@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>DevBook - Feed</title>
+<style>body{font-family:sans-serif;max-width:520px;margin:40px auto}
+textarea{width:100%;padding:8px;box-sizing:border-box}button{padding:8px 16px;margin-top:8px}</style>
+</head>
+<body>
+<main>
+  <h1>Your feed</h1>
+  <p data-test="welcome">Signed in as demo.</p>
+  <form onsubmit="return publish(event)">
+    <textarea data-test="composer" placeholder="What's up?"></textarea>
+    <button type="submit" data-test="publish">Publish</button>
+  </form>
+  <ul data-test="feed-list"><li>Yesterday: hello world</li></ul>
+</main>
+<script>
+function publish(e){
+  e.preventDefault();
+  const t = document.querySelector("[data-test='composer']").value.trim();
+  if(!t) return false;
+  location.href = "social_done.html?" + new URLSearchParams({post: t});
+  return false;
+}
+</script>
+</body>
+</html>

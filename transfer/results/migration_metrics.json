@@ -1,0 +1,3333 @@
+{
+  "goal": "我下周要去北京出差，周一至周五都可以，从昆明出发。搜索早8点至晚6点最低价的机票并记录。另外再搜索出发当日价格300以内的酒店记录",
+  "metrics": {
+    "baseline": "ctrip/ctrip_task.py 手写计划（未经配置）",
+    "sites": {
+      "ctrip": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 18
+        },
+        "desc_identical_raw": "18/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 0,
+          "signal": 0,
+          "start_url": 0
+        },
+        "extra_roles": {},
+        "extra_subgoals": 0,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 1
+        },
+        "collect_roles": [
+          "record_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 19
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ]
+        },
+        "language": "zh-CN",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/ctrip.json"
+      },
+      "farehaven": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 18
+        },
+        "desc_identical_raw": "16/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 18,
+          "signal": 18,
+          "start_url": 18
+        },
+        "extra_roles": {
+          "dismiss_promo": 5
+        },
+        "extra_subgoals": 5,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 1
+        },
+        "collect_roles": [
+          "record_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 24
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "flights[per_date]×4",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ]
+        },
+        "language": "en",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/farehaven.json"
+      },
+      "flyquest": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 29
+        },
+        "desc_identical_raw": "15/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 18,
+          "signal": 18,
+          "start_url": 18
+        },
+        "extra_roles": {},
+        "extra_subgoals": 0,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 1
+        },
+        "collect_roles": [
+          "record_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 19
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ]
+        },
+        "language": "en",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/flyquest.json"
+      },
+      "skybook": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 18
+        },
+        "desc_identical_raw": "15/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 18,
+          "signal": 18,
+          "start_url": 18
+        },
+        "extra_roles": {},
+        "extra_subgoals": 0,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 5
+        },
+        "collect_roles": [
+          "select_all",
+          "record_page",
+          "next_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 23
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×5"
+          ]
+        },
+        "language": "en",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/skybook.json"
+      },
+      "slowjet": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 18
+        },
+        "desc_identical_raw": "15/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 18,
+          "signal": 18,
+          "start_url": 18
+        },
+        "extra_roles": {},
+        "extra_subgoals": 0,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 1
+        },
+        "collect_roles": [
+          "record_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 19
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ]
+        },
+        "language": "en",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/slowjet.json"
+      },
+      "trekly": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 18
+        },
+        "desc_identical_raw": "15/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 18,
+          "signal": 18,
+          "start_url": 18
+        },
+        "extra_roles": {},
+        "extra_subgoals": 0,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 1
+        },
+        "collect_roles": [
+          "record_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 19
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ]
+        },
+        "language": "en",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/trekly.json"
+      },
+      "voyagio": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 23
+        },
+        "desc_identical_raw": "15/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 18,
+          "signal": 18,
+          "start_url": 18
+        },
+        "extra_roles": {
+          "filter_window_apply": 5
+        },
+        "extra_subgoals": 5,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 1
+        },
+        "collect_roles": [
+          "record_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 24
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "wizard_date[per_date]×1",
+            "wizard_options[per_date]×1",
+            "results[per_date]×2",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ]
+        },
+        "language": "en",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/voyagio.json"
+      }
+    }
+  },
+  "runs": [
+    {
+      "site": "ctrip",
+      "profile": "ctrip-replica",
+      "language": "zh-CN",
+      "spec": "/root/ML/LayaWebUse/transfer/specs/ctrip.json",
+      "dates": [
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-09"
+      ],
+      "checkin": "2026-10-08",
+      "records": {
+        "flights": [
+          {
+            "date": "2026-10-05",
+            "no": "CA1296",
+            "airline": "中国国航(CA)",
+            "dep": "14:25",
+            "arr": "17:35",
+            "price": 1030,
+            "window": "08:00-18:00",
+            "sort": "价格从低到高"
+          },
+          {
+            "date": "2026-10-06",
+            "no": "HO1196",
+            "airline": "吉祥航空(HO)",
+            "dep": "10:30",
+            "arr": "13:45",
+            "price": 910,
+            "window": "08:00-18:00",
+            "sort": "价格从低到高"
+          },
+          {
+            "date": "2026-10-07",
+            "no": "9C1207",
+            "airline": "春秋航空(9C)",
+            "dep": "10:30",
+            "arr": "13:45",
+            "price": 900,
+            "window": "08:00-18:00",
+            "sort": "价格从低到高"
+          },
+          {
+            "date": "2026-10-08",
+            "no": "HO1144",
+            "airline": "吉祥航空(HO)",
+            "dep": "08:20",
+            "arr": "11:30",
+            "price": 530,
+            "window": "08:00-18:00",
+            "sort": "价格从低到高"
+          },
+          {
+            "date": "2026-10-09",
+            "no": "3U1340",
+            "airline": "四川航空(3U)",
+            "dep": "14:25",
+            "arr": "17:35",
+            "price": 690,
+            "window": "08:00-18:00",
+            "sort": "价格从低到高"
+          }
+        ],
+        "hotels": [
+          {
+            "id": 902055,
+            "name": "北京国贸CBD和颐酒店",
+            "star": 2,
+            "score": 4.7,
+            "area": "国贸CBD",
+            "room": "大床房",
+            "price": 130,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 900000,
+            "name": "北京王府井如家酒店",
+            "star": 2,
+            "score": 4.1,
+            "area": "王府井",
+            "room": "大床房",
+            "price": 130,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 904110,
+            "name": "北京三里屯全季酒店",
+            "star": 2,
+            "score": 4.4,
+            "area": "三里屯",
+            "room": "大床房",
+            "price": 140,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 901233,
+            "name": "北京亚运村智选假日酒店",
+            "star": 2,
+            "score": 4.1,
+            "area": "亚运村",
+            "room": "商务双床房",
+            "price": 160,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 903288,
+            "name": "北京亦庄诺富特酒店",
+            "star": 2,
+            "score": 4.7,
+            "area": "亦庄",
+            "room": "商务双床房",
+            "price": 170,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 905343,
+            "name": "北京丰台科技园索菲特酒店",
+            "star": 2,
+            "score": 4.4,
+            "area": "丰台科技园",
+            "room": "商务双床房",
+            "price": 180,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 900411,
+            "name": "北京西单桔子酒店",
+            "star": 2,
+            "score": 4.4,
+            "area": "西单",
+            "room": "家庭房",
+            "price": 200,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 902466,
+            "name": "北京中关村开元名都酒店",
+            "star": 2,
+            "score": 4.1,
+            "area": "中关村",
+            "room": "家庭房",
+            "price": 200,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 904521,
+            "name": "北京望京麗枫酒店",
+            "star": 2,
+            "score": 4.7,
+            "area": "望京",
+            "room": "家庭房",
+            "price": 210,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 901644,
+            "name": "北京天安门凯宾斯基酒店",
+            "star": 2,
+            "score": 4.4,
+            "area": "天安门",
+            "room": "行政大床房",
+            "price": 230,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 905754,
+            "name": "北京王府井馨乐庭酒店",
+            "star": 2,
+            "score": 4.7,
+            "area": "王府井",
+            "room": "行政大床房",
+            "price": 240,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 903699,
+            "name": "北京鸟巢朗廷酒店",
+            "star": 2,
+            "score": 4.1,
+            "area": "鸟巢",
+            "room": "行政大床房",
+            "price": 240,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 900822,
+            "name": "北京首都机场维也纳酒店",
+            "star": 2,
+            "score": 4.7,
+            "area": "首都机场",
+            "room": "高级双床间",
+            "price": 270,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 902877,
+            "name": "北京北京南站尚客优酒店",
+            "star": 2,
+            "score": 4.4,
+            "area": "北京南站",
+            "room": "高级双床间",
+            "price": 270,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 904932,
+            "name": "北京五道口希尔顿欢朋酒店",
+            "star": 2,
+            "score": 4.1,
+            "area": "五道口",
+            "room": "高级双床间",
+            "price": 280,
+            "checkin": "2026-10-08"
+          }
+        ],
+        "skipped": 0,
+        "retried": 0
+      },
+      "skipped": 0,
+      "retried": 0,
+      "dropped_when": false,
+      "dropped_retries": false,
+      "verify": {
+        "checks": [
+          {
+            "what": "2026-10-05 区间内最低价航班",
+            "ok": true,
+            "expected": "CA1296 14:25 ¥1030",
+            "recorded": "CA1296 14:25 ¥1030"
+          },
+          {
+            "what": "2026-10-06 区间内最低价航班",
+            "ok": true,
+            "expected": "HO1196 10:30 ¥910",
+            "recorded": "HO1196 10:30 ¥910"
+          },
+          {
+            "what": "2026-10-07 区间内最低价航班",
+            "ok": true,
+            "expected": "9C1207 10:30 ¥900",
+            "recorded": "9C1207 10:30 ¥900"
+          },
+          {
+            "what": "2026-10-08 区间内最低价航班",
+            "ok": true,
+            "expected": "HO1144 08:20 ¥530",
+            "recorded": "HO1144 08:20 ¥530"
+          },
+          {
+            "what": "2026-10-09 区间内最低价航班",
+            "ok": true,
+            "expected": "3U1340 14:25 ¥690",
+            "recorded": "3U1340 14:25 ¥690"
+          },
+          {
+            "what": "周一至周五的最低价（决定出发当日）",
+            "ok": true,
+            "expected": "2026-10-08 HO1144 ¥530",
+            "recorded": "2026-10-08 HO1144 ¥530"
+          },
+          {
+            "what": "2026-10-08 入住、¥300以内酒店（数量/集合/价格升序）",
+            "ok": true,
+            "expected": "15 家 ¥130-¥280",
+            "recorded": "15 家 ¥130-¥280"
+          }
+        ],
+        "ok": true,
+        "departure_date": "2026-10-08",
+        "oracle_date": "2026-10-08",
+        "checkin": "2026-10-08"
+      },
+      "blocked": null,
+      "audit": {
+        "verdict": "APPROVE",
+        "reasons": [
+          "trace clean, goal signal present"
+        ],
+        "auditor": "mock"
+      },
+      "subgoals": 19
+    },
+    {
+      "site": "farehaven",
+      "profile": "farehaven-replica6",
+      "language": "en",
+      "spec": "/root/ML/LayaWebUse/transfer/specs/farehaven.json",
+      "dates": [
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-09"
+      ],
+      "checkin": "2026-10-08",
+      "records": {
+        "flights": [
+          {
+            "date": "2026-10-05",
+            "no": "SK646",
+            "airline": "Skyline",
+            "dep": "08:25",
+            "arr": "11:50",
+            "price": 530,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-06",
+            "no": "SK859",
+            "airline": "Skyline",
+            "dep": "17:55",
+            "arr": "21:15",
+            "price": 710,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-07",
+            "no": "OR888",
+            "airline": "Orchid Wings",
+            "dep": "17:55",
+            "arr": "21:15",
+            "price": 670,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-08",
+            "no": "MT733",
+            "airline": "Meridian Transit",
+            "dep": "08:25",
+            "arr": "11:50",
+            "price": 450,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-09",
+            "no": "FH762",
+            "airline": "FareHaven Air",
+            "dep": "08:25",
+            "arr": "11:50",
+            "price": 580,
+            "window": "08:00-18:00"
+          }
+        ],
+        "hotels": [
+          {
+            "id": 100629,
+            "name": "Hearth Hotel Beijing Yonghegong",
+            "star": 4,
+            "score": 4.1,
+            "area": "Yonghegong",
+            "room": "King",
+            "price": 165,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 100962,
+            "name": "Ginkgo Hotel Beijing Zhongguancun",
+            "star": 4,
+            "score": 4.1,
+            "area": "Zhongguancun",
+            "room": "Twin",
+            "price": 175,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 100074,
+            "name": "Copper Beech Hotel Beijing Baiziwan",
+            "star": 4,
+            "score": 4.1,
+            "area": "Baiziwan",
+            "room": "King",
+            "price": 190,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 100407,
+            "name": "Birch Hotel Beijing Dongsi",
+            "star": 4,
+            "score": 4.1,
+            "area": "Dongsi",
+            "room": "Twin",
+            "price": 200,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 100740,
+            "name": "Alcove Hotel Beijing Gulou",
+            "star": 4,
+            "score": 4.1,
+            "area": "Gulou",
+            "room": "Queen",
+            "price": 215,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 101073,
+            "name": "Jade Walk Hotel Beijing Liangmaqiao",
+            "star": 4,
+            "score": 4.1,
+            "area": "Liangmaqiao",
+            "room": "Suite",
+            "price": 230,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 100185,
+            "name": "Flint Hotel Beijing Liuliqiao",
+            "star": 4,
+            "score": 4.1,
+            "area": "Liuliqiao",
+            "room": "Queen",
+            "price": 240,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 100518,
+            "name": "Elder Hotel Beijing Caishikou",
+            "star": 4,
+            "score": 4.1,
+            "area": "Caishikou",
+            "room": "Suite",
+            "price": 255,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 100851,
+            "name": "Dune Hotel Beijing Xidan",
+            "star": 4,
+            "score": 4.1,
+            "area": "Xidan",
+            "room": "Studio",
+            "price": 265,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 101184,
+            "name": "Copper Beech Hotel Beijing Baiziwan",
+            "star": 4,
+            "score": 4.1,
+            "area": "Baiziwan",
+            "room": "King",
+            "price": 280,
+            "checkin": "2026-10-08"
+          },
+          {
+            "id": 100296,
+            "name": "Iris Hotel Beijing Temple of Heaven",
+            "star": 4,
+            "score": 4.1,
+            "area": "Temple of Heaven",
+            "room": "Studio",
+            "price": 290,
+            "checkin": "2026-10-08"
+          }
+        ],
+        "skipped": 4,
+        "retried": 0
+      },
+      "skipped": 4,
+      "retried": 0,
+      "dropped_when": false,
+      "dropped_retries": false,
+      "verify": {
+        "checks": [
+          {
+            "what": "2026-10-05 区间内最低价航班",
+            "ok": true,
+            "expected": "SK646 08:25 ¥530",
+            "recorded": "SK646 08:25 ¥530"
+          },
+          {
+            "what": "2026-10-06 区间内最低价航班",
+            "ok": true,
+            "expected": "SK859 17:55 ¥710",
+            "recorded": "SK859 17:55 ¥710"
+          },
+          {
+            "what": "2026-10-07 区间内最低价航班",
+            "ok": true,
+            "expected": "OR888 17:55 ¥670",
+            "recorded": "OR888 17:55 ¥670"
+          },
+          {
+            "what": "2026-10-08 区间内最低价航班",
+            "ok": true,
+            "expected": "MT733 08:25 ¥450",
+            "recorded": "MT733 08:25 ¥450"
+          },
+          {
+            "what": "2026-10-09 区间内最低价航班",
+            "ok": true,
+            "expected": "FH762 08:25 ¥580",
+            "recorded": "FH762 08:25 ¥580"
+          },
+          {
+            "what": "周一至周五的最低价（决定出发当日）",
+            "ok": true,
+            "expected": "2026-10-08 MT733 ¥450",
+            "recorded": "2026-10-08 MT733 ¥450"
+          },
+          {
+            "what": "2026-10-08 入住、¥300以内酒店（数量/集合/价格升序）",
+            "ok": true,
+            "expected": "11 家 ¥165-¥290",
+            "recorded": "11 家 ¥165-¥290"
+          }
+        ],
+        "ok": true,
+        "departure_date": "2026-10-08",
+        "oracle_date": "2026-10-08",
+        "checkin": "2026-10-08"
+      },
+      "blocked": null,
+      "audit": {
+        "verdict": "APPROVE",
+        "reasons": [
+          "trace clean, goal signal present"
+        ],
+        "auditor": "mock"
+      },
+      "subgoals": 24
+    },
+    {
+      "site": "flyquest",
+      "profile": "flyquest-replica4",
+      "language": "en",
+      "spec": "/root/ML/LayaWebUse/transfer/specs/flyquest.json",
+      "dates": [
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-09"
+      ],
+      "checkin": "2026-10-05",
+      "records": {
+        "flights": [
+          {
+            "date": "2026-10-05",
+            "no": "CT603",
+            "airline": "CloudTrail",
+            "dep": "15:00",
+            "arr": "18:10",
+            "price": 530,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-06",
+            "no": "NB518",
+            "airline": "NorthBay",
+            "dep": "09:30",
+            "arr": "12:40",
+            "price": 590,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-07",
+            "no": "FQ578",
+            "airline": "FlyQuest Air",
+            "dep": "10:55",
+            "arr": "14:25",
+            "price": 660,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-08",
+            "no": "CT725",
+            "airline": "CloudTrail",
+            "dep": "16:20",
+            "arr": "19:45",
+            "price": 610,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-09",
+            "no": "CT814",
+            "airline": "CloudTrail",
+            "dep": "17:55",
+            "arr": "21:25",
+            "price": 600,
+            "window": "08:00-18:00"
+          }
+        ],
+        "hotels": [
+          {
+            "id": 601416,
+            "name": "Ember Hotel Beijing Shuangjing",
+            "star": 2,
+            "score": 4.4,
+            "area": "Shuangjing",
+            "room": "Studio",
+            "price": 140,
+            "checkin": "2026-10-05"
+          },
+          {
+            "id": 600708,
+            "name": "Copper Hotel Beijing Hepingli",
+            "star": 2,
+            "score": 4.2,
+            "area": "Hepingli",
+            "room": "King",
+            "price": 140,
+            "checkin": "2026-10-05"
+          },
+          {
+            "id": 600000,
+            "name": "Aria Hotel Beijing Qianmen",
+            "star": 2,
+            "score": 4,
+            "area": "Qianmen",
+            "room": "Queen",
+            "price": 140,
+            "checkin": "2026-10-05"
+          },
+          {
+            "id": 600826,
+            "name": "Ember Hotel Beijing Shuangjing",
+            "star": 4,
+            "score": 4.4,
+            "area": "Shuangjing",
+            "room": "Studio",
+            "price": 165,
+            "checkin": "2026-10-05"
+          },
+          {
+            "id": 600118,
+            "name": "Copper Hotel Beijing Hepingli",
+            "star": 4,
+            "score": 4.2,
+            "area": "Hepingli",
+            "room": "King",
+            "price": 165,
+            "checkin": "2026-10-05"
+          },
+          {
+            "id": 601534,
+            "name": "Gable Hotel Beijing Fengtai",
+            "star": 4,
+            "score": 4.6,
+            "area": "Fengtai",
+            "room": "Twin XL",
+            "price": 170,
+            "checkin": "2026-10-05"
+          },
+          {
+            "id": 600236,
+            "name": "Ember Hotel Beijing Shuangjing",
+            "star": 3,
+            "score": 4.4,
+            "area": "Shuangjing",
+            "room": "Studio",
+            "price": 190,
+            "checkin": "2026-10-05"
+          },
+          {
+            "id": 600944,
+            "name": "Gable Hotel Beijing Fengtai",
+            "star": 3,
+            "score": 4.6,
+            "area": "Fengtai",
+            "room": "Twin XL",
+            "price": 195,
+            "checkin": "2026-10-05"
+          },
+          {
+            "id": 601062,
+            "name": "Ivory Hotel Beijing Anzhen",
+            "star": 2,
+            "score": 4.8,
+            "area": "Anzhen",
+            "room": "Family",
+            "price": 220,
+            "checkin": "2026-10-05"
+          },
+          {
+            "id": 600354,
+            "name": "Gable Hotel Beijing Fengtai",
+            "star": 2,
+            "score": 4.6,
+            "area": "Fengtai",
+            "room": "Twin XL",
+            "price": 220,
+            "checkin": "2026-10-05"
+          },
+          {
+            "id": 600472,
+            "name": "Ivory Hotel Beijing Anzhen",
+            "star": 4,
+            "score": 4.8,
+            "area": "Anzhen",
+            "room": "Family",
+            "price": 245,
+            "checkin": "2026-10-05"
+          },
+          {
+            "id": 601180,
+            "name": "Aria Hotel Beijing Qianmen",
+            "star": 4,
+            "score": 4,
+            "area": "Qianmen",
+            "room": "Queen",
+            "price": 245,
+            "checkin": "2026-10-05"
+          },
+          {
+            "id": 601298,
+            "name": "Copper Hotel Beijing Hepingli",
+            "star": 3,
+            "score": 4.2,
+            "area": "Hepingli",
+            "room": "King",
+            "price": 270,
+            "checkin": "2026-10-05"
+          },
+          {
+            "id": 600590,
+            "name": "Aria Hotel Beijing Qianmen",
+            "star": 3,
+            "score": 4,
+            "area": "Qianmen",
+            "room": "Queen",
+            "price": 270,
+            "checkin": "2026-10-05"
+          }
+        ],
+        "skipped": 0,
+        "retried": 0
+      },
+      "skipped": 0,
+      "retried": 0,
+      "dropped_when": false,
+      "dropped_retries": false,
+      "verify": {
+        "checks": [
+          {
+            "what": "2026-10-05 区间内最低价航班",
+            "ok": true,
+            "expected": "CT603 15:00 ¥530",
+            "recorded": "CT603 15:00 ¥530"
+          },
+          {
+            "what": "2026-10-06 区间内最低价航班",
+            "ok": true,
+            "expected": "NB518 09:30 ¥590",
+            "recorded": "NB518 09:30 ¥590"
+          },
+          {
+            "what": "2026-10-07 区间内最低价航班",
+            "ok": true,
+            "expected": "FQ578 10:55 ¥660",
+            "recorded": "FQ578 10:55 ¥660"
+          },
+          {
+            "what": "2026-10-08 区间内最低价航班",
+            "ok": true,
+            "expected": "CT725 16:20 ¥610",
+            "recorded": "CT725 16:20 ¥610"
+          },
+          {
+            "what": "2026-10-09 区间内最低价航班",
+            "ok": true,
+            "expected": "CT814 17:55 ¥600",
+            "recorded": "CT814 17:55 ¥600"
+          },
+          {
+            "what": "周一至周五的最低价（决定出发当日）",
+            "ok": true,
+            "expected": "2026-10-05 CT603 ¥530",
+            "recorded": "2026-10-05 CT603 ¥530"
+          },
+          {
+            "what": "2026-10-05 入住、¥300以内酒店（数量/集合/价格升序）",
+            "ok": true,
+            "expected": "14 家 ¥140-¥270",
+            "recorded": "14 家 ¥140-¥270"
+          }
+        ],
+        "ok": true,
+        "departure_date": "2026-10-05",
+        "oracle_date": "2026-10-05",
+        "checkin": "2026-10-05"
+      },
+      "blocked": null,
+      "audit": {
+        "verdict": "APPROVE",
+        "reasons": [
+          "trace clean, goal signal present"
+        ],
+        "auditor": "mock"
+      },
+      "subgoals": 19
+    },
+    {
+      "site": "skybook",
+      "profile": "skybook-replica2",
+      "language": "en",
+      "spec": "/root/ML/LayaWebUse/transfer/specs/skybook.json",
+      "dates": [
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-09"
+      ],
+      "checkin": "2026-10-07",
+      "records": {
+        "flights": [
+          {
+            "date": "2026-10-05",
+            "no": "LM359",
+            "airline": "LuckyMoon",
+            "dep": "08:35",
+            "arr": "11:50",
+            "price": 800,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-06",
+            "no": "PB535",
+            "airline": "PacificBridge",
+            "dep": "12:20",
+            "arr": "15:50",
+            "price": 740,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-07",
+            "no": "PB446",
+            "airline": "PacificBridge",
+            "dep": "09:40",
+            "arr": "13:05",
+            "price": 630,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-08",
+            "no": "LM410",
+            "airline": "LuckyMoon",
+            "dep": "08:35",
+            "arr": "11:50",
+            "price": 650,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-09",
+            "no": "SW480",
+            "airline": "SkyWise Air",
+            "dep": "09:40",
+            "arr": "13:05",
+            "price": 700,
+            "window": "08:00-18:00"
+          }
+        ],
+        "hotels": [
+          {
+            "id": 700000,
+            "name": "Sunrise Hotel Beijing Wangfujing",
+            "star": 2,
+            "score": 4,
+            "area": "Wangfujing",
+            "room": "Double",
+            "price": 135,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 701638,
+            "name": "Willow Hotel Beijing Capital Airport",
+            "star": 2,
+            "score": 4,
+            "area": "Capital Airport",
+            "room": "Family",
+            "price": 145,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 700910,
+            "name": "Courtyard 9 Hotel Beijing Yizhuang",
+            "star": 3,
+            "score": 4,
+            "area": "Yizhuang",
+            "room": "Double",
+            "price": 160,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 702548,
+            "name": "North Gate Hotel Beijing Zhongguancun",
+            "star": 3,
+            "score": 4,
+            "area": "Zhongguancun",
+            "room": "Family",
+            "price": 170,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 700182,
+            "name": "Harbor Inn Hotel Beijing Sanlitun",
+            "star": 4,
+            "score": 4,
+            "area": "Sanlitun",
+            "room": "Deluxe King",
+            "price": 175,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 701820,
+            "name": "Silk Tree Hotel Beijing Wudaokou",
+            "star": 4,
+            "score": 4,
+            "area": "Wudaokou",
+            "room": "Double",
+            "price": 185,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 701092,
+            "name": "Sunrise Hotel Beijing Wangfujing",
+            "star": 2,
+            "score": 4,
+            "area": "Wangfujing",
+            "room": "Deluxe King",
+            "price": 200,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 700364,
+            "name": "North Gate Hotel Beijing Zhongguancun",
+            "star": 3,
+            "score": 4,
+            "area": "Zhongguancun",
+            "room": "Studio",
+            "price": 210,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 702002,
+            "name": "Courtyard 9 Hotel Beijing Yizhuang",
+            "star": 3,
+            "score": 4,
+            "area": "Yizhuang",
+            "room": "Deluxe King",
+            "price": 225,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 701274,
+            "name": "Harbor Inn Hotel Beijing Sanlitun",
+            "star": 4,
+            "score": 4,
+            "area": "Sanlitun",
+            "room": "Studio",
+            "price": 235,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 700546,
+            "name": "Willow Hotel Beijing Capital Airport",
+            "star": 2,
+            "score": 4,
+            "area": "Capital Airport",
+            "room": "Twin",
+            "price": 250,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 702184,
+            "name": "Sunrise Hotel Beijing Wangfujing",
+            "star": 2,
+            "score": 4,
+            "area": "Wangfujing",
+            "room": "Studio",
+            "price": 260,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 701456,
+            "name": "North Gate Hotel Beijing Zhongguancun",
+            "star": 3,
+            "score": 4,
+            "area": "Zhongguancun",
+            "room": "Twin",
+            "price": 275,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 700728,
+            "name": "Silk Tree Hotel Beijing Wudaokou",
+            "star": 4,
+            "score": 4,
+            "area": "Wudaokou",
+            "room": "Family",
+            "price": 285,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 702366,
+            "name": "Harbor Inn Hotel Beijing Sanlitun",
+            "star": 4,
+            "score": 4,
+            "area": "Sanlitun",
+            "room": "Twin",
+            "price": 300,
+            "checkin": "2026-10-07"
+          }
+        ],
+        "skipped": 0,
+        "retried": 0
+      },
+      "skipped": 0,
+      "retried": 0,
+      "dropped_when": false,
+      "dropped_retries": false,
+      "verify": {
+        "checks": [
+          {
+            "what": "2026-10-05 区间内最低价航班",
+            "ok": true,
+            "expected": "LM359 08:35 ¥800",
+            "recorded": "LM359 08:35 ¥800"
+          },
+          {
+            "what": "2026-10-06 区间内最低价航班",
+            "ok": true,
+            "expected": "PB535 12:20 ¥740",
+            "recorded": "PB535 12:20 ¥740"
+          },
+          {
+            "what": "2026-10-07 区间内最低价航班",
+            "ok": true,
+            "expected": "PB446 09:40 ¥630",
+            "recorded": "PB446 09:40 ¥630"
+          },
+          {
+            "what": "2026-10-08 区间内最低价航班",
+            "ok": true,
+            "expected": "LM410 08:35 ¥650",
+            "recorded": "LM410 08:35 ¥650"
+          },
+          {
+            "what": "2026-10-09 区间内最低价航班",
+            "ok": true,
+            "expected": "SW480 09:40 ¥700",
+            "recorded": "SW480 09:40 ¥700"
+          },
+          {
+            "what": "周一至周五的最低价（决定出发当日）",
+            "ok": true,
+            "expected": "2026-10-07 PB446 ¥630",
+            "recorded": "2026-10-07 PB446 ¥630"
+          },
+          {
+            "what": "2026-10-07 入住、¥300以内酒店（数量/集合/价格升序）",
+            "ok": true,
+            "expected": "15 家 ¥135-¥300",
+            "recorded": "15 家 ¥135-¥300"
+          }
+        ],
+        "ok": true,
+        "departure_date": "2026-10-07",
+        "oracle_date": "2026-10-07",
+        "checkin": "2026-10-07"
+      },
+      "blocked": null,
+      "audit": {
+        "verdict": "APPROVE",
+        "reasons": [
+          "trace clean, goal signal present"
+        ],
+        "auditor": "mock"
+      },
+      "subgoals": 23
+    },
+    {
+      "site": "slowjet",
+      "profile": "slowjet-replica7",
+      "language": "en",
+      "spec": "/root/ML/LayaWebUse/transfer/specs/slowjet.json",
+      "dates": [
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-09"
+      ],
+      "checkin": "2026-10-07",
+      "records": {
+        "flights": [
+          {
+            "date": "2026-10-05",
+            "no": "DR871",
+            "airline": "Driftline",
+            "dep": "17:20",
+            "arr": "20:25",
+            "price": 600,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-06",
+            "no": "AV808",
+            "airline": "Aviator Co",
+            "dep": "12:55",
+            "arr": "16:05",
+            "price": 580,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-07",
+            "no": "QK764",
+            "airline": "QuickLane",
+            "dep": "08:25",
+            "arr": "11:50",
+            "price": 510,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-08",
+            "no": "SJ815",
+            "airline": "SlowJet",
+            "dep": "11:20",
+            "arr": "14:50",
+            "price": 560,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-09",
+            "no": "PL942",
+            "airline": "Polaris Air",
+            "dep": "17:55",
+            "arr": "21:15",
+            "price": 540,
+            "window": "08:00-18:00"
+          }
+        ],
+        "hotels": [
+          {
+            "id": 200000,
+            "name": "Nimbus Hotel Beijing Chaoyangmen",
+            "star": 2,
+            "score": 4.1,
+            "area": "Chaoyangmen",
+            "room": "Queen",
+            "price": 155,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 200369,
+            "name": "Willow Hotel Beijing Sijiqing",
+            "star": 2,
+            "score": 4.1,
+            "area": "Sijiqing",
+            "room": "Suite",
+            "price": 170,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 200738,
+            "name": "Vellum Hotel Beijing Fangzhuang",
+            "star": 2,
+            "score": 4.1,
+            "area": "Fangzhuang",
+            "room": "Studio",
+            "price": 180,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 201107,
+            "name": "Umber Hotel Beijing Beiyuan",
+            "star": 2,
+            "score": 4.1,
+            "area": "Beiyuan",
+            "room": "King",
+            "price": 195,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 200123,
+            "name": "Quill Hotel Beijing Youyi",
+            "star": 2,
+            "score": 4.1,
+            "area": "Youyi",
+            "room": "Studio",
+            "price": 205,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 200492,
+            "name": "Pebble Hotel Beijing Guangqumen",
+            "star": 2,
+            "score": 4.1,
+            "area": "Guangqumen",
+            "room": "King",
+            "price": 220,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 200861,
+            "name": "Onyx Hotel Beijing Hepingmen",
+            "star": 2,
+            "score": 4.1,
+            "area": "Hepingmen",
+            "room": "Twin",
+            "price": 230,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 200246,
+            "name": "Tundra Hotel Beijing Huixin",
+            "star": 2,
+            "score": 4.1,
+            "area": "Huixin",
+            "room": "Twin",
+            "price": 255,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 200615,
+            "name": "Slate Hotel Beijing Shuangqiao",
+            "star": 2,
+            "score": 4.1,
+            "area": "Shuangqiao",
+            "room": "Queen",
+            "price": 270,
+            "checkin": "2026-10-07"
+          },
+          {
+            "id": 200984,
+            "name": "Ridge Hotel Beijing Gongzhufen",
+            "star": 2,
+            "score": 4.1,
+            "area": "Gongzhufen",
+            "room": "Suite",
+            "price": 285,
+            "checkin": "2026-10-07"
+          }
+        ],
+        "skipped": 0,
+        "retried": 5
+      },
+      "skipped": 0,
+      "retried": 5,
+      "dropped_when": false,
+      "dropped_retries": false,
+      "verify": {
+        "checks": [
+          {
+            "what": "2026-10-05 区间内最低价航班",
+            "ok": true,
+            "expected": "DR871 17:20 ¥600",
+            "recorded": "DR871 17:20 ¥600"
+          },
+          {
+            "what": "2026-10-06 区间内最低价航班",
+            "ok": true,
+            "expected": "AV808 12:55 ¥580",
+            "recorded": "AV808 12:55 ¥580"
+          },
+          {
+            "what": "2026-10-07 区间内最低价航班",
+            "ok": true,
+            "expected": "QK764 08:25 ¥510",
+            "recorded": "QK764 08:25 ¥510"
+          },
+          {
+            "what": "2026-10-08 区间内最低价航班",
+            "ok": true,
+            "expected": "SJ815 11:20 ¥560",
+            "recorded": "SJ815 11:20 ¥560"
+          },
+          {
+            "what": "2026-10-09 区间内最低价航班",
+            "ok": true,
+            "expected": "PL942 17:55 ¥540",
+            "recorded": "PL942 17:55 ¥540"
+          },
+          {
+            "what": "周一至周五的最低价（决定出发当日）",
+            "ok": true,
+            "expected": "2026-10-07 QK764 ¥510",
+            "recorded": "2026-10-07 QK764 ¥510"
+          },
+          {
+            "what": "2026-10-07 入住、¥300以内酒店（数量/集合/价格升序）",
+            "ok": true,
+            "expected": "10 家 ¥155-¥285",
+            "recorded": "10 家 ¥155-¥285"
+          }
+        ],
+        "ok": true,
+        "departure_date": "2026-10-07",
+        "oracle_date": "2026-10-07",
+        "checkin": "2026-10-07"
+      },
+      "blocked": null,
+      "audit": {
+        "verdict": "APPROVE",
+        "reasons": [
+          "trace clean, goal signal present"
+        ],
+        "auditor": "mock"
+      },
+      "subgoals": 19
+    },
+    {
+      "site": "trekly",
+      "profile": "trekly-replica3",
+      "language": "en",
+      "spec": "/root/ML/LayaWebUse/transfer/specs/trekly.json",
+      "dates": [
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-09"
+      ],
+      "checkin": "2026-10-09",
+      "records": {
+        "flights": [
+          {
+            "date": "2026-10-05",
+            "no": "OS382",
+            "airline": "Orbit Sky",
+            "dep": "08:10",
+            "arr": "11:40",
+            "price": 540,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-06",
+            "no": "ZP446",
+            "airline": "Zephyr Jet",
+            "dep": "09:25",
+            "arr": "12:40",
+            "price": 720,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-07",
+            "no": "ZP428",
+            "airline": "Zephyr Jet",
+            "dep": "08:10",
+            "arr": "11:40",
+            "price": 520,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-08",
+            "no": "HL779",
+            "airline": "Highland Air",
+            "dep": "17:45",
+            "arr": "21:05",
+            "price": 650,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-09",
+            "no": "VM474",
+            "airline": "Vermillion",
+            "dep": "08:10",
+            "arr": "11:40",
+            "price": 480,
+            "window": "08:00-18:00"
+          }
+        ],
+        "hotels": [
+          {
+            "id": 500657,
+            "name": "Vista Hotel Beijing Tuanjiehu",
+            "star": 2,
+            "score": 4.1,
+            "area": "Tuanjiehu",
+            "room": "Suite",
+            "price": 150,
+            "checkin": "2026-10-09"
+          },
+          {
+            "id": 500073,
+            "name": "Cedar Hotel Beijing Dongzhimen",
+            "star": 3,
+            "score": 4.4,
+            "area": "Dongzhimen",
+            "room": "Twin",
+            "price": 160,
+            "checkin": "2026-10-09"
+          },
+          {
+            "id": 501387,
+            "name": "Vista Hotel Beijing Tuanjiehu",
+            "star": 3,
+            "score": 4.4,
+            "area": "Tuanjiehu",
+            "room": "Suite",
+            "price": 170,
+            "checkin": "2026-10-09"
+          },
+          {
+            "id": 500803,
+            "name": "Cedar Hotel Beijing Dongzhimen",
+            "star": 4,
+            "score": 4.7,
+            "area": "Dongzhimen",
+            "room": "Twin",
+            "price": 180,
+            "checkin": "2026-10-09"
+          },
+          {
+            "id": 500219,
+            "name": "Quartz Hotel Beijing Shuangjing",
+            "star": 2,
+            "score": 4.1,
+            "area": "Shuangjing",
+            "room": "Loft",
+            "price": 195,
+            "checkin": "2026-10-09"
+          },
+          {
+            "id": 501533,
+            "name": "Cedar Hotel Beijing Dongzhimen",
+            "star": 2,
+            "score": 4.1,
+            "area": "Dongzhimen",
+            "room": "Twin",
+            "price": 200,
+            "checkin": "2026-10-09"
+          },
+          {
+            "id": 500949,
+            "name": "Quartz Hotel Beijing Shuangjing",
+            "star": 3,
+            "score": 4.4,
+            "area": "Shuangjing",
+            "room": "Loft",
+            "price": 215,
+            "checkin": "2026-10-09"
+          },
+          {
+            "id": 500365,
+            "name": "Rowan Hotel Beijing Haidian",
+            "star": 4,
+            "score": 4.7,
+            "area": "Haidian",
+            "room": "Queen",
+            "price": 230,
+            "checkin": "2026-10-09"
+          },
+          {
+            "id": 501679,
+            "name": "Quartz Hotel Beijing Shuangjing",
+            "star": 4,
+            "score": 4.7,
+            "area": "Shuangjing",
+            "room": "Loft",
+            "price": 235,
+            "checkin": "2026-10-09"
+          },
+          {
+            "id": 501095,
+            "name": "Rowan Hotel Beijing Haidian",
+            "star": 2,
+            "score": 4.1,
+            "area": "Haidian",
+            "room": "Queen",
+            "price": 250,
+            "checkin": "2026-10-09"
+          },
+          {
+            "id": 500511,
+            "name": "Topaz Hotel Beijing Madian",
+            "star": 3,
+            "score": 4.4,
+            "area": "Madian",
+            "room": "King",
+            "price": 265,
+            "checkin": "2026-10-09"
+          },
+          {
+            "id": 501241,
+            "name": "Topaz Hotel Beijing Madian",
+            "star": 4,
+            "score": 4.7,
+            "area": "Madian",
+            "room": "King",
+            "price": 285,
+            "checkin": "2026-10-09"
+          }
+        ],
+        "skipped": 0,
+        "retried": 0
+      },
+      "skipped": 0,
+      "retried": 0,
+      "dropped_when": false,
+      "dropped_retries": false,
+      "verify": {
+        "checks": [
+          {
+            "what": "2026-10-05 区间内最低价航班",
+            "ok": true,
+            "expected": "OS382 08:10 ¥540",
+            "recorded": "OS382 08:10 ¥540"
+          },
+          {
+            "what": "2026-10-06 区间内最低价航班",
+            "ok": true,
+            "expected": "ZP446 09:25 ¥720",
+            "recorded": "ZP446 09:25 ¥720"
+          },
+          {
+            "what": "2026-10-07 区间内最低价航班",
+            "ok": true,
+            "expected": "ZP428 08:10 ¥520",
+            "recorded": "ZP428 08:10 ¥520"
+          },
+          {
+            "what": "2026-10-08 区间内最低价航班",
+            "ok": true,
+            "expected": "HL779 17:45 ¥650",
+            "recorded": "HL779 17:45 ¥650"
+          },
+          {
+            "what": "2026-10-09 区间内最低价航班",
+            "ok": true,
+            "expected": "VM474 08:10 ¥480",
+            "recorded": "VM474 08:10 ¥480"
+          },
+          {
+            "what": "周一至周五的最低价（决定出发当日）",
+            "ok": true,
+            "expected": "2026-10-09 VM474 ¥480",
+            "recorded": "2026-10-09 VM474 ¥480"
+          },
+          {
+            "what": "2026-10-09 入住、¥300以内酒店（数量/集合/价格升序）",
+            "ok": true,
+            "expected": "12 家 ¥150-¥285",
+            "recorded": "12 家 ¥150-¥285"
+          }
+        ],
+        "ok": true,
+        "departure_date": "2026-10-09",
+        "oracle_date": "2026-10-09",
+        "checkin": "2026-10-09"
+      },
+      "blocked": null,
+      "audit": {
+        "verdict": "APPROVE",
+        "reasons": [
+          "trace clean, goal signal present"
+        ],
+        "auditor": "mock"
+      },
+      "subgoals": 19
+    },
+    {
+      "site": "voyagio",
+      "profile": "voyagio-replica5",
+      "language": "en",
+      "spec": "/root/ML/LayaWebUse/transfer/specs/voyagio.json",
+      "dates": [
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-09"
+      ],
+      "checkin": "2026-10-06",
+      "records": {
+        "flights": [
+          {
+            "date": "2026-10-05",
+            "no": "TR624",
+            "airline": "Terra Flights",
+            "dep": "11:10",
+            "arr": "14:25",
+            "price": 740,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-06",
+            "no": "VG705",
+            "airline": "Voyagio Air",
+            "dep": "14:05",
+            "arr": "17:15",
+            "price": 550,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-07",
+            "no": "VG600",
+            "airline": "Voyagio Air",
+            "dep": "08:15",
+            "arr": "11:25",
+            "price": 620,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-08",
+            "no": "VG650",
+            "airline": "Voyagio Air",
+            "dep": "09:50",
+            "arr": "13:20",
+            "price": 600,
+            "window": "08:00-18:00"
+          },
+          {
+            "date": "2026-10-09",
+            "no": "VG700",
+            "airline": "Voyagio Air",
+            "dep": "11:10",
+            "arr": "14:25",
+            "price": 630,
+            "window": "08:00-18:00"
+          }
+        ],
+        "hotels": [
+          {
+            "id": 800047,
+            "name": "Beacon Hotel Beijing Sanlitun SOHO",
+            "star": 4,
+            "score": 4.3,
+            "area": "Sanlitun SOHO",
+            "room": "Twin",
+            "price": 160,
+            "checkin": "2026-10-06"
+          },
+          {
+            "id": 801316,
+            "name": "Ink Hotel Beijing Songjiazhuang",
+            "star": 3,
+            "score": 4.4,
+            "area": "Songjiazhuang",
+            "room": "Studio",
+            "price": 170,
+            "checkin": "2026-10-06"
+          },
+          {
+            "id": 800752,
+            "name": "Grove Hotel Beijing Fengtai",
+            "star": 3,
+            "score": 4.8,
+            "area": "Fengtai",
+            "room": "Twin",
+            "price": 180,
+            "checkin": "2026-10-06"
+          },
+          {
+            "id": 800188,
+            "name": "Elm Hotel Beijing Beixinqiao",
+            "star": 3,
+            "score": 4.2,
+            "area": "Beixinqiao",
+            "room": "Suite",
+            "price": 195,
+            "checkin": "2026-10-06"
+          },
+          {
+            "id": 801457,
+            "name": "Beacon Hotel Beijing Sanlitun SOHO",
+            "star": 4,
+            "score": 4.3,
+            "area": "Sanlitun SOHO",
+            "room": "Twin",
+            "price": 200,
+            "checkin": "2026-10-06"
+          },
+          {
+            "id": 800893,
+            "name": "Jetty Hotel Beijing Wangjing",
+            "star": 4,
+            "score": 4.7,
+            "area": "Wangjing",
+            "room": "Suite",
+            "price": 215,
+            "checkin": "2026-10-06"
+          },
+          {
+            "id": 800329,
+            "name": "Harbor Hotel Beijing Shijingshan",
+            "star": 4,
+            "score": 4.1,
+            "area": "Shijingshan",
+            "room": "King",
+            "price": 225,
+            "checkin": "2026-10-06"
+          },
+          {
+            "id": 801598,
+            "name": "Elm Hotel Beijing Beixinqiao",
+            "star": 3,
+            "score": 4.2,
+            "area": "Beixinqiao",
+            "room": "Suite",
+            "price": 235,
+            "checkin": "2026-10-06"
+          },
+          {
+            "id": 801034,
+            "name": "Clove Hotel Beijing Jianguomen",
+            "star": 3,
+            "score": 4.6,
+            "area": "Jianguomen",
+            "room": "King",
+            "price": 245,
+            "checkin": "2026-10-06"
+          },
+          {
+            "id": 800470,
+            "name": "Anchor Hotel Beijing Houhai",
+            "star": 3,
+            "score": 4,
+            "area": "Houhai",
+            "room": "Queen",
+            "price": 260,
+            "checkin": "2026-10-06"
+          },
+          {
+            "id": 801739,
+            "name": "Harbor Hotel Beijing Shijingshan",
+            "star": 4,
+            "score": 4.1,
+            "area": "Shijingshan",
+            "room": "King",
+            "price": 265,
+            "checkin": "2026-10-06"
+          },
+          {
+            "id": 801175,
+            "name": "Fjord Hotel Beijing Liufang",
+            "star": 4,
+            "score": 4.5,
+            "area": "Liufang",
+            "room": "Queen",
+            "price": 280,
+            "checkin": "2026-10-06"
+          },
+          {
+            "id": 800611,
+            "name": "Drift Hotel Beijing Chaoyang Park",
+            "star": 4,
+            "score": 4.9,
+            "area": "Chaoyang Park",
+            "room": "Studio",
+            "price": 295,
+            "checkin": "2026-10-06"
+          }
+        ],
+        "skipped": 0,
+        "retried": 0
+      },
+      "skipped": 0,
+      "retried": 0,
+      "dropped_when": false,
+      "dropped_retries": false,
+      "verify": {
+        "checks": [
+          {
+            "what": "2026-10-05 区间内最低价航班",
+            "ok": true,
+            "expected": "TR624 11:10 ¥740",
+            "recorded": "TR624 11:10 ¥740"
+          },
+          {
+            "what": "2026-10-06 区间内最低价航班",
+            "ok": true,
+            "expected": "VG705 14:05 ¥550",
+            "recorded": "VG705 14:05 ¥550"
+          },
+          {
+            "what": "2026-10-07 区间内最低价航班",
+            "ok": true,
+            "expected": "VG600 08:15 ¥620",
+            "recorded": "VG600 08:15 ¥620"
+          },
+          {
+            "what": "2026-10-08 区间内最低价航班",
+            "ok": true,
+            "expected": "VG650 09:50 ¥600",
+            "recorded": "VG650 09:50 ¥600"
+          },
+          {
+            "what": "2026-10-09 区间内最低价航班",
+            "ok": true,
+            "expected": "VG700 11:10 ¥630",
+            "recorded": "VG700 11:10 ¥630"
+          },
+          {
+            "what": "周一至周五的最低价（决定出发当日）",
+            "ok": true,
+            "expected": "2026-10-06 VG705 ¥550",
+            "recorded": "2026-10-06 VG705 ¥550"
+          },
+          {
+            "what": "2026-10-06 入住、¥300以内酒店（数量/集合/价格升序）",
+            "ok": true,
+            "expected": "13 家 ¥160-¥295",
+            "recorded": "13 家 ¥160-¥295"
+          }
+        ],
+        "ok": true,
+        "departure_date": "2026-10-06",
+        "oracle_date": "2026-10-06",
+        "checkin": "2026-10-06"
+      },
+      "blocked": null,
+      "audit": {
+        "verdict": "APPROVE",
+        "reasons": [
+          "trace clean, goal signal present"
+        ],
+        "auditor": "mock"
+      },
+      "subgoals": 24
+    }
+  ],
+  "steps": {
+    "ctrip": [
+      {
+        "step": 1,
+        "desc": "click a \"机票\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click a \"08:00-18:00\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click a \"价格从低到高\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"记录当前列表最低价航班\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click a \"08:00-18:00\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click a \"价格从低到高\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"记录当前列表最低价航班\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click a \"08:00-18:00\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click a \"价格从低到高\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"记录当前列表最低价航班\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click a \"08:00-18:00\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click a \"价格从低到高\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"记录当前列表最低价航班\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click a \"08:00-18:00\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click a \"价格从低到高\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"记录当前列表最低价航班\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click a \"¥300以下\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click a \"价格从低到高\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"记录当前列表全部酒店\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      }
+    ],
+    "farehaven": [
+      {
+        "step": 1,
+        "desc": "click a \"Flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Dismiss\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"No limit / Max price per night No limit \"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record every stay shown\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      }
+    ],
+    "flyquest": [
+      {
+        "step": 1,
+        "desc": "click a \"Flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into input \"Departure date\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 3,
+        "desc": "click button \"Search flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into input \"Departure date\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 3,
+        "desc": "click button \"Search flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into input \"Departure date\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 3,
+        "desc": "click button \"Search flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into input \"Departure date\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 3,
+        "desc": "click button \"Search flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into input \"Departure date\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 3,
+        "desc": "click button \"Search flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"No limit / Max price per night No limit \"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "click button \"Apply\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record every stay shown\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      }
+    ],
+    "skybook": [
+      {
+        "step": 1,
+        "desc": "click a \"Flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort by\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record lowest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort by\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record lowest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort by\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record lowest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort by\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record lowest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort by\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record lowest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click input \"300 / ¥300 or less\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort by\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click input \"Select all shown\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record selected\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click a \"Next page →\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click input \"Select all shown\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record selected\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      }
+    ],
+    "slowjet": [
+      {
+        "step": 1,
+        "desc": "click a \"Flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record this fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record this fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record this fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record this fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record this fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"No limit / Max price per night No limit \"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record every stay shown\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      }
+    ],
+    "trekly": [
+      {
+        "step": 1,
+        "desc": "click a \"Flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest shown\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest shown\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest shown\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest shown\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest shown\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into input \"1500 / Max price per night\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record every stay shown\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      }
+    ],
+    "voyagio": [
+      {
+        "step": 1,
+        "desc": "click a \"Flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into input \"Departure date\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "click button \"Continue\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into input \"Departure date\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "click button \"Continue\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into input \"Departure date\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "click button \"Continue\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into input \"Departure date\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "click button \"Continue\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into input \"Departure date\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "click button \"Continue\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "click button \"Search flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "click button \"Search flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "click button \"Search flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "click button \"Search flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 2,
+        "desc": "click button \"Search flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record cheapest fare\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"No limit / Max price per night No limit \"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "click button \"Record every stay shown\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      }
+    ]
+  }
+}

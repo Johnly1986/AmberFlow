@@ -1,0 +1,37 @@
+/* FareHaven —— 复刻站 #6：部分日期弹"促销"遮罩，关掉才点得动列表 */
+* { box-sizing: border-box; }
+body { margin: 0; background: #eef2ee; color: #1d2a1f;
+       font: 14px/1.6 "Segoe UI", Tahoma, sans-serif; }
+a { color: #1f7a4d; text-decoration: none; }
+.fh-top { background: #14532d; color: #fff; padding: 12px 22px; display: flex; gap: 18px;
+          align-items: center; }
+.fh-top .brand { font-size: 19px; font-weight: 700; letter-spacing: .5px; }
+.fh-top nav a { color: #b7e4c7; margin-right: 14px; }
+.fh-top nav a.on { color: #fff; border-bottom: 2px solid #95d5b2; }
+main { max-width: 1000px; margin: 18px auto 70px; padding: 0 16px; }
+h1 { font-size: 19px; margin: 10px 0 12px; }
+.card { background: #fff; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px;
+        box-shadow: 0 1px 6px rgba(20, 83, 45, .08); }
+.row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+label { display: flex; flex-direction: column; font-size: 12px; color: #5c7a67; }
+select { border: 1px solid #c3d6c8; border-radius: 6px; padding: 7px 9px; font: inherit; background: #fff; }
+button { border: 1px solid #c3d6c8; background: #fff; border-radius: 6px; padding: 8px 14px;
+         font: inherit; cursor: pointer; }
+button.primary { background: #1f7a4d; border-color: #1f7a4d; color: #fff; font-weight: 700; }
+.state { color: #5c7a67; font-size: 13px; margin: 10px 0 0; }
+table { width: 100%; border-collapse: collapse; margin-top: 12px; background: #fff; font-size: 13px;
+        border-radius: 8px; overflow: hidden; }
+th, td { border-bottom: 1px solid #eef3ef; padding: 7px 9px; text-align: left; }
+th { background: #f7faf8; color: #5c7a67; font-weight: 600; }
+.amount, td.amount { color: #0f7b6c; font-weight: 700; font-size: 15px; }
+.log { background: #eefaf4; border: 1px solid #bfe3d2; border-radius: 6px; color: #12604a;
+       padding: 8px 10px; margin: 10px 0 0; min-height: 20px; }
+.empty { color: #8aa294; padding: 12px 0; }
+/* 遮罩：盖住整页，不关掉就点不动下面任何东西 */
+#promo-modal { position: fixed; inset: 0; background: rgba(20, 40, 28, .72); z-index: 50;
+               display: flex; align-items: center; justify-content: center; }
+#promo-modal .sheet { background: #fff; border-radius: 12px; padding: 26px 30px; max-width: 420px;
+                      text-align: center; box-shadow: 0 8px 30px rgba(0,0,0,.3); }
+#promo-modal h2 { margin: 0 0 8px; font-size: 18px; color: #14532d; }
+#promo-modal p { color: #5c7a67; margin: 0 0 16px; }
+.tiny { color: #8aa294; font-size: 12px; }

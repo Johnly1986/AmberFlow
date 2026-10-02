@@ -1,0 +1,166 @@
+{
+  "name": "ctrip-replica",
+  "language": "zh-CN",
+  "site_label": "携程",
+  "site_dir": "ctrip/site",
+  "ledger_js": "() => window.__CTRIP_RECORDS || {}",
+  "data_module": "ctrip.data",
+  "params": {
+    "from": "昆明",
+    "to": "北京",
+    "city": "北京",
+    "window_label": "08:00-18:00",
+    "cap_label": "¥300以下"
+  },
+  "slots": {},
+  "collect_roles": [
+    "record_page"
+  ],
+  "phases": [
+    {
+      "phase": "entry",
+      "stage": "flight",
+      "repeat": "once",
+      "steps": [
+        {
+          "role": "entry",
+          "desc": "从{site_label}首页进入机票搜索页（{from} → {to}）",
+          "path": "ct_home.html",
+          "hint": "a[data-test=entry-flight]",
+          "signal": {
+            "css_text_contains": [
+              "[data-test=page-title]",
+              "机票"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "phase": "flights",
+      "stage": "flight",
+      "repeat": "per_date",
+      "steps": [
+        {
+          "role": "filter_window",
+          "desc": "打开 {date}（{wd}）{from}到{to}的航班列表，并把出发时段筛选为 {window_label}",
+          "path": "flights.html",
+          "query": {
+            "from": "KMG",
+            "to": "BJS",
+            "date": "{date}"
+          },
+          "hint": "a[data-test=window-0800-1800]",
+          "signal": {
+            "css_text_contains": [
+              "[data-test=window-state]",
+              "08:00-18:00"
+            ]
+          }
+        },
+        {
+          "role": "sort_price",
+          "desc": "把 {date}（{wd}）的航班列表按价格从低到高排序",
+          "path": "flights.html",
+          "query": {
+            "from": "KMG",
+            "to": "BJS",
+            "date": "{date}",
+            "window": "0800-1800"
+          },
+          "hint": "a[data-test=sort-price_asc]",
+          "signal": {
+            "css_text_contains": [
+              "[data-test=sort-state]",
+              "价格从低到高"
+            ]
+          }
+        },
+        {
+          "role": "record_lowest",
+          "desc": "记录 {date}（{wd}）{window_label} 区间内最低价的航班",
+          "path": "flights.html",
+          "query": {
+            "from": "KMG",
+            "to": "BJS",
+            "date": "{date}",
+            "window": "0800-1800",
+            "sort": "price_asc"
+          },
+          "hint": "button[data-test=record-lowest]",
+          "signal": {
+            "css_text_contains": [
+              "[data-test=last-record]",
+              "已记录"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "phase": "hotel",
+      "stage": "hotel",
+      "repeat": "per_checkin",
+      "steps": [
+        {
+          "role": "set_cap",
+          "desc": "打开 {city} {checkin} 入住的酒店列表，并把价格上限设为 {cap_label}",
+          "path": "hotels.html",
+          "query": {
+            "city": "{city}",
+            "checkin": "{checkin}"
+          },
+          "hint": "a[data-test=cap-300]",
+          "signal": {
+            "css_text_contains": [
+              "[data-test=price-cap-state]",
+              "300"
+            ]
+          }
+        },
+        {
+          "role": "sort_price",
+          "desc": "把 {city} {checkin} 入住的酒店列表按价格从低到高排序",
+          "path": "hotels.html",
+          "query": {
+            "city": "{city}",
+            "checkin": "{checkin}",
+            "cap": "300"
+          },
+          "hint": "a[data-test=h-sort-price_asc]",
+          "signal": {
+            "css_text_contains": [
+              "[data-test=sort-state]",
+              "价格从低到高"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "phase": "collect",
+      "stage": "hotel",
+      "repeat": "per_checkin",
+      "steps": [
+        {
+          "role": "record_page",
+          "desc": "记录 {checkin} 入住、¥300以内的全部酒店",
+          "path": "hotels.html",
+          "query": {
+            "city": "{city}",
+            "checkin": "{checkin}",
+            "cap": "300",
+            "sort": "price_asc"
+          },
+          "hint": "button[data-test=record-hotels]",
+          "signal": {
+            "css_text_contains": [
+              "[data-test=hotel-recorded]",
+              "已记录"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

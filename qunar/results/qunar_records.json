@@ -1,0 +1,83 @@
+{
+  "plan": {},
+  "home": {
+    "elements": 3,
+    "criteria_sample": [
+      [
+        "e0",
+        "button \"搜索\""
+      ],
+      [
+        "e1",
+        "a \"触屏版\" -> /h5"
+      ],
+      [
+        "e2",
+        "a \"电脑版\" -> www.qunar.com/index.htm"
+      ]
+    ]
+  },
+  "subgoals": [
+    {
+      "desc": "打开出发城市选择器",
+      "done": true,
+      "stop_reason": "dom goal signal",
+      "attempts": 1,
+      "final_url": "https://touch.qunar.com/h5/flight/#cityselect",
+      "methods": [
+        "rule:match"
+      ]
+    },
+    {
+      "desc": "点击搜索，跳转航班列表页",
+      "done": true,
+      "stop_reason": "dom goal signal",
+      "attempts": 1,
+      "final_url": "https://touch.qunar.com/ncs/page/flightlist?depCity=%E5%8C%97%E4%BA%AC&arrCity=%E4%B8%8A%E6%B5%B7&goDate=2026-10-03&from=touch_index_search&child=0&baby=0&cabin",
+      "methods": [
+        "rule:match"
+      ]
+    }
+  ],
+  "api": [
+    {
+      "status": 200,
+      "body": "{\"bstatus\":{\"code\":1999,\"status\":1999,\"msg\":\"没有查询到符合条件的航班\"},\"code\":-1,\"data\":null,\"msg\":\"没有查询到符合条件的航班\",\"ret\":false}"
+    }
+  ],
+  "list_direct": {
+    "url": "https://touch.qunar.com/ncs/page/flightlist?depCity=%E6%98%86%E6%98%8E&arrCity=%E5%8C%97%E4%BA%AC&goDate=2026-10-06&from=touch_index_search&child=0&baby=0&cabin",
+    "body_len": 17,
+    "body_head": "昆明北京 ⏎ 没有查询到符合条件的航班",
+    "no_flight_banner": true,
+    "elements": 0,
+    "api_seen": 1
+  },
+  "checks": [
+    {
+      "what": "首次加载的表单可交互（执行器按规则命中计划点名目标 div 北京）",
+      "ok": true,
+      "expected": "子目标1 done 且 method=rule:*",
+      "recorded": "done=True methods=['rule:match']"
+    },
+    {
+      "what": "交互：出发城市选择器被打开（URL hash 信号）",
+      "ok": true,
+      "expected": "url_contains #cityselect",
+      "recorded": "https://touch.qunar.com/h5/flight/#cityselect"
+    },
+    {
+      "what": "动作：搜索跳转列表页（URL 信号，SPA 自建请求）",
+      "ok": true,
+      "expected": "url_contains ncs/page/flightlist?depCity=",
+      "recorded": "https://touch.qunar.com/ncs/page/flightlist?depCity=%E5%8C%97%E4%BA%AC&arrCity=%E4%B8%8A%E6%B5%B7&goDate=2026-10-03&from=touch_index_search&child=0&baby=0&cabin"
+    },
+    {
+      "what": "边界：列表数据门如实复现（touchInnerList 1999；末次加载表单降级为 3 元素）",
+      "ok": true,
+      "expected": "1999/没有查询到符合条件的航班",
+      "recorded": "api_seen=1 banner=True"
+    }
+  ],
+  "verdict": "4/4"
+}

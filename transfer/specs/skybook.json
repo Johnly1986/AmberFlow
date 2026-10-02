@@ -1,0 +1,248 @@
+{
+  "name": "skybook-replica2",
+  "language": "en",
+  "site_label": "SkyBook",
+  "site_dir": "transfer/site2",
+  "ledger_js": "() => window.__SKYBOOK_LEDGER || {}",
+  "data_module": "transfer.data2",
+  "params": {
+    "from": "昆明",
+    "to": "北京",
+    "city": "北京",
+    "window_label": "08:00-18:00",
+    "cap_label": "¥300"
+  },
+  "slots": {
+    "window": "0800-1800",
+    "sort": "price_asc"
+  },
+  "collect_roles": [
+    "select_all",
+    "record_page",
+    "next_page"
+  ],
+  "phases": [
+    {
+      "phase": "entry",
+      "stage": "flight",
+      "repeat": "once",
+      "steps": [
+        {
+          "role": "entry",
+          "desc": "从{site_label}首页进入机票搜索页（{from} → {to}）",
+          "path": "index.html",
+          "hint": "#nav-flights",
+          "signal": {
+            "css_text_contains": [
+              "#page-title",
+              "Flights"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "phase": "flights",
+      "stage": "flight",
+      "repeat": "per_date",
+      "steps": [
+        {
+          "role": "filter_window",
+          "desc": "打开 {date}（{wd}）{from}到{to}的航班列表，并把出发时段筛选为 {window_label}",
+          "path": "flights.html",
+          "query": {
+            "from": "KMG",
+            "to": "BJS",
+            "date": "{date}"
+          },
+          "hint": "#window",
+          "signal": {
+            "css_text_contains": [
+              "#window-state",
+              "08:00-18:00"
+            ]
+          }
+        },
+        {
+          "role": "sort_price",
+          "desc": "把 {date}（{wd}）的航班列表按价格从低到高排序",
+          "path": "flights.html",
+          "query": {
+            "from": "KMG",
+            "to": "BJS",
+            "date": "{date}",
+            "window": "0800-1800"
+          },
+          "hint": "#sort",
+          "signal": {
+            "css_text_contains": [
+              "#sort-state",
+              "price (low to high)"
+            ]
+          }
+        },
+        {
+          "role": "record_lowest",
+          "desc": "记录 {date}（{wd}）{window_label} 区间内最低价的航班",
+          "path": "flights.html",
+          "query": {
+            "from": "KMG",
+            "to": "BJS",
+            "date": "{date}",
+            "window": "0800-1800",
+            "sort": "price_asc"
+          },
+          "hint": "#record-lowest",
+          "signal": {
+            "css_text_contains": [
+              "#last-record",
+              "Recorded"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "phase": "hotel",
+      "stage": "hotel",
+      "repeat": "per_checkin",
+      "steps": [
+        {
+          "role": "set_cap",
+          "desc": "打开 {city} {checkin} 入住的酒店列表，并把价格上限设为 {cap_label}",
+          "path": "hotels.html",
+          "query": {
+            "city": "Beijing",
+            "checkin": "{checkin}"
+          },
+          "hint": "#cap-300",
+          "signal": {
+            "css_text_contains": [
+              "#cap-state",
+              "300"
+            ]
+          }
+        },
+        {
+          "role": "sort_price",
+          "desc": "把 {city} {checkin} 入住的酒店列表按价格从低到高排序",
+          "path": "hotels.html",
+          "query": {
+            "city": "Beijing",
+            "checkin": "{checkin}",
+            "cap": "300"
+          },
+          "hint": "#sort",
+          "signal": {
+            "css_text_contains": [
+              "#sort-state",
+              "price (low to high)"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "phase": "collect",
+      "stage": "hotel",
+      "repeat": "per_checkin",
+      "steps": [
+        {
+          "role": "select_all",
+          "desc": "勾选当前页显示的全部酒店",
+          "path": "hotels.html",
+          "query": {
+            "city": "Beijing",
+            "checkin": "{checkin}",
+            "cap": "300",
+            "sort": "price_asc"
+          },
+          "hint": "#select-all",
+          "signal": {
+            "css_text_contains": [
+              "#selection-count",
+              "Selected"
+            ]
+          }
+        },
+        {
+          "role": "record_page",
+          "desc": "记录已勾选的酒店",
+          "path": "hotels.html",
+          "query": {
+            "city": "Beijing",
+            "checkin": "{checkin}",
+            "cap": "300",
+            "sort": "price_asc",
+            "selected": "all"
+          },
+          "hint": "#record-selected",
+          "signal": {
+            "css_text_contains": [
+              "#hotel-recorded",
+              "Recorded"
+            ]
+          }
+        },
+        {
+          "role": "next_page",
+          "desc": "翻到酒店列表的下一页",
+          "path": "hotels.html",
+          "query": {
+            "city": "Beijing",
+            "checkin": "{checkin}",
+            "cap": "300",
+            "sort": "price_asc",
+            "selected": "all"
+          },
+          "hint": "#next-page",
+          "signal": {
+            "css_text_contains": [
+              "#page-state",
+              "Page 2"
+            ]
+          }
+        },
+        {
+          "role": "select_all",
+          "desc": "勾选第二页显示的全部酒店",
+          "path": "hotels.html",
+          "query": {
+            "city": "Beijing",
+            "checkin": "{checkin}",
+            "cap": "300",
+            "sort": "price_asc",
+            "page": "2"
+          },
+          "hint": "#select-all",
+          "signal": {
+            "css_text_contains": [
+              "#selection-count",
+              "Selected"
+            ]
+          }
+        },
+        {
+          "role": "record_page",
+          "desc": "记录第二页已勾选的酒店",
+          "path": "hotels.html",
+          "query": {
+            "city": "Beijing",
+            "checkin": "{checkin}",
+            "cap": "300",
+            "sort": "price_asc",
+            "page": "2",
+            "selected": "all"
+          },
+          "hint": "#record-selected",
+          "signal": {
+            "css_text_contains": [
+              "#hotel-recorded",
+              "Recorded"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

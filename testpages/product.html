@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Wireless Mouse X200 - Example Shop</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:40px auto}header a{font-weight:bold;text-decoration:none;color:#111}.badge{background:#c00;color:#fff;border-radius:10px;padding:1px 8px;margin-left:4px}button,a.btn{padding:8px 14px;margin:6px 4px}</style>
+</head>
+<body>
+<header><a data-test="logo" href="product.html">Example Shop</a>
+  <a data-test="cart-link" href="cart.html">Cart<span class="badge" data-test="cart-count">0</span></a></header>
+<main>
+  <h1>Wireless Mouse X200</h1>
+  <p>$29.99. In stock. Ergonomic 2.4GHz wireless mouse with USB receiver.
+     Free shipping on orders over $50.</p>
+  <a data-test="product-title" href="product.html">Wireless Mouse X200</a><br>
+  <button data-test="add-to-cart">Add to cart</button>
+  <button data-test="support" onclick="alert('support chat')">Contact support</button>
+  <input data-test="search-box" placeholder="Search products">
+</main>
+<script>
+document.querySelector("[data-test='add-to-cart']").addEventListener("click", function () {
+  const b = document.querySelector("[data-test='cart-count']");
+  b.textContent = parseInt(b.textContent) + 1;
+  this.textContent = "Added ✓";
+});
+</script>
+</body>
+</html>

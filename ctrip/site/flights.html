@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>昆明到北京机票查询预订-携程飞机票</title>
+<link rel="stylesheet" href="ctrip.css">
+</head>
+<body data-page="flights">
+<header class="ct-header">
+  <span class="logo">携程旅行</span>
+  <nav><a href="ct_home.html">首页</a><a href="flights.html" class="on">机票</a><a href="hotels.html">酒店</a></nav>
+</header>
+<main>
+  <h1 data-test="page-title">机票 · 单程</h1>
+
+  <div class="card">
+    <div class="search-bar">
+      <label>出发地<input id="from-input" value="昆明" readonly></label>
+      <label>到达地<input id="to-input" value="北京" readonly></label>
+      <label>出发日期<input id="date-input" value="" readonly></label>
+      <button data-test="search">搜索</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="route" data-test="route">昆明(KMG) → 北京(BJS)</div>
+    <div class="meta" data-test="dep-date">出发日期：</div>
+    <nav class="date-tabs" id="date-tabs" data-test="date-tabs"></nav>
+  </div>
+
+  <div class="card">
+    <div class="filters" id="filters-window" data-test="filters-window"></div>
+    <div class="filters" id="filters-sort" data-test="filters-sort" style="margin-top:8px"></div>
+    <div class="state-line">
+      <span data-test="window-state" id="window-state">出发时段：不限</span>
+      <span data-test="sort-state" id="sort-state">排序：默认排序</span>
+      <span data-test="result-count" id="result-count">共 0 个航班</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <button class="primary" data-test="record-lowest">记录当前列表最低价航班</button>
+    <div class="record-box" data-test="last-record" id="last-record"></div>
+    <table class="records" data-test="record-table" id="record-table">
+      <thead><tr><th>日期</th><th>航班</th><th>时刻</th><th>价格</th><th>出发时段筛选</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <ul class="flight-list" id="flight-list" data-test="flight-list"></ul>
+</main>
+<script src="ctrip_data.js"></script>
+<script src="site.js"></script>
+</body>
+</html>

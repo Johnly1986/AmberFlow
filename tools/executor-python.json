@@ -1,0 +1,53 @@
+{
+ "hint-add-to-cart": {
+  "done": true,
+  "stop_reason": "dom goal signal",
+  "n_steps": 1,
+  "steps": [
+   {
+    "how": "clicked",
+    "method": "rule:match"
+   }
+  ]
+ },
+ "model-pick-add-to-cart": {
+  "done": true,
+  "stop_reason": "dom goal signal",
+  "n_steps": 1,
+  "steps": [
+   {
+    "how": "clicked",
+    "method": "laya"
+   }
+  ]
+ },
+ "risky-checkout-denied": {
+  "done": false,
+  "stop_reason": "max_steps",
+  "n_steps": 4,
+  "steps": [
+   {
+    "how": null,
+    "method": null
+   },
+   {
+    "how": "clicked",
+    "method": "laya"
+   },
+   {
+    "how": "clicked",
+    "method": "laya"
+   },
+   {
+    "how": "clicked",
+    "method": "laya"
+   }
+  ]
+ },
+ "low-confidence-stop": {
+  "done": false,
+  "stop_reason": "low confidence 0.10 < floor 0.25 on step 1",
+  "n_steps": 0,
+  "steps": []
+ }
+}

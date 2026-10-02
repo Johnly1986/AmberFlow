@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>安防资产台账 - PTZ 登记</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:40px auto}
+header a{font-weight:bold;text-decoration:none;color:#111}
+label{display:block;margin-top:12px;font-weight:600}
+input,select{width:100%;padding:6px;margin-top:4px;box-sizing:border-box}
+.err{color:#c00;font-size:13px;min-height:18px}button{margin-top:16px;padding:8px 20px}</style>
+</head>
+<body>
+<header><a data-test="logo" href="asset_portal.html">安防资产台账</a></header>
+<main>
+  <h1>PTZ 球机 登记</h1>
+  <form onsubmit="return submitB(event)">
+    <label>S/N 编号 <input data-test="b-sn" required></label>
+    <label>设备型号 <input data-test="b-model" required></label>
+    <label>光学变倍
+      <select data-test="b-zoom"><option value="">请选择</option><option>12x</option><option>25x</option><option>40x</option></select></label>
+    <label>预置位 <input data-test="b-preset" type="number" required></label>
+    <label>管理地址 <input data-test="b-ip" required></label>
+    <label>安装点位 <input data-test="b-spot" required></label>
+    <p class="err" data-test="b-error"></p>
+    <button type="submit" data-test="b-submit">保存设备</button>
+  </form>
+</main>
+<script>
+function submitB(e){
+  e.preventDefault();
+  const err = document.querySelector("[data-test='b-error']");
+  const sn = document.querySelector("[data-test='b-sn']").value.trim();
+  if(!/^DOME-?\d{4,}$/.test(sn)){ err.textContent = "S/N 格式错误(应为 DOME-XXXX)"; return false; }
+  location.href = "asset_done.html?" + new URLSearchParams({serial: sn, form: "B"});
+  return false;
+}
+</script>
+</body>
+</html>

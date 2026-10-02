@@ -1,0 +1,240 @@
+{
+ "fixtures": [
+  "testpages/product.html",
+  "testpages/long_page.html",
+  "bench/fixtures/shop_home.html",
+  "bench/fixtures/shop_cart.html",
+  "bench/fixtures/frames_parent.html",
+  "bench/fixtures/spa_overlay.html"
+ ],
+ "elements": {
+  "testpages/product.html": [
+   {
+    "ref": "e0",
+    "tag": "a",
+    "label": "Wireless Mouse X200",
+    "data_test": "product-title",
+    "href": "product.html",
+    "frame": 0
+   },
+   {
+    "ref": "e1",
+    "tag": "button",
+    "label": "Add to cart",
+    "data_test": "add-to-cart",
+    "href": "",
+    "frame": 0
+   },
+   {
+    "ref": "e2",
+    "tag": "button",
+    "label": "Contact support",
+    "data_test": "support",
+    "href": "",
+    "frame": 0
+   },
+   {
+    "ref": "e3",
+    "tag": "input",
+    "label": "Search products",
+    "data_test": "search-box",
+    "href": "",
+    "frame": 0
+   },
+   {
+    "ref": "e4",
+    "tag": "a",
+    "label": "Example Shop",
+    "data_test": "logo",
+    "href": "product.html",
+    "frame": 0
+   },
+   {
+    "ref": "e5",
+    "tag": "a",
+    "label": "Cart",
+    "data_test": "cart-link",
+    "href": "cart.html",
+    "frame": 0
+   }
+  ],
+  "testpages/long_page.html": [
+   {
+    "ref": "e0",
+    "tag": "button",
+    "label": "Add to cart",
+    "data_test": "add-to-cart",
+    "href": "",
+    "frame": 0
+   },
+   {
+    "ref": "e1",
+    "tag": "input",
+    "label": "Search products",
+    "data_test": "search-box",
+    "href": "",
+    "frame": 0
+   },
+   {
+    "ref": "e2",
+    "tag": "a",
+    "label": "Example Shop",
+    "data_test": "logo",
+    "href": "product.html",
+    "frame": 0
+   },
+   {
+    "ref": "e3",
+    "tag": "a",
+    "label": "Cart",
+    "data_test": "cart-link",
+    "href": "cart.html",
+    "frame": 0
+   }
+  ],
+  "bench/fixtures/shop_home.html": [
+   {
+    "ref": "e0",
+    "tag": "button",
+    "label": "Add to cart",
+    "data_test": "add-to-cart",
+    "href": "",
+    "frame": 0
+   },
+   {
+    "ref": "e1",
+    "tag": "input",
+    "label": "Search products",
+    "data_test": "search-box",
+    "href": "",
+    "frame": 0
+   },
+   {
+    "ref": "e2",
+    "tag": "a",
+    "label": "TrailBottle 750ml",
+    "data_test": "product-title",
+    "href": "shop_home.html",
+    "frame": 0
+   },
+   {
+    "ref": "e3",
+    "tag": "a",
+    "label": "Acme Store",
+    "data_test": "logo",
+    "href": "shop_home.html",
+    "frame": 0
+   },
+   {
+    "ref": "e4",
+    "tag": "a",
+    "label": "Cart",
+    "data_test": "cart-link",
+    "href": "shop_cart.html",
+    "frame": 0
+   }
+  ],
+  "bench/fixtures/shop_cart.html": [
+   {
+    "ref": "e0",
+    "tag": "input",
+    "label": "Coupon code",
+    "data_test": "coupon",
+    "href": "",
+    "frame": 0
+   },
+   {
+    "ref": "e1",
+    "tag": "button",
+    "label": "Apply coupon",
+    "data_test": "apply-coupon",
+    "href": "",
+    "frame": 0
+   },
+   {
+    "ref": "e2",
+    "tag": "select",
+    "label": "1",
+    "data_test": "qty",
+    "href": "",
+    "frame": 0
+   },
+   {
+    "ref": "e3",
+    "tag": "a",
+    "label": "Proceed to checkout",
+    "data_test": "checkout",
+    "href": "shop_thanks.html",
+    "frame": 0
+   },
+   {
+    "ref": "e4",
+    "tag": "a",
+    "label": "Continue shopping",
+    "data_test": "",
+    "href": "shop_home.html",
+    "frame": 0
+   },
+   {
+    "ref": "e5",
+    "tag": "a",
+    "label": "Acme Store",
+    "data_test": "logo",
+    "href": "shop_home.html",
+    "frame": 0
+   },
+   {
+    "ref": "e6",
+    "tag": "a",
+    "label": "Cart",
+    "data_test": "cart-link",
+    "href": "shop_cart.html",
+    "frame": 0
+   }
+  ],
+  "bench/fixtures/frames_parent.html": [
+   {
+    "ref": "f1:e0",
+    "tag": "input",
+    "label": "序列号",
+    "data_test": "f-serial",
+    "href": "",
+    "frame": 1
+   },
+   {
+    "ref": "f1:e1",
+    "tag": "input",
+    "label": "安装点位",
+    "data_test": "f-spot",
+    "href": "",
+    "frame": 1
+   },
+   {
+    "ref": "f1:e2",
+    "tag": "button",
+    "label": "提交",
+    "data_test": "f-submit",
+    "href": "",
+    "frame": 1
+   }
+  ],
+  "bench/fixtures/spa_overlay.html": [
+   {
+    "ref": "e0",
+    "tag": "button",
+    "label": "Pay now",
+    "data_test": "pay-now",
+    "href": "",
+    "frame": 0
+   },
+   {
+    "ref": "e1",
+    "tag": "button",
+    "label": "Accept",
+    "data_test": "accept",
+    "href": "",
+    "frame": 0
+   }
+  ]
+ }
+}

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Acme Store - Cart</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:40px auto}header a{font-weight:bold;text-decoration:none;color:#111;margin-right:14px}.badge{background:#06c;color:#fff;border-radius:10px;padding:1px 8px}button,a.btn,input,select{padding:8px 12px;margin:6px 4px}</style>
+</head>
+<body>
+<header><a data-test="logo" href="shop_home.html">Acme Store</a>
+  <a data-test="cart-link" href="shop_cart.html">Cart<span class="badge" data-test="cart-count">1</span></a></header>
+<main>
+  <h1>Your Cart</h1>
+  <ul><li>TrailBottle 750ml x1 &mdash; $19.50</li></ul>
+  <p>Subtotal: $19.50</p>
+  <input data-test="coupon" placeholder="Coupon code">
+  <button data-test="apply-coupon">Apply coupon</button>
+  <select data-test="qty"><option>1</option><option>2</option><option>3</option></select>
+  <a class="btn" data-test="checkout" href="shop_thanks.html">Proceed to checkout</a>
+  <a href="shop_home.html">Continue shopping</a>
+</main>
+<script>
+document.querySelector("[data-test='apply-coupon']").addEventListener("click", function () {
+  const v = document.querySelector("[data-test='coupon']").value.trim().toUpperCase();
+  let msg = document.querySelector("[data-test='coupon-msg']");
+  if (!msg) { msg = document.createElement("p"); msg.setAttribute("data-test", "coupon-msg");
+              this.parentNode.insertBefore(msg, this.nextSibling); }
+  msg.textContent = v === "ACME10" ? "Coupon applied: -$1.95" : "Invalid coupon";
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,1756 @@
+// 由 ctrip/data.py 生成，请勿手改：python3 ctrip/data.py --write
+window.CTRIP = {
+ "window": {
+  "lo": "08:00",
+  "hi": "18:00"
+ },
+ "route": {
+  "from": "昆明",
+  "from_code": "KMG",
+  "to": "北京",
+  "to_code": "BJS"
+ },
+ "dates": [
+  {
+   "date": "2026-10-05",
+   "wd": "周一",
+   "short": "10月5日"
+  },
+  {
+   "date": "2026-10-06",
+   "wd": "周二",
+   "short": "10月6日"
+  },
+  {
+   "date": "2026-10-07",
+   "wd": "周三",
+   "short": "10月7日"
+  },
+  {
+   "date": "2026-10-08",
+   "wd": "周四",
+   "short": "10月8日"
+  },
+  {
+   "date": "2026-10-09",
+   "wd": "周五",
+   "short": "10月9日"
+  }
+ ],
+ "flights": [
+  {
+   "date": "2026-10-05",
+   "no": "CA1000",
+   "airline": "中国国航(CA)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "06:20",
+   "arr": "09:45",
+   "dur": "3h25m",
+   "plane": "空客A320",
+   "price": 710,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-05",
+   "no": "MU1037",
+   "airline": "东方航空(MU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "07:05",
+   "arr": "10:20",
+   "dur": "3h15m",
+   "plane": "波音737-800",
+   "price": 770,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-05",
+   "no": "CZ1074",
+   "airline": "南方航空(CZ)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "07:40",
+   "arr": "11:00",
+   "dur": "3h20m",
+   "plane": "空客A321",
+   "price": 850,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-05",
+   "no": "HU1111",
+   "airline": "海南航空(HU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "08:20",
+   "arr": "11:30",
+   "dur": "3h10m",
+   "plane": "波音787-9",
+   "price": 1070,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-05",
+   "no": "3U1148",
+   "airline": "四川航空(3U)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "09:15",
+   "arr": "12:45",
+   "dur": "3h30m",
+   "plane": "空客A330",
+   "price": 1130,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-05",
+   "no": "KY1185",
+   "airline": "昆明航空(KY)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "10:30",
+   "arr": "13:45",
+   "dur": "3h15m",
+   "plane": "波音737-800",
+   "price": 1250,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-05",
+   "no": "HO1222",
+   "airline": "吉祥航空(HO)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "11:45",
+   "arr": "15:05",
+   "dur": "3h20m",
+   "plane": "空客A320",
+   "price": 1390,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-05",
+   "no": "9C1259",
+   "airline": "春秋航空(9C)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "13:10",
+   "arr": "16:35",
+   "dur": "3h25m",
+   "plane": "波音787-9",
+   "price": 1420,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-05",
+   "no": "CA1296",
+   "airline": "中国国航(CA)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "14:25",
+   "arr": "17:35",
+   "dur": "3h10m",
+   "plane": "空客A321",
+   "price": 1030,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": true
+  },
+  {
+   "date": "2026-10-05",
+   "no": "MU1333",
+   "airline": "东方航空(MU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "15:40",
+   "arr": "19:10",
+   "dur": "3h30m",
+   "plane": "波音737-800",
+   "price": 1280,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-05",
+   "no": "CZ1370",
+   "airline": "南方航空(CZ)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "16:55",
+   "arr": "20:10",
+   "dur": "3h15m",
+   "plane": "空客A320",
+   "price": 1220,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-05",
+   "no": "HU1407",
+   "airline": "海南航空(HU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "17:50",
+   "arr": "21:10",
+   "dur": "3h20m",
+   "plane": "波音787-9",
+   "price": 1120,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-05",
+   "no": "3U1444",
+   "airline": "四川航空(3U)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "18:05",
+   "arr": "21:30",
+   "dur": "3h25m",
+   "plane": "空客A321",
+   "price": 590,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": true
+  },
+  {
+   "date": "2026-10-05",
+   "no": "KY1481",
+   "airline": "昆明航空(KY)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "19:30",
+   "arr": "22:40",
+   "dur": "3h10m",
+   "plane": "波音737-800",
+   "price": 770,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-05",
+   "no": "HO1518",
+   "airline": "吉祥航空(HO)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "21:50",
+   "arr": "01:20",
+   "dur": "3h30m",
+   "plane": "空客A320",
+   "price": 710,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-06",
+   "no": "MU1011",
+   "airline": "东方航空(MU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "06:20",
+   "arr": "09:45",
+   "dur": "3h25m",
+   "plane": "空客A320",
+   "price": 730,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-06",
+   "no": "CZ1048",
+   "airline": "南方航空(CZ)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "07:05",
+   "arr": "10:20",
+   "dur": "3h15m",
+   "plane": "波音737-800",
+   "price": 530,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": true
+  },
+  {
+   "date": "2026-10-06",
+   "no": "HU1085",
+   "airline": "海南航空(HU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "07:40",
+   "arr": "11:00",
+   "dur": "3h20m",
+   "plane": "空客A321",
+   "price": 860,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-06",
+   "no": "3U1122",
+   "airline": "四川航空(3U)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "08:20",
+   "arr": "11:30",
+   "dur": "3h10m",
+   "plane": "波音787-9",
+   "price": 1020,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-06",
+   "no": "KY1159",
+   "airline": "昆明航空(KY)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "09:15",
+   "arr": "12:45",
+   "dur": "3h30m",
+   "plane": "空客A330",
+   "price": 1140,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-06",
+   "no": "HO1196",
+   "airline": "吉祥航空(HO)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "10:30",
+   "arr": "13:45",
+   "dur": "3h15m",
+   "plane": "波音737-800",
+   "price": 910,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": true
+  },
+  {
+   "date": "2026-10-06",
+   "no": "9C1233",
+   "airline": "春秋航空(9C)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "11:45",
+   "arr": "15:05",
+   "dur": "3h20m",
+   "plane": "空客A320",
+   "price": 1390,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-06",
+   "no": "CA1270",
+   "airline": "中国国航(CA)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "13:10",
+   "arr": "16:35",
+   "dur": "3h25m",
+   "plane": "波音787-9",
+   "price": 1490,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-06",
+   "no": "MU1307",
+   "airline": "东方航空(MU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "14:25",
+   "arr": "17:35",
+   "dur": "3h10m",
+   "plane": "空客A321",
+   "price": 1410,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-06",
+   "no": "CZ1344",
+   "airline": "南方航空(CZ)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "15:40",
+   "arr": "19:10",
+   "dur": "3h30m",
+   "plane": "波音737-800",
+   "price": 1300,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-06",
+   "no": "HU1381",
+   "airline": "海南航空(HU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "16:55",
+   "arr": "20:10",
+   "dur": "3h15m",
+   "plane": "空客A320",
+   "price": 1200,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-06",
+   "no": "3U1418",
+   "airline": "四川航空(3U)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "17:50",
+   "arr": "21:10",
+   "dur": "3h20m",
+   "plane": "波音787-9",
+   "price": 1090,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-06",
+   "no": "KY1455",
+   "airline": "昆明航空(KY)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "18:05",
+   "arr": "21:30",
+   "dur": "3h25m",
+   "plane": "空客A321",
+   "price": 900,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-06",
+   "no": "HO1492",
+   "airline": "吉祥航空(HO)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "19:30",
+   "arr": "22:40",
+   "dur": "3h10m",
+   "plane": "波音737-800",
+   "price": 770,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-06",
+   "no": "9C1529",
+   "airline": "春秋航空(9C)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "21:50",
+   "arr": "01:20",
+   "dur": "3h30m",
+   "plane": "空客A320",
+   "price": 670,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-07",
+   "no": "CZ1022",
+   "airline": "南方航空(CZ)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "06:20",
+   "arr": "09:45",
+   "dur": "3h25m",
+   "plane": "空客A320",
+   "price": 680,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-07",
+   "no": "HU1059",
+   "airline": "海南航空(HU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "07:05",
+   "arr": "10:20",
+   "dur": "3h15m",
+   "plane": "波音737-800",
+   "price": 730,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-07",
+   "no": "3U1096",
+   "airline": "四川航空(3U)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "07:40",
+   "arr": "11:00",
+   "dur": "3h20m",
+   "plane": "空客A321",
+   "price": 590,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": true
+  },
+  {
+   "date": "2026-10-07",
+   "no": "KY1133",
+   "airline": "昆明航空(KY)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "08:20",
+   "arr": "11:30",
+   "dur": "3h10m",
+   "plane": "波音787-9",
+   "price": 1080,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-07",
+   "no": "HO1170",
+   "airline": "吉祥航空(HO)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "09:15",
+   "arr": "12:45",
+   "dur": "3h30m",
+   "plane": "空客A330",
+   "price": 1130,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-07",
+   "no": "9C1207",
+   "airline": "春秋航空(9C)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "10:30",
+   "arr": "13:45",
+   "dur": "3h15m",
+   "plane": "波音737-800",
+   "price": 900,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": true
+  },
+  {
+   "date": "2026-10-07",
+   "no": "CA1244",
+   "airline": "中国国航(CA)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "11:45",
+   "arr": "15:05",
+   "dur": "3h20m",
+   "plane": "空客A320",
+   "price": 1350,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-07",
+   "no": "MU1281",
+   "airline": "东方航空(MU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "13:10",
+   "arr": "16:35",
+   "dur": "3h25m",
+   "plane": "波音787-9",
+   "price": 1440,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-07",
+   "no": "CZ1318",
+   "airline": "南方航空(CZ)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "14:25",
+   "arr": "17:35",
+   "dur": "3h10m",
+   "plane": "空客A321",
+   "price": 1350,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-07",
+   "no": "HU1355",
+   "airline": "海南航空(HU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "15:40",
+   "arr": "19:10",
+   "dur": "3h30m",
+   "plane": "波音737-800",
+   "price": 1280,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-07",
+   "no": "3U1392",
+   "airline": "四川航空(3U)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "16:55",
+   "arr": "20:10",
+   "dur": "3h15m",
+   "plane": "空客A320",
+   "price": 1180,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-07",
+   "no": "KY1429",
+   "airline": "昆明航空(KY)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "17:50",
+   "arr": "21:10",
+   "dur": "3h20m",
+   "plane": "波音787-9",
+   "price": 1120,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-07",
+   "no": "HO1466",
+   "airline": "吉祥航空(HO)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "18:05",
+   "arr": "21:30",
+   "dur": "3h25m",
+   "plane": "空客A321",
+   "price": 850,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-07",
+   "no": "9C1503",
+   "airline": "春秋航空(9C)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "19:30",
+   "arr": "22:40",
+   "dur": "3h10m",
+   "plane": "波音737-800",
+   "price": 840,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-07",
+   "no": "CA1540",
+   "airline": "中国国航(CA)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "21:50",
+   "arr": "01:20",
+   "dur": "3h30m",
+   "plane": "空客A320",
+   "price": 640,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-08",
+   "no": "HU1033",
+   "airline": "海南航空(HU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "06:20",
+   "arr": "09:45",
+   "dur": "3h25m",
+   "plane": "空客A320",
+   "price": 360,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": true
+  },
+  {
+   "date": "2026-10-08",
+   "no": "3U1070",
+   "airline": "四川航空(3U)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "07:05",
+   "arr": "10:20",
+   "dur": "3h15m",
+   "plane": "波音737-800",
+   "price": 510,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-08",
+   "no": "KY1107",
+   "airline": "昆明航空(KY)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "07:40",
+   "arr": "11:00",
+   "dur": "3h20m",
+   "plane": "空客A321",
+   "price": 560,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-08",
+   "no": "HO1144",
+   "airline": "吉祥航空(HO)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "08:20",
+   "arr": "11:30",
+   "dur": "3h10m",
+   "plane": "波音787-9",
+   "price": 530,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": true
+  },
+  {
+   "date": "2026-10-08",
+   "no": "9C1181",
+   "airline": "春秋航空(9C)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "09:15",
+   "arr": "12:45",
+   "dur": "3h30m",
+   "plane": "空客A330",
+   "price": 770,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-08",
+   "no": "CA1218",
+   "airline": "中国国航(CA)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "10:30",
+   "arr": "13:45",
+   "dur": "3h15m",
+   "plane": "波音737-800",
+   "price": 870,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-08",
+   "no": "MU1255",
+   "airline": "东方航空(MU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "11:45",
+   "arr": "15:05",
+   "dur": "3h20m",
+   "plane": "空客A320",
+   "price": 910,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-08",
+   "no": "CZ1292",
+   "airline": "南方航空(CZ)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "13:10",
+   "arr": "16:35",
+   "dur": "3h25m",
+   "plane": "波音787-9",
+   "price": 960,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-08",
+   "no": "HU1329",
+   "airline": "海南航空(HU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "14:25",
+   "arr": "17:35",
+   "dur": "3h10m",
+   "plane": "空客A321",
+   "price": 940,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-08",
+   "no": "3U1366",
+   "airline": "四川航空(3U)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "15:40",
+   "arr": "19:10",
+   "dur": "3h30m",
+   "plane": "波音737-800",
+   "price": 850,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-08",
+   "no": "KY1403",
+   "airline": "昆明航空(KY)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "16:55",
+   "arr": "20:10",
+   "dur": "3h15m",
+   "plane": "空客A320",
+   "price": 790,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-08",
+   "no": "HO1440",
+   "airline": "吉祥航空(HO)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "17:50",
+   "arr": "21:10",
+   "dur": "3h20m",
+   "plane": "波音787-9",
+   "price": 720,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-08",
+   "no": "9C1477",
+   "airline": "春秋航空(9C)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "18:05",
+   "arr": "21:30",
+   "dur": "3h25m",
+   "plane": "空客A321",
+   "price": 540,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-08",
+   "no": "CA1514",
+   "airline": "中国国航(CA)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "19:30",
+   "arr": "22:40",
+   "dur": "3h10m",
+   "plane": "波音737-800",
+   "price": 560,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-08",
+   "no": "MU1551",
+   "airline": "东方航空(MU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "21:50",
+   "arr": "01:20",
+   "dur": "3h30m",
+   "plane": "空客A320",
+   "price": 490,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-09",
+   "no": "3U1044",
+   "airline": "四川航空(3U)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "06:20",
+   "arr": "09:45",
+   "dur": "3h25m",
+   "plane": "空客A320",
+   "price": 340,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": true
+  },
+  {
+   "date": "2026-10-09",
+   "no": "KY1081",
+   "airline": "昆明航空(KY)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "07:05",
+   "arr": "10:20",
+   "dur": "3h15m",
+   "plane": "波音737-800",
+   "price": 480,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-09",
+   "no": "HO1118",
+   "airline": "吉祥航空(HO)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "07:40",
+   "arr": "11:00",
+   "dur": "3h20m",
+   "plane": "空客A321",
+   "price": 540,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-09",
+   "no": "9C1155",
+   "airline": "春秋航空(9C)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "08:20",
+   "arr": "11:30",
+   "dur": "3h10m",
+   "plane": "波音787-9",
+   "price": 730,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-09",
+   "no": "CA1192",
+   "airline": "中国国航(CA)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "09:15",
+   "arr": "12:45",
+   "dur": "3h30m",
+   "plane": "空客A330",
+   "price": 740,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-09",
+   "no": "MU1229",
+   "airline": "东方航空(MU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "10:30",
+   "arr": "13:45",
+   "dur": "3h15m",
+   "plane": "波音737-800",
+   "price": 860,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-09",
+   "no": "CZ1266",
+   "airline": "南方航空(CZ)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "11:45",
+   "arr": "15:05",
+   "dur": "3h20m",
+   "plane": "空客A320",
+   "price": 920,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-09",
+   "no": "HU1303",
+   "airline": "海南航空(HU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "13:10",
+   "arr": "16:35",
+   "dur": "3h25m",
+   "plane": "波音787-9",
+   "price": 990,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-09",
+   "no": "3U1340",
+   "airline": "四川航空(3U)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "14:25",
+   "arr": "17:35",
+   "dur": "3h10m",
+   "plane": "空客A321",
+   "price": 690,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": true
+  },
+  {
+   "date": "2026-10-09",
+   "no": "KY1377",
+   "airline": "昆明航空(KY)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "15:40",
+   "arr": "19:10",
+   "dur": "3h30m",
+   "plane": "波音737-800",
+   "price": 840,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-09",
+   "no": "HO1414",
+   "airline": "吉祥航空(HO)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "16:55",
+   "arr": "20:10",
+   "dur": "3h15m",
+   "plane": "空客A320",
+   "price": 830,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-09",
+   "no": "9C1451",
+   "airline": "春秋航空(9C)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "17:50",
+   "arr": "21:10",
+   "dur": "3h20m",
+   "plane": "波音787-9",
+   "price": 730,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-09",
+   "no": "CA1488",
+   "airline": "中国国航(CA)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "18:05",
+   "arr": "21:30",
+   "dur": "3h25m",
+   "plane": "空客A321",
+   "price": 590,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-09",
+   "no": "MU1525",
+   "airline": "东方航空(MU)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "19:30",
+   "arr": "22:40",
+   "dur": "3h10m",
+   "plane": "波音737-800",
+   "price": 560,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  },
+  {
+   "date": "2026-10-09",
+   "no": "CZ1562",
+   "airline": "南方航空(CZ)",
+   "from": "KMG",
+   "to": "BJS",
+   "dep": "21:50",
+   "arr": "01:20",
+   "dur": "3h30m",
+   "plane": "空客A320",
+   "price": 400,
+   "tax": 50,
+   "cabin": "经济舱",
+   "promo": false
+  }
+ ],
+ "hotels": [
+  {
+   "id": 904384,
+   "name": "北京中关村亚朵酒店",
+   "star": 5,
+   "score": 4.9,
+   "reviews": 1796,
+   "area": "中关村",
+   "room": "行政大床房",
+   "price": 840,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 903151,
+   "name": "北京亚运村康莱德酒店",
+   "star": 5,
+   "score": 4.9,
+   "reviews": 5279,
+   "area": "亚运村",
+   "room": "家庭房",
+   "price": 830,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 900685,
+   "name": "北京望京麗枫酒店",
+   "star": 5,
+   "score": 4.9,
+   "reviews": 3245,
+   "area": "望京",
+   "room": "大床房",
+   "price": 800,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 901918,
+   "name": "北京王府井馨乐庭酒店",
+   "star": 5,
+   "score": 4.9,
+   "reviews": 8762,
+   "area": "王府井",
+   "room": "商务双床房",
+   "price": 820,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 905617,
+   "name": "北京鸟巢丽亭酒店",
+   "star": 5,
+   "score": 4.9,
+   "reviews": 7313,
+   "area": "鸟巢",
+   "room": "高级双床间",
+   "price": 860,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 905069,
+   "name": "北京亚运村智选假日酒店",
+   "star": 4,
+   "score": 4.8,
+   "reviews": 4861,
+   "area": "亚运村",
+   "room": "行政大床房",
+   "price": 470,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 901370,
+   "name": "北京亦庄万豪酒店",
+   "star": 4,
+   "score": 4.8,
+   "reviews": 6310,
+   "area": "亦庄",
+   "room": "大床房",
+   "price": 430,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 900137,
+   "name": "北京国贸CBD汉庭酒店",
+   "star": 4,
+   "score": 4.8,
+   "reviews": 793,
+   "area": "国贸CBD",
+   "room": "高级双床间",
+   "price": 420,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 902603,
+   "name": "北京望京君亭酒店",
+   "star": 4,
+   "score": 4.8,
+   "reviews": 2827,
+   "area": "望京",
+   "room": "商务双床房",
+   "price": 440,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 903836,
+   "name": "北京王府井如家酒店",
+   "star": 4,
+   "score": 4.8,
+   "reviews": 8344,
+   "area": "王府井",
+   "room": "家庭房",
+   "price": 460,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 903288,
+   "name": "北京亦庄诺富特酒店",
+   "star": 2,
+   "score": 4.7,
+   "reviews": 5892,
+   "area": "亦庄",
+   "room": "商务双床房",
+   "price": 170,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 902055,
+   "name": "北京国贸CBD和颐酒店",
+   "star": 2,
+   "score": 4.7,
+   "reviews": 375,
+   "area": "国贸CBD",
+   "room": "大床房",
+   "price": 130,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 904521,
+   "name": "北京望京麗枫酒店",
+   "star": 2,
+   "score": 4.7,
+   "reviews": 2409,
+   "area": "望京",
+   "room": "家庭房",
+   "price": 210,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 905754,
+   "name": "北京王府井馨乐庭酒店",
+   "star": 2,
+   "score": 4.7,
+   "reviews": 7926,
+   "area": "王府井",
+   "room": "行政大床房",
+   "price": 240,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 900822,
+   "name": "北京首都机场维也纳酒店",
+   "star": 2,
+   "score": 4.7,
+   "reviews": 3858,
+   "area": "首都机场",
+   "room": "高级双床间",
+   "price": 270,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 900274,
+   "name": "北京三里屯全季酒店",
+   "star": 4,
+   "score": 4.6,
+   "reviews": 1406,
+   "area": "三里屯",
+   "room": "行政大床房",
+   "price": 510,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 901507,
+   "name": "北京丰台科技园索菲特酒店",
+   "star": 4,
+   "score": 4.6,
+   "reviews": 6923,
+   "area": "丰台科技园",
+   "room": "高级双床间",
+   "price": 530,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 905206,
+   "name": "北京亦庄万豪酒店",
+   "star": 4,
+   "score": 4.6,
+   "reviews": 5474,
+   "area": "亦庄",
+   "room": "家庭房",
+   "price": 570,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 903973,
+   "name": "北京国贸CBD汉庭酒店",
+   "star": 4,
+   "score": 4.6,
+   "reviews": 8957,
+   "area": "国贸CBD",
+   "room": "商务双床房",
+   "price": 550,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 902740,
+   "name": "北京首都机场喆啡酒店",
+   "star": 4,
+   "score": 4.6,
+   "reviews": 3440,
+   "area": "首都机场",
+   "room": "大床房",
+   "price": 540,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 902192,
+   "name": "北京三里屯格林豪泰酒店",
+   "star": 5,
+   "score": 4.5,
+   "reviews": 988,
+   "area": "三里屯",
+   "room": "高级双床间",
+   "price": 1010,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 903425,
+   "name": "北京丰台科技园华美达酒店",
+   "star": 5,
+   "score": 4.5,
+   "reviews": 6505,
+   "area": "丰台科技园",
+   "room": "大床房",
+   "price": 1020,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 900959,
+   "name": "北京北京南站锦江之星酒店",
+   "star": 5,
+   "score": 4.5,
+   "reviews": 4471,
+   "area": "北京南站",
+   "room": "行政大床房",
+   "price": 1000,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 905891,
+   "name": "北京国贸CBD和颐酒店",
+   "star": 5,
+   "score": 4.5,
+   "reviews": 8539,
+   "area": "国贸CBD",
+   "room": "家庭房",
+   "price": 1050,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 904658,
+   "name": "北京首都机场维也纳酒店",
+   "star": 5,
+   "score": 4.5,
+   "reviews": 3022,
+   "area": "首都机场",
+   "room": "商务双床房",
+   "price": 1040,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 904110,
+   "name": "北京三里屯全季酒店",
+   "star": 2,
+   "score": 4.4,
+   "reviews": 570,
+   "area": "三里屯",
+   "room": "大床房",
+   "price": 140,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 905343,
+   "name": "北京丰台科技园索菲特酒店",
+   "star": 2,
+   "score": 4.4,
+   "reviews": 6087,
+   "area": "丰台科技园",
+   "room": "商务双床房",
+   "price": 180,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 902877,
+   "name": "北京北京南站尚客优酒店",
+   "star": 2,
+   "score": 4.4,
+   "reviews": 4053,
+   "area": "北京南站",
+   "room": "高级双床间",
+   "price": 270,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 901644,
+   "name": "北京天安门凯宾斯基酒店",
+   "star": 2,
+   "score": 4.4,
+   "reviews": 7536,
+   "area": "天安门",
+   "room": "行政大床房",
+   "price": 230,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 900411,
+   "name": "北京西单桔子酒店",
+   "star": 2,
+   "score": 4.4,
+   "reviews": 2019,
+   "area": "西单",
+   "room": "家庭房",
+   "price": 200,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 901096,
+   "name": "北京五道口希尔顿欢朋酒店",
+   "star": 5,
+   "score": 4.3,
+   "reviews": 5084,
+   "area": "五道口",
+   "room": "家庭房",
+   "price": 1100,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 904795,
+   "name": "北京北京南站锦江之星酒店",
+   "star": 5,
+   "score": 4.3,
+   "reviews": 3635,
+   "area": "北京南站",
+   "room": "大床房",
+   "price": 1140,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 903562,
+   "name": "北京天安门美居酒店",
+   "star": 5,
+   "score": 4.3,
+   "reviews": 7118,
+   "area": "天安门",
+   "room": "高级双床间",
+   "price": 1120,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 902329,
+   "name": "北京西单城市便捷酒店",
+   "star": 5,
+   "score": 4.3,
+   "reviews": 1601,
+   "area": "西单",
+   "room": "行政大床房",
+   "price": 1110,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 900548,
+   "name": "北京中关村亚朵酒店",
+   "star": 5,
+   "score": 4.2,
+   "reviews": 2632,
+   "area": "中关村",
+   "room": "商务双床房",
+   "price": 710,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 903014,
+   "name": "北京五道口派柏云酒店",
+   "star": 5,
+   "score": 4.2,
+   "reviews": 4666,
+   "area": "五道口",
+   "room": "行政大床房",
+   "price": 730,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 905480,
+   "name": "北京天安门凯宾斯基酒店",
+   "star": 5,
+   "score": 4.2,
+   "reviews": 6700,
+   "area": "天安门",
+   "room": "大床房",
+   "price": 760,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 904247,
+   "name": "北京西单桔子酒店",
+   "star": 5,
+   "score": 4.2,
+   "reviews": 1183,
+   "area": "西单",
+   "room": "高级双床间",
+   "price": 750,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 901781,
+   "name": "北京鸟巢丽亭酒店",
+   "star": 5,
+   "score": 4.2,
+   "reviews": 8149,
+   "area": "鸟巢",
+   "room": "家庭房",
+   "price": 720,
+   "tags": [
+    "免费取消"
+   ]
+  },
+  {
+   "id": 902466,
+   "name": "北京中关村开元名都酒店",
+   "star": 2,
+   "score": 4.1,
+   "reviews": 2214,
+   "area": "中关村",
+   "room": "家庭房",
+   "price": 200,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 904932,
+   "name": "北京五道口希尔顿欢朋酒店",
+   "star": 2,
+   "score": 4.1,
+   "reviews": 4248,
+   "area": "五道口",
+   "room": "高级双床间",
+   "price": 280,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 901233,
+   "name": "北京亚运村智选假日酒店",
+   "star": 2,
+   "score": 4.1,
+   "reviews": 5697,
+   "area": "亚运村",
+   "room": "商务双床房",
+   "price": 160,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 900000,
+   "name": "北京王府井如家酒店",
+   "star": 2,
+   "score": 4.1,
+   "reviews": 180,
+   "area": "王府井",
+   "room": "大床房",
+   "price": 130,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  },
+  {
+   "id": 903699,
+   "name": "北京鸟巢朗廷酒店",
+   "star": 2,
+   "score": 4.1,
+   "reviews": 7731,
+   "area": "鸟巢",
+   "room": "行政大床房",
+   "price": 240,
+   "tags": [
+    "免费取消",
+    "包早餐"
+   ]
+  }
+ ]
+};

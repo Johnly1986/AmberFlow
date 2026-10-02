@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>携程旅行网：酒店预订,机票预订查询,旅游度假</title>
+<link rel="stylesheet" href="ctrip.css">
+</head>
+<body data-page="home">
+<header class="ct-header">
+  <span class="logo">携程旅行</span>
+  <nav><a href="ct_home.html" class="on">首页</a><a href="flights.html">机票</a><a href="hotels.html">酒店</a></nav>
+</header>
+<main>
+  <h1 data-test="page-title">携程旅行 · 本地复刻站</h1>
+  <div class="card">
+    <p class="meta">这是用例「携程搜票 + 订酒店」的本地复刻站：交互路径与列表页结构照携程写，
+      数据由 <code>ctrip/data.py</code> 生成。线上真实站点的可达性见
+      <code>ctrip/results/live_probe.json</code>。</p>
+  </div>
+  <div class="entry">
+    <a data-test="entry-flight" href="flights.html"><b>机票</b>昆明 → 北京，单程</a>
+    <a data-test="entry-hotel" href="hotels.html"><b>酒店</b>北京，出发当日入住</a>
+  </div>
+</main>
+<script src="ctrip_data.js"></script>
+<script src="site.js"></script>
+</body>
+</html>

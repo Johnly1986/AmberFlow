@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>枪机录入 - Example Shop</title>
+<style>body{font-family:sans-serif;max-width:560px;margin:40px auto}
+header a{font-weight:bold;text-decoration:none;color:#111}
+label{display:block;margin-top:12px;font-weight:600}
+input,select{width:100%;padding:6px;margin-top:4px;box-sizing:border-box}
+.err{color:#c00;font-size:13px;min-height:18px}
+button{margin-top:16px;padding:8px 20px}</style>
+</head>
+<body>
+<header><a data-test="logo" href="portal.html">设备管理系统</a></header>
+<main>
+  <h1>枪机 / 筒机 录入</h1>
+  <form onsubmit="return submitA(event)">
+    <label>序列号 <input data-test="a-serial" required></label>
+    <label>型号 <input data-test="a-model" required></label>
+    <label>分辨率
+      <select data-test="a-resolution">
+        <option value="">请选择</option><option>1080P</option>
+        <option>4MP</option><option>4K</option>
+      </select></label>
+    <label>镜头焦距(mm) <input data-test="a-focal" type="number" step="0.1" required></label>
+    <label>IP 地址 <input data-test="a-ip" required></label>
+    <label>安装位置 <input data-test="a-location" required></label>
+    <p class="err" data-test="a-error"></p>
+    <button type="submit" data-test="a-submit">提交录入</button>
+  </form>
+</main>
+<script>
+function submitA(e){
+  e.preventDefault();
+  const err = document.querySelector("[data-test='a-error']");
+  const serial = document.querySelector("[data-test='a-serial']").value.trim();
+  if(!/^CAM-?\d{4,}$/.test(serial)){ err.textContent = "序列号格式错误(应为 CAM-XXXX)"; return false; }
+  err.textContent = "";
+  const q = new URLSearchParams({serial: serial, form: "A"});
+  location.href = "entry_success.html?" + q.toString();
+  return false;
+}
+</script>
+</body>
+</html>

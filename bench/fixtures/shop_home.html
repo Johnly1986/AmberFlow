@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Acme Store - TrailBottle 750ml</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:40px auto}header a{font-weight:bold;text-decoration:none;color:#111;margin-right:14px}.badge{background:#06c;color:#fff;border-radius:10px;padding:1px 8px;margin-left:4px}button,a.btn,input{padding:8px 12px;margin:6px 4px}</style>
+</head>
+<body>
+<header><a data-test="logo" href="shop_home.html">Acme Store</a>
+  <a data-test="cart-link" href="shop_cart.html">Cart<span class="badge" data-test="cart-count">0</span></a></header>
+<main>
+  <h1>TrailBottle 750ml</h1>
+  <p>$19.50. In stock. Insulated steel bottle, matte black.</p>
+  <button data-test="add-to-cart">Add to cart</button>
+  <input data-test="search-box" placeholder="Search products">
+  <a data-test="product-title" href="shop_home.html">TrailBottle 750ml</a>
+</main>
+<script>
+document.querySelector("[data-test='add-to-cart']").addEventListener("click", function () {
+  const b = document.querySelector("[data-test='cart-count']");
+  b.textContent = parseInt(b.textContent) + 1;
+  this.textContent = "Added ✓";
+});
+</script>
+</body>
+</html>

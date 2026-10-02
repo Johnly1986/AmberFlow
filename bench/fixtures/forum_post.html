@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>社区论坛 - 发帖</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:40px auto}
+label{display:block;margin-top:12px;font-weight:600}
+input,textarea,select{width:100%;padding:6px;box-sizing:border-box}
+button{margin-top:16px;padding:8px 20px}.err{color:#c00;min-height:18px}</style>
+</head>
+<body>
+<main>
+  <h1>发布新帖</h1>
+  <form onsubmit="return post(event)">
+    <label>标题 <input data-test="f-title" required></label>
+    <label>正文 <textarea data-test="f-body" rows="4"></textarea></label>
+    <label>板块
+      <select data-test="f-board"><option value="">请选择</option><option>技术交流</option><option>生活分享</option></select></label>
+    <p class="err" data-test="f-error"></p>
+    <button type="submit" data-test="f-submit">发布</button>
+  </form>
+</main>
+<script>
+function post(e){
+  e.preventDefault();
+  const err = document.querySelector("[data-test='f-error']");
+  const t = document.querySelector("[data-test='f-title']").value.trim();
+  if(t.length < 5){ err.textContent = "标题太短(至少5个字)"; return false; }
+  location.href = "forum_done.html?" + new URLSearchParams({title: t});
+  return false;
+}
+</script>
+</body>
+</html>

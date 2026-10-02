@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>登记表单</title>
+<style>body{font-family:sans-serif;margin:16px}label{display:block;margin:8px 0}</style></head>
+<body>
+<form>
+  <label>序列号 <input data-test="f-serial" name="serial"></label>
+  <label>安装点位 <input data-test="f-spot" name="spot"></label>
+  <button data-test="f-submit" type="submit">提交</button>
+  <p data-test="done-title"></p>
+</form>
+<script>
+document.querySelector("form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  document.querySelector("[data-test='done-title']").textContent =
+    "已登记 " + document.querySelector("[data-test='f-serial']").value;
+});
+</script>
+</body></html>

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>FareHaven · stays</title><link rel="stylesheet" href="style.css"></head>
+<body data-page="hotels">
+<header class="fh-top"><span class="brand">FAREHAVEN</span>
+  <nav><a id="nav-home" href="index.html">Home</a>
+       <a id="nav-flights" href="flights.html">Flights</a>
+       <a id="nav-hotels" href="hotels.html" class="on">Stays</a></nav></header>
+<main>
+  <h1 id="page-title">Stays · Beijing</h1>
+  <section class="card">
+    <div class="row">
+      <label>Max price per night<select id="cap" name="cap"></select></label>
+      <label>Sort<select id="sort" name="sort"></select></label>
+    </div>
+    <p class="state"><span id="cap-state">Max price: no limit</span> ·
+      <span id="sort-state">Sort: Recommended</span> ·
+      <span id="row-count">0 stays</span></p>
+  </section>
+  <section class="card">
+    <button id="record-all" type="button" class="primary">Record every stay shown</button>
+    <p id="log" class="log"></p>
+    <table id="ledger-table">
+      <thead><tr><th>#</th><th>Stay</th><th>Stars</th><th>Score</th><th>Area</th><th>Rate</th></tr></thead><tbody></tbody>
+    </table>
+  </section>
+  <section class="card">
+    <table id="stays">
+      <thead><tr><th>Stay</th><th>Stars</th><th>Score</th><th>Area</th><th>Room</th><th>Rate</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+<script src="data6.js"></script><script src="site6.js"></script>
+</body></html>

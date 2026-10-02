@@ -1,0 +1,431 @@
+{
+  "goal": "我下周要去北京出差，周一至周五都可以，从昆明出发。搜索早8点至晚6点最低价的机票并记录。另外再搜索出发当日价格300以内的酒店记录",
+  "dates": [
+    "2026-10-05",
+    "2026-10-06",
+    "2026-10-07",
+    "2026-10-08",
+    "2026-10-09"
+  ],
+  "checkin": "2026-10-08",
+  "blocked": null,
+  "records": {
+    "flights": [
+      {
+        "date": "2026-10-05",
+        "no": "CA1296",
+        "airline": "中国国航(CA)",
+        "dep": "14:25",
+        "arr": "17:35",
+        "price": 1030,
+        "window": "08:00-18:00",
+        "sort": "价格从低到高"
+      },
+      {
+        "date": "2026-10-06",
+        "no": "HO1196",
+        "airline": "吉祥航空(HO)",
+        "dep": "10:30",
+        "arr": "13:45",
+        "price": 910,
+        "window": "08:00-18:00",
+        "sort": "价格从低到高"
+      },
+      {
+        "date": "2026-10-07",
+        "no": "9C1207",
+        "airline": "春秋航空(9C)",
+        "dep": "10:30",
+        "arr": "13:45",
+        "price": 900,
+        "window": "08:00-18:00",
+        "sort": "价格从低到高"
+      },
+      {
+        "date": "2026-10-08",
+        "no": "HO1144",
+        "airline": "吉祥航空(HO)",
+        "dep": "08:20",
+        "arr": "11:30",
+        "price": 530,
+        "window": "08:00-18:00",
+        "sort": "价格从低到高"
+      },
+      {
+        "date": "2026-10-09",
+        "no": "3U1340",
+        "airline": "四川航空(3U)",
+        "dep": "14:25",
+        "arr": "17:35",
+        "price": 690,
+        "window": "08:00-18:00",
+        "sort": "价格从低到高"
+      }
+    ],
+    "hotels": [
+      {
+        "id": 902055,
+        "name": "北京国贸CBD和颐酒店",
+        "star": 2,
+        "score": 4.7,
+        "area": "国贸CBD",
+        "room": "大床房",
+        "price": 130,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 900000,
+        "name": "北京王府井如家酒店",
+        "star": 2,
+        "score": 4.1,
+        "area": "王府井",
+        "room": "大床房",
+        "price": 130,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 904110,
+        "name": "北京三里屯全季酒店",
+        "star": 2,
+        "score": 4.4,
+        "area": "三里屯",
+        "room": "大床房",
+        "price": 140,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 901233,
+        "name": "北京亚运村智选假日酒店",
+        "star": 2,
+        "score": 4.1,
+        "area": "亚运村",
+        "room": "商务双床房",
+        "price": 160,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 903288,
+        "name": "北京亦庄诺富特酒店",
+        "star": 2,
+        "score": 4.7,
+        "area": "亦庄",
+        "room": "商务双床房",
+        "price": 170,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 905343,
+        "name": "北京丰台科技园索菲特酒店",
+        "star": 2,
+        "score": 4.4,
+        "area": "丰台科技园",
+        "room": "商务双床房",
+        "price": 180,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 900411,
+        "name": "北京西单桔子酒店",
+        "star": 2,
+        "score": 4.4,
+        "area": "西单",
+        "room": "家庭房",
+        "price": 200,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 902466,
+        "name": "北京中关村开元名都酒店",
+        "star": 2,
+        "score": 4.1,
+        "area": "中关村",
+        "room": "家庭房",
+        "price": 200,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 904521,
+        "name": "北京望京麗枫酒店",
+        "star": 2,
+        "score": 4.7,
+        "area": "望京",
+        "room": "家庭房",
+        "price": 210,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 901644,
+        "name": "北京天安门凯宾斯基酒店",
+        "star": 2,
+        "score": 4.4,
+        "area": "天安门",
+        "room": "行政大床房",
+        "price": 230,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 905754,
+        "name": "北京王府井馨乐庭酒店",
+        "star": 2,
+        "score": 4.7,
+        "area": "王府井",
+        "room": "行政大床房",
+        "price": 240,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 903699,
+        "name": "北京鸟巢朗廷酒店",
+        "star": 2,
+        "score": 4.1,
+        "area": "鸟巢",
+        "room": "行政大床房",
+        "price": 240,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 900822,
+        "name": "北京首都机场维也纳酒店",
+        "star": 2,
+        "score": 4.7,
+        "area": "首都机场",
+        "room": "高级双床间",
+        "price": 270,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 902877,
+        "name": "北京北京南站尚客优酒店",
+        "star": 2,
+        "score": 4.4,
+        "area": "北京南站",
+        "room": "高级双床间",
+        "price": 270,
+        "checkin": "2026-10-08"
+      },
+      {
+        "id": 904932,
+        "name": "北京五道口希尔顿欢朋酒店",
+        "star": 2,
+        "score": 4.1,
+        "area": "五道口",
+        "room": "高级双床间",
+        "price": 280,
+        "checkin": "2026-10-08"
+      }
+    ]
+  },
+  "verify": {
+    "checks": [
+      {
+        "what": "2026-10-05 区间内最低价航班",
+        "ok": true,
+        "expected": "CA1296 14:25 ¥1030",
+        "recorded": "CA1296 14:25 ¥1030"
+      },
+      {
+        "what": "2026-10-06 区间内最低价航班",
+        "ok": true,
+        "expected": "HO1196 10:30 ¥910",
+        "recorded": "HO1196 10:30 ¥910"
+      },
+      {
+        "what": "2026-10-07 区间内最低价航班",
+        "ok": true,
+        "expected": "9C1207 10:30 ¥900",
+        "recorded": "9C1207 10:30 ¥900"
+      },
+      {
+        "what": "2026-10-08 区间内最低价航班",
+        "ok": true,
+        "expected": "HO1144 08:20 ¥530",
+        "recorded": "HO1144 08:20 ¥530"
+      },
+      {
+        "what": "2026-10-09 区间内最低价航班",
+        "ok": true,
+        "expected": "3U1340 14:25 ¥690",
+        "recorded": "3U1340 14:25 ¥690"
+      },
+      {
+        "what": "周一至周五的最低价（决定出发当日）",
+        "ok": true,
+        "expected": "2026-10-08 HO1144 ¥530",
+        "recorded": "2026-10-08 HO1144 ¥530"
+      },
+      {
+        "what": "2026-10-08 入住、¥300以内酒店（数量/集合/价格升序）",
+        "ok": true,
+        "expected": "15 家 ¥130-¥280",
+        "recorded": "15 家 ¥130-¥280"
+      }
+    ],
+    "ok": true,
+    "departure_date": "2026-10-08",
+    "oracle_date": "2026-10-08",
+    "checkin": "2026-10-08"
+  },
+  "audit": {
+    "verdict": "APPROVE",
+    "reasons": [
+      "trace clean, goal signal present"
+    ],
+    "auditor": "mock"
+  },
+  "hints": true,
+  "route_models": false,
+  "steps": [
+    {
+      "step": 1,
+      "desc": "click a \"机票\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click a \"08:00-18:00\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click a \"价格从低到高\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click button \"记录当前列表最低价航班\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click a \"08:00-18:00\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click a \"价格从低到高\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click button \"记录当前列表最低价航班\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click a \"08:00-18:00\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click a \"价格从低到高\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click button \"记录当前列表最低价航班\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click a \"08:00-18:00\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click a \"价格从低到高\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click button \"记录当前列表最低价航班\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click a \"08:00-18:00\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click a \"价格从低到高\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click button \"记录当前列表最低价航班\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click a \"¥300以下\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click a \"价格从低到高\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    },
+    {
+      "step": 1,
+      "desc": "click button \"记录当前列表全部酒店\"",
+      "how": "clicked",
+      "method": "rule:match",
+      "conf": 1.0,
+      "inert": false
+    }
+  ]
+}

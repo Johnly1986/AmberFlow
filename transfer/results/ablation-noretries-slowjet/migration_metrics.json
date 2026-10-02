@@ -1,0 +1,462 @@
+{
+  "goal": "我下周要去北京出差，周一至周五都可以，从昆明出发。搜索早8点至晚6点最低价的机票并记录。另外再搜索出发当日价格300以内的酒店记录",
+  "metrics": {
+    "baseline": "ctrip/ctrip_task.py 手写计划（未经配置）",
+    "sites": {
+      "ctrip": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 18
+        },
+        "desc_identical_raw": "18/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 0,
+          "signal": 0,
+          "start_url": 0
+        },
+        "extra_roles": {},
+        "extra_subgoals": 0,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 1
+        },
+        "collect_roles": [
+          "record_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 19
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ]
+        },
+        "language": "zh-CN",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/ctrip.json"
+      },
+      "farehaven": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 18
+        },
+        "desc_identical_raw": "16/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 18,
+          "signal": 18,
+          "start_url": 18
+        },
+        "extra_roles": {
+          "dismiss_promo": 5
+        },
+        "extra_subgoals": 5,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 1
+        },
+        "collect_roles": [
+          "record_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 24
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "flights[per_date]×4",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ]
+        },
+        "language": "en",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/farehaven.json"
+      },
+      "flyquest": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 29
+        },
+        "desc_identical_raw": "15/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 18,
+          "signal": 18,
+          "start_url": 18
+        },
+        "extra_roles": {},
+        "extra_subgoals": 0,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 1
+        },
+        "collect_roles": [
+          "record_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 19
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ]
+        },
+        "language": "en",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/flyquest.json"
+      },
+      "skybook": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 18
+        },
+        "desc_identical_raw": "15/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 18,
+          "signal": 18,
+          "start_url": 18
+        },
+        "extra_roles": {},
+        "extra_subgoals": 0,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 5
+        },
+        "collect_roles": [
+          "select_all",
+          "record_page",
+          "next_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 23
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×5"
+          ]
+        },
+        "language": "en",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/skybook.json"
+      },
+      "slowjet": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 18
+        },
+        "desc_identical_raw": "15/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 18,
+          "signal": 18,
+          "start_url": 18
+        },
+        "extra_roles": {},
+        "extra_subgoals": 0,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 1
+        },
+        "collect_roles": [
+          "record_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 19
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ]
+        },
+        "language": "en",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/slowjet.json"
+      },
+      "trekly": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 18
+        },
+        "desc_identical_raw": "15/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 18,
+          "signal": 18,
+          "start_url": 18
+        },
+        "extra_roles": {},
+        "extra_subgoals": 0,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 1
+        },
+        "collect_roles": [
+          "record_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 19
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ]
+        },
+        "language": "en",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/trekly.json"
+      },
+      "voyagio": {
+        "shared_roles": 18,
+        "actions": {
+          "baseline": 18,
+          "other": 23
+        },
+        "desc_identical_raw": "15/18",
+        "desc_identical_normalized": "18/18",
+        "normalized_away": [
+          "日期/星期",
+          "站点名",
+          "价格上限说法(¥300以下/¥300)"
+        ],
+        "fields_changed": {
+          "target_hint": 18,
+          "signal": 18,
+          "start_url": 18
+        },
+        "extra_roles": {
+          "filter_window_apply": 5
+        },
+        "extra_subgoals": 5,
+        "collect_steps": {
+          "baseline": 1,
+          "other": 1
+        },
+        "collect_roles": [
+          "record_page"
+        ],
+        "subgoals": {
+          "baseline": 19,
+          "other": 24
+        },
+        "shape": {
+          "baseline": [
+            "entry[once]×1",
+            "flights[per_date]×3",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ],
+          "other": [
+            "entry[once]×1",
+            "wizard_date[per_date]×1",
+            "wizard_options[per_date]×1",
+            "results[per_date]×2",
+            "hotel[per_checkin]×2",
+            "collect[per_checkin]×1"
+          ]
+        },
+        "language": "en",
+        "spec": "/root/ML/LayaWebUse/transfer/specs/voyagio.json"
+      }
+    }
+  },
+  "runs": [
+    {
+      "site": "slowjet",
+      "profile": "slowjet-replica7",
+      "language": "en",
+      "spec": "/root/ML/LayaWebUse/transfer/specs/slowjet.json",
+      "dates": [
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-09"
+      ],
+      "checkin": null,
+      "records": {
+        "flights": [],
+        "hotels": [],
+        "skipped": 0,
+        "retried": 0
+      },
+      "skipped": 0,
+      "retried": 0,
+      "dropped_when": false,
+      "dropped_retries": true,
+      "verify": {
+        "checks": [
+          {
+            "what": "2026-10-05 区间内最低价航班",
+            "ok": false,
+            "expected": "DR871 17:20 ¥600",
+            "recorded": "未记录"
+          },
+          {
+            "what": "2026-10-06 区间内最低价航班",
+            "ok": false,
+            "expected": "AV808 12:55 ¥580",
+            "recorded": "未记录"
+          },
+          {
+            "what": "2026-10-07 区间内最低价航班",
+            "ok": false,
+            "expected": "QK764 08:25 ¥510",
+            "recorded": "未记录"
+          },
+          {
+            "what": "2026-10-08 区间内最低价航班",
+            "ok": false,
+            "expected": "SJ815 11:20 ¥560",
+            "recorded": "未记录"
+          },
+          {
+            "what": "2026-10-09 区间内最低价航班",
+            "ok": false,
+            "expected": "PL942 17:55 ¥540",
+            "recorded": "未记录"
+          },
+          {
+            "what": "周一至周五的最低价（决定出发当日）",
+            "ok": false,
+            "expected": "2026-10-07 QK764 ¥510",
+            "recorded": "未选出"
+          },
+          {
+            "what": "2026-10-07 入住、¥300以内酒店（数量/集合/价格升序）",
+            "ok": false,
+            "expected": "10 家 ¥155-¥285",
+            "recorded": "0 家"
+          }
+        ],
+        "ok": false,
+        "departure_date": null,
+        "oracle_date": "2026-10-07",
+        "checkin": null
+      },
+      "blocked": "low confidence 0.16 < floor 0.25 on step 1",
+      "audit": {
+        "verdict": "REJECT",
+        "reasons": [
+          "goal-completion signal never fired"
+        ],
+        "auditor": "mock"
+      },
+      "subgoals": 16
+    }
+  ],
+  "steps": {
+    "slowjet": [
+      {
+        "step": 1,
+        "desc": "click a \"Flights\"",
+        "how": "clicked",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Any time / Departure window Any time 00:\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      },
+      {
+        "step": 1,
+        "desc": "type text into select \"Recommended / Sort Recommended price (lo\"",
+        "how": "filled",
+        "method": "rule:match",
+        "conf": 1.0
+      }
+    ]
+  }
+}

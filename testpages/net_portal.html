@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>摄像头网络管理</title>
+<style>body{font-family:sans-serif;max-width:760px;margin:32px auto}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px;text-align:left}</style></head>
+<body>
+<h1>摄像头网络管理</h1>
+<p>点击「网络设置」进入对应设备的配置页。</p>
+<!-- Four cameras, and every row's link reads exactly "网络设置": the same
+     duplicate-label grid the real camera web UIs show. Only data-test (or the
+     frozen plan's target_hint) tells them apart. -->
+<table>
+  <thead><tr><th>序列号</th><th>当前 IP</th><th>型号</th><th>操作</th></tr></thead>
+  <tbody>
+    <tr><td>CAM-1001</td><td>10.0.0.11</td><td>DS-2CD1143</td>
+        <td><a data-test="net-CAM-1001" href="net_settings.html?sn=CAM-1001">网络设置</a></td></tr>
+    <tr><td>CAM-1002</td><td>10.0.0.12</td><td>DS-2CD1143</td>
+        <td><a data-test="net-CAM-1002" href="net_settings.html?sn=CAM-1002">网络设置</a></td></tr>
+    <tr><td>PTZ-2001</td><td>10.0.0.21</td><td>SD49425</td>
+        <td><a data-test="net-PTZ-2001" href="net_settings.html?sn=PTZ-2001">网络设置</a></td></tr>
+    <tr><td>CAM-1003</td><td>10.0.0.13</td><td>DS-2CD1021</td>
+        <td><a data-test="net-CAM-1003" href="net_settings.html?sn=CAM-1003">网络设置</a></td></tr>
+  </tbody>
+</table>
+</body></html>

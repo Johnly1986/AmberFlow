@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Trekly · flights Kunming to Beijing</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-page="flights">
+<header class="tk-top">
+  <span class="brand">TREKLY</span>
+  <nav><a id="nav-home" href="index.html">Home</a>
+       <a id="nav-flights" href="flights.html" class="here">Flights</a>
+       <a id="nav-hotels" href="hotels.html">Stays</a></nav>
+</header>
+<main>
+  <h1 id="page-title">Flights · one way</h1>
+  <section class="panel">
+    <div class="row">
+      <label for="dep-window">Departure window</label>
+      <select id="dep-window" name="window"></select>
+      <label for="sort-by">Sort</label>
+      <select id="sort-by" name="sort"></select>
+    </div>
+    <p class="state"><span id="window-state">Departure window: Any time</span> ·
+      <span id="sort-state">Sort: Recommended</span> ·
+      <span id="row-count">0 fares</span></p>
+  </section>
+  <section class="panel">
+    <button id="record-cheapest" type="button" class="primary">Record cheapest shown</button>
+    <p id="log" class="log"></p>
+    <table id="ledger-table">
+      <thead><tr><th>Date</th><th>Flight</th><th>Times</th><th>Fare</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+  <section class="panel">
+    <table id="fares">
+      <thead><tr><th>Departs</th><th>Arrives</th><th>Flight</th><th>Duration</th><th>Aircraft</th><th>Fare</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+<script src="data3.js"></script>
+<script src="site3.js"></script>
+</body>
+</html>

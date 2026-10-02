@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "laya Quick Action Picker",
+  "version": "0.1.0",
+  "description": "Press Ctrl+Shift+K: laya picks the best next action on the current page via a local model server.",
+  "permissions": ["activeTab"],
+  "host_permissions": ["http://127.0.0.1:8765/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "trigger-picker": {
+      "suggested_key": { "default": "Ctrl+Shift+K" },
+      "description": "Ask laya what to do on this page"
+    }
+  }
+}

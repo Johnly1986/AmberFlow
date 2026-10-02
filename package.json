@@ -1,0 +1,42 @@
+{
+  "name": "layawebuse",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "冻结计划的浏览器自动化中间件：LLM 只规划一次，laya 逐步执行，完成只认 DOM 信号",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "parity": "node --experimental-strip-types tools/parity.ts",
+    "parity:extraction": "node --experimental-strip-types tools/extraction-parity.ts",
+    "parity:executor": "node --experimental-strip-types tools/executor-parity.ts",
+    "parity:datasource": "node --experimental-strip-types tools/datasource-parity.ts",
+    "parity:ctrip": "node --experimental-strip-types tools/ctrip-parity.ts",
+    "parity:transfer": "node --experimental-strip-types tools/transfer-parity.ts",
+    "test:parity": "npm run parity && npm run parity:extraction && npm run parity:executor && npm run parity:datasource && npm run parity:ctrip && npm run parity:transfer",
+    "verify": "npm run typecheck && npm test && npm run test:parity",
+    "bench": "node --experimental-strip-types src/bench.ts",
+    "bench:fixtures": "node --experimental-strip-types src/bench.ts --fixtures-only --mode-tag smoke --out bench/results",
+    "plan-cli": "node --experimental-strip-types tools/plan_cli.ts",
+    "shortlist": "node --experimental-strip-types tools/shortlist_demo.ts",
+    "qunar": "node --experimental-strip-types src/qunar-task.ts",
+    "ip-config": "node --experimental-strip-types src/ip-config.ts",
+    "camera-entry": "node --experimental-strip-types src/camera-entry.ts",
+    "picker-server": "node --experimental-strip-types src/picker-server.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "playwright": "1.58.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
+    "exceljs": "^4.4.0",
+    "onnxruntime-node": "^1.30.0"
+  }
+}

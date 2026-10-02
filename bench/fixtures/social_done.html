@@ -1,0 +1,8 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>DevBook - Posted</title><style>body{font-family:sans-serif;max-width:520px;margin:40px auto}</style></head>
+<body><main><h1 data-test="post-ok">Posted!</h1><p data-test="post-text"></p></main>
+<script>document.querySelector("[data-test='post-text']").textContent =
+  new URLSearchParams(location.search).get("post") || "";</script>
+</body>
+</html>

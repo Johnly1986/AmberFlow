@@ -1,0 +1,67 @@
+{
+  "name": "ctrip-hotels-pc",
+  "label": "携程酒店列表（PC SSR；价格需登录）",
+  "transport": {
+    "client": "curl",
+    "url_template": "https://hotels.ctrip.com/hotels/list?city={city}&checkin={checkin}&checkout={checkout}",
+    "note": "同一 URL curl 200；SSR 里有酒店名/星级/评分，但价格节点对未登录访客为空",
+    "block_markers": [
+      "whaleguard"
+    ]
+  },
+  "constants": {
+    "city": 1
+  },
+  "date": {
+    "params": {
+      "checkin": "date",
+      "checkout": "date+1day"
+    }
+  },
+  "extract": {
+    "kind": "html_regex",
+    "split": "data-offline-hotelId=\"",
+    "fields": {
+      "id": "^(\\d+)",
+      "name": "hotelName\">([^<]+)",
+      "star": "(\\d+) out of 5 stars",
+      "score": "class=\"score\"[^>]*>([\\d.]+)",
+      "price": "class=\"price-line\"[^>]*>\\s*([^<]*)"
+    }
+  },
+  "counts": [
+    {
+      "key": "hotels",
+      "label": "酒店数",
+      "ignore_window": true
+    }
+  ],
+  "audits": [
+    {
+      "key": "empty_price",
+      "label": "价格节点为空",
+      "field": "price",
+      "empty": true
+    }
+  ],
+  "report": {
+    "title": "携程北京酒店（PC 列表 SSR）",
+    "source_note": "`hotels.ctrip.com/hotels/list?city=1&checkin=…&checkout=…` 的服务端渲染 HTML",
+    "preview": {
+      "columns": [
+        "id",
+        "name",
+        "star",
+        "score",
+        "price"
+      ],
+      "limit": 8
+    },
+    "notes": [
+      "**价格拿不到**：匿名访客的 `.price-line` 是空的，页面写着「登录以查看会员价」。",
+      "同一份 HTML 里有真实的酒店名/星级/评分 —— 所以“≤300 元”这个条件**无法用匿名数据判定**。",
+      "要完成酒店那一半，需要已登录会话：`python3 ctrip/live_capture.py --profile <dir>`。"
+    ],
+    "currency": "¥"
+  }
+}

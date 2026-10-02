@@ -1,0 +1,5020 @@
+{
+ "reference": "datasource.py",
+ "fixtures": {
+  "flights": "bench/fixtures/ctrip_h5_route.html",
+  "hotels": "bench/fixtures/ctrip_hotels_pc.html"
+ },
+ "fake_rendered": {
+  "elements": 29,
+  "snapshot": "[00] div 搜索 航班 价格 预订\n[01] div 搜索 航班 价格 预订\n[02] div 搜索 航班 价格 预订\n[03] div 搜索 航班 价格 预订\n[04] div 搜索 航班 价格 预订\n[05] div 搜索 航班 价格 预订\n[06] div 搜索 航班 价格 预订\n[07] div 搜索 航班 价格 预订\n[08] div 搜索 航班 价格 预订\n[09] div 搜索 航班 价格 预订\n[10] div 搜索 航班 价格 预订\n[11] div 搜索 航班 价格 预订\n[12] div 搜索 航班 价格 预订\n[13] div 搜索 航班 价格 预订\n[14] div 搜索 航班 价格 预订\n[15] div 搜索 航班 价格 预订\n[16] div 搜索 航班 价格 预订\n[17] div 搜索 航班 价格 预订\n[18] div 搜索 航班 价格 预订\n[19] div 搜索 航班 价格 预订\n[20] div 搜索 航班 价格 预订\n[21] div 搜索 航班 价格 预订\n[22] div 搜索 航班 价格 预订\n[23] div 搜索 航班 价格 预订\n[24] div 搜索 航班 价格 预订\n[25] div 搜索 航班 价格 预订\n[26] div 搜索 航班 价格 预订\n[27] div 搜索 航班 价格 预订\n[28] div 搜索 航班 价格 预订\n[29] div 搜索 航班 价格 预订\n[30] div 搜索 航班 价格 预订\n[31] div 搜索 航班 价格 预订\n[32] div 搜索 航班 价格 预订\n[33] div 搜索 航班 价格 预订\n[34] div 搜索 航班 价格 预订\n[35] div 搜索 航班 价格 预订\n[36] div 搜索 航班 价格 预订\n[37] div 搜索 航班 价格 预订\n[38] div 搜索 航班 价格 预订\n[39] div 搜索 航班 价格 预订\n[40] div 搜索 航班 价格 预订\n[41] div 搜索 航班 价格 预订\n[42] div 搜索 航班 价格 预订\n[43] div 搜索 航班 价格 预订\n[44] div 搜索 航班 价格 预订\n[45] div 搜索 航班 价格 预订\n[46] div 搜索 航班 价格 预订\n[47] div 搜索 航班 价格 预订\n[48] div 搜索 航班 价格 预订\n[49] div 搜索 航班 价格 预订\n[50] div 搜索 航班 价格 预订\n[51] div 搜索 航班 价格 预订\n[52] div 搜索 航班 价格 预订\n[53] div 搜索 航班 价格 预订\n[54] div 搜索 航班 价格 预订\n[55] div 搜索 航班 价格 预订\n[56] div 搜索 航班 价格 预订\n[57] div 搜索 航班 价格 预订\n[58] div 搜索 航班 价格 预订\n[59] div 搜索 航班 价格 预订\n",
+  "title": "昆明到北京机票查询预订-昆明飞北京特价机票价格昆明到北京机票查询预订-昆明飞北京特价机票价格昆明到北京机票查询预订-昆明飞北京特价机票价格昆明到北京机票查询预订-昆明飞北京特价机票价格",
+  "text": "这段 text 不进报告（run_source 会把它剔掉）"
+ },
+ "engine": {
+  "resolve": [
+   {
+    "obj": {
+     "a": {
+      "b": [
+       {
+        "c": "x"
+       },
+       {
+        "c": "y"
+       },
+       {
+        "c": "z"
+       }
+      ]
+     }
+    },
+    "path": "a.b[0].c",
+    "expected": "x"
+   },
+   {
+    "obj": {
+     "a": {
+      "b": [
+       {
+        "c": "x"
+       },
+       {
+        "c": "y"
+       },
+       {
+        "c": "z"
+       }
+      ]
+     }
+    },
+    "path": "a.b[-1].c",
+    "expected": "z"
+   },
+   {
+    "obj": {
+     "a": {
+      "b": [
+       {
+        "c": "x"
+       },
+       {
+        "c": "y"
+       },
+       {
+        "c": "z"
+       }
+      ]
+     }
+    },
+    "path": "a.b[].c",
+    "expected": [
+     "x",
+     "y",
+     "z"
+    ]
+   },
+   {
+    "obj": {
+     "a": {
+      "b": [
+       {
+        "c": "x"
+       },
+       {
+        "c": "y"
+       },
+       {
+        "c": "z"
+       }
+      ]
+     }
+    },
+    "path": "a.nope.c",
+    "expected": null
+   },
+   {
+    "obj": {
+     "a": {
+      "b": [
+       {
+        "c": "x"
+       },
+       {
+        "c": "y"
+       },
+       {
+        "c": "z"
+       }
+      ]
+     }
+    },
+    "path": "a.b[9].c",
+    "expected": null
+   },
+   {
+    "obj": {
+     "a": {
+      "b": [
+       {
+        "c": "x"
+       },
+       {
+        "c": "y"
+       },
+       {
+        "c": "z"
+       }
+      ]
+     }
+    },
+    "path": "a.b[-9].c",
+    "expected": null
+   },
+   {
+    "obj": {
+     "a": {
+      "b": [
+       {
+        "c": "x"
+       },
+       {
+        "c": "y"
+       },
+       {
+        "c": "z"
+       }
+      ]
+     }
+    },
+    "path": "a.b",
+    "expected": [
+     {
+      "c": "x"
+     },
+     {
+      "c": "y"
+     },
+     {
+      "c": "z"
+     }
+    ]
+   },
+   {
+    "obj": {
+     "a": {
+      "b": [
+       {
+        "c": "x"
+       },
+       {
+        "c": "y"
+       },
+       {
+        "c": "z"
+       }
+      ]
+     }
+    },
+    "path": "",
+    "expected": {
+     "a": {
+      "b": [
+       {
+        "c": "x"
+       },
+       {
+        "c": "y"
+       },
+       {
+        "c": "z"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "obj": {
+     "a": [
+      1,
+      2,
+      3
+     ]
+    },
+    "path": "[0]",
+    "expected": null
+   },
+   {
+    "obj": {
+     "a": [
+      1,
+      2,
+      3
+     ]
+    },
+    "path": "[-1]",
+    "expected": null
+   },
+   {
+    "obj": {
+     "a": [
+      1,
+      2,
+      3
+     ]
+    },
+    "path": "[]",
+    "expected": null
+   },
+   {
+    "obj": {
+     "a": [
+      1,
+      2,
+      3
+     ]
+    },
+    "path": "a[1]",
+    "expected": 2
+   },
+   {
+    "obj": {
+     "a": "not-a-list"
+    },
+    "path": "a[0]",
+    "expected": null
+   },
+   {
+    "obj": {
+     "a": {
+      "b": 1
+     }
+    },
+    "path": "a.b.c",
+    "expected": null
+   },
+   {
+    "obj": [
+     {
+      "x": 1
+     },
+     {
+      "x": 2
+     }
+    ],
+    "path": "[].x",
+    "expected": [
+     1,
+     2
+    ]
+   },
+   {
+    "obj": {
+     "a": {
+      "b": [
+       {
+        "c": [
+         1,
+         2
+        ]
+       },
+       {
+        "c": [
+         3
+        ]
+       }
+      ]
+     }
+    },
+    "path": "a.b[].c[]",
+    "expected": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   {
+    "obj": {
+     "a": {
+      "weird-key": 7
+     }
+    },
+    "path": "a.weird-key",
+    "expected": 7
+   },
+   {
+    "obj": {
+     "a": {
+      "b": null
+     }
+    },
+    "path": "a.b",
+    "expected": null
+   }
+  ],
+  "apply_ops": [
+   {
+    "value": "2026-10-09 15:30:00",
+    "ops": [
+     "time"
+    ],
+    "expected": "15:30"
+   },
+   {
+    "value": "2026-10-09 15:30:00",
+    "ops": [
+     "time",
+     "strip"
+    ],
+    "expected": "15:30"
+   },
+   {
+    "value": "  padded  ",
+    "ops": [
+     "strip"
+    ],
+    "expected": "padded"
+   },
+   {
+    "value": "42",
+    "ops": [
+     "int"
+    ],
+    "expected": 42
+   },
+   {
+    "value": 42,
+    "ops": [
+     "int"
+    ],
+    "expected": 42
+   },
+   {
+    "value": "4.2",
+    "ops": [
+     "int"
+    ],
+    "expected": null
+   },
+   {
+    "value": null,
+    "ops": [
+     "int"
+    ],
+    "expected": null
+   },
+   {
+    "value": "",
+    "ops": [
+     "str"
+    ],
+    "expected": ""
+   },
+   {
+    "value": null,
+    "ops": [
+     "str"
+    ],
+    "expected": ""
+   },
+   {
+    "value": 0,
+    "ops": [
+     "str"
+    ],
+    "expected": "0"
+   },
+   {
+    "value": 1150,
+    "ops": [
+     "str"
+    ],
+    "expected": "1150"
+   },
+   {
+    "value": [
+     "A",
+     "B"
+    ],
+    "ops": [
+     "join:+"
+    ],
+    "expected": "A+B"
+   },
+   {
+    "value": [
+     "A",
+     "B"
+    ],
+    "ops": [
+     "join:"
+    ],
+    "expected": "AB"
+   },
+   {
+    "value": "AB",
+    "ops": [
+     "join:+"
+    ],
+    "expected": "AB"
+   },
+   {
+    "value": [
+     1,
+     2,
+     3
+    ],
+    "ops": [
+     "len"
+    ],
+    "expected": 3
+   },
+   {
+    "value": "abc",
+    "ops": [
+     "len"
+    ],
+    "expected": 3
+   },
+   {
+    "value": "中文",
+    "ops": [
+     "len"
+    ],
+    "expected": 2
+   },
+   {
+    "value": [
+     1,
+     2,
+     3
+    ],
+    "ops": [
+     "len-1"
+    ],
+    "expected": 2
+   },
+   {
+    "value": [],
+    "ops": [
+     "len-1"
+    ],
+    "expected": null
+   },
+   {
+    "value": null,
+    "ops": [
+     "len-1"
+    ],
+    "expected": null
+   },
+   {
+    "value": [
+     1,
+     2,
+     3
+    ],
+    "ops": [
+     "len",
+     "str"
+    ],
+    "expected": "3"
+   },
+   {
+    "value": 1150,
+    "ops": [
+     "len"
+    ],
+    "expected": null
+   }
+  ],
+  "apply_ops_errors": [
+   {
+    "value": 1,
+    "ops": [
+     "sqrtt"
+    ],
+    "error": "unknown op 'sqrtt' (known: time, join, len, len-1, int, str, strip)"
+   }
+  ],
+  "field_value": [
+   {
+    "row": {
+     "s": [
+      {
+       "t": "2026-10-09 21:05:00"
+      },
+      {
+       "t": "2026-10-10 00:30:00"
+      }
+     ]
+    },
+    "spec": {
+     "path": "s[-1].t",
+     "ops": [
+      "time"
+     ],
+     "compare_day_with": "s[0].t"
+    },
+    "expected": "00:30+1"
+   },
+   {
+    "row": {
+     "s": [
+      {
+       "t": "2026-10-09 21:05:00"
+      },
+      {
+       "t": "2026-10-09 23:30:00"
+      }
+     ]
+    },
+    "spec": {
+     "path": "s[-1].t",
+     "ops": [
+      "time"
+     ],
+     "compare_day_with": "s[0].t"
+    },
+    "expected": "23:30"
+   },
+   {
+    "row": {
+     "s": [
+      {
+       "t": "2026-10-09 21:05:00"
+      }
+     ]
+    },
+    "spec": {
+     "path": "s[0].t",
+     "ops": [
+      "time"
+     ]
+    },
+    "expected": "21:05"
+   },
+   {
+    "row": {
+     "price": null
+    },
+    "spec": "price",
+    "expected": null
+   },
+   {
+    "row": {
+     "price": 1150
+    },
+    "spec": "price",
+    "expected": 1150
+   },
+   {
+    "row": {
+     "items": [
+      {
+       "n": "a"
+      },
+      {
+       "n": "b"
+      }
+     ]
+    },
+    "spec": "items[].n|join:+",
+    "expected": "a+b"
+   },
+   {
+    "row": {
+     "items": [
+      {
+       "n": "a"
+      },
+      {
+       "n": "b"
+      }
+     ]
+    },
+    "spec": {
+     "path": "items",
+     "ops": [
+      "len-1"
+     ]
+    },
+    "expected": 1
+   },
+   {
+    "row": {
+     "a": {
+      "b": "  7  "
+     }
+    },
+    "spec": "a.b|strip|int",
+    "expected": 7
+   },
+   {
+    "row": {
+     "x": "2026-10-09 07:00:00"
+    },
+    "spec": "x|time",
+    "expected": "07:00"
+   },
+   {
+    "row": {},
+    "spec": "missing|str",
+    "expected": ""
+   }
+  ],
+  "date_expr": [
+   {
+    "expr": "date",
+    "date": "2026-10-05",
+    "today": "2026-10-02",
+    "expected": "2026-10-05"
+   },
+   {
+    "expr": "day_offset",
+    "date": "2026-10-05",
+    "today": "2026-10-02",
+    "expected": 3
+   },
+   {
+    "expr": "day_offset",
+    "date": "2026-10-02",
+    "today": "2026-10-02",
+    "expected": 0
+   },
+   {
+    "expr": "weekday_cn",
+    "date": "2026-10-05",
+    "today": "2026-10-02",
+    "expected": "周一"
+   },
+   {
+    "expr": "weekday_cn",
+    "date": "2026-10-11",
+    "today": "2026-10-02",
+    "expected": "周日"
+   },
+   {
+    "expr": "date+1day",
+    "date": "2026-10-09",
+    "today": "2026-10-02",
+    "expected": "2026-10-10"
+   },
+   {
+    "expr": "date+7day",
+    "date": "2026-10-09",
+    "today": "2026-10-02",
+    "expected": "2026-10-16"
+   },
+   {
+    "expr": "date-1day",
+    "date": "2026-10-01",
+    "today": "2026-10-02",
+    "expected": "2026-09-30"
+   },
+   {
+    "expr": "date+0day",
+    "date": "2026-10-05",
+    "today": "2026-10-02",
+    "expected": "2026-10-05"
+   }
+  ],
+  "date_expr_errors": [
+   {
+    "expr": "next_friday",
+    "date": "2026-10-05",
+    "today": "2026-10-02",
+    "error": "unknown date expression 'next_friday' (known: date, day_offset, weekday_cn, date±Nday)"
+   },
+   {
+    "expr": "date+1week",
+    "date": "2026-10-05",
+    "today": "2026-10-02",
+    "error": "unknown date expression 'date+1week' (known: date, day_offset, weekday_cn, date±Nday)"
+   },
+   {
+    "expr": "",
+    "date": "2026-10-05",
+    "today": "2026-10-02",
+    "error": "unknown date expression '' (known: date, day_offset, weekday_cn, date±Nday)"
+   }
+  ],
+  "next_week_dates": [
+   {
+    "today": "2026-10-02",
+    "expected": [
+     "2026-10-05",
+     "2026-10-06",
+     "2026-10-07",
+     "2026-10-08",
+     "2026-10-09"
+    ]
+   },
+   {
+    "today": "2026-10-04",
+    "expected": [
+     "2026-10-05",
+     "2026-10-06",
+     "2026-10-07",
+     "2026-10-08",
+     "2026-10-09"
+    ]
+   },
+   {
+    "today": "2026-10-05",
+    "expected": [
+     "2026-10-12",
+     "2026-10-13",
+     "2026-10-14",
+     "2026-10-15",
+     "2026-10-16"
+    ]
+   },
+   {
+    "today": "2026-10-10",
+    "expected": [
+     "2026-10-12",
+     "2026-10-13",
+     "2026-10-14",
+     "2026-10-15",
+     "2026-10-16"
+    ]
+   },
+   {
+    "today": "2026-01-01",
+    "expected": [
+     "2026-01-05",
+     "2026-01-06",
+     "2026-01-07",
+     "2026-01-08",
+     "2026-01-09"
+    ]
+   }
+  ],
+  "default_dates": [
+   {
+    "source": {
+     "default_dates": [
+      "2026-10-05",
+      "2026-10-06"
+     ]
+    },
+    "expected": [
+     "2026-10-05",
+     "2026-10-06"
+    ]
+   },
+   {
+    "source": {
+     "default_dates": [
+      2026,
+      "x"
+     ]
+    },
+    "expected": [
+     "2026",
+     "x"
+    ]
+   }
+  ],
+  "in_window": [
+   {
+    "t": "08:00",
+    "lo": "08:00",
+    "hi": "18:00",
+    "expected": true
+   },
+   {
+    "t": "18:00",
+    "lo": "08:00",
+    "hi": "18:00",
+    "expected": true
+   },
+   {
+    "t": "07:59",
+    "lo": "08:00",
+    "hi": "18:00",
+    "expected": false
+   },
+   {
+    "t": "18:01",
+    "lo": "08:00",
+    "hi": "18:00",
+    "expected": false
+   },
+   {
+    "t": "",
+    "lo": "08:00",
+    "hi": "18:00",
+    "expected": false
+   },
+   {
+    "t": "12:00",
+    "lo": "08:00",
+    "hi": "18:00",
+    "expected": true
+   },
+   {
+    "t": "00:00",
+    "lo": "00:00",
+    "hi": "23:59",
+    "expected": true
+   },
+   {
+    "t": "23:59",
+    "lo": "00:00",
+    "hi": "23:59",
+    "expected": true
+   }
+  ],
+  "matches": [
+   {
+    "row": {
+     "stops": 0,
+     "price": 1150
+    },
+    "where": {
+     "stops": 0
+    },
+    "expected": true
+   },
+   {
+    "row": {
+     "stops": 1,
+     "price": 1150
+    },
+    "where": {
+     "stops": 0
+    },
+    "expected": false
+   },
+   {
+    "row": {
+     "stops": null
+    },
+    "where": {
+     "stops": 0
+    },
+    "expected": false
+   },
+   {
+    "row": {
+     "a": "x",
+     "b": "y"
+    },
+    "where": {
+     "a": "x",
+     "b": "y"
+    },
+    "expected": true
+   },
+   {
+    "row": {
+     "a": "x",
+     "b": "z"
+    },
+    "where": {
+     "a": "x",
+     "b": "y"
+    },
+    "expected": false
+   },
+   {
+    "row": {
+     "a": 1150
+    },
+    "where": {},
+    "expected": true
+   },
+   {
+    "row": {
+     "a": 1150
+    },
+    "where": null,
+    "expected": true
+   },
+   {
+    "row": {
+     "a": "1150"
+    },
+    "where": {
+     "a": 1150
+    },
+    "expected": true
+   }
+  ],
+  "blocked": [
+   {
+    "source": {
+     "transport": {
+      "block_markers": [
+       "whaleguard"
+      ]
+     }
+    },
+    "code": 200,
+    "body": "WhaleGuard block",
+    "expected": true
+   },
+   {
+    "source": {
+     "transport": {
+      "block_markers": [
+       "whaleguard"
+      ]
+     }
+    },
+    "code": 200,
+    "body": "<html>ok</html>",
+    "expected": false
+   },
+   {
+    "source": {
+     "transport": {
+      "block_markers": [
+       "whaleguard"
+      ]
+     }
+    },
+    "code": 432,
+    "body": "<html>ok</html>",
+    "expected": true
+   },
+   {
+    "source": {
+     "transport": {
+      "block_markers": [
+       "whaleguard"
+      ]
+     }
+    },
+    "code": 200,
+    "body": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxwhaleguard",
+    "expected": false
+   },
+   {
+    "source": {
+     "transport": {}
+    },
+    "code": 200,
+    "body": "whaleguard anywhere",
+    "expected": false
+   },
+   {
+    "source": {
+     "transport": {
+      "block_markers": []
+     }
+    },
+    "code": 200,
+    "body": "whaleguard anywhere",
+    "expected": false
+   },
+   {
+    "source": {
+     "transport": {
+      "block_markers": []
+     }
+    },
+    "code": 403,
+    "body": "<html>ok</html>",
+    "expected": true
+   }
+  ],
+  "select_best": [
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "source": {
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     }
+    },
+    "sel": {
+     "sort_by": [
+      "price",
+      "dep"
+     ]
+    },
+    "expected": {
+     "flight_no": "B",
+     "dep": "09:30",
+     "stops": 1,
+     "price": 700
+    }
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "source": {
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     }
+    },
+    "sel": {
+     "sort_by": [
+      "price",
+      "dep"
+     ],
+     "where": {
+      "stops": 0
+     }
+    },
+    "expected": {
+     "flight_no": "E",
+     "dep": "12:00",
+     "stops": 0,
+     "price": 700
+    }
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "source": {
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     }
+    },
+    "sel": {
+     "sort_by": [
+      "price",
+      "dep"
+     ],
+     "ignore_window": true
+    },
+    "expected": {
+     "flight_no": "D",
+     "dep": "18:30",
+     "stops": 0,
+     "price": 300
+    }
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "source": {
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     }
+    },
+    "sel": {
+     "sort_by": [
+      "price",
+      "dep"
+     ],
+     "where": {
+      "stops": 9
+     }
+    },
+    "expected": null
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "source": {
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     }
+    },
+    "sel": {
+     "sort_by": [
+      "dep"
+     ]
+    },
+    "expected": {
+     "flight_no": "B",
+     "dep": "09:30",
+     "stops": 1,
+     "price": 700
+    }
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "source": {
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     }
+    },
+    "sel": {
+     "sort_by": []
+    },
+    "expected": {
+     "flight_no": "B",
+     "dep": "09:30",
+     "stops": 1,
+     "price": 700
+    }
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "source": {
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     }
+    },
+    "sel": {},
+    "expected": {
+     "flight_no": "B",
+     "dep": "09:30",
+     "stops": 1,
+     "price": 700
+    }
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "source": {
+     "filters": {}
+    },
+    "sel": {
+     "sort_by": [
+      "price"
+     ]
+    },
+    "expected": {
+     "flight_no": "D",
+     "dep": "18:30",
+     "stops": 0,
+     "price": 300
+    }
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "source": {
+     "filters": {}
+    },
+    "sel": {
+     "sort_by": [
+      "dep",
+      "price"
+     ]
+    },
+    "expected": {
+     "flight_no": "F",
+     "dep": "",
+     "stops": 0,
+     "price": 500
+    }
+   }
+  ],
+  "count_rows": [
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "source": {
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     }
+    },
+    "spec": {
+     "where": {
+      "stops": 0
+     }
+    },
+    "expected": 2
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "source": {
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     }
+    },
+    "spec": {
+     "ignore_window": true
+    },
+    "expected": 7
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "source": {
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     }
+    },
+    "spec": {},
+    "expected": 4
+   }
+  ],
+  "audit_rows": [
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "spec": {
+     "field": "price",
+     "empty": true
+    },
+    "expected": 1
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "spec": {
+     "field": "dep",
+     "empty": true
+    },
+    "expected": 1
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "spec": {
+     "field": "stops",
+     "equals": 0
+    },
+    "expected": 5
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "spec": {
+     "field": "stops",
+     "equals": "0"
+    },
+    "expected": 5
+   },
+   {
+    "rows": [
+     {
+      "flight_no": "A",
+      "dep": "07:30",
+      "stops": 0,
+      "price": 900
+     },
+     {
+      "flight_no": "B",
+      "dep": "09:30",
+      "stops": 1,
+      "price": 700
+     },
+     {
+      "flight_no": "C",
+      "dep": "18:00",
+      "stops": 0,
+      "price": 1200
+     },
+     {
+      "flight_no": "D",
+      "dep": "18:30",
+      "stops": 0,
+      "price": 300
+     },
+     {
+      "flight_no": "E",
+      "dep": "12:00",
+      "stops": 0,
+      "price": 700
+     },
+     {
+      "flight_no": "F",
+      "dep": "",
+      "stops": 0,
+      "price": 500
+     },
+     {
+      "flight_no": "G",
+      "dep": "10:00",
+      "stops": 2,
+      "price": null
+     }
+    ],
+    "spec": {
+     "field": "missing",
+     "empty": true
+    },
+    "expected": 7
+   }
+  ],
+  "validate": [
+   {
+    "name": "good-flights",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": []
+   },
+   {
+    "name": "good-hotels",
+    "source": {
+     "name": "ctrip-hotels-pc",
+     "label": "携程酒店列表（PC SSR；价格需登录）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://hotels.ctrip.com/hotels/list?city={city}&checkin={checkin}&checkout={checkout}",
+      "note": "同一 URL curl 200；SSR 里有酒店名/星级/评分，但价格节点对未登录访客为空",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "city": 1
+     },
+     "date": {
+      "params": {
+       "checkin": "date",
+       "checkout": "date+1day"
+      }
+     },
+     "extract": {
+      "kind": "html_regex",
+      "split": "data-offline-hotelId=\"",
+      "fields": {
+       "id": "^(\\d+)",
+       "name": "hotelName\">([^<]+)",
+       "star": "(\\d+) out of 5 stars",
+       "score": "class=\"score\"[^>]*>([\\d.]+)",
+       "price": "class=\"price-line\"[^>]*>\\s*([^<]*)"
+      }
+     },
+     "counts": [
+      {
+       "key": "hotels",
+       "label": "酒店数",
+       "ignore_window": true
+      }
+     ],
+     "audits": [
+      {
+       "key": "empty_price",
+       "label": "价格节点为空",
+       "field": "price",
+       "empty": true
+      }
+     ],
+     "report": {
+      "title": "携程北京酒店（PC 列表 SSR）",
+      "source_note": "`hotels.ctrip.com/hotels/list?city=1&checkin=…&checkout=…` 的服务端渲染 HTML",
+      "preview": {
+       "columns": [
+        "id",
+        "name",
+        "star",
+        "score",
+        "price"
+       ],
+       "limit": 8
+      },
+      "notes": [
+       "**价格拿不到**：匿名访客的 `.price-line` 是空的，页面写着「登录以查看会员价」。",
+       "同一份 HTML 里有真实的酒店名/星级/评分 —— 所以“≤300 元”这个条件**无法用匿名数据判定**。",
+       "要完成酒店那一半，需要已登录会话：`python3 ctrip/live_capture.py --profile <dir>`。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-hotels-pc.json"
+    },
+    "expected": []
+   },
+   {
+    "name": "no-name",
+    "source": {
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "name is required"
+    ]
+   },
+   {
+    "name": "client-wget",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "wget",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "transport.client must be one of ('curl', 'httpx')"
+    ]
+   },
+   {
+    "name": "no-transport",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "transport.url_template is required"
+    ]
+   },
+   {
+    "name": "kind-magic",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "magic",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "extract.kind must be one of ('json_in_script', 'html_regex')"
+    ]
+   },
+   {
+    "name": "empty-fields",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {}
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "extract.fields must not be empty"
+    ]
+   },
+   {
+    "name": "unknown-op",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price|sqrtt",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "extract.fields.price: unknown op 'sqrtt' (known: time, join, len, len-1, int, str, strip)"
+    ]
+   },
+   {
+    "name": "unknown-op-in-dict",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": {
+        "path": "price",
+        "ops": [
+         "sqrt"
+        ]
+       },
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "extract.fields.price: unknown op 'sqrt' (known: time, join, len, len-1, int, str, strip)"
+    ]
+   },
+   {
+    "name": "empty-rows",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "extract.rows is required for json_in_script"
+    ]
+   },
+   {
+    "name": "no-var",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "extract.var is required for json_in_script"
+    ]
+   },
+   {
+    "name": "bad-date-param",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "next_friday"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "date.params.n: unknown date expression 'next_friday' (known: date, day_offset, weekday_cn, date±Nday)"
+    ]
+   },
+   {
+    "name": "audit-no-field",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json",
+     "audits": [
+      {
+       "key": "x"
+      }
+     ]
+    },
+    "expected": [
+     "every audit needs a key and a field"
+    ]
+   },
+   {
+    "name": "default-dates-named",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_month",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "default_dates 'next_month': unknown named expression (known: 'next_week'; or use a list of ISO dates)"
+    ]
+   },
+   {
+    "name": "block-markers-string",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": "whaleguard"
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "transport.block_markers must be a list of body substrings"
+    ]
+   },
+   {
+    "name": "no-url-template",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "label": "最低价（含经停）",
+       "sort_by": [
+        "price",
+        "dep"
+       ]
+      },
+      {
+       "key": "best_nonstop",
+       "label": "直飞最低",
+       "sort_by": [
+        "price",
+        "dep"
+       ],
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "transport.url_template is required"
+    ]
+   },
+   {
+    "name": "select-no-key",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "sort_by": [
+        "price"
+       ]
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "every select needs a key"
+    ]
+   },
+   {
+    "name": "select-bad-sort",
+    "source": {
+     "name": "ctrip-flights-h5",
+     "label": "携程 H5 线路页（真实机票价格）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+      "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "dcity": "kmg",
+      "acity": "bjs"
+     },
+     "default_dates": "next_week",
+     "date": {
+      "params": {
+       "n": "day_offset"
+      }
+     },
+     "extract": {
+      "kind": "json_in_script",
+      "var": "window.__INITIAL_STATE__",
+      "rows": "listData.flights",
+      "date": "listData.ddate",
+      "strip": "listData.dateList[].date",
+      "fields": {
+       "flight_no": "flightItem.flights[].flightNo|join:+",
+       "airline": "flightItem.flights[0].airline.name",
+       "dep": "flightItem.flights[0].dtime|time",
+       "arr": {
+        "path": "flightItem.flights[-1].atime",
+        "ops": [
+         "time"
+        ],
+        "compare_day_with": "flightItem.flights[0].dtime"
+       },
+       "dep_port": "flightItem.flights[0].dport.name",
+       "arr_port": "flightItem.flights[-1].aport.name",
+       "arr_city": "flightItem.flights[-1].aport.cityCode",
+       "stops": {
+        "path": "flightItem.flights",
+        "ops": [
+         "len-1"
+        ]
+       },
+       "price": "price",
+       "cabin": "displayClass",
+       "discount": "drate"
+      }
+     },
+     "filters": {
+      "time_field": "dep",
+      "window": [
+       "08:00",
+       "18:00"
+      ]
+     },
+     "counts": [
+      {
+       "key": "in_window",
+       "label": "时段内班次"
+      },
+      {
+       "key": "in_window_nonstop",
+       "label": "时段内直飞",
+       "where": {
+        "stops": 0
+       }
+      }
+     ],
+     "selects": [
+      {
+       "key": "best",
+       "sort_by": [
+        1
+       ]
+      }
+     ],
+     "report": {
+      "title": "携程真实机票价格（H5 线路页）",
+      "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+      "preview": {
+       "columns": [
+        "flight_no",
+        "dep",
+        "arr",
+        "airline",
+        "stops",
+        "price"
+       ],
+       "limit": 6
+      },
+      "notes": [
+       "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+       "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+       "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+       "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-flights-h5.json"
+    },
+    "expected": [
+     "select best: sort_by must be field names"
+    ]
+   },
+   {
+    "name": "html-two-groups",
+    "source": {
+     "name": "ctrip-hotels-pc",
+     "label": "携程酒店列表（PC SSR；价格需登录）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://hotels.ctrip.com/hotels/list?city={city}&checkin={checkin}&checkout={checkout}",
+      "note": "同一 URL curl 200；SSR 里有酒店名/星级/评分，但价格节点对未登录访客为空",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "city": 1
+     },
+     "date": {
+      "params": {
+       "checkin": "date",
+       "checkout": "date+1day"
+      }
+     },
+     "extract": {
+      "kind": "html_regex",
+      "split": "data-offline-hotelId=\"",
+      "fields": {
+       "id": "^(\\d+)-(\\d+)",
+       "name": "hotelName\">([^<]+)",
+       "star": "(\\d+) out of 5 stars",
+       "score": "class=\"score\"[^>]*>([\\d.]+)",
+       "price": "class=\"price-line\"[^>]*>\\s*([^<]*)"
+      }
+     },
+     "counts": [
+      {
+       "key": "hotels",
+       "label": "酒店数",
+       "ignore_window": true
+      }
+     ],
+     "audits": [
+      {
+       "key": "empty_price",
+       "label": "价格节点为空",
+       "field": "price",
+       "empty": true
+      }
+     ],
+     "report": {
+      "title": "携程北京酒店（PC 列表 SSR）",
+      "source_note": "`hotels.ctrip.com/hotels/list?city=1&checkin=…&checkout=…` 的服务端渲染 HTML",
+      "preview": {
+       "columns": [
+        "id",
+        "name",
+        "star",
+        "score",
+        "price"
+       ],
+       "limit": 8
+      },
+      "notes": [
+       "**价格拿不到**：匿名访客的 `.price-line` 是空的，页面写着「登录以查看会员价」。",
+       "同一份 HTML 里有真实的酒店名/星级/评分 —— 所以“≤300 元”这个条件**无法用匿名数据判定**。",
+       "要完成酒店那一半，需要已登录会话：`python3 ctrip/live_capture.py --profile <dir>`。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-hotels-pc.json"
+    },
+    "expected": [
+     "extract.fields.id: regex needs exactly one capture group"
+    ]
+   },
+   {
+    "name": "html-no-groups",
+    "source": {
+     "name": "ctrip-hotels-pc",
+     "label": "携程酒店列表（PC SSR；价格需登录）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://hotels.ctrip.com/hotels/list?city={city}&checkin={checkin}&checkout={checkout}",
+      "note": "同一 URL curl 200；SSR 里有酒店名/星级/评分，但价格节点对未登录访客为空",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "city": 1
+     },
+     "date": {
+      "params": {
+       "checkin": "date",
+       "checkout": "date+1day"
+      }
+     },
+     "extract": {
+      "kind": "html_regex",
+      "split": "data-offline-hotelId=\"",
+      "fields": {
+       "id": "^(\\d+)",
+       "name": "hotelName\">[^<]+",
+       "star": "(\\d+) out of 5 stars",
+       "score": "class=\"score\"[^>]*>([\\d.]+)",
+       "price": "class=\"price-line\"[^>]*>\\s*([^<]*)"
+      }
+     },
+     "counts": [
+      {
+       "key": "hotels",
+       "label": "酒店数",
+       "ignore_window": true
+      }
+     ],
+     "audits": [
+      {
+       "key": "empty_price",
+       "label": "价格节点为空",
+       "field": "price",
+       "empty": true
+      }
+     ],
+     "report": {
+      "title": "携程北京酒店（PC 列表 SSR）",
+      "source_note": "`hotels.ctrip.com/hotels/list?city=1&checkin=…&checkout=…` 的服务端渲染 HTML",
+      "preview": {
+       "columns": [
+        "id",
+        "name",
+        "star",
+        "score",
+        "price"
+       ],
+       "limit": 8
+      },
+      "notes": [
+       "**价格拿不到**：匿名访客的 `.price-line` 是空的，页面写着「登录以查看会员价」。",
+       "同一份 HTML 里有真实的酒店名/星级/评分 —— 所以“≤300 元”这个条件**无法用匿名数据判定**。",
+       "要完成酒店那一半，需要已登录会话：`python3 ctrip/live_capture.py --profile <dir>`。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-hotels-pc.json"
+    },
+    "expected": [
+     "extract.fields.name: regex needs exactly one capture group"
+    ]
+   },
+   {
+    "name": "html-no-split",
+    "source": {
+     "name": "ctrip-hotels-pc",
+     "label": "携程酒店列表（PC SSR；价格需登录）",
+     "transport": {
+      "client": "curl",
+      "url_template": "https://hotels.ctrip.com/hotels/list?city={city}&checkin={checkin}&checkout={checkout}",
+      "note": "同一 URL curl 200；SSR 里有酒店名/星级/评分，但价格节点对未登录访客为空",
+      "block_markers": [
+       "whaleguard"
+      ]
+     },
+     "constants": {
+      "city": 1
+     },
+     "date": {
+      "params": {
+       "checkin": "date",
+       "checkout": "date+1day"
+      }
+     },
+     "extract": {
+      "kind": "html_regex",
+      "fields": {
+       "id": "^(\\d+)",
+       "name": "hotelName\">([^<]+)",
+       "star": "(\\d+) out of 5 stars",
+       "score": "class=\"score\"[^>]*>([\\d.]+)",
+       "price": "class=\"price-line\"[^>]*>\\s*([^<]*)"
+      }
+     },
+     "counts": [
+      {
+       "key": "hotels",
+       "label": "酒店数",
+       "ignore_window": true
+      }
+     ],
+     "audits": [
+      {
+       "key": "empty_price",
+       "label": "价格节点为空",
+       "field": "price",
+       "empty": true
+      }
+     ],
+     "report": {
+      "title": "携程北京酒店（PC 列表 SSR）",
+      "source_note": "`hotels.ctrip.com/hotels/list?city=1&checkin=…&checkout=…` 的服务端渲染 HTML",
+      "preview": {
+       "columns": [
+        "id",
+        "name",
+        "star",
+        "score",
+        "price"
+       ],
+       "limit": 8
+      },
+      "notes": [
+       "**价格拿不到**：匿名访客的 `.price-line` 是空的，页面写着「登录以查看会员价」。",
+       "同一份 HTML 里有真实的酒店名/星级/评分 —— 所以“≤300 元”这个条件**无法用匿名数据判定**。",
+       "要完成酒店那一半，需要已登录会话：`python3 ctrip/live_capture.py --profile <dir>`。"
+      ],
+      "currency": "¥"
+     },
+     "_path": "ctrip/sources/ctrip-hotels-pc.json"
+    },
+    "expected": [
+     "extract.split is required for html_regex"
+    ]
+   }
+  ]
+ },
+ "sources": [
+  {
+   "name": "ctrip-flights-h5",
+   "config": {
+    "name": "ctrip-flights-h5",
+    "label": "携程 H5 线路页（真实机票价格）",
+    "transport": {
+     "client": "curl",
+     "url_template": "https://m.ctrip.com/html5/flight/{dcity}-{acity}-day-{n}.html",
+     "note": "只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）",
+     "block_markers": [
+      "whaleguard"
+     ]
+    },
+    "constants": {
+     "dcity": "kmg",
+     "acity": "bjs"
+    },
+    "default_dates": "next_week",
+    "date": {
+     "params": {
+      "n": "day_offset"
+     }
+    },
+    "extract": {
+     "kind": "json_in_script",
+     "var": "window.__INITIAL_STATE__",
+     "rows": "listData.flights",
+     "date": "listData.ddate",
+     "strip": "listData.dateList[].date",
+     "fields": {
+      "flight_no": "flightItem.flights[].flightNo|join:+",
+      "airline": "flightItem.flights[0].airline.name",
+      "dep": "flightItem.flights[0].dtime|time",
+      "arr": {
+       "path": "flightItem.flights[-1].atime",
+       "ops": [
+        "time"
+       ],
+       "compare_day_with": "flightItem.flights[0].dtime"
+      },
+      "dep_port": "flightItem.flights[0].dport.name",
+      "arr_port": "flightItem.flights[-1].aport.name",
+      "arr_city": "flightItem.flights[-1].aport.cityCode",
+      "stops": {
+       "path": "flightItem.flights",
+       "ops": [
+        "len-1"
+       ]
+      },
+      "price": "price",
+      "cabin": "displayClass",
+      "discount": "drate"
+     }
+    },
+    "filters": {
+     "time_field": "dep",
+     "window": [
+      "08:00",
+      "18:00"
+     ]
+    },
+    "counts": [
+     {
+      "key": "in_window",
+      "label": "时段内班次"
+     },
+     {
+      "key": "in_window_nonstop",
+      "label": "时段内直飞",
+      "where": {
+       "stops": 0
+      }
+     }
+    ],
+    "selects": [
+     {
+      "key": "best",
+      "label": "最低价（含经停）",
+      "sort_by": [
+       "price",
+       "dep"
+      ]
+     },
+     {
+      "key": "best_nonstop",
+      "label": "直飞最低",
+      "sort_by": [
+       "price",
+       "dep"
+      ],
+      "where": {
+       "stops": 0
+      }
+     }
+    ],
+    "report": {
+     "title": "携程真实机票价格（H5 线路页）",
+     "source_note": "`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）",
+     "preview": {
+      "columns": [
+       "flight_no",
+       "dep",
+       "arr",
+       "airline",
+       "stops",
+       "price"
+      ],
+      "limit": 6
+     },
+     "notes": [
+      "用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。",
+      "带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。",
+      "抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。",
+      "酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。"
+     ],
+     "currency": "¥"
+    },
+    "_path": "ctrip/sources/ctrip-flights-h5.json"
+   },
+   "fixture": "bench/fixtures/ctrip_h5_route.html",
+   "today": "2026-10-02",
+   "dates": [
+    "2026-10-05",
+    "2026-10-09",
+    "2026-10-02"
+   ],
+   "url_for": [
+    {
+     "date": "2026-10-05",
+     "url": "https://m.ctrip.com/html5/flight/kmg-bjs-day-3.html"
+    },
+    {
+     "date": "2026-10-09",
+     "url": "https://m.ctrip.com/html5/flight/kmg-bjs-day-7.html"
+    },
+    {
+     "date": "2026-10-02",
+     "url": "https://m.ctrip.com/html5/flight/kmg-bjs-day-0.html"
+    }
+   ],
+   "date_params": [
+    {
+     "date": "2026-10-05",
+     "params": {
+      "dcity": "kmg",
+      "acity": "bjs",
+      "n": 3
+     }
+    },
+    {
+     "date": "2026-10-09",
+     "params": {
+      "dcity": "kmg",
+      "acity": "bjs",
+      "n": 7
+     }
+    },
+    {
+     "date": "2026-10-02",
+     "params": {
+      "dcity": "kmg",
+      "acity": "bjs",
+      "n": 0
+     }
+    }
+   ],
+   "pages": [
+    {
+     "date": "2026-10-05",
+     "page_date": "2026-10-05",
+     "strip": [
+      "2026-10-03",
+      "2026-10-04",
+      "2026-10-05",
+      "2026-10-06",
+      "2026-10-07"
+     ],
+     "rows": [
+      {
+       "flight_no": "CA4171",
+       "airline": "中国国航",
+       "dep": "07:00",
+       "arr": "10:35",
+       "dep_port": "长水",
+       "arr_port": "首都",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1150,
+       "cabin": "经济舱",
+       "discount": "3.5折"
+      },
+      {
+       "flight_no": "MU5749+MU2012",
+       "airline": "东方航空",
+       "dep": "09:30",
+       "arr": "16:55",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 1,
+       "price": 1264,
+       "cabin": "经济舱",
+       "discount": "3.8折"
+      },
+      {
+       "flight_no": "CZ6160",
+       "airline": "南方航空",
+       "dep": "21:05",
+       "arr": "00:30+1",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1340,
+       "cabin": "经济舱",
+       "discount": "4折"
+      },
+      {
+       "flight_no": "JD5630",
+       "airline": "新海航｜首都航空",
+       "dep": "14:35",
+       "arr": "17:55",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1350,
+       "cabin": "经济舱",
+       "discount": "4折"
+      },
+      {
+       "flight_no": "CA8648",
+       "airline": "中国国航",
+       "dep": "08:15",
+       "arr": "11:30",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1350,
+       "cabin": "经济舱",
+       "discount": "4折"
+      },
+      {
+       "flight_no": "KY8269",
+       "airline": "昆明航空",
+       "dep": "08:20",
+       "arr": "12:15",
+       "dep_port": "长水",
+       "arr_port": "首都",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1388,
+       "cabin": "经济舱",
+       "discount": "4.2折"
+      }
+     ],
+     "rows_count": 6,
+     "counts": {
+      "in_window": 4,
+      "in_window_nonstop": 3
+     },
+     "audits": {},
+     "selects": {
+      "best": {
+       "flight_no": "MU5749+MU2012",
+       "airline": "东方航空",
+       "dep": "09:30",
+       "arr": "16:55",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 1,
+       "price": 1264,
+       "cabin": "经济舱",
+       "discount": "3.8折"
+      },
+      "best_nonstop": {
+       "flight_no": "CA8648",
+       "airline": "中国国航",
+       "dep": "08:15",
+       "arr": "11:30",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1350,
+       "cabin": "经济舱",
+       "discount": "4折"
+      }
+     }
+    },
+    {
+     "date": "2026-10-09",
+     "page_date": "2026-10-05",
+     "strip": [
+      "2026-10-03",
+      "2026-10-04",
+      "2026-10-05",
+      "2026-10-06",
+      "2026-10-07"
+     ],
+     "rows": [
+      {
+       "flight_no": "CA4171",
+       "airline": "中国国航",
+       "dep": "07:00",
+       "arr": "10:35",
+       "dep_port": "长水",
+       "arr_port": "首都",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1150,
+       "cabin": "经济舱",
+       "discount": "3.5折"
+      },
+      {
+       "flight_no": "MU5749+MU2012",
+       "airline": "东方航空",
+       "dep": "09:30",
+       "arr": "16:55",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 1,
+       "price": 1264,
+       "cabin": "经济舱",
+       "discount": "3.8折"
+      },
+      {
+       "flight_no": "CZ6160",
+       "airline": "南方航空",
+       "dep": "21:05",
+       "arr": "00:30+1",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1340,
+       "cabin": "经济舱",
+       "discount": "4折"
+      },
+      {
+       "flight_no": "JD5630",
+       "airline": "新海航｜首都航空",
+       "dep": "14:35",
+       "arr": "17:55",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1350,
+       "cabin": "经济舱",
+       "discount": "4折"
+      },
+      {
+       "flight_no": "CA8648",
+       "airline": "中国国航",
+       "dep": "08:15",
+       "arr": "11:30",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1350,
+       "cabin": "经济舱",
+       "discount": "4折"
+      },
+      {
+       "flight_no": "KY8269",
+       "airline": "昆明航空",
+       "dep": "08:20",
+       "arr": "12:15",
+       "dep_port": "长水",
+       "arr_port": "首都",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1388,
+       "cabin": "经济舱",
+       "discount": "4.2折"
+      }
+     ],
+     "rows_count": 6,
+     "counts": {
+      "in_window": 4,
+      "in_window_nonstop": 3
+     },
+     "audits": {},
+     "selects": {
+      "best": {
+       "flight_no": "MU5749+MU2012",
+       "airline": "东方航空",
+       "dep": "09:30",
+       "arr": "16:55",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 1,
+       "price": 1264,
+       "cabin": "经济舱",
+       "discount": "3.8折"
+      },
+      "best_nonstop": {
+       "flight_no": "CA8648",
+       "airline": "中国国航",
+       "dep": "08:15",
+       "arr": "11:30",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1350,
+       "cabin": "经济舱",
+       "discount": "4折"
+      }
+     }
+    },
+    {
+     "date": "2026-10-02",
+     "page_date": "2026-10-05",
+     "strip": [
+      "2026-10-03",
+      "2026-10-04",
+      "2026-10-05",
+      "2026-10-06",
+      "2026-10-07"
+     ],
+     "rows": [
+      {
+       "flight_no": "CA4171",
+       "airline": "中国国航",
+       "dep": "07:00",
+       "arr": "10:35",
+       "dep_port": "长水",
+       "arr_port": "首都",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1150,
+       "cabin": "经济舱",
+       "discount": "3.5折"
+      },
+      {
+       "flight_no": "MU5749+MU2012",
+       "airline": "东方航空",
+       "dep": "09:30",
+       "arr": "16:55",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 1,
+       "price": 1264,
+       "cabin": "经济舱",
+       "discount": "3.8折"
+      },
+      {
+       "flight_no": "CZ6160",
+       "airline": "南方航空",
+       "dep": "21:05",
+       "arr": "00:30+1",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1340,
+       "cabin": "经济舱",
+       "discount": "4折"
+      },
+      {
+       "flight_no": "JD5630",
+       "airline": "新海航｜首都航空",
+       "dep": "14:35",
+       "arr": "17:55",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1350,
+       "cabin": "经济舱",
+       "discount": "4折"
+      },
+      {
+       "flight_no": "CA8648",
+       "airline": "中国国航",
+       "dep": "08:15",
+       "arr": "11:30",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1350,
+       "cabin": "经济舱",
+       "discount": "4折"
+      },
+      {
+       "flight_no": "KY8269",
+       "airline": "昆明航空",
+       "dep": "08:20",
+       "arr": "12:15",
+       "dep_port": "长水",
+       "arr_port": "首都",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1388,
+       "cabin": "经济舱",
+       "discount": "4.2折"
+      }
+     ],
+     "rows_count": 6,
+     "counts": {
+      "in_window": 4,
+      "in_window_nonstop": 3
+     },
+     "audits": {},
+     "selects": {
+      "best": {
+       "flight_no": "MU5749+MU2012",
+       "airline": "东方航空",
+       "dep": "09:30",
+       "arr": "16:55",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 1,
+       "price": 1264,
+       "cabin": "经济舱",
+       "discount": "3.8折"
+      },
+      "best_nonstop": {
+       "flight_no": "CA8648",
+       "airline": "中国国航",
+       "dep": "08:15",
+       "arr": "11:30",
+       "dep_port": "长水",
+       "arr_port": "大兴",
+       "arr_city": "BJS",
+       "stops": 0,
+       "price": 1350,
+       "cabin": "经济舱",
+       "discount": "4折"
+      }
+     }
+    }
+   ],
+   "report_markdown": "# 携程真实机票价格（H5 线路页）\n\n- 数据源配置：`ctrip/sources/ctrip-flights-h5.json`\n- 抓取通道：`curl` —— 只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）\n- 出发时段口径：[08:00, 18:00] 闭区间（字段 `dep`）\n- 数据来源：`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）\n\n| 日期 | 时段内班次 | 时段内直飞 | 最低价（含经停） | 直飞最低 |\n|---|---|---|---|---|\n| 2026-10-02 | 4 | 3 | MU5749+MU2012 09:30 **¥1264** | CA8648 08:15 **¥1350** |\n| 2026-10-05 | 4 | 3 | MU5749+MU2012 09:30 **¥1264** | CA8648 08:15 **¥1350** |\n| 2026-10-09 | 4 | 3 | MU5749+MU2012 09:30 **¥1264** | CA8648 08:15 **¥1350** |\n\n**最低价（含经停）（真实数据）**：2026-10-02 MU5749+MU2012 东方航空 09:30 16:55 长水 大兴 经济舱 3.8折 **¥1264**\n\n**直飞最低（真实数据）**：2026-10-02 CA8648 中国国航 08:15 11:30 长水 大兴 经济舱 4折 **¥1350**\n\n## 2026-10-02 前 6 条（原始行）\n\n| flight_no | dep | arr | airline | stops | price |\n|---|---|---|---|---|---|\n| CA4171 | 07:00 | 10:35 | 中国国航 | 0 | 1150 |\n| MU5749+MU2012 | 09:30 | 16:55 | 东方航空 | 1 | 1264 |\n| CZ6160 | 21:05 | 00:30+1 | 南方航空 | 0 | 1340 |\n| JD5630 | 14:35 | 17:55 | 新海航｜首都航空 | 0 | 1350 |\n| CA8648 | 08:15 | 11:30 | 中国国航 | 0 | 1350 |\n| KY8269 | 08:20 | 12:15 | 昆明航空 | 0 | 1388 |\n\n## 说明\n\n- 用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。\n- 带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。\n- 抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。\n- 酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。\n",
+   "report_markdown_rendered": "# 携程真实机票价格（H5 线路页）\n\n- 数据源配置：`ctrip/sources/ctrip-flights-h5.json`\n- 抓取通道：`curl` —— 只有 curl 能过 WhaleGuard 指纹（curl 200 / curl+Chrome UA、httpx、Chromium 全部 432）\n- 出发时段口径：[08:00, 18:00] 闭区间（字段 `dep`）\n- 数据来源：`m.ctrip.com/html5/flight/<dcity>-<acity>-day-N.html` 的 `window.__INITIAL_STATE__.listData.flights`（携程服务端渲染的完整航班列表；N = 目标日期 − 今天）\n\n| 日期 | 时段内班次 | 时段内直飞 | 最低价（含经停） | 直飞最低 |\n|---|---|---|---|---|\n| 2026-10-02 | 4 | 3 | MU5749+MU2012 09:30 **¥1264** | CA8648 08:15 **¥1350** |\n| 2026-10-05 | 4 | 3 | MU5749+MU2012 09:30 **¥1264** | CA8648 08:15 **¥1350** |\n| 2026-10-09 | 4 | 3 | MU5749+MU2012 09:30 **¥1264** | CA8648 08:15 **¥1350** |\n\n**最低价（含经停）（真实数据）**：2026-10-02 MU5749+MU2012 东方航空 09:30 16:55 长水 大兴 经济舱 3.8折 **¥1264**\n\n**直飞最低（真实数据）**：2026-10-02 CA8648 中国国航 08:15 11:30 长水 大兴 经济舱 4折 **¥1350**\n\n## 2026-10-02 前 6 条（原始行）\n\n| flight_no | dep | arr | airline | stops | price |\n|---|---|---|---|---|---|\n| CA4171 | 07:00 | 10:35 | 中国国航 | 0 | 1150 |\n| MU5749+MU2012 | 09:30 | 16:55 | 东方航空 | 1 | 1264 |\n| CZ6160 | 21:05 | 00:30+1 | 南方航空 | 0 | 1340 |\n| JD5630 | 14:35 | 17:55 | 新海航｜首都航空 | 0 | 1350 |\n| CA8648 | 08:15 | 11:30 | 中国国航 | 0 | 1350 |\n| KY8269 | 08:20 | 12:15 | 昆明航空 | 0 | 1388 |\n\n## 渲染验证：执行器看得到真实 DOM\n\n- 抓到的 HTML 交给真浏览器渲染后，抽取层得到 **29** 个可交互元素，页面标题：昆明到北京机票查询预订-昆明飞北京特价机票价格昆明到北京机票查询预订-昆明飞北京特价机票价格昆明到北京机票查询预订-昆明\n\n```\n[00] div 搜索 航班 价格 预订\n[01] div 搜索 航班 价格 预订\n[02] div 搜索 航班 价格 预订\n[03] div 搜索 航班 价格 预订\n[04] div 搜索 航班 价格 预订\n[05] div 搜索 航班 价格 预订\n[06] div 搜索 航班 价格 预订\n[07] div 搜索 航班 价格 预订\n[08] div 搜索 航班 价格 预订\n[09] div 搜索 航班 价格 预订\n[10] div 搜索 航班 价格 预订\n[11] div 搜索 航班 价格 预订\n[12] div 搜索 航班 价格 预订\n[13] div 搜索 航班 价格 预订\n[14] div 搜索 航班 价格 预订\n[15] div 搜索 航班 价格 预订\n[16] div 搜索 航班 价格 预订\n[17] div 搜索 航班 价格 预订\n[18] div 搜索 航班 价格 预订\n[19] div 搜索 航班 价格 预订\n[20] div 搜索 航班 价格 预订\n[21] div 搜索 航班 价格 预订\n[22] div 搜索 航班 价格 预订\n[23] div 搜索 航班 价格 预订\n[24] div 搜索 航班 价格 预订\n[25] div 搜索 航班 价格 预订\n[26] div 搜索 航班 价格 预订\n[27] div 搜索 航班 价格 预订\n[28] div 搜索 航班 价格 预订\n[29] div 搜索 航班 价格 预订\n[30] div 搜索 航班 价格 预订\n[31] div 搜索 航班 价格 预订\n[32] div 搜索 航班 价格 预订\n[33] di\n```\n\n## 说明\n\n- 用例口径：出发时刻落在 [08:00, 18:00] 闭区间，取最低价（同价取更早起飞）。\n- 带 `+1` 的是次日到达的联程票；若要求当日到达请看“直飞最低”一列。\n- 抓取日期与页面上的价格都是**抓取当时**的携程报价，会随时间和登录态变化。\n- 酒店那一半没有对应通道（匿名访客拿不到价格节点），见 sources/ctrip-hotels-pc.json。\n"
+  },
+  {
+   "name": "ctrip-hotels-pc",
+   "config": {
+    "name": "ctrip-hotels-pc",
+    "label": "携程酒店列表（PC SSR；价格需登录）",
+    "transport": {
+     "client": "curl",
+     "url_template": "https://hotels.ctrip.com/hotels/list?city={city}&checkin={checkin}&checkout={checkout}",
+     "note": "同一 URL curl 200；SSR 里有酒店名/星级/评分，但价格节点对未登录访客为空",
+     "block_markers": [
+      "whaleguard"
+     ]
+    },
+    "constants": {
+     "city": 1
+    },
+    "date": {
+     "params": {
+      "checkin": "date",
+      "checkout": "date+1day"
+     }
+    },
+    "extract": {
+     "kind": "html_regex",
+     "split": "data-offline-hotelId=\"",
+     "fields": {
+      "id": "^(\\d+)",
+      "name": "hotelName\">([^<]+)",
+      "star": "(\\d+) out of 5 stars",
+      "score": "class=\"score\"[^>]*>([\\d.]+)",
+      "price": "class=\"price-line\"[^>]*>\\s*([^<]*)"
+     }
+    },
+    "counts": [
+     {
+      "key": "hotels",
+      "label": "酒店数",
+      "ignore_window": true
+     }
+    ],
+    "audits": [
+     {
+      "key": "empty_price",
+      "label": "价格节点为空",
+      "field": "price",
+      "empty": true
+     }
+    ],
+    "report": {
+     "title": "携程北京酒店（PC 列表 SSR）",
+     "source_note": "`hotels.ctrip.com/hotels/list?city=1&checkin=…&checkout=…` 的服务端渲染 HTML",
+     "preview": {
+      "columns": [
+       "id",
+       "name",
+       "star",
+       "score",
+       "price"
+      ],
+      "limit": 8
+     },
+     "notes": [
+      "**价格拿不到**：匿名访客的 `.price-line` 是空的，页面写着「登录以查看会员价」。",
+      "同一份 HTML 里有真实的酒店名/星级/评分 —— 所以“≤300 元”这个条件**无法用匿名数据判定**。",
+      "要完成酒店那一半，需要已登录会话：`python3 ctrip/live_capture.py --profile <dir>`。"
+     ],
+     "currency": "¥"
+    },
+    "_path": "ctrip/sources/ctrip-hotels-pc.json"
+   },
+   "fixture": "bench/fixtures/ctrip_hotels_pc.html",
+   "today": "2026-10-02",
+   "dates": [
+    "2026-10-09"
+   ],
+   "url_for": [
+    {
+     "date": "2026-10-09",
+     "url": "https://hotels.ctrip.com/hotels/list?city=1&checkin=2026-10-09&checkout=2026-10-10"
+    }
+   ],
+   "date_params": [
+    {
+     "date": "2026-10-09",
+     "params": {
+      "city": 1,
+      "checkin": "2026-10-09",
+      "checkout": "2026-10-10"
+     }
+    }
+   ],
+   "pages": [
+    {
+     "date": "2026-10-09",
+     "page_date": "",
+     "strip": [],
+     "rows": [
+      {
+       "id": "40611324",
+       "name": "麗枫酒店(北京国贸四惠地铁站店)",
+       "star": "3",
+       "score": "4.8",
+       "price": ""
+      },
+      {
+       "id": "1286148",
+       "name": "北京索菲特大酒店",
+       "star": "5",
+       "score": "4.6",
+       "price": ""
+      },
+      {
+       "id": "427807",
+       "name": "北京长富宫饭店",
+       "star": "",
+       "score": "4.8",
+       "price": ""
+      }
+     ],
+     "rows_count": 3,
+     "counts": {
+      "hotels": 3
+     },
+     "audits": {
+      "empty_price": 3
+     },
+     "selects": {}
+    }
+   ],
+   "report_markdown": "# 携程北京酒店（PC 列表 SSR）\n\n- 数据源配置：`ctrip/sources/ctrip-hotels-pc.json`\n- 抓取通道：`curl` —— 同一 URL curl 200；SSR 里有酒店名/星级/评分，但价格节点对未登录访客为空\n- 数据来源：`hotels.ctrip.com/hotels/list?city=1&checkin=…&checkout=…` 的服务端渲染 HTML\n\n| 日期 | 酒店数 | 价格节点为空 |\n|---|---|---|\n| 2026-10-09 | 3 | 3/3 |\n\n## 2026-10-09 前 3 条（原始行）\n\n| id | name | star | score | price |\n|---|---|---|---|---|\n| 40611324 | 麗枫酒店(北京国贸四惠地铁站店) | 3 | 4.8 |  |\n| 1286148 | 北京索菲特大酒店 | 5 | 4.6 |  |\n| 427807 | 北京长富宫饭店 |  | 4.8 |  |\n\n## 说明\n\n- **价格拿不到**：匿名访客的 `.price-line` 是空的，页面写着「登录以查看会员价」。\n- 同一份 HTML 里有真实的酒店名/星级/评分 —— 所以“≤300 元”这个条件**无法用匿名数据判定**。\n- 要完成酒店那一半，需要已登录会话：`python3 ctrip/live_capture.py --profile <dir>`。\n",
+   "report_markdown_rendered": "# 携程北京酒店（PC 列表 SSR）\n\n- 数据源配置：`ctrip/sources/ctrip-hotels-pc.json`\n- 抓取通道：`curl` —— 同一 URL curl 200；SSR 里有酒店名/星级/评分，但价格节点对未登录访客为空\n- 数据来源：`hotels.ctrip.com/hotels/list?city=1&checkin=…&checkout=…` 的服务端渲染 HTML\n\n| 日期 | 酒店数 | 价格节点为空 |\n|---|---|---|\n| 2026-10-09 | 3 | 3/3 |\n\n## 2026-10-09 前 3 条（原始行）\n\n| id | name | star | score | price |\n|---|---|---|---|---|\n| 40611324 | 麗枫酒店(北京国贸四惠地铁站店) | 3 | 4.8 |  |\n| 1286148 | 北京索菲特大酒店 | 5 | 4.6 |  |\n| 427807 | 北京长富宫饭店 |  | 4.8 |  |\n\n## 渲染验证：执行器看得到真实 DOM\n\n- 抓到的 HTML 交给真浏览器渲染后，抽取层得到 **29** 个可交互元素，页面标题：昆明到北京机票查询预订-昆明飞北京特价机票价格昆明到北京机票查询预订-昆明飞北京特价机票价格昆明到北京机票查询预订-昆明\n\n```\n[00] div 搜索 航班 价格 预订\n[01] div 搜索 航班 价格 预订\n[02] div 搜索 航班 价格 预订\n[03] div 搜索 航班 价格 预订\n[04] div 搜索 航班 价格 预订\n[05] div 搜索 航班 价格 预订\n[06] div 搜索 航班 价格 预订\n[07] div 搜索 航班 价格 预订\n[08] div 搜索 航班 价格 预订\n[09] div 搜索 航班 价格 预订\n[10] div 搜索 航班 价格 预订\n[11] div 搜索 航班 价格 预订\n[12] div 搜索 航班 价格 预订\n[13] div 搜索 航班 价格 预订\n[14] div 搜索 航班 价格 预订\n[15] div 搜索 航班 价格 预订\n[16] div 搜索 航班 价格 预订\n[17] div 搜索 航班 价格 预订\n[18] div 搜索 航班 价格 预订\n[19] div 搜索 航班 价格 预订\n[20] div 搜索 航班 价格 预订\n[21] div 搜索 航班 价格 预订\n[22] div 搜索 航班 价格 预订\n[23] div 搜索 航班 价格 预订\n[24] div 搜索 航班 价格 预订\n[25] div 搜索 航班 价格 预订\n[26] div 搜索 航班 价格 预订\n[27] div 搜索 航班 价格 预订\n[28] div 搜索 航班 价格 预订\n[29] div 搜索 航班 价格 预订\n[30] div 搜索 航班 价格 预订\n[31] div 搜索 航班 价格 预订\n[32] div 搜索 航班 价格 预订\n[33] di\n```\n\n## 说明\n\n- **价格拿不到**：匿名访客的 `.price-line` 是空的，页面写着「登录以查看会员价」。\n- 同一份 HTML 里有真实的酒店名/星级/评分 —— 所以“≤300 元”这个条件**无法用匿名数据判定**。\n- 要完成酒店那一半，需要已登录会话：`python3 ctrip/live_capture.py --profile <dir>`。\n"
+  }
+ ]
+}

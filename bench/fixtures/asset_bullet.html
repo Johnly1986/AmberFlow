@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>安防资产台账 - 设备登记</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:40px auto}
+header a{font-weight:bold;text-decoration:none;color:#111}
+label{display:block;margin-top:12px;font-weight:600}
+input,select{width:100%;padding:6px;margin-top:4px;box-sizing:border-box}
+.err{color:#c00;font-size:13px;min-height:18px}button{margin-top:16px;padding:8px 20px}</style>
+</head>
+<body>
+<header><a data-test="logo" href="asset_portal.html">安防资产台账</a></header>
+<main>
+  <h1>枪机 / 筒机 登记</h1>
+  <form onsubmit="return submitA(event)">
+    <label>序列号 <input data-test="a-sn" required></label>
+    <label>设备型号 <input data-test="a-model" required></label>
+    <label>分辨率
+      <select data-test="a-res"><option value="">请选择</option><option>1080P</option><option>4MP</option><option>8MP</option></select></label>
+    <label>焦距(mm) <input data-test="a-lens" type="number" step="0.1" required></label>
+    <label>管理地址 <input data-test="a-ip" required></label>
+    <label>安装点位 <input data-test="a-spot" required></label>
+    <p class="err" data-test="a-error"></p>
+    <button type="submit" data-test="a-submit">提交登记</button>
+  </form>
+</main>
+<script>
+function submitA(e){
+  e.preventDefault();
+  const err = document.querySelector("[data-test='a-error']");
+  const sn = document.querySelector("[data-test='a-sn']").value.trim();
+  if(!/^GC-?\d{4,}$/.test(sn)){ err.textContent = "序列号格式错误(应为 GC-XXXX)"; return false; }
+  location.href = "asset_done.html?" + new URLSearchParams({serial: sn, form: "A"});
+  return false;
+}
+</script>
+</body>
+</html>

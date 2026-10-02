@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>设备登记（框架页）</title>
+<style>body{font-family:sans-serif;max-width:720px;margin:32px auto}</style></head>
+<body>
+<h1>设备登记入口</h1>
+<p>登记表单在下方框架内。</p>
+<!-- The form lives INSIDE an iframe: document.querySelectorAll on the parent sees
+     nothing at all, which is exactly the production shape that used to be
+     un-actionable ("action space exhausted" on an empty-looking page). -->
+<iframe src="frames_inner.html" width="520" height="240" title="登记表单"></iframe>
+</body></html>

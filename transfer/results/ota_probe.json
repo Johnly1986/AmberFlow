@@ -1,0 +1,252 @@
+{
+  "checked_at": "2026-10-02 01:29:21",
+  "http": {
+    "qunar-flight": [
+      {
+        "ua": "curl-cli",
+        "status": 200,
+        "bytes": 84041,
+        "secs": 0.6,
+        "title": "【去哪儿网】机票查询,特价机票,打折飞机票-去哪儿网Qunar.com",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "<!DOCTYPE html> <html> <head> <script>window.__root_time = new Date().getTime();</script> <meta http-equiv=\"Co",
+        "label": "去哪儿机票列表（昆明→北京 2026-10-05）"
+      },
+      {
+        "ua": "httpx-浏览器UA",
+        "status": 200,
+        "bytes": 83243,
+        "secs": 0.6,
+        "title": "【去哪儿网】机票查询,特价机票,打折飞机票-去哪儿网Qunar.com",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "<!DOCTYPE html> <html> <head> <script>window.__root_time = new Date().getTime();</script> <meta http-equiv=\"Co",
+        "label": "去哪儿机票列表（昆明→北京 2026-10-05）"
+      }
+    ],
+    "qunar-hotel": [
+      {
+        "ua": "curl-cli",
+        "status": 301,
+        "bytes": 45,
+        "secs": 0.4,
+        "title": "",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "Moved Permanently. Redirecting to /cn/beijing",
+        "label": "去哪儿酒店（北京）"
+      },
+      {
+        "ua": "httpx-浏览器UA",
+        "status": 200,
+        "bytes": 2798,
+        "secs": 1.2,
+        "title": "【去哪儿网】机票查询预订，酒店预订，旅游团购，度假搜索，门票预订-去哪儿网Qunar.com",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "<!DOCTYPE html> <html lang=\"en\"> <head> <meta charset=\"UTF-8\"> <meta name=\"viewport\" content=\"width=device-wid",
+        "label": "去哪儿酒店（北京）"
+      }
+    ],
+    "ly-hotel": [
+      {
+        "ua": "curl-cli",
+        "status": 301,
+        "bytes": 0,
+        "secs": 0.2,
+        "title": "",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "",
+        "label": "同程酒店（特价酒店）"
+      },
+      {
+        "ua": "httpx-浏览器UA",
+        "status": 200,
+        "bytes": 236559,
+        "secs": 0.5,
+        "title": "【同程特价酒店】酒店价格查询_打折酒店预订_酒店预订官网-同程酒店",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "<!DOCTYPE html> <html > <head><meta charset=\"utf-8\"> <title>【同程特价酒店】酒店价格查询_打折酒店预订_酒店预订官网-同程酒店</title> <meta na",
+        "label": "同程酒店（特价酒店）"
+      }
+    ],
+    "tuniu": [
+      {
+        "ua": "curl-cli",
+        "status": 202,
+        "bytes": 11137,
+        "secs": 0.3,
+        "title": "",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transit",
+        "label": "途牛首页"
+      },
+      {
+        "ua": "httpx-浏览器UA",
+        "status": 202,
+        "bytes": 11122,
+        "secs": 0.3,
+        "title": "",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transit",
+        "label": "途牛首页"
+      }
+    ],
+    "booking-hotel": [
+      {
+        "ua": "curl-cli",
+        "status": 202,
+        "bytes": 0,
+        "secs": 0.0,
+        "title": "",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "",
+        "label": "Booking 北京 2026-10-08"
+      },
+      {
+        "ua": "httpx-浏览器UA",
+        "status": 202,
+        "bytes": 0,
+        "secs": 0.0,
+        "title": "",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "",
+        "label": "Booking 北京 2026-10-08"
+      }
+    ],
+    "agoda-hotel": [
+      {
+        "ua": "curl-cli",
+        "status": 200,
+        "bytes": 85233,
+        "secs": 0.3,
+        "title": "",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "<!DOCTYPE html> <html lang=\"zh-Hans\" kite-lang=\"zh-Hans\" class=\"chrome no-js\" dir=\"ltr\"> <head> <meta charset=",
+        "label": "Agoda 北京城市页"
+      },
+      {
+        "ua": "httpx-浏览器UA",
+        "status": 200,
+        "bytes": 85191,
+        "secs": 0.1,
+        "title": "",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "<!DOCTYPE html> <html lang=\"zh-Hans\" kite-lang=\"zh-Hans\" class=\"chrome no-js\" dir=\"ltr\"> <head> <meta charset=",
+        "label": "Agoda 北京城市页"
+      }
+    ],
+    "expedia-hotel": [
+      {
+        "ua": "curl-cli",
+        "status": 429,
+        "bytes": 13290,
+        "secs": 0.1,
+        "title": "",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "\b\u0000\u0000\u0000\u0000\u0000\u0000\u0003]iȑ+\\yI]\u0001\u001bX\u000ef<'%e2I1 R\"GDf$Uv\u0018/\"`拈$Vv!uϒݷUZeC^9yW\u0007V%v\u0014n?7}ULؿNoe~xI1c#g +vF_߱3\u001boE~`w^\u0007?&\u0007v7zMK^T -U ",
+        "label": "Expedia 北京 2026-10-08"
+      },
+      {
+        "ua": "httpx-浏览器UA",
+        "status": 429,
+        "bytes": 113565,
+        "secs": 0.1,
+        "title": "Bot or Not?",
+        "price_tokens": 0,
+        "challenge": true,
+        "discontinued_notice": false,
+        "body_head": "<!DOCTYPE html><html ><head><title>Bot or Not?</title><meta charSet=\"UTF-8\"/><meta http-equiv=\"X-UA-Compatible",
+        "label": "Expedia 北京 2026-10-08"
+      }
+    ],
+    "kayak-hotel": [
+      {
+        "ua": "curl-cli",
+        "status": 302,
+        "bytes": 0,
+        "secs": 0.4,
+        "title": "",
+        "price_tokens": 0,
+        "challenge": false,
+        "discontinued_notice": false,
+        "body_head": "",
+        "label": "Kayak 北京 2026-10-08"
+      },
+      {
+        "ua": "httpx-浏览器UA",
+        "status": 200,
+        "bytes": 4954,
+        "secs": 0.3,
+        "title": "Please verify that you are a real user",
+        "price_tokens": 0,
+        "challenge": true,
+        "discontinued_notice": false,
+        "body_head": "<!DOCTYPE html> <html lang=\"en\" dir=\"ltr\"> <head> <meta charset=\"utf-8\"> <meta name=\"viewport\" content=\"width=",
+        "label": "Kayak 北京 2026-10-08"
+      }
+    ]
+  },
+  "browser_render": [
+    {
+      "key": "qunar-flight",
+      "url": "https://flight.qunar.com/site/oneway_list.htm?searchDepartureAirport=%E6%98%86%E6%98%8E&searchArrivalAirport=%E5%8C%97%E4%BA%AC&searchDepartureTime=2026-10-05",
+      "status": 200,
+      "title": "【去哪儿网】机票查询,特价机票,打折飞机票-去哪儿网Qunar.com",
+      "text_len": 495,
+      "prices": 0,
+      "price_sample": [],
+      "text_head": "请按 shift+enter 进入去哪网智能导盲语音引导模式 | 适老化及无障碍 | 请登录 | 或免费注册 | 消息 | 查看订单 | 积分商城 | 联系客服 | 首页 | 机票 | 酒店 | 团购 | 度假 | 邮轮 | 门票 | 火车票 | 攻略 | 当地人 | 汽车票 | 单程往返 | 周一"
+    },
+    {
+      "key": "ly-hotel",
+      "url": "https://www.ly.com/hotel/",
+      "status": 200,
+      "title": "【同程特价酒店】酒店价格查询_打折酒店预订_酒店预订官网-同程酒店",
+      "text_len": 1023,
+      "prices": 0,
+      "price_sample": [],
+      "text_head": "Language | 首页 | 酒店 | 机票 | 火车票 | 更多 | 登录 | 注册 | 目的地 | 入住 | 周四 | 离店 | 今天 | 关键词 | 人数 | 1成人，0儿童 | 搜索 | 登录会员订酒店，即刻享受促销价~ | 超多优惠享不停 天天特价会员特权限时抢购门店新客出游特惠 | 酒"
+    },
+    {
+      "key": "tuniu",
+      "url": "https://www.tuniu.com/",
+      "status": 202,
+      "title": "WAF拦截页面",
+      "text_len": 191,
+      "prices": 0,
+      "price_sample": [],
+      "text_head": "您的请求已中断 | 您提交的请求可能对网站造成威胁，无法访问 | 可能原因 | Web应用防护服务检测您当前访问存在Web安全风险或访问不合规 | 您可以做什么？ | 如有疑问，请点击提交反馈或联系网站安全运维中心反馈请求UUID | 请求UUID： | 237a5ac4c4e7976ab56406"
+    }
+  ],
+  "verdict": {
+    "anonymous_price_list_reachable": false,
+    "usable_targets": [],
+    "reason": "没有任何一家候选站点对匿名+机房 IP 的访客抛出价格列表：qunar-flight 200/200；qunar-hotel 301/200；ly-hotel 301/200；tuniu 202/202；booking-hotel 202/202；agoda-hotel 200/200；expedia-hotel 429/429（挑战页）；kayak-hotel 302/200（挑战页）",
+    "qunar_flight_notice": "去哪儿网页版机票查询/预订 2026-10-10 起停止提供（页面公告，实测抓到）",
+    "fallback_for_transfer": "用「结构不同、同类任务」的复刻站验证迁移（transfer/），真实站点一侧等能过风控的出口 IP + 登录态，驱动可原样复用"
+  }
+}
