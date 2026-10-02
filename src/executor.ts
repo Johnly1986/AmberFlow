@@ -182,6 +182,18 @@ export interface EscalationRequest {
   why: string;
 }
 
+/**
+ * Remembers which elements were clicked and changed nothing, per (page, subgoal), so
+ * a retry / resume / re-run does not walk into the same dead element again — and
+ * CLEARS the mark the moment that element works (see src/outcome-memory.ts).
+ */
+export interface OutcomeMemoryLike {
+  key(url: string, instruction: string): string;
+  inertIn(key: string): ReadonlySet<string>;
+  record(key: string, signature: string, outcome: "inert" | "effective"): void;
+  countPrevented?(n?: number): void;
+}
+
 export type EscalatorLike =
   (req: EscalationRequest) => string | null | Promise<string | null>;
 
@@ -207,6 +219,8 @@ export interface RunOptions {
   reobserve?: boolean;
   /** Consulted after re-observation fails, before the subgoal blocks (opt-in). */
   escalateFn?: EscalatorLike | null;
+  /** Cross-run memory of elements that proved inert on this page+subgoal. */
+  outcomeMemory?: OutcomeMemoryLike | null;
   /** Reuse an open page (one browser across subgoals); run() then owns nothing. */
   page?: AnyPage | null;
   slots?: Record<string, unknown> | null;
@@ -241,6 +255,8 @@ export interface MiddlewareOptions {
   reobserve?: boolean;
   /** See RunOptions.escalateFn (default: none — the local model is the last word). */
   escalateFn?: EscalatorLike | null;
+  /** See RunOptions.outcomeMemory (default: none — each run starts blind). */
+  outcomeMemory?: OutcomeMemoryLike | null;
   gotoTimeout?: number;
   routeModels?: boolean;
   router?: RouterLike | null;
@@ -422,6 +438,7 @@ export class BrowserMiddleware {
   manualConfirmFn: ((desc: string, stateExcerpt: string) => boolean | Promise<boolean>) | null = null;
   reobserve = true;
   escalateFn: EscalatorLike | null = null;
+  outcomeMemory: OutcomeMemoryLike | null = null;
   gotoTimeout: number;
   /** Deterministic rule prefilter ON, anti-repeat ON (measured production defaults). */
   rulesOn = true;
@@ -449,6 +466,7 @@ export class BrowserMiddleware {
     this.manualConfirmFn = opts.manualConfirmFn ?? null;
     this.reobserve = opts.reobserve ?? true;
     this.escalateFn = opts.escalateFn ?? null;
+    this.outcomeMemory = opts.outcomeMemory ?? null;
     this.gotoTimeout = opts.gotoTimeout ?? 30000;
   }
 
@@ -953,6 +971,7 @@ export class BrowserMiddleware {
       manualConfirmFn = this.manualConfirmFn,
       reobserve = this.reobserve,
       escalateFn = this.escalateFn,
+      outcomeMemory = this.outcomeMemory,
     } = opts;
 
     const slots: Record<string, unknown> = { ...extractSlots(instruction), ...(slotsIn ?? {}) };
@@ -1004,6 +1023,26 @@ export class BrowserMiddleware {
 
       for (let stepNo = 1; stepNo <= this.maxSteps; stepNo++) {
         let elems = await extractElements(pg);
+        // OUTCOME MEMORY: skip elements a previous attempt already proved inert on
+        // this page+subgoal — but only while something else remains to choose from
+        // (a remembered element must never empty the pool).
+        let prevented = 0;
+        if (outcomeMemory) {
+          const inert = outcomeMemory.inertIn(outcomeMemory.key(urlOf(pg), instruction));
+          if (inert.size) {
+            const candidates = Object.entries(elems)
+              .filter(([r, e]) => inert.has(JSON.stringify(esig(e))) && forbidden[r] === undefined);
+            const remaining = Object.keys(elems).length - Object.keys(forbidden).length - candidates.length;
+            if (remaining >= 1) {
+              for (const [r, e] of candidates) forbidden[r] = esig(e);
+              prevented = candidates.length;
+              outcomeMemory.countPrevented?.(prevented);
+              if (verbose && prevented) {
+                console.log(`  step ${stepNo}: outcome memory skipped ${prevented} inert element(s)`);
+              }
+            }
+          }
+        }
         let reobserved = false;          // at most ONE wider look per step
         let escalated = false;           // at most ONE escalation per step
         let escalatedPick: string | null = null;
@@ -1272,6 +1311,7 @@ export class BrowserMiddleware {
           conf: round3(conf), ...(method.startsWith("laya") && layaMargin !== null
             ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}),
           ...(method === "escalate" && escalatedPick ? { escalated: true } : {}),
+          ...(prevented ? { prevented } : {}),
           inert, url: urlOf(pg),
         });
         if (verbose) {
@@ -1322,8 +1362,12 @@ export class BrowserMiddleware {
         // regardless of method (this is what killed the Sign-in loops).
         if (inert) {
           forbidden[ref] = esig(el);
+          outcomeMemory?.record(outcomeMemory.key(urlOf(pg), instruction), JSON.stringify(esig(el)), "inert");
           continue;
         }
+        // It worked: forget any earlier inert mark for this exact element (pages
+        // change, and a stale blacklist would be worse than no memory).
+        outcomeMemory?.record(outcomeMemory.key(urlOf(pg), instruction), JSON.stringify(esig(el)), "effective");
         if (this.antiRepeat) {
           // Forbid after a *semantic* (laya) pick that missed the signal, or
           // after any fill that did not advance it. Rule hits on clicks stay

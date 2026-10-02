@@ -19,7 +19,7 @@ Environment: the author's box is Windows (bash shell), Python 3.14, CUDA (≈35 
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 518 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 529 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -343,6 +343,26 @@ These are empirical findings from this codebase's own experiments — preserve t
 - **Ablation knobs are part of the evidence, not a convenience.** `bench --force-rules on|off`,
   `--force-model`, and now `--force-conf-floor <n>` exist so a gate's *setting* is measurable on the same cases
   (the floor A/B above is what retired the calibration gate). Same for `npm run cache:measure`.
+
+- **Decision memory has TWO halves: what was decided, and what HAPPENED.** `withDecisionCache` covers the
+  first (round 1). `src/outcome-memory.ts` covers the second: an element that was clicked and changed nothing
+  is remembered per (EXACT url + subgoal) by element SIGNATURE (refs are re-indexed every scan, so they must
+  never be persisted), skipped while at least one other candidate remains (it can never empty the pool), and
+  cleared the moment that element works. Bounded (256 keys / 32 per key, LRU), optionally persisted to JSON,
+  and a damaged file degrades to "no memory" rather than failing a run. Mechanism evidence, A/B pinned:
+  two rule-proof buttons where the first is inert — attempt 1 clicks the dead one and spends its step budget,
+  attempt 2 skips it (trace `prevented: 1`) and completes; the no-memory control fails identically twice; and a
+  remembered element that is the ONLY candidate is still used. Real-model measurement (live pack, rules off,
+  A/B): 4/8 cases / 6/11 subgoals BOTH ways, while the memory demonstrably engaged — 4 (url, subgoal) keys,
+  8 inert signatures, 8 steps with candidates pruned, 39 candidate picks skipped. So it ships as an OPT-IN
+  (`--outcome-memory on`, `runCase(..., mem)`, `BrowserMiddleware({outcomeMemory})`) with both numbers
+  recorded: the mechanism works, the outcome effect is not measurable in a configuration whose failures are
+  "the model cannot find the element at all", not "it keeps hitting a dead one".
+- **A dropped option is worse than a crash.** The first outcome-memory A/B handed `BenchMiddleware` an
+  `outcomeMemory` that was accepted but never forwarded to `super()`, so the executor had none: the run looked
+  normal and both legs measured identically — nearly recorded as "no benefit". `tests/outcome-memory.test.ts`
+  now asserts the harness keeps what it was given (`mw.outcomeMemory === mem`). When an experiment's two legs
+  come out suspiciously identical, verify the knob is actually CONNECTED before believing the result.
 
 - **The risk head fires on ~40% of benign clicks.** On the ctrip case 8/19 steps were flagged RISKY: a nav link "机票" 0.82,
   a sort link "价格从低到高" 0.87, a price-cap link "¥300以下" 0.79, and a purely local "record" button 0.62-0.79. The gate asks

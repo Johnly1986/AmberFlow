@@ -24,6 +24,7 @@ import { TaskPlan, type Subgoal } from "./plan.ts";
 import { checkSignal } from "./signals.ts";
 import { runSubgoalWithRetries } from "./planner.ts";
 import { installLayaRuntime, type DecisionAgent, type LayaRuntime } from "./model.ts";
+import { createOutcomeMemory, type OutcomeMemoryLike } from "./outcome-memory.ts";
 
 export interface BenchCase {
   id: string;
@@ -67,6 +68,8 @@ export interface BenchMiddlewareOptions {
   agentOverride?: DecisionAgent | null;
   auditor?: Auditor;
   routeModels?: boolean;
+  /** Cross-run outcome memory (see src/outcome-memory.ts). */
+  outcomeMemory?: OutcomeMemoryLike | null;
 }
 
 export class BenchMiddleware extends BrowserMiddleware {
@@ -85,6 +88,9 @@ export class BenchMiddleware extends BrowserMiddleware {
       riskyThreshold: 0.6,
       doneThreshold: 0.5,
       confirmFn: () => true,     // bench user: allow-all (risk logged, not blocking)
+      // Forwarded, or the harness would silently run without the memory it was given
+      // (this exact omission produced an A/B that measured nothing).
+      outcomeMemory: opts.outcomeMemory ?? null,
     });
     this.modelIdUsed = route
       ? "router"
@@ -98,6 +104,7 @@ export class BenchMiddleware extends BrowserMiddleware {
 /** One case: one browser, one page across the whole case (session + JS state persist). */
 export async function runCase(
   c: BenchCase, agents: Record<string, DecisionAgent | null>,
+  outcomeMemory: OutcomeMemoryLike | null = null,
 ): Promise<BenchCaseResult> {
   // `slots` go on the PLAN, not into the per-call options: `runSubgoalWithRetries`
   // passes `plan.slots` (merged with the subgoal's own), so a case-level value bag
@@ -112,6 +119,7 @@ export async function runCase(
     model, rules: c.rules ?? true, antiRepeat: c.anti_repeat ?? true,
     confFloor: c.conf_floor ?? 0.25, maxSteps: c.max_steps ?? 8,
     agentOverride: agents[model] ?? null,
+    outcomeMemory: outcomeMemory ?? null,
   });
   const browser = (await browserEnv.launch({ chromium } as never)) as unknown as {
     newPage(): Promise<unknown>; close(): Promise<void>;
@@ -173,6 +181,10 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
       // Ablation knob: the confidence floor is a GATE, so its setting must be
       // measurable on the same cases (see docs/decision-model-survey.md).
       "force-conf-floor": { type: "string" },
+      // Outcome memory: remember elements that proved inert on a page+subgoal so a
+      // retry does not walk into them again (see src/outcome-memory.ts).
+      "outcome-memory": { type: "string" },
+      "outcome-memory-file": { type: "string" },
     },
   });
   const v = parsed.values;
@@ -203,10 +215,13 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
   console.log(`checkpoints loaded: ${JSON.stringify(Object.keys(agents))}\n`);
 
   const all: BenchCaseResult[] = [];
+  const mem = v["outcome-memory"] === "on"
+    ? createOutcomeMemory({ path: (v["outcome-memory-file"] as string | undefined) ?? null })
+    : null;
   for (const c of cases) {
     console.log(`=== ${c.id} (${c.platform}, model=${c.model ?? "english"}) ===`);
     try {
-      all.push(await runCase(c, agents));
+      all.push(await runCase(c, agents, mem));
     } catch (e) {
       console.error(e);
       all.push({

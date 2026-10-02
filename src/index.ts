@@ -14,6 +14,10 @@ export * as signalInduction from "./signal-induction.ts";
 // decision log (retries/replans/resumes re-ask what was already answered).
 export { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "./decision-cache.ts";
 export * as decisionCache from "./decision-cache.ts";
+// Outcome memory: the other half — remember elements that proved INERT on a
+// page+subgoal so a retry/resume does not repeat a dead action.
+export { OutcomeMemory, createOutcomeMemory, type OutcomeMemoryLike, type OutcomeMemoryStats } from "./outcome-memory.ts";
+export * as outcomeMemory from "./outcome-memory.ts";
 export * from "./plan.ts";
 export * from "./model.ts";
 export * from "./audit.ts";
