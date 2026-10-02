@@ -76,6 +76,7 @@ bash bench/smoke.sh     # CI 的"绿色"定义；缺 ONNX 产物时模型侧三�
 | Excel 批量 | `src/camera-entry.ts`（类型列路由两套表单）· `src/ip-config.ts`（IP 规划表写进设备页） |
 | 归纳完成信号（演示一次） | `tools/induce_signal.ts --url <page> --click <hint> --replays 2` |
 | 看模型自信度准不准（切片 ECE） | `npm run calibration -- bench/results/live-*.json` |
+| 量化学习型 hint 收益 | `npm run hint:measure` |
 | 量化决策缓存收益 | `npm run cache:measure -- shop-add-coupon asset-bullet-zh` |
 | 计划管理 / Path A / Path B | `npm run plan-cli -- --help` · `src/path-a.ts [--confirm-safe]` · `src/picker-server.ts` + 加载 `extension/` |
 | 演示 | `src/long-task.ts`（规划→执行→审计）· `npm run shortlist`（真模型） |

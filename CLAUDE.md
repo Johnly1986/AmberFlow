@@ -379,8 +379,15 @@ These are empirical findings from this codebase's own experiments — preserve t
   (105 model picks), learn pass 3/8 & 4/11 (96), reuse pass 3/8 & **5/11** (91) — and the subgoal covered by
   the learned `a[near~艾伦·图灵]` went from 4 steps to 1. Live sites vary far too much run to run (154/140/128
   total steps; Wikipedia serves error shells) to call the extra subgoal causal. Learned hints amortize
-  subgoals that once SUCCEEDED; they cannot rescue one the model never solved. Hence OPT-IN until a
-  repeat-the-same-plan protocol (like `cache:measure`) shows a clean win.
+  subgoals that once SUCCEEDED; they cannot rescue one the model never solved.
+- **Learned hints DO pay — measured noise-free, not inferred from a live session.** `npm run hint:measure`
+  runs the fixture matrix twice IN ONE PROCESS with the authored hints stripped, so the only difference
+  between run 1 and run 2 is the memory: control 53 -> **53** forwards (identical legs, so the matrix is
+  deterministic), learned 53 -> **44** — 9 forwards saved (−17%), model-driven steps 12 -> 7, 3 of the 4
+  learned hints reused. The pass count is 8/9 in BOTH legs and BOTH runs, which rules out the confound that
+  matters (saving forwards by failing faster). So the mechanism is worth using; it stays opt-in at the
+  LIBRARY level only because the memory's scope and file path are a deployment decision — a middleware must
+  not invent a persistence location — and `--hint-memory` stays explicit in bench so future A/Bs are clean.
 
 - **A frozen corpus must not depend on the WALL CLOCK.** The ctrip parity layer compares a rendered
   report byte for byte, and that report embeds a human-readable 「执行日期」 line — so the gate silently

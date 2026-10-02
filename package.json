@@ -29,7 +29,8 @@
     "picker-server": "node --experimental-strip-types src/picker-server.ts",
     "induce": "node --experimental-strip-types tools/induce_signal.ts",
     "cache:measure": "node --experimental-strip-types tools/cache_measure.ts",
-    "calibration": "node --experimental-strip-types tools/calibration.ts"
+    "calibration": "node --experimental-strip-types tools/calibration.ts",
+    "hint:measure": "node --experimental-strip-types tools/hint_measure.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
