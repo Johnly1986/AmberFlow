@@ -19,7 +19,7 @@ Environment: the author's box is Windows (bash shell), Python 3.14, CUDA (≈35 
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 505 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 514 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -305,12 +305,26 @@ These are empirical findings from this codebase's own experiments — preserve t
   threshold (`path-a.ts`) — it would flag a product page. Our hand-written phrasing gives 0.907 / 0.940
   with the injection page at 1.000 for all three. Presets are tuned for USER PROMPTS, not page text;
   the measured rule stays ours (see `docs/decision-model-survey.md`, variant C in `src/tune-guard.ts`).
-- **C3-R's top-two margin is recorded, not yet gated.** The same-base application (ColomboAI C3R) abstains
-  on "low confidence OR small top-two margin", and its architecture is a System-One fast path plus a
-  separate deliberative (LLM) path. We already have the two-tier shape (rules → laya → re-observe → stop /
-  human); the margin is now written into every `laya*` trace step as `margin` so the gate can be adopted
-  only if it measurably separates good picks from bad ones. Also hardened here: an empty probability map
-  used to make `Math.max()` return `-Infinity`, printing `low confidence -Infinity` in the stop reason.
+- **C3-R's top-two margin does NOT transfer — measured, then rejected.** The same-base application
+  (ColomboAI C3R) abstains on "low confidence OR small top-two margin". On our data (live pack with
+  `--force-rules off`: 70 model picks → 39 good, 5 inert/坏, 26 abstained) the margin points the WRONG way:
+  bad picks have a HIGHER median margin (0.348) than good ones (0.263), and the worst one scored 0.942.
+  Every threshold that catches anything destroys far more good picks — t=0.10 catches 1/5 bad and loses
+  7/39 good; t=0.15 catches 1/5 and loses 17/39. So a small margin here means "the model is torn", not
+  "the model is about to be wrong": our wrong actions are CONFIDENT clicks on plausible-but-inert elements,
+  which the confidence floor + inert detection + re-observe already handle. The margin stays a diagnostic
+  (`trace.margin`), never a gate. (Same run quantifies the rule layer: 8/8 with rules, 4/8 without.)
+  Also hardened here: an empty probability map used to make `Math.max()` return `-Infinity`.
+- **Escalation is a PICKER, not a planner — and it must see the WIDER view.** C3-R's deliberative path is
+  implemented as `RunOptions.escalateFn` / `llmEscalator()`: consulted once per step, only after the local
+  model fell below the floor AND one wider look failed. It receives exactly the criteria view the harness
+  renders and may only name one of those refs; a `null`, a non-candidate ref, or a throwing endpoint means
+  ABSTAIN (fail closed, back to the previous blocking behaviour), so nothing it says can invent an element,
+  a value or an action. Two implementation traps, both hit and fixed: (1) the escalator was originally handed
+  the NARROW pool (40 candidates, target invisible) because the wider pool was only adopted when the local
+  model recovered — widening now becomes the step's view unconditionally; (2) a confident local pick is never
+  overridden (escalation is a fallback, not a second opinion). Pinned by `tests/escalate.test.ts`
+  (recovers a blocked subgoal; rejects an invented ref; not consulted at high confidence; survives a throw).
 
 - **The risk head fires on ~40% of benign clicks.** On the ctrip case 8/19 steps were flagged RISKY: a nav link "机票" 0.82,
   a sort link "价格从低到高" 0.87, a price-cap link "¥300以下" 0.79, and a purely local "record" button 0.62-0.79. The gate asks

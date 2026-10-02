@@ -17,7 +17,7 @@
 import { criteriaView, extractSlots, type ElemPool } from "./extraction.ts";
 import { PlanningRules, TaskPlan, type Subgoal } from "./plan.ts";
 import { checkSignal } from "./signals.ts";
-import { browserSession, type BrowserSession, type RunOptions } from "./executor.ts";
+import { browserSession, type BrowserSession, type EscalatorLike, type RunOptions } from "./executor.ts";
 import type { TraceStep } from "./audit.ts";
 
 /* ------------------------------------------------------------------ snapshot */
@@ -66,6 +66,70 @@ export interface LLMPlannerOptions {
   timeout?: number;
   /** Test seam: replace the HTTP call (defaults to the OpenAI-compatible fetch). */
   chatFn?: ChatFn;
+}
+
+/**
+ * The deliberative rung: an LLM consulted when the LOCAL decision model is unsure.
+ *
+ * C3-R's two-tier design (System-One fast path + separate deliberative path) adapted
+ * to this project's contract: the escalator is a PICKER. It is shown exactly the
+ * criteria view the local model saw and must answer with one of those refs; anything
+ * else — an invented element, a value, an action — is rejected here AND again in the
+ * executor. It fails CLOSED (null = abstain), so an unreachable endpoint degrades to
+ * the local model's abstention rather than to a guessed click.
+ *
+ * Needs OPENAI_BASE_URL + OPENAI_API_KEY (same env as the planner), or an injected
+ * `chatFn` (the test seam).
+ */
+export function llmEscalator(opts: {
+  baseUrl?: string; apiKey?: string; model?: string; timeout?: number;
+  chatFn?: (user: string, system: string) => Promise<string>;
+} = {}): EscalatorLike {
+  const base = (opts.baseUrl ?? process.env.OPENAI_BASE_URL ?? "").replace(/\/+$/, "");
+  const key = opts.apiKey ?? process.env.OPENAI_API_KEY ?? "";
+  const model = opts.model ?? process.env.PLANNER_MODEL ?? "gpt-4o-mini";
+  const timeout = (opts.timeout ?? 30) * 1000;
+
+  const system = "You are a stronger reasoner consulted by a browser-automation harness when its local "
+    + "decision model is unsure. You are given a goal and a NUMBERED list of candidate elements that "
+    + "ALREADY EXIST on the page. Choose the single element that best advances the goal. "
+    + 'Reply ONLY with JSON: {"ref": "<candidate id>"}, or {"ref": null} if none of them does. '
+    + "You may NOT invent elements, values or actions, and you may not propose steps.";
+
+  const chat = opts.chatFn ?? (async (user: string, sys: string): Promise<string> => {
+    if (!base) throw new Error("llmEscalator needs OPENAI_BASE_URL");
+    if (!key) throw new Error("llmEscalator needs OPENAI_API_KEY");
+    const r = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model, temperature: 0,
+        messages: [{ role: "system", content: sys }, { role: "user", content: user }],
+      }),
+      signal: AbortSignal.timeout(timeout),
+    });
+    if (!r.ok) throw new Error(`llmEscalator HTTP ${r.status}`);
+    const body = (await r.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    return body.choices?.[0]?.message?.content ?? "";
+  });
+
+  return async (req) => {
+    const lines = Object.entries(req.criteria).map(([ref, line]) => `${ref}: ${line}`).join("\n");
+    const user = `Goal: ${req.instruction}\nWhy the local model abstained: ${req.why}\n`
+      + `Page: ${req.url} — ${req.title}\n\nCandidates:\n${lines}\n\n`
+      + 'Reply with {"ref": "<one of the ids above, or null>"}.';
+    try {
+      const reply = await chat(user, system);
+      const m = /\{[\s\S]*?\}/.exec(reply ?? "");
+      if (!m) return null;
+      const parsed = JSON.parse(m[0]) as { ref?: unknown };
+      const ref = typeof parsed.ref === "string" ? parsed.ref : null;
+      // the contract: only an element the harness actually showed
+      return ref !== null && Object.prototype.hasOwnProperty.call(req.criteria, ref) ? ref : null;
+    } catch {
+      return null;                                   // fail closed: abstain, never guess
+    }
+  };
 }
 
 export class LLMPlanner implements PlannerLike {

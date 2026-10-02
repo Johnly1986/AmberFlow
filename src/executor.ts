@@ -165,6 +165,26 @@ export interface RunReport {
   audit: AuditVerdictLike;
 }
 
+/**
+ * A stronger reasoner consulted when the LOCAL model is unsure — C3-R's
+ * "deliberative path" adapted to this project's contract: the escalator is a
+ * PICKER, not a planner. It receives the same criteria view the local model saw and
+ * may only name one of those refs; it cannot invent elements, values or actions.
+ */
+export interface EscalationRequest {
+  instruction: string;
+  /** ref -> the rendered line the local model was shown (same rendering). */
+  criteria: Record<string, string>;
+  url: string;
+  title: string;
+  main_text: string;
+  /** Why the local model was not trusted, e.g. "low confidence 0.12 < floor 0.25". */
+  why: string;
+}
+
+export type EscalatorLike =
+  (req: EscalationRequest) => string | null | Promise<string | null>;
+
 export interface RunOptions {
   /** DOM completion signal: `(page) => boolean`, async allowed. */
   goalSignalFn?: ((page: AnyPage) => boolean | Promise<boolean>) | null;
@@ -185,6 +205,8 @@ export interface RunOptions {
    * runs on the way to stopping.
    */
   reobserve?: boolean;
+  /** Consulted after re-observation fails, before the subgoal blocks (opt-in). */
+  escalateFn?: EscalatorLike | null;
   /** Reuse an open page (one browser across subgoals); run() then owns nothing. */
   page?: AnyPage | null;
   slots?: Record<string, unknown> | null;
@@ -217,6 +239,8 @@ export interface MiddlewareOptions {
   manualConfirmFn?: ((desc: string, stateExcerpt: string) => boolean | Promise<boolean>) | null;
   /** See RunOptions.reobserve (default ON). */
   reobserve?: boolean;
+  /** See RunOptions.escalateFn (default: none — the local model is the last word). */
+  escalateFn?: EscalatorLike | null;
   gotoTimeout?: number;
   routeModels?: boolean;
   router?: RouterLike | null;
@@ -397,6 +421,7 @@ export class BrowserMiddleware {
   confirmFn: (desc: string) => boolean | Promise<boolean>;
   manualConfirmFn: ((desc: string, stateExcerpt: string) => boolean | Promise<boolean>) | null = null;
   reobserve = true;
+  escalateFn: EscalatorLike | null = null;
   gotoTimeout: number;
   /** Deterministic rule prefilter ON, anti-repeat ON (measured production defaults). */
   rulesOn = true;
@@ -423,6 +448,7 @@ export class BrowserMiddleware {
     this.confirmFn = opts.confirmFn ?? DEFAULT_CONFIRM;
     this.manualConfirmFn = opts.manualConfirmFn ?? null;
     this.reobserve = opts.reobserve ?? true;
+    this.escalateFn = opts.escalateFn ?? null;
     this.gotoTimeout = opts.gotoTimeout ?? 30000;
   }
 
@@ -926,6 +952,7 @@ export class BrowserMiddleware {
       manualGoal = false,
       manualConfirmFn = this.manualConfirmFn,
       reobserve = this.reobserve,
+      escalateFn = this.escalateFn,
     } = opts;
 
     const slots: Record<string, unknown> = { ...extractSlots(instruction), ...(slotsIn ?? {}) };
@@ -978,6 +1005,8 @@ export class BrowserMiddleware {
       for (let stepNo = 1; stepNo <= this.maxSteps; stepNo++) {
         let elems = await extractElements(pg);
         let reobserved = false;          // at most ONE wider look per step
+        let escalated = false;           // at most ONE escalation per step
+        let escalatedPick: string | null = null;
         // A frozen plan that NAMES its target must never be blocked by the
         // extraction budget: retrieve the hinted element(s) into the pool when
         // they were evicted.
@@ -1096,8 +1125,13 @@ export class BrowserMiddleware {
                 }
                 const [ref2, conf2] = await this.pickElement(
                   instruction, pg, wide, new Set(Object.keys(forbidden)));
+                // The wider view BECOMES the step's view even when the local model
+                // stays unsure: a stronger reasoner (escalation) must be able to see
+                // what the wider look already found, or widening would be pointless.
+                // (Measured: the escalator was handed the 40-element narrow view and
+                // the target was still invisible to it.)
+                elems = wide;
                 if (ref2 !== null && conf2 >= floor) {
-                  elems = wide;
                   ref = ref2;
                   conf = conf2;
                   method = "laya:reobserve";
@@ -1106,7 +1140,40 @@ export class BrowserMiddleware {
                     console.log(`  step ${stepNo}: re-observed wider `
                       + `(${Object.keys(wide).length} elements) -> ${ref} conf=${conf2.toFixed(2)}`);
                   }
+                } else if (verbose) {
+                  console.log(`  step ${stepNo}: re-observed wider `
+                    + `(${Object.keys(wide).length} elements) -> still below floor`);
                 }
+              }
+            }
+            // ESCALATION (C3-R's deliberative path): a stronger reasoner may still
+            // name one of the elements the harness showed. It is a picker, not a
+            // planner — an answer that is not a ref from THIS view is rejected, so
+            // nothing it says can invent an element, a value or an action.
+            if (!recovered && escalateFn && !escalated) {
+              escalated = true;
+              const crit = criteriaView(elems, new Set(Object.keys(forbidden)),
+                await ariaInteractiveLines(pg));
+              const state = {
+                url: urlOf(pg), title: await pg.title(),
+                main_text: await stateText(pg, instruction, this.embedFn),
+              };
+              try {
+                const pick = await escalateFn({
+                  instruction, criteria: crit, why: `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)}`,
+                  ...state,
+                });
+                if (pick && crit[pick] !== undefined && !(pick in forbidden)) {
+                  ref = pick;
+                  method = "escalate";
+                  escalatedPick = pick;
+                  recovered = true;
+                  if (verbose) console.log(`  step ${stepNo}: escalated -> ${pick}`);
+                } else if (verbose) {
+                  console.log(`  step ${stepNo}: escalation rejected (${pick === null ? "no answer" : `'${pick}' is not a shown candidate`})`);
+                }
+              } catch (e) {
+                if (verbose) console.log(`  step ${stepNo}: escalation failed (${describeActionError(e)})`);
               }
             }
             if (!recovered) {
@@ -1204,6 +1271,7 @@ export class BrowserMiddleware {
           step: stepNo, desc, how, value: arg, risky, executed, confirmed, method,
           conf: round3(conf), ...(method.startsWith("laya") && layaMargin !== null
             ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}),
+          ...(method === "escalate" && escalatedPick ? { escalated: true } : {}),
           inert, url: urlOf(pg),
         });
         if (verbose) {
