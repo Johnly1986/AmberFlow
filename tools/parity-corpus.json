@@ -545,6 +545,208 @@
     }
    },
    "hint": "a[href~news]",
+   "expected": "e0"
+  },
+  {
+   "name": "~slug-beats-substring",
+   "kind": "hint",
+   "elems": {
+    "e0": {
+     "ref": "e0",
+     "scan": 0,
+     "tag": "a",
+     "label": "News",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "/news"
+    },
+    "e1": {
+     "ref": "e1",
+     "scan": 1,
+     "tag": "a",
+     "label": "Newsletter",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "/newsletter"
+    }
+   },
+   "hint": "a[href~news]",
+   "expected": "e0"
+  },
+  {
+   "name": "~slug-in-absolute-href",
+   "kind": "hint",
+   "elems": {
+    "e0": {
+     "ref": "e0",
+     "scan": 0,
+     "tag": "a",
+     "label": "Turing",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "https://en.wikipedia.org/wiki/Alan_Turing"
+    },
+    "e1": {
+     "ref": "e1",
+     "scan": 1,
+     "tag": "a",
+     "label": "Enigma",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "https://en.wikipedia.org/wiki/Alan_Turing:_The_Enigma"
+    },
+    "e2": {
+     "ref": "e2",
+     "scan": 2,
+     "tag": "a",
+     "label": "Law",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "https://en.wikipedia.org/wiki/Alan_Turing_law"
+    }
+   },
+   "hint": "a[href~Alan_Turing]",
+   "expected": "e0"
+  },
+  {
+   "name": "~exact-beats-slug",
+   "kind": "hint",
+   "elems": {
+    "e0": {
+     "ref": "e0",
+     "scan": 0,
+     "tag": "a",
+     "label": "Turing",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "Alan_Turing"
+    },
+    "e1": {
+     "ref": "e1",
+     "scan": 1,
+     "tag": "a",
+     "label": "Law",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "Alan_Turing_law"
+    }
+   },
+   "hint": "a[href~Alan_Turing]",
+   "expected": "e0"
+  },
+  {
+   "name": "~genuinely-ambiguous",
+   "kind": "hint",
+   "elems": {
+    "e0": {
+     "ref": "e0",
+     "scan": 0,
+     "tag": "a",
+     "label": "World",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "/news/world"
+    },
+    "e1": {
+     "ref": "e1",
+     "scan": 1,
+     "tag": "a",
+     "label": "UK",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "/news/uk"
+    }
+   },
+   "hint": "a[href~news]",
+   "expected": null
+  },
+  {
+   "name": "bare-whole-label-wins",
+   "kind": "hint",
+   "elems": {
+    "e0": {
+     "ref": "e0",
+     "scan": 0,
+     "tag": "a",
+     "label": "艾伦·图灵",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "/wiki/t"
+    },
+    "e1": {
+     "ref": "e1",
+     "scan": 1,
+     "tag": "a",
+     "label": "艾伦·图灵 – 古吉拉特语",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "https://gu.wikipedia.org/x"
+    },
+    "e2": {
+     "ref": "e2",
+     "scan": 2,
+     "tag": "a",
+     "label": "艾伦·图灵 (消歧义)",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "/wiki/d"
+    }
+   },
+   "hint": "艾伦·图灵",
+   "expected": "e0"
+  },
+  {
+   "name": "bare-prefix-ambiguous",
+   "kind": "hint",
+   "elems": {
+    "e0": {
+     "ref": "e0",
+     "scan": 0,
+     "tag": "a",
+     "label": "艾伦·图灵奖",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "/prize"
+    },
+    "e1": {
+     "ref": "e1",
+     "scan": 1,
+     "tag": "a",
+     "label": "艾伦·图灵研究所",
+     "data_test": "",
+     "name": "",
+     "id": "",
+     "input_type": "",
+     "href": "/institute"
+    }
+   },
+   "hint": "艾伦·图灵",
    "expected": null
   },
   {

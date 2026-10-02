@@ -18,7 +18,12 @@
    用被测实现自己生成期望就不是独立参考了。
 2. **实测结论与设计规范在其中。** `CLAUDE.md` / `ARCHITECTURE.md`（已随仓库保留）描述的
    实测规则、以及 ctrip / transfer / qunar 三个用例的原始报告都在备份中；TS 代码的注释大量引用它们。
-3. **回灌方向反过来也能用。** 移植期在 TS 侧发现的缺陷（replan 异常崩溃、when-skip 被判失败、
+3. **参考实现与 TS 版保持同一套实测规则。** 线上平台（`bench/cases-live.json`）暴露的分级 hint 匹配
+   （`attr~v`：完全相等 → 末段路径 → 全子串；裸 token：整条 label → 整词 → 前缀 → 子串）与
+   "有 hint 时规则层只认 hint、未命中落到模型"的优先级，已回灌到 `layaapp/rules.py` 与
+   `layaapp/executor.py`；对拍语料随之重新生成（`ts/tools/parity-corpus.json`，51 → 57 例），
+   Python 侧测试同步更新。**要再生成语料，必须回到这份备份里跑 `python3 ts/tools/gen_parity_corpus.py`。**
+4. **回灌方向反过来也能用。** 移植期在 TS 侧发现的缺陷（replan 异常崩溃、when-skip 被判失败、
    裸 `elems[ref]`）已回灌进 Python 参考并加钉死测试（备份的 `python-final` 标签即含这些补丁），
    若将来需要再次对拍，这份参考是干净的。
 

@@ -149,3 +149,45 @@ node --experimental-strip-types -e "import('./src/laya-onnx.ts').then(async m =>
   `--disable-extensions`，压过 `--load-extension`，service worker 永不注册（移植扩展 e2e 时实测）；
 - 默认 `confirmFn` 改为**拒绝并告警**（Node 无同步 stdin；风险动作绝不默认放行）；
 - `routerMaxLoaded()` 用 `os.totalmem()`（Python 的 `SC_AVPHYS_PAGES` 更接近 `os.freemem()`）。
+
+## 线上平台实测与优化（2026-10）
+
+`bench/cases-live.json` 的 8 个真实站点用例（Wikipedia 英/中、Hacker News、python.org、BBC、
+books/quotes.toscrape、Polymer shadow DOM 商店）跑真 ONNX 模型 + 真网络：
+
+| | 用例 | 子目标 | 步数中 rule:match 占比 | 耗时 |
+|---|---|---|---|---|
+| 优化前 | 6/8 | 8/9 | 混杂（wiki 两步靠模型侥幸 0.23/0.29） | 66 s |
+| **优化后** | **8/8** | **11/11** | **11/11（零模型选择）** | **90.6 s** |
+
+用 `node --experimental-strip-types src/bench.ts --cases bench/cases-live.json --mode-tag live` 复现。
+
+线上暴露并修掉的四类真实缺陷（都在真实 DOM 上量到，且都钉了单测）：
+
+1. **hint 的 `~` 是"子串匹配 + 全同才敢用"，在真实列表页必然歧义。**
+   `a[href~Alan_Turing]` 在今天的英文维基搜索结果命中 17 条（Alan_Turing / _law / _Institute /
+   Legacy_of_Alan_Turing …），歧义 → 交给模型 → 置信度 0.23 < 0.25 → **BLOCKED**。
+   改为分级：**属性完全相等 → 末段路径等于 token → 才退回旧的"全子串 + 同签名"语义**
+   （仍然对"真正不同"的候选返回 None，bbc 双 `/news` 链接的行为不变）。
+2. **裸 token 同理**（中文维基搜索结果）：规范条目 label 恰为 `艾伦·图灵`，而语言侧栏约 100 条
+   标题只是"包含"它（`艾伦·图灵 – 古吉拉特语`，token 甚至是独立词）。改为分级：
+   **整条 label 相等 → 整词相等 → 词前缀 → 词子串**，只取最强非空层。该步从
+   `laya conf=0.29`（侥幸过线）变成 `rule:match conf=1.00`。
+3. **可见性必须要求"非零盒子"。** 中文维基主页有 **349 个语言侧栏链接**：`checkVisibility()`
+   为真但 `getBoundingClientRect()` 是 0×0，Playwright 拒绝点击 → 旧版让它们进了元素池 →
+   一次点击超时**炸穿 `run()`**（整个用例 0/0）。现在抽取要求 `rect.width>0 && rect.height>0`
+   （与 Playwright 的可点击定义对齐），并且**动作失败被容纳**：`_clickOnly`/`_executeElement`
+   捕获异常 → 返回 `action_failed` → 循环禁掉该 ref 继续，绝不让 TimeoutError 逃出执行器。
+4. **计划的 hint 不该被 token 猜测抢先。** 维基那次首页返回了错误壳（`Why did this happen?`），
+   计划的 `#searchInput` 不在池里；旧规则先跑 `navRule` 按指令 token 连猜 **18 个无值字段**
+   （一个 step 内反复 needs_value），再让模型点到垃圾元素 → 22 步撞 `max_steps`。
+   现在**有 hint 时只认 hint**：命中即规则命中，未命中直接落到模型（这正是文档写的
+   "hint 权威，不拿 token 赌"），`needs_value` 空转消失。
+
+另外三处工程修正：`isDone`/`isRisky` 容忍运行时缺答；bench 运行器改走
+`runSubgoalWithRetries`（**用例里的 `retries` 之前是死数据**）并记录 `attempts`；用例级
+`slots` 挂到 `TaskPlan` 上（改成重试路径后曾丢失，正是线上包抓出来的回归）。线上包的 11 个子目标
+统一加 `retries: 2`——真实站点的冷加载抖动本来就是计划词表要处理的东西。
+
+以上 1/2/4 三条**已同步回灌 Python 参考实现**（`layaapp/rules.py`、`layaapp/executor.py`），
+冻结对拍语料随之重新生成（51 → 57 例，新增 6 条分级用例），Python 侧测试同步更新（158 passed）。

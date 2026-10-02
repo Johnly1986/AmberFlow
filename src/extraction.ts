@@ -226,13 +226,18 @@ export const EXTRACT_JS = String.raw`(arg) => {
   const rows = [];
   for (let i = 0; i < all.length; i++) {
     const e = all[i];
+    // A NON-ZERO BOX is required, not just a layout box: Wikipedia's language
+    // sidebar keeps ~349 interlanguage links inside a collapsed container, so
+    // checkVisibility() is true while getBoundingClientRect() is 0x0 — Playwright
+    // then refuses to click ("element is not visible") and the step died. Keep
+    // this in sync with what the executor can actually act on.
+    const hasBox = (() => { const r = e.getClientRects(); return r.length > 0 && r[0].width > 0 && r[0].height > 0; })();
     let vis;
     if (e.checkVisibility) {
-      vis = e.getClientRects().length > 0 && e.checkVisibility({checkVisibilityCSS: true, checkOpacity: false});
+      vis = hasBox && e.checkVisibility({checkVisibilityCSS: true, checkOpacity: false});
     } else {
       const cs = getComputedStyle(e);
-      vis = cs.display !== 'none' && cs.visibility !== 'hidden' &&
-            (e.getClientRects().length > 0 || cs.position === 'fixed');
+      vis = cs.display !== 'none' && cs.visibility !== 'hidden' && hasBox;
     }
     if (!vis) continue;
     const tag = e.tagName.toLowerCase();
@@ -273,12 +278,13 @@ const PASS_EXTRACT = compile("arg", `${COLLECT_JS}\nreturn (${EXTRACT_JS})(arg);
 /** Fallback metadata pass: {i, vis, main} for every INTERACTIVE_ALL match. */
 const META_JS = String.raw`(sel) => [...document.querySelectorAll(sel)].map((e, i) => {
             let vis;
+            // non-zero box, same rule as the main pass (see the note there)
+            const hasBox = (() => { const r = e.getClientRects(); return r.length > 0 && r[0].width > 0 && r[0].height > 0; })();
             if (e.checkVisibility) {
-                vis = e.getClientRects().length > 0 &&
-                      e.checkVisibility({checkVisibilityCSS: true, checkOpacity: false});
+                vis = hasBox && e.checkVisibility({checkVisibilityCSS: true, checkOpacity: false});
             } else {
                 const cs = getComputedStyle(e);
-                vis = cs.display !== 'none' && cs.visibility !== 'hidden' &&
+                vis = cs.display !== 'none' && cs.visibility !== 'hidden' && hasBox;
                       (e.getClientRects().length > 0 || cs.position === 'fixed');
             }
             let m = false;

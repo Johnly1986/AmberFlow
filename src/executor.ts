@@ -249,6 +249,12 @@ function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
 
+/** One line for a failed Playwright action, safe to put in a trace/report. */
+function describeActionError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  return msg.split("\n")[0]!.trim().slice(0, 160);
+}
+
 function sigEq(a: Sig, b: Sig): boolean {
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
 }
@@ -534,7 +540,11 @@ export class BrowserMiddleware {
         instructions: "The user goal is given for context only. Judge ONLY the action itself: would performing it trigger an irreversible or externally-visible effect (payment, order placement, deletion, sending a message, final submission)? Typing text into a visible form field, opening pages, or navigating is NOT risky. {action} (context: {user_goal})",
       },
     });
-    const p = (res.answers["r"] as NoulAnswer).noul;
+    // Same guard as `isDone`: a missing answer must not crash the step (the gate
+    // then simply treats the action as not-risky, which is what a `r`-less runtime
+    // means, and the deterministic DESTRUCTIVE_PATTERNS check still applies).
+    const rAns = res.answers["r"] as NoulAnswer | undefined;
+    const p = rAns ? rAns.noul : 0;
     // 0.6 is the measured split; the constructor param used to be shadowed by a
     // literal in Python — now the param is live on both sides.
     return [p >= this.riskyThreshold, p];
@@ -558,7 +568,11 @@ export class BrowserMiddleware {
         instructions: `User goal: ${goal}. Look at this page: does it explicitly CONFIRM the goal is complete (a success message, a confirmation page, the requested item now present)? Answer false if the page is merely a starting or intermediate page.`,
       },
     });
-    return (res.answers["d"] as NoulAnswer).noul;
+    // A runtime that did not answer the question (a scripted/partial model) must
+    // not crash the loop: "no done judgment" is the safe reading, and DOM signals
+    // remain the only completion truth anyway.
+    const ans = res.answers["d"] as NoulAnswer | undefined;
+    return ans ? ans.noul : 0;
   }
 
   /* -- execution ----------------------------------------------------------- */
@@ -725,7 +739,16 @@ export class BrowserMiddleware {
   async _clickOnly(page: AnyPage, el: Elem): Promise<[string, unknown]> {
     const loc = await this._locatorFor(page, el);
     if (loc === null) return ["stale_ref", null];
-    await firstLoc(loc).click({ timeout: 5000 });
+    // Same containment as `_executeElement`: an element that passes the
+    // actionability probe can still be unclickable a moment later (a collapsed
+    // language sidebar, a re-render, an animation). Playwright raises a 5 s
+    // TimeoutError; letting it escape killed the whole plan (measured on the live
+    // zh.wikipedia case: 0/0 subgoals). Report it and let the loop forbid the ref.
+    try {
+      await firstLoc(loc).click({ timeout: 5000 });
+    } catch (e) {
+      return ["action_failed", describeActionError(e)];
+    }
     try {
       await page.waitForLoadState("domcontentloaded", { timeout: 3000 });
     } catch {
@@ -749,14 +772,23 @@ export class BrowserMiddleware {
       if (val === null || val === undefined) return ["needs_value", null];
       const loc = await this._locatorFor(page, el);
       if (loc === null) return ["stale_ref", null];
-      if (tag === "select") {
-        try {
-          await firstLoc(loc).selectOption({ label: String(val) }, { timeout: 1500 });
-        } catch {
-          await firstLoc(loc).selectOption({ value: String(val) }, { timeout: 5000 });
+      // A failing action is a RESULT, not an exception: a disabled/hidden field
+      // or a page that unmounts mid-step must forbid the ref (the loop does that
+      // for any non-"filled"/"clicked" outcome) and keep the subgoal alive. The
+      // Python reference let Playwright's TimeoutError escape `run()` and killed
+      // the whole plan; found by the live zh.wikipedia case.
+      try {
+        if (tag === "select") {
+          try {
+            await firstLoc(loc).selectOption({ label: String(val) }, { timeout: 1500 });
+          } catch {
+            await firstLoc(loc).selectOption({ value: String(val) }, { timeout: 5000 });
+          }
+        } else {
+          await firstLoc(loc).fill(String(val));
         }
-      } else {
-        await firstLoc(loc).fill(String(val));
+      } catch (e) {
+        return ["action_failed", describeActionError(e)];
       }
       return ["filled", val];
     }
@@ -920,7 +952,16 @@ export class BrowserMiddleware {
         }
         let ruleRef: string | null = null;
         if (this.rulesOn) {
-          ruleRef = navRule(instruction, elems) ?? affordanceRule(instruction, elems, curHint);
+          // A frozen plan that NAMES its target is authoritative: href/label token
+          // matching may not pre-empt it. Measured live (en.wikipedia search page
+          // served an error shell, so the plan's `#searchInput` was absent):
+          // running `navRule` first token-matched 18 slot-less fields, each
+          // forbidden and re-picked inside ONE step, then laya clicked junk and the
+          // subgoal hit `max_steps` after 22 steps. The documented fall-through for
+          // a hint that matches nothing is LAYA ("rather than gambling on a token").
+          ruleRef = curHint
+            ? affordanceRule(instruction, elems, curHint)
+            : (navRule(instruction, elems) ?? affordanceRule(instruction, elems, null));
         }
         // re-admit refs whose only sin was being covered at an earlier step, but
         // ONLY after this subgoal actually executed something since the block

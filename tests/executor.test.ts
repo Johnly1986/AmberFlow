@@ -189,6 +189,52 @@ describe("BrowserMiddleware.run — production loop semantics", () => {
     expect(calls).toBe(0);
   }, 60_000);
 
+  it("⑨ a plan hint that matches nothing falls through to LAYA, never to token guessing", async () => {
+    // Measured live on the en.wikipedia search page (which served an error shell, so
+    // the plan's `#searchInput` was absent): `navRule` ran FIRST and token-matched 18
+    // slot-less fields, each forbidden and re-picked inside ONE step, then laya
+    // clicked junk -> `max_steps` after 22 steps. A hint is authoritative: when it
+    // matches nothing the documented fall-through is the MODEL.
+    let calls = 0;
+    install(scriptedAgent((key, _s, questions) => {
+      calls += 1;
+      if (key === "act") {
+        const crit = (questions["act"]?.criteria ?? {}) as Record<string, string>;
+        return { choice: Object.keys(crit)[0]!, probabilities: {}, confidence: 0.9 };
+      }
+      if (key === "r") return { noul: 0.0 };
+      if (key === "d") return { noul: 0.0 };
+      return undefined;
+    }));
+    const report = await mw({ maxSteps: 1 }).run(
+      "add the wireless mouse to the shopping cart", fixture("testpages", "product.html"),
+      { page: asPage(), pw, verbose: false, goalSignalFn: () => false, targetHint: "#no-such-id" },
+    );
+    expect(report.steps.some((s) => s.method === "laya")).toBe(true);
+    expect(report.steps.some((s) => s.method === "rule:match")).toBe(false);
+    expect(calls).toBeGreaterThan(0);
+  }, 60_000);
+
+  it("⑨b a matching hint still resolves by rule, with the model never asked to pick", async () => {
+    const acts: string[] = [];
+    install(scriptedAgent((key, _s, questions) => {
+      if (key === "act") {
+        acts.push("act");
+        const crit = (questions["act"]?.criteria ?? {}) as Record<string, string>;
+        return { choice: Object.keys(crit)[0]!, probabilities: {}, confidence: 0.9 };
+      }
+      if (key === "r") return { noul: 0.0 };
+      if (key === "d") return { noul: 0.0 };
+      return undefined;
+    }));
+    const report = await mw({ maxSteps: 1 }).run(
+      "add the wireless mouse to the shopping cart", fixture("testpages", "product.html"),
+      { page: asPage(), pw, verbose: false, goalSignalFn: () => false, targetHint: "[data-test=add-to-cart]" },
+    );
+    expect(report.steps[0]!.method).toBe("rule:match");
+    expect(acts).toHaveLength(0);          // the pick never reached the model
+  }, 60_000);
+
   it("⑤ walks ordered target_hints through two deterministic actions (fill, then click)", async () => {
     install(fakeAgent((crit) => {
       const r = firstRef(crit);

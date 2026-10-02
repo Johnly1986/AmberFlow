@@ -172,10 +172,24 @@ export function hintMatch(hint: string, elems: ElemPool): string | null {
     const tilde = rest.indexOf("~");
     const k = alias(rest.slice(0, tilde));
     const v = rest.slice(tilde + 1);
-    const hits = new Set(entries
-      .filter(([, e]) => (!pre || e.tag === pre) && String(e[k] ?? "").toLowerCase().includes(v))
-      .map(([r]) => r));
-    return firstIfSame(hits, elems);
+    const cf = (x: unknown): string => String(x ?? "").toLowerCase();
+    const hitList = entries.filter(([, e]) => (!pre || e.tag === pre) && cf(e[k]).includes(v));
+    // TIERED resolution, measured on live pages. A substring hint that names a
+    // page slug also matches every RELATED page: on today's en.wikipedia search
+    // results `a[href~Alan_Turing]` hits 17 links (Alan_Turing, Alan_Turing_law,
+    // Alan_Turing_Institute, Legacy_of_Alan_Turing, ...). Same-signature
+    // ambiguity then gives up and hands the step to laya — measured: confidence
+    // 0.23 < 0.25 floor -> the subgoal BLOCKED. Prefer, in order:
+    //   1. exact attribute equality                (`href` == "Alan_Turing")
+    //   2. a whole LAST PATH SEGMENT               (`.../wiki/Alan_Turing`)
+    //   3. the old behaviour over all substring hits (still None when the
+    //      candidates are genuinely different — the bbc.com two-identical-links
+    //      rule is unchanged).
+    const exact = hitList.filter(([, e]) => cf(e[k]) === v);
+    if (exact.length) return firstIfSame(new Set(exact.map(([r]) => r)), elems);
+    const slug = hitList.filter(([, e]) => cf(e[k]).split("/").pop() === v);
+    if (slug.length) return firstIfSame(new Set(slug.map(([r]) => r)), elems);
+    return firstIfSame(new Set(hitList.map(([r]) => r)), elems);
   }
   if (h.split("[").pop()!.includes("~")) {
     // near~token: the container identity line (add_near_context) disambiguates
@@ -216,11 +230,29 @@ export function hintMatch(hint: string, elems: ElemPool): string | null {
     }
     return firstIfSame(hits, elems);
   }
-  // bare token: unique label/data-test word
-  const hits = new Set<string>();
+  // bare token: unique label/data-test word — TIERED for the same reason as
+  // `attr~value`: on a live page the exact label ("艾伦·图灵") is one candidate
+  // among many titles that merely CONTAIN it (the language sidebar ships ~100 of
+  // them, each titled "艾伦·图灵 – 古吉拉特语" — where the token is even its own
+  // WORD, so word-equality alone is not discriminating). Tiers, strongest first:
+  //   0. the WHOLE label equals the hint      ("艾伦·图灵")
+  //   1. a label/data-test word equals it
+  //   2. a word starts with it
+  //   3. a word contains it
+  // Only the strongest non-empty tier is considered; genuine ambiguity inside it
+  // still returns null.
+  const whole = new Set<string>();
+  const tiers: Array<Set<string>> = [new Set(), new Set(), new Set()];
   for (const [r, e] of entries) {
+    const label = String(e.label ?? "").trim().toLowerCase();
+    if (label === h) whole.add(r);
     const ws = `${e.data_test ?? ""} ${e.label}`.toLowerCase().replace(/-/g, " ").split(/\s+/);
-    if (ws.some((w) => w === h || w.startsWith(h) || w.includes(h))) hits.add(r);
+    if (ws.some((w) => w === h)) tiers[0]!.add(r);
+    else if (ws.some((w) => w.startsWith(h))) tiers[1]!.add(r);
+    else if (ws.some((w) => w.includes(h))) tiers[2]!.add(r);
   }
-  return firstIfSame(hits, elems);
+  for (const hits of [whole, ...tiers]) {
+    if (hits.size) return firstIfSame(hits, elems);
+  }
+  return null;
 }

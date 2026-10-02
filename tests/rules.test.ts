@@ -77,11 +77,52 @@ describe("target_hint grammar", () => {
     // satisfies the goal, so take the first in scan order.
     const dup = pool(el("e3", "a", "News", "", { href: "/news" }), el("e7", "a", "News", "", { href: "/news" }));
     expect(hintMatch("a[href=/news]", dup)).toBe("e3");
+    // TIERED (measured on the live en.wikipedia search results): a slug hint must
+    // prefer the page NAMED that slug over pages that merely contain it, instead
+    // of declaring ambiguity and handing the step to laya.
     const different = pool(
       el("e0", "a", "News", "", { href: "/news" }),
       el("e1", "a", "Newsletter", "", { href: "/newsletter" }),
     );
-    expect(hintMatch("a[href~news]", different)).toBeNull();
+    expect(hintMatch("a[href~news]", different)).toBe("e0");
+    // ... but when NO candidate owns the slug, genuine ambiguity still refuses.
+    const ambiguous = pool(
+      el("e0", "a", "World", "", { href: "/news/world" }),
+      el("e1", "a", "UK", "", { href: "/news/uk" }),
+    );
+    expect(hintMatch("a[href~news]", ambiguous)).toBeNull();
+  });
+
+  it("prefers an exact attribute over a slug, and a slug over a substring", () => {
+    const absolute = pool(
+      el("e0", "a", "Alan Turing", "", { href: "https://en.wikipedia.org/wiki/Alan_Turing" }),
+      el("e1", "a", "Enigma", "", { href: "https://en.wikipedia.org/wiki/Alan_Turing:_The_Enigma" }),
+      el("e2", "a", "Law", "", { href: "https://en.wikipedia.org/wiki/Alan_Turing_law" }),
+    );
+    expect(hintMatch("a[href~Alan_Turing]", absolute)).toBe("e0");   // absolute href, slug at the end
+    const exact = pool(
+      el("e0", "a", "Turing", "", { href: "Alan_Turing" }),
+      el("e1", "a", "Law", "", { href: "Alan_Turing_law" }),
+    );
+    expect(hintMatch("a[href~Alan_Turing]", exact)).toBe("e0");      // exact equality wins
+  });
+
+  it("resolves a bare token to the exact label when related titles contain it", () => {
+    // The live zh search results: the canonical article is one candidate among
+    // ~100 language-sidebar links whose title merely CONTAINS the token.
+    const elems = pool(
+      el("e0", "a", "艾伦·图灵", "", { href: "/wiki/%E8%89%BE%E4%BC%A6%C2%B7%E5%9B%BE%E7%81%B5" }),
+      el("e1", "a", "艾伦·图灵 – 古吉拉特语", "", { href: "https://gu.wikipedia.org/wiki/x" }),
+      el("e3", "a", "艾伦·图灵 (消歧义)", "", { href: "/wiki/disamb" }),
+    );
+    expect(hintMatch("艾伦·图灵", elems)).toBe("e0");                // exact word beats prefix/contains
+    // A word-level match is stronger than a prefix, but the PREFIX tier itself
+    // must stay ambiguous when the candidates differ.
+    const onlyPrefixes = pool(
+      el("e0", "a", "艾伦·图灵奖", "", { href: "/prize" }),
+      el("e1", "a", "艾伦·图灵研究所", "", { href: "/institute" }),
+    );
+    expect(hintMatch("艾伦·图灵", onlyPrefixes)).toBeNull();
   });
 });
 

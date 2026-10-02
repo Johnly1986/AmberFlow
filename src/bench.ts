@@ -22,6 +22,7 @@ import { BrowserMiddleware } from "./executor.ts";
 import { REPO } from "./flow.ts";
 import { TaskPlan, type Subgoal } from "./plan.ts";
 import { checkSignal } from "./signals.ts";
+import { runSubgoalWithRetries } from "./planner.ts";
 import { installLayaRuntime, type DecisionAgent, type LayaRuntime } from "./model.ts";
 
 export interface BenchCase {
@@ -98,7 +99,12 @@ export class BenchMiddleware extends BrowserMiddleware {
 export async function runCase(
   c: BenchCase, agents: Record<string, DecisionAgent | null>,
 ): Promise<BenchCaseResult> {
-  const plan = new TaskPlan(c.goal, c.subgoals, "/tmp/bench_plan.json");
+  // `slots` go on the PLAN, not into the per-call options: `runSubgoalWithRetries`
+  // passes `plan.slots` (merged with the subgoal's own), so a case-level value bag
+  // must live there or the fill has nothing to type. Measured live: python.org's
+  // `{"q": "asyncio"}` stopped reaching the recovered search field after the retry
+  // wiring, and the step burned as `needs_value`.
+  const plan = new TaskPlan(c.goal, c.subgoals, "/tmp/bench_plan.json", c.slots ?? {});
   const t0 = Date.now();
   const results: Array<Record<string, unknown>> = [];
   const model = c.model ?? "english";
@@ -113,14 +119,21 @@ export async function runCase(
   const page = await browser.newPage();
   try {
     for (const [i, sg] of plan.subgoals.entries()) {
-      const rep = await mw.run(sg.desc, startUrl(sg.start_url!), {
-        goalSignalFn: (p: unknown) => checkSignal(p as never, sg.signal),
-        page: page as never, slots: c.slots ?? {}, pw: { chromium } as never,
-        targetHint: sg.target_hint ?? null,
-        verbose: true,
+      // Through `runSubgoalWithRetries`, not `mw.run`: a case's `retries` is the
+      // plan's own vocabulary for transient failures and the live pack uses it
+      // (a cold load on a real site burned 9 steps into `max_steps` while the same
+      // case passed in isolation). `attempts` is recorded per subgoal so a retried
+      // step shows up in the report instead of being silently absorbed.
+      const { rep, attempt, steps } = await runSubgoalWithRetries(
+        mw as never, sg, plan, startUrl(sg.start_url!),
+        page as never, { chromium } as never, true,
+      );
+      results.push({
+        subgoal: sg.desc, ...rep, attempts: attempt,
+        steps: steps.length ? steps : rep.steps,
       });
-      results.push({ subgoal: sg.desc, ...rep });
-      console.log(`  [${i}] ${rep.done ? "DONE" : "FAIL"} ${sg.desc.slice(0, 60)}  (${rep.stop_reason})`);
+      console.log(`  [${i}] ${rep.done ? "DONE" : "FAIL"} ${sg.desc.slice(0, 60)}`
+        + `  (${rep.stop_reason}${attempt > 1 ? `, ${attempt} attempts` : ""})`);
     }
   } finally {
     await browser.close();

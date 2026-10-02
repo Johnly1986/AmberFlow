@@ -19,7 +19,7 @@ Environment: the author's box is Windows (bash shell), Python 3.14, CUDA (≈35 
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 557 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 474 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -46,6 +46,8 @@ node --experimental-strip-types src/live-probe.ts                               
 npm run plan-cli -- --help                                                         # 计划 CLI：new/add/edit/check/run
 npm run shortlist                                                                  # 真 ONNX 的 shortlist demo
 ```
+
+线上平台用例：`node --experimental-strip-types src/bench.ts --cases bench/cases-live.json --mode-tag live`（8 个真实站点，见 README 的实测一节）。
 
 **Python 参考命令**（`pytest`、`python3 xxx.py`、`pip install -r requirements.txt`）属于已移出的参考实现，
 在 `/root/ML/LayaWebUse-python-reference-backup`（另见 `BACKUP.md`）。本仓库不包含 Python，也不再需要 Python 环境。
@@ -235,6 +237,35 @@ These are empirical findings from this codebase's own experiments — preserve t
   `laya.Router` correctly routes to `multilingual` (Han = 61% of letters). Routing doubles it and still misses the 0.25 floor.
   Measured: `python3 ctrip/ctrip_task.py --no-hints [--route]` -> 0/7 both ways. Do not read this as "rules beat the model":
   it says the model's zero-shot ceiling on CJK list pages is below this flow's floor.
+- **A hint is TIERED, and a live list page is why.** `~` hints used to be "substring matches,
+  and only usable when every hit is identical"; on real pages that is always ambiguous —
+  `a[href~Alan_Turing]` matched **17** links on the live en.wikipedia search results
+  (Alan_Turing, _law, _Institute, Legacy_of_Alan_Turing, ...), the ambiguity check gave up, and the
+  step fell to laya at **0.23 < 0.25 → BLOCKED**. Similarly a bare token: the zh results page has the
+  canonical link labelled exactly `艾伦·图灵` plus ~100 language-sidebar links that merely CONTAIN it
+  (`艾伦·图灵 – 古吉拉特语`, where the token is even its own word) → the pick was a 0.29 coin flip. Now:
+  `attr~v` prefers **exact attribute → whole last path segment → old all-substring behaviour**;
+  a bare token prefers **whole label → whole word → word prefix → word substring**. Genuine ambiguity
+  inside the winning tier still returns None (the bbc two-`/news`-links rule is unchanged). Measured
+  after: the live pack went **6/8 cases / 8/9 subgoals → 8/8 / 11/11, every step `rule:match`, zero
+  model picks**. Pinned by unit tests + 6 new frozen parity cases.
+- **A plan hint outranks token matching — in the rule ORDER, not just in `affordance_rule`.** The loop
+  used to run `nav_rule(...) or affordance_rule(...)` regardless of a hint, so with the plan's
+  `#searchInput` absent (Wikipedia served an error shell) `nav_rule` token-matched **18 slot-less
+  fields**, each forbidden and re-picked inside ONE step, then laya clicked junk → `max_steps` after 22
+  steps. A hint is authoritative: when one exists only the hint may decide, and a miss falls through to
+  **laya** (the documented "rather than gambling on a token"). Both implementations now do that.
+- **Visibility needs a NON-ZERO BOX, and a failed action must be a RESULT, not an exception.** The zh
+  wikipedia main page ships **349 interlanguage links** that pass `checkVisibility()` but measure 0×0 —
+  Playwright refuses to click them, and letting one through made a click timeout **escape `run()`**
+  (the whole case reported 0/0). Extraction now requires `rect.width > 0 && rect.height > 0` (aligned
+  with what Playwright can actually act on) and `_click_only`/`_execute_element` catch action failures,
+  return `action_failed`, and let the loop forbid the ref — nothing Playwright raises can kill a plan.
+- **The live pack needs `retries`, and the HARNESS must honour it.** Real sites are cold on the first
+  hit (en.wikipedia burned 9 steps into `max_steps` in one pack run while the same case passed in
+  isolation). `bench/cases-live.json` sets `retries: 2` per subgoal and `run_case` goes through
+  `run_subgoal_with_retries` — before that the case data's `retries` was **inert**, and case-level
+  `slots` were silently dropped once the retry path was wired (the live pack caught that regression).
 - **The risk head fires on ~40% of benign clicks.** On the ctrip case 8/19 steps were flagged RISKY: a nav link "机票" 0.82,
   a sort link "价格从低到高" 0.87, a price-cap link "¥300以下" 0.79, and a purely local "record" button 0.62-0.79. The gate asks
   (never blocks), so the scenario's `confirm_fn` allows anything outside `DESTRUCTIVE_PATTERNS` and refuses what matches --
