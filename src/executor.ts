@@ -158,6 +158,8 @@ export interface RunReport {
   goal: string;
   done: boolean;
   skipped?: boolean;
+  /** `done` came from a HUMAN attestation (`{manual: true}`), not a DOM signal. */
+  manual?: boolean;
   stop_reason: string;
   steps: TraceStep[];
   audit: AuditVerdictLike;
@@ -166,6 +168,15 @@ export interface RunReport {
 export interface RunOptions {
   /** DOM completion signal: `(page) => boolean`, async allowed. */
   goalSignalFn?: ((page: AnyPage) => boolean | Promise<boolean>) | null;
+  /**
+   * The subgoal's signal is `{manual: true}`: its completion cannot be verified
+   * from the DOM, so the HUMAN attests it. The executor asks right after an action
+   * that had a visible effect, records the page state it was shown, and only then
+   * reports `done` (with `manual: true`). With no `manualConfirmFn` the step stops
+   * with an explicit reason instead of silently succeeding.
+   */
+  manualGoal?: boolean;
+  manualConfirmFn?: ((desc: string, stateExcerpt: string) => boolean | Promise<boolean>) | null;
   /** Reuse an open page (one browser across subgoals); run() then owns nothing. */
   page?: AnyPage | null;
   slots?: Record<string, unknown> | null;
@@ -194,6 +205,8 @@ export interface MiddlewareOptions {
   riskyThreshold?: number;
   doneThreshold?: number;
   confirmFn?: (desc: string) => boolean | Promise<boolean>;
+  /** Human oracle for `{manual: true}` subgoals (see RunOptions.manualGoal). */
+  manualConfirmFn?: ((desc: string, stateExcerpt: string) => boolean | Promise<boolean>) | null;
   gotoTimeout?: number;
   routeModels?: boolean;
   router?: RouterLike | null;
@@ -356,6 +369,7 @@ export class BrowserMiddleware {
   riskyThreshold: number;
   doneThreshold: number;
   confirmFn: (desc: string) => boolean | Promise<boolean>;
+  manualConfirmFn: ((desc: string, stateExcerpt: string) => boolean | Promise<boolean>) | null = null;
   gotoTimeout: number;
   /** Deterministic rule prefilter ON, anti-repeat ON (measured production defaults). */
   rulesOn = true;
@@ -380,6 +394,7 @@ export class BrowserMiddleware {
     this.riskyThreshold = opts.riskyThreshold ?? 0.6;
     this.doneThreshold = opts.doneThreshold ?? 0.5;
     this.confirmFn = opts.confirmFn ?? DEFAULT_CONFIRM;
+    this.manualConfirmFn = opts.manualConfirmFn ?? null;
     this.gotoTimeout = opts.gotoTimeout ?? 30000;
   }
 
@@ -876,6 +891,8 @@ export class BrowserMiddleware {
       verbose = true,
       targetHints = null,
       precondition = null,
+      manualGoal = false,
+      manualConfirmFn = this.manualConfirmFn,
     } = opts;
 
     const slots: Record<string, unknown> = { ...extractSlots(instruction), ...(slotsIn ?? {}) };
@@ -887,6 +904,7 @@ export class BrowserMiddleware {
 
     const trace: TraceStep[] = [];
     let done = false;
+    let manualDone = false;          // done because a HUMAN attested, not a DOM signal
     let stopReason = "max_steps";
     const forbidden: Record<string, Sig> = {};                 // ref -> element signature (esig)
     // refs skipped ONLY because an overlay blocked them: retryable once the page
@@ -1121,6 +1139,29 @@ export class BrowserMiddleware {
           stopReason = "dom goal signal";
           break;
         }
+        // `{manual: true}`: no DOM fact can confirm this step, so the human is asked
+        // — but only after an action with a visible effect (an inert action is not a
+        // completion), and the state the human was shown is recorded in the trace,
+        // which is also the transition signal induction consumes next time.
+        if (manualGoal && executed && !inert) {
+          const excerpt = JSON.stringify(post).slice(0, 300);
+          if (!manualConfirmFn) {
+            stopReason = "manual step needs a human: no manualConfirmFn configured";
+            break;
+          }
+          const attested = await manualConfirmFn(instruction, excerpt);
+          trace.push({
+            step: stepNo, desc, how: attested ? "manual_confirmed" : "manual_declined",
+            executed: true, method: "manual", conf: round3(conf), manual: true,
+            url: urlOf(pg), state: excerpt,
+          });
+          if (attested) {
+            done = true;
+            manualDone = true;
+            stopReason = "manual confirmation (human oracle)";
+            break;
+          }
+        }
         // DOM signals are the only truth, so the model's noul is consulted ONLY
         // when no DOM signal exists — and even then it never grants `done`, it
         // just stops the loop with an explicit "unverified" reason.
@@ -1153,6 +1194,9 @@ export class BrowserMiddleware {
     }
 
     const verdict = (await this.auditor.audit(instruction, trace, done)) as AuditVerdict;
-    return { goal: instruction, done, stop_reason: stopReason, steps: trace, audit: verdict };
+    return {
+      goal: instruction, done, stop_reason: stopReason, steps: trace, audit: verdict,
+      ...(manualDone ? { manual: true } : {}),
+    };
   }
 }

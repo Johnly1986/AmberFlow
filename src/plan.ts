@@ -95,12 +95,35 @@ export class PlanningRules {
       if (Object.keys(sig).length === 0) {
         if (this.requireSignal) issues.push(`${tag}: missing done-signal`);
       } else {
-        for (const [op, args] of Object.entries(sig)) {
-          if (!(op in SIGNAL_OPS)) issues.push(`${tag}: unknown signal op '${op}'`);
-          else if (signalArgs(args).length !== SIGNAL_OPS[op]) {
-            issues.push(`${tag}: ${op} needs ${SIGNAL_OPS[op]} argument(s)`);
+        // Composition and `manual` carry no scalar arguments; they are validated
+        // structurally and — for the combinators — recursively, so a bad op nested
+        // inside `all_of` is caught at plan-validation time, not mid-run.
+        const checkSignalSpec = (spec: SignalSpec, where: string): void => {
+          for (const [op, args] of Object.entries(spec)) {
+            if (!(op in SIGNAL_OPS)) { issues.push(`${where}: unknown signal op '${op}'`); continue; }
+            if (op === "manual") continue;                        // a human attestation, no args
+            if (op === "all_of" || op === "any_of") {
+              if (!Array.isArray(args) || args.length === 0) {
+                issues.push(`${where}: ${op} needs a non-empty list of signals`);
+                continue;
+              }
+              args.forEach((child, j) => checkSignalSpec(child as SignalSpec, `${where}.${op}[${j}]`));
+              continue;
+            }
+            if (op === "not") {
+              if (!args || typeof args !== "object" || Array.isArray(args)) {
+                issues.push(`${where}: not needs one signal`);
+                continue;
+              }
+              checkSignalSpec(args as SignalSpec, `${where}.not`);
+              continue;
+            }
+            if (signalArgs(args).length !== SIGNAL_OPS[op]) {
+              issues.push(`${where}: ${op} needs ${SIGNAL_OPS[op]} argument(s)`);
+            }
           }
-        }
+        };
+        checkSignalSpec(sig, tag);
       }
       const hint = s.target_hint;
       const hints = s.target_hints;

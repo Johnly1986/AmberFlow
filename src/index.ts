@@ -2,6 +2,14 @@
 export * from "./extraction.ts";
 export * from "./rules.ts";
 export * from "./signals.ts";
+// Signal induction (teach a step once -> a plan-ready, discriminating signal) and
+// the witness capture it needs. See README: a human should not have to author
+// signals by hand, but nothing here weakens what counts as evidence.
+export {
+  captureStateView, diffStates, induceSignals, isVolatile, selectorFor,
+  signalReproducible, stableToken, WITNESS_SEL,
+} from "./signal-induction.ts";
+export * as signalInduction from "./signal-induction.ts";
 export * from "./plan.ts";
 export * from "./model.ts";
 export * from "./audit.ts";

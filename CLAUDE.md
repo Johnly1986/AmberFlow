@@ -19,7 +19,7 @@ Environment: the author's box is Windows (bash shell), Python 3.14, CUDA (≈35 
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 474 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 495 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -266,6 +266,24 @@ These are empirical findings from this codebase's own experiments — preserve t
   isolation). `bench/cases-live.json` sets `retries: 2` per subgoal and `run_case` goes through
   `run_subgoal_with_retries` — before that the case data's `retries` was **inert**, and case-level
   `slots` were silently dropped once the retry path was wired (the live pack caught that regression).
+- **A completion signal is INDUCTED, or it is human-attested — never guessed.** Asking a human (or an LLM
+  planner) to predict a real page's post-state is how both wikipedia live cases failed twice; so the flow can
+  WATCH the transition instead: `tools/induce_signal.ts` demonstrates a step once and compiles a plan-ready
+  predicate from the before/after pair. Accuracy comes from three gates, not from trust: the candidate must be
+  **false before / true after** (discriminating), use a **stable handle** (`data-test`/`id`/`name`/`near`, never a
+  positional path or a volatile literal — ids, dates, counts of 4+ digits, hashes), and **reproduce across
+  `--replays` runs** before adoption. Measured on the repo's own fixture: the induced top candidate IS the
+  hand-written `{"css_text_equals":["[data-test=cart-count]","1"]}`. Two design consequences the live pages
+  forced: (1) the captured state must include **signal-bearing non-interactive nodes** (badges, counters, toasts)
+  — the executor's pool holds only actionable elements, and the natural completion signal usually lives one node
+  away (`captureStateView` adds a bounded witness pass); (2) when nothing discriminates, the honest answer is
+  `{"signal":{"manual":true}}` + `manualConfirmFn`, which records the state the human was shown and reports
+  `manual: true`, rather than a looser predicate.
+- **Composition cannot weaken evidence.** `all_of` / `any_of` / `not` are validated recursively by
+  `PlanningRules` and evaluated offline by `evalSignalOnState`; every leaf is still one of the five DOM
+  operators, so `all_of` can only add discrimination and `any_of` only accepts alternatives a human verified.
+  `not` is how a disappearing spinner is expressed without inventing a positive claim.
+
 - **The risk head fires on ~40% of benign clicks.** On the ctrip case 8/19 steps were flagged RISKY: a nav link "机票" 0.82,
   a sort link "价格从低到高" 0.87, a price-cap link "¥300以下" 0.79, and a purely local "record" button 0.62-0.79. The gate asks
   (never blocks), so the scenario's `confirm_fn` allows anything outside `DESTRUCTIVE_PATTERNS` and refuses what matches --

@@ -190,11 +190,19 @@ export async function runOnce(
       targetHint: sg.target_hint ?? null,
       targetHints: sg.target_hints ?? null,
       precondition: sg.when ?? null,
+      // `{manual: true}` on the subgoal's signal: no DOM fact can confirm this step,
+      // so the executor asks the human (the middleware carries `manualConfirmFn`).
+      manualGoal: isManualSignal(sg.signal),
       verbose: mw._planVerbose ?? true,
     });
   } catch (e) {
     return { done: false, steps: [], stop_reason: `error: ${e}` };
   }
+}
+
+/** Is this subgoal's completion a human attestation rather than a DOM fact? */
+export function isManualSignal(signal: unknown): boolean {
+  return Boolean(signal && typeof signal === "object" && "manual" in (signal as Record<string, unknown>));
 }
 
 /**

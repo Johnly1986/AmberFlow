@@ -26,10 +26,14 @@
   Path B 本地模型服务 + MV3 扩展（`Ctrl+Shift+K`）。
 - **模型运行时**：Node 内直接跑 ONNX，不需要 Python / PyTorch / CUDA；没有权重时用脚本模型替身，
   离线测试照常全绿。
+- **信号可归纳、也可由人作证**：`tools/induce_signal.ts` 让你把一步**演示一次**，它从"前态/后态"编译出
+  可判定的完成信号（前态为假 + 后态为真 + 稳定句柄 + 多轮复现才判定为可自动采纳）；归纳不出信号时，
+  该步声明 `{"signal": {"manual": true}}`，由人确认，并把"人所看到的状态"写进轨迹。信号语言支持组合
+  （`all_of` / `any_of` / `not`），叶子仍是 DOM 事实，因此组合不会放松证据。
 - **站点即配置**：取数引擎不含站点知识，站点写在 `<site>/sources/*.json`；另有可达性/抓取/OTA 探针。
 - **开箱用例**：ctrip（19 子目标 + 独立判分 7/7）、transfer（spec 驱动的 6 个复刻站 + 迁移度量 + 消融）、
   qunar（真实站点如实记录边界）、bench（6 个离线夹具 + 8 个真实站点）、Excel 批量（设备录入 / IP 规划表）。
-- **门禁**：475 个测试 + 六层跨实现对拍；`npm run verify` 与 `bash bench/smoke.sh`。
+- **门禁**：495 个测试 + 六层跨实现对拍；`npm run verify` 与 `bash bench/smoke.sh`。
 
 ## 使用方法
 
@@ -39,7 +43,7 @@
 
 ```bash
 npm ci
-npm run verify          # 类型检查 + 475 测试 + 六层对拍（不需要模型权重）
+npm run verify          # 类型检查 + 495 测试 + 六层对拍（不需要模型权重）
 bash bench/smoke.sh     # CI 的"绿色"定义；缺 ONNX 产物时模型侧三步打印 SKIP
 ```
 
@@ -48,6 +52,7 @@ bash bench/smoke.sh     # CI 的"绿色"定义；缺 ONNX 产物时模型侧三�
 | 冻结计划跑分（离线夹具 / 8 个真实站点） | `npm run bench:fixtures` · `src/bench.ts --cases bench/cases-live.json` |
 | 三个用例（ctrip / transfer / qunar） | `src/ctrip-task.ts` · `src/transfer-task.ts --site skybook [--metrics-only] [--no-when]` · `src/qunar-task.ts` |
 | 真实取数与探针 | `src/datasource.ts --list` · `--source ctrip-flights-h5` · `src/h5-flights.ts` · `src/live-probe.ts` · `src/live-capture.ts` · `src/ota-probe.ts` |
+| 归纳完成信号（演示一次） | `node --experimental-strip-types tools/induce_signal.ts --url testpages/product.html --click "[data-test=add-to-cart]" --replays 2` |
 | Excel 批量 | `src/camera-entry.ts`（类型列路由两套表单）· `src/ip-config.ts`（IP 规划表写进设备页） |
 | 计划管理 / Path A / Path B | `npm run plan-cli -- --help` · `src/path-a.ts [--confirm-safe]` · `src/picker-server.ts` + 加载 `extension/` |
 | 演示 | `src/long-task.ts`（规划→执行→审计）· `npm run shortlist`（真模型） |

@@ -50,10 +50,20 @@ describe("checkSignal — css operators read the first match", () => {
 });
 
 describe("signal contract", () => {
-  it("keeps the five operators and their arities in one map", () => {
+  it("keeps the five DOM leaves, the combinators and `manual` in one map", () => {
     expect(SIGNAL_OPS).toEqual({
+      // the leaves: every completion claim is ultimately one of these DOM facts
       url_contains: 1, css_exists: 1, css_text_equals: 2, css_text_contains: 2, css_value_equals: 2,
+      // composition (arity handled structurally by PlanningRules, not as scalars)
+      all_of: 1, any_of: 1, not: 1,
+      // a human attestation: never verifiable from the DOM, so it blocks without a human
+      manual: 0,
     });
+  });
+
+  it("a `manual` signal is false to the automated loop (only a human can attest it)", async () => {
+    // no page needed: the live check returns false before touching the DOM
+    expect(await checkSignal({} as never, { manual: true })).toBe(false);
   });
 
   it("signalArgs normalises scalars without calling .length on a number", () => {

@@ -48,13 +48,141 @@ export async function checkSignal(page: PageLike, spec: SignalSpec): Promise<boo
       const loc = await locatorAnyFrame(page, String(sel));
       return loc !== null && String(await firstOf(loc).inputValue({ timeout: 2000 })) === String(want);
     }
+    // Composition. Each leaf is still a DOM fact, so a composed signal cannot be
+    // more permissive than its parts: `all_of` adds discrimination, `any_of` only
+    // accepts alternatives a human verified one by one, `not` expresses "the
+    // spinner is gone" without inventing a positive claim.
+    if ("all_of" in spec) {
+      for (const part of spec.all_of as SignalSpec[]) {
+        if (!(await checkSignal(page, part))) return false;
+      }
+      return true;
+    }
+    if ("any_of" in spec) {
+      for (const part of spec.any_of as SignalSpec[]) {
+        if (await checkSignal(page, part)) return true;
+      }
+      return false;
+    }
+    if ("not" in spec) return !(await checkSignal(page, spec.not as SignalSpec));
+    // A human attestation is not a DOM fact: it can never be verified here, so a
+    // `manual` signal is false for the automated loop and the executor asks the
+    // human explicitly (see RunOptions.manualGoal). With no human, the step blocks.
+    if ("manual" in spec) return false;
   } catch {
     return false;
   }
   throw new Error(`unknown signal spec: ${JSON.stringify(spec)}`);
 }
 
+/**
+ * Evaluate a signal OFFLINE, against a captured page view.
+ *
+ * The live `checkSignal` needs a browser; signal INDUCTION needs to test hundreds
+ * of candidate predicates against a recorded before/after pair, so the same
+ * semantics are available over the extracted element pool. Returns `null` when the
+ * selector cannot be decided from the pool (classes, `:nth-child`, shadow paths):
+ * induction treats that as "needs live verification" instead of guessing.
+ */
+export function evalSignalOnState(spec: SignalSpec, view: StateView): boolean | null {
+  const one = (s: SignalSpec): boolean | null => evalSignalOnState(s, view);
+  if ("all_of" in spec) return andAll((spec.all_of as SignalSpec[]).map(one));
+  if ("any_of" in spec) return orAny((spec.any_of as SignalSpec[]).map(one));
+  if ("not" in spec) {
+    const v = one(spec.not as SignalSpec);
+    return v === null ? null : !v;
+  }
+  if ("manual" in spec) return null;                       // human attestation: not decidable here
+  if ("url_contains" in spec) return view.url.includes(String(arg(spec.url_contains)));
+  if ("css_exists" in spec) {
+    const hits = matchSelector(view.elems, String(arg(spec.css_exists)));
+    return hits === null ? null : hits.length > 0;
+  }
+  const textOps: Array<[string, (got: string, want: string) => boolean]> = [
+    ["css_text_contains", (g, w) => g.includes(w)],
+    ["css_text_equals", (g, w) => g.trim() === w],
+    ["css_value_equals", (g, w) => g === w],
+  ];
+  for (const [op, cmp] of textOps) {
+    if (!(op in spec)) continue;
+    const pair = (Array.isArray(spec[op]) ? (spec[op] as unknown[]) : [spec[op]]).map(arg);
+    const hits = matchSelector(view.elems, String(pair[0]));
+    if (hits === null) return null;                        // selector is not pool-expressible
+    if (!hits.length) return false;
+    const el = hits[0]!;
+    const got = op === "css_value_equals"
+      ? String(el.value ?? el.label ?? "")
+      : String(el.label ?? "");
+    return cmp(got, String(pair[1]));
+  }
+  return null;                                             // unknown op: undecidable offline
+}
+
+function andAll(vs: Array<boolean | null>): boolean | null {
+  if (vs.some((v) => v === false)) return false;
+  return vs.some((v) => v === null) ? null : true;
+}
+
+function orAny(vs: Array<boolean | null>): boolean | null {
+  if (vs.some((v) => v === true)) return true;
+  return vs.some((v) => v === null) ? null : false;
+}
+
+/** A captured page state: enough to decide pool-expressible signals offline. */
+export interface StateView {
+  url: string;
+  elems: Record<string, { tag: string; label?: string; value?: unknown;
+    data_test?: string; name?: string; id?: string; input_type?: string;
+    href?: string; near?: string; scan?: number; [k: string]: unknown }>;
+}
+
+const ATTR_ALIAS: Record<string, string> = {
+  test: "data_test", "data-test": "data_test", type: "input_type",
+};
+
+/**
+ * Match the SUBSET of CSS that the element pool can express: `#id`, `tag`,
+ * `[attr=value]`, `[attr~substr]`, `tag[attr=v]`, comma lists, and `[data-test=x]`.
+ * Anything else (classes, `:nth-child`, descendant combinators) returns null —
+ * induction must not pretend it can evaluate what the offline view cannot see.
+ */
+export function matchSelector(elems: StateView["elems"], selector: string): StateView["elems"][string][] | null {
+  const parts = selector.split(",").map((s) => s.trim()).filter(Boolean);
+  if (!parts.length) return null;
+  // Pool-expressible only: `/^tag?(\[attr[=~]value\])?$/`. Classes, pseudos,
+  // descendant/child combinators and `*` are NOT decidable from the pool, so the
+  // caller is told `null` instead of getting a confident wrong answer.
+  const PART = /^([a-z0-9]*)(?:#([^\[\]]+))?(?:\[([^\]=~]+)([=~])([^\]]*)\])?$/i;
+  const ordered = Object.entries(elems).sort((a, b) => Number(a[1].scan ?? 0) - Number(b[1].scan ?? 0));
+  const out: StateView["elems"][string][] = [];
+  for (const part of parts) {
+    const m = PART.exec(part);
+    if (!m) return null;
+    const [, tag, id, rawKey, op, rawVal] = m;
+    if (!tag && !rawKey && !id) return null;
+    const key = rawKey ? (ATTR_ALIAS[rawKey.toLowerCase()] ?? rawKey.toLowerCase()) : "";
+    const val = (rawVal ?? "").replace(/^['"]|['"]$/g, "").toLowerCase();
+    for (const [, e] of ordered) {
+      if (tag && String(e.tag).toLowerCase() !== tag.toLowerCase()) continue;
+      if (id && String(e.id ?? "") !== id) continue;
+      if (key) {
+        const got = String((e as Record<string, unknown>)[key] ?? "").toLowerCase();
+        if (op === "=" && got !== val) continue;
+        if (op === "~" && !got.includes(val)) continue;
+      }
+      out.push(e);
+    }
+  }
+  return out;
+}
+
 export const SIGNAL_OPS: Readonly<Record<string, number>> = {
+  // composition (leaves stay DOM facts, so composing cannot weaken them)
+  all_of: 1,
+  any_of: 1,
+  not: 1,
+  // a human attestation: never verifiable from the DOM, so it blocks without a human
+  manual: 0,
   url_contains: 1,
   css_exists: 1,
   css_text_equals: 2,
