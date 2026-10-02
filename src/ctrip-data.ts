@@ -49,7 +49,7 @@ import crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { nextWeekDates } from "./datasource.ts";
+import { nextWeekDates, todayIso } from "./datasource.ts";
 
 /** Python `data.py` 从引擎侧 re-export `next_week_dates`（日期语义只有一个实现）。 */
 export { nextWeekDates };
@@ -477,10 +477,9 @@ export function hotelsUnder(hotels: readonly Hotel[], cap = 300): Hotel[] {
 
 /* ================================================================ main */
 
+/** 今天的日期：复用引擎侧实现（`LAYA_TODAY` 可钉住，见 datasource.todayIso）。 */
 function todayIsoLocal(): string {
-  const d = new Date();
-  const p = (n: number): string => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return todayIso();
 }
 
 export function main(argv?: readonly string[]): number {

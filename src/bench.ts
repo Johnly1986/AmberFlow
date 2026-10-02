@@ -25,6 +25,7 @@ import { checkSignal } from "./signals.ts";
 import { runSubgoalWithRetries } from "./planner.ts";
 import { installLayaRuntime, type DecisionAgent, type LayaRuntime } from "./model.ts";
 import { createOutcomeMemory, type OutcomeMemoryLike } from "./outcome-memory.ts";
+import { createHintMemory, type HintMemoryLike } from "./hint-memory.ts";
 
 export interface BenchCase {
   id: string;
@@ -70,6 +71,8 @@ export interface BenchMiddlewareOptions {
   routeModels?: boolean;
   /** Cross-run outcome memory (see src/outcome-memory.ts). */
   outcomeMemory?: OutcomeMemoryLike | null;
+  /** Cross-run learned hints (see src/hint-memory.ts). */
+  hintMemory?: HintMemoryLike | null;
 }
 
 export class BenchMiddleware extends BrowserMiddleware {
@@ -91,6 +94,7 @@ export class BenchMiddleware extends BrowserMiddleware {
       // Forwarded, or the harness would silently run without the memory it was given
       // (this exact omission produced an A/B that measured nothing).
       outcomeMemory: opts.outcomeMemory ?? null,
+      hintMemory: opts.hintMemory ?? null,            // forwarded, or it silently does nothing
     });
     this.modelIdUsed = route
       ? "router"
@@ -105,6 +109,7 @@ export class BenchMiddleware extends BrowserMiddleware {
 export async function runCase(
   c: BenchCase, agents: Record<string, DecisionAgent | null>,
   outcomeMemory: OutcomeMemoryLike | null = null,
+  hintMemory: HintMemoryLike | null = null,
 ): Promise<BenchCaseResult> {
   // `slots` go on the PLAN, not into the per-call options: `runSubgoalWithRetries`
   // passes `plan.slots` (merged with the subgoal's own), so a case-level value bag
@@ -120,6 +125,7 @@ export async function runCase(
     confFloor: c.conf_floor ?? 0.25, maxSteps: c.max_steps ?? 8,
     agentOverride: agents[model] ?? null,
     outcomeMemory: outcomeMemory ?? null,
+    hintMemory: hintMemory ?? null,
   });
   const browser = (await browserEnv.launch({ chromium } as never)) as unknown as {
     newPage(): Promise<unknown>; close(): Promise<void>;
@@ -185,6 +191,13 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
       // retry does not walk into them again (see src/outcome-memory.ts).
       "outcome-memory": { type: "string" },
       "outcome-memory-file": { type: "string" },
+      // Learned hints: remember the stable handle of a pick that WORKED, so the next run
+      // of the same page+subgoal needs no model call (see src/hint-memory.ts).
+      "hint-memory": { type: "string" },
+      "hint-memory-file": { type: "string" },
+      // Ablation: strip the AUTHORED hints, leaving the model (and any learned hints) to
+      // decide — the regime in which a learned hint is measurable.
+      "force-hints": { type: "string" },
     },
   });
   const v = parsed.values;
@@ -200,6 +213,12 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
     if (v["force-model"]) c.model = String(v["force-model"]);
     if (v["force-rules"] !== undefined) c.rules = v["force-rules"] === "on";
     if (v["force-conf-floor"] !== undefined) c.conf_floor = Number(v["force-conf-floor"]);
+    if (v["force-hints"] === "off") {
+      for (const sg of c.subgoals ?? []) {
+        delete (sg as { target_hint?: string }).target_hint;
+        delete (sg as { target_hints?: string[] }).target_hints;
+      }
+    }
   }
 
   // The model seam: an explicitly injected runtime (tests), or the installed one.
@@ -218,10 +237,13 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
   const mem = v["outcome-memory"] === "on"
     ? createOutcomeMemory({ path: (v["outcome-memory-file"] as string | undefined) ?? null })
     : null;
+  const hints = v["hint-memory"] === "on"
+    ? createHintMemory({ path: (v["hint-memory-file"] as string | undefined) ?? null })
+    : null;
   for (const c of cases) {
     console.log(`=== ${c.id} (${c.platform}, model=${c.model ?? "english"}) ===`);
     try {
-      all.push(await runCase(c, agents, mem));
+      all.push(await runCase(c, agents, mem, hints));
     } catch (e) {
       console.error(e);
       all.push({

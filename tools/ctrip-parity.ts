@@ -53,6 +53,13 @@ const py = JSON.parse(
   recordedRoot && recordedRoot !== REPO ? rawCorpus.replaceAll(recordedRoot, REPO) : rawCorpus,
 ) as Record<string, any>;
 
+// Pin the clock to the day the frozen corpus was generated: its report embeds a
+// human-readable 执行日期, so an unpinned byte-comparison expires at midnight (measured:
+// 10/10 -> 9/10 when the date rolled from 2026-10-02 to 2026-10-03). The corpus is a
+// Python artifact and stays untouched; the CLOCK is what moves.
+const frozenDay = /执行日期：(\d{4}-\d{2}-\d{2})/.exec(String(py["report"] ?? ""))?.[1];
+if (frozenDay) process.env.LAYA_TODAY = frozenDay;
+
 let failed = 0;
 let passed = 0;
 

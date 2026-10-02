@@ -47,6 +47,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import * as C from "./ctrip-data.ts";
+import { todayIso } from "./datasource.ts";
 import { TaskPlan, type Subgoal } from "./plan.ts";
 import { runSubgoalWithRetries, type MiddlewareLike } from "./planner.ts";
 import { browserSession, BrowserMiddleware, type AnyPage, type PwLike } from "./executor.ts";
@@ -306,10 +307,9 @@ export function verify(records: Partial<Records>, checkin: string | null): Verdi
 
 /* ---------------------------------------------------------------- 报告 */
 
+/** 今天的日期：复用引擎实现（`LAYA_TODAY` 可钉住，见 datasource.todayIso）。 */
 function todayIsoLocal(): string {
-  const d = new Date();
-  const p = (n: number): string => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return todayIso();
 }
 
 export function reportLines(records: Partial<Records>, ver: Verdict): string[] {

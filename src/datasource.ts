@@ -534,7 +534,19 @@ function todayEpochDay(): number {
   return Math.floor(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / 86400000);
 }
 
-function todayIso(): string {
+/**
+ * Today in local time as `YYYY-MM-DD`. `LAYA_TODAY=YYYY-MM-DD` PINS it.
+ *
+ * Why a pin exists: the frozen cross-runtime corpora contain a human-readable
+ * 「执行日期」line, so a byte-comparison against them silently expires at midnight —
+ * measured: the ctrip parity layer went 10/10 -> 9/10 on 2026-10-03 purely because the
+ * reference corpus was generated on 2026-10-02. CI must not depend on the wall clock, so
+ * the parity tools pin the clock to the day their corpus was generated. A malformed pin
+ * is ignored rather than trusted.
+ */
+export function todayIso(override?: string | null): string {
+  const pinned = override ?? process.env.LAYA_TODAY;
+  if (pinned && /^\d{4}-\d{2}-\d{2}$/.test(pinned)) return pinned;
   return epochDayToIso(todayEpochDay());
 }
 
@@ -577,7 +589,7 @@ export function dateParams(source: Source, date: string, today?: DateLike | null
  * 「下周」直觉一致。这是纯日历数学，所以是引擎级日期表达式。
  */
 export function nextWeekDates(today?: DateLike | null): string[] {
-  const t = today === undefined || today === null ? todayEpochDay() : dateToEpochDay(today);
+  const t = today === undefined || today === null ? dateToEpochDay(todayIso()) : dateToEpochDay(today);
   const wd = pyWeekday(t);
   const daysToMon = wd !== 6 ? 7 - wd : 1;
   const mon = t + daysToMon;

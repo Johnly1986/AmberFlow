@@ -19,7 +19,7 @@ Environment: the author's box is Windows (bash shell), Python 3.14, CUDA (≈35 
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 529 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 544 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -363,6 +363,35 @@ These are empirical findings from this codebase's own experiments — preserve t
   normal and both legs measured identically — nearly recorded as "no benefit". `tests/outcome-memory.test.ts`
   now asserts the harness keeps what it was given (`mw.outcomeMemory === mem`). When an experiment's two legs
   come out suspiciously identical, verify the knob is actually CONNECTED before believing the result.
+
+- **A hint can be EARNED, not only authored.** Authored hints carry the live pack (8/8); strip them and the
+  same pack drops to **3/8** (measured with `--force-hints off`, rules still on) — so the lever is the hint
+  layer, not model accuracy. `src/hint-memory.ts` turns an OBSERVED success into a rule: when a MODEL pick
+  actually advanced the subgoal, the element it touched becomes a hint in the existing grammar
+  (`data-test` -> `id` -> `name` -> `tag[near~label]`, and the value must not be volatile: 4+ digits, hashes
+  and counters are refused). Keyed by (exact url, subgoal), used ONLY when the plan authored no hint
+  (authored always wins), bounded, optionally persisted. It is the same epistemology as induced signals:
+  WATCHED, never guessed — and a wrong learned hint is harmless because the grammar falls back to the model
+  when it matches nothing or is ambiguous. Mechanism A/B pinned in `tests/hint-memory.test.ts`: run 1 asks the
+  model, learns, completes; run 2 resolves the step `rule:match` with **zero further model calls**; the
+  control (no memory) asks again; an authored hint still wins; a broken learned hint does not stall the run.
+  Live observation, reported as OBSERVATION not proof: with authored hints stripped, baseline 3/8 & 4/11
+  (105 model picks), learn pass 3/8 & 4/11 (96), reuse pass 3/8 & **5/11** (91) — and the subgoal covered by
+  the learned `a[near~艾伦·图灵]` went from 4 steps to 1. Live sites vary far too much run to run (154/140/128
+  total steps; Wikipedia serves error shells) to call the extra subgoal causal. Learned hints amortize
+  subgoals that once SUCCEEDED; they cannot rescue one the model never solved. Hence OPT-IN until a
+  repeat-the-same-plan protocol (like `cache:measure`) shows a clean win.
+
+- **A frozen corpus must not depend on the WALL CLOCK.** The ctrip parity layer compares a rendered
+  report byte for byte, and that report embeds a human-readable 「执行日期」 line — so the gate silently
+  expired at midnight: 10/10 -> 9/10 on 2026-10-03 purely because the reference corpus was generated on
+  2026-10-02 (`first byte diff @108`). The corpus is a Python artifact and stays untouched; the CLOCK is
+  what gets pinned. `todayIso()` (single implementation in `src/datasource.ts`, now also used by
+  `ctrip-data.ts`/`ctrip-task.ts` instead of their two private copies) honours `LAYA_TODAY=YYYY-MM-DD`
+  (malformed values are ignored, never trusted), `nextWeekDates()` derives from it, and
+  `tools/ctrip-parity.ts` pins it to the day parsed out of its own corpus. `tests/parity-clock.test.ts`
+  pins the property both ways: under the corpus day the corpus reproduces exactly, and without a pin the
+  value tracks the real date. When a "frozen" fixture can change at midnight, it is not frozen.
 
 - **The risk head fires on ~40% of benign clicks.** On the ctrip case 8/19 steps were flagged RISKY: a nav link "机票" 0.82,
   a sort link "价格从低到高" 0.87, a price-cap link "¥300以下" 0.79, and a purely local "record" button 0.62-0.79. The gate asks

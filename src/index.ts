@@ -18,6 +18,10 @@ export * as decisionCache from "./decision-cache.ts";
 // page+subgoal so a retry/resume does not repeat a dead action.
 export { OutcomeMemory, createOutcomeMemory, type OutcomeMemoryLike, type OutcomeMemoryStats } from "./outcome-memory.ts";
 export * as outcomeMemory from "./outcome-memory.ts";
+// Learned hints: turn an OBSERVED success into a rule for the next run (stable
+// handles only), so a subgoal that needed the model once may cost nothing later.
+export { HintMemory, createHintMemory, induceHint, type HintMemoryLike, type HintMemoryStats } from "./hint-memory.ts";
+export * as hintMemory from "./hint-memory.ts";
 export * from "./plan.ts";
 export * from "./model.ts";
 export * from "./audit.ts";

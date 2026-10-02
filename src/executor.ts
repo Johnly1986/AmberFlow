@@ -92,6 +92,7 @@ import {
   navRule,
 } from "./rules.ts";
 import { checkSignal, type SignalSpec } from "./signals.ts";
+import { induceHint } from "./hint-memory.ts";
 
 /* ------------------------------------------------------------------ shapes */
 
@@ -194,6 +195,18 @@ export interface OutcomeMemoryLike {
   countPrevented?(n?: number): void;
 }
 
+/**
+ * Hints EARNED from an observed success: when a model pick actually advanced the
+ * subgoal, the element it touched becomes a hint for the same (url, subgoal) next time
+ * — restricted to stable handles by `induceHint` (see src/hint-memory.ts).
+ */
+export interface HintMemoryLike {
+  key(url: string, instruction: string): string;
+  lookup(key: string): string | null;
+  record(key: string, hint: string): void;
+  countUsed?(n?: number): void;
+}
+
 export type EscalatorLike =
   (req: EscalationRequest) => string | null | Promise<string | null>;
 
@@ -221,6 +234,8 @@ export interface RunOptions {
   escalateFn?: EscalatorLike | null;
   /** Cross-run memory of elements that proved inert on this page+subgoal. */
   outcomeMemory?: OutcomeMemoryLike | null;
+  /** Cross-run memory of hints LEARNED from successful picks (used when the plan has none). */
+  hintMemory?: HintMemoryLike | null;
   /** Reuse an open page (one browser across subgoals); run() then owns nothing. */
   page?: AnyPage | null;
   slots?: Record<string, unknown> | null;
@@ -257,6 +272,8 @@ export interface MiddlewareOptions {
   escalateFn?: EscalatorLike | null;
   /** See RunOptions.outcomeMemory (default: none — each run starts blind). */
   outcomeMemory?: OutcomeMemoryLike | null;
+  /** See RunOptions.hintMemory (default: none — only authored hints are used). */
+  hintMemory?: HintMemoryLike | null;
   gotoTimeout?: number;
   routeModels?: boolean;
   router?: RouterLike | null;
@@ -439,12 +456,17 @@ export class BrowserMiddleware {
   reobserve = true;
   escalateFn: EscalatorLike | null = null;
   outcomeMemory: OutcomeMemoryLike | null = null;
+  hintMemory: HintMemoryLike | null = null;
   gotoTimeout: number;
   /** Deterministic rule prefilter ON, anti-repeat ON (measured production defaults). */
   rulesOn = true;
   antiRepeat = true;
   /** Frozen-plan disambiguation, set per run() from the plan's target_hint. */
   targetHint: string | null = null;
+  /** current (url, subgoal) key for the learned-hint memory */
+  _hintKey = "";
+  /** did the step's decision come from a LEARNED hint? (for the stats) */
+  _learnedHintApplied = false;
   /** Ordered hints: each is authoritative for ONE action, then the next takes over. */
   targetHints: string[] = [];
   _hintI = 0;
@@ -467,6 +489,7 @@ export class BrowserMiddleware {
     this.reobserve = opts.reobserve ?? true;
     this.escalateFn = opts.escalateFn ?? null;
     this.outcomeMemory = opts.outcomeMemory ?? null;
+    this.hintMemory = opts.hintMemory ?? null;
     this.gotoTimeout = opts.gotoTimeout ?? 30000;
   }
 
@@ -510,7 +533,18 @@ export class BrowserMiddleware {
   currentHint(): string | null {
     const hints = this.targetHints;
     if (hints && hints.length) return hints[Math.min(this._hintI, hints.length - 1)] ?? null;
-    return this.targetHint;
+    if (this.targetHint) return this.targetHint;
+    // No authored hint for this step: a LEARNED one (observed success on this exact
+    // url + subgoal) takes the same authority. The hint grammar is unchanged, so a
+    // learned hint that matches nothing or is ambiguous still falls back to the model.
+    if (this.hintMemory && this._hintKey) {
+      const learned = this.hintMemory.lookup(this._hintKey);
+      if (learned) {
+        this._learnedHintApplied = true;
+        return learned;
+      }
+    }
+    return null;
   }
 
   /** Called once the current hint's action has done its job (or died). */
@@ -972,6 +1006,7 @@ export class BrowserMiddleware {
       reobserve = this.reobserve,
       escalateFn = this.escalateFn,
       outcomeMemory = this.outcomeMemory,
+      hintMemory = this.hintMemory,
     } = opts;
 
     const slots: Record<string, unknown> = { ...extractSlots(instruction), ...(slotsIn ?? {}) };
@@ -1027,6 +1062,8 @@ export class BrowserMiddleware {
         // this page+subgoal — but only while something else remains to choose from
         // (a remembered element must never empty the pool).
         let prevented = 0;
+        this._learnedHintApplied = false;
+        this._hintKey = hintMemory ? hintMemory.key(urlOf(pg), instruction) : "";
         if (outcomeMemory) {
           const inert = outcomeMemory.inertIn(outcomeMemory.key(urlOf(pg), instruction));
           if (inert.size) {
@@ -1318,8 +1355,21 @@ export class BrowserMiddleware {
           console.log(`  step ${stepNo}: ${desc} (${how}, ${method}, conf=${conf.toFixed(2)}${inert ? ", inert" : ""})`);
         }
 
+        if (executed && !inert && this._learnedHintApplied && method === "rule:match") {
+          (hintMemory as HintMemoryLike | null)?.countUsed?.(1);
+        }
         if (executed && !inert) this._advanceHint();
         if (goalSignalFn && (await goalSignalFn(pg))) {
+          // A MODEL pick that actually advanced the subgoal is a hint we EARNED: record
+          // it (stable handles only, via induceHint) so the next run of this exact url +
+          // subgoal resolves by rule at zero model cost. Rule hits need no help.
+          if (hintMemory && this._hintKey && (method.startsWith("laya") || method === "escalate")) {
+            const learned = induceHint(el);
+            if (learned) {
+              hintMemory.record(this._hintKey, learned);
+              if (verbose) console.log(`  step ${stepNo}: learned hint ${learned} for this page+subgoal`);
+            }
+          }
           done = true;
           stopReason = "dom goal signal";
           break;
