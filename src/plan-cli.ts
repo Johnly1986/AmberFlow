@@ -22,6 +22,7 @@ import { SIGNAL_OPS, type SignalSpec } from "./signals.ts";
 import { browserSession, BrowserMiddleware } from "./executor.ts";
 import { extractElements } from "./extraction.ts";
 import { getAuditor, type AuditVerdict } from "./audit.ts";
+import { createHintMemory, type HintMemoryLike } from "./hint-memory.ts";
 
 export const DEFAULT_FILE = ".task_plan.json";
 
@@ -176,6 +177,11 @@ export function cmdReset(file: string, io: CliIO = defaultIO): void {
 export interface RunArgs {
   file: string; max: number; reset: boolean; confirm: "allow" | "deny" | "ask";
   replan: boolean;
+  /**
+   * Sidecar path for LEARNED HINTS (see src/hint-memory.ts). The memory lives in its own
+   * file on purpose: a frozen plan is an audited artifact and a run must not rewrite it.
+   */
+  hintMemory?: string | null;
 }
 
 export interface RunOutcome {
@@ -191,6 +197,8 @@ export interface RunDeps {
   /** Test seam: replace the executor / the session factory. */
   middleware?: unknown;
   sessionFactory?: () => Promise<unknown>;
+  /** Test seam: an in-memory learned-hint store instead of the sidecar file. */
+  hintMemory?: HintMemoryLike | null;
 }
 
 export async function cmdRun(a: RunArgs, io: CliIO = defaultIO, deps: RunDeps = {}): Promise<RunOutcome> {
@@ -216,7 +224,8 @@ export async function cmdRun(a: RunArgs, io: CliIO = defaultIO, deps: RunDeps = 
     }
     planner = new LLMPlanner();
   }
-  const mw = (deps.middleware ?? new BrowserMiddleware({ confirmFn })) as BrowserMiddleware;
+  const hints = deps.hintMemory ?? (a.hintMemory ? createHintMemory({ path: a.hintMemory }) : null);
+  const mw = (deps.middleware ?? new BrowserMiddleware({ confirmFn, hintMemory: hints })) as BrowserMiddleware;
   const start = plan.subgoals.find((s) => s.start_url)?.start_url ?? null;
   if (start === null) throw new Error("no subgoal has a start_url");
   const rep = await runPlan(mw as never, plan, {
@@ -228,6 +237,11 @@ export async function cmdRun(a: RunArgs, io: CliIO = defaultIO, deps: RunDeps = 
   const audit = (await auditor.audit(plan.goal, rep.traces, finished)) as AuditVerdict;
   io.out(`\n${rep.completed} subgoals; steps=${rep.traces.length}`);
   io.out(`final audit: ${JSON.stringify(audit)}`);
+  if (hints?.stats) {
+    const s = hints.stats();
+    io.out(`learned hints: ${s.entries} known, ${s.used} reused this run`
+      + `${a.hintMemory ? ` (${a.hintMemory})` : ""}`);
+  }
   return { exitCode: finished ? 0 : 1, completed: rep.completed, audit, finished };
 }
 
@@ -240,6 +254,7 @@ const USAGE = `Plan CLI: LLM-drafted OR hand-built plans, both constrained by th
   plan-cli edit IDX [--desc D] [--signal S] [--url U] [--hint H]
   plan-cli move IDX TO | del IDX | show | check | reset
   plan-cli run [--confirm allow|deny|ask] [--reset] [--replan]
+               [--learn-hints | --hint-memory FILE]   # learned hints live in a SIDECAR
 
 Plans live in --file (default ${DEFAULT_FILE}); editing that JSON by hand between
 commands works too — \`check\` re-validates whatever is on disk.`;
@@ -258,6 +273,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: CliIO = d
       llm: { type: "boolean" }, url: { type: "string" }, hint: { type: "string" },
       desc: { type: "string" }, signal: { type: "string" },
       confirm: { type: "string" }, reset: { type: "boolean" }, replan: { type: "boolean" },
+      "hint-memory": { type: "string" }, "learn-hints": { type: "boolean" },
     },
   });
   const file = parsed.values.file ?? DEFAULT_FILE;
@@ -294,10 +310,14 @@ export async function main(argv: string[] = process.argv.slice(2), io: CliIO = d
       cmdReset(file, io);
       return 0;
     case "run": {
+      const learn = Boolean(parsed.values["learn-hints"]);
       const outcome = await cmdRun({
         file, max, reset: Boolean(parsed.values.reset),
         confirm: (parsed.values.confirm ?? "ask") as RunArgs["confirm"],
         replan: Boolean(parsed.values.replan),
+        // --learn-hints keeps the memory NEXT TO the plan (a sidecar), never inside it
+        hintMemory: (parsed.values["hint-memory"] as string | undefined)
+          ?? (learn ? `${file}.hints.json` : null),
       }, io);
       return outcome.exitCode;
     }

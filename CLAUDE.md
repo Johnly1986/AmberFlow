@@ -19,7 +19,7 @@ Environment: the author's box is Windows (bash shell), Python 3.14, CUDA (≈35 
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 544 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 548 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -388,6 +388,15 @@ These are empirical findings from this codebase's own experiments — preserve t
   matters (saving forwards by failing faster). So the mechanism is worth using; it stays opt-in at the
   LIBRARY level only because the memory's scope and file path are a deployment decision — a middleware must
   not invent a persistence location — and `--hint-memory` stays explicit in bench so future A/Bs are clean.
+
+- **Learned hints are a SIDECAR, never part of the plan.** `plan_cli run --learn-hints` keeps the memory
+  next to the plan (`<plan>.hints.json`), or `--hint-memory FILE` names it explicitly; the run prints how many
+  hints it knows and how many it reused. The distinction is load-bearing and pinned by
+  `tests/plan-cli-hints.test.ts`: the plan file IS rewritten (status/obstacle are the resume checkpoint — that
+  is a feature), but no run may write what it LEARNED into the audited artifact — after a run the subgoals
+  still carry no `target_hint`, and the learned handle appears only in the sidecar. The same test proves the
+  payoff end to end through the CLI: run 1 asks the model and records `[data-test=proceed-now]`, run 2 of the
+  same plan completes with **zero further model calls**, and without the flag the model is asked every time.
 
 - **A frozen corpus must not depend on the WALL CLOCK.** The ctrip parity layer compares a rendered
   report byte for byte, and that report embeds a human-readable 「执行日期」 line — so the gate silently

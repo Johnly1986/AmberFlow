@@ -54,6 +54,8 @@ export interface HintMemoryLike {
   key(url: string, instruction: string): string;
   lookup(key: string): string | null;
   record(key: string, hint: string): void;
+  /** Optional: report what the memory knows (the CLI prints it after a run). */
+  stats?(): { entries: number; used: number };
 }
 
 export interface HintMemoryStats {
