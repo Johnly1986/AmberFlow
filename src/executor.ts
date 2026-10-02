@@ -92,6 +92,7 @@ import {
   navRule,
 } from "./rules.ts";
 import { checkSignal, type SignalSpec } from "./signals.ts";
+import { LayaNotConfiguredError, type LayaRuntime } from "./model.ts";
 import { induceHint } from "./hint-memory.ts";
 
 /* ------------------------------------------------------------------ shapes */
@@ -463,6 +464,9 @@ export class BrowserMiddleware {
   manualConfirmFn: ((desc: string, stateExcerpt: string) => boolean | Promise<boolean>) | null = null;
   reobserve = true;
   escalateFn: EscalatorLike | null = null;
+  /** No runtime installed: rules/hints only. Set by `ready()` (see RULES-ONLY MODE). */
+  rulesOnly = false;
+  rulesOnlyReason = "";
   outcomeMemory: OutcomeMemoryLike | null = null;
   outcomeMemoryMode: "forbid" | "rank" = "forbid";
   hintMemory: HintMemoryLike | null = null;
@@ -509,7 +513,21 @@ export class BrowserMiddleware {
    */
   private async ready(): Promise<void> {
     if (this._ready) return;
-    const rt = getLayaRuntime();
+    let rt: LayaRuntime;
+    try {
+      rt = getLayaRuntime();
+    } catch (err) {
+      if (!(err instanceof LayaNotConfiguredError)) throw err;
+      // RULES-ONLY MODE. A frozen plan that NAMES its targets needs no model at all, so an
+      // unconfigured runtime must not abort the whole run: the steps that rules/hints can
+      // decide are executed, and a step that genuinely needs a pick blocks with this reason.
+      // (Measured need: `npm start` on a fresh checkout has no ONNX artifacts and blocked
+      //  immediately, which also made the doctor's "规则模式也能跑" claim false.)
+      this.rulesOnly = true;
+      this.rulesOnlyReason = (err as Error).message;
+      this._ready = true;
+      return;
+    }
     if (this.agent === null) {
       this.agent = typeof this.modelId === "string" ? await rt.load(this.modelId) : this.modelId;
     }
@@ -523,7 +541,9 @@ export class BrowserMiddleware {
       // exactly this). Without it a 3 GB box would hold two.
       try {
         if (this.router) {
-          if (this.router.attach && this.router.default) this.router.attach(this.router.default, this.agent);
+          if (this.router.attach && this.router.default && this.agent) {
+            this.router.attach(this.router.default, this.agent);
+          }
           this._routedModel = this.router.default ?? null;
         }
       } catch {
@@ -625,6 +645,10 @@ export class BrowserMiddleware {
     forbidden: Set<string>,
     notes: Record<string, string> | null = null,
   ): Promise<[string | null, number, Record<string, number>]> {
+    if (this.rulesOnly) {
+      // no model to ask: the caller reports "needs a model pick" instead of a crash
+      return [null, 0.0, {}];
+    }
     const crit = criteriaView(elems, forbidden, await ariaInteractiveLines(page), notes);
     if (!Object.keys(crit).length) {
       // action space exhausted (every element forbidden/inert) — signal this
@@ -667,6 +691,8 @@ export class BrowserMiddleware {
 
   /** Layered risk gate. Returns `[isRisky, probability]`. */
   async isRisky(goal: string, desc: string): Promise<[boolean, number]> {
+    await this.ready();
+    if (this.rulesOnly) return [DESTRUCTIVE_PATTERNS.some((p) => desc.toLowerCase().includes(p)), 0.0];
     if (DESTRUCTIVE_PATTERNS.some((p) => desc.toLowerCase().includes(p))) return [true, 1.0];
     const state = { action: desc, user_goal: goal };
     const { agent } = await this.agentFor(state);
@@ -691,6 +717,8 @@ export class BrowserMiddleware {
    * `done` here: DOM signals are the only truth (the caller decides).
    */
   async isDone(goal: string, page: AnyPage): Promise<number> {
+    await this.ready();
+    if (this.rulesOnly) return 0.0;      // the model's "done" vote is advisory anyway
     const state = {
       goal,
       url: urlOf(page),
@@ -1174,7 +1202,12 @@ export class BrowserMiddleware {
           layaMargin = topTwoMargin(pprobs);
         }
         if (ref === null) {
-          stopReason = `action space exhausted on step ${stepNo}`;
+          // In rules-only mode a null ref usually means "no runtime to ask", which is not
+          // the same failure as "every element is forbidden" — say which one it is.
+          stopReason = this.rulesOnly
+            ? `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`
+            : `action space exhausted on step ${stepNo}`;
+          if (verbose && this.rulesOnly) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
         }
         // PORT FIX: a model answer can name a ref that is no longer in THIS
@@ -1198,6 +1231,13 @@ export class BrowserMiddleware {
           const priorHit = trace.some((t) => t.desc === wantDesc && t.executed);
           if (priorHit && conf >= 0.10) {
             /* re-drive: proceed despite floor */
+          } else if (this.rulesOnly) {
+            // No runtime installed and no rule/hint resolved this step: say exactly that.
+            // Reporting "low confidence 0.00" here would blame the model for not existing.
+            stopReason = `no model runtime: this step needs a model pick (rules-only mode) `
+              + `on step ${stepNo}`;
+            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            break;
           } else if (Object.keys(forbidden).length >= Math.max(0, Object.keys(elems).length - 1)) {
             stopReason = `action space exhausted (${Object.keys(forbidden).length} forbidden) on step ${stepNo}`;
             break;

@@ -1,0 +1,32 @@
+{
+  "goal": "在示例商店把无线鼠标加入购物车并打开购物车页",
+  "subgoals": [
+    {
+      "desc": "把 Wireless Mouse X200 加入购物车",
+      "signal": {
+        "css_text_equals": [
+          "[data-test=cart-count]",
+          "1"
+        ]
+      },
+      "start_url": "file:///root/ML/LayaWebUse/testpages/product.html",
+      "status": "done",
+      "obstacle": null,
+      "target_hint": "[data-test=add-to-cart]",
+      "attempts": 1
+    },
+    {
+      "desc": "打开购物车页",
+      "signal": {
+        "url_contains": "cart.html"
+      },
+      "start_url": "file:///root/ML/LayaWebUse/testpages/product.html",
+      "status": "done",
+      "obstacle": null,
+      "target_hint": "[data-test=cart-link]",
+      "attempts": 1
+    }
+  ],
+  "slots": {},
+  "saved_at": 1790984867.414
+}

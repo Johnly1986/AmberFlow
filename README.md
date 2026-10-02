@@ -1,7 +1,14 @@
 # LayaWebUse
 
 冻结计划的浏览器自动化中间件（TypeScript / Node ≥ 22.6）：**LLM 只规划一次**，执行阶段由本地决策模型
-逐步决策，**完成只认 DOM 信号**。装上依赖就能跑，不装模型权重也能跑离线部分。
+逐步决策，**完成只认 DOM 信号**。
+
+```bash
+npm ci && npx playwright install chromium
+npm start        # 一条命令跑起一项真实工作（仓库自带页面，离线，零配置）
+```
+
+没有模型权重也能跑：计划点名了目标的步骤由规则解决，需要模型兜底的步骤会明确告诉你。
 
 ## 项目目标
 
@@ -34,29 +41,42 @@
 
 ## 使用方法
 
-### 1. 准备
+### 1. 装上，然后一条命令开始
 
 ```bash
 npm ci
-npx playwright install chromium          # 或者用 PLAYWRIGHT_BROWSERS_PATH 指向已装好的 chromium
+npx playwright install chromium
+npm start                      # 开箱任务：在仓库自带页面上跑一份真实计划（离线，零配置）
 ```
 
-真模型是可选的：设置 `LAYA_ONNX_MODEL` 与 `LAYA_TOKENIZER_DIR`（默认读 `/tmp/laya_dec.onnx` 与 HuggingFace
-缓存；导出方式见 [node-port-poc/README.md](node-port-poc/README.md)）。**没有模型产物也能用**——离线测试照常全绿，
-只有需要真模型的步骤会打印 SKIP。
+`npm start` 会打印每一步是怎么被判定的、结果如何。想先看环境齐不齐：`npm run doctor`
+（Node / chromium / 决策模型 / LLM 四项一眼看清，缺什么就给出该跑的命令）。
 
-### 2. 跑起来
+**模型权重是可选的**：没有权重时进入"规则模式"——计划点名了目标的步骤照样执行
+（`npm start` 的开箱任务全部如此），只有确实需要模型兜底的步骤会明确告诉你需要什么，而不是抛异常。
+
+### 2. 做你自己的事：也是一条命令
 
 ```bash
-node --experimental-strip-types src/long-task.ts      # 最小全链路：规划 → 执行 → 审计
-node --experimental-strip-types src/ctrip-task.ts     # 开箱用例：19 个子目标 + 独立判分
-npm run plan-cli -- --help                            # 计划管理：new / add / edit / check / run
-node --experimental-strip-types src/bench.ts --cases bench/cases-live.json   # 8 个真实站点跑分
-
-npm run verify                                        # 类型检查 + 全部测试
+npm start -- --goal "把商品加入购物车" --url https://shop.example.com/p/1
 ```
 
-本地的 `testpages/` 是随仓库提供的练习页，可以直接拿来做计划与信号实验。
+它会：打开页面 → **演示一次**（在你点名的目标上执行一次动作）→ 从"前态/后态"**编译出完成信号**
+（不让你去猜页面做完之后长什么样）→ 把目标的稳定句柄写进计划 → 保存计划 → 直接执行。
+
+常用开关：`--target '[data-test=add-to-cart]'`（显式点名目标，适合页面非中文或语义不直观时）、
+`--dry-run`（只生成计划不执行）、`--headful`（显示浏览器窗口）、`--plan <文件>`（计划保存位置）。
+
+做多步任务、或者想手工编排计划：
+
+```bash
+npm run plan-cli -- --help                         # new / add / edit / check / run
+npm run plan-cli -- add 1 "打开购物车页" --signal 'url_contains=cart.html' --url <页面>
+npm run plan-cli -- run --replan                   # 跑（阻塞时可让 LLM 重新规划）
+node --experimental-strip-types tools/induce_signal.ts --url <页面> --click '[data-test=add-to-cart]' --replays 2
+```
+
+### 3. 在代码里用
 
 ### 3. 在代码里用
 

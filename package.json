@@ -8,6 +8,8 @@
     "node": ">=22.6"
   },
   "scripts": {
+    "start": "node --experimental-strip-types src/start.ts",
+    "doctor": "node --experimental-strip-types src/start.ts --doctor",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

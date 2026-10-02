@@ -15,11 +15,20 @@ Environment: the author's box is Windows (bash shell), Python 3.14, CUDA (≈35 
 
 ## Commands
 
+一条命令开始一项工作（README 的首选入口）：
+
+```bash
+npm start                                        # 开箱任务：自带页面上跑一份真实计划（离线、零配置）
+npm start -- --goal "把商品加入购物车" --url <页面>   # 演示一次 → 归纳完成信号 + 点名目标 → 执行
+npm run doctor                                   # 环境体检：Node / chromium / 决策模型 / LLM
+```
+
+
 ```bash
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 549 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 557 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
