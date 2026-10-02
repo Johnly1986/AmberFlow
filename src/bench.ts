@@ -170,6 +170,9 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
       cases: { type: "string" }, out: { type: "string" }, "mode-tag": { type: "string" },
       only: { type: "string" }, "fixtures-only": { type: "boolean" },
       "force-model": { type: "string" }, "force-rules": { type: "string" },
+      // Ablation knob: the confidence floor is a GATE, so its setting must be
+      // measurable on the same cases (see docs/decision-model-survey.md).
+      "force-conf-floor": { type: "string" },
     },
   });
   const v = parsed.values;
@@ -184,6 +187,7 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
   for (const c of cases) {
     if (v["force-model"]) c.model = String(v["force-model"]);
     if (v["force-rules"] !== undefined) c.rules = v["force-rules"] === "on";
+    if (v["force-conf-floor"] !== undefined) c.conf_floor = Number(v["force-conf-floor"]);
   }
 
   // The model seam: an explicitly injected runtime (tests), or the installed one.

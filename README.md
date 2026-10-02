@@ -38,10 +38,14 @@
   一律弃权，流程回到原来的阻塞行为。每步最多一次，只在失败路径付费。
 - **看不够就再看一次**：元素池是模型的全部世界，低置信时执行器会**加宽观察一次**（40 → 120 元素）再决策，
   而不是直接判阻塞；命中则在轨迹里记为 `laya:reobserve`（失败路径才付费）。
+- **自信度是要被测量的，不是被信任的**：`npm run calibration` 用模型作者自己的 ECE 口径，把历史轨迹变成
+  逐切片的可靠性表（动作级 / 任务级两个标签）。实测（关规则、夹具+线上共 80 个模型步）：英文切片平均自信 0.498、
+  任务级完成仅 0.314（ECE 0.200），分桶还倒挂（低自信段 95.0% 有效 > 高自信段 88.9%）——把置信度地板从
+  0.25 降到 0.10 也**不改变任何结果**（4/8 / 6/11 完全一致），所以这里不设"校准门"。
 - **站点即配置**：取数引擎不含站点知识，站点写在 `<site>/sources/*.json`；另有可达性/抓取/OTA 探针。
 - **开箱用例**：ctrip（19 子目标 + 独立判分 7/7）、transfer（spec 驱动的 6 个复刻站 + 迁移度量 + 消融）、
   qunar（真实站点如实记录边界）、bench（6 个离线夹具 + 8 个真实站点）、Excel 批量（设备录入 / IP 规划表）。
-- **门禁**：514 个测试 + 六层跨实现对拍；`npm run verify` 与 `bash bench/smoke.sh`。
+- **门禁**：518 个测试 + 六层跨实现对拍；`npm run verify` 与 `bash bench/smoke.sh`。
 
 ## 使用方法
 
@@ -51,7 +55,7 @@
 
 ```bash
 npm ci
-npm run verify          # 类型检查 + 514 测试 + 六层对拍（不需要模型权重）
+npm run verify          # 类型检查 + 518 测试 + 六层对拍（不需要模型权重）
 bash bench/smoke.sh     # CI 的"绿色"定义；缺 ONNX 产物时模型侧三步打印 SKIP
 ```
 
@@ -63,6 +67,7 @@ bash bench/smoke.sh     # CI 的"绿色"定义；缺 ONNX 产物时模型侧三�
 | 归纳完成信号（演示一次） | `node --experimental-strip-types tools/induce_signal.ts --url testpages/product.html --click "[data-test=add-to-cart]" --replays 2` |
 | Excel 批量 | `src/camera-entry.ts`（类型列路由两套表单）· `src/ip-config.ts`（IP 规划表写进设备页） |
 | 归纳完成信号（演示一次） | `tools/induce_signal.ts --url <page> --click <hint> --replays 2` |
+| 看模型自信度准不准（切片 ECE） | `npm run calibration -- bench/results/live-*.json` |
 | 量化决策缓存收益 | `npm run cache:measure -- shop-add-coupon asset-bullet-zh` |
 | 计划管理 / Path A / Path B | `npm run plan-cli -- --help` · `src/path-a.ts [--confirm-safe]` · `src/picker-server.ts` + 加载 `extension/` |
 | 演示 | `src/long-task.ts`（规划→执行→审计）· `npm run shortlist`（真模型） |

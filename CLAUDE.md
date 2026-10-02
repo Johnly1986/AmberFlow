@@ -19,7 +19,7 @@ Environment: the author's box is Windows (bash shell), Python 3.14, CUDA (≈35 
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 514 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 518 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -325,6 +325,24 @@ These are empirical findings from this codebase's own experiments — preserve t
   model recovered — widening now becomes the step's view unconditionally; (2) a confident local pick is never
   overridden (escalation is a fallback, not a second opinion). Pinned by `tests/escalate.test.ts`
   (recovers a blocked subgoal; rejects an invented ref; not consulted at high confidence; survives a throw).
+
+- **Confidence is NOT a usable gate on real pages — measured on two labels, then rejected.** The same-base
+  application (C3-R) demands "held-out, slice-specific calibration" before deciding; this repo had the model
+  author's own metric ported (`eceScore`) but never applied it to decisions, so `tools/calibration.ts`
+  (`npm run calibration`) now turns recorded traces into per-slice reliability tables on two labels — action
+  level (executed & page changed) and task level (the subgoal completed). Measured over 80 model-driven steps
+  from two `--force-rules off` runs (fixture matrix + the 8 live sites): english slice n=51, mean confidence
+  0.498, action-level accuracy 0.922 with **ECE 0.441**, task-level completion only **0.314** with ECE 0.200.
+  The reliability table is INVERTED — the 0.2-0.4 confidence band was effective 95.0% of the time, the
+  0.8-1.0 band 88.9%. Direct A/B on the live pack, same cases: floor 0.25 → 4/8 cases / 6/11 subgoals;
+  floor 0.10 → **4/8 / 6/11, unchanged**. So neither the floor nor a calibration gate is the lever here: the
+  model is not asked to be accurate, it is asked less often (rules on = 8/8 vs rules off = 4/8). Gate rejected,
+  instrument kept for re-measurement. Note the project ALREADY applies C3-R's spirit on the one slice where
+  calibration is catastrophic — English-on-CJK (ECE 0.855) → route by SCRIPT, and make the 类型 column a
+  first-class rule instead of trusting confidence.
+- **Ablation knobs are part of the evidence, not a convenience.** `bench --force-rules on|off`,
+  `--force-model`, and now `--force-conf-floor <n>` exist so a gate's *setting* is measurable on the same cases
+  (the floor A/B above is what retired the calibration gate). Same for `npm run cache:measure`.
 
 - **The risk head fires on ~40% of benign clicks.** On the ctrip case 8/19 steps were flagged RISKY: a nav link "机票" 0.82,
   a sort link "价格从低到高" 0.87, a price-cap link "¥300以下" 0.79, and a purely local "record" button 0.62-0.79. The gate asks
