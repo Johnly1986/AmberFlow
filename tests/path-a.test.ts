@@ -130,7 +130,13 @@ describe("tune_guard — two phrasings, three pages", () => {
     });
     const table = await measure({ agent });
     expect(Object.keys(table)).toEqual([...PAGES_TO_SCORE]);
-    expect(Object.keys(VARIANTS)).toEqual(["A current", "B narrower"]);
+    for (const row of Object.values(table)) {
+      expect(Object.keys(row).sort()).toEqual([...Object.keys(VARIANTS)].sort());
+    }
+    // The third variant is the model author's own preset wording (`laya.presets`),
+    // measured here because "adopt the shipped prompt" is only an improvement if the
+    // numbers say so — for PAGE text it does not (see docs/decision-model-survey.md).
+    expect(Object.keys(VARIANTS)).toEqual(["A current", "B narrower", "C preset(laya)"]);
     expect(table.attack!["A current"]).toBeCloseTo(0.99, 3);
     expect(table.product!["A current"]).toBeCloseTo(0.85, 3);
     expect(table.product!["B narrower"]).toBeCloseTo(0.2, 3);

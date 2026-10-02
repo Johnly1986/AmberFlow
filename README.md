@@ -30,10 +30,15 @@
   可判定的完成信号（前态为假 + 后态为真 + 稳定句柄 + 多轮复现才判定为可自动采纳）；归纳不出信号时，
   该步声明 `{"signal": {"manual": true}}`，由人确认，并把"人所看到的状态"写进轨迹。信号语言支持组合
   （`all_of` / `any_of` / `not`），叶子仍是 DOM 事实，因此组合不会放松证据。
+- **决策记忆**：laya 是确定性的，同状态同问题重复前向纯属浪费——`withDecisionCache` 按（状态指纹 + 问题指纹）
+  精确缓存并可选写 JSONL 决策日志（重试/重规划/续跑/消融都会命中；页面一变即 miss）。实测同一份计划跑两遍：
+  第二遍 **0 次前向、9.2s → 1.3s**。
+- **看不够就再看一次**：元素池是模型的全部世界，低置信时执行器会**加宽观察一次**（40 → 120 元素）再决策，
+  而不是直接判阻塞；命中则在轨迹里记为 `laya:reobserve`（失败路径才付费）。
 - **站点即配置**：取数引擎不含站点知识，站点写在 `<site>/sources/*.json`；另有可达性/抓取/OTA 探针。
 - **开箱用例**：ctrip（19 子目标 + 独立判分 7/7）、transfer（spec 驱动的 6 个复刻站 + 迁移度量 + 消融）、
   qunar（真实站点如实记录边界）、bench（6 个离线夹具 + 8 个真实站点）、Excel 批量（设备录入 / IP 规划表）。
-- **门禁**：495 个测试 + 六层跨实现对拍；`npm run verify` 与 `bash bench/smoke.sh`。
+- **门禁**：505 个测试 + 六层跨实现对拍；`npm run verify` 与 `bash bench/smoke.sh`。
 
 ## 使用方法
 
@@ -43,7 +48,7 @@
 
 ```bash
 npm ci
-npm run verify          # 类型检查 + 495 测试 + 六层对拍（不需要模型权重）
+npm run verify          # 类型检查 + 505 测试 + 六层对拍（不需要模型权重）
 bash bench/smoke.sh     # CI 的"绿色"定义；缺 ONNX 产物时模型侧三步打印 SKIP
 ```
 
@@ -54,6 +59,8 @@ bash bench/smoke.sh     # CI 的"绿色"定义；缺 ONNX 产物时模型侧三�
 | 真实取数与探针 | `src/datasource.ts --list` · `--source ctrip-flights-h5` · `src/h5-flights.ts` · `src/live-probe.ts` · `src/live-capture.ts` · `src/ota-probe.ts` |
 | 归纳完成信号（演示一次） | `node --experimental-strip-types tools/induce_signal.ts --url testpages/product.html --click "[data-test=add-to-cart]" --replays 2` |
 | Excel 批量 | `src/camera-entry.ts`（类型列路由两套表单）· `src/ip-config.ts`（IP 规划表写进设备页） |
+| 归纳完成信号（演示一次） | `tools/induce_signal.ts --url <page> --click <hint> --replays 2` |
+| 量化决策缓存收益 | `npm run cache:measure -- shop-add-coupon asset-bullet-zh` |
 | 计划管理 / Path A / Path B | `npm run plan-cli -- --help` · `src/path-a.ts [--confirm-safe]` · `src/picker-server.ts` + 加载 `extension/` |
 | 演示 | `src/long-task.ts`（规划→执行→审计）· `npm run shortlist`（真模型） |
 

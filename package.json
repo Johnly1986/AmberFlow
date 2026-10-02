@@ -27,7 +27,8 @@
     "ip-config": "node --experimental-strip-types src/ip-config.ts",
     "camera-entry": "node --experimental-strip-types src/camera-entry.ts",
     "picker-server": "node --experimental-strip-types src/picker-server.ts",
-    "induce": "node --experimental-strip-types tools/induce_signal.ts"
+    "induce": "node --experimental-strip-types tools/induce_signal.ts",
+    "cache:measure": "node --experimental-strip-types tools/cache_measure.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

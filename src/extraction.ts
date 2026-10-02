@@ -393,7 +393,18 @@ const FN_WRAPPER = compile("e", String.raw`const own = (e.value || '').trim();
  * `jsProbe` runs the CDP listener walk once per URL first, so JS-only widgets
  * (addEventListener divs) are stamped `data-js-ref` and join the scan.
  */
-export async function extractElements(page: PageLike, jsProbe = true): Promise<ElemPool> {
+/**
+ * Extract the interaction pool.
+ *
+ * `maxElements` defaults to the model-view budget (MAX_ELEMENTS). The executor may
+ * ask for a WIDER pass once, when a decision came back below the confidence floor:
+ * the pool is the model's entire world, so a target that never entered it cannot be
+ * chosen no matter how good the model is (the observation bottleneck). Widening is
+ * opt-in and costs one extra scan on the failure path only.
+ */
+export async function extractElements(
+  page: PageLike, jsProbe = true, maxElements: number = MAX_ELEMENTS,
+): Promise<ElemPool> {
   if (jsProbe) {
     try {
       await jsInteractiveWidgets(page);
@@ -404,7 +415,7 @@ export async function extractElements(page: PageLike, jsProbe = true): Promise<E
   const elems: ElemPool = {};
   const frames = framesOf(page);
   for (let fi = 0; fi < frames.length; fi++) {
-    const remaining = MAX_ELEMENTS - Object.keys(elems).length;
+    const remaining = maxElements - Object.keys(elems).length;
     if (remaining <= 0) break;
     let rows: Elem[] | null = null;
     try {
@@ -413,7 +424,7 @@ export async function extractElements(page: PageLike, jsProbe = true): Promise<E
     } catch {
       rows = null;
     }
-    if (rows === null && fi === 0) rows = await extractRowsPerElement(page);   // resilience
+    if (rows === null && fi === 0) rows = await extractRowsPerElement(page, maxElements);  // resilience
     for (const row of rows ?? []) {
       // child-frame refs are namespaced so one pool holds every frame
       row.ref = fi === 0 ? row.ref : `f${fi}:${row.ref}`;
@@ -435,7 +446,7 @@ export async function candidateMeta(page: PageLike): Promise<Array<{ i: number; 
 }
 
 /** Resilience path: only used when the one-pass JS extraction throws. */
-export async function extractRowsPerElement(page: PageLike): Promise<Elem[]> {
+export async function extractRowsPerElement(page: PageLike, maxElements: number = MAX_ELEMENTS): Promise<Elem[]> {
   const handles = await page.locator!(INTERACTIVE_ALL).all!();
   const meta = await candidateMeta(page);
   let order = [...meta.filter((m) => m.vis && m.main).map((m) => m.i),
@@ -443,7 +454,7 @@ export async function extractRowsPerElement(page: PageLike): Promise<Elem[]> {
   if (!meta.length) order = handles.map((_h, i) => i);   // meta pass failed: DOM order
   const elems: Elem[] = [];
   for (const i of order) {
-    if (elems.length >= MAX_ELEMENTS) break;
+    if (elems.length >= maxElements) break;
     const el = handles[i] as any;
     if (!el) continue;
     let visible = true;

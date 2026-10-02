@@ -177,6 +177,14 @@ export interface RunOptions {
    */
   manualGoal?: boolean;
   manualConfirmFn?: ((desc: string, stateExcerpt: string) => boolean | Promise<boolean>) | null;
+  /**
+   * Observation-bottleneck recovery: when a model pick lands below the confidence
+   * floor, take ONE wider look (a bigger element budget) and re-ask before blocking
+   * the subgoal. The pool is the model's entire world — a target that never entered
+   * it cannot be chosen no matter how good the model is. Default ON; it only ever
+   * runs on the way to stopping.
+   */
+  reobserve?: boolean;
   /** Reuse an open page (one browser across subgoals); run() then owns nothing. */
   page?: AnyPage | null;
   slots?: Record<string, unknown> | null;
@@ -207,6 +215,8 @@ export interface MiddlewareOptions {
   confirmFn?: (desc: string) => boolean | Promise<boolean>;
   /** Human oracle for `{manual: true}` subgoals (see RunOptions.manualGoal). */
   manualConfirmFn?: ((desc: string, stateExcerpt: string) => boolean | Promise<boolean>) | null;
+  /** See RunOptions.reobserve (default ON). */
+  reobserve?: boolean;
   gotoTimeout?: number;
   routeModels?: boolean;
   router?: RouterLike | null;
@@ -258,8 +268,24 @@ function firstLoc(loc: any): AnyLoc {
   return typeof loc.first === "function" ? loc.first() : loc.first;
 }
 
+/** Budget for the ONE wider look a low-confidence decision is allowed to take. */
+const WIDER_ELEMENTS = 120;
+
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
+}
+
+/**
+ * Top-two margin of a decision distribution — C3-R's second abstention signal
+ * (its decision model abstains when the top two options are too close, even if the
+ * top probability is high). Recorded here as a DIAGNOSTIC only: the gate itself is
+ * adopted only if measured to separate good picks from bad ones.
+ */
+function topTwoMargin(probs: Record<string, unknown> | undefined): number | null {
+  const vs = Object.values(probs ?? {}).map(Number).filter((v) => Number.isFinite(v))
+    .sort((a, b) => b - a);
+  if (!vs.length) return null;
+  return vs.length === 1 ? vs[0]! : vs[0]! - vs[1]!;
 }
 
 /** One line for a failed Playwright action, safe to put in a trace/report. */
@@ -370,6 +396,7 @@ export class BrowserMiddleware {
   doneThreshold: number;
   confirmFn: (desc: string) => boolean | Promise<boolean>;
   manualConfirmFn: ((desc: string, stateExcerpt: string) => boolean | Promise<boolean>) | null = null;
+  reobserve = true;
   gotoTimeout: number;
   /** Deterministic rule prefilter ON, anti-repeat ON (measured production defaults). */
   rulesOn = true;
@@ -395,6 +422,7 @@ export class BrowserMiddleware {
     this.doneThreshold = opts.doneThreshold ?? 0.5;
     this.confirmFn = opts.confirmFn ?? DEFAULT_CONFIRM;
     this.manualConfirmFn = opts.manualConfirmFn ?? null;
+    this.reobserve = opts.reobserve ?? true;
     this.gotoTimeout = opts.gotoTimeout ?? 30000;
   }
 
@@ -540,7 +568,11 @@ export class BrowserMiddleware {
     // `confidence` is 1 - normalized entropy: with few options it collapses even
     // when the model is decisive. The argmax value against the runner-up is the
     // calibration-consistent gate signal here.
-    const top = Math.max(...Object.values(probs));
+    // `Math.max()` of an empty list is -Infinity: a runtime that answers without
+    // probabilities must not poison the floor comparison (the stop message printed
+    // `low confidence -Infinity`). Fall back to the answer's own confidence.
+    const values = Object.values(probs);
+    const top = values.length ? Math.max(...values) : (a.confidence ?? 0);
     return [a.choice, top, probs];
   }
 
@@ -893,6 +925,7 @@ export class BrowserMiddleware {
       precondition = null,
       manualGoal = false,
       manualConfirmFn = this.manualConfirmFn,
+      reobserve = this.reobserve,
     } = opts;
 
     const slots: Record<string, unknown> = { ...extractSlots(instruction), ...(slotsIn ?? {}) };
@@ -943,7 +976,8 @@ export class BrowserMiddleware {
       }
 
       for (let stepNo = 1; stepNo <= this.maxSteps; stepNo++) {
-        const elems = await extractElements(pg);
+        let elems = await extractElements(pg);
+        let reobserved = false;          // at most ONE wider look per step
         // A frozen plan that NAMES its target must never be blocked by the
         // extraction budget: retrieve the hinted element(s) into the pool when
         // they were evicted.
@@ -994,6 +1028,7 @@ export class BrowserMiddleware {
         let ref: string | null = null;
         let conf = 0;
         let method = "laya";
+        let layaMargin: number | null = null;      // C3-R top-two margin (diagnostic)
         if (ruleRef && !(ruleRef in forbidden)) {
           ref = ruleRef;
           conf = 1.0;
@@ -1002,10 +1037,12 @@ export class BrowserMiddleware {
           // the rule's target is forbidden (inert or tried) -> fall through to
           // laya with the reduced action space instead of re-hitting a known-dead
           // element
-          const [picked, pconf] = await this.pickElement(instruction, pg, elems, new Set(Object.keys(forbidden)));
+          const [picked, pconf, pprobs] = await this.pickElement(
+            instruction, pg, elems, new Set(Object.keys(forbidden)));
           ref = picked;
           conf = pconf;
           method = "laya";
+          layaMargin = topTwoMargin(pprobs);
         }
         if (ref === null) {
           stopReason = `action space exhausted on step ${stepNo}`;
@@ -1036,8 +1073,46 @@ export class BrowserMiddleware {
             stopReason = `action space exhausted (${Object.keys(forbidden).length} forbidden) on step ${stepNo}`;
             break;
           } else {
-            stopReason = `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`;
-            break;
+            // OBSERVATION-BOTTLENECK RECOVERY (browser-use's "the button is there, we
+            // just failed to show it"): the pool is the model's entire world, so a
+            // target that never entered it cannot be chosen no matter how good the
+            // model is. Take ONE wider look and re-ask before blocking the subgoal.
+            // Only the way to stopping pays for the extra scan; the pick is recorded
+            // as `laya:reobserve` so a widened step is visible in the trace/audit.
+            let recovered = false;
+            if (reobserve && !reobserved && ref !== null) {
+              reobserved = true;
+              const wide = await extractElements(pg, true, WIDER_ELEMENTS);
+              if (Object.keys(wide).length > Object.keys(elems).length) {
+                // refs are positional: re-prune forbids whose ref now names a
+                // different element before re-asking (same rule as the step head).
+                for (const r of Object.keys(forbidden)) {
+                  const cur = wide[r];
+                  if (cur === undefined || !sigEq(forbidden[r]!, esig(cur))) {
+                    delete forbidden[r];
+                    delete blockedRetry[r];
+                    reAdmitted.delete(r);
+                  }
+                }
+                const [ref2, conf2] = await this.pickElement(
+                  instruction, pg, wide, new Set(Object.keys(forbidden)));
+                if (ref2 !== null && conf2 >= floor) {
+                  elems = wide;
+                  ref = ref2;
+                  conf = conf2;
+                  method = "laya:reobserve";
+                  recovered = true;
+                  if (verbose) {
+                    console.log(`  step ${stepNo}: re-observed wider `
+                      + `(${Object.keys(wide).length} elements) -> ${ref} conf=${conf2.toFixed(2)}`);
+                  }
+                }
+              }
+            }
+            if (!recovered) {
+              stopReason = `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`;
+              break;
+            }
           }
         }
         const el = elems[ref]!;
@@ -1127,7 +1202,9 @@ export class BrowserMiddleware {
         const inert = JSON.stringify(pre) === JSON.stringify(post);   // url+text+input-values all identical
         trace.push({
           step: stepNo, desc, how, value: arg, risky, executed, confirmed, method,
-          conf: round3(conf), inert, url: urlOf(pg),
+          conf: round3(conf), ...(method.startsWith("laya") && layaMargin !== null
+            ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}),
+          inert, url: urlOf(pg),
         });
         if (verbose) {
           console.log(`  step ${stepNo}: ${desc} (${how}, ${method}, conf=${conf.toFixed(2)}${inert ? ", inert" : ""})`);

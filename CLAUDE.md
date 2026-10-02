@@ -19,7 +19,7 @@ Environment: the author's box is Windows (bash shell), Python 3.14, CUDA (≈35 
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 495 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 505 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -283,6 +283,34 @@ These are empirical findings from this codebase's own experiments — preserve t
   `PlanningRules` and evaluated offline by `evalSignalOnState`; every leaf is still one of the five DOM
   operators, so `all_of` can only add discrimination and `any_of` only accepts alternatives a human verified.
   `not` is how a disappearing spinner is expressed without inventing a positive claim.
+
+- **The pool is the model's whole world — so widen it before giving up.** browser-use names this the
+  observation bottleneck ("the button is there, we just failed to show it"): a target that never entered
+  the element pool cannot be chosen no matter how good the model is. The live-pack failures were exactly
+  this (python.org's `#searchInput` evicted by the 40-element budget; the fixture's own `cart-count` badge
+  outside the pool entirely). `RunOptions.reobserve` (default ON) takes ONE wider look (`WIDER_ELEMENTS=120`,
+  via the now-parameterised `extractElements(page, jsProbe, maxElements)`) and re-asks before blocking;
+  the pick is traced as `laya:reobserve`. A/B pinned in `tests/reobserve.test.ts`: with 60 decoy buttons
+  ahead of the target, OFF blocks with `low confidence … < floor 0.25`, ON recovers and completes.
+  Only the way to stopping pays for the extra scan.
+- **A deterministic model should not be asked twice.** laya answers identically for identical
+  (state, question, option set), yet retries, replans, resumes and ablation re-runs asked again every
+  time. `withDecisionCache` memoises on an EXACT fingerprint (state + questions, sorted-key canonical
+  JSON), is bounded, resettable, and can append one JSONL record per decision. Measured on the real
+  model with the same plan run twice: 12 forwards / second run 9.2 s without it, 6 forwards total with
+  it — **second run 0 forwards, 1.3 s**. Exact keys mean a changed page is a miss, never a stale hit.
+- **The model author's preset wording is not automatically better.** `laya.presets.guard_questions()`
+  phrases prompt-injection as "instructions aimed at the AI system rather than a genuine user request";
+  measured on the three fixtures it scores benign pages **0.969 / 0.930**, i.e. ABOVE the 0.95 attack
+  threshold (`path-a.ts`) — it would flag a product page. Our hand-written phrasing gives 0.907 / 0.940
+  with the injection page at 1.000 for all three. Presets are tuned for USER PROMPTS, not page text;
+  the measured rule stays ours (see `docs/decision-model-survey.md`, variant C in `src/tune-guard.ts`).
+- **C3-R's top-two margin is recorded, not yet gated.** The same-base application (ColomboAI C3R) abstains
+  on "low confidence OR small top-two margin", and its architecture is a System-One fast path plus a
+  separate deliberative (LLM) path. We already have the two-tier shape (rules → laya → re-observe → stop /
+  human); the margin is now written into every `laya*` trace step as `margin` so the gate can be adopted
+  only if it measurably separates good picks from bad ones. Also hardened here: an empty probability map
+  used to make `Math.max()` return `-Infinity`, printing `low confidence -Infinity` in the stop reason.
 
 - **The risk head fires on ~40% of benign clicks.** On the ctrip case 8/19 steps were flagged RISKY: a nav link "机票" 0.82,
   a sort link "价格从低到高" 0.87, a price-cap link "¥300以下" 0.79, and a purely local "record" button 0.62-0.79. The gate asks

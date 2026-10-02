@@ -10,6 +10,10 @@ export {
   signalReproducible, stableToken, WITNESS_SEL,
 } from "./signal-induction.ts";
 export * as signalInduction from "./signal-induction.ts";
+// Decision memory: exact-key memoisation of a deterministic model + a JSONL
+// decision log (retries/replans/resumes re-ask what was already answered).
+export { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "./decision-cache.ts";
+export * as decisionCache from "./decision-cache.ts";
 export * from "./plan.ts";
 export * from "./model.ts";
 export * from "./audit.ts";
