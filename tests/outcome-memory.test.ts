@@ -177,6 +177,59 @@ describe("the executor uses it, and it is what saves the retry", () => {
     expect(b.steps[0]!.prevented).toBeUndefined();
   }, 120_000);
 
+  it("rank mode KEEPS the element and tells the model about it, instead of removing it", async () => {
+    // The same observation, used the other way: annotate the observation rather than gate
+    // the action. The model decides — and it is shown what the harness already knows.
+    let phase: "learn" | "use" = "learn";
+    const seenLines: string[] = [];
+    installLayaRuntime(scriptedRuntime(scriptedAgent((key, _s, questions): Answer | undefined => {
+      if (key === "r") return { noul: 0.05 };
+      if (key === "d") return { noul: 0.0 };
+      if (key === "act") {
+        const crit = (questions[key]!.criteria ?? {}) as Record<string, string>;
+        const keys = Object.keys(crit);
+        if (phase === "learn") {
+          // take the FIRST candidate: the decoy that does nothing
+          return {
+            choice: keys[0] ?? "",
+            probabilities: Object.fromEntries(keys.map((k, i) => [k, i === 0 ? 0.9 : 0.1 / keys.length])),
+            confidence: 0.9,
+          };
+        }
+        seenLines.push(...Object.values(crit));
+        const live = keys.find((k) => String(crit[k]).includes("Proceed to payment")) ?? keys[0] ?? "";
+        return {
+          choice: live,
+          probabilities: Object.fromEntries(keys.map((k) => [k, k === live ? 0.9 : 0.1 / keys.length])),
+          confidence: 0.9,
+        };
+      }
+      return undefined;
+    })));
+
+    const url = pageWithDeadFirst();
+    const mem = createOutcomeMemory();
+    const learn = new BrowserMiddleware({
+      maxSteps: 1, confirmFn: () => true, outcomeMemory: mem, outcomeMemoryMode: "rank",
+    });
+    const learned = await attempt(learn, url);
+    expect(learned.done).toBe(false);
+    expect(learned.steps[0]!.inert).toBe(true);
+    expect(mem.stats().entries).toBe(1);
+
+    phase = "use";
+    const mw = new BrowserMiddleware({
+      maxSteps: 3, confirmFn: () => true, outcomeMemory: mem, outcomeMemoryMode: "rank",
+    });
+    const report = await attempt(mw, url);
+    expect(report.done).toBe(true);
+    expect(report.steps[0]!.noted).toBe(1);
+    expect(report.steps[0]!.prevented).toBeUndefined();
+    // the annotation reached the model, and the dead element was still IN the view
+    expect(seenLines.some((l) => l.includes("[tried before, page did not change]"))).toBe(true);
+    expect(seenLines.some((l) => l.includes("Store locator"))).toBe(true);
+  }, 120_000);
+
   it("never empties the pool: a remembered element that is the ONLY candidate is still used", async () => {
     alwaysFirst();
     const url = pageWithOnlyDead();

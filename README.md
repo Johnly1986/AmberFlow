@@ -53,7 +53,7 @@
 - **站点即配置**：取数引擎不含站点知识，站点写在 `<site>/sources/*.json`；另有可达性/抓取/OTA 探针。
 - **开箱用例**：ctrip（19 子目标 + 独立判分 7/7）、transfer（spec 驱动的 6 个复刻站 + 迁移度量 + 消融）、
   qunar（真实站点如实记录边界）、bench（6 个离线夹具 + 8 个真实站点）、Excel 批量（设备录入 / IP 规划表）。
-- **门禁**：548 个测试 + 六层跨实现对拍；`npm run verify` 与 `bash bench/smoke.sh`。
+- **门禁**：549 个测试 + 六层跨实现对拍；`npm run verify` 与 `bash bench/smoke.sh`。
 
 ## 使用方法
 
@@ -63,7 +63,7 @@
 
 ```bash
 npm ci
-npm run verify          # 类型检查 + 548 测试 + 六层对拍（不需要模型权重）
+npm run verify          # 类型检查 + 549 测试 + 六层对拍（不需要模型权重）
 bash bench/smoke.sh     # CI 的"绿色"定义；缺 ONNX 产物时模型侧三步打印 SKIP
 ```
 

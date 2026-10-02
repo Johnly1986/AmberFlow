@@ -600,14 +600,23 @@ export async function ariaInteractiveLines(page: PageLike): Promise<Array<[strin
  * label/attrs -> 0.50 vs 0.18 (this function). The ` [test=..] -> href` suffixes
  * are load-bearing even though rules/hints never read this text.
  */
-export function criteriaView(elems: ElemPool, forbidden: Set<string>, ariaLines: Array<[string, string]> | null): Record<string, string> {
+export function criteriaView(
+  elems: ElemPool, forbidden: Set<string>, ariaLines: Array<[string, string]> | null,
+  /**
+   * Optional per-ref note appended to the rendered line — how a RANKED (not forbidden)
+   * candidate tells the model what is already known about it, e.g. that a previous
+   * attempt on this exact page+subgoal produced no change (see src/outcome-memory.ts).
+   */
+  notes: Record<string, string> | null = null,
+): Record<string, string> {
   const crit: Record<string, string> = {};
   const aligned = ariaLines !== null && ariaLines.length === Object.keys(elems).length;
   const ordered = Object.entries(elems)
     .sort((a, b) => (a[1].scan ?? Number(a[0].slice(1))) - (b[1].scan ?? Number(b[0].slice(1))));
   ordered.forEach(([ref, e], i) => {
     if (forbidden.has(ref)) return;
-    const attrs = (e.data_test ? ` [test=${e.data_test}]` : "") + (e.href ? ` -> ${e.href}` : "");
+    const note = notes?.[ref] ? ` ${notes[ref]}` : "";
+    const attrs = (e.data_test ? ` [test=${e.data_test}]` : "") + (e.href ? ` -> ${e.href}` : "") + note;
     if (aligned) {
       const [role, name] = ariaLines![i]!;
       const ours = e.label;

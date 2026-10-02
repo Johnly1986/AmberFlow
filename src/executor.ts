@@ -234,6 +234,12 @@ export interface RunOptions {
   escalateFn?: EscalatorLike | null;
   /** Cross-run memory of elements that proved inert on this page+subgoal. */
   outcomeMemory?: OutcomeMemoryLike | null;
+  /**
+   * How an inert memory is used:
+   *   "forbid" (default) — the element is removed from the candidate pool
+   *   "rank"             — it stays, annotated in the model's view ("tried, no change")
+   */
+  outcomeMemoryMode?: "forbid" | "rank";
   /** Cross-run memory of hints LEARNED from successful picks (used when the plan has none). */
   hintMemory?: HintMemoryLike | null;
   /** Reuse an open page (one browser across subgoals); run() then owns nothing. */
@@ -272,6 +278,8 @@ export interface MiddlewareOptions {
   escalateFn?: EscalatorLike | null;
   /** See RunOptions.outcomeMemory (default: none — each run starts blind). */
   outcomeMemory?: OutcomeMemoryLike | null;
+  /** See RunOptions.outcomeMemoryMode (default "forbid"). */
+  outcomeMemoryMode?: "forbid" | "rank";
   /** See RunOptions.hintMemory (default: none — only authored hints are used). */
   hintMemory?: HintMemoryLike | null;
   gotoTimeout?: number;
@@ -456,6 +464,7 @@ export class BrowserMiddleware {
   reobserve = true;
   escalateFn: EscalatorLike | null = null;
   outcomeMemory: OutcomeMemoryLike | null = null;
+  outcomeMemoryMode: "forbid" | "rank" = "forbid";
   hintMemory: HintMemoryLike | null = null;
   gotoTimeout: number;
   /** Deterministic rule prefilter ON, anti-repeat ON (measured production defaults). */
@@ -489,6 +498,7 @@ export class BrowserMiddleware {
     this.reobserve = opts.reobserve ?? true;
     this.escalateFn = opts.escalateFn ?? null;
     this.outcomeMemory = opts.outcomeMemory ?? null;
+    this.outcomeMemoryMode = opts.outcomeMemoryMode ?? "forbid";
     this.hintMemory = opts.hintMemory ?? null;
     this.gotoTimeout = opts.gotoTimeout ?? 30000;
   }
@@ -613,8 +623,9 @@ export class BrowserMiddleware {
     page: AnyPage,
     elems: ElemPool,
     forbidden: Set<string>,
+    notes: Record<string, string> | null = null,
   ): Promise<[string | null, number, Record<string, number>]> {
-    const crit = criteriaView(elems, forbidden, await ariaInteractiveLines(page));
+    const crit = criteriaView(elems, forbidden, await ariaInteractiveLines(page), notes);
     if (!Object.keys(crit).length) {
       // action space exhausted (every element forbidden/inert) — signal this
       // with conf 0 so the caller stops instead of crashing the runtime.
@@ -1006,6 +1017,7 @@ export class BrowserMiddleware {
       reobserve = this.reobserve,
       escalateFn = this.escalateFn,
       outcomeMemory = this.outcomeMemory,
+      outcomeMemoryMode = this.outcomeMemoryMode,
       hintMemory = this.hintMemory,
     } = opts;
 
@@ -1062,20 +1074,32 @@ export class BrowserMiddleware {
         // this page+subgoal — but only while something else remains to choose from
         // (a remembered element must never empty the pool).
         let prevented = 0;
+        let noted: Record<string, string> | null = null;
         this._learnedHintApplied = false;
         this._hintKey = hintMemory ? hintMemory.key(urlOf(pg), instruction) : "";
+        // OUTCOME MEMORY — two ways to use "this element did nothing last time":
+        //   forbid: remove it, but only while something else remains (never empty the pool)
+        //   rank:   keep it and SAY SO in the model's view, so the MODEL decides —
+        //           annotating the observation instead of gating the action
         if (outcomeMemory) {
           const inert = outcomeMemory.inertIn(outcomeMemory.key(urlOf(pg), instruction));
           if (inert.size) {
             const candidates = Object.entries(elems)
               .filter(([r, e]) => inert.has(JSON.stringify(esig(e))) && forbidden[r] === undefined);
-            const remaining = Object.keys(elems).length - Object.keys(forbidden).length - candidates.length;
-            if (remaining >= 1) {
-              for (const [r, e] of candidates) forbidden[r] = esig(e);
-              prevented = candidates.length;
-              outcomeMemory.countPrevented?.(prevented);
-              if (verbose && prevented) {
-                console.log(`  step ${stepNo}: outcome memory skipped ${prevented} inert element(s)`);
+            if (outcomeMemoryMode === "rank") {
+              if (candidates.length) {
+                noted = {};
+                for (const [r] of candidates) noted[r] = "[tried before, page did not change]";
+              }
+            } else {
+              const remaining = Object.keys(elems).length - Object.keys(forbidden).length - candidates.length;
+              if (remaining >= 1) {
+                for (const [r, e] of candidates) forbidden[r] = esig(e);
+                prevented = candidates.length;
+                outcomeMemory.countPrevented?.(prevented);
+                if (verbose && prevented) {
+                  console.log(`  step ${stepNo}: outcome memory skipped ${prevented} inert element(s)`);
+                }
               }
             }
           }
@@ -1143,7 +1167,7 @@ export class BrowserMiddleware {
           // laya with the reduced action space instead of re-hitting a known-dead
           // element
           const [picked, pconf, pprobs] = await this.pickElement(
-            instruction, pg, elems, new Set(Object.keys(forbidden)));
+            instruction, pg, elems, new Set(Object.keys(forbidden)), noted);
           ref = picked;
           conf = pconf;
           method = "laya";
@@ -1200,7 +1224,7 @@ export class BrowserMiddleware {
                   }
                 }
                 const [ref2, conf2] = await this.pickElement(
-                  instruction, pg, wide, new Set(Object.keys(forbidden)));
+                  instruction, pg, wide, new Set(Object.keys(forbidden)), noted);
                 // The wider view BECOMES the step's view even when the local model
                 // stays unsure: a stronger reasoner (escalation) must be able to see
                 // what the wider look already found, or widening would be pointless.
@@ -1349,6 +1373,7 @@ export class BrowserMiddleware {
             ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}),
           ...(method === "escalate" && escalatedPick ? { escalated: true } : {}),
           ...(prevented ? { prevented } : {}),
+          ...(noted ? { noted: Object.keys(noted).length } : {}),
           inert, url: urlOf(pg),
         });
         if (verbose) {

@@ -71,6 +71,8 @@ export interface BenchMiddlewareOptions {
   routeModels?: boolean;
   /** Cross-run outcome memory (see src/outcome-memory.ts). */
   outcomeMemory?: OutcomeMemoryLike | null;
+  /** "forbid" (default) removes a remembered element; "rank" annotates it instead. */
+  outcomeMemoryMode?: "forbid" | "rank";
   /** Cross-run learned hints (see src/hint-memory.ts). */
   hintMemory?: HintMemoryLike | null;
 }
@@ -94,6 +96,7 @@ export class BenchMiddleware extends BrowserMiddleware {
       // Forwarded, or the harness would silently run without the memory it was given
       // (this exact omission produced an A/B that measured nothing).
       outcomeMemory: opts.outcomeMemory ?? null,
+      outcomeMemoryMode: opts.outcomeMemoryMode ?? "forbid",
       hintMemory: opts.hintMemory ?? null,            // forwarded, or it silently does nothing
     });
     this.modelIdUsed = route
@@ -110,6 +113,7 @@ export async function runCase(
   c: BenchCase, agents: Record<string, DecisionAgent | null>,
   outcomeMemory: OutcomeMemoryLike | null = null,
   hintMemory: HintMemoryLike | null = null,
+  outcomeMemoryMode: "forbid" | "rank" = "forbid",
 ): Promise<BenchCaseResult> {
   // `slots` go on the PLAN, not into the per-call options: `runSubgoalWithRetries`
   // passes `plan.slots` (merged with the subgoal's own), so a case-level value bag
@@ -125,6 +129,7 @@ export async function runCase(
     confFloor: c.conf_floor ?? 0.25, maxSteps: c.max_steps ?? 8,
     agentOverride: agents[model] ?? null,
     outcomeMemory: outcomeMemory ?? null,
+    outcomeMemoryMode,
     hintMemory: hintMemory ?? null,
   });
   const browser = (await browserEnv.launch({ chromium } as never)) as unknown as {
@@ -191,6 +196,9 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
       // retry does not walk into them again (see src/outcome-memory.ts).
       "outcome-memory": { type: "string" },
       "outcome-memory-file": { type: "string" },
+      // forbid (default) removes a remembered-inert element; rank keeps it and annotates
+      // it in the model's view (the two ways to use the same observation).
+      "outcome-memory-mode": { type: "string" },
       // Learned hints: remember the stable handle of a pick that WORKED, so the next run
       // of the same page+subgoal needs no model call (see src/hint-memory.ts).
       "hint-memory": { type: "string" },
@@ -243,7 +251,8 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
   for (const c of cases) {
     console.log(`=== ${c.id} (${c.platform}, model=${c.model ?? "english"}) ===`);
     try {
-      all.push(await runCase(c, agents, mem, hints));
+      all.push(await runCase(c, agents, mem, hints,
+        (v["outcome-memory-mode"] as "forbid" | "rank" | undefined) ?? "forbid"));
     } catch (e) {
       console.error(e);
       all.push({
