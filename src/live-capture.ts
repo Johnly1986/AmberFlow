@@ -33,14 +33,20 @@ import * as D from "./datasource.ts";
 import * as browserEnv from "./browser-env.ts";
 import { criteriaView, extractElements, pageText, urlOf, type ElemPool, type PageLike } from "./extraction.ts";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const RESULTS = path.resolve(HERE, "..", "ctrip", "results");
+import { addDays as psAddDays, fillProbeDate, loadProbeSet, markerList, type ProbeSet } from "./probe-set.ts";
+
+/**
+ * 站点知识（URL 模板、风控/登录墙特征、登录重定向主机、结果目录）全在
+ * `apps/ctrip-live/pack.json`；本文件只剩"怎么抓、怎么判"。判决顺序是 load-bearing 的：
+ * unreachable → blocked → login_required → captured。
+ */
+export const SET: ProbeSet = loadProbeSet("ctrip-live");
+
+const RESULTS = SET.resultsDir;
 export const OUT = path.join(RESULTS, "live_capture");
 
-export const BLOCK_MARKERS = [
-  "whaleguard", "challenge validation", "bot or not", "verify that you are a real user",
-];
-export const LOGIN_MARKERS = ["登录以查看会员价", "账号密码登录", "扫码登录"];
+export const BLOCK_MARKERS: readonly string[] = markerList(SET, "block_text");
+export const LOGIN_MARKERS: readonly string[] = markerList(SET, "login_text");
 
 export const IPHONE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
   + "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
@@ -91,8 +97,10 @@ export function looksLoggedOut(text: string): boolean {
  */
 export function looksLoginRedirect(finalUrl: string, title = ""): boolean {
   const url = (finalUrl || "").toLowerCase();
-  return url.includes("passport.ctrip.com") || url.includes("/login")
-    || (title || "").includes("登录首页") || (title || "").toLowerCase().includes("sign in");
+  const t = title || "";
+  if (SET.login.hosts.some((h) => url.includes(h.toLowerCase()))) return true;
+  if (SET.login.paths.some((p) => url.includes(p.toLowerCase()))) return true;
+  return SET.login.titles.some((x) => t.includes(x) || t.toLowerCase().includes(x.toLowerCase()));
 }
 
 export interface CaptureObservation {
@@ -123,23 +131,19 @@ export function verdictFor(obs: CaptureObservation): CaptureVerdict {
  * 用 `\n` 分隔的字符串换成了三个字段的元组，语义与 Python 版相同。
  */
 export function targets(date: string): Array<[string, string, string]> {
-  const checkout = addDays(date, 1);
-  return [
-    ["flights", "携程机票列表：昆明 → 北京（单程）",
-      `https://flights.ctrip.com/online/list/oneway-kmg-bjs?depdate=${date}`
-      + "&cabin=y_s&adult=1&child=0&infant=0"],
-    ["hotels", "携程酒店列表：北京（入住当日 / 次日离店）",
-      `https://hotels.ctrip.com/hotels/list?city=1&checkin=${date.replace(/-/g, "/")}`
-      + `&checkout=${checkout.replace(/-/g, "/")}`],
-  ];
+  return SET.capture.map((t) => [t.id, t.label, fillProbeDate(t.url, date)] as const as [string, string, string]);
 }
 
-/** `date + n` 天，ISO 字符串（等价 Python `timedelta` 那一步）。 */
+/**
+ * `date + n` 天，ISO 字符串（唯一实现在 `probe-set.addDays`，这里保留导出以免调用方破坏）。
+ * 非法日期仍然响亮报错（`ValueError`，与数据源那一档同口径）。
+ */
 export function addDays(date: string, n: number): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date.trim());
-  if (!m) throw new D.ValueError(`Invalid isoformat string: ${JSON.stringify(date)}`);
-  const ms = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) + n * 86400000;
-  return new Date(ms).toISOString().slice(0, 10);
+  try {
+    return psAddDays(date, n);
+  } catch {
+    throw new D.ValueError(`Invalid isoformat string: ${JSON.stringify(date)}`);
+  }
 }
 
 /** `layaapp.snapshot_text` 的三行等价物（与 `datasource.renderAndSnapshot` 同一渲染空间）。 */
@@ -253,7 +257,7 @@ export async function captureOne(
 const USAGE = `usage: live-capture [-h] [--date DATE] [--only {flights,hotels}] [--mobile]
                      [--profile PROFILE]
 
-抓真实携程页面，产出可照写的计划快照`;
+抓真实页面（探针集 ${SET.app}），产出可照写的计划快照`;
 
 export interface CaptureArgs {
   date: string | null;

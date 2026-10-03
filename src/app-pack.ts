@@ -22,6 +22,7 @@ import { REPO } from "./flow.ts";
 import { PlanningRules, TaskPlan, type Subgoal } from "./plan.ts";
 import type { SignalSpec } from "./signals.ts";
 import { validateToolSignal, type ToolSignal } from "./tool-signals.ts";
+import { validateProbeBlock } from "./probe-set.ts";
 import { loadSource } from "./datasource.ts";
 
 export const APPS_DIR = path.join(REPO, "apps");
@@ -37,7 +38,7 @@ export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = { out_dir:
 /** 包级允许的键；未知键在加载期报错（配置写错了要响亮，不静默）。 */
 export const PACK_KEYS = [
   "spec_version", "id", "label", "goal", "model", "max_subgoals", "hosts",
-  "slots", "required_slots", "sources", "roles", "journey", "invariants", "notes",
+  "slots", "required_slots", "sources", "roles", "journey", "invariants", "notes", "probe",
 ] as const;
 
 /**
@@ -97,6 +98,12 @@ export interface AppPack {
   sources?: string[];
   roles?: Record<string, Record<string, unknown>>;
   journey: Array<Record<string, unknown>>;
+  /**
+   * 探针集（测量型应用）：声明要测哪些 URL、站点特征、结果目录。站点知识的**唯一**合法
+   * 去处——驱动只剩"怎么测"。校验见 `probe-set.validateProbeBlock`（含"每个 URL 的主机都
+   * 必须在 `hosts` 里"，否则防泄漏门禁会漏掉它）。
+   */
+  probe?: Record<string, unknown>;
   invariants?: AppInvariant[];
   notes?: string[];
   /** 加载器写入：这个包的文件路径（报告用）。 */
@@ -290,8 +297,13 @@ export function validatePack(pack: AppPack,
   for (const k of ["id", "label", "goal"] as const) {
     if (typeof pack[k] !== "string" || !pack[k]) p.push(`${k} is required`);
   }
-  if (!Array.isArray(pack.journey) || pack.journey.length === 0) {
-    p.push("journey must be a non-empty list of steps");
+  if (!Array.isArray(pack.journey)) {
+    p.push("journey must be a list of steps");
+    return p;
+  }
+  if (pack.journey.length === 0 && pack.probe === undefined) {
+    // 空旅程只有一个合法理由：这是**测量型应用**（只声明探针集，没有要跑的旅程）。
+    p.push("journey must be a non-empty list of steps (or declare a probe set)");
     return p;
   }
   if (pack.roles !== undefined && !isDict(pack.roles)) p.push("roles must be an object of step templates");
@@ -381,6 +393,9 @@ export function validatePack(pack: AppPack,
     } catch (e) {
       p.push(`source ${JSON.stringify(String(s))} not found (${e instanceof Error ? e.message : String(e)})`);
     }
+  }
+  if (pack.probe !== undefined) {
+    p.push(...validateProbeBlock(pack.probe, pack.hosts, "probe"));
   }
   if ((pack.invariants ?? []).length
     && !pack.journey.some((e) => stepKind((e["role"] ? { ...(roles[String(e["role"])] ?? {}), ...e } : e) as Record<string, unknown>) === "browser")) {

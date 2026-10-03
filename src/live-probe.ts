@@ -32,37 +32,50 @@ import { fileURLToPath } from "node:url";
 
 import * as D from "./datasource.ts";
 import * as browserEnv from "./browser-env.ts";
+import { REPO, fillProbeDate, loadProbeSet, markerList, shortOf, type ProbeSet } from "./probe-set.ts";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const RESULTS = path.resolve(HERE, "..", "ctrip", "results");
+/**
+ * 站点知识全在 `apps/ctrip-live/pack.json` 的 `probe` 块里（目标 URL、站点特征、结果目录、
+ * 判决要引用的目标 id、命中哪一段文本）。本文件只剩"怎么测"：三种客户端 × 两档 UA、
+ * 真浏览器、手机模拟、重复请求，以及纯函数判决。**代码里没有任何站点标识**——
+ * `npm run apps:matrix` 的债计数与防泄漏门禁都盯着这一点。
+ */
+export const SET: ProbeSet = loadProbeSet("ctrip-live");
+
+const RESULTS = SET.resultsDir;
 
 export const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
   + "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 export const PLAIN_UA = "curl/8.10.0";
 
-export const TARGETS: ReadonlyArray<readonly [string, string, string]> = [
-  ["flight_list_cn", "携程 PC 机票列表（昆明→北京 2026-10-05）",
-    "https://flights.ctrip.com/online/list/oneway-kmg-bjs?depdate=2026-10-05"],
-  ["flight_mobile_cn", "携程手机版机票（KMG→BJS 2026-10-05）",
-    "https://m.ctrip.com/html5/flight/swift/domestic/KMG/BJS/2026-10-05"],
-  ["flight_trip_com", "Trip.com 机票搜索（携程集团海外站）",
-    "https://www.trip.com/flights/showfarefirst?dcity=kmg&acity=bjs&ddate=2026-10-05"
-    + "&triptype=ow&class=y&quantity=1&locale=zh-CN&curr=CNY"],
-  ["flight_api_retired", "老机票数据接口 /itinerary/api/12808/products",
-    "https://flights.ctrip.com/itinerary/api/12808/products"],
-  ["hotel_list_cn", "携程 PC 酒店列表（北京 2026-10-05 入住）",
-    "https://hotels.ctrip.com/hotels/list?city=1&checkin=2026/10/05&checkout=2026/10/06"],
-  ["hotel_home_cn", "携程首页（酒店搜索入口）", "https://www.ctrip.com/"],
-];
+export const TARGETS: ReadonlyArray<readonly [string, string, string]> =
+  SET.http.map((t) => [t.id, t.label, fillProbeDate(t.url, SET.date)] as const);
+
+/** 机票还有别的入口形态（行程页 / 低价频道 / 手机版低价页）——"我只试了列表页"是
+ * 站不住脚的，所以这些也逐一实测记下来。 */
+export const ALT_SHAPES: ReadonlyArray<readonly [string, string]> =
+  SET.alts.map((t) => [t.id, fillProbeDate(t.url, SET.date)] as const);
+
+/** 手机模拟与区域域名：UA/设备/区域任意组合都试一遍 —— 这些都没试过的话，
+ * "被封了"这个结论就不完整（机房 IP 封锁 vs UA 指纹，是两种完全不同的原因）。
+ * URL 里的 `{date}` 由 `main()` 用 `--date`（默认取声明日期）填入。 */
+export const MOBILE_TARGETS: ReadonlyArray<readonly [string, string]> =
+  SET.mobile.map((t) => [t.id, t.url] as const);
 
 /** 一条探测记录的 Python-dict 等价物（字段随客户端不同而变化）。 */
 export type ProbeRecord = Record<string, any>;
 
 const TITLE_RE = /<title>(.*?)<\/title>/s;
-const PRICE_RE = /[¥￥]\s?\d[\d,]*/g;
-const EMPTY_PRICE_RE = /class="price-line">\s*<\/div>/g;
-const HOTEL_NAME_RE = /class="hotelName">([^<]{2,40})<\/span>/g;
-const HOTEL_TOTAL_RE = /找到([\d,]+)家酒店/;
+
+/** 站点特征表来自探针集（`markers`）：哪些文本算风控品牌词、哪些算"被挡"、价格/酒店名怎么抓。 */
+const markers = (key: string): string[] => markerList(SET, key);
+const hit = (body: string, key: string): boolean => {
+  const low = body.toLowerCase();
+  return markers(key).some((m) => low.includes(m.toLowerCase()));
+};
+const hitExact = (body: string, key: string): boolean => markers(key).some((m) => body.includes(m));
+const occurrences = (body: string, key: string): number =>
+  markers(key).reduce((n, m) => n + (body.split(m).length - 1), 0);
 
 function pyRound1(x: number): number {
   return Math.round(x * 10) / 10;
@@ -84,31 +97,39 @@ export function strftimeNow(): string {
     + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-/** 把一次抓取压成可比较的形状（状态/大小/标题/关键标志/正文头）。 */
+/**
+ * 把一次抓取压成可比较的形状（状态/大小/标题/关键标志/正文头）。
+ *
+ * **输出的键名是冻结语料的一部分**（`tests/probes.test.ts` 逐字段复算已提交的
+ * `ctrip/results/live_probe.json`），所以 `whaleguard` 这个名字保留：它的语义是
+ * "探针集 `markers.gate_text` 命中"，而不是某个写死的品牌词。
+ */
 export function shape(ua: string, status: number, body: string, secs: number, url: string): ProbeRecord {
-  const low = body.toLowerCase();
   const title = TITLE_RE.exec(body);
-  const first = (re: RegExp, s: string): string => {
-    const m = new RegExp(re.source, re.flags.replace("g", "")).exec(s);
-    return m ? m[1]! : "";
-  };
+  const priceRe = markers("price_re")[0];
+  const emptyNodes = markers("empty_price_re")[0];
+  const nameRe = markers("hotel_name_re")[0];
+  const totalRe = markers("hotel_total_re")[0];
   return {
     ua,
     status,
     bytes: body.length,
     secs: pyRound1(secs),
     title: head(title ? title[1]! : "", 90),
-    whaleguard: low.includes("whaleguard"),
-    challenge: body.includes("Challenge Validation"),
-    prices_yen: [...new Set(body.match(PRICE_RE) ?? [])].sort().slice(0, 8),
+    whaleguard: hit(body, "gate_text"),
+    challenge: hitExact(body, "challenge_text"),
+    prices_yen: priceRe === undefined
+      ? [] : [...new Set(body.match(new RegExp(priceRe, "g")) ?? [])].sort().slice(0, 8),
     body_head: head(squashed(body), 160),
-    flight_rows: body.split("flight-card").length - 1 + (body.split("flight-list").length - 1),
-    hotel_cards: body.split("hotelName").length - 1 + (body.split('class="hotel-card"').length - 1),
-    empty_price_nodes: (body.match(EMPTY_PRICE_RE) ?? []).length,
+    flight_rows: occurrences(body, "flight_rows"),
+    hotel_cards: occurrences(body, "hotel_cards"),
+    empty_price_nodes: emptyNodes === undefined
+      ? 0 : (body.match(new RegExp(emptyNodes, "g")) ?? []).length,
     // 线上**确实能拿到**的那部分真实数据：酒店名/星级（价格拿不到）
-    hotel_names_sample: [...body.matchAll(HOTEL_NAME_RE)].map((m) => m[1]!).slice(0, 12),
-    hotel_total_tip: first(HOTEL_TOTAL_RE, body),
-    login_wall: body.includes("以查看会员价") || body.includes("登录首页"),
+    hotel_names_sample: nameRe === undefined
+      ? [] : [...body.matchAll(new RegExp(nameRe, "g"))].map((m) => m[1]!).slice(0, 12),
+    hotel_total_tip: totalRe === undefined ? "" : (new RegExp(totalRe).exec(body)?.[1] ?? ""),
+    login_wall: hitExact(body, "login_text"),
     final_url: url,
   };
 }
@@ -165,28 +186,6 @@ export async function httpProbe(url: string, ua: string, timeout = 25.0): Promis
   }
 }
 
-// 机票还有别的入口形态（行程页 / 低价频道 / 手机版低价页）——"我只试了列表页"是
-// 站不住脚的，所以这些也逐一实测记下来。
-export const ALT_SHAPES: ReadonlyArray<readonly [string, string]> = [
-  ["itinerary-oneway", "https://flights.ctrip.com/itinerary/oneway/kmg-bjs?date=2026-10-05"],
-  ["itinerary-sortbyprice", "https://flights.ctrip.com/itinerary/oneway/KMG-BJS?date=2026-10-05&sortByPrice=true"],
-  ["lowestprice-channel", "https://flights.ctrip.com/lowestprice/oneway-kmg-bjs"],
-  ["mobile-lowestprice", "https://m.ctrip.com/html5/flight/lowestprice/KMG/BJS"],
-  ["list-lowprice-param", "https://flights.ctrip.com/online/list/oneway-kmg-bjs?depdate=2026-10-05&lowprice_value=1"],
-];
-
-// 手机模拟与区域域名：UA/设备/区域任意组合都试一遍 —— 这些都没试过的话，
-// "被封了"这个结论就不完整（机房 IP 封锁 vs UA 指纹，是两种完全不同的原因）。
-export const MOBILE_TARGETS: ReadonlyArray<readonly [string, string]> = [
-  ["ctrip-mobile-flight", "https://m.ctrip.com/html5/flight/swift/domestic/KMG/BJS/{date}"],
-  ["trip-hk-flight", "https://hk.trip.com/flights/showfarefirst?dcity=kmg&acity=bjs"
-    + "&ddate={date}&triptype=ow&class=y&quantity=1&locale=zh-HK&curr=CNY"],
-  ["trip-us-flight", "https://us.trip.com/flights/showfarefirst?dcity=kmg&acity=bjs"
-    + "&ddate={date}&triptype=ow&class=y&quantity=1&locale=en-US&curr=CNY"],
-  ["trip-sg-flight", "https://sg.trip.com/flights/showfarefirst?dcity=kmg&acity=bjs"
-    + "&ddate={date}&triptype=ow&class=y&quantity=1&locale=en-SG&curr=CNY"],
-];
-
 export const IPHONE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
   + "(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
 export const ANDROID_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -203,7 +202,7 @@ export async function mobileProbe(dates: string[], verbose = true): Promise<Prob
       viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3,
     });
     for (const [key, tpl] of MOBILE_TARGETS) {
-      const url = tpl.replace("{date}", dates[0] ?? "");
+      const url = fillProbeDate(tpl, dates[0] ?? SET.date);
       const pg: any = await ctx.newPage();
       const rec: ProbeRecord = { ua: uaName, key, url };
       try {
@@ -213,7 +212,8 @@ export async function mobileProbe(dates: string[], verbose = true): Promise<Prob
         rec["status"] = r ? r.status() : null;
         rec["text_len"] = t.length;
         rec["whaleguard"] = t.toLowerCase().includes("whaleguard");
-        rec["prices"] = (t.match(PRICE_RE) ?? []).length;
+        const priceRe = markers("price_re")[0];
+        rec["prices"] = priceRe === undefined ? 0 : (t.match(new RegExp(priceRe, "g")) ?? []).length;
         rec["text_head"] = head(t.split("\n").map((x) => x.trim()).filter(Boolean).join(" | "), 90);
       } catch (e) {
         rec["error"] = `${e instanceof Error ? e.name : typeof e}: ${head(e instanceof Error ? e.message : String(e), 80)}`;
@@ -241,7 +241,7 @@ export async function browserProbe(verbose = true): Promise<ProbeRecord[]> {
     userAgent: BROWSER_UA, viewport: { width: 1440, height: 900 },
   });
   const pg: any = await ctx.newPage();
-  const home: ProbeRecord = { url: "https://www.ctrip.com/" };
+  const home: ProbeRecord = { url: SET.home?.url ?? "" };
   try {
     const r = await pg.goto(home["url"], { waitUntil: "domcontentloaded", timeout: 45000 });
     await pg.waitForTimeout(3000);
@@ -254,7 +254,10 @@ export async function browserProbe(verbose = true): Promise<ProbeRecord[]> {
   }
   out.push(home);
 
-  for (const [key, label, url] of [...TARGETS.slice(0, 1), ...TARGETS.slice(2, 3)]) {
+  const browserIds = SET.browser.length ? SET.browser : TARGETS.map((t) => t[0]);
+  for (const key of browserIds) {
+    const [key0, label, url] = TARGETS.find((t) => t[0] === key) ?? [key, key, ""];
+    void key0;
     const rec: ProbeRecord = { key, label, url, browser: true };
     try {
       const r = await pg.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
@@ -306,29 +309,30 @@ export function verdictOf(
   alts: ProbeRecord[],
   mobile: ProbeRecord[],
 ): ProbeRecord {
-  const flCurl = pick(http, "flight_list_cn", "curl-cli");
-  const flChrome = pick(http, "flight_list_cn", "httpx-浏览器");
-  const brFlight = browser.find((x) => x["key"] === "flight_list_cn") ?? {};
+  const role = (name: string): string => SET.roles[name] ?? name;
+  const flCurl = pick(http, role("flight"), "curl-cli");
+  const flChrome = pick(http, role("flight"), "httpx-浏览器");
+  const brFlight = browser.find((x) => x["key"] === role("flight")) ?? {};
   const hotel = (() => {
-    const a = pick(http, "hotel_list_cn", "curl-cli");
-    return nonEmpty(a) ? a : pick(http, "hotel_list_cn", "httpx");
+    const a = pick(http, role("hotel"), "curl-cli");
+    return nonEmpty(a) ? a : pick(http, role("hotel"), "httpx");
   })();
-  const api = pick(http, "flight_api_retired", "curl-cli");
-  const trip = pick(http, "flight_trip_com", "httpx-浏览器");
+  const api = pick(http, role("api"), "curl-cli");
+  const trip = pick(http, role("trip"), "httpx-浏览器");
 
   return {
     flight_search: (flChrome["whaleguard"] || brFlight["whaleguard"]) ? "BLOCKED" : "OK",
-    flight_reason: `flights.ctrip.com：浏览器 UA 走 httpx 得到 HTTP ${flChrome["status"]} `
+    flight_reason: `${shortOf(SET, role("flight"))}：浏览器 UA 走 httpx 得到 HTTP ${flChrome["status"]} `
       + `\`whaleguard block\`（${flChrome["bytes"]} B），真浏览器同样 `
       + `${brFlight["status"]} \`whaleguard block\`；换 curl-cli 才拿到 `
       + `${flCurl["bytes"]} B，但那是 Next.js 空壳（flight-card/list 标记 `
       + `${flCurl["flight_rows"]} 个，列表数据走 XHR），而老数据接口 `
       + `/itinerary/api/12808/products 已下线（${String(api["body_head"] ?? "").slice(0, 60)}）。`
-      + `Trip.com 机票：httpx 浏览器 UA ${trip["status"]} `
+      + `${shortOf(SET, role("trip"))} 机票：httpx 浏览器 UA ${trip["status"]} `
       + `${trip["challenge"] ? "Challenge Validation" : ""}，真浏览器 `
       + "`whaleguard block`。",
     hotel_price: hotel["login_wall"] ? "LOGIN_REQUIRED" : "UNKNOWN",
-    hotel_reason: `hotels.ctrip.com 列表页 SSR 出 ${hotel["hotel_cards"]} 个酒店名/星级标记，`
+    hotel_reason: `${shortOf(SET, role("hotel"))} 列表页 SSR 出 ${hotel["hotel_cards"]} 个酒店名/星级标记，`
       + `但未登录访客的价格节点为空（${hotel["empty_price_nodes"]} 个空 .price-line），`
       + `正文含「登录以查看会员价」=${pyBool(hotel["login_wall"])}——`
       + "「¥300 以内」这个筛选条件拿不到数据来判定。",
@@ -354,7 +358,7 @@ export interface LiveProbeDeps {
 
 const USAGE = `usage: live-probe [-h] [--out OUT] [--no-browser] [--no-mobile]
 
-线上可达性实测（携程机票/酒店），写 ctrip/results/live_probe.json`;
+线上可达性实测（探针集 ${SET.app}），默认写 ${path.relative(REPO, path.join(RESULTS, "live_probe.json"))}`;
 
 export function parseArgv(argv: readonly string[]): {
   out: string | null; noBrowser: boolean; noMobile: boolean; help: boolean;
@@ -415,7 +419,10 @@ export async function main(argv: readonly string[] = process.argv.slice(2), deps
   // 必须用重复请求说话，不能拿一次偶然当结论。
   console.log("\n== 重复请求（手机版机票页 ×5，浏览器 UA） ==");
   const flaky: Array<number | undefined> = [];
-  for (let i = 0; i < 5; i++) flaky.push((await doHttp(TARGETS[1]![2], BROWSER_UA, 20))["status"]);
+  const repeatId = SET.repeat?.id ?? TARGETS[0]![0];
+  const repeatUrl = TARGETS.find((t) => t[0] === repeatId)?.[2] ?? "";
+  const repeatTimes = SET.repeat?.times ?? 5;
+  for (let i = 0; i < repeatTimes; i++) flaky.push((await doHttp(repeatUrl, BROWSER_UA, 20))["status"]);
   console.log(`  status 序列: [${flaky.join(", ")}]`);
 
   console.log("\n== 机票的其他入口形态（浏览器 UA） ==");

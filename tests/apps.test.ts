@@ -129,10 +129,12 @@ describe("应用运行器：数据腿 → 动作腿 → 结束状态不变量", 
 
 describe("应用层度量：代码行与防泄漏", () => {
   it("应用目录里 0 行代码；核心层没有应用声明的站点/工具标识", () => {
-    const { rows, leaks } = matrix();
+    const { rows, leaks, debt } = matrix();
     expect(rows.map((r) => r.app)).toEqual(expect.arrayContaining(["demo-app", "demo-tool", "git-log", "bench-cases"]));
     expect(rows.every((r) => r.code === 0), JSON.stringify(rows)).toBe(true);
     expect(leaks, JSON.stringify(leaks)).toEqual([]);
+    // 债归零：每个站点知识都搬进了 apps/（探针驱动也进了核心层，见 tools/apps_matrix.ts 的 CORE）
+    expect(debt, JSON.stringify(debt)).toEqual([]);
     const demo = rows.find((r) => r.app === "demo-app")!;
     expect(demo).toMatchObject({ kind: "pack", roles: 4, steps: 5, invariants: 2, sources: 1 });
   });

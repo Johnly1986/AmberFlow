@@ -1,0 +1,67 @@
+{
+  "spec_version": 1,
+  "id": "qunar-live",
+  "label": "qunar 可达性探针（携程被出口 IP 挡住时的对照：另一家中国 OTA 的 H5 机票页）",
+  "goal": "在去哪儿机票 H5 完成一次航班搜索（北京→上海），搜索动作以列表页 URL 为完成信号",
+  "hosts": [
+    "touch.qunar.com"
+  ],
+  "journey": [
+    {
+      "desc": "打开出发城市选择器",
+      "start_url": "https://touch.qunar.com/h5/flight/",
+      "target_hint": "北京",
+      "signal": {
+        "url_contains": "#cityselect"
+      },
+      "retries": 2
+    },
+    {
+      "desc": "点击搜索，跳转航班列表页",
+      "start_url": "https://touch.qunar.com/h5/flight/",
+      "target_hint": "搜索",
+      "signal": {
+        "url_contains": "ncs/page/flightlist?depCity="
+      },
+      "retries": 2
+    }
+  ],
+  "probe": {
+    "date": "2026-10-05",
+    "results_dir": "qunar/results",
+    "http": [
+      {
+        "id": "qunar-flight-h5",
+        "label": "qunar H5 机票首页",
+        "short": "touch.qunar.com/h5/flight/",
+        "url": "https://touch.qunar.com/h5/flight/"
+      },
+      {
+        "id": "qunar-flight-list",
+        "label": "航班列表页（数据腿直接进）",
+        "short": "touch.qunar.com",
+        "url": "https://touch.qunar.com/ncs/page/flightlist"
+      }
+    ],
+    "markers": {
+      "block_text": [
+        "whaleguard",
+        "captcha",
+        "access denied",
+        "forbidden"
+      ]
+    },
+    "login": {
+      "paths": [
+        "passport.",
+        "/login"
+      ]
+    }
+  },
+  "notes": [
+    "冻结计划也搬进来了（原来在 src/qunar-task.ts 的 buildPlan() 里）：两步、城市选择器与搜索按钮各点一次、完成信号是 URL。",
+    "判决顺序是 load-bearing 的：0 → unreachable，非 200 或正文命中 block_text → blocked，URL 命中 login 规则 → login_required，否则 captured。",
+    "实测（2026-10-03）：页面本身三种客户端都能抓到，而列表 API 对自动化浏览器拒绝服务——边界记在 qunar-task 的判分里（4/4 判据）。",
+    "`login.paths` 用子串规则（`passport.` / `/login`）：这是跳转 URL 的特征，不是主机名，所以不进入 hosts 的防泄漏清单。"
+  ]
+}

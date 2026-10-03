@@ -197,12 +197,61 @@ npm run apps -- --app repo-report --no-model                    # 真实工具�
 npm run apps -- --app cli-report --no-model                     # 不带 --allow-dangerous：危险步被拒绝、不落盘
 ```
 
-## 五、还没做的（诚实清单）
+## 五、探针集：把「线上能不能打开」也变成数据
+
+测量型应用（探针）与旅程型应用共用一个 `pack.json`，只是声明的是 `probe` 块而不是 `journey`：
+
+```jsonc
+{
+  "hosts": ["m.ctrip.com", "hotels.ctrip.com"],        // 声明 + 防泄漏门禁的输入
+  "journey": [],
+  "probe": {
+    "date": "2026-10-05",
+    "results_dir": "ctrip/results",
+    "home":  { "id": "home", "label": "首页预热", "short": "www.ctrip.com", "url": "https://www.ctrip.com/" },
+    "http":  [ { "id": "flight_list_cn", "label": "PC 机票列表", "short": "flights.ctrip.com",
+                 "url": "https://flights.ctrip.com/online/list?depdate={date}" } ],
+    "browser": ["flight_list_cn"],                      // 用真浏览器再验一次的 http 目标
+    "repeat":  { "id": "flight_list_cn", "times": 5 },   // 重复请求（打掉"一次偶然"）
+    "alts":    [ { "id": "itinerary-oneway", "url": "..." } ],
+    "mobile":  [ { "id": "trip-hk-flight", "url": "...{date}" } ],
+    "capture": [ { "id": "flights", "label": "…", "url": "...{date}&cabin=y_s" } ],
+    "roles":   { "flight": "flight_list_cn", "hotel": "hotel_list_cn" },   // 判决引用目标用角色名
+    "markers": { "gate_text": ["whaleguard"], "login_text": ["登录以查看会员价"], "price_re": "..." },
+    "login":   { "hosts": ["passport.ctrip.com"], "paths": ["/login"], "titles": ["登录首页"] }
+  }
+}
+```
+
+加载期校验（`src/probe-set.ts`）三条硬规矩：
+
+1. **每个 URL 的主机必须在 `hosts` 里**——否则这个主机就在防泄漏门禁的覆盖范围之外，等于把站点知识藏起来；
+2. 占位符只有四个（`{date}` / `{date_slash}` / `{checkout}` / `{checkout_slash}`，纯日历运算，不碰时钟），未知占位符报错；
+3. `browser` / `repeat` / `roles` 只能指向声明过的 http 目标 id，未知键一律报错。
+
+驱动只剩「怎么测」：`src/live-probe.ts`、`src/live-capture.ts`、`src/ota-probe.ts`、`src/qunar-probe.ts`、
+`src/qunar-task.ts` 现在都**不含任何站点标识**，因此它们已进入共享层「核心」名单——
+再往里面写死一个主机名，`npm run apps:matrix` 立刻报泄漏。
+
+```bash
+node --experimental-strip-types src/live-probe.ts                 # 携程可达性矩阵（写 ctrip/results/live_probe.json）
+node --experimental-strip-types src/live-probe.ts --out /tmp/x.json
+node --experimental-strip-types src/live-capture.ts --date 2026-10-08
+node --experimental-strip-types src/ota-probe.ts                  # 候选 OTA 可达性
+node --experimental-strip-types src/qunar-probe.ts                # qunar 对照
+node --experimental-strip-types src/qunar-task.ts                 # 抓取计划来自 apps/qunar-live/pack.json 的 journey
+```
+
+债计数的口径也升级了：除了"应用声明的标识出现在非核心文件里"，还**独立**扫描非核心文件里写死的
+`http(s)://主机`（`localhost` / `example.com` 之类除外）——所以"藏在驱动里、应用还没声明"的站点知识
+同样会出现在债那一栏，而不是只能看见自己已经承认的那些。当前：**债 0 处**。
+
+## 六、还没做的（诚实清单）
 
 | 项 | 现状 |
 |---|---|
 | **数据腿 → 动作腿的绑定**（`bind: {slot: "source.selects.x.field"}`） | 没做。等出现第二个真实消费者再加语法（一个消费者不值得造一条语法） |
-| **把每站点专用驱动迁进应用包** | 没做。`apps:matrix` 的"债"那一栏就是进度条（当前 `live-probe` / `live-capture` 3 处站点知识） |
+| **把每站点专用驱动迁进应用包** | 探针一族已迁完（债 0）：`ctrip-live` / `ota-live` / `qunar-live` 声明了全部 URL、站点特征与结果目录，5 个驱动进了核心层。剩下的站点知识都是**本地复刻站**（`ctrip/`、`transfer/` 下的 `file://` 页面与用例驱动），不是外部主机 |
 | **交互式 TTY 工具**（`ssh` 提问、编辑器） | 明确不做。真需要人参与就走 `{"signal":{"manual":true}}` + 人工背书 |
 | **阶段性不变量**（旅程中途的验收） | 没做。中间要求现阶段写成子目标信号；`invariants` 只长在浏览器结束状态上 |
 

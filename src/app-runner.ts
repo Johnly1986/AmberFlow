@@ -211,6 +211,12 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     const kinds = expanded.steps.map((s) => (s.kind === "tool" ? "tool" : "web")).join(",");
     console.log(`=== app ${pack.id} (${pack.label}) ===`);
     console.log(`  journey: ${expanded.steps.length} step(s) [${kinds}], roles: ${expanded.rolesUsed.join(", ") || "-"}`);
+    if (expanded.steps.length === 0 && pack.probe !== undefined) {
+      const sets = pack.probe as Record<string, unknown>;
+      const n = ["http", "alts", "mobile", "capture"]
+        .reduce((k, key) => k + (Array.isArray(sets[key]) ? (sets[key] as unknown[]).length : 0), 0);
+      console.log(`  测量型应用（探针集）：${n} 个目标；测量入口见 apps/README.md 的探针一节`);
+    }
   }
 
   // ---- 数据腿：同一套数据源引擎（HTTP 或 CLI 通道） -------------------------

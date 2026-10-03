@@ -28,38 +28,34 @@ import { checkSignal } from "./signals.ts";
 import { criteriaView, extractElements } from "./extraction.ts";
 import { runSubgoalWithRetries } from "./planner.ts";
 import { REPO } from "./flow.ts";
+import { expandPack, loadPack } from "./app-pack.ts";
+import { loadProbeSet, shortOf } from "./probe-set.ts";
 
-export const HOME = "https://touch.qunar.com/h5/flight/";
+/**
+ * 冻结计划与两个 URL 都来自应用包 `apps/qunar-live/pack.json`（原来写死在这里——
+ * 矩阵的"债"那一栏就是它）。本文件只剩"怎么跑 + 怎么判分"。
+ */
+const PACK = loadPack("qunar-live");
+const PROBE = loadProbeSet("qunar-live");
+
+export const HOME: string = expandPack(PACK, {}, path.join(REPO, "qunar", "results", "qunar_plan.json"))
+  .plan.subgoals[0]!.start_url!;
+/** 数据腿直接进的列表页（探针集里声明的 URL）。 */
+export const LIST_URL: string = loadProbeSet("qunar-live").http
+  .find((t) => t.id === "qunar-flight-list")!.url;
 export const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
   + "AppleWebKit/605.1.15 (Version/17.0 Mobile/15E148 Safari/604.1)";
 export const RESULTS = path.join(REPO, "qunar", "results");
 
-/** Frozen plan: each subgoal = one click + one URL done-signal (the ctrip shape). */
+/**
+ * 冻结计划：**从应用包的 journey 展开**（每个子目标 = 一次点击 + 一个 URL 完成信号）。
+ *
+ * 计划本身是数据（`apps/qunar-live/pack.json` 的 `journey`）：两步、两个点名目标
+ * （div「北京」/唯一按钮「搜索」）、两个 URL 完成信号、各 2 次重试（SPA 水合竞态——
+ * 见 CLAUDE.md 的 `retries` 条目）。代码里没有 URL，也没有站点名。
+ */
 export function buildPlan(outdir = RESULTS): TaskPlan {
-  return new TaskPlan(
-    "在去哪儿机票 H5 完成一次航班搜索（北京→上海），搜索动作以列表页 URL 为完成信号",
-    [
-      {
-        desc: "打开出发城市选择器",
-        start_url: HOME,
-        target_hint: "北京",                       // div "北京" -- unique (arrival city is 上海)
-        signal: { url_contains: "#cityselect" },
-        // SPA hydration race: run()'s goto(domcontentloaded) scans immediately,
-        // the form may not be rendered yet -- the first transient failure in
-        // CLAUDE.md's retries entry.
-        retries: 2,
-      },
-      {
-        desc: "点击搜索，跳转航班列表页",
-        start_url: HOME,
-        target_hint: "搜索",                       // button "搜索" -- the page's only <button>
-        signal: { url_contains: "ncs/page/flightlist?depCity=" },
-        retries: 2,
-      },
-    ] as Array<Partial<Subgoal>>,
-    path.join(outdir, "qunar_plan.json"),
-    {},
-  );
+  return expandPack(PACK, {}, path.join(outdir, "qunar_plan.json")).plan;
 }
 
 /** Response body may already be released; a listener must never kill the task. */
@@ -132,7 +128,7 @@ export function buildChecks(records: QunarRecords): QunarCheck[] {
 export function renderReport(records: QunarRecords, checks: QunarCheck[]): string {
   const okN = checks.filter((c) => c.ok).length;
   const L = ["# qunar 迁移测试结果", "",
-    `- 目标：\`touch.qunar.com/h5/flight/\`（真实站点）· 判分 **${okN}/${checks.length}**`,
+    `- 目标：\`${shortOf(PROBE, "qunar-flight-h5")}\`（真实站点）· 判分 **${okN}/${checks.length}**`,
     "- 首页：首次加载 13 个可交互元素（qunar/results/probe.json，执行器 criteria 视图正常）；"
     + `末次加载降级为 ${records.home.elements} 个（反爬降级，见判分明细第 4 行）`, "",
     "## 判分明细", "", "| 检查项 | 期望 | 记录 | 判定 |", "|---|---|---|---|"];
@@ -217,7 +213,7 @@ export async function main(): Promise<number> {
         depCity: "昆明", arrCity: "北京", goDate: "2026-10-06", from: "touch_index_search",
         child: "0", baby: "0", cabinType: "0",
       });
-      await page.goto("https://touch.qunar.com/ncs/page/flightlist?" + q, {
+      await page.goto(LIST_URL + "?" + q, {
         waitUntil: "domcontentloaded", timeout: 30_000,
       });
       await page.waitForTimeout(9000);

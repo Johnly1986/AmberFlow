@@ -28,34 +28,31 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import * as browserEnv from "./browser-env.ts";
+import { fillProbeDate, loadProbeSet, markerList, type ProbeSet } from "./probe-set.ts";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const RESULTS = path.resolve(HERE, "..", "transfer", "results");
+/**
+ * 站点知识（候选站点、URL、挑战页/下线公告特征、结果目录）全在
+ * `apps/ota-live/pack.json`；本文件只剩"怎么测"（curl / fetch / 真浏览器渲染）与纯函数判决。
+ */
+export const SET: ProbeSet = loadProbeSet("ota-live");
+
+const RESULTS = SET.resultsDir;
 
 export const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
   + "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
-export const TARGETS: ReadonlyArray<readonly [string, string, string]> = [
-  ["qunar-flight", "去哪儿机票列表（昆明→北京 2026-10-05）",
-    "https://flight.qunar.com/site/oneway_list.htm?searchDepartureAirport=%E6%98%86%E6%98%8E"
-    + "&searchArrivalAirport=%E5%8C%97%E4%BA%AC&searchDepartureTime=2026-10-05"],
-  ["qunar-hotel", "去哪儿酒店（北京）", "https://hotel.qunar.com/city/beijing/"],
-  ["ly-hotel", "同程酒店（特价酒店）", "https://www.ly.com/hotel/"],
-  ["tuniu", "途牛首页", "https://www.tuniu.com/"],
-  ["booking-hotel", "Booking 北京 2026-10-08",
-    "https://www.booking.com/searchresults.zh-cn.html?ss=%E5%8C%97%E4%BA%AC"
-    + "&checkin=2026-10-08&checkout=2026-10-09&group_adults=1&no_rooms=1"],
-  ["agoda-hotel", "Agoda 北京城市页", "https://www.agoda.com/zh-cn/city/beijing-cn.html"],
-  ["expedia-hotel", "Expedia 北京 2026-10-08",
-    "https://www.expedia.com/Hotel-Search?destination=Beijing&startDate=2026-10-08&endDate=2026-10-09"],
-  ["kayak-hotel", "Kayak 北京 2026-10-08", "https://www.kayak.com/hotels/Beijing,China-c1/2026-10-08/2026-10-09"],
-];
+export const TARGETS: ReadonlyArray<readonly [string, string, string]> =
+  SET.http.map((t) => [t.id, t.label, fillProbeDate(t.url, SET.date)] as const);
 
 export type ProbeRecord = Record<string, any>;
 
-const PRICE_RE = /[¥￥]\s?\d[\d,]*|CN¥\s?\d[\d,]*|US\$\s?\d[\d,]*/g;
-const TITLE_RE = /<title>(.*?)<\/title>/s;
-const CHALLENGE_WORDS = ["Bot or Not", "real user", "Challenge Validation", "请稍候", "安全验证"];
+/** 站点特征表来自探针集：价格记号、标题、挑战页词、下线公告词。 */
+const priceRe = (): string | undefined => markerList(SET, "price_re")[0];
+const titleRe = (): RegExp => new RegExp(markerList(SET, "title_re")[0] ?? "<title>(.*?)</title>", "s");
+const challengeHit = (body: string): boolean =>
+  markerList(SET, "challenge_text").some((w) => body.includes(w));
+const noticeHit = (body: string): boolean =>
+  markerList(SET, "notice_text").some((w) => body.includes(w));
 
 function pyRound1(x: number): number {
   return Math.round(x * 10) / 10;
@@ -65,14 +62,15 @@ function squashed(s: string): string {
   return s.split(/\s+/).filter(Boolean).join(" ");
 }
 
-/** `PRICE_RE.findall(body)`：价格记号（含 ¥/CN¥/US$）。 */
+/** 价格记号（含 ¥/CN¥/US$，模式由探针集声明）。 */
 export function priceTokens(s: string): string[] {
-  return s.match(PRICE_RE) ?? [];
+  const re = priceRe();
+  return re === undefined ? [] : (s.match(new RegExp(re, "g")) ?? []);
 }
 
 /** 把一次抓取压成可比较的形状。 */
 export function shape(ua: string, status: number, body: string, secs: number): ProbeRecord {
-  const title = TITLE_RE.exec(body);
+  const title = titleRe().exec(body);
   return {
     ua,
     status,
@@ -80,8 +78,8 @@ export function shape(ua: string, status: number, body: string, secs: number): P
     secs: pyRound1(secs),
     title: (title ? title[1]! : "").slice(0, 70),
     price_tokens: priceTokens(body).length,
-    challenge: CHALLENGE_WORDS.some((w) => body.includes(w)),
-    discontinued_notice: body.includes("停止提供"),
+    challenge: challengeHit(body),
+    discontinued_notice: noticeHit(body),
     body_head: squashed(body).slice(0, 110),
   };
 }
@@ -210,7 +208,7 @@ export interface OtaProbeDeps {
 
 const USAGE = `usage: ota-probe [-h] [--out OUT] [--no-browser]
 
-迁移目标的线上可达性（还有哪家 OTA 能当"布局相似的旅游网"）`;
+迁移目标的线上可达性（探针集 ${SET.app}：还有哪家 OTA 能当"布局相似的旅游网"）`;
 
 export function parseArgv(argv: readonly string[]): { out: string | null; noBrowser: boolean; help: boolean } {
   let out: string | null = null;

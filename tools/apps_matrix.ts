@@ -28,9 +28,16 @@ const SHARED = fs.readdirSync(path.join(REPO, "src"))
 const CORE = new Set([
   "app-pack.ts", "app-runner.ts", "audit.ts", "bench.ts", "browser-env.ts", "datasource.ts",
   "decision-cache.ts", "executor.ts", "extraction.ts", "flow.ts", "hint-memory.ts", "index.ts",
-  "model.ts", "outcome-memory.ts", "picker.ts", "plan.ts", "planner.ts", "rules.ts", "signals.ts",
-  "start.ts",
+  "model.ts", "outcome-memory.ts", "picker.ts", "plan.ts", "planner.ts", "probe-set.ts", "rules.ts",
+  "signals.ts", "start.ts",
+  // 探测/任务驱动：站点知识已全部搬进 apps/<id>/pack.json（见 probe-set.ts 的说明），
+  // 所以它们也进核心层——再往这里写死一个主机名，门禁就会红。
+  "live-capture.ts", "live-probe.ts", "ota-probe.ts", "qunar-probe.ts", "qunar-task.ts",
 ]);
+
+/** 不是站点知识的"主机"：本地地址与文档示例。 */
+const GENERIC_HOSTS = new Set(["localhost", "127.0.0.1", "example.com", "www.example.com",
+  "shop.example.com", "0.0.0.0"]);
 
 /** 语言/工具链级名字不算"应用知识"：任何应用都可以用它们。 */
 const GENERIC = new Set(["node", "npm", "npx", "curl", "httpx", "cli", "bash", "sh", "ts", "js"]);
@@ -155,6 +162,19 @@ export function matrix(): {
     }
   }
   const debt: Array<{ token: string; file: string }> = [];
+  // 声明无关的那一半：非核心共享层文件里**写死的 http(s) 主机**。声明过的 token 已经
+  // 由下面的循环覆盖；这里抓的是"藏在驱动里、应用还没声明"的站点知识——否则债计数
+  // 就只能看见自己已经承认的那些。
+  const declaredSet = new Set(allTokens);
+  for (const [file, code] of shared) {
+    if (CORE.has(path.basename(file))) continue;
+    for (const m of code.matchAll(/https?:\/\/([A-Za-z0-9._-]+)/g)) {
+      const h = m[1]!.toLowerCase();
+      if (GENERIC_HOSTS.has(h) || declaredSet.has(h)) continue;
+      const entry = { token: h, file: path.relative(REPO, file) };
+      if (!debt.some((d) => d.token === entry.token && d.file === entry.file)) debt.push(entry);
+    }
+  }
   for (const token of allTokens) {
     // 词边界匹配：短标识（git / jq）用子串会误伤 digit / legitimate 这类普通单词
     const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

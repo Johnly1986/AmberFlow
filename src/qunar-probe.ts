@@ -13,13 +13,19 @@ import { execFileSync } from "node:child_process";
 import { chromium } from "playwright";
 import * as browserEnv from "./browser-env.ts";
 import type { AnyPage } from "./path-a.ts";
+import { loadProbeSet, markerList } from "./probe-set.ts";
 
-export const TARGET = "https://touch.qunar.com/h5/flight/";
+/**
+ * 站点知识（目标 URL、被挡特征、登录跳转特征、结果目录）全在 `apps/qunar-live/pack.json`；
+ * 本文件只剩三种客户端 + 判决顺序。
+ */
+export const SET = loadProbeSet("qunar-live");
+
+export const TARGET = SET.http[0]?.url ?? "";
 export const IPHONE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
   + "AppleWebKit/605.1.15 (Version/17.0 Mobile/15E148 Safari/604.1)";
 
-export const RESULTS = path.join(
-  path.dirname(path.dirname(fileURLToPath(import.meta.url))), "qunar", "results");
+export const RESULTS = SET.resultsDir;
 
 export interface ProbeResult {
   code: number;
@@ -57,11 +63,12 @@ export async function httpxGet(url: string, ua: string | null = null, timeoutMs 
 
 export function looksBlocked(body: string): boolean {
   const low = body.toLowerCase();
-  return ["whaleguard", "captcha", "access denied", "forbidden"].some((m) => low.includes(m));
+  return markerList(SET, "block_text").some((m) => low.includes(m.toLowerCase()));
 }
 
 export function looksLoginRedirect(url: string, _body: string): boolean {
-  return url.includes("passport.") || url.includes("/login");
+  const low = url.toLowerCase();
+  return SET.login.paths.some((p) => low.includes(p.toLowerCase()));
 }
 
 /** Verdict order matters: blocked beats login_required, 0 is unreachable. */
