@@ -83,6 +83,8 @@ describe("the data the project needs is still here", () => {
     ["bench/cases-live-long.json", "the long-flow live pack"],
     ["apps/README.md", "how to add an app pack"],
     ["apps/demo-app/pack.json", "the reference app pack (roles + journey + invariants)"],
+    ["apps/cli-report/pack.json", "the tool-step pack (dry-run + confirm + retries)"],
+    ["apps/repo-report/pack.json", "the real-tool pack (git + jq)"],
     ["apps/demo-tool/sources/demo-tool.json", "the CI-safe CLI tool source"],
     ["apps/git-log/sources/git-log.json", "a real CLI (git) source"],
     ["bench/fixtures/shop_home.html", "offline bench fixture"],

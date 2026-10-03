@@ -343,6 +343,21 @@ export async function httpxGet(url: string, timeout = 60.0): Promise<[number, st
 
 /* ------------------------------------------------- 传输：命令行工具（cli） */
 
+/**
+ * 一次命令行调用的完整观察结果 —— 动作腿（`tools`）的完成信号就长在这个形状上：
+ * 退出码、stdout/stderr（分开，才分得清"报错"和"结果"）、实际 argv（审计用）、cwd。
+ */
+export interface CliObservation {
+  code: number;
+  /** 退出码是否在 `transport.cli.exit_ok` 里 */
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  argv: string[];
+  cwd: string;
+  exit_ok: number[];
+}
+
 /** `transport.cli` 允许的键；未知键在加载期就报错（不是静默忽略）。 */
 export const CLI_KEYS = ["bin", "argv", "env_allow", "cwd", "exit_ok", "stdin"] as const;
 
@@ -417,17 +432,22 @@ function cliCwd(spec: Record<string, any>): string {
  *
  * 超时、二进制不存在、argv 非法都**抛错**而不是静默返回空——和 curl 那一档同口径。
  */
-export async function cliRun(url: string, timeout = 60.0, source?: Source): Promise<[number, string]> {
+export async function cliRunDetailed(
+  url: string, timeout = 60.0, source?: Source, extraArgs: readonly string[] = [],
+): Promise<CliObservation> {
   const spec = cliSpec(source);
   const bin = pyStr(spec["bin"]);
   const argvTpl = spec["argv"];
   if (!Array.isArray(argvTpl) || !argvTpl.length) {
     throw new ValueError("transport.cli.argv must be a non-empty list (an argv array, never a shell string)");
   }
-  const argv = argvTpl.map((a) => cliFormat(pyStr(a), cliParams(source, url)));
+  // 逐步追加的参数（动作腿用）：与 argv 同样只替换已声明的键，其余花括号原样保留
+  const params = cliParams(source, url);
+  const argv = [...argvTpl, ...extraArgs].map((a) => cliFormat(pyStr(a), params));
   const exitOk = Array.isArray(spec["exit_ok"]) ? (spec["exit_ok"] as unknown[]).map(Number) : [0];
+  const cwd = cliCwd(spec);
   const res = spawnSync(bin, argv, {
-    cwd: cliCwd(spec),
+    cwd,
     env: cliEnv(spec),
     encoding: "utf8",
     maxBuffer: 1 << 28,
@@ -440,7 +460,26 @@ export async function cliRun(url: string, timeout = 60.0, source?: Source): Prom
   const stdout = typeof res.stdout === "string" ? res.stdout : "";
   const stderr = typeof res.stderr === "string" ? res.stderr : "";
   const code = res.status === null ? 1 : res.status;
-  return [exitOk.includes(code) ? 200 : code, stdout + stderr];
+  return { code, ok: exitOk.includes(code), stdout, stderr, argv, cwd, exit_ok: exitOk };
+}
+
+/**
+ * 跑一个命令行工具，把它的退出码映射成引擎的「状态码」。
+ *
+ * **为什么是 argv 数组而不是命令字符串：永不过 shell。** `spawnSync(bin, argv)` 默认
+ * `shell: false`，每个参数原样交给进程——槽位/模板里的 `;`、`$(...)`、`|`、空格都只是
+ * 普通字符。这是 CLI 面与 DOM 面最大的安全差异（页面上误点最多点错，字符串拼接能执行），
+ * 也是它必须写成数组的原因。
+ *
+ * 退出码语义按配置：`exit_ok`（默认 `[0]`）里的码算成功 → 200；其它码原样向上抛给
+ * `blocked()`（它只看"非 200"），于是 audits/counts/selects/report 一行都不用改。
+ * stderr 并进响应体，好让 `block_markers` 认出「要登录/被限流」这类失败。
+ *
+ * 超时、二进制不存在、argv 非法都**抛错**而不是静默返回空——和 curl 那一档同口径。
+ */
+export async function cliRun(url: string, timeout = 60.0, source?: Source): Promise<[number, string]> {
+  const obs = await cliRunDetailed(url, timeout, source);
+  return [obs.ok ? 200 : obs.code, obs.stdout + obs.stderr];
 }
 
 /** 版本探针的原始输出（第一行）。没配 pin 就返回 null，不跑子进程。 */

@@ -29,7 +29,7 @@ npm run doctor                                   # 环境体检：Node / chromiu
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 631 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 664 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -66,9 +66,13 @@ npm run shortlist                                                               
 设计、逐子目标信号证据与它暴露的四个真实缺陷见 [bench/LONG_FLOW_REPORT.md](bench/LONG_FLOW_REPORT.md)）。
 
 应用包（应用层）：`npm run apps -- --list` / `npm run apps -- --app demo-app --no-model`（离线整跑：
-数据腿 → 冻结计划 → 结束状态不变量）/ `npm run apps -- --app demo-app --dry`（只展开计划）。
+数据腿 → 混合旅程（工具步 + 浏览器步）→ 结束状态不变量）/ `npm run apps -- --app demo-app --dry`（只展开计划）。
 新增一个应用 = 新目录 `apps/<id>/`（`pack.json` + 可选 `sources/*.json`），**共享层零改动**；
 度量与防泄漏门禁：`npm run apps:matrix`。怎么加见 [apps/README.md](apps/README.md)。
+
+工具步（命令行当动作腿）：`npm run apps -- --app cli-report --no-model --allow-dangerous`（桩工具：
+退出码 / JSON 路径 / stderr / 幂等重试 / 干跑+确认+落盘）、`--app repo-report --no-model`（真实 git + jq）。
+不带 `--allow-dangerous` 时危险步会被**拒绝**且不落盘。
 
 **Python 参考命令**（`pytest`、`python3 xxx.py`、`pip install -r requirements.txt`）属于**已彻底移除**的参考实现：
 工作树与 git 历史都已删除，磁盘上不再有 Python 文件（见 `BACKUP.md`）。
@@ -199,15 +203,32 @@ These are empirical findings from this codebase's own experiments — preserve t
   validation reuses `PlanningRules.problems` (one grammar, not a second one), `{slot}` placeholders substitute ONLY
   declared slots (tool args and JSON payloads are full of braces; an unknown placeholder fails at load), and relative
   `start_url`s resolve to `file://` from the repo root. `src/app-runner.ts` runs the whole chain in one command
-  (`npm run apps -- --app demo-app`): data leg → frozen plan via **`runPlan`** (it does NOT fork the executor — it just
-  hands `runPlan` a session whose `close()` is deferred, so the invariants can be evaluated on the journey's real end
-  state, cookies included) → report. Invariants cannot see INTERMEDIATE requirements (that is what subgoal signals are
-  for) — recorded in the pack's own notes rather than pretended away. The cost is checkable:
-  `npm run apps:matrix` prints per app the declared lines, roles/steps/invariants, the **code lines inside app dirs
-  (currently 0 — apps are data)** and a leak check that fails if any app-declared host or CLI tool name appears in the
-  CORE shared modules (word-boundary match after stripping block comments; `git` must not match `digit`). Site knowledge
-  still living in per-site drivers (`live-probe.ts` / `live-capture.ts`) is reported as DEBT, not as an exemption —
-  migrating those into app packs should make that number go down.
+  (`npm run apps -- --app demo-app`): data leg → journey → invariants → report. The journey is a **mixed step list**
+  (browser steps and tool steps, in order): a browser step goes through `runSubgoalWithRetries` — the executor loop is
+  still `BrowserMiddleware.run`, and the runner owns the session (created lazily at the FIRST browser step, `close()`
+  deferred) so the invariants are evaluated on the journey's real end state, cookies included. It no longer hands the
+  whole journey to `runPlan` because that entry only understands DOM steps. Invariants cannot see INTERMEDIATE
+  requirements (that is what subgoal signals are for) and need at least one browser step (validated) — recorded in the
+  pack's own notes rather than pretended away. The cost is checkable:
+  `npm run apps:matrix` prints per app the declared lines, roles/browser steps/tool steps/invariants, the **code lines
+  inside app dirs (currently 0 — apps are data)** and a leak check that fails if any app-declared host or CLI tool name
+  appears in the CORE shared modules (word-boundary match after stripping block comments; `git` must not match `digit`).
+  Site knowledge still living in per-site drivers (`live-probe.ts` / `live-capture.ts`) is reported as DEBT, not as an
+  exemption — migrating those into app packs should make that number go down.
+- **A tool step is an ACTION LEG, and the three disciplines are what make it safe.** A journey entry with a `source` is a
+  tool step: it reuses the CLI transport (argv array, env allowlist, cwd, exit codes, version pin) and adds `args` /
+  `dry_run_args` / `idempotent` / `dangerous`. Its completion truth is the **process observation** — `src/tool-signals.ts`
+  grows the same shape as the DOM language on that surface (`exit_ok`, `exit_code_equals`, `stdout_contains`,
+  `stdout_matches`, `stderr_contains`, `json_path_equals` via the datasource path language, `file_exists`, `file_absent`,
+  plus recursive `all_of`/`any_of`/`not`), validated at load exactly like the DOM one. Because re-running a CLI command
+  is not like re-clicking a link: (1) `retries > 0` REQUIRES `idempotent: true`; (2) `dangerous: true` REQUIRES
+  `dry_run_args`, and a failed dry run never applies; (3) a dangerous step is REFUSED unless `--allow-dangerous` (or an
+  injected `confirmToolStep`) approves it after seeing the dry-run evidence — the refusal is reported as
+  `refused: dangerous|declined|dry-run-failed`, never silently skipped, and a refused step leaves no artifact behind
+  (pinned by `tests/apps.test.ts`, which also checks the flaky-tool retry really took 3 attempts and that the file only
+  appears after confirmation). `{out_dir}` is a RUNTIME placeholder (this run's `--out`), not a plan value: artifacts go
+  to a run directory so the pack stays machine-independent. Verified on two tool types: the deterministic stub
+  (`apps/cli-report`, CI-safe) and real tools (`apps/repo-report`: git line text + jq JSON).
 - **Ctrip serves its H5 ROUTE pages server-side, and WhaleGuard's gate is a CLIENT fingerprint check.** `m.ctrip.com/
   html5/flight/<dcity>-<acity>-day-<N>.html` (N = target date minus today) returns 200 to `curl` -- with its default UA
   or an iPhone Safari UA -- and 432 to `curl` + a Chrome UA, to Python `httpx`, to Chromium and to Playwright's

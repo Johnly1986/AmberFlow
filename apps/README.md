@@ -147,18 +147,62 @@ npm run apps:matrix                                      # 度量：声明行 / 
 | 行文本工具 | `git log` | `cli` + `lines_regex` | 同上（缺 git 时 SKIP） |
 | JSON 工具 | `jq`（输入是仓库里的用例包） | `cli` + `json_stdout` / `lines_regex` | 同上（缺 jq 时 SKIP） |
 
-## 四、CLI 作为旅程中的一步（下一步）
+## 四、工具步：命令行作为旅程中的一步
 
-当 CLI 不只是"取数"，而是**旅程里的一步且要选**（选哪个子命令/flag、这步算不算完成）时，
-形状与浏览器面一一对应，但不新开一套语言：
+当 CLI 不只是"取数"，而是**旅程里的一步且要判定完成**时，它就是**工具步**——与浏览器步共用同一套
+旅程词汇（`signal` / `retries` / 干跑 / 确认），只是完成真值长在**进程观察面**上：
 
-| 浏览器面 | CLI 面 |
+```jsonc
+{
+  "id": "write-artifact",
+  "desc": "不可逆写入：先干跑，经确认后落盘",
+  "source": "demo-tool",                          // 复用数据源配置（argv/env/cwd/exit_ok/版本 pin）
+  "args": ["--write={out_dir}/report.txt"],        // 追加参数；{slot} 与 {out_dir} 都会替换
+  "dry_run_args": ["--write={out_dir}/report.txt", "--dry-run"],
+  "dangerous": true,                               // 需要 dry_run_args，且默认拒绝执行
+  "signal": {
+    "all_of": [
+      { "exit_ok": true },                         // 退出码在 source 的 exit_ok 白名单里
+      { "stdout_contains": "wrote" },
+      { "file_exists": "{out_dir}/report.txt" }     // 产物真的落地了
+    ]
+  }
+}
+```
+
+进程观察面的信号叶子（同一个组合语法：`all_of` / `any_of` / `not`，递归）：
+
+| 叶子 | 看的事实 |
 |---|---|
-| 元素池 | 退出码 + stdout/stderr（head+tail）+ 产物文件 |
-| `target_hint` | argv token / flag（计划点名，规则零成本命中） |
-| 完成信号 | `exit_code_equals` / `stdout_contains` / `json_path_equals` / `file_exists`（叶子家族新增，`all_of/any_of/not` 复用） |
-| 风险门 | 破坏性 flag 规则（`--force`、`-rf`、`deploy`）+ **干跑优先**（`dry_run_flag`） |
-| `retries` | 看幂等性：`idempotent: false` 的步骤默认只跑一次 |
+| `exit_ok` | 退出码在 `exit_ok` 白名单里（最常用的"跑成功了"） |
+| `exit_code_equals` | 精确退出码（`grep` / `diff` 那种语义化退出码） |
+| `stdout_contains` / `stdout_matches` | 产物里的事实 / 形状（正则） |
+| `stderr_contains` | 失败原因（"要登录"这类；对应浏览器面的 `block_markers`） |
+| `json_path_equals` | 结构化产物里的一个字段（复用数据源的路径语言） |
+| `file_exists` / `file_absent` | 副作用落地了吗 |
 
-**不可逆动作（部署/推送/删除）单独一类**：两阶段（干跑/计划文件 → 人工确认 → apply），`retries` 强制为 0。
-交互式 TTY 工具（`ssh` 提问、编辑器）不在范围内——真需要人参与就走 `{"signal":{"manual":true}}` + 人工背书。
+三条纪律（都来自"浏览器里重点一次很便宜、命令行重跑可能不可逆"）：
+
+1. **默认不重试**：`retries > 0` 必须显式 `idempotent: true`，否则加载期报错；
+2. **不可逆先干跑**：`dangerous: true` 必须有 `dry_run_args`，干跑不成功就不 apply；
+3. **确认才动手**：`dangerous` 步默认**拒绝**，只有 `--allow-dangerous`（或注入 `confirmToolStep`）
+   点头才真跑；拒绝会作为显式结果上报（`refused: dangerous | declined | dry-run-failed`），不是静默跳过。
+
+`{out_dir}` 是**运行期占位符**（本次运行的输出目录，`--out` 决定），不是计划里的值——产物落到运行期目录，
+应用包才机器无关。看两条示范：
+
+```bash
+npm run apps -- --app cli-report --no-model --allow-dangerous   # 桩工具：退出码/JSON/stderr/幂等重试/干跑+确认+落盘
+npm run apps -- --app repo-report --no-model                    # 真实工具：git（行文本）+ jq（JSON）
+npm run apps -- --app cli-report --no-model                     # 不带 --allow-dangerous：危险步被拒绝、不落盘
+```
+
+## 五、还没做的（诚实清单）
+
+| 项 | 现状 |
+|---|---|
+| **数据腿 → 动作腿的绑定**（`bind: {slot: "source.selects.x.field"}`） | 没做。等出现第二个真实消费者再加语法（一个消费者不值得造一条语法） |
+| **把每站点专用驱动迁进应用包** | 没做。`apps:matrix` 的"债"那一栏就是进度条（当前 `live-probe` / `live-capture` 3 处站点知识） |
+| **交互式 TTY 工具**（`ssh` 提问、编辑器） | 明确不做。真需要人参与就走 `{"signal":{"manual":true}}` + 人工背书 |
+| **阶段性不变量**（旅程中途的验收） | 没做。中间要求现阶段写成子目标信号；`invariants` 只长在浏览器结束状态上 |
+

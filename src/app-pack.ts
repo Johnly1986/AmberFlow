@@ -21,10 +21,18 @@ import path from "node:path";
 import { REPO } from "./flow.ts";
 import { PlanningRules, TaskPlan, type Subgoal } from "./plan.ts";
 import type { SignalSpec } from "./signals.ts";
+import { validateToolSignal, type ToolSignal } from "./tool-signals.ts";
 import { loadSource } from "./datasource.ts";
 
 export const APPS_DIR = path.join(REPO, "apps");
 export const SPEC_VERSION = 1;
+
+/**
+ * **运行期占位符**：由运行器提供，不属于计划的数据袋（值是"写到哪儿"，不是业务数据）。
+ * 目前只有 `{out_dir}`（本次运行的输出目录）——不可逆动作的产物几乎总要落到一个运行期目录里，
+ * 写死绝对路径会让应用包换台机器就不可跑。
+ */
+export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = { out_dir: "{out_dir}" };
 
 /** 包级允许的键；未知键在加载期报错（配置写错了要响亮，不静默）。 */
 export const PACK_KEYS = [
@@ -32,11 +40,43 @@ export const PACK_KEYS = [
   "slots", "required_slots", "sources", "roles", "journey", "invariants", "notes",
 ] as const;
 
-/** 旅程里一步允许的键（也就是 `Subgoal` 的声明面 + `role`）。 */
+/**
+ * 旅程里一步允许的键。两种步型：
+ *   - **浏览器步**（`Subgoal` 的声明面）：desc/signal/start_url/target_hint(s)/slots/when/retries
+ *   - **工具步**（命令行动作腿）：source/args/dry_run_args/idempotent/dangerous + 进程信号
+ * 两种步型互斥的键在加载期就报错，不会"写了没用"。
+ */
 export const STEP_KEYS = [
-  "role", "desc", "signal", "start_url", "target_hint", "target_hints", "slots", "when",
-  "retries",
+  // 共同
+  "role", "desc", "signal", "slots", "retries", "id",
+  // 浏览器步
+  "start_url", "target_hint", "target_hints", "when",
+  // 工具步
+  "source", "args", "dry_run_args", "idempotent", "dangerous",
 ] as const;
+
+const BROWSER_ONLY = ["start_url", "target_hint", "target_hints", "when"] as const;
+const TOOL_ONLY = ["source", "args", "dry_run_args", "idempotent", "dangerous"] as const;
+
+/** 展开后的一步：浏览器步或工具步（`kind` 由 `source` 是否存在决定）。 */
+export interface ExpandedStep {
+  index: number;
+  kind: "browser" | "tool";
+  desc: string;
+  role: string | null;
+  /** 浏览器步：交给唯一执行器的子目标 */
+  subgoal?: Subgoal;
+  /** 工具步：命令行动作腿的调用参数（signal 是进程观察面的信号） */
+  tool?: {
+    source: string;
+    args: string[];
+    dry_run_args: string[] | null;
+    signal: ToolSignal;
+    retries: number;
+    idempotent: boolean;
+    dangerous: boolean;
+  };
+}
 
 export interface AppInvariant {
   id: string;
@@ -149,44 +189,82 @@ function substitute(value: unknown, slots: Record<string, unknown>, out: string[
 
 export interface ExpandedPack {
   pack: AppPack;
+  /** 展开后的步骤（按旅程顺序，含浏览器步与工具步） */
+  steps: ExpandedStep[];
+  /** 只含浏览器步的冻结计划（交给 `runPlan` / `runSubgoalWithRetries` 的执行单元） */
   plan: TaskPlan;
   slots: Record<string, unknown>;
   /** plan 里用到的角色（按出现顺序去重）——角色覆盖率就是一个数字。 */
   rolesUsed: string[];
 }
 
+/** 一步是工具步还是浏览器步：有 `source` 就是工具步（加载期已保证互斥键不混用）。 */
+export function stepKind(step: Record<string, unknown>): "browser" | "tool" {
+  return step["source"] === undefined ? "browser" : "tool";
+}
+
+/** 展开一步：角色模板 + 内联覆盖 + 槽位替换（两种步型共用）。 */
+function expandStep(
+  entry: Record<string, unknown>, roles: Record<string, Record<string, unknown>>,
+  slots: Record<string, unknown>, problems: string[], index: number,
+): { merged: Record<string, unknown>; role: string | null } {
+  const roleName = entry["role"] === undefined ? null : String(entry["role"]);
+  let merged: Record<string, unknown> = {};
+  if (roleName !== null) {
+    merged = { ...(roles[roleName] ?? {}) };
+  }
+  merged = { ...merged, ...entry };
+  delete merged["role"];
+  const out = substitute(merged, slots, problems) as Record<string, unknown>;
+  if (!out["desc"]) problems.push(`journey[${index}]: step has no desc (role ${roleName ?? "-"})`);
+  return { merged: out, role: roleName };
+}
+
 /**
- * 包 → 冻结计划。**同一份包 + 同一组槽位必须展开出逐字段相同的计划**（可复现性由测试钉住）。
+ * 包 → 冻结计划（浏览器步）+ 步骤表（含工具步）。**同一份包 + 同一组槽位必须展开出逐字段
+ * 相同的计划**（可复现性由测试钉住）。
  */
 export function expandPack(pack: AppPack, overrides: Record<string, unknown> = {},
   planPath = path.join(REPO, ".task_state.json")): ExpandedPack {
   const slots: Record<string, unknown> = { ...(pack.slots ?? {}), ...overrides };
+  // 替换袋 = 计划槽位 + 运行期占位符（后者替换成自身，留给运行器换成真实输出目录）
+  const bag: Record<string, unknown> = { ...RUNTIME_PLACEHOLDERS, ...slots };
   const problems = validatePack(pack, { slots });
   if (problems.length) {
     throw new Error(`app pack ${pack.id} is invalid:\n  - ${problems.join("\n  - ")}`);
   }
   const roles = pack.roles ?? {};
   const used: string[] = [];
-  const steps: Array<Record<string, unknown>> = [];
+  const steps: ExpandedStep[] = [];
+  const browserSubgoals: Array<Record<string, unknown>> = [];
   const subProblems: string[] = [];
   pack.journey.forEach((entry, i) => {
-    const roleName = entry["role"] === undefined ? null : String(entry["role"]);
-    let merged: Record<string, unknown> = {};
-    if (roleName !== null) {
-      merged = { ...(roles[roleName] ?? {}) };
-      used.push(roleName);
+    const { merged, role } = expandStep(entry, roles, bag, subProblems, i);
+    if (role !== null) used.push(role);
+    if (stepKind(merged) === "tool") {
+      steps.push({
+        index: i, kind: "tool", desc: String(merged["desc"]), role,
+        tool: {
+          source: String(merged["source"]),
+          args: ((merged["args"] as unknown[]) ?? []).map((x) => String(x)),
+          dry_run_args: merged["dry_run_args"] === undefined || merged["dry_run_args"] === null
+            ? null : (merged["dry_run_args"] as unknown[]).map((x) => String(x)),
+          signal: (merged["signal"] ?? {}) as ToolSignal,
+          retries: merged["retries"] === undefined ? 0 : Math.trunc(Number(merged["retries"])),
+          idempotent: merged["idempotent"] === true,
+          dangerous: merged["dangerous"] === true,
+        },
+      });
+    } else {
+      browserSubgoals.push(merged);
+      steps.push({ index: i, kind: "browser", desc: String(merged["desc"]), role, subgoal: merged as Subgoal });
     }
-    merged = { ...merged, ...entry };
-    delete merged["role"];
-    const step = substitute(merged, slots, subProblems) as Record<string, unknown>;
-    if (!step["desc"]) subProblems.push(`journey[${i}]: step has no desc (role ${roleName ?? "-"})`);
-    steps.push(step);
   });
   if (subProblems.length) {
     throw new Error(`app pack ${pack.id} is invalid:\n  - ${subProblems.join("\n  - ")}`);
   }
-  const plan = new TaskPlan(pack.goal, steps as unknown as Array<Partial<Subgoal>>, planPath, slots);
-  return { pack, plan, slots, rolesUsed: [...new Set(used)] };
+  const plan = new TaskPlan(pack.goal, browserSubgoals as unknown as Array<Partial<Subgoal>>, planPath, slots);
+  return { pack, steps, plan, slots, rolesUsed: [...new Set(used)] };
 }
 
 /* ------------------------------------------------------------------ 校验 */
@@ -226,32 +304,75 @@ export function validatePack(pack: AppPack,
     if (!(String(s) in slots)) p.push(`required slot ${JSON.stringify(String(s))} has no value`);
   }
   const roles = pack.roles ?? {};
-  for (const [name, tpl] of Object.entries(roles)) {
-    if (!isDict(tpl)) { p.push(`roles.${name} must be an object`); continue; }
-    for (const k of Object.keys(tpl)) {
+  const checkStep = (step: Record<string, unknown>, where: string): void => {
+    for (const k of Object.keys(step)) {
       if (!(STEP_KEYS as readonly string[]).includes(k) || k === "role") {
-        p.push(`roles.${name}.${k}: unknown step key (known: ${STEP_KEYS.filter((x) => x !== "role").join(", ")})`);
+        p.push(`${where}.${k}: unknown step key (known: ${STEP_KEYS.filter((x) => x !== "role").join(", ")})`);
       }
     }
-    if (!tpl["desc"] && !tpl["signal"]) p.push(`roles.${name} needs desc and signal`);
+    const tool = step["source"] !== undefined;
+    if (tool) {
+      for (const k of BROWSER_ONLY) {
+        if (step[k] !== undefined) p.push(`${where}.${k}: browser-only key on a tool step (source=${JSON.stringify(String(step["source"]))})`);
+      }
+      try {
+        loadSource(String(step["source"]));
+      } catch (e) {
+        p.push(`${where}.source ${JSON.stringify(String(step["source"]))} not found (${e instanceof Error ? e.message : String(e)})`);
+      }
+      p.push(...validateToolSignal((step["signal"] ?? {}) as ToolSignal, `${where}.signal`));
+      const args = step["args"];
+      if (args !== undefined && !(Array.isArray(args) && args.every((x) => typeof x === "string"))) {
+        p.push(`${where}.args must be a list of strings (appended to the source argv)`);
+      }
+      const dry = step["dry_run_args"];
+      if (dry !== undefined && !(Array.isArray(dry) && dry.length && dry.every((x) => typeof x === "string"))) {
+        p.push(`${where}.dry_run_args must be a non-empty list of strings`);
+      }
+      const retries = Number(step["retries"] ?? 0);
+      if (retries > 0 && step["idempotent"] !== true) {
+        p.push(`${where}.retries=${retries} needs idempotent: true (re-running a tool can be irreversible)`);
+      }
+      if (step["dangerous"] === true) {
+        if (dry === undefined) {
+          p.push(`${where}.dangerous needs dry_run_args — 不可逆动作必须先干跑`);
+        }
+        if (retries > 0) p.push(`${where}.dangerous must not retry (retries=${retries})`);
+      }
+    } else {
+      for (const k of TOOL_ONLY) {
+        if (step[k] !== undefined) p.push(`${where}.${k}: tool-only key on a browser step`);
+      }
+      if (!step["signal"]) p.push(`${where}: needs a done-signal`);
+      if (!step["desc"]) p.push(`${where}: needs desc`);
+    }
+  };
+  for (const [name, tpl] of Object.entries(roles)) {
+    if (!isDict(tpl)) { p.push(`roles.${name} must be an object`); continue; }
+    checkStep(tpl as Record<string, unknown>, `roles.${name}`);
+    if (stepKind(tpl as Record<string, unknown>) === "browser" && !tpl["desc"]) {
+      p.push(`roles.${name} needs desc and signal`);
+    }
   }
   pack.journey.forEach((entry, i) => {
     if (!isDict(entry)) { p.push(`journey[${i}] must be an object`); return; }
-    for (const k of Object.keys(entry)) {
-      if (!(STEP_KEYS as readonly string[]).includes(k)) {
-        p.push(`journey[${i}].${k}: unknown step key (known: ${STEP_KEYS.join(", ")})`);
-      }
-    }
     const roleName = entry["role"];
     if (roleName !== undefined && !(String(roleName) in roles)) {
       p.push(`journey[${i}]: unknown role ${JSON.stringify(String(roleName))}`);
     }
-    if (!entry["desc"] && roleName === undefined) p.push(`journey[${i}]: needs desc (or a role that has one)`);
-    if (!entry["signal"] && roleName === undefined) p.push(`journey[${i}]: needs a done-signal`);
+    if (roleName === undefined) {
+      checkStep(entry, `journey[${i}]`);
+    } else {
+      // 角色模板已经校验过；内联覆盖只允许"补字段"，键集合再查一遍
+      for (const k of Object.keys(entry)) {
+        if (!(STEP_KEYS as readonly string[]).includes(k)) p.push(`journey[${i}].${k}: unknown step key`);
+      }
+    }
   });
   // 占位符必须指向已声明的槽位（`required_slots` 或 `slots` 里给了值）
   const seen: string[] = [];
-  substitute({ roles: pack.roles ?? {}, journey: pack.journey }, slots, seen);
+  substitute({ roles: pack.roles ?? {}, journey: pack.journey },
+    { ...RUNTIME_PLACEHOLDERS, ...slots }, seen);
   for (const s of [...new Set(seen)]) p.push(s);
   // 数据腿：引用的数据源必须真的存在（发现制，不维护清单）
   for (const s of pack.sources ?? []) {
@@ -261,23 +382,30 @@ export function validatePack(pack: AppPack,
       p.push(`source ${JSON.stringify(String(s))} not found (${e instanceof Error ? e.message : String(e)})`);
     }
   }
+  if ((pack.invariants ?? []).length
+    && !pack.journey.some((e) => stepKind((e["role"] ? { ...(roles[String(e["role"])] ?? {}), ...e } : e) as Record<string, unknown>) === "browser")) {
+    p.push("invariants need at least one browser step (they are evaluated on the browser end state)");
+  }
   for (const [i, inv] of (pack.invariants ?? []).entries()) {
     if (!isDict(inv) || !inv["id"] || !isDict(inv["signal"])) {
       p.push(`invariants[${i}] needs {id, signal}`);
     }
   }
-  // 展开成计划后再用计划自己的校验器过一遍（信号/hint/when/retries 一套口径）
+  // 展开成计划后再用计划自己的校验器过一遍（信号/hint/when/retries 一套口径）。
+  // 只有**浏览器步**进计划；工具步的信号是进程观察面的，它们已经在上面按 TOOL_SIGNAL_OPS 校验过。
   if (!p.length) {
     try {
-      const rolesUsed = pack.journey.map((e, i) => {
+      const browserSteps = pack.journey.map((e, i) => {
         const merged = e["role"] ? { ...(roles[String(e["role"])] ?? {}), ...e } : { ...e };
         delete merged["role"];
-        return substitute(merged, slots, []) as Record<string, unknown>;
-      });
-      const plan = new TaskPlan(pack.goal, rolesUsed as unknown as Array<Partial<Subgoal>>,
-        ":memory:", slots);
-      const rules = new PlanningRules(pack.max_subgoals ?? 12, true, false);
-      p.push(...rules.problems(plan).map((x) => `plan: ${x}`));
+        return substitute(merged, { ...RUNTIME_PLACEHOLDERS, ...slots }, []) as Record<string, unknown>;
+      }).filter((step) => stepKind(step) === "browser");
+      if (browserSteps.length) {
+        const plan = new TaskPlan(pack.goal, browserSteps as unknown as Array<Partial<Subgoal>>,
+          ":memory:", slots);
+        const rules = new PlanningRules(pack.max_subgoals ?? 12, true, false);
+        p.push(...rules.problems(plan).map((x) => `plan: ${x}`));
+      }
     } catch (e) {
       p.push(`plan: ${e instanceof Error ? e.message : String(e)}`);
     }

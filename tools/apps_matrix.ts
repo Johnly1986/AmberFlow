@@ -96,6 +96,8 @@ interface Row {
   sources: number;
   roles: number;
   steps: number;
+  /** 旅程里的工具步（命令行动作腿）数量 */
+  toolSteps: number;
   invariants: number;
   declared: number;
   code: number;
@@ -118,7 +120,9 @@ export function matrix(): {
       // 数据腿可以是本目录的 source，也可以是引用别的应用的 source（`sources` 字段）
       sources: Math.max(sources, (pack.sources ?? []).length),
       roles: Object.keys(pack.roles ?? {}).length,
-      steps: pack.journey.length, invariants: (pack.invariants ?? []).length,
+      steps: pack.journey.length,
+      toolSteps: pack.journey.filter((e) => (e as Record<string, unknown>)["source"] !== undefined).length,
+      invariants: (pack.invariants ?? []).length,
       declared: jsonLines(path.join(dir, "pack.json")),
       code: appCodeLines(dir),
       tokens: declaredTokens(dir),
@@ -131,7 +135,7 @@ export function matrix(): {
     if (rows.some((r) => r.app === app)) continue;
     rows.push({
       app, kind: "sources-only", sources: fs.readdirSync(d).filter((f) => f.endsWith(".json")).length,
-      roles: 0, steps: 0, invariants: 0,
+      roles: 0, steps: 0, toolSteps: 0, invariants: 0,
       declared: fs.readdirSync(d).filter((f) => f.endsWith(".json"))
         .reduce((n, f) => n + jsonLines(path.join(d, f)), 0),
       code: appCodeLines(path.dirname(d)), tokens: declaredTokens(path.dirname(d)),
@@ -171,9 +175,9 @@ export function main(argv: string[] = process.argv.slice(2)): number {
     console.log(JSON.stringify({ rows, leaks, debt }, null, 2));
     return leaks.length ? 1 : 0;
   }
-  const head = ["应用", "类型", "数据源", "角色", "步骤", "不变量", "声明行", "代码行", "声明的标识"];
+  const head = ["应用", "类型", "数据源", "角色", "步骤", "工具步", "不变量", "声明行", "代码行", "声明的标识"];
   const table = rows.map((r) => [r.app, r.kind, String(r.sources), String(r.roles), String(r.steps),
-    String(r.invariants), String(r.declared), String(r.code), r.tokens.join(",") || "-"]);
+    String(r.toolSteps), String(r.invariants), String(r.declared), String(r.code), r.tokens.join(",") || "-"]);
   const widths = head.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
   const line = (cells: string[]): string =>
     cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");

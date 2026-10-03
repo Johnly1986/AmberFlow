@@ -1,14 +1,17 @@
 /**
  * 应用层测试 —— 应用包是**数据**，共享层零改动。
  *
- * 四组：
+ * 五组：
  *   1. 发现与校验：坏包在加载期炸（未知键/角色/占位符/缺必填槽位/未知数据源/坏不变量）；
  *   2. 展开：角色模板 + 槽位替换 + 可复现（同一份包展开出逐字段相同的计划）；
  *   3. 端到端：`runApp` 跑完「数据腿 → 冻结计划 → 结束状态不变量」整条链路（离线、脚本模型）；
- *   4. 度量：应用目录 0 行代码；核心层不许出现应用声明的站点/工具标识（`apps:matrix`）。
+ *   4. 度量：应用目录 0 行代码；核心层不许出现应用声明的站点/工具标识（`apps:matrix`）；
+ *   5. 工具步：命令行工具当动作腿（退出码/stdout/stderr/JSON/产物 + 干跑/确认/幂等重试）。
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appDirs, expandPack, listPacks, loadPack, PACK_KEYS, validatePack, type AppPack } from "../src/app-pack.ts";
 import { runApp } from "../src/app-runner.ts";
@@ -45,7 +48,7 @@ describe("应用包：发现与校验", () => {
     ["未知数据源", (p: any) => { p.sources = ["no-such-source"]; }, "not found"],
     ["坏不变量", (p: any) => { p.invariants = [{ id: "x" }]; }, "invariants[0] needs"],
     ["未知信号算子", (p: any) => { p.roles.checkout.signal = { magic_op: "x" }; }, "unknown signal op"],
-    ["角色缺信号", (p: any) => { delete p.roles.checkout.signal; }, "missing done-signal"],
+    ["角色缺信号", (p: any) => { delete p.roles.checkout.signal; }, "needs a done-signal"],
   ])("%s", (_label, mutate, snippet) => {
     const pack = clone(loadPack("demo-app")) as any;
     mutate(pack);
@@ -103,7 +106,7 @@ describe("应用运行器：数据腿 → 动作腿 → 结束状态不变量", 
       verbose: false, planPath: path.join("/tmp", "layawebuse-apps", "demo-app-test.json"),
     });
     expect(res.ok, JSON.stringify(res.subgoals)).toBe(true);
-    expect(res.completed).toBe("4/4");
+    expect(res.completed).toBe("5/5");
     expect(res.subgoals.every((s) => s.status === "done")).toBe(true);
     expect(res.invariants.map((i) => [i.id, i.held])).toEqual([
       ["on-thanks-page", true], ["no-error-banner", true],
@@ -131,7 +134,7 @@ describe("应用层度量：代码行与防泄漏", () => {
     expect(rows.every((r) => r.code === 0), JSON.stringify(rows)).toBe(true);
     expect(leaks, JSON.stringify(leaks)).toEqual([]);
     const demo = rows.find((r) => r.app === "demo-app")!;
-    expect(demo).toMatchObject({ kind: "pack", roles: 4, steps: 4, invariants: 2, sources: 1 });
+    expect(demo).toMatchObject({ kind: "pack", roles: 4, steps: 5, invariants: 2, sources: 1 });
   });
 
   it("泄漏检查真的有牙：把一个站点名写进核心层就会被抓到（模拟，不改文件）", () => {
@@ -153,4 +156,141 @@ describe("应用包与数据源的位置约定", () => {
       expect(stray, `${dir} 顶层不该有代码文件`).toEqual([]);
     }
   });
+});
+
+/* ------------------------------------------------- 工具步：命令行当动作腿 */
+
+const freshOut = (tag: string): string => {
+  const d = path.join(os.tmpdir(), `layawebuse-apps-test-${tag}-${process.pid}-${Date.now()}`);
+  fs.mkdirSync(d, { recursive: true });
+  return d;
+};
+const hasTool = (bin: string): boolean => {
+  try {
+    execFileSync("sh", ["-c", `command -v ${bin}`], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+describe("工具步：命令行工具当动作腿", () => {
+  it.each([
+    ["未知数据源", (p: any) => { p.journey[0] = { id: "x", desc: "d", source: "no-such", signal: { exit_ok: true } }; },
+      "source \"no-such\" not found"],
+    ["retries 需要幂等", (p: any) => { p.journey[0].retries = 2; }, "needs idempotent: true"],
+    ["dangerous 需要干跑", (p: any) => {
+      p.journey[0] = { id: "x", desc: "d", source: "demo-tool", dangerous: true, signal: { exit_ok: true } };
+    }, "dangerous needs dry_run_args"],
+    ["dangerous 不许重试", (p: any) => {
+      p.journey[0] = {
+        id: "x", desc: "d", source: "demo-tool", dangerous: true, idempotent: true, retries: 1,
+        dry_run_args: ["--dry-run"], signal: { exit_ok: true },
+      };
+    }, "must not retry"],
+    ["工具步不许有浏览器键", (p: any) => { p.journey[0].start_url = "https://x"; },
+      "browser-only key on a tool step"],
+    ["浏览器步不许有工具键", (p: any) => {
+      p.journey[0] = { desc: "d", signal: { css_exists: "#a" }, args: ["--x"] };
+    }, "tool-only key on a browser step"],
+    ["工具信号算子白名单", (p: any) => { p.journey[0].signal = { stdout_eq: "x" }; },
+      "unknown tool signal op 'stdout_eq'"],
+    ["不变量需要浏览器步", (p: any) => {
+      p.journey = p.journey.filter((s: any) => s.source !== undefined);
+      p.invariants = [{ id: "x", signal: { css_exists: "#a" } }];
+    }, "invariants need at least one browser step"],
+  ])("%s", (_label, mutate, snippet) => {
+    const pack = clone(loadPack("cli-report")) as any;
+    mutate(pack);
+    expect(validatePack(pack).join(" | ")).toContain(snippet);
+  });
+
+  it("cli-report 全绿：退出码 / JSON 路径 / stderr / 幂等重试 / 干跑+确认+落盘", async () => {
+    const out = freshOut("cli-report");
+    const res = await runApp(loadPack("cli-report"), {
+      verbose: false, outDir: out, planPath: path.join(out, "plan.json"), allowDangerous: true,
+    });
+    expect(res.ok, JSON.stringify(res.tool_steps)).toBe(true);
+    expect(res.completed).toBe("5/5");
+    expect(res.subgoals).toHaveLength(0);                     // 全工具步：没有浏览器子目标
+    expect(res.tool_steps.map((t) => [t.source, t.code, t.done])).toEqual([
+      ["demo-tool", 0, true], ["demo-tool", 3, true], ["demo-tool", 2, true],
+      ["demo-tool", 0, true], ["demo-tool", 0, true],
+    ]);
+    // 幂等读操作重试到第 3 次才成功（失败计数在进程之外，所以这是真的重试）
+    expect(res.tool_steps[3]!.attempts).toBe(3);
+    // 不可逆写入：干跑先过了，产物才落地
+    expect(res.tool_steps[4]!.dry_run?.ok).toBe(true);
+    expect(res.tool_steps[4]!.refused).toBeUndefined();
+    expect(fs.existsSync(path.join(out, "cli-report-artifact.txt"))).toBe(true);
+  }, 120_000);
+
+  it("危险步默认拒绝：不确认就不落盘，并且明确报告 refused", async () => {
+    const out = freshOut("cli-refuse");
+    const res = await runApp(loadPack("cli-report"), {
+      verbose: false, outDir: out, planPath: path.join(out, "plan.json"),
+    });
+    expect(res.ok).toBe(false);
+    expect(res.completed).toBe("4/5");
+    expect(res.tool_steps[4]!.refused).toBe("dangerous");
+    expect(res.tool_steps[4]!.code).toBeNull();               // apply 根本没跑
+    expect(fs.existsSync(path.join(out, "cli-report-artifact.txt"))).toBe(false);
+  }, 120_000);
+
+  it("确认钩子说不 -> declined；说可以 -> 执行（钩子拿到的是干跑证据）", async () => {
+    const out = freshOut("cli-confirm");
+    const seen: string[] = [];
+    const declined = await runApp(loadPack("cli-report"), {
+      verbose: false, outDir: out, planPath: path.join(out, "plan.json"),
+      confirmToolStep: (desc, ev) => { seen.push(`${desc}|${ev.dry_run?.ok}`); return false; },
+    });
+    expect(declined.tool_steps[4]!.refused).toBe("declined");
+    expect(fs.existsSync(path.join(out, "cli-report-artifact.txt"))).toBe(false);
+    expect(seen[0]).toContain("|true");                       // 确认时已经看到干跑结果
+
+    const allowed = await runApp(loadPack("cli-report"), {
+      verbose: false, outDir: out, planPath: path.join(out, "plan.json"),
+      confirmToolStep: () => true,
+    });
+    expect(allowed.ok).toBe(true);
+    expect(fs.existsSync(path.join(out, "cli-report-artifact.txt"))).toBe(true);
+  }, 120_000);
+
+  it("干跑不成功就不 apply（干跑失败是一种显式拒绝）", async () => {
+    const out = freshOut("cli-dryfail");
+    const pack = clone(loadPack("cli-report")) as any;
+    const write = pack.journey[4];
+    write.args = ["--fail", "--write={out_dir}/never.txt"];
+    write.dry_run_args = ["--fail", "--write={out_dir}/never.txt", "--dry-run"];
+    write.signal = { all_of: [{ exit_ok: 0 }, { file_exists: "{out_dir}/never.txt" }] };
+    const res = await runApp(pack, {
+      verbose: false, outDir: out, planPath: path.join(out, "plan.json"), allowDangerous: true,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.tool_steps[4]!.refused).toBe("dry-run-failed");
+    expect(fs.existsSync(path.join(out, "never.txt"))).toBe(false);
+  }, 120_000);
+
+  it("混合旅程：工具步 + 浏览器步按顺序跑（demo-app 5 步）", async () => {
+    const out = freshOut("mixed");
+    const res = await runApp(loadPack("demo-app"), {
+      verbose: false, outDir: out, planPath: path.join(out, "plan.json"),
+    });
+    expect(res.ok, JSON.stringify(res)).toBe(true);
+    expect(res.completed).toBe("5/5");
+    expect(res.subgoals).toHaveLength(4);                     // 浏览器步子目标
+    expect(res.tool_steps).toHaveLength(1);                   // 旅程第一步是工具步
+    expect(res.tool_steps[0]).toMatchObject({ source: "demo-tool", code: 0, done: true });
+    expect(res.invariants.every((i) => i.held)).toBe(true);
+  }, 120_000);
+
+  it.skipIf(!hasTool("git") || !hasTool("jq"))("真实工具的工具步（git + jq）：只读链路 3/3", async () => {
+    const out = freshOut("repo-report");
+    const res = await runApp(loadPack("repo-report"), {
+      verbose: false, outDir: out, planPath: path.join(out, "plan.json"),
+    });
+    expect(res.ok, JSON.stringify(res.tool_steps)).toBe(true);
+    expect(res.tool_steps.map((t) => t.source)).toEqual(["git-log", "bench-cases-index", "bench-cases-shape"]);
+    expect(res.tool_steps.every((t) => t.done && t.code === 0)).toBe(true);
+  }, 120_000);
 });
