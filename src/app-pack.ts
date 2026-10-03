@@ -297,6 +297,12 @@ export function validatePack(pack: AppPack,
   for (const k of ["id", "label", "goal"] as const) {
     if (typeof pack[k] !== "string" || !pack[k]) p.push(`${k} is required`);
   }
+  // `hosts` 必须是字符串列表：防泄漏门禁（`tools/apps_matrix.ts`）会逐项遍历它。
+  // 写成裸字符串虽然能被 `validateProbeBlock` 的 `asList` 容忍，但门禁会按**字符**建 token
+  // （`\bm\b` 之类），既漏掉真主机又刷出一堆假泄漏 —— 所以在加载期就拒绝。
+  if (pack.hosts !== undefined && (!Array.isArray(pack.hosts) || pack.hosts.some((h) => typeof h !== "string"))) {
+    p.push("hosts must be a list of strings (the leak gate iterates it)");
+  }
   if (!Array.isArray(pack.journey)) {
     p.push("journey must be a list of steps");
     return p;
@@ -378,6 +384,21 @@ export function validatePack(pack: AppPack,
       // 角色模板已经校验过；内联覆盖只允许"补字段"，键集合再查一遍
       for (const k of Object.keys(entry)) {
         if (!(STEP_KEYS as readonly string[]).includes(k)) p.push(`journey[${i}].${k}: unknown step key`);
+      }
+      // 合并后两种步型的互斥键仍要查：角色模板走 checkStep，但**内联覆盖**以前只查键名，
+      // 于是 `{role: <浏览器角色>, args:[...]}` 会把 args 静默丢掉（"写了没用"），
+      // step 仍按浏览器步执行 —— 这正是不变量"两种步型互斥键加载期就报错"要防的事。
+      const tpl = roles[String(roleName)];
+      if (isDict(tpl)) {
+        const merged = { ...tpl, ...entry };
+        const tool = merged["source"] !== undefined;
+        for (const k of tool ? BROWSER_ONLY : TOOL_ONLY) {
+          if (merged[k] !== undefined) {
+            p.push(`journey[${i}].${k}: ${tool
+              ? `browser-only key on a tool step (source=${JSON.stringify(String(merged["source"]))})`
+              : "tool-only key on a browser step"}`);
+          }
+        }
       }
     }
   });

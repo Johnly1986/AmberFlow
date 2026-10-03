@@ -82,7 +82,15 @@ export interface ToolStepResult {
   attempts: number;
   done: boolean;
   /** 显式拒绝的原因：`dangerous`（没允许）/ `declined`（确认函数说不）/ `dry-run-failed` */
-  refused?: "dangerous" | "declined" | "dry-run-failed";
+  /**
+   * 显式拒绝/失败的原因：
+   *   dangerous        —— 危险步没拿到许可（默认行为）
+   *   declined         —— 确认钩子说不
+   *   dry-run-failed   —— 干跑不成功，所以不 apply
+   *   tool-unavailable —— 命令根本起不来（缺二进制 / 超时被杀 / argv 非法）：
+   *                       这是**结果**不是崩溃——上层要能在结果 JSON 里读到它。
+   */
+  refused?: "dangerous" | "declined" | "dry-run-failed" | "tool-unavailable";
   dry_run: { code: number; ok: boolean; stdout: string; argv: string[] } | null;
   code: number | null;
   ok: boolean;
@@ -148,9 +156,22 @@ export async function runToolStep(
     attempts: 0, done: false, dry_run: null, code: null, ok: false, stdout: "", stderr: "",
   };
 
+  const unavailable = (e: unknown): void => {
+    base.refused = "tool-unavailable";
+    base.stderr = `${e instanceof Error ? e.name : typeof e}: `
+      + `${e instanceof Error ? e.message : String(e)}`.slice(0, 200);
+    if (opts.verbose) console.log(`  [${step.index}] tool ${t.source}: UNAVAILABLE (${base.stderr})`);
+  };
+
   let dry: CliObservation | null = null;
   if (t.dry_run_args) {
-    dry = await cliRunDetailed(target, 60, src, t.dry_run_args.map((a) => String(sub(a))));
+    try {
+      dry = await cliRunDetailed(target, 60, src, t.dry_run_args.map((a) => String(sub(a))));
+    } catch (e) {
+      // 缺二进制 / 超时被杀：干跑起不来 => 不 apply，并且如实上报（不抛栈）
+      unavailable(e);
+      return base;
+    }
     base.dry_run = { code: dry.code, ok: dry.ok, stdout: dry.stdout, argv: dry.argv };
     if (opts.verbose) {
       console.log(`  [${step.index}] dry-run ${t.source}: exit ${dry.code}${dry.ok ? "" : " (not ok)"}`);
@@ -176,7 +197,13 @@ export async function runToolStep(
   const tries = Math.max(1, 1 + (t.idempotent ? t.retries : 0));
   for (let i = 1; i <= tries; i++) {
     base.attempts = i;
-    const o = await cliRunDetailed(target, 60, src, t.args.map((a) => String(sub(a))));
+    let o: CliObservation;
+    try {
+      o = await cliRunDetailed(target, 60, src, t.args.map((a) => String(sub(a))));
+    } catch (e) {
+      unavailable(e);
+      break;
+    }
     base.argv = o.argv;
     base.code = o.code;
     base.ok = o.ok;
@@ -404,8 +431,27 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   fs.mkdirSync(outDir, { recursive: true });
   const planPath = path.join(outDir, `${pack.id}-plan.json`);
 
+  // 测量型应用（只声明 probe、没有 journey）走 app 运行器是没有意义的：它会"通过 0/0"。
+  // 与其给一个什么都没证明的绿色，不如指路到真正的测量入口。
+  if (pack.probe !== undefined && (pack.journey ?? []).length === 0) {
+    const sets = pack.probe as Record<string, unknown>;
+    const n = ["http", "alts", "mobile", "capture"]
+      .reduce((k, key) => k + (Array.isArray(sets[key]) ? (sets[key] as unknown[]).length : 0), 0);
+    console.error(`app ${pack.id} 是测量型应用（探针集，${n} 个目标），没有 journey：`
+      + "请用对应的探针驱动（src/live-probe.ts / live-capture.ts / ota-probe.ts / qunar-probe.ts），"
+      + "或用 `npm run apps -- --app " + pack.id + " --dry` 只看声明。");
+    return 2;
+  }
+
   if (v.dry) {
-    const { plan, steps, rolesUsed } = expandPack(pack, slots, planPath);
+    let dryOut;
+    try {
+      dryOut = expandPack(pack, slots, planPath);
+    } catch (e) {                                  // 坏包也要干净地报错（exit 2），不是抛栈
+      console.error(e instanceof Error ? e.message : String(e));
+      return 2;
+    }
+    const { plan, steps, rolesUsed } = dryOut;
     console.log(JSON.stringify({
       app: pack.id, roles_used: rolesUsed, slots: plan.slots,
       goal: plan.goal, steps, subgoals: plan.subgoals,
@@ -429,6 +475,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       allowDangerous: v["allow-dangerous"] === true,
       modelId: v.model ?? pack.model ?? "english",
     });
+  } catch (e) {
+    // 坏包（未知键/角色/占位符/主机……）在 `expandPack` 里就抛出：CLI 的契约是
+    // "报清楚 + 退出码 2"，不是把栈甩给用户。
+    console.error(e instanceof Error ? e.message : String(e));
+    return 2;
   } finally {
     installLayaRuntime(null);
   }

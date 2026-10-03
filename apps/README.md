@@ -195,7 +195,13 @@ npm run apps:matrix                                      # 度量：声明行 / 
 npm run apps -- --app cli-report --no-model --allow-dangerous   # 桩工具：退出码/JSON/stderr/幂等重试/干跑+确认+落盘
 npm run apps -- --app repo-report --no-model                    # 真实工具：git（行文本）+ jq（JSON）
 npm run apps -- --app cli-report --no-model                     # 不带 --allow-dangerous：危险步被拒绝、不落盘
+
+npm run apps -- --app ctrip-case --no-model --no-sources        # 19 个冻结子目标跑本地复刻站（与 src/ctrip-task.ts 的计划逐字段全等）
+npm run apps -- --app ip-config  --no-model                     # Excel IP 规划表 → 设备网络页（含"表格写错的那行由设备页自己拒绝"）
 ```
+
+应用清单与"完成一个应用"的五条定义在 [apps/INVENTORY.md](INVENTORY.md)；独立复核（题 → 命令 → 原始观测 → 结论）
+在 [bench/APP_VERIFY_REPORT.md](../bench/APP_VERIFY_REPORT.md)。
 
 ## 五、探针集：把「线上能不能打开」也变成数据
 

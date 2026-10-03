@@ -113,7 +113,10 @@ function targetProblems(t: unknown, where: string, hosts: Set<string>, p: string
   const url = String(t["url"] ?? "");
   const h = hostOfUrl(url);
   if (url && h === null) p.push(`${where}.url: not an http(s) URL: ${JSON.stringify(url)}`);
-  if (h !== null && hosts.size && !hosts.has(h)) {
+  if (h !== null && !hosts.has(h)) {
+    // **包括 `hosts` 缺失/为空时**：原来这里是 `hosts.size && !hosts.has(h)`，于是
+    // `hosts: []` 成了一道后门 —— 探针可以打着任意主机而门禁看不见它（"声明了就覆盖到"
+    // 这句话必须双向成立：没声明的主机就是错误）。
     p.push(`${where}.url host ${JSON.stringify(h)} is not declared in pack.hosts (the leak gate would miss it)`);
   }
   for (const ph of new Set([...url.matchAll(/\{([a-z_]+)\}/g)].map((m) => m[1]!))) {
@@ -131,6 +134,10 @@ export function validateProbeBlock(probe: unknown, hostsRaw: unknown, where = "p
   const p: string[] = [];
   if (!isDict(probe)) { p.push(`${where}: must be an object`); return p; }
   const hosts = new Set(strList(hostsRaw ?? []).map((h) => h.toLowerCase()));
+  // `hosts` 必须是字符串列表（门禁逐项遍历它；裸字符串会被按字符建 token）。
+  if (hostsRaw !== undefined && (!Array.isArray(hostsRaw) || hostsRaw.some((h) => typeof h !== "string"))) {
+    p.push(`${where}: hosts must be a list of strings (the leak gate iterates it)`);
+  }
   for (const k of Object.keys(probe)) {
     if (!(PROBE_KEYS as readonly string[]).includes(k)) {
       p.push(`${where}.${k}: unknown key (known: ${PROBE_KEYS.join(", ")})`);
@@ -208,7 +215,7 @@ export function validateProbeBlock(probe: unknown, hostsRaw: unknown, where = "p
       }
       for (const h of strList(login["hosts"] ?? [])) {
         const hh = h.toLowerCase();
-        if (hosts.size && !hosts.has(hh)) {
+        if (!hosts.has(hh)) {
           p.push(`${where}.login.hosts ${JSON.stringify(h)} is not declared in pack.hosts`);
         }
       }
