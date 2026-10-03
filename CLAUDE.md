@@ -246,7 +246,7 @@ These are empirical findings from this codebase's own experiments — preserve t
 - **On Chinese pages the plan's `target_hint` is load-bearing, not decoration.** The ctrip case resolves 19/19 steps by rule with
   hints (zero model calls); stripping them blocks subgoal 1 outright -- confidence **0.13** on the zh homepage, and **0.24** after
   `laya.Router` correctly routes to `multilingual` (Han = 61% of letters). Routing doubles it and still misses the 0.25 floor.
-  Measured: `python3 ctrip/ctrip_task.py --no-hints [--route]` -> 0/7 both ways. Do not read this as "rules beat the model":
+  Measured: `src/ctrip-task.ts --no-hints [--route]` -> 0/7 both ways. Do not read this as "rules beat the model":
   it says the model's zero-shot ceiling on CJK list pages is below this flow's floor.
 - **A hint is TIERED, and a live list page is why.** `~` hints used to be "substring matches,
   and only usable when every hit is identical"; on real pages that is always ambiguous —

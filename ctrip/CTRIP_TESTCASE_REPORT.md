@@ -32,7 +32,7 @@
 不筛出发时段就会答错，筛选不是摆设。五个日期区间内最低价的起飞时刻也不同
 （14:25 / 10:30 / 10:30 / 08:20 / 14:25），所以"周一到周五都查一遍"确实是一次比较。
 
-## 2. 线上可达性：实测证据（`python3 ctrip/live_probe.py`）
+## 2. 线上可达性：实测证据（`node --experimental-strip-types src/live-probe.ts`）
 
 | 目标 | curl-cli | httpx 普通 UA | httpx 浏览器 UA | 真浏览器（Playwright） |
 |---|---|---|---|---|
@@ -67,11 +67,11 @@
 ## 2.5 从一个能过风控的网络怎么跑真实用例
 
 本环境看不到真实 DOM（机票 432、酒店被跳到登录页），所以"照着真实 DOM 写 hint/signal"这一步
-做不了。这一轮把它做成了一条命令 —— `ctrip/live_capture.py`：
+做不了。这一轮把它做成了一条命令 —— `src/live-capture.ts`：
 
 ```bash
-python3 ctrip/live_capture.py --date 2026-10-05      # 机票 + 酒店各抓一次
-python3 ctrip/live_capture.py --profile ~/ctrip-session   # 用已登录的浏览器目录（酒店列表要求登录）
+node --experimental-strip-types src/live-capture.ts --date 2026-10-05      # 机票 + 酒店各抓一次
+node --experimental-strip-types src/live-capture.ts --profile ~/ctrip-session   # 用已登录的浏览器目录（酒店列表要求登录）
 ```
 
 它对每个目标给出**四种判决**（判定逻辑是纯函数，有离线单测）：
@@ -118,7 +118,7 @@ https://m.ctrip.com/html5/flight/kmg-bjs-day-N.html        N = (目标日期 - �
 即：WhaleGuard 按 **TLS/HTTP2 指纹 + UA** 打分 —— "非浏览器"客户端放行，浏览器一律拦。
 （这也解释了为什么之前"换成 curl 就能拿到空壳、换浏览器就 432"。）
 
-**用例的机票那一半，真实数据结论**（`python3 ctrip/h5_flights.py`，原始数据
+**用例的机票那一半，真实数据结论**（`node --experimental-strip-types src/h5-flights.ts`，原始数据
 `results/real_flights.json`，明细 `results/real_flights.md`）：
 
 | 日期 | 时段内班次 | 最低价（含经停） | 直飞最低 |
@@ -134,7 +134,7 @@ https://m.ctrip.com/html5/flight/kmg-bjs-day-N.html        N = (目标日期 - �
 10-05~10-08 高、10-09 回落。）
 
 **"执行器能不能在真实 DOM 上工作"也验了**：把抓到的 HTML 交给真浏览器渲染后，执行器的抽取层
-拿到 **29 个可交互元素**、标题正确（`python3 ctrip/h5_flights.py --render` 的输出在
+拿到 **29 个可交互元素**、标题正确（`src/h5-flights.ts --render` 的输出在
 `results/real_flights.md` 的"渲染验证"一节）。也就是说"照着真实 DOM 写 hint/signal"这件事
 现在做得到了 —— 只是**抓取**必须走 curl，**渲染与决策**仍走 harness。
 
@@ -142,7 +142,7 @@ https://m.ctrip.com/html5/flight/kmg-bjs-day-N.html        N = (目标日期 - �
 的 SSR 里有 18 个酒店名/星级/评分，但 `<div class="price-line"></div>` 是空的面且页面写着
 「登录以查看会员价」；`m.ctrip.com/html5/hotel/list` 只是空壳；
 `POST /restapi/soa2/16709/json/HotelSearch` 返回 `ErrorCode: 0` 但不带酒店列表。
-所以"出发当日 ≤300 元的酒店"仍然需要**已登录**会话（`live_capture.py --profile <dir>`）。
+所以"出发当日 ≤300 元的酒店"仍然需要**已登录**会话（`src/live-capture.ts --profile <dir>`）。
 
 ## 2.8 取数是**配置**，不是脚本（同一个引擎跑两个站点）
 
@@ -265,14 +265,14 @@ click button "记录当前列表最低价航班" ×5   p=0.62 / 0.70 / 0.73 / 0.
 ## 8. 怎么复现
 
 ```bash
-python3 ctrip/ctrip_task.py                    # 跑用例（写 results/），全对才返回 0
-python3 ctrip/ctrip_task.py --no-hints         # 消融：去掉全部 hint（复现 0/7）
-python3 ctrip/ctrip_task.py --no-hints --route # 消融：+ checkpoint 路由（复现 0.24）
-python3 ctrip/data.py                          # 打印日期推断 + 五天最低价 + ≤300 酒店
-python3 ctrip/data.py --write                  # 重新生成 site/ctrip_data.js（有单测盯一致性）
-python3 ctrip/live_probe.py                    # 实测线上可达性（写 results/live_probe.json）
-python -m pytest ctrip/test_ctrip.py -q        # 20 个离线测试（含判分"有牙齿"的反例）
-bash bench/smoke.sh                            # 回归门：96 单测 + 6 fixture case + 本用例端到端
+node --experimental-strip-types src/ctrip-task.ts                    # 跑用例（写 results/），全对才返回 0
+node --experimental-strip-types src/ctrip-task.ts --no-hints         # 消融：去掉全部 hint（复现 0/7）
+node --experimental-strip-types src/ctrip-task.ts --no-hints --route # 消融：+ checkpoint 路由（复现 0.24）
+node --experimental-strip-types src/ctrip-data.ts                    # 打印日期推断 + 五天最低价 + ≤300 酒店
+node --experimental-strip-types src/ctrip-data.ts --write            # 重新生成 site/ctrip_data.js（有单测盯一致性）
+node --experimental-strip-types src/live-probe.ts                    # 实测线上可达性（写 results/live_probe.json）
+npm run verify                                                       # 全量门禁（类型检查 + 全部测试 + 六层对拍）
+bash bench/smoke.sh                                                  # CI 的"绿色"定义（含本用例端到端）
 ```
 
 ## 9. 诚实清单（不足与边界）

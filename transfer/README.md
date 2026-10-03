@@ -112,6 +112,6 @@ python3 transfer/transfer_task.py --site slowjet               # 第七个站点
 python3 transfer/transfer_task.py --site slowjet --no-retries  # 消融：去掉重试 -> 第一个冷页面就 BLOCKED
 python3 transfer/transfer_task.py --both              # 所有站点都跑 + 对比
 python3 transfer/transfer_task.py --emit-plan skybook # 配置 → 冻结计划 JSON
-python -m pytest transfer/test_transfer.py -q
+node --experimental-strip-types tools/transfer-parity.ts      # TS 侧逐例对拍（原 Python 套件见 BACKUP.md）
 bash bench/smoke.sh                                   # 回归门（含本目录）
 ```

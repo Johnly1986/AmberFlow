@@ -191,7 +191,7 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
    `hotels.ctrip.com` 列表页 SSR 能出酒店名/星级，但未登录访客的价格节点为空（"登录以查看会员价"），「≤300 元」无法判定。
    补充：iPhone/Android UA + 移动视口 + 触摸、`hk./us./sg.trip.com` 三个区域域名 —— 10 次访问 10 次 432，
    说明挡的是**出口 IP**而非 UA/设备/区域；酒店列表在浏览器里会被**重定向到登录页**（`passport.ctrip.com`）。
-   实测与复现见 `ctrip/live_probe.py`、`ctrip/live_capture.py` → `ctrip/results/{live_probe.json,live_capture/}`。
+   实测与复现见 `src/live-probe.ts`、`src/live-capture.ts` → `ctrip/results/{live_probe.json,live_capture/}`（原 Python 版命令与输出归档在历史 bundle，见 [BACKUP.md](BACKUP.md)）。
    因此 `ctrip/` 用例跑在**本地复刻站**上，
    票价/房态是本地生成数据（结论只对复刻站成立，不代表真实携程报价）。
 9. **一个子目标只有一次点击**：筛选/排序若停留在页面 JS 状态里，`run()` 每步重新 `goto` 会丢状态、且同一个 hint 会被反复点。

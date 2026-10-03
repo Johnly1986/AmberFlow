@@ -307,6 +307,6 @@ python3 transfer/transfer_task.py --both              # 五个站点端到端 + 
 python3 transfer/transfer_task.py --metrics-only      # 只看指标，不开浏览器
 python3 transfer/transfer_task.py --emit-plan skybook # 配置 → 冻结计划 JSON
 python3 transfer/ota_probe.py                         # 候选真实站点的可达性实测
-python -m pytest transfer/test_transfer.py -q         # 17 个离线测试
+node --experimental-strip-types tools/transfer-parity.ts      # TS 侧逐例对拍（原 Python 套件见 BACKUP.md）         # 17 个离线测试
 bash bench/smoke.sh                                   # 回归门（含本目录）
 ```
