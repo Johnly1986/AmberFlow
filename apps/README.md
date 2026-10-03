@@ -83,7 +83,60 @@ node --experimental-strip-types src/datasource.ts --source git-log --out /tmp/ap
 
 `html_regex` 保持原样（它是 HTML 口径，`split` 后会**丢掉第一块**）；行文本有自己的抽取器，别复用。
 
-## 二、多类型工具的复核清单
+## 二、动作腿：`pack.json`（角色 → 冻结计划 → 结束状态验收）
+
+`apps/<app>/pack.json` 把三样东西绑在一起：**动作腿**（`journey` 用 `roles` 里的模板串起来）、
+**数据腿**（`sources` 引用数据源配置）、**验收**（`invariants` 是旅程结束状态上的断言）。
+跑一条完整链路：
+
+```bash
+npm run apps -- --list                                  # 发现了哪些应用包
+npm run apps -- --app demo-app --dry                     # 只展开计划（不开浏览器、不装模型）
+npm run apps -- --app demo-app --no-model                # 离线整跑（脚本模型，CI 可跑）
+npm run apps -- --app demo-app                            # 真模型（需要 1.7GB ONNX 产物）
+npm run apps:matrix                                      # 度量：声明行 / 代码行 / 防泄漏
+```
+
+```jsonc
+{
+  "spec_version": 1,
+  "id": "demo-app",
+  "label": "……",
+  "goal": "……",                       // 一句话目标（只给人看；每个子目标只喂自己的 desc 给模型）
+  "model": "english",                  // 或 multilingual / router
+  "max_subgoals": 8,                   // 预算：超了加载期就报错，而不是让计划无限长大
+  "hosts": [],                         // 这个应用声明的站点（防泄漏检查会用到）
+  "slots": { "coupon": "ACME10" },     // 数据袋：值只来自计划，模型不许发明
+  "required_slots": ["coupon"],        // 缺了就加载期报错
+  "sources": ["demo-tool"],            // 数据腿：本目录或别的应用的 source
+  "roles": {
+    "apply-coupon": {                  // 角色 = 可复用的步骤模板（desc/signal/hint/slots/when/retries）
+      "desc": "在购物车输入优惠券 {coupon} 并应用",
+      "start_url": "bench/fixtures/shop_cart.html",
+      "target_hints": ["[data-test=coupon]", "[data-test=apply-coupon]"],
+      "slots": { "coupon": "{coupon}" },
+      "signal": { "css_text_contains": ["[data-test=coupon-msg]", "Coupon applied"] }
+    }
+  },
+  "journey": [ { "role": "apply-coupon" } ],   // 也能内联写整步；模板与内联字段合并，内联优先
+  "invariants": [
+    { "id": "on-thanks-page", "desc": "……", "signal": { "url_contains": "shop_thanks.html" } }
+  ]
+}
+```
+
+要点：
+
+- **角色优先，别复制步骤**：同一套角色在多个应用间复用，矩阵里"角色数"就是一个数字；
+  跨应用比的是"映射了几个角色"，不是"抄了几段步骤"。
+- **`{slot}` 占位符只替换已声明的槽位**，其余花括号原样保留；未知占位符加载期报错。
+- **`invariants` 在会话结束状态上求值**（同一个 page、同一份 cookie），所以能表达"下单后购物车已清空"
+  这类验收。它看不见**中间**要求——中间要求写成子目标信号。
+- **校验复用冻结计划那一套**：`PlanningRules.problems` 负责信号/hint/`when`/`retries`，
+  应用包不新开第二套语法校验器。
+- 相对 `start_url` 按仓库根解析成 `file://`（与 bench 同口径），所以应用包可以随仓库搬走。
+
+## 三、多类型工具的复核清单
 
 同一套引擎、同一套 `counts/audits/selects/report`，覆盖四类工具：
 
@@ -94,7 +147,7 @@ node --experimental-strip-types src/datasource.ts --source git-log --out /tmp/ap
 | 行文本工具 | `git log` | `cli` + `lines_regex` | 同上（缺 git 时 SKIP） |
 | JSON 工具 | `jq`（输入是仓库里的用例包） | `cli` + `json_stdout` / `lines_regex` | 同上（缺 jq 时 SKIP） |
 
-## 三、动作腿（下一步）：CLI 是旅程中的一步
+## 四、CLI 作为旅程中的一步（下一步）
 
 当 CLI 不只是"取数"，而是**旅程里的一步且要选**（选哪个子命令/flag、这步算不算完成）时，
 形状与浏览器面一一对应，但不新开一套语言：

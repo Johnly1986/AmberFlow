@@ -29,7 +29,7 @@ npm run doctor                                   # 环境体检：Node / chromiu
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 605 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 631 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -64,6 +64,11 @@ npm run shortlist                                                               
 长流程线上用例：`node --experimental-strip-types src/bench.ts --cases bench/cases-live-long.json --mode-tag live-long`
 （3 个真实站点 / 34 个子目标，一条命令跑完三条完整旅程；不进 CI，外部站点慢且会波动。
 设计、逐子目标信号证据与它暴露的四个真实缺陷见 [bench/LONG_FLOW_REPORT.md](bench/LONG_FLOW_REPORT.md)）。
+
+应用包（应用层）：`npm run apps -- --list` / `npm run apps -- --app demo-app --no-model`（离线整跑：
+数据腿 → 冻结计划 → 结束状态不变量）/ `npm run apps -- --app demo-app --dry`（只展开计划）。
+新增一个应用 = 新目录 `apps/<id>/`（`pack.json` + 可选 `sources/*.json`），**共享层零改动**；
+度量与防泄漏门禁：`npm run apps:matrix`。怎么加见 [apps/README.md](apps/README.md)。
 
 **Python 参考命令**（`pytest`、`python3 xxx.py`、`pip install -r requirements.txt`）属于**已彻底移除**的参考实现：
 工作树与 git 历史都已删除，磁盘上不再有 Python 文件（见 `BACKUP.md`）。
@@ -186,6 +191,23 @@ These are empirical findings from this codebase's own experiments — preserve t
   (git), JSON (`jq`), and the pre-existing curl/httpx HTTP clients whose 163-item parity corpus is untouched except the
   two "unknown value" messages. Adding an app = a directory under `apps/` (see `apps/README.md`), never a new branch in
   the engine.
+- **An application is a DIRECTORY, not a driver -- and its cost is a measured number.** `apps/<id>/pack.json` declares
+  the app: `roles` (reusable step templates: desc/signal/hint/slots/when/retries), `journey` (which roles, in what
+  order — inline steps merge over the template), `slots` + `required_slots` (the data bag; values still only ever come
+  from the plan), `sources` (its data leg — the same datasource engine, HTTP or CLI channel), `invariants` (assertions on
+  the END state) and `hosts` (documentation + the leak check's input). Discovery is `apps/<id>/pack.json`, load-time
+  validation reuses `PlanningRules.problems` (one grammar, not a second one), `{slot}` placeholders substitute ONLY
+  declared slots (tool args and JSON payloads are full of braces; an unknown placeholder fails at load), and relative
+  `start_url`s resolve to `file://` from the repo root. `src/app-runner.ts` runs the whole chain in one command
+  (`npm run apps -- --app demo-app`): data leg → frozen plan via **`runPlan`** (it does NOT fork the executor — it just
+  hands `runPlan` a session whose `close()` is deferred, so the invariants can be evaluated on the journey's real end
+  state, cookies included) → report. Invariants cannot see INTERMEDIATE requirements (that is what subgoal signals are
+  for) — recorded in the pack's own notes rather than pretended away. The cost is checkable:
+  `npm run apps:matrix` prints per app the declared lines, roles/steps/invariants, the **code lines inside app dirs
+  (currently 0 — apps are data)** and a leak check that fails if any app-declared host or CLI tool name appears in the
+  CORE shared modules (word-boundary match after stripping block comments; `git` must not match `digit`). Site knowledge
+  still living in per-site drivers (`live-probe.ts` / `live-capture.ts`) is reported as DEBT, not as an exemption —
+  migrating those into app packs should make that number go down.
 - **Ctrip serves its H5 ROUTE pages server-side, and WhaleGuard's gate is a CLIENT fingerprint check.** `m.ctrip.com/
   html5/flight/<dcity>-<acity>-day-<N>.html` (N = target date minus today) returns 200 to `curl` -- with its default UA
   or an iPhone Safari UA -- and 432 to `curl` + a Chrome UA, to Python `httpx`, to Chromium and to Playwright's

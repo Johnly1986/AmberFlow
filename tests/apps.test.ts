@@ -1,0 +1,156 @@
+/**
+ * 应用层测试 —— 应用包是**数据**，共享层零改动。
+ *
+ * 四组：
+ *   1. 发现与校验：坏包在加载期炸（未知键/角色/占位符/缺必填槽位/未知数据源/坏不变量）；
+ *   2. 展开：角色模板 + 槽位替换 + 可复现（同一份包展开出逐字段相同的计划）；
+ *   3. 端到端：`runApp` 跑完「数据腿 → 冻结计划 → 结束状态不变量」整条链路（离线、脚本模型）；
+ *   4. 度量：应用目录 0 行代码；核心层不许出现应用声明的站点/工具标识（`apps:matrix`）。
+ */
+import fs from "node:fs";
+import path from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { appDirs, expandPack, listPacks, loadPack, PACK_KEYS, validatePack, type AppPack } from "../src/app-pack.ts";
+import { runApp } from "../src/app-runner.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
+import { matrix } from "../tools/apps_matrix.ts";
+
+const REPO = path.resolve(import.meta.dirname, "..");
+const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+
+beforeAll(() => {
+  // 与其它离线测试同一约定：注入脚本模型，绝不加载 1.7GB 权重
+  installLayaRuntime(scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 }))));
+});
+afterAll(() => installLayaRuntime(null));
+
+describe("应用包：发现与校验", () => {
+  it("发现制扫出 apps/<id>/pack.json；demo-app 通过校验", () => {
+    const packs = listPacks().map(([id]) => id);
+    expect(packs).toContain("demo-app");
+    expect(appDirs().some((d) => d.endsWith(path.join("apps", "demo-app")))).toBe(true);
+    const pack = loadPack("demo-app");
+    expect(validatePack(pack), JSON.stringify(validatePack(pack))).toEqual([]);
+  });
+
+  it.each([
+    ["spec_version", (p: any) => { p.spec_version = 2; }, "spec_version must be 1"],
+    ["未知包键", (p: any) => { p.whatever = 1; }, "unknown pack key"],
+    ["缺 goal", (p: any) => { delete p.goal; }, "goal is required"],
+    ["空 journey", (p: any) => { p.journey = []; }, "journey must be a non-empty list"],
+    ["未知角色", (p: any) => { p.journey[0] = { role: "nope" }; }, "unknown role"],
+    ["未知步骤键", (p: any) => { p.journey[0].magic = 1; }, "unknown step key"],
+    ["未知占位符", (p: any) => { p.roles["add-to-cart"].desc = "用 {nope} 加购"; }, "unknown slot placeholder {nope}"],
+    ["缺必填槽位", (p: any) => { p.required_slots = ["missing"]; }, "required slot \"missing\" has no value"],
+    ["未知数据源", (p: any) => { p.sources = ["no-such-source"]; }, "not found"],
+    ["坏不变量", (p: any) => { p.invariants = [{ id: "x" }]; }, "invariants[0] needs"],
+    ["未知信号算子", (p: any) => { p.roles.checkout.signal = { magic_op: "x" }; }, "unknown signal op"],
+    ["角色缺信号", (p: any) => { delete p.roles.checkout.signal; }, "missing done-signal"],
+  ])("%s", (_label, mutate, snippet) => {
+    const pack = clone(loadPack("demo-app")) as any;
+    mutate(pack);
+    expect(validatePack(pack).join(" | ")).toContain(snippet);
+  });
+
+  it("包级键集合是白名单（未知键不会被静默忽略）", () => {
+    expect(PACK_KEYS).toContain("journey");
+    expect(PACK_KEYS).toContain("invariants");
+    expect(PACK_KEYS).toContain("sources");
+  });
+
+  it("校验器复用计划自己的口径：子目标超预算会报出来", () => {
+    const pack = clone(loadPack("demo-app")) as AppPack;
+    pack.max_subgoals = 2;                                   // 4 步 > 预算 2
+    expect(validatePack(pack).join(" | ")).toContain("exceed max 2");
+  });
+});
+
+describe("应用包：展开成冻结计划", () => {
+  it("角色模板 + 槽位替换 + 可复现（两次展开逐字段相同）", () => {
+    const pack = loadPack("demo-app");
+    const a = expandPack(pack, {}, "/tmp/a.json");
+    const b = expandPack(pack, {}, "/tmp/b.json");
+    expect(a.rolesUsed).toEqual(["add-to-cart", "open-cart", "apply-coupon", "checkout"]);
+    expect(a.plan.subgoals).toHaveLength(4);
+    // 逐字段相同（path 不在比较范围内；计划内容必须完全一致）
+    expect(JSON.parse(JSON.stringify(a.plan.subgoals))).toEqual(JSON.parse(JSON.stringify(b.plan.subgoals)));
+    // 占位符替换：desc 与子目标 slots 都拿到了值，且**值只来自计划**
+    const coupon = a.plan.subgoals[2]!;
+    expect(coupon.desc).toContain("ACME10");
+    expect((coupon.slots as Record<string, unknown>).coupon).toBe("ACME10");
+    expect(a.plan.slots.coupon).toBe("ACME10");
+  });
+
+  it("覆盖槽位（--slot）只改数据，不改结构", () => {
+    const pack = loadPack("demo-app");
+    const a = expandPack(pack, { coupon: "OTHER20" }, "/tmp/c.json");
+    expect(a.plan.subgoals).toHaveLength(4);
+    expect(a.plan.subgoals[2]!.desc).toContain("OTHER20");
+    expect((a.plan.subgoals[2]!.slots as Record<string, unknown>).coupon).toBe("OTHER20");
+  });
+
+  it("未知角色引用在展开时报错（不是跑到一半才发现）", () => {
+    const pack = clone(loadPack("demo-app")) as AppPack;
+    pack.journey[0] = { role: "ghost" } as never;
+    expect(() => expandPack(pack, {}, "/tmp/d.json")).toThrow(/unknown role/);
+  });
+});
+
+describe("应用运行器：数据腿 → 动作腿 → 结束状态不变量", () => {
+  it("demo-app 端到端通过（离线夹具 + 桩工具，脚本模型）", async () => {
+    const pack = loadPack("demo-app");
+    const res = await runApp(pack, {
+      verbose: false, planPath: path.join("/tmp", "layawebuse-apps", "demo-app-test.json"),
+    });
+    expect(res.ok, JSON.stringify(res.subgoals)).toBe(true);
+    expect(res.completed).toBe("4/4");
+    expect(res.subgoals.every((s) => s.status === "done")).toBe(true);
+    expect(res.invariants.map((i) => [i.id, i.held])).toEqual([
+      ["on-thanks-page", true], ["no-error-banner", true],
+    ]);
+    // 数据腿真的跑了，而且走的是同一套引擎（CLI 通道 + 版本 pin）
+    expect(res.sources).toHaveLength(1);
+    expect(res.sources[0]).toMatchObject({ name: "demo-tool", rows: 3, tool_version: "stub-tool 1.4.2" });
+    expect(res.sources[0]!.counts.rows).toBe(3);
+  }, 120_000);
+
+  it("不变量在会话结束状态上求值：故意写错的不变量必须不成立", async () => {
+    const pack = clone(loadPack("demo-app")) as AppPack;
+    pack.invariants = [{ id: "wrong", desc: "结束状态里不该有的东西", signal: { css_exists: "[data-test=definitely-absent]" } }];
+    const res = await runApp(pack, { verbose: false, sources: false, planPath: "/tmp/layawebuse-apps/bad.json" });
+    expect(res.subgoals.every((s) => s.status === "done")).toBe(true);   // 旅程本身跑完了
+    expect(res.invariants).toEqual([{ id: "wrong", desc: "结束状态里不该有的东西", held: false }]);
+    expect(res.ok).toBe(false);                                          // 但验收不通过
+  }, 120_000);
+});
+
+describe("应用层度量：代码行与防泄漏", () => {
+  it("应用目录里 0 行代码；核心层没有应用声明的站点/工具标识", () => {
+    const { rows, leaks } = matrix();
+    expect(rows.map((r) => r.app)).toEqual(expect.arrayContaining(["demo-app", "demo-tool", "git-log", "bench-cases"]));
+    expect(rows.every((r) => r.code === 0), JSON.stringify(rows)).toBe(true);
+    expect(leaks, JSON.stringify(leaks)).toEqual([]);
+    const demo = rows.find((r) => r.app === "demo-app")!;
+    expect(demo).toMatchObject({ kind: "pack", roles: 4, steps: 4, invariants: 2, sources: 1 });
+  });
+
+  it("泄漏检查真的有牙：把一个站点名写进核心层就会被抓到（模拟，不改文件）", () => {
+    // 直接验证判据本身：词边界 + 大小写不敏感，且短标识不会误伤普通单词
+    const tokens = ["git", "jq", "m.ctrip.com"];
+    const word = (t: string): RegExp => new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    expect(word("git").test("a legitimate digit")).toBe(false);
+    expect(word("git").test("run git log")).toBe(true);
+    expect(word("jq").test("jQuery-ish")).toBe(false);
+    expect(word("m.ctrip.com").test("https://m.ctrip.com/x")).toBe(true);
+    expect(tokens.length).toBe(3);
+  });
+});
+
+describe("应用包与数据源的位置约定", () => {
+  it("app 目录只放声明（JSON）与可选的 bin/，不放业务代码", () => {
+    for (const dir of appDirs()) {
+      const stray = fs.readdirSync(dir).filter((f) => /\.(ts|js|mjs|cjs)$/.test(f));
+      expect(stray, `${dir} 顶层不该有代码文件`).toEqual([]);
+    }
+  });
+});

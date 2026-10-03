@@ -67,7 +67,7 @@ describe("the repository is single-stack (TypeScript only)", () => {
     for (const [name, cmd] of Object.entries(pkg.scripts)) {
       expect(cmd, `script ${name} still shells out to Python`).not.toMatch(/python|pytest|uvicorn/);
     }
-    for (const s of ["typecheck", "test", "test:parity", "verify", "bench", "plan-cli"]) {
+    for (const s of ["typecheck", "test", "test:parity", "verify", "bench", "apps", "apps:matrix", "plan-cli"]) {
       expect(Object.keys(pkg.scripts), `missing script ${s}`).toContain(s);
     }
   });
@@ -82,6 +82,7 @@ describe("the data the project needs is still here", () => {
     ["bench/cases.json", "the frozen-plan matrix"],
     ["bench/cases-live-long.json", "the long-flow live pack"],
     ["apps/README.md", "how to add an app pack"],
+    ["apps/demo-app/pack.json", "the reference app pack (roles + journey + invariants)"],
     ["apps/demo-tool/sources/demo-tool.json", "the CI-safe CLI tool source"],
     ["apps/git-log/sources/git-log.json", "a real CLI (git) source"],
     ["bench/fixtures/shop_home.html", "offline bench fixture"],
