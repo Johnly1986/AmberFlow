@@ -132,6 +132,9 @@ node --experimental-strip-types src/bench.ts --cases bench/cases-live-long.json 
 
 一次 RISKY 记录（quotes 的 `inspirational` 标签链接，风险头 0.79）——风险门只询问不阻断，与既有结论一致。
 
+**重复一次（同一台机器、同一命令）**：`3/3`、`34/34`、43 步全部 `rule:match`、0 重试、**91.1 s**（46.4 / 21.1 / 23.6）——
+逐用例步数与决策来源完全一致，说明这 34 步是计划决定的，不是当次跑赢的运气。
+
 **消融：去掉模型（脚本化 abstain 模型，只答 `noul`）**：同样 `34/34`、59.7 s → 说明这 34 个子目标
 **完全由计划/hint/规则决定**，模型只被问「危不危险」。
 
