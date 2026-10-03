@@ -358,9 +358,14 @@ describe("live-capture：四种判决（纯函数 + 假 page）", () => {
     }
   });
 
-  it("CLI：--only 只接受 flights/hotels；--help 不启动浏览器", async () => {
+  it("CLI：--only 只接受 flights/hotels；--out 让复测不碰冻结语料；--help 不启动浏览器", async () => {
     expect(LC.parseArgv(["--date", "2026-10-08", "--only", "hotels", "--mobile"]))
-      .toMatchObject({ date: "2026-10-08", only: "hotels", mobile: true, profile: null });
+      .toMatchObject({ date: "2026-10-08", only: "hotels", mobile: true, profile: null, out: null });
+    // `--out` 是复测用的：快照与 summary.json 写到别处，已提交的 ctrip/results 不动
+    expect(LC.parseArgv(["--out", "/tmp/x"]).out).toBe("/tmp/x");
+    expect(LC.parseArgv(["--out=/tmp/y"]).out).toBe("/tmp/y");
+    // 默认输出目录来自探针集声明（不是写死在代码里）
+    expect(LC.OUT.endsWith(path.join("ctrip", "results", "live_capture"))).toBe(true);
     expect(() => LC.parseArgv(["--only", "trains"])).toThrow(/invalid choice/);
     expect(() => LC.parseArgv(["--nope"])).toThrow(/unrecognized argument/);
     expect(await LC.main(["--help"])).toBe(0);

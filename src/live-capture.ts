@@ -33,7 +33,7 @@ import * as D from "./datasource.ts";
 import * as browserEnv from "./browser-env.ts";
 import { criteriaView, extractElements, pageText, urlOf, type ElemPool, type PageLike } from "./extraction.ts";
 
-import { addDays as psAddDays, fillProbeDate, loadProbeSet, markerList, type ProbeSet } from "./probe-set.ts";
+import { REPO, addDays as psAddDays, fillProbeDate, loadProbeSet, markerList, type ProbeSet } from "./probe-set.ts";
 
 /**
  * 站点知识（URL 模板、风控/登录墙特征、登录重定向主机、结果目录）全在
@@ -255,20 +255,24 @@ export async function captureOne(
 }
 
 const USAGE = `usage: live-capture [-h] [--date DATE] [--only {flights,hotels}] [--mobile]
-                     [--profile PROFILE]
+                     [--profile PROFILE] [--out DIR]
 
-抓真实页面（探针集 ${SET.app}），产出可照写的计划快照`;
+抓真实页面（探针集 ${SET.app}），产出可照写的计划快照。
+--out DIR 把快照与 summary.json 写到别处（默认 ${path.relative(REPO, OUT)}）——
+复测时用它，避免覆盖已提交的冻结语料。`;
 
 export interface CaptureArgs {
   date: string | null;
   only: string | null;
   mobile: boolean;
   profile: string | null;
+  /** 输出目录（复测用）：默认写探针集声明的 results_dir。 */
+  out: string | null;
   help: boolean;
 }
 
 export function parseArgv(argv: readonly string[]): CaptureArgs {
-  const o: CaptureArgs = { date: null, only: null, mobile: false, profile: null, help: false };
+  const o: CaptureArgs = { date: null, only: null, mobile: false, profile: null, out: null, help: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     switch (a) {
@@ -278,10 +282,12 @@ export function parseArgv(argv: readonly string[]): CaptureArgs {
       case "--only": o.only = String(argv[++i]); break;
       case "--mobile": o.mobile = true; break;
       case "--profile": o.profile = String(argv[++i]); break;
+      case "--out": o.out = String(argv[++i]); break;
       default:
         if (a.startsWith("--date=")) o.date = a.slice(7);
         else if (a.startsWith("--only=")) o.only = a.slice(7);
         else if (a.startsWith("--profile=")) o.profile = a.slice(10);
+        else if (a.startsWith("--out=")) o.out = a.slice(6);
         else throw new Error(`unrecognized argument: ${a}`);
     }
   }
@@ -306,6 +312,8 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
   const date = args.date ?? D.nextWeekDates()[0]!;
   const todo = targets(date).filter((t) => !args.only || t[0] === args.only);
+  // `--out` 时把 live_capture/ 与被改写的 summary.json 都挪到那个目录里（冻结语料不动）
+  const outDir = args.out === null ? OUT : path.resolve(args.out, "live_capture");
 
   const pw: any = await import("playwright");
   const results: Array<Record<string, any>> = [];
@@ -328,7 +336,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     });
   }
   for (const [key, label, url] of todo) {
-    const rec = await captureOne(await ctx.newPage(), key, label, url, Boolean(args.mobile));
+    const rec = await captureOne(await ctx.newPage(), key, label, url, Boolean(args.mobile), { outDir });
     console.log(`[${key}] ${rec["verdict"]}`
       + (rec["status"] ? `  HTTP ${rec["status"]}` : "")
       + (rec["elements"] !== undefined ? `  elements=${rec["elements"]}` : "")
@@ -344,12 +352,12 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   if (b !== null) await b.close();
   else await ctx.close();
 
-  fs.mkdirSync(RESULTS, { recursive: true });
-  fs.mkdirSync(OUT, { recursive: true });
+  fs.mkdirSync(path.dirname(outDir), { recursive: true });
+  fs.mkdirSync(outDir, { recursive: true });
   const captured = results.filter((r) => r["verdict"] === "captured").length;
   const verdicts: Record<string, string> = {};
   for (const r of results) verdicts[r["key"]] = r["verdict"];
-  fs.writeFileSync(path.join(OUT, "summary.json"), JSON.stringify({
+  fs.writeFileSync(path.join(outDir, "summary.json"), JSON.stringify({
     date,
     mobile: Boolean(args.mobile),
     profile: args.profile,
@@ -362,7 +370,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   console.log(`\n可抓取 ${captured}/${results.length}`
     + (captured === 0 ? "   ← 这个网络现在跑不了真实用例（见上面 advice）"
       : "   ← 快照可用于写真实站点的计划（plan_cli / LLM 规划器）"));
-  console.log(`写入 ${path.join(OUT, "summary.json")}`);
+  console.log(`写入 ${path.join(outDir, "summary.json")}`);
   return captured ? 0 : 1;
 }
 

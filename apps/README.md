@@ -237,10 +237,13 @@ npm run apps -- --app cli-report --no-model                     # 不带 --allow
 node --experimental-strip-types src/live-probe.ts                 # 携程可达性矩阵（写 ctrip/results/live_probe.json）
 node --experimental-strip-types src/live-probe.ts --out /tmp/x.json
 node --experimental-strip-types src/live-capture.ts --date 2026-10-08
-node --experimental-strip-types src/ota-probe.ts                  # 候选 OTA 可达性
+node --experimental-strip-types src/live-capture.ts --out /tmp/dir # 快照与 summary.json 写到别处（复测不碰冻结语料）
+node --experimental-strip-types src/ota-probe.ts --out /tmp/ota.json
 node --experimental-strip-types src/qunar-probe.ts                # qunar 对照
 node --experimental-strip-types src/qunar-task.ts                 # 抓取计划来自 apps/qunar-live/pack.json 的 journey
 ```
+
+最近一次线上复测（8/8 用例、34/34 子目标、四个探针的逐项观测）：[bench/live-retest/REPORT.md](../bench/live-retest/REPORT.md)。
 
 债计数的口径也升级了：除了"应用声明的标识出现在非核心文件里"，还**独立**扫描非核心文件里写死的
 `http(s)://主机`（`localhost` / `example.com` 之类除外）——所以"藏在驱动里、应用还没声明"的站点知识

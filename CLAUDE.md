@@ -61,6 +61,10 @@ npm run shortlist                                                               
 
 线上平台用例：`node --experimental-strip-types src/bench.ts --cases bench/cases-live.json --mode-tag live`（8 个真实站点，见 README 的实测一节）。
 
+线上复测（2026-10-03，含四个可达性探针的逐项原始观测）：[bench/live-retest/REPORT.md](bench/live-retest/REPORT.md)。
+复测时所有写文件的命令都带 `--out`，**不覆盖已提交的冻结语料**；探针的 URL/特征/结果目录全在
+`apps/{ctrip,ota,qunar}-live/pack.json` 里声明（见 `src/probe-set.ts`）。
+
 长流程线上用例：`node --experimental-strip-types src/bench.ts --cases bench/cases-live-long.json --mode-tag live-long`
 （3 个真实站点 / 34 个子目标，一条命令跑完三条完整旅程；不进 CI，外部站点慢且会波动。
 设计、逐子目标信号证据与它暴露的四个真实缺陷见 [bench/LONG_FLOW_REPORT.md](bench/LONG_FLOW_REPORT.md)）。
@@ -77,7 +81,9 @@ npm run shortlist                                                               
 探针集（测量型应用）：`apps/ctrip-live` / `apps/ota-live` / `apps/qunar-live` 声明了全部 URL、站点特征、
 结果目录与判决角色；驱动只剩"怎么测"（`src/live-probe.ts` / `live-capture.ts` / `ota-probe.ts` /
 `qunar-probe.ts` / `qunar-task.ts`，它们现在都在共享层**核心**名单里）。`npm run apps:matrix` 的债计数：
-**0 处**（含"非核心文件里写死的 http 主机"这一独立的扫描口径）。
+**0 处**（含"非核心文件里写死的 http 主机"这一独立的扫描口径）。复测用 `--out`：
+`src/live-probe.ts --out /tmp/x.json` / `src/live-capture.ts --out /tmp/dir` /
+`src/ota-probe.ts --out /tmp/x.json`。
 
 **Python 参考命令**（`pytest`、`python3 xxx.py`、`pip install -r requirements.txt`）属于**已彻底移除**的参考实现：
 工作树与 git 历史都已删除，磁盘上不再有 Python 文件（见 `BACKUP.md`）。

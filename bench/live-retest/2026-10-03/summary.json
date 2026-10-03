@@ -1,0 +1,309 @@
+{
+  "retested_at_utc": "2026-10-03T15:49:58Z..2026-10-03T15:58:58Z",
+  "runtime": "node 22.23.2",
+  "packs": {
+    "bench/cases-live.json": {
+      "mode_tag": "live",
+      "cases_passed": "8/8",
+      "subgoals_passed": "11/11",
+      "total_secs": 266.8,
+      "per_case": [
+        {
+          "case": "live-wiki-en-search",
+          "platform": "live:en.wikipedia.org",
+          "model": "english",
+          "rules": true,
+          "subgoals_done": "2/2",
+          "all_done": true,
+          "steps": 2,
+          "secs": 15.9
+        },
+        {
+          "case": "live-wiki-zh-search",
+          "platform": "live:zh.wikipedia.org",
+          "model": "multilingual",
+          "rules": true,
+          "subgoals_done": "2/2",
+          "all_done": true,
+          "steps": 5,
+          "secs": 199.1
+        },
+        {
+          "case": "live-hn-newest",
+          "platform": "live:news.ycombinator.com",
+          "model": "english",
+          "rules": true,
+          "subgoals_done": "1/1",
+          "all_done": true,
+          "steps": 1,
+          "secs": 26.9
+        },
+        {
+          "case": "live-python-org-search",
+          "platform": "live:python.org",
+          "model": "english",
+          "rules": true,
+          "subgoals_done": "2/2",
+          "all_done": true,
+          "steps": 2,
+          "secs": 6.2
+        },
+        {
+          "case": "live-bbc-news",
+          "platform": "live:bbc.com",
+          "model": "english",
+          "rules": true,
+          "subgoals_done": "1/1",
+          "all_done": true,
+          "steps": 1,
+          "secs": 8.5
+        },
+        {
+          "case": "live-books-next-page",
+          "platform": "live:books.toscrape.com",
+          "model": "english",
+          "rules": true,
+          "subgoals_done": "1/1",
+          "all_done": true,
+          "steps": 1,
+          "secs": 4.4
+        },
+        {
+          "case": "live-quotes-next-page",
+          "platform": "live:quotes.toscrape.com",
+          "model": "english",
+          "rules": true,
+          "subgoals_done": "1/1",
+          "all_done": true,
+          "steps": 1,
+          "secs": 2.8
+        },
+        {
+          "case": "live-polymer-shadow",
+          "platform": "live:shop.polymer-project.org(shadow DOM)",
+          "model": "english",
+          "rules": true,
+          "subgoals_done": "1/1",
+          "all_done": true,
+          "steps": 1,
+          "secs": 3
+        }
+      ],
+      "metrics": {
+        "steps": 14,
+        "rule": 14,
+        "model": 0,
+        "retried_subgoals": 2
+      }
+    },
+    "bench/cases-live-long.json": {
+      "mode_tag": "live-long",
+      "cases_passed": "3/3",
+      "subgoals_passed": "34/34",
+      "total_secs": 98.8,
+      "per_case": [
+        {
+          "case": "live-long-saucedemo-checkout",
+          "platform": "live:www.saucedemo.com",
+          "model": "english",
+          "rules": true,
+          "subgoals_done": "15/15",
+          "all_done": true,
+          "steps": 22,
+          "secs": 54.3
+        },
+        {
+          "case": "live-long-books",
+          "platform": "live:books.toscrape.com",
+          "model": "english",
+          "rules": true,
+          "subgoals_done": "10/10",
+          "all_done": true,
+          "steps": 10,
+          "secs": 21
+        },
+        {
+          "case": "live-long-quotes",
+          "platform": "live:quotes.toscrape.com",
+          "model": "english",
+          "rules": true,
+          "subgoals_done": "9/9",
+          "all_done": true,
+          "steps": 11,
+          "secs": 23.5
+        }
+      ],
+      "metrics": {
+        "steps": 43,
+        "rule": 43,
+        "model": 0,
+        "retried_subgoals": 0
+      }
+    }
+  },
+  "probes": {
+    "apps/ctrip-live (live-probe)": {
+      "checked_at": "2026-10-03 23:57:52",
+      "verdict": {
+        "flight_search": "BLOCKED",
+        "flight_reason": "flights.ctrip.com：浏览器 UA 走 httpx 得到 HTTP 432 `whaleguard block`（17 B），真浏览器同样 432 `whaleguard block`；换 curl-cli 才拿到 621901 B，但那是 Next.js 空壳（flight-card/list 标记 0 个，列表数据走 XHR），而老数据接口 /itinerary/api/12808/products 已下线（{\"status\":0,\"data\":{\"error\":{\"code\":\"\",\"msg\":\"接口下线\"}}}）。Trip.com 机票：httpx 浏览器 UA 200 Challenge Validation，真浏览器 `whaleguard block`。",
+        "hotel_price": "LOGIN_REQUIRED",
+        "hotel_reason": "hotels.ctrip.com 列表页 SSR 出 23 个酒店名/星级标记，但未登录访客的价格节点为空（5 个空 .price-line），正文含「登录以查看会员价」=True——「¥300 以内」这个筛选条件拿不到数据来判定。",
+        "real_data_available": {
+          "hotel_names": [
+            "桔子酒店(北京永丰航天城店)",
+            "北京索菲特大酒店",
+            "北京长富宫饭店",
+            "北京远航国际酒店(首都机场新国展店)",
+            "北京贵宾楼饭店"
+          ],
+          "hotel_total_tip": "6241",
+          "note": "酒店名/星级是真的（SSR），价格/房态不是（登录墙）"
+        },
+        "flight_alt_shapes_all_432": true,
+        "mobile_and_regional_all_432": true,
+        "usable_for_case": false,
+        "fallback": "ctrip/site/ 本地复刻站（同一交互路径 / 同一用例口径），见 ctrip/ctrip_task.py"
+      },
+      "http_statuses": {
+        "flight_list_cn": [
+          "curl-cli=200",
+          "httpx-普通UA=432(wg)",
+          "httpx-浏览器UA=432(wg)"
+        ],
+        "flight_mobile_cn": [
+          "curl-cli=302",
+          "httpx-普通UA=432(wg)",
+          "httpx-浏览器UA=432(wg)"
+        ],
+        "flight_trip_com": [
+          "curl-cli=432(wg)",
+          "httpx-普通UA=432(wg)",
+          "httpx-浏览器UA=200"
+        ],
+        "flight_api_retired": [
+          "curl-cli=200",
+          "httpx-普通UA=432(wg)",
+          "httpx-浏览器UA=432(wg)"
+        ],
+        "hotel_list_cn": [
+          "curl-cli=200",
+          "httpx-普通UA=200",
+          "httpx-浏览器UA=200"
+        ],
+        "hotel_home_cn": [
+          "curl-cli=200",
+          "httpx-普通UA=200",
+          "httpx-浏览器UA=200"
+        ]
+      },
+      "mobile_flight_repeat_status": [
+        432,
+        432,
+        432,
+        432,
+        432
+      ],
+      "mobile_and_regional": [
+        "iphone/ctrip-mobile-flight=432",
+        "iphone/trip-hk-flight=432",
+        "iphone/trip-us-flight=432",
+        "iphone/trip-sg-flight=432",
+        "android/ctrip-mobile-flight=432",
+        "android/trip-hk-flight=432",
+        "android/trip-us-flight=432",
+        "android/trip-sg-flight=432"
+      ]
+    },
+    "apps/ctrip-live (live-capture)": {
+      "date": "2026-10-05",
+      "captured": 0,
+      "total": 2,
+      "verdicts": {
+        "flights": "blocked",
+        "hotels": "login_required"
+      },
+      "results": [
+        {
+          "key": "flights",
+          "verdict": "blocked",
+          "status": 432,
+          "error": null
+        },
+        {
+          "key": "hotels",
+          "verdict": "login_required",
+          "status": 200,
+          "error": null
+        }
+      ]
+    },
+    "apps/ota-live (ota-probe)": {
+      "checked_at": "2026-10-03 23:58:49",
+      "verdict": {
+        "anonymous_price_list_reachable": false,
+        "usable_targets": [],
+        "reason": "没有任何一家候选站点对匿名+机房 IP 的访客抛出价格列表：qunar-flight 200/200；qunar-hotel 301/200；ly-hotel 301/200；tuniu 202/202；booking-hotel 202/202；agoda-hotel 200/200；expedia-hotel 429/429（挑战页）；kayak-hotel 302/200（挑战页）",
+        "qunar_flight_notice": "去哪儿网页版机票查询/预订 2026-10-10 起停止提供（页面公告，实测抓到）",
+        "fallback_for_transfer": "用「结构不同、同类任务」的复刻站验证迁移（transfer/），真实站点一侧等能过风控的出口 IP + 登录态，驱动可原样复用"
+      },
+      "statuses": {
+        "qunar-flight": [
+          "curl-cli=200",
+          "httpx-浏览器UA=200"
+        ],
+        "qunar-hotel": [
+          "curl-cli=301",
+          "httpx-浏览器UA=200"
+        ],
+        "ly-hotel": [
+          "curl-cli=301",
+          "httpx-浏览器UA=200"
+        ],
+        "tuniu": [
+          "curl-cli=202",
+          "httpx-浏览器UA=202"
+        ],
+        "booking-hotel": [
+          "curl-cli=202",
+          "httpx-浏览器UA=202"
+        ],
+        "agoda-hotel": [
+          "curl-cli=200",
+          "httpx-浏览器UA=200"
+        ],
+        "expedia-hotel": [
+          "curl-cli=429",
+          "httpx-浏览器UA=429(challenge)"
+        ],
+        "kayak-hotel": [
+          "curl-cli=302",
+          "httpx-浏览器UA=200(challenge)"
+        ]
+      },
+      "browser_render": [
+        {
+          "key": "qunar-flight",
+          "status": 200,
+          "prices": 0
+        },
+        {
+          "key": "ly-hotel",
+          "status": 200,
+          "prices": 0
+        },
+        {
+          "key": "tuniu",
+          "status": 202,
+          "prices": 0
+        }
+      ]
+    },
+    "apps/qunar-live (qunar-probe)": [
+      "curl-default-ua    captured       {\"code\":200,\"bytes\":669519,\"verdict\":\"captured\"}",
+      "curl-iphone-ua     captured       {\"code\":200,\"bytes\":669523,\"verdict\":\"captured\"}",
+      "httpx              captured       {\"code\":200,\"bytes\":669532,\"verdict\":\"captured\"}",
+      "chromium           captured       {\"final_url\":\"https://touch.qunar.com/h5/flight/\",\"title\":\"去哪儿网机票服务\",\"bytes\":786232,\"has_search\":true,\"verdict\":\"captured\"}"
+    ]
+  }
+}
