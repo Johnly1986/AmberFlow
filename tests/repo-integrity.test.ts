@@ -1,7 +1,7 @@
 /**
  * Repository integrity — the checkable form of "the TS version IS the project".
  *
- * The Python reference has been moved out (backed up outside the repo; see
+ * The Python reference has been moved out and its working tree deleted (history kept in a
  * BACKUP.md), so these assertions pin the new shape:
  *
  *  - no Python source, config or requirement file anywhere in the tree;
@@ -119,9 +119,9 @@ describe("the cross-runtime parity harnesses survived the move", () => {
     expect(size(corpus), `${corpus} is empty`).toBeGreaterThan(100);
   });
 
-  it("does not ship the Python generators (they live in the backup)", () => {
+  it("does not ship the Python generators (they live in the history bundle)", () => {
     const gens = FILES.filter((f) => /(^|\/)(gen|dump)_.*\.py$/.test(f));
-    expect(gens, "generator scripts belong in the Python backup").toEqual([]);
+    expect(gens, "generator scripts live in the Python history bundle (see BACKUP.md)").toEqual([]);
   });
 
   it("every parity tool reads a corpus that is committed, not generated at run time", () => {

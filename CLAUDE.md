@@ -1,6 +1,7 @@
 > **状态（2026-10）**：本仓库现在是 **TypeScript 单一技术栈**。
-> 下文描述的 Python 实现已整体移出并备份（见 [BACKUP.md](BACKUP.md)）；
-> 文中的 `python xxx.py` / `pytest` 命令指向备份中的参考实现，对应的 TS 入口见 [README.md](README.md)。
+> 下文描述的 Python 实现已整体移出、并经审查后删除（历史归档见 [BACKUP.md](BACKUP.md)）；
+> 文中的 `python xxx.py` / `pytest` 命令指向**已归档**的参考实现（历史 bundle，见 [BACKUP.md](BACKUP.md)），
+> 对应的 TS 入口见 [README.md](README.md)。
 > 设计规范、实测结论与用例记录照旧有效——TS 代码的注释大量引用它们。
 
 # CLAUDE.md
@@ -58,8 +59,9 @@ npm run shortlist                                                               
 
 线上平台用例：`node --experimental-strip-types src/bench.ts --cases bench/cases-live.json --mode-tag live`（8 个真实站点，见 README 的实测一节）。
 
-**Python 参考命令**（`pytest`、`python3 xxx.py`、`pip install -r requirements.txt`）属于已移出的参考实现，
-在 `/root/ML/LayaWebUse-python-reference-backup`（另见 `BACKUP.md`）。本仓库不包含 Python，也不再需要 Python 环境。
+**Python 参考命令**（`pytest`、`python3 xxx.py`、`pip install -r requirements.txt`）属于**已归档**的参考实现：
+原目录已删除，完整历史在 `/root/ML/LayaWebUse-python-history.bundle`（`git clone` 即可重建，见 `BACKUP.md`）。
+本仓库不包含 Python，也不再需要 Python 环境；六层对拍改为对**已入库的冻结语料**运行。
 
 CI：`.github/workflows/checks.yml` 只做一件事——装 Node 依赖 + chromium，然后跑 `bench/smoke.sh`。
 保持 `bench/smoke.sh` 是"绿色"的唯一定义。

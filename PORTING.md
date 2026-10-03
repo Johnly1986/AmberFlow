@@ -1,6 +1,6 @@
 # 移植与等价性记录（PORTING）
 
-本仓库的前身是 Python 实现，现已收敛为 TypeScript 单一技术栈；Python 版整体移出并备份（见
+本仓库的前身是 Python 实现，现已收敛为 TypeScript 单一技术栈；Python 版整体移出、经审查后删除（历史归档见
 [BACKUP.md](BACKUP.md)）。这份文档保留移植期的工程记录：模块对照、等价性对拍、保真细节、
 已知偏差，以及真实站点实测与由此产生的修正。**面向使用者的目标/功能/用法在
 [README.md](README.md)。**
@@ -46,7 +46,7 @@
 ## 等价性怎么证明
 
 对拍语料由 **Python 参考实现**生成并入库（`tools/*-corpus.json`、`*-python.json`），TS 侧重放逐项比对；
-生成器留在 Python 备份里——用被测实现自己生成期望就不是独立参考。
+生成器留在 Python 归档（历史 bundle）里——用被测实现自己生成期望就不是独立参考。
 
 | 层 | 规模 | 结果 |
 |---|---|---|
@@ -65,7 +65,7 @@ npm run test:parity       # 只跑六层对拍
 
 ### 重新生成语料
 
-必须回到 Python 备份里跑生成器，再把 JSON 拷回 `tools/`（见 [BACKUP.md](BACKUP.md)）。
+必须 `git clone` 历史 bundle（见 [BACKUP.md](BACKUP.md)）、跑生成器，再把 JSON 拷回 `tools/`。
 
 ## 移植中刻意保留的语义细节
 
@@ -109,7 +109,7 @@ npm run test:parity       # 只跑六层对拍
 - 规则优先级：旧顺序 `nav_rule(...) or affordance_rule(...)` 会抢在计划 hint 之前做 token 猜测；
   两侧都改为"有 hint 时只认 hint，未命中落到模型"。
 
-回灌补丁对应的钉死测试在备份的 `test_middleware.py`（`test_run_plan_replan_exception_does_not_kill_the_run`、
+回灌补丁对应的钉死测试在归档的 `test_middleware.py`（bundle 的 `python-backports` 标签）里（`test_run_plan_replan_exception_does_not_kill_the_run`、
 `test_plan_cli_counts_skipped_guards_as_finished`、`test_run_stops_cleanly_when_the_model_names_a_missing_ref`）；
 Python 套件 158 passed。
 
