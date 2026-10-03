@@ -106,6 +106,8 @@ export interface RunResult {
   fetched_at: string;
   dates: Record<string, DateEntry>;
   rendered: Record<string, unknown>;
+  /** 只在配了 `transport.version_pin` 时出现：实测工具版本（curl/httpx 那一档不带）。 */
+  tool_version?: string;
 }
 
 /* ---------------------------------------------------------------- 错误（对齐 Python 异常类型） */
@@ -280,27 +282,31 @@ function pyCompareTuple(a: readonly unknown[], b: readonly unknown[]): number {
  * 显式传 dirs。
  */
 export function sourceDirs(): string[] {
-  let entries: string[];
-  try {
-    entries = fs.readdirSync(REPO);
-  } catch {
-    entries = [];
-  }
   const out: string[] = [];
-  for (const name of entries) {
-    const p = path.join(REPO, name, "sources");
+  const push = (p: string): void => {
     try {
       if (fs.statSync(p).isDirectory()) out.push(p);
     } catch {
       /* 不是目录 */
     }
-  }
+  };
+  const readdir = (p: string): string[] => {
+    try {
+      return fs.readdirSync(p);
+    } catch {
+      return [];
+    }
+  };
+  for (const name of readdir(REPO)) push(path.join(REPO, name, "sources"));
+  // 应用包：一个应用一个目录，`apps/<id>/sources` 同样是配置目录。发现制，不维护目录表
+  // —— 新接一个应用/工具 = 新目录 + source JSON，引擎不加一行站点知识。
+  for (const name of readdir(path.join(REPO, "apps"))) push(path.join(REPO, "apps", name, "sources"));
   return out.sort();
 }
 
 /* ---------------------------------------------------------------- 传输 */
 
-export type Client = (url: string, timeout?: number) => Promise<[number, string]>;
+export type Client = (url: string, timeout?: number, source?: Source) => Promise<[number, string]>;
 
 /**
  * 用 curl 子进程取页面。
@@ -335,7 +341,143 @@ export async function httpxGet(url: string, timeout = 60.0): Promise<[number, st
   return [r.status, await r.text()];
 }
 
-export const CLIENTS: Record<string, Client> = { curl: curlGet, httpx: httpxGet };
+/* ------------------------------------------------- 传输：命令行工具（cli） */
+
+/** `transport.cli` 允许的键；未知键在加载期就报错（不是静默忽略）。 */
+export const CLI_KEYS = ["bin", "argv", "env_allow", "cwd", "exit_ok", "stdin"] as const;
+
+/** `transport.cli.bin`：只用于日志/报告，不跑进程。 */
+export function cliBinOf(source: Source): string {
+  const tr = (source["transport"] as Record<string, any> | undefined) || {};
+  const spec = tr["cli"];
+  return isDict(spec) ? pyStr((spec as Record<string, any>)["bin"]) : "";
+}
+
+function cliSpec(source?: Source): Record<string, any> {
+  const tr = ((source ?? {})["transport"] as Record<string, any> | undefined) || {};
+  const spec = tr["cli"];
+  if (!isDict(spec)) {
+    throw new ValueError("transport.cli is required for client 'cli' (bin + argv)");
+  }
+  return spec as Record<string, any>;
+}
+
+/** argv 里能用的占位符：`{url}`（引擎已按日期参数拼好的目标）与配置里的 `constants`。 */
+function cliParams(source: Source | undefined, url: string): Record<string, unknown> {
+  return { ...(((source ?? {})["constants"] as Record<string, unknown>) || {}), url };
+}
+
+/**
+ * argv 的占位符替换：**只替换已知键，其余花括号原样保留**。
+ *
+ * 为什么不直接用 `pyFormat`（url_template 用的那个 Python `.format` 口径）：工具参数里
+ * 到处是花括号——`jq '[.cases[] | {id: .id}]'`、`--data '{"a":1}'`、模板字符串——严格口径
+ * 会把它们当成缺失的格式字段并报 MissingKey。url_template 继续用严格口径（缺参数要响亮
+ * 报错，且有对拍语料钉着），argv 用这条宽松口径，两者各自写在注释里。
+ */
+function cliFormat(text: string, params: Record<string, unknown>): string {
+  return text.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, k: string) => (k in params ? pyStr(params[k]) : m));
+}
+
+/**
+ * 子进程的环境变量：`env_allow` 是白名单。
+ *
+ * 给了 `env` 就**完全替换**子进程环境，所以 `PATH` 永远保留——否则连可执行文件都找不到
+ * （Node 的 spawn 查 PATH 用的是子进程环境）。不给白名单就整体继承，与 curl 那一档一致。
+ */
+function cliEnv(spec: Record<string, any>): NodeJS.ProcessEnv | undefined {
+  const raw = spec["env_allow"];
+  if (raw === undefined || raw === null) return undefined;
+  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH ?? "" };
+  for (const k of raw as string[]) {
+    const v = process.env[k];
+    if (v !== undefined) env[k] = v;
+  }
+  return env;
+}
+
+function cliCwd(spec: Record<string, any>): string {
+  const raw = spec["cwd"];
+  if (raw === undefined || raw === null || pyStr(raw) === "") return REPO;
+  const c = pyStr(raw);
+  return path.isAbsolute(c) ? c : path.join(REPO, c);
+}
+
+/**
+ * 跑一个命令行工具，把它的退出码映射成引擎的「状态码」。
+ *
+ * **为什么是 argv 数组而不是命令字符串：永不过 shell。** `spawnSync(bin, argv)` 默认
+ * `shell: false`，每个参数原样交给进程——槽位/模板里的 `;`、`$(...)`、`|`、空格都只是
+ * 普通字符。这是 CLI 面与 DOM 面最大的安全差异（页面上误点最多点错，字符串拼接能执行），
+ * 也是它必须写成数组的原因。
+ *
+ * 退出码语义按配置：`exit_ok`（默认 `[0]`）里的码算成功 → 200；其它码原样向上抛给
+ * `blocked()`（它只看"非 200"），于是 audits/counts/selects/report 一行都不用改。
+ * stderr 并进响应体，好让 `block_markers` 认出「要登录/被限流」这类失败。
+ *
+ * 超时、二进制不存在、argv 非法都**抛错**而不是静默返回空——和 curl 那一档同口径。
+ */
+export async function cliRun(url: string, timeout = 60.0, source?: Source): Promise<[number, string]> {
+  const spec = cliSpec(source);
+  const bin = pyStr(spec["bin"]);
+  const argvTpl = spec["argv"];
+  if (!Array.isArray(argvTpl) || !argvTpl.length) {
+    throw new ValueError("transport.cli.argv must be a non-empty list (an argv array, never a shell string)");
+  }
+  const argv = argvTpl.map((a) => cliFormat(pyStr(a), cliParams(source, url)));
+  const exitOk = Array.isArray(spec["exit_ok"]) ? (spec["exit_ok"] as unknown[]).map(Number) : [0];
+  const res = spawnSync(bin, argv, {
+    cwd: cliCwd(spec),
+    env: cliEnv(spec),
+    encoding: "utf8",
+    maxBuffer: 1 << 28,
+    // 子进程拿到的就是调用方给的墙钟预算（`timeout` 是秒）。curl 那一档多给 10 s 宽限是因为
+    // HTTP 有连接/重定向的开销；命令行工具的预算是它自己的事，超时就杀掉并抛错。
+    timeout: Math.max(250, Math.round(timeout * 1000)),
+    input: spec["stdin"] === undefined || spec["stdin"] === null ? undefined : pyStr(spec["stdin"]),
+  });
+  if (res.error) throw res.error;          // ENOENT / ETIMEDOUT：响亮地失败
+  const stdout = typeof res.stdout === "string" ? res.stdout : "";
+  const stderr = typeof res.stderr === "string" ? res.stderr : "";
+  const code = res.status === null ? 1 : res.status;
+  return [exitOk.includes(code) ? 200 : code, stdout + stderr];
+}
+
+/** 版本探针的原始输出（第一行）。没配 pin 就返回 null，不跑子进程。 */
+export function cliVersion(source: Source): string | null {
+  const tr = (source["transport"] as Record<string, any> | undefined) || {};
+  if (!pyTruthy(tr["version_pin"])) return null;
+  const spec = tr["cli"] as Record<string, any>;
+  const argvRaw = tr["version_argv"] === undefined || tr["version_argv"] === null
+    ? ["--version"] : (tr["version_argv"] as unknown[]);
+  const res = spawnSync(pyStr(spec["bin"]), argvRaw.map(pyStr), {
+    cwd: cliCwd(spec),
+    env: cliEnv(spec),
+    encoding: "utf8",
+    maxBuffer: 1 << 24,
+    timeout: 30_000,
+  });
+  if (res.error) throw res.error;
+  const text = `${typeof res.stdout === "string" ? res.stdout : ""}`
+    + `${typeof res.stderr === "string" ? res.stderr : ""}`;
+  return text.split("\n").map((s) => s.trim()).find((s) => s) ?? "";
+}
+
+/**
+ * 工具版本是「冻结语料不能依赖墙上时钟」的同型问题：同一个命令的输出会随版本漂移，
+ * 所以 pin 不住就**响亮地失败**，而不是抽出一堆看起来对的数据。返回实测版本（进报告）。
+ */
+export function checkVersion(source: Source): string | null {
+  const pin = ((source["transport"] as Record<string, any> | undefined) || {})["version_pin"];
+  if (!pyTruthy(pin)) return null;
+  const seen = cliVersion(source) ?? "";
+  if (!seen.includes(pyStr(pin))) {
+    throw new ValueError(`tool version mismatch: expected ${pyRepr(pyStr(pin))}, got ${pyRepr(seen)}`);
+  }
+  return seen;
+}
+
+export const CLIENTS: Record<string, Client> = { curl: curlGet, httpx: httpxGet, cli: cliRun };
 
 /* ---------------------------------------------------------------- 路径语言 */
 
@@ -378,8 +520,8 @@ export function resolve(obj: unknown, p: string): unknown {
 
 /* ---------------------------------------------------------------- 算子 */
 
-export const TRANSPORTS = ["curl", "httpx"] as const;
-export const EXTRACT_KINDS = ["json_in_script", "html_regex"] as const;
+export const TRANSPORTS = ["curl", "httpx", "cli"] as const;
+export const EXTRACT_KINDS = ["json_in_script", "html_regex", "json_stdout", "lines_regex"] as const;
 export const OPS = ["time", "join", "len", "len-1", "int", "str", "strip"] as const; // join:<sep> 带参数
 export const DATE_EXPRS = ["date", "day_offset", "weekday_cn"] as const;
 
@@ -485,9 +627,57 @@ function htmlRegex(html: string, spec: Record<string, any>): Page {
   return { date: getOr(spec, "date", "") as unknown, strip: [], rows };
 }
 
+/**
+ * 整个 stdout 就是一个 JSON 文档（`jq -c .`、`--print_format json` 这类工具的输出）。
+ *
+ * 与 `json_in_script` 的唯一区别是入口：那个从 HTML 里挖 `var X = {...}`，这个直接解析
+ * 子进程的标准输出。`rows` 仍是必填的路径——"哪个数组是数据行"是配置知识，引擎不猜。
+ */
+function jsonStdout(text: string, spec: Record<string, any>): Page {
+  if (!hasOwn(spec, "rows")) throw new KeyError(pyRepr("rows"));
+  let state: unknown;
+  try {
+    state = JSON.parse(text);
+  } catch (e) {
+    const head = text.trim().split("\n")[0]?.slice(0, 120) ?? "";
+    throw new ValueError(`stdout is not JSON (${e instanceof Error ? e.message : String(e)}; first line: ${head})`);
+  }
+  const fields = spec["fields"] as Record<string, unknown>;
+  const rawRows = resolve(state, pyStr(spec["rows"]));
+  const rows = (pyTruthy(rawRows) ? pyIterate(rawRows) : []).map((x) => rowOf(x, fields));
+  return { date: "", strip: [], rows };
+}
+
+/**
+ * 按行解析文本输出（`git log`、`ls -l`、`jq -r` 这类）。
+ *
+ * 为什么不复用 `html_regex`：它按 `split` 切块后 **`slice(1)` 丢掉第一块**（Python 参考的
+ * 口径，正文前的表头），对行文本就是"永远丢第一行"——一个只为 HTML 成立、在 CLI 上变成
+ * 陷阱的行为。行文本没有"表头块"这个概念，所以它有自己的抽取器：逐行匹配、空行跳过、
+ * 全空字段的行不计入。
+ */
+function linesRegex(text: string, spec: Record<string, any>): Page {
+  const sepRaw = spec["line_sep"];
+  const sep = sepRaw === undefined || sepRaw === null || pyStr(sepRaw) === "" ? "\n" : pyStr(sepRaw);
+  const fields = (spec["fields"] || {}) as Record<string, string>;
+  const rows: Row[] = [];
+  for (const line of text.split(sep)) {
+    if (!line.trim()) continue;
+    const row: Row = {};
+    for (const [k, pat] of Object.entries(fields)) {
+      const m = new RegExp(pat, "s").exec(line);
+      row[k] = m && m[1] !== undefined ? m[1].trim() : "";
+    }
+    if (Object.values(row).some(pyTruthy)) rows.push(row);
+  }
+  return { date: "", strip: [], rows };
+}
+
 export const EXTRACTORS: Record<string, (html: string, spec: Record<string, any>) => Page> = {
   json_in_script: jsonInScript,
   html_regex: htmlRegex,
+  json_stdout: jsonStdout,
+  lines_regex: linesRegex,
 };
 
 export function extract(html: string, source: Source): Page {
@@ -674,7 +864,7 @@ export async function fetchSource(source: Source, url: string, timeout = 60.0): 
   const client = transportClient(source);
   const fn = CLIENTS[pyStr(client)];
   if (!fn) throw new KeyError(pyRepr(client));
-  return fn(url, timeout);
+  return fn(url, timeout, source);
 }
 
 /**
@@ -803,7 +993,13 @@ export function reportMarkdown(
     `# ${pyStr(title)}`,
     "",
     `- 数据源配置：\`${pyStr(getOr(source, "_path", source["name"]))}\``,
-    `- 抓取通道：\`${pyStr(client)}\`` + (pyTruthy(tr["note"]) ? ` —— ${pyStr(tr["note"])}` : ""),
+    `- 抓取通道：\`${pyStr(client)}\``
+      + (pyStr(client) === "cli"
+        ? `（\`${cliBinOf(source)}\``
+          + (pyTruthy(tr["version_pin"]) ? `，版本 pin \`${pyStr(tr["version_pin"])}\`` : "")
+          + "）"
+        : "")
+      + (pyTruthy(tr["note"]) ? ` —— ${pyStr(tr["note"])}` : ""),
   ];
   const f = (source["filters"] || {}) as Record<string, any>;
   if (pyTruthy(f["window"])) {
@@ -826,9 +1022,19 @@ export function reportMarkdown(
       for (const s of selects) {
         const b = ((d["selects"] || {}) as Record<string, Row | null>)[pyStr(s["key"])];
         if (b) {
-          const no = pyTruthy(b["flight_no"]) ? b["flight_no"] : pyTruthy(b["name"]) ? b["name"] : "";
+          // 出行类数据源的标识列是 `flight_no` / `name`；别的数据源（CLI 工具输出这类）
+          // 用 `id`，再没有就留空。价格同理：有 `price` 就按配置的货币前缀渲染（机票报告
+          // 逐字节不变），没有就渲染 `sort_by` 的第一个键——报告格式不该要求每份数据源
+          // 都长成机票表。
+          const no = pyTruthy(b["flight_no"]) ? b["flight_no"]
+            : pyTruthy(b["name"]) ? b["name"]
+              : pyTruthy(b["id"]) ? b["id"] : "";
           const dep = timeField === null ? "" : pyStr(getOr(b, timeField, ""));
-          cells.push(`${pyStr(no)} ${dep} **${pyStr(cur)}${pyStr(b["price"])}**`.trim());
+          const key0 = pyStr(((s["sort_by"] as string[] | undefined) ?? ["price"])[0] ?? "price");
+          const priceVal = b["price"] === undefined || b["price"] === null
+            ? pyStr(getOr(b, key0, ""))
+            : `${pyStr(cur)}${pyStr(b["price"])}`;
+          cells.push(`${pyStr(no)} ${dep} **${priceVal}**`.trim());
         } else {
           cells.push("-");
         }
@@ -845,21 +1051,29 @@ export function reportMarkdown(
       for (const date of Object.keys(perDate)) {
         const b = ((perDate[date]!["selects"] || {}) as Record<string, Row | null>)[pyStr(s["key"])];
         if (!pyTruthy(b)) continue;
-        const price = pyTruthy(b!["price"]) ? b!["price"] : 1 << 30;
+        // 比较键：有 price 用 price（机票口径，逐字节不变），否则用 sort_by 的第一个键。
+        const key0 = pyStr(((s["sort_by"] as string[] | undefined) ?? ["price"])[0] ?? "price");
+        const val = pyTruthy(b![key0]) ? b![key0] : 1 << 30;
         if (best === null) {
           best = [date, b!];
           continue;
         }
-        const bestPrice = pyTruthy(best[1]["price"]) ? best[1]["price"] : 1 << 30;
-        if (pyCompareTuple([price, date], [bestPrice, best[0]]) < 0) best = [date, b!];
+        const bestVal = pyTruthy(best[1][key0]) ? best[1][key0] : 1 << 30;
+        if (pyCompareTuple([val, date], [bestVal, best[0]]) < 0) best = [date, b!];
       }
       if (best) {
         const [date, b] = best;
+        const key0 = pyStr(((s["sort_by"] as string[] | undefined) ?? ["price"])[0] ?? "price");
         const desc = ["flight_no", "airline", "dep", "arr", "dep_port", "arr_port", "cabin", "discount"]
           .filter((k) => pyTruthy(b[k]))
           .map((k) => pyStr(b[k]))
           .join(" ");
-        L.push("", `**${pyStr(getOr(s, "label", s["key"]))}（真实数据）**：${date} ${desc} **${pyStr(cur)}${pyStr(b["price"])}**`);
+        // 非"价格型"数据源：渲染标识列 + 排序键的值，而不是把 None 打出来。
+        const hasPrice = b["price"] !== undefined && b["price"] !== null;
+        const shown = hasPrice ? `${pyStr(cur)}${pyStr(b["price"])}` : pyStr(getOr(b, key0, ""));
+        const ident = hasPrice || pyTruthy(desc) ? desc
+          : ["id", "name", "label"].map((k) => (pyTruthy(b[k]) ? pyStr(b[k]) : "")).filter(Boolean).join(" ");
+        L.push("", `**${pyStr(getOr(s, "label", s["key"]))}（真实数据）**：${date} ${ident} **${shown}**`);
       }
     }
   }
@@ -993,6 +1207,58 @@ export function validateSource(src: Source): string[] {
     p.push("transport.block_markers must be a list of body substrings");
   }
   if (!pyTruthy(tr["url_template"])) p.push("transport.url_template is required");
+  // cli 那一档的配置：argv 数组（不是命令字符串）、env 白名单、退出码白名单、cwd。
+  // 未知键直接报错——配置写错了要在加载时炸，而不是运行时静默少跑一个参数。
+  if (client === "cli") {
+    const spec = tr["cli"];
+    if (!isDict(spec)) {
+      p.push("transport.cli is required for client 'cli' (bin + argv)");
+    } else {
+      for (const k of Object.keys(spec as Record<string, unknown>)) {
+        if (!(CLI_KEYS as readonly string[]).includes(k)) {
+          p.push(`transport.cli.${k}: unknown key (known: ${CLI_KEYS.join(", ")})`);
+        }
+      }
+      const bin = (spec as Record<string, unknown>)["bin"];
+      const argv = (spec as Record<string, unknown>)["argv"];
+      if (typeof bin !== "string" || !bin.trim()) {
+        p.push("transport.cli.bin is required (the executable name or path, never a shell string)");
+      }
+      if (!Array.isArray(argv) || !argv.length || !argv.every((a) => typeof a === "string")) {
+        p.push("transport.cli.argv must be a non-empty list of strings (an argv array, never a shell string)");
+      }
+      const ea = (spec as Record<string, unknown>)["env_allow"];
+      if (ea !== undefined && ea !== null && !(Array.isArray(ea) && ea.every((x) => typeof x === "string"))) {
+        p.push("transport.cli.env_allow must be a list of environment variable names");
+      }
+      const eo = (spec as Record<string, unknown>)["exit_ok"];
+      if (eo !== undefined && eo !== null && !(Array.isArray(eo) && eo.every((x) => Number.isInteger(x)))) {
+        p.push("transport.cli.exit_ok must be a list of integer exit codes (default [0])");
+      }
+      const cwd = (spec as Record<string, unknown>)["cwd"];
+      if (cwd !== undefined && cwd !== null && typeof cwd !== "string") {
+        p.push("transport.cli.cwd must be a string (relative paths resolve from the repo root)");
+      }
+      const stdin = (spec as Record<string, unknown>)["stdin"];
+      if (stdin !== undefined && stdin !== null && typeof stdin !== "string") {
+        p.push("transport.cli.stdin must be a string");
+      }
+    }
+    const vp = tr["version_pin"];
+    if (vp !== undefined && vp !== null && typeof vp !== "string") {
+      p.push("transport.version_pin must be a string (a substring of the tool's version output)");
+    }
+    const va = tr["version_argv"];
+    if (va !== undefined && va !== null
+      && !(Array.isArray(va) && va.length && va.every((x) => typeof x === "string"))) {
+      p.push("transport.version_argv must be a non-empty list of strings (default ['--version'])");
+    }
+  } else if (tr["cli"] !== undefined && tr["cli"] !== null) {
+    p.push("transport.cli only applies to transport.client 'cli'");
+  }
+  if (client !== "cli" && pyTruthy(tr["version_pin"])) {
+    p.push("transport.version_pin only applies to transport.client 'cli'");
+  }
   const dd = src["default_dates"];
   if (typeof dd === "string" && dd !== "next_week") {
     p.push(`default_dates ${pyRepr(dd)}: unknown named expression (known: 'next_week'; `
@@ -1021,8 +1287,23 @@ export function validateSource(src: Source): string[] {
     for (const [k, pat] of Object.entries((ex["fields"] || {}) as Record<string, string>)) {
       if (countGroups(pat) !== 1) p.push(`extract.fields.${k}: regex needs exactly one capture group`);
     }
+  } else if (kind === "json_stdout") {
+    if (!pyTruthy(ex["rows"])) p.push("extract.rows is required for json_stdout");
+  } else if (kind === "lines_regex") {
+    const sep = ex["line_sep"];
+    if (sep !== undefined && sep !== null && typeof sep !== "string") {
+      p.push("extract.line_sep must be a string (default a newline)");
+    }
+    for (const [k, pat] of Object.entries((ex["fields"] || {}) as Record<string, string>)) {
+      if (countGroups(pat) !== 1) p.push(`extract.fields.${k}: regex needs exactly one capture group`);
+    }
   }
+  // 只有"路径 + 算子"口径的抽取器才检查算子：html_regex / lines_regex 的字段是**正则**，
+  // 里面的 `|` 是交替而不是"路径|算子"分隔符（早期版本对正则字段也查算子，于是任何带交替
+  // 的正则都被误报成 `unknown op`）。
+  const regexKind = kind === "html_regex" || kind === "lines_regex";
   for (const [k, spec] of Object.entries((ex["fields"] || {}) as Record<string, unknown>)) {
+    if (regexKind) break;
     const ops: unknown[] = typeof spec === "string"
       ? (spec.includes("|") ? spec.slice(spec.indexOf("|") + 1).split("|") : [])
       : (((spec as Record<string, unknown>)["ops"] as unknown[]) || []);
@@ -1082,6 +1363,9 @@ export interface RunOptions {
 
 export async function runSource(source: Source, dates: string[], opts: RunOptions = {}): Promise<RunResult> {
   const { today = null, saveRaw = null, render = false, verbose = true } = opts;
+  // 版本 pin：工具输出随版本漂移，pin 不住就响亮失败（同「冻结语料不能依赖墙上时钟」）。
+  const toolVersion = checkVersion(source);
+  const isCli = pyStr(transportClient(source)) === "cli";
   const perDate: Record<string, DateEntry> = {};
   let rawFirst: string | null = null;
   for (const date of dates) {
@@ -1089,9 +1373,11 @@ export async function runSource(source: Source, dates: string[], opts: RunOption
     const [code, body] = await fetchSource(source, url);
     if (blocked(source, code, body)) {
       if (verbose) {
-        console.log(`${date}: HTTP ${code} —— 被风控挡住（${pyStr(transportClient(source))}）`);
+        console.log(isCli
+          ? `${date}: 命令退出码 ${code} —— 没有成功拿到数据（\`${cliBinOf(source)}\`，看 stderr 是否命中 block_markers）`
+          : `${date}: HTTP ${code} —— 被风控挡住（${pyStr(transportClient(source))}）`);
       }
-      perDate[date] = { error: `HTTP ${code}`, url };
+      perDate[date] = { error: isCli ? `exit ${code}` : `HTTP ${code}`, url };
       continue;
     }
     if (rawFirst === null) rawFirst = body;
@@ -1129,7 +1415,10 @@ export async function runSource(source: Source, dates: string[], opts: RunOption
   if (rendered) {
     for (const [k, v] of Object.entries(rendered)) if (k !== "text") renderedOut[k] = v;
   }
-  return { source: source["name"], fetched_at: isoNowSeconds(), dates: perDate, rendered: renderedOut };
+  return {
+    source: source["name"], fetched_at: isoNowSeconds(), dates: perDate, rendered: renderedOut,
+    ...(toolVersion ? { tool_version: toolVersion } : {}),
+  };
 }
 
 const USAGE = `usage: datasource [-h] [--source SOURCE] [--list] [--sources-dir DIR]

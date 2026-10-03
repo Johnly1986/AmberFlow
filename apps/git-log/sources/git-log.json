@@ -1,0 +1,72 @@
+{
+  "name": "git-log",
+  "label": "本仓库最近 30 天的提交（git 子进程，行文本）",
+  "transport": {
+    "client": "cli",
+    "url_template": "{since}",
+    "note": "真实命令行工具：git 走子进程，输出按行解析（lines_regex）；不是 HTTP 通道",
+    "cli": {
+      "bin": "git",
+      "argv": [
+        "log",
+        "--since={url}",
+        "--date=short",
+        "--no-merges",
+        "--pretty=format:%h|%an|%ad|%s"
+      ],
+      "cwd": ".",
+      "exit_ok": [
+        0
+      ]
+    },
+    "version_pin": "git version 2.",
+    "version_argv": [
+      "--version"
+    ]
+  },
+  "date": {
+    "params": {
+      "since": "date-30day"
+    }
+  },
+  "extract": {
+    "kind": "lines_regex",
+    "fields": {
+      "sha": "^([0-9a-f]{7,40})\\|",
+      "author": "^[0-9a-f]{7,40}\\|([^|]*)\\|",
+      "date": "^[0-9a-f]{7,40}\\|[^|]*\\|([0-9]{4}-[0-9]{2}-[0-9]{2})\\|",
+      "subject": "^[0-9a-f]{7,40}\\|[^|]*\\|[^|]*\\|(.+)$"
+    }
+  },
+  "counts": [
+    {
+      "key": "commits",
+      "label": "提交数"
+    }
+  ],
+  "audits": [
+    {
+      "key": "no_subject",
+      "label": "缺标题行",
+      "field": "subject",
+      "empty": true
+    }
+  ],
+  "report": {
+    "title": "最近 30 天的提交（git）",
+    "source_note": "`git log --since=<date-30day> --pretty=format:%h|%an|%ad|%s`（`transport.client = cli`）；版本 pin 到 `git version 2.`",
+    "preview": {
+      "columns": [
+        "sha",
+        "author",
+        "date",
+        "subject"
+      ],
+      "limit": 8
+    },
+    "notes": [
+      "这条 source 演示「CLI 工具 = 传输档」：引擎只知道「有一族客户端叫 cli」，`git` 只出现在配置里。",
+      "行文本用 `lines_regex`：逐行匹配、空行跳过、全空字段的行不计入（`html_regex` 会丢掉第一块，那是为 HTML 表头定的口径）。"
+    ]
+  }
+}

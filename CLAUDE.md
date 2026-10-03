@@ -29,7 +29,7 @@ npm run doctor                                   # 环境体检：Node / chromiu
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 562 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 605 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -42,9 +42,11 @@ node --experimental-strip-types src/transfer-task.ts --site skybook
 node --experimental-strip-types src/transfer-task.ts --site farehaven --no-when    # 去掉条件守卫 → 1/7
 node --experimental-strip-types src/transfer-task.ts --site slowjet --no-retries   # 去掉重试 → 0/7
 node --experimental-strip-types src/transfer-task.ts --metrics-only                # 不装模型、不开浏览器
-node --experimental-strip-types src/datasource.ts --list                           # 数据源引擎（引擎不含站点知识）
 node --experimental-strip-types src/datasource.ts --source ctrip-flights-h5        # 真实票价，config 驱动
 node --experimental-strip-types src/datasource.ts --source ctrip-hotels-pc --dates 2026-10-09
+node --experimental-strip-types src/datasource.ts --list                           # 应用包也是配置目录：<repo>/*/sources 与 apps/*/sources
+node --experimental-strip-types src/datasource.ts --source git-log                 # CLI 通道：git 子进程 + lines_regex
+node --experimental-strip-types src/datasource.ts --source bench-cases-shape       # CLI 通道：jq + json_stdout
 node --experimental-strip-types src/qunar-task.ts                                  # qunar 迁移测试（边界已实测）
 node --experimental-strip-types src/ip-config.ts                                   # Excel IP 规划表 → 设备网络页
 node --experimental-strip-types src/camera-entry.ts                                # Excel 类型列路由两套表单
@@ -148,8 +150,9 @@ These are empirical findings from this codebase's own experiments — preserve t
 - **English checkpoint on CJK-heavy states yields very low confidence** (0.03–0.09; argmax still often correct) — that is expected, not a bug: routing is the fix (see the Router bullet above), not a confidence floor. The old `ROUTE_CONF_FLOOR` fallback is gone; instead the 类型 column is a FIRST-CLASS rule (`TYPE_TO_FORM`, camera_entry) that decides the page whenever it is recognised, with the model answer kept as a logged audit for disagreement.
 - **The injection guard on the base checkpoint is both over-sensitive on benign DOM text and phrase-dependent on real attacks** (benign shop pages score 0.79–0.90; weak-worded attacks score ~0.2). Threshold 0.95 is the measured split in `QuickActionPicker`; see `tune_guard.py`.
 - `predict_shortlist` passes through unchanged when labels ≤ k (then `scores` is None); it is only active above ~8 labels.
-- **Fetching a site is CONFIG, not a script -- and "the engine knows no site" is a unit test.** `datasource.py` is a
-  generic engine: transports (curl/httpx), two extractors (`json_in_script` / `html_regex`), a deliberately tiny path
+- **Fetching a site is CONFIG, not a script -- and "the engine knows no site" is a unit test.** `datasource.ts` is a
+  generic engine: transports (`curl` subprocess / `httpx` global fetch / `cli` arbitrary command), four extractors
+  (`json_in_script` / `html_regex` / `json_stdout` / `lines_regex`), a deliberately tiny path
   language (`a.b`, `[0]`, `[-1]`, `[]` = map, ops `time|join:x|len|len-1|int|str|strip`), config-driven counts/selects/
   audits, and a config-driven report. Everything site-specific lives in `<site>/sources/*.json`: URL template, how the
   date parameters are computed, the row path, each field's path+ops, the time window, the selection rules, the report
@@ -158,14 +161,31 @@ These are empirical findings from this codebase's own experiments — preserve t
   real leaks on first run (a Ctrip default for `extract.var`, a hard-coded `¥` in the report, another in the print
   path). The second source is the proof: `ctrip-hotels-pc` uses the SAME engine with zero code change by switching to
   `kind: html_regex`, `checkin/checkout` date params and an `audits` entry that measures "price node empty 5/5".
-  `validate_source` runs at load time (unknown extractor/op, wrong capture-group count, unknown date expression, unknown
-  `default_dates` expression, non-list `block_markers`) so a bad config fails loudly instead of silently extracting wrong
-  data. Source lookup is DISCOVERY, not a directory list: every `*/sources` dir under the repo is a config dir
-  (`--sources-dir` overrides; the engine file contains no site names at code level). `default_dates: "next_week"` is an
-  ENGINE-level date expression (`datasource.next_week_dates` — pure calendar math; `ctrip/data.py` re-exports it, so the
+  `validate_source` runs at load time (unknown extractor/op/client, wrong capture-group count, unknown date expression,
+  unknown `default_dates` expression, non-list `block_markers`, unknown `transport.cli` key) so a bad config fails loudly
+  instead of silently extracting wrong data. Source lookup is DISCOVERY, not a directory list: every `*/sources` and
+  `apps/*/sources` dir under the repo is a config dir (`--sources-dir` overrides; the engine file contains no site names
+  at code level, and a test greps for concrete tool names too). `default_dates: "next_week"` is an
+  ENGINE-level date expression (`datasource.next_week_dates` — pure calendar math; `ctrip-data.ts` re-exports it, so the
   dependency points site → engine), and bot-block body signatures are CONFIG too (`transport.block_markers`, e.g.
   `["whaleguard"]`) — the engine itself only treats non-200 as blocked. Report output follows the source:
   `<sources dir>/../results` unless `--out`.
+- **A CLI tool is a TRANSPORT, not a new application -- and it must never see a shell.** `transport.client: "cli"` runs
+  `transport.cli.bin` with an **argv array** (`spawnSync`, `shell: false`): templates (`{url}` + `constants`) are
+  substituted per argument, so `;`, `$(...)`, backticks and `|` arrive as plain characters — `tests/cli-transport.test.ts`
+  literally fires those at a temp file and asserts it was never created. The config surface is six keys
+  (`bin / argv / env_allow / cwd / exit_ok / stdin`), unknown keys fail at load; `env_allow` is a whitelist with `PATH`
+  always kept (otherwise the binary cannot be found), and credentials are referenced by NAME from the environment —
+  never written into the audited plan. Exit codes map onto the engine's status code (`exit_ok`, default `[0]` → 200,
+  anything else passes through so `blocked()` and the report say "命令退出码 N"), which means audits/counts/selects/report
+  needed **no change at all**. Two output shapes have their own extractors: `lines_regex` (line-oriented text — kept
+  separate because `html_regex` drops the first block, an HTML-header convention that would silently eat line 1) and
+  `json_stdout` (the whole stdout is one JSON document). **Tool versions drift like the wall clock does**, so
+  `transport.version_pin` + `version_argv` must match or the source throws (`ValueError`), and the observed version goes
+  into the result and the report. Verified across four tool types: synthetic stub (`apps/demo-tool`, CI-safe), line text
+  (git), JSON (`jq`), and the pre-existing curl/httpx HTTP clients whose 163-item parity corpus is untouched except the
+  two "unknown value" messages. Adding an app = a directory under `apps/` (see `apps/README.md`), never a new branch in
+  the engine.
 - **Ctrip serves its H5 ROUTE pages server-side, and WhaleGuard's gate is a CLIENT fingerprint check.** `m.ctrip.com/
   html5/flight/<dcity>-<acity>-day-<N>.html` (N = target date minus today) returns 200 to `curl` -- with its default UA
   or an iPhone Safari UA -- and 432 to `curl` + a Chrome UA, to Python `httpx`, to Chromium and to Playwright's

@@ -111,9 +111,9 @@ describe("validateSource 在加载时炸", () => {
   it("每类坏配置的问题文案都包含关键片段", () => {
     const good = flights();
     const cases: Array<[string, (c: any) => void, string]> = [
-      ["client", (c) => { c.transport.client = "wget"; }, "transport.client must be one of ('curl', 'httpx')"],
+      ["client", (c) => { c.transport.client = "wget"; }, "transport.client must be one of ('curl', 'httpx', 'cli')"],
       ["no transport", (c) => { delete c.transport; }, "transport.url_template is required"],
-      ["kind", (c) => { c.extract.kind = "magic"; }, "extract.kind must be one of ('json_in_script', 'html_regex')"],
+      ["kind", (c) => { c.extract.kind = "magic"; }, "extract.kind must be one of ('json_in_script', 'html_regex', 'json_stdout', 'lines_regex')"],
       ["empty fields", (c) => { c.extract.fields = {}; }, "extract.fields must not be empty"],
       ["unknown op", (c) => { c.extract.fields.price = "price|sqrtt"; }, "unknown op"],
       ["unknown op in dict", (c) => { c.extract.fields.price = { path: "price", ops: ["sqrt"] }; }, "unknown op 'sqrt'"],
@@ -530,8 +530,8 @@ describe("main() CLI（不碰网络的分支）", () => {
     }
     const text = lines.join("\n");
     expect(text).toContain("配置有问题：");
-    expect(text).toContain("transport.client must be one of ('curl', 'httpx')");
-    expect(text).toContain("extract.kind must be one of ('json_in_script', 'html_regex')");
+    expect(text).toContain("transport.client must be one of ('curl', 'httpx', 'cli')");
+    expect(text).toContain("extract.kind must be one of ('json_in_script', 'html_regex', 'json_stdout', 'lines_regex')");
   });
 
   it("端到端（本地 http 服务，httpx 通道）：counts/selects/audits + json + md + save-raw，被挡日期记 error", async () => {

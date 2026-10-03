@@ -2441,7 +2441,7 @@
      "_path": "ctrip/sources/ctrip-flights-h5.json"
     },
     "expected": [
-     "transport.client must be one of ('curl', 'httpx')"
+     "transport.client must be one of ('curl', 'httpx', 'cli')"
     ]
    },
    {
@@ -2679,7 +2679,7 @@
      "_path": "ctrip/sources/ctrip-flights-h5.json"
     },
     "expected": [
-     "extract.kind must be one of ('json_in_script', 'html_regex')"
+     "extract.kind must be one of ('json_in_script', 'html_regex', 'json_stdout', 'lines_regex')"
     ]
    },
    {
@@ -5016,5 +5016,6 @@
    "report_markdown": "# 携程北京酒店（PC 列表 SSR）\n\n- 数据源配置：`ctrip/sources/ctrip-hotels-pc.json`\n- 抓取通道：`curl` —— 同一 URL curl 200；SSR 里有酒店名/星级/评分，但价格节点对未登录访客为空\n- 数据来源：`hotels.ctrip.com/hotels/list?city=1&checkin=…&checkout=…` 的服务端渲染 HTML\n\n| 日期 | 酒店数 | 价格节点为空 |\n|---|---|---|\n| 2026-10-09 | 3 | 3/3 |\n\n## 2026-10-09 前 3 条（原始行）\n\n| id | name | star | score | price |\n|---|---|---|---|---|\n| 40611324 | 麗枫酒店(北京国贸四惠地铁站店) | 3 | 4.8 |  |\n| 1286148 | 北京索菲特大酒店 | 5 | 4.6 |  |\n| 427807 | 北京长富宫饭店 |  | 4.8 |  |\n\n## 说明\n\n- **价格拿不到**：匿名访客的 `.price-line` 是空的，页面写着「登录以查看会员价」。\n- 同一份 HTML 里有真实的酒店名/星级/评分 —— 所以“≤300 元”这个条件**无法用匿名数据判定**。\n- 要完成酒店那一半，需要已登录会话：`python3 ctrip/live_capture.py --profile <dir>`。\n",
    "report_markdown_rendered": "# 携程北京酒店（PC 列表 SSR）\n\n- 数据源配置：`ctrip/sources/ctrip-hotels-pc.json`\n- 抓取通道：`curl` —— 同一 URL curl 200；SSR 里有酒店名/星级/评分，但价格节点对未登录访客为空\n- 数据来源：`hotels.ctrip.com/hotels/list?city=1&checkin=…&checkout=…` 的服务端渲染 HTML\n\n| 日期 | 酒店数 | 价格节点为空 |\n|---|---|---|\n| 2026-10-09 | 3 | 3/3 |\n\n## 2026-10-09 前 3 条（原始行）\n\n| id | name | star | score | price |\n|---|---|---|---|---|\n| 40611324 | 麗枫酒店(北京国贸四惠地铁站店) | 3 | 4.8 |  |\n| 1286148 | 北京索菲特大酒店 | 5 | 4.6 |  |\n| 427807 | 北京长富宫饭店 |  | 4.8 |  |\n\n## 渲染验证：执行器看得到真实 DOM\n\n- 抓到的 HTML 交给真浏览器渲染后，抽取层得到 **29** 个可交互元素，页面标题：昆明到北京机票查询预订-昆明飞北京特价机票价格昆明到北京机票查询预订-昆明飞北京特价机票价格昆明到北京机票查询预订-昆明\n\n```\n[00] div 搜索 航班 价格 预订\n[01] div 搜索 航班 价格 预订\n[02] div 搜索 航班 价格 预订\n[03] div 搜索 航班 价格 预订\n[04] div 搜索 航班 价格 预订\n[05] div 搜索 航班 价格 预订\n[06] div 搜索 航班 价格 预订\n[07] div 搜索 航班 价格 预订\n[08] div 搜索 航班 价格 预订\n[09] div 搜索 航班 价格 预订\n[10] div 搜索 航班 价格 预订\n[11] div 搜索 航班 价格 预订\n[12] div 搜索 航班 价格 预订\n[13] div 搜索 航班 价格 预订\n[14] div 搜索 航班 价格 预订\n[15] div 搜索 航班 价格 预订\n[16] div 搜索 航班 价格 预订\n[17] div 搜索 航班 价格 预订\n[18] div 搜索 航班 价格 预订\n[19] div 搜索 航班 价格 预订\n[20] div 搜索 航班 价格 预订\n[21] div 搜索 航班 价格 预订\n[22] div 搜索 航班 价格 预订\n[23] div 搜索 航班 价格 预订\n[24] div 搜索 航班 价格 预订\n[25] div 搜索 航班 价格 预订\n[26] div 搜索 航班 价格 预订\n[27] div 搜索 航班 价格 预订\n[28] div 搜索 航班 价格 预订\n[29] div 搜索 航班 价格 预订\n[30] div 搜索 航班 价格 预订\n[31] div 搜索 航班 价格 预订\n[32] div 搜索 航班 价格 预订\n[33] di\n```\n\n## 说明\n\n- **价格拿不到**：匿名访客的 `.price-line` 是空的，页面写着「登录以查看会员价」。\n- 同一份 HTML 里有真实的酒店名/星级/评分 —— 所以“≤300 元”这个条件**无法用匿名数据判定**。\n- 要完成酒店那一半，需要已登录会话：`python3 ctrip/live_capture.py --profile <dir>`。\n"
   }
- ]
+ ],
+ "_note": "2026-10: transport 词表加了 cli（命令行工具传输）、extract.kind 加了 json_stdout/lines_regex（子进程 stdout 的两种形状）——只改这两条“未知取值”的文案，其余 163 项逐字节不动。"
 }

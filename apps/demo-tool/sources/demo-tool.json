@@ -1,0 +1,82 @@
+{
+  "name": "demo-tool",
+  "label": "桩工具（CLI 传输的离线夹具，CI 无条件可跑）",
+  "transport": {
+    "client": "cli",
+    "url_template": "widgets",
+    "note": "确定性桩工具：等价于测试里的 scriptedRuntime，用来验证 argv 数组（永不过 shell）、env 白名单、cwd、退出码、超时与版本 pin",
+    "cli": {
+      "bin": "node",
+      "argv": [
+        "apps/demo-tool/bin/stub-tool.mjs",
+        "--query={url}",
+        "--json"
+      ],
+      "env_allow": [
+        "STUB_TOKEN"
+      ],
+      "cwd": ".",
+      "exit_ok": [
+        0
+      ]
+    },
+    "version_pin": "stub-tool 1.4.2",
+    "version_argv": [
+      "apps/demo-tool/bin/stub-tool.mjs",
+      "--version"
+    ]
+  },
+  "constants": {
+    "STUB_QUERY": "widgets"
+  },
+  "extract": {
+    "kind": "json_stdout",
+    "rows": "rows",
+    "fields": {
+      "id": "id",
+      "label": "label",
+      "price": "price"
+    }
+  },
+  "counts": [
+    {
+      "key": "rows",
+      "label": "行数"
+    }
+  ],
+  "audits": [
+    {
+      "key": "no_price",
+      "label": "缺价格行",
+      "field": "price",
+      "empty": true
+    }
+  ],
+  "selects": [
+    {
+      "key": "cheapest",
+      "label": "最低价",
+      "sort_by": [
+        "price"
+      ]
+    }
+  ],
+  "report": {
+    "title": "桩工具输出（CLI 传输夹具）",
+    "source_note": "`node apps/demo-tool/bin/stub-tool.mjs --query=widgets --json` 的 stdout；版本 pin 写在 `transport.version_pin`，不匹配就报错",
+    "currency": "$",
+    "preview": {
+      "columns": [
+        "id",
+        "label",
+        "price"
+      ],
+      "limit": 3
+    },
+    "notes": [
+      "这条 source 的意义不是数据，而是**形状**：一个 CLI 工具的 stdout 被当成数据源的响应体，走同一套 audits/counts/selects/report。",
+      "argv 是数组、`shell: false`：`{url}` 里的 `;`、`$(...)`、`|` 只会作为普通参数传给进程。",
+      "env 白名单只放行 STUB_TOKEN（PATH 永远保留，否则找不到可执行文件）。"
+    ]
+  }
+}
