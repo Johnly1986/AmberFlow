@@ -80,6 +80,7 @@ describe("the data the project needs is still here", () => {
     ["testpages/net_portal.html", "IP-config fixture"],
     ["testpages/camera_a.html", "camera fixture"],
     ["bench/cases.json", "the frozen-plan matrix"],
+    ["bench/cases-live-long.json", "the long-flow live pack"],
     ["bench/fixtures/shop_home.html", "offline bench fixture"],
     ["camera_ips.xlsx", "the IP plan sheet"],
     ["devices.xlsx", "the camera sheet"],

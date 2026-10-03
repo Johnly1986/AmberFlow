@@ -231,7 +231,19 @@ export const EXTRACT_JS = String.raw`(arg) => {
     // checkVisibility() is true while getBoundingClientRect() is 0x0 — Playwright
     // then refuses to click ("element is not visible") and the step died. Keep
     // this in sync with what the executor can actually act on.
-    const hasBox = (() => { const r = e.getClientRects(); return r.length > 0 && r[0].width > 0 && r[0].height > 0; })();
+    //
+    // ANY rect counts, not just the FIRST one. An inline anchor wrapping a block
+    // (a div holding the product title — the ordinary card-title markup) reports
+    // a 0x0 rect for the inline boxes FIRST and the real block box after it: the
+    // r[0] form silently dropped all six product-title links on the live
+    // saucedemo.com inventory (pool 25/31), so the element every human clicks was
+    // invisible to the model. Rect count is not availability either: all-zero rects
+    // (the collapsed interlanguage sidebar) are still rejected.
+    const hasBox = (() => {
+      const r = e.getClientRects();
+      for (let k = 0; k < r.length; k++) if (r[k].width > 0 && r[k].height > 0) return true;
+      return false;
+    })();
     let vis;
     if (e.checkVisibility) {
       vis = hasBox && e.checkVisibility({checkVisibilityCSS: true, checkOpacity: false});
@@ -278,14 +290,18 @@ const PASS_EXTRACT = compile("arg", `${COLLECT_JS}\nreturn (${EXTRACT_JS})(arg);
 /** Fallback metadata pass: {i, vis, main} for every INTERACTIVE_ALL match. */
 const META_JS = String.raw`(sel) => [...document.querySelectorAll(sel)].map((e, i) => {
             let vis;
-            // non-zero box, same rule as the main pass (see the note there)
-            const hasBox = (() => { const r = e.getClientRects(); return r.length > 0 && r[0].width > 0 && r[0].height > 0; })();
+            // non-zero box, same rule as the main pass (see the note there):
+            // ANY non-zero rect, not just the first one
+            const hasBox = (() => {
+                const r = e.getClientRects();
+                for (let k = 0; k < r.length; k++) if (r[k].width > 0 && r[k].height > 0) return true;
+                return false;
+            })();
             if (e.checkVisibility) {
                 vis = hasBox && e.checkVisibility({checkVisibilityCSS: true, checkOpacity: false});
             } else {
                 const cs = getComputedStyle(e);
                 vis = cs.display !== 'none' && cs.visibility !== 'hidden' && hasBox;
-                      (e.getClientRects().length > 0 || cs.position === 'fixed');
             }
             let m = false;
             if (!e.closest('nav, aside, footer, header'))

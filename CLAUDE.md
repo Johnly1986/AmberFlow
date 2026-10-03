@@ -29,7 +29,7 @@ npm run doctor                                   # 环境体检：Node / chromiu
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 557 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 562 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -58,6 +58,10 @@ npm run shortlist                                                               
 ```
 
 线上平台用例：`node --experimental-strip-types src/bench.ts --cases bench/cases-live.json --mode-tag live`（8 个真实站点，见 README 的实测一节）。
+
+长流程线上用例：`node --experimental-strip-types src/bench.ts --cases bench/cases-live-long.json --mode-tag live-long`
+（3 个真实站点 / 34 个子目标，一条命令跑完三条完整旅程；不进 CI，外部站点慢且会波动。
+设计、逐子目标信号证据与它暴露的四个真实缺陷见 [bench/LONG_FLOW_REPORT.md](bench/LONG_FLOW_REPORT.md)）。
 
 **Python 参考命令**（`pytest`、`python3 xxx.py`、`pip install -r requirements.txt`）属于**已彻底移除**的参考实现：
 工作树与 git 历史都已删除，磁盘上不再有 Python 文件（见 `BACKUP.md`）。
@@ -272,6 +276,11 @@ These are empirical findings from this codebase's own experiments — preserve t
   (the whole case reported 0/0). Extraction now requires `rect.width > 0 && rect.height > 0` (aligned
   with what Playwright can actually act on) and `_click_only`/`_execute_element` catch action failures,
   return `action_failed`, and let the loop forbid the ref — nothing Playwright raises can kill a plan.
+  The box test is **ANY non-empty rect, not `getClientRects()[0]`**: an inline anchor that wraps a block
+  (`<a data-test="item-2-title-link"><div>Product title</div></a>`, the ordinary card-title markup) reports
+  its 0×0 inline boxes FIRST and the real block box after them, so the `r[0]` form silently dropped all six
+  product-title links on live saucedemo.com (pool 25/31) — the element a human clicks was invisible to both
+  the model and hint matching. All-zero rects are still rejected. Pinned by `tests/extraction.test.ts`.
 - **The live pack needs `retries`, and the HARNESS must honour it.** Real sites are cold on the first
   hit (en.wikipedia burned 9 steps into `max_steps` in one pack run while the same case passed in
   isolation). `bench/cases-live.json` sets `retries: 2` per subgoal and `run_case` goes through
@@ -436,3 +445,24 @@ These are empirical findings from this codebase's own experiments — preserve t
   a sort link "价格从低到高" 0.87, a price-cap link "¥300以下" 0.79, and a purely local "record" button 0.62-0.79. The gate asks
   (never blocks), so the scenario's `confirm_fn` allows anything outside `DESTRUCTIVE_PATTERNS` and refuses what matches --
   calibration by action *type* is the fix, and this is the second scenario measuring it.
+
+- **A LONG FLOW reaches three execution shapes the short live pack cannot, and all three were real defects.**
+  `bench/cases-live-long.json` (3 sites / 34 subgoals / one journey each) is what surfaced them; the case-level
+  numbers and the per-subgoal evidence are in `bench/LONG_FLOW_REPORT.md`.
+  1. **`target_hints` must RE-RESOLVE the next hint in the SAME step it advances.** Advancing `_hintI` while the
+     stale `curHint` stayed in hand sent the very next action to the model: on the live saucedemo logout, the menu
+     click is a CSS-only change (so `inert`, so its element is forbidden), the ordered list named the logout link all
+     along, and rules-only mode blocked the subgoal with "needs a model pick". A single `target_hint` keeps its old
+     whole-subgoal authority — only the ordered list walks (`tests/executor.test.ts` ⑤b).
+  2. **`action-timeout` must not be a life sentence.** The occlusion probe returns it when the hit-test at the
+     element's centre is CLEAN but Playwright would not commit the click inside its budget — i.e. "slow, not
+     blocked" — yet the caller forbade the ref for the rest of the subgoal. Live: saucedemo's burger sidebar slides
+     in over ~0.5 s and would not click inside 0.8 s, so the pack lost its last target. The probe now gives one
+     longer try (2.5 s) before reporting (`⑩b`); a genuinely covered element still fails fast via the hit-test.
+  3. **A done-signal needs a bounded SETTLE window after an executed action.** Client-side routing updates the url
+     the instant the click is handled and re-renders AFTERWARDS, so the one post-action check can look at the OLD
+     page — measured on "Back to products": the signal became true 30-230 ms after the click, and roughly 1 run in 4
+     checked too early, after which the step had no target left (the action had removed it) and asked the model.
+     4 × 0.12 s polls (max 0.48 s), deliberately NOT gated on `!inert` (an async effect is invisible to the
+     pre/post snapshot) (`⑤c`). The saucedemo case's flake rate went **7 failures in 15 runs -> 0 in 8**, and the
+     whole pack runs **34/34 subgoals with zero model picks** (real model: 43 steps, all `rule:match`, 102.6 s).

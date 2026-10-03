@@ -337,6 +337,17 @@ function firstLoc(loc: any): AnyLoc {
 /** Budget for the ONE wider look a low-confidence decision is allowed to take. */
 const WIDER_ELEMENTS = 120;
 
+/**
+ * SPA settle window: how long a done-signal gets to become true after an executed
+ * action before the loop spends another step. Client-side routing updates the url
+ * immediately and re-renders afterwards — measured 30-230 ms on the live saucedemo
+ * long flow — and a single check there is a coin flip.
+ */
+const SPA_SETTLE_MS = 120;
+const SPA_SETTLE_POLLS = 4;
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
@@ -835,7 +846,7 @@ export class BrowserMiddleware {
    * actionable or unsure — the post-action inert check stays as the backstop.
    * `"__clicked__"` means the probe already performed the real click.
    */
-  async occludedReason(page: AnyPage, el: Elem, probeMs = 800): Promise<string | null> {
+  async occludedReason(page: AnyPage, el: Elem, probeMs = 800, slowMs = 2500): Promise<string | null> {
     const loc = await this._locatorFor(page, el);
     if (loc === null) return "stale_ref";
     try {
@@ -853,7 +864,19 @@ export class BrowserMiddleware {
           return null;
         }
         if (hit) return `not-actionable-or-covered:${String(hit)}`;
-        return "action-timeout";   // slow but unblocked: let the next step retry
+        // Slow but UNBLOCKED: nothing covers the element, so the short budget was
+        // simply too short — a widget animating in. Give it ONE longer try before
+        // reporting, because reporting is not free: the caller FORBIDS the ref for
+        // the rest of the subgoal. Measured on the live saucedemo logout: the
+        // sidebar slides in over 0.5 s and Playwright would not commit the click
+        // inside the 0.8 s probe, so the ordered `target_hints` sequence lost its
+        // last target and the long flow blocked on a link that works ~1 s later.
+        try {
+          await firstLoc(loc).click({ timeout: slowMs });
+          return "__clicked__";
+        } catch {
+          return "action-timeout";   // still not actionable: it is not just slow
+        }
       }
       return null;
     }
@@ -1137,27 +1160,39 @@ export class BrowserMiddleware {
         let escalatedPick: string | null = null;
         // A frozen plan that NAMES its target must never be blocked by the
         // extraction budget: retrieve the hinted element(s) into the pool when
-        // they were evicted.
-        const curHint = this.currentHint();
-        if (curHint && hintMatch(curHint, elems) === null) {
-          for (const [ref, e] of Object.entries(await hintLookup(pg, curHint))) {
-            if (!new Set(Object.values(elems).map((x) => x.scan)).has(e.scan)) elems[ref] = e;
+        // they were evicted. And a hint whose element is already forbidden is
+        // "this action is done" for an ORDERED sequence (`target_hints`): advance
+        // and RESOLVE THE NEXT HINT IN THE SAME STEP. Advancing without
+        // re-resolving handed the very next action to the model — measured on the
+        // live saucedemo logout step, whose menu click is classified `inert`
+        // (opening a CSS sidebar changes no url/text/input value), so in
+        // rules-only mode the subgoal blocked with "needs a model pick" even
+        // though the ordered hint list named the logout link all along.
+        let curHint = this.currentHint();
+        for (let guard = 0; curHint !== null && guard < 8; guard++) {
+          if (hintMatch(curHint, elems) === null) {
+            for (const [ref, e] of Object.entries(await hintLookup(pg, curHint))) {
+              if (!new Set(Object.values(elems).map((x) => x.scan)).has(e.scan)) elems[ref] = e;
+            }
           }
-        }
-        // drop forbids whose ref now points at a different element
-        for (const r of Object.keys(forbidden)) {
-          const cur = elems[r];
-          if (cur === undefined || !sigEq(forbidden[r]!, esig(cur))) {
-            delete forbidden[r];
-            delete blockedRetry[r];
-            reAdmitted.delete(r);
+          // drop forbids whose ref now points at a different element
+          for (const r of Object.keys(forbidden)) {
+            const cur = elems[r];
+            if (cur === undefined || !sigEq(forbidden[r]!, esig(cur))) {
+              delete forbidden[r];
+              delete blockedRetry[r];
+              reAdmitted.delete(r);
+            }
           }
-        }
-        // A dead hint means "this action is done/failed" for an ordered
-        // sequence: move to the next one instead of burning the subgoal.
-        if (curHint) {
+          // A dead hint means "this action is done/failed" for an ordered
+          // sequence: move to the next one instead of burning the subgoal.
           const dead = hintMatch(curHint, elems);
-          if (dead !== null && dead in forbidden) this._advanceHint();
+          if (dead !== null && dead in forbidden && this._hintI < this.targetHints.length - 1) {
+            this._advanceHint();
+            curHint = this.currentHint();
+            continue;
+          }
+          break;
         }
         let ruleRef: string | null = null;
         if (this.rulesOn) {
@@ -1438,6 +1473,34 @@ export class BrowserMiddleware {
           done = true;
           stopReason = "dom goal signal";
           break;
+        }
+        // ---- SPA settle ------------------------------------------------------
+        // A client-side route change updates the url the instant the click is
+        // handled and re-renders AFTERWARDS, so one post-action check can look at
+        // the OLD page. Measured on the live long flow (saucedemo "Back to
+        // products"): the done-signal became true 30-230 ms after the click, i.e.
+        // 1 run in 4 checked too early, then had no target left for the next step
+        // (the action had removed the hinted button) and asked the model for one.
+        // The plan's DOM signal is the only truth, so give it a bounded window
+        // before spending another step — 0.12 s polls, at most 0.48 s, after any
+        // action that actually executed. Deliberately NOT gated on `!inert`: the
+        // inert judgment is a pre/post SNAPSHOT and cannot see an effect that lands
+        // asynchronously (the live burger click *was* inert, and so is a click whose
+        // handler only schedules the change).
+        if (goalSignalFn && executed) {
+          for (let k = 0; k < SPA_SETTLE_POLLS; k++) {
+            await sleep(SPA_SETTLE_MS);
+            if (await goalSignalFn(pg)) {
+              done = true;
+              stopReason = "dom goal signal";
+              if (verbose) {
+                console.log(`  step ${stepNo}: -> done (dom goal signal, `
+                  + `settled after ${(k + 1) * SPA_SETTLE_MS} ms)`);
+              }
+              break;
+            }
+          }
+          if (done) break;
         }
         // `{manual: true}`: no DOM fact can confirm this step, so the human is asked
         // — but only after an action with a visible effect (an inert action is not a

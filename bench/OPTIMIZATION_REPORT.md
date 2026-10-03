@@ -483,3 +483,25 @@ summary: CAM-1001=OK, CAM-1002=OK, PTZ-2001=OK, CAM-1003=REJECTED
 1. 真实 LLM 端点（第 13 轮已就绪）才能跑"编排→固化→执行"闭环。
 2. 路由成本优化：按计划/站点固定一次 checkpoint，或 ≥4 GB 放开 `max_loaded=2`。
 3. 第 12 轮扰动实验的三个改进（有界等待内容出现、planner 补障碍物子目标、signal 去耦合）——`hydrate900` 与 en.wikipedia Codex 仍会失败。
+
+---
+
+## 二十一、长流程线上用例（3 站点 / 34 子目标）
+
+> 第 8 轮的线上包是 8 个 case / 11 个子目标，每个 case 只有 1–2 个子目标——它证明"单点动作能被规则解决"。
+> 本轮补上它结构上测不到的那一半：**一条完整旅程**（登录 → 多次页面往返 → 表单 → 提交 → 登出），
+> 3 个真实站点、34 个子目标、跨子目标的服务端会话状态、一个子目标多个动作、只在 JS 里的排序状态、
+> 客户端路由竞态、`retries` 与 hint 兜底回捞。
+
+- 用例包：`bench/cases-live-long.json`；命令
+  `node --experimental-strip-types src/bench.ts --cases bench/cases-live-long.json --mode-tag live-long`
+- **实测（真模型，CPU-only）**：`3/3` 用例、`34/34` 子目标、43 步 **全部 `rule:match`（零模型选择）**、102.6 s；
+  既有线上包回归 `8/8`、`11/11` 仍然全 `rule:match`。
+- **四个真实缺陷（全部由长流程首次触达，全部已修 + 已钉测试）**：
+  1. 可见性判定只看 `getClientRects()[0]` → inline anchor 包 block 的六个商品标题链接全部丢出元素池（25/31）；
+  2. 有序 `target_hints` 前进后没有重新解析 → 下一个动作被丢给模型（规则模式直接阻塞）；
+  3. 可操作性探针把"慢但没被遮挡"的元素判成 `action-timeout` 并**拉黑**（注释说的事没做）；
+  4. 动作后的信号只查一次 → SPA 路由"先改 URL 后重渲染"造成约 1/4 的误判（实测 30–230 ms），
+     修法是给信号一个有界结算窗口（4 × 0.12 s）。
+- 抖动：同一用例修复前 **15 次里 7 次失败**，修复后 **8/8 全绿**。
+- 设计、逐子目标证据（34 行）、消融与已知边界：[bench/LONG_FLOW_REPORT.md](LONG_FLOW_REPORT.md)。

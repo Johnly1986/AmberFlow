@@ -96,6 +96,25 @@ describe("synthetic pages — the paths the fixtures cannot express", () => {
     const view = criteriaView(elems, new Set(), null);
     expect(Object.values(view).some((v) => v.includes("[near="))).toBe(true);
   }, 60_000);
+
+  it("keeps an inline anchor that WRAPS A BLOCK (any non-zero rect, not just the first)", async () => {
+    // The live shape, measured on saucedemo.com's inventory: every product title is
+    // `<a data-test="item-2-title-link"><div>Sauce Labs Onesie</div></a>`. An inline
+    // anchor's own inline boxes report 0x0 FIRST and the wrapped block box after it,
+    // so the old `rects[0]` test dropped all six title links (pool 25/31) — the
+    // element a human clicks was invisible to both the model and hint matching.
+    await page.goto("about:blank");
+    await page.setContent(`<html><body><main>
+      <a href="#" data-test="card-title"><div class="name">Sauce Labs Onesie</div></a>
+      <a href="#" id="zero" style="display:inline-block;width:0;height:0;overflow:hidden">not actionable</a>
+      </main></body></html>`);
+    const elems = await extractElements(page, false);
+    const values = Object.values(elems);
+    expect(values.some((e) => e.data_test === "card-title")).toBe(true);
+    // …while a genuinely 0x0 box is still rejected: Wikipedia's collapsed language
+    // sidebar passes checkVisibility() but Playwright refuses to click it.
+    expect(values.some((e) => e.id === "zero")).toBe(false);
+  }, 60_000);
 });
 
 describe("views", () => {

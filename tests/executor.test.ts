@@ -259,6 +259,60 @@ describe("BrowserMiddleware.run — production loop semantics", () => {
     expect(String(report.steps[1]!.desc)).toContain("Apply coupon");
   }, 60_000);
 
+  it("⑤b advances an ordered hint whose element went dead and RESOLVES the next one in the same step", async () => {
+    // Live shape (saucedemo.com's burger menu): the first action is a CSS-only change,
+    // so its pre/post snapshot is identical and the loop calls it `inert` — forbidding
+    // that element. The hint list is the plan's own answer to "this action is done";
+    // advancing it without re-resolving handed the NEXT action to the model, and in
+    // rules-only mode blocked a subgoal whose target the list named all along.
+    let picks = 0;
+    install(fakeAgent(() => { picks += 1; return null; }));   // abstains; must never be needed
+    const report = await mw({ maxSteps: 4 }).run(
+      "open the panel and confirm", dataUrl(`<html><body><main><h1>Panel</h1>
+        <button id="open" onclick="document.getElementById('panel').style.transform='translateX(0)'">Open panel</button>
+        <div id="panel" style="transform:translateX(-400px)">Panel body</div>
+        <button id="confirm" onclick="document.getElementById('out').textContent='confirmed'">Confirm</button>
+        <p id="out"></p></main></body></html>`),
+      {
+        page: asPage(), pw, verbose: false,
+        targetHints: ["#open", "#confirm"],
+        goalSignalFn: (p) => checkSignal(p, { css_text_contains: ["#out", "confirmed"] }),
+      },
+    );
+
+    expect(report.done).toBe(true);
+    expect(report.stop_reason).toBe("dom goal signal");
+    expect(report.steps).toHaveLength(2);
+    expect(report.steps[0]).toMatchObject({ step: 1, how: "clicked", method: "rule:match", inert: true });
+    expect(report.steps[1]).toMatchObject({ step: 2, how: "clicked", method: "rule:match", executed: true });
+    expect(String(report.steps[1]!.desc)).toContain("Confirm");
+    expect(picks).toBe(0);          // every step was decided by the ordered hint
+  }, 60_000);
+
+  it("⑤c gives a done-signal a bounded settle window after an action (client-side re-render)", async () => {
+    // Live shape (saucedemo "Back to products"): the click returns before the app
+    // re-renders, so one immediate check sees the OLD page — measured 30-230 ms.
+    // With no window the step looked `inert`, the signal never fired and the loop
+    // asked the model for a target the action had already removed.
+    let picks = 0;
+    install(fakeAgent(() => { picks += 1; return null; }));
+    const report = await mw({ maxSteps: 3 }).run(
+      "confirm the delayed change", dataUrl(`<html><body><main><h1>Delayed</h1>
+        <button data-test="delayed" onclick="setTimeout(() => { document.getElementById('out').textContent='confirmed'; }, 260)">Confirm</button>
+        <p id="out"></p></main></body></html>`),
+      {
+        page: asPage(), pw, verbose: false,
+        targetHint: "[data-test=delayed]",
+        goalSignalFn: (p) => checkSignal(p, { css_text_contains: ["#out", "confirmed"] }),
+      },
+    );
+
+    expect(report.done).toBe(true);
+    expect(report.stop_reason).toBe("dom goal signal");
+    expect(report.steps).toHaveLength(1);
+    expect(picks).toBe(0);
+  }, 60_000);
+
   it("⑥ clicks a submit-type input instead of filling it", async () => {
     install(fakeAgent((crit) => {
       const r = firstRef(crit);
@@ -374,6 +428,27 @@ describe("BrowserMiddleware.run — production loop semantics", () => {
     // the 800 ms probe reports the cause: nothing like the 5 s click timeout
     expect(elapsed).toBeLessThan(5_000);
     expect(report.stop_reason).toBe("action space exhausted on step 2");
+  }, 60_000);
+
+  it("⑩b retries a SLOW-but-unblocked element with a longer budget instead of banning it", async () => {
+    // Live shape (saucedemo's burger sidebar): Playwright will not commit a click on
+    // a moving element. The hit-test says nothing covers it, so the short probe was
+    // simply too short — reporting `action-timeout` FORBIDS the ref for the rest of
+    // the subgoal, which is how the long flow lost its last ordered hint target.
+    await page.goto(dataUrl(`<html><body><main><h1>Sliding</h1>
+      <div id="wrap" style="transform:translateX(10px);transition:transform 1200ms linear">
+        <button data-test="slide" onclick="document.getElementById('out').textContent='clicked'">Slide</button>
+      </div><p id="out"></p></main>
+      <script>requestAnimationFrame(() => { document.getElementById('wrap').style.transform = 'translateX(140px)'; });</script>
+      </body></html>`));
+    await new Promise((r) => setTimeout(r, 150));        // mid-transition: in viewport, still moving
+    const elems = await extractElements(page as unknown as Parameters<typeof extractElements>[0], false);
+    const el = Object.values(elems).find((e) => e.data_test === "slide")!;
+    expect(el).toBeDefined();
+
+    // a 0.2 s probe cannot click it; the longer retry waits the motion out
+    expect(await mw().occludedReason(asPage(), el, 200, 2500)).toBe("__clicked__");
+    expect(await page.locator("#out").innerText()).toBe("clicked");
   }, 60_000);
 
   it("⑪ never grants `done` from the model's noul — unverified claims only stop the loop", async () => {
