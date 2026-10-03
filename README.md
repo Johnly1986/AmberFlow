@@ -23,6 +23,11 @@ npm start        # 一条命令跑起一项真实工作（仓库自带页面，�
 
 ## 现有功能
 
+- **一条命令开始**：`npm start` 在仓库自带页面上跑一份真实计划（离线、零配置）；`npm run doctor` 体检
+  Node / chromium / 决策模型 / LLM；换成自己的页面也是一条命令——打开页面**演示一次**，自动归纳完成信号、
+  点名目标、写入计划并执行，不需要手写计划 JSON。
+- **没有模型权重也能跑（规则模式）**：计划点名了目标的步骤由规则解决、不碰模型；确实需要模型兜底的步骤会
+  明确说明原因，而不是抛异常或瞎猜。
 - **冻结计划执行**：有序子目标 + 每步完成信号 + 数据袋；JSON 断点续跑；`when` 条件跳过；
   `retries` 整步重试；`target_hints` 一步多目标；`slots` 每步取值。
 - **点名目标与规则优先**：计划里的 `target_hint` 命中即按规则解决（零模型调用）；hint 分级匹配
@@ -31,7 +36,7 @@ npm start        # 一条命令跑起一项真实工作（仓库自带页面，�
   `css_value_equals`）+ 组合（`all_of` / `any_of` / `not`）；也可以让一步**演示一次**自动归纳出信号；
   归纳不出来时声明 `{"signal": {"manual": true}}`，由人确认并把人所见状态写进轨迹。
 - **决策模型本地跑**：Node 内直接推理，不需要 Python / PyTorch / CUDA；模型不确定时先**加宽一次观察**
-  （把更多候选展示给它）再决策，而不是直接判失败；也可以选配一个更强的 LLM 兜底，默认不需要。
+  （把更多候选展示给它）再决策，而不是直接判失败；确需兜底时可接一个更强的 LLM（默认不接）。
 - **三条使用路径**：代码内的生产执行器；Path A 固定动作拾取器（命令行）；Path B 本地模型服务 +
   MV3 扩展（页面内 `Ctrl+Shift+K`）。
 - **站点即配置**：取数引擎不含站点知识，站点写在 `<site>/sources/*.json`；另附真实站点可达性 / 抓取探针。
@@ -75,8 +80,6 @@ npm run plan-cli -- add 1 "打开购物车页" --signal 'url_contains=cart.html'
 npm run plan-cli -- run --replan                   # 跑（阻塞时可让 LLM 重新规划）
 node --experimental-strip-types tools/induce_signal.ts --url <页面> --click '[data-test=add-to-cart]' --replays 2
 ```
-
-### 3. 在代码里用
 
 ### 3. 在代码里用
 
