@@ -1,6 +1,6 @@
 > **状态（2026-10）**：本仓库现在是 **TypeScript 单一技术栈**。
-> 下文描述的 Python 实现已整体移出、并经审查后删除（历史归档见 [BACKUP.md](BACKUP.md)）；
-> 文中的 `python xxx.py` / `pytest` 命令指向**已归档**的参考实现（历史 bundle，见 [BACKUP.md](BACKUP.md)），
+> 下文描述的 Python 实现已整体移出、并经审查后彻底删除（见 [BACKUP.md](BACKUP.md)）；
+> 文中的 `python xxx.py` / `pytest` 命令指向**已彻底移除**的参考实现（见 [BACKUP.md](BACKUP.md)）；
 > 对应的 TS 入口见 [README.md](README.md)。
 > 设计规范、实测结论与用例记录照旧有效——TS 代码的注释大量引用它们。
 
@@ -59,8 +59,8 @@ npm run shortlist                                                               
 
 线上平台用例：`node --experimental-strip-types src/bench.ts --cases bench/cases-live.json --mode-tag live`（8 个真实站点，见 README 的实测一节）。
 
-**Python 参考命令**（`pytest`、`python3 xxx.py`、`pip install -r requirements.txt`）属于**已归档**的参考实现：
-原目录已删除，完整历史在 `/root/ML/LayaWebUse-python-history.bundle`（`git clone` 即可重建，见 `BACKUP.md`）。
+**Python 参考命令**（`pytest`、`python3 xxx.py`、`pip install -r requirements.txt`）属于**已彻底移除**的参考实现：
+工作树与 git 历史都已删除，磁盘上不再有 Python 文件（见 `BACKUP.md`）。
 本仓库不包含 Python，也不再需要 Python 环境；六层对拍改为对**已入库的冻结语料**运行。
 
 CI：`.github/workflows/checks.yml` 只做一件事——装 Node 依赖 + chromium，然后跑 `bench/smoke.sh`。
@@ -75,7 +75,7 @@ LLM planner/auditor 在 `OPENAI_BASE_URL` + `OPENAI_API_KEY`（可加 `PLANNER_M
 
 ## Architecture
 
-**Python 参考 → TS 模块对照**（实现已全部迁移，Python 侧仅供比对）：
+**Python 参考 → TS 模块对照**（实现已全部迁移；Python 侧已移除，对拍改为对冻结语料）：
 
 | Python（备份中） | TypeScript |
 |---|---|

@@ -2,7 +2,7 @@
  * 迁移层的跨实现对拍：TS 侧重算六个复刻站（`transfer/data2..data7.py`）的库存与
  * 迁移度量，与 `tools/gen_transfer_corpus.py`（Python 参考实现，输出到 stdout）逐项比对。
  *
- *   语料已冻结在 `tools/transfer-corpus.json`（生成器只存在于 Python 历史 bundle 里，见 BACKUP.md）
+ *   语料已冻结在 `tools/transfer-corpus.json`（生成器随参考实现移除，见 BACKUP.md）
  *   cd ts && npx vite-node tools/transfer-parity.ts
  *
  * 判据：
@@ -42,10 +42,10 @@ function canon(v: unknown): string {
 }
 
 // 冻结的 Python 参考语料。生成器 `tools/gen_transfer_corpus.py` 属已移出的参考实现（见 BACKUP.md）：
-// 用被测实现自己生成期望值就不再是独立参考，所以语料入库、生成器随参考实现一起归档（历史 bundle）。
+// 用被测实现自己生成期望值就不再是独立参考，所以语料入库，生成器随参考实现移除。
 const corpusPath = path.join(here, "transfer-corpus.json");
 if (!fs.existsSync(corpusPath)) {
-  console.error(`缺少冻结语料 ${corpusPath}；重新生成需 git clone Python 历史 bundle（见 BACKUP.md）`);
+  console.error(`缺少冻结语料 ${corpusPath}；语料已冻结、不能重新生成（见 BACKUP.md）`);
   process.exit(2);
 }
 // 语料由 Python 参考实现在**它自己的目录**里生成，因此其中的站点 URL 记录的是那个根路径。

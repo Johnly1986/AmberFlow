@@ -119,9 +119,9 @@ describe("the cross-runtime parity harnesses survived the move", () => {
     expect(size(corpus), `${corpus} is empty`).toBeGreaterThan(100);
   });
 
-  it("does not ship the Python generators (they live in the history bundle)", () => {
+  it("does not ship the Python generators (they belonged to the removed reference)", () => {
     const gens = FILES.filter((f) => /(^|\/)(gen|dump)_.*\.py$/.test(f));
-    expect(gens, "generator scripts live in the Python history bundle (see BACKUP.md)").toEqual([]);
+    expect(gens, "generator scripts belonged to the removed Python reference (see BACKUP.md)").toEqual([]);
   });
 
   it("every parity tool reads a corpus that is committed, not generated at run time", () => {

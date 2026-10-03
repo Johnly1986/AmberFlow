@@ -46,7 +46,7 @@
 ## 等价性怎么证明
 
 对拍语料由 **Python 参考实现**生成并入库（`tools/*-corpus.json`、`*-python.json`），TS 侧重放逐项比对；
-生成器留在 Python 归档（历史 bundle）里——用被测实现自己生成期望就不是独立参考。
+生成器随参考实现一并移除——用被测实现自己生成期望就不是独立参考。
 
 | 层 | 规模 | 结果 |
 |---|---|---|
@@ -65,7 +65,7 @@ npm run test:parity       # 只跑六层对拍
 
 ### 重新生成语料
 
-必须 `git clone` 历史 bundle（见 [BACKUP.md](BACKUP.md)）、跑生成器，再把 JSON 拷回 `tools/`。
+语料已冻结、不能再生成（生成器随参考实现移除，见 [BACKUP.md](BACKUP.md)）；改动对拍覆盖范围需要自行重建期望值。
 
 ## 移植中刻意保留的语义细节
 
@@ -109,7 +109,7 @@ npm run test:parity       # 只跑六层对拍
 - 规则优先级：旧顺序 `nav_rule(...) or affordance_rule(...)` 会抢在计划 hint 之前做 token 猜测；
   两侧都改为"有 hint 时只认 hint，未命中落到模型"。
 
-回灌补丁对应的钉死测试在归档的 `test_middleware.py`（bundle 的 `python-backports` 标签）里（`test_run_plan_replan_exception_does_not_kill_the_run`、
+回灌补丁对应的钉死测试曾在 `test_middleware.py`（随参考实现移除）里（`test_run_plan_replan_exception_does_not_kill_the_run`、
 `test_plan_cli_counts_skipped_guards_as_finished`、`test_run_stops_cleanly_when_the_model_names_a_missing_ref`）；
 Python 套件 158 passed。
 
