@@ -33,7 +33,16 @@ export const SPEC_VERSION = 1;
  * 目前只有 `{out_dir}`（本次运行的输出目录）——不可逆动作的产物几乎总要落到一个运行期目录里，
  * 写死绝对路径会让应用包换台机器就不可跑。
  */
-export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = { out_dir: "{out_dir}" };
+export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = {
+  out_dir: "{out_dir}",
+  /**
+   * G-K：**每次运行唯一**的标识。`{out_dir}` 是跨运行复用的，所以把"跨调用的状态"（重试计数、
+   * 临时锁、一次性令牌）写在 out_dir 里会让**第二次运行的行为与第一次不同**——实测：
+   * `cli-report` 的"前两次失败"在同一条命令第二次执行时第一次尝试就通过了，验收变成了
+   * 不可复现。要跨调用有状态又不想污染运行之间，就用 `{run_id}`。
+   */
+  run_id: "{run_id}",
+};
 
 /** 包级允许的键；未知键在加载期报错（配置写错了要响亮，不静默）。 */
 export const PACK_KEYS = [
@@ -297,6 +306,26 @@ export function validatePack(pack: AppPack,
   for (const k of ["id", "label", "goal"] as const) {
     if (typeof pack[k] !== "string" || !pack[k]) p.push(`${k} is required`);
   }
+  // G-H：几个"看着能用其实会误导"的类型错误在加载期就报。最典型的是把 `sources` 写成**裸字符串**
+  // ——它会被当列表逐字符遍历，于是报出一串"未知数据源"的伪错误，把人引到错的方向。
+  if (pack.max_subgoals !== undefined
+    && (!Number.isInteger(pack.max_subgoals) || pack.max_subgoals < 1)) {
+    p.push("max_subgoals must be a positive integer");
+  }
+  if (pack.slots !== undefined && !isDict(pack.slots)) {
+    p.push("slots must be an object of slot -> value");
+  }
+  if (pack.required_slots !== undefined
+    && (!Array.isArray(pack.required_slots) || pack.required_slots.some((x) => typeof x !== "string"))) {
+    p.push("required_slots must be a list of slot names");
+  }
+  if (pack.sources !== undefined
+    && (!Array.isArray(pack.sources) || pack.sources.some((x) => typeof x !== "string"))) {
+    p.push("sources must be a list of source names (a bare string would be read as a list of characters)");
+  }
+  if (pack.model !== undefined && typeof pack.model !== "string") {
+    p.push("model must be a string");
+  }
   // `hosts` 必须是字符串列表：防泄漏门禁（`tools/apps_matrix.ts`）会逐项遍历它。
   // 写成裸字符串虽然能被 `validateProbeBlock` 的 `asList` 容忍，但门禁会按**字符**建 token
   // （`\bm\b` 之类），既漏掉真主机又刷出一堆假泄漏 —— 所以在加载期就拒绝。
@@ -317,8 +346,10 @@ export function validatePack(pack: AppPack,
   if (pack.required_slots !== undefined && !Array.isArray(pack.required_slots)) {
     p.push("required_slots must be a list of slot names");
   }
-  const slots = { ...(pack.slots ?? {}), ...(opts.slots ?? {}) };
-  for (const s of pack.required_slots ?? []) {
+  // 类型不对时用空袋兜住下游遍历：加载期只该报**那一条**真错，不该再刷出一串"逐字符"的伪错误。
+  const slotsDict = isDict(pack.slots) ? pack.slots : {};
+  const slots = { ...slotsDict, ...(opts.slots ?? {}) };
+  for (const s of Array.isArray(pack.required_slots) ? pack.required_slots : []) {
     if (!(String(s) in slots)) p.push(`required slot ${JSON.stringify(String(s))} has no value`);
   }
   const roles = pack.roles ?? {};
@@ -363,6 +394,10 @@ export function validatePack(pack: AppPack,
       }
       if (!step["signal"]) p.push(`${where}: needs a done-signal`);
       if (!step["desc"]) p.push(`${where}: needs desc`);
+      // G-G：执行器**每个子目标都会重新 goto start_url**（计划里状态不跨子目标保留），
+      // 所以浏览器步没有 start_url 在运行时只有两种结局：goto("") 报错，或者悄悄停在上一页。
+      // 两种都不该等到运行时才发现。
+      if (!step["start_url"]) p.push(`${where}: a browser step needs start_url (each subgoal re-navigates)`);
     }
   };
   for (const [name, tpl] of Object.entries(roles)) {
@@ -392,6 +427,9 @@ export function validatePack(pack: AppPack,
       if (isDict(tpl)) {
         const merged = { ...tpl, ...entry };
         const tool = merged["source"] !== undefined;
+        if (!tool && !merged["start_url"]) {
+          p.push(`journey[${i}]: a browser step needs start_url (neither the role nor the override has one)`);
+        }
         for (const k of tool ? BROWSER_ONLY : TOOL_ONLY) {
           if (merged[k] !== undefined) {
             p.push(`journey[${i}].${k}: ${tool
@@ -408,7 +446,7 @@ export function validatePack(pack: AppPack,
     { ...RUNTIME_PLACEHOLDERS, ...slots }, seen);
   for (const s of [...new Set(seen)]) p.push(s);
   // 数据腿：引用的数据源必须真的存在（发现制，不维护清单）
-  for (const s of pack.sources ?? []) {
+  for (const s of Array.isArray(pack.sources) ? pack.sources : []) {
     try {
       loadSource(String(s));
     } catch (e) {

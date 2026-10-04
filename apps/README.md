@@ -198,6 +198,9 @@ npm run apps -- --app cli-report --no-model                     # 不带 --allow
 
 npm run apps -- --app ctrip-case --no-model --no-sources        # 19 个冻结子目标跑本地复刻站（与 src/ctrip-task.ts 的计划逐字段全等）
 npm run apps -- --app ip-config  --no-model                     # Excel IP 规划表 → 设备网络页（含"表格写错的那行由设备页自己拒绝"）
+npm run apps -- --app camera-entry --no-model                   # Excel 类型列路由两套表单（空类型行用行内证据、坏序列号显式拒绝）
+npm run apps -- --app transfer-voyagio --no-model --no-sources  # 第二个复刻站的完整旅程：两页向导（24 步）
+npm run apps -- --app transfer-slowjet --no-model --no-sources  # 第三个复刻站：冷启动重试（retries 真的被用上）
 ```
 
 应用清单与"完成一个应用"的五条定义在 [apps/INVENTORY.md](INVENTORY.md)；独立复核（题 → 命令 → 原始观测 → 结论）

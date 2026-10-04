@@ -29,7 +29,7 @@ npm run doctor                                   # 环境体检：Node / chromiu
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 737 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 760 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -73,7 +73,9 @@ npm run shortlist                                                               
 数据腿 → 混合旅程（工具步 + 浏览器步）→ 结束状态不变量）/ `npm run apps -- --app demo-app --dry`（只展开计划）。
 真实应用：`--app ctrip-case --no-model --no-sources`（19 个冻结子目标跑本地复刻站，与 `src/ctrip-task.ts`
 的计划**逐字段全等**）、`--app ip-config --no-model`（Excel IP 规划表 → 设备网络页，含"表格写错的那行由设备页
-自己拒绝"）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
+自己拒绝"）、`--app camera-entry --no-model`（Excel 类型列路由两套表单：空类型行按**行内证据**显式选页、
+坏序列号那行显式成步）、`--app transfer-voyagio --no-model --no-sources`（第二个复刻站：**两页向导** 24 步）、
+`--app transfer-slowjet --no-model --no-sources`（第三个复刻站：**冷启动重试** 19 步）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
 原始观测 → 结论，含 11 处缺陷与 3 处共享层修补）：[bench/APP_VERIFY_REPORT.md](bench/APP_VERIFY_REPORT.md)。
 新增一个应用 = 新目录 `apps/<id>/`（`pack.json` + 可选 `sources/*.json`），**共享层零改动**；
 度量与防泄漏门禁：`npm run apps:matrix`。怎么加见 [apps/README.md](apps/README.md)。
@@ -238,7 +240,15 @@ These are empirical findings from this codebase's own experiments — preserve t
   stack, and a missing CLI binary throwing instead of becoming `refused: "tool-unavailable"`. The remaining five
   (duplicate ids across target lists, non-string ids silently `String()`-ed, a browser step without `start_url`, unchecked
   `max_subgoals`/`slots`/`sources` types, persisted retry counters) are recorded in `apps/INVENTORY.md` §四 for the next
-  round — reported, not pretended.
+  round — reported, not pretended. Round 2 fixed five more of them, each with a regression test: ids that are one
+  namespace ACROSS the probe target lists, a non-string target id (silently `String()`-ed), a browser step without
+  `start_url` (the executor re-navigates every subgoal), type checks for `max_subgoals`/`slots`/`required_slots`/
+  `sources`/`model` (a bare string used to produce a string of character-by-character "unknown source" pseudo-errors
+  ON TOP of the real one), and `{run_id}` — a per-run placeholder, because a retry counter written into the shared
+  `{out_dir}` makes the SECOND run of the same command behave differently (measured: `cli-report`'s flaky step went
+  from `attempts=3` to `attempts=1`; with `{run_id}` it is 3 every time). One boundary the tests now state out loud:
+  a green run is not automatically a model-free run — `transfer-slowjet` asks laya once per cold load and passes only
+  because `retries` re-runs the subgoal, so its test asserts `act` was asked AND `attempts>1`.
 - **A tool step is an ACTION LEG, and the three disciplines are what make it safe.** A journey entry with a `source` is a
   tool step: it reuses the CLI transport (argv array, env allowlist, cwd, exit codes, version pin) and adds `args` /
   `dry_run_args` / `idempotent` / `dangerous`. Its completion truth is the **process observation** — `src/tool-signals.ts`

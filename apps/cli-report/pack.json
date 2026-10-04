@@ -13,9 +13,18 @@
       "source": "demo-tool",
       "signal": {
         "all_of": [
-          { "exit_ok": 0 },
-          { "stdout_contains": "stub-tool" },
-          { "json_path_equals": ["rows[2].id", "w-3"] }
+          {
+            "exit_ok": 0
+          },
+          {
+            "stdout_contains": "stub-tool"
+          },
+          {
+            "json_path_equals": [
+              "rows[2].id",
+              "w-3"
+            ]
+          }
         ]
       }
     },
@@ -23,12 +32,22 @@
       "id": "fail-path",
       "desc": "工具以退出码 3 失败时，用精确退出码加 stderr 事实认出来（失败也是一种可验证事实）",
       "source": "demo-tool",
-      "args": ["--fail"],
+      "args": [
+        "--fail"
+      ],
       "signal": {
         "all_of": [
-          { "exit_code_equals": 3 },
-          { "stderr_contains": "boom" },
-          { "not": { "exit_ok": 0 } }
+          {
+            "exit_code_equals": 3
+          },
+          {
+            "stderr_contains": "boom"
+          },
+          {
+            "not": {
+              "exit_ok": 0
+            }
+          }
         ]
       }
     },
@@ -36,11 +55,17 @@
       "id": "auth-path",
       "desc": "工具提示要登录时，stderr 信号能认出这类失败（对应浏览器面的 block_markers）",
       "source": "demo-tool",
-      "args": ["--auth-required"],
+      "args": [
+        "--auth-required"
+      ],
       "signal": {
         "all_of": [
-          { "exit_code_equals": 2 },
-          { "stderr_contains": "authentication required" }
+          {
+            "exit_code_equals": 2
+          },
+          {
+            "stderr_contains": "authentication required"
+          }
         ]
       }
     },
@@ -48,13 +73,20 @@
       "id": "flaky-read",
       "desc": "前两次调用失败、第三次成功：读操作声明幂等，才允许重试",
       "source": "demo-tool",
-      "args": ["--fail-times=2", "--counter={out_dir}/retry-counter"],
+      "args": [
+        "--fail-times=2",
+        "--counter={out_dir}/retry-counter-{run_id}"
+      ],
       "idempotent": true,
       "retries": 3,
       "signal": {
         "all_of": [
-          { "exit_ok": 0 },
-          { "stdout_contains": "rows" }
+          {
+            "exit_ok": 0
+          },
+          {
+            "stdout_contains": "rows"
+          }
         ]
       }
     },
@@ -62,14 +94,27 @@
       "id": "write-artifact",
       "desc": "不可逆写入：先干跑，经确认后落盘一个产物文件",
       "source": "demo-tool",
-      "args": ["--write={out_dir}/cli-report-artifact.txt", "--query=report"],
-      "dry_run_args": ["--write={out_dir}/cli-report-artifact.txt", "--query=report", "--dry-run"],
+      "args": [
+        "--write={out_dir}/cli-report-artifact.txt",
+        "--query=report"
+      ],
+      "dry_run_args": [
+        "--write={out_dir}/cli-report-artifact.txt",
+        "--query=report",
+        "--dry-run"
+      ],
       "dangerous": true,
       "signal": {
         "all_of": [
-          { "exit_ok": 0 },
-          { "stdout_contains": "wrote" },
-          { "file_exists": "{out_dir}/cli-report-artifact.txt" }
+          {
+            "exit_ok": 0
+          },
+          {
+            "stdout_contains": "wrote"
+          },
+          {
+            "file_exists": "{out_dir}/cli-report-artifact.txt"
+          }
         ]
       }
     }

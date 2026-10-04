@@ -24,9 +24,11 @@
 |---|---|---|---|---|---|
 | A1 | `apps/ctrip-case` | `ctrip/site/*.html` 复刻站 + `src/ctrip-task.ts` 的 19 冻结子目标 + 独立判分 7/7 | ✅ | `npm run apps -- --app ctrip-case --no-model --no-sources` | **已完成**（独立复核：19/19、与冻结计划逐字段全等、3 条不变量） |
 | A2 | `apps/ip-config` | `src/ip-config.ts`（Excel IP 规划表 → 设备网络页）+ `testpages/` | ✅ | `npm run apps -- --app ip-config --no-model` | **已完成**（独立复核：8/8；表格写错的 CAM-1003 是**显式一步**、由设备页自己的拒绝文案判定） |
-| A3 | `apps/camera-entry` | `src/camera-entry.ts`（Excel 类型列路由两套表单）+ `testpages/` | ✅ | `npm run apps -- --app camera-entry --no-model` | 待出题 |
-| A4 | `apps/transfer-replica` | `transfer/site2..7` 复刻站 + `transfer/specs/*.json`（向导 / 滑块 / 条件浮层 / 冷启动重试） | ✅ | `npm run apps -- --app transfer-replica --no-model --slot site=<id>` | 待出题 |
-| A5 | `apps/qunar-flight` | `touch.qunar.com` H5 机票（真实站点；边界见 `src/qunar-task.ts`） | ❌ 需网络 | `npm run apps -- --app qunar-flight --model english` | 待出题 |
+| A3 | `apps/camera-entry` | `src/camera-entry.ts`（Excel 类型列路由两套表单）+ `testpages/` | ✅ | `npm run apps -- --app camera-entry --no-model` | **已完成**（4/4；空类型行用行内证据显式选页、CAM-12 被拒行显式成步；独立复核 confirmed） |
+| A4 | `apps/transfer-voyagio` | `transfer/site5` + `specs/voyagio.json`（6 个 phase = **两页向导**） | ✅ | `npm run apps -- --app transfer-voyagio --no-model --no-sources` | **已完成**（24/24；与 `emitPlan("voyagio")` 全字段全等） |
+| A5 | `apps/transfer-slowjet` | `transfer/site7` + `specs/slowjet.json`（**冷启动重试**） | ✅ | `npm run apps -- --app transfer-slowjet --no-model --no-sources` | **已完成**（19/19；`retries` 真的被用上：有子目标 attempts>1） |
+| A6 | `apps/transfer-trekly` / `transfer-farehaven` / `transfer-skybook` / `transfer-flyquest` | `transfer/site3`（滑块）/ `site6`（条件浮层 `when`）/ `site2`（11 步最大）/ `site4`（提交表单才能进结果页） | ✅ | 同 A4 口径 | 待出题 |
+| A7 | `apps/qunar-flight` | `touch.qunar.com` H5 机票（真实站点；边界见 `src/qunar-task.ts`） | ❌ 需网络 | `npm run apps -- --app qunar-flight --model english` | 待出题 |
 | — | `apps/demo-app` / `cli-report` / `repo-report` | 应用层示范、工具步示范、真实工具（git+jq） | ✅ | 见 `apps/README.md` | 已完成 |
 | — | `apps/ctrip-live` / `ota-live` / `qunar-live` | 测量型应用（探针集） | ❌ 需网络 | 见 `bench/live-retest/REPORT.md` | 已完成 |
 | — | `apps/demo-tool` / `git-log` / `bench-cases` | 纯数据源应用（无旅程） | ✅ | `npm run apps:matrix` | 已完成 |
@@ -60,9 +62,12 @@
 | G-G/G-H | 浏览器步无 `start_url` 放行 / `max_subgoals`·`slots`·`sources` 类型不校验 | 下一轮 |
 | G-K | 工具步的重试计数文件跨运行持久（`cli-report` 的 attempts 会从 1 变 3 再变 1） | 下一轮（记录在案） |
 
-本轮结果：**A1 / A2 完成并各自通过独立复核**（19/19 + 8/8，不变量成立，逐字段对齐），
-应用总数 11 个 / 声明 1372 行 / 应用目录 0 行代码 / 泄漏 OK / 债 0；全仓 **737 个测试 / 46 个文件** 绿。
-A3 / A4 / A5 留在下一轮（见第二节表格）。
+第 1 轮结果：**A1 / A2 完成并各自通过独立复核**（19/19 + 8/8，不变量成立，逐字段对齐）。
+第 2 轮结果：**A3 / A4 / A5 完成并各自通过独立复核**（4/4 + 24/24 + 19/19，不变量成立，逐字段对齐），
+共享层 5 类加固（G-E/G-F/G-G/G-H/G-K）已修并各有回归测试；三轮共 **14 个应用**（`npm run apps:matrix` 的行数：11 个包 + 3 个纯数据源应用）。
+一条必须说清楚的边界：**`transfer-slowjet` 的绿不是"全程规则命中"**——它的冷启动让第一次尝试落空、
+laya 被问过一次（脚本模型给不出 choice），最后靠 `retries` 重跑才过；测试里显式断言了 `act` 被问过 +
+有子目标 `attempts>1`。其余四条旅程（ctrip-case / ip-config / camera-entry / voyagio）都是全规则命中。
 
 另有两条"知道的边界"要一直说清楚：`cli-report`/`repo-report` 在**缺 git/jq** 的机器上以前会崩（G-L 已修成结果），
 `ip-config` 前三台设备的"保存了正确值"由**逐步骤信号**保证，而 `invariants` 只看**结束状态**（CAM-1003 的拒绝页）。

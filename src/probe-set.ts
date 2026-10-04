@@ -108,7 +108,15 @@ function targetProblems(t: unknown, where: string, hosts: Set<string>, p: string
       p.push(`${where}.${k}: unknown target key (known: ${TARGET_KEYS.join(", ")})`);
     }
   }
+  // G-F：id 必须是**字符串**。以前 `String(id)` 会把数字 id 静默接受，而
+  // `roles`/`browser`/`repeat` 的引用校验与 `shortOf` 查找都在另一个命名空间里，
+  // 数字 1 与字符串 "1" 会在那里对不上——加载期就该拒绝。
   if (!t["id"]) p.push(`${where}: target needs an id`);
+  else if (typeof t["id"] !== "string") {
+    // G-F：数字 id 以前被静默 `String()`。`roles`/`browser`/`repeat` 的引用校验和 `shortOf`
+    // 查找用的是字符串命名空间，数字 1 与 "1" 在那里对不上——加载期拒绝，不留到运行期。
+    p.push(`${where}.id must be a string (ids are referenced by roles/browser/repeat)`);
+  }
   if (!t["url"]) p.push(`${where}: target needs a url`);
   const url = String(t["url"] ?? "");
   const h = hostOfUrl(url);
@@ -151,6 +159,9 @@ export function validateProbeBlock(probe: unknown, hostsRaw: unknown, where = "p
     p.push(`${where}.results_dir must be a repo-relative path`);
   }
   if (probe["home"] !== undefined) targetProblems(probe["home"], `${where}.home`, hosts, p);
+  // G-E：四类目标共享一个 id 命名空间（`roles`/`browser`/`repeat` 都按 id 引用，
+  // `shortOf` 也是全局查找），所以重复 id 必须**跨列表**检测，而不只是列表内。
+  const seenIds = new Map<string, string>();
   for (const key of ["http", "alts", "mobile", "capture"] as const) {
     const list = probe[key];
     if (list === undefined) continue;
@@ -158,6 +169,17 @@ export function validateProbeBlock(probe: unknown, hostsRaw: unknown, where = "p
     list.forEach((t, i) => targetProblems(t, `${where}.${key}[${i}]`, hosts, p));
     const ids = list.map((t) => String((t as Record<string, unknown>)["id"] ?? ""));
     if (new Set(ids).size !== ids.length) p.push(`${where}.${key}: duplicate target ids`);
+    list.forEach((t, i) => {
+      const id = (t as Record<string, unknown>)["id"];
+      if (typeof id !== "string" || !id) return;          // 已在 targetProblems 里报过
+      const at = seenIds.get(id);
+      if (at !== undefined && !at.startsWith(`${where}.${key}[`)) {
+        p.push(`${where}.${key}[${i}]: duplicate target id ${JSON.stringify(id)}`
+          + ` (already declared at ${at}); ids are one namespace across the target lists`);
+      } else if (at === undefined) {
+        seenIds.set(id, `${where}.${key}[${i}]`);
+      }
+    });
   }
   if (probe["browser"] !== undefined) {
     const known = new Set((Array.isArray(probe["http"]) ? probe["http"] : [])

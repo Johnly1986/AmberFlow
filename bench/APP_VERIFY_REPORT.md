@@ -674,3 +674,168 @@ ip-config   pack 0 0  8 0 3 226 0 -
 
 
 
+
+---
+
+# 9. 第 2 轮复核（camera-entry / transfer-voyagio / transfer-slowjet）
+
+- 复核对象（**revision 固定**，packs 只存在于这一版；mtime 均为 2026-10-04 01:13）：
+
+```text
+5f397b1bdc3666287595dbeee0af0ebf054ea4d4c89e3a398ac1169b5c01548f  apps/camera-entry/pack.json
+4614c0f86f6318c5eb6b177c34c0a5980409ce1d39e999c8940580c45c6a29a5  apps/transfer-voyagio/pack.json
+5ca1da2b388e9561cd62a854d8d66d75d1123d7679752fb21b836a17d3e38ed9  apps/transfer-slowjet/pack.json
+```
+
+- 共享层（Lead 本轮加固后，复核时）：`src/app-pack.ts 6c7d7871…`、`src/probe-set.ts 9d37ddb3…`、`src/app-runner.ts 5ac3fc47…`。**本轮我未改 `src/**`**（只报告）。
+- 方法同 §8：题 → 命令 → 原始观测 → confirmed/refuted/unverifiable；所有临时副本在 `/tmp`。
+
+## 9.1 camera-entry（题面：Excel 类型列路由两套表单，空类型行 + CAM-12 被拒行都要显式）
+
+```text
+$ npm run apps -- --app camera-entry --no-model --out /tmp/v2-camera
+- 结果：**通过** ｜ 步骤 4/4 ｜ 用时 9.1s
+| 0 | 按规划表录入 CAM-1001（枪机）… | done | 1 |
+| 1 | 按规划表录入 PTZ-2001（球机）… | done | 1 |
+| 2 | 按规划表录入 PTZ-2002（类型列空）：行内证据是 PTZ 序列号 + 变倍/预置位，显式进入 PTZ 表单并提交 | done | 1 |
+| 3 | 按规划表录入 CAM-12（枪机）：…序列号不合规由表单自己拒绝 | done | 1 |
+| end-on-the-rejected-form | 成立 |
+| rejection-not-reported-as-success | 成立 |
+| end-state-is-the-fixed-form | 成立 |
+exit code = 0
+```
+
+结论：**confirmed**（4/4 + 3 条不变量，退出码 0）。
+
+**逐字段对比**：题面说"与 `src/camera-entry.ts` 的 `buildPlan` 对比"——该文件**没有 `buildPlan`**（它的 API 是 `FORMS` / `TYPE_TO_FORM` / `DEMO_ROWS` / `main(deps)`），所以这一条**按字面 unverifiable**。我改用真实可比的素材（`DEMO_ROWS` 4 行 × `TYPE_TO_FORM` × `FORMS` 选择器）逐行核对：
+
+```text
+$ node --experimental-strip-types /tmp/v2-camera.ts
+journey steps = 4 ; DEMO_ROWS = 4
+CAM-1001  sheet_type=枪机     -> form_a slots=OK entry_hint=OK submit_hint=OK
+PTZ-2001  sheet_type=球机     -> form_b slots=OK entry_hint=OK submit_hint=OK
+PTZ-2002  sheet_type=(blank) -> form_b slots=OK entry_hint=OK submit_hint=OK
+CAM-12    sheet_type=枪机     -> form_a slots=OK entry_hint=OK submit_hint=OK
+CAM-12 rejection explicitly expressed (error text + the exact value + page): true
+blank-type row explicit step: YES ; desc="按规划表录入 PTZ-2002（类型列空）：行内证据是 PTZ 序列号 + 变倍/预置位，显式进入 PTZ 表单并提交"
+TOTAL problems = 0
+```
+
+- 每行的 slots 与该行非空字段经 `FORMS[form].fields` 映射后的键值**逐项相同**；`target_hints[0]`/`[-1]` 正是该表单的 `entry`/`submit` 选择器（即 `TYPE_TO_FORM` 的字面映射落进计划）。
+- **(a) 空 `device_type` 行**（PTZ-2002）：**显式成步**（step 2，`entry-ptz` + `b-*` slots），desc 说明"类型列空…显式进入 PTZ 表单"；不是静默跳过、也不是丢给模型赌。**confirmed**。
+- **(b) CAM-12 被拒行**：**显式成步**（step 3），完成信号三件套 = `url_contains camera_a.html` + `a-error` 含「序列号格式错误」+ `css_value_equals a-serial = "CAM-12"`（该表单的错误文案是固定串、不回显值，所以把"拒绝发生在我们填入的那个值上"钉在输入框上）；不变量再确认一次"没有谎报成功"。**confirmed**，没有静默丢弃。
+
+## 9.2 transfer-voyagio（题面：两页向导 24 步，与 spec 逐字段对齐）
+
+```text
+$ npm run apps -- --app transfer-voyagio --no-model --no-sources --out /tmp/v2-voyagio
+- 结果：**通过** ｜ 步骤 24/24 ｜ 用时 33.6s
+| end-on-recorded-stays-list | 成立 |  end-state-is-the-stays-page | 成立 |  recorded-for-the-frozen-checkin | 成立（2026-10-06）
+exit code = 0
+
+$ node --experimental-strip-types /tmp/v2-align.ts transfer-voyagio voyagio   # LAYA_TODAY=2026-10-02
+got 24 / emitted 24 ; rolesUsed=["wizard-date","wizard-options","sort-fares","record-lowest"]
+TOTAL diffs = 0 ; byField = {}
+```
+
+字段口径：`desc / start_url / target_hint / target_hints / signal / when / retries / slots`，`start_url` 按 `app-runner.startUrl` 解析后再比；基准是 `emitPlan("voyagio", loadSpec("voyagio"), …)` 展开的计划（24 步 = 1 入口 + 5 天 × 4（向导第1步/向导第2步/排序/记录）+ 3 酒店）。结论：**confirmed**（24/24 全字段全等，验收 24/24 + 3 不变量）。
+
+## 9.3 transfer-slowjet（题面：冷启动重试 19 步）+ **retries 是否真被这条链路验证**
+
+```text
+$ npm run apps -- --app transfer-slowjet --no-model --no-sources --out /tmp/v2-slowjet
+- 结果：**通过** ｜ 步骤 19/19 ｜ 用时 25.8s
+| end-on-recorded-hotels-list | 成立 |  end-state-is-the-hotels-page | 成立 |  recorded-for-the-frozen-checkin | 成立（2026-10-07）
+exit code = 0
+
+$ node --experimental-strip-types /tmp/v2-align.ts transfer-slowjet slowjet   # LAYA_TODAY=2026-10-02
+got 19 / emitted 19 ; rolesUsed=["filter-window","sort-flights","record-fare"]
+TOTAL diffs = 0 ; byField = {}
+```
+
+结论（验收 + 对齐）：**confirmed**（19/19 全字段全等，19/19 + 3 不变量）。
+
+**retries 真的被用到吗？——用原始观测回答：是。** 未改动的那次运行里，5 个 `record-fare` 步全是 **attempt 2**，日志有 5 条重试记录：
+
+```text
+| 3  | 记录 2026-10-05（周一）08:00-18:00 区间内最低价的航班 | done | 2 | - |
+| 6  | 记录 2026-10-06（周二）… | done | 2 | - |
+| 9  | 记录 2026-10-07（周三）… | done | 2 | - |
+| 12 | 记录 2026-10-08（周四）… | done | 2 | - |
+| 15 | 记录 2026-10-09（周五）… | done | 2 | - |
+    -> retry 1/1: picked ref 'undefined' is not in the element pool on step 1     （×5）
+# 尝试列统计：14 步 attempt=1，5 步 attempt=2
+```
+
+**证伪这一条**：临时副本把 `roles.record-fare.retries`（以及 journey 上任何 `retries`）删掉后重跑：
+
+```text
+$ node --experimental-strip-types src/app-runner.ts --app /tmp/v2-falsify/slowjet-noretry/pack.json \
+    --no-model --no-sources --quiet --out /tmp/v2-falsify/out-noretry
+slowjet-noretry exit=1
+ok=False completed=14/19
+blocked: (3,'记录 2026-10-05…','blocked',1,"picked ref 'undefined' is not in the element pool on step 1")
+         (6/9/12/15 同上)
+invariants: end-on-recorded-hotels-list=True, end-state-is-the-hotels-page=True, recorded-for-the-frozen-checkin=True
+```
+
+**判定**：**confirmed —— 这条链路真的在验证 `retries`**（去掉后 5 步在 attempt 1 全部 blocked，退出码 1）。**不是**"仍通过 ⇒ 没被验证"的那种情况。注意一个细节：这一轮 exit 1 来自**逐步 done**（14/19），三条**结束状态**不变量反而仍然成立（因为它们只看酒店页）。这正是 APPLY 的"不变量看不见中间要求"边界 —— 去掉重试后的失败由子目标信号抓住，不是由不变量抓住。
+
+## 9.4 主动证伪：三包的不变量都不可能成立（临时副本）→ 必须 exit 1
+
+```text
+$ node --experimental-strip-types src/app-runner.ts --app /tmp/v2-falsify/<app>/pack.json --no-model [--no-sources] --quiet --out …
+falsify-camera   exit=1   ok=False completed=4/4   invariants=[('impossible', False)]
+falsify-voyagio  exit=1   ok=False completed=24/24 invariants=[('impossible', False)]
+falsify-slowjet  exit=1   ok=False completed=19/19 invariants=[('impossible', False)]
+```
+
+结论：**confirmed** —— 三个包的动作腿都照跑（4/4、24/24、19/19），验收不成立 → `ok=false` → 退出码 1。
+
+## 9.5 门禁与应用目录
+
+```text
+$ npm run apps:matrix
+camera-entry      pack  0   0   4  0   3   221  0  -
+transfer-slowjet  pack  0   3  19  0   3   233  0  -
+transfer-voyagio  pack  0   4  24  0   3   283  0  -
+应用 14 个 ｜ 声明 2154 行 ｜ 应用目录里的代码 0 行（期望 0：应用是数据，代码在共享层）
+共享层文件 48 个（核心 26 个）｜ 应用声明的标识 20 个
+泄漏检查：OK（核心层代码里没有任何应用声明的站点/工具标识）      exit code = 0（debt=0，未打印"债"一节）
+
+$ find apps/camera-entry apps/transfer-voyagio apps/transfer-slowjet -type f
+apps/camera-entry/pack.json
+apps/transfer-voyagio/pack.json
+apps/transfer-slowjet/pack.json
+```
+
+结论：**confirmed**（0 代码行 / 0 泄漏 / 0 债；三个新目录只有 `pack.json`，无 `.ts/.js/.mjs/.cjs`）。
+
+## 9.6 Lead 本轮 5 项共享层加固（G-E/G-F/G-G/G-H/G-K）核验
+
+（我只跑最小复现，不改 `src/**`；`src/app-pack.ts 6c7d7871…` / `src/probe-set.ts 9d37ddb3…` / `src/app-runner.ts 5ac3fc47…`）
+
+| # | 最小复现 | 原始观测 | 结论 |
+|---|---|---|---|
+| G-E 跨列表重复 id | `validateProbeBlock({http:[{id:"a",…}],alts:[{id:"a",…}]}, ["m.ctrip.com"])` | `probe.alts[0]: duplicate target id "a" (already declared at probe.http[0]); ids are one namespace across the target lists` | confirmed 已修 |
+| G-F 非字符串 id | `validateProbeBlock({http:[{id:7,url:…}]}, hosts)` | `probe.http[0].id must be a string (ids are referenced by roles/browser/repeat)` | confirmed 已修 |
+| G-G 浏览器步无 `start_url` | `validatePack(demo-app，删掉 roles["add-to-cart"].start_url)` | `roles.add-to-cart: a browser step needs start_url (each subgoal re-navigates)` + `journey[1]: a browser step needs start_url (neither the role nor the override has one)` | confirmed 已修 |
+| G-H 类型不校验 | `max_subgoals:"8"` / `slots:"ACME10"` / `sources:"demo-tool"` | `max_subgoals must be a positive integer` / `slots must be an object of slot -> value` / `sources must be a list of source names (a bare string would be read as a list of characters)` | confirmed 已修 |
+| G-K retry 计数持久 | 同一 `--out` 目录连跑两次 `cli-report --allow-dangerous` | 两次都是 `step3 attempts = 3`；目录里出现两个不同的 `retry-counter-<run_id>` 文件（pack 已用 `--counter={out_dir}/retry-counter-{run_id}`） | confirmed 已修 |
+
+G-K 的原始观测（修前是"第二次运行 attempts 变 1"，因为 `/tmp/layawebuse-apps/retry-counter` 持久）：
+
+```text
+$ for i in 1 2; do npm run apps -- --app cli-report --no-model --allow-dangerous --quiet --out /tmp/v2-gk; …; done
+run1 exit=0   step3 attempts = 3 | ok = True
+run2 exit=0   step3 attempts = 3 | ok = True
+$ ls /tmp/v2-gk/retry-counter-*
+retry-counter-mut2a499-2518009-4   retry-counter-mut2a53f-2518087-4
+```
+
+## 9.7 第 2 轮未能验证 / 边界
+
+- **camera-entry 的"与 `buildPlan` 逐字段对比"按字面 unverifiable**：`src/camera-entry.ts` 没有 `buildPlan`（也没有 `settingsUrl`）。我改与 `DEMO_ROWS`/`TYPE_TO_FORM`/`FORMS` 逐行对比（0 问题），并单独确认了两条特殊行。若 Lead 期望的是另一个符号名，请指正。
+- **两个 transfer 包的 `emitPlan` 基准用的是 `LAYA_TODAY=2026-10-02`**（与 §8 同一冻结时钟口径）；若不 pin，`nextWeekDates`/`bestOverall` 会随墙上时钟漂移，日期一变包就与 spec 不等——包里的日期因此是写死的（notes 已声明）。
+- 我没有复核 `transfer/site5` / `site7` 的页面实现本身，只复核了"包展开的计划 == spec 展开的计划"与"验收真的跑通"。
+- 三包 verdict 只对 §9 开头 pin 的 sha256 有效；若作者再改 pack，需重跑。

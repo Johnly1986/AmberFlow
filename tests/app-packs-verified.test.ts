@@ -18,8 +18,11 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appDirs, expandPack, loadPack, validatePack, type AppPack, type ExpandedStep } from "../src/app-pack.ts";
-import { main as appMain, runApp, runToolStep } from "../src/app-runner.ts";
+import { main as appMain, runApp, runToolStep, startUrl } from "../src/app-runner.ts";
 import { loadProbeSet } from "../src/probe-set.ts";
+import { DEMO_ROWS, FORMS, TYPE_TO_FORM } from "../src/camera-entry.ts";
+import { emitPlan } from "../src/transfer-task.ts";
+import { loadSpec } from "../src/flow.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
 import type { ToolSignal } from "../src/tool-signals.ts";
 import { matrix } from "../tools/apps_matrix.ts";
@@ -369,5 +372,137 @@ describe("CLI 错误路径：G-A / G-J / G-L 三条修复不得静默回归", ()
     expect(res.code).toBeNull();
     expect(res.stderr).toContain("ENOENT");
     expect(res.stderr).toContain("definitely-not-a-real-tool-xyz");
+  });
+});
+
+/* ==================================================== 第 2 轮：三个新应用包 */
+
+/** `expandPack` 计划 vs `emitPlan(spec)` 的逐字段对比（本轮 transfer 两包的基准）。 */
+function alignmentDiffs(packId: string, specName: string): string[] {
+  const out = tmpDir(`align-${packId}`);
+  const got = expandPack(loadPack(packId), {}, path.join(out, "p.json")).plan.subgoals as any[];
+  // 冻结时钟：pack 的日期是写死的（生成语料那天 = 2026-10-02），不 pin 就会随墙上时钟漂移
+  const prev = process.env.LAYA_TODAY;
+  process.env.LAYA_TODAY = "2026-10-02";
+  let emitted: any[];
+  try {
+    emitted = JSON.parse(fs.readFileSync(emitPlan(specName, loadSpec(specName), out), "utf-8")).subgoals as any[];
+  } finally {
+    if (prev === undefined) delete process.env.LAYA_TODAY; else process.env.LAYA_TODAY = prev;
+  }
+  const FIELDS = ["desc", "start_url", "target_hint", "target_hints", "signal", "when", "retries", "slots"];
+  const diffs: string[] = [];
+  if (got.length !== emitted.length) diffs.push(`length ${got.length} != ${emitted.length}`);
+  for (let i = 0; i < Math.max(got.length, emitted.length); i++) {
+    for (const f of FIELDS) {
+      let a = (got[i] ?? {})[f] ?? null;
+      const b = (emitted[i] ?? {})[f] ?? null;
+      if (f === "start_url" && typeof a === "string") a = startUrl(a);
+      if (JSON.stringify(a) !== JSON.stringify(b)) diffs.push(`[${i}].${f}`);
+    }
+  }
+  return diffs;
+}
+
+describe("第 2 轮：camera-entry / transfer-voyagio / transfer-slowjet", () => {
+  it("camera-entry：4/4 + 3 不变量；空类型行与 CAM-12 拒绝行都显式成步", async () => {
+    const steps = loadPack("camera-entry").journey as any[];
+    expect(steps).toHaveLength(4);
+    // (a) 空 device_type 行：显式选 PTZ 表单（不是丢给模型，也不是跳过）
+    const blank = steps.find((s) => String(s.desc).includes("类型列空"));
+    expect(blank, "blank device_type row").toBeTruthy();
+    expect((blank.target_hints as string[])[0]).toBe("[data-test='entry-ptz']");
+    expect(blank.slots["b-sn"]).toBe("PTZ-2002");
+    // (b) CAM-12 被拒行：显式信号 = 表单自己的错误文案 + 我们填的那个值 + 页面
+    const cam12 = steps.find((s) => JSON.stringify(s.slots ?? {}).includes("CAM-12"));
+    expect(cam12, "CAM-12 rejected row").toBeTruthy();
+    const sig = JSON.stringify(cam12.signal);
+    expect(sig).toContain("序列号格式错误");
+    expect(sig).toContain("CAM-12");
+    expect(sig).toContain("camera_a.html");
+
+    const out = tmpDir("r2-camera");
+    const res = await runApp(loadPack("camera-entry"), {
+      verbose: false, outDir: out, planPath: path.join(out, "plan.json"),
+    });
+    expect(res.completed).toBe("4/4");
+    expect(res.ok, JSON.stringify(res.subgoals)).toBe(true);
+    expect(res.invariants.map((i) => [i.id, i.held])).toEqual([
+      ["end-on-the-rejected-form", true],
+      ["rejection-not-reported-as-success", true],
+      ["end-state-is-the-fixed-form", true],
+    ]);
+  }, 120_000);
+
+  it("camera-entry：每行 slots 与 DEMO_ROWS × TYPE_TO_FORM × FORMS 逐项一致", () => {
+    const steps = loadPack("camera-entry").journey as any[];
+    const dt = (sel: string): string => (/\[data-test='?([^'\]]+)/.exec(sel) ?? [])[1]!;
+    for (const row of DEMO_ROWS as any[]) {
+      const step = steps.find((s) => Object.values(s.slots ?? {}).map(String).includes(String(row.serial)));
+      expect(step, `row ${row.serial}`).toBeTruthy();
+      const stype = typeof row.device_type === "string" ? row.device_type.trim() : "";
+      // 空类型：包显式按行内证据选了 PTZ 表单（与 TYPE_TO_FORM 对 PTZ 的判定同源）
+      const formName = (TYPE_TO_FORM[stype] ?? (String(row.serial).startsWith("PTZ") ? "form_b" : "form_a")) as "form_a" | "form_b";
+      const form = FORMS[formName];
+      for (const [col, sel] of Object.entries(form.fields)) {
+        const v = row[col];
+        if (v === null || v === undefined || String(v).trim() === "") continue;
+        expect(String((step.slots as any)[dt(sel)]), `${row.serial}.${col}`).toBe(String(v));
+      }
+      const hints = step.target_hints as string[];
+      expect(hints[0], `${row.serial} entry hint`).toBe(form.entry);
+      expect(hints[hints.length - 1], `${row.serial} submit hint`).toBe(form.submit);
+    }
+  });
+
+  it("transfer-voyagio：验收 24/24 + 3 不变量；计划与 emitPlan('voyagio') 逐字段全等", async () => {
+    expect(alignmentDiffs("transfer-voyagio", "voyagio")).toEqual([]);
+    const out = tmpDir("r2-voyagio");
+    const res = await runApp(loadPack("transfer-voyagio"), {
+      verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json"),
+    });
+    expect(res.completed).toBe("24/24");
+    expect(res.ok, JSON.stringify(res.subgoals.filter((s) => s.status !== "done"))).toBe(true);
+    expect(res.invariants.every((i) => i.held)).toBe(true);
+  }, 180_000);
+
+  it("transfer-slowjet：计划与 emitPlan('slowjet') 逐字段全等", () => {
+    expect(alignmentDiffs("transfer-slowjet", "slowjet")).toEqual([]);
+  });
+
+  it("transfer-slowjet：retries 真的被用到；临时副本去掉 retries -> 14/19 + exit 1", async () => {
+    const base = { verbose: false, sources: false } as const;
+    const out = tmpDir("r2-slowjet");
+    const res = await runApp(loadPack("transfer-slowjet"), {
+      ...base, outDir: out, planPath: path.join(out, "plan.json"),
+    });
+    expect(res.completed).toBe("19/19");
+    expect(res.ok, JSON.stringify(res.subgoals.filter((s) => s.status !== "done"))).toBe(true);
+    // 冷启动：5 个 record 步在第 2 次尝试才 done（这就是 retries 被用到的证据）
+    expect(res.subgoals.filter((s) => s.attempts === 2)).toHaveLength(5);
+
+    const stripped = clone(loadPack("transfer-slowjet")) as any;
+    for (const tpl of Object.values(stripped.roles ?? {}) as any[]) delete tpl.retries;
+    for (const s of stripped.journey) delete s.retries;
+    const out2 = tmpDir("r2-slowjet-noretry");
+    const res2 = await runApp(stripped, { ...base, outDir: out2, planPath: path.join(out2, "plan.json") });
+    expect(res2.ok).toBe(false);
+    expect(res2.completed).toBe("14/19");                       // 5 个 record 步第一次就 blocked
+    expect(res2.subgoals.filter((s) => s.status === "blocked")).toHaveLength(5);
+  }, 240_000);
+
+  it("第 2 轮门禁：三个新目录只有 JSON，matrix 仍然 0 代码行 / 0 泄漏 / 0 债", () => {
+    for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet"]) {
+      expect(validatePack(loadPack(id)), id).toEqual([]);
+      const files = fs.readdirSync(path.join(REPO, "apps", id));
+      expect(files.filter((f) => /\.(ts|js|mjs|cjs)$/.test(f)), `${id} code files`).toEqual([]);
+      expect(files).toEqual(["pack.json"]);
+    }
+    const { rows, leaks, debt } = matrix();
+    expect(leaks, JSON.stringify(leaks)).toEqual([]);
+    expect(debt, JSON.stringify(debt)).toEqual([]);
+    for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet"]) {
+      expect(rows.find((r) => r.app === id)!.code, id).toBe(0);
+    }
   });
 });

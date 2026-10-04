@@ -39,6 +39,9 @@ import { checkSignal } from "./signals.ts";
 import { checkToolSignal, type ToolSignal } from "./tool-signals.ts";
 import { expandPack, listPacks, loadPack, type AppPack, type ExpandedStep } from "./app-pack.ts";
 
+/** 进程内运行序号：保证同一毫秒内连续两次运行也不会撞上同一个 `{run_id}`。 */
+let RUN_SEQ = 0;
+
 /** 相对 start_url 按仓库根解析成 file://（与 bench 同一口径）。 */
 export function startUrl(u: string): string {
   if (u.includes("://")) return u;
@@ -61,6 +64,8 @@ export interface AppRunOptions {
   verbose?: boolean;
   /** 本次运行的输出目录：工具步的 `{out_dir}` 占位符用它替换（运行期值，不是计划数据）。 */
   outDir?: string;
+  /** 本次运行唯一标识：`{run_id}`（默认时间戳 + pid；测试可注入固定值以复现）。 */
+  runId?: string;
   /** 测试缝：注入会话工厂。 */
   sessionFactory?: () => Promise<BrowserSession>;
   modelId?: string;
@@ -138,10 +143,17 @@ export async function runToolStep(
   const target = urlFor(src, defaultDates(src)[0]!);
   // `{out_dir}` 是运行期占位符（写到哪儿），不是计划里的值：在这里换成真实输出目录
   const outDir = opts.outDir ?? path.dirname(opts.planPath ?? path.join(os.tmpdir(), "app"));
+  // `{run_id}`：**每次运行唯一**（进程内单调序号 + 毫秒时间戳 + pid），给"跨调用有状态"的参数用
+  // （重试计数等）。只用秒级时间戳是不够的：同一秒里连跑两次会复用同一个计数文件，
+  // 于是第二次运行"看起来"第一次就成功了——那正是 G-K 要修的不可复现。
+  const runId = opts.runId
+    ?? `${Date.now().toString(36)}-${process.pid}-${++RUN_SEQ}`;
   // `{out_dir}` 是运行期占位符（写到哪儿），不是计划里的值：argv、干跑 argv 和 signal 里
   // 的路径（file_exists / file_absent）都要换成真实输出目录，否则"产物落地了吗"永远为假。
   const sub = (v: unknown): unknown => {
-    if (typeof v === "string") return v.split("{out_dir}").join(outDir);
+    if (typeof v === "string") {
+      return v.split("{out_dir}").join(outDir).split("{run_id}").join(runId);
+    }
     if (Array.isArray(v)) return v.map(sub);
     if (typeof v === "object" && v !== null) {
       const o: Record<string, unknown> = {};

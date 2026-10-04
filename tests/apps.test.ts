@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appDirs, expandPack, listPacks, loadPack, PACK_KEYS, validatePack, type AppPack } from "../src/app-pack.ts";
 import { runApp } from "../src/app-runner.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
+import { validateProbeBlock } from "../src/probe-set.ts";
 import { matrix } from "../tools/apps_matrix.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
@@ -294,5 +295,65 @@ describe("工具步：命令行工具当动作腿", () => {
     expect(res.ok, JSON.stringify(res.tool_steps)).toBe(true);
     expect(res.tool_steps.map((t) => t.source)).toEqual(["git-log", "bench-cases-index", "bench-cases-shape"]);
     expect(res.tool_steps.every((t) => t.done && t.code === 0)).toBe(true);
+  }, 120_000);
+});
+
+/* ------------------------------------------- 第 2 轮共享层加固（复核发现，逐条钉住） */
+
+describe("共享层加固：复核发现的 5 类缺陷不得回归", () => {
+  it("G-G 浏览器步必须有 start_url——包括角色模板合并之后", () => {
+    // 角色自带 start_url、但某一次使用把它覆盖掉：合并后就没有了
+    const withRole = clone(loadPack("ctrip-case")) as any;
+    delete withRole.roles["filter-window"].start_url;
+    expect(validatePack(withRole).join(" | "))
+      .toContain("a browser step needs start_url");
+
+    // 普通（无角色）浏览器步同样要查：ctrip-case 的第 0 步就是无角色的浏览器步
+    const plain = clone(loadPack("ctrip-case")) as any;
+    delete plain.journey[0].start_url;
+    expect(validatePack(plain).join(" | ")).toContain("needs start_url");
+  });
+
+  it("G-H 类型校验：max_subgoals / slots / required_slots / sources / model", () => {
+    const p = clone(loadPack("demo-app")) as any;
+    p.max_subgoals = 0;
+    p.slots = "x";
+    p.required_slots = "coupon";
+    p.sources = "demo-tool";                    // 裸字符串会被逐字符遍历 -> 一串伪错误
+    p.model = 5;
+    const problems = validatePack(p).join(" | ");
+    expect(problems).toContain("max_subgoals must be a positive integer");
+    expect(problems).toContain("slots must be an object");
+    expect(problems).toContain("required_slots must be a list of slot names");
+    expect(problems).toContain("sources must be a list of source names");
+    expect(problems).toContain("model must be a string");
+    // 关键是**不要**再吐出一串"未知数据源"的伪错误
+    expect(problems).not.toContain("not found");
+  });
+
+  it("G-E / G-F 探针集：跨列表重复 id 与非字符串 id", () => {
+    const hosts = ["m.ctrip.com"];
+    const cross = validateProbeBlock({
+      http: [{ id: "a", url: "https://m.ctrip.com/1" }],
+      alts: [{ id: "a", url: "https://m.ctrip.com/2" }],
+    }, hosts);
+    expect(cross.join(" | ")).toContain("ids are one namespace across the target lists");
+
+    const numeric = validateProbeBlock({ http: [{ id: 1, url: "https://m.ctrip.com/1" }] }, hosts);
+    expect(numeric.join(" | ")).toContain("id must be a string");
+  });
+
+  it("G-K {run_id}：同一条命令在同一个 --out 目录里重复运行必须可复现", async () => {
+    const out = freshOut("g-k");
+    const opts = { verbose: false, outDir: out, planPath: path.join(out, "plan.json"), allowDangerous: true };
+    const first = await runApp(loadPack("cli-report"), opts);
+    const second = await runApp(loadPack("cli-report"), opts);   // 同一个 out_dir！
+    expect(first.tool_steps[3]!.attempts).toBe(3);
+    expect(second.tool_steps[3]!.attempts).toBe(3);              // 修复前这里是 1
+    // 机制说明：`{run_id}` 是"每次运行唯一"的那一半；注入固定 runId 就会复用计数（因此默认不能用固定值）
+    const fixed = await runApp(loadPack("cli-report"), { ...opts, runId: "pinned" });
+    const fixedAgain = await runApp(loadPack("cli-report"), { ...opts, runId: "pinned" });
+    expect(fixed.tool_steps[3]!.attempts).toBe(3);
+    expect(fixedAgain.tool_steps[3]!.attempts).toBe(1);
   }, 120_000);
 });

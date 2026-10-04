@@ -17,6 +17,7 @@
  *     生成物；因此这里的对齐断言用的是**显式日期**，不跟随墙上时钟（与 `LAYA_TODAY`
  *     那条教训同型：冻结语料不该随日期漂移）。
  */
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -24,6 +25,8 @@ import { expandPack, loadPack, validatePack } from "../src/app-pack.ts";
 import { runApp, startUrl } from "../src/app-runner.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
 import { buildPlan, DEMO_ROWS } from "../src/ip-config.ts";
+import { DEMO_ROWS as CAM_ROWS, FORMS, TYPE_TO_FORM } from "../src/camera-entry.ts";
+import { discoverSpecs, emitPlan } from "../src/transfer-task.ts";
 import * as CT from "../src/ctrip-task.ts";
 import { matrix } from "../tools/apps_matrix.ts";
 
@@ -243,5 +246,140 @@ describe("两个新应用包：应用目录是数据（0 行代码 / 0 泄漏 / 
     expect(ip.tokens).toEqual([]);
     expect(leaks, JSON.stringify(leaks)).toEqual([]);
     expect(debt, JSON.stringify(debt)).toEqual([]);
+  });
+});
+
+/* ================================================================ A3 / A4 / A5 */
+
+/** `[data-test='a-serial']` -> `a-serial`：包里的槽位键就是表单字段的 data-test 名。 */
+const fieldKey = (sel: string): string => sel.replace(/^\[data-test='|'\]$/g, "");
+const isBlankRow = (v: unknown): boolean =>
+  v === null || v === undefined || v === "" || (typeof v === "number" && Number.isNaN(v));
+
+describe("apps/camera-entry（A3：Excel 类型列路由两套表单）", () => {
+  it("journey 与 src/camera-entry.ts 的类型规则 + fillForm 的字段映射逐字段对齐", () => {
+    const exp = expandPack(loadPack("camera-entry"), {}, planPath("camera-align"));
+    expect(exp.plan.subgoals).toHaveLength(CAM_ROWS.length);   // 4 行 = 4 步
+    expect(exp.rolesUsed).toEqual([]);
+
+    // 期望的槽位 = 该行的 form 字段（跳过空值），键名是 data-test 名，值是行里的值
+    const expectedSlots = (form: "form_a" | "form_b", row: Record<string, unknown>): Record<string, string> =>
+      Object.fromEntries(Object.entries(FORMS[form].fields)
+        .filter(([col]) => !isBlankRow(row[col]))
+        .map(([col, sel]) => [fieldKey(sel), String(row[col])]));
+
+    // 行 0/1/3 的页面由 TYPE_TO_FORM 决定（规则路由，不是模型）
+    const cases: Array<[number, string]> = [[0, "form_a"], [1, "form_b"], [3, "form_a"]];
+    for (const [i, form] of cases) {
+      const row = CAM_ROWS[i]! as Record<string, unknown>;
+      expect(TYPE_TO_FORM[String(row["device_type"])], `row ${i} 类型规则`).toBe(form);
+      expect(exp.plan.subgoals[i]!.slots, `row ${i} slots`).toEqual(expectedSlots(form as "form_a", row));
+    }
+    // 行 2 的 类型 为空：驱动会落到 laya.Router，pack 里必须用**行内证据**显式选页（PTZ 序列号 + 变倍/预置位）
+    const blank = CAM_ROWS[2]! as Record<string, unknown>;
+    expect(blank["device_type"]).toBeNull();
+    expect(String(blank["serial"]).startsWith("PTZ")).toBe(true);
+    expect(exp.plan.subgoals[2]!.slots).toEqual(expectedSlots("form_b", blank));
+    // 行 4（CAM-12）是设计好被表单拒绝的：它必须**显式成步**，完成信号是表单自己的拒绝文案
+    expect(exp.plan.subgoals[3]!.slots).toMatchObject({ "a-serial": "CAM-12" });
+    const sig = JSON.stringify(exp.plan.subgoals[3]!.signal);
+    expect(sig).toContain(fieldKey(FORMS.form_a.error));
+    expect(sig).toContain("CAM-12");
+  });
+
+  it("端到端 4/4 + 3 条不变量；没有任何一步落到模型选择", async () => {
+    asked = [];
+    const res = await runApp(loadPack("camera-entry"), {
+      verbose: false, sources: false, planPath: planPath("camera-e2e"),
+    });
+    expect(res.ok, JSON.stringify(res.subgoals)).toBe(true);
+    expect(res.completed).toBe("4/4");
+    expect(res.invariants.map((i) => [i.id, i.held])).toEqual([
+      ["end-on-the-rejected-form", true],
+      ["rejection-not-reported-as-success", true],
+      ["end-state-is-the-fixed-form", true],
+    ]);
+    expect(asked).not.toContain("act");          // 脚本模型给不出 choice；全 done 即全规则命中
+  }, 120_000);
+
+  it("坏包在加载期炸：浏览器步缺信号 / 缺 start_url 都要被点名", () => {
+    const noSignal = clone(loadPack("camera-entry")) as any;
+    delete noSignal["journey"][3]["signal"];
+    expect(validatePack(noSignal)).toEqual(["journey[3]: needs a done-signal"]);
+
+    const noStart = clone(loadPack("camera-entry")) as any;
+    delete noStart["journey"][1]["start_url"];
+    expect(validatePack(noStart)).toEqual(["journey[1]: a browser step needs start_url (each subgoal re-navigates)"]);
+  });
+});
+
+describe("transfer 复刻站两题（A4 向导 / A5 冷启动重试）", () => {
+  const emitted = (key: string, dir: string): Array<Record<string, any>> => {
+    const specs = discoverSpecs();
+    const p = emitPlan(key, specs[key]!, dir);
+    return (JSON.parse(fs.readFileSync(p, "utf-8")) as { subgoals: Array<Record<string, any>> }).subgoals;
+  };
+
+  // `modelFree`：这条旅程是否**全程规则命中**。voyagio 是；slowjet 不是——它的冷启动会让第一次
+  // 尝试落空、laya 被问一次（脚本模型给不出 choice），最后是靠 `retries` 重跑才过的。
+  // 这个区别必须显式写出来，否则"绿的"会被读成"不需要模型"。
+  for (const [id, specKey, tag, modelFree] of [["transfer-voyagio", "voyagio", "voyagio", true],
+    ["transfer-slowjet", "slowjet", "slowjet", false]] as const) {
+    it(`${id}：journey 与 emitPlan(${specKey}) 的展开计划逐字段对齐`, () => {
+      const frozen = emitted(specKey, path.join(os.tmpdir(), `app-packs-authored-${tag}`));
+      const exp = expandPack(loadPack(id), {}, planPath(`${tag}-align`));
+      expect(exp.plan.subgoals).toHaveLength(frozen.length);
+      frozen.forEach((f, i) => {
+        const g = exp.plan.subgoals[i]! as Record<string, any>;
+        expect(g.desc, `desc[${i}]`).toBe(f.desc);
+        expect(startUrl(String(g.start_url)), `start_url[${i}]`).toBe(String(f.start_url));
+        expect(g.target_hint ?? null, `target_hint[${i}]`).toBe(f.target_hint ?? null);
+        expect(g.signal, `signal[${i}]`).toEqual(f.signal);
+        expect(g.when ?? null, `when[${i}]`).toBe(f.when ?? null);
+        expect(g.retries ?? 0, `retries[${i}]`).toBe(f.retries ?? 0);
+        expect(g.slots ?? {}, `slots[${i}]`).toEqual(f.slots ?? {});
+      });
+    }, 120_000);
+
+    it(`${id}：端到端全部 done/skipped + 不变量成立`, async () => {
+      asked = [];
+      const res = await runApp(loadPack(id), {
+        verbose: false, sources: false, planPath: planPath(`${tag}-e2e`),
+      });
+      expect(res.ok, JSON.stringify(res.subgoals)).toBe(true);
+      expect(res.subgoals.every((s) => s.status === "done" || s.status === "skipped")).toBe(true);
+      expect(res.invariants.every((i) => i.held)).toBe(true);
+      if (modelFree) {
+        expect(asked).not.toContain("act");
+      } else {
+        // 如实记录：模型被问过（脚本模型没有 choice），而旅程仍然全 done —— 那是 `retries` 的功劳
+        expect(asked).toContain("act");
+        expect(res.subgoals.some((s) => Number(s.attempts ?? 1) > 1)).toBe(true);
+      }
+    }, 180_000);
+  }
+
+  it("slowjet 的 retries 是运行时策略：它如实进了 journey，且真的被用上（attempt>1）", async () => {
+    const exp = expandPack(loadPack("transfer-slowjet"), {}, planPath("slowjet-retries"));
+    const withRetries = exp.plan.subgoals.filter((s) => (s.retries ?? 0) > 0);
+    expect(withRetries.length).toBeGreaterThan(0);
+    const res = await runApp(loadPack("transfer-slowjet"), {
+      verbose: false, sources: false, planPath: planPath("slowjet-retries-run"),
+    });
+    const retried = res.subgoals.filter((s) => Number(s.attempts ?? 1) > 1);
+    expect(retried.length, JSON.stringify(res.subgoals)).toBeGreaterThan(0);
+    expect(res.ok).toBe(true);
+  }, 180_000);
+
+  it("transfer 包的应用目录是数据（0 代码行），且三个新应用都进了矩阵", () => {
+    const { rows, leaks, debt } = matrix();
+    for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet"]) {
+      const r = rows.find((x) => x.app === id)!;
+      expect(r, id).toBeTruthy();
+      expect(r.code, id).toBe(0);
+      expect(r.tokens.length, id).toBe(0);                     // hosts 为空：本地复刻站
+    }
+    expect(leaks).toEqual([]);
+    expect(debt).toEqual([]);
   });
 });
