@@ -124,7 +124,9 @@ export interface AppPack {
    * 而 `plan_sha256` 是展开内容的指纹——改包、改 spec 都会让 `npm run apps:gen -- --check` 变红。
    * 人写的部分（`invariants` / `notes`）仍然是这个包的一部分，生成器只搬运、不发明。
    */
-  generated_from?: { spec: string; plan_sha256: string };
+  generated_from?:
+    | { spec: string; plan_sha256: string }
+    | { source: string; plan_sha256: string };
   /** 浏览器设备面（只有手机版页面存在的站点必须声明它；见 `executor.DeviceSpec`）。 */
   device?: Record<string, unknown>;
   /**
@@ -495,16 +497,34 @@ export function validatePack(pack: AppPack,
     if (!isDict(g)) {
       p.push("generated_from must be an object {spec, plan_sha256}");
     } else {
-      if (typeof g["spec"] !== "string" || !g["spec"].trim()) {
-        p.push("generated_from.spec must be a non-empty path");
-      } else if (!fs.existsSync(path.resolve(REPO, String(g["spec"])))) {
-        p.push(`generated_from.spec ${JSON.stringify(g["spec"])} does not exist (regenerate with npm run apps:gen)`);
+      // 两种上游二选一：spec 文件，或 `<模块>#<导出名>`（导出函数返回一份应用级计划）
+      const kind = typeof g["spec"] === "string" ? "spec" : typeof g["source"] === "string" ? "source" : null;
+      if (kind === null) {
+        p.push("generated_from needs either .spec or .source (regenerate with npm run apps:gen)");
+      } else if (kind === "spec" && typeof g["source"] === "string") {
+        p.push("generated_from must not carry both .spec and .source");
+      } else {
+        const raw = String(g[kind]);
+        if (!raw.trim()) {
+          p.push(`generated_from.${kind} must be a non-empty string`);
+        } else if (kind === "spec") {
+          if (!fs.existsSync(path.resolve(REPO, raw))) {
+            p.push(`generated_from.spec ${JSON.stringify(raw)} does not exist (regenerate with npm run apps:gen)`);
+          }
+        } else {
+          const [file, fn] = raw.split("#");
+          if (!file || !fn) {
+            p.push(`generated_from.source must look like "<module>#<export>", got ${JSON.stringify(raw)}`);
+          } else if (!fs.existsSync(path.resolve(REPO, file))) {
+            p.push(`generated_from.source module ${JSON.stringify(file)} does not exist`);
+          }
+        }
       }
       if (typeof g["plan_sha256"] !== "string" || !/^[0-9a-f]{64}$/.test(String(g["plan_sha256"]))) {
         p.push("generated_from.plan_sha256 must be a sha256 hex string (regenerate with npm run apps:gen)");
       }
       for (const k of Object.keys(g)) {
-        if (!["spec", "plan_sha256"].includes(k)) p.push(`generated_from.${k}: unknown key`);
+        if (!["spec", "source", "plan_sha256"].includes(k)) p.push(`generated_from.${k}: unknown key`);
       }
     }
   }

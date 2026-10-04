@@ -141,6 +141,10 @@ npm run apps:matrix                                     # 声明成本 / 代码�
 npm run apps:gen -- --check                             # 生成的包与 spec 展开是否一致（改 spec 没重新生成就红）
 ```
 
+**不变量也不用猜**：`npm run apps:induce -- --app <id>` 跑通一次，从"动手前（旅程少做最后一步）/结束后"
+两个状态提出**可判定、可区分、可复现**的结束状态不变量；`--write` 只追加（人的判断一条不动），
+然后**立刻再跑一遍**——重跑不成立的候选会被自动撤掉。它给的是候选，措辞仍要人 review。
+
 **流程不用手写**：`npm run apps:gen -- --write --id <app> --spec <key>` 从一个 spec 生成/刷新整个应用包
 （旅程逐字段等于 `emitPlan(spec)` 的展开结果，包里记着展开内容的 `plan_sha256`；改 spec 忘了重新生成、
 或有人手改了 `journey`，`--check` 都会变红）。当前 7 个应用是**生成**的（6 个 transfer 复刻站 + ctrip-case），

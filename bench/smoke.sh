@@ -37,6 +37,8 @@ if [ "$fail" -eq 0 ]; then npm run --silent test || fail=1; fi
 run "2/3 六层跨实现对拍" npm run --silent test:parity
 # 生成的包必须与 spec 的展开一致（构造性质；改 spec 没重新生成、或手改了 journey，这里就红）
 run "2b 应用包与 spec 展开一致（apps:gen --check）" npm run --silent apps:gen -- --check --quiet
+# 探针基线：包里的判决必须等于已入库探测记录（站点变了/有人手改包，都会在这里变红）
+run "2c 探针基线与探测记录一致（probes:baseline --check）" npm run --silent probes:baseline -- --check --quiet
 
 echo
 echo "### 3/3 模型侧用例（夹具跑分 / ctrip / transfer）"

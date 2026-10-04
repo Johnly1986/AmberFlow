@@ -135,7 +135,10 @@ export function matrix(): {
       declared: jsonLines(path.join(dir, "pack.json")),
       code: appCodeLines(dir),
       tokens: declaredTokens(dir),
-      generated: (pack as { generated_from?: { spec?: string } }).generated_from?.spec ?? null,
+      generated: (() => {
+        const g = (pack as { generated_from?: { spec?: string; source?: string } }).generated_from;
+        return g?.spec ?? g?.source ?? null;
+      })(),
     });
   }
   // 只用 sources 的应用（数据腿应用）也算应用——它们没有包
@@ -201,7 +204,7 @@ export function main(argv: string[] = process.argv.slice(2)): number {
   const head = ["应用", "类型", "数据源", "角色", "步骤", "工具步", "不变量", "声明行", "代码行", "来源", "声明的标识"];
   const table = rows.map((r) => [r.app, r.kind, String(r.sources), String(r.roles), String(r.steps),
     String(r.toolSteps), String(r.invariants), String(r.declared), String(r.code),
-    r.generated ? `生成:${r.generated.replace(/^transfer\/specs\//, "").replace(/\.json$/, "")}` : "手写",
+    r.generated ? `生成:${r.generated.replace(/^transfer\/specs\//, "").replace(/\.json$/, "").replace(/^src\//, "")}` : "手写",
     r.tokens.join(",") || "-"]);
   const widths = head.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
   const line = (cells: string[]): string =>

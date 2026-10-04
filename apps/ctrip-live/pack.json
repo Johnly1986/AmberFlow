@@ -194,6 +194,20 @@
         "登录首页",
         "sign in"
       ]
+    },
+    "baseline": {
+      "verdicts": {
+        "flight_search": "BLOCKED",
+        "hotel_price": "LOGIN_REQUIRED",
+        "flight_alt_shapes_all_432": "true",
+        "mobile_and_regional_all_432": "true",
+        "usable_for_case": "false",
+        "fallback": "ctrip/site/ 本地复刻站（同一交互路径 / 同一用例口径），见 ctrip/ctrip_task.py",
+        "captured": "0",
+        "total": "2",
+        "flights": "blocked",
+        "hotels": "login_required"
+      }
     }
   },
   "notes": [

@@ -29,7 +29,7 @@ npm run doctor                                   # 环境体检：Node / chromiu
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 837 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 859 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -83,7 +83,11 @@ npm run shortlist                                                               
 线上应用：`--app qunar-live --out /tmp/qunar`（真网络 + 真模型，**包里声明了 iPhone 设备面**；见下条规则）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
 原始观测 → 结论，含 11 处缺陷与 3 处共享层修补）：[bench/APP_VERIFY_REPORT.md](bench/APP_VERIFY_REPORT.md)。
 新增一个应用 = 新目录 `apps/<id>/`（`pack.json` + 可选 `sources/*.json`），**共享层零改动**；
-**流程不必手写**：`npm run apps:gen -- --write --id <app> --spec <key>` 从 `transfer/specs/*.json` 生成整个包
+**不变量也不必猜**：`npm run apps:induce -- --app <id> [--write]` 跑通一次，从"旅程少做最后一步"与
+"结束后"两个状态提出候选（区分性 + 稳定句柄 + 复跑一致三关），`--write` 只追加并在写回后**立刻重跑**，
+重跑不成立的候选自动撤掉。
+**流程不必手写**：`npm run apps:gen -- --write --id <app> --spec <key>`（或 `--source <模块>#<导出名>`
+从代码里的应用级计划）生成整个包
 （旅程逐字段 = `emitPlan(spec)` 的展开结果，`generated_from.plan_sha256` 是展开内容的指纹；
 `--check` 已进 `bench/smoke.sh`）。当前 7 个应用是生成的（`apps:matrix` 的"来源"列标出）。
 生成器**沿用种子包的角色结构、只把值换成展开结果**，并且**不发明判断**——`invariants`/`notes`/探针
@@ -102,6 +106,9 @@ npm run shortlist                                                               
 工具步（命令行当动作腿）：`npm run apps -- --app cli-report --no-model --allow-dangerous`（桩工具：
 退出码 / JSON 路径 / stderr / 幂等重试 / 干跑+确认+落盘）、`--app repo-report --no-model`（真实 git + jq）。
 不带 `--allow-dangerous` 时危险步会被**拒绝**且不落盘。
+
+探针基线：`npm run probes:baseline -- --check` 把包里 `probe.baseline.verdicts`（上一次真实探测的判决）
+与已入库的探测记录比——站点变了、或有人手改了包，都会红；`--write` 刷新（只存标量观察，不存 `*_reason`）。
 
 探针集（测量型应用）：`apps/ctrip-live` / `apps/ota-live` / `apps/qunar-live` 声明了全部 URL、站点特征、
 结果目录与判决角色；驱动只剩"怎么测"（`src/live-probe.ts` / `live-capture.ts` / `ota-probe.ts` /

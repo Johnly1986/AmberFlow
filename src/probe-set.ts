@@ -30,7 +30,7 @@ export const SPEC_VERSION = 1;
 
 export const PROBE_KEYS = [
   "date", "results_dir", "home", "http", "browser", "alts", "mobile", "repeat", "capture",
-  "roles", "markers", "login", "notes",
+  "roles", "markers", "login", "notes", "baseline",
 ] as const;
 export const TARGET_KEYS = ["id", "label", "short", "url"] as const;
 export const MARKER_KEYS = [
@@ -210,6 +210,26 @@ export function validateProbeBlock(probe: unknown, hostsRaw: unknown, where = "p
         .map((t) => String((t as Record<string, unknown>)["id"] ?? "")));
       for (const [role, id] of Object.entries(roles)) {
         if (!ids.has(String(id))) p.push(`${where}.roles.${role}: ${JSON.stringify(String(id))} is not an http target id`);
+      }
+    }
+  }
+  // `baseline`：上一次真实探测测出来的**判决**（不是输入）。见 tools/probe-baseline.ts——
+  // 它让"站点变了"从"再读一遍报告"变成一条会变红的检查；只存标量判决，不存 reason。
+  const baseline = probe["baseline"];
+  if (baseline !== undefined) {
+    if (!isDict(baseline)) {
+      p.push(`${where}.baseline must be an object {verdicts}`);
+    } else {
+      for (const k of Object.keys(baseline)) {
+        if (k !== "verdicts") p.push(`${where}.baseline.${k}: unknown key (known: verdicts)`);
+      }
+      const v = (baseline as Record<string, unknown>)["verdicts"];
+      if (!isDict(v)) {
+        p.push(`${where}.baseline.verdicts must be an object of scalars`);
+      } else {
+        for (const [k, val] of Object.entries(v)) {
+          if (typeof val !== "string") p.push(`${where}.baseline.verdicts.${k} must be a string`);
+        }
       }
     }
   }

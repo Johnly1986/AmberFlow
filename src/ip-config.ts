@@ -120,6 +120,69 @@ export function buildPlan(sn: string, row: IpRow, portal = PORTAL): TaskPlan {
   );
 }
 
+/**
+ * **应用级的计划**：整张规划表 → 一份计划（应用包 `apps/ip-config` 就由它生成）。
+ *
+ * 为什么它不直接等于 `rows.flatMap(row => buildPlan(...).subgoals)`：应用包的验收语义比
+ * "驱动跑一遍"更强，而那部分判断**属于代码、不属于手抄的 JSON**：
+ *
+ *   1. 保存成功不只认"已保存"，还要认**回显的是这一行规划的值**（`all_of` 两条）——
+ *      否则"保存了别的设备/别的值"也会被算成成功；
+ *   2. 规划表写错的行（第 4 段 > 255）**预期被设备页拒绝**：完成信号 = 设备页的错误文案
+ *      + **被拒绝的正是规划里那个值** + **没有出现"已保存"**，并且这一步带上自己的 `slots`，
+ *      好让"被拒绝的值就是规划值"这件事有数据出处（不是从页面抄回来的）。
+ *
+ * 这两条以前只写在 `apps/ip-config/pack.json` 里（人抄的 JSON，复核方要逐字段核对）。现在它们
+ * 是函数，`npm run apps:gen` 从它生成包，`--check` 保证两者不漂移。
+ */
+export function buildAppPlan(rows: IpRow[] = DEMO_ROWS, portal = PORTAL): TaskPlan {
+  const subgoals: Array<Record<string, unknown>> = [];
+  for (const row of rows) {
+    const sn = String(row.序列号);
+    const plan = buildPlan(sn, row, portal);
+    const malformed = !isIpv4(String(row.ip));
+    for (const sg of plan.subgoals) {
+      const copy = JSON.parse(JSON.stringify(sg)) as Record<string, unknown>;
+      const isSave = String(copy["desc"]).startsWith("把规划的");
+      if (!isSave) { subgoals.push(copy); continue; }
+      // 每台设备的值必须**跟着它自己那一步**（应用是 4 台设备拼成一条旅程，计划级数据袋装不下）
+      copy["slots"] = { ip: String(row.ip), mask: String(row.子网掩码), gw: String(row.网关) };
+      if (malformed) {
+        copy["desc"] = `把规划的 IP / 子网掩码 / 网关 提交到 ${sn}（规划表写的是 ${String(row.ip)}）`;
+        copy["signal"] = {
+          all_of: [
+            { css_text_contains: ["[data-test=error]", "IP 地址格式错误"] },
+            { css_text_contains: ["[data-test=error]", String(row.ip)] },
+            { not: { css_text_contains: ["[data-test=save-ok]", "已保存"] } },
+          ],
+        };
+      } else {
+        copy["signal"] = {
+          all_of: [
+            { css_text_contains: ["[data-test=save-ok]", "已保存"] },
+            { css_text_contains: ["[data-test=save-ok]", String(row.ip)] },
+          ],
+        };
+      }
+      subgoals.push(copy);
+    }
+  }
+  return new TaskPlan(
+    "按 Excel IP 规划表把每台设备的 ip / 子网掩码 / 网关写进它自己的网络设置页；"
+    + "表格里写错的那一行必须由设备页自己的校验拒绝，并被如实报出来",
+    subgoals as never,
+    ".task_state.json",
+    {},
+  );
+}
+
+/** 第 4 段 > 255（或不是四段）就是规划表写错的行——与设备页的校验同一条规则。 */
+export function isIpv4(s: string): boolean {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s.trim());
+  if (!m) return false;
+  return m.slice(1).every((o) => Number(o) <= 255);
+}
+
 export interface IpResult {
   sn: string;
   status: "OK" | "REJECTED" | "BLOCKED";

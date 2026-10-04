@@ -56,6 +56,14 @@
         "passport.",
         "/login"
       ]
+    },
+    "baseline": {
+      "verdicts": {
+        "curl-default-ua": "captured",
+        "curl-iphone-ua": "captured",
+        "httpx": "captured",
+        "chromium": "captured"
+      }
     }
   },
   "notes": [

@@ -67,7 +67,7 @@ describe("the repository is single-stack (TypeScript only)", () => {
     for (const [name, cmd] of Object.entries(pkg.scripts)) {
       expect(cmd, `script ${name} still shells out to Python`).not.toMatch(/python|pytest|uvicorn/);
     }
-    for (const s of ["typecheck", "test", "test:parity", "verify", "bench", "apps", "apps:matrix", "apps:suite", "apps:gen", "plan-cli"]) {
+    for (const s of ["typecheck", "test", "test:parity", "verify", "bench", "apps", "apps:matrix", "apps:suite", "apps:gen", "probes:baseline", "apps:induce", "plan-cli"]) {
       expect(Object.keys(pkg.scripts), `missing script ${s}`).toContain(s);
     }
   });
@@ -104,6 +104,10 @@ describe("the data the project needs is still here", () => {
     ["bench/AUTHORING_ASSESSMENT.md", "what of the app layer is machine-generated vs hand-written"],
     ["tools/spec-to-pack.ts", "the spec -> pack generator (alignment by construction)"],
     ["tests/spec-to-pack.test.ts", "drift detection for generated packs"],
+    ["tools/probe-baseline.ts", "the probe verdict baseline (site drift vs hand edits)"],
+    ["tests/probe-baseline.test.ts", "baseline drift detection"],
+    ["tools/apps-induce.ts", "invariant induction (propose, then let a re-run decide)"],
+    ["tests/apps-induce.test.ts", "induction gates + append-only write-back"],
     ["apps/INVENTORY.md", "the application backlog + definition of done"],
     ["apps/demo-tool/sources/demo-tool.json", "the CI-safe CLI tool source"],
     ["apps/git-log/sources/git-log.json", "a real CLI (git) source"],

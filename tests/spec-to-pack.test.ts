@@ -12,7 +12,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadPack, validatePack, type AppPack } from "../src/app-pack.ts";
 import { discoverSpecs, emitPlan } from "../src/transfer-task.ts";
 import {
-  checkApp, generatePack, generatedApps, planSha, serializePack, specPathOf, structureFromSeed,
+  checkAgainstFlow, flowFor, generatePack, generatedApps, planSha, serializePack, specPathOf,
+  structureFromSeed, type Flow,
 } from "../tools/spec-to-pack.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
@@ -24,11 +25,19 @@ function tmp(): string {
 }
 afterEach(() => { while (TMP.length) fs.rmSync(TMP.pop()!, { recursive: true, force: true }); });
 
+/** 测试里按应用现算一次 flow（checkAgainstFlow 接收已解析的 flow）。 */
+async function testFlow(a: { ref: Parameters<typeof flowFor>[0] }): Promise<Flow> {
+  return flowFor(a.ref);
+}
+
 describe("spec → pack：7 个复刻站应用与 spec 展开一致（构造性质，不是人工对齐）", () => {
-  it("每个声明了 generated_from 的应用都通过 check（加载 + 展开 + 逐字段 + 哈希）", () => {
+  it("每个声明了 generated_from 的应用都通过 check（加载 + 展开 + 逐字段 + 哈希）", async () => {
     const apps = generatedApps();
     expect(apps.length).toBeGreaterThanOrEqual(7);          // 6 个 transfer 复刻站 + ctrip-case
-    for (const a of apps) expect({ id: a.id, problems: checkApp(a) }).toEqual({ id: a.id, problems: [] });
+    for (const a of apps) {
+      const flow = await flowFor(a.ref);
+      expect({ id: a.id, problems: checkAgainstFlow(a, flow) }).toEqual({ id: a.id, problems: [] });
+    }
   });
 
   it("生成是**幂等**的，而且不依赖时钟（同一输入两次生成逐字节相同）", () => {
@@ -49,41 +58,84 @@ describe("spec → pack：7 个复刻站应用与 spec 展开一致（构造性�
   });
 });
 
+describe("builder → pack：流程来自代码里的应用级计划（第 2 条）", () => {
+  it("apps/ip-config 由 src/ip-config.ts#buildAppPlan 生成，且 check 通过", async () => {
+    const a = generatedApps().find((x) => x.id === "ip-config")!;
+    expect(a.ref).toEqual({ source: "src/ip-config.ts#buildAppPlan" });
+    expect(checkAgainstFlow(a, await flowFor(a.ref))).toEqual([]);
+  });
+
+  it("builder 把验收语义带进包：保存步认回显值，坏行预期被拒绝（而不是手抄进 JSON）", () => {
+    const pack = loadPack(path.join(REPO, "apps", "ip-config", "pack.json"));
+    const j = pack.journey as Array<Record<string, unknown>>;
+    // 第 2 步（CAM-1001 的保存）：all_of[已保存, 回显 10.0.1.11]
+    expect(JSON.stringify(j[1]!["signal"])).toContain("10.0.1.11");
+    expect(JSON.stringify(j[1]!["signal"])).toContain("all_of");
+    // 第 8 步（CAM-1003 坏行）：错误文案 + 被拒的值 + not 已保存 + 自己的 slots
+    const bad = JSON.stringify(j[7]!["signal"]);
+    expect(bad).toContain("IP 地址格式错误");
+    expect(bad).toContain("10.0.1.999");
+    expect(bad).toContain("not");
+    expect(j[7]!["slots"]).toMatchObject({ ip: "10.0.1.999" });
+  });
+
+  it("builder 侧的漂移同样被 check 抓到（改 src 里的判断而没重新生成）", async () => {
+    const a = generatedApps().find((x) => x.id === "ip-config")!;
+    const doctored = JSON.parse(JSON.stringify(a.pack)) as AppPack;
+    (doctored.journey[1] as Record<string, unknown>)["signal"] = { css_text_contains: ["[data-test=save-ok]", "已保存"] };
+    const flow = await flowFor(a.ref);
+    expect(checkAgainstFlow({ id: a.id, pack: doctored }, flow).join(" | ")).toMatch(/与 spec 展开不一致/);
+  });
+
+  it("坏 source 声明在加载期报错（模块不存在 / 缺 #导出名 / 两种都给）", () => {
+    const base = loadPack(path.join(REPO, "apps", "ip-config", "pack.json"));
+    const mk = (): AppPack => JSON.parse(JSON.stringify(base)) as AppPack;
+    const noModule = mk();
+    (noModule.generated_from as { source: string }).source = "src/ghost.ts#buildAppPlan";
+    expect(validatePack(noModule).join(" | ")).toMatch(/module "src\/ghost\.ts" does not exist/);
+    const noFn = mk();
+    (noFn.generated_from as { source: string }).source = "src/ip-config.ts";
+    expect(validatePack(noFn).join(" | ")).toMatch(/must look like/);
+    const both = mk();
+    (both.generated_from as unknown as Record<string, unknown>)["spec"] = "transfer/specs/trekly.json";
+    expect(validatePack(both).join(" | ")).toMatch(/must not carry both/);
+  });
+});
+
 describe("spec → pack：漂移必须被抓到（这是它替代人工对齐的资格）", () => {
-  it("包里的旅程被手改 → check 报「与 spec 展开不一致」", () => {
+  it("包里的旅程被手改 → check 报「与 spec 展开不一致」", async () => {
     const a = generatedApps().find((x) => x.id === "transfer-trekly")!;
     const doctored = JSON.parse(JSON.stringify(a.pack)) as AppPack;
     (doctored.journey[1] as Record<string, unknown>)["target_hint"] = "#totally-different";
-    const problems = checkApp({ id: a.id, spec: a.spec, pack: doctored }).join(" | ");
+    const problems = checkAgainstFlow({ id: a.id, pack: doctored }, (await testFlow(a))).join(" | ");
     expect(problems).toMatch(/与 spec 展开不一致/);
   });
 
-  it("角色模板被手改 → 同样被抓到（角色也是展开结果的一部分）", () => {
+  it("角色模板被手改 → 同样被抓到（角色也是展开结果的一部分）", async () => {
     const a = generatedApps().find((x) => x.id === "transfer-trekly")!;
     const doctored = JSON.parse(JSON.stringify(a.pack)) as AppPack;
     const roles = doctored.roles as Record<string, Record<string, unknown>>;
     roles["filter-window"]!["signal"] = { css_exists: "#wrong" };
-    expect(checkApp({ id: a.id, spec: a.spec, pack: doctored }).join(" | ")).toMatch(/与 spec 展开不一致/);
+    expect(checkAgainstFlow({ id: a.id, pack: doctored }, (await testFlow(a))).join(" | ")).toMatch(/与 spec 展开不一致/);
   });
 
-  it("plan_sha256 对不上 → 报哈希不匹配（改了 spec 忘了重新生成时就是这样）", () => {
+  it("plan_sha256 对不上 → 报哈希不匹配（改了 spec 忘了重新生成时就是这样）", async () => {
     const a = generatedApps().find((x) => x.id === "transfer-voyagio")!;
     const doctored = JSON.parse(JSON.stringify(a.pack)) as AppPack;
     (doctored.generated_from as { plan_sha256: string }).plan_sha256 = "0".repeat(64);
-    expect(checkApp({ id: a.id, spec: a.spec, pack: doctored }).join(" | ")).toMatch(/plan_sha256 不匹配/);
+    expect(checkAgainstFlow({ id: a.id, pack: doctored }, (await testFlow(a))).join(" | ")).toMatch(/plan_sha256 不匹配/);
   });
 
-  it("invariants 为空会被明说（生成器只搬判断，不发明判断）", () => {
+  it("invariants 为空会被明说（生成器只搬判断，不发明判断）", async () => {
     const a = generatedApps().find((x) => x.id === "transfer-skybook")!;
     const doctored = JSON.parse(JSON.stringify(a.pack)) as AppPack;
     doctored.invariants = [];
-    expect(checkApp({ id: a.id, spec: a.spec, pack: doctored }).join(" | ")).toMatch(/invariants 为空/);
+    expect(checkAgainstFlow({ id: a.id, pack: doctored }, (await testFlow(a))).join(" | ")).toMatch(/invariants 为空/);
   });
 
-  it("spec 路径不存在时也报（generated_from.spec 是发现入口，不能悬空）", () => {
+  it("spec 路径不存在时也报（generated_from.spec 是发现入口，不能悬空）", async () => {
     const a = generatedApps()[0]!;
-    const problems = checkApp({ id: a.id, spec: "transfer/specs/nope.json", pack: a.pack }).join(" | ");
-    expect(problems).toMatch(/spec transfer\/specs\/nope\.json 不存在/);
+    await expect(flowFor({ spec: "transfer/specs/nope.json" })).rejects.toThrow(/不存在/);
   });
 });
 

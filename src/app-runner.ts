@@ -37,6 +37,8 @@ import { runSubgoalWithRetries } from "./planner.ts";
 import { DESTRUCTIVE_PATTERNS } from "./rules.ts";
 import { checkSignal } from "./signals.ts";
 import { checkToolSignal, type ToolSignal } from "./tool-signals.ts";
+import { captureStateView } from "./signal-induction.ts";
+import type { StateView } from "./signals.ts";
 import { expandPack, listPacks, loadPack, type AppPack, type ExpandedStep } from "./app-pack.ts";
 
 /** 进程内运行序号：保证同一毫秒内连续两次运行也不会撞上同一个 `{run_id}`。 */
@@ -68,6 +70,12 @@ export interface AppRunOptions {
   runId?: string;
   /** 测试缝：注入会话工厂。 */
   sessionFactory?: () => Promise<BrowserSession>;
+  /**
+   * 把旅程**结束时的页面状态**一并返回（`end_state`）：给"不变量归纳"用
+   * （`tools/apps-induce.ts` 拿它与"还没动手时的状态"比，挑出真正被这条旅程改变的、稳定的 DOM 事实）。
+   * 默认关：普通运行不需要多付一次页面扫描。
+   */
+  captureState?: boolean;
   modelId?: string;
 }
 
@@ -150,6 +158,8 @@ export interface AppRunResult {
   sources: AppSourceResult[];
   ok: boolean;
   secs: number;
+  /** `captureState: true` 时的旅程结束状态（见 `RunOptions.captureState`）。 */
+  end_state?: StateView;
 }
 
 /** 跑一个工具步：干跑（若声明）→ 确认（若不可逆）→ apply（按幂等性决定重试）。 */
@@ -258,6 +268,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   } = opts;
   const t0 = Date.now();
   const expanded = expandPack(pack, slots, planPath);
+  let endState: StateView | undefined;
   const plan = expanded.plan;
   // 相对 start_url 按仓库根解析成 file://（与 bench 同一口径）：应用包写仓库内路径，
   // 不写死绝对路径，换机器/换 checkout 目录仍然可跑。
@@ -350,6 +361,15 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       invariantResults.push({ id: inv.id, desc: inv.desc ?? inv.id, held });
       if (verbose) console.log(`  invariant ${inv.id}: ${held ? "held" : "VIOLATED"}`);
     }
+    // 结束态必须在 session 关掉**之前**抓（否则抓到的是一个已关闭的页面）。
+    // 捕获失败不该让一条本来成功的旅程变红，但也不能静默——verbose 下说明原因。
+    if (opts.captureState && live !== null) {
+      try {
+        endState = await captureStateView(live.page as never);
+      } catch (e) {
+        if (verbose) console.log(`  end-state capture failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
   } finally {
     if (holder.session !== null) await holder.session.close();
   }
@@ -368,6 +388,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     roles_used: expanded.rolesUsed, slots: expanded.slots,
     completed: `${doneCount}/${expanded.steps.length}`,
     subgoals, tool_steps: toolSteps, invariants: invariantResults,
+    ...(endState ? { end_state: endState } : {}),
     sources: sourceResults, ok, secs: Math.round((Date.now() - t0) / 100) / 10,
   };
 }

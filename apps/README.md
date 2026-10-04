@@ -133,7 +133,18 @@ npm run apps:gen -- --write                                 # 刷新所有已挂
 npm run apps:gen -- --check                                 # 门禁口径：旅程 == emitPlan(spec) 的展开且哈希匹配
 ```
 
-生成物里 `generated_from: { spec, plan_sha256 }` 就是这份承诺：**对齐是构造性质，不是人工核对**。
+流程的来源有两种（`generated_from` 里二选一）：
+
+| 来源 | 写法 | 什么时候用 |
+|---|---|---|
+| spec 文件 | `{ "spec": "transfer/specs/trekly.json" }` | 流程已经是一份 spec（`emitPlan` 展开） |
+| **模块导出** | `{ "source": "src/ip-config.ts#buildAppPlan" }` | 流程的判断写在**代码**里（例如"保存要认回显的值""规划表写错的行预期被设备页拒绝"）——驱动与生成器共用同一份，谁也漂移不了 |
+
+```bash
+npm run apps:gen -- --write --id ip-config --source src/ip-config.ts#buildAppPlan
+```
+
+生成物里 `generated_from` 就是这份承诺：**对齐是构造性质，不是人工核对**。
 任何一侧漂移都会让 `--check` 变红（手改 `journey`、改了 spec 没重新生成，都会抓到）；`bench/smoke.sh`
 已经把它当成一条门禁。生成器**沿用你已有的结构**（角色名、哪些字段是逐实例覆盖），只把**值**换成展开结果——
 所以它不会重排你的包，也不会重新发明角色名。**它不生成判断**：`invariants` / `notes` 仍然是人的，
@@ -329,6 +340,31 @@ node --experimental-strip-types src/qunar-task.ts                 # 抓取计划
 债计数的口径也升级了：除了"应用声明的标识出现在非核心文件里"，还**独立**扫描非核心文件里写死的
 `http(s)://主机`（`localhost` / `example.com` 之类除外）——所以"藏在驱动里、应用还没声明"的站点知识
 同样会出现在债那一栏，而不是只能看见自己已经承认的那些。当前：**债 0 处**。
+
+### 不变量归纳：让跑通的旅程自己提出"什么必须成立"
+
+```bash
+npm run apps:induce -- --app ctrip-case --json     # 看它提出什么（含每条候选的对照态）
+npm run apps:induce -- --app ctrip-case --write    # 追加进包里，然后立刻重跑验证
+```
+
+三道闸门：① **区分性**（结束后为真、**对照态**为假——对照态是"这条旅程少做最后一步"，不是首页，
+否则会把城市输入框这类无关 UI 也收进来）；② **稳定句柄**（`data-test`/`id`/`name`，值不能是波动量）；
+③ **复跑一致**（`--runs N` 取交集）。`--write` 只追加、不覆盖人的判断，并且**重跑不成立的候选会被撤掉**
+（宁可少一条真断言，也不要一条会骗人的）。实测：某次归纳提出 4 条、重跑发现 1 条不可复现（`#ledger-table`
+是否缺席不稳定）→ 自动撤掉 → 最终 19/19、3/3 成立。
+
+### 探针基线：把"上次测出来的判决"记进包里
+
+```bash
+npm run probes:baseline -- --check                 # 门禁口径：包里的判决 vs 已入库的探测记录
+npm run probes:baseline -- --write                 # 用记录刷新基线
+npm run probes:baseline -- --from <新探针结果.json> --write   # 用一次新探测刷新
+```
+
+声明的是**输入**（URL / 风控词 / 登录墙特征），基线记的是**测出来的判决**（`BLOCKED` /
+`LOGIN_REQUIRED` / `captured` …）。于是"站点变了"不再只能靠人再读一遍报告：`--check` 会红，
+而且"有人手改了包"是同一个检查。只存标量观察，不存 `*_reason`（叙述留在冻结语料里，别造第二份散文）。
 
 ## 六、还没做的（诚实清单）
 

@@ -29,6 +29,67 @@ import { discoverSpecs, emitPlan } from "../src/transfer-task.ts";
 
 export const REPO = path.resolve(import.meta.dirname, "..");
 
+/** 计划的最小形状（`TaskPlan` 实例与 `emitPlan` 写出的 JSON 都满足它）。 */
+export interface PlanLike {
+  goal?: string;
+  slots?: Record<string, unknown>;
+  subgoals: Array<Record<string, unknown>>;
+}
+
+/** 流程的来源：一个 spec 文件，或一个导出"应用级计划"的模块函数。 */
+export type FlowRef = { spec: string } | { source: string };
+
+export interface Flow {
+  plan: PlanLike;
+  label: string;
+  /** spec 的步骤定义（角色名重建用）；builder 输入没有这个，纯按计划展开。 */
+  specSteps?: Array<{ role?: string; desc?: string }>;
+}
+
+/**
+ * 应用里的每一步都来自**某个上游构件**。两种上游：
+ *   - `spec`：`transfer/specs/<key>.json`（经 `emitPlan` 展开）；
+ *   - `source`：`<模块>#<导出名>`，导出函数返回一份应用级计划（例如
+ *     `src/ip-config.ts#buildAppPlan`：整张 IP 规划表 → 一条旅程，并且把"保存要认回显的值"
+ *     "规划表写错的行预期被设备页拒绝"这两条判断写在**代码**里，而不是手抄进 JSON）。
+ * 判断写在代码里而不是数据里，是因为它本来就是"这个应用验收什么"的语义；写进代码后
+ * 驱动与生成器共用同一份，谁也漂移不了。
+ */
+export async function flowFor(ref: FlowRef): Promise<Flow> {
+  if ("spec" in ref) {
+    const key = ref.spec.replace(/^transfer\/specs\//, "").replace(/\.json$/, "");
+    const specs = discoverSpecs();
+    if (!specs[key]) throw new Error(`spec ${JSON.stringify(ref.spec)} 不存在（可用：${Object.keys(specs).join(", ")}）`);
+    return {
+      plan: expandSpec(key, specs[key]).plan,
+      label: specPathOf(key),
+      specSteps: ((specs[key] as { phases?: Array<{ steps?: Array<{ role?: string; desc?: string }> }> }).phases ?? [])
+        .flatMap((ph) => ph.steps ?? []),
+    };
+  }
+  const [file, fn] = ref.source.split("#");
+  if (!file || !fn) throw new Error(`generated_from.source 形如 "<模块>#<导出名>"，收到 ${JSON.stringify(ref.source)}`);
+  const mod = (await import(path.join(REPO, file))) as Record<string, unknown>;
+  const build = mod[fn];
+  if (typeof build !== "function") throw new Error(`${file} 没有导出函数 ${fn}`);
+  const out = (build as () => unknown)() as PlanLike;
+  if (!out || !Array.isArray(out.subgoals)) throw new Error(`${file}#${fn} 必须返回 {goal, slots, subgoals}`);
+  return { plan: out, label: ref.source };
+}
+
+/** 从 `generated_from` 读出来源（两种写法都支持）。 */
+export function refOf(pack: AppPack): FlowRef | null {
+  const g = (pack as { generated_from?: { spec?: string; source?: string } }).generated_from;
+  if (!g) return null;
+  if (typeof g.spec === "string") return { spec: g.spec };
+  if (typeof g.source === "string") return { source: g.source };
+  return null;
+}
+
+export function refLabel(ref: FlowRef): string {
+  return "spec" in ref ? ref.spec : ref.source;
+}
+
 /** 人写的键：生成器原样保留（缺失时保持缺失）。 */
 export const HUMAN_KEYS = [
   "label", "model", "max_subgoals", "hosts", "required_slots", "sources",
@@ -211,24 +272,31 @@ export function applyStructure(
   return { roles, journey };
 }
 
+/** spec 输入的便捷包装（既有调用点与测试都用它）。 */
 export function generatePack(
   id: string, specKey: string, spec: unknown, specPath: string, keep?: AppPack | null,
 ): Generated {
-  const { plan } = expandSpec(specKey, spec);
-  const steps = plan.subgoals.length;
+  const { plan } = expandSpec(specKey, spec as never);
   const specSteps = ((spec as { phases?: Array<{ steps?: Array<{ role?: string; desc?: string }> }> }).phases ?? [])
     .flatMap((ph) => ph.steps ?? []);
+  return generateFromFlow(id, { plan, label: specPath, specSteps }, keep);
+}
+
+export function generateFromFlow(id: string, flow: Flow, keep?: AppPack | null): Generated {
+  const plan = flow.plan;
+  const specPath = flow.label;
+  const steps = plan.subgoals.length;
+  const specSteps = flow.specSteps ?? [];
   const full = journeyFrom(plan);
   const seedStructure = structureFromSeed(keep, full.length);
   const { roles, journey } = seedStructure
     ? applyStructure(full, seedStructure)
     : rolesAndJourney(full, specSteps);
-  const specRel = specPathOf(specKey);
   const pack: Record<string, unknown> = {
     spec_version: 1,
     id,
-    label: keep?.label ?? `${specKey} 复刻站（由 spec 生成）`,
-    goal: plan.goal ?? keep?.goal ?? specKey,
+    label: keep?.label ?? `${flow.label} 生成的应用`,
+    goal: plan.goal ?? keep?.goal ?? flow.label,
     model: keep?.model ?? "english",
     max_subgoals: keep?.max_subgoals ?? steps,
     hosts: keep?.hosts ?? [],
@@ -239,16 +307,18 @@ export function generatePack(
     journey,
     invariants: keep?.invariants ?? [],
     notes: [
-      `本文件由 \`npm run apps:gen\` 从 \`${specRel}\` 生成：旅程逐字段等于 \`emitPlan("${specKey}")\` 的展开结果，`,
+      `本文件由 \`npm run apps:gen\` 从 \`${flow.label}\` 生成：旅程逐字段等于该来源的展开结果，`,
       "改流程请改 spec 再重新生成，不要手改 journey（手改会被 `npm run apps:gen -- --check` 抓到）。",
       "**人写的只有这里的 invariants 与 notes**（结束状态要成立什么、以及为什么这样定）——生成器不发明判断。",
       ...(keep?.notes ?? []),
     ],
-    generated_from: { spec: specRel, plan_sha256: planSha(plan) },
+    generated_from: flow.label.includes("#")
+      ? { source: flow.label, plan_sha256: planSha(plan) }
+      : { spec: flow.label, plan_sha256: planSha(plan) },
   };
   const keepBag = (keep ?? {}) as unknown as Record<string, unknown>;
   for (const k of ["device", "probe"] as const) if (keepBag[k] !== undefined) pack[k] = keepBag[k];
-  return { pack: pack as unknown as AppPack, planSha: planSha(plan), steps, specPath: specRel };
+  return { pack: pack as unknown as AppPack, planSha: planSha(plan), steps, specPath: flow.label };
 }
 
 /** 稳定序列化：键按 PACK 的书写顺序，2 空格缩进（生成物要可读、可比对、diff 干净）。 */
@@ -264,23 +334,20 @@ export function serializePack(pack: AppPack): string {
 }
 
 /** 找到所有"已挂上生成器"的应用（发现，而不是维护一张名单）。 */
-export function generatedApps(): Array<{ id: string; dir: string; spec: string; pack: AppPack }> {
-  const out: Array<{ id: string; dir: string; spec: string; pack: AppPack }> = [];
+export function generatedApps(): Array<{ id: string; dir: string; ref: FlowRef; pack: AppPack }> {
+  const out: Array<{ id: string; dir: string; ref: FlowRef; pack: AppPack }> = [];
   for (const dir of appDirs()) {
     const pack = loadPack(path.join(dir, "pack.json"));
-    const g = (pack as { generated_from?: { spec?: string } }).generated_from;
-    if (g?.spec) out.push({ id: pack.id, dir, spec: g.spec, pack });
+    const ref = refOf(pack);
+    if (ref) out.push({ id: pack.id, dir, ref, pack });
   }
   return out;
 }
 
 /** `--check`：包与 spec 两侧都不许漂移。返回每条应用的问题清单（空 = 通过）。 */
-export function checkApp(entry: { id: string; spec: string; pack: AppPack }): string[] {
+export function checkAgainstFlow(entry: { id: string; pack: AppPack }, flow: Flow): string[] {
   const problems: string[] = [];
-  const specs = discoverSpecs();
-  const key = Object.keys(specs).find((k) => `transfer/specs/${k}.json` === entry.spec);
-  if (!key) { problems.push(`spec ${entry.spec} 不存在（可用的：${Object.keys(specs).join(", ")}）`); return problems; }
-  const fresh = generatePack(entry.id, key, specs[key], entry.spec, entry.pack);
+  const fresh = generateFromFlow(entry.id, flow, entry.pack);
   // "比 JSON"是不够的：一个引用了不存在角色的 journey 也可以逐字节等于另一个坏 journey。
   // 所以这里**真加载 + 真展开**，再把展开后的计划逐字段与 emitPlan 的结果比。
   problems.push(...validatePack(entry.pack));
@@ -328,7 +395,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     args: argv,
     options: {
       write: { type: "boolean" }, check: { type: "boolean" }, list: { type: "boolean" },
-      id: { type: "string" }, spec: { type: "string" }, quiet: { type: "boolean" }, help: { type: "boolean" },
+      id: { type: "string" }, spec: { type: "string" }, source: { type: "string" },
+      quiet: { type: "boolean" }, help: { type: "boolean" },
     },
   });
   if (values.help || (!values.write && !values.check && !values.list)) {
@@ -336,7 +404,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   --list            有哪些 spec 可生成、哪些应用已挂上生成器
   --check           检查所有已挂上的应用：旅程 == emitPlan(spec) 的展开，且 plan_sha256 匹配
-  --write           重新生成（默认所有已挂上的应用；给 --id/--spec 可给新应用挂上）
+  --write           重新生成（默认所有已挂上的应用；给 --id/--spec 或 --id/--source 可给新应用挂上）
+  --source MOD#FN   流程来自一个导出"应用级计划"的函数（例如 src/ip-config.ts#buildAppPlan）
   --quiet           只输出结论行
 
 退出码：0=一致 ｜ 1=有漂移 ｜ 2=用法错误（如 --id 没有对应的 spec）`);
@@ -349,34 +418,39 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     for (const k of Object.keys(specs).sort()) console.log(`  ${k.padEnd(12)} transfer/specs/${k}.json`);
     const apps = generatedApps();
     console.log("\n已挂上生成器的应用：");
-    if (!apps.length) console.log("  （还没有：用 --write --id <app> --spec <key> 挂上第一个）");
-    for (const a of apps.sort((x, y) => x.id.localeCompare(y.id))) console.log(`  ${a.id.padEnd(22)} ${a.spec}`);
+    if (!apps.length) console.log("  （还没有：用 --write --id <app> --spec <key> 或 --source <模块#导出名> 挂上第一个）");
+    for (const a of apps.sort((x, y) => x.id.localeCompare(y.id))) {
+      console.log(`  ${a.id.padEnd(22)} ${refLabel(a.ref)}`);
+    }
     return 0;
   }
 
   if (values.write) {
-    const targets: Array<{ id: string; spec: string; keep: AppPack | null }> = [];
-    if (values.id || values.spec) {
-      if (!values.id || !values.spec) { console.error("--write 给新应用挂上时必须同时给 --id 与 --spec"); return 2; }
-      if (!specs[values.spec]) {
+    const targets: Array<{ id: string; ref: FlowRef; keep: AppPack | null }> = [];
+    if (values.id || values.spec || values.source) {
+      if (!values.id || (!values.spec && !values.source)) {
+        console.error("--write 给新应用挂上时必须给 --id 且给 --spec 或 --source 之一"); return 2;
+      }
+      if (values.spec && values.source) { console.error("--spec 与 --source 只能给一个"); return 2; }
+      if (values.spec && !specs[values.spec]) {
         console.error(`spec ${JSON.stringify(values.spec)} 不存在（可用：${Object.keys(specs).join(", ")}）`);
         return 2;
       }
       const dir = path.join(REPO, "apps", values.id);
       const existing = fs.existsSync(path.join(dir, "pack.json")) ? loadPack(path.join(dir, "pack.json")) : null;
-      targets.push({ id: values.id, spec: values.spec, keep: existing });
+      targets.push({ id: values.id, ref: values.source ? { source: values.source } : { spec: specPathOf(values.spec!) }, keep: existing });
     } else {
-      for (const a of generatedApps()) targets.push({ id: a.id, spec: a.spec, keep: a.pack });
+      for (const a of generatedApps()) targets.push({ id: a.id, ref: a.ref, keep: a.pack });
       if (!targets.length) { console.error("没有任何应用声明了 generated_from（用 --id/--spec 挂上第一个）"); return 2; }
     }
     for (const t of targets) {
-      const key = t.spec.replace(/^transfer\/specs\//, "").replace(/\.json$/, "");
-      const gen = generatePack(t.id, key, specs[key], specPathOf(t.spec), t.keep);
+      const flow = await flowFor(t.ref);
+      const gen = generateFromFlow(t.id, flow, t.keep);
       const dir = path.join(REPO, "apps", t.id);
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, "pack.json"), serializePack(gen.pack));
       if (!values.quiet) {
-        console.log(`已生成 apps/${t.id}/pack.json  ← ${t.spec}（${gen.steps} 步，plan_sha256 ${gen.planSha.slice(0, 12)}…）`);
+        console.log(`已生成 apps/${t.id}/pack.json  ← ${flow.label}（${gen.steps} 步，plan_sha256 ${gen.planSha.slice(0, 12)}…）`);
         if ((gen.pack.invariants ?? []).length === 0) {
           console.log(`  ⚠ ${t.id} 的 invariants 为空：生成器不会替你发明"什么必须成立"——它只验证动作腿跑完。`);
         }
@@ -390,13 +464,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (!apps.length) { console.error("没有任何应用声明了 generated_from；先跑 --write --id <app> --spec <key>"); return 2; }
   let bad = 0;
   for (const a of apps.sort((x, y) => x.id.localeCompare(y.id))) {
-    const problems = checkApp(a);
+    let problems: string[];
+    try {
+      problems = checkAgainstFlow(a, await flowFor(a.ref));
+    } catch (e) {
+      problems = [e instanceof Error ? e.message : String(e)];
+    }
     if (problems.length) {
       bad++;
       console.error(`✗ ${a.id}`);
       for (const p of problems) console.error(`    - ${p}`);
     } else if (!values.quiet) {
-      console.log(`✓ ${a.id.padEnd(22)} ${a.spec}  plan_sha256 ${(a.pack as never as { generated_from: { plan_sha256: string } }).generated_from.plan_sha256.slice(0, 12)}…`);
+      const sha = (a.pack as unknown as { generated_from: { plan_sha256: string } }).generated_from.plan_sha256;
+      console.log(`✓ ${a.id.padEnd(22)} ${refLabel(a.ref)}  plan_sha256 ${sha.slice(0, 12)}…`);
     }
   }
   console.log(`apps:gen：${apps.length - bad}/${apps.length} 与 spec 展开一致`

@@ -7,23 +7,23 @@
   "max_subgoals": 8,
   "hosts": [],
   "slots": {},
+  "required_slots": [],
   "sources": [],
   "journey": [
     {
       "desc": "打开 CAM-1001 的网络设置页",
       "start_url": "testpages/net_portal.html",
-      "target_hint": "a[data-test=net-CAM-1001]",
       "signal": {
         "css_text_contains": [
           "[data-test=sn]",
           "CAM-1001"
         ]
-      }
+      },
+      "target_hint": "a[data-test=net-CAM-1001]"
     },
     {
       "desc": "把规划的 IP / 子网掩码 / 网关 保存到 CAM-1001",
       "start_url": "testpages/net_settings.html?sn=CAM-1001",
-      "target_hint": "button[data-test=net-save]",
       "signal": {
         "all_of": [
           {
@@ -40,6 +40,7 @@
           }
         ]
       },
+      "target_hint": "button[data-test=net-save]",
       "slots": {
         "ip": "10.0.1.11",
         "mask": "255.255.255.0",
@@ -49,18 +50,17 @@
     {
       "desc": "打开 CAM-1002 的网络设置页",
       "start_url": "testpages/net_portal.html",
-      "target_hint": "a[data-test=net-CAM-1002]",
       "signal": {
         "css_text_contains": [
           "[data-test=sn]",
           "CAM-1002"
         ]
-      }
+      },
+      "target_hint": "a[data-test=net-CAM-1002]"
     },
     {
       "desc": "把规划的 IP / 子网掩码 / 网关 保存到 CAM-1002",
       "start_url": "testpages/net_settings.html?sn=CAM-1002",
-      "target_hint": "button[data-test=net-save]",
       "signal": {
         "all_of": [
           {
@@ -77,6 +77,7 @@
           }
         ]
       },
+      "target_hint": "button[data-test=net-save]",
       "slots": {
         "ip": "10.0.1.12",
         "mask": "255.255.255.0",
@@ -86,18 +87,17 @@
     {
       "desc": "打开 PTZ-2001 的网络设置页",
       "start_url": "testpages/net_portal.html",
-      "target_hint": "a[data-test=net-PTZ-2001]",
       "signal": {
         "css_text_contains": [
           "[data-test=sn]",
           "PTZ-2001"
         ]
-      }
+      },
+      "target_hint": "a[data-test=net-PTZ-2001]"
     },
     {
       "desc": "把规划的 IP / 子网掩码 / 网关 保存到 PTZ-2001",
       "start_url": "testpages/net_settings.html?sn=PTZ-2001",
-      "target_hint": "button[data-test=net-save]",
       "signal": {
         "all_of": [
           {
@@ -114,6 +114,7 @@
           }
         ]
       },
+      "target_hint": "button[data-test=net-save]",
       "slots": {
         "ip": "10.0.2.21",
         "mask": "255.255.255.0",
@@ -123,23 +124,17 @@
     {
       "desc": "打开 CAM-1003 的网络设置页",
       "start_url": "testpages/net_portal.html",
-      "target_hint": "a[data-test=net-CAM-1003]",
       "signal": {
         "css_text_contains": [
           "[data-test=sn]",
           "CAM-1003"
         ]
-      }
+      },
+      "target_hint": "a[data-test=net-CAM-1003]"
     },
     {
       "desc": "把规划的 IP / 子网掩码 / 网关 提交到 CAM-1003（规划表写的是 10.0.1.999）",
       "start_url": "testpages/net_settings.html?sn=CAM-1003",
-      "target_hint": "button[data-test=net-save]",
-      "slots": {
-        "ip": "10.0.1.999",
-        "mask": "255.255.255.0",
-        "gw": "10.0.1.1"
-      },
       "signal": {
         "all_of": [
           {
@@ -163,6 +158,12 @@
             }
           }
         ]
+      },
+      "target_hint": "button[data-test=net-save]",
+      "slots": {
+        "ip": "10.0.1.999",
+        "mask": "255.255.255.0",
+        "gw": "10.0.1.1"
       }
     }
   ],
@@ -214,6 +215,9 @@
     }
   ],
   "notes": [
+    "本文件由 `npm run apps:gen` 从 `src/ip-config.ts#buildAppPlan` 生成：旅程逐字段等于该来源的展开结果，",
+    "改流程请改 spec 再重新生成，不要手改 journey（手改会被 `npm run apps:gen -- --check` 抓到）。",
+    "**人写的只有这里的 invariants 与 notes**（结束状态要成立什么、以及为什么这样定）——生成器不发明判断。",
     "材料：src/ip-config.ts 的 PAGES / DEMO_ROWS / buildPlan / settingsUrl（页面在 testpages/net_portal.html 与 testpages/net_settings.html）。journey 的前 6 步与 buildPlan(序列号, 行) 的两个子目标对齐 —— desc / start_url / target_hint / slots 逐字段相同；保存步的 signal 是**加固版**（驱动的「已保存」叶子 + 该行自己的 IP，见下一条），由 tests/app-packs-authored.test.ts 断言。",
     "第 4 行 CAM-1003 的 ip=10.0.1.999 是**设计好要被设备页自己的校验拒绝**的（第 4 段超过 255）。本包选择把它**显式写成一步**：该步的完成信号就是设备页的拒绝文案（[data-test=error] 含「IP 地址格式错误」且含规划值本身），所以整条旅程仍然 8/8 done、验收退出码 0 —— 但没有静默丢掉这道设计好的失败：它被声明、被执行、被不变量再次确认（rejection-is-not-reported-as-success）。drivers 那边同一件事报成 REJECTED（读页面自己的错误文案），是 PASS 不是失败；应用包里它就是一个 done 的子目标。",
     "start_url 全部是**相对仓库路径**（testpages/net_portal.html、testpages/net_settings.html?sn=...），运行器按仓库根解析成 file://。",
@@ -222,5 +226,9 @@
     "三条「保存」步的 slots 只带自己那一行的 ip/mask/gw（值只来自计划，模型不发明）：执行器在点击前用它们预填页面上的三个空输入框。",
     "保存步的完成信号比驱动**更强**：驱动只断言 [data-test=save-ok] 含「已保存」，本包在此之上再钉一条该行自己的 IP（页面回显形如「已保存 10.0.1.11 / 255.255.255.0 / 10.0.1.1 到 CAM-1001」），所以「保存成功」必须保存的是**这一行**的值，而不只是「某一次保存成功了」。被拒绝那一行的对应加固已经写在它的信号与不变量里（错误文案含 10.0.1.999）。",
     "已知边界：不变量只看 CAM-1003 的结束状态；前三台设备的保存成功由各自的子目标信号保证（[data-test=save-ok] 同时含「已保存」与**这一行**的 IP），那不是结束状态事实。"
-  ]
+  ],
+  "generated_from": {
+    "source": "src/ip-config.ts#buildAppPlan",
+    "plan_sha256": "aa35f078d9c584f9c0b25c3a9b1d109c5172b6010e076c374a6fee61ffbe4342"
+  }
 }

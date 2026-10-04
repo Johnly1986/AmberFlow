@@ -164,3 +164,52 @@ npm run apps:gen -- --list / --write / --check      # tools/spec-to-pack.ts
 - **诚实边界**：生成器依赖"种子包"来沿用结构；没有种子时它按 spec 的 role 名归并（`filter_window` →
   `filter-window`），因此**首个**包的命名仍带人的偏好。第 2/3/4 条（`buildPlan`/`sources` 接入、不变量归纳、
   探针回写）还没做。
+
+## 九、落地记录：第 2 条也已实现（builder 输入）
+
+第 1 条只吃 spec。第 2 条把"上游构件"扩展到**代码里的应用级计划**：
+
+- 生成器新增 `--source <模块>#<导出名>`（`generated_from.source`；加载期校验"模块存在 + 形如 `path#fn`"，
+  且与 `spec` 二选一）。`--check` 对两种来源一样工作。
+- `apps/ip-config` 因此变成生成物：新增 `src/ip-config.ts#buildAppPlan(rows, portal)`，把整张规划表
+  拼成一条旅程，并把**两条验收语义写进代码**（以前只写在人抄的 JSON 里）：
+  ① 保存成功不只认"已保存"，还要认**回显的是这一行规划的值**（否则"保存了别的值"也算成功）；
+  ② 规划表写错的行（第 4 段 > 255）**预期被设备页拒绝**：错误文案 + 被拒的正是规划里那个值 + 没有"已保存"，
+     并带上自己的 `slots`（让"被拒的值 = 规划值"有数据出处）。
+- 迁移是**无损**的：`buildAppPlan()` 与手写包逐字段 **0 差异**（8 步：desc/start_url/hint/signal/slots），
+  生成后包与手写包只差 provenance 与 notes；ip-config 自己的测试 + 应用验收照旧全绿。
+- 现在的账：**8 个应用是生成的**（7 个 spec + 1 个 builder），`apps:matrix` 的"来源"列逐个标出。
+
+**边界（没做的）**：`camera-entry`（类型列路由）**没有**搬进 builder —— 它的上游是"Excel 类型列 × 两套表单 ×
+行内证据"的路由表，把它改写成 `buildAppPlan` 等于把判断从一处代码挪到另一处，收益是"可生成"，代价是
+同一个应用出现两份路由知识；`demo-app` / `cli-report` / `repo-report` 的旅程与工具步语义（`dangerous` /
+`idempotent`）属于**语义判断**，按第 3 层的结论仍在人这一侧。
+
+## 十、落地记录：第 3、4 条（不变量归纳 / 探针基线）
+
+**第 3 条（不变量归纳）**：`npm run apps:induce -- --app <id> [--write] [--runs N]`
+（`tools/apps-induce.ts`，站在既有的 `induceSignals(before, after)` 上）。
+
+- **对照态的选择是这条工具的关键**，也是第一次就暴露出来的问题：先用"首页"当对照，归纳出来的全是
+  页面 UI（城市输入框、搜索按钮、分页按钮……）——它区分的是"首页和结果页不一样"，不是"这条旅程改变了什么"。
+  改成**"这条旅程少做最后一步"**之后，候选立刻变成对的东西：`ctrip-case` 归纳出 `[data-test=hotel-recorded]`
+  （与手写不变量**同一个节点**，措辞不同：它给"¥300以下的酒店"，人写"已记录"），以及
+  `not css_exists(#ledger-table)` 之类"消失了"的事实。
+- **三道闸门**：区分性（结束后真、对照态假）、稳定句柄（`data-test`/`id`/`name` + 非波动量）、
+  复跑一致（`--runs N` 取交集）。
+- **写回会自愈**，而且这件事**被实测证明有必要**：一次演练里归纳提出 4 条，写回后重跑发现
+  `not css_exists(#ledger-table)` **不可复现**（该节点是否缺席不稳定）→ 工具撤掉它 → 再跑
+  **19/19、不变量 3/3、exit 0**。"归纳提出、重跑裁决"是它敢写回的唯一理由。
+- 它**只追加**，人的判断一条不动（有单测钉住）；措辞仍要人 review——归纳给的是观测到的文本，
+  不是人的意图。
+
+**第 4 条（探针基线）**：`npm run probes:baseline [--check|--write] [--from <探针结果.json>]`
+（`tools/probe-baseline.ts`）。声明的是**输入**（URL / 风控词 / 登录墙特征），基线记的是**测出来的判决**
+（`BLOCKED` / `LOGIN_REQUIRED` / `captured` / 计数）。四种探针驱动的结果形状各自抽取（含 qunar 那种
+逐行文本），已从已入库的 2026-10-03 复测记录写入三个探针包（ctrip-live 10 项 / ota-live 3 项 / qunar-live 4 项），
+并且**进了 `bench/smoke.sh`（2c）**：站点变了、或有人手改包，CI 就会红。只存标量观察，不存 `*_reason`
+（叙述留在冻结语料里，别造第二份会漂移的散文）。
+
+**至此四条全部落地**（1 spec→pack、2 builder 输入、3 不变量归纳、4 探针基线）。仍然留在人这一侧的，
+正是评估里说的那部分：`dangerous`/`idempotent` 这类**语义意图**、"这次结束态是对的吗"的最终**裁定**、
+以及站点是否只有手机版的**结论确认**。
