@@ -137,8 +137,15 @@ npm run apps -- --app cli-report --no-model             # 危险步：默认**�
 npm run apps -- --app cli-report --no-model --allow-dangerous   # 放行后真跑
 
 npm run apps:suite                                      # 一条命令跑完所有离线旅程应用并给结论表
-npm run apps:matrix                                     # 声明成本 / 应用目录代码行数 / 泄漏门禁
+npm run apps:matrix                                     # 声明成本 / 代码行数 / 泄漏门禁 / 这个包是生成的还是手写的
+npm run apps:gen -- --check                             # 生成的包与 spec 展开是否一致（改 spec 没重新生成就红）
 ```
+
+**流程不用手写**：`npm run apps:gen -- --write --id <app> --spec <key>` 从一个 spec 生成/刷新整个应用包
+（旅程逐字段等于 `emitPlan(spec)` 的展开结果，包里记着展开内容的 `plan_sha256`；改 spec 忘了重新生成、
+或有人手改了 `journey`，`--check` 都会变红）。当前 7 个应用是**生成**的（6 个 transfer 复刻站 + ctrip-case），
+`apps:matrix` 的"来源"列会标出来。生成器**不发明判断**：`invariants`（什么必须成立）与 `notes` 是人的部分，
+它只搬运；缺 `invariants` 时会明说而不是给一个空壳。
 
 `apps:suite` 的**退出码契约**（写进 `--help` 与 [apps/README.md](apps/README.md)）：
 

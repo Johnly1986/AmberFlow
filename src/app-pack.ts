@@ -48,6 +48,7 @@ export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = {
 export const PACK_KEYS = [
   "spec_version", "id", "label", "goal", "model", "max_subgoals", "hosts",
   "slots", "required_slots", "sources", "roles", "journey", "invariants", "notes", "probe", "device",
+  "generated_from",
 ] as const;
 
 /**
@@ -116,6 +117,14 @@ export interface AppPack {
   sources?: string[];
   roles?: Record<string, Record<string, unknown>>;
   journey: Array<Record<string, unknown>>;
+  /**
+   * 这个包是**生成的**：`{ spec, plan_sha256 }`（见 `tools/spec-to-pack.ts`）。
+   *
+   * 它把"对齐"从"两处独立写的东西互验"变成一个构造性质：旅程 = `emitPlan(spec)` 的展开结果，
+   * 而 `plan_sha256` 是展开内容的指纹——改包、改 spec 都会让 `npm run apps:gen -- --check` 变红。
+   * 人写的部分（`invariants` / `notes`）仍然是这个包的一部分，生成器只搬运、不发明。
+   */
+  generated_from?: { spec: string; plan_sha256: string };
   /** 浏览器设备面（只有手机版页面存在的站点必须声明它；见 `executor.DeviceSpec`）。 */
   device?: Record<string, unknown>;
   /**
@@ -478,6 +487,24 @@ export function validatePack(pack: AppPack,
         if (k === "user_agent" && (typeof v !== "string" || !v.trim())) {
           p.push("device.user_agent must be a non-empty string");
         }
+      }
+    }
+  }
+  if (pack.generated_from !== undefined) {
+    const g = pack.generated_from as Record<string, unknown>;
+    if (!isDict(g)) {
+      p.push("generated_from must be an object {spec, plan_sha256}");
+    } else {
+      if (typeof g["spec"] !== "string" || !g["spec"].trim()) {
+        p.push("generated_from.spec must be a non-empty path");
+      } else if (!fs.existsSync(path.resolve(REPO, String(g["spec"])))) {
+        p.push(`generated_from.spec ${JSON.stringify(g["spec"])} does not exist (regenerate with npm run apps:gen)`);
+      }
+      if (typeof g["plan_sha256"] !== "string" || !/^[0-9a-f]{64}$/.test(String(g["plan_sha256"]))) {
+        p.push("generated_from.plan_sha256 must be a sha256 hex string (regenerate with npm run apps:gen)");
+      }
+      for (const k of Object.keys(g)) {
+        if (!["spec", "plan_sha256"].includes(k)) p.push(`generated_from.${k}: unknown key`);
       }
     }
   }

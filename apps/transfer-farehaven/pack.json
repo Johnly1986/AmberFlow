@@ -11,18 +11,19 @@
     "sort": "price_asc",
     "cap": "300"
   },
+  "required_slots": [],
   "sources": [],
   "roles": {
     "dismiss-promo": {
       "desc": "如果 2026-10-05（周一）的机票页弹出了促销遮罩，就先关掉它",
       "start_url": "transfer/site6/flights.html?date=2026-10-05",
-      "target_hint": "#promo-dismiss",
       "signal": {
         "css_text_contains": [
           "#promo-state",
           "dismissed"
         ]
       },
+      "target_hint": "#promo-dismiss",
       "when": {
         "css_exists": [
           "#promo-modal"
@@ -32,48 +33,48 @@
     "filter-window": {
       "desc": "打开 2026-10-05（周一）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
       "start_url": "transfer/site6/flights.html?date=2026-10-05",
-      "target_hint": "#window",
       "signal": {
         "css_text_contains": [
           "#window-state",
           "08:00-18:00"
         ]
-      }
+      },
+      "target_hint": "#window"
     },
     "sort-flights": {
       "desc": "把 2026-10-05（周一）的航班列表按价格从低到高排序",
       "start_url": "transfer/site6/flights.html?date=2026-10-05&window=0800-1800",
-      "target_hint": "#sort",
       "signal": {
         "css_text_contains": [
           "#sort-state",
           "price (low to high)"
         ]
-      }
+      },
+      "target_hint": "#sort"
     },
     "record-lowest": {
       "desc": "记录 2026-10-05（周一）08:00-18:00 区间内最低价的航班",
       "start_url": "transfer/site6/flights.html?date=2026-10-05&window=0800-1800&sort=price_asc",
-      "target_hint": "#record-cheapest",
       "signal": {
         "css_text_contains": [
           "#log",
           "Recorded"
         ]
-      }
+      },
+      "target_hint": "#record-cheapest"
     }
   },
   "journey": [
     {
       "desc": "从FareHaven首页进入机票搜索页（昆明 → 北京）",
       "start_url": "transfer/site6/index.html",
-      "target_hint": "#nav-flights",
       "signal": {
         "css_text_contains": [
           "#page-title",
           "Flights"
         ]
-      }
+      },
+      "target_hint": "#nav-flights"
     },
     {
       "role": "dismiss-promo"
@@ -170,35 +171,35 @@
     {
       "desc": "打开 北京 2026-10-08 入住的酒店列表，并把价格上限设为 ¥300",
       "start_url": "transfer/site6/hotels.html?checkin=2026-10-08",
-      "target_hint": "#cap",
       "signal": {
         "css_text_contains": [
           "#cap-state",
           "300"
         ]
-      }
+      },
+      "target_hint": "#cap"
     },
     {
       "desc": "把 北京 2026-10-08 入住的酒店列表按价格从低到高排序",
       "start_url": "transfer/site6/hotels.html?checkin=2026-10-08&cap=300",
-      "target_hint": "#sort",
       "signal": {
         "css_text_contains": [
           "#sort-state",
           "price (low to high)"
         ]
-      }
+      },
+      "target_hint": "#sort"
     },
     {
       "desc": "记录当前显示的每一家酒店",
       "start_url": "transfer/site6/hotels.html?checkin=2026-10-08&cap=300&sort=price_asc",
-      "target_hint": "#record-all",
       "signal": {
         "css_text_contains": [
           "#log",
           "Recorded"
         ]
-      }
+      },
+      "target_hint": "#record-all"
     }
   ],
   "invariants": [
@@ -259,6 +260,9 @@
     }
   ],
   "notes": [
+    "本文件由 `npm run apps:gen` 从 `transfer/specs/farehaven.json` 生成：旅程逐字段等于 `emitPlan(\"farehaven\")` 的展开结果，",
+    "改流程请改 spec 再重新生成，不要手改 journey（手改会被 `npm run apps:gen -- --check` 抓到）。",
+    "**人写的只有这里的 invariants 与 notes**（结束状态要成立什么、以及为什么这样定）——生成器不发明判断。",
     "材料：transfer/specs/farehaven.json + transfer/site6/*。journey 由 `emitPlan(\"farehaven\", spec, out)` 展开后**逐字段转写**，由 tests/app-packs-authored.test.ts 与展开计划逐字段比对。",
     "start_url 全部是**相对仓库路径**（transfer/site6/index.html、flights.html?…、hotels.html?…），运行器按仓库根解析成 file://。",
     "**`when` 是这一站的重点**：24 步里有 5 步（每个日期一步，下标 1/5/9/13/17）带 `when: {\"css_exists\": [\"#promo-modal\"]}` —— 语义是「这一步**可能不适用**就跳过」，不是「失败了就重试」。包里**原样保留** `when`（roles.dismiss-promo 的模板上带 when，五个实例都继承它），没有被改写成带 retries 的普通步。",
@@ -268,5 +272,9 @@
     "farehaven 的计划里**没有 `retries`**；测试逐字段断言 when 与 retries 两边一致（retries 都是 null）。",
     "hosts / sources 为空：只走仓库自带的 file:// 复刻站，没有外部主机、没有数据腿。",
     "已知边界：不变量只看结束状态（hotels.html 上已记录的列表）；「有浮层就先关掉」是**中间/条件**要求，由那 5 个带 when 的子目标信号（#promo-state 含 dismissed，或整步 skipped）保证。"
-  ]
+  ],
+  "generated_from": {
+    "spec": "transfer/specs/farehaven.json",
+    "plan_sha256": "d75e6c7badeb79b5a7360043de8dae04258ea448c4951059701201fe5e4ea746"
+  }
 }

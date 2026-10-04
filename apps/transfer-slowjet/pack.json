@@ -11,40 +11,41 @@
     "sort": "price_asc",
     "cap": "300"
   },
+  "required_slots": [],
   "sources": [],
   "roles": {
     "filter-window": {
       "desc": "打开 2026-10-05（周一）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
       "start_url": "transfer/site7/flights.html?date=2026-10-05",
-      "target_hint": "#window",
       "signal": {
         "css_text_contains": [
           "#window-state",
           "08:00-18:00"
         ]
-      }
+      },
+      "target_hint": "#window"
     },
     "sort-flights": {
       "desc": "把 2026-10-05（周一）的航班列表按价格从低到高排序",
       "start_url": "transfer/site7/flights.html?date=2026-10-05&window=0800-1800",
-      "target_hint": "#sort",
       "signal": {
         "css_text_contains": [
           "#sort-state",
           "price (low to high)"
         ]
-      }
+      },
+      "target_hint": "#sort"
     },
     "record-fare": {
       "desc": "记录 2026-10-05（周一）08:00-18:00 区间内最低价的航班",
       "start_url": "transfer/site7/summary.html?date=2026-10-05&window=0800-1800&sort=price_asc",
-      "target_hint": "#record-fare",
       "signal": {
         "css_text_contains": [
           "#log",
           "Recorded"
         ]
       },
+      "target_hint": "#record-fare",
       "retries": 1
     }
   },
@@ -52,13 +53,13 @@
     {
       "desc": "从SlowJet首页进入机票搜索页（昆明 → 北京）",
       "start_url": "transfer/site7/index.html",
-      "target_hint": "#nav-flights",
       "signal": {
         "css_text_contains": [
           "#page-title",
           "Flights"
         ]
-      }
+      },
+      "target_hint": "#nav-flights"
     },
     {
       "role": "filter-window"
@@ -132,35 +133,35 @@
     {
       "desc": "打开 北京 2026-10-07 入住的酒店列表，并把价格上限设为 ¥300",
       "start_url": "transfer/site7/hotels.html?checkin=2026-10-07",
-      "target_hint": "#cap",
       "signal": {
         "css_text_contains": [
           "#cap-state",
           "300"
         ]
-      }
+      },
+      "target_hint": "#cap"
     },
     {
       "desc": "把 北京 2026-10-07 入住的酒店列表按价格从低到高排序",
       "start_url": "transfer/site7/hotels.html?checkin=2026-10-07&cap=300",
-      "target_hint": "#sort",
       "signal": {
         "css_text_contains": [
           "#sort-state",
           "price (low to high)"
         ]
-      }
+      },
+      "target_hint": "#sort"
     },
     {
       "desc": "记录当前显示的每一家酒店",
       "start_url": "transfer/site7/hotels.html?checkin=2026-10-07&cap=300&sort=price_asc",
-      "target_hint": "#record-all",
       "signal": {
         "css_text_contains": [
           "#log",
           "Recorded"
         ]
-      }
+      },
+      "target_hint": "#record-all"
     }
   ],
   "invariants": [
@@ -221,6 +222,9 @@
     }
   ],
   "notes": [
+    "本文件由 `npm run apps:gen` 从 `transfer/specs/slowjet.json` 生成：旅程逐字段等于 `emitPlan(\"slowjet\")` 的展开结果，",
+    "改流程请改 spec 再重新生成，不要手改 journey（手改会被 `npm run apps:gen -- --check` 抓到）。",
+    "**人写的只有这里的 invariants 与 notes**（结束状态要成立什么、以及为什么这样定）——生成器不发明判断。",
     "材料：transfer/specs/slowjet.json + transfer/site7/*。journey 由 `emitPlan(\"slowjet\", spec, out)` 展开后**逐字段转写**，由 tests/app-packs-authored.test.ts 与展开计划逐字段比对。",
     "start_url 全部是**相对仓库路径**（transfer/site7/index.html、flights.html?…、summary.html?…、hotels.html?…），运行器按仓库根解析成 file://。",
     "**`retries` 是这一站的重点**：site7 的出票摘要页 `summary.html` 用 `window.name` 按日期记\"预热\"标记，**第一次访问是冷的**（只有 Preparing fares…，连 `#record-fare` 按钮都没有）。spec 在那 5 个 record_lowest 步骤上写了 `retries: 1`，包里**原样带进 journey**（roles.record-fare 的模板上带 `retries: 1`，五个日期的实例都继承它）—— 测试逐字段断言这 5 步的 `retries === 1`。",
@@ -229,5 +233,9 @@
     "roles 只用在真正重复 5 次的三个形状上（filter-window / sort-flights / record-fare）；首页与酒店三步只出现一次，直接内联。",
     "hosts / sources 为空：只走仓库自带的 file:// 复刻站，没有外部主机、没有数据腿。",
     "已知边界：不变量只看结束状态（hotels.html 上已记录的酒店列表）；五天的\"记录最低价\"是中间要求，由各自的子目标信号（#log 含 Recorded）保证 —— 而那 5 步正是靠 `retries` 才在冷启动下拿到的。"
-  ]
+  ],
+  "generated_from": {
+    "spec": "transfer/specs/slowjet.json",
+    "plan_sha256": "6fed4bb69cbc5c1913794343d7503bdfa77454046b2e9603362a251023849635"
+  }
 }

@@ -124,6 +124,21 @@ npm run apps:suite                                       # 一条命令验收所
 
 一个可复制粘贴的最小应用在 [../README.md](../README.md) 的"应用层"一节（整包 JSON，逐字节复制即可跑绿）。
 
+### 流程也不是手写的：`spec → pack`
+
+```bash
+npm run apps:gen -- --list                                  # 有哪些 spec 可生成 / 哪些应用已挂上
+npm run apps:gen -- --write --id transfer-trekly --spec trekly   # 生成或刷新一个包
+npm run apps:gen -- --write                                 # 刷新所有已挂上的
+npm run apps:gen -- --check                                 # 门禁口径：旅程 == emitPlan(spec) 的展开且哈希匹配
+```
+
+生成物里 `generated_from: { spec, plan_sha256 }` 就是这份承诺：**对齐是构造性质，不是人工核对**。
+任何一侧漂移都会让 `--check` 变红（手改 `journey`、改了 spec 没重新生成，都会抓到）；`bench/smoke.sh`
+已经把它当成一条门禁。生成器**沿用你已有的结构**（角色名、哪些字段是逐实例覆盖），只把**值**换成展开结果——
+所以它不会重排你的包，也不会重新发明角色名。**它不生成判断**：`invariants` / `notes` 仍然是人的，
+缺 `invariants` 时它会明着提示（那意味着这个应用什么都不验证）。
+
 ```jsonc
 {
   "spec_version": 1,

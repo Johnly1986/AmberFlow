@@ -109,6 +109,8 @@ interface Row {
   declared: number;
   code: number;
   tokens: string[];
+  /** 这个包是**生成的**吗？`spec` 就是它的上游（`generated_from`）；手写的是 `null`。 */
+  generated: string | null;
 }
 
 export function matrix(): {
@@ -133,6 +135,7 @@ export function matrix(): {
       declared: jsonLines(path.join(dir, "pack.json")),
       code: appCodeLines(dir),
       tokens: declaredTokens(dir),
+      generated: (pack as { generated_from?: { spec?: string } }).generated_from?.spec ?? null,
     });
   }
   // 只用 sources 的应用（数据腿应用）也算应用——它们没有包
@@ -142,7 +145,7 @@ export function matrix(): {
     if (rows.some((r) => r.app === app)) continue;
     rows.push({
       app, kind: "sources-only", sources: fs.readdirSync(d).filter((f) => f.endsWith(".json")).length,
-      roles: 0, steps: 0, toolSteps: 0, invariants: 0,
+      roles: 0, steps: 0, toolSteps: 0, invariants: 0, generated: null,
       declared: fs.readdirSync(d).filter((f) => f.endsWith(".json"))
         .reduce((n, f) => n + jsonLines(path.join(d, f)), 0),
       code: appCodeLines(path.dirname(d)), tokens: declaredTokens(path.dirname(d)),
@@ -195,9 +198,11 @@ export function main(argv: string[] = process.argv.slice(2)): number {
     console.log(JSON.stringify({ rows, leaks, debt }, null, 2));
     return leaks.length ? 1 : 0;
   }
-  const head = ["应用", "类型", "数据源", "角色", "步骤", "工具步", "不变量", "声明行", "代码行", "声明的标识"];
+  const head = ["应用", "类型", "数据源", "角色", "步骤", "工具步", "不变量", "声明行", "代码行", "来源", "声明的标识"];
   const table = rows.map((r) => [r.app, r.kind, String(r.sources), String(r.roles), String(r.steps),
-    String(r.toolSteps), String(r.invariants), String(r.declared), String(r.code), r.tokens.join(",") || "-"]);
+    String(r.toolSteps), String(r.invariants), String(r.declared), String(r.code),
+    r.generated ? `生成:${r.generated.replace(/^transfer\/specs\//, "").replace(/\.json$/, "")}` : "手写",
+    r.tokens.join(",") || "-"]);
   const widths = head.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
   const line = (cells: string[]): string =>
     cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
@@ -211,7 +216,11 @@ export function main(argv: string[] = process.argv.slice(2)): number {
   console.log();
   console.log(`应用 ${rows.length} 个 ｜ 声明 ${totDeclared} 行 ｜ 应用目录里的代码 ${totCode} 行`
     + `（期望 0：应用是数据，代码在共享层）`);
+  const gen = rows.filter((r) => r.generated).length;
+  const genDeclared = rows.filter((r) => r.generated).reduce((n, r) => n + r.declared, 0);
   console.log(`共享层文件 ${SHARED.length} 个（核心 ${CORE.size} 个）｜ 应用声明的标识 ${allTokenCount} 个`);
+  console.log(`其中**由 spec 生成**的 ${gen} 个（声明 ${genDeclared} 行，旅程不再由人抄写）；`
+    + `手写 ${rows.length - gen} 个 —— 剩给"人"的只有 invariants / notes / 探针这些判断与测量`);
   if (debt.length) {
     console.log();
     console.log(`每站点专用驱动里的站点知识（债，不是豁免）：${debt.length} 处`);

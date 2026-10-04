@@ -7,53 +7,54 @@
   "max_subgoals": 19,
   "hosts": [],
   "slots": {},
+  "required_slots": [],
   "sources": [],
   "roles": {
     "filter-window": {
       "desc": "打开 2026-10-05（周一）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
       "start_url": "ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-05",
-      "target_hint": "a[data-test=window-0800-1800]",
       "signal": {
         "css_text_contains": [
           "[data-test=window-state]",
           "08:00-18:00"
         ]
-      }
+      },
+      "target_hint": "a[data-test=window-0800-1800]"
     },
     "sort-flights": {
       "desc": "把 2026-10-05（周一）的航班列表按价格从低到高排序",
       "start_url": "ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-05&window=0800-1800",
-      "target_hint": "a[data-test=sort-price_asc]",
       "signal": {
         "css_text_contains": [
           "[data-test=sort-state]",
           "价格从低到高"
         ]
-      }
+      },
+      "target_hint": "a[data-test=sort-price_asc]"
     },
     "record-lowest": {
       "desc": "记录 2026-10-05（周一）08:00-18:00 区间内最低价的航班",
       "start_url": "ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-05&window=0800-1800&sort=price_asc",
-      "target_hint": "button[data-test=record-lowest]",
       "signal": {
         "css_text_contains": [
           "[data-test=last-record]",
           "已记录"
         ]
-      }
+      },
+      "target_hint": "button[data-test=record-lowest]"
     }
   },
   "journey": [
     {
       "desc": "从携程首页进入机票搜索页（昆明 → 北京）",
       "start_url": "ctrip/site/ct_home.html",
-      "target_hint": "a[data-test=entry-flight]",
       "signal": {
         "css_text_contains": [
           "[data-test=page-title]",
           "机票"
         ]
-      }
+      },
+      "target_hint": "a[data-test=entry-flight]"
     },
     {
       "role": "filter-window"
@@ -127,35 +128,35 @@
     {
       "desc": "打开 北京 2026-10-08 入住的酒店列表，并把价格上限设为 ¥300以下",
       "start_url": "ctrip/site/hotels.html?city=%E5%8C%97%E4%BA%AC&checkin=2026-10-08",
-      "target_hint": "a[data-test=cap-300]",
       "signal": {
         "css_text_contains": [
           "[data-test=price-cap-state]",
           "300"
         ]
-      }
+      },
+      "target_hint": "a[data-test=cap-300]"
     },
     {
       "desc": "把 北京 2026-10-08 入住的酒店列表按价格从低到高排序",
       "start_url": "ctrip/site/hotels.html?city=%E5%8C%97%E4%BA%AC&checkin=2026-10-08&cap=300",
-      "target_hint": "a[data-test=h-sort-price_asc]",
       "signal": {
         "css_text_contains": [
           "[data-test=sort-state]",
           "价格从低到高"
         ]
-      }
+      },
+      "target_hint": "a[data-test=h-sort-price_asc]"
     },
     {
       "desc": "记录 2026-10-08 入住、¥300以内的全部酒店",
       "start_url": "ctrip/site/hotels.html?city=%E5%8C%97%E4%BA%AC&checkin=2026-10-08&cap=300&sort=price_asc",
-      "target_hint": "button[data-test=record-hotels]",
       "signal": {
         "css_text_contains": [
           "[data-test=hotel-recorded]",
           "已记录"
         ]
-      }
+      },
+      "target_hint": "button[data-test=record-hotels]"
     }
   ],
   "invariants": [
@@ -218,6 +219,9 @@
     }
   ],
   "notes": [
+    "本文件由 `npm run apps:gen` 从 `transfer/specs/ctrip.json` 生成：旅程逐字段等于 `emitPlan(\"ctrip\")` 的展开结果，",
+    "改流程请改 spec 再重新生成，不要手改 journey（手改会被 `npm run apps:gen -- --check` 抓到）。",
+    "**人写的只有这里的 invariants 与 notes**（结束状态要成立什么、以及为什么这样定）——生成器不发明判断。",
     "材料：ctrip/site/*.html 的本地复刻站 + src/ctrip-task.ts 的 19 个冻结子目标（同一份计划也能由 transfer/specs/ctrip.json 展开得到）。journey 与冻结计划逐字段对齐（desc / start_url / target_hint / signal），由 tests/app-packs-authored.test.ts 用展开后的计划逐字段断言。",
     "start_url 全部是**相对仓库路径**（如 ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-05），运行器按仓库根解析成 file://；包随仓库搬走仍然可跑，没有绝对路径。",
     "五个日期（2026-10-05..10-09）与入住日（2026-10-08）是**写死的**，因为站点数据 ctrip/site/ctrip_data.js 是一份提交进仓库的冻结生成物：日期换掉，flights.html 的列表就会是空的，所以这里刻意不跟墙上时钟走（生成该语料的那天是 2026-10-02，对应 LAYA_TODAY=2026-10-02）。",
@@ -225,5 +229,9 @@
     "hosts 为空：旅程只走仓库自带的 file:// 复刻站，没有任何外部主机；sources 为空：这条链路不需要数据腿（--no-sources 是空操作）。",
     "不变量的口径：它们是**结束状态**上的 DOM 事实（停在 cap=300、价格升序、已记账的酒店列表；机票页的 UI 不在；结果非空）。真正的**独立判分**（7/7，从数据算、不读页面）留在 src/ctrip-task.ts 的 verify()，由 tests/ctrip.test.ts 守着——应用包不重复那份判分，因为包里的信号语言只能看 DOM。",
     "已知边界：不变量看不见中间要求（比如「五天各记录一次最低价航班」）。那些是子目标信号（每一步的 last-record 含「已记录」），不是结束状态事实。"
-  ]
+  ],
+  "generated_from": {
+    "spec": "transfer/specs/ctrip.json",
+    "plan_sha256": "186a1cdfc0a9362f08e6b9d795b3ba5bdc78cca2f07e1fe057d84b332b39972f"
+  }
 }

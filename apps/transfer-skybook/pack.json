@@ -10,75 +10,76 @@
     "window": "0800-1800",
     "sort": "price_asc"
   },
+  "required_slots": [],
   "sources": [],
   "roles": {
     "filter-window": {
       "desc": "打开 2026-10-05（周一）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
       "start_url": "transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-05",
-      "target_hint": "#window",
       "signal": {
         "css_text_contains": [
           "#window-state",
           "08:00-18:00"
         ]
-      }
+      },
+      "target_hint": "#window"
     },
     "sort-flights": {
       "desc": "把 2026-10-05（周一）的航班列表按价格从低到高排序",
       "start_url": "transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-05&window=0800-1800",
-      "target_hint": "#sort",
       "signal": {
         "css_text_contains": [
           "#sort-state",
           "price (low to high)"
         ]
-      }
+      },
+      "target_hint": "#sort"
     },
     "record-lowest": {
       "desc": "记录 2026-10-05（周一）08:00-18:00 区间内最低价的航班",
       "start_url": "transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-05&window=0800-1800&sort=price_asc",
-      "target_hint": "#record-lowest",
       "signal": {
         "css_text_contains": [
           "#last-record",
           "Recorded"
         ]
-      }
+      },
+      "target_hint": "#record-lowest"
     },
     "select-all": {
       "desc": "勾选当前页显示的全部酒店",
       "start_url": "transfer/site2/hotels.html?city=Beijing&checkin=2026-10-07&cap=300&sort=price_asc",
-      "target_hint": "#select-all",
       "signal": {
         "css_text_contains": [
           "#selection-count",
           "Selected"
         ]
-      }
+      },
+      "target_hint": "#select-all"
     },
     "record-selected": {
       "desc": "记录已勾选的酒店",
       "start_url": "transfer/site2/hotels.html?city=Beijing&checkin=2026-10-07&cap=300&sort=price_asc&selected=all",
-      "target_hint": "#record-selected",
       "signal": {
         "css_text_contains": [
           "#hotel-recorded",
           "Recorded"
         ]
-      }
+      },
+      "target_hint": "#record-selected"
     }
   },
   "journey": [
     {
       "desc": "从SkyBook首页进入机票搜索页（昆明 → 北京）",
       "start_url": "transfer/site2/index.html",
-      "target_hint": "#nav-flights",
       "signal": {
         "css_text_contains": [
           "#page-title",
           "Flights"
         ]
-      }
+      },
+      "target_hint": "#nav-flights"
     },
     {
       "role": "filter-window"
@@ -152,24 +153,24 @@
     {
       "desc": "打开 北京 2026-10-07 入住的酒店列表，并把价格上限设为 ¥300",
       "start_url": "transfer/site2/hotels.html?city=Beijing&checkin=2026-10-07",
-      "target_hint": "#cap-300",
       "signal": {
         "css_text_contains": [
           "#cap-state",
           "300"
         ]
-      }
+      },
+      "target_hint": "#cap-300"
     },
     {
       "desc": "把 北京 2026-10-07 入住的酒店列表按价格从低到高排序",
       "start_url": "transfer/site2/hotels.html?city=Beijing&checkin=2026-10-07&cap=300",
-      "target_hint": "#sort",
       "signal": {
         "css_text_contains": [
           "#sort-state",
           "price (low to high)"
         ]
-      }
+      },
+      "target_hint": "#sort"
     },
     {
       "role": "select-all"
@@ -180,13 +181,13 @@
     {
       "desc": "翻到酒店列表的下一页",
       "start_url": "transfer/site2/hotels.html?city=Beijing&checkin=2026-10-07&cap=300&sort=price_asc&selected=all",
-      "target_hint": "#next-page",
       "signal": {
         "css_text_contains": [
           "#page-state",
           "Page 2"
         ]
-      }
+      },
+      "target_hint": "#next-page"
     },
     {
       "role": "select-all",
@@ -270,6 +271,9 @@
     }
   ],
   "notes": [
+    "本文件由 `npm run apps:gen` 从 `transfer/specs/skybook.json` 生成：旅程逐字段等于 `emitPlan(\"skybook\")` 的展开结果，",
+    "改流程请改 spec 再重新生成，不要手改 journey（手改会被 `npm run apps:gen -- --check` 抓到）。",
+    "**人写的只有这里的 invariants 与 notes**（结束状态要成立什么、以及为什么这样定）——生成器不发明判断。",
     "材料：transfer/specs/skybook.json + transfer/site2/*。journey 由 `emitPlan(\"skybook\", spec, out)` 展开后**逐字段转写**（desc / start_url / target_hint(s) / signal / when / retries / slots），由 tests/app-packs-authored.test.ts 与展开计划逐字段比对。",
     "start_url 全部是**相对仓库路径**（transfer/site2/index.html、flights.html?…、hotels.html?…），运行器按仓库根解析成 file://。",
     "**角色覆盖率**：23 步里用 5 个角色模板覆盖 19 步（83%）—— filter-window 5 步、sort-flights 5 步、record-lowest 5 步（五天各一次）、select-all 2 步、record-selected 2 步（两页各一次）；剩下 4 步（首页入口、设上限、酒店排序、翻页）只出现一次，直接内联。角色模板就是该形状的首个实例，其余实例只内联覆盖真正不同的字段（desc / start_url）。",
@@ -278,5 +282,9 @@
     "skybook 的计划里**没有 `when`、也没有 `retries`**（那两种形状分别是 farehaven / slowjet 复刻站的）；测试逐字段断言这两项两边一致（都是 null）—— 不发明字段。",
     "hosts / sources 为空：只走仓库自带的 file:// 复刻站，没有外部主机、没有数据腿（--no-sources 是空操作）。",
     "已知边界：不变量只看结束状态（第 2 页已勾选并记录）；五天各自的筛选/排序/记录与第 1 页的勾选记录都是**中间**要求，由各自的子目标信号保证。"
-  ]
+  ],
+  "generated_from": {
+    "spec": "transfer/specs/skybook.json",
+    "plan_sha256": "a5349fcf90d25cc5a7e7a6a293bafce7c9b15eedf999f0e1ca3157f9141a315c"
+  }
 }

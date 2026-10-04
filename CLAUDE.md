@@ -29,7 +29,7 @@ npm run doctor                                   # 环境体检：Node / chromiu
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 821 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 837 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -83,6 +83,11 @@ npm run shortlist                                                               
 线上应用：`--app qunar-live --out /tmp/qunar`（真网络 + 真模型，**包里声明了 iPhone 设备面**；见下条规则）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
 原始观测 → 结论，含 11 处缺陷与 3 处共享层修补）：[bench/APP_VERIFY_REPORT.md](bench/APP_VERIFY_REPORT.md)。
 新增一个应用 = 新目录 `apps/<id>/`（`pack.json` + 可选 `sources/*.json`），**共享层零改动**；
+**流程不必手写**：`npm run apps:gen -- --write --id <app> --spec <key>` 从 `transfer/specs/*.json` 生成整个包
+（旅程逐字段 = `emitPlan(spec)` 的展开结果，`generated_from.plan_sha256` 是展开内容的指纹；
+`--check` 已进 `bench/smoke.sh`）。当前 7 个应用是生成的（`apps:matrix` 的"来源"列标出）。
+生成器**沿用种子包的角色结构、只把值换成展开结果**，并且**不发明判断**——`invariants`/`notes`/探针
+这些判断与测量仍然是人的，缺 `invariants` 时它会明说。
 度量与防泄漏门禁：`npm run apps:matrix`。**"所有应用都完成了吗"的答案**：`npm run apps:suite`
 （跑完每个旅程型应用的验收，一行一个应用：步骤/跳过/不变量/用时/结论；线上应用与测量型应用自动被识别为
 "要真网络"并**明着跳过**——跳过不等于通过；危险步未放行记成**未执行（危险步未放行）**，既不算绿也不算红，

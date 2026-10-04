@@ -67,7 +67,7 @@ describe("the repository is single-stack (TypeScript only)", () => {
     for (const [name, cmd] of Object.entries(pkg.scripts)) {
       expect(cmd, `script ${name} still shells out to Python`).not.toMatch(/python|pytest|uvicorn/);
     }
-    for (const s of ["typecheck", "test", "test:parity", "verify", "bench", "apps", "apps:matrix", "apps:suite", "plan-cli"]) {
+    for (const s of ["typecheck", "test", "test:parity", "verify", "bench", "apps", "apps:matrix", "apps:suite", "apps:gen", "plan-cli"]) {
       expect(Object.keys(pkg.scripts), `missing script ${s}`).toContain(s);
     }
   });
@@ -99,7 +99,11 @@ describe("the data the project needs is still here", () => {
     ["apps/transfer-skybook/pack.json", "the SkyBook replica pack (23 steps, pagination)"],
     ["apps/transfer-flyquest/pack.json", "the FlyQuest replica pack (results page only via form submit)"],
     ["bench/live-retest/qunar-live-app-run.md", "the live qunar app run (declared iPhone device)"],
-    ["bench/APP_VERIFY_REPORT.md", "the independent verification report (rounds 1-3)"],
+    ["bench/APP_VERIFY_REPORT.md", "the independent verification report (rounds 1-5)"],
+    ["bench/UX_REVIEW.md", "the user-experience review (three personas + post-fix re-test)"],
+    ["bench/AUTHORING_ASSESSMENT.md", "what of the app layer is machine-generated vs hand-written"],
+    ["tools/spec-to-pack.ts", "the spec -> pack generator (alignment by construction)"],
+    ["tests/spec-to-pack.test.ts", "drift detection for generated packs"],
     ["apps/INVENTORY.md", "the application backlog + definition of done"],
     ["apps/demo-tool/sources/demo-tool.json", "the CI-safe CLI tool source"],
     ["apps/git-log/sources/git-log.json", "a real CLI (git) source"],
