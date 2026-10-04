@@ -29,7 +29,7 @@ npm run doctor                                   # 环境体检：Node / chromiu
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 801 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 821 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -83,10 +83,16 @@ npm run shortlist                                                               
 线上应用：`--app qunar-live --out /tmp/qunar`（真网络 + 真模型，**包里声明了 iPhone 设备面**；见下条规则）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
 原始观测 → 结论，含 11 处缺陷与 3 处共享层修补）：[bench/APP_VERIFY_REPORT.md](bench/APP_VERIFY_REPORT.md)。
 新增一个应用 = 新目录 `apps/<id>/`（`pack.json` + 可选 `sources/*.json`），**共享层零改动**；
-度量与防泄漏门禁：`npm run apps:matrix`。**"所有应用都完成了吗"的退出码**：`npm run apps:suite`
+度量与防泄漏门禁：`npm run apps:matrix`。**"所有应用都完成了吗"的答案**：`npm run apps:suite`
 （跑完每个旅程型应用的验收，一行一个应用：步骤/跳过/不变量/用时/结论；线上应用与测量型应用自动被识别为
-"要真网络"并**明着跳过**；危险步因未放行而没执行会记成"待放行(未执行)"——既不算绿也不算红，因为绿色的前提
-是真的执行过）。怎么加见 [apps/README.md](apps/README.md)。
+"要真网络"并**明着跳过**——跳过不等于通过；危险步未放行记成**未执行（危险步未放行）**，既不算绿也不算红，
+因为绿色的前提是真的执行过）。**它的退出码是分层的**：`0`=全部真执行且通过、`1`=有未通过（含"加载失败"，
+逐应用 try/catch，坏包只影响它自己那一行）、`2`=用法错误（`--only` 未命中会列出已知应用名）、`3`=有未执行。
+一轮真实用户体验评审（三个子代理扮演使用者，见 [bench/UX_REVIEW.md](bench/UX_REVIEW.md)）揪出的问题都已在
+同一轮修掉：`--slot` 的键必须声明过（以前打错名字是**静默假绿**）、`--only` 打错字不再"0/0 通过"、
+缺目标时的报错改成 `step N names no target: …`（以前是 `picked ref 'undefined' is not in the element pool`，
+使用者完全看不懂）、`npm start` 会把**写进仓库的检查点路径**打印出来、危险步在 CLI/报告/套件三处只有一套说法
+（`REFUSAL_LABELS`，含"怎么补救"与"有没有落盘"）。怎么加见 [apps/README.md](apps/README.md)。
 
 工具步（命令行当动作腿）：`npm run apps -- --app cli-report --no-model --allow-dangerous`（桩工具：
 退出码 / JSON 路径 / stderr / 幂等重试 / 干跑+确认+落盘）、`--app repo-report --no-model`（真实 git + jq）。

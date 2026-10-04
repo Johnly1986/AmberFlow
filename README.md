@@ -39,6 +39,9 @@ npm start        # 一条命令跑起一项真实工作（仓库自带页面，�
   （把更多候选展示给它）再决策，而不是直接判失败；确需兜底时可接一个更强的 LLM（默认不接）。
 - **三条使用路径**：代码内的生产执行器；Path A 固定动作拾取器（命令行）；Path B 本地模型服务 +
   MV3 扩展（页面内 `Ctrl+Shift+K`）。
+- **应用层：一个应用是一个目录**：`apps/<id>/pack.json` 声明数据腿 + 混合旅程（浏览器步/工具步）+ 结束状态
+  不变量，一条命令跑完；加一个应用**不需要改共享层一行代码**。清单与"完成一个应用"的五条定义见
+  [apps/INVENTORY.md](apps/INVENTORY.md)，怎么加见 [apps/README.md](apps/README.md)。
 - **站点即配置**：取数引擎不含站点知识，站点写在 `<site>/sources/*.json`；另附真实站点可达性 / 抓取探针。
 - **Excel 批量入口**：设备录入（按"类型"列路由两套表单）、IP 规划表写入设备网络页。
 - **开箱用例**：ctrip（19 子目标 + 独立判分）、transfer（spec 驱动的多站点迁移与消融）、qunar（真实站点
@@ -51,11 +54,16 @@ npm start        # 一条命令跑起一项真实工作（仓库自带页面，�
 ```bash
 npm ci
 npx playwright install chromium
-npm start                      # 开箱任务：在仓库自带页面上跑一份真实计划（离线，零配置）
+npm start                      # 开箱任务：在仓库自带页面上跑一份真实计划（离线，不需要再配置什么）
 ```
 
 `npm start` 会打印每一步是怎么被判定的、结果如何。想先看环境齐不齐：`npm run doctor`
 （Node / chromium / 决策模型 / LLM 四项一眼看清，缺什么就给出该跑的命令）。
+
+> **它会写一个文件**：`npm start` 默认把计划检查点写进仓库根目录的 `.task_plan.json`（所以跑完
+> `git status` 会看到这一处改动，最后一行会明确打印这个路径）。不想动工作区就加 `--plan /tmp/your-plan.json`。
+> 仓库里还有 `.task_state.json`，那只是 §3 代码示例里显式传的文件名；`plan-cli` 与 `npm start` 用的是
+> `.task_plan.json`。
 
 **模型权重是可选的**：没有权重时进入"规则模式"——计划点名了目标的步骤照样执行
 （`npm start` 的开箱任务全部如此），只有确实需要模型兜底的步骤会明确告诉你需要什么，而不是抛异常。
@@ -115,7 +123,89 @@ console.log(rep.completed, rep.plan.summary(), rep.traces.length);
 直接 `mw.run(desc, url, { goalSignalFn, slots, targetHint })` 也可以，但**单步调用不会自动读计划里的
 `target_hint`，需要自己传**。
 
-### 4. 常用配置
+### 4. 应用层：把一件事写成一个目录
+
+一个应用 = `apps/<id>/pack.json`（纯数据）：数据腿 + 混合旅程（浏览器步 / 工具步）+ 结束状态不变量。
+加一个应用**不需要改共享层代码**。
+
+```bash
+npm run apps -- --list                                  # 有哪些应用
+npm run apps -- --app demo-app --dry                    # 只展开计划（不开浏览器、不装模型）
+npm run apps -- --app demo-app --no-model               # 离线整跑（数据腿 → 旅程 → 不变量）
+npm run apps -- --app repo-report --no-model            # 真实工具：git + jq
+npm run apps -- --app cli-report --no-model             # 危险步：默认**未执行**（exit 1）
+npm run apps -- --app cli-report --no-model --allow-dangerous   # 放行后真跑
+
+npm run apps:suite                                      # 一条命令跑完所有离线旅程应用并给结论表
+npm run apps:matrix                                     # 声明成本 / 应用目录代码行数 / 泄漏门禁
+```
+
+`apps:suite` 的**退出码契约**（写进 `--help` 与 [apps/README.md](apps/README.md)）：
+
+| 码 | 含义 |
+|---|---|
+| `0` | 每个离线旅程应用都**真执行**且通过 |
+| `1` | 有未通过（含"加载失败"——坏包只影响它自己那一行） |
+| `2` | 用法错误（例如 `--only` 没匹配到任何应用；会列出已知应用名） |
+| `3` | 有**未执行**（危险步没放行：不算绿，也不算红） |
+
+线上应用（`start_url` 是 `http(s)`）与测量型应用会被**明着跳过**并注明"要真网络"——跳过不等于通过。
+
+**最小可跑的应用**（复制成一个新目录 `apps/hello/pack.json` 就能跑；选择器取自仓库自带的
+`testpages/portal.html`）：
+
+```json
+{
+  "spec_version": 1,
+  "id": "hello",
+  "label": "最小离线应用",
+  "goal": "在门户页进入枪机/筒机录入",
+  "model": "english",
+  "max_subgoals": 4,
+  "hosts": [],
+  "slots": {},
+  "required_slots": [],
+  "sources": [],
+  "roles": {
+    "open-portal": {
+      "desc": "点击「枪机 / 筒机 录入」",
+      "start_url": "testpages/portal.html",
+      "target_hints": ["[data-test=entry-fixed]"],
+      "signal": { "url_contains": "camera_a.html" }
+    }
+  },
+  "journey": [{ "role": "open-portal" }],
+  "invariants": [
+    { "id": "on-camera-a", "desc": "结束时停在 camera_a 录入页",
+      "signal": { "url_contains": "camera_a.html" } }
+  ]
+}
+```
+
+```bash
+npm run apps -- --app hello --no-model --out /tmp/hello     # 期望 exit 0 + "结果：**通过**"
+```
+
+两条**文档没说但会咬人**的规则，这里一次说清：
+
+1. **浏览器步必须有一个能点到的目标**：给它 `target_hint` / `target_hints`（计划点名 → 零模型调用），
+   或者确保规则/laya 能在元素池里命中一个元素。缺了会 `blocked`，报错会直说
+   `step N names no target: no target_hint(s), no rule matched any of the K element(s)…`。
+2. **`--slot k=v` 的键必须在包里声明过**（`slots` / `required_slots`）。打错名字不再是静默忽略，
+   而是 exit 2 并列出已声明的槽位。
+
+### 5. 开箱用例：每条都有可复制命令
+
+```bash
+node --experimental-strip-types src/ctrip-task.ts            # 携程用例：19 冻结子目标 + 独立判分 7/7
+node --experimental-strip-types src/transfer-task.ts --site skybook
+node --experimental-strip-types src/qunar-task.ts            # qunar 真实站点（边界已实测记录）
+npm run test:parity                                          # 六层跨实现对拍（冻结语料）
+npm run verify                                               # 一键门禁：typecheck + 全部测试 + 对拍
+npm run bench -- --cases bench/cases-live.json --mode-tag live   # 8 个真实站点跑分（要真网络）
+```
+
+### 6. 常用配置
 
 | 变量 | 作用 |
 |---|---|

@@ -32,6 +32,9 @@ import { induceHint } from "./hint-memory.ts";
 import { LayaNotConfiguredError, installLayaRuntime } from "./model.ts";
 import { createLayaOnnxRuntime } from "./laya-onnx.ts";
 import { PlanningRules, TaskPlan } from "./plan.ts";
+
+/** CLI 的默认检查点（与 parseArgs 的 default 同一个字符串；打印副作用时要用到它）。 */
+export const DEFAULT_PLAN_PATH = ".task_plan.json";
 import type { SignalSpec } from "./signals.ts";
 import { runPlan } from "./planner.ts";
 import { affordanceRule } from "./rules.ts";
@@ -328,6 +331,9 @@ async function commandJob(
       io.out("建议：换一个「动作后页面确实变化」的步骤，或给该步补一个 DOM 信号（见 npm run plan-cli -- --help）。");
     }
     io.out("");
+    io.out(`计划检查点：${opts.plan}`
+      + (opts.plan === DEFAULT_PLAN_PATH ? "（默认落在仓库根目录，会出现在版本控制状态里）" : ""));
+    io.out("");
     io.out("接着做：npm run plan-cli -- show           # 看这份计划");
     io.out("        npm run plan-cli -- add 1 \"下一步描述\" --signal 'css_exists=#id' --url <页面>");
     io.out("        npm run plan-cli -- run [--replan]  # 再跑一次（可续跑）");
@@ -364,6 +370,9 @@ async function commandDemo(planPath: string, headless: boolean, io: Io, deps: St
   io.out(`\n结果：${rep.completed}   步骤 ${rep.traces.length}   跳过 ${rep.skipped}   重试 ${rep.retried}`);
   io.out(`每步的判定方式：${rep.traces.map((t) => t.method).join(", ") || "（无步骤）"}`);
   io.out("");
+  io.out(`计划检查点：${planPath}`);
+  io.out("  （本次运行已把它更新：版本控制会让你看到这一处改动；不想动工作区就加 --plan /tmp/your-plan.json）");
+  io.out("");
   io.out("这份计划全部由「计划点名目标 + DOM 信号」解决，没有用到模型权重。");
   io.out("换成你自己的页面：npm start -- --goal \"<你要做的事>\" --url <页面地址>");
   void headless;
@@ -379,7 +388,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
       doctor: { type: "boolean" }, demo: { type: "boolean" },
       "dry-run": { type: "boolean" }, headful: { type: "boolean" },
       target: { type: "string" },
-      plan: { type: "string", default: ".task_plan.json" },
+      plan: { type: "string", default: DEFAULT_PLAN_PATH },
       help: { type: "boolean" },
     },
   });

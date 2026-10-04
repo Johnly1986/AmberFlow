@@ -95,7 +95,34 @@ npm run apps -- --app demo-app --dry                     # 只展开计划（不
 npm run apps -- --app demo-app --no-model                # 离线整跑（脚本模型，CI 可跑）
 npm run apps -- --app demo-app                            # 真模型（需要 1.7GB ONNX 产物）
 npm run apps:matrix                                      # 度量：声明行 / 代码行 / 防泄漏
+npm run apps:suite                                       # 一条命令验收所有离线旅程应用（结论表 + 退出码）
 ```
+
+**退出码契约**（`npm run apps` 与 `npm run apps:suite` 都写进了 `--help`）：
+
+| 命令 | 码 | 含义 |
+|---|---|---|
+| `npm run apps` | `0` | 动作腿与不变量全部成立 |
+| | `1` | 有子目标 blocked / 有工具步未完成 / 有不变量不成立（**危险步没放行也是 1，并且在输出里写明"未执行"**） |
+| | `2` | 用法错误：包不合法、`--slot` 的键没声明、`--out` 建不出来、测量型应用没有 journey |
+| `npm run apps:suite` | `0` | 每个离线旅程应用都真执行且通过 |
+| | `1` | 有未通过（含"加载失败"：坏包只影响它自己那一行，其余照常出表） |
+| | `2` | 用法错误（例如 `--only` 没匹配到任何应用，会列出已知应用名） |
+| | `3` | 有**未执行**（危险步没放行——不算绿也不算红，因为绿色的前提是真的执行过） |
+
+给脚本消费：`npm run --silent apps:suite -- --json`（`npm run` 默认会往 stdout 前加 3 行脚本头，直接
+`JSON.parse` 会被它挡住；或者干脆 `node --experimental-strip-types tools/apps_suite.ts --json`）。
+`--only` 没匹配到任何应用时，人类可读的消息走 stderr，stdout 是 `{"error":…,"exit_code":2}`。
+
+两条**文档以前没说、但会咬人**的规则：
+
+1. **浏览器步必须有一个能点到的目标**：`target_hint` / `target_hints`（计划点名 → 零模型调用），或至少让规则/
+   laya 能在元素池里命中一个元素。缺了就会 `blocked`，报错直说
+   `step N names no target: no target_hint(s), no rule matched any of the K element(s)…`。
+2. **`--slot k=v` 的键必须在包里声明过**（`slots` / `required_slots`）：打错名字现在 exit 2 并列出已声明的槽位
+   （以前是静默忽略 + 假绿）。
+
+一个可复制粘贴的最小应用在 [../README.md](../README.md) 的"应用层"一节（整包 JSON，逐字节复制即可跑绿）。
 
 ```jsonc
 {

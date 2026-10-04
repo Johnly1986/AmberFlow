@@ -109,6 +109,24 @@ export interface AppInvariantResult {
   held: boolean;
 }
 
+/**
+ * **拒绝原因的唯一定义**。同一个状态曾经有三种说法：CLI 说 `REFUSED (dangerous)`、
+ * 单应用报告的表里写 `**dangerous**`（那是类别，不是结论）、套件说"待放行(未执行)"——
+ * 单独把 .md 发给别人看，它像一次成功的干跑。现在三个界面都念这一张表，
+ * 并且一律把"怎么补救"和"有没有落盘"写在同一句里。
+ */
+export const REFUSAL_LABELS: Record<string, string> = {
+  dangerous: "未执行（危险步未放行；加 `--allow-dangerous` 可放行，本次未落盘）",
+  declined: "未执行（确认函数拒绝；未落盘）",
+  "dry-run-failed": "未执行（干跑没通过，所以没有 apply）",
+  "tool-unavailable": "未执行（命令起不来：缺二进制 / 超时 / argv 非法）",
+};
+
+/** 给 CLI 用的一行短语（不带 Markdown 反引号）。 */
+export function refusalLine(refused: string): string {
+  return (REFUSAL_LABELS[refused] ?? `未执行（${refused}）`).replace(/`/g, "");
+}
+
 export interface AppSourceResult {
   name: string;
   rows: number;
@@ -202,7 +220,7 @@ export async function runToolStep(
     if (opts.confirmToolStep) allowed = await opts.confirmToolStep(step.desc, evidence);
     if (!allowed) {
       base.refused = opts.confirmToolStep ? "declined" : "dangerous";
-      if (opts.verbose) console.log(`  [${step.index}] REFUSED (${base.refused}) ${step.desc}`);
+      if (opts.verbose) console.log(`  [${step.index}] ${refusalLine(base.refused)} —— ${step.desc}`);
       return base;
     }
   }
@@ -381,7 +399,9 @@ export function appReportMarkdown(r: AppRunResult): string {
     L.push("", "## 动作腿：工具步（命令行）", "",
       "| # | 步骤 | 数据源 | 退出码 | 结论 | 尝试 | 干跑 |", "|---|---|---|---|---|---|---|");
     for (const t of r.tool_steps) {
-      const verdict = t.done ? "signal held" : `**${t.refused ?? "signal not held"}**`;
+      // 结论列写**结论**（"未执行 + 怎么补救"），不写内部类别（`dangerous` 仍然在 JSON 里）。
+      const verdict = t.done ? "signal held"
+        : t.refused ? `**${REFUSAL_LABELS[t.refused] ?? "未执行"}**` : "signal not held";
       const dry = t.dry_run ? `exit ${t.dry_run.code}${t.dry_run.ok ? "" : " (not ok)"}` : "-";
       L.push(`| ${t.index} | ${t.desc.slice(0, 60)} | ${t.source} | ${t.code ?? "-"} | ${verdict} | ${t.attempts} | ${dry} |`);
     }
@@ -430,7 +450,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   for (const s of v.slot ?? []) {
     const i = s.indexOf("=");
     if (i <= 0) { console.error(`--slot needs k=v, got ${JSON.stringify(s)}`); return 2; }
-    slots[s.slice(0, i)] = s.slice(i + 1);
+    const key = s.slice(0, i);
+    // 同名给两次曾经是**静默 last-wins**：`--slot coupon=A --slot coupon=B` 里 A 悄悄消失。
+    // 与"打错槽位名"同一类缺陷（值没被用上而使用者以为生效），所以同样按用法错误处理。
+    if (Object.prototype.hasOwnProperty.call(slots, key)) {
+      console.error(`--slot ${JSON.stringify(key)} 给了两次（${JSON.stringify(slots[key])} 与 `
+        + `${JSON.stringify(s.slice(i + 1))}）：一个槽位只能有一个值`);
+      return 2;
+    }
+    slots[key] = s.slice(i + 1);
   }
 
   let pack: AppPack;
@@ -441,8 +469,29 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 2;
   }
 
+  // 槽位名打错曾是**静默**的：`--slot coupn=X` 会被原样塞进计划，值谁也没用上，而应用照旧"通过"。
+  // 值只来自计划，但键必须有出处——不在声明里就是用法错误（exit 2），并且把已声明的列出来。
+  const declaredSlots = new Set([
+    ...Object.keys(pack.slots ?? {}),
+    ...((pack.required_slots ?? []) as string[]),
+  ]);
+  const unknownSlots = Object.keys(slots).filter((k) => !declaredSlots.has(k));
+  if (unknownSlots.length) {
+    console.error(`--slot ${unknownSlots.map((k) => JSON.stringify(k)).join(", ")} not declared by app ${pack.id}`
+      + (declaredSlots.size
+        ? `（已声明：${[...declaredSlots].sort().join(", ")}）`
+        : "（该应用没有声明任何槽位）"));
+    return 2;
+  }
+
   const outDir = path.resolve(v.out ?? path.join(os.tmpdir(), "layawebuse-apps"));
-  fs.mkdirSync(outDir, { recursive: true });
+  // 输出目录建不出来时是**用法错误**，不该把 Node 的 mkdir 栈甩给使用者（`--out /sys/x`）。
+  try {
+    fs.mkdirSync(outDir, { recursive: true });
+  } catch (e) {
+    console.error(`--out ${JSON.stringify(outDir)} 建不出来：${e instanceof Error ? e.message : String(e)}`);
+    return 2;
+  }
   const planPath = path.join(outDir, `${pack.id}-plan.json`);
 
   // 测量型应用（只声明 probe、没有 journey）走 app 运行器是没有意义的：它会"通过 0/0"。

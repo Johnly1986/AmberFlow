@@ -18,7 +18,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appDirs, expandPack, loadPack, validatePack, type AppPack, type ExpandedStep } from "../src/app-pack.ts";
-import { main as appMain, runApp, runToolStep, startUrl } from "../src/app-runner.ts";
+import { main as appMain, refusalLine, runApp, runToolStep, startUrl } from "../src/app-runner.ts";
 import { loadProbeSet } from "../src/probe-set.ts";
 import { DEMO_ROWS, FORMS, TYPE_TO_FORM } from "../src/camera-entry.ts";
 import { emitPlan } from "../src/transfer-task.ts";
@@ -26,6 +26,7 @@ import { loadSpec } from "../src/flow.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
 import type { ToolSignal } from "../src/tool-signals.ts";
 import { matrix } from "../tools/apps_matrix.ts";
+import { main as suiteMain, suite } from "../tools/apps_suite.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -650,5 +651,109 @@ describe("第 3 轮：transfer-trekly / transfer-farehaven", () => {
     expect(res.completed).toBe("20/24");
     const blocked = res.subgoals.map((s, i) => [i, s.status]).filter(([, st]) => st === "blocked").map(([i]) => i);
     expect(blocked).toEqual([5, 9, 13, 17]);
+  }, 180_000);
+});
+
+/* ==================================================== 第 5 轮：使用者体验修复（补 Lead 未覆盖的角度） */
+
+/** 收走 console.log / console.error（suiteMain 的 --json 走 stdout）。 */
+async function captureOut<T>(fn: () => Promise<T>): Promise<{ code: T; out: string }> {
+  const log = console.log, err = console.error;
+  const lines: string[] = [];
+  console.log = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
+  console.error = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
+  try { return { code: await fn(), out: lines.join("\n") }; }
+  finally { console.log = log; console.error = err; }
+}
+
+describe("第 5 轮：使用者体验修复（对抗性补测）", () => {
+  it("`--slot` 大小写/空格不做静默折叠：键名原样回显", async () => {
+    const up = await captureErr(() => appMain(["--app", "demo-app", "--no-model", "--slot", "COUPON=x"]));
+    expect(up.code).toBe(2);
+    expect(up.err).toContain('--slot "COUPON" not declared');
+    const sp = await captureErr(() => appMain(["--app", "demo-app", "--no-model", "--slot", " coupon=1"]));
+    expect(sp.code).toBe(2);
+    expect(sp.err).toContain('--slot " coupon" not declared');
+  });
+
+  // 第 5 轮复核（§12.1）曾把"同名给两次 = 后者生效"记为**观察**；Lead 随后按同一条最小修法收紧：
+  // 与"打错槽位名"同一类静默——值没被用上而使用者以为生效——所以现在**是用法错误**（exit 2，回显两个值）。
+  it("`--slot` 同名给两次 = 用法错误（exit 2，回显两个值；由 §12 复核从 last-wins 收紧）", async () => {
+    const out = tmpDir("r5-dup-slot");
+    const cap = await captureErr(() => appMain(["--app", "demo-app", "--no-model", "--quiet",
+      "--out", out, "--slot", "coupon=A", "--slot", "coupon=B"]));
+    expect(cap.code).toBe(2);
+    expect(cap.err).toContain('--slot "coupon" 给了两次');
+    expect(cap.err).toContain('"A"');                            // 两个值都要回显，使用者才知道自己给了什么
+    expect(cap.err).toContain('"B"');
+    expect(fs.existsSync(path.join(out, "demo-app-plan.json"))).toBe(false);  // 没跑到展开计划
+  }, 120_000);
+
+  it("`apps:suite --json` 的 exit_code 与真退出码一致（3 = 未执行；2 = 用法错误且 output 是合法 JSON）", async () => {
+    const r = await captureOut(() => suiteMain(["--only", "demo-app,cli-report", "--json"]));
+    expect(r.code).toBe(3);
+    const payload = JSON.parse(r.out.slice(r.out.indexOf("{")));   // 跳过 npm 前缀（这里直接调 main）
+    expect(payload.exit_code).toBe(3);
+
+    // --only 打错字 + --json：以前是 exit 2 + 空 stdout；现在必须给可解析对象
+    const typo = await captureOut(() => suiteMain(["--only", "demo-ap", "--json"]));
+    expect(typo.code).toBe(2);
+    const errPayload = JSON.parse(typo.out.slice(typo.out.indexOf("{")));
+    expect(errPayload.exit_code).toBe(2);
+    expect(errPayload.unmatched).toEqual(["demo-ap"]);
+    expect(errPayload.known).toContain("demo-app");
+    expect(String(errPayload.error)).toMatch(/没有匹配任何应用/);
+  }, 180_000);
+
+  it("hint 匹配不到 -> 走 `matched nothing in a pool of N` 这条消息，而不是 `names no target`", async () => {
+    installLayaRuntime(scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 }))));
+    const dir = tmpDir("r5-badhint");
+    const packPath = path.join(dir, "pack.json");
+    fs.writeFileSync(packPath, JSON.stringify({
+      spec_version: 1, id: "r5-badhint", label: "hint 匹配不到", goal: "打开门户页",
+      model: "english", max_subgoals: 1, hosts: [], slots: {}, sources: [],
+      roles: {}, journey: [{
+        desc: "点一个页面上不存在的句柄", start_url: "testpages/portal.html",
+        target_hint: "#definitely-absent", signal: { url_contains: "portal.html" },
+      }],
+      invariants: [{ id: "x", signal: { url_contains: "portal.html" } }],
+    }), "utf-8");
+    const res = await runApp(loadPack(packPath), {
+      verbose: false, sources: false, outDir: dir, planPath: path.join(dir, "plan.json"),
+    });
+    const reason = String((res.subgoals[0] as { obstacle?: string }).obstacle ?? "");
+    expect(reason).toMatch(/matched nothing in a pool of \d+ element\(s\)/);
+    expect(reason).toContain('#definitely-absent');
+    expect(reason).not.toMatch(/names no target/);
+  }, 180_000);
+
+  it("危险步三处同源：CLI 行 = refusalLine，报告 = Markdown 形式，JSON 仍是机器值", async () => {
+    const out = tmpDir("r5-refusal");
+    const r = await captureOut(() => appMain(["--app", "cli-report", "--no-model", "--out", out]));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(refusalLine("dangerous"));          // CLI 用无反引号的一行短语
+    const md = fs.readFileSync(path.join(out, "cli-report-report.md"), "utf-8");
+    expect(md).toContain("未执行（危险步未放行；加 `--allow-dangerous` 可放行，本次未落盘）");
+    const result = JSON.parse(fs.readFileSync(path.join(out, "cli-report-result.json"), "utf-8"));
+    expect(result.tool_steps[4].refused).toBe("dangerous");      // 机器值不被文案污染
+    expect(result.tool_steps[4].done).toBe(false);
+  }, 120_000);
+
+  it("坏包只毁自己那一行：suite 逐应用 try/catch，其余照常出表且 exit 1", async () => {
+    const brokenDir = path.join(REPO, "apps", "zz-verify-broken");
+    try {
+      fs.mkdirSync(brokenDir, { recursive: true });
+      fs.writeFileSync(path.join(brokenDir, "pack.json"), "{ this is not json", "utf-8");
+      const out = await captureOut(() => suiteMain(["--only", "zz-verify-broken,demo-app"]));
+      expect(out.code).toBe(1);                                  // 有未通过 -> 1
+      const payload = await suite(["zz-verify-broken", "demo-app"]);
+      const broken = payload.rows.find((r) => r.app === "zz-verify-broken")!;
+      const demo = payload.rows.find((r) => r.app === "demo-app")!;
+      expect(broken.status).toBe("failed");
+      expect(String((broken as { note?: string }).note ?? "")).toMatch(/加载失败/);
+      expect(demo.status).toBe("passed");                        // 坏包不掀桌子
+    } finally {
+      fs.rmSync(brokenDir, { recursive: true, force: true });    // 不留脏目录
+    }
   }, 180_000);
 });

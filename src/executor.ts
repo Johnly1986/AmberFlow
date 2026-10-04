@@ -1290,7 +1290,18 @@ export class BrowserMiddleware {
         // answer is nonsense). The Python reference reads `elems[ref]` unguarded
         // and dies with a KeyError; stop the subgoal with a reason instead.
         if (elems[ref] === undefined) {
-          stopReason = `picked ref '${ref}' is not in the element pool on step ${stepNo}`;
+          // 这条曾经是使用者最看不懂的一句：`picked ref 'undefined' is not in the element
+          // pool on step 1`。它真正的意思是"这一步没有能点到的目标"——计划没点名（没有
+          // target_hint），规则也没命中，于是一个不存在的 ref 被交到这里。把病因写出来，
+          // 并且告诉使用者下一步该改什么（加 target_hint），而不是复述执行器的内部产物。
+          const poolSize = Object.keys(elems).length;
+          stopReason = curHint
+            ? `target_hint ${JSON.stringify(curHint)} matched nothing in a pool of ${poolSize} `
+              + `element(s) on step ${stepNo}`
+            : `step ${stepNo} names no target: no target_hint(s), no rule matched any of the `
+              + `${poolSize} element(s), and the picker returned no usable element`
+              + `（给这一步加 target_hint，或在页面上点名一个稳定句柄）`;
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
         }
         // The confidence floor decays as failed elements are forbidden: a

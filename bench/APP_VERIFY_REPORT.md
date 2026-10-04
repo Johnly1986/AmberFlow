@@ -1131,3 +1131,220 @@ verdict：**confirmed**（12 个离线旅程应用都在表里；3 个需要真�
 - 我只统计了"信号文本相同"的重复组，**没有**逐条评估"这个信号是否只在正确页面上才可能成立"（那需要给每一步注入错误页面的反事实运行，超出本轮范围）。
 - flyquest 的退化实验只做了 `target_hints → target_hint("#date")` 这一种退法；退化成 `target_hint("#search-btn")`（直接提交、不填日期）预期也会红（信号要求 `#window-state` = 08:00-18:00），但**未实测**。
 - 两个 verdict 只对 §11 开头 pin 的 sha256 有效；`apps:suite` 的表是那一刻仓库状态的整体快照。
+
+---
+
+# 12. 第 5 轮复核（使用者体验修复）
+
+- 复核对象（pin 的 sha256，复核时）：
+```text
+fa926472b554f1d4be082d7b8eb772ebb96e646b775d410dead35c0109de5802  src/app-runner.ts
+d87450c39bb81d8eb5c0e249be1cb0d47eb07da5bb8e422039ab75aec2471d4e  tools/apps_suite.ts
+54d6a91043640b9578be038e3a412802f5b3464f4d89eb7510ac29e8b3e51276  tests/ux-fixes.test.ts
+ea7fbf73ff0c64bcbee63aecf797dec50602b0bfd74cd5ecbfd09da5ab39136f  bench/UX_REVIEW.md
+1ef74ed29113ff93a711a3a564b719a9bbc641fae522d53e2d6cb7e34a569a17  src/start.ts
+```
+- 本轮**未改** `src/**` / `tools/**` / 文档 / 任何 pack / `tests/ux-fixes.test.ts`；新用例加在 `tests/app-packs-verified.test.ts`。
+
+## 12.0 ⚠️ REFUTED（最重要的一条）：`apps:matrix` 的泄漏门禁被 `src/start.ts` 的 UX 文案打破
+
+题面（CLAUDE.md / 应用层纪律）：`npm run apps:matrix` 必须 **0 代码行 / 0 泄漏 / 0 债**。实测**不成立**：
+
+```text
+$ npm run apps:matrix
+应用 18 个 ｜ 声明 3210 行 ｜ 应用目录里的代码 0 行
+共享层文件 48 个（核心 26 个）｜ 应用声明的标识 20 个
+
+泄漏检查：FAIL
+  - 核心层 src/start.ts 出现了应用标识 "git"
+exit code = 1
+```
+
+最小复现（根因两行，都是本轮 UX 修复新加的文案）：
+
+```text
+$ grep -n "git" src/start.ts
+335:      + (opts.plan === DEFAULT_PLAN_PATH ? "（默认落在仓库根目录，会出现在 git status 里）" : ""));
+374:  io.out("  （本次运行已把它更新：git status 会看到这一处改动；不想动工作区就加 --plan /tmp/your-plan.json）");
+$ grep -n '"start.ts"' tools/apps_matrix.ts
+32:  "signals.ts", "start.ts",        # start.ts 在 CORE 名单里
+# "git" 是 apps/git-log 声明的 token（transport.cli.bin）→ 核心层出现它就 FAIL
+```
+
+**连带把 4 个测试文件的 5 条断言打红**（都不是我这轮引入的；枚举自 `grep -rln "matrix()" tests/`）：
+
+```text
+$ npx vitest run tests/apps.test.ts tests/probe-set.test.ts
+× tests/apps.test.ts > 应用层度量：代码行与防泄漏 > 应用目录里 0 行代码；核心层没有应用声明的站点/工具标识
+× tests/probe-set.test.ts > 债归零：应用层纪律的终点线 > apps:matrix 的债计数为空
+ Test Files 2 failed (2) | Tests 2 failed | 68 passed
+$ npx vitest run tests/app-packs-authored.test.ts
+× 两个新应用包：应用目录是数据（0 行代码 / 0 泄漏 / 0 债） > apps:matrix 里两个包都 0 代码行…
+ Test Files 1 failed (1) | Tests 1 failed | 32 passed
+$ npx vitest run tests/app-packs-verified.test.ts      # 我的文件里同样两条门禁断言
+× 门禁：apps:matrix 的泄漏与债都为空，应用目录 0 行代码 > leaks / debt 都为空…
+× 第 2 轮门禁：三个新目录只有 JSON，matrix 仍然 0 代码行 / 0 泄漏 / 0 债
+ Test Files 1 failed (1) | Tests 56 passed | 2 failed
+```
+
+即：`apps:matrix` 是**全仓唯一**因这处改动而红的地方；受影响的是 4 个文件里共 5 条"0 泄漏/0 债"断言（`apps.test.ts` 1、`probe-set.test.ts` 1、`app-packs-authored.test.ts` 1、我的 2）。我没有跑整仓 `npm test`（会红在同样的 4 个文件上，10 分钟无新信息）。
+
+**判定：refuted**（`apps:matrix` 0 泄漏这一条现在不成立）。**建议的最小修法**（Lead 写域，我不动手）：把这两处文案里的裸词 `git` 换成中文说法，例如 `"（默认落在仓库根目录，工作区状态里会看到这一处改动）"`，gate 即可恢复 0 泄漏；UX 信息（副作用 + `--plan` 出路）一个字都不用丢。**注意这不是门禁误报**：`git` 确实是 `apps/git-log` 声明的标识，核心层共享文件出现它正是该门禁要拦的东西。
+
+## 12.1 `--slot` 的键必须声明过
+
+```text
+$ npm run apps -- --app demo-app --no-model --slot foo=1        → exit 2
+--slot "foo" not declared by app demo-app（已声明：coupon）        ← 列出已声明槽位
+$ npm run apps -- --app demo-app --no-model --slot coupon=ACME10 → exit 0（照常通过）
+$ … --slot COUPON=x      → exit 2 ；--slot "COUPON" not declared by app demo-app（已声明：coupon）
+$ … --slot " coupon=1"   → exit 2 ；--slot " coupon" not declared by app demo-app（已声明：coupon）
+$ … --slot =1            → exit 2 ；--slot needs k=v, got "=1"
+$ … --slot coupon=A --slot coupon=B → exit 1（**后者生效**，见下）
+```
+
+verdict：**confirmed**（未声明的键、大小写变体、前后空格、非 `k=v` 全部 exit 2 且**原样回显键名**，不静默折叠）。
+**记录在案的观察（不是 refuted）**：同名给两次是 **last-wins**，不给任何提示 —— 我实测 `coupon=B` 进了计划（`demo-app-plan.json` 的 `slots.coupon === "B"`），随后 apply-coupon 步因为测试夹具不认 "B" 而 blocked → exit 1（**不是假绿**）。这条与"打错键名"是同一类静默，建议下一轮考虑：重复键报错，或至少警告一次。
+
+## 12.2 `apps:suite` 的退出码分层
+
+```text
+$ npm run apps:suite -- --only demo-ap               → exit 2
+  --only "demo-ap" 没有匹配任何应用。已知应用：camera-entry, cli-report, ctrip-case, ctrip-live,
+  demo-app, ip-config, ota-live, qunar-live, repo-report, transfer-farehaven, transfer-flyquest,
+  transfer-skybook, transfer-slowjet, transfer-trekly, transfer-voyagio
+$ npm run apps:suite -- --only demo-app,cli-report   → exit 3
+  应用套件：1/2 真执行且通过，1 个未执行
+    - cli-report：未执行（危险步未放行；加 --allow-dangerous 可放行，本次未落盘）
+  退出码：3（0=全部真执行且通过 ｜ 1=有未通过 ｜ 2=用法错误 ｜ 3=有未执行）
+$ npm run apps:suite -- --only demo-app              → exit 0（1/1 真执行且通过）
+$ npm run apps:suite -- --only demo-app --json       → exit 0，`"exit_code": 0`
+$ npm run apps:suite -- --only demo-app,cli-report --json → **真退出码 3**，`"exit_code": 3`   ← 一致
+$ npm run apps:suite -- --only demo-ap --json        → 真退出码 2，且**不输出 JSON**（只有用法错误文本）
+```
+
+verdict：**confirmed**（0/1/2/3 四层与 `--json` 的 `exit_code` 一致）。
+**如实记录三个边缘行为**（题面要求，不美化）：
+- `--only ""` → **exit 3**：空串被当作"没有过滤"，跑整个套件（cli-report 未执行 → 3）。不是用法错误；如果使用者把变量传空，会静默跑全套（但没有假绿）。
+- `--only demo-app,demo-app` → **exit 0**，重复名被去重，只跑一次。
+- `--only DEMO-APP` → **exit 2** + 已知应用列表（大小写敏感，不静默规范化）。
+
+## 12.3 逐应用容错（坏包只毁自己那一行）
+
+```text
+before: apps/ 下有 18 个目录
+$ mkdir apps/zz-verify-broken && printf '{ this is not json' > apps/zz-verify-broken/pack.json
+$ npm run apps:suite -- --only zz-verify-broken,demo-app
+demo-app          5   5/5  0   2/2  2.3s  通过
+zz-verify-broken  0   0/0  0   -    0s    **未通过**
+  - zz-verify-broken：加载失败：Expected property name or '}' in JSON at position 2 (line 1 column 3)
+应用套件：1/2 真执行且通过，1 个未通过        exit code = 1
+$ mkdir apps/zz-verify-nopack   （只有目录，没有 pack.json）
+$ npm run apps:suite -- --only zz-verify-nopack,demo-app → exit 2
+  --only "zz-verify-nopack" 没有匹配任何应用。…（发现制只认 apps/<id>/pack.json）
+$ rm -rf apps/zz-verify-broken apps/zz-verify-nopack
+after: apps/ 下 18 个目录；ls apps | grep zz → 无；git status -- apps/ → 只有既有的 M apps/README.md（Lead 的改动）
+```
+
+verdict：**confirmed**（坏包只影响它自己那一行、其余照常出表、exit 1；无 pack.json 的目录不是应用，验证后 `apps/` 目录数恢复 18、无 `zz` 残留、`apps/` 的 git 状态干净）。
+
+## 12.4 报错说人话：两条消息确实分开了
+
+```text
+# A) 浏览器步只有 signal、没有 target_hint（临时 pack 在 /tmp，--no-model）
+exit=1  obstacle: step 1 names no target: no target_hint(s), no rule matched any of the 5 element(s),
+        and the picker returned no usable element（给这一步加 target_hint，或在页面上点名一个稳定句柄）
+  文件里 "names no target" 出现 2 次；"is not in the element pool" 出现 **0** 次
+# B) 有 target_hint 但页面上匹配不到（target_hint = "#definitely-absent"）
+exit=1  obstacle: target_hint "#definitely-absent" matched nothing in a pool of 5 element(s) on step 1
+  文件里 "matched nothing in a pool of" 2 次；"names no target" **0** 次
+```
+
+verdict：**confirmed**（没有目标 → `names no target` + 补救动作；有目标但页面没有 → `matched nothing in a pool of N element(s)`；两条分支互斥，老的内部措辞 `is not in the element pool` 不再作为用户可见的错误出现。
+
+## 12.5 危险步三处说法一致 + `npm start` 副作用显式
+
+REFUSAL_LABELS 是唯一来源（`src/app-runner.ts:118`）：`dangerous: "未执行（危险步未放行；加 \`--allow-dangerous\` 可放行，本次未落盘）"`。三处实际输出：
+
+```text
+(1) CLI stdout   : [4] 未执行（危险步未放行；加 --allow-dangerous 可放行，本次未落盘） —— 不可逆写入：…
+(2) report.md    : | 4 | … | **未执行（危险步未放行；加 `--allow-dangerous` 可放行，本次未落盘）** | 0 | exit 0 |
+(3) suite 汇总行 : - cli-report：未执行（危险步未放行；加 --allow-dangerous 可放行，本次未落盘）
+JSON             : refused = 'dangerous' , done = False        ← 机器值未被文案污染
+```
+
+逐字比对：**CLI 与 suite 的文案逐字相同**（都走 `refusalLine()`，无反引号）；**report.md 是同一句话的 Markdown 形式**（唯一差别是标志位两侧的一对反引号，因为它是 `.md`）。三处都包含 REFUSAL_LABELS 的同一段文字 → verdict **confirmed**（"逐字同源"在纯文本两个界面上成立；Markdown 界面保留代码格式，属有意渲染差异）。
+
+`npm start`：
+
+```text
+$ npm start            → exit 0
+计划检查点：.task_plan.json
+  （本次运行已把它更新：git status 会看到这一处改动；不想动工作区就加 --plan /tmp/your-plan.json）
+这份计划全部由「计划点名目标 + DOM 信号」解决，没有用到模型权重。
+$ git status --porcelain -- .task_plan.json → " M .task_plan.json"    （确实弄脏）
+$ git checkout -- .task_plan.json           → 恢复干净（复核后 git status 里不再有它）
+$ grep -nE "检查点|task_plan" /tmp/v5/npm-start.txt → 计划检查点：.task_plan.json
+```
+
+verdict：**confirmed**（打印了写进仓库的检查点路径 + 副作用说明 + `--plan` 出路；我已按题面 `git checkout -- .task_plan.json` 复原，仓库未被我留脏）。
+
+## 12.6 第 5 轮未能验证 / 边界
+
+- §12.0 的 refuted 需要 Lead 修 `src/start.ts` 文案；**在修好之前**，`npm test` 会红 4 条（`apps.test.ts` 1 + `probe-set.test.ts` 1 + 我的文件 2），`npm run apps:matrix` exit 1。这不是本轮的测试写错，而是它正确地抓住了回归。
+- §12.5 的"逐字一致"我按"纯文本 vs Markdown"两层表述：若要求 report.md 也零反引号，那是渲染口径的改变，不由本轮判定。
+- `--slot` 重复键的 last-wins 是**观察**（未 refute 本轮修复的主张）；建议下一轮补一条"重复键报错/告警"。
+- `npm start` 我只验证到"打印检查点路径 + 弄脏并复原"；它跑的是内置演示 plan（输出自述"没有用到模型权重"），未覆盖真实页面的那一路。
+
+## 12.7 修复后复测（闸门抓到 Lead 引入的泄漏 → 已修；两条收紧的行为）
+
+**新 pin（复测时的 sha256）**：
+
+```text
+9cdeb6be2e3c1b812faafe0e5442ca1d351bf49244101ef6e85f8dfd2fb9883a  src/start.ts
+053b208a8714fa2a0dfaa438b9ef646c35344def94637473ca3196664454da94  src/app-runner.ts
+ec26dad14b6d42cdbed251b8473931f344494680122f0b909468e527105880a4  tools/apps_suite.ts
+```
+
+### (a) §12.0 的 refuted 已修复 → 门禁恢复
+
+```text
+$ npm run apps:matrix
+应用 18 个 ｜ 声明 3210 行 ｜ 应用目录里的代码 0 行（期望 0：应用是数据，代码在共享层）
+共享层文件 48 个（核心 26 个）｜ 应用声明的标识 20 个
+泄漏检查：OK（核心层代码里没有任何应用声明的站点/工具标识）      exit code = 0
+```
+
+修法与我给的最小修法一致：`src/start.ts` 两处文案去掉裸词 `git status`（改成"版本控制会让你看到这一处改动"），
+UX 信息（写进仓库的副作用 + `--plan` 出路）一个字没丢。**判定：refuted → fixed → 复测 confirmed**。
+
+### (b) `--slot` 重复键：由 last-wins 收紧为用法错误（我在 §12.1 记为观察，Lead 采纳）
+
+```text
+$ npm run apps -- --app demo-app --no-model --quiet --out /tmp/v6/out --slot coupon=A --slot coupon=B
+exit code = 2
+--slot "coupon" 给了两次（"A" 与 "B"）：一个槽位只能有一个值
+# 没有生成 demo-app-plan.json（没走到展开计划）
+$ … --slot coupon=ACME10   → exit 0（照常通过）
+```
+
+理由（Lead 的收紧与我 §12.1 的分析同一条）：值没被用上而使用者以为生效，与"打错槽位名"是同一类静默。
+**判定：behavior confirmed**；我按新契约改写了 `tests/app-packs-verified.test.ts` 的用例（标题/注释写明"由 §12 复核从 last-wins 收紧"），并断言两个值都被回显、且没有产物。
+
+### (c) `--only` 打错字 + `--json`：现在给可解析对象
+
+```text
+$ npm run apps:suite -- --only demo-ap --json        → exit 2
+stderr: --only "demo-ap" 没有匹配任何应用。已知应用：…（人类可读）
+stdout: { "error": "…", "unmatched": ["demo-ap"], "known": [15 个应用名], "exit_code": 2 }
+$ node --experimental-strip-types tools/apps_suite.ts --only demo-ap --json
+stdout 是**纯 JSON**（`pure JSON = True`；npm 头是 npm 自己的输出，不是工具写的）
+$ npm run apps:suite -- --only demo-app                → exit 0（1/1 真执行且通过）
+$ npm run apps:suite -- --only demo-app,cli-report     → exit 3（未执行那一路不变）
+$ npm run apps:suite -- --only demo-app,cli-report --json → exit_code 3 与真退出码一致（不变）
+```
+
+**判定：confirmed**（用法错误不再"exit 2 + 空 stdout"）；人类可读错误走 stderr、机器可读对象走 stdout，两者不混。
+我把这条也加进同一个用例（`--json` 的 3 路径与 2 路径都测），`tests/app-packs-verified.test.ts` 现在 **58 条**全绿。
+
+**边界（如实记录）**：直接在终端里 `JSON.parse(stdout)` 会被 npm 的 3 行脚本头挡住——要机器消费就用 `node --experimental-strip-types tools/apps_suite.ts …`（纯 JSON），或从第一个 `{` 起解析；这是 npm 包装层的行为，不是工具漏输出。
