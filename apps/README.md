@@ -203,6 +203,9 @@ npm run apps -- --app transfer-voyagio --no-model --no-sources  # 第二个复�
 npm run apps -- --app transfer-slowjet --no-model --no-sources  # 第三个复刻站：冷启动重试（retries 真的被用上）
 npm run apps -- --app transfer-trekly --no-model --no-sources   # 第四个复刻站：价格上限是滑块（32 → 12 条）
 npm run apps -- --app transfer-farehaven --no-model --no-sources # 第五个复刻站：条件浮层 when（20 done + 4 skipped）
+npm run apps -- --app transfer-skybook --no-model --no-sources   # 第六个复刻站：23 步、唯一带分页的骨架
+npm run apps -- --app transfer-flyquest --no-model --no-sources  # 第七个复刻站：结果页只能靠提交搜索表单到达
+npm run apps -- --app qunar-live --out /tmp/qunar                # 线上应用（真网络 + 真模型；包里声明了 iPhone 设备面）
 ```
 
 应用清单与"完成一个应用"的五条定义在 [apps/INVENTORY.md](INVENTORY.md)；独立复核（题 → 命令 → 原始观测 → 结论）
@@ -215,6 +218,9 @@ npm run apps:suite                     # 跑完每个旅程型应用的验收（
 npm run apps:suite -- --only ctrip-case,ip-config
 npm run apps:suite -- --json
 ```
+
+线上那道题（`apps/qunar-live`，需网络 + 真模型）不在套件里跑——`isLive()` 会因为它的 `start_url` 是
+`https://` 而**明着跳过**；它的验收是自己一条命令，证据在 `apps/INVENTORY.md` §五。
 
 三条口径：① 线上旅程（`start_url` 是 `http(s)://`）与测量型应用（只声明 probe）**自动识别**并明着跳过——
 "没跑"不会被算成绿；② 一律脚本模型 + 不跑数据腿，所以离线可复现；③ 需要显式放行的危险步
@@ -244,6 +250,16 @@ npm run apps:suite -- --json
     "login":   { "hosts": ["passport.ctrip.com"], "paths": ["/login"], "titles": ["登录首页"] }
   }
 }
+```
+
+**设备面**：只有手机版页面存在的站点（`touch.` 域）必须声明 `device`，否则桌面 UA/视口下 DOM 不同、
+计划点名的目标不在元素池里，hint 必然落空——实测：`apps/qunar-live` 在桌面上下文里第一个子目标三次尝试都是
+`low confidence 0.15`，声明 iPhone UA + 390×844 后同一份计划 **2/2 一次命中、全规则**：
+
+```jsonc
+"device": { "user_agent": "Mozilla/5.0 (iPhone; ...)", "viewport": {"width": 390, "height": 844},
+            "is_mobile": true, "has_touch": true, "locale": "zh-CN", "timezone": "Asia/Shanghai",
+            "device_scale_factor": 3 }
 ```
 
 加载期校验（`src/probe-set.ts`）三条硬规矩：

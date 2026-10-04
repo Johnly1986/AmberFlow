@@ -47,7 +47,16 @@ export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = {
 /** 包级允许的键；未知键在加载期报错（配置写错了要响亮，不静默）。 */
 export const PACK_KEYS = [
   "spec_version", "id", "label", "goal", "model", "max_subgoals", "hosts",
-  "slots", "required_slots", "sources", "roles", "journey", "invariants", "notes", "probe",
+  "slots", "required_slots", "sources", "roles", "journey", "invariants", "notes", "probe", "device",
+] as const;
+
+/**
+ * `device` 允许的键（与 `DeviceSpec` 一一对应）。理由是**只有手机版页面存在**的站点：
+ * 桌面 UA/视口下 DOM 不同、计划点名的目标不在池里，hint 必然落空。设备是站点知识，所以进声明面；
+ * 未知键在加载期报错（写错了要响亮）。
+ */
+export const DEVICE_KEYS = [
+  "user_agent", "viewport", "is_mobile", "has_touch", "locale", "timezone", "device_scale_factor",
 ] as const;
 
 /**
@@ -107,6 +116,8 @@ export interface AppPack {
   sources?: string[];
   roles?: Record<string, Record<string, unknown>>;
   journey: Array<Record<string, unknown>>;
+  /** 浏览器设备面（只有手机版页面存在的站点必须声明它；见 `executor.DeviceSpec`）。 */
+  device?: Record<string, unknown>;
   /**
    * 探针集（测量型应用）：声明要测哪些 URL、站点特征、结果目录。站点知识的**唯一**合法
    * 去处——驱动只剩"怎么测"。校验见 `probe-set.validateProbeBlock`（含"每个 URL 的主机都
@@ -451,6 +462,23 @@ export function validatePack(pack: AppPack,
       loadSource(String(s));
     } catch (e) {
       p.push(`source ${JSON.stringify(String(s))} not found (${e instanceof Error ? e.message : String(e)})`);
+    }
+  }
+  if (pack.device !== undefined) {
+    if (!isDict(pack.device)) {
+      p.push("device must be an object");
+    } else {
+      for (const [k, v] of Object.entries(pack.device)) {
+        if (!(DEVICE_KEYS as readonly string[]).includes(k)) {
+          p.push(`device.${k}: unknown key (known: ${DEVICE_KEYS.join(", ")})`);
+        }
+        if (k === "viewport" && (!isDict(v) || !Number.isFinite(Number(v["width"])) || !Number.isFinite(Number(v["height"])))) {
+          p.push("device.viewport must be {width, height}");
+        }
+        if (k === "user_agent" && (typeof v !== "string" || !v.trim())) {
+          p.push("device.user_agent must be a non-empty string");
+        }
+      }
     }
   }
   if (pack.probe !== undefined) {

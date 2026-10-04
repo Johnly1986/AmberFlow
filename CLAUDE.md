@@ -29,7 +29,7 @@ npm run doctor                                   # 环境体检：Node / chromiu
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 782 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 801 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -77,7 +77,10 @@ npm run shortlist                                                               
 坏序列号那行显式成步）、`--app transfer-voyagio --no-model --no-sources`（第二个复刻站：**两页向导** 24 步）、
 `--app transfer-slowjet --no-model --no-sources`（第三个复刻站：**冷启动重试** 19 步）、
 `--app transfer-trekly --no-model --no-sources`（第四个复刻站：价格上限是**滑块**，19 步）、
-`--app transfer-farehaven --no-model --no-sources`（第五个复刻站：**条件浮层 `when`**，24 步 = 20 done + 4 skipped）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
+`--app transfer-farehaven --no-model --no-sources`（第五个复刻站：**条件浮层 `when`**，24 步 = 20 done + 4 skipped）、
+`--app transfer-skybook --no-model --no-sources`（第六个：23 步、唯一带**分页**的骨架）、
+`--app transfer-flyquest --no-model --no-sources`（第七个：结果页**只能靠提交搜索表单**到达）。
+线上应用：`--app qunar-live --out /tmp/qunar`（真网络 + 真模型，**包里声明了 iPhone 设备面**；见下条规则）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
 原始观测 → 结论，含 11 处缺陷与 3 处共享层修补）：[bench/APP_VERIFY_REPORT.md](bench/APP_VERIFY_REPORT.md)。
 新增一个应用 = 新目录 `apps/<id>/`（`pack.json` + 可选 `sources/*.json`），**共享层零改动**；
 度量与防泄漏门禁：`npm run apps:matrix`。**"所有应用都完成了吗"的退出码**：`npm run apps:suite`
@@ -260,6 +263,17 @@ These are empirical findings from this codebase's own experiments — preserve t
   because `retries` re-runs the subgoal, so its test asserts `act` was asked AND `attempts>1`; symmetrically,
   `transfer-farehaven`'s `when` guards are discriminatingly verified only because DELETING them (temp copy) turns the
   run red (exit 1, exactly those 4 subgoals blocked).
+- **A site that exists ONLY as a mobile page needs a declared DEVICE, or the plan silently cannot work.** Adding the
+  last application (`apps/qunar-live`, the live `touch.qunar.com` H5 journey) exposed a schema gap rather than a site
+  change: the same frozen plan failed 3/3 on desktop with `low confidence 0.15 < floor 0.25`, because the mobile DOM
+  has the city chip the plan names (`div "北京"`) and the desktop DOM does not — the hint can never match, and laya on a
+  Chinese page is at ~0.15 anyway. The fix is data, not code: a pack may declare `device`
+  (`user_agent` / `viewport` / `is_mobile` / `has_touch` / `locale` / `timezone` / `device_scale_factor`, unknown keys
+  fail at load), and `browserSession(headless, device)` opens a context with exactly those options — packs without a
+  `device` keep the old `browser.newPage()` path so no existing app's output changes. Measured after the declaration:
+  **2/2 subgoals, both `rule:match`, 46.5 s** (`click div "北京" (clicked, rule:match, conf=1.00)`). Evidence:
+  `bench/live-retest/qunar-live-app-run.md`. The lesson generalises: when a "blocked" live app is reproducible as a
+  hint that matches nothing, ask what the app was never allowed to declare.
 - **A tool step is an ACTION LEG, and the three disciplines are what make it safe.** A journey entry with a `source` is a
   tool step: it reuses the CLI transport (argv array, env allowlist, cwd, exit codes, version pin) and adds `args` /
   `dry_run_args` / `idempotent` / `dangerous`. Its completion truth is the **process observation** — `src/tool-signals.ts`

@@ -492,7 +492,7 @@ describe("第 2 轮：camera-entry / transfer-voyagio / transfer-slowjet", () =>
   }, 240_000);
 
   it("第 2 轮门禁：三个新目录只有 JSON，matrix 仍然 0 代码行 / 0 泄漏 / 0 债", () => {
-    for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet", "transfer-trekly", "transfer-farehaven"]) {
+    for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet", "transfer-trekly", "transfer-farehaven", "transfer-skybook", "transfer-flyquest"]) {
       expect(validatePack(loadPack(id)), id).toEqual([]);
       const files = fs.readdirSync(path.join(REPO, "apps", id));
       expect(files.filter((f) => /\.(ts|js|mjs|cjs)$/.test(f)), `${id} code files`).toEqual([]);
@@ -501,10 +501,85 @@ describe("第 2 轮：camera-entry / transfer-voyagio / transfer-slowjet", () =>
     const { rows, leaks, debt } = matrix();
     expect(leaks, JSON.stringify(leaks)).toEqual([]);
     expect(debt, JSON.stringify(debt)).toEqual([]);
-    for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet", "transfer-trekly", "transfer-farehaven"]) {
+    for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet", "transfer-trekly", "transfer-farehaven", "transfer-skybook", "transfer-flyquest"]) {
       expect(rows.find((r) => r.app === id)!.code, id).toBe(0);
     }
   });
+});
+
+/* ==================================================== 第 4 轮：skybook / flyquest */
+
+describe("第 4 轮：transfer-skybook / transfer-flyquest", () => {
+  it("skybook：23/23 + 3 不变量；5 个角色模板覆盖 19 步、4 步内联", async () => {
+    const pack: any = loadPack("transfer-skybook");
+    const cov = new Map<string, number>();
+    let inline = 0;
+    for (const s of pack.journey as any[]) {
+      if (s.role) cov.set(s.role, (cov.get(s.role) ?? 0) + 1); else inline++;
+    }
+    expect(pack.journey).toHaveLength(23);
+    expect(cov).toEqual(new Map([["filter-window", 5], ["sort-flights", 5], ["record-lowest", 5], ["select-all", 2], ["record-selected", 2]]));
+    expect(inline).toBe(4);                                   // 入口 / 酒店上限 / 酒店排序 / 翻页
+    const out = tmpDir("r4-skybook");
+    const res = await runApp(pack, { verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json") });
+    expect(res.completed).toBe("23/23");
+    expect(res.ok, JSON.stringify(res.subgoals.filter((s) => s.status !== "done"))).toBe(true);
+    expect(res.invariants.map((i) => [i.id, i.held])).toEqual([
+      ["end-on-recorded-second-page", true],
+      ["the-second-page-was-really-selected", true],
+      ["end-state-is-the-hotels-page", true],
+    ]);
+  }, 180_000);
+
+  it("skybook：信号独立性画像 —— 23 步 / 8 种信号 / 5 个重复组，其中 1 组跨页面", () => {
+    const sgs = expandPack(loadPack("transfer-skybook"), {}, path.join(tmpDir("r4-sky-a"), "p.json")).plan.subgoals as any[];
+    const bySig = new Map<string, number[]>();
+    sgs.forEach((s: any, i: number) => { const k = JSON.stringify(s.signal); bySig.set(k, [...(bySig.get(k) ?? []), i]); });
+    expect(sgs).toHaveLength(23);
+    expect(bySig.size).toBe(8);                               // 8 种 done-signal
+    const dup = [...bySig.entries()].filter(([, idx]) => idx.length > 1);
+    expect(dup).toHaveLength(5);
+    // 唯一跨页面的一组：机票排序 ×5 + 酒店排序 ×1 共用 #sort-state
+    const crossPage = dup.filter(([, idx]) => new Set(idx.map((i) => String(sgs[i].start_url).split("?")[0].split("/").pop())).size > 1);
+    expect(crossPage).toHaveLength(1);
+    expect(crossPage[0]![1]).toEqual([2, 5, 8, 11, 14, 17]);
+    expect(String(sgs[2].signal.css_text_contains[0])).toBe("#sort-state");
+  });
+
+  it("skybook：计划与 emitPlan('skybook') 逐字段全等", () => {
+    expect(alignmentDiffs("transfer-skybook", "skybook")).toEqual([]);
+  });
+
+  it("flyquest：search-form 步是有序 target_hints（填日期→选时段→提交）；与 emitPlan('flyquest') 逐字段全等", () => {
+    const pack: any = loadPack("transfer-flyquest");
+    const tpl = pack.roles["search-form"];
+    expect(tpl.target_hints).toEqual(["#date", "#window", "#search-btn"]);
+    expect(tpl.start_url).toBe("transfer/site4/search.html");   // 不带查询串：结果页只能由提交产生
+    expect(tpl.slots).toEqual({ date: "2026-10-05" });
+    expect(alignmentDiffs("transfer-flyquest", "flyquest")).toEqual([]);
+  });
+
+  it("flyquest：19/19 + 3 不变量", async () => {
+    const out = tmpDir("r4-flyquest");
+    const res = await runApp(loadPack("transfer-flyquest"), {
+      verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json"),
+    });
+    expect(res.completed).toBe("19/19");
+    expect(res.ok, JSON.stringify(res.subgoals.filter((s) => s.status !== "done"))).toBe(true);
+    expect(res.invariants.every((i) => i.held)).toBe(true);
+  }, 180_000);
+
+  it("flyquest：把有序 target_hints 退化成单个 target_hint -> 14/19，那 5 个 search 步 blocked", async () => {
+    const stripped = clone(loadPack("transfer-flyquest")) as any;
+    delete stripped.roles["search-form"].target_hints;
+    stripped.roles["search-form"].target_hint = "#date";
+    const out = tmpDir("r4-flyquest-hint1");
+    const res = await runApp(stripped, { verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json") });
+    expect(res.ok).toBe(false);
+    expect(res.completed).toBe("14/19");
+    const blocked = res.subgoals.map((s, i) => [i, s.status]).filter(([, st]) => st === "blocked").map(([i]) => i);
+    expect(blocked).toEqual([1, 4, 7, 10, 13]);               // 5 个 per-date search-form 步
+  }, 180_000);
 });
 
 /* ==================================================== 第 3 轮：trekly / farehaven */

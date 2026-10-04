@@ -962,3 +962,172 @@ verdict：**confirmed**（0 代码行 / 0 泄漏 / 0 债；两目录只有 `pack
 - trekly 的"结果收窄"事实绑在**冻结数据集**上（`12 stays`）：数据集一换，不变量里的 12 就要跟着改——packs 的日期/cap 都是写死的，这是与 §8/§9 同一条"冻结语料"约定。
 - 我没有复核 `transfer/site3` / `site6` 的生成器（`transfer/data3.ts` / `data6.ts`）本身，只复核了"包展开 == spec 展开"、"验收真的跑通"、以及两页的行为文件（`site3.js` / `site6.js`）。
 - 两个 verdict 只对 §10 开头 pin 的 sha256 有效；作者若再改 pack 需重验。
+
+---
+
+# 11. 第 4 轮复核（skybook / flyquest）
+
+- 复核对象（**revision 固定**，mtime 均为 2026-10-04 09:08）：
+
+```text
+d0b2d13d8dc1128954ebf85942520c6af9c3b2d06928acf2c4f486639b16bf59  apps/transfer-skybook/pack.json
+e5723bd160546009ce837f5c449eb05bdb9e7c4c0798922232510eeb8b390ab8  apps/transfer-flyquest/pack.json
+```
+
+- 本轮**未改 `src/**` / `tools/**`**（只报告）；临时副本在 `/tmp`。方法同 §8–§10：题 → 命令 → 原始观测 → verdict。
+
+## 11.1 transfer-skybook（题面：23 步；角色覆盖率 + 信号是否彼此独立）
+
+```text
+$ npm run apps -- --app transfer-skybook --no-model --no-sources --out /tmp/v4-skybook
+- 结果：**通过** ｜ 步骤 23/23 ｜ 用时 31.1s        exit code = 0（23 行 done）
+| end-on-recorded-second-page | 成立 |
+| the-second-page-was-really-selected | 成立 |
+| end-state-is-the-hotels-page | 成立 |
+```
+
+**角色覆盖率**（包的 `roles` + journey）：23 步里 **5 个角色模板覆盖 19 步**，其余 4 步内联（无 role）：
+
+```text
+$ python3 -c "…role coverage…"
+roles: [filter-window, sort-flights, record-lowest, select-all, record-selected]
+filter-window 5 | sort-flights 5 | record-lowest 5 | select-all 2 | record-selected 2 | (inline) 4
+inline（无 role）步：0 入口 / 16 酒店设上限 / 17 酒店排序 / 20 翻到第 2 页
+```
+
+（spec 里有 8 个 role；包把 entry / set_cap / 酒店 sort / next_page 这 4 个只出现一次的步骤直接内联，把"真正重复的形状"留成模板 —— 与 §8 的口径一致：内联不等于丢字段，逐字段对齐证明这一点。）
+
+**信号是否彼此独立**（在 23 步展开计划上按 `signal` 分组）：
+
+```text
+$ node --experimental-strip-types /tmp/v4-signals.ts
+subgoals = 23 ; distinct signals = 8 ; duplicate groups = 5
+  x5 idx=[1,4,7,10,13] pages=["flights.html"]  {"css_text_contains":["#window-state","08:00-18:00"]}
+  x6 idx=[2,5,8,11,14,17] pages=["flights.html","hotels.html"]  {"css_text_contains":["#sort-state","price (low to high)"]}
+  x5 idx=[3,6,9,12,15] pages=["flights.html"]  {"css_text_contains":["#last-record","Recorded"]}
+  x2 idx=[18,21] pages=["hotels.html"]  {"css_text_contains":["#selection-count","Selected"]}
+  x2 idx=[19,22] pages=["hotels.html"]  {"css_text_contains":["#hotel-recorded","Recorded"]}
+```
+
+读法（诚实区分两种重复）：
+- **同角色、按日期/页码重复**（预期内）：筛时段 ×5、记录最低价 ×5、勾选 ×2、记录 ×2 —— 它们是同一步骤模板在 5 个日期 / 2 页上的实例，信号相同是因为**角色相同**，不是"抄了别人的信号"。
+- **跨页面重复 1 组（值得记下）**：`#sort-state` + "price (low to high)" 共 6 次 = 机票排序 ×5 + **酒店排序 ×1**（idx 17）。也就是说这个 done-signal 本身**不能区分"机票排好了"与"酒店排好了"**；之所以不产生歧义，是因为每个子目标都先重新 `goto` 到自己的页面（执行器每步重启、状态在 URL 里），信号是在正确的页面上求值的。若将来有人把这两步合并到同一页面上，这个信号就会失去区分度。
+- 其余 3 组都是"同角色不同实例"，无跨角色抄用。
+
+逐字段对齐：
+
+```text
+$ node --experimental-strip-types /tmp/v2-align.ts transfer-skybook skybook    # LAYA_TODAY=2026-10-02
+got 23 / emitted 23 ; rolesUsed=["filter-window","sort-flights","record-lowest","select-all","record-selected"]
+TOTAL diffs = 0 ; byField = {}
+```
+
+verdict：**confirmed**（23/23 + 3 不变量；5 角色覆盖 19 步 + 4 内联；信号 8 种，重复组 5 个，其中 1 个跨页面 —— 已如实记录）。
+
+## 11.2 transfer-flyquest（题面：结果页只能由**提交表单**产生 → 那一步必须是有序 `target_hints`）
+
+```text
+$ npm run apps -- --app transfer-flyquest --no-model --no-sources --out /tmp/v4-flyquest
+- 结果：**通过** ｜ 步骤 19/19 ｜ 用时 33.4s        exit code = 0（19 行 done）
+| end-on-recorded-stays-list | 成立 |
+| end-state-is-the-stays-page | 成立 |
+| recorded-for-the-frozen-checkin | 成立 |
+```
+
+**那一步确实是"先填表单再提交"的有序列表**（`roles.search-form`，覆盖 5 个日期）：
+
+```text
+{"desc": "打开 2026-10-05（周一）…并把出发时段筛选为 08:00-18:00",
+ "start_url": "transfer/site4/search.html",              ← 不带任何查询串
+ "target_hints": ["#date", "#window", "#search-btn"],    ← 有序：填日期 → 选时段 → 提交
+ "signal": {"css_text_contains": ["#window-state", "08:00-18:00"]},
+ "slots": {"date": "2026-10-05"}}
+```
+
+后面的排序/记录步的 `start_url` 才是 `fares.html?...`（结果页），即结果页只能由这次表单提交产生；`search.html` 本身不是结果页。
+
+**退化证伪**：临时副本把该 role 的 `target_hints` 换成单个 `target_hint: "#date"` 后重跑：
+
+```text
+$ node --experimental-strip-types src/app-runner.ts --app /tmp/v4-falsify/flyquest-singlehint/pack.json \
+    --no-model --no-sources --quiet --out /tmp/v4-falsify/out-singlehint
+flyquest-singlehint exit=1
+ok=False completed=14/19
+[1]  blocked attempts=1 obstacle=picked ref 'undefined' is not in the element pool on step 2
+[4]  blocked attempts=1 obstacle=…    （[7] [10] [13] 同）
+invariants 仍全部成立（只看酒店结束状态）
+```
+
+5 个 `search-form` 步在**第 2 个动作**上卡住（obstacle 明确写着 `on step 2`）：单 hint 在填了 `#date` 之后仍然权威，同一个元素被再选 → inert/forbidden → 落到模型而脚本模型答不出 `act` → blocked。**判定：有序 `target_hints` 是被区分性验证的**（删掉就红，且红的正是那 5 步）。与 §9.3 `retries`、§10.2 `when` 同型：exit 1 来自逐步 done，不变量本身仍成立。
+
+逐字段对齐：
+
+```text
+$ node --experimental-strip-types /tmp/v2-align.ts transfer-flyquest flyquest
+got 19 / emitted 19 ; rolesUsed=["search-form","sort-fares","record-cheapest"]
+TOTAL diffs = 0 ; byField = {}          # 含 target_hints 两条（search-form 3 元素 / 酒店 cap 2 元素）
+```
+
+verdict：**confirmed**。
+
+## 11.3 证伪：不变量换成不可能成立（临时副本）→ exit 1
+
+```text
+falsify-skybook   exit=1  ok=False completed=23/23 invariants=[('impossible', False)]
+falsify-flyquest  exit=1  ok=False completed=19/19 invariants=[('impossible', False)]
+```
+
+verdict：**confirmed**。
+
+## 11.4 门禁与应用目录
+
+```text
+$ npm run apps:matrix
+transfer-flyquest  pack  0  3  19  0  3  252  0  -
+transfer-skybook   pack  0  5  23  0  3  282  0  -
+应用 18 个 ｜ 声明 3197 行 ｜ 应用目录里的代码 0 行（期望 0：应用是数据，代码在共享层）
+泄漏检查：OK（核心层代码里没有任何应用声明的站点/工具标识）      exit code = 0（debt=0）
+
+$ find apps/transfer-skybook apps/transfer-flyquest -type f
+apps/transfer-skybook/pack.json
+apps/transfer-flyquest/pack.json         # 只有 JSON
+```
+
+verdict：**confirmed**（0 代码行 / 0 泄漏 / 0 债；两目录只有 `pack.json`）。
+
+## 11.5 全量套件 `npm run apps:suite`（题面：现在应是 12 个离线旅程应用）
+
+```text
+$ npm run apps:suite
+应用                  步骤  完成     跳过  不变量  用时     结论
+camera-entry        4   4/4    0   3/3  7.3s   通过
+cli-report          5   4/5    0   0/0  0.5s   待放行(未执行)
+ctrip-case          19  19/19  0   3/3  7.3s   通过
+demo-app            5   5/5    0   2/2  2.1s   通过
+ip-config           8   8/8    0   3/3  2.4s   通过
+repo-report         3   3/3    0   0/0  0.2s   通过
+transfer-farehaven  24  24/24  4   3/3  28s    通过
+transfer-flyquest   19  19/19  0   3/3  30.7s  通过
+transfer-skybook    23  23/23  0   3/3  23.3s  通过
+transfer-slowjet    19  19/19  0   3/3  23.2s  通过
+transfer-trekly     19  19/19  0   3/3  21.5s  通过
+transfer-voyagio    24  24/24  0   3/3  28.2s  通过
+
+跳过（不是豁免：它们要真网络，另有验收口径）：
+  - ctrip-live（测量型应用：只声明 probe，要真网络）
+  - ota-live（测量型应用：只声明 probe，要真网络）
+  - qunar-live（线上旅程：start_url 是 http(s)，要真网络）
+
+应用套件：11/12 通过，1 个待显式放行（危险步未执行）  ← 离线旅程型应用没有红项
+  - cli-report：危险步未执行（验收命令要带 --allow-dangerous）
+exit code = 0
+```
+
+verdict：**confirmed**（12 个离线旅程应用都在表里；3 个需要真网络的应用**明着跳过**；`cli-report` 因为危险步没放行而记「待放行(未执行)」——既不算绿也不算红，与 CLAUDE.md 的口径一致）。本轮是我自己跑的，`transfer-skybook` / `transfer-flyquest` 的 23/23、19/19 与 §11.1/§11.2 的单独验收一致。
+
+## 11.6 第 4 轮未能验证 / 边界
+
+- skybook 的 `#sort-state` 跨页面重复（flights ×5 + hotels ×1）**依赖"每个子目标先重新 goto 到自己的页面"才不产生歧义**；如果将来把机票/酒店的排序并到同一页面，这条 done-signal 需要拆开。
+- 我只统计了"信号文本相同"的重复组，**没有**逐条评估"这个信号是否只在正确页面上才可能成立"（那需要给每一步注入错误页面的反事实运行，超出本轮范围）。
+- flyquest 的退化实验只做了 `target_hints → target_hint("#date")` 这一种退法；退化成 `target_hint("#search-btn")`（直接提交、不填日期）预期也会红（信号要求 `#window-state` = 08:00-18:00），但**未实测**。
+- 两个 verdict 只对 §11 开头 pin 的 sha256 有效；`apps:suite` 的表是那一刻仓库状态的整体快照。

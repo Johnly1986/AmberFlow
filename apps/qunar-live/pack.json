@@ -59,9 +59,24 @@
     }
   },
   "notes": [
+    "`device`：这是**手机版页面**（`touch.` 域），桌面 UA/视口下 DOM 不同、点名目标不在元素池里，hint 必然落空（实测：桌面上下文下第一个子目标三次尝试都 `low confidence 0.15`；声明 iPhone UA + 390×844 后同一份计划一次命中）。设备面与应用包一起声明，不写死在驱动里。",
+    "`model: multilingual`：这两页是中文，英文 checkpoint 在 CJK 状态上会塌到 0.03-0.15（CLAUDE.md 有实测记录），所以模型兜底必须用多语 checkpoint —— 这是**声明**，不是运行参数。",
     "冻结计划也搬进来了（原来在 src/qunar-task.ts 的 buildPlan() 里）：两步、城市选择器与搜索按钮各点一次、完成信号是 URL。",
     "判决顺序是 load-bearing 的：0 → unreachable，非 200 或正文命中 block_text → blocked，URL 命中 login 规则 → login_required，否则 captured。",
     "实测（2026-10-03）：页面本身三种客户端都能抓到，而列表 API 对自动化浏览器拒绝服务——边界记在 qunar-task 的判分里（4/4 判据）。",
     "`login.paths` 用子串规则（`passport.` / `/login`）：这是跳转 URL 的特征，不是主机名，所以不进入 hosts 的防泄漏清单。"
-  ]
+  ],
+  "model": "multilingual",
+  "device": {
+    "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "is_mobile": true,
+    "has_touch": true,
+    "locale": "zh-CN",
+    "timezone": "Asia/Shanghai",
+    "device_scale_factor": 3
+  }
 }

@@ -297,7 +297,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const holder: { session: BrowserSession | null } = { session: null };
   const getShell = async (): Promise<BrowserSession> => {
     if (holder.session === null) {
-      holder.session = own ? await browserSession() : await opts.sessionFactory!();
+      // 包声明了设备就用它（只有手机版页面存在的站点，桌面 DOM 里 hint 必然落空）
+      const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
+      holder.session = own ? await browserSession(true, device) : await opts.sessionFactory!();
     }
     const s = holder.session;
     // 会话的生命周期由本函数掌握：执行器关掉的是这个壳，真正的 page 留到不变量之后。

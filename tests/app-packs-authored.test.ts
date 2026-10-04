@@ -335,7 +335,9 @@ describe("transfer 复刻站两题（A4 向导 / A5 冷启动重试）", () => {
   for (const [id, specKey, tag, modelFree] of [["transfer-voyagio", "voyagio", "voyagio", true],
     ["transfer-slowjet", "slowjet", "slowjet", false],
     ["transfer-trekly", "trekly", "trekly", true],
-    ["transfer-farehaven", "farehaven", "farehaven", true]] as const) {
+    ["transfer-farehaven", "farehaven", "farehaven", true],
+    ["transfer-skybook", "skybook", "skybook", true],
+    ["transfer-flyquest", "flyquest", "flyquest", true]] as const) {
     it(`${id}：journey 与 emitPlan(${specKey}) 的展开计划逐字段对齐`, () => {
       const frozen = emitted(specKey, path.join(os.tmpdir(), `app-packs-authored-${tag}`));
       const exp = expandPack(loadPack(id), {}, planPath(`${tag}-align`));
@@ -420,10 +422,44 @@ describe("transfer 复刻站两题（A4 向导 / A5 冷启动重试）", () => {
     expect(validatePack(tight)).toEqual(["plan: 24 subgoals exceed max 23"]);
   });
 
-  it("transfer 包的应用目录是数据（0 代码行），且五个新应用都进了矩阵", () => {
+  it("flyquest 的搜索表单步用的是有序 target_hints（不是单个 hint）", () => {
+    const exp = expandPack(loadPack("transfer-flyquest"), {}, planPath("flyquest-hints"));
+    const formSteps = exp.plan.subgoals.filter((s) => Array.isArray(s.target_hints) && s.target_hints!.length === 3);
+    // 5 个日期各一步：填日期 → 选时段 → 提交搜索（提交那一下才产生 URL 变化）
+    expect(formSteps.length, JSON.stringify(exp.plan.subgoals.map((s) => s.target_hints))).toBe(5);
+    for (const s of formSteps) {
+      expect(s.target_hints).toEqual(["#date", "#window", "#search-btn"]);
+      expect(s.target_hint ?? null, "有序列表的步骤不该再挂单 hint").toBeNull();
+      expect(String(s.start_url), "表单步从 search.html 起步").toContain("transfer/site4/search.html");
+      expect(s.slots).toEqual({ date: expect.any(String) });     // 日期值只来自计划
+    }
+    // 酒店上限那一步是第二处有序列表（先填 #cap 再点 #apply-cap）
+    const capSteps = exp.plan.subgoals.filter((s) => Array.isArray(s.target_hints) && s.target_hints!.length === 2);
+    expect(capSteps.map((s) => s.target_hints)).toEqual([["#cap", "#apply-cap"]]);
+  });
+
+  it("skybook 坏包在加载期炸：浏览器步缺 start_url（精确报错文本）", () => {
+    const noUrl = clone(loadPack("transfer-skybook")) as any;
+    delete noUrl["journey"][0]["start_url"];
+    expect(validatePack(noUrl)).toEqual(["journey[0]: a browser step needs start_url (each subgoal re-navigates)"]);
+  });
+
+  it("flyquest 坏包在加载期炸：把搜索表单的有序列表清空（每个实例都被点名）", () => {
+    const noHints = clone(loadPack("transfer-flyquest")) as any;
+    noHints["roles"]["search-form"]["target_hints"] = [];
+    expect(validatePack(noHints)).toEqual([
+      "plan: subgoal[1]: target_hints must be a non-empty list of strings",
+      "plan: subgoal[4]: target_hints must be a non-empty list of strings",
+      "plan: subgoal[7]: target_hints must be a non-empty list of strings",
+      "plan: subgoal[10]: target_hints must be a non-empty list of strings",
+      "plan: subgoal[13]: target_hints must be a non-empty list of strings",
+    ]);
+  });
+
+  it("transfer 包的应用目录是数据（0 代码行），且七个新应用都进了矩阵", () => {
     const { rows, leaks, debt } = matrix();
     for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet",
-      "transfer-trekly", "transfer-farehaven"]) {
+      "transfer-trekly", "transfer-farehaven", "transfer-skybook", "transfer-flyquest"]) {
       const r = rows.find((x) => x.app === id)!;
       expect(r, id).toBeTruthy();
       expect(r.code, id).toBe(0);

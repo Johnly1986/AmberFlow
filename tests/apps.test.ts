@@ -405,3 +405,32 @@ describe("共享层加固：`when` 与 `signal` 用同一套校验（出题方�
     expect(validatePack(loadPack("transfer-slowjet"))).toEqual([]);
   });
 });
+
+describe("共享层：`device` 声明（只有手机版页面存在的站点）", () => {
+  it("qunar-live 声明了 iPhone 设备面，且校验通过（这是它能在线上跑通的前提）", () => {
+    const pack = loadPack("qunar-live");
+    expect(pack.device).toMatchObject({ is_mobile: true, has_touch: true, locale: "zh-CN" });
+    expect((pack.device as any).viewport).toEqual({ width: 390, height: 844 });
+    expect(String((pack.device as any).user_agent)).toContain("iPhone");
+    expect(validatePack(pack)).toEqual([]);
+  });
+
+  it("坏 device 在加载期报错（未知键 / 视口形状 / 空 UA）", () => {
+    const p = clone(loadPack("qunar-live")) as any;
+    p.device = { user_agent: "", viewport: { width: 390 }, nope: 1, is_mobile: true };
+    const problems = validatePack(p).join(" | ");
+    expect(problems).toContain("device.viewport must be {width, height}");
+    expect(problems).toContain("device.user_agent must be a non-empty string");
+    expect(problems).toContain("device.nope: unknown key");
+    const notObj = clone(loadPack("qunar-live")) as any;
+    notObj.device = "iphone";
+    expect(validatePack(notObj).join(" | ")).toContain("device must be an object");
+  });
+
+  it("没声明 device 的离线应用不受影响（老路径仍是 browser.newPage()）", () => {
+    for (const id of ["demo-app", "ctrip-case", "transfer-skybook"]) {
+      const pack = loadPack(id);
+      if (pack.device === undefined) expect(validatePack(pack)).toEqual([]);
+    }
+  });
+});

@@ -29,8 +29,9 @@
 | A5 | `apps/transfer-slowjet` | `transfer/site7` + `specs/slowjet.json`（**冷启动重试**） | ✅ | `npm run apps -- --app transfer-slowjet --no-model --no-sources` | **已完成**（19/19；`retries` 真的被用上：有子目标 attempts>1） |
 | A6a | `apps/transfer-trekly` | `transfer/site3`：价格上限是 **`<input type=range>` 滑块**（19 步） | ✅ | `npm run apps -- --app transfer-trekly --no-model --no-sources` | **已完成**（19/19；三条结束状态不变量含 `#row-count` 32→12；独立复核：滑块四重证据 + 删除语义相同） |
 | A6b | `apps/transfer-farehaven` | `transfer/site6`：**条件浮层 `when`**（24 步，5 条 when） | ✅ | `npm run apps -- --app transfer-farehaven --no-model --no-sources` | **已完成**（20 done + **4 skipped**；独立复核：删掉 when → exit 1 且恰好那 4 步 blocked，说明是被区分性验证的） |
-| A6c | `apps/transfer-skybook` / `transfer-flyquest` | `transfer/site2`（11 步、最大）/ `site4`（必须提交表单才进结果页） | ✅ | 同 A4 口径 | 待出题 |
-| A7 | `apps/qunar-flight` | `touch.qunar.com` H5 机票（真实站点；边界见 `src/qunar-task.ts`） | ❌ 需网络 | `npm run apps -- --app qunar-flight --model english` | 待出题 |
+| A6c | `apps/transfer-skybook` | `transfer/site2`：**23 步**（本批最大）、唯一的**分页**骨架；5 个角色模板覆盖 19/23 步 | ✅ | `npm run apps -- --app transfer-skybook --no-model --no-sources` | **已完成**（23/23；独立复核：23/23 全字段 0 diffs；信号 8 种 / 5 个重复组，其中 1 组跨页面已作边界记录） |
+| A6d | `apps/transfer-flyquest` | `transfer/site4`：结果页**只能靠提交搜索表单**到达（有序 `target_hints`） | ✅ | `npm run apps -- --app transfer-flyquest --no-model --no-sources` | **已完成**（19/19；独立复核：退化成单 hint → exit 1 且恰好那 5 步 attempt 1 blocked） |
+| A7 | `apps/qunar-live`（旅程 + 探针同一包） | `touch.qunar.com` **H5 手机版**机票；边界见 `src/qunar-task.ts` | ❌ 需网络 + 真模型 | `npm run apps -- --app qunar-live --out /tmp/qunar` | **已完成**（**2/2**，两步都 `rule:match`，46.5s）——前提是包里声明了 `device`（见 §五） |
 | — | `apps/demo-app` / `cli-report` / `repo-report` | 应用层示范、工具步示范、真实工具（git+jq） | ✅ | 见 `apps/README.md` | 已完成 |
 | — | `apps/ctrip-live` / `ota-live` / `qunar-live` | 测量型应用（探针集） | ❌ 需网络 | 见 `bench/live-retest/REPORT.md` | 已完成 |
 | — | `apps/demo-tool` / `git-log` / `bench-cases` | 纯数据源应用（无旅程） | ✅ | `npm run apps:matrix` | 已完成 |
@@ -64,6 +65,7 @@
 | G-I | 重复 invariant id | 下一轮 |
 | G-G/G-H | 浏览器步无 `start_url` 放行 / `max_subgoals`·`slots`·`sources` 类型不校验 | **已修（第 2 轮）** |
 | G-K | 工具步的重试计数文件跨运行持久（`cli-report` 的 attempts 会从 1 变 3 再变 1） | **已修（第 2 轮，`{run_id}`）** |
+| G-N | **应用包不能声明设备面**：`touch.qunar.com` 的手机版页在桌面 UA/视口下 DOM 不同 → hint 落空、laya 也选不出来（0.15 < 0.25 floor）→ 一个线上应用被记成"跑不通"。修法：`device`（UA/视口/触摸/locale/时区/DPR）进声明面 + `browserSession(headless, device)`，qunar 包声明 iPhone 390×844 后 **2/2 全规则命中** | **已修（第 4 轮）** |
 | G-M | **`when` 不校验**：`signal` 走 `PlanningRules`，`when` 没人管——未知算子要到运行期才变成 BLOCKED 的 `error: unknown signal spec` | **已修（第 3 轮：`when` 用同一个 walker 校验，含组合嵌套与空 when）** |
 
 第 1 轮结果：**A1 / A2 完成并各自通过独立复核**（19/19 + 8/8，不变量成立，逐字段对齐）。
@@ -72,6 +74,15 @@
 一条必须说清楚的边界：**`transfer-slowjet` 的绿不是"全程规则命中"**——它的冷启动让第一次尝试落空、
 laya 被问过一次（脚本模型给不出 choice），最后靠 `retries` 重跑才过；测试里显式断言了 `act` 被问过 +
 有子目标 `attempts>1`。其余四条旅程（ctrip-case / ip-config / camera-entry / voyagio）都是全规则命中。
+
+第 4 轮结果：**A6c skybook（23 步）与 A6d flyquest（提交表单）完成并各自通过独立复核**，
+**A7 线上那道题也完成**（`apps/qunar-live` 2/2，两步全规则命中，46.5s，证据 [bench/live-retest/qunar-live-app-run.md](../bench/live-retest/qunar-app-run.md)）。
+**清单至此没有待出题的行**；`npm run apps:suite` 覆盖 12 个离线旅程应用（11 绿 + `cli-report` 待放行），
+线上/测量型应用被自动识别并明着跳过。当前 18 个应用 / 3210 声明行 / 应用目录 0 行代码 / 泄漏 OK / 债 0。
+
+第 4 轮（线上那道题）暴露并修掉了一个**schema 缺口**（G-N，见 §五）：应用包无法声明**设备面**，
+于是"只有手机版页面存在"的站点（`touch.` 域）在桌面上下文里跑——DOM 不同、计划点名的目标不在元素池里、
+hint 必然落空。修复后同一份计划 2/2 一次命中（`click div "北京" (clicked, rule:match, conf=1.00)`）。
 
 另有两条"知道的边界"要一直说清楚：`cli-report`/`repo-report` 在**缺 git/jq** 的机器上以前会崩（G-L 已修成结果），
 `ip-config` 前三台设备的"保存了正确值"由**逐步骤信号**保证，而 `invariants` 只看**结束状态**（CAM-1003 的拒绝页）。

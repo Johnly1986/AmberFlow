@@ -407,13 +407,52 @@ const DEFAULT_CONFIRM = (desc: string): boolean => {
  * an explicit async `close()` (there is no `with` in TS). `run()` will not own
  * the browser when this page/pw pair is injected.
  */
-export async function browserSession(headless = true): Promise<BrowserSession> {
+/**
+ * 可声明的**设备面**（应用包里的 `device` 块用它）。
+ *
+ * 为什么它必须能声明：有些站点是**只有手机版才存在**的——`touch.qunar.com` 的 H5 页在桌面 UA/视口下
+ * DOM 都不一样，于是计划点名的城市 chip 在元素池里根本不存在，hint 落空、laya 也选不出来（实测：
+ * 桌面上下文下第一个子目标三次尝试都 `low confidence 0.15`；同一份计划在 iPhone UA + 390×844 下
+ * 一次命中）。把它写死在驱动里就等于把站点知识藏回代码，所以设备是**声明**。
+ */
+export interface DeviceSpec {
+  user_agent?: string;
+  viewport?: { width: number; height: number };
+  is_mobile?: boolean;
+  has_touch?: boolean;
+  locale?: string;
+  timezone?: string;
+  device_scale_factor?: number;
+}
+
+export async function browserSession(headless = true, device?: DeviceSpec | null): Promise<BrowserSession> {
   const mod = await import("playwright");
   const pw: PwLike = { chromium: mod.chromium as unknown as PwLike["chromium"] };
   const browser = (await browserEnv.launch(pw, headless)) as unknown as BrowserHandle;
   let page: AnyPage;
+  let context: AnyPage | null = null;
   try {
-    page = (await browser.newPage()) as AnyPage;
+    if (device && Object.keys(device).length) {
+      // 有设备声明就开一个带 UA/视口/触摸的上下文；没有就保持老的 `browser.newPage()` 路径，
+      // 免得给所有既有应用引入一层新对象（它们的验收输出不该因为这次改动而变化）。
+      const ctx = await (browser as unknown as {
+        newContext(o?: Record<string, unknown>): Promise<{
+          newPage(): Promise<AnyPage>; close(): Promise<void>;
+        }>;
+      }).newContext({
+        ...(device.user_agent === undefined ? {} : { userAgent: device.user_agent }),
+        ...(device.viewport === undefined ? {} : { viewport: device.viewport }),
+        ...(device.is_mobile === undefined ? {} : { isMobile: device.is_mobile }),
+        ...(device.has_touch === undefined ? {} : { hasTouch: device.has_touch }),
+        ...(device.locale === undefined ? {} : { locale: device.locale }),
+        ...(device.timezone === undefined ? {} : { timezoneId: device.timezone }),
+        ...(device.device_scale_factor === undefined ? {} : { deviceScaleFactor: device.device_scale_factor }),
+      });
+      context = ctx as unknown as AnyPage;
+      page = await ctx.newPage();
+    } else {
+      page = (await browser.newPage()) as AnyPage;
+    }
   } catch (err) {
     await browser.close();
     throw err;
@@ -426,6 +465,7 @@ export async function browserSession(headless = true): Promise<BrowserSession> {
     async close(): Promise<void> {
       if (closed) return;
       closed = true;
+      if (context) { try { await (context as unknown as { close(): Promise<void> }).close(); } catch { /* browser.close()下面兜底 */ } }
       await browser.close();
     },
   };
