@@ -27,7 +27,9 @@
 | A3 | `apps/camera-entry` | `src/camera-entry.ts`（Excel 类型列路由两套表单）+ `testpages/` | ✅ | `npm run apps -- --app camera-entry --no-model` | **已完成**（4/4；空类型行用行内证据显式选页、CAM-12 被拒行显式成步；独立复核 confirmed） |
 | A4 | `apps/transfer-voyagio` | `transfer/site5` + `specs/voyagio.json`（6 个 phase = **两页向导**） | ✅ | `npm run apps -- --app transfer-voyagio --no-model --no-sources` | **已完成**（24/24；与 `emitPlan("voyagio")` 全字段全等） |
 | A5 | `apps/transfer-slowjet` | `transfer/site7` + `specs/slowjet.json`（**冷启动重试**） | ✅ | `npm run apps -- --app transfer-slowjet --no-model --no-sources` | **已完成**（19/19；`retries` 真的被用上：有子目标 attempts>1） |
-| A6 | `apps/transfer-trekly` / `transfer-farehaven` / `transfer-skybook` / `transfer-flyquest` | `transfer/site3`（滑块）/ `site6`（条件浮层 `when`）/ `site2`（11 步最大）/ `site4`（提交表单才能进结果页） | ✅ | 同 A4 口径 | 待出题 |
+| A6a | `apps/transfer-trekly` | `transfer/site3`：价格上限是 **`<input type=range>` 滑块**（19 步） | ✅ | `npm run apps -- --app transfer-trekly --no-model --no-sources` | **已完成**（19/19；三条结束状态不变量含 `#row-count` 32→12；独立复核：滑块四重证据 + 删除语义相同） |
+| A6b | `apps/transfer-farehaven` | `transfer/site6`：**条件浮层 `when`**（24 步，5 条 when） | ✅ | `npm run apps -- --app transfer-farehaven --no-model --no-sources` | **已完成**（20 done + **4 skipped**；独立复核：删掉 when → exit 1 且恰好那 4 步 blocked，说明是被区分性验证的） |
+| A6c | `apps/transfer-skybook` / `transfer-flyquest` | `transfer/site2`（11 步、最大）/ `site4`（必须提交表单才进结果页） | ✅ | 同 A4 口径 | 待出题 |
 | A7 | `apps/qunar-flight` | `touch.qunar.com` H5 机票（真实站点；边界见 `src/qunar-task.ts`） | ❌ 需网络 | `npm run apps -- --app qunar-flight --model english` | 待出题 |
 | — | `apps/demo-app` / `cli-report` / `repo-report` | 应用层示范、工具步示范、真实工具（git+jq） | ✅ | 见 `apps/README.md` | 已完成 |
 | — | `apps/ctrip-live` / `ota-live` / `qunar-live` | 测量型应用（探针集） | ❌ 需网络 | 见 `bench/live-retest/REPORT.md` | 已完成 |
@@ -58,9 +60,11 @@
 | G-A | 测量型应用（探针集）经 `runApp` **空转"通过 0/0"** | 已修（CLI 指路探针驱动，exit 2） |
 | G-J | 坏包走 CLI 是未捕获异常（栈） | 已修（报清楚 + exit 2） |
 | G-L | 命令起不来（缺二进制/超时）抛栈、不写结果 | 已修（`refused: "tool-unavailable"` 进结果 JSON） |
-| G-E/G-F/G-I | 跨列表重复 id / 非字符串 id 静默 `String()` / 重复 invariant id | 下一轮 |
-| G-G/G-H | 浏览器步无 `start_url` 放行 / `max_subgoals`·`slots`·`sources` 类型不校验 | 下一轮 |
-| G-K | 工具步的重试计数文件跨运行持久（`cli-report` 的 attempts 会从 1 变 3 再变 1） | 下一轮（记录在案） |
+| G-E/G-F | 跨列表重复 id / 非字符串 id 静默 `String()` | **已修（第 2 轮）** |
+| G-I | 重复 invariant id | 下一轮 |
+| G-G/G-H | 浏览器步无 `start_url` 放行 / `max_subgoals`·`slots`·`sources` 类型不校验 | **已修（第 2 轮）** |
+| G-K | 工具步的重试计数文件跨运行持久（`cli-report` 的 attempts 会从 1 变 3 再变 1） | **已修（第 2 轮，`{run_id}`）** |
+| G-M | **`when` 不校验**：`signal` 走 `PlanningRules`，`when` 没人管——未知算子要到运行期才变成 BLOCKED 的 `error: unknown signal spec` | **已修（第 3 轮：`when` 用同一个 walker 校验，含组合嵌套与空 when）** |
 
 第 1 轮结果：**A1 / A2 完成并各自通过独立复核**（19/19 + 8/8，不变量成立，逐字段对齐）。
 第 2 轮结果：**A3 / A4 / A5 完成并各自通过独立复核**（4/4 + 24/24 + 19/19，不变量成立，逐字段对齐），

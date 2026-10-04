@@ -29,7 +29,7 @@ npm run doctor                                   # 环境体检：Node / chromiu
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 760 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 782 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -75,10 +75,15 @@ npm run shortlist                                                               
 的计划**逐字段全等**）、`--app ip-config --no-model`（Excel IP 规划表 → 设备网络页，含"表格写错的那行由设备页
 自己拒绝"）、`--app camera-entry --no-model`（Excel 类型列路由两套表单：空类型行按**行内证据**显式选页、
 坏序列号那行显式成步）、`--app transfer-voyagio --no-model --no-sources`（第二个复刻站：**两页向导** 24 步）、
-`--app transfer-slowjet --no-model --no-sources`（第三个复刻站：**冷启动重试** 19 步）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
+`--app transfer-slowjet --no-model --no-sources`（第三个复刻站：**冷启动重试** 19 步）、
+`--app transfer-trekly --no-model --no-sources`（第四个复刻站：价格上限是**滑块**，19 步）、
+`--app transfer-farehaven --no-model --no-sources`（第五个复刻站：**条件浮层 `when`**，24 步 = 20 done + 4 skipped）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
 原始观测 → 结论，含 11 处缺陷与 3 处共享层修补）：[bench/APP_VERIFY_REPORT.md](bench/APP_VERIFY_REPORT.md)。
 新增一个应用 = 新目录 `apps/<id>/`（`pack.json` + 可选 `sources/*.json`），**共享层零改动**；
-度量与防泄漏门禁：`npm run apps:matrix`。怎么加见 [apps/README.md](apps/README.md)。
+度量与防泄漏门禁：`npm run apps:matrix`。**"所有应用都完成了吗"的退出码**：`npm run apps:suite`
+（跑完每个旅程型应用的验收，一行一个应用：步骤/跳过/不变量/用时/结论；线上应用与测量型应用自动被识别为
+"要真网络"并**明着跳过**；危险步因未放行而没执行会记成"待放行(未执行)"——既不算绿也不算红，因为绿色的前提
+是真的执行过）。怎么加见 [apps/README.md](apps/README.md)。
 
 工具步（命令行当动作腿）：`npm run apps -- --app cli-report --no-model --allow-dangerous`（桩工具：
 退出码 / JSON 路径 / stderr / 幂等重试 / 干跑+确认+落盘）、`--app repo-report --no-model`（真实 git + jq）。
@@ -246,9 +251,15 @@ These are empirical findings from this codebase's own experiments — preserve t
   `sources`/`model` (a bare string used to produce a string of character-by-character "unknown source" pseudo-errors
   ON TOP of the real one), and `{run_id}` — a per-run placeholder, because a retry counter written into the shared
   `{out_dir}` makes the SECOND run of the same command behave differently (measured: `cli-report`'s flaky step went
-  from `attempts=3` to `attempts=1`; with `{run_id}` it is 3 every time). One boundary the tests now state out loud:
+  from `attempts=3` to `attempts=1`; with `{run_id}` it is 3 every time). Round 3 added one more, found by the AUTHOR this
+  time: `PlanningRules.problems` validated every subgoal `signal` recursively but never its `when` — the same
+  `signals.ts` answers both questions, so the guard went unchecked until the run, where a bad op surfaced as
+  `stop_reason: "error: … unknown signal spec"` and a BLOCKED subgoal (loud, but a round too late). `when` now goes
+  through the same walker (nested combinators and an empty `when` included). One boundary the tests state out loud:
   a green run is not automatically a model-free run — `transfer-slowjet` asks laya once per cold load and passes only
-  because `retries` re-runs the subgoal, so its test asserts `act` was asked AND `attempts>1`.
+  because `retries` re-runs the subgoal, so its test asserts `act` was asked AND `attempts>1`; symmetrically,
+  `transfer-farehaven`'s `when` guards are discriminatingly verified only because DELETING them (temp copy) turns the
+  run red (exit 1, exactly those 4 subgoals blocked).
 - **A tool step is an ACTION LEG, and the three disciplines are what make it safe.** A journey entry with a `source` is a
   tool step: it reuses the CLI transport (argv array, env allowlist, cwd, exit codes, version pin) and adds `args` /
   `dry_run_args` / `idempotent` / `dangerous`. Its completion truth is the **process observation** — `src/tool-signals.ts`

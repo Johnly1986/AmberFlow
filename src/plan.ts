@@ -92,38 +92,52 @@ export class PlanningRules {
     plan.subgoals.forEach((s, i) => {
       const tag = `subgoal[${i}]`;
       const sig = (s.signal ?? {}) as SignalSpec;
+      // Composition and `manual` carry no scalar arguments; they are validated
+      // structurally and — for the combinators — recursively, so a bad op nested
+      // inside `all_of` is caught at plan-validation time, not mid-run.
+      //
+      // `when` uses the SAME languages as `signal` (`signals.ts` answers both
+      // questions), so it must be checked by the same walker. It used to be skipped:
+      // a `when: {magic_op: "#x"}` passed validation and only blew up mid-run as
+      // `stop_reason: "error: … unknown signal spec"` -> a BLOCKED subgoal. Loud, but
+      // one round too late — a guard that can never be evaluated should fail at load.
+      const checkSignalSpec = (spec: SignalSpec, where: string): void => {
+        for (const [op, args] of Object.entries(spec)) {
+          if (!(op in SIGNAL_OPS)) { issues.push(`${where}: unknown signal op '${op}'`); continue; }
+          if (op === "manual") continue;                        // a human attestation, no args
+          if (op === "all_of" || op === "any_of") {
+            if (!Array.isArray(args) || args.length === 0) {
+              issues.push(`${where}: ${op} needs a non-empty list of signals`);
+              continue;
+            }
+            args.forEach((child, j) => checkSignalSpec(child as SignalSpec, `${where}.${op}[${j}]`));
+            continue;
+          }
+          if (op === "not") {
+            if (!args || typeof args !== "object" || Array.isArray(args)) {
+              issues.push(`${where}: not needs one signal`);
+              continue;
+            }
+            checkSignalSpec(args as SignalSpec, `${where}.not`);
+            continue;
+          }
+          if (signalArgs(args).length !== SIGNAL_OPS[op]) {
+            issues.push(`${where}: ${op} needs ${SIGNAL_OPS[op]} argument(s)`);
+          }
+        }
+      };
       if (Object.keys(sig).length === 0) {
         if (this.requireSignal) issues.push(`${tag}: missing done-signal`);
       } else {
-        // Composition and `manual` carry no scalar arguments; they are validated
-        // structurally and — for the combinators — recursively, so a bad op nested
-        // inside `all_of` is caught at plan-validation time, not mid-run.
-        const checkSignalSpec = (spec: SignalSpec, where: string): void => {
-          for (const [op, args] of Object.entries(spec)) {
-            if (!(op in SIGNAL_OPS)) { issues.push(`${where}: unknown signal op '${op}'`); continue; }
-            if (op === "manual") continue;                        // a human attestation, no args
-            if (op === "all_of" || op === "any_of") {
-              if (!Array.isArray(args) || args.length === 0) {
-                issues.push(`${where}: ${op} needs a non-empty list of signals`);
-                continue;
-              }
-              args.forEach((child, j) => checkSignalSpec(child as SignalSpec, `${where}.${op}[${j}]`));
-              continue;
-            }
-            if (op === "not") {
-              if (!args || typeof args !== "object" || Array.isArray(args)) {
-                issues.push(`${where}: not needs one signal`);
-                continue;
-              }
-              checkSignalSpec(args as SignalSpec, `${where}.not`);
-              continue;
-            }
-            if (signalArgs(args).length !== SIGNAL_OPS[op]) {
-              issues.push(`${where}: ${op} needs ${SIGNAL_OPS[op]} argument(s)`);
-            }
-          }
-        };
         checkSignalSpec(sig, tag);
+      }
+      const when = (s as { when?: SignalSpec | null }).when;
+      if (when !== undefined && when !== null) {
+        if (typeof when !== "object" || Array.isArray(when) || Object.keys(when).length === 0) {
+          issues.push(`${tag}.when: must be a non-empty signal (the guard decides skip vs run)`);
+        } else {
+          checkSignalSpec(when, `${tag}.when`);
+        }
       }
       const hint = s.target_hint;
       const hints = s.target_hints;

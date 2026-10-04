@@ -839,3 +839,126 @@ retry-counter-mut2a499-2518009-4   retry-counter-mut2a53f-2518087-4
 - **两个 transfer 包的 `emitPlan` 基准用的是 `LAYA_TODAY=2026-10-02`**（与 §8 同一冻结时钟口径）；若不 pin，`nextWeekDates`/`bestOverall` 会随墙上时钟漂移，日期一变包就与 spec 不等——包里的日期因此是写死的（notes 已声明）。
 - 我没有复核 `transfer/site5` / `site7` 的页面实现本身，只复核了"包展开的计划 == spec 展开的计划"与"验收真的跑通"。
 - 三包 verdict 只对 §9 开头 pin 的 sha256 有效；若作者再改 pack，需重跑。
+
+---
+
+# 10. 第 3 轮复核（trekly / farehaven）
+
+- 复核对象（**revision 固定**，mtime 均为 2026-10-04 08:30）：
+
+```text
+d29e5ac1661608e4d279fcd78fce8216322a7c22722c7aef6527c313e8b57b53  apps/transfer-trekly/pack.json
+fed2a89ce5c1743d72ca37ffd13d5f459587579cda2772656ef6d3e9e70509fe  apps/transfer-farehaven/pack.json
+```
+
+- 本轮**未改 `src/**`**（只报告）；所有临时副本在 `/tmp`。方法同 §8/§9：题 → 命令 → 原始观测 → verdict。
+
+## 10.1 transfer-trekly（题面：价格上限必须真的是 range 滑块 + 验收要体现"上限=300 / 结果收窄"）
+
+```text
+$ npm run apps -- --app transfer-trekly --no-model --no-sources --out /tmp/v3-trekly
+- 结果：**通过** ｜ 步骤 19/19 ｜ 用时 26.5s        exit code = 0
+| 16 | 打开 北京 2026-10-09 入住的酒店列表，并把价格上限设为 ¥300 | done | 1 |
+| 17 | 把 北京 2026-10-09 入住的酒店列表按价格从低到高排序 | done | 1 |
+| 18 | 记录当前显示的每一家酒店 | done | 1 |
+| end-on-recorded-narrowed-stays-list | 成立 |
+| the-slider-really-moved-off-its-default | 成立 |
+| the-slider-narrowed-the-list-to-the-frozen-count | 成立 |
+```
+
+**range 滑块语义（四重证据，全部一致）**：
+
+1. 页面本身就是滑块：`transfer/site3/hotels.html:20` → `<input type="range" id="max-price" name="cap" min="100" max="1500" step="50" value="1500">`，`#cap-state` 初值 `Max price: no limit`，`site3.js` 里 `slider.oninput = () => location.href = here({cap: v, sort})`、`#row-count` 按 `limit = Number(cap)` 过滤。
+2. 包里点名的是滑块：step 16 `target_hint: "#max-price"`，`start_url` 是**不带 cap 的** `transfer/site3/hotels.html?checkin=2026-10-09`（所以必须靠 `fill` + `input` 事件导航）。
+3. 运行日志走的是 fill 路径：`step 1: type text into input "1500 / Max price per night" (filled, rule:match, conf=1.00)` —— `input[type=range]` 没有单独动作，`locator.fill()` 设值并触发 `input`（CLAUDE.md 记录的实测）。
+4. 验收的事实不是"某一步 done"，而是**结束状态**上的三个事实：`#cap-state` 含 `¥300`（滑块离开默认值，`not … "no limit"`）、`.stay-row` 非空、**`#row-count` 含 `12 stays`**（冻结数据 32 家 → cap=300 后 12 家）。第三条正是"结果收窄"的硬事实，且它确实在 e2e 里成立。
+
+逐字段对齐：
+
+```text
+$ node --experimental-strip-types /tmp/v2-align.ts transfer-trekly trekly    # LAYA_TODAY=2026-10-02
+got 19 / emitted 19 ; rolesUsed=["filter-window","sort-flights","record-lowest"]
+TOTAL diffs = 0 ; byField = {}          # desc/start_url/target_hint(s)/signal/when/retries/slots 全等；when=0、retries=0
+```
+
+verdict：**confirmed**（滑块语义 + 收窄事实 + 19/19 全字段对齐）。
+
+## 10.2 transfer-farehaven（题面：`when` 必须保留 5 条；e2e 必须真的出现 skipped）
+
+```text
+$ npm run apps -- --app transfer-farehaven --no-model --no-sources --out /tmp/v3-farehaven
+- 结果：**通过** ｜ 步骤 24/24 ｜ 用时 26s          exit code = 0
+（表格：20 行 done + 4 行 skipped）
+| 5  | 如果 2026-10-06（周二）的机票页弹出了促销遮罩，就先关掉它 | skipped | 1 | - |
+| 9  | 如果 2026-10-07（周三）的机票页弹出了促销遮罩，就先关掉它 | skipped | 1 | - |
+| 13 | 如果 2026-10-08（周四）的机票页弹出了促销遮罩，就先关掉它 | skipped | 1 | - |
+| 17 | 如果 2026-10-09（周五）的机票页弹出了促销遮罩，就先关掉它 | skipped | 1 | - |
+| end-on-recorded-hotels-list / end-state-is-the-hotels-page / recorded-for-the-frozen-checkin | 均成立 |
+```
+
+**`when` 如实保留 = 5 条**（展开后的计划）：
+
+```text
+$ node --experimental-strip-types /tmp/v3-when.ts
+transfer-farehaven: subgoals=24 when=5 retries=0
+   [1]  {"css_exists":["#promo-modal"]}  如果 2026-10-05（周一）…
+   [5]  … [9] … [13] … [17]              （每天一条）
+transfer-trekly:    subgoals=19 when=0 retries=0
+```
+
+第 1 条（10-05）**done**：`window.FAREHAVEN.promoDates = ["2026-10-05","2026-10-06","2026-10-07"]`，但 `site6.js` 用 `localStorage.fh_promo_handled` 记住"已处理"——第一次关掉后，同一次运行里后续日期（含另两个 promo 日）不再渲染 `#promo-modal`，`when` 为假 → **4 条 skipped**。所以"部分页面才有遮罩"这件事被如实表达成 `done ×1 + skipped ×4`，不是"全都 done"也不是"全都跳过"。
+
+逐字段对齐：
+
+```text
+$ node --experimental-strip-types /tmp/v2-align.ts transfer-farehaven farehaven
+got 24 / emitted 24 ; rolesUsed=["dismiss-promo","filter-window","sort-flights","record-lowest"]
+TOTAL diffs = 0 ; byField = {}          # 含 when：5 条逐字段与 spec 展开一致
+```
+
+**证伪 `when` 的区分度**：临时副本删掉 `roles.dismiss-promo.when`（journey 无内联 when）后重跑：
+
+```text
+$ node --experimental-strip-types src/app-runner.ts --app /tmp/v3-falsify/farehaven-nowhen/pack.json \
+    --no-model --no-sources --quiet --out /tmp/v3-falsify/out-nowhen
+farehaven-nowhen exit=1
+ok=False completed=20/24
+[5]  blocked attempts=1 obstacle=picked ref 'undefined' is not in the element pool on step 1
+[9]  blocked attempts=1 obstacle=…
+[13] blocked attempts=1 obstacle=…
+[17] blocked attempts=1 obstacle=…      # 恰好是没有遮罩的那 4 天
+invariants 仍全部成立（它们只看酒店结束状态）
+```
+
+verdict：**confirmed** —— 删掉 `when` 后**阻塞在恰好 4 个没有浮层的日期上**，所以这条 `when` 在当前数据下**是被区分性地验证**的（不是"有没有它都一样"）。与 §9.3 的 `retries` 同型：exit 1 来自**逐步 done**（20/24），不变量本身仍成立。
+
+## 10.3 证伪：不变量换成不可能成立（临时副本）→ exit 1
+
+```text
+falsify-trekly    exit=1  ok=False completed=19/19 invariants=[('impossible', False)]
+falsify-farehaven exit=1  ok=False completed=24/24 invariants=[('impossible', False)]
+```
+
+verdict：**confirmed**（动作腿照跑，验收不成立即退出码 1）。
+
+## 10.4 门禁与应用目录
+
+```text
+$ npm run apps:matrix
+transfer-trekly     pack  0  3  19  0  3  235  0  -
+transfer-farehaven  pack  0  4  24  0  3  272  0  -
+应用 16 个 ｜ 声明 2661 行 ｜ 应用目录里的代码 0 行（期望 0：应用是数据，代码在共享层）
+泄漏检查：OK（核心层代码里没有任何应用声明的站点/工具标识）      exit code = 0（debt=0）
+
+$ find apps/transfer-trekly apps/transfer-farehaven -type f
+apps/transfer-trekly/pack.json
+apps/transfer-farehaven/pack.json        # 只有 JSON，没有 .ts/.js/.mjs/.cjs
+```
+
+verdict：**confirmed**（0 代码行 / 0 泄漏 / 0 债；两目录只有 `pack.json`）。
+
+## 10.5 第 3 轮未能验证 / 边界
+
+- trekly 的"结果收窄"事实绑在**冻结数据集**上（`12 stays`）：数据集一换，不变量里的 12 就要跟着改——packs 的日期/cap 都是写死的，这是与 §8/§9 同一条"冻结语料"约定。
+- 我没有复核 `transfer/site3` / `site6` 的生成器（`transfer/data3.ts` / `data6.ts`）本身，只复核了"包展开 == spec 展开"、"验收真的跑通"、以及两页的行为文件（`site3.js` / `site6.js`）。
+- 两个 verdict 只对 §10 开头 pin 的 sha256 有效；作者若再改 pack 需重验。

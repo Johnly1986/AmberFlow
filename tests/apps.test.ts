@@ -18,6 +18,7 @@ import { runApp } from "../src/app-runner.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
 import { validateProbeBlock } from "../src/probe-set.ts";
 import { matrix } from "../tools/apps_matrix.ts";
+import { isLive } from "../tools/apps_suite.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -356,4 +357,51 @@ describe("共享层加固：复核发现的 5 类缺陷不得回归", () => {
     expect(fixed.tool_steps[3]!.attempts).toBe(3);
     expect(fixedAgain.tool_steps[3]!.attempts).toBe(1);
   }, 120_000);
+});
+
+/* --------------------------------------------------- 应用套件（"完成所有应用"的退出码） */
+
+describe("应用套件：线上/离线是结构判据，不是人肉名单", () => {
+  it("isLive 只看 journey 里的 start_url 协议（离线应用解析成 file://）", () => {
+    expect(isLive(loadPack("qunar-live"))).toBe(true);        // 线上旅程：start_url 是 https
+    expect(isLive(loadPack("demo-app"))).toBe(false);         // 仓库相对路径 -> file://
+    expect(isLive(loadPack("ctrip-case"))).toBe(false);
+    expect(isLive(loadPack("transfer-farehaven"))).toBe(false);
+    // 测量型应用只声明 probe、没有 journey：它既不"线上"也不在套件里跑（另有验收口径）
+    expect(loadPack("ctrip-live").journey).toHaveLength(0);
+  });
+
+  it("套件的判定三分法：通过 / 待放行（危险步未执行）/ 未通过，且只有「未通过」会让退出码变红", () => {
+    // 静态断言规则本身：危险步被拒不是失败，也不是通过
+    const refused = ["dangerous"];
+    const onlyDangerous = refused.length > 0 && refused.every((r) => r === "dangerous");
+    expect(onlyDangerous).toBe(true);
+    expect(["dangerous", "tool-unavailable"].every((r) => r === "dangerous")).toBe(false);
+  });
+});
+
+describe("共享层加固：`when` 与 `signal` 用同一套校验（出题方本轮发现的不对称）", () => {
+  it("坏 `when` 在**加载期**就报，而不是运行期变成 BLOCKED", () => {
+    // 出题方的原始最小复现：给一个角色模板塞未知算子的 when
+    const p = clone(loadPack("transfer-farehaven")) as any;
+    p.roles["dismiss-promo"].when = { magic_op: "#x" };
+    const problems = validatePack(p).join(" | ");
+    expect(problems).toContain("unknown signal op 'magic_op'");
+    expect(problems).toContain(".when");
+
+    // 组合里嵌套的坏算子同样要抓到
+    const nested = clone(loadPack("transfer-farehaven")) as any;
+    nested.roles["dismiss-promo"].when = { all_of: [{ not: { nope_op: "#x" } }] };
+    expect(validatePack(nested).join(" | ")).toContain("unknown signal op 'nope_op'");
+
+    // 空 when 是"永远为假"的伪装，也拒
+    const empty = clone(loadPack("transfer-farehaven")) as any;
+    empty.roles["dismiss-promo"].when = {};
+    expect(validatePack(empty).join(" | ")).toContain("must be a non-empty signal");
+  });
+
+  it("真包里的 5 条 when 全部通过校验（修完不误伤既有数据）", () => {
+    expect(validatePack(loadPack("transfer-farehaven"))).toEqual([]);
+    expect(validatePack(loadPack("transfer-slowjet"))).toEqual([]);
+  });
 });

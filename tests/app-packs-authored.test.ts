@@ -316,15 +316,26 @@ describe("apps/camera-entry（A3：Excel 类型列路由两套表单）", () => 
 describe("transfer 复刻站两题（A4 向导 / A5 冷启动重试）", () => {
   const emitted = (key: string, dir: string): Array<Record<string, any>> => {
     const specs = discoverSpecs();
-    const p = emitPlan(key, specs[key]!, dir);
-    return (JSON.parse(fs.readFileSync(p, "utf-8")) as { subgoals: Array<Record<string, any>> }).subgoals;
+    // `emitPlan` 的日期来自 `nextWeekDates()`（读 LAYA_TODAY）；包里的日期是**冻结**的
+    // （用 2026-10-02 那天生成的 2026-10-05..09），所以这里同步地把时钟钉在同一天 ——
+    // 否则过了那个周末，对齐测试就会因为日期漂移而红（与 parity-clock 那条教训同型）。
+    const old = process.env.LAYA_TODAY;
+    process.env.LAYA_TODAY = "2026-10-02";
+    try {
+      const p = emitPlan(key, specs[key]!, dir);
+      return (JSON.parse(fs.readFileSync(p, "utf-8")) as { subgoals: Array<Record<string, any>> }).subgoals;
+    } finally {
+      if (old === undefined) delete process.env.LAYA_TODAY; else process.env.LAYA_TODAY = old;
+    }
   };
 
   // `modelFree`：这条旅程是否**全程规则命中**。voyagio 是；slowjet 不是——它的冷启动会让第一次
   // 尝试落空、laya 被问一次（脚本模型给不出 choice），最后是靠 `retries` 重跑才过的。
   // 这个区别必须显式写出来，否则"绿的"会被读成"不需要模型"。
   for (const [id, specKey, tag, modelFree] of [["transfer-voyagio", "voyagio", "voyagio", true],
-    ["transfer-slowjet", "slowjet", "slowjet", false]] as const) {
+    ["transfer-slowjet", "slowjet", "slowjet", false],
+    ["transfer-trekly", "trekly", "trekly", true],
+    ["transfer-farehaven", "farehaven", "farehaven", true]] as const) {
     it(`${id}：journey 与 emitPlan(${specKey}) 的展开计划逐字段对齐`, () => {
       const frozen = emitted(specKey, path.join(os.tmpdir(), `app-packs-authored-${tag}`));
       const exp = expandPack(loadPack(id), {}, planPath(`${tag}-align`));
@@ -335,7 +346,7 @@ describe("transfer 复刻站两题（A4 向导 / A5 冷启动重试）", () => {
         expect(startUrl(String(g.start_url)), `start_url[${i}]`).toBe(String(f.start_url));
         expect(g.target_hint ?? null, `target_hint[${i}]`).toBe(f.target_hint ?? null);
         expect(g.signal, `signal[${i}]`).toEqual(f.signal);
-        expect(g.when ?? null, `when[${i}]`).toBe(f.when ?? null);
+        expect(g.when ?? null, `when[${i}]`).toEqual(f.when ?? null);
         expect(g.retries ?? 0, `retries[${i}]`).toBe(f.retries ?? 0);
         expect(g.slots ?? {}, `slots[${i}]`).toEqual(f.slots ?? {});
       });
@@ -371,9 +382,48 @@ describe("transfer 复刻站两题（A4 向导 / A5 冷启动重试）", () => {
     expect(res.ok).toBe(true);
   }, 180_000);
 
-  it("transfer 包的应用目录是数据（0 代码行），且三个新应用都进了矩阵", () => {
+  it("farehaven 的 when 是「可能不适用就跳过」：展开后 5 条 when，端到端确实出现 skipped", async () => {
+    const frozen = emitted("farehaven", path.join(os.tmpdir(), "app-packs-authored-farehaven"));
+    const exp = expandPack(loadPack("transfer-farehaven"), {}, planPath("farehaven-when"));
+    expect(frozen.filter((f) => f.when).length).toBe(5);
+    expect(exp.plan.subgoals.filter((s) => s.when).length).toBe(5);
+    // 条件步没有被改写成普通步：那 5 条的 when 逐条与展开计划相同
+    frozen.forEach((f, i) => {
+      if (f.when) expect(exp.plan.subgoals[i]!.when, `when[${i}]`).toEqual(f.when);
+    });
+    // 而且它们确实没有 `retries`（when 不等于 retries —— 一个跳过，一个重跑）
+    expect(exp.plan.subgoals.every((s) => (s.retries ?? 0) === 0)).toBe(true);
+
+    const res = await runApp(loadPack("transfer-farehaven"), {
+      verbose: false, sources: false, planPath: planPath("farehaven-when-run"),
+    });
+    const whenIdx = new Set(exp.plan.subgoals.map((s, i) => (s.when ? i : -1)).filter((i) => i >= 0));
+    const skipped = res.subgoals.filter((s) => s.status === "skipped");
+    expect(skipped.length, JSON.stringify(res.subgoals)).toBeGreaterThanOrEqual(1);
+    // 每一条 skipped 都必须是那 5 个条件步之一（不是别的东西被悄悄跳过）
+    res.subgoals.forEach((s, i) => {
+      if (s.status === "skipped") expect(whenIdx.has(i), `skipped[${i}]`).toBe(true);
+    });
+    expect(res.ok).toBe(true);
+    expect(res.subgoals.every((s) => s.status === "done" || s.status === "skipped")).toBe(true);
+  }, 180_000);
+
+  it("trekly 坏包在加载期炸：未知角色（精确报错文本）", () => {
+    const ghost = clone(loadPack("transfer-trekly")) as any;
+    ghost["journey"][0] = { role: "ghost" };
+    expect(validatePack(ghost)).toEqual(['journey[0]: unknown role "ghost"']);
+  });
+
+  it("farehaven 坏包在加载期炸：子目标超预算（精确报错文本）", () => {
+    const tight = clone(loadPack("transfer-farehaven")) as any;
+    tight["max_subgoals"] = 23;                       // 24 步 > 预算 23
+    expect(validatePack(tight)).toEqual(["plan: 24 subgoals exceed max 23"]);
+  });
+
+  it("transfer 包的应用目录是数据（0 代码行），且五个新应用都进了矩阵", () => {
     const { rows, leaks, debt } = matrix();
-    for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet"]) {
+    for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet",
+      "transfer-trekly", "transfer-farehaven"]) {
       const r = rows.find((x) => x.app === id)!;
       expect(r, id).toBeTruthy();
       expect(r.code, id).toBe(0);

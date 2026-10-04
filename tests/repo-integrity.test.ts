@@ -67,7 +67,7 @@ describe("the repository is single-stack (TypeScript only)", () => {
     for (const [name, cmd] of Object.entries(pkg.scripts)) {
       expect(cmd, `script ${name} still shells out to Python`).not.toMatch(/python|pytest|uvicorn/);
     }
-    for (const s of ["typecheck", "test", "test:parity", "verify", "bench", "apps", "apps:matrix", "plan-cli"]) {
+    for (const s of ["typecheck", "test", "test:parity", "verify", "bench", "apps", "apps:matrix", "apps:suite", "plan-cli"]) {
       expect(Object.keys(pkg.scripts), `missing script ${s}`).toContain(s);
     }
   });
@@ -94,7 +94,10 @@ describe("the data the project needs is still here", () => {
     ["apps/camera-entry/pack.json", "the Excel type-column routing app (two forms + explicit rejection)"],
     ["apps/transfer-voyagio/pack.json", "the Voyagio replica pack (two-page wizard, 24 steps)"],
     ["apps/transfer-slowjet/pack.json", "the SlowJet replica pack (cold-load retries)"],
-    ["bench/APP_VERIFY_REPORT.md", "the independent verification report (rounds 1-2)"],
+    ["apps/transfer-trekly/pack.json", "the Trekly replica pack (range-slider price cap)"],
+    ["apps/transfer-farehaven/pack.json", "the FareHaven replica pack (conditional overlay via when)"],
+    ["bench/APP_VERIFY_REPORT.md", "the independent verification report (rounds 1-3)"],
+    ["apps/INVENTORY.md", "the application backlog + definition of done"],
     ["apps/demo-tool/sources/demo-tool.json", "the CI-safe CLI tool source"],
     ["apps/git-log/sources/git-log.json", "a real CLI (git) source"],
     ["bench/fixtures/shop_home.html", "offline bench fixture"],

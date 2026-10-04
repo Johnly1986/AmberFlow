@@ -201,10 +201,24 @@ npm run apps -- --app ip-config  --no-model                     # Excel IP 规�
 npm run apps -- --app camera-entry --no-model                   # Excel 类型列路由两套表单（空类型行用行内证据、坏序列号显式拒绝）
 npm run apps -- --app transfer-voyagio --no-model --no-sources  # 第二个复刻站的完整旅程：两页向导（24 步）
 npm run apps -- --app transfer-slowjet --no-model --no-sources  # 第三个复刻站：冷启动重试（retries 真的被用上）
+npm run apps -- --app transfer-trekly --no-model --no-sources   # 第四个复刻站：价格上限是滑块（32 → 12 条）
+npm run apps -- --app transfer-farehaven --no-model --no-sources # 第五个复刻站：条件浮层 when（20 done + 4 skipped）
 ```
 
 应用清单与"完成一个应用"的五条定义在 [apps/INVENTORY.md](INVENTORY.md)；独立复核（题 → 命令 → 原始观测 → 结论）
 在 [bench/APP_VERIFY_REPORT.md](../bench/APP_VERIFY_REPORT.md)。
+
+**"所有应用都完成了吗"的退出码**：
+
+```bash
+npm run apps:suite                     # 跑完每个旅程型应用的验收（离线口径，一条命令）
+npm run apps:suite -- --only ctrip-case,ip-config
+npm run apps:suite -- --json
+```
+
+三条口径：① 线上旅程（`start_url` 是 `http(s)://`）与测量型应用（只声明 probe）**自动识别**并明着跳过——
+"没跑"不会被算成绿；② 一律脚本模型 + 不跑数据腿，所以离线可复现；③ 需要显式放行的危险步
+（如 `apps/cli-report` 的不可逆写入）会记成 **待放行(未执行)**：既不算绿也不算红，因为绿色的前提是真的执行过。
 
 ## 五、探针集：把「线上能不能打开」也变成数据
 

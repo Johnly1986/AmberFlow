@@ -492,7 +492,7 @@ describe("第 2 轮：camera-entry / transfer-voyagio / transfer-slowjet", () =>
   }, 240_000);
 
   it("第 2 轮门禁：三个新目录只有 JSON，matrix 仍然 0 代码行 / 0 泄漏 / 0 债", () => {
-    for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet"]) {
+    for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet", "transfer-trekly", "transfer-farehaven"]) {
       expect(validatePack(loadPack(id)), id).toEqual([]);
       const files = fs.readdirSync(path.join(REPO, "apps", id));
       expect(files.filter((f) => /\.(ts|js|mjs|cjs)$/.test(f)), `${id} code files`).toEqual([]);
@@ -501,8 +501,79 @@ describe("第 2 轮：camera-entry / transfer-voyagio / transfer-slowjet", () =>
     const { rows, leaks, debt } = matrix();
     expect(leaks, JSON.stringify(leaks)).toEqual([]);
     expect(debt, JSON.stringify(debt)).toEqual([]);
-    for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet"]) {
+    for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet", "transfer-trekly", "transfer-farehaven"]) {
       expect(rows.find((r) => r.app === id)!.code, id).toBe(0);
     }
   });
+});
+
+/* ==================================================== 第 3 轮：trekly / farehaven */
+
+describe("第 3 轮：transfer-trekly / transfer-farehaven", () => {
+  it("trekly：价格上限步真的是 range 滑块（页面 input[type=range] + 包点名 #max-price）", () => {
+    const html = fs.readFileSync(path.join(REPO, "transfer", "site3", "hotels.html"), "utf-8");
+    expect(html).toMatch(/<input[^>]*type="range"[^>]*id="max-price"/);
+    expect(html).toContain('id="cap-state"');
+    const pack: any = loadPack("transfer-trekly");
+    const cap = (pack.journey as any[]).find((s) => s.target_hint === "#max-price");
+    expect(cap, "cap step").toBeTruthy();
+    expect(cap.start_url).toContain("checkin=");
+    expect(cap.start_url).not.toContain("cap=");              // 必须靠 fill+input 事件导航，而不是预置 URL
+    expect((pack.slots as any).cap).toBe("300");              // 值只来自计划
+  });
+
+  it("trekly：19/19 + 3 不变量，且结束状态真的收窄（#row-count = 12 stays）", async () => {
+    const out = tmpDir("r3-trekly");
+    const res = await runApp(loadPack("transfer-trekly"), {
+      verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json"),
+    });
+    expect(res.completed).toBe("19/19");
+    expect(res.ok, JSON.stringify(res.subgoals.filter((s) => s.status !== "done"))).toBe(true);
+    expect(res.invariants.map((i) => [i.id, i.held])).toEqual([
+      ["end-on-recorded-narrowed-stays-list", true],
+      ["the-slider-really-moved-off-its-default", true],
+      ["the-slider-narrowed-the-list-to-the-frozen-count", true],
+    ]);
+  }, 180_000);
+
+  it("trekly：计划与 emitPlan('trekly') 逐字段全等（when/retries 均为 0）", () => {
+    expect(alignmentDiffs("transfer-trekly", "trekly")).toEqual([]);
+    const sgs = expandPack(loadPack("transfer-trekly"), {}, path.join(tmpDir("r3-trekly-a"), "p.json")).plan.subgoals as any[];
+    expect(sgs.filter((s) => s.when)).toHaveLength(0);
+    expect(sgs.filter((s) => s.retries)).toHaveLength(0);
+  });
+
+  it("farehaven：计划与 emitPlan('farehaven') 逐字段全等，且 when 如实保留 5 条", () => {
+    expect(alignmentDiffs("transfer-farehaven", "farehaven")).toEqual([]);
+    const sgs = expandPack(loadPack("transfer-farehaven"), {}, path.join(tmpDir("r3-fh-a"), "p.json")).plan.subgoals as any[];
+    const whens = sgs.filter((s) => s.when);
+    expect(whens).toHaveLength(5);
+    for (const s of whens) expect(s.when).toEqual({ css_exists: ["#promo-modal"] });
+  });
+
+  it("farehaven：24/24，且端到端真的出现 4 条 skipped（部分日期没有浮层）", async () => {
+    const out = tmpDir("r3-farehaven");
+    const res = await runApp(loadPack("transfer-farehaven"), {
+      verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json"),
+    });
+    expect(res.completed).toBe("24/24");
+    expect(res.ok, JSON.stringify(res.subgoals.filter((s) => s.status === "blocked"))).toBe(true);
+    const skipped = res.subgoals.map((s, i) => [i, s.status]).filter(([, st]) => st === "skipped");
+    expect(skipped.map(([i]) => i)).toEqual([5, 9, 13, 17]);   // 恰好是没有 #promo-modal 的那 4 天
+    expect(res.invariants.every((i) => i.held)).toBe(true);
+  }, 180_000);
+
+  it("farehaven：删掉 when 的临时副本阻塞在无浮层的那 4 天（when 是区分性验证的）", async () => {
+    const stripped = clone(loadPack("transfer-farehaven")) as any;
+    for (const tpl of Object.values(stripped.roles ?? {}) as any[]) delete tpl.when;
+    for (const s of stripped.journey) delete s.when;
+    const out = tmpDir("r3-farehaven-nowhen");
+    const res = await runApp(stripped, {
+      verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json"),
+    });
+    expect(res.ok).toBe(false);
+    expect(res.completed).toBe("20/24");
+    const blocked = res.subgoals.map((s, i) => [i, s.status]).filter(([, st]) => st === "blocked").map(([i]) => i);
+    expect(blocked).toEqual([5, 9, 13, 17]);
+  }, 180_000);
 });

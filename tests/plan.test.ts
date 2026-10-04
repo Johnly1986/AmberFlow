@@ -149,3 +149,29 @@ describe("extractSlots", () => {
     expect(extractSlots("填写 序列号: GC-8801")).toEqual({});
   });
 });
+
+describe("PlanningRules：`when` 与 `signal` 同一套语言、同一套校验", () => {
+  it("未知算子/空 when 都在 plan 校验期被抓到（不再等到运行期 BLOCKED）", () => {
+    const rules = new PlanningRules(10, true, false);
+    const plan = new TaskPlan("g", [
+      { desc: "d", start_url: "file:///x.html", target_hint: "a", signal: { css_exists: "#a" },
+        when: { magic_op: "#x" } },
+      { desc: "d2", start_url: "file:///x.html", target_hint: "a", signal: { css_exists: "#a" },
+        when: {} as never },
+    ] as never, ":memory:", {});
+    const issues = rules.problems(plan).join(" | ");
+    expect(issues).toContain("subgoal[0].when: unknown signal op 'magic_op'");
+    expect(issues).toContain("subgoal[1].when: must be a non-empty signal");
+  });
+
+  it("合法的 when 零问题，且 when 是 null/缺省时不许报错", () => {
+    const rules = new PlanningRules(10, true, false);
+    const plan = new TaskPlan("g", [
+      { desc: "d", start_url: "file:///x.html", target_hint: "a",
+        signal: { css_exists: "#a" }, when: { css_exists: "#promo" } },
+      { desc: "d2", start_url: "file:///x.html", target_hint: "a",
+        signal: { css_exists: "#a" }, when: null as never },
+    ] as never, ":memory:", {});
+    expect(rules.problems(plan)).toEqual([]);
+  });
+});
