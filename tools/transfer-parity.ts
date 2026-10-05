@@ -13,6 +13,12 @@
  *     `collect_roles` 被 dict 字面量定义了两次，TS 只保留活的那份并附 `collect_steps`），
  *     这里通过"把 spec 自己的声明再覆盖回去"对齐到 Python 的最终语义。
  */
+// 冻结展开日期：本工具与提交进仓库的 Python 参考产物逐字节对拍，必须用**同一周**展开
+// （不然周日绿、周一红——本轮实测 41 项不一致就是它）。单一出处见 tools/frozen-today.ts。
+import { pinFrozenToday } from "./frozen-today.ts";
+
+pinFrozenToday();
+
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

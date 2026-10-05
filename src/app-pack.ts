@@ -48,7 +48,7 @@ export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = {
 export const PACK_KEYS = [
   "spec_version", "id", "label", "goal", "model", "max_subgoals", "hosts",
   "slots", "required_slots", "sources", "roles", "journey", "invariants", "notes", "probe", "device",
-  "generated_from",
+  "generated_from", "recorded_from",
 ] as const;
 
 /**
@@ -127,6 +127,14 @@ export interface AppPack {
   generated_from?:
     | { spec: string; plan_sha256: string }
     | { source: string; plan_sha256: string };
+  /**
+   * 这个包是**演示一次录下来的**（`npm run learn`）：`{ url, steps, sha256 }`。
+   *
+   * 与 `generated_from` 同族：都是"这份文件从哪来"的血统，让 `--check`/回放能判漂移。
+   * 区别在于上游——`generated_from` 的上游是 spec/代码，`recorded_from` 的上游是**一次真实演示**
+   * （人做了一遍，或外层 Agent 带着 goal+url 让它跑了一遍）。**故意不带时间戳**：冻结语料不许依赖时钟。
+   */
+  recorded_from?: { url: string; steps: number; sha256: string };
   /** 浏览器设备面（只有手机版页面存在的站点必须声明它；见 `executor.DeviceSpec`）。 */
   device?: Record<string, unknown>;
   /**
@@ -525,6 +533,21 @@ export function validatePack(pack: AppPack,
       }
       for (const k of Object.keys(g)) {
         if (!["spec", "source", "plan_sha256"].includes(k)) p.push(`generated_from.${k}: unknown key`);
+      }
+    }
+  }
+  if (pack.recorded_from !== undefined) {
+    const r = pack.recorded_from as Record<string, unknown>;
+    if (!isDict(r)) {
+      p.push("recorded_from must be an object {url, steps, sha256}");
+    } else {
+      if (typeof r["url"] !== "string" || !r["url"].trim()) p.push("recorded_from.url must be a non-empty string");
+      if (!Number.isInteger(r["steps"]) || Number(r["steps"]) <= 0) p.push("recorded_from.steps must be a positive integer");
+      if (typeof r["sha256"] !== "string" || !/^[0-9a-f]{64}$/.test(String(r["sha256"]))) {
+        p.push("recorded_from.sha256 must be a sha256 hex string (re-run npm run learn)");
+      }
+      for (const k of Object.keys(r)) {
+        if (!["url", "steps", "sha256"].includes(k)) p.push(`recorded_from.${k}: unknown key`);
       }
     }
   }

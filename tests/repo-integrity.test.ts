@@ -67,7 +67,7 @@ describe("the repository is single-stack (TypeScript only)", () => {
     for (const [name, cmd] of Object.entries(pkg.scripts)) {
       expect(cmd, `script ${name} still shells out to Python`).not.toMatch(/python|pytest|uvicorn/);
     }
-    for (const s of ["typecheck", "test", "test:parity", "verify", "bench", "apps", "apps:matrix", "apps:suite", "apps:gen", "probes:baseline", "apps:induce", "plan-cli"]) {
+    for (const s of ["typecheck", "test", "test:parity", "verify", "bench", "apps", "apps:matrix", "apps:suite", "apps:gen", "probes:baseline", "apps:induce", "learn", "agent", "plan-cli"]) {
       expect(Object.keys(pkg.scripts), `missing script ${s}`).toContain(s);
     }
   });
@@ -105,6 +105,9 @@ describe("the data the project needs is still here", () => {
     ["bench/IMPROVEMENT_BACKLOG.md", "the consolidated improvement backlog (evidence + acceptance per item)"],
     ["tools/spec-to-pack.ts", "the spec -> pack generator (alignment by construction)"],
     ["tests/spec-to-pack.test.ts", "drift detection for generated packs"],
+    ["tools/learn.ts", "the learn door: demonstrate once -> recorded pack, gated by a 0-forward replay"],
+    ["tests/learn.test.ts", "learn gates (recorded provenance, replay teeth, frozen expansion date)"],
+    ["apps/learned-cart/pack.json", "the recorded example app (journey from a demo, invariants induced)"],
     ["tools/probe-baseline.ts", "the probe verdict baseline (site drift vs hand edits)"],
     ["tests/probe-baseline.test.ts", "baseline drift detection"],
     ["tools/apps-induce.ts", "invariant induction (propose, then let a re-run decide)"],

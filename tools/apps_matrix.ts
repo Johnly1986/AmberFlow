@@ -136,8 +136,14 @@ export function matrix(): {
       code: appCodeLines(dir),
       tokens: declaredTokens(dir),
       generated: (() => {
-        const g = (pack as { generated_from?: { spec?: string; source?: string } }).generated_from;
-        return g?.spec ?? g?.source ?? null;
+        const p2 = pack as {
+          generated_from?: { spec?: string; source?: string };
+          recorded_from?: { url?: string };
+        };
+        const g = p2.generated_from;
+        if (g?.spec || g?.source) return g.spec ?? g.source ?? null;
+        if (p2.recorded_from?.url) return `recorded:${p2.recorded_from.url}`;   // 演示录下来的
+        return null;
       })(),
     });
   }
@@ -204,7 +210,11 @@ export function main(argv: string[] = process.argv.slice(2)): number {
   const head = ["应用", "类型", "数据源", "角色", "步骤", "工具步", "不变量", "声明行", "代码行", "来源", "声明的标识"];
   const table = rows.map((r) => [r.app, r.kind, String(r.sources), String(r.roles), String(r.steps),
     String(r.toolSteps), String(r.invariants), String(r.declared), String(r.code),
-    r.generated ? `生成:${r.generated.replace(/^transfer\/specs\//, "").replace(/\.json$/, "").replace(/^src\//, "")}` : "手写",
+    r.generated
+      ? (r.generated.startsWith("recorded:")
+        ? `录制:${r.generated.slice("recorded:".length)}`
+        : `生成:${r.generated.replace(/^transfer\/specs\//, "").replace(/\.json$/, "").replace(/^src\//, "")}`)
+      : "手写",
     r.tokens.join(",") || "-"]);
   const widths = head.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
   const line = (cells: string[]): string =>
@@ -219,11 +229,13 @@ export function main(argv: string[] = process.argv.slice(2)): number {
   console.log();
   console.log(`应用 ${rows.length} 个 ｜ 声明 ${totDeclared} 行 ｜ 应用目录里的代码 ${totCode} 行`
     + `（期望 0：应用是数据，代码在共享层）`);
-  const gen = rows.filter((r) => r.generated).length;
+  const gen = rows.filter((r) => r.generated && !r.generated.startsWith("recorded:")).length;
+  const rec = rows.filter((r) => r.generated?.startsWith("recorded:")).length;
+  const hand = rows.length - gen - rec;
   const genDeclared = rows.filter((r) => r.generated).reduce((n, r) => n + r.declared, 0);
   console.log(`共享层文件 ${SHARED.length} 个（核心 ${CORE.size} 个）｜ 应用声明的标识 ${allTokenCount} 个`);
-  console.log(`其中**由 spec 生成**的 ${gen} 个（声明 ${genDeclared} 行，旅程不再由人抄写）；`
-    + `手写 ${rows.length - gen} 个 —— 剩给"人"的只有 invariants / notes / 探针这些判断与测量`);
+  console.log(`其中**由 spec/代码生成**的 ${gen} 个、**演示录制的** ${rec} 个（合计声明 ${genDeclared} 行不再由人抄写）；`
+    + `手写 ${hand} 个 —— 剩给"人"的只有 invariants / notes / 探针这些判断与测量`);
   if (debt.length) {
     console.log();
     console.log(`每站点专用驱动里的站点知识（债，不是豁免）：${debt.length} 处`);

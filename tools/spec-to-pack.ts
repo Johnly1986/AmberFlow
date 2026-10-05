@@ -25,9 +25,31 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { appDirs, expandPack, loadPack, validatePack, type AppPack } from "../src/app-pack.ts";
+import { FROZEN_TODAY } from "./frozen-today.ts";
 import { discoverSpecs, emitPlan } from "../src/transfer-task.ts";
 
 export const REPO = path.resolve(import.meta.dirname, "..");
+
+/**
+ * **冻结展开日期**。spec 的 `per_date` 阶段是按"下周"展开的，所以 `emitPlan` 的结果**依赖当天日期**：
+ * 2026-10-04 生成的一周是 10-05..09，跨到 10-05 再 `--check` 就会算出 10-12..16 —— 门禁每个周一自己变红。
+ * 包是冻结语料，所以展开必须钉在同一天（与 `tests/app-packs-authored.test.ts` 的 `emitted()` 同一口径；
+ * ctrip 对拍也是这么钉的：语料哪天生成的就用哪天）。要故意换一周就 `--today 2026-10-02`。
+ */
+export { FROZEN_TODAY } from "./frozen-today.ts";
+
+/** 只有显式的 `--today` 能移动那一周；环境里的 `LAYA_TODAY` 一律不算（否则别的测试设一下就能改变门禁结论）。 */
+let EXPANSION_TODAY: string | null = null;
+export function setExpansionToday(today: string | null): void { EXPANSION_TODAY = today; }
+
+/** 在**钉住的**日期下跑展开：环境变量被忽略，恢复到调用前的值。 */
+export function withFrozenToday<T>(fn: () => T): T {
+  const prev = process.env.LAYA_TODAY;
+  process.env.LAYA_TODAY = EXPANSION_TODAY ?? FROZEN_TODAY;
+  try { return fn(); } finally {
+    if (prev === undefined) delete process.env.LAYA_TODAY; else process.env.LAYA_TODAY = prev;
+  }
+}
 
 /** 计划的最小形状（`TaskPlan` 实例与 `emitPlan` 写出的 JSON 都满足它）。 */
 export interface PlanLike {
@@ -130,7 +152,8 @@ export function expandSpec(specKey: string, spec: unknown): {
 } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `spec-to-pack-${specKey}-`));
   try {
-    const planPath = emitPlan(specKey, spec as never, dir);
+    // 展开依赖当天日期（见 FROZEN_TODAY）——生成器与 `--check` 都走这里，所以两边永远同一周。
+    const planPath = withFrozenToday(() => emitPlan(specKey, spec as never, dir));
     return { plan: JSON.parse(fs.readFileSync(planPath, "utf-8")) };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -326,7 +349,7 @@ export function serializePack(pack: AppPack): string {
   const out: Record<string, unknown> = {};
   for (const k of ["spec_version", "id", "label", "goal", "model", "max_subgoals", "hosts", "slots",
     "required_slots", "sources", "device", "roles", "journey", "invariants", "notes",
-    "generated_from", "probe"]) {
+    "generated_from", "recorded_from", "probe"]) {
     const bag = pack as unknown as Record<string, unknown>;
     if (bag[k] !== undefined) out[k] = bag[k];
   }
@@ -396,6 +419,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     options: {
       write: { type: "boolean" }, check: { type: "boolean" }, list: { type: "boolean" },
       id: { type: "string" }, spec: { type: "string" }, source: { type: "string" },
+      today: { type: "string" },
       quiet: { type: "boolean" }, help: { type: "boolean" },
     },
   });
@@ -406,12 +430,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   --check           检查所有已挂上的应用：旅程 == emitPlan(spec) 的展开，且 plan_sha256 匹配
   --write           重新生成（默认所有已挂上的应用；给 --id/--spec 或 --id/--source 可给新应用挂上）
   --source MOD#FN   流程来自一个导出"应用级计划"的函数（例如 src/ip-config.ts#buildAppPlan）
+  --today YYYY-MM-DD 展开用的"今天"（默认钉住 FROZEN_TODAY=${FROZEN_TODAY}，否则包会随星期漂移）
   --quiet           只输出结论行
 
 退出码：0=一致 ｜ 1=有漂移 ｜ 2=用法错误（如 --id 没有对应的 spec）`);
     return values.help ? 0 : 2;
   }
   const specs = discoverSpecs();
+  setExpansionToday(values.today ?? null);   // `--today` 是**唯一**能移动冻结那一周的开关
 
   if (values.list) {
     console.log("可生成的 spec：");

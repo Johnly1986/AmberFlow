@@ -45,10 +45,16 @@ echo "### 3/3 模型侧用例（夹具跑分 / ctrip / transfer）"
 if [ -f "$ARTIFACT" ] && [ -f "$ARTIFACT.data" ]; then
   run "3a 夹具跑分（真 ONNX，生产执行器循环）" \
     "$NODE" "$STRIP" src/bench.ts --fixtures-only --mode-tag smoke --out "$OUT/bench"
+  # 与**冻结语料**对拍的命令都必须在钉住的展开日期下跑：ctrip/transfer 用例的"下周"由当天日期算出，
+  # 而期望值来自提交进仓库的那一周（2026-10-05..09）。不钉住的话同一个提交周日绿、周一红
+  # （本轮实测：apps:gen --check 7 个漂移、tests/transfer.test.ts 15 条、transfer-parity 41 项、
+  #  smoke 3b/3c 各 0/7）。单一出处见 tools/frozen-today.ts。
   run "3b ctrip 用例端到端（19 子目标 + 独立判分 7/7）" \
-    "$NODE" "$STRIP" src/ctrip-task.ts --quiet --out "$OUT/ctrip"
+    env LAYA_TODAY="${LAYA_TODAY:-2026-10-02}" "$NODE" "$STRIP" src/ctrip-task.ts --quiet --out "$OUT/ctrip"
+  # transfer 用例对拍的是**冻结语料**（提交进仓库的 Python 结果，那一周是 2026-10-05..09），
+  # 所以展开日期必须钉住：不然周日绿、周一红（本轮实测）。
   run "3c transfer 用例（spec 驱动，skybook）" \
-    "$NODE" "$STRIP" src/transfer-task.ts --site skybook --quiet --out "$OUT/transfer"
+    env LAYA_TODAY="${LAYA_TODAY:-2026-10-02}" "$NODE" "$STRIP" src/transfer-task.ts --site skybook --quiet --out "$OUT/transfer"
 elif [ "${SMOKE_REQUIRE_MODEL:-0}" = "1" ]; then
   echo "FAIL: ONNX 产物缺失（$ARTIFACT / $ARTIFACT.data）但 SMOKE_REQUIRE_MODEL=1"
   fail=1

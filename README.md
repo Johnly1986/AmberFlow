@@ -145,6 +145,16 @@ npm run apps:gen -- --check                             # 生成的包与 spec �
 两个状态提出**可判定、可区分、可复现**的结束状态不变量；`--write` 只追加（人的判断一条不动），
 然后**立刻再跑一遍**——重跑不成立的候选会被自动撤掉。它给的是候选，措辞仍要人 review。
 
+**三类入口，一个引擎**：
+
+| 谁 | 入口 | 他要提供什么 |
+|---|---|---|
+| 不想写配置的人 | `npm run learn` | **一个演示 + 几个 y/n**：连上你正开着的浏览器（`--cdp`）或给一个 `--url`，你做一遍，我从"动作前/动作后"归纳出每步的完成信号与结束态不变量，你只确认 |
+| 手上有 spec / Excel / 代码里的人 | `npm run apps:gen -- --spec <key>` / `--source <模块>#<导出名>` | **本来就有的上游数据**（生成即对齐，`--check` 进 CI） |
+| 外层 Agent | `npm run agent -- --goal "…" --url <页面>` | **一句话**（`--json --yes`：一次调用，返回 status/steps/signals/invariants/replay） |
+
+三条都遵守同一条门槛：**写文件之前必须"规则模式零模型调用回放"通过**——回放不过就**不落盘**（宁可没有这份配置，也不要一份不可复现的）。录制的包带 `recorded_from` 血统；生成/录制的包都会在 `apps:matrix` 的"来源"列里标出来。
+
 **流程不用手写**：`npm run apps:gen -- --write --id <app> --spec <key>` 从一个 spec 生成/刷新整个应用包
 （旅程逐字段等于 `emitPlan(spec)` 的展开结果，包里记着展开内容的 `plan_sha256`；改 spec 忘了重新生成、
 或有人手改了 `journey`，`--check` 都会变红）。当前 7 个应用是**生成**的（6 个 transfer 复刻站 + ctrip-case），

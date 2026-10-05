@@ -38,7 +38,9 @@
     "apps:suite": "node --experimental-strip-types tools/apps_suite.ts",
     "apps:gen": "node --experimental-strip-types tools/spec-to-pack.ts",
     "probes:baseline": "node --experimental-strip-types tools/probe-baseline.ts",
-    "apps:induce": "node --experimental-strip-types tools/apps-induce.ts"
+    "apps:induce": "node --experimental-strip-types tools/apps-induce.ts",
+    "learn": "node --experimental-strip-types tools/learn.ts",
+    "agent": "node --experimental-strip-types tools/learn.ts --json --yes"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

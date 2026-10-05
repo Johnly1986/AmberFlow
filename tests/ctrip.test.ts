@@ -12,6 +12,9 @@
  *     模型，且 `act` 只回低置信度 —— 计划里 19 步全靠 `target_hint` 规则命中；一旦某个
  *     hint 失效，模型那一步会因低于置信度下限而 BLOCKED，测试立刻红。
  */
+// 冻结展开日期：本文件对拍的是冻结语料（Python 生成物 / 端到端判分 / 五天记录），见 tests/frozen-today.ts
+import "./frozen-today.ts";
+
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

@@ -29,7 +29,7 @@ npm run doctor                                   # 环境体检：Node / chromiu
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 859 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 872 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -56,6 +56,9 @@ node --experimental-strip-types src/picker-server.ts                            
 node --experimental-strip-types src/tune-guard.ts                                  # 注入闸门分离度实测
 node --experimental-strip-types src/live-probe.ts                                  # 携程可达性矩阵（真实站点）
 npm run plan-cli -- --help                                                         # 计划 CLI：new/add/edit/check/run
+node --experimental-strip-types tools/learn.ts                                     # 演示一次就录成应用（零参数）
+node --experimental-strip-types tools/learn.ts --json --yes --goal … --url …      # 外层 Agent 的一次调用
+node --experimental-strip-types tools/spec-to-pack.ts --check                      # 生成的包 == 上游的展开
 npm run shortlist                                                                  # 真 ONNX 的 shortlist demo
 ```
 
@@ -83,13 +86,23 @@ npm run shortlist                                                               
 线上应用：`--app qunar-live --out /tmp/qunar`（真网络 + 真模型，**包里声明了 iPhone 设备面**；见下条规则）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
 原始观测 → 结论，含 11 处缺陷与 3 处共享层修补）：[bench/APP_VERIFY_REPORT.md](bench/APP_VERIFY_REPORT.md)。
 新增一个应用 = 新目录 `apps/<id>/`（`pack.json` + 可选 `sources/*.json`），**共享层零改动**；
+**也可以"演示一次"就录出来**：`npm run learn`（人：连他正开着的浏览器 `--cdp`，或给 `--url`；他做一遍，
+信号与不变量由引擎归纳，他只回 y/n）／`npm run agent -- --goal … --url …`（外层 Agent 的一次调用，同引擎 `--json --yes`）。
+两条硬规矩：① **不变量从"回放形状的那次运行"归纳**，不是从人演示的那次（演示是连续会话、会累积页面状态，
+回放是每个子目标重新导航——实测过角标在演示里到 2、回放只到 1）；② **落盘门槛 = 规则模式零模型调用回放通过**，
+回放不过就不写文件，复跑里不成立的候选会被明确剔除并写进 notes（不静默改绿）。包里带 `recorded_from` 血统。
 **不变量也不必猜**：`npm run apps:induce -- --app <id> [--write]` 跑通一次，从"旅程少做最后一步"与
 "结束后"两个状态提出候选（区分性 + 稳定句柄 + 复跑一致三关），`--write` 只追加并在写回后**立刻重跑**，
 重跑不成立的候选自动撤掉。
 **流程不必手写**：`npm run apps:gen -- --write --id <app> --spec <key>`（或 `--source <模块>#<导出名>`
 从代码里的应用级计划）生成整个包
 （旅程逐字段 = `emitPlan(spec)` 的展开结果，`generated_from.plan_sha256` 是展开内容的指纹；
-`--check` 已进 `bench/smoke.sh`）。当前 7 个应用是生成的（`apps:matrix` 的"来源"列标出）。
+`--check` 已进 `bench/smoke.sh`）。**展开日期是钉住的**（单一出处 `tools/frozen-today.ts` 的 `FROZEN_TODAY = 2026-10-02`）：spec 的
+`per_date` 阶段按"下周"算，所以"当天是哪天"会改变展开结果——2026-10-04（周日）算出的那一周是 10-05..09，
+跨到 10-05（周一）就变成 10-12..16，**同一个提交周日绿、周一红**。本轮实测到它同时打红四处：
+`apps:gen --check`（7 个包漂移）、`tests/transfer.test.ts`（15 条）、`tools/transfer-parity.ts`（41 项不一致）、
+`bench/smoke.sh` 的 3b/3c oracle 用例（各 0/7）。现在四处共用同一个常量：生成器/检查器（环境变量不算，只有显式
+`--today` 能换周）、对拍工具、`tests/frozen-today.ts`（测试夹具）、smoke 的第 3b/3c 步。要换周就同时改这一处。当前 8 个应用是生成的（`apps:matrix` 的"来源"列标出）。
 生成器**沿用种子包的角色结构、只把值换成展开结果**，并且**不发明判断**——`invariants`/`notes`/探针
 这些判断与测量仍然是人的，缺 `invariants` 时它会明说。
 度量与防泄漏门禁：`npm run apps:matrix`。**"所有应用都完成了吗"的答案**：`npm run apps:suite`

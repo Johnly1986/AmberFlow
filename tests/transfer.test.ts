@@ -11,6 +11,13 @@
  * 另外覆盖：spec 加载/展开长度、迁移度量（与 Python 报告同数）、消融只改运行时策略
  * 不改计划形状、各站点判分口径（库存各不相同）。
  */
+// **冻结展开日期**：spec 的 `per_date` 阶段按"下周"算，所以"今天是哪天"会改变展开结果——
+// 而本文件对拍的是**冻结语料**（提交进仓库的 Python 生成物、迁移度量、端到端判分），
+// 它们对应"下周 = 2026-10-05..09"那一周。不钉住的话，周日→周一跨过边界后
+// `nextWeekDates()` 会换成 10-12..16，整个文件集体变红（实测 15 条）。
+// 与 `tests/app-packs-authored.test.ts` 的 `emitted()`、`tools/spec-to-pack.ts` 的 FROZEN_TODAY 同一口径。
+import "./frozen-today.ts";               // 钉住展开日期（常量与理由见该文件）
+
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
