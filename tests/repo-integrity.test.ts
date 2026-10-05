@@ -102,6 +102,7 @@ describe("the data the project needs is still here", () => {
     ["bench/APP_VERIFY_REPORT.md", "the independent verification report (rounds 1-5)"],
     ["bench/UX_REVIEW.md", "the user-experience review (three personas + post-fix re-test)"],
     ["bench/AUTHORING_ASSESSMENT.md", "what of the app layer is machine-generated vs hand-written"],
+    ["bench/IMPROVEMENT_BACKLOG.md", "the consolidated improvement backlog (evidence + acceptance per item)"],
     ["tools/spec-to-pack.ts", "the spec -> pack generator (alignment by construction)"],
     ["tests/spec-to-pack.test.ts", "drift detection for generated packs"],
     ["tools/probe-baseline.ts", "the probe verdict baseline (site drift vs hand edits)"],
