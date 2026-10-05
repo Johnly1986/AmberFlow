@@ -29,7 +29,7 @@ npm run doctor                                   # 环境体检：Node / chromiu
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 872 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 873 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -86,7 +86,9 @@ npm run shortlist                                                               
 线上应用：`--app qunar-live --out /tmp/qunar`（真网络 + 真模型，**包里声明了 iPhone 设备面**；见下条规则）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
 原始观测 → 结论，含 11 处缺陷与 3 处共享层修补）：[bench/APP_VERIFY_REPORT.md](bench/APP_VERIFY_REPORT.md)。
 新增一个应用 = 新目录 `apps/<id>/`（`pack.json` + 可选 `sources/*.json`），**共享层零改动**；
-**也可以"演示一次"就录出来**：`npm run learn`（人：连他正开着的浏览器 `--cdp`，或给 `--url`；他做一遍，
+**也可以"演示一次"就录出来**：`npm run learn`（人：连他正开着的浏览器 `--cdp`——**挂载模式也认 `--url`**，
+给了就导航那一页，退出**只断开不关闭**；实测过不给 `--url` 会停在 about:blank 然后拿用户的选择器点不到东西。
+或给 `--url`；他做一遍，
 信号与不变量由引擎归纳，他只回 y/n）／`npm run agent -- --goal … --url …`（外层 Agent 的一次调用，同引擎 `--json --yes`）。
 两条硬规矩：① **不变量从"回放形状的那次运行"归纳**，不是从人演示的那次（演示是连续会话、会累积页面状态，
 回放是每个子目标重新导航——实测过角标在演示里到 2、回放只到 1）；② **落盘门槛 = 规则模式零模型调用回放通过**，

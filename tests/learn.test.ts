@@ -183,3 +183,47 @@ describe("learn：包的形状与 replayCheck 的接口", () => {
     expect(validatePack(pack)).toEqual([]);
   });
 });
+
+describe("learn：挂到**你自己的**浏览器（--cdp）", () => {
+  it("连上已有浏览器、认 --url、录成包，并且退出时只断开不关闭它", async () => {
+    const fsx = await import("node:fs");
+    const cp = await import("node:child_process");
+    const profile = tmp("learn-cdp-profile");
+    const bin = (await import("../src/browser-env.ts")).chromiumCandidates()
+      .find((c) => { try { fsx.accessSync(c); return true; } catch { return false; } });
+    expect(bin, "需要一个 chromium 可执行文件").toBeTruthy();
+    // `--remote-debugging-port=0` + 读 DevToolsActivePort：不抢固定端口，也就不会和别的测试打架
+    const child = cp.spawn(bin!, [
+      "--headless=new", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0",
+      `--user-data-dir=${profile}`, "about:blank",
+    ], { stdio: "ignore" });
+    const portFile = path.join(profile, "DevToolsActivePort");
+    let ws = "";
+    try {
+      for (let i = 0; i < 100 && !ws; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        if (!fsx.existsSync(portFile)) continue;
+        const [port, wsPath] = fsx.readFileSync(portFile, "utf-8").split("\n");
+        if (port && wsPath) ws = `ws://127.0.0.1:${port}${wsPath}`;
+      }
+      expect(ws, "chromium 应该写出 DevToolsActivePort").not.toBe("");
+      const dir = tmp("learn-cdp");
+      const script = path.join(dir, "actions.json");
+      fs.writeFileSync(script, JSON.stringify(ACTIONS));
+      const packDir = path.join(dir, "packs");
+      const code = await learnMain([
+        "--cdp", ws, "--url", "testpages/product.html", "--goal", "挂载录制",
+        "--script", script, "--yes", "--id", "learned-cdp", "--pack-dir", packDir, "--out", dir, "--quiet",
+      ]);
+      expect(code).toBe(0);
+      const file = path.join(packDir, "learned-cdp", "pack.json");
+      expect(fs.existsSync(file)).toBe(true);
+      expect(loadPack(file).recorded_from).toMatchObject({ steps: 2 });
+      // "只断开不关闭"：attached 模式下别人的窗口里有别人的会话，不许被我们关掉
+      const res = await fetch(`http://127.0.0.1:${new URL(ws).port}/json/version`);
+      expect(res.ok).toBe(true);
+    } finally {
+      child.kill("SIGKILL");
+    }
+  }, 300_000);
+});

@@ -420,6 +420,12 @@ async function connectPage(opts: {
     const browser = await pw.chromium.connectOverCDP(opts.cdp);
     const ctx = browser.contexts()[0] ?? await browser.newContext();
     const page = ctx.pages()[0] ?? await ctx.newPage();
+    // 挂载模式**也认 `--url`**：给了就导航到那一页（实测过一次：不给会停在 about:blank，
+    // 然后拿着用户给的选择器点不到东西，报出来的是"找不到元素"而不是"你其实在空白页"）。
+    if (opts.url) {
+      await (page as unknown as { goto(u: string, o?: unknown): Promise<unknown> })
+        .goto(startUrl(opts.url), { waitUntil: "domcontentloaded", timeout: 30_000 });
+    }
     return {
       page, attached: true,
       url: pageUrl(page),
