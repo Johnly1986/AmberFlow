@@ -1,0 +1,125 @@
+---
+description: "从会话侧调用 LayaWebUse 冻结计划浏览器引擎的 harness 接口：三个工具，用于列出应用、端到端运行一个应用，以及用「目标 + 页面 + 录好的动作清单」录制一条流程。"
+kind: "package-bundle"
+---
+
+# @deepseek-ai/dsh-layawebuse-bridge
+
+[English](README.md) | 中文
+
+## 概述
+
+`dsh-layawebuse-bridge` 把一个外部浏览器引擎暴露成三个面向模型的工具。LayaWebUse 只规划一次，之后每一步都在**本地**决策，把 DOM 信号当作唯一的完成真相，并且能从一次演示里录制流程；本桥不添加任何自己的浏览器逻辑，只调用那个 checkout 的命令行并归纳其产物。`layawebuse_apps` 列出已声明的应用，并说明每个包是由 spec 生成的、由演示录制的、手写的，还是纯数据源。`layawebuse_run` 端到端运行一个应用，返回完成情况、**只列失败**的步骤、拒绝项与不变量结果；加上 `dry` 时则只返回展开后的计划，不执行任何一步。`layawebuse_learn` 用一个目标、一个页面和一份录好的动作清单来录制流程，并报告那次"零模型调用回放"，正是它决定录制的流程是否可复现到值得保存。
+
+## 目录
+
+- [使用这个包](#use-this-package)
+- [理解实现](#understand-the-implementation)
+- [进一步探索](#further-exploration)
+- [模型体验](#model-experience)
+- [已知限制与后续工作](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
+
+-----
+
+<a id="use-this-package"></a>
+## 使用这个包
+
+用一个 LayaWebUse checkout 的路径挂载本插件。不是 checkout 的路径会在**加载期**失败而不是第一次调用时失败，所以打错字会在组装阶段就暴露：
+
+```yaml
+repoPath: /path/to/LayaWebUse   # required; must contain src/app-runner.ts
+nodeBin: null                   # optional; defaults to the running interpreter
+timeoutMs: 900000               # optional; live runs are slow by nature
+allowDangerous: false           # optional; gates dry-run-gated tool steps
+toolPrefix: layawebuse          # optional; the model-visible tool-name prefix
+```
+
+### 何时选择它
+
+当一次会话要驱动的流程必须保持可复现时选择它：引擎拒绝发明目标，只依据 DOM 信号报告完成，并且
+除非"零模型调用回放"仍然通过，否则拒绝保存录制的流程。若任务依赖页面看起来是什么样，或者没有
+可调用的 checkout，就应该改选像素级浏览器工具。
+
+<a id="understand-the-implementation"></a>
+把它作为 bundle 装进一个 profile —— `dsh plugin --profile <名称> add <路径或包名>`（插件窗口跑的是同一个
+操作）。声明了 `dsh.bundle` 的包在安装时会自动加入 `dsh.profile.bundles`，因此三个工具无需手写 profile
+补丁即可用；live profile 会在下一次配置重载时生效。`LAYAWEBUSE_REPO` 可覆盖 bundle 补丁传入的 checkout
+路径，而不是 checkout 的路径会在加载期失败。
+
+### 从另一个插件里调用
+
+其它插件可以注入服务，而不是去调工具。本桥提供 `ctx.layawebuse`，含 `listApps`、`run`、`learn`——
+和工具跑的是同一份代码，因此部署闸门与失败诊断不会在两个入口之间漂移。工具是面向模型的门，
+服务是面向插件的门；它不需要 `callId`、不需要 signal、也不需要知道工具名。
+
+```ts
+import type { Context } from '@deepseek-ai/cordis'
+import '@deepseek-ai/dsh-layawebuse-bridge'
+
+const Consumer = {
+  name: 'consumer',
+  inject: ['layawebuse'],
+  apply(ctx: Context) {
+    return ctx.layawebuse.run({ app: 'learned-cart', noModel: true })
+  },
+}
+```
+
+## 理解实现
+
+每个工具都是一层薄封装：拼装 argv、带硬超时地跑一个子进程，然后归纳命令行写下的产物。
+
+- `layawebuse_apps` 只读 `apps/<id>/pack.json`：不用浏览器、不用模型、不起子进程。没有 `pack.json` 但
+  带 `sources/` 的目录是**纯数据源应用**，会以 `data-source` 列出，因为别的包正是按名字引用它们。
+- `layawebuse_run` 启动 `src/app-runner.ts --app <id> --out <dir>` 并读取 `<id>-result.json`。
+  摘要只列失败项；完整的逐步表格留在 `<id>-report.md` 里，结果会给出它的路径，需要细节时再读。
+  `dry` 只展开计划并把它返回：那次运行不写任何产物、不校验任何东西，因此被报成一次展开，而不是
+  PASS/FAIL。
+- `layawebuse_learn` 启动 `tools/learn.ts --json --yes`：它把流程跑一遍，从观测到的状态变化里归纳
+  每步的完成信号与结束态不变量，并且只在"零模型调用回放"通过时才保存包；桥会原样报告那次回放。
+  `script` 是必填的：命令行唯一的另一个动作来源是人在交互式终端上的现场演示，而工具调用既没有终端
+  也没有 stdin，且桥恒定传 `--yes`。缺少 `script` 的调用会在**启动任何进程之前**被拒绝。
+
+### 信任边界
+
+本桥会从 `repoPath` 启动一个外部进程，且不经过 harness 的沙箱策略，因此启用本插件意味着信任那个
+checkout。除非部署把 `allowDangerous` 设为 true，危险的工具步一律被拒绝；在未开启的部署上请求它们
+会被明确拒绝，而不是被悄悄降级。
+
+<a id="further-exploration"></a>
+## 进一步探索
+
+- 本仓库的 `apps/README.md` —— 应用包怎么声明、三个工具所呈现的退出码契约，以及两条"会咬人"的规矩。
+- 本插件所运行的 DSH 安装里的 `packages/core/tools` 与 `packages/browser-use/browser-use` ——
+  测试所驱动的工具注册表，以及本桥所补充的树内浏览器自动化服务。
+
+<a id="model-experience"></a>
+## 模型体验
+
+模型看到三个 schema 很窄的工具。`layawebuse_run` 回答 PASS/FAIL、完成计数、不变量计数、带障碍文本
+的失败步骤，以及报告路径；完成的步骤只是计数而不是逐行，所以六十步的旅程只用一行而不是一页。
+**跑了但没被拒绝**的工具步也会被点名；若一次失败没有任何可点名的步骤，摘要会报出退出码或超时，
+因此 FAIL 总会说明它是怎么失败的。`dry` 则改为回答展开后的
+计划，让人不运行也能检查一条旅程。`layawebuse_learn` 回答它被把关的那次回放（含模型调用次数），
+因此不可复现的流程永远不会被报成"已学会"；没有 script 时它会立刻拒绝，不会先启动浏览器。
+
+<a id="known-limitations-and-deferred-work"></a>
+## 已知限制与后续工作
+
+- 真机测试需要 checkout 与 chromium（录制那条还需要 checkout 的 ONNX 产物）；缺一时会**跳过**并打印原因。
+- 本桥刻意不叫 `tool-*`，因此不会进入自动生成的工具目录。
+- 每次运行都会留下自己的临时目录——结果会指向其中的报告，所以那个目录必须比这次调用活得更久。
+  产物按调用隔离，从不共享。
+- 插件尚未暴露 checkout 同样提供的探针与不变量归纳工具。
+- `layawebuse_learn` 无法替你演示：录制**新**流程必须给一份录好的动作清单，因为命令行的现场录制器
+  需要交互式终端。没有 script 的调用会被直接拒绝，而不是被放进引擎里失败。
+
+### 开发备注
+
+本包在两个层面被测。`tests/bridge.spec.ts` 把插件挂在一个**桩 checkout** 上，其命令行在本桥依赖的
+几点上与真实命令行一致——`--dry` 打印计划且不写产物、`learn` 没有 `--script` 就拒绝、JSON 之前会有
+（其中一行含花括号的）日志行——并通过 `ctx.tools.execute` 驱动三个工具，覆盖参数拼装、血统解析、
+只列失败的归纳、加载期校验、各条拒绝路径与 dry 展开。`tests/live.spec.ts` 用同一条注册表路径驱动
+**真实** checkout：以 `no_model` 跑一个录制的两步应用、一次 `dry` 展开、一次被逼失败的运行（让 FAIL
+判决对照真实产物）、无 script 的拒绝，以及一次真实的录制——它的"零模型调用回放"正是保存的前置条件。

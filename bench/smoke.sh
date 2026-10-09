@@ -39,6 +39,20 @@ run "2/3 六层跨实现对拍" npm run --silent test:parity
 run "2b 应用包与 spec 展开一致（apps:gen --check）" npm run --silent apps:gen -- --check --quiet
 # 探针基线：包里的判决必须等于已入库探测记录（站点变了/有人手改包，都会在这里变红）
 run "2c 探针基线与探测记录一致（probes:baseline --check）" npm run --silent probes:baseline -- --check --quiet
+# 2d 可选门禁：integrations/dsh-bridge 是 DSH 的适配器（把引擎的 CLI 接成三个模型可见工具）。
+#    它需要一份 DSH 安装提供宿主包（cordis / dsh-tools / schemastery…），因此**不进无条件门禁**：
+#    设了 DSH_ROOT 就实跑它的离线测试，没设就 SKIP 并打印原因（跳过 ≠ 通过）。
+if [ -d integrations/dsh-bridge ]; then
+  if [ -n "${DSH_ROOT:-}" ] && [ -d "${DSH_ROOT}/packages/core/tools" ]; then
+    run "2d DSH 插件 integrations/dsh-bridge（离线测试，宿主 $DSH_ROOT）" \
+      bash -c "cd integrations/dsh-bridge && node scripts/setup-links.mjs && npm run --silent build && node ../../node_modules/vitest/vitest.mjs run tests/bridge.spec.ts tests/service.spec.ts"
+  else
+    echo
+    echo "SKIP: integrations/dsh-bridge 未跑（它是 DSH 的适配器，需要一份 DSH 安装提供宿主包）。"
+    echo "      设 DSH_ROOT=/path/to/deepseek-harness 即可让它进入本次门禁；真机测试需要 chromium，"
+    echo "      录制那条还需要 ONNX 产物。"
+  fi
+fi
 
 echo
 echo "### 3/3 模型侧用例（夹具跑分 / ctrip / transfer）"

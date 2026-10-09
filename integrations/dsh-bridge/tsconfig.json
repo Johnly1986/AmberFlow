@@ -1,0 +1,37 @@
+{
+  // Self-contained build: this package is not part of the DSH workspace and not part of the root
+  // tsconfig's `src|tests|tools` program, so it carries its own options (mirroring the strictness it
+  // was developed under). The target stays es2022 because this repository's vitest ships an esbuild
+  // that does not recognise `es2024` in a tsconfig and warns on every transform; nothing here needs
+  // an ES2024-only API.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2022"],
+    "declaration": true,
+    "sourceMap": true,
+    "declarationMap": true,
+    "composite": true,
+    "incremental": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    // The sources import each other as `./bridge.ts`; the compiler rewrites those specifiers to
+    // `./bridge.js`, which is why the emitted lib/types tree is directly loadable by Node.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": false,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": ["src"]
+}
+
