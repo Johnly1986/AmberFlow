@@ -33,6 +33,9 @@ nodeBin: null                   # optional; defaults to the running interpreter
 timeoutMs: 900000               # optional; live runs are slow by nature
 allowDangerous: false           # optional; gates dry-run-gated tool steps
 toolPrefix: layawebuse          # optional; the model-visible tool-name prefix
+envMode: inherit                # optional; `allowlist` 会把会话机密挡在子进程环境之外
+forwardEnv: []                  # optional; `allowlist` 模式下额外转发的环境变量名
+keepRuns: 30                    # optional; 保留最新的 $TMPDIR/dsh-layawebuse-* 目录数；0 关闭回收
 ```
 
 ### 何时选择它
@@ -110,8 +113,13 @@ checkout。除非部署把 `allowDangerous` 设为 true，危险的工具步一�
 - 真机测试需要 checkout 与 chromium（录制那条还需要 checkout 的 ONNX 产物）；缺一时会**跳过**并打印原因。
 - 本桥刻意不叫 `tool-*`，因此不会进入自动生成的工具目录。
 - 每次运行都会留下自己的临时目录——结果会指向其中的报告，所以那个目录必须比这次调用活得更久。
-  产物按调用隔离，从不共享。
-- 插件尚未暴露 checkout 同样提供的探针与不变量归纳工具。
+  产物按调用隔离，从不共享。`keepRuns` 限定最新的多少个 `dsh-layawebuse-*` 目录会被保留；目录要
+  距最后一次写入满一小时才可能被回收，慢速真机运行不会被删到自己头上。
+- 应用清单现在会标注 `kind=probe`（测量型探针包——引擎拒绝经 app runner 运行它们）与
+  `data-source`；`…_run` 会把引擎的探针拒绝翻译成同样的指引——但探针驱动本身仍未做成工具。
+- 默认整体继承会话环境给子进程（"信任 checkout"是本插件声明的前提）。设 `envMode: allowlist`
+  可只转发运行必需项加 `LAYAWEBUSE_*` 与 `forwardEnv` 列出的名字。
+- 插件尚未暴露 checkout 同样提供的不变量归纳与批量套件工具。
 - `layawebuse_learn` 无法替你演示：录制**新**流程必须给一份录好的动作清单，因为命令行的现场录制器
   需要交互式终端。没有 script 的调用会被直接拒绝，而不是被放进引擎里失败。
 

@@ -12,9 +12,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  diagnoseFailure, learnArgs, listApps as listAppSummaries, parseSource, runArgs, runProcess,
-  summarizeLearn, summarizeRun, type AppSummary, type BridgeOptions, type LearnSummary,
-  type RunSummary,
+  diagnoseFailure, learnArgs, listApps as listAppSummaries, parseSource, pruneRunDirs,
+  runArgs, runProcess, summarizeLearn, summarizeRun,
+  type AppSummary, type BridgeOptions, type LearnSummary, type RunSummary,
 } from './bridge.ts'
 
 /** One `run` call, mirroring the `…_run` tool parameters with camelCase names. */
@@ -29,6 +29,11 @@ export interface LayawebuseRunArgs {
   noSources?: boolean
   /** Permit dangerous tool steps; refused unless the deployment set `allowDangerous`. */
   allowDangerous?: boolean
+  /**
+   * The engine's middle gate (`--confirm-safe`): with `allowDangerous`, destructive actions are
+   * still confirmed per step against their dry-run evidence instead of blanket-approved.
+   */
+  confirmSafe?: boolean
   /** Values for declared slots. */
   slots?: Record<string, string>
 }
@@ -49,6 +54,8 @@ export interface LayawebuseLearnArgs {
   id?: string
   /** CDP websocket URL of the browser to attach to; chooses the browser, never the actions. */
   cdp?: string
+  /** Launch a visible browser for the recording instead of headless (debug aid). */
+  headful?: boolean
   /** Directory to write the pack into; defaults to `<repo>/apps`, i.e. inside the checkout. */
   packDir?: string
 }
@@ -109,6 +116,7 @@ export async function runApp(
     )
   }
   const outDir = newOutDir('run')
+  pruneRunDirs(options.keepRuns)
   const outcome = await runProcess(options, runArgs(options, {
     app: args.app,
     outDir,
@@ -116,9 +124,10 @@ export async function runApp(
     ...(args.noModel === undefined ? {} : { noModel: args.noModel }),
     ...(args.noSources === undefined ? {} : { noSources: args.noSources }),
     ...(args.allowDangerous === undefined ? {} : { dangerous: args.allowDangerous }),
+    ...(args.confirmSafe === undefined ? {} : { confirmSafe: args.confirmSafe }),
     ...(args.slots === undefined ? {} : { slots: args.slots }),
   }))
-  return { summary: summarizeRun(outDir, args.app, outcome), outDir }
+  return { summary: summarizeRun(outDir, args.app, outcome, `${options.toolPrefix}_run`), outDir }
 }
 
 /**
@@ -151,6 +160,7 @@ export async function learn(
     )
   }
   const outDir = newOutDir('learn')
+  pruneRunDirs(options.keepRuns)
   const outcome = await runProcess(options, learnArgs(options, {
     url: args.url,
     goal: args.goal,
@@ -158,6 +168,7 @@ export async function learn(
     script,
     ...(args.id === undefined ? {} : { id: args.id }),
     ...(args.cdp === undefined ? {} : { cdp: args.cdp }),
+    ...(args.headful === undefined ? {} : { headful: args.headful }),
     ...(args.packDir === undefined ? {} : { packDir: args.packDir }),
   }))
   let summary: LearnSummary

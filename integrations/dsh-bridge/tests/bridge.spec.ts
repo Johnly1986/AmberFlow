@@ -14,8 +14,8 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import * as Bridge from '@deepseek-ai/dsh-layawebuse-bridge'
 import {
-  diagnoseFailure, firstLines, learnArgs, listApps, parseJsonDocument, runArgs, runProcess, stripAnsi,
-  summarizeLearn, summarizeRun,
+  buildEnv, diagnoseFailure, firstLines, learnArgs, listApps, parseJsonDocument, pruneRunDirs,
+  runArgs, runProcess, stripAnsi, summarizeLearn, summarizeRun,
 } from '../src/bridge.ts'
 
 describe('bridge helpers', () => {
@@ -32,14 +32,34 @@ describe('bridge helpers', () => {
     expect(() => listApps(tmp('empty'))).toThrow(/no apps\/ directory/)
   })
 
+  it('listApps classifies kinds: journey runs, probe is refused by the engine, data-source has no pack', () => {
+    const repo = stubCheckout({
+      ...PACKS,
+      'probe-app': { id: 'probe-app', label: 'p', goal: 'reachability', hosts: ['x.example'], invariants: [], probe: { http: ['a', 'b'] } },
+    })
+    stubDataSource(repo, 'src-app')
+    const apps = listApps(repo)
+    expect(apps.find(a => a.id === 'probe-app')!.kind).toBe('probe')
+    expect(apps.find(a => a.id === 'src-app')!.kind).toBe('data-source')
+    expect(apps.find(a => a.id === 'gen-app')!.kind).toBe('journey')
+  })
+
+  it('summarizeRun translates the engine probe refusal into this door\'s guidance', () => {
+    const out = tmp('run-out')
+    const detail = 'app probe-app 是测量型应用（探针集，17 个目标），没有 journey：请用对应的探针驱动…或用 `npm run apps -- --app probe-app --dry` 只看声明。'
+    expect(() => summarizeRun(out, 'probe-app', proc({ code: 2, stderr: detail })))
+      .toThrow(/cannot run .*kind='probe'/)
+  })
+
   it('runArgs assembles flags, slots and the dangerous switch', () => {
     const argv = runArgs(OPTIONS, {
       app: 'demo', outDir: '/tmp/out', dry: true, noModel: true, noSources: true, dangerous: true,
+      confirmSafe: true,
       slots: { date: '2026-10-12', window: '0800-1800' },
     })
     expect(argv.slice(0, 3)).toEqual(['/usr/bin/node', '--experimental-strip-types', '/repo/src/app-runner.ts'])
     expect(argv.join(' ')).toContain('--app demo --out /tmp/out')
-    for (const flag of ['--dry', '--no-model', '--no-sources', '--allow-dangerous']) expect(argv).toContain(flag)
+    for (const flag of ['--dry', '--no-model', '--no-sources', '--allow-dangerous', '--confirm-safe']) expect(argv).toContain(flag)
     expect(argv.slice(-4)).toEqual(['--slot', 'date=2026-10-12', '--slot', 'window=0800-1800'])
   })
 
@@ -49,6 +69,9 @@ describe('bridge helpers', () => {
     expect(argv).toContain('--yes')
     expect(argv.slice(-2)).toEqual(['--out', '/tmp/out'])
     expect(argv).not.toContain('--cdp')
+    expect(argv).not.toContain('--headful')
+    const headful = learnArgs(OPTIONS, { url: 'p', goal: 'g', outDir: '/tmp/o', headful: true })
+    expect(headful).toContain('--headful')
   })
 
   it('summarizeRun keeps FAILURES only and names the artifact it read', () => {
@@ -472,5 +495,47 @@ describe('verified defects, kept fixed', () => {
     // instead of the full stdout turned that into "learn printed no JSON document".
     expect(result.isError).toBe(false)
     expect(result.value).toMatchObject({ status: 'ok', verified: true, forwards: 0 })
+  })
+})
+
+describe('environment and artifact policy', () => {
+  it('buildEnv inherits by default; allowlist strips session secrets, keeps the run essentials', () => {
+    process.env.LAYAWEBUSE_BRIDGE_TEST = 'engine-facing'
+    process.env.BRIDGE_TEST_ONLY_KEY = 'forward-me'
+    try {
+      const inherit = buildEnv({ ...OPTIONS, envMode: 'inherit' })
+      expect(inherit.BRIDGE_TEST_ONLY_KEY).toBe('forward-me')
+      const allow = buildEnv({ ...OPTIONS, envMode: 'allowlist' })
+      expect(allow.PATH).toBe(process.env.PATH)
+      expect(allow.HOME).toBe(process.env.HOME)
+      expect(allow.LAYAWEBUSE_BRIDGE_TEST).toBe('engine-facing') // LAYAWEBUSE_* always travels
+      expect(allow.BRIDGE_TEST_ONLY_KEY).toBeUndefined()
+      const withForward = buildEnv({ ...OPTIONS, envMode: 'allowlist', forwardEnv: ['BRIDGE_TEST_ONLY_KEY'] })
+      expect(withForward.BRIDGE_TEST_ONLY_KEY).toBe('forward-me')
+    } finally {
+      delete process.env.LAYAWEBUSE_BRIDGE_TEST
+      delete process.env.BRIDGE_TEST_ONLY_KEY
+    }
+  })
+
+  it('pruneRunDirs keeps the newest N, spares young and foreign directories', () => {
+    const root = tmp('prune')
+    const mk = (name: string, ageMs: number) => {
+      const d = path.join(root, name)
+      fs.mkdirSync(d)
+      const t = new Date(Date.now() - ageMs)
+      fs.utimesSync(d, t, t)
+      return d
+    }
+    const old1 = mk('dsh-layawebuse-run-old1', 48 * 3_600_000)
+    const old2 = mk('dsh-layawebuse-learn-old2', 24 * 3_600_000)
+    const young = mk('dsh-layawebuse-run-young', 60_000)
+    const foreign = mk('unrelated-dir', 48 * 3_600_000)
+    expect(pruneRunDirs(1, 3_600_000, root)).toBe(2)
+    expect(fs.existsSync(old1)).toBe(false)
+    expect(fs.existsSync(old2)).toBe(false)
+    expect(fs.existsSync(young)).toBe(true)
+    expect(fs.existsSync(foreign)).toBe(true)
+    expect(pruneRunDirs(0, 0, root)).toBe(0)
   })
 })

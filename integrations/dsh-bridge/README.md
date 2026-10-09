@@ -33,6 +33,9 @@ nodeBin: null                   # optional; defaults to the running interpreter
 timeoutMs: 900000               # optional; live runs are slow by nature
 allowDangerous: false           # optional; gates dry-run-gated tool steps
 toolPrefix: layawebuse          # optional; the model-visible tool-name prefix
+envMode: inherit                # optional; `allowlist` strips session secrets from the child env
+forwardEnv: []                  # optional; extra env var NAMES forwarded under `allowlist`
+keepRuns: 30                    # optional; newest $TMPDIR/dsh-layawebuse-* dirs kept; 0 disables GC
 ```
 
 ### When to choose it
@@ -121,8 +124,15 @@ before a browser is launched.
   ONNX graph); without them they SKIP with the reason printed.
 - The bridge is deliberately not a `tool-*` package, so it stays out of the generated tool catalog.
 - Every run leaves its temp directory behind — the result names the report inside it, so that
-  directory has to outlive the call. Artifacts are per call, never shared.
-- The plugin does not yet expose the app-level probe or induction tools the checkout also provides.
+  directory has to outlive the call. Artifacts are per call, never shared. `keepRuns` caps how many
+  of the newest `dsh-layawebuse-*` directories survive; a directory is only removed an hour after
+  its last write, so a slow live run is never pruned under it.
+- App listings mark `kind=probe` packs (measurement sets the engine refuses to run through the app
+  runner) and `data-source` packs, and `…_run` turns the engine's probe refusal into that guidance —
+  but the probe drivers themselves are still not exposed as a tool.
+- The child environment is inherited wholesale by default (trusting the checkout is the stated
+  premise). Set `envMode: allowlist` to forward only the run essentials plus `LAYAWEBUSE_*` and
+  `forwardEnv`.
 - `layawebuse_learn` cannot demonstrate for you: recording a NEW flow needs a recorded action list,
   because the CLI's live recorder needs an interactive terminal. A script-less call is refused up
   front rather than being allowed to fail inside the engine.

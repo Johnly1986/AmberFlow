@@ -26,7 +26,8 @@ export function cleanupTmp(): void {
 }
 
 export const OPTIONS: BridgeOptions = {
-  repoPath: '/repo', nodeBin: '/usr/bin/node', timeoutMs: 1000, allowDangerous: false, toolPrefix: 'layawebuse',
+  repoPath: '/repo', nodeBin: '/usr/bin/node', timeoutMs: 1000, allowDangerous: false,
+  toolPrefix: 'layawebuse', envMode: 'inherit', forwardEnv: [], keepRuns: 0,
 }
 
 /**

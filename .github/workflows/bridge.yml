@@ -1,0 +1,28 @@
+name: bridge
+# The DSH plugin lives in this repo (integrations/dsh-bridge). Its offline specs are hermetic:
+# host packages resolve from npm (the package's own `exports` map makes the self-import work), the
+# checkout is stubbed in-process — so CI can gate every bridge change without a browser, a model,
+# or a DSH installation. live.spec.ts (real CLIs + chromium) runs locally and in deployments.
+"on":
+  push:
+    paths:
+      - 'integrations/**'
+      - '.github/workflows/bridge.yml'
+  pull_request:
+  workflow_dispatch:
+jobs:
+  offline:
+    name: bridge offline specs (no browser, no DSH install)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install bridge dependencies
+        run: npm install --no-audit --no-fund
+        working-directory: integrations/dsh-bridge
+      - name: Run hermetic bridge specs
+        run: npx vitest run tests/bridge.spec.ts tests/service.spec.ts
+        working-directory: integrations/dsh-bridge

@@ -9,6 +9,7 @@
 
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
@@ -24,6 +25,20 @@ export interface BridgeOptions {
   allowDangerous: boolean
   /** Model-visible tool-name prefix. */
   toolPrefix: string
+  /**
+   * How the engine child process gets its environment. `inherit` (the default) forwards everything,
+   * which is what a deployment trusting the checkout expects; `allowlist` forwards only the keys a
+   * CLI run actually needs (PATH/HOME/certs/proxies/playwright) plus LAYAWEBUSE_*, so session
+   * secrets never reach the external process.
+   */
+  envMode: 'inherit' | 'allowlist'
+  /** Extra environment variable names forwarded in `allowlist` mode (exact keys, no glob). */
+  forwardEnv: string[]
+  /**
+   * Per-call artifact directories are kept because the result names a report inside them; this caps
+   * how many of the newest `dsh-layawebuse-*` temp directories survive. 0 disables pruning.
+   */
+  keepRuns: number
 }
 
 /** One declared app, as the bridge presents it to the model. */
@@ -38,6 +53,12 @@ export interface AppSummary {
   invariants: number
   /** Where this pack came from: generated (spec/source) | recorded (demo) | hand-written. */
   origin: string
+  /**
+   * What `_run` can do with it. `journey` runs end to end; `probe` is a measurement set the engine
+   * refuses to run through app-runner (its drivers live in the checkout), so the model learns it
+   * from the listing instead of burning a spawn; `data-source` has no pack.json at all.
+   */
+  kind: 'journey' | 'probe' | 'data-source'
   hosts: string[]
 }
 
@@ -237,7 +258,7 @@ export function listApps(repoPath: string): AppSummary[] {
       if (fs.existsSync(path.join(dir, entry.name, 'sources'))) {
         out.push({
           id: entry.name, label: entry.name, goal: '', steps: 0, toolSteps: 0,
-          invariants: 0, origin: 'data-source', hosts: [],
+          invariants: 0, origin: 'data-source', kind: 'data-source', hosts: [],
         })
       }
       continue
@@ -254,6 +275,9 @@ export function listApps(repoPath: string): AppSummary[] {
     }
     const generated = asRecord(pack['generated_from'])
     const recorded = asRecord(pack['recorded_from'])
+    // The same predicate the engine's app-runner uses to refuse a spawn (probe defined, no
+    // journey): surface it in the listing instead of letting `_run` discover it by burning a call.
+    const isProbe = pack['probe'] !== undefined && journey.length === 0
     out.push({
       id: asText(pack['id'], entry.name),
       label: asText(pack['label']),
@@ -266,6 +290,7 @@ export function listApps(repoPath: string): AppSummary[] {
         : recorded !== null
           ? `recorded:${asText(recorded['url'], '?')}`
           : 'hand-written',
+      kind: isProbe ? 'probe' : 'journey',
       hosts: Array.isArray(pack['hosts'])
         ? (pack['hosts'] as unknown[]).filter((h): h is string => typeof h === 'string')
         : [],
@@ -290,6 +315,8 @@ export function runArgs(
     noModel?: boolean
     noSources?: boolean
     dangerous?: boolean
+    /** Ask the engine to refuse destructive actions per dry-run evidence (middle gate). */
+    confirmSafe?: boolean
     slots?: Record<string, string>
   },
 ): string[] {
@@ -299,6 +326,7 @@ export function runArgs(
   if (args.noModel) argv.push('--no-model')
   if (args.noSources) argv.push('--no-sources')
   if (args.dangerous) argv.push('--allow-dangerous')
+  if (args.confirmSafe) argv.push('--confirm-safe')
   for (const [key, value] of Object.entries(args.slots ?? {})) argv.push('--slot', `${key}=${value}`)
   return argv
 }
@@ -326,6 +354,35 @@ export function learnArgs(
   return argv
 }
 
+/** Environment keys an engine CLI run actually needs in `allowlist` mode. Everything the spawned
+ * process must NOT see (session API keys and the rest) is dropped unless named in `forwardEnv`. */
+const ENV_BASE = [
+  'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TZ', 'TMPDIR', 'TEMP', 'TMP',
+  'LANG', 'LC_ALL', 'LC_CTYPE', 'NODE_OPTIONS', 'NODE_PATH', 'NODE_EXTRA_CA_CERTS',
+  'SSL_CERT_FILE', 'SSL_CERT_DIR', 'CURL_CA_BUNDLE', 'PLAYWRIGHT_BROWSERS_PATH',
+]
+const ENV_PROXY = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy']
+
+/**
+ * The environment for one engine child process.
+ * @param options - resolved bridge options (env mode + explicit forward list).
+ * @returns a fresh env object for `spawn`.
+ */
+export function buildEnv(options: BridgeOptions): NodeJS.ProcessEnv {
+  if (options.envMode === 'inherit') return { ...process.env }
+  const out: NodeJS.ProcessEnv = {}
+  const wanted = [...ENV_BASE, ...ENV_PROXY, ...options.forwardEnv]
+  for (const key of wanted) {
+    if (process.env[key] !== undefined) out[key] = process.env[key]
+  }
+  // Deployment-level overrides for the engine itself (repo path, model hints, timeouts) travel by
+  // name, and LAYAWEBUSE_* stays forwardable so a checkout configured by env keeps working.
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith('LAYAWEBUSE_')) out[key] = process.env[key]
+  }
+  return out
+}
+
 /**
  * Run one child process with a hard timeout and bounded output.
  *
@@ -343,7 +400,7 @@ export function runProcess(options: BridgeOptions, argv: string[]): Promise<Proc
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, {
       cwd: options.repoPath,
-      env: { ...process.env },
+      env: buildEnv(options),
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let stdout = ''
@@ -433,6 +490,52 @@ export interface RunSummary {
 }
 
 /**
+ * Prune this bridge's old per-call temp directories (`dsh-layawebuse-*`).
+ *
+ * A run's report must outlive the call — that is why the directories exist — but they must not grow
+ * without bound. This keeps the newest `keep` directories and never touches one younger than
+ * `minAgeMs` (a slow run's directory is still a live directory). Best-effort: a failed stat or
+ * removal is ignored — housekeeping never breaks the call it follows.
+ * @param keep - how many newest directories to retain; 0 or below disables pruning.
+ * @param minAgeMs - minimum age before a beyond-quota directory may be removed.
+ * @returns how many directories were removed.
+ */
+export function pruneRunDirs(keep: number, minAgeMs = 3_600_000, root = os.tmpdir()): number {
+  if (keep <= 0) return 0
+  let entries: fs.Dirent[]
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true })
+  } catch {
+    return 0
+  }
+  const dirs = entries
+    .filter(e => e.isDirectory() && e.name.startsWith('dsh-layawebuse-'))
+    .map(e => {
+      const full = path.join(root, e.name)
+      let mtime = 0
+      try {
+        mtime = fs.statSync(full).mtimeMs
+      } catch {
+        return null
+      }
+      return { full, mtime }
+    })
+    .filter((x): x is { full: string; mtime: number } => x !== null)
+    .sort((a, b) => b.mtime - a.mtime)
+  let removed = 0
+  for (const dir of dirs.slice(keep)) {
+    if (Date.now() - dir.mtime < minAgeMs) continue
+    try {
+      fs.rmSync(dir.full, { recursive: true, force: true })
+      removed += 1
+    } catch {
+      // Leave it for the next call.
+    }
+  }
+  return removed
+}
+
+/**
  * Read a `--dry` expansion out of the CLI's stdout.
  * @param stdout - the process output.
  * @returns the plan, or null when the stream is not an expansion document.
@@ -462,10 +565,11 @@ function readDryPlan(stdout: string): { app: string; steps: PlanStep[] } | null 
  * @param outDir - the run directory the bridge passed as `--out`.
  * @param app - the app id.
  * @param outcome - the finished process.
+ * @param runTool - the model-visible run tool name, used when translating the engine's probe refusal.
  * @returns the compact summary.
  * @throws when the run ended without a result artifact and without an expansion to show for it.
  */
-export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcome): RunSummary {
+export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcome, runTool?: string): RunSummary {
   const resultPath = path.join(outDir, `${app}-result.json`)
   if (!fs.existsSync(resultPath)) {
     // Parse the FULL stdout: a 24-step plan is several kilobytes and the display excerpt would cut
@@ -481,6 +585,15 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
       }
     }
     const detail = firstLines(outcome.stderr) || firstLines(outcome.stdout)
+    // The engine refuses probe packs with a CLI-worded pointer to its own drivers (and sometimes to
+    // `--dry`, which the model just did). Translate that into what THIS door offers instead.
+    if (/没有 journey|测量型/.test(detail)) {
+      throw new Error(
+        `layawebuse-bridge: ${JSON.stringify(app)} is a measurement probe (no journey) and cannot run `
+        + `through ${runTool ?? 'the …_run tool'}; read its declaration with the apps tool `
+        + `(kind='probe') or run the checkout's probe drivers directly. CLI said: ${detail}`,
+      )
+    }
     throw new Error(
       `no ${app}-result.json in ${outDir} (exit ${outcome.code ?? 'killed'}) — run did not reach the artifact stage`
       + (detail ? `; cause: ${detail}` : ''),

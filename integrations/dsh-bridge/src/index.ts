@@ -32,8 +32,8 @@ export {
   type LayawebuseLearnArgs, type LayawebuseRunArgs, type LayawebuseService,
 } from './service.ts'
 export {
-  diagnoseFailure, firstLines, learnArgs, listApps, parseJsonDocument, parseSource, runArgs,
-  runProcess, stripAnsi, summarizeLearn, summarizeRun,
+  buildEnv, diagnoseFailure, firstLines, learnArgs, listApps, parseJsonDocument, parseSource,
+  pruneRunDirs, runArgs, runProcess, stripAnsi, summarizeLearn, summarizeRun,
   type AppSummary, type BridgeOptions, type LearnSummary, type PlanStep, type ProcessOutcome,
   type RunSummary,
 } from './bridge.ts'
@@ -53,6 +53,19 @@ export interface Config {
   allowDangerous?: boolean
   /** Model-visible tool-name prefix (default `layawebuse`). */
   toolPrefix?: string
+  /**
+   * Environment policy for the engine child process: `inherit` (default) forwards everything, which
+   * assumes the checkout is trusted with the session's environment; `allowlist` forwards only the
+   * keys an engine run needs (PATH/HOME/certs/proxies/playwright) plus LAYAWEBUSE_* and `forwardEnv`.
+   */
+  envMode?: 'inherit' | 'allowlist'
+  /** Extra environment variable NAMES forwarded when `envMode` is `allowlist` (exact keys). */
+  forwardEnv?: string[]
+  /**
+   * How many newest per-call artifact directories (`$TMPDIR/dsh-layawebuse-*`) to keep. Directories
+   * stay removable only after an hour of age, so a live run is never pruned; 0 disables housekeeping.
+   */
+  keepRuns?: number
 }
 
 /** Schemastery schema for {@link Config}. */
@@ -62,6 +75,9 @@ export const Config: z<Config> = z.object({
   timeoutMs: z.natural().min(1000).default(900_000),
   allowDangerous: z.boolean().default(false),
   toolPrefix: z.string().default('layawebuse'),
+  envMode: z.union([z.const('inherit'), z.const('allowlist')]).default('inherit'),
+  forwardEnv: z.array(z.string()).default([]),
+  keepRuns: z.natural().default(30),
 })
 
 /** Resolve defaults and verify the checkout really is one, at LOAD time rather than first call. */
@@ -81,6 +97,9 @@ function resolveOptions(config: Config): BridgeOptions {
     timeoutMs: config.timeoutMs ?? 900_000,
     allowDangerous: config.allowDangerous ?? false,
     toolPrefix: prefix,
+    envMode: config.envMode ?? 'inherit',
+    forwardEnv: config.forwardEnv ?? [],
+    keepRuns: config.keepRuns ?? 30,
   }
 }
 
@@ -103,7 +122,10 @@ export function apply(ctx: Context, config: Config): void {
     description:
       'List the browser/CLI apps declared in the LayaWebUse checkout, with their step counts, '
       + 'invariant counts and where each pack came from (generated from a spec/source, recorded from '
-      + 'a demonstrated flow, hand-written, or a pure data source with no journey of its own). Reads '
+      + 'a demonstrated flow, hand-written, or a pure data source with no journey of its own). '
+      + 'Each row carries a kind: `journey` apps run under the run tool; `probe` apps are measurement '
+      + 'sets the engine refuses to run through the app runner (read their declaration only); '
+      + '`data-source` rows feed other packs. Reads '
       + 'the packs only: no browser, no model, no subprocess.',
     parameters: {
       filter: { type: 'string', description: 'Optional case-insensitive substring match on id/label/goal.' },
@@ -127,6 +149,8 @@ export function apply(ctx: Context, config: Config): void {
                 toolSteps: { type: 'integer', required: true },
                 invariants: { type: 'integer', required: true },
                 origin: { type: 'string', required: true },
+                kind: { type: 'string', required: true },
+                hosts: { type: 'array', required: true, items: { type: 'string' } },
               },
             },
           },
@@ -138,7 +162,8 @@ export function apply(ctx: Context, config: Config): void {
           ? 'No apps matched.'
           : value.apps.map(a => `${a.id}${a.label === '' || a.label === a.id ? '' : ` — ${a.label}`} `
             + `(${a.steps} browser + ${a.toolSteps} tool steps, `
-            + `${a.invariants} invariants, ${a.origin})`).join('\n'),
+            + `${a.invariants} invariants, ${a.origin}, kind=${a.kind}`
+            + `${a.hosts.length ? `, hosts: ${a.hosts.join(',')}` : ''})`).join('\n'),
       }],
     },
     execute(args) {
@@ -151,6 +176,7 @@ export function apply(ctx: Context, config: Config): void {
         .map(a => ({
           id: a.id, label: a.label, goal: a.goal,
           steps: a.steps, toolSteps: a.toolSteps, invariants: a.invariants, origin: a.origin,
+          kind: a.kind, hosts: a.hosts,
         }))
       return Promise.resolve({ apps })
     },
@@ -174,6 +200,11 @@ export function apply(ctx: Context, config: Config): void {
       allow_dangerous: {
         type: 'boolean',
         description: 'Permit dangerous tool steps (dry-run gated). Requires the deployment to enable it.',
+      },
+      confirm_safe: {
+        type: 'boolean',
+        description: 'With allow_dangerous, still confirm each destructive step against its dry-run '
+          + 'evidence (the engine\'s middle gate) instead of blanket-approving.',
       },
       slots: {
         type: 'array',
@@ -289,6 +320,7 @@ export function apply(ctx: Context, config: Config): void {
         ...(args.no_model === undefined ? {} : { noModel: args.no_model }),
         ...(args.no_sources === undefined ? {} : { noSources: args.no_sources }),
         ...(args.allow_dangerous === undefined ? {} : { allowDangerous: args.allow_dangerous }),
+        ...(args.confirm_safe === undefined ? {} : { confirmSafe: args.confirm_safe }),
         // `Object.fromEntries` defines own properties, so even a `__proto__` slot reaches the CLI.
         ...(args.slots === undefined ? {} : { slots: Object.fromEntries(slots) }),
       })
@@ -335,6 +367,7 @@ export function apply(ctx: Context, config: Config): void {
       },
       id: { type: 'string', description: 'App id to save under (defaults to a slug of host+goal).' },
       cdp: { type: 'string', description: 'CDP websocket URL of the browser to attach to; selects the browser, not the actions.' },
+      headful: { type: 'boolean', description: 'Launch a visible browser for the recording (debug aid for a flaky flow).' },
       pack_dir: {
         type: 'string',
         description: 'Directory to write the pack into. Defaults to <repo>/apps, i.e. inside the checkout itself.',
@@ -369,6 +402,7 @@ export function apply(ctx: Context, config: Config): void {
         script: args.script,
         ...(args.id === undefined ? {} : { id: args.id }),
         ...(args.cdp === undefined ? {} : { cdp: args.cdp }),
+        ...(args.headful === undefined ? {} : { headful: args.headful }),
         ...(args.pack_dir === undefined ? {} : { packDir: args.pack_dir }),
       })
       return {
