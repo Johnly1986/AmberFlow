@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>云程机票 — 下单结果</title></head>
+<body>
+<h1 id="page-title">云程机票 — 下单结果</h1>
+<div id="order-box">订单提交成功</div>
+<div id="order-id"></div>
+<script>
+var q = new URLSearchParams(location.search);
+document.getElementById("order-id").textContent = "订单号 " + (q.get("order") || "-")
+  + " · 航班 " + (q.get("flight") || "-") + " · ¥" + (q.get("price") || "-");
+</script>
+</body>
+</html>

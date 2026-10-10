@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Fareport — Fare query</title></head>
+<body>
+<h1 data-test="query-title">Fareport — Fare query</h1>
+<div data-test="query-form">
+  <input data-test="dep-city" placeholder="Departure city">
+  <input data-test="arr-city" placeholder="Arrival city">
+  <button data-test="do-search" onclick="doSearch()">Search</button>
+  <a data-test="hotel-search" href="home.html">Hotel search</a>
+</div>
+<div data-test="query-state"></div>
+<script>
+function doSearch() {
+  var f = document.querySelector('[data-test=dep-city]').value.trim() || "Kunming";
+  var t = document.querySelector('[data-test=arr-city]').value.trim() || "Beijing";
+  document.querySelector('[data-test=query-state]').textContent = "Loading " + f + " -> " + t;
+  location.href = "fare-list.html?from=" + encodeURIComponent(f) + "&to=" + encodeURIComponent(t);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "host": "site-a",
+  "steps": {
+    "open-flights": {
+      "hint": "[id=nav-flight]",
+      "replays_ok": 1,
+      "method": "escalate"
+    },
+    "pick-date": {
+      "hint": "[data-test=chip-may18]",
+      "replays_ok": 1,
+      "method": "escalate"
+    },
+    "purchase": {
+      "hint": "[id=buy-btn]",
+      "replays_ok": 1,
+      "method": "escalate"
+    }
+  }
+}

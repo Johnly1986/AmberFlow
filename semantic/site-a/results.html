@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>云程机票 — 航班列表</title></head>
+<body>
+<h1 id="page-title">云程机票 — 航班列表</h1>
+<div id="query-line"></div>
+<div id="date-bar">
+  <button class="chip" data-test="chip-may17">5月17日</button>
+  <button class="chip" data-test="chip-may18">5月18日</button>
+  <button class="chip" data-test="chip-may19">5月19日</button>
+</div>
+<table id="fares"><tbody id="fare-rows"></tbody></table>
+<div id="list-state"></div>
+<script>
+var q = new URLSearchParams(location.search);
+var FROM = q.get("from") || "昆明";
+var TO = q.get("to") || "北京";
+var DATE = q.get("date") || "05-17";
+var FARES = {
+  "05-17": [["F1","08:05",1280],["F2","09:40",1180],["F3","11:15",1320],["F4","14:30",1260],["F5","18:50",1090]],
+  "05-18": [["F1","08:05",1280],["F2","09:40",1150],["F3","11:15",980],["F4","14:30",1330],["F5","18:50",1060]],
+  "05-19": [["F1","08:05",1420],["F2","09:40",1230],["F3","11:15",1180],["F4","14:30",990],["F5","18:50",1140]]
+};
+document.getElementById("query-line").textContent = FROM + " → " + TO + " · " + DATE;
+var rows = FARES[DATE] || FARES["05-17"];
+document.getElementById("fare-rows").innerHTML = rows.map(function (r) {
+  return '<tr class="flight-item"><td class="fno">' + r[0] + '</td><td class="dep">' + r[1]
+    + '</td><td class="price">¥' + r[2] + '</td><td><button class="btn-pick" onclick="pick(\'' + r[0]
+    + '\',' + r[2] + ')">订票</button></td></tr>';
+}).join("");
+document.getElementById("list-state").textContent = "列表已更新 " + DATE;
+function pick(no, price) {
+  location.href = "purchase.html?from=" + encodeURIComponent(FROM) + "&to=" + encodeURIComponent(TO)
+    + "&date=" + DATE + "&flight=" + no + "&price=" + price;
+}
+var chips = document.querySelectorAll(".chip");
+for (var i = 0; i < chips.length; i++) {
+  (function (b) {
+    b.addEventListener("click", function () {
+      var d = "05-" + b.getAttribute("data-test").slice(-2);
+      location.href = "results.html?from=" + encodeURIComponent(FROM) + "&to=" + encodeURIComponent(TO) + "&date=" + d;
+    });
+  })(chips[i]);
+}
+</script>
+</body>
+</html>

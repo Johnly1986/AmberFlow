@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>云程机票 — 订单确认</title></head>
+<body>
+<h1 id="page-title">云程机票 — 订单确认</h1>
+<div id="summary"></div>
+<button id="buy-btn" onclick="buy()">购买</button>
+<a id="cancel" href="index.html">取消</a>
+<div id="buy-state"></div>
+<script>
+var q = new URLSearchParams(location.search);
+document.getElementById("summary").textContent = "航班 " + (q.get("flight") || "(未选)")
+  + " · " + (q.get("price") ? "¥" + q.get("price") : "价格待定")
+  + " · " + (q.get("from") || "昆明") + " → " + (q.get("to") || "北京")
+  + " · " + (q.get("date") || "05-17");
+function buy() {
+  document.getElementById("buy-state").textContent = "正在提交订单…";
+  location.href = "done.html?order=A1024&flight=" + (q.get("flight") || "")
+    + "&price=" + (q.get("price") || "") + "&date=" + (q.get("date") || "");
+}
+</script>
+</body>
+</html>

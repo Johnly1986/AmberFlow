@@ -950,19 +950,43 @@ function poolOf(rows: Row[], source: Source, spec: Record<string, any>): Row[] {
   return pool;
 }
 
+/**
+ * 选择语义的**唯一实现**：按 `sort_by` 多键取胜者，`order: "max"` 翻转比较。
+ * 缺值（null/undefined）在两种 order 下都排最后——它不是一个"极大值"。
+ *
+ * `selects`（本引擎）与 SemanticFlow 的 `list_step`（min/max）都走这里：一份实现，
+ * 浏览器侧与数据侧的"选哪一行"不会各写一套而悄悄漂移。
+ *
+ * @returns 胜者在 `rows` 里的下标；空行集返回 -1。
+ */
+export function selectIndex(rows: Row[], sel: Record<string, any>): number {
+  const keys = (sel["sort_by"] as string[] | undefined) || ["price"];
+  const wantMax = pyStr(sel["order"] ?? "min") === "max";
+  let best = -1;
+  let bestKey: unknown[] | null = null;
+  let bestMissing = 0;
+  rows.forEach((r, i) => {
+    const missing = keys.filter((k) => r[k] === null || r[k] === undefined).length;
+    const key = keys.map((k) => (r[k] === null || r[k] === undefined ? 0 : r[k]));
+    if (bestKey === null) {
+      best = i; bestKey = key; bestMissing = missing;
+      return;
+    }
+    // 缺得少的先赢（缺值永远排最后），再按值比。
+    if (missing !== bestMissing) {
+      if (missing < bestMissing) { best = i; bestKey = key; bestMissing = missing; }
+      return;
+    }
+    const cmp = pyCompareTuple(key, bestKey);
+    if (wantMax ? cmp > 0 : cmp < 0) { best = i; bestKey = key; }
+  });
+  return best;
+}
+
 export function selectBest(rows: Row[], source: Source, sel: Record<string, any>): Row | null {
   const pool = poolOf(rows, source, sel);
-  const keys = (sel["sort_by"] as string[] | undefined) || ["price"];
-  let best: Row | null = null;
-  let bestKey: unknown[] | null = null;
-  for (const r of pool) {
-    const key = keys.map((k) => (r[k] === null || r[k] === undefined ? 1 << 30 : r[k]));
-    if (bestKey === null || pyCompareTuple(key, bestKey) < 0) {
-      best = r;
-      bestKey = key;
-    }
-  }
-  return best;
+  const i = selectIndex(pool, sel);
+  return i < 0 ? null : pool[i]!;
 }
 
 /** 按配置核查数据质量：`{"field": "price", "empty": true}` -> 有多少行为空。 */
@@ -1361,6 +1385,10 @@ export function validateSource(src: Source): string[] {
     const sb = hasOwn(s, "sort_by") ? s["sort_by"] : null;
     for (const k of (pyTruthy(sb) ? pyIterate(sb) : ["price"])) {
       if (typeof k !== "string") p.push(`select ${pyStr(s["key"])}: sort_by must be field names`);
+    }
+    const ord = s["order"];
+    if (ord !== undefined && ord !== "min" && ord !== "max") {
+      p.push(`select ${pyStr(s["key"])}: order must be min|max (got ${pyRepr(ord)})`);
     }
   }
   return p;

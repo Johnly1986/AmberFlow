@@ -1,0 +1,20 @@
+{
+  "host": "site-b",
+  "steps": {
+    "open-flights": {
+      "hint": "[data-test=tab-flights]",
+      "replays_ok": 1,
+      "method": "laya"
+    },
+    "submit-search": {
+      "hint": "[data-test=do-search]",
+      "replays_ok": 1,
+      "method": "laya"
+    },
+    "purchase": {
+      "hint": "[data-test=purchase-submit]",
+      "replays_ok": 1,
+      "method": "laya"
+    }
+  }
+}

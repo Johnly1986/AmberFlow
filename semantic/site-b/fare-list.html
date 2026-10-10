@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Fareport — Fare list</title></head>
+<body>
+<h1 data-test="list-title">Fareport — Fare list</h1>
+<div data-test="query-line"></div>
+<div data-test="date-bar">
+  <button data-test="day-17may">May 17</button>
+  <button data-test="day-18may">May 18</button>
+  <button data-test="day-19may">May 19</button>
+</div>
+<div id="rows"></div>
+<div data-test="list-state"></div>
+<script>
+var q = new URLSearchParams(location.search);
+var FROM = q.get("from") || "Kunming";
+var TO = q.get("to") || "Beijing";
+var DATE = q.get("date") || "05-17";
+var FARES = {
+  "05-17": [["F1","08:05",1280],["F2","09:40",1180],["F3","11:15",1320],["F4","14:30",1260],["F5","18:50",1090]],
+  "05-18": [["F1","08:05",1280],["F2","09:40",1150],["F3","11:15",980],["F4","14:30",1330],["F5","18:50",1060]],
+  "05-19": [["F1","08:05",1420],["F2","09:40",1230],["F3","11:15",1180],["F4","14:30",990],["F5","18:50",1140]]
+};
+document.querySelector('[data-test=query-line]').textContent = FROM + " -> " + TO + " · " + DATE;
+var rows = FARES[DATE] || FARES["05-17"];
+document.getElementById("rows").innerHTML = rows.map(function (r) {
+  return '<div class="fare-row" data-test="fare-row-' + r[0] + '">'
+    + '<span class="fno">' + r[0] + '</span><span class="dep">' + r[1]
+    + '</span><span class="fare-price">' + r[2] + ' CNY</span>'
+    + '<button class="select-fare" data-test="select-' + r[0] + '" onclick="pick(\'' + r[0] + '\',' + r[2] + ')">Select</button></div>';
+}).join("");
+document.querySelector('[data-test=list-state]').textContent = "List updated " + DATE;
+function pick(no, price) {
+  location.href = "fare-buy.html?from=" + encodeURIComponent(FROM) + "&to=" + encodeURIComponent(TO)
+    + "&date=" + DATE + "&flight=" + no + "&price=" + price;
+}
+var days = document.querySelectorAll("[data-test^=day-]");
+for (var i = 0; i < days.length; i++) {
+  (function (b) {
+    b.addEventListener("click", function () {
+      var d = "05-" + b.getAttribute("data-test").slice(4, 6);
+      location.href = "fare-list.html?from=" + encodeURIComponent(FROM) + "&to=" + encodeURIComponent(TO) + "&date=" + d;
+    });
+  })(days[i]);
+}
+</script>
+</body>
+</html>

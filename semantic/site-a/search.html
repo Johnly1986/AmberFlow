@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>云程机票 — 机票搜索</title></head>
+<body>
+<h1 id="page-title">云程机票 — 机票搜索</h1>
+<div id="search-form">
+  <input id="from-city" placeholder="出发城市">
+  <input id="to-city" placeholder="到达城市">
+  <button id="search-btn" onclick="doSearch()">搜索</button>
+  <a id="hotel-link" href="index.html">搜索酒店</a>
+</div>
+<div id="form-state"></div>
+<script>
+function doSearch() {
+  var f = document.getElementById("from-city").value.trim() || "昆明";
+  var t = document.getElementById("to-city").value.trim() || "北京";
+  document.getElementById("form-state").textContent = "正在跳转 " + f + " → " + t;
+  location.href = "results.html?from=" + encodeURIComponent(f) + "&to=" + encodeURIComponent(t);
+}
+</script>
+</body>
+</html>

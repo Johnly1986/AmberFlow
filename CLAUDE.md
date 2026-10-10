@@ -60,7 +60,32 @@ node --experimental-strip-types tools/learn.ts                                  
 node --experimental-strip-types tools/learn.ts --json --yes --goal … --url …      # 外层 Agent 的一次调用
 node --experimental-strip-types tools/spec-to-pack.ts --check                      # 生成的包 == 上游的展开
 npm run shortlist                                                                  # 真 ONNX 的 shortlist demo
+npm run semantic -- --app flight-cheapest --site site-a [--laya scripted|unsure|onnx]   # 语义流：模板跨站迁移 + 三级解析回填环
+npm run plan:flow -- --goal "订5月18日昆明到北京最低价机票" --seed <页面> --app <id> --yes   # plan 端到端：看页面→归纳信号→模板+档案→门控落盘
 ```
+
+语义流（SemanticFlow，2026-10）：`apps/<id>/flow.json`（spec_version 2，语义模板：页面角色 + 语义目标
++ **页面角色契约信号**，零站点选择器）+ `apps/<id>/sites/<site>.profile.json`（authored 站点知识：
+pages 覆盖 / fill_keys 值绑定 / list_extract / frozen_signals）+ `sites/<site>.profile.json`（运行时
+**学到的** hint，`replays_ok` 重放计数）。三级解析全接在既有缝上（执行循环零改动）：
+①`SiteProfileMemory`（实现 `HintMemoryLike`，按（站点, 语义步 id）键控、人可读）回退取回已学 hint →
+②desc 进元素池 Laya 现场选 → ③`escalateFn` 老师点名，**提名让 DOM/URL 信号成立才回填**（执行器
+既有的 record 路径就是门）。"判断最低价"是 `list_step` 数据规则（extract → `select: min(price)` →
+act_on），模型不产出"选哪行"——而且与数据引擎**共用同一实现** `datasource.selectIndex`（`order: min|max`），
+所以浏览器侧与数据侧的"选哪行"不会各写一套。实测与边界见 [docs/SEMANTIC_FLOW_M1_REPORT.md](docs/SEMANTIC_FLOW_M1_REPORT.md)。
+**红线 2 有牙**：回填的 hint 先只进内存（staged），**同一次运行内**再整跑一遍零模型重放，只有真的以规则
+命中并完成的条目才落盘（`replays_ok` 从 1 起算），其余按原值撤回、报告记 `unverified`；`--no-verify-backfill`
+是显式消融口（按现状落盘、`replays_ok: 0`、报告记 `skipped`）。已学 hint 连续 N 次（默认 2）没让信号成立
+→ 报 `drift` 并撤下条目、下次重新学。**红线 3 有牙**：`dangerous` 步先走执行器 `dryRun`（三级解析 + 只读
+`isVisible/isEnabled/中心 hit-test`，不点不填不滚动）拿到"会点到什么"的证据，再由
+`--allow-dangerous`/`confirmDangerous(step, evidence)` 点头；干跑不成立 = 直接拒绝。站的文字系统结论
+（`<html lang>` 优先，否则 CJK 占比 → `locale`/`checkpoint`）由 plan 首访写进档案、运行期据此选 checkpoint。
+`npm run plan:flow`（M3）把"一句话 + 种子页"变成上面这套：逐步看页面 → 每步真执行 → 判据从**两次独立演示**
+归纳（判别 + 稳定句柄 + 跨演示可复现，选不出来就 manual 停止，绝不猜），页面角色文件名 / 查询参数名 /
+值绑定 / 行抽取全部观察进站点档案；**重放门控（runFlow 整跑）不过 = 一个文件都不落盘**（learn 的纪律）。
+红线：plan **不写 hint**（档案 `steps` 恒空，hint 归运行期回填环）；dangerous 由 goal 里的"订/购买/pay"
+自动标注。实测（含中文城市提取、`{slot}` 泛化、查询差分候选三处坑）见 [docs/SEMANTIC_FLOW_M3_REPORT.md](docs/SEMANTIC_FLOW_M3_REPORT.md)；
+每条验收指标钉在哪个测试见方案文档 §8。
 
 线上平台用例：`node --experimental-strip-types src/bench.ts --cases bench/cases-live.json --mode-tag live`（8 个真实站点，见 README 的实测一节）。
 

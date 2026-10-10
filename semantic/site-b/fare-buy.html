@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Fareport — Order</title></head>
+<body>
+<h1 data-test="buy-title">Fareport — Order</h1>
+<div data-test="summary"></div>
+<button data-test="purchase-submit" onclick="buy()">Purchase</button>
+<a data-test="cancel-link" href="home.html">Cancel</a>
+<div data-test="buy-state"></div>
+<script>
+var q = new URLSearchParams(location.search);
+document.querySelector('[data-test=summary]').textContent = "Flight " + (q.get("flight") || "(none)")
+  + " · " + (q.get("price") ? q.get("price") + " CNY" : "price pending")
+  + " · " + (q.get("from") || "Kunming") + " -> " + (q.get("to") || "Beijing")
+  + " · " + (q.get("date") || "05-17");
+function buy() {
+  document.querySelector('[data-test=buy-state]').textContent = "Submitting…";
+  location.href = "fare-done.html?order=B-2048&flight=" + (q.get("flight") || "")
+    + "&price=" + (q.get("price") || "") + "&date=" + (q.get("date") || "");
+}
+</script>
+</body>
+</html>

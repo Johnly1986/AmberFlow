@@ -137,6 +137,9 @@ interface AnyLoc {
   evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
   innerText(opts?: Record<string, unknown>): Promise<string> | string;
   inputValue(opts?: Record<string, unknown>): Promise<string> | string;
+  /** Read-only actionability questions (the dry-run probe uses only these). */
+  isVisible?(): Promise<boolean>;
+  isEnabled?(): Promise<boolean>;
   first?: unknown;
 }
 
@@ -162,6 +165,8 @@ export interface RunReport {
   skipped?: boolean;
   /** `done` came from a HUMAN attestation (`{manual: true}`), not a DOM signal. */
   manual?: boolean;
+  /** The run stopped at the dry-run probe: nothing was executed. */
+  dry_run?: boolean;
   stop_reason: string;
   steps: TraceStep[];
   audit: AuditVerdictLike;
@@ -253,6 +258,18 @@ export interface RunOptions {
   targetHints?: string[] | null;
   /** `when` guard: evaluated after navigation, before any action. */
   precondition?: SignalSpec | null;
+  /**
+   * DRY RUN: resolve the step's target exactly as a real run would (rule hint →
+   * local model → re-observe → escalate), probe that it is actionable WITHOUT
+   * touching it, and stop there. Nothing is clicked, filled, or scrolled: the
+   * pre-fill guard and the occlusion probe (which clicks) are never reached, so
+   * the page is bit-identical afterwards. `stop_reason` starts with `dry-run:` and
+   * the trace carries `dry_run: true` + `actionable` + `would`.
+   *
+   * This is the evidence half of "an irreversible action is always dry-run +
+   * human confirmation": the runner shows what WOULD be clicked before asking.
+   */
+  dryRun?: boolean;
 }
 
 export interface BrowserSession {
@@ -720,7 +737,13 @@ export class BrowserMiddleware {
         criteria: crit,
       },
     }, { embedFn, k: 8 });
-    const a = res.answers["act"] as ChoiceAnswer;
+    const a = res.answers["act"] as ChoiceAnswer | undefined;
+    // A runtime that does not answer `act` AT ALL must block the step, not crash
+    // (same guard as isRisky/isDone — "no pick" is a result). A present but
+    // choiceless answer (a noul-shaped object) flows on exactly as before: the
+    // caller's `elems[ref]` miss reports it via the helpful "names no target"
+    // message, which is the UX contract for a step nothing could name.
+    if (a === undefined) return [null, 0.0, {}];
     // The shortlist re-normalises probabilities over its kept subset only: when
     // it dropped nothing (labels <= k), that renormalised value is NOT the
     // model's calibrated confidence — `predict_shortlist` hands back the
@@ -922,6 +945,27 @@ export class BrowserMiddleware {
     }
   }
 
+  /**
+   * Non-mutating actionability probe for a dry run. `occludedReason` cannot be used
+   * here: its fast path IS the real click, so a dry run through it would already have
+   * acted. This asks Playwright the read-only questions only (`isVisible` /
+   * `isEnabled`) plus the same centre hit-test, so the page state is untouched.
+   */
+  async dryRunProbe(page: AnyPage, el: Elem): Promise<{ actionable: boolean; reason: string | null }> {
+    const loc = await this._locatorFor(page, el);
+    if (loc === null) return { actionable: false, reason: "stale_ref" };
+    try {
+      const first = firstLoc(loc);
+      if (first.isVisible && !(await first.isVisible())) return { actionable: false, reason: "not-visible" };
+      if (first.isEnabled && !(await first.isEnabled())) return { actionable: false, reason: "disabled" };
+      const hit = await first.evaluate(FN_HIT);
+      if (hit) return { actionable: false, reason: `not-actionable-or-covered:${String(hit)}` };
+      return { actionable: true, reason: null };
+    } catch (e) {
+      return { actionable: false, reason: `probe-failed:${describeActionError(e)}` };
+    }
+  }
+
   /** Match a plan slot to this field: exact key first, then substring, any case. */
   _slotValue(el: Elem, slots: Record<string, unknown>): unknown {
     const keys = [el["data_test"], el["label"], el["name"], el["id"]].filter((k) => !!k) as string[];
@@ -1110,6 +1154,7 @@ export class BrowserMiddleware {
       outcomeMemory = this.outcomeMemory,
       outcomeMemoryMode = this.outcomeMemoryMode,
       hintMemory = this.hintMemory,
+      dryRun = false,
     } = opts;
 
     const slots: Record<string, unknown> = { ...extractSlots(instruction), ...(slotsIn ?? {}) };
@@ -1122,6 +1167,7 @@ export class BrowserMiddleware {
     const trace: TraceStep[] = [];
     let done = false;
     let manualDone = false;          // done because a HUMAN attested, not a DOM signal
+    let dryRan = false;              // stopped at the dry-run probe (nothing executed)
     let stopReason = "max_steps";
     const forbidden: Record<string, Sig> = {};                 // ref -> element signature (esig)
     // refs skipped ONLY because an overlay blocked them: retryable once the page
@@ -1411,6 +1457,28 @@ export class BrowserMiddleware {
         const el = elems[ref]!;
         const verb = this._isTyping(el) ? "type text into" : "click";
         const desc = `${verb} ${el.tag} "${el.label}"`;
+        // DRY RUN stops HERE: the target is resolved (rule hint / local model /
+        // re-observe / escalate) and probed, and nothing on the page is touched —
+        // the pre-fill guard below and `occludedReason` (which clicks) are never
+        // reached. The caller gets "what WOULD happen" as evidence.
+        if (dryRun) {
+          const probe = await this.dryRunProbe(pg, el);
+          dryRan = true;
+          stopReason = probe.actionable
+            ? `dry-run: would ${desc} (${method}, conf=${conf.toFixed(2)})`
+            : `dry-run: target not actionable (${probe.reason ?? "unknown"})`;
+          trace.push({
+            step: stepNo, desc, method, conf: round3(conf), executed: false,
+            dry_run: true, actionable: probe.actionable,
+            ...(probe.reason === null ? {} : { reason: probe.reason }),
+            would: `${el.tag} "${el.label}"`, url: urlOf(pg),
+          });
+          if (verbose) {
+            console.log(`  step ${stepNo}: DRY-RUN `
+              + (probe.actionable ? `would ${desc}` : `not actionable (${probe.reason ?? "unknown"})`));
+          }
+          break;
+        }
         // Pre-fill guard: a click whose form has empty fields that the plan's
         // slots can supply would die in HTML5 validation or JS checks — an inert
         // click and a wasted step. Values come from the plan, never the model.
@@ -1615,6 +1683,7 @@ export class BrowserMiddleware {
     return {
       goal: instruction, done, stop_reason: stopReason, steps: trace, audit: verdict,
       ...(manualDone ? { manual: true } : {}),
+      ...(dryRan ? { dry_run: true } : {}),
     };
   }
 }

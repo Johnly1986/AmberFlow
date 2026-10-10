@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Fareport — Result</title></head>
+<body>
+<h1 data-test="done-title">Fareport — Result</h1>
+<div data-test="order-box">Order confirmed</div>
+<div data-test="order-ref"></div>
+<script>
+var q = new URLSearchParams(location.search);
+document.querySelector('[data-test=order-ref]').textContent = "Ref " + (q.get("order") || "-")
+  + " · Flight " + (q.get("flight") || "-") + " · " + (q.get("price") || "-") + " CNY";
+</script>
+</body>
+</html>

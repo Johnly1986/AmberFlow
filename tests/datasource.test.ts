@@ -21,7 +21,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   auditRows, applyOps, blocked, countRows, dateExpr, dateParams, defaultDates,
   extract, fieldValue, FileNotFoundError, inWindow, listSources, loadSource, main,
-  matches, nextWeekDates, reportMarkdown, resolve, selectBest, sourceDirs, urlFor,
+  matches, nextWeekDates, reportMarkdown, resolve, selectBest, selectIndex, sourceDirs, urlFor,
   validateSource, type Source,
 } from "../src/datasource.ts";
 
@@ -301,6 +301,35 @@ describe("in_window / matches / select_best", () => {
   it("缺 filters 时默认窗口 [00:00,23:59] 与默认 sort_by=[price]", () => {
     expect(selectBest([{ price: 5 }, { price: 1 }], { filters: {} } as Source, {})).toEqual({ price: 1 });
     expect(selectBest([], src, {})).toBeNull();
+  });
+
+  it("select_index 是选择语义的唯一实现：min/max、并列取先、缺值永远排最后", () => {
+    const fares = [{ price: 1280 }, { price: 1150 }, { price: 980 }, { price: 1330 }, { price: 1060 }];
+    // min：SemanticFlow 的 list_step 与 selects 走同一个函数（index，不是 Row）。
+    expect(selectIndex(fares, { sort_by: ["price"] })).toBe(2);
+    expect(selectIndex(fares, { sort_by: ["price"], order: "min" })).toBe(2);
+    expect(selectIndex(fares, { sort_by: ["price"], order: "max" })).toBe(3);
+    // 并列取先（两种 order 都是）：既有 TS 循环的严格比较口径不变。
+    expect(selectIndex([{ price: 7 }, { price: 7 }], { sort_by: ["price"] })).toBe(0);
+    expect(selectIndex([{ price: 7 }, { price: 7 }], { sort_by: ["price"], order: "max" })).toBe(0);
+    // 缺值不是一个"极大值"：两种 order 下都排最后。
+    const holes = [{ price: 1 }, {}, { price: 0 }];
+    expect(selectIndex(holes, { sort_by: ["price"] })).toBe(2);
+    expect(selectIndex(holes, { sort_by: ["price"], order: "max" })).toBe(0);
+    // selectBest 就是 poolOf + selectIndex：同一行集两条路给出同一行。
+    expect(selectBest(fares, { filters: {} } as Source, { sort_by: ["price"] })).toBe(fares[2]);
+    expect(selectIndex([], { sort_by: ["price"] })).toBe(-1);
+  });
+
+  it("selects 的 order 只认 min|max，错值加载期炸", () => {
+    const real = loadSource("ctrip-flights-h5");
+    const withSelect = (order: string): Source => ({
+      ...real, selects: [{ key: "best", sort_by: ["price"], order }],
+    });
+    expect(validateSource(withSelect("min"))).toEqual([]);
+    expect(validateSource(withSelect("max"))).toEqual([]);
+    expect(validateSource(withSelect("cheapest")))
+      .toEqual([expect.stringContaining("order must be min|max")]);
   });
 
   it("count_rows / audit_rows 按配置计数", () => {
