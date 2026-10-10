@@ -62,10 +62,14 @@ export interface AppSummary {
   /**
    * What `_run` can do with it. `journey` runs end to end; `probe` is a measurement set the engine
    * refuses to run through app-runner (its drivers live in the checkout), so the model learns it
-   * from the listing instead of burning a spawn; `data-source` has no pack.json at all.
+   * from the listing instead of burning a spawn; `data-source` has no pack.json at all;
+   * `semantic-template` is a site-agnostic SemanticFlow template (flow.json) — run it with
+   * `…_run` plus a `site` from its `sites` map, and grow its per-site profile with `…_plan`.
    */
-  kind: 'journey' | 'probe' | 'data-source'
+  kind: 'journey' | 'probe' | 'data-source' | 'semantic-template'
   hosts: string[]
+  /** For semantic templates: the declared site keys (each backed by `apps/<id>/sites/<site>.profile.json`). */
+  sites?: string[]
 }
 
 /** A process result, with the output bounded so one call cannot flood the session. */
@@ -259,6 +263,29 @@ export function listApps(repoPath: string): AppSummary[] {
     if (!entry.isDirectory()) continue
     const file = path.join(dir, entry.name, 'pack.json')
     if (!fs.existsSync(file)) {
+      // A SemanticFlow template (spec_version 2, site-agnostic): a different family in the SAME
+      // directory listing, so the model sees exactly one app surface. It runs through the
+      // checkout's `src/semantic-flow.ts` with a `site`, and `src/plan-flow.ts` grows its per-site
+      // profile — the listing is what tells the model which door a given id belongs to.
+      const flowFile = path.join(dir, entry.name, 'flow.json')
+      if (fs.existsSync(flowFile)) {
+        const flow = JSON.parse(fs.readFileSync(flowFile, 'utf-8')) as Record<string, unknown>
+        const sites = asRecord(flow['sites'])
+        const notes = Array.isArray(flow['notes']) ? (flow['notes'] as unknown[]) : []
+        out.push({
+          id: asText(flow['id'], entry.name),
+          label: asText(flow['label'], entry.name),
+          goal: asText(flow['goal']),
+          steps: Array.isArray(flow['steps']) ? (flow['steps'] as unknown[]).length : 0,
+          toolSteps: 0,
+          invariants: Array.isArray(flow['invariants']) ? (flow['invariants'] as unknown[]).length : 0,
+          origin: typeof notes[0] === 'string' && notes[0].startsWith('planned') ? 'planned' : 'hand-written',
+          kind: 'semantic-template',
+          hosts: [],
+          sites: sites === null ? [] : Object.keys(sites),
+        })
+        continue
+      }
       // A declared app with no journey of its own: a pure data source other packs reference by name
       // (`apps/<id>/sources`, e.g. `git-log`). Listing it is what makes a `source` resolvable.
       if (fs.existsSync(path.join(dir, entry.name, 'sources'))) {
@@ -357,6 +384,70 @@ export function learnArgs(
   if (args.packDir) argv.push('--pack-dir', args.packDir)
   if (args.headful) argv.push('--headful')
   argv.push('--out', args.outDir)
+  return argv
+}
+
+/**
+ * The argv for one semantic-flow run (`src/semantic-flow.ts`): the same tool contract as packs,
+ * dispatched to the site-agnostic template. `noModel` maps to the engine's pure-rule plane
+ * (`--laya none --escalate none` — SiteProfile hints, rules, and list steps only); anything else
+ * runs the real decision model (`--laya onnx`) with the LLM teacher (`--escalate llm`), and the
+ * model/endpoint's absence degrades exactly like the pack door: blocked steps, honest counts.
+ * @param options - resolved bridge options.
+ * @param args - the model-facing call arguments (`site` selects the profile to run against).
+ * @returns argv including the node binary as element 0.
+ */
+export function flowRunArgs(
+  options: BridgeOptions,
+  args: {
+    app: string
+    site: string
+    outDir: string
+    dry?: boolean
+    noModel?: boolean
+    dangerous?: boolean
+    slots?: Record<string, string>
+  },
+): string[] {
+  const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []),
+    '--experimental-strip-types', path.join(options.repoPath, 'src', 'semantic-flow.ts')]
+  argv.push('--app', args.app, '--site', args.site, '--out', args.outDir, '--quiet')
+  if (args.dry) argv.push('--dry')
+  if (args.noModel) argv.push('--laya', 'none', '--escalate', 'none')
+  else argv.push('--laya', 'onnx', '--escalate', 'llm')
+  if (args.dangerous) argv.push('--allow-dangerous')
+  for (const [key, value] of Object.entries(args.slots ?? {})) argv.push('--slot', `${key}=${value}`)
+  return argv
+}
+
+/**
+ * The argv for one plan call (`src/plan-flow.ts`): goal + seed → template + site profile, gated by
+ * a replay before anything is written. `--json --yes` is what makes it a single machine call — the
+ * interactive door (per-step y/n) is not available to a tool, and the dangerous-step demo gate is
+ * engine-side: `--allow-dangerous-demo` only for fixtures/sandboxes.
+ * @param options - resolved bridge options.
+ * @param args - the model-facing call arguments.
+ * @returns argv including the node binary as element 0.
+ */
+export function planArgs(
+  options: BridgeOptions,
+  args: {
+    goal: string
+    seed: string
+    app: string
+    site?: string
+    force?: boolean
+    dangerousDemo?: boolean
+    planner?: 'scripted' | 'llm'
+  },
+): string[] {
+  const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []),
+    '--experimental-strip-types', path.join(options.repoPath, 'src', 'plan-flow.ts'), '--json', '--yes']
+  argv.push('--goal', args.goal, '--seed', args.seed, '--app', args.app)
+  if (args.site) argv.push('--site', args.site)
+  if (args.force) argv.push('--force')
+  if (args.dangerousDemo) argv.push('--allow-dangerous-demo')
+  if (args.planner) argv.push('--planner', args.planner)
   return argv
 }
 
@@ -493,6 +584,32 @@ export interface RunSummary {
   reportPath: string
   stdoutTail: string
   timedOut: boolean
+  /**
+   * Semantic-flow runs only: the engine's per-level tally line
+   * (`rule N · laya M · escalate K (written back W) · list L · blocked B`) — the migration
+   * evidence in one string. Absent for pack apps.
+   */
+  line?: string
+  /** Semantic-flow runs only: where the learned site profile was written ('' when none was). */
+  profilePath?: string
+}
+
+/** What one `…_plan` call answered: the planned template + site profile, or the honest failure. */
+export interface PlanSummary {
+  /** `planned` = the replay gate passed and files were written; `failed` = nothing was written. */
+  status: string
+  ok: boolean
+  app: string
+  site: string
+  /** The planned steps with where each completion signal came from (induced | contract). */
+  steps: { id: string; desc: string; signal_source: string }[]
+  /** The gate run's tally line — same shape as {@link RunSummary.line}. */
+  gate: string
+  /** Absolute paths once written; '' when the plan wrote nothing (a failed gate never does). */
+  templatePath: string
+  profilePath: string
+  /** Failure cause when status is `failed`; '' otherwise. */
+  error: string
 }
 
 /**
@@ -709,5 +826,120 @@ export function summarizeLearn(stdout: string): LearnSummary {
     completed: asText(replay['completed']),
     invariants: asText(replay['invariants']),
     saved: typeof saved === 'string' && saved !== '' ? saved : false,
+  }
+}
+
+/**
+ * Summarize a semantic-flow run's artifact (`<app>-<site>-flow-result.json`), into the SAME
+ * shape as {@link summarizeRun} plus the migration line. Only failures are listed; the per-step
+ * table lives in the report file the summary names.
+ *
+ * A `--dry` semantic run expands the compiled steps and writes nothing — same contract as packs,
+ * so the expansion is summarized as `dry: true`, not as a missing artifact.
+ * @param outDir - the run directory the bridge passed as `--out`.
+ * @param app - the template id.
+ * @param site - the site key the template ran against.
+ * @param outcome - the finished process.
+ * @returns the compact summary.
+ * @throws when the run ended without a result artifact and without an expansion to show for it.
+ */
+export function summarizeFlow(
+  outDir: string, app: string, site: string, outcome: ProcessOutcome,
+): RunSummary {
+  const resultPath = path.join(outDir, `${app}-${site}-flow-result.json`)
+  if (!fs.existsSync(resultPath)) {
+    const plan = readDryPlan(parseSource(outcome))
+    if (plan !== null && outcome.code === 0 && !outcome.timedOut) {
+      return {
+        ok: true, exitCode: outcome.code, dry: true, completed: '',
+        blocked: [], blockedTotal: 0, refused: [], failedTools: [],
+        invariants: { held: 0, total: 0, failed: [] },
+        plan: plan.steps.slice(0, MAX_PLAN_STEPS), planSteps: plan.steps.length,
+        outDir, reportPath: '', stdoutTail: outcome.stdout, timedOut: false,
+      }
+    }
+    const detail = firstLines(outcome.stderr) || firstLines(outcome.stdout)
+    throw new Error(
+      `no ${app}-${site}-flow-result.json in ${outDir} (exit ${outcome.code ?? 'killed'})`
+      + ' — the semantic run did not reach the artifact stage'
+      + (detail ? `; cause: ${detail}` : ''),
+    )
+  }
+  let raw: Record<string, unknown>
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(resultPath, 'utf-8'))
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('not a JSON object')
+    }
+    raw = parsed as Record<string, unknown>
+  } catch (error) {
+    throw new Error(
+      `unreadable ${app}-${site}-flow-result.json in ${outDir}: `
+      + (error instanceof Error ? error.message : 'not valid JSON'),
+    )
+  }
+  const steps = asRecords(raw['steps'])
+  const blocked = steps
+    .filter(s => s['status'] === 'blocked')
+    .map(s => ({ desc: asText(s['desc']), obstacle: asText(s['obstacle'], 'blocked') }))
+  const refused = steps
+    .filter(s => s['status'] === 'refused')
+    .map(s => `${asText(s['desc'])}: ${asText(s['obstacle'], 'refused')}`)
+  const doneCount = steps.filter(s => s['status'] === 'done' || s['status'] === 'skipped').length
+  const invariants = asRecords(raw['invariants'])
+  return {
+    ok: raw['ok'] === true && outcome.code === 0,
+    exitCode: outcome.code,
+    dry: false,
+    completed: `${String(doneCount)}/${String(steps.length)}`,
+    blocked: blocked.slice(0, MAX_FAILURES),
+    blockedTotal: blocked.length,
+    refused,
+    failedTools: [],
+    invariants: {
+      held: invariants.filter(i => i['held'] === true).length,
+      total: invariants.length,
+      failed: invariants.filter(i => i['held'] !== true).map(i => asText(i['id'])),
+    },
+    plan: [],
+    planSteps: 0,
+    outDir,
+    reportPath: fs.existsSync(path.join(outDir, `${app}-${site}-flow-report.md`))
+      ? path.join(outDir, `${app}-${site}-flow-report.md`)
+      : '',
+    stdoutTail: outcome.stdout,
+    timedOut: outcome.timedOut,
+    line: asText(raw['line']),
+    profilePath: asText(raw['profile_path']),
+  }
+}
+
+/**
+ * Summarize `plan-flow --json` output: the replay gate is the engine's contract, so the tool
+ * reports `status: planned` only when files were written. A failed plan prints
+ * `{"status":"failed","error":…}` — that is a RESULT, not a crash, and it is surfaced as such.
+ * @param stdout - the CLI's stdout (it prints one JSON document, walk lines before it).
+ * @returns the compact plan summary; template/profile paths absolute.
+ * @throws when the CLI produced no machine-readable document at all.
+ */
+export function summarizePlan(stdout: string): PlanSummary {
+  const doc = parseJsonDocument(stdout)
+  if (doc === null) {
+    throw new Error(`plan printed no JSON document; first lines: ${firstLines(stdout) || '(empty)'}`)
+  }
+  const written = asRecord(doc['written'])
+  const steps = asRecords(doc['steps'])
+  return {
+    status: asText(doc['status'], 'unknown'),
+    ok: doc['ok'] === true,
+    app: asText(doc['app']),
+    site: asText(doc['site']),
+    steps: steps.map(s => ({
+      id: asText(s['id']), desc: asText(s['desc']), signal_source: asText(s['signal_source']),
+    })),
+    gate: asText(doc['gate']),
+    templatePath: typeof written?.['flow'] === 'string' ? written['flow'] : '',
+    profilePath: typeof written?.['profile'] === 'string' ? written['profile'] : '',
+    error: asText(doc['error']),
   }
 }

@@ -12,15 +12,21 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  diagnoseFailure, learnArgs, listApps as listAppSummaries, parseSource, pruneRunDirs,
-  runArgs, runProcess, summarizeLearn, summarizeRun,
-  type AppSummary, type BridgeOptions, type LearnSummary, type RunSummary,
+  diagnoseFailure, flowRunArgs, learnArgs, listApps as listAppSummaries, parseSource, planArgs,
+  pruneRunDirs, runArgs, runProcess, summarizeFlow, summarizeLearn, summarizePlan, summarizeRun,
+  type AppSummary, type BridgeOptions, type LearnSummary, type PlanSummary, type RunSummary,
 } from './bridge.ts'
 
 /** One `run` call, mirroring the `…_run` tool parameters with camelCase names. */
 export interface AmberFlowRunArgs {
   /** App id from {@link AmberFlowService.listApps}. */
   app: string
+  /**
+   * Semantic templates only: the site key to run against (see the app's `sites` in the listing).
+   * A pack id with `site` is a usage error, and a semantic template without it is one too — the
+   * doors are dispatched by the artifact on disk (`apps/<id>/flow.json`), not by the caller's guess.
+   */
+  site?: string
   /** Only expand the plan: no browser, no tools. */
   dry?: boolean
   /** Rules-only: never ask the local decision model. */
@@ -60,6 +66,27 @@ export interface AmberFlowLearnArgs {
   packDir?: string
 }
 
+/** One `plan` call: goal + seed → v2 template + site profile, gated by a replay before writing. */
+export interface AmberFlowPlanArgs {
+  /** One sentence, exactly as the user said it (the engine extracts date/cities/intents from it). */
+  goal: string
+  /** Seed page: a repo-relative fixture path or a URL. */
+  seed: string
+  /** App id to write the template under (`apps/<id>/flow.json`). */
+  app: string
+  /** Site key for the profile; defaults to the seed's directory/host in the engine CLI. */
+  site?: string
+  /** Overwrite an existing template app (a re-plan); the engine's `--force`. */
+  force?: boolean
+  /**
+   * Demonstrate the dangerous step (a purchase click) during the walk. Refused unless the
+   * deployment set `allowDangerous` — on a real site, "demonstrate once" places a real order.
+   */
+  allowDangerous?: boolean
+  /** Planner door: `llm` needs OPENAI_* in the environment; default is the engine's offline recipe. */
+  planner?: 'scripted' | 'llm'
+}
+
 /**
  * What another plugin can call. Every method is the exact code path the corresponding tool runs.
  */
@@ -71,7 +98,8 @@ export interface AmberFlowService {
    */
   listApps(filter?: string): AppSummary[]
   /**
-   * Run one declared app end to end.
+   * Run one declared app end to end. Packs go through app-runner; a semantic template (its id owns
+   * an `apps/<id>/flow.json`) goes through the SemanticFlow door and needs a `site`.
    * @param args - the app and its run options.
    * @returns the compact summary (failures only; the full table stays in the report file).
    */
@@ -82,6 +110,14 @@ export interface AmberFlowService {
    * @returns the summary including the rules-only replay that gated the save.
    */
   learn(args: AmberFlowLearnArgs): Promise<LearnSummary>
+  /**
+   * Plan a semantic flow from one sentence: look at the pages, induce each step's completion signal
+   * from two reproducible demonstrations, and write template + site profile ONLY when the replay
+   * gate passes. A failed gate writes nothing and says so.
+   * @param args - the goal, the seed page, and the app id.
+   * @returns the plan summary (status, steps with signal provenance, written paths).
+   */
+  plan(args: AmberFlowPlanArgs): Promise<PlanSummary>
 }
 
 /** One temp run directory per call, so artifacts never collide between sessions. */
@@ -115,8 +151,41 @@ export async function runApp(
       + `set Config.allowDangerous=true to allow ${options.toolPrefix}_run with allow_dangerous`,
     )
   }
+  // The doors are dispatched by what is on disk (apps/<id>/flow.json), not by the caller's guess —
+  // the same "load-time beats first-call" discipline as resolving the checkout.
+  const isFlow = fs.existsSync(path.join(options.repoPath, 'apps', args.app, 'flow.json'))
   const outDir = newOutDir('run')
   pruneRunDirs(options.keepRuns)
+  if (isFlow) {
+    if (args.noSources !== undefined || args.confirmSafe !== undefined) {
+      throw new Error(
+        `amberflow-bridge: ${args.app} is a semantic template — no_sources/confirm_safe belong to `
+        + 'pack apps (a template has no data leg; its irreversible gate is allow_dangerous).',
+      )
+    }
+    if (!isFilled(args.site)) {
+      throw new Error(
+        `amberflow-bridge: ${args.app} is a semantic template (site-agnostic) — pass \`site\`, one `
+        + `of its declared sites (see ${options.toolPrefix}_apps). Migrating to a new site: run `
+        + `${options.toolPrefix}_plan against it first, or run without a profile and let the `
+        + 'backfill ring learn one.',
+      )
+    }
+    const outcome = await runProcess(options, flowRunArgs(options, {
+      app: args.app, site: args.site, outDir,
+      ...(args.dry === undefined ? {} : { dry: args.dry }),
+      ...(args.noModel === undefined ? {} : { noModel: args.noModel }),
+      ...(args.allowDangerous === undefined ? {} : { dangerous: args.allowDangerous }),
+      ...(args.slots === undefined ? {} : { slots: args.slots }),
+    }))
+    return { summary: summarizeFlow(outDir, args.app, args.site, outcome), outDir }
+  }
+  if (isFilled(args.site)) {
+    throw new Error(
+      `amberflow-bridge: \`site\` applies only to semantic templates (apps/${args.app}/flow.json); `
+      + `${args.app} is a pack app and runs against the sites frozen in its own pack.`,
+    )
+  }
   const outcome = await runProcess(options, runArgs(options, {
     app: args.app,
     outDir,
@@ -185,6 +254,42 @@ export async function learn(
 }
 
 /**
+ * Plan one semantic flow from a goal + seed. `--json --yes` is what makes it a single machine
+ * call: the interactive door (per-step y/n) does not exist for a tool. The engine's own gates do
+ * the rest: no dangerous-step demonstration without `allowDangerousDemo`, and no file written
+ * unless the replay gate passes — so a failed plan is a RESULT (`status: failed`), not a crash.
+ * @param options - resolved bridge options.
+ * @param args - the plan arguments.
+ * @returns the summary with absolute written paths (empty strings when nothing was written).
+ * @throws when the CLI died without any machine-readable document (usage/env failure).
+ */
+export async function plan(
+  options: BridgeOptions, args: AmberFlowPlanArgs,
+): Promise<PlanSummary> {
+  if (args.allowDangerous && !options.allowDangerous) {
+    throw new Error(
+      'amberflow-bridge: this deployment does not permit demonstrating the dangerous step during '
+      + `planning; set Config.allowDangerous=true to allow ${options.toolPrefix}_plan with `
+      + 'allow_dangerous (fixtures/sandboxes only)',
+    )
+  }
+  // The plan writes into the checkout's apps/, not into a per-call artifact dir — no outDir here.
+  pruneRunDirs(options.keepRuns)
+  const outcome = await runProcess(options, planArgs(options, {
+    goal: args.goal, seed: args.seed, app: args.app,
+    ...(isFilled(args.site) ? { site: args.site } : {}),
+    ...(args.force === undefined ? {} : { force: args.force }),
+    ...(args.allowDangerous === undefined ? {} : { dangerousDemo: args.allowDangerous }),
+    ...(args.planner === undefined ? {} : { planner: args.planner }),
+  }))
+  try {
+    return summarizePlan(parseSource(outcome))
+  } catch {
+    throw new Error(diagnoseFailure(`${options.toolPrefix}_plan`, outcome))
+  }
+}
+
+/**
  * Build the service for one deployment.
  * @param options - resolved bridge options.
  * @returns the service {@link apply} provides as `ctx.amberflow`.
@@ -203,6 +308,9 @@ export function createService(options: BridgeOptions): AmberFlowService {
     },
     learn(args) {
       return learn(options, args)
+    },
+    plan(args) {
+      return plan(options, args)
     },
   }
 }

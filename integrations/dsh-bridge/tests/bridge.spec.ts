@@ -5,7 +5,7 @@
  * checkout is exercised separately in `live.spec.ts`.
  */
 import { Context } from '@deepseek-ai/cordis'
-import { OPTIONS, PACKS, SPAWN_MARKER, proc, stubCheckout, stubDataSource, tmp } from './stub.ts'
+import { OPTIONS, PACKS, SPAWN_MARKER, proc, stubCheckout, stubDataSource, tmp, FLOW_TEMPLATE } from './stub.ts'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -14,8 +14,8 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import * as Bridge from '@deepseek-ai/dsh-amberflow-bridge'
 import {
-  buildEnv, diagnoseFailure, firstLines, learnArgs, listApps, parseJsonDocument, pruneRunDirs,
-  runArgs, runProcess, stripAnsi, summarizeLearn, summarizeRun,
+  buildEnv, diagnoseFailure, firstLines, flowRunArgs, learnArgs, listApps, parseJsonDocument, planArgs,
+  pruneRunDirs, runArgs, runProcess, stripAnsi, summarizeFlow, summarizeLearn, summarizePlan, summarizeRun,
 } from '../src/bridge.ts'
 
 describe('bridge helpers', () => {
@@ -189,6 +189,15 @@ function call(ctx: Context, name: string, args: unknown) {
   })
 }
 
+/**
+ * The model-facing text of one tool result. `content` is a `ContentBlock[]` — the registry's
+ * projection, not a string — so `String(result.content)` renders `[object Object]` and asserts
+ * nothing. Read the text blocks instead.
+ */
+function textOf(result: { content: ReadonlyArray<{ type: string; text?: string }> }): string {
+  return result.content.map(b => (b.type === 'text' ? String(b.text ?? '') : '')).join('\n')
+}
+
 describe('bridge plugin', () => {
   it('refuses a repoPath that is not a checkout, at load time', async () => {
     const ctx = new Context()
@@ -198,15 +207,15 @@ describe('bridge plugin', () => {
       .rejects.toThrow(/not an AmberFlow checkout/)
   })
 
-  it('registers the three tools under the configured prefix', async () => {
+  it('registers the four tools under the configured prefix', async () => {
     const ctx = await mount(stubCheckout(PACKS))
     const names = ctx.tools.schemas().map(s => s.name).sort()
-    expect(names).toEqual(['amberflow_apps', 'amberflow_learn', 'amberflow_run'])
+    expect(names).toEqual(['amberflow_apps', 'amberflow_learn', 'amberflow_plan', 'amberflow_run'])
     const run = ctx.tools.schemas().find(s => s.name === 'amberflow_run')!
     expect(run.description).toContain('compact summary')
     // schemas() exposes the whole JSON Schema, so read the property map
     const props = (run.parameters as { properties: Record<string, unknown> }).properties
-    expect(Object.keys(props)).toEqual(expect.arrayContaining(['app', 'dry', 'no_model', 'allow_dangerous', 'slots']))
+    expect(Object.keys(props)).toEqual(expect.arrayContaining(['app', 'site', 'dry', 'no_model', 'allow_dangerous', 'slots']))
   })
 
   it('executes …_apps through the registry (filesystem only)', async () => {
@@ -630,4 +639,153 @@ describe('checkout under node_modules (git-install shape)', () => {
     // so the search finds nothing and must fail with the actionable sentence rather than a later spawn.
     await expect(ctx.plugin(Bridge, { repoPath: t.repo })).rejects.toThrow(/ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING/)
   })
+})
+
+/* ---------------------------------------------------------------- SemanticFlow door (M4) */
+
+describe('SemanticFlow door — list / argv / summarize / registry', () => {
+  it('listApps exposes flow.json as a semantic-template row with its sites (and planned provenance)', () => {
+    const apps = listApps(stubCheckout(PACKS, { flow: true }))
+    const flow = apps.find(a => a.id === 'flow-app')
+    expect(flow).toMatchObject({
+      kind: 'semantic-template', origin: 'planned', steps: 1, toolSteps: 0, invariants: 1,
+      sites: ['site-a'],
+    })
+    // Packs keep their shape; `sites` is only on templates.
+    expect(apps.find(a => a.id === 'gen-app')!.sites).toBeUndefined()
+    expect(FLOW_TEMPLATE.spec_version).toBe(2)
+  })
+
+  it('flowRunArgs maps the tool options onto the engine plane (no_model ⇒ rules-only door)', () => {
+    const base = flowRunArgs(OPTIONS, { app: 'flow-app', site: 'site-a', outDir: '/out' })
+    expect(base.join(' ')).toContain('semantic-flow.ts --app flow-app --site site-a --out /out --quiet')
+    expect(base.join(' ')).toContain('--laya onnx --escalate llm')
+    const rules = flowRunArgs({ ...OPTIONS, repoPath: '/r' }, {
+      app: 'a', site: 's', outDir: '/o', noModel: true, dangerous: true, slots: { from: '昆明' },
+    })
+    expect(rules.join(' ')).toContain('--laya none --escalate none')
+    expect(rules.join(' ')).toContain('--allow-dangerous')
+    expect(rules.join(' ')).toContain('--slot from=昆明')
+    // The dangerous flag is ONLY there when the caller asked (the deployment gate is upstream).
+    expect(base.join(' ')).not.toContain('--allow-dangerous')
+  })
+
+  it('planArgs is the machine door: --json --yes always, the demo gate only when granted', () => {
+    const argv = planArgs(OPTIONS, {
+      goal: '订5月18日昆明到北京最低价机票', seed: 'semantic/site-a/index.html',
+      app: 'p', site: 'site-a', dangerousDemo: true, planner: 'llm',
+    }).join(' ')
+    expect(argv).toContain('plan-flow.ts --json --yes')
+    expect(argv).toContain('--allow-dangerous-demo')
+    expect(argv).toContain('--planner llm')
+    expect(planArgs(OPTIONS, { goal: 'g', seed: 's', app: 'p' }).join(' '))
+      .not.toContain('--allow-dangerous-demo')
+  })
+
+  it('summarizeFlow maps the artifact into the run shape and keeps the tally line + profile', () => {
+    const out = tmp('flow-art')
+    fs.writeFileSync(path.join(out, 'fa-sa-flow-result.json'), JSON.stringify({
+      ok: false,
+      steps: [
+        { id: 'a', desc: 'done step', status: 'done' },
+        { id: 'b', desc: 'stuck step', status: 'blocked', obstacle: 'low confidence 0.12 < floor 0.25' },
+        { id: 'c', desc: 'purchase', status: 'refused', obstacle: '危险步未放行' },
+      ],
+      invariants: [{ id: 'inv0', held: true }, { id: 'inv1', held: false }],
+      line: 'rule 1 · laya 0 · escalate 0 (written back 0) · list 0 · blocked 1',
+      profile_path: '/repo/sites/sa.profile.json',
+    }))
+    const s = summarizeFlow(out, 'fa', 'sa', proc({ code: 1 }))
+    expect(s).toMatchObject({
+      ok: false, dry: false, completed: '1/3', blockedTotal: 1,
+      blocked: [{ desc: 'stuck step', obstacle: 'low confidence 0.12 < floor 0.25' }],
+      refused: ['purchase: 危险步未放行'],
+      invariants: { held: 1, total: 2, failed: ['inv1'] },
+      line: expect.stringContaining('rule 1') as never,
+      profilePath: '/repo/sites/sa.profile.json',
+    })
+  })
+
+  it('summarizeFlow reads a --dry expansion; missing artifact without one is a loud diagnosis', () => {
+    const out = tmp('flow-dry')
+    const dry = summarizeFlow(out, 'fa', 'sa', proc({
+      code: 0,
+      stdout: JSON.stringify({ app: 'fa', site: 'sa', steps: [{ index: 0, kind: 'browser', desc: 'x' }] }),
+    }))
+    expect(dry.dry).toBe(true)
+    expect(dry.planSteps).toBe(1)
+    expect(() => summarizeFlow(out, 'fa', 'sa', proc({ code: 2, stderr: 'site is not declared' })))
+      .toThrow(/did not reach the artifact stage; cause: site is not declared/)
+  })
+
+  it('summarizePlan keeps a failed plan as a RESULT and an absent document as a crash diagnosis', () => {
+    const failed = summarizePlan('walk noise line\n' + JSON.stringify({
+      status: 'failed', ok: false, app: 'p', site: 's', steps: [], gate: '',
+      written: null, error: 'replay gate FAILED — nothing was written: rule 0 … blocked 2',
+    }))
+    expect(failed).toMatchObject({ status: 'failed', ok: false, templatePath: '', profilePath: '' })
+    expect(failed.error).toContain('replay gate')
+    expect(() => summarizePlan('plain text, no document')).toThrow(/plan printed no JSON document/)
+  })
+
+  it('the registry runs a template through the SITE door and returns the line', async () => {
+    const repo = stubCheckout(PACKS, { flow: true })
+    const ctx = await mount(repo)
+    const result = await call(ctx, 'amberflow_run', { app: 'flow-app', site: 'site-a' })
+    expect(result.isError).toBe(false)
+    const value = result.value as { ok: boolean; completed: string; blockedTotal: number; line?: string }
+    expect(value).toMatchObject({ ok: true, completed: '1/2', blockedTotal: 1 })
+    expect(value.line).toContain('written back 0')
+    // The argv the stub recorded proves the site AND the model plane reached the engine CLI.
+    // No `no_model` was asked for, so the semantic door keeps the real plane (onnx + llm).
+    const argv: string[] = JSON.parse(fs.readFileSync(path.join(repo, 'argv.json'), 'utf-8'))
+    expect(argv).toContain('site-a')
+    expect(argv.slice(argv.indexOf('--laya'), argv.indexOf('--laya') + 4))
+      .toEqual(['--laya', 'onnx', '--escalate', 'llm'])
+  }, 30_000)
+
+  it('usage errors name the door: template without a site, pack with one', async () => {
+    const ctx = await mount(stubCheckout(PACKS, { flow: true }))
+    const noSite = await call(ctx, 'amberflow_run', { app: 'flow-app' })
+    expect(noSite.isError).toBe(true)
+    expect(textOf(noSite)).toContain('is a semantic template (site-agnostic)')
+    const packSite = await call(ctx, 'amberflow_run', { app: 'gen-app', site: 'x' })
+    expect(packSite.isError).toBe(true)
+    expect(textOf(packSite)).toContain('applies only to semantic templates')
+  }, 30_000)
+
+  it('plan through the registry: the demo gate holds the dangerous step; deployment gates the demo', async () => {
+    const repo = stubCheckout(PACKS)
+    const ctx = await mount(repo)
+    const refused = await call(ctx, 'amberflow_plan', {
+      goal: '订5月18日昆明到北京最低价机票', seed: 'semantic/site-a/index.html', app: 'planned-x',
+    })
+    // A failed plan is a RESULT (isError false), and nothing was written.
+    expect(refused.isError).toBe(false)
+    expect(refused.value).toMatchObject({ status: 'failed', ok: false, templatePath: '' })
+    expect(fs.existsSync(path.join(repo, 'apps', 'planned-x'))).toBe(false)
+    // The CALLER asking allow_dangerous on a deployment that forbids it is the hard error.
+    const gated = await call(ctx, 'amberflow_plan', {
+      goal: 'g', seed: 's', app: 'planned-z', allow_dangerous: true,
+    })
+    expect(gated.isError).toBe(true)
+    expect(textOf(gated)).toContain('does not permit demonstrating the dangerous step')
+  }, 30_000)
+
+  it('a deployment that allows dangerous lets the plan demonstrate the purchase and write', async () => {
+    const repo = stubCheckout(PACKS)
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(Bridge, { repoPath: repo, allowDangerous: true })
+    const planned = await call(ctx, 'amberflow_plan', {
+      goal: '订5月18日昆明到北京最低价机票', seed: 'semantic/site-a/index.html',
+      app: 'planned-y', site: 'site-a', allow_dangerous: true,
+    })
+    expect(planned.isError).toBe(false)
+    expect(planned.value).toMatchObject({ status: 'planned', ok: true, site: 'site-a' })
+    const value = planned.value as { templatePath: string }
+    expect(value.templatePath).toContain('planned-y')
+    expect(fs.existsSync(path.join(repo, 'apps', 'planned-y', 'flow.json'))).toBe(true)
+  }, 30_000)
 })

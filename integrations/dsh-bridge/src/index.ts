@@ -24,19 +24,20 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { listApps, type BridgeOptions } from './bridge.ts'
-import { createService, runApp, learn, type AmberFlowService } from './service.ts'
+import { createService, runApp, learn, plan, type AmberFlowService } from './service.ts'
 
 // The package root is the consumer surface: another plugin imports these without reaching into `src/`
 // (a published package ships only `lib/`).
 export {
-  learn, newOutDir, runApp,
-  type AmberFlowLearnArgs, type AmberFlowRunArgs, type AmberFlowService,
+  learn, newOutDir, runApp, plan,
+  type AmberFlowLearnArgs, type AmberFlowPlanArgs, type AmberFlowRunArgs, type AmberFlowService,
 } from './service.ts'
 export {
-  buildEnv, diagnoseFailure, firstLines, learnArgs, listApps, parseJsonDocument, parseSource,
-  pruneRunDirs, runArgs, runProcess, stripAnsi, summarizeLearn, summarizeRun,
-  type AppSummary, type BridgeOptions, type LearnSummary, type PlanStep, type ProcessOutcome,
-  type RunSummary,
+  buildEnv, diagnoseFailure, firstLines, flowRunArgs, learnArgs, listApps, parseJsonDocument,
+  parseSource, planArgs, pruneRunDirs, runArgs, runProcess, stripAnsi,
+  summarizeFlow, summarizeLearn, summarizePlan, summarizeRun,
+  type AppSummary, type BridgeOptions, type LearnSummary, type PlanStep, type PlanSummary,
+  type ProcessOutcome, type RunSummary,
 } from './bridge.ts'
 
 export const name = 'amberflow-bridge'
@@ -203,7 +204,9 @@ export function apply(ctx: Context, config: Config): void {
       + 'a demonstrated flow, hand-written, or a pure data source with no journey of its own). '
       + 'Each row carries a kind: `journey` apps run under the run tool; `probe` apps are measurement '
       + 'sets the engine refuses to run through the app runner (read their declaration only); '
-      + '`data-source` rows feed other packs. Reads '
+      + '`data-source` rows feed other packs; `semantic-template` rows (flow.json) are site-agnostic '
+      + 'SemanticFlow templates — run them with the run tool plus one of their listed `sites`, and '
+      + 'grow a new site\'s profile with the plan tool. Reads '
       + 'the packs only: no browser, no model, no subprocess.',
     parameters: {
       filter: { type: 'string', description: 'Optional case-insensitive substring match on id/label/goal.' },
@@ -229,6 +232,7 @@ export function apply(ctx: Context, config: Config): void {
                 origin: { type: 'string', required: true },
                 kind: { type: 'string', required: true },
                 hosts: { type: 'array', required: true, items: { type: 'string' } },
+                sites: { type: 'array', items: { type: 'string' } },
               },
             },
           },
@@ -241,7 +245,8 @@ export function apply(ctx: Context, config: Config): void {
           : value.apps.map(a => `${a.id}${a.label === '' || a.label === a.id ? '' : ` — ${a.label}`} `
             + `(${a.steps} browser + ${a.toolSteps} tool steps, `
             + `${a.invariants} invariants, ${a.origin}, kind=${a.kind}`
-            + `${a.hosts.length ? `, hosts: ${a.hosts.join(',')}` : ''})`).join('\n'),
+            + `${a.hosts.length ? `, hosts: ${a.hosts.join(',')}` : ''}`
+            + `${a.sites && a.sites.length ? `, sites: ${a.sites.join(',')}` : ''})`).join('\n'),
       }],
     },
     execute(args) {
@@ -255,6 +260,7 @@ export function apply(ctx: Context, config: Config): void {
           id: a.id, label: a.label, goal: a.goal,
           steps: a.steps, toolSteps: a.toolSteps, invariants: a.invariants, origin: a.origin,
           kind: a.kind, hosts: a.hosts,
+          ...(a.sites === undefined ? {} : { sites: a.sites }),
         }))
       return Promise.resolve({ apps })
     },
@@ -268,10 +274,17 @@ export function apply(ctx: Context, config: Config): void {
       + 'invariant results. The full per-step table stays in the report file named by the result, read '
       + 'it with the read tool when you need the detail. `no_model` keeps the run rules-only (no model '
       + 'forward passes); `dry` expands the plan and returns it instead of executing anything, so it '
-      + 'verifies nothing and writes no report. A non-zero exit with no artifact means the run never '
+      + 'verifies nothing and writes no report. Semantic templates (`kind=semantic-template` in the '
+      + 'apps listing) additionally REQUIRE `site` and report a resolution-level tally line '
+      + '(rule/laya/escalate/backfill counts). A non-zero exit with no artifact means the run never '
       + 'reached the verify stage; the cause is included.',
     parameters: {
       app: { type: 'string', required: true, description: 'The app id from `' + toolPrefix + '_apps`.' },
+      site: {
+        type: 'string',
+        description: 'Semantic templates only: one of the site keys listed by `' + toolPrefix
+          + '_apps`. Pack apps must not pass it.',
+      },
       dry: { type: 'boolean', description: 'Only expand the plan; do not open a browser or run tools.' },
       no_model: { type: 'boolean', description: 'Rules-only: never ask the local decision model.' },
       no_sources: { type: 'boolean', description: 'Skip the data leg (use already-available data).' },
@@ -341,6 +354,10 @@ export function apply(ctx: Context, config: Config): void {
           reportPath: { type: 'string', required: true },
           timedOut: { type: 'boolean', required: true },
           stdoutTail: { type: 'string', required: true },
+          // Semantic-flow runs only: the rule/laya/escalate/backfill tally line, and the learned
+          // site profile the backfill ring wrote (when it wrote one).
+          line: { type: 'string' },
+          profilePath: { type: 'string' },
         },
       },
       render: (_args, value) => {
@@ -370,7 +387,9 @@ export function apply(ctx: Context, config: Config): void {
             + (value.failedTools.length ? `; tool steps failed: ${value.failedTools.join(' | ')}` : '')
             + (value.refused.length ? `; not executed: ${value.refused.join(', ')}` : '')
             + stopped
-            + (value.reportPath ? `\nreport: ${value.reportPath}` : '\nno report was written'),
+            + (value.line ? `; ${value.line}` : '')
+            + (value.reportPath ? `\nreport: ${value.reportPath}` : '\nno report was written')
+            + (value.profilePath ? `\nprofile: ${value.profilePath}` : ''),
         }]
       },
     },
@@ -394,6 +413,7 @@ export function apply(ctx: Context, config: Config): void {
       // The deployment gate lives in the shared call, so the service refuses it identically.
       const { summary } = await runApp(options, {
         app: args.app,
+        ...(args.site === undefined ? {} : { site: args.site }),
         ...(args.dry === undefined ? {} : { dry: args.dry }),
         ...(args.no_model === undefined ? {} : { noModel: args.no_model }),
         ...(args.no_sources === undefined ? {} : { noSources: args.no_sources }),
@@ -417,6 +437,8 @@ export function apply(ctx: Context, config: Config): void {
         reportPath: summary.reportPath,
         timedOut: summary.timedOut,
         stdoutTail: summary.stdoutTail,
+        ...(summary.line === undefined ? {} : { line: summary.line }),
+        ...(summary.profilePath === undefined ? {} : { profilePath: summary.profilePath }),
       }
     },
   }))
@@ -492,6 +514,113 @@ export function apply(ctx: Context, config: Config): void {
         completed: summary.completed,
         invariants: summary.invariants,
         ...(summary.saved ? { saved: summary.saved } : {}),
+      }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: `${toolPrefix}_plan`,
+    description:
+      'Turn ONE sentence plus a seed page into a site-agnostic SemanticFlow template (spec_version 2 '
+      + 'flow.json) plus that site\'s profile: the engine looks at each page as it walks the flow, '
+      + 'proposes each step semantically (no selectors in the template), executes it through the same '
+      + 'decision ladder the run tool uses, and INDUCES each step\'s completion signal from TWO '
+      + 'independent demonstrations (discriminating + reproducible, or the plan stops instead of '
+      + 'guessing). Page-role filenames, query parameter names, fill bindings and row extraction are '
+      + 'observed into the SITE PROFILE; learned hints are NOT written here (the run-time backfill '
+      + 'ring earns those on the first real runs). The template + profile are written ONLY when a '
+      + 'replay gate — compiling and running the whole journey — passes; a failed gate writes nothing '
+      + 'and reports the blocked steps. Re-running with an existing app id plans the SAME template '
+      + 'onto a new site (migration: only the new site\'s profile is produced). Needs a browser; '
+      + 'pass `planner: "llm"` for the LLM planner (requires OPENAI_* env), default is the offline '
+      + 'goal-recipe planner. A dangerous step (purchase) is never demonstrated unless this '
+      + 'deployment allows dangerous actions AND the caller passes allow_dangerous — on a real site '
+      + 'a demo click is a real order.',
+    parameters: {
+      goal: {
+        type: 'string', required: true,
+        description: 'The user sentence, as said ("订一张5月18日昆明到北京价格最低的机票") — '
+          + 'the engine extracts date/cities/intents into the slot bag; values never come from prose later.',
+      },
+      seed: {
+        type: 'string', required: true,
+        description: 'Seed page: a repo-relative path (semantic/site-a/index.html) or a URL.',
+      },
+      app: { type: 'string', required: true, description: 'App id to write apps/<id>/flow.json under.' },
+      site: {
+        type: 'string',
+        description: 'Site key for the profile; defaults to the seed\'s directory name (file) or host (http).',
+      },
+      force: { type: 'boolean', description: 'Overwrite an existing brand-new template app id (a re-plan).' },
+      planner: {
+        type: 'string', enum: ['scripted', 'llm'],
+        description: 'Planner door: `llm` needs OPENAI_* on the machine running the checkout; '
+          + 'the default offline recipe covers goal-shaped flows on fixtures/sandboxes.',
+      },
+      allow_dangerous: {
+        type: 'boolean',
+        description: 'Demonstrate the dangerous step (purchase click) during the walk. Deployment-'
+          + 'gated; fixtures/sandboxes only.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          status: { type: 'string', required: true },
+          ok: { type: 'boolean', required: true },
+          app: { type: 'string', required: true },
+          site: { type: 'string', required: true },
+          steps: {
+            type: 'array',
+            required: true,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                id: { type: 'string', required: true },
+                desc: { type: 'string', required: true },
+                signal_source: { type: 'string', required: true },
+              },
+            },
+          },
+          gate: { type: 'string', required: true },
+          templatePath: { type: 'string', required: true },
+          profilePath: { type: 'string', required: true },
+          error: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.status === 'planned'
+          ? `PLANNED ${value.app} @ ${value.site}: ${value.steps.length} step(s), gate: ${value.gate}`
+            + `\ntemplate: ${value.templatePath}\nprofile: ${value.profilePath}`
+            + (value.steps.some(s => s.signal_source === 'contract')
+              ? '\n(steps with signal_source=contract carry only the page-role URL fact)' : '')
+          : `NOT planned (${value.app} @ ${value.site}) — nothing was written: ${value.error}`,
+      }],
+    },
+    async execute(args) {
+      const summary = await plan(options, {
+        goal: args.goal,
+        seed: args.seed,
+        app: args.app,
+        ...(args.site === undefined ? {} : { site: args.site }),
+        ...(args.force === undefined ? {} : { force: args.force }),
+        ...(args.planner === undefined ? {} : { planner: args.planner }),
+        ...(args.allow_dangerous === undefined ? {} : { allowDangerous: args.allow_dangerous }),
+      })
+      return {
+        status: summary.status,
+        ok: summary.ok,
+        app: summary.app,
+        site: summary.site,
+        steps: summary.steps,
+        gate: summary.gate,
+        templatePath: summary.templatePath,
+        profilePath: summary.profilePath,
+        error: summary.error,
       }
     },
   }))
