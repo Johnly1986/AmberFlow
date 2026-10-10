@@ -2,7 +2,7 @@
 
 > **冻结计划的浏览器自动化中间件**（TypeScript / Node ≥ 22.6）：LLM 只规划一次，执行由本地规则与决策模型逐步完成，演示一次后既可端侧执行，也可以手动规划。
 
-## 运行
+## 安装运行
 
 ```bash
 npm ci && npx playwright install chromium
@@ -21,7 +21,7 @@ step 1: click a "Add to cart" (clicked, rule:match, conf=1.00)
 
 没有模型权重也能跑：计划点名了目标的步骤由**规则**解决；确实需要模型兜底的步骤会明确说明缺什么，而不是瞎猜或抛异常。
 
-## 在 DSH 会话里用（插件）
+## DSH 插件安装
 
 装进 profile 即得三个工具——`amberflow_apps`（列应用）/ `amberflow_run`（跑一个，含 `dry` / `no_model` / `slots`）/ `amberflow_learn`（录制归纳）：
 
@@ -29,8 +29,7 @@ step 1: click a "Add to cart" (clicked, rule:match, conf=1.00)
 dsh plugin --profile <名称> add github:Johnly1986/AmberFlow          # 仓库直装（见 README 附注：私有库需凭证）
 dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridge   # 开发态 link
 ```
-
-桥不做任何浏览器逻辑——它调用本仓库的 CLI 并如实汇总产物。详见 [integrations/dsh-bridge/README.md](integrations/dsh-bridge/README.md)。
+或在插件页面直接添加项目地址。
 
 
 ## 三条硬约束
