@@ -28,7 +28,7 @@ kind: "package-bundle"
 用一个 LayaWebUse checkout 的路径挂载本插件。不是 checkout 的路径会在**加载期**失败而不是第一次调用时失败，所以打错字会在组装阶段就暴露：
 
 ```yaml
-repoPath: /path/to/LayaWebUse   # required; must contain src/app-runner.ts
+repoPath: null                  # optional; resolves config > LAYAWEBUSE_REPO > the checkout the plugin sits in
 nodeBin: null                   # optional; defaults to the running interpreter
 timeoutMs: 900000               # optional; live runs are slow by nature
 allowDangerous: false           # optional; gates dry-run-gated tool steps
@@ -46,9 +46,20 @@ keepRuns: 30                    # optional; 保留最新的 $TMPDIR/dsh-layawebu
 
 <a id="understand-the-implementation"></a>
 把它作为 bundle 装进一个 profile —— `dsh plugin --profile <名称> add <路径或包名>`（插件窗口跑的是同一个
-操作）。声明了 `dsh.bundle` 的包在安装时会自动加入 `dsh.profile.bundles`，因此三个工具无需手写 profile
-补丁即可用；live profile 会在下一次配置重载时生效。`LAYAWEBUSE_REPO` 可覆盖 bundle 补丁传入的 checkout
-路径，而不是 checkout 的路径会在加载期失败。
+操作）。支持三种通道：
+
+- **路径 / link**（本仓库的开发形态）：`dsh plugin --profile web add /绝对路径/LayaWebUse/integrations/dsh-bridge`
+  安装嵌套包；它的 `cordis.patch.yml` 按包名寻址插件。
+- **git 直装引擎仓库本身**：`dsh plugin --profile <名称> add github:Johnly1986/LayaWebUse` 安装仓库根
+  ——根 `dsh.bundle` 指向 `dsh-bundle.yml`，行寻址 `layawebuse/dsh-plugin`（包 subpath）。克隆就是整个
+  引擎，插件据此自定位 checkout；本包不跑任何构建脚本，因此**无需 `allowBuilds` 授权**（若 pnpm 列出
+  带安装脚本的依赖 `onnxruntime-node`、`protobufjs`，只需批准这两个名）。长期信任的安装请锁 commit
+  （`#<sha>`），并在 profile 启动的机器上执行一次 `npx playwright install chromium`。
+- **npm 或 tarball**：`pnpm pack` 打包；根 package.json 就是 bundle，git 通道的行为原样沿用。
+
+声明了 `dsh.bundle` 的包在安装时会自动加入 `dsh.profile.bundles`，因此三个工具无需手写 profile
+补丁即可用；live profile 会在下一次配置重载时生效。`LAYAWEBUSE_REPO` 覆盖解析出的 checkout 路径；
+而不是 checkout 的路径会在加载期失败。
 
 ### 从另一个插件里调用
 

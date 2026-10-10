@@ -28,13 +28,13 @@ English | [中文](README.zh.md)
 Mount the plugin with the path of a LayaWebUse checkout. A path that is not a checkout fails at load time rather than on the first call, so a typo surfaces during composition:
 
 ```yaml
-repoPath: /path/to/LayaWebUse   # required; must contain src/app-runner.ts
+repoPath: null                  # optional; resolves config > LAYAWEBUSE_REPO > the checkout the plugin sits in
 nodeBin: null                   # optional; defaults to the running interpreter
 timeoutMs: 900000               # optional; live runs are slow by nature
 allowDangerous: false           # optional; gates dry-run-gated tool steps
 toolPrefix: layawebuse          # optional; the model-visible tool-name prefix
 envMode: inherit                # optional; `allowlist` strips session secrets from the child env
-forwardEnv: []                  # optional; extra env var NAMES forwarded under `allowlist`
+forwardEnv: []                  # optional; `allowlist` 模式下额外转发的环境变量名
 keepRuns: 30                    # optional; newest $TMPDIR/dsh-layawebuse-* dirs kept; 0 disables GC
 ```
 
@@ -46,10 +46,24 @@ unless a replay with zero model calls still passes. Choose a pixel-level browser
 the task depends on what a page looks like, or when no checkout is available to call.
 
 Install it into a profile as a bundle — `dsh plugin --profile <name> add <path-or-package>` (the
-plugin window runs the same operation). A package that declares `dsh.bundle` joins
-`dsh.profile.bundles` on install, so the three tools become available without a hand-written profile
-patch; a live profile applies that at the next config reload. `LAYAWEBUSE_REPO` overrides the checkout
-path the bundle patch passes, and a path that is not a checkout fails at load time.
+plugin window runs the same operation). Three channels are supported:
+
+- **Path / link** (this repository's development shape): `dsh plugin --profile web add /absolute/path/to/LayaWebUse/integrations/dsh-bridge`
+  installs the nested package; its `cordis.patch.yml` addresses the plugin by package name.
+- **The engine repository itself over git**: `dsh plugin --profile <name> add github:Johnly1986/LayaWebUse`
+  installs the repo root, whose `dsh.bundle` points at `dsh-bundle.yml` — the row addresses
+  `layawebuse/dsh-plugin` (a package subpath). The clone contains the whole engine, so the plugin
+  locates its own checkout; no build script runs, so no `allowBuilds` grant is needed for this
+  package itself (its dependencies that do run install scripts — `onnxruntime-node`, `protobufjs` —
+  are the only names to approve if pnpm lists them). Pin commits for installs you trust long-term
+  (`#<sha>`), and run `npx playwright install chromium` once where the profile boots.
+- **npm or tarball**: pack with `pnpm pack`; the root `package.json` is the bundle, so the git
+  behavior above carries over unchanged.
+
+A package that declares `dsh.bundle` joins `dsh.profile.bundles` on install, so the three tools
+become available without a hand-written profile patch; a live profile applies that at the next
+config reload. `LAYAWEBUSE_REPO` overrides the checkout the resolved config names; a path that is
+not a checkout fails at load time.
 
 ### Call it from another plugin
 
