@@ -4,7 +4,7 @@
 就是 TS 实现，`git log --all --name-only` 里**从未出现过任何 `.py` 文件**。不需要 Python 环境，也不包含 Python 代码。
 
 原先的 Python 参考实现（`layaapp/`、全部 `*.py` 驱动与测试、`requirements.txt`、fine-tune notebook）
-曾整体移出仓库、位于 `/root/ML/LayaWebUse-python-reference-backup/`；在审查确认仓库对它没有任何依赖后，
+曾整体移出仓库、位于 `/root/ML/AmberFlow-python-reference-backup/`；在审查确认仓库对它没有任何依赖后，
 **该目录已删除**；随后它的历史归档（git bundle）也**已删除**。现在磁盘上不再有任何 Python 相关文件。
 
 ## 仓库里仍与 Python 有关的东西（都不可移除，且运行时都不需要 Python）

@@ -27,7 +27,7 @@ export function cleanupTmp(): void {
 
 export const OPTIONS: BridgeOptions = {
   repoPath: '/repo', nodeBin: '/usr/bin/node', timeoutMs: 1000, allowDangerous: false,
-  toolPrefix: 'layawebuse', envMode: 'inherit', forwardEnv: [], keepRuns: 0,
+  toolPrefix: 'amberflow', envMode: 'inherit', forwardEnv: [], keepRuns: 0,
 }
 
 /**
@@ -104,7 +104,7 @@ function learnSource(options: StubOptions): string {
 
 /** A checkout stub that satisfies load-time validation and answers with canned documents. */
 export function stubCheckout(packs: Record<string, unknown>, options: StubOptions = {}): string {
-  const repo = tmp('layawebuse-stub')
+  const repo = tmp('amberflow-stub')
   fs.mkdirSync(path.join(repo, 'src'), { recursive: true })
   fs.mkdirSync(path.join(repo, 'tools'), { recursive: true })
   fs.writeFileSync(path.join(repo, 'src', 'app-runner.ts'), [

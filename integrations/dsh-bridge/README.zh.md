@@ -1,15 +1,15 @@
 ---
-description: "从会话侧调用 LayaWebUse 冻结计划浏览器引擎的 harness 接口：三个工具，用于列出应用、端到端运行一个应用，以及用「目标 + 页面 + 录好的动作清单」录制一条流程。"
+description: "从会话侧调用 AmberFlow 冻结计划浏览器引擎的 harness 接口：三个工具，用于列出应用、端到端运行一个应用，以及用「目标 + 页面 + 录好的动作清单」录制一条流程。"
 kind: "package-bundle"
 ---
 
-# @deepseek-ai/dsh-layawebuse-bridge
+# @deepseek-ai/dsh-amberflow-bridge
 
 [English](README.md) | 中文
 
 ## 概述
 
-`dsh-layawebuse-bridge` 把一个外部浏览器引擎暴露成三个面向模型的工具。LayaWebUse 只规划一次，之后每一步都在**本地**决策，把 DOM 信号当作唯一的完成真相，并且能从一次演示里录制流程；本桥不添加任何自己的浏览器逻辑，只调用那个 checkout 的命令行并归纳其产物。`layawebuse_apps` 列出已声明的应用，并说明每个包是由 spec 生成的、由演示录制的、手写的，还是纯数据源。`layawebuse_run` 端到端运行一个应用，返回完成情况、**只列失败**的步骤、拒绝项与不变量结果；加上 `dry` 时则只返回展开后的计划，不执行任何一步。`layawebuse_learn` 用一个目标、一个页面和一份录好的动作清单来录制流程，并报告那次"零模型调用回放"，正是它决定录制的流程是否可复现到值得保存。
+`dsh-amberflow-bridge` 把一个外部浏览器引擎暴露成三个面向模型的工具。AmberFlow 只规划一次，之后每一步都在**本地**决策，把 DOM 信号当作唯一的完成真相，并且能从一次演示里录制流程；本桥不添加任何自己的浏览器逻辑，只调用那个 checkout 的命令行并归纳其产物。`amberflow_apps` 列出已声明的应用，并说明每个包是由 spec 生成的、由演示录制的、手写的，还是纯数据源。`amberflow_run` 端到端运行一个应用，返回完成情况、**只列失败**的步骤、拒绝项与不变量结果；加上 `dry` 时则只返回展开后的计划，不执行任何一步。`amberflow_learn` 用一个目标、一个页面和一份录好的动作清单来录制流程，并报告那次"零模型调用回放"，正是它决定录制的流程是否可复现到值得保存。
 
 ## 目录
 
@@ -25,17 +25,17 @@ kind: "package-bundle"
 <a id="use-this-package"></a>
 ## 使用这个包
 
-用一个 LayaWebUse checkout 的路径挂载本插件。不是 checkout 的路径会在**加载期**失败而不是第一次调用时失败，所以打错字会在组装阶段就暴露：
+用一个 AmberFlow checkout 的路径挂载本插件。不是 checkout 的路径会在**加载期**失败而不是第一次调用时失败，所以打错字会在组装阶段就暴露：
 
 ```yaml
-repoPath: null                  # optional; resolves config > LAYAWEBUSE_REPO > the checkout the plugin sits in
+repoPath: null                  # optional; resolves config > AMBERFLOW_REPO > the checkout the plugin sits in
 nodeBin: null                   # optional; defaults to the running interpreter
 timeoutMs: 900000               # optional; live runs are slow by nature
 allowDangerous: false           # optional; gates dry-run-gated tool steps
-toolPrefix: layawebuse          # optional; the model-visible tool-name prefix
+toolPrefix: amberflow          # optional; the model-visible tool-name prefix
 envMode: inherit                # optional; `allowlist` 会把会话机密挡在子进程环境之外
 forwardEnv: []                  # optional; `allowlist` 模式下额外转发的环境变量名
-keepRuns: 30                    # optional; 保留最新的 $TMPDIR/dsh-layawebuse-* 目录数；0 关闭回收
+keepRuns: 30                    # optional; 保留最新的 $TMPDIR/dsh-amberflow-* 目录数；0 关闭回收
 ```
 
 ### 何时选择它
@@ -48,34 +48,34 @@ keepRuns: 30                    # optional; 保留最新的 $TMPDIR/dsh-layawebu
 把它作为 bundle 装进一个 profile —— `dsh plugin --profile <名称> add <路径或包名>`（插件窗口跑的是同一个
 操作）。支持三种通道：
 
-- **路径 / link**（本仓库的开发形态）：`dsh plugin --profile web add /绝对路径/LayaWebUse/integrations/dsh-bridge`
+- **路径 / link**（本仓库的开发形态）：`dsh plugin --profile web add /绝对路径/AmberFlow/integrations/dsh-bridge`
   安装嵌套包；它的 `cordis.patch.yml` 按包名寻址插件。
-- **git 直装引擎仓库本身**：`dsh plugin --profile <名称> add github:Johnly1986/LayaWebUse` 安装仓库根
-  ——根 `dsh.bundle` 指向 `dsh-bundle.yml`，行寻址 `layawebuse/dsh-plugin`（包 subpath）。克隆就是整个
+- **git 直装引擎仓库本身**：`dsh plugin --profile <名称> add github:Johnly1986/AmberFlow` 安装仓库根
+  ——根 `dsh.bundle` 指向 `dsh-bundle.yml`，行寻址 `amberflow/dsh-plugin`（包 subpath）。克隆就是整个
   引擎，插件据此自定位 checkout；本包不跑任何构建脚本，因此**无需 `allowBuilds` 授权**（若 pnpm 列出
   带安装脚本的依赖 `onnxruntime-node`、`protobufjs`，只需批准这两个名）。长期信任的安装请锁 commit
   （`#<sha>`），并在 profile 启动的机器上执行一次 `npx playwright install chromium`。
 - **npm 或 tarball**：`pnpm pack` 打包；根 package.json 就是 bundle，git 通道的行为原样沿用。
 
 声明了 `dsh.bundle` 的包在安装时会自动加入 `dsh.profile.bundles`，因此三个工具无需手写 profile
-补丁即可用；live profile 会在下一次配置重载时生效。`LAYAWEBUSE_REPO` 覆盖解析出的 checkout 路径；
+补丁即可用；live profile 会在下一次配置重载时生效。`AMBERFLOW_REPO` 覆盖解析出的 checkout 路径；
 而不是 checkout 的路径会在加载期失败。
 
 ### 从另一个插件里调用
 
-其它插件可以注入服务，而不是去调工具。本桥提供 `ctx.layawebuse`，含 `listApps`、`run`、`learn`——
+其它插件可以注入服务，而不是去调工具。本桥提供 `ctx.amberflow`，含 `listApps`、`run`、`learn`——
 和工具跑的是同一份代码，因此部署闸门与失败诊断不会在两个入口之间漂移。工具是面向模型的门，
 服务是面向插件的门；它不需要 `callId`、不需要 signal、也不需要知道工具名。
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
-import '@deepseek-ai/dsh-layawebuse-bridge'
+import '@deepseek-ai/dsh-amberflow-bridge'
 
 const Consumer = {
   name: 'consumer',
-  inject: ['layawebuse'],
+  inject: ['amberflow'],
   apply(ctx: Context) {
-    return ctx.layawebuse.run({ app: 'learned-cart', noModel: true })
+    return ctx.amberflow.run({ app: 'learned-cart', noModel: true })
   },
 }
 ```
@@ -84,13 +84,13 @@ const Consumer = {
 
 每个工具都是一层薄封装：拼装 argv、带硬超时地跑一个子进程，然后归纳命令行写下的产物。
 
-- `layawebuse_apps` 只读 `apps/<id>/pack.json`：不用浏览器、不用模型、不起子进程。没有 `pack.json` 但
+- `amberflow_apps` 只读 `apps/<id>/pack.json`：不用浏览器、不用模型、不起子进程。没有 `pack.json` 但
   带 `sources/` 的目录是**纯数据源应用**，会以 `data-source` 列出，因为别的包正是按名字引用它们。
-- `layawebuse_run` 启动 `src/app-runner.ts --app <id> --out <dir>` 并读取 `<id>-result.json`。
+- `amberflow_run` 启动 `src/app-runner.ts --app <id> --out <dir>` 并读取 `<id>-result.json`。
   摘要只列失败项；完整的逐步表格留在 `<id>-report.md` 里，结果会给出它的路径，需要细节时再读。
   `dry` 只展开计划并把它返回：那次运行不写任何产物、不校验任何东西，因此被报成一次展开，而不是
   PASS/FAIL。
-- `layawebuse_learn` 启动 `tools/learn.ts --json --yes`：它把流程跑一遍，从观测到的状态变化里归纳
+- `amberflow_learn` 启动 `tools/learn.ts --json --yes`：它把流程跑一遍，从观测到的状态变化里归纳
   每步的完成信号与结束态不变量，并且只在"零模型调用回放"通过时才保存包；桥会原样报告那次回放。
   `script` 是必填的：命令行唯一的另一个动作来源是人在交互式终端上的现场演示，而工具调用既没有终端
   也没有 stdin，且桥恒定传 `--yes`。缺少 `script` 的调用会在**启动任何进程之前**被拒绝。
@@ -111,11 +111,11 @@ checkout。除非部署把 `allowDangerous` 设为 true，危险的工具步一�
 <a id="model-experience"></a>
 ## 模型体验
 
-模型看到三个 schema 很窄的工具。`layawebuse_run` 回答 PASS/FAIL、完成计数、不变量计数、带障碍文本
+模型看到三个 schema 很窄的工具。`amberflow_run` 回答 PASS/FAIL、完成计数、不变量计数、带障碍文本
 的失败步骤，以及报告路径；完成的步骤只是计数而不是逐行，所以六十步的旅程只用一行而不是一页。
 **跑了但没被拒绝**的工具步也会被点名；若一次失败没有任何可点名的步骤，摘要会报出退出码或超时，
 因此 FAIL 总会说明它是怎么失败的。`dry` 则改为回答展开后的
-计划，让人不运行也能检查一条旅程。`layawebuse_learn` 回答它被把关的那次回放（含模型调用次数），
+计划，让人不运行也能检查一条旅程。`amberflow_learn` 回答它被把关的那次回放（含模型调用次数），
 因此不可复现的流程永远不会被报成"已学会"；没有 script 时它会立刻拒绝，不会先启动浏览器。
 
 <a id="known-limitations-and-deferred-work"></a>
@@ -124,14 +124,14 @@ checkout。除非部署把 `allowDangerous` 设为 true，危险的工具步一�
 - 真机测试需要 checkout 与 chromium（录制那条还需要 checkout 的 ONNX 产物）；缺一时会**跳过**并打印原因。
 - 本桥刻意不叫 `tool-*`，因此不会进入自动生成的工具目录。
 - 每次运行都会留下自己的临时目录——结果会指向其中的报告，所以那个目录必须比这次调用活得更久。
-  产物按调用隔离，从不共享。`keepRuns` 限定最新的多少个 `dsh-layawebuse-*` 目录会被保留；目录要
+  产物按调用隔离，从不共享。`keepRuns` 限定最新的多少个 `dsh-amberflow-*` 目录会被保留；目录要
   距最后一次写入满一小时才可能被回收，慢速真机运行不会被删到自己头上。
 - 应用清单现在会标注 `kind=probe`（测量型探针包——引擎拒绝经 app runner 运行它们）与
   `data-source`；`…_run` 会把引擎的探针拒绝翻译成同样的指引——但探针驱动本身仍未做成工具。
 - 默认整体继承会话环境给子进程（"信任 checkout"是本插件声明的前提）。设 `envMode: allowlist`
-  可只转发运行必需项加 `LAYAWEBUSE_*` 与 `forwardEnv` 列出的名字。
+  可只转发运行必需项加 `AMBERFLOW_*` 与 `forwardEnv` 列出的名字。
 - 插件尚未暴露 checkout 同样提供的不变量归纳与批量套件工具。
-- `layawebuse_learn` 无法替你演示：录制**新**流程必须给一份录好的动作清单，因为命令行的现场录制器
+- `amberflow_learn` 无法替你演示：录制**新**流程必须给一份录好的动作清单，因为命令行的现场录制器
   需要交互式终端。没有 script 的调用会被直接拒绝，而不是被放进引擎里失败。
 
 ### 开发备注

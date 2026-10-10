@@ -1,4 +1,6 @@
-# LayaWebUse
+# AmberFlow
+
+> 曾用名 **LayaWebUse**（2026-10-10 更名）。仓库、包名、桥工具前缀（默认 `amberflow_*`）、环境变量（`AMBERFLOW_REPO`，旧名 `LAYAWEBUSE_REPO` 仍兼容读取）已全部更名；"Laya" 保留为本地决策模型的姓。
 
 冻结计划的浏览器自动化中间件（TypeScript / Node ≥ 22.6）：**LLM 只规划一次**，执行阶段由本地决策模型
 逐步决策，**完成只认 DOM 信号**。

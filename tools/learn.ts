@@ -214,7 +214,7 @@ export async function learnFromActions(
   const kept = ind.candidates
     .filter((c) => c.stability >= 2 || c.kind === "url")
     .filter((c) => evalSignalOnState(c.signal, startState) === false && evalSignalOnState(c.signal, end) === true);
-  // 去重：① URL 候选只留**最短**的（`/cart.html`、`/testpages/cart.html`、`/LayaWebUse/testpages/cart.html`
+  // 去重：① URL 候选只留**最短**的（`/cart.html`、`/testpages/cart.html`、`/AmberFlow/testpages/cart.html`
   // 说的是同一件事，短的那个还是判别力最强的）；② 同一选择器的只剩一条。
   const urls = kept.filter((c) => c.kind === "url")
     .map((c) => String((c.signal as { url_contains?: string }).url_contains ?? ""))

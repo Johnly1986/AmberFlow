@@ -263,7 +263,7 @@ export async function runToolStep(
 export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<AppRunResult> {
   const {
     slots = {}, sources = true, confirmSafe = false, verbose = true,
-    planPath = path.join(os.tmpdir(), "layawebuse-apps", `${pack.id}-plan.json`),
+    planPath = path.join(os.tmpdir(), "amberflow-apps", `${pack.id}-plan.json`),
     modelId = pack.model ?? "english",
   } = opts;
   const t0 = Date.now();
@@ -505,7 +505,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 2;
   }
 
-  const outDir = path.resolve(v.out ?? path.join(os.tmpdir(), "layawebuse-apps"));
+  const outDir = path.resolve(v.out ?? path.join(os.tmpdir(), "amberflow-apps"));
   // 输出目录建不出来时是**用法错误**，不该把 Node 的 mkdir 栈甩给使用者（`--out /sys/x`）。
   try {
     fs.mkdirSync(outDir, { recursive: true });

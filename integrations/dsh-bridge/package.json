@@ -1,8 +1,8 @@
 {
-  "name": "@deepseek-ai/dsh-layawebuse-bridge",
+  "name": "@deepseek-ai/dsh-amberflow-bridge",
   "version": "0.2.0-rc.2",
   "private": true,
-  "description": "Bridge plugin exposing the LayaWebUse frozen-plan browser engine (apps/learn) as model-facing tools",
+  "description": "Bridge plugin exposing the AmberFlow frozen-plan browser engine (apps/learn) as model-facing tools",
   "license": "MIT",
   "type": "module",
   "main": "lib/types/index.js",

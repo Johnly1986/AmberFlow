@@ -1,5 +1,5 @@
 /**
- * Hermetic tests for the LayaWebUse bridge: argument assembly, artifact summarization, load-time
+ * Hermetic tests for the AmberFlow bridge: argument assembly, artifact summarization, load-time
  * validation, and the full registry path (`ctx.tools.execute`) against a **stub checkout** whose
  * `app-runner.ts` / `learn.ts` print canned documents. No browser, no model, no network — the real
  * checkout is exercised separately in `live.spec.ts`.
@@ -12,7 +12,7 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import * as Bridge from '@deepseek-ai/dsh-layawebuse-bridge'
+import * as Bridge from '@deepseek-ai/dsh-amberflow-bridge'
 import {
   buildEnv, diagnoseFailure, firstLines, learnArgs, listApps, parseJsonDocument, pruneRunDirs,
   runArgs, runProcess, stripAnsi, summarizeLearn, summarizeRun,
@@ -138,12 +138,12 @@ describe('bridge diagnostics', () => {
   })
 
   it('diagnoseFailure names the exit and prefers stderr over stdout', () => {
-    const message = diagnoseFailure('layawebuse_learn', proc({
+    const message = diagnoseFailure('amberflow_learn', proc({
       code: 2, stdout: 'usage text', stderr: 'page.goto: net::ERR_FILE_NOT_FOUND',
     }))
-    expect(message).toBe('layawebuse_learn failed (exit 2): page.goto: net::ERR_FILE_NOT_FOUND')
-    expect(diagnoseFailure('layawebuse_run', proc({ code: null, timedOut: true })))
-      .toBe('layawebuse_run failed (timed out): (no output)')
+    expect(message).toBe('amberflow_learn failed (exit 2): page.goto: net::ERR_FILE_NOT_FOUND')
+    expect(diagnoseFailure('amberflow_run', proc({ code: null, timedOut: true })))
+      .toBe('amberflow_run failed (timed out): (no output)')
   })
 
   it('summarizeLearn on an empty document reports the first lines instead of a usage tail', () => {
@@ -195,14 +195,14 @@ describe('bridge plugin', () => {
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await expect(ctx.plugin(Bridge, { repoPath: tmp('not-a-repo') }))
-      .rejects.toThrow(/not a LayaWebUse checkout/)
+      .rejects.toThrow(/not an AmberFlow checkout/)
   })
 
   it('registers the three tools under the configured prefix', async () => {
     const ctx = await mount(stubCheckout(PACKS))
     const names = ctx.tools.schemas().map(s => s.name).sort()
-    expect(names).toEqual(['layawebuse_apps', 'layawebuse_learn', 'layawebuse_run'])
-    const run = ctx.tools.schemas().find(s => s.name === 'layawebuse_run')!
+    expect(names).toEqual(['amberflow_apps', 'amberflow_learn', 'amberflow_run'])
+    const run = ctx.tools.schemas().find(s => s.name === 'amberflow_run')!
     expect(run.description).toContain('compact summary')
     // schemas() exposes the whole JSON Schema, so read the property map
     const props = (run.parameters as { properties: Record<string, unknown> }).properties
@@ -211,7 +211,7 @@ describe('bridge plugin', () => {
 
   it('executes …_apps through the registry (filesystem only)', async () => {
     const ctx = await mount(stubCheckout(PACKS))
-    const result = await call(ctx, 'layawebuse_apps', { filter: 'rec' })
+    const result = await call(ctx, 'amberflow_apps', { filter: 'rec' })
     expect(result.isError).toBe(false)
     const value = result.value as { apps: { id: string; origin: string; steps: number }[] }
     expect(value.apps).toHaveLength(1)
@@ -220,7 +220,7 @@ describe('bridge plugin', () => {
 
   it('executes …_run through the registry and summarizes the real artifact', async () => {
     const ctx = await mount(stubCheckout(PACKS))
-    const result = await call(ctx, 'layawebuse_run', { app: 'gen-app', no_model: true, no_sources: true })
+    const result = await call(ctx, 'amberflow_run', { app: 'gen-app', no_model: true, no_sources: true })
     expect(result.isError).toBe(false)
     const value = result.value as {
       ok: boolean
@@ -242,7 +242,7 @@ describe('bridge plugin', () => {
   it('executes …_learn through the registry and reports the zero-forward replay', async () => {
     const repo = stubCheckout(PACKS)
     const ctx = await mount(repo)
-    const result = await call(ctx, 'layawebuse_learn', {
+    const result = await call(ctx, 'amberflow_learn', {
       url: 'testpages/product.html', goal: 'add to cart', script: '/tmp/actions.json',
     })
     expect(result.isError).toBe(false)
@@ -257,7 +257,7 @@ describe('bridge plugin', () => {
 
   it('reports a failing learn as its CAUSE, never as the usage block', async () => {
     const ctx = await mount(stubCheckout(PACKS, { learnFails: true }))
-    const result = await call(ctx, 'layawebuse_learn', {
+    const result = await call(ctx, 'amberflow_learn', {
       url: 'testpages/missing.html', goal: 'x', script: '/tmp/actions.json',
     })
     expect(result.isError).toBe(true)
@@ -269,7 +269,7 @@ describe('bridge plugin', () => {
 
   it('refuses dangerous tool steps when the deployment has not enabled them', async () => {
     const ctx = await mount(stubCheckout(PACKS))
-    const result = await call(ctx, 'layawebuse_run', { app: 'gen-app', allow_dangerous: true })
+    const result = await call(ctx, 'amberflow_run', { app: 'gen-app', allow_dangerous: true })
     expect(result.isError).toBe(true)
     expect(JSON.stringify(result)).toContain('does not permit dangerous tool steps')
   })
@@ -368,7 +368,7 @@ describe('verified defects, kept fixed', () => {
 
   it('reports why a FAIL stopped when no step can be named', async () => {
     const ctx = await mount(stubCheckout(PACKS, { cleanThenExit: 3 }))
-    const result = await call(ctx, 'layawebuse_run', { app: 'gen-app' })
+    const result = await call(ctx, 'amberflow_run', { app: 'gen-app' })
     expect(result.isError).toBe(false)
     const value = result.value as { ok: boolean; blockedTotal: number; failedTools: string[] }
     expect(value.ok).toBe(false)
@@ -393,7 +393,7 @@ describe('verified defects, kept fixed', () => {
   it('refuses a repeated slot, and still passes a __proto__ slot through', async () => {
     const repo = stubCheckout(PACKS)
     const ctx = await mount(repo)
-    const dup = await call(ctx, 'layawebuse_run', { app: 'gen-app', slots: ['cap=1', 'cap=2'] })
+    const dup = await call(ctx, 'amberflow_run', { app: 'gen-app', slots: ['cap=1', 'cap=2'] })
     expect(dup.isError).toBe(true)
     expect(JSON.stringify(dup)).toContain('was given more than once')
     // Refused before spawning: the canned CLI never ran, so it never recorded its argv.
@@ -401,7 +401,7 @@ describe('verified defects, kept fixed', () => {
 
     // `slots['__proto__'] = v` would write through the prototype setter and silently vanish; the CLI
     // must actually receive it.
-    const ok = await call(ctx, 'layawebuse_run', { app: 'gen-app', slots: ['__proto__=x'] })
+    const ok = await call(ctx, 'amberflow_run', { app: 'gen-app', slots: ['__proto__=x'] })
     expect(ok.isError).toBe(false)
     const argv = JSON.parse(fs.readFileSync(path.join(repo, 'argv.json'), 'utf-8')) as string[]
     expect(argv.join(' ')).toContain('--slot __proto__=x')
@@ -464,7 +464,7 @@ describe('verified defects, kept fixed', () => {
   it('refuses …_learn without a script BEFORE spawning the CLI', async () => {
     const repo = stubCheckout(PACKS)
     const ctx = await mount(repo)
-    const result = await call(ctx, 'layawebuse_learn', { url: 'testpages/product.html', goal: 'x' })
+    const result = await call(ctx, 'amberflow_learn', { url: 'testpages/product.html', goal: 'x' })
     expect(result.isError).toBe(true)
     expect(JSON.stringify(result)).toMatch(/script/i)
     expect(fs.existsSync(path.join(repo, SPAWN_MARKER))).toBe(false)
@@ -472,7 +472,7 @@ describe('verified defects, kept fixed', () => {
 
   it('executes a dry run through the registry and renders it as DRY, not PASS/FAIL', async () => {
     const ctx = await mount(stubCheckout(PACKS))
-    const result = await call(ctx, 'layawebuse_run', { app: 'gen-app', dry: true })
+    const result = await call(ctx, 'amberflow_run', { app: 'gen-app', dry: true })
     expect(result.isError).toBe(false)
     const value = result.value as { dry: boolean; ok: boolean; planSteps: number; plan: unknown[] }
     expect(value).toMatchObject({ dry: true, ok: true, planSteps: 2 })
@@ -484,7 +484,7 @@ describe('verified defects, kept fixed', () => {
 
   it('expands a long journey through the registry, whose plan exceeds the output window', async () => {
     const ctx = await mount(stubCheckout(PACKS, { drySteps: 60 }))
-    const result = await call(ctx, 'layawebuse_run', { app: 'gen-app', dry: true })
+    const result = await call(ctx, 'amberflow_run', { app: 'gen-app', dry: true })
     // Before the full-stdout fix this reported "run did not reach the artifact stage": the plan was
     // cut by the display window and could no longer be parsed.
     expect(result.isError).toBe(false)
@@ -496,7 +496,7 @@ describe('verified defects, kept fixed', () => {
 
   it('reads a learn document that is larger than the display excerpt', async () => {
     const ctx = await mount(stubCheckout(PACKS, { learnBig: true }))
-    const result = await call(ctx, 'layawebuse_learn', {
+    const result = await call(ctx, 'amberflow_learn', {
       url: 'testpages/product.html', goal: 'add to cart', script: '/tmp/actions.json',
     })
     // A long recorded flow's document overflows the 1200 + 800 byte window; parsing the excerpt
@@ -508,7 +508,7 @@ describe('verified defects, kept fixed', () => {
 
 describe('environment and artifact policy', () => {
   it('buildEnv inherits by default; allowlist strips session secrets, keeps the run essentials', () => {
-    process.env.LAYAWEBUSE_BRIDGE_TEST = 'engine-facing'
+    process.env.AMBERFLOW_BRIDGE_TEST = 'engine-facing'
     process.env.BRIDGE_TEST_ONLY_KEY = 'forward-me'
     try {
       const inherit = buildEnv({ ...OPTIONS, envMode: 'inherit' })
@@ -516,12 +516,12 @@ describe('environment and artifact policy', () => {
       const allow = buildEnv({ ...OPTIONS, envMode: 'allowlist' })
       expect(allow.PATH).toBe(process.env.PATH)
       expect(allow.HOME).toBe(process.env.HOME)
-      expect(allow.LAYAWEBUSE_BRIDGE_TEST).toBe('engine-facing') // LAYAWEBUSE_* always travels
+      expect(allow.AMBERFLOW_BRIDGE_TEST).toBe('engine-facing') // AMBERFLOW_* always travels
       expect(allow.BRIDGE_TEST_ONLY_KEY).toBeUndefined()
       const withForward = buildEnv({ ...OPTIONS, envMode: 'allowlist', forwardEnv: ['BRIDGE_TEST_ONLY_KEY'] })
       expect(withForward.BRIDGE_TEST_ONLY_KEY).toBe('forward-me')
     } finally {
-      delete process.env.LAYAWEBUSE_BRIDGE_TEST
+      delete process.env.AMBERFLOW_BRIDGE_TEST
       delete process.env.BRIDGE_TEST_ONLY_KEY
     }
   })
@@ -535,9 +535,9 @@ describe('environment and artifact policy', () => {
       fs.utimesSync(d, t, t)
       return d
     }
-    const old1 = mk('dsh-layawebuse-run-old1', 48 * 3_600_000)
-    const old2 = mk('dsh-layawebuse-learn-old2', 24 * 3_600_000)
-    const young = mk('dsh-layawebuse-run-young', 60_000)
+    const old1 = mk('dsh-amberflow-run-old1', 48 * 3_600_000)
+    const old2 = mk('dsh-amberflow-learn-old2', 24 * 3_600_000)
+    const young = mk('dsh-amberflow-run-young', 60_000)
     const foreign = mk('unrelated-dir', 48 * 3_600_000)
     expect(pruneRunDirs(1, 3_600_000, root)).toBe(2)
     expect(fs.existsSync(old1)).toBe(false)
@@ -548,7 +548,7 @@ describe('environment and artifact policy', () => {
   })
 })
 
-describe('checkout resolution: config > LAYAWEBUSE_REPO > self-locate', () => {
+describe('checkout resolution: config > AMBERFLOW_REPO > self-locate', () => {
   it('findCheckout walks up to the ancestor holding src/app-runner.ts', () => {
     const repo = stubCheckout(PACKS)
     const deep = path.join(repo, 'integrations', 'dsh-bridge', 'src')
@@ -558,51 +558,51 @@ describe('checkout resolution: config > LAYAWEBUSE_REPO > self-locate', () => {
   })
 
   it('an explicit config repoPath wins over the environment', async () => {
-    process.env.LAYAWEBUSE_REPO = '/does/not/exist'
+    process.env.AMBERFLOW_REPO = '/does/not/exist'
     try {
       const ctx = await mount(stubCheckout(PACKS))
-      const result = await call(ctx, 'layawebuse_apps', {})
+      const result = await call(ctx, 'amberflow_apps', {})
       expect(result.isError).toBe(false)
     } finally {
-      delete process.env.LAYAWEBUSE_REPO
+      delete process.env.AMBERFLOW_REPO
     }
   })
 
-  it('LAYAWEBUSE_REPO decides when the config omits repoPath', async () => {
+  it('AMBERFLOW_REPO decides when the config omits repoPath', async () => {
     const repo = stubCheckout(PACKS)
-    process.env.LAYAWEBUSE_REPO = repo
+    process.env.AMBERFLOW_REPO = repo
     try {
       const ctx = new Context()
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
       await ctx.plugin(Bridge, {})
-      const result = await call(ctx, 'layawebuse_apps', {})
+      const result = await call(ctx, 'amberflow_apps', {})
       expect(result.isError).toBe(false)
       expect((result.value as { apps: unknown[] }).apps.length).toBeGreaterThan(0)
     } finally {
-      delete process.env.LAYAWEBUSE_REPO
+      delete process.env.AMBERFLOW_REPO
     }
   })
 
   it('with neither config nor env, the plugin self-locates its own checkout (git-install shape)', async () => {
-    // The specs run inside the LayaWebUse repo, so the module's ancestors ARE a checkout — the same
+    // The specs run inside the AmberFlow repo, so the module's ancestors ARE a checkout — the same
     // resolution a git-installed bundle performs against its clone.
-    delete process.env.LAYAWEBUSE_REPO
+    delete process.env.AMBERFLOW_REPO
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(Bridge, {})
-    const result = await call(ctx, 'layawebuse_apps', { filter: 'demo-app' })
+    const result = await call(ctx, 'amberflow_apps', { filter: 'demo-app' })
     expect(result.isError).toBe(false)
     expect((result.value as { apps: { id: string }[] }).apps.map(a => a.id)).toContain('demo-app')
   })
 })
 
 describe('checkout under node_modules (git-install shape)', () => {
-  /** A fake profile tree: node_modules/layawebuse is the checkout, tsx installed alongside or not. */
+  /** A fake profile tree: node_modules/amberflow is the checkout, tsx installed alongside or not. */
   function profileTree(withTsx: boolean): { repo: string; tsxCli: string } {
     const root = tmp('profile')
-    const repo = path.join(root, 'node_modules', 'layawebuse')
+    const repo = path.join(root, 'node_modules', 'amberflow')
     fs.mkdirSync(path.join(repo, 'src'), { recursive: true })
     fs.writeFileSync(path.join(repo, 'src', 'app-runner.ts'), 'process.exit(0)')
     const tsxCli = path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs')

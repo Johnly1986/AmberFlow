@@ -4,7 +4,7 @@
  *
  * Two different owners:
  * - the TOOLCHAIN (typescript / vitest / @types) comes from this repository, because the package now
- *   lives inside LayaWebUse and builds with that checkout's tooling;
+ *   lives inside AmberFlow and builds with that checkout's tooling;
  * - the HOST packages (`@deepseek-ai/*`) come from a DSH installation, because this package is a DSH
  *   plugin: the running DSH process provides those, and they are what it resolves at runtime too.
  *

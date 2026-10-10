@@ -3,7 +3,7 @@
 > 文中的 `python xxx.py` / `pytest` 命令指向备份中的参考实现，对应的 TS 入口见 [README.md](README.md)。
 > 设计规范、实测结论与用例记录照旧有效——TS 代码的注释大量引用它们。
 
-# LayaWebUse 总体架构
+# AmberFlow 总体架构
 
 > 本文描述当前代码的设计意图与边界。历史迭代（每轮的失败模式、实测数字、修复依据）见
 > `bench/OPTIMIZATION_REPORT.md`；给 agent 的硬约束清单见 `CLAUDE.md`。

@@ -1,5 +1,5 @@
 /**
- * The plugin-to-plugin seam: another plugin `inject`s `layawebuse` and calls the engine directly,
+ * The plugin-to-plugin seam: another plugin `inject`s `amberflow` and calls the engine directly,
  * without going through the tool registry. These tests mount a real consumer plugin next to the
  * bridge and assert that both doors run the SAME code — same options, same deployment gate, same
  * diagnostics — so neither can drift from the other.
@@ -10,34 +10,34 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import * as Bridge from '@deepseek-ai/dsh-layawebuse-bridge'
+import * as Bridge from '@deepseek-ai/dsh-amberflow-bridge'
 // The package ROOT must carry the helpers: a published package ships only `lib/`, never `src/`.
-import { firstLines, stripAnsi, summarizeLearn, type LayawebuseService } from '@deepseek-ai/dsh-layawebuse-bridge'
+import { firstLines, stripAnsi, summarizeLearn, type AmberFlowService } from '@deepseek-ai/dsh-amberflow-bridge'
 import { cleanupTmp, PACKS, SPAWN_MARKER, stubCheckout } from './stub.ts'
 
 afterEach(cleanupTmp)
 
 /** A consumer plugin, written the way a real plugin would be: inject the service, use it. */
-function consumerPlugin(seen: { api?: LayawebuseService }) {
+function consumerPlugin(seen: { api?: AmberFlowService }) {
   return {
-    name: 'layawebuse-consumer',
-    inject: ['layawebuse'],
+    name: 'amberflow-consumer',
+    inject: ['amberflow'],
     apply(ctx: Context): void {
-      seen.api = ctx.layawebuse
+      seen.api = ctx.amberflow
     },
   }
 }
 
-async function mount(repoPath: string): Promise<{ api: LayawebuseService; ctx: Context }> {
+async function mount(repoPath: string): Promise<{ api: AmberFlowService; ctx: Context }> {
   const ctx = new Context()
-  const seen: { api?: LayawebuseService } = {}
+  const seen: { api?: AmberFlowService } = {}
   // The bridge injects `tools` (it registers the three tools), so a deployment mounts the registry;
   // the service then comes up with it, and the consumer injects the service.
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(Bridge, { repoPath })
   await ctx.plugin(consumerPlugin(seen))
-  if (seen.api === undefined) throw new Error('the consumer never received ctx.layawebuse')
+  if (seen.api === undefined) throw new Error('the consumer never received ctx.amberflow')
   return { api: seen.api, ctx }
 }
 

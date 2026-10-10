@@ -1,10 +1,10 @@
 /**
- * Pure helpers behind the LayaWebUse bridge: build the argv for the external CLI, read the
+ * Pure helpers behind the AmberFlow bridge: build the argv for the external CLI, read the
  * artifacts it writes, and summarize them into a **context-cheap** shape.
  *
  * No spawning happens here, so the process policy lives in exactly one place (`runProcess`) and
  * everything else stays unit-testable without a browser, a model, or the external repo.
- * @module @deepseek-ai/dsh-layawebuse-bridge/bridge
+ * @module @deepseek-ai/dsh-amberflow-bridge/bridge
  */
 
 import { spawn } from 'node:child_process'
@@ -15,7 +15,7 @@ import { StringDecoder } from 'node:string_decoder'
 
 /** Resolved deployment options (defaults already applied). */
 export interface BridgeOptions {
-  /** Absolute path of the LayaWebUse checkout that owns `src/app-runner.ts`. */
+  /** Absolute path of the AmberFlow checkout that owns `src/app-runner.ts`. */
   repoPath: string
   /** Node binary used to run the CLI (defaults to the running interpreter). */
   nodeBin: string
@@ -28,7 +28,7 @@ export interface BridgeOptions {
   /**
    * How the engine child process gets its environment. `inherit` (the default) forwards everything,
    * which is what a deployment trusting the checkout expects; `allowlist` forwards only the keys a
-   * CLI run actually needs (PATH/HOME/certs/proxies/playwright) plus LAYAWEBUSE_*, so session
+   * CLI run actually needs (PATH/HOME/certs/proxies/playwright) plus AMBERFLOW_*, so session
    * secrets never reach the external process.
    */
   envMode: 'inherit' | 'allowlist'
@@ -36,7 +36,7 @@ export interface BridgeOptions {
   forwardEnv: string[]
   /**
    * Per-call artifact directories are kept because the result names a report inside them; this caps
-   * how many of the newest `dsh-layawebuse-*` temp directories survive. 0 disables pruning.
+   * how many of the newest `dsh-amberflow-*` temp directories survive. 0 disables pruning.
    */
   keepRuns: number
   /**
@@ -248,7 +248,7 @@ export function parseJsonDocument(stdout: string): Record<string, unknown> | nul
 /**
  * Read every `apps/<id>/pack.json` under a checkout and summarize it.
  * Deliberately filesystem-only: listing apps needs no browser, no model and no subprocess.
- * @param repoPath - absolute path of the LayaWebUse checkout.
+ * @param repoPath - absolute path of the AmberFlow checkout.
  * @returns one summary per declared app, sorted by id.
  */
 export function listApps(repoPath: string): AppSummary[] {
@@ -382,9 +382,9 @@ export function buildEnv(options: BridgeOptions): NodeJS.ProcessEnv {
     if (process.env[key] !== undefined) out[key] = process.env[key]
   }
   // Deployment-level overrides for the engine itself (repo path, model hints, timeouts) travel by
-  // name, and LAYAWEBUSE_* stays forwardable so a checkout configured by env keeps working.
+  // name, and AMBERFLOW_* stays forwardable so a checkout configured by env keeps working.
   for (const key of Object.keys(process.env)) {
-    if (key.startsWith('LAYAWEBUSE_')) out[key] = process.env[key]
+    if (key.startsWith('AMBERFLOW_')) out[key] = process.env[key]
   }
   return out
 }
@@ -496,7 +496,7 @@ export interface RunSummary {
 }
 
 /**
- * Prune this bridge's old per-call temp directories (`dsh-layawebuse-*`).
+ * Prune this bridge's old per-call temp directories (`dsh-amberflow-*`).
  *
  * A run's report must outlive the call — that is why the directories exist — but they must not grow
  * without bound. This keeps the newest `keep` directories and never touches one younger than
@@ -515,7 +515,7 @@ export function pruneRunDirs(keep: number, minAgeMs = 3_600_000, root = os.tmpdi
     return 0
   }
   const dirs = entries
-    .filter(e => e.isDirectory() && e.name.startsWith('dsh-layawebuse-'))
+    .filter(e => e.isDirectory() && (e.name.startsWith('dsh-amberflow-') || e.name.startsWith('dsh-layawebuse-')))
     .map(e => {
       const full = path.join(root, e.name)
       let mtime = 0
@@ -595,7 +595,7 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
     // `--dry`, which the model just did). Translate that into what THIS door offers instead.
     if (/没有 journey|测量型/.test(detail)) {
       throw new Error(
-        `layawebuse-bridge: ${JSON.stringify(app)} is a measurement probe (no journey) and cannot run `
+        `amberflow-bridge: ${JSON.stringify(app)} is a measurement probe (no journey) and cannot run `
         + `through ${runTool ?? 'the …_run tool'}; read its declaration with the apps tool `
         + `(kind='probe') or run the checkout's probe drivers directly. CLI said: ${detail}`,
       )

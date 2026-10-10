@@ -5,7 +5,7 @@
  * One implementation, two doors — the tools are thin adapters over {@link runApp} / {@link learn}, so
  * a deployment gate (the dangerous-step refusal) and the failure diagnostics cannot drift between
  * "the model called the tool" and "another plugin called the service".
- * @module @deepseek-ai/dsh-layawebuse-bridge/service
+ * @module @deepseek-ai/dsh-amberflow-bridge/service
  */
 
 import fs from 'node:fs'
@@ -18,8 +18,8 @@ import {
 } from './bridge.ts'
 
 /** One `run` call, mirroring the `…_run` tool parameters with camelCase names. */
-export interface LayawebuseRunArgs {
-  /** App id from {@link LayawebuseService.listApps}. */
+export interface AmberFlowRunArgs {
+  /** App id from {@link AmberFlowService.listApps}. */
   app: string
   /** Only expand the plan: no browser, no tools. */
   dry?: boolean
@@ -39,7 +39,7 @@ export interface LayawebuseRunArgs {
 }
 
 /** One `learn` call, mirroring the `…_learn` tool parameters with camelCase names. */
-export interface LayawebuseLearnArgs {
+export interface AmberFlowLearnArgs {
   /** One line describing the flow to perform. */
   goal: string
   /** Page to start from (a URL or a repo-relative fixture path). */
@@ -63,7 +63,7 @@ export interface LayawebuseLearnArgs {
 /**
  * What another plugin can call. Every method is the exact code path the corresponding tool runs.
  */
-export interface LayawebuseService {
+export interface AmberFlowService {
   /**
    * List the declared apps.
    * @param filter - optional case-insensitive substring match on id, label or goal.
@@ -75,18 +75,18 @@ export interface LayawebuseService {
    * @param args - the app and its run options.
    * @returns the compact summary (failures only; the full table stays in the report file).
    */
-  run(args: LayawebuseRunArgs): Promise<RunSummary>
+  run(args: AmberFlowRunArgs): Promise<RunSummary>
   /**
    * Record one browser flow, or fail honestly.
    * @param args - the goal, the page, and how the flow is demonstrated.
    * @returns the summary including the rules-only replay that gated the save.
    */
-  learn(args: LayawebuseLearnArgs): Promise<LearnSummary>
+  learn(args: AmberFlowLearnArgs): Promise<LearnSummary>
 }
 
 /** One temp run directory per call, so artifacts never collide between sessions. */
 export function newOutDir(tag: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `dsh-layawebuse-${tag}-`))
+  return fs.mkdtempSync(path.join(os.tmpdir(), `dsh-amberflow-${tag}-`))
 }
 
 /**
@@ -107,11 +107,11 @@ function isFilled(value: unknown): value is string {
  * @throws when the deployment forbids dangerous steps or the run produced no artifact.
  */
 export async function runApp(
-  options: BridgeOptions, args: LayawebuseRunArgs,
+  options: BridgeOptions, args: AmberFlowRunArgs,
 ): Promise<{ summary: RunSummary; outDir: string }> {
   if (args.allowDangerous && !options.allowDangerous) {
     throw new Error(
-      'layawebuse-bridge: this deployment does not permit dangerous tool steps; '
+      'amberflow-bridge: this deployment does not permit dangerous tool steps; '
       + `set Config.allowDangerous=true to allow ${options.toolPrefix}_run with allow_dangerous`,
     )
   }
@@ -145,14 +145,14 @@ export async function runApp(
  * @throws when no script was given, or when the CLI failed without a machine-readable answer.
  */
 export async function learn(
-  options: BridgeOptions, args: LayawebuseLearnArgs,
+  options: BridgeOptions, args: AmberFlowLearnArgs,
 ): Promise<LearnSummary> {
   // The type marks `script` required so a TypeScript caller cannot forget it; a JavaScript caller
   // still can, and must get the same sentence instead of a browser launch that fails a minute later.
   const script = args.script
   if (!isFilled(script)) {
     throw new Error(
-      `layawebuse-bridge: ${options.toolPrefix}_learn needs a recorded action list — pass \`script\` `
+      `amberflow-bridge: ${options.toolPrefix}_learn needs a recorded action list — pass \`script\` `
       + '(a JSON array of {"op":"click"|"type","hint":"<selector>"} entries). The engine can also '
       + 'record from a live demonstration, but only in an interactive terminal, and every tool call '
       + 'runs the CLI with --yes and no stdin. `cdp` only picks the browser to attach to; it cannot '
@@ -187,9 +187,9 @@ export async function learn(
 /**
  * Build the service for one deployment.
  * @param options - resolved bridge options.
- * @returns the service {@link apply} provides as `ctx.layawebuse`.
+ * @returns the service {@link apply} provides as `ctx.amberflow`.
  */
-export function createService(options: BridgeOptions): LayawebuseService {
+export function createService(options: BridgeOptions): AmberFlowService {
   return {
     listApps(filter) {
       const needle = (filter ?? '').toLowerCase()
@@ -209,7 +209,7 @@ export function createService(options: BridgeOptions): LayawebuseService {
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    /** The LayaWebUse bridge's programmatic seam, provided by `@deepseek-ai/dsh-layawebuse-bridge`. */
-    layawebuse: LayawebuseService
+    /** The AmberFlow bridge's programmatic seam, provided by `@deepseek-ai/dsh-amberflow-bridge`. */
+    amberflow: AmberFlowService
   }
 }

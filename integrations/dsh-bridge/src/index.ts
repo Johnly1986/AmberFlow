@@ -1,7 +1,7 @@
 /**
- * LayaWebUse bridge — the harness side of "the engine is called, not embedded".
+ * AmberFlow bridge — the harness side of "the engine is called, not embedded".
  *
- * LayaWebUse is a frozen-plan browser engine: an LLM (or a human) authors a flow once, the engine
+ * AmberFlow is a frozen-plan browser engine: an LLM (or a human) authors a flow once, the engine
  * decides every step locally, and **DOM signals are the only completion truth**. It already exposes
  * that engine as CLIs (`app-runner`, `learn`). This plugin turns those CLIs into model-facing tools
  * so a DSH session can drive them — and it deliberately adds **no browser logic of its own**:
@@ -14,7 +14,7 @@
  *
  * Trust boundary, stated out loud: the bridge spawns a foreign process from `repoPath`. It does not
  * route through the harness sandbox policy, so enabling this plugin means trusting that checkout.
- * @module @deepseek-ai/dsh-layawebuse-bridge
+ * @module @deepseek-ai/dsh-amberflow-bridge
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -24,13 +24,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { listApps, type BridgeOptions } from './bridge.ts'
-import { createService, runApp, learn, type LayawebuseService } from './service.ts'
+import { createService, runApp, learn, type AmberFlowService } from './service.ts'
 
 // The package root is the consumer surface: another plugin imports these without reaching into `src/`
 // (a published package ships only `lib/`).
 export {
   learn, newOutDir, runApp,
-  type LayawebuseLearnArgs, type LayawebuseRunArgs, type LayawebuseService,
+  type AmberFlowLearnArgs, type AmberFlowRunArgs, type AmberFlowService,
 } from './service.ts'
 export {
   buildEnv, diagnoseFailure, firstLines, learnArgs, listApps, parseJsonDocument, parseSource,
@@ -39,14 +39,14 @@ export {
   type RunSummary,
 } from './bridge.ts'
 
-export const name = 'layawebuse-bridge'
+export const name = 'amberflow-bridge'
 export const inject = ['tools']
 
 /** Deployment configuration for the bridge. */
 export interface Config {
   /**
-   * Absolute path of the LayaWebUse checkout (the one holding `src/app-runner.ts`). Optional:
-   * precedence is config > `LAYAWEBUSE_REPO` > the checkout this plugin module lives in
+   * Absolute path of the AmberFlow checkout (the one holding `src/app-runner.ts`). Optional:
+   * precedence is config > `AMBERFLOW_REPO` > the checkout this plugin module lives in
    * (a git-installed bundle contains the whole engine, so it self-locates).
    */
   repoPath?: string
@@ -56,18 +56,18 @@ export interface Config {
   timeoutMs?: number
   /** Whether this deployment permits dangerous tool steps (`--allow-dangerous`, dry-run gated). */
   allowDangerous?: boolean
-  /** Model-visible tool-name prefix (default `layawebuse`). */
+  /** Model-visible tool-name prefix (default `amberflow`). */
   toolPrefix?: string
   /**
    * Environment policy for the engine child process: `inherit` (default) forwards everything, which
    * assumes the checkout is trusted with the session's environment; `allowlist` forwards only the
-   * keys an engine run needs (PATH/HOME/certs/proxies/playwright) plus LAYAWEBUSE_* and `forwardEnv`.
+   * keys an engine run needs (PATH/HOME/certs/proxies/playwright) plus AMBERFLOW_* and `forwardEnv`.
    */
   envMode?: 'inherit' | 'allowlist'
   /** Extra environment variable NAMES forwarded when `envMode` is `allowlist` (exact keys). */
   forwardEnv?: string[]
   /**
-   * How many newest per-call artifact directories (`$TMPDIR/dsh-layawebuse-*`) to keep. Directories
+   * How many newest per-call artifact directories (`$TMPDIR/dsh-amberflow-*`) to keep. Directories
    * stay removable only after an hour of age, so a live run is never pruned; 0 disables housekeeping.
    */
   keepRuns?: number
@@ -81,14 +81,14 @@ export const Config: z<Config> = z.object({
   nodeBin: z.string(),
   timeoutMs: z.natural().min(1000).default(900_000),
   allowDangerous: z.boolean().default(false),
-  toolPrefix: z.string().default('layawebuse'),
+  toolPrefix: z.string().default('amberflow'),
   envMode: z.union([z.const('inherit'), z.const('allowlist')]).default('inherit'),
   forwardEnv: z.array(z.string()).default([]),
   keepRuns: z.natural().default(30),
 })
 
 /**
- * Walk up from a directory looking for a LayaWebUse checkout (one holding `src/app-runner.ts`).
+ * Walk up from a directory looking for a AmberFlow checkout (one holding `src/app-runner.ts`).
  * Used when no repoPath was configured: a git-installed bundle contains the whole engine, so the
  * plugin can locate its own checkout — a link/path install resolves to the same tree it always used.
  * @param fromDir - the directory to start from (typically this module's).
@@ -132,21 +132,23 @@ function findTsxCli(fromDirs: string[]): string | undefined {
 
 /** Resolve defaults and verify the checkout really is one, at LOAD time rather than first call. */
 function resolveOptions(config: Config): BridgeOptions {
-  // Precedence: explicit config (a patch line) > LAYAWEBUSE_REPO > this module's own checkout.
+  // Precedence: explicit config (a patch line) > AMBERFLOW_REPO > the pre-rename LAYAWEBUSE_REPO
+  // (still honored so deployments written before the rename keep working) > own checkout.
+  const envRepo = process.env.AMBERFLOW_REPO ?? process.env.LAYAWEBUSE_REPO
   const repoPath = config.repoPath !== undefined && config.repoPath !== ''
     ? path.resolve(config.repoPath)
-    : process.env.LAYAWEBUSE_REPO !== undefined && process.env.LAYAWEBUSE_REPO !== ''
-      ? path.resolve(process.env.LAYAWEBUSE_REPO)
+    : envRepo !== undefined && envRepo !== ''
+      ? path.resolve(envRepo)
       : findCheckout(path.dirname(fileURLToPath(import.meta.url)))
   if (repoPath === undefined) {
-    throw new Error('layawebuse-bridge: no LayaWebUse checkout found — set Config.repoPath or LAYAWEBUSE_REPO')
+    throw new Error('amberflow-bridge: no AmberFlow checkout found — set Config.repoPath or AMBERFLOW_REPO')
   }
   if (!fs.existsSync(path.join(repoPath, 'src', 'app-runner.ts'))) {
-    throw new Error(`layawebuse-bridge: ${repoPath} is not a LayaWebUse checkout (missing src/app-runner.ts)`)
+    throw new Error(`amberflow-bridge: ${repoPath} is not an AmberFlow checkout (missing src/app-runner.ts)`)
   }
-  const prefix = config.toolPrefix ?? 'layawebuse'
+  const prefix = config.toolPrefix ?? 'amberflow'
   if (!/^[a-z][a-z0-9_]*$/.test(prefix)) {
-    throw new Error(`layawebuse-bridge: toolPrefix ${JSON.stringify(prefix)} must be lower_snake_case`)
+    throw new Error(`amberflow-bridge: toolPrefix ${JSON.stringify(prefix)} must be lower_snake_case`)
   }
   // Node's own type stripping refuses .ts files under a node_modules tree (Node 22-24, no flag
   // overrides it). A git-installed bundle lives exactly there, so spawn through tsx instead —
@@ -159,10 +161,10 @@ function resolveOptions(config: Config): BridgeOptions {
     ])
     if (tsxCli === undefined) {
       throw new Error(
-        `layawebuse-bridge: the checkout ${repoPath} sits under node_modules, where Node cannot run `
+        `amberflow-bridge: the checkout ${repoPath} sits under node_modules, where Node cannot run `
         + 'its TypeScript CLIs (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING). No tsx was found from '
         + 'the checkout or the host install tree: install tsx into this profile, point '
-        + 'Config.nodeBin at a tsx binary, or set LAYAWEBUSE_REPO to a checkout outside node_modules.',
+        + 'Config.nodeBin at a tsx binary, or set AMBERFLOW_REPO to a checkout outside node_modules.',
       )
     }
   }
@@ -188,15 +190,15 @@ export function apply(ctx: Context, config: Config): void {
   const options = resolveOptions(config)
   const { toolPrefix } = options
 
-  // Plugin-to-plugin door: another plugin injects `layawebuse` and calls the engine directly, running
+  // Plugin-to-plugin door: another plugin injects `amberflow` and calls the engine directly, running
   // exactly the code the tools run (same options, same gates, same diagnostics).
-  const service: LayawebuseService = createService(options)
-  ctx.provide('layawebuse', service)
+  const service: AmberFlowService = createService(options)
+  ctx.provide('amberflow', service)
 
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_apps`,
     description:
-      'List the browser/CLI apps declared in the LayaWebUse checkout, with their step counts, '
+      'List the browser/CLI apps declared in the AmberFlow checkout, with their step counts, '
       + 'invariant counts and where each pack came from (generated from a spec/source, recorded from '
       + 'a demonstrated flow, hand-written, or a pure data source with no journey of its own). '
       + 'Each row carries a kind: `journey` apps run under the run tool; `probe` apps are measurement '
@@ -261,7 +263,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_run`,
     description:
-      'Run one declared LayaWebUse app end to end (data leg -> browser/tool steps -> end-state '
+      'Run one declared AmberFlow app end to end (data leg -> browser/tool steps -> end-state '
       + 'invariants) and return a compact summary: completion, the FAILED subgoals only, refusals, and '
       + 'invariant results. The full per-step table stays in the report file named by the result, read '
       + 'it with the read tool when you need the detail. `no_model` keeps the run rules-only (no model '
@@ -379,13 +381,13 @@ export function apply(ctx: Context, config: Config): void {
       for (const entry of args.slots ?? []) {
         const at = entry.indexOf('=')
         if (at <= 0) {
-          throw new Error(`layawebuse-bridge: slot ${JSON.stringify(entry)} must be "key=value"`)
+          throw new Error(`amberflow-bridge: slot ${JSON.stringify(entry)} must be "key=value"`)
         }
         const key = entry.slice(0, at)
         // The CLI treats a repeated slot as a usage error; catching it here keeps the bridge from
         // silently dropping the first value before the CLI ever sees the duplicate.
         if (slots.has(key)) {
-          throw new Error(`layawebuse-bridge: slot ${JSON.stringify(key)} was given more than once`)
+          throw new Error(`amberflow-bridge: slot ${JSON.stringify(key)} was given more than once`)
         }
         slots.set(key, entry.slice(at + 1))
       }
@@ -422,7 +424,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_learn`,
     description:
-      'Hand one browser flow to LayaWebUse so it can be recorded instead of hand-written: give the '
+      'Hand one browser flow to AmberFlow so it can be recorded instead of hand-written: give the '
       + 'recorded action list plus the page it starts from, and the engine runs it once, induces each '
       + "step's completion signal and the end-state invariants from the observed transitions, and "
       + 'saves the pack ONLY when a rules-only replay with zero model calls still passes. The result '

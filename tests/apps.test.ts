@@ -105,7 +105,7 @@ describe("应用运行器：数据腿 → 动作腿 → 结束状态不变量", 
   it("demo-app 端到端通过（离线夹具 + 桩工具，脚本模型）", async () => {
     const pack = loadPack("demo-app");
     const res = await runApp(pack, {
-      verbose: false, planPath: path.join("/tmp", "layawebuse-apps", "demo-app-test.json"),
+      verbose: false, planPath: path.join("/tmp", "amberflow-apps", "demo-app-test.json"),
     });
     expect(res.ok, JSON.stringify(res.subgoals)).toBe(true);
     expect(res.completed).toBe("5/5");
@@ -122,7 +122,7 @@ describe("应用运行器：数据腿 → 动作腿 → 结束状态不变量", 
   it("不变量在会话结束状态上求值：故意写错的不变量必须不成立", async () => {
     const pack = clone(loadPack("demo-app")) as AppPack;
     pack.invariants = [{ id: "wrong", desc: "结束状态里不该有的东西", signal: { css_exists: "[data-test=definitely-absent]" } }];
-    const res = await runApp(pack, { verbose: false, sources: false, planPath: "/tmp/layawebuse-apps/bad.json" });
+    const res = await runApp(pack, { verbose: false, sources: false, planPath: "/tmp/amberflow-apps/bad.json" });
     expect(res.subgoals.every((s) => s.status === "done")).toBe(true);   // 旅程本身跑完了
     expect(res.invariants).toEqual([{ id: "wrong", desc: "结束状态里不该有的东西", held: false }]);
     expect(res.ok).toBe(false);                                          // 但验收不通过
@@ -165,7 +165,7 @@ describe("应用包与数据源的位置约定", () => {
 /* ------------------------------------------------- 工具步：命令行当动作腿 */
 
 const freshOut = (tag: string): string => {
-  const d = path.join(os.tmpdir(), `layawebuse-apps-test-${tag}-${process.pid}-${Date.now()}`);
+  const d = path.join(os.tmpdir(), `amberflow-apps-test-${tag}-${process.pid}-${Date.now()}`);
   fs.mkdirSync(d, { recursive: true });
   return d;
 };

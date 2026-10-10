@@ -1,7 +1,7 @@
 # 开发与部署
 
-这个包是 **DSH 的适配器**：把本仓库（LayaWebUse）的冻结计划引擎接成三个模型可见的工具
-（`layawebuse_apps` / `_run` / `_learn`）。它住在 `integrations/dsh-bridge/`，与引擎同仓库、同版本线。
+这个包是 **DSH 的适配器**：把本仓库（AmberFlow）的冻结计划引擎接成三个模型可见的工具
+（`amberflow_apps` / `_run` / `_learn`）。它住在 `integrations/dsh-bridge/`，与引擎同仓库、同版本线。
 
 依赖方向是**单向**的：本包 → 本仓库（用 `repoPath` 起它的 CLI 子进程并读产物）；引擎对 DSH 与本包
 **零引用**。除此之外它还需要 DSH 的宿主包（`@deepseek-ai/cordis` / `-dsh-tools` / `-schemastery`），
@@ -11,7 +11,7 @@
 
 | 路径 | 作用 |
 |---|---|
-| `src/` | 三个工具与其背后的服务缝（`ctx.layawebuse`，供别的插件调用） |
+| `src/` | 三个工具与其背后的服务缝（`ctx.amberflow`，供别的插件调用） |
 | `tests/` | 两层：`bridge`/`service`（离线、桩 checkout）与 `live`（真浏览器 + 真 checkout） |
 | `cordis.patch.yml` | bundle 层：装进 profile 即注册三个工具；`repoPath` 指向本仓库根 |
 | `scripts/setup-links.mjs` | 链入依赖：工具链取自本仓库，宿主包取自 DSH 安装 |
@@ -42,11 +42,11 @@ checkout 的 tsconfig paths 解析到这些包的**源码**——插件因此与
 ## 装进 / 移出 DSH profile
 
 ```bash
-dsh plugin --profile <name> add /root/ML/LayaWebUse/integrations/dsh-bridge
-dsh plugin --profile <name> remove @deepseek-ai/dsh-layawebuse-bridge
+dsh plugin --profile <name> add /root/ML/AmberFlow/integrations/dsh-bridge
+dsh plugin --profile <name> remove @deepseek-ai/dsh-amberflow-bridge
 ```
 
-`cordis.patch.yml` 的 `repoPath` 默认 `/root/ML/LayaWebUse`；换 checkout 用环境变量 `LAYAWEBUSE_REPO`
+`cordis.patch.yml` 的 `repoPath` 默认 `/root/ML/AmberFlow`；换 checkout 用环境变量 `AMBERFLOW_REPO`
 覆盖。它**没有**改成"相对本包位置"是有意的：插件既可能从 `src/`（tsx）也可能从 `lib/`（node）加载，
 两者的相对深度不同，显式路径更安全。
 
@@ -59,6 +59,6 @@ DSH profile 补丁里把 HMR 的 `root` 指向本目录，重建 `lib/` 后会�
   name: "@deepseek-ai/dsh-hmr"
   config:
     root:
-      - /root/ML/LayaWebUse/integrations/dsh-bridge
+      - /root/ML/AmberFlow/integrations/dsh-bridge
     followSymlinks: false   # 必需：node_modules/@deepseek-ai/* 是指向 DSH 安装的软链
 ```

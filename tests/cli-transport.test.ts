@@ -51,7 +51,7 @@ const stubSource = (over: Partial<Record<string, unknown>> = {}): Source => {
   return { ...base, ...over } as unknown as Source;
 };
 
-const fakeName = (): string => path.join(os.tmpdir(), `layawebuse-shell-${process.pid}-${Math.random().toString(36).slice(2)}`);
+const fakeName = (): string => path.join(os.tmpdir(), `amberflow-shell-${process.pid}-${Math.random().toString(36).slice(2)}`);
 const exists = (p: string): boolean => {
   try {
     fs.statSync(p);

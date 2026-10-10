@@ -176,7 +176,7 @@ describe("the record of the Python reference is kept, not lost", () => {
     const readme = fs.readFileSync(path.join(ROOT, "README.md"), "utf-8");
     expect(readme).toMatch(/TypeScript|TS/);
     const backup = fs.readFileSync(path.join(ROOT, "BACKUP.md"), "utf-8");
-    expect(backup).toMatch(/LayaWebUse-python-reference-backup/);
+    expect(backup).toMatch(/AmberFlow-python-reference-backup/);
   });
 });
 

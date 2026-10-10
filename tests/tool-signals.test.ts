@@ -11,7 +11,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { checkToolSignal, TOOL_SIGNAL_OPS, validateToolSignal, type ToolSignal } from "../src/tool-signals.ts";
 import type { CliObservation } from "../src/datasource.ts";
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "layawebuse-tool-signals-"));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "amberflow-tool-signals-"));
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const obs = (over: Partial<CliObservation> = {}): CliObservation => ({

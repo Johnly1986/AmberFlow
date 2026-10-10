@@ -1,10 +1,10 @@
-# Bundle layer for @deepseek-ai/dsh-layawebuse-bridge: activating this bundle is what
+# Bundle layer for @deepseek-ai/dsh-amberflow-bridge: activating this bundle is what
 # makes the three tools available, so an installation needs no hand-written profile patch.
 #
 # The row declares no config on purpose: the checkout resolves by precedence inside the plugin
-# (Config.repoPath > LAYAWEBUSE_REPO > the checkout this package sits in / was installed with),
+# (Config.repoPath > AMBERFLOW_REPO > the checkout this package sits in / was installed with),
 # and every other key has a schema default. Per the layer rules, a user override of this row
 # replaces the whole `config`, so keeping it empty keeps overriding cheap.
 - insert:
-    - id: layawebuse-bridge
-      name: '@deepseek-ai/dsh-layawebuse-bridge'
+    - id: amberflow-bridge
+      name: '@deepseek-ai/dsh-amberflow-bridge'

@@ -1,10 +1,10 @@
 /**
- * Live tests: the bridge driving the REAL LayaWebUse checkout through the tool registry.
+ * Live tests: the bridge driving the REAL AmberFlow checkout through the tool registry.
  *
  * They are skipped — loudly, with the reason printed — when the checkout or a chromium build is not
  * present on this machine, so a checkout-less CI reports "skipped", never "passed".
  *
- * Point `LAYAWEBUSE_REPO` at the checkout to run them; the default is the development path.
+ * Point `AMBERFLOW_REPO` at the checkout to run them; the default is the development path.
  */
 import { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -13,10 +13,14 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import * as Bridge from '@deepseek-ai/dsh-layawebuse-bridge'
+import * as Bridge from '@deepseek-ai/dsh-amberflow-bridge'
 
-const REPO = process.env['LAYAWEBUSE_REPO'] ?? '/root/ML/LayaWebUse'
+// The bridge lives inside the engine repo, so the checkout is simply three levels up;
+// AMBERFLOW_REPO (or the pre-rename LAYAWEBUSE_REPO) overrides it for split layouts.
+const REPO = process.env['AMBERFLOW_REPO'] ?? process.env['LAYAWEBUSE_REPO']
+  ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const HAS_REPO = fs.existsSync(path.join(REPO, 'src', 'app-runner.ts'))
 /**
  * Written straight to stderr: Vitest intercepts `console.*` during collection, so a `console.warn`
@@ -24,10 +28,10 @@ const HAS_REPO = fs.existsSync(path.join(REPO, 'src', 'app-runner.ts'))
  * @param reason - the skip reason to print.
  */
 function warnSkipped(reason: string): void {
-  process.stderr.write(`[layawebuse-bridge] ${reason}\n`)
+  process.stderr.write(`[amberflow-bridge] ${reason}\n`)
 }
 if (!HAS_REPO) {
-  warnSkipped(`live tests SKIPPED: no checkout at ${REPO} (set LAYAWEBUSE_REPO)`)
+  warnSkipped(`live tests SKIPPED: no checkout at ${REPO} (set AMBERFLOW_REPO)`)
 }
 
 /** A chromium that Playwright can launch, or null (the browser test is skipped without one). */
@@ -76,7 +80,7 @@ function call(ctx: Context, name: string, args: unknown) {
 describe.skipIf(!HAS_REPO)('live checkout', () => {
   it('lists the real apps and reports where each pack came from', async () => {
     const ctx = await mount()
-    const result = await call(ctx, 'layawebuse_apps', {})
+    const result = await call(ctx, 'amberflow_apps', {})
     expect(result.isError).toBe(false)
     const { apps } = result.value as { apps: { id: string; origin: string; steps: number }[] }
     expect(apps.length).toBeGreaterThanOrEqual(15)
@@ -89,7 +93,7 @@ describe.skipIf(!HAS_REPO)('live checkout', () => {
 
   it('filters by substring across id, label and goal', async () => {
     const ctx = await mount()
-    const result = await call(ctx, 'layawebuse_apps', { filter: 'learned' })
+    const result = await call(ctx, 'amberflow_apps', { filter: 'learned' })
     const { apps } = result.value as { apps: { id: string }[] }
     expect(apps.map(a => a.id)).toContain('learned-cart')
   }, 60_000)
@@ -98,7 +102,7 @@ describe.skipIf(!HAS_REPO)('live checkout', () => {
 describe.skipIf(!HAS_REPO || !CHROMIUM)('live checkout + browser', () => {
   it('runs a real app end to end and returns the failure-only summary', async () => {
     const ctx = await mount()
-    const result = await call(ctx, 'layawebuse_run', {
+    const result = await call(ctx, 'amberflow_run', {
       app: 'learned-cart',        // 2 browser steps recorded from a demonstration
       no_model: true,             // rules only: this run must not need the decision model at all
       no_sources: true,
@@ -125,7 +129,7 @@ describe.skipIf(!HAS_REPO || !CHROMIUM)('live checkout + browser', () => {
 
   it('expands a plan for `dry` instead of reporting a missing artifact', async () => {
     const ctx = await mount()
-    const result = await call(ctx, 'layawebuse_run', { app: 'learned-cart', dry: true })
+    const result = await call(ctx, 'amberflow_run', { app: 'learned-cart', dry: true })
     // Before the fix this was an error: the real CLI writes no artifact for `--dry` and exits 0.
     expect(result.isError).toBe(false)
     const value = result.value as {
@@ -144,7 +148,7 @@ describe.skipIf(!HAS_REPO || !CHROMIUM)('live checkout + browser', () => {
   it('reports FAIL when a real run really fails, with the blocked step named', async () => {
     const ctx = await mount()
     // A price cap the fixture site cannot apply: the run must end non-zero with a blocked subgoal.
-    const result = await call(ctx, 'layawebuse_run', {
+    const result = await call(ctx, 'amberflow_run', {
       app: 'transfer-flyquest', no_model: true, no_sources: true, slots: ['cap=999'],
     })
     expect(result.isError).toBe(false)
@@ -173,7 +177,7 @@ describe.skipIf(!HAS_REPO)('live checkout + learn', () => {
   it('refuses to spawn anything when a non-interactive call has no script', async () => {
     const ctx = await mount()
     const started = Date.now()
-    const result = await call(ctx, 'layawebuse_learn', {
+    const result = await call(ctx, 'amberflow_learn', {
       url: 'testpages/product.html', goal: 'add the wireless mouse to the cart',
     })
     expect(result.isError).toBe(true)
@@ -183,14 +187,14 @@ describe.skipIf(!HAS_REPO)('live checkout + learn', () => {
   }, 60_000)
 
   it.skipIf(!HAS_MODEL || CHROMIUM === null)('records a flow from a script and reports the zero-forward replay', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'layawebuse-live-learn-'))
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amberflow-live-learn-'))
     const script = path.join(dir, 'actions.json')
     fs.writeFileSync(script, JSON.stringify([
       { op: 'click', hint: '[data-test=add-to-cart]', label: 'Add to cart' },
       { op: 'click', hint: '[data-test=cart-link]', label: 'Cart' },
     ]))
     const ctx = await mount()
-    const result = await call(ctx, 'layawebuse_learn', {
+    const result = await call(ctx, 'amberflow_learn', {
       url: 'testpages/product.html',
       goal: 'add the wireless mouse to the cart',
       id: 'live-learn-probe',

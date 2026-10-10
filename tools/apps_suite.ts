@@ -47,7 +47,7 @@ export function isLive(pack: AppPack): boolean {
 
 /** 跑一个应用包（离线口径）。返回值就是套件表格里的一行。 */
 export async function runOne(pack: AppPack): Promise<SuiteRow> {
-  const out = path.join("/tmp", "layawebuse-suite", pack.id);
+  const out = path.join("/tmp", "amberflow-suite", pack.id);
   fs.mkdirSync(out, { recursive: true });
   const res: AppRunResult = await runApp(pack, {
     verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json"),
