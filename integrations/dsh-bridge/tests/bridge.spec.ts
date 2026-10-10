@@ -74,6 +74,14 @@ describe('bridge helpers', () => {
     expect(headful).toContain('--headful')
   })
 
+  it('with a tsx launcher configured, both CLIs spawn through it (node_modules checkout shape)', () => {
+    const opts = { ...OPTIONS, tsxCli: '/opt/tsx/dist/cli.mjs' }
+    const run = runArgs(opts, { app: 'demo', outDir: '/tmp/out' })
+    expect(run.slice(0, 4)).toEqual(['/usr/bin/node', '/opt/tsx/dist/cli.mjs', '--experimental-strip-types', '/repo/src/app-runner.ts'])
+    const learn = learnArgs(opts, { url: 'u', goal: 'g', script: '/tmp/s.json', outDir: '/tmp/out' })
+    expect(learn.slice(0, 4)).toEqual(['/usr/bin/node', '/opt/tsx/dist/cli.mjs', '--experimental-strip-types', '/repo/tools/learn.ts'])
+  })
+
   it('summarizeRun keeps FAILURES only and names the artifact it read', () => {
     const out = tmp('run-out')
     fs.writeFileSync(path.join(out, 'demo-result.json'), JSON.stringify({
@@ -587,5 +595,39 @@ describe('checkout resolution: config > LAYAWEBUSE_REPO > self-locate', () => {
     const result = await call(ctx, 'layawebuse_apps', { filter: 'demo-app' })
     expect(result.isError).toBe(false)
     expect((result.value as { apps: { id: string }[] }).apps.map(a => a.id)).toContain('demo-app')
+  })
+})
+
+describe('checkout under node_modules (git-install shape)', () => {
+  /** A fake profile tree: node_modules/layawebuse is the checkout, tsx installed alongside or not. */
+  function profileTree(withTsx: boolean): { repo: string; tsxCli: string } {
+    const root = tmp('profile')
+    const repo = path.join(root, 'node_modules', 'layawebuse')
+    fs.mkdirSync(path.join(repo, 'src'), { recursive: true })
+    fs.writeFileSync(path.join(repo, 'src', 'app-runner.ts'), 'process.exit(0)')
+    const tsxCli = path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs')
+    if (withTsx) {
+      fs.mkdirSync(path.dirname(tsxCli), { recursive: true })
+      fs.writeFileSync(tsxCli, '')
+    }
+    return { repo, tsxCli }
+  }
+
+  it('mounts when a tsx entry exists beside the node_modules checkout', async () => {
+    const t = profileTree(true)
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await expect(ctx.plugin(Bridge, { repoPath: t.repo })).resolves.toBeDefined()
+  })
+
+  it('refuses to mount under node_modules with no reachable tsx, naming the Node error', async () => {
+    const t = profileTree(false)
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    // process.argv[1] (the vitest host chain) contains no node_modules/tsx in this repo's dep tree,
+    // so the search finds nothing and must fail with the actionable sentence rather than a later spawn.
+    await expect(ctx.plugin(Bridge, { repoPath: t.repo })).rejects.toThrow(/ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING/)
   })
 })

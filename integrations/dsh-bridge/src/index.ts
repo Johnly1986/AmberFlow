@@ -76,7 +76,9 @@ export interface Config {
 /** Schemastery schema for {@link Config}. */
 export const Config: z<Config> = z.object({
   repoPath: z.string(),
-  nodeBin: z.string().default(process.execPath),
+  // No schema default on purpose: resolveOptions must tell "unset" from "set" to decide whether
+  // the node_modules checkout needs the tsx launcher; `?? process.execPath` applies the fallback.
+  nodeBin: z.string(),
   timeoutMs: z.natural().min(1000).default(900_000),
   allowDangerous: z.boolean().default(false),
   toolPrefix: z.string().default('layawebuse'),
@@ -102,6 +104,32 @@ export function findCheckout(fromDir: string): string | undefined {
   }
 }
 
+/** Whether a path sits inside a `node_modules` tree, where Node refuses its own type stripping. */
+function underNodeModules(dir: string): boolean {
+  return dir.split(/[\\/]/).includes('node_modules')
+}
+
+/**
+ * Walk up each root chain looking for an installed tsx entry (`node_modules/tsx/dist/cli.mjs`).
+ * The DSH host runs on tsx, so its install tree usually provides it; a profile that installed the
+ * engine with hoisted deps may provide it too.
+ * @param fromDirs - ancestor chains to search, in order.
+ * @returns the absolute cli.mjs path, or undefined.
+ */
+function findTsxCli(fromDirs: string[]): string | undefined {
+  for (const start of fromDirs) {
+    let dir = path.resolve(start)
+    for (;;) {
+      const cli = path.join(dir, 'node_modules', 'tsx', 'dist', 'cli.mjs')
+      if (fs.existsSync(cli)) return cli
+      const parent = path.dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  }
+  return undefined
+}
+
 /** Resolve defaults and verify the checkout really is one, at LOAD time rather than first call. */
 function resolveOptions(config: Config): BridgeOptions {
   // Precedence: explicit config (a patch line) > LAYAWEBUSE_REPO > this module's own checkout.
@@ -120,9 +148,28 @@ function resolveOptions(config: Config): BridgeOptions {
   if (!/^[a-z][a-z0-9_]*$/.test(prefix)) {
     throw new Error(`layawebuse-bridge: toolPrefix ${JSON.stringify(prefix)} must be lower_snake_case`)
   }
+  // Node's own type stripping refuses .ts files under a node_modules tree (Node 22-24, no flag
+  // overrides it). A git-installed bundle lives exactly there, so spawn through tsx instead —
+  // unless the deployment already named its own launcher via nodeBin (a tsx binary also works).
+  let tsxCli: string | undefined
+  if (underNodeModules(repoPath) && config.nodeBin === undefined) {
+    tsxCli = findTsxCli([
+      repoPath,
+      process.argv[1] === undefined ? path.dirname(process.execPath) : path.dirname(path.resolve(process.argv[1])),
+    ])
+    if (tsxCli === undefined) {
+      throw new Error(
+        `layawebuse-bridge: the checkout ${repoPath} sits under node_modules, where Node cannot run `
+        + 'its TypeScript CLIs (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING). No tsx was found from '
+        + 'the checkout or the host install tree: install tsx into this profile, point '
+        + 'Config.nodeBin at a tsx binary, or set LAYAWEBUSE_REPO to a checkout outside node_modules.',
+      )
+    }
+  }
   return {
     repoPath,
     nodeBin: config.nodeBin ?? process.execPath,
+    ...(tsxCli === undefined ? {} : { tsxCli }),
     timeoutMs: config.timeoutMs ?? 900_000,
     allowDangerous: config.allowDangerous ?? false,
     toolPrefix: prefix,

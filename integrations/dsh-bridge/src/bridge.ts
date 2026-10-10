@@ -39,6 +39,12 @@ export interface BridgeOptions {
    * how many of the newest `dsh-layawebuse-*` temp directories survive. 0 disables pruning.
    */
   keepRuns: number
+  /**
+   * Absolute path of tsx's `dist/cli.mjs` when the checkout lives under a `node_modules` tree.
+   * Node's own `--experimental-strip-types` refuses such paths (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING),
+   * so the engine CLI is launched through tsx, which forwards the flags and handles the file.
+   */
+  tsxCli?: string
 }
 
 /** One declared app, as the bridge presents it to the model. */
@@ -320,7 +326,7 @@ export function runArgs(
     slots?: Record<string, string>
   },
 ): string[] {
-  const argv = [options.nodeBin, '--experimental-strip-types', path.join(options.repoPath, 'src', 'app-runner.ts')]
+  const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []), '--experimental-strip-types', path.join(options.repoPath, 'src', 'app-runner.ts')]
   argv.push('--app', args.app, '--out', args.outDir)
   if (args.dry) argv.push('--dry')
   if (args.noModel) argv.push('--no-model')
@@ -342,7 +348,7 @@ export function learnArgs(
   options: BridgeOptions,
   args: { url?: string; goal?: string; id?: string; cdp?: string; script?: string; packDir?: string; outDir: string; headful?: boolean },
 ): string[] {
-  const argv = [options.nodeBin, '--experimental-strip-types', path.join(options.repoPath, 'tools', 'learn.ts'), '--json', '--yes']
+  const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []), '--experimental-strip-types', path.join(options.repoPath, 'tools', 'learn.ts'), '--json', '--yes']
   if (args.url) argv.push('--url', args.url)
   if (args.goal) argv.push('--goal', args.goal)
   if (args.id) argv.push('--id', args.id)

@@ -56,7 +56,11 @@ plugin window runs the same operation). Three channels are supported:
   locates its own checkout; no build script runs, so no `allowBuilds` grant is needed for this
   package itself (its dependencies that do run install scripts — `onnxruntime-node`, `protobufjs` —
   are the only names to approve if pnpm lists them). Pin commits for installs you trust long-term
-  (`#<sha>`), and run `npx playwright install chromium` once where the profile boots.
+  (`#<sha>`), and run `npx playwright install chromium` once where the profile boots. The ONNX
+  decision model is a large artifact that deliberately stays out of git: rules-only runs and
+  `learn`'s zero-forward replay need nothing beyond the clone, but model-fallback decisions on a
+  fresh machine require placing `laya_dec.onnx` (+ `.onnx.data`) and pointing `LAYAA_ONNX_MODEL`
+  at it (see BACKUP.md); without it, `no_model: false` runs fail loudly at model load.
 - **npm or tarball**: pack with `pnpm pack`; the root `package.json` is the bundle, so the git
   behavior above carries over unchanged.
 
