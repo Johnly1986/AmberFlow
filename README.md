@@ -1,8 +1,8 @@
 # AmberFlow
 
-> **冻结计划的浏览器自动化中间件**（TypeScript / Node ≥ 22.6）：LLM 只规划一次，执行由本地规则与决策模型逐步完成，**成功与否只认 DOM 信号**——把网页流程凝成琥珀，演示一次，重放永远。（曾用名 LayaWebUse；"Laya" 保留为本地决策模型的姓。）
+> **冻结计划的浏览器自动化中间件**（TypeScript / Node ≥ 22.6）：LLM 只规划一次，执行由本地规则与决策模型逐步完成，演示一次后既可端侧执行，也可以手动规划。
 
-## 30 秒跑起来
+## 运行
 
 ```bash
 npm ci && npx playwright install chromium
