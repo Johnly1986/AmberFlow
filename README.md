@@ -21,7 +21,19 @@ step 1: click a "Add to cart" (clicked, rule:match, conf=1.00)
 
 没有模型权重也能跑：计划点名了目标的步骤由**规则**解决；确实需要模型兜底的步骤会明确说明缺什么，而不是瞎猜或抛异常。
 
-## 三条硬约束（为什么可信）
+## 在 DSH 会话里用（插件）
+
+装进 profile 即得三个工具——`amberflow_apps`（列应用）/ `amberflow_run`（跑一个，含 `dry` / `no_model` / `slots`）/ `amberflow_learn`（录制归纳）：
+
+```bash
+dsh plugin --profile <名称> add github:Johnly1986/AmberFlow          # 仓库直装（见 README 附注：私有库需凭证）
+dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridge   # 开发态 link
+```
+
+桥不做任何浏览器逻辑——它调用本仓库的 CLI 并如实汇总产物。详见 [integrations/dsh-bridge/README.md](integrations/dsh-bridge/README.md)。
+
+
+## 三条硬约束
 
 - **不重规划**——任务开始时冻结成一份计划（有序子目标 + 每步完成信号 + 数据袋），执行器只按计划推进。
 - **不发明取值**——要填的值只来自计划的数据袋（`slots`），模型无权产生值。
@@ -74,17 +86,6 @@ npm run apps -- --app hello --no-model --out /tmp/hello   # 期望 exit 0 + "结
 ```
 
 两条省时间的规则：**浏览器步必须点名得到目标**（`target_hint`，或规则能在元素池里命中）；**`--slot k=v` 的键必须在包里声明过**（打错名字是用法错误，不是静默忽略）。
-
-## 在 DSH 会话里用（插件）
-
-装进 profile 即得三个工具——`amberflow_apps`（列应用）/ `amberflow_run`（跑一个，含 `dry` / `no_model` / `slots`）/ `amberflow_learn`（录制归纳）：
-
-```bash
-dsh plugin --profile <名称> add github:Johnly1986/AmberFlow          # 仓库直装（见 README 附注：私有库需凭证）
-dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridge   # 开发态 link
-```
-
-桥不做任何浏览器逻辑——它调用本仓库的 CLI 并如实汇总产物。详见 [integrations/dsh-bridge/README.md](integrations/dsh-bridge/README.md)。
 
 ## 在代码里用
 
