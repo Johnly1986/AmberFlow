@@ -539,3 +539,53 @@ describe('environment and artifact policy', () => {
     expect(pruneRunDirs(0, 0, root)).toBe(0)
   })
 })
+
+describe('checkout resolution: config > LAYAWEBUSE_REPO > self-locate', () => {
+  it('findCheckout walks up to the ancestor holding src/app-runner.ts', () => {
+    const repo = stubCheckout(PACKS)
+    const deep = path.join(repo, 'integrations', 'dsh-bridge', 'src')
+    fs.mkdirSync(deep, { recursive: true })
+    expect(Bridge.findCheckout(deep)).toBe(fs.realpathSync(repo))
+    expect(Bridge.findCheckout(tmp('nowhere'))).toBeUndefined()
+  })
+
+  it('an explicit config repoPath wins over the environment', async () => {
+    process.env.LAYAWEBUSE_REPO = '/does/not/exist'
+    try {
+      const ctx = await mount(stubCheckout(PACKS))
+      const result = await call(ctx, 'layawebuse_apps', {})
+      expect(result.isError).toBe(false)
+    } finally {
+      delete process.env.LAYAWEBUSE_REPO
+    }
+  })
+
+  it('LAYAWEBUSE_REPO decides when the config omits repoPath', async () => {
+    const repo = stubCheckout(PACKS)
+    process.env.LAYAWEBUSE_REPO = repo
+    try {
+      const ctx = new Context()
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(Bridge, {})
+      const result = await call(ctx, 'layawebuse_apps', {})
+      expect(result.isError).toBe(false)
+      expect((result.value as { apps: unknown[] }).apps.length).toBeGreaterThan(0)
+    } finally {
+      delete process.env.LAYAWEBUSE_REPO
+    }
+  })
+
+  it('with neither config nor env, the plugin self-locates its own checkout (git-install shape)', async () => {
+    // The specs run inside the LayaWebUse repo, so the module's ancestors ARE a checkout — the same
+    // resolution a git-installed bundle performs against its clone.
+    delete process.env.LAYAWEBUSE_REPO
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(Bridge, {})
+    const result = await call(ctx, 'layawebuse_apps', { filter: 'demo-app' })
+    expect(result.isError).toBe(false)
+    expect((result.value as { apps: { id: string }[] }).apps.map(a => a.id)).toContain('demo-app')
+  })
+})

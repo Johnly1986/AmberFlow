@@ -22,6 +22,7 @@ import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { listApps, type BridgeOptions } from './bridge.ts'
 import { createService, runApp, learn, type LayawebuseService } from './service.ts'
 
@@ -43,8 +44,12 @@ export const inject = ['tools']
 
 /** Deployment configuration for the bridge. */
 export interface Config {
-  /** Absolute path of the LayaWebUse checkout (the one holding `src/app-runner.ts`). Required. */
-  repoPath: string
+  /**
+   * Absolute path of the LayaWebUse checkout (the one holding `src/app-runner.ts`). Optional:
+   * precedence is config > `LAYAWEBUSE_REPO` > the checkout this plugin module lives in
+   * (a git-installed bundle contains the whole engine, so it self-locates).
+   */
+  repoPath?: string
   /** Node binary used for the external CLI; defaults to the running interpreter. */
   nodeBin?: string
   /** Hard wall-clock cap per call, ms (default 15 min: live runs are slow by nature). */
@@ -70,7 +75,7 @@ export interface Config {
 
 /** Schemastery schema for {@link Config}. */
 export const Config: z<Config> = z.object({
-  repoPath: z.string().required(),
+  repoPath: z.string(),
   nodeBin: z.string().default(process.execPath),
   timeoutMs: z.natural().min(1000).default(900_000),
   allowDangerous: z.boolean().default(false),
@@ -80,11 +85,35 @@ export const Config: z<Config> = z.object({
   keepRuns: z.natural().default(30),
 })
 
+/**
+ * Walk up from a directory looking for a LayaWebUse checkout (one holding `src/app-runner.ts`).
+ * Used when no repoPath was configured: a git-installed bundle contains the whole engine, so the
+ * plugin can locate its own checkout — a link/path install resolves to the same tree it always used.
+ * @param fromDir - the directory to start from (typically this module's).
+ * @returns the checkout root, or undefined when no ancestor is one.
+ */
+export function findCheckout(fromDir: string): string | undefined {
+  let dir = path.resolve(fromDir)
+  for (;;) {
+    if (fs.existsSync(path.join(dir, 'src', 'app-runner.ts'))) return dir
+    const parent = path.dirname(dir)
+    if (parent === dir) return undefined
+    dir = parent
+  }
+}
+
 /** Resolve defaults and verify the checkout really is one, at LOAD time rather than first call. */
 function resolveOptions(config: Config): BridgeOptions {
-  const repoPath = path.resolve(config.repoPath)
-  const entry = path.join(repoPath, 'src', 'app-runner.ts')
-  if (!fs.existsSync(entry)) {
+  // Precedence: explicit config (a patch line) > LAYAWEBUSE_REPO > this module's own checkout.
+  const repoPath = config.repoPath !== undefined && config.repoPath !== ''
+    ? path.resolve(config.repoPath)
+    : process.env.LAYAWEBUSE_REPO !== undefined && process.env.LAYAWEBUSE_REPO !== ''
+      ? path.resolve(process.env.LAYAWEBUSE_REPO)
+      : findCheckout(path.dirname(fileURLToPath(import.meta.url)))
+  if (repoPath === undefined) {
+    throw new Error('layawebuse-bridge: no LayaWebUse checkout found — set Config.repoPath or LAYAWEBUSE_REPO')
+  }
+  if (!fs.existsSync(path.join(repoPath, 'src', 'app-runner.ts'))) {
     throw new Error(`layawebuse-bridge: ${repoPath} is not a LayaWebUse checkout (missing src/app-runner.ts)`)
   }
   const prefix = config.toolPrefix ?? 'layawebuse'

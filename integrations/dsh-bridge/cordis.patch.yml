@@ -1,12 +1,10 @@
 # Bundle layer for @deepseek-ai/dsh-layawebuse-bridge: activating this bundle is what
 # makes the three tools available, so an installation needs no hand-written profile patch.
 #
-# `repoPath` is the LayaWebUse checkout the bridge calls (it must contain src/app-runner.ts;
-# a wrong path fails at load time, loudly). Override it per deployment with the
-# LAYAWEBUSE_REPO environment variable; the default is this project's development path.
+# The row declares no config on purpose: the checkout resolves by precedence inside the plugin
+# (Config.repoPath > LAYAWEBUSE_REPO > the checkout this package sits in / was installed with),
+# and every other key has a schema default. Per the layer rules, a user override of this row
+# replaces the whole `config`, so keeping it empty keeps overriding cheap.
 - insert:
     - id: layawebuse-bridge
       name: '@deepseek-ai/dsh-layawebuse-bridge'
-      config:
-        repoPath: !!js process.env.LAYAWEBUSE_REPO ?? '/root/ML/LayaWebUse'
-        allowDangerous: false
