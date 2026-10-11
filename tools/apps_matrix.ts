@@ -16,6 +16,9 @@ import { parseArgs } from "node:util";
 import { appDirs, loadPack, listPacks } from "../src/app-pack.ts";
 import { listSources, loadSource } from "../src/datasource.ts";
 import { REPO } from "../src/flow.ts";
+// 运行时两列的出处：**上一次 `apps:suite` 真跑**落下的 `<app>-result.json`（`decisions` 字段）。
+// 矩阵本体仍是静态声明检查；这两列只是把"跑过的证据"拼上表——没跑过显示"未跑"，绝不编数。
+import { suiteOutDir } from "./apps_suite.ts";
 
 const SHARED = fs.readdirSync(path.join(REPO, "src"))
   .filter((f) => f.endsWith(".ts")).map((f) => path.join(REPO, "src", f));
@@ -97,6 +100,31 @@ function appCodeLines(appDir: string): number {
   return n;
 }
 
+/** 上一次套件真跑留下的运行时数（没有产物 = 未跑过，显示"未跑"而不是 0）。 */
+interface SuiteStats {
+  /** 模型被咨询的决策数（含未过闸门的）——"保险碰没碰过"。 */
+  modelAsks: number;
+  confMax: number | null;
+  reobserve: number;
+}
+
+function suiteStats(app: string): SuiteStats | null {
+  const file = path.join(suiteOutDir(), app, `${app}-result.json`);
+  try {
+    const doc = JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, any>;
+    const d = doc["decisions"] as Record<string, any> | undefined;
+    if (!d) return null;
+    const conf = d["conf"] as Record<string, any> | undefined;
+    return {
+      modelAsks: Number(d["model_asks"] ?? 0),
+      confMax: typeof conf?.["max"] === "number" ? conf["max"] : null,
+      reobserve: Number(d["reobserve"] ?? 0),
+    };
+  } catch {
+    return null;                      // 没跑过/读不到：如实缺席
+  }
+}
+
 interface Row {
   app: string;
   kind: string;
@@ -111,6 +139,10 @@ interface Row {
   tokens: string[];
   /** 这个包是**生成的**吗？`spec` 就是它的上游（`generated_from`）；手写的是 `null`。 */
   generated: string | null;
+  /** 上一次套件真跑的模型咨询数（`null` = 未跑；0 = 真跑过且零咨询——那是卖点，不是缺数）。 */
+  modelAsks: number | null;
+  confMax: number | null;
+  reobserve: number | null;
 }
 
 export function matrix(): {
@@ -124,8 +156,11 @@ export function matrix(): {
     const srcDir = path.join(dir, "sources");
     const sources = fs.existsSync(srcDir)
       ? fs.readdirSync(srcDir).filter((f) => f.endsWith(".json")).length : 0;
+    const stats = suiteStats(pack.id);
     rows.push({
       app: pack.id, kind: "pack",
+      modelAsks: stats?.modelAsks ?? null, confMax: stats?.confMax ?? null,
+      reobserve: stats?.reobserve ?? null,
       // 数据腿可以是本目录的 source，也可以是引用别的应用的 source（`sources` 字段）
       sources: Math.max(sources, (pack.sources ?? []).length),
       roles: Object.keys(pack.roles ?? {}).length,
@@ -155,6 +190,7 @@ export function matrix(): {
     rows.push({
       app, kind: "sources-only", sources: fs.readdirSync(d).filter((f) => f.endsWith(".json")).length,
       roles: 0, steps: 0, toolSteps: 0, invariants: 0, generated: null,
+      modelAsks: null, confMax: null, reobserve: null,
       declared: fs.readdirSync(d).filter((f) => f.endsWith(".json"))
         .reduce((n, f) => n + jsonLines(path.join(d, f)), 0),
       code: appCodeLines(path.dirname(d)), tokens: declaredTokens(path.dirname(d)),
@@ -207,9 +243,15 @@ export function main(argv: string[] = process.argv.slice(2)): number {
     console.log(JSON.stringify({ rows, leaks, debt }, null, 2));
     return leaks.length ? 1 : 0;
   }
-  const head = ["应用", "类型", "数据源", "角色", "步骤", "工具步", "不变量", "声明行", "代码行", "来源", "声明的标识"];
+  const head = ["应用", "类型", "数据源", "角色", "步骤", "工具步", "不变量", "声明行", "代码行", "模型咨询", "reobserve", "来源", "声明的标识"];
+  // 运行时两列的口径（LAYA_VALUE_PLAN P1）：读上一次 `apps:suite` 的 result.json；
+  // "未跑" ≠ 0——前者是没证据，后者是真跑过且规则消化了全部（这是卖点）。
+  const fmtModel = (r: Row): string => r.modelAsks === null ? "未跑"
+    : `${r.modelAsks}${r.confMax !== null ? `(conf ${r.confMax.toFixed(2)})` : ""}`;
+  const fmtReobs = (r: Row): string => r.reobserve === null ? "未跑" : String(r.reobserve);
   const table = rows.map((r) => [r.app, r.kind, String(r.sources), String(r.roles), String(r.steps),
     String(r.toolSteps), String(r.invariants), String(r.declared), String(r.code),
+    fmtModel(r), fmtReobs(r),
     r.generated
       ? (r.generated.startsWith("recorded:")
         ? `录制:${r.generated.slice("recorded:".length)}`
@@ -248,6 +290,8 @@ export function main(argv: string[] = process.argv.slice(2)): number {
     return 1;
   }
   console.log("泄漏检查：OK（核心层代码里没有任何应用声明的站点/工具标识）");
+  console.log(`模型步/reobserve 两列读的是上一次 \`apps:suite\` 的产物（${suiteOutDir()}）；`
+    + `"未跑"=没有证据，0=真跑过且规则消化了全部（model not needed，正是产品主张）`);
   return 0;
 }
 

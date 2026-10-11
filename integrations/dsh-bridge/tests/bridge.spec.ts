@@ -105,6 +105,29 @@ describe('bridge helpers', () => {
     expect(s.reportPath).toBe(path.join(out, 'demo-report.md'))
   })
 
+  it('summarizeRun reads the model tier and decision line from the artifact', () => {
+    const out = tmp('run-tier')
+    fs.writeFileSync(path.join(out, 'demo-result.json'), JSON.stringify({
+      ok: true, completed: '1/1',
+      subgoals: [{ desc: 'a', status: 'done' }],
+      tool_steps: [], invariants: [],
+      model_status: 'off(missing)',
+      decisions: { line: 'rule 1 · laya 0 · laya:reobserve 0 · escalate 0' },
+    }))
+    const s = summarizeRun(out, 'demo', proc({ code: 0 }))
+    expect(s.model).toBe('off(missing)')
+    expect(s.decisions).toBe('rule 1 · laya 0 · laya:reobserve 0 · escalate 0')
+    // An artifact from an engine that predates the fields: no tier line rather than an invented one.
+    const legacy = tmp('run-legacy')
+    fs.writeFileSync(path.join(legacy, 'demo-result.json'), JSON.stringify({
+      ok: true, completed: '1/1', subgoals: [{ desc: 'a', status: 'done' }],
+      tool_steps: [], invariants: [],
+    }))
+    const l = summarizeRun(legacy, 'demo', proc({ code: 0 }))
+    expect(l.model).toBeUndefined()
+    expect(l.decisions).toBeUndefined()
+  })
+
   it('summarizeRun refuses to invent a result when the run never reached the artifact stage', () => {
     // The cause, not the usage block that follows it.
     expect(() => summarizeRun(tmp('run-empty'), 'demo', proc({
@@ -248,6 +271,19 @@ describe('bridge plugin', () => {
     expect(value.invariants).toEqual({ held: 1, total: 2, failed: ['total-shown'] })
   })
 
+  it('surfaces the model tier and the decision tally (P0: the plugin user must SEE the ladder)', async () => {
+    const ctx = await mount(stubCheckout(PACKS))
+    const result = await call(ctx, 'amberflow_run', { app: 'gen-app', no_model: true, no_sources: true })
+    const value = result.value as { model?: string; decisions?: string }
+    // The stub mirrors the engine: no_model ⇒ the tier line says rules-only, and the artifact's
+    // `decisions.line` reaches the tool without any step-log scraping.
+    expect(value.model).toBe('off(rules-only)')
+    expect(value.decisions).toBe('rule 1 · laya 1 (conf 0.31) · laya:reobserve 0 · escalate 0')
+    const text = JSON.stringify(result)
+    expect(text).toContain('model: off(rules-only)')
+    expect(text).toContain('decisions: rule 1 · laya 1 (conf 0.31)')
+  })
+
   it('executes …_learn through the registry and reports the zero-forward replay', async () => {
     const repo = stubCheckout(PACKS)
     const ctx = await mount(repo)
@@ -293,10 +329,13 @@ describe('verified defects, kept fixed', () => {
     const stdout = JSON.stringify({
       app: 'demo', roles_used: [], slots: {},
       steps: [{ index: 0, kind: 'browser', desc: 'open' }, { index: 1, kind: 'tool', desc: 'write' }],
+      model_status: 'on',
     }, null, 2)
     const s = summarizeRun(tmp('dry-out'), 'demo', proc({ code: 0, stdout }))
     expect(s.dry).toBe(true)
     expect(s.ok).toBe(true)
+    // The tier travels even with a dry run: the caller learns which ladder WOULD have run.
+    expect(s.model).toBe('on')
     expect(s.planSteps).toBe(2)
     expect(s.plan).toEqual([
       { index: 0, kind: 'browser', desc: 'open' },

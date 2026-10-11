@@ -12,13 +12,28 @@
  *   - 一律 `sources: false`（数据腿要网络/外部工具的单独跑）+ 脚本模型（离线、确定性）；
  *   - 需要真工具的包（如 `repo-report` 用 git/jq）如果工具缺失，会以 `tool-unavailable` 如实报失败，
  *     而不是被跳过——**"没验证"必须是可见的**。
+ *
+ * 每行还报**模型出场**三组数（LAYA_VALUE_PLAN P1：出场率 / 挽回 / 缓存）。口径有两个出处，各有
+ * 道理：**过关数在 trace 里数**（`method` 为 laya/laya:reobserve），**咨询数在运行时缝上数**
+ * （`countingRuntime`）——低置信 break 的那次咨询不在 trace 留 `method`，只按 trace 数会把
+ * `transfer-slowjet` 的在场漏报成零出场。`slowjet 咨询 ≥1 而 demo-app = 0` 是同一张表要同时讲的
+ * 两句真话：规则消化了绝大多数，但没有模型时 slowjet 会红。"零出场"也写成卖点
+ * （`model not needed`），不是难看。每个应用的完整结果落 `<套件目录>/<app>/<app>-result.json`，
+ * `apps:matrix` 的"模型咨询/reobserve"两列读的就是这份**上一次真跑**的产物——没有跑过的应用
+ * 显示"未跑"，绝不编数。
  */
 import path from "node:path";
 import fs from "node:fs";
 import { parseArgs } from "node:util";
 import { appDirs, loadPack, type AppPack } from "../src/app-pack.ts";
 import { runApp, refusalLine, type AppRunResult } from "../src/app-runner.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
+import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "../src/decision-cache.ts";
+import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime, type CountingRuntime } from "../src/model.ts";
+
+/** 套件产物目录：matrix 的运行时两列从这里读（单一出处、**调用时**读 env，测试可隔离）。 */
+export function suiteOutDir(): string {
+  return process.env.AMBERFLOW_SUITE_OUT ?? path.join("/tmp", "amberflow-suite");
+}
 
 export type SuiteStatus = "passed" | "needs-dangerous-opt-in" | "failed";
 
@@ -31,6 +46,16 @@ export interface SuiteRow {
   status: SuiteStatus;
   secs: number;
   note?: string;
+  /** 模型被咨询的决策数（含没过置信闸门的——"保险碰没碰过"看这个）。 */
+  model_asks: number;
+  /** 过关并执行的模型步（trace `method` 为 laya/laya:reobserve）；脚本模型下通常 0。 */
+  model_steps: number;
+  /** 模型步的最高 conf（出场率一行里的小尾巴；没有出场为 null）。 */
+  conf_max: number | null;
+  /** 加宽重看救回的步数（`laya:reobserve`）。 */
+  reobserve: number;
+  /** 本次运行期间决策缓存省下的重复提问（增量，不是进程累计）。 */
+  cache_saved: number;
 }
 
 /**
@@ -45,13 +70,27 @@ export function isLive(pack: AppPack): boolean {
   return steps.some((st) => typeof st["start_url"] === "string" && /^https?:\/\//.test(String(st["start_url"])));
 }
 
-/** 跑一个应用包（离线口径）。返回值就是套件表格里的一行。 */
-export async function runOne(pack: AppPack): Promise<SuiteRow> {
-  const out = path.join("/tmp", "amberflow-suite", pack.id);
+/** 跑一个应用包（离线口径）。返回值就是套件表格里的一行；完整结果另落 `<套件目录>/<app>/` 供 matrix 读。 */
+export async function runOne(
+  pack: AppPack, cached: CachedRuntime, counted: CountingRuntime, outBase = suiteOutDir(),
+): Promise<SuiteRow> {
+  const out = path.join(outBase, pack.id);
   fs.mkdirSync(out, { recursive: true });
+  const before = cached.decisionStats();
+  const asksBefore = counted.pickAsks();
   const res: AppRunResult = await runApp(pack, {
     verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json"),
+    // 套件的口径 = 脚本模型：层级如实写，不冒充真 ONNX。咨询数从运行时缝上数——
+    // "哪一步本该问模型"与"模型此刻是谁"是两个问题，seam 回答前者、trace 回答后者。
+    modelStatus: "off(scripted)",
+    // 报**本次运行的增量**：套件一个进程跑所有应用，累计值会把前一个应用的命中算进来。
+    runtimeStats: () => {
+      const after = cached.decisionStats();
+      return { hits: after.hits - before.hits, misses: after.misses - before.misses, entries: after.entries };
+    },
+    pickAsks: () => counted.pickAsks() - asksBefore,
   });
+  fs.writeFileSync(path.join(out, `${pack.id}-result.json`), JSON.stringify(res, null, 2), "utf-8");
   const steps = res.subgoals.length + res.tool_steps.length;
   const skipped = res.subgoals.filter((s) => s.status === "skipped").length;
   const held = res.invariants.filter((i) => i.held).length;
@@ -60,6 +99,7 @@ export async function runOne(pack: AppPack): Promise<SuiteRow> {
   const refusals = res.tool_steps.filter((t) => !t.done).map((t) => t.refused);
   const onlyDangerous = !res.ok && refusals.length > 0 && refusals.every((r) => r === "dangerous");
   const status: SuiteStatus = res.ok ? "passed" : onlyDangerous ? "needs-dangerous-opt-in" : "failed";
+  const d = res.decisions!;
   return {
     app: pack.id,
     steps,
@@ -70,13 +110,24 @@ export async function runOne(pack: AppPack): Promise<SuiteRow> {
     secs: res.secs,
     ...(onlyDangerous
       ? { note: refusalLine("dangerous") } : {}),
+    model_asks: d.model_asks,
+    model_steps: d.model_steps,
+    conf_max: d.conf.max,
+    reobserve: d.reobserve,
+    cache_saved: d.cache?.hits ?? 0,
   };
 }
 
 export async function suite(only: string[] = []): Promise<{
   rows: SuiteRow[]; skipped: string[]; unmatched: string[]; known: string[];
+  /** 整个套件一进程的决策缓存账（命中=省下的重复提问）。 */
+  cache: DecisionCacheStats;
 }> {
-  installLayaRuntime(scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 }))));
+  // 两层包装：缓存记"省下的重复提问"（零成本率），外层计数记"模型被咨询几次"（出场率）——
+  // 命中也是一次咨询，所以计数在缓存外面。laya 是确定性的，同问不重答。
+  const cached = withDecisionCache(scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 }))));
+  const counted = countingRuntime(cached);
+  installLayaRuntime(counted);
   const rows: SuiteRow[] = [];
   const skipped: string[] = [];
   const seen = new Set<string>();
@@ -94,6 +145,7 @@ export async function suite(only: string[] = []): Promise<{
           rows.push({
             app: name, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
             status: "failed", secs: 0, note: `加载失败：${msg}`,
+            model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0,
           });
         }
         continue;
@@ -109,11 +161,11 @@ export async function suite(only: string[] = []): Promise<{
         continue;
       }
       try {
-        rows.push(await runOne(pack));
+        rows.push(await runOne(pack, cached, counted));
       } catch (e) {
         rows.push({
           app: pack.id, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
-          status: "failed", secs: 0,
+          status: "failed", secs: 0, model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0,
           note: `运行崩了：${e instanceof Error ? e.message : String(e)}`,
         });
       }
@@ -124,7 +176,7 @@ export async function suite(only: string[] = []): Promise<{
   // `seen` 在 `--only` 过滤**之前**收集，所以它就是"已知应用"的完整名单（用来给打错字的人候选）。
   const known = [...seen].sort();
   const unmatched = only.filter((o: string) => !seen.has(o) && !rows.some((r) => r.app === o));
-  return { rows, skipped, unmatched, known };
+  return { rows, skipped, unmatched, known, cache: cached.decisionStats() };
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
@@ -155,7 +207,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   } finally {
     console.log = passthrough;
   }
-  const { rows, skipped, unmatched, known } = out;
+  const { rows, skipped, unmatched, known, cache } = out;
   if (unmatched.length) {
     const msg = `--only ${unmatched.map((u) => JSON.stringify(u)).join(", ")} 没有匹配任何应用。`
       + `已知应用：${known.join(", ")}`;
@@ -168,17 +220,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const code = rows.some((r) => r.status === "failed") ? 1
       : rows.some((r) => r.status === "needs-dangerous-opt-in") ? 3 : 0;
     passthrough(JSON.stringify({
-      rows, skipped, exit_code: code,
+      rows, skipped, cache, exit_code: code,
       legend: "0=全部真执行且通过 ｜ 1=有未通过 ｜ 2=用法错误 ｜ 3=有未执行（危险步未放行）",
     }, null, 2));
     return code;
   }
-  const head = ["应用", "步骤", "完成", "跳过", "不变量", "用时", "结论"];
+  const head = ["应用", "步骤", "完成", "跳过", "不变量", "模型咨询", "reobserve", "用时", "结论"];
   const verdict = (r: SuiteRow): string =>
-    r.status === "passed" ? "通过"
+    r.status === "passed"
+      ? (r.steps > 0 && r.model_asks === 0 ? "通过（model not needed）" : "通过")
       : r.status === "needs-dangerous-opt-in" ? "未执行（危险步未放行）" : "**未通过**";
   const table = rows.map((r) => [r.app, String(r.steps), r.completed, String(r.skipped),
-    r.invariants, `${r.secs}s`, verdict(r)]);
+    r.invariants, `${r.model_asks}${r.conf_max !== null ? `(conf ${r.conf_max.toFixed(2)})` : ""}`,
+    String(r.reobserve), `${r.secs}s`, verdict(r)]);
   const widths = head.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
   const line = (cells: string[]): string => cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
   console.log(line(head));
@@ -199,6 +253,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     + (failed.length ? `，${failed.length} 个未通过` : "")
     + (skipped.length ? `（另有 ${skipped.length} 个要真网络，已跳过——跳过不等于通过）` : "")
     + (!pending.length && !failed.length ? "  ← 全部真执行且通过" : ""));
+  // 三组数（LAYA_VALUE_PLAN P1）：出场率、挽回、缓存——"模型的价值"从这里开始可核对。
+  const modelAsks = rows.reduce((n, r) => n + r.model_asks, 0);
+  const modelSteps = rows.reduce((n, r) => n + r.model_steps, 0);
+  const totalSteps = rows.reduce((n, r) => n + r.steps, 0);
+  const withModel = rows.filter((r) => r.model_asks > 0);
+  const noModel = rows.filter((r) => r.steps > 0 && r.model_asks === 0);
+  console.log(`模型参与：咨询 ${modelAsks} 次（过关执行 ${modelSteps} 步）/ 总步 ${totalSteps}；用到模型的应用：`
+    + `${withModel.map((r) => `${r.app} 问 ${r.model_asks}${r.conf_max !== null ? `(conf ${r.conf_max.toFixed(2)})` : ""}`).join("、") || "无"}`);
+  console.log(`reobserve 救回：${rows.reduce((n, r) => n + r.reobserve, 0)} 步`
+    + `（加宽重看从"低置信要停"边缘拿回的那几步）；零咨询的应用 ${noModel.length} 个`
+    + `——model not needed 正是产品主张的证据：能规则化就别猜。`);
+  console.log(`决策缓存：命中 ${cache.hits} / 提问 ${cache.hits + cache.misses}`
+    + `（laya 是确定性的：同问不重答——${cache.misses} 次是真问，${cache.hits} 次省）`);
   for (const r of pending) console.log(`  - ${r.app}：${r.note ?? ""}`);
   console.log(`退出码：${failed.length ? 1 : pending.length ? 3 : 0}`
     + `（0=全部真执行且通过 ｜ 1=有未通过 ｜ 2=用法错误 ｜ 3=有未执行）`);

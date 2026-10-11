@@ -1,6 +1,8 @@
 # AmberFlow
 
 > **冻结计划的浏览器自动化中间件**（TypeScript / Node ≥ 22.6）：LLM 只规划一次，执行由本地规则与决策模型逐步完成，演示一次后既可端侧执行，也可以手动规划。
+>
+> 规则保证可复现，Laya 保证不轻言放弃，信号保证不作弊。
 
 ## 安装运行
 
@@ -39,6 +41,23 @@ dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridg
 - **不信模型说"完成"**——子目标完成与否由该步自己的 DOM/URL 信号判定，模型判断仅作记录。
 
 分工原则：**规则先于模型**——计划 `target_hint` 点名目标即零成本解决，规则拿不准才问本地模型，模型也不过confidence闸门才考虑升级（默认不接外部 LLM）。
+
+## 为什么本地还养一个模型
+
+模型不是英雄，是**保险**；保险的价值要可核对。四组数字，每组都有当场可跑的复现命令：
+
+| 数字 | 它证明什么 | 怎么复现 |
+|---|---|---|
+| 60 个诱饵元素挡在前面：规则落空 + 目标不在池内 = 必 blocked；模型加宽重看（`laya:reobserve`）把它捞回来 | 池子外的目标谁也选不到——模型负责"不轻言放弃" | `npx vitest run tests/reobserve.test.ts` |
+| `transfer-slowjet`：冷加载的那一问就是模型的活；去掉 `retries` 实测 0/7（0.16 < 0.25 直接 block） | 没有模型这个应用会红——`apps:suite` 的"模型步"列明写 ≥1 | `npm run apps:suite -- --only transfer-slowjet` |
+| 同一份计划二跑：**12 forwards → 0，9.2s → 1.3s**（Windows+GPU 实测；离线口径由套件页脚 `决策缓存` 给同一形状的两个数） | 确定性模型不该被问第二次：本地、免费、可审计 | `npm run cache:measure`（要 ONNX 产物）；离线看套件页脚 |
+| 诚实边界：中文页面上模型 0.03–0.09（argmax 常仍正确）；checkpoint 路由按**文字系统**切、绝不按置信度切（ECE 0.855 的教训写进了故事） | 我们比谁都清楚它不行在哪——这是可信度，不是减分 | `node --experimental-strip-types src/ctrip-task.ts --no-hints` |
+
+装不装得模型，跑之前就知道：`npm run doctor` 点名缺哪件（图 / 外置权重 / tokenizer）并给出一条补齐命令
+`npm run model:fetch -- --from <url 或本地路径>`（SHA256 先验后换，坏件绝不覆盖现有产物）。
+跑完之后，每次运行的结果里都有两行：`model: on|off(missing)` 与"决策来源"一行
+（`rule 19 · laya 1 (conf 0.31) · laya:reobserve 1 · cache 命中 6/12 forwards`）——
+CLI 报告、`apps:suite` 表格与 DSH 插件 `amberflow_run` 的 summary 念的是**同一份账**。
 
 ## 把你的流程固化成应用
 

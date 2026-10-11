@@ -592,6 +592,20 @@ export interface RunSummary {
   line?: string
   /** Semantic-flow runs only: where the learned site profile was written ('' when none was). */
   profilePath?: string
+  /**
+   * Which tier the run executed on — `on`, `off(missing)` (no ONNX artifacts: the rules ladder
+   * did everything a rule could, and model-needed steps blocked honestly), `off(rules-only)`
+   * (the caller asked `no_model`), or `off(scripted)` (a stub checkout's scripted runtime).
+   * Read from the engine's `<app>-result.json` `model_status`; absent only for artifacts written
+   * by older engines, which is reported as no line rather than as a guess.
+   */
+  model?: string
+  /**
+   * The decision-source tally (`rule 19 · laya 1 (conf 0.31) · laya:reobserve 1 · cache 6/12`)
+   * from the engine's `decisions.line` — model appearances in one string, so a plugin user can
+   * SEE the ladder working instead of reading step logs. Absent for older artifacts.
+   */
+  decisions?: string
 }
 
 /** What one `…_plan` call answered: the planned template + site profile, or the honest failure. */
@@ -663,11 +677,12 @@ export function pruneRunDirs(keep: number, minAgeMs = 3_600_000, root = os.tmpdi
  * @param stdout - the process output.
  * @returns the plan, or null when the stream is not an expansion document.
  */
-function readDryPlan(stdout: string): { app: string; steps: PlanStep[] } | null {
+function readDryPlan(stdout: string): { app: string; steps: PlanStep[]; model?: string } | null {
   const doc = parseJsonDocument(stdout)
   if (doc === null || !Array.isArray(doc['steps'])) return null
   const steps = asRecords(doc['steps'])
   if (steps.length !== (doc['steps'] as unknown[]).length) return null
+  const model = asText(doc['model_status'])
   return {
     app: asText(doc['app']),
     steps: steps.map((step, i) => ({
@@ -675,6 +690,7 @@ function readDryPlan(stdout: string): { app: string; steps: PlanStep[] } | null 
       kind: asText(step['kind']),
       desc: asText(step['desc']),
     })),
+    ...(model === '' ? {} : { model }),
   }
 }
 
@@ -705,6 +721,7 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
         invariants: { held: 0, total: 0, failed: [] },
         plan: plan.steps.slice(0, MAX_PLAN_STEPS), planSteps: plan.steps.length,
         outDir, reportPath: '', stdoutTail: outcome.stdout, timedOut: false,
+        ...(plan.model === undefined ? {} : { model: plan.model }),
       }
     }
     const detail = firstLines(outcome.stderr) || firstLines(outcome.stdout)
@@ -774,7 +791,21 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
       : '',
     stdoutTail: outcome.stdout,
     timedOut: outcome.timedOut,
+    // Which tier ran, and who decided each step — read from the artifact, never inferred from
+    // the exit code (P0: a plugin user must SEE that the model did or did not take part).
+    ...modelFields(raw),
   }
+}
+
+/** `model_status` / `decisions.line` from the artifact; keys omitted when an older engine wrote none. */
+function modelFields(raw: Record<string, unknown>): { model?: string, decisions?: string } {
+  const out: { model?: string, decisions?: string } = {}
+  const status = asText(raw['model_status'])
+  if (status !== '') out.model = status
+  const d = asRecord(raw['decisions'])
+  const line = d === null ? '' : asText(d['line'])
+  if (line !== '') out.decisions = line
+  return out
 }
 
 /**

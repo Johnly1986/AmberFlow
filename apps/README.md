@@ -93,10 +93,19 @@ node --experimental-strip-types src/datasource.ts --source git-log --out /tmp/ap
 npm run apps -- --list                                  # 发现了哪些应用包
 npm run apps -- --app demo-app --dry                     # 只展开计划（不开浏览器、不装模型）
 npm run apps -- --app demo-app --no-model                # 离线整跑（脚本模型，CI 可跑）
-npm run apps -- --app demo-app                            # 真模型（需要 1.7GB ONNX 产物）
-npm run apps:matrix                                      # 度量：声明行 / 代码行 / 防泄漏
+npm run apps -- --app demo-app                            # 真模型（需要产物；缺了 `npm run model:fetch` 补）
+npm run apps:matrix                                      # 度量：声明行 / 代码行 / 防泄漏 + 上次套件的模型咨询两列
 npm run apps:suite                                       # 一条命令验收所有离线旅程应用（结论表 + 退出码）
 ```
+
+每次运行都带**两行模型账**（`docs/LAYA_VALUE_PLAN.md` P0/P1：保险的价值要看得见）：
+
+- `model: on | off(missing) | off(rules-only)`——此刻跑在哪一层（DSH 桥的 `amberflow_run` summary 念同一行）；
+- `决策来源：rule 19 · laya 1 (conf 0.31) · laya:reobserve 1 · 模型被咨询 N 次（…未过闸门） · cache 命中 N/M forwards`——
+  出场率 / 挽回 / 缓存三组数。口径：过关数在 trace 里数，**咨询数在运行时缝上数**（低置信的咨询不在 trace 留
+  `method`，只数 trace 会把 `transfer-slowjet` 这种"问了、没过、靠 retries"的在场漏报成零出场）。
+  `apps:suite` 的"模型咨询"列与 `apps:matrix` 的两列读的是**上一次真跑**落下的 `*-result.json`；
+  matrix 上"未跑"≠0——前者是没证据，后者是真跑过且规则消化了全部（结论列直接写 `model not needed`）。
 
 **退出码契约**（`npm run apps` 与 `npm run apps:suite` 都写进了 `--help`）：
 

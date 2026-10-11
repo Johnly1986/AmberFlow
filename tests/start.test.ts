@@ -13,7 +13,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { doctorReport, main, preflight, type Io } from "../src/start.ts";
+import { doctorReport, main, preflight, type Io, type Preflight } from "../src/start.ts";
+import type { ModelArtifacts } from "../src/model-artifacts.ts";
 import { BrowserMiddleware } from "../src/executor.ts";
 import { checkSignal } from "../src/signals.ts";
 import { installLayaRuntime } from "../src/model.ts";
@@ -39,6 +40,33 @@ describe("doctor — say what is ready and what is missing", () => {
     // whatever the state, it either explains the fix or points at the first command
     expect(text).toMatch(/playwright install chromium|npm start/);
     expect(r.ok || /✗/.test(text)).toBe(true);
+  });
+
+  it("缺件报告带操作：点名缺哪件，并给出一条补齐命令（P0 的『缺 → 一条命令补』）", () => {
+    const mk = (a: Partial<ModelArtifacts>): Preflight => {
+      const artifacts = {
+        onnxPath: "/tmp/laya_dec.onnx", dataPath: "/tmp/laya_dec.onnx.data",
+        graph: false, weights: false, tokenizerDir: null, ready: false, ...a,
+      };
+      // 与 `preflight()` 同一规则：model 就是"三件齐"（旧版只看两个文件，tokenizer 缺了也说真模型）。
+      return {
+        node: "22.6.0", nodeOk: true, chromium: "/bin/chromium", llm: false, browserPath: null,
+        model: artifacts.ready, artifacts,
+      };
+    };
+    const all = doctorReport(mk({})).lines.join("\n");
+    expect(all).toContain("缺 ONNX 图 / 外置权重 .onnx.data / tokenizer");
+    expect(all).toContain("npm run model:fetch -- --from");
+    expect(all).toContain("[--tokenizer <path|url>]");
+    // 只缺 tokenizer 时，补齐命令同样点名 tokenizer（它就是要补的那一件），不误报缺图。
+    const tokOnly = doctorReport(mk({ graph: true, weights: true })).lines.join("\n");
+    expect(tokOnly).toContain("缺 tokenizer");
+    expect(tokOnly).toContain("[--tokenizer <path|url>]");
+    expect(tokOnly).not.toContain("ONNX 图");
+    // 齐了就说齐了——同一行的 ✓ 不许骗人（旧版只看两个文件，tokenizer 缺了也报"真模型"）。
+    const ready = doctorReport(mk({ graph: true, weights: true, tokenizerDir: "/tok", ready: true })).lines.join("\n");
+    expect(ready).toMatch(/决策模型.*✓ 真模型（图 \+ 权重 \+ tokenizer 齐）/);
+    expect(ready).not.toContain("model:fetch");
   });
 });
 

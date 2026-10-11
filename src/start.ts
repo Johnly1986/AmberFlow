@@ -30,6 +30,7 @@ import { extractElements, type Elem, type ElemPool } from "./extraction.ts";
 import { REPO } from "./flow.ts";
 import { induceHint } from "./hint-memory.ts";
 import { LayaNotConfiguredError, installLayaRuntime } from "./model.ts";
+import { checkArtifacts, missingPieces, onnxModelPath, type ModelArtifacts } from "./model-artifacts.ts";
 import { createLayaOnnxRuntime } from "./laya-onnx.ts";
 import { PlanningRules, TaskPlan } from "./plan.ts";
 
@@ -66,13 +67,16 @@ export interface StartDeps {
   noModel?: boolean;
 }
 
-const MODEL_PATH = (): string => process.env.LAYA_ONNX_MODEL ?? "/tmp/laya_dec.onnx";
+/** 与 `src/model-artifacts.ts` 同一约定（旧名 LAYAA_ONNX_MODEL 也认）。 */
+const MODEL_PATH = (): string => onnxModelPath();
 
 export interface Preflight {
   node: string;
   nodeOk: boolean;
   chromium: string | null;
   model: boolean;
+  /** 三件产物的逐项状态（图/权重/tokenizer）——doctor 的"缺哪件点名哪件"靠它。 */
+  artifacts: ModelArtifacts;
   llm: boolean;
   browserPath: string | null;
 }
@@ -93,19 +97,28 @@ export function preflight(): Preflight {
       chromiumPath = null;
     }
   }
-  const base = MODEL_PATH();
+  const artifacts = checkArtifacts(MODEL_PATH());
   return {
     node,
     nodeOk: maj > 22 || (maj === 22 && min >= 6),
     chromium: chromiumPath,
-    model: fs.existsSync(base) && fs.existsSync(`${base}.data`),
+    model: artifacts.ready,
+    artifacts,
     llm: Boolean(process.env.OPENAI_BASE_URL && process.env.OPENAI_API_KEY),
     browserPath: process.env.PLAYWRIGHT_BROWSERS_PATH ?? null,
   };
 }
 
-const SOURCE_HINT = (base: string): string =>
-  `（导出方式见 node-port-poc/README.md；或设 LAYA_ONNX_MODEL=${base}）`;
+/**
+ * 缺件的一行话 = **缺哪件 + 一条补齐命令**（LAYA_VALUE_PLAN P0：对齐 Node/chromium 项的既有体例）。
+ * 产物一套三件（图 / 外置权重 / tokenizer），只说"缺"不顶用——点名到件，命令能直接抄。
+ */
+const MODEL_MISSING_LINE = (a: ModelArtifacts): string => {
+  const miss = missingPieces(a);
+  return `决策模型     ✗ 缺 ${miss.join(" / ")}（${a.onnxPath} 一套三件）\n`
+    + `             → 一条命令补：npm run model:fetch -- --from <url 或本地路径>`
+    + (miss.includes("tokenizer") ? " [--tokenizer <path|url>]" : "");
+};
 
 /** Plain-language report, with the exact next command for anything missing. */
 export function doctorReport(p: Preflight): { ok: boolean; lines: string[] } {
@@ -113,8 +126,8 @@ export function doctorReport(p: Preflight): { ok: boolean; lines: string[] } {
   lines.push(`Node        ${p.node}${p.nodeOk ? "  ✓" : "  ✗ 需要 ≥ 22.6"}`);
   lines.push(`chromium    ${p.chromium ?? "✗ 未找到"}`);
   lines.push(p.model
-    ? `决策模型     ${MODEL_PATH()}  ✓ 真模型`
-    : `决策模型     ✗ 未找到 ${MODEL_PATH()} → 规则模式：计划点名的步骤照样能跑，需要模型兜底时${SOURCE_HINT(MODEL_PATH())}`);
+    ? `决策模型     ${p.artifacts.onnxPath}  ✓ 真模型（图 + 权重 + tokenizer 齐）`
+    : MODEL_MISSING_LINE(p.artifacts));
   lines.push(`LLM 规划/审计 ${p.llm ? "✓ 已配置" : "— 未配置（用内置替身，全流程照常）"}`);
   const ok = p.nodeOk && p.chromium !== null;
   if (!ok) {
@@ -343,7 +356,8 @@ async function commandJob(
       io.out("");
       io.out("这一步需要本地决策模型兜底，但没找到模型权重。两种选择：");
       io.out(`  1) 让计划点名目标（本次演示已经这样做了；规则命不中时才需要模型）`);
-      io.out(`  2) 准备模型产物：${SOURCE_HINT(MODEL_PATH())}`);
+      io.out(`  2) 准备模型产物：npm run model:fetch -- --from <url 或本地路径>`
+        + `（落点约定：${MODEL_PATH()}，见 npm run doctor 的缺件点名）`);
       return 3;
     }
     throw err;
@@ -418,7 +432,8 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
   // Real weights when they are there; otherwise run in rules mode and let a step that
   // genuinely needs the model say so (never a stack trace, never a guess).
   if (p.model && !deps.noModel) installLayaRuntime(createLayaOnnxRuntime());
-  else io.out(`（规则模式：未找到 ${MODEL_PATH()} —— 计划点名的步骤照样能跑）\n`);
+  else io.out(`（规则模式：模型产物不齐——缺 ${missingPieces(p.artifacts).join("/")}，`
+    + `补齐见 npm run doctor / npm run model:fetch；计划点名的步骤照样能跑）\n`);
 
   const goal = v.goal;
   const url = v.url;

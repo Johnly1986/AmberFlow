@@ -270,9 +270,11 @@ export function apply(ctx: Context, config: Config): void {
     name: `${toolPrefix}_run`,
     description:
       'Run one declared AmberFlow app end to end (data leg -> browser/tool steps -> end-state '
-      + 'invariants) and return a compact summary: completion, the FAILED subgoals only, refusals, and '
-      + 'invariant results. The full per-step table stays in the report file named by the result, read '
-      + 'it with the read tool when you need the detail. `no_model` keeps the run rules-only (no model '
+      + 'invariants) and return a compact summary: completion, the FAILED subgoals only, refusals, '
+      + 'invariant results, and a `model: on|off(missing)` tier line saying whether the local '
+      + 'decision model was in play at all — plus the per-step decision tally (rule vs laya vs '
+      + 'reobserve vs cache). The full per-step table stays in the report file named by the result, '
+      + 'read it with the read tool when you need the detail. `no_model` keeps the run rules-only (no model '
       + 'forward passes); `dry` expands the plan and returns it instead of executing anything, so it '
       + 'verifies nothing and writes no report. Semantic templates (`kind=semantic-template` in the '
       + 'apps listing) additionally REQUIRE `site` and report a resolution-level tally line '
@@ -358,6 +360,10 @@ export function apply(ctx: Context, config: Config): void {
           // site profile the backfill ring wrote (when it wrote one).
           line: { type: 'string' },
           profilePath: { type: 'string' },
+          // Pack runs: which tier executed (`on` / `off(missing)` / `off(rules-only)` /
+          // `off(scripted)`), and the decision-source tally. Absent only on older artifacts.
+          model: { type: 'string' },
+          decisions: { type: 'string' },
         },
       },
       render: (_args, value) => {
@@ -365,6 +371,7 @@ export function apply(ctx: Context, config: Config): void {
           return [{
             type: 'text',
             text: `DRY ${value.planSteps} step(s) expanded — nothing executed, nothing verified`
+              + (value.model ? ` (model tier: ${value.model})` : '')
               + (value.plan.length
                 ? `:\n${value.plan.map(s => `${s.index}. [${s.kind}] ${s.desc}`).join('\n')}`
                 : ''),
@@ -388,6 +395,8 @@ export function apply(ctx: Context, config: Config): void {
             + (value.refused.length ? `; not executed: ${value.refused.join(', ')}` : '')
             + stopped
             + (value.line ? `; ${value.line}` : '')
+            + `; model: ${value.model ?? 'unknown (artifact has no tier)'}`
+            + (value.decisions ? `\ndecisions: ${value.decisions}` : '')
             + (value.reportPath ? `\nreport: ${value.reportPath}` : '\nno report was written')
             + (value.profilePath ? `\nprofile: ${value.profilePath}` : ''),
         }]
@@ -439,6 +448,8 @@ export function apply(ctx: Context, config: Config): void {
         stdoutTail: summary.stdoutTail,
         ...(summary.line === undefined ? {} : { line: summary.line }),
         ...(summary.profilePath === undefined ? {} : { profilePath: summary.profilePath }),
+        ...(summary.model === undefined ? {} : { model: summary.model }),
+        ...(summary.decisions === undefined ? {} : { decisions: summary.decisions }),
       }
     },
   }))

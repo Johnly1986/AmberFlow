@@ -21,7 +21,8 @@ Environment: the author's box is Windows (bash shell), Python 3.14, CUDA (≈35 
 ```bash
 npm start                                        # 开箱任务：自带页面上跑一份真实计划（离线、零配置）
 npm start -- --goal "把商品加入购物车" --url <页面>   # 演示一次 → 归纳完成信号 + 点名目标 → 执行
-npm run doctor                                   # 环境体检：Node / chromium / 决策模型 / LLM
+npm run doctor                                   # 环境体检：Node / chromium / 决策模型 / LLM（缺件点名 + 补齐命令）
+npm run model:fetch -- --from <url|本地路径>       # 决策模型产物通道：图+权重(+tokenizer)，SHA256 先验后换
 ```
 
 
@@ -517,6 +518,18 @@ These are empirical findings from this codebase's own experiments — preserve t
   JSON), is bounded, resettable, and can append one JSONL record per decision. Measured on the real
   model with the same plan run twice: 12 forwards / second run 9.2 s without it, 6 forwards total with
   it — **second run 0 forwards, 1.3 s**. Exact keys mean a changed page is a miss, never a stale hit.
+- **模型出场有两个口径，缺一个都会漏报（P1 实测出来的）。** The executor writes `method` into the trace
+  only for decisions that PASSED its gates; the ask that dies at `low confidence < floor` never reaches
+  a trace line. So "how often did the model take part" cannot be counted from traces alone —
+  `transfer-slowjet`'s cold load would report 0 model steps while it is precisely the run where the
+  model is load-bearing (asked, below floor, saved by `retries`). Hence two counters, each in one place:
+  **passes counted from traces** (`rule/laya/laya:reobserve/escalate` in `summarizeDecisions`) and
+  **consultations counted at the runtime seam** (`countingRuntime` wraps `predictShortlist`, sees hits
+  AND misses, never touches the executor loop). The gap between them is "asked but never trusted" —
+  reported as its own number, not hidden. Model tier (`on|off(missing)|off(rules-only)`) is written by
+  the engine into `<app>-result.json` (`model_status`), read by `apps:matrix`/`apps:suite`/the DSH bridge
+  — one source (`src/model-artifacts.ts`), because doctor and the runtime once disagreed about what
+  "artifacts complete" means (a box with graph+weights but no tokenizer read as "真模型" and failed later).
 - **The model author's preset wording is not automatically better.** `laya.presets.guard_questions()`
   phrases prompt-injection as "instructions aimed at the AI system rather than a genuine user request";
   measured on the three fixtures it scores benign pages **0.969 / 0.930**, i.e. ABOVE the 0.95 attack

@@ -1,6 +1,23 @@
 # Laya 价值凸显优化方案
 
-**日期**：2026-10-10 ｜ **状态**：提案
+**日期**：2026-10-10 ｜ **状态**：**P0/P1/P2 已实施（2026-10-11）**，P3 按方案"数据回来之后"暂缓
+
+实施落点（每条都可当场复现）：
+
+| 方案项 | 落在哪 |
+|---|---|
+| P0 `model:fetch` 通道 | `src/model-fetch.ts` + npm script；`.part` 先落、SHA256 先验后换、不覆盖已有（`--force` 才换）、tokenizer 可选随装；产物探测单一出处 `src/model-artifacts.ts`。测试 `tests/model-fetch.test.ts` |
+| P0 doctor 缺件点名 | `src/start.ts` 的 `MODEL_MISSING_LINE`：缺哪件（图/权重/tokenizer）+ 一条补齐命令；三件齐才说"✓ 真模型"（旧版只看两个文件，缺 tokenizer 也报绿）。测试 `tests/start.test.ts` |
+| P0 桥 `model: on|off(missing)` | 引擎写 `model_status` 进 `*-result.json`（dry 展开也带），`summarizeRun` 读出并随 summary 渲染；插件用户转述即知跑在哪层。桥测试 `surfaces the model tier…` / `reads the model tier…` |
+| P1 出场量化 | `src/app-runner.ts` `summarizeDecisions`（trace 数过关 + `countingRuntime` 缝上数咨询）→ 结果 JSON / md 报告 / `apps:suite` 列与页脚 / `apps:matrix` 两列（读上次套件产物，未跑≠0）。验收实测：`transfer-slowjet` 咨询 ≥1（且 5 次未过闸门——真话），`demo-app` = 0。测试 `tests/model-visibility.test.ts` |
+| P1 cache 并入套件 | 套件一个进程装 `withDecisionCache`，每行报**增量**命中（累计会把上一个应用算进来），页脚报"缓存节约"总数；`cache:measure` 实测同计划二跑 12 forwards → 0 |
+| P2 叙事升格 | README 新增"为什么本地还养一个模型"四组数字（各带复现命令）+ 首屏品牌句"规则保证可复现，Laya 保证不轻言放弃，信号保证不作弊。"；ARCHITECTURE 决策条目 10 |
+
+实测暴露的一个方案盲区（已按事实修正口径）：P1 原写"trace 已有方法级统计，纯汇总口径"——但执行器在
+`low confidence` 处直接 `break`，**没过闸门的咨询不在 trace 里留 `method`**。只按 trace 数会把
+`transfer-slowjet` 这种"问了、模型没过、靠 retries 才绿"的在场漏报成零出场。所以咨询数改在**运行时缝**上数
+（`countingRuntime`），过关数仍从 trace 数——两个数并排报，差值就是"未过闸门"的次数。
+红线未动：`learn` 的零模型重放门控、DOM 信号唯一真值、决策缓存只做"同问不重答"（重放门控路径不经过它）。
 **判断前提**（本方案不是要让模型"多干活"，而是让它已有的活被看见——以下均有仓内实测背书）
 
 ## 一、诊断：价值为什么不可感知

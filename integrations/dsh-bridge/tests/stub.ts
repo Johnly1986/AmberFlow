@@ -117,11 +117,13 @@ export function stubCheckout(packs: Record<string, unknown>, options: StubOption
     'fs.mkdirSync(out, { recursive: true })',
     // Record what the bridge actually passed, so a spec can prove a slot reached the CLI.
     "fs.writeFileSync('argv.json', JSON.stringify(argv))",
-    // The real CLI's `--dry`: expand the plan, print it, write NO artifact, exit 0.
+    // The real CLI's `--dry`: expand the plan (including which tier WOULD run), print it,
+    // write NO artifact, exit 0.
     "if (argv.includes('--dry')) {",
     `  const steps = Array.from({ length: ${String(options.drySteps ?? 2)} }, (_, i) => `,
     '    ({ index: i, kind: i % 2 ? "tool" : "browser", desc: "step " + i + " " + "x".repeat(80) }))',
-    '  console.log(JSON.stringify({ app, roles_used: [], slots: {}, steps }, null, 2))',
+    '  const tier = argv.includes("--no-model") ? "off(rules-only)" : "on"',
+    '  console.log(JSON.stringify({ app, roles_used: [], slots: {}, steps, model_status: tier }, null, 2))',
     '  process.exit(0)',
     '}',
     'fs.writeFileSync(path.join(out, `${app}-result.json`), JSON.stringify({',
@@ -131,12 +133,17 @@ export function stubCheckout(packs: Record<string, unknown>, options: StubOption
         "  subgoals: [{ desc: 'open the page', status: 'done' }, { desc: 'add to cart', status: 'blocked', obstacle: 'hint matched nothing' }],",
         "  tool_steps: [{ desc: 'dry run', refused: 'dangerous', done: false }],",
         "  invariants: [{ id: 'cart-count-1', held: true }, { id: 'total-shown', held: false }],",
+        // Which tier ran + the decision tally (mirrors the engine's `model_status`/`decisions`).
+        "  model_status: argv.includes('--no-model') ? 'off(rules-only)' : 'off(missing)',",
+        "  decisions: { line: 'rule 1 · laya 1 (conf 0.31) · laya:reobserve 0 · escalate 0' },",
       ]
       : [
         "  ok: true, completed: '2/2',",
         "  subgoals: [{ desc: 'open the page', status: 'done' }],",
         '  tool_steps: [],',
         "  invariants: [{ id: 'cart-count-1', held: true }],",
+        "  model_status: argv.includes('--no-model') ? 'off(rules-only)' : 'off(missing)',",
+        "  decisions: { line: 'rule 1 · laya 0 · laya:reobserve 0 · escalate 0' },",
       ],
     '}))',
     ...options.cleanThenExit === undefined ? [] : [`process.exit(${String(options.cleanThenExit)})`],

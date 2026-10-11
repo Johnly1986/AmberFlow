@@ -71,10 +71,12 @@ if [ -f "$ARTIFACT" ] && [ -f "$ARTIFACT.data" ]; then
     env LAYA_TODAY="${LAYA_TODAY:-2026-10-02}" "$NODE" "$STRIP" src/transfer-task.ts --site skybook --quiet --out "$OUT/transfer"
 elif [ "${SMOKE_REQUIRE_MODEL:-0}" = "1" ]; then
   echo "FAIL: ONNX 产物缺失（$ARTIFACT / $ARTIFACT.data）但 SMOKE_REQUIRE_MODEL=1"
+  echo "      补齐：npm run model:fetch -- --from <url 或本地路径>（SHA256 可钉；见 npm run doctor 的缺件点名）"
   fail=1
 else
   echo "SKIP: 未找到 ONNX 产物（$ARTIFACT / $ARTIFACT.data）"
-  echo "      导出方法见 node-port-poc/README.md；设 SMOKE_REQUIRE_MODEL=1 可让缺失变成失败。"
+  echo "      一条命令补：npm run model:fetch -- --from <url 或本地路径>；导出方法见 node-port-poc/README.md。"
+  echo "      设 SMOKE_REQUIRE_MODEL=1 可让缺失变成失败。"
 fi
 
 echo

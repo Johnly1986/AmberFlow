@@ -28,11 +28,13 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
-import { MockAuditor } from "./audit.ts";
+import { MockAuditor, type TraceStep } from "./audit.ts";
 import { cliRunDetailed, defaultDates, loadSource, runSource, urlFor, type CliObservation } from "./datasource.ts";
+import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "./decision-cache.ts";
+import { checkArtifacts, missingPieces } from "./model-artifacts.ts";
 import { BrowserMiddleware, browserSession, type BrowserSession } from "./executor.ts";
 import { REPO } from "./flow.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "./model.ts";
+import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime } from "./model.ts";
 import { runSubgoalWithRetries } from "./planner.ts";
 import { DESTRUCTIVE_PATTERNS } from "./rules.ts";
 import { checkSignal } from "./signals.ts";
@@ -77,6 +79,98 @@ export interface AppRunOptions {
    */
   captureState?: boolean;
   modelId?: string;
+  /**
+   * 本次运行跑在哪个模型层级（`on` / `off(missing)` / `off(rules-only)` / `off(scripted)`）。
+   * 由**调用方**（CLI / 套件 / 桥的桩）判定并传入——运行器自己不猜：装进 `installLayaRuntime`
+   * 的东西对这里透明，而"真模型在不在"的判定出处在 `src/model-artifacts.ts`。
+   * 结果 JSON 与桥的 summary 都念这一个值（LAYA_VALUE_PLAN P0：用户先要知道此刻跑在哪层）。
+   */
+  modelStatus?: string;
+  /** 决策缓存统计的取数口（调用方装了缓存就给；`runApp` 在旅程跑完后读一次）。 */
+  runtimeStats?: () => DecisionCacheStats;
+  /** 模型咨询计数的取数口（`countingRuntime` 包一层就给；同样是跑完读一次）。 */
+  pickAsks?: () => number;
+}
+
+/**
+ * 一次运行的"决策来源"汇总（LAYA_VALUE_PLAN P1）——把散在 step 日志里的判定方式变成三组数：
+ * 出场率（模型步/总步 + conf）、reobserve 挽回、缓存节约。**纯汇总口径，无新机制**：
+ * 数据就是执行器 trace 里已有的 `method`/`conf`，这里只是数一遍。
+ */
+export interface AppDecisions {
+  /** 浏览器动作腿里"有判定"的步数（trace 条目数；跳过的子目标不产生判定）。 */
+  total_steps: number;
+  /** 各判定方式的计数：`rule:match` / `laya` / `laya:reobserve` / `escalate` / `manual` / 其他。 */
+  by_method: Record<string, number>;
+  /**
+   * 模型被咨询的决策数（运行时缝上数的，含没过置信闸门的那些）。
+   * `laya`/`laya:reobserve` 只统计**过关并执行了**的咨询；咨询而没过闸门不在 trace 里留
+   * `method`（执行器在 `low confidence` 处直接 break），所以"保险碰没碰过"必须看这个数。
+   */
+  model_asks: number;
+  /** 过关执行的模型步：`laya` + `laya:reobserve`（escalate 是远程老师，另列）。 */
+  model_steps: number;
+  /** 加宽重看（`laya:reobserve`）的步数——从"低置信要停"边缘救回来的那一步。 */
+  reobserve: number;
+  /** escalate 步数（LLM 老师点名，非本地模型）。 */
+  escalate: number;
+  /** 过关模型步的 conf 分布（n/min/max；n=0 时 min/max 为 null）。 */
+  conf: { n: number; min: number | null; max: number | null };
+  /** 决策缓存（装了才有）：命中数与提问总数。 */
+  cache: { hits: number, misses: number } | null;
+  /** 一行汇总，人读与机器读同一份：`rule 19 · laya 1 (conf 0.31) · 咨询 5 · laya:reobserve 1 · cache 6/12`。 */
+  line: string;
+}
+
+/** trace + 咨询计数 → 汇总。口径写死在这一个函数里，套件/矩阵/桥/报告四处念同一份数。 */
+export function summarizeDecisions(
+  steps: TraceStep[], cache: DecisionCacheStats | null, modelAsks = 0,
+): AppDecisions {
+  const byMethod: Record<string, number> = {};
+  const modelConfs: number[] = [];
+  for (const t of steps) {
+    const m = typeof t["method"] === "string" ? t["method"] : "other";
+    byMethod[m] = (byMethod[m] ?? 0) + 1;
+    if ((m === "laya" || m === "laya:reobserve") && typeof t["conf"] === "number") {
+      modelConfs.push(t["conf"]);
+    }
+  }
+  const laya = byMethod["laya"] ?? 0;
+  const reobserve = byMethod["laya:reobserve"] ?? 0;
+  const escalate = byMethod["escalate"] ?? 0;
+  const parts = [
+    `rule ${byMethod["rule:match"] ?? 0}`,
+    `laya ${laya}` + (modelConfs.length ? ` (conf ${Math.max(...modelConfs).toFixed(2)})` : ""),
+    `laya:reobserve ${reobserve}`,
+    `escalate ${escalate}`,
+  ];
+  // 咨询数与过关数并排放：差值就是"问了但没过闸门"的那几次——它们不在 trace 里，
+  // 但它们是保险被碰过的直接证据（slowjet 的冷加载正是这一形状）。
+  if (modelAsks !== laya + reobserve) {
+    parts.push(`模型被咨询 ${modelAsks} 次`
+      + (modelAsks > laya + reobserve ? `（${modelAsks - laya - reobserve} 次未过闸门）` : ""));
+  }
+  const extra = Object.entries(byMethod)
+    .filter(([m]) => !["rule:match", "laya", "laya:reobserve", "escalate"].includes(m));
+  for (const [m, n] of extra) parts.push(`${m} ${n}`);
+  if (cache !== null) {
+    parts.push(`cache 命中 ${cache.hits}/${cache.hits + cache.misses} forwards`);
+  }
+  return {
+    total_steps: steps.length,
+    by_method: byMethod,
+    model_asks: modelAsks,
+    model_steps: laya + reobserve,
+    reobserve,
+    escalate,
+    conf: {
+      n: modelConfs.length,
+      min: modelConfs.length ? Math.min(...modelConfs) : null,
+      max: modelConfs.length ? Math.max(...modelConfs) : null,
+    },
+    cache: cache === null ? null : { hits: cache.hits, misses: cache.misses },
+    line: parts.join(" · "),
+  };
 }
 
 export interface ToolStepEvidence {
@@ -158,6 +252,10 @@ export interface AppRunResult {
   sources: AppSourceResult[];
   ok: boolean;
   secs: number;
+  /** 模型层级（`on` / `off(missing)` / `off(rules-only)` / `off(scripted)`；未提供则缺字段）。 */
+  model_status?: string;
+  /** 决策来源汇总（见 `AppDecisions`；LAYA_VALUE_PLAN P1 的"出场率/挽回/缓存"三组数）。 */
+  decisions?: AppDecisions;
   /** `captureState: true` 时的旅程结束状态（见 `RunOptions.captureState`）。 */
   end_state?: StateView;
 }
@@ -337,6 +435,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
 
   const toolSteps: ToolStepResult[] = [];
   const invariantResults: AppInvariantResult[] = [];
+  /** 每一步的判定方式（trace 原样收集）——P1 的出场率/挽回数从这儿数出来，不另造机制。 */
+  const decisionSteps: TraceStep[] = [];
   let browserI = 0;
   try {
     for (const step of expanded.steps) {
@@ -346,8 +446,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       }
       const sg = plan.subgoals[browserI++]!;
       const shell = await getShell();
-      const { rep, attempt } = await runSubgoalWithRetries(
+      const { rep, attempt, steps } = await runSubgoalWithRetries(
         mw as never, sg, plan, sg.start_url ?? "", shell.page, shell.pw, verbose);
+      decisionSteps.push(...steps);
       sg.status = rep.done ? (rep.skipped ? "skipped" : "done") : "blocked";
       sg.attempts = attempt;
       sg.obstacle = rep.done ? null : rep.stop_reason;
@@ -382,6 +483,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const ok = browserOk && toolsOk && invariantResults.every((i) => i.held);
   const doneCount = subgoals.filter((s) => s.status === "done" || s.status === "skipped").length
     + toolSteps.filter((t) => t.done).length;
+  const stats = opts.runtimeStats ? opts.runtimeStats() : null;
   return {
     app: pack.id, label: pack.label, goal: pack.goal,
     pack_path: pack._path ?? "", plan_path: planPath,
@@ -389,6 +491,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     completed: `${doneCount}/${expanded.steps.length}`,
     subgoals, tool_steps: toolSteps, invariants: invariantResults,
     ...(endState ? { end_state: endState } : {}),
+    ...(opts.modelStatus !== undefined ? { model_status: opts.modelStatus } : {}),
+    decisions: summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0),
     sources: sourceResults, ok, secs: Math.round((Date.now() - t0) / 100) / 10,
   };
 }
@@ -401,6 +505,8 @@ export function appReportMarkdown(r: AppRunResult): string {
     `- 应用包：\`${r.pack_path}\``,
     `- 目标：${r.goal}`,
     `- 结果：**${r.ok ? "通过" : "未通过"}** ｜ 步骤 ${r.completed} ｜ 用时 ${r.secs}s`,
+    ...(r.model_status !== undefined
+      ? [`- 模型层级：\`${r.model_status}\`（on=真 ONNX 在位；off(missing)=缺产物，走的是规则模式）`] : []),
     `- 角色：${r.roles_used.map((x) => `\`${x}\``).join(", ") || "（未用角色模板）"}`,
     `- 槽位（值只来自计划）：${JSON.stringify(r.slots)}`,
   ];
@@ -415,6 +521,12 @@ export function appReportMarkdown(r: AppRunResult): string {
     r.subgoals.forEach((s, i) => {
       L.push(`| ${i} | ${String(s.desc).slice(0, 80)} | ${s.status} | ${s.attempts} | ${s.obstacle ?? "-"} |`);
     });
+    if (r.decisions !== undefined) {
+      // 出场率一行（LAYA_VALUE_PLAN P1）：谁判的、模型救了几步、缓存省了几次——小计在表下，不散在日志里。
+      L.push("", `**决策来源**：${r.decisions.line}`
+        + ` ｜ 模型出场 ${r.decisions.model_steps}/${r.decisions.total_steps} 步`
+        + (r.decisions.model_steps === 0 ? "（model not needed——能规则化就别猜）" : ""));
+    }
   }
   if (r.tool_steps.length) {
     L.push("", "## 动作腿：工具步（命令行）", "",
@@ -527,6 +639,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 2;
   }
 
+  // 模型层级在哪一层，**每个出口都要回答**（dry 也不例外——桥的 summary 靠它写
+  // `model: on|off(missing)`，用户先要知道此刻跑在哪个层级，再谈结果可不可信）。
+  const noModel = v["no-model"] === true;
+  const artifacts = checkArtifacts();
+  const modelStatus = noModel ? "off(rules-only)" : artifacts.ready ? "on" : "off(missing)";
+
   if (v.dry) {
     let dryOut;
     try {
@@ -538,18 +656,24 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const { plan, steps, rolesUsed } = dryOut;
     console.log(JSON.stringify({
       app: pack.id, roles_used: rolesUsed, slots: plan.slots,
-      goal: plan.goal, steps, subgoals: plan.subgoals,
+      goal: plan.goal, steps, subgoals: plan.subgoals, model_status: modelStatus,
     }, null, 2));
     return 0;
   }
 
-  if (v["no-model"]) {
-    installLayaRuntime(scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 }))));
-  } else {
-    const { createLayaOnnxRuntime } = await import("./laya-onnx.ts");
-    const rt = createLayaOnnxRuntime();
-    installLayaRuntime(rt);
+  // 两层包装，各数一件事：缓存记"省下的重复提问"（零成本率），计数记"模型被咨询过几次"
+  // （出场率）——计数在缓存**外面**：命中也是一次咨询，只是没花 forward。
+  // laya 是确定性的，同一问题不该问两次；命中率本身就是要报的数（LAYA_VALUE_PLAN P1）。
+  const inner = noModel
+    ? scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 })))
+    : (await import("./laya-onnx.ts")).createLayaOnnxRuntime();
+  if (!noModel && !artifacts.ready) {
+    console.log(`（模型产物不齐——缺 ${missingPieces(artifacts).join("/")}；需要模型兜底的步会如实 block。`
+      + `补齐：npm run model:fetch -- --from <url 或本地路径>）`);
   }
+  const cached = withDecisionCache(inner);
+  const counted = countingRuntime(cached);
+  installLayaRuntime(counted);
 
   let result: AppRunResult;
   try {
@@ -558,6 +682,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       sources: !v["no-sources"], confirmSafe: v["confirm-safe"] === true,
       allowDangerous: v["allow-dangerous"] === true,
       modelId: v.model ?? pack.model ?? "english",
+      modelStatus,
+      runtimeStats: () => cached.decisionStats(),
+      pickAsks: () => counted.pickAsks(),
     });
   } catch (e) {
     // 坏包（未知键/角色/占位符/主机……）在 `expandPack` 里就抛出：CLI 的契约是

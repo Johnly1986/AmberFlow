@@ -19,6 +19,7 @@
     "prepare": "node scripts/bootstrap.mjs",
     "start": "node --experimental-strip-types src/start.ts",
     "doctor": "node --experimental-strip-types src/start.ts --doctor",
+    "model:fetch": "node --experimental-strip-types src/model-fetch.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

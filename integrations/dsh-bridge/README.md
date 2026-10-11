@@ -59,8 +59,10 @@ plugin window runs the same operation). Three channels are supported:
   (`#<sha>`), and run `npx playwright install chromium` once where the profile boots. The ONNX
   decision model is a large artifact that deliberately stays out of git: rules-only runs and
   `learn`'s zero-forward replay need nothing beyond the clone, but model-fallback decisions on a
-  fresh machine require placing `laya_dec.onnx` (+ `.onnx.data`) and pointing `LAYAA_ONNX_MODEL`
-  at it (see BACKUP.md); without it, `no_model: false` runs fail loudly at model load.
+  fresh machine want `laya_dec.onnx` (+ `.onnx.data`, optionally the tokenizer) installed — that is
+  what the checkout's `npm run model:fetch -- --from <url|path>` does (SHA256-gated, verify-then-swap;
+  `npm run doctor` names the missing piece). Without it the run still works and the summary says
+  `model: off(missing)`; steps that genuinely need the model fail loudly at load instead of guessing.
 - **npm or tarball**: pack with `pnpm pack`; the root `package.json` is the bundle, so the git
   behavior above carries over unchanged.
 
@@ -129,7 +131,11 @@ is rejected instead of being silently downgraded.
 The model sees three tools with narrow schemas. `amberflow_run` answers with PASS or FAIL, the
 completion count, invariant counts, the failed steps with their obstacle text, and the report path;
 steps that completed are a count, not rows, so a sixty-step journey costs a line rather than a page.
-A tool step that failed without being refused is named too, and a run that stopped with no failed step
+Every answer also carries a **tier line** — `model: on` / `off(missing)` / `off(rules-only)` — and, when
+the artifact has it, the per-step **decision tally** (`rule 19 · laya 1 (conf 0.31) · laya:reobserve 1 ·
+cache 命中 6/12 forwards`): a user learns which ladder actually ran, and the model's appearances stop
+being invisible step-log trivia (docs/LAYA_VALUE_PLAN.md P0/P1). A tool step that failed without being
+refused is named too, and a run that stopped with no failed step
 to name reports its exit code or timeout, so a FAIL says why it failed.
 `dry` answers with the expanded plan instead, so a journey can be inspected without being run.
 `amberflow_learn` answers with the replay it was gated on, including the model-call count, so a flow

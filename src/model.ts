@@ -123,6 +123,33 @@ export function scriptedAgent(
   };
 }
 
+/* ----------------------------------------------------------------- instrument */
+
+export interface CountingRuntime extends LayaRuntime {
+  /** 到现在为止被咨询的**决策**次数（`act` 提问；noul/score 的问询另算）。 */
+  pickAsks(): number;
+}
+
+/**
+ * 计数包装：模型被问了几个"该点哪个"的决定——**含没过置信闸门的那些**。
+ *
+ * 为什么需要它：执行器在 `low confidence` 处 `break` 时**不会**把那次咨询写进 trace
+ * （trace 只记过关的决定），只按 `method` 数就会漏报——而"保险被碰过一次"正是 LAYA_VALUE_PLAN
+ * P1 要报的第一组数。计数发生在运行时缝上：与执行循环零耦合，真假模型同一把尺。
+ */
+export function countingRuntime(rt: LayaRuntime): CountingRuntime {
+  let asks = 0;
+  return {
+    ...rt,
+    async predictShortlist(agent, state, questions, opts) {
+      const act = questions["act"];
+      if (act && act.type === "choice") asks += 1;
+      return rt.predictShortlist(agent, state, questions, opts);
+    },
+    pickAsks: () => asks,
+  };
+}
+
 /** Runtime wrapping a single scripted agent (no router, no real load). */
 export function scriptedRuntime(agent: DecisionAgent, opts: { passthrough?: boolean } = {}): LayaRuntime {
   return {

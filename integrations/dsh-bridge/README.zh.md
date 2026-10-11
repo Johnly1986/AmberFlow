@@ -54,7 +54,11 @@ keepRuns: 30                    # optional; 保留最新的 $TMPDIR/dsh-amberflo
   ——根 `dsh.bundle` 指向 `dsh-bundle.yml`，行寻址 `amberflow/dsh-plugin`（包 subpath）。克隆就是整个
   引擎，插件据此自定位 checkout；本包不跑任何构建脚本，因此**无需 `allowBuilds` 授权**（若 pnpm 列出
   带安装脚本的依赖 `onnxruntime-node`、`protobufjs`，只需批准这两个名）。长期信任的安装请锁 commit
-  （`#<sha>`），并在 profile 启动的机器上执行一次 `npx playwright install chromium`。
+  （`#<sha>`），并在 profile 启动的机器上执行一次 `npx playwright install chromium`。ONNX 决策模型
+  是刻意不进 git 的大产物：规则模式的运行与 `learn` 的零模型回放只需要克隆本身；要让模型兜底，就
+  在 checkout 里跑一条 `npm run model:fetch -- --from <url|本地路径>`（SHA256 先验后换；`npm run
+  doctor` 会点名缺哪件）。没有它运行照常，只是摘要会明写 `model: off(missing)`，真需要模型的步骤
+  在装载处响亮地失败而不是瞎猜。
 - **npm 或 tarball**：`pnpm pack` 打包；根 package.json 就是 bundle，git 通道的行为原样沿用。
 
 声明了 `dsh.bundle` 的包在安装时会自动加入 `dsh.profile.bundles`，因此三个工具无需手写 profile
@@ -88,6 +92,9 @@ const Consumer = {
   带 `sources/` 的目录是**纯数据源应用**，会以 `data-source` 列出，因为别的包正是按名字引用它们。
 - `amberflow_run` 启动 `src/app-runner.ts --app <id> --out <dir>` 并读取 `<id>-result.json`。
   摘要只列失败项；完整的逐步表格留在 `<id>-report.md` 里，结果会给出它的路径，需要细节时再读。
+  摘要还带一行**模型层级**（`model: on` / `off(missing)` / `off(rules-only)`）与"决策来源"小计
+  （`rule 19 · laya 1 (conf 0.31) · laya:reobserve 1 · cache 命中 6/12 forwards`）——用户一眼看清
+  这次跑在哪一层、模型出场没有（`docs/LAYA_VALUE_PLAN.md` P0/P1）。
   `dry` 只展开计划并把它返回：那次运行不写任何产物、不校验任何东西，因此被报成一次展开，而不是
   PASS/FAIL。
 - `amberflow_learn` 启动 `tools/learn.ts --json --yes`：它把流程跑一遍，从观测到的状态变化里归纳

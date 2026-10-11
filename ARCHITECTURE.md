@@ -145,6 +145,22 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
 代价实测：router 模式 **9/9（25/25 子目标）** 通过，CJK 用例确实路由到 multilingual，但用时 **410.9 s vs 固定 english 的 58.1 s**
 ——语言切换要冷载 checkpoint。**路由买的是语言覆盖，不是速度**；≥4 GB 机器放开 `max_loaded=2` 才能避免抖动。
 
+### 10. 模型价值可见性：保险要报数（2026-10，`docs/LAYA_VALUE_PLAN.md` P0–P2）
+
+诊断：**离线应用 100% `rule:match`，模型出场散在 step 日志里没人汇总**——"没权重也能跑"于是被读成"模型没用"。
+对策不是让模型多干活，而是把已有价值变成可核对的数（红线：`learn` 的零模型重放门控与 DOM 信号唯一真值**不动**）：
+
+- **装得上（P0）**：`npm run model:fetch -- --from <url|file://|本地路径>`——图 + 外置权重 +（可选）tokenizer，
+  `.part` 先落、SHA256 **先验后换**（坏件绝不覆盖现有产物）；`doctor` 从"缺"升级成**点名缺哪件 + 一条补齐命令**；
+  三件探测的单一出处是 `src/model-artifacts.ts`（doctor / fetch / 运行器 / 桥共用，防第二套判据漂移）。
+- **看得见（P1）**：每次运行汇总 `rule N · laya N (conf) · laya:reobserve N · escalate N · 咨询 N · cache 命中 N/M`，
+  进 CLI 报告、`apps:suite` 表格、`apps:matrix` 两列与 DSH 桥 `amberflow_run` 的 summary（外加 `model: on|off(missing)` 层级行）。
+  口径有两个出处且各有道理：**过关数在 trace 里数**（执行器只把过关的决定写进 trace），
+  **咨询数在运行时缝上数**（`countingRuntime`）——低置信 break 的那次咨询不在 trace 里留 `method`，
+  只按 trace 数会把"保险被碰过"（`transfer-slowjet` 的冷加载）漏报成零出场。
+- **讲得清（P2）**：README 的"为什么本地还养一个模型"给四组带复现命令的数字，含诚实边界
+  （CJK 页面上模型 0.03–0.09，所以路由按文字系统切、不按置信度切）。
+
 ## 五、冻结流程的契约（数据格式）
 
 ```json
