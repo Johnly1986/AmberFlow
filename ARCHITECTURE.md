@@ -25,6 +25,11 @@
 
 ## 二、分层（单向依赖）
 
+> 一张六层总览图（入口 / 应用数据 / 计划 / 执行 / 模型运行时 / 证据 + 四条红线）：
+> [docs/architecture.png](docs/architecture.png)（矢量版 [docs/architecture.svg](docs/architecture.svg)）。
+> 图由 `node tools/arch-diagram.mjs` **生成**——文字出框、盒子重叠、越过内容右界都会让生成失败，
+> 所以它不会悄悄变成一张过时的图：改了模块就改这张表的源。
+
 ```
                      ┌── LLMPlanner        (System 2：一次性编排 / 失败后重规划)
 用户目标 / Excel 行 ─┤
