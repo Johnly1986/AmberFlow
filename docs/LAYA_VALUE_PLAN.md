@@ -6,7 +6,7 @@
 
 | 方案项 | 落在哪 |
 |---|---|
-| P0 `model:fetch` 通道 | `src/model-fetch.ts` + npm script；`.part` 先落、SHA256 先验后换、不覆盖已有（`--force` 才换）、tokenizer 可选随装；产物探测单一出处 `src/model-artifacts.ts`。测试 `tests/model-fetch.test.ts` |
+| P0 `model:fetch` 通道 | `src/model-fetch.ts` + npm script；`.part` 先落、SHA256 先验后换、不覆盖已有（`--force` 才换）、tokenizer 可选随装；**不留半途态**（组内某件失败 → 本轮新装的兄弟件一起撤回，否则重跑会被覆盖保护挡住，把人锁在"既不齐又不让补"的状态里）。两条腿都实测：`file://` 复制 + 真 http server 的分块下载 / 404 / 中途断流（`tests/model-fetch.test.ts` 14 条）；产物探测单一出处 `src/model-artifacts.ts` |
 | P0 doctor 缺件点名 | `src/start.ts` 的 `MODEL_MISSING_LINE`：缺哪件（图/权重/tokenizer）+ 一条补齐命令；三件齐才说"✓ 真模型"（旧版只看两个文件，缺 tokenizer 也报绿）。测试 `tests/start.test.ts` |
 | P0 桥 `model: on|off(missing)` | 引擎写 `model_status` 进 `*-result.json`（dry 展开也带），`summarizeRun` 读出并随 summary 渲染；插件用户转述即知跑在哪层。桥测试 `surfaces the model tier…` / `reads the model tier…` |
 | P1 出场量化 | `src/app-runner.ts` `summarizeDecisions`（trace 数过关 + `countingRuntime` 缝上数咨询）→ 结果 JSON / md 报告 / `apps:suite` 列与页脚 / `apps:matrix` 两列（读上次套件产物，未跑≠0）。验收实测：`transfer-slowjet` 咨询 ≥1（且 5 次未过闸门——真话），`demo-app` = 0。测试 `tests/model-visibility.test.ts` |
@@ -18,6 +18,12 @@
 `transfer-slowjet` 这种"问了、模型没过、靠 retries 才绿"的在场漏报成零出场。所以咨询数改在**运行时缝**上数
 （`countingRuntime`），过关数仍从 trace 数——两个数并排报，差值就是"未过闸门"的次数。
 红线未动：`learn` 的零模型重放门控、DOM 信号唯一真值、决策缓存只做"同问不重答"（重放门控路径不经过它）。
+
+P0 验收口径的诚实边界：方案写的是"干净机器两条命令后，live 用例的 step 日志出现 `laya:` 前缀"。
+本 checkout 拿不到真 1.7GB 产物，所以这条**没有在这里被端到端验证**；已验证的是通道与判定的形状：
+真 http server 分块下载/404/断流三况、SHA256 等值/不符/未提供、doctor 的三件点名（假产物齐 → ✓ 真模型；
+缺件 → 点名 + 一条补齐命令）、以及 `model_status` 从产物判定一路传到 CLI 报告/套件/matrix/桥 summary。
+`laya:` 前缀本身属于真产物上场后的那一跑，留作分发后验收。
 **判断前提**（本方案不是要让模型"多干活"，而是让它已有的活被看见——以下均有仓内实测背书）
 
 ## 一、诊断：价值为什么不可感知
@@ -65,6 +71,11 @@
 - 品牌句候选（README 首屏）："规则保证可复现，Laya 保证不轻言放弃，信号保证不作弊。"
 
 ### P3 场景扩台（谨慎、按数据决定）
+
+> **2026-10-11 状态：未实施，按方案自设的时点等待。** P0/P1 的数据已回流（见上表实测），但这两项
+> 各自要先回答一个数据问题再动：风险票的来源标注要改执行器的 trace 形状（风险审计链的字段扩展），
+> `learn` 的录制侧报数要先把"录制问了几次"与"重放问了几次"分成两本账——门控仍是零模型重放，
+> 这条纪律不许在报数的名义下松动。下一轮按实测数据决定，不在这里顺手改。
 
 - **风险裁决可视化**：危险步的拒绝/放行信息附上模型风险票（0.6 闸那票）来源，审计链更完整。
 - **learn 的模型侧呈现**：录制若用到模型（非零 forwards），status 行从"0 model call(s)"扩展为"N model call(s), conf>floor on all"——门控仍是零模型重放，但**允许录制过程有模型参与并如实报数**。

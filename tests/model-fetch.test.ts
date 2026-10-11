@@ -1,18 +1,21 @@
 /**
  * P0 权重通道：`npm run model:fetch`——"想体验模型兜底的人**有路可走**"的那条路。
  *
- * 钉住四条纪律（都来自仓内对"落盘"的同一套要求）：
+ * 钉住的纪律（都来自仓内对"落盘"的同一套要求）：
  *   1. 先验后换：坏件/校验不符绝不覆盖现有产物（`.part` 清理，旧件原样）；
  *   2. 校验是点名不是点头：不符就失败退出；没给期望值就打印实测 digest 并明说"未校验"；
  *   3. 不覆盖已有（`--force` 才换）；
- *   4. 落点与 doctor 同一约定（`src/model-artifacts.ts`）——两处各写一份路径规则正是
+ *   4. 不留半途态：一组里某件失败 → 本轮新装的兄弟件一起撤回（重跑不必 --force，旧件未动）；
+ *   5. 落点与 doctor 同一约定（`src/model-artifacts.ts`）——两处各写一份路径规则正是
  *      本仓库反复钉的"双实现漂移"（见 CLAUDE.md 的 hint grammar 教训）。
+ *   通道两条腿都测：`file://` 复制 + 真 http server 的分块下载/404/中途断流。
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { main, resolveSources } from "../src/model-fetch.ts";
 import { checkArtifacts, onnxModelPath } from "../src/model-artifacts.ts";
 
@@ -159,5 +162,91 @@ describe("model-artifacts — 单一出处的缺件点名", () => {
     expect(onnxModelPath({ LAYAA_ONNX_MODEL: "/y/l.onnx" })).toBe("/y/l.onnx");
     expect(onnxModelPath({ LAYAA_ONNX_MODEL: "/y/l.onnx", LAYA_ONNX_MODEL: "/z/l.onnx" }))
       .toBe("/z/l.onnx");
+  });
+});
+
+/** 真起一个本地 http server：测的是默认 transfer 的流式分支，不是注入的桩。 */
+async function withServer(
+  route: (req: http.IncomingMessage, res: http.ServerResponse) => void,
+  fn: (base: string) => Promise<void>,
+): Promise<void> {
+  const server = http.createServer((req, res) => route(req, res));
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const port = (server.address() as { port: number }).port;
+  try {
+    await fn(`http://127.0.0.1:${String(port)}`);
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+}
+
+describe("model:fetch — http(s) 流式通道（1.7GB 形状的真路径）", () => {
+  const GRAPH = Buffer.concat([Buffer.alloc(64 * 1024, 0xAB), Buffer.from("graph-tail")]);
+  const DATA = Buffer.alloc(32 * 1024, 0xCD);
+
+  it("分块下载两件 + SHA256 等值 → 就位，字节全等", async () => {
+    await withServer((req, res) => {
+      const p = req.url ?? "";
+      if (p.endsWith("laya_dec.onnx")) {
+        res.writeHead(200, { "content-type": "application/octet-stream" });
+        // 分块写：模拟真源头的 chunked 传输，逼流水线走多 chunk 路径。
+        for (let i = 0; i < GRAPH.length; i += 20_000) res.write(GRAPH.subarray(i, i + 20_000));
+        res.end();
+      } else if (p.endsWith(".onnx.data")) {
+        res.writeHead(200); res.end(DATA);
+      } else { res.writeHead(404); res.end(); }
+    }, async (base) => {
+      const dest = tmpDir("mf-http");
+      const onnx = path.join(dest, "laya_dec.onnx");
+      const { io, lines } = recording();
+      const code = await main([
+        "--from", `${base}/models`, "--out", onnx,
+        "--sha256-onnx", sha256(GRAPH), "--sha256-data", sha256(DATA),
+      ], io);
+      expect(code).toBe(0);
+      expect(fs.readFileSync(onnx)).toEqual(GRAPH);
+      expect(fs.readFileSync(`${onnx}.data`)).toEqual(DATA);
+      expect(lines.join("\n")).toContain("✓ 与期望一致");
+      expect(fs.existsSync(`${onnx}.part`)).toBe(false);
+    });
+  });
+
+  it("源缺件（HTTP 404）= 失败退出，并且**本轮新装的图一起撤回**（不留半途态）", async () => {
+    await withServer((req, res) => {
+      if ((req.url ?? "").endsWith("laya_dec.onnx")) { res.writeHead(200); res.end(GRAPH); }
+      else { res.writeHead(404); res.end(); }     // 权重不在：产物不分"半张图"
+    }, async (base) => {
+      const dest = tmpDir("mf-404");
+      const onnx = path.join(dest, "laya_dec.onnx");
+      const { io, lines } = recording();
+      const code = await main(["--from", `${base}/models`, "--out", onnx], io);
+      expect(code).toBe(1);
+      expect(lines.join("\n")).toContain("404");
+      expect(fs.existsSync(onnx), "图装上了也必须撤回：否则重跑被\"不覆盖已有\"挡住").toBe(false);
+      expect(fs.existsSync(`${onnx}.part`)).toBe(false);
+      // 撤回之后重跑同一条命令不再撞覆盖保护（半途态陷阱的回归钉）。
+      const a = checkArtifacts(onnx, () => null);
+      expect(a.graph).toBe(false);
+    });
+  });
+
+  it("传输中途断流 = 失败、半个字节都不留", async () => {
+    await withServer((req, res) => {
+      const p = req.url ?? "";
+      if (p.endsWith(".onnx.data")) { res.writeHead(200); res.end(DATA); return; }
+      res.writeHead(200);
+      res.write(GRAPH.subarray(0, 10_000));
+      // 半路掐断 socket：fetch 的 body 流会 reject，走的是真断流分支而不是 404。
+      setImmediate(() => res.socket?.destroy());
+    }, async (base) => {
+      const dest = tmpDir("mf-cut");
+      const onnx = path.join(dest, "laya_dec.onnx");
+      const { io } = recording();
+      const code = await main(["--from", `${base}/models`, "--out", onnx], io);
+      expect(code).toBe(1);
+      for (const f of [onnx, `${onnx}.data`, `${onnx}.part`, `${onnx}.data.part`]) {
+        expect(fs.existsSync(f), `${f} 不该存在`).toBe(false);
+      }
+    });
   });
 });

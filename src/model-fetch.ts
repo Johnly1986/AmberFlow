@@ -10,11 +10,13 @@
  * 全仓库的同一约定（`src/model-artifacts.ts`）：`LAYA_ONNX_MODEL` 环境变量，默认
  * `/tmp/laya_dec.onnx`——doctor 报的路径与这里装的路径永远是同一个。
  *
- * 三条纪律（和这个仓库对"落盘"的一切要求同源）：
+ * 四条纪律（和这个仓库对"落盘"的一切要求同源）：
  *   1. **先验后换**：写到 `.part`，算完 SHA256 才 rename 就位——坏产物绝不覆盖好产物；
  *   2. **校验是点名而不是点头**：给了 `--sha256-*` 就必须等值，不符就删 `.part` 并以失败退出；
  *      没给就**打印实测 digest**（"未校验"三个字照写），让分发方下一轮能把它钉住；
- *   3. **不覆盖已有**（除非 `--force`）：产物 1.7GB，误覆盖的代价是人重新下载一整轮。
+ *   3. **不覆盖已有**（除非 `--force`）：产物 1.7GB，误覆盖的代价是人重新下载一整轮；
+ *   4. **不留半途态**：一组里某件失败时，本轮**新装**的兄弟件一起撤回（动工前已存在的一件未动）——
+ *      否则"图装上了、权重没装上"的重跑会被第 3 条的覆盖保护挡住，把人锁在既不齐又不让补的状态里。
  *
  * 本仓库没有公开源，所以通道先认 `file://`/本地路径——这正是方案工作量表里
  * "先做 `--from <本地路径/file://>` 让通道成型，URL 源后补"的那一条；http(s) 同步支持，
@@ -200,17 +202,27 @@ export async function main(
   if (v.tokenizer) jobs.push({ src: String(v.tokenizer), dest: tokDest, kind: "tokenizer",
     expect: expect.tokenizer, shaFlag: "--sha256-tokenizer" });
 
+  // 半途态是陷阱：图装上了、权重没装上，重跑时**第一条就会被"不覆盖已有"挡住**，用户被困在
+  // 一个既不齐又不让补的状态里。所以逐件记录"本轮新装"的落点，失败时撤回去——
+  // 动工前已存在的产物从头到尾没被碰过，这个不变式对整组成立，不只对单件成立。
+  const installedFresh: string[] = [];
   try {
     for (const job of jobs) {
       fs.mkdirSync(path.dirname(job.dest), { recursive: true });
       const part = `${job.dest}.part`;
+      const preexisting = fs.existsSync(job.dest);
       io.out(`取回 ${job.kind} …`);
       const digest = await doTransfer(job.src, part);
       installVerified(digest, job.expect, job.kind, job.shaFlag, job.dest, part, io);
+      if (!preexisting) installedFresh.push(job.dest);
       io.out(`  已就位：${job.dest}`);
     }
   } catch (e) {
+    for (const f of installedFresh) {
+      try { fs.rmSync(f, { force: true }); io.out(`  撤回本轮新装：${f}`); } catch { /* 尽力 */ }
+    }
     io.out(`失败：${e instanceof Error ? e.message : String(e)}`);
+    io.out("（本轮没有留下半途态：缺件重跑不必 --force，现有产物也未被改动）");
     return 1;
   }
 
