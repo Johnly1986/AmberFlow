@@ -18,6 +18,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { appsSearchPath } from "./amberflow-home.ts";
 import { REPO } from "./flow.ts";
 import { PlanningRules, TaskPlan, type Subgoal } from "./plan.ts";
 import type { SignalSpec } from "./signals.ts";
@@ -152,21 +153,30 @@ export interface AppPack {
 const isDict = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** `apps/<id>/pack.json` 的目录（发现制）。 */
+/** `apps/<id>/pack.json` 的目录（发现制）。
+ *  P0-6（前提 A）：扫 **用户目录 → 仓库夹具** 两段路径，同 id 用户目录赢——
+ *  应用是用户本地产物，仓库 `apps/` 只是开发夹具；但仓库目录永远在搜索路径里，
+ *  `npm run apps -- --list` 的既有清单不因这次改动少一个包。 */
 export function appDirs(): string[] {
-  let names: string[] = [];
-  try {
-    names = fs.readdirSync(APPS_DIR);
-  } catch {
-    return [];
-  }
   const out: string[] = [];
-  for (const n of names.sort()) {
-    const p = path.join(APPS_DIR, n, "pack.json");
+  const seen = new Set<string>();
+  for (const base of appsSearchPath(APPS_DIR)) {
+    let names: string[];
     try {
-      if (fs.statSync(p).isFile()) out.push(path.join(APPS_DIR, n));
+      names = fs.readdirSync(base);
     } catch {
-      /* 没有 pack.json 的目录（比如只有 sources 的）不算应用包 */
+      continue;                              // 用户目录还没建出来：正常，跳过
+    }
+    for (const n of names.sort()) {
+      if (seen.has(n)) continue;             // 同名包：用户目录覆盖仓库夹具
+      const p = path.join(base, n, "pack.json");
+      try {
+        if (!fs.statSync(p).isFile()) continue;
+      } catch {
+        continue;                            /* 没有 pack.json 的目录（比如只有 sources 的）不算应用包 */
+      }
+      seen.add(n);
+      out.push(path.join(base, n));
     }
   }
   return out;
@@ -193,7 +203,8 @@ export function loadPack(nameOrPath: string): AppPack {
     const hit = appDirs().map((d) => path.join(d, "pack.json"))
       .find((c) => path.basename(path.dirname(c)) === nameOrPath);
     if (hit === undefined) {
-      throw new Error(`app pack ${JSON.stringify(nameOrPath)} not found under ${APPS_DIR}`);
+      throw new Error(`app pack ${JSON.stringify(nameOrPath)} not found (searched, in order: `
+        + `${appsSearchPath(APPS_DIR).join(", ")})`);
     }
     p = hit;
   }

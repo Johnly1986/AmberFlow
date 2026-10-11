@@ -30,6 +30,7 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { MockAuditor } from "./audit.ts";
 import { APPS_DIR } from "./app-pack.ts";
+import { ensureDir, userAppsDir } from "./amberflow-home.ts";
 import {
   BrowserMiddleware, browserSession, type BrowserSession, type EscalatorLike,
 } from "./executor.ts";
@@ -558,7 +559,19 @@ export async function planFlow(opts: PlanFlowOptions): Promise<PlanFlowResult> {
     laya = "scripted", escalate = "scripted",
     yes = false, verbose = true, maxSteps = 12,
   } = opts;
-  const appsRoot = opts.appsDir ?? APPS_DIR;
+  // 落点默认移出 checkout（P0-⑥ / 前提 A）：规划出来的应用是**用户本地产物**，写
+  // `$AMBERFLOW_HOME/apps`；显式传 appsDir 时听调用方的（测试/工具都传）。
+  const appsRoot = opts.appsDir ?? userAppsDir();
+  // 迁移模式的配方可能在仓库夹具里（`apps/<id>/flow.json` 是 authored 模板，跟代码版本走）。
+  // 用户目录还没有它 → 先把**仓库里的整个应用目录**拷到用户作用域再走既有流程：
+  // 读得到、门控用得着、其它站点的档案不丢，而且**checkout 一个字节都不写**。
+  if (appsRoot !== APPS_DIR && !fs.existsSync(path.join(appsRoot, app))) {
+    const repoApp = path.join(APPS_DIR, app);
+    if (fs.existsSync(path.join(repoApp, "flow.json"))) {
+      ensureDir(appsRoot);
+      fs.cpSync(repoApp, path.join(appsRoot, app), { recursive: true });
+    }
+  }
   const params = extractParams(goal);
   const slots: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(params)) {

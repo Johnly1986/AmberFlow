@@ -231,9 +231,20 @@ export interface MiddlewareReport {
   done: boolean;
   skipped?: boolean;
   stop_reason: string;
+  /** Structured stop cause (the executor's `StopCode`); absent for hand-made reports. */
+  stop_code?: string;
   steps: TraceStep[];
   [k: string]: unknown;
 }
+
+/**
+ * Stops that a retry CANNOT fix (docs/ARCHITECTURE_REVIEW.md D6 / backlog I-1):
+ * `config_error` re-runs the same broken path, `host_not_allowed` re-walks into the
+ * same undeclared host. Retrying those is not resilience — it is the same error
+ * twice with more side effects behind it (measured: a bad artifact path ran the
+ * data leg AND the first tool step, then repeated the config error two more times).
+ */
+export const NEVER_RETRY_CODES: ReadonlySet<string> = new Set(["config_error", "host_not_allowed"]);
 
 export interface MiddlewareLike {
   run(instruction: string, startUrl: string, opts?: RunOptions): Promise<MiddlewareReport>;
@@ -292,6 +303,16 @@ export async function runSubgoalWithRetries(
     rep = await runOnce(mw, sg, plan, url, page, pw);
     steps.push(...(rep.steps ?? []));
     if (rep.done) break;
+    // D6: a config-class stop is NOT transient. `retries` exists for cold loads and
+    // hydration races — the whole subgoal re-running is the point there. Re-running
+    // a broken artifact path or an undeclared host is the same refusal N more times,
+    // with N more navigations of side effects. Stop after the first honest one.
+    if (rep.stop_code && NEVER_RETRY_CODES.has(rep.stop_code)) {
+      if (verbose && tries > 1) {
+        console.log(`    -> not retried (${rep.stop_code}: a config-class stop is the same on every attempt)`);
+      }
+      break;
+    }
     if (i < tries && verbose) {
       console.log(`    -> retry ${i}/${tries - 1}: ${rep.stop_reason}`);
     }

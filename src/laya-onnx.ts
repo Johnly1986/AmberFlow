@@ -648,7 +648,12 @@ function rankLabels(
  */
 export function createLayaOnnxRuntime(opts: CreateLayaOnnxRuntimeOptions = {}): LayaRuntime {
   const onnxPath = opts.onnxPath
-    ?? process.env.LAYAA_ONNX_MODEL ?? process.env.LAYA_ONNX_MODEL
+    // Precedence must match the single-source detector `model-artifacts.onnxModelPath`:
+    // `LAYA_ONNX_MODEL` is canonical, `LAYAA_ONNX_MODEL` is the legacy typo kept for
+    // compatibility. The two orders disagreed once — doctor checked `LAYA_*` while this
+    // runtime loaded `LAYAA_*` first, so an env setting both (or only the typo name) made
+    // "artifacts complete" mean different files in two places. Keep them identical.
+    ?? process.env.LAYA_ONNX_MODEL ?? process.env.LAYAA_ONNX_MODEL
     ?? DEFAULT_ONNX_PATH;
   const tokenizerDir = opts.tokenizerDir ?? findDefaultTokenizerDir();
 
@@ -657,12 +662,12 @@ export function createLayaOnnxRuntime(opts: CreateLayaOnnxRuntimeOptions = {}): 
       if (!fs.existsSync(onnxPath)) {
         throw new Error(
           `laya ONNX graph not found: ${onnxPath} ` +
-          `(set LAYAA_ONNX_MODEL / LAYA_ONNX_MODEL, or pass createLayaOnnxRuntime({ onnxPath }))`,
+          `(set LAYA_ONNX_MODEL, or pass createLayaOnnxRuntime({ onnxPath }))`,
         );
       }
       if (!tokenizerDir || !fs.existsSync(path.join(tokenizerDir, "tokenizer.json"))) {
         throw new Error(
-          "laya tokenizer not found: download convaiinnovations/laya or set LAYAA_TOKENIZER_DIR / LAYA_TOKENIZER_DIR " +
+          "laya tokenizer not found: download convaiinnovations/laya or set LAYA_TOKENIZER_DIR " +
           "(expected <snapshot>/tokenizer/tokenizer.json)",
         );
       }

@@ -481,7 +481,9 @@ export function apply(ctx: Context, config: Config): void {
       headful: { type: 'boolean', description: 'Launch a visible browser for the recording (debug aid for a flaky flow).' },
       pack_dir: {
         type: 'string',
-        description: 'Directory to write the pack into. Defaults to <repo>/apps, i.e. inside the checkout itself.',
+        description: 'Directory to write the pack into. Defaults to the user-scope apps dir '
+        + '($AMBERFLOW_HOME/apps, or ~/.amberflow/apps) — NOT inside the checkout. '
+        + 'Recorded apps are user config; the repo\'s apps/ are only development fixtures.',
       },
     },
     output: {

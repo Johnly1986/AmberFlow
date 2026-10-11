@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 import { MockAuditor, type TraceStep } from "./audit.ts";
 import { cliRunDetailed, defaultDates, loadSource, runSource, urlFor, type CliObservation } from "./datasource.ts";
 import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "./decision-cache.ts";
-import { checkArtifacts, missingPieces } from "./model-artifacts.ts";
+import { checkArtifacts, missingPieces, modelConfigError } from "./model-artifacts.ts";
 import { BrowserMiddleware, browserSession, type BrowserSession } from "./executor.ts";
 import { REPO } from "./flow.ts";
 import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime } from "./model.ts";
@@ -357,6 +357,28 @@ export async function runToolStep(
   return base;
 }
 
+/** 配置类错误的专用类型：它**不是**一次失败的旅程，是"这次运行根本不该开始"。
+ *  调用方（CLI 的 try/catch、桥、套件）看到它就退出 2，**永不重试**（P0-5 / backlog I-1）。 */
+export class AppRunConfigError extends Error {}
+
+/**
+ * 启动期预检（P0-5，实测见 bench/IMPROVEMENT_BACKLOG.md I-1）：
+ * `LAYA_ONNX_MODEL=/tmp/definitely-missing.onnx npm run apps -- --app demo-app` 之前会
+ * 把**数据腿与第一个工具步都执行掉**，然后在第一个需要模型的步被同一个配置错误挡住，
+ * 并且**重试了 2 次**——配置错误是瞬时的，重跑一百遍还是同一句话，副作用却已经落了盘。
+ *
+ * 预检只拦"**显式指了一个不存在的产物/目录**"（`model-artifacts.modelConfigError`），
+ * 环境变量没设、产物本来就缺的情形仍归 `off(missing)` 层级，照旧如实 block 需要模型的步。
+ * 必须在**数据腿之前**跑——函数开头这一处就是"0 步、0 副作用"的那个"0"。
+ */
+export function preflightConfig(opts: AppRunOptions = {}): void {
+  if (opts.modelStatus === "off(rules-only)" || opts.modelStatus === "off(scripted)") return;
+  const cfg = modelConfigError();
+  if (cfg !== null) {
+    throw new AppRunConfigError(`model-unavailable: ${cfg}`);
+  }
+}
+
 /** 跑一个应用包。返回结构化结果（报告与退出码都由调用方决定）。 */
 export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<AppRunResult> {
   const {
@@ -365,7 +387,18 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     modelId = pack.model ?? "english",
   } = opts;
   const t0 = Date.now();
+  // 预检在**任何**腿之前：坏配置不该先跑数据腿再报错（I-1 的"0 副作用"就是这个位置）。
+  preflightConfig(opts);
   const expanded = expandPack(pack, slots, planPath);
+  // 数据源的**配置**也在跑之前全部加载：`loadSource` 会在加载期跑 `validate_source`
+  // （未知抽取器/op/transport 键、错的捕获组数……）。以前第 2 个源的坏配置要等第 1 个源
+  // 真的打完网络才浮出来——网络副作用已经发生，报错却在半路。加载不产生副作用。
+  {
+    const cfgNames = new Set<string>();
+    for (const n of pack.sources ?? []) cfgNames.add(String(n));
+    for (const s of expanded.steps) if (s.kind === "tool" && s.tool) cfgNames.add(String(s.tool.source));
+    for (const n of cfgNames) loadSource(n);
+  }
   let endState: StateView | undefined;
   const plan = expanded.plan;
   // 相对 start_url 按仓库根解析成 file://（与 bench 同一口径）：应用包写仓库内路径，
@@ -412,6 +445,11 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     confFloor: 0.25,
     riskyThreshold: 0.6,
     doneThreshold: 0.5,
+    // P0-4（导航信封）：`hosts` 以前只在**加载期**校验类型、给防泄漏门禁当输入，
+    // 运行期谁也不看它——包可以导航到任何主机。现在包声明的 hosts 就是这次旅程的
+    // 信封：未声明的主机在 goto 前拒绝、动作后落到未声明主机即停（结构化理由）。
+    // 空列表/未声明 = 不启用信封：离线夹具包逐字节不受影响。
+    hosts: (pack.hosts ?? null) as string[] | null,
     // 批量运行器的默认：风险只记录不阻断；`confirmSafe` 时拒绝破坏性动作。
     confirmFn: confirmSafe
       ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
@@ -452,6 +490,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       sg.status = rep.done ? (rep.skipped ? "skipped" : "done") : "blocked";
       sg.attempts = attempt;
       sg.obstacle = rep.done ? null : rep.stop_reason;
+      // P0-2：把结构化停因也落到 checkpoint（旧字段一个不动，报告/套件继续念 `obstacle`）。
+      if (!rep.done && rep.stop_code) (sg as Record<string, unknown>).stop_code = rep.stop_code;
       plan.save();
     }
     // ---- 验收：结束状态上的不变量（同一会话、同一 cookie/页面） -------------
@@ -689,6 +729,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   } catch (e) {
     // 坏包（未知键/角色/占位符/主机……）在 `expandPack` 里就抛出：CLI 的契约是
     // "报清楚 + 退出码 2"，不是把栈甩给用户。
+    // 配置类错误单独走 stdout（I-1 验收：`model-unavailable` 出现在输出里、
+    // 退出码非 0、产物文件**不存在**——预检在任何腿之前，这里没有可落的盘）。
+    if (e instanceof AppRunConfigError) {
+      console.log(e.message);
+      console.log(`（未开跑：0 步、0 副作用；配置类错误不进重试循环）`);
+      return 2;
+    }
     console.error(e instanceof Error ? e.message : String(e));
     return 2;
   } finally {

@@ -127,6 +127,33 @@ export interface BrowserHandle extends BrowserLike {
 /** Element signature — refs are positional, so forbiddances key on this. */
 type Sig = [string, string, string];
 
+/**
+ * Structured stop cause (docs/ARCHITECTURE_REVIEW.md D4 / P0-2).
+ *
+ * The loop used to terminate on 12 free-text `stop_reason` strings, so every
+ * downstream consumer (apps:suite exit codes, the DSH bridge, reports, refusal
+ * labels) had to STRING-MATCH prose. `stop_code` is the data; `stop_reason`
+ * stays the human rendering — byte-identical to what the frozen parity corpus
+ * records (the Python reference asserted those strings; fixture-level rule:
+ * adding shape, never rewording).
+ */
+export type StopCode =
+  | "max_steps"
+  | "dom_goal_signal"
+  | "precondition_skipped"
+  | "no_model_runtime"
+  | "action_space_exhausted"
+  | "hint_matched_nothing"
+  | "step_names_no_target"
+  | "low_confidence"
+  | "dry_run"
+  | "dry_run_not_actionable"
+  | "manual_needs_human"
+  | "manual_confirmation"
+  | "noul_unverified"
+  | "host_not_allowed"
+  | "config_error";
+
 /** Minimal locator surface used by the executor (superset of `extraction.LocLike`). */
 interface AnyLoc {
   click(opts?: Record<string, unknown>): Promise<void>;
@@ -167,7 +194,12 @@ export interface RunReport {
   manual?: boolean;
   /** The run stopped at the dry-run probe: nothing was executed. */
   dry_run?: boolean;
+  /** Human-readable rendering of why the loop stopped. Stable text, never parsed. */
   stop_reason: string;
+  /** The SAME fact as data (see `StopCode`); consumers branch on this, not prose. */
+  stop_code?: StopCode;
+  /** Which step produced the stop (1-based; absent for pre-step exits like `host_not_allowed`). */
+  stop_step?: number;
   steps: TraceStep[];
   audit: AuditVerdictLike;
 }
@@ -259,6 +291,13 @@ export interface RunOptions {
   /** `when` guard: evaluated after navigation, before any action. */
   precondition?: SignalSpec | null;
   /**
+   * Navigation envelope (see `disallowedHost`): when non-empty, `run()` refuses
+   * to open a `start_url` whose host is not declared, and stops the subgoal if
+   * an executed action lands on an undeclared host. Default: no envelope —
+   * behaviour identical to before. `apps/<id>/pack.json`'s `hosts` feeds this.
+   */
+  hosts?: string[] | null;
+  /**
    * DRY RUN: resolve the step's target exactly as a real run would (rule hint →
    * local model → re-observe → escalate), probe that it is actionable WITHOUT
    * touching it, and stop there. Nothing is clicked, filled, or scrolled: the
@@ -303,6 +342,8 @@ export interface MiddlewareOptions {
   gotoTimeout?: number;
   routeModels?: boolean;
   router?: RouterLike | null;
+  /** Constructor-level default for `RunOptions.hosts` (the navigation envelope). */
+  hosts?: string[] | null;
 }
 
 /* ------------------------------------------------------------------ JS passes
@@ -318,9 +359,20 @@ function asFunction(src: string): (...args: any[]) => any {
   return (new Function(`return (${src});`) as () => (...args: any[]) => any)();
 }
 
-/** Every input's current value — inner_text misses fills, and values drive validation. */
+/** Every input's current value — inner_text misses fills, and values drive validation.
+ *
+ * SECRET REDACTION (P0-3, docs/ARCHITECTURE_REVIEW.md D5①): `password`/`file`/`hidden`
+ * inputs keep their SHAPE (a per-character mask) but never their content. The inert
+ * check compares this string, so a typed password still CHANGES the snapshot
+ * (`"" -> "*"` -> `"**"`) without leaking the value into a snapshot, a trace line or
+ * a committed `-result.json`. A raw `.value` of a secret field must not survive here. */
 const VALS_JS = `() => [...document.querySelectorAll('input,textarea,select')]
-  .map(e => (e.name || e.id || e.getAttribute('data-test') || e.tagName) + '=' + e.value)
+  .map(e => {
+    const t = (e.getAttribute('type') || '').toLowerCase();
+    const raw = String(e.value ?? '');
+    const v = (t === 'password' || t === 'file' || t === 'hidden') ? '*'.repeat(raw.length) : raw;
+    return (e.name || e.id || e.getAttribute('data-test') || e.tagName) + '=' + v;
+  })
   .join('&')`;
 const FN_VALS = asFunction(VALS_JS);
 
@@ -390,6 +442,49 @@ function describeActionError(e: unknown): string {
 
 function sigEq(a: Sig, b: Sig): boolean {
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
+
+/**
+ * Navigation envelope (P0-4, docs/ARCHITECTURE_REVIEW.md D5② / backlog R-5).
+ *
+ * `hosts` used to be a LOAD-TIME fact only: type-checked in `app-pack.ts`, the input
+ * of the leak gate — and never consulted at runtime, so any pack could navigate to
+ * any host. With an allow-list given, a URL whose host is not declared is refused
+ * BEFORE the page goes there (and a mid-journey redirect onto an undeclared host
+ * stops the subgoal with a structured reason). An empty/absent list disables the
+ * envelope: offline fixture packs declare no hosts and must keep working unchanged.
+ *
+ * Matching: exact host, or any SUBDOMAIN of a declared host. `file:`/`about:`/
+ * `data:` carry no host and pass — the envelope guards the NETWORK, not the fixture.
+ */
+export function disallowedHost(url: string, hosts: string[] | null | undefined): string | null {
+  if (!hosts || hosts.length === 0) return null;
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;                                      // unparseable: whatever the page does next, it is checked again post-action
+  }
+  if (["file:", "about:", "data:"].includes(u.protocol)) return null;
+  const host = u.hostname.toLowerCase();
+  if (!host) return null;
+  const ok = hosts.some((h) => {
+    const e = String(h).toLowerCase().replace(/^\.+/, "");
+    return e !== "" && (host === e || host.endsWith(`.${e}`));
+  });
+  return ok ? null : host;
+}
+
+/** Element types whose current value is a SECRET: never written into a trace or report (P0-3, D5①). */
+const SECRET_INPUT_TYPES = new Set(["password", "file", "hidden"]);
+
+/** Mask a filled value when the target field is secret-typed; same length, no content. */
+function redactValue(el: Elem, val: unknown): unknown {
+  if (val === null || val === undefined) return val;
+  const t = String(el["input_type"] ?? "").toLowerCase();
+  if (!SECRET_INPUT_TYPES.has(t)) return val;
+  const s = String(val);
+  return `***(${s.length})`;
 }
 
 function safeUrl(obj: unknown): string {
@@ -535,10 +630,20 @@ export class BrowserMiddleware {
   /** No runtime installed: rules/hints only. Set by `ready()` (see RULES-ONLY MODE). */
   rulesOnly = false;
   rulesOnlyReason = "";
+  /**
+   * A CONFIG-class runtime failure (bad artifact path, unreadable weights): unlike
+   * "no artifacts configured" (rules-only, legitimate) this is a usage error — the
+   * loop refuses to act on it and `run()` stops with `stop_code: "config_error"`,
+   * which the retry wrapper NEVER re-attempts (D6: a config error retried twice is
+   * the same error, plus two sets of side effects).
+   */
+  configError: string | null = null;
   outcomeMemory: OutcomeMemoryLike | null = null;
   outcomeMemoryMode: "forbid" | "rank" = "forbid";
   hintMemory: HintMemoryLike | null = null;
   gotoTimeout: number;
+  /** Navigation envelope default for runs that do not pass `hosts` (see `RunOptions.hosts`). */
+  hosts: string[] | null = null;
   /** Deterministic rule prefilter ON, anti-repeat ON (measured production defaults). */
   rulesOn = true;
   antiRepeat = true;
@@ -573,6 +678,7 @@ export class BrowserMiddleware {
     this.outcomeMemoryMode = opts.outcomeMemoryMode ?? "forbid";
     this.hintMemory = opts.hintMemory ?? null;
     this.gotoTimeout = opts.gotoTimeout ?? 30000;
+    this.hosts = opts.hosts ?? null;
   }
 
   /**
@@ -597,7 +703,15 @@ export class BrowserMiddleware {
       return;
     }
     if (this.agent === null) {
-      this.agent = typeof this.modelId === "string" ? await rt.load(this.modelId) : this.modelId;
+      try {
+        this.agent = typeof this.modelId === "string" ? await rt.load(this.modelId) : this.modelId;
+      } catch (e) {
+        // CONFIG error (bad artifact path etc.): rules cannot stand in for a model
+        // the operator explicitly pointed at — refuse to act, and say so once.
+        this.configError = e instanceof Error ? e.message : String(e);
+        this._ready = true;
+        return;
+      }
     }
     this.embedFn = rt.embedFnFromAgent(this.agent);
     if (this.routeModels) {
@@ -1155,7 +1269,12 @@ export class BrowserMiddleware {
       outcomeMemoryMode = this.outcomeMemoryMode,
       hintMemory = this.hintMemory,
       dryRun = false,
+      hosts = null,
     } = opts;
+
+    // The navigation envelope: run-level declaration wins, else the middleware's
+    // (set once for a whole journey by the app runner from `pack.hosts`).
+    const hostGate = hosts ?? this.hosts;
 
     const slots: Record<string, unknown> = { ...extractSlots(instruction), ...(slotsIn ?? {}) };
     this.targetHints = (targetHints ?? []).filter((h) => !!h);
@@ -1169,17 +1288,85 @@ export class BrowserMiddleware {
     let manualDone = false;          // done because a HUMAN attested, not a DOM signal
     let dryRan = false;              // stopped at the dry-run probe (nothing executed)
     let stopReason = "max_steps";
+    let stopCode: StopCode = "max_steps";
+    let stopStep: number | undefined;
+    /** ONE place where the loop decides to stop (D1/D4): sets code + step, and the
+     *  human string when given. Every stop site goes through here. */
+    const stop = (code: StopCode, detail?: string, at?: number): void => {
+      stopCode = code;
+      if (detail !== undefined) stopReason = detail;
+      if (at !== undefined) stopStep = at;
+    };
     const forbidden: Record<string, Sig> = {};                 // ref -> element signature (esig)
+    // WHY each ref was forbidden — diagnostics only (D1: "which of the seven
+    // egresses killed this element" used to require reading the code).
+    const forbidWhy: Record<string, string> = {};
     // refs skipped ONLY because an overlay blocked them: retryable once the page
     // changes (the blocker may be gone); never counted as exhausted.
     const blockedRetry: Record<string, [number, number]> = {};  // ref -> (step, len(trace))
     const reAdmitted = new Set<string>();
+    /** THE forbid egress (D1): an element leaves the action space exactly here.
+     *  Seven call sites used to assign the signature directly, each with its own
+     *  trace shape; the assignment is now single-sourced. */
+    const forbid = (ref: string, el: Elem, why: string): void => {
+      forbidden[ref] = esig(el);
+      forbidWhy[ref] = why;
+    };
+    /** THE un-forbid egress (re-admission after a page change removes the blocker). */
+    const unforbid = (ref: string): void => {
+      delete forbidden[ref];
+      delete blockedRetry[ref];
+      delete forbidWhy[ref];
+    };
+    /**
+     * THE re-prune egress (D2): forbiddances key on refs, and refs are re-indexed
+     * on every scan — a stale forbid now pointing at a DIFFERENT element must go.
+     * This same invariant used to be hand-written at three sites (step head,
+     * wider re-scan, overlay re-entry); one implementation now.
+     */
+    const pruneForbids = (elems: ElemPool): void => {
+      for (const r of Object.keys(forbidden)) {
+        const cur = elems[r];
+        if (cur === undefined || !sigEq(forbidden[r]!, esig(cur))) {
+          unforbid(r);
+          reAdmitted.delete(r);
+        }
+      }
+    };
     let page: AnyPage | null = pageIn;
     const ownsBrowser = page === null;
     let browser: BrowserHandle | null = null;
 
     try {
       await this.ready();
+      // A config error is not a transient failure: acting on rules-only anyway would
+      // silently downgrade what the operator explicitly configured, and retrying it
+      // just repeats the same error with more side effects (D6). Refuse cleanly,
+      // BEFORE the navigation envelope and before a single step.
+      if (this.configError !== null) {
+        const why = `model runtime config error: ${this.configError}`;
+        if (verbose) console.log(`  -> REFUSED before navigation: ${why}（配置类错误不重试、不降级跑）`);
+        return {
+          goal: instruction, done: false,
+          stop_reason: why, stop_code: "config_error",
+          steps: [],
+          audit: { verdict: "REJECT", reasons: [why], auditor: "preflight" },
+        };
+      }
+      // NAVIGATION ENVELOPE (P0-4): refuse BEFORE the browser opens the page. A
+      // refused subgoal has touched nothing — zero steps, zero side effects.
+      const deniedHost = disallowedHost(startUrl, hostGate);
+      if (deniedHost !== null) {
+        const why = `host not allowed: '${deniedHost}' is not among the declared hosts `
+          + `(${hostGate!.join(", ")}) — add it to the pack's hosts list if this step is meant to leave for it`;
+        if (verbose) console.log(`  -> REFUSED before navigation: ${why}`);
+        return {
+          goal: instruction, done: false,
+          stop_reason: why, stop_code: "host_not_allowed",
+          steps: [],
+          audit: { verdict: "REJECT", reasons: [why], auditor: "navigation-envelope" },
+        };
+      }
       if (ownsBrowser) {
         // PORT NOTE 5: `sync_playwright()` has no twin; the module IS the
         // connection. Use the injected pw when given, else the imported one.
@@ -1200,7 +1387,7 @@ export class BrowserMiddleware {
         if (verbose) console.log(`    -> SKIPPED (precondition not met: ${JSON.stringify(precondition)})`);
         return {
           goal: instruction, done: true, skipped: true,
-          stop_reason: "precondition not met -> skipped", steps: [],
+          stop_reason: "precondition not met -> skipped", stop_code: "precondition_skipped", steps: [],
           audit: { verdict: "SKIPPED", reasons: ["precondition not met"], auditor: "n/a" },
         };
       }
@@ -1231,7 +1418,7 @@ export class BrowserMiddleware {
             } else {
               const remaining = Object.keys(elems).length - Object.keys(forbidden).length - candidates.length;
               if (remaining >= 1) {
-                for (const [r, e] of candidates) forbidden[r] = esig(e);
+                for (const [r, e] of candidates) forbid(r, e, "outcome-memory");
                 prevented = candidates.length;
                 outcomeMemory.countPrevented?.(prevented);
                 if (verbose && prevented) {
@@ -1262,14 +1449,7 @@ export class BrowserMiddleware {
             }
           }
           // drop forbids whose ref now points at a different element
-          for (const r of Object.keys(forbidden)) {
-            const cur = elems[r];
-            if (cur === undefined || !sigEq(forbidden[r]!, esig(cur))) {
-              delete forbidden[r];
-              delete blockedRetry[r];
-              reAdmitted.delete(r);
-            }
-          }
+          pruneForbids(elems);
           // A dead hint means "this action is done/failed" for an ordered
           // sequence: move to the next one instead of burning the subgoal.
           const dead = hintMatch(curHint, elems);
@@ -1298,8 +1478,7 @@ export class BrowserMiddleware {
         // (the recovery click that removed the banner). Once per ref.
         for (const [br, [bStep, bCount]] of Object.entries(blockedRetry)) {
           if (elems[br] !== undefined && stepNo > bStep && trace.slice(bCount).some((t) => t.executed)) {
-            delete forbidden[br];
-            delete blockedRetry[br];
+            unforbid(br);
             reAdmitted.add(br);
           }
         }
@@ -1325,9 +1504,12 @@ export class BrowserMiddleware {
         if (ref === null) {
           // In rules-only mode a null ref usually means "no runtime to ask", which is not
           // the same failure as "every element is forbidden" — say which one it is.
-          stopReason = this.rulesOnly
-            ? `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`
-            : `action space exhausted on step ${stepNo}`;
+          if (this.rulesOnly) {
+            stop("no_model_runtime",
+              `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`, stepNo);
+          } else {
+            stop("action_space_exhausted", `action space exhausted on step ${stepNo}`, stepNo);
+          }
           if (verbose && this.rulesOnly) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
         }
@@ -1341,12 +1523,16 @@ export class BrowserMiddleware {
           // target_hint），规则也没命中，于是一个不存在的 ref 被交到这里。把病因写出来，
           // 并且告诉使用者下一步该改什么（加 target_hint），而不是复述执行器的内部产物。
           const poolSize = Object.keys(elems).length;
-          stopReason = curHint
-            ? `target_hint ${JSON.stringify(curHint)} matched nothing in a pool of ${poolSize} `
-              + `element(s) on step ${stepNo}`
-            : `step ${stepNo} names no target: no target_hint(s), no rule matched any of the `
+          if (curHint) {
+            stop("hint_matched_nothing",
+              `target_hint ${JSON.stringify(curHint)} matched nothing in a pool of ${poolSize} `
+              + `element(s) on step ${stepNo}`, stepNo);
+          } else {
+            stop("step_names_no_target",
+              `step ${stepNo} names no target: no target_hint(s), no rule matched any of the `
               + `${poolSize} element(s), and the picker returned no usable element`
-              + `（给这一步加 target_hint，或在页面上点名一个稳定句柄）`;
+              + `（给这一步加 target_hint，或在页面上点名一个稳定句柄）`, stepNo);
+          }
           if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
         }
@@ -1366,12 +1552,13 @@ export class BrowserMiddleware {
           } else if (this.rulesOnly) {
             // No runtime installed and no rule/hint resolved this step: say exactly that.
             // Reporting "low confidence 0.00" here would blame the model for not existing.
-            stopReason = `no model runtime: this step needs a model pick (rules-only mode) `
-              + `on step ${stepNo}`;
+            stop("no_model_runtime",
+              `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`, stepNo);
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
           } else if (Object.keys(forbidden).length >= Math.max(0, Object.keys(elems).length - 1)) {
-            stopReason = `action space exhausted (${Object.keys(forbidden).length} forbidden) on step ${stepNo}`;
+            stop("action_space_exhausted",
+              `action space exhausted (${Object.keys(forbidden).length} forbidden) on step ${stepNo}`, stepNo);
             break;
           } else {
             // OBSERVATION-BOTTLENECK RECOVERY (browser-use's "the button is there, we
@@ -1387,14 +1574,7 @@ export class BrowserMiddleware {
               if (Object.keys(wide).length > Object.keys(elems).length) {
                 // refs are positional: re-prune forbids whose ref now names a
                 // different element before re-asking (same rule as the step head).
-                for (const r of Object.keys(forbidden)) {
-                  const cur = wide[r];
-                  if (cur === undefined || !sigEq(forbidden[r]!, esig(cur))) {
-                    delete forbidden[r];
-                    delete blockedRetry[r];
-                    reAdmitted.delete(r);
-                  }
-                }
+                pruneForbids(wide);
                 const [ref2, conf2] = await this.pickElement(
                   instruction, pg, wide, new Set(Object.keys(forbidden)), noted);
                 // The wider view BECOMES the step's view even when the local model
@@ -1449,7 +1629,8 @@ export class BrowserMiddleware {
               }
             }
             if (!recovered) {
-              stopReason = `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`;
+              stop("low_confidence",
+                `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`, stepNo);
               break;
             }
           }
@@ -1464,9 +1645,12 @@ export class BrowserMiddleware {
         if (dryRun) {
           const probe = await this.dryRunProbe(pg, el);
           dryRan = true;
-          stopReason = probe.actionable
-            ? `dry-run: would ${desc} (${method}, conf=${conf.toFixed(2)})`
-            : `dry-run: target not actionable (${probe.reason ?? "unknown"})`;
+          if (probe.actionable) {
+            stop("dry_run", `dry-run: would ${desc} (${method}, conf=${conf.toFixed(2)})`, stepNo);
+          } else {
+            stop("dry_run_not_actionable",
+              `dry-run: target not actionable (${probe.reason ?? "unknown"})`, stepNo);
+          }
           trace.push({
             step: stepNo, desc, method, conf: round3(conf), executed: false,
             dry_run: true, actionable: probe.actionable,
@@ -1494,7 +1678,7 @@ export class BrowserMiddleware {
           // needs_value. Submit-type inputs are the exception: they are CLICKED,
           // never filled.
           if (this._slotValue(el, slots) === null && !this._isSubmit(el)) {
-            forbidden[ref] = esig(el);
+            forbid(ref, el, "needs_value");
             trace.push({ step: stepNo, desc, how: "needs_value", executed: false, method, conf: round3(conf), url: urlOf(pg) });
             if (verbose) console.log(`  step ${stepNo}: (needs_value, rule) -> skip ${ref}`);
             continue;
@@ -1506,7 +1690,7 @@ export class BrowserMiddleware {
           if (verbose) console.log(`  step ${stepNo}: RISKY ${desc} (p=${riskP.toFixed(2)}) -> asks for confirmation`);
           confirmed = await this.confirmFn(desc);
           if (!confirmed) {
-            forbidden[ref] = esig(el);
+            forbid(ref, el, "risk-declined");
             trace.push({ step: stepNo, desc, risky: true, executed: false, confirmed: false, url: urlOf(pg) });
             continue;
           }
@@ -1528,7 +1712,7 @@ export class BrowserMiddleware {
             how = "clicked";
             arg = null;
           } else if (reason) {
-            forbidden[ref] = esig(el);
+            forbid(ref, el, reason);
             if (reason.startsWith("not-actionable-or-covered") && !reAdmitted.has(ref)) {
               blockedRetry[ref] = [stepNo, trace.length];
             }
@@ -1551,7 +1735,7 @@ export class BrowserMiddleware {
         if (!executed) {
           // needs_value / stale_ref: this element cannot advance the plan right
           // now; forbid and try another (no model call).
-          forbidden[ref] = esig(el);
+          forbid(ref, el, String(how));
           trace.push({
             step: stepNo, desc: `click ${el.tag} "${el.label}"`, how,
             executed: false, method, conf: round3(conf), url: urlOf(pg),
@@ -1562,7 +1746,7 @@ export class BrowserMiddleware {
         const post = await this.snapshot(pg);
         const inert = JSON.stringify(pre) === JSON.stringify(post);   // url+text+input-values all identical
         trace.push({
-          step: stepNo, desc, how, value: arg, risky, executed, confirmed, method,
+          step: stepNo, desc, how, value: redactValue(el, arg), risky, executed, confirmed, method,
           conf: round3(conf), ...(method.startsWith("laya") && layaMargin !== null
             ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}),
           ...(method === "escalate" && escalatedPick ? { escalated: true } : {}),
@@ -1572,6 +1756,18 @@ export class BrowserMiddleware {
         });
         if (verbose) {
           console.log(`  step ${stepNo}: ${desc} (${how}, ${method}, conf=${conf.toFixed(2)}${inert ? ", inert" : ""})`);
+        }
+        // NAVIGATION ENVELOPE, post-action half: an executed action must not land
+        // the page on an undeclared host either. The action DID happen (recorded
+        // above, honestly); nothing further is touched and the subgoal stops with
+        // a structured reason.
+        const landed = disallowedHost(post.url, hostGate);
+        if (landed !== null) {
+          stop("host_not_allowed",
+            `navigated off the envelope to '${landed}' — not among the declared hosts `
+            + `(${hostGate!.join(", ")}) on step ${stepNo}`, stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          break;
         }
 
         if (executed && !inert && this._learnedHintApplied && method === "rule:match") {
@@ -1590,7 +1786,7 @@ export class BrowserMiddleware {
             }
           }
           done = true;
-          stopReason = "dom goal signal";
+          stop("dom_goal_signal", "dom goal signal", stepNo);
           break;
         }
         // ---- SPA settle ------------------------------------------------------
@@ -1611,7 +1807,7 @@ export class BrowserMiddleware {
             await sleep(SPA_SETTLE_MS);
             if (await goalSignalFn(pg)) {
               done = true;
-              stopReason = "dom goal signal";
+              stop("dom_goal_signal", "dom goal signal", stepNo);
               if (verbose) {
                 console.log(`  step ${stepNo}: -> done (dom goal signal, `
                   + `settled after ${(k + 1) * SPA_SETTLE_MS} ms)`);
@@ -1628,7 +1824,8 @@ export class BrowserMiddleware {
         if (manualGoal && executed && !inert) {
           const excerpt = JSON.stringify(post).slice(0, 300);
           if (!manualConfirmFn) {
-            stopReason = "manual step needs a human: no manualConfirmFn configured";
+            stop("manual_needs_human",
+              "manual step needs a human: no manualConfirmFn configured", stepNo);
             break;
           }
           const attested = await manualConfirmFn(instruction, excerpt);
@@ -1640,7 +1837,7 @@ export class BrowserMiddleware {
           if (attested) {
             done = true;
             manualDone = true;
-            stopReason = "manual confirmation (human oracle)";
+            stop("manual_confirmation", "manual confirmation (human oracle)", stepNo);
             break;
           }
         }
@@ -1651,14 +1848,15 @@ export class BrowserMiddleware {
           const doneP = await this.isDone(instruction, pg);
           if (doneP >= this.doneThreshold) {
             done = false;
-            stopReason = `laya claims done (p=${doneP.toFixed(2)}) but no DOM signal to verify`;
+            stop("noul_unverified",
+              `laya claims done (p=${doneP.toFixed(2)}) but no DOM signal to verify`, stepNo);
             break;
           }
         }
         // Inert action on this element -> forbid it for the rest of the subgoal
         // regardless of method (this is what killed the Sign-in loops).
         if (inert) {
-          forbidden[ref] = esig(el);
+          forbid(ref, el, "inert");
           outcomeMemory?.record(outcomeMemory.key(urlOf(pg), instruction), JSON.stringify(esig(el)), "inert");
           continue;
         }
@@ -1670,7 +1868,7 @@ export class BrowserMiddleware {
           // after any fill that did not advance it. Rule hits on clicks stay
           // exempt: two subgoals may legitimately drive the same button, and the
           // inert guard catches dead loops.
-          if (method === "laya" || how === "filled") forbidden[ref] = esig(el);
+          if (method === "laya" || how === "filled") forbid(ref, el, "anti-repeat");
         }
       }
     } finally {
@@ -1682,6 +1880,8 @@ export class BrowserMiddleware {
     const verdict = (await this.auditor.audit(instruction, trace, done)) as AuditVerdict;
     return {
       goal: instruction, done, stop_reason: stopReason, steps: trace, audit: verdict,
+      stop_code: stopCode,
+      ...(stopStep !== undefined ? { stop_step: stopStep } : {}),
       ...(manualDone ? { manual: true } : {}),
       ...(dryRan ? { dry_run: true } : {}),
     };

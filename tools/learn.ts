@@ -23,6 +23,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { loadPack, validatePack, type AppPack } from "../src/app-pack.ts";
+import { ensureDir, userAppsDir } from "../src/amberflow-home.ts";
 import { runApp, startUrl } from "../src/app-runner.ts";
 import { browserSession } from "../src/executor.ts";
 import { extractElements } from "../src/extraction.ts";
@@ -405,6 +406,7 @@ const USAGE = `usage: learn [--url <页面>] [--goal "<一句话>"] [--id <应�
   --script   用一串录好的动作代替人现场演示（CI/测试用；格式见 README）
   --yes      不再逐条确认（外层 Agent 用；等价于 npm run agent）
   --json     输出结构化结果（一次调用的形状）
+  --pack-dir 包的落点；默认 $AMBERFLOW_HOME/apps（用户作用域，不写进 checkout）
 退出码：0=已录制且零前向回放通过 ｜ 1=录了但回放不过（**不落盘**）｜ 2=用法/环境问题`;
 
 /** id 的唯一出处（演示前后来回用，避免两处算法漂移）。 */
@@ -623,18 +625,21 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       return 1;
     }
 
-    const packDir = path.resolve(values["pack-dir"] ?? path.join(REPO, "apps"));
+    // 落点默认移出 checkout（P0-⑥ / 前提 A）：应用是用户本地产物，录一次不该写进
+    // 引擎的安装目录。`--pack-dir` 仍可显式指到任意目录（含仓库 apps/，开发夹具用）。
+    const packDir = ensureDir(path.resolve(values["pack-dir"] ?? userAppsDir()));
     const dir = path.join(packDir, id);
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, "pack.json");
     fs.writeFileSync(file, serializePack(pack));
-    result.saved = path.relative(REPO, file);
+    const rel = path.relative(REPO, file);
+    result.saved = rel.startsWith("..") ? file : rel;   // 用户作用域的包显示绝对路径，仓库内的保持相对
 
     if (values.json) {
       console.log(JSON.stringify({ ...result, status: "ok" }, null, 2));
     } else {
       say("");
-      say(`✓ 已写 ${path.relative(REPO, file)}`);
+      say(`✓ 已写 ${result.saved}`);
       say(`✓ 规则模式回放：**0 次模型调用**，${replay.completed} 完成，不变量 ${replay.invariants}`);
       say(`  跑它：npm run apps -- --app ${id} --no-model --no-sources`);
       say("  要加条件/重试就手写 `when`/`retries`（这两项不录制）；页面变了会报 recorded-flow drift，重新演示即可。");

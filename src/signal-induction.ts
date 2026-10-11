@@ -315,7 +315,13 @@ const WITNESS_JS = String.raw`(arg) => {
     if (out.length >= arg.max) break;
     const text = (e.innerText || e.textContent || '').replace(/\s+/g, ' ').trim();
     if (text.length > 160) continue;                       // a container, not a status node
-    const value = (e.value !== undefined && e.value !== null) ? String(e.value) : '';
+    const t = (e.getAttribute('type') || '').toLowerCase();
+    const raw = (e.value !== undefined && e.value !== null) ? String(e.value) : '';
+    // SECRET REDACTION (P0-3): a witness node CAN be a credential field (data-test
+    // on an input is routine), and an induced css_value_equals candidate would write
+    // the typed value into a pack file. Mask secret-shaped fields by length so nothing
+    // sensitive is ever proposed as a completion value.
+    const value = (t === 'password' || t === 'file' || t === 'hidden') ? '*'.repeat(raw.length) : raw;
     if (!text && !value) continue;
     out.push({
       tag: e.tagName.toLowerCase(),

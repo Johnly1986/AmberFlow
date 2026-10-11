@@ -77,3 +77,27 @@ export function missingPieces(a: ModelArtifacts): string[] {
   if (a.tokenizerDir === null) out.push("tokenizer");
   return out;
 }
+
+/**
+ * 区分两种"模型不在"（D6 / backlog I-1）：
+ *
+ *   - **没配置**（环境变量未设、默认路径没有产物）→ 层级 `off(missing)`，照常跑规则层，
+ *     需要模型的步**如实 block**。这是这台 CPU 机器的常态，不是错误。
+ *   - **配置错了**（显式把 `LAYA_ONNX_MODEL` 指到一个不存在的文件）→ 这是**用法错误**：
+ *     它不是瞬时的，重试一百次也是同一句话；而且"跑到第一个需要模型的步才发现"意味着
+ *     数据腿和第一个工具步**已经执行**（实测过：同一配置错误被重试 2 次、产物已落盘）。
+ *
+ * 所以配置错误要在**启动期预检**里点名并拒绝开跑（0 步、0 副作用），永不进重试循环。
+ */
+export function modelConfigError(env: NodeJS.ProcessEnv = process.env): string | null {
+  const explicitGraph = env.LAYA_ONNX_MODEL ?? env.LAYAA_ONNX_MODEL ?? null;
+  if (explicitGraph !== null && !fs.existsSync(explicitGraph)) {
+    return `LAYA_ONNX_MODEL=${JSON.stringify(explicitGraph)} points at a file that does not exist `
+      + `(补产物：npm run model:fetch -- --from <url|本地路径>；或删掉这个环境变量，按缺产物的规则层跑)`;
+  }
+  const explicitTok = env.LAYA_TOKENIZER_DIR ?? env.LAYAA_TOKENIZER_DIR ?? null;
+  if (explicitTok !== null && !fs.existsSync(path.join(explicitTok, "tokenizer.json"))) {
+    return `LAYA_TOKENIZER_DIR=${JSON.stringify(explicitTok)} has no tokenizer.json inside`;
+  }
+  return null;
+}

@@ -62,7 +62,8 @@ export interface AmberFlowLearnArgs {
   cdp?: string
   /** Launch a visible browser for the recording instead of headless (debug aid). */
   headful?: boolean
-  /** Directory to write the pack into; defaults to `<repo>/apps`, i.e. inside the checkout. */
+  /** Directory to write the pack into; defaults to the user-scope dir `$AMBERFLOW_HOME/apps`
+   *  — recorded apps are user config, the repo `apps/` are development fixtures. */
   packDir?: string
 }
 
