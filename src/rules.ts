@@ -157,13 +157,41 @@ const alias = (k: string): string => ATTR_ALIASES[k] ?? k;
  * attr selectors match the *extracted attribute* of each candidate; a `tag[...]`
  * prefix also constrains the tag.
  */
-export function hintMatch(hint: string, elems: ElemPool): string | null {
+/**
+ * The tiered candidate set a `target_hint` resolves to, WITHOUT the ambiguity
+ * collapse. `refs` is the strongest non-empty tier's hit list (the exact set
+ * `hintMatch` would feed `firstIfSame`); `tier` is which rung won (grammar-local);
+ * `decided` is a candidate `hintMatch` already settles to on its own (the
+ * submit-preference on a bare `input`/`button` tag). `hintMatch` is
+ * `decided ?? firstIfSame(refs)` — so the two views are the SAME single
+ * implementation and can never drift into a second hint grammar (the mistake the
+ * split plan §2.1 and CLAUDE.md both charge for).
+ *
+ * Why this exists (docs/EXECUTION_LAYER_SPLIT_PLAN.md, benefit #1): in-tier
+ * ambiguity used to collapse to `null`, degrading "pick one of these few" back
+ * into "pick one of the whole pool" — measured 17 candidates → 0.23 BLOCKED,
+ * 0.29 coin-flip. `hintCandidates` hands the DECIDER the narrowed subset.
+ */
+export interface HintCandidates {
+  refs: string[];
+  /** Tier index that produced these refs (see the branch comments). */
+  tier: number;
+  /** A ref `hintMatch` already resolves unambiguously (submit-preference); else null. */
+  decided: string | null;
+}
+
+/** The 6 hint grammars, single-parsed; `sink` (if given) records the candidate set. */
+function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | null): string | null {
   const h = hint.trim().toLowerCase();
   const entries = Object.entries(elems);
+  /** Record the strongest tier's refs, then resolve exactly as before. */
+  const emit = (refs: string[], tier: number): string | null => {
+    if (sink) { sink.refs = refs; sink.tier = tier; sink.decided = null; }
+    return firstIfSame(new Set(refs), elems);
+  };
 
   if (h.startsWith("#")) {
-    const hits = new Set(entries.filter(([, e]) => String(e.id ?? "").toLowerCase() === h.slice(1)).map(([r]) => r));
-    return firstIfSame(hits, elems);
+    return emit(entries.filter(([, e]) => String(e.id ?? "").toLowerCase() === h.slice(1)).map(([r]) => r), 0);
   }
   if (h.includes("[") && h.split("[", 2)[1]!.includes("~")) {
     // attr~substr: substring attribute match, e.g. a[href~travel_2]
@@ -186,10 +214,10 @@ export function hintMatch(hint: string, elems: ElemPool): string | null {
     //      candidates are genuinely different — the bbc.com two-identical-links
     //      rule is unchanged).
     const exact = hitList.filter(([, e]) => cf(e[k]) === v);
-    if (exact.length) return firstIfSame(new Set(exact.map(([r]) => r)), elems);
+    if (exact.length) return emit(exact.map(([r]) => r), 1);
     const slug = hitList.filter(([, e]) => cf(e[k]).split("/").pop() === v);
-    if (slug.length) return firstIfSame(new Set(slug.map(([r]) => r)), elems);
-    return firstIfSame(new Set(hitList.map(([r]) => r)), elems);
+    if (slug.length) return emit(slug.map(([r]) => r), 2);
+    return emit(hitList.map(([r]) => r), 3);
   }
   if (h.split("[").pop()!.includes("~")) {
     // near~token: the container identity line (add_near_context) disambiguates
@@ -198,10 +226,10 @@ export function hintMatch(hint: string, elems: ElemPool): string | null {
     const pre = h.slice(0, h.indexOf("[") >= 0 ? h.indexOf("[") : 0);
     const after = h.includes("[") ? h.slice(h.indexOf("[") + 1) : h;
     const tok = after.replace(/\]$/, "").split("~").slice(-1)[0]!;
-    const hits = new Set(entries
+    const refs = entries
       .filter(([, e]) => (!pre || e.tag === pre) && String(e.near ?? "").toLowerCase().includes(tok))
-      .map(([r]) => r));
-    return firstIfSame(hits, elems);
+      .map(([r]) => r);
+    return emit(refs, 0);
   }
   if (h.includes("[")) {
     const pre = h.slice(0, h.indexOf("["));
@@ -212,10 +240,10 @@ export function hintMatch(hint: string, elems: ElemPool): string | null {
     // are routinely upper-case (data-test="net-CAM-1001"); a raw `==` silently
     // missed and the plan-named target fell back to laya (~0.03 conf).
     const v = (eq >= 0 ? rest.slice(eq + 1) : "").replace(/\]$/, "").replace(/^['"]|['"]$/g, "");
-    const hits = new Set(entries
+    const refs = entries
       .filter(([, e]) => (!pre || e.tag === pre) && String(e[k] ?? "").toLowerCase() === v)
-      .map(([r]) => r));
-    return firstIfSame(hits, elems);
+      .map(([r]) => r);
+    return emit(refs, 0);
   }
   if (["button", "link", "input", "textarea", "select"].includes(h)) {
     const want: Record<string, string[]> = {
@@ -226,9 +254,12 @@ export function hintMatch(hint: string, elems: ElemPool): string | null {
     if ((h === "input" || h === "button") && hits.size > 1) {
       const submits = [...hits].filter((r) =>
         ["submit", "button"].includes(String(elems[r]!.input_type ?? "")) || elems[r]!.tag === "button");
-      if (submits.length === 1) return submits[0]!;
+      if (submits.length === 1) {
+        if (sink) { sink.refs = submits; sink.tier = 0; sink.decided = submits[0]!; }
+        return submits[0]!;
+      }
     }
-    return firstIfSame(hits, elems);
+    return emit([...hits], 0);
   }
   // bare token: unique label/data-test word — TIERED for the same reason as
   // `attr~value`: on a live page the exact label ("艾伦·图灵") is one candidate
@@ -251,8 +282,33 @@ export function hintMatch(hint: string, elems: ElemPool): string | null {
     else if (ws.some((w) => w.startsWith(h))) tiers[1]!.add(r);
     else if (ws.some((w) => w.includes(h))) tiers[2]!.add(r);
   }
-  for (const hits of [whole, ...tiers]) {
-    if (hits.size) return firstIfSame(hits, elems);
+  const ladder = [whole, ...tiers];
+  for (let t = 0; t < ladder.length; t++) {
+    const hits = ladder[t]!;
+    if (hits.size) return emit([...hits], t);
   }
+  if (sink) { sink.refs = []; sink.tier = -1; sink.decided = null; }
   return null;
+}
+
+/**
+ * Resolve a frozen plan's `target_hint` to a single ref (see `hintMatchImpl`).
+ * This is the pool-side half of the hint grammar; `extraction.hintLookup` is the
+ * DOM-side half and re-queries live elements the budget evicted. Both are driven
+ * by the same tier semantics documented on `hintMatchImpl`.
+ */
+export function hintMatch(hint: string, elems: ElemPool): string | null {
+  return hintMatchImpl(hint, elems, null);
+}
+
+/**
+ * The tiered candidate set for a `target_hint` (see `HintCandidates`). Returns null
+ * only when the hint matches NOTHING (an empty pool-wide miss); a hint that hits a
+ * tier always yields that tier's refs — including an ambiguous tier, which is the
+ * whole point: the decider gets "these k elements" instead of "null → the full pool".
+ */
+export function hintCandidates(hint: string, elems: ElemPool): HintCandidates | null {
+  const sink: HintCandidates = { refs: [], tier: -1, decided: null };
+  hintMatchImpl(hint, elems, sink);
+  return sink.refs.length ? sink : null;
 }

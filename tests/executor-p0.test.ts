@@ -187,9 +187,9 @@ describe("敏感字段遮蔽：值不落进快照/trace/报告（D5①）", () =
     });
     await ctx.close();
     const filled = rep.steps.find((s) => s.how === "filled");
-    expect(filled, "the password field should have been filled").toBeTruthy();
+    expect(filled).toBeTruthy();   // the password field should have been filled
     expect(JSON.stringify(filled)).not.toContain("Sup3rS3cret");
-    expect(String(filled!.value)).toMatch(/^\*\*\*\(\d+\)$/, "masked with a length digest");
+    expect(String(filled!.value)).toMatch(/^\*\*\*\(\d+\)$/);   // masked with a length digest
   });
 
   it("input[type=password/file/hidden] 的值不进 inert 快照比对（只留长度掩码）", () => {
@@ -243,7 +243,7 @@ describe("导航信封：hosts 运行期强制（D5②）", () => {
     expect(rep.done).toBe(false);
     expect(rep.stop_code).toBe("host_not_allowed");
     expect(rep.steps.length).toBe(0);
-    expect(navigated, "refusal must happen BEFORE any navigation").toBe(false);
+    expect(navigated).toBe(false);   // refusal must happen BEFORE any navigation
   });
 
   it("动作后落到未声明主机：结构化停止（不是继续在上面点）", async () => {
@@ -347,7 +347,7 @@ describe("配置类错误：启动期预检、永不重试（D6 / backlog I-1）
     expect(rep.done).toBe(false);
     expect(rep.stop_code).toBe("config_error");
     expect(rep.steps.length).toBe(0);
-    expect(navigated, "config refusal must happen BEFORE navigation").toBe(false);
+    expect(navigated).toBe(false);   // config refusal must happen BEFORE navigation
     expect(rep.stop_reason).toContain("/tmp/broken.onnx");
   });
 

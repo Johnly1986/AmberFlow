@@ -88,6 +88,7 @@ import {
   ROLE_TOKENS,
   STOP_TOKENS,
   affordanceRule,
+  hintCandidates,
   hintMatch,
   navRule,
 } from "./rules.ts";
@@ -298,6 +299,18 @@ export interface RunOptions {
    */
   hosts?: string[] | null;
   /**
+   * P1 TIERED HINT (docs/EXECUTION_LAYER_SPLIT_PLAN.md M0, default OFF): when the
+   * plan's `target_hint` resolves to a TIER that is ambiguous inside (several
+   * genuinely different candidates), rules.ts used to collapse that to `null` and
+   * the step fell to laya over the WHOLE pool — "pick 1 of 40" for what is really
+   * "pick 1 of these 3" (measured: 17 candidates → 0.23 → BLOCKED). With this on,
+   * the ambiguous tier becomes a NARROWED question: laya sees only those candidates
+   * (the shortlist is then a passthrough at ≤ k labels). If the narrowed ask
+   * abstains, the step falls back to today's full-pool ask — the tier narrows the
+   * question, it never decides by itself. OFF ⇒ byte-identical behaviour.
+   */
+  tieredHint?: boolean;
+  /**
    * DRY RUN: resolve the step's target exactly as a real run would (rule hint →
    * local model → re-observe → escalate), probe that it is actionable WITHOUT
    * touching it, and stop there. Nothing is clicked, filled, or scrolled: the
@@ -344,6 +357,8 @@ export interface MiddlewareOptions {
   router?: RouterLike | null;
   /** Constructor-level default for `RunOptions.hosts` (the navigation envelope). */
   hosts?: string[] | null;
+  /** Constructor-level default for `RunOptions.tieredHint` (P1 narrowed question, default OFF). */
+  tieredHint?: boolean;
 }
 
 /* ------------------------------------------------------------------ JS passes
@@ -644,6 +659,8 @@ export class BrowserMiddleware {
   gotoTimeout: number;
   /** Navigation envelope default for runs that do not pass `hosts` (see `RunOptions.hosts`). */
   hosts: string[] | null = null;
+  /** See `RunOptions.tieredHint` (P1 narrowed question; default OFF = today's behaviour). */
+  tieredHint = false;
   /** Deterministic rule prefilter ON, anti-repeat ON (measured production defaults). */
   rulesOn = true;
   antiRepeat = true;
@@ -679,6 +696,7 @@ export class BrowserMiddleware {
     this.hintMemory = opts.hintMemory ?? null;
     this.gotoTimeout = opts.gotoTimeout ?? 30000;
     this.hosts = opts.hosts ?? null;
+    this.tieredHint = opts.tieredHint ?? this.tieredHint;
   }
 
   /**
@@ -1270,6 +1288,7 @@ export class BrowserMiddleware {
       hintMemory = this.hintMemory,
       dryRun = false,
       hosts = null,
+      tieredHint = this.tieredHint,
     } = opts;
 
     // The navigation envelope: run-level declaration wins, else the middleware's
@@ -1486,6 +1505,7 @@ export class BrowserMiddleware {
         let conf = 0;
         let method = "laya";
         let layaMargin: number | null = null;      // C3-R top-two margin (diagnostic)
+        let tierAsk: { n: number; tier: number } | null = null;   // P1 diagnostic: the narrowed question
         if (ruleRef && !(ruleRef in forbidden)) {
           ref = ruleRef;
           conf = 1.0;
@@ -1494,8 +1514,35 @@ export class BrowserMiddleware {
           // the rule's target is forbidden (inert or tried) -> fall through to
           // laya with the reduced action space instead of re-hitting a known-dead
           // element
-          const [picked, pconf, pprobs] = await this.pickElement(
-            instruction, pg, elems, new Set(Object.keys(forbidden)), noted);
+          const forbiddenSet = new Set(Object.keys(forbidden));
+          // P1 TIERED HINT (opt-in, `tieredHint`; OFF keeps today's behaviour byte-identical):
+          // an ambiguous-in-tier plan hint used to collapse to null and become
+          // "pick 1 of the whole 40" — now it becomes "pick 1 of THESE candidates".
+          // The tier is a SMALLER QUESTION, never a decider: below floor or no answer,
+          // the step re-asks the full pool and every later rung stays as today.
+          let askPool = elems;
+          if (tieredHint && curHint !== null && ruleRef === null) {
+            const cand = hintCandidates(curHint, elems);
+            if (cand !== null && cand.decided === null && cand.refs.length > 1) {
+              const subset: ElemPool = {};
+              for (const r of cand.refs) {
+                if (elems[r] !== undefined && !forbiddenSet.has(r)) subset[r] = elems[r]!;
+              }
+              if (Object.keys(subset).length > 1) {
+                askPool = subset;
+                tierAsk = { n: Object.keys(subset).length, tier: cand.tier };
+              }
+            }
+          }
+          let [picked, pconf, pprobs] = await this.pickElement(
+            instruction, pg, askPool, forbiddenSet, noted);
+          if (askPool !== elems && (picked === null || pconf < this.confFloor)) {
+            // narrowed ask abstained: today's full-pool ask still gets its turn
+            if (verbose) console.log(`  step ${stepNo}: tiered hint (${tierAsk!.n} candidates) abstained -> full pool`);
+            tierAsk = null;
+            [picked, pconf, pprobs] = await this.pickElement(
+              instruction, pg, elems, forbiddenSet, noted);
+          }
           ref = picked;
           conf = pconf;
           method = "laya";
@@ -1752,6 +1799,7 @@ export class BrowserMiddleware {
           ...(method === "escalate" && escalatedPick ? { escalated: true } : {}),
           ...(prevented ? { prevented } : {}),
           ...(noted ? { noted: Object.keys(noted).length } : {}),
+          ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question
           inert, url: urlOf(pg),
         });
         if (verbose) {
