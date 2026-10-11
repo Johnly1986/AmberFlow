@@ -40,6 +40,7 @@ import {
   BrowserMiddleware, browserSession, type BrowserSession, type EscalatorLike,
 } from "./executor.ts";
 import { REPO } from "./flow.ts";
+import { checkArtifacts } from "./model-artifacts.ts";
 import { extractSlots } from "./extraction.ts";
 import { selectIndex } from "./datasource.ts";
 import {
@@ -834,6 +835,12 @@ export interface FlowRunResult {
   goal: string;
   laya: string;
   escalate: string;
+  /**
+   * P0 层级行——**真**跑在哪一层：`on`（ONNX 面且三件齐）/ `off(missing)`（请求了 onnx 但产物不齐）/
+   * `off(scripted)`（离线替身）/ `off(rules-only)`（`--laya none` 纯规则面）。
+   * 与 pack 的 `model_status` 同一词汇、同一出处（`src/model-artifacts.ts`）。
+   */
+  model_status: string;
   /** 本站档案决定的 checkpoint（§3：复用 Router 的文字系统路由结论）。 */
   checkpoint: string;
   locale: string | null;
@@ -1221,9 +1228,15 @@ function finalize(
     + (ctx.drift.length ? ` · drift ${ctx.drift.length}` : "");
   const ok = results.every((r) => r.status === "done" || r.status === "skipped")
     && invariants.every((i) => i.held);
+  // P0 层级行：`laya` 是**请求的面**，`model_status` 是**真跑在哪一层**——请求 onnx 面但三件不齐
+  // 就是 off(missing)（真上场时会在装载处响亮失败），离线替身面是 off(scripted)/off(rules-only)。
+  // 与 pack 同一个词汇、同一个出处（`src/model-artifacts.ts`），桥与报告念同一行。
+  const tier = ctx.laya === "onnx"
+    ? (checkArtifacts().ready ? "on" : "off(missing)")
+    : ctx.laya === "none" ? "off(rules-only)" : "off(scripted)";
   return {
     app: template.id, site: siteKey, site_label: compiled.site.label, goal: template.goal,
-    laya: ctx.laya, escalate: ctx.escalate,
+    laya: ctx.laya, escalate: ctx.escalate, model_status: tier,
     checkpoint: ctx.checkpoint, locale: ctx.locale,
     steps: results, invariants, counts, line,
     backfill_gate: ctx.backfillGate,
@@ -1252,6 +1265,7 @@ export function flowReportMarkdown(r: FlowRunResult): string {
     `- 目标：${r.goal}`,
     `- 决策面：laya=${r.laya} ｜ escalate=${r.escalate} ｜ checkpoint=${r.checkpoint}`
       + (r.locale ? `（locale=${r.locale}）` : ""),
+    `- 模型层级：\`${r.model_status}\`（请求的面 laya=${r.laya}；on 才意味着真模型在决策）`,
     `- 结果：**${r.ok ? "通过" : "未通过"}** ｜ 步骤 ${r.steps.filter((s) => s.status === "done" || s.status === "skipped").length}/${r.steps.length} ｜ 用时 ${r.secs}s`,
     `- 解析级：${r.line}`,
     `- 回填门（红线 2）：${gate}`,
@@ -1351,12 +1365,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       const profile = loadSiteProfile(appId, siteKey);
       const pProblems = validateProfile(profile, template);
       if (pProblems.length) throw new Error(`site profile ${appId}/${siteKey} is invalid:\n  - ${pProblems.join("\n  - ")}`);
+      // dry 也带层级行：调用者在"会不会真用模型"上问的正是这一次展开会跑在哪一层。
+      const dryTier = laya === "onnx"
+        ? (checkArtifacts().ready ? "on" : "off(missing)")
+        : laya === "none" ? "off(rules-only)" : "off(scripted)";
       const compiled = compileFlow(template, siteKey, profile, slotOverrides);
       console.log(JSON.stringify({
         app: appId, site: siteKey, site_label: compiled.site.label, goal: template.goal,
         slots: compiled.slots, profile_path: loadSiteProfile(appId, siteKey)._path ?? "",
         checkpoint: profile.checkpoint ?? template.model ?? "english",
-        locale: profile.locale ?? null,
+        locale: profile.locale ?? null, model_status: dryTier,
         steps: compiled.steps.map((s) => ({
           id: s.id, desc: s.desc, kind: s.kind, url: s.url, signal: s.signal,
           signal_source: s.signal_source, dangerous: s.dangerous, targets: s.targets,

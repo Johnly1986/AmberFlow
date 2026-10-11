@@ -395,7 +395,7 @@ export function apply(ctx: Context, config: Config): void {
             + (value.refused.length ? `; not executed: ${value.refused.join(', ')}` : '')
             + stopped
             + (value.line ? `; ${value.line}` : '')
-            + `; model: ${value.model ?? 'unknown (artifact has no tier)'}`
+            + (value.model ? `; model: ${value.model}` : '')
             + (value.decisions ? `\ndecisions: ${value.decisions}` : '')
             + (value.reportPath ? `\nreport: ${value.reportPath}` : '\nno report was written')
             + (value.profilePath ? `\nprofile: ${value.profilePath}` : ''),

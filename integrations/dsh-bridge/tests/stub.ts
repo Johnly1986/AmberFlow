@@ -209,6 +209,10 @@ function flowSource(): string {
     '}',
     'fs.writeFileSync(path.join(out, `${app}-${site}-flow-result.json`), JSON.stringify({',
     "  ok: true, completed: '1/2',",
+    // The real CLI writes both: the requested plane and the honest tier.
+    "  laya: argv.includes('--laya') ? argv[argv.indexOf('--laya') + 1] : 'scripted',",
+    "  model_status: argv.includes('--laya') && argv[argv.indexOf('--laya') + 1] === 'none'",
+    "    ? 'off(rules-only)' : 'off(scripted)',",
     "  steps: [{ id: 'open-flights', desc: 'open the flights channel', status: 'done' },",
     "    { id: 'pick-date', desc: 'choose the departure date', status: 'blocked', obstacle: 'low confidence' }],",
     "  invariants: [{ id: 'inv0', desc: 'done page', held: true }],",

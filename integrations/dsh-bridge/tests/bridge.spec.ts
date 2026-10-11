@@ -721,6 +721,27 @@ describe('SemanticFlow door — list / argv / summarize / registry', () => {
       .not.toContain('--allow-dangerous-demo')
   })
 
+  it('summarizeFlow reads the tier: model_status first, the requested plane only for older artifacts', () => {
+    const out = tmp('flow-tier')
+    fs.writeFileSync(path.join(out, 'fa-sa-flow-result.json'), JSON.stringify({
+      ok: true, steps: [{ id: 'a', desc: 'a', status: 'done' }], invariants: [],
+      line: 'rule 1 · laya 0 · escalate 0 (written back 0) · list 0 · blocked 0',
+      laya: 'onnx', model_status: 'off(missing)',
+    }))
+    // The engine's honest tier wins over the plane it merely requested.
+    expect(summarizeFlow(out, 'fa', 'sa', proc({ code: 0 })).model).toBe('off(missing)')
+    const legacy = tmp('flow-tier-legacy')
+    fs.writeFileSync(path.join(legacy, 'fa-sa-flow-result.json'), JSON.stringify({
+      ok: true, steps: [], invariants: [], laya: 'onnx',
+    }))
+    expect(summarizeFlow(legacy, 'fa', 'sa', proc({ code: 0 })).model).toBe('on')
+    const none = tmp('flow-tier-none')
+    fs.writeFileSync(path.join(none, 'fa-sa-flow-result.json'), JSON.stringify({
+      ok: true, steps: [], invariants: [], laya: 'none',
+    }))
+    expect(summarizeFlow(none, 'fa', 'sa', proc({ code: 0 })).model).toBe('off(rules-only)')
+  })
+
   it('summarizeFlow maps the artifact into the run shape and keeps the tally line + profile', () => {
     const out = tmp('flow-art')
     fs.writeFileSync(path.join(out, 'fa-sa-flow-result.json'), JSON.stringify({

@@ -596,8 +596,9 @@ export interface RunSummary {
    * Which tier the run executed on — `on`, `off(missing)` (no ONNX artifacts: the rules ladder
    * did everything a rule could, and model-needed steps blocked honestly), `off(rules-only)`
    * (the caller asked `no_model`), or `off(scripted)` (a stub checkout's scripted runtime).
-   * Read from the engine's `<app>-result.json` `model_status`; absent only for artifacts written
-   * by older engines, which is reported as no line rather than as a guess.
+   * Read from the engine's `model_status` in the artifact (pack door) or, for the semantic door,
+   * from the honest tier with a fallback onto the requested plane (`laya: onnx|none|scripted`).
+   * Absent only for artifacts written by older engines: no line rather than a guess.
    */
   model?: string
   /**
@@ -942,6 +943,17 @@ export function summarizeFlow(
     timedOut: outcome.timedOut,
     line: asText(raw['line']),
     profilePath: asText(raw['profile_path']),
+    // Tier: the engine's honest `model_status` when present; otherwise the older artifacts'
+    // requested plane (`laya: onnx|…`) read the P0 way. No field at all = no tier line, never a guess.
+    ...(() => {
+      const fields = modelFields(raw)
+      if (fields.model !== undefined) return fields
+      const plane = asText(raw['laya'])
+      if (plane === '') return fields
+      if (plane === 'onnx') return { ...fields, model: 'on' }
+      if (plane === 'none') return { ...fields, model: 'off(rules-only)' }
+      return { ...fields, model: 'off(scripted)' }
+    })(),
   }
 }
 
