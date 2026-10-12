@@ -95,6 +95,7 @@ import {
 import { checkSignal, type SignalSpec } from "./signals.ts";
 import { LayaNotConfiguredError, type LayaRuntime } from "./model.ts";
 import { induceHint } from "./hint-memory.ts";
+import { instantiateSpace, resolveCommandValue, type CommandDecl } from "./actions.ts";
 
 /* ------------------------------------------------------------------ shapes */
 
@@ -153,7 +154,11 @@ export type StopCode =
   | "manual_confirmation"
   | "noul_unverified"
   | "host_not_allowed"
-  | "config_error";
+  | "config_error"
+  /** P2: a declared command space with NOTHING resolvable on this page (space-empty). */
+  | "space_empty"
+  /** P2: a `fill`/`select` command's declared slot binding has no value (never guessed). */
+  | "needs_value";
 
 /** Minimal locator surface used by the executor (superset of `extraction.LocLike`). */
 interface AnyLoc {
@@ -291,6 +296,21 @@ export interface RunOptions {
   targetHints?: string[] | null;
   /** `when` guard: evaluated after navigation, before any action. */
   precondition?: SignalSpec | null;
+  /**
+   * P2 COMMAND SPACE (docs/ARCHITECTURE_REVIEW.md §6, the "check + submit in ONE
+   * subgoal" use case): an ORDERED CLOSED SET of commands this step may execute,
+   * declared by the app config and validated at load (`actions.validateCommands`).
+   * When present, the step acts ON THE SPACE, not on the pool:
+   *   instantiate the space (decl × this step's pool × forbiddances, a pure function)
+   *   → walk it in declared order, executing one command per step
+   *   → a command that resolves to nothing is OUT; nothing left ⇒ structured
+   *     `space_empty` — the loop NEVER falls back to the whole pool and the model
+   *     is NEVER asked to pick (the closed set decides).
+   * `fill`/`select` bind their value by NAME from the plan's slots (`{from:"slot",key}`)
+   * — a missing binding is `needs_value`, never a guess (红线② at the command layer).
+   * Absent ⇒ today's behaviour, byte-identical.
+   */
+  commands?: CommandDecl[] | null;
   /**
    * Navigation envelope (see `disallowedHost`): when non-empty, `run()` refuses
    * to open a `start_url` whose host is not declared, and stops the subgoal if
@@ -1167,11 +1187,18 @@ export class BrowserMiddleware {
    * value, so the label probe is expected to miss and Playwright's 30 s default
    * would charge that miss to every select fill).
    */
-  async _executeElement(page: AnyPage, el: Elem, slots: Record<string, unknown>): Promise<[string, unknown]> {
+  async _executeElement(
+    page: AnyPage, el: Elem, slots: Record<string, unknown>,
+    bound?: { value: unknown } | null,
+  ): Promise<[string, unknown]> {
     const tag = el.tag;
     if (tag === "input" || tag === "textarea" || tag === "select") {
       if (this._isSubmit(el)) return this._clickOnly(page, el);
-      const val = this._slotValue(el, slots);
+      // P2: a command-space fill/select arrives with its value ALREADY BOUND BY NAME
+      // (`{from:"slot", key}` from the plan) — it must not fall back to `_slotValue`'s
+      // substring heuristic, which is how a value once got handed to a radio. When no
+      // binding was given (every pre-existing path), the heuristic stays exactly as today.
+      const val = bound !== undefined && bound !== null ? bound.value : this._slotValue(el, slots);
       if (val === null || val === undefined) return ["needs_value", null];
       const loc = await this._locatorFor(page, el);
       if (loc === null) return ["stale_ref", null];
@@ -1289,11 +1316,18 @@ export class BrowserMiddleware {
       dryRun = false,
       hosts = null,
       tieredHint = this.tieredHint,
+      commands = null,
     } = opts;
 
     // The navigation envelope: run-level declaration wins, else the middleware's
     // (set once for a whole journey by the app runner from `pack.hosts`).
     const hostGate = hosts ?? this.hosts;
+    // P2 command space: the ordered closed set for THIS subgoal. Progress is per-run
+    // local state (a retry re-runs the whole subgoal, so the space restarts walking
+    // from the top — exactly the `retries` contract).
+    const cmdSpace: CommandDecl[] = (commands ?? []).filter((c) => c && typeof c.id === "string");
+    const cmdDone = new Set<string>();
+    let cmdI = 0;
 
     const slots: Record<string, unknown> = { ...extractSlots(instruction), ...(slotsIn ?? {}) };
     this.targetHints = (targetHints ?? []).filter((h) => !!h);
@@ -1450,6 +1484,53 @@ export class BrowserMiddleware {
         let reobserved = false;          // at most ONE wider look per step
         let escalated = false;           // at most ONE escalation per step
         let escalatedPick: string | null = null;
+        // P2 COMMAND SPACE — the step's action is chosen ON THE CLOSED SET, not on the pool:
+        // `instantiateSpace` semantics implemented as the walk below (declaration × this
+        // step's observation; a command resolving to nothing is OUT — with the same
+        // "the plan-named target is never eaten by the budget" recovery hints get — and
+        // nothing left is a structured stop, NEVER a fallback to the full pool, NEVER a
+        // model pick). Order is decided by the declaration and the page, not by scoring;
+        // completion truth stays the subgoal signal (红线③ untouched).
+        let cmdPick: { cmd: CommandDecl; ref: string; index: number } | null = null;
+        if (cmdSpace.length) {
+          const scans = new Set(Object.values(elems).map((x) => x.scan));
+          let pendingUnresolved: string[] = [];
+          for (let i = cmdI; i < cmdSpace.length; i++) {
+            const c = cmdSpace[i]!;
+            if (cmdDone.has(c.id)) continue;
+            if (c.op === "skip") {          // skip: resolves by definition, moves the page not at all
+              cmdDone.add(c.id);
+              cmdI = i + 1;
+              continue;
+            }
+            const target = c.target ?? "";
+            let r = hintMatch(target, elems);
+            if (r === null && target !== "") {
+              for (const [ref, e] of Object.entries(await hintLookup(pg, target))) {
+                if (!scans.has(e.scan)) elems[ref] = e;
+              }
+              r = hintMatch(target, elems);
+            }
+            pruneForbids(elems);
+            if (r !== null && !(r in forbidden)) { cmdPick = { cmd: c, ref: r, index: i }; break; }
+            if (r === null) { pendingUnresolved.push(c.id); continue; }
+            // resolved but forbidden: that command's action already ran or died — walk past it.
+            cmdDone.add(c.id);
+            cmdI = i + 1;
+          }
+          if (cmdPick === null) {
+            if (cmdDone.size >= cmdSpace.length) {
+              stop("action_space_exhausted",
+                `commands exhausted (${cmdDone.size}/${cmdSpace.length} acted) but the done-signal never held on step ${stepNo}`, stepNo);
+            } else {
+              stop("space_empty",
+                `command space matches nothing on this page — pending unresolved: `
+                + `${pendingUnresolved.join(", ") || "-"} (unresolvable candidates are OUT; the space never falls back to the full pool) on step ${stepNo}`, stepNo);
+            }
+            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            break;
+          }
+        }
         // A frozen plan that NAMES its target must never be blocked by the
         // extraction budget: retrieve the hinted element(s) into the pool when
         // they were evicted. And a hint whose element is already forbidden is
@@ -1460,7 +1541,7 @@ export class BrowserMiddleware {
         // (opening a CSS sidebar changes no url/text/input value), so in
         // rules-only mode the subgoal blocked with "needs a model pick" even
         // though the ordered hint list named the logout link all along.
-        let curHint = this.currentHint();
+        let curHint = cmdSpace.length ? null : this.currentHint();
         for (let guard = 0; curHint !== null && guard < 8; guard++) {
           if (hintMatch(curHint, elems) === null) {
             for (const [ref, e] of Object.entries(await hintLookup(pg, curHint))) {
@@ -1479,8 +1560,23 @@ export class BrowserMiddleware {
           }
           break;
         }
+        const commandMode = cmdSpace.length > 0;
+        // resolve the picked command's parameter binding NOW (fill/select). A missing
+        // declared binding is a STRUCTURED `needs_value` stop, never a guess (红线②):
+        // the value's only source is the plan's data bag, named by `value.key`.
+        let commandValue: unknown;
+        let commandBindMissing: string | null = null;
+        if (commandMode && cmdPick && (cmdPick.cmd.op === "fill" || cmdPick.cmd.op === "select")) {
+          const rv = resolveCommandValue(cmdPick.cmd, slots);
+          if (!rv.ok) commandBindMissing = rv.reason;
+          else commandValue = rv.value;
+        }
         let ruleRef: string | null = null;
-        if (this.rulesOn) {
+        if (commandMode && cmdPick) {
+          // the space already resolved the element by name; use it verbatim (no token rule,
+          // no model, no confidence floor — a closed-set pick is deterministic by contract).
+          ruleRef = cmdPick.ref;
+        } else if (this.rulesOn) {
           // A frozen plan that NAMES its target is authoritative: href/label token
           // matching may not pre-empt it. Measured live (en.wikipedia search page
           // served an error shell, so the plan's `#searchInput` was absent):
@@ -1710,6 +1806,17 @@ export class BrowserMiddleware {
           }
           break;
         }
+        // P2: a fill/select whose DECLARED binding has no value stops here — honestly,
+        // structurally, and never with a guessed value. (The substring-heuristic path
+        // below is the old behaviour; a command space replaces guessing with binding.)
+        if (commandMode && commandBindMissing !== null) {
+          trace.push({ step: stepNo, desc, how: "needs_value", executed: false, method, conf: 1.0, command: cmdPick!.cmd.id, url: urlOf(pg) });
+          stop("needs_value",
+            `command ${JSON.stringify(cmdPick!.cmd.id)}: ${commandBindMissing} `
+            + `— a declared binding either has its value in the plan or the step stops (红线②: never guessed) on step ${stepNo}`, stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          break;
+        }
         // Pre-fill guard: a click whose form has empty fields that the plan's
         // slots can supply would die in HTML5 validation or JS checks — an inert
         // click and a wasted step. Values come from the plan, never the model.
@@ -1719,7 +1826,7 @@ export class BrowserMiddleware {
             const [phow] = await this._executeElement(pg, pe, slots);
             if (verbose) console.log(`  step ${stepNo}.pre: fill required ${JSON.stringify(pe.label)} -> ${phow}`);
           }
-        } else if (method === "rule:match") {
+        } else if (method === "rule:match" && !commandMode) {
           // A rule-picked field with no slot value cannot be filled; forbid it so
           // the next step goes to laya instead of burning the subgoal on
           // needs_value. Submit-type inputs are the exception: they are CLICKED,
@@ -1775,7 +1882,8 @@ export class BrowserMiddleware {
           if (!this._isTyping(el)) {
             [how, arg] = await this._clickOnly(pg, el);
           } else {
-            [how, arg] = await this._executeElement(pg, el, slots);
+            [how, arg] = await this._executeElement(pg, el, slots,
+              commandMode ? { value: commandValue } : null);
           }
         }
         const executed = how === "clicked" || how === "filled";
@@ -1785,16 +1893,27 @@ export class BrowserMiddleware {
           forbid(ref, el, String(how));
           trace.push({
             step: stepNo, desc: `click ${el.tag} "${el.label}"`, how,
-            executed: false, method, conf: round3(conf), url: urlOf(pg),
+            executed: false, method, conf: round3(conf),
+            ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
+            url: urlOf(pg),
           });
           if (verbose) console.log(`  step ${stepNo}: (${how}, ${method}) -> skip ${ref}`);
           continue;
         }
         const post = await this.snapshot(pg);
         const inert = JSON.stringify(pre) === JSON.stringify(post);   // url+text+input-values all identical
+        // P2: an executed command is ACTED whether or not the page moved — the walk
+        // must not re-drive the same command next step (its element is forbidden on
+        // inert anyway, but the closed set advances by the command's identity, not the
+        // element's). `executed && !inert` also advances `target_hints` below.
+        if (executed && cmdPick) {
+          cmdDone.add(cmdPick.cmd.id);
+          cmdI = cmdPick.index + 1;
+        }
         trace.push({
           step: stepNo, desc, how, value: redactValue(el, arg), risky, executed, confirmed, method,
-          conf: round3(conf), ...(method.startsWith("laya") && layaMargin !== null
+          conf: round3(conf), ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
+          ...(method.startsWith("laya") && layaMargin !== null
             ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}),
           ...(method === "escalate" && escalatedPick ? { escalated: true } : {}),
           ...(prevented ? { prevented } : {}),

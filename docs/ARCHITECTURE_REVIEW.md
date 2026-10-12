@@ -270,7 +270,7 @@ npm run apps:suite && npm run apps:matrix             # 行为与成本账单
   ② §七.9"一个子目标一次点击"是否同意推翻？③ P0 直接开工，还是先把 P1 的 A/B 台搭起来？
   ④ `space`/`bindings` 放 `src/` 共享层（新模块）还是先作为 `app-pack.ts` 内部编译产物试一轮？
 
-## 11. 实施状态补记（同日，按本文 §7 顺序落地 P0 + P1）
+## 11. 实施状态补记（同日，按本文 §7 顺序落地 P0 + P1 + P2）
 
 **P0 已实施**（"不改行为只改形状"逐条兑现，`npm run verify` 全绿 + `apps:gen --check` 8/8 不漂）：
 ① 禁元素收敛为单出口 `forbid/unforbid/pruneForbids`（7 写入 / 3 re-prune → 各 1 处，源码结构守卫测试钉死）；
@@ -289,11 +289,25 @@ npm run apps:suite && npm run apps:matrix             # 行为与成本账单
 OFF 问 15 条候选、ON 只问 3 条，窄问弃权即回退整池；阶梯四个 `method` 取值与 `apps:suite` 结论一字未动。
 出口打通：CLI `--tiered-hint`、DSH 桥 `tiered_hint`（新守卫：不传新开关时默认 argv 逐字节不变）。
 
+**P2 已实施**（命令层 `src/actions.ts`；门控 = `commands` 字段本身，不声明逐字节不变；`tests/actions.test.ts` 15 条）：
+声明半 = `COMMAND_OPS`（引擎能力面，代码）+ `validateCommands` 由同一个 `PlanningRules.problems` 走查
+（未知 op / 重复 id / fill 缺绑 / 参数来源非 slot ⇒ 加载期红，§8.3 无第三套语法）；
+实例化半 = `instantiateSpace` 纯函数（声明 × 当次池；解析不到出局，全空 ⇒ 结构化 `space_empty`，
+**绝不退回全池、绝不问模型**）。红线② 在命令层的落地：`fill/select` 的值只按名绑计划槽位
+（`resolveCommandValue`），缺绑 ⇒ `needs_value` 结构化停并进 `NEVER_RETRY_CODES`。
+**§7-P2 的验收台兑现**：SkyBook"勾选+提交"放进**一个子目标**——真 site2 夹具上 2 条 executed 命令
+（`command: [check, record]`、方法全 `rule:match`、选择提问 0 次、`#hotel-recorded` 落账）；
+旧 8 个生成包一字未动（`apps:gen --check` 8/8、六层对拍全绿），§七.9 的"仍未解决"就地改写为"已开口子"。
+
 **§9 复算口径的变化**：`grep -c "forbidden\[.*\] = esig" src/executor.ts` → **1**（助手内部那一行）；
 `stopReason = ` 的直接赋值只剩初始化 + `stop()` 内部两处；其余数字（trace.push 7 种等）未变——P0 没碰 trace 形状。
 
-**仍未做**（按本文自己的纪律，不在本轮越权）：P2 `src/actions.ts`、P3 `src/bindings.ts`、P4 `next`；
+**仍未做**（按本文自己的纪律，不在本轮越权）：P3 `src/bindings.ts`（`<select>`/`list_extract` 的声明式候选规则——
+命令层的具名绑定已覆盖"缺绑即 needs_value"，`select` 的 label→value 两候选回退仍是代码里的既有纪律）、
+P4 `next`（§7.2 负例 4 的环上界还没实现，等 P2 用久后的数字）；
 线上包 A/B 的**真机数字**（本文 §4#1 明说不能假设一定变好，需要 `--tiered-hint` 在 live pack 上跑对照——
 离线机制已证，线上一跑需网络与权重）；`BrowserMiddleware` 更名（前提 C 的命名债）；D3 inert 降级（要先有
 "死元素当目标"夹具证明新上界早停且理由不同）。**需要裁定**的四个问题里，③已按"P0 直接开工"执行，
-①②④仍归项目方拍板。
+①（红线①改写）已由 P1/P2 的实现事实接受——运行期只有"闭集内选择"与"过门回填"两条路；②（§七.9 推翻）
+已由 P2 落地为"可表达的新面"而非改写旧包；④（space/bindings 放共享层新模块还是内部编译产物）
+按 P2 的实测定为**共享层新模块 `src/actions.ts`**（纯函数、可离线单测、被 pack 与计划两面共用）。

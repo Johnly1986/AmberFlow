@@ -11,6 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { SIGNAL_OPS, signalArgs, type SignalSpec } from "./signals.ts";
+import { validateCommands, type CommandDecl } from "./actions.ts";
 
 export interface Subgoal {
   desc: string;
@@ -21,6 +22,12 @@ export interface Subgoal {
   slots?: Record<string, unknown>;
   when?: SignalSpec;
   retries?: number;
+  /**
+   * P2 命令层：这一步的**命令闭集**（可选；不写 = 今天的一步一指针，逐字节不变）。
+   * 声明半在加载期对着引擎能力面校验（`actions.validateCommands`），
+   * 实例化半在运行期把声明 × 当次元素池收成候选（`actions.instantiateSpace`）。
+   */
+  commands?: CommandDecl[];
   status?: string;
   obstacle?: string | null;
   attempts?: number;
@@ -36,6 +43,7 @@ export interface PlanFile {
 
 const EDITABLE = new Set([
   "desc", "signal", "start_url", "status", "target_hint", "target_hints", "slots", "when", "retries",
+  "commands",
 ]);
 
 export class PlanningRules {
@@ -157,6 +165,13 @@ export class PlanningRules {
           (typeof retries !== "number" || !Number.isInteger(retries) || retries < 0)) {
         issues.push(`${tag}: retries must be a non-negative integer`);
       }
+      // P2 command space: the SAME validator the pack loader uses (`actions.validateCommands`),
+      // so a hand-edited or LLM-amended plan that declares `commands` is checked at load time
+      // exactly like a pack step — unknown op / dup id / a fill with no slot binding fail here,
+      // not mid-run. Absent `commands` adds nothing (default-equivalence).
+      if (s.commands !== undefined) {
+        validateCommands(s.commands, tag, issues);
+      }
       const desc = String(s.desc ?? "").toLowerCase();
       for (const w of this.forbiddenWords) {
         if (desc.includes(w)) issues.push(`${tag}: forbidden word '${w}' in desc`);
@@ -190,7 +205,7 @@ export class TaskPlan {
         status: "pending",
         obstacle: null,
       };
-      for (const k of ["target_hint", "target_hints", "slots", "when"] as const) {
+      for (const k of ["target_hint", "target_hints", "slots", "when", "commands"] as const) {
         if (s[k]) out[k] = s[k] as never;      // truthy-only, exactly like Python
       }
       if (s.retries) out.retries = Math.trunc(Number(s.retries));
@@ -228,14 +243,18 @@ export class TaskPlan {
     slots: Record<string, unknown> | null = null,
     when: SignalSpec | null = null,
     retries: number | null = null,
+    commands: CommandDecl[] | null = null,
   ): void {
     const sg: Subgoal = { desc, signal, start_url: startUrl, status: "pending", obstacle: null };
-    // Complete contract surface: Python's insert() silently dropped when/retries
+    // Complete contract surface: Python's insert() silently dropped when/retries —
+    // and the same lesson applies to every field added later, so `commands` rides here too
+    // (a replan amendment must never lose a step's command space).
     if (targetHint) sg.target_hint = targetHint;
     if (targetHints) sg.target_hints = targetHints;
     if (slots) sg.slots = slots;
     if (when) sg.when = when;
     if (retries) sg.retries = Math.trunc(retries);
+    if (commands) sg.commands = commands;
     this.subgoals.splice(idx, 0, sg);
   }
 

@@ -240,11 +240,14 @@ export interface MiddlewareReport {
 /**
  * Stops that a retry CANNOT fix (docs/ARCHITECTURE_REVIEW.md D6 / backlog I-1):
  * `config_error` re-runs the same broken path, `host_not_allowed` re-walks into the
- * same undeclared host. Retrying those is not resilience — it is the same error
- * twice with more side effects behind it (measured: a bad artifact path ran the
- * data leg AND the first tool step, then repeated the config error two more times).
+ * same undeclared host, and a command-mode `needs_value` re-reads the same plan
+ * data bag — all three say the identical sentence on every attempt, each attempt
+ * with its own side effects. (Measured: a bad artifact path ran the data leg AND
+ * the first tool step, then repeated the config error two more times.)
  */
-export const NEVER_RETRY_CODES: ReadonlySet<string> = new Set(["config_error", "host_not_allowed"]);
+export const NEVER_RETRY_CODES: ReadonlySet<string> = new Set([
+  "config_error", "host_not_allowed", "needs_value",
+]);
 
 export interface MiddlewareLike {
   run(instruction: string, startUrl: string, opts?: RunOptions): Promise<MiddlewareReport>;
@@ -264,6 +267,8 @@ export async function runOnce(
       page: page as never, pw: pw as never,
       targetHint: sg.target_hint ?? null,
       targetHints: sg.target_hints ?? null,
+      // P2: the step's command space (absent ⇒ the loop acts exactly like today).
+      commands: (sg.commands as never) ?? null,
       precondition: sg.when ?? null,
       // `{manual: true}` on the subgoal's signal: no DOM fact can confirm this step,
       // so the executor asks the human (the middleware carries `manualConfirmFn`).
@@ -406,7 +411,7 @@ export async function runPlan(
           known.add(s.desc);
           plan.insert(plan.subgoals.length, s.desc, s.signal, s.start_url ?? null,
             s.target_hint ?? null, s.target_hints ?? null, s.slots ?? null,
-            s.when ?? null, s.retries ?? null);  // the port carries when/retries too
+            s.when ?? null, s.retries ?? null, s.commands ?? null);  // when/retries/commands survive the amendment
         }
         const added = plan.subgoals.length - before;
         replans += 1;

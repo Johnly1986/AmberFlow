@@ -71,12 +71,12 @@ export const STEP_KEYS = [
   // 共同
   "role", "desc", "signal", "slots", "retries", "id",
   // 浏览器步
-  "start_url", "target_hint", "target_hints", "when",
+  "start_url", "target_hint", "target_hints", "when", "commands",
   // 工具步
   "source", "args", "dry_run_args", "idempotent", "dangerous",
 ] as const;
 
-const BROWSER_ONLY = ["start_url", "target_hint", "target_hints", "when"] as const;
+const BROWSER_ONLY = ["start_url", "target_hint", "target_hints", "when", "commands"] as const;
 const TOOL_ONLY = ["source", "args", "dry_run_args", "idempotent", "dangerous"] as const;
 
 /** 展开后的一步：浏览器步或工具步（`kind` 由 `source` 是否存在决定）。 */

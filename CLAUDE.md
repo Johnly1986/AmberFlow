@@ -698,6 +698,13 @@ These are empirical findings from this codebase's own experiments — preserve t
   6 种语法收敛进 `rules.hintMatchImpl`，`hintMatch ≡ firstIfSame(hintCandidates)` 由 20 例差分逐形状钉死；
   ON 时档内歧义向模型只问那几条候选（实测 OFF 问 15、ON 问 3），窄问弃权即回退整池——
   **阶梯四个 `method` 取值一字未动**。出口打通 CLI `--tiered-hint` 与桥 `tiered_hint`。
-- **P2/P3/P4 按 §7 门槛排队**（`src/actions.ts` 命令层、`src/bindings.ts` 数据槽层、`next` 分支）：
-  门槛是 P1 的线上 A/B 真机数字 + 人工裁定，本轮不越权实施；红线（闭集不可逃逸、缺省等价、
-  新知识过零模型重放门）已写进 `docs/ARCHITECTURE_REVIEW.md` §8。
+- **P2 命令层已落地（`src/actions.ts`；门控 = `commands` 字段本身，不声明逐字节不变；`tests/actions.test.ts` 15 条）**：
+  声明半 `COMMAND_OPS=click|check|fill|select|skip` 是引擎能力面（代码），包/计划 `commands` 引用它，
+  未知 op / 重复 id / fill 缺 slot 绑定 / 参数来源非 slot ⇒ 加载期红（同一个 `PlanningRules.problems`，无第三套语法）；
+  实例化半 `instantiateSpace`=声明×当次观察（纯函数），解析不到出局、全空 ⇒ 结构化 `space_empty`
+  **绝不退回全池、绝不问模型**；`fill/select` 值只按计划槽位**具名绑定**（`resolveCommandValue`），缺绑 ⇒
+  `needs_value` 停并进 `NEVER_RETRY_CODES`。验收用例兑现：SkyBook"勾选+提交"放进**一个子目标**
+  （§七.9 未解边界 → 可表达；真 site2 夹具 2 条 executed 命令、零选择提问、信号落账），
+  旧 8 个生成包一字未动（`apps:gen --check` 8/8）。红线（闭集不可逃逸、缺省等价、新知识过零模型重放门）见 review §8。
+- **P3/P4 按 §7 门槛排队**（`src/bindings.ts` 数据槽层的页面候选声明式选择、`next` 分支）：
+  门槛是 P2 用久之后的数字与人工裁定，本轮不越权实施。
