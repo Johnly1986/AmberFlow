@@ -124,6 +124,13 @@ export interface AppDecisions {
   conf: { n: number; min: number | null; max: number | null };
   /** 决策缓存（装了才有）：命中数与提问总数。 */
   cache: { hits: number, misses: number } | null;
+  /**
+   * 梯级账单（ARCHITECTURE_IMPROVEMENTS §5）：每一级"到达 / 决定 / 问了但没过闸门"。
+   * **救回**的诚实定义 = 该级独立决定的步数（低一级没决定的那一步才轮得到它——
+   * trace 里 `method` 就是这么记的，所以不需要反事实重跑）。整条梯级在语料上决定 0 步
+   * 就是 `dead rung`，由套件在**聚合层**判定（单应用看不出全貌，见 tools/apps_suite.ts）。
+   */
+  ladder: { rule: number; laya: number; reobserve: number; escalate: number; asked_not_passed: number };
   /** 一行汇总，人读与机器读同一份：`rule 19 · laya 1 (conf 0.31) · 咨询 5 · laya:reobserve 1 · cache 6/12`。 */
   line: string;
 }
@@ -169,6 +176,11 @@ export function summarizeDecisions(
     model_steps: laya + reobserve,
     reobserve,
     escalate,
+    ladder: {
+      rule: byMethod["rule:match"] ?? 0,
+      laya, reobserve, escalate,
+      asked_not_passed: Math.max(0, modelAsks - (laya + reobserve)),
+    },
     conf: {
       n: modelConfs.length,
       min: modelConfs.length ? Math.min(...modelConfs) : null,

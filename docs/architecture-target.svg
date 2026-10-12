@@ -282,14 +282,16 @@
 <text x="58" y="2012" class="lay">⑨ 模型角色的修正（审查 docs/DECISION_MODEL_PURPOSE_REVIEW.md + 方案 docs/MODEL_ROLE_PLAN.md + 实施计划 W1–W5；注意与执行层 P0–P4 是两套编号）</text>
 <rect x="60" y="2020" width="444" height="140" class="bxred"/>
 <text x="71" y="2039" class="t" font-size="12">实测：分工写反了</text>
-<text x="71" y="2055" class="s">浏览器步 169/171（98.8%）手写了目标；真模型下</text>
-<text x="71" y="2069" class="s">整批语料 201 步里选择提问 5 次、过关 0 次，</text>
-<text x="71" y="2083" class="s">rule:match 201/201 —— 选目标从不由模型决定。</text>
-<text x="71" y="2097" class="s">模型 top-1 25%（拉丁 18% / CJK 50%）；闸门内</text>
-<text x="71" y="2111" class="s">precision 15%，而闸门本身是两把不可比的尺子</text>
-<text x="71" y="2125" class="s">（passthrough AUC 0.233 反向 / shortlist 0.587）。</text>
-<text x="71" y="2139" class="s">删掉声明：同一批旅程完成率 4/4 → 0/4。</text>
-<text x="71" y="2153" class="sm">梯级：reobserve / escalate 救回 0 次 ⇒ dead rung</text>
+<text x="71" y="2055" class="s">浏览器步 169/171（98.8%）手写了目标；</text>
+<text x="71" y="2069" class="s">真模型下整批语料 201 步里选择提问 5 次、</text>
+<text x="71" y="2083" class="s">过关 0 次，rule:match 201/201</text>
+<text x="71" y="2097" class="s">—— 选目标从不由模型决定。模型 top-1 25%</text>
+<text x="71" y="2111" class="s">（拉丁 18% / CJK 50%）；闸门内 precision 15%，</text>
+<text x="71" y="2125" class="s">而闸门是两把不可比的尺子（passthrough AUC 0.233 反向</text>
+<text x="71" y="2139" class="s">／ shortlist 0.587）。</text>
+<text x="71" y="2153" class="sm">拆开看：passthrough 采纳 57 只对 3；shortlist 采纳 18 对 8。</text>
+<text x="71" y="2167" class="s">删掉声明：同一批旅程完成率 4/4 → 0/4。</text>
+<text x="71" y="2181" class="sm">梯级：reobserve / escalate 救回 0 次 ⇒ dead rung</text>
 <rect x="516" y="2020" width="444" height="140" class="bxnew"/>
 <text x="527" y="2039" class="t" font-size="12">可修的三处（都有实测支持）</text>
 <text x="527" y="2055" class="s">① 问法：窄问 14/14 选对（全池 3/14）——档内</text>

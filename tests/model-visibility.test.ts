@@ -70,6 +70,28 @@ describe("runApp 的决策来源汇总（P1 的第一处出口）", () => {
   }, 180_000);
 });
 
+describe("梯级账单（ARCHITECTURE_IMPROVEMENTS §5：没出场的梯级要有数字）", () => {
+  it("AppDecisions.ladder 把每一级的独立决定数算出来（trace 的 method 就是它的口径）", async () => {
+    const out = tmpDir("mv-ladder");
+    const asksBefore = counted.pickAsks();
+    const res = await runApp(loadPack("demo-app"), {
+      verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json"),
+      modelStatus: "off(scripted)", runtimeStats: () => cached.decisionStats(),
+      pickAsks: () => counted.pickAsks() - asksBefore,
+    });
+    const l = res.decisions!.ladder;
+    expect(l.rule).toBeGreaterThan(0);            // 全规则消化的应用
+    expect(l.laya).toBe(0);
+    expect(l.reobserve).toBe(0);
+    expect(l.escalate).toBe(0);                   // 没有端点 ⇒ 这一级恒 0，正是要暴露的 dead rung
+    expect(l.asked_not_passed).toBe(0);
+    // 与 by_method 对账：梯级账单不许自造数，它就是同一份 trace 的另一只眼
+    expect(l.rule).toBe(res.decisions!.by_method["rule:match"] ?? 0);
+    expect(l.laya + l.reobserve).toBe(res.decisions!.model_steps);
+  }, 180_000);
+
+});
+
 describe("套件的验收数（P1 的验收口径）", () => {
   it("同一张表：slowjet 咨询 ≥1（保险被碰过）；demo-app 为 0；产物落套件目录", async () => {
     const sj = await runOne(loadPack("transfer-slowjet"), cached, counted);

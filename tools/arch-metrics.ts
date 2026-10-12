@@ -40,6 +40,7 @@ interface Corpus {
   browser_steps: number;
   tool_steps: number;
   steps_naming_target: number;
+  hint_coverage: { hinted: number; browser: number; pct: number };
   hint_coverage_browser: string;
   hint_coverage_with_flow: string;
   flow_apps: number;
@@ -125,6 +126,7 @@ function corpus(): Corpus {
     browser_steps: browser,
     tool_steps: tool,
     steps_naming_target: hinted,
+    hint_coverage: { hinted, browser, pct: Math.round((100 * hinted) / browser * 10) / 10 },
     hint_coverage_browser: `${hinted}/${browser} = ${((100 * hinted) / browser).toFixed(1)}%`,
     hint_coverage_with_flow: `${hinted + 0}/${browser + flowSteps} = ${((100 * hinted) / (browser + flowSteps)).toFixed(1)}%（+2 个语义流模板的 ${flowSteps} 步，设计上零 hint）`,
     flow_apps: flowApps,
@@ -149,7 +151,14 @@ interface ModelMetrics {
   tier: string;
   real_model_corpus: { apps: number; trace_steps: number; choice_asks: number; passed: number; reobserve: number; escalate: number; secs: number } | { note: string };
   scripted_corpus_secs: number | { note: string };
-  harness: { judged: number; top1: string; floor025_precision: string; auc_all: number; passthrough: string; shortlist: string } | { note: string };
+  harness: {
+    judged: number; top1: string; floor025_precision: string; auc_all: number; passthrough: string; shortlist: string;
+    numeric: {
+      judged: number; top1_pct: number; latin_pct: number; cjk_pct: number; precision025_pct: number;
+      auc_all: number; passthrough_auc: number; shortlist_auc: number;
+      passthrough_adopted: number; passthrough_right: number; shortlist_adopted: number; shortlist_right: number;
+    };
+  } | { note: string };
   ladder: { note: string };
 }
 
@@ -186,12 +195,22 @@ function modelMetrics(): ModelMetrics {
     const branch = (b: Record<string, any>): string =>
       `n=${b.steps} 命中 ${b.accuracy === null ? "-" : `${Math.round(b.accuracy * 100)}%`}`
       + ` ｜ floor0.25 采纳 ${b.decided_at_floor_025}（对 ${b.right}）｜ AUC ${b.auc_conf_vs_correct}`;
+    const pt = s.by_question_shape.passthrough_pool_le_8, sl = s.by_question_shape.shortlist_pool_gt_8;
     harness = {
       judged: s.judged, top1: `${Math.round(s.top1_accuracy * 100)}%`,
+      numeric: {
+        judged: s.judged, top1_pct: Math.round(s.top1_accuracy * 100),
+        latin_pct: Math.round(100 * (s.accuracy_latin_pages.match(/\((\d+)%\)/)?.[1] ?? "0") / 100) || Number(s.accuracy_latin_pages.match(/\((\d+)%\)/)?.[1] ?? 0),
+        cjk_pct: Number(s.accuracy_cjk_pages.match(/\((\d+)%\)/)?.[1] ?? 0),
+        precision025_pct: Math.round(s.floor_sweep.find((f: any) => f.floor === 0.25).precision * 100),
+        auc_all: s.conf.auc_conf_vs_correct,
+        passthrough_auc: pt?.auc_conf_vs_correct ?? null, shortlist_auc: sl?.auc_conf_vs_correct ?? null,
+        passthrough_adopted: pt?.decided_at_floor_025 ?? null, passthrough_right: pt?.right ?? null,
+        shortlist_adopted: sl?.decided_at_floor_025 ?? null, shortlist_right: sl?.right ?? null,
+      },
       floor025_precision: `${s.floor_sweep.find((f: any) => f.floor === 0.25).precision * 100}%`,
       auc_all: s.conf.auc_conf_vs_correct,
-      passthrough: branch(s.by_question_shape.passthrough_pool_le_8),
-      shortlist: branch(s.by_question_shape.shortlist_pool_gt_6 ?? s.by_question_shape.shortlist_pool_gt_8),
+      passthrough: branch(pt), shortlist: branch(sl),
     };
   }
   return {

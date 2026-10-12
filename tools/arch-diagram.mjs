@@ -18,6 +18,7 @@
  * 否则会出现"图里 1061、实际 1068、而 --check 照样绿"（本轮实测到过）。
  */
 import fs from "node:fs";
+import path from "node:path";
 
 const W = 1560, PAD = 11;
 const wide = (cp) =>
@@ -33,6 +34,35 @@ const est = (s, size) => [...s].reduce((n, ch) => {
 }, 0);
 
 const problems = [];
+
+// 计量单一出处（docs/ARCHITECTURE_REVIEW…不，见 docs/ARCHITECTURE_IMPROVEMENTS.md §1/§8）：
+// 图里**能算的数字一律从 arch-metrics.json 插值**，不再手写——否则"图与生成结果一致"的
+// --check 只是自洽门（本轮实测：图里写 1061、实际 1068，--check 照样绿）。
+// JSON 缺失就记为问题（先检查后写 ⇒ 不落盘），而不是悄悄退回旧数字。
+const HERE0 = path.dirname(new URL(import.meta.url).pathname);
+let M = null;
+try {
+  M = JSON.parse(fs.readFileSync(path.resolve(HERE0, "..", "docs", "arch-metrics.json"), "utf-8"));
+} catch {
+  problems.push("计量缺失：docs/arch-metrics.json 读不到（跑 npm run metrics）");
+}
+const mv = (get, label) => {
+  if (!M) return "?" + label;
+  const v = get(M);
+  if (v === null || v === undefined) { problems.push(`计量缺字段：${label}（刷新 docs/arch-metrics.json）`); return "?"; }
+  return String(v);
+};
+const N = {
+  tests: mv((m) => m.tests?.count, "tests.count"),
+  binLines: mv((m) => m.corpus?.bin_fixture_lines, "corpus.bin_fixture_lines"),
+  hintPct: mv((m) => m.corpus?.hint_coverage?.pct, "corpus.hint_coverage.pct"),
+  hinted: mv((m) => m.corpus?.hint_coverage?.hinted, "hint_coverage.hinted"),
+  browserSteps: mv((m) => m.corpus?.hint_coverage?.browser, "hint_coverage.browser"),
+  top1: mv((m) => m.model?.harness?.numeric?.top1_pct, "harness.top1_pct"),
+  prec: mv((m) => m.model?.harness?.numeric?.precision025_pct, "harness.precision025_pct"),
+  aucPt: mv((m) => m.model?.harness?.numeric?.passthrough_auc, "harness.passthrough_auc"),
+  aucSl: mv((m) => m.model?.harness?.numeric?.shortlist_auc, "harness.shortlist_auc"),
+};
 const boxes = [];
 const check = (where, text, size, max) => { if (est(text, size) * 1.06 > max) problems.push(`${where}: ${Math.round(est(text,size)*1.06)} > ${Math.round(max)}  ${JSON.stringify(text)}`); };
 
@@ -91,7 +121,7 @@ box(175, 356, 320, 78, "bxd", "apps/<id>/pack.json", ["roles 模板 · journey �
 box(510, 356, 320, 78, "bxd", "sources/*.json（数据腿）", ["transport: curl / fetch / cli（argv 数组，无 shell）", "extractor 四种 · date 表达式 · counts/selects", "\"引擎不认识站点\"是单测"]);
 box(845, 356, 320, 78, "bxd", "flow.json + sites/*.profile.json", ["spec_version 2：页面角色 + 语义目标 + 契约信号", "authored 档案：pages / fill_keys / list_extract", "学到的 hint 另存，replays_ok 计数，不过报 drift"]);
 box(1180, 356, 235, 78, "bxd", "血统与可复现", ["generated_from / recorded_from", "FROZEN_TODAY 钉住展开周", "未声明的 {slot} 即用法错误"]);
-T(58, 438, "新增一个应用 = 新目录；应用目录里的应用逻辑代码行数由 apps:matrix 计（0；bin/ 桩夹具 101 行另列，见 npm run metrics）", "lbl");
+T(58, 438, `新增一个应用 = 新目录；应用目录里的应用逻辑代码行数由 apps:matrix 计（0；bin/ 桩夹具 ${N.binLines} 行另列，npm run metrics）`, "lbl");
 
 /* ---------------- L3 计划 ---------------- */
 band(460, 92, "③ 计划层");
@@ -137,12 +167,12 @@ box(175, 826, 260, 66, "bxm", "src/model.ts — LayaRuntime 缝", ["load / predi
 box(450, 826, 300, 66, "bxm", "laya-onnx.ts + laya-format.ts", ["buildSequence · 温度标定 · shortlist k=8", "checkpoint 按文字系统路由，不按置信度"]);
 box(765, 826, 320, 66, "bxm", "产物：图 + .onnx.data + tokenizer", ["约 1.7GB，刻意不进 git", "LAYA_ONNX_MODEL 约定 / HF 快照发现"]);
 box(1100, 826, 315, 66, "bxm", "src/model-artifacts.ts", ["三件齐才算 on（单一出处）", "doctor / fetch / 运行器 / 桥 共用"]);
-T(58, 906, "实测（真 ONNX，本机）：声明解决了 98.8% 的浏览器步；模型 top-1 25%、闸门内 precision 15%（两把不可比的尺子：passthrough AUC 0.233 / shortlist 0.587）", "lbl");
+T(58, 906, `实测（真 ONNX，本机）：声明解决了 ${N.hintPct}% 的浏览器步（${N.hinted}/${N.browserSteps}）；模型 top-1 ${N.top1}%、闸门内 precision ${N.prec}%（两把不可比的尺子：passthrough AUC ${N.aucPt} / shortlist AUC ${N.aucSl}）`, "lbl");
 
 
 /* ---------------- L6 证据 ---------------- */
 band(924, 108, "⑥ 分层证据（结论必须能被命令复现，叙述不算证据）");
-box(175, 958, 420, 60, "bxe", "tests/ 1068 条 + 六层跨实现对拍（冻结语料）", ["rules/extraction/executor/datasource/ctrip/transfer", "node-port-poc：ONNX 与 ORT 数值对拍 max|diff| 2.98e-5"]);
+box(175, 958, 420, 60, "bxe", `tests/ ${N.tests} 条 + 六层跨实现对拍（冻结语料）`, ["rules/extraction/executor/datasource/ctrip/transfer", "node-port-poc：ONNX 与 ORT 数值对拍 max|diff| 2.98e-5"]);
 box(610, 958, 400, 60, "bxe", "用例与线上复测记录", ["bench/cases*.json · ctrip 19 子目标 + 独立判分 7/7", "transfer 七站 · live-retest 逐项原始观测"]);
 box(1025, 958, 390, 60, "bxe", "作者 / 独立复核两角色", ["apps/INVENTORY.md 定义\"完成一个应用\"的五条", "APP_VERIFY_REPORT.md：缺陷带最小复现，报而不装绿"]);
 
@@ -194,7 +224,6 @@ for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++
 }
 for (const b of boxes) if (b.x + b.w > 1416) problems.push(`越出内容右界：${b.title} 到 ${String(b.x + b.w)}`);
 
-import path from "node:path";
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const argOf = (name) => {
   const i = process.argv.indexOf(name);

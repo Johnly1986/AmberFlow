@@ -92,7 +92,7 @@
 <text x="1191" y="391" class="s">generated_from / recorded_from</text>
 <text x="1191" y="405" class="s">FROZEN_TODAY 钉住展开周</text>
 <text x="1191" y="419" class="s">未声明的 {slot} 即用法错误</text>
-<text x="58" y="438" class="lbl">新增一个应用 = 新目录；应用目录里的应用逻辑代码行数由 apps:matrix 计（0；bin/ 桩夹具 101 行另列，见 npm run metrics）</text>
+<text x="58" y="438" class="lbl">新增一个应用 = 新目录；应用目录里的应用逻辑代码行数由 apps:matrix 计（0；bin/ 桩夹具 101 行另列，npm run metrics）</text>
 <rect x="40" y="460" width="1480" height="92" class="band"/>
 <text x="58" y="484" class="lay">③ 计划层</text>
 <rect x="175" y="492" width="330" height="50" class="bx"/>
@@ -210,7 +210,7 @@
 <text x="1111" y="845" class="t" font-size="12.5">src/model-artifacts.ts</text>
 <text x="1111" y="861" class="s">三件齐才算 on（单一出处）</text>
 <text x="1111" y="875" class="s">doctor / fetch / 运行器 / 桥 共用</text>
-<text x="58" y="906" class="lbl">实测（真 ONNX，本机）：声明解决了 98.8% 的浏览器步；模型 top-1 25%、闸门内 precision 15%（两把不可比的尺子：passthrough AUC 0.233 / shortlist 0.587）</text>
+<text x="58" y="906" class="lbl">实测（真 ONNX，本机）：声明解决了 98.8% 的浏览器步（169/171）；模型 top-1 25%、闸门内 precision 15%（两把不可比的尺子：passthrough AUC 0.233 / shortlist AUC 0.587）</text>
 <rect x="40" y="924" width="1480" height="108" class="band"/>
 <text x="58" y="948" class="lay">⑥ 分层证据（结论必须能被命令复现，叙述不算证据）</text>
 <rect x="175" y="958" width="420" height="60" class="bxe"/>

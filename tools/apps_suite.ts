@@ -54,6 +54,10 @@ export interface SuiteRow {
   conf_max: number | null;
   /** 加宽重看救回的步数（`laya:reobserve`）。 */
   reobserve: number;
+  /** 规则/hint 级决定的步数（梯级账单用；来自 decisions.by_method["rule:match"]）。 */
+  rule_steps: number;
+  /** escalate 级决定的步数（LLM 老师点名；没有端点时恒 0，正是要暴露的那种 dead rung）。 */
+  escalate: number;
   /** 本次运行期间决策缓存省下的重复提问（增量，不是进程累计）。 */
   cache_saved: number;
 }
@@ -111,6 +115,7 @@ export async function runOne(
     ...(onlyDangerous
       ? { note: refusalLine("dangerous") } : {}),
     model_asks: d.model_asks,
+    rule_steps: d.ladder?.rule ?? 0, escalate: d.ladder?.escalate ?? 0,
     model_steps: d.model_steps,
     conf_max: d.conf.max,
     reobserve: d.reobserve,
@@ -145,7 +150,7 @@ export async function suite(only: string[] = []): Promise<{
           rows.push({
             app: name, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
             status: "failed", secs: 0, note: `加载失败：${msg}`,
-            model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0,
+            model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0,
           });
         }
         continue;
@@ -165,7 +170,7 @@ export async function suite(only: string[] = []): Promise<{
       } catch (e) {
         rows.push({
           app: pack.id, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
-          status: "failed", secs: 0, model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0,
+          status: "failed", secs: 0, model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0,
           note: `运行崩了：${e instanceof Error ? e.message : String(e)}`,
         });
       }
@@ -267,6 +272,20 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     + `——model not needed 正是产品主张的证据：能规则化就别猜。`);
   console.log(`决策缓存：命中 ${cache.hits} / 提问 ${cache.hits + cache.misses}`
     + `（laya 是确定性的：同问不重答——${cache.misses} 次是真问，${cache.hits} 次省）`);
+  // 梯级账单（ARCHITECTURE_IMPROVEMENTS §5）：每一级"到达 → 决定"，整条语料上决定 0 步的级
+  // 就是 dead rung——它不是保险，是错觉（会让人以为"有兜底"）。口径：低一级没决定的那一步
+  // 才轮得到这一级，所以 trace 里的 method 计数就是它的"独立决定数"，不需要反事实重跑。
+  const rungRule = rows.reduce((n, r) => n + (r.rule_steps ?? 0), 0);
+  const rungLaya = modelSteps - rows.reduce((n, r) => n + r.reobserve, 0);
+  const rungEscalate = rows.reduce((n, r) => n + (r.escalate ?? 0), 0);
+  const rungs: Array<[string, number]> = [
+    ["规则/hint", rungRule], ["laya", rungLaya],
+    ["reobserve", rows.reduce((n, r) => n + r.reobserve, 0)], ["escalate", rungEscalate],
+  ];
+  const dead = rungs.filter(([, n]) => n === 0).map(([k]) => k);
+  console.log(`梯级账单：${rungs.map(([k, n]) => `${k} 决定 ${n}`).join(" ｜ ")}`
+    + (dead.length ? ` ⇒ **dead rung：${dead.join("、")}**（本轮语料上从未救回任何东西；`
+      + `要么接线、要么从架构里拿掉，别让它当"保险"）` : ""));
   for (const r of pending) console.log(`  - ${r.app}：${r.note ?? ""}`);
   console.log(`退出码：${failed.length ? 1 : pending.length ? 3 : 0}`
     + `（0=全部真执行且通过 ｜ 1=有未通过 ｜ 2=用法错误 ｜ 3=有未执行）`);

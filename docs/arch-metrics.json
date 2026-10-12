@@ -8,6 +8,11 @@
     "browser_steps": 171,
     "tool_steps": 9,
     "steps_naming_target": 169,
+    "hint_coverage": {
+      "hinted": 169,
+      "browser": 171,
+      "pct": 98.8
+    },
     "hint_coverage_browser": "169/171 = 98.8%",
     "hint_coverage_with_flow": "169/181 = 93.4%（+2 个语义流模板的 10 步，设计上零 hint）",
     "flow_apps": 2,
@@ -43,10 +48,24 @@
       "escalate": 0,
       "secs": 597
     },
-    "scripted_corpus_secs": 160.6,
+    "scripted_corpus_secs": 160.7,
     "harness": {
       "judged": 162,
       "top1": "25%",
+      "numeric": {
+        "judged": 162,
+        "top1_pct": 25,
+        "latin_pct": 18,
+        "cjk_pct": 50,
+        "precision025_pct": 15,
+        "auc_all": 0.325,
+        "passthrough_auc": 0.233,
+        "shortlist_auc": 0.587,
+        "passthrough_adopted": 57,
+        "passthrough_right": 3,
+        "shortlist_adopted": 18,
+        "shortlist_right": 8
+      },
       "floor025_precision": "15%",
       "auc_all": 0.325,
       "passthrough": "n=137 命中 22% ｜ floor0.25 采纳 57（对 3）｜ AUC 0.233",

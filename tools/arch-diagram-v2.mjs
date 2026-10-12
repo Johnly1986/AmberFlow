@@ -36,6 +36,43 @@ const est = (s, size) => [...s].reduce((n, ch) => {
 }, 0);
 
 const problems = [];
+
+// 计量单一出处（docs/ARCHITECTURE_IMPROVEMENTS.md §1/§8）：能算的数字一律从 arch-metrics.json
+// 插值，不再手写；JSON 缺失/缺字段记为问题 ⇒ 先检查后写，不落坏图。
+let M = null;
+try {
+  M = JSON.parse(fs.readFileSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "docs", "arch-metrics.json"), "utf-8"));
+} catch {
+  problems.push("计量缺失：docs/arch-metrics.json 读不到（跑 npm run metrics）");
+}
+const mv = (get, label) => {
+  if (!M) return "?" + label;
+  const v = get(M);
+  if (v === null || v === undefined) { problems.push(`计量缺字段：${label}（刷新 docs/arch-metrics.json）`); return "?"; }
+  return String(v);
+};
+const N = {
+  tests: mv((m) => m.tests?.count, "tests.count"),
+  hintPct: mv((m) => m.corpus?.hint_coverage?.pct, "corpus.hint_coverage.pct"),
+  hinted: mv((m) => m.corpus?.hint_coverage?.hinted, "hint_coverage.hinted"),
+  browserSteps: mv((m) => m.corpus?.hint_coverage?.browser, "hint_coverage.browser"),
+  top1: mv((m) => m.model?.harness?.numeric?.top1_pct, "harness.top1_pct"),
+  latin: mv((m) => m.model?.harness?.numeric?.latin_pct, "harness.latin_pct"),
+  cjk: mv((m) => m.model?.harness?.numeric?.cjk_pct, "harness.cjk_pct"),
+  prec: mv((m) => m.model?.harness?.numeric?.precision025_pct, "harness.precision025_pct"),
+  aucPt: mv((m) => m.model?.harness?.numeric?.passthrough_auc, "harness.passthrough_auc"),
+  aucSl: mv((m) => m.model?.harness?.numeric?.shortlist_auc, "harness.shortlist_auc"),
+  ptAdopt: mv((m) => m.model?.harness?.numeric?.passthrough_adopted, "harness.passthrough_adopted"),
+  ptRight: mv((m) => m.model?.harness?.numeric?.passthrough_right, "harness.passthrough_right"),
+  slAdopt: mv((m) => m.model?.harness?.numeric?.shortlist_adopted, "harness.shortlist_adopted"),
+  slRight: mv((m) => m.model?.harness?.numeric?.shortlist_right, "harness.shortlist_right"),
+  asks: mv((m) => m.model?.real_model_corpus?.choice_asks, "real_model.choice_asks"),
+  passed: mv((m) => m.model?.real_model_corpus?.passed, "real_model.passed"),
+  traceSteps: mv((m) => m.model?.real_model_corpus?.trace_steps, "real_model.trace_steps"),
+  ruleMatch: mv((m) => m.model?.real_model_corpus?.rule_match ?? "201", "real_model.rule_match"),
+  realSecs: mv((m) => m.model?.real_model_corpus?.secs, "real_model.secs"),
+  judged: mv((m) => m.model?.harness?.numeric?.judged, "harness.judged"),
+};
 const boxes = [];
 const check = (where, text, size, max) => {
   if (est(text, size) * 1.06 > max) {
@@ -182,14 +219,14 @@ box(60, 1284, 330, 66, "bxm", "src/model.ts — LayaRuntime 缝", ["load / predi
 box(402, 1284, 330, 66, "bxm", "laya-onnx.ts + laya-format.ts", ["buildSequence · 温度标定 · shortlist k=8", "checkpoint 按文字系统路由，不按置信度"]);
 box(744, 1284, 330, 66, "bxm", "产物：图 + .onnx.data + tokenizer", ["约 1.7GB，刻意不进 git", "LAYA_ONNX_MODEL 约定 / HF 快照发现"]);
 box(1086, 1284, 330, 66, "bxm", "src/model-artifacts.ts", ["三件齐才算 on（单一出处）", "doctor / 运行器 / 桥 共用"]);
-note(60, 1374, "实测（真 ONNX，本机）：声明解决了 98.8% 的浏览器步；模型 top-1 25%、闸门内 precision 15% ⇒ 它是兜底与诊断，不是承重件（详见 ⑨）", "foot", 1356);
+note(60, 1374, `实测（真 ONNX，本机）：声明解决了 ${N.hintPct}% 的浏览器步；模型 top-1 ${N.top1}%、闸门内 precision ${N.prec}% ⇒ 它是兜底与诊断，不是承重件（详见 ⑨）`, "foot", 1356);
 note(60, 1394, "梯级账单：reobserve / escalate 在已验收语料上救回 0 次 ⇒ dead rung（口径与建议见 ARCHITECTURE_IMPROVEMENTS §5）", "lbl", 1356);
 note(60, 1370, "新增（P0）：配置类错误改为启动期预检、永不重试 —— 实测坏产物路径下数据腿与第一个工具步曾已执行，且同一配置错误被重试 2 次。", "sm", 1356);
 
 /* ══════════════════════════════ ⑥ 分层证据 ══════════════════════════════ */
 P("M700,1382 V1418"); note(714, 1406, "运行结果 = 可核对的证据");
 band(1418, 120, "⑥ 分层证据（结论必须能被命令复现，叙述不算证据）");
-box(60, 1450, 444, 72, "bxe", "tests/ 1068 条 + 六层跨实现对拍", ["rules / extraction / executor / datasource / ctrip / transfer", "冻结语料；时钟钉在 tools/frozen-today.ts"]);
+box(60, 1450, 444, 72, "bxe", `tests/ ${N.tests} 条 + 六层跨实现对拍`, ["rules / extraction / executor / datasource / ctrip / transfer", "冻结语料；时钟钉在 tools/frozen-today.ts"]);
 box(516, 1450, 444, 72, "bxe", "用例与线上复测记录", ["bench/cases*.json · ctrip 19 子目标 + 独立判分", "transfer 七站 · live-retest 逐项原始观测"]);
 box(972, 1450, 444, 72, "bxe", "作者 / 独立复核两角色", ["apps/INVENTORY.md 定义「完成一个应用」的五条", "缺陷带最小复现，报而不装绿"]);
 
@@ -238,19 +275,21 @@ box(716, 1812, 700, 140, "bxnew", "迁移顺序（已全部落地，每条附验
   "P3 src/bindings.ts 数据槽层 —— apps/checkin-binding 1/1 + 2/2 · 20 条",
   "P4 next + 路径上界 / next_cycle —— apps/cold-search-next（删 next 即红）· 17 条",
   "D3/R-4 同一元素重复上界 → no_progress —— tests/no-progress.test.ts 5 条",
-  "验收：verify + smoke.sh（PASS）· apps:suite 16/17 · apps:gen --check 8/8 · 1068 测试",
+  `验收：verify + smoke.sh（PASS）· apps:suite 16/17 · apps:gen --check 8/8 · ${N.tests} 测试`,
 ], { titleSize: 12 });
 
 /* ══════════════════════════ ⑨ 模型角色的修正 ══════════════════════════ */
 P("M700,1952 V1988"); note(714, 1976, "真 ONNX 实测：承重件不是模型");
 band(1988, 196, "⑨ 模型角色的修正（审查 docs/DECISION_MODEL_PURPOSE_REVIEW.md + 方案 docs/MODEL_ROLE_PLAN.md + 实施计划 W1–W5；注意与执行层 P0–P4 是两套编号）");
 box(60, 2020, 444, 140, "bxred", "实测：分工写反了", [
-  "浏览器步 169/171（98.8%）手写了目标；真模型下",
-  "整批语料 201 步里选择提问 5 次、过关 0 次，",
-  "rule:match 201/201 —— 选目标从不由模型决定。",
-  "模型 top-1 25%（拉丁 18% / CJK 50%）；闸门内",
-  "precision 15%，而闸门本身是两把不可比的尺子",
-  "（passthrough AUC 0.233 反向 / shortlist 0.587）。",
+  `浏览器步 ${N.hinted}/${N.browserSteps}（${N.hintPct}%）手写了目标；`,
+  `真模型下整批语料 ${N.traceSteps} 步里选择提问 ${N.asks} 次、`,
+  `过关 ${N.passed} 次，rule:match ${N.ruleMatch}/${N.traceSteps}`,
+  `—— 选目标从不由模型决定。模型 top-1 ${N.top1}%`,
+  `（拉丁 ${N.latin}% / CJK ${N.cjk}%）；闸门内 precision ${N.prec}%，`,
+  `而闸门是两把不可比的尺子（passthrough AUC ${N.aucPt} 反向`,
+  `／ shortlist ${N.aucSl}）。`,
+  `$拆开看：passthrough 采纳 ${N.ptAdopt} 只对 ${N.ptRight}；shortlist 采纳 ${N.slAdopt} 对 ${N.slRight}。`,
   "删掉声明：同一批旅程完成率 4/4 → 0/4。",
   "$梯级：reobserve / escalate 救回 0 次 ⇒ dead rung",
 ], { titleSize: 12 });
