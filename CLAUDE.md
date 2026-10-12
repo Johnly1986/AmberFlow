@@ -724,5 +724,14 @@ These are empirical findings from this codebase's own experiments — preserve t
   到顶 ⇒ 结构化 `path_stop.code="next_cycle"`（不挂死、不栈溢出），走过的次数进报告 `path_visits`。
   验收台 `apps/cold-search-next`（冷启动回边把 search 走两遍；**删 `next` 即红**：record 的 `when` 不成立
   → skipped → 不变量不成立）。**边界**：`runPlan`（resume 队列语义）对 `next` **响亮拒绝**而非静默忽略；
-  语义流模板的步骤键白名单里没有 `next`（那边不存在"写了不生效"）；`inert` 降级（D3）与
-  `BrowserMiddleware` 更名仍未做。
+  语义流模板的步骤键白名单里没有 `next`（那边不存在"写了不生效"）；`BrowserMiddleware` 更名仍未做。
+- **D3/R-4 已落地（`inert` 不再是循环唯一的终止依据；`tests/no-progress.test.ts` 5 条）**：
+  `inert` 是整页快照比对，页面有倒计时/轮播/埋点回执时**永远不成立** → 证据链断掉、anti-repeat
+  不触发、同一个死按钮被反复点，最后报告把病因写成 `max_steps`。现在
+  `MiddlewareOptions.maxEffectiveRepeats`（缺省 3；**0 = 显式消融**回到旧行为）按**元素签名**
+  （不是位置性 ref）数"驱动了但信号没成立"的次数，超界 ⇒ 结构化 `stop_code: "no_progress"`
+  （正文点名元素/次数/"不是步数预算"）。计发生在信号（含 SPA settle）与人工/noul 检查之后。
+  **§8.5 的验收方式**（同一份夹具 A/B，数字进断言）：`testpages/dead-target.html` 同时是"死目标"与
+  "吵页面"（50 ms 倒计时 + 页面级点击计数，后者让"不 inert"变成确定性的，不靠采样运气）——
+  关掉上界 **8 步 / `max_steps` / 4.5 s**，缺省上界 **第 4 步 / `no_progress` / 2.3 s**；
+  点到第 3 次才成立的信号照旧 `dom_goal_signal`（不误杀合法重复）。

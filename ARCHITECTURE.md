@@ -35,10 +35,12 @@
 > [docs/architecture-target.svg](docs/architecture-target.svg)（`node tools/arch-diagram-v2.mjs`，
 > 先量后写：坏图不落盘）。**落地状态：P0（形状硬化，不改任何运行结果）、P1（hint 单实现 +
 > tier 候选集，门控 `tieredHint` 默认关）、P2（命令层 `src/actions.ts`）、P3（数据槽层
-> `src/bindings.ts`）、P4（声明式后继 `next`，应用旅程层）均已实施并带负例测试**
+> `src/bindings.ts`）、P4（声明式后继 `next`，应用旅程层）、D3/R-4（`inert` 不再是唯一终止依据：
+> `maxEffectiveRepeats` + 结构化 `no_progress`）均已实施并带负例测试**
 > （`tests/executor-p0.test.ts` 21 / `tests/rules-tiered.test.ts` 24 / `tests/actions.test.ts` 15 /
-> `tests/bindings.test.ts` 17 / `tests/path-next.test.ts` 14）；每个门控都按"不声明即逐字节等价"
-> 落地，验收台是两个新应用包（`apps/checkin-binding`、`apps/cold-search-next`）。线上包 A/B 的
+> `tests/bindings.test.ts` 20 / `tests/path-next.test.ts` 17 / `tests/no-progress.test.ts` 5）；
+> 每个门控都按"不声明即逐字节等价"落地，验收台是两个新应用包（`apps/checkin-binding`、
+> `apps/cold-search-next`）与一份死目标夹具（`testpages/dead-target.html`）。线上包 A/B 的
 > 真机数字仍未做（要网络与权重），`runPlan` 的队列语义与 `next` 边的关系见 §七.3。
 
 ```
@@ -267,8 +269,23 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
 - **验收用例兑现**：`apps/cold-search-next` 的冷启动回边把 search 走了两遍然后走下去（`path_visits`
   可查）；**删 `next` 即红**（record 的 `when` 不成立 → skipped → 不变量不成立）；无条件自环跑出
   `next_cycle`。计划级 runner（`runPlan`，resume 队列语义）对 `next` **响亮拒绝**而不是静默忽略。
-- **仍未做**：`runPlan` 的队列语义与声明边是两套（见 §七.3）；`inert` 降级（D3）与
-  `BrowserMiddleware` 更名（前提 C）仍欠着；线上包 A/B 的真机数字还没有（要网络与权重）。
+- **仍未做**：`runPlan` 的队列语义与声明边是两套（见 §七.3）；`BrowserMiddleware` 更名（前提 C）
+  仍欠着；线上包 A/B 的真机数字还没有（要网络与权重）。
+
+**D3 + R-4 已落地（`inert` 不再是循环唯一的终止依据；`tests/no-progress.test.ts` 5 条）**：
+- **病灶**：`inert` 是整页快照比对——页面有倒计时/轮播/埋点回执时它**永远不成立**，
+  "这个元素没用了"的证据链断掉，anti-repeat 不触发，同一个死按钮被反复点，最后报告把病因
+  写成 `max_steps`。噪声信号不该是唯一的终止依据（重审 §2-D3），R-4 要的正是"卡住 ≠ 预算用完"。
+- **做法**：`MiddlewareOptions.maxEffectiveRepeats`（缺省 3；**0 = 显式消融**回到旧行为）——
+  一个子目标内同一个**元素签名**被执行的次数超过上界而完成信号始终不成立 ⇒ 结构化
+  `stop_code: "no_progress"`，正文点名元素、次数与"不是步数预算"。计数发生在信号（含 SPA settle
+  窗口）与人工/noul 检查之后，数的正是"驱动了但没进展"；签名而非 ref（ref 每次重扫重新编号）。
+- **§8.5 的验收兑现**（夹具 A/B，数字进断言）：`testpages/dead-target.html` 同时是"死目标"
+  （handler 存在但什么都不改）与"吵页面"（50 ms 倒计时 + 页面级点击计数——后者的确定性让
+  这条夹具不靠采样运气）。关掉上界：**8 步全花在同一个死按钮上、`max_steps`、4.5 s**；
+  缺省上界：**第 4 步 `no_progress`、2.3 s**——更早，且理由不同。
+- **不误杀合法重复**：点到第 3 次才成立的信号依旧 `dom_goal_signal`；`retries` 的每次尝试重置
+  计数（那是"整个子目标重来"的合同，有界且如实）。六层对拍与全部应用套件一字未动。
 
 ## 五、冻结流程的契约（数据格式）
 

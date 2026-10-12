@@ -158,6 +158,12 @@ export type StopCode =
   | "config_error"
   /** P2: a declared command space with NOTHING resolvable on this page (space-empty). */
   | "space_empty"
+  /**
+   * D3/R-4：同一个元素被**有效地**执行了 N 次而完成信号始终不成立 —— 循环卡住了，
+   * 不是步数预算用完了。与 `max_steps` 分开（backlog R-4）：前者说"目标死了/信号不会来了"，
+   * 后者说"给了 8 步还没跑完"。
+   */
+  | "no_progress"
   /** P2: a `fill`/`select` command's declared slot binding has no value (never guessed). */
   | "needs_value";
 
@@ -378,6 +384,15 @@ export interface MiddlewareOptions {
   router?: RouterLike | null;
   /** Constructor-level default for `RunOptions.hosts` (the navigation envelope). */
   hosts?: string[] | null;
+  /**
+   * D3/R-4：同一个元素（按**元素签名**，不是位置性 ref）在**一个子目标内**最多被有效执行几次。
+   *
+   * 为什么需要这个上界：`inert` 是整页快照比对，页面上有个倒计时/轮播/广告计时器时它
+   * **永远不成立**（前/后两次采样之间页面必然变了），于是"这个元素没用了"的证据链断掉，
+   * anti-repeat 不触发，同一个死按钮被反复点，最后报告把病因写成 `max_steps`——
+   * 一个噪声信号不该是循环唯一的终止依据（重审 D3）。缺省 3；0 = 关闭（回到今天的行为）。
+   */
+  maxEffectiveRepeats?: number;
   /** Constructor-level default for `RunOptions.tieredHint` (P1 narrowed question, default OFF). */
   tieredHint?: boolean;
 }
@@ -682,6 +697,8 @@ export class BrowserMiddleware {
   hosts: string[] | null = null;
   /** See `RunOptions.tieredHint` (P1 narrowed question; default OFF = today's behaviour). */
   tieredHint = false;
+  /** See `MiddlewareOptions.maxEffectiveRepeats` (D3/R-4; default 3, 0 disables). */
+  maxEffectiveRepeats = 3;
   /** Deterministic rule prefilter ON, anti-repeat ON (measured production defaults). */
   rulesOn = true;
   antiRepeat = true;
@@ -717,6 +734,7 @@ export class BrowserMiddleware {
     this.hintMemory = opts.hintMemory ?? null;
     this.gotoTimeout = opts.gotoTimeout ?? 30000;
     this.hosts = opts.hosts ?? null;
+    this.maxEffectiveRepeats = opts.maxEffectiveRepeats ?? this.maxEffectiveRepeats;
     this.tieredHint = opts.tieredHint ?? this.tieredHint;
   }
 
@@ -1369,6 +1387,9 @@ export class BrowserMiddleware {
     const cmdSpace: CommandDecl[] = (commands ?? []).filter((c) => c && typeof c.id === "string");
     const cmdDone = new Set<string>();
     let cmdI = 0;
+    // D3/R-4: element signature -> how many times this subgoal effectively drove it while the
+    // done-signal stayed false. Keyed by SIGNATURE (refs are positional); see the check below.
+    const effectiveRuns: Record<string, number> = {};
 
     const slots: Record<string, unknown> = { ...extractSlots(instruction), ...(slotsIn ?? {}) };
     this.targetHints = (targetHints ?? []).filter((h) => !!h);
@@ -2072,6 +2093,28 @@ export class BrowserMiddleware {
             done = false;
             stop("noul_unverified",
               `laya claims done (p=${doneP.toFixed(2)}) but no DOM signal to verify`, stepNo);
+            break;
+          }
+        }
+        // D3 / R-4: HOW OFTEN was this exact element effectively driven without the
+        // subgoal's signal ever becoming true? `inert` is a full-page snapshot diff, so a
+        // page with a running countdown/carousel is NEVER inert: the evidence chain breaks,
+        // anti-repeat does not fire, and the same dead button is clicked until `max_steps` —
+        // a noise signal must not be the loop's only terminator. Measured on
+        // testpages/dead-target.html (50 ms tick): 8 clicks on the dead button, `max_steps`,
+        // 4.5 s. The count is keyed by element SIGNATURE (refs are positional and re-indexed
+        // every scan) and reset by nothing: within ONE subgoal a repeat is a repeat.
+        {
+          const repeatKey = JSON.stringify(esig(el));
+          const ran = (effectiveRuns[repeatKey] ?? 0) + 1;
+          effectiveRuns[repeatKey] = ran;
+          if (this.maxEffectiveRepeats > 0 && ran > this.maxEffectiveRepeats) {
+            stop("no_progress",
+              `${el.tag} "${el.label}" was executed ${ran} time(s) in this subgoal `
+              + `and the done-signal never held — the target looks dead (or the signal can never fire); `
+              + `stopping here instead of blaming the step budget (max_steps=${this.maxSteps}) on step ${stepNo}`,
+              stepNo);
+            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
           }
         }

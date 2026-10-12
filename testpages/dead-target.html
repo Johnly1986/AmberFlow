@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>确认下单 - 示例站</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:40px auto}button,a{padding:6px 10px;margin:6px 4px}</style>
+</head>
+<body>
+<main>
+  <h1>订单确认</h1>
+  <!-- D3 的夹具：两件事同时成立，正是重审 §D3 描述的双向失灵。
+       ① 目标元素是**死的**：确认按钮的 handler 存在但什么都不改变（真实站点里：被 JS 拦下、
+          校验失败却不报错、或者只改 class）。所以完成信号永远不会成立。
+       ② 页面是**吵的**：右上角有一个 50ms 一跳的计数器（倒计时/轮播/广告计时器都长这样），
+          快照（url+text+所有输入值）在前/后两次采样之间**必然**不同 —— `inert` 判定因此
+          永远为假，anti-repeat 不触发，同一个死按钮被反复点。50ms 是刻意的：它必须快过
+          "点击 + 两次快照"的往返，否则这条夹具会变成一次靠运气的复现。 -->
+  <p>剩余时间：<span data-test="clock">--</span></p>
+  <p>本页点击次数：<span data-test="hits">0</span></p>
+  <button data-test="confirm">确认下单</button>
+  <a data-test="help" href="checkin.html">查看帮助</a>
+  <a data-test="back" href="cart.html">返回购物车</a>
+  <p data-test="status">待确认</p>
+</main>
+<script>
+document.querySelector('[data-test=confirm]').addEventListener('click', function () {
+  // 什么都不做：不改 DOM、不改 URL、不改输入值。真实站点的"静默失败"长这样。
+});
+// 一条与目标无关的**页面级**点击计数（真实站点里是埋点回执、时间戳、"最后操作"提示）。
+// 它让整页快照在每次点击前后**必然**不同 —— 也就是说 `inert` 永远为假、证据链断掉，
+// 而目标其实一步都没进展。这是"时钟/轮播让 inert 失灵"的确定性版本：
+// 时钟要靠"采样之间正好跳一下"（概率），这个不靠运气。
+document.addEventListener('click', () => {
+  const hits = document.querySelector('[data-test=hits]');
+  hits.textContent = String(Number(hits.textContent) + 1);
+});
+let left = 600;
+setInterval(() => {
+  left = left > 0 ? left - 1 : 600;
+  document.querySelector('[data-test=clock]').textContent = left + 's';
+}, 50);
+document.querySelector('[data-test=clock]').textContent = left + 's';
+</script>
+</body>
+</html>
