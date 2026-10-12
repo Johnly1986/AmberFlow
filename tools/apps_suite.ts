@@ -68,6 +68,7 @@ export interface SuiteRow {
   escalate: number;
   /** 浏览器步里点名了目标的比例（§W2：hint 是承重墙这件事要每天看得见，不是审查时才数）。 */
   hint_hinted: number;
+  hint_named: number;
   hint_browser: number;
   /** 本次运行期间决策缓存省下的重复提问（增量，不是进程累计）。 */
   cache_saved: number;
@@ -128,7 +129,7 @@ export async function runOne(
       ? { note: refusalLine("dangerous") } : {}),
     model_asks: d.model_asks,
     rule_steps: d.ladder?.rule ?? 0, escalate: d.ladder?.escalate ?? 0,
-    hint_hinted: hints.hinted, hint_browser: hints.browser,
+    hint_hinted: hints.hinted, hint_named: hints.named, hint_browser: hints.browser,
     model_steps: d.model_steps,
     conf_max: d.conf.max,
     reobserve: d.reobserve,
@@ -187,7 +188,7 @@ export async function suite(
           rows.push({
             app: name, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
             status: "failed", secs: 0, note: `加载失败：${msg}`,
-            model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, hint_hinted: 0, hint_browser: 0,
+            model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, hint_hinted: 0, hint_named: 0, hint_browser: 0,
           });
         }
         continue;
@@ -207,7 +208,7 @@ export async function suite(
       } catch (e) {
         rows.push({
           app: pack.id, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
-          status: "failed", secs: 0, model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, hint_hinted: 0, hint_browser: 0,
+          status: "failed", secs: 0, model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, hint_hinted: 0, hint_named: 0, hint_browser: 0,
           note: `运行崩了：${e instanceof Error ? e.message : String(e)}`,
         });
       }
@@ -290,7 +291,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const table = rows.map((r) => [r.app, String(r.steps), r.completed, String(r.skipped),
     r.invariants, `${r.model_asks}${r.conf_max !== null ? `(conf ${r.model_steps ? `✓` : r.conf_max.toFixed(2)})` : ""}`,
     String(r.reobserve), `${r.secs}s`, verdict(r), marginal(r),
-    r.hint_browser ? `${r.hint_hinted}/${r.hint_browser}` : "-"]);
+    r.hint_browser ? `${r.hint_hinted}(声明 ${r.hint_named})/${r.hint_browser}` : "-"]);
   const widths = head.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
   const line = (cells: string[]): string => cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
   console.log(line(head));
@@ -336,11 +337,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   ];
   const dead = rungs.filter(([, n]) => n === 0).map(([k]) => k);
   const hintHinted = rows.reduce((n, r) => n + r.hint_hinted, 0);
+  const hintNamed = rows.reduce((n, r) => n + r.hint_named, 0);
   const hintBrowser = rows.reduce((n, r) => n + r.hint_browser, 0);
   if (hintBrowser > 0) {
     const pct = ((100 * hintHinted) / hintBrowser).toFixed(1);
-    console.log(`hint 覆盖：${hintHinted}/${hintBrowser} = ${pct}% 的浏览器步点了名（**这就是承重墙**——`
-      + `删掉它们，同一批旅程的完成率会掉到 0；剩下的 ${hintBrowser - hintHinted} 步才依赖模型兜底）`);
+    const npct = ((100 * hintNamed) / hintBrowser).toFixed(1);
+    console.log(`hint 覆盖：${hintHinted}/${hintBrowser} = ${pct}% 用 target_hint 点名（**这就是承重墙**——`
+      + `删掉它们，同一批旅程的完成率会掉到 0）`);
+    console.log(`声明解决：${hintNamed}/${hintBrowser} = ${npct}% 由声明点名（含 commands 闭集），`
+      + `依赖模型兜底的只剩 ${hintBrowser - hintNamed} 步`);
   }
   const marginalTotal = rows.reduce((n, r) => n + r.model_steps, 0);
   if (tierOn) {

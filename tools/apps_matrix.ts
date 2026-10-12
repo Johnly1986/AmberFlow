@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { appDirs, loadPack, listPacks } from "../src/app-pack.ts";
+import { appDirs, loadPack, listPacks, packHintCoverage, type AppPack } from "../src/app-pack.ts";
 import { listSources, loadSource } from "../src/datasource.ts";
 import { REPO } from "../src/flow.ts";
 // 运行时两列的出处：**上一次 `apps:suite` 真跑**落下的 `<app>-result.json`（`decisions` 字段）。
@@ -129,6 +129,20 @@ function suiteStats(app: string): SuiteStats | null {
   }
 }
 
+/** 包声明的策略（原样回显，不补默认值——"没声明"和"声明成缺省值"是两件事）。 */
+function declaredPolicy(pack: AppPack): string {
+  const q = (pack as unknown as Record<string, unknown>)["policy"] as Record<string, unknown> | undefined;
+  if (!q) return "";
+  return Object.entries(q).map(([k, v]) => `${k}=${String(v)}`).join(" ");
+}
+
+function hintCoverageOf(pack: AppPack): string {
+  const c = packHintCoverage(pack);
+  if (!c.browser) return "-";
+  // 两个数并排：hint 点名 / 由声明解决（含 commands）。相等时只打一个，免得读的人以为有差。
+  return c.named === c.hinted ? `${c.hinted}/${c.browser}` : `${c.hinted}(+${c.named - c.hinted} commands)/${c.browser}`;
+}
+
 interface Row {
   app: string;
   kind: string;
@@ -147,6 +161,10 @@ interface Row {
   modelAsks: number | null;
   confMax: number | null;
   reobserve: number | null;
+  /** 包声明的运行策略（§3）：`k=v` 列表；没声明为空串（缺省 = 今天的行为）。 */
+  policy: string;
+  /** 浏览器步里点名了目标的比例（§W2：承重墙要每天看得见）。 */
+  hintCoverage: string;
 }
 
 export function matrix(): {
@@ -177,6 +195,7 @@ export function matrix(): {
       declared: jsonLines(path.join(dir, "pack.json")),
       code: appCodeLines(dir, binAcc),
       tokens: declaredTokens(dir),
+      policy: declaredPolicy(pack), hintCoverage: hintCoverageOf(pack),
       generated: (() => {
         const p2 = pack as {
           generated_from?: { spec?: string; source?: string };
@@ -198,6 +217,7 @@ export function matrix(): {
       app, kind: "sources-only", sources: fs.readdirSync(d).filter((f) => f.endsWith(".json")).length,
       roles: 0, steps: 0, toolSteps: 0, invariants: 0, generated: null,
       modelAsks: null, confMax: null, reobserve: null,
+      policy: "", hintCoverage: "-",          // 只有数据腿的目录：没有旅程，也就没有点名与策略
       declared: fs.readdirSync(d).filter((f) => f.endsWith(".json"))
         .reduce((n, f) => n + jsonLines(path.join(d, f)), 0),
       code: appCodeLines(path.dirname(d), binAcc), tokens: declaredTokens(path.dirname(d)),
@@ -250,7 +270,7 @@ export function main(argv: string[] = process.argv.slice(2)): number {
     console.log(JSON.stringify({ rows, leaks, debt }, null, 2));
     return leaks.length ? 1 : 0;
   }
-  const head = ["应用", "类型", "数据源", "角色", "步骤", "工具步", "不变量", "声明行", "代码行", "模型咨询", "reobserve", "来源", "声明的标识"];
+  const head = ["应用", "类型", "数据源", "角色", "步骤", "工具步", "不变量", "声明行", "代码行", "模型咨询", "reobserve", "来源", "声明的标识", "hint覆盖", "policy"];
   // 运行时两列的口径（LAYA_VALUE_PLAN P1）：读上一次 `apps:suite` 的 result.json；
   // "未跑" ≠ 0——前者是没证据，后者是真跑过且规则消化了全部（这是卖点）。
   const fmtModel = (r: Row): string => r.modelAsks === null ? "未跑"
@@ -264,7 +284,7 @@ export function main(argv: string[] = process.argv.slice(2)): number {
         ? `录制:${r.generated.slice("recorded:".length)}`
         : `生成:${r.generated.replace(/^transfer\/specs\//, "").replace(/\.json$/, "").replace(/^src\//, "")}`)
       : "手写",
-    r.tokens.join(",") || "-"]);
+    r.tokens.join(",") || "-", r.hintCoverage, r.policy || "-"]);
   const widths = head.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
   const line = (cells: string[]): string =>
     cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");

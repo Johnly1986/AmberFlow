@@ -40,7 +40,7 @@ interface Corpus {
   browser_steps: number;
   tool_steps: number;
   steps_naming_target: number;
-  hint_coverage: { hinted: number; browser: number; pct: number };
+  hint_coverage: { hinted: number; named: number; browser: number; pct: number };
   hint_coverage_browser: string;
   hint_coverage_with_flow: string;
   flow_apps: number;
@@ -74,7 +74,7 @@ interface Corpus {
 function corpus(): Corpus {
   const appsDir = path.join(REPO, "apps");
   let packLines = 0, flowLines = 0, profileLines = 0, binLines = 0;
-  let packs = 0, journeyEntries = 0, browser = 0, tool = 0, hinted = 0, jrLines = 0;
+  let packs = 0, journeyEntries = 0, browser = 0, tool = 0, hinted = 0, jrLines = 0, namedTotal = 0;
   let flowApps = 0, flowSteps = 0;
   let hintsSteps = 0, cmdDecls = 0, urlStateSteps = 0;
   const cmdPackSet = new Set<string>();
@@ -99,6 +99,10 @@ function corpus(): Corpus {
       packs++;
       packLines += nonEmpty(fs.readFileSync(packPath, "utf-8"));
       const pack = loadPack(packPath) as unknown as Record<string, unknown>;
+      // 覆盖率走单一实现 `packHintCoverage`（套件/matrix/图共用同一口径），本地不再数一遍。
+      const cov = packHintCoverage(pack as never);
+      browser += cov.browser; hinted += cov.hinted; tool += cov === undefined ? 0 : 0;
+      namedTotal += cov.named;
       const roles = (pack["roles"] ?? {}) as Record<string, Record<string, unknown>>;
       const journey = (pack["journey"] ?? []) as Array<Record<string, unknown>>;
       jrLines += nonEmpty(JSON.stringify({ roles: pack["roles"] ?? {}, journey }, null, 2));
@@ -108,8 +112,8 @@ function corpus(): Corpus {
         journeyEntries++;
         const merged: Record<string, unknown> = e["role"] ? { ...(roles[String(e["role"])] ?? {}), ...e } : e;
         countDecl(merged, false);                                             // 口径③：journey 合并后也数一遍
-        if (e["source"]) { tool++; }                                          // 工具步：没有 DOM 目标
-        else { browser++; if (hintOf(merged)) hinted++; }
+        if (e["source"]) tool++;                                             // 工具步：没有 DOM 目标
+        // browser/hinted/named 由 packHintCoverage 数（见上），这里不再重复一份口径
         // §6 发散度：一个步同时算进它用到的每一种"多动作写法"
         if (Array.isArray(merged["target_hints"]) && (merged["target_hints"] as unknown[]).length > 1) {
           hintsSteps++; packHints++;
@@ -161,7 +165,9 @@ function corpus(): Corpus {
     browser_steps: browser,
     tool_steps: tool,
     steps_naming_target: hinted,
-    hint_coverage: { hinted, browser, pct: Math.round((100 * hinted) / browser * 10) / 10 },
+    hint_coverage: {
+      hinted, named: namedTotal, browser, pct: Math.round((100 * hinted) / browser * 10) / 10,
+    },
     hint_coverage_browser: `${hinted}/${browser} = ${((100 * hinted) / browser).toFixed(1)}%`,
     hint_coverage_with_flow: `${hinted + 0}/${browser + flowSteps} = ${((100 * hinted) / (browser + flowSteps)).toFixed(1)}%（+2 个语义流模板的 ${flowSteps} 步，设计上零 hint）`,
     flow_apps: flowApps,

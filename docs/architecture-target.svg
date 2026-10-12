@@ -209,7 +209,7 @@
 <text x="1097" y="1303" class="t" font-size="12.5">src/model-artifacts.ts</text>
 <text x="1097" y="1319" class="s">三件齐才算 on（单一出处）</text>
 <text x="1097" y="1333" class="s">doctor / 运行器 / 桥 共用</text>
-<text x="60" y="1374" class="foot">实测（真 ONNX，本机）：声明解决了 98.8% 的浏览器步；模型 top-1 25%、闸门内 precision 15% ⇒ 它是兜底与诊断，不是承重件（详见 ⑨）</text>
+<text x="60" y="1374" class="foot">实测（真 ONNX，本机）：浏览器步 171/171 全由声明解决（169 个 hint 点名 = 98.8%，其余走 commands 闭集）；模型 top-1 25%、闸门内 precision 15% ⇒ 它是兜底与诊断，不是承重件（详见 ⑨）</text>
 <text x="60" y="1394" class="lbl">梯级账单：reobserve / escalate 在已验收语料上救回 0 次 ⇒ dead rung（口径与建议见 ARCHITECTURE_IMPROVEMENTS §5）</text>
 <text x="60" y="1370" class="sm">新增（P0）：配置类错误改为启动期预检、永不重试 —— 实测坏产物路径下数据腿与第一个工具步曾已执行，且同一配置错误被重试 2 次。</text>
 <path class="ln" d="M700,1382 V1418" marker-end="url(#arr)"/>
@@ -282,7 +282,7 @@
 <text x="58" y="2012" class="lay">⑨ 模型角色的修正（审查 docs/DECISION_MODEL_PURPOSE_REVIEW.md + 方案 docs/MODEL_ROLE_PLAN.md + 实施计划 W1–W5；注意与执行层 P0–P4 是两套编号）</text>
 <rect x="60" y="2020" width="444" height="140" class="bxred"/>
 <text x="71" y="2039" class="t" font-size="12">实测：分工写反了</text>
-<text x="71" y="2055" class="s">浏览器步 169/171（98.8%）手写了目标；</text>
+<text x="71" y="2055" class="s">浏览器步 171/171 全由声明解决（169 个用 hint 点名 = 98.8%，其余 commands）；</text>
 <text x="71" y="2069" class="s">真模型下整批语料 201 步里选择提问 5 次、</text>
 <text x="71" y="2083" class="s">过关 0 次，rule:match 201/201</text>
 <text x="71" y="2097" class="s">—— 选目标从不由模型决定。模型 top-1 25%</text>

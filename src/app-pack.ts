@@ -234,15 +234,19 @@ export function appDirs(): string[] {
 
 /** 已发现的应用包：`[id, label, path]`，按 id 排序。 */
 /**
- * 这个包的**浏览器步里有多少点名了目标**（`target_hint` / `target_hints`）。
+ * 这个包的**浏览器步里有多少点名了目标**。两个数，别混：
  *
- * 为什么放在这里、并且只有一份实现：这个数字被 `apps:suite` 的列、`apps:matrix`、
- * `tools/arch-metrics.ts` 与两张图同时引用——它一旦有两份，就会有两个值（本轮已经为这类
- * 事付过一次账）。工具步没有 DOM 目标，天然不计入分母。
+ *   - `hinted` —— 用 `target_hint` / `target_hints` 点名的（审查文档里"98.8% 手写了目标"说的是这个）；
+ *   - `named`  —— **由声明解决、不依赖模型兜底**的：`hinted` 加上用 `commands` 命令闭集点名的步
+ *     （P2 那类步明确"绝不退回全池、绝不问模型"，所以它同样是声明在承重）。
+ *
+ * 为什么放在这里、并且只有一份实现：这两个数被 `apps:suite` 的列、`apps:matrix`、
+ * `tools/arch-metrics.ts` 与两张图同时引用——它们一旦有两份实现，就会有两个值
+ * （本轮已经为这类事付过一次账）。工具步没有 DOM 目标，天然不计入分母。
  */
-export function packHintCoverage(pack: AppPack): { hinted: number; browser: number } {
+export function packHintCoverage(pack: AppPack): { hinted: number; named: number; browser: number } {
   const roles = pack.roles ?? {};
-  let hinted = 0, browser = 0;
+  let hinted = 0, named = 0, browser = 0;
   for (const e of pack.journey ?? []) {
     if (!e || typeof e !== "object") continue;
     const merged: Record<string, unknown> = { ...(roles[String((e as Record<string, unknown>)["role"])] ?? {}), ...(e as object) };
@@ -251,8 +255,10 @@ export function packHintCoverage(pack: AppPack): { hinted: number; browser: numb
     const h = merged["target_hints"];
     const has = (Array.isArray(h) && h.length > 0) || typeof merged["target_hint"] === "string";
     if (has) hinted++;
+    const cmds = merged["commands"];
+    if (has || (Array.isArray(cmds) && cmds.length > 0)) named++;
   }
-  return { hinted, browser };
+  return { hinted, named, browser };
 }
 
 export function listPacks(): Array<[string, string, string]> {

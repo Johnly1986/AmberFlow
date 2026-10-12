@@ -55,6 +55,7 @@ const N = {
   tests: mv((m) => m.tests?.count, "tests.count"),
   hintPct: mv((m) => m.corpus?.hint_coverage?.pct, "corpus.hint_coverage.pct"),
   hinted: mv((m) => m.corpus?.hint_coverage?.hinted, "hint_coverage.hinted"),
+  named: mv((m) => m.corpus?.hint_coverage?.named, "hint_coverage.named"),
   browserSteps: mv((m) => m.corpus?.hint_coverage?.browser, "hint_coverage.browser"),
   top1: mv((m) => m.model?.harness?.numeric?.top1_pct, "harness.top1_pct"),
   latin: mv((m) => m.model?.harness?.numeric?.latin_pct, "harness.latin_pct"),
@@ -219,7 +220,7 @@ box(60, 1284, 330, 66, "bxm", "src/model.ts — LayaRuntime 缝", ["load / predi
 box(402, 1284, 330, 66, "bxm", "laya-onnx.ts + laya-format.ts", ["buildSequence · 温度标定 · shortlist k=8", "checkpoint 按文字系统路由，不按置信度"]);
 box(744, 1284, 330, 66, "bxm", "产物：图 + .onnx.data + tokenizer", ["约 1.7GB，刻意不进 git", "LAYA_ONNX_MODEL 约定 / HF 快照发现"]);
 box(1086, 1284, 330, 66, "bxm", "src/model-artifacts.ts", ["三件齐才算 on（单一出处）", "doctor / 运行器 / 桥 共用"]);
-note(60, 1374, `实测（真 ONNX，本机）：声明解决了 ${N.hintPct}% 的浏览器步；模型 top-1 ${N.top1}%、闸门内 precision ${N.prec}% ⇒ 它是兜底与诊断，不是承重件（详见 ⑨）`, "foot", 1356);
+note(60, 1374, `实测（真 ONNX，本机）：浏览器步 ${N.named}/${N.browserSteps} 全由声明解决（${N.hinted} 个 hint 点名 = ${N.hintPct}%，其余走 commands 闭集）；模型 top-1 ${N.top1}%、闸门内 precision ${N.prec}% ⇒ 它是兜底与诊断，不是承重件（详见 ⑨）`, "foot", 1356);
 note(60, 1394, "梯级账单：reobserve / escalate 在已验收语料上救回 0 次 ⇒ dead rung（口径与建议见 ARCHITECTURE_IMPROVEMENTS §5）", "lbl", 1356);
 note(60, 1370, "新增（P0）：配置类错误改为启动期预检、永不重试 —— 实测坏产物路径下数据腿与第一个工具步曾已执行，且同一配置错误被重试 2 次。", "sm", 1356);
 
@@ -282,7 +283,8 @@ box(716, 1812, 700, 140, "bxnew", "迁移顺序（已全部落地，每条附验
 P("M700,1952 V1988"); note(714, 1976, "真 ONNX 实测：承重件不是模型");
 band(1988, 196, "⑨ 模型角色的修正（审查 docs/DECISION_MODEL_PURPOSE_REVIEW.md + 方案 docs/MODEL_ROLE_PLAN.md + 实施计划 W1–W5；注意与执行层 P0–P4 是两套编号）");
 box(60, 2020, 444, 140, "bxred", "实测：分工写反了", [
-  `浏览器步 ${N.hinted}/${N.browserSteps}（${N.hintPct}%）手写了目标；`,
+  `浏览器步 ${N.named}/${N.browserSteps} 全由声明解决`
+  + `（${N.hinted} 个用 hint 点名 = ${N.hintPct}%，其余 commands）；`,
   `真模型下整批语料 ${N.traceSteps} 步里选择提问 ${N.asks} 次、`,
   `过关 ${N.passed} 次，rule:match ${N.ruleMatch}/${N.traceSteps}`,
   `—— 选目标从不由模型决定。模型 top-1 ${N.top1}%`,

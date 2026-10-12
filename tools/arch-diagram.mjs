@@ -56,6 +56,7 @@ const N = {
   tests: mv((m) => m.tests?.count, "tests.count"),
   binLines: mv((m) => m.corpus?.bin_fixture_lines, "corpus.bin_fixture_lines"),
   hintPct: mv((m) => m.corpus?.hint_coverage?.pct, "corpus.hint_coverage.pct"),
+  named: mv((m) => m.corpus?.hint_coverage?.named, "corpus.hint_coverage.named"),
   hinted: mv((m) => m.corpus?.hint_coverage?.hinted, "hint_coverage.hinted"),
   browserSteps: mv((m) => m.corpus?.hint_coverage?.browser, "hint_coverage.browser"),
   top1: mv((m) => m.model?.harness?.numeric?.top1_pct, "harness.top1_pct"),
@@ -167,7 +168,7 @@ box(175, 826, 260, 66, "bxm", "src/model.ts — LayaRuntime 缝", ["load / predi
 box(450, 826, 300, 66, "bxm", "laya-onnx.ts + laya-format.ts", ["buildSequence · 温度标定 · shortlist k=8", "checkpoint 按文字系统路由，不按置信度"]);
 box(765, 826, 320, 66, "bxm", "产物：图 + .onnx.data + tokenizer", ["约 1.7GB，刻意不进 git", "LAYA_ONNX_MODEL 约定 / HF 快照发现"]);
 box(1100, 826, 315, 66, "bxm", "src/model-artifacts.ts", ["三件齐才算 on（单一出处）", "doctor / fetch / 运行器 / 桥 共用"]);
-T(58, 906, `实测（真 ONNX，本机）：声明解决了 ${N.hintPct}% 的浏览器步（${N.hinted}/${N.browserSteps}）；模型 top-1 ${N.top1}%、闸门内 precision ${N.prec}%（两把不可比的尺子：passthrough AUC ${N.aucPt} / shortlist AUC ${N.aucSl}）`, "lbl");
+T(58, 906, `实测（真 ONNX，本机）：浏览器步 ${N.named}/${N.browserSteps} 全由声明解决（其中 ${N.hinted} 用 hint 点名 = ${N.hintPct}%，其余走 commands 闭集）；模型 top-1 ${N.top1}%、闸门内 precision ${N.prec}%（两把不可比的尺子：passthrough AUC ${N.aucPt} / shortlist AUC ${N.aucSl}）`, "lbl");
 
 
 /* ---------------- L6 证据 ---------------- */

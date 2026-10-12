@@ -75,6 +75,7 @@ node --experimental-strip-types tools/ask-shapes.ts \
 |---|---|---|---|
 | 仓库内 `apps/*/pack.json`（17 个有 journey 的包） | 180 | 169 | **93.9%** |
 | └ 只算**浏览器步**（DOM hint 才有意义；9 个工具步天然没有 hint） | 171 | 169 | **98.8%** |
+| └〔后续修正〕**由声明解决、不依赖模型**的步（169 个 hint 点名 **+ 2 个 `commands` 闭集**） | 171 | **171** | **100%**（`npm run metrics` 的 `hint_coverage.named`；"98.8%"说的是 hint，两个数别混） |
 | 再加上 2 个语义流模板 `apps/flight-cheapest*`（`flow.json`，各 5 步，**设计上零 hint**） | 190 | 170 | 89.5% |
 | 再加上用户作用域 `~/.amberflow/apps/dsh-learn-probe`（`learn` 录的） | 191 | 171 | 89.5% |
 
