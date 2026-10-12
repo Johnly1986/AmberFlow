@@ -33,6 +33,11 @@
 > **重审后的目标架构**（④ 执行层三段化：命令层 / 决策层 / 数据槽层 + 三档裁定 + 迁移顺序）见
 > [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)，其生成图
 > [docs/architecture-target.svg](docs/architecture-target.svg)（`node tools/arch-diagram-v2.mjs`，
+> **决策模型的存在理由另有一份独立审查**：[docs/DECISION_MODEL_PURPOSE_REVIEW.md](docs/DECISION_MODEL_PURPOSE_REVIEW.md)
+> ——以"模型是为了简化配置、增加弹性与容错"为唯一准绳，用真 ONNX 模型实测（169/180 步手写了目标；
+> 模型 top-1 25%、闸门内 precision 15%；删掉 hint 后同一批旅程完成率 4/4 → 0/4），
+> 结论是**分工写反了**：承重件是声明+规则+编译/录制，模型是兜底与诊断。
+>
 > 先量后写：坏图不落盘）。**落地状态：P0（形状硬化，不改任何运行结果）、P1（hint 单实现 +
 > tier 候选集，门控 `tieredHint` 默认关）、P2（命令层 `src/actions.ts`）、P3（数据槽层
 > `src/bindings.ts`）、P4（声明式后继 `next`，应用旅程层）、D3/R-4（`inert` 不再是唯一终止依据：
