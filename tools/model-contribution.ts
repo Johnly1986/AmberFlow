@@ -53,6 +53,11 @@ interface StepRow {
   correct: boolean | null;          // null = 这一行没法判（hint 解不出来 / 模型没答）
   conf: number;
   shortlisted: boolean;
+  /** 问法形状（§2）：full=passthrough（池 ≤ k），shortlist=重问子集，none=没提出候选。 */
+  shape?: string;
+  p_top1?: number | null;
+  p_top2?: number | null;
+  margin?: number | null;
   han: number;                      // 页面文字里汉字占比（分层用）
   secs: number;
 }
@@ -121,8 +126,14 @@ async function main(argv: string[]): Promise<number> {
           const expectedRef = hint ? hintMatch(hint, elems) : null;
           const text = await page.evaluate(() => (globalThis as { document?: { body?: { innerText?: string } } }).document?.body?.innerText ?? "");
           const t0 = Date.now();
-          const [pickedRef, conf, probs] = await mw.pickElement(
+          // §2：走 pickProposal，把"问法形状"与 p(top1)/margin 一起落进产物——
+          // W4/R4 的停止条件（"两支 AUC ≥ 0.5 且 precision 高于现状"）必须能从这份 JSON 直接算出来，
+          // 不能只有那个承载两种含义的 conf。
+          const proposal = await mw.pickProposal(
             sg.desc, page as unknown as AnyPage, elems, new Set(), null);
+          const pickedRef = proposal.choiceRef;
+          const conf = proposal.entropyConf;
+          const probs = proposal.probs;
           const secs = (Date.now() - t0) / 1000;
           const expectedEl = expectedRef !== null ? elems[expectedRef] : undefined;
           const pickedEl = pickedRef !== null ? elems[pickedRef] : undefined;
@@ -135,6 +146,10 @@ async function main(argv: string[]): Promise<number> {
             picked: pickedEl ? oneLine(pickedEl) : null,
             correct, conf: Math.round(conf * 1000) / 1000,
             shortlisted: Object.keys(probs).length > 0 && Object.keys(probs).length < Object.keys(elems).length,
+            shape: proposal.shape.kind,
+            p_top1: proposal.pTop1 === null ? null : Math.round(proposal.pTop1 * 1000) / 1000,
+            p_top2: proposal.pTop2 === null ? null : Math.round(proposal.pTop2 * 1000) / 1000,
+            margin: proposal.margin === null ? null : Math.round(proposal.margin * 1000) / 1000,
             han: Math.round(hanRatio(String(text)) * 100) / 100,
             secs: Math.round(secs * 10) / 10,
           });

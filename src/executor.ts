@@ -117,6 +117,19 @@ export type AnyPage = Omit<PageLike, "locator" | "evaluate"> & {
 };
 
 /** The playwright "connection" object: just the BrowserType, in Node. */
+/** 一次选元素提案（见 `pickProposal` 的注释：为什么"问法形状"必须进接口）。 */
+export interface PickProposal {
+  choiceRef: string | null;
+  shape: { kind: "full" | "shortlist" | "none"; k: number; poolSize: number; options: number };
+  pTop1: number | null;
+  pTop2: number | null;
+  /** 只有一个候选时 margin = pTop1（没有对手可比，不是"很有把握"）。 */
+  margin: number | null;
+  /** 今天的 `conf`：passthrough=1−归一化熵；shortlist=max(子集概率)。**只作诊断，别跨 shape 比。** */
+  entropyConf: number;
+  probs: Record<string, number>;
+}
+
 export interface PwLike {
   chromium: { launch(opts: LaunchOptions): Promise<unknown> };
 }
@@ -876,23 +889,62 @@ export class BrowserMiddleware {
 
   /* -- laya calls (each one forward pass) ---------------------------------- */
 
-  /** First rung of the pick ladder, then laya. Returns `[ref, conf, probabilities]`. */
-  async pickElement(
+  /**
+   * 一次"选元素"的**完整提案**（docs/ARCHITECTURE_IMPROVEMENTS.md §2）。
+   *
+   * 为什么要结构而不是一个 float：`conf` 今天承载**两个不可比的量**——
+   * passthrough（池 ≤ k）是 `1 − 归一化熵`，shortlist（池 > k）是**子集上的 max(probs)**。
+   * 实测两者方向相反（AUC 0.233 反向 vs 0.587），拿同一个 floor 比它们是把两把尺子叠在一起。
+   * 这里把"问法形状"变成接口的一部分：**闸门要按 shape 分档读，不能跨 shape 比标量**。
+   *
+   * `entropyConf` 保留但降级为诊断字段（它就是今天的 `conf` 在 passthrough 那一支的含义）；
+   * `pTop1/pTop2/margin` 是与选项数无关的信号，W4/R4 的标定要用它们。
+   */
+  async pickProposal(
     goal: string,
     page: AnyPage,
     elems: ElemPool,
     forbidden: Set<string>,
     notes: Record<string, string> | null = null,
-  ): Promise<[string | null, number, Record<string, number>]> {
+  ): Promise<PickProposal> {
+    const picked = await this.pickInner(goal, page, elems, forbidden, notes);
+    const values = Object.values(picked.probs).sort((a, b) => b - a);
+    const poolSize = Object.keys(elems).length;
+    // 形状用**权威信号**（predictShortlist 的 passthrough 标志），不是从概率条数反推——
+    // 有些运行时只回一条概率，反推会把 passthrough 误判成 shortlist（本轮测试踩过）。
+    const kind: PickProposal["shape"]["kind"] =
+      picked.ref === null ? "none" : picked.passthrough ? "full" : "shortlist";
+    return {
+      choiceRef: picked.ref,
+      shape: { kind, k: 8, poolSize, options: values.length },
+      pTop1: values[0] ?? null,
+      pTop2: values[1] ?? null,
+      margin: values.length >= 2 ? values[0]! - values[1]! : (values[0] ?? null),
+      entropyConf: picked.conf,
+      probs: picked.probs,
+    };
+  }
+
+  /**
+   * 一次提问的全部事实：选了什么、conf 怎么来的（passthrough 与否决定它的含义）、原始概率。
+   * `pickElement` 是它的三元组视图（保持既有调用点与 trace 口径不变），`pickProposal` 是带形状的视图。
+   */
+  private async pickInner(
+    goal: string,
+    page: AnyPage,
+    elems: ElemPool,
+    forbidden: Set<string>,
+    notes: Record<string, string> | null,
+  ): Promise<{ ref: string | null; conf: number; probs: Record<string, number>; passthrough: boolean }> {
     if (this.rulesOnly) {
       // no model to ask: the caller reports "needs a model pick" instead of a crash
-      return [null, 0.0, {}];
+      return { ref: null, conf: 0.0, probs: {}, passthrough: true };
     }
     const crit = criteriaView(elems, forbidden, await ariaInteractiveLines(page), notes);
     if (!Object.keys(crit).length) {
       // action space exhausted (every element forbidden/inert) — signal this
       // with conf 0 so the caller stops instead of crashing the runtime.
-      return [null, 0.0, {}];
+      return { ref: null, conf: 0.0, probs: {}, passthrough: true };
     }
     const state = {
       goal,
@@ -914,7 +966,7 @@ export class BrowserMiddleware {
     // choiceless answer (a noul-shaped object) flows on exactly as before: the
     // caller's `elems[ref]` miss reports it via the helpful "names no target"
     // message, which is the UX contract for a step nothing could name.
-    if (a === undefined) return [null, 0.0, {}];
+    if (a === undefined) return { ref: null, conf: 0.0, probs: {}, passthrough: false };
     // The shortlist re-normalises probabilities over its kept subset only: when
     // it dropped nothing (labels <= k), that renormalised value is NOT the
     // model's calibrated confidence — `predict_shortlist` hands back the
@@ -922,7 +974,7 @@ export class BrowserMiddleware {
     // inflated a 0.13 pick to 0.76 and let wrong clicks through the floor.
     const probs = a.probabilities ?? {};
     const sl = res.shortlist?.["act"] ?? {};
-    if (sl.passthrough) return [a.choice, a.confidence, probs];
+    if (sl.passthrough) return { ref: a.choice ?? null, conf: a.confidence, probs, passthrough: true };
     // `confidence` is 1 - normalized entropy: with few options it collapses even
     // when the model is decisive. The argmax value against the runner-up is the
     // calibration-consistent gate signal here.
@@ -931,7 +983,19 @@ export class BrowserMiddleware {
     // `low confidence -Infinity`). Fall back to the answer's own confidence.
     const values = Object.values(probs);
     const top = values.length ? Math.max(...values) : (a.confidence ?? 0);
-    return [a.choice, top, probs];
+    return { ref: a.choice ?? null, conf: top, probs, passthrough: false };
+  }
+
+  /** First rung of the pick ladder, then laya. Returns `[ref, conf, probabilities]`. */
+  async pickElement(
+    goal: string,
+    page: AnyPage,
+    elems: ElemPool,
+    forbidden: Set<string>,
+    notes: Record<string, string> | null = null,
+  ): Promise<[string | null, number, Record<string, number>]> {
+    const r = await this.pickInner(goal, page, elems, forbidden, notes);
+    return [r.ref, r.conf, r.probs];
   }
 
   /** Layered risk gate. Returns `[isRisky, probability]`. */

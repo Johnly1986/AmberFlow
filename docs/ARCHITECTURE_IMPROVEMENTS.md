@@ -40,7 +40,7 @@
 > 两支 AUC、采纳/对数、真模型出场数全部改为插值）。**真值门实测有效**：把 JSON 里的 `tests.count`
 > 改成 9999 ⇒ 两个 `--check` 同时 exit 1；改回即绿。JSON 缺失/缺字段也记为问题（先检查后写，不落坏图）。
 
-## 2. 决策接口要按"问法"版本化（P1，解 W4 的阻塞）
+## 2. 决策接口要按"问法"版本化（P1，解 W4 的阻塞）——**接口已落地，闸门分档待 W4**
 
 **问题**：`pickElement` 返回的 `conf` 是**两个不可比的量**：池 ≤ 8 时 `1 − 归一化熵`（在全部选项上算），
 池 > 8 时短名单重问的 `max(probs)`。合并看是 AUC **0.325**；拆开看是 passthrough **0.233（反向）**
@@ -63,6 +63,16 @@ Proposal = { choiceRef, shape: {kind: "full" | "shortlist" | "narrow", k, poolSi
 **验收**：`model:contribution` 的产物含 `margin`/`pTop1`；两支的 AUC 与 floor 曲线**直接从产物算得出来**；
 六层对拍与 `apps:suite` 默认档逐字节不变。
 **代价/风险**：M；改的是 `LayaRuntime` 的返回结构与闸门读取点（默认档行为不变）。**边界**：`narrow`（tieredHint）默认关，只增不启。
+
+> **状态（本轮）**：✅ 接口侧落地——`BrowserMiddleware.pickProposal()` 返回
+> `{choiceRef, shape{kind:full|shortlist|none, k, poolSize, options}, pTop1, pTop2, margin, entropyConf, probs}`；
+> `pickElement` 改成同一内核（`pickInner`）的三元组视图，**默认口径一位字节没动**
+> （六层对拍全绿，含执行器 4 场景与报告逐字节）。形状用**权威信号**（`predictShortlist` 的
+> `passthrough` 标志）判定，不从概率条数反推——反推会把 passthrough 误判成 shortlist（测试踩过并钉住）。
+> ✅ `tools/model-contribution.ts` 现在落 `shape/p_top1/p_top2/margin`（demo-app 实测：
+> 错的 #1/#2 margin 0.031/0.062，对的 #3/#4 margin 0.538/0.852 —— 这正是 W4 要的分离度）。
+> ⏳ 未做：闸门的**分档读取**（`gate` 档位）——那是 W4 的行为改动，需要 R3 漂移夹具当验收台。
+> 契约测试在 `tests/executor.test.ts`（4 条，含"没有概率 ⇒ null 而不是 -Infinity"与"池子 ≤8 测不到短名单"两处坑）。
 
 ## 3. 运行策略要能声明（P2）
 

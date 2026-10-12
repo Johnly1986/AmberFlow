@@ -502,3 +502,62 @@ describe("browser lifecycle + RAM probe", () => {
     expect([1, 2]).toContain(routerMaxLoaded());
   });
 });
+
+
+/* ── §2 决策接口：一次提案必须带"问法形状"，不能只给一个 float ───────────── */
+describe("pickProposal（ARCHITECTURE_IMPROVEMENTS §2：conf 是两把尺子，形状要进接口）", () => {
+  /** 装一个能回**多条概率**的运行时（fakeAgent 会把概率塌成一条，测不出形状）。 */
+  const installProbs = (answer: Record<string, unknown>, passthrough: boolean): void => {
+    installLayaRuntime({
+      async load() { return null as never; },
+      embedFnFromAgent() { return null; },
+      async predictShortlist(_a: unknown, _s: unknown, questions: Record<string, unknown>) {
+        const labels = Object.keys(((questions["act"] as { criteria?: object })?.criteria) ?? {});
+        return {
+          answers: { act: { type: "choice", ...answer } },
+          shortlist: { act: { passthrough: passthrough || labels.length <= 8 } },
+        };
+      },
+    } as never);
+  };
+
+  it("passthrough：shape=full，entropyConf 与 pickElement 的 conf 同值；margin = p1 − p2", async () => {
+    installProbs({ choice: "e1", confidence: 0.42, probabilities: { e1: 0.5, e2: 0.1 } }, true);
+    const prop = await mw().pickProposal("x", asPage(), { e1: {}, e2: {}, e3: {} } as never, new Set());
+    expect(prop.shape.kind).toBe("full");
+    expect(prop.shape.options).toBe(2);
+    expect(prop.pTop1).toBeCloseTo(0.5);
+    expect(prop.pTop2).toBeCloseTo(0.1);
+    expect(prop.margin).toBeCloseTo(0.4);
+    expect(prop.entropyConf).toBeCloseTo(0.42);
+    // 三元组视图必须给出**同一个** conf：默认口径一位字节都没动
+    const [ref, conf] = await mw().pickElement("x", asPage(), { e1: {}, e2: {}, e3: {} } as never, new Set());
+    expect(ref).toBe("e1");
+    expect(conf).toBeCloseTo(0.42);
+  }, 60_000);
+
+  it("shortlist：conf 是子集 max(probs)，形状必须被标出来（不许与 full 混比）", async () => {
+    // 短名单只在**池子 > k=8** 时才生效——所以夹具要给 10 个元素，否则测的是 passthrough。
+    installProbs({ choice: "e1", confidence: 0.99, probabilities: { e1: 0.31, e2: 0.22 } }, false);
+    const ten = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`e${i + 1}`, {}]));
+    const prop = await mw().pickProposal("x", asPage(), ten as never, new Set());
+    expect(prop.shape.kind).toBe("shortlist");
+    expect(prop.entropyConf).toBeCloseTo(0.31);   // 不是熵！这就是两支尺子的差别所在
+    expect(prop.margin).toBeCloseTo(0.09);
+  }, 60_000);
+
+  it("没有概率的运行时：pTop/margin 为 null，绝不出现 -Infinity", async () => {
+    installProbs({ choice: "e1", confidence: 0.7 }, true);
+    const prop = await mw().pickProposal("x", asPage(), { e1: {} } as never, new Set());
+    expect(prop.pTop1).toBeNull();
+    expect(prop.margin).toBeNull();
+    expect(Number.isFinite(prop.entropyConf)).toBe(true);
+  }, 60_000);
+
+  it("动作空间耗尽：shape=none、choiceRef=null —— 『没得选』是一种结果", async () => {
+    installProbs({ choice: "e9", confidence: 0.9 }, true);
+    const prop = await mw().pickProposal("x", asPage(), {} as never, new Set());
+    expect(prop.choiceRef).toBeNull();
+    expect(prop.shape.kind).toBe("none");
+  }, 60_000);
+});
