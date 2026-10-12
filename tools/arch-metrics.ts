@@ -279,6 +279,13 @@ function modelMetrics(): ModelMetrics {
 
 const metrics = {
   generated_by: "tools/arch-metrics.ts",
+  /** 快照时间：`corpus` 段是仓库算出来的（永远新鲜），`model`/`tests` 是外部产物快照（会过期）。 */
+  generated_at: new Date().toISOString().slice(0, 10),
+  provenance: {
+    corpus: "仓库实时计算（--check 的门只比这一段）",
+    model: "外部快照：/tmp 下的真模型跑批产物；换机器或重跑就会变，引用时看 generated_at",
+    tests: "外部快照：`npx vitest list | wc -l`（静态数 it( 只有 799，不可用）",
+  },
   note: "本文件是计量单一出处：能算的自动算，算不出来的写 note 并注明需要的命令；每个数带口径。",
   corpus: corpus(),
   model: modelMetrics(),

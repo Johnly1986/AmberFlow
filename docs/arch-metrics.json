@@ -1,5 +1,11 @@
 {
   "generated_by": "tools/arch-metrics.ts",
+  "generated_at": "2026-10-12",
+  "provenance": {
+    "corpus": "仓库实时计算（--check 的门只比这一段）",
+    "model": "外部快照：/tmp 下的真模型跑批产物；换机器或重跑就会变，引用时看 generated_at",
+    "tests": "外部快照：`npx vitest list | wc -l`（静态数 it( 只有 799，不可用）"
+  },
   "note": "本文件是计量单一出处：能算的自动算，算不出来的写 note 并注明需要的命令；每个数带口径。",
   "corpus": {
     "app_dirs": 26,
@@ -58,7 +64,7 @@
       "escalate": 0,
       "secs": 597
     },
-    "scripted_corpus_secs": 166.3,
+    "scripted_corpus_secs": 166.4,
     "harness": {
       "judged": 162,
       "top1": "25%",
