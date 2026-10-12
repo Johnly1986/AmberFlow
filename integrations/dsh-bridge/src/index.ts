@@ -72,6 +72,12 @@ export interface Config {
    * stay removable only after an hour of age, so a live run is never pruned; 0 disables housekeeping.
    */
   keepRuns?: number
+  /**
+   * Override for the USER-scope apps dir root (`$AMBERFLOW_HOME`, listed as `$AMBERFLOW_HOME/apps`
+   * before the checkout's fixture `apps/`). Tests pin this to a non-existent path so a developer's
+   * own recorded apps can never leak into a listing assertion.
+   */
+  appsHome?: string
 }
 
 /** Schemastery schema for {@link Config}. */
@@ -86,6 +92,7 @@ export const Config: z<Config> = z.object({
   envMode: z.union([z.const('inherit'), z.const('allowlist')]).default('inherit'),
   forwardEnv: z.array(z.string()).default([]),
   keepRuns: z.natural().default(30),
+  appsHome: z.string(),
 })
 
 /**
@@ -179,6 +186,7 @@ function resolveOptions(config: Config): BridgeOptions {
     envMode: config.envMode ?? 'inherit',
     forwardEnv: config.forwardEnv ?? [],
     keepRuns: config.keepRuns ?? 30,
+    ...(config.appsHome === undefined ? {} : { appsEnv: { ...process.env, AMBERFLOW_HOME: config.appsHome } }),
   }
 }
 
@@ -251,7 +259,7 @@ export function apply(ctx: Context, config: Config): void {
     },
     execute(args) {
       const needle = (args.filter ?? '').toLowerCase()
-      const apps = listApps(options.repoPath)
+      const apps = listApps(options.repoPath, options.appsEnv)
         .filter(a => !needle
           || a.id.toLowerCase().includes(needle)
           || a.label.toLowerCase().includes(needle)

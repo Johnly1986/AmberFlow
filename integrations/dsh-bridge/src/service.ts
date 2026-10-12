@@ -306,7 +306,7 @@ export function createService(options: BridgeOptions): AmberFlowService {
   return {
     listApps(filter) {
       const needle = (filter ?? '').toLowerCase()
-      return listAppSummaries(options.repoPath).filter(app => !needle
+      return listAppSummaries(options.repoPath, options.appsEnv).filter(app => !needle
         || app.id.toLowerCase().includes(needle)
         || app.label.toLowerCase().includes(needle)
         || app.goal.toLowerCase().includes(needle))

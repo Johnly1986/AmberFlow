@@ -18,10 +18,13 @@ import {
   pruneRunDirs, runArgs, runProcess, stripAnsi, summarizeFlow, summarizeLearn, summarizePlan, summarizeRun,
 } from '../src/bridge.ts'
 
+/** An env whose user-scope dir cannot exist: listings see ONLY the stub checkout. */
+const NO_USER_APPS: NodeJS.ProcessEnv = { AMBERFLOW_HOME: '/nonexistent-amberflow-test-home' }
+
 describe('bridge helpers', () => {
   it('listApps reports steps, invariants and provenance per pack', () => {
     const repo = stubCheckout(PACKS)
-    const apps = listApps(repo)
+    const apps = listApps(repo, NO_USER_APPS)
     expect(apps.map(a => a.id)).toEqual(['gen-app', 'hand-app', 'rec-app'])
     expect(apps[0]).toMatchObject({ steps: 2, toolSteps: 1, invariants: 1, origin: 'generated:transfer/specs/x.json' })
     expect(apps[2]).toMatchObject({ steps: 1, invariants: 2, origin: 'recorded:testpages/product.html' })
@@ -29,7 +32,31 @@ describe('bridge helpers', () => {
   })
 
   it('listApps fails loudly on a directory that is not a checkout', () => {
-    expect(() => listApps(tmp('empty'))).toThrow(/no apps\/ directory/)
+    expect(() => listApps(tmp('empty'), NO_USER_APPS)).toThrow(/no apps\/ directory/)
+  })
+
+  it('user scope is listed, and a same-named user app SHADOWS the repo fixture', () => {
+    // $AMBERFLOW_HOME/apps comes first: recorded apps are the user's, checkout apps/ are fixtures.
+    const repo = stubCheckout(PACKS)
+    const home = tmp('amber-home')
+    const userApp = path.join(home, 'apps', 'hand-app')
+    fs.mkdirSync(userApp, { recursive: true })
+    fs.writeFileSync(path.join(userApp, 'pack.json'), JSON.stringify({
+      spec_version: 1, id: 'hand-app', label: 'USER version', goal: 'recorded by me',
+      journey: [{ desc: 'a', signal: { url_contains: 'x' }, start_url: 'file:///a' }],
+      recorded_from: { url: 'testpages/product.html' },
+    }))
+    fs.mkdirSync(path.join(home, 'apps', 'my-flow'), { recursive: true })
+    fs.writeFileSync(path.join(home, 'apps', 'my-flow', 'pack.json'), JSON.stringify({
+      spec_version: 1, id: 'my-flow', label: 'mine', goal: 'g',
+      journey: [{ desc: 'a', signal: { url_contains: 'x' }, start_url: 'file:///a' }],
+    }))
+    const apps = listApps(repo, { AMBERFLOW_HOME: home })
+    const hand = apps.find(a => a.id === 'hand-app')
+    expect(hand!.label).toBe('USER version')                    // shadowed by the user's copy
+    expect(apps.map(a => a.id)).toEqual(['gen-app', 'hand-app', 'my-flow', 'rec-app'])
+    // with the user scope gone, the SAME listing is exactly the fixture set again
+    expect(listApps(repo, NO_USER_APPS).map(a => a.id)).toEqual(['gen-app', 'hand-app', 'rec-app'])
   })
 
   it('listApps classifies kinds: journey runs, probe is refused by the engine, data-source has no pack', () => {
@@ -38,7 +65,7 @@ describe('bridge helpers', () => {
       'probe-app': { id: 'probe-app', label: 'p', goal: 'reachability', hosts: ['x.example'], invariants: [], probe: { http: ['a', 'b'] } },
     })
     stubDataSource(repo, 'src-app')
-    const apps = listApps(repo)
+    const apps = listApps(repo, NO_USER_APPS)
     expect(apps.find(a => a.id === 'probe-app')!.kind).toBe('probe')
     expect(apps.find(a => a.id === 'src-app')!.kind).toBe('data-source')
     expect(apps.find(a => a.id === 'gen-app')!.kind).toBe('journey')
@@ -505,7 +532,7 @@ describe('verified defects, kept fixed', () => {
   it('lists a declared data-source app that has no pack.json', () => {
     const repo = stubCheckout(PACKS)
     stubDataSource(repo, 'git-log')
-    expect(listApps(repo).find(a => a.id === 'git-log')).toMatchObject({
+    expect(listApps(repo, NO_USER_APPS).find(a => a.id === 'git-log')).toMatchObject({
       id: 'git-log', label: 'git-log', steps: 0, toolSteps: 0, invariants: 0, origin: 'data-source',
     })
   })
@@ -518,7 +545,7 @@ describe('verified defects, kept fixed', () => {
         journey: [{ role: 'writer' }, { role: 'plain' }],
       },
     })
-    expect(listApps(repo).find(a => a.id === 'role-tool')).toMatchObject({ steps: 1, toolSteps: 1 })
+    expect(listApps(repo, NO_USER_APPS).find(a => a.id === 'role-tool')).toMatchObject({ steps: 1, toolSteps: 1 })
   })
 
   it('refuses …_learn without a script BEFORE spawning the CLI', async () => {
@@ -696,7 +723,7 @@ describe('checkout under node_modules (git-install shape)', () => {
 
 describe('SemanticFlow door — list / argv / summarize / registry', () => {
   it('listApps exposes flow.json as a semantic-template row with its sites (and planned provenance)', () => {
-    const apps = listApps(stubCheckout(PACKS, { flow: true }))
+    const apps = listApps(stubCheckout(PACKS, { flow: true }), NO_USER_APPS)
     const flow = apps.find(a => a.id === 'flow-app')
     expect(flow).toMatchObject({
       kind: 'semantic-template', origin: 'planned', steps: 1, toolSteps: 0, invariants: 1,

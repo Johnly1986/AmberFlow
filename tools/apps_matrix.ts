@@ -29,10 +29,11 @@ const SHARED = fs.readdirSync(path.join(REPO, "src"))
  * 不是豁免：矩阵把它们单独列出来计数，迁移到应用包时这个数字应该下降。
  */
 const CORE = new Set([
-  "app-pack.ts", "app-runner.ts", "audit.ts", "bench.ts", "browser-env.ts", "datasource.ts",
-  "decision-cache.ts", "executor.ts", "extraction.ts", "flow.ts", "hint-memory.ts", "index.ts",
-  "model.ts", "outcome-memory.ts", "picker.ts", "plan.ts", "planner.ts", "probe-set.ts", "rules.ts",
-  "signals.ts", "start.ts",
+  "actions.ts", "amberflow-home.ts", "app-pack.ts", "app-runner.ts", "audit.ts", "bench.ts",
+  "bindings.ts", "browser-env.ts", "datasource.ts", "decision-cache.ts", "executor.ts", "extraction.ts",
+  "flow.ts", "hint-memory.ts", "index.ts", "model.ts", "model-artifacts.ts", "outcome-memory.ts",
+  "picker.ts", "plan.ts", "planner.ts", "probe-set.ts", "rules.ts", "signal-induction.ts",
+  "signals.ts", "start.ts", "tool-signals.ts",
   // 探测/任务驱动：站点知识已全部搬进 apps/<id>/pack.json（见 probe-set.ts 的说明），
   // 所以它们也进核心层——再往这里写死一个主机名，门禁就会红。
   "live-capture.ts", "live-probe.ts", "ota-probe.ts", "qunar-probe.ts", "qunar-task.ts",

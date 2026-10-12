@@ -35,7 +35,7 @@ async function mount(repoPath: string): Promise<{ api: AmberFlowService; ctx: Co
   // the service then comes up with it, and the consumer injects the service.
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
-  await ctx.plugin(Bridge, { repoPath })
+  await ctx.plugin(Bridge, { repoPath, appsHome: '/nonexistent-amberflow-test-home' })
   await ctx.plugin(consumerPlugin(seen))
   if (seen.api === undefined) throw new Error('the consumer never received ctx.amberflow')
   return { api: seen.api, ctx }

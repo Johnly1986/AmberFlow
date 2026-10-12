@@ -35,6 +35,12 @@ export interface BridgeOptions {
   /** Extra environment variable names forwarded in `allowlist` mode (exact keys, no glob). */
   forwardEnv: string[]
   /**
+   * Environment used to resolve the USER-scope apps dir ($AMBERFLOW_HOME/apps) when
+   * listing. Defaults to the running process's env; tests pin it to a non-existent
+   * home so a developer's recorded apps never leak into a listing assertion.
+   */
+  appsEnv?: NodeJS.ProcessEnv
+  /**
    * Per-call artifact directories are kept because the result names a report inside them; this caps
    * how many of the newest `dsh-amberflow-*` temp directories survive. 0 disables pruning.
    */
@@ -250,17 +256,41 @@ export function parseJsonDocument(stdout: string): Record<string, unknown> | nul
 }
 
 /**
- * Read every `apps/<id>/pack.json` under a checkout and summarize it.
+ * The app search path (mirrors `src/amberflow-home.ts` in the engine — the ONE place the
+ * precedence rule lives twice, kept honest by `tests/user-scope.test.ts` here and the
+ * engine's own discovery tests): `$AMBERFLOW_HOME/apps` first, the checkout's `apps/`
+ * as development fixtures after; a same-named user app shadows the fixture.
+ * @param repoPath - absolute path of the AmberFlow checkout.
+ * @param env - environment to resolve AMBERFLOW_HOME from.
+ * @returns the directories to scan, in precedence order.
+ */
+export function appsDirsWith(repoPath: string, env: NodeJS.ProcessEnv = process.env): string[] {
+  const repoApps = path.join(repoPath, 'apps')
+  const home = String(env.AMBERFLOW_HOME ?? '').trim()
+  const userApps = home !== '' ? path.resolve(home, 'apps') : path.join(os.homedir(), '.amberflow', 'apps')
+  return userApps === repoApps ? [repoApps] : [userApps, repoApps]
+}
+
+/**
+ * Read every `apps/<id>/pack.json` in the search path (user scope + checkout) and summarize it.
  * Deliberately filesystem-only: listing apps needs no browser, no model and no subprocess.
  * @param repoPath - absolute path of the AmberFlow checkout.
- * @returns one summary per declared app, sorted by id.
+ * @param env - environment for AMBERFLOW_HOME resolution.
+ * @returns one summary per declared app, sorted by id; user apps shadow same-named fixtures.
  */
-export function listApps(repoPath: string): AppSummary[] {
-  const dir = path.join(repoPath, 'apps')
-  if (!fs.existsSync(dir)) throw new Error(`no apps/ directory under ${repoPath}`)
+export function listApps(repoPath: string, env: NodeJS.ProcessEnv = process.env): AppSummary[] {
+  const dirs = appsDirsWith(repoPath, env)
+  if (!dirs.some((d) => fs.existsSync(d))) {
+    throw new Error(`no apps/ directory under ${repoPath} (searched: ${dirs.join(', ')})`)
+  }
   const out: AppSummary[] = []
+  const seen = new Set<string>()
+  for (const dir of dirs) {
+  if (!fs.existsSync(dir)) continue
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
+    if (seen.has(entry.name)) continue           // user scope wins over the repo fixture
+    seen.add(entry.name)
     const file = path.join(dir, entry.name, 'pack.json')
     if (!fs.existsSync(file)) {
       // A SemanticFlow template (spec_version 2, site-agnostic): a different family in the SAME
@@ -328,6 +358,7 @@ export function listApps(repoPath: string): AppSummary[] {
         ? (pack['hosts'] as unknown[]).filter((h): h is string => typeof h === 'string')
         : [],
     })
+  }
   }
   return out.sort((a, b) => a.id.localeCompare(b.id))
 }
