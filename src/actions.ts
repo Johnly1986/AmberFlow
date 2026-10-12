@@ -15,14 +15,20 @@
  *     结构化的 `space-empty` 事实，**绝不退回"全量观察"**（同 hint 纪律：未命中不赌）。
  *
  * 红线落点：
- *   - 红线②（不发明取值）：`fill`/`select` 的参数只有**声明绑定**一种来源——
- *     `{"from": "slot", "key": "…"}`，值按计划槽位；缺值即 `needs_value`（如实，不猜），
- *     模型永不参与选值。
+ *   - 红线②（不发明取值）：`fill`/`select` 的参数只有**声明绑定**——
+ *     `{"from": "slot", "key": "…"}`（计划数据袋）、`{"from": "option", "key": "…", "match": "…"}`
+ *     （当次观察到的页面候选 + **声明的**匹配规则）、`{"from": "list", …}`（行集 + 声明的排序规则，
+ *     只接数据腿）。缺值/未命中/档内歧义一律 `needs_value`（如实，不猜），模型永不参与选值；
+ *     形状与解析都在 `bindings.ts` 一处（P3）。
  *   - hint 语法（§8.3）：命令的 `target` 用的就是 `rules.hintMatchImpl` 那**一套**语法，
  *     不新开第三种句柄语法。
  *   - 红线③（完成只认该面证据）：命令走完 ≠ 完成；子目标的 `signal` 仍是唯一真相。
  */
 import { hintMatch } from "./rules.ts";
+import {
+  isValueBinding, resolveBinding, validateBinding,
+  type OptionCandidate, type ValueBinding,
+} from "./bindings.ts";
 import type { ElemPool } from "./extraction.ts";
 
 /** 引擎能力面的动词表（代码）。新增一个面/原语是新 provider，不是在配置里造词。 */
@@ -42,7 +48,12 @@ export interface CommandDecl {
   id: string;
   op: CommandOp | string;         // 字符串收进来，`validateCommands` 对着 COMMAND_OPS 校
   target?: string;
-  value?: { from: "slot"; key: string };
+  /**
+   * 参数**绑定**（P3 起有三种来源，见 `bindings.ts`）：`slot`（计划数据袋）、
+   * `option`（当次观察到的页面候选 + 声明的匹配规则）、`list`（行集 + 声明的排序规则）。
+   * 三条来源都要求声明点名；没有"看着像就填"这一档。
+   */
+  value?: ValueBinding;
 }
 
 /** 实例化出的一条可选项：声明 + 当次池里的落点。 */
@@ -108,18 +119,10 @@ export function validateCommands(
     if (VALUE_OPS.has(op)) {
       if (value === undefined) {
         problems.push(`${at}: op '${op}' needs value {from:'slot', key} — a value's only source is the plan (红线②)`);
-      } else if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        problems.push(`${at}: value must be {from:'slot', key}`);
       } else {
-        const v = value as Record<string, unknown>;
-        if (v["from"] !== "slot") {
-          problems.push(`${at}: value.from must be 'slot' (model-chosen and literal-authored values are refused)`);
-        }
-        if (typeof v["key"] !== "string" || !v["key"].trim()) {
-          problems.push(`${at}: value.key must be a non-empty slot name`);
-        } else if (slotKeys !== undefined && !slotKeys.has(v["key"])) {
-          problems.push(`${at}: value.key ${JSON.stringify(v["key"])} is not a declared slot (known: ${[...slotKeys].join(", ") || "none"})`);
-        }
+        // P3：绑定形状由**数据槽层**的那一个校验器判（`bindings.validateBinding`），
+        // 命令层不另写一份——两套语法漂移这个项目已经付过两次学费（§8.3）。
+        validateBinding(value, `${at}.value`, problems, { slotKeys, op });
       }
     } else if (value !== undefined && !NO_TARGET_OPS.has(op)) {
       problems.push(`${at}: op '${op}' takes no value (only fill/select bind parameters)`);
@@ -159,14 +162,21 @@ export function instantiateSpace(
   return { live, unresolved, forbidden: forbiddenOut };
 }
 
-/** 参数绑定的解析（数据槽层的 P2 一半）：值**只**按计划槽位按名字来；缺 ⇒ needs_value。 */
+/**
+ * 参数绑定的解析（命令层 → 数据槽层的门）：值只按**声明的来源**来；缺 ⇒ needs_value。
+ *
+ * P3 起解析落在 `bindings.resolveBinding`（一份实现、纯函数、可离线单测）；这里保留
+ * `{ok, value}` 这个既有返回形状，因为命令层与执行器只消费它，而 `via` 是诊断。
+ * `ctx.options` 是**当次观察**的页面候选（执行器为 `option` 来源现读 `<select>` 的 option）。
+ */
 export function resolveCommandValue(
   decl: CommandDecl, slots: Record<string, unknown>,
+  ctx: { options?: readonly OptionCandidate[] } = {},
 ): { ok: true; value: unknown } | { ok: false; reason: string } {
   if (!decl.value) return { ok: false, reason: "no declared binding" };
-  if (decl.value.from !== "slot") return { ok: false, reason: `unsupported value source ${JSON.stringify(decl.value.from)}` };
-  if (!(decl.value.key in slots)) {
-    return { ok: false, reason: `slot ${JSON.stringify(decl.value.key)} is not in the plan's data bag (values come from the plan, never invented)` };
+  if (!isValueBinding(decl.value)) {
+    return { ok: false, reason: `unsupported value source ${JSON.stringify((decl.value as { from?: unknown }).from)}` };
   }
-  return { ok: true, value: slots[decl.value.key] };
+  const r = resolveBinding(decl.value, { slots, options: ctx.options });
+  return r.ok ? { ok: true, value: r.value } : { ok: false, reason: r.reason };
 }

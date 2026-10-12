@@ -360,7 +360,7 @@ describe("CLI 错误路径：G-A / G-J / G-L 三条修复不得静默回归", ()
     fs.writeFileSync(srcPath, JSON.stringify(src), "utf-8");
 
     const step: ExpandedStep = {
-      index: 0, kind: "tool", desc: "缺二进制的工具步", role: null,
+      index: 0, kind: "tool", desc: "缺二进制的工具步", role: null, id: null, next: [],
       tool: {
         source: srcPath, args: [], dry_run_args: null,
         signal: { exit_ok: 0 } as unknown as ToolSignal,

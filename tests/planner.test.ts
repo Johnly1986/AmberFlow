@@ -156,6 +156,36 @@ describe("runPlan — replan wiring", () => {
     expect(plan.subgoals[0]!.obstacle).toBe("stuck");
   });
 
+  it("replan 补丁带来的 `next` 边被**响亮地**不采纳（入口守卫不能只管初始计划）", async () => {
+    const ran: string[] = [];
+    const mw = new FakeMW((desc) => { ran.push(desc); return desc.includes("amended") ? DONE() : STUCK("stuck"); });
+    const planner = {
+      replan: () => new TaskPlan("g", [
+        { desc: "amended one", signal: { url_contains: "ok" }, id: "a1", next: ["a3"] },
+        { desc: "amended two", signal: { url_contains: "ok" }, id: "a2" },
+      ]),
+    };
+    const plan = new TaskPlan("g", [{ desc: "doomed step", signal: { url_contains: "x" } }],
+      path.join(tmp, "p-next.json"));
+    const printed: string[] = [];
+    const orig = console.log;
+    console.log = (...a: unknown[]) => { printed.push(a.join(" ")); };
+    let rep;
+    try {
+      rep = await runPlan(mw, plan, {
+        startUrl: "u", planner: planner as never, verbose: false, sessionFactory: fakeSession({ opened: 0 }),
+      });
+    } finally {
+      console.log = orig;
+    }
+    // 步照常补进来（那是 replan 的本职），但边**没有**溜进计划：runPlan 走的是 resume 队列。
+    expect(ran).toEqual(["doomed step", "amended one", "amended two"]);
+    expect(rep!.replans).toBe(1);
+    expect(plan.subgoals[1]!.next).toBeUndefined();
+    expect(plan.subgoals[1]!.id).toBe("a1");
+    expect(printed.some((l) => /declares `next` \(a3\), which runPlan cannot honour/.test(l))).toBe(true);
+  });
+
   it("stops when the planner makes no progress (an echo can never spin)", async () => {
     const counter = { opened: 0 };
     let calls = 0;

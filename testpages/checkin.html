@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>入住日期 - 示例酒店</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:40px auto}select,button{padding:6px 10px;margin:6px 4px}</style>
+</head>
+<body>
+<header><a data-test="home" href="product.html">示例酒店</a></header>
+<main>
+  <h1>选择入住日期</h1>
+  <!-- P3 数据槽层的夹具：机器值（value）与人读标签（option 文本）刻意不同——
+       真实站点的 `<select>` 正是这样（"2026-10-12" vs "10月12日 周一"），
+       而旧世界的 `_slotValue` 只有"子串猜测 + label→value 两候选回退"。
+       这里让 option 来源的声明式规则可测：match:"value" 走机器值，match:"label" 走人读标签。 -->
+  <label>入住日期
+    <select data-test="checkin">
+      <option value="">请选择</option>
+      <option value="2026-10-12">10月12日 周一</option>
+      <option value="2026-10-13">10月13日 周二</option>
+      <option value="2026-10-14">10月14日 周三</option>
+    </select></label>
+  <button data-test="confirm">确认日期</button>
+  <p data-test="summary">未选择</p>
+</main>
+<script>
+document.querySelector('[data-test=confirm]').addEventListener('click', () => {
+  const sel = document.querySelector('[data-test=checkin]');
+  document.querySelector('[data-test=summary]').textContent =
+    sel.value ? '入住 ' + sel.value : '请先选择日期';
+});
+</script>
+</body>
+</html>

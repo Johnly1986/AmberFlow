@@ -34,6 +34,7 @@ import { ensureDir, userAppsDir } from "./amberflow-home.ts";
 import {
   BrowserMiddleware, browserSession, type BrowserSession, type EscalatorLike,
 } from "./executor.ts";
+import { resolveBinding } from "./bindings.ts";
 import { criteriaView, extractElements, urlOf, type ElemPool } from "./extraction.ts";
 import { installLayaRuntime, scriptedRuntime } from "./model.ts";
 import { llmEscalator } from "./planner.ts";
@@ -672,8 +673,14 @@ export async function planFlow(opts: PlanFlowOptions): Promise<PlanFlowResult> {
         const stepStart = baseStart;
         if (proposal.list) {
           const disc = await discoverListConfig(session.page, proposal.list.by);
-          const idx = disc.values.reduce((best, v, i2) =>
-            (proposal.list!.op === "min" ? v < disc.values[best]! : v > disc.values[best]!) ? i2 : best, 0);
+          // "选哪一行"只有一份实现（P3 数据槽层 → datasource.selectIndex）：规划期演示选中的那一行
+          // 与运行期 `list_step` 选的那一行必须是同一条规则，否则写进档案的 chosen_row 会骗人。
+          const picked = resolveBinding(
+            { from: "list", by: "v", order: proposal.list.op },
+            { rows: disc.values.map((v) => ({ v })) },
+          );
+          if (!picked.ok) throw new Error(`list step ${proposal.id}: ${picked.reason}`);
+          const idx = picked.index ?? -1;
           const loc = (session.page as {
             locator: (s: string) => {
               nth: (i: number) => { locator: (s: string) => { first: () => { click: (o: unknown) => Promise<void> } } };

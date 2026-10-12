@@ -42,7 +42,7 @@ import {
 import { REPO } from "./flow.ts";
 import { checkArtifacts } from "./model-artifacts.ts";
 import { extractSlots } from "./extraction.ts";
-import { selectIndex } from "./datasource.ts";
+import { resolveBinding, validateBinding } from "./bindings.ts";
 import {
   installLayaRuntime, scriptedAgent, scriptedRuntime,
   type DecisionAgent, type Question,
@@ -154,7 +154,7 @@ const PROFILE_KEYS = [
   "fill_keys", "list_extract", "frozen_signals", "steps", "notes",
 ] as const;
 const ROLES = new Set(["button", "link", "input", "textarea", "select"]);
-const LIST_OPS = new Set(["min", "max"]);
+// min/max 的合法面在数据槽层一处（`bindings.LIST_ORDERS`）——这里不再复制一份词表。
 const FIELD_OPS = new Set(["int", "str", "strip"]);
 
 const isDict = (v: unknown): v is Record<string, unknown> =>
@@ -322,10 +322,19 @@ export function validateTemplate(t: FlowTemplate): string[] {
     }
     if (s["list_step"] !== undefined) {
       const ls = s["list_step"];
-      if (!isDict(ls) || !LIST_OPS.has(String(ls["op"])) || typeof ls["by"] !== "string" || !ls["by"]) {
+      if (!isDict(ls)) {
         p.push(`${where}.list_step must be {"op": "min"|"max", "by": field${", \"act\": \"row"}}`);
-      } else if (ls["act"] !== undefined && ls["act"] !== "row") {
-        p.push(`${where}.list_step.act must be "row"`);
+      } else {
+        // P3：flow 的 `{op, by}` 形状是**既有**声明面（不动它，§8.4 缺省等价），
+        // 但它映射到数据槽层同一条 `{from:"list", order, by}` 上校验——
+        // min/max 的合法面只在 `bindings.LIST_ORDERS` 一处，不再各写一份词表（§8.3）。
+        validateBinding(
+          { from: "list", by: ls["by"], order: ls["op"] },
+          `${where}.list_step`, p, { allowList: true },
+        );
+        if (ls["act"] !== undefined && ls["act"] !== "row") {
+          p.push(`${where}.list_step.act must be "row"`);
+        }
       }
     }
   });
@@ -761,10 +770,13 @@ export async function runListStep(
     if (values.some((v) => Number.isNaN(v))) {
       return { done: false, detail: { rows: rows.length }, error: `field ${JSON.stringify(by)} did not parse as a number on every row` };
     }
-    // "选哪一行"不是模型判断，也不在这里另写一套：走 datasource 引擎的同一实现
-    // （`selectIndex`，`selects` 与 list_step 共用），min/max 只是 order 的值。
+    // "选哪一行"不是模型判断，也不在这里另写一套：P3 起这条声明（`{from:"list", by, order}`）
+    // 由数据槽层 `bindings.resolveBinding` 解析，它内部调的仍是 datasource 引擎的同一个
+    // `selectIndex`（`selects` / `list_step` / 命令绑定共用一份实现），min/max 只是 order 的值。
     const numeric: Array<Record<string, unknown>> = rows.map((r, i) => ({ ...r, [by]: values[i] }));
-    const chosen = selectIndex(numeric, { sort_by: [by], order: op });
+    const bound = resolveBinding({ from: "list", by, order: op }, { rows: numeric });
+    if (!bound.ok) return { done: false, detail: { rows: rows.length }, error: bound.reason };
+    const chosen = bound.index ?? -1;
     const detail: Record<string, unknown> = {
       rows: rows.length, op, by,
       chosen: rows[chosen], chosen_index: chosen,

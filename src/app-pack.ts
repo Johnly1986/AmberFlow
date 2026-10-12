@@ -25,6 +25,7 @@ import type { SignalSpec } from "./signals.ts";
 import { validateToolSignal, type ToolSignal } from "./tool-signals.ts";
 import { validateProbeBlock } from "./probe-set.ts";
 import { loadSource } from "./datasource.ts";
+import { extractSlots } from "./extraction.ts";
 
 export const APPS_DIR = path.join(REPO, "apps");
 export const SPEC_VERSION = 1;
@@ -49,7 +50,7 @@ export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = {
 export const PACK_KEYS = [
   "spec_version", "id", "label", "goal", "model", "max_subgoals", "hosts",
   "slots", "required_slots", "sources", "roles", "journey", "invariants", "notes", "probe", "device",
-  "generated_from", "recorded_from",
+  "max_step_visits", "generated_from", "recorded_from",
 ] as const;
 
 /**
@@ -68,8 +69,8 @@ export const DEVICE_KEYS = [
  * 两种步型互斥的键在加载期就报错，不会"写了没用"。
  */
 export const STEP_KEYS = [
-  // 共同
-  "role", "desc", "signal", "slots", "retries", "id",
+  // 共同（`id`/`next` 是两种步型共用的走向声明：P4）
+  "role", "desc", "signal", "slots", "retries", "id", "next",
   // 浏览器步
   "start_url", "target_hint", "target_hints", "when", "commands",
   // 工具步
@@ -85,6 +86,10 @@ export interface ExpandedStep {
   kind: "browser" | "tool";
   desc: string;
   role: string | null;
+  /** 步名字（P4：`next` 的落点；此前是死字段）。未声明就是 `null`。 */
+  id: string | null;
+  /** P4 声明式后继：有序候选步 id（无可走就自然顺序）。 */
+  next: string[];
   /** 浏览器步：交给唯一执行器的子目标 */
   subgoal?: Subgoal;
   /** 工具步：命令行动作腿的调用参数（signal 是进程观察面的信号） */
@@ -112,6 +117,11 @@ export interface AppPack {
   goal: string;
   model?: string;
   max_subgoals?: number;
+  /**
+   * P4：`next` 边的**路径上界**——同一个步 id 在一次运行里最多进入几次（默认 3）。
+   * 环不会挂死：到顶就是结构化停因（`next_cycle`），点名是哪一步、走了几次。
+   */
+  max_step_visits?: number;
   hosts?: string[];
   slots?: Record<string, unknown>;
   required_slots?: string[];
@@ -250,6 +260,11 @@ export interface ExpandedPack {
   steps: ExpandedStep[];
   /** 只含浏览器步的冻结计划（交给 `runPlan` / `runSubgoalWithRetries` 的执行单元） */
   plan: TaskPlan;
+  /**
+   * 结束状态断言，**已完成槽位替换**：`{checkin}` 与 journey 里的 `{checkin}` 是同一件事，
+   * 展开期一次替换完，运行期不再各处理一遍。
+   */
+  invariants: AppInvariant[];
   slots: Record<string, unknown>;
   /** plan 里用到的角色（按出现顺序去重）——角色覆盖率就是一个数字。 */
   rolesUsed: string[];
@@ -298,9 +313,11 @@ export function expandPack(pack: AppPack, overrides: Record<string, unknown> = {
   pack.journey.forEach((entry, i) => {
     const { merged, role } = expandStep(entry, roles, bag, subProblems, i);
     if (role !== null) used.push(role);
+    const stepId = merged["id"] === undefined || merged["id"] === null ? null : String(merged["id"]);
+    const stepNext = Array.isArray(merged["next"]) ? (merged["next"] as unknown[]).map((x) => String(x)) : [];
     if (stepKind(merged) === "tool") {
       steps.push({
-        index: i, kind: "tool", desc: String(merged["desc"]), role,
+        index: i, kind: "tool", desc: String(merged["desc"]), role, id: stepId, next: stepNext,
         tool: {
           source: String(merged["source"]),
           args: ((merged["args"] as unknown[]) ?? []).map((x) => String(x)),
@@ -314,14 +331,20 @@ export function expandPack(pack: AppPack, overrides: Record<string, unknown> = {
       });
     } else {
       browserSubgoals.push(merged);
-      steps.push({ index: i, kind: "browser", desc: String(merged["desc"]), role, subgoal: merged as Subgoal });
+      steps.push({
+        index: i, kind: "browser", desc: String(merged["desc"]), role, id: stepId, next: stepNext,
+        subgoal: merged as Subgoal,
+      });
     }
   });
   if (subProblems.length) {
     throw new Error(`app pack ${pack.id} is invalid:\n  - ${subProblems.join("\n  - ")}`);
   }
   const plan = new TaskPlan(pack.goal, browserSubgoals as unknown as Array<Partial<Subgoal>>, planPath, slots);
-  return { pack, steps, plan, slots, rolesUsed: [...new Set(used)] };
+  // 不变量与步骤同一套 `{slot}` 规则（未知占位符已在 `validatePack` 里红过了）。
+  const invariants = (pack.invariants ?? []).map(
+    (inv) => substitute(inv, bag, []) as AppInvariant);
+  return { pack, steps, plan, invariants, slots, rolesUsed: [...new Set(used)] };
 }
 
 /* ------------------------------------------------------------------ 校验 */
@@ -481,9 +504,53 @@ export function validatePack(pack: AppPack,
       }
     }
   });
-  // 占位符必须指向已声明的槽位（`required_slots` 或 `slots` 里给了值）
+  // P4 走向：步 id 必须唯一，`next` 的落点必须在**同一个旅程**里真的存在。
+  // 一条指向空气的边如果拖到运行期才发现，"分支"就变成了一步都不走的静默跳过——
+  // 与 hint 未命中不赌同一条纪律：加载期红。
+  {
+    const merged: Array<Record<string, unknown>> = pack.journey.map((e, i) => {
+      if (!isDict(e)) return { __bad: i } as Record<string, unknown>;
+      const rn = e["role"];
+      const tpl = rn !== undefined && isDict(roles[String(rn)]) ? roles[String(rn)]! : {};
+      return { ...tpl, ...e };
+    });
+    const idAt = new Map<string, number>();
+    merged.forEach((m, i) => {
+      const id = m["id"];
+      if (id === undefined || id === null) return;
+      if (typeof id !== "string" || !id.trim()) {
+        p.push(`journey[${i}].id must be a non-empty string`);
+        return;
+      }
+      if (idAt.has(id)) p.push(`journey[${i}]: duplicate step id '${id}' (next edges need one name per step)`);
+      else idAt.set(id, i);
+    });
+    merged.forEach((m, i) => {
+      const next = m["next"];
+      if (next === undefined || next === null) return;
+      if (!Array.isArray(next) || next.length === 0
+          || !next.every((x) => typeof x === "string" && x.trim() !== "")) {
+        p.push(`journey[${i}].next must be a non-empty list of step ids`);
+        return;
+      }
+      for (const t of next) {
+        if (!idAt.has(String(t))) {
+          p.push(`journey[${i}].next: ${JSON.stringify(String(t))} names no step in this journey`
+            + ` (declared ids: ${[...idAt.keys()].join(", ") || "none"})`);
+        }
+      }
+    });
+    if (pack.max_step_visits !== undefined
+        && (typeof pack.max_step_visits !== "number" || !Number.isInteger(pack.max_step_visits)
+            || pack.max_step_visits < 1)) {
+      p.push("max_step_visits must be a positive integer (the per-path visit bound of `next` edges)");
+    }
+  }
+  // 占位符必须指向已声明的槽位（`required_slots` 或 `slots` 里给了值）。
+  // `invariants` 与 journey 同规则：结束状态断言里写 `{checkin}` 不替换的话，
+  // 那条断言会拿字面量去比对一个永远不会相等的值——**静默假红**，比不写更糟。
   const seen: string[] = [];
-  substitute({ roles: pack.roles ?? {}, journey: pack.journey },
+  substitute({ roles: pack.roles ?? {}, journey: pack.journey, invariants: pack.invariants ?? [] },
     { ...RUNTIME_PLACEHOLDERS, ...slots }, seen);
   for (const s of [...new Set(seen)]) p.push(s);
   // 数据腿：引用的数据源必须真的存在（发现制，不维护清单）
@@ -587,7 +654,24 @@ export function validatePack(pack: AppPack,
         const plan = new TaskPlan(pack.goal, browserSteps as unknown as Array<Partial<Subgoal>>,
           ":memory:", slots);
         const rules = new PlanningRules(pack.max_subgoals ?? 12, true, false);
-        p.push(...rules.problems(plan).map((x) => `plan: ${x}`));
+        // `next` 的落点按**整个旅程**校验（工具步不进计划，但可以是边的落点）。
+        const journeyIds = new Set<string>();
+        pack.journey.forEach((e, i) => {
+          if (!isDict(e)) return;
+          const rn = e["role"];
+          const tpl = rn !== undefined && isDict(roles[String(rn)]) ? roles[String(rn)]! : {};
+          const id = { ...tpl, ...e }["id"];
+          if (typeof id === "string" && id.trim() !== "") journeyIds.add(id);
+        });
+        // 已知的数据袋键 = 包声明的槽位 + CLI 覆盖 + **目标文本里的 `k=v`** + 角色/步自带的 slots。
+        // 四样缺一样都会把合法的绑定判成"未声明"（假红），所以在这里一次算全。
+        const slotKeys = new Set<string>([
+          ...Object.keys(slots),
+          ...Object.keys(extractSlots(pack.goal ?? "")),
+          ...pack.journey.flatMap((e) => (isDict(e) && isDict(e["slots"]) ? Object.keys(e["slots"]) : [])),
+          ...Object.values(roles).flatMap((r) => (isDict(r) && isDict(r["slots"]) ? Object.keys(r["slots"]) : [])),
+        ]);
+        p.push(...rules.problems(plan, { extraIds: journeyIds, slotKeys }).map((x) => `plan: ${x}`));
       }
     } catch (e) {
       p.push(`plan: ${e instanceof Error ? e.message : String(e)}`);

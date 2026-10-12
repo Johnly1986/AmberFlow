@@ -96,6 +96,7 @@ import { checkSignal, type SignalSpec } from "./signals.ts";
 import { LayaNotConfiguredError, type LayaRuntime } from "./model.ts";
 import { induceHint } from "./hint-memory.ts";
 import { instantiateSpace, resolveCommandValue, type CommandDecl } from "./actions.ts";
+import { optionCandidatesFrom, type OptionCandidate } from "./bindings.ts";
 
 /* ------------------------------------------------------------------ shapes */
 
@@ -1181,15 +1182,49 @@ export class BrowserMiddleware {
   }
 
   /**
+   * P3 数据槽层：**当次观察**一个 `<select>` 的候选（机器值 + 人读标签）。
+   *
+   * 候选只在绑定那一刻读——"此刻有什么"是观察，不是声明（§6.1 两半分界）。
+   * 读不到（不是 select、已从页面消失、跨域 frame）就返回空集：调用方的
+   * `resolveBinding` 会把它变成一条诚实的 `needs_value`，而不是拿别的东西顶上。
+   */
+  async _optionCandidates(page: AnyPage, el: Elem): Promise<OptionCandidate[]> {
+    const loc = await this._locatorFor(page, el);
+    if (loc === null) return [];
+    try {
+      const raw = await firstLoc(loc).evaluate((node: unknown) => {
+        const options = (node as { options?: ArrayLike<{ value?: unknown; textContent?: unknown }> }).options;
+        if (!options) return [];
+        return Array.from(options).map((o) => ({
+          value: String(o.value ?? ""),
+          label: String(o.textContent ?? "").trim(),
+        }));
+      });
+      return optionCandidatesFrom(raw);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * The action model: click / fill / select — with submit-type inputs clicked
    * (never filled: their `value` is the visible label) and `select` trying the
    * human label first with a SHORT timeout (a slot usually carries the machine
    * value, so the label probe is expected to miss and Playwright's 30 s default
    * would charge that miss to every select fill).
+   *
+   * P3 exception: when the value came from a **declared** `{from:"option"}` binding it was already
+   * resolved against this page's option list, so the fill selects by VALUE directly (`bound.byValue`)
+   * — the label probe would only cost 1.5 s and could select a different option whose label happens
+   * to equal the machine value. Every path without a declared binding keeps the order above.
    */
   async _executeElement(
     page: AnyPage, el: Elem, slots: Record<string, unknown>,
-    bound?: { value: unknown } | null,
+    /**
+     * P2/P3：命令闭集带来的**具名绑定**。`byValue` = 这个值是从当次观察到的候选里按值解出来的
+     * （`{from:"option"}`），所以 `<select>` 直接按值选——见下面 select 分支的注释。
+     */
+    bound?: { value: unknown; byValue?: boolean } | null,
   ): Promise<[string, unknown]> {
     const tag = el.tag;
     if (tag === "input" || tag === "textarea" || tag === "select") {
@@ -1209,10 +1244,16 @@ export class BrowserMiddleware {
       // the whole plan; found by the live zh.wikipedia case.
       try {
         if (tag === "select") {
-          try {
-            await firstLoc(loc).selectOption({ label: String(val) }, { timeout: 1500 });
-          } catch {
+          if (bound?.byValue) {
+            // 声明式绑定已经**按值**命中过当次观察到的候选：直接按值选（不付 label 探测，
+            // 也不会选中"标签恰好等于这个机器值"的另一个 option）。
             await firstLoc(loc).selectOption({ value: String(val) }, { timeout: 5000 });
+          } else {
+            try {
+              await firstLoc(loc).selectOption({ label: String(val) }, { timeout: 1500 });
+            } catch {
+              await firstLoc(loc).selectOption({ value: String(val) }, { timeout: 5000 });
+            }
           }
         } else {
           await firstLoc(loc).fill(String(val));
@@ -1565,11 +1606,25 @@ export class BrowserMiddleware {
         // declared binding is a STRUCTURED `needs_value` stop, never a guess (红线②):
         // the value's only source is the plan's data bag, named by `value.key`.
         let commandValue: unknown;
+        let commandByValue = false;
         let commandBindMissing: string | null = null;
         if (commandMode && cmdPick && (cmdPick.cmd.op === "fill" || cmdPick.cmd.op === "select")) {
-          const rv = resolveCommandValue(cmdPick.cmd, slots);
+          // P3: an `option` source is an OBSERVATION at bind time — read this page's
+          // candidate list now (never assumed, never remembered from another run).
+          let boundOptions: OptionCandidate[] | undefined;
+          if (cmdPick.cmd.value?.from === "option") {
+            const boundEl = elems[cmdPick.ref];
+            boundOptions = boundEl ? await this._optionCandidates(pg, boundEl) : [];
+          }
+          const rv = resolveCommandValue(cmdPick.cmd, slots, { options: boundOptions });
           if (!rv.ok) commandBindMissing = rv.reason;
-          else commandValue = rv.value;
+          else {
+            commandValue = rv.value;
+            // 声明式候选是按**值**解出来的，执行也按值选：label 优先的探测既白付 1.5 s，
+            // 又可能选中"标签恰好等于我们要的机器值"的另一个 option。今天的启发式路径
+            // （没有绑定）一字不动，仍走 label→value 两候选回退。
+            commandByValue = cmdPick.cmd.value?.from === "option";
+          }
         }
         let ruleRef: string | null = null;
         if (commandMode && cmdPick) {
@@ -1883,7 +1938,7 @@ export class BrowserMiddleware {
             [how, arg] = await this._clickOnly(pg, el);
           } else {
             [how, arg] = await this._executeElement(pg, el, slots,
-              commandMode ? { value: commandValue } : null);
+              commandMode ? { value: commandValue, byValue: commandByValue } : null);
           }
         }
         const executed = how === "clicked" || how === "filled";

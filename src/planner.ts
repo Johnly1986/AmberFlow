@@ -361,6 +361,21 @@ export async function runPlan(
           maxReplans = 2, verbose = true } = opts;
   const sessionFactory = opts.sessionFactory ?? (() => browserSession());
 
+  // P4 声明式后继只在**应用旅程**这一层落地（`app-runner` 的走步循环按步 id 走，
+  // 上界与环检测由 `plan.createPathWalk` 提供）。计划级 runner 用的是 resume 队列
+  // （"下一个未完成的子目标"），与"按声明的边往哪走"是两套语义——**静默忽略一条边**
+  // 是最坏的选项（作者以为写了分支，实际什么都没发生），所以这里响亮拒绝、零副作用。
+  const withEdges = plan.subgoals.filter((s) => (s.next ?? []).length > 0);
+  if (withEdges.length) {
+    throw new Error(
+      `runPlan cannot honour \`next\` edges (${withEdges.length} subgoal(s) declare them: `
+      + `${withEdges.map((s) => JSON.stringify(String(s.id ?? s.desc))).join(", ")}). `
+      + "Declarative successors are driven by the app journey runner "
+      + "(`npm run apps -- --app <id>`, apps/<id>/pack.json); move the branch there or drop the edges "
+      + "— a silently ignored edge would look like a plan that ran.",
+    );
+  }
+
   plan.save();
   const traces: TraceStep[] = [];
   let replans = 0;
@@ -409,9 +424,19 @@ export async function runPlan(
         for (const s of amended.subgoals ?? []) {
           if (known.has(s.desc)) continue;       // never re-queue known work
           known.add(s.desc);
+          // 入口那道守卫只看**初始**计划；一次 replan 补丁是运行期新增的结构，必须同样过闸。
+          // 这里是"响亮地不采纳"而不是"静默忽略"：与 replan 异常同一条纪律——吞掉的错误
+          // 与"没有补充"长得一模一样。
+          const edges = (s.next ?? []).filter((x) => !!x);
+          if (edges.length) {
+            console.log(`    -> replan amendment ${JSON.stringify(s.id ?? s.desc)} declares \`next\` `
+              + `(${edges.join(", ")}), which runPlan cannot honour — the edges are dropped, `
+              + `the subgoal is kept`);
+          }
           plan.insert(plan.subgoals.length, s.desc, s.signal, s.start_url ?? null,
             s.target_hint ?? null, s.target_hints ?? null, s.slots ?? null,
-            s.when ?? null, s.retries ?? null, s.commands ?? null);  // when/retries/commands survive the amendment
+            s.when ?? null, s.retries ?? null, s.commands ?? null,
+            { id: s.id ?? null, next: edges.length ? null : (s.next ?? null) });
         }
         const added = plan.subgoals.length - before;
         replans += 1;

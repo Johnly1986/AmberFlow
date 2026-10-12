@@ -42,6 +42,7 @@ import { checkToolSignal, type ToolSignal } from "./tool-signals.ts";
 import { captureStateView } from "./signal-induction.ts";
 import type { StateView } from "./signals.ts";
 import { expandPack, listPacks, loadPack, type AppPack, type ExpandedStep } from "./app-pack.ts";
+import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "./plan.ts";
 
 /** 进程内运行序号：保证同一毫秒内连续两次运行也不会撞上同一个 `{run_id}`。 */
 let RUN_SEQ = 0;
@@ -257,6 +258,22 @@ export interface AppRunResult {
   sources: AppSourceResult[];
   ok: boolean;
   secs: number;
+  /**
+   * P4 走向的显式停因：`next` 边把同一个步 id 走进了环，路径上界到顶就停在这里——
+   * 结构化的 code（不是散文），点名哪一步、进入了几次（§7-P4 的验收台：不是挂死、不是栈溢出）。
+   */
+  path_stop?: { code: "next_cycle"; step_id: string; visits: number; detail: string };
+  /**
+   * P4 走向的实数：每个**有名字**的步被进入了几次（`next` 回边会 >1）。
+   * `completed` 数的是步数（计划形状），这里数的是**走法**——一次旅程走回来过，
+   * 报告必须说得出这件事，否则回边是隐形的。
+   */
+  path_visits?: Record<string, number>;
+  /**
+   * P4 走向的另一半事实：被声明式边**跨过去**的步（记成 `skipped`，这里点名是谁跨的）。
+   * 与"`when` 不成立所以跳过"分开报——两者的原因不同，报告不该把它们混成一句话。
+   */
+  path_crossed?: string[];
   /** 模型层级（`on` / `off(missing)` / `off(rules-only)` / `off(scripted)`；未提供则缺字段）。 */
   model_status?: string;
   /** 决策来源汇总（见 `AppDecisions`；LAYA_VALUE_PLAN P1 的"出场率/挽回/缓存"三组数）。 */
@@ -482,29 +499,91 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const invariantResults: AppInvariantResult[] = [];
   /** 每一步的判定方式（trace 原样收集）——P1 的出场率/挽回数从这儿数出来，不另造机制。 */
   const decisionSteps: TraceStep[] = [];
-  let browserI = 0;
+  // 浏览器步在 `plan.subgoals` 里的下标：`next` 允许跳步，所以不能再靠一个自增计数器
+  // （那是"位置即身份"，而边是按**名字**声明的）。
+  const browserIndexOf: number[] = [];
+  {
+    let k = 0;
+    for (const s of expanded.steps) browserIndexOf.push(s.kind === "browser" ? k++ : -1);
+  }
+  // P4 走向：一份实现（`plan.createPathWalk`），带**路径上界**——`maxSteps=8` 是每步的预算，
+  // 不是每一条路径的（X4）。环到顶就是显式停因，不是挂死、不是栈溢出。
+  const walk = createPathWalk(expanded.steps, pack.max_step_visits ?? DEFAULT_MAX_STEP_VISITS);
+  const pathCrossed: string[] = [];
+  let pathStopOut: AppRunResult["path_stop"];
   try {
-    for (const step of expanded.steps) {
+    let i = 0;
+    while (i < expanded.steps.length) {
+      const step = expanded.steps[i]!;
+      // 进入这一步：同一个步 id 走太多遍 = 声明的 `next` 边成了环。
+      const over = walk.enter(i);
+      if (over !== null) {
+        pathStopOut = {
+          code: "next_cycle",
+          step_id: over.id,
+          visits: over.visits,
+          detail: `step ${JSON.stringify(over.id)} was entered ${over.visits} time(s) in one run`
+            + ` (per-path bound max_step_visits=${pack.max_step_visits ?? DEFAULT_MAX_STEP_VISITS})`
+            + ` — a declared \`next\` edge forms a cycle; stopping instead of looping forever`,
+        };
+        const sg = browserIndexOf[i]! >= 0 ? plan.subgoals[browserIndexOf[i]!] : undefined;
+        if (sg) { sg.status = "blocked"; sg.obstacle = pathStopOut.detail; plan.save(); }
+        if (verbose) console.log(`  [journey] ${pathStopOut.detail}`);
+        break;
+      }
       if (step.kind === "tool") {
         toolSteps.push(await runToolStep(step, opts));
-        continue;
+      } else {
+        const sg = plan.subgoals[browserIndexOf[i]!]!;
+        const shell = await getShell();
+        const { rep, attempt, steps } = await runSubgoalWithRetries(
+          mw as never, sg, plan, sg.start_url ?? "", shell.page, shell.pw, verbose);
+        decisionSteps.push(...steps);
+        sg.status = rep.done ? (rep.skipped ? "skipped" : "done") : "blocked";
+        sg.attempts = attempt;
+        sg.obstacle = rep.done ? null : rep.stop_reason;
+        // P0-2：把结构化停因也落到 checkpoint（旧字段一个不动，报告/套件继续念 `obstacle`）。
+        if (!rep.done && rep.stop_code) (sg as Record<string, unknown>).stop_code = rep.stop_code;
+        plan.save();
       }
-      const sg = plan.subgoals[browserI++]!;
-      const shell = await getShell();
-      const { rep, attempt, steps } = await runSubgoalWithRetries(
-        mw as never, sg, plan, sg.start_url ?? "", shell.page, shell.pw, verbose);
-      decisionSteps.push(...steps);
-      sg.status = rep.done ? (rep.skipped ? "skipped" : "done") : "blocked";
-      sg.attempts = attempt;
-      sg.obstacle = rep.done ? null : rep.stop_reason;
-      // P0-2：把结构化停因也落到 checkpoint（旧字段一个不动，报告/套件继续念 `obstacle`）。
-      if (!rep.done && rep.stop_code) (sg as Record<string, unknown>).stop_code = rep.stop_code;
-      plan.save();
+      // 声明式后继：按序取第一个"此刻适用"的候选；都没声明/都不适用 ⇒ 自然顺序。
+      // 适用性问的是该步**自己的 `when`**（"这一步适不适用"），问在当次页面上——
+      // 这一步没有模型参与，走向由声明与页面证据决定（红线①）。
+      const from = i;
+      i = await walk.after(i, async (j) => {
+        const cand = expanded.steps[j]!;
+        if (cand.kind !== "browser") return true;            // 工具步没有 `when`：声明了就适用
+        const sg = plan.subgoals[browserIndexOf[j]!];
+        const when = sg?.when;
+        if (when === undefined || when === null) return true;
+        if (holder.session === null) {
+          // 还没有页面可问（旅程第一步是工具步、候选却在浏览器步上）：此刻无法成立，
+          // 如实当作"不适用"，继续看下一个候选——不为了让分支走通去偷偷开一个浏览器。
+          if (verbose) console.log(`  [journey] next candidate ${JSON.stringify(cand.id ?? j)} not evaluated (no page yet)`);
+          return false;
+        }
+        return await checkSignal(holder.session.page as never, when);
+      });
+      // 被声明式边**跨过去**的步：这条边就是作者对"这条路径上它不适用"的声明，
+      // 所以记成 `skipped`（不是留在 pending——那会让任何前向分支都红）。
+      // 记的是"跨过"这件事本身，报告里单列（`path_crossed`），不与 `when` 自然的跳过混为一谈。
+      if (i > from + 1) {
+        for (let k = from + 1; k < i; k++) {
+          const crossed = expanded.steps[k]!;
+          if (crossed.kind === "browser") {
+            const sg = plan.subgoals[browserIndexOf[k]!]!;
+            if (sg.status === "pending") { sg.status = "skipped"; plan.save(); }
+          }
+          pathCrossed.push(`${crossed.id ?? `#${crossed.index}`} (crossed by \`next\` from ${expanded.steps[from]!.id ?? `#${expanded.steps[from]!.index}`})`);
+          if (verbose) console.log(`  [journey] step ${crossed.id ?? `#${crossed.index}`} crossed by a declared next edge -> skipped`);
+        }
+      }
     }
     // ---- 验收：结束状态上的不变量（同一会话、同一 cookie/页面） -------------
     // 显式再标注一次类型：`session` 是在 `getShell` 闭包里赋值的，控制流分析看不到。
     const live = holder.session;
-    for (const inv of pack.invariants ?? []) {
+    // `expanded.invariants`（不是 pack.invariants）：展开期已做槽位替换，与 journey 同一套规则。
+    for (const inv of expanded.invariants) {
       const held = live === null ? false : await checkSignal(live.page as never, inv.signal);
       invariantResults.push({ id: inv.id, desc: inv.desc ?? inv.id, held });
       if (verbose) console.log(`  invariant ${inv.id}: ${held ? "held" : "VIOLATED"}`);
@@ -527,9 +606,12 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   }));
   const browserOk = subgoals.every((s) => s.status === "done" || s.status === "skipped");
   const toolsOk = toolSteps.every((t) => t.done);
-  const ok = browserOk && toolsOk && invariantResults.every((i) => i.held);
+  // 路径上界到顶 = 这次旅程没有走完（即使被环卷进去的那一步恰好是工具步，也不能算绿）。
+  const ok = browserOk && toolsOk && invariantResults.every((i) => i.held) && pathStopOut === undefined;
+  // 数的是**声明出来的步**，不是"跑了几趟"：`next` 回边会让同一个工具步跑很多遍，
+  // 那样 `completed` 会写出 `100/2` 这种读不通的数（真要读趟数看 `path_visits`）。
   const doneCount = subgoals.filter((s) => s.status === "done" || s.status === "skipped").length
-    + toolSteps.filter((t) => t.done).length;
+    + new Set(toolSteps.filter((t) => t.done).map((t) => t.index)).size;
   const stats = opts.runtimeStats ? opts.runtimeStats() : null;
   return {
     app: pack.id, label: pack.label, goal: pack.goal,
@@ -537,6 +619,11 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     roles_used: expanded.rolesUsed, slots: expanded.slots,
     completed: `${doneCount}/${expanded.steps.length}`,
     subgoals, tool_steps: toolSteps, invariants: invariantResults,
+    // 只在**真的走回来过**时才写这个字段：声明了 id 但没走边的包，结果 JSON 与今天一模一样
+    // （缺省等价的纪律：新字段不该只是"多一行没人看的数"）。
+    ...(Object.values(walk.visits()).some((n) => n > 1) ? { path_visits: walk.visits() } : {}),
+    ...(pathCrossed.length ? { path_crossed: pathCrossed } : {}),
+    ...(pathStopOut ? { path_stop: pathStopOut } : {}),
     ...(endState ? { end_state: endState } : {}),
     ...(opts.modelStatus !== undefined ? { model_status: opts.modelStatus } : {}),
     decisions: summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0),
@@ -556,6 +643,16 @@ export function appReportMarkdown(r: AppRunResult): string {
       ? [`- 模型层级：\`${r.model_status}\`（on=真 ONNX 在位；off(missing)=缺产物，走的是规则模式）`] : []),
     `- 角色：${r.roles_used.map((x) => `\`${x}\``).join(", ") || "（未用角色模板）"}`,
     `- 槽位（值只来自计划）：${JSON.stringify(r.slots)}`,
+    ...(r.path_stop !== undefined
+      ? [`- **走向停因**：\`${r.path_stop.code}\` ｜ 步 \`${r.path_stop.step_id}\` 被进入 ${r.path_stop.visits} 次：${r.path_stop.detail}`]
+      : []),
+    ...(r.path_visits !== undefined && Object.values(r.path_visits).some((n) => n > 1)
+      ? ["- **走向**（`next` 边真的走回来了）："
+        + Object.entries(r.path_visits).map(([k, n]) => `\`${k}\`×${n}`).join("、")]
+      : []),
+    ...(r.path_crossed !== undefined && r.path_crossed.length
+      ? ["- **跨过的步**（声明式边跨过去，记成 skipped）：" + r.path_crossed.join("、")]
+      : []),
   ];
   if (r.sources.length) {
     L.push("", "## 数据腿", "", "| 数据源 | 行数 | counts | selects | 工具版本 |", "|---|---|---|---|---|");

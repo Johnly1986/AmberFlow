@@ -1,0 +1,49 @@
+{
+  "spec_version": 1,
+  "id": "cold-search-next",
+  "label": "P4 声明式后继示范：冷启动搜索用声明的回边再搜一遍（不是 retries）",
+  "goal": "在冷启动示例站搜索关键词：第一次命中冷缓存、结果为空，就整步重来；拿到结果后记录下来",
+  "hosts": [],
+  "slots": {
+    "q": "琥珀"
+  },
+  "required_slots": [
+    "q"
+  ],
+  "max_step_visits": 4,
+  "journey": [
+    {
+      "id": "search",
+      "desc": "搜索 {q}（结果还没到位就再搜一遍）",
+      "start_url": "testpages/cold-search.html",
+      "target_hints": ["[data-test=q]", "[data-test=search]"],
+      "slots": { "q": "{q}" },
+      "when": { "not": { "css_text_contains": ["[data-test=results]", "结果 A"] } },
+      "next": ["search", "record"],
+      "signal": { "css_text_contains": ["[data-test=status]", "搜索完成"] }
+    },
+    {
+      "id": "record",
+      "desc": "记录这一次搜索的结果",
+      "start_url": "testpages/cold-search.html",
+      "target_hint": "[data-test=record]",
+      "when": { "css_text_contains": ["[data-test=results]", "结果 A"] },
+      "signal": { "css_text_equals": ["[data-test=recorded]", "已记录 2 条"] }
+    }
+  ],
+  "invariants": [
+    {
+      "id": "results-recorded",
+      "desc": "结束状态下结果真的被记下来了（不是停在空列表上）",
+      "signal": { "css_text_equals": ["[data-test=recorded]", "已记录 2 条"] }
+    }
+  ],
+  "notes": [
+    "P4（`next` 声明式后继）的示范包：`search` 声明 `next: [\"search\", \"record\"]`——按序取第一个『此刻适用』的候选，适用性问的就是该步自己的 `when`（与『这一步适不适用』同一个问题，同一套信号语言）。",
+    "为什么不是 `retries`：那一次搜索**成功了**（信号成立），只是结果还没到位。`retries` 只重跑失败的步，表达不了『成功了但后置条件不满足，回去再来一遍』——回边能。",
+    "夹具 testpages/cold-search.html 的站点状态活在 sessionStorage 里：每个子目标都会重新 goto，所以页面自己记不住『我搜过几次』；这正是一条声明式回边要解决的问题。",
+    "环有上界：`max_step_visits: 4`（缺省 3）。走到上界就是结构化停因 `path_stop.code = \"next_cycle\"`，点名哪一步、进了几次——不挂死、不栈溢出（负例钉在 tests/path-next.test.ts）。",
+    "删 `next` 即红：没有回边时第一次（冷）搜索完成后自然走到 `record`，那里的 `when` 不成立 → 整步 skipped → `results-recorded` 不变量不成立，旅程红——能力是真的在承重。",
+    "验收：`npm run apps -- --app cold-search-next --no-model` → 2/2 步（search 走 2 遍）、1/1 不变量。"
+  ]
+}

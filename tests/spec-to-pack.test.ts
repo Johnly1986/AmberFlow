@@ -12,8 +12,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadPack, validatePack, type AppPack } from "../src/app-pack.ts";
 import { discoverSpecs, emitPlan } from "../src/transfer-task.ts";
 import {
-  checkAgainstFlow, flowFor, generatePack, generatedApps, planSha, serializePack, specPathOf,
-  structureFromSeed, type Flow,
+  checkAgainstFlow, flowFor, generatePack, generatedApps, inexpressibleKeys, planSha, serializePack,
+  specPathOf, structureFromSeed, type Flow,
 } from "../tools/spec-to-pack.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
@@ -159,6 +159,30 @@ describe("spec → pack：generated_from 在加载期就被校验（坏声明不
     const bad3 = seed();
     (bad3.generated_from as unknown as Record<string, unknown>)["unknown"] = 1;
     expect(validatePack(bad3).join(" | ")).toMatch(/generated_from\.unknown: unknown key/);
+  });
+});
+
+describe("生成器表达不了的键必须被点名（独立复核 D1：--write 会静默丢掉它们）", () => {
+  it("手改一个生成包加了 P4 的边/上界 ⇒ --check 变红（不是静默假绿）", async () => {
+    const a = generatedApps().find((x) => x.id === "transfer-skybook")!;
+    const flow = await flowFor(a.ref);
+    expect(checkAgainstFlow(a, flow)).toEqual([]);                 // 干净时全绿
+    const tampered = JSON.parse(JSON.stringify(a.pack)) as AppPack;
+    (tampered.journey[0] as Record<string, unknown>)["id"] = "step-one";
+    (tampered.journey[0] as Record<string, unknown>)["next"] = ["step-two"];
+    (tampered as unknown as Record<string, unknown>)["max_step_visits"] = 7;
+    const joined = checkAgainstFlow({ id: a.id, pack: tampered }, flow).join(" | ");
+    expect(joined).toMatch(/生成器表达不了.*journey\[0\]\.next/);
+    expect(joined).toMatch(/journey\[0\]\.id/);
+    expect(joined).toMatch(/max_step_visits/);
+  });
+
+  it("inexpressibleKeys 是数据驱动的：生成器新表达的键自动不再算丢失", () => {
+    const seed = { spec_version: 1, id: "x", label: "x", goal: "g", hosts: [], journey: [], notes: [] } as unknown as AppPack;
+    const fresh = { spec_version: 1, id: "x", label: "x", goal: "g", hosts: [], journey: [], notes: [] };
+    expect(inexpressibleKeys(seed, fresh)).toEqual([]);
+    (seed as unknown as Record<string, unknown>)["whatever_new"] = 1;
+    expect(inexpressibleKeys(seed, fresh)).toEqual(["whatever_new"]);
   });
 });
 

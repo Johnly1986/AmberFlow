@@ -28,6 +28,9 @@ import { appDirs, expandPack, loadPack, validatePack, type AppPack } from "../sr
 import { FROZEN_TODAY } from "./frozen-today.ts";
 import { discoverSpecs, emitPlan } from "../src/transfer-task.ts";
 
+const isDict = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
 export const REPO = path.resolve(import.meta.dirname, "..");
 
 /**
@@ -367,6 +370,40 @@ export function generatedApps(): Array<{ id: string; dir: string; ref: FlowRef; 
   return out;
 }
 
+/**
+ * 生成器**表达不了**的键：`--write` 会静默丢掉它们，所以 `--check` 必须点名。
+ *
+ * 起因（独立复核 D1）：`next` / `id` / `max_step_visits`（P4）、`commands`（P2）、`device`
+ * 这些是**应用配置的表达面**，spec 一侧没有对应物；手改一个生成包加了边，`--check` 却照旧
+ * 全绿、`--write` 一抹就没了——那正是"静默假绿"。做法是数据驱动的（比较种子包与刚生成的包
+ * 的键集合），不维护第二张键清单：清单会漂，比较不会。
+ */
+export function inexpressibleKeys(seed: AppPack, freshPack: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const skipTop = new Set(["generated_from", "_path", "probe"]);
+  const freshTop = new Set(Object.keys(freshPack));
+  for (const k of Object.keys(seed as unknown as Record<string, unknown>)) {
+    if (!freshTop.has(k) && !skipTop.has(k)) out.push(k);
+  }
+  const freshStepKeys = new Set<string>();
+  const collect = (steps: Array<Record<string, unknown>> | undefined): void => {
+    for (const s of steps ?? []) for (const k of Object.keys(s)) if (k !== "role") freshStepKeys.add(k);
+  };
+  collect(freshPack["journey"] as Array<Record<string, unknown>> | undefined);
+  const freshRoles = (freshPack["roles"] ?? {}) as Record<string, Record<string, unknown>>;
+  for (const r of Object.values(freshRoles)) collect([r]);
+  seed.journey.forEach((entry, i) => {
+    if (!isDict(entry)) return;
+    const rn = entry["role"];
+    const tpl = rn !== undefined && isDict(seed.roles?.[String(rn)]) ? seed.roles[String(rn)]! : {};
+    for (const k of Object.keys({ ...tpl, ...entry })) {
+      if (k === "role" || freshStepKeys.has(k)) continue;
+      out.push(`journey[${i}].${k}`);
+    }
+  });
+  return [...new Set(out)];
+}
+
 /** `--check`：包与 spec 两侧都不许漂移。返回每条应用的问题清单（空 = 通过）。 */
 export function checkAgainstFlow(entry: { id: string; pack: AppPack }, flow: Flow): string[] {
   const problems: string[] = [];
@@ -374,6 +411,11 @@ export function checkAgainstFlow(entry: { id: string; pack: AppPack }, flow: Flo
   // "比 JSON"是不够的：一个引用了不存在角色的 journey 也可以逐字节等于另一个坏 journey。
   // 所以这里**真加载 + 真展开**，再把展开后的计划逐字段与 emitPlan 的结果比。
   problems.push(...validatePack(entry.pack));
+  const dropped = inexpressibleKeys(entry.pack, fresh.pack as unknown as Record<string, unknown>);
+  if (dropped.length) {
+    problems.push(`这些键生成器表达不了，\`--write\` 会把它们丢掉：${dropped.join(", ")}`
+      + "——要么把判断移回 spec，要么不要让这个包由生成器托管");
+  }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `spec-to-pack-check-${entry.id}-`));
   try {
     const mine = expandPack(entry.pack, {}, path.join(dir, "mine.json")).plan;
@@ -472,6 +514,17 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     for (const t of targets) {
       const flow = await flowFor(t.ref);
       const gen = generateFromFlow(t.id, flow, t.keep);
+      // 响亮拒绝，不静默丢键：一个手改过的生成包如果带了 spec 表达不了的东西（`next` 边、
+      // `commands`、`max_step_visits`…），写回就等于把它们删掉而不说一句话。
+      if (t.keep) {
+        const dropped = inexpressibleKeys(t.keep, gen.pack as unknown as Record<string, unknown>);
+        if (dropped.length) {
+          console.error(`拒绝写回 apps/${t.id}/pack.json：这些键生成器表达不了，写回等于删掉它们——`
+            + `${dropped.join(", ")}。要么把判断移回 ${flow.label}，要么把这个包从生成器里摘出来`
+            + `（去掉 generated_from）。什么都没写。`);
+          return 1;
+        }
+      }
       const dir = path.join(REPO, "apps", t.id);
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, "pack.json"), serializePack(gen.pack));
