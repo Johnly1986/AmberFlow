@@ -92,7 +92,7 @@
 <text x="1191" y="391" class="s">generated_from / recorded_from</text>
 <text x="1191" y="405" class="s">FROZEN_TODAY 钉住展开周</text>
 <text x="1191" y="419" class="s">未声明的 {slot} 即用法错误</text>
-<text x="58" y="438" class="lbl">新增一个应用 = 新目录；应用目录里的代码行数由 apps:matrix 变成 0 这个数字</text>
+<text x="58" y="438" class="lbl">新增一个应用 = 新目录；应用目录里的应用逻辑代码行数由 apps:matrix 计（0；bin/ 桩夹具 101 行另列，见 npm run metrics）</text>
 <rect x="40" y="460" width="1480" height="92" class="band"/>
 <text x="58" y="484" class="lay">③ 计划层</text>
 <rect x="175" y="492" width="330" height="50" class="bx"/>

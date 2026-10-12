@@ -210,6 +210,7 @@
 <text x="1097" y="1319" class="s">三件齐才算 on（单一出处）</text>
 <text x="1097" y="1333" class="s">doctor / 运行器 / 桥 共用</text>
 <text x="60" y="1374" class="foot">实测（真 ONNX，本机）：声明解决了 98.8% 的浏览器步；模型 top-1 25%、闸门内 precision 15% ⇒ 它是兜底与诊断，不是承重件（详见 ⑨）</text>
+<text x="60" y="1394" class="lbl">梯级账单：reobserve / escalate 在已验收语料上救回 0 次 ⇒ dead rung（口径与建议见 ARCHITECTURE_IMPROVEMENTS §5）</text>
 <text x="60" y="1370" class="sm">新增（P0）：配置类错误改为启动期预检、永不重试 —— 实测坏产物路径下数据腿与第一个工具步曾已执行，且同一配置错误被重试 2 次。</text>
 <path class="ln" d="M700,1382 V1418" marker-end="url(#arr)"/>
 <text x="714" y="1406" class="lbl">运行结果 = 可核对的证据</text>
@@ -278,7 +279,7 @@
 <path class="ln" d="M700,1952 V1988" marker-end="url(#arr)"/>
 <text x="714" y="1976" class="lbl">真 ONNX 实测：承重件不是模型</text>
 <rect x="40" y="1988" width="1480" height="196" class="band"/>
-<text x="58" y="2012" class="lay">⑨ 模型角色的修正（独立审查 docs/DECISION_MODEL_PURPOSE_REVIEW.md + 方案 docs/MODEL_ROLE_PLAN.md）</text>
+<text x="58" y="2012" class="lay">⑨ 模型角色的修正（审查 docs/DECISION_MODEL_PURPOSE_REVIEW.md + 方案 docs/MODEL_ROLE_PLAN.md + 实施计划 W1–W5；注意与执行层 P0–P4 是两套编号）</text>
 <rect x="60" y="2020" width="444" height="140" class="bxred"/>
 <text x="71" y="2039" class="t" font-size="12">实测：分工写反了</text>
 <text x="71" y="2055" class="s">浏览器步 169/171（98.8%）手写了目标；真模型下</text>
@@ -288,14 +289,15 @@
 <text x="71" y="2111" class="s">precision 15%，而闸门本身是两把不可比的尺子</text>
 <text x="71" y="2125" class="s">（passthrough AUC 0.233 反向 / shortlist 0.587）。</text>
 <text x="71" y="2139" class="s">删掉声明：同一批旅程完成率 4/4 → 0/4。</text>
+<text x="71" y="2153" class="sm">梯级：reobserve / escalate 救回 0 次 ⇒ dead rung</text>
 <rect x="516" y="2020" width="444" height="140" class="bxnew"/>
 <text x="527" y="2039" class="t" font-size="12">可修的三处（都有实测支持）</text>
 <text x="527" y="2055" class="s">① 问法：窄问 14/14 选对（全池 3/14）——档内</text>
 <text x="527" y="2069" class="s">     候选 + 短名单，把「40 选 1」变成「≤8 选 1」。</text>
 <text x="527" y="2083" class="s">② 闸门：按问法归一（p(top1) / margin），</text>
 <text x="527" y="2097" class="s">     两把尺子分开标定；默认档逐字节不变。</text>
-<text x="527" y="2111" class="s">③ 裁决：只在页面能拒绝错误动作的步（表单 /</text>
-<text x="527" y="2125" class="s">     下拉 / radio）放开模型——camera-entry 4/4。</text>
+<text x="527" y="2111" class="s">③ 裁决：只在非破坏性步放开模型（select 40% +</text>
+<text x="527" y="2125" class="s">     input 10% = 50%；真被页面校验的只有 10%）。</text>
 <text x="527" y="2139" class="s">连零选择器的语义流家族：开关模型结果逐字段相同。</text>
 <rect x="972" y="2020" width="444" height="140" class="bxe"/>
 <text x="983" y="2039" class="t" font-size="12">实施方案（按性价比，见 MODEL_ROLE_PLAN）</text>
@@ -306,9 +308,10 @@
 <text x="983" y="2111" class="s">备选：明确降级为「风险头 + 诊断」，省 597→240 s</text>
 <text x="983" y="2125" class="sm">判据：闸门两栏 AUC ≥0.5 · 漂移夹具转绿 · 错误动作被采纳 = 0</text>
 <path class="ln" d="M700,2160 V2196" marker-end="url(#arr)"/>
-<rect x="40" y="2196" width="1480" height="96" class="band red"/>
+<rect x="40" y="2196" width="1480" height="120" class="band red"/>
 <text x="58" y="2220" class="foot" font-weight="700">四条红线（重审后：措辞收窄，机制不变，仍有测试与门禁撑着）</text>
 <text x="58" y="2242" class="foot">① 计划结构冻结 —— 运行期只允许「闭集内选择」与「过门回填」；② 不发明取值 —— 模型永不选值，页面候选必须由声明规则命中；</text>
 <text x="58" y="2262" class="foot">③ 完成只认该步「该面的证据」（DOM / 进程 / HTTP …；模型自述只作诊断）；④ 任何运行期新知识（hint / 候选 / 分支）都要过零模型重放门，不过就一个文件都不落。</text>
 <text x="58" y="2282" class="foot">（2026-10 补：模型角色的修正是加分项——不改变这四条；它只让兜底层在它能赢的地方出场。）</text>
+<text x="58" y="2302" class="foot">架构改进（未落地，不画进本图的结构）：计量单一出处 · 决策接口按问法版本化 · 可声明运行策略 · 可逆性模型 · 梯级卫生 · 声明面归并 —— docs/ARCHITECTURE_IMPROVEMENTS.md</text>
 </svg>

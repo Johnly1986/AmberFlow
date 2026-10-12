@@ -91,7 +91,7 @@ box(175, 356, 320, 78, "bxd", "apps/<id>/pack.json", ["roles 模板 · journey �
 box(510, 356, 320, 78, "bxd", "sources/*.json（数据腿）", ["transport: curl / fetch / cli（argv 数组，无 shell）", "extractor 四种 · date 表达式 · counts/selects", "\"引擎不认识站点\"是单测"]);
 box(845, 356, 320, 78, "bxd", "flow.json + sites/*.profile.json", ["spec_version 2：页面角色 + 语义目标 + 契约信号", "authored 档案：pages / fill_keys / list_extract", "学到的 hint 另存，replays_ok 计数，不过报 drift"]);
 box(1180, 356, 235, 78, "bxd", "血统与可复现", ["generated_from / recorded_from", "FROZEN_TODAY 钉住展开周", "未声明的 {slot} 即用法错误"]);
-T(58, 438, "新增一个应用 = 新目录；应用目录里的代码行数由 apps:matrix 变成 0 这个数字", "lbl");
+T(58, 438, "新增一个应用 = 新目录；应用目录里的应用逻辑代码行数由 apps:matrix 计（0；bin/ 桩夹具 101 行另列，见 npm run metrics）", "lbl");
 
 /* ---------------- L3 计划 ---------------- */
 band(460, 92, "③ 计划层");
