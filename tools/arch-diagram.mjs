@@ -12,6 +12,10 @@
  *
  * 渲染成 PNG（可选）：用仓库里的 playwright chromium 把 SVG 内联进 HTML 截图即可
  * （viewBox 1560×1120，deviceScaleFactor 2）。
+ *
+ * **`--check` 是自洽门，不是真值门**：它只保证"仓库里那份 == 生成器现在的输出"，
+ * 图里写死的数字（测试条数、实测口径之类）不受它保护——改完仓库要**顺手把数字重算一遍**，
+ * 否则会出现"图里 1061、实际 1068、而 --check 照样绿"（本轮实测到过）。
  */
 import fs from "node:fs";
 
@@ -138,7 +142,7 @@ T(58, 906, "实测（真 ONNX，本机）：声明解决了 98.8% 的浏览器�
 
 /* ---------------- L6 证据 ---------------- */
 band(924, 108, "⑥ 分层证据（结论必须能被命令复现，叙述不算证据）");
-box(175, 958, 420, 60, "bxe", "tests/ 1061 条 + 六层跨实现对拍（冻结语料）", ["rules/extraction/executor/datasource/ctrip/transfer", "node-port-poc：ONNX 与 ORT 数值对拍 max|diff| 2.98e-5"]);
+box(175, 958, 420, 60, "bxe", "tests/ 1068 条 + 六层跨实现对拍（冻结语料）", ["rules/extraction/executor/datasource/ctrip/transfer", "node-port-poc：ONNX 与 ORT 数值对拍 max|diff| 2.98e-5"]);
 box(610, 958, 400, 60, "bxe", "用例与线上复测记录", ["bench/cases*.json · ctrip 19 子目标 + 独立判分 7/7", "transfer 七站 · live-retest 逐项原始观测"]);
 box(1025, 958, 390, 60, "bxe", "作者 / 独立复核两角色", ["apps/INVENTORY.md 定义\"完成一个应用\"的五条", "APP_VERIFY_REPORT.md：缺陷带最小复现，报而不装绿"]);
 

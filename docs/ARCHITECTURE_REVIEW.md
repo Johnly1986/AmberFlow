@@ -304,7 +304,7 @@ OFF 问 15 条候选、ON 只问 3 条，窄问弃权即回退整池；阶梯四
 **§9 复算口径的变化**：`grep -c "forbidden\[.*\] = esig" src/executor.ts` → **1**（助手内部那一行）；
 `stopReason = ` 的直接赋值只剩初始化 + `stop()` 内部两处；其余数字（trace.push 7 种等）未变——P0 没碰 trace 形状。
 
-**P3 已实施**（数据槽层 `src/bindings.ts`；门控 = 绑定形状本身，不声明逐字节不变；`tests/bindings.test.ts` 17 条）：
+**P3 已实施**（数据槽层 `src/bindings.ts`；门控 = 绑定形状本身，不声明逐字节不变；`tests/bindings.test.ts` 20 条）：
 
 - **三条来源，都必须声明点名**（红线②的落地形式）：`slot`（计划数据袋）、`option`
   （当次观察到的页面候选 + `match: value|label|contains`）、`list`（行集 + `order: min|max`）。
@@ -320,7 +320,7 @@ OFF 问 15 条候选、ON 只问 3 条，窄问弃权即回退整池；阶梯四
   页面一个字没改"。顺带补了一处**静默假红**：`{slot}` 占位符以前只在 journey 替换，
   `invariants` 里写 `{checkin}` 会拿字面量去比对——现在与 journey 同一套规则（未知占位符加载期红）。
 
-**P4 已实施**（声明式后继 `next`，应用旅程层；默认缺省逐字节等价；`tests/path-next.test.ts` 14 条）：
+**P4 已实施**（声明式后继 `next`，应用旅程层；默认缺省逐字节等价；`tests/path-next.test.ts` 17 条）：
 
 - **边在编译期**：应用步的 `id` 从死字段变活（`next` 的落点）；加载期校验 id 唯一 + 落点存在。
 - **运行期只选走哪条**：按声明顺序取第一个"此刻适用"的候选，适用性 = 该步自己的 `when`

@@ -88,13 +88,16 @@ function jsonLines(p: string): number {
   }
 }
 
-function appCodeLines(appDir: string): number {
+function appCodeLines(appDir: string, into: { bin: number } = { bin: 0 }): number {
   let n = 0;
   const walk = (d: string): void => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, e.name);
       if (e.isDirectory()) walk(p);
-      else if (/\.(ts|js|mjs|cjs)$/.test(e.name) && !/[/\\]bin[/\\]/.test(p)) n += jsonLines(p);
+      else if (/\.(ts|js|mjs|cjs)$/.test(e.name)) {
+        if (/[/\\]bin[/\\]/.test(p)) into.bin += jsonLines(p);
+        else n += jsonLines(p);
+      }
     }
   };
   walk(appDir);
@@ -150,8 +153,11 @@ export function matrix(): {
   rows: Row[];
   leaks: Array<{ token: string; file: string }>;
   debt: Array<{ token: string; file: string }>;
+  /** `bin/` 桩夹具的行数（不计入"应用逻辑代码行"，但头条数字要说明它） */
+  binLines: number;
 } {
   const rows: Row[] = [];
+  const binAcc = { bin: 0 };            // bin/ 桩夹具的行数（不计入"应用逻辑"，但要在头条里说明）
   for (const dir of appDirs()) {
     const pack = loadPack(path.join(dir, "pack.json"));
     const srcDir = path.join(dir, "sources");
@@ -169,7 +175,7 @@ export function matrix(): {
       toolSteps: pack.journey.filter((e) => (e as Record<string, unknown>)["source"] !== undefined).length,
       invariants: (pack.invariants ?? []).length,
       declared: jsonLines(path.join(dir, "pack.json")),
-      code: appCodeLines(dir),
+      code: appCodeLines(dir, binAcc),
       tokens: declaredTokens(dir),
       generated: (() => {
         const p2 = pack as {
@@ -194,7 +200,7 @@ export function matrix(): {
       modelAsks: null, confMax: null, reobserve: null,
       declared: fs.readdirSync(d).filter((f) => f.endsWith(".json"))
         .reduce((n, f) => n + jsonLines(path.join(d, f)), 0),
-      code: appCodeLines(path.dirname(d)), tokens: declaredTokens(path.dirname(d)),
+      code: appCodeLines(path.dirname(d), binAcc), tokens: declaredTokens(path.dirname(d)),
     });
   }
   rows.sort((a, b) => (a.app < b.app ? -1 : a.app > b.app ? 1 : 0));
@@ -234,12 +240,12 @@ export function matrix(): {
       if (CORE.has(path.basename(file))) leaks.push(entry); else debt.push(entry);
     }
   }
-  return { rows, leaks, debt };
+  return { rows, leaks, debt, binLines: binAcc.bin };
 }
 
 export function main(argv: string[] = process.argv.slice(2)): number {
   const { values } = parseArgs({ args: argv, options: { json: { type: "boolean" } } });
-  const { rows, leaks, debt } = matrix();
+  const { rows, leaks, debt, binLines } = matrix();
   if (values.json) {
     console.log(JSON.stringify({ rows, leaks, debt }, null, 2));
     return leaks.length ? 1 : 0;
@@ -270,8 +276,11 @@ export function main(argv: string[] = process.argv.slice(2)): number {
   const allTokenCount = new Set([...rows.flatMap((r) => r.tokens),
     ...leaks.map((l) => l.token), ...debt.map((d) => d.token)]).size;
   console.log();
+  // `bin/` 里的桩夹具不计入"应用逻辑代码行"（它是工具步要调的命令，跟配置一样是夹具）——
+  // 但头条数字必须写明这一点：独立复核量过 apps/demo-tool/bin/stub-tool.mjs 共 102 行（非空 93），
+  // 只写"0 行"字面不真。
   console.log(`应用 ${rows.length} 个 ｜ 声明 ${totDeclared} 行 ｜ 应用目录里的代码 ${totCode} 行`
-    + `（期望 0：应用是数据，代码在共享层）`);
+    + `（期望 0：应用是数据，代码在共享层；另有 bin/ 桩夹具 ${binLines} 行不计入）`);
   const gen = rows.filter((r) => r.generated && !r.generated.startsWith("recorded:")).length;
   const rec = rows.filter((r) => r.generated?.startsWith("recorded:")).length;
   const hand = rows.length - gen - rec;

@@ -249,7 +249,7 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
   同时"删即是红"：同一步去掉 `commands` 回到两跳深链的旧世界（旧冻结包一字未动，
   `apps:gen --check` 8/8 仍逐字节）。
 
-**P3 已落地（数据槽层，`src/bindings.ts`，门控 = 绑定形状本身：不声明逐字节不变；`tests/bindings.test.ts` 17 条）**：
+**P3 已落地（数据槽层，`src/bindings.ts`，门控 = 绑定形状本身：不声明逐字节不变；`tests/bindings.test.ts` 20 条）**：
 - **三条来源，都必须声明点名**（红线②：模型永不参与选值）：`{from:"slot",key}`（计划数据袋，
   今天的前身是 `--slot k=v` / `plan.slots`）、`{from:"option",key,match}`（**当次观察**到的页面候选
   + `match: value|label|contains`，今天的前身是 `<select>` 标签→值两候选回退）、
@@ -265,7 +265,7 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
   （机器值 `2026-10-13` ≠ 人读标签 `10月13日 周二`），全程 `rule:match`、零模型选择提问；
   规则命不中 ⇒ 结构化 `needs_value` 且**页面一个字没改**（负例钉在 `tests/bindings.test.ts`）。
 
-**P4 已落地（声明式后继 `next`，应用旅程层；`tests/path-next.test.ts` 14 条）**：
+**P4 已落地（声明式后继 `next`，应用旅程层；`tests/path-next.test.ts` 17 条）**：
 - **边是编译期就有的**：应用包的步本来就有 `id`（此前是死字段），`next: ["step-id", …]` 是有序候选；
   加载期校验"步 id 唯一 + 落点必须存在"（一条指向空气的边 = 一步都不走的静默分支，加载期红）。
 - **运行期只选走哪条**：按声明顺序取第一个"此刻适用"的候选，适用性问的就是该步**自己的 `when`**

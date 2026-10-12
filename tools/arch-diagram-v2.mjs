@@ -8,6 +8,8 @@
  * 与 v1 的一处刻意差异：**先检查、后写文件**。v1 是 `writeFileSync` 之后才 `exit(1)`，
  * 于是"量不过关就不产出"这句话在 v1 里是不成立的（坏图已经落盘）——本文件把它补上。
  *
+ * `--check` 是自洽门（图 == 生成器输出），**不是真值门**：图里写死的数字要人手刷新。
+ *
  * 内容对应 `docs/ARCHITECTURE_REVIEW.md` 的讨论结果：六层保持连续（可映射新旧），
  * ④ 执行层展开成"编译 / 选择 / 应用"三段（= 命令层 / 决策层 / 数据槽层），
  * 并附三档裁定、已确认缺陷、迁移顺序与改写后的红线。
@@ -186,7 +188,7 @@ note(60, 1370, "新增（P0）：配置类错误改为启动期预检、永不�
 /* ══════════════════════════════ ⑥ 分层证据 ══════════════════════════════ */
 P("M700,1382 V1418"); note(714, 1406, "运行结果 = 可核对的证据");
 band(1418, 120, "⑥ 分层证据（结论必须能被命令复现，叙述不算证据）");
-box(60, 1450, 444, 72, "bxe", "tests/ 1061 条 + 六层跨实现对拍", ["rules / extraction / executor / datasource / ctrip / transfer", "冻结语料；时钟钉在 tools/frozen-today.ts"]);
+box(60, 1450, 444, 72, "bxe", "tests/ 1068 条 + 六层跨实现对拍", ["rules / extraction / executor / datasource / ctrip / transfer", "冻结语料；时钟钉在 tools/frozen-today.ts"]);
 box(516, 1450, 444, 72, "bxe", "用例与线上复测记录", ["bench/cases*.json · ctrip 19 子目标 + 独立判分", "transfer 七站 · live-retest 逐项原始观测"]);
 box(972, 1450, 444, 72, "bxe", "作者 / 独立复核两角色", ["apps/INVENTORY.md 定义「完成一个应用」的五条", "缺陷带最小复现，报而不装绿"]);
 
@@ -235,7 +237,7 @@ box(716, 1812, 700, 140, "bxnew", "迁移顺序（已全部落地，每条附验
   "P3 src/bindings.ts 数据槽层 —— apps/checkin-binding 1/1 + 2/2 · 20 条",
   "P4 next + 路径上界 / next_cycle —— apps/cold-search-next（删 next 即红）· 17 条",
   "D3/R-4 同一元素重复上界 → no_progress —— tests/no-progress.test.ts 5 条",
-  "验收：verify + smoke.sh（PASS）· apps:suite 16/17 · apps:gen --check 8/8 · 1061 测试",
+  "验收：verify + smoke.sh（PASS）· apps:suite 16/17 · apps:gen --check 8/8 · 1068 测试",
 ], { titleSize: 12 });
 
 /* ══════════════════════════ ⑨ 模型角色的修正 ══════════════════════════ */

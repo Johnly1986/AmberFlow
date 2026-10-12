@@ -75,8 +75,8 @@ node --experimental-strip-types tools/ask-shapes.ts \
 |---|---|---|---|
 | 仓库内 `apps/*/pack.json`（17 个有 journey 的包） | 180 | 169 | **93.9%** |
 | └ 只算**浏览器步**（DOM hint 才有意义；9 个工具步天然没有 hint） | 171 | 169 | **98.8%** |
-| 再加上 2 个语义流模板 `apps/flight-cheapest*`（`flow.json`，各 5 步，**设计上零 hint**） | 191 | 170 | 89.0% |
-| 再加上用户作用域 `~/.amberflow/apps/dsh-learn-probe`（`learn` 录的） | 192 | 171 | 89.1% |
+| 再加上 2 个语义流模板 `apps/flight-cheapest*`（`flow.json`，各 5 步，**设计上零 hint**） | 190 | 170 | 89.5% |
+| 再加上用户作用域 `~/.amberflow/apps/dsh-learn-probe`（`learn` 录的） | 191 | 171 | 89.5% |
 
 §2.3 的 172 步测量走的是引擎自己的发现（`listPacks()`，含用户作用域那个包，不含语义流模板）。
 **被排除的那一族恰恰是最该被审的**：`flight-cheapest*` 是唯一"设计上不写选择器、让模型现场选"的家族
@@ -90,7 +90,7 @@ node --experimental-strip-types tools/ask-shapes.ts \
 | 其中由生成器产出（`apps:gen`） | 8 个应用 | `npm run apps:gen -- --check` |
 | 声明里"机械展开"的比例（项目自己的评估） | 61%（1797/2965） | `bench/AUTHORING_ASSESSMENT.md` |
 | 真正必须人写的判断 | 约 31 条（29 不变量 + 1 设备 + 1 危险动作） | 同上 |
-| 容错声明：`when` / `retries` / `next` | 7 / 12 / 1 | 同上计数 |
+| 容错声明：`when` / `retries` / `next` | 7 / 12 / 1（**角色模板合并后**的逐步计数；若按"角色模板 + journey 条目"分开数则是 8 / 17 / 1，两个分母都真实，引用时要写明） | 同上计数 |
 | P2/P3/P4 新增的声明面 | `commands` 2 处、具名绑定 1 处、`next` 1 处、`max_step_visits` 1 处 | 同上计数 |
 
 ### 2.2 运行侧：模型的实际出场（两个层级都测了）
@@ -189,6 +189,10 @@ node --experimental-strip-types tools/ask-shapes.ts \
 `[复核修正]` **CJK 那一列用的是 base/English checkpoint**：TS 侧 ONNX 端口 `load(modelId)` 不为权重区分
 `model` 字段（`apps/qunar-live` 声明了 `multilingual`，但生产同样只加载一份权重），所以本文的
 "CJK 页 50%"是**同一份权重在中文页面上的表现**，不是 `laya.Router` 路由到 multilingual 之后的表现。
+
+口径两点（红队复核补）：① 生产里的 floor **随 forbidden 衰减**（`max(0.10, confFloor − 0.05·|forbidden|)`），
+下表用静态 floor 扫描，但区间 0.05–0.50 已覆盖衰减下界 0.10，方向不变；② 本文只测了 **choice 头**，
+`noul` / `score` 两个头没测（§6 已列）。
 
 **按池子大小分层**（同一份数据）：
 
