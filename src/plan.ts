@@ -13,6 +13,14 @@ import path from "node:path";
 import { SIGNAL_OPS, signalArgs, type SignalSpec } from "./signals.ts";
 import { validateCommands, type CommandDecl } from "./actions.ts";
 
+/** 一步的可逆性声明（docs/ARCHITECTURE_IMPROVEMENTS.md §4）。 */
+export interface StepEffect {
+  /** 执行后会不会留下不可撤回的后果（提交订单、发消息、删除…）。 */
+  irreversible?: boolean;
+  /** 动作后用什么证明"页面接受了它"：`signal`=该步自己的完成信号（默认）；`none`=不校验。 */
+  verify_after?: "signal" | "none";
+}
+
 export interface Subgoal {
   desc: string;
   signal: SignalSpec;
@@ -39,6 +47,12 @@ export interface Subgoal {
    * 实例化半在运行期把声明 × 当次元素池收成候选（`actions.instantiateSpace`）。
    */
   commands?: CommandDecl[];
+  /**
+   * §4：这一步的**可逆性**声明（`irreversible` = 错了会留下不可撤回的后果）。
+   * 风险闸门读它：写了就以声明为准（不再靠关键词猜），没写 = 今天（关键词 + 模型票）。
+   * `irreversible: true` 的步不许重试（加载期校验），也是模型**绝不能**被放开的地方。
+   */
+  effect?: StepEffect;
   status?: string;
   obstacle?: string | null;
   attempts?: number;

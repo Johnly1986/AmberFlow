@@ -269,6 +269,9 @@ export async function runOnce(
       targetHints: sg.target_hints ?? null,
       // P2: the step's command space (absent ⇒ the loop acts exactly like today).
       commands: (sg.commands as never) ?? null,
+      // §4: the step's declared reversibility (absent ⇒ the gate falls back to
+      // keyword + model vote, i.e. exactly today's behavior).
+      effect: sg.effect ?? undefined,
       precondition: sg.when ?? null,
       // `{manual: true}` on the subgoal's signal: no DOM fact can confirm this step,
       // so the executor asks the human (the middleware carries `manualConfirmFn`).

@@ -100,7 +100,7 @@ Proposal = { choiceRef, shape: {kind: "full" | "shortlist" | "narrow", k, poolSi
 > ⏳ 未做：`apps:matrix` 的 `policy` 列；`risk_ask`/`reobserve`/`max_effective_repeats` 三个键
 > **只有 schema，还没有读取方**——接线属于 W1（风险头）与执行器既有参数，不许假装已生效。
 
-## 4. 可逆性模型：把 `dangerous: true` 换成 `effect`（P2）
+## 4. 可逆性模型：把 `dangerous: true` 换成 `effect`（P2）——**部分落地**
 
 **问题**：今天安全边界是一个布尔。A2（"只在页面能拒绝的步放开模型"）的真实覆盖面因此被压得很窄：
 按实测元素标签，语料里 `select` **40.1%** + `input` **9.9%** = **50% 是非破坏性的**，
@@ -116,6 +116,16 @@ Proposal = { choiceRef, shape: {kind: "full" | "shortlist" | "narrow", k, poolSi
 **验收**：`camera-entry` 删掉 hint 后从 0/4 → 能走完（页面校验 + 信号）；"错误动作被采纳"= 0；
 不可逆步声明 `undo` 在加载期报错；负例测试覆盖"选错下拉 ⇒ 白跑但不误报成功"。
 **代价/风险**：M–L；风险 = 回退动作本身可能有副作用 ⇒ `undo` 只允许引用**声明过的、非危险的**步。
+
+> **状态（本轮）**：✅ `effect{irreversible,verify_after}` 进浏览器步声明面（`src/plan.ts` 的 `StepEffect`
+> → `expandPack` → `runOnce` → `run()`），风险闸门改为**声明优先**：写了 `irreversible` 就以它为准
+> （`true` ⇒ 必问人；`false` ⇒ 跳过关键词与模型票），**没写 = 今天逐字节不变**（原 ② 号测试仍绿）。
+> 加载期：未知键/错类型报错，`irreversible:true` 的步不许 `retries`（与工具步 `dangerous must not retry` 同一条纪律）。
+> 行为测试两条（`tests/executor.test.ts`）：同一条含 "checkout" 的 desc 声明 `false` ⇒ **不问人**；
+> 良性的 "Add to cart" 声明 `true` ⇒ **问人**。
+> ⏳ **未接线（不许假装生效）**：`verify_after` 只有 schema 与校验，执行器还没有读它——
+> 今天"动作后看信号"本来就是循环的默认行为，`none` 这一档要等 W4 的裁决语义一起设计；
+> `undo` 没有实现（回退动作需要自己的安全论证）。A2/W4 因此仍受这条未完成项阻塞。
 
 ## 5. 梯级卫生：没出场的梯级要有数字（P1，报告即可）——**已落地**
 

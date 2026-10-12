@@ -94,13 +94,25 @@ export const STEP_KEYS = [
   // 共同（`id`/`next` 是两种步型共用的走向声明：P4）
   "role", "desc", "signal", "slots", "retries", "id", "next",
   // 浏览器步
-  "start_url", "target_hint", "target_hints", "when", "commands",
+  "start_url", "target_hint", "target_hints", "when", "commands", "effect",
   // 工具步
   "source", "args", "dry_run_args", "idempotent", "dangerous",
 ] as const;
 
-const BROWSER_ONLY = ["start_url", "target_hint", "target_hints", "when", "commands"] as const;
+const BROWSER_ONLY = ["start_url", "target_hint", "target_hints", "when", "commands", "effect"] as const;
 const TOOL_ONLY = ["source", "args", "dry_run_args", "idempotent", "dangerous"] as const;
+
+/**
+ * **可逆性是步的属性，不是"危险"这个布尔**（docs/ARCHITECTURE_IMPROVEMENTS.md §4）。
+ *
+ * 浏览器步今天没有声明面：风险闸门只看 `DESTRUCTIVE_PATTERNS` + 模型票，于是
+ * "能不能让模型试"与"这一步错了会留下什么"被压成同一个问题，策略只能一刀切在最保守的一侧。
+ * `effect.irreversible` 把后者单独说出来；缺省不写 = 今天的判定（逐字节不变）。
+ */
+export const EFFECT_KEYS = ["irreversible", "verify_after"] as const;
+
+// 类型归属在 `plan.ts`（步骤语法的一部分）；这里只保留校验用的键集。
+export type { StepEffect } from "./plan.ts";
 
 /** 展开后的一步：浏览器步或工具步（`kind` 由 `source` 是否存在决定）。 */
 export interface ExpandedStep {
@@ -477,6 +489,30 @@ export function validatePack(pack: AppPack,
         if (retries > 0) p.push(`${where}.dangerous must not retry (retries=${retries})`);
       }
     } else {
+      // effect（§4）：可逆性声明。写错要响亮；不可逆步不许重试——与工具步
+      // `dangerous must not retry` 是同一条纪律的两半。
+      const eff = step["effect"];
+      if (eff !== undefined) {
+        if (!isDict(eff)) {
+          p.push(`${where}.effect: must be an object (keys: ${EFFECT_KEYS.join(", ")})`);
+        } else {
+          for (const k of Object.keys(eff)) {
+            if (!(EFFECT_KEYS as readonly string[]).includes(k) && !k.startsWith("_")) {
+              p.push(`${where}.effect.${k}: unknown key (known: ${EFFECT_KEYS.join(", ")})`);
+            }
+          }
+          if (eff["irreversible"] !== undefined && typeof eff["irreversible"] !== "boolean") {
+            p.push(`${where}.effect.irreversible: must be a boolean`);
+          }
+          if (eff["verify_after"] !== undefined && eff["verify_after"] !== "signal" && eff["verify_after"] !== "none") {
+            p.push(`${where}.effect.verify_after: must be "signal" | "none"`);
+          }
+          const er = Number(step["retries"] ?? 0);
+          if (eff["irreversible"] === true && er > 0) {
+            p.push(`${where}.effect.irreversible: an irreversible step must not retry (retries=${er})`);
+          }
+        }
+      }
       for (const k of TOOL_ONLY) {
         if (step[k] !== undefined) p.push(`${where}.${k}: tool-only key on a browser step`);
       }

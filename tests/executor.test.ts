@@ -148,6 +148,45 @@ describe("BrowserMiddleware.run — production loop semantics", () => {
     expect(report.steps.filter((s) => String(s.desc).includes("Proceed to checkout"))).toHaveLength(1);
   }, 60_000);
 
+  // ── §4 可逆性是**声明**，不是靠关键词猜（docs/ARCHITECTURE_IMPROVEMENTS.md §4）──────
+  it("§4 声明 irreversible:false ⇒ 含 checkout 的步不再问人（白跑不留后果，这是模型可被放开的依据）", async () => {
+    install(fakeAgent((crit) => {
+      const r = refWith(crit, "[test=checkout]") ?? firstRef(crit);
+      return r ? { choice: r, confidence: 0.9 } : null;
+    }));
+    const asked: string[] = [];
+    const report = await mw({ maxSteps: 2, confirmFn: (d) => { asked.push(d); return false; } }).run(
+      "proceed to checkout", fixture("bench", "fixtures", "shop_cart.html"),
+      {
+        page: asPage(), pw, verbose: false, goalSignalFn: () => true,
+        effect: { irreversible: false },
+      },
+    );
+    expect(asked).toEqual([]);            // 同一条 desc，今天会被 "checkout" 关键词判风险
+    expect(report.done).toBe(true);
+  }, 60_000);
+
+  it("§4 声明 irreversible:true ⇒ 良性步也要问人（声明优先于关键词与模型票）", async () => {
+    install(fakeAgent((crit) => {
+      const r = refWith(crit, "[test=add-to-cart]") ?? firstRef(crit);
+      return r ? { choice: r, confidence: 0.9 } : null;
+    }));
+    const asked: string[] = [];
+    // maxSteps=1：一次尝试就够——声明作用于**整个子目标**，所以换到的每个候选都会问；
+    // 断言要的是"良性 desc 也被问了"，不是"只问一次"。
+    const report = await mw({ maxSteps: 1, confirmFn: (d) => { asked.push(d); return false; } }).run(
+      "add the wireless mouse to the cart", fixture("testpages", "product.html"),
+      {
+        page: asPage(), pw, verbose: false,
+        goalSignalFn: (p) => checkSignal(p, { css_text_contains: ["[data-test='cart-count']", "1"] }),
+        effect: { irreversible: true },
+      },
+    );
+    expect(asked).toHaveLength(1);        // "Add to cart" 不含任何破坏性关键词
+    expect(asked[0]).toContain("Add to cart");
+    expect(report.done).toBe(false);      // 人说了不 ⇒ 这一步不落地
+  }, 60_000);
+
   it("③ stops below the confidence floor with the Python wording", async () => {
     install(fakeAgent((crit) => {
       const r = firstRef(crit);

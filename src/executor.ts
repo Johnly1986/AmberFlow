@@ -332,6 +332,13 @@ export interface RunOptions {
    */
   commands?: CommandDecl[] | null;
   /**
+   * §4：这一步的**可逆性**声明（来自 `pack` 的 `effect`）。它改变的是"闸门相不相信关键词/模型票"，
+   * 不改变任何缺省行为：不写 = 今天（DESTRUCTIVE_PATTERNS + 模型票）。
+   * `irreversible: true` ⇒ 必问确认且不许被模型提议；`false` ⇒ 明确告诉架构"错了也白跑"，
+   * 这是 W4/A2 唯一允许放开模型的依据。
+   */
+  effect?: { irreversible?: boolean; verify_after?: "signal" | "none" };
+  /**
    * Navigation envelope (see `disallowedHost`): when non-empty, `run()` refuses
    * to open a `start_url` whose host is not declared, and stops the subgoal if
    * an executed action lands on an undeclared host. Default: no envelope —
@@ -1440,6 +1447,7 @@ export class BrowserMiddleware {
       hosts = null,
       tieredHint = this.tieredHint,
       commands = null,
+      effect,
     } = opts;
 
     // The navigation envelope: run-level declaration wins, else the middleware's
@@ -1978,7 +1986,16 @@ export class BrowserMiddleware {
             continue;
           }
         }
-        const [risky, riskP] = await this.isRisky(instruction, desc);
+        // §4：可逆性是**声明**，不该靠关键词猜。写了 effect.irreversible 就以它为准
+        // （true ⇒ 一定问人；false ⇒ 这一步非破坏性，跳过一次模型前向，省下 W1 要省的那笔钱）。
+        // 没写就完全走今天的路径：关键词 + 模型票。
+        let risky: boolean, riskP: number;
+        if (effect?.irreversible !== undefined) {
+          risky = effect.irreversible;
+          riskP = effect.irreversible ? 1.0 : 0.0;
+        } else {
+          [risky, riskP] = await this.isRisky(instruction, desc);
+        }
         let confirmed = false;
         if (risky) {
           if (verbose) console.log(`  step ${stepNo}: RISKY ${desc} (p=${riskP.toFixed(2)}) -> asks for confirmation`);
