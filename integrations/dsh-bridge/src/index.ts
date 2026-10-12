@@ -299,6 +299,12 @@ export function apply(ctx: Context, config: Config): void {
         description: 'With allow_dangerous, still confirm each destructive step against its dry-run '
           + 'evidence (the engine\'s middle gate) instead of blanket-approving.',
       },
+      tiered_hint: {
+        type: 'boolean',
+        description: 'P1 experiment: when the plan\'s target_hint resolves to an ambiguous tier, '
+          + 'the model is asked a SMALLER question (only that tier\'s candidates, not the whole pool). '
+          + 'Off by default — behavior identical to before; use it for A/B runs.',
+      },
       slots: {
         type: 'array',
         description: 'Values for declared slots, as "key=value" entries (e.g. ["date=2026-10-12"]).',
@@ -428,6 +434,7 @@ export function apply(ctx: Context, config: Config): void {
         ...(args.no_sources === undefined ? {} : { noSources: args.no_sources }),
         ...(args.allow_dangerous === undefined ? {} : { allowDangerous: args.allow_dangerous }),
         ...(args.confirm_safe === undefined ? {} : { confirmSafe: args.confirm_safe }),
+        ...(args.tiered_hint === undefined ? {} : { tieredHint: args.tiered_hint }),
         // `Object.fromEntries` defines own properties, so even a `__proto__` slot reaches the CLI.
         ...(args.slots === undefined ? {} : { slots: Object.fromEntries(slots) }),
       })

@@ -54,13 +54,25 @@ describe('bridge helpers', () => {
   it('runArgs assembles flags, slots and the dangerous switch', () => {
     const argv = runArgs(OPTIONS, {
       app: 'demo', outDir: '/tmp/out', dry: true, noModel: true, noSources: true, dangerous: true,
-      confirmSafe: true,
+      confirmSafe: true, tieredHint: true,
       slots: { date: '2026-10-12', window: '0800-1800' },
     })
     expect(argv.slice(0, 3)).toEqual(['/usr/bin/node', '--experimental-strip-types', '/repo/src/app-runner.ts'])
     expect(argv.join(' ')).toContain('--app demo --out /tmp/out')
-    for (const flag of ['--dry', '--no-model', '--no-sources', '--allow-dangerous', '--confirm-safe']) expect(argv).toContain(flag)
+    for (const flag of ['--dry', '--no-model', '--no-sources', '--allow-dangerous', '--confirm-safe', '--tiered-hint']) expect(argv).toContain(flag)
     expect(argv.slice(-4)).toEqual(['--slot', 'date=2026-10-12', '--slot', 'window=0800-1800'])
+  })
+
+  it('runArgs keeps the DEFAULT argv byte-stable when the new flags are absent', () => {
+    // P0/P1 added hosts/tiered-hint/etc. as ADDITIVE switches; the default invocation must be
+    // exactly what every frozen report and the live tests were recorded against.
+    const argv = runArgs(OPTIONS, { app: 'demo', outDir: '/tmp/out' })
+    expect(argv).toEqual([
+      '/usr/bin/node', '--experimental-strip-types', '/repo/src/app-runner.ts',
+      '--app', 'demo', '--out', '/tmp/out',
+    ])
+    const off = runArgs(OPTIONS, { app: 'demo', outDir: '/tmp/out', tieredHint: false, confirmSafe: false })
+    expect(off).toEqual(argv)
   })
 
   it('learnArgs always asks for the machine-readable single call', () => {

@@ -90,6 +90,11 @@ export interface AppRunOptions {
   runtimeStats?: () => DecisionCacheStats;
   /** 模型咨询计数的取数口（`countingRuntime` 包一层就给；同样是跑完读一次）。 */
   pickAsks?: () => number;
+  /**
+   * P1 `tieredHint` 的出口（默认关 = 今天逐字节）：hint 档内歧义变成对模型的更小提问。
+   * 由 `--tiered-hint` / 桥的 `tiered_hint` 打开，用于线上包 A/B（EXECUTION_LAYER_SPLIT_PLAN §4#1）。
+   */
+  tieredHint?: boolean;
 }
 
 /**
@@ -450,6 +455,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     // 信封：未声明的主机在 goto 前拒绝、动作后落到未声明主机即停（结构化理由）。
     // 空列表/未声明 = 不启用信封：离线夹具包逐字节不受影响。
     hosts: (pack.hosts ?? null) as string[] | null,
+    // P1 窄问开关（默认关；开了也只影响"档内歧义的 hint 步"问模型的范围，阶梯与 method 不动）。
+    tieredHint: opts.tieredHint === true,
     // 批量运行器的默认：风险只记录不阻断；`confirmSafe` 时拒绝破坏性动作。
     confirmFn: confirmSafe
       ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
@@ -596,9 +603,10 @@ export function appReportMarkdown(r: AppRunResult): string {
 
 const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--out DIR]
                   [--model ID] [--no-model] [--no-sources] [--confirm-safe]
-                  [--allow-dangerous] [--quiet]
+                  [--allow-dangerous] [--tiered-hint] [--quiet]
 
-按 apps/<app>/pack.json 跑一条完整应用链路：数据腿 → 浏览器步/工具步 → 结束状态不变量`;
+按 apps/<app>/pack.json 跑一条完整应用链路：数据腿 → 浏览器步/工具步 → 结束状态不变量
+--tiered-hint  P1 实验开关：hint 档内歧义向模型问更小的问题（默认关 = 行为逐字节不变）`;
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const parsed = parseArgs({
@@ -609,6 +617,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       model: { type: "string" }, "no-model": { type: "boolean" },
       "no-sources": { type: "boolean" }, "confirm-safe": { type: "boolean" },
       "allow-dangerous": { type: "boolean" },
+      "tiered-hint": { type: "boolean" },
       quiet: { type: "boolean" }, help: { type: "boolean" },
     },
   });
@@ -721,6 +730,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       slots, planPath, outDir, verbose: !v.quiet,
       sources: !v["no-sources"], confirmSafe: v["confirm-safe"] === true,
       allowDangerous: v["allow-dangerous"] === true,
+      tieredHint: v["tiered-hint"] === true,
       modelId: v.model ?? pack.model ?? "english",
       modelStatus,
       runtimeStats: () => cached.decisionStats(),

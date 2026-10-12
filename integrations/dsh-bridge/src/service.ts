@@ -40,6 +40,12 @@ export interface AmberFlowRunArgs {
    * still confirmed per step against their dry-run evidence instead of blanket-approved.
    */
   confirmSafe?: boolean
+  /**
+   * P1 experiment switch (engine `--tiered-hint`): an ambiguous-in-tier plan hint becomes a
+   * SMALLER question to the model (it sees only that tier's candidates instead of the whole pool).
+   * Off by default — behavior byte-identical to before; used for A/B on live packs.
+   */
+  tieredHint?: boolean
   /** Values for declared slots. */
   slots?: Record<string, string>
 }
@@ -195,6 +201,7 @@ export async function runApp(
     ...(args.noSources === undefined ? {} : { noSources: args.noSources }),
     ...(args.allowDangerous === undefined ? {} : { dangerous: args.allowDangerous }),
     ...(args.confirmSafe === undefined ? {} : { confirmSafe: args.confirmSafe }),
+    ...(args.tieredHint === undefined ? {} : { tieredHint: args.tieredHint }),
     ...(args.slots === undefined ? {} : { slots: args.slots }),
   }))
   return { summary: summarizeRun(outDir, args.app, outcome, `${options.toolPrefix}_run`), outDir }

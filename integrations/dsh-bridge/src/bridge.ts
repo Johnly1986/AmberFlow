@@ -350,6 +350,8 @@ export function runArgs(
     dangerous?: boolean
     /** Ask the engine to refuse destructive actions per dry-run evidence (middle gate). */
     confirmSafe?: boolean
+    /** P1 experiment: narrowed model question for an ambiguous-in-tier hint (engine `--tiered-hint`). */
+    tieredHint?: boolean
     slots?: Record<string, string>
   },
 ): string[] {
@@ -360,6 +362,7 @@ export function runArgs(
   if (args.noSources) argv.push('--no-sources')
   if (args.dangerous) argv.push('--allow-dangerous')
   if (args.confirmSafe) argv.push('--confirm-safe')
+  if (args.tieredHint) argv.push('--tiered-hint')
   for (const [key, value] of Object.entries(args.slots ?? {})) argv.push('--slot', `${key}=${value}`)
   return argv
 }
