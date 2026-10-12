@@ -543,6 +543,38 @@ describe("browser lifecycle + RAM probe", () => {
 });
 
 
+describe("riskAsk（§W1：批模式下这次前向的答案本来就被丢掉，要省就声明着省）", () => {
+  const riskyVoter = (): void => install(fakeAgent(() => ({ choice: "e1", confidence: 0.9 }), 0.95));
+
+  it("默认 always：非关键词动作也问一次模型，命中阈值就问人", async () => {
+    riskyVoter();
+    const asked: string[] = [];
+    await mw({ maxSteps: 1, confirmFn: (d) => { asked.push(d); return false; } }).run(
+      "add the wireless mouse to the cart", fixture("testpages", "product.html"),
+      { page: asPage(), pw, verbose: false, goalSignalFn: () => false },
+    );
+    expect(asked.length).toBe(1);              // 模型票 0.95 ≥ 0.6 ⇒ 问人
+  }, 60_000);
+
+  it("声明 rules-only：同样的模型票不再花前向，而关键词命中仍然拦", async () => {
+    riskyVoter();
+    const asked: string[] = [];
+    await mw({
+      maxSteps: 1, riskAsk: "rules-only",
+      confirmFn: (d) => { asked.push(d); return false; },
+    }).run("add the wireless mouse to the cart", fixture("testpages", "product.html"),
+      { page: asPage(), pw, verbose: false, goalSignalFn: () => false });
+    expect(asked).toEqual([]);                 // 良性动作：不问了
+
+    const asked2: string[] = [];
+    await mw({ maxSteps: 2, riskAsk: "rules-only", confirmFn: (d) => { asked2.push(d); return false; } }).run(
+      "proceed to checkout", fixture("bench", "fixtures", "shop_cart.html"),
+      { page: asPage(), pw, verbose: false, goalSignalFn: () => false });
+    expect(asked2.length).toBe(1);             // "checkout" 命中关键词 ⇒ 规则照样拦，没放松
+    expect(asked2[0]).toContain("Proceed to checkout");
+  }, 90_000);
+});
+
 /* ── §2 决策接口：一次提案必须带"问法形状"，不能只给一个 float ───────────── */
 describe("pickProposal（ARCHITECTURE_IMPROVEMENTS §2：conf 是两把尺子，形状要进接口）", () => {
   /** 装一个能回**多条概率**的运行时（fakeAgent 会把概率塌成一条，测不出形状）。 */

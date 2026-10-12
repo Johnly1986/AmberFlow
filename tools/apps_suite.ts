@@ -30,9 +30,17 @@ import { runApp, refusalLine, type AppRunResult } from "../src/app-runner.ts";
 import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "../src/decision-cache.ts";
 import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime, type CountingRuntime } from "../src/model.ts";
 
-/** 套件产物目录：matrix 的运行时两列从这里读（单一出处、**调用时**读 env，测试可隔离）。 */
-export function suiteOutDir(): string {
-  return process.env.AMBERFLOW_SUITE_OUT ?? path.join("/tmp", "amberflow-suite");
+/**
+ * 套件产物目录：matrix 的运行时两列从这里读（单一出处、**调用时**读 env，测试可隔离）。
+ *
+ * **两臂必须落在不同目录**（本轮踩过）：`--real-model` 曾经与桩臂共用 `/tmp/amberflow-suite`，
+ * 于是"上一次真跑"的产物变成混合两臂——matrix 的两列与 `arch-metrics` 的脚本桩基线都跟着失真，
+ * 而且没有任何地方报错。臂是口径的一部分，口径不能靠事后记得。
+ */
+export function suiteOutDir(tier: "scripted" | "on" = "scripted"): string {
+  const env = process.env.AMBERFLOW_SUITE_OUT;
+  if (env) return env;                                  // 显式指定 = 调用方负责隔离
+  return path.join("/tmp", tier === "on" ? "amberflow-suite-realmodel" : "amberflow-suite");
 }
 
 export type SuiteStatus = "passed" | "needs-dangerous-opt-in" | "failed";
@@ -79,7 +87,7 @@ export function isLive(pack: AppPack): boolean {
 
 /** 跑一个应用包（离线口径）。返回值就是套件表格里的一行；完整结果另落 `<套件目录>/<app>/` 供 matrix 读。 */
 export async function runOne(
-  pack: AppPack, cached: CachedRuntime, counted: CountingRuntime, outBase = suiteOutDir(),
+  pack: AppPack, cached: CachedRuntime, counted: CountingRuntime, outBase = suiteOutDir("scripted"),
 ): Promise<SuiteRow> {
   const hints = packHintCoverage(pack);          // §W2：承重墙每天看得见
   const out = path.join(outBase, pack.id);
@@ -195,7 +203,7 @@ export async function suite(
         continue;
       }
       try {
-        rows.push(await runOne(pack, cached, counted));
+        rows.push(await runOne(pack, cached, counted, suiteOutDir(opts.realModel ? "on" : "scripted")));
       } catch (e) {
         rows.push({
           app: pack.id, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
@@ -345,6 +353,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     console.log(`模型边际：未测（本臂跑在 ${tier}；桩模型的"过关 0"是构造出来的，不是证据。`
       + `真模型那一臂：npm run apps:suite -- --real-model）`);
   }
+  console.log(`产物目录：${suiteOutDir(tierOn ? "on" : "scripted")}`
+    + `（两臂分开落盘：混在一处会让 matrix 的"上一次真跑"两列与脚本桩基线一起失真）`);
   console.log(`梯级账单：${rungs.map(([k, n]) => `${k} 决定 ${n}`).join(" ｜ ")}`
     + (dead.length ? ` ⇒ **dead rung：${dead.join("、")}**（本轮语料上从未救回任何东西；`
       + `要么接线、要么从架构里拿掉，别让它当"保险"）` : ""));

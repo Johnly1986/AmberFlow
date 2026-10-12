@@ -97,8 +97,17 @@ Proposal = { choiceRef, shape: {kind: "full" | "shortlist" | "narrow", k, poolSi
 > 生效值与来源写进 `<app>-result.json.effective_policy` 与报告行；**都没写时字段整个不存在**
 > （缺省等价纪律，同 `path_visits`）。实测三种情形都对，并修掉一个真 bug：
 > CLI 以前恒传布尔 ⇒ 永远压过包声明、还把来源写成 `cli`（假账），现在只在显式给旗标时才算覆盖。
-> ⏳ 未做：`apps:matrix` 的 `policy` 列；`risk_ask`/`reobserve`/`max_effective_repeats` 三个键
-> **只有 schema，还没有读取方**——接线属于 W1（风险头）与执行器既有参数，不许假装已生效。
+> **状态更新（本轮）**：✅ 四个键**全部接线**（`risk_ask` / `reobserve` / `max_effective_repeats`
+> 不再是空 schema）。`risk_ask: rules-only` 的实测（真模型在位，同一份包只差这一行声明）：
+>
+> | 应用 | 默认（每步问一次"要不要拦"） | `rules-only` | 结果 |
+> |---|---|---|---|
+| demo-app（5 步） | 12.8 s | **2.3 s**（5.6×） | 都 5/5 通过，`ladder` 逐字段相同 |
+| ctrip-case（19 步） | 46.2 s | **6.0 s**（7.7×） | 都 19/19 通过，`ladder` 逐字段相同 |
+>
+> 安全性没有放松：`DESTRUCTIVE_PATTERNS` 命中照样拦（测试钉住 "checkout" 那一步仍问人），
+> 省掉的只是**批模式下答案本来就被丢掉**的那次前向（默认 `confirmFn` 一律放行）。
+> ⏳ 仍未做：`apps:matrix` 的 `policy` 列。
 
 ## 4. 可逆性模型：把 `dangerous: true` 换成 `effect`（P2）——**部分落地**
 

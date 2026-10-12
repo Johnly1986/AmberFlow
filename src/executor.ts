@@ -413,6 +413,16 @@ export interface MiddlewareOptions {
    * 一个噪声信号不该是循环唯一的终止依据（重审 D3）。缺省 3；0 = 关闭（回到今天的行为）。
    */
   maxEffectiveRepeats?: number;
+  /**
+   * 风险问句花不花一次模型前向（§W1）。默认 `always` = 今天（关键词命中即定，
+   * 没命中的**每一步**都问一次模型）。`rules-only` = 只信关键词规则，一步都不问。
+   *
+   * 为什么这条值得存在：批量运行里 `confirmFn` 默认是"一律放行"，于是这次前向的答案
+   * **被丢掉**——它按每步一次的频率收费（实测整批语料 597 s vs 桩 160.7 s，
+   * 而选目标只被问了 5 次），换来的东西在批模式下没人看。要省，就得**声明着省**，
+   * 而不是让执行器偷偷少问（那会改变 trace 与拒绝行为）。
+   */
+  riskAsk?: "always" | "rules-only";
   /** Constructor-level default for `RunOptions.tieredHint` (P1 narrowed question, default OFF). */
   tieredHint?: boolean;
 }
@@ -719,6 +729,8 @@ export class BrowserMiddleware {
   tieredHint = false;
   /** See `MiddlewareOptions.maxEffectiveRepeats` (D3/R-4; default 3, 0 disables). */
   maxEffectiveRepeats = 3;
+  /** 见 MiddlewareOptions.riskAsk。 */
+  riskAsk: "always" | "rules-only" = "always";
   /** Deterministic rule prefilter ON, anti-repeat ON (measured production defaults). */
   rulesOn = true;
   antiRepeat = true;
@@ -755,6 +767,7 @@ export class BrowserMiddleware {
     this.gotoTimeout = opts.gotoTimeout ?? 30000;
     this.hosts = opts.hosts ?? null;
     this.maxEffectiveRepeats = opts.maxEffectiveRepeats ?? this.maxEffectiveRepeats;
+    this.riskAsk = opts.riskAsk ?? this.riskAsk;
     this.tieredHint = opts.tieredHint ?? this.tieredHint;
   }
 
@@ -1014,6 +1027,9 @@ export class BrowserMiddleware {
     await this.ready();
     if (this.rulesOnly) return [DESTRUCTIVE_PATTERNS.some((p) => desc.toLowerCase().includes(p)), 0.0];
     if (DESTRUCTIVE_PATTERNS.some((p) => desc.toLowerCase().includes(p))) return [true, 1.0];
+    // §W1：`rules-only` 是**声明着省**——关键词规则刚才已经跑过了，没命中就不再花一次前向。
+    // 默认 `always` 完全走今天的路径（每一次非关键词动作都问一遍"要不要拦"）。
+    if (this.riskAsk === "rules-only") return [false, 0.0];
     const state = { action: desc, user_goal: goal };
     const { agent } = await this.agentFor(state);
     const res = await agent.predict(state, {

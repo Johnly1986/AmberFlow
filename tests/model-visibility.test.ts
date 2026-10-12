@@ -109,13 +109,15 @@ describe("生效策略进产物（ARCHITECTURE_IMPROVEMENTS §3：同一个包�
     const viaPack = await runApp(declared as never, {
       verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json"),
     });
-    expect(viaPack.effective_policy).toEqual({ tiered_hint: true, tiered_hint_source: "pack" });
+    expect(viaPack.effective_policy?.tiered_hint).toEqual({ value: true, source: "pack" });
+    // 其余三项没声明 ⇒ 记 default（报告只打非缺省的，但产物里四项齐全，读的人不用猜缺了什么）
+    expect(viaPack.effective_policy?.risk_ask).toEqual({ value: "always", source: "default" });
     const out2 = tmpDir("pol-cli");
     const viaCli = await runApp(declared as never, {
       verbose: false, sources: false, outDir: out2, planPath: path.join(out2, "plan.json"),
       tieredHint: false,                                     // 本次显式关掉，必须赢过包声明
     });
-    expect(viaCli.effective_policy).toEqual({ tiered_hint: false, tiered_hint_source: "cli" });
+    expect(viaCli.effective_policy?.tiered_hint).toEqual({ value: false, source: "cli" });
     expect(appReportMarkdown(viaPack)).toContain("生效策略");
   }, 300_000);
 });

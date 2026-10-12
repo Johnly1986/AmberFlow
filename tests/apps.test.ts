@@ -52,7 +52,7 @@ describe("应用包：发现与校验", () => {
     ["坏不变量", (p: any) => { p.invariants = [{ id: "x" }]; }, "invariants[0] needs"],
     ["未知信号算子", (p: any) => { p.roles.checkout.signal = { magic_op: "x" }; }, "unknown signal op"],
     ["未知策略键（§3：写了就要生效，不许静默忽略）", (p: any) => { p.policy = { made_up: 1 }; }, "unknown policy key"],
-    ["策略值类型错（risk_ask 是闭集）", (p: any) => { p.policy = { risk_ask: "sometimes" }; }, "must be one of always | on-ambiguity"],
+    ["策略值类型错（risk_ask 是闭集）", (p: any) => { p.policy = { risk_ask: "sometimes" }; }, "must be one of always | rules-only"],
     ["策略值类型错（tiered_hint 必须是布尔）", (p: any) => { p.policy = { tiered_hint: "yes" }; }, "tiered_hint: must be a boolean"],
     ["max_effective_repeats 要 >=1", (p: any) => { p.policy = { max_effective_repeats: 0 }; }, "integer >= 1"],
     ["角色缺信号", (p: any) => { delete p.roles.checkout.signal; }, "needs a done-signal"],

@@ -65,8 +65,12 @@ export const POLICY_KEYS = [
   "tiered_hint", "risk_ask", "reobserve", "max_effective_repeats",
 ] as const;
 
-/** `risk_ask`：什么时候值得花一次模型前向去问"要不要拦"。 */
-export const RISK_ASK_MODES = ["always", "on-ambiguity"] as const;
+/**
+ * `risk_ask`：值不值得为"要不要拦"花一次模型前向。
+ * `always` = 今天（非关键词动作每一步都问）；`rules-only` = 只信 `DESTRUCTIVE_PATTERNS`。
+ * 批量运行里 `confirmFn` 默认一律放行 ⇒ 这次前向的答案没人看，`rules-only` 就是把它省下来。
+ */
+export const RISK_ASK_MODES = ["always", "rules-only"] as const;
 
 export interface PackPolicy {
   tiered_hint?: boolean;

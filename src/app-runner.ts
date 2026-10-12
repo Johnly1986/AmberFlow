@@ -290,7 +290,12 @@ export interface AppRunResult {
    * 生效的运行策略与它的来源（§3）：让"这次跑的是什么策略"成为产物的一部分——
    * 否则同一个包含义随命令行变，而报告看不出来。
    */
-  effective_policy?: { tiered_hint: boolean; tiered_hint_source: "cli" | "pack" | "default" };
+  effective_policy?: {
+    tiered_hint: { value: boolean; source: "cli" | "pack" | "default" };
+    risk_ask: { value: "always" | "rules-only"; source: "pack" | "default" };
+    reobserve: { value: boolean; source: "pack" | "default" };
+    max_effective_repeats: { value: number; source: "pack" | "default" };
+  };
   /** 模型层级（`on` / `off(missing)` / `off(rules-only)` / `off(scripted)`；未提供则缺字段）。 */
   model_status?: string;
   /** 决策来源汇总（见 `AppDecisions`；LAYA_VALUE_PLAN P1 的"出场率/挽回/缓存"三组数）。 */
@@ -477,6 +482,29 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   }
 
   // ---- 旅程：逐步骤按类型执行（浏览器步走执行器，工具步走命令行） -----------
+  // §3：运行策略的**生效值与来源**在这里一次算清（构造与报告读同一个对象，不分两头各猜一遍）。
+  // 优先级：CLI(本次显式) > pack.policy(声明) > 缺省(= 今天)。缺省一个都没动。
+  const declaredPolicy = ((pack as unknown as Record<string, unknown>)["policy"] ?? {}) as PackPolicy;
+  const policy = {
+    tiered_hint: {
+      value: opts.tieredHint ?? declaredPolicy.tiered_hint ?? false,
+      source: opts.tieredHint !== undefined ? "cli" as const
+        : declaredPolicy.tiered_hint !== undefined ? "pack" as const : "default" as const,
+    },
+    risk_ask: {
+      value: declaredPolicy.risk_ask ?? "always",
+      source: declaredPolicy.risk_ask !== undefined ? "pack" as const : "default" as const,
+    },
+    reobserve: {
+      value: declaredPolicy.reobserve ?? true,
+      source: declaredPolicy.reobserve !== undefined ? "pack" as const : "default" as const,
+    },
+    max_effective_repeats: {
+      value: declaredPolicy.max_effective_repeats ?? 3,
+      source: declaredPolicy.max_effective_repeats !== undefined ? "pack" as const : "default" as const,
+    },
+  };
+  const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
   const mw = new BrowserMiddleware({
     modelId,
     auditor: new MockAuditor(),
@@ -491,7 +519,11 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     hosts: (pack.hosts ?? null) as string[] | null,
     // P1 窄问开关（默认关；开了也只影响"档内歧义的 hint 步"问模型的范围，阶梯与 method 不动）。
     // §3：优先级 CLI(本次) > pack.policy(声明) > 缺省(false)。不写 policy 的包逐字节不变。
-    tieredHint: opts.tieredHint ?? ((pack as unknown as Record<string, unknown>)["policy"] as PackPolicy | undefined)?.tiered_hint === true,
+    tieredHint: policy.tiered_hint.value,
+    // §W1：`risk_ask: rules-only` 让"要不要拦"不再花一次每步的前向（批模式下它的答案本来就被丢掉）。
+    riskAsk: policy.risk_ask.value === "rules-only" ? "rules-only" : "always",
+    reobserve: policy.reobserve.value,
+    maxEffectiveRepeats: policy.max_effective_repeats.value,
     // 批量运行器的默认：风险只记录不阻断；`confirmSafe` 时拒绝破坏性动作。
     confirmFn: confirmSafe
       ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
@@ -645,14 +677,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     ...(endState ? { end_state: endState } : {}),
     // §3：生效策略**只在非缺省时写进产物**（与 path_visits 同一纪律）。
     // 来源三态要说清：CLI 本次覆盖 / 包声明 / 都没写——否则报告看不出这次跑的和上次是不是同一件事。
-    ...(() => {
-      const declared = (pack as unknown as Record<string, unknown>)["policy"] as PackPolicy | undefined;
-      const src = opts.tieredHint !== undefined ? "cli" : declared?.tiered_hint === true ? "pack" : "default";
-      const val = opts.tieredHint ?? declared?.tiered_hint === true;
-      return src === "default" && val === false ? {} : {
-        effective_policy: { tiered_hint: val, tiered_hint_source: src },
-      };
-    })(),
+    ...(anyDeclared ? { effective_policy: policy } : {}),
     ...(opts.modelStatus !== undefined ? { model_status: opts.modelStatus } : {}),
     decisions: summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0),
     sources: sourceResults, ok, secs: Math.round((Date.now() - t0) / 100) / 10,
@@ -670,8 +695,10 @@ export function appReportMarkdown(r: AppRunResult): string {
     ...(r.model_status !== undefined
       ? [`- 模型层级：\`${r.model_status}\`（on=真 ONNX 在位；off(missing)=缺产物，走的是规则模式）`] : []),
     ...(r.effective_policy
-      ? [`- 生效策略：\`tiered_hint=${r.effective_policy.tiered_hint}\``
-        + `（来源 ${r.effective_policy.tiered_hint_source}：cli=本次命令覆盖 > pack=包声明 > default）`] : []),
+      ? [`- 生效策略：${Object.entries(r.effective_policy)
+          .filter(([, v]) => v.source !== "default")
+          .map(([k, v]) => `\`${k}=${String(v.value)}\`(${v.source})`).join(" ")}`
+        + `｜优先级 cli=本次命令覆盖 > pack=包声明 > default=今天的行为`] : []),
     `- 角色：${r.roles_used.map((x) => `\`${x}\``).join(", ") || "（未用角色模板）"}`,
     `- 槽位（值只来自计划）：${JSON.stringify(r.slots)}`,
     ...(r.path_stop !== undefined

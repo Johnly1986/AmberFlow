@@ -111,6 +111,18 @@ npm run apps:suite                                       # 一条命令验收所
   若合计为 0 ⇒ 退出码 4 + 页脚写明"运行期弹性主张不成立"。出处：
   [docs/ARCHITECTURE_IMPROVEMENTS.md](../docs/ARCHITECTURE_IMPROVEMENTS.md) §5/§7。
 
+**运行策略可以声明**（`pack.policy`，缺省 = 今天的行为；优先级 CLI 本次 > 包声明 > 缺省）：
+
+| 键 | 作用 | 缺省 |
+|---|---|---|
+| `tiered_hint` | hint 档内歧义时改问"这几个候选里哪个"（窄问） | `false` |
+| `risk_ask` | `rules-only` = 只信 `DESTRUCTIVE_PATTERNS`，不再每步花一次前向问"要不要拦"（实测 5.6–7.7× 提速，结果逐字段相同） | `"always"` |
+| `reobserve` | 低置信要停之前，加宽重看一次（120 元素） | `true` |
+| `max_effective_repeats` | 同一元素"有效重复"的上界，超了就 `no_progress` | `3` |
+
+生效值与来源写进 `<app>-result.json` 的 `effective_policy` 与报告行；**四项都缺省时这个字段整个不存在**
+（缺省等价：不声明的包输出逐字节不变）。未知键/错类型加载期报错。
+
 **退出码契约**（`npm run apps` 与 `npm run apps:suite` 都写进了 `--help`）：
 
 | 命令 | 码 | 含义 |
