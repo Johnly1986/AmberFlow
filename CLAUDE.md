@@ -226,7 +226,7 @@ These are empirical findings from this codebase's own experiments — preserve t
 - **DOM signals are the only completion truth.** laya's noul "done" judgment false-positives on unchanged pages; it is logged as advisory and never grants `done` (see the `is_done` comment in browser_agent.py).
 - **Risk = deterministic keyword rules OR model vote ≥ 0.6.** The base checkpoint's risk head flips with goal phrasing (a real checkout click scored 0.18 under a "navigate" goal; cart navigation scored 0.81 under "open cart page"). `DESTRUCTIVE_PATTERNS` catches the high-stakes verbs; the gate asks for confirmation rather than blocking.
 - **Literal mappings go to rules, semantics to laya.** `_nav_rule` (href match, gated on navigation verbs) and `_affordance_rule` (unique data-test/label token match) run before laya. Both need their guards: "shopping cart" must not href-match cart.html; ambiguity falls through to laya.
-- **Two implementations of the hint grammar must stay in sync.** `BrowserMiddleware._hint_match` resolves hints against the in-memory pool; `hint_lookup` re-queries the DOM in JS for a target the MAX_ELEMENTS budget evicted. They drifted once (`#id` was added to one side only) and the plan-named target was silently lost on en.wikipedia. `hint_lookup` also **stamps** its matches (`data-hintref`) in the same pass that matches them: re-resolving scan indices against a later `page.locator(...).all()` returned a *different* element on python.org because the DOM mutated in between. Multi-word labels additionally need real `\s` escapes inside the raw JS string.
+- **Two implementations of the hint grammar must stay in sync.** POOL-side, the 6 forms are now SINGLE-SOURCED in `rules.hintMatchImpl` (P1): `hintMatch` (collapsing view) and `hintCandidates` (tiered set) are two eyes of one walk, `hintMatch ≡ firstIfSame(hintCandidates)` pinned by 20 differential cases (`tests/rules-tiered.test.ts`). The DOM-side half (`hint_lookup`) still re-queries live pages for targets the MAX_ELEMENTS budget evicted — it must be changed IN PAIRS with the parser (it drifted twice: `#id` added to one side only; `=` missed case-folding — the next bullet). `hint_lookup` also **stamps** its matches (`data-hintref`) in the same pass that matches them: re-resolving scan indices against a later `page.locator(...).all()` returned a *different* element on python.org because the DOM mutated in between. Multi-word labels additionally need real `\s` escapes inside the raw JS string. For the 2026-10 execution-layer hardening (single forbid egress, structured `stop_code`, secret masking, the `hosts` navigation envelope, config-error preflight, `$AMBERFLOW_HOME/apps`, the gated `tieredHint` narrower ask) see the section at the end of this file + ARCHITECTURE.md §四.11.
 - **Hint attribute values are case-FOLDED, not `==`.** The `=` branch lower-cases the hint on entry, so comparing it against the raw attribute silently missed upper-case ids (`data-test="net-CAM-1001"`, the normal shape for device ids) and the plan-named target fell back to laya (~0.03 conf, whole batch BLOCKED). `~` and `#id` already case-folded; `=` was the odd one out -- the same two-implementation drift as before. Pinned by a unit test.
 - **Language routing is opt-in AT THE EXECUTOR.** `BrowserMiddleware(route_models=True)` (bench: `model="router"` / `--force-model router`) asks `laya.Router` which checkpoint suits each page's state -- script detection is the primary signal -- so a plan needs no hand-written `model` field. Two details are load-bearing: the default checkpoint built in `__init__` is **attached** to the router (`Router.attach`), never duplicated; and on a swap the executor must drop **its own** reference and `gc.collect()` BEFORE `Router.load`, because the old Agent (~0.7-1.7 GB) would otherwise stay alive while the new one is built -- that co-residency window is what OOMs a 3 GB box. Any router failure degrades to the resident agent. Measured: router mode holds **9/9 cases, 25/25 subgoals**, and the CJK cases log `checkpoint -> multilingual`; but the run took **410.9 s vs 58.1 s** fixed-english, i.e. routing buys language coverage, not speed (checkpoint reload per language switch, `max_loaded=1` on this box).
 - **Indistinguishable duplicate targets are decidable.** `_first_if_same()` takes the first match in scan order when every hit shares (tag,label,href,data-test) -- bbc.com ships two identical `/news` links -- and still returns None for genuinely different candidates.
@@ -445,7 +445,7 @@ These are empirical findings from this codebase's own experiments — preserve t
   (`ctrip/ctrip_task.py`). A subgoal that genuinely needs several actions says so explicitly (`target_hints` + its own
   `slots`), one that may not apply at all says so with `when` ("dismiss the overlay IF it is there") -- skipped, not
   failed -- and one that failed this once says `retries` and is re-run whole. What remains inexpressible is a branch
-  INSIDE a subgoal, jumping BACK to an earlier subgoal, and multi-way choices (ARCHITECTURE.md §7.3).
+  INSIDE a subgoal, jumping BACK to an earlier subgoal, and multi-way choices (ARCHITECTURE.md §七 第 3 条).
 - **On Chinese pages the plan's `target_hint` is load-bearing, not decoration.** The ctrip case resolves 19/19 steps by rule with
   hints (zero model calls); stripping them blocks subgoal 1 outright -- confidence **0.13** on the zh homepage, and **0.24** after
   `laya.Router` correctly routes to `multilingual` (Han = 61% of letters). Routing doubles it and still misses the 0.25 floor.
@@ -677,3 +677,27 @@ These are empirical findings from this codebase's own experiments — preserve t
      4 × 0.12 s polls (max 0.48 s), deliberately NOT gated on `!inert` (an async effect is invisible to the
      pre/post snapshot) (`⑤c`). The saucedemo case's flake rate went **7 failures in 15 runs -> 0 in 8**, and the
      whole pack runs **34/34 subgoals with zero model picks** (real model: 43 steps, all `rule:match`, 102.6 s).
+
+## 执行层三段化（2026-10 重审，P0/P1 已落地；全文见 ARCHITECTURE.md §四.11 + docs/ARCHITECTURE_REVIEW.md）
+
+重审把 `run()` 揉在一起的三件事切开：**命令层**（声明半=应用配置/实例化半=运行期收候选集）、
+**决策层**（只读，唯一问模型处，只在闭集内选）、**数据槽层**（声明式绑定 + 该面原语执行）。
+本轮落了 P0（只改形状、不改任何运行结果）与 P1（hint 单实现 + tier 候选集，门控默认关）：
+
+- **P0 五条硬化，每条都有负例（`tests/executor-p0.test.ts`）**：① 禁元素单出口
+  `forbid/unforbid/pruneForbids`（源码结构守卫钉死 1 处写入）；② 停因是数据 `stop_code`+`stop_step`
+  （人读串 `stop_reason` 逐字节照旧——parity 语料钉它）；③ 敏感字段掩码 `password/file/hidden` 只留
+  按长度掩码（明文不进快照/trace/报告/witness，inert 判定与 `css_value_equals` 不受影响）；
+  ④ `hosts` 是**导航信封**：`disallowedHost` goto 前拒绝（0 步 0 副作用）、动作后越界即停，
+  **空声明不启用**（离线包逐字节不变）；⑤ 配置类错误 `preflightConfig` 在任何腿前拦、
+  `NEVER_RETRY_CODES={config_error,host_not_allowed}` 只跑一次。`LAYA_ONNX_MODEL` 优先级并入
+  `model-artifacts` 单一口径（doctor 与 runtime 曾判得不一致）。
+- **应用落盘移出 checkout**（前提 A）：新产物默认写 `$AMBERFLOW_HOME/apps`（缺省 `~/.amberflow/apps`），
+  发现制扫 `[用户目录, 仓库夹具]` 同 id 用户赢；`spec_version` 不认识就响亮拒绝（CI 盖不到用户的包）。
+- **P1 hint 单实现 + 更小提问（门控 `tieredHint`，默认 OFF = 逐字节不变；`tests/rules-tiered.test.ts`）**：
+  6 种语法收敛进 `rules.hintMatchImpl`，`hintMatch ≡ firstIfSame(hintCandidates)` 由 20 例差分逐形状钉死；
+  ON 时档内歧义向模型只问那几条候选（实测 OFF 问 15、ON 问 3），窄问弃权即回退整池——
+  **阶梯四个 `method` 取值一字未动**。出口打通 CLI `--tiered-hint` 与桥 `tiered_hint`。
+- **P2/P3/P4 按 §7 门槛排队**（`src/actions.ts` 命令层、`src/bindings.ts` 数据槽层、`next` 分支）：
+  门槛是 P1 的线上 A/B 真机数字 + 人工裁定，本轮不越权实施；红线（闭集不可逃逸、缺省等价、
+  新知识过零模型重放门）已写进 `docs/ARCHITECTURE_REVIEW.md` §8。

@@ -269,3 +269,31 @@ npm run apps:suite && npm run apps:matrix             # 行为与成本账单
 - **需要裁定**：① 红线①改写为"计划结构冻结 + 闭集内选择 + 过门回填"是否接受？
   ② §七.9"一个子目标一次点击"是否同意推翻？③ P0 直接开工，还是先把 P1 的 A/B 台搭起来？
   ④ `space`/`bindings` 放 `src/` 共享层（新模块）还是先作为 `app-pack.ts` 内部编译产物试一轮？
+
+## 11. 实施状态补记（同日，按本文 §7 顺序落地 P0 + P1）
+
+**P0 已实施**（"不改行为只改形状"逐条兑现，`npm run verify` 全绿 + `apps:gen --check` 8/8 不漂）：
+① 禁元素收敛为单出口 `forbid/unforbid/pruneForbids`（7 写入 / 3 re-prune → 各 1 处，源码结构守卫测试钉死）；
+② `RunReport.stop_code`（`StopCode` 枚举）+ `stop_step`，人读串照旧（parity 语料逐字节）；
+③ 敏感字段掩码（快照/trace/报告/归纳 witness；按长度掩码保住 inert 判定，信号读真实 DOM 不受影响）；
+④ `hosts` 运行期强制（`disallowedHost`：goto 前拒绝 = 0 步 0 副作用、动作后越界即结构化停止、空声明不启用）；
+⑤ 配置类错误启动期预检（`preflightConfig` 在任何腿之前）+ `NEVER_RETRY_CODES`（实测旧行为：坏产物路径
+跑掉数据腿与首个工具步、同一错误重试 2 次）+ `LAYA_ONNX_MODEL` 优先级与 `model-artifacts` 单一口径并轨；
+⑥ 应用落盘移出 checkout（`src/amberflow-home.ts`，`$AMBERFLOW_HOME/apps` 缺省；learn/plan:flow 默认用户作用域，
+发现制 `[用户目录, 仓库夹具]` 同 id 用户赢；`spec_version` 响亮拒绝照旧）。
+负例：`tests/executor-p0.test.ts` 21 条（含 D1/D2 结构守卫、掩码负例、`evil.example` 干净拒绝、坏产物路径零副作用）。
+
+**P1 已实施**（门控 `tieredHint` 默认 OFF = 行为逐字节；`tests/rules-tiered.test.ts` 24 条）：
+6 种语法收敛为单一走查器 `hintMatchImpl`，`hintMatch ≡ firstIfSame(hintCandidates)` 由 20 例差分逐形状钉死；
+档内歧义出口携带候选集不再塌缩成 `null`；打开门控后模型收到**更小提问**——实测同一歧义页
+OFF 问 15 条候选、ON 只问 3 条，窄问弃权即回退整池；阶梯四个 `method` 取值与 `apps:suite` 结论一字未动。
+出口打通：CLI `--tiered-hint`、DSH 桥 `tiered_hint`（新守卫：不传新开关时默认 argv 逐字节不变）。
+
+**§9 复算口径的变化**：`grep -c "forbidden\[.*\] = esig" src/executor.ts` → **1**（助手内部那一行）；
+`stopReason = ` 的直接赋值只剩初始化 + `stop()` 内部两处；其余数字（trace.push 7 种等）未变——P0 没碰 trace 形状。
+
+**仍未做**（按本文自己的纪律，不在本轮越权）：P2 `src/actions.ts`、P3 `src/bindings.ts`、P4 `next`；
+线上包 A/B 的**真机数字**（本文 §4#1 明说不能假设一定变好，需要 `--tiered-hint` 在 live pack 上跑对照——
+离线机制已证，线上一跑需网络与权重）；`BrowserMiddleware` 更名（前提 C 的命名债）；D3 inert 降级（要先有
+"死元素当目标"夹具证明新上界早停且理由不同）。**需要裁定**的四个问题里，③已按"P0 直接开工"执行，
+①②④仍归项目方拍板。

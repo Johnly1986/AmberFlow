@@ -29,6 +29,14 @@
 > [docs/architecture.png](docs/architecture.png)（矢量版 [docs/architecture.svg](docs/architecture.svg)）。
 > 图由 `node tools/arch-diagram.mjs` **生成**——文字出框、盒子重叠、越过内容右界都会让生成失败，
 > 所以它不会悄悄变成一张过时的图：改了模块就改这张表的源。
+>
+> **重审后的目标架构**（④ 执行层三段化：命令层 / 决策层 / 数据槽层 + 三档裁定 + 迁移顺序）见
+> [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)，其生成图
+> [docs/architecture-target.svg](docs/architecture-target.svg)（`node tools/arch-diagram-v2.mjs`，
+> 先量后写：坏图不落盘）。**落地状态：P0（形状硬化，不改任何运行结果）与 P1（hint 单实现 +
+> tier 候选集，门控 `tieredHint` 默认关）已实施并带负例测试**（`tests/executor-p0.test.ts`、
+> `tests/rules-tiered.test.ts`）；P2/P3/P4 按该文档 §7 的门槛排队——门槛是 P1 的线上 A/B 数字
+> 与人工裁定，不是代码能力。
 
 ```
                      ┌── LLMPlanner        (System 2：一次性编排 / 失败后重规划)
@@ -59,6 +67,14 @@ laya (pip)         Agent.predict / predict_shortlist  ·  Router.route/predict(�
 `bench/run_bench.py` 的 `BenchMiddleware` **继承**（不复制）这个执行循环，只做两件事：
 选 checkpoint、拨消融开关（rules on/off、anti-repeat、conf floor）。单测钉死
 `BenchMiddleware.run is BrowserMiddleware.run`。
+
+这条链在 2026-10 重审后按"这一步在干什么"分成三段（[docs/architecture-target.svg](docs/architecture-target.svg)）：
+**命令层**（声明半 = 应用配置 / 实例化半 = 运行期把声明 × 当次观察收成候选集）、
+**决策层**（只读，唯一问模型的地方，只在闭集内选）、**数据槽层**（声明式绑定 + 该面原语执行）。
+已落地的 P0/P1 不改这十个盒子的顺序，改的是它们的**形状纪律**：禁元素单出口、停因是数据
+（`stop_code`）、敏感值掩码、hosts 导航信封、配置错误不重试、hint 档内歧义成为可交给决策层的
+**候选集**（`tieredHint`，默认关）。"选目标 4 个盒子 / 定参数 0 个盒子"的比例失衡就此有了承接面——
+把它彻底改成"命令 × 参数"闭集是 P2/P3 的事，门槛是 P1 的 A/B 数字（见 §四.11）。
 
 ### 2.1 包结构：`layaapp/` 就是应用层
 
@@ -166,6 +182,48 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
 - **讲得清（P2）**：README 的"为什么本地还养一个模型"给四组带复现命令的数字，含诚实边界
   （CJK 页面上模型 0.03–0.09，所以路由按文字系统切、不按置信度切）。
 
+### 11. 执行层三段化：先形状，后能力（2026-10 重审，`docs/ARCHITECTURE_REVIEW.md` P0/P1 已落地）
+
+重审的结论不是"执行层少了一层"，而是 `run()` 把**实例化动作空间 / 选择 / 应用动作**揉在一个
+约 550 行的可变状态机里（7 处禁元素出口、12 处散文 stop_reason、7 种 trace 形状）。
+迁移顺序按"性价比 + 现成验收台"排：P0 只改形状、不改任何运行结果，把 P1–P4 要踩的地基先立住。
+
+**P0（已落地，`tests/executor-p0.test.ts` 21 条负例钉死）**
+
+- **禁元素只有一个出口**：`forbid(ref, el, why)` / `unforbid` / `pruneForbids`（D1/D2——同一件事
+  曾有 7 处写入、3 处独立 re-prune；源码结构守卫测试把它钉成 1 处）。
+- **停因是数据**：`RunReport.stop_code`（`StopCode` 枚举）+ `stop_step`；人读串 `stop_reason`
+  逐字节照旧（冻结 parity 语料钉的是人读串——加形状，不改措辞）。
+- **敏感字段遮蔽**：`password/file/hidden` 的值在 inert 快照、trace、报告、归纳 witness 里
+  一律替换为**按长度的掩码**（`***(N)`）——明文不落盘，而"输入改变了页面"仍可判（否则填密码
+  会被误判 inert）；`css_value_equals` 走真实 DOM 读取，判完成不受影响。
+- **hosts 是导航信封**（运行期强制，不再是纯文档）：goto 前拒绝未声明主机（0 步 0 副作用），
+  动作后落到未声明主机即结构化停止；`file:/about:/data:` 不拦、**空声明不启用**（离线夹具包
+  逐字节不变）。子域按后缀放行。
+- **配置类错误不是瞬时失败**：`preflightConfig` 在任何腿**之前**拦下"显式指向不存在的产物"
+  （实测旧行为：坏 `LAYA_ONNX_MODEL` 把数据腿和第一个工具步都跑掉了，同一错误重试 2 次）；
+  `NEVER_RETRY_CODES = {config_error, host_not_allowed}` 让重试环只跑一次。顺带钉死
+  `LAYA_ONNX_MODEL` 与 `LAYAA_*` 旧名的优先级单一口径（doctor 与 runtime 曾判得不一致）。
+- **应用落盘移出 checkout**（前提 A）：`src/amberflow-home.ts` 定义 `$AMBERFLOW_HOME/apps`
+  （缺省 `~/.amberflow/apps`）；`learn`/`plan:flow` 的新产物默认写用户作用域，
+  发现制扫 `[用户目录, 仓库夹具]`、同 id 用户优先——仓库 `apps/` 降为开发夹具，
+  `spec_version` 不认识就响亮拒绝（CI 盖不到用户的包，猜 = 静默错）。
+
+**P1（已落地，门控默认关；`tests/rules-tiered.test.ts` 24 条）**
+
+- 6 种 hint 语法收敛为**单一**走查器 `hintMatchImpl`：`hintMatch` 是它"塌缩后"的那只眼睛，
+  `hintCandidates` 是"不塌缩"的那只（最强非空档的 refs + tier + submit-decided）；
+  `hintMatch ≡ firstIfSame(hintCandidates)` 由 20 例差分测试逐形状钉死。
+- 档内歧义不再退化成"40 里选 1"：`tieredHint`（默认 OFF）打开后，歧义档变成对模型的
+  **更小提问**（候选 3 条只问 3 条；实测同一页 OFF 问 15 / ON 问 3），窄问弃权即回退整池，
+  阶梯顺序与四个 `method` 取值一字未动——报告、对拍语料、`apps:suite` 结论不受影响。
+  出口打通到 CLI（`--tiered-hint`）与 DSH 桥（`tiered_hint`）。
+
+**P2/P3/P4（排队，门槛是数字不是说服力）**：`src/actions.ts`（命令层声明半/实例化半）、
+`src/bindings.ts`（数据槽层声明式绑定）、`next` 声明式后继。重审文档 §8 的四条红线（收窄后的
+①"计划结构冻结 + 闭集内选择 + 过门回填"、②"模型永不选值"、③"完成只认该面证据"、
+④"新知识过零模型重放门"）与 §7.2 的负例清单是它们的验收口径；本轮不越权实施。
+
 ## 五、冻结流程的契约（数据格式）
 
 ```json
@@ -203,7 +261,11 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
    骨架形状现在是配置（阶段列表 + `stage`/`repeat`，见 `transfer/specs/voyagio.json` 的两页向导），
    但 `repeat` 只有 once/per_date/per_checkin 三种，**没有"回退/条件跳转/并发搜索"**——
    那些要么加新的 repeat 语义，要么由 replan 接手。
-4. **两处 hint 语法实现易漂移**，且 `hint_lookup` 依赖向页面 DOM 写入 `data-hintref` 章。
+4. **hint 语法：池侧已单实现，DOM 侧仍是第二匹配器**。P1 把 6 种语法收敛进 `rules.hintMatchImpl`
+   （`hintMatch`/`hintCandidates` 同走一遍，差分测试逐形状钉死等价）；`extraction.hintLookup`
+   为回捞被预算挤出的元素仍在 DOM 里再解析一次（它必须查活页面），历史上它漂移过两次
+   （`#id` 只加一侧、`=` 分支漏大小写折叠），所以它的形状仍要和新走查器**成对修改**，
+   且依赖向页面 DOM 写入 `data-hintref` 章。
 5. 注入闸门 0.95 与良性页实测 0.91–0.94 只差 0.01，需要按页面类型分层。
 6. **真 LLM 闭环仍未实跑**：本机没有 `OPENAI_*`，`LLMPlanner`/`LLMAuditor` 只有离线单测覆盖（prompt 携带页面快照、hint 保留、replan 成功/无进展/次数上限）——缺的是端点，不是代码。replan 尚未把**阻塞那一刻**的页面快照传回 planner（`page` 就在作用域内，2 行改动）；`LLMAuditor` 也还没替掉 `MockAuditor`。
 7. `_listener_cache` 按 URL 无上限增长；`run_bench.py` 只在全部跑完后落盘（一次 35 min 的跑分险些因超时全丢）。
