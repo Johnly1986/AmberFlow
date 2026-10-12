@@ -10,6 +10,7 @@
 .bxm{fill:#ebf4ff;stroke:#4a86c5;stroke-width:1.2}
 .bxe{fill:#f0fff4;stroke:#4a9d63;stroke-width:1.2}
 .bxp{fill:#faf5ff;stroke:#8b5fbf;stroke-width:1.4}
+.bxnew{fill:#f0f7ff;stroke:#2b6cb0;stroke-width:1.6}
 .t{fill:#1a202c;font-size:12.5px;font-weight:600}
 .s{fill:#4a5568;font-size:10.5px}
 .sm{fill:#2b6cb0;font-size:10.5px}
@@ -61,12 +62,13 @@
 <text x="821" y="245" class="s">图 + 权重（+ tokenizer）</text>
 <text x="821" y="259" class="s">.part 先落，SHA256 先验后换</text>
 <text x="821" y="273" class="s">半途态整组撤回，不覆盖已有</text>
-<rect x="1075" y="196" width="340" height="84" class="bxe"/>
+<rect x="1075" y="196" width="340" height="98" class="bxe"/>
 <text x="1086" y="215" class="t" font-size="12.5">度量与门禁（同一条命令可复现）</text>
 <text x="1086" y="231" class="s">apps:matrix 声明成本 / 0 代码行 / 站点知识泄漏与债</text>
 <text x="1086" y="245" class="s">apps:suite 逐应用真跑 + 模型账 · apps:gen --check</text>
-<text x="1086" y="259" class="s">probes:baseline · verify · smoke.sh——全绿才算完</text>
-<text x="1086" y="273" class="sm">读 ④ 落下的 *-result.json（模型账两列的出处）</text>
+<text x="1086" y="259" class="s">model:contribution 逐题实测 · ask-shapes 换问法</text>
+<text x="1086" y="273" class="s">probes:baseline · verify · smoke.sh——全绿才算完</text>
+<text x="1086" y="287" class="sm">读 ④ 落下的 *-result.json（模型账两列的出处）</text>
 <text x="58" y="296" class="lbl">入口只编排：所有浏览器决策都落到同一个执行循环（④），没有第二个分支</text>
 <rect x="40" y="322" width="1480" height="122" class="band"/>
 <text x="58" y="346" class="lay">② 应用 = 目录（数据，不是代码）</text>
@@ -95,7 +97,7 @@
 <text x="58" y="484" class="lay">③ 计划层</text>
 <rect x="175" y="492" width="330" height="50" class="bx"/>
 <text x="186" y="511" class="t" font-size="12.5">src/plan.ts — TaskPlan / PlanningRules</text>
-<text x="186" y="527" class="s">有序子目标 + 完成信号 + 数据袋；checkpoint 续跑</text>
+<text x="186" y="527" class="s">有序子目标 + 完成信号 + 数据袋 · checkpoint 续跑</text>
 <rect x="520" y="492" width="330" height="50" class="bx"/>
 <text x="531" y="511" class="t" font-size="12.5">src/planner.ts — runPlan / 重试</text>
 <text x="531" y="527" class="s">when 跳过 · retries 整步重跑 · replan 异常必打印</text>
@@ -105,67 +107,74 @@
 <rect x="1180" y="492" width="235" height="50" class="bx"/>
 <text x="1191" y="511" class="t" font-size="12.5">src/signals.ts — 信号语言</text>
 <text x="1191" y="527" class="s">5 个 DOM 算子 + all_of/any_of/not</text>
+<text x="58" y="548" class="lbl">P4：步 id/next + createPathWalk（路径上界 → next_cycle）；runPlan 拒绝 next 边——声明式后继只在应用旅程层生效；signal 与 when 走同一个走查器</text>
 <rect x="40" y="568" width="1480" height="208" class="band"/>
 <text x="58" y="592" class="lay">④ 执行层 — 唯一生产循环 BrowserMiddleware.run（永不分叉；bench 只继承换 checkpoint/消融开关）</text>
-<rect x="60" y="604" width="130" height="72" class="bx"/>
+<rect x="60" y="604" width="118" height="72" class="bx"/>
 <text x="71" y="621" class="t" font-size="11.5">元素抽取</text>
 <text x="71" y="637" class="s">extraction.ts</text>
 <text x="71" y="651" class="s">一次 JS pass</text>
-<text x="71" y="665" class="s">iframe + shadow</text>
-<rect x="194" y="604" width="130" height="72" class="bx"/>
-<text x="205" y="621" class="t" font-size="11.5">规则 / hint</text>
-<text x="205" y="637" class="s">rules.ts</text>
-<text x="205" y="651" class="s">nav / affordance</text>
-<text x="205" y="665" class="s">分层 hint 匹配</text>
-<path class="ln" d="M190,640 H194" marker-end="url(#arr)"/>
-<rect x="328" y="604" width="130" height="72" class="bxm"/>
-<text x="339" y="621" class="t" font-size="11.5">laya 选</text>
-<text x="339" y="637" class="s">pickElement</text>
-<text x="339" y="651" class="s">conf &lt; floor</text>
-<text x="339" y="665" class="s">→ block</text>
-<path class="ln" d="M324,640 H328" marker-end="url(#arr)"/>
-<rect x="462" y="604" width="130" height="72" class="bxm"/>
-<text x="473" y="621" class="t" font-size="11.5">加宽重看</text>
-<text x="473" y="637" class="s">reobserve ×1</text>
-<text x="473" y="651" class="s">120 元素</text>
-<text x="473" y="665" class="s">laya:reobserve</text>
-<path class="ln" d="M458,640 H462" marker-end="url(#arr)"/>
-<rect x="596" y="604" width="130" height="72" class="bxm"/>
-<text x="607" y="621" class="t" font-size="11.5">升级老师</text>
-<text x="607" y="637" class="s">escalateFn</text>
-<text x="607" y="651" class="s">只能点池中 ref</text>
-<text x="607" y="665" class="s">失败即弃权</text>
-<path class="ln" d="M592,640 H596" marker-end="url(#arr)"/>
-<rect x="730" y="604" width="130" height="72" class="bx"/>
-<text x="741" y="621" class="t" font-size="11.5">风险闸门</text>
-<text x="741" y="637" class="s">DESTRUCTIVE</text>
-<text x="741" y="651" class="s">+ 模型票 ≥0.6</text>
-<text x="741" y="665" class="s">dry-run 证据</text>
-<path class="ln" d="M726,640 H730" marker-end="url(#arr)"/>
-<rect x="864" y="604" width="130" height="72" class="bx"/>
-<text x="875" y="621" class="t" font-size="11.5">可点性探针</text>
-<text x="875" y="637" class="s">hit-test / 遮挡</text>
-<text x="875" y="651" class="s">失败=结果</text>
-<text x="875" y="665" class="s">不抛栈</text>
-<path class="ln" d="M860,640 H864" marker-end="url(#arr)"/>
-<rect x="998" y="604" width="130" height="72" class="bx"/>
-<text x="1009" y="621" class="t" font-size="11.5">执行动作</text>
-<text x="1009" y="637" class="s">click / type</text>
-<text x="1009" y="651" class="s">select / radio</text>
-<text x="1009" y="665" class="s">range / 填值=slots</text>
-<path class="ln" d="M994,640 H998" marker-end="url(#arr)"/>
-<rect x="1132" y="604" width="130" height="72" class="bx"/>
-<text x="1143" y="621" class="t" font-size="11.5">inert 检测</text>
-<text x="1143" y="637" class="s">url+text+values</text>
-<text x="1143" y="651" class="s">相同→禁该元素</text>
-<text x="1143" y="665" class="s">按签名记</text>
-<path class="ln" d="M1128,640 H1132" marker-end="url(#arr)"/>
-<rect x="1266" y="604" width="130" height="72" class="bxe"/>
-<text x="1277" y="621" class="t" font-size="11.5">完成 = DOM 信号</text>
-<text x="1277" y="637" class="s">check_signal</text>
-<text x="1277" y="651" class="s">noul 仅参考</text>
-<text x="1277" y="665" class="s">manual → 问人</text>
-<path class="ln" d="M1262,640 H1266" marker-end="url(#arr)"/>
+<text x="71" y="665" class="s">iframe+shadow</text>
+<rect x="182" y="604" width="118" height="72" class="bxnew"/>
+<text x="193" y="621" class="t" font-size="11.5">命令闭集</text>
+<text x="193" y="637" class="s">actions.ts P2</text>
+<text x="193" y="651" class="s">声明×当次观察</text>
+<text x="193" y="665" class="s">空则 space_empty</text>
+<path class="ln" d="M178,640 H182" marker-end="url(#arr)"/>
+<rect x="304" y="604" width="118" height="72" class="bx"/>
+<text x="315" y="621" class="t" font-size="11.5">规则 / hint</text>
+<text x="315" y="637" class="s">rules.ts</text>
+<text x="315" y="651" class="s">nav / affordance</text>
+<text x="315" y="665" class="s">分层 hint 匹配</text>
+<path class="ln" d="M300,640 H304" marker-end="url(#arr)"/>
+<rect x="426" y="604" width="118" height="72" class="bxm"/>
+<text x="437" y="621" class="t" font-size="11.5">laya 选</text>
+<text x="437" y="637" class="s">pickElement</text>
+<text x="437" y="651" class="s">conf &lt; floor</text>
+<text x="437" y="665" class="s">→ block</text>
+<path class="ln" d="M422,640 H426" marker-end="url(#arr)"/>
+<rect x="548" y="604" width="118" height="72" class="bxm"/>
+<text x="559" y="621" class="t" font-size="11.5">加宽重看</text>
+<text x="559" y="637" class="s">reobserve ×1</text>
+<text x="559" y="651" class="s">120 元素</text>
+<text x="559" y="665" class="s">laya:reobserve</text>
+<path class="ln" d="M544,640 H548" marker-end="url(#arr)"/>
+<rect x="670" y="604" width="118" height="72" class="bxm"/>
+<text x="681" y="621" class="t" font-size="11.5">升级老师</text>
+<text x="681" y="637" class="s">escalateFn</text>
+<text x="681" y="651" class="s">只能点池中 ref</text>
+<text x="681" y="665" class="s">失败即弃权</text>
+<path class="ln" d="M666,640 H670" marker-end="url(#arr)"/>
+<rect x="792" y="604" width="118" height="72" class="bx"/>
+<text x="803" y="621" class="t" font-size="11.5">风险闸门</text>
+<text x="803" y="637" class="s">DESTRUCTIVE</text>
+<text x="803" y="651" class="s">+ 模型票 ≥0.6</text>
+<text x="803" y="665" class="s">dry-run 证据</text>
+<path class="ln" d="M788,640 H792" marker-end="url(#arr)"/>
+<rect x="914" y="604" width="118" height="72" class="bx"/>
+<text x="925" y="621" class="t" font-size="11.5">可点性探针</text>
+<text x="925" y="637" class="s">hit-test / 遮挡</text>
+<text x="925" y="651" class="s">失败=结果</text>
+<text x="925" y="665" class="s">不抛栈</text>
+<path class="ln" d="M910,640 H914" marker-end="url(#arr)"/>
+<rect x="1036" y="604" width="118" height="72" class="bx"/>
+<text x="1047" y="621" class="t" font-size="11.5">执行动作</text>
+<text x="1047" y="637" class="s">click / type</text>
+<text x="1047" y="651" class="s">select / radio</text>
+<text x="1047" y="665" class="s">填值=绑定 P3</text>
+<path class="ln" d="M1032,640 H1036" marker-end="url(#arr)"/>
+<rect x="1158" y="604" width="118" height="72" class="bxnew"/>
+<text x="1169" y="621" class="t" font-size="11.5">inert → 上界</text>
+<text x="1169" y="637" class="s">url+text+values</text>
+<text x="1169" y="651" class="s">同元素重复→</text>
+<text x="1169" y="665" class="s">no_progress D3</text>
+<path class="ln" d="M1154,640 H1158" marker-end="url(#arr)"/>
+<rect x="1280" y="604" width="118" height="72" class="bxe"/>
+<text x="1291" y="621" class="t" font-size="11.5">完成 = 信号</text>
+<text x="1291" y="637" class="s">check_signal</text>
+<text x="1291" y="651" class="s">noul 仅参考</text>
+<text x="1291" y="665" class="s">manual → 问人</text>
+<path class="ln" d="M1276,640 H1280" marker-end="url(#arr)"/>
 <rect x="60" y="690" width="400" height="68" class="bx"/>
 <text x="71" y="709" class="t" font-size="12.5">工具步（命令行当动作腿）</text>
 <text x="71" y="725" class="s">src/tool-signals.ts：exit_ok / stdout / json_path / file_exists</text>
@@ -183,7 +192,7 @@
 <text x="1161" y="725" class="s">&lt;app&gt;-result.json：model_status</text>
 <text x="1161" y="739" class="s">&lt;app&gt;-report.md：逐步表 + 决策来源小计</text>
 <text x="58" y="776" class="lbl">低置信 break 的那次咨询不在 trace 留 method——咨询数在运行时缝上数，过关数在 trace 里数</text>
-<rect x="40" y="792" width="1480" height="116" class="band"/>
+<rect x="40" y="792" width="1480" height="134" class="band"/>
 <text x="58" y="816" class="lay">⑤ 模型运行时（可缺席——缺了走规则模式，需要模型的步骤如实 block）</text>
 <rect x="175" y="826" width="260" height="66" class="bxm"/>
 <text x="186" y="845" class="t" font-size="12.5">src/model.ts — LayaRuntime 缝</text>
@@ -201,10 +210,11 @@
 <text x="1111" y="845" class="t" font-size="12.5">src/model-artifacts.ts</text>
 <text x="1111" y="861" class="s">三件齐才算 on（单一出处）</text>
 <text x="1111" y="875" class="s">doctor / fetch / 运行器 / 桥 共用</text>
+<text x="58" y="906" class="lbl">实测（真 ONNX，本机）：声明解决了 98.8% 的浏览器步；模型 top-1 25%、闸门内 precision 15%（两把不可比的尺子：passthrough AUC 0.233 / shortlist 0.587）</text>
 <rect x="40" y="924" width="1480" height="108" class="band"/>
 <text x="58" y="948" class="lay">⑥ 分层证据（结论必须能被命令复现，叙述不算证据）</text>
 <rect x="175" y="958" width="420" height="60" class="bxe"/>
-<text x="186" y="977" class="t" font-size="12.5">tests/ 950+ 条 + 六层跨实现对拍（冻结语料）</text>
+<text x="186" y="977" class="t" font-size="12.5">tests/ 1061 条 + 六层跨实现对拍（冻结语料）</text>
 <text x="186" y="993" class="s">rules/extraction/executor/datasource/ctrip/transfer</text>
 <text x="186" y="1007" class="s">node-port-poc：ONNX 与 ORT 数值对拍 max|diff| 2.98e-5</text>
 <rect x="610" y="958" width="400" height="60" class="bxe"/>

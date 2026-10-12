@@ -11,11 +11,16 @@
  * 内容对应 `docs/ARCHITECTURE_REVIEW.md` 的讨论结果：六层保持连续（可映射新旧），
  * ④ 执行层展开成"编译 / 选择 / 应用"三段（= 命令层 / 决策层 / 数据槽层），
  * 并附三档裁定、已确认缺陷、迁移顺序与改写后的红线。
+ *
+ * 2026-10 更新：⑧ 从"待迁移"改成**已落地**（P0–P4 + D3/R-4 逐条附验收台）；
+ * 新增 ⑨「模型角色的修正」——独立审查用真 ONNX 模型实测出"分工写反了"
+ * （声明解决 98.8% 的浏览器步；模型 top-1 25%、闸门内 precision 15%），
+ * 修正方向见 `docs/MODEL_ROLE_PLAN.md`。画布相应加高。
  */
 import fs from "node:fs";
 import path from "node:path";
 
-const W = 1560, H = 2130, PAD = 11, RIGHT = 1416;
+const W = 1560, H = 2320, PAD = 11, RIGHT = 1416;
 const wide = (cp) =>
   (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0x303E) || (cp >= 0x3041 && cp <= 0x33FF)
   || (cp >= 0x3400 && cp <= 0x4DBF) || (cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0xA000 && cp <= 0xA4CF)
@@ -170,17 +175,18 @@ note(60, 1196, "闭集不可逃逸：决策层返回集合外的 id ⇒ 拒绝�
 
 /* ══════════════════════════════ ⑤ 模型运行时 ══════════════════════════════ */
 P("M700,1216 V1252"); note(714, 1240, "经决策缓存与咨询计数后问模型");
-band(1252, 130, "⑤ 本地决策模型运行时（可缺席；laya 是当前唯一实现，换决策提供者不动上层）");
+band(1252, 148, "⑤ 本地决策模型运行时（可缺席；laya 是当前唯一实现，换决策提供者不动上层）");
 box(60, 1284, 330, 66, "bxm", "src/model.ts — LayaRuntime 缝", ["load / predictShortlist / Router", "测试注入 scriptedRuntime，不碰权重"]);
 box(402, 1284, 330, 66, "bxm", "laya-onnx.ts + laya-format.ts", ["buildSequence · 温度标定 · shortlist k=8", "checkpoint 按文字系统路由，不按置信度"]);
 box(744, 1284, 330, 66, "bxm", "产物：图 + .onnx.data + tokenizer", ["约 1.7GB，刻意不进 git", "LAYA_ONNX_MODEL 约定 / HF 快照发现"]);
 box(1086, 1284, 330, 66, "bxm", "src/model-artifacts.ts", ["三件齐才算 on（单一出处）", "doctor / 运行器 / 桥 共用"]);
+note(60, 1374, "实测（真 ONNX，本机）：声明解决了 98.8% 的浏览器步；模型 top-1 25%、闸门内 precision 15% ⇒ 它是兜底与诊断，不是承重件（详见 ⑨）", "foot", 1356);
 note(60, 1370, "新增（P0）：配置类错误改为启动期预检、永不重试 —— 实测坏产物路径下数据腿与第一个工具步曾已执行，且同一配置错误被重试 2 次。", "sm", 1356);
 
 /* ══════════════════════════════ ⑥ 分层证据 ══════════════════════════════ */
 P("M700,1382 V1418"); note(714, 1406, "运行结果 = 可核对的证据");
 band(1418, 120, "⑥ 分层证据（结论必须能被命令复现，叙述不算证据）");
-box(60, 1450, 444, 72, "bxe", "tests/ 950+ 条 + 六层跨实现对拍", ["rules / extraction / executor / datasource / ctrip / transfer", "冻结语料；时钟钉在 tools/frozen-today.ts"]);
+box(60, 1450, 444, 72, "bxe", "tests/ 1061 条 + 六层跨实现对拍", ["rules / extraction / executor / datasource / ctrip / transfer", "冻结语料；时钟钉在 tools/frozen-today.ts"]);
 box(516, 1450, 444, 72, "bxe", "用例与线上复测记录", ["bench/cases*.json · ctrip 19 子目标 + 独立判分", "transfer 七站 · live-retest 逐项原始观测"]);
 box(972, 1450, 444, 72, "bxe", "作者 / 独立复核两角色", ["apps/INVENTORY.md 定义「完成一个应用」的五条", "缺陷带最小复现，报而不装绿"]);
 
@@ -212,30 +218,63 @@ box(972, 1606, 444, 120, "bxred", "推翻 —— 实现后果被写成了原则"
 /* ══════════════════════════════ ⑧ 缺陷 → 迁移 ══════════════════════════════ */
 P("M700,1744 V1780"); note(714, 1768, "先立地基，再加能力");
 band(1780, 190, "⑧ 已确认缺陷 → 迁移顺序（按性价比 + 现成验收台）");
-box(60, 1812, 640, 140, "bxred", "已确认缺陷（数字可复算）", [
-  "D1 7 处禁元素出口 / 12 处 stop_reason 散文 / 7 种 trace 形状",
-  "D2 位置性 ref 的 3 处独立 re-prune（同一条不变量写三遍）",
-  "D3 inert 既当证据又当终止责任（噪声信号承担终止）",
-  "D4 敏感字段 0 处遮蔽：填进去的值进 trace 与报告",
-  "D5 hosts 运行期 0 处强制（包可导航到任意主机）",
-  "D6 配置类错误被当瞬时错误重试，且有副作用",
-  "$X1 4 个 step 载体字段漂移 · X2 hint 两处实现 + 出口塌缩 null",
+box(60, 1812, 640, 140, "bxe", "已确认缺陷（均已修，逐条留负例）", [
+  "✓ D1 7 处禁元素出口 / 12 处 stop_reason 散文 → 单出口 + StopCode 枚举",
+  "✓ D2 位置性 ref 的 3 处独立 re-prune → pruneForbids 一处",
+  "✓ D3 inert 既当证据又当终止责任 → maxEffectiveRepeats（缺省 3）",
+  "      + 结构化 no_progress：死目标夹具 8 步/4.5s → 4 步/2.3s",
+  "✓ D4 敏感字段 0 处遮蔽 → 按长度掩码（inert 判定与信号读取不受影响）",
+  "✓ D5 hosts 运行期 0 处强制 → disallowedHost 导航信封（空声明不启用）",
+  "✓ D6 配置类错误被重试且有副作用 → preflightConfig + NEVER_RETRY_CODES",
+  "✓ X1 4 个载体字段漂移 · X2 hint 两处实现 + 出口塌缩 → 一个走查器 + tier 出口",
 ], { titleSize: 12 });
-box(716, 1812, 700, 140, "bxnew", "迁移顺序", [
-  "P0 不改行为只改形状：单出口 / 结构化 stop_reason / 遮蔽 / hosts / 预检",
-  "P1  target 结构化 + hint 单实现，出口携带 tier 候选集",
-  "P2  src/actions.ts 命令层（先只做「勾选 + 提交」这一个用例）",
-  "P3  src/bindings.ts 数据槽层（先接 select 与 list_extract 两处前身）",
-  "P4  next 声明式后继（分支）—— 最后做，门槛是 P2 / P3 的数字",
-  "验收台：verify + smoke.sh · apps:suite · apps:matrix · apps:gen --check · 规则消融 A/B",
+box(716, 1812, 700, 140, "bxnew", "迁移顺序（已全部落地，每条附验收台）", [
+  "P0 单出口 / 结构化 stop_reason / 遮蔽 / hosts / 预检 —— tests/executor-p0.test.ts 21 条",
+  "P1 hint 单实现 + tier 候选集（门控 tieredHint，默认 OFF 逐字节不变）—— 24 条",
+  "P2 src/actions.ts 命令闭集 —— apps/skybook-checksubmit「勾选+提交」1/1 · 15 条",
+  "P3 src/bindings.ts 数据槽层 —— apps/checkin-binding 1/1 + 2/2 · 20 条",
+  "P4 next + 路径上界 / next_cycle —— apps/cold-search-next（删 next 即红）· 17 条",
+  "D3/R-4 同一元素重复上界 → no_progress —— tests/no-progress.test.ts 5 条",
+  "验收：verify + smoke.sh（PASS）· apps:suite 16/17 · apps:gen --check 8/8 · 1061 测试",
+], { titleSize: 12 });
+
+/* ══════════════════════════ ⑨ 模型角色的修正 ══════════════════════════ */
+P("M700,1952 V1988"); note(714, 1976, "真 ONNX 实测：承重件不是模型");
+band(1988, 196, "⑨ 模型角色的修正（独立审查 docs/DECISION_MODEL_PURPOSE_REVIEW.md + 方案 docs/MODEL_ROLE_PLAN.md）");
+box(60, 2020, 444, 140, "bxred", "实测：分工写反了", [
+  "浏览器步 169/171（98.8%）手写了目标；真模型下",
+  "整批语料 201 步里选择提问 5 次、过关 0 次，",
+  "rule:match 201/201 —— 选目标从不由模型决定。",
+  "模型 top-1 25%（拉丁 18% / CJK 50%）；闸门内",
+  "precision 15%，而闸门本身是两把不可比的尺子",
+  "（passthrough AUC 0.233 反向 / shortlist 0.587）。",
+  "删掉声明：同一批旅程完成率 4/4 → 0/4。",
+], { titleSize: 12 });
+box(516, 2020, 444, 140, "bxnew", "可修的三处（都有实测支持）", [
+  "① 问法：窄问 14/14 选对（全池 3/14）——档内",
+  "     候选 + 短名单，把「40 选 1」变成「≤8 选 1」。",
+  "② 闸门：按问法归一（p(top1) / margin），",
+  "     两把尺子分开标定；默认档逐字节不变。",
+  "③ 裁决：只在页面能拒绝错误动作的步（表单 /",
+  "     下拉 / radio）放开模型——camera-entry 4/4。",
+  "连零选择器的语义流家族：开关模型结果逐字段相同。",
+], { titleSize: 12 });
+box(972, 2020, 444, 140, "bxe", "实施方案（按性价比，见 MODEL_ROLE_PLAN）", [
+  "A3 风险头规则优先 + 进决策缓存（纯赚：597 s → <300 s）",
+  "C1 覆盖率与 precision 进套件 · C2 漂移夹具 · C3 写进文档",
+  "A1 + A2 同批：闸门档位 + 页面裁决（唯一有行为风险）",
+  "B  作者期：模型提议 (hint, signal)、人确认（需 LLM 端点）",
+  "备选：明确降级为「风险头 + 诊断」，省 597→240 s",
+  "$判据：闸门两栏 AUC ≥0.5 · 漂移夹具转绿 · 错误动作被采纳 = 0",
 ], { titleSize: 12 });
 
 /* ══════════════════════════════ 红线（改写后）══════════════════════════════ */
-P("M700,1970 V2006");
-R(40, 2006, W - 80, 84, "band red");
-T(58, 2030, "四条红线（重审后：措辞收窄，机制不变，仍有测试与门禁撑着）", "foot", ' font-weight="700"');
-note(58, 2052, "① 计划结构冻结 —— 运行期只允许「闭集内选择」与「过门回填」；② 不发明取值 —— 模型永不选值，页面候选必须由声明规则命中；", "foot", 1356);
-note(58, 2072, "③ 完成只认该步「该面的证据」（DOM / 进程 / HTTP …；模型自述只作诊断）；④ 任何运行期新知识（hint / 候选 / 分支）都要过零模型重放门，不过就一个文件都不落。", "foot", 1356);
+P("M700,2160 V2196");
+R(40, 2196, W - 80, 96, "band red");
+T(58, 2220, "四条红线（重审后：措辞收窄，机制不变，仍有测试与门禁撑着）", "foot", ' font-weight="700"');
+note(58, 2242, "① 计划结构冻结 —— 运行期只允许「闭集内选择」与「过门回填」；② 不发明取值 —— 模型永不选值，页面候选必须由声明规则命中；", "foot", 1356);
+note(58, 2262, "③ 完成只认该步「该面的证据」（DOM / 进程 / HTTP …；模型自述只作诊断）；④ 任何运行期新知识（hint / 候选 / 分支）都要过零模型重放门，不过就一个文件都不落。", "foot", 1356);
+note(58, 2282, "（2026-10 补：模型角色的修正是加分项——不改变这四条；它只让兜底层在它能赢的地方出场。）", "foot", 1356);
 
 /* ══════════════════════════════ 组装 ══════════════════════════════ */
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="'PingFang SC','Microsoft YaHei','Noto Sans CJK SC','Source Han Sans CN','Helvetica Neue',Arial,sans-serif">
@@ -280,7 +319,22 @@ if (problems.length) {
 }
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
-const OUT_SVG = path.resolve(HERE, "..", "docs", "architecture-target.svg");
+const argOf = (name) => {
+  const i = process.argv.indexOf(name);
+  return i >= 0 ? process.argv[i + 1] : null;
+};
+const OUT_SVG = argOf("--out") ?? path.resolve(HERE, "..", "docs", "architecture-target.svg");
+
+if (process.argv.includes("--check")) {
+  const cur = fs.existsSync(OUT_SVG) ? fs.readFileSync(OUT_SVG, "utf-8") : "";
+  if (cur !== svg + "\n") {
+    console.error(`图漂移：${OUT_SVG} 与生成结果不一致（改模块就要重跑本生成器）`);
+    process.exit(1);
+  }
+  console.log(`图与生成结果一致：${OUT_SVG}`);
+  process.exit(0);
+}
+
 fs.writeFileSync(OUT_SVG, svg + "\n");
 console.log(`写出 ${OUT_SVG}`);
 

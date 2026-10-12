@@ -353,6 +353,7 @@ node --experimental-strip-types tools/ask-shapes.ts \
 > **这些建议已经展开成一份可执行的方案**：[docs/MODEL_ROLE_PLAN.md](MODEL_ROLE_PLAN.md)
 > ——每条带"改什么 / 为什么能修反向 / 验收判据（数字）/ 代价与风险 / 诚实边界"，
 > 并给出落地顺序与一条"如果一条都不做"的降级路线（把模型明确降级成风险头 + 诊断，省 597→240 s 与 1.7 GB 依赖）。
+> **实施计划（阶段 / 任务卡 / 写入范围 / 门禁 / 停止条件）：[docs/MODEL_ROLE_IMPL_PLAN.md](MODEL_ROLE_IMPL_PLAN.md)。**
 
 | 阶段 | 内容 | 通过判据（可测） |
 |---|---|---|

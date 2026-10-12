@@ -1,5 +1,9 @@
 /**
- * 架构图生成器（`node tools/arch-diagram.mjs` → `docs/architecture.svg`）。
+ * 架构图生成器（`node tools/arch-diagram.mjs [--png] [--check] [--out <path>]` → `docs/architecture.svg`）。
+ *
+ * 2026-10 更新（P0–P4 + D3/R-4 落地、模型角色实测之后）：④ 的链条补上**命令闭集**（P2）、
+ * **执行动作里的具名绑定**（P3）、**同一元素重复上界 → no_progress**（D3/R-4）；③ 写明
+ * `id/next` 与 `runPlan` 对边的拒绝；⑤ 写上真模型的实测口径（它现在是兜底与诊断，不是承重件）。
  *
  * 为什么是**生成**而不是手画：手画的图会随代码漂移，而且"文字出框/盒子重叠"这类缺陷
  * 只有量过才发现。这里每条文字行都按 CJK≈1em / ASCII≈0.55em 估宽，任何一行出框、
@@ -68,9 +72,10 @@ box(175, 196, 620, 84, "bxp", "DSH 插件模式（integrations/dsh-bridge）", [
   "$summary 带 model: on|off(missing) 与决策来源小计；危险步默认拒绝",
 ]);
 box(810, 196, 250, 84, "bxm", "npm run model:fetch", ["src/model-fetch.ts → 装进 ⑤ 的约定路径", "图 + 权重（+ tokenizer）", ".part 先落，SHA256 先验后换", "半途态整组撤回，不覆盖已有"]);
-box(1075, 196, 340, 84, "bxe", "度量与门禁（同一条命令可复现）", [
+box(1075, 196, 340, 98, "bxe", "度量与门禁（同一条命令可复现）", [
   "apps:matrix 声明成本 / 0 代码行 / 站点知识泄漏与债",
   "apps:suite 逐应用真跑 + 模型账 · apps:gen --check",
+  "model:contribution 逐题实测 · ask-shapes 换问法",
   "probes:baseline · verify · smoke.sh——全绿才算完",
   "$读 ④ 落下的 *-result.json（模型账两列的出处）",
 ]);
@@ -86,28 +91,33 @@ T(58, 438, "新增一个应用 = 新目录；应用目录里的代码行数由 a
 
 /* ---------------- L3 计划 ---------------- */
 band(460, 92, "③ 计划层");
-box(175, 492, 330, 50, "bx", "src/plan.ts — TaskPlan / PlanningRules", ["有序子目标 + 完成信号 + 数据袋；checkpoint 续跑"]);
+box(175, 492, 330, 50, "bx", "src/plan.ts — TaskPlan / PlanningRules", ["有序子目标 + 完成信号 + 数据袋 · checkpoint 续跑"]);
 box(520, 492, 330, 50, "bx", "src/planner.ts — runPlan / 重试", ["when 跳过 · retries 整步重跑 · replan 异常必打印"]);
 box(865, 492, 300, 50, "bx", "LLM 规划 / 审计（可选）", ["OPENAI_* 齐则启用，否则 Mock/Scripted 照常全流程"]);
 box(1180, 492, 235, 50, "bx", "src/signals.ts — 信号语言", ["5 个 DOM 算子 + all_of/any_of/not"]);
 
+T(58, 548, "P4：步 id/next + createPathWalk（路径上界 → next_cycle）；runPlan 拒绝 next 边——声明式后继只在应用旅程层生效；signal 与 when 走同一个走查器", "lbl");
+
 /* ---------------- L4 执行 ---------------- */
 band(568, 208, "④ 执行层 — 唯一生产循环 BrowserMiddleware.run（永不分叉；bench 只继承换 checkpoint/消融开关）");
 const chain = [
-  ["元素抽取", ["extraction.ts", "一次 JS pass", "iframe + shadow"]],
+  ["元素抽取", ["extraction.ts", "一次 JS pass", "iframe+shadow"]],
+  ["命令闭集", ["actions.ts P2", "声明×当次观察", "空则 space_empty"]],
   ["规则 / hint", ["rules.ts", "nav / affordance", "分层 hint 匹配"]],
   ["laya 选", ["pickElement", "conf < floor", "→ block"]],
   ["加宽重看", ["reobserve ×1", "120 元素", "laya:reobserve"]],
   ["升级老师", ["escalateFn", "只能点池中 ref", "失败即弃权"]],
   ["风险闸门", ["DESTRUCTIVE", "+ 模型票 ≥0.6", "dry-run 证据"]],
   ["可点性探针", ["hit-test / 遮挡", "失败=结果", "不抛栈"]],
-  ["执行动作", ["click / type", "select / radio", "range / 填值=slots"]],
-  ["inert 检测", ["url+text+values", "相同→禁该元素", "按签名记"]],
-  ["完成 = DOM 信号", ["check_signal", "noul 仅参考", "manual → 问人"]],
+  ["执行动作", ["click / type", "select / radio", "填值=绑定 P3"]],
+  ["inert → 上界", ["url+text+values", "同元素重复→", "no_progress D3"]],
+  ["完成 = 信号", ["check_signal", "noul 仅参考", "manual → 问人"]],
 ];
-const cw = 130, gap = 4, x0 = 60;
+const cw = 118, gap = 4, x0 = 60;
 chain.forEach(([t, ls], i) => {
-  const cls = ["laya 选", "加宽重看", "升级老师"].includes(t) ? "bxm" : t.startsWith("完成") ? "bxe" : "bx";
+  const cls = ["laya 选", "加宽重看", "升级老师"].includes(t) ? "bxm"
+    : ["命令闭集", "inert → 上界"].includes(t) ? "bxnew"
+    : t.startsWith("完成") ? "bxe" : "bx";
   box(x0 + i * (cw + gap), 604, cw, 72, cls, t, ls, { titleSize: 11.5, titleDy: 17 });
   if (i) P(`M${x0 + i * (cw + gap) - gap},640 H${x0 + i * (cw + gap)}`);
 });
@@ -118,16 +128,17 @@ box(1150, 690, 265, 68, "bxe", "运行结果 = 可核对的证据", ["<app>-resu
 T(58, 776, "低置信 break 的那次咨询不在 trace 留 method——咨询数在运行时缝上数，过关数在 trace 里数", "lbl");
 
 /* ---------------- L5 模型运行时 ---------------- */
-band(792, 116, "⑤ 模型运行时（可缺席——缺了走规则模式，需要模型的步骤如实 block）");
+band(792, 134, "⑤ 模型运行时（可缺席——缺了走规则模式，需要模型的步骤如实 block）");
 box(175, 826, 260, 66, "bxm", "src/model.ts — LayaRuntime 缝", ["load / predictShortlist / Router", "测试注入 scriptedRuntime，不碰权重"]);
 box(450, 826, 300, 66, "bxm", "laya-onnx.ts + laya-format.ts", ["buildSequence · 温度标定 · shortlist k=8", "checkpoint 按文字系统路由，不按置信度"]);
 box(765, 826, 320, 66, "bxm", "产物：图 + .onnx.data + tokenizer", ["约 1.7GB，刻意不进 git", "LAYA_ONNX_MODEL 约定 / HF 快照发现"]);
 box(1100, 826, 315, 66, "bxm", "src/model-artifacts.ts", ["三件齐才算 on（单一出处）", "doctor / fetch / 运行器 / 桥 共用"]);
+T(58, 906, "实测（真 ONNX，本机）：声明解决了 98.8% 的浏览器步；模型 top-1 25%、闸门内 precision 15%（两把不可比的尺子：passthrough AUC 0.233 / shortlist 0.587）", "lbl");
 
 
 /* ---------------- L6 证据 ---------------- */
 band(924, 108, "⑥ 分层证据（结论必须能被命令复现，叙述不算证据）");
-box(175, 958, 420, 60, "bxe", "tests/ 950+ 条 + 六层跨实现对拍（冻结语料）", ["rules/extraction/executor/datasource/ctrip/transfer", "node-port-poc：ONNX 与 ORT 数值对拍 max|diff| 2.98e-5"]);
+box(175, 958, 420, 60, "bxe", "tests/ 1061 条 + 六层跨实现对拍（冻结语料）", ["rules/extraction/executor/datasource/ctrip/transfer", "node-port-poc：ONNX 与 ORT 数值对拍 max|diff| 2.98e-5"]);
 box(610, 958, 400, 60, "bxe", "用例与线上复测记录", ["bench/cases*.json · ctrip 19 子目标 + 独立判分 7/7", "transfer 七站 · live-retest 逐项原始观测"]);
 box(1025, 958, 390, 60, "bxe", "作者 / 独立复核两角色", ["apps/INVENTORY.md 定义\"完成一个应用\"的五条", "APP_VERIFY_REPORT.md：缺陷带最小复现，报而不装绿"]);
 
@@ -158,6 +169,7 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="1120" 
 .bxm{fill:#ebf4ff;stroke:#4a86c5;stroke-width:1.2}
 .bxe{fill:#f0fff4;stroke:#4a9d63;stroke-width:1.2}
 .bxp{fill:#faf5ff;stroke:#8b5fbf;stroke-width:1.4}
+.bxnew{fill:#f0f7ff;stroke:#2b6cb0;stroke-width:1.6}
 .t{fill:#1a202c;font-size:12.5px;font-weight:600}
 .s{fill:#4a5568;font-size:10.5px}
 .sm{fill:#2b6cb0;font-size:10.5px}
@@ -179,7 +191,43 @@ for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++
 for (const b of boxes) if (b.x + b.w > 1416) problems.push(`越出内容右界：${b.title} 到 ${String(b.x + b.w)}`);
 
 import path from "node:path";
-const OUT = path.resolve(new URL(".", import.meta.url).pathname, "..", "docs", "architecture.svg");
+const HERE = path.dirname(new URL(import.meta.url).pathname);
+const argOf = (name) => {
+  const i = process.argv.indexOf(name);
+  return i >= 0 ? process.argv[i + 1] : null;
+};
+const OUT = argOf("--out") ?? path.resolve(HERE, "..", "docs", "architecture.svg");
+
+// 先量后写（v1 原来把这两步反了：坏图会落盘之后才 exit 1）——与 v2 同一套纪律。
+if (problems.length) {
+  console.error(`图不合法（${problems.length} 项），未写任何文件：\n` + problems.join("\n"));
+  process.exit(1);
+}
+
+if (process.argv.includes("--check")) {
+  // 漂移门：仓库里那份必须与生成结果逐字节一致。图是生成物，就该像 apps:gen --check 一样可复算。
+  const cur = fs.existsSync(OUT) ? fs.readFileSync(OUT, "utf-8") : "";
+  if (cur !== svg + "\n") {
+    console.error(`图漂移：${OUT} 与生成结果不一致（改模块就要重跑本生成器）`);
+    process.exit(1);
+  }
+  console.log(`图与生成结果一致：${OUT}`);
+  process.exit(0);
+}
+
 fs.writeFileSync(OUT, svg + "\n");
 console.log(`写出 ${OUT}`);
-if (problems.length) { console.error("图不合法：\n" + problems.join("\n")); process.exit(1); }
+
+if (process.argv.includes("--png")) {
+  const OUT_PNG = OUT.replace(/\.svg$/, ".png");
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ viewport: { width: W, height: 1120 }, deviceScaleFactor: 2 });
+    await page.setContent(`<!doctype html><html><body style="margin:0;padding:0">${svg}</body></html>`);
+    await page.screenshot({ path: OUT_PNG, clip: { x: 0, y: 0, width: W, height: 1120 } });
+    console.log(`写出 ${OUT_PNG}（${W * 2}×${1120 * 2}）`);
+  } finally {
+    await browser.close();
+  }
+}

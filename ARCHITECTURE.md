@@ -25,21 +25,26 @@
 
 ## 二、分层（单向依赖）
 
-> 一张六层总览图（入口 / 应用数据 / 计划 / 执行 / 模型运行时 / 证据 + 四条红线）：
-> [docs/architecture.png](docs/architecture.png)（矢量版 [docs/architecture.svg](docs/architecture.svg)）。
-> 图由 `node tools/arch-diagram.mjs` **生成**——文字出框、盒子重叠、越过内容右界都会让生成失败，
-> 所以它不会悄悄变成一张过时的图：改了模块就改这张表的源。
+> **两张图都是生成的**——改模块就改生成器的源；布局不过关（文字出框 / 盒子重叠 / 越出画布）
+> 就**非零退出且一个文件都不写**，两个生成器都支持 `--check`（仓库里那份与生成结果不一致即红，
+> `tests/arch-diagram.test.ts` 钉住）：
 >
-> **重审后的目标架构**（④ 执行层三段化：命令层 / 决策层 / 数据槽层 + 三档裁定 + 迁移顺序）见
-> [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)，其生成图
-> [docs/architecture-target.svg](docs/architecture-target.svg)（`node tools/arch-diagram-v2.mjs`，
-> **决策模型的存在理由另有一份独立审查**：[docs/DECISION_MODEL_PURPOSE_REVIEW.md](docs/DECISION_MODEL_PURPOSE_REVIEW.md)
-> ——以"模型是为了简化配置、增加弹性与容错"为唯一准绳，用真 ONNX 模型实测（169/180 步手写了目标；
-> 模型 top-1 25%、闸门内 precision 15%；删掉 hint 后同一批旅程完成率 4/4 → 0/4），
-> 结论是**分工写反了**：承重件是声明+规则+编译/录制，模型是兜底与诊断。
-> 修正方案（每条带验收数字与代价）：[docs/MODEL_ROLE_PLAN.md](docs/MODEL_ROLE_PLAN.md)。
+> - **六层总览**（入口 / 应用数据 / 计划 / 执行 / 模型运行时 / 证据 + 四条红线）：
+>   [docs/architecture.png](docs/architecture.png)（矢量版 [docs/architecture.svg](docs/architecture.svg)）
+>   —— `node tools/arch-diagram.mjs [--png]`。
+> - **重审后的目标架构**（④ 三段化 = 命令层 / 决策层 / 数据槽层；三档裁定；⑧ 已落地的迁移；
+>   ⑨ 模型角色的修正）：[docs/architecture-target.png](docs/architecture-target.png)
+>   （矢量版 [docs/architecture-target.svg](docs/architecture-target.svg)）—— `node tools/arch-diagram-v2.mjs [--png]`。
+>   推理与裁定见 [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)。
 >
-> 先量后写：坏图不落盘）。**落地状态：P0（形状硬化，不改任何运行结果）、P1（hint 单实现 +
+> **决策模型的存在理由**另有一份独立审查
+> [docs/DECISION_MODEL_PURPOSE_REVIEW.md](docs/DECISION_MODEL_PURPOSE_REVIEW.md)：以"模型是为了简化配置、
+> 增加弹性与容错"为唯一准绳，用真 ONNX 模型实测（169/180 步手写了目标；模型 top-1 25%、闸门内
+> precision 15%；删掉 hint 后同一批旅程完成率 4/4 → 0/4），结论是**分工写反了**：承重件是
+> 声明 + 规则 + 编译/录制，模型是兜底与诊断。修正方案 [docs/MODEL_ROLE_PLAN.md](docs/MODEL_ROLE_PLAN.md)、
+> 实施计划 [docs/MODEL_ROLE_IMPL_PLAN.md](docs/MODEL_ROLE_IMPL_PLAN.md)（目标图 ⑨）。
+>
+> **落地状态：P0（形状硬化，不改任何运行结果）、P1（hint 单实现 +
 > tier 候选集，门控 `tieredHint` 默认关）、P2（命令层 `src/actions.ts`）、P3（数据槽层
 > `src/bindings.ts`）、P4（声明式后继 `next`，应用旅程层）、D3/R-4（`inert` 不再是唯一终止依据：
 > `maxEffectiveRepeats` + 结构化 `no_progress`）均已实施并带负例测试**
