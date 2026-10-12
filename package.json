@@ -55,7 +55,8 @@
     "probes:baseline": "node --experimental-strip-types tools/probe-baseline.ts",
     "apps:induce": "node --experimental-strip-types tools/apps-induce.ts",
     "learn": "node --experimental-strip-types tools/learn.ts",
-    "agent": "node --experimental-strip-types tools/learn.ts --json --yes"
+    "agent": "node --experimental-strip-types tools/learn.ts --json --yes",
+    "metrics": "node --experimental-strip-types tools/arch-metrics.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

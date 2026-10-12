@@ -84,13 +84,13 @@ node --experimental-strip-types tools/ask-shapes.ts \
 
 | 指标 | 数值 | 复算 |
 |---|---|---|
-| 声明行（非空） | **3651** 行 = `pack.json` 3238 + `flow.json` 238 + `sites/*.profile.json` 175；21 个应用目录（19 个 pack + 2 个 flow） | §7 末尾的两条复算命令 |
+| 声明行（非空） | **3651** 行 = `pack.json` 3238 + `flow.json` 238 + `sites/*.profile.json` 175；21 个应用目录（19 个 pack + 2 个 flow） | `npm run metrics`（§7 末尾还有一条纯静态复算） |
 | 应用包旅程步（`journey`，角色模板合并后） | 180 步（17 个包） | 同上 |
 | └ 其中**点名了目标**（`target_hint` / `target_hints`） | **169/180 = 93.9%**（只算浏览器步 169/171 = 98.8%） | 同上 |
 | 其中由生成器产出（`apps:gen`） | 8 个应用 | `npm run apps:gen -- --check` |
 | 声明里"机械展开"的比例（项目自己的评估） | 61%（1797/2965） | `bench/AUTHORING_ASSESSMENT.md` |
 | 真正必须人写的判断 | 约 31 条（29 不变量 + 1 设备 + 1 危险动作） | 同上 |
-| 容错声明：`when` / `retries` / `next` | 7 / 12 / 1（**角色模板合并后**的逐步计数；若按"角色模板 + journey 条目"分开数则是 8 / 17 / 1，两个分母都真实，引用时要写明） | 同上计数 |
+| 容错声明：`when` / `retries` / `next` | **7 / 12 / 1**（口径②：合并后全部 180 个 journey 条目）；口径①（只看 171 个浏览器步）是 **7 / 11 / 1**；口径③（角色模板与条目分开数）是 **8 / 17 / 1**。三套都真实，引用必须写明是哪一套 | `npm run metrics`（单一出处 `docs/arch-metrics.json`） |
 | P2/P3/P4 新增的声明面 | `commands` 2 处、具名绑定 1 处、`next` 1 处、`max_step_visits` 1 处 | 同上计数 |
 
 ### 2.2 运行侧：模型的实际出场（两个层级都测了）
@@ -358,6 +358,7 @@ node --experimental-strip-types tools/ask-shapes.ts \
 > ——每条带"改什么 / 为什么能修反向 / 验收判据（数字）/ 代价与风险 / 诚实边界"，
 > 并给出落地顺序与一条"如果一条都不做"的降级路线（把模型明确降级成风险头 + 诊断，省 597→240 s 与 1.7 GB 依赖）。
 > **实施计划（阶段 / 任务卡 / 写入范围 / 门禁 / 停止条件）：[docs/MODEL_ROLE_IMPL_PLAN.md](MODEL_ROLE_IMPL_PLAN.md)。**
+> **对新架构本身的改进意见（结构/接口/缝，含 P0 单一出处工具）：[docs/ARCHITECTURE_IMPROVEMENTS.md](ARCHITECTURE_IMPROVEMENTS.md)。**
 
 | 阶段 | 内容 | 通过判据（可测） |
 |---|---|---|

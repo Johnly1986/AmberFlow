@@ -44,6 +44,10 @@
 > 声明 + 规则 + 编译/录制，模型是兜底与诊断。修正方案 [docs/MODEL_ROLE_PLAN.md](docs/MODEL_ROLE_PLAN.md)、
 > 实施计划 [docs/MODEL_ROLE_IMPL_PLAN.md](docs/MODEL_ROLE_IMPL_PLAN.md)（目标图 ⑨）。
 >
+> **架构本身的改进意见**（计量单一出处 `npm run metrics` → `docs/arch-metrics.json` /
+> 决策接口按问法版本化 / 可声明运行策略 / 可逆性模型 / 梯级卫生 / 声明面归并）见
+> [docs/ARCHITECTURE_IMPROVEMENTS.md](docs/ARCHITECTURE_IMPROVEMENTS.md)。
+>
 > **落地状态：P0（形状硬化，不改任何运行结果）、P1（hint 单实现 +
 > tier 候选集，门控 `tieredHint` 默认关）、P2（命令层 `src/actions.ts`）、P3（数据槽层
 > `src/bindings.ts`）、P4（声明式后继 `next`，应用旅程层）、D3/R-4（`inert` 不再是唯一终止依据：
