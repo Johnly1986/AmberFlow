@@ -593,6 +593,23 @@ describe("pickProposal（ARCHITECTURE_IMPROVEMENTS §2：conf 是两把尺子，
     expect(Number.isFinite(prop.entropyConf)).toBe(true);
   }, 60_000);
 
+  it("§2 答了但没给出可用元素 ⇒ choiceRef 归一成 null，而 pickElement 必须**保留 undefined**", async () => {
+    // 这条测试存在的理由：本轮把 `a.choice ?? null` 写进内核，调用方就再也分不出
+    // "答了但没可用元素"（该说人话：hint 没命中 / 这一步没点名）与"根本没答"
+    // （action space exhausted），两条 UX 测试当场打红。区别是承重的。
+    installLayaRuntime({
+      async load() { return null as never; },
+      embedFnFromAgent() { return null; },
+      async predictShortlist() {
+        return { answers: { act: { type: "choice", confidence: 0.5 } as never }, shortlist: { act: { passthrough: true } } };
+      },
+    } as never);
+    const prop = await mw().pickProposal("x", asPage(), { e1: {} } as never, new Set());
+    expect(prop.choiceRef).toBeNull();                 // 结构化视图归一，消费方不用想这个
+    const [ref] = await mw().pickElement("x", asPage(), { e1: {} } as never, new Set());
+    expect(ref).toBeUndefined();                       // 三元组视图**不能**归一：调用方靠它选报错文案
+  }, 60_000);
+
   it("动作空间耗尽：shape=none、choiceRef=null —— 『没得选』是一种结果", async () => {
     installProbs({ choice: "e9", confidence: 0.9 }, true);
     const prop = await mw().pickProposal("x", asPage(), {} as never, new Set());

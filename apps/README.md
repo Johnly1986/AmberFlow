@@ -106,6 +106,10 @@ npm run apps:suite                                       # 一条命令验收所
   `method`，只数 trace 会把 `transfer-slowjet` 这种"问了、没过、靠 retries"的在场漏报成零出场）。
   `apps:suite` 的"模型咨询"列与 `apps:matrix` 的两列读的是**上一次真跑**落下的 `*-result.json`；
   matrix 上"未跑"≠0——前者是没证据，后者是真跑过且规则消化了全部（结论列直接写 `model not needed`）。
+- **模型边际**（`模型边际` 列）：梯级只有低一级没决定才轮到模型，所以 `model_steps` 就是模型在这条
+  语料上的**独立贡献**。桩臂打"未测"（它的 0 是构造出来的，不是证据）；真模型臂（`--real-model`）
+  若合计为 0 ⇒ 退出码 4 + 页脚写明"运行期弹性主张不成立"。出处：
+  [docs/ARCHITECTURE_IMPROVEMENTS.md](../docs/ARCHITECTURE_IMPROVEMENTS.md) §5/§7。
 
 **退出码契约**（`npm run apps` 与 `npm run apps:suite` 都写进了 `--help`）：
 
@@ -114,10 +118,14 @@ npm run apps:suite                                       # 一条命令验收所
 | `npm run apps` | `0` | 动作腿与不变量全部成立 |
 | | `1` | 有子目标 blocked / 有工具步未完成 / 有不变量不成立（**危险步没放行也是 1，并且在输出里写明"未执行"**） |
 | | `2` | 用法错误：包不合法、`--slot` 的键没声明、`--out` 建不出来、测量型应用没有 journey |
-| `npm run apps:suite` | `0` | 每个离线旅程应用都真执行且通过 |
+| `npm run apps:suite` | `0` | 每个离线旅程应用都真执行且通过（默认臂 = 脚本桩） |
 | | `1` | 有未通过（含"加载失败"：坏包只影响它自己那一行，其余照常出表） |
 | | `2` | 用法错误（例如 `--only` 没匹配到任何应用，会列出已知应用名） |
 | | `3` | 有**未执行**（危险步没放行——不算绿也不算红，因为绿色的前提是真的执行过） |
+| | `4` | **仅 `--real-model` 臂**：应用全过，但"模型边际"= 0（模型一步也没独立决定）⇒ 运行期弹性主张不成立，绿色不许替它背书 |
+
+优先级 `1 > 3 > 4`：**没真执行完的运行不配被判定"模型有没有用"**——所以先报未通过/未执行，
+只有"全部真执行且通过"才轮到问边际。规则是纯函数 `suiteExitCode()`，回归在 `tests/apps.test.ts`。
 
 给脚本消费：`npm run --silent apps:suite -- --json`（`npm run` 默认会往 stdout 前加 3 行脚本头，直接
 `JSON.parse` 会被它挡住；或者干脆 `node --experimental-strip-types tools/apps_suite.ts --json`）。

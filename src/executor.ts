@@ -922,7 +922,7 @@ export class BrowserMiddleware {
     const kind: PickProposal["shape"]["kind"] =
       picked.ref === null ? "none" : picked.passthrough ? "full" : "shortlist";
     return {
-      choiceRef: picked.ref,
+      choiceRef: picked.ref ?? null,
       shape: { kind, k: 8, poolSize, options: values.length },
       pTop1: values[0] ?? null,
       pTop2: values[1] ?? null,
@@ -981,7 +981,11 @@ export class BrowserMiddleware {
     // inflated a 0.13 pick to 0.76 and let wrong clicks through the floor.
     const probs = a.probabilities ?? {};
     const sl = res.shortlist?.["act"] ?? {};
-    if (sl.passthrough) return { ref: a.choice ?? null, conf: a.confidence, probs, passthrough: true };
+    // **不要**把 `a.choice` 的 undefined 归成 null：调用方靠这两种值区分
+    // "运行时答了但没给出可用元素"（→ 说人话：hint 没命中 / 这一步没点名）与
+    // "根本没答"（→ action space exhausted）。本轮把它写成 `?? null` 就打红了
+    // tests/ux-fixes.test.ts ③ 与 tests/app-packs-verified.test.ts 第 5 轮各一条。
+    if (sl.passthrough) return { ref: a.choice as string | null, conf: a.confidence, probs, passthrough: true };
     // `confidence` is 1 - normalized entropy: with few options it collapses even
     // when the model is decisive. The argmax value against the runner-up is the
     // calibration-consistent gate signal here.
@@ -990,7 +994,7 @@ export class BrowserMiddleware {
     // `low confidence -Infinity`). Fall back to the answer's own confidence.
     const values = Object.values(probs);
     const top = values.length ? Math.max(...values) : (a.confidence ?? 0);
-    return { ref: a.choice ?? null, conf: top, probs, passthrough: false };
+    return { ref: a.choice as string | null, conf: top, probs, passthrough: false };
   }
 
   /** First rung of the pick ladder, then laya. Returns `[ref, conf, probabilities]`. */

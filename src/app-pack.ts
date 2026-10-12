@@ -229,6 +229,28 @@ export function appDirs(): string[] {
 }
 
 /** 已发现的应用包：`[id, label, path]`，按 id 排序。 */
+/**
+ * 这个包的**浏览器步里有多少点名了目标**（`target_hint` / `target_hints`）。
+ *
+ * 为什么放在这里、并且只有一份实现：这个数字被 `apps:suite` 的列、`apps:matrix`、
+ * `tools/arch-metrics.ts` 与两张图同时引用——它一旦有两份，就会有两个值（本轮已经为这类
+ * 事付过一次账）。工具步没有 DOM 目标，天然不计入分母。
+ */
+export function packHintCoverage(pack: AppPack): { hinted: number; browser: number } {
+  const roles = pack.roles ?? {};
+  let hinted = 0, browser = 0;
+  for (const e of pack.journey ?? []) {
+    if (!e || typeof e !== "object") continue;
+    const merged: Record<string, unknown> = { ...(roles[String((e as Record<string, unknown>)["role"])] ?? {}), ...(e as object) };
+    if ((e as Record<string, unknown>)["source"] !== undefined) continue;   // 工具步：没有 DOM 目标
+    browser++;
+    const h = merged["target_hints"];
+    const has = (Array.isArray(h) && h.length > 0) || typeof merged["target_hint"] === "string";
+    if (has) hinted++;
+  }
+  return { hinted, browser };
+}
+
 export function listPacks(): Array<[string, string, string]> {
   const out: Array<[string, string, string]> = [];
   for (const dir of appDirs()) {

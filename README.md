@@ -47,12 +47,18 @@ dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridg
 
 ## 为什么本地还养一个模型
 
-模型不是英雄，是**保险**；保险的价值要可核对。四组数字，每组都有当场可跑的复现命令：
+**分工先说清楚**（本轮独立审查的结论，不是口号）：**流程能被规则与声明解决，就不该让模型猜。**
+承重的是声明 + 规则 + 编译器/录制器——已验收语料里 **98.8% 的浏览器步点了名**（`apps:suite` 的
+`hint覆盖` 列每天报这个数），真模型跑完整批语料时 **201 步里只被咨询 5 次、独立决定 0 步**
+（`npm run apps:suite -- --real-model` 的 `模型边际` 列；桩臂这一列打"未测"）。
+模型的位置是**兜底 + 诊断**，而兜底现在有了数字：边际为 0 时套件**退出码 4**，绿色不再替它背书。
+
+那"保险"到底值不值，四组数字，每组都有当场可跑的复现命令：
 
 | 数字 | 它证明什么 | 怎么复现 |
 |---|---|---|
-| 60 个诱饵元素挡在前面：规则落空 + 目标不在池内 = 必 blocked；模型加宽重看（`laya:reobserve`）把它捞回来 | 池子外的目标谁也选不到——模型负责"不轻言放弃" | `npx vitest run tests/reobserve.test.ts` |
-| `transfer-slowjet`：冷加载的那一问就是模型的活；去掉 `retries` 实测 0/7（0.16 < 0.25 直接 block） | 没有模型这个应用会红——`apps:suite` 的"模型步"列明写 ≥1 | `npm run apps:suite -- --only transfer-slowjet` |
+| 60 个诱饵元素挡在前面：规则落空 + 目标不在池内 = 必 blocked；模型加宽重看（`laya:reobserve`）把它捞回来 | 池子外的目标谁也选不到——模型负责"不轻言放弃"。**但注意口径**：这是夹具里的能力，已验收语料上 `reobserve` 救回 **0** 步（页脚 `梯级账单` 会把它标成 dead rung） | `npx vitest run tests/reobserve.test.ts` |
+| `transfer-slowjet`：冷加载时模型**被问了 5 次、一次都没过闸门**（真模型臂与桩臂同形：`咨询 5 / 过关 0`）；把它救回来的是 `retries`——去掉 `retries` 实测 0/7 | **反面教材（本轮修正）**：以前这里写"没有模型这个应用会红"，实测不成立；红的是没有重试 | `npm run apps:suite -- --only transfer-slowjet`（看页脚 `梯级账单` 与 `模型边际`） |
 | 同一份计划二跑：**12 forwards → 0，9.2s → 1.3s**（Windows+GPU 实测；离线口径由套件页脚 `决策缓存` 给同一形状的两个数） | 确定性模型不该被问第二次：本地、免费、可审计 | `npm run cache:measure`（要 ONNX 产物）；离线看套件页脚 |
 | 诚实边界：中文页面上模型 0.03–0.09（argmax 常仍正确）；checkpoint 路由按**文字系统**切、绝不按置信度切（ECE 0.855 的教训写进了故事） | 我们比谁都清楚它不行在哪——这是可信度，不是减分 | `node --experimental-strip-types src/ctrip-task.ts --no-hints` |
 

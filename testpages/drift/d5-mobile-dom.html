@@ -1,12 +1,11 @@
 <!doctype html><html lang="zh"><head><meta charset="utf-8"><title>漂移夹具 · 手机版 DOM</title></head>
 <body>
   <h1>订单页（H5）</h1>
-  <!-- 手机版把控件放进带 class 的 div 里，且没有 data-test：桌面 DOM 上的句柄在这里根本不存在 -->
-  <form action="d5-mobile-dom.html?saved=1" method="get">
+  <!-- 手机版页面不带任何 data-test：桌面 DOM 上的属性句柄在这里根本不存在（qunar 那一类） -->
+  <form action="saved.html" method="get">
     <div class="m-field"><span class="m-label">备注</span><input class="m-input" name="note"></div>
     <div class="m-field"><span class="m-label">配送</span><select class="m-select" name="ship">
       <option value="std">标准</option><option value="fast">加急</option></select></div>
-    <div class="m-btn"><span>保存</span></div>
     <input class="m-submit" type="submit" value="保存">
   </form>
 </body></html>

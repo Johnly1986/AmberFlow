@@ -18,7 +18,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { listPacks, loadPack } from "../src/app-pack.ts";
+import { listPacks, loadPack, packHintCoverage } from "../src/app-pack.ts";
 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const args = process.argv.slice(2);
@@ -48,6 +48,21 @@ interface Corpus {
   declared_lines: { pack: number; flow: number; profile: number; total: number };
   journey_roles_lines: { lines: number; of_pack_lines: string };
   bin_fixture_lines: number;
+  /**
+   * **声明面的发散度**（§6 的前提：不能计数的东西没法归并）。
+   * 同一个意图（"填一个字段再提交"）今天有三条写法：拆成两个子目标 + URL 深链 /
+   * `target_hints`（有序点名）/ `commands`（命令闭集）。这里数的是**每种写法被用了几次、
+   * 在几个包里**，以及有多少包同时用了不止一种。
+   */
+  surfaces: {
+    multi_action_packs: number;
+    target_hints_steps: number;
+    commands_packs: number;
+    commands_decls: number;
+    deep_link_steps: number;
+    packs_using_more_than_one: string[];
+    note: string;
+  };
   declarations: {
     when: number; retries: number; next: number;
     all_journey_entries: string;
@@ -61,6 +76,10 @@ function corpus(): Corpus {
   let packLines = 0, flowLines = 0, profileLines = 0, binLines = 0;
   let packs = 0, journeyEntries = 0, browser = 0, tool = 0, hinted = 0, jrLines = 0;
   let flowApps = 0, flowSteps = 0;
+  let hintsSteps = 0, cmdDecls = 0, urlStateSteps = 0;
+  const cmdPackSet = new Set<string>();
+  const multiActionPacks = new Set<string>();
+  const usingMoreThanOne: string[] = [];
   let whenMerged = 0, retriesMerged = 0, nextMerged = 0;       // 口径①：合并后、只看浏览器步
   let whenAll = 0, retriesAll = 0, nextAll = 0;                // 口径②：合并后、全部 journey 条目（含工具步）
   let whenSplit = 0, retriesSplit = 0, nextSplit = 0;          // 口径③：角色模板与 journey 条目分开数
@@ -84,17 +103,33 @@ function corpus(): Corpus {
       const journey = (pack["journey"] ?? []) as Array<Record<string, unknown>>;
       jrLines += nonEmpty(JSON.stringify({ roles: pack["roles"] ?? {}, journey }, null, 2));
       for (const [, r] of Object.entries(roles)) countDecl(r, false);          // 口径③：角色模板单独数
+      let packHints = 0, packCmds = 0;
       for (const e of journey) {
         journeyEntries++;
         const merged: Record<string, unknown> = e["role"] ? { ...(roles[String(e["role"])] ?? {}), ...e } : e;
         countDecl(merged, false);                                             // 口径③：journey 合并后也数一遍
         if (e["source"]) { tool++; }                                          // 工具步：没有 DOM 目标
         else { browser++; if (hintOf(merged)) hinted++; }
+        // §6 发散度：一个步同时算进它用到的每一种"多动作写法"
+        if (Array.isArray(merged["target_hints"]) && (merged["target_hints"] as unknown[]).length > 1) {
+          hintsSteps++; packHints++;
+        }
+        if (Array.isArray(merged["commands"]) && (merged["commands"] as unknown[]).length > 0) {
+          cmdDecls += (merged["commands"] as unknown[]).length;
+          cmdPackSet.add(id); packCmds++;
+        }
+        // 注意：URL 带查询参数**不是**"多动作的另一种写法"——那是红线①（状态进 URL）的纪律，
+        // 几乎每一步都这样。把它算进发散度会得出一个吓人或安慰人的假数，所以单列。
+        if (/[?&](selected|sort|window|cap|date|q)=/.test(String(merged["start_url"] ?? ""))) urlStateSteps++;
         if (merged["when"]) whenAll++;                                        // 口径②：合并后、全部条目
         if (merged["retries"]) retriesAll++;
         if (merged["next"]) nextAll++;
         if (!e["source"]) countDecl(merged, true);                            // 口径①：合并后的浏览器步
       }
+      // 发散度只算**真的两种多动作写法**：有序点名 vs 命令闭集。
+      const kinds = [packHints > 0, packCmds > 0].filter(Boolean).length;
+      if (packHints > 0 || packCmds > 0) multiActionPacks.add(id);
+      if (kinds > 1) usingMoreThanOne.push(`${id}(target_hints + commands)`);
     }
     if (fs.existsSync(flowPath)) {
       flowApps++;
@@ -134,6 +169,17 @@ function corpus(): Corpus {
     declared_lines: { pack: packLines, flow: flowLines, profile: profileLines, total: packLines + flowLines + profileLines },
     journey_roles_lines: { lines: jrLines, of_pack_lines: `${((100 * jrLines) / packLines).toFixed(1)}%` },
     bin_fixture_lines: binLines,
+    surfaces: {
+      multi_action_packs: multiActionPacks.size,
+      target_hints_steps: hintsSteps,
+      commands_packs: cmdPackSet.size,
+      commands_decls: cmdDecls,
+      deep_link_steps: urlStateSteps,
+      packs_using_more_than_one: usingMoreThanOne,
+      note: "§6 的前提：不能计数就没法归并。多动作意图今天有两种写法"
+        + "（target_hints 有序点名 / commands 命令闭集）；deep_link_steps 是**红线①（状态进 URL）**"
+        + "的纪律，不是多动作写法，单列以免被误读成发散度。",
+    },
     declarations: {
       when: whenMerged, retries: retriesMerged, next: nextMerged,
       all_journey_entries: `${whenAll}/${retriesAll}/${nextAll}`,

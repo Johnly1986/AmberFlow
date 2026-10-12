@@ -28,6 +28,15 @@
       "of_pack_lines": "60.9%"
     },
     "bin_fixture_lines": 101,
+    "surfaces": {
+      "multi_action_packs": 7,
+      "target_hints_steps": 22,
+      "commands_packs": 2,
+      "commands_decls": 4,
+      "deep_link_steps": 124,
+      "packs_using_more_than_one": [],
+      "note": "§6 的前提：不能计数就没法归并。多动作意图今天有两种写法（target_hints 有序点名 / commands 命令闭集）；deep_link_steps 是**红线①（状态进 URL）**的纪律，不是多动作写法，单列以免被误读成发散度。"
+    },
     "declarations": {
       "when": 7,
       "retries": 11,
@@ -48,7 +57,7 @@
       "escalate": 0,
       "secs": 597
     },
-    "scripted_corpus_secs": 160.7,
+    "scripted_corpus_secs": 675.8,
     "harness": {
       "judged": 162,
       "top1": "25%",

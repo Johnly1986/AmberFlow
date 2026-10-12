@@ -13,11 +13,12 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { appDirs, expandPack, listPacks, loadPack, PACK_KEYS, validatePack, type AppPack } from "../src/app-pack.ts";
+import { appDirs, expandPack, listPacks, loadPack, packHintCoverage, PACK_KEYS, validatePack, type AppPack } from "../src/app-pack.ts";
 import { runApp } from "../src/app-runner.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
 import { validateProbeBlock } from "../src/probe-set.ts";
 import { matrix } from "../tools/apps_matrix.ts";
+import { suiteExitCode } from "../tools/apps_suite.ts";
 import { isLive } from "../tools/apps_suite.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
@@ -436,5 +437,31 @@ describe("共享层：`device` 声明（只有手机版页面存在的站点）"
       const pack = loadPack(id);
       if (pack.device === undefined) expect(validatePack(pack)).toEqual([]);
     }
+  });
+});
+
+describe("套件退出码规则（§7/W2：边际为 0 不许算绿）", () => {
+  it("优先级 1 > 3 > 4：没真执行完的运行不配被判定模型有没有用", () => {
+    expect(suiteExitCode({ failed: 1, pending: 1, tierOn: true, marginal: 0 })).toBe(1);
+    expect(suiteExitCode({ failed: 0, pending: 1, tierOn: true, marginal: 0 })).toBe(3);
+    expect(suiteExitCode({ failed: 0, pending: 0, tierOn: true, marginal: 0 })).toBe(4);
+    expect(suiteExitCode({ failed: 0, pending: 0, tierOn: true, marginal: 2 })).toBe(0);
+    // 桩臂：过关数恒 0 是构造出来的，不能当"边际为 0"的证据 ⇒ 永远是 0（不新增红）
+    expect(suiteExitCode({ failed: 0, pending: 0, tierOn: false, marginal: 0 })).toBe(0);
+  });
+});
+
+describe("packHintCoverage（承重墙的单一实现：三处消费共用一份口径）", () => {
+  it("工具步不进分母；target_hints 与 target_hint 都算点名", () => {
+    const pack = clone(loadPack("demo-app")) as AppPack;
+    const c = packHintCoverage(pack);
+    expect(c.browser).toBe(4);                 // demo-app：5 个 journey 条目里 1 个是工具步
+    expect(c.hinted).toBe(4);                  // 全部浏览器步都点了名
+    const noHint = clone(pack) as AppPack;
+    delete (noHint.roles as Record<string, Record<string, unknown>>)["add-to-cart"]["target_hint"];
+    delete (noHint.roles as Record<string, Record<string, unknown>>)["add-to-cart"]["target_hints"];
+    const c2 = packHintCoverage(noHint);
+    expect(c2.hinted).toBeLessThan(c.hinted);  // 删声明 ⇒ 覆盖数真的掉下来（不是恒等于步数）
+    expect(c2.browser).toBe(c.browser);        // 分母不动
   });
 });

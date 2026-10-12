@@ -25,7 +25,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { parseArgs } from "node:util";
-import { appDirs, loadPack, type AppPack } from "../src/app-pack.ts";
+import { appDirs, loadPack, packHintCoverage, type AppPack } from "../src/app-pack.ts";
 import { runApp, refusalLine, type AppRunResult } from "../src/app-runner.ts";
 import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "../src/decision-cache.ts";
 import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime, type CountingRuntime } from "../src/model.ts";
@@ -58,6 +58,9 @@ export interface SuiteRow {
   rule_steps: number;
   /** escalate 级决定的步数（LLM 老师点名；没有端点时恒 0，正是要暴露的那种 dead rung）。 */
   escalate: number;
+  /** 浏览器步里点名了目标的比例（§W2：hint 是承重墙这件事要每天看得见，不是审查时才数）。 */
+  hint_hinted: number;
+  hint_browser: number;
   /** 本次运行期间决策缓存省下的重复提问（增量，不是进程累计）。 */
   cache_saved: number;
 }
@@ -78,6 +81,7 @@ export function isLive(pack: AppPack): boolean {
 export async function runOne(
   pack: AppPack, cached: CachedRuntime, counted: CountingRuntime, outBase = suiteOutDir(),
 ): Promise<SuiteRow> {
+  const hints = packHintCoverage(pack);          // §W2：承重墙每天看得见
   const out = path.join(outBase, pack.id);
   fs.mkdirSync(out, { recursive: true });
   const before = cached.decisionStats();
@@ -116,6 +120,7 @@ export async function runOne(
       ? { note: refusalLine("dangerous") } : {}),
     model_asks: d.model_asks,
     rule_steps: d.ladder?.rule ?? 0, escalate: d.ladder?.escalate ?? 0,
+    hint_hinted: hints.hinted, hint_browser: hints.browser,
     model_steps: d.model_steps,
     conf_max: d.conf.max,
     reobserve: d.reobserve,
@@ -123,14 +128,38 @@ export async function runOne(
   };
 }
 
-export async function suite(only: string[] = []): Promise<{
+/**
+ * 套件的退出码规则（抽成纯函数是为了能被测到——"边际为 0 不许算绿"这条判据本身也得有回归）。
+ *
+ * 优先级 `1 > 3 > 4` 的理由：**没真执行完的运行不配被判定"模型有没有用"**。
+ * 所以有未通过先 1；有危险步未放行先 3；只有"全都真执行且通过"时，才轮到问
+ * "那模型独立决定了什么？"——答案是 0 就是 4（§7/W2）。
+ */
+export function suiteExitCode(a: {
+  failed: number; pending: number; tierOn: boolean; marginal: number;
+}): number {
+  if (a.failed > 0) return 1;
+  if (a.pending > 0) return 3;
+  if (a.tierOn && a.marginal === 0) return 4;
+  return 0;
+}
+
+export async function suite(
+  only: string[] = [], opts: { realModel?: boolean } = {},
+): Promise<{
   rows: SuiteRow[]; skipped: string[]; unmatched: string[]; known: string[];
   /** 整个套件一进程的决策缓存账（命中=省下的重复提问）。 */
   cache: DecisionCacheStats;
+  /** 这一臂跑在哪个模型层级（`on` = 真 ONNX；`off(scripted)` = 桩）。 */
+  tier: string;
 }> {
   // 两层包装：缓存记"省下的重复提问"（零成本率），外层计数记"模型被咨询几次"（出场率）——
   // 命中也是一次咨询，所以计数在缓存外面。laya 是确定性的，同问不重答。
-  const cached = withDecisionCache(scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 }))));
+  // §7/W2：`--real-model` 显式换真模型那一臂（CI 默认仍是桩：不把 1.7 GB 权重塞进 CI）。
+  const inner = opts.realModel
+    ? (await import("../src/laya-onnx.ts")).createLayaOnnxRuntime() as never
+    : scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 })));
+  const cached = withDecisionCache(inner);
   const counted = countingRuntime(cached);
   installLayaRuntime(counted);
   const rows: SuiteRow[] = [];
@@ -150,7 +179,7 @@ export async function suite(only: string[] = []): Promise<{
           rows.push({
             app: name, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
             status: "failed", secs: 0, note: `加载失败：${msg}`,
-            model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0,
+            model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, hint_hinted: 0, hint_browser: 0,
           });
         }
         continue;
@@ -170,7 +199,7 @@ export async function suite(only: string[] = []): Promise<{
       } catch (e) {
         rows.push({
           app: pack.id, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
-          status: "failed", secs: 0, model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0,
+          status: "failed", secs: 0, model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, hint_hinted: 0, hint_browser: 0,
           note: `运行崩了：${e instanceof Error ? e.message : String(e)}`,
         });
       }
@@ -181,7 +210,10 @@ export async function suite(only: string[] = []): Promise<{
   // `seen` 在 `--only` 过滤**之前**收集，所以它就是"已知应用"的完整名单（用来给打错字的人候选）。
   const known = [...seen].sort();
   const unmatched = only.filter((o: string) => !seen.has(o) && !rows.some((r) => r.app === o));
-  return { rows, skipped, unmatched, known, cache: cached.decisionStats() };
+  return {
+    rows, skipped, unmatched, known, cache: cached.decisionStats(),
+    tier: opts.realModel ? "on" : "off(scripted)",
+  };
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
@@ -189,14 +221,17 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     args: argv,
     options: {
       only: { type: "string" }, json: { type: "boolean" },
+      "real-model": { type: "boolean" },
       help: { type: "boolean" }, verbose: { type: "boolean" },
     },
   });
   if (values.help) {
-    console.log("usage: apps-suite [--only id,id] [--json] [--verbose]\n\n"
+    console.log("usage: apps-suite [--only id,id] [--json] [--verbose] [--real-model]\n\n"
       + "一条命令跑完所有旅程型应用的验收（离线口径）\n\n"
+      + "默认臂是**脚本桩**（确定性、CI 可跑、不碰 1.7 GB 权重）；`--real-model` 换真 ONNX 那一臂。\n"
       + "退出码：0=全部真执行且通过 ｜ 1=有未通过（含加载失败） ｜ "
-      + "2=用法错误（--only 未命中任何应用） ｜ 3=有\"未执行\"（危险步未放行，不算全绿）\n"
+      + "2=用法错误（--only 未命中任何应用） ｜ 3=有\"未执行\"（危险步未放行，不算全绿） ｜ "
+      + "4=真模型臂**边际为 0**（应用都过了，但模型一步也没独立决定 ⇒ \"弹性\"不成立）\n"
       + "线上/测量型应用会被明着跳过（它们要真网络），跳过不等于通过。\n"
       + "表里带模型账（咨询数 / reobserve / 页脚的缓存命中）——出场率、挽回、零成本率三组数（P1）。\n"
       + "默认只打结论表；要看逐应用日志加 --verbose。");
@@ -209,11 +244,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (!values.verbose && !values.json) console.log = (...a: unknown[]) => { swallowed.push(a.join(" ")); };
   let out;
   try {
-    out = await suite(only);
+    out = await suite(only, { realModel: values["real-model"] === true });
   } finally {
     console.log = passthrough;
   }
-  const { rows, skipped, unmatched, known, cache } = out;
+  const { rows, skipped, unmatched, known, cache, tier } = out;
+  const tierOn = tier === "on";
   if (unmatched.length) {
     const msg = `--only ${unmatched.map((u) => JSON.stringify(u)).join(", ")} 没有匹配任何应用。`
       + `已知应用：${known.join(", ")}`;
@@ -226,19 +262,27 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const code = rows.some((r) => r.status === "failed") ? 1
       : rows.some((r) => r.status === "needs-dangerous-opt-in") ? 3 : 0;
     passthrough(JSON.stringify({
-      rows, skipped, cache, exit_code: code,
-      legend: "0=全部真执行且通过 ｜ 1=有未通过 ｜ 2=用法错误 ｜ 3=有未执行（危险步未放行）",
+      rows, skipped, cache, tier: out.tier,
+      model_marginal: out.tier === "on" ? rows.reduce((n, r) => n + r.model_steps, 0) : null,
+      exit_code: code,
+      legend: "0=全部真执行且通过 ｜ 1=有未通过 ｜ 2=用法错误 ｜ 3=有未执行（危险步未放行） ｜ 4=真模型臂边际为 0",
     }, null, 2));
     return code;
   }
-  const head = ["应用", "步骤", "完成", "跳过", "不变量", "模型咨询", "reobserve", "用时", "结论"];
+  const head = ["应用", "步骤", "完成", "跳过", "不变量", "模型咨询", "reobserve", "用时", "结论",
+    "模型边际", "hint覆盖"];
   const verdict = (r: SuiteRow): string =>
     r.status === "passed"
       ? (r.steps > 0 && r.model_asks === 0 ? "通过（model not needed）" : "通过")
       : r.status === "needs-dangerous-opt-in" ? "未执行（危险步未放行）" : "**未通过**";
+  // 模型边际（§7 / W2）：梯级只有低一级没决定才轮得到模型，所以"模型独立决定的步"
+  // 就是它的边际贡献——不需要反事实重跑。缺省（脚本桩）下这一列没有意义，打"未测"而不是 0。
+  const marginal = (r: SuiteRow): string =>
+    tierOn ? String(r.model_steps) : "未测";
   const table = rows.map((r) => [r.app, String(r.steps), r.completed, String(r.skipped),
-    r.invariants, `${r.model_asks}${r.conf_max !== null ? `(conf ${r.conf_max.toFixed(2)})` : ""}`,
-    String(r.reobserve), `${r.secs}s`, verdict(r)]);
+    r.invariants, `${r.model_asks}${r.conf_max !== null ? `(conf ${r.model_steps ? `✓` : r.conf_max.toFixed(2)})` : ""}`,
+    String(r.reobserve), `${r.secs}s`, verdict(r), marginal(r),
+    r.hint_browser ? `${r.hint_hinted}/${r.hint_browser}` : "-"]);
   const widths = head.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
   const line = (cells: string[]): string => cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
   console.log(line(head));
@@ -283,13 +327,34 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     ["reobserve", rows.reduce((n, r) => n + r.reobserve, 0)], ["escalate", rungEscalate],
   ];
   const dead = rungs.filter(([, n]) => n === 0).map(([k]) => k);
+  const hintHinted = rows.reduce((n, r) => n + r.hint_hinted, 0);
+  const hintBrowser = rows.reduce((n, r) => n + r.hint_browser, 0);
+  if (hintBrowser > 0) {
+    const pct = ((100 * hintHinted) / hintBrowser).toFixed(1);
+    console.log(`hint 覆盖：${hintHinted}/${hintBrowser} = ${pct}% 的浏览器步点了名（**这就是承重墙**——`
+      + `删掉它们，同一批旅程的完成率会掉到 0；剩下的 ${hintBrowser - hintHinted} 步才依赖模型兜底）`);
+  }
+  const marginalTotal = rows.reduce((n, r) => n + r.model_steps, 0);
+  if (tierOn) {
+    console.log(`模型边际：${marginalTotal} 步（梯级里只有规则/hint 没决定才轮到模型 ⇒ model_steps 就是它的独立贡献）`);
+    if (marginalTotal === 0) {
+      console.log("** 模型边际 = 0：本语料上『运行期弹性/容错』主张不成立 —— "
+        + "要么接线（docs/MODEL_ROLE_PLAN.md A1/A2），要么走备选降级。这不算通过。 **");
+    }
+  } else {
+    console.log(`模型边际：未测（本臂跑在 ${tier}；桩模型的"过关 0"是构造出来的，不是证据。`
+      + `真模型那一臂：npm run apps:suite -- --real-model）`);
+  }
   console.log(`梯级账单：${rungs.map(([k, n]) => `${k} 决定 ${n}`).join(" ｜ ")}`
     + (dead.length ? ` ⇒ **dead rung：${dead.join("、")}**（本轮语料上从未救回任何东西；`
       + `要么接线、要么从架构里拿掉，别让它当"保险"）` : ""));
   for (const r of pending) console.log(`  - ${r.app}：${r.note ?? ""}`);
-  console.log(`退出码：${failed.length ? 1 : pending.length ? 3 : 0}`
-    + `（0=全部真执行且通过 ｜ 1=有未通过 ｜ 2=用法错误 ｜ 3=有未执行）`);
-  return failed.length ? 1 : pending.length ? 3 : 0;
+  const code = suiteExitCode({
+    failed: failed.length, pending: pending.length, tierOn, marginal: marginalTotal,
+  });
+  console.log(`退出码：${code}`
+    + `（0=全部真执行且通过 ｜ 1=有未通过 ｜ 2=用法错误 ｜ 3=有未执行 ｜ 4=真模型臂边际为 0）`);
+  return code;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
