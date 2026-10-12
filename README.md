@@ -29,9 +29,12 @@ step 1: click a "Add to cart" (clicked, rule:match, conf=1.00)
 
 ```bash
 dsh plugin --profile <名称> add github:Johnly1986/AmberFlow          # 仓库直装（见 README 附注：私有库需凭证）
-dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridge   # 开发态 link
+dsh plugin --profile <名称> add /绝对路径/AmberFlow                  # 开发态 link：仓库根 bundle，插件与引擎同源
+dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridge   # 只装适配器包（引擎由 repoPath 指）
 ```
-或在插件页面直接添加项目地址。
+或在插件页面直接添加项目地址。开发态 link 之后**重启一次 DSH 进程**：换安装形态时，运行中的进程
+不会自己换掉已加载的桥模块（引擎 CLI 是子进程，倒是立刻用新的）；判据与解释见
+[integrations/dsh-bridge/DEVELOPING.md](integrations/dsh-bridge/DEVELOPING.md)。
 
 
 ## 三条硬约束

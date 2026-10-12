@@ -33,10 +33,13 @@
 > **重审后的目标架构**（④ 执行层三段化：命令层 / 决策层 / 数据槽层 + 三档裁定 + 迁移顺序）见
 > [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md)，其生成图
 > [docs/architecture-target.svg](docs/architecture-target.svg)（`node tools/arch-diagram-v2.mjs`，
-> 先量后写：坏图不落盘）。**落地状态：P0（形状硬化，不改任何运行结果）与 P1（hint 单实现 +
-> tier 候选集，门控 `tieredHint` 默认关）已实施并带负例测试**（`tests/executor-p0.test.ts`、
-> `tests/rules-tiered.test.ts`）；P2/P3/P4 按该文档 §7 的门槛排队——门槛是 P1 的线上 A/B 数字
-> 与人工裁定，不是代码能力。
+> 先量后写：坏图不落盘）。**落地状态：P0（形状硬化，不改任何运行结果）、P1（hint 单实现 +
+> tier 候选集，门控 `tieredHint` 默认关）、P2（命令层 `src/actions.ts`）、P3（数据槽层
+> `src/bindings.ts`）、P4（声明式后继 `next`，应用旅程层）均已实施并带负例测试**
+> （`tests/executor-p0.test.ts` 21 / `tests/rules-tiered.test.ts` 24 / `tests/actions.test.ts` 15 /
+> `tests/bindings.test.ts` 17 / `tests/path-next.test.ts` 14）；每个门控都按"不声明即逐字节等价"
+> 落地，验收台是两个新应用包（`apps/checkin-binding`、`apps/cold-search-next`）。线上包 A/B 的
+> 真机数字仍未做（要网络与权重），`runPlan` 的队列语义与 `next` 边的关系见 §七.3。
 
 ```
                      ┌── LLMPlanner        (System 2：一次性编排 / 失败后重规划)
@@ -233,10 +236,39 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
   同时"删即是红"：同一步去掉 `commands` 回到两跳深链的旧世界（旧冻结包一字未动，
   `apps:gen --check` 8/8 仍逐字节）。
 
-**P3/P4（排队）**：`src/bindings.ts`（数据槽层：页面候选的声明式选择规则，`by: value|label|…`，
-把 `<select>` 的硬编码两候选回退换成可声明面）、`next` 声明式后继（分支）。重审文档 §8 的四条
-红线（收窄后的①"计划结构冻结 + 闭集内选择 + 过门回填"、②"模型永不选值"、③"完成只认该面证据"、
-④"新知识过零模型重放门"）与 §7.2 的负例清单是它们的验收口径。
+**P3 已落地（数据槽层，`src/bindings.ts`，门控 = 绑定形状本身：不声明逐字节不变；`tests/bindings.test.ts` 17 条）**：
+- **三条来源，都必须声明点名**（红线②：模型永不参与选值）：`{from:"slot",key}`（计划数据袋，
+  今天的前身是 `--slot k=v` / `plan.slots`）、`{from:"option",key,match}`（**当次观察**到的页面候选
+  + `match: value|label|contains`，今天的前身是 `<select>` 标签→值两候选回退）、
+  `{from:"list",by,order}`（行集 + `order: min|max`，今天的前身是 `list_step` → `selectIndex`）。
+- **规则必须声明**：`option` 不给 `match` 就是"看着像就填"，加载期直接红；`list` 的
+  `min|max` 合法面只在 `bindings.LIST_ORDERS` 一处（`semantic-flow` 不再复制词表）。
+- **分档匹配、档内歧义即弃权**（把 P1 的 tier 纪律用到"值"上）：`value` 精确 → 折叠大小写 →
+  `label` → 子串，逐档找**唯一**命中；一档里 >1 个候选返回失败而不是掷硬币。
+- **解析走一份实现**：`resolveBinding` 是纯函数；`list` 直接调 `datasource.selectIndex`
+  （`selects` / `list_step` / 命令绑定同一个它）；`<select>` 的候选在**绑定那一刻**现读
+  （`_optionCandidates`）——"此刻有什么"是观察，不是记忆。
+- **验收用例兑现**：`apps/checkin-binding` 在真夹具上一条命令完成"选日期 + 确认"
+  （机器值 `2026-10-13` ≠ 人读标签 `10月13日 周二`），全程 `rule:match`、零模型选择提问；
+  规则命不中 ⇒ 结构化 `needs_value` 且**页面一个字没改**（负例钉在 `tests/bindings.test.ts`）。
+
+**P4 已落地（声明式后继 `next`，应用旅程层；`tests/path-next.test.ts` 14 条）**：
+- **边是编译期就有的**：应用包的步本来就有 `id`（此前是死字段），`next: ["step-id", …]` 是有序候选；
+  加载期校验"步 id 唯一 + 落点必须存在"（一条指向空气的边 = 一步都不走的静默分支，加载期红）。
+- **运行期只选走哪条**：按声明顺序取第一个"此刻适用"的候选，适用性问的就是该步**自己的 `when`**
+  ——与"这一步适不适用"是同一个问题、同一套信号语言、零模型参与（红线①）。`when` 因此会被问
+  **两次**（选边时在来源页、进入时在它自己的 `start_url`），所以跨页分支的守卫要写成"页面角色级"
+  的事实（两页都成立），否则边会被选中、步却会在进入时被跳过。
+- **被边跨过的步记成 `skipped`**（`path_crossed` 单列"是谁跨的"）：那条边就是作者对"这条路径上
+  它不适用"的声明；否则任何前向分支都会因为"跨过的步留在 pending"而永远红。
+- **路径上界是硬约束**（X4：`maxSteps` 是每步的，不是每路径的）：`plan.createPathWalk` 给每个
+  步步 id 计数，缺省 3（包可声明 `max_step_visits`）；到顶就是结构化 `path_stop.code = "next_cycle"`，
+  点名哪一步、进了几次——不挂死、不栈溢出。走过的次数进报告（`path_visits`），回边不是隐形的。
+- **验收用例兑现**：`apps/cold-search-next` 的冷启动回边把 search 走了两遍然后走下去（`path_visits`
+  可查）；**删 `next` 即红**（record 的 `when` 不成立 → skipped → 不变量不成立）；无条件自环跑出
+  `next_cycle`。计划级 runner（`runPlan`，resume 队列语义）对 `next` **响亮拒绝**而不是静默忽略。
+- **仍未做**：`runPlan` 的队列语义与声明边是两套（见 §七.3）；`inert` 降级（D3）与
+  `BrowserMiddleware` 更名（前提 C）仍欠着；线上包 A/B 的真机数字还没有（要网络与权重）。
 
 ## 五、冻结流程的契约（数据格式）
 
@@ -268,13 +300,18 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
 1. **shadow DOM 的顺序语义**：三个 JS pass 已改为 shadow-aware，但采集顺序是"light DOM 全部 → 各 shadow root"，
    与 Playwright 的深度优先交错顺序不同；`scan`/near 内部一致，跨实现比较时需注意。
 2. **跨域 iframe 不可达**：只做同源 frame（`frame.evaluate` 抛异常即跳过），跨域 iframe 仍等于不存在。
-3. **一个子目标里的动作是"直线"，条件与重试都只在子目标级别**：`target_hints`（有序 hint 列表）解决了
-   "填表 → 选择 → 提交"这类连续动作，子目标也能带自己的 `slots`；`when` 让它在不适用时被**跳过**
+3. **一个子目标里的动作是"直线"；走向（`next`）已在应用旅程层开口（P4）**：`target_hints`（有序 hint 列表）
+   解决了"填表 → 选择 → 提交"这类连续动作，子目标也能带自己的 `slots`；`when` 让它在不适用时被**跳过**
    （复刻站 #6），`retries` 让它在这一次失败时**整步重来**（复刻站 #7）。P2 的 `commands` 把这条直线
-   升级为**声明的命令闭集**（带 op、带具名参数绑定、解析不到的候选出局；§七.9），但直线仍是直线——
-   仍然做不到的是子目标**内部**的分支/循环、**回退到第 N 步**、以及多分支选择（P4 的 `next` 排队中）。
-   骨架形状现在是配置（阶段列表 + `stage`/`repeat`，见 `transfer/specs/voyagio.json` 的两页向导），
-   但 `repeat` 只有 once/per_date/per_checkin 三种，**没有"回退/条件跳转/并发搜索"**——
+   升级为**声明的命令闭集**（带 op、带具名参数绑定、解析不到的候选出局；§七.9）；P4 的 `next`
+   让**步与步之间**的走向成为声明（有序候选 + 该步自己的 `when` 作适用性判据，带路径上界与
+   `next_cycle` 结构化停因）——"回退到第 N 步"现在是可表达的（`apps/cold-search-next` 把冷启动
+   搜索走了两遍），**子目标内部**的分支/循环仍然不可表达（一步之内还是直线）。
+   **两处仍然不覆盖**：① `runPlan`（计划级 runner 的 resume 队列）**响亮拒绝** `next`，
+   声明边只在应用旅程层生效——同一份计划被两个 runner 用两种走向语义驱动是不可接受的；
+   ② 语义流模板（`flow.json`）的步骤键是白名单，`next` 不在里面（要加需先改那个白名单与它的
+   `repeat` 语义）。骨架形状现在是配置（阶段列表 + `stage`/`repeat`，见 `transfer/specs/voyagio.json`
+   的两页向导），但 `repeat` 只有 once/per_date/per_checkin 三种，**没有"回退/条件跳转/并发搜索"**——
    那些要么加新的 repeat 语义，要么由 replan 接手。
 4. **hint 语法：池侧已单实现，DOM 侧仍是第二匹配器**。P1 把 6 种语法收敛进 `rules.hintMatchImpl`
    （`hintMatch`/`hintCandidates` 同走一遍，差分测试逐形状钉死等价）；`extraction.hintLookup`
@@ -300,8 +337,12 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
    **"勾选+提交放进一个子目标"现在是可表达的**（2026-10 P2）：步可声明 `commands` 闭集（`src/actions.ts`），
    声明 × 当次观察实例化成候选，按声明顺序走、每步一个动作、同一子目标内推进
    （`tests/actions.test.ts` 用真 site2 夹具跑通：2 条 executed 命令、1 个子目标、零模型提问、`#hotel-recorded` 落账）。
+   **这一步的参数也不需要猜**（2026-10 P3）：`value` 是**声明式绑定**（`src/bindings.ts`）——
+   计划槽位、页面候选（`match: value|label|contains`，档内歧义即弃权）、行集（`order: min|max`），
+   三种来源都必须点名；命不中 ⇒ 结构化 `needs_value`，页面一个字不改
+   （`apps/checkin-binding`：机器值与人读标签不同的真 `<select>`，全程 `rule:match`、零模型提问）。
    **不因此改变的是**：冻结复刻站照旧用 URL 深链——那 8 个生成包的展开与 `plan_sha256` 是逐字节钉住的回归语料，
-   命令闭集是给**新写/用户录**的包的表达面，不是把已验收的包改写一遍。
+   命令闭集与绑定是给**新写/用户录**的包的表达面，不是把已验收的包改写一遍。
 10. **流程是配置，但有三样东西刻意不配置**：判分口径（必须是独立第二实现）、站点库存生成器、执行循环。
    把它们配置化只会得到一份无法测试的字符串程序；`transfer/specs/ctrip.json` 与手写计划逐字段一致这条单测，
    才是"配置能表达流程"的证明。

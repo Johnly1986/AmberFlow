@@ -22,7 +22,7 @@
 ```bash
 npm run setup          # 链依赖；DSH_ROOT=/path/to/deepseek-harness 指定宿主安装
 npm run build          # tsc -b → lib/types/*.js + *.d.ts（不需要打包器：tsc 会把 ./x.ts 改写成 ./x.js）
-npm run test:offline   # 47 条，离线，CI 可跑
+npm run test:offline   # 73 条，离线，CI 可跑
 npm run test:live      # 真机；需要 chromium + 本仓库，录制那条还需要 ONNX 产物
 npm test               # build + 全部
 ```
@@ -41,14 +41,45 @@ checkout 的 tsconfig paths 解析到这些包的**源码**——插件因此与
 
 ## 装进 / 移出 DSH profile
 
+两条通道，按"插件与引擎谁跟着谁走"选：
+
 ```bash
-dsh plugin --profile <name> add /root/ML/AmberFlow/integrations/dsh-bridge
+# ① 仓库根 bundle（dsh-bundle.yml 的 row 名是 amberflow/dsh-plugin，进程用整仓库）
+dsh plugin --profile <name> add /path/to/AmberFlow
+
+# ② 只装嵌套包（进程用这一份包，宿主包仍由 DSH 提供）
+dsh plugin --profile <name> add /path/to/AmberFlow/integrations/dsh-bridge
 dsh plugin --profile <name> remove @deepseek-ai/dsh-amberflow-bridge
 ```
 
-`cordis.patch.yml` 的 `repoPath` 默认 `/root/ML/AmberFlow`；换 checkout 用环境变量 `AMBERFLOW_REPO`
-覆盖。它**没有**改成"相对本包位置"是有意的：插件既可能从 `src/`（tsx）也可能从 `lib/`（node）加载，
-两者的相对深度不同，显式路径更安全。
+`package.json` 的 `dsh.bundle.patch` 让装进来的包自动进 `dsh.profile.bundles`，所以两条通道
+都不需要手写 patch；**开发机**再往 profile 的 `cordis.patch.yml` 加一条显式 `repoPath`，读起来
+没有歧义：
+
+```yaml
+- id: amberflow-bridge           # 与 dsh-bundle.yml 的 row id 一致
+  name: "amberflow/dsh-plugin"
+  config:
+    repoPath: /path/to/AmberFlow
+```
+
+### 一个实测到的坑：把"已安装的副本"换成 link 之后，**运行中的进程不会自己换代码**
+
+`pnpm add <dir>` 装的是 `link:<dir>`（`node_modules/<pkg>` 是指向 checkout 的软链），所以
+文件系统这一层立刻是新的：引擎 CLI（`repoPath` 下的 `src/*.ts`）、`apps/`、`$AMBERFLOW_HOME/apps`
+都会立刻反映工作树。**但插件模块本身不会**——进程启动时那一次 `import()` 用的是当时解析出的
+规范路径（Node 会 realpath），换成软链后同一个 specifier 解析到**另一个**路径，HMR 的重载候选
+查找（按模块 URL 命中 loadCache）因此找不到它，`patchReload: live` 也只更新配置、不重新 import。
+
+判据（哪个模块真的在跑，一秒就能测）：
+
+- 工具 schema：新桥有 `tiered_hint` 参数（P1 加的）；`amberflow_run` 的参数表里没有它 = 跑的是旧模块；
+- 用户作用域：`amberflow_apps` 列不列出 `$AMBERFLOW_HOME/apps` 里的包（本地桥的
+  `appsDirsWith` 会列，旧版的 `listApps` 只看 checkout 的 `apps/`）。
+
+结论：**换安装形态之后重启一次 DSH 进程**（重启的是宿主进程，不是另起一个 server）。之后每次
+改本仓库的 `src/`，引擎侧照旧立刻生效（CLI 是子进程现读文件），改桥自己的 `src/` 则需要 HMR
+或再重启一次。
 
 ## 热重载（可选）
 
@@ -59,6 +90,6 @@ DSH profile 补丁里把 HMR 的 `root` 指向本目录，重建 `lib/` 后会�
   name: "@deepseek-ai/dsh-hmr"
   config:
     root:
-      - /root/ML/AmberFlow/integrations/dsh-bridge
+      - /path/to/AmberFlow/integrations/dsh-bridge
     followSymlinks: false   # 必需：node_modules/@deepseek-ai/* 是指向 DSH 安装的软链
 ```

@@ -302,12 +302,47 @@ OFF 问 15 条候选、ON 只问 3 条，窄问弃权即回退整池；阶梯四
 **§9 复算口径的变化**：`grep -c "forbidden\[.*\] = esig" src/executor.ts` → **1**（助手内部那一行）；
 `stopReason = ` 的直接赋值只剩初始化 + `stop()` 内部两处；其余数字（trace.push 7 种等）未变——P0 没碰 trace 形状。
 
-**仍未做**（按本文自己的纪律，不在本轮越权）：P3 `src/bindings.ts`（`<select>`/`list_extract` 的声明式候选规则——
-命令层的具名绑定已覆盖"缺绑即 needs_value"，`select` 的 label→value 两候选回退仍是代码里的既有纪律）、
-P4 `next`（§7.2 负例 4 的环上界还没实现，等 P2 用久后的数字）；
+**P3 已实施**（数据槽层 `src/bindings.ts`；门控 = 绑定形状本身，不声明逐字节不变；`tests/bindings.test.ts` 17 条）：
+
+- **三条来源，都必须声明点名**（红线②的落地形式）：`slot`（计划数据袋）、`option`
+  （当次观察到的页面候选 + `match: value|label|contains`）、`list`（行集 + `order: min|max`）。
+  `option` 不给 `match` ⇒ 加载期红（"看着像就填"就是猜）；`list` 挂在命令上 ⇒ 加载期红
+  （没有 op 消费"行"，它属于数据腿）。
+- **分档匹配、档内歧义即弃权**：把 P1 的 tier 纪律从"元素"挪到"值"——唯一命中才采纳，
+  一档里 >1 个候选返回失败。**§7-P3 的两处前身接线完成**：`<select>` 的 label→value 两候选回退
+  变成 `{from:"option", match:"value"|"label"}`（候选在绑定那一刻**现读**页面）；`list_step`
+  的选择改由 `resolveBinding({from:"list",…})` 表达，内部仍是 `datasource.selectIndex`
+  （一份实现，`selects`/`list_step`/命令绑定共用），`semantic-flow` 里的 `min|max` 词表已删。
+- **验收台**：`apps/checkin-binding`（真夹具：机器值 `2026-10-13` ≠ 人读标签 `10月13日 周二`）
+  一条 `select` 命令 + 一条确认命令、零模型选择提问；负例是"规则命不中 ⇒ `needs_value` 且
+  页面一个字没改"。顺带补了一处**静默假红**：`{slot}` 占位符以前只在 journey 替换，
+  `invariants` 里写 `{checkin}` 会拿字面量去比对——现在与 journey 同一套规则（未知占位符加载期红）。
+
+**P4 已实施**（声明式后继 `next`，应用旅程层；默认缺省逐字节等价；`tests/path-next.test.ts` 14 条）：
+
+- **边在编译期**：应用步的 `id` 从死字段变活（`next` 的落点）；加载期校验 id 唯一 + 落点存在。
+- **运行期只选走哪条**：按声明顺序取第一个"此刻适用"的候选，适用性 = 该步自己的 `when`
+  （与"这一步适不适用"同一个问题、同一套信号语言、零模型参与）。`when` 被问两次（选边时在来源页、
+  进入时在目标页），所以跨页分支的守卫必须是"页面角色级"的事实；被边跨过的步记成 `skipped`
+  并单列 `path_crossed`，否则任何前向分支都会因为"跨过的步留在 pending"而永远红。
+- **§5.1 的硬约束兑现**：`plan.createPathWalk` 是走向的唯一实现，带 per-step 访问计数与
+  **路径上界**（缺省 3，包可声明 `max_step_visits`）；到顶 = 结构化
+  `path_stop.code = "next_cycle"`（§7.2 负例 4：不是挂死、不是栈溢出）。走过的次数进报告
+  （`path_visits`），回边不是隐形的。
+- **验收台**：`apps/cold-search-next` —— 冷启动搜索的**回边**（`search` 走两遍后走向 `record`）；
+  **删 `next` 即红**（§7.2 负例 5 的手法：record 的 `when` 不成立 → skipped → 不变量不成立）；
+  无条件自环跑出 `next_cycle`。**边界**：`runPlan` 用的是 resume 队列语义，对 `next`
+  **响亮拒绝**（静默忽略一条边 = 作者以为写了分支而实际什么都没发生）；语义流模板的步骤键白名单
+  里没有 `next`，因此 `flow.json` 侧也不存在"写了不生效"。
+
+**仍未做**（按本文自己的纪律，不在本轮越权）：
 线上包 A/B 的**真机数字**（本文 §4#1 明说不能假设一定变好，需要 `--tiered-hint` 在 live pack 上跑对照——
 离线机制已证，线上一跑需网络与权重）；`BrowserMiddleware` 更名（前提 C 的命名债）；D3 inert 降级（要先有
-"死元素当目标"夹具证明新上界早停且理由不同）。**需要裁定**的四个问题里，③已按"P0 直接开工"执行，
+"死元素当目标"夹具证明新上界早停且理由不同）；`runPlan` 与 `next` 的语义统一（要么给计划级 runner 加
+按步 id 的走向，要么让计划携带"由应用运行器驱动"的标记）；`validateCommands` 的 `slotKeys` 目前只有
+测试在传（应用包层还没把 merged slots 的键喂进去——绑定写错槽位名要在运行期才变成 `needs_value`）。
+**需要裁定**的四个问题里，③已按"P0 直接开工"执行，
 ①（红线①改写）已由 P1/P2 的实现事实接受——运行期只有"闭集内选择"与"过门回填"两条路；②（§七.9 推翻）
 已由 P2 落地为"可表达的新面"而非改写旧包；④（space/bindings 放共享层新模块还是内部编译产物）
-按 P2 的实测定为**共享层新模块 `src/actions.ts`**（纯函数、可离线单测、被 pack 与计划两面共用）。
+按 P2/P3 的实测定为**共享层新模块**（`src/actions.ts`、`src/bindings.ts`：纯函数、可离线单测、
+被 pack 与计划两面共用）。

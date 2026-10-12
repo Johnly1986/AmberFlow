@@ -32,6 +32,9 @@
 | A6c | `apps/transfer-skybook` | `transfer/site2`：**23 步**（本批最大）、唯一的**分页**骨架；5 个角色模板覆盖 19/23 步 | ✅ | `npm run apps -- --app transfer-skybook --no-model --no-sources` | **已完成**（23/23；独立复核：23/23 全字段 0 diffs；信号 8 种 / 5 个重复组，其中 1 组跨页面已作边界记录） |
 | A6d | `apps/transfer-flyquest` | `transfer/site4`：结果页**只能靠提交搜索表单**到达（有序 `target_hints`） | ✅ | `npm run apps -- --app transfer-flyquest --no-model --no-sources` | **已完成**（19/19；独立复核：退化成单 hint → exit 1 且恰好那 5 步 attempt 1 blocked） |
 | A7 | `apps/qunar-live`（旅程 + 探针同一包） | `touch.qunar.com` **H5 手机版**机票；边界见 `src/qunar-task.ts` | ❌ 需网络 + 真模型 | `npm run apps -- --app qunar-live --out /tmp/qunar` | **已完成**（**2/2**，两步都 `rule:match`，46.5s）——前提是包里声明了 `device`（见 §五） |
+| A8 | `apps/checkin-binding` | `testpages/checkin.html`：机器值（`2026-10-13`）与人读标签（`10月13日 周二`）**不同**的真 `<select>`；P3 数据槽层的验收台 | ✅ | `npm run apps -- --app checkin-binding --no-model` | **已完成**（1/1 步、2/2 不变量、零模型提问；负例"规则命不中 ⇒ `needs_value` 且页面一个字没改"钉在 `tests/bindings.test.ts`） |
+| A9 | `apps/cold-search-next` | `testpages/cold-search.html`：站点状态活在 sessionStorage 里（每个子目标都会重新 `goto`，页面自己记不住"搜过几次"）；P4 声明式后继 `next` 的验收台 | ✅ | `npm run apps -- --app cold-search-next --no-model` | **已完成**（2/2 步、`search` **走两遍**、1/1 不变量；删 `next` 即红、无条件自环 → `next_cycle` 结构化停因，钉在 `tests/path-next.test.ts`） |
+| — | `apps/skybook-checksubmit` | `transfer/site2/hotels.html`：P2 命令闭集的验收台（"勾选 + 提交"放进**一个**子目标） | ✅ | `npm run apps -- --app skybook-checksubmit --no-model` | **已完成**（旧 8 个生成包 `apps:gen --check` 8/8 不漂；负例钉在 `tests/actions.test.ts`） |
 | — | `apps/demo-app` / `cli-report` / `repo-report` | 应用层示范、工具步示范、真实工具（git+jq） | ✅ | 见 `apps/README.md` | 已完成 |
 | — | `apps/ctrip-live` / `ota-live` / `qunar-live` | 测量型应用（探针集） | ❌ 需网络 | 见 `bench/live-retest/REPORT.md` | 已完成 |
 | — | `apps/demo-tool` / `git-log` / `bench-cases` | 纯数据源应用（无旅程） | ✅ | `npm run apps:matrix` | 已完成 |

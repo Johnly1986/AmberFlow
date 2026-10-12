@@ -706,5 +706,23 @@ These are empirical findings from this codebase's own experiments — preserve t
   `needs_value` 停并进 `NEVER_RETRY_CODES`。验收用例兑现：SkyBook"勾选+提交"放进**一个子目标**
   （§七.9 未解边界 → 可表达；真 site2 夹具 2 条 executed 命令、零选择提问、信号落账），
   旧 8 个生成包一字未动（`apps:gen --check` 8/8）。红线（闭集不可逃逸、缺省等价、新知识过零模型重放门）见 review §8。
-- **P3/P4 按 §7 门槛排队**（`src/bindings.ts` 数据槽层的页面候选声明式选择、`next` 分支）：
-  门槛是 P2 用久之后的数字与人工裁定，本轮不越权实施。
+- **P3 数据槽层已落地（`src/bindings.ts`；门控 = 绑定形状本身，不声明逐字节不变；`tests/bindings.test.ts` 17 条）**：
+  参数三条来源、都必须点名：`{from:"slot",key}`（计划袋）、`{from:"option",key,match}`（**当次观察**的页面候选
+  + `match: value|label|contains`）、`{from:"list",by,order}`（行集 + `order: min|max`）。规则不声明 ⇒ 加载期红
+  （"看着像就填"就是猜）；分档匹配、**档内歧义即弃权**（P1 的 tier 纪律用到值上）；解析只有一份实现
+  （`resolveBinding` 纯函数；`list` 内部调 `datasource.selectIndex`，`selects`/`list_step`/命令绑定共用），
+  `<select>` 的候选在**绑定那一刻现读**（`_optionCandidates`）。两处前身接线完成：`<select>` 的 label→value
+  两候选回退 → `match` 声明；`semantic-flow` 的 `min|max` 词表已删（合法面只剩 `bindings.LIST_ORDERS`）。
+  验收台 `apps/checkin-binding`（真夹具：机器值 `2026-10-13` ≠ 人读标签 `10月13日 周二`，零模型提问）；
+  负例"规则命不中 ⇒ `needs_value` 且页面一个字没改"。顺带修一处静默假红：`{slot}` 占位符现在对
+  `invariants` 与 journey 是同一套规则（未知占位符加载期红）。
+- **P4 声明式后继已落地（`next`，应用旅程层；缺省逐字节等价；`tests/path-next.test.ts` 14 条）**：
+  步 `id` 从死字段变活，`next: [step-id,…]` 是有序候选；加载期校验"id 唯一 + 落点存在"（指向空气的边
+  = 一步都不走的静默分支）。运行期按声明顺序取第一个"此刻适用"的候选，适用性 = 该步**自己的 `when`**
+  （同一个问题、同一套信号语言、零模型）。**路径上界**是硬约束（`maxSteps` 是每步的，不是每路径的）：
+  `plan.createPathWalk` 是走向的唯一实现，带 per-step 计数（缺省 3，包可声明 `max_step_visits`），
+  到顶 ⇒ 结构化 `path_stop.code="next_cycle"`（不挂死、不栈溢出），走过的次数进报告 `path_visits`。
+  验收台 `apps/cold-search-next`（冷启动回边把 search 走两遍；**删 `next` 即红**：record 的 `when` 不成立
+  → skipped → 不变量不成立）。**边界**：`runPlan`（resume 队列语义）对 `next` **响亮拒绝**而非静默忽略；
+  语义流模板的步骤键白名单里没有 `next`（那边不存在"写了不生效"）；`inert` 降级（D3）与
+  `BrowserMiddleware` 更名仍未做。
