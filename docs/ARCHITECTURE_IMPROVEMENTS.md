@@ -74,7 +74,7 @@ Proposal = { choiceRef, shape: {kind: "full" | "shortlist" | "narrow", k, poolSi
 > ⏳ 未做：闸门的**分档读取**（`gate` 档位）——那是 W4 的行为改动，需要 R3 漂移夹具当验收台。
 > 契约测试在 `tests/executor.test.ts`（4 条，含"没有概率 ⇒ null 而不是 -Infinity"与"池子 ≤8 测不到短名单"两处坑）。
 
-## 3. 运行策略要能声明（P2）
+## 3. 运行策略要能声明（P2）——**已落地**
 
 **问题**：`tieredHint`（窄问）是 `RunOptions` / CLI flag / DSH 桥的参数——**包作者无法为自己的包声明它**
 （`PACK_KEYS`/`STEP_KEYS` 里没有这个键）。于是"这个应用适合窄问"这条知识只存在于跑命令的人脑子里，
@@ -91,6 +91,14 @@ Proposal = { choiceRef, shape: {kind: "full" | "shortlist" | "narrow", k, poolSi
 不声明 policy 的包输出逐字节不变；`apps:matrix` 增一列 `policy`。
 **代价/风险**：M；风险 = 又加一层声明（**与"简化配置"反向**）⇒ 因此只允许**包级**、不允许逐步写；
 逐步开关要继续留在"默认关、由包级打开"的层级里。
+
+> **状态（本轮）**：✅ `pack.policy{tiered_hint,risk_ask,reobserve,max_effective_repeats}`，
+> 未知键/错类型/越界值加载期报错（4 条负例进 `tests/apps.test.ts`）。优先级 **CLI(显式) > pack > 缺省**，
+> 生效值与来源写进 `<app>-result.json.effective_policy` 与报告行；**都没写时字段整个不存在**
+> （缺省等价纪律，同 `path_visits`）。实测三种情形都对，并修掉一个真 bug：
+> CLI 以前恒传布尔 ⇒ 永远压过包声明、还把来源写成 `cli`（假账），现在只在显式给旗标时才算覆盖。
+> ⏳ 未做：`apps:matrix` 的 `policy` 列；`risk_ask`/`reobserve`/`max_effective_repeats` 三个键
+> **只有 schema，还没有读取方**——接线属于 W1（风险头）与执行器既有参数，不许假装已生效。
 
 ## 4. 可逆性模型：把 `dangerous: true` 换成 `effect`（P2）
 

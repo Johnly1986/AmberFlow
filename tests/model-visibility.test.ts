@@ -92,6 +92,34 @@ describe("梯级账单（ARCHITECTURE_IMPROVEMENTS §5：没出场的梯级要�
 
 });
 
+describe("生效策略进产物（ARCHITECTURE_IMPROVEMENTS §3：同一个包不该随命令行变含义）", () => {
+  it("不声明、不覆盖 ⇒ 产物里没有 effective_policy（缺省等价的纪律）", async () => {
+    const out = tmpDir("pol-default");
+    const res = await runApp(loadPack("demo-app"), {
+      verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json"),
+    });
+    expect(res.effective_policy).toBeUndefined();
+    expect(appReportMarkdown(res)).not.toContain("生效策略");
+  }, 180_000);
+
+  it("包声明 tiered_hint ⇒ 来源记 pack；CLI 显式旗标 ⇒ 来源记 cli 并压过包", async () => {
+    const declared = JSON.parse(JSON.stringify(loadPack("demo-app"))) as Record<string, unknown>;
+    declared.policy = { tiered_hint: true };
+    const out = tmpDir("pol-pack");
+    const viaPack = await runApp(declared as never, {
+      verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json"),
+    });
+    expect(viaPack.effective_policy).toEqual({ tiered_hint: true, tiered_hint_source: "pack" });
+    const out2 = tmpDir("pol-cli");
+    const viaCli = await runApp(declared as never, {
+      verbose: false, sources: false, outDir: out2, planPath: path.join(out2, "plan.json"),
+      tieredHint: false,                                     // 本次显式关掉，必须赢过包声明
+    });
+    expect(viaCli.effective_policy).toEqual({ tiered_hint: false, tiered_hint_source: "cli" });
+    expect(appReportMarkdown(viaPack)).toContain("生效策略");
+  }, 300_000);
+});
+
 describe("套件的验收数（P1 的验收口径）", () => {
   it("同一张表：slowjet 咨询 ≥1（保险被碰过）；demo-app 为 0；产物落套件目录", async () => {
     const sj = await runOne(loadPack("transfer-slowjet"), cached, counted);

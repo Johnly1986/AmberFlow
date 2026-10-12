@@ -41,7 +41,7 @@ import { checkSignal } from "./signals.ts";
 import { checkToolSignal, type ToolSignal } from "./tool-signals.ts";
 import { captureStateView } from "./signal-induction.ts";
 import type { StateView } from "./signals.ts";
-import { expandPack, listPacks, loadPack, type AppPack, type ExpandedStep } from "./app-pack.ts";
+import { expandPack, listPacks, loadPack, type AppPack, type ExpandedStep, type PackPolicy } from "./app-pack.ts";
 import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "./plan.ts";
 
 /** 进程内运行序号：保证同一毫秒内连续两次运行也不会撞上同一个 `{run_id}`。 */
@@ -286,6 +286,11 @@ export interface AppRunResult {
    * 与"`when` 不成立所以跳过"分开报——两者的原因不同，报告不该把它们混成一句话。
    */
   path_crossed?: string[];
+  /**
+   * 生效的运行策略与它的来源（§3）：让"这次跑的是什么策略"成为产物的一部分——
+   * 否则同一个包含义随命令行变，而报告看不出来。
+   */
+  effective_policy?: { tiered_hint: boolean; tiered_hint_source: "cli" | "pack" | "default" };
   /** 模型层级（`on` / `off(missing)` / `off(rules-only)` / `off(scripted)`；未提供则缺字段）。 */
   model_status?: string;
   /** 决策来源汇总（见 `AppDecisions`；LAYA_VALUE_PLAN P1 的"出场率/挽回/缓存"三组数）。 */
@@ -485,7 +490,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     // 空列表/未声明 = 不启用信封：离线夹具包逐字节不受影响。
     hosts: (pack.hosts ?? null) as string[] | null,
     // P1 窄问开关（默认关；开了也只影响"档内歧义的 hint 步"问模型的范围，阶梯与 method 不动）。
-    tieredHint: opts.tieredHint === true,
+    // §3：优先级 CLI(本次) > pack.policy(声明) > 缺省(false)。不写 policy 的包逐字节不变。
+    tieredHint: opts.tieredHint ?? ((pack as unknown as Record<string, unknown>)["policy"] as PackPolicy | undefined)?.tiered_hint === true,
     // 批量运行器的默认：风险只记录不阻断；`confirmSafe` 时拒绝破坏性动作。
     confirmFn: confirmSafe
       ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
@@ -637,6 +643,16 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     ...(pathCrossed.length ? { path_crossed: pathCrossed } : {}),
     ...(pathStopOut ? { path_stop: pathStopOut } : {}),
     ...(endState ? { end_state: endState } : {}),
+    // §3：生效策略**只在非缺省时写进产物**（与 path_visits 同一纪律）。
+    // 来源三态要说清：CLI 本次覆盖 / 包声明 / 都没写——否则报告看不出这次跑的和上次是不是同一件事。
+    ...(() => {
+      const declared = (pack as unknown as Record<string, unknown>)["policy"] as PackPolicy | undefined;
+      const src = opts.tieredHint !== undefined ? "cli" : declared?.tiered_hint === true ? "pack" : "default";
+      const val = opts.tieredHint ?? declared?.tiered_hint === true;
+      return src === "default" && val === false ? {} : {
+        effective_policy: { tiered_hint: val, tiered_hint_source: src },
+      };
+    })(),
     ...(opts.modelStatus !== undefined ? { model_status: opts.modelStatus } : {}),
     decisions: summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0),
     sources: sourceResults, ok, secs: Math.round((Date.now() - t0) / 100) / 10,
@@ -653,6 +669,9 @@ export function appReportMarkdown(r: AppRunResult): string {
     `- 结果：**${r.ok ? "通过" : "未通过"}** ｜ 步骤 ${r.completed} ｜ 用时 ${r.secs}s`,
     ...(r.model_status !== undefined
       ? [`- 模型层级：\`${r.model_status}\`（on=真 ONNX 在位；off(missing)=缺产物，走的是规则模式）`] : []),
+    ...(r.effective_policy
+      ? [`- 生效策略：\`tiered_hint=${r.effective_policy.tiered_hint}\``
+        + `（来源 ${r.effective_policy.tiered_hint_source}：cli=本次命令覆盖 > pack=包声明 > default）`] : []),
     `- 角色：${r.roles_used.map((x) => `\`${x}\``).join(", ") || "（未用角色模板）"}`,
     `- 槽位（值只来自计划）：${JSON.stringify(r.slots)}`,
     ...(r.path_stop !== undefined
@@ -839,7 +858,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       slots, planPath, outDir, verbose: !v.quiet,
       sources: !v["no-sources"], confirmSafe: v["confirm-safe"] === true,
       allowDangerous: v["allow-dangerous"] === true,
-      tieredHint: v["tiered-hint"] === true,
+      // §3：只有**显式给了旗标**才算"本次覆盖"；否则留 undefined，让包声明赢。
+      // （以前这里恒传一个布尔，等于 CLI 永远压过 pack——报告还会把来源写成 cli，假账。）
+      tieredHint: v["tiered-hint"] === true ? true : undefined,
       modelId: v.model ?? pack.model ?? "english",
       modelStatus,
       runtimeStats: () => cached.decisionStats(),

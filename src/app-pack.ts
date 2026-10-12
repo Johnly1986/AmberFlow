@@ -50,8 +50,30 @@ export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = {
 export const PACK_KEYS = [
   "spec_version", "id", "label", "goal", "model", "max_subgoals", "hosts",
   "slots", "required_slots", "sources", "roles", "journey", "invariants", "notes", "probe", "device",
-  "max_step_visits", "generated_from", "recorded_from",
+  "max_step_visits", "generated_from", "recorded_from", "policy",
 ] as const;
+
+/**
+ * **运行策略可以声明**（docs/ARCHITECTURE_IMPROVEMENTS.md §3）。
+ *
+ * 配置面以前被劈成两半："应用是什么"在包里，"这次怎么跑"只在命令行——于是同一个包的含义随
+ * 命令行变，而 `tieredHint`（窄问）这类**属于站点知识**的开关，包作者根本没法为自己的包打开。
+ * 现在包级可以声明这些策略；**缺省 = 今天的行为**（不写 policy 的包逐字节不变），
+ * CLI 显式参数只覆盖本次运行，报告打印生效值与来源。
+ */
+export const POLICY_KEYS = [
+  "tiered_hint", "risk_ask", "reobserve", "max_effective_repeats",
+] as const;
+
+/** `risk_ask`：什么时候值得花一次模型前向去问"要不要拦"。 */
+export const RISK_ASK_MODES = ["always", "on-ambiguity"] as const;
+
+export interface PackPolicy {
+  tiered_hint?: boolean;
+  risk_ask?: (typeof RISK_ASK_MODES)[number];
+  reobserve?: boolean;
+  max_effective_repeats?: number;
+}
 
 /**
  * `device` 允许的键（与 `DeviceSpec` 一一对应）。理由是**只有手机版页面存在**的站点：
@@ -111,6 +133,8 @@ export interface AppInvariant {
 }
 
 export interface AppPack {
+  /** §3：运行策略声明（缺省 = 今天的行为；未知键加载期报错）。 */
+  policy?: PackPolicy;
   spec_version: number;
   id: string;
   label: string;
@@ -677,5 +701,33 @@ export function validatePack(pack: AppPack,
       p.push(`plan: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
+
+  // policy（§3）：未知键 / 错类型 / 越界值都在加载期响亮拒绝——写了就要生效，不许静默忽略。
+  const pol = (pack as Record<string, unknown>)["policy"];
+  if (pol !== undefined) {
+    if (!isDict(pol)) {
+      p.push(`policy: must be an object (keys: ${POLICY_KEYS.join(", ")})`);
+    } else {
+      for (const k of Object.keys(pol)) {
+        if (!(POLICY_KEYS as readonly string[]).includes(k) && !k.startsWith("_")) {
+          p.push(`policy.${k}: unknown policy key (known: ${POLICY_KEYS.join(", ")})`);
+        }
+      }
+      if (pol["tiered_hint"] !== undefined && typeof pol["tiered_hint"] !== "boolean") {
+        p.push("policy.tiered_hint: must be a boolean");
+      }
+      if (pol["reobserve"] !== undefined && typeof pol["reobserve"] !== "boolean") {
+        p.push("policy.reobserve: must be a boolean");
+      }
+      if (pol["risk_ask"] !== undefined && !(RISK_ASK_MODES as readonly string[]).includes(String(pol["risk_ask"]))) {
+        p.push(`policy.risk_ask: must be one of ${RISK_ASK_MODES.join(" | ")}`);
+      }
+      const mer = pol["max_effective_repeats"];
+      if (mer !== undefined && (typeof mer !== "number" || !Number.isInteger(mer) || mer < 1)) {
+        p.push("policy.max_effective_repeats: must be an integer >= 1");
+      }
+    }
+  }
+
   return p;
 }
