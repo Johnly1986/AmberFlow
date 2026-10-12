@@ -161,6 +161,34 @@ async function main(argv: string[]): Promise<number> {
   const byScript = (cjk: boolean): StepRow[] => judged.filter((r) => (r.han > 0.05) === cjk);
   const acc = (rs: StepRow[]): string => rs.length ? `${right.filter((r) => rs.includes(r)).length}/${rs.length} (${Math.round(100 * right.filter((r) => rs.includes(r)).length / rs.length)}%)` : "-";
   const floors = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50];
+  /**
+   * `conf` 在 `pickElement` 里是**两个不可比的量**（docs/DECISION_MODEL_PURPOSE_REVIEW.md §2.3）：
+   *   - passthrough（池 ≤ k=8）：`conf = 1 − 归一化熵`（在**全部**选项上算）
+   *   - shortlist（池 > k）：模型被重问一次保留子集，`conf = max(子集概率)`
+   * 合成一个数会得出"闸门不区分对错"的错误结论（实测：一支 AUC 0.233 **反向**、一支 0.587 弱正向）。
+   * 所以摘要必须**分开报**，并且给一个 AUC（把"这一步答对了"当标签）。
+   */
+  const auc = (rs: StepRow[]): number | null => {
+    const P = rs.filter((r) => r.correct), N = rs.filter((r) => !r.correct);
+    if (!P.length || !N.length) return null;
+    let hit = 0, tot = 0;
+    for (const a of P) for (const b of N) { tot++; hit += a.conf > b.conf ? 1 : a.conf === b.conf ? 0.5 : 0; }
+    return Math.round((hit / tot) * 1000) / 1000;
+  };
+  const branch = (shortlisted: boolean) => {
+    const rs = judged.filter((r) => r.shortlisted === shortlisted);
+    const pass = rs.filter((r) => r.conf >= 0.25);
+    const ok = pass.filter((r) => r.correct);
+    return {
+      steps: rs.length,
+      accuracy: rs.length ? Math.round((100 * rs.filter((r) => r.correct).length) / rs.length) / 100 : null,
+      decided_at_floor_025: pass.length,
+      right: ok.length,
+      precision: pass.length ? Math.round((100 * ok.length) / pass.length) / 100 : null,
+      conf_mean: rs.length ? Math.round((1000 * rs.reduce((a, r) => a + r.conf, 0)) / rs.length) / 1000 : null,
+      auc_conf_vs_correct: auc(rs),
+    };
+  };
   const summary = {
     steps_measured: rows.length,
     judged: judged.length,
@@ -172,6 +200,12 @@ async function main(argv: string[]): Promise<number> {
       mean: judged.length ? Math.round(1000 * judged.reduce((a, r) => a + r.conf, 0) / judged.length) / 1000 : null,
       max: judged.length ? Math.max(...judged.map((r) => r.conf)) : null,
       at_or_above_floor_025: judged.filter((r) => r.conf >= 0.25).length,
+      auc_conf_vs_correct: auc(judged),
+    },
+    // 两把尺子分开报（见上面的注释）：这一栏才是"闸门该不该信"的依据。
+    by_question_shape: {
+      passthrough_pool_le_8: branch(false),
+      shortlist_pool_gt_8: branch(true),
     },
     floor_sweep: floors.map((f) => {
       const pass = judged.filter((r) => r.conf >= f);
@@ -193,7 +227,14 @@ async function main(argv: string[]): Promise<number> {
       + `hint 未命中/模型没答 ${summary.hint_unresolved_or_no_answer}）`);
     console.log(`top-1 命中率 ${summary.top1_accuracy === null ? "-" : `${Math.round(summary.top1_accuracy * 100)}%`}`
       + ` ｜ 拉丁页 ${summary.accuracy_latin_pages} ｜ CJK 页 ${summary.accuracy_cjk_pages}`);
-    console.log(`置信度 均值 ${summary.conf.mean} 最大 ${summary.conf.max} ｜ ≥0.25 的步 ${summary.conf.at_or_above_floor_025}/${summary.judged}`);
+    console.log(`置信度 均值 ${summary.conf.mean} 最大 ${summary.conf.max} ｜ ≥0.25 的步 ${summary.conf.at_or_above_floor_025}/${summary.judged}`
+      + ` ｜ AUC(conf→对) ${summary.conf.auc_conf_vs_correct}`);
+    console.log("按问法形状拆开（两把不可比的尺子，别合成一个数）：");
+    for (const [name, b] of Object.entries(summary.by_question_shape)) {
+      console.log(`  ${name.padEnd(24)} n=${String(b.steps).padStart(3)} 命中 ${b.accuracy === null ? "-" : `${Math.round(b.accuracy * 100)}%`}`
+        + ` ｜ floor 0.25 采纳 ${b.decided_at_floor_025}（对 ${b.right}，precision ${b.precision === null ? "-" : `${Math.round(b.precision * 100)}%`}）`
+        + ` ｜ 均值 conf ${b.conf_mean} ｜ AUC ${b.auc_conf_vs_correct}`);
+    }
     console.log("\nfloor 扫描（floor = 执行器采纳线；占位数 = 模型真正会决定的步、precision = 其中选对的比例）");
     console.log("floor  模型决定  precision  coverage");
     for (const s of summary.floor_sweep) {
