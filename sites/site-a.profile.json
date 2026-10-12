@@ -3,12 +3,12 @@
   "steps": {
     "open-flights": {
       "hint": "[id=nav-flight]",
-      "replays_ok": 1,
+      "replays_ok": 3,
       "method": "laya"
     },
     "pick-date": {
       "hint": "[data-test=chip-may18]",
-      "replays_ok": 1,
+      "replays_ok": 3,
       "method": "laya"
     },
     "purchase": {
