@@ -296,14 +296,14 @@
 <text x="527" y="2039" class="t" font-size="12">可修的三处（都有实测支持）</text>
 <text x="527" y="2055" class="s">① 问法：窄问 14/14 选对（全池 3/14）——档内</text>
 <text x="527" y="2069" class="s">     候选 + 短名单，把「40 选 1」变成「≤8 选 1」。</text>
-<text x="527" y="2083" class="s">② 闸门：按问法归一（p(top1) / margin），</text>
-<text x="527" y="2097" class="s">     两把尺子分开标定；默认档逐字节不变。</text>
-<text x="527" y="2111" class="s">③ 裁决：只在非破坏性步放开模型（select 40% +</text>
-<text x="527" y="2125" class="s">     input 10% = 50%；真被页面校验的只有 10%）。</text>
+<text x="527" y="2083" class="s">② 闸门：W0 实测**换信号无效**（同 coverage 下</text>
+<text x="527" y="2097" class="s">     confidence 14.7% &gt; margin 12% &gt; pTop1 8%），</text>
+<text x="527" y="2111" class="s">     ⇒ 依据只能是爆炸半径：③ 非破坏性步放开</text>
+<text x="527" y="2125" class="s">     （select 40% + input 10% = 50%）+ 事后看信号。</text>
 <text x="527" y="2139" class="s">连零选择器的语义流家族：开关模型结果逐字段相同。</text>
 <rect x="972" y="2020" width="444" height="140" class="bxe"/>
 <text x="983" y="2039" class="t" font-size="12">实施方案（按性价比，见 MODEL_ROLE_PLAN）</text>
-<text x="983" y="2055" class="s">A3 风险头规则优先 + 进决策缓存（纯赚：597 s → &lt;300 s）</text>
+<text x="983" y="2055" class="s">A3 风险头改为声明着省（✅ 实测 12.8→2.3 s / 46.2→6.0 s）</text>
 <text x="983" y="2069" class="s">C1 覆盖率与 precision 进套件 · C2 漂移夹具 · C3 写进文档</text>
 <text x="983" y="2083" class="s">A1 + A2 同批：闸门档位 + 页面裁决（唯一有行为风险）</text>
 <text x="983" y="2097" class="s">B  作者期：未实现（无 LLM 端点，2026-10-13 裁定）</text>

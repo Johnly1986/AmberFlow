@@ -64,7 +64,7 @@
         "reobserve": 0,
         "escalate": 0,
         "rule_match": 201,
-        "secs": 723.4,
+        "secs": 689.1,
         "tier": "on"
       }
     },
@@ -77,7 +77,7 @@
         "reobserve": 0,
         "escalate": 0,
         "rule_match": 5,
-        "secs": 2.1,
+        "secs": 2,
         "tier": "ablation"
       }
     },

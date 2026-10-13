@@ -66,8 +66,9 @@ Proposal = { choiceRef, shape: {kind: "full" | "shortlist" | "narrow", k, poolSi
 **为什么是结构问题**：现在的缝把"模型的不确定性"压成一个标量，**信息在函数返回时就丢了**——
 下游无论怎么写阈值都只能用一个尺度去量两种问题。这不是调参能修的。
 
-**验收**：`model:contribution` 的产物含 `margin`/`pTop1`；两支的 AUC 与 floor 曲线**直接从产物算得出来**；
-六层对拍与 `apps:suite` 默认档逐字节不变。
+**验收**：✅ 全部达成——产物含 `shape/p_top1/p_top2/margin`（`bench/w0-model-contribution.json`），
+三个信号的同-coverage 比较可直接算（`npm run gate:signals`），默认档逐字节不变。
+**测出来的答案是"都不合格"**，因此本条的后续不是改闸门，而是 W4′（改问法 + 限爆炸半径）。
 **代价/风险**：M；改的是 `LayaRuntime` 的返回结构与闸门读取点（默认档行为不变）。**边界**：`narrow`（tieredHint）默认关，只增不启。
 
 > **状态（本轮）**：✅ 接口侧落地——`BrowserMiddleware.pickProposal()` 返回
@@ -77,7 +78,12 @@ Proposal = { choiceRef, shape: {kind: "full" | "shortlist" | "narrow", k, poolSi
 > `passthrough` 标志）判定，不从概率条数反推——反推会把 passthrough 误判成 shortlist（测试踩过并钉住）。
 > ✅ `tools/model-contribution.ts` 现在落 `shape/p_top1/p_top2/margin`（demo-app 实测：
 > 错的 #1/#2 margin 0.031/0.062，对的 #3/#4 margin 0.538/0.852 —— 这正是 W4 要的分离度）。
-> ⏳ 未做：闸门的**分档读取**（`gate` 档位）——那是 W4 的行为改动，需要 R3 漂移夹具当验收台。
+> ⏳→✅ **闸门的"分档读取"已由 W0 判定（2026-10-13）**：分档**去掉的是假象**
+> （聚合 AUC 0.233 → 分桶 0.48 / 0.533），但**同 coverage 下三个信号都不优于现状**
+> （`confidence 14.7%` ｜ `margin 12%` ｜ `pTop1 8%`）⇒ **"换一个数就能信模型"这条被数据否掉**。
+> 依据与回归：`bench/w0-gate-signals.json`、`tools/gate-signals.ts`、`tests/gate-signals.test.ts`。
+> 剩下的可行方向改成了 **W4′**：改问法（窄问，改的是正确率）+ 限爆炸半径（非破坏性步放开、事后看信号），
+> 而不是改阈值。
 > **信号是不是通用接口，已单独做过横评**：[docs/DECISION_INTERFACE_SURVEY.md](DECISION_INTERFACE_SURVEY.md)
 > ——结论是"枚举候选 + 选一个"通用、`pTop1/margin` 只在评分式选择器上免费（browser-use 那类纯生成的没有）、
 > 而 `confidence` 本来就是 laya 按选项数分桶标定后的**派生统计量**（所以"分档"不是外来概念）。

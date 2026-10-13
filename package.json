@@ -56,7 +56,8 @@
     "apps:induce": "node --experimental-strip-types tools/apps-induce.ts",
     "learn": "node --experimental-strip-types tools/learn.ts",
     "agent": "node --experimental-strip-types tools/learn.ts --json --yes",
-    "metrics": "node --experimental-strip-types tools/arch-metrics.ts"
+    "metrics": "node --experimental-strip-types tools/arch-metrics.ts",
+    "gate:signals": "node --experimental-strip-types tools/gate-signals.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

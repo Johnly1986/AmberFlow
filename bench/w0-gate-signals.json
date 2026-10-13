@@ -1,0 +1,106 @@
+{
+  "input": "/root/coding/AmberFlow/bench/w0-model-contribution.json",
+  "judged": 162,
+  "margin_defined": 162,
+  "baseline_floor_025": {
+    "threshold": 0.25,
+    "adopted": 75,
+    "right": 11,
+    "precision": 14.7
+  },
+  "signals": {
+    "confidence (1−H/log k)": {
+      "auc_all": 0.325,
+      "at_baseline_coverage": {
+        "threshold": 0.25,
+        "adopted": 75,
+        "right": 11,
+        "precision": 14.7
+      },
+      "by_bucket": {
+        "2": {
+          "n": 0,
+          "auc": null
+        },
+        "3-5": {
+          "n": 49,
+          "auc": 0.48
+        },
+        "6-10": {
+          "n": 113,
+          "auc": 0.533
+        },
+        "11+": {
+          "n": 0,
+          "auc": null
+        }
+      },
+      "by_branch": {
+        "passthrough": 0.233,
+        "shortlist": 0.587
+      }
+    },
+    "pTop1": {
+      "auc_all": 0.34,
+      "at_baseline_coverage": {
+        "threshold": 0.448,
+        "adopted": 75,
+        "right": 6,
+        "precision": 8
+      },
+      "by_bucket": {
+        "2": {
+          "n": 0,
+          "auc": null
+        },
+        "3-5": {
+          "n": 49,
+          "auc": 0.518
+        },
+        "6-10": {
+          "n": 113,
+          "auc": 0.326
+        },
+        "11+": {
+          "n": 0,
+          "auc": null
+        }
+      },
+      "by_branch": {
+        "passthrough": 0.315,
+        "shortlist": 0.587
+      }
+    },
+    "margin (pTop1−pTop2)": {
+      "auc_all": 0.306,
+      "at_baseline_coverage": {
+        "threshold": 0.204,
+        "adopted": 75,
+        "right": 9,
+        "precision": 12
+      },
+      "by_bucket": {
+        "2": {
+          "n": 0,
+          "auc": null
+        },
+        "3-5": {
+          "n": 49,
+          "auc": 0.392
+        },
+        "6-10": {
+          "n": 113,
+          "auc": 0.359
+        },
+        "11+": {
+          "n": 0,
+          "auc": null
+        }
+      },
+      "by_branch": {
+        "passthrough": 0.273,
+        "shortlist": 0.52
+      }
+    }
+  }
+}
