@@ -31,6 +31,8 @@ import { REPO } from "./flow.ts";
 import { induceHint } from "./hint-memory.ts";
 import { LayaNotConfiguredError, installLayaRuntime } from "./model.ts";
 import { checkArtifacts, missingPieces, onnxModelPath, type ModelArtifacts } from "./model-artifacts.ts";
+import { BUILTIN_LAYA_PROVIDERS, listDecisionProviders } from "./decision-provider.ts";
+import { BASELINE_PROVIDERS, registerBaselines } from "./decision-baselines.ts";
 import { createLayaOnnxRuntime } from "./laya-onnx.ts";
 import { PlanningRules, TaskPlan } from "./plan.ts";
 
@@ -128,6 +130,12 @@ export function doctorReport(p: Preflight): { ok: boolean; lines: string[] } {
   lines.push(p.model
     ? `决策模型     ${p.artifacts.onnxPath}  ✓ 真模型（图 + 权重 + tokenizer 齐）`
     : MODEL_MISSING_LINE(p.artifacts));
+  // 换模型测试的入口要在体检里看得见：只报"模型在不在"不够，还要报"能选谁"。
+  registerBaselines();
+  const selectable = [...BUILTIN_LAYA_PROVIDERS, ...BASELINE_PROVIDERS,
+    ...listDecisionProviders().filter((n) => !(BASELINE_PROVIDERS as readonly string[]).includes(n))];
+  lines.push(`决策提供者   ${selectable.join(" | ")}（--provider NAME / AMBERFLOW_DECISION_PROVIDER；`
+    + "基线对照 `npm run providers:baseline`）");
   lines.push(`LLM 规划/审计 ${p.llm ? "✓ 已配置" : "— 未配置（用内置替身，全流程照常）"}`);
   const ok = p.nodeOk && p.chromium !== null;
   if (!ok) {

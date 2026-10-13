@@ -26,6 +26,7 @@
  * （见 `resolveForMiddleware`）。
  */
 import { ariaInteractiveLines, criteriaView, stateText, urlOf, type PageLike } from "./extraction.ts";
+import * as layaModelModule from "./model.ts";
 import { getLayaRuntime, type DecisionAgent, type LayaRuntime, type ModelState } from "./model.ts";
 
 /** 一个决策提供者的身份与能力声明。 */
@@ -174,6 +175,102 @@ export async function installProviderFromEnv(env: NodeJS.ProcessEnv = process.en
   }
   active = await factory();
   return active.name;
+}
+
+/* ── 选择：一个名字 → 哪扇门（CLI / env 都走这一个函数，不分两头各猜一遍） ──── */
+
+/** 内建名字：走旧的 `LayaRuntime` 门（checkpoint 路由、换入换出都在执行器那边）。 */
+export const BUILTIN_LAYA_PROVIDERS = ["laya-onnx", "scripted-stub", "none"] as const;
+
+export interface Selection {
+  /** 实际生效的 provider 名字（写进产物，供报告与 A/B 对照）。 */
+  provider: string;
+  /** 层级：**有决策层在场就是 `on`**，基线 provider 也算 on（它确实被咨询了）。 */
+  tier: string;
+  /** 是不是消融臂（`scripted-stub` / `none`）——只有消融臂的"过关 0"不算证据。 */
+  ablation: boolean;
+}
+
+/** 解析结果：调用方拿到"该装什么"，自己决定要不要再包缓存/计数（app-runner 必须包）。 */
+export type ProviderSpec =
+  | { kind: "laya"; name: string; tier: string; ablation: boolean; make: () => Promise<LayaRuntime> | LayaRuntime }
+  | { kind: "provider"; name: string; tier: "on"; ablation: false; provider: DecisionProvider }
+  | { kind: "none"; name: string; tier: string; ablation: true };
+
+/** 给 provider 套一层咨询计数（基线 provider 也要出场数，否则梯级账单会把它算成零咨询）。 */
+export function countedProvider(p: DecisionProvider): { provider: DecisionProvider; asks: () => number } {
+  let n = 0;
+  return {
+    asks: () => n,
+    provider: {
+      ...p,
+      async pick(req) { n += 1; return p.pick(req); },
+      ...(p.risk ? { risk: (g: string, d: string) => p.risk!(g, d) } : {}),
+      ...(p.doneVote ? { doneVote: (g: string, st: ModelState) => p.doneVote!(g, st) } : {}),
+    },
+  };
+}
+
+/**
+ * 按名字**解析**该装什么（不安装）。三扇门，一个入口：
+ *   `laya-onnx`      真 ONNX 端口（默认）；产物不齐时 tier 如实写 `off(missing)`
+ *   `scripted-stub`  脚本桩（**消融臂**：它的"过关 0"是构造出来的）
+ *   `none`           不装决策层（**消融臂**：执行器进 rules-only）
+ *   其它             注册表里的 provider（基线 `coin-flip` 等，或嵌入方自己注册的）
+ *
+ * 未注册的名字**报错并列出可选项**——拼错 provider 名却静默退回默认，会让一整轮 A/B 白跑。
+ */
+export async function resolveProviderSpec(
+  name?: string | null, env: NodeJS.ProcessEnv = process.env,
+): Promise<ProviderSpec> {
+  const { registerBaselines, BASELINE_PROVIDERS } = await import("./decision-baselines.ts");
+  registerBaselines();
+  const wanted = name ?? env.AMBERFLOW_DECISION_PROVIDER ?? "laya-onnx";
+  if (wanted === "none") {
+    return { kind: "none", name: "none", tier: "off(ablation:rules-only)", ablation: true };
+  }
+  if (wanted === "scripted-stub") {
+    return {
+      kind: "laya", name: "scripted-stub", tier: "off(ablation:scripted-stub)", ablation: true,
+      make: () => {
+        const { scriptedAgent, scriptedRuntime } = require0();
+        return scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 })) as never);
+      },
+    };
+  }
+  if (wanted === "laya-onnx") {
+    const { checkArtifacts } = await import("./model-artifacts.ts");
+    return {
+      kind: "laya", name: "laya-onnx", ablation: false,
+      tier: checkArtifacts().ready ? "on" : "off(missing)",
+      make: async () => (await import("./laya-onnx.ts")).createLayaOnnxRuntime(),
+    };
+  }
+  const factory = registry.get(wanted);
+  if (!factory) {
+    throw new Error(`未知的决策提供者 ${JSON.stringify(wanted)}。可用：${
+      [...BUILTIN_LAYA_PROVIDERS, ...BASELINE_PROVIDERS,
+        ...listDecisionProviders().filter((n) => !(BASELINE_PROVIDERS as readonly string[]).includes(n))].join(", ")}`);
+  }
+  const p = await factory();
+  return { kind: "provider", name: p.name, tier: "on", ablation: false, provider: p };
+}
+
+/** 小工具：同步拿 model.ts 的替身工厂（它在 ESM 下已是静态依赖，这里只为避免顶层循环）。 */
+function require0(): typeof import("./model.ts") {
+  return layaModelModule;
+}
+
+/** 解析 + 安装（简单调用方用；需要包缓存/计数的用 `resolveProviderSpec`）。 */
+export async function applyDecisionSelection(
+  name?: string | null, env: NodeJS.ProcessEnv = process.env,
+): Promise<Selection> {
+  const spec = await resolveProviderSpec(name, env);
+  const { installLayaRuntime } = await import("./model.ts");
+  if (spec.kind === "none") { installLayaRuntime(null); installDecisionProvider(null); }
+  else if (spec.kind === "laya") { installLayaRuntime(await spec.make()); installDecisionProvider(null); }
+  else { installDecisionProvider(spec.provider); }
+  return { provider: spec.name, tier: spec.tier, ablation: spec.ablation };
 }
 
 /* ── laya 适配器：把旧的 LayaRuntime 包成 provider ───────────────────────── */

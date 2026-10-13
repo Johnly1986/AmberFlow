@@ -9,7 +9,9 @@
 ```bash
 npm ci && npx playwright install chromium
 npm start          # 在仓库自带页面上跑一份真实计划：离线、零配置
-npm run doctor     # 环境体检：Node / chromium / 决策模型 / LLM，缺什么给什么命令
+npm run doctor     # 环境体检：Node / chromium / 决策模型 / 可选 provider / LLM，缺什么给什么命令
+npm run apps -- --app ctrip-case --provider coin-flip   # 换决策模型跑（laya-onnx|scripted-stub|none|基线|自注册）
+npm run providers:baseline   # 决策提供者对照台：零智能基线 first-candidate 是任何新模型要赢的线
 ```
 
 成功的样子（`npm start` 会逐步打印判定依据，最后一行是结论）：

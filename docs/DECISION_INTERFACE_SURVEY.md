@@ -155,3 +155,49 @@ Gate 按 (shape.kind, k 桶) 分档读——桶的切法直接对齐 provider �
 > 分桶见 `laya/common.py:temp_bucket`；choice 答案构造见 `laya/agent.py`（`t_scale` 那一段）。
 > 我们侧的两把尺子见 `src/laya-onnx.ts:predictShortlist` 与 `src/executor.ts:pickInner`
 > （passthrough 用 `a.confidence`，短名单用 `max(probs)`）。
+
+
+## 7. 怎么接一个 provider（换模型测试的落地形状）
+
+抽象不是为了好看，是为了**换**。现在有三扇门，一个入口（`applyDecisionSelection` / `resolveProviderSpec`）：
+
+```bash
+npm run apps -- --app ctrip-case --provider laya-onnx        # 默认：真 ONNX
+npm run apps -- --app ctrip-case --provider coin-flip        # 基线：可复现的随机
+npm run apps -- --app ctrip-case --provider first-candidate  # 基线：只有名次
+npm run apps -- --app ctrip-case --provider none             # 消融臂：不装决策层
+AMBERFLOW_DECISION_PROVIDER=coin-flip npm run apps:suite     # 整批换
+```
+
+自己接一个：实现 `DecisionProvider`（`src/decision-provider.ts`）→ `registerDecisionProvider("我的模型", () => mine)`
+→ 跑 `tests/decision-provider.test.ts` 里那份**契约**（跑在每个 provider 上，不是只跑 laya）。
+契约里最要紧的一条：给不出概率时 `pTop1/pTop2/margin` 必须是 `null`，**不许填 0**。
+
+## 8. 首轮基线实测：这条改写了"模型带来弹性"的评估方式
+
+`npm run providers:baseline`（`tools/provider-baselines.ts`，产物 `bench/provider-baselines.json`，
+回归 `tests/provider-baselines.test.ts`）。对照的是**删掉全部 hint 的同一批旅程**：
+
+| 无 hint 旅程 | `always-abstain` | **`first-candidate`**（零智能） | `coin-flip` | laya（真 ONNX，审查文档 §2.4） |
+|---|---|---|---|---|
+| demo-app | ✗ 1/5 | **✓ 5/5**（问 12 / 过 12） | ✗ 2/5 | ✗ 3/5 |
+| camera-entry | ✗ 0/4 | **✓ 4/4**（问 28 / 过 28） | ✗ 0/4 | ✗ 0/4 |
+| transfer-trekly | ✗ 0/19 | **✓ 19/19**（问 37 / 过 37） | ✗ 0/19 | ✗ 0/19 |
+| ctrip-case | ✗ 0/19 | ✗ 7/19（问 137） | ✗ 0/19 | ✗ 10/19 |
+
+**一个零智能的"选第一个未禁候选"在四条旅程里过了三条，而真模型一条都没过。**
+
+机制解释（这才是重点，不是"基线聪明"）：执行器的梯级是
+`选 → 动作 → 页面没变则 inert → 禁掉 → 再问`。于是"选第一个"退化成一次**系统性遍历**——
+把搜索做掉的是 `forbid + inert + retries` 这套机制，不是模型。
+
+三条不夸大的边界：
+1. 基线**不安全**，它是尺子不是策略：夹具里点错多为惰性，真实页面会乱点导航/品牌；
+   不可逆动作要靠 `effect.irreversible` + 风险闸门 + `hosts` 信封拦。
+2. `ctrip-case` 上 laya（10/19）反而赢基线（7/19）——所以结论不是"基线总赢"，是**"基线常常就够"**。
+3. 遍历靠多问：trekly 37 次、ctrip 137 次咨询，代价在步数与时间。
+
+**由此改写两条评估规则**：
+- 任何新决策模型的门槛从"比没有模型强"改成 **`≥ first-candidate`**（`providers:baseline` 那张表）；
+- 我在 `MODEL_ROLE_PLAN` A2 里用过的论据"camera-entry 模型 4/4 选对 ⇒ 表单类步可以放开模型"
+  **不再成立**——同一个 4/4 零智能基线也拿到了。A2 的其余论据（非破坏性 + 事后看信号）不受影响。

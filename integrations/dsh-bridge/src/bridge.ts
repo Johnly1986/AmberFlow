@@ -377,6 +377,7 @@ export function runArgs(
     outDir: string
     dry?: boolean
     ablate?: "stub" | "rules-only"
+    provider?: string
     noSources?: boolean
     dangerous?: boolean
     /** Ask the engine to refuse destructive actions per dry-run evidence (middle gate). */
@@ -390,6 +391,7 @@ export function runArgs(
   argv.push('--app', args.app, '--out', args.outDir)
   if (args.dry) argv.push('--dry')
   if (args.ablate) argv.push('--ablate', String(args.ablate))
+  if (args.provider) argv.push('--provider', String(args.provider))
   if (args.noSources) argv.push('--no-sources')
   if (args.dangerous) argv.push('--allow-dangerous')
   if (args.confirmSafe) argv.push('--confirm-safe')
@@ -439,6 +441,7 @@ export function flowRunArgs(
     outDir: string
     dry?: boolean
     ablate?: "stub" | "rules-only"
+    provider?: string
     dangerous?: boolean
     slots?: Record<string, string>
   },

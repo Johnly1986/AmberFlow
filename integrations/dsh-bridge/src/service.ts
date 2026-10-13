@@ -32,6 +32,8 @@ export interface AmberFlowRunArgs {
   /** Rules-only: never ask the local decision model. */
   /** 消融实验臂（`stub`=脚本桩，`rules-only`=不装模型）。**省略即真模型**——这是默认。 */
   ablate?: "stub" | "rules-only"
+  /** 换决策提供者跑这一次（laya-onnx 默认 / 基线 / 自注册）。不透传则工具参数会静默失效。 */
+  provider?: string
   /** Skip the data leg. */
   noSources?: boolean
   /** Permit dangerous tool steps; refused unless the deployment set `allowDangerous`. */
@@ -183,6 +185,8 @@ export async function runApp(
       app: args.app, site: args.site, outDir,
       ...(args.dry === undefined ? {} : { dry: args.dry }),
       ...(args.ablate === undefined ? {} : { ablate: args.ablate }),
+    ...(args.provider === undefined ? {} : { provider: args.provider }),
+      ...(args.provider === undefined ? {} : { provider: args.provider }),
       ...(args.allowDangerous === undefined ? {} : { dangerous: args.allowDangerous }),
       ...(args.slots === undefined ? {} : { slots: args.slots }),
     }))
@@ -199,6 +203,7 @@ export async function runApp(
     outDir,
     ...(args.dry === undefined ? {} : { dry: args.dry }),
     ...(args.ablate === undefined ? {} : { ablate: args.ablate }),
+    ...(args.provider === undefined ? {} : { provider: args.provider }),
     ...(args.noSources === undefined ? {} : { noSources: args.noSources }),
     ...(args.allowDangerous === undefined ? {} : { dangerous: args.allowDangerous }),
     ...(args.confirmSafe === undefined ? {} : { confirmSafe: args.confirmSafe }),

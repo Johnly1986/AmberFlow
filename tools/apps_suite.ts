@@ -29,6 +29,7 @@ import { appDirs, loadPack, packHintCoverage, type AppPack } from "../src/app-pa
 import { runApp, refusalLine, type AppRunResult } from "../src/app-runner.ts";
 import { checkArtifacts, missingPieces } from "../src/model-artifacts.ts";
 import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "../src/decision-cache.ts";
+import { countedProvider, installDecisionProvider, resolveProviderSpec } from "../src/decision-provider.ts";
 import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime, type CountingRuntime } from "../src/model.ts";
 
 /**
@@ -38,11 +39,20 @@ import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime, ty
  * 于是"上一次真跑"的产物变成混合两臂——matrix 的两列与 `arch-metrics` 的脚本桩基线都跟着失真，
  * 而且没有任何地方报错。臂是口径的一部分，口径不能靠事后记得。
  */
-export function suiteOutDir(tier: "real" | "ablate" = "real"): string {
+export function suiteOutDir(arm: "real" | "ablate" | string = "real"): string {
   const env = process.env.AMBERFLOW_SUITE_OUT;
   if (env) return env;                                  // 显式指定 = 调用方负责隔离
   // 默认（真模型臂）占住那个"记录"目录：matrix 与文档引用的就是它。
-  return path.join("/tmp", tier === "ablate" ? "amberflow-suite-ablate" : "amberflow-suite");
+  // 换 provider 跑 A/B 时**各占一个目录**：否则第二个模型的产物会覆盖第一个的证据，
+  // 而 matrix/计量读到的是一份说不清谁的记录（本轮为同类问题付过两次账）。
+  // 名字映射是**口径**：`laya-onnx` 就是默认臂，占住那个"记录"目录（matrix 与 `npm run metrics`
+  // 读的都是它）。刚才我让默认臂也带上 provider 名，于是记录目录变成了 -laya-onnx——
+  // 两个读产物的地方会同时说"未跑"。改 provider 标签不能顺手挪走别人的证据。
+  if (arm === "real" || arm === "laya-onnx") return path.join("/tmp", "amberflow-suite");
+  if (arm === "ablate" || arm === "scripted-stub" || arm === "none") {
+    return path.join("/tmp", "amberflow-suite-ablate");
+  }
+  return path.join("/tmp", `amberflow-suite-${arm.replace(/[^A-Za-z0-9._-]/g, "-")}`);
 }
 
 export type SuiteStatus = "passed" | "needs-dangerous-opt-in" | "failed";
@@ -90,15 +100,21 @@ export function isLive(pack: AppPack): boolean {
 
 /** 跑一个应用包（离线口径）。返回值就是套件表格里的一行；完整结果另落 `<套件目录>/<app>/` 供 matrix 读。 */
 export async function runOne(
-  pack: AppPack, cached: CachedRuntime, counted: CountingRuntime, outBase = suiteOutDir("real"),
+  pack: AppPack, cached: CachedRuntime | null, counted: CountingRuntime | null, outBase = suiteOutDir("real"),
   /** 这次跑的层级，**由调用方给**——产物会到处被读（matrix / 桥 / 计量），标签不能靠猜。 */
   tier = "off(scripted)",
+  /** 非 laya provider 的咨询计数（laya 臂用 counted 那条缝，两者不同时存在）。 */
+  providerAsks?: () => number,
 ): Promise<SuiteRow> {
   const hints = packHintCoverage(pack);          // §W2：承重墙每天看得见
   const out = path.join(outBase, pack.id);
   fs.mkdirSync(out, { recursive: true });
-  const before = cached.decisionStats();
-  const asksBefore = counted.pickAsks();
+  // 非 laya 的 provider 没有决策缓存（缓存键是 laya 的 state+questions 形状），
+  // 但**必须有咨询计数**——否则梯级账单会把一个真在决策的 provider 记成零出场。
+  const statsOf = (): DecisionCacheStats => cached?.decisionStats() ?? { hits: 0, misses: 0, entries: 0 };
+  const asksOf = (): number => counted?.pickAsks() ?? providerAsks?.() ?? 0;
+  const before = statsOf();
+  const asksBefore = asksOf();
   const res: AppRunResult = await runApp(pack, {
     verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json"),
     // 层级如实写（曾经硬编码 off(scripted)，于是真模型臂的产物也在说自己是桩——
@@ -107,10 +123,10 @@ export async function runOne(
     modelStatus: tier,
     // 报**本次运行的增量**：套件一个进程跑所有应用，累计值会把前一个应用的命中算进来。
     runtimeStats: () => {
-      const after = cached.decisionStats();
+      const after = statsOf();
       return { hits: after.hits - before.hits, misses: after.misses - before.misses, entries: after.entries };
     },
-    pickAsks: () => counted.pickAsks() - asksBefore,
+    pickAsks: () => asksOf() - asksBefore,
   });
   fs.writeFileSync(path.join(out, `${pack.id}-result.json`), JSON.stringify(res, null, 2), "utf-8");
   const steps = res.subgoals.length + res.tool_steps.length;
@@ -167,29 +183,41 @@ export function suiteExitCode(a: {
  * `arm: "ablate"` 是**消融实验**（脚本桩），用来回答"没有模型这一层会怎样"。
  */
 export async function suite(
-  only: string[] = [], opts: { arm?: "real" | "ablate" } = {},
+  only: string[] = [], opts: { arm?: "real" | "ablate"; provider?: string } = {},
 ): Promise<{
   rows: SuiteRow[]; skipped: string[]; unmatched: string[]; known: string[];
   /** 整个套件一进程的决策缓存账（命中=省下的重复提问）。 */
   cache: DecisionCacheStats;
   /** 这一臂跑在哪个模型层级（`on` = 真 ONNX；`off(ablation:scripted-stub)` = 消融桩）。 */
   tier: string;
+  /** 这一臂实际用的决策提供者名字（换模型 A/B 时，产物目录与页脚都按它标）。 */
+  provider: string;
 }> {
   // 两层包装：缓存记"省下的重复提问"（零成本率），外层计数记"模型被咨询几次"（出场率）——
   // 命中也是一次咨询，所以计数在缓存外面。laya 是确定性的，同问不重答。
+  // §provider：`--provider NAME` 让**同一套语料与门禁**跑在不同决策模型上（换模型 A/B 的入口）。
+  // 没给就按 arm 走默认（真模型 / 消融桩）。产物不齐时默认臂拒绝，但显式选了非 laya 的
+  // provider（基线之类）就不该被 laya 的产物卡住——那是另一件事。
   const arm = opts.arm ?? "real";
-  if (arm === "real" && !checkArtifacts().ready) {
+  const spec = await resolveProviderSpec(opts.provider ?? (arm === "ablate" ? "scripted-stub" : undefined));
+  if (spec.kind === "laya" && !spec.ablation && !checkArtifacts().ready) {
     // 响亮地拒绝，而不是退回桩：静默换臂会让下面所有数字变成桩的自证。
     throw new Error(`模型产物不齐（缺 ${missingPieces(checkArtifacts()).join("/")}）——`
       + `套件默认跑真模型。补齐：npm run model:fetch -- --from <url 或本地路径>；`
       + `确实要跑消融臂：--ablate`);
   }
-  const inner = arm === "real"
-    ? (await import("../src/laya-onnx.ts")).createLayaOnnxRuntime() as never
-    : scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 })));
-  const cached = withDecisionCache(inner);
-  const counted = countingRuntime(cached);
-  installLayaRuntime(counted);
+  const inner = spec.kind === "laya" ? await spec.make() : null;
+  let providerAsks: (() => number) | null = null;
+  if (spec.kind === "provider") {
+    const counted = countedProvider(spec.provider);
+    installDecisionProvider(counted.provider);
+    providerAsks = counted.asks;
+  } else {
+    installDecisionProvider(null);
+  }
+  const cached = inner === null ? null : withDecisionCache(inner);
+  const counted = cached ? countingRuntime(cached) : null;
+  if (cached && counted) installLayaRuntime(counted);
   const rows: SuiteRow[] = [];
   const skipped: string[] = [];
   const seen = new Set<string>();
@@ -224,8 +252,8 @@ export async function suite(
       }
       try {
         rows.push(await runOne(pack, cached, counted,
-          suiteOutDir(opts.arm === "ablate" ? "ablate" : "real"),
-          opts.arm === "ablate" ? "off(ablation:scripted-stub)" : "on"));
+          suiteOutDir(opts.provider ?? (opts.arm === "ablate" ? "ablate" : "real")),
+          spec.tier, providerAsks ?? undefined));
       } catch (e) {
         rows.push({
           app: pack.id, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
@@ -241,8 +269,8 @@ export async function suite(
   const known = [...seen].sort();
   const unmatched = only.filter((o: string) => !seen.has(o) && !rows.some((r) => r.app === o));
   return {
-    rows, skipped, unmatched, known, cache: cached.decisionStats(),
-    tier: arm === "real" ? "on" : "off(ablation:scripted-stub)",
+    rows, skipped, unmatched, known, cache: cached?.decisionStats() ?? { hits: 0, misses: 0, entries: 0 },
+    tier: spec.tier, provider: spec.name,
   };
 }
 
@@ -251,7 +279,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     args: argv,
     options: {
       only: { type: "string" }, json: { type: "boolean" },
-      ablate: { type: "boolean" },
+      ablate: { type: "boolean" }, provider: { type: "string" },
       help: { type: "boolean" }, verbose: { type: "boolean" },
     },
   });
@@ -274,12 +302,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (!values.verbose && !values.json) console.log = (...a: unknown[]) => { swallowed.push(a.join(" ")); };
   let out;
   try {
-    out = await suite(only, { arm: values.ablate === true ? "ablate" : "real" });
+    out = await suite(only, {
+      arm: values.ablate === true ? "ablate" : "real",
+      provider: values.provider,
+    });
   } finally {
     console.log = passthrough;
   }
-  const { rows, skipped, unmatched, known, cache, tier } = out;
+  const { rows, skipped, unmatched, known, cache, tier, provider } = out;
   const tierOn = tier === "on";
+  const isLaya = provider === "laya-onnx" || provider === "scripted-stub" || provider === "none";
   if (unmatched.length) {
     const msg = `--only ${unmatched.map((u) => JSON.stringify(u)).join(", ")} 没有匹配任何应用。`
       + `已知应用：${known.join(", ")}`;
@@ -344,8 +376,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   console.log(`reobserve 救回：${rows.reduce((n, r) => n + r.reobserve, 0)} 步`
     + `（加宽重看从"低置信要停"边缘拿回的那几步）；零咨询的应用 ${noModel.length} 个`
     + `——model not needed 正是产品主张的证据：能规则化就别猜。`);
-  console.log(`决策缓存：命中 ${cache.hits} / 提问 ${cache.hits + cache.misses}`
-    + `（laya 是确定性的：同问不重答——${cache.misses} 次是真问，${cache.hits} 次省）`);
+  if (isLaya) {
+    console.log(`决策缓存：命中 ${cache.hits} / 提问 ${cache.hits + cache.misses}`
+      + `（laya 是确定性的：同问不重答——${cache.misses} 次是真问，${cache.hits} 次省）`);
+  } else {
+    // 非 laya 的 provider 没有那层缓存（键是 laya 的 state+questions 形状），
+    // 打 0/0 会让人以为"缓存完全没命中"——那是另一件事。
+    console.log(`决策缓存：不适用（provider=${provider}，不是 laya 端口；出场数看"模型参与"行）`);
+  }
   // 梯级账单（ARCHITECTURE_IMPROVEMENTS §5）：每一级"到达 → 决定"，整条语料上决定 0 步的级
   // 就是 dead rung——它不是保险，是错觉（会让人以为"有兜底"）。口径：低一级没决定的那一步
   // 才轮得到这一级，所以 trace 里的 method 计数就是它的"独立决定数"，不需要反事实重跑。
@@ -353,7 +391,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const rungLaya = modelSteps - rows.reduce((n, r) => n + r.reobserve, 0);
   const rungEscalate = rows.reduce((n, r) => n + (r.escalate ?? 0), 0);
   const rungs: Array<[string, number]> = [
-    ["规则/hint", rungRule], ["laya", rungLaya],
+    // 第二级以前固定叫 "laya"：换 provider 后那是**错的标签**（明明在问 coin-flip，
+    // 账单却写 laya 决定 0）。梯级名字跟着 provider 走。
+    ["规则/hint", rungRule], [isLaya ? "laya" : provider, rungLaya],
     ["reobserve", rows.reduce((n, r) => n + r.reobserve, 0)], ["escalate", rungEscalate],
   ];
   const dead = rungs.filter(([, n]) => n === 0).map(([k]) => k);
@@ -379,7 +419,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     console.log(`模型边际：不适用（本臂是**消融臂** ${tier}：桩模型的"过关 0"是构造出来的，不是证据）。`
       + `日常跑法就是真模型：npm run apps:suite`);
   }
-  console.log(`产物目录：${suiteOutDir(tierOn ? "real" : "ablate")}`
+  console.log(`产物目录：${suiteOutDir(provider)}`
     + `（两臂分开落盘：混在一处会让 matrix 的"上一次真跑"两列与脚本桩基线一起失真）`);
   console.log(`梯级账单：${rungs.map(([k, n]) => `${k} 决定 ${n}`).join(" ｜ ")}`
     + (dead.length ? ` ⇒ **dead rung：${dead.join("、")}**（本轮语料上从未救回任何东西；`

@@ -221,6 +221,13 @@ node --experimental-strip-types tools/ask-shapes.ts \
 | transfer-trekly（拉丁复刻站 19 步） | **通过** 19/19，58 s，0 咨询 | 未通过 **0/19**（19 步全 blocked） | 0.02–0.24 | 31 |
 
 **流程级：有 hint 4/4 通过（0 次 choice 咨询）；删掉 hint 0/4 通过（模型被咨询 4–42 次）。**
+
+> `[基线修正 2026-10-13]` 这张表后来的读法要改一处：**"删掉 hint 后 0/4"不等于"没有决策层就 0/4"**。
+> `npm run providers:baseline` 显示零智能的 `first-candidate`（永远选第一个未禁候选）在同样这四条
+> 无 hint 旅程上过了 **3/4**（demo-app 5/5、camera-entry 4/4、trekly 19/19；ctrip 7/19 输给 laya 的 10/19）。
+> 把搜索做掉的是梯级里的 `forbid + inert + retries`，不是模型。
+> 所以本节的正确结论是：**声明在承重**（原结论，不变）**；而在声明缺席时，模型的贡献也低于一个遍历基线**
+> （比原结论更强，也更难看）。见 DECISION_INTERFACE_SURVEY §8。
 模型确实被问了，但它的答案在 47 次尝试里没有一次把子目标走完——要么没过闸门（上表右列），
 要么过闸门之后落在别的东西上。`[复核修正]` 初版写的"另有多次 `needs_value`"在**产物里查不到**
 （只在运行期 stdout 有 `(needs_value, laya) -> skip` 的行，报告不落这一行），故不作为结论。

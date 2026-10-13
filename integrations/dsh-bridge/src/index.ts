@@ -297,6 +297,7 @@ export function apply(ctx: Context, config: Config): void {
       },
       dry: { type: 'boolean', description: 'Only expand the plan; do not open a browser or run tools.' },
       ablate: { type: 'string', enum: ['stub', 'rules-only'], description: 'ABLATION EXPERIMENT ONLY. `stub` installs a scripted fake model; `rules-only` runs with no model at all. Omit for a normal run (the real decision model is the default).' },
+      provider: { type: 'string', description: 'Which decision provider to run on: laya-onnx (default), scripted-stub, none, or a baseline (first-candidate | coin-flip | always-abstain) / any registered provider. Use baselines to measure whether a model beats zero-intelligence search.' },
       no_sources: { type: 'boolean', description: 'Skip the data leg (use already-available data).' },
       allow_dangerous: {
         type: 'boolean',
@@ -439,6 +440,7 @@ export function apply(ctx: Context, config: Config): void {
         ...(args.site === undefined ? {} : { site: args.site }),
         ...(args.dry === undefined ? {} : { dry: args.dry }),
         ...(args.ablate === undefined ? {} : { ablate: args.ablate }),
+        ...(args.provider === undefined ? {} : { provider: args.provider }),
         ...(args.no_sources === undefined ? {} : { noSources: args.no_sources }),
         ...(args.allow_dangerous === undefined ? {} : { allowDangerous: args.allow_dangerous }),
         ...(args.confirm_safe === undefined ? {} : { confirmSafe: args.confirm_safe }),

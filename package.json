@@ -57,7 +57,8 @@
     "learn": "node --experimental-strip-types tools/learn.ts",
     "agent": "node --experimental-strip-types tools/learn.ts --json --yes",
     "metrics": "node --experimental-strip-types tools/arch-metrics.ts",
-    "gate:signals": "node --experimental-strip-types tools/gate-signals.ts"
+    "gate:signals": "node --experimental-strip-types tools/gate-signals.ts",
+    "providers:baseline": "node --experimental-strip-types tools/provider-baselines.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

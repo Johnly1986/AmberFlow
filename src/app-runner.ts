@@ -33,6 +33,7 @@ import { MockAuditor, type TraceStep } from "./audit.ts";
 import { cliRunDetailed, defaultDates, loadSource, runSource, urlFor, type CliObservation } from "./datasource.ts";
 import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "./decision-cache.ts";
 import { checkArtifacts, missingPieces, modelConfigError } from "./model-artifacts.ts";
+import { activeProviderInfo, countedProvider, installDecisionProvider, resolveProviderSpec } from "./decision-provider.ts";
 import { BrowserMiddleware, browserSession, type BrowserSession } from "./executor.ts";
 import { REPO } from "./flow.ts";
 import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime } from "./model.ts";
@@ -65,6 +66,8 @@ export interface AppRunOptions {
   confirmSafe?: boolean;
   /** 工具步：允许 `dangerous` 步真跑（默认拒绝）。 */
   allowDangerous?: boolean;
+  /** 本次实际用的决策提供者身份（CLI 解析后传入；未提供则产物里没有这个字段）。 */
+  providerInfo?: { name: string; version: string; capabilities: Record<string, unknown> };
   /** 工具步：注入确认钩子（拿到干跑证据）；返回 false 则拒绝。 */
   confirmToolStep?: (desc: string, evidence: ToolStepEvidence) => boolean | Promise<boolean>;
   verbose?: boolean;
@@ -293,12 +296,16 @@ export interface AppRunResult {
    * 生效的运行策略与它的来源（§3）：让"这次跑的是什么策略"成为产物的一部分——
    * 否则同一个包含义随命令行变，而报告看不出来。
    */
+  /** 本次实际用的决策提供者（名字/版本/能力）。换模型 A/B 的对照就靠它。 */
+  decision_provider?: { name: string; version: string; capabilities: Record<string, unknown> };
   effective_policy?: {
     tiered_hint: { value: boolean; source: "cli" | "pack" | "default" };
     risk_ask: { value: "always" | "rules-only"; source: "pack" | "default" };
     reobserve: { value: boolean; source: "pack" | "default" };
     max_effective_repeats: { value: number; source: "pack" | "default" };
   };
+  /** 本次实际用的决策提供者身份（CLI 解析后传进来；未提供则缺字段）。 */
+  providerInfo?: { name: string; version: string; capabilities: Record<string, unknown> };
   /** 模型层级（`on` / `off(missing)` / `off(ablation:…)`；未提供则缺字段）。 */
   model_status?: string;
   /** 决策来源汇总（见 `AppDecisions`；LAYA_VALUE_PLAN P1 的"出场率/挽回/缓存"三组数）。 */
@@ -684,6 +691,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     // §3：生效策略**只在非缺省时写进产物**（与 path_visits 同一纪律）。
     // 来源三态要说清：CLI 本次覆盖 / 包声明 / 都没写——否则报告看不出这次跑的和上次是不是同一件事。
     ...(anyDeclared ? { effective_policy: policy } : {}),
+    // 换模型测试的对照靠这个字段：层级只说"有没有决策层"，身份才说"是哪一家"。
+    ...(opts.providerInfo ? { decision_provider: opts.providerInfo } : {}),
     ...(opts.modelStatus !== undefined ? { model_status: opts.modelStatus } : {}),
     decisions: summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0),
     sources: sourceResults, ok, secs: Math.round((Date.now() - t0) / 100) / 10,
@@ -700,6 +709,9 @@ export function appReportMarkdown(r: AppRunResult): string {
     `- 结果：**${r.ok ? "通过" : "未通过"}** ｜ 步骤 ${r.completed} ｜ 用时 ${r.secs}s`,
     ...(r.model_status !== undefined
       ? [`- 模型层级：\`${r.model_status}\`（on=真 ONNX 在位；off(missing)=缺产物，走的是规则模式）`] : []),
+    ...(r.decision_provider
+      ? [`- 决策提供者：\`${r.decision_provider.name} ${r.decision_provider.version}\``
+        + `（score=${String((r.decision_provider.capabilities as Record<string, unknown>).score_kind)}）`] : []),
     ...(r.effective_policy
       ? [`- 生效策略：${Object.entries(r.effective_policy)
           .filter(([, v]) => v.source !== "default")
@@ -763,7 +775,7 @@ export function appReportMarkdown(r: AppRunResult): string {
 }
 
 const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--out DIR]
-                  [--model ID] [--ablate stub|rules-only] [--no-sources] [--confirm-safe]
+                  [--model ID] [--provider NAME] [--ablate stub|rules-only] [--no-sources] [--confirm-safe]
                   [--allow-dangerous] [--tiered-hint] [--quiet]
 
 按 apps/<app>/pack.json 跑一条完整应用链路：数据腿 → 浏览器步/工具步 → 结束状态不变量
@@ -775,7 +787,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     options: {
       list: { type: "boolean" }, app: { type: "string" }, dry: { type: "boolean" },
       slot: { type: "string", multiple: true }, out: { type: "string" },
-      model: { type: "string" }, ablate: { type: "string" },
+      model: { type: "string" }, ablate: { type: "string" }, provider: { type: "string" },
       "no-sources": { type: "boolean" }, "confirm-safe": { type: "boolean" },
       "allow-dangerous": { type: "boolean" },
       "tiered-hint": { type: "boolean" },
@@ -861,10 +873,20 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     console.error(`--ablate 只接受 stub | rules-only（收到 ${JSON.stringify(ablate)}）`);
     return 2;
   }
+  // §provider 层：`--provider` 选决策模型（换模型做测试的那条路）；`--ablate` 保留为消融简写。
+  // 解析与安装分开做（resolveProviderSpec），因为中间必须插进**决策缓存与咨询计数**——
+  // 少了它们，`模型边际`/`梯级账单`/缓存命中率三组数就不存在了。
+  const providerWanted = v.provider
+    ?? (ablate === "stub" ? "scripted-stub" : ablate === "rules-only" ? "none" : undefined);
+  let spec;
+  try {
+    spec = await resolveProviderSpec(providerWanted);
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    return 2;
+  }
   const artifacts = checkArtifacts();
-  const modelStatus = ablate === "stub" ? "off(ablation:scripted-stub)"
-    : ablate === "rules-only" ? "off(ablation:rules-only)"
-      : artifacts.ready ? "on" : "off(missing)";
+  const modelStatus = spec.tier;
 
   if (v.dry) {
     let dryOut;
@@ -887,12 +909,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // laya 是确定性的，同一问题不该问两次；命中率本身就是要报的数（LAYA_VALUE_PLAN P1）。
   // `rules-only` 消融**不装任何 runtime**（走执行器真正的 rulesOnly 路径），
   // `stub` 消融装一个恒定 0.05 的桩（回答"问了但永远不过闸门"的形状）。两者都不是默认。
-  const inner = ablate === "rules-only"
-    ? null
-    : ablate === "stub"
-      ? scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 })))
-      : (await import("./laya-onnx.ts")).createLayaOnnxRuntime();
-  if (ablate === undefined && !artifacts.ready) {
+  const inner = spec.kind === "none" ? null : spec.kind === "laya" ? await spec.make() : null;
+  if (spec.kind === "laya" && !spec.ablation && !artifacts.ready) {
     console.log(`（模型产物不齐——缺 ${missingPieces(artifacts).join("/")}；需要模型兜底的步会如实 block。`
       + `补齐：npm run model:fetch -- --from <url 或本地路径>）`);
   }
@@ -900,14 +918,21 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // LayaNotConfiguredError ⇒ 执行器进 rulesOnly 并记下原因），不是"装一个假装是模型的桩"。
   let runtimeStats: (() => DecisionCacheStats) | null = null;
   let pickAsks: (() => number) | null = null;
-  if (inner === null) {
+  if (spec.kind === "none") {
     installLayaRuntime(null);
-  } else {
+  } else if (spec.kind === "laya" && inner !== null) {
     const cached = withDecisionCache(inner);
     const counted = countingRuntime(cached);
     installLayaRuntime(counted);
     runtimeStats = () => cached.decisionStats();
     pickAsks = () => counted.pickAsks();
+  } else if (spec.kind === "provider") {
+    // 非 laya 的 provider：不套决策缓存（它的键是 laya 的 state+questions 形状，
+    // 对别的 provider 不成立——缓存错了会静默复用别的模型的决策），但**要数咨询次数**，
+    // 否则梯级账单会把一个真的在决策的 provider 记成零出场。
+    const counted = countedProvider(spec.provider);
+    installDecisionProvider(counted.provider);
+    pickAsks = counted.asks;
   }
 
   let result: AppRunResult;
@@ -921,6 +946,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       tieredHint: v["tiered-hint"] === true ? true : undefined,
       modelId: v.model ?? pack.model ?? "english",
       modelStatus,
+      providerInfo: activeProviderInfo() ?? {
+        name: spec.name, version: spec.kind === "laya" ? "runtime" : "n/a",
+        capabilities: { choice: spec.kind !== "none", risk: spec.kind === "laya", done: spec.kind === "laya",
+          shortlist: spec.kind === "laya", score_kind: spec.kind === "laya" ? "entropy_conf" : "rank_only" },
+      },
       runtimeStats: runtimeStats ?? undefined,
       pickAsks: pickAsks ?? undefined,
     });
