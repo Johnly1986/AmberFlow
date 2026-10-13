@@ -78,6 +78,11 @@ Proposal = { choiceRef, shape: {kind: "full" | "shortlist" | "narrow", k, poolSi
 > ✅ `tools/model-contribution.ts` 现在落 `shape/p_top1/p_top2/margin`（demo-app 实测：
 > 错的 #1/#2 margin 0.031/0.062，对的 #3/#4 margin 0.538/0.852 —— 这正是 W4 要的分离度）。
 > ⏳ 未做：闸门的**分档读取**（`gate` 档位）——那是 W4 的行为改动，需要 R3 漂移夹具当验收台。
+> **信号是不是通用接口，已单独做过横评**：[docs/DECISION_INTERFACE_SURVEY.md](DECISION_INTERFACE_SURVEY.md)
+> ——结论是"枚举候选 + 选一个"通用、`pTop1/margin` 只在评分式选择器上免费（browser-use 那类纯生成的没有）、
+> 而 `confidence` 本来就是 laya 按选项数分桶标定后的**派生统计量**（所以"分档"不是外来概念）。
+> 但 **margin 到底该不该当闸门输入仍未定**：本仓库早年测过它并否掉（CLAUDE.md 的 C3-R 条目），
+> 插桩后的语料重跑（15 分钟）才能定。
 > 契约测试在 `tests/executor.test.ts`（4 条，含"没有概率 ⇒ null 而不是 -Infinity"与"池子 ≤8 测不到短名单"两处坑）。
 
 ## 3. 运行策略要能声明（P2）——**已落地**
@@ -138,9 +143,14 @@ Proposal = { choiceRef, shape: {kind: "full" | "shortlist" | "narrow", k, poolSi
 > 加载期：未知键/错类型报错，`irreversible:true` 的步不许 `retries`（与工具步 `dangerous must not retry` 同一条纪律）。
 > 行为测试两条（`tests/executor.test.ts`）：同一条含 "checkout" 的 desc 声明 `false` ⇒ **不问人**；
 > 良性的 "Add to cart" 声明 `true` ⇒ **问人**。
-> ⏳ **未接线（不许假装生效）**：`verify_after` 只有 schema 与校验，执行器还没有读它——
-> 今天"动作后看信号"本来就是循环的默认行为，`none` 这一档要等 W4 的裁决语义一起设计；
-> `undo` 没有实现（回退动作需要自己的安全论证）。A2/W4 因此仍受这条未完成项阻塞。
+> **裁定（2026-10-13，项目方）**：
+> - **`verify_after: none` 不允许存在** ⇒ 该键已从 schema **删除**（`signal` 就是循环默认，
+>   `none` 被禁 ⇒ 没有任何合法取值；留着只会让人以为"完成可以被声明关掉"）。
+>   写了它会在加载期报错并说明理由（`tests/apps.test.ts` 钉住）。
+> - **`undo` 只能引用声明过的、非危险（`irreversible !== true`）的步** —— 这条约束被接受，
+>   将来实现时必须内建：① 加载期校验目标存在且非不可逆；② 回退失败是**结构化停因**
+>   （`rolled_back` / `rollback_failed`），不许静默当成功；③ 不可逆步不得声明 undo。
+> - 因此 §4 的剩余部分（undo 原语）与 W4 的裁决语义**一起做**，不单独接线。
 
 ## 5. 梯级卫生：没出场的梯级要有数字（P1，报告即可）——**已落地**
 
@@ -194,8 +204,10 @@ Proposal = { choiceRef, shape: {kind: "full" | "shortlist" | "narrow", k, poolSi
 > ✅ **编译入口其实已经有两层，只是没人这么叫它**：`apps:gen`（spec → 包，8/8 对拍、生成包占 pack 行 64.1%）
 > 与 `learn`（演示 → 包，零模型重放门）。**缺的是第三层：意图（一句话）→ spec**，
 > 而那一段正好卡在 LLM 端点上（本机未配置）——所以 §6 的"从意图编译"= W5/B1，不是另一件事。
-> ⏳ 未做：写法收敛的规范（哪种意图必须用哪种面）与迁移报告；两者都应在端点到位后一起定，
-> 否则"编译器"只能吃 spec，归并就还是人决定。
+> **裁定（2026-10-13，项目方）**：**"意图 → spec" 这一层移到「未实现」**（见
+> `MODEL_ROLE_IMPL_PLAN` 的 W5 与决策日志）——本机没有 LLM 端点，`doctor` 明说未配置，
+> 而 laya 是**做选择题**的决策模型，不产 spec。因此 §6 剩下的"写法收敛规范 + 迁移报告"
+> 也随之挂起：**不挂在路线图上，挂在未实现里**。
 
 ## 7. 弹性要有"族"而不是"一次 A/B"（P2，与 W3 同源）——**已落地**
 
@@ -272,7 +284,7 @@ Proposal = { choiceRef, shape: {kind: "full" | "shortlist" | "narrow", k, poolSi
 | 4 | §2 决策接口 `pickProposal{shape,pTop1,margin}` + 产物落字段 | ✅ 接口完成<br>⏳ 闸门分档 = W4 | **解除了 W4 的阻塞** | M |
 | 5 | §3 运行策略可声明（四键全接线 + 生效值进产物 + matrix 列） | ✅ 完成 | W4 的前置 | M |
 | 6 | §7 漂移族（五类 + 恢复率 3/5 与 4/5 + 模型边际 ⇒ 退出码 4） | ✅ 完成 | W3 的替代/扩展 | M |
-| 7 | §4 可逆性 `effect.irreversible`（闸门声明优先 + 两条行为测试） | ◐ 部分<br>⏳ `verify_after` / `undo` 未接线 | A2 的依据 | M–L |
+| 7 | §4 可逆性 `effect.irreversible`（闸门声明优先 + 两条行为测试） | ◐ 部分<br>✅ `verify_after` 已按裁定删除<br>⏳ `undo` 未实现（约束已接受） | A2 的依据 | M–L |
 | 8 | §6 声明面归并 + `compileIntent` | ◐ 前提完成（发散度可计数：169 hint + 2 commands = 171/171 由声明解决）<br>⏳ 规范与迁移报告；意图→spec 卡在 LLM 端点 | 与 B1 同方向 | L |
 
 **剩下三件事都不是"我没做完"，而是被外部条件卡住**：

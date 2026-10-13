@@ -55,6 +55,9 @@ describe("应用包：发现与校验", () => {
     ["策略值类型错（risk_ask 是闭集）", (p: any) => { p.policy = { risk_ask: "sometimes" }; }, "must be one of always | rules-only"],
     ["策略值类型错（tiered_hint 必须是布尔）", (p: any) => { p.policy = { tiered_hint: "yes" }; }, "tiered_hint: must be a boolean"],
     ["max_effective_repeats 要 >=1", (p: any) => { p.policy = { max_effective_repeats: 0 }; }, "integer >= 1"],
+    ["verify_after 已按裁定删除（完成不能被声明关掉 = 红线③）",
+      (p: any) => { p.roles["add-to-cart"].effect = { irreversible: false, verify_after: "none" }; },
+      "verify_after: 已删除的键"],
     ["角色缺信号", (p: any) => { delete p.roles.checkout.signal; }, "needs a done-signal"],
   ])("%s", (_label, mutate, snippet) => {
     const pack = clone(loadPack("demo-app")) as any;

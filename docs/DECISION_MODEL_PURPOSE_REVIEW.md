@@ -360,6 +360,8 @@ node --experimental-strip-types tools/ask-shapes.ts \
 > 并给出落地顺序与一条"如果一条都不做"的降级路线（把模型明确降级成风险头 + 诊断，省 597→240 s 与 1.7 GB 依赖）。
 > **实施计划（阶段 / 任务卡 / 写入范围 / 门禁 / 停止条件）：[docs/MODEL_ROLE_IMPL_PLAN.md](MODEL_ROLE_IMPL_PLAN.md)。**
 > **对新架构本身的改进意见（结构/接口/缝，含 P0 单一出处工具）：[docs/ARCHITECTURE_IMPROVEMENTS.md](ARCHITECTURE_IMPROVEMENTS.md)。**
+> 决策接口是不是通用形状（`shape/pTop1/margin` 横评 laya / browser-use / MindAct）：
+> [docs/DECISION_INTERFACE_SURVEY.md](DECISION_INTERFACE_SURVEY.md)。
 
 | 阶段 | 内容 | 通过判据（可测） |
 |---|---|---|

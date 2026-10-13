@@ -337,7 +337,7 @@ export interface RunOptions {
    * `irreversible: true` ⇒ 必问确认且不许被模型提议；`false` ⇒ 明确告诉架构"错了也白跑"，
    * 这是 W4/A2 唯一允许放开模型的依据。
    */
-  effect?: { irreversible?: boolean; verify_after?: "signal" | "none" };
+  effect?: { irreversible?: boolean };
   /**
    * Navigation envelope (see `disallowedHost`): when non-empty, `run()` refuses
    * to open a `start_url` whose host is not declared, and stops the subgoal if

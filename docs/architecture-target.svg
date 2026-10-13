@@ -306,7 +306,7 @@
 <text x="983" y="2055" class="s">A3 风险头规则优先 + 进决策缓存（纯赚：597 s → &lt;300 s）</text>
 <text x="983" y="2069" class="s">C1 覆盖率与 precision 进套件 · C2 漂移夹具 · C3 写进文档</text>
 <text x="983" y="2083" class="s">A1 + A2 同批：闸门档位 + 页面裁决（唯一有行为风险）</text>
-<text x="983" y="2097" class="s">B  作者期：模型提议 (hint, signal)、人确认（需 LLM 端点）</text>
+<text x="983" y="2097" class="s">B  作者期：未实现（无 LLM 端点，2026-10-13 裁定）</text>
 <text x="983" y="2111" class="s">备选：明确降级为「风险头 + 诊断」，省 597→240 s</text>
 <text x="983" y="2125" class="sm">判据：闸门两栏 AUC ≥0.5 · 漂移夹具转绿 · 错误动作被采纳 = 0</text>
 <path class="ln" d="M700,2160 V2196" marker-end="url(#arr)"/>

@@ -113,7 +113,7 @@ const TOOL_ONLY = ["source", "args", "dry_run_args", "idempotent", "dangerous"] 
  * "能不能让模型试"与"这一步错了会留下什么"被压成同一个问题，策略只能一刀切在最保守的一侧。
  * `effect.irreversible` 把后者单独说出来；缺省不写 = 今天的判定（逐字节不变）。
  */
-export const EFFECT_KEYS = ["irreversible", "verify_after"] as const;
+export const EFFECT_KEYS = ["irreversible"] as const;
 
 // 类型归属在 `plan.ts`（步骤语法的一部分）；这里只保留校验用的键集。
 export type { StepEffect } from "./plan.ts";
@@ -536,8 +536,11 @@ export function validatePack(pack: AppPack,
           if (eff["irreversible"] !== undefined && typeof eff["irreversible"] !== "boolean") {
             p.push(`${where}.effect.irreversible: must be a boolean`);
           }
-          if (eff["verify_after"] !== undefined && eff["verify_after"] !== "signal" && eff["verify_after"] !== "none") {
-            p.push(`${where}.effect.verify_after: must be "signal" | "none"`);
+          if (eff["verify_after"] !== undefined) {
+            // 项目方裁定：`verify_after: none` 不允许存在（等于声明"这一步可以不验证完成"），
+            // 而 `signal` 就是循环的默认行为 ⇒ 这个键没有合法取值，已从 schema 删除。
+            p.push(`${where}.effect.verify_after: 已删除的键——完成只认该步的证据（红线③），不能被声明关掉；`
+              + `默认就是"看该子目标的信号"，不需要写。`);
           }
           const er = Number(step["retries"] ?? 0);
           if (eff["irreversible"] === true && er > 0) {

@@ -13,12 +13,18 @@ import path from "node:path";
 import { SIGNAL_OPS, signalArgs, type SignalSpec } from "./signals.ts";
 import { validateCommands, type CommandDecl } from "./actions.ts";
 
-/** 一步的可逆性声明（docs/ARCHITECTURE_IMPROVEMENTS.md §4）。 */
+/**
+ * 一步的可逆性声明（docs/ARCHITECTURE_IMPROVEMENTS.md §4）。
+ *
+ * 曾经还有第二个键 `verify_after`（`signal` | `none`）。项目方裁定：
+ * **`none` 不允许存在**——"动作后不要求证据也算完成"就是放松红线③；
+ * 而 `signal` 正是执行循环今天的默认行为。一个键的两个取值里，一个是空转、一个被禁，
+ * 那它就不该存在（留着只会让人以为"完成可以被声明关掉"）。
+ * 将来若要"动作后额外校验"，那是一个**新原语**（见 §4 的 undo 约束），不是把这个键加回来。
+ */
 export interface StepEffect {
   /** 执行后会不会留下不可撤回的后果（提交订单、发消息、删除…）。 */
   irreversible?: boolean;
-  /** 动作后用什么证明"页面接受了它"：`signal`=该步自己的完成信号（默认）；`none`=不校验。 */
-  verify_after?: "signal" | "none";
 }
 
 export interface Subgoal {
