@@ -83,7 +83,31 @@ function run(file: string, app: string, provider: string, outDir: string): Cell 
   };
 }
 
+/**
+ * 外部 provider 的就绪探测：`jevk5` 这类要一个服务在场。没服务就**提前停下并指路**，
+ * 而不是跑出 12 格"未通过"——那会被误读成"这个模型不行"，而真相是"根本没问成"。
+ */
+async function ensureReady(names: string[]): Promise<void> {
+  if (!names.includes("jevk5")) return;
+  const endpoint = process.env.JEVK5_ENDPOINT ?? "http://127.0.0.1:8090/v1/systemone";
+  const health = endpoint.replace(/\/v1\/systemone\/?$/, "/health");
+  try {
+    const res = await fetch(health, { signal: AbortSignal.timeout(5000) });
+    if (res.ok) return;
+  } catch { /* 下面统一报 */ }
+  throw new Error(`provider "jevk5" 需要在线服务，但 ${health} 不应答。`
+    + `起法（CUDA / GGUF / Lite 三条路）见 docs/DECISION_PROVIDER_JEVK5.md；`
+    + `或用 JEVK5_ENDPOINT 指向已有服务。`);
+}
+
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "prov-base-"));
+try {
+  await ensureReady(PROVIDERS);
+} catch (e) {
+  // 期望内的失败（服务没起）说清楚就退出，别甩栈——栈会让人以为是工具的 bug。
+  console.error((e as Error).message);
+  process.exit(2);
+}
 const results: Record<string, Record<string, Cell>> = {};
 for (const app of APPS) {
   const file = hintless(app, tmp);

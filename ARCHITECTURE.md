@@ -47,6 +47,11 @@
 > 声明 + 规则 + 编译/录制，模型是兜底与诊断。修正方案 [docs/MODEL_ROLE_PLAN.md](docs/MODEL_ROLE_PLAN.md)、
 > 实施计划 [docs/MODEL_ROLE_IMPL_PLAN.md](docs/MODEL_ROLE_IMPL_PLAN.md)（目标图 ⑨）。
 >
+> **决策模型可换**：`--provider laya-onnx|scripted-stub|none|first-candidate|coin-flip|always-abstain|jevk5`
+> （`AMBERFLOW_DECISION_PROVIDER`；缝与契约见 [docs/DECISION_INTERFACE_SURVEY.md](docs/DECISION_INTERFACE_SURVEY.md) §7，
+> 外部模型接入示例 [docs/DECISION_PROVIDER_JEVK5.md](docs/DECISION_PROVIDER_JEVK5.md)；
+> 基线对照 `npm run providers:baseline`）。
+>
 > **架构本身的改进意见**（计量单一出处 `npm run metrics` → `docs/arch-metrics.json` /
 > 决策接口按问法版本化 / 可声明运行策略 / 可逆性模型 / 梯级卫生 / 声明面归并）见
 > [docs/ARCHITECTURE_IMPROVEMENTS.md](docs/ARCHITECTURE_IMPROVEMENTS.md)。

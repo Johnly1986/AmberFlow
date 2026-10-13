@@ -225,6 +225,13 @@ export async function resolveProviderSpec(
 ): Promise<ProviderSpec> {
   const { registerBaselines, BASELINE_PROVIDERS } = await import("./decision-baselines.ts");
   registerBaselines();
+  // 外部 provider 在这里注册（**注册不需要权重**，只有真调用才需要服务端在场——
+  // 所以 doctor 能列出它，而没起服务时错误信息会指路，而不是"未知 provider"）。
+  const { registerJevK5 } = await import("./decision-jevk5.ts");
+  await registerJevK5();
+  const extra = listDecisionProviders().filter(
+    (n) => !(BASELINE_PROVIDERS as readonly string[]).includes(n)
+      && !(BUILTIN_LAYA_PROVIDERS as readonly string[]).includes(n));
   const wanted = name ?? env.AMBERFLOW_DECISION_PROVIDER ?? "laya-onnx";
   if (wanted === "none") {
     return { kind: "none", name: "none", tier: "off(ablation:rules-only)", ablation: true };
@@ -249,8 +256,7 @@ export async function resolveProviderSpec(
   const factory = registry.get(wanted);
   if (!factory) {
     throw new Error(`未知的决策提供者 ${JSON.stringify(wanted)}。可用：${
-      [...BUILTIN_LAYA_PROVIDERS, ...BASELINE_PROVIDERS,
-        ...listDecisionProviders().filter((n) => !(BASELINE_PROVIDERS as readonly string[]).includes(n))].join(", ")}`);
+      [...BUILTIN_LAYA_PROVIDERS, ...BASELINE_PROVIDERS, ...extra].join(", ")}`);
   }
   const p = await factory();
   return { kind: "provider", name: p.name, tier: "on", ablation: false, provider: p };

@@ -170,8 +170,13 @@ AMBERFLOW_DECISION_PROVIDER=coin-flip npm run apps:suite     # 整批换
 ```
 
 自己接一个：实现 `DecisionProvider`（`src/decision-provider.ts`）→ `registerDecisionProvider("我的模型", () => mine)`
-→ 跑 `tests/decision-provider.test.ts` 里那份**契约**（跑在每个 provider 上，不是只跑 laya）。
+→ 跑那份**契约**（`tests/provider-contract.ts`，每个 provider 同一份考卷，不是只考 laya）。
 契约里最要紧的一条：给不出概率时 `pTop1/pTop2/margin` 必须是 `null`，**不许填 0**。
+
+**第一个外部接入者已经是 JevK5**（[docs/DECISION_PROVIDER_JEVK5.md](DECISION_PROVIDER_JEVK5.md)）：
+它的 `confidence` 是 `max(p)` 而 laya 的是 `1 − H/log k` ——**同名不同义**，
+这正是 `score_kind` 必须存在的原因；它的 choice 要求 ≥2 个选项，所以单候选时我们**不发请求**。
+两条都不是设计时想到的，是接第二个模型时**被逼出来的**。
 
 ## 8. 首轮基线实测：这条改写了"模型带来弹性"的评估方式
 

@@ -148,6 +148,8 @@ console.log(rep.completed, rep.traces.length);
 | 变量 | 作用 |
 |---|---|
 | `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR` | 本地决策模型产物位置（缺了走规则模式） |
+| `AMBERFLOW_DECISION_PROVIDER` | 选决策提供者：`laya-onnx`（默认）/ `scripted-stub` / `none` / 基线 / `jevk5` |
+| `JEVK5_ENDPOINT` | JevK5 的 `/v1/systemone` 地址（`--provider jevk5` 时用；起法见 docs/DECISION_PROVIDER_JEVK5.md） |
 | `OPENAI_BASE_URL` + `OPENAI_API_KEY` | 启用 LLM 规划与审计（不配则用内置替身，流程照常） |
 | `AMBERFLOW_REPO` | DSH 桥指向的 checkout（旧名 `LAYAWEBUSE_REPO` 仍兼容） |
 

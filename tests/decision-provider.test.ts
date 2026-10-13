@@ -20,6 +20,7 @@ import * as browserEnv from "../src/browser-env.ts";
 import { BrowserMiddleware, type AnyPage } from "../src/executor.ts";
 import { extractElements, type ElemPool } from "../src/extraction.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime, type DecisionAgent, type LayaRuntime, type ModelState } from "../src/model.ts";
+import { providerContract } from "./provider-contract.ts";
 import {
   layaProvider, listDecisionProviders, registerDecisionProvider, installProviderFromEnv,
   installDecisionProvider, type ChoiceRequest, type ChoiceOutcome, type DecisionProvider,
@@ -29,14 +30,14 @@ const REPO = path.resolve(import.meta.dirname, "..");
 const PAGE_URL = pathToFileURL(path.join(REPO, "testpages", "product.html")).href;
 
 let browser: Browser;
-let page: Page;
+let pageObj: Page;
 let elems: ElemPool;
 
 beforeAll(async () => {
   browser = (await browserEnv.launch({ chromium } as never, true)) as never;
-  page = await (browser as unknown as { newPage(): Promise<Page> }).newPage();
-  await page.goto(PAGE_URL, { waitUntil: "domcontentloaded" });
-  elems = await extractElements(page as unknown as AnyPage);
+  pageObj = await (browser as unknown as { newPage(): Promise<Page> }).newPage();
+  await pageObj.goto(PAGE_URL, { waitUntil: "domcontentloaded" });
+  elems = await extractElements(pageObj as unknown as AnyPage);
 }, 120_000);
 
 afterAll(async () => {
@@ -44,6 +45,10 @@ afterAll(async () => {
   installLayaRuntime(null);
   installDecisionProvider(null);
 });
+
+/** 契约要的页面与元素池（每次现取，避免跨用例脏）。 */
+const page = (): ChoiceRequest["page"] => pageObj as unknown as ChoiceRequest["page"];
+const pool = (): ChoiceRequest["elems"] => elems as never;
 
 /** 一个"永远选第一个候选、conf 0.42"的脚本 laya 替身。 */
 const scriptedModel = (): { runtime: LayaRuntime; agent: DecisionAgent } => {
@@ -75,9 +80,9 @@ describe("① 等价：laya 适配器必须等于今天执行器内部的那条�
       agentFor: async (s: ModelState) => ({ agent: await runtime.load("scripted"), embedFn: null }),
     });
     const viaExecutor = await mw.pickProposal("add the wireless mouse to the cart",
-      page as unknown as AnyPage, elems, new Set(), null);
+      pageObj as unknown as AnyPage, elems, new Set(), null);
     const viaProvider = await provider.pick({
-      goal: "add the wireless mouse to the cart", page: page as unknown as ChoiceRequest["page"],
+      goal: "add the wireless mouse to the cart", page: page(),
       elems: elems as never, forbidden: new Set(), notes: null, narrow: null, k: 8,
     } satisfies ChoiceRequest);
 
@@ -88,9 +93,9 @@ describe("① 等价：laya 适配器必须等于今天执行器内部的那条�
     expect(viaProvider.signals.pTop1).not.toBeNull();
     // 禁掉全部候选 ⇒ 两边都得说"没得选"（null，不是 undefined、不是 0 分瞎选）
     const all = new Set(Object.keys(elems));
-    const emptyViaExecutor = await mw.pickProposal("x", page as unknown as AnyPage, elems, all, null);
+    const emptyViaExecutor = await mw.pickProposal("x", pageObj as unknown as AnyPage, elems, all, null);
     const emptyViaProvider = await provider.pick({
-      goal: "x", page: page as unknown as ChoiceRequest["page"], elems: elems as never,
+      goal: "x", page: page(), elems: elems as never,
       forbidden: all, notes: null, narrow: null, k: 8,
     });
     expect(emptyViaExecutor.choiceRef).toBeNull();
@@ -99,50 +104,11 @@ describe("① 等价：laya 适配器必须等于今天执行器内部的那条�
   }, 120_000);
 });
 
-/**
- * 契约：任何 provider 都必须满足的四条。跑在三个实现上——**抽象是否成立，看的是
- * 不是 laya 的那个实现能不能过**。
- */
-function providerContract(name: string, make: () => DecisionProvider): void {
-  it(`${name}：声明了能力，且 score_kind 与 signals 一致`, async () => {
-    const p = make();
-    expect(p.name).toBeTruthy();
-    expect(p.version).toBeTruthy();
-    expect(typeof p.capabilities.choice).toBe("boolean");
-    const req: ChoiceRequest = {
-      goal: "add to cart", page: page as unknown as ChoiceRequest["page"],
-      elems: elems as never, forbidden: new Set(), notes: null, narrow: null, k: 8,
-    };
-    const out: ChoiceOutcome = await p.pick(req);
-    expect(out.scoreKind).toBe(p.capabilities.score_kind);
-    if (p.capabilities.score_kind === "rank_only") {
-      // 只有名次的 provider：**必须**是 null。写成 0 就是"不给概率"冒充"没把握"。
-      expect(out.signals.pTop1).toBeNull();
-      expect(out.signals.pTop2).toBeNull();
-      expect(out.signals.margin).toBeNull();
-    }
-    expect(Number.isFinite(out.score)).toBe(true);
-    expect(out.options).toBeGreaterThanOrEqual(0);
-    // 风险头/完成投票只在声明了才存在；没声明却留个方法也算违约
-    if (!p.capabilities.risk) expect(p.risk).toBeUndefined();
-    if (!p.capabilities.done) expect(p.doneVote).toBeUndefined();
-  });
-
-  it(`${name}：没有候选时返回 null 而不是瞎选`, async () => {
-    const p = make();
-    const out = await p.pick({
-      goal: "g", page: page as unknown as ChoiceRequest["page"], elems: elems as never,
-      forbidden: new Set(Object.keys(elems)), notes: null, narrow: null, k: 8,
-    });
-    expect(out.ref).toBeNull();
-  });
-}
-
 describe("② 可替换：契约跑在三个 provider 上（后两个不碰 laya 类型）", () => {
   providerContract("laya 适配器", () => {
     const { runtime } = scriptedModel();
     return layaProvider({ runtime, agentFor: async () => ({ agent: await runtime.load("scripted"), embedFn: null }) });
-  });
+  }, page, pool);
 
   providerContract("rank_only（只有名次，例如纯生成式 agent）", () => ({
     name: "rank-only", version: "test",
@@ -153,7 +119,7 @@ describe("② 可替换：契约跑在三个 provider 上（后两个不碰 laya
         signals: { pTop1: null, pTop2: null, margin: null },
         options: keys.length, passthrough: true, probs: {} };
     },
-  }));
+  }), page, pool);
 
   providerContract("coin-flip（有概率、但等于瞎猜：对照基线）", () => ({
     name: "coin-flip", version: "test",
@@ -172,7 +138,7 @@ describe("② 可替换：契约跑在三个 provider 上（后两个不碰 laya
         options: keys.length, passthrough: true, probs };
     },
     async risk(): Promise<number> { return 0; },
-  }));
+  }), page, pool);
 });
 
 describe("③ 注册表：换 provider 是配置，不是改代码", () => {
