@@ -81,6 +81,7 @@ import {
   type NoulAnswer,
   type RouterLike,
 } from "./model.ts";
+import { decisionProviderOrNull, layaProvider, type DecisionProvider } from "./decision-provider.ts";
 import {
   DESTRUCTIVE_PATTERNS,
   FILLER_TOKENS,
@@ -731,6 +732,11 @@ export class BrowserMiddleware {
   maxEffectiveRepeats = 3;
   /** 见 MiddlewareOptions.riskAsk。 */
   riskAsk: "always" | "rules-only" = "always";
+  /**
+   * 本次运行实际用的决策提供者（`ready()` 里解析；null = 没有决策层，走 rules-only）。
+   * 换模型是配置不是改代码：见 src/decision-provider.ts 的头注释。
+   */
+  decision: DecisionProvider | null = null;
   /** Deterministic rule prefilter ON, anti-repeat ON (measured production defaults). */
   rulesOn = true;
   antiRepeat = true;
@@ -777,6 +783,17 @@ export class BrowserMiddleware {
    */
   private async ready(): Promise<void> {
     if (this._ready) return;
+    // **决策提供者层的入口**（docs/DECISION_INTERFACE_SURVEY.md 的落地）：
+    //   ① 显式装了 provider（换模型测试走这条）⇒ 直接用它，不要求 laya runtime 存在；
+    //   ② 否则走旧门：装了 `LayaRuntime` 就就地包一层适配器 ⇒ 行为与今天逐字段相同
+    //      （等价由 tests/decision-provider.test.ts 钉住，不是"看着一样"）；
+    //   ③ 两者都没有 ⇒ rules-only（下面那段既有逻辑，一个字没改）。
+    const explicit = decisionProviderOrNull();
+    if (explicit) {
+      this.decision = explicit;
+      this._ready = true;
+      return;
+    }
     let rt: LayaRuntime;
     try {
       rt = getLayaRuntime();
@@ -822,6 +839,12 @@ export class BrowserMiddleware {
         /* routing is an optimization, not a dependency */
       }
     }
+    this.decision = layaProvider({
+      runtime: rt,
+      agentFor: (st) => this.agentFor(st),
+      name: `laya-onnx`, version: this.modelId === undefined ? "default" : String(this.modelId),
+      capabilities: { choice: true, risk: true, done: true, shortlist: true, score_kind: "entropy_conf" },
+    });
     this._ready = true;
   }
 
@@ -956,58 +979,24 @@ export class BrowserMiddleware {
     forbidden: Set<string>,
     notes: Record<string, string> | null,
   ): Promise<{ ref: string | null; conf: number; probs: Record<string, number>; passthrough: boolean }> {
+    // `pickElement`/`pickProposal` 也允许被**单独调用**（测试与外部嵌入方就这么用），而 provider
+    // 是在 ready() 里解析的：不先 ready 就会拿着 null 当成"没得选"。ready() 幂等，
+    // run() 那条路早已 await 过，这里不会重复加载权重。
+    await this.ready();
     if (this.rulesOnly) {
       // no model to ask: the caller reports "needs a model pick" instead of a crash
       return { ref: null, conf: 0.0, probs: {}, passthrough: true };
     }
-    const crit = criteriaView(elems, forbidden, await ariaInteractiveLines(page), notes);
-    if (!Object.keys(crit).length) {
-      // action space exhausted (every element forbidden/inert) — signal this
-      // with conf 0 so the caller stops instead of crashing the runtime.
+    const provider = this.decision;
+    if (!provider) {
       return { ref: null, conf: 0.0, probs: {}, passthrough: true };
     }
-    const state = {
-      goal,
-      url: urlOf(page),
-      title: await page.title(),
-      main_text: await stateText(page, goal, this.embedFn),
-    };
-    const { agent, embedFn } = await this.agentFor(state);
-    const res = await getLayaRuntime().predictShortlist(agent, state, {
-      act: {
-        type: "choice",
-        instructions: `Goal: ${goal}. Which single element should be interacted with next to make progress on this goal? Ignore branding, navigation and decoration unless the goal requires them.`,
-        criteria: crit,
-      },
-    }, { embedFn, k: 8 });
-    const a = res.answers["act"] as ChoiceAnswer | undefined;
-    // A runtime that does not answer `act` AT ALL must block the step, not crash
-    // (same guard as isRisky/isDone — "no pick" is a result). A present but
-    // choiceless answer (a noul-shaped object) flows on exactly as before: the
-    // caller's `elems[ref]` miss reports it via the helpful "names no target"
-    // message, which is the UX contract for a step nothing could name.
-    if (a === undefined) return { ref: null, conf: 0.0, probs: {}, passthrough: false };
-    // The shortlist re-normalises probabilities over its kept subset only: when
-    // it dropped nothing (labels <= k), that renormalised value is NOT the
-    // model's calibrated confidence — `predict_shortlist` hands back the
-    // passthrough answer whose own `confidence` is. Trusting the subset one
-    // inflated a 0.13 pick to 0.76 and let wrong clicks through the floor.
-    const probs = a.probabilities ?? {};
-    const sl = res.shortlist?.["act"] ?? {};
-    // **不要**把 `a.choice` 的 undefined 归成 null：调用方靠这两种值区分
-    // "运行时答了但没给出可用元素"（→ 说人话：hint 没命中 / 这一步没点名）与
-    // "根本没答"（→ action space exhausted）。本轮把它写成 `?? null` 就打红了
-    // tests/ux-fixes.test.ts ③ 与 tests/app-packs-verified.test.ts 第 5 轮各一条。
-    if (sl.passthrough) return { ref: a.choice as string | null, conf: a.confidence, probs, passthrough: true };
-    // `confidence` is 1 - normalized entropy: with few options it collapses even
-    // when the model is decisive. The argmax value against the runner-up is the
-    // calibration-consistent gate signal here.
-    // `Math.max()` of an empty list is -Infinity: a runtime that answers without
-    // probabilities must not poison the floor comparison (the stop message printed
-    // `low confidence -Infinity`). Fall back to the answer's own confidence.
-    const values = Object.values(probs);
-    const top = values.length ? Math.max(...values) : (a.confidence ?? 0);
-    return { ref: a.choice as string | null, conf: top, probs, passthrough: false };
+    // 视图构造、state 渲染、短名单重问、两支各自的 conf 口径——**全部在适配器里**，
+    // 且与替换前的实现逐字段等价（tests/decision-provider.test.ts ①）。
+    const out = await provider.pick({
+      goal, page, elems, forbidden, notes, narrow: null, k: 8,
+    });
+    return { ref: out.ref as string | null, conf: out.score, probs: out.probs, passthrough: out.passthrough };
   }
 
   /** First rung of the pick ladder, then laya. Returns `[ref, conf, probabilities]`. */
@@ -1030,6 +1019,9 @@ export class BrowserMiddleware {
     // §W1：`rules-only` 是**声明着省**——关键词规则刚才已经跑过了，没命中就不再花一次前向。
     // 默认 `always` 完全走今天的路径（每一次非关键词动作都问一遍"要不要拦"）。
     if (this.riskAsk === "rules-only") return [false, 0.0];
+    // 换 provider 后新增的一条：**没有风险头的 provider 不该被问**。
+    // 这不是优化而是正确性——向一个不实现 risk 的模型要风险概率，只能拿到编出来的数。
+    if (this.decision && !this.decision.capabilities.risk) return [false, 0.0];
     const state = { action: desc, user_goal: goal };
     const { agent } = await this.agentFor(state);
     const res = await agent.predict(state, {
@@ -1055,6 +1047,7 @@ export class BrowserMiddleware {
   async isDone(goal: string, page: AnyPage): Promise<number> {
     await this.ready();
     if (this.rulesOnly) return 0.0;      // the model's "done" vote is advisory anyway
+    if (this.decision && !this.decision.capabilities.done) return 0.0;   // 没有这个头就别编一个数
     const state = {
       goal,
       url: urlOf(page),

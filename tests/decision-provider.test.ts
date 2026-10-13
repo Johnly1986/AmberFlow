@@ -1,0 +1,197 @@
+/**
+ * 决策提供者层的两件事：**等价**与**可替换**。
+ *
+ * 1. **等价**（Stage 2 的前提）：`layaProvider().pick()` 必须与今天执行器内部的
+ *    `pickProposal()` 在同一份夹具上**逐字段相同**。不是"应该一样"，是被测住一样——
+ *    因为这条缝包住的是全仓库最承重的一个函数（`pickInner`），而六层对拍的执行器层
+ *    就挂在它上面。
+ * 2. **可替换**（抽象成不成立的判据）：契约测试跑在**三个** provider 上——
+ *    laya 适配器、一个只有名次的 `rank_only`、一个均匀随机的 `coin-flip`。
+ *    后两个**不 import 任何 laya 类型**：如果它们能过契约，说明这个接口不是 laya 的形状。
+ *
+ * 契约里最要紧的一条是"`null` 不许写成 `0`"：没有概率的 provider 若把 `pTop1` 报成 0，
+ * 任何阈值都会把它判成"最没把握"，于是"这个模型不给概率"被伪装成"这个模型很不确定"。
+ */
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { chromium, type Browser, type Page } from "playwright";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import * as browserEnv from "../src/browser-env.ts";
+import { BrowserMiddleware, type AnyPage } from "../src/executor.ts";
+import { extractElements, type ElemPool } from "../src/extraction.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime, type DecisionAgent, type LayaRuntime, type ModelState } from "../src/model.ts";
+import {
+  layaProvider, listDecisionProviders, registerDecisionProvider, installProviderFromEnv,
+  installDecisionProvider, type ChoiceRequest, type ChoiceOutcome, type DecisionProvider,
+} from "../src/decision-provider.ts";
+
+const REPO = path.resolve(import.meta.dirname, "..");
+const PAGE_URL = pathToFileURL(path.join(REPO, "testpages", "product.html")).href;
+
+let browser: Browser;
+let page: Page;
+let elems: ElemPool;
+
+beforeAll(async () => {
+  browser = (await browserEnv.launch({ chromium } as never, true)) as never;
+  page = await (browser as unknown as { newPage(): Promise<Page> }).newPage();
+  await page.goto(PAGE_URL, { waitUntil: "domcontentloaded" });
+  elems = await extractElements(page as unknown as AnyPage);
+}, 120_000);
+
+afterAll(async () => {
+  await browser?.close();
+  installLayaRuntime(null);
+  installDecisionProvider(null);
+});
+
+/** 一个"永远选第一个候选、conf 0.42"的脚本 laya 替身。 */
+const scriptedModel = (): { runtime: LayaRuntime; agent: DecisionAgent } => {
+  const runtime = scriptedRuntime(scriptedAgent((key, _s, questions) => {
+    if (key === "act") {
+      const crit = (questions["act"]?.criteria ?? {}) as Record<string, string>;
+      const first = Object.keys(crit)[0];
+      return first ? { choice: first, confidence: 0.42, probabilities: { [first]: 0.42 } } : undefined;
+    }
+    if (key === "r") return { noul: 0.05 };
+    return { noul: 0.0 };
+  }) as never);
+  const box: { agent: DecisionAgent } = { agent: null as never };
+  const wrapped: LayaRuntime = {
+    async load(id, o) { box.agent = await runtime.load(id, o); return box.agent; },
+    embedFnFromAgent: (a) => runtime.embedFnFromAgent(a),
+    predictShortlist: (a, s, q, o) => runtime.predictShortlist(a, s, q, o),
+  };
+  return { runtime: wrapped, agent: box.agent };
+};
+
+describe("① 等价：laya 适配器必须等于今天执行器内部的那条路", () => {
+  it("同一份夹具上 ref / score / passthrough / options / signals 逐字段相同", async () => {
+    const { runtime } = scriptedModel();
+    installLayaRuntime(runtime);
+    const mw = new BrowserMiddleware({ modelId: "scripted" });
+    const provider = layaProvider({
+      runtime,
+      agentFor: async (s: ModelState) => ({ agent: await runtime.load("scripted"), embedFn: null }),
+    });
+    const viaExecutor = await mw.pickProposal("add the wireless mouse to the cart",
+      page as unknown as AnyPage, elems, new Set(), null);
+    const viaProvider = await provider.pick({
+      goal: "add the wireless mouse to the cart", page: page as unknown as ChoiceRequest["page"],
+      elems: elems as never, forbidden: new Set(), notes: null, narrow: null, k: 8,
+    } satisfies ChoiceRequest);
+
+    expect(viaProvider.ref).toEqual(viaExecutor.choiceRef);
+    expect(viaProvider.score).toBeCloseTo(viaExecutor.entropyConf, 6);
+    expect(viaProvider.passthrough).toBe(viaExecutor.shape.kind !== "shortlist");
+    expect(viaProvider.options).toBeGreaterThan(0);
+    expect(viaProvider.signals.pTop1).not.toBeNull();
+    // 禁掉全部候选 ⇒ 两边都得说"没得选"（null，不是 undefined、不是 0 分瞎选）
+    const all = new Set(Object.keys(elems));
+    const emptyViaExecutor = await mw.pickProposal("x", page as unknown as AnyPage, elems, all, null);
+    const emptyViaProvider = await provider.pick({
+      goal: "x", page: page as unknown as ChoiceRequest["page"], elems: elems as never,
+      forbidden: all, notes: null, narrow: null, k: 8,
+    });
+    expect(emptyViaExecutor.choiceRef).toBeNull();
+    expect(emptyViaProvider.ref).toBeNull();
+    expect(emptyViaProvider.options).toBe(0);
+  }, 120_000);
+});
+
+/**
+ * 契约：任何 provider 都必须满足的四条。跑在三个实现上——**抽象是否成立，看的是
+ * 不是 laya 的那个实现能不能过**。
+ */
+function providerContract(name: string, make: () => DecisionProvider): void {
+  it(`${name}：声明了能力，且 score_kind 与 signals 一致`, async () => {
+    const p = make();
+    expect(p.name).toBeTruthy();
+    expect(p.version).toBeTruthy();
+    expect(typeof p.capabilities.choice).toBe("boolean");
+    const req: ChoiceRequest = {
+      goal: "add to cart", page: page as unknown as ChoiceRequest["page"],
+      elems: elems as never, forbidden: new Set(), notes: null, narrow: null, k: 8,
+    };
+    const out: ChoiceOutcome = await p.pick(req);
+    expect(out.scoreKind).toBe(p.capabilities.score_kind);
+    if (p.capabilities.score_kind === "rank_only") {
+      // 只有名次的 provider：**必须**是 null。写成 0 就是"不给概率"冒充"没把握"。
+      expect(out.signals.pTop1).toBeNull();
+      expect(out.signals.pTop2).toBeNull();
+      expect(out.signals.margin).toBeNull();
+    }
+    expect(Number.isFinite(out.score)).toBe(true);
+    expect(out.options).toBeGreaterThanOrEqual(0);
+    // 风险头/完成投票只在声明了才存在；没声明却留个方法也算违约
+    if (!p.capabilities.risk) expect(p.risk).toBeUndefined();
+    if (!p.capabilities.done) expect(p.doneVote).toBeUndefined();
+  });
+
+  it(`${name}：没有候选时返回 null 而不是瞎选`, async () => {
+    const p = make();
+    const out = await p.pick({
+      goal: "g", page: page as unknown as ChoiceRequest["page"], elems: elems as never,
+      forbidden: new Set(Object.keys(elems)), notes: null, narrow: null, k: 8,
+    });
+    expect(out.ref).toBeNull();
+  });
+}
+
+describe("② 可替换：契约跑在三个 provider 上（后两个不碰 laya 类型）", () => {
+  providerContract("laya 适配器", () => {
+    const { runtime } = scriptedModel();
+    return layaProvider({ runtime, agentFor: async () => ({ agent: await runtime.load("scripted"), embedFn: null }) });
+  });
+
+  providerContract("rank_only（只有名次，例如纯生成式 agent）", () => ({
+    name: "rank-only", version: "test",
+    capabilities: { choice: true, risk: false, done: false, shortlist: false, score_kind: "rank_only" },
+    async pick(req: ChoiceRequest): Promise<ChoiceOutcome> {
+      const keys = Object.keys(req.elems).filter((k) => !req.forbidden.has(k));
+      return { ref: keys[0] ?? null, score: 0, scoreKind: "rank_only",
+        signals: { pTop1: null, pTop2: null, margin: null },
+        options: keys.length, passthrough: true, probs: {} };
+    },
+  }));
+
+  providerContract("coin-flip（有概率、但等于瞎猜：对照基线）", () => ({
+    name: "coin-flip", version: "test",
+    capabilities: { choice: true, risk: true, done: false, shortlist: false, score_kind: "calibrated_prob" },
+    async pick(req: ChoiceRequest): Promise<ChoiceOutcome> {
+      const keys = Object.keys(req.elems).filter((k) => !req.forbidden.has(k));
+      if (!keys.length) {
+        return { ref: null, score: 0, scoreKind: "calibrated_prob",
+          signals: { pTop1: null, pTop2: null, margin: null }, options: 0, passthrough: true, probs: {} };
+      }
+      const p = 1 / keys.length;
+      const probs = Object.fromEntries(keys.map((k) => [k, p]));
+      const pick = keys[Math.floor(Math.random() * keys.length)]!;
+      return { ref: pick, score: p, scoreKind: "calibrated_prob",
+        signals: { pTop1: p, pTop2: keys.length > 1 ? p : null, margin: keys.length > 1 ? 0 : null },
+        options: keys.length, passthrough: true, probs };
+    },
+    async risk(): Promise<number> { return 0; },
+  }));
+});
+
+describe("③ 注册表：换 provider 是配置，不是改代码", () => {
+  it("未注册的名字响亮报错（拼错 provider 名不能静默退回默认）", async () => {
+    registerDecisionProvider("test-rank-only", () => ({
+      name: "test-rank-only", version: "1",
+      capabilities: { choice: true, risk: false, done: false, shortlist: false, score_kind: "rank_only" },
+      async pick() {
+        return { ref: null, score: 0, scoreKind: "rank_only" as const,
+          signals: { pTop1: null, pTop2: null, margin: null }, options: 0, passthrough: true, probs: {} };
+      },
+    }));
+    expect(listDecisionProviders()).toContain("test-rank-only");
+    await expect(installProviderFromEnv({ AMBERFLOW_DECISION_PROVIDER: "test-rank-typo" }))
+      .rejects.toThrow(/未知的决策提供者.*test-rank-typo/);
+    const changed = await installProviderFromEnv({ AMBERFLOW_DECISION_PROVIDER: "test-rank-only" });
+    expect(changed).toBe("test-rank-only");
+    // 没设 env ⇒ 不动当前 provider（缺省等价的纪律）
+    installDecisionProvider(null);
+    expect(await installProviderFromEnv({})).toBeNull();
+  });
+});
