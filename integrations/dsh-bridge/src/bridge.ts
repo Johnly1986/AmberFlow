@@ -376,7 +376,7 @@ export function runArgs(
     app: string
     outDir: string
     dry?: boolean
-    noModel?: boolean
+    ablate?: "stub" | "rules-only"
     noSources?: boolean
     dangerous?: boolean
     /** Ask the engine to refuse destructive actions per dry-run evidence (middle gate). */
@@ -389,7 +389,7 @@ export function runArgs(
   const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []), '--experimental-strip-types', path.join(options.repoPath, 'src', 'app-runner.ts')]
   argv.push('--app', args.app, '--out', args.outDir)
   if (args.dry) argv.push('--dry')
-  if (args.noModel) argv.push('--no-model')
+  if (args.ablate) argv.push('--ablate', String(args.ablate))
   if (args.noSources) argv.push('--no-sources')
   if (args.dangerous) argv.push('--allow-dangerous')
   if (args.confirmSafe) argv.push('--confirm-safe')
@@ -423,7 +423,7 @@ export function learnArgs(
 
 /**
  * The argv for one semantic-flow run (`src/semantic-flow.ts`): the same tool contract as packs,
- * dispatched to the site-agnostic template. `noModel` maps to the engine's pure-rule plane
+ * dispatched to the site-agnostic template. `ablate` maps to the engine's ablation planes
  * (`--laya none --escalate none` — SiteProfile hints, rules, and list steps only); anything else
  * runs the real decision model (`--laya onnx`) with the LLM teacher (`--escalate llm`), and the
  * model/endpoint's absence degrades exactly like the pack door: blocked steps, honest counts.
@@ -438,7 +438,7 @@ export function flowRunArgs(
     site: string
     outDir: string
     dry?: boolean
-    noModel?: boolean
+    ablate?: "stub" | "rules-only"
     dangerous?: boolean
     slots?: Record<string, string>
   },
@@ -447,7 +447,9 @@ export function flowRunArgs(
     '--experimental-strip-types', path.join(options.repoPath, 'src', 'semantic-flow.ts')]
   argv.push('--app', args.app, '--site', args.site, '--out', args.outDir, '--quiet')
   if (args.dry) argv.push('--dry')
-  if (args.noModel) argv.push('--laya', 'none', '--escalate', 'none')
+  // 默认就是真模型面；`ablate` 只做消融实验（rules-only = 不装模型，stub = 会答但永不过闸）。
+  if (args.ablate === 'rules-only') argv.push('--laya', 'none', '--escalate', 'none')
+  else if (args.ablate === 'stub') argv.push('--laya', 'unsure', '--escalate', 'none')
   else argv.push('--laya', 'onnx', '--escalate', 'llm')
   if (args.dangerous) argv.push('--allow-dangerous')
   for (const [key, value] of Object.entries(args.slots ?? {})) argv.push('--slot', `${key}=${value}`)
@@ -627,9 +629,11 @@ export interface RunSummary {
   /** Semantic-flow runs only: where the learned site profile was written ('' when none was). */
   profilePath?: string
   /**
-   * Which tier the run executed on — `on`, `off(missing)` (no ONNX artifacts: the rules ladder
-   * did everything a rule could, and model-needed steps blocked honestly), `off(rules-only)`
-   * (the caller asked `no_model`), or `off(scripted)` (a stub checkout's scripted runtime).
+   * Which tier the run executed on — **`on` is the default and the only normal one** (real ONNX
+   * model in place); `off(missing)` means the artifacts are absent, so the rules ladder did
+   * everything a rule could and model-needed steps blocked honestly; `off(ablation:stub)` /
+   * `off(ablation:rules-only)` mark an explicit **ablation arm** (`ablate`), i.e. an experiment
+   * that answers "what happens without this layer" — never a routine way to run.
    * Read from the engine's `model_status` in the artifact (pack door) or, for the semantic door,
    * from the honest tier with a fallback onto the requested plane (`laya: onnx|none|scripted`).
    * Absent only for artifacts written by older engines: no line rather than a guess.

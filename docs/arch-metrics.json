@@ -1,6 +1,6 @@
 {
   "generated_by": "tools/arch-metrics.ts",
-  "generated_at": "2026-10-12",
+  "generated_at": "2026-10-13",
   "provenance": {
     "corpus": "仓库实时计算（--check 的门只比这一段）",
     "model": "外部快照：/tmp 下的真模型跑批产物；换机器或重跑就会变，引用时看 generated_at",
@@ -64,7 +64,7 @@
       "escalate": 0,
       "secs": 597
     },
-    "scripted_corpus_secs": 166.4,
+    "scripted_corpus_secs": 166.3,
     "harness": {
       "judged": 162,
       "top1": "25%",

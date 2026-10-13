@@ -95,7 +95,7 @@ const band = (y, h, label) => { R(40, y, W - 80, h, "band"); T(58, y + 24, label
 /* ---------------- L1 入口 ---------------- */
 band(70, 236, "① 入口层（一条命令 / 一次工具调用）");
 box(175, 106, 210, 78, "bx", "npm start · doctor", ["src/start.ts", "开箱任务；演示一次即归纳信号", "缺件点名 + 一条补齐命令"]);
-box(400, 106, 210, 78, "bx", "npm run apps", ["src/app-runner.ts", "数据腿 → 旅程 → 结束态不变量", "--dry / --no-model / --slot"]);
+box(400, 106, 210, 78, "bx", "npm run apps", ["src/app-runner.ts", "数据腿 → 旅程 → 结束态不变量", "--dry / --ablate / --slot"]);
 box(625, 106, 210, 78, "bx", "npm run learn · agent", ["tools/learn.ts --json --yes", "演示一次 → 录成应用包", "零模型重放通过才落盘"]);
 box(850, 106, 225, 78, "bx", "plan:flow · semantic", ["plan-flow / semantic-flow", "一句话+种子页 → 模板+站点档案", "跨站迁移 · 回填重放门"]);
 box(1090, 106, 175, 78, "bx", "plan-cli · datasource", ["plan_cli / datasource", "手写计划；站点=配置", "sources/*.json 发现制"]);

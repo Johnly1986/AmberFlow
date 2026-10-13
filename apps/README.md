@@ -92,7 +92,7 @@ node --experimental-strip-types src/datasource.ts --source git-log --out /tmp/ap
 ```bash
 npm run apps -- --list                                  # 发现了哪些应用包
 npm run apps -- --app demo-app --dry                     # 只展开计划（不开浏览器、不装模型）
-npm run apps -- --app demo-app --no-model                # 离线整跑（脚本模型，CI 可跑）
+npm run apps -- --app demo-app                # 离线整跑（默认走真模型；缺产物时如实降级）
 npm run apps -- --app demo-app                            # 真模型（需要产物；缺了 `npm run model:fetch` 补）
 npm run apps:matrix                                      # 度量：声明行 / 代码行 / 防泄漏 + 上次套件的模型咨询两列
 npm run apps:suite                                       # 一条命令验收所有离线旅程应用（结论表 + 退出码）
@@ -274,19 +274,19 @@ npm run apps:gen -- --write --id ip-config --source src/ip-config.ts#buildAppPla
 应用包才机器无关。看两条示范：
 
 ```bash
-npm run apps -- --app cli-report --no-model --allow-dangerous   # 桩工具：退出码/JSON/stderr/幂等重试/干跑+确认+落盘
-npm run apps -- --app repo-report --no-model                    # 真实工具：git（行文本）+ jq（JSON）
-npm run apps -- --app cli-report --no-model                     # 不带 --allow-dangerous：危险步被拒绝、不落盘
+npm run apps -- --app cli-report --allow-dangerous   # 桩工具：退出码/JSON/stderr/幂等重试/干跑+确认+落盘
+npm run apps -- --app repo-report                    # 真实工具：git（行文本）+ jq（JSON）
+npm run apps -- --app cli-report                     # 不带 --allow-dangerous：危险步被拒绝、不落盘
 
-npm run apps -- --app ctrip-case --no-model --no-sources        # 19 个冻结子目标跑本地复刻站（与 src/ctrip-task.ts 的计划逐字段全等）
-npm run apps -- --app ip-config  --no-model                     # Excel IP 规划表 → 设备网络页（含"表格写错的那行由设备页自己拒绝"）
-npm run apps -- --app camera-entry --no-model                   # Excel 类型列路由两套表单（空类型行用行内证据、坏序列号显式拒绝）
-npm run apps -- --app transfer-voyagio --no-model --no-sources  # 第二个复刻站的完整旅程：两页向导（24 步）
-npm run apps -- --app transfer-slowjet --no-model --no-sources  # 第三个复刻站：冷启动重试（retries 真的被用上）
-npm run apps -- --app transfer-trekly --no-model --no-sources   # 第四个复刻站：价格上限是滑块（32 → 12 条）
-npm run apps -- --app transfer-farehaven --no-model --no-sources # 第五个复刻站：条件浮层 when（20 done + 4 skipped）
-npm run apps -- --app transfer-skybook --no-model --no-sources   # 第六个复刻站：23 步、唯一带分页的骨架
-npm run apps -- --app transfer-flyquest --no-model --no-sources  # 第七个复刻站：结果页只能靠提交搜索表单到达
+npm run apps -- --app ctrip-case --no-sources        # 19 个冻结子目标跑本地复刻站（与 src/ctrip-task.ts 的计划逐字段全等）
+npm run apps -- --app ip-config                     # Excel IP 规划表 → 设备网络页（含"表格写错的那行由设备页自己拒绝"）
+npm run apps -- --app camera-entry                   # Excel 类型列路由两套表单（空类型行用行内证据、坏序列号显式拒绝）
+npm run apps -- --app transfer-voyagio --no-sources  # 第二个复刻站的完整旅程：两页向导（24 步）
+npm run apps -- --app transfer-slowjet --no-sources  # 第三个复刻站：冷启动重试（retries 真的被用上）
+npm run apps -- --app transfer-trekly --no-sources   # 第四个复刻站：价格上限是滑块（32 → 12 条）
+npm run apps -- --app transfer-farehaven --no-sources # 第五个复刻站：条件浮层 when（20 done + 4 skipped）
+npm run apps -- --app transfer-skybook --no-sources   # 第六个复刻站：23 步、唯一带分页的骨架
+npm run apps -- --app transfer-flyquest --no-sources  # 第七个复刻站：结果页只能靠提交搜索表单到达
 npm run apps -- --app qunar-live --out /tmp/qunar                # 线上应用（真网络 + 真模型；包里声明了 iPhone 设备面）
 ```
 

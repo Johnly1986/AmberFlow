@@ -148,7 +148,7 @@ describe("套件的验收数（P1 的验收口径）", () => {
 
 describe("matrix 的运行时两列读真跑的产物", () => {
   it("跑过的应用给出数；没跑过的显示未跑（不排成 0）", async () => {
-    await suite(["demo-app"]);                               // 真跑一遍，产物进隔离目录
+    await suite(["demo-app"], { arm: "ablate" });                               // 真跑一遍，产物进隔离目录
     const { rows } = matrix();
     const demo = rows.find((r) => r.app === "demo-app")!;
     expect(demo.modelAsks).toBe(0);                         // 真跑过且零咨询 = 卖点，不是缺数

@@ -30,7 +30,8 @@ export interface AmberFlowRunArgs {
   /** Only expand the plan: no browser, no tools. */
   dry?: boolean
   /** Rules-only: never ask the local decision model. */
-  noModel?: boolean
+  /** 消融实验臂（`stub`=脚本桩，`rules-only`=不装模型）。**省略即真模型**——这是默认。 */
+  ablate?: "stub" | "rules-only"
   /** Skip the data leg. */
   noSources?: boolean
   /** Permit dangerous tool steps; refused unless the deployment set `allowDangerous`. */
@@ -181,7 +182,7 @@ export async function runApp(
     const outcome = await runProcess(options, flowRunArgs(options, {
       app: args.app, site: args.site, outDir,
       ...(args.dry === undefined ? {} : { dry: args.dry }),
-      ...(args.noModel === undefined ? {} : { noModel: args.noModel }),
+      ...(args.ablate === undefined ? {} : { ablate: args.ablate }),
       ...(args.allowDangerous === undefined ? {} : { dangerous: args.allowDangerous }),
       ...(args.slots === undefined ? {} : { slots: args.slots }),
     }))
@@ -197,7 +198,7 @@ export async function runApp(
     app: args.app,
     outDir,
     ...(args.dry === undefined ? {} : { dry: args.dry }),
-    ...(args.noModel === undefined ? {} : { noModel: args.noModel }),
+    ...(args.ablate === undefined ? {} : { ablate: args.ablate }),
     ...(args.noSources === undefined ? {} : { noSources: args.noSources }),
     ...(args.allowDangerous === undefined ? {} : { dangerous: args.allowDangerous }),
     ...(args.confirmSafe === undefined ? {} : { confirmSafe: args.confirmSafe }),

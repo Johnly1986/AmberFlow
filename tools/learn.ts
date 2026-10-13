@@ -641,7 +641,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       say("");
       say(`✓ 已写 ${result.saved}`);
       say(`✓ 规则模式回放：**0 次模型调用**，${replay.completed} 完成，不变量 ${replay.invariants}`);
-      say(`  跑它：npm run apps -- --app ${id} --no-model --no-sources`);
+      say(`  跑它：npm run apps -- --app ${id} --no-sources`);
       say("  要加条件/重试就手写 `when`/`retries`（这两项不录制）；页面变了会报 recorded-flow drift，重新演示即可。");
     }
     return 0;

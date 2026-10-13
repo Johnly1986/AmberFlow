@@ -45,6 +45,6 @@
     "规则命不中 ⇒ 结构化 `needs_value` 停（绝不挑最近的一天），页面一个字都不改——负例钉在 tests/bindings.test.ts。",
     "命令闭集（P2）让『选中 + 确认』待在同一个子目标里；参数绑定（P3）让这次选中不需要任何模型判断：全程 rule:match、零模型选择提问。",
     "`invariants` 里的 `{checkin}` 与 journey 里的同一套占位符规则（展开期替换）——断言必须比的是计划里那一天，不是字面量。",
-    "验收：`npm run apps -- --app checkin-binding --no-model` → 1/1 步、2/2 不变量。"
+    "验收：`npm run apps -- --app checkin-binding` → 1/1 步、2/2 不变量。"
   ]
 }

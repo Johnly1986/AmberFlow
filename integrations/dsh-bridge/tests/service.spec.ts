@@ -58,7 +58,7 @@ describe('service seam (plugin to plugin)', () => {
 
   it('runs an app through the CLI and returns the compact summary', async () => {
     const { api } = await mount(stubCheckout(PACKS))
-    const summary = await api.run({ app: 'gen-app', noModel: true })
+    const summary = await api.run({ app: 'gen-app', ablate: 'stub' })
     expect(summary.ok).toBe(true)
     expect(summary.completed).toBe('2/2')
     expect(summary.blocked).toEqual([{ desc: 'add to cart', obstacle: 'hint matched nothing' }])

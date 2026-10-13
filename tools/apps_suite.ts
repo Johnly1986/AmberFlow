@@ -27,6 +27,7 @@ import fs from "node:fs";
 import { parseArgs } from "node:util";
 import { appDirs, loadPack, packHintCoverage, type AppPack } from "../src/app-pack.ts";
 import { runApp, refusalLine, type AppRunResult } from "../src/app-runner.ts";
+import { checkArtifacts, missingPieces } from "../src/model-artifacts.ts";
 import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "../src/decision-cache.ts";
 import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime, type CountingRuntime } from "../src/model.ts";
 
@@ -37,10 +38,11 @@ import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime, ty
  * 于是"上一次真跑"的产物变成混合两臂——matrix 的两列与 `arch-metrics` 的脚本桩基线都跟着失真，
  * 而且没有任何地方报错。臂是口径的一部分，口径不能靠事后记得。
  */
-export function suiteOutDir(tier: "scripted" | "on" = "scripted"): string {
+export function suiteOutDir(tier: "real" | "ablate" = "real"): string {
   const env = process.env.AMBERFLOW_SUITE_OUT;
   if (env) return env;                                  // 显式指定 = 调用方负责隔离
-  return path.join("/tmp", tier === "on" ? "amberflow-suite-realmodel" : "amberflow-suite");
+  // 默认（真模型臂）占住那个"记录"目录：matrix 与文档引用的就是它。
+  return path.join("/tmp", tier === "ablate" ? "amberflow-suite-ablate" : "amberflow-suite");
 }
 
 export type SuiteStatus = "passed" | "needs-dangerous-opt-in" | "failed";
@@ -88,7 +90,7 @@ export function isLive(pack: AppPack): boolean {
 
 /** 跑一个应用包（离线口径）。返回值就是套件表格里的一行；完整结果另落 `<套件目录>/<app>/` 供 matrix 读。 */
 export async function runOne(
-  pack: AppPack, cached: CachedRuntime, counted: CountingRuntime, outBase = suiteOutDir("scripted"),
+  pack: AppPack, cached: CachedRuntime, counted: CountingRuntime, outBase = suiteOutDir("real"),
 ): Promise<SuiteRow> {
   const hints = packHintCoverage(pack);          // §W2：承重墙每天看得见
   const out = path.join(outBase, pack.id);
@@ -153,19 +155,33 @@ export function suiteExitCode(a: {
   return 0;
 }
 
+/**
+ * 跑完整套离线旅程应用。
+ *
+ * **默认臂就是真模型**（`arm: "real"`）——产物不齐直接拒绝，不再悄悄退回脚本桩：
+ * 曾经默认是桩、`--real-model` 才换真模型，于是日常看到的每个"模型出场"数字都来自桩，
+ * 而桩的 `过关 0` 是构造出来的、不是证据。默认值决定日常看什么数。
+ * `arm: "ablate"` 是**消融实验**（脚本桩），用来回答"没有模型这一层会怎样"。
+ */
 export async function suite(
-  only: string[] = [], opts: { realModel?: boolean } = {},
+  only: string[] = [], opts: { arm?: "real" | "ablate" } = {},
 ): Promise<{
   rows: SuiteRow[]; skipped: string[]; unmatched: string[]; known: string[];
   /** 整个套件一进程的决策缓存账（命中=省下的重复提问）。 */
   cache: DecisionCacheStats;
-  /** 这一臂跑在哪个模型层级（`on` = 真 ONNX；`off(scripted)` = 桩）。 */
+  /** 这一臂跑在哪个模型层级（`on` = 真 ONNX；`off(ablation:scripted-stub)` = 消融桩）。 */
   tier: string;
 }> {
   // 两层包装：缓存记"省下的重复提问"（零成本率），外层计数记"模型被咨询几次"（出场率）——
   // 命中也是一次咨询，所以计数在缓存外面。laya 是确定性的，同问不重答。
-  // §7/W2：`--real-model` 显式换真模型那一臂（CI 默认仍是桩：不把 1.7 GB 权重塞进 CI）。
-  const inner = opts.realModel
+  const arm = opts.arm ?? "real";
+  if (arm === "real" && !checkArtifacts().ready) {
+    // 响亮地拒绝，而不是退回桩：静默换臂会让下面所有数字变成桩的自证。
+    throw new Error(`模型产物不齐（缺 ${missingPieces(checkArtifacts()).join("/")}）——`
+      + `套件默认跑真模型。补齐：npm run model:fetch -- --from <url 或本地路径>；`
+      + `确实要跑消融臂：--ablate`);
+  }
+  const inner = arm === "real"
     ? (await import("../src/laya-onnx.ts")).createLayaOnnxRuntime() as never
     : scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 })));
   const cached = withDecisionCache(inner);
@@ -204,7 +220,7 @@ export async function suite(
         continue;
       }
       try {
-        rows.push(await runOne(pack, cached, counted, suiteOutDir(opts.realModel ? "on" : "scripted")));
+        rows.push(await runOne(pack, cached, counted, suiteOutDir(opts.arm === "ablate" ? "ablate" : "real")));
       } catch (e) {
         rows.push({
           app: pack.id, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
@@ -221,7 +237,7 @@ export async function suite(
   const unmatched = only.filter((o: string) => !seen.has(o) && !rows.some((r) => r.app === o));
   return {
     rows, skipped, unmatched, known, cache: cached.decisionStats(),
-    tier: opts.realModel ? "on" : "off(scripted)",
+    tier: arm === "real" ? "on" : "off(ablation:scripted-stub)",
   };
 }
 
@@ -230,7 +246,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     args: argv,
     options: {
       only: { type: "string" }, json: { type: "boolean" },
-      "real-model": { type: "boolean" },
+      ablate: { type: "boolean" },
       help: { type: "boolean" }, verbose: { type: "boolean" },
     },
   });
@@ -253,7 +269,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (!values.verbose && !values.json) console.log = (...a: unknown[]) => { swallowed.push(a.join(" ")); };
   let out;
   try {
-    out = await suite(only, { realModel: values["real-model"] === true });
+    out = await suite(only, { arm: values.ablate === true ? "ablate" : "real" });
   } finally {
     console.log = passthrough;
   }
@@ -355,10 +371,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         + "要么接线（docs/MODEL_ROLE_PLAN.md A1/A2），要么走备选降级。这不算通过。 **");
     }
   } else {
-    console.log(`模型边际：未测（本臂跑在 ${tier}；桩模型的"过关 0"是构造出来的，不是证据。`
-      + `真模型那一臂：npm run apps:suite -- --real-model）`);
+    console.log(`模型边际：不适用（本臂是**消融臂** ${tier}：桩模型的"过关 0"是构造出来的，不是证据）。`
+      + `日常跑法就是真模型：npm run apps:suite`);
   }
-  console.log(`产物目录：${suiteOutDir(tierOn ? "on" : "scripted")}`
+  console.log(`产物目录：${suiteOutDir(tierOn ? "real" : "ablate")}`
     + `（两臂分开落盘：混在一处会让 matrix 的"上一次真跑"两列与脚本桩基线一起失真）`);
   console.log(`梯级账单：${rungs.map(([k, n]) => `${k} 决定 ${n}`).join(" ｜ ")}`
     + (dead.length ? ` ⇒ **dead rung：${dead.join("、")}**（本轮语料上从未救回任何东西；`

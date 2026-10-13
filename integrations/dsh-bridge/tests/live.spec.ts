@@ -104,7 +104,7 @@ describe.skipIf(!HAS_REPO || !CHROMIUM)('live checkout + browser', () => {
     const ctx = await mount()
     const result = await call(ctx, 'amberflow_run', {
       app: 'learned-cart',        // 2 browser steps recorded from a demonstration
-      no_model: true,             // rules only: this run must not need the decision model at all
+      ablate: 'rules-only',       // 消融：只跑规则面（默认永远是真模型，这里是要回答"没有它会怎样"）
       no_sources: true,
     })
     expect(result.isError).toBe(false)
@@ -149,7 +149,7 @@ describe.skipIf(!HAS_REPO || !CHROMIUM)('live checkout + browser', () => {
     const ctx = await mount()
     // A price cap the fixture site cannot apply: the run must end non-zero with a blocked subgoal.
     const result = await call(ctx, 'amberflow_run', {
-      app: 'transfer-flyquest', no_model: true, no_sources: true, slots: ['cap=999'],
+      app: 'transfer-flyquest', ablate: 'rules-only', no_sources: true, slots: ['cap=999'],
     })
     expect(result.isError).toBe(false)
     const value = result.value as {

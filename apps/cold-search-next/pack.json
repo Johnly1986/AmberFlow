@@ -44,6 +44,6 @@
     "夹具 testpages/cold-search.html 的站点状态活在 sessionStorage 里：每个子目标都会重新 goto，所以页面自己记不住『我搜过几次』；这正是一条声明式回边要解决的问题。",
     "环有上界：`max_step_visits: 4`（缺省 3）。走到上界就是结构化停因 `path_stop.code = \"next_cycle\"`，点名哪一步、进了几次——不挂死、不栈溢出（负例钉在 tests/path-next.test.ts）。",
     "删 `next` 即红：没有回边时第一次（冷）搜索完成后自然走到 `record`，那里的 `when` 不成立 → 整步 skipped → `results-recorded` 不变量不成立，旅程红——能力是真的在承重。",
-    "验收：`npm run apps -- --app cold-search-next --no-model` → 2/2 步（search 走 2 遍）、1/1 不变量。"
+    "验收：`npm run apps -- --app cold-search-next` → 2/2 步（search 走 2 遍）、1/1 不变量。"
   ]
 }

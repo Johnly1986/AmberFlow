@@ -80,13 +80,13 @@ describe('bridge helpers', () => {
 
   it('runArgs assembles flags, slots and the dangerous switch', () => {
     const argv = runArgs(OPTIONS, {
-      app: 'demo', outDir: '/tmp/out', dry: true, noModel: true, noSources: true, dangerous: true,
+      app: 'demo', outDir: '/tmp/out', dry: true, ablate: 'stub', noSources: true, dangerous: true,
       confirmSafe: true, tieredHint: true,
       slots: { date: '2026-10-12', window: '0800-1800' },
     })
     expect(argv.slice(0, 3)).toEqual(['/usr/bin/node', '--experimental-strip-types', '/repo/src/app-runner.ts'])
     expect(argv.join(' ')).toContain('--app demo --out /tmp/out')
-    for (const flag of ['--dry', '--no-model', '--no-sources', '--allow-dangerous', '--confirm-safe', '--tiered-hint']) expect(argv).toContain(flag)
+    for (const flag of ['--dry', '--ablate', 'stub', '--no-sources', '--allow-dangerous', '--confirm-safe', '--tiered-hint']) expect(argv).toContain(flag)
     expect(argv.slice(-4)).toEqual(['--slot', 'date=2026-10-12', '--slot', 'window=0800-1800'])
   })
 
@@ -277,7 +277,7 @@ describe('bridge plugin', () => {
     expect(run.description).toContain('compact summary')
     // schemas() exposes the whole JSON Schema, so read the property map
     const props = (run.parameters as { properties: Record<string, unknown> }).properties
-    expect(Object.keys(props)).toEqual(expect.arrayContaining(['app', 'site', 'dry', 'no_model', 'allow_dangerous', 'slots']))
+    expect(Object.keys(props)).toEqual(expect.arrayContaining(['app', 'site', 'dry', 'ablate', 'allow_dangerous', 'slots']))
   })
 
   it('executes …_apps through the registry (filesystem only)', async () => {
@@ -291,7 +291,7 @@ describe('bridge plugin', () => {
 
   it('executes …_run through the registry and summarizes the real artifact', async () => {
     const ctx = await mount(stubCheckout(PACKS))
-    const result = await call(ctx, 'amberflow_run', { app: 'gen-app', no_model: true, no_sources: true })
+    const result = await call(ctx, 'amberflow_run', { app: 'gen-app', ablate: 'stub', no_sources: true })
     expect(result.isError).toBe(false)
     const value = result.value as {
       ok: boolean
@@ -312,14 +312,14 @@ describe('bridge plugin', () => {
 
   it('surfaces the model tier and the decision tally (P0: the plugin user must SEE the ladder)', async () => {
     const ctx = await mount(stubCheckout(PACKS))
-    const result = await call(ctx, 'amberflow_run', { app: 'gen-app', no_model: true, no_sources: true })
+    const result = await call(ctx, 'amberflow_run', { app: 'gen-app', ablate: 'stub', no_sources: true })
     const value = result.value as { model?: string; decisions?: string }
-    // The stub mirrors the engine: no_model ⇒ the tier line says rules-only, and the artifact's
+    // The stub mirrors the engine: ablate ⇒ the tier line says which ablation arm ran, and the artifact's
     // `decisions.line` reaches the tool without any step-log scraping.
-    expect(value.model).toBe('off(rules-only)')
+    expect(value.model).toBe('off(ablation:scripted-stub)')
     expect(value.decisions).toBe('rule 1 · laya 1 (conf 0.31) · laya:reobserve 0 · escalate 0')
     const text = JSON.stringify(result)
-    expect(text).toContain('model: off(rules-only)')
+    expect(text).toContain('model: off(ablation:scripted-stub)')
     expect(text).toContain('decisions: rule 1 · laya 1 (conf 0.31)')
   })
 
@@ -734,12 +734,12 @@ describe('SemanticFlow door — list / argv / summarize / registry', () => {
     expect(FLOW_TEMPLATE.spec_version).toBe(2)
   })
 
-  it('flowRunArgs maps the tool options onto the engine plane (no_model ⇒ rules-only door)', () => {
+  it('flowRunArgs maps the tool options onto the engine plane (ablate ⇒ 消融面；默认永远真模型)', () => {
     const base = flowRunArgs(OPTIONS, { app: 'flow-app', site: 'site-a', outDir: '/out' })
     expect(base.join(' ')).toContain('semantic-flow.ts --app flow-app --site site-a --out /out --quiet')
     expect(base.join(' ')).toContain('--laya onnx --escalate llm')
     const rules = flowRunArgs({ ...OPTIONS, repoPath: '/r' }, {
-      app: 'a', site: 's', outDir: '/o', noModel: true, dangerous: true, slots: { from: '昆明' },
+      app: 'a', site: 's', outDir: '/o', ablate: 'rules-only', dangerous: true, slots: { from: '昆明' },
     })
     expect(rules.join(' ')).toContain('--laya none --escalate none')
     expect(rules.join(' ')).toContain('--allow-dangerous')
@@ -836,7 +836,7 @@ describe('SemanticFlow door — list / argv / summarize / registry', () => {
     expect(value).toMatchObject({ ok: true, completed: '1/2', blockedTotal: 1 })
     expect(value.line).toContain('written back 0')
     // The argv the stub recorded proves the site AND the model plane reached the engine CLI.
-    // No `no_model` was asked for, so the semantic door keeps the real plane (onnx + llm).
+    // No `ablate` was asked for, so the semantic door keeps the real plane (onnx + llm).
     const argv: string[] = JSON.parse(fs.readFileSync(path.join(repo, 'argv.json'), 'utf-8'))
     expect(argv).toContain('site-a')
     expect(argv.slice(argv.indexOf('--laya'), argv.indexOf('--laya') + 4))

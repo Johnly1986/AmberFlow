@@ -28,7 +28,7 @@
     "commands 闭集让同一个子目标按声明走两步（点勾选框会触发页面自己的深链导航，第二条命令对新池再解析）。",
     "它**不改写** transfer-skybook：那 8 个生成包的展开与 plan_sha256 是逐字节钉住的回归语料；",
     "命令闭集是给新写/用户录的包的表达面。执行全程零模型调用（解析不到的候选出局，绝不退回全池）。",
-    "验收：`npm run apps -- --app skybook-checksubmit --no-model` → 1/1 步、1/1 不变量；",
+    "验收：`npm run apps -- --app skybook-checksubmit` → 1/1 步、1/1 不变量；",
     "负例（删 commands 即红、space_empty、needs_value）钉在 tests/actions.test.ts。"
   ]
 }

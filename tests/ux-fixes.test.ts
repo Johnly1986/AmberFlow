@@ -36,12 +36,12 @@ function quiet<T>(fn: () => Promise<T>): Promise<T> {
 
 describe("① `--slot` 打错名字不再是假绿", () => {
   it("未声明的槽位 -> exit 2（以前会静默塞进计划并照旧\"通过\"）", async () => {
-    const code = await quiet(() => appMain(["--app", "demo-app", "--no-model", "--slot", "foo=1"]));
+    const code = await quiet(() => appMain(["--app", "demo-app", "--ablate", "stub", "--slot", "foo=1"]));
     expect(code).toBe(2);
   });
 
   it("声明过的槽位照常通过", async () => {
-    const code = await quiet(() => appMain(["--app", "demo-app", "--no-model", "--slot", "coupon=ACME10",
+    const code = await quiet(() => appMain(["--app", "demo-app", "--ablate", "stub", "--slot", "coupon=ACME10",
       "--out", tmpDir("slot-ok")]));
     expect(code).toBe(0);
   });
@@ -51,7 +51,7 @@ describe("① `--slot` 打错名字不再是假绿", () => {
   });
 
   it("同一槽位给两次不再是静默 last-wins（复核方发现的同类问题）", async () => {
-    expect(await quiet(() => appMain(["--app", "demo-app", "--no-model",
+    expect(await quiet(() => appMain(["--app", "demo-app", "--ablate", "stub",
       "--slot", "coupon=A", "--slot", "coupon=B"]))).toBe(2);
   });
 });
@@ -66,9 +66,13 @@ describe("② `apps:suite`：没跑过的应用不许报绿，坏包不许掀桌
     expect(await quiet(() => suiteMain(["--only", "demo-app,cli-report"]))).toBe(3);
   }, 180_000);
 
-  it("全部真执行且通过 -> exit 0（把\"跳过\"与\"未执行\"排除在同一条结论之外）", async () => {
-    expect(await quiet(() => suiteMain(["--only", "demo-app"]))).toBe(0);
-  }, 180_000);
+  it("全部真执行且通过 -> 消融臂 exit 0；真模型臂 exit 4（应用都过但模型边际为 0，不算绿）", async () => {
+    // 两条断言各管一件事：
+    //  · 消融臂（--ablate）只看"执行与验收"，全过就是 0（跳过/未执行仍被排除在同一条结论之外）；
+    //  · 默认臂是真模型：demo-app 全过，但模型一步也没独立决定 ⇒ 4（docs/ARCHITECTURE_IMPROVEMENTS.md §7）。
+    expect(await quiet(() => suiteMain(["--only", "demo-app", "--ablate"]))).toBe(0);
+    expect(await quiet(() => suiteMain(["--only", "demo-app"]))).toBe(4);
+  }, 300_000);
 
   it("`--json` 的用法错误也给可解析对象（脚本调用方不该拿到空 stdout）", async () => {
     const lines: string[] = [];
@@ -89,7 +93,7 @@ describe("② `apps:suite`：没跑过的应用不许报绿，坏包不许掀桌
   });
 
   it("suite() 报告未命中的过滤项，并给出已知应用名", async () => {
-    const out = await quiet(() => suite(["nope-app"]));
+    const out = await quiet(() => suite(["nope-app"], { arm: "ablate" }));
     expect(out.unmatched).toEqual(["nope-app"]);
     expect(out.rows).toHaveLength(0);
     expect(out.known).toContain("demo-app");     // 打错字时能自查
@@ -133,7 +137,7 @@ describe("④ 危险步在三个界面只有一套说法（并且带补救动作
   it("单应用报告的结论列写结论（不是内部类别），并带补救动作", async () => {
     const dir = tmpDir("cli-md");
     // 报告文件是 CLI 写的（runApp 只跑链路），所以这里走与使用者同一条命令。
-    const code = await quiet(() => appMain(["--app", "cli-report", "--no-model", "--out", dir]));
+    const code = await quiet(() => appMain(["--app", "cli-report", "--ablate", "stub", "--out", dir]));
     expect(code).toBe(1);                                      // 未执行 -> 非零
     const res = JSON.parse(fs.readFileSync(path.join(dir, "cli-report-result.json"), "utf-8"));
     expect(res.tool_steps[4].refused).toBe("dangerous");       // 机器字段没变
@@ -159,6 +163,6 @@ describe("⑤ 副作用与用法错误都要说清", () => {
 
   it("`--out` 建不出来是用法错误（exit 2），不是把 Node 的 mkdir 栈甩给使用者", async () => {
     const bad = fs.existsSync("/sys") ? "/sys/ux-out-should-fail" : path.join("/proc", "ux-out-should-fail");
-    expect(await quiet(() => appMain(["--app", "demo-app", "--no-model", "--out", bad]))).toBe(2);
+    expect(await quiet(() => appMain(["--app", "demo-app", "--ablate", "stub", "--out", bad]))).toBe(2);
   });
 });

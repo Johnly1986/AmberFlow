@@ -881,7 +881,7 @@ export interface FlowRunOptions {
   appsDir?: string;
   /** 忽略已学档案（重演"第一次迁移"）。 */
   fresh?: boolean;
-  /** ②级决策者：scripted=语义替身(0.71)；unsure=语义替身但永远不过闸(0.05)；onnx=真模型；none=纯规则（同 `--no-model`）。 */
+  /** ②级决策者：scripted=语义替身(0.71)；unsure=语义替身但永远不过闸(0.05)；onnx=真模型；none=纯规则（同 app-runner 的 `--ablate rules-only`）。 */
   laya?: "scripted" | "unsure" | "onnx" | "none";
   /** ③级老师：scripted=语义替身；llm=llmEscalator(OPENAI_*）；none=无。 */
   escalate?: "scripted" | "llm" | "none";
@@ -1028,7 +1028,7 @@ export async function runFlow(
 
   // ②级与③级的决策者装好（离线替身、真模型/LLM，或 none=纯规则面）。
   const noneRuntime = (): ReturnType<typeof scriptedRuntime> =>
-    // 与 app-runner 的 `--no-model` 同口径：只答 noul、从不提名元素的运行时——
+    // 与 app-runner 的 `--ablate rules-only` 同口径：不装 runtime，规则消化一切——
     // 规则没命中的步如实 blocked，而不是崩溃。
     scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 })));
   if (laya === "onnx") {
@@ -1315,7 +1315,7 @@ const USAGE = `usage: semantic-flow --app ID --site KEY [--laya scripted|unsure|
                    [--out DIR] [--dry] [--quiet] [--list]
 
 一份语义模板（apps/<id>/flow.json）+ 站点档案，跑通三级解析与回填环，
-并在站点之间迁移。--dry 只编译不执行；--laya none 是纯规则面（同 app-runner 的 --no-model）。
+并在站点之间迁移。--dry 只编译不执行；--laya none 是纯规则面（同 app-runner 的 --ablate rules-only）。
 危险步（购买）先干跑取证、再要 --allow-dangerous/人确认；新回填的 hint 必须过
 "整跑零模型重放"才落盘（--no-verify-backfill 关掉这道门，只用于消融）。`;
 

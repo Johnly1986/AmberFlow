@@ -25,7 +25,7 @@ step 1: click a "Add to cart" (clicked, rule:match, conf=1.00)
 
 ## DSH 插件安装
 
-装进 profile 即得三个工具——`amberflow_apps`（列应用）/ `amberflow_run`（跑一个，含 `dry` / `no_model` / `slots`）/ `amberflow_learn`（录制归纳）：
+装进 profile 即得三个工具——`amberflow_apps`（列应用）/ `amberflow_run`（跑一个，含 `dry` / `ablate` / `slots`；**默认跑真模型**）/ `amberflow_learn`（录制归纳）：
 
 ```bash
 dsh plugin --profile <名称> add github:Johnly1986/AmberFlow          # 仓库直装（见 README 附注：私有库需凭证）
@@ -75,7 +75,7 @@ CLI 报告、`apps:suite` 表格与 DSH 插件 `amberflow_run` 的 summary 念�
 
 ```bash
 npm run apps -- --list                                  # 有哪些应用
-npm run apps -- --app demo-app --no-model               # 离线整跑一条完整链路
+npm run apps -- --app demo-app               # 离线整跑一条完整链路
 npm run apps -- --app demo-app --dry                    # 只展开计划，不开浏览器
 npm run apps:suite                                      # 全部离线应用跑完，一行一个给结论
 ```
@@ -110,7 +110,7 @@ npm run apps:suite                                      # 全部离线应用跑�
 ```
 
 ```bash
-npm run apps -- --app hello --no-model --out /tmp/hello   # 期望 exit 0 + "结果：**通过**"
+npm run apps -- --app hello --out /tmp/hello   # 期望 exit 0 + "结果：**通过**"
 ```
 
 两条省时间的规则：**浏览器步必须点名得到目标**（`target_hint`，或规则能在元素池里命中）；**`--slot k=v` 的键必须在包里声明过**（打错名字是用法错误，不是静默忽略）。

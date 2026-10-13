@@ -7,7 +7,7 @@
  *      重复目标 id / `hosts` 写成了裸字符串 / 角色内联覆盖混用两种步型的键。每条都断言
  *      **消息内容**，而不是"它抛了错"。
  *   2. **同一条路径**：离线应用的验收跑 `runApp`（`src/app-runner.ts` 的 `main()` 除
- *      argv 解析与 `--no-model` 运行时安装外，全部逻辑都在这里），并用一次真实的
+ *      argv 解析与 `--ablate` 运行时安装外，全部逻辑都在这里），并用一次真实的
  *      `main()` 子进程证明"没干活 -> 退出码 1"这条链路真的通到进程退出码。
  *
  * 报告见 `bench/APP_VERIFY_REPORT.md`（逐条：题面 → 命令 → 原始观测 → 结论）。
@@ -309,7 +309,7 @@ describe("证伪：把工作弄坏，退出码必须变 1", () => {
     const out = tmpDir("falsify-cli-out");
     const r = spawnSync(process.execPath, [
       "--experimental-strip-types", path.join(REPO, "src", "app-runner.ts"),
-      "--app", packPath, "--no-model", "--quiet", "--out", out,
+      "--app", packPath, "--ablate", "stub", "--quiet", "--out", out,
     ], { cwd: REPO, encoding: "utf8" });
     expect(r.status, r.stdout + r.stderr).toBe(1);
     const result = JSON.parse(fs.readFileSync(path.join(out, "cli-report-result.json"), "utf-8"));
@@ -325,7 +325,7 @@ describe("证伪：把工作弄坏，退出码必须变 1", () => {
 
 describe("CLI 错误路径：G-A / G-J / G-L 三条修复不得静默回归", () => {
   it("G-A：测量型应用经 CLI 返回 2 并指向探针驱动（不再'通过 0/0'）", async () => {
-    const { code, err } = await captureErr(() => appMain(["--app", "ctrip-live", "--no-model"]));
+    const { code, err } = await captureErr(() => appMain(["--app", "ctrip-live", "--ablate", "stub"]));
     expect(code).toBe(2);
     expect(err).toContain("测量型应用");
     expect(err).toContain("src/live-probe.ts");                 // 指路到真正的测量入口
@@ -339,7 +339,7 @@ describe("CLI 错误路径：G-A / G-J / G-L 三条修复不得静默回归", ()
     const packPath = tmpPack("g-j", pack);
     const out = tmpDir("g-j-out");
 
-    const full = await captureErr(() => appMain(["--app", packPath, "--no-model", "--quiet", "--out", out]));
+    const full = await captureErr(() => appMain(["--app", packPath, "--ablate", "stub", "--quiet", "--out", out]));
     expect(full.code).toBe(2);
     expect(full.err).toMatch(/app pack .* is invalid:/);
     expect(full.err).toContain("journey[0].bogus_key: unknown step key");
@@ -668,10 +668,10 @@ async function captureOut<T>(fn: () => Promise<T>): Promise<{ code: T; out: stri
 
 describe("第 5 轮：使用者体验修复（对抗性补测）", () => {
   it("`--slot` 大小写/空格不做静默折叠：键名原样回显", async () => {
-    const up = await captureErr(() => appMain(["--app", "demo-app", "--no-model", "--slot", "COUPON=x"]));
+    const up = await captureErr(() => appMain(["--app", "demo-app", "--ablate", "stub", "--slot", "COUPON=x"]));
     expect(up.code).toBe(2);
     expect(up.err).toContain('--slot "COUPON" not declared');
-    const sp = await captureErr(() => appMain(["--app", "demo-app", "--no-model", "--slot", " coupon=1"]));
+    const sp = await captureErr(() => appMain(["--app", "demo-app", "--ablate", "stub", "--slot", " coupon=1"]));
     expect(sp.code).toBe(2);
     expect(sp.err).toContain('--slot " coupon" not declared');
   });
@@ -680,7 +680,7 @@ describe("第 5 轮：使用者体验修复（对抗性补测）", () => {
   // 与"打错槽位名"同一类静默——值没被用上而使用者以为生效——所以现在**是用法错误**（exit 2，回显两个值）。
   it("`--slot` 同名给两次 = 用法错误（exit 2，回显两个值；由 §12 复核从 last-wins 收紧）", async () => {
     const out = tmpDir("r5-dup-slot");
-    const cap = await captureErr(() => appMain(["--app", "demo-app", "--no-model", "--quiet",
+    const cap = await captureErr(() => appMain(["--app", "demo-app", "--ablate", "stub", "--quiet",
       "--out", out, "--slot", "coupon=A", "--slot", "coupon=B"]));
     expect(cap.code).toBe(2);
     expect(cap.err).toContain('--slot "coupon" 给了两次');
@@ -729,7 +729,7 @@ describe("第 5 轮：使用者体验修复（对抗性补测）", () => {
 
   it("危险步三处同源：CLI 行 = refusalLine，报告 = Markdown 形式，JSON 仍是机器值", async () => {
     const out = tmpDir("r5-refusal");
-    const r = await captureOut(() => appMain(["--app", "cli-report", "--no-model", "--out", out]));
+    const r = await captureOut(() => appMain(["--app", "cli-report", "--ablate", "stub", "--out", out]));
     expect(r.code).toBe(1);
     expect(r.out).toContain(refusalLine("dangerous"));          // CLI 用无反引号的一行短语
     const md = fs.readFileSync(path.join(out, "cli-report-report.md"), "utf-8");
@@ -746,7 +746,7 @@ describe("第 5 轮：使用者体验修复（对抗性补测）", () => {
       fs.writeFileSync(path.join(brokenDir, "pack.json"), "{ this is not json", "utf-8");
       const out = await captureOut(() => suiteMain(["--only", "zz-verify-broken,demo-app"]));
       expect(out.code).toBe(1);                                  // 有未通过 -> 1
-      const payload = await suite(["zz-verify-broken", "demo-app"]);
+      const payload = await suite(["zz-verify-broken", "demo-app"], { arm: "ablate" });
       const broken = payload.rows.find((r) => r.app === "zz-verify-broken")!;
       const demo = payload.rows.find((r) => r.app === "demo-app")!;
       expect(broken.status).toBe("failed");

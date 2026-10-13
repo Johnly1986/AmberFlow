@@ -169,5 +169,5 @@ artifact, `learn` refuses without `--script`, stdout carries log lines (one with
 JSON — and drives the three tools through `ctx.tools.execute`, covering argument assembly, provenance
 parsing, failure-only summarization, load-time validation, the refusal paths and the dry expansion.
 `tests/live.spec.ts` drives the real checkout through the same registry path: a recorded two-step app
-with `no_model`, a `dry` expansion, a run forced to fail so the FAIL verdict is checked against a real
+with an `ablate` arm (`stub` | `rules-only`; omit it and the real model runs), a `dry` expansion, a run forced to fail so the FAIL verdict is checked against a real
 artifact, the script-less refusal, and a real recording whose zero-forward replay gates the save.

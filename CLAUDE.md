@@ -98,17 +98,17 @@ act_on），模型不产出"选哪行"——而且与数据引擎**共用同一�
 （3 个真实站点 / 34 个子目标，一条命令跑完三条完整旅程；不进 CI，外部站点慢且会波动。
 设计、逐子目标信号证据与它暴露的四个真实缺陷见 [bench/LONG_FLOW_REPORT.md](bench/LONG_FLOW_REPORT.md)）。
 
-应用包（应用层）：`npm run apps -- --list` / `npm run apps -- --app demo-app --no-model`（离线整跑：
+应用包（应用层）：`npm run apps -- --list` / `npm run apps -- --app demo-app`（离线整跑：
 数据腿 → 混合旅程（工具步 + 浏览器步）→ 结束状态不变量）/ `npm run apps -- --app demo-app --dry`（只展开计划）。
-真实应用：`--app ctrip-case --no-model --no-sources`（19 个冻结子目标跑本地复刻站，与 `src/ctrip-task.ts`
-的计划**逐字段全等**）、`--app ip-config --no-model`（Excel IP 规划表 → 设备网络页，含"表格写错的那行由设备页
-自己拒绝"）、`--app camera-entry --no-model`（Excel 类型列路由两套表单：空类型行按**行内证据**显式选页、
-坏序列号那行显式成步）、`--app transfer-voyagio --no-model --no-sources`（第二个复刻站：**两页向导** 24 步）、
-`--app transfer-slowjet --no-model --no-sources`（第三个复刻站：**冷启动重试** 19 步）、
-`--app transfer-trekly --no-model --no-sources`（第四个复刻站：价格上限是**滑块**，19 步）、
-`--app transfer-farehaven --no-model --no-sources`（第五个复刻站：**条件浮层 `when`**，24 步 = 20 done + 4 skipped）、
-`--app transfer-skybook --no-model --no-sources`（第六个：23 步、唯一带**分页**的骨架）、
-`--app transfer-flyquest --no-model --no-sources`（第七个：结果页**只能靠提交搜索表单**到达）。
+真实应用：`--app ctrip-case --no-sources`（19 个冻结子目标跑本地复刻站，与 `src/ctrip-task.ts`
+的计划**逐字段全等**）、`--app ip-config`（Excel IP 规划表 → 设备网络页，含"表格写错的那行由设备页
+自己拒绝"）、`--app camera-entry`（Excel 类型列路由两套表单：空类型行按**行内证据**显式选页、
+坏序列号那行显式成步）、`--app transfer-voyagio --no-sources`（第二个复刻站：**两页向导** 24 步）、
+`--app transfer-slowjet --no-sources`（第三个复刻站：**冷启动重试** 19 步）、
+`--app transfer-trekly --no-sources`（第四个复刻站：价格上限是**滑块**，19 步）、
+`--app transfer-farehaven --no-sources`（第五个复刻站：**条件浮层 `when`**，24 步 = 20 done + 4 skipped）、
+`--app transfer-skybook --no-sources`（第六个：23 步、唯一带**分页**的骨架）、
+`--app transfer-flyquest --no-sources`（第七个：结果页**只能靠提交搜索表单**到达）。
 线上应用：`--app qunar-live --out /tmp/qunar`（真网络 + 真模型，**包里声明了 iPhone 设备面**；见下条规则）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
 原始观测 → 结论，含 11 处缺陷与 3 处共享层修补）：[bench/APP_VERIFY_REPORT.md](bench/APP_VERIFY_REPORT.md)。
 新增一个应用 = 新目录 `apps/<id>/`（`pack.json` + 可选 `sources/*.json`），**共享层零改动**；
@@ -144,8 +144,8 @@ act_on），模型不产出"选哪行"——而且与数据引擎**共用同一�
 使用者完全看不懂）、`npm start` 会把**写进仓库的检查点路径**打印出来、危险步在 CLI/报告/套件三处只有一套说法
 （`REFUSAL_LABELS`，含"怎么补救"与"有没有落盘"）。怎么加见 [apps/README.md](apps/README.md)。
 
-工具步（命令行当动作腿）：`npm run apps -- --app cli-report --no-model --allow-dangerous`（桩工具：
-退出码 / JSON 路径 / stderr / 幂等重试 / 干跑+确认+落盘）、`--app repo-report --no-model`（真实 git + jq）。
+工具步（命令行当动作腿）：`npm run apps -- --app cli-report --allow-dangerous`（桩工具：
+退出码 / JSON 路径 / stderr / 幂等重试 / 干跑+确认+落盘）、`--app repo-report`（真实 git + jq）。
 不带 `--allow-dangerous` 时危险步会被**拒绝**且不落盘。
 
 探针基线：`npm run probes:baseline -- --check` 把包里 `probe.baseline.verdicts`（上一次真实探测的判决）
@@ -526,7 +526,9 @@ These are empirical findings from this codebase's own experiments — preserve t
   **passes counted from traces** (`rule/laya/laya:reobserve/escalate` in `summarizeDecisions`) and
   **consultations counted at the runtime seam** (`countingRuntime` wraps `predictShortlist`, sees hits
   AND misses, never touches the executor loop). The gap between them is "asked but never trusted" —
-  reported as its own number, not hidden. Model tier (`on|off(missing)|off(rules-only)`) is written by
+  reported as its own number, not hidden. Model tier (`on` = 真模型，**默认**；`off(missing)` = 产物不齐、如实降级；`off(ablation:scripted-stub)`
+与 `off(ablation:rules-only)` = **消融实验臂**，`--ablate` 显式才出现；旧的 `--no-model` 把桩标成
+`off(rules-only)`，名实不符，已改名) is written by
   the engine into `<app>-result.json` (`model_status`), read by `apps:matrix`/`apps:suite`/the DSH bridge
   — one source (`src/model-artifacts.ts`), because doctor and the runtime once disagreed about what
   "artifacts complete" means (a box with graph+weights but no tokenizer read as "真模型" and failed later).

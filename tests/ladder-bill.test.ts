@@ -28,7 +28,7 @@ describe("梯级账单：每一级的独立决定数与 dead rung", () => {
   });
 
   it("套件行带 rule_steps/escalate（聚合层的 dead rung 判定靠这两列）", async () => {
-    const { rows } = await suite(["demo-app"]);
+    const { rows } = await suite(["demo-app"], { arm: "ablate" });
     expect(rows.length).toBe(1);
     expect(typeof rows[0]!.rule_steps).toBe("number");
     expect(rows[0]!.rule_steps).toBeGreaterThan(0);   // demo-app 全规则消化

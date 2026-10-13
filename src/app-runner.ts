@@ -20,7 +20,8 @@
  *      `confirmToolStep`）点头才执行；拒绝会作为显式结果上报，不是静默跳过。
  *
  *   node --experimental-strip-types src/app-runner.ts --list
- *   node --experimental-strip-types src/app-runner.ts --app demo-app --no-model     # CI 可跑
+ *   node --experimental-strip-types src/app-runner.ts --app demo-app                  # 真模型（默认）
+ *   node --experimental-strip-types src/app-runner.ts --app demo-app --ablate stub     # 消融：脚本桩
  *   node --experimental-strip-types src/app-runner.ts --app demo-app --dry          # 只展开计划
  */
 import fs from "node:fs";
@@ -81,7 +82,9 @@ export interface AppRunOptions {
   captureState?: boolean;
   modelId?: string;
   /**
-   * 本次运行跑在哪个模型层级（`on` / `off(missing)` / `off(rules-only)` / `off(scripted)`）。
+   * 本次运行跑在哪个模型层级：`on`（真模型，**默认**）/ `off(missing)`（产物不齐，如实降级）/
+   * `off(ablation:scripted-stub)` 与 `off(ablation:rules-only)`（**消融实验臂**，`--ablate` 显式才出现）。
+   * 旧名字 `off(rules-only)` 曾指"装了个脚本桩"——名实不符，已随 `--no-model` 一起改掉。
    * 由**调用方**（CLI / 套件 / 桥的桩）判定并传入——运行器自己不猜：装进 `installLayaRuntime`
    * 的东西对这里透明，而"真模型在不在"的判定出处在 `src/model-artifacts.ts`。
    * 结果 JSON 与桥的 summary 都念这一个值（LAYA_VALUE_PLAN P0：用户先要知道此刻跑在哪层）。
@@ -296,7 +299,7 @@ export interface AppRunResult {
     reobserve: { value: boolean; source: "pack" | "default" };
     max_effective_repeats: { value: number; source: "pack" | "default" };
   };
-  /** 模型层级（`on` / `off(missing)` / `off(rules-only)` / `off(scripted)`；未提供则缺字段）。 */
+  /** 模型层级（`on` / `off(missing)` / `off(ablation:…)`；未提供则缺字段）。 */
   model_status?: string;
   /** 决策来源汇总（见 `AppDecisions`；LAYA_VALUE_PLAN P1 的"出场率/挽回/缓存"三组数）。 */
   decisions?: AppDecisions;
@@ -416,7 +419,10 @@ export class AppRunConfigError extends Error {}
  * 必须在**数据腿之前**跑——函数开头这一处就是"0 步、0 副作用"的那个"0"。
  */
 export function preflightConfig(opts: AppRunOptions = {}): void {
-  if (opts.modelStatus === "off(rules-only)" || opts.modelStatus === "off(scripted)") return;
+  // 消融臂不该被产物齐不齐拦住（它就是不装/装桩），前缀匹配即可。
+  if (typeof opts.modelStatus === "string"
+    && (opts.modelStatus === "off(rules-only)" || opts.modelStatus === "off(scripted)"
+      || opts.modelStatus.startsWith("off(ablation:"))) return;
   const cfg = modelConfigError();
   if (cfg !== null) {
     throw new AppRunConfigError(`model-unavailable: ${cfg}`);
@@ -757,7 +763,7 @@ export function appReportMarkdown(r: AppRunResult): string {
 }
 
 const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--out DIR]
-                  [--model ID] [--no-model] [--no-sources] [--confirm-safe]
+                  [--model ID] [--ablate stub|rules-only] [--no-sources] [--confirm-safe]
                   [--allow-dangerous] [--tiered-hint] [--quiet]
 
 按 apps/<app>/pack.json 跑一条完整应用链路：数据腿 → 浏览器步/工具步 → 结束状态不变量
@@ -769,7 +775,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     options: {
       list: { type: "boolean" }, app: { type: "string" }, dry: { type: "boolean" },
       slot: { type: "string", multiple: true }, out: { type: "string" },
-      model: { type: "string" }, "no-model": { type: "boolean" },
+      model: { type: "string" }, ablate: { type: "string" },
       "no-sources": { type: "boolean" }, "confirm-safe": { type: "boolean" },
       "allow-dangerous": { type: "boolean" },
       "tiered-hint": { type: "boolean" },
@@ -845,9 +851,20 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   // 模型层级在哪一层，**每个出口都要回答**（dry 也不例外——桥的 summary 靠它写
   // `model: on|off(missing)`，用户先要知道此刻跑在哪个层级，再谈结果可不可信）。
-  const noModel = v["no-model"] === true;
+  // 默认**只有一个层级**：真模型。`--ablate` 是**消融实验**的开关，不是"另一种跑法"——
+  // 它的存在只为回答"没有这一层会怎样"（本仓库的每条主张都靠这种 A/B 立起来），
+  // 所以名字里带 ablate、产物里带 ablation 前缀，谁都不会把它当成日常模式。
+  // （旧 `--no-model` 有两个问题：① 它装的其实是脚本桩，却把层级标成 `off(rules-only)`；
+  //  ② "no model" 听起来像默认路径的替代，于是所有文档示例都带着它跑，真模型反而从没上过场。）
+  const ablate = v.ablate;
+  if (ablate !== undefined && ablate !== "stub" && ablate !== "rules-only") {
+    console.error(`--ablate 只接受 stub | rules-only（收到 ${JSON.stringify(ablate)}）`);
+    return 2;
+  }
   const artifacts = checkArtifacts();
-  const modelStatus = noModel ? "off(rules-only)" : artifacts.ready ? "on" : "off(missing)";
+  const modelStatus = ablate === "stub" ? "off(ablation:scripted-stub)"
+    : ablate === "rules-only" ? "off(ablation:rules-only)"
+      : artifacts.ready ? "on" : "off(missing)";
 
   if (v.dry) {
     let dryOut;
@@ -868,16 +885,30 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // 两层包装，各数一件事：缓存记"省下的重复提问"（零成本率），计数记"模型被咨询过几次"
   // （出场率）——计数在缓存**外面**：命中也是一次咨询，只是没花 forward。
   // laya 是确定性的，同一问题不该问两次；命中率本身就是要报的数（LAYA_VALUE_PLAN P1）。
-  const inner = noModel
-    ? scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 })))
-    : (await import("./laya-onnx.ts")).createLayaOnnxRuntime();
-  if (!noModel && !artifacts.ready) {
+  // `rules-only` 消融**不装任何 runtime**（走执行器真正的 rulesOnly 路径），
+  // `stub` 消融装一个恒定 0.05 的桩（回答"问了但永远不过闸门"的形状）。两者都不是默认。
+  const inner = ablate === "rules-only"
+    ? null
+    : ablate === "stub"
+      ? scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 })))
+      : (await import("./laya-onnx.ts")).createLayaOnnxRuntime();
+  if (ablate === undefined && !artifacts.ready) {
     console.log(`（模型产物不齐——缺 ${missingPieces(artifacts).join("/")}；需要模型兜底的步会如实 block。`
       + `补齐：npm run model:fetch -- --from <url 或本地路径>）`);
   }
-  const cached = withDecisionCache(inner);
-  const counted = countingRuntime(cached);
-  installLayaRuntime(counted);
+  // 消融的 rules-only 走**真正的**无 runtime 路径（`getLayaRuntime()` 抛
+  // LayaNotConfiguredError ⇒ 执行器进 rulesOnly 并记下原因），不是"装一个假装是模型的桩"。
+  let runtimeStats: (() => DecisionCacheStats) | null = null;
+  let pickAsks: (() => number) | null = null;
+  if (inner === null) {
+    installLayaRuntime(null);
+  } else {
+    const cached = withDecisionCache(inner);
+    const counted = countingRuntime(cached);
+    installLayaRuntime(counted);
+    runtimeStats = () => cached.decisionStats();
+    pickAsks = () => counted.pickAsks();
+  }
 
   let result: AppRunResult;
   try {
@@ -890,8 +921,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       tieredHint: v["tiered-hint"] === true ? true : undefined,
       modelId: v.model ?? pack.model ?? "english",
       modelStatus,
-      runtimeStats: () => cached.decisionStats(),
-      pickAsks: () => counted.pickAsks(),
+      runtimeStats: runtimeStats ?? undefined,
+      pickAsks: pickAsks ?? undefined,
     });
   } catch (e) {
     // 坏包（未知键/角色/占位符/主机……）在 `expandPack` 里就抛出：CLI 的契约是

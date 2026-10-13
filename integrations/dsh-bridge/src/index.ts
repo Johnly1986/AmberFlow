@@ -282,7 +282,7 @@ export function apply(ctx: Context, config: Config): void {
       + 'invariant results, and a `model: on|off(missing)` tier line saying whether the local '
       + 'decision model was in play at all — plus the per-step decision tally (rule vs laya vs '
       + 'reobserve vs cache). The full per-step table stays in the report file named by the result, '
-      + 'read it with the read tool when you need the detail. `no_model` keeps the run rules-only (no model '
+      + 'read it with the read tool when you need the detail. `ablate` runs an ABLATION arm (scripted stub, or no '
       + 'forward passes); `dry` expands the plan and returns it instead of executing anything, so it '
       + 'verifies nothing and writes no report. Semantic templates (`kind=semantic-template` in the '
       + 'apps listing) additionally REQUIRE `site` and report a resolution-level tally line '
@@ -296,7 +296,7 @@ export function apply(ctx: Context, config: Config): void {
           + '_apps`. Pack apps must not pass it.',
       },
       dry: { type: 'boolean', description: 'Only expand the plan; do not open a browser or run tools.' },
-      no_model: { type: 'boolean', description: 'Rules-only: never ask the local decision model.' },
+      ablate: { type: 'string', enum: ['stub', 'rules-only'], description: 'ABLATION EXPERIMENT ONLY. `stub` installs a scripted fake model; `rules-only` runs with no model at all. Omit for a normal run (the real decision model is the default).' },
       no_sources: { type: 'boolean', description: 'Skip the data leg (use already-available data).' },
       allow_dangerous: {
         type: 'boolean',
@@ -438,7 +438,7 @@ export function apply(ctx: Context, config: Config): void {
         app: args.app,
         ...(args.site === undefined ? {} : { site: args.site }),
         ...(args.dry === undefined ? {} : { dry: args.dry }),
-        ...(args.no_model === undefined ? {} : { noModel: args.no_model }),
+        ...(args.ablate === undefined ? {} : { ablate: args.ablate }),
         ...(args.no_sources === undefined ? {} : { noSources: args.no_sources }),
         ...(args.allow_dangerous === undefined ? {} : { allowDangerous: args.allow_dangerous }),
         ...(args.confirm_safe === undefined ? {} : { confirmSafe: args.confirm_safe }),

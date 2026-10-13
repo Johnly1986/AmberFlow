@@ -122,7 +122,7 @@ export function stubCheckout(packs: Record<string, unknown>, options: StubOption
     "if (argv.includes('--dry')) {",
     `  const steps = Array.from({ length: ${String(options.drySteps ?? 2)} }, (_, i) => `,
     '    ({ index: i, kind: i % 2 ? "tool" : "browser", desc: "step " + i + " " + "x".repeat(80) }))',
-    '  const tier = argv.includes("--no-model") ? "off(rules-only)" : "on"',
+    '  const tier = argv.includes("--ablate") ? "off(ablation:scripted-stub)" : "on"',
     '  console.log(JSON.stringify({ app, roles_used: [], slots: {}, steps, model_status: tier }, null, 2))',
     '  process.exit(0)',
     '}',
@@ -134,7 +134,7 @@ export function stubCheckout(packs: Record<string, unknown>, options: StubOption
         "  tool_steps: [{ desc: 'dry run', refused: 'dangerous', done: false }],",
         "  invariants: [{ id: 'cart-count-1', held: true }, { id: 'total-shown', held: false }],",
         // Which tier ran + the decision tally (mirrors the engine's `model_status`/`decisions`).
-        "  model_status: argv.includes('--no-model') ? 'off(rules-only)' : 'off(missing)',",
+        "  model_status: argv.includes('--ablate') ? 'off(ablation:scripted-stub)' : 'off(missing)',",
         "  decisions: { line: 'rule 1 · laya 1 (conf 0.31) · laya:reobserve 0 · escalate 0' },",
       ]
       : [
@@ -142,7 +142,7 @@ export function stubCheckout(packs: Record<string, unknown>, options: StubOption
         "  subgoals: [{ desc: 'open the page', status: 'done' }],",
         '  tool_steps: [],',
         "  invariants: [{ id: 'cart-count-1', held: true }],",
-        "  model_status: argv.includes('--no-model') ? 'off(rules-only)' : 'off(missing)',",
+        "  model_status: argv.includes('--ablate') ? 'off(ablation:scripted-stub)' : 'off(missing)',",
         "  decisions: { line: 'rule 1 · laya 0 · laya:reobserve 0 · escalate 0' },",
       ],
     '}))',

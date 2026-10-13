@@ -237,7 +237,7 @@ export async function main(
   io.out("");
   if (a.ready) {
     io.out("决策模型产物齐了（图 + 权重 + tokenizer）。npm run doctor 会显示 ✓ 真模型；");
-    io.out("之后 npm run apps -- --app ctrip-case（不带 --no-model）就是真模型在决策。");
+    io.out("之后 npm run apps -- --app ctrip-case 就是真模型在决策（默认，不需要旗标）。");
   } else {
     io.out(`产物还不齐，缺：${missingPieces(a).join("、")}`);
     io.out("（规则模式照跑；缺件清单与补法见 npm run doctor）");
