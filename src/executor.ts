@@ -737,6 +737,11 @@ export class BrowserMiddleware {
    * 换模型是配置不是改代码：见 src/decision-provider.ts 的头注释。
    */
   decision: DecisionProvider | null = null;
+  /**
+   * 风险头调用失败的原因（null = 没失败过）。报告与 `apps:suite` 要把它显式说出来：
+   * 一次"退化成关键词判定"的运行和一次正常运行**不是同一件事**，不许混在同一个绿色里。
+   */
+  riskDegraded: string | null = null;
   /** Deterministic rule prefilter ON, anti-repeat ON (measured production defaults). */
   rulesOn = true;
   antiRepeat = true;
@@ -1022,6 +1027,25 @@ export class BrowserMiddleware {
     // 换 provider 后新增的一条：**没有风险头的 provider 不该被问**。
     // 这不是优化而是正确性——向一个不实现 risk 的模型要风险概率，只能拿到编出来的数。
     if (this.decision && !this.decision.capabilities.risk) return [false, 0.0];
+    // **有 provider 就走 provider 的风险头**。旧代码在这里直接读 `this.agent`——
+    // 而注册型 provider（jevk5 等）下 `this.agent` 是 null，实测抛
+    // `Cannot read properties of null (reading 'predict')`，把每个**有 hint 的步**也一起打红
+    // （风险闸门在 pick 之后跑，规则决定的步同样要过它）。
+    // laya 适配器做的是与下面完全相同的那次 `agent.predict`、同样的问法，所以默认路径逐字节不变。
+    if (this.decision?.capabilities.risk && this.decision.risk) {
+      try {
+        const p = await this.decision.risk(goal, desc);
+        return [p >= this.riskyThreshold, p];
+      } catch (e) {
+        // **风险头挂了 ≠ 整条计划不能跑**：退回到确定性关键词规则（就是上面那条），
+        // 并把降级记下来让报告说得出"这次的风险判定是退化的"。
+        // 不这么做的话，一个只声明了 risk 的外部 provider 掉线，会把**每个有 hint 的步**
+        // 一起打红——而"点了名的计划不需要模型也能跑"是本仓库明写的承重性质。
+        // 静默当成"不危险"更不行：那等于掉线解锁了安全闸门。
+        this.riskDegraded = (e as Error).message;
+        return [DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x)), 0.0];
+      }
+    }
     const state = { action: desc, user_goal: goal };
     const { agent } = await this.agentFor(state);
     const res = await agent.predict(state, {
@@ -1054,6 +1078,10 @@ export class BrowserMiddleware {
       title: await page.title(),
       main_text: await stateText(page, goal, this.embedFn),
     };
+    // 同上：完成投票也走 provider（永远只是参考，红线③不变——DOM 信号才是完成真相）。
+    if (this.decision?.capabilities.done && this.decision.doneVote) {
+      return await this.decision.doneVote(goal, state);
+    }
     const { agent } = await this.agentFor(state);
     const res = await agent.predict(state, {
       d: {

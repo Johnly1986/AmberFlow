@@ -308,6 +308,11 @@ export interface AppRunResult {
   providerInfo?: { name: string; version: string; capabilities: Record<string, unknown> };
   /** 模型层级（`on` / `off(missing)` / `off(ablation:…)`；未提供则缺字段）。 */
   model_status?: string;
+  /**
+   * 风险判定退化的原因（provider 的风险头调用失败 ⇒ 本次只用了关键词规则）。
+   * 缺字段 = 没退化过。见 `src/executor.ts` 的 `riskDegraded`。
+   */
+  risk_degraded?: string;
   /** 决策来源汇总（见 `AppDecisions`；LAYA_VALUE_PLAN P1 的"出场率/挽回/缓存"三组数）。 */
   decisions?: AppDecisions;
   /** `captureState: true` 时的旅程结束状态（见 `RunOptions.captureState`）。 */
@@ -695,6 +700,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     ...(opts.providerInfo ? { decision_provider: opts.providerInfo } : {}),
     ...(opts.modelStatus !== undefined ? { model_status: opts.modelStatus } : {}),
     decisions: summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0),
+    // 风险头掉线时执行器退回到关键词规则——**这件事必须出现在产物里**，
+    // 否则一次"退化的运行"和一次正常的运行会共用同一个绿色。
+    ...(mw.riskDegraded ? { risk_degraded: mw.riskDegraded } : {}),
     sources: sourceResults, ok, secs: Math.round((Date.now() - t0) / 100) / 10,
   };
 }
@@ -743,6 +751,10 @@ export function appReportMarkdown(r: AppRunResult): string {
     });
     if (r.decisions !== undefined) {
       // 出场率一行（LAYA_VALUE_PLAN P1）：谁判的、模型救了几步、缓存省了几次——小计在表下，不散在日志里。
+      if (r.risk_degraded) {
+        L.push("", `- ⚠ **风险判定已退化**：${r.risk_degraded}`
+          + `（本次只用关键词规则代替模型投票——这**不是**一次正常的风险闸门运行）`);
+      }
       L.push("", `**决策来源**：${r.decisions.line}`
         + ` ｜ 模型出场 ${r.decisions.model_steps}/${r.decisions.total_steps} 步`
         + (r.decisions.model_steps === 0 ? "（model not needed——能规则化就别猜）" : ""));

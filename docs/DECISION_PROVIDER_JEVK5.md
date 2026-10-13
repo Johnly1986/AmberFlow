@@ -85,6 +85,23 @@ npm run providers:baseline -- --providers first-candidate,jevk5 --apps demo-app,
 3. 换 provider 时 `hint 覆盖 / 声明解决` 两行不变——那才是这套系统真正的承重证据；
 4. 任何"某模型更好"的结论都要同时给出它的**咨询数与耗时**（遍历型基线靠多问，代价要摊开）。
 
+## 接入它时抓到的两个真 bug（这是"必须有第二个实现"的实证）
+
+**① `isRisky`/`isDone` 根本没走 provider。** Stage 2 我只把 `pick` 改道，风险/完成两处只加了
+"能力跳过"的守卫，于是注册型 provider 落回旧路径读 `this.agent`（那里是 `null`）⇒
+`TypeError: Cannot read properties of null (reading 'predict')`，而且**把每个有 hint 的步一起打红**
+（风险闸门在 pick 之后跑，规则决定的步同样要过它）。
+最该记住的是**它怎么躲过测试的**：三个内置基线恰好都声明 `risk: false`，走的是"跳过"分支，
+所以 1116 条测试全绿。是覆盖面放过了它，不是代码对。
+→ 回归：[tests/decision-provider-executor.test.ts](../tests/decision-provider-executor.test.ts)（3 条：
+掉线要降级并记录、降级时关键词仍拦得住不可逆动作、provider 的数字真的驱动闸门）。
+
+**② 一个外部 provider 掉线，会让整条计划失效——包括不需要它的那些步。**
+修法是**降级而不是失败**：风险头调用失败 ⇒ 退回确定性关键词规则，并把原因写进
+`<app>-result.json.risk_degraded`、报告一行 ⚠、套件汇总一行。
+两条边界都是刻意的：**不静默当成"不危险"**（那等于掉线解锁安全闸门），
+也**不让它把 hint 决定的步一起打红**（"点了名的计划不需要模型也能跑"是本仓库明写的承重性质）。
+
 ## 与既有结论的关系
 
 - 这次接入本身就是 provider 层的第一个外部客户，它验证了抽象的两条设计：

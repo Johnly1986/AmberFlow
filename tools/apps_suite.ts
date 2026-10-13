@@ -84,6 +84,8 @@ export interface SuiteRow {
   hint_browser: number;
   /** 本次运行期间决策缓存省下的重复提问（增量，不是进程累计）。 */
   cache_saved: number;
+  /** 风险判定退化的原因（provider 的风险头调用失败 ⇒ 本次只用关键词规则）。缺字段 = 没退化。 */
+  risk_degraded?: string;
 }
 
 /**
@@ -151,6 +153,7 @@ export async function runOne(
     model_asks: d.model_asks,
     rule_steps: d.ladder?.rule ?? 0, escalate: d.ladder?.escalate ?? 0,
     hint_hinted: hints.hinted, hint_named: hints.named, hint_browser: hints.browser,
+    ...(res.risk_degraded ? { risk_degraded: String(res.risk_degraded) } : {}),
     model_steps: d.model_steps,
     conf_max: d.conf.max,
     reobserve: d.reobserve,
@@ -407,6 +410,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       + `删掉它们，同一批旅程的完成率会掉到 0）`);
     console.log(`声明解决：${hintNamed}/${hintBrowser} = ${npct}% 由声明点名（含 commands 闭集），`
       + `依赖模型兜底的只剩 ${hintBrowser - hintNamed} 步`);
+  }
+  // 退化必须出现在汇总里：一次"风险头掉线、只靠关键词"的运行不该和正常运行共用一个绿色。
+  const degraded = rows.filter((r) => r.risk_degraded);
+  if (degraded.length) {
+    console.log(`⚠ 风险判定退化：${degraded.length} 个应用（${degraded.map((r) => r.app).join("、")}）`
+      + ` —— 这些运行的风险闸门只用了关键词规则，不是正常的 provider 投票。`);
   }
   const marginalTotal = rows.reduce((n, r) => n + r.model_steps, 0);
   if (tierOn) {
