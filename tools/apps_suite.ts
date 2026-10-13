@@ -91,6 +91,8 @@ export function isLive(pack: AppPack): boolean {
 /** 跑一个应用包（离线口径）。返回值就是套件表格里的一行；完整结果另落 `<套件目录>/<app>/` 供 matrix 读。 */
 export async function runOne(
   pack: AppPack, cached: CachedRuntime, counted: CountingRuntime, outBase = suiteOutDir("real"),
+  /** 这次跑的层级，**由调用方给**——产物会到处被读（matrix / 桥 / 计量），标签不能靠猜。 */
+  tier = "off(scripted)",
 ): Promise<SuiteRow> {
   const hints = packHintCoverage(pack);          // §W2：承重墙每天看得见
   const out = path.join(outBase, pack.id);
@@ -99,9 +101,10 @@ export async function runOne(
   const asksBefore = counted.pickAsks();
   const res: AppRunResult = await runApp(pack, {
     verbose: false, sources: false, outDir: out, planPath: path.join(out, "plan.json"),
-    // 套件的口径 = 脚本模型：层级如实写，不冒充真 ONNX。咨询数从运行时缝上数——
+    // 层级如实写（曾经硬编码 off(scripted)，于是真模型臂的产物也在说自己是桩——
+    // 按层级认臂的读者就会把它当桩跳过）。咨询数从运行时缝上数：
     // "哪一步本该问模型"与"模型此刻是谁"是两个问题，seam 回答前者、trace 回答后者。
-    modelStatus: "off(scripted)",
+    modelStatus: tier,
     // 报**本次运行的增量**：套件一个进程跑所有应用，累计值会把前一个应用的命中算进来。
     runtimeStats: () => {
       const after = cached.decisionStats();
@@ -220,7 +223,9 @@ export async function suite(
         continue;
       }
       try {
-        rows.push(await runOne(pack, cached, counted, suiteOutDir(opts.arm === "ablate" ? "ablate" : "real")));
+        rows.push(await runOne(pack, cached, counted,
+          suiteOutDir(opts.arm === "ablate" ? "ablate" : "real"),
+          opts.arm === "ablate" ? "off(ablation:scripted-stub)" : "on"));
       } catch (e) {
         rows.push({
           app: pack.id, steps: 0, completed: "0/0", skipped: 0, invariants: "-",

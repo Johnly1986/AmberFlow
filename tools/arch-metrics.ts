@@ -198,13 +198,24 @@ function corpus(): Corpus {
   };
 }
 
-/* ── ② 模型与梯级：从产物读，读不到就写"未测" ───────────────────────────── */
+/* ── ② 模型与梯级：读套件产物，按层级认臂 ───────────────────────── */
+
+/** 一臂的统计。层级由产物自己说（`model_status`），不由目录名猜。 */
+interface ArmStats {
+  apps: number; trace_steps: number; choice_asks: number; passed: number;
+  reobserve: number; escalate: number; rule_match: number; secs: number; tier: string;
+}
+interface ArmResult { note?: string; stats?: ArmStats }
+
 interface ModelMetrics {
   tier: string;
-  real_model_corpus: { apps: number; trace_steps: number; choice_asks: number; passed: number; reobserve: number; escalate: number; secs: number } | { note: string };
-  scripted_corpus_secs: number | { note: string };
+  /** 默认臂（真模型）：读 `/tmp/amberflow-suite`，只认 `model_status === "on"` 的产物。 */
+  real_model_corpus: ArmResult;
+  /** 消融臂：读 `/tmp/amberflow-suite-ablate`；没跑过就是"未测"。 */
+  ablation_corpus: ArmResult;
   harness: {
-    judged: number; top1: string; floor025_precision: string; auc_all: number; passthrough: string; shortlist: string;
+    judged: number; top1: string; floor025_precision: string; auc_all: number;
+    passthrough: string; shortlist: string;
     numeric: {
       judged: number; top1_pct: number; latin_pct: number; cjk_pct: number; precision025_pct: number;
       auc_all: number; passthrough_auc: number; shortlist_auc: number;
@@ -214,68 +225,88 @@ interface ModelMetrics {
   ladder: { note: string };
 }
 
-function modelMetrics(): ModelMetrics {
-  const real = readJson("/tmp/realmodel-suite/summary.json") as Array<Record<string, number>> | null;
-  let realCorpus: ModelMetrics["real_model_corpus"] = {
-    note: "未测：跑 `node /tmp/run-corpus.mjs`（真模型，约 10 分钟）",
-  };
-  if (Array.isArray(real) && real.length) {
-    const sum = (k: string): number => real.reduce((a, r) => a + (r[k] ?? 0), 0);
-    realCorpus = {
-      apps: real.length, trace_steps: sum("steps"), choice_asks: sum("asks"),
-      passed: sum("passed"), reobserve: sum("reobserve"), escalate: sum("escalate"), secs: sum("secs"),
-    };
+/**
+ * 读一个套件产物目录。**按层级认臂，不按目录名认**：
+ * 目录里混进另一臂的产物时宁可跳过并留 note，也不要拿真模型的 754.8 s 去填"脚本桩基线"
+ * 那种字段——本轮真的差点这么干了（默认臂改成真模型之后，旧字段名就开始说谎）。
+ */
+function readArm(dir: string, want: "on" | "ablate"): ArmResult {
+  if (!fs.existsSync(dir)) {
+    return { note: `未测：没有 ${dir}（跑 npm run apps:suite${want === "ablate" ? " -- --ablate" : ""}）` };
   }
-  let scripted: ModelMetrics["scripted_corpus_secs"] = {
-    note: "未测：跑 `npm run apps:suite`（脚本桩，约 4 分钟）",
+  const acc: ArmStats = {
+    apps: 0, trace_steps: 0, choice_asks: 0, passed: 0,
+    reobserve: 0, escalate: 0, rule_match: 0, secs: 0, tier: want === "on" ? "on" : "ablation",
   };
-  const suites = path.join("/tmp", "amberflow-suite");
-  if (fs.existsSync(suites)) {
-    let secs = 0, n = 0;
-    for (const d of fs.readdirSync(suites)) {
-      const r = readJson(path.join(suites, d, `${d}-result.json`));
-      if (r) { secs += Number(r["secs"] ?? 0); n++; }
+  let skipped: string | null = null;
+  for (const d of fs.readdirSync(dir)) {
+    const r = readJson(path.join(dir, d, `${d}-result.json`)) as Record<string, any> | null;
+    if (!r) continue;
+    const tier = String(r.model_status ?? "");
+    const isReal = tier === "on";
+    if (isReal !== (want === "on")) {
+      skipped = skipped ?? (tier || "(无层级)");
+      continue;
     }
-    if (n) scripted = Math.round(secs * 10) / 10;
+    const dec = (r.decisions ?? {}) as Record<string, any>;
+    acc.apps += 1;
+    acc.trace_steps += Number(dec.total_steps ?? 0);
+    acc.choice_asks += Number(dec.model_asks ?? 0);
+    acc.passed += Number(dec.model_steps ?? 0);
+    acc.reobserve += Number(dec.reobserve ?? 0);
+    acc.escalate += Number(dec.escalate ?? 0);
+    acc.rule_match += Number(dec.by_method?.["rule:match"] ?? 0);
+    acc.secs += Number(r.secs ?? 0);
   }
-  const mc = readJson("/tmp/model-contribution.json") as { rows?: unknown[]; summary?: Record<string, any> } | null;
+  acc.secs = Math.round(acc.secs * 10) / 10;
+  if (acc.apps === 0) {
+    return { note: `未测：${dir} 里没有属于本臂（want=${want}）的产物${skipped ? `（跳过了 ${skipped} 的）` : ""}` };
+  }
+  return skipped ? { stats: acc, note: `跳过了层级为 ${skipped} 的产物` } : { stats: acc };
+}
+
+function modelMetrics(): ModelMetrics {
+  const mc = readJson("/tmp/model-contribution.json") as { summary?: Record<string, any> } | null;
   let harness: ModelMetrics["harness"] = {
     note: "未测：跑 `npm run model:contribution -- --out /tmp/model-contribution.json`（真模型，约 15 分钟）",
   };
   if (mc?.summary) {
     const s = mc.summary as Record<string, any>;
+    const pt = s.by_question_shape.passthrough_pool_le_8;
+    const sl = s.by_question_shape.shortlist_pool_gt_8;
     const branch = (b: Record<string, any>): string =>
       `n=${b.steps} 命中 ${b.accuracy === null ? "-" : `${Math.round(b.accuracy * 100)}%`}`
       + ` ｜ floor0.25 采纳 ${b.decided_at_floor_025}（对 ${b.right}）｜ AUC ${b.auc_conf_vs_correct}`;
-    const pt = s.by_question_shape.passthrough_pool_le_8, sl = s.by_question_shape.shortlist_pool_gt_8;
+    const f25 = s.floor_sweep.find((f: any) => f.floor === 0.25);
     harness = {
-      judged: s.judged, top1: `${Math.round(s.top1_accuracy * 100)}%`,
+      judged: s.judged,
+      top1: `${Math.round(s.top1_accuracy * 100)}%`,
+      floor025_precision: `${Math.round(f25.precision * 100)}%`,
+      auc_all: s.conf.auc_conf_vs_correct,
+      passthrough: branch(pt), shortlist: branch(sl),
       numeric: {
         judged: s.judged, top1_pct: Math.round(s.top1_accuracy * 100),
-        latin_pct: Math.round(100 * (s.accuracy_latin_pages.match(/\((\d+)%\)/)?.[1] ?? "0") / 100) || Number(s.accuracy_latin_pages.match(/\((\d+)%\)/)?.[1] ?? 0),
-        cjk_pct: Number(s.accuracy_cjk_pages.match(/\((\d+)%\)/)?.[1] ?? 0),
-        precision025_pct: Math.round(s.floor_sweep.find((f: any) => f.floor === 0.25).precision * 100),
+        latin_pct: Number(String(s.accuracy_latin_pages).match(/\((\d+)%\)/)?.[1] ?? 0),
+        cjk_pct: Number(String(s.accuracy_cjk_pages).match(/\((\d+)%\)/)?.[1] ?? 0),
+        precision025_pct: Math.round(f25.precision * 100),
         auc_all: s.conf.auc_conf_vs_correct,
         passthrough_auc: pt?.auc_conf_vs_correct ?? null, shortlist_auc: sl?.auc_conf_vs_correct ?? null,
         passthrough_adopted: pt?.decided_at_floor_025 ?? null, passthrough_right: pt?.right ?? null,
         shortlist_adopted: sl?.decided_at_floor_025 ?? null, shortlist_right: sl?.right ?? null,
       },
-      floor025_precision: `${s.floor_sweep.find((f: any) => f.floor === 0.25).precision * 100}%`,
-      auc_all: s.conf.auc_conf_vs_correct,
-      passthrough: branch(pt), shortlist: branch(sl),
     };
   }
   return {
     tier: fs.existsSync("/tmp/laya_dec.onnx") ? "on（/tmp/laya_dec.onnx 在位）" : "off(missing)",
-    real_model_corpus: realCorpus,
-    scripted_corpus_secs: scripted,
+    real_model_corpus: readArm("/tmp/amberflow-suite", "on"),
+    ablation_corpus: readArm("/tmp/amberflow-suite-ablate", "ablate"),
     harness,
     ladder: {
-      note: "梯级出场以真模型语料为准：reobserve/escalate 的救回次数读 real_model_corpus；"
-        + "为 0 表示该梯级在已验收语料里从未救回过任何东西（不是'没测'）",
+      note: "梯级出场以 real_model_corpus 为准；0 表示该级在已验收语料上从未独立决定任何东西（不是『没测』）",
     },
   };
 }
+
 
 const metrics = {
   generated_by: "tools/arch-metrics.ts",
@@ -324,7 +355,7 @@ console.log(`声明行 ${c.declared_lines.total}（pack ${c.declared_lines.pack}
   + `｜journey+roles 占 pack 行 ${c.journey_roles_lines.of_pack_lines}｜bin/ 夹具 ${c.bin_fixture_lines} 行`);
 console.log(`容错声明：when ${c.declarations.when} / retries ${c.declarations.retries} / next ${c.declarations.next}`
   + `（合并后浏览器步口径；另一套分母见 JSON 的 note）`);
-console.log(`模型：层级 ${metrics.model.tier} ｜ 真模型语料 ${JSON.stringify(metrics.model.real_model_corpus)}`
-  + ` ｜ 脚本桩 ${JSON.stringify(metrics.model.scripted_corpus_secs)}`);
+console.log(`模型：层级 ${metrics.model.tier} ｜ 真模型臂 ${JSON.stringify(metrics.model.real_model_corpus)}`
+  + ` ｜ 消融臂 ${JSON.stringify(metrics.model.ablation_corpus)}`);
 console.log(`测试：${metrics.tests.count ?? "未测"}（${metrics.tests.source}）`);
 console.log(`写出 ${OUT}`);

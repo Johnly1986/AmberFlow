@@ -67,11 +67,11 @@ const N = {
   ptRight: mv((m) => m.model?.harness?.numeric?.passthrough_right, "harness.passthrough_right"),
   slAdopt: mv((m) => m.model?.harness?.numeric?.shortlist_adopted, "harness.shortlist_adopted"),
   slRight: mv((m) => m.model?.harness?.numeric?.shortlist_right, "harness.shortlist_right"),
-  asks: mv((m) => m.model?.real_model_corpus?.choice_asks, "real_model.choice_asks"),
-  passed: mv((m) => m.model?.real_model_corpus?.passed, "real_model.passed"),
-  traceSteps: mv((m) => m.model?.real_model_corpus?.trace_steps, "real_model.trace_steps"),
-  ruleMatch: mv((m) => m.model?.real_model_corpus?.rule_match ?? "201", "real_model.rule_match"),
-  realSecs: mv((m) => m.model?.real_model_corpus?.secs, "real_model.secs"),
+  asks: mv((m) => m.model?.real_model_corpus?.stats?.choice_asks, "real_model_corpus.stats.choice_asks"),
+  passed: mv((m) => m.model?.real_model_corpus?.stats?.passed, "real_model_corpus.stats.passed"),
+  traceSteps: mv((m) => m.model?.real_model_corpus?.stats?.trace_steps, "real_model_corpus.stats.trace_steps"),
+  ruleMatch: mv((m) => m.model?.real_model_corpus?.stats?.rule_match, "real_model_corpus.stats.rule_match"),
+  realSecs: mv((m) => m.model?.real_model_corpus?.stats?.secs, "real_model_corpus.stats.secs"),
   judged: mv((m) => m.model?.harness?.numeric?.judged, "harness.judged"),
 };
 const boxes = [];
