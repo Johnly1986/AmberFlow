@@ -315,14 +315,16 @@ const metrics = {
   provenance: {
     corpus: "仓库实时计算（--check 的门只比这一段）",
     model: "外部快照：/tmp 下的真模型跑批产物；换机器或重跑就会变，引用时看 generated_at",
-    tests: "外部快照：`npx vitest list | wc -l`（静态数 it( 只有 799，不可用）",
+    // 口径 2026-10-14 修正：`vitest list | wc -l` 会把**多行用例名**数成多行（实测一条
+    // 用例名换行 ⇒ 1132 ≠ 运行器报的 1131）。只数每条用例开头的 `(tests|integrations)/` 行。
+    tests: "外部快照：`npx vitest list | grep -cE \"^(tests|integrations)/\"`（静态数 it( 只有 799，不可用；wc -l 会把多行用例名数成多行）",
   },
   note: "本文件是计量单一出处：能算的自动算，算不出来的写 note 并注明需要的命令；每个数带口径。",
   corpus: corpus(),
   model: modelMetrics(),
   tests: argOf("--tests")
-    ? { count: Number(argOf("--tests")), source: "--tests（应来自 `npx vitest list | wc -l`；静态数 `it(` 只有 799，不可用）" }
-    : { count: null, source: "未测：`npx vitest list | wc -l`（静态数不出参数化用例）" },
+    ? { count: Number(argOf("--tests")), source: "--tests（应来自 `npx vitest list | grep -cE \"^(tests|integrations)/\"`；静态数 `it(` 只有 799，不可用）" }
+    : { count: null, source: "未测：`npx vitest list | grep -cE \"^(tests|integrations)/\"`（静态数不出参数化用例）" },
 };
 
 const OUT = argOf("--out") ?? path.join(REPO, "docs", "arch-metrics.json");
