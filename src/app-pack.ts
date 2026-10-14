@@ -98,7 +98,7 @@ export const STEP_KEYS = [
   // 共同（`id`/`next` 是两种步型共用的走向声明：P4）
   "role", "desc", "signal", "slots", "retries", "id", "next",
   // 浏览器步
-  "start_url", "target_hint", "target_hints", "when", "commands", "effect",
+  "start_url", "target_hint", "target_hints", "when", "commands", "effect", "adjudicate",
   // 工具步
   "source", "args", "dry_run_args", "idempotent", "dangerous",
 ] as const;

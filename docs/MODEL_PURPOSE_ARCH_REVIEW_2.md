@@ -146,11 +146,19 @@ provider，而两个目的需要不同智能：恢复档的实测最优是零智
 >   `$AMBERFLOW_HOME/hint-memory/<app>.json`，学到的永不进被审计的包），结果产物加
 >   `hint_memory` 字段（不开 = 逐字节不变），`apps:matrix` 加"学到/复用"列。验收钉在
 >   `tests/app-runner-learn.test.ts`：run1 学、run2 `laya` 出场 0 且零额外前向、包不变、矩阵列 `1/1`。
-> - **R1 已落地**——`tools/drift-real-arm.ts` 产出冻结产物 `bench/drift-real-arm.json`（当前 **0/3**），
+> - **R1 已落地**——`tools/drift-real-arm.ts` 产出冻结产物 `bench/drift-real-arm.json`，
 >   `--check` 逐格比 `done`；不跑模型的结论钉在 `tests/drift-real-arm.test.ts`，真跑模型的 `--check`
->   进 `bench/smoke.sh` 模型侧分支（3d，无产物 SKIP）。某格翻绿会红，逼作者显式 `--write` + 改期望——
->   W4′ 若立项，这就是它的验收台。
-> - R5（A2′ 收口）、R4（escalate 部署态）、R3（梯级×智能）仍待裁定，未动。
+>   进 `bench/smoke.sh` 模型侧分支（3d，无产物 SKIP）。某格翻绿会红，逼作者显式 `--write` + 改期望。
+> - **R5 已落地（A2′ 补完，2026-10-14 续）**——声明面 `adjudicate`（加载期钉：必须
+>   `effect.irreversible:false` + 可判定信号，不可逆/manual/没声明一律红），运行期在规则/窄问/
+>   加宽/升级都拿不下、本来要 `low_confidence` 阻塞时，让模型的低置信选择**被执行、由本步 DOM 信号
+>   事后裁决**（trace 记 `laya:adjudicated`；每元素一次白跑即禁，爆炸半径由声明限定）。
+>   **R1 那条臂当场兑现**：漂移族红格 plain 0/3 → **A2′ 3/3**——模型低置信下其实选对了，
+>   是闸门把正确答案丢了；这是"运行期弹性"第一次有数字背书。顺带修了一条潜伏断链
+>   （`TaskPlan` 构造器丢弃 `effect` ⇒ W1 的 `effect.irreversible` 从没穿过 pack→plan→executor，
+>   0 个包用过它所以没暴露）。验收 `tests/executor-adjudicate.test.ts`（加载期 4 + 运行期救回/对照/
+>   有界 3 + 断链 1）；缺省不开 = 全语料逐字节不变（`apps:suite` 16/17、`verify` 全绿）。
+> - R4（escalate 部署态）、R3（梯级×智能）仍待裁定，未动。
 
 1. **R2**（学习环接主链路 + matrix 列）——模型唯一被测正的价值从侧门转正门。
 2. **R1**（漂移族真模型臂进门禁）——把本轮 0/3 从一次性测量变成常设账；W4′ 若立项，这就是它的验收台。

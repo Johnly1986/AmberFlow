@@ -340,6 +340,15 @@ export interface RunOptions {
    */
   effect?: { irreversible?: boolean };
   /**
+   * A2′（W4′ 存活半边，2026-10-14 补完）：这一步声明了"错了白跑"（`effect.irreversible:false`，
+   * 加载期已校验，见 `plan.ts`），于是当规则/窄问/加宽/升级**都拿不下**、本来要 `low_confidence`
+   * 阻塞时，**让本地模型的低置信选择被执行，由这一步自己的 DOM 信号事后裁决**——
+   * 与老师提名同一认识论（执行 + 信号定生死），只是爆炸半径由声明限定：每个元素一次机会
+   * （裁决过未确认即禁），不可逆的步绝不允许开这个口。trace 记 `laya:adjudicated`。
+   * 不写 = 今天逐字节（低置信即阻塞）。
+   */
+  adjudicate?: boolean;
+  /**
    * Navigation envelope (see `disallowedHost`): when non-empty, `run()` refuses
    * to open a `start_url` whose host is not declared, and stops the subgoal if
    * an executed action lands on an undeclared host. Default: no envelope —
@@ -1489,6 +1498,7 @@ export class BrowserMiddleware {
       tieredHint = this.tieredHint,
       commands = null,
       effect,
+      adjudicate = false,
     } = opts;
 
     // The navigation envelope: run-level declaration wins, else the middleware's
@@ -1888,7 +1898,11 @@ export class BrowserMiddleware {
               `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`, stepNo);
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
-          } else if (Object.keys(forbidden).length >= Math.max(0, Object.keys(elems).length - 1)) {
+          } else if (!(adjudicate && ref !== null)
+            && Object.keys(forbidden).length >= Math.max(0, Object.keys(elems).length - 1)) {
+            // A2′：`adjudicate` 开着且还有活着的候选时，不能用"动作空间耗尽"抢在裁决前面——
+            // 那最后一个低置信候选正是该被信号裁决的那一个（"错了白跑"是作者声明过的）。
+            // 没开裁决时这个提前停原样保留（逐字节今天）。
             stop("action_space_exhausted",
               `action space exhausted (${Object.keys(forbidden).length} forbidden) on step ${stepNo}`, stepNo);
             break;
@@ -1900,6 +1914,9 @@ export class BrowserMiddleware {
             // Only the way to stopping pays for the extra scan; the pick is recorded
             // as `laya:reobserve` so a widened step is visible in the trace/audit.
             let recovered = false;
+            // A2′：加宽重看即便没过闸门，它看到的候选也可能比窄池那一个更好——
+            // 记下来，若这一步声明了裁决资格，就用**最后一次观察到的**低置信选择（elems 已是宽视图）。
+            let widePick: { ref: string; conf: number } | null = null;
             if (reobserve && !reobserved && ref !== null) {
               reobserved = true;
               const wide = await extractElements(pg, true, WIDER_ELEMENTS);
@@ -1924,9 +1941,12 @@ export class BrowserMiddleware {
                     console.log(`  step ${stepNo}: re-observed wider `
                       + `(${Object.keys(wide).length} elements) -> ${ref} conf=${conf2.toFixed(2)}`);
                   }
-                } else if (verbose) {
-                  console.log(`  step ${stepNo}: re-observed wider `
-                    + `(${Object.keys(wide).length} elements) -> still below floor`);
+                } else {
+                  if (ref2 !== null) widePick = { ref: ref2, conf: conf2 };
+                  if (verbose) {
+                    console.log(`  step ${stepNo}: re-observed wider `
+                      + `(${Object.keys(wide).length} elements) -> still below floor`);
+                  }
                 }
               }
             }
@@ -1961,9 +1981,25 @@ export class BrowserMiddleware {
               }
             }
             if (!recovered) {
-              stop("low_confidence",
-                `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`, stepNo);
-              break;
+              // A2′：这一步声明了"错了白跑"（`adjudicate`，加载期已钉 `effect.irreversible:false`
+              // + 可判定信号），于是"低置信"不再是阻塞理由——把模型此刻的选择**执行**，让这一步
+              // 自己的 DOM 信号事后裁决（信号成立 = done；不成立 = 下面循环尾部禁掉这个元素，
+              // 一次白跑就是它的全部代价）。这是老师的"提名被执行、信号定生死"同一认识论，
+              // 只是爆炸半径由作者声明限定。没声明 ⇒ 逐字节今天（低置信即阻塞）。
+              const bestPick = widePick ?? (ref !== null ? { ref, conf } : null);
+              if (adjudicate && bestPick !== null && !this.rulesOnly) {
+                ref = bestPick.ref;
+                conf = bestPick.conf;
+                method = "laya:adjudicated";
+                if (verbose) {
+                  console.log(`  step ${stepNo}: adjudicating below gate (${ref} `
+                    + `conf=${conf.toFixed(2)} < floor ${floor.toFixed(2)}) — the step's own signal judges`);
+                }
+              } else {
+                stop("low_confidence",
+                  `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`, stepNo);
+                break;
+              }
             }
           }
         }
@@ -2257,6 +2293,10 @@ export class BrowserMiddleware {
           // inert guard catches dead loops.
           if (method === "laya" || how === "filled") forbid(ref, el, "anti-repeat");
         }
+        // A2′：裁决过一次的元素不配第二次机会——声明说"错了白跑"，白跑一次就是它的全部代价。
+        // 不挂在 antiRepeat 下（那是循环通用卫生），因为"一次裁决"是 A2′ 的语义本身：
+        // 走到这里 = 执行了、非惰性、信号没成立 ⇒ 这一格裁判已给出"不算"，禁掉换下一个候选。
+        if (method === "laya:adjudicated" && executed) forbid(ref, el, "adjudicated-missed");
       }
     } finally {
       // Only close the browser run() launched itself: an injected page/pw belongs

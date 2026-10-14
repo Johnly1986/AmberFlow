@@ -272,6 +272,9 @@ export async function runOnce(
       // §4: the step's declared reversibility (absent ⇒ the gate falls back to
       // keyword + model vote, i.e. exactly today's behavior).
       effect: sg.effect ?? undefined,
+      // A2′: the step declared "wrong = wasted" (load-time checked to REQUIRE
+      // effect.irreversible=false + a decidable signal). Absent ⇒ low conf blocks.
+      adjudicate: (sg as Record<string, unknown>).adjudicate === true,
       precondition: sg.when ?? null,
       // `{manual: true}` on the subgoal's signal: no DOM fact can confirm this step,
       // so the executor asks the human (the middleware carries `manualConfirmFn`).

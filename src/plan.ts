@@ -59,6 +59,15 @@ export interface Subgoal {
    * `irreversible: true` 的步不许重试（加载期校验），也是模型**绝不能**被放开的地方。
    */
   effect?: StepEffect;
+  /**
+   * A2′（W4′ 存活半边，2026-10-14 补完）：**让本地模型的低置信选择被执行，由这一步自己的
+   * DOM 信号事后裁决**。资格是**声明出来的**，不是猜的——加载期校验（`PlanningRules.problems`）：
+   * ① 必须显式 `effect.irreversible === false`（"错了白跑"是作者的话，不可逆的步绝不能放开）；
+   * ② 信号必须可判定（`manual` 没有裁判）。运行期它只在规则/窄问/加宽/升级**都拿不下**之后
+   * 才轮到（爆炸半径：每个元素一次白跑机会 + `max_step_visits`/`retries` 上界），
+   * trace 记 `laya:adjudicated`，与老师的"提名被执行、信号定生死"是同一认识论。
+   */
+  adjudicate?: boolean;
   status?: string;
   obstacle?: string | null;
   attempts?: number;
@@ -74,7 +83,7 @@ export interface PlanFile {
 
 const EDITABLE = new Set([
   "desc", "signal", "start_url", "status", "target_hint", "target_hints", "slots", "when", "retries",
-  "commands", "id", "next",
+  "commands", "id", "next", "effect", "adjudicate",
 ]);
 
 /**
@@ -308,6 +317,24 @@ export class PlanningRules {
       if (s.commands !== undefined) {
         validateCommands(s.commands, tag, issues, opts.slotKeys);
       }
+      // A2′：`adjudicate` 的资格是**声明**出来的，加载期就钉死（配置类错误不许拖到运行期）：
+      // ① 必须显式 `effect.irreversible === false`——不可逆/没声明可逆性的步绝不能放开模型；
+      // ② 信号必须可判定——`manual` 没有裁判，"事后由信号裁决"无从谈起。
+      if (s.adjudicate !== undefined) {
+        if (s.adjudicate !== true && s.adjudicate !== false) {
+          issues.push(`${tag}: adjudicate must be true or false`);
+        } else if (s.adjudicate === true) {
+          const eff = s.effect as { irreversible?: boolean } | undefined;
+          if (eff?.irreversible !== false) {
+            issues.push(`${tag}: adjudicate requires effect.irreversible = false `
+              + `(the blast radius must be DECLARED, not assumed — an irreversible step is where the model is never let through)`);
+          }
+          const sig = s.signal as { manual?: boolean } | undefined;
+          if (sig?.manual === true) {
+            issues.push(`${tag}: adjudicate requires a decidable DOM signal (manual has no judge to adjudicate)`);
+          }
+        }
+      }
       const desc = String(s.desc ?? "").toLowerCase();
       for (const w of this.forbiddenWords) {
         if (desc.includes(w)) issues.push(`${tag}: forbidden word '${w}' in desc`);
@@ -341,7 +368,11 @@ export class TaskPlan {
         status: "pending",
         obstacle: null,
       };
-      for (const k of ["target_hint", "target_hints", "slots", "when", "commands", "id", "next"] as const) {
+      for (const k of ["target_hint", "target_hints", "slots", "when", "commands", "id", "next",
+        // 2026-10-14 实测修断链：`effect` 以前不在这张清单里 ⇒ 构造器把它丢了，于是 §4/W1 的
+        // `effect.irreversible` 声明**从没穿过 pack→plan→executor**（0 个包用过它，所以没暴露）。
+        // A2′ 的放开资格正建立在这个声明上，必须先让它活下来。`adjudicate` 同批加入。
+        "effect", "adjudicate"] as const) {
         if (s[k]) out[k] = s[k] as never;      // truthy-only, exactly like Python
       }
       if (s.retries) out.retries = Math.trunc(Number(s.retries));

@@ -148,7 +148,7 @@ export interface AppDecisions {
    * trace 里 `method` 就是这么记的，所以不需要反事实重跑）。整条梯级在语料上决定 0 步
    * 就是 `dead rung`，由套件在**聚合层**判定（单应用看不出全貌，见 tools/apps_suite.ts）。
    */
-  ladder: { rule: number; laya: number; reobserve: number; escalate: number; asked_not_passed: number };
+  ladder: { rule: number; laya: number; reobserve: number; escalate: number; adjudicated: number; asked_not_passed: number };
   /** 一行汇总，人读与机器读同一份：`rule 19 · laya 1 (conf 0.31) · 咨询 5 · laya:reobserve 1 · cache 6/12`。 */
   line: string;
 }
@@ -162,27 +162,33 @@ export function summarizeDecisions(
   for (const t of steps) {
     const m = typeof t["method"] === "string" ? t["method"] : "other";
     byMethod[m] = (byMethod[m] ?? 0) + 1;
-    if ((m === "laya" || m === "laya:reobserve") && typeof t["conf"] === "number") {
+    if ((m === "laya" || m === "laya:reobserve" || m === "laya:adjudicated") && typeof t["conf"] === "number") {
       modelConfs.push(t["conf"]);
     }
   }
   const laya = byMethod["laya"] ?? 0;
   const reobserve = byMethod["laya:reobserve"] ?? 0;
+  const adjudicated = byMethod["laya:adjudicated"] ?? 0;
   const escalate = byMethod["escalate"] ?? 0;
   const parts = [
     `rule ${byMethod["rule:match"] ?? 0}`,
     `laya ${laya}` + (modelConfs.length ? ` (conf ${Math.max(...modelConfs).toFixed(2)})` : ""),
     `laya:reobserve ${reobserve}`,
+    // A2′：只有真发生过裁决才出现在这一行（缺省等价的纪律，同 path_visits）。
+    ...(adjudicated ? [`laya:adjudicated ${adjudicated}`] : []),
     `escalate ${escalate}`,
   ];
   // 咨询数与过关数并排放：差值就是"问了但没过闸门"的那几次——它们不在 trace 里，
   // 但它们是保险被碰过的直接证据（slowjet 的冷加载正是这一形状）。
-  if (modelAsks !== laya + reobserve) {
+  // A2′：裁决过的也算"过了"（被执行了，只是没过置信闸门、改由信号裁决），否则会把
+  // 一次真救回来的裁决错记成"问了没用"。
+  const passed = laya + reobserve + adjudicated;
+  if (modelAsks !== passed) {
     parts.push(`模型被咨询 ${modelAsks} 次`
-      + (modelAsks > laya + reobserve ? `（${modelAsks - laya - reobserve} 次未过闸门）` : ""));
+      + (modelAsks > passed ? `（${modelAsks - passed} 次未过闸门）` : ""));
   }
   const extra = Object.entries(byMethod)
-    .filter(([m]) => !["rule:match", "laya", "laya:reobserve", "escalate"].includes(m));
+    .filter(([m]) => !["rule:match", "laya", "laya:reobserve", "laya:adjudicated", "escalate"].includes(m));
   for (const [m, n] of extra) parts.push(`${m} ${n}`);
   if (cache !== null) {
     parts.push(`cache 命中 ${cache.hits}/${cache.hits + cache.misses} forwards`);
@@ -191,13 +197,15 @@ export function summarizeDecisions(
     total_steps: steps.length,
     by_method: byMethod,
     model_asks: modelAsks,
-    model_steps: laya + reobserve,
+    model_steps: laya + reobserve + adjudicated,
     reobserve,
     escalate,
     ladder: {
       rule: byMethod["rule:match"] ?? 0,
       laya, reobserve, escalate,
-      asked_not_passed: Math.max(0, modelAsks - (laya + reobserve)),
+      // A2′：裁决级单独计数（梯级账单要能看见"这一级今天兜回过没有"）。
+      adjudicated,
+      asked_not_passed: Math.max(0, modelAsks - (laya + reobserve + adjudicated)),
     },
     conf: {
       n: modelConfs.length,

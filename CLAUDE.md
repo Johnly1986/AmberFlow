@@ -741,3 +741,14 @@ These are empirical findings from this codebase's own experiments — preserve t
   "吵页面"（50 ms 倒计时 + 页面级点击计数，后者让"不 inert"变成确定性的，不靠采样运气）——
   关掉上界 **8 步 / `max_steps` / 4.5 s**，缺省上界 **第 4 步 / `no_progress` / 2.3 s**；
   点到第 3 次才成立的信号照旧 `dom_goal_signal`（不误杀合法重复）。
+- **A2′ 已落地（非破坏性步放开模型、事后由信号裁决；`tests/executor-adjudicate.test.ts` 8 条）**：
+  W0 把"换闸门信号"（A1）否证了——`confidence/pTop1/margin` 同台比，现状已是最优，"反向"只是两把尺子
+  混用的假象。A2′ 是它剩下的、不依赖"信分数"的半边：**步声明 `adjudicate:true`（加载期硬校验必须
+  `effect.irreversible:false` + 可判定 DOM 信号；不可逆/manual/没声明一律红）**，运行期在规则/窄问/
+  加宽/升级**都拿不下**、本来要 `low_confidence` 阻塞时，让模型的低置信选择**被执行、由这一步自己的
+  信号事后裁决**（trace 记 `laya:adjudicated`；执行了但信号没成立 ⇒ 该元素立即禁，一次白跑就是全部代价）。
+  这是老师的"提名被执行、信号定生死"同一认识论，只是爆炸半径由作者声明限定。**R1 那条臂当场兑现**：
+  漂移族红格 plain（今天）0/3 → **A2′ 3/3**——模型低置信下其实**选对了**，是闸门把正确答案丢了
+  （`bench/drift-real-arm.json` 两条臂都冻结进门禁）。缺省不开 = 全语料逐字节不变。
+  顺带修一条潜伏断链：`TaskPlan` 构造器的保留清单**没有 `effect`** ⇒ W1 的 `effect.irreversible`
+  声明从没穿过 pack→plan→executor（0 个包用过它所以从没暴露）；A2′ 依赖这个声明存活，先把它接上（`src/plan.ts`）。

@@ -21,10 +21,11 @@ describe("梯级账单：每一级的独立决定数与 dead rung", () => {
         { method: "escalate", conf: 1 },
       ] as never, null, 9,
     );
-    expect(d.ladder).toEqual({ rule: 2, laya: 1, reobserve: 1, escalate: 1, asked_not_passed: 7 });
+    expect(d.ladder).toEqual({ rule: 2, laya: 1, reobserve: 1, escalate: 1, adjudicated: 0, asked_not_passed: 7 });
     // 对账：ladder 不许和 by_method / model_steps 打架
     expect(d.ladder.rule).toBe(d.by_method["rule:match"]);
-    expect(d.ladder.laya + d.ladder.reobserve).toBe(d.model_steps);
+    // A2′：model_steps 现在含裁决级（laya + reobserve + adjudicated）；本例没裁决 ⇒ +0。
+    expect(d.ladder.laya + d.ladder.reobserve + d.ladder.adjudicated).toBe(d.model_steps);
   });
 
   it("套件行带 rule_steps/escalate（聚合层的 dead rung 判定靠这两列）", async () => {

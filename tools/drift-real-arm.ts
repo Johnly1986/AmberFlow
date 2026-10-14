@@ -41,8 +41,8 @@ export interface CellVerdict {
   done: boolean; method: string | null; conf: number | null; stop: string | null;
 }
 
-/** 逐格跑一次（真模型在位由调用方保证）。 */
-export async function runCells(): Promise<CellVerdict[]> {
+/** 逐格跑一次（真模型在位由调用方保证）。`adjudicate` = A2′ 臂：非破坏性步放开模型、事后信号裁决。 */
+export async function runCells(adjudicate = false): Promise<CellVerdict[]> {
   const out: CellVerdict[] = [];
   for (const [file, hint, label] of CELLS) {
     const mw = new BrowserMiddleware({ maxSteps: 3, confirmFn: () => true });
@@ -50,6 +50,8 @@ export async function runCells(): Promise<CellVerdict[]> {
       slots: {}, targetHint: hint,
       goalSignalFn: async (p) => checkSignal(p as never, { url_contains: "saved.html" }),
       verbose: false,
+      // A2′：这些夹具步都是"点一个保存按钮"，非破坏性（重复点只是再导航），声明可逆。
+      ...(adjudicate ? { adjudicate: true, effect: { irreversible: false } } : {}),
     });
     const s = (report.steps[0] ?? {}) as Record<string, unknown>;
     out.push({
@@ -78,15 +80,17 @@ export function compareVerdicts(
   return problems;
 }
 
-function artifactDoc(cells: CellVerdict[]): string {
-  const recovered = cells.filter((c) => c.done).length;
+function artifactDoc(plain: CellVerdict[], adjudicated: CellVerdict[]): string {
+  const rec = (cs: CellVerdict[]) => `${cs.filter((c) => c.done).length}/${cs.length}`;
   return JSON.stringify({
     generated_by: "tools/drift-real-arm.ts",
-    note: "漂移族真模型臂的冻结结论。--check 逐格比 done（不比 conf/timing）；"
-      + "某格变绿 = W4′ 落地了，必须 --write 刷新并同步 tests/drift-real-arm.test.ts 的期望。",
+    note: "漂移族真模型臂的冻结结论，两条：plain=今天（低置信即阻塞），adjudicated=A2′（非破坏性步放开模型、事后信号裁决）。"
+      + "--check 逐格比 done（不比 conf/timing）；某格变绿 = 机制真的兜回了东西，必须 --write 刷新并同步 tests/drift-real-arm.test.ts 的期望。",
     model: "真 ONNX 决策模型（换 checkpoint 要重跑 --write）",
-    recovered: `${recovered}/${cells.length}`,
-    cells,
+    recovered: rec(plain),
+    recovered_adjudicated: rec(adjudicated),
+    cells: plain,
+    cells_adjudicated: adjudicated,
   }, null, 2) + "\n";
 }
 
@@ -104,23 +108,29 @@ async function main(): Promise<number> {
     return 2;
   }
   installLayaRuntime(createLayaOnnxRuntime());
-  const cells = await runCells();
-  const recovered = cells.filter((c) => c.done).length;
-  for (const c of cells) {
-    console.log(`${c.label}  ->  ${c.done ? "绿" : "红"}`
-      + `  [${c.done ? `method=${c.method} conf=${c.conf}` : `stop=${String(c.stop ?? "").slice(0, 52)}`}]`);
+  const cells = await runCells(false);
+  const adjudicated = await runCells(true);
+  const rec = (cs: CellVerdict[]) => cs.filter((c) => c.done).length;
+  console.log("漂移族红格 · 两条臂（真模型）：");
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i]!, adj = adjudicated[i]!;
+    console.log(`  ${c.label}  plain=${c.done ? "绿" : "红"}  A2′=${adj.done ? "绿" : "红"}`
+      + `  [A2′ method=${adj.method ?? "-"}]`);
   }
-  console.log(`\n恢复率（真模型臂，漂移族红格）：${recovered}/${cells.length}`);
+  console.log(`\n恢复率：plain ${rec(cells)}/${cells.length} ｜ A2′（裁决） ${rec(adjudicated)}/${adjudicated.length}`);
 
   if (has("--write")) {
-    fs.writeFileSync(ARTIFACT, artifactDoc(cells));
+    fs.writeFileSync(ARTIFACT, artifactDoc(cells, adjudicated));
     console.log(`写出 ${ARTIFACT}`);
     return 0;
   }
   if (has("--check")) {
     if (!fs.existsSync(ARTIFACT)) { console.error(`产物不存在：${ARTIFACT}（先 --write）`); return 1; }
-    const recorded = (JSON.parse(fs.readFileSync(ARTIFACT, "utf-8")) as { cells: CellVerdict[] }).cells;
-    const problems = compareVerdicts(recorded, cells);
+    const doc = JSON.parse(fs.readFileSync(ARTIFACT, "utf-8")) as
+      { cells: CellVerdict[]; cells_adjudicated?: CellVerdict[] };
+    const problems = compareVerdicts(doc.cells, cells);
+    if (doc.cells_adjudicated) problems.push(...compareVerdicts(doc.cells_adjudicated, adjudicated));
+    else problems.push("产物还没有 A2′ 臂（--write 刷新一次）");
     if (problems.length) { console.error("漂移：\n" + problems.join("\n")); return 1; }
     console.log(`与已入库产物一致：${ARTIFACT}`);
     return 0;

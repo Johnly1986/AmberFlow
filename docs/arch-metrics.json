@@ -57,14 +57,14 @@
     "tier": "on（/tmp/laya_dec.onnx 在位）",
     "real_model_corpus": {
       "stats": {
-        "apps": 17,
-        "trace_steps": 201,
-        "choice_asks": 5,
+        "apps": 2,
+        "trace_steps": 5,
+        "choice_asks": 0,
         "passed": 0,
         "reobserve": 0,
         "escalate": 0,
-        "rule_match": 201,
-        "secs": 745.8,
+        "rule_match": 5,
+        "secs": 17,
         "tier": "on"
       }
     },
@@ -101,14 +101,15 @@
         "passthrough_right": 3,
         "shortlist_adopted": 18,
         "shortlist_right": 8
-      }
+      },
+      "carried": "沿用上一次的快照（/tmp/model-contribution.json 不在；重跑：npm run model:contribution -- --out /tmp/model-contribution.json）"
     },
     "ladder": {
       "note": "梯级出场以 real_model_corpus 为准；0 表示该级在已验收语料上从未独立决定任何东西（不是『没测』）"
     }
   },
   "tests": {
-    "count": 1138,
+    "count": 1145,
     "source": "--tests（应来自 `npx vitest list | grep -cE \"^(tests|integrations)/\"`；静态数 `it(` 只有 799，不可用）"
   }
 }

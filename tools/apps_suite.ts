@@ -79,6 +79,8 @@ export interface SuiteRow {
   rule_steps: number;
   /** escalate 级决定的步数（LLM 老师点名；没有端点时恒 0，正是要暴露的那种 dead rung）。 */
   escalate: number;
+  /** A2′ 裁决级决定的步数（opt-in：没包声明就是缺席，不是"接了没用"，所以只在 >0 时进账单）。 */
+  adjudicated: number;
   /** 浏览器步里点名了目标的比例（§W2：hint 是承重墙这件事要每天看得见，不是审查时才数）。 */
   hint_hinted: number;
   hint_named: number;
@@ -153,6 +155,7 @@ export async function runOne(
       ? { note: refusalLine("dangerous") } : {}),
     model_asks: d.model_asks,
     rule_steps: d.ladder?.rule ?? 0, escalate: d.ladder?.escalate ?? 0,
+    adjudicated: d.ladder?.adjudicated ?? 0,
     hint_hinted: hints.hinted, hint_named: hints.named, hint_browser: hints.browser,
     ...(res.risk_degraded ? { risk_degraded: String(res.risk_degraded) } : {}),
     model_steps: d.model_steps,
@@ -239,7 +242,7 @@ export async function suite(
           rows.push({
             app: name, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
             status: "failed", secs: 0, note: `加载失败：${msg}`,
-            model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, hint_hinted: 0, hint_named: 0, hint_browser: 0,
+            model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, adjudicated: 0, hint_hinted: 0, hint_named: 0, hint_browser: 0,
           });
         }
         continue;
@@ -261,7 +264,7 @@ export async function suite(
       } catch (e) {
         rows.push({
           app: pack.id, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
-          status: "failed", secs: 0, model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, hint_hinted: 0, hint_named: 0, hint_browser: 0,
+          status: "failed", secs: 0, model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, adjudicated: 0, hint_hinted: 0, hint_named: 0, hint_browser: 0,
           note: `运行崩了：${e instanceof Error ? e.message : String(e)}`,
         });
       }
@@ -400,13 +403,17 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // 就是 dead rung——它不是保险，是错觉（会让人以为"有兜底"）。口径：低一级没决定的那一步
   // 才轮得到这一级，所以 trace 里的 method 计数就是它的"独立决定数"，不需要反事实重跑。
   const rungRule = rows.reduce((n, r) => n + (r.rule_steps ?? 0), 0);
-  const rungLaya = modelSteps - rows.reduce((n, r) => n + r.reobserve, 0);
+  const rungAdjudicated = rows.reduce((n, r) => n + (r.adjudicated ?? 0), 0);
+  const rungLaya = modelSteps - rows.reduce((n, r) => n + r.reobserve, 0) - rungAdjudicated;
   const rungEscalate = rows.reduce((n, r) => n + (r.escalate ?? 0), 0);
   const rungs: Array<[string, number]> = [
     // 第二级以前固定叫 "laya"：换 provider 后那是**错的标签**（明明在问 coin-flip，
     // 账单却写 laya 决定 0）。梯级名字跟着 provider 走。
     ["规则/hint", rungRule], [isLaya ? "laya" : provider, rungLaya],
     ["reobserve", rows.reduce((n, r) => n + r.reobserve, 0)], ["escalate", rungEscalate],
+    // A2′ 裁决级：**只在真发生过时进账单**。它是 opt-in 声明，没包用 = 缺席，
+    // 不与"接了却从没救回东西"的 dead rung 混为一谈（R4 教训：没接线 ≠ 没用）。
+    ...(rungAdjudicated ? [["adjudicate(A2′)", rungAdjudicated] as [string, number]] : []),
   ];
   const dead = rungs.filter(([, n]) => n === 0).map(([k]) => k);
   const hintHinted = rows.reduce((n, r) => n + r.hint_hinted, 0);
