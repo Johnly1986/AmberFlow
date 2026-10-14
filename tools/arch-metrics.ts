@@ -216,6 +216,9 @@ interface ModelMetrics {
   harness: {
     judged: number; top1: string; floor025_precision: string; auc_all: number;
     passthrough: string; shortlist: string;
+    /** 源产物（/tmp/model-contribution.json）不在时，这份是**沿用上一次的快照**——标出来，
+     *  免得刷新命令在 /tmp 冷的时候把 15 分钟模型跑的数悄悄清成"未测"、连带打爆图门禁。 */
+    carried?: string;
     numeric: {
       judged: number; top1_pct: number; latin_pct: number; cjk_pct: number; precision025_pct: number;
       auc_all: number; passthrough_auc: number; shortlist_auc: number;
@@ -267,9 +270,18 @@ function readArm(dir: string, want: "on" | "ablate"): ArmResult {
 
 function modelMetrics(): ModelMetrics {
   const mc = readJson("/tmp/model-contribution.json") as { summary?: Record<string, any> } | null;
-  let harness: ModelMetrics["harness"] = {
-    note: "未测：跑 `npm run model:contribution -- --out /tmp/model-contribution.json`（真模型，约 15 分钟）",
-  };
+  // 源产物不在时**沿用上一次的 harness 快照**（而不是清成"未测"）：harness 是一次 15 分钟
+  // 真模型跑的冻结数，`npm run metrics` 不重跑它；把它清空会让依赖这些字段的架构图
+  // 在 /tmp 冷的时候无法生成（实测踩过：刷新一次 metrics，v1/v2 图门禁同时红）。
+  // 只有从没有过快照（committed 里也没有完整 harness）才落"未测"。
+  const committed = readJson(path.join(REPO, "docs", "arch-metrics.json")) as
+    { model?: { harness?: ModelMetrics["harness"] } } | null;
+  const carriedHarness = committed?.model?.harness && "numeric" in committed.model.harness
+    ? { ...committed.model.harness,
+        carried: "沿用上一次的快照（/tmp/model-contribution.json 不在；重跑：npm run model:contribution -- --out /tmp/model-contribution.json）" }
+    : null;
+  let harness: ModelMetrics["harness"] = carriedHarness
+    ?? { note: "未测：跑 `npm run model:contribution -- --out /tmp/model-contribution.json`（真模型，约 15 分钟）" };
   if (mc?.summary) {
     const s = mc.summary as Record<string, any>;
     const pt = s.by_question_shape.passthrough_pool_le_8;
@@ -308,6 +320,12 @@ function modelMetrics(): ModelMetrics {
 }
 
 
+// 已入库的快照：`--tests`/model-contribution 缺席时，tests/model 段沿用上一次的值（标 carried），
+// 而不是清成"未测"——否则裸跑 `npm run metrics` 会在 /tmp 冷的时候把架构图依赖的字段抹掉，
+// 让 `--check` 门禁红（2026-10-14 实测踩过：刷新一次 metrics，v1/v2 图同时无法生成）。
+const committedDoc = readJson(path.join(REPO, "docs", "arch-metrics.json")) as
+  { tests?: { count?: number | null } } | null;
+
 const metrics = {
   generated_by: "tools/arch-metrics.ts",
   /** 快照时间：`corpus` 段是仓库算出来的（永远新鲜），`model`/`tests` 是外部产物快照（会过期）。 */
@@ -324,7 +342,9 @@ const metrics = {
   model: modelMetrics(),
   tests: argOf("--tests")
     ? { count: Number(argOf("--tests")), source: "--tests（应来自 `npx vitest list | grep -cE \"^(tests|integrations)/\"`；静态数 `it(` 只有 799，不可用）" }
-    : { count: null, source: "未测：`npx vitest list | grep -cE \"^(tests|integrations)/\"`（静态数不出参数化用例）" },
+    : committedDoc?.tests?.count != null
+      ? { count: committedDoc.tests.count, source: "沿用上一次的快照（未给 --tests；重算：`npx vitest list | grep -cE \"^(tests|integrations)/\"` 再 `--tests N`）" }
+      : { count: null, source: "未测：`npx vitest list | grep -cE \"^(tests|integrations)/\"`（静态数不出参数化用例）" },
 };
 
 const OUT = argOf("--out") ?? path.join(REPO, "docs", "arch-metrics.json");

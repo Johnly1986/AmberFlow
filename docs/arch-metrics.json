@@ -108,7 +108,7 @@
     }
   },
   "tests": {
-    "count": 1132,
+    "count": 1138,
     "source": "--tests（应来自 `npx vitest list | grep -cE \"^(tests|integrations)/\"`；静态数 `it(` 只有 799，不可用）"
   }
 }

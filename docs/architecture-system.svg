@@ -177,7 +177,7 @@
 <text x="58" y="970" class="lay">⑦ 验收层 — 结论必须能被命令复现（跳过 ≠ 通过）</text>
 <rect x="60" y="980" width="276" height="60" class="bxe"/>
 <text x="71" y="999" class="t" font-size="12.5">npm run verify</text>
-<text x="71" y="1015" class="s">typecheck + 1132 条测试 + 六层对拍</text>
+<text x="71" y="1015" class="s">typecheck + 1138 条测试 + 六层对拍</text>
 <rect x="346" y="980" width="276" height="60" class="bxe"/>
 <text x="357" y="999" class="t" font-size="12.5">bench/smoke.sh（CI 的绿色唯一定义）</text>
 <text x="357" y="1015" class="s">离线无条件；模型侧缺产物打 SKIP 并跳过</text>
