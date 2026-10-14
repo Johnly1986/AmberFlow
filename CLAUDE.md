@@ -30,7 +30,7 @@ npm run model:fetch -- --from <url|本地路径>       # 决策模型产物通�
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 1068 个测试（仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料）
+npm test                                 # 1132 个测试：仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料（条数单一出处 docs/arch-metrics.json，`npm run metrics` 重算）
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
@@ -696,6 +696,10 @@ These are empirical findings from this codebase's own experiments — preserve t
   `model-artifacts` 单一口径（doctor 与 runtime 曾判得不一致）。
 - **应用落盘移出 checkout**（前提 A）：新产物默认写 `$AMBERFLOW_HOME/apps`（缺省 `~/.amberflow/apps`），
   发现制扫 `[用户目录, 仓库夹具]` 同 id 用户赢；`spec_version` 不认识就响亮拒绝（CI 盖不到用户的包）。
+  **这条纪律必须覆盖每一类落盘产物**：2026-10-14 开箱测试轮实测到缝裂开过一次——pack.json 走两目录，
+  而 v2 `flow.json` 的发现（`semantic-flow` 的 `loadTemplate/listFlowApps/loadSiteProfile`）只扫仓库，
+  plan:flow 的产物因此"落得下、跑不起"。修好后由 `tests/semantic.test.ts` 的"模板发现跨两个根"钉住
+  （用户赢 + 仓库夹具仍可见 + 显式传目录保持单根语义）。"两份实现各扫各的"是本项目反复复发的缺陷形状。
 - **P1 hint 单实现 + 更小提问（门控 `tieredHint`，默认 OFF = 逐字节不变；`tests/rules-tiered.test.ts`）**：
   6 种语法收敛进 `rules.hintMatchImpl`，`hintMatch ≡ firstIfSame(hintCandidates)` 由 20 例差分逐形状钉死；
   ON 时档内歧义向模型只问那几条候选（实测 OFF 问 15、ON 问 3），窄问弃权即回退整池——

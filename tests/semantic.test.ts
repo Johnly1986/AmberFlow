@@ -14,7 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import {
-  compileFlow, flowReportMarkdown, loadSiteProfile, loadTemplate,
+  compileFlow, flowReportMarkdown, listFlowApps, loadSiteProfile, loadTemplate,
   runFlow, validateProfile, validateTemplate,
 } from "../src/semantic-flow.ts";
 import {
@@ -694,5 +694,40 @@ describe("出厂语义模板/档案的不变量（apps/*/flow.json）", () => {
           .toBe(template.steps.length);
       }
     }
+  });
+});
+
+describe("模板发现跨两个根 —— plan:flow 的落点 = runner 的扫面（2026-10-14 开箱测试轮修的缝）", () => {
+  // 缺陷实测：plan:flow 把 v2 模板落进 $AMBERFLOW_HOME/apps（P0 前提 A 的纪律），
+  // 但 semantic-flow 的发现只扫仓库 apps/ —— 生成的模板"落得下、跑不起"。
+  // 修好后的性质：两个根都扫；同 id 用户目录赢；显式传目录仍然只听那一个。
+  it("用户目录的 flow.json 被发现；同 id 用户赢；仓库夹具仍可见", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "af-sem-home-"));
+    const userApps = path.join(home, "apps", "flight-cheapest");
+    fs.mkdirSync(path.join(userApps, "sites"), { recursive: true });
+    const repoApps = path.join(fileURLToPath(new URL("..", import.meta.url)), "apps");
+    const t = JSON.parse(fs.readFileSync(path.join(repoApps, "flight-cheapest", "flow.json"), "utf-8"));
+    t.label = "USER-DIR-COPY";
+    fs.writeFileSync(path.join(userApps, "flow.json"), JSON.stringify(t));
+    process.env.AMBERFLOW_HOME = home;
+    try {
+      const tpl = loadTemplate("flight-cheapest");
+      expect(tpl.label).toBe("USER-DIR-COPY");
+      expect(tpl._path!.startsWith(home)).toBe(true);
+      const rows = listFlowApps();
+      expect(rows.map(([id]) => id)).not.toContain("oob-not-here-xyz");  // 不存在的不混进来（否定对照）
+      // 用户目录赢之后，仓库独有的另一个模板依然可见（多根，不是替换）。
+      expect(rows.map(([id]) => id)).toContain("flight-cheapest-planned");
+      const seen = rows.filter(([id]) => id === "flight-cheapest");
+      expect(seen.length).toBe(1);                                   // 同 id 只报一次
+    } finally {
+      delete process.env.AMBERFLOW_HOME;
+    }
+  });
+
+  it("显式 appsDir 保持单根语义（测试/工具传目录的既有契约不破）", () => {
+    const repoApps = path.join(fileURLToPath(new URL("..", import.meta.url)), "apps");
+    expect(loadTemplate("flight-cheapest", repoApps)._path!.startsWith(repoApps)).toBe(true);
+    expect(() => loadTemplate("flight-cheapest", "/nonexistent-dir")).toThrow(/searched/);
   });
 });
