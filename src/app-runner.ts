@@ -30,6 +30,8 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { MockAuditor, type TraceStep } from "./audit.ts";
+import { createHintMemory, type HintMemoryLike } from "./hint-memory.ts";
+import { ensureDir, userAppsDir } from "./amberflow-home.ts";
 import { isParseUsageError, renamedHint, usageErrorLine } from "./cli-args.ts";
 import { cliRunDetailed, defaultDates, loadSource, runSource, urlFor, type CliObservation } from "./datasource.ts";
 import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "./decision-cache.ts";
@@ -103,6 +105,15 @@ export interface AppRunOptions {
    * 由 `--tiered-hint` / 桥的 `tiered_hint` 打开，用于线上包 A/B（EXECUTION_LAYER_SPLIT_PLAN §4#1）。
    */
   tieredHint?: boolean;
+  /**
+   * R2（2026-10-14 立项）：**学习环接主链路**——把"模型选对且推进了子目标"的观察
+   * 变成规则（`src/hint-memory.ts` 的既有纪律：authored 恒优先、句柄必须稳定、
+   * 键 =（精确 url, 子目标））。**学到的永不进被审计的包**——它是 sidecar，
+   * 与 plan-cli `--learn-hints` 同一形状；不开这个口时运行器与产物逐字节不变。
+   */
+  hintMemory?: HintMemoryLike | null;
+  /** sidecar 的落点（仅报告用；`--hint-memory FILE` / 默认 `$AMBERFLOW_HOME/hint-memory/<app>.json`）。 */
+  hintMemoryPath?: string | null;
 }
 
 /**
@@ -316,6 +327,11 @@ export interface AppRunResult {
   risk_degraded?: string;
   /** 决策来源汇总（见 `AppDecisions`；LAYA_VALUE_PLAN P1 的"出场率/挽回/缓存"三组数）。 */
   decisions?: AppDecisions;
+  /**
+   * R2：本次开了学习环时的账（sidecar 落点 + 已知/复用/被拒的条数）。
+   * **缺字段 = 没开**——不开时产物逐字节不变（path_visits/effective_policy 的同一条纪律）。
+   */
+  hint_memory?: { path: string | null; entries: number; used: number; rejected: number };
   /** `captureState: true` 时的旅程结束状态（见 `RunOptions.captureState`）。 */
   end_state?: StateView;
 }
@@ -543,6 +559,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     riskAsk: policy.risk_ask.value === "rules-only" ? "rules-only" : "always",
     reobserve: policy.reobserve.value,
     maxEffectiveRepeats: policy.max_effective_repeats.value,
+    // R2：学习环（不开 = null = 今天逐字节；authored hint 恒优先于学到的）。
+    hintMemory: opts.hintMemory ?? null,
     // 批量运行器的默认：风险只记录不阻断；`confirmSafe` 时拒绝破坏性动作。
     confirmFn: confirmSafe
       ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
@@ -701,6 +719,17 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     ...(opts.providerInfo ? { decision_provider: opts.providerInfo } : {}),
     ...(opts.modelStatus !== undefined ? { model_status: opts.modelStatus } : {}),
     decisions: summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0),
+    // R2：学习环的账——只在**开了**的时候写字段（缺省等价纪律，同 path_visits）。
+    // `rejected` 要 cast：接口只承诺 entries/used，它是 HintMemory 实现多给的——
+    // 跨实现注入（测试桩/别的记忆）时不能假设它在。
+    ...(opts.hintMemory ? {
+      hint_memory: {
+        path: opts.hintMemoryPath ?? null,
+        entries: opts.hintMemory.stats?.().entries ?? 0,
+        used: opts.hintMemory.stats?.().used ?? 0,
+        rejected: (opts.hintMemory.stats?.() as { rejected?: number } | undefined)?.rejected ?? 0,
+      },
+    } : {}),
     // 风险头掉线时执行器退回到关键词规则——**这件事必须出现在产物里**，
     // 否则一次"退化的运行"和一次正常的运行会共用同一个绿色。
     ...(mw.riskDegraded ? { risk_degraded: mw.riskDegraded } : {}),
@@ -789,10 +818,20 @@ export function appReportMarkdown(r: AppRunResult): string {
 
 const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--out DIR]
                   [--model ID] [--provider NAME] [--ablate stub|rules-only] [--no-sources] [--confirm-safe]
-                  [--allow-dangerous] [--tiered-hint] [--quiet]
+                  [--allow-dangerous] [--tiered-hint] [--learn-hints | --hint-memory FILE] [--quiet]
 
 按 apps/<app>/pack.json 跑一条完整应用链路：数据腿 → 浏览器步/工具步 → 结束状态不变量
---tiered-hint  P1 实验开关：hint 档内歧义向模型问更小的问题（默认关 = 行为逐字节不变）`;
+--tiered-hint  P1 实验开关：hint 档内歧义向模型问更小的问题（默认关 = 行为逐字节不变）
+--learn-hints  R2 学习环：模型选对的步变成规则（sidecar，永不写进被审计的包；authored 恒优先）
+               落点默认 $AMBERFLOW_HOME/hint-memory/<app>.json，--hint-memory FILE 显式指定`;
+
+/**
+ * app-runner 默认产物目录（**调用时**读 env，测试可隔离——与 apps_suite 的 suiteOutDir 同一纪律）。
+ * matrix 的"学到/复用"列读的就是这里：那是"上一次真跑"的证据，没跑过显示"未跑"。
+ */
+export function appsOutDir(env: NodeJS.ProcessEnv = process.env): string {
+  return env.AMBERFLOW_APPS_OUT ?? path.join(os.tmpdir(), "amberflow-apps");
+}
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
@@ -807,6 +846,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         "no-sources": { type: "boolean" }, "confirm-safe": { type: "boolean" },
         "allow-dangerous": { type: "boolean" },
         "tiered-hint": { type: "boolean" },
+        "learn-hints": { type: "boolean" }, "hint-memory": { type: "string" },
         quiet: { type: "boolean" }, help: { type: "boolean" },
       },
     });
@@ -865,7 +905,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 2;
   }
 
-  const outDir = path.resolve(v.out ?? path.join(os.tmpdir(), "amberflow-apps"));
+  const outDir = path.resolve(v.out ?? appsOutDir());
   // 输出目录建不出来时是**用法错误**，不该把 Node 的 mkdir 栈甩给使用者（`--out /sys/x`）。
   try {
     fs.mkdirSync(outDir, { recursive: true });
@@ -961,6 +1001,28 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     pickAsks = counted.asks;
   }
 
+  // R2：学习环的 sidecar。**学到的永不进被审计的包**（plan-cli `--learn-hints` 的同一条纪律，
+  // 由 tests/plan-cli-hints.test.ts 钉过：包文件逐字节不变，学到的只出现在 sidecar）。
+  // 默认落 `$AMBERFLOW_HOME/hint-memory/<app>.json`（用户作用域，不写 checkout）；
+  // `--hint-memory FILE` 显式指定。都不给 ⇒ null ⇒ 执行器与产物逐字节不变。
+  let hintMemory: HintMemoryLike | null = null;
+  let hintMemoryPath: string | null = null;
+  if (v["learn-hints"] === true || v["hint-memory"]) {
+    hintMemoryPath = v["hint-memory"]
+      ? path.resolve(String(v["hint-memory"]))
+      : path.join(path.dirname(userAppsDir()), "hint-memory", `${pack.id}.json`);
+    try {
+      ensureDir(path.dirname(hintMemoryPath));
+    } catch (e) {
+      console.error(`--hint-memory 落点建不出来：${hintMemoryPath}（${e instanceof Error ? e.message : String(e)}）`);
+      return 2;
+    }
+    hintMemory = createHintMemory({ path: hintMemoryPath });
+    if (!v.quiet) {
+      console.log(`learned hints: ${hintMemory.stats?.().entries ?? 0} known（sidecar ${hintMemoryPath}）`);
+    }
+  }
+
   let result: AppRunResult;
   try {
     result = await runApp(pack, {
@@ -970,6 +1032,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       // §3：只有**显式给了旗标**才算"本次覆盖"；否则留 undefined，让包声明赢。
       // （以前这里恒传一个布尔，等于 CLI 永远压过 pack——报告还会把来源写成 cli，假账。）
       tieredHint: v["tiered-hint"] === true ? true : undefined,
+      hintMemory, hintMemoryPath,
       modelId: v.model ?? pack.model ?? "english",
       modelStatus,
       providerInfo: activeProviderInfo() ?? {
@@ -1003,6 +1066,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (!v.quiet) {
     console.log();
     console.log(appReportMarkdown(result));
+    // R2 的账（plan-cli 同一形状）：known = sidecar 里现存几条；reused = 本次真的按它命中的次数。
+    if (result.hint_memory) {
+      console.log(`learned hints: ${result.hint_memory.entries} known, `
+        + `${result.hint_memory.used} reused this run（sidecar ${result.hint_memory.path}）`);
+    }
     console.log(`写入 ${jsonPath} 与 ${mdPath}`);
   }
   return result.ok ? 0 : 1;

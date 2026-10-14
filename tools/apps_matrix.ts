@@ -15,6 +15,7 @@ import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { appDirs, loadPack, listPacks, packHintCoverage, type AppPack } from "../src/app-pack.ts";
+import { appsOutDir } from "../src/app-runner.ts";
 import { listSources, loadSource } from "../src/datasource.ts";
 import { REPO } from "../src/flow.ts";
 // 运行时两列的出处：**上一次 `apps:suite` 真跑**落下的 `<app>-result.json`（`decisions` 字段）。
@@ -137,6 +138,25 @@ function declaredPolicy(pack: AppPack): string {
   return Object.entries(q).map(([k, v]) => `${k}=${String(v)}`).join(" ");
 }
 
+/**
+ * R2 学习环的账：读**上一次 app-runner 独立运行**产物里的 `hint_memory`
+ * （`AMBERFLOW_APPS_OUT`，缺省 tmpdir/amberflow-apps——suite 的桩臂不学习，所以出处不是套件目录）。
+ * 三种缺席要分开说：没有产物 = "未跑"；有产物但没开 --learn-hints = "未接"；
+ * 开了 = `已知/复用`。绝不把"没证据"印成 0。
+ */
+function learnColumn(app: string): string {
+  const file = path.join(appsOutDir(), `${app}-result.json`);
+  let doc: Record<string, unknown>;
+  try {
+    doc = JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, unknown>;
+  } catch {
+    return "未跑";
+  }
+  const h = doc["hint_memory"] as Record<string, unknown> | undefined;
+  if (!h) return "未接";
+  return `${Number(h.entries ?? 0)}/${Number(h.used ?? 0)}`;
+}
+
 function hintCoverageOf(pack: AppPack): string {
   const c = packHintCoverage(pack);
   if (!c.browser) return "-";
@@ -166,6 +186,8 @@ interface Row {
   policy: string;
   /** 浏览器步里点名了目标的比例（§W2：承重墙要每天看得见）。 */
   hintCoverage: string;
+  /** R2 学习环：`已知/复用`（读上次 app-runner 独立跑产物）；"未跑"/"未接" 是缺席，不是 0。 */
+  learn: string;
 }
 
 export function matrix(): {
@@ -197,6 +219,7 @@ export function matrix(): {
       code: appCodeLines(dir, binAcc),
       tokens: declaredTokens(dir),
       policy: declaredPolicy(pack), hintCoverage: hintCoverageOf(pack),
+      learn: learnColumn(pack.id),
       generated: (() => {
         const p2 = pack as {
           generated_from?: { spec?: string; source?: string };
@@ -218,7 +241,7 @@ export function matrix(): {
       app, kind: "sources-only", sources: fs.readdirSync(d).filter((f) => f.endsWith(".json")).length,
       roles: 0, steps: 0, toolSteps: 0, invariants: 0, generated: null,
       modelAsks: null, confMax: null, reobserve: null,
-      policy: "", hintCoverage: "-",          // 只有数据腿的目录：没有旅程，也就没有点名与策略
+      policy: "", hintCoverage: "-", learn: "-",          // 只有数据腿的目录：没有旅程，也就没有点名与策略
       declared: fs.readdirSync(d).filter((f) => f.endsWith(".json"))
         .reduce((n, f) => n + jsonLines(path.join(d, f)), 0),
       code: appCodeLines(path.dirname(d), binAcc), tokens: declaredTokens(path.dirname(d)),
@@ -279,7 +302,7 @@ export function main(argv: string[] = process.argv.slice(2)): number {
     console.log(JSON.stringify({ rows, leaks, debt }, null, 2));
     return leaks.length ? 1 : 0;
   }
-  const head = ["应用", "类型", "数据源", "角色", "步骤", "工具步", "不变量", "声明行", "代码行", "模型咨询", "reobserve", "来源", "声明的标识", "hint覆盖", "policy"];
+  const head = ["应用", "类型", "数据源", "角色", "步骤", "工具步", "不变量", "声明行", "代码行", "模型咨询", "reobserve", "来源", "声明的标识", "hint覆盖", "学到/复用", "policy"];
   // 运行时两列的口径（LAYA_VALUE_PLAN P1）：读上一次 `apps:suite` 的 result.json；
   // "未跑" ≠ 0——前者是没证据，后者是真跑过且规则消化了全部（这是卖点）。
   const fmtModel = (r: Row): string => r.modelAsks === null ? "未跑"
@@ -293,7 +316,7 @@ export function main(argv: string[] = process.argv.slice(2)): number {
         ? `录制:${r.generated.slice("recorded:".length)}`
         : `生成:${r.generated.replace(/^transfer\/specs\//, "").replace(/\.json$/, "").replace(/^src\//, "")}`)
       : "手写",
-    r.tokens.join(",") || "-", r.hintCoverage, r.policy || "-"]);
+    r.tokens.join(",") || "-", r.hintCoverage, r.learn || "-", r.policy || "-"]);
   const widths = head.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
   const line = (cells: string[]): string =>
     cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
@@ -331,6 +354,8 @@ export function main(argv: string[] = process.argv.slice(2)): number {
   console.log("泄漏检查：OK（核心层代码里没有任何应用声明的站点/工具标识）");
   console.log(`模型步/reobserve 两列读的是上一次 \`apps:suite\` 的产物（${suiteOutDir()}）；`
     + `"未跑"=没有证据，0=真跑过且规则消化了全部（model not needed，正是产品主张）`);
+  console.log(`学到/复用 列读的是上一次 **app-runner 独立跑**（带 --learn-hints）的产物（${appsOutDir()}）；`
+    + `"未接"=那次没开学习环——学习环的账不替没发生的事编数（R2）`);
   return 0;
 }
 
