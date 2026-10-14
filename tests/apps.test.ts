@@ -172,11 +172,22 @@ describe("应用包与数据源的位置约定", () => {
 
 /* ------------------------------------------------- 工具步：命令行当动作腿 */
 
+// 每轮测试都新建一个 out 目录跑产物。**必须回收**：以前没有回收，一次开发会话在 /tmp
+// 留下几百个 `amberflow-apps-test-*`（2026-10-14 开箱测试轮实测：仓库外 609 个）。
+// 夹具泄漏是磁盘债，不是"测试绿了"的一部分。
+const madeOutDirs = new Set<string>();
 const freshOut = (tag: string): string => {
   const d = path.join(os.tmpdir(), `amberflow-apps-test-${tag}-${process.pid}-${Date.now()}`);
   fs.mkdirSync(d, { recursive: true });
+  madeOutDirs.add(d);
   return d;
 };
+afterAll(() => {
+  for (const d of madeOutDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* 尽力而为：删不掉不红测试 */ }
+  }
+  madeOutDirs.clear();
+});
 const hasTool = (bin: string): boolean => {
   try {
     execFileSync("sh", ["-c", `command -v ${bin}`], { stdio: "ignore" });

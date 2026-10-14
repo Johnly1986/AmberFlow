@@ -5,18 +5,23 @@
  * checkout is exercised separately in `live.spec.ts`.
  */
 import { Context } from '@deepseek-ai/cordis'
-import { OPTIONS, PACKS, SPAWN_MARKER, proc, stubCheckout, stubDataSource, tmp, FLOW_TEMPLATE } from './stub.ts'
+import { OPTIONS, PACKS, SPAWN_MARKER, proc, stubCheckout, stubDataSource, tmp, FLOW_TEMPLATE, cleanupTmp } from './stub.ts'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import fs from 'node:fs'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import * as Bridge from '@deepseek-ai/dsh-amberflow-bridge'
 import {
   buildEnv, diagnoseFailure, firstLines, flowRunArgs, learnArgs, listApps, parseJsonDocument, planArgs,
   pruneRunDirs, runArgs, runProcess, stripAnsi, summarizeFlow, summarizeLearn, summarizePlan, summarizeRun,
 } from '../src/bridge.ts'
+
+// Every scratch checkout a stub built is removed after each test. The specs create `amberflow-stub-*`
+// scratch repos by design; without this they accumulated — one development session left 1000+ of them
+// in /tmp (counted during the 2026-10-14 out-of-the-box audit). Fixtures that leak are disk debt.
+afterEach(cleanupTmp)
 
 /** An env whose user-scope dir cannot exist: listings see ONLY the stub checkout. */
 const NO_USER_APPS: NodeJS.ProcessEnv = { AMBERFLOW_HOME: '/nonexistent-amberflow-test-home' }
