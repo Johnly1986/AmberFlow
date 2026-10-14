@@ -1,0 +1,35 @@
+{
+  "generated_by": "tools/drift-real-arm.ts",
+  "note": "漂移族真模型臂的冻结结论。--check 逐格比 done（不比 conf/timing）；某格变绿 = W4′ 落地了，必须 --write 刷新并同步 tests/drift-real-arm.test.ts 的期望。",
+  "model": "真 ONNX 决策模型（换 checkpoint 要重跑 --write）",
+  "recovered": "0/3",
+  "cells": [
+    {
+      "file": "d1-renamed-id.html",
+      "hint": "[data-test=save]",
+      "label": "① 改 data-test × 属性句柄",
+      "done": false,
+      "method": null,
+      "conf": null,
+      "stop": "low confidence 0.04 < floor 0.25 on step 1"
+    },
+    {
+      "file": "d5-mobile-dom.html",
+      "hint": "[data-test=save]",
+      "label": "⑤ 手机版 DOM × 属性句柄",
+      "done": false,
+      "method": null,
+      "conf": null,
+      "stop": "low confidence 0.04 < floor 0.25 on step 1"
+    },
+    {
+      "file": "d4-reworded.html",
+      "hint": "保存",
+      "label": "④ 文案改写 × 标签点名",
+      "done": false,
+      "method": null,
+      "conf": null,
+      "stop": "low confidence 0.16 < floor 0.25 on step 1"
+    }
+  ]
+}

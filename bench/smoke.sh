@@ -69,6 +69,11 @@ if [ -f "$ARTIFACT" ] && [ -f "$ARTIFACT.data" ]; then
   # 所以展开日期必须钉住：不然周日绿、周一红（本轮实测）。
   run "3c transfer 用例（spec 驱动，skybook）" \
     env LAYA_TODAY="${LAYA_TODAY:-2026-10-02}" "$NODE" "$STRIP" src/transfer-task.ts --site skybook --quiet --out "$OUT/transfer"
+  # R1（第二次目的审查）：漂移族真模型臂——把"模型能不能兜回声明失效的红格"变成常设账。
+  # --check 逐格比 done 与 bench/drift-real-arm.json（当前冻结 0/3）；某格翻绿会红，
+  # 逼作者显式 --write 刷新 + 改 tests/drift-real-arm.test.ts 的期望，而不是悄悄发生。
+  run "3d 漂移族真模型臂与冻结产物一致（drift-real-arm --check）" \
+    "$NODE" "$STRIP" tools/drift-real-arm.ts --check
 elif [ "${SMOKE_REQUIRE_MODEL:-0}" = "1" ]; then
   echo "FAIL: ONNX 产物缺失（$ARTIFACT / $ARTIFACT.data）但 SMOKE_REQUIRE_MODEL=1"
   echo "      补齐：npm run model:fetch -- --from <url 或本地路径>（SHA256 可钉；见 npm run doctor 的缺件点名）"

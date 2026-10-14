@@ -141,6 +141,17 @@ provider，而两个目的需要不同智能：恢复档的实测最优是零智
 
 ## E. 建议顺序（性价比；每条带验收，不新造尺子）
 
+> **落地状态（2026-10-14 续，项目方裁定 R1/R2 立项后）**：
+> - **R2 已落地**——`app-runner` 接 `--learn-hints`/`--hint-memory FILE`（sidecar 默认
+>   `$AMBERFLOW_HOME/hint-memory/<app>.json`，学到的永不进被审计的包），结果产物加
+>   `hint_memory` 字段（不开 = 逐字节不变），`apps:matrix` 加"学到/复用"列。验收钉在
+>   `tests/app-runner-learn.test.ts`：run1 学、run2 `laya` 出场 0 且零额外前向、包不变、矩阵列 `1/1`。
+> - **R1 已落地**——`tools/drift-real-arm.ts` 产出冻结产物 `bench/drift-real-arm.json`（当前 **0/3**），
+>   `--check` 逐格比 `done`；不跑模型的结论钉在 `tests/drift-real-arm.test.ts`，真跑模型的 `--check`
+>   进 `bench/smoke.sh` 模型侧分支（3d，无产物 SKIP）。某格翻绿会红，逼作者显式 `--write` + 改期望——
+>   W4′ 若立项，这就是它的验收台。
+> - R5（A2′ 收口）、R4（escalate 部署态）、R3（梯级×智能）仍待裁定，未动。
+
 1. **R2**（学习环接主链路 + matrix 列）——模型唯一被测正的价值从侧门转正门。
 2. **R1**（漂移族真模型臂进门禁）——把本轮 0/3 从一次性测量变成常设账；W4′ 若立项，这就是它的验收台。
 3. **R5**（A2′ 收口：立项或降级，二选一，白纸黑字）。
