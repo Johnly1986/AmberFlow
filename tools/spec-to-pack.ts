@@ -20,6 +20,7 @@
  * 这些是"不可约残差"——生成器只搬运，不生成；缺 `invariants` 时会**明着提示**（而不是悄悄给一个空壳）。
  */
 import crypto from "node:crypto";
+import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -456,7 +457,10 @@ export function checkAgainstFlow(entry: { id: string; pack: AppPack }, flow: Flo
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  const { values } = parseArgs({
+  let values;
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  try {
+    ({ values } = parseArgs({
     args: argv,
     options: {
       write: { type: "boolean" }, check: { type: "boolean" }, list: { type: "boolean" },
@@ -464,7 +468,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       today: { type: "string" },
       quiet: { type: "boolean" }, help: { type: "boolean" },
     },
-  });
+  }));
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    console.error(usageErrorLine(err));
+    return 2;
+  }
   if (values.help || (!values.write && !values.check && !values.list)) {
     console.log(`usage: apps-gen [--list] [--check] [--write [--id ID --spec KEY]] [--quiet]
 

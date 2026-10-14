@@ -18,6 +18,7 @@
  * 只录"点一下"和"填一个值"两类动作（其余形状要等动作模型扩展）。
  */
 import crypto from "node:crypto";
+import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -449,7 +450,10 @@ async function connectPage(opts: {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  const { values } = parseArgs({
+  let values;
+  // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  try {
+    ({ values } = parseArgs({
     args: argv,
     options: {
       url: { type: "string" }, goal: { type: "string" }, id: { type: "string" },
@@ -457,7 +461,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       json: { type: "boolean" }, "pack-dir": { type: "string" }, out: { type: "string" },
       headful: { type: "boolean" }, quiet: { type: "boolean" }, help: { type: "boolean" },
     },
-  });
+  }));
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    console.error(usageErrorLine(err));
+    console.error();
+    console.error(USAGE);
+    return 2;
+  }
   if (values.help) { console.log(USAGE); return 0; }
 
   const interactive = Boolean(process.stdin.isTTY) && !values.yes;

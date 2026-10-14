@@ -18,6 +18,7 @@
  * （写回不是终点，验收才是）。归纳出来的不变量带着来源注释（哪次运行、什么状态变化），方便人 review。
  */
 import fs from "node:fs";
+import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -202,13 +203,21 @@ export function existingSignals(pack: AppPack): string[] {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  const { values } = parseArgs({
+  let values;
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  try {
+    ({ values } = parseArgs({
     args: argv,
     options: {
       app: { type: "string" }, write: { type: "boolean" }, json: { type: "boolean" },
       runs: { type: "string" }, quiet: { type: "boolean" }, help: { type: "boolean" },
     },
-  });
+  }));
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    console.error(usageErrorLine(err));
+    return 2;
+  }
   if (values.help || !values.app) {
     console.log(`usage: apps-induce --app <id> [--write] [--json] [--runs N] [--quiet]
 

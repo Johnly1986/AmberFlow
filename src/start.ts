@@ -31,6 +31,7 @@ import { REPO } from "./flow.ts";
 import { induceHint } from "./hint-memory.ts";
 import { LayaNotConfiguredError, installLayaRuntime } from "./model.ts";
 import { checkArtifacts, missingPieces, onnxModelPath, type ModelArtifacts } from "./model-artifacts.ts";
+import { isParseUsageError, usageErrorLine } from "./cli-args.ts";
 import { BUILTIN_LAYA_PROVIDERS, listDecisionProviders } from "./decision-provider.ts";
 import { BASELINE_PROVIDERS, registerBaselines } from "./decision-baselines.ts";
 import { createLayaOnnxRuntime } from "./laya-onnx.ts";
@@ -374,6 +375,15 @@ async function commandJob(
   }
 }
 
+/**
+ * 开箱 demo 的完成判定：只认**子目标状态**，不认二手口径。
+ * 两个方向都错过（2026-10-14 开箱测试轮审查）：`startsWith(String(traces.length))` 不带斜杠
+ * 把 1/2（第二步阻塞）判成绿；带重试时 traces 比子目标数多，会把 2/2 的成功判成红。
+ */
+export function demoSucceeded(rep: { plan: { subgoals: Array<{ status: string }> } }): boolean {
+  return rep.plan.subgoals.length > 0 && rep.plan.subgoals.every((s) => s.status === "done");
+}
+
 async function commandDemo(planPath: string, headless: boolean, io: Io, deps: StartDeps): Promise<number> {
   const plan = demoPlan(planPath);
   const problems = new PlanningRules().problems(plan);
@@ -398,22 +408,36 @@ async function commandDemo(planPath: string, headless: boolean, io: Io, deps: St
   io.out("这份计划全部由「计划点名目标 + DOM 信号」解决，没有用到模型权重。");
   io.out("换成你自己的页面：npm start -- --goal \"<你要做的事>\" --url <页面地址>");
   void headless;
-  return rep.traces.length > 0 && rep.completed.startsWith(String(rep.traces.length)) ? 0 : 1;
+  // 完成与否只认**子目标状态**："N/M" 与 trace 计数都是二手口径——带重试时 traces 会比子目标
+  // 数多，`startsWith(String(traces.length))` 会把绿的判成红；不带斜杠（"1/2" 以 "1" 开头）
+  // 又会把只完成一半的开箱判成绿（2026-10-14 开箱测试轮审查发现的两个方向）。
+  const doneCount = rep.plan.subgoals.filter((s) => s.status === "done").length;
+  return rep.plan.subgoals.length > 0 && doneCount === rep.plan.subgoals.length ? 0 : 1;
 }
 
 export async function main(argv: string[] = process.argv.slice(2), io: Io = defaultIo, deps: StartDeps = {}): Promise<number> {
-  const parsed = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: {
-      goal: { type: "string" }, url: { type: "string" },
-      doctor: { type: "boolean" }, demo: { type: "boolean" },
-      "dry-run": { type: "boolean" }, headful: { type: "boolean" },
-      target: { type: "string" },
-      plan: { type: "string", default: DEFAULT_PLAN_PATH },
-      help: { type: "boolean" },
-    },
-  });
+  // 打错的参数对第一次用 `npm start` 的人最劝退：一行点名 + 完整用法，绝不甩堆栈。
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: argv,
+      allowPositionals: true,
+      options: {
+        goal: { type: "string" }, url: { type: "string" },
+        doctor: { type: "boolean" }, demo: { type: "boolean" },
+        "dry-run": { type: "boolean" }, headful: { type: "boolean" },
+        target: { type: "string" },
+        plan: { type: "string", default: DEFAULT_PLAN_PATH },
+        help: { type: "boolean" },
+      },
+    });
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    io.out(usageErrorLine(err));
+    io.out("");
+    io.out(USAGE);
+    return 2;
+  }
   const v = parsed.values;
   const headless = !v.headful;
 

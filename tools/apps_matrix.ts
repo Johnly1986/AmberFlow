@@ -11,6 +11,7 @@
  *      不是依赖）。任何一处命中就退出码 1，所以它可以直接当 CI 门禁。
  */
 import fs from "node:fs";
+import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { appDirs, loadPack, listPacks, packHintCoverage, type AppPack } from "../src/app-pack.ts";
@@ -264,7 +265,15 @@ export function matrix(): {
 }
 
 export function main(argv: string[] = process.argv.slice(2)): number {
-  const { values } = parseArgs({ args: argv, options: { json: { type: "boolean" } } });
+  let values;
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  try {
+    ({ values } = parseArgs({ args: argv, options: { json: { type: "boolean" } } }));
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    console.error(usageErrorLine(err));
+    return 2;
+  }
   const { rows, leaks, debt, binLines } = matrix();
   if (values.json) {
     console.log(JSON.stringify({ rows, leaks, debt }, null, 2));

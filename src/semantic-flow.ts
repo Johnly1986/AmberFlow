@@ -31,11 +31,13 @@
  *   node --experimental-strip-types src/semantic-flow.ts --app flight-cheapest --site site-b --dry
  */
 import fs from "node:fs";
+import { isParseUsageError, usageErrorLine } from "./cli-args.ts";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { MockAuditor } from "./audit.ts";
 import { APPS_DIR } from "./app-pack.ts";
+import { userAppsDir } from "./amberflow-home.ts";
 import {
   BrowserMiddleware, browserSession, type BrowserSession, type EscalatorLike,
 } from "./executor.ts";
@@ -163,49 +165,74 @@ const isStrList = (v: unknown): v is string[] => Array.isArray(v) && v.every((x)
 
 /* ------------------------------------------------------------------ 加载与校验 */
 
-function templatePath(appId: string, appsDir: string = APPS_DIR): string {
-  return path.join(appsDir, appId, "flow.json");
+/**
+ * v2 模板的发现根，**与 app-pack 同一纪律**（P0 前提 A：新产物落 `$AMBERFLOW_HOME/apps`，
+ * 不写 checkout；发现制扫 [用户目录, 仓库夹具]，同 id 用户赢）。plan-flow / learn 写的正是
+ * 用户目录——发现只看仓库的话，规划出来的模板会"落得下、跑不起"（2026-10-14 开箱测试轮实测：
+ * plan:flow 成功落 ~/.amberflow/apps，`npm run semantic -- --app <它>` 报 not found）。
+ * 显式传目录 = 只扫那里（测试/工具的单根语义不变）。
+ */
+export function flowAppsRoots(appsDir?: string | null): string[] {
+  return appsDir ? [appsDir] : [userAppsDir(), APPS_DIR];
 }
 
-/** 发现有语义模板的应用（apps/<id>/flow.json）。 */
-export function listFlowApps(appsDir: string = APPS_DIR): Array<[string, string, string[]]> {
-  const out: Array<[string, string, string[]]> = [];
-  let names: string[] = [];
-  try {
-    names = fs.readdirSync(appsDir);
-  } catch {
-    return out;
+function templatePath(appId: string, appsDir?: string | null): string {
+  for (const r of flowAppsRoots(appsDir)) {
+    const p = path.join(r, appId, "flow.json");
+    if (fs.existsSync(p)) return p;
   }
-  for (const n of names.sort()) {
-    const p = templatePath(n, appsDir);
-    if (!fs.existsSync(p)) continue;
+  return path.join(flowAppsRoots(appsDir)[0]!, appId, "flow.json");   // 报错用：首个候选
+}
+
+/** 发现有语义模板的应用（<root>/<id>/flow.json，多根、同 id 用户赢）。 */
+export function listFlowApps(appsDir?: string | null): Array<[string, string, string[]]> {
+  const out: Array<[string, string, string[]]> = [];
+  const seen = new Set<string>();
+  for (const root of flowAppsRoots(appsDir)) {
+    let names: string[] = [];
     try {
-      const t = JSON.parse(fs.readFileSync(p, "utf-8")) as FlowTemplate;
-      out.push([String(t.id ?? n), String(t.label ?? ""), Object.keys(t.sites ?? {})]);
-    } catch (e) {
-      out.push([n, `<invalid: ${e instanceof Error ? e.message : String(e)}>`, []]);
+      names = fs.readdirSync(root);
+    } catch {
+      continue;
+    }
+    for (const n of names.sort()) {
+      if (seen.has(n)) continue;                       // 前面的根（用户目录）赢
+      const p = path.join(root, n, "flow.json");
+      if (!fs.existsSync(p)) continue;
+      seen.add(n);
+      try {
+        const t = JSON.parse(fs.readFileSync(p, "utf-8")) as FlowTemplate;
+        out.push([String(t.id ?? n), String(t.label ?? ""), Object.keys(t.sites ?? {})]);
+      } catch (e) {
+        out.push([n, `<invalid: ${e instanceof Error ? e.message : String(e)}>`, []]);
+      }
     }
   }
   return out;
 }
 
-export function loadTemplate(appId: string, appsDir: string = APPS_DIR): FlowTemplate {
+export function loadTemplate(appId: string, appsDir?: string | null): FlowTemplate {
   const p = templatePath(appId, appsDir);
   if (!fs.existsSync(p)) {
-    throw new Error(`semantic template ${JSON.stringify(appId)} not found (no ${p})`);
+    throw new Error(`semantic template ${JSON.stringify(appId)} not found `
+      + `(searched: ${flowAppsRoots(appsDir).map((r) => path.join(r, appId, "flow.json")).join(", ")})`);
   }
   const t = JSON.parse(fs.readFileSync(p, "utf-8")) as FlowTemplate;
   t._path = p;
   return t;
 }
 
-/** 模板自带的 authored 站点档案：`apps/<id>/sites/<site>.profile.json`。 */
-export function loadSiteProfile(appId: string, siteKey: string, appsDir: string = APPS_DIR): SiteProfile {
-  const p = path.join(appsDir, appId, "sites", `${siteKey}.profile.json`);
-  if (!fs.existsSync(p)) return { site: siteKey };
-  const prof = JSON.parse(fs.readFileSync(p, "utf-8")) as SiteProfile;
-  prof._path = p;
-  return prof;
+/** 模板自带的 authored 站点档案：`<root>/<id>/sites/<site>.profile.json`（多根、用户赢）。 */
+export function loadSiteProfile(appId: string, siteKey: string, appsDir?: string | null): SiteProfile {
+  for (const r of flowAppsRoots(appsDir)) {
+    const p = path.join(r, appId, "sites", `${siteKey}.profile.json`);
+    if (fs.existsSync(p)) {
+      const prof = JSON.parse(fs.readFileSync(p, "utf-8")) as SiteProfile;
+      prof._path = p;
+      return prof;
+    }
+  }
+  return { site: siteKey };
 }
 
 function checkTarget(t: unknown, where: string, problems: string[]): void {
@@ -1320,7 +1347,10 @@ const USAGE = `usage: semantic-flow --app ID --site KEY [--laya scripted|unsure|
 "整跑零模型重放"才落盘（--no-verify-backfill 关掉这道门，只用于消融）。`;
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  const parsed = parseArgs({
+  let parsed;
+  // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  try {
+    parsed = parseArgs({
     args: argv, allowPositionals: true,
     options: {
       list: { type: "boolean" }, app: { type: "string" }, site: { type: "string" },
@@ -1332,6 +1362,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       help: { type: "boolean" },
     },
   });
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    console.error(usageErrorLine(err));
+    console.error();
+    console.error(USAGE);
+    return 2;
+  }
   const v = parsed.values;
   if (v.help) { console.log(USAGE); return 0; }
   if (v.list || !v.app || !v.site) {

@@ -30,6 +30,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { MockAuditor, type TraceStep } from "./audit.ts";
+import { isParseUsageError, renamedHint, usageErrorLine } from "./cli-args.ts";
 import { cliRunDetailed, defaultDates, loadSource, runSource, urlFor, type CliObservation } from "./datasource.ts";
 import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "./decision-cache.ts";
 import { checkArtifacts, missingPieces, modelConfigError } from "./model-artifacts.ts";
@@ -794,18 +795,31 @@ const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [-
 --tiered-hint  P1 实验开关：hint 档内歧义向模型问更小的问题（默认关 = 行为逐字节不变）`;
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  const parsed = parseArgs({
-    args: argv, allowPositionals: true,
-    options: {
-      list: { type: "boolean" }, app: { type: "string" }, dry: { type: "boolean" },
-      slot: { type: "string", multiple: true }, out: { type: "string" },
-      model: { type: "string" }, ablate: { type: "string" }, provider: { type: "string" },
-      "no-sources": { type: "boolean" }, "confirm-safe": { type: "boolean" },
-      "allow-dangerous": { type: "boolean" },
-      "tiered-hint": { type: "boolean" },
-      quiet: { type: "boolean" }, help: { type: "boolean" },
-    },
-  });
+  // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: argv, allowPositionals: true,
+      options: {
+        list: { type: "boolean" }, app: { type: "string" }, dry: { type: "boolean" },
+        slot: { type: "string", multiple: true }, out: { type: "string" },
+        model: { type: "string" }, ablate: { type: "string" }, provider: { type: "string" },
+        "no-sources": { type: "boolean" }, "confirm-safe": { type: "boolean" },
+        "allow-dangerous": { type: "boolean" },
+        "tiered-hint": { type: "boolean" },
+        quiet: { type: "boolean" }, help: { type: "boolean" },
+      },
+    });
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    const line = usageErrorLine(err);
+    console.error(line);
+    const hint = renamedHint(line);        // 旧调用方（升级窗口的旧桥）要知道新写法
+    if (hint) console.error(hint);
+    console.error();
+    console.error(USAGE);
+    return 2;
+  }
   const v = parsed.values;
   if (v.help) { console.log(USAGE); return 0; }
   if (v.list || !v.app) {

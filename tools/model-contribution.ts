@@ -26,6 +26,7 @@
  *   - 这个工具**不执行动作**，只问"选哪个"，所以它不改变任何页面。
  */
 import fs from "node:fs";
+import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -73,7 +74,10 @@ function hanRatio(text: string): number {
 const oneLine = (el: Elem): string => `${el.tag} "${el.label}"${el.id ? ` #${el.id}` : ""}${el.data_test ? ` [${el.data_test}]` : ""}`;
 
 async function main(argv: string[]): Promise<number> {
-  const { values } = parseArgs({
+  let values;
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  try {
+    ({ values } = parseArgs({
     args: argv,
     options: {
       apps: { type: "string" },          // 逗号分隔；默认全部有浏览器步的包
@@ -82,7 +86,12 @@ async function main(argv: string[]): Promise<number> {
       limit: { type: "string" },
       quiet: { type: "boolean", default: false },
     },
-  });
+  }));
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    console.error(usageErrorLine(err));
+    return 2;
+  }
 
   const art = checkArtifacts();
   if (!art.ready) {

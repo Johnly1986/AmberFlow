@@ -12,6 +12,7 @@
  * too, in the prototype chain.
  */
 import fs from "node:fs";
+import { isParseUsageError, usageErrorLine } from "./cli-args.ts";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -182,7 +183,10 @@ export interface BenchMainDeps {
 }
 
 export async function main(argv: string[] = process.argv.slice(2), deps: BenchMainDeps = {}): Promise<number> {
-  const parsed = parseArgs({
+  let parsed;
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  try {
+    parsed = parseArgs({
     args: argv,
     allowPositionals: true,
     options: {
@@ -208,6 +212,11 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
       "force-hints": { type: "string" },
     },
   });
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    console.error(usageErrorLine(err));
+    return 2;
+  }
   const v = parsed.values;
   const casesPath = v.cases ? path.resolve(v.cases) : path.join(REPO, "bench", "cases.json");
   const outdir = path.resolve(v.out ?? path.join(REPO, "bench", "results"));

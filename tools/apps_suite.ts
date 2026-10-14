@@ -23,6 +23,7 @@
  * 显示"未跑"，绝不编数。
  */
 import path from "node:path";
+import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
 import fs from "node:fs";
 import { parseArgs } from "node:util";
 import { appDirs, loadPack, packHintCoverage, type AppPack } from "../src/app-pack.ts";
@@ -278,14 +279,22 @@ export async function suite(
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  const { values } = parseArgs({
+  let values;
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  try {
+    ({ values } = parseArgs({
     args: argv,
     options: {
       only: { type: "string" }, json: { type: "boolean" },
       ablate: { type: "boolean" }, provider: { type: "string" },
       help: { type: "boolean" }, verbose: { type: "boolean" },
     },
-  });
+  }));
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    console.error(usageErrorLine(err));
+    return 2;
+  }
   if (values.help) {
     console.log("usage: apps-suite [--only id,id] [--json] [--verbose] [--real-model]\n\n"
       + "一条命令跑完所有旅程型应用的验收（离线口径）\n\n"

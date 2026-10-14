@@ -23,6 +23,7 @@
  * 流式下载不吞内存。
  */
 import crypto from "node:crypto";
+import { isParseUsageError, usageErrorLine } from "./cli-args.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -149,7 +150,10 @@ export const USAGE = `npm run model:fetch — 决策模型产物的安装通道�
 export async function main(
   argv: string[] = process.argv.slice(2), io: FetchIo = defaultIo, deps: FetchDeps = {},
 ): Promise<number> {
-  const parsed = parseArgs({
+  let parsed;
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  try {
+    parsed = parseArgs({
     args: argv, allowPositionals: false,
     options: {
       from: { type: "string" }, out: { type: "string" },
@@ -158,6 +162,11 @@ export async function main(
       tokenizer: { type: "string" }, force: { type: "boolean" }, help: { type: "boolean" },
     },
   });
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    console.error(usageErrorLine(err));
+    return 2;
+  }
   const v = parsed.values;
   if (v.help || !v.from) {
     io.out(USAGE);

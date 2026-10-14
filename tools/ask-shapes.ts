@@ -21,6 +21,7 @@
  * 所以 `--repeat` 的默认值是 3，输出**每一次**的结果与汇总，不写"平均分"。
  */
 import { parseArgs } from "node:util";
+import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
 import { chromium, type Page } from "playwright";
 import * as browserEnv from "../src/browser-env.ts";
 import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/executor.ts";
@@ -39,7 +40,10 @@ const isRight = (el: Elem | undefined, expect: string | null): boolean | null =>
 };
 
 async function main(argv: string[]): Promise<number> {
-  const { values } = parseArgs({
+  let values;
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  try {
+    ({ values } = parseArgs({
     args: argv,
     options: {
       url: { type: "string" },
@@ -49,7 +53,12 @@ async function main(argv: string[]): Promise<number> {
       repeat: { type: "string", default: "3" },
       headful: { type: "boolean", default: false },
     },
-  });
+  }));
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    console.error(usageErrorLine(err));
+    return 2;
+  }
   if (!values.url || !values.goal) {
     console.error("用法：ask-shapes.ts --url <页面> --goal <这一步的目标> [--hint <hint>] [--expect <子串>] [--repeat 3]");
     return 2;

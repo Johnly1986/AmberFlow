@@ -24,6 +24,7 @@
  *     --app flight-cheapest-planned --site site-b --yes
  */
 import fs from "node:fs";
+import { isParseUsageError, usageErrorLine } from "./cli-args.ts";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -901,7 +902,10 @@ export function siteKeyFor(seed: string): string {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  const parsed = parseArgs({
+  let parsed;
+  // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  try {
+    parsed = parseArgs({
     args: argv, allowPositionals: true,
     options: {
       goal: { type: "string" }, seed: { type: "string" }, app: { type: "string" },
@@ -911,6 +915,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       json: { type: "boolean" }, quiet: { type: "boolean" }, help: { type: "boolean" },
     },
   });
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    console.error(usageErrorLine(err));
+    console.error();
+    console.error(USAGE);
+    return 2;
+  }
   const v = parsed.values;
   if (v.help) { console.log(USAGE); return 0; }
   if (!v.goal || !v.seed || !v.app) { console.error(USAGE); return 2; }

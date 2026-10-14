@@ -23,6 +23,7 @@ import { browserSession, BrowserMiddleware } from "./executor.ts";
 import { extractElements } from "./extraction.ts";
 import { getAuditor, type AuditVerdict } from "./audit.ts";
 import { createHintMemory, type HintMemoryLike } from "./hint-memory.ts";
+import { isParseUsageError, usageErrorLine } from "./cli-args.ts";
 
 export const DEFAULT_FILE = ".task_plan.json";
 
@@ -265,64 +266,105 @@ export async function main(argv: string[] = process.argv.slice(2), io: CliIO = d
     io.out(USAGE);
     return cmd ? 0 : 1;
   }
-  const parsed = parseArgs({
-    args: rest,
-    allowPositionals: true,
-    options: {
-      file: { type: "string" }, max: { type: "string" },
-      llm: { type: "boolean" }, url: { type: "string" }, hint: { type: "string" },
-      desc: { type: "string" }, signal: { type: "string" },
-      confirm: { type: "string" }, reset: { type: "boolean" }, replan: { type: "boolean" },
-      "hint-memory": { type: "string" }, "learn-hints": { type: "boolean" },
-    },
-  });
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: rest,
+      allowPositionals: true,
+      options: {
+        file: { type: "string" }, max: { type: "string" },
+        llm: { type: "boolean" }, url: { type: "string" }, hint: { type: "string" },
+        desc: { type: "string" }, signal: { type: "string" },
+        confirm: { type: "string" }, reset: { type: "boolean" }, replan: { type: "boolean" },
+        "hint-memory": { type: "string" }, "learn-hints": { type: "boolean" },
+      },
+    });
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    io.out(usageErrorLine(err)); io.out(""); io.out(USAGE);
+    return 2;
+  }
   const file = parsed.values.file ?? DEFAULT_FILE;
   const max = Number(parsed.values.max ?? 8);
   const pos = parsed.positionals;
 
-  switch (cmd) {
-    case "new":
-      await cmdNew({ goal: pos[0] ?? "", file, llm: Boolean(parsed.values.llm),
-                     url: parsed.values.url ?? null, max }, io);
-      return 0;
-    case "show":
-      cmdShow(file, io);
-      return 0;
-    case "add":
-      cmdAdd(file, Number(pos[0]), pos[1] ?? "", String(parsed.values.signal ?? ""),
-             parsed.values.url ?? null, parsed.values.hint ?? null, io);
-      return 0;
-    case "edit":
-      cmdEdit(file, Number(pos[0]), {
-        desc: parsed.values.desc, signal: parsed.values.signal,
-        url: parsed.values.url, hint: parsed.values.hint,
-      }, io);
-      return 0;
-    case "del":
-      cmdDel(file, Number(pos[0]), io);
-      return 0;
-    case "move":
-      cmdMove(file, Number(pos[0]), Number(pos[1]), io);
-      return 0;
-    case "check":
-      return cmdCheck(file, max, io) ? 0 : 1;
-    case "reset":
-      cmdReset(file, io);
-      return 0;
-    case "run": {
-      const learn = Boolean(parsed.values["learn-hints"]);
-      const outcome = await cmdRun({
-        file, max, reset: Boolean(parsed.values.reset),
-        confirm: (parsed.values.confirm ?? "ask") as RunArgs["confirm"],
-        replan: Boolean(parsed.values.replan),
-        // --learn-hints keeps the memory NEXT TO the plan (a sidecar), never inside it
-        hintMemory: (parsed.values["hint-memory"] as string | undefined)
-          ?? (learn ? `${file}.hints.json` : null),
-      }, io);
-      return outcome.exitCode;
+  // 索引必须是整数：`add x` 以前会 insert(NaN) —— 打错的参数**污染计划文件**比报错更糟。
+  const index = (raw: string | undefined, which: string): number | null => {
+    const n = Number(raw);
+    if (raw === undefined || !Number.isInteger(n) || n < 0) {
+      io.out(`参数用法不对：${which} 需要非负整数（收到 '${raw ?? "（缺）"}'）；计划文件未改动。`);
+      return null;
     }
-    default:
-      io.out(`unknown command '${cmd}'\n\n${USAGE}`);
+    return n;
+  };
+
+  try {
+    switch (cmd) {
+      case "new":
+        await cmdNew({ goal: pos[0] ?? "", file, llm: Boolean(parsed.values.llm),
+                      url: parsed.values.url ?? null, max }, io);
+        return 0;
+      case "show":
+        cmdShow(file, io);
+        return 0;
+      case "add": {
+        const i = index(pos[0], "add IDX");
+        if (i === null) return 2;
+        cmdAdd(file, i, pos[1] ?? "", String(parsed.values.signal ?? ""),
+               parsed.values.url ?? null, parsed.values.hint ?? null, io);
+        return 0;
+      }
+      case "edit": {
+        const i = index(pos[0], "edit IDX");
+        if (i === null) return 2;
+        cmdEdit(file, i, {
+          desc: parsed.values.desc, signal: parsed.values.signal,
+          url: parsed.values.url, hint: parsed.values.hint,
+        }, io);
+        return 0;
+      }
+      case "del": {
+        const i = index(pos[0], "del IDX");
+        if (i === null) return 2;
+        cmdDel(file, i, io);
+        return 0;
+      }
+      case "move": {
+        const from = index(pos[0], "move IDX");
+        const to = index(pos[1], "move TO");
+        if (from === null || to === null) return 2;
+        cmdMove(file, from, to, io);
+        return 0;
+      }
+      case "check":
+        return cmdCheck(file, max, io) ? 0 : 1;
+      case "reset":
+        cmdReset(file, io);
+        return 0;
+      case "run": {
+        const learn = Boolean(parsed.values["learn-hints"]);
+        const outcome = await cmdRun({
+          file, max, reset: Boolean(parsed.values.reset),
+          confirm: (parsed.values.confirm ?? "ask") as RunArgs["confirm"],
+          replan: Boolean(parsed.values.replan),
+          // --learn-hints keeps the memory NEXT TO the plan (a sidecar), never inside it
+          hintMemory: (parsed.values["hint-memory"] as string | undefined)
+            ?? (learn ? `${file}.hints.json` : null),
+        }, io);
+        return outcome.exitCode;
+      }
+      default:
+        io.out(`unknown command '${cmd}'\n\n${USAGE}`);
+        return 2;
+    }
+  } catch (err) {
+    // 三类**已知**的"你给错了"消息（信号语法 / 没有计划 / --llm 缺 env）：一行点名，
+    // 不甩堆栈；其余异常是真 bug，原样上抛（吞掉它比堆栈更糟——"崩了"必须看得见）。
+    const m = (err as Error)?.message ?? "";
+    if (/unknown signal op|needs 'selector\|value'|^no plan at |--llm needs/.test(m)) {
+      io.out(`参数用法不对：${m}`);
       return 2;
+    }
+    throw err;
   }
 }

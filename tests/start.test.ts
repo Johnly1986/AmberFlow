@@ -13,7 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { doctorReport, main, preflight, type Io, type Preflight } from "../src/start.ts";
+import { demoSucceeded, doctorReport, main, preflight, type Io, type Preflight } from "../src/start.ts";
 import type { ModelArtifacts } from "../src/model-artifacts.ts";
 import { BrowserMiddleware } from "../src/executor.ts";
 import { checkSignal } from "../src/signals.ts";
@@ -70,7 +70,39 @@ describe("doctor — say what is ready and what is missing", () => {
   });
 });
 
+describe("demo 完成判定 — 只认子目标状态（2026-10-14 审查修的双向缺陷）", () => {
+  const rep = (statuses: string[], traces: number) => ({
+    plan: { subgoals: statuses.map((status) => ({ status })) },
+    traces: Array.from({ length: traces }, () => ({})),
+  });
+  it("1/2（第二步阻塞）不是绿：旧 startsWith(String(traces.length)) 会判成 0", () => {
+    expect(demoSucceeded(rep(["done", "blocked"], 1) as never)).toBe(false);
+  });
+  it("2/2 但带重试（traces 比子目标多）仍是绿：旧口径会判成红", () => {
+    expect(demoSucceeded(rep(["done", "done"], 4) as never)).toBe(true);
+  });
+  it("空计划不算成功（无子目标 = 没有发生过任何验收）", () => {
+    expect(demoSucceeded(rep([], 0) as never)).toBe(false);
+  });
+  it("skipped 的条件步不自动等于失败？——开箱 demo 没有条件步，状态表按 done 全等判", () => {
+    expect(demoSucceeded(rep(["done", "skipped"], 2) as never)).toBe(false);
+  });
+});
+
 describe("npm start — the bundled job needs no configuration", () => {
+  it("a typo'd flag gets a one-liner + usage and exit 2 — no raw parseArgs stack", async () => {
+    // 实测缺陷（2026-10-14 开箱测试轮）：`npm start -- --out /tmp/x` 直接把
+    // ERR_PARSE_ARGS_UNKNOWN_OPTION 整段堆栈打给第一次用的人。
+    const { io, lines } = recording();
+    const code = await main(["--out", "/tmp/x"], io, { noModel: true });
+    expect(code).toBe(2);
+    const text = lines.join("\n");
+    expect(text).toContain("参数用法不对");
+    expect(text).toContain("--out");
+    expect(text).toContain("npm start —");      // USAGE 跟在后面，给下一步可抄的命令
+    expect(text).not.toMatch(/ at .*\.(ts|js):\d+/);   // 没有堆栈
+  });
+
   it("REALLY works with no model runtime installed (the rules-only promise)", async () => {
     // This is the claim `npm run doctor` makes in rules mode, and the first version of the
     // entry point was false: the executor called getLayaRuntime() during setup and blocked

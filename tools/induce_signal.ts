@@ -12,6 +12,7 @@
  * reported as REVIEW (and `no-signal` means: declare the step `{manual: true}`).
  */
 import path from "node:path";
+import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { chromium } from "playwright";
@@ -62,13 +63,21 @@ async function runOnce(url: string, click: string | null, replays: number): Prom
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  const { values } = parseArgs({
+  let values;
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  try {
+    ({ values } = parseArgs({
     args: argv,
     options: {
       url: { type: "string" }, click: { type: "string" },
       replays: { type: "string" }, json: { type: "boolean" },
     },
-  });
+  }));
+  } catch (err) {
+    if (!isParseUsageError(err)) throw err;
+    console.error(usageErrorLine(err));
+    return 2;
+  }
   const raw = values.url;
   if (!raw) {
     console.error("usage: induce_signal.ts --url <page|url> [--click <hint>] [--replays 2] [--json]");
