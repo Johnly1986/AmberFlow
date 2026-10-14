@@ -28,11 +28,15 @@
 > **规范关系**：六层总览 = **现状**（只画已落地的东西）；目标架构 = **现状 + 裁定 + 下一步**。
 > 未落地的改进意见**不进图**（清单留在 `docs/ARCHITECTURE_IMPROVEMENTS.md`），否则图会变成文档的第二份抄本。
 >
-> **两张图都是生成的**——改模块就改生成器的源；布局不过关（文字出框 / 盒子重叠 / 越出画布）
-> 就**非零退出且一个文件都不写**，两个生成器都支持 `--check`（仓库里那份与生成结果不一致即红，
+> **三张图都是生成的**——改模块就改生成器的源；布局不过关（文字出框 / 盒子重叠 / 越出画布）
+> 就**非零退出且一个文件都不写**，三个生成器都支持 `--check`（仓库里那份与生成结果不一致即红，
 > `tests/arch-diagram.test.ts` 钉住）：
 >
-> - **六层总览**（入口 / 应用数据 / 计划 / 执行 / 模型运行时 / 证据 + 四条红线）：
+> - **系统总览**（七层：入口 / 声明 / 编译与录制 / 计划 / 执行 / 决策 / 验收 + 右栏**外部边界**
+>   + 四条红线；数字全部从 `docs/arch-metrics.json` 插值）：
+>   [docs/architecture-system.png](docs/architecture-system.png)（矢量版 [docs/architecture-system.svg](docs/architecture-system.svg)）
+>   —— `node tools/arch-diagram-system.mjs [--png]`。第一眼看这张。
+> - **六层数据流总览**（入口 / 应用数据 / 计划 / 执行 / 模型运行时 / 证据 + 四条红线）：
 >   [docs/architecture.png](docs/architecture.png)（矢量版 [docs/architecture.svg](docs/architecture.svg)）
 >   —— `node tools/arch-diagram.mjs [--png]`。
 > - **重审后的目标架构**（④ 三段化 = 命令层 / 决策层 / 数据槽层；三档裁定；⑧ 已落地的迁移；

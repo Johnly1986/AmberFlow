@@ -30,7 +30,7 @@ npm run model:fetch -- --from <url|本地路径>       # 决策模型产物通�
 npm ci                                   # Node ≥ 22.6；工具脚本跑在 `node --experimental-strip-types` 下
 npm run verify                           # 一键门禁：typecheck + 全部测试 + 六层跨实现对拍
 bash bench/smoke.sh                      # CI 调用的唯一"绿色"定义（离线部分无条件；模型侧缺产物时打印 SKIP）
-npm test                                 # 1132 个测试：仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料（条数单一出处 docs/arch-metrics.json，`npm run metrics` 重算）
+npm test                                 # 1132 个测试：仓库不变量 / 执行器 / 提取 / 计划 / 用例 / 对拍语料（条数单一出处 docs/arch-metrics.json（口径：`npx vitest list | grep -cE "^(tests|integrations)/"`））
 npm run test:parity                      # 六层跨实现对拍：rules/extraction/executor/datasource/ctrip/transfer
 
 npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹具用例（需 ONNX 产物，走生产执行器循环）
