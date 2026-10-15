@@ -77,6 +77,37 @@ describe("执行器 × 外部 provider 的风险头", () => {
     expect(report.steps[0]?.method).toBe("rule:match");
   }, 120_000);
 
+  it("④ pick 抛错（在线 provider 未配置/掉线）⇒ 声明点名的步照跑，且**根本不碰坏服务**", async () => {
+    // "默认在线 provider 不破坏开箱"的地基：全声明的跑法里，provider 一次都不该被敲。
+    installDecisionProvider(fakeProvider({
+      pick: async () => { throw new Error("缺 API key：设 DASHSCOPE_API_KEY"); },
+    }));
+    const mw = new BrowserMiddleware({ maxSteps: 3 });
+    const report = await mw.run("add the wireless mouse to the cart", PRODUCT, {
+      page: page as unknown as AnyPage, pw: browser as never, verbose: false,
+      targetHint: "button[data-test=add-to-cart]",     // 规则决定选谁：provider 从不被调用
+      goalSignalFn: (p) => checkSignal(p as never, { css_text_contains: ["[data-test='cart-count']", "1"] } as never),
+    });
+    expect(report.done).toBe(true);                     // 声明点名的步照样跑完，没崩
+    expect(report.steps[0]?.method).toBe("rule:match");
+    expect(mw.providerDegraded).toBe("");               // 关键：坏 provider 从头到尾没被敲过一次
+  }, 120_000);
+
+  it("④b 规则决定不了、必须问 provider 时它抛错 ⇒ 优雅降级到 rules-only，如实 block（不崩、不假装完成）", async () => {
+    installDecisionProvider(fakeProvider({
+      pick: async () => { throw new Error("服务不可达"); },
+    }));
+    const mw = new BrowserMiddleware({ maxSteps: 3 });
+    // 目标与信号都对不上任何元素/规则 ⇒ 这一步真需要模型 → provider 被敲 → 抛错 → 降级。
+    const report = await mw.run("click the flux capacitor that does not exist", PRODUCT, {
+      page: page as unknown as AnyPage, pw: browser as never, verbose: false,
+      goalSignalFn: (p) => checkSignal(p as never, { url_contains: "never-on-this-site.html" } as never),
+    });
+    expect(report.done).toBe(false);
+    expect(report.stop_reason).toContain("no model runtime");   // 停因是 rules-only，不是崩溃
+    expect(mw.providerDegraded).toContain("服务不可达");          // 退化原因被记下来，不静默
+  }, 120_000);
+
   it("② 降级时关键词规则仍然拦得住不可逆动作（不许掉线=解锁安全闸门）", async () => {
     installDecisionProvider(fakeProvider({ risk: async () => { throw new Error("down"); } }));
     const asked: string[] = [];

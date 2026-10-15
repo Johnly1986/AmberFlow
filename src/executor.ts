@@ -721,6 +721,8 @@ export class BrowserMiddleware {
   /** No runtime installed: rules/hints only. Set by `ready()` (see RULES-ONLY MODE). */
   rulesOnly = false;
   rulesOnlyReason = "";
+  /** 在线 provider 掉线/没配好 ⇒ pick 抛错，本次降级到 rules-only 的原因（报告要单列，同 risk_degraded）。 */
+  providerDegraded = "";
   /**
    * A CONFIG-class runtime failure (bad artifact path, unreadable weights): unlike
    * "no artifacts configured" (rules-only, legitimate) this is a usage error — the
@@ -1007,9 +1009,20 @@ export class BrowserMiddleware {
     }
     // 视图构造、state 渲染、短名单重问、两支各自的 conf 口径——**全部在适配器里**，
     // 且与替换前的实现逐字段等价（tests/decision-provider.test.ts ①）。
-    const out = await provider.pick({
-      goal, page, elems, forbidden, notes, narrow: null, k: 8,
-    });
+    // **在线 provider 掉线/没配好 ⇒ 优雅降级到 rules-only**（与"本地模型不在位"同一条路）：
+    // 缺 key/缺端点/网络不可达时，不该把整条计划崩掉，也不该每步再敲一次坏服务——
+    // 声明点名的步照跑，需要选目标的步按 rules-only 如实 block。这是"默认在线 provider"
+    // 不破坏开箱（无 key 也能跑声明）的地基。风险头那边早就这么降级（isRisky 的 catch）；
+    // pick 这边补齐，两条兜底档对"服务不可用"的反应一致。
+    let out;
+    try {
+      out = await provider.pick({ goal, page, elems, forbidden, notes, narrow: null, k: 8 });
+    } catch (err) {
+      this.rulesOnly = true;
+      this.rulesOnlyReason = (err as Error).message;
+      this.providerDegraded = (err as Error).message;
+      return { ref: null, conf: 0.0, probs: {}, passthrough: true };
+    }
     return { ref: out.ref as string | null, conf: out.score, probs: out.probs, passthrough: out.passthrough };
   }
 

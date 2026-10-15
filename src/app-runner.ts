@@ -333,6 +333,8 @@ export interface AppRunResult {
    * 缺字段 = 没退化过。见 `src/executor.ts` 的 `riskDegraded`。
    */
   risk_degraded?: string;
+  /** 在线 provider 掉线/没配好 ⇒ 本次降级到 rules-only 的原因。缺字段 = 没降级。 */
+  provider_degraded?: string;
   /** 决策来源汇总（见 `AppDecisions`；LAYA_VALUE_PLAN P1 的"出场率/挽回/缓存"三组数）。 */
   decisions?: AppDecisions;
   /**
@@ -741,6 +743,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     // 风险头掉线时执行器退回到关键词规则——**这件事必须出现在产物里**，
     // 否则一次"退化的运行"和一次正常的运行会共用同一个绿色。
     ...(mw.riskDegraded ? { risk_degraded: mw.riskDegraded } : {}),
+    // 在线 provider 掉线/没配好 ⇒ 本次跑降级到 rules-only——同样必须出现在产物里（同 risk_degraded）。
+    ...(mw.providerDegraded ? { provider_degraded: mw.providerDegraded } : {}),
     sources: sourceResults, ok, secs: Math.round((Date.now() - t0) / 100) / 10,
   };
 }
@@ -792,6 +796,10 @@ export function appReportMarkdown(r: AppRunResult): string {
       if (r.risk_degraded) {
         L.push("", `- ⚠ **风险判定已退化**：${r.risk_degraded}`
           + `（本次只用关键词规则代替模型投票——这**不是**一次正常的风险闸门运行）`);
+      }
+      if (r.provider_degraded) {
+        L.push("", `- ⚠ **决策服务已退化到规则模式**：${r.provider_degraded}`
+          + `（provider 不可用/未配置——声明点名的步照跑，需要选目标的步按 rules-only 如实 block）`);
       }
       L.push("", `**决策来源**：${r.decisions.line}`
         + ` ｜ 模型出场 ${r.decisions.model_steps}/${r.decisions.total_steps} 步`
