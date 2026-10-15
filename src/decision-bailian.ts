@@ -68,6 +68,15 @@ export function bailianProvider(opts: BailianOptions = {}): DecisionProvider {
       }
       return key;
     },
+    // 解析期判定（不抛）：缺 key 或缺端点各给一句指路。供 resolveProviderSpec 区分显式/默认。
+    configError() {
+      const key = (opts.apiKey ?? env.DASHSCOPE_API_KEY ?? env.BAILIAN_API_KEY ?? "").trim();
+      const hasEndpoint = !!(opts.endpoint || env.BAILIAN_ENDPOINT || opts.workspaceId || env.BAILIAN_WORKSPACE_ID);
+      const missing: string[] = [];
+      if (!key) missing.push("API key（DASHSCOPE_API_KEY）");
+      if (!hasEndpoint) missing.push("端点（BAILIAN_ENDPOINT 或 BAILIAN_WORKSPACE_ID）");
+      return missing.length ? `缺 ${missing.join(" 与 ")}。` : null;
+    },
     extraBody: () => ({ model }),
     minOptions: 1,
     validateChoiceInPool: true,

@@ -94,6 +94,13 @@ export interface DecisionProvider extends ProviderInfo {
   risk?(goal: string, actionDesc: string): Promise<number>;
   /** `capabilities.done` 为真时才会被调用。永远只是参考（红线③）。 */
   doneVote?(goal: string, state: ModelState): Promise<number>;
+  /**
+   * 这个服务是否**已配置到可用**（缺凭据/端点等）。返回一句指路串 = 未配置；返回 null = 就绪。
+   * 解析时（`resolveProviderSpec`）用它区分：显式点名却没配 ⇒ 响亮报错；
+   * 环境默认却没配 ⇒ 干净落到 rules-only（不装一个每步都抛的 provider）。
+   * 不实现 = 视为已配置（本地基线、有默认端点的服务）。
+   */
+  configError?(): string | null;
   /** 释放权重/连接。可选。 */
   close?(): void | Promise<void>;
 }
@@ -235,7 +242,11 @@ export async function resolveProviderSpec(
   const extra = listDecisionProviders().filter(
     (n) => !(BASELINE_PROVIDERS as readonly string[]).includes(n)
       && !(BUILTIN_LAYA_PROVIDERS as readonly string[]).includes(n));
-  const wanted = name ?? env.AMBERFLOW_DECISION_PROVIDER ?? "laya-onnx";
+  // 环境默认档（可配置；Stage 3 会把缺省从 "laya-onnx" 翻成在线 provider）。
+  const DEFAULT = env.AMBERFLOW_DEFAULT_DECISION_PROVIDER ?? "laya-onnx";
+  // "显式" = 调用方传了名字，或设了 AMBERFLOW_DECISION_PROVIDER；两者都没有 = 用环境默认档。
+  const explicit = name != null || env.AMBERFLOW_DECISION_PROVIDER != null;
+  const wanted = name ?? env.AMBERFLOW_DECISION_PROVIDER ?? DEFAULT;
   if (wanted === "none") {
     return { kind: "none", name: "none", tier: "off(ablation:rules-only)", ablation: true };
   }
@@ -262,6 +273,14 @@ export async function resolveProviderSpec(
       [...BUILTIN_LAYA_PROVIDERS, ...BASELINE_PROVIDERS, ...extra].join(", ")}`);
   }
   const p = await factory();
+  // 在线服务没配好（缺 key/端点）时，**解析时就分两种处理**，而不是装一个每步都抛的 provider：
+  //   ① 显式点名（--provider bailian / env）却没配 ⇒ 响亮报错指路（用户要的就是它）；
+  //   ② 环境默认档没配 ⇒ 干净落到 rules-only（没人要求在线模型，声明照样能跑——开箱不受影响）。
+  const ce = p.configError?.();
+  if (ce) {
+    if (explicit) throw new Error(`决策提供者 ${JSON.stringify(wanted)} 未配置：${ce}`);
+    return { kind: "none", name: `rules-only(${wanted} 未配置)`, tier: "off(no decision service configured)", ablation: true };
+  }
   return { kind: "provider", name: p.name, tier: "on", ablation: false, provider: p };
 }
 

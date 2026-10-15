@@ -60,6 +60,8 @@ export interface SystemOneProfile {
   doneInstructions(goal: string): string;
   /** 服务不可达时的指路串。 */
   unreachableHint: string;
+  /** 是否已配置到可用（缺凭据/端点→一句指路串；就绪→null）。供 resolveProviderSpec 解析时判定显式/默认。 */
+  configError?(): string | null;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
@@ -136,6 +138,7 @@ export function systemOneClient(p: SystemOneProfile): DecisionProvider {
     name: p.name,
     version: p.version,
     capabilities: p.capabilities,
+    ...(p.configError ? { configError: () => p.configError!() } : {}),
 
     async pick(req: ChoiceRequest): Promise<ChoiceOutcome> {
       const built = buildChoiceBody(p, req);
