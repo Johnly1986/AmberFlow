@@ -45,10 +45,26 @@ interface BailianReply {
   answers?: Record<string, BailianAnswer>;
   usage?: { input_tokens?: number };
   latency_ms?: number;
-  // 错误体形状官方未固定，三种都兜（code/message 是 DashScope 常见字段）。
-  code?: string;
-  message?: string;
-  error?: string;
+  // 错误体形状官方未固定：429/401 的 message/error/code 可能是**字符串，也可能是对象**
+  // （实测 429 返回 `{"error":{"code":..,"message":..}}`）。用 unknown，交给 errorText 抽可读串。
+  code?: unknown;
+  message?: unknown;
+  error?: unknown;
+}
+
+/** 从错误体里抽一句人读的原因——对象字段要展开，绝不 [object Object]（实测踩过 429）。 */
+function errorText(json: BailianReply, status: number): string {
+  const pick = (v: unknown): string | null => {
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (v && typeof v === "object") {
+      const o = v as Record<string, unknown>;
+      const inner = o.message ?? o.code;
+      if (typeof inner === "string" && inner.trim()) return inner.trim();
+      return JSON.stringify(v);
+    }
+    return null;
+  };
+  return pick(json.message) ?? pick(json.error) ?? pick(json.code) ?? `(HTTP ${status}，无 error 字段)`;
 }
 
 export interface BailianOptions {
@@ -160,8 +176,7 @@ export function bailianProvider(opts: BailianOptions = {}): DecisionProvider {
     const json = await res.json().catch(() => null) as BailianReply | null;
     if (!res.ok) {
       // 401/403（key 无效）、400（选项/输入超限）、429（限流）都带原因，原样带出来。
-      const why = json?.message ?? json?.error ?? json?.code ?? `(HTTP ${res.status}，无 error 字段)`;
-      throw new Error(`百炼决策模型返回 ${res.status}：${why}`);
+      throw new Error(`百炼决策模型返回 ${res.status}：${errorText(json ?? {}, res.status)}`);
     }
     return json ?? {};
   }

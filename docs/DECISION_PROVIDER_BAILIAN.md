@@ -70,5 +70,17 @@ npm run apps:suite -- --provider bailian
 ## 与 JevK5 一样：本机不依赖它跑测试
 
 契约测试用一个假的 `/compatible-mode/v1/systemone` 把线协议钉住（认证头、`model` 字段、
-`confidence≠max(prob)` 的映射、单候选可问、池外答案归 null、缺 key/端点报错），
-**CI 不需要网络、不需要真 key**。真服务在场时同一份 provider 代码直接可用。
+`confidence≠max(prob)` 的映射、单候选可问、池外答案归 null、缺 key/端点报错、
+**非 2xx 错误体是嵌套对象时抽出可读原因**），**CI 不需要网络、不需要真 key**。真服务在场时同一份 provider 代码直接可用。
+
+## 在线实测（2026-10-14，decision-model-preview @ token-plan.cn-beijing）
+
+- **契约确认**：choice 返回 `{choice, confidence, probabilities}`，且 `confidence` 与 `max(prob)` **不相等**
+  （实测 0.78 vs 0.85）——独立标定的把握数，映射按此分开。
+- **风险头比 laya 更锐利**：`risk("Place order")=0.95` vs `risk("Cart")=0.08`（laya 在 ~40% 良性点击上误报）。
+- **slowjet（冷启动，声明失效的那一类）**：bailian 咨询 25 次、**全部过闸门**、决定 25 步、19/19 通过；
+  对照 laya 在同一应用 5 次咨询 0 次过闸门、只靠 retries 走完。**这是模型兜底档第一次真出场**（模型边际 0 → 25）。
+  诚实边界：证据集中在**一个**冷启动夹具应用，其余 16 个应用 bailian 咨询 0 次（规则消化全部，model not needed）。
+- **限流（preview 档）**：整批 `apps:suite`（~170 次突发调用）会触发 **HTTP 429**，风险头如实降级到关键词规则
+  （`risk_degraded` 进产物，不静默）。单应用跑不触发。批量对照要么**放慢/分批**，要么把它当已知的 preview 档配额约束。
+

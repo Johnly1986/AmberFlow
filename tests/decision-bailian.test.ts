@@ -136,6 +136,17 @@ describe("bailian decision-model-preview provider（假 /systemone，无网络�
     await expect(P().pick(reqOf())).rejects.toThrow(/401.*API-key 无效或已过期|API-key 无效或已过期/);
   });
 
+  it("错误体是嵌套对象（实测 429 限流）：抽出可读原因，绝不 [object Object]", async () => {
+    // 真服务在套件突发调用下返回过 `{"error":{"code":"Throttling...","message":"..."}}`，
+    // 旧实现把对象字段直接拼进错误串 → `[object Object]`，丢掉了限流这个关键信息。
+    reset({ error: { code: "Throttling.RateQuota", message: "Requests rate limit exceeded" } }, 429);
+    let msg = "";
+    try { await P().pick(reqOf()); } catch (e) { msg = (e as Error).message; }
+    expect(msg).toContain("429");
+    expect(msg).toContain("rate limit");
+    expect(msg).not.toContain("[object Object]");
+  });
+
   it("risk / doneVote 走 noul（返回 P(yes)，不是选项）", async () => {
     reset({ type: "noul", noul: 0.83 });
     const p = P();
