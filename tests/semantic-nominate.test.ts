@@ -203,6 +203,8 @@ describe("S2 试点 e2e（真 chromium）：学 → 摊销 → drift 撤下 → 
     const profPath = path.join(app.profileDir, "site-x.profile.json");
     const after1 = JSON.parse(fs.readFileSync(profPath, "utf-8"));
     expect(after1.instructions.pick).toMatchObject({ instruction: "list_pick", replays_ok: 1, method: "rule" });
+    // S4：提名账单（dead-rung 自报——哪档从没出场一眼可见）
+    expect(r1.nominate_bill).toMatchObject({ via: { rule: 1 }, committed: 1, dropped: 0 });
     // 二跑：②档案命中（证据序——学过的映射优先于全局关键词），重放计数累加
     const r2 = await run();
     expect(r2.ok).toBe(true);

@@ -50,7 +50,7 @@ import {
   type DecisionAgent, type Question,
 } from "./model.ts";
 import { llmEscalator, runSubgoalWithRetries } from "./planner.ts";
-import { PlanningRules, TaskPlan, type Subgoal } from "./plan.ts";
+import { PlanningRules, TaskPlan, createPathWalk, DEFAULT_MAX_STEP_VISITS, type Subgoal } from "./plan.ts";
 import {
   LearnedStore, SiteProfileMemory, matchSemanticTarget,
   CHECKPOINTS, type CheckpointId,
@@ -64,7 +64,9 @@ import { nominateInstruction } from "./nominate.ts";
 
 /* ------------------------------------------------------------------ 模板形状 */
 
+/** 最低接受的模板版本；`next` 走向边需要 3（v2 模板写了 next ⇒ 红 + 指路）。 */
 export const FLOW_SPEC_VERSION = 2;
+export const FLOW_SPEC_VERSION_CURRENT = 3;
 
 /** 页面角色信号：完成 = 到达该站此页角色的 URL（可选再要求查询串含某子串）。 */
 export interface PageSignal {
@@ -96,6 +98,11 @@ export interface FlowStep {
   dangerous?: boolean;
   list_step?: ListStepSpec;
   /**
+   * NL Flow S3：声明式后继（有序候选；适用性 = 候选步自己的 `when`，与 app-runner 的
+   * P4 同一语义）。需要 spec_version 3；指向空气 = 加载期红。
+   */
+  next?: string[];
+  /**
    * NL Flow S2（docs/NL_FLOW_DESIGN.md §4/§10-S2）：步级提名开关。声明后本步的
    * `list_step` **降格为 list_pick 候选参数**（op/by/act 仍是声明的数据规则——红线②
    * 不动），运行期由提名梯级裁决"这次用不用它"；不声明 = 现状行为逐字节不变。
@@ -126,6 +133,11 @@ export interface FlowTemplate {
   steps: FlowStep[];
   invariants?: PageSignal[];
   notes?: string[];
+  /**
+   * NL Flow S3：每步的进入次数上界（声明 `next` 回边时的环上界；缺省 3，与 app-runner 同源）。
+   * 到顶 = 结构化 `next_cycle` 停因，不挂死。
+   */
+  max_step_visits?: number;
   /** 加载器写入：模板文件路径（报告用）。 */
   _path?: string;
 }
@@ -160,11 +172,12 @@ export interface SiteProfile {
 
 const TEMPLATE_KEYS = [
   "spec_version", "id", "label", "goal", "model", "slots", "sites", "pages", "steps", "invariants", "notes",
+  "max_step_visits",
 ] as const;
 const STEP_KEYS = [
   "id", "desc", "page", "page_query", "semantic_target", "semantic_targets",
   "fills", "signal", "when", "retries", "dangerous", "list_step",
-  "nominate", "instr",
+  "nominate", "instr", "next",
 ] as const;
 const PROFILE_KEYS = [
   "spec_version", "site", "label", "locale", "checkpoint", "pages", "page_query",
@@ -280,8 +293,19 @@ export function validateTemplate(t: FlowTemplate): string[] {
       p.push(`${k}: unknown template key (known: ${TEMPLATE_KEYS.join(", ")})`);
     }
   }
-  if (t.spec_version !== FLOW_SPEC_VERSION) {
-    p.push(`spec_version must be ${FLOW_SPEC_VERSION} (got ${JSON.stringify(t.spec_version)})`);
+  if (t.spec_version !== FLOW_SPEC_VERSION && t.spec_version !== FLOW_SPEC_VERSION_CURRENT) {
+    p.push(`spec_version must be ${FLOW_SPEC_VERSION} or ${FLOW_SPEC_VERSION_CURRENT}`
+      + ` (got ${JSON.stringify(t.spec_version)})`);
+  }
+  if (t.max_step_visits !== undefined
+    && (!Number.isInteger(t.max_step_visits) || Number(t.max_step_visits) < 1)) {
+    p.push("max_step_visits must be a positive integer");
+  }
+  // NL Flow S3：`next` 是 v3 的声明面——v2 模板写了就指路升版（不认识就响亮拒绝的纪律）。
+  if (t.spec_version === FLOW_SPEC_VERSION
+    && Array.isArray(t.steps) && t.steps.some((s) => isDict(s) && s["next"] !== undefined)) {
+    p.push(`step.next requires spec_version ${FLOW_SPEC_VERSION_CURRENT}`
+      + `（走向边是 v3 声明面；升版后 v2 模板一字不改照常加载）`);
   }
   for (const k of ["id", "label", "goal"] as const) {
     if (typeof t[k] !== "string" || !t[k]) p.push(`${k} is required`);
@@ -395,6 +419,23 @@ export function validateTemplate(t: FlowTemplate): string[] {
       }
     }
   });
+  // NL Flow S3：`next` 的目标必须是**声明过的步 id**——指向空气的边 = 一步都不走的静默
+  // 分支，加载期红（与 app-pack 的 P4 同一条纪律）。
+  for (const [i, s] of (t.steps as unknown[]).entries()) {
+    if (!isDict(s) || s["next"] === undefined) continue;
+    const where = `steps[${i}].next`;
+    const nx = s["next"];
+    if (!Array.isArray(nx) || nx.length === 0 || !nx.every((x) => typeof x === "string" && x)) {
+      p.push(`${where} must be a non-empty list of step ids`);
+      continue;
+    }
+    const seenNext = new Set<string>();
+    for (const target of nx) {
+      if (!ids.has(target as string)) p.push(`${where}: target ${JSON.stringify(target)} is not a declared step id`);
+      if (seenNext.has(target as string)) p.push(`${where}: duplicate target ${JSON.stringify(target)}`);
+      seenNext.add(target as string);
+    }
+  }
   if (t.invariants !== undefined) {
     if (!Array.isArray(t.invariants)) p.push("invariants must be a list of page signals");
     else {
@@ -561,6 +602,8 @@ export interface CompiledStep {
   instr?: string | null;
   /** NL Flow S2：list_pick 候选的声明参数（来自模板 list_step × 档案 list_extract）。 */
   list_candidate?: { cfg: ListExtract; op: "min" | "max"; by: string };
+  /** NL Flow S3：声明式后继（有序候选；适用性 = 候选步自己的 `when`）。 */
+  next?: string[];
 }
 
 function substituteSlots(text: string, slots: Record<string, unknown>, problems: string[]): string {
@@ -783,6 +826,7 @@ export function compileFlow(
       ...(nominating
         ? { nominate: true, instr: step.instr ?? null, ...(listCandidate ? { list_candidate: listCandidate } : {}) }
         : {}),
+      ...(step.next ? { next: [...step.next] } : {}),
     });
   });
 
@@ -966,6 +1010,18 @@ export interface FlowRunResult {
   unverified_backfill: string[];
   /** 连续失败达到阈值、已撤下的已学 hint（§5 的 drift 语义）。 */
   drift: DriftNote[];
+  /**
+   * NL Flow S3：声明 `next` 的模板才带这三样（缺省等价——无边模板的结果 JSON 一字不加）：
+   * 环上界的结构化停因、每步进入次数、被边跨过的步（记 skipped 的那一半事实）。
+   */
+  path_stop?: { code: "next_cycle"; step_id: string; visits: number; detail: string };
+  path_visits?: Record<string, number>;
+  path_crossed?: string[];
+  /**
+   * NL Flow S4：提名账单（仅 `nominate` 步在场时）——各档出场数 + 指令回填门的
+   * 落盘/撤回 + drift 数。dead rung 自报：哪档从没出场一眼可见。
+   */
+  nominate_bill?: { via: Record<string, number>; committed: number; dropped: number; drift: number };
   line: string;
   profile_path: string;
   ok: boolean;
@@ -1182,8 +1238,19 @@ export async function runFlow(
   let backfillGate: FlowRunResult["backfill_gate"] = "none";
   let committed: string[] = [];
   let dropped: string[] = [];
+  // NL Flow S4：指令回填门的账（提名账单用）。
+  let instrCommitted = 0;
+  let instrDropped = 0;
   try {
-    for (const step of compiled.steps) {
+    // NL Flow S3：走向 = 声明边（`next`）+ 候选步自己的 `when`；无边的模板 = 顺序遍历，
+    // 行为与今天逐字节相同（walk.after 无边时就是 i+1）。
+    const walk = createPathWalk(compiled.steps, template.max_step_visits ?? DEFAULT_MAX_STEP_VISITS);
+    const ranIdx = new Set<number>();
+    const pathCrossed: string[] = [];
+    let pathStop: FlowRunResult["path_stop"];
+    const hasEdges = compiled.steps.some((s) => s.next !== undefined);
+    let i = 0;
+    const runOne = async (step: CompiledStep): Promise<void> => {
       // ---- 红线 3：不可逆动作先 DRY-RUN，再要人确认；默认拒绝 --------------
       let dryEvidence: DryRunEvidence | null = null;
       if (step.dangerous) {
@@ -1196,7 +1263,7 @@ export async function runFlow(
             obstacle: `dry-run 未通过：${dryEvidence.stop_reason}`, detail: { dry_run: dryEvidence },
           });
           if (verbose) console.log(`  [${step.id}] 危险步干跑未通过 —— ${dryEvidence.stop_reason}`);
-          continue;
+          return;
         }
         let allowed = allowDangerous === true;
         if (!allowed && opts.confirmDangerous) allowed = await opts.confirmDangerous(step, dryEvidence);
@@ -1207,7 +1274,7 @@ export async function runFlow(
             obstacle: REFUSAL_LABELS.dangerous, detail: { dry_run: dryEvidence, approved: false },
           });
           if (verbose) console.log(`  [${step.id}] ${REFUSAL_LABELS.dangerous} —— ${step.desc}`);
-          continue;
+          return;
         }
         if (verbose) {
           console.log(`  [${step.id}] 危险步放行（干跑证据：${dryEvidence.method} ${dryEvidence.would}）`);
@@ -1226,7 +1293,7 @@ export async function runFlow(
           console.log(`  [${step.id}] -> ${out.done ? "done" : `BLOCKED (${out.error})`}`
             + (out.done ? ` ${JSON.stringify(out.detail.chosen)}` : ""));
         }
-        continue;
+        return;
       }
       const bsg = step.sg!;
       // ---- NL Flow S2：提名步——梯级裁"这次用哪个指令" -------------------------
@@ -1261,7 +1328,7 @@ export async function runFlow(
           }
           // blocked 的失败计数**只在旅程末尾的 drift 块记一次**（与 hint 块同一模式——
           // 这里再记就是双计，阈值会被一次运行打穿）。
-          continue;
+          return;
         }
         // 元素动作提名：via 记进结果。**不落盘**——可复现重放的证据是 hint 环的，
         // 元素动作的提名没有等价证据（绝不假装它被持久化了）。
@@ -1286,7 +1353,47 @@ export async function runFlow(
       if (memory.recordedThisRun.has(step.id)) {
         memory.labelMethod(step.id, methods.includes("escalate") ? "escalate" : "laya");
       }
+    };
+    // ---- 走向驱动：声明边（next）+ 候选步自己的 when；环上界 = next_cycle 结构化停因
+    while (i < compiled.steps.length) {
+      const over = walk.enter(i);
+      if (over !== null) {
+        pathStop = {
+          code: "next_cycle", step_id: over.id, visits: over.visits,
+          detail: `step ${JSON.stringify(over.id)} was entered ${over.visits} time(s) in one run`
+            + ` (per-path bound max_step_visits=${template.max_step_visits ?? DEFAULT_MAX_STEP_VISITS})`
+            + " — a declared next edge forms a cycle; stopping instead of looping forever",
+        };
+        if (verbose) console.log(`  [journey] ${pathStop.detail}`);
+        break;
+      }
+      ranIdx.add(i);
+      await runOne(compiled.steps[i]!);
+      const from = i;
+      i = await walk.after(i, async (j) => {
+        const cand = compiled.steps[j]!;
+        const when = cand.sg?.when ?? null;
+        if (!when) return true;                      // 没声明 when 的候选：声明即适用
+        return await checkSignal(session.page as never, when);
+      });
+      if (i > from + 1) {
+        for (let k = from + 1; k < i; k++) {
+          const crossed = compiled.steps[k]!;
+          pathCrossed.push(`${crossed.id ?? `#${k}`} (crossed by \`next\` from ${compiled.steps[from]!.id ?? `#${from}`})`);
+          if (verbose) console.log(`  [journey] step ${crossed.id ?? `#${k}`} crossed by a declared next edge -> skipped`);
+        }
+      }
     }
+    // 被边跨过且从未进入的步：没有结果 = 没执行 → 记 skipped（边就是作者对
+    // "这条路径上它不适用"的声明；P4 的同一条语义）。后来经回边进入的步有真实结果。
+    compiled.steps.forEach((s, k) => {
+      if (ranIdx.has(k)) return;
+      results.push({
+        id: s.id, desc: s.desc, kind: s.kind, status: "skipped", attempts: 0,
+        methods: [], hint_used: false, backfilled: false,
+        obstacle: "crossed by a declared next edge", detail: null,
+      });
+    });
 
     // ---- §5 drift：本次运行前已在盘上的 hint，这一步却没让信号成立 -----------------
     for (const r of results) {
@@ -1379,13 +1486,15 @@ export async function runFlow(
         if (out.done) verifiedInstr.add(step.id);
         else if (verbose) console.log(`  指令回填门：${step.id} 重放未通过（${out.error}）`);
       }
-      instrMemory?.commitVerified(verifiedInstr);
+      const res = instrMemory?.commitVerified(verifiedInstr);
+      instrCommitted = res?.committed.length ?? 0;
+      instrDropped = res?.dropped.length ?? 0;
       if (verbose) {
         console.log(`  指令回填门：${verifiedInstr.size}/${stagedInstr.length} 条重放通过落盘`
           + `${verifiedInstr.size < stagedInstr.length ? "（未过的按原值撤回）" : ""}`);
       }
     } else if (stagedInstr.length) {
-      instrMemory?.commitAll();
+      instrCommitted = instrMemory?.commitAll().length ?? 0;
     }
     instrMemory?.flush();
 
@@ -1395,6 +1504,7 @@ export async function runFlow(
       checkpoint,
       locale: profile.locale ?? null,
       backfillGate, committed, dropped, drift,
+      pathStop, pathCrossed, hasEdges, pathVisits: walk.visits(), instrCommitted, instrDropped,
     });
   } finally {
     if (own) await session.close();
@@ -1410,6 +1520,9 @@ function finalize(
     checkpoint: string; locale: string | null;
     backfillGate: FlowRunResult["backfill_gate"]; committed: string[]; dropped: string[];
     drift: DriftNote[];
+    pathStop?: FlowRunResult["path_stop"]; pathCrossed: string[]; hasEdges: boolean;
+    pathVisits: Record<string, number>;
+    instrCommitted: number; instrDropped: number;
   },
 ): FlowRunResult {
   let rule = 0, layaN = 0, escN = 0, listN = 0, refusedN = 0;
@@ -1429,8 +1542,24 @@ function finalize(
   const line = `rule ${rule} · laya ${layaN} · escalate ${escN} (written back ${backfilled})`
     + ` · list ${listN} · blocked ${blocked}${refusedN ? ` · refused ${refusedN}` : ""}`
     + (ctx.drift.length ? ` · drift ${ctx.drift.length}` : "");
+  // NL Flow S4：提名账单（dead-rung 自报——哪档从没出场一眼可见；仅 nominate 步在场时有）。
+  const viaCounts: Record<string, number> = {};
+  for (const r of results) {
+    if (!r.nominated) continue;
+    const v = r.nominated.via;
+    viaCounts[v] = (viaCounts[v] ?? 0) + 1;
+  }
+  const hasNominate = Object.keys(viaCounts).length > 0;
+  const nominate_bill = hasNominate
+    ? { via: viaCounts, committed: ctx.instrCommitted, dropped: ctx.instrDropped, drift: ctx.drift.length }
+    : undefined;
+  const billLine = hasNominate
+    ? ` · 提名 ${Object.entries(viaCounts).map(([k, v]) => `${k} ${v}`).join(" · ")}`
+      + `（指令落盘 ${ctx.instrCommitted}/撤回 ${ctx.instrDropped}）`
+    : "";
   const ok = results.every((r) => r.status === "done" || r.status === "skipped")
-    && invariants.every((i) => i.held);
+    && invariants.every((i) => i.held)
+    && ctx.pathStop === undefined;
   // P0 层级行：`laya` 是**请求的面**，`model_status` 是**真跑在哪一层**——请求 onnx 面但三件不齐
   // 就是 off(missing)（真上场时会在装载处响亮失败），离线替身面是 off(scripted)/off(rules-only)。
   // 与 pack 同一个词汇、同一个出处（`src/model-artifacts.ts`），桥与报告念同一行。
@@ -1441,11 +1570,17 @@ function finalize(
     app: template.id, site: siteKey, site_label: compiled.site.label, goal: template.goal,
     laya: ctx.laya, escalate: ctx.escalate, model_status: tier,
     checkpoint: ctx.checkpoint, locale: ctx.locale,
-    steps: results, invariants, counts, line,
+    steps: results, invariants, counts, line: line + billLine,
     backfill_gate: ctx.backfillGate,
     verified_backfill: ctx.committed,
     unverified_backfill: ctx.dropped,
     drift: ctx.drift,
+    ...(ctx.hasEdges ? {
+      path_stop: ctx.pathStop,
+      path_visits: ctx.pathVisits,
+      path_crossed: ctx.pathCrossed,
+    } : {}),
+    ...(nominate_bill ? { nominate_bill } : {}),
     profile_path: ctx.profileWritten ? ctx.store.pathFor(siteKey) : "",
     ok, secs: Math.round((Date.now() - ctx.t0) / 100) / 10,
   };
