@@ -69,7 +69,11 @@ export class InstructionProfileMemory implements NominationMemory {
    * 回填一条提名（门 = 该步的完成信号，由调用方把握）。staged 模式只进内存；
    * 改写指令 ⇒ `replays_ok` 归零（换映射 = 重新挣信任），同值保持计数。
    */
-  recordInstruction(stepKey: string, instruction: string, method: "rule" | "model" | "teacher" | "enumerate"): void {
+  recordInstruction(
+    stepKey: string,
+    instruction: string,
+    method: "rule" | "learned" | "model" | "teacher" | "enumerate" | "locked",
+  ): void {
     if (!isInstructionName(instruction)) {
       throw new Error(`instruction memory ${this.site}.${stepKey}: `
         + `${JSON.stringify(instruction)} is not in the closed set (never invent an instruction)`);
@@ -127,6 +131,18 @@ export class InstructionProfileMemory implements NominationMemory {
   /** 撤掉所有尚未过门的条目。 */
   discardPending(): string[] {
     return this.commitVerified(new Set()).dropped;
+  }
+
+  /**
+   * 显式关掉回填门（测试/消融，`--no-verify-backfill` 同款）：本次新写的条目按现状落盘，
+   * `replays_ok` 不 +1——它还没有被重放验证过，这一点在档案里如实可见。
+   */
+  commitAll(): string[] {
+    const committed = [...this.pending];
+    this.pending.clear();
+    this.prior.clear();
+    this.persist();
+    return committed;
   }
 
   /** 一条已学指令用上了但这一步没完成 → 记一次失败；达到阈值即 drift（调用方调 dropInstruction）。 */

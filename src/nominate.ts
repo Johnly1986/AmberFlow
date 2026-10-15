@@ -3,10 +3,12 @@
  *
  * 梯级五档，**命中即停**；无论哪档提名，完成一律由该步自己的信号裁决（红线③）：
  *
- *   ① 规则匹配（`ruleNominate`）：确定性关键词梯级，数据规则优先——"选择最低价"必须先撞
- *      `list_pick`，才不会被 select 的"选择"吃掉。没命中就是**弃权**，不是猜。
  *   ② 档案映射（`memory`）：已学映射，键由调用方拼（app/site/stepId）；纪律归学习环
  *      （staged → 零模型重放 → commit；drift 撤下——语义流已落地的那套）。
+ *      **在 ① 规则之前**：站点级已验证映射（replays_ok 背书）优先于全局启发式（证据序），
+ *      且 drift 撤下后 ① 才接管——坏映射不会被规则抢先遮成死档。
+ *   ① 规则匹配（`ruleNominate`）：确定性关键词梯级，数据规则优先——"选择最低价"必须先撞
+ *      `list_pick`，才不会被 select 的"选择"吃掉。没命中就是**弃权**，不是猜。
  *   ③ 模型窄问（`ask`）：选项 = 指令闭集；**答案不在闭集内 = 弃权**（fail closed，
  *      绝不为凑答案现造指令）。注入式——执行器/实验台各自提供自己的问法。
  *   ④ 老师点名（`teacher`）：LLM 点名（同 ③ 的闭集校验）。不可逆步允许 ④、禁 ③⑤。
@@ -84,17 +86,21 @@ function enumOrder(order?: readonly string[]): readonly string[] {
 /**
  * 梯级主入口。永不抛异常：③④ 的 ask 抛错 = 该档弃权（与执行器"老师抛错降级"同一口径），
  * 绝不让一个坏 provider 打死整条计划。
+ *
+ * 档序是 **②在①前**（证据序，不是成本序——两档都是零成本）：②是**站点级、过重放门的
+ * 已验证映射**，①是全局关键词启发式；两者冲突时信被验证过的。这也让 drift 臂收敛——
+ * 坏映射撤下后 ① 才接管，而不是①抢先命中把撤下的映射永远遮成死档。
  */
 export async function nominateInstruction(input: NominateInput): Promise<Nomination> {
   const order = enumOrder(input.order);
-  // ① 规则
-  const ruled = inSet(ruleNominate(input.desc));
-  if (ruled !== null) return { instruction: ruled, via: "rule", order };
-  // ② 档案
+  // ② 档案（站点级已验证映射：有 replays_ok 背书，优先于全局启发式）
   if (input.memory && input.stepKey) {
     const learned = inSet(input.memory.lookupInstruction(input.stepKey));
     if (learned !== null) return { instruction: learned, via: "learned", order };
   }
+  // ① 规则
+  const ruled = inSet(ruleNominate(input.desc));
+  if (ruled !== null) return { instruction: ruled, via: "rule", order };
   // ③ 模型窄问
   if (input.ask) {
     try {

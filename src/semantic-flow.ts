@@ -43,7 +43,7 @@ import {
 } from "./executor.ts";
 import { REPO } from "./flow.ts";
 import { checkArtifacts } from "./model-artifacts.ts";
-import { extractSlots } from "./extraction.ts";
+import { extractSlots, urlOf } from "./extraction.ts";
 import { resolveBinding, validateBinding } from "./bindings.ts";
 import {
   installLayaRuntime, scriptedAgent, scriptedRuntime,
@@ -58,6 +58,9 @@ import {
 } from "./semantic.ts";
 import { checkSignal, type SignalSpec } from "./signals.ts";
 import { startUrl, REFUSAL_LABELS, type AppInvariantResult } from "./app-runner.ts";
+import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES } from "./instructions.ts";
+import { createInstructionMemory } from "./semantic-instructions.ts";
+import { nominateInstruction } from "./nominate.ts";
 
 /* ------------------------------------------------------------------ 模板形状 */
 
@@ -92,6 +95,17 @@ export interface FlowStep {
   retries?: number;
   dangerous?: boolean;
   list_step?: ListStepSpec;
+  /**
+   * NL Flow S2（docs/NL_FLOW_DESIGN.md §4/§10-S2）：步级提名开关。声明后本步的
+   * `list_step` **降格为 list_pick 候选参数**（op/by/act 仍是声明的数据规则——红线②
+   * 不动），运行期由提名梯级裁决"这次用不用它"；不声明 = 现状行为逐字节不变。
+   */
+  nominate?: boolean;
+  /**
+   * NL Flow S2：指令锁——跳过提名梯级，恒用该指令（候选集坍缩为它）。
+   * 必须在闭集内（`instructions.INSTRUCTION_NAMES`），且要求本步声明 `nominate: true`。
+   */
+  instr?: string;
 }
 
 export interface FlowSite {
@@ -150,6 +164,7 @@ const TEMPLATE_KEYS = [
 const STEP_KEYS = [
   "id", "desc", "page", "page_query", "semantic_target", "semantic_targets",
   "fills", "signal", "when", "retries", "dangerous", "list_step",
+  "nominate", "instr",
 ] as const;
 const PROFILE_KEYS = [
   "spec_version", "site", "label", "locale", "checkpoint", "pages", "page_query",
@@ -347,6 +362,21 @@ export function validateTemplate(t: FlowTemplate): string[] {
     if (s["dangerous"] === true && s["list_step"] !== undefined) {
       p.push(`${where}: a list step cannot be dangerous (it never acts on the model's word)`);
     }
+    // NL Flow S2：提名步与指令锁（校验紧跟声明面；读取方在 compile/runFlow——不挂空 schema）。
+    if (s["nominate"] !== undefined && typeof s["nominate"] !== "boolean") {
+      p.push(`${where}.nominate must be a boolean`);
+    }
+    if (s["nominate"] === true && s["dangerous"] === true) {
+      p.push(`${where}: a nominating step cannot be dangerous（不可逆步不参与提名——`
+        + `它永远是显式声明的 dangerous 步：dry-run + 人确认，提名闭集里没有它）`);
+    }
+    if (s["instr"] !== undefined) {
+      if (typeof s["instr"] !== "string" || !(INSTRUCTION_NAMES as readonly string[]).includes(s["instr"])) {
+        p.push(`${where}.instr must be one of ${INSTRUCTION_NAMES.join("|")} (got ${JSON.stringify(s["instr"])})`);
+      } else if (s["nominate"] !== true) {
+        p.push(`${where}.instr locks the nomination ladder — declare nominate: true on this step`);
+      }
+    }
     if (s["list_step"] !== undefined) {
       const ls = s["list_step"];
       if (!isDict(ls)) {
@@ -525,6 +555,12 @@ export interface CompiledStep {
   pageFile: string;
   signal: SignalSpec;
   signal_source: "contract" | "authored";
+  /** NL Flow S2：本步参与提名梯级（`nominate: true`；list_step 降格为 list_pick 候选参数）。 */
+  nominate?: boolean;
+  /** NL Flow S2：指令锁（非 null = 候选集坍缩为它，跳过梯级）。 */
+  instr?: string | null;
+  /** NL Flow S2：list_pick 候选的声明参数（来自模板 list_step × 档案 list_extract）。 */
+  list_candidate?: { cfg: ListExtract; op: "min" | "max"; by: string };
 }
 
 function substituteSlots(text: string, slots: Record<string, unknown>, problems: string[]): string {
@@ -535,6 +571,19 @@ function substituteSlots(text: string, slots: Record<string, unknown>, problems:
     }
     return String(slots[k]);
   });
+}
+
+/**
+ * NL Flow S2：一个提名步的**可执行候选序**（⑤枚举的输入；runFlow 的裁决按它走）。
+ *   - `instr` 锁 = 候选集坍缩为该指令（跳过梯级——锁是作者的最终说法）；
+ *   - `list_pick` 只有在候选参数齐备（模板 `list_step` × 档案 `list_extract`）时才在序内——
+ *     它的参数永远是声明的，模型/学习环只裁"用不用"（红线②）；
+ *   - 其余按缺省序（S0 实测那张：click 在首位，⑤的兜底头）。
+ */
+export function executableInstructionOrder(step: CompiledStep): readonly string[] {
+  if (!step.nominate) return [];
+  if (step.instr) return [step.instr];
+  return DEFAULT_ENUM_ORDER.filter((n) => n !== "list_pick" || step.list_candidate !== undefined);
 }
 
 /**
@@ -669,7 +718,8 @@ export function compileFlow(
       : (step.semantic_target ? [subTarget(step.semantic_target)] : []);
 
     const listSpec = step.list_step;
-    if (listSpec) {
+    const nominating = step.nominate === true;
+    if (listSpec && !nominating) {
       const cfg = profile.list_extract?.[step.id];
       if (!cfg) {
         problems.push(`${where}: a list step needs list_extract.${step.id} in the site profile`
@@ -683,6 +733,19 @@ export function compileFlow(
         signal_source: frozen ? "authored" : "contract",
       });
       return;
+    }
+    // NL Flow S2：nominate 步——`list_step` 是 list_pick **候选参数**（不是决定）。
+    // 行选择器/字段仍是站点知识（缺档案 = 编译期红，与 list 步同一纪律）；
+    // 用不用这个候选由运行期提名梯级裁决（值与选择规则永远是声明的——红线②）。
+    let listCandidate: CompiledStep["list_candidate"] = undefined;
+    if (listSpec && nominating) {
+      const cfg = profile.list_extract?.[step.id];
+      if (!cfg) {
+        problems.push(`${where}: a nominating step with a list_pick candidate needs `
+          + `list_extract.${step.id} in the site profile（缺了 = 该候选不可执行，编译期说清楚）`);
+        return;
+      }
+      listCandidate = { cfg, op: listSpec.op, by: listSpec.by };
     }
 
     // 值绑定：fill 声明的槽位 ← 档案的字段键（_slotValue 靠键匹配站点字段）。
@@ -717,6 +780,9 @@ export function compileFlow(
       },
       dangerous: step.dangerous === true, targets, pageFile, signal,
       signal_source: frozen ? "authored" : "contract",
+      ...(nominating
+        ? { nominate: true, instr: step.instr ?? null, ...(listCandidate ? { list_candidate: listCandidate } : {}) }
+        : {}),
     });
   });
 
@@ -858,6 +924,12 @@ export interface FlowStepResult {
   backfilled: boolean;
   obstacle: string | null;
   detail: Record<string, unknown> | null;
+  /**
+   * NL Flow S2：本步的提名（仅 `nominate: true` 的步有）——梯级选出的指令与命中档
+   * （`locked` = 模板的 `instr` 锁）。元素动作的提名**不落盘**：可复现重放的证据是
+   * hint 环的，不是指令环的——报告如实显示，绝不假装它被持久化了。
+   */
+  nominated?: { instruction: string | null; via: string };
 }
 
 /** 一个被报为 drift 的已学 hint（连续 N 次没让信号成立 → 撤下、下次重新学）。 */
@@ -1049,6 +1121,15 @@ export async function runFlow(
   });
   memory.registerSteps(compiled.steps.map((s) => [s.desc, s.id] as [string, string]));
   const knownBefore = new Set(Object.keys(memory.getSteps()));
+  // NL Flow S2：指令记忆（有 nominate 步才建；与 hint 记忆同库同段、staged 回填门照旧）。
+  const hasNominate = compiled.steps.some((s) => s.nominate);
+  const instrMemory = hasNominate
+    ? createInstructionMemory(store, siteKey, { staged: true, readOnly: writeProfile === false })
+    : null;
+  const learnedOnDiskInstr = fresh
+    ? {} as Record<string, string>
+    : Object.fromEntries(Object.entries(store.load(siteKey).instructions ?? {})
+      .map(([k, v]) => [k, v.instruction]));
   // §3 文字系统路由：站点档案的 checkpoint 优先（plan 观察来的，或人手写的），
   // 否则模板的 model，最后 english——"中文站用多语 checkpoint"因此是数据不是代码。
   const checkpoint = profile.checkpoint ?? template.model ?? "english";
@@ -1095,6 +1176,8 @@ export async function runFlow(
   const session = own ? await browserSession(true) : await opts.sessionFactory!();
   const results: FlowStepResult[] = [];
   const drift: DriftNote[] = [];
+  // NL Flow S2：元素动作提名的记录面（step id → {instruction, via}；不落盘，见 FlowStepResult.nominated）。
+  const nominatedOf = new Map<string, { instruction: string | null; via: string }>();
   const driftLimit = opts.driftLimit ?? 2;
   let backfillGate: FlowRunResult["backfill_gate"] = "none";
   let committed: string[] = [];
@@ -1146,6 +1229,44 @@ export async function runFlow(
         continue;
       }
       const bsg = step.sg!;
+      // ---- NL Flow S2：提名步——梯级裁"这次用哪个指令" -------------------------
+      // list_pick 候选走数据腿（op/by/act 是声明的数据规则，梯级只裁用不用——红线②）；
+      // 元素动作走既有浏览器支线（元素解析是执行器自己的梯级）。`instr` 锁 = 候选集坍缩。
+      if (step.nominate) {
+        // 键 = 语义步 id（学习档案按站点一份，与 hint 记忆同一键法；应用归属由档案路径承载）
+        const instrKey = step.id;
+        const nom: { instruction: string | null; via: "rule" | "learned" | "model" | "teacher" | "enumerate" | "locked" } = step.instr
+          ? { instruction: step.instr, via: "locked" }
+          : await nominateInstruction({ desc: step.desc, stepKey: instrKey, memory: instrMemory });
+        if (verbose) console.log(`  [${step.id}] 提名：${nom.instruction} (${nom.via})`);
+        if (nom.instruction === "list_pick" && step.list_candidate) {
+          const listExec: CompiledStep = { ...step, kind: "list", list: step.list_candidate };
+          // 既有模板的 list 步靠前一步落到列表页；提名步可能就是旅程第一步——
+          // 按本步 URL 守卫导航（domcontentloaded 纪律），不把"页面不在"误报成"没有行"。
+          if (urlOf(session.page) !== listExec.url) {
+            await session.page.goto(listExec.url, { waitUntil: "domcontentloaded" });
+          }
+          if (verbose) console.log(`  [${step.id}] ${step.desc} (list: ${listExec.list!.op} by ${listExec.list!.by})`);
+          const out = await runListStep(session.page, listExec, verbose);
+          results.push({
+            id: step.id, desc: step.desc, kind: "list",
+            status: out.done ? "done" : "blocked", attempts: 1,
+            methods: out.done ? ["list"] : [], hint_used: false, backfilled: false,
+            obstacle: out.done ? null : (out.error ?? "list step failed"), detail: out.detail,
+            nominated: { instruction: nom.instruction, via: nom.via },
+          });
+          if (out.done) {
+            // 提名让信号成立 → 候选映射进指令记忆（staged；重放门在旅程末尾统一裁决）
+            instrMemory?.recordInstruction(instrKey, "list_pick", nom.via);
+          }
+          // blocked 的失败计数**只在旅程末尾的 drift 块记一次**（与 hint 块同一模式——
+          // 这里再记就是双计，阈值会被一次运行打穿）。
+          continue;
+        }
+        // 元素动作提名：via 记进结果。**不落盘**——可复现重放的证据是 hint 环的，
+        // 元素动作的提名没有等价证据（绝不假装它被持久化了）。
+        nominatedOf.set(step.id, { instruction: nom.instruction, via: nom.via });
+      }
       if (verbose) console.log(`  [${step.id}] ${bsg.desc}`);
       const { rep, attempt } = await runSubgoalWithRetries(
         mw as never, bsg, plan, bsg.start_url ?? "", session.page, session.pw, verbose);
@@ -1159,6 +1280,7 @@ export async function runFlow(
         attempts: attempt, methods,
         hint_used: hintUsed, backfilled: memory.recordedThisRun.has(step.id),
         obstacle: rep.done ? null : rep.stop_reason, detail: dryEvidence,
+        ...(nominatedOf.has(step.id) ? { nominated: nominatedOf.get(step.id) } : {}),
       });
       // 回填来源标注（报告面）：本步走过 escalate 就是老师点名，否则是 laya 现场。
       if (memory.recordedThisRun.has(step.id)) {
@@ -1177,6 +1299,22 @@ export async function runFlow(
           drift.push({ step: r.id, hint, failures });
           if (verbose) {
             console.log(`  [${r.id}] drift：已学 hint ${hint} 连续 ${failures} 次没让信号成立 → 撤下`);
+          }
+        }
+      }
+    }
+
+    // ---- NL Flow S2 drift：同一套纪律用在已学指令上（list_pick 是唯一可执行判定的轴）--
+    for (const r of results) {
+      if (!(r.id in learnedOnDiskInstr)) continue;
+      if (r.status !== "blocked") { instrMemory?.resetFailures(r.id); continue; }
+      const failures = instrMemory?.countFailure(r.id) ?? 0;
+      if (failures >= driftLimit) {
+        const gone = instrMemory?.dropInstruction(r.id);
+        if (gone) {
+          drift.push({ step: r.id, hint: gone, failures });
+          if (verbose) {
+            console.log(`  [${r.id}] drift：已学指令 ${gone} 连续 ${failures} 次没让信号成立 → 撤下`);
           }
         }
       }
@@ -1224,6 +1362,32 @@ export async function runFlow(
     // 重放计数与 drift 计数落盘（没有新条目时也要写）。
     memory.flush();
     for (const r of results) r.backfilled = committed.includes(r.id);
+
+    // ---- NL Flow S2 指令回填门：list_pick 是确定性数据规则——同运行重放一次，过了才落盘。
+    // （元素动作的提名不进记忆：没有可复现重放证据的产物不落盘——红线 2 的同一条纪律。）
+    const stagedInstr = instrMemory?.stagedSteps() ?? [];
+    if (stagedInstr.length && opts.verifyBackfill !== false) {
+      const verifiedInstr = new Set<string>();
+      for (const step of compiled.steps) {
+        if (!stagedInstr.includes(step.id) || step.list_candidate === undefined) continue;
+        const listExec: CompiledStep = { ...step, kind: "list", list: step.list_candidate };
+        // 重放在**当前会话的真实状态**上进行——先把页面带回本步的 URL（首次执行可能已离开）
+        if (urlOf(session.page) !== listExec.url) {
+          await session.page.goto(listExec.url, { waitUntil: "domcontentloaded" });
+        }
+        const out = await runListStep(session.page, listExec, false);
+        if (out.done) verifiedInstr.add(step.id);
+        else if (verbose) console.log(`  指令回填门：${step.id} 重放未通过（${out.error}）`);
+      }
+      instrMemory?.commitVerified(verifiedInstr);
+      if (verbose) {
+        console.log(`  指令回填门：${verifiedInstr.size}/${stagedInstr.length} 条重放通过落盘`
+          + `${verifiedInstr.size < stagedInstr.length ? "（未过的按原值撤回）" : ""}`);
+      }
+    } else if (stagedInstr.length) {
+      instrMemory?.commitAll();
+    }
+    instrMemory?.flush();
 
     return finalize(template, siteKey, compiled, results, invariants, {
       laya, escalate, store, t0,

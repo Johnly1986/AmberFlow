@@ -39,12 +39,22 @@ describe("①档规则：确定性关键词梯级，数据规则优先", () => {
 describe("梯级：命中即停、闭集 fail-closed、坏 ask 不打死计划", () => {
   const desc = "处理这一单"; // ① 必弃权的 desc
 
-  it("①命中 ⇒ 停，②③④ 不被咨询", async () => {
+  it("②档案命中 ⇒ via learned（证据序：站点级已验证映射优先于全局启发式）", async () => {
+    // desc 同时撞得中规则（"输入…"）与档案映射——②在前：信被重放验证过的那个
+    const r = await nominateInstruction({
+      desc: "输入出发城市",
+      stepKey: "k",
+      memory: { lookupInstruction: () => "select" },
+    });
+    expect(r).toMatchObject({ instruction: "select", via: "learned" });
+  });
+
+  it("①规则命中 ⇒ 停，③④ 不被咨询（②空手时）", async () => {
     let consulted = 0;
     const r = await nominateInstruction({
       desc: "输入出发城市",
       stepKey: "k",
-      memory: { lookupInstruction: () => { consulted += 1; return "click"; } },
+      memory: { lookupInstruction: () => null },
       ask: async () => { consulted += 10; return "fill"; },
     });
     expect(r).toMatchObject({ instruction: "fill", via: "rule" });
@@ -65,6 +75,7 @@ describe("梯级：命中即停、闭集 fail-closed、坏 ask 不打死计划",
     expect(ghost.instruction).toBe("fill");          // ② 弃权 → ⑤ 枚举首位
     expect(ghost.via).toBe("enumerate");
   });
+
 
   it("③窄问命中 ⇒ via model；③抛错 ⇒ 掉到④/⑤，不是抛异常", async () => {
     const asked = await nominateInstruction({ desc, ask: async () => "check" });

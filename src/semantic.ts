@@ -178,8 +178,8 @@ export interface LearnedInstructionEntry {
   /** 必须在指令闭集内（`instructions.INSTRUCTION_NAMES`）——手改档案写出未知指令 = 响亮报错。 */
   instruction: string;
   replays_ok: number;
-  /** 提名来源（nominate.ts 的 via）：rule | model | teacher | enumerate——报告面用。 */
-  method?: "rule" | "model" | "teacher" | "enumerate";
+  /** 提名来源（nominate.ts 的 via + 模板锁）：rule | learned | model | teacher | enumerate | locked。 */
+  method?: "rule" | "learned" | "model" | "teacher" | "enumerate" | "locked";
   /** 已学指令连续没让信号成立的次数（重放成功即清零）——drift 判定用。 */
   failures?: number;
 }
@@ -193,7 +193,7 @@ export interface LearnedSiteFile {
 }
 
 const ENTRY_METHODS = new Set(["laya", "escalate"]);
-const INSTRUCTION_METHODS = new Set(["rule", "model", "teacher", "enumerate"]);
+const INSTRUCTION_METHODS = new Set(["rule", "learned", "model", "teacher", "enumerate", "locked"]);
 
 function validateLearned(site: string, file: LearnedSiteFile): void {
   if (typeof file.host !== "string" || !file.host) {
@@ -231,7 +231,7 @@ function validateLearned(site: string, file: LearnedSiteFile): void {
         throw new Error(`learned profile ${site}.${stepId}: replays_ok must be a non-negative integer`);
       }
       if (e.method !== undefined && !INSTRUCTION_METHODS.has(e.method)) {
-        throw new Error(`learned profile ${site}.${stepId}: method must be rule|model|teacher|enumerate`);
+        throw new Error(`learned profile ${site}.${stepId}: method must be rule|learned|model|teacher|enumerate|locked`);
       }
       if (e.failures !== undefined && (!Number.isInteger(e.failures) || e.failures < 0)) {
         throw new Error(`learned profile ${site}.${stepId}: failures must be a non-negative integer`);

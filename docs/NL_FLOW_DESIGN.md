@@ -148,11 +148,16 @@ for step in steps:                                  # 序列推进；next 声明
 
 | 档 | 谁 | 何时命中 | 成本 |
 |---|---|---|---|
+| ② 档案映射 | 已学映射（`replays_ok`，站点级、过重放门） | 稳态（二跑起） | 零 |
 | ① 规则匹配 | 确定性关键词/同义词表 → 指令 | desc 含明确动词（"点击/进入/抽取"） | 零 |
-| ② 档案映射 | 已学映射（`replays_ok`） | 稳态（二跑起） | 零 |
 | ③ 模型窄问 | SystemOne choice 题：选项 = 指令闭集（5–10 个），题面 = 当前步 desc | ①② 落空 | 一次前向/请求 |
 | ④ 老师点名 | SystemTwo escalate（LLM 看 criteria view 点名指令） | ③ 不过闸 / CJK 首迁 | 一次调用 |
 | ⑤ 枚举裁决 | 按声明优先级逐条试，信号裁决，每条一次机会 | ③④ 都不在场（兜底） | 有界白跑 |
+
+> **②在①前（证据序，2026-10-15 实现时裁定）**：②③④⑤ 都是零/有界成本，排序按**证据强度**——
+> 站点级、过重放门的已验证映射强于全局关键词启发式。这也让 drift 臂收敛：坏映射撤下后
+> ① 才接管，而不是 ① 抢先命中把撤下的映射永远遮成死档（dead-rung 的教训：先分清
+> "接了没用"与"被遮住没用"）。
 
 设计要点：
 
@@ -241,7 +246,7 @@ for step in steps:                                  # 序列推进；next 声明
 |---|---|---|
 | **S0 实验台**（先测后立）**——✅ 工具已落地（`npm run nominate:measure`）；全语料数字见 `bench/instruction-nomination/REPORT.md`** | 冻结语料的 NL 步，测提名正确率：③ 真模型臂 vs `first-candidate` 基线 vs ⑤ 枚举（真值 = 已验收语料的**实际执行**） | 冻结产物 + 报告。**停止条件**：③ 正确率 ≤ 基线且 ⑤ 收回失败 ⇒ 设想降级为现状（声明指令 + 模型只挑元素），本文归档 |
 | **S1 数据集**——**✅ 已落地并过全量验收**（`verify` 1179/1179 + 六层对拍绿） | `dataset store`（`src/dataset.ts`：具名/溯源/generation 失效）+ `{from:"dataset"}` 绑定（第四来源）+ `RunOptions.dataset`（缺省 null 逐字节不变） | `tests/dataset.test.ts` 11 条：needs_value / 重跑失效（陈旧世代不可读）/ 溯源 / 坏档案报错 / 真执行器端到端 |
-| **S2 提名梯级**——**◐ 核心件 + 学习存储已落地**（`src/instructions.ts` 注册表 + `src/nominate.ts` 梯级 ①②③⑤ + `src/semantic-instructions.ts` 指令学习存储：档案 `instructions` 段、staged 回填门、drift 撤下、**读-合并-写**修掉双记忆实例的 lost-update；`tests/nominate.test.ts` 10 条 + `tests/semantic-instructions.test.ts` 13 条；S0 实验台已收敛到同一份实现——结构守卫钉住词表单一出处）；runner 接线与三臂试点未动 | ①②③⑤ 接 semantic-flow 试点（一个应用）；④ 挂既有 escalate | 首跑/二跑/漂移三臂；二跑零模型；删 `instr` 锁定即回到现状行为 |
+| **S2 提名梯级**——**◐ 已落地并过三臂 e2e**（核心：`src/instructions.ts` + `src/nominate.ts`，**②档案档在①规则前——证据序**，站点级已验证映射优先于全局启发式；数据面：`src/semantic-instructions.ts` 学习存储（档案 `instructions` 段 + staged 回填门 + drift 撤下 + 读-合并-写修 lost-update）；**试点接线：`semantic-flow` 的 `nominate`/`instr` 步**——`list_step` 降格为 list_pick 候选参数（值与规则仍是声明，红线②），runner 梯级裁决用不用它，list_pick 走确定性数据腿、过**指令回填门**（同运行重放）落盘，元素动作提名只进报告不落盘（其摊销证据属 hint 环）；list 分支补按本步 URL 的守卫导航。测试：`tests/nominate.test.ts` 11 + `tests/semantic-instructions.test.ts` 13 + `tests/semantic-nominate.test.ts` 11（含三臂 e2e：**学→摊销→drift 撤下→再学**））。**未做**：③模型窄问的 runner 接线（S0 实测 desc-only 下是死档，缺省姿势 ②①⑤）、S3 组合层 | ①②③⑤ 接 semantic-flow 试点（一个应用）；④ 挂既有 escalate | 首跑/二跑/漂移三臂；二跑零模型；删 `instr` 锁定即回到现状行为 |
 | **S3 组合与边** | 组合指令 DAG + `next` 贯通（spec_version 3 白名单扩 `next`） | `next_cycle` 上界；六层对拍 + `apps:gen --check` 逐字节 |
 | **S4 收口** | doctor/矩阵/套件三处加"提名账单"（各级出场/过关/救回，dead rung 自报） | 梯级账单同款；矩阵加"稳态成本"列 |
 
