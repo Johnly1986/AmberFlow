@@ -26,6 +26,8 @@ import { runApp, type AppRunResult } from "../src/app-runner.ts";
 import { checkArtifacts, missingPieces, modelConfigError } from "../src/model-artifacts.ts";
 import { createLayaOnnxRuntime } from "../src/laya-onnx.ts";
 import { installLayaRuntime, type DecisionAgent } from "../src/model.ts";
+import { ruleNominate } from "../src/nominate.ts";
+import { DEFAULT_ENUM_ORDER, instructionCriteria } from "../src/instructions.ts";
 
 /** 本工具不经执行器，直接问 agent；装运行时只为保持"谁在跑"的单一出处。 */
 function installLayaRuntimeSafe(rt: ReturnType<typeof createLayaOnnxRuntime>): void {
@@ -34,29 +36,12 @@ function installLayaRuntimeSafe(rt: ReturnType<typeof createLayaOnnxRuntime>): v
 
 /* ------------------------------------------------------------ 指令闭集与关键词梯级 */
 
-/** 提名的指令闭集（S2 注册表的运行面；`list_pick` 是数据规则组合，语料里真值不会是它）。 */
-const INSTRUCTIONS: Record<string, string> = {
-  click: "点击一个链接、按钮或控件（打开/进入/提交/记录）",
-  fill: "在一个文本输入框里填写文字（日期、名称、编号）",
-  select: "在一个下拉框里选择一个选项",
-  check: "勾选一个复选框或单选框",
-  list_pick: "从列表行里按数据规则选一行（最低价/最高价/最小/最大）",
-};
-const ORDER = Object.keys(INSTRUCTIONS);
-
 /**
- * 第①档：确定性关键词梯级（数据规则优先——"选择最低价"必须先撞 list_pick，
- * 才不会被 select 的"选择"吃掉）。没命中就是弃权（返回 null），梯级往下走。
+ * 提名的指令闭集与关键词梯级都**只活在 src/**（`instructions.ts` / `nominate.ts`）——
+ * 本工具是 S0 的考官，不自备词表（单一出处；改词表 = 换考卷，必须重跑 S0 并各记各数）。
  */
-export function ruleNominate(desc: string): string | null {
-  const d = desc.toLowerCase();
-  if (/最低价|最低|最便宜|最贵|最高价|最高|最小|最大|cheapest|lowest|highest/.test(d)) return "list_pick";
-  if (/勾选|复选|单选|勾上|check/.test(d)) return "check";
-  if (/下拉|选择.*(选项|航班|酒店|日期|房型)|(select).*(option|dropdown)/.test(d)) return "select";
-  if (/输入|填写|填入|键入|fill|type/.test(d)) return "fill";
-  if (/点击|单击|进入|打开|跳转|提交|搜索|记录|保存|click|open|press|submit|search/.test(d)) return "click";
-  return null;
-}
+const INSTRUCTIONS: Record<string, string> = instructionCriteria();
+const ORDER: string[] = [...DEFAULT_ENUM_ORDER];
 
 /** 真值提取：这一步**真的执行了**什么（从生产循环的 trace，不是从声明猜）。 */
 export function truthOf(hows: string[], descs: string[]): string | null {
