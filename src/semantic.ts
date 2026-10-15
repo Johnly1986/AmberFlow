@@ -27,6 +27,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { HintMemoryLike } from "./hint-memory.ts";
+import { INSTRUCTION_NAMES } from "./instructions.ts";
 
 /** 语义目标：模板携带的全部站点无关定位信息（代替硬 hint 成为模板默认）。 */
 export interface SemanticTarget {
@@ -169,13 +170,30 @@ export interface LearnedStepEntry {
   failures?: number;
 }
 
+/**
+ * 一个已学的**指令**条目（NL Flow S2，docs/NL_FLOW_DESIGN.md §7）：与 hint 条目同一套
+ * 纪律（replays_ok 只增、改写归零、连续失败 drift 撤下），存的是"这一步用哪条指令"。
+ */
+export interface LearnedInstructionEntry {
+  /** 必须在指令闭集内（`instructions.INSTRUCTION_NAMES`）——手改档案写出未知指令 = 响亮报错。 */
+  instruction: string;
+  replays_ok: number;
+  /** 提名来源（nominate.ts 的 via）：rule | model | teacher | enumerate——报告面用。 */
+  method?: "rule" | "model" | "teacher" | "enumerate";
+  /** 已学指令连续没让信号成立的次数（重放成功即清零）——drift 判定用。 */
+  failures?: number;
+}
+
 /** 一个站点的已学档案：只存学到的（authored 的站点知识在模板包里，不在这）。 */
 export interface LearnedSiteFile {
   host: string;
   steps: Record<string, LearnedStepEntry>;
+  /** NL Flow S2：指令学习段（可选；旧档案没有它照常加载——向后兼容）。 */
+  instructions?: Record<string, LearnedInstructionEntry>;
 }
 
 const ENTRY_METHODS = new Set(["laya", "escalate"]);
+const INSTRUCTION_METHODS = new Set(["rule", "model", "teacher", "enumerate"]);
 
 function validateLearned(site: string, file: LearnedSiteFile): void {
   if (typeof file.host !== "string" || !file.host) {
@@ -196,6 +214,28 @@ function validateLearned(site: string, file: LearnedSiteFile): void {
     }
     if (e.failures !== undefined && (!Number.isInteger(e.failures) || e.failures < 0)) {
       throw new Error(`learned profile ${site}.${stepId}: failures must be a non-negative integer`);
+    }
+  }
+  // NL Flow S2：指令段（可选）。指令名对闭集校验——档案是证据面，手改出闭集外的
+  // "指令"必须响亮报错，而不是运行期被 fail-closed 静默弃权（那会变成看不见的坏证据）。
+  if (file.instructions !== undefined) {
+    if (typeof file.instructions !== "object" || file.instructions === null || Array.isArray(file.instructions)) {
+      throw new Error(`learned profile ${site}: instructions must be an object`);
+    }
+    for (const [stepId, e] of Object.entries(file.instructions)) {
+      if (typeof e.instruction !== "string" || !INSTRUCTION_NAMES.includes(e.instruction)) {
+        throw new Error(`learned profile ${site}.${stepId}: instruction must be one of `
+          + `${INSTRUCTION_NAMES.join("|")} (got ${JSON.stringify(e.instruction)})`);
+      }
+      if (!Number.isInteger(e.replays_ok) || e.replays_ok < 0) {
+        throw new Error(`learned profile ${site}.${stepId}: replays_ok must be a non-negative integer`);
+      }
+      if (e.method !== undefined && !INSTRUCTION_METHODS.has(e.method)) {
+        throw new Error(`learned profile ${site}.${stepId}: method must be rule|model|teacher|enumerate`);
+      }
+      if (e.failures !== undefined && (!Number.isInteger(e.failures) || e.failures < 0)) {
+        throw new Error(`learned profile ${site}.${stepId}: failures must be a non-negative integer`);
+      }
     }
   }
 }
@@ -289,7 +329,13 @@ export class SiteProfileMemory implements HintMemoryLike {
     this.staged = opts.staged === true;
     this.readOnly = opts.readOnly === true;
     const learned = store.load(site);
-    this.file = { host: learned.host, steps: { ...baseSteps, ...learned.steps } };
+    // NL Flow S2：`instructions` 段原样携带——hint 回填落盘时不得把指令段悄悄丢掉
+    // （档案是证据面，半份档案比没有档案更糟）。
+    this.file = {
+      host: learned.host,
+      steps: { ...baseSteps, ...learned.steps },
+      ...(learned.instructions ? { instructions: learned.instructions } : {}),
+    };
   }
 
   /** 运行器在编译模板后注册（desc → stepId）；重复注册同一 desc 以最后一次为准。 */
@@ -442,7 +488,15 @@ export class SiteProfileMemory implements HintMemoryLike {
 
   private persist(): void {
     if (this.readOnly) return;
-    this.store.save(this.site, this.file);
+    // 读-合并-写：本类只拥有 steps 段——磁盘上可能有同运行另一个记忆实例（NL Flow 的
+    // 指令记忆）刚写下的 instructions 段，拿着构造时的旧快照整体写回会把它清掉
+    // （lost-update）。重读最新档案、只覆盖自己的段（段级并发，各写各的）。
+    const fresh = this.store.load(this.site);
+    this.store.save(this.site, {
+      host: fresh.host,
+      steps: this.file.steps,
+      ...(fresh.instructions ? { instructions: fresh.instructions } : {}),
+    });
   }
 
   private hashKey(instruction: string): string {

@@ -241,7 +241,7 @@ for step in steps:                                  # 序列推进；next 声明
 |---|---|---|
 | **S0 实验台**（先测后立）**——✅ 工具已落地（`npm run nominate:measure`）；全语料数字见 `bench/instruction-nomination/REPORT.md`** | 冻结语料的 NL 步，测提名正确率：③ 真模型臂 vs `first-candidate` 基线 vs ⑤ 枚举（真值 = 已验收语料的**实际执行**） | 冻结产物 + 报告。**停止条件**：③ 正确率 ≤ 基线且 ⑤ 收回失败 ⇒ 设想降级为现状（声明指令 + 模型只挑元素），本文归档 |
 | **S1 数据集**——**✅ 已落地并过全量验收**（`verify` 1179/1179 + 六层对拍绿） | `dataset store`（`src/dataset.ts`：具名/溯源/generation 失效）+ `{from:"dataset"}` 绑定（第四来源）+ `RunOptions.dataset`（缺省 null 逐字节不变） | `tests/dataset.test.ts` 11 条：needs_value / 重跑失效（陈旧世代不可读）/ 溯源 / 坏档案报错 / 真执行器端到端 |
-| **S2 提名梯级**——**◐ 核心件已落地**（`src/instructions.ts` 注册表 + `src/nominate.ts` 梯级 ①②③⑤，`tests/nominate.test.ts` 10 条；S0 实验台已收敛到同一份实现——结构守卫钉住词表单一出处）；试点接线未动 | ①②③⑤ 接 semantic-flow 试点（一个应用）；④ 挂既有 escalate | 首跑/二跑/漂移三臂；二跑零模型；删 `instr` 锁定即回到现状行为 |
+| **S2 提名梯级**——**◐ 核心件 + 学习存储已落地**（`src/instructions.ts` 注册表 + `src/nominate.ts` 梯级 ①②③⑤ + `src/semantic-instructions.ts` 指令学习存储：档案 `instructions` 段、staged 回填门、drift 撤下、**读-合并-写**修掉双记忆实例的 lost-update；`tests/nominate.test.ts` 10 条 + `tests/semantic-instructions.test.ts` 13 条；S0 实验台已收敛到同一份实现——结构守卫钉住词表单一出处）；runner 接线与三臂试点未动 | ①②③⑤ 接 semantic-flow 试点（一个应用）；④ 挂既有 escalate | 首跑/二跑/漂移三臂；二跑零模型；删 `instr` 锁定即回到现状行为 |
 | **S3 组合与边** | 组合指令 DAG + `next` 贯通（spec_version 3 白名单扩 `next`） | `next_cycle` 上界；六层对拍 + `apps:gen --check` 逐字节 |
 | **S4 收口** | doctor/矩阵/套件三处加"提名账单"（各级出场/过关/救回，dead rung 自报） | 梯级账单同款；矩阵加"稳态成本"列 |
 
