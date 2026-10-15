@@ -86,6 +86,13 @@ export interface AppRunOptions {
    * 默认关：普通运行不需要多付一次页面扫描。
    */
   captureState?: boolean;
+  /**
+   * S0（NL Flow，docs/NL_FLOW_DESIGN.md §10-S0）：把每个浏览器子目标的执行证据带进结果
+   * （`step_traces`：desc / 状态 / 每一步的 how、desc、method）。提名实验台用它从
+   * **已验收语料的实际执行**里取真值指令（truth = 这一步真的执行了什么动作）。
+   * 默认关：不开时结果 JSON 与今天逐字节相同（缺省等价纪律，`end_state` 同款）。
+   */
+  captureTraces?: boolean;
   modelId?: string;
   /**
    * 本次运行跑在哪个模型层级：`on`（真模型，**默认**）/ `off(missing)`（产物不齐，如实降级）/
@@ -344,6 +351,22 @@ export interface AppRunResult {
   hint_memory?: { path: string | null; entries: number; used: number; rejected: number };
   /** `captureState: true` 时的旅程结束状态（见 `RunOptions.captureState`）。 */
   end_state?: StateView;
+  /**
+   * S0（NL Flow）：`captureTraces: true` 时的每浏览器步执行证据。缺字段 = 没开
+   * （缺省等价的纪律：新字段不该只是"多一行没人看的数"）。
+   */
+  step_traces?: Array<{
+    index: number;
+    id: string | null;
+    desc: string;
+    status: string;
+    /** 每个执行过的动作的 `how`（clicked / filled / …）。 */
+    hows: string[];
+    /** 每个执行过的动作的人读描述（`click button "…"` / `type text into select …`）。 */
+    descs: string[];
+    /** 全部 trace 行的判定方式（与 `decisions.ladder` 同一口径）。 */
+    methods: string[];
+  }>;
 }
 
 /** 跑一个工具步：干跑（若声明）→ 确认（若不可逆）→ apply（按幂等性决定重试）。 */
@@ -596,6 +619,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const invariantResults: AppInvariantResult[] = [];
   /** 每一步的判定方式（trace 原样收集）——P1 的出场率/挽回数从这儿数出来，不另造机制。 */
   const decisionSteps: TraceStep[] = [];
+  // S0（NL Flow）：`captureTraces` 开着才收集（见 AppRunOptions.captureTraces）。
+  const stepTraces: NonNullable<AppRunResult["step_traces"]> = [];
   // 浏览器步在 `plan.subgoals` 里的下标：`next` 允许跳步，所以不能再靠一个自增计数器
   // （那是"位置即身份"，而边是按**名字**声明的）。
   const browserIndexOf: number[] = [];
@@ -636,6 +661,18 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
         const { rep, attempt, steps } = await runSubgoalWithRetries(
           mw as never, sg, plan, sg.start_url ?? "", shell.page, shell.pw, verbose);
         decisionSteps.push(...steps);
+        if (opts.captureTraces) {
+          const executed = rep.steps.filter((t) => t.executed);
+          stepTraces.push({
+            index: step.index ?? i,
+            id: step.id ?? null,
+            desc: sg.desc,
+            status: rep.done ? (rep.skipped ? "skipped" : "done") : "blocked",
+            hows: executed.map((t) => String(t.how ?? "")),
+            descs: executed.map((t) => String(t.desc ?? "")),
+            methods: rep.steps.map((t) => String(t.method ?? "")).filter(Boolean),
+          });
+        }
         sg.status = rep.done ? (rep.skipped ? "skipped" : "done") : "blocked";
         sg.attempts = attempt;
         sg.obstacle = rep.done ? null : rep.stop_reason;
@@ -716,6 +753,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     roles_used: expanded.rolesUsed, slots: expanded.slots,
     completed: `${doneCount}/${expanded.steps.length}`,
     subgoals, tool_steps: toolSteps, invariants: invariantResults,
+    ...(opts.captureTraces ? { step_traces: stepTraces } : {}),
     // 只在**真的走回来过**时才写这个字段：声明了 id 但没走边的包，结果 JSON 与今天一模一样
     // （缺省等价的纪律：新字段不该只是"多一行没人看的数"）。
     ...(Object.values(walk.visits()).some((n) => n > 1) ? { path_visits: walk.visits() } : {}),

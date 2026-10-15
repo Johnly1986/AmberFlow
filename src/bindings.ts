@@ -11,14 +11,15 @@
  *      未知来源 / 未知匹配规则 / 空键来源 / `option` 用在看不见选项的 op 上 ⇒ 加载期红。
  *   2. **运行期解析**：`resolveBinding` 是**纯函数**（声明 × 当次观察 → 值或结构化缺值原因）。
  *
- * 红线②（不发明取值）在这里的落地形式：**模型永远不参与选值**——只有三种来源，
- * 且每一种都必须由声明点名：
+ * 红线②（不发明取值）在这里的落地形式：**模型永远不参与选值**——来源面四种
+ * （NL Flow S1 起加 `dataset`，docs/NL_FLOW_DESIGN.md §2.3/§5），且每一种都必须由声明点名：
  *
  * | 来源 | 形状 | 今天的前身 |
  * |---|---|---|
  * | 用户参数 / 计划槽（**绑定**，不是候选） | `{"from":"slot","key":"…"}` | `--slot k=v`、`plan.slots` |
  * | 页面候选 + **声明规则** | `{"from":"option","key":"…","match":"value\|label\|contains"}` | `<select>` 的 label→value 两候选回退 |
  * | 列表行 + **数据规则** | `{"from":"list","by":"price","order":"min\|max"}` | `list_extract` → `datasource.selectIndex` |
+ * | 前序步骤的具名产出（**数据集**，现读最新 generation） | `{"from":"dataset","key":"…"}` | ——（NL Flow S1 新增；`src/dataset.ts`） |
  *
  * 两条纪律，与 hint 的 P1 同款：
  *   - **分档匹配、档内歧义 = 弃权**（fail closed）：`option` 的匹配按
@@ -28,9 +29,10 @@
  *     `datasource.selectIndex`——浏览器侧与数据侧共用同一实现（`list_step` 也走这里）。
  */
 import { selectIndex } from "./datasource.ts";
+import type { DatasetReader } from "./dataset.ts";
 
 /** 引擎能力面：参数来源（代码，不是用户词表）。 */
-export const BINDING_SOURCES = ["slot", "option", "list"] as const;
+export const BINDING_SOURCES = ["slot", "option", "list", "dataset"] as const;
 export type BindingSource = (typeof BINDING_SOURCES)[number];
 /** 页面候选的声明式匹配规则（红线②：规则必须声明，不接受"看着像就填"）。 */
 export const OPTION_MATCHES = ["value", "label", "contains"] as const;
@@ -56,7 +58,15 @@ export interface ListBinding {
   by: string;
   order: ListOrder;
 }
-export type ValueBinding = SlotBinding | OptionBinding | ListBinding;
+/**
+ * 数据集绑定（NL Flow S1）：引用一个**前序步骤的具名产出**，解析那一刻现读最新
+ * generation——陈旧世代不可读（`DatasetReader.read` 对它返回 null ⇒ 结构化缺值）。
+ */
+export interface DatasetBinding {
+  from: "dataset";
+  key: string;
+}
+export type ValueBinding = SlotBinding | OptionBinding | ListBinding | DatasetBinding;
 
 /** 当次观察到的页面候选（`<select>` 的 option：机器值 + 人读标签）。 */
 export interface OptionCandidate {
@@ -69,6 +79,8 @@ export interface BindingContext {
   slots?: Record<string, unknown>;
   options?: readonly OptionCandidate[];
   rows?: readonly Record<string, unknown>[];
+  /** NL Flow S1：数据集读取面（`dataset` 来源；运行方没给 ⇒ 该来源结构化失败，不猜）。 */
+  dataset?: DatasetReader;
 }
 
 export type BindingOutcome =
@@ -100,10 +112,12 @@ export function isValueBinding(v: unknown): v is ValueBinding {
  * @param opts.slotKeys - 给了就校"槽位键必须声明过"（应用包层传 merged slots 的键）。
  * @param opts.op - 命令的 op；`option` 只对能看见选项的 op（`select`）成立，加载期就拒绝。
  * @param opts.allowList - 是否允许 `list` 来源（只有数据腿 `list_step` 消费行；命令闭集不消费）。
+ * @param opts.datasetKeys - 给了就校"数据集键必须声明过"（NL Flow：步骤 `gives` 契约的并集；
+ *   缺省只校形状——plan 层加载时还不知道运行期会产出什么）。
  */
 export function validateBinding(
   value: unknown, where: string, problems: string[],
-  opts: { slotKeys?: ReadonlySet<string>; op?: string; allowList?: boolean } = {},
+  opts: { slotKeys?: ReadonlySet<string>; op?: string; allowList?: boolean; datasetKeys?: ReadonlySet<string> } = {},
 ): void {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     problems.push(`${where}: value must be {from:'slot',key} | {from:'option',key,match} | {from:'list',by,order}`);
@@ -143,6 +157,16 @@ export function validateBinding(
     }
     return;
   }
+  if (from === "dataset") {
+    // NL Flow S1：值来自**前序步骤的具名产出**（src/dataset.ts），不是任何人的临场发挥。
+    const key = v["key"];
+    if (typeof key !== "string" || !key.trim()) {
+      problems.push(`${where}: value.key must be a non-empty dataset entry name`);
+    } else if (opts.datasetKeys !== undefined && !opts.datasetKeys.has(key)) {
+      problems.push(`${where}: value.key ${JSON.stringify(key)} is not a declared dataset entry (known: ${[...opts.datasetKeys].join(", ") || "none"})`);
+    }
+    return;
+  }
   // from === "list"
   if (!opts.allowList) {
     problems.push(`${where}: an 'list' source picks a ROW, which no command op consumes — declare it on a list_step (the data leg), not on commands`);
@@ -168,9 +192,11 @@ export function asBinding(value: unknown): ValueBinding {
 /**
  * 运行期解析（纯函数）：声明 × 当次观察 → 值，或**结构化缺值原因**。
  *
- * 三条来源各自 fail closed：
+ * 四条来源各自 fail closed：
  *   - `slot`：袋里没有那个键 ⇒ 失败（值不在计划里就停下来，绝不猜）。
  *   - `option`：没有观察到候选 / 三档都没命中 / 档内歧义 ⇒ 失败。
+ *   - `dataset`（NL Flow S1）：运行方没给数据集 / 键从未写入 / 已被重跑失效 ⇒ 失败
+ *     （陈旧世代不可读，错误停在当步而不是级联）。
  *   - `list`：没有行 / 该列在**所有**行上都为空 ⇒ 失败（`selectIndex` 对全空列会返回第 0 行，
  *     那是"没有数据时挑第一行"，不是声明式选择，所以这里先拦）。
  */
@@ -242,6 +268,30 @@ export function resolveBinding(binding: ValueBinding, ctx: BindingContext = {}):
       ok: false,
       reason: `none of the observed candidates matched ${JSON.stringify(want)} for ${JSON.stringify(binding.key)}`
         + ` (rule '${binding.match}'; ${options.length} candidate(s) observed)`,
+    };
+  }
+
+  if (binding.from === "dataset") {
+    // NL Flow S1：现读**最新 generation**；读不到（没写 / 已失效）就是结构化缺值——
+    // 防第 5 步用到第 3 步的陈旧值静默级联（设计文档 §2.3 规则 3）。
+    if (!ctx.dataset) {
+      return {
+        ok: false,
+        reason: `no dataset was provided in this context`
+          + ` (the 'dataset' source reads a previous step's named output; the runner supplied none)`,
+      };
+    }
+    const entry = ctx.dataset.read(binding.key);
+    if (entry === null) {
+      return {
+        ok: false,
+        reason: `dataset key ${JSON.stringify(binding.key)} has no readable value`
+          + ` (never written, or invalidated by a rerun — stale generations are unreadable)`,
+      };
+    }
+    return {
+      ok: true, value: entry.value, index: null,
+      via: `dataset:${binding.key}(gen ${entry.generation} by ${entry.writtenBy})`,
     };
   }
 

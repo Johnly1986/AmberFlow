@@ -2,8 +2,8 @@
  * P3 数据槽层（docs/ARCHITECTURE_REVIEW.md §6.1 的"数据槽层"行 + §7-P3 行）。
  *
  * 三件事各钉一组：
- *   ① 声明半：规则**必须声明**（没有 match/order 就是加载期红）；来源面只有三种；
- *      `option` 只能挂在看得见候选的 op 上；`list` 只接数据腿。
+ *   ① 声明半：规则**必须声明**（没有 match/order 就是加载期红）；来源面四种
+ *      （NL Flow S1 起加 `dataset`）；`option` 只能挂在看得见候选的 op 上；`list` 只接数据腿。
  *   ② 运行期解析：分档匹配、**档内歧义即弃权**；没有候选 / 全空列 / 空行集都是结构化失败，
  *      绝不"挑一个"。
  *   ③ 端到端：真 `<select>` 上走 `commands` 的 `option` 绑定（机器值 ≠ 人读标签），
@@ -48,16 +48,17 @@ afterAll(async () => { await browser?.close(); installLayaRuntime(null); });
 
 /* ------------------------------------------------------------------ ① 声明半 */
 
-describe("数据槽层声明半：规则必须声明，来源面只有三种", () => {
-  it("三条来源的合法形状全过；能力面就是这三个名字", () => {
+describe("数据槽层声明半：规则必须声明，来源面四种（S1 起 dataset）", () => {
+  it("四条来源的合法形状全过；能力面就是这四个名字", () => {
     expect(problems({ from: "slot", key: "q" }, { slotKeys: new Set(["q"]) })).toEqual([]);
     expect(problems({ from: "option", key: "checkin", match: "value" }, { slotKeys: new Set(["checkin"]), op: "select" })).toEqual([]);
     expect(problems({ from: "list", by: "price", order: "min" }, { allowList: true })).toEqual([]);
+    expect(problems({ from: "dataset", key: "chosen_fare" }, { datasetKeys: new Set(["chosen_fare"]) })).toEqual([]);
   });
 
   it("未知来源 ⇒ 红（`model` 不是一条来源——红线②）", () => {
     expect(problems({ from: "model", key: "x" })[0])
-      .toMatch(/value\.from must be one of slot\|option\|list \(got "model"\)/);
+      .toMatch(/value\.from must be one of slot\|option\|list\|dataset \(got "model"\)/);
   });
 
   it("option 必须声明 match（不声明规则 = 猜），未知 match 也红", () => {

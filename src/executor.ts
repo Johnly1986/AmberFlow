@@ -97,6 +97,7 @@ import { checkSignal, type SignalSpec } from "./signals.ts";
 import { LayaNotConfiguredError, type LayaRuntime } from "./model.ts";
 import { induceHint } from "./hint-memory.ts";
 import { instantiateSpace, resolveCommandValue, type CommandDecl } from "./actions.ts";
+import type { DatasetReader } from "./dataset.ts";
 import { optionCandidatesFrom, type OptionCandidate } from "./bindings.ts";
 
 /* ------------------------------------------------------------------ shapes */
@@ -332,6 +333,14 @@ export interface RunOptions {
    * Absent ⇒ today's behaviour, byte-identical.
    */
   commands?: CommandDecl[] | null;
+  /**
+   * NL Flow S1（docs/NL_FLOW_DESIGN.md §2.3/§5）：`dataset` 绑定来源的读取面。
+   * 命令参数可声明 `{"from":"dataset","key":"…"}` 引用**前序步骤的具名产出**；
+   * 解析在绑定那一刻现读最新 generation——陈旧世代不可读。缺省 null ⇒ 该来源
+   * 结构化 `needs_value`（没有数据集就没有值，绝不猜）。不声明 dataset 绑定的包：
+   * 行为逐字节不变。
+   */
+  dataset?: DatasetReader | null;
   /**
    * §4：这一步的**可逆性**声明（来自 `pack` 的 `effect`）。它改变的是"闸门相不相信关键词/模型票"，
    * 不改变任何缺省行为：不写 = 今天（DESTRUCTIVE_PATTERNS + 模型票）。
@@ -1510,6 +1519,7 @@ export class BrowserMiddleware {
       hosts = null,
       tieredHint = this.tieredHint,
       commands = null,
+      dataset = null,
       effect,
       adjudicate = false,
     } = opts;
@@ -1773,7 +1783,7 @@ export class BrowserMiddleware {
             const boundEl = elems[cmdPick.ref];
             boundOptions = boundEl ? await this._optionCandidates(pg, boundEl) : [];
           }
-          const rv = resolveCommandValue(cmdPick.cmd, slots, { options: boundOptions });
+          const rv = resolveCommandValue(cmdPick.cmd, slots, { options: boundOptions, dataset: dataset ?? undefined });
           if (!rv.ok) commandBindMissing = rv.reason;
           else {
             commandValue = rv.value;

@@ -29,6 +29,7 @@ import {
   isValueBinding, resolveBinding, validateBinding,
   type OptionCandidate, type ValueBinding,
 } from "./bindings.ts";
+import type { DatasetReader } from "./dataset.ts";
 import type { ElemPool } from "./extraction.ts";
 
 /** 引擎能力面的动词表（代码）。新增一个面/原语是新 provider，不是在配置里造词。 */
@@ -49,9 +50,10 @@ export interface CommandDecl {
   op: CommandOp | string;         // 字符串收进来，`validateCommands` 对着 COMMAND_OPS 校
   target?: string;
   /**
-   * 参数**绑定**（P3 起有三种来源，见 `bindings.ts`）：`slot`（计划数据袋）、
-   * `option`（当次观察到的页面候选 + 声明的匹配规则）、`list`（行集 + 声明的排序规则）。
-   * 三条来源都要求声明点名；没有"看着像就填"这一档。
+   * 参数**绑定**（P3 起有三种来源，NL Flow S1 起四种，见 `bindings.ts`）：
+   * `slot`（计划数据袋）、`option`（当次观察到的页面候选 + 声明的匹配规则）、
+   * `list`（行集 + 声明的排序规则）、`dataset`（前序步骤的具名产出，现读最新 generation）。
+   * 全部要求声明点名；没有"看着像就填"这一档。
    */
   value?: ValueBinding;
 }
@@ -171,12 +173,12 @@ export function instantiateSpace(
  */
 export function resolveCommandValue(
   decl: CommandDecl, slots: Record<string, unknown>,
-  ctx: { options?: readonly OptionCandidate[] } = {},
+  ctx: { options?: readonly OptionCandidate[]; dataset?: DatasetReader } = {},
 ): { ok: true; value: unknown } | { ok: false; reason: string } {
   if (!decl.value) return { ok: false, reason: "no declared binding" };
   if (!isValueBinding(decl.value)) {
     return { ok: false, reason: `unsupported value source ${JSON.stringify((decl.value as { from?: unknown }).from)}` };
   }
-  const r = resolveBinding(decl.value, { slots, options: ctx.options });
+  const r = resolveBinding(decl.value, { slots, options: ctx.options, dataset: ctx.dataset });
   return r.ok ? { ok: true, value: r.value } : { ok: false, reason: r.reason };
 }

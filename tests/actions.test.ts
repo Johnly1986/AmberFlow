@@ -73,10 +73,10 @@ describe("命令层声明半：对着引擎能力面校验", () => {
 
   it("fill 缺 value ⇒ 红；参数来源不在能力面上 ⇒ 红（红线②落地）", () => {
     expect(problems([{ id: "f", op: "fill", target: "#q" }])[0]).toMatch(/needs value/);
-    // P3 把来源面从 slot 扩到 slot|option|list（bindings.BINDING_SOURCES），
+    // P3 把来源面从 slot 扩到 slot|option|list，NL Flow S1 再扩到 dataset（bindings.BINDING_SOURCES），
     // 但"谁选值"一个字没松：`model` 仍然不是一条来源。
     expect(problems([{ id: "f", op: "fill", target: "#q", value: { from: "model", key: "x" } as never }])
-      .some((p) => /value\.from must be one of slot\|option\|list \(got "model"\)/.test(p))).toBe(true);
+      .some((p) => /value\.from must be one of slot\|option\|list\|dataset \(got "model"\)/.test(p))).toBe(true);
   });
 
   it("参数键必须声明过（给了 slotKeys 就顺带校）", () => {

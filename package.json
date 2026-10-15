@@ -58,6 +58,7 @@
     "agent": "node --experimental-strip-types tools/learn.ts --json --yes",
     "metrics": "node --experimental-strip-types tools/arch-metrics.ts",
     "gate:signals": "node --experimental-strip-types tools/gate-signals.ts",
+    "nominate:measure": "node --experimental-strip-types tools/instruction_nomination.ts",
     "providers:baseline": "node --experimental-strip-types tools/provider-baselines.ts"
   },
   "devDependencies": {
