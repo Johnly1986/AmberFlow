@@ -148,8 +148,10 @@ console.log(rep.completed, rep.traces.length);
 | 变量 | 作用 |
 |---|---|
 | `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR` | 本地决策模型产物位置（缺了走规则模式） |
-| `AMBERFLOW_DECISION_PROVIDER` | 选决策提供者：`laya-onnx`（默认）/ `scripted-stub` / `none` / 基线 / `jevk5` |
+| `AMBERFLOW_DECISION_PROVIDER` | 选决策提供者：`laya-onnx`（默认）/ `scripted-stub` / `none` / 基线 / `jevk5` / `bailian` |
 | `JEVK5_ENDPOINT` | JevK5 的 `/v1/systemone` 地址（`--provider jevk5` 时用；起法见 docs/DECISION_PROVIDER_JEVK5.md） |
+| `DASHSCOPE_API_KEY`（别名 `BAILIAN_API_KEY`） | 百炼决策模型的 API token（`--provider bailian` 时用）——**只进环境变量，绝不写进代码/产物/提交** |
+| `BAILIAN_ENDPOINT` 或 `BAILIAN_WORKSPACE_ID`(+`BAILIAN_REGION`) | 百炼 systemone 端点（workspace 作用域）；起法见 docs/DECISION_PROVIDER_BAILIAN.md |
 | `OPENAI_BASE_URL` + `OPENAI_API_KEY` | 启用 LLM 规划与审计（不配则用内置替身，流程照常） |
 | `AMBERFLOW_REPO` | DSH 桥指向的 checkout（旧名 `LAYAWEBUSE_REPO` 仍兼容） |
 

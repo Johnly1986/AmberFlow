@@ -151,7 +151,7 @@
 <text x="58" y="808" class="lay">⑥ 决策层 — 可插拔提供者与它的账（实测咨询 0/5 步、独立决定 0）</text>
 <rect x="60" y="818" width="470" height="62" class="bxm"/>
 <text x="71" y="837" class="t" font-size="12.5">决策提供者注册表（decision-provider.ts）</text>
-<text x="71" y="853" class="s">laya-onnx（默认）| stub | none | jevk5 | 自注册；--provider 选</text>
+<text x="71" y="853" class="s">laya-onnx | stub | none | jevk5 | bailian | 自注册（--provider）</text>
 <text x="71" y="867" class="sm">基线对照：first-candidate 是新模型要赢的线（providers:baseline）</text>
 <rect x="540" y="818" width="306" height="62" class="bxm"/>
 <text x="551" y="837" class="t" font-size="12.5">laya-onnx.ts + Router</text>
@@ -177,7 +177,7 @@
 <text x="58" y="970" class="lay">⑦ 验收层 — 结论必须能被命令复现（跳过 ≠ 通过）</text>
 <rect x="60" y="980" width="276" height="60" class="bxe"/>
 <text x="71" y="999" class="t" font-size="12.5">npm run verify</text>
-<text x="71" y="1015" class="s">typecheck + 1145 条测试 + 六层对拍</text>
+<text x="71" y="1015" class="s">typecheck + 1157 条测试 + 六层对拍</text>
 <rect x="346" y="980" width="276" height="60" class="bxe"/>
 <text x="357" y="999" class="t" font-size="12.5">bench/smoke.sh（CI 的绿色唯一定义）</text>
 <text x="357" y="1015" class="s">离线无条件；模型侧缺产物打 SKIP 并跳过</text>
@@ -243,6 +243,6 @@
 <rect x="40" y="1066" width="1480" height="96" class="band red"/>
 <text x="58" y="1090" class="foot" font-weight="700">四条红线（每条都有测试与门禁撑着，不是口号）</text>
 <text x="58" y="1110" class="foot">① 不重规划——任务开始即冻结计划；② 不发明取值——填的值只来自数据袋（slots/具名绑定，模型无权产生值）；③ 不信模型说"完成"——只认该步 DOM/URL 信号；④ 不可复现即拒存——零模型重放门不过一个文件都不落，危险步先干跑取证再点头。</text>
-<text x="58" y="1130" class="foot">实测口径（单一出处 docs/arch-metrics.json，generated_at 2026-10-14）：浏览器步 171/171 全由声明解决（169 用 hint 点名 = 98.8%，其余 2 步走命令闭集）；真模型臂 2 应用 5 步里咨询 0、独立决定 0——兜底与诊断，不是承重件。</text>
+<text x="58" y="1130" class="foot">实测口径（单一出处 docs/arch-metrics.json，generated_at 2026-10-15）：浏览器步 171/171 全由声明解决（169 用 hint 点名 = 98.8%，其余 2 步走命令闭集）；真模型臂 2 应用 5 步里咨询 0、独立决定 0——兜底与诊断，不是承重件。</text>
 <text x="58" y="1152" class="foot">开箱：`npm ci &amp;&amp; npx playwright install chromium &amp;&amp; npm start` 两条命令见结果；无权重走规则模式（缺件点名+补齐命令）；`npm start -- --goal … --url …` 演示一次即归纳；`plan:flow` 一句话即编译。</text>
 </svg>

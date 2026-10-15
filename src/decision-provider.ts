@@ -229,6 +229,9 @@ export async function resolveProviderSpec(
   // 所以 doctor 能列出它，而没起服务时错误信息会指路，而不是"未知 provider"）。
   const { registerJevK5 } = await import("./decision-jevk5.ts");
   await registerJevK5();
+  // 百炼 decision-model-preview：同样注册不需要 key/端点，真调用缺了才报错指路。
+  const { registerBailian } = await import("./decision-bailian.ts");
+  await registerBailian();
   const extra = listDecisionProviders().filter(
     (n) => !(BASELINE_PROVIDERS as readonly string[]).includes(n)
       && !(BUILTIN_LAYA_PROVIDERS as readonly string[]).includes(n));

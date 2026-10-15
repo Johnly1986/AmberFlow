@@ -446,6 +446,13 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     return 0;
   }
   if (v.doctor) {
+    // 外部 provider 的注册**不需要权重/服务在场**（只有真调用才需要）——先注册，
+    // 体检才列得出"能选谁"（jevk5 / bailian）。否则 doctor 的 provider 行会漏掉它们，
+    // 而代码注释早就声称"doctor 能列出它"——这里把那句话变成真的。
+    const { registerJevK5 } = await import("./decision-jevk5.ts");
+    const { registerBailian } = await import("./decision-bailian.ts");
+    await registerJevK5();
+    await registerBailian();
     const report = doctorReport(preflight());
     for (const l of report.lines) io.out(l);
     return report.ok ? 0 : 2;
