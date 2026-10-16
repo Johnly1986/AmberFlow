@@ -69,6 +69,16 @@ describe("①校验：instr 闭集、锁要求 nominate、提名步不许 danger
     expect(problemsOf([{ id: "s", desc: "d", page: "home", signal: { page: "done" }, nominate: true, instr: "click" }]))
       .toEqual([]);
   });
+
+  it("锁到不可执行的指令 ⇒ 红（复核实测：曾经放行 → 运行期静默降级 + 谎报提名）", () => {
+    // `list_pick` 的参数（op/by/act）是声明的；没有 list_step 候选就执行不了这条指令。
+    const p = problemsOf([{ id: "s", desc: "d", page: "home", signal: { page: "done" },
+      nominate: true, instr: "list_pick" }]);
+    expect(p.some((x) => /instr "list_pick" needs a list_step candidate/.test(x))).toBe(true);
+    // 带候选参数就合法（行选择器仍在档案里，运行期由 list_extract 提供）
+    expect(problemsOf([{ id: "s", desc: "d", page: "home", signal: { page: "done" },
+      nominate: true, instr: "list_pick", list_step: { op: "min", by: "price", act: "row" } }])).toEqual([]);
+  });
 });
 
 describe("②编译：nominate 步把 list_step 降格为 list_pick 候选参数", () => {
@@ -149,7 +159,7 @@ const PAGE = (body: string): string =>
   `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>t</title></head><body>${body}</body></html>`;
 
 /** 提名试点夹具：一张票价表 + act 按钮 → done 页；act_sel 可注入坏值（drift 臂用）。 */
-function nominateApp(opts: { actSel: string }): { appsDir: string; site: string; profileDir: string; fixAct: () => void } {
+function nominateApp(opts: { actSel: string; instr?: string }): { appsDir: string; site: string; profileDir: string; fixAct: () => void } {
   const appsDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-nom-"));
   const dir = path.join(appsDir, "flight-nominate");
   const pagesDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-nom-pages-"));
@@ -169,6 +179,7 @@ function nominateApp(opts: { actSel: string }): { appsDir: string; site: string;
     steps: [{
       id: "pick", desc: "记录当前列表最低价航班", page: "home", nominate: true,
       list_step: { op: "min", by: "price", act: "row" },
+      ...(opts.instr ? { instr: opts.instr } : {}),
       signal: { page: "done" },
     }],
     invariants: [],
@@ -236,6 +247,8 @@ describe("S2 试点 e2e（真 chromium）：学 → 摊销 → drift 撤下 → 
     expect(r2.ok).toBe(false);
     expect(r2.drift.length).toBe(1);
     expect(r2.drift[0]).toMatchObject({ step: "pick", hint: "list_pick", failures: 2 });
+    // S4 账单：②档出场 1、drift 1——与报告行同一份账（不是另算一个数）
+    expect(r2.nominate_bill).toMatchObject({ via: { learned: 1 }, drift: 1 });
     expect(JSON.parse(fs.readFileSync(profPath, "utf-8")).instructions.pick).toBeUndefined();
     // 修好 act_sel → run3：②已空、①规则接管 list_pick → done → 再学（重放门落盘）
     app.fixAct();
@@ -244,5 +257,66 @@ describe("S2 试点 e2e（真 chromium）：学 → 摊销 → drift 撤下 → 
     expect(r3.steps.find((s) => s.id === "pick")!.nominated).toEqual({ instruction: "list_pick", via: "rule" });
     const after3 = JSON.parse(fs.readFileSync(profPath, "utf-8"));
     expect(after3.instructions.pick).toMatchObject({ instruction: "list_pick", replays_ok: 1 });
+  });
+
+  it("`instr` 锁：跳过梯级（via locked）、仍过重放门落盘（method 如实记 locked）", { timeout: 180_000 }, async () => {
+    const app = nominateApp({ actSel: ".btn-pick", instr: "list_pick" });
+    const r = await runFlow("flight-nominate", app.site, {
+      appsDir: app.appsDir, profileDir: app.profileDir, laya: "scripted", verbose: false,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.steps.find((s) => s.id === "pick")!.nominated).toEqual({ instruction: "list_pick", via: "locked" });
+    const prof = JSON.parse(fs.readFileSync(path.join(app.profileDir, "site-x.profile.json"), "utf-8"));
+    expect(prof.instructions.pick).toMatchObject({ instruction: "list_pick", replays_ok: 1, method: "locked" });
+    expect(r.nominate_bill).toMatchObject({ via: { locked: 1 }, committed: 1 });
+  });
+
+  it("消融口 --no-verify-backfill 同款：按现状落盘但 replays_ok 停在 0（没验过如实可见）", { timeout: 180_000 }, async () => {
+    const app = nominateApp({ actSel: ".btn-pick" });
+    const r = await runFlow("flight-nominate", app.site, {
+      appsDir: app.appsDir, profileDir: app.profileDir, laya: "scripted", verbose: false,
+      verifyBackfill: false,
+    });
+    expect(r.ok).toBe(true);
+    const prof = JSON.parse(fs.readFileSync(path.join(app.profileDir, "site-x.profile.json"), "utf-8"));
+    expect(prof.instructions.pick).toMatchObject({ instruction: "list_pick", replays_ok: 0 });
+    expect(r.nominate_bill).toMatchObject({ via: { rule: 1 }, committed: 1 });
+  });
+
+  it("已知边界（钉子）：元素动作提名**不约束**执行器的动作分类——试点只强制 list_pick 轴", { timeout: 180_000 }, async () => {
+    // 锁 click、语义目标落到一个按钮：执行器照旧按元素类型执行。报告如实记
+    // via=locked/instruction=click，但**这不是"指令被强制执行"的证据**——
+    // 元素动作的指令约束要等 S3 组合层。本钉子防的是把这条边界读成"已强制"。
+    const appsDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-click-"));
+    const dir = path.join(appsDir, "flight-nominate");
+    const pagesDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-click-pages-"));
+    fs.writeFileSync(path.join(pagesDir, "home.html"),
+      PAGE('<button data-test="go" onclick="location.href=\'done.html\'">前往</button>'), "utf-8");
+    fs.writeFileSync(path.join(pagesDir, "done.html"), PAGE("<h1>done</h1>"), "utf-8");
+    fs.mkdirSync(path.join(dir, "sites"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "flow.json"), JSON.stringify({
+      spec_version: 2, id: "flight-nominate", label: "x", goal: "x", model: "english", slots: {},
+      sites: { "site-x": { label: "site-x", start_url: `file://${path.join(pagesDir, "home.html")}` } },
+      pages: { home: "home.html", done: "done.html" },
+      steps: [{ id: "pick", desc: "open the result page", page: "home", nominate: true, instr: "click",
+        semantic_target: { role: "button", text: "前往" }, signal: { page: "done" } }],
+      invariants: [],
+    }, null, 2), "utf-8");
+    fs.writeFileSync(path.join(dir, "sites", "site-x.profile.json"),
+      JSON.stringify({ spec_version: 2, site: "site-x" }, null, 2), "utf-8");
+    const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-click-prof-"));
+    const r = await runFlow("flight-nominate", "site-x", { appsDir, profileDir, laya: "scripted", verbose: false });
+    expect(r.ok).toBe(true);
+    expect(r.steps.find((s) => s.id === "pick")!.nominated).toEqual({ instruction: "click", via: "locked" });
+    // 证据：这条锁 click 的步走的是**浏览器支线**（kind=browser，元素由既有梯级解析——
+    // 这里没有已学 hint，所以是 scripted 语义替身那一档），不是被指令强制的列表腿。
+    const s = r.steps.find((x) => x.id === "pick")!;
+    expect(s.kind).toBe("browser");
+    expect(s.methods.length).toBeGreaterThan(0);
+    // 元素动作的提名**不进指令记忆**（没有可复现重放证据；它的摊销证据属 hint 环）。
+    // 注意：hint 记忆的 flush 会落一份（可能是空的）档案——所以断的是**指令段**没有这条。
+    const profPath = path.join(profileDir, "site-x.profile.json");
+    const prof = fs.existsSync(profPath) ? JSON.parse(fs.readFileSync(profPath, "utf-8")) : {};
+    expect(prof.instructions?.pick).toBeUndefined();
   });
 });

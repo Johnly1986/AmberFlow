@@ -17,6 +17,8 @@
  * 由项目方对着数字定。
  *
  * 用法：`node --experimental-strip-types tools/instruction_nomination.ts [--out DIR] [--limit N]`
+ *       `… --check [--no-model]`：与已入库产物比可离线复算的部分（`--no-model` = CI 快跑）；
+ *       冻结产物没有门禁就会静默漂移（改词表/改夹具/手改 REPORT 都不红），这条是它的门。
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -173,6 +175,71 @@ function pct(n: number, d: number): string {
   return d === 0 ? "—" : `${n}/${d} (${((100 * n) / d).toFixed(1)}%)`;
 }
 
+/**
+ * `--check`：与已入库产物比**可离线复算的部分**——语料计数 + 规则/基线/枚举三臂 + 闭集与序。
+ * 冻结产物没有门禁就会静默漂移（改词表、改夹具、手改 REPORT.md 都不红），这条是它的门。
+ * model 臂依赖本机权重：只在**产物与本机都 on** 时比，否则如实说"未比"（跳过 ≠ 通过）。
+ */
+async function check(outDir: string, withModel: boolean): Promise<number> {
+  const p = path.join(outDir, "nomination.json");
+  if (!fs.existsSync(p)) {
+    console.error(`nomination --check：产物不存在：${p}（先跑一次不带 --check 的生成）`);
+    return 1;
+  }
+  const committed = JSON.parse(fs.readFileSync(p, "utf-8")) as {
+    instruction_set: unknown; enumeration_order: unknown;
+    corpus: { packs: number; rows: number };
+    scores: Record<string, { correct: number; abstain: number }>;
+    enumeration: { order: unknown; coverage_at_first: number; coverage_in_order: number; mean_truth_position: number };
+    model_arm: { status: string };
+  };
+  const { rows, packs } = await collectCorpus(10_000);
+  const diffs: string[] = [];
+  const eq = (what: string, a: unknown, b: unknown): void => {
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      diffs.push(`${what}: 产物 ${JSON.stringify(a)} ≠ 复算 ${JSON.stringify(b)}`);
+    }
+  };
+  eq("corpus.packs", committed.corpus.packs, packs);
+  eq("corpus.rows", committed.corpus.rows, rows.length);
+  eq("instruction_set", committed.instruction_set, INSTRUCTIONS);
+  eq("enumeration_order", committed.enumeration_order, ORDER);
+  const rules = rows.map((r) => ruleNominate(r.desc));
+  const first = rows.map(() => "click");
+  const correctOf = (pred: Array<string | null>): number =>
+    rows.reduce((n, r, i) => n + (pred[i] === r.truth ? 1 : 0), 0);
+  eq("scores.rules.correct", committed.scores.rules!.correct, correctOf(rules));
+  eq("scores.rules.abstain", committed.scores.rules!.abstain, rules.filter((x) => x === null).length);
+  eq("scores.first-candidate.correct", committed.scores["first-candidate"]!.correct, correctOf(first));
+  const positions = rows.map((r) => ORDER.indexOf(r.truth));
+  eq("enumeration.coverage_at_first", committed.enumeration.coverage_at_first, positions.filter((x) => x === 0).length);
+  eq("enumeration.coverage_in_order", committed.enumeration.coverage_in_order, positions.filter((x) => x >= 0).length);
+  const mean = positions.length ? positions.reduce((a, b) => a + b, 0) / positions.length : 0;
+  eq("enumeration.mean_truth_position", committed.enumeration.mean_truth_position, Math.round(mean * 1000) / 1000);
+  // model 臂：默认比（产物与本机都 on 时）；`--no-model` = CI 快速门只比离线部分。
+  let modelNote: string;
+  if (!withModel) {
+    modelNote = "未比（--no-model：CI 快跑只验离线部分；加默认档或 --with-model 才比）";
+  } else {
+    const m = await loadModelArm();
+    if (committed.model_arm.status !== "on" || m.status !== "on" || !m.ask) {
+      modelNote = `未比（产物 model_arm=${committed.model_arm.status} ｜ 本机=${m.status}）——跳过 ≠ 通过`;
+    } else {
+      let hit = 0;
+      for (const r of rows) if ((await m.ask(r.desc)) === r.truth) hit += 1;
+      eq("scores.model.correct", committed.scores.model!.correct, hit);
+      modelNote = `已比（${hit}/${rows.length}）`;
+    }
+  }
+  if (diffs.length) {
+    console.error("nomination --check FAILED（冻结产物与复算不一致）：");
+    for (const d of diffs) console.error(`  - ${d}`);
+    return 1;
+  }
+  console.log(`nomination --check OK：语料 ${packs} 包 / ${rows.length} 步 + 离线三臂 + 闭集/序与产物一致；model 臂 ${modelNote}`);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   const get = (k: string): string | undefined => {
@@ -181,6 +248,7 @@ async function main(): Promise<number> {
   };
   const outDir = path.resolve(get("out") ?? path.join(import.meta.dirname, "..", "bench", "instruction-nomination"));
   const limit = Math.max(1, Number(get("limit") ?? 10_000));
+  if (argv.includes("--check")) return check(outDir, !argv.includes("--no-model"));
 
   console.log("S0 指令提名实验台：语料 = 已验收离线语料的实际执行（truth 来自生产循环 trace）");
   const { rows, skipped, packs } = await collectCorpus(limit);

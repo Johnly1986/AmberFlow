@@ -39,12 +39,17 @@ run "2/3 六层跨实现对拍" npm run --silent test:parity
 run "2b 应用包与 spec 展开一致（apps:gen --check）" npm run --silent apps:gen -- --check --quiet
 # 探针基线：包里的判决必须等于已入库探测记录（站点变了/有人手改包，都会在这里变红）
 run "2c 探针基线与探测记录一致（probes:baseline --check）" npm run --silent probes:baseline -- --check --quiet
-# 2d 可选门禁：integrations/dsh-bridge 是 DSH 的适配器（把引擎的 CLI 接成三个模型可见工具）。
+# 2d 提名实验台的冻结产物（S0 证据）：语料计数 + 规则/基线/枚举三臂 + 闭集/序必须与
+#    bench/instruction-nomination/nomination.json 一致——改词表或改夹具却"忘了重跑 S0"，
+#    这里就红（冻结产物没有门禁就会静默漂移）。离线部分无条件跑；model 臂见 3e。
+run "2d 提名实验台与冻结产物一致（nominate:measure --check --no-model）" \
+  npm run --silent nominate:measure -- --check --no-model
+# 2e 可选门禁：integrations/dsh-bridge 是 DSH 的适配器（把引擎的 CLI 接成三个模型可见工具）。
 #    它需要一份 DSH 安装提供宿主包（cordis / dsh-tools / schemastery…），因此**不进无条件门禁**：
 #    设了 DSH_ROOT 就实跑它的离线测试，没设就 SKIP 并打印原因（跳过 ≠ 通过）。
 if [ -d integrations/dsh-bridge ]; then
   if [ -n "${DSH_ROOT:-}" ] && [ -d "${DSH_ROOT}/packages/core/tools" ]; then
-    run "2d DSH 插件 integrations/dsh-bridge（离线测试，宿主 $DSH_ROOT）" \
+    run "2e DSH 插件 integrations/dsh-bridge（离线测试，宿主 $DSH_ROOT）" \
       bash -c "cd integrations/dsh-bridge && node scripts/setup-links.mjs && npm run --silent build && node ../../node_modules/vitest/vitest.mjs run tests/bridge.spec.ts tests/service.spec.ts"
   else
     echo
@@ -74,6 +79,16 @@ if [ -f "$ARTIFACT" ] && [ -f "$ARTIFACT.data" ]; then
   # 逼作者显式 --write 刷新 + 改 tests/drift-real-arm.test.ts 的期望，而不是悄悄发生。
   run "3d 漂移族真模型臂与冻结产物一致（drift-real-arm --check）" \
     "$NODE" "$STRIP" tools/drift-real-arm.ts --check
+  # 3e 提名实验台的 model 臂（默认关：165 次真前向约 10 分钟；设 NOMINATE_CHECK_MODEL=1 打开）。
+  #    它把 S0 报告里那个"model 4.8%"从头再算一遍——数对不上就红，不是引用一句结论。
+  if [ "${NOMINATE_CHECK_MODEL:-0}" = "1" ]; then
+    run "3e 提名实验台 model 臂与冻结产物一致（nominate:measure --check）" \
+      npm run --silent nominate:measure -- --check
+  else
+    echo
+    echo "SKIP: 3e 提名实验台 model 臂未比（165 次真前向 ≈10 分钟）；设 NOMINATE_CHECK_MODEL=1 让它进本次门禁。"
+    echo "      离线三臂已由 2d 无条件验证；跳过 ≠ 通过。"
+  fi
 elif [ "${SMOKE_REQUIRE_MODEL:-0}" = "1" ]; then
   echo "FAIL: ONNX 产物缺失（$ARTIFACT / $ARTIFACT.data）但 SMOKE_REQUIRE_MODEL=1"
   echo "      补齐：npm run model:fetch -- --from <url 或本地路径>（SHA256 可钉；见 npm run doctor 的缺件点名）"

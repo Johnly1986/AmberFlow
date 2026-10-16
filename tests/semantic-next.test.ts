@@ -62,7 +62,9 @@ describe("①校验：next 是 v3 声明面，目标必须是声明过的步 id"
 const PAGE = (body: string): string =>
   `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>t</title></head><body>${body}</body></html>`;
 
-function nextApp(specVersion: number, steps: unknown[]): { appsDir: string; site: string; profileDir: string } {
+function nextApp(
+  specVersion: number, steps: unknown[], extra: Record<string, unknown> = {},
+): { appsDir: string; site: string; profileDir: string } {
   const appsDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-next-"));
   const dir = path.join(appsDir, "next-app");
   const pagesDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-next-pages-"));
@@ -78,7 +80,7 @@ function nextApp(specVersion: number, steps: unknown[]): { appsDir: string; site
     model: "english", slots: {},
     sites: { "site-x": { label: "site-x", start_url: `file://${path.join(pagesDir, "home.html")}` } },
     pages: { home: "home.html", second: "second.html", done: "done.html" },
-    steps, invariants: [],
+    steps, invariants: [], ...extra,
   }, null, 2), "utf-8");
   fs.writeFileSync(path.join(dir, "sites", "site-x.profile.json"),
     JSON.stringify({ spec_version: 2, site: "site-x" }, null, 2), "utf-8");
@@ -138,5 +140,40 @@ describe("②③走向 e2e：跨步与环上界（真 chromium）", () => {
     expect("path_visits" in r).toBe(false);
     expect("path_crossed" in r).toBe(false);
     expect("nominate_bill" in r).toBe(false);
+  });
+
+  it("模板级 max_step_visits 真的被采纳（声明 2 ⇒ 第 3 次进入即 next_cycle）", { timeout: 180_000 }, async () => {
+    const app = nextApp(3, [
+      { id: "a", desc: "open the second page", page: "home",
+        semantic_target: { role: "button", text: "前往" }, signal: { page: "second" }, next: ["a"] },
+    ], { max_step_visits: 2 });
+    const r = await run(app);
+    expect(r.ok).toBe(false);
+    expect(r.path_stop).toMatchObject({ code: "next_cycle", step_id: "a", visits: 3 });
+    expect(r.path_visits).toMatchObject({ a: 3 });
+  });
+
+  it("被边跨过的步记 skipped，后来经另一条边进入的步给**真实结果**（一步一条，不重复）", { timeout: 180_000 }, async () => {
+    // a --next=[d]--> 跨过 b；d --next=[c]--> c 真的进入并执行 → b 无结果（skipped），c 有结果
+    const app = nextApp(3, [
+      { id: "a", desc: "open the second page", page: "home",
+        semantic_target: { role: "button", text: "前往" }, signal: { page: "second" }, next: ["d"] },
+      { id: "b", desc: "never entered (crossed)", page: "second",
+        semantic_target: { role: "button", text: "记录" }, signal: { page: "done" } },
+      { id: "d", desc: "go to the done page", page: "second",
+        semantic_target: { role: "button", text: "记录" }, signal: { page: "done" }, next: ["c"] },
+      { id: "c", desc: "finish on the done page", page: "done",
+        semantic_target: { role: "button", text: "完成" }, signal: { page: "done" } },
+    ]);
+    const r = await run(app);
+    expect(r.ok).toBe(true);
+    const ids = r.steps.map((s) => s.id);
+    expect(ids.length).toBe(new Set(ids).size);              // 一步一条，不重复
+    const byId = Object.fromEntries(r.steps.map((s) => [s.id, s]));
+    expect(byId["b"]!.status).toBe("skipped");               // 被边跨过且从未进入
+    expect(byId["c"]!.status).toBe("done");                  // 后来经边进入 ⇒ 真实结果
+    expect(r.path_crossed!.some((x) => x.startsWith("b "))).toBe(true);
+    expect(r.path_visits).toMatchObject({ a: 1, c: 1, d: 1 });
+    expect(r.path_visits!["b"]).toBeUndefined();
   });
 });

@@ -399,6 +399,12 @@ export function validateTemplate(t: FlowTemplate): string[] {
         p.push(`${where}.instr must be one of ${INSTRUCTION_NAMES.join("|")} (got ${JSON.stringify(s["instr"])})`);
       } else if (s["nominate"] !== true) {
         p.push(`${where}.instr locks the nomination ladder — declare nominate: true on this step`);
+      } else if (s["instr"] === "list_pick" && s["list_step"] === undefined) {
+        // 锁到一条**不可执行**的指令 = 运行期静默降级成元素动作 + 谎报提名（复核实测：
+        // 校验曾经放行，候选序坍缩成 ["list_pick"]，runner 掉进浏览器支线仍报 via=locked）。
+        // 参数是声明的：锁 list_pick 就必须有 list_step 候选参数（行选择器仍在档案里）。
+        p.push(`${where}.instr "list_pick" needs a list_step candidate`
+          + `（候选参数是声明的；锁到不可执行的指令 = 静默降级 + 谎报提名）`);
       }
     }
     if (s["list_step"] !== undefined) {
