@@ -1,10 +1,18 @@
 # 自然语言清单运行时（NL Flow）设计：指令晚绑定 + 具名数据集
 
-**日期**：2026-10-15 ｜ **状态**：**分阶段实施中**——
-**S1 已落地并过全量验收**（`src/dataset.ts` + 绑定第四来源 `{from:"dataset"}` + 执行器 `RunOptions.dataset`；
-`tests/dataset.test.ts` 11 条；`npm run verify` 1179/1179 全绿 + 六层对拍逐字节一致，缺省等价成立）；
-**S0 实验台已建**（`npm run nominate:measure` → `tools/instruction_nomination.ts`，四臂 + 冻结产物
-`bench/instruction-nomination/`）；S2–S4 未动。文中其余"预期"仍是外推，落地一条改一条。
+**日期**：2026-10-15 ｜ **状态**：**分阶段实施完成（五阶段全部落地或显式裁定）**——
+**S0** 实验台 + 全语料冻结数字（`npm run nominate:measure`；model 臂 4.8% ≤ 基线 51.5%，但 ⑤ 枚举序
+100% 收回 ⇒ 设计文档的停止条件**不触发**，"②①⑤ 承重、③ 可选"的缺省姿势由数字背书）；
+**S1** 数据集 + 第四绑定来源 `{from:"dataset"}` + 执行器 `RunOptions.dataset`；
+**S2** 指令注册表 + 提名梯级 + 指令学习存储 + 语义流 `nominate`/`instr` 步（**三臂 e2e：学 → 摊销 →
+drift 撤下 → 再学**；②档案档在①规则之前——证据序）；
+**S3** `next` 贯通（spec_version 3 + P4 同一 `createPathWalk`；**裁定：组合指令 DAG 暂缓**——`list_pick`
+是唯一组合指令，单实例不加 schema，`compose` 已在 §2.2 备好）；
+**S4** 提名账单进结果与报告行（dead-rung 自报）。
+**最终验收（2026-10-15）**：`npm run verify` 退出码 0（**1221/1221 测试 + 六层对拍逐字节一致**）、
+`bash bench/smoke.sh` **PASS**（含 `apps:gen --check`）、工作树干净（提交 `8ad9ed6`/`354d0ef`/`bd4ffc5`/
+`b501088`/`c1fadd2`）。未做项均为显式裁定或可选（③窄问 runner 接线、④老师档、S0 换问法 A/B、组合 DAG），
+逐条记在 §10，不挂空 schema。文中其余"预期"仍是外推，落地一条改一条。
 **来源**：项目方设想，与 [SYSTEM12_POSITIONING_REVIEW.md](SYSTEM12_POSITIONING_REVIEW.md) 的定位评审同一条讨论线。
 **与既有系统的关系**：本设计**不推翻** SemanticFlow / 应用包 / 执行器任何已落地机制——
 信号语言、绑定、梯级卫生、学习门全部复用；差异只有一处：**指令的选择从"写清单时声明"
