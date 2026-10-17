@@ -1,13 +1,12 @@
 # NL Flow 测试用例独立复核（2026-10-15）
 
-> **审判对象**：本会话为 `docs/NL_FLOW_DESIGN.md`（S0–S4）写的 5 个测试文件、共 **57 条**用例：
-> `tests/dataset.test.ts`(11) · `tests/nominate.test.ts`(12) · `tests/semantic-instructions.test.ts`(13) ·
-> `tests/semantic-nominate.test.ts`(15) · `tests/semantic-next.test.ts`(8)。
+> **审判对象**：本会话为 `docs/NL_FLOW_DESIGN.md`（S0–S4）写的 5 个测试文件、共 **60 条**用例（处置轮后）：
+> `tests/dataset.test.ts`(11) · `tests/nominate.test.ts`(13) · `tests/semantic-instructions.test.ts`(11) · `tests/semantic-nominate.test.ts`(17) · `tests/semantic-next.test.ts`(8)。
 > **审判方式**：不看作者意图，只看**测试实际能证伪什么**——对每条验收主张问"删掉/改坏实现，哪条用例会红"，
 > 并用一次**静态探针**与一次**产物篡改**去证伪可疑的绿。
 > **结论一句话**：整体是行为级、有负例、缺省等价有语料钉——**但复核抓到 2 处真缺陷（1 处是"绿得可疑"、
 > 1 处是"证据没有门禁"）+ 4 处覆盖缺口**，本轮全部已修（新增/加强 7 条用例 + 1 个门禁 + 1 个仓库级守卫），
-> 另有 5 条如实记为未修（含一条结构性缺口，是当前最该补的东西）。
+> 另 5 条先如实记为未修；**同日处置轮已全部落地或判定维持**（§6）。
 
 ## 0. 复核结论表
 
@@ -19,11 +18,11 @@
 | 4 | runner 的 `instr` 锁定路径与 `verifyBackfill:false` 消融口**零 e2e** | 中 | ✅ 已修（2 条 e2e） |
 | 5 | S4 账单只断言了 `committed`，`via/drift` 没有断言（账单可能与报告行各说各话） | 中 | ✅ 已修（三臂各断言 `via`，drift 臂断言 `drift:1`） |
 | 6 | S3 覆盖缺口：模板级 `max_step_visits` 未测；"被跨过 skipped"与"后来经边进入给真实结果"未在同一次运行里区分 | 低 | ✅ 已修（2 条 e2e） |
-| 7 | **数据集只有消费面、没有生产写入者/失效调用者**（`write`/`invalidateStep` 在 `src/` 零调用） | **高（结构）** | ⬜ **已裁定挂起**（2026-10-15 项目方：按文档顺序，随 S3 组合层落地一并接；不提前、不单接——挂载点已写进设计文档 S3 行） |
-| 8 | 元素动作提名**不约束执行器动作分类**——报告语义易被读成"指令已强制" | 中 | ◐ 已加钉子测试把边界钉死；真正的强制留到 S3 |
-| 9 | model 臂数字绑定本机权重：无产物机器上 `--check` 永远"未比" | 低（设计上不可消除） | ⬜ 如实标注（跳过 ≠ 通过） |
-| 10 | 两个 e2e 夹具各复制一份 `PAGE/mkdtemp` 样板 | 低 | ⬜ 记录（第三个夹具出现再抽 `tests/fixtures.ts`） |
-| 11 | `executableInstructionOrder` 直测偏内部 | 观察 | ⬜ 可接受（导出 API 且被 runner 消费） |
+| 7 | **数据集只有消费面、没有生产写入者/失效调用者**（`write`/`invalidateStep` 在 `src/` 零调用） | **高（结构）** | ✅ 已解决（处置轮：S3 组合层落地——`gives` → `dataset.write`、指令重放门前 `invalidateStep`、`dataset_view` 审计面；e2e 验到 generation 单调 3。裁定措辞勘误见 §6） |
+| 8 | 元素动作提名**不约束执行器动作分类**——报告语义易被读成"指令已强制" | 中 | ✅ 已解决（处置轮：证据面强制 `firstExecFamily` 核对，不一致 = 结构化 `instruction_not_honored`；check ≡ click 以测试声明等价） |
+| 9 | model 臂数字绑定本机权重：无产物机器上 `--check` 永远"未比" | 低（设计上不可消除） | ✅ 已解决（处置轮：`model_arm.graph_sha256` 流式指纹——同权重才比；异权重如实"未比（权重不同）"，不误红也不假绿） |
+| 10 | 两个 e2e 夹具各复制一份 `PAGE/mkdtemp` 样板 | 低 | ✅ 已解决（处置轮：第三个夹具出现 ⇒ 抽 `tests/fixtures.ts`，三处夹具全部改用） |
+| 11 | `executableInstructionOrder` 直测偏内部 | 观察 | ✅ 判定维持（导出 API 且被 runner 消费，断言对象是可观察的候选集）——不修，留痕 |
 
 ## 1. 已修：抓到的一处"绿得可疑"（发现 1）
 
@@ -89,9 +88,9 @@ model 臂在无产物机器上永远"未比"——这一点被打印出来，不
   不是只吃缺省）；同一次运行里 `b` 被边跨过记 `skipped`、`c` 后来经另一条边进入给**真实结果**，
   且"一步一条不重复"（这是我写的 `ranIdx`/去重逻辑此前唯一的直接断言）。
 
-## 4. 未修（如实记录，含判断）
+## 4. 处置轮（同日追加：原未修 5 条——全部落地或判定维持）
 
-**7（高，结构）｜数据集有"能力"没有"生产者"。** `grep` 实证：`DatasetStore.write`、
+**7（高，结构）｜数据集有"能力"没有"生产者"。** ✅ 已处置：见 §6 第 7 行（含裁定措辞勘误）。 `grep` 实证：`DatasetStore.write`、
 `createDataset`、`invalidateStep` 在 `src/` 内**零生产调用**；`RunOptions.dataset` 只在
 `executor.ts:1786` 被消费（靠调用方注入）。也就是说 §2.3 的三条规则里，
 "具名/溯源"在存储与绑定层是活的，"**步重跑 ⇒ 该步条目失效**"目前**没有生产触发者**；
@@ -103,14 +102,14 @@ needs_value/失效/溯源三项是在单元与注入层达成的——这一点�
 挂载点与届时的验收动作（改写 S1 注记、端到端例）已写进设计文档 S3 行，这条从"未修"
 变成"已裁定挂起"，不再悬空。
 
-**8（中）｜元素动作提名不约束执行。** 已加钉子用例（见上）；真正的强制要等 S3 组合层，
+**8（中）｜元素动作提名不约束执行。** ✅ 已处置：证据面强制落地。 已加钉子用例（见上）；真正的强制要等 S3 组合层，
 现在报告里的 `instruction/via` 对 click/fill/select/check 只是**提名记录**，不是执行保证。
 文档与代码注释已写明，测试现在也钉住了——**不建议**在这之前把报告措辞改成"已按指令执行"。
 
-**9（低）｜model 臂快照性质**：无产物机器上 `--check` 只能"未比"；这是冻结证据的固有边界
+**9（低）｜model 臂快照性质** ✅ 已处置：权重指纹落地。：无产物机器上 `--check` 只能"未比"；这是冻结证据的固有边界
 （文档已要求标注"何时、何命令测的"）。
 
-**10（低）｜夹具样板**：`nominateApp` 与边界钉子各写了一份 `PAGE/mkdtemp` 样板；
+**10（低）｜夹具样板** ✅ 已处置：公共夹具面抽出。：`nominateApp` 与边界钉子各写了一份 `PAGE/mkdtemp` 样板；
 第三个夹具出现时抽 `tests/fixtures.ts`，现在抽是为两个实例搭抽象。
 
 **11（观察）｜`executableInstructionOrder` 直测**偏内部，但它是导出 API 且被 runner 消费，
@@ -138,3 +137,18 @@ npx vitest run tests/nominate.test.ts
 > 未重审仓库既有 1100+ 条用例（那需要另一轮）；"已修"的判定依据是本节复算命令的实际输出，
 > 不是断言的数量。发现 7/8 是**结构与语义**层面的，改它们会动设计面，故只记录 + 补注，
 > 不在这轮偷偷放宽或加戏。
+
+## 6. 处置记录（同日追加，全部有复算证据）
+
+| 条 | 落了什么 | 证据 |
+|---|---|---|
+| 7 | **组合指令 DAG**：`list_pick` 在注册表**声明** `compose = [extract_rows, select, act_on_row]` 与 `outputs = {chosen: row}`（`validateInstructionRegistry()` 加载期自校验）；`runListStep` 改为**读声明的小解释器**（行为逐字保持，由既有测试钉住）。**数据集生产面**：`gives` 声明（单名字、步必须有产出，否则加载期红）→ 信号成立后 `dataset.write(name, chosen, stepId)`；**指令重放门先 `invalidateStep` 再重写**（§2.3 规则 3 的生产触发者）；结果新增 `dataset_view` 审计面 | e2e：generation 单调到 3（首写→失效→重放写）、`stale: false`、`writtenBy: "pick"`、值 = min(price) 行；无 gives ⇒ 无 `dataset_view` 字段（缺省等价测试） |
+| 8 | **证据面强制**：浏览器支线用 `firstExecFamily`（trace 首个执行动作的族：`type text into select`→select、`into input/textarea`→fill、其余→click）核对提名/锁定的指令——族不一致 ⇒ 结构化 `instruction_not_honored: nominated X, page action was Y`，步 blocked、ok=false；`check ≡ click` 显式声明等价（执行器同一点击路径，不假装能区分） | 三条断言：fill 锁按钮 ⇒ blocked + 点名；check 锁按钮 ⇒ 合法 done；click 锁按钮 ⇒ done 且不进指令记忆 |
+| 9 | `model_arm.graph_sha256`（流式哈希前 16 hex）：`--check` 只在**产物与本机同一份权重**时比 model 数；不同 ⇒ 明说"未比（权重不同）"——不误红也不假绿 | 产物已重生成带指纹（`a60a…`）；`--check --no-model` 与全量 `--check` 均 exit 0 |
+| 10 | `tests/fixtures.ts`：`PAGE`/`tmpDir`/`writeJson`/`makeFlowApp`（带 `flowFor(pagesDir, site)` 工厂——start_url 依赖 pagesDir 的正确形状；"学习档案 vs authored 档案"两个落点写进注释，复核抓过混用）；nominateApp/nextApp/强制夹具三处改用 | 重构后两文件 25 条全绿、tsc 干净 |
+| 11 | 维持原判断，不动 | — |
+
+**勘误（裁定措辞）**：S1 行与裁定注记里的"demo-app 改写一例"不精确——**pack 面（demo-app）没有产出指令**（pack 命令 op 全是元素动作），数据集生产面的归宿是语义流 runner 的 `list_pick`。端到端例由 `flight-nominate` 试点夹具承担；demo-app 一字未动。
+
+**复算**：`npx vitest run tests/semantic-nominate.test.ts tests/nominate.test.ts tests/semantic-next.test.ts` ·
+`npm run nominate:measure -- --check --no-model`（≈2 分钟）· 全量 `npm run verify`（见设计文档收口数字）。

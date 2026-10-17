@@ -107,6 +107,21 @@ describe("梯级：命中即停、闭集 fail-closed、坏 ask 不打死计划",
   });
 });
 
+describe("S3 注册表：组合声明与自校验", () => {
+  it("list_pick 声明了 compose（三个已注册原语、有序）与 outputs（chosen: row）；全表自校验无问题", async () => {
+    const { INSTRUCTION_SET, validateInstructionRegistry, getInstruction, COMPOSE_PRIMITIVES } =
+      await import("../src/instructions.ts");
+    expect(validateInstructionRegistry()).toEqual([]);
+    const lp = getInstruction("list_pick")!;
+    expect(lp.compose).toEqual(["extract_rows", "select", "act_on_row"]);
+    for (const op of lp.compose!) expect(COMPOSE_PRIMITIVES).toContain(op);
+    expect(lp.outputs).toEqual({ chosen: "row" });
+    // 元素动作没有组合声明（它们走执行器支线）
+    expect(getInstruction("click")!.compose).toBeUndefined();
+    expect(INSTRUCTION_SET.every((i) => i.reversible)).toBe(true);   // 不可逆动作永不进闭集
+  });
+});
+
 describe("③档的考卷：指令闭集与 criteria（S0 实验台同一份）", () => {
   it("闭集就是五个名字；criteria 名集与闭集一致；isInstructionName 收紧", () => {
     expect(INSTRUCTION_NAMES).toEqual(["click", "fill", "select", "check", "list_pick"]);

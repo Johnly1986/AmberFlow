@@ -424,6 +424,12 @@ export interface MiddlewareOptions {
   /** Constructor-level default for `RunOptions.hosts` (the navigation envelope). */
   hosts?: string[] | null;
   /**
+   * Constructor-level default for `RunOptions.dataset`（NL Flow S1 注入面的旅程级形态）：
+   * 一整个旅程共用一个数据集时由构造方给；run 级 opts.dataset 仍可覆盖。
+   * 不声明 dataset 绑定的计划：行为逐字节不变。
+   */
+  dataset?: DatasetReader | null;
+  /**
    * D3/R-4：同一个元素（按**元素签名**，不是位置性 ref）在**一个子目标内**最多被有效执行几次。
    *
    * 为什么需要这个上界：`inert` 是整页快照比对，页面上有个倒计时/轮播/广告计时器时它
@@ -746,6 +752,8 @@ export class BrowserMiddleware {
   gotoTimeout: number;
   /** Navigation envelope default for runs that do not pass `hosts` (see `RunOptions.hosts`). */
   hosts: string[] | null = null;
+  /** See MiddlewareOptions.dataset (constructor-level default for RunOptions.dataset). */
+  dataset: DatasetReader | null = null;
   /** See `RunOptions.tieredHint` (P1 narrowed question; default OFF = today's behaviour). */
   tieredHint = false;
   /** See `MiddlewareOptions.maxEffectiveRepeats` (D3/R-4; default 3, 0 disables). */
@@ -797,6 +805,7 @@ export class BrowserMiddleware {
     this.hintMemory = opts.hintMemory ?? null;
     this.gotoTimeout = opts.gotoTimeout ?? 30000;
     this.hosts = opts.hosts ?? null;
+    this.dataset = opts.dataset ?? null;
     this.maxEffectiveRepeats = opts.maxEffectiveRepeats ?? this.maxEffectiveRepeats;
     this.riskAsk = opts.riskAsk ?? this.riskAsk;
     this.tieredHint = opts.tieredHint ?? this.tieredHint;
@@ -1519,7 +1528,7 @@ export class BrowserMiddleware {
       hosts = null,
       tieredHint = this.tieredHint,
       commands = null,
-      dataset = null,
+      dataset = this.dataset,
       effect,
       adjudicate = false,
     } = opts;

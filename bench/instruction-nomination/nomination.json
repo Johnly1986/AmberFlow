@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-15T18:27:56.193Z",
+  "generated_at": "2026-10-17T05:01:27.896Z",
   "instruction_set": {
     "click": "点击一个链接、按钮或控件（打开/进入/提交/记录）",
     "fill": "在一个文本输入框里填写文字（日期、名称、编号）",
@@ -21,7 +21,8 @@
   },
   "model_arm": {
     "status": "on",
-    "detail": "convaiinnovations/laya (+multilingual)"
+    "detail": "convaiinnovations/laya (+multilingual)",
+    "graph_sha256": "a60a631333b410e3"
   },
   "rows": [
     {

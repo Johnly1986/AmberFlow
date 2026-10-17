@@ -10,8 +10,7 @@
  *      （不是挂死、不是栈溢出），ok=false。
  *   ④ 缺省等价：无边模板的结果 JSON 不出现 path_* 字段（新字段不该只是"多一行没人看的数"）。
  */
-import fs from "node:fs";
-import os from "node:os";
+import { makeFlowApp, PAGE } from "./fixtures.ts";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { validateTemplate, runFlow, type FlowTemplate } from "../src/semantic-flow.ts";
@@ -59,32 +58,26 @@ describe("①校验：next 是 v3 声明面，目标必须是声明过的步 id"
 
 /* ------------------------------------------------------------------ e2e（真 chromium） */
 
-const PAGE = (body: string): string =>
-  `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>t</title></head><body>${body}</body></html>`;
-
 function nextApp(
   specVersion: number, steps: unknown[], extra: Record<string, unknown> = {},
 ): { appsDir: string; site: string; profileDir: string } {
-  const appsDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-next-"));
-  const dir = path.join(appsDir, "next-app");
-  const pagesDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-next-pages-"));
-  fs.writeFileSync(path.join(pagesDir, "home.html"),
-    PAGE('<button data-test="go" onclick="location.href=\'second.html\'">前往</button>'), "utf-8");
-  fs.writeFileSync(path.join(pagesDir, "second.html"),
-    PAGE('<button data-test="record" onclick="location.href=\'done.html\'">记录</button>'), "utf-8");
-  fs.writeFileSync(path.join(pagesDir, "done.html"),
-    PAGE('<button data-test="finish" onclick="document.title=\'f\'">完成</button>'), "utf-8");
-  fs.mkdirSync(path.join(dir, "sites"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "flow.json"), JSON.stringify({
-    spec_version: specVersion, id: "next-app", label: "next-app", goal: "next-app",
-    model: "english", slots: {},
-    sites: { "site-x": { label: "site-x", start_url: `file://${path.join(pagesDir, "home.html")}` } },
-    pages: { home: "home.html", second: "second.html", done: "done.html" },
-    steps, invariants: [], ...extra,
-  }, null, 2), "utf-8");
-  fs.writeFileSync(path.join(dir, "sites", "site-x.profile.json"),
-    JSON.stringify({ spec_version: 2, site: "site-x" }, null, 2), "utf-8");
-  return { appsDir, site: "site-x", profileDir: fs.mkdtempSync(path.join(os.tmpdir(), "semantic-next-prof-")) };
+  const app = makeFlowApp({
+    prefix: "semantic-next", id: "next-app",
+    files: {
+      "home.html": PAGE('<button data-test="go" onclick="location.href=\'second.html\'">前往</button>', "en"),
+      "second.html": PAGE('<button data-test="record" onclick="location.href=\'done.html\'">记录</button>', "en"),
+      "done.html": PAGE('<button data-test="finish" onclick="document.title=\'f\'">完成</button>', "en"),
+    },
+    flowFor: (pagesDir, site) => ({
+      spec_version: specVersion, id: "next-app", label: "next-app", goal: "next-app",
+      model: "english", slots: {},
+      sites: { [site]: { label: site, start_url: `file://${path.join(pagesDir, "home.html")}` } },
+      pages: { home: "home.html", second: "second.html", done: "done.html" },
+      steps, invariants: [], ...extra,
+    }),
+    authoredProfile: { spec_version: 2, site: "site-x" },
+  });
+  return { appsDir: app.appsDir, site: app.site, profileDir: app.profileDir };
 }
 
 const run = (app: { appsDir: string; site: string; profileDir: string }): ReturnType<typeof runFlow> =>

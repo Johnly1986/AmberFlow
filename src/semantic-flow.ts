@@ -58,9 +58,10 @@ import {
 } from "./semantic.ts";
 import { checkSignal, type SignalSpec } from "./signals.ts";
 import { startUrl, REFUSAL_LABELS, type AppInvariantResult } from "./app-runner.ts";
-import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES } from "./instructions.ts";
+import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, getInstruction } from "./instructions.ts";
 import { createInstructionMemory } from "./semantic-instructions.ts";
 import { nominateInstruction } from "./nominate.ts";
+import { createDataset, type DatasetEntry } from "./dataset.ts";
 
 /* ------------------------------------------------------------------ 模板形状 */
 
@@ -97,6 +98,11 @@ export interface FlowStep {
   retries?: number;
   dangerous?: boolean;
   list_step?: ListStepSpec;
+  /**
+   * NL Flow S3：本步承诺写进数据集的名字（当前闭集唯一产出指令 = list_pick 的 `chosen`，
+   * 所以只允许一个名字）。步没有产出却声明 gives = 加载期红——静默的"永远不写入"比报错更糟。
+   */
+  gives?: string[];
   /**
    * NL Flow S3：声明式后继（有序候选；适用性 = 候选步自己的 `when`，与 app-runner 的
    * P4 同一语义）。需要 spec_version 3；指向空气 = 加载期红。
@@ -177,7 +183,7 @@ const TEMPLATE_KEYS = [
 const STEP_KEYS = [
   "id", "desc", "page", "page_query", "semantic_target", "semantic_targets",
   "fills", "signal", "when", "retries", "dangerous", "list_step",
-  "nominate", "instr", "next",
+  "nominate", "instr", "next", "gives",
 ] as const;
 const PROFILE_KEYS = [
   "spec_version", "site", "label", "locale", "checkpoint", "pages", "page_query",
@@ -385,6 +391,14 @@ export function validateTemplate(t: FlowTemplate): string[] {
     }
     if (s["dangerous"] === true && s["list_step"] !== undefined) {
       p.push(`${where}: a list step cannot be dangerous (it never acts on the model's word)`);
+    }
+    // NL Flow S3：gives 的产出契约（见 FlowStep.gives 注释）。
+    if (s["gives"] !== undefined) {
+      if (!isStrList(s["gives"]) || (s["gives"] as string[]).length !== 1 || !(s["gives"] as string[])[0].trim()) {
+        p.push(`${where}.gives must be a one-name list (唯一产出指令 list_pick 输出 chosen——给它一个数据集名)`);
+      } else if (s["list_step"] === undefined) {
+        p.push(`${where}: gives on a step with no producing instruction（当前闭集只有 list_pick 产出，需声明 list_step 候选或本体）`);
+      }
     }
     // NL Flow S2：提名步与指令锁（校验紧跟声明面；读取方在 compile/runFlow——不挂空 schema）。
     if (s["nominate"] !== undefined && typeof s["nominate"] !== "boolean") {
@@ -610,6 +624,8 @@ export interface CompiledStep {
   list_candidate?: { cfg: ListExtract; op: "min" | "max"; by: string };
   /** NL Flow S3：声明式后继（有序候选；适用性 = 候选步自己的 `when`）。 */
   next?: string[];
+  /** NL Flow S3：本步承诺写进数据集的名字（唯一产出 = list_pick 的 chosen）。 */
+  gives?: string[];
 }
 
 function substituteSlots(text: string, slots: Record<string, unknown>, problems: string[]): string {
@@ -780,6 +796,8 @@ export function compileFlow(
         list: { cfg, op: listSpec.op, by: listSpec.by },
         dangerous: false, targets, pageFile, signal,
         signal_source: frozen ? "authored" : "contract",
+        ...(step.next ? { next: [...step.next] } : {}),
+        ...(step.gives ? { gives: [...step.gives] } : {}),
       });
       return;
     }
@@ -833,6 +851,7 @@ export function compileFlow(
         ? { nominate: true, instr: step.instr ?? null, ...(listCandidate ? { list_candidate: listCandidate } : {}) }
         : {}),
       ...(step.next ? { next: [...step.next] } : {}),
+      ...(step.gives ? { gives: [...step.gives] } : {}),
     });
   });
 
@@ -876,85 +895,135 @@ export interface ListStepOutcome {
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
- * list_step：浏览器步内的数据腿。"判断最低价"是**数据规则**——对抽取列求值
- * （min/max），模型不产出"选哪行"的判断，选中行的句柄被点击后仍由 DOM/URL 信号验收。
+ * 首个**执行过的**动作的族（trace 证据面）：`type text into select` → select、
+ * `type text into input/textarea` → fill、其余 → click。强制点用它核对提名。
+ */
+function firstExecFamily(
+  steps: ReadonlyArray<Record<string, unknown>>,
+): "click" | "fill" | "select" | null {
+  const t = steps.find((x) => x["executed"] === true);
+  if (!t) return null;
+  const d = String(t["desc"] ?? "").toLowerCase();
+  if (d.startsWith("type text into select")) return "select";
+  if (d.startsWith("type text into input") || d.startsWith("type text into textarea")) return "fill";
+  return "click";
+}
+
+/* ------------------------------------------------------------------ 组合指令解释器（S3） */
+
+/** 解释器的逐步状态：观察到的行集 → 数值列 → 选中下标（管线各原语读写它）。 */
+interface ComposeCtx {
+  rows: Array<Record<string, string>>;
+  values: number[];
+  index: number;
+  detail: Record<string, unknown>;
+}
+
+/** `extract_rows`：一次 $$eval 读行 × 声明的字段选择器（观察，不是猜测）。 */
+async function composeExtractRows(
+  page: unknown, cfg: ListExtract, ctx: ComposeCtx,
+): Promise<string | null> {
+  const rows = await (page as {
+    $$eval: (sel: string, fn: (rs: unknown[], f: unknown) => unknown, arg: unknown) => Promise<unknown>;
+  }).$$eval(cfg.row_sel, (rs, f) => rs.map((r) => {
+    const el = r as {
+      textContent?: string | null;
+      querySelector: (sel: string) => { textContent?: string | null } | null;
+    };
+    const out: Record<string, string> = {};
+    for (const [name, spec] of Object.entries(f as Record<string, { sel: string } >)) {
+      const node: { textContent?: string | null } | null = spec.sel ? el.querySelector(spec.sel) : el;
+      out[name] = node ? String(node.textContent ?? "").trim() : "";
+    }
+    return out;
+  }), cfg.fields) as Array<Record<string, string>>;
+  ctx.rows = rows;
+  ctx.detail.rows = rows.length;
+  if (!rows.length) return "no rows matched row_sel";
+  return null;
+}
+
+/** `select`：数值列解析 + 声明规则的 `min|max`（走 bindings/datasource 那一份实现）。 */
+function composeSelect(op: "min" | "max", by: string, cfg: ListExtract, ctx: ComposeCtx): string | null {
+  ctx.values = ctx.rows.map((r) => {
+    const raw = String(r[by] ?? "");
+    if (cfg.fields[by]?.op === "int") {
+      const n = Number(raw.replace(/[^\d-]/g, ""));
+      return Number.isFinite(n) ? n : NaN;
+    }
+    return NaN;
+  });
+  if (ctx.values.some((v) => Number.isNaN(v))) {
+    return `field ${JSON.stringify(by)} did not parse as a number on every row`;
+  }
+  // "选哪一行"不是模型判断，也不在这里另写一套：这条声明（`{from:"list", by, order}`）
+  // 由数据槽层 `bindings.resolveBinding` 解析，它内部调的仍是 datasource 引擎的同一个
+  // `selectIndex`（`selects` / `list_step` / 命令绑定共用一份实现），min/max 只是 order 的值。
+  const numeric: Array<Record<string, unknown>> = ctx.rows.map((r, i) => ({ ...r, [by]: ctx.values[i] }));
+  const bound = resolveBinding({ from: "list", by, order: op }, { rows: numeric });
+  if (!bound.ok) return bound.reason;
+  ctx.index = bound.index ?? -1;
+  // detail 的键与顺序照旧（报告与 pilot 测试钉着 chosen/chosen_index/values）。
+  ctx.detail.op = op; ctx.detail.by = by;
+  ctx.detail.chosen = ctx.rows[ctx.index]; ctx.detail.chosen_index = ctx.index;
+  ctx.detail.values = ctx.values;
+  return null;
+}
+
+/** `act_on_row`：点选中行的动作句柄（行选择器来自档案声明，不是模型发明）。 */
+async function composeActOnRow(page: unknown, cfg: ListExtract, ctx: ComposeCtx): Promise<string | null> {
+  const rowLoc = (page as {
+    locator: (sel: string) => {
+      nth: (i: number) => {
+        click: (o: unknown) => Promise<void>;
+        locator: (sel: string) => { first: () => { click: (o: unknown) => Promise<void> } };
+      };
+    };
+  }).locator(cfg.row_sel).nth(ctx.index);
+  const target = cfg.act_sel ? rowLoc.locator(cfg.act_sel).first() : rowLoc;
+  await target.click({ timeout: 5000 });
+  try {
+    await (page as { waitForLoadState: (s: string, o?: unknown) => Promise<void> })
+      .waitForLoadState("domcontentloaded", { timeout: 3000 });
+  } catch {
+    /* the click may not navigate; the signal decides */
+  }
+  return null;
+}
+
+/**
+ * list_step：浏览器步内的数据腿——S3 起**按注册表声明的管线执行**：`list_pick.compose`
+ * 的原语序决定解释顺序（extract_rows → select → act_on_row），参数永远来自声明
+ * （模板 list_step 的 op/by × 档案 list_extract），解释器不发明任何东西（红线②）。
+ * "判断最低价"是数据规则（min/max 走 bindings/datasource 那一份 `selectIndex`），
+ * 点击之后照旧由 DOM/URL 信号验收（红线③）。
  */
 export async function runListStep(
-  page: unknown, step: CompiledStep, verbose = true,
+  page: unknown, step: CompiledStep, _verbose = true,
 ): Promise<ListStepOutcome> {
   const { cfg, op, by } = step.list!;
-  const fieldCfg = cfg.fields;
+  const pipeline = getInstruction("list_pick")?.compose ?? [];
+  if (pipeline.length === 0) {
+    return { done: false, detail: {}, error: "list_pick compose declaration missing (engine invariant broken)" };
+  }
+  const ctx: ComposeCtx = { rows: [], values: [], index: -1, detail: {} };
   try {
-    const rows = await (page as {
-      $$eval: (sel: string, fn: (rs: unknown[], f: unknown) => unknown, arg: unknown) => Promise<unknown>;
-    }).$$eval(cfg.row_sel, (rs, f) => rs.map((r) => {
-      const el = r as {
-        textContent?: string | null;
-        querySelector: (sel: string) => { textContent?: string | null } | null;
-      };
-      const out: Record<string, string> = {};
-      for (const [name, spec] of Object.entries(f as Record<string, { sel: string } >)) {
-        const node: { textContent?: string | null } | null = spec.sel ? el.querySelector(spec.sel) : el;
-        out[name] = node ? String(node.textContent ?? "").trim() : "";
-      }
-      return out;
-    }), fieldCfg) as Array<Record<string, string>>;
-
-    if (!rows.length) return { done: false, detail: { rows: 0 }, error: "no rows matched row_sel" };
-
-    const values = rows.map((r) => {
-      const raw = String(r[by] ?? "");
-      if (fieldCfg[by]?.op === "int") {
-        const n = Number(raw.replace(/[^\d-]/g, ""));
-        return Number.isFinite(n) ? n : NaN;
-      }
-      return NaN;
-    });
-    if (values.some((v) => Number.isNaN(v))) {
-      return { done: false, detail: { rows: rows.length }, error: `field ${JSON.stringify(by)} did not parse as a number on every row` };
-    }
-    // "选哪一行"不是模型判断，也不在这里另写一套：P3 起这条声明（`{from:"list", by, order}`）
-    // 由数据槽层 `bindings.resolveBinding` 解析，它内部调的仍是 datasource 引擎的同一个
-    // `selectIndex`（`selects` / `list_step` / 命令绑定共用一份实现），min/max 只是 order 的值。
-    const numeric: Array<Record<string, unknown>> = rows.map((r, i) => ({ ...r, [by]: values[i] }));
-    const bound = resolveBinding({ from: "list", by, order: op }, { rows: numeric });
-    if (!bound.ok) return { done: false, detail: { rows: rows.length }, error: bound.reason };
-    const chosen = bound.index ?? -1;
-    const detail: Record<string, unknown> = {
-      rows: rows.length, op, by,
-      chosen: rows[chosen], chosen_index: chosen,
-      values,
-    };
-    const rowLoc = (page as {
-      locator: (sel: string) => {
-        nth: (i: number) => {
-          click: (o: unknown) => Promise<void>;
-          locator: (sel: string) => { first: () => { click: (o: unknown) => Promise<void> } };
-        };
-      };
-    }).locator(cfg.row_sel).nth(chosen);
-    const target = cfg.act_sel ? rowLoc.locator(cfg.act_sel).first() : rowLoc;
-    await target.click({ timeout: 5000 });
-    try {
-      await (page as { waitForLoadState: (s: string, o?: unknown) => Promise<void> })
-        .waitForLoadState("domcontentloaded", { timeout: 3000 });
-    } catch {
-      /* the click may not navigate; the signal decides */
+    for (const primitive of pipeline) {
+      const err = primitive === "extract_rows" ? await composeExtractRows(page, cfg, ctx)
+        : primitive === "select" ? composeSelect(op, by, cfg, ctx)
+        : await composeActOnRow(page, cfg, ctx);
+      if (err !== null) return { done: false, detail: ctx.detail, error: err };
     }
     for (let k = 0; k < 5; k++) {
       if (await checkSignal(page as never, step.signal)) {
-        detail.settled_after = `${(k + 1) * 120}ms`;
-        return { done: true, detail };
+        ctx.detail.settled_after = `${(k + 1) * 120}ms`;
+        return { done: true, detail: ctx.detail };
       }
       await sleep(120);
     }
-    return { done: false, detail, error: "completion signal never held after the click" };
+    return { done: false, detail: ctx.detail, error: "completion signal never held after the click" };
   } catch (e) {
     return { done: false, detail: {}, error: e instanceof Error ? e.message : String(e) };
-  } finally {
-    if (verbose) {
-      /* 报告面在 runFlow 汇总打印；这里只兜错误 */
-    }
   }
 }
 
@@ -1028,6 +1097,11 @@ export interface FlowRunResult {
    * 落盘/撤回 + drift 数。dead rung 自报：哪档从没出场一眼可见。
    */
   nominate_bill?: { via: Record<string, number>; committed: number; dropped: number; drift: number };
+  /**
+   * NL Flow S3：模板声明了 `gives` 时的运行级数据集**审计视图**（全部条目，含被重跑
+   * 失效的陈旧世代——审计面看得见历史，`read` 面只认最新）。缺字段 = 没有 gives。
+   */
+  dataset_view?: DatasetEntry[];
   line: string;
   profile_path: string;
   ok: boolean;
@@ -1192,6 +1266,10 @@ export async function runFlow(
     ? {} as Record<string, string>
     : Object.fromEntries(Object.entries(store.load(siteKey).instructions ?? {})
       .map(([k, v]) => [k, v.instruction]));
+  // NL Flow S3 数据集生产面：有步声明 `gives` 才建生产者（缺省零开销、结果也不带
+  // dataset_view——缺字段等价纪律）。写入发生在**信号成立之后**；重跑（指令重放门）
+  // 先失效旧写入再重写（§2.3 规则 3：陈旧世代不可读）。
+  const dataset = compiled.steps.some((s) => s.gives?.length) ? createDataset() : null;
   // §3 文字系统路由：站点档案的 checkpoint 优先（plan 观察来的，或人手写的），
   // 否则模板的 model，最后 english——"中文站用多语 checkpoint"因此是数据不是代码。
   const checkpoint = profile.checkpoint ?? template.model ?? "english";
@@ -1232,7 +1310,7 @@ export async function runFlow(
     // 语义层的危险闸在这里（模板 `dangerous`）；执行器自己的风险闸照旧记录不阻断。
     confirmFn: () => true,
   };
-  const mw = new BrowserMiddleware({ ...mwOpts, escalateFn, hintMemory: memory });
+  const mw = new BrowserMiddleware({ ...mwOpts, escalateFn, hintMemory: memory, dataset });
 
   const own = opts.sessionFactory === undefined;
   const session = own ? await browserSession(true) : await opts.sessionFactory!();
@@ -1299,6 +1377,9 @@ export async function runFlow(
           console.log(`  [${step.id}] -> ${out.done ? "done" : `BLOCKED (${out.error})`}`
             + (out.done ? ` ${JSON.stringify(out.detail.chosen)}` : ""));
         }
+        if (out.done && dataset && step.gives?.length) {
+          dataset.write(step.gives[0], out.detail["chosen"], step.id);   // 信号成立之后才写
+        }
         return;
       }
       const bsg = step.sg!;
@@ -1331,6 +1412,7 @@ export async function runFlow(
           if (out.done) {
             // 提名让信号成立 → 候选映射进指令记忆（staged；重放门在旅程末尾统一裁决）
             instrMemory?.recordInstruction(instrKey, "list_pick", nom.via);
+            if (dataset && step.gives?.length) dataset.write(step.gives[0], out.detail["chosen"], step.id);
           }
           // blocked 的失败计数**只在旅程末尾的 drift 块记一次**（与 hint 块同一模式——
           // 这里再记就是双计，阈值会被一次运行打穿）。
@@ -1345,14 +1427,28 @@ export async function runFlow(
         mw as never, bsg, plan, bsg.start_url ?? "", session.page, session.pw, verbose);
       const methods = ((rep.steps ?? []) as Array<{ method?: string }>)
         .map((t) => t.method ?? "").filter(Boolean);
-      const hintUsed = knownBefore.has(step.id) && rep.done && !rep.skipped && methods.includes("rule:match");
+      // ---- S3 元素动作强制（复核发现 8）：提名/锁定说出的指令，必须由页面**真实执行的动作
+      // 族**背书——check ≡ click（执行器同一点击路径，trace 分不开它们；声明等价而非假装能分）。
+      // 不一致 = 结构化 blocked（绝不绿着把"没照做"记成"做完了"）。
+      let forceViolation: string | null = null;
+      const nomRec = nominatedOf.get(step.id);
+      if (step.nominate && nomRec?.instruction && !rep.skipped) {
+        const fam = firstExecFamily(((rep.steps ?? []) as Array<Record<string, unknown>>));
+        const want = nomRec.instruction === "check" ? "click" : nomRec.instruction;
+        if (fam !== null && fam !== want) {
+          forceViolation = `instruction_not_honored: nominated ${JSON.stringify(nomRec.instruction)}, page action was ${fam}`;
+          if (verbose) console.log(`  [${step.id}] ${forceViolation}`);
+        }
+      }
+      const hintUsed = knownBefore.has(step.id) && rep.done && forceViolation === null
+        && !rep.skipped && methods.includes("rule:match");
       if (hintUsed) memory.countReplay(step.id);
       results.push({
         id: step.id, desc: bsg.desc, kind: "browser",
-        status: rep.done ? (rep.skipped ? "skipped" : "done") : "blocked",
+        status: rep.done && forceViolation === null ? (rep.skipped ? "skipped" : "done") : "blocked",
         attempts: attempt, methods,
         hint_used: hintUsed, backfilled: memory.recordedThisRun.has(step.id),
-        obstacle: rep.done ? null : rep.stop_reason, detail: dryEvidence,
+        obstacle: forceViolation ?? (rep.done ? null : rep.stop_reason), detail: dryEvidence,
         ...(nominatedOf.has(step.id) ? { nominated: nominatedOf.get(step.id) } : {}),
       });
       // 回填来源标注（报告面）：本步走过 escalate 就是老师点名，否则是 laya 现场。
@@ -1488,9 +1584,13 @@ export async function runFlow(
         if (urlOf(session.page) !== listExec.url) {
           await session.page.goto(listExec.url, { waitUntil: "domcontentloaded" });
         }
+        // §2.3 规则 3 的生产触发者：重跑前失效旧写入（陈旧不可读），重放的写入是新事件。
+        dataset?.invalidateStep(step.id);
         const out = await runListStep(session.page, listExec, false);
-        if (out.done) verifiedInstr.add(step.id);
-        else if (verbose) console.log(`  指令回填门：${step.id} 重放未通过（${out.error}）`);
+        if (out.done) {
+          verifiedInstr.add(step.id);
+          if (dataset && step.gives?.length) dataset.write(step.gives[0], out.detail["chosen"], step.id);
+        } else if (verbose) console.log(`  指令回填门：${step.id} 重放未通过（${out.error}）`);
       }
       const res = instrMemory?.commitVerified(verifiedInstr);
       instrCommitted = res?.committed.length ?? 0;
@@ -1511,6 +1611,7 @@ export async function runFlow(
       locale: profile.locale ?? null,
       backfillGate, committed, dropped, drift,
       pathStop, pathCrossed, hasEdges, pathVisits: walk.visits(), instrCommitted, instrDropped,
+      datasetView: dataset ? dataset.entriesView() : null,
     });
   } finally {
     if (own) await session.close();
@@ -1529,6 +1630,7 @@ function finalize(
     pathStop?: FlowRunResult["path_stop"]; pathCrossed: string[]; hasEdges: boolean;
     pathVisits: Record<string, number>;
     instrCommitted: number; instrDropped: number;
+    datasetView: readonly DatasetEntry[] | null;
   },
 ): FlowRunResult {
   let rule = 0, layaN = 0, escN = 0, listN = 0, refusedN = 0;
@@ -1587,6 +1689,7 @@ function finalize(
       path_crossed: ctx.pathCrossed,
     } : {}),
     ...(nominate_bill ? { nominate_bill } : {}),
+    ...(ctx.datasetView ? { dataset_view: [...ctx.datasetView] } : {}),
     profile_path: ctx.profileWritten ? ctx.store.pathFor(siteKey) : "",
     ok, secs: Math.round((Date.now() - ctx.t0) / 100) / 10,
   };

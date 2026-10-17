@@ -22,6 +22,7 @@ import { nominateInstruction } from "../src/nominate.ts";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import { makeFlowApp, PAGE, tmpDir, writeJson } from "./fixtures.ts";
 
 const template = (steps: unknown[]): FlowTemplate => ({
   spec_version: 2,
@@ -70,8 +71,18 @@ describe("①校验：instr 闭集、锁要求 nominate、提名步不许 danger
       .toEqual([]);
   });
 
-  it("锁到不可执行的指令 ⇒ 红（复核实测：曾经放行 → 运行期静默降级 + 谎报提名）", () => {
-    // `list_pick` 的参数（op/by/act）是声明的；没有 list_step 候选就执行不了这条指令。
+  it("S3 gives 的产出契约：没有产出的步声明 gives ⇒ 红；多名字 ⇒ 红", () => {
+    expect(problemsOf([{ id: "s", desc: "d", page: "home", signal: { page: "done" },
+      gives: ["chosen_fare"] }])
+      .some((x) => /gives on a step with no producing instruction/.test(x))).toBe(true);
+    expect(problemsOf([{ id: "s", desc: "d", page: "home", signal: { page: "done" },
+      list_step: { op: "min", by: "price" }, gives: ["a", "b"] }])
+      .some((x) => /gives must be a one-name list/.test(x))).toBe(true);
+    expect(problemsOf([{ id: "s", desc: "d", page: "home", signal: { page: "done" },
+      list_step: { op: "min", by: "price" }, gives: ["chosen_fare"] }])).toEqual([]);
+  });
+
+  it("锁到不可执行的指令 ⇒ 红（复核实测：曾经放行 → 运行期静默降级 + 谎报提名）", () => {    // `list_pick` 的参数（op/by/act）是声明的；没有 list_step 候选就执行不了这条指令。
     const p = problemsOf([{ id: "s", desc: "d", page: "home", signal: { page: "done" },
       nominate: true, instr: "list_pick" }]);
     expect(p.some((x) => /instr "list_pick" needs a list_step candidate/.test(x))).toBe(true);
@@ -155,48 +166,37 @@ describe("④⑤候选序与梯级端到端（编译产物上）", () => {
 
 import { runFlow, type FlowRunResult } from "../src/semantic-flow.ts";
 
-const PAGE = (body: string): string =>
-  `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>t</title></head><body>${body}</body></html>`;
-
-/** 提名试点夹具：一张票价表 + act 按钮 → done 页；act_sel 可注入坏值（drift 臂用）。 */
-function nominateApp(opts: { actSel: string; instr?: string }): { appsDir: string; site: string; profileDir: string; fixAct: () => void } {
-  const appsDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-nom-"));
-  const dir = path.join(appsDir, "flight-nominate");
-  const pagesDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-nom-pages-"));
-  const rows = [[980, "F3"], [1150, "F5"], [1280, "F1"]].map(([p, fno]) =>
-    `<tr class="flight-item"><td class="fno">${fno}</td><td class="price">${p}</td>`
-    + `<td><button class="btn-pick" data-pick="${p}" onclick="location.href='done.html?p=${p}'">选择</button></td></tr>`)
+function nominateApp(opts: { actSel: string; instr?: string; gives?: string[] }): { appsDir: string; site: string; profileDir: string; fixAct: () => void } {
+  const rows = [[980, "F3"], [1150, "F5"], [1280, "F1"]].map(([pr, fno]) =>
+    `<tr class="flight-item"><td class="fno">${fno}</td><td class="price">${pr}</td>`
+    + `<td><button class="btn-pick" data-pick="${pr}" onclick="location.href='done.html?p=${pr}'">选择</button></td></tr>`)
     .join("");
-  fs.writeFileSync(path.join(pagesDir, "home.html"),
-    PAGE(`<table id="fares">${rows}</table>`), "utf-8");
-  fs.writeFileSync(path.join(pagesDir, "done.html"), PAGE("<h1>done</h1>"), "utf-8");
-  fs.mkdirSync(path.join(dir, "sites"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "flow.json"), JSON.stringify({
-    spec_version: 2, id: "flight-nominate", label: "flight-nominate", goal: "flight-nominate",
-    model: "english", slots: {},
-    sites: { "site-x": { label: "site-x", start_url: `file://${path.join(pagesDir, "home.html")}` } },
-    pages: { home: "home.html", done: "done.html" },
-    steps: [{
-      id: "pick", desc: "记录当前列表最低价航班", page: "home", nominate: true,
-      list_step: { op: "min", by: "price", act: "row" },
-      ...(opts.instr ? { instr: opts.instr } : {}),
-      signal: { page: "done" },
-    }],
-    invariants: [],
-  }, null, 2), "utf-8");
-  const profilePath = path.join(dir, "sites", "site-x.profile.json");
-  const writeProfile = (actSel: string, instructions?: Record<string, unknown>): void => {
-    fs.writeFileSync(profilePath, JSON.stringify({
-      spec_version: 2, site: "site-x",
-      list_extract: { pick: { row_sel: "tr.flight-item", fields: { price: { sel: ".price", op: "int" } }, act_sel: actSel } },
-      ...(instructions ? { instructions } : {}),
-    }, null, 2), "utf-8");
-  };
-  writeProfile(opts.actSel);
-  const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-nom-prof-"));
+  const authored = (actSel: string): Record<string, unknown> => ({
+    spec_version: 2, site: "site-x",
+    list_extract: { pick: { row_sel: "tr.flight-item", fields: { price: { sel: ".price", op: "int" } }, act_sel: actSel } },
+  });
+  const app = makeFlowApp({
+    prefix: "semantic-nom", id: "flight-nominate",
+    files: { "home.html": PAGE(`<table id="fares">${rows}</table>`), "done.html": PAGE("<h1>done</h1>") },
+    flowFor: (pagesDir, site) => ({
+      spec_version: 2, id: "flight-nominate", label: "flight-nominate", goal: "flight-nominate",
+      model: "english", slots: {},
+      sites: { [site]: { label: site, start_url: `file://${path.join(pagesDir, "home.html")}` } },
+      pages: { home: "home.html", done: "done.html" },
+      steps: [{
+        id: "pick", desc: "记录当前列表最低价航班", page: "home", nominate: true,
+        list_step: { op: "min", by: "price", act: "row" },
+        ...(opts.instr ? { instr: opts.instr } : {}),
+        ...(opts.gives ? { gives: opts.gives } : {}),
+        signal: { page: "done" },
+      }],
+      invariants: [],
+    }),
+    authoredProfile: authored(opts.actSel),
+  });
   return {
-    appsDir, site: "site-x", profileDir,
-    fixAct: (): void => writeProfile(".btn-pick"),
+    appsDir: app.appsDir, site: app.site, profileDir: app.profileDir,
+    fixAct: (): void => writeJson(app.authoredProfilePath, authored(".btn-pick")),
   };
 }
 
@@ -283,40 +283,71 @@ describe("S2 试点 e2e（真 chromium）：学 → 摊销 → drift 撤下 → 
     expect(r.nominate_bill).toMatchObject({ via: { rule: 1 }, committed: 1 });
   });
 
-  it("已知边界（钉子）：元素动作提名**不约束**执行器的动作分类——试点只强制 list_pick 轴", { timeout: 180_000 }, async () => {
-    // 锁 click、语义目标落到一个按钮：执行器照旧按元素类型执行。报告如实记
-    // via=locked/instruction=click，但**这不是"指令被强制执行"的证据**——
-    // 元素动作的指令约束要等 S3 组合层。本钉子防的是把这条边界读成"已强制"。
-    const appsDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-click-"));
-    const dir = path.join(appsDir, "flight-nominate");
-    const pagesDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-click-pages-"));
-    fs.writeFileSync(path.join(pagesDir, "home.html"),
-      PAGE('<button data-test="go" onclick="location.href=\'done.html\'">前往</button>'), "utf-8");
-    fs.writeFileSync(path.join(pagesDir, "done.html"), PAGE("<h1>done</h1>"), "utf-8");
-    fs.mkdirSync(path.join(dir, "sites"), { recursive: true });
-    fs.writeFileSync(path.join(dir, "flow.json"), JSON.stringify({
+  it("S3 强制（发现 8 落地）：提名/锁定与页面真实动作族核对——不一致 = 结构化阻塞", { timeout: 180_000 }, async () => {
+    const stepOf = (instr: string): Record<string, unknown> => ({
+      id: "pick", desc: "open the result page", page: "home", nominate: true, instr,
+      semantic_target: { role: "button", text: "前往" }, signal: { page: "done" },
+    });
+    const flowFor = (instr: string) => (pagesDir: string, site: string): Record<string, unknown> => ({
       spec_version: 2, id: "flight-nominate", label: "x", goal: "x", model: "english", slots: {},
-      sites: { "site-x": { label: "site-x", start_url: `file://${path.join(pagesDir, "home.html")}` } },
+      sites: { [site]: { label: site, start_url: `file://${path.join(pagesDir, "home.html")}` } },
       pages: { home: "home.html", done: "done.html" },
-      steps: [{ id: "pick", desc: "open the result page", page: "home", nominate: true, instr: "click",
-        semantic_target: { role: "button", text: "前往" }, signal: { page: "done" } }],
-      invariants: [],
-    }, null, 2), "utf-8");
-    fs.writeFileSync(path.join(dir, "sites", "site-x.profile.json"),
-      JSON.stringify({ spec_version: 2, site: "site-x" }, null, 2), "utf-8");
-    const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), "semantic-click-prof-"));
-    const r = await runFlow("flight-nominate", "site-x", { appsDir, profileDir, laya: "scripted", verbose: false });
-    expect(r.ok).toBe(true);
-    expect(r.steps.find((s) => s.id === "pick")!.nominated).toEqual({ instruction: "click", via: "locked" });
-    // 证据：这条锁 click 的步走的是**浏览器支线**（kind=browser，元素由既有梯级解析——
-    // 这里没有已学 hint，所以是 scripted 语义替身那一档），不是被指令强制的列表腿。
-    const s = r.steps.find((x) => x.id === "pick")!;
-    expect(s.kind).toBe("browser");
-    expect(s.methods.length).toBeGreaterThan(0);
-    // 元素动作的提名**不进指令记忆**（没有可复现重放证据；它的摊销证据属 hint 环）。
-    // 注意：hint 记忆的 flush 会落一份（可能是空的）档案——所以断的是**指令段**没有这条。
-    const profPath = path.join(profileDir, "site-x.profile.json");
+      steps: [stepOf(instr)], invariants: [],
+    });
+    const app = makeFlowApp({
+      prefix: "semantic-click", id: "flight-nominate",
+      files: {
+        "home.html": PAGE('<button data-test="go" onclick="location.href=\'done.html\'">前往</button>'),
+        "done.html": PAGE("<h1>done</h1>"),
+      },
+      flowFor: flowFor("click"),
+      authoredProfile: { spec_version: 2, site: "site-x" },
+    });
+    const runWith = async (instr: string): Promise<FlowRunResult> => {
+      writeJson(app.flowPath, flowFor(instr)(app.pagesDir, app.site));
+      return runFlow("flight-nominate", "site-x", {
+        appsDir: app.appsDir, profileDir: tmpDir("semantic-click-prof-"), laya: "scripted", verbose: false,
+      });
+    };
+    // ① click 锁在按钮上：族一致 ⇒ done；元素动作提名**不进指令记忆**
+    //（可复现重放的证据属 hint 环；hint 记忆 flush 会落一份可能为空的档案，所以断"指令段没有这条"）。
+    const rClick = await runWith("click");
+    expect(rClick.ok).toBe(true);
+    const s1 = rClick.steps.find((s) => s.id === "pick")!;
+    expect(s1.nominated).toEqual({ instruction: "click", via: "locked" });
+    expect(s1.kind).toBe("browser");
+    const profPath = path.join(rClick.profile_path ? path.dirname(rClick.profile_path) : "/nonexistent", "site-x.profile.json");
     const prof = fs.existsSync(profPath) ? JSON.parse(fs.readFileSync(profPath, "utf-8")) : {};
     expect(prof.instructions?.pick).toBeUndefined();
+    // ② fill 锁在按钮上：族不一致 ⇒ 结构化 instruction_not_honored，绝不绿
+    const rFill = await runWith("fill");
+    expect(rFill.ok).toBe(false);
+    const s2 = rFill.steps.find((s) => s.id === "pick")!;
+    expect(s2.status).toBe("blocked");
+    expect(s2.obstacle).toMatch(/instruction_not_honored: nominated "fill", page action was click/);
+    // ③ check ≡ click：执行器同一点击路径，trace 分不开它们——**声明等价**而非假装能区分
+    const rCheck = await runWith("check");
+    expect(rCheck.ok).toBe(true);
+    expect(rCheck.steps.find((s) => s.id === "pick")!.nominated).toEqual({ instruction: "check", via: "locked" });
+  });
+
+  it("S3 数据集生产面：gives ⇒ 首写 + 重放门先失效后重写（generation 单调），审计面全可见；缺省无字段", { timeout: 180_000 }, async () => {
+    const app = nominateApp({ actSel: ".btn-pick", gives: ["chosen_fare"] });
+    const r = await runFlow("flight-nominate", app.site, {
+      appsDir: app.appsDir, profileDir: app.profileDir, laya: "scripted", verbose: false,
+    });
+    expect(r.ok).toBe(true);
+    // 事件序列：首写(gen1) → 重放门 invalidate(gen2, 陈旧不可读) → 重放写(gen3, 活)。
+    expect(r.dataset_view).toHaveLength(1);
+    const e = r.dataset_view![0]!;
+    expect(e).toMatchObject({ key: "chosen_fare", writtenBy: "pick", generation: 3, stale: false });
+    expect(e.value).toMatchObject({ price: "980" });      // min(price) 选中的行（抽取的观察值）
+    // 缺省等价：不声明 gives 的运行不带这个字段
+    const plain = nominateApp({ actSel: ".btn-pick" });
+    const r2 = await runFlow("flight-nominate", plain.site, {
+      appsDir: plain.appsDir, profileDir: plain.profileDir, laya: "scripted", verbose: false,
+    });
+    expect(r2.ok).toBe(true);
+    expect("dataset_view" in r2).toBe(false);
   });
 });

@@ -23,9 +23,11 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
+import { pipeline } from "node:stream/promises";
 import { loadPack, expandPack, type AppPack } from "../src/app-pack.ts";
 import { runApp, type AppRunResult } from "../src/app-runner.ts";
-import { checkArtifacts, missingPieces, modelConfigError } from "../src/model-artifacts.ts";
+import { checkArtifacts, missingPieces, modelConfigError, onnxModelPath } from "../src/model-artifacts.ts";
 import { createLayaOnnxRuntime } from "../src/laya-onnx.ts";
 import { installLayaRuntime, type DecisionAgent } from "../src/model.ts";
 import { ruleNominate } from "../src/nominate.ts";
@@ -128,10 +130,23 @@ const cjkRatio = (s: string): number => {
   return s.length ? cjk / s.length : 0;
 };
 
+/** 流式 sha256（图是 GB 级，不整读进内存）；取前 16 hex 做证据面指纹。 */
+async function sha256File(p: string): Promise<string | null> {
+  try {
+    const h = crypto.createHash("sha256");
+    await pipeline(fs.createReadStream(p), h);
+    return h.digest("hex").slice(0, 16);
+  } catch {
+    return null;
+  }
+}
+
 async function loadModelArm(): Promise<{
   status: string;
   ask: ((desc: string) => Promise<string | null>) | null;
   detail: string;
+  /** 权重图指纹（发现 9：冻结产物的 model 数字属于**那一组权重**——换权重不许误红也不许假绿）。 */
+  graphSha: string | null;
 }> {
   const envError = modelConfigError();
   const artifacts = checkArtifacts();
@@ -141,6 +156,7 @@ async function loadModelArm(): Promise<{
       status: "off(missing)",
       ask: null,
       detail: envError ?? `missing: ${missing.join(", ")}`,
+      graphSha: null,
     };
   }
   installLayaRuntimeSafe(createLayaOnnxRuntime());
@@ -166,7 +182,10 @@ async function loadModelArm(): Promise<{
     if (!a || !("choice" in a) || typeof a.choice !== "string") return null;
     return a.choice in INSTRUCTIONS ? a.choice : null;
   };
-  return { status: "on", ask, detail: "convaiinnovations/laya (+multilingual)" };
+  return {
+    status: "on", ask, detail: "convaiinnovations/laya (+multilingual)",
+    graphSha: await sha256File(onnxModelPath()),
+  };
 }
 
 /* ---------------------------------------------------------------------------- 主流程 */
@@ -216,14 +235,19 @@ async function check(outDir: string, withModel: boolean): Promise<number> {
   eq("enumeration.coverage_in_order", committed.enumeration.coverage_in_order, positions.filter((x) => x >= 0).length);
   const mean = positions.length ? positions.reduce((a, b) => a + b, 0) / positions.length : 0;
   eq("enumeration.mean_truth_position", committed.enumeration.mean_truth_position, Math.round(mean * 1000) / 1000);
-  // model 臂：默认比（产物与本机都 on 时）；`--no-model` = CI 快速门只比离线部分。
+  // model 臂：默认比（产物与本机都 on **且权重同一份**时）；`--no-model` = CI 快速门只比离线部分。
   let modelNote: string;
   if (!withModel) {
     modelNote = "未比（--no-model：CI 快跑只验离线部分；加默认档或 --with-model 才比）";
   } else {
     const m = await loadModelArm();
+    const committedSha = (committed.model_arm as { graph_sha256?: string }).graph_sha256;
     if (committed.model_arm.status !== "on" || m.status !== "on" || !m.ask) {
       modelNote = `未比（产物 model_arm=${committed.model_arm.status} ｜ 本机=${m.status}）——跳过 ≠ 通过`;
+    } else if (committedSha && m.graphSha && committedSha !== m.graphSha) {
+      // 换权重不是"数字错了"——是**另一场考试**。不误红（别的机器不该为权重差异背锅），
+      // 也不假绿（明说没比）。刷新 = 显式重跑生成并 --write 产物。
+      modelNote = `未比（权重与冻结产物不同：committed ${committedSha}… vs 本机 ${m.graphSha}…）——跳过 ≠ 通过；要刷新产物请重跑本命令（不带 --check 即写）`;
     } else {
       let hit = 0;
       for (const r of rows) if ((await m.ask(r.desc)) === r.truth) hit += 1;
@@ -258,11 +282,12 @@ async function main(): Promise<number> {
   const arms: Record<string, Array<string | null>> = { rules: [], "first-candidate": [], model: [], enumeration: [] };
   let modelStatus = "off(not-run)";
   let modelDetail = "arm disabled";
+  let modelGraphSha: string | null = null;
   if (rows.length) {
     for (const r of rows) arms.rules.push(ruleNominate(r.desc));
     for (const r of rows) arms["first-candidate"].push("click");
     const m = await loadModelArm();
-    modelStatus = m.status; modelDetail = m.detail;
+    modelStatus = m.status; modelDetail = m.detail; modelGraphSha = m.graphSha;
     console.log(`model 臂：${modelStatus}（${modelDetail}）`);
     if (m.ask) {
       let i = 0;
@@ -304,7 +329,10 @@ async function main(): Promise<number> {
     instruction_set: INSTRUCTIONS,
     enumeration_order: ORDER,
     corpus: { packs, rows: rows.length, skipped: skipped.length },
-    model_arm: { status: modelStatus, detail: modelDetail },
+    model_arm: {
+      status: modelStatus, detail: modelDetail,
+      ...(modelGraphSha ? { graph_sha256: modelGraphSha } : {}),
+    },
     rows,
     /** 每行的各臂预测（诊断用：错在哪、错成什么）。 */
     predictions: Object.fromEntries(Object.entries(arms).map(([k, v]) => [k, v])),
