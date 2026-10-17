@@ -7,6 +7,7 @@ coverage/
 
 # 运行时产物：跑分矩阵、查看器输出、计划 checkpoint
 .task_state.json
+.task_plan.json
 bench/results/
 qunar/results/list_direct.png
 qunar/results/home_rendered.html
