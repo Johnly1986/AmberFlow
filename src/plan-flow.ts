@@ -211,15 +211,28 @@ export function templatePlanner(template: FlowTemplate): FlowPlanner {
 export function llmFlowPlanner(opts: {
   baseUrl?: string; apiKey?: string; model?: string; timeout?: number;
   chatFn?: (user: string, system: string) => Promise<string>;
+  /**
+   * 停止原因的回调：`api-error`（网络/HTTP，**会再抛**——静默停下会让网络故障伪装成
+   * "模型判完成"，产物写出一个 1 步的假绿模板）、`empty-reply` / `no-json` / `bad-json` /
+   * `invalid-schema`（fail-closed，停但不猜）、`done`（模型说目标已达成）。
+   */
+  onStop?: (reason: "api-error" | "empty-reply" | "no-json" | "bad-json" | "invalid-schema" | "done", detail?: unknown) => void;
 } = {}): FlowPlanner {
   const base = (opts.baseUrl ?? process.env.OPENAI_BASE_URL ?? "").replace(/\/+$/, "");
   const key = opts.apiKey ?? process.env.OPENAI_API_KEY ?? "";
   const model = opts.model ?? process.env.PLANNER_MODEL ?? "gpt-4o-mini";
-  const timeout = (opts.timeout ?? 30) * 1000;
+  // 30s 对"整页元素快照 + 推理型模型"太紧（2026-10-15 实测：第二次规划调用超时被旧代码静默吞掉，
+  // 产出一份 1 步的"成功"模板）。默认 120s，可用 PLANNER_TIMEOUT（秒）覆盖。
+  const timeout = (opts.timeout ?? (Number(process.env.PLANNER_TIMEOUT ?? "") || 120)) * 1000;
   const system = "You plan a SEMANTIC browser flow, one step per page view. The template must stay "
     + "site-agnostic: never emit CSS selectors, ids or data-test values — name targets by role plus "
     + "the visible wording you can SEE on the page. Never invent values; typed values are referenced "
-    + "as {slot}. Reply ONLY JSON: {\"id\",\"desc\",\"page\",\"lands\",\"targets\":[{\"role\",\"text\"}],"
+    + "as {slot}. "
+    + "`fills`: [{slot, word}] — `word` is the VISIBLE LABEL or PLACEHOLDER of the input field you "
+    + "want to fill (e.g. 出发城市 / Departure city), NEVER the value to type (values come from slots). "
+    + "`list`: {op:'min'|'max', by:'price'} ONLY when this page visibly shows a repeating row group "
+    + "with a numeric price column (a results/list page); never propose list on a search/form page. "
+    + "Reply ONLY JSON: {\"id\",\"desc\",\"page\",\"lands\",\"targets\":[{\"role\",\"text\"}],"
     + "\"fills\":[{\"slot\",\"word\"}],\"list\":{\"op\":\"min|max\",\"by\":\"price\"},\"dangerous\":bool} "
     + "or {\"done\":true} when the goal is achieved.";
   const chat = opts.chatFn ?? (async (user: string, sys: string): Promise<string> => {
@@ -243,19 +256,44 @@ export function llmFlowPlanner(opts: {
     const user = `Goal: ${req.goal}\nSlots: ${JSON.stringify(req.slots)}\nCompleted: `
       + `${JSON.stringify(req.completed.map((c) => c.id))}\nPage: ${req.url} — ${req.title}\n\n`
       + `Visible elements:\n${lines}\n\nPropose the NEXT single step (or {"done":true}).`;
+    // 网络/HTTP 错**不是**"模型判完成"：调用错误原样抛给调用方（不进入下面那个 fail-closed 的
+    // 解析 try）——静默停下会让网络故障伪装成"规划结束"，写出短模板假绿。
+    let reply: string;
     try {
-      const reply = await chat(user, system);
+      reply = await chat(user, system);
+    } catch (e) {
+      opts.onStop?.("api-error", e instanceof Error ? e.message : String(e));
+      throw e;
+    }
+    try {
+      if (!String(reply ?? "").trim()) { opts.onStop?.("empty-reply"); return null; }
       // 贪心到最后一个 `}`：惰性匹配会在**嵌套对象**处截断（targets:[{...}] 实测踩过）。
       const m = /\{[\s\S]*\}/.exec(reply ?? "");
-      if (m === null) return null;
+      if (m === null) { opts.onStop?.("no-json", String(reply).slice(0, 300)); return null; }
       let p: Record<string, unknown>;
-      try { p = JSON.parse(m[0]) as Record<string, unknown>; } catch { return null; }
-      if (p["done"] === true) return null;
-      if (typeof p["id"] !== "string" || typeof p["desc"] !== "string"
-        || typeof p["page"] !== "string" || typeof p["lands"] !== "string"
-        || !Array.isArray(p["targets"])) return null;      // fail closed：不像话 = 停
+      try { p = JSON.parse(m[0]) as Record<string, unknown>; } catch {
+        opts.onStop?.("bad-json", m[0].slice(0, 300));
+        return null;
+      }
+      if (p["done"] === true) { opts.onStop?.("done"); return null; }
+      // 契约容错（实测常见形状，不是猜）：id 常给数字（`"id": 1`）→ 归一成字符串；
+      // 其余字段仍严格（`desc`/`page` 必须是非空字符串，`targets` 必须是数组）。
+      const idRaw = p["id"];
+      const stepId = typeof idRaw === "string" ? idRaw.trim()
+        : typeof idRaw === "number" ? String(idRaw) : "";
+      if (!stepId || typeof p["desc"] !== "string" || !p["desc"].trim()
+        || typeof p["page"] !== "string" || !p["page"].trim()
+        || !Array.isArray(p["targets"])) {
+        opts.onStop?.("invalid-schema", p);                  // fail closed：不像话 = 停
+        return null;
+      }
+      // `lands` **可省略**：落点页名在演示前不可能知道（实测 deepseek-v4-pro 给 null 就此停摆）——
+      // 空串 = 让演示观察到的落点文件名当角色名。给了就归一成文件名（模型常给整条 URL）。
+      const landsRaw = p["lands"] === undefined || p["lands"] === null ? "" : String(p["lands"]);
       return {
-        id: p["id"], desc: p["desc"], page: p["page"], lands: p["lands"],
+        id: stepId, desc: p["desc"],
+        page: fileOf(String(p["page"])),
+        lands: landsRaw ? fileOf(landsRaw) : "", 
         targets: p["targets"] as SemanticTarget[],
         ...(Array.isArray(p["fills"]) ? { fills: p["fills"] as Array<{ slot: string; word: string }> } : {}),
         ...(p["list"] && typeof p["list"] === "object"
@@ -723,11 +761,14 @@ export async function planFlow(opts: PlanFlowOptions): Promise<PlanFlowResult> {
       currentUrl = landedUrl;
 
       const landingFile = fileOf(landedUrl);
+      // 落点角色名：模型给了就用；没给（演示前不可能知道）就用观察到的文件名——
+      // 模板里的 signal/invariant 引用的是**这个名字**，映射表 pages 里再落真文件。
+      const landsRole = proposal.lands !== "" ? proposal.lands : landingFile;
       pages[proposal.page] = startFile;
-      pages[proposal.lands] = landingFile;
+      pages[landsRole] = landingFile;
       const qt = generalizeQuery(runs[0]![0]!.url, slots);
       if (qt !== "") pageQuery[proposal.id] = qt;
-      const sig = pickInducedSignal(runs, proposal.lands, landingFile);
+      const sig = pickInducedSignal(runs, landsRole, landingFile);
       if (sig.kind === "manual") {
         throw new Error(`step ${JSON.stringify(proposal.id)}: no discriminating reproducible signal — `
           + "plan stops instead of guessing（learn 的纪律）");
@@ -735,8 +776,8 @@ export async function planFlow(opts: PlanFlowOptions): Promise<PlanFlowResult> {
       if (sig.kind === "induced") frozenSignals[proposal.id] = generalizeSignalValues(sig.signal, slots);
 
       steps.push({
-        id: proposal.id, desc: proposal.desc, page: proposal.page, lands: proposal.lands,
-        signal: { page: proposal.lands },
+        id: proposal.id, desc: proposal.desc, page: proposal.page, lands: landsRole,
+        signal: { page: landsRole },
         signal_source: sig.kind,
         targets: proposal.targets,
         ...(qt !== "" ? { page_query: qt } : {}),
@@ -930,7 +971,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const result = await planFlow({
       goal: String(v.goal), seedUrl: String(v.seed), app: String(v.app),
       site: v.site !== undefined ? String(v.site) : siteKeyFor(String(v.seed)),
-      ...(plannerKind === "llm" ? { planner: llmFlowPlanner() } : {}),
+      ...(plannerKind === "llm"
+        ? { planner: llmFlowPlanner({ onStop: (reason, detail) => {
+          const why: Record<string, string> = {
+            "api-error": "调用失败（网络/HTTP）——已抛出，本次未落盘",
+            "empty-reply": "模型回了空内容（fail-closed 停止）",
+            "no-json": "模型回答里没有 JSON（fail-closed 停止）",
+            "bad-json": "模型回答的 JSON 解析失败（fail-closed 停止）",
+            "invalid-schema": "模型回答不符合步骤契约（fail-closed 停止）",
+            "done": "模型判定目标已达到（{done:true}）——规划结束",
+          };
+          console.error(`规划停止：${why[reason] ?? reason}`
+            + (detail !== undefined ? ` ｜ ${JSON.stringify(detail).slice(0, 300)}` : ""));
+        } }) } : {}),
       laya: v.laya === "unsure" ? "unsure" : "scripted",
       escalate: v.escalate === "llm" ? "llm" : v.escalate === "none" ? "none" : "scripted",
       yes: v.yes === true, force: v.force === true, verbose: !v.quiet,

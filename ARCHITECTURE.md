@@ -51,7 +51,13 @@
 > 声明 + 规则 + 编译/录制，模型是兜底与诊断。修正方案 [docs/MODEL_ROLE_PLAN.md](docs/MODEL_ROLE_PLAN.md)、
 > 实施计划 [docs/MODEL_ROLE_IMPL_PLAN.md](docs/MODEL_ROLE_IMPL_PLAN.md)（目标图 ⑨）。
 >
-> **决策模型可换**：`--provider laya-onnx|scripted-stub|none|first-candidate|coin-flip|always-abstain|jevk5`
+> **决策模型可换**：`--provider laya-onnx|scripted-stub|none|first-candidate|coin-flip|always-abstain|jevk5|bailian|token-plan`
+>
+> **闸门刻度随 provider 校准**（2026-10-15 在线接入审查的实测缺陷）：执行器比的是 provider 的 `score`，
+> 而 `score_kind` 两支不可比——0.25 是 laya 的刻度。现在刻度四级可声明 **CLI `--conf-floor` >
+> `pack.policy.conf_floor` > `ProviderInfo.floor`（provider 自报）> 0.25**，生效值与来源进
+> `effective_policy.conf_floor`；实测 token-plan 自报 0.20（camera-entry 的 0.20 一枪曾被 0.25 误伤），
+> 见 [docs/DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md) §4
 > （`AMBERFLOW_DECISION_PROVIDER`；缝与契约见 [docs/DECISION_INTERFACE_SURVEY.md](docs/DECISION_INTERFACE_SURVEY.md) §7，
 > 外部模型接入示例 [docs/DECISION_PROVIDER_JEVK5.md](docs/DECISION_PROVIDER_JEVK5.md)；
 > 基线对照 `npm run providers:baseline`）。

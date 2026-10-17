@@ -154,7 +154,7 @@ box(824, 778, 386, 56, "bxnew", "证据面强制与两本账（S3/S4）", ["提�
 
 /* ---------------- ⑥ 决策层 ---------------- */
 band(862, 152, `⑥ 决策层 — 可插拔提供者与它的账（实测咨询 ${N.modelAsks}/${N.modelSteps} 步、独立决定 ${N.modelPassed}）`);
-box(60, 894, 470, 62, "bxm", "决策提供者注册表（decision-provider.ts）", ["laya-onnx | stub | none | jevk5 | bailian | 自注册（--provider）", "$基线对照：first-candidate 是新模型要赢的线（providers:baseline）"]);
+box(60, 894, 470, 62, "bxm", "决策提供者注册表（decision-provider.ts）", ["laya-onnx | stub | none | jevk5 | bailian | token-plan | 自注册", "$基线对照：first-candidate 是新模型要赢的线（providers:baseline）"]);
 box(540, 894, 306, 62, "bxm", "laya-onnx.ts + Router", ["buildSequence · shortlist · 按文字系统选点", "$置信度从不参与换 checkpoint（ECE 0.855 的教训）"]);
 box(856, 894, 354, 62, "bxm", "decision-cache.ts + countingRuntime", ["精确指纹：同问不重答（二跑 0 forwards 实测）", "$过关数在 trace 数 · 咨询数在运行时缝数，差值=未过闸"]);
 box(60, 964, 262, 42, "bxm", "学习库：hint 与指令映射", ["过重放门才回填；authored 优先；读-合并-写"]);

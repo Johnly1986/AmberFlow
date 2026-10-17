@@ -4,7 +4,8 @@
   "providers": [
     "always-abstain",
     "first-candidate",
-    "coin-flip"
+    "coin-flip",
+    "token-plan"
   ],
   "apps": [
     "demo-app",
@@ -17,37 +18,44 @@
       "always-abstain": {
         "ok": false,
         "completed": "1/5",
-        "secs": 3,
+        "secs": 4.6,
         "asks": 12,
         "passed": 0
       },
       "first-candidate": {
         "ok": true,
         "completed": "5/5",
-        "secs": 5.2,
+        "secs": 6.9,
         "asks": 12,
         "passed": 12
       },
       "coin-flip": {
         "ok": false,
         "completed": "2/5",
-        "secs": 1.9,
+        "secs": 2.9,
         "asks": 10,
         "passed": 1
+      },
+      "token-plan": {
+        "ok": true,
+        "completed": "5/5",
+        "secs": 11,
+        "asks": 5,
+        "passed": 5
       }
     },
     "camera-entry": {
       "always-abstain": {
         "ok": false,
         "completed": "0/4",
-        "secs": 2.1,
+        "secs": 2.9,
         "asks": 4,
         "passed": 0
       },
       "first-candidate": {
         "ok": true,
         "completed": "4/4",
-        "secs": 14.9,
+        "secs": 15.8,
         "asks": 28,
         "passed": 28
       },
@@ -57,20 +65,27 @@
         "secs": 6.6,
         "asks": 12,
         "passed": 9
+      },
+      "token-plan": {
+        "ok": true,
+        "completed": "4/4",
+        "secs": 17,
+        "asks": 7,
+        "passed": 7
       }
     },
     "transfer-trekly": {
       "always-abstain": {
         "ok": false,
         "completed": "0/19",
-        "secs": 3.8,
+        "secs": 4,
         "asks": 19,
         "passed": 0
       },
       "first-candidate": {
         "ok": true,
         "completed": "19/19",
-        "secs": 56.5,
+        "secs": 56.7,
         "asks": 37,
         "passed": 37
       },
@@ -80,6 +95,13 @@
         "secs": 3.9,
         "asks": 19,
         "passed": 0
+      },
+      "token-plan": {
+        "ok": true,
+        "completed": "19/19",
+        "secs": 54.5,
+        "asks": 26,
+        "passed": 26
       }
     },
     "ctrip-case": {
@@ -93,16 +115,23 @@
       "first-candidate": {
         "ok": false,
         "completed": "7/19",
-        "secs": 55.2,
+        "secs": 55.3,
         "asks": 137,
         "passed": 137
       },
       "coin-flip": {
         "ok": false,
         "completed": "0/19",
-        "secs": 4.3,
+        "secs": 4.4,
         "asks": 19,
         "passed": 0
+      },
+      "token-plan": {
+        "ok": false,
+        "completed": "19/19",
+        "secs": 39.3,
+        "asks": 23,
+        "passed": 23
       }
     }
   }

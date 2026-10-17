@@ -147,10 +147,62 @@ describe("llmFlowPlanner — 与老师同一条 fail-closed 纪律", () => {
     expect(p!.targets[0]!.text).toEqual(["机票"]);
   });
 
-  it("done / 垃圾回答 → null（停止规划，绝不猜）", async () => {
-    expect(await llmFlowPlanner({ chatFn: async () => '{"done":true}' })(REQ)).toBeNull();
-    expect(await llmFlowPlanner({ chatFn: async () => "sure thing!" })(REQ)).toBeNull();
-    expect(await llmFlowPlanner({ chatFn: async () => { throw new Error("endpoint down"); } })(REQ)).toBeNull();
+  it("契约容错（实测形状）：数字 id 归一为字符串；lands 可省略（演示前不可能知道落点）；page 归一成文件名", async () => {
+    const planner = llmFlowPlanner({
+      chatFn: async () => JSON.stringify({
+        id: 2,
+        desc: "填城市并搜索",
+        page: "file:///root/x/semantic/site-a/search.html",
+        lands: null,                                   // 实测 deepseek-v4-pro 就给 null
+        targets: [{ role: "button", text: "搜索" }],
+        fills: [],
+        list: null,
+        dangerous: false,
+      }),
+    });
+    const p = await planner(REQ);
+    expect(p).not.toBeNull();
+    expect(p!.id).toBe("2");
+    expect(p!.page).toBe("search.html");
+    expect(p!.lands).toBe("");                       // 空 = 用演示观察到的落点文件名当角色名
+  });
+
+  it("done / 垃圾回答 → null（停止规划，绝不猜），且**停止原因可辨**", async () => {
+    const reasons: string[] = [];
+    const withStop = (reply: string | (() => never)) => llmFlowPlanner({
+      chatFn: async () => (typeof reply === "string" ? reply : reply()),
+      onStop: (r) => reasons.push(r),
+    });
+    expect(await withStop('{"done":true}')(REQ)).toBeNull();
+    expect(await withStop("sure thing!")(REQ)).toBeNull();
+    expect(await withStop('{"foo":1}')(REQ)).toBeNull();       // 契约不合 = invalid-schema
+    // 规划循环必须能区分：模型说"完成" ≠ 回答坏掉 ≠ 调用失败
+    expect(reasons).toEqual(["done", "no-json", "invalid-schema"]);
+  });
+
+  it("调用失败**抛出**而不是 null（静默停下会让网络故障伪装成「规划结束」、写出短模板假绿）", async () => {
+    const reasons: string[] = [];
+    const planner = llmFlowPlanner({
+      chatFn: async () => { throw new Error("endpoint down"); },
+      onStop: (r) => reasons.push(r),
+    });
+    await expect(planner(REQ)).rejects.toThrow(/endpoint down/);
+    expect(reasons).toEqual(["api-error"]);
+  });
+
+  it("超时口径可配（PLANNER_TIMEOUT 秒）——30s 对整页快照+推理模型太紧（实测超时事故）", async () => {
+    // 不真等超时：只验"构造器读环境变量"这条口径——把超时设成 1 秒并注入一个慢 chatFn。
+    const saved = process.env.PLANNER_TIMEOUT;
+    process.env.PLANNER_TIMEOUT = "1";
+    try {
+      const planner = llmFlowPlanner({
+        chatFn: async () => { await new Promise((r) => setTimeout(r, 20)); return '{"done":true}'; },
+      });
+      expect(await planner(REQ)).toBeNull();     // chatFn 自己不受 timeout 管（注入缝）；只验构造不炸
+    } finally {
+      if (saved === undefined) delete process.env.PLANNER_TIMEOUT;
+      else process.env.PLANNER_TIMEOUT = saved;
+    }
   });
 });
 

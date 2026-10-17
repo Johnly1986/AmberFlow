@@ -30,7 +30,7 @@ import { appDirs, loadPack, packHintCoverage, type AppPack } from "../src/app-pa
 import { runApp, refusalLine, type AppRunResult } from "../src/app-runner.ts";
 import { checkArtifacts, missingPieces } from "../src/model-artifacts.ts";
 import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "../src/decision-cache.ts";
-import { countedProvider, installDecisionProvider, resolveProviderSpec } from "../src/decision-provider.ts";
+import { countedProvider, installDecisionProvider, resolveProviderSpec, type ProviderInfo } from "../src/decision-provider.ts";
 import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime, type CountingRuntime } from "../src/model.ts";
 
 /**
@@ -110,6 +110,8 @@ export async function runOne(
   tier = "off(scripted)",
   /** 非 laya provider 的咨询计数（laya 臂用 counted 那条缝，两者不同时存在）。 */
   providerAsks?: () => number,
+  /** 非 laya provider 的身份（名字/版本/能力/自报闸门刻度）——进产物，换模型 A/B 要读它。 */
+  providerInfo?: ProviderInfo,
 ): Promise<SuiteRow> {
   const hints = packHintCoverage(pack);          // §W2：承重墙每天看得见
   const out = path.join(outBase, pack.id);
@@ -126,6 +128,8 @@ export async function runOne(
     // 按层级认臂的读者就会把它当桩跳过）。咨询数从运行时缝上数：
     // "哪一步本该问模型"与"模型此刻是谁"是两个问题，seam 回答前者、trace 回答后者。
     modelStatus: tier,
+    // provider 身份 + 自报闸门刻度进产物（换模型 A/B 要能读出"这次是谁在决策、刻度多少"）。
+    ...(providerInfo ? { providerInfo, providerFloor: providerInfo.floor } : {}),
     // 报**本次运行的增量**：套件一个进程跑所有应用，累计值会把前一个应用的命中算进来。
     runtimeStats: () => {
       const after = statsOf();
@@ -260,7 +264,8 @@ export async function suite(
       try {
         rows.push(await runOne(pack, cached, counted,
           suiteOutDir(opts.provider ?? (opts.arm === "ablate" ? "ablate" : "real")),
-          spec.tier, providerAsks ?? undefined));
+          spec.tier, providerAsks ?? undefined,
+          spec.kind === "provider" ? spec.provider : undefined));
       } catch (e) {
         rows.push({
           app: pack.id, steps: 0, completed: "0/0", skipped: 0, invariants: "-",

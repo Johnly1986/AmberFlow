@@ -84,10 +84,18 @@ function run(file: string, app: string, provider: string, outDir: string): Cell 
 }
 
 /**
- * 外部 provider 的就绪探测：`jevk5` 这类要一个服务在场。没服务就**提前停下并指路**，
- * 而不是跑出 12 格"未通过"——那会被误读成"这个模型不行"，而真相是"根本没问成"。
+ * 外部 provider 的就绪探测：`jevk5` 这类要一个服务在场，`token-plan` 这类要一份 key——
+ * 没就绪就**提前停下并指路**，而不是跑出 12 格"未通过"——那会被误读成"这个模型不行"，
+ * 而真相是"根本没问成"。
  */
 async function ensureReady(names: string[]): Promise<void> {
+  if (names.includes("token-plan")) {
+    const key = (process.env.TOKEN_PLAN_API_KEY ?? process.env.DASHSCOPE_API_KEY ?? "").trim();
+    if (!key) {
+      throw new Error('provider "token-plan" 缺 API key：设 TOKEN_PLAN_API_KEY（或 DASHSCOPE_API_KEY）。'
+        + "token 只从环境读，绝不内联进命令/代码/产物；契约见 docs/DECISION_PROVIDER_TOKENPLAN.md。");
+    }
+  }
   if (!names.includes("jevk5")) return;
   const endpoint = process.env.JEVK5_ENDPOINT ?? "http://127.0.0.1:8090/v1/systemone";
   const health = endpoint.replace(/\/v1\/systemone\/?$/, "/health");

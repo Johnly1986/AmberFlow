@@ -52,6 +52,13 @@ export interface ProviderInfo {
   name: string;
   version: string;
   capabilities: ProviderCapabilities;
+  /**
+   * provider 自报的**闸门刻度**（可选）：它的 `score` 落在哪个值以上才算"够把握"。
+   * 为什么必须由 provider 说：闸门比的是 `score`，而 `score_kind` 不同的两支不可比
+   * （laya 的归一化熵 vs 在线服务的标定概率）——0.25 在两种刻度上不是同一件事。
+   * 缺省不声明 = 用全局缺省 0.25（既有行为逐字节不变）。优先级：CLI > pack.policy > 本字段 > 0.25。
+   */
+  floor?: number;
 }
 
 /** provider 需要读页面（渲染视图、取 URL/标题）；执行器传的是它自己那个 page。 */
@@ -152,8 +159,8 @@ export function decisionProviderOrNull(): DecisionProvider | null {
 /** 当前 provider 的身份（报告/doctor/matrix 读它；没装就是 null）。 */
 export function activeProviderInfo(): ProviderInfo | null {
   if (!active) return null;
-  const { name, version, capabilities } = active;
-  return { name, version, capabilities: { ...capabilities } };
+  const { name, version, capabilities, floor } = active;
+  return { name, version, capabilities: { ...capabilities }, ...(floor !== undefined ? { floor } : {}) };
 }
 
 /** 一行给人看的身份串：`laya-onnx 0.3.5（entropy_conf，支持短名单）`。 */
@@ -239,6 +246,9 @@ export async function resolveProviderSpec(
   // 百炼 decision-model-preview：同样注册不需要 key/端点，真调用缺了才报错指路。
   const { registerBailian } = await import("./decision-bailian.ts");
   await registerBailian();
+  // token-plan MaaS 网关（同一 SystemOne 协议，共享端点、Token 只从环境读）。
+  const { registerTokenPlan } = await import("./decision-tokenplan.ts");
+  await registerTokenPlan();
   const extra = listDecisionProviders().filter(
     (n) => !(BASELINE_PROVIDERS as readonly string[]).includes(n)
       && !(BUILTIN_LAYA_PROVIDERS as readonly string[]).includes(n));

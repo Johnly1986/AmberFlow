@@ -36,7 +36,7 @@ import { isParseUsageError, renamedHint, usageErrorLine } from "./cli-args.ts";
 import { cliRunDetailed, defaultDates, loadSource, runSource, urlFor, type CliObservation } from "./datasource.ts";
 import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "./decision-cache.ts";
 import { checkArtifacts, missingPieces, modelConfigError } from "./model-artifacts.ts";
-import { activeProviderInfo, countedProvider, installDecisionProvider, resolveProviderSpec } from "./decision-provider.ts";
+import { activeProviderInfo, countedProvider, installDecisionProvider, resolveProviderSpec, type ProviderInfo } from "./decision-provider.ts";
 import { BrowserMiddleware, browserSession, type BrowserSession } from "./executor.ts";
 import { REPO } from "./flow.ts";
 import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime } from "./model.ts";
@@ -70,7 +70,7 @@ export interface AppRunOptions {
   /** 工具步：允许 `dangerous` 步真跑（默认拒绝）。 */
   allowDangerous?: boolean;
   /** 本次实际用的决策提供者身份（CLI 解析后传入；未提供则产物里没有这个字段）。 */
-  providerInfo?: { name: string; version: string; capabilities: Record<string, unknown> };
+  providerInfo?: ProviderInfo;
   /** 工具步：注入确认钩子（拿到干跑证据）；返回 false 则拒绝。 */
   confirmToolStep?: (desc: string, evidence: ToolStepEvidence) => boolean | Promise<boolean>;
   verbose?: boolean;
@@ -121,6 +121,14 @@ export interface AppRunOptions {
   hintMemory?: HintMemoryLike | null;
   /** sidecar 的落点（仅报告用；`--hint-memory FILE` / 默认 `$AMBERFLOW_HOME/hint-memory/<app>.json`）。 */
   hintMemoryPath?: string | null;
+  /**
+   * 置信度闸门的**本次覆盖**（`--conf-floor N`）。不传 = 让 pack.policy / provider 自报 / 0.25 接管。
+   * 为什么需要它：闸门比的是 provider 的 `score`，换 provider（score_kind 不同）时缺省刻度不再成立——
+   * 实测 token-plan 在 camera-entry 上有一枪 0.20 被 0.25 硬阻塞（见 docs/DECISION_PROVIDER_TOKENPLAN.md）。
+   */
+  confFloor?: number;
+  /** provider 自报的闸门刻度（`ProviderInfo.floor`；CLI 装了 provider 就传进来）。 */
+  providerFloor?: number;
 }
 
 /**
@@ -324,15 +332,16 @@ export interface AppRunResult {
    * 否则同一个包含义随命令行变，而报告看不出来。
    */
   /** 本次实际用的决策提供者（名字/版本/能力）。换模型 A/B 的对照就靠它。 */
-  decision_provider?: { name: string; version: string; capabilities: Record<string, unknown> };
+  decision_provider?: ProviderInfo;
   effective_policy?: {
     tiered_hint: { value: boolean; source: "cli" | "pack" | "default" };
     risk_ask: { value: "always" | "rules-only"; source: "pack" | "default" };
     reobserve: { value: boolean; source: "pack" | "default" };
     max_effective_repeats: { value: number; source: "pack" | "default" };
+    conf_floor: { value: number; source: "cli" | "pack" | "provider" | "default" };
   };
   /** 本次实际用的决策提供者身份（CLI 解析后传进来；未提供则缺字段）。 */
-  providerInfo?: { name: string; version: string; capabilities: Record<string, unknown> };
+  providerInfo?: ProviderInfo;
   /** 模型层级（`on` / `off(missing)` / `off(ablation:…)`；未提供则缺字段）。 */
   model_status?: string;
   /**
@@ -571,13 +580,22 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       value: declaredPolicy.max_effective_repeats ?? 3,
       source: declaredPolicy.max_effective_repeats !== undefined ? "pack" as const : "default" as const,
     },
+    // 闸门刻度：CLI（本次显式）> pack.policy > provider 自报 > 0.25。
+    // 换 provider 时缺省刻度不再成立（score_kind 不可比）——这是这条声明面的存在理由。
+    conf_floor: opts.confFloor !== undefined
+      ? { value: opts.confFloor, source: "cli" as const }
+      : declaredPolicy.conf_floor !== undefined
+        ? { value: declaredPolicy.conf_floor, source: "pack" as const }
+        : opts.providerFloor !== undefined
+          ? { value: opts.providerFloor, source: "provider" as const }
+          : { value: 0.25, source: "default" as const },
   };
   const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
   const mw = new BrowserMiddleware({
     modelId,
     auditor: new MockAuditor(),
     maxSteps: 8,
-    confFloor: 0.25,
+    confFloor: policy.conf_floor.value,
     riskyThreshold: 0.6,
     doneThreshold: 0.5,
     // P0-4（导航信封）：`hosts` 以前只在**加载期**校验类型、给防泄漏门禁当输入，
@@ -799,7 +817,8 @@ export function appReportMarkdown(r: AppRunResult): string {
       ? [`- 模型层级：\`${r.model_status}\`（on=真 ONNX 在位；off(missing)=缺产物，走的是规则模式）`] : []),
     ...(r.decision_provider
       ? [`- 决策提供者：\`${r.decision_provider.name} ${r.decision_provider.version}\``
-        + `（score=${String((r.decision_provider.capabilities as Record<string, unknown>).score_kind)}）`] : []),
+        + `（score=${String(r.decision_provider.capabilities.score_kind)}`
+        + `${r.decision_provider.floor !== undefined ? `，闸门刻度 ${r.decision_provider.floor}` : ""}）`] : []),
     ...(r.effective_policy
       ? [`- 生效策略：${Object.entries(r.effective_policy)
           .filter(([, v]) => v.source !== "default")
@@ -872,12 +891,14 @@ export function appReportMarkdown(r: AppRunResult): string {
 
 const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--out DIR]
                   [--model ID] [--provider NAME] [--ablate stub|rules-only] [--no-sources] [--confirm-safe]
-                  [--allow-dangerous] [--tiered-hint] [--learn-hints | --hint-memory FILE] [--quiet]
+                  [--allow-dangerous] [--tiered-hint] [--learn-hints | --hint-memory FILE] [--conf-floor N] [--quiet]
 
 按 apps/<app>/pack.json 跑一条完整应用链路：数据腿 → 浏览器步/工具步 → 结束状态不变量
 --tiered-hint  P1 实验开关：hint 档内歧义向模型问更小的问题（默认关 = 行为逐字节不变）
 --learn-hints  R2 学习环：模型选对的步变成规则（sidecar，永不写进被审计的包；authored 恒优先）
-               落点默认 $AMBERFLOW_HOME/hint-memory/<app>.json，--hint-memory FILE 显式指定`;
+               落点默认 $AMBERFLOW_HOME/hint-memory/<app>.json，--hint-memory FILE 显式指定
+--conf-floor N 置信度闸门刻度（0<N≤1）：换 provider（score_kind 不同）时缺省 0.25 不再成立，
+               本旗标 = 本次覆盖；包可用 policy.conf_floor 声明；provider 可自报 floor`;
 
 /**
  * app-runner 默认产物目录（**调用时**读 env，测试可隔离——与 apps_suite 的 suiteOutDir 同一纪律）。
@@ -901,6 +922,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         "allow-dangerous": { type: "boolean" },
         "tiered-hint": { type: "boolean" },
         "learn-hints": { type: "boolean" }, "hint-memory": { type: "string" },
+        "conf-floor": { type: "string" },
         quiet: { type: "boolean" }, help: { type: "boolean" },
       },
     });
@@ -1077,6 +1099,17 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
   }
 
+  // --conf-floor：显式覆盖闸门刻度；范围错误是**用法错误**（退出码 2），不是静默忽略。
+  let cliConfFloor: number | undefined;
+  if (v["conf-floor"] !== undefined) {
+    const n = Number(v["conf-floor"]);
+    if (!Number.isFinite(n) || n <= 0 || n > 1) {
+      console.error(`--conf-floor 要是 (0, 1] 之间的数（拿到 ${JSON.stringify(v["conf-floor"])}）`);
+      return 2;
+    }
+    cliConfFloor = n;
+  }
+
   let result: AppRunResult;
   try {
     result = await runApp(pack, {
@@ -1087,12 +1120,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       // （以前这里恒传一个布尔，等于 CLI 永远压过 pack——报告还会把来源写成 cli，假账。）
       tieredHint: v["tiered-hint"] === true ? true : undefined,
       hintMemory, hintMemoryPath,
+      confFloor: cliConfFloor,
+      providerFloor: activeProviderInfo()?.floor,
       modelId: v.model ?? pack.model ?? "english",
       modelStatus,
       providerInfo: activeProviderInfo() ?? {
         name: spec.name, version: spec.kind === "laya" ? "runtime" : "n/a",
         capabilities: { choice: spec.kind !== "none", risk: spec.kind === "laya", done: spec.kind === "laya",
-          shortlist: spec.kind === "laya", score_kind: spec.kind === "laya" ? "entropy_conf" : "rank_only" },
+          shortlist: spec.kind === "laya", score_kind: spec.kind === "laya" ? ("entropy_conf" as const) : ("rank_only" as const) },
       },
       runtimeStats: runtimeStats ?? undefined,
       pickAsks: pickAsks ?? undefined,

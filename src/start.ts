@@ -451,8 +451,10 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     // 而代码注释早就声称"doctor 能列出它"——这里把那句话变成真的。
     const { registerJevK5 } = await import("./decision-jevk5.ts");
     const { registerBailian } = await import("./decision-bailian.ts");
+    const { registerTokenPlan } = await import("./decision-tokenplan.ts");
     await registerJevK5();
     await registerBailian();
+    await registerTokenPlan();
     const report = doctorReport(preflight());
     for (const l of report.lines) io.out(l);
     return report.ok ? 0 : 2;

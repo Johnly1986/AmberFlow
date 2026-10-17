@@ -10,7 +10,7 @@
 npm ci && npx playwright install chromium
 npm start          # 在仓库自带页面上跑一份真实计划：离线、零配置
 npm run doctor     # 环境体检：Node / chromium / 决策模型 / 可选 provider / LLM，缺什么给什么命令
-npm run apps -- --app ctrip-case --provider coin-flip   # 换决策模型跑（laya-onnx|scripted-stub|none|基线|自注册）
+npm run apps -- --app ctrip-case --provider coin-flip   # 换决策模型跑（laya-onnx|stub|none|基线|jevk5|bailian|token-plan|自注册）
 npm run providers:baseline   # 决策提供者对照台：零智能基线 first-candidate 是任何新模型要赢的线
 ```
 
@@ -148,7 +148,11 @@ console.log(rep.completed, rep.traces.length);
 | 变量 | 作用 |
 |---|---|
 | `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR` | 本地决策模型产物位置（缺了走规则模式） |
-| `AMBERFLOW_DECISION_PROVIDER` | 选决策提供者：`laya-onnx`（默认）/ `scripted-stub` / `none` / 基线 / `jevk5` / `bailian` |
+| `AMBERFLOW_DECISION_PROVIDER` | 选决策提供者：`laya-onnx`（默认）/ `scripted-stub` / `none` / 基线 / `jevk5` / `bailian` / `token-plan` |
+| `TOKEN_PLAN_ENDPOINT` | token-plan MaaS 网关的 SystemOne 端点（完整 URL，要带 `/compatible-mode/v1/systemone`）；**端点只从环境读**（共享层不写死外部主机） |
+| `TOKEN_PLAN_API_KEY` | token-plan 的 token（回退 `DASHSCOPE_API_KEY`）；只从环境读，绝不进代码/产物/提交。见 [docs/DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md) |
+| `TOKEN_PLAN_MODEL` | 覆盖 token-plan 的决策模型名（默认 `decision-model-preview`） |
+| `PLANNER_TIMEOUT` | `plan:flow --planner llm` 的规划调用超时（秒，默认 120；30s 对推理模型+整页快照太紧） |
 | `JEVK5_ENDPOINT` | JevK5 的 `/v1/systemone` 地址（`--provider jevk5` 时用；起法见 docs/DECISION_PROVIDER_JEVK5.md） |
 | `DASHSCOPE_API_KEY`（别名 `BAILIAN_API_KEY`） | 百炼决策模型的 API token（`--provider bailian` 时用）——**只进环境变量，绝不写进代码/产物/提交** |
 | `BAILIAN_ENDPOINT` 或 `BAILIAN_WORKSPACE_ID`(+`BAILIAN_REGION`) | 百炼 systemone 端点（workspace 作用域）；起法见 docs/DECISION_PROVIDER_BAILIAN.md |
@@ -157,7 +161,7 @@ console.log(rep.completed, rep.traces.length);
 
 ## 延伸阅读
 
-[ARCHITECTURE.md](ARCHITECTURE.md)（模块结构与实测规则）· [CLAUDE.md](CLAUDE.md)（工程规约）· [apps/INVENTORY.md](apps/INVENTORY.md)（应用清单与"完成"的定义）· [PORTING.md](PORTING.md) / [BACKUP.md](BACKUP.md)（Python 参考实现的迁移与存档）
+[ARCHITECTURE.md](ARCHITECTURE.md)（模块结构与实测规则）· [DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md)（在线决策模型接入与实测账）· [CLAUDE.md](CLAUDE.md)（工程规约）· [apps/INVENTORY.md](apps/INVENTORY.md)（应用清单与"完成"的定义）· [PORTING.md](PORTING.md) / [BACKUP.md](BACKUP.md)（Python 参考实现的迁移与存档）
 
 ## License
 

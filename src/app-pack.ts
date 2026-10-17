@@ -62,7 +62,7 @@ export const PACK_KEYS = [
  * CLI 显式参数只覆盖本次运行，报告打印生效值与来源。
  */
 export const POLICY_KEYS = [
-  "tiered_hint", "risk_ask", "reobserve", "max_effective_repeats",
+  "tiered_hint", "risk_ask", "reobserve", "max_effective_repeats", "conf_floor",
 ] as const;
 
 /**
@@ -77,6 +77,13 @@ export interface PackPolicy {
   risk_ask?: (typeof RISK_ASK_MODES)[number];
   reobserve?: boolean;
   max_effective_repeats?: number;
+  /**
+   * 置信度闸门（缺省 0.25）。**为什么要能声明**：闸门比的是 provider 的 `score`，而
+   * `score_kind` 不同的两支不可比（laya 的归一化熵 vs 在线服务的标定概率）——
+   * 换 provider 时 0.25 的含义就变了（实测：token-plan 在 camera-entry 上有一枪 0.20
+   * 被硬阻塞，而 0.20 是它自己的"把握"刻度）。优先级：CLI > pack.policy > provider 自报 > 0.25。
+   */
+  conf_floor?: number;
 }
 
 /**
@@ -796,6 +803,10 @@ export function validatePack(pack: AppPack,
       const mer = pol["max_effective_repeats"];
       if (mer !== undefined && (typeof mer !== "number" || !Number.isInteger(mer) || mer < 1)) {
         p.push("policy.max_effective_repeats: must be an integer >= 1");
+      }
+      const cf = pol["conf_floor"];
+      if (cf !== undefined && (typeof cf !== "number" || !Number.isFinite(cf) || cf <= 0 || cf > 1)) {
+        p.push("policy.conf_floor: must be a number in (0, 1]");
       }
     }
   }

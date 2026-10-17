@@ -122,6 +122,32 @@ describe("生效策略进产物（ARCHITECTURE_IMPROVEMENTS §3：同一个包�
   }, 300_000);
 });
 
+describe("闸门刻度可声明（换 provider 时缺省 0.25 不再成立）", () => {
+  it("优先级 cli > pack > provider > 0.25，来源如实进产物；全缺省 ⇒ 无 effective_policy", async () => {
+    const base = { verbose: false, sources: false, planPath: "", outDir: "" };
+    const run = async (policy: Record<string, unknown> | null, opts: Record<string, unknown> = {}) => {
+      const pack = JSON.parse(JSON.stringify(loadPack("demo-app"))) as Record<string, unknown>;
+      if (policy) pack.policy = policy;
+      const out = tmpDir("floor");
+      return runApp(pack as never, { ...base, outDir: out, planPath: path.join(out, "plan.json"), ...opts });
+    };
+    // 全缺省：没有 effective_policy（缺省等价纪律）
+    const dflt = await run(null);
+    expect(dflt.effective_policy).toBeUndefined();
+    // provider 自报（CLI 装了 provider 就把它的 floor 传进来）
+    const viaProvider = await run(null, { providerFloor: 0.2 });
+    expect(viaProvider.effective_policy?.conf_floor).toEqual({ value: 0.2, source: "provider" });
+    // pack 声明压过 provider
+    const viaPack = await run({ conf_floor: 0.15 }, { providerFloor: 0.2 });
+    expect(viaPack.effective_policy?.conf_floor).toEqual({ value: 0.15, source: "pack" });
+    // CLI 本次覆盖压过 pack
+    const viaCli = await run({ conf_floor: 0.15 }, { providerFloor: 0.2, confFloor: 0.3 });
+    expect(viaCli.effective_policy?.conf_floor).toEqual({ value: 0.3, source: "cli" });
+    // 报告面：非缺省的策略行可见（含新刻度）
+    expect(appReportMarkdown(viaCli)).toContain("conf_floor=0.3");
+  }, 300_000);
+});
+
 describe("套件的验收数（P1 的验收口径）", () => {
   it("同一张表：slowjet 咨询 ≥1（保险被碰过）；demo-app 为 0；产物落套件目录", async () => {
     const sj = await runOne(loadPack("transfer-slowjet"), cached, counted);
