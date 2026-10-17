@@ -57,14 +57,14 @@
     "tier": "on（/tmp/laya_dec.onnx 在位）",
     "real_model_corpus": {
       "stats": {
-        "apps": 2,
-        "trace_steps": 5,
-        "choice_asks": 0,
+        "apps": 17,
+        "trace_steps": 201,
+        "choice_asks": 5,
         "passed": 0,
         "reobserve": 0,
         "escalate": 0,
-        "rule_match": 5,
-        "secs": 14.2,
+        "rule_match": 201,
+        "secs": 709.3,
         "tier": "on"
       }
     },
@@ -109,7 +109,7 @@
     }
   },
   "tests": {
-    "count": 1167,
-    "source": "沿用上一次的快照（未给 --tests；重算：`npx vitest list | grep -cE \"^(tests|integrations)/\"` 再 `--tests N`）"
+    "count": 1231,
+    "source": "--tests（应来自 `npx vitest list | grep -cE \"^(tests|integrations)/\"`；静态数 `it(` 只有 799，不可用）"
   }
 }

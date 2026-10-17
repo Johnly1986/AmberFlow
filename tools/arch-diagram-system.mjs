@@ -8,7 +8,9 @@
  *   - 本图：**系统全景 + 外部边界 + 信任链**——七层各是什么、系统与世界接壤在哪、
  *     每层的红线由什么撑着。补上 v1 画完后才落地的东西：决策提供者注册表
  *     （decision-provider）、`$AMBERFLOW_HOME/apps` 双根发现、模型出场的实测账、
- *     CLI 一行点名（cli-args）。
+ *     CLI 一行点名（cli-args）；NL Flow（docs/NL_FLOW_DESIGN.md）落地后新增：
+ *     声明面 v3（nominate/instr/next/gives）、提名梯级与组合指令解释器、
+ *     具名数据集生产面、元素动作的证据面强制、S0 实验台的 --check 门禁。
  *
  * 纪律与 v1/v2 相同：
  *   - 数字一律从单一出处 `docs/arch-metrics.json` 插值，不手抄（手抄的数会过期——
@@ -20,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const W = 1560, PAD = 11;
-const H = 1210;
+const H = 1288;
 const wide = (cp) =>
   (cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0x303E) || (cp >= 0x3041 && cp <= 0x33FF)
   || (cp >= 0x3400 && cp <= 0x4DBF) || (cp >= 0x4E00 && cp <= 0x9FFF) || (cp >= 0xA000 && cp <= 0xA4CF)
@@ -103,13 +105,13 @@ box(616, 96, 292, 52, "bx", "learn · agent · plan:flow", ["tools/learn.ts / sr
 box(918, 96, 272, 52, "bx", "plan-cli · datasource · bench", ["手写计划；站点=配置；跑分矩阵", "$探针 live-*：URL 全在 pack 声明"]);
 box(60, 158, 546, 44, "bxp", "DSH 插件（integrations/dsh-bridge）：amberflow_apps / run / learn", ["桥起 CLI 子进程、读 *-result.json 归纳 summary；引擎对 DSH 零引用"]);
 box(616, 158, 292, 44, "bxm", "npm run model:fetch（产物通道）", [".part 先落 · SHA256 先验后换 · 半途态整组撤回"]);
-box(918, 158, 272, 44, "bxe", "度量与门禁（一条命令可复现）", ["apps:matrix · suite · gen --check · smoke"]);
+box(918, 158, 272, 44, "bxe", "度量与门禁（一条命令可复现）", ["matrix/suite/gen/probes/nominate --check", "$提名实验台：冻结产物复算不一致即红"]);
 T(58, 224, "入口只编排：所有浏览器动作都汇入同一个执行循环（⑤），没有第二个分支", "lbl");
 
 /* ---------------- ② 声明层 ---------------- */
 band(236, 118, `② 声明层 — 应用是目录与数据，不是代码（${N.apps} 个目录，代码行数实测 0）`);
 box(60, 268, 380, 76, "bxd", "apps/<id>/pack.json（spec_version 1）", ["roles · journey（浏览器步+工具步混排）· slots", "invariants · hosts · device · probe · policy", "$加载期校验与计划同一套语法（PlanningRules）"]);
-box(450, 268, 380, 76, "bxd", "flow.json + sites/*.profile.json（v2）", [`${N.flowApps} 份模板 / ${N.flowSteps} 步：页面角色 + 语义目标 + 契约信号`, "authored 档案：pages / fill_keys / list_extract", "$学到的 hint 走重放门，replays_ok 起算，不过报 drift"]);
+box(450, 268, 380, 76, "bxd", "flow.json + sites/*.profile.json（v2/v3）", [`${N.flowApps} 份模板 / ${N.flowSteps} 步：页面角色 + 语义目标 + 契约信号`, "v3 声明面：nominate / instr / next / gives", "$学到的 hint 与指令映射都过重放门；drift 撤下重学"]);
 box(840, 268, 350, 76, "bxd", "transfer/specs/*.json + sources/*.json", ["phase × repeat（once/per_date/per_checkin）", "数据腿：curl / fetch / cli(argv，无 shell)", "$「引擎不认识站点」是单测"]);
 T(58, 348, "落盘与发现（本轮实测修的缝）：pack 与 flow 同一双根纪律——扫 [用户目录, 仓库 apps/]，同 id 用户赢", "lbl");
 
@@ -128,7 +130,7 @@ box(760, 510, 220, 52, "bx", "src/signals.ts — 信号语言", ["5 个 DOM 算�
 box(990, 510, 200, 52, "bx", "LLM 规划/审计（可选）", ["OPENAI_* 齐则启用；", "否则内置替身，流程照常"]);
 
 /* ---------------- ⑤ 执行层 ---------------- */
-band(584, 190, "⑤ 执行层 — 唯一生产循环 BrowserMiddleware.run（永不分叉）");
+band(584, 268, "⑤ 执行层 — 唯一生产循环 BrowserMiddleware.run（永不分叉）");
 const chain = [
   ["元素池", ["extraction.ts", "一次 JS pass", "iframe+shadow", "非零盒判可见"]],
   ["规则先行", ["rules.ts", "tiered hint 单实现", "档内歧义才问模型", "$authored 恒赢已学"]],
@@ -145,26 +147,30 @@ chain.forEach(([t, ls], i) => {
 box(60, 714, 372, 52, "bx", "三面同词汇：DOM 面 / 工具面 / 数据面", ["tool-signals：exit/stdout/json_path/file_* 等", "$retries 需 idempotent；dangerous 先干跑再点头"]);
 box(442, 714, 372, 52, "bxnew", "命令闭集 + 具名绑定（P2/P3 已接线）", ["click|check|fill|select|skip；值只按 slot 具名绑定", "$list 绑定 = datasource.selectIndex 同一实现"]);
 box(824, 714, 386, 52, "bxe", "运行结果 = 可核对的证据", ["<app>-result.json（model_status、决策账）+ <app>-report.md", "$suite/matrix/桥 读的是同一份产物"]);
+// NL Flow：晚绑定三件（S2/S3）——指令在运行期提名，数据在信号之后具名流转
+box(60, 778, 372, 56, "bxnew", "提名梯级 S2 — nominate.ts + 指令注册表", ["②档案 → ①规则 → ③窄问 → ④老师 → ⑤枚举，命中即停", "$闭集外答案 = 弃权（fail closed）；instr 锁跳过梯级"]);
+box(442, 778, 372, 56, "bxnew", "组合指令解释器 + 数据集生产面（S3）", ["list_pick 声明 compose：extract→select→act，参数全是声明", "$gives → 信号成立后 dataset.write；重放门前先失效"]);
+box(824, 778, 386, 56, "bxnew", "证据面强制与两本账（S3/S4）", ["提名与 trace 动作族不符 ⇒ instruction_not_honored（blocked）", "$dataset_view / nominate_bill：生产与账每跑可见"]);
 
 /* ---------------- ⑥ 决策层 ---------------- */
-band(786, 152, `⑥ 决策层 — 可插拔提供者与它的账（实测咨询 ${N.modelAsks}/${N.modelSteps} 步、独立决定 ${N.modelPassed}）`);
-box(60, 818, 470, 62, "bxm", "决策提供者注册表（decision-provider.ts）", ["laya-onnx | stub | none | jevk5 | bailian | 自注册（--provider）", "$基线对照：first-candidate 是新模型要赢的线（providers:baseline）"]);
-box(540, 818, 306, 62, "bxm", "laya-onnx.ts + Router", ["buildSequence · shortlist · 按文字系统选点", "$置信度从不参与换 checkpoint（ECE 0.855 的教训）"]);
-box(856, 818, 354, 62, "bxm", "decision-cache.ts + countingRuntime", ["精确指纹：同问不重答（二跑 0 forwards 实测）", "$过关数在 trace 数 · 咨询数在运行时缝数，差值=未过闸"]);
-box(60, 888, 262, 42, "bxm", "hint-memory + SiteProfileMemory", ["学过且过了重放门才回；authored 恒优先"]);
-box(332, 888, 262, 42, "bxm", "outcome-memory（opt-in）", ["按元素签名记\"点了没变化\"，可禁可标注"]);
-box(604, 888, 320, 42, "bxm", "风险头 + 注入守卫（实测阈值，不是默认值）", ["关键词∨模型投票≥0.6 → 要确认；注入 0.95 分离度实测"]);
-box(934, 888, 290, 42, "bxm", "model-artifacts.ts 单一口径", ["三件齐才算 on；缺了如实走规则模式"]);
+band(862, 152, `⑥ 决策层 — 可插拔提供者与它的账（实测咨询 ${N.modelAsks}/${N.modelSteps} 步、独立决定 ${N.modelPassed}）`);
+box(60, 894, 470, 62, "bxm", "决策提供者注册表（decision-provider.ts）", ["laya-onnx | stub | none | jevk5 | bailian | 自注册（--provider）", "$基线对照：first-candidate 是新模型要赢的线（providers:baseline）"]);
+box(540, 894, 306, 62, "bxm", "laya-onnx.ts + Router", ["buildSequence · shortlist · 按文字系统选点", "$置信度从不参与换 checkpoint（ECE 0.855 的教训）"]);
+box(856, 894, 354, 62, "bxm", "decision-cache.ts + countingRuntime", ["精确指纹：同问不重答（二跑 0 forwards 实测）", "$过关数在 trace 数 · 咨询数在运行时缝数，差值=未过闸"]);
+box(60, 964, 262, 42, "bxm", "学习库：hint 与指令映射", ["过重放门才回填；authored 优先；读-合并-写"]);
+box(332, 964, 262, 42, "bxm", "outcome-memory（opt-in）", ["按元素签名记\"点了没变化\"，可禁可标注"]);
+box(604, 964, 320, 42, "bxm", "风险头 + 注入守卫（实测阈值，不是默认值）", ["关键词∨模型投票≥0.6 → 要确认；注入 0.95 分离度实测"]);
+box(934, 964, 290, 42, "bxm", "model-artifacts.ts 单一口径", ["三件齐才算 on；缺了如实走规则模式"]);
 
 /* ---------------- ⑦ 验收层 ---------------- */
-band(948, 108, "⑦ 验收层 — 结论必须能被命令复现（跳过 ≠ 通过）");
-box(60, 980, 276, 60, "bxe", "npm run verify", [`typecheck + ${N.tests} 条测试 + 六层对拍`]);
-box(346, 980, 276, 60, "bxe", "bench/smoke.sh（CI 的绿色唯一定义）", ["离线无条件；模型侧缺产物打 SKIP 并跳过"]);
-box(632, 980, 284, 60, "bxe", "apps:suite + apps:matrix", ["分层退出码 0/1/2/3；泄漏 0 · 应用代码 0 行"]);
-box(926, 980, 284, 60, "bxe", "metrics 单一出处 + 两图 --check", ["能算的算出来；快照段标 generated_at 与命令"]);
+band(1024, 108, "⑦ 验收层 — 结论必须能被命令复现（跳过 ≠ 通过）");
+box(60, 1056, 276, 60, "bxe", "npm run verify", [`typecheck + ${N.tests} 条测试 + 六层对拍`]);
+box(346, 1056, 276, 60, "bxe", "bench/smoke.sh（CI 的绿色唯一定义）", ["离线无条件；模型侧缺产物打 SKIP 并跳过"]);
+box(632, 1056, 284, 60, "bxe", "apps:suite + apps:matrix", ["分层退出码 0/1/2/3；泄漏 0 · 应用代码 0 行"]);
+box(926, 1056, 284, 60, "bxe", "metrics 单一出处 + 两图 --check", ["能算的算出来；快照段标 generated_at 与命令"]);
 
 /* ---------------- 右栏：外部边界 ---------------- */
-side(64, 992, "与世界接壤（系统的边界在哪、缺了什么会怎样）");
+side(64, 1068, "与世界接壤（系统的边界在哪、缺了什么会怎样）");
 box(1243, 96, 259, 64, "bx", "chromium（Playwright 解析）", ["PLAYWRIGHT_BROWSERS_PATH 或托管版", "$缺 → doctor 直接给那条安装命令"]);
 box(1243, 172, 259, 76, "bx", "laya 模型产物（1.7GB 级，不进 git）", ["HF 快照发现 / LAYA_ONNX_MODEL 约定", "$缺产物走规则模式；要模型的步骤如实 block"]);
 box(1243, 260, 259, 64, "bx", "真实站点（线上应用与探针才碰）", ["携程 H5 走 HTTP 门（浏览器门被拦）", "$移动页要声明 device；CI 不依赖网络"]);
@@ -179,8 +185,8 @@ box(1243, 756, 259, 64, "bx", "实测证据（2026-10-14 开箱测试轮）", [`
 out.push(`<path class="lnb" d="M1230,128 H1243" marker-end="url(#arrB)"/>`);
 out.push(`<path class="lnb" d="M1230,200 H1243" marker-end="url(#arrB)"/>`);
 out.push(`<path class="lnb" d="M1230,292 H1243" marker-end="url(#arrB)"/>`);
-out.push(`<path class="lnb" d="M1230,850 H1237 V172 H1243" marker-end="url(#arrB)"/>`);
-T(1243, 838, "⑥ 的模型经缝上接产物；入口层接 DSH 宿主与浏览器", "lbl");
+out.push(`<path class="lnb" d="M1230,926 H1237 V172 H1243" marker-end="url(#arrB)"/>`);
+T(1243, 914, "⑥ 的模型经缝上接产物；入口层接 DSH 宿主与浏览器", "lbl");
 
 /* ---------------- 层间主干箭头 ---------------- */
 P("M620,214 V264"); T(632, 242, "发现包/模板（双根，用户赢）", "lbl");
@@ -190,11 +196,11 @@ P("M620,562 V612"); T(632, 590, "子目标 + 完成信号 + slots", "lbl");
 P("M620,704 V712");
 
 /* ---------------- 底部：红线 + 开箱承诺 ---------------- */
-R(40, 1066, W - 80, 96, "band red");
-T(58, 1090, "四条红线（每条都有测试与门禁撑着，不是口号）", "foot", ' font-weight="700"');
-T(58, 1110, "① 不重规划——任务开始即冻结计划；② 不发明取值——填的值只来自数据袋（slots/具名绑定，模型无权产生值）；③ 不信模型说\"完成\"——只认该步 DOM/URL 信号；④ 不可复现即拒存——零模型重放门不过一个文件都不落，危险步先干跑取证再点头。", "foot");
-T(58, 1130, `实测口径（单一出处 docs/arch-metrics.json，generated_at ${M?.generated_at ?? "?"}）：浏览器步 ${N.named}/${N.browserSteps} 全由声明解决（${N.hinted} 用 hint 点名 = ${N.hintPct}%，其余 ${Number(N.named) - Number(N.hinted)} 步走命令闭集）；真模型臂 ${N.modelApps} 应用 ${N.modelSteps} 步里咨询 ${N.modelAsks}、独立决定 ${N.modelPassed}——兜底与诊断，不是承重件。`, "foot");
-T(58, 1152, "开箱：`npm ci && npx playwright install chromium && npm start` 两条命令见结果；无权重走规则模式（缺件点名+补齐命令）；`npm start -- --goal … --url …` 演示一次即归纳；`plan:flow` 一句话即编译。", "foot");
+R(40, 1142, W - 80, 96, "band red");
+T(58, 1166, "四条红线（每条都有测试与门禁撑着，不是口号）", "foot", ' font-weight="700"');
+T(58, 1186, "① 不重规划——计划结构冻结在开始；运行期只允许闭集内提名与过门回填；② 不发明取值——填的值只来自数据袋（slots/具名绑定，模型无权产生值）；③ 不信模型说\"完成\"——只认该步 DOM/URL 信号；④ 不可复现即拒存——零模型重放门不过一个文件都不落，危险步先干跑取证再点头。", "foot");
+T(58, 1206, `实测口径（单一出处 docs/arch-metrics.json，generated_at ${M?.generated_at ?? "?"}）：浏览器步 ${N.named}/${N.browserSteps} 全由声明解决（${N.hinted} 用 hint 点名 = ${N.hintPct}%，其余 ${Number(N.named) - Number(N.hinted)} 步走命令闭集）；真模型臂 ${N.modelApps} 应用 ${N.modelSteps} 步里咨询 ${N.modelAsks}、独立决定 ${N.modelPassed}——兜底与诊断，不是承重件。`, "foot");
+T(58, 1228, "开箱：`npm ci && npx playwright install chromium && npm start` 两条命令见结果；无权重走规则模式（缺件点名+补齐命令）；`npm start -- --goal … --url …` 演示一次即归纳；`plan:flow` 一句话即编译。", "foot");
 
 /* ---------------- 重叠与越界检查 ---------------- */
 for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
