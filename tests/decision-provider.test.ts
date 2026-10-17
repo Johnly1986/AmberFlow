@@ -161,3 +161,44 @@ describe("③ 注册表：换 provider 是配置，不是改代码", () => {
     expect(await installProviderFromEnv({})).toBeNull();
   });
 });
+
+/* ------------------------------------------- S2 ③ 提名形状：闭集选择（askChoice） */
+
+describe("askChoice：对调用方给定的闭集做一次 choice（不依赖页面元素池）", () => {
+  it("laya 适配器：题面/选项原样问出去；答案做闭集校验；score=confidence；池外答案不采纳", async () => {
+    let seen: { state?: unknown; q?: unknown } = {};
+    const agent = {
+      async predict(state: unknown, questions: Record<string, unknown>) {
+        seen = { state, q: questions["act"] };
+        return { answers: { act: { type: "choice", choice: "b", confidence: 0.7, probabilities: { a: 0.3, b: 0.7 } } } };
+      },
+    };
+    const provider = layaProvider({
+      runtime: {} as never,
+      agentFor: async () => ({ agent: agent as never, embedFn: null }),
+    });
+    const criteria = { a: "点击", b: "选最低价" };
+    const out = await provider.askChoice!({ goal: "选择最低价", instructions: "pick one", criteria });
+    expect(seen.state).toMatchObject({ goal: "选择最低价" });     // desc-only：不装页面状态
+    expect(seen.q).toEqual({ type: "choice", instructions: "pick one", criteria });
+    expect(out).toMatchObject({ ref: "b", score: 0.7, scoreKind: "entropy_conf" });
+    expect(out!.probs).toEqual({ a: 0.3, b: 0.7 });
+
+    // 池外答案 = 没答（fail closed：绝不为凑答案现造指令）
+    const rogue = { async predict() { return { answers: { act: { type: "choice", choice: "zzz", confidence: 0.9 } } }; } };
+    const p2 = layaProvider({ runtime: {} as never, agentFor: async () => ({ agent: rogue as never, embedFn: null }) });
+    const out2 = await p2.askChoice!({ goal: "x", instructions: "y", criteria: { a: "A" } });
+    expect(out2!.ref).toBeNull();
+  });
+
+  it("契约：没有 askChoice 的 provider 就是没有这个能力（调用方不得假装问过）", async () => {
+    // 内置基线是 provider，但只实现 pick/risk/done（无闭集选择）——梯级遇到它就该 ③ 弃权。
+    const { registerBaselines } = await import("../src/decision-baselines.ts");
+    const { listDecisionProviders, resolveProviderSpec } = await import("../src/decision-provider.ts");
+    registerBaselines();
+    expect(listDecisionProviders()).toContain("coin-flip");
+    const spec = await resolveProviderSpec("coin-flip", {});
+    expect(spec.kind).toBe("provider");
+    if (spec.kind === "provider") expect(spec.provider.askChoice).toBeUndefined();
+  });
+});

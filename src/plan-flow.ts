@@ -752,7 +752,9 @@ export async function planFlow(opts: PlanFlowOptions): Promise<PlanFlowResult> {
           });
           landedUrl = urlOf(session.page as never);
           if (landedUrl === stepStart) {
-            throw new Error(`step ${JSON.stringify(proposal.id)} did not advance the page: ${rep.stop_reason}`);
+            throw new Error(`step ${JSON.stringify(proposal.id)} did not advance the page: ${rep.stop_reason}`
+              + "（若目标其实已达成，规划器应返回 {\"done\":true} 而不是再提一步；"
+              + "真 LLM 规划时实测过这种\"目标达成后不肯停手\"的形态）");
           }
         }
         const after = await captureStateView(session.page as never);
@@ -860,8 +862,18 @@ export async function planFlow(opts: PlanFlowOptions): Promise<PlanFlowResult> {
         confirmDangerous: () => true, verbose: false, appsDir: appsRoot,
       });
       gateOk = gate.ok; line = gate.line;
+      // 诊断：被拦步不仅报 stop_reason，还要**带上它在模板里的声明形状**（targets/fills/list_step）——
+      // 真 LLM 规划时实测过只报 "action space exhausted" 无法定位是哪条声明没被解出来。
+      const shapeOf = (id: string): string => {
+        const draft = steps.find((st) => st.id === id);
+        if (!draft) return "";
+        const parts: string[] = [`targets=${JSON.stringify(draft.targets)}`];
+        if (draft.fills !== undefined) parts.push(`fills=${JSON.stringify(draft.fills)}`);
+        if (draft.list_step !== undefined) parts.push(`list_step=${JSON.stringify(draft.list_step)}`);
+        return `（模板声明：${parts.join(" ｜ ")}）`;
+      };
       blocked.push(...gate.steps.filter((s) => s.status === "blocked" || s.status === "refused")
-        .map((s) => `${s.id}: ${s.obstacle ?? s.status}`));
+        .map((s) => `${s.id}: ${s.obstacle ?? s.status}${shapeOf(s.id)}`));
     } catch (e) {
       blocked.push(String(e instanceof Error ? e.message : e));
     }
@@ -927,7 +939,9 @@ const USAGE = `usage: plan-flow --goal "..." --seed <page|url> --app ID [--site 
                    [--yes] [--force] [--allow-dangerous-demo] [--json] [--quiet] [--list]
 
 一句话 + 种子页 → 看页面逐步规划 → 信号归纳 → v2 模板 + 站点档案（重放门控后落盘）。
-危险步（购买）默认不演示——加 --allow-dangerous-demo 只在复刻站/沙箱页开。`;
+危险步（购买）默认不演示——加 --allow-dangerous-demo 只在复刻站/沙箱页开。
+--planner llm 走线上 OpenAI 兼容通道：OPENAI_BASE_URL + OPENAI_API_KEY + PLANNER_MODEL（模型自选），
+  规划调用超时用 PLANNER_TIMEOUT（秒，默认 120；推理模型 + 整页快照建议 ≥300）。`;
 
 /** 站点键：--site 优先；否则用 seed 路径的目录名（file://）或主机名（http）。 */
 export function siteKeyFor(seed: string): string {

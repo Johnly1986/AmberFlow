@@ -31,7 +31,9 @@ import { checkArtifacts, missingPieces, modelConfigError, onnxModelPath } from "
 import { createLayaOnnxRuntime } from "../src/laya-onnx.ts";
 import { installLayaRuntime, type DecisionAgent } from "../src/model.ts";
 import { ruleNominate } from "../src/nominate.ts";
-import { DEFAULT_ENUM_ORDER, instructionCriteria } from "../src/instructions.ts";
+import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, instructionCriteria } from "../src/instructions.ts";
+import { providerNominationAsk } from "../src/nominate.ts";
+import { resolveProviderSpec, type ProviderInfo } from "../src/decision-provider.ts";
 
 /** 本工具不经执行器，直接问 agent；装运行时只为保持"谁在跑"的单一出处。 */
 function installLayaRuntimeSafe(rt: ReturnType<typeof createLayaOnnxRuntime>): void {
@@ -190,6 +192,24 @@ async function loadModelArm(): Promise<{
 
 /* ---------------------------------------------------------------------------- 主流程 */
 
+/** 计分（默认四臂与线上 provider 审查臂共用同一份口径）。 */
+function scoreArm(rows: Row[], pred: Array<string | null>): {
+  correct: number; abstain: number; total: number;
+  byTruth: Record<string, { n: number; correct: number }>;
+} {
+  let correct = 0, abstain = 0;
+  const byTruth: Record<string, { n: number; correct: number }> = {};
+  rows.forEach((r, i) => {
+    const t = r.truth;
+    byTruth[t] ??= { n: 0, correct: 0 };
+    byTruth[t]!.n += 1;
+    const p = pred[i];
+    if (p === null || p === undefined) { abstain += 1; return; }
+    if (p === t) { correct += 1; byTruth[t]!.correct += 1; }
+  });
+  return { correct, abstain, total: rows.length, byTruth };
+}
+
 function pct(n: number, d: number): string {
   return d === 0 ? "—" : `${n}/${d} (${((100 * n) / d).toFixed(1)}%)`;
 }
@@ -264,14 +284,245 @@ async function check(outDir: string, withModel: boolean): Promise<number> {
   return 0;
 }
 
+/* ------------------------------------------------------- 线上决策模型审查臂（S0-online） */
+
+/**
+ * **用线上决策模型审查 S0 考卷**：同一份语料、同一份问法，把 ③ 档换成"闭集选择能力"
+ * （`DecisionProvider.askChoice`，与运行期提名梯级同一份接线 `providerNominationAsk`）。
+ *
+ * 与默认四臂的关系：默认模式是**冻结的 S0 产物**（本地 laya 那一枪）；本模式写**独立产物**，
+ * 不碰 S0 冻结文件——换模型不是重跑考试，是**另一场考试**，各记各数。
+ * 复用：语料收集、离线三臂、闭集与序全部与本工具同源（单一出处），只把 ③ 的模型换掉。
+ */
+async function runProviderReview(outDir: string, providerName: string, limit: number): Promise<number> {
+  console.log(`S0 线上决策模型审查：provider=${providerName}｜语料 = 已验收离线语料的实际执行`);
+  const { rows, skipped, packs } = await collectCorpus(limit);
+  console.log(`语料：${packs} 个离线旅程包，${rows.length} 条有真值的浏览器步（跳过 ${skipped.length} 条）`);
+
+  // 离线三臂（与默认四臂同一份口径）
+  const rules = rows.map((r) => ruleNominate(r.desc));
+  const first = rows.map(() => "click");
+  const enumeration = rows.map(() => ORDER[0]!);
+
+  // 线上 ③：解析 provider（显式点名却没配 ⇒ 响亮说清楚，不写产物——空手产物会被误读成"测过了"）
+  let status = "off(unconfigured)";
+  let detail = "";
+  let identity: ProviderInfo | null = null;
+  let ask: ReturnType<typeof providerNominationAsk> = null;
+  try {
+    const spec = await resolveProviderSpec(providerName, process.env);
+    if (spec.kind !== "provider") {
+      detail = `provider 未配置到可用（tier=${spec.tier}）：按仓库纪律，未配置不测、不写产物`;
+    } else {
+      identity = {
+        name: spec.provider.name, version: spec.provider.version,
+        capabilities: { ...spec.provider.capabilities },
+        ...(spec.provider.floor !== undefined ? { floor: spec.provider.floor } : {}),
+      };
+      ask = providerNominationAsk(spec.provider);
+      if (!ask) detail = "provider 没有 askChoice 能力（不能做闭集选择）";
+      else status = "on";
+    }
+  } catch (e) {
+    detail = `解析失败：${e instanceof Error ? e.message : String(e)}`;
+  }
+  if (!ask) {
+    console.error(`线上臂不可用：${status}｜${detail}`);
+    return 2;
+  }
+
+  console.log(`线上 ③：${identity!.name} ${identity!.version}（score_kind=${identity!.capabilities.score_kind}`
+    + `${identity!.floor !== undefined ? `，floor=${identity!.floor}` : ""}）`);
+  const preds: Array<string | null> = [];
+  const latencies: number[] = [];
+  const t0 = Date.now();
+  for (let i = 0; i < rows.length; i++) {
+    const t = Date.now();
+    preds.push(await ask(rows[i]!.desc, INSTRUCTION_NAMES));
+    latencies.push(Date.now() - t);
+    if ((i + 1) % 20 === 0) console.log(`  线上臂进度 ${i + 1}/${rows.length}`);
+  }
+  const totalMs = Date.now() - t0;
+
+  const arms: Record<string, Array<string | null>> = {
+    rules, "first-candidate": first, [providerName]: preds, enumeration,
+  };
+  const scores = Object.fromEntries(Object.entries(arms).map(([k, v]) => [k, scoreArm(rows, v)]));
+  const positions = rows.map((r) => ORDER.indexOf(r.truth));
+  const coverage1 = positions.filter((p) => p === 0).length;
+  const coverageAll = positions.filter((p) => p >= 0).length;
+
+  // 错成什么（审查用：模型臂的混淆矩阵）
+  const confusion: Record<string, Record<string, number>> = {};
+  rows.forEach((r, i) => {
+    const p = preds[i];
+    if (p === null || p === undefined || p === r.truth) return;
+    (confusion[r.truth] ??= {})[p] = ((confusion[r.truth] ??= {})[p] ?? 0) + 1;
+  });
+
+  // 历史账：引用 S0 冻结产物里本地 laya 那一枪（有则引用，无则明说）
+  const s0Path = path.join(import.meta.dirname, "..", "bench", "instruction-nomination", "nomination.json");
+  let s0Ref: { model_status: string; correct: number; total: number } | null = null;
+  if (fs.existsSync(s0Path)) {
+    try {
+      const s0 = JSON.parse(fs.readFileSync(s0Path, "utf-8")) as {
+        corpus: { rows: number }; model_arm: { status: string }; scores: { model?: { correct: number } };
+      };
+      s0Ref = { model_status: s0.model_arm.status, correct: s0.scores.model?.correct ?? -1, total: s0.corpus.rows };
+    } catch { /* 引用失败就当没有 */ }
+  }
+
+  const artifact = {
+    generated_at: new Date().toISOString(),
+    mode: "provider-review",
+    provider_arm: {
+      provider: providerName,
+      status,
+      identity,
+      asks: rows.length,
+      total_ms: totalMs,
+      mean_ms: rows.length ? Math.round((totalMs / rows.length) * 10) / 10 : 0,
+      p50_ms: latencies.length ? latencies.slice().sort((a, b) => a - b)[Math.floor(latencies.length / 2)] : 0,
+    },
+    instruction_set: INSTRUCTIONS,
+    enumeration_order: ORDER,
+    corpus: { packs, rows: rows.length, skipped: skipped.length },
+    rows,
+    predictions: { rules, "first-candidate": first, [providerName]: preds },
+    scores,
+    confusion,
+    enumeration: {
+      order: ORDER, coverage_at_first: coverage1, coverage_in_order: coverageAll,
+      mean_truth_position: Math.round((positions.reduce((a, b) => a + b, 0) / Math.max(1, positions.length)) * 1000) / 1000,
+    },
+    reference_s0: s0Ref,
+  };
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(path.join(outDir, "nomination-online.json"), JSON.stringify(artifact, null, 2), "utf-8");
+
+  // ---- 报告 ----
+  const base = scores["first-candidate"]!.correct;
+  const ruled = scores.rules!.correct;
+  const online = scores[providerName]!.correct;
+  const L: string[] = [];
+  L.push("# S0 线上决策模型审查（③ 提名窄问换 provider）");
+  L.push("");
+  L.push(`- 生成：${artifact.generated_at} ｜ provider：**${identity!.name} ${identity!.version}**`);
+  L.push(`- 语料：${packs} 包 / ${rows.length} 步（跳过 ${skipped.length}）——与 S0 冻结产物同一份收集器`);
+  L.push(`- 问法：同一份 \`nominationInstructions\`（S0 与本审查共用单一出处）；选项 = 指令闭集`);
+  L.push(`- 代价：${rows.length} 次咨询，总 ${(totalMs / 1000).toFixed(1)} s（均值 ${artifact.provider_arm.mean_ms} ms / p50 ${artifact.provider_arm.p50_ms} ms）`);
+  L.push("");
+  L.push("| 臂 | 正确率 | 弃权 | 说明 |");
+  L.push("|---|---|---|---|");
+  L.push(`| rules（①关键词梯级） | ${pct(ruled, rows.length)} | ${scores.rules!.abstain} | 确定性；未命中弃权 |`);
+  L.push(`| first-candidate（基线） | ${pct(base, rows.length)} | 0 | 永远答 click |`);
+  if (s0Ref) {
+    L.push(`| 本地 laya（S0 冻结账） | ${pct(Math.max(0, s0Ref.correct), s0Ref.total)} | — | 2026-10-15 冻结产物（${s0Ref.model_status}） |`);
+  }
+  L.push(`| **线上 ${identity!.name}（③）** | **${pct(online, rows.length)}** | ${scores[providerName]!.abstain} | score_kind=${identity!.capabilities.score_kind} |`);
+  L.push("");
+  L.push("## 按真值拆分");
+  L.push("");
+  L.push(`| 真值 | 条数 | rules 命中 | 线上 ③ 命中 |`);
+  L.push("|---|---|---|---|");
+  for (const t of ORDER) {
+    const bt = scores.rules!.byTruth[t];
+    if (!bt) continue;
+    const bo = scores[providerName]!.byTruth[t];
+    L.push(`| ${t} | ${bt.n} | ${bt.correct} | ${bo ? bo.correct : 0} |`);
+  }
+  L.push("");
+  L.push("## 错成什么（线上 ③ 的混淆，只列错行）");
+  L.push("");
+  if (Object.keys(confusion).length === 0) {
+    L.push("- 无错误。");
+  } else {
+    for (const [truth, m] of Object.entries(confusion)) {
+      L.push(`- 真值 ${truth} → ${Object.entries(m).map(([p, n]) => `${p}×${n}`).join("、")}`);
+    }
+  }
+  L.push("");
+  L.push("## 对设计文档停止条件的读数（只报告，不裁定）");
+  L.push("");
+  L.push(`- ③ vs 基线：线上 ${online} / first-candidate ${base}（总 ${rows.length}）`
+    + ` ⇒ ${online > base ? "**高于**基线" : "**不高于**基线"}`);
+  L.push(`- ③ vs ①规则：${online} vs ${ruled} ⇒ ${online > ruled ? "高于" : "不高于"}确定性梯级`);
+  if (s0Ref) {
+    L.push(`- 与本地 laya 的差：${online} vs ${Math.max(0, s0Ref.correct)}（同一份考卷、不同模型——不是"同模型换问法"）`);
+  }
+  L.push("");
+  L.push("## 口径边界（诚实清单）");
+  L.push("");
+  L.push("- **desc-only 问法**（state 只有 `{goal: desc}`，无页面）：这是\"不依赖页面的提名\"的下界；"
+    + "运行期提名器可以带页面状态，那一档没测。");
+  L.push("- **一份权重/一个服务**：换 provider 的权重或服务版本 = 另一场考试，数字不迁移（同 S0 model 臂的 graph_sha256 纪律）。");
+  L.push("- **单次运行**，不是统计重采样；线上服务有网络抖动（延迟列在产物里）。");
+  L.push("- 本产物**不替代** S0 冻结产物（`bench/instruction-nomination/`）：那份仍是本地 laya 的账。");
+  L.push("");
+  L.push(`复算：\`TOKEN_PLAN_ENDPOINT=… TOKEN_PLAN_API_KEY=… node --experimental-strip-types tools/instruction_nomination.ts --provider ${providerName}\``);
+  const report = L.join("\n");
+  fs.writeFileSync(path.join(outDir, "REPORT.md"), report, "utf-8");
+  console.log("\n" + report);
+  return 0;
+}
+
+/** `--check`：线上审查产物的**可离线复算部分**（语料/闭集/离线三臂）；线上臂是网络臂，默认不比。 */
+async function checkProviderReview(outDir: string, providerName: string): Promise<number> {
+  const p = path.join(outDir, "nomination-online.json");
+  if (!fs.existsSync(p)) {
+    console.error(`nomination --check：线上审查产物不存在：${p}（先跑一次 --provider ${providerName} 生成）`);
+    return 1;
+  }
+  const committed = JSON.parse(fs.readFileSync(p, "utf-8")) as {
+    instruction_set: unknown; enumeration_order: unknown;
+    corpus: { packs: number; rows: number };
+    scores: Record<string, { correct: number; abstain: number }>;
+    provider_arm: { provider: string; status: string; identity: { name: string; version: string } | null };
+  };
+  const { rows, packs } = await collectCorpus(10_000);
+  const diffs: string[] = [];
+  const eq = (what: string, a: unknown, b: unknown): void => {
+    if (JSON.stringify(a) !== JSON.stringify(b)) diffs.push(`${what}: 产物 ${JSON.stringify(a)} ≠ 复算 ${JSON.stringify(b)}`);
+  };
+  eq("corpus.packs", committed.corpus.packs, packs);
+  eq("corpus.rows", committed.corpus.rows, rows.length);
+  eq("instruction_set", committed.instruction_set, INSTRUCTIONS);
+  eq("enumeration_order", committed.enumeration_order, ORDER);
+  const rules = rows.map((r) => ruleNominate(r.desc));
+  const first = rows.map(() => "click");
+  const correctOf = (pred: Array<string | null>): number => rows.reduce((n, r, i) => n + (pred[i] === r.truth ? 1 : 0), 0);
+  eq("scores.rules.correct", committed.scores["rules"]!.correct, correctOf(rules));
+  eq("scores.first-candidate.correct", committed.scores["first-candidate"]!.correct, correctOf(first));
+  // 线上臂：**网络臂**，默认不比（跳过 ≠ 通过）；产物身份自报也要一致。
+  const note = committed.provider_arm.status === "on"
+    ? `未比（网络臂：产物 provider=${committed.provider_arm.provider} ${committed.provider_arm.identity?.version ?? "?"}；重跑需配置端点/密钥）`
+    : `未比（产物线上臂 status=${committed.provider_arm.status}）`;
+  if (diffs.length) {
+    console.error("nomination --check（线上审查产物）FAILED：");
+    for (const d of diffs) console.error(`  - ${d}`);
+    return 1;
+  }
+  console.log(`nomination --check（线上审查产物）OK：语料 ${packs} 包 / ${rows.length} 步 + 离线三臂与产物一致；线上臂 ${note}`);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   const get = (k: string): string | undefined => {
     const i = argv.indexOf(`--${k}`);
     return i >= 0 ? argv[i + 1] : undefined;
   };
-  const outDir = path.resolve(get("out") ?? path.join(import.meta.dirname, "..", "bench", "instruction-nomination"));
+  const providerName = get("provider");
+  const defaultOut = providerName
+    ? path.join(import.meta.dirname, "..", "bench", "instruction-nomination-online")
+    : path.join(import.meta.dirname, "..", "bench", "instruction-nomination");
+  const outDir = path.resolve(get("out") ?? defaultOut);
   const limit = Math.max(1, Number(get("limit") ?? 10_000));
+  if (providerName) {
+    return argv.includes("--check")
+      ? checkProviderReview(outDir, providerName)
+      : runProviderReview(outDir, providerName, limit);
+  }
   if (argv.includes("--check")) return check(outDir, !argv.includes("--no-model"));
 
   console.log("S0 指令提名实验台：语料 = 已验收离线语料的实际执行（truth 来自生产循环 trace）");
@@ -303,20 +554,7 @@ async function main(): Promise<number> {
   }
 
   // ---- 计分 ------------------------------------------------------------------
-  const score = (pred: Array<string | null>) => {
-    let correct = 0, abstain = 0;
-    const byTruth: Record<string, { n: number; correct: number }> = {};
-    rows.forEach((r, i) => {
-      const t = r.truth;
-      byTruth[t] ??= { n: 0, correct: 0 };
-      byTruth[t]!.n += 1;
-      const p = pred[i];
-      if (p === null || p === undefined) { abstain += 1; return; }
-      if (p === t) { correct += 1; byTruth[t]!.correct += 1; }
-    });
-    return { correct, abstain, total: rows.length, byTruth };
-  };
-  const scores = Object.fromEntries(Object.entries(arms).map(([k, v]) => [k, score(v)]));
+  const scores = Object.fromEntries(Object.entries(arms).map(([k, v]) => [k, scoreArm(rows, v)]));
 
   // 枚举臂：真值在声明序里的位置（裁决兜回来的代价 = 位置，0 起算）
   const positions = rows.map((r) => ORDER.indexOf(r.truth));

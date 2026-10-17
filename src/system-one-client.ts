@@ -14,7 +14,9 @@
  * 各自钉住自己 provider 的线协议映射，Stage 1 把它们重写到本客户端上时**一字不改仍全绿**——
  * 这保证"抽取"没有偷改行为。
  */
-import type { ChoiceOutcome, ChoiceRequest, DecisionProvider, ProviderCapabilities } from "./decision-provider.ts";
+import type {
+  ChoiceOutcome, ChoiceRequest, ClosedSetChoice, ClosedSetRequest, DecisionProvider, ProviderCapabilities,
+} from "./decision-provider.ts";
 
 /** SystemOne 的一个答案（choice/noul/score 共用一个形状，字段按类型出现）。 */
 export interface SystemOneAnswer {
@@ -166,6 +168,29 @@ export function systemOneClient(p: SystemOneProfile): DecisionProvider {
         },
         options: sorted.length || built.asked.length,
         passthrough: true,          // 客户端不问子集；收窄/shortlist 是服务侧的事
+        probs,
+      };
+    },
+
+    async askChoice(req: ClosedSetRequest): Promise<ClosedSetChoice | null> {
+      const refs = Object.keys(req.criteria);
+      // 与 pick 同一条候选下限：结构上没得选就不发请求（JevK5 会 400）。
+      if (refs.length < p.minOptions) return null;
+      const reply = await ask({
+        ...p.extraBody(),
+        state: { ...(req.state ?? {}), goal: req.goal },
+        questions: { act: { type: "choice", instructions: req.instructions, criteria: req.criteria } },
+      });
+      const a = reply.answers?.["act"];
+      if (!a) return null;
+      const probs = a.probabilities ?? {};
+      const sorted = Object.values(probs).sort((x, y) => y - x);
+      const ref = typeof a.choice === "string"
+        && (!p.validateChoiceInPool || refs.includes(a.choice)) ? a.choice : null;
+      return {
+        ref,
+        score: a.confidence ?? sorted[0] ?? 0,
+        scoreKind: p.capabilities.score_kind,
         probs,
       };
     },

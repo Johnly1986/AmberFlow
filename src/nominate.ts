@@ -16,10 +16,16 @@
  *      S0 实测本序对已验收语料 100% 覆盖、真值平均位置 0.88，兜底代价有界。
  *
  * S0 的直接推论（bench/instruction-nomination/REPORT.md）：③ 在 desc-only 问法下
- * **低于零智能基线**（4.8% vs 51.5%）——所以缺省姿势是 ①②⑤ 承重、③ 可选；
+ * **低于零智能基线**（本地 laya 4.8% vs 51.5%）——所以缺省姿势是 ①②⑤ 承重、③ 可选；
  * 本模块把 ③ 做成注入点而不是内置调用，正是为了让"要不要问模型"成为调用方的策略。
+ *
+ * 2026-10-17 线上决策模型复测（同一考卷、同一问法，docs/ONLINE_MODEL_TEST_REVIEW.md）：
+ * 更强的线上模型把 ③ 从 8/165 提到 41/165（4.8% → 24.8%），**但仍低于基线 85/165**，
+ * 且从不弃权（fill 真值 14/14 全错、select/click 大量塌缩到 list_pick）。
+ * ⇒ 这不是"模型不够强"的问题，是 desc-only 提名这个**题形状**的天花板：运行期仍不接 ③。
  */
-import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, isInstructionName } from "./instructions.ts";
+import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, instructionCriteria, isInstructionName } from "./instructions.ts";
+import type { DecisionProvider } from "./decision-provider.ts";
 
 /**
  * ① 确定性关键词梯级（单一出处：S0 实验台与运行期共用这一份——
@@ -45,6 +51,37 @@ export interface NominationMemory {
 
 /** ③④ 的共享形状：给 desc 与闭集选项，返回提名或 null（null = 弃权）。 */
 export type NominationAsk = (desc: string, options: readonly string[]) => Promise<string | null>;
+
+/**
+ * ③ 模型窄问的**指令措辞**（单一出处：S0 实验台与运行期共用这一份）。
+ * 为什么是单一出处：措辞影响行为（ask-shapes 的教训），改措辞 = 换考卷，必须重跑 S0 各记各数。
+ */
+export function nominationInstructions(desc: string): string {
+  return `Goal: ${desc}. Which single instruction should be executed next to make progress on this goal? `
+    + "The candidates are abstract operation names; choose the one whose description matches the step.";
+}
+
+/**
+ * 把"有闭集选择能力的决策 provider"接成 ③（或 ④）的 `NominationAsk`。
+ *
+ * 这是 S0 与运行期**同一条**接线：选项 = 指令闭集（ref → 描述），题面 = `nominationInstructions`。
+ * provider 没有 `askChoice` 能力 ⇒ 返回 null（调用方按"③ 不可用"处理，绝不假装问过）。
+ * 抛错照旧由 `nominateInstruction` 兜成该档弃权。
+ */
+export function providerNominationAsk(provider: DecisionProvider | null | undefined): NominationAsk | null {
+  if (!provider?.askChoice) return null;
+  const criteria = instructionCriteria();
+  return async (desc, options) => {
+    const pool = Object.fromEntries(options.filter((n) => isInstructionName(n)).map((n) => [n, criteria[n] ?? n]));
+    if (Object.keys(pool).length === 0) return null;
+    const res = await provider.askChoice!({
+      goal: desc,
+      instructions: nominationInstructions(desc),
+      criteria: pool,
+    });
+    return res?.ref ?? null;
+  };
+}
 
 export type NominationVia = "rule" | "learned" | "model" | "teacher" | "enumerate";
 

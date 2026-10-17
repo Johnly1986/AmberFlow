@@ -15,7 +15,10 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, instructionCriteria, isInstructionName,
 } from "../src/instructions.ts";
-import { nominateInstruction, ruleNominate } from "../src/nominate.ts";
+import {
+  nominateInstruction, nominationInstructions, providerNominationAsk, ruleNominate,
+} from "../src/nominate.ts";
+import type { ClosedSetRequest, DecisionProvider } from "../src/decision-provider.ts";
 
 describe("①档规则：确定性关键词梯级，数据规则优先", () => {
   it("五类动词各归各档；数据规则词先于 select 的『选择』", () => {
@@ -164,5 +167,62 @@ describe("④单一出处：关键词梯级只许活在 src/nominate.ts 一处�
     };
     for (const r of roots) if (fs.existsSync(r)) walk(r);
     expect(offenders, "第二份词表 = 换考卷不重跑 S0（复算门跟不上）").toEqual([]);
+  });
+});
+
+/* ------------------------------------------- ③ 的 provider 接线（S2 ③ 单一出处） */
+
+describe("providerNominationAsk：把有闭集选择能力的决策 provider 接成 ③", () => {
+  /** 只实现 askChoice 的最小 provider（拾取形状无关：提名用不到 pick 的页面池）。 */
+  const fakeProvider = (impl: (req: ClosedSetRequest) => Promise<{ ref: string | null; score: number; scoreKind: "calibrated_prob"; probs: Record<string, number> } | null>): DecisionProvider => ({
+    name: "fake", version: "1",
+    capabilities: { choice: true, risk: false, done: false, shortlist: false, score_kind: "calibrated_prob" },
+    pick: async () => ({ ref: null, score: 0, scoreKind: "calibrated_prob", signals: { pTop1: null, pTop2: null, margin: null }, options: 0, passthrough: true, probs: {} }),
+    askChoice: impl,
+  });
+
+  it("题面与闭集走单一出处：选项 = 指令闭集（ref → 描述），指令措辞来自 nominationInstructions", async () => {
+    let seen: ClosedSetRequest | null = null;
+    const provider = fakeProvider(async (req) => {
+      seen = req;
+      return { ref: "fill", score: 0.9, scoreKind: "calibrated_prob", probs: { fill: 0.9 } };
+    });
+    const ask = providerNominationAsk(provider)!;
+    expect(ask).not.toBeNull();
+    const out = await ask("输入出发城市", INSTRUCTION_NAMES);
+    expect(out).toBe("fill");
+    expect(seen!.goal).toBe("输入出发城市");
+    expect(seen!.instructions).toBe(nominationInstructions("输入出发城市"));
+    expect(Object.keys(seen!.criteria)).toEqual([...INSTRUCTION_NAMES]);
+    // 选项值是**指令描述**（不是名字本身）：模型要看到能理解的人话
+    expect(seen!.criteria["fill"]).toBe(instructionCriteria()["fill"]);
+  });
+
+  it("池外/弃权 → null（梯级往下走，绝不现造指令）；provider 没这个能力 ⇒ 接线为 null", async () => {
+    const provider = fakeProvider(async () => ({ ref: null, score: 0.1, scoreKind: "calibrated_prob", probs: {} }));
+    expect(await providerNominationAsk(provider)!("输入城市", INSTRUCTION_NAMES)).toBeNull();
+    const noAsk = { ...fakeProvider(async () => null) };
+    delete (noAsk as { askChoice?: unknown }).askChoice;
+    expect(providerNominationAsk(noAsk as DecisionProvider)).toBeNull();
+    expect(providerNominationAsk(null)).toBeNull();
+  });
+
+  it("梯级集成：③ 命中记 via=model；provider 抛错 = 该档弃权、落⑤枚举（绝不打死计划）", async () => {
+    const hit = await nominateInstruction({
+      desc: "在搜索框输入出发城市",           // ① 会命中 fill —— 先把规则臂让开：用不会命中的描述
+      ask: providerNominationAsk(fakeProvider(async () => ({ ref: "fill", score: 0.9, scoreKind: "calibrated_prob", probs: {} }))),
+    });
+    expect(hit.via).toBe("rule");             // ① 在 ③ 前：有规则就不问模型（成本序在证据序之后）
+    const noRule = await nominateInstruction({
+      desc: "下一段操作",                       // ① 弃权（无关键词）
+      ask: providerNominationAsk(fakeProvider(async () => ({ ref: "list_pick", score: 0.9, scoreKind: "calibrated_prob", probs: {} }))),
+    });
+    expect(noRule).toMatchObject({ instruction: "list_pick", via: "model" });
+    const broken = await nominateInstruction({
+      desc: "下一段操作",
+      ask: providerNominationAsk(fakeProvider(async () => { throw new Error("服务不可达"); })),
+    });
+    expect(broken.via).toBe("enumerate");     // ③ 弃权 → ⑤
+    expect(broken.instruction).toBe(DEFAULT_ENUM_ORDER[0]);
   });
 });

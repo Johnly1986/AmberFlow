@@ -94,9 +94,40 @@ export interface ChoiceOutcome {
   probs: Record<string, number>;
 }
 
+/**
+ * 一次"闭集选择"请求（S2 ③ 提名梯级的模型窄问形状）：**不依赖页面元素池**——
+ * 选项与题面都由调用方给。与 `pick` 的区别就在这：pick 的选项来自页面池，askChoice 的选项
+ * 是调用方声明的闭集（如指令闭集）。
+ */
+export interface ClosedSetRequest {
+  /** 题面里的目标（通常是这一步的自然语言描述）。 */
+  goal: string;
+  /** 给模型的指令。措辞影响行为——由调用方提供它测过的那一版，不在 provider 里硬编码。 */
+  instructions: string;
+  /** 闭集选项：ref → 描述。返回值保证在池内（池外答案一律当没答）。 */
+  criteria: Record<string, string>;
+  /** 可选：额外的 state 字段（运行期提名器可以把当次页面状态带上；缺省只有 goal）。 */
+  state?: Record<string, unknown>;
+}
+
+/** 闭集选择结果。`ref` 已做闭集校验（池外 → null）。 */
+export interface ClosedSetChoice {
+  ref: string | null;
+  /** 把握数，含义由 `ProviderCapabilities.score_kind` 解释。 */
+  score: number;
+  scoreKind: ProviderCapabilities["score_kind"];
+  probs: Record<string, number>;
+}
+
 /** 一个决策提供者。`pick` 是必须的，其余按能力声明。 */
 export interface DecisionProvider extends ProviderInfo {
   pick(req: ChoiceRequest): Promise<ChoiceOutcome>;
+  /**
+   * 能力：对**调用方给定的闭集**做一次 choice（S2 ③ 提名；docs/NL_FLOW_DESIGN.md §4）。
+   * 不实现 = 该 provider 不能做提名窄问；梯级按"③ 弃权"往下走（fail closed，不猜）。
+   * 实现方必须自己保证返回的 ref 在 `criteria` 内（池外答案 → null）。
+   */
+  askChoice?(req: ClosedSetRequest): Promise<ClosedSetChoice | null>;
   /** `capabilities.risk` 为真时才会被调用。返回 `[0,1]` 的风险概率。 */
   risk?(goal: string, actionDesc: string): Promise<number>;
   /** `capabilities.done` 为真时才会被调用。永远只是参考（红线③）。 */
@@ -380,6 +411,22 @@ export function layaProvider(opts: {
       return { ref: a.choice as string | null | undefined,
         score: values.length ? values[0]! : (a.confidence ?? 0),
         scoreKind: caps.score_kind, signals, options: values.length, passthrough: false, probs };
+    },
+
+    async askChoice(req: ClosedSetRequest): Promise<ClosedSetChoice | null> {
+      const { agent } = await agentFor({ goal: req.goal });
+      const res = await agent.predict(
+        { ...(req.state ?? {}), goal: req.goal } as ModelState,
+        { act: { type: "choice", instructions: req.instructions, criteria: req.criteria } },
+      );
+      const a = res.answers["act"] as
+        { choice?: string; confidence?: number; probabilities?: Record<string, number> } | undefined;
+      if (a === undefined) return null;
+      const probs = a.probabilities ?? {};
+      const sorted = Object.values(probs).sort((x, y) => y - x);
+      // 闭集校验是**实现方**的责任（与 systemOneClient 同一条纪律）：池外名字不采纳。
+      const ref = typeof a.choice === "string" && a.choice in req.criteria ? a.choice : null;
+      return { ref, score: a.confidence ?? sorted[0] ?? 0, scoreKind: caps.score_kind, probs };
     },
 
     async risk(goal: string, actionDesc: string): Promise<number> {

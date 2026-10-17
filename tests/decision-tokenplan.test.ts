@@ -131,6 +131,28 @@ describe("token-plan decision-model-preview provider（假 /systemone，无网�
     expect(await p.doneVote!("g", { url: "file://x" })).toBeCloseTo(0.12);
   });
 
+  it("askChoice（S2 ③ 提名形状）：body 带调用方给的题面/闭集，返回 ref 且做闭集校验", async () => {
+    reset({ type: "choice", choice: "fill", confidence: 0.82, probabilities: { click: 0.1, fill: 0.9 } });
+    const p = P();
+    const out = await p.askChoice!({
+      goal: "输入出发城市",
+      instructions: "Which single instruction should be executed next?",
+      criteria: { click: "点击一个元素", fill: "往输入框里填值" },
+    });
+    expect(received).toHaveLength(1);
+    expect(received[0]!.path).toBe("/compatible-mode/v1/systemone");
+    expect(received[0]!.auth).toBe("Bearer test-key-not-secret");   // 认证仍在 header
+    expect(received[0]!.body.state.goal).toBe("输入出发城市");
+    expect(received[0]!.body.questions.act.instructions).toContain("Which single instruction");
+    expect(received[0]!.body.questions.act.criteria).toEqual({ click: "点击一个元素", fill: "往输入框里填值" });
+    expect(out).toMatchObject({ ref: "fill", score: 0.82, scoreKind: "calibrated_prob" });
+    expect(out!.probs).toEqual({ click: 0.1, fill: 0.9 });
+    // 池外答案 → null（不拿它去当指令）
+    reset({ type: "choice", choice: "other", confidence: 0.5, probabilities: { other: 0.5, click: 0.5 } });
+    const out2 = await p.askChoice!({ goal: "g", instructions: "i", criteria: { click: "点击" } });
+    expect(out2!.ref).toBeNull();
+  });
+
   // 同一份考卷：外部 provider 与内置 provider 走完全相同的契约
   providerContract("token-plan（假服务）", () => tokenPlanProvider({ endpoint, apiKey: "test-key-not-secret" }),
     () => reqOf().page, () => fakeElems);
