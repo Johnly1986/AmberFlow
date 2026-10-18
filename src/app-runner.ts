@@ -48,6 +48,7 @@ import { captureStateView } from "./signal-induction.ts";
 import { captureStepStateView, type StepStateView } from "./page-context.ts";
 import type { StateView } from "./signals.ts";
 import { expandPack, listPacks, loadPack, type AppPack, type ExpandedStep, type PackPolicy } from "./app-pack.ts";
+import { getAppAdapter, type AdapterRunContext } from "./app-adapters.ts";
 import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "./plan.ts";
 
 /** 进程内运行序号：保证同一毫秒内连续两次运行也不会撞上同一个 `{run_id}`。 */
@@ -529,7 +530,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   {
     const cfgNames = new Set<string>();
     for (const n of pack.sources ?? []) cfgNames.add(String(n));
-    for (const s of expanded.steps) if (s.kind === "tool" && s.tool) cfgNames.add(String(s.tool.source));
+    for (const s of expanded.steps) if (s.adapter === "cli" && s.tool) cfgNames.add(String(s.tool.source));
     for (const n of cfgNames) loadSource(n);
   }
   let endState: StateView | undefined;
@@ -540,7 +541,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     if (sg.start_url) sg.start_url = startUrl(sg.start_url);
   }
   if (verbose) {
-    const kinds = expanded.steps.map((s) => (s.kind === "tool" ? "tool" : "web")).join(",");
+    const kinds = expanded.steps.map((s) => s.adapter).join(",");
     console.log(`=== app ${pack.id} (${pack.label}) ===`);
     console.log(`  journey: ${expanded.steps.length} step(s) [${kinds}], roles: ${expanded.rolesUsed.join(", ") || "-"}`);
     if (expanded.steps.length === 0 && pack.probe !== undefined) {
@@ -656,13 +657,56 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const browserIndexOf: number[] = [];
   {
     let k = 0;
-    for (const s of expanded.steps) browserIndexOf.push(s.kind === "browser" ? k++ : -1);
+    for (const s of expanded.steps) browserIndexOf.push(s.adapter === "web" ? k++ : -1);
   }
   // P4 走向：一份实现（`plan.createPathWalk`），带**路径上界**——`maxSteps=8` 是每步的预算，
   // 不是每一条路径的（X4）。环到顶就是显式停因，不是挂死、不是栈溢出。
   const walk = createPathWalk(expanded.steps, pack.max_step_visits ?? DEFAULT_MAX_STEP_VISITS);
   const pathCrossed: string[] = [];
   let pathStopOut: AppRunResult["path_stop"];
+  // 应用支持器运行上下文（docs/APP_SUPPORTER_DESIGN.md §2）：web/cli 两个内建适配器
+  // **迁移桥**——执行委托回下面两个服务（执行循环本身不搬进适配器）；新类型自己实现 run。
+  const adapterCtx: AdapterRunContext = {
+    outDir: path.dirname(planPath),
+    verbose,
+    runWebStep: async (st: ExpandedStep): Promise<{ done: boolean }> => {
+      const sg = plan.subgoals[browserIndexOf[st.index]!]!;
+      const shell = await getShell();
+      // S0 上下文实验：快照这一步**开始时**的页面（只读；只在本开关打开时多付一次导航）。
+      let stateView: StepStateView | null = null;
+      if (opts.captureTraces && opts.captureStateView && sg.start_url) {
+        try {
+          await (shell.page as unknown as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
+            sg.start_url, { waitUntil: "domcontentloaded", timeout: 30_000 },
+          );
+          stateView = await captureStepStateView(shell.page as never);
+        } catch { stateView = null; }
+      }
+      const { rep, attempt, steps } = await runSubgoalWithRetries(
+        mw as never, sg, plan, sg.start_url ?? "", shell.page, shell.pw, verbose);
+      decisionSteps.push(...steps);
+      if (opts.captureTraces) {
+        const executed = rep.steps.filter((t) => t.executed);
+        stepTraces.push({
+          index: st.index ?? 0,
+          id: st.id ?? null,
+          desc: sg.desc,
+          status: rep.done ? (rep.skipped ? "skipped" : "done") : "blocked",
+          hows: executed.map((t) => String(t.how ?? "")),
+          descs: executed.map((t) => String(t.desc ?? "")),
+          methods: rep.steps.map((t) => String(t.method ?? "")).filter(Boolean),
+          ...(stateView ? { state_view: stateView } : {}),
+        });
+      }
+      sg.status = rep.done ? (rep.skipped ? "skipped" : "done") : "blocked";
+      sg.attempts = attempt;
+      sg.obstacle = rep.done ? null : rep.stop_reason;
+      if (!rep.done && rep.stop_code) (sg as Record<string, unknown>).stop_code = rep.stop_code;
+      plan.save();
+      return { done: rep.done };
+    },
+    runCliStep: async (st: ExpandedStep) => runToolStep(st, opts),
+  };
   try {
     let i = 0;
     while (i < expanded.steps.length) {
@@ -683,52 +727,21 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
         if (verbose) console.log(`  [journey] ${pathStopOut.detail}`);
         break;
       }
-      if (step.kind === "tool") {
-        toolSteps.push(await runToolStep(step, opts));
-      } else {
-        const sg = plan.subgoals[browserIndexOf[i]!]!;
-        const shell = await getShell();
-        // S0 上下文实验：快照这一步**开始时**的页面（只读；只在本开关打开时多付一次导航）。
-        // 额外 goto 到本步 start_url 与执行器自己的首跳同址，会话/cookie 不变，结果不因快照而改。
-        let stateView: StepStateView | null = null;
-        if (opts.captureTraces && opts.captureStateView && sg.start_url) {
-          try {
-            await (shell.page as unknown as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
-              sg.start_url, { waitUntil: "domcontentloaded", timeout: 30_000 },
-            );
-            stateView = await captureStepStateView(shell.page as never);
-          } catch { stateView = null; }
-        }
-        const { rep, attempt, steps } = await runSubgoalWithRetries(
-          mw as never, sg, plan, sg.start_url ?? "", shell.page, shell.pw, verbose);
-        decisionSteps.push(...steps);
-        if (opts.captureTraces) {
-          const executed = rep.steps.filter((t) => t.executed);
-          stepTraces.push({
-            index: step.index ?? i,
-            id: step.id ?? null,
-            desc: sg.desc,
-            status: rep.done ? (rep.skipped ? "skipped" : "done") : "blocked",
-            hows: executed.map((t) => String(t.how ?? "")),
-            descs: executed.map((t) => String(t.desc ?? "")),
-            methods: rep.steps.map((t) => String(t.method ?? "")).filter(Boolean),
-            ...(stateView ? { state_view: stateView } : {}),
-          });
-        }
-        sg.status = rep.done ? (rep.skipped ? "skipped" : "done") : "blocked";
-        sg.attempts = attempt;
-        sg.obstacle = rep.done ? null : rep.stop_reason;
-        // P0-2：把结构化停因也落到 checkpoint（旧字段一个不动，报告/套件继续念 `obstacle`）。
-        if (!rep.done && rep.stop_code) (sg as Record<string, unknown>).stop_code = rep.stop_code;
-        plan.save();
+      // 应用支持器分派：一种类型 = 一个适配器（web/cli 走迁移桥，新类型原生执行）。
+      const adapter = getAppAdapter(step.adapter);
+      if (adapter === undefined) {
+        throw new AppRunConfigError(`unknown app adapter ${JSON.stringify(step.adapter)} `
+          + `on step #${step.index} (known: web, cli)`);
       }
+      const outcome = await adapter.run(step.decl, step, adapterCtx);
+      if (outcome.tool) toolSteps.push(outcome.tool);
       // 声明式后继：按序取第一个"此刻适用"的候选；都没声明/都不适用 ⇒ 自然顺序。
       // 适用性问的是该步**自己的 `when`**（"这一步适不适用"），问在当次页面上——
       // 这一步没有模型参与，走向由声明与页面证据决定（红线①）。
       const from = i;
       i = await walk.after(i, async (j) => {
         const cand = expanded.steps[j]!;
-        if (cand.kind !== "browser") return true;            // 工具步没有 `when`：声明了就适用
+        if (cand.adapter !== "web") return true;             // 非 web 步没有 `when`：声明了就适用（Slice 1 边界）
         const sg = plan.subgoals[browserIndexOf[j]!];
         const when = sg?.when;
         if (when === undefined || when === null) return true;
@@ -746,7 +759,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       if (i > from + 1) {
         for (let k = from + 1; k < i; k++) {
           const crossed = expanded.steps[k]!;
-          if (crossed.kind === "browser") {
+          if (crossed.adapter === "web") {
             const sg = plan.subgoals[browserIndexOf[k]!]!;
             if (sg.status === "pending") { sg.status = "skipped"; plan.save(); }
           }

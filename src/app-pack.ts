@@ -22,7 +22,10 @@ import { appsSearchPath } from "./amberflow-home.ts";
 import { REPO } from "./flow.ts";
 import { PlanningRules, TaskPlan, type Subgoal } from "./plan.ts";
 import type { SignalSpec } from "./signals.ts";
-import { validateToolSignal, type ToolSignal } from "./tool-signals.ts";
+import {
+  CLI_STEP_KEYS, SHARED_STEP_KEYS, WEB_STEP_KEYS,
+  getAppAdapter, listAppAdapterObjects, type AppAdapter, type ProcessStepDecl,
+} from "./app-adapters.ts";
 import { validateProbeBlock } from "./probe-set.ts";
 import { loadSource } from "./datasource.ts";
 import { extractSlots } from "./extraction.ts";
@@ -96,38 +99,39 @@ export const DEVICE_KEYS = [
 ] as const;
 
 /**
- * 旅程里一步允许的键。两种步型：
- *   - **浏览器步**（`Subgoal` 的声明面）：desc/signal/start_url/target_hint(s)/slots/when/retries
- *   - **工具步**（命令行动作腿）：source/args/dry_run_args/idempotent/dangerous + 进程信号
- * 两种步型互斥的键在加载期就报错，不会"写了没用"。
+ * 旅程里一步允许的键。**单一出处** = 共享键 + 各应用支持器的专属键（`src/app-adapters.ts`）。
+ * 写错类型/写了别的类型的键，加载期就红（"写了没用"不存在）。
  */
-export const STEP_KEYS = [
-  // 共同（`id`/`next` 是两种步型共用的走向声明：P4）
-  "role", "desc", "signal", "slots", "retries", "id", "next",
-  // 浏览器步
-  "start_url", "target_hint", "target_hints", "when", "commands", "effect", "adjudicate",
-  // 工具步
-  "source", "args", "dry_run_args", "idempotent", "dangerous",
-] as const;
-
-const BROWSER_ONLY = ["start_url", "target_hint", "target_hints", "when", "commands", "effect"] as const;
-const TOOL_ONLY = ["source", "args", "dry_run_args", "idempotent", "dangerous"] as const;
+export const STEP_KEYS = [...SHARED_STEP_KEYS, ...WEB_STEP_KEYS, ...CLI_STEP_KEYS, "adjudicate"] as const;
+// 兼容导出（历史导入面）
+export { EFFECT_KEYS } from "./app-adapters.ts";
 
 /**
- * **可逆性是步的属性，不是"危险"这个布尔**（docs/ARCHITECTURE_IMPROVEMENTS.md §4）。
- *
- * 浏览器步今天没有声明面：风险闸门只看 `DESTRUCTIVE_PATTERNS` + 模型票，于是
- * "能不能让模型试"与"这一步错了会留下什么"被压成同一个问题，策略只能一刀切在最保守的一侧。
- * `effect.irreversible` 把后者单独说出来；缺省不写 = 今天的判定（逐字节不变）。
+ * **当前已注册适配器的全部步键**（动态）：共享键 + 每个适配器的专属键 + `adjudicate`。
+ * 校验用这个而不是 `STEP_KEYS` 常量——注册一个新类型后，它的键立刻成为合法键。
  */
-export const EFFECT_KEYS = ["irreversible"] as const;
+export function appStepKeys(): string[] {
+  return [...new Set([
+    ...SHARED_STEP_KEYS,
+    ...listAppAdapterObjects().flatMap((a) => [...a.stepKeys]),
+    "adjudicate",
+  ])];
+}
+export type { ProcessStepDecl };
+
 
 // 类型归属在 `plan.ts`（步骤语法的一部分）；这里只保留校验用的键集。
 export type { StepEffect } from "./plan.ts";
 
-/** 展开后的一步：浏览器步或工具步（`kind` 由 `source` 是否存在决定）。 */
+/**
+ * 展开后的一步。`adapter` 是**类型抽象**（`web` / `cli` / 将来的 `ssh` / `stdio`…），
+ * `decl` 是该适配器自己的声明值；`kind` 只是既有消费者的**兼容视图**（browser/tool）。
+ */
 export interface ExpandedStep {
   index: number;
+  /** 应用支持器 id（`step.adapter` 显式声明，或按 `source` 推断）。 */
+  adapter: string;
+  /** 兼容视图：web → browser；其它（进程类）→ tool。 */
   kind: "browser" | "tool";
   desc: string;
   role: string | null;
@@ -135,18 +139,12 @@ export interface ExpandedStep {
   id: string | null;
   /** P4 声明式后继：有序候选步 id（无可走就自然顺序）。 */
   next: string[];
+  /** 适配器自己的声明值（web = Subgoal；cli = ProcessStepDecl）。 */
+  decl: unknown;
   /** 浏览器步：交给唯一执行器的子目标 */
   subgoal?: Subgoal;
   /** 工具步：命令行动作腿的调用参数（signal 是进程观察面的信号） */
-  tool?: {
-    source: string;
-    args: string[];
-    dry_run_args: string[] | null;
-    signal: ToolSignal;
-    retries: number;
-    idempotent: boolean;
-    dangerous: boolean;
-  };
+  tool?: ProcessStepDecl;
 }
 
 export interface AppInvariant {
@@ -346,8 +344,22 @@ export interface ExpandedPack {
 }
 
 /** 一步是工具步还是浏览器步：有 `source` 就是工具步（加载期已保证互斥键不混用）。 */
+/**
+ * 这一步属于哪种应用类型：显式 `adapter` 优先；否则按既有推断（有 `source` ⇒ cli，否则 web）。
+ * **未知类型不在这里炸**——加载期校验会红并列出已知项；这里只回答"类型名是什么"。
+ */
+export function adapterKind(step: Record<string, unknown>): string {
+  const explicit = step["adapter"];
+  if (explicit !== undefined && explicit !== null) return String(explicit).trim().toLowerCase();
+  return step["source"] === undefined ? "web" : "cli";
+}
+
+/**
+ * 兼容视图（既有消费者按 `"browser" | "tool"` 读 `ExpandedStep.kind`）。
+ * 未知类型返回 "browser"（加载期必红，跑到这里之前就失败了）。
+ */
 export function stepKind(step: Record<string, unknown>): "browser" | "tool" {
-  return step["source"] === undefined ? "browser" : "tool";
+  return getAppAdapter(adapterKind(step))?.legacyKind ?? "browser";
 }
 
 /** 展开一步：角色模板 + 内联覆盖 + 槽位替换（两种步型共用）。 */
@@ -390,27 +402,22 @@ export function expandPack(pack: AppPack, overrides: Record<string, unknown> = {
     if (role !== null) used.push(role);
     const stepId = merged["id"] === undefined || merged["id"] === null ? null : String(merged["id"]);
     const stepNext = Array.isArray(merged["next"]) ? (merged["next"] as unknown[]).map((x) => String(x)) : [];
-    if (stepKind(merged) === "tool") {
-      steps.push({
-        index: i, kind: "tool", desc: String(merged["desc"]), role, id: stepId, next: stepNext,
-        tool: {
-          source: String(merged["source"]),
-          args: ((merged["args"] as unknown[]) ?? []).map((x) => String(x)),
-          dry_run_args: merged["dry_run_args"] === undefined || merged["dry_run_args"] === null
-            ? null : (merged["dry_run_args"] as unknown[]).map((x) => String(x)),
-          signal: (merged["signal"] ?? {}) as ToolSignal,
-          retries: merged["retries"] === undefined ? 0 : Math.trunc(Number(merged["retries"])),
-          idempotent: merged["idempotent"] === true,
-          dangerous: merged["dangerous"] === true,
-        },
-      });
-    } else {
-      browserSubgoals.push(merged);
-      steps.push({
-        index: i, kind: "browser", desc: String(merged["desc"]), role, id: stepId, next: stepNext,
-        subgoal: merged as Subgoal,
-      });
+    const adapter = getAppAdapter(adapterKind(merged));
+    if (adapter === undefined) {
+      // 加载期校验已经报过这条；这里不让它把展开变成"半成品步骤"。
+      subProblems.push(`journey[${i}].adapter: unknown app adapter ${JSON.stringify(adapterKind(merged))} `
+        + `(known: ${listAppAdapterObjects().map((a) => a.kind).join(", ")})`);
+      return;
     }
+    const out = adapter.expand(merged, `journey[${i}]`);
+    if (out.subgoal) browserSubgoals.push(out.subgoal);
+    steps.push({
+      index: i, adapter: adapter.kind, kind: adapter.legacyKind,
+      desc: String(merged["desc"]), role, id: stepId, next: stepNext,
+      decl: out.decl,
+      ...(out.subgoal ? { subgoal: out.subgoal as Subgoal } : {}),
+      ...(out.tool ? { tool: out.tool } : {}),
+    });
   });
   if (subProblems.length) {
     throw new Error(`app pack ${pack.id} is invalid:\n  - ${subProblems.join("\n  - ")}`);
@@ -492,79 +499,34 @@ export function validatePack(pack: AppPack,
     if (!(String(s) in slots)) p.push(`required slot ${JSON.stringify(String(s))} has no value`);
   }
   const roles = pack.roles ?? {};
+  /** 其它适配器的专属键写在当前步上 = "写了没用"：点名谁的类型，加载期红。 */
+  const checkForeignKeys = (step: Record<string, unknown>, where: string, adapter: AppAdapter): void => {
+    for (const other of listAppAdapterObjects()) {
+      if (other.kind === adapter.kind) continue;
+      for (const k of other.stepKeys) {
+        if (step[k] === undefined) continue;
+        if ((adapter.stepKeys as readonly string[]).includes(k)) continue;
+        const suffix = adapter.kind === "cli" ? ` (source=${JSON.stringify(String(step["source"]))})` : "";
+        p.push(`${where}.${k}: ${other.label}-only key on a ${adapter.label} step${suffix}`);
+      }
+    }
+  };
   const checkStep = (step: Record<string, unknown>, where: string): void => {
+    const keys = appStepKeys();
     for (const k of Object.keys(step)) {
-      if (!(STEP_KEYS as readonly string[]).includes(k) || k === "role") {
-        p.push(`${where}.${k}: unknown step key (known: ${STEP_KEYS.filter((x) => x !== "role").join(", ")})`);
+      if (!keys.includes(k) || k === "role") {
+        p.push(`${where}.${k}: unknown step key (known: ${keys.filter((x) => x !== "role").join(", ")})`);
       }
     }
-    const tool = step["source"] !== undefined;
-    if (tool) {
-      for (const k of BROWSER_ONLY) {
-        if (step[k] !== undefined) p.push(`${where}.${k}: browser-only key on a tool step (source=${JSON.stringify(String(step["source"]))})`);
-      }
-      try {
-        loadSource(String(step["source"]));
-      } catch (e) {
-        p.push(`${where}.source ${JSON.stringify(String(step["source"]))} not found (${e instanceof Error ? e.message : String(e)})`);
-      }
-      p.push(...validateToolSignal((step["signal"] ?? {}) as ToolSignal, `${where}.signal`));
-      const args = step["args"];
-      if (args !== undefined && !(Array.isArray(args) && args.every((x) => typeof x === "string"))) {
-        p.push(`${where}.args must be a list of strings (appended to the source argv)`);
-      }
-      const dry = step["dry_run_args"];
-      if (dry !== undefined && !(Array.isArray(dry) && dry.length && dry.every((x) => typeof x === "string"))) {
-        p.push(`${where}.dry_run_args must be a non-empty list of strings`);
-      }
-      const retries = Number(step["retries"] ?? 0);
-      if (retries > 0 && step["idempotent"] !== true) {
-        p.push(`${where}.retries=${retries} needs idempotent: true (re-running a tool can be irreversible)`);
-      }
-      if (step["dangerous"] === true) {
-        if (dry === undefined) {
-          p.push(`${where}.dangerous needs dry_run_args — 不可逆动作必须先干跑`);
-        }
-        if (retries > 0) p.push(`${where}.dangerous must not retry (retries=${retries})`);
-      }
-    } else {
-      // effect（§4）：可逆性声明。写错要响亮；不可逆步不许重试——与工具步
-      // `dangerous must not retry` 是同一条纪律的两半。
-      const eff = step["effect"];
-      if (eff !== undefined) {
-        if (!isDict(eff)) {
-          p.push(`${where}.effect: must be an object (keys: ${EFFECT_KEYS.join(", ")})`);
-        } else {
-          for (const k of Object.keys(eff)) {
-            if (!(EFFECT_KEYS as readonly string[]).includes(k) && !k.startsWith("_")) {
-              p.push(`${where}.effect.${k}: unknown key (known: ${EFFECT_KEYS.join(", ")})`);
-            }
-          }
-          if (eff["irreversible"] !== undefined && typeof eff["irreversible"] !== "boolean") {
-            p.push(`${where}.effect.irreversible: must be a boolean`);
-          }
-          if (eff["verify_after"] !== undefined) {
-            // 项目方裁定：`verify_after: none` 不允许存在（等于声明"这一步可以不验证完成"），
-            // 而 `signal` 就是循环的默认行为 ⇒ 这个键没有合法取值，已从 schema 删除。
-            p.push(`${where}.effect.verify_after: 已删除的键——完成只认该步的证据（红线③），不能被声明关掉；`
-              + `默认就是"看该子目标的信号"，不需要写。`);
-          }
-          const er = Number(step["retries"] ?? 0);
-          if (eff["irreversible"] === true && er > 0) {
-            p.push(`${where}.effect.irreversible: an irreversible step must not retry (retries=${er})`);
-          }
-        }
-      }
-      for (const k of TOOL_ONLY) {
-        if (step[k] !== undefined) p.push(`${where}.${k}: tool-only key on a browser step`);
-      }
-      if (!step["signal"]) p.push(`${where}: needs a done-signal`);
-      if (!step["desc"]) p.push(`${where}: needs desc`);
-      // G-G：执行器**每个子目标都会重新 goto start_url**（计划里状态不跨子目标保留），
-      // 所以浏览器步没有 start_url 在运行时只有两种结局：goto("") 报错，或者悄悄停在上一页。
-      // 两种都不该等到运行时才发现。
-      if (!step["start_url"]) p.push(`${where}: a browser step needs start_url (each subgoal re-navigates)`);
+    const kind = adapterKind(step);
+    const adapter = getAppAdapter(kind);
+    if (adapter === undefined) {
+      p.push(`${where}.adapter: unknown app adapter ${JSON.stringify(kind)} `
+        + `(known: ${listAppAdapterObjects().map((a) => a.kind).join(", ")})`);
+      return;
     }
+    checkForeignKeys(step, where, adapter);
+    adapter.validateStep(step, where, p);
   };
   for (const [name, tpl] of Object.entries(roles)) {
     if (!isDict(tpl)) { p.push(`roles.${name} must be an object`); continue; }
@@ -584,23 +546,27 @@ export function validatePack(pack: AppPack,
     } else {
       // 角色模板已经校验过；内联覆盖只允许"补字段"，键集合再查一遍
       for (const k of Object.keys(entry)) {
-        if (!(STEP_KEYS as readonly string[]).includes(k)) p.push(`journey[${i}].${k}: unknown step key`);
+        if (!appStepKeys().includes(k)) p.push(`journey[${i}].${k}: unknown step key`);
       }
-      // 合并后两种步型的互斥键仍要查：角色模板走 checkStep，但**内联覆盖**以前只查键名，
-      // 于是 `{role: <浏览器角色>, args:[...]}` 会把 args 静默丢掉（"写了没用"），
-      // step 仍按浏览器步执行 —— 这正是不变量"两种步型互斥键加载期就报错"要防的事。
+      // 合并后**类型互斥键**仍要查：角色模板走 checkStep，但内联覆盖以前只查键名，
+      // 于是 `{role: <浏览器角色>, args:[...]}` 会把 args 静默丢掉（"写了没用"）。
       const tpl = roles[String(roleName)];
       if (isDict(tpl)) {
         const merged = { ...tpl, ...entry };
-        const tool = merged["source"] !== undefined;
-        if (!tool && !merged["start_url"]) {
+        const adapter = getAppAdapter(adapterKind(merged));
+        if (adapter?.kind === "web" && !merged["start_url"]) {
           p.push(`journey[${i}]: a browser step needs start_url (neither the role nor the override has one)`);
         }
-        for (const k of tool ? BROWSER_ONLY : TOOL_ONLY) {
-          if (merged[k] !== undefined) {
-            p.push(`journey[${i}].${k}: ${tool
-              ? `browser-only key on a tool step (source=${JSON.stringify(String(merged["source"]))})`
-              : "tool-only key on a browser step"}`);
+        if (adapter !== undefined) {
+          for (const other of listAppAdapterObjects()) {
+            if (other.kind === adapter.kind) continue;
+            for (const k of other.stepKeys) {
+              if (merged[k] === undefined) continue;
+              if ((adapter.stepKeys as readonly string[]).includes(k)) continue;
+              const suffix = adapter.kind === "cli"
+                ? ` (source=${JSON.stringify(String(merged["source"]))})` : "";
+              p.push(`journey[${i}].${k}: ${other.label}-only key on a ${adapter.label} step${suffix}`);
+            }
           }
         }
       }

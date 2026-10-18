@@ -217,7 +217,7 @@
 <rect x="40" y="1418" width="1480" height="120" class="band"/>
 <text x="58" y="1442" class="lay">⑥ 分层证据（结论必须能被命令复现，叙述不算证据）</text>
 <rect x="60" y="1450" width="444" height="72" class="bxe"/>
-<text x="71" y="1469" class="t" font-size="12.5">tests/ 1277 条 + 六层跨实现对拍</text>
+<text x="71" y="1469" class="t" font-size="12.5">tests/ 1288 条 + 六层跨实现对拍</text>
 <text x="71" y="1485" class="s">rules / extraction / executor / datasource / ctrip / transfer</text>
 <text x="71" y="1499" class="s">冻结语料；时钟钉在 tools/frozen-today.ts</text>
 <rect x="516" y="1450" width="444" height="72" class="bxe"/>
@@ -275,7 +275,7 @@
 <text x="727" y="1889" class="s">P3 src/bindings.ts 数据槽层 —— apps/checkin-binding 1/1 + 2/2 · 20 条</text>
 <text x="727" y="1903" class="s">P4 next + 路径上界 / next_cycle —— apps/cold-search-next（删 next 即红）· 17 条</text>
 <text x="727" y="1917" class="s">D3/R-4 同一元素重复上界 → no_progress —— tests/no-progress.test.ts 5 条</text>
-<text x="727" y="1931" class="s">验收：verify + smoke.sh（PASS）· apps:suite 16/17 · apps:gen --check 8/8 · 1277 测试</text>
+<text x="727" y="1931" class="s">验收：verify + smoke.sh（PASS）· apps:suite 16/17 · apps:gen --check 8/8 · 1288 测试</text>
 <path class="ln" d="M700,1952 V1988" marker-end="url(#arr)"/>
 <text x="714" y="1976" class="lbl">真 ONNX 实测：承重件不是模型</text>
 <rect x="40" y="1988" width="1480" height="196" class="band"/>

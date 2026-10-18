@@ -308,7 +308,27 @@ npm run apps:suite -- --json
 "没跑"不会被算成绿；② 一律脚本模型 + 不跑数据腿，所以离线可复现；③ 需要显式放行的危险步
 （如 `apps/cli-report` 的不可逆写入）会记成 **待放行(未执行)**：既不算绿也不算红，因为绿色的前提是真的执行过。
 
-## 五、探针集：把「线上能不能打开」也变成数据
+## 五、应用支持器（AppAdapter）：一次旅程可以混用多种应用类型
+
+动作腿的类型不再写死在核心。`src/app-adapters.ts` 的**注册表**声明"一种应用类型 = 一个支持器"：
+声明面（该类型的步键 + 加载期校验）、信号面（web = DOM 信号；cli = 进程观察面）、执行（`run`）、
+返回值（`returns`，Slice 2 起）。包里的 journey 是**类型无关**的步骤序列，每步用 `adapter` 指名类型：
+
+```jsonc
+{ "id": "open-page",  "adapter": "web",  "start_url": "testpages/product.html",
+  "desc": "打开页面", "signal": { "css_exists": "main" } }
+{ "id": "run-report", "adapter": "cli",  "source": "demo-tool",
+  "desc": "跑一次桩工具", "signal": { "exit_ok": true } }
+```
+
+- **向后兼容**：不写 `adapter` 时按既有推断（有 `source` ⇒ `cli`，否则 ⇒ `web`），20+ 个既有应用包
+  一个字节都不用改；切片 1 的全部产物与套件结果逐字节/逐行不变。
+- **专属键白名单**：写错类型（web 步带 `source`、cli 步带 `start_url`）**加载期就红**并点名归属。
+- **加一种应用类型 = 注册一个支持器**，不改 `app-pack` / `app-runner` 的核心分支；
+  下一片是 `ssh`（本机 sshd 真场景）与 `stdio`（真实交互式进程/游戏），以及 `returns` 跨步传值。
+  设计、契约与真实场景验收表见 [docs/APP_SUPPORTER_DESIGN.md](../docs/APP_SUPPORTER_DESIGN.md)。
+
+## 六、探针集：把「线上能不能打开」也变成数据
 
 测量型应用（探针）与旅程型应用共用一个 `pack.json`，只是声明的是 `probe` 块而不是 `journey`：
 
@@ -409,7 +429,7 @@ npm run probes:baseline -- --from <新探针结果.json> --write   # 用一次�
 `LOGIN_REQUIRED` / `captured` …）。于是"站点变了"不再只能靠人再读一遍报告：`--check` 会红，
 而且"有人手改了包"是同一个检查。只存标量观察，不存 `*_reason`（叙述留在冻结语料里，别造第二份散文）。
 
-## 六、还没做的（诚实清单）
+## 七、还没做的（诚实清单）
 
 | 项 | 现状 |
 |---|---|
