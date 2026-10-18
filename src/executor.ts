@@ -63,11 +63,13 @@ import {
   esig,
   extractElements,
   extractSlots,
+  elemFamily,
   filterElemsByFamily,
   firstOf,
   frameAt,
   framesOf,
   hintLookup,
+  orderElemsByFamily,
   stateText,
   urlOf,
   type Elem,
@@ -174,10 +176,14 @@ export type StopCode =
   | "host_not_allowed"
   | "config_error"
   /**
-   * S2 ③ 运行期接线：提名指令收窄元素池后，本页一个该族候选都没有——
-   * 结构化停因（不退全池、不猜）。
+   * S2 ③ 运行期接线（改版）：提名族是软先验；**有界修复**时本页一个该族候选都没有。
    */
   | "nominated_family_empty"
+  /**
+   * S2 ③ 运行期接线（改版）：第一轮解析出的动作族与提名不符，且有界修复也没解出
+   * 过闸的该族候选——结构化停因（绝不执行一个与提名矛盾的动作）。
+   */
+  | "nominated_family_mismatch"
   /** P2: a declared command space with NOTHING resolvable on this page (space-empty). */
   | "space_empty"
   /**
@@ -1713,10 +1719,11 @@ export class BrowserMiddleware {
             }
           }
         }
-        // S2 ③ 运行期接线：提名指令收窄元素池——规则/模型只在该族元素里挑。
-        // `elems` 仍是"全池"（hint 检索/命令空间/证据面用它）；候选池单独一个视图。
-        const pickPool = (pool: ElemPool = elems): ElemPool =>
-          expectedFamily === null ? pool : filterElemsByFamily(pool, expectedFamily);
+        // S2 ③ 运行期接线（改版）：提名族是**软先验**，不是第一道过滤器——族内元素排前面，
+        // 其他族元素**仍在候选里**（它们既可能是真目标，也可能是解出目标的上下文：自定义控件
+        // 的结构族 ≠ 语义动作）。真正"只在该族里找"只发生在**有界修复**那一次（走向停止才付）。
+        const orderedPool = (pool: ElemPool = elems): ElemPool =>
+          expectedFamily === null ? pool : orderElemsByFamily(pool, expectedFamily);
         let reobserved = false;          // at most ONE wider look per step
         let escalated = false;           // at most ONE escalation per step
         let escalatedPick: string | null = null;
@@ -1834,21 +1841,10 @@ export class BrowserMiddleware {
           // forbidden and re-picked inside ONE step, then laya clicked junk and the
           // subgoal hit `max_steps` after 22 steps. The documented fall-through for
           // a hint that matches nothing is LAYA ("rather than gambling on a token").
-          // 窄池只对"没有命中签名"的目标生效：计划声明的 hint 是权威（命中全池就用它）；
-          // 未命中时规则/模型都只在窄池里找——否则收窄等于没做。
-          const hintHit = curHint !== null && hintMatch(curHint, elems) !== null;
+          // 计划声明的 hint 是权威；否则规则在**排序先验池**里找（该族在前，其余仍在）。
           ruleRef = curHint
-            ? affordanceRule(instruction, hintHit ? elems : pickPool(), curHint)
-            : (navRule(instruction, pickPool()) ?? affordanceRule(instruction, pickPool(), null));
-        }
-        // 收窄后一个候选都没有：这是"提名指令在这页上无可作用元素"的结构化停因，
-        // 不退全池（那等于没窄）、不猜（红线③的提名面形态）。
-        if (expectedFamily !== null && ruleRef === null && Object.keys(pickPool()).length === 0) {
-          stop("nominated_family_empty",
-            `nominated instruction "${expectedFamily}" narrows the element pool, but this page has `
-            + `no ${expectedFamily} candidates on step ${stepNo}`, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
-          break;
+            ? affordanceRule(instruction, elems, curHint)
+            : (navRule(instruction, orderedPool()) ?? affordanceRule(instruction, orderedPool(), null));
         }
         // re-admit refs whose only sin was being covered at an earlier step, but
         // ONLY after this subgoal actually executed something since the block
@@ -1878,8 +1874,8 @@ export class BrowserMiddleware {
           // "pick 1 of the whole 40" — now it becomes "pick 1 of THESE candidates".
           // The tier is a SMALLER QUESTION, never a decider: below floor or no answer,
           // the step re-asks the full pool and every later rung stays as today.
-          let askPool = pickPool();
-          if (tieredHint && expectedFamily === null && curHint !== null && ruleRef === null) {
+          let askPool = orderedPool();
+          if (tieredHint && curHint !== null && ruleRef === null) {
             const cand = hintCandidates(curHint, elems);
             if (cand !== null && cand.decided === null && cand.refs.length > 1) {
               const subset: ElemPool = {};
@@ -1987,8 +1983,8 @@ export class BrowserMiddleware {
                 // refs are positional: re-prune forbids whose ref now names a
                 // different element before re-asking (same rule as the step head).
                 pruneForbids(wide);
-                // 收窄时宽视图也只留该族（否则"加宽重看"会把收窄绕过去）。
-                const wideAsk = pickPool(wide);
+                // 宽视图同样只做**排序先验**（不丢元素：加宽看到的东西不该被族过滤掉）。
+                const wideAsk = orderedPool(wide);
                 const [ref2, conf2] = await this.pickElement(
                   instruction, pg, wideAsk, new Set(Object.keys(forbidden)), noted);
                 // The wider view BECOMES the step's view even when the local model
@@ -2021,7 +2017,7 @@ export class BrowserMiddleware {
             // nothing it says can invent an element, a value or an action.
             if (!recovered && escalateFn && !escalated) {
               escalated = true;
-              const crit = criteriaView(pickPool(), new Set(Object.keys(forbidden)),
+              const crit = criteriaView(orderedPool(), new Set(Object.keys(forbidden)),
                 await ariaInteractiveLines(pg));
               const state = {
                 url: urlOf(pg), title: await pg.title(),
@@ -2066,6 +2062,52 @@ export class BrowserMiddleware {
                 break;
               }
             }
+          }
+        }
+        // S2 ③ **有界修复**（只在走向停止时付一次成本）：第一轮用全池（软先验）解析出的动作族
+        // 与提名不符 / 没解出目标时，才用"该族"再做一次解析；仍不成立 ⇒ 结构化停，
+        // 绝不执行一个与提名矛盾的动作。
+        // 为什么不是第一道过滤：结构族 ≠ 语义动作（div[role=combobox] = click 但语义 select、
+        // contenteditable = click 但语义 fill、input[type=range] = fill 但语义设值），硬过滤会
+        // 把真目标或关键上下文元素一并排掉（项目方推敲结论）。
+        let nominatedRepair = false;
+        if (expectedFamily !== null) {
+          const pickedFamily = ref !== null ? elemFamily(elems[ref]!) : null;
+          if (ref === null || pickedFamily !== expectedFamily) {
+            const narrow = filterElemsByFamily(elems, expectedFamily);
+            if (Object.keys(narrow).length === 0) {
+              stop("nominated_family_empty",
+                `nominated instruction "${expectedFamily}" but this page has no ${expectedFamily} `
+                + `candidates on step ${stepNo}`, stepNo);
+              if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+              break;
+            }
+            const repairFloor = Math.max(0.10, this.confFloor - 0.05 * Object.keys(forbidden).length);
+            const forbiddenSet = new Set(Object.keys(forbidden));
+            const repairRule = navRule(instruction, narrow) ?? affordanceRule(instruction, narrow, null);
+            let repaired: { ref: string; conf: number; method: string } | null = null;
+            if (repairRule !== null && !(repairRule in forbidden)) {
+              repaired = { ref: repairRule, conf: 1, method: "rule:match" };
+            }
+            if (repaired === null) {
+              const [rp, rconf] = await this.pickElement(instruction, pg, narrow, forbiddenSet, noted);
+              if (rp !== null && rconf >= repairFloor) repaired = { ref: rp, conf: rconf, method: "laya" };
+            }
+            if (repaired === null) {
+              stop("nominated_family_mismatch",
+                `nominated instruction "${expectedFamily}", but the page resolved ${pickedFamily ?? "nothing"} `
+                + `and no ${expectedFamily} candidate passed the floor on step ${stepNo}`, stepNo);
+              if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+              break;
+            }
+            if (verbose) {
+              console.log(`  step ${stepNo}: nominated-family repair ${expectedFamily} -> `
+                + `${repaired.ref} (${repaired.method})`);
+            }
+            ref = repaired.ref;
+            conf = repaired.conf;
+            method = repaired.method;
+            nominatedRepair = true;
           }
         }
         const el = elems[ref]!;
@@ -2212,6 +2254,7 @@ export class BrowserMiddleware {
         trace.push({
           step: stepNo, desc, how, value: redactValue(el, arg), risky, executed, confirmed, method,
           conf: round3(conf), ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
+          ...(nominatedRepair ? { nominated_family_repair: true } : {}),
           ...(method.startsWith("laya") && layaMargin !== null
             ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}),
           ...(method === "escalate" && escalatedPick ? { escalated: true } : {}),

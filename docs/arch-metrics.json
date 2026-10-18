@@ -64,7 +64,7 @@
         "reobserve": 0,
         "escalate": 0,
         "rule_match": 201,
-        "secs": 667.8,
+        "secs": 669.2,
         "tier": "on"
       }
     },
@@ -109,7 +109,7 @@
     }
   },
   "tests": {
-    "count": 1271,
+    "count": 1273,
     "source": "--tests（应来自 `npx vitest list | grep -cE \"^(tests|integrations)/\"`；静态数 `it(` 只有 799，不可用）"
   }
 }

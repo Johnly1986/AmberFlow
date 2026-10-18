@@ -1147,7 +1147,9 @@ export interface FlowRunOptions {
    * S2 ③ **运行期接线**（用户裁定：允许收窄元素池 / 纯运行期不回填 / 仅 nominate 步）。
    * 传入一个决策 provider（如 `--nominate-provider token-plan`）后：仅对 `nominate: true` 且没有
    * `instr` 锁的步，在 ②学习映射、①规则都弃权时，用**页面状态 + 页面条件化候选**问它一次；
-   * 提名来自模型（`via=model`）且是元素动作族时，再按该指令**收窄元素池**交给执行器。
+   * 提名来自模型（`via=model`）且是元素动作族时，把它作为**软先验**交给执行器：候选池按该族
+   * 排序（其他族元素仍在候选与上下文里），只有解析出的动作族与提名不符时才做**一次有界修复**
+   * （窄池重解析）；修复仍不成立 ⇒ 结构化停因（绝不执行与提名矛盾的动作）。
    * 缺省 null = 不接线，行为逐字节不变。
    */
   nominateProvider?: DecisionProvider | null;
@@ -1414,7 +1416,7 @@ export async function runFlow(
         const instrKey = step.id;
         let ask: NominationAsk | null = null;
         if (!step.instr && nominateProvider !== null) {
-          // ③ 运行期接线（用户裁定：仅 nominate 步 / 纯运行期不回填 / 允许收窄元素池）：
+          // ③ 运行期接线（用户裁定：仅 nominate 步 / 纯运行期不回填 / 提名族作软先验+有界修复）：
           // 提问前把页面**按本步 URL 守卫导航**到 start 页并抓只读上下文——提名发生在
           // 执行器导航之前，不补这一步拿到的就是上一步的落点（S0 的教训：没有上下文别问）。
           // 抓不到上下文 ⇒ 不提问（ask=null），梯级按 ②①⑤ 继续，行为与没接线一致。
@@ -1830,7 +1832,8 @@ const USAGE = `usage: semantic-flow --app ID --site KEY [--laya scripted|unsure|
 
 S2 ③ 运行期接线（--nominate-provider）：仅对声明 nominate: true 且无 instr 锁的步，在 ②学习映射、
 ①规则都弃权时，用**页面状态 + 页面条件化候选**问一次决策 provider（如 token-plan）；模型提名若是
-元素动作族，则按其**收窄元素池**交给执行器（hint 仍是权威；同页无该族候选 = 结构化停因）。
+元素动作族，则作为**软先验**（族内优先排序，不丢其他族元素/上下文）+ 解析族不符时**一次有界修复**
+交给执行器（hint 仍是权威；同页无该族候选/修复不过闸 = 结构化停因）。
 纯运行期、不回填指令记忆；不接 = 行为逐字节不变。provider 需显式配置（如 TOKEN_PLAN_ENDPOINT/
 TOKEN_PLAN_API_KEY），缺配置响亮报错。
 

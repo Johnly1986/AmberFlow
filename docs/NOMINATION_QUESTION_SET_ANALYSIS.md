@@ -231,9 +231,14 @@ npm run nominate:context -- --check            # 离线可复算部分：语料/
 2. **题面**：问之前按本步 URL 守卫导航到 start 页，抓**只读页面状态**（URL/标题/正文 240 字/控件能力摘要），
    连同**条件化候选**（"本页有下拉 N 个（出发时段）"）一起发给决策 provider——即 S0-v2 的 88.5% 构造。
    **抓不到上下文就不问**（没有页面的问法 = 让模型猜，S0 的教训）。
-3. **收窄（D2）**：模型提名是元素动作族（click/fill/select/check）时，把该族作为 `expectedFamily` 交给执行器——
-   规则/模型只在该族元素里挑（点名叫的 hint 仍权威）；窄后本页无该族候选 ⇒ 结构化停因
-   `nominated_family_empty`（不退全池、不猜）。**只有 `via=model` 才窄**；规则/档案/枚举档行为不变。
+3. **提名族 = 软先验 + 有界修复**（2026-10-18 推敲后改版，取代最初的硬过滤）：
+   模型提名是元素动作族（click/fill/select/check）时，候选池**按该族排序**（其他族元素**仍在候选与
+   上下文里**——结构族 ≠ 语义动作：`div[role=combobox]` 是 click 族但语义 select、`contenteditable`
+   是 click 族但语义 fill、`input[type=range]` 是 fill 族但语义设值；其他族元素也可能正是真目标）。
+   只有当解析出的动作族与提名**不符**（或根本没解出目标）时，才做**一次有界修复**：用该族窄池重解析
+   （规则优先、模型次之），仍不成立 ⇒ `nominated_family_empty`（本页无该族）或
+   `nominated_family_mismatch`（有该族但不过闸）结构化停因——**绝不执行与提名矛盾的动作**。
+   成本纪律：软先验零成本，修复只在走向停止时付一次。**只有 `via=model` 才启用**；规则/档案/枚举档不变。
 4. **fail-closed**：provider 抛错/超时/池外答案 ⇒ 该档弃权，落⑤枚举，旅程不被打死。
 5. **纯运行期**：不写指令记忆（不 staged、不重放门、不影响 ②）；账单只记本次的模型咨询。
 6. **账**：`nominate_bill.model = {asks, abstains, errors}`、结果带 `nominate_provider` 身份、
@@ -241,7 +246,8 @@ npm run nominate:context -- --check            # 离线可复算部分：语料/
 
 ### 7.2 验证
 
-- 单测（假 provider，真 chromium）：executor 收窄 3 条（窄池只含该族 / 缺省不窄 / 空族结构化停因）；
+- 单测（假 provider，真 chromium）：executor 5 条（第一轮全池可见/上下文不丢、解析族不符→有界修复并记
+  `nominated_family_repair`、空族与修复不过闸两种停因分开记、缺省不窄）；
   semantic 接线 6 条（上下文与条件化候选真的进题面、①命中不问、池外/抛错落⑤、`instr` 锁不问、D2 空族停因）。
 - **真服务端到端（两次真跑，token-plan `decision-model-preview`）**：
   1. **收窄正路**：临时应用"只有按钮的页面 + `nominate:true`、描述无规则关键词"→ 模型按页面上下文提名

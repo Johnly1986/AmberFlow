@@ -31,8 +31,9 @@
  * **候选按页面条件化 88.5%**（歧义组 7.2% → 92.8%）；本地 laya 带同一份上下文 4.8% → 54.5%。
  * ⇒ **③ 不是不可行，而是"desc-only 题面"不可行**；接线需要页面状态 + 页面条件化候选。
  * 2026-10-18 **运行期接线已落地（opt-in，用户裁定）**：`semantic-flow --nominate-provider NAME`，
- * 仅对 `nominate: true` 且无 `instr` 锁的步、②①弃权时问；模型提名若为元素动作族则**收窄元素池**
- * （D2）；纯运行期不回填（不写指令记忆）；无上下文不问；抛错/池外 = 该档弃权落 ⑤。
+ * 仅对 `nominate: true` 且无 `instr` 锁的步、②①弃权时问；模型提名若为元素动作族，则作为
+ * **软先验**（族内优先排序，不丢其他族元素——结构族 ≠ 语义动作）+ 解析族不符时**一次有界修复**；
+ * 纯运行期不回填（不写指令记忆）；无上下文不问；抛错/池外 = 该档弃权落 ⑤。
  */
 import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, instructionCriteria, isInstructionName } from "./instructions.ts";
 import type { DecisionProvider } from "./decision-provider.ts";

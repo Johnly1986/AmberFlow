@@ -61,8 +61,9 @@
 >
 > **③ 提名窄问的运行期接线（opt-in，2026-10-18）**：`semantic-flow --nominate-provider NAME`——
 > 仅对 `nominate: true` 且无 `instr` 锁的步、②学习映射与①规则都弃权时，带**页面状态 + 页面条件化候选**
-> 问一次决策 provider；模型提名若为元素动作族则**收窄元素池**（`RunOptions.expectedFamily`，hint 仍权威；
-> 空族 = 结构化停因 `nominated_family_empty`）；纯运行期不回填、无上下文不问、抛错/池外落⑤；
+> 问一次决策 provider；模型提名若为元素动作族则作为**软先验**（`RunOptions.expectedFamily`：族内优先排序、不丢其他族
+> 元素与上下文；解析族不符时一次**有界修复**，仍不成立 = `nominated_family_empty`/`nominated_family_mismatch`
+> 结构化停因；hint 仍权威——硬过滤被否，结构族 ≠ 语义动作）；纯运行期不回填、无上下文不问、抛错/池外落⑤；
 > 账单加模型档。缺省不接 = 行为逐字节不变。设计/实测：[docs/NOMINATION_QUESTION_SET_ANALYSIS.md](docs/NOMINATION_QUESTION_SET_ANALYSIS.md) §6–§7
 > （`AMBERFLOW_DECISION_PROVIDER`；缝与契约见 [docs/DECISION_INTERFACE_SURVEY.md](docs/DECISION_INTERFACE_SURVEY.md) §7，
 > 外部模型接入示例 [docs/DECISION_PROVIDER_JEVK5.md](docs/DECISION_PROVIDER_JEVK5.md)；

@@ -55,11 +55,29 @@ export function elemFamily(e: Elem): ElemFamily {
   return "click";
 }
 
-/** 按动作族过滤元素池（收窄用；ref 保留原值）。 */
+/** 按动作族过滤元素池（**只用于有界修复**；ref 保留原值）。 */
 export function filterElemsByFamily(elems: ElemPool, family: ElemFamily): ElemPool {
   const out: ElemPool = {};
   for (const [ref, e] of Object.entries(elems)) if (elemFamily(e) === family) out[ref] = e;
   return out;
+}
+
+/**
+ * 按动作族**排序**元素池（不丢信息）：该族在前、其余在后。
+ *
+ * 这是"提名族作为**软先验**"的载体——各族元素都还在候选里（其他族的元素既可能是真目标，
+ * 也可能是解出目标的上下文：`div[role=combobox]` 是 click 族却是 select、`contenteditable`
+ * 是 click 族却是 fill、`input[type=range]` 是 fill 族却是设值），排序只让该族优先被规则/模型看到。
+ * 结构族 ≠ 语义动作，所以**不能**拿它硬过滤。
+ */
+export function orderElemsByFamily(elems: ElemPool, family: ElemFamily): ElemPool {
+  const first: ElemPool = {};
+  const rest: ElemPool = {};
+  for (const [ref, e] of Object.entries(elems)) {
+    if (elemFamily(e) === family) first[ref] = e;
+    else rest[ref] = e;
+  }
+  return { ...first, ...rest };
 }
 
 /**

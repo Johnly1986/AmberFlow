@@ -650,12 +650,12 @@ describe("pickProposal（ARCHITECTURE_IMPROVEMENTS §2：conf 是两把尺子，
   }, 60_000);
 });
 
-/* --------------------------------------- S2 ③ 运行期接线：提名指令收窄元素池 */
+/* ------------------------- S2 ③ 运行期接线（改版）：提名族 = 软先验 + 有界修复 */
 
-describe("expectedFamily：提名指令收窄元素池（规则/模型只在该族里挑；hint 仍权威）", () => {
-  const PAGE_HTML = `<button id="go">Go</button><input id="city" placeholder="城市">`;
+describe("expectedFamily：提名族是软先验，不是第一道过滤器（其他族元素仍在候选与上下文里）", () => {
+  const PAGE_HTML = `<input id="city" placeholder="城市"><button id="go">Go</button>`;
 
-  it("收窄到 fill：模型只看到输入框候选，按钮被移出池子（选中输入框 ⇒ needs_value 结构化停）", async () => {
+  it("第一轮全池可见（上下文不丢）：模型能看到其他族元素；族内优先排序只是先验", async () => {
     const seen: string[] = [];
     install(fakeAgent((crit) => {
       seen.push(...Object.values(crit));
@@ -666,38 +666,84 @@ describe("expectedFamily：提名指令收窄元素池（规则/模型只在该�
       page: asPage(), pw, slots: {}, goalSignalFn: () => false, verbose: false,
       expectedFamily: "fill",
     });
-    expect(seen.some((l) => l.includes("城市"))).toBe(true);
-    expect(seen.some((l) => l.includes("Go"))).toBe(false);
-    // 选中的是输入框：没有声明值可填 ⇒ trace 记 needs_value（不是瞎点按钮）
-    const needValue = rep.steps.filter((t) => String(t.how) === "needs_value");
-    expect(needValue.length).toBeGreaterThan(0);
-    expect(needValue.every((t) => String(t.desc).includes("城市"))).toBe(true);
-    expect(rep.steps.some((t) => String(t.desc).includes("Go"))).toBe(false);
+    // 软先验：fill 族的输入框排在前面……
+    expect(seen[0]).toBeDefined();
+    expect(String(seen[0])).toContain("城市");
+    // ……但其他族元素**没有被丢掉**（上下文/真目标可能就在它们身上）
+    expect(seen.some((l) => l.includes("Go"))).toBe(true);
+    expect(rep.steps.some((t) => String(t.how) === "needs_value")).toBe(true);
   });
 
-  it("缺省不窄：同一页不传 expectedFamily ⇒ 候选池含按钮（行为逐字节不变）", async () => {
+  it("解析族与提名不符 ⇒ **有界修复**一次（窄池重解析）并记 nominated_family_repair", async () => {
+    let actAsks = 0;
+    const askedPools: string[][] = [];
+    install(fakeAgent((crit) => {
+      actAsks += 1;
+      askedPools.push(Object.values(crit));
+      const city = refWith(crit, "城市");
+      const go = refWith(crit, "Go");
+      if (actAsks === 1 && city) return { choice: city, confidence: 0.95 };  // 第一轮故意选错族
+      return go ? { choice: go, confidence: 0.95 } : null;
+    }));
+    const rep = await mw({ maxSteps: 1 }).run("继续", dataUrl(PAGE_HTML), {
+      page: asPage(), pw, slots: {}, goalSignalFn: () => false, verbose: false,
+      expectedFamily: "click",
+    });
+    // 第一轮问的是全池（两个元素都在）；修复轮问的是窄池（只剩 click 族）
+    expect(askedPools[0]!.some((l) => l.includes("城市"))).toBe(true);
+    expect(askedPools[0]!.some((l) => l.includes("Go"))).toBe(true);
+    expect(askedPools.at(-1)!.length).toBeLessThan(askedPools[0]!.length);
+    // 修复后执行了 click 族的按钮，并在 trace 上留下修复证据
+    const executed = rep.steps.filter((t) => t.executed === true);
+    expect(executed.length).toBeGreaterThan(0);
+    expect(String(executed[0]!.desc)).toContain("Go");
+    expect(executed[0]!).toMatchObject({ nominated_family_repair: true });
+  });
+
+  it("有界修复解不出该族候选 ⇒ 结构化停因 nominated_family_mismatch（绝不执行与提名矛盾的动作）", async () => {
+    let actAsks = 0;
+    install(fakeAgent((crit) => {
+      actAsks += 1;
+      const city = refWith(crit, "城市");
+      if (city) return { choice: city, confidence: 0.95 };   // 提名 select，但页面只有输入框/按钮
+      return null;
+    }));
+    const rep = await mw({ maxSteps: 1 }).run("继续", dataUrl(PAGE_HTML), {
+      page: asPage(), pw, slots: {}, goalSignalFn: () => false, verbose: false,
+      expectedFamily: "select",
+    });
+    expect(rep.stop_code).toBe("nominated_family_empty");   // 窄池为空（此页无 select 族）
+    expect(rep.stop_reason).toContain("no select candidates");
+  });
+
+  it("窄池非空但修复解析不过闸 ⇒ nominated_family_mismatch（两种失败分开记）", async () => {
+    let actAsks = 0;
+    install(fakeAgent((crit) => {
+      actAsks += 1;
+      const city = refWith(crit, "城市");
+      if (actAsks === 1 && city) return { choice: city, confidence: 0.95 };  // 第一轮选错族
+      return null;                                                          // 修复轮无答案
+    }));
+    const rep = await mw({ maxSteps: 1 }).run(
+      "继续", dataUrl(`<input id="city" placeholder="城市"><select id="s"><option>A</option></select>`), {
+        page: asPage(), pw, slots: {}, goalSignalFn: () => false, verbose: false,
+        expectedFamily: "select",
+      });
+    expect(rep.stop_code).toBe("nominated_family_mismatch");
+    expect(rep.stop_reason).toContain("no select candidate passed the floor");
+  });
+
+  it("缺省不窄：同一页不传 expectedFamily ⇒ 既有行为（全池、无修复标记）", async () => {
     const seen: string[] = [];
     install(fakeAgent((crit) => {
       seen.push(...Object.values(crit));
       const r = firstRef(crit);
       return r ? { choice: r, confidence: 0.95 } : null;
     }));
-    await mw({ maxSteps: 1 }).run("继续", dataUrl(PAGE_HTML), {
+    const rep = await mw({ maxSteps: 1 }).run("继续", dataUrl(PAGE_HTML), {
       page: asPage(), pw, slots: {}, goalSignalFn: () => false, verbose: false,
     });
     expect(seen.some((l) => l.includes("Go"))).toBe(true);
-  });
-
-  it("收窄后本页无该族候选 ⇒ 结构化停因 nominated_family_empty（不退全池、不猜）", async () => {
-    install(fakeAgent((crit) => {
-      const r = firstRef(crit);
-      return r ? { choice: r, confidence: 0.95 } : null;
-    }));
-    const rep = await mw({ maxSteps: 1 }).run("继续", dataUrl(`<button id="go">Go</button>`), {
-      page: asPage(), pw, slots: {}, goalSignalFn: () => false, verbose: false,
-      expectedFamily: "select",
-    });
-    expect(rep.stop_code).toBe("nominated_family_empty");
-    expect(rep.stop_reason).toContain('no select candidates');
+    expect(rep.steps.every((t) => t.nominated_family_repair === undefined)).toBe(true);
   });
 });
