@@ -482,3 +482,46 @@ describe("packHintCoverage（承重墙的单一实现：三处消费共用一份
     expect(c2.browser).toBe(c.browser);        // 分母不动
   });
 });
+
+/* ------------------------------------------- S0-v2 上下文实验的页面状态采集 */
+
+describe("每步页面状态采集（S0-v2：把页面上下文告诉决策模型）", () => {
+  it("captureTraces + captureStateView ⇒ 每步带 state_view（URL/标题/正文/控件摘要）", async () => {
+    const out = freshOut("state-view");
+    installLayaRuntime(scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 })) as never));
+    try {
+      const res = await runApp(loadPack("demo-app"), {
+        verbose: false, sources: false, outDir: out,
+        planPath: path.join(out, "plan.json"),
+        captureTraces: true, captureStateView: true,
+      });
+      const traces = res.step_traces ?? [];
+      expect(traces.length).toBeGreaterThan(0);
+      const first = traces[0]!.state_view;
+      expect(first).toBeDefined();
+      expect(first!.url).toContain("bench/fixtures/");   // 首步从 shop 首页开始（demo-app 的起点）
+      // 控件能力摘要：商品页上有"加入购物车"按钮、购物车链接等可点元素
+      expect(first!.affordances.clickables.length).toBeGreaterThan(0);
+      expect(Array.isArray(first!.affordances.text_inputs)).toBe(true);
+      expect(typeof first!.affordances.prices).toBe("number");
+      expect(first!.text.length).toBeLessThanOrEqual(241);     // 240 字 + 省略号
+    } finally {
+      installLayaRuntime(null);
+    }
+  }, 180_000);
+
+  it("只开 captureTraces 不开 captureStateView ⇒ 产物没有 state_view（缺省等价的纪律）", async () => {
+    const out = freshOut("state-view-off");
+    installLayaRuntime(scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 })) as never));
+    try {
+      const res = await runApp(loadPack("demo-app"), {
+        verbose: false, sources: false, outDir: out,
+        planPath: path.join(out, "plan.json"),
+        captureTraces: true,
+      });
+      for (const t of res.step_traces ?? []) expect(t.state_view).toBeUndefined();
+    } finally {
+      installLayaRuntime(null);
+    }
+  }, 180_000);
+});

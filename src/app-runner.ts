@@ -45,6 +45,7 @@ import { DESTRUCTIVE_PATTERNS } from "./rules.ts";
 import { checkSignal } from "./signals.ts";
 import { checkToolSignal, type ToolSignal } from "./tool-signals.ts";
 import { captureStateView } from "./signal-induction.ts";
+import { extractElements, urlOf } from "./extraction.ts";
 import type { StateView } from "./signals.ts";
 import { expandPack, listPacks, loadPack, type AppPack, type ExpandedStep, type PackPolicy } from "./app-pack.ts";
 import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "./plan.ts";
@@ -56,6 +57,70 @@ let RUN_SEQ = 0;
 export function startUrl(u: string): string {
   if (u.includes("://")) return u;
   return new URL(`file://${path.resolve(REPO, u)}`).href;
+}
+
+/** S0 上下文实验用：一步**开始时**的页面状态（只读快照；`captureTraces && captureStateView` 才采）。 */
+export interface StepStateView {
+  url: string;
+  title: string;
+  /** 正文开头一段（决策模型 `main_text` 的形状；压到 240 字，别把整页塞进题面）。 */
+  text: string;
+  /** 本页可交互控件的**能力摘要**（按动作族分组；"页面有什么"的紧凑视图，不是站点知识）。 */
+  affordances: {
+    /** 文本输入框（input 非 checkbox/radio/button + textarea）。 */
+    text_inputs: string[];
+    selects: string[];
+    /** 复选框 / 单选框。 */
+    checkboxes: string[];
+    /** 可点击元素（a / button / input[button|submit]）。 */
+    clickables: string[];
+    /** 带价格形态文本的元素数（list_pick 的页面线索）。 */
+    prices: number;
+  };
+}
+
+const clipText = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+/**
+ * 抓一步开始时的页面状态（只读）。**为什么需要它**：S0 考卷把页面藏起来，决策模型只能按词面猜；
+ * 上下文实验把页面补上（docs/NOMINATION_QUESTION_SET_ANALYSIS.md §6）。控件分类只看标签/类型，
+ * 对任何站点同一套——页面知识进 state，不进代码。
+ */
+export async function captureStepStateView(
+  page: Parameters<typeof extractElements>[0],
+): Promise<StepStateView> {
+  const out: StepStateView = {
+    url: (() => { try { return urlOf(page as never); } catch { return ""; } })(),
+    title: "",
+    text: "",
+    affordances: { text_inputs: [], selects: [], checkboxes: [], clickables: [], prices: 0 },
+  };
+  try { out.title = await (page as unknown as { title(): Promise<string> }).title(); } catch { /* 页面瞬态：留空 */ }
+  try {
+    const body = await (page as unknown as { evaluate(expression: string): Promise<unknown> })
+      .evaluate("document.body ? document.body.innerText.replace(/\\s+/g, ' ').trim() : ''");
+    out.text = clipText(String(body ?? ""), 240);
+  } catch { /* 留空，不编 */ }
+  try {
+    const elems = await extractElements(page);
+    const push = (arr: string[], label: string): void => {
+      const l = label.trim();
+      if (l && arr.length < 8 && !arr.includes(l)) arr.push(clipText(l, 40));
+    };
+    for (const e of Object.values(elems)) {
+      const label = String(e.label ?? "").trim();
+      const type = String(e.input_type ?? "").toLowerCase();
+      if (e.tag === "select") push(out.affordances.selects, label);
+      else if (e.tag === "textarea") push(out.affordances.text_inputs, label);
+      else if (e.tag === "input") {
+        if (type === "checkbox" || type === "radio") push(out.affordances.checkboxes, label);
+        else if (type === "button" || type === "submit") push(out.affordances.clickables, label);
+        else push(out.affordances.text_inputs, label);
+      } else if (e.tag === "button" || e.tag === "a") push(out.affordances.clickables, label);
+      if (/[¥￥]\s*\d|\d+\s*元|price/i.test(label)) out.affordances.prices += 1;
+    }
+  } catch { /* 提取失败：留空 */ }
+  return out;
 }
 
 export interface AppRunOptions {
@@ -93,6 +158,12 @@ export interface AppRunOptions {
    * 默认关：不开时结果 JSON 与今天逐字节相同（缺省等价纪律，`end_state` 同款）。
    */
   captureTraces?: boolean;
+  /**
+   * S0 上下文实验（docs/NOMINATION_QUESTION_SET_ANALYSIS.md §6）：把**每步开始时**的页面状态
+   * 采进 `step_traces[i].state_view`（URL/标题/正文摘要/控件能力摘要）。**缺省关**：
+   * 不开时与 captureTraces 既有行为逐字节不变（只在需要时多付一次导航 + 一次提取）。
+   */
+  captureStateView?: boolean;
   modelId?: string;
   /**
    * 本次运行跑在哪个模型层级：`on`（真模型，**默认**）/ `off(missing)`（产物不齐，如实降级）/
@@ -375,6 +446,8 @@ export interface AppRunResult {
     descs: string[];
     /** 全部 trace 行的判定方式（与 `decisions.ladder` 同一口径）。 */
     methods: string[];
+    /** `captureStateView: true` 时这一步**开始时**的页面状态（缺字段 = 没开，缺省等价纪律）。 */
+    state_view?: StepStateView;
   }>;
 }
 
@@ -676,6 +749,17 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       } else {
         const sg = plan.subgoals[browserIndexOf[i]!]!;
         const shell = await getShell();
+        // S0 上下文实验：快照这一步**开始时**的页面（只读；只在本开关打开时多付一次导航）。
+        // 额外 goto 到本步 start_url 与执行器自己的首跳同址，会话/cookie 不变，结果不因快照而改。
+        let stateView: StepStateView | null = null;
+        if (opts.captureTraces && opts.captureStateView && sg.start_url) {
+          try {
+            await (shell.page as unknown as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
+              sg.start_url, { waitUntil: "domcontentloaded", timeout: 30_000 },
+            );
+            stateView = await captureStepStateView(shell.page as never);
+          } catch { stateView = null; }
+        }
         const { rep, attempt, steps } = await runSubgoalWithRetries(
           mw as never, sg, plan, sg.start_url ?? "", shell.page, shell.pw, verbose);
         decisionSteps.push(...steps);
@@ -689,6 +773,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
             hows: executed.map((t) => String(t.how ?? "")),
             descs: executed.map((t) => String(t.desc ?? "")),
             methods: rep.steps.map((t) => String(t.method ?? "")).filter(Boolean),
+            ...(stateView ? { state_view: stateView } : {}),
           });
         }
         sg.status = rep.done ? (rep.skipped ? "skipped" : "done") : "blocked";

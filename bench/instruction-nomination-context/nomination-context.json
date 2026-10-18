@@ -1,0 +1,5760 @@
+{
+  "generated_at": "2026-10-18T02:11:28.872Z",
+  "mode": "context-review",
+  "provider_arm": {
+    "provider": "token-plan",
+    "status": "on",
+    "identity": {
+      "name": "token-plan",
+      "version": "decision-model-preview",
+      "capabilities": {
+        "choice": true,
+        "risk": true,
+        "done": true,
+        "shortlist": false,
+        "score_kind": "calibrated_prob"
+      },
+      "floor": 0.2
+    },
+    "asks": {
+      "nostate": {
+        "asks": 165,
+        "totalMs": 74446
+      },
+      "context": {
+        "asks": 165,
+        "totalMs": 78153
+      },
+      "context-candidates": {
+        "asks": 165,
+        "totalMs": 95791
+      }
+    },
+    "laya": {
+      "status": "on"
+    }
+  },
+  "instruction_set": {
+    "click": "点击一个链接、按钮或控件（打开/进入/提交/记录）",
+    "fill": "在一个文本输入框里填写文字（日期、名称、编号）",
+    "select": "在一个下拉框里选择一个选项",
+    "check": "勾选一个复选框或单选框",
+    "list_pick": "从列表行里按数据规则选一行（最低价/最高价/最小/最大）"
+  },
+  "enumeration_order": [
+    "click",
+    "fill",
+    "select",
+    "check",
+    "list_pick"
+  ],
+  "corpus": {
+    "packs": 14,
+    "rows": 165,
+    "skipped": 5,
+    "with_state": 165,
+    "ambiguous": 83
+  },
+  "rows": [
+    {
+      "app": "camera-entry",
+      "index": 0,
+      "id": null,
+      "desc": "按规划表录入 CAM-1001（枪机）：进入固定焦距表单，填入该行字段并提交",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/portal.html",
+        "title": "设备录入门户 - Example Shop",
+        "text": "设备管理系统 摄像头设备录入 枪机 / 筒机 录入(固定焦距,需分辨率与安装角度) PTZ 球机 录入(带云台,需变倍与预置位)",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "设备管理系统",
+            "枪机 / 筒机 录入(固定焦距,需分辨率与安装角度)",
+            "PTZ 球机 录入(带云台,需变倍与预置位)"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "camera-entry",
+      "index": 1,
+      "id": null,
+      "desc": "按规划表录入 PTZ-2001（球机）：进入 PTZ 表单，填入该行字段并提交",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/portal.html",
+        "title": "设备录入门户 - Example Shop",
+        "text": "设备管理系统 摄像头设备录入 枪机 / 筒机 录入(固定焦距,需分辨率与安装角度) PTZ 球机 录入(带云台,需变倍与预置位)",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "设备管理系统",
+            "枪机 / 筒机 录入(固定焦距,需分辨率与安装角度)",
+            "PTZ 球机 录入(带云台,需变倍与预置位)"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "camera-entry",
+      "index": 2,
+      "id": null,
+      "desc": "按规划表录入 PTZ-2002（类型列空）：行内证据是 PTZ 序列号 + 变倍/预置位，显式进入 PTZ 表单并提交",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/portal.html",
+        "title": "设备录入门户 - Example Shop",
+        "text": "设备管理系统 摄像头设备录入 枪机 / 筒机 录入(固定焦距,需分辨率与安装角度) PTZ 球机 录入(带云台,需变倍与预置位)",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "设备管理系统",
+            "枪机 / 筒机 录入(固定焦距,需分辨率与安装角度)",
+            "PTZ 球机 录入(带云台,需变倍与预置位)"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "camera-entry",
+      "index": 3,
+      "id": null,
+      "desc": "按规划表录入 CAM-12（枪机）：进入固定焦距表单并提交，序列号不合规由表单自己拒绝",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/portal.html",
+        "title": "设备录入门户 - Example Shop",
+        "text": "设备管理系统 摄像头设备录入 枪机 / 筒机 录入(固定焦距,需分辨率与安装角度) PTZ 球机 录入(带云台,需变倍与预置位)",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "设备管理系统",
+            "枪机 / 筒机 录入(固定焦距,需分辨率与安装角度)",
+            "PTZ 球机 录入(带云台,需变倍与预置位)"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "checkin-binding",
+      "index": 0,
+      "id": "pick-and-confirm",
+      "desc": "选择入住日期 2026-10-13 并确认",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/checkin.html",
+        "title": "入住日期 - 示例酒店",
+        "text": "示例酒店 选择入住日期 入住日期 请选择 10月12日 周一 10月13日 周二 10月14日 周三 确认日期 未选择",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "请选择 10月12日 周一 10月13日 周二 10月14日 周三 / 入住日期"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "确认日期",
+            "示例酒店"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "cold-search-next",
+      "index": 0,
+      "id": "search",
+      "desc": "搜索 琥珀（结果还没到位就再搜一遍）",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/cold-search.html",
+        "title": "冷启动搜索 - 示例站",
+        "text": "结果检索 关键词 搜索 未搜索 记录结果 未记录",
+        "affordances": {
+          "text_inputs": [
+            "关键词"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "记录结果"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "cold-search-next",
+      "index": 0,
+      "id": "search",
+      "desc": "搜索 琥珀（结果还没到位就再搜一遍）",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/cold-search.html",
+        "title": "冷启动搜索 - 示例站",
+        "text": "结果检索 关键词 搜索 未搜索 记录结果 未记录",
+        "affordances": {
+          "text_inputs": [
+            "关键词"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "记录结果"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "cold-search-next",
+      "index": 1,
+      "id": "record",
+      "desc": "记录这一次搜索的结果",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/cold-search.html",
+        "title": "冷启动搜索 - 示例站",
+        "text": "结果检索 关键词 搜索 搜索完成：2 条结果 结果 A 结果 B 记录结果 未记录",
+        "affordances": {
+          "text_inputs": [
+            "关键词"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "记录结果"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 0,
+      "id": null,
+      "desc": "从携程首页进入机票搜索页（昆明 → 北京）",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/ct_home.html",
+        "title": "携程旅行网：酒店预订,机票预订查询,旅游度假",
+        "text": "携程旅行 首页机票酒店 携程旅行 · 本地复刻站 这是用例「携程搜票 + 订酒店」的本地复刻站：交互路径与列表页结构照携程写， 数据由 ctrip/data.py 生成。线上真实站点的可达性见 ctrip/results/live_probe.json。 机票 昆明 → 北京，单程 酒店 北京，出发当日入住",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "机票",
+            "酒店",
+            "首页"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 1,
+      "id": null,
+      "desc": "打开 2026-10-05（周一）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-05",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-05 周一 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：不限 排序：默认排序 共 15 个航班 记录当前列表最低价航班 日期 航班 时刻 价格 出发时段筛选 …",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 2,
+      "id": null,
+      "desc": "把 2026-10-05（周一）的航班列表按价格从低到高排序",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-05&window=0800-1800",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-05 周一 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：08:00-18:00 排序：默认排序 共 9 个航班 记录当前列表最低价航班 日期 航班 时刻 价格…",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 3,
+      "id": null,
+      "desc": "记录 2026-10-05（周一）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-05&window=0800-1800&sort=price_asc",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-05 周一 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：08:00-18:00 排序：价格从低到高 共 9 个航班 记录当前列表最低价航班 日期 航班 时刻 …",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 4,
+      "id": null,
+      "desc": "打开 2026-10-06（周二）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-06",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-06 周二 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：不限 排序：默认排序 共 15 个航班 记录当前列表最低价航班 日期 航班 时刻 价格 出发时段筛选 …",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 5,
+      "id": null,
+      "desc": "把 2026-10-06（周二）的航班列表按价格从低到高排序",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-06&window=0800-1800",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-06 周二 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：08:00-18:00 排序：默认排序 共 9 个航班 记录当前列表最低价航班 日期 航班 时刻 价格…",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 6,
+      "id": null,
+      "desc": "记录 2026-10-06（周二）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-06&window=0800-1800&sort=price_asc",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-06 周二 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：08:00-18:00 排序：价格从低到高 共 9 个航班 记录当前列表最低价航班 日期 航班 时刻 …",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 7,
+      "id": null,
+      "desc": "打开 2026-10-07（周三）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-07",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-07 周三 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：不限 排序：默认排序 共 15 个航班 记录当前列表最低价航班 日期 航班 时刻 价格 出发时段筛选 …",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 8,
+      "id": null,
+      "desc": "把 2026-10-07（周三）的航班列表按价格从低到高排序",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-07&window=0800-1800",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-07 周三 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：08:00-18:00 排序：默认排序 共 9 个航班 记录当前列表最低价航班 日期 航班 时刻 价格…",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 9,
+      "id": null,
+      "desc": "记录 2026-10-07（周三）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-07&window=0800-1800&sort=price_asc",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-07 周三 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：08:00-18:00 排序：价格从低到高 共 9 个航班 记录当前列表最低价航班 日期 航班 时刻 …",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 10,
+      "id": null,
+      "desc": "打开 2026-10-08（周四）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-08",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-08 周四 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：不限 排序：默认排序 共 15 个航班 记录当前列表最低价航班 日期 航班 时刻 价格 出发时段筛选 …",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 11,
+      "id": null,
+      "desc": "把 2026-10-08（周四）的航班列表按价格从低到高排序",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-08&window=0800-1800",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-08 周四 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：08:00-18:00 排序：默认排序 共 9 个航班 记录当前列表最低价航班 日期 航班 时刻 价格…",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 12,
+      "id": null,
+      "desc": "记录 2026-10-08（周四）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-08&window=0800-1800&sort=price_asc",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-08 周四 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：08:00-18:00 排序：价格从低到高 共 9 个航班 记录当前列表最低价航班 日期 航班 时刻 …",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 13,
+      "id": null,
+      "desc": "打开 2026-10-09（周五）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-09",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-09 周五 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：不限 排序：默认排序 共 15 个航班 记录当前列表最低价航班 日期 航班 时刻 价格 出发时段筛选 …",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 14,
+      "id": null,
+      "desc": "把 2026-10-09（周五）的航班列表按价格从低到高排序",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-09&window=0800-1800",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-09 周五 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：08:00-18:00 排序：默认排序 共 9 个航班 记录当前列表最低价航班 日期 航班 时刻 价格…",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 15,
+      "id": null,
+      "desc": "记录 2026-10-09（周五）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/flights.html?from=KMG&to=BJS&date=2026-10-09&window=0800-1800&sort=price_asc",
+        "title": "昆明到北京机票查询预订-携程飞机票",
+        "text": "携程旅行 首页机票酒店 机票 · 单程 出发地 到达地 出发日期 搜索 昆明(KMG) → 北京(BJS) 出发日期：2026-10-09 周五 10月5日 周一 10月6日 周二 10月7日 周三 10月8日 周四 10月9日 周五 出发时段 不限 00:00-08:00 08:00-18:00 18:00-24:00 排序 默认排序 价格从低到高 时间从早到晚 出发时段：08:00-18:00 排序：价格从低到高 共 9 个航班 记录当前列表最低价航班 日期 航班 时刻 …",
+        "affordances": {
+          "text_inputs": [
+            "昆明 / 出发地",
+            "北京 / 到达地",
+            "出发日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "00:00-08:00",
+            "08:00-18:00",
+            "18:00-24:00",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 16,
+      "id": null,
+      "desc": "打开 北京 2026-10-08 入住的酒店列表，并把价格上限设为 ¥300以下",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/hotels.html?city=%E5%8C%97%E4%BA%AC&checkin=2026-10-08",
+        "title": "北京酒店,北京酒店预订查询,北京宾馆住宿【携程酒店】",
+        "text": "携程旅行 首页机票酒店 酒店 · 北京 目的地 入住日期 搜索 北京 入住：2026-10-08 离店：2026-10-09 价格上限 不限 ¥200以下 ¥300以下 ¥500以下 排序 默认排序 价格从低到高 时间从早到晚 价格上限：不限 排序：默认排序 共 44 家酒店 记录当前列表全部酒店 # 酒店 星级 评分 位置 价格 北京中关村亚朵酒店 ★★★★★ 中关村 · 行政大床房 · 免费取消 4.9 分 · 1796 条点评 ¥840 /晚 北京亚运村康莱德酒店 ★★…",
+        "affordances": {
+          "text_inputs": [
+            "北京 / 目的地",
+            "入住日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "¥200以下",
+            "¥300以下",
+            "¥500以下",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 3
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 17,
+      "id": null,
+      "desc": "把 北京 2026-10-08 入住的酒店列表按价格从低到高排序",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/hotels.html?city=%E5%8C%97%E4%BA%AC&checkin=2026-10-08&cap=300",
+        "title": "北京酒店,北京酒店预订查询,北京宾馆住宿【携程酒店】",
+        "text": "携程旅行 首页机票酒店 酒店 · 北京 目的地 入住日期 搜索 北京 入住：2026-10-08 离店：2026-10-09 价格上限 不限 ¥200以下 ¥300以下 ¥500以下 排序 默认排序 价格从低到高 时间从早到晚 价格上限：¥300以下 排序：默认排序 共 15 家酒店 记录当前列表全部酒店 # 酒店 星级 评分 位置 价格 北京亦庄诺富特酒店 ★★ 亦庄 · 商务双床房 · 免费取消 / 包早餐 4.7 分 · 5892 条点评 ¥170 /晚 北京国贸CBD…",
+        "affordances": {
+          "text_inputs": [
+            "北京 / 目的地",
+            "入住日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "¥200以下",
+            "¥300以下",
+            "¥500以下",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 3
+        }
+      }
+    },
+    {
+      "app": "ctrip-case",
+      "index": 18,
+      "id": null,
+      "desc": "记录 2026-10-08 入住、¥300以内的全部酒店",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/ctrip/site/hotels.html?city=%E5%8C%97%E4%BA%AC&checkin=2026-10-08&cap=300&sort=price_asc",
+        "title": "北京酒店,北京酒店预订查询,北京宾馆住宿【携程酒店】",
+        "text": "携程旅行 首页机票酒店 酒店 · 北京 目的地 入住日期 搜索 北京 入住：2026-10-08 离店：2026-10-09 价格上限 不限 ¥200以下 ¥300以下 ¥500以下 排序 默认排序 价格从低到高 时间从早到晚 价格上限：¥300以下 排序：价格从低到高 共 15 家酒店 记录当前列表全部酒店 # 酒店 星级 评分 位置 价格 北京国贸CBD和颐酒店 ★★ 国贸CBD · 大床房 · 免费取消 / 包早餐 4.7 分 · 375 条点评 ¥130 /晚 北京王…",
+        "affordances": {
+          "text_inputs": [
+            "北京 / 目的地",
+            "入住日期"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "搜索",
+            "不限",
+            "¥200以下",
+            "¥300以下",
+            "¥500以下",
+            "默认排序",
+            "价格从低到高",
+            "时间从早到晚"
+          ],
+          "prices": 3
+        }
+      }
+    },
+    {
+      "app": "demo-app",
+      "index": 1,
+      "id": null,
+      "desc": "把 TrailBottle 加入购物车",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/bench/fixtures/shop_home.html",
+        "title": "Acme Store - TrailBottle 750ml",
+        "text": "Acme Store Cart0 TrailBottle 750ml $19.50. In stock. Insulated steel bottle, matte black. Add to cart TrailBottle 750ml",
+        "affordances": {
+          "text_inputs": [
+            "Search products"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Add to cart",
+            "TrailBottle 750ml",
+            "Acme Store",
+            "Cart"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "demo-app",
+      "index": 2,
+      "id": null,
+      "desc": "打开购物车页",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/bench/fixtures/shop_home.html",
+        "title": "Acme Store - TrailBottle 750ml",
+        "text": "Acme Store Cart0 TrailBottle 750ml $19.50. In stock. Insulated steel bottle, matte black. Add to cart TrailBottle 750ml",
+        "affordances": {
+          "text_inputs": [
+            "Search products"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Add to cart",
+            "TrailBottle 750ml",
+            "Acme Store",
+            "Cart"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "demo-app",
+      "index": 3,
+      "id": null,
+      "desc": "在购物车输入优惠券 ACME10 并应用",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/bench/fixtures/shop_cart.html",
+        "title": "Acme Store - Cart",
+        "text": "Acme Store Cart1 Your Cart TrailBottle 750ml x1 — $19.50 Subtotal: $19.50 Apply coupon 1 2 3 Proceed to checkout Continue shopping",
+        "affordances": {
+          "text_inputs": [
+            "Coupon code"
+          ],
+          "selects": [
+            "1"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Apply coupon",
+            "Proceed to checkout",
+            "Continue shopping",
+            "Acme Store",
+            "Cart"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ip-config",
+      "index": 0,
+      "id": null,
+      "desc": "打开 CAM-1001 的网络设置页",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/net_portal.html",
+        "title": "摄像头网络管理",
+        "text": "摄像头网络管理 点击「网络设置」进入对应设备的配置页。 序列号 当前 IP 型号 操作 CAM-1001 10.0.0.11 DS-2CD1143 网络设置 CAM-1002 10.0.0.12 DS-2CD1143 网络设置 PTZ-2001 10.0.0.21 SD49425 网络设置 CAM-1003 10.0.0.13 DS-2CD1021 网络设置",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "网络设置"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ip-config",
+      "index": 1,
+      "id": null,
+      "desc": "把规划的 IP / 子网掩码 / 网关 保存到 CAM-1001",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/net_settings.html?sn=CAM-1001",
+        "title": "网络设置",
+        "text": "网络设置 设备序列号：CAM-1001 IP 地址 子网掩码 默认网关 保存",
+        "affordances": {
+          "text_inputs": [
+            "10.0.1.11 / IP 地址",
+            "255.255.255.0 / 子网掩码",
+            "10.0.1.1 / 默认网关"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "保存"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ip-config",
+      "index": 2,
+      "id": null,
+      "desc": "打开 CAM-1002 的网络设置页",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/net_portal.html",
+        "title": "摄像头网络管理",
+        "text": "摄像头网络管理 点击「网络设置」进入对应设备的配置页。 序列号 当前 IP 型号 操作 CAM-1001 10.0.0.11 DS-2CD1143 网络设置 CAM-1002 10.0.0.12 DS-2CD1143 网络设置 PTZ-2001 10.0.0.21 SD49425 网络设置 CAM-1003 10.0.0.13 DS-2CD1021 网络设置",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "网络设置"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ip-config",
+      "index": 3,
+      "id": null,
+      "desc": "把规划的 IP / 子网掩码 / 网关 保存到 CAM-1002",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/net_settings.html?sn=CAM-1002",
+        "title": "网络设置",
+        "text": "网络设置 设备序列号：CAM-1002 IP 地址 子网掩码 默认网关 保存",
+        "affordances": {
+          "text_inputs": [
+            "10.0.1.11 / IP 地址",
+            "255.255.255.0 / 子网掩码",
+            "10.0.1.1 / 默认网关"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "保存"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ip-config",
+      "index": 4,
+      "id": null,
+      "desc": "打开 PTZ-2001 的网络设置页",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/net_portal.html",
+        "title": "摄像头网络管理",
+        "text": "摄像头网络管理 点击「网络设置」进入对应设备的配置页。 序列号 当前 IP 型号 操作 CAM-1001 10.0.0.11 DS-2CD1143 网络设置 CAM-1002 10.0.0.12 DS-2CD1143 网络设置 PTZ-2001 10.0.0.21 SD49425 网络设置 CAM-1003 10.0.0.13 DS-2CD1021 网络设置",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "网络设置"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ip-config",
+      "index": 5,
+      "id": null,
+      "desc": "把规划的 IP / 子网掩码 / 网关 保存到 PTZ-2001",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/net_settings.html?sn=PTZ-2001",
+        "title": "网络设置",
+        "text": "网络设置 设备序列号：PTZ-2001 IP 地址 子网掩码 默认网关 保存",
+        "affordances": {
+          "text_inputs": [
+            "10.0.1.11 / IP 地址",
+            "255.255.255.0 / 子网掩码",
+            "10.0.1.1 / 默认网关"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "保存"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ip-config",
+      "index": 6,
+      "id": null,
+      "desc": "打开 CAM-1003 的网络设置页",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/net_portal.html",
+        "title": "摄像头网络管理",
+        "text": "摄像头网络管理 点击「网络设置」进入对应设备的配置页。 序列号 当前 IP 型号 操作 CAM-1001 10.0.0.11 DS-2CD1143 网络设置 CAM-1002 10.0.0.12 DS-2CD1143 网络设置 PTZ-2001 10.0.0.21 SD49425 网络设置 CAM-1003 10.0.0.13 DS-2CD1021 网络设置",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "网络设置"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "ip-config",
+      "index": 7,
+      "id": null,
+      "desc": "把规划的 IP / 子网掩码 / 网关 提交到 CAM-1003（规划表写的是 10.0.1.999）",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/net_settings.html?sn=CAM-1003",
+        "title": "网络设置",
+        "text": "网络设置 设备序列号：CAM-1003 IP 地址 子网掩码 默认网关 保存",
+        "affordances": {
+          "text_inputs": [
+            "10.0.1.11 / IP 地址",
+            "255.255.255.0 / 子网掩码",
+            "10.0.1.1 / 默认网关"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "保存"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "learned-cart",
+      "index": 0,
+      "id": null,
+      "desc": "点击「Add to cart」",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/product.html",
+        "title": "Wireless Mouse X200 - Example Shop",
+        "text": "Example Shop Cart0 Wireless Mouse X200 $29.99. In stock. Ergonomic 2.4GHz wireless mouse with USB receiver. Free shipping on orders over $50. Wireless Mouse X200 Add to cart Contact support",
+        "affordances": {
+          "text_inputs": [
+            "Search products"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Wireless Mouse X200",
+            "Add to cart",
+            "Contact support",
+            "Example Shop",
+            "Cart"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "learned-cart",
+      "index": 1,
+      "id": null,
+      "desc": "点击「Cart」",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/testpages/product.html",
+        "title": "Wireless Mouse X200 - Example Shop",
+        "text": "Example Shop Cart0 Wireless Mouse X200 $29.99. In stock. Ergonomic 2.4GHz wireless mouse with USB receiver. Free shipping on orders over $50. Wireless Mouse X200 Add to cart Contact support",
+        "affordances": {
+          "text_inputs": [
+            "Search products"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Wireless Mouse X200",
+            "Add to cart",
+            "Contact support",
+            "Example Shop",
+            "Cart"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "skybook-checksubmit",
+      "index": 0,
+      "id": null,
+      "desc": "勾选当前页显示的全部酒店并记录",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/hotels.html?city=Beijing&checkin=2026-10-07&cap=300&sort=price_asc",
+        "title": "SkyBook · hotels in Beijing",
+        "text": "SkyBook Home Flights Hotels Hotels · Beijing Price per night Any price ¥200 or less ¥300 or less ¥500 or less Sort by Recommended price (low to high) departure time Price cap: ¥300 or less · Sort: price (low to high) · 15 hotels · Page 1 of…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [
+            "all / Any price",
+            "200 / ¥200 or less",
+            "300 / ¥300 or less",
+            "500 / ¥500 or less",
+            "Select all shown",
+            "700000",
+            "701638",
+            "700910"
+          ],
+          "clickables": [
+            "Record selected",
+            "Home",
+            "Flights",
+            "Hotels",
+            "Next page →"
+          ],
+          "prices": 4
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 0,
+      "id": null,
+      "desc": "从FareHaven首页进入机票搜索页（昆明 → 北京）",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/index.html",
+        "title": "FareHaven · plan a trip",
+        "text": "FAREHAVEN Home Flights Stays FareHaven · replica #6 (date-scoped promo overlay) A promo overlay covers the fare list on SOME dates (a National-Day sale) and does not exist on the others. So the plan's dismiss step must actually run when it …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Flights · Kunming → Beijing",
+            "Stays · Beijing",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 1,
+      "id": null,
+      "desc": "如果 2026-10-05（周一）的机票页弹出了促销遮罩，就先关掉它",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-05",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 14 fares · Promotion: active —…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays",
+            "Dismiss"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 2,
+      "id": null,
+      "desc": "打开 2026-10-05（周一）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-05",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 14 fares · Promotion: already …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 3,
+      "id": null,
+      "desc": "把 2026-10-05（周一）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-05&window=0800-1800",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares · Promotion: alread…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 4,
+      "id": null,
+      "desc": "记录 2026-10-05（周一）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-05&window=0800-1800&sort=price_asc",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares · Promotion…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 6,
+      "id": null,
+      "desc": "打开 2026-10-06（周二）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-06",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 14 fares · Promotion: already …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 7,
+      "id": null,
+      "desc": "把 2026-10-06（周二）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-06&window=0800-1800",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares · Promotion: alread…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 8,
+      "id": null,
+      "desc": "记录 2026-10-06（周二）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-06&window=0800-1800&sort=price_asc",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares · Promotion…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 10,
+      "id": null,
+      "desc": "打开 2026-10-07（周三）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-07",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 14 fares · Promotion: already …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 11,
+      "id": null,
+      "desc": "把 2026-10-07（周三）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-07&window=0800-1800",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares · Promotion: alread…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 12,
+      "id": null,
+      "desc": "记录 2026-10-07（周三）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-07&window=0800-1800&sort=price_asc",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares · Promotion…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 14,
+      "id": null,
+      "desc": "打开 2026-10-08（周四）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-08",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 14 fares · Promotion: none tod…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 15,
+      "id": null,
+      "desc": "把 2026-10-08（周四）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-08&window=0800-1800",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares · Promotion: none t…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 16,
+      "id": null,
+      "desc": "记录 2026-10-08（周四）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-08&window=0800-1800&sort=price_asc",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares · Promotion…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 18,
+      "id": null,
+      "desc": "打开 2026-10-09（周五）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-09",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 14 fares · Promotion: none tod…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 19,
+      "id": null,
+      "desc": "把 2026-10-09（周五）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-09&window=0800-1800",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares · Promotion: none t…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 20,
+      "id": null,
+      "desc": "记录 2026-10-09（周五）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/flights.html?date=2026-10-09&window=0800-1800&sort=price_asc",
+        "title": "FareHaven · fares",
+        "text": "FAREHAVEN Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares · Promotion…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 21,
+      "id": null,
+      "desc": "打开 北京 2026-10-08 入住的酒店列表，并把价格上限设为 ¥300",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/hotels.html?checkin=2026-10-08",
+        "title": "FareHaven · stays",
+        "text": "FAREHAVEN Home Flights Stays Stays · Beijing Max price per night No limit ¥200 or less ¥300 or less ¥500 or less Sort Recommended price (low to high) departure time Max price: no limit · Sort: Recommended · 38 stays Record every stay shown …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "No limit / Max price per night No limit",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 2
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 22,
+      "id": null,
+      "desc": "把 北京 2026-10-08 入住的酒店列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/hotels.html?checkin=2026-10-08&cap=300",
+        "title": "FareHaven · stays",
+        "text": "FAREHAVEN Home Flights Stays Stays · Beijing Max price per night No limit ¥200 or less ¥300 or less ¥500 or less Sort Recommended price (low to high) departure time Max price: ¥300 · Sort: Recommended · 11 stays Record every stay shown # St…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "No limit / Max price per night No limit",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 2
+        }
+      }
+    },
+    {
+      "app": "transfer-farehaven",
+      "index": 23,
+      "id": null,
+      "desc": "记录当前显示的每一家酒店",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site6/hotels.html?checkin=2026-10-08&cap=300&sort=price_asc",
+        "title": "FareHaven · stays",
+        "text": "FAREHAVEN Home Flights Stays Stays · Beijing Max price per night No limit ¥200 or less ¥300 or less ¥500 or less Sort Recommended price (low to high) departure time Max price: ¥300 · Sort: price (low to high) · 11 stays Record every stay sh…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "No limit / Max price per night No limit",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 2
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 0,
+      "id": null,
+      "desc": "从FlyQuest首页进入机票搜索页（昆明 → 北京）",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/index.html",
+        "title": "FlyQuest · search",
+        "text": "FLYQUEST Home Flights Stays FlyQuest · replica #4 (form search) The results page can only be reached by SUBMITTING the search form: type the date, pick the departure window, press Search. One hint per subgoal cannot drive that — this replic…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Flights · Kunming → Beijing",
+            "Stays · Beijing",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 1,
+      "id": null,
+      "desc": "打开 2026-10-05（周一）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/search.html",
+        "title": "FlyQuest · find flights",
+        "text": "FLYQUEST Home Flights Stays Flights · search From To Departure date Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Search flights Fill the date and press Search.",
+        "affordances": {
+          "text_inputs": [
+            "KMG / From",
+            "BJS / To",
+            "Departure date"
+          ],
+          "selects": [
+            "Any time / Departure window Any time 00:"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Search flights",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 2,
+      "id": null,
+      "desc": "把 2026-10-05（周一）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/fares.html?from=KMG&to=BJS&date=2026-10-05&window=0800-1800",
+        "title": "FlyQuest · fares",
+        "text": "FLYQUEST Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration Fare 0…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 3,
+      "id": null,
+      "desc": "记录 2026-10-05（周一）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/fares.html?from=KMG&to=BJS&date=2026-10-05&window=0800-1800&sort=price_asc",
+        "title": "FlyQuest · fares",
+        "text": "FLYQUEST Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duratio…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 4,
+      "id": null,
+      "desc": "打开 2026-10-06（周二）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/search.html",
+        "title": "FlyQuest · find flights",
+        "text": "FLYQUEST Home Flights Stays Flights · search From To Departure date Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Search flights Fill the date and press Search.",
+        "affordances": {
+          "text_inputs": [
+            "KMG / From",
+            "BJS / To",
+            "Departure date"
+          ],
+          "selects": [
+            "Any time / Departure window Any time 00:"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Search flights",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 5,
+      "id": null,
+      "desc": "把 2026-10-06（周二）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/fares.html?from=KMG&to=BJS&date=2026-10-06&window=0800-1800",
+        "title": "FlyQuest · fares",
+        "text": "FLYQUEST Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration Fare 0…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 6,
+      "id": null,
+      "desc": "记录 2026-10-06（周二）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/fares.html?from=KMG&to=BJS&date=2026-10-06&window=0800-1800&sort=price_asc",
+        "title": "FlyQuest · fares",
+        "text": "FLYQUEST Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duratio…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 7,
+      "id": null,
+      "desc": "打开 2026-10-07（周三）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/search.html",
+        "title": "FlyQuest · find flights",
+        "text": "FLYQUEST Home Flights Stays Flights · search From To Departure date Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Search flights Fill the date and press Search.",
+        "affordances": {
+          "text_inputs": [
+            "KMG / From",
+            "BJS / To",
+            "Departure date"
+          ],
+          "selects": [
+            "Any time / Departure window Any time 00:"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Search flights",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 8,
+      "id": null,
+      "desc": "把 2026-10-07（周三）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/fares.html?from=KMG&to=BJS&date=2026-10-07&window=0800-1800",
+        "title": "FlyQuest · fares",
+        "text": "FLYQUEST Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration Fare 0…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 9,
+      "id": null,
+      "desc": "记录 2026-10-07（周三）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/fares.html?from=KMG&to=BJS&date=2026-10-07&window=0800-1800&sort=price_asc",
+        "title": "FlyQuest · fares",
+        "text": "FLYQUEST Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duratio…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 10,
+      "id": null,
+      "desc": "打开 2026-10-08（周四）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/search.html",
+        "title": "FlyQuest · find flights",
+        "text": "FLYQUEST Home Flights Stays Flights · search From To Departure date Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Search flights Fill the date and press Search.",
+        "affordances": {
+          "text_inputs": [
+            "KMG / From",
+            "BJS / To",
+            "Departure date"
+          ],
+          "selects": [
+            "Any time / Departure window Any time 00:"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Search flights",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 11,
+      "id": null,
+      "desc": "把 2026-10-08（周四）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/fares.html?from=KMG&to=BJS&date=2026-10-08&window=0800-1800",
+        "title": "FlyQuest · fares",
+        "text": "FLYQUEST Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration Fare 0…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 12,
+      "id": null,
+      "desc": "记录 2026-10-08（周四）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/fares.html?from=KMG&to=BJS&date=2026-10-08&window=0800-1800&sort=price_asc",
+        "title": "FlyQuest · fares",
+        "text": "FLYQUEST Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duratio…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 13,
+      "id": null,
+      "desc": "打开 2026-10-09（周五）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/search.html",
+        "title": "FlyQuest · find flights",
+        "text": "FLYQUEST Home Flights Stays Flights · search From To Departure date Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Search flights Fill the date and press Search.",
+        "affordances": {
+          "text_inputs": [
+            "KMG / From",
+            "BJS / To",
+            "Departure date"
+          ],
+          "selects": [
+            "Any time / Departure window Any time 00:"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Search flights",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 14,
+      "id": null,
+      "desc": "把 2026-10-09（周五）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/fares.html?from=KMG&to=BJS&date=2026-10-09&window=0800-1800",
+        "title": "FlyQuest · fares",
+        "text": "FLYQUEST Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration Fare 0…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 15,
+      "id": null,
+      "desc": "记录 2026-10-09（周五）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/fares.html?from=KMG&to=BJS&date=2026-10-09&window=0800-1800&sort=price_asc",
+        "title": "FlyQuest · fares",
+        "text": "FLYQUEST Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duratio…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 16,
+      "id": null,
+      "desc": "打开 北京 2026-10-05 入住的酒店列表，并把价格上限设为 ¥300",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/stays.html",
+        "title": "FlyQuest · stays",
+        "text": "FLYQUEST Home Flights Stays Stays · Beijing Max price per night No limit ¥200 or less ¥300 or less ¥500 or less Apply Sort Recommended price (low to high) departure time Max price: no limit · Sort: Recommended · 30 stays Record every stay s…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "No limit / Max price per night No limit",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Apply",
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 2
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 17,
+      "id": null,
+      "desc": "把 北京 2026-10-05 入住的酒店列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/stays.html?checkin=2026-10-05&cap=300",
+        "title": "FlyQuest · stays",
+        "text": "FLYQUEST Home Flights Stays Stays · Beijing Max price per night No limit ¥200 or less ¥300 or less ¥500 or less Apply Sort Recommended price (low to high) departure time Max price: ¥300 · Sort: Recommended · 14 stays Record every stay shown…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "No limit / Max price per night No limit",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Apply",
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 2
+        }
+      }
+    },
+    {
+      "app": "transfer-flyquest",
+      "index": 18,
+      "id": null,
+      "desc": "记录当前显示的每一家酒店",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site4/stays.html?checkin=2026-10-05&cap=300&sort=price_asc",
+        "title": "FlyQuest · stays",
+        "text": "FLYQUEST Home Flights Stays Stays · Beijing Max price per night No limit ¥200 or less ¥300 or less ¥500 or less Apply Sort Recommended price (low to high) departure time Max price: ¥300 · Sort: price (low to high) · 14 stays Record every st…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "No limit / Max price per night No limit",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Apply",
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 2
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 0,
+      "id": null,
+      "desc": "从SkyBook首页进入机票搜索页（昆明 → 北京）",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/index.html",
+        "title": "SkyBook · flights and hotels",
+        "text": "SkyBook Home Flights Hotels SkyBook · replica #2 (transfer target) A deliberately different site: English UI, no data-test attributes, filters as a <select> / radio group, results as a card grid, per-card checkboxes and two pages of hotels.…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Home",
+            "Flights",
+            "Hotels",
+            "Flights · Kunming → Beijing",
+            "Hotels · Beijing"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 1,
+      "id": null,
+      "desc": "打开 2026-10-05（周一）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-05",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 15 flights Record lowest far…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 2,
+      "id": null,
+      "desc": "把 2026-10-05（周一）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-05&window=0800-1800",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 flights Record lowest f…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 3,
+      "id": null,
+      "desc": "记录 2026-10-05（周一）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-05&window=0800-1800&sort=price_asc",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 flights Record …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 4,
+      "id": null,
+      "desc": "打开 2026-10-06（周二）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-06",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 15 flights Record lowest far…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 5,
+      "id": null,
+      "desc": "把 2026-10-06（周二）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-06&window=0800-1800",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 flights Record lowest f…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 6,
+      "id": null,
+      "desc": "记录 2026-10-06（周二）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-06&window=0800-1800&sort=price_asc",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 flights Record …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 7,
+      "id": null,
+      "desc": "打开 2026-10-07（周三）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-07",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 15 flights Record lowest far…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 8,
+      "id": null,
+      "desc": "把 2026-10-07（周三）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-07&window=0800-1800",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 flights Record lowest f…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 9,
+      "id": null,
+      "desc": "记录 2026-10-07（周三）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-07&window=0800-1800&sort=price_asc",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 flights Record …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 10,
+      "id": null,
+      "desc": "打开 2026-10-08（周四）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-08",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 15 flights Record lowest far…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 11,
+      "id": null,
+      "desc": "把 2026-10-08（周四）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-08&window=0800-1800",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 flights Record lowest f…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 12,
+      "id": null,
+      "desc": "记录 2026-10-08（周四）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-08&window=0800-1800&sort=price_asc",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 flights Record …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 13,
+      "id": null,
+      "desc": "打开 2026-10-09（周五）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-09",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 15 flights Record lowest far…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 14,
+      "id": null,
+      "desc": "把 2026-10-09（周五）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-09&window=0800-1800",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 flights Record lowest f…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 15,
+      "id": null,
+      "desc": "记录 2026-10-09（周五）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/flights.html?from=KMG&to=BJS&date=2026-10-09&window=0800-1800&sort=price_asc",
+        "title": "SkyBook · flights Kunming to Beijing",
+        "text": "SkyBook Home Flights Hotels Flights · One way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort by Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 flights Record …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record lowest fare",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 16,
+      "id": null,
+      "desc": "打开 北京 2026-10-07 入住的酒店列表，并把价格上限设为 ¥300",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/hotels.html?city=Beijing&checkin=2026-10-07",
+        "title": "SkyBook · hotels in Beijing",
+        "text": "SkyBook Home Flights Hotels Hotels · Beijing Price per night Any price ¥200 or less ¥300 or less ¥500 or less Sort by Recommended price (low to high) departure time Price cap: Any price · Sort: Recommended · 36 hotels · Page 1 of 5 Select a…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [
+            "all / Any price",
+            "200 / ¥200 or less",
+            "300 / ¥300 or less",
+            "500 / ¥500 or less",
+            "Select all shown",
+            "700819",
+            "701911",
+            "703003"
+          ],
+          "clickables": [
+            "Record selected",
+            "Home",
+            "Flights",
+            "Hotels",
+            "Next page →"
+          ],
+          "prices": 4
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 17,
+      "id": null,
+      "desc": "把 北京 2026-10-07 入住的酒店列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/hotels.html?city=Beijing&checkin=2026-10-07&cap=300",
+        "title": "SkyBook · hotels in Beijing",
+        "text": "SkyBook Home Flights Hotels Hotels · Beijing Price per night Any price ¥200 or less ¥300 or less ¥500 or less Sort by Recommended price (low to high) departure time Price cap: ¥300 or less · Sort: Recommended · 15 hotels · Page 1 of 2 Selec…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [
+            "all / Any price",
+            "200 / ¥200 or less",
+            "300 / ¥300 or less",
+            "500 / ¥500 or less",
+            "Select all shown",
+            "700910",
+            "702002",
+            "700182"
+          ],
+          "clickables": [
+            "Record selected",
+            "Home",
+            "Flights",
+            "Hotels",
+            "Next page →"
+          ],
+          "prices": 4
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 18,
+      "id": null,
+      "desc": "勾选当前页显示的全部酒店",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/hotels.html?city=Beijing&checkin=2026-10-07&cap=300&sort=price_asc",
+        "title": "SkyBook · hotels in Beijing",
+        "text": "SkyBook Home Flights Hotels Hotels · Beijing Price per night Any price ¥200 or less ¥300 or less ¥500 or less Sort by Recommended price (low to high) departure time Price cap: ¥300 or less · Sort: price (low to high) · 15 hotels · Page 1 of…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [
+            "all / Any price",
+            "200 / ¥200 or less",
+            "300 / ¥300 or less",
+            "500 / ¥500 or less",
+            "Select all shown",
+            "700000",
+            "701638",
+            "700910"
+          ],
+          "clickables": [
+            "Record selected",
+            "Home",
+            "Flights",
+            "Hotels",
+            "Next page →"
+          ],
+          "prices": 4
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 19,
+      "id": null,
+      "desc": "记录已勾选的酒店",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/hotels.html?city=Beijing&checkin=2026-10-07&cap=300&sort=price_asc&selected=all",
+        "title": "SkyBook · hotels in Beijing",
+        "text": "SkyBook Home Flights Hotels Hotels · Beijing Price per night Any price ¥200 or less ¥300 or less ¥500 or less Sort by Recommended price (low to high) departure time Price cap: ¥300 or less · Sort: price (low to high) · 15 hotels · Page 1 of…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [
+            "all / Any price",
+            "200 / ¥200 or less",
+            "300 / ¥300 or less",
+            "500 / ¥500 or less",
+            "Select all shown",
+            "700000",
+            "701638",
+            "700910"
+          ],
+          "clickables": [
+            "Record selected",
+            "Home",
+            "Flights",
+            "Hotels",
+            "Next page →"
+          ],
+          "prices": 4
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 20,
+      "id": null,
+      "desc": "翻到酒店列表的下一页",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/hotels.html?city=Beijing&checkin=2026-10-07&cap=300&sort=price_asc&selected=all",
+        "title": "SkyBook · hotels in Beijing",
+        "text": "SkyBook Home Flights Hotels Hotels · Beijing Price per night Any price ¥200 or less ¥300 or less ¥500 or less Sort by Recommended price (low to high) departure time Price cap: ¥300 or less · Sort: price (low to high) · 15 hotels · Page 1 of…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [
+            "all / Any price",
+            "200 / ¥200 or less",
+            "300 / ¥300 or less",
+            "500 / ¥500 or less",
+            "Select all shown",
+            "700000",
+            "701638",
+            "700910"
+          ],
+          "clickables": [
+            "Record selected",
+            "Home",
+            "Flights",
+            "Hotels",
+            "Next page →"
+          ],
+          "prices": 4
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 21,
+      "id": null,
+      "desc": "勾选第二页显示的全部酒店",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/hotels.html?city=Beijing&checkin=2026-10-07&cap=300&sort=price_asc&page=2",
+        "title": "SkyBook · hotels in Beijing",
+        "text": "SkyBook Home Flights Hotels Hotels · Beijing Price per night Any price ¥200 or less ¥300 or less ¥500 or less Sort by Recommended price (low to high) departure time Price cap: ¥300 or less · Sort: price (low to high) · 15 hotels · Page 2 of…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [
+            "all / Any price",
+            "200 / ¥200 or less",
+            "300 / ¥300 or less",
+            "500 / ¥500 or less",
+            "Select all shown",
+            "702002",
+            "701274",
+            "700546"
+          ],
+          "clickables": [
+            "Record selected",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 4
+        }
+      }
+    },
+    {
+      "app": "transfer-skybook",
+      "index": 22,
+      "id": null,
+      "desc": "记录第二页已勾选的酒店",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site2/hotels.html?city=Beijing&checkin=2026-10-07&cap=300&sort=price_asc&page=2&selected=all",
+        "title": "SkyBook · hotels in Beijing",
+        "text": "SkyBook Home Flights Hotels Hotels · Beijing Price per night Any price ¥200 or less ¥300 or less ¥500 or less Sort by Recommended price (low to high) departure time Price cap: ¥300 or less · Sort: price (low to high) · 15 hotels · Page 2 of…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort by"
+          ],
+          "checkboxes": [
+            "all / Any price",
+            "200 / ¥200 or less",
+            "300 / ¥300 or less",
+            "500 / ¥500 or less",
+            "Select all shown",
+            "702002",
+            "701274",
+            "700546"
+          ],
+          "clickables": [
+            "Record selected",
+            "Home",
+            "Flights",
+            "Hotels"
+          ],
+          "prices": 4
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 0,
+      "id": null,
+      "desc": "从SlowJet首页进入机票搜索页（昆明 → 北京）",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/index.html",
+        "title": "SlowJet · plan a trip",
+        "text": "SLOWJET Home Flights Stays SlowJet · replica #7 (cold first load) The booking summary page is COLD on its first hit per date: it renders \"Preparing fares…\" and no record button, and only the second visit is complete. So the \"record the chea…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Flights · Kunming → Beijing",
+            "Stays · Beijing",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 1,
+      "id": null,
+      "desc": "打开 2026-10-05（周一）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/flights.html?date=2026-10-05",
+        "title": "SlowJet · fares",
+        "text": "SLOWJET Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Booking summary → Departure window: Any time · Sort: Recommended · 14 fares Depar…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Booking summary →",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 2,
+      "id": null,
+      "desc": "把 2026-10-05（周一）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/flights.html?date=2026-10-05&window=0800-1800",
+        "title": "SlowJet · fares",
+        "text": "SLOWJET Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Booking summary → Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Dep…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Booking summary →",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 3,
+      "id": null,
+      "desc": "记录 2026-10-05（周一）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/summary.html?date=2026-10-05&window=0800-1800&sort=price_asc",
+        "title": "SlowJet · booking summary",
+        "text": "SLOWJET Home Flights Stays Booking summary Preparing fares… please visit again. Summary not ready Date Flight Times Fare",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 4,
+      "id": null,
+      "desc": "打开 2026-10-06（周二）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/flights.html?date=2026-10-06",
+        "title": "SlowJet · fares",
+        "text": "SLOWJET Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Booking summary → Departure window: Any time · Sort: Recommended · 14 fares Depar…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Booking summary →",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 5,
+      "id": null,
+      "desc": "把 2026-10-06（周二）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/flights.html?date=2026-10-06&window=0800-1800",
+        "title": "SlowJet · fares",
+        "text": "SLOWJET Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Booking summary → Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Dep…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Booking summary →",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 6,
+      "id": null,
+      "desc": "记录 2026-10-06（周二）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/summary.html?date=2026-10-06&window=0800-1800&sort=price_asc",
+        "title": "SlowJet · booking summary",
+        "text": "SLOWJET Home Flights Stays Booking summary Preparing fares… please visit again. Summary not ready Date Flight Times Fare",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 7,
+      "id": null,
+      "desc": "打开 2026-10-07（周三）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/flights.html?date=2026-10-07",
+        "title": "SlowJet · fares",
+        "text": "SLOWJET Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Booking summary → Departure window: Any time · Sort: Recommended · 14 fares Depar…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Booking summary →",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 8,
+      "id": null,
+      "desc": "把 2026-10-07（周三）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/flights.html?date=2026-10-07&window=0800-1800",
+        "title": "SlowJet · fares",
+        "text": "SLOWJET Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Booking summary → Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Dep…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Booking summary →",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 9,
+      "id": null,
+      "desc": "记录 2026-10-07（周三）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/summary.html?date=2026-10-07&window=0800-1800&sort=price_asc",
+        "title": "SlowJet · booking summary",
+        "text": "SLOWJET Home Flights Stays Booking summary Preparing fares… please visit again. Summary not ready Date Flight Times Fare",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 10,
+      "id": null,
+      "desc": "打开 2026-10-08（周四）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/flights.html?date=2026-10-08",
+        "title": "SlowJet · fares",
+        "text": "SLOWJET Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Booking summary → Departure window: Any time · Sort: Recommended · 14 fares Depar…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Booking summary →",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 11,
+      "id": null,
+      "desc": "把 2026-10-08（周四）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/flights.html?date=2026-10-08&window=0800-1800",
+        "title": "SlowJet · fares",
+        "text": "SLOWJET Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Booking summary → Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Dep…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Booking summary →",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 12,
+      "id": null,
+      "desc": "记录 2026-10-08（周四）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/summary.html?date=2026-10-08&window=0800-1800&sort=price_asc",
+        "title": "SlowJet · booking summary",
+        "text": "SLOWJET Home Flights Stays Booking summary Preparing fares… please visit again. Summary not ready Date Flight Times Fare",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 13,
+      "id": null,
+      "desc": "打开 2026-10-09（周五）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/flights.html?date=2026-10-09",
+        "title": "SlowJet · fares",
+        "text": "SLOWJET Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Booking summary → Departure window: Any time · Sort: Recommended · 14 fares Depar…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Booking summary →",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 14,
+      "id": null,
+      "desc": "把 2026-10-09（周五）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/flights.html?date=2026-10-09&window=0800-1800",
+        "title": "SlowJet · fares",
+        "text": "SLOWJET Home Flights Stays Flights · results Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Booking summary → Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Dep…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Booking summary →",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 15,
+      "id": null,
+      "desc": "记录 2026-10-09（周五）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/summary.html?date=2026-10-09&window=0800-1800&sort=price_asc",
+        "title": "SlowJet · booking summary",
+        "text": "SLOWJET Home Flights Stays Booking summary Preparing fares… please visit again. Summary not ready Date Flight Times Fare",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 16,
+      "id": null,
+      "desc": "打开 北京 2026-10-07 入住的酒店列表，并把价格上限设为 ¥300",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/hotels.html?checkin=2026-10-07",
+        "title": "SlowJet · stays",
+        "text": "SLOWJET Home Flights Stays Stays · Beijing Max price per night No limit ¥200 or less ¥300 or less ¥500 or less Sort Recommended price (low to high) departure time Max price: no limit · Sort: Recommended · 36 stays Record every stay shown # …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "No limit / Max price per night No limit",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 2
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 17,
+      "id": null,
+      "desc": "把 北京 2026-10-07 入住的酒店列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/hotels.html?checkin=2026-10-07&cap=300",
+        "title": "SlowJet · stays",
+        "text": "SLOWJET Home Flights Stays Stays · Beijing Max price per night No limit ¥200 or less ¥300 or less ¥500 or less Sort Recommended price (low to high) departure time Max price: ¥300 · Sort: Recommended · 10 stays Record every stay shown # Stay…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "No limit / Max price per night No limit",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 2
+        }
+      }
+    },
+    {
+      "app": "transfer-slowjet",
+      "index": 18,
+      "id": null,
+      "desc": "记录当前显示的每一家酒店",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site7/hotels.html?checkin=2026-10-07&cap=300&sort=price_asc",
+        "title": "SlowJet · stays",
+        "text": "SLOWJET Home Flights Stays Stays · Beijing Max price per night No limit ¥200 or less ¥300 or less ¥500 or less Sort Recommended price (low to high) departure time Max price: ¥300 · Sort: price (low to high) · 10 stays Record every stay show…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "No limit / Max price per night No limit",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 2
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 0,
+      "id": null,
+      "desc": "从Trekly首页进入机票搜索页（昆明 → 北京）",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/index.html",
+        "title": "Trekly · flights and stays",
+        "text": "TREKLY Home Flights Stays Trekly · replica #3 (table layout, slider cap) Third layout of the same flow: results in a table, the price cap on a range slider, one click records every row shown. Inventory from transfer/data3.py. Flights · Kunm…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Flights · Kunming → Beijing",
+            "Stays · Beijing",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 1,
+      "id": null,
+      "desc": "打开 2026-10-05（周一）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-05",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 14 fares Record cheapest shown Da…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 2,
+      "id": null,
+      "desc": "把 2026-10-05（周一）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-05&window=0800-1800",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest shown …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 3,
+      "id": null,
+      "desc": "记录 2026-10-05（周一）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-05&window=0800-1800&sort=price_asc",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapes…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 4,
+      "id": null,
+      "desc": "打开 2026-10-06（周二）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-06",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 14 fares Record cheapest shown Da…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 5,
+      "id": null,
+      "desc": "把 2026-10-06（周二）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-06&window=0800-1800",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest shown …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 6,
+      "id": null,
+      "desc": "记录 2026-10-06（周二）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-06&window=0800-1800&sort=price_asc",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapes…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 7,
+      "id": null,
+      "desc": "打开 2026-10-07（周三）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-07",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 14 fares Record cheapest shown Da…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 8,
+      "id": null,
+      "desc": "把 2026-10-07（周三）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-07&window=0800-1800",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest shown …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 9,
+      "id": null,
+      "desc": "记录 2026-10-07（周三）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-07&window=0800-1800&sort=price_asc",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapes…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 10,
+      "id": null,
+      "desc": "打开 2026-10-08（周四）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-08",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 14 fares Record cheapest shown Da…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 11,
+      "id": null,
+      "desc": "把 2026-10-08（周四）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-08&window=0800-1800",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest shown …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 12,
+      "id": null,
+      "desc": "记录 2026-10-08（周四）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-08&window=0800-1800&sort=price_asc",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapes…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 13,
+      "id": null,
+      "desc": "打开 2026-10-09（周五）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-09",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: Any time · Sort: Recommended · 14 fares Record cheapest shown Da…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 14,
+      "id": null,
+      "desc": "把 2026-10-09（周五）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-09&window=0800-1800",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest shown …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 15,
+      "id": null,
+      "desc": "记录 2026-10-09（周五）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/flights.html?date=2026-10-09&window=0800-1800&sort=price_asc",
+        "title": "Trekly · flights Kunming to Beijing",
+        "text": "TREKLY Home Flights Stays Flights · one way Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapes…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window",
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 16,
+      "id": null,
+      "desc": "打开 北京 2026-10-09 入住的酒店列表，并把价格上限设为 ¥300",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/hotels.html?checkin=2026-10-09",
+        "title": "Trekly · stays in Beijing",
+        "text": "TREKLY Home Flights Stays Stays · Beijing Max price per night Sort Recommended price (low to high) departure time Max price: no limit · Sort: Recommended · 32 stays Record every stay shown # Stay Stars Score Area Rate Stay Stars Score Area …",
+        "affordances": {
+          "text_inputs": [
+            "1500 / Max price per night"
+          ],
+          "selects": [
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 17,
+      "id": null,
+      "desc": "把 北京 2026-10-09 入住的酒店列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/hotels.html?checkin=2026-10-09&cap=300",
+        "title": "Trekly · stays in Beijing",
+        "text": "TREKLY Home Flights Stays Stays · Beijing Max price per night Sort Recommended price (low to high) departure time Max price: ¥300 · Sort: Recommended · 12 stays Record every stay shown # Stay Stars Score Area Rate Stay Stars Score Area Room…",
+        "affordances": {
+          "text_inputs": [
+            "1500 / Max price per night"
+          ],
+          "selects": [
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-trekly",
+      "index": 18,
+      "id": null,
+      "desc": "记录当前显示的每一家酒店",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site3/hotels.html?checkin=2026-10-09&cap=300&sort=price_asc",
+        "title": "Trekly · stays in Beijing",
+        "text": "TREKLY Home Flights Stays Stays · Beijing Max price per night Sort Recommended price (low to high) departure time Max price: ¥300 · Sort: price (low to high) · 12 stays Record every stay shown # Stay Stars Score Area Rate Stay Stars Score A…",
+        "affordances": {
+          "text_inputs": [
+            "1500 / Max price per night"
+          ],
+          "selects": [
+            "Recommended / Sort"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 0,
+      "id": null,
+      "desc": "从Voyagio首页进入机票搜索页（昆明 → 北京）",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/index.html",
+        "title": "Voyagio · plan a trip",
+        "text": "VOYAGIO Home Flights Stays Voyagio · replica #5 (two-step search wizard) The flight search is a WIZARD: step 1 picks the date, step 2 picks the window and submits. That is a different shape, not a different widget — the spec expresses it by…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Flights · Kunming → Beijing",
+            "Stays · Beijing",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 1,
+      "id": null,
+      "desc": "打开 2026-10-05（周一）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/step1.html",
+        "title": "Voyagio · step 1",
+        "text": "VOYAGIO Home Flights Stays Flights · step 1 of 2 1 Date 2 Options From To Departure date Continue Step 1 of 2 · pick a date",
+        "affordances": {
+          "text_inputs": [
+            "KMG / From",
+            "BJS / To",
+            "Departure date"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Continue",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 2,
+      "id": null,
+      "desc": "打开 2026-10-06（周二）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/step1.html",
+        "title": "Voyagio · step 1",
+        "text": "VOYAGIO Home Flights Stays Flights · step 1 of 2 1 Date 2 Options From To Departure date Continue Step 1 of 2 · pick a date",
+        "affordances": {
+          "text_inputs": [
+            "KMG / From",
+            "BJS / To",
+            "Departure date"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Continue",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 3,
+      "id": null,
+      "desc": "打开 2026-10-07（周三）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/step1.html",
+        "title": "Voyagio · step 1",
+        "text": "VOYAGIO Home Flights Stays Flights · step 1 of 2 1 Date 2 Options From To Departure date Continue Step 1 of 2 · pick a date",
+        "affordances": {
+          "text_inputs": [
+            "KMG / From",
+            "BJS / To",
+            "Departure date"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Continue",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 4,
+      "id": null,
+      "desc": "打开 2026-10-08（周四）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/step1.html",
+        "title": "Voyagio · step 1",
+        "text": "VOYAGIO Home Flights Stays Flights · step 1 of 2 1 Date 2 Options From To Departure date Continue Step 1 of 2 · pick a date",
+        "affordances": {
+          "text_inputs": [
+            "KMG / From",
+            "BJS / To",
+            "Departure date"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Continue",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 5,
+      "id": null,
+      "desc": "打开 2026-10-09（周五）昆明到北京的航班列表，并把出发时段筛选为 08:00-18:00",
+      "truth": "fill",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/step1.html",
+        "title": "Voyagio · step 1",
+        "text": "VOYAGIO Home Flights Stays Flights · step 1 of 2 1 Date 2 Options From To Departure date Continue Step 1 of 2 · pick a date",
+        "affordances": {
+          "text_inputs": [
+            "KMG / From",
+            "BJS / To",
+            "Departure date"
+          ],
+          "selects": [],
+          "checkboxes": [],
+          "clickables": [
+            "Continue",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 6,
+      "id": null,
+      "desc": "在向导第 2 步把 2026-10-05（周一）的出发时段设成 08:00-18:00 并搜索",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/step2.html?date=2026-10-05",
+        "title": "Voyagio · step 2",
+        "text": "VOYAGIO Home Flights Stays Flights · step 2 of 2 1 Date 2 Options Step 2 of 2 · 2026-10-05 Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Search flights",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Search flights",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 7,
+      "id": null,
+      "desc": "在向导第 2 步把 2026-10-06（周二）的出发时段设成 08:00-18:00 并搜索",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/step2.html?date=2026-10-06",
+        "title": "Voyagio · step 2",
+        "text": "VOYAGIO Home Flights Stays Flights · step 2 of 2 1 Date 2 Options Step 2 of 2 · 2026-10-06 Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Search flights",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Search flights",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 8,
+      "id": null,
+      "desc": "在向导第 2 步把 2026-10-07（周三）的出发时段设成 08:00-18:00 并搜索",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/step2.html?date=2026-10-07",
+        "title": "Voyagio · step 2",
+        "text": "VOYAGIO Home Flights Stays Flights · step 2 of 2 1 Date 2 Options Step 2 of 2 · 2026-10-07 Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Search flights",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Search flights",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 9,
+      "id": null,
+      "desc": "在向导第 2 步把 2026-10-08（周四）的出发时段设成 08:00-18:00 并搜索",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/step2.html?date=2026-10-08",
+        "title": "Voyagio · step 2",
+        "text": "VOYAGIO Home Flights Stays Flights · step 2 of 2 1 Date 2 Options Step 2 of 2 · 2026-10-08 Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Search flights",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Search flights",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 10,
+      "id": null,
+      "desc": "在向导第 2 步把 2026-10-09（周五）的出发时段设成 08:00-18:00 并搜索",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/step2.html?date=2026-10-09",
+        "title": "Voyagio · step 2",
+        "text": "VOYAGIO Home Flights Stays Flights · step 2 of 2 1 Date 2 Options Step 2 of 2 · 2026-10-09 Departure window Any time 00:00-08:00 08:00-18:00 18:00-24:00 Search flights",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Any time / Departure window Any time 00:"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Search flights",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 0
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 11,
+      "id": null,
+      "desc": "把 2026-10-05（周一）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/fares.html?from=KMG&to=BJS&date=2026-10-05&window=0800-1800",
+        "title": "Voyagio · fares",
+        "text": "VOYAGIO Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration Fare 08…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 12,
+      "id": null,
+      "desc": "记录 2026-10-05（周一）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/fares.html?from=KMG&to=BJS&date=2026-10-05&window=0800-1800&sort=price_asc",
+        "title": "Voyagio · fares",
+        "text": "VOYAGIO Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 13,
+      "id": null,
+      "desc": "把 2026-10-06（周二）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/fares.html?from=KMG&to=BJS&date=2026-10-06&window=0800-1800",
+        "title": "Voyagio · fares",
+        "text": "VOYAGIO Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration Fare 08…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 14,
+      "id": null,
+      "desc": "记录 2026-10-06（周二）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/fares.html?from=KMG&to=BJS&date=2026-10-06&window=0800-1800&sort=price_asc",
+        "title": "Voyagio · fares",
+        "text": "VOYAGIO Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 15,
+      "id": null,
+      "desc": "把 2026-10-07（周三）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/fares.html?from=KMG&to=BJS&date=2026-10-07&window=0800-1800",
+        "title": "Voyagio · fares",
+        "text": "VOYAGIO Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration Fare 08…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 16,
+      "id": null,
+      "desc": "记录 2026-10-07（周三）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/fares.html?from=KMG&to=BJS&date=2026-10-07&window=0800-1800&sort=price_asc",
+        "title": "Voyagio · fares",
+        "text": "VOYAGIO Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 17,
+      "id": null,
+      "desc": "把 2026-10-08（周四）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/fares.html?from=KMG&to=BJS&date=2026-10-08&window=0800-1800",
+        "title": "Voyagio · fares",
+        "text": "VOYAGIO Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration Fare 08…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 18,
+      "id": null,
+      "desc": "记录 2026-10-08（周四）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/fares.html?from=KMG&to=BJS&date=2026-10-08&window=0800-1800&sort=price_asc",
+        "title": "Voyagio · fares",
+        "text": "VOYAGIO Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 19,
+      "id": null,
+      "desc": "把 2026-10-09（周五）的航班列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/fares.html?from=KMG&to=BJS&date=2026-10-09&window=0800-1800",
+        "title": "Voyagio · fares",
+        "text": "VOYAGIO Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: Recommended · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration Fare 08…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 20,
+      "id": null,
+      "desc": "记录 2026-10-09（周五）08:00-18:00 区间内最低价的航班",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/fares.html?from=KMG&to=BJS&date=2026-10-09&window=0800-1800&sort=price_asc",
+        "title": "Voyagio · fares",
+        "text": "VOYAGIO Home Flights Stays Flights · results Sort Recommended price (low to high) departure time Departure window: 08:00-18:00 · Sort: price (low to high) · 9 fares Record cheapest fare Date Flight Times Fare Departs Arrives Flight Duration…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record cheapest fare",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 1
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 21,
+      "id": null,
+      "desc": "打开 北京 2026-10-06 入住的酒店列表，并把价格上限设为 ¥300",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/stays.html?checkin=2026-10-06",
+        "title": "Voyagio · stays",
+        "text": "VOYAGIO Home Flights Stays Stays · Beijing Max price per night No limit ¥200 or less ¥300 or less ¥500 or less Sort Recommended price (low to high) departure time Max price: no limit · Sort: Recommended · 40 stays Record every stay shown # …",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "No limit / Max price per night No limit",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 2
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 22,
+      "id": null,
+      "desc": "把 北京 2026-10-06 入住的酒店列表按价格从低到高排序",
+      "truth": "select",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/stays.html?checkin=2026-10-06&cap=300",
+        "title": "Voyagio · stays",
+        "text": "VOYAGIO Home Flights Stays Stays · Beijing Max price per night No limit ¥200 or less ¥300 or less ¥500 or less Sort Recommended price (low to high) departure time Max price: ¥300 · Sort: Recommended · 13 stays Record every stay shown # Stay…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "No limit / Max price per night No limit",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 2
+        }
+      }
+    },
+    {
+      "app": "transfer-voyagio",
+      "index": 23,
+      "id": null,
+      "desc": "记录当前显示的每一家酒店",
+      "truth": "click",
+      "state": {
+        "url": "file:///root/coding/AmberFlow/transfer/site5/stays.html?checkin=2026-10-06&cap=300&sort=price_asc",
+        "title": "Voyagio · stays",
+        "text": "VOYAGIO Home Flights Stays Stays · Beijing Max price per night No limit ¥200 or less ¥300 or less ¥500 or less Sort Recommended price (low to high) departure time Max price: ¥300 · Sort: price (low to high) · 13 stays Record every stay show…",
+        "affordances": {
+          "text_inputs": [],
+          "selects": [
+            "No limit / Max price per night No limit",
+            "Recommended / Sort Recommended price (lo"
+          ],
+          "checkboxes": [],
+          "clickables": [
+            "Record every stay shown",
+            "Home",
+            "Flights",
+            "Stays"
+          ],
+          "prices": 2
+        }
+      }
+    }
+  ],
+  "predictions": {
+    "rules": [
+      "fill",
+      "fill",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "click",
+      null,
+      "click",
+      "fill",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "check",
+      "click",
+      null,
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "click",
+      "click",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "click",
+      "click",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "check",
+      "check",
+      null,
+      "check",
+      "check",
+      "click",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "click",
+      "click",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      null,
+      "list_pick",
+      null,
+      "list_pick",
+      null,
+      "list_pick",
+      null,
+      "list_pick",
+      null,
+      "list_pick",
+      "click",
+      null,
+      "click"
+    ],
+    "first-candidate": [
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click"
+    ],
+    "nostate": [
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "check",
+      "click",
+      "click",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "check",
+      "click",
+      "click",
+      "check",
+      "click",
+      "click",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "list_pick",
+      "list_pick",
+      "list_pick",
+      "list_pick",
+      "list_pick",
+      "list_pick",
+      "list_pick",
+      "list_pick",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "click"
+    ],
+    "context": [
+      "click",
+      "click",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "list_pick",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "click",
+      "fill",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "check",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "select",
+      "select",
+      "select",
+      "select",
+      "select",
+      "select",
+      "click",
+      "select",
+      "click",
+      "select",
+      "click",
+      "select",
+      "click",
+      "select",
+      "list_pick",
+      "click",
+      "list_pick",
+      "click"
+    ],
+    "context-candidates": [
+      "click",
+      "click",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "list_pick",
+      "click",
+      "list_pick",
+      "click",
+      "click",
+      "click",
+      "fill",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "click",
+      "select",
+      "click",
+      "select",
+      "select",
+      "click",
+      "select",
+      "select",
+      "click",
+      "click",
+      "fill",
+      "select",
+      "click",
+      "fill",
+      "select",
+      "click",
+      "fill",
+      "select",
+      "click",
+      "fill",
+      "select",
+      "click",
+      "fill",
+      "select",
+      "click",
+      "select",
+      "select",
+      "click",
+      "click",
+      "select",
+      "select",
+      "click",
+      "select",
+      "select",
+      "click",
+      "select",
+      "select",
+      "click",
+      "select",
+      "select",
+      "click",
+      "select",
+      "select",
+      "click",
+      "check",
+      "select",
+      "check",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "select",
+      "select",
+      "list_pick",
+      "select",
+      "select",
+      "list_pick",
+      "select",
+      "select",
+      "list_pick",
+      "select",
+      "select",
+      "list_pick",
+      "select",
+      "select",
+      "list_pick",
+      "select",
+      "select",
+      "click",
+      "click",
+      "select",
+      "select",
+      "click",
+      "select",
+      "select",
+      "click",
+      "select",
+      "select",
+      "click",
+      "select",
+      "select",
+      "click",
+      "select",
+      "select",
+      "click",
+      "fill",
+      "select",
+      "click",
+      "click",
+      "fill",
+      "fill",
+      "fill",
+      "fill",
+      "fill",
+      "select",
+      "select",
+      "select",
+      "select",
+      "select",
+      "select",
+      "click",
+      "select",
+      "click",
+      "select",
+      "click",
+      "select",
+      "click",
+      "select",
+      "click",
+      "select",
+      "select",
+      "click"
+    ],
+    "laya-context": [
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "select",
+      "select",
+      "select",
+      "select",
+      "select",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click",
+      "click"
+    ]
+  },
+  "scores": {
+    "rules": {
+      "correct": 36,
+      "abstain": 45,
+      "total": 165,
+      "byTruth": {
+        "click": {
+          "n": 85,
+          "correct": 34
+        },
+        "select": {
+          "n": 66,
+          "correct": 1
+        },
+        "fill": {
+          "n": 14,
+          "correct": 1
+        }
+      }
+    },
+    "first-candidate": {
+      "correct": 85,
+      "abstain": 0,
+      "total": 165,
+      "byTruth": {
+        "click": {
+          "n": 85,
+          "correct": 85
+        },
+        "select": {
+          "n": 66,
+          "correct": 0
+        },
+        "fill": {
+          "n": 14,
+          "correct": 0
+        }
+      }
+    },
+    "nostate": {
+      "correct": 41,
+      "abstain": 0,
+      "total": 165,
+      "byTruth": {
+        "click": {
+          "n": 85,
+          "correct": 41
+        },
+        "select": {
+          "n": 66,
+          "correct": 0
+        },
+        "fill": {
+          "n": 14,
+          "correct": 0
+        }
+      }
+    },
+    "context": {
+      "correct": 105,
+      "abstain": 0,
+      "total": 165,
+      "byTruth": {
+        "click": {
+          "n": 85,
+          "correct": 72
+        },
+        "select": {
+          "n": 66,
+          "correct": 32
+        },
+        "fill": {
+          "n": 14,
+          "correct": 1
+        }
+      }
+    },
+    "context-candidates": {
+      "correct": 146,
+      "abstain": 0,
+      "total": 165,
+      "byTruth": {
+        "click": {
+          "n": 85,
+          "correct": 72
+        },
+        "select": {
+          "n": 66,
+          "correct": 62
+        },
+        "fill": {
+          "n": 14,
+          "correct": 12
+        }
+      }
+    },
+    "laya-context": {
+      "correct": 90,
+      "abstain": 0,
+      "total": 165,
+      "byTruth": {
+        "click": {
+          "n": 85,
+          "correct": 85
+        },
+        "select": {
+          "n": 66,
+          "correct": 5
+        },
+        "fill": {
+          "n": 14,
+          "correct": 0
+        }
+      }
+    }
+  },
+  "by_subset": {
+    "rules": {
+      "amb": {
+        "n": 83,
+        "correct": 6
+      },
+      "clear": {
+        "n": 82,
+        "correct": 30
+      }
+    },
+    "first-candidate": {
+      "amb": {
+        "n": 83,
+        "correct": 12
+      },
+      "clear": {
+        "n": 82,
+        "correct": 73
+      }
+    },
+    "nostate": {
+      "amb": {
+        "n": 83,
+        "correct": 6
+      },
+      "clear": {
+        "n": 82,
+        "correct": 35
+      }
+    },
+    "context": {
+      "amb": {
+        "n": 83,
+        "correct": 32
+      },
+      "clear": {
+        "n": 82,
+        "correct": 73
+      }
+    },
+    "context-candidates": {
+      "amb": {
+        "n": 83,
+        "correct": 77
+      },
+      "clear": {
+        "n": 82,
+        "correct": 69
+      }
+    },
+    "laya-context": {
+      "amb": {
+        "n": 83,
+        "correct": 12
+      },
+      "clear": {
+        "n": 82,
+        "correct": 78
+      }
+    }
+  }
+}

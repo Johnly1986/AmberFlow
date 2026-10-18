@@ -17,6 +17,9 @@
  * ①题面无状态（83/165 行同一句话跨应用真值不同）；②标签取 trace 首动作（题面首动作族与真值吻合
  * 仅 44.8%）；③语料排除 list/check 步（闭集 2/5 结构性不可对，77 次 list_pick 预测全错）。
  * 换问法/换语料（S0-v2：受约束提名）= 换考卷，必须新建产物、各记各数，别改本冻结产物。
+ * **S0-v2 已实现**：`--context --provider <name>`（独立产物 `bench/instruction-nomination-context/`）——
+ * 同一考卷补页面状态（captureStateView），并对照"候选按页面条件化"臂；实测 24.8% → 63.6% → 88.5%
+ * （da2 歧义组 7.2% → 92.8%），见 docs/NOMINATION_QUESTION_SET_ANALYSIS.md §6。
  *
  * 产出：`bench/instruction-nomination/nomination.json`（冻结产物）+ 同名 .md 报告 + 控制台结论。
  * **停止条件（设计文档 §10-S0）只报告、不裁定**：③ 正确率 ≤ 基线且 ⑤ 收不回 ⇒ 设想降级，
@@ -32,13 +35,13 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { loadPack, expandPack, type AppPack } from "../src/app-pack.ts";
-import { runApp, type AppRunResult } from "../src/app-runner.ts";
+import { runApp, type AppRunResult, type StepStateView } from "../src/app-runner.ts";
 import { checkArtifacts, missingPieces, modelConfigError, onnxModelPath } from "../src/model-artifacts.ts";
 import { createLayaOnnxRuntime } from "../src/laya-onnx.ts";
 import { installLayaRuntime, type DecisionAgent } from "../src/model.ts";
 import { ruleNominate } from "../src/nominate.ts";
 import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, instructionCriteria } from "../src/instructions.ts";
-import { providerNominationAsk } from "../src/nominate.ts";
+import { nominationInstructions, providerNominationAsk } from "../src/nominate.ts";
 import { resolveProviderSpec, type ProviderInfo } from "../src/decision-provider.ts";
 
 /** 本工具不经执行器，直接问 agent；装运行时只为保持"谁在跑"的单一出处。 */
@@ -71,6 +74,8 @@ export function truthOf(hows: string[], descs: string[]): string | null {
 
 interface Row {
   app: string; index: number; id: string | null; desc: string; truth: string;
+  /** S0-v2 上下文实验：这一步开始时的页面状态（withState 才采；缺字段 = 没开）。 */
+  state?: StepStateView;
 }
 
 /** 离线旅程包发现：有浏览器步、无 hosts（真网络）、无 probe 块的 pack。 */
@@ -90,7 +95,7 @@ function discoverOfflineJourneyPacks(): Array<{ pack: AppPack; path: string }> {
   return out;
 }
 
-async function collectCorpus(limit: number): Promise<{ rows: Row[]; skipped: string[]; packs: number }> {
+async function collectCorpus(limit: number, withState = false): Promise<{ rows: Row[]; skipped: string[]; packs: number }> {
   const rows: Row[] = [];
   const skipped: string[] = [];
   const packs = discoverOfflineJourneyPacks();
@@ -114,6 +119,7 @@ async function collectCorpus(limit: number): Promise<{ rows: Row[]; skipped: str
         sources: false, verbose: false,
         planPath: path.join(tmp, `${pack.id}.plan.json`),
         outDir: tmp, captureTraces: true,
+        ...(withState ? { captureStateView: true } : {}),
         confirmSafe: true,
       });
     } catch (e) {
@@ -125,7 +131,10 @@ async function collectCorpus(limit: number): Promise<{ rows: Row[]; skipped: str
       if (t.status !== "done") { skipped.push(`${pack.id}#${t.index}: ${t.status}`); continue; }
       const truth = truthOf(t.hows, t.descs);
       if (truth === null) { skipped.push(`${pack.id}#${t.index}: no executed action`); continue; }
-      rows.push({ app: pack.id, index: t.index, id: t.id, desc: t.desc, truth });
+      rows.push({
+        app: pack.id, index: t.index, id: t.id, desc: t.desc, truth,
+        ...(t.state_view ? { state: t.state_view } : {}),
+      });
     }
   }
   return { rows, skipped, packs: packsWithSteps };
@@ -149,7 +158,7 @@ async function sha256File(p: string): Promise<string | null> {
   }
 }
 
-async function loadModelArm(): Promise<{
+async function loadModelArm(stateFor?: (desc: string) => Record<string, unknown>): Promise<{
   status: string;
   ask: ((desc: string) => Promise<string | null>) | null;
   detail: string;
@@ -177,7 +186,7 @@ async function loadModelArm(): Promise<{
     // 问法**逐字照抄**执行器给 laya 的实测形状（decision-provider.ts:349——
     // ask-shapes 调研的教训：措辞影响行为，实验必须给模型它被调优过的那一枪）。
     const res = await agent.predict(
-      { goal: desc },
+      stateFor ? { ...stateFor(desc), goal: desc } : { goal: desc },
       {
         act: {
           type: "choice",
@@ -472,6 +481,44 @@ async function runProviderReview(outDir: string, providerName: string, limit: nu
   return 0;
 }
 
+/** `--check`：上下文实验产物的**可离线复算部分**（语料/歧义组/离线两臂）；线上臂是网络臂，默认不比。 */
+async function checkContextReview(outDir: string, providerName: string): Promise<number> {
+  const p = path.join(outDir, "nomination-context.json");
+  if (!fs.existsSync(p)) {
+    console.error(`nomination --check：上下文实验产物不存在：${p}（先跑一次 --context --provider ${providerName}）`);
+    return 1;
+  }
+  const committed = JSON.parse(fs.readFileSync(p, "utf-8")) as {
+    instruction_set: unknown; enumeration_order: unknown;
+    corpus: { packs: number; rows: number; with_state: number; ambiguous: number };
+    scores: Record<string, { correct: number }>;
+    predictions: Record<string, Array<string | null>>;
+  };
+  const { rows, packs } = await collectCorpus(10_000, true);
+  const diffs: string[] = [];
+  const eq = (what: string, a: unknown, b: unknown): void => {
+    if (JSON.stringify(a) !== JSON.stringify(b)) diffs.push(`${what}: 产物 ${JSON.stringify(a)} ≠ 复算 ${JSON.stringify(b)}`);
+  };
+  eq("corpus.packs", committed.corpus.packs, packs);
+  eq("corpus.rows", committed.corpus.rows, rows.length);
+  eq("corpus.with_state", committed.corpus.with_state, rows.filter((r) => r.state).length);
+  eq("instruction_set", committed.instruction_set, INSTRUCTIONS);
+  eq("enumeration_order", committed.enumeration_order, ORDER);
+  const rules = rows.map((r) => ruleNominate(r.desc));
+  const first = rows.map(() => "click");
+  const correctOf = (pred: Array<string | null>): number => rows.reduce((n, r, i) => n + (pred[i] === r.truth ? 1 : 0), 0);
+  eq("scores.rules.correct", committed.scores["rules"]!.correct, correctOf(rules));
+  eq("scores.first-candidate.correct", committed.scores["first-candidate"]!.correct, correctOf(first));
+  if (diffs.length) {
+    console.error("nomination --check（上下文实验产物）FAILED：");
+    for (const d of diffs) console.error(`  - ${d}`);
+    return 1;
+  }
+  console.log(`nomination --check（上下文实验产物）OK：语料 ${packs} 包 / ${rows.length} 步（状态 ${rows.filter((r) => r.state).length}）`
+    + ` + 离线两臂一致；线上臂 未比（网络臂：产物 provider=${providerName}；重跑需配置端点/密钥）`);
+  return 0;
+}
+
 /** `--check`：线上审查产物的**可离线复算部分**（语料/闭集/离线三臂）；线上臂是网络臂，默认不比。 */
 async function checkProviderReview(outDir: string, providerName: string): Promise<number> {
   const p = path.join(outDir, "nomination-online.json");
@@ -512,6 +559,239 @@ async function checkProviderReview(outDir: string, providerName: string): Promis
   return 0;
 }
 
+/* ------------------------------------------- S0-v2：把页面上下文补进题面（上下文实验） */
+
+/** 归一化题面（日期/时段/价格→占位），用于识别"同一句话、不同真值"的跨实现歧义组。 */
+function normalizeDesc(d: string): string {
+  return d
+    .replace(/20\d\d-\d\d-\d\d（周.）?/g, "{date}")
+    .replace(/20\d\d-\d\d-\d\d/g, "{date}")
+    .replace(/\d{1,2}:\d{2}-\d{2}:\d{2}/g, "{time}")
+    .replace(/¥\d+/g, "{price}")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** 页面能力摘要 → 一行给人读/给模型读的"本页有什么"（候选条件化臂用；不是站点知识）。 */
+function availabilityLine(state: StepStateView | undefined, name: string): string {
+  if (!state) return "";
+  const a = state.affordances;
+  const list = (xs: string[]): string => (xs.length ? xs.slice(0, 3).join("/") : "");
+  switch (name) {
+    case "click":
+      return `本页可点击元素 ${a.clickables.length} 个${list(a.clickables) ? `（${list(a.clickables)}）` : ""}`;
+    case "fill":
+      return `本页文本输入框 ${a.text_inputs.length} 个${list(a.text_inputs) ? `（${list(a.text_inputs)}）` : ""}`;
+    case "select":
+      return `本页下拉框 ${a.selects.length} 个${list(a.selects) ? `（${list(a.selects)}）` : ""}`;
+    case "check":
+      return `本页勾选框 ${a.checkboxes.length} 个${list(a.checkboxes) ? `（${list(a.checkboxes)}）` : ""}`;
+    case "list_pick":
+      return `本页带价格文本的元素 ${a.prices} 个`;
+    default:
+      return "";
+  }
+}
+
+/** 上下文 state（决策模型看到的"场景"）：页面 URL/标题/正文摘要 + 控件能力摘要。 */
+function contextState(row: Row): Record<string, unknown> | undefined {
+  if (!row.state) return undefined;
+  return {
+    url: row.state.url,
+    title: row.state.title,
+    main_text: row.state.text,
+    affordances: row.state.affordances,
+  };
+}
+
+/**
+ * **S0-v2 上下文实验**：与 S0 同一考卷（语料/真值/闭集/问法），只把**页面上下文**补进题面。
+ * 对照臂：
+ *   - `nostate`（同 S0 的线上执行）：state 只有 goal——复现"猜"的那一臂；
+ *   - `context`：state = {url,title,main_text,affordances}（页面有什么，模型自己判断）；
+ *   - `context-candidates`：context + 候选描述带上**本页可用性**（候选条件化）；
+ *   - `laya-context`：本地 laya 也带同一份上下文（两个模型同题对照，验证"根因是设计"）。
+ * 额外读数：**歧义组**（归一化题面同、跨应用真值不同）上的准确率——上下文应该主要救这些行。
+ */
+async function runContextReview(outDir: string, providerName: string, limit: number): Promise<number> {
+  console.log(`S0-v2 上下文实验：provider=${providerName}｜同一考卷 + 页面上下文`);
+  const { rows, skipped, packs } = await collectCorpus(limit, true);
+  const withState = rows.filter((r) => r.state !== undefined).length;
+  console.log(`语料：${packs} 包 / ${rows.length} 步（跳过 ${skipped.length}；带页面状态 ${withState}）`);
+  if (withState === 0) {
+    console.error("没有采到页面状态（captureStateView 未生效？）——上下文实验无从谈起，不写产物");
+    return 2;
+  }
+
+  // 歧义组标记：归一化题面相同且真值不同 ⇒ 该组内所有行标 ambiguous
+  const groups = new Map<string, number[]>();
+  rows.forEach((r, i) => {
+    const k = normalizeDesc(r.desc);
+    groups.set(k, [...(groups.get(k) ?? []), i]);
+  });
+  const ambiguous = new Set<number>();
+  for (const idxs of groups.values()) {
+    if (idxs.length > 1 && new Set(idxs.map((i) => rows[i]!.truth)).size > 1) for (const i of idxs) ambiguous.add(i);
+  }
+  console.log(`歧义组（同一句话跨应用不同真值）：${ambiguous.size} 行`);
+
+  // ---- 解析 provider（缺配置不写产物） ----
+  let identity: ProviderInfo | null = null;
+  let provider: Awaited<ReturnType<typeof resolveProviderSpec>> | null = null;
+  try {
+    const spec = await resolveProviderSpec(providerName, process.env);
+    if (spec.kind !== "provider") {
+      console.error(`provider 未配置到可用（tier=${spec.tier}）：不测、不写产物`);
+      return 2;
+    }
+    if (!spec.provider.askChoice) {
+      console.error(`provider ${providerName} 没有 askChoice 能力`);
+      return 2;
+    }
+    provider = spec;
+    identity = {
+      name: spec.provider.name, version: spec.provider.version,
+      capabilities: { ...spec.provider.capabilities },
+      ...(spec.provider.floor !== undefined ? { floor: spec.provider.floor } : {}),
+    };
+  } catch (e) {
+    console.error(`解析 provider 失败：${e instanceof Error ? e.message : String(e)}`);
+    return 2;
+  }
+  const askChoice = provider!.kind === "provider" ? provider!.provider.askChoice!.bind(provider!.provider) : null;
+  if (!askChoice) return 2;
+
+  // ---- 各臂 ----
+  const arms: Record<string, Array<string | null>> = {
+    rules: rows.map((r) => ruleNominate(r.desc)),
+    "first-candidate": rows.map(() => "click"),
+  };
+  const asksOf: Record<string, { asks: number; totalMs: number }> = {};
+  const runOnline = async (arm: string, stateFor: (row: Row) => Record<string, unknown> | undefined,
+    criteriaFor?: (row: Row) => Record<string, string>): Promise<void> => {
+    const preds: Array<string | null> = [];
+    const t0 = Date.now();
+    for (const r of rows) {
+      const criteria = criteriaFor ? criteriaFor(r) : { ...INSTRUCTIONS };
+      const res = await askChoice({
+        goal: r.desc,
+        instructions: nominationInstructions(r.desc),
+        criteria,
+        ...(stateFor(r) ? { state: stateFor(r) } : {}),
+      });
+      preds.push(res?.ref ?? null);
+    }
+    arms[arm] = preds;
+    asksOf[arm] = { asks: rows.length, totalMs: Date.now() - t0 };
+    console.log(`  ${arm}: ${preds.filter((p) => p !== null).length}/${rows.length} 有答案 · ${(asksOf[arm]!.totalMs / 1000).toFixed(1)}s`);
+  };
+  await runOnline("nostate", () => undefined);
+  await runOnline("context", (r) => contextState(r));
+  await runOnline("context-candidates", (r) => contextState(r), (r) => {
+    const out: Record<string, string> = {};
+    for (const [name, desc] of Object.entries(INSTRUCTIONS)) {
+      const avail = availabilityLine(r.state, name);
+      out[name] = avail ? `${desc}（本页：${avail}）` : desc;
+    }
+    return out;
+  });
+
+  // laya 上下文臂（本地模型同题对照；产物不齐 = 如实 off）
+  const layaArm = await loadModelArm((desc) => {
+    const r = rows.find((x) => x.desc === desc);
+    if (r?.state === undefined) return {};
+    const a = r.state.affordances;
+    const line = `可点击 ${a.clickables.length}｜输入框 ${a.text_inputs.length}｜下拉 ${a.selects.length}`
+      + `｜勾选 ${a.checkboxes.length}｜价格元素 ${a.prices}`;
+    return { url: r.state.url, title: r.state.title, main_text: `${r.state.text} [${line}]` };
+  });
+  let layaStatus = layaArm.status;
+  if (layaArm.ask) {
+    const preds: Array<string | null> = [];
+    for (const r of rows) preds.push(await layaArm.ask(r.desc));
+    arms["laya-context"] = preds;
+  } else {
+    arms["laya-context"] = rows.map(() => null);
+    layaStatus = layaArm.status;
+  }
+
+  // ---- 计分（总体 + 歧义组/非歧义组分别记） ----
+  const scores = Object.fromEntries(Object.entries(arms).map(([k, v]) => [k, scoreArm(rows, v)]));
+  const splitScore = (arm: string): { amb: { n: number; correct: number }; clear: { n: number; correct: number } } => {
+    let ambN = 0, ambC = 0, clN = 0, clC = 0;
+    rows.forEach((r, i) => {
+      const ok = arms[arm]![i] === r.truth;
+      if (ambiguous.has(i)) { ambN += 1; if (ok) ambC += 1; } else { clN += 1; if (ok) clC += 1; }
+    });
+    return { amb: { n: ambN, correct: ambC }, clear: { n: clN, correct: clC } };
+  };
+
+  const artifact = {
+    generated_at: new Date().toISOString(),
+    mode: "context-review",
+    provider_arm: {
+      provider: providerName, status: "on", identity,
+      asks: asksOf, laya: { status: layaStatus },
+    },
+    instruction_set: INSTRUCTIONS,
+    enumeration_order: ORDER,
+    corpus: { packs, rows: rows.length, skipped: skipped.length, with_state: withState, ambiguous: ambiguous.size },
+    rows,
+    predictions: arms,
+    scores,
+    by_subset: Object.fromEntries(Object.keys(arms).map((k) => [k, splitScore(k)])),
+  };
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(path.join(outDir, "nomination-context.json"), JSON.stringify(artifact, null, 2), "utf-8");
+
+  const pctArm = (k: string): string => pct(scores[k]!.correct, rows.length);
+  const L: string[] = [];
+  L.push("# S0-v2 上下文实验：把页面状态补进题面");
+  L.push("");
+  L.push(`- 生成：${artifact.generated_at} ｜ provider：**${identity!.name} ${identity!.version}**`);
+  L.push(`- 语料：${packs} 包 / ${rows.length} 步（跳过 ${skipped.length}；带页面状态 ${withState}；歧义组 ${ambiguous.size} 行）`);
+  L.push("- 设计：与 S0 **同一语料/同一真值/同一闭集/同一问法**，唯一变量 = 题面里有没有页面上下文");
+  L.push("");
+  L.push("| 臂 | 正确率 | 歧义组（同一句话跨应用不同真值） | 非歧义组 | 说明 |");
+  L.push("|---|---|---|---|---|");
+  const lineOf = (k: string, note: string): string => {
+    const sp = splitScore(k);
+    return `| ${k} | ${pctArm(k)} | ${pct(sp.amb.correct, sp.amb.n)} | ${pct(sp.clear.correct, sp.clear.n)} | ${note} |`;
+  };
+  L.push(lineOf("first-candidate", "永远答 click（零智能基线）"));
+  L.push(lineOf("rules", "① 关键词梯级"));
+  L.push(lineOf("nostate", "复现 S0 的『猜』臂：state 只有 goal"));
+  L.push(lineOf("context", "**补页面状态**：url/title/正文摘要/控件能力摘要"));
+  L.push(lineOf("context-candidates", "上下文 + 候选描述带本页可用性"));
+  L.push(lineOf("laya-context", `本地 laya 带同一份上下文（${layaStatus}）`));
+  L.push("");
+  const ctx = scores["context"]!;
+  const ns = scores["nostate"]!;
+  const base = scores["first-candidate"]!.correct;
+  L.push("## 读数（只报告，不裁定）");
+  L.push("");
+  L.push(`- **缺口→补齐**：nostate ${ns.correct}/${rows.length} → context ${ctx.correct}/${rows.length}`
+    + `（+${ctx.correct - ns.correct}）⇒ ${ctx.correct > ns.correct ? "页面上下文有增益" : "没有增益"}`);
+  L.push(`- **对基线**：context ${ctx.correct} vs first-candidate ${base}`
+    + ` ⇒ ${ctx.correct > base ? "**高于**零智能基线" : "仍不高于零智能基线"}`);
+  L.push(`- **歧义组是试金石**：context 在歧义组 ${pct(splitScore("context").amb.correct, splitScore("context").amb.n)}，`
+    + `nostate 在歧义组 ${pct(splitScore("nostate").amb.correct, splitScore("nostate").amb.n)}`);
+  L.push(`- 咨询代价：${Object.entries(asksOf).map(([k, v]) => `${k} ${v.asks} 次/${(v.totalMs / 1000).toFixed(1)}s`).join("；")}`);
+  L.push("");
+  L.push("## 口径边界（诚实清单）");
+  L.push("");
+  L.push("- 真值仍是 **trace 首个 DOM 动作**（S0 同口径）：上下文能消除『同一句话跨实现』的歧义，"
+    + "但不能修复『多动作步只取第一动作』的标签错位——那部分要改标签口径（见 NOMINATION_QUESTION_SET_ANALYSIS §4）。");
+  L.push("- 页面状态是**只读摘要**（正文 240 字 + 控件分组），不是完整 DOM；信息量是「能给到多少」的近似，不是上限。");
+  L.push("- 单次运行、单服务版本；网络臂不进 CI。");
+  L.push("");
+  L.push(`复算：\`TOKEN_PLAN_ENDPOINT=… TOKEN_PLAN_API_KEY=… node --experimental-strip-types tools/instruction_nomination.ts --context --provider ${providerName}\``);
+  const report = L.join("\n");
+  fs.writeFileSync(path.join(outDir, "REPORT.md"), report, "utf-8");
+  console.log("\n" + report);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   const get = (k: string): string | undefined => {
@@ -519,11 +799,23 @@ async function main(): Promise<number> {
     return i >= 0 ? argv[i + 1] : undefined;
   };
   const providerName = get("provider");
-  const defaultOut = providerName
-    ? path.join(import.meta.dirname, "..", "bench", "instruction-nomination-online")
-    : path.join(import.meta.dirname, "..", "bench", "instruction-nomination");
+  const contextMode = argv.includes("--context");
+  const defaultOut = contextMode
+    ? path.join(import.meta.dirname, "..", "bench", "instruction-nomination-context")
+    : providerName
+      ? path.join(import.meta.dirname, "..", "bench", "instruction-nomination-online")
+      : path.join(import.meta.dirname, "..", "bench", "instruction-nomination");
   const outDir = path.resolve(get("out") ?? defaultOut);
   const limit = Math.max(1, Number(get("limit") ?? 10_000));
+  if (contextMode) {
+    if (!providerName) {
+      console.error("--context 需要 --provider <name>（上下文实验要一个决策 provider）");
+      return 2;
+    }
+    return argv.includes("--check")
+      ? checkContextReview(outDir, providerName)
+      : runContextReview(outDir, providerName, limit);
+  }
   if (providerName) {
     return argv.includes("--check")
       ? checkProviderReview(outDir, providerName)

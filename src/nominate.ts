@@ -26,6 +26,11 @@
  * （83/165 行同一句话跨应用真值不同）、标签取 trace 首动作（题面首动作族与真值吻合仅 44.8%）、
  * 语料排除 list/check（闭集 2/5 结构性不可对）、97.6% 的错误是"按文字作答 vs 按实现判分"的错位。
  * 运行期仍不接 ③；不接线的依据是**边际**（rules 弃权 45 行上 ③ 只对 3 行），不是被污染的准确率。
+ *
+ * 2026-10-18 S0-v2（上下文实验，同一考卷只补页面状态）：nostate 24.8% → **context 63.6%** →
+ * **候选按页面条件化 88.5%**（歧义组 7.2% → 92.8%）；本地 laya 带同一份上下文 4.8% → 54.5%。
+ * ⇒ **③ 不是不可行，而是"desc-only 题面"不可行**；接线需要页面状态 + 页面条件化候选，
+ * 属**显式未做项**（何时问、信号裁决、成本边际要先定），不在本模块偷偷内置。
  */
 import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, instructionCriteria, isInstructionName } from "./instructions.ts";
 import type { DecisionProvider } from "./decision-provider.ts";

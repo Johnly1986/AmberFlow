@@ -61,7 +61,8 @@
     "nominate:measure": "node --experimental-strip-types tools/instruction_nomination.ts",
     "providers:baseline": "node --experimental-strip-types tools/provider-baselines.ts",
     "probe:tokenplan": "node tools/probe-tokenplan.mjs",
-    "nominate:online": "node --experimental-strip-types tools/instruction_nomination.ts --provider token-plan"
+    "nominate:online": "node --experimental-strip-types tools/instruction_nomination.ts --provider token-plan",
+    "nominate:context": "node --experimental-strip-types tools/instruction_nomination.ts --context --provider token-plan"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
