@@ -161,7 +161,7 @@
 <text x="835" y="813" class="s">提名与 trace 动作族不符 ⇒ instruction_not_honored（blocked）</text>
 <text x="835" y="827" class="sm">dataset_view / nominate_bill：生产与账每跑可见</text>
 <rect x="40" y="862" width="1170" height="152" class="band"/>
-<text x="58" y="884" class="lay">⑥ 决策层 — 可插拔提供者与它的账（实测咨询 5/202 步、独立决定 0）</text>
+<text x="58" y="884" class="lay">⑥ 决策层 — 可插拔提供者与它的账（实测咨询 5/205 步、独立决定 0）</text>
 <rect x="60" y="894" width="470" height="62" class="bxm"/>
 <text x="71" y="913" class="t" font-size="12.5">决策提供者注册表（decision-provider.ts）</text>
 <text x="71" y="929" class="s">laya-onnx | stub | none | jevk5 | bailian | token-plan | 自注册</text>
@@ -190,7 +190,7 @@
 <text x="58" y="1046" class="lay">⑦ 验收层 — 结论必须能被命令复现（跳过 ≠ 通过）</text>
 <rect x="60" y="1056" width="276" height="60" class="bxe"/>
 <text x="71" y="1075" class="t" font-size="12.5">npm run verify</text>
-<text x="71" y="1091" class="s">typecheck + 1303 条测试 + 六层对拍</text>
+<text x="71" y="1091" class="s">typecheck + 1311 条测试 + 六层对拍</text>
 <rect x="346" y="1056" width="276" height="60" class="bxe"/>
 <text x="357" y="1075" class="t" font-size="12.5">bench/smoke.sh（CI 的绿色唯一定义）</text>
 <text x="357" y="1091" class="s">离线无条件；模型侧缺产物打 SKIP 并跳过</text>
@@ -237,7 +237,7 @@
 <text x="1254" y="727" class="s">对拍对的是入库记录；FROZEN_TODAY 钉周</text>
 <rect x="1243" y="756" width="259" height="64" class="bx"/>
 <text x="1254" y="775" class="t" font-size="12.5">实测证据（2026-10-14 开箱测试轮）</text>
-<text x="1254" y="791" class="s">18 个真跑应用 / 202 步 trace（真模型臂）</text>
+<text x="1254" y="791" class="s">19 个真跑应用 / 205 步 trace（真模型臂）</text>
 <text x="1254" y="805" class="sm">live 8 站与长流程 3 站属线上口径，见 bench/</text>
 <path class="lnb" d="M1230,128 H1243" marker-end="url(#arrB)"/>
 <path class="lnb" d="M1230,200 H1243" marker-end="url(#arrB)"/>
@@ -256,6 +256,6 @@
 <rect x="40" y="1142" width="1480" height="96" class="band red"/>
 <text x="58" y="1166" class="foot" font-weight="700">四条红线（每条都有测试与门禁撑着，不是口号）</text>
 <text x="58" y="1186" class="foot">① 不重规划——计划结构冻结在开始；运行期只允许闭集内提名与过门回填；② 不发明取值——填的值只来自数据袋（slots/具名绑定，模型无权产生值）；③ 不信模型说"完成"——只认该步 DOM/URL 信号；④ 不可复现即拒存——零模型重放门不过一个文件都不落，危险步先干跑取证再点头。</text>
-<text x="58" y="1206" class="foot">实测口径（单一出处 docs/arch-metrics.json，generated_at 2026-10-18）：浏览器步 172/173 全由声明解决（170 用 hint 点名 = 98.3%，其余 2 步走命令闭集）；真模型臂 18 应用 202 步里咨询 5、独立决定 0——兜底与诊断，不是承重件。</text>
+<text x="58" y="1206" class="foot">实测口径（单一出处 docs/arch-metrics.json，generated_at 2026-10-18）：浏览器步 173/175 全由声明解决（170 用 hint 点名 = 97.1%，其余 3 步走命令闭集）；真模型臂 19 应用 205 步里咨询 5、独立决定 0——兜底与诊断，不是承重件。</text>
 <text x="58" y="1228" class="foot">开箱：`npm ci &amp;&amp; npx playwright install chromium &amp;&amp; npm start` 两条命令见结果；无权重走规则模式（缺件点名+补齐命令）；`npm start -- --goal … --url …` 演示一次即归纳；`plan:flow` 一句话即编译。</text>
 </svg>

@@ -17,8 +17,10 @@
  * 并给 `cli`/`ssh` 加**返回值**（`returns`，stdout/regex/exit_code 抽取）→ 运行级数据集 →
  * 后续步骤以 `{dataset:NAME}` 消费（缺失 = 结构化 `needs_value`，绝不猜）。
  */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import path from "node:path";
 import { loadSource, type CliObservation } from "./datasource.ts";
+import { REPO } from "./flow.ts";
 import type { DatasetReader } from "./dataset.ts";
 import { checkToolSignal, validateToolSignal, type ToolSignal } from "./tool-signals.ts";
 import type { ToolStepResult } from "./app-runner.ts";
@@ -585,10 +587,240 @@ export function sshReady(): { ready: boolean; reason?: string } {
 /** 测试/嵌入方重置可用性缓存（环境变化后重新探测）。 */
 export function resetSshProbe(): void { sshProbe = null; }
 
+/* ------------------------------------------------------------- 内建：stdio */
+
+/** stdio（游戏/任意交互式进程）步的声明键。 */
+const STDIO_BLOCK_KEYS = ["argv", "cwd", "env_allow", "script", "timeout_ms"] as const;
+
+/** 一条"看到提示 → 回一行"的交互规则（`when` 是正则，`send` 是原文）。 */
+export interface StdioScriptStep { when: string; send: string }
+
+export interface StdioStepDecl {
+  argv: string[];
+  cwd: string | null;
+  envAllow: string[];
+  script: StdioScriptStep[];
+  timeoutMs: number;
+  signal: ToolSignal;
+  returns: Record<string, ReturnExtractor> | null;
+}
+
+function expandStdio(merged: Record<string, unknown>): StdioStepDecl {
+  const b = (isDict(merged["stdio"]) ? merged["stdio"] : {}) as Record<string, unknown>;
+  return {
+    argv: ((b["argv"] as unknown[]) ?? []).map((x) => String(x)),
+    cwd: b["cwd"] === undefined || b["cwd"] === null ? null : String(b["cwd"]),
+    envAllow: ((b["env_allow"] as unknown[]) ?? []).map((x) => String(x)),
+    script: Array.isArray(b["script"])
+      ? (b["script"] as Array<Record<string, unknown>>).map((x) => ({ when: String(x["when"]), send: String(x["send"]) }))
+      : [],
+    timeoutMs: b["timeout_ms"] === undefined || b["timeout_ms"] === null ? 20_000 : Math.trunc(Number(b["timeout_ms"])),
+    signal: (merged["signal"] ?? {}) as ToolSignal,
+    returns: (isDict(merged["returns"]) ? merged["returns"] : null) as Record<string, ReturnExtractor> | null,
+  };
+}
+
+/** env 白名单（与 cli 传输同口径：PATH 恒在，其余按声明；未声明的环境变量不泄漏给子进程）。 */
+function envForStdio(allow: readonly string[]): Record<string, string> {
+  const env: Record<string, string> = { PATH: process.env.PATH ?? "" };
+  for (const k of allow) {
+    const v = process.env[k];
+    if (v !== undefined) env[k] = v;
+  }
+  return env;
+}
+
+/**
+ * `stdio`：**持续双向会话**的应用类型（交互式游戏、REPL、终端问答……）。
+ *
+ * 与 cli/ssh 的区别：那两者是"发一次 argv、看一次观察"；stdio 的完成真值要在一段
+ * **提示-应答**对话之后才出现。本适配器把声明写成有序的 `script`（看到正则 → 回一行），
+ * 用管道驱动真实子进程，完成仍只认该步自己的进程观察信号（红线③），超时/退出都是结构化结果。
+ *
+ * 边界（如实）：行文本协议，不是 TUI/全屏终端（没有 pty 语义）；`retries` 不支持（重放一整局
+ * 不是同一次交互）；`dangerous` 干跑语义未实现。
+ */
+export const stdioAdapter: AppAdapter = {
+  kind: "stdio",
+  legacyKind: "tool",
+  label: "stdio",
+  stepKeys: ["stdio", "idempotent", "dangerous"],
+  validateStep(step, where, p) {
+    const b = step["stdio"];
+    if (!isDict(b)) {
+      p.push(`${where}.stdio: a stdio step needs an object {argv, script, [cwd/env_allow/timeout_ms]}`);
+      return;
+    }
+    for (const k of Object.keys(b)) {
+      if (!(STDIO_BLOCK_KEYS as readonly string[]).includes(k)) {
+        p.push(`${where}.stdio.${k}: unknown key (known: ${STDIO_BLOCK_KEYS.join(", ")})`);
+      }
+    }
+    const argv = b["argv"];
+    if (!Array.isArray(argv) || argv.length === 0 || !argv.every((x) => typeof x === "string" && x.trim() !== "")) {
+      p.push(`${where}.stdio.argv: a non-empty list of strings (program + args; argv array, never a shell)`);
+    }
+    if (b["cwd"] !== undefined && (typeof b["cwd"] !== "string" || !String(b["cwd"]).trim())) {
+      p.push(`${where}.stdio.cwd: non-empty string required (or omit → repo root)`);
+    }
+    if (b["env_allow"] !== undefined
+      && (!Array.isArray(b["env_allow"]) || b["env_allow"].some((x) => typeof x !== "string"))) {
+      p.push(`${where}.stdio.env_allow: a list of env var names (PATH is always kept)`);
+    }
+    const script = b["script"];
+    if (!Array.isArray(script) || script.length === 0) {
+      p.push(`${where}.stdio.script: a non-empty list of {when, send} interaction rules`);
+    } else {
+      script.forEach((entry, i) => {
+        const at = `${where}.stdio.script[${i}]`;
+        if (!isDict(entry)) { p.push(`${at}: must be an object {when, send}`); return; }
+        for (const k of Object.keys(entry)) {
+          if (k !== "when" && k !== "send") p.push(`${at}.${k}: unknown key (known: when, send)`);
+        }
+        if (typeof entry["when"] !== "string" || entry["when"] === "") {
+          p.push(`${at}.when: non-empty regex string required (the prompt to wait for)`);
+        } else {
+          try { new RegExp(entry["when"]); } catch (e) {
+            p.push(`${at}.when: invalid regex (${e instanceof Error ? e.message : String(e)})`);
+          }
+        }
+        if (typeof entry["send"] !== "string") p.push(`${at}.send: string required (the line to write)`);
+      });
+    }
+    if (b["timeout_ms"] !== undefined) {
+      const t = Number(b["timeout_ms"]);
+      if (!Number.isInteger(t) || t < 100 || t > 120_000) {
+        p.push(`${where}.stdio.timeout_ms: integer 100..120000 (a hung interactive app must be bounded)`);
+      }
+    }
+    const retries = Number(step["retries"] ?? 0);
+    if (retries > 0) {
+      p.push(`${where}.retries=${retries}: stdio 是交互式会话，不支持 retries（重放一整局不是同一次交互）`);
+    }
+    if (step["dangerous"] === true) {
+      p.push(`${where}.dangerous: stdio 的危险步/干跑语义尚未实现（设计文档 Slice 4）——先别声明`);
+    }
+    p.push(...validateToolSignal((step["signal"] ?? {}) as ToolSignal, `${where}.signal`));
+    validateReturns(step["returns"], where, p);
+  },
+  expand(merged) {
+    return { decl: expandStdio(merged) };
+  },
+  async run(decl, step, ctx) {
+    const d = decl as StdioStepDecl;
+    const base: ToolStepResult = {
+      index: step.index, desc: step.desc, source: `stdio:${d.argv[0] ?? ""}`, signal: d.signal, argv: [],
+      attempts: 1, done: false, dry_run: null, code: null, ok: false, stdout: "", stderr: "",
+    };
+    // 运行期占位符：先 {out_dir}/{run_id}，再 {dataset:NAME}（缺失 = needs_value，不猜、不启动进程）。
+    const runtime = (xs: string[]): string[] => xs.map((a) => a.split("{out_dir}").join(ctx.outDir)
+      .split("{run_id}").join(ctx.runId ?? ""));
+    const argvSub = substituteDatasetPlaceholders(runtime(d.argv), ctx.dataset ?? null);
+    const sendSub = substituteDatasetPlaceholders(runtime(d.script.map((x) => x.send)), ctx.dataset ?? null);
+    const missing = [...new Set([...argvSub.missing, ...sendSub.missing])];
+    if (missing.length > 0) {
+      base.refused = "needs_value";
+      base.stderr = `missing dataset value(s): ${missing.join(", ")} `
+        + `（{dataset:NAME} 只认前序步骤在信号成立后写的值；没有就停，不猜）`;
+      if (ctx.verbose) console.log(`  [${step.index}] stdio: NEEDS_VALUE (${base.stderr})`);
+      return { done: false, tool: base };
+    }
+    const argv = argvSub.value as string[];
+    const sends = sendSub.value as string[];
+    const cwd = d.cwd === null ? REPO : path.resolve(REPO, d.cwd);
+    base.argv = argv;
+    return await new Promise<AdapterStepRun>((resolve) => {
+      let stdout = "";
+      let stderr = "";
+      let next = 0;
+      let done = false;
+      let settled = false;
+      let timedOut = false;
+      let timeoutHandle: NodeJS.Timeout | null = null;
+      let graceHandle: NodeJS.Timeout | null = null;
+      const proc = spawn(argv[0]!, argv.slice(1), {
+        cwd, env: envForStdio(d.envAllow), stdio: ["pipe", "pipe", "pipe"],
+      });
+      // 进程早退时管道写入会 EPIPE：这是"这局没打完"的一种，不是未捕获异常。
+      proc.stdin.on("error", () => { /* 由 close 统一收口 */ });
+      const finalObs = (): CliObservation => ({
+        code: base.code ?? 1, ok: base.code === 0, stdout, stderr, argv, cwd, exit_ok: [0],
+      });
+      /** 会话进行中的观察：退出码未知（-1/false），所以 exit_* 叶子在进程真正退出前不会误成立。 */
+      const partialObs = (): CliObservation => ({
+        code: -1, ok: false, stdout, stderr, argv, cwd, exit_ok: [],
+      });
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+        if (graceHandle !== null) clearTimeout(graceHandle);
+        base.stdout = stdout;
+        base.stderr = stderr;
+        if (timedOut) {
+          base.stderr = `${stderr}${stderr.trim() ? "\n" : ""}[stdio] timed out after ${d.timeoutMs}ms; `
+            + `the interactive session did not reach the step signal (killed)`;
+        }
+        base.done = done;
+        const returns = done ? extractProcessReturns(d.returns, { stdout, stderr, code: base.code }) : undefined;
+        resolve({ done, tool: base, ...(returns !== undefined ? { returns } : {}) });
+      };
+      const writeNext = (): void => {
+        while (next < d.script.length && !settled) {
+          const rule = d.script[next]!;
+          if (!new RegExp(rule.when).test(stdout)) break;
+          try { proc.stdin.write(`${sends[next]!}\n`); } catch { /* EPIPE：等 close 收口 */ }
+          next += 1;
+        }
+      };
+      const checkDone = (): void => {
+        if (done || settled) return;
+        if (!checkToolSignal(partialObs(), d.signal)) return;
+        done = true;
+        // 信号已成立：给进程 1s 体面退出（flush 输出/自行收尾），否则 kill——"服务器型"进程
+        // 不能因为信号成立了就让 runner 永远等下去。
+        graceHandle = setTimeout(() => {
+          try { proc.kill("SIGKILL"); } catch { /* 已退出 */ }
+          graceHandle = setTimeout(finish, 300);
+          if (typeof graceHandle.unref === "function") graceHandle.unref();
+        }, 1_000);
+        if (typeof graceHandle.unref === "function") graceHandle.unref();
+      };
+      proc.on("error", (e) => {
+        base.refused = "tool-unavailable";
+        stderr = `${stderr}${stderr.trim() ? "\n" : ""}${e.name}: ${e.message}`;
+        finish();
+      });
+      proc.stdout.on("data", (chunk) => {
+        stdout += String(chunk);
+        writeNext();
+        checkDone();
+      });
+      proc.stderr.on("data", (chunk) => { stderr += String(chunk); });
+      proc.on("close", (code) => {
+        base.code = code;
+        if (!done) {
+          // 进程已退出：此时才用真实退出码评估信号（exit_* 叶子在这一刻才有意义）。
+          done = checkToolSignal(finalObs(), d.signal);
+        }
+        finish();
+      });
+      timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        try { proc.kill("SIGKILL"); } catch { /* 已退出 */ }
+        // 极端情况 close 不来：再等 500ms 强制收口（结果如实标 timeout）。
+        graceHandle = setTimeout(finish, 500);
+      }, d.timeoutMs);
+      if (ctx.verbose) console.log(`  [${step.index}] stdio ${d.argv[0]}: started (timeout ${d.timeoutMs}ms)`);
+    });
+  },
+};
+
 // 内建注册：顺序无关（注册表按 kind 查）。
 registerAppAdapter(webAdapter);
 registerAppAdapter(cliAdapter);
 registerAppAdapter(sshAdapter);
+registerAppAdapter(stdioAdapter);
 
 /** 已注册适配器的全部专属键（`STEP_KEYS` 的单一出处）。 */
 export function appAdapterStepKeys(): string[] {
@@ -601,4 +833,5 @@ export function resetAppAdapters(): void {
   registerAppAdapter(webAdapter);
   registerAppAdapter(cliAdapter);
   registerAppAdapter(sshAdapter);
+  registerAppAdapter(stdioAdapter);
 }

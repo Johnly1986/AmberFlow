@@ -326,7 +326,7 @@ npm run apps:suite -- --json
 - **专属键白名单**：写错类型（web 步带 `source`、cli 步带 `start_url`）**加载期就红**并点名归属。
 - **加一种应用类型 = 注册一个支持器**，不改 `app-pack` / `app-runner` 的核心分支。
 
-**ssh 步**（真实本机 sshd；`apps/ssh-demo` 是示范）：
+**ssh 步**（真实本机 sshd）与 **stdio 步**（交互式进程/游戏）见示范应用 `apps/mixed-demo`：
 
 ```jsonc
 { "id": "remote", "adapter": "ssh", "desc": "把令牌写到远端再读回",
@@ -339,6 +339,26 @@ npm run apps:suite -- --json
 `ssh` 的信号与工具步同一条进程观察面（exit/stdout/stderr，**没有**本地 `file_*`）；`retries` 需 `idempotent`；
 `dangerous`/干跑语义尚未实现（加载期拒绝）。**ssh 的 argv 走远端 shell**（ssh 客户端拼接后交给远端 shell），
 与本地 cli 的"argv 数组永不过 shell"不同——转义由声明者负责。
+
+**stdio 步**（游戏/任意交互式进程：提示-应答-信号，行文本协议）：
+
+```jsonc
+{ "id": "game", "adapter": "stdio", "desc": "玩一局猜数字游戏",
+  "stdio": {
+    "argv": ["node", "bench/fixtures/guess-game.mjs", "--secret=42"],
+    "script": [                                  // 有序：等到 when 正则 → 写一行 send
+      { "when": "Guess a number", "send": "50" },
+      { "when": "Too high", "send": "25" },
+      { "when": "Too low", "send": "37" }
+    ],
+    "timeout_ms": 20000                          // 交互式进程必须有界
+  },
+  "signal": { "exit_ok": true, "stdout_contains": "You win" },
+  "returns": { "tries": { "from": "stdout_regex", "pattern": "in (\\d+) tries" } } }
+```
+
+stdio 的完成真值仍是进程观察面；`retries`/`dangerous` 不支持（加载期拒绝），`{dataset:NAME}` 可喂 `send` 与 `argv`。
+完整示范（web+cli+ssh+stdio 一条旅程、三条传值通路）：`apps/mixed-demo`。
 
 **返回值传递（`returns` → `{dataset:NAME}`）**：进程族步（cli/ssh）可在信号成立后抽取值写进运行级数据集，
 后续步骤用 `{dataset:NAME}` 消费（浏览器命令步则用 `{"from":"dataset","key":"NAME"}`）：

@@ -1,6 +1,6 @@
 # 应用支持器（AppAdapter）：多类型应用、同一流程、返回值传递
 
-**日期**：2026-10-18 ｜ **状态**：设计 + **Slice 1/2 已落地**（提交见 git log）｜ **目标**（项目方）：
+**日期**：2026-10-18 ｜ **状态**：设计 + **Slice 1/2/3 已落地**（提交见 git log）｜ **目标**（项目方）：
 改进应用层，支持多类型应用（网页、ssh、游戏等），抽象"应用支持器"，**同一流程不应限定应用类型**，
 **返回信号应可以传递**；每次实现都用**真实场景**验证。
 
@@ -233,7 +233,7 @@ CI 的绿色定义仍只有 `bench/smoke.sh`（离线 + 既有夹具）。新增
   传过去的值）；另一条验证"ssh 连不上 = 结构化失败"。
 - 新增 `tests/app-returns.test.ts`（6 条，离线 CI 可跑）：加载期对账（无产者/重名/坏抽取器红）、
   产者信号不成立 ⇒ 不写 + 消费者 `needs_value`、抽取不到 ⇒ 如实缺席（不编造）。
-- 新增 `apps/ssh-demo`（仓库级示范应用，套件输出一行）：`npm run apps -- --app ssh-demo --no-sources`
+- 新增 `apps/ssh-demo`（仓库级示范应用，套件输出一行；Slice 3 已升级并更名为 `apps/mixed-demo`，见 §13）：`npm run apps -- --app ssh-demo --no-sources`
   实测 **4/4 通过**：token=`widgets`（cli→数据集）、ssh:localhost 真执行并返回值
   （`remote=widgets`）、真实文件 `<out>/ssh-token` 内容为 `widgets`、浏览器不变量成立；
   `apps:suite --only ssh-demo` 行结论"通过（model not needed）"。
@@ -253,3 +253,42 @@ CI 的绿色定义仍只有 `bench/smoke.sh`（离线 + 既有夹具）。新增
 - `stdio`（游戏等交互式进程）支持器尚未实现（Slice 3）；类型无关的 `when`/`invariants[i].adapter` 仍缺（Slice 4）。
 - ssh argv 是**远端 shell 字符串语义**（ssh 客户端会拼接后交给远端 shell）——与本地 cli 的
   "argv 数组永不过 shell"不同；转义责任在声明者，已写进 `apps/README.md` 与 ssh-demo 的 notes。
+
+## 13. Slice 3 落地记录（2026-10-18）：stdio（游戏/交互式进程）+ 全类型混合旅程
+
+**实现**
+
+- `src/app-adapters.ts`：新增 **`stdio` 支持器**——真实子进程的**持续双向会话**：
+  · 声明 `stdio: {argv, cwd?, env_allow?, script: [{when, send}], timeout_ms?}`；`argv` 数组（永不过 shell）、
+    `env_allow` 白名单（PATH 恒在，其余不泄漏）、`cwd` 相对仓库根；
+  · 交互协议是**有序脚本**：stdout 上等到 `when` 正则 → 写一行 `send`，真实提示-应答（不是"把输入一次性灌进去"）；
+  · 完成仍只认该步自己的**进程观察信号**（红线③）；会话进行中的观察把退出码置未知（-1/false），
+    所以 `exit_*` 叶子不会在进程退出前误成立，进程退出后再用真实退出码判一次；
+  · **超时 = 结构化失败**（kill + `[stdio] timed out after Nms`，不挂死、不抛栈）；
+  · 信号成立后给进程 1s 体面退出、否则 kill（"服务器型"进程不能因为信号成立就让 runner 永远等）；
+  · `retries`/`dangerous` 加载期拒绝（重放一整局不是同一次交互；干跑语义未实现）；
+  · 传值：`{out_dir}`/`{run_id}`/`{dataset:NAME}` 可进 argv 与 send；缺失 = needs_value **且不启动进程**。
+- `bench/fixtures/guess-game.mjs`：确定性的真实交互式猜数字游戏（`--secret`/`--max`），
+  作为 CI 无条件可跑的真实场景夹具（只依赖 node）。实现中抓到一个真实细节：**stdin 是管道、读端还开着时
+  Node 默认不会自己退出**——游戏一局结束必须显式 `process.exit`，否则适配器只能靠超时收场（已写进夹具注释）。
+- `apps/mixed-demo`（由 `apps/ssh-demo` 升级更名）：**一条旅程 7 步 / 四种类型**：
+  web（加购）→ cli（令牌）→ ssh（远端写/读，并从同一次输出抽优惠券码）→ cli（消费远端值）→
+  **web（命令绑定 `{from:"dataset"}` 填优惠券并应用）** → **stdio（玩一局猜数字）** → cli（消费游戏返回值）。
+  真实运行实测 **7/7 通过、28~31s**：`dataset_view` 四条值（token/remote/coupon/tries + 溯源）、
+  `<out>/ssh-token` 内容 = `widgets`、不变量 `coupon-applied` 成立、报告有"数据传递"行；
+  套件行"通过（model not needed）"。**浏览器侧消费数据集值**（第二条传值通路）由这个应用端到端证明。
+
+**真实场景验收**
+
+- `tests/app-stdio.test.ts`（7 条，离线 CI 可跑）：声明面（缺块/未知键/坏正则/retries/dangerous 红）、
+  真实交互一局（7 次猜中 + returns + 数据集溯源）、超时结构化失败、`{dataset:NAME}` 喂 send 的跨类型传递、
+  缺失值 = needs_value 且**进程没启动**（没有开局提示，证明"停在任何副作用之前"）。
+- `tests/app-mixed.test.ts`（1 条，**真实本机 sshd + 真实子进程**，无 sshd 则跳过）：`loadPack("mixed-demo")`
+  整跑，断言四种类型同旅程、三条传值通路、真实远端文件、浏览器结束态不变量、报告行。
+- 全量 `apps:suite` 与 `npm run verify`/`bench/smoke.sh` 见提交记录（能力闸：混合应用依赖 sshd，
+  不可用则如实跳过）。
+
+**已知边界（下一片）**
+
+- 类型无关的 `when` / `invariants[i].adapter`（进程族结束态不变量）仍是 Slice 4；
+  stdio 是**行文本协议**（无 pty/TUI 语义）、不支持 retries/dangerous；ssh 的 dangerous/干跑语义未实现。
