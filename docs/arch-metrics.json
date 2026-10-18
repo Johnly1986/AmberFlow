@@ -8,31 +8,31 @@
   },
   "note": "本文件是计量单一出处：能算的自动算，算不出来的写 note 并注明需要的命令；每个数带口径。",
   "corpus": {
-    "app_dirs": 26,
-    "packs_with_journey": 19,
-    "journey_entries": 180,
-    "browser_steps": 171,
-    "tool_steps": 9,
-    "steps_naming_target": 169,
+    "app_dirs": 27,
+    "packs_with_journey": 20,
+    "journey_entries": 184,
+    "browser_steps": 173,
+    "tool_steps": 11,
+    "steps_naming_target": 170,
     "hint_coverage": {
-      "hinted": 169,
-      "named": 171,
-      "browser": 171,
-      "pct": 98.8
+      "hinted": 170,
+      "named": 172,
+      "browser": 173,
+      "pct": 98.3
     },
-    "hint_coverage_browser": "169/171 = 98.8%",
-    "hint_coverage_with_flow": "169/181 = 93.4%（+2 个语义流模板的 10 步，设计上零 hint）",
+    "hint_coverage_browser": "170/173 = 98.3%",
+    "hint_coverage_with_flow": "170/183 = 92.9%（+2 个语义流模板的 10 步，设计上零 hint）",
     "flow_apps": 2,
     "flow_steps": 10,
     "declared_lines": {
-      "pack": 3238,
+      "pack": 3301,
       "flow": 238,
       "profile": 175,
-      "total": 3651
+      "total": 3714
     },
     "journey_roles_lines": {
-      "lines": 1971,
-      "of_pack_lines": "60.9%"
+      "lines": 2042,
+      "of_pack_lines": "61.9%"
     },
     "bin_fixture_lines": 101,
     "surfaces": {
@@ -46,25 +46,25 @@
     },
     "declarations": {
       "when": 7,
-      "retries": 11,
+      "retries": 12,
       "next": 1,
-      "all_journey_entries": "7/12/1",
-      "split_roles_plus_entries": "8/17/1",
-      "note": "三套分母都真实，引用时必须写明是哪一套：① 合并后只看浏览器步 = 7/11/1（本文件头条）；② 合并后全部 journey 条目（含 9 个工具步）= 7/12/1；③ 角色模板与 journey 条目分开数（同一条声明可能各数一次）= 8/17/1"
+      "all_journey_entries": "7/13/1",
+      "split_roles_plus_entries": "8/18/1",
+      "note": "三套分母都真实，引用时必须写明是哪一套：① 合并后只看浏览器步 = 7/12/1（本文件头条）；② 合并后全部 journey 条目（含 11 个工具步）= 7/13/1；③ 角色模板与 journey 条目分开数（同一条声明可能各数一次）= 8/18/1"
     }
   },
   "model": {
     "tier": "on（/tmp/laya_dec.onnx 在位）",
     "real_model_corpus": {
       "stats": {
-        "apps": 17,
-        "trace_steps": 201,
+        "apps": 18,
+        "trace_steps": 202,
         "choice_asks": 5,
         "passed": 0,
         "reobserve": 0,
         "escalate": 0,
-        "rule_match": 201,
-        "secs": 1085.6,
+        "rule_match": 202,
+        "secs": 1147,
         "tier": "on"
       }
     },
@@ -77,7 +77,7 @@
         "reobserve": 0,
         "escalate": 0,
         "rule_match": 5,
-        "secs": 3.4,
+        "secs": 4.4,
         "tier": "ablation"
       }
     },
@@ -109,7 +109,7 @@
     }
   },
   "tests": {
-    "count": 1288,
+    "count": 1303,
     "source": "--tests（应来自 `npx vitest list | grep -cE \"^(tests|integrations)/\"`；静态数 `it(` 只有 799，不可用）"
   }
 }

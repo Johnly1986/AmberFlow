@@ -35,6 +35,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { loadPack, expandPack, type AppPack } from "../src/app-pack.ts";
+import { getAppAdapter } from "../src/app-adapters.ts";
 import { runApp, type AppRunResult, type StepStateView } from "../src/app-runner.ts";
 import { conditionedInstructionCriteria, pageStateForModel } from "../src/page-context.ts";
 import { checkArtifacts, missingPieces, modelConfigError, onnxModelPath } from "../src/model-artifacts.ts";
@@ -79,7 +80,14 @@ interface Row {
   state?: StepStateView;
 }
 
-/** 离线旅程包发现：有浏览器步、无 hosts（真网络）、无 probe 块的 pack。 */
+/**
+ * 离线旅程包发现：有浏览器步、无 hosts（真网络）、无 probe 块的 pack。
+ *
+ * **还要排除"能力探测型"应用**（多类型应用里依赖本机服务的类型，如 ssh 需要可用 sshd）：
+ * 这份提名语料是**机器无关的冻结证据**（`--check` 逐字节复算），一个"能不能跑取决于这台机器
+ * 有没有装服务"的应用进了语料，语料就会随环境漂移——所以按适配器声明的 `ready()` 探测排除，
+ * **不按应用 id 特判**（加新类型时自动获得同一条规则）。
+ */
 function discoverOfflineJourneyPacks(): Array<{ pack: AppPack; path: string }> {
   const root = path.resolve(import.meta.dirname, "..", "apps");
   const out: Array<{ pack: AppPack; path: string }> = [];
@@ -90,6 +98,13 @@ function discoverOfflineJourneyPacks(): Array<{ pack: AppPack; path: string }> {
       const pack = loadPack(p);
       const live = Array.isArray(pack.hosts) && pack.hosts.length > 0;
       if (live || pack.probe !== undefined) continue;
+      let capabilityGated = false;
+      try {
+        for (const st of expandPack(pack, {}, ":memory:").steps) {
+          if (getAppAdapter(st.adapter)?.ready !== undefined) { capabilityGated = true; break; }
+        }
+      } catch { continue; }   // 展开失败不进语料（apps:suite 会点名它）
+      if (capabilityGated) continue;
       out.push({ pack, path: p });
     } catch { /* 坏包不进语料（apps:suite 会点名它） */ }
   }

@@ -26,7 +26,8 @@ import path from "node:path";
 import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
 import fs from "node:fs";
 import { parseArgs } from "node:util";
-import { appDirs, loadPack, packHintCoverage, type AppPack } from "../src/app-pack.ts";
+import { appDirs, expandPack, loadPack, packHintCoverage, type AppPack } from "../src/app-pack.ts";
+import { getAppAdapter } from "../src/app-adapters.ts";
 import { runApp, refusalLine, type AppRunResult } from "../src/app-runner.ts";
 import { checkArtifacts, missingPieces } from "../src/model-artifacts.ts";
 import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "../src/decision-cache.ts";
@@ -101,6 +102,30 @@ export interface SuiteRow {
 export function isLive(pack: AppPack): boolean {
   const steps = [...Object.values(pack.roles ?? {}), ...pack.journey] as Array<Record<string, unknown>>;
   return steps.some((st) => typeof st["start_url"] === "string" && /^https?:\/\//.test(String(st["start_url"])));
+}
+
+/**
+ * **能力闸**：这个包用到的应用支持器在当前机器上能不能真跑（如 ssh 需要可达的 sshd）。
+ *
+ * 为什么要它：多类型应用里有些类型依赖本机服务；在没装/没跑 sshd 的机器上直接跑会红，
+ * 但那是"环境不具备"而不是"应用错了"。套件因此**如实跳过**（跳过 ≠ 通过，退出码仍是有未执行）。
+ * 扩展点：每个适配器可自带 `ready()` 探测，这里不写任何类型专属分支。
+ */
+export function unavailableAdapters(pack: AppPack): string[] {
+  let steps;
+  try {
+    steps = expandPack(pack, {}, ":memory:").steps;
+  } catch {
+    return [];   // 展开失败会在正常运行时以"加载失败/运行崩了"如实报，不在这里重复猜
+  }
+  const out: string[] = [];
+  for (const kind of new Set(steps.map((st) => st.adapter))) {
+    const probe = getAppAdapter(kind)?.ready?.();
+    if (probe !== undefined && !probe.ready) {
+      out.push(`${kind}：${probe.reason ?? "本机能力不可用"}`);
+    }
+  }
+  return out;
 }
 
 /** 跑一个应用包（离线口径）。返回值就是套件表格里的一行；完整结果另落 `<套件目录>/<app>/` 供 matrix 读。 */
@@ -259,6 +284,12 @@ export async function suite(
       }
       if (isLive(pack)) {
         skipped.push(`${pack.id}（线上旅程：start_url 是 http(s)，要真网络）`);
+        continue;
+      }
+      // 多类型应用的能力闸：本机缺服务（如 sshd）⇒ 如实跳过，不假装红也不假装绿。
+      const unavailable = unavailableAdapters(pack);
+      if (unavailable.length > 0) {
+        skipped.push(`${pack.id}（能力不可用：${unavailable.join("；")}）`);
         continue;
       }
       try {

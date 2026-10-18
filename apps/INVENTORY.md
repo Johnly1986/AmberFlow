@@ -35,6 +35,7 @@
 | A8 | `apps/checkin-binding` | `testpages/checkin.html`：机器值（`2026-10-13`）与人读标签（`10月13日 周二`）**不同**的真 `<select>`；P3 数据槽层的验收台 | ✅ | `npm run apps -- --app checkin-binding` | **已完成**（1/1 步、2/2 不变量、零模型提问；负例"规则命不中 ⇒ `needs_value` 且页面一个字没改"钉在 `tests/bindings.test.ts`） |
 | A9 | `apps/cold-search-next` | `testpages/cold-search.html`：站点状态活在 sessionStorage 里（每个子目标都会重新 `goto`，页面自己记不住"搜过几次"）；P4 声明式后继 `next` 的验收台 | ✅ | `npm run apps -- --app cold-search-next` | **已完成**（2/2 步、`search` **走两遍**、1/1 不变量；删 `next` 即红、无条件自环 → `next_cycle` 结构化停因，钉在 `tests/path-next.test.ts`） |
 | — | `apps/skybook-checksubmit` | `transfer/site2/hotels.html`：P2 命令闭集的验收台（"勾选 + 提交"放进**一个**子目标） | ✅ | `npm run apps -- --app skybook-checksubmit` | **已完成**（旧 8 个生成包 `apps:gen --check` 8/8 不漂；负例钉在 `tests/actions.test.ts`） |
+| — | `apps/ssh-demo` | **同一旅程混用 web + cli + ssh**：返回值跨类型传递（cli→数据集→ssh→数据集→cli）；真实副作用的证据在 `{out_dir}` 里可查 | ✅* | `npm run apps -- --app ssh-demo` | **已完成**（套件：能力探测到本机 sshd 才跑；不可用**如实跳过**——跳过 ≠ 通过。*需本机 sshd） |
 | — | `apps/demo-app` / `cli-report` / `repo-report` | 应用层示范、工具步示范、真实工具（git+jq） | ✅ | 见 `apps/README.md` | 已完成 |
 | — | `apps/ctrip-live` / `ota-live` / `qunar-live` | 测量型应用（探针集） | ❌ 需网络 | 见 `bench/live-retest/REPORT.md` | 已完成 |
 | — | `apps/demo-tool` / `git-log` / `bench-cases` | 纯数据源应用（无旅程） | ✅ | `npm run apps:matrix` | 已完成 |

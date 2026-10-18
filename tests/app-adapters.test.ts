@@ -13,8 +13,9 @@ import {
 } from "../src/app-pack.ts";
 import {
   getAppAdapter, listAppAdapters, registerAppAdapter, requireAppAdapter, resetAppAdapters,
-  type AppAdapter,
+  sshReady, type AppAdapter,
 } from "../src/app-adapters.ts";
+import { unavailableAdapters } from "../tools/apps_suite.ts";
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 const demo = (): any => clone(loadPack("demo-app")) as any;
@@ -47,10 +48,10 @@ afterEach(() => resetAppAdapters());
 
 describe("①注册表：一种应用类型 = 一个支持器", () => {
   it("内建 web/cli；未知 id 响亮报错并列出已知项（绝不静默退回）", () => {
-    expect(listAppAdapters()).toEqual(["cli", "web"]);
+    expect(listAppAdapters()).toEqual(["cli", "ssh", "web"]);
     expect(getAppAdapter("web")!.legacyKind).toBe("browser");
     expect(getAppAdapter("cli")!.legacyKind).toBe("tool");
-    expect(() => requireAppAdapter("telnet")).toThrow(/未知的应用支持器.*telnet.*cli, web/);
+    expect(() => requireAppAdapter("telnet")).toThrow(/未知的应用支持器.*telnet.*cli, ssh, web/);
   });
 
   it("注册新类型后：步键立刻合法、包能通过校验并展开出 adapter/decl（不改 app-pack 分支）", () => {
@@ -163,5 +164,94 @@ describe("④执行分派：adapter.run（迁移桥委托 runner 服务；新类
     expect(cliOut.done).toBe(true);
     expect(cliOut.tool).toMatchObject({ done: true, code: 0 });
     expect(calls).toEqual(["web", "cli"]);
+  });
+});
+
+/* --------------------------------------------- Slice 2：ssh 声明面与能力探测 */
+
+describe("⑤ssh 支持器：声明面（加载期）", () => {
+  const sshStep = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: "remote", desc: "在远端读一次", adapter: "ssh",
+    ssh: { host: "localhost", argv: ["cat", "/tmp/x"] },
+    signal: { exit_ok: true }, ...over,
+  });
+
+  it("合法 ssh 步通过校验并展开出 ssh 声明；事件族信号（exit/stdout）可用", () => {
+    const pack = demo();
+    pack.journey = [sshStep(), ...pack.journey.slice(1)];
+    expect(validatePack(pack as AppPack).filter((x) => x.includes("ssh"))).toEqual([]);
+    const exp = expandPack(pack as AppPack, {}, ":memory:");
+    const step = exp.steps[0]!;
+    expect(step).toMatchObject({ adapter: "ssh", kind: "tool" });
+    expect((step.decl as { host: string }).host).toBe("localhost");
+  });
+
+  it("坏 ssh 块：缺 host/argv、未知键、port 越界 —— 全部加载期红", () => {
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ ssh: { argv: ["true"] } }, "ssh.host"],
+      [{ ssh: { host: "localhost" } }, "ssh.argv"],
+      [{ ssh: { host: "localhost", argv: ["true"], bogus: 1 } }, "ssh.bogus: unknown key"],
+      [{ ssh: { host: "localhost", argv: ["true"], port: 70000 } }, "ssh.port"],
+    ];
+    for (const [over, snippet] of cases) {
+      const pack = demo();
+      pack.journey = [sshStep(over), ...pack.journey.slice(1)];
+      expect(validatePack(pack as AppPack).join(" | ")).toContain(snippet);
+    }
+  });
+
+  it("ssh 没有本地文件面：file_* 信号加载期拒绝；dangerous 未实现也拒绝", () => {
+    const pack1 = demo();
+    pack1.journey = [sshStep({ signal: { file_exists: "/tmp/x" } }), ...pack1.journey.slice(1)];
+    expect(validatePack(pack1 as AppPack).join(" | ")).toContain("ssh 步没有本地文件面");
+    const pack2 = demo();
+    pack2.journey = [sshStep({ dangerous: true }), ...pack2.journey.slice(1)];
+    expect(validatePack(pack2 as AppPack).join(" | ")).toContain("ssh 的危险步/干跑语义尚未实现");
+  });
+
+  it("web 步声明 returns ⇒ 加载期红（DOM 抽取是 Slice 4）", () => {
+    const pack = demo();
+    pack.journey = [{ ...explicitWebStep(), returns: { x: { from: "stdout" } } }, ...pack.journey.slice(1)];
+    expect(validatePack(pack as AppPack).join(" | ")).toContain("web 步的返回值抽取尚未实现");
+  });
+
+  it("能力探测返回布尔形状（本机可用性如实反映，不在 CI 猜测）", () => {
+    const probe = sshReady();
+    expect(typeof probe.ready).toBe("boolean");
+    if (!probe.ready) expect(typeof probe.reason).toBe("string");
+  });
+});
+
+describe("⑥能力闸：本机缺服务 ⇒ 套件如实跳过（跳过 ≠ 通过）", () => {
+  it("适配器 ready() 不可用 ⇒ unavailableAdapters 给出类型 + 原因；可用 ⇒ 空", () => {
+    const needService: AppAdapter = {
+      ...fakeAdapter({ kind: "needsvc" }),
+      ready: () => ({ ready: false, reason: "本机没有该服务" }),
+    };
+    registerAppAdapter(needService);
+    const pack = demo();
+    pack.journey = [{ id: "s", desc: "需要一个本机服务", signal: { exit_ok: true }, adapter: "needsvc", needsvc_cmd: "x" }];
+    pack.invariants = [];
+    const missing = unavailableAdapters(pack as AppPack);
+    expect(missing).toEqual(["needsvc：本机没有该服务"]);
+
+    const available: AppAdapter = { ...fakeAdapter({ kind: "avail" }), ready: () => ({ ready: true }) };
+    registerAppAdapter(available);
+    const pack2 = demo();
+    pack2.journey = [{ id: "s", desc: "服务可用", signal: { exit_ok: true }, adapter: "avail", avail_cmd: "x" }];
+    pack2.invariants = [];
+    expect(unavailableAdapters(pack2 as AppPack)).toEqual([]);
+  });
+
+  it("内建的 ssh 能力探测与套件判定一致（同一处探测，不各写一套）", () => {
+    const pack = demo();
+    pack.journey = [{
+      id: "ssh", desc: "ssh 步", adapter: "ssh",
+      ssh: { host: "localhost", argv: ["true"] }, signal: { exit_ok: true },
+    }];
+    pack.invariants = [];
+    const missing = unavailableAdapters(pack as AppPack);
+    const probe = sshReady();
+    expect(missing.length === 0).toBe(probe.ready);
   });
 });

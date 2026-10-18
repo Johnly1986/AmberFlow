@@ -1,6 +1,6 @@
 # 应用支持器（AppAdapter）：多类型应用、同一流程、返回值传递
 
-**日期**：2026-10-18 ｜ **状态**：设计 + **Slice 1 已落地**（提交见 git log）｜ **目标**（项目方）：
+**日期**：2026-10-18 ｜ **状态**：设计 + **Slice 1/2 已落地**（提交见 git log）｜ **目标**（项目方）：
 改进应用层，支持多类型应用（网页、ssh、游戏等），抽象"应用支持器"，**同一流程不应限定应用类型**，
 **返回信号应可以传递**；每次实现都用**真实场景**验证。
 
@@ -199,3 +199,57 @@ CI 的绿色定义仍只有 `bench/smoke.sh`（离线 + 既有夹具）。新增
 
 **下一片（Slice 2）**：`ssh` 支持器（本机 sshd 真场景）+ `returns`（stdout_regex → 数据集）→
 下一步消费；随后 Slice 3 `stdio`/游戏 + 混合类型旅程；Slice 4 类型无关的 `when`/不变量与架构收口。
+
+## 12. Slice 2 落地记录（2026-10-18）：ssh 支持器 + 返回值传递 + 能力闸
+
+**实现**
+
+- `src/app-adapters.ts`：
+  · **`ssh` 支持器**（`kind: "ssh"`）：结构化声明 `ssh: {host, user?, port?, key?, argv}`；执行真实的
+    `ssh` 子进程（`BatchMode=yes`/`StrictHostKeyChecking=no`/`ConnectTimeout=5`，30s 超时）；信号复用
+    **进程观察面**（`tool-signals`：exit/stdout/stderr/json_path）；与 cli 同口径的 `retries`+`idempotent`、
+    加载期拒绝 `file_*`（ssh 没有本地文件面）与 `dangerous`（干跑语义未实现，Slice 4 再做）；连不上 =
+    结构化失败（`code != 0`、`done=false`），不抛栈；`ready()` 能力探测（本机 sshd 是否可用）。
+  · **返回值（returns）**：共享 `returns` 步键；进程族（cli/ssh）同一套抽取器
+    `stdout` / `stdout_regex` / `stderr_regex` / `exit_code`；**只在信号成立后**抽取并交给 runner 写数据集
+    （`writtenBy = stepId#attempt`）；web 步明确拒绝（DOM 抽取留给 Slice 4）。
+  · **传值**：运行期占位符 `{dataset:NAME}`（与 `{out_dir}`/`{run_id}` 同族）——cli 参数在
+    `runToolStep` 解析、ssh argv 在适配器内解析；**缺失/陈旧 = 结构化 `needs_value`，绝不替换成空串或猜值**。
+- `src/app-pack.ts`：`returns` 进共享键；**加载期对账**——`returns.NAME` 产者在同一旅程里必须唯一、
+  每个 `{dataset:NAME}` 必须有产者（否则运行期必然 needs_value 的"静默版"）；`{dataset:NAME}` 不参与
+  槽位替换（保留到运行期，不误报 unknown slot）。
+- `src/app-runner.ts`：运行级 `DatasetStore`（可注入）；每步执行**前**失效该步上次写过的值（`next` 回边/
+  重跑不读陈旧世代），执行后按需写入；`{from:"dataset"}` 浏览器命令绑定接线（`MiddlewareOptions.dataset`）；
+  `tool_steps[i].returns` 与结果级 `dataset_view`（含 generation/stale/溯源）成为审计面；报告多一行数据传递。
+- `tools/apps_suite.ts`：**能力闸** `unavailableAdapters(pack)`——展开旅程，问每个用到的适配器
+  `ready()`；不可用 ⇒ 该应用**如实跳过**（理由进 skipped 列表；跳过 ≠ 通过，退出码仍有"未执行"）。
+  以后任何依赖本机服务的类型（游戏/桌面等）自动获得同一条纪律，不在套件里写类型分支。
+
+**真实场景验收**
+
+- 新增 `tests/app-ssh.test.ts`（2 条，**真实本机 sshd**；无 sshd 时打印原因跳过）：同一旅程
+  **web → cli → ssh → cli**：cli 的 `stdout_regex` → 数据集 → ssh 远端命令的 `{dataset:token}`；
+  ssh 的 `stdout_regex` → 数据集 → 下一 cli 步 argv；**远端副作用可查**（远端写出的文件内容 =
+  传过去的值）；另一条验证"ssh 连不上 = 结构化失败"。
+- 新增 `tests/app-returns.test.ts`（6 条，离线 CI 可跑）：加载期对账（无产者/重名/坏抽取器红）、
+  产者信号不成立 ⇒ 不写 + 消费者 `needs_value`、抽取不到 ⇒ 如实缺席（不编造）。
+- 新增 `apps/ssh-demo`（仓库级示范应用，套件输出一行）：`npm run apps -- --app ssh-demo --no-sources`
+  实测 **4/4 通过**：token=`widgets`（cli→数据集）、ssh:localhost 真执行并返回值
+  （`remote=widgets`）、真实文件 `<out>/ssh-token` 内容为 `widgets`、浏览器不变量成立；
+  `apps:suite --only ssh-demo` 行结论"通过（model not needed）"。
+- `apps:suite` 全量回归：ssh-demo 加入后与应用层既有行为一致（见提交记录里的套件输出）；
+  能力不可用路径由 `tests/app-adapters.test.ts` 的确定性假适配器覆盖（不可用 ⇒ 给出类型+原因；可用 ⇒ 空）。
+
+**与冻结语料的关系（本轮实测到并修掉的一处）**
+
+新增 `apps/ssh-demo` 后，`nomination --check` 立刻红：**机器无关的提名语料**把"能不能跑取决于本机
+有没有 sshd"的应用也算进去了（14 包/165 步 → 15 包/166 步）。修法不是特判应用 id，而是把**语料口径**
+写进工具：凡是用到声明了 `ready()` 能力探测的适配器（如 ssh）的应用，**不进离线网页提名语料**
+（`tools/instruction_nomination.ts` 的 `discoverOfflineJourneyPacks`）——以后任何依赖本机服务的类型自动
+获得同一条规则。修后 `nomination --check` 与上下文实验产物都恢复 14 包/165 步逐字节一致。
+
+**已知边界（下一片）**
+
+- `stdio`（游戏等交互式进程）支持器尚未实现（Slice 3）；类型无关的 `when`/`invariants[i].adapter` 仍缺（Slice 4）。
+- ssh argv 是**远端 shell 字符串语义**（ssh 客户端会拼接后交给远端 shell）——与本地 cli 的
+  "argv 数组永不过 shell"不同；转义责任在声明者，已写进 `apps/README.md` 与 ssh-demo 的 notes。

@@ -48,7 +48,8 @@ import { captureStateView } from "./signal-induction.ts";
 import { captureStepStateView, type StepStateView } from "./page-context.ts";
 import type { StateView } from "./signals.ts";
 import { expandPack, listPacks, loadPack, type AppPack, type ExpandedStep, type PackPolicy } from "./app-pack.ts";
-import { getAppAdapter, type AdapterRunContext } from "./app-adapters.ts";
+import { getAppAdapter, substituteDatasetPlaceholders, type AdapterRunContext } from "./app-adapters.ts";
+import { DatasetStore, type DatasetEntry } from "./dataset.ts";
 import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "./plan.ts";
 
 /** 进程内运行序号：保证同一毫秒内连续两次运行也不会撞上同一个 `{run_id}`。 */
@@ -114,6 +115,11 @@ export interface AppRunOptions {
    * 结果 JSON 与桥的 summary 都念这一个值（LAYA_VALUE_PLAN P0：用户先要知道此刻跑在哪层）。
    */
   modelStatus?: string;
+  /**
+   * 运行级数据集（Slice 2：返回值传递）。缺省 = 本次运行新建一个；注入 = 调用方要
+   * 在运行前预置值（测试）/复用同一份（同一进程连跑）。`{dataset:NAME}` 只认它。
+   */
+  dataset?: DatasetStore;
   /** 决策缓存统计的取数口（调用方装了缓存就给；`runApp` 在旅程跑完后读一次）。 */
   runtimeStats?: () => DecisionCacheStats;
   /** 模型咨询计数的取数口（`countingRuntime` 包一层就给；同样是跑完读一次）。 */
@@ -267,12 +273,14 @@ export interface ToolStepResult {
    *   tool-unavailable —— 命令根本起不来（缺二进制 / 超时被杀 / argv 非法）：
    *                       这是**结果**不是崩溃——上层要能在结果 JSON 里读到它。
    */
-  refused?: "dangerous" | "declined" | "dry-run-failed" | "tool-unavailable";
+  refused?: "dangerous" | "declined" | "dry-run-failed" | "tool-unavailable" | "needs_value";
   dry_run: { code: number; ok: boolean; stdout: string; argv: string[] } | null;
   code: number | null;
   ok: boolean;
   stdout: string;
   stderr: string;
+  /** Slice 2：本步信号成立后抽取出的返回值（runner 同时写进运行级数据集）。 */
+  returns?: Record<string, unknown>;
 }
 
 export interface AppInvariantResult {
@@ -292,6 +300,7 @@ export const REFUSAL_LABELS: Record<string, string> = {
   declined: "未执行（确认函数拒绝；未落盘）",
   "dry-run-failed": "未执行（干跑没通过，所以没有 apply）",
   "tool-unavailable": "未执行（命令起不来：缺二进制 / 超时 / argv 非法）",
+  "needs_value": "未执行（{dataset:NAME} 引用的数据没有值——前序步骤没产生它或已失效；不猜）",
 };
 
 /** 给 CLI 用的一行短语（不带 Markdown 反引号）。 */
@@ -371,6 +380,8 @@ export interface AppRunResult {
   hint_memory?: { path: string | null; entries: number; used: number; rejected: number };
   /** `captureState: true` 时的旅程结束状态（见 `RunOptions.captureState`）。 */
   end_state?: StateView;
+  /** Slice 2：运行级数据集的审计视图（含陈旧世代与溯源；缺字段 = 没有 returns）。 */
+  dataset_view?: DatasetEntry[];
   /**
    * S0（NL Flow）：`captureTraces: true` 时的每浏览器步执行证据。缺字段 = 没开
    * （缺省等价的纪律：新字段不该只是"多一行没人看的数"）。
@@ -407,9 +418,20 @@ export async function runToolStep(
     ?? `${Date.now().toString(36)}-${process.pid}-${++RUN_SEQ}`;
   // `{out_dir}` 是运行期占位符（写到哪儿），不是计划里的值：argv、干跑 argv 和 signal 里
   // 的路径（file_exists / file_absent）都要换成真实输出目录，否则"产物落地了吗"永远为假。
+  const missingDataset = new Set<string>();
   const sub = (v: unknown): unknown => {
     if (typeof v === "string") {
-      return v.split("{out_dir}").join(outDir).split("{run_id}").join(runId);
+      // Slice 2：`{dataset:NAME}` 从运行级数据集现读（缺失 = 结构化 needs_value，绝不猜；
+      // 与 `{out_dir}`/`{run_id}` 同一条"运行期占位符"纪律，只是值来自前序步骤）。
+      return v.split("{out_dir}").join(outDir).split("{run_id}").join(runId)
+        .replace(/\{dataset:([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, name: string) => {
+          const ent = opts.dataset?.read(name) ?? null;
+          if (ent === null || ent.value === undefined || ent.value === null) {
+            missingDataset.add(name);
+            return m;
+          }
+          return typeof ent.value === "string" ? ent.value : JSON.stringify(ent.value);
+        });
     }
     if (Array.isArray(v)) return v.map(sub);
     if (typeof v === "object" && v !== null) {
@@ -420,10 +442,21 @@ export async function runToolStep(
     return v;
   };
   const t = { ...rawTool, signal: sub(rawTool.signal) as ToolSignal };
+  // 参数里的运行期占位符一次解析完（干跑与 apply 用同一份），缺失值在**任何副作用之前**停。
+  const resolvedArgs = t.args.map((a) => String(sub(a)));
+  const resolvedDry = t.dry_run_args === null ? null : t.dry_run_args.map((a) => String(sub(a)));
   const base: ToolStepResult = {
     index: step.index, desc: step.desc, source: t.source, signal: t.signal, argv: [],
     attempts: 0, done: false, dry_run: null, code: null, ok: false, stdout: "", stderr: "",
   };
+
+  if (missingDataset.size > 0) {
+    base.refused = "needs_value";
+    base.stderr = `missing dataset value(s): ${[...missingDataset].join(", ")} `
+      + `（{dataset:NAME} 只认前序步骤在信号成立后写的值；没有就停，不猜）`;
+    if (opts.verbose) console.log(`  [${step.index}] tool ${t.source}: NEEDS_VALUE (${base.stderr})`);
+    return base;
+  }
 
   const unavailable = (e: unknown): void => {
     base.refused = "tool-unavailable";
@@ -435,7 +468,7 @@ export async function runToolStep(
   let dry: CliObservation | null = null;
   if (t.dry_run_args) {
     try {
-      dry = await cliRunDetailed(target, 60, src, t.dry_run_args.map((a) => String(sub(a))));
+      dry = await cliRunDetailed(target, 60, src, resolvedDry ?? []);
     } catch (e) {
       // 缺二进制 / 超时被杀：干跑起不来 => 不 apply，并且如实上报（不抛栈）
       unavailable(e);
@@ -468,7 +501,7 @@ export async function runToolStep(
     base.attempts = i;
     let o: CliObservation;
     try {
-      o = await cliRunDetailed(target, 60, src, t.args.map((a) => String(sub(a))));
+      o = await cliRunDetailed(target, 60, src, resolvedArgs);
     } catch (e) {
       unavailable(e);
       break;
@@ -604,9 +637,16 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
           : { value: 0.25, source: "default" as const },
   };
   const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
+  // Slice 2（应用支持器）：运行级数据集——步骤信号成立后写入 `returns`，后续步骤以
+  // `{dataset:NAME}` 消费；重跑（next 回边）前先失效，下游不会读到陈旧世代。
+  const dataset = opts.dataset ?? new DatasetStore();
+  const returnsByStep = new Map<string, string[]>();
+  const runOpts: AppRunOptions = { ...opts, dataset };
   const mw = new BrowserMiddleware({
     modelId,
     auditor: new MockAuditor(),
+    // Slice 2：浏览器命令步可以 `{"from":"dataset","key":"NAME"}` 消费前序步骤的返回值。
+    dataset,
     maxSteps: 8,
     confFloor: policy.conf_floor.value,
     riskyThreshold: 0.6,
@@ -666,9 +706,12 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   let pathStopOut: AppRunResult["path_stop"];
   // 应用支持器运行上下文（docs/APP_SUPPORTER_DESIGN.md §2）：web/cli 两个内建适配器
   // **迁移桥**——执行委托回下面两个服务（执行循环本身不搬进适配器）；新类型自己实现 run。
+  const appRunId = `${Date.now().toString(36)}-${process.pid}`;
   const adapterCtx: AdapterRunContext = {
     outDir: path.dirname(planPath),
     verbose,
+    dataset,
+    runId: appRunId,
     runWebStep: async (st: ExpandedStep): Promise<{ done: boolean }> => {
       const sg = plan.subgoals[browserIndexOf[st.index]!]!;
       const shell = await getShell();
@@ -705,7 +748,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       plan.save();
       return { done: rep.done };
     },
-    runCliStep: async (st: ExpandedStep) => runToolStep(st, opts),
+    runCliStep: async (st: ExpandedStep) => runToolStep(st, runOpts),
   };
   try {
     let i = 0;
@@ -733,8 +776,26 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
         throw new AppRunConfigError(`unknown app adapter ${JSON.stringify(step.adapter)} `
           + `on step #${step.index} (known: web, cli)`);
       }
+      // `next` 回边/重跑：这一步上次写过的返回值在重新执行前先失效（数据集纪律：
+      // 陈旧世代不可读，下游会以 needs_value 结构化停，而不是静默使用旧值）。
+      const stepKey = step.id ?? `#${step.index}`;
+      for (const by of returnsByStep.get(stepKey) ?? []) dataset.invalidateStep(by);
+      returnsByStep.delete(stepKey);
       const outcome = await adapter.run(step.decl, step, adapterCtx);
-      if (outcome.tool) toolSteps.push(outcome.tool);
+      if (outcome.tool) {
+        if (outcome.done && outcome.returns !== undefined) {
+          // 声明的抽取执行过了：哪怕一个都没抽到，也在证据面留 {}（"执行了，只是没抽到"）。
+          outcome.tool.returns = outcome.returns;
+          if (Object.keys(outcome.returns).length > 0) {
+            const writtenBy = `${stepKey}#${outcome.tool.attempts || 1}`;
+            for (const [name, value] of Object.entries(outcome.returns)) {
+              dataset.write(name, value, writtenBy);
+            }
+            returnsByStep.set(stepKey, [writtenBy]);
+          }
+        }
+        toolSteps.push(outcome.tool);
+      }
       // 声明式后继：按序取第一个"此刻适用"的候选；都没声明/都不适用 ⇒ 自然顺序。
       // 适用性问的是该步**自己的 `when`**（"这一步适不适用"），问在当次页面上——
       // 这一步没有模型参与，走向由声明与页面证据决定（红线①）。
@@ -809,6 +870,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     completed: `${doneCount}/${expanded.steps.length}`,
     subgoals, tool_steps: toolSteps, invariants: invariantResults,
     ...(opts.captureTraces ? { step_traces: stepTraces } : {}),
+    // Slice 2：返回值传递的审计面（缺省不出现——没有 returns 的包产物逐字节不变）。
+    ...(dataset.entriesView().length > 0 ? { dataset_view: [...dataset.entriesView()] } : {}),
     // 只在**真的走回来过**时才写这个字段：声明了 id 但没走边的包，结果 JSON 与今天一模一样
     // （缺省等价的纪律：新字段不该只是"多一行没人看的数"）。
     ...(Object.values(walk.visits()).some((n) => n > 1) ? { path_visits: walk.visits() } : {}),
@@ -862,6 +925,10 @@ export function appReportMarkdown(r: AppRunResult): string {
           .map(([k, v]) => `\`${k}=${String(v.value)}\`(${v.source})`).join(" ")}`
         + `｜优先级 cli=本次命令覆盖 > pack=包声明 > default=今天的行为`] : []),
     `- 角色：${r.roles_used.map((x) => `\`${x}\``).join(", ") || "（未用角色模板）"}`,
+    ...(r.dataset_view !== undefined && r.dataset_view.length > 0
+      ? [`- 数据传递：${r.dataset_view.map((e) => `\`${e.key}=${JSON.stringify(e.value ?? null)}\``
+        + `${e.stale ? "（陈旧）" : ""}（${e.writtenBy}）`).join(" ｜ ")}`]
+      : []),
     `- 槽位（值只来自计划）：${JSON.stringify(r.slots)}`,
     ...(r.path_stop !== undefined
       ? [`- **走向停因**：\`${r.path_stop.code}\` ｜ 步 \`${r.path_stop.step_id}\` 被进入 ${r.path_stop.visits} 次：${r.path_stop.detail}`]

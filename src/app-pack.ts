@@ -614,6 +614,46 @@ export function validatePack(pack: AppPack,
       p.push("max_step_visits must be a positive integer (the per-path visit bound of `next` edges)");
     }
   }
+  // Slice 2（应用支持器）：返回值传递的**加载期对账**——
+  //   ① `returns.NAME` 的产者在一个旅程里唯一（同名两产者 = 谁写的说不清，审计也说不清）；
+  //   ② `{dataset:NAME}` 的消费者必须真有产者（否则运行期必然 needs_value：那是"写了没用"的静默版）。
+  {
+    const DATASET_REF = /\{dataset:([A-Za-z_][A-Za-z0-9_]*)\}/g;
+    const producers = new Map<string, number>();
+    const refs: Array<{ name: string; where: string }> = [];
+    const scanRefs = (value: unknown, where: string): void => {
+      if (typeof value === "string") {
+        for (const m of value.matchAll(DATASET_REF)) refs.push({ name: m[1]!, where });
+        return;
+      }
+      if (Array.isArray(value)) { value.forEach((v, i) => scanRefs(v, `${where}[${i}]`)); return; }
+      if (isDict(value)) for (const [k, v] of Object.entries(value)) scanRefs(v, `${where}.${k}`);
+    };
+    pack.journey.forEach((e, i) => {
+      if (!isDict(e)) return;
+      const rn = e["role"];
+      const tpl = rn !== undefined && isDict(roles[String(rn)]) ? roles[String(rn)]! : {};
+      const merged = { ...tpl, ...e };
+      const ret = merged["returns"];
+      if (isDict(ret)) {
+        for (const name of Object.keys(ret)) {
+          const prev = producers.get(name);
+          if (prev !== undefined) {
+            p.push(`journey[${i}].returns.${name}: also produced by journey[${prev}] (returns names must be unique)`
+              + ` — the dataset would silently keep whichever wrote last`);
+          } else producers.set(name, i);
+        }
+      }
+      scanRefs(merged, `journey[${i}]`);
+    });
+    scanRefs(pack.invariants ?? [], "invariants");
+    for (const ref of refs) {
+      if (!producers.has(ref.name)) {
+        p.push(`${ref.where}: {dataset:${ref.name}} has no producer — no step declares `
+          + `returns.${ref.name} (a value that never gets written is a silent needs_value; declare it)`);
+      }
+    }
+  }
   // 占位符必须指向已声明的槽位（`required_slots` 或 `slots` 里给了值）。
   // `invariants` 与 journey 同规则：结束状态断言里写 `{checkin}` 不替换的话，
   // 那条断言会拿字面量去比对一个永远不会相等的值——**静默假红**，比不写更糟。

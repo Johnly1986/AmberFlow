@@ -324,9 +324,38 @@ npm run apps:suite -- --json
 - **向后兼容**：不写 `adapter` 时按既有推断（有 `source` ⇒ `cli`，否则 ⇒ `web`），20+ 个既有应用包
   一个字节都不用改；切片 1 的全部产物与套件结果逐字节/逐行不变。
 - **专属键白名单**：写错类型（web 步带 `source`、cli 步带 `start_url`）**加载期就红**并点名归属。
-- **加一种应用类型 = 注册一个支持器**，不改 `app-pack` / `app-runner` 的核心分支；
-  下一片是 `ssh`（本机 sshd 真场景）与 `stdio`（真实交互式进程/游戏），以及 `returns` 跨步传值。
-  设计、契约与真实场景验收表见 [docs/APP_SUPPORTER_DESIGN.md](../docs/APP_SUPPORTER_DESIGN.md)。
+- **加一种应用类型 = 注册一个支持器**，不改 `app-pack` / `app-runner` 的核心分支。
+
+**ssh 步**（真实本机 sshd；`apps/ssh-demo` 是示范）：
+
+```jsonc
+{ "id": "remote", "adapter": "ssh", "desc": "把令牌写到远端再读回",
+  "ssh": { "host": "localhost",
+           "argv": ["mkdir -p {out_dir} && echo {dataset:token} > {out_dir}/ssh-token && cat {out_dir}/ssh-token"] },
+  "signal": { "exit_ok": true, "stdout_contains": "widgets" },
+  "returns": { "remote": { "from": "stdout_regex", "pattern": "([a-z]+)" } } }
+```
+
+`ssh` 的信号与工具步同一条进程观察面（exit/stdout/stderr，**没有**本地 `file_*`）；`retries` 需 `idempotent`；
+`dangerous`/干跑语义尚未实现（加载期拒绝）。**ssh 的 argv 走远端 shell**（ssh 客户端拼接后交给远端 shell），
+与本地 cli 的"argv 数组永不过 shell"不同——转义由声明者负责。
+
+**返回值传递（`returns` → `{dataset:NAME}`）**：进程族步（cli/ssh）可在信号成立后抽取值写进运行级数据集，
+后续步骤用 `{dataset:NAME}` 消费（浏览器命令步则用 `{"from":"dataset","key":"NAME"}`）：
+
+```jsonc
+{ "id": "produce", "adapter": "cli", "source": "demo-tool", "args": ["--query=widgets"],
+  "signal": { "exit_ok": true },
+  "returns": { "token": { "from": "stdout_regex", "pattern": "\"query\":\\s*\"([a-z]+)\"" } } }
+{ "id": "consume", "adapter": "cli", "source": "demo-tool", "args": ["--query={dataset:token}"],
+  "signal": { "exit_ok": true, "stdout_contains": "widget widgets" } }
+```
+
+加载期对账：`returns.NAME` 产者唯一、每个 `{dataset:NAME}` 必须真有产者；运行期缺失/陈旧 ⇒ 结构化
+`needs_value`（不猜、不空串）。**注意**：需要本机服务的类型（如 ssh）在 `apps:suite` 里会自动做能力探测，
+不可用则**如实跳过**（跳过 ≠ 通过）。
+
+设计、契约与真实场景验收表见 [docs/APP_SUPPORTER_DESIGN.md](../docs/APP_SUPPORTER_DESIGN.md)。
 
 ## 六、探针集：把「线上能不能打开」也变成数据
 

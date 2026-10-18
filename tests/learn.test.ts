@@ -28,7 +28,13 @@ function tmp(tag = "learn"): string {
   TMP.push(d);
   return d;
 }
-afterEach(() => { while (TMP.length) fs.rmSync(TMP.pop()!, { recursive: true, force: true }); });
+afterEach(() => {
+  // chromium 的 persistent profile 在 close 之后仍可能有尾写（实测 ENOTEMPTY 偶发）；
+  // 递归删除带重试是清理，不是隐藏问题——测试本身的断言不变。
+  while (TMP.length) {
+    fs.rmSync(TMP.pop()!, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
 
 const ACTIONS = [
   { op: "click", hint: "[data-test=add-to-cart]", label: "Add to cart" },
