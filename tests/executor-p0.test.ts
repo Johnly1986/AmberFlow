@@ -280,8 +280,10 @@ describe("导航信封：hosts 运行期强制（D5②）", () => {
 /* ------------------------------------------------------------------ D6: config-class, never retried */
 
 describe("配置类错误：启动期预检、永不重试（D6 / backlog I-1）", () => {
-  it("NEVER_RETRY_CODES 含 config_error / host_not_allowed / needs_value（命令模式的绑定缺失是确定性的）", () => {
-    expect([...NEVER_RETRY_CODES].sort()).toEqual(["config_error", "host_not_allowed", "needs_value"]);
+  it("NEVER_RETRY_CODES 含 config_error / host_not_allowed / needs_value / nominated_family_empty（确定性停因）", () => {
+    expect([...NEVER_RETRY_CODES].sort()).toEqual([
+      "config_error", "host_not_allowed", "needs_value", "nominated_family_empty",
+    ]);
   });
 
   it("带 config_error 停因的子目标 retries=2 也**只跑一次**（重试同一个错 = 同一句话 N 遍）", async () => {

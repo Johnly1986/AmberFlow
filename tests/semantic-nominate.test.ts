@@ -166,7 +166,7 @@ describe("④⑤候选序与梯级端到端（编译产物上）", () => {
 
 import { runFlow, type FlowRunResult } from "../src/semantic-flow.ts";
 
-function nominateApp(opts: { actSel: string; instr?: string; gives?: string[] }): { appsDir: string; site: string; profileDir: string; fixAct: () => void } {
+function nominateApp(opts: { actSel: string; instr?: string; gives?: string[]; desc?: string }): { appsDir: string; site: string; profileDir: string; fixAct: () => void } {
   const rows = [[980, "F3"], [1150, "F5"], [1280, "F1"]].map(([pr, fno]) =>
     `<tr class="flight-item"><td class="fno">${fno}</td><td class="price">${pr}</td>`
     + `<td><button class="btn-pick" data-pick="${pr}" onclick="location.href='done.html?p=${pr}'">选择</button></td></tr>`)
@@ -184,7 +184,7 @@ function nominateApp(opts: { actSel: string; instr?: string; gives?: string[] })
       sites: { [site]: { label: site, start_url: `file://${path.join(pagesDir, "home.html")}` } },
       pages: { home: "home.html", done: "done.html" },
       steps: [{
-        id: "pick", desc: "记录当前列表最低价航班", page: "home", nominate: true,
+        id: "pick", desc: opts.desc ?? "记录当前列表最低价航班", page: "home", nominate: true,
         list_step: { op: "min", by: "price", act: "row" },
         ...(opts.instr ? { instr: opts.instr } : {}),
         ...(opts.gives ? { gives: opts.gives } : {}),
@@ -349,5 +349,141 @@ describe("S2 试点 e2e（真 chromium）：学 → 摊销 → drift 撤下 → 
     });
     expect(r2.ok).toBe(true);
     expect("dataset_view" in r2).toBe(false);
+  });
+});
+
+/* --------------------------------------------- S2 ③ 运行期接线（fake provider，真 chromium） */
+
+import type { DecisionProvider } from "../src/decision-provider.ts";
+import { makeFlowApp as makeApp2, PAGE as PAGE2 } from "./fixtures.ts";
+
+/** 只实现 askChoice 的假决策 provider（记录每次请求；可回指定答案/抛错）。 */
+function fakeDecisionProvider(opts: { reply?: string | null; throws?: boolean } = {}): {
+  provider: DecisionProvider; seen: Array<Record<string, unknown>>; asks: () => number;
+} {
+  const seen: Array<Record<string, unknown>> = [];
+  let calls = 0;
+  const provider: DecisionProvider = {
+    name: "fake-decision", version: "test",
+    capabilities: { choice: true, risk: false, done: false, shortlist: false, score_kind: "calibrated_prob" },
+    pick: async () => ({
+      ref: null, score: 0, scoreKind: "calibrated_prob",
+      signals: { pTop1: null, pTop2: null, margin: null }, options: 0, passthrough: true, probs: {},
+    }),
+    askChoice: async (req) => {
+      calls += 1;
+      seen.push(req as unknown as Record<string, unknown>);
+      if (opts.throws) throw new Error("provider down");
+      const ref = opts.reply ?? null;
+      return ref === null ? null : { ref, score: 0.9, scoreKind: "calibrated_prob", probs: { [ref]: 0.9 } };
+    },
+  } as DecisionProvider;
+  return { provider, seen, asks: () => calls };
+}
+
+describe("S2 ③ 运行期接线：只对 nominate 步、②①弃权时问；页面上下文 + 条件化候选；fail-closed", () => {
+  it("③ 命中：state 带页面状态、候选带本页可用性；账单记模型档；via=model", { timeout: 180_000 }, async () => {
+    // desc 不含任何规则关键词 ⇒ ①弃权；无档案 ⇒ ②也空 ⇒ ③ 才会被问
+    const app = nominateApp({ actSel: ".btn-pick", desc: "处理列表里的数据" });
+    const fp = fakeDecisionProvider({ reply: "list_pick" });
+    const r = await runFlow("flight-nominate", app.site, {
+      appsDir: app.appsDir, profileDir: app.profileDir, laya: "scripted", verbose: false,
+      nominateProvider: fp.provider,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.steps.find((x) => x.id === "pick")!.nominated).toEqual({ instruction: "list_pick", via: "model" });
+    expect(fp.asks()).toBe(1);
+    const req = fp.seen[0]!;
+    // 页面上下文：URL/标题/正文/控件摘要都在题面里
+    expect(String((req["state"] as Record<string, unknown>)["url"])).toContain("home.html");
+    expect(String((req["state"] as Record<string, unknown>)["main_text"]).length).toBeGreaterThan(0);
+    // 条件化候选：每条指令描述都带"本页：…"（S0-v2 的 88.5% 构造）
+    const criteria = req["criteria"] as Record<string, string>;
+    expect(Object.keys(criteria).sort()).toEqual(["check", "click", "fill", "list_pick", "select"]);
+    expect(Object.values(criteria).every((v) => v.includes("本页："))).toBe(true);
+    // 账单：模型档 + provider 身份
+    expect(r.nominate_bill).toMatchObject({
+      via: { model: 1 }, model: { asks: 1, abstains: 0, errors: 0 },
+    });
+    expect(r.nominate_provider).toEqual({ name: "fake-decision", version: "test" });
+    // **纯运行期**（用户裁定）：模型提名不写学习记忆——下一跑不会以 ② 命中冒充"学到的"
+    const profPath = path.join(app.profileDir, "site-x.profile.json");
+    const prof = fs.existsSync(profPath) ? JSON.parse(fs.readFileSync(profPath, "utf-8")) : {};
+    expect(prof.instructions?.pick).toBeUndefined();
+  });
+
+  it("①规则命中 ⇒ 不问（③ 只在 ②①弃权时触达）；provider 在场也不花咨询", { timeout: 180_000 }, async () => {
+    const app = nominateApp({ actSel: ".btn-pick" });   // 默认 desc 含"最低价"⇒ ① 命中
+    const fp = fakeDecisionProvider({ reply: "list_pick" });
+    const r = await runFlow("flight-nominate", app.site, {
+      appsDir: app.appsDir, profileDir: app.profileDir, laya: "scripted", verbose: false,
+      nominateProvider: fp.provider,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.steps.find((x) => x.id === "pick")!.nominated).toEqual({ instruction: "list_pick", via: "rule" });
+    expect(fp.asks()).toBe(0);
+  });
+
+  it("池外答案 ⇒ 当作没答（fail closed），落⑤枚举，流程不炸", { timeout: 180_000 }, async () => {
+    const app = nominateApp({ actSel: ".btn-pick", desc: "处理列表里的数据" });
+    const fp = fakeDecisionProvider({ reply: "delete_all" });
+    const r = await runFlow("flight-nominate", app.site, {
+      appsDir: app.appsDir, profileDir: app.profileDir, laya: "scripted", verbose: false,
+      nominateProvider: fp.provider,
+    });
+    expect(fp.asks()).toBe(1);
+    expect(r.steps.find((x) => x.id === "pick")!.nominated!.via).toBe("enumerate");
+    expect(r.nominate_bill).toMatchObject({ model: { asks: 1 } });
+  });
+
+  it("provider 抛错 ⇒ 该档弃权（落⑤），旅程不被打死；账单记降级", { timeout: 180_000 }, async () => {
+    const app = nominateApp({ actSel: ".btn-pick", desc: "处理列表里的数据" });
+    const fp = fakeDecisionProvider({ throws: true });
+    const r = await runFlow("flight-nominate", app.site, {
+      appsDir: app.appsDir, profileDir: app.profileDir, laya: "scripted", verbose: false,
+      nominateProvider: fp.provider,
+    });
+    expect(r.steps.find((x) => x.id === "pick")!.nominated!.via).toBe("enumerate");
+    expect(r.nominate_bill).toMatchObject({ model: { asks: 1, errors: 1 } });
+  });
+
+  it("`instr` 锁 ⇒ 跳过梯级（via=locked），不花咨询", { timeout: 180_000 }, async () => {
+    const app = nominateApp({ actSel: ".btn-pick", instr: "list_pick" });
+    const fp = fakeDecisionProvider({ reply: "click" });
+    const r = await runFlow("flight-nominate", app.site, {
+      appsDir: app.appsDir, profileDir: app.profileDir, laya: "scripted", verbose: false,
+      nominateProvider: fp.provider,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.steps.find((x) => x.id === "pick")!.nominated).toEqual({ instruction: "list_pick", via: "locked" });
+    expect(fp.asks()).toBe(0);
+  });
+
+  it("收窄元素池（D2）：模型提名 fill、但本页没有 fill 族候选 ⇒ 结构化停因 nominated_family_empty", { timeout: 180_000 }, async () => {
+    const app = makeApp2({
+      prefix: "semantic-narrow", id: "narrow-app",
+      files: { "home.html": PAGE2(`<button data-test="go">继续</button>`), "done.html": PAGE2("<h1>done</h1>") },
+      flowFor: (pagesDir, site) => ({
+        spec_version: 2, id: "narrow-app", label: "narrow-app", goal: "narrow-app",
+        model: "english", slots: {},
+        sites: { [site]: { label: site, start_url: `file://${path.join(pagesDir, "home.html")}` } },
+        pages: { home: "home.html", done: "done.html" },
+        steps: [{
+          id: "go", desc: "继续操作", page: "home", nominate: true, signal: { page: "done" },
+        }],
+        invariants: [],
+      }),
+      authoredProfile: { spec_version: 2, site: "site-x" },
+    });
+    const fp = fakeDecisionProvider({ reply: "fill" });       // 页面只有按钮 → fill 族为空
+    const r = await runFlow("narrow-app", app.site, {
+      appsDir: app.appsDir, profileDir: app.profileDir, laya: "scripted", verbose: false,
+      nominateProvider: fp.provider,
+    });
+    expect(r.ok).toBe(false);
+    const st = r.steps.find((x) => x.id === "go")!;
+    expect(st.status).toBe("blocked");
+    expect(st.nominated).toEqual({ instruction: "fill", via: "model" });
+    expect(String(st.obstacle)).toContain("no fill candidates");
   });
 });

@@ -43,7 +43,11 @@ import {
 } from "./executor.ts";
 import { REPO } from "./flow.ts";
 import { checkArtifacts } from "./model-artifacts.ts";
-import { extractSlots, urlOf } from "./extraction.ts";
+import { extractSlots, urlOf, type ElemFamily } from "./extraction.ts";
+import { captureStepStateView, type StepStateView } from "./page-context.ts";
+import { contextualProviderNominationAsk } from "./nominate.ts";
+import type { DecisionProvider } from "./decision-provider.ts";
+import { resolveProviderSpec } from "./decision-provider.ts";
 import { resolveBinding, validateBinding } from "./bindings.ts";
 import {
   installLayaRuntime, scriptedAgent, scriptedRuntime,
@@ -60,7 +64,7 @@ import { checkSignal, type SignalSpec } from "./signals.ts";
 import { startUrl, REFUSAL_LABELS, type AppInvariantResult } from "./app-runner.ts";
 import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, getInstruction } from "./instructions.ts";
 import { createInstructionMemory } from "./semantic-instructions.ts";
-import { nominateInstruction } from "./nominate.ts";
+import { nominateInstruction, type NominationAsk } from "./nominate.ts";
 import { createDataset, type DatasetEntry } from "./dataset.ts";
 
 /* ------------------------------------------------------------------ 模板形状 */
@@ -1096,7 +1100,13 @@ export interface FlowRunResult {
    * NL Flow S4：提名账单（仅 `nominate` 步在场时）——各档出场数 + 指令回填门的
    * 落盘/撤回 + drift 数。dead rung 自报：哪档从没出场一眼可见。
    */
-  nominate_bill?: { via: Record<string, number>; committed: number; dropped: number; drift: number };
+  nominate_bill?: {
+    via: Record<string, number>; committed: number; dropped: number; drift: number;
+    /** ③ 运行期接线的模型账（缺字段 = 没接 provider）。 */
+    model?: { asks: number; abstains: number; errors: number };
+  };
+  /** S2 ③ 运行期接线：本次用的决策 provider 身份（缺字段 = 没接）。 */
+  nominate_provider?: { name: string; version: string };
   /**
    * NL Flow S3：模板声明了 `gives` 时的运行级数据集**审计视图**（全部条目，含被重跑
    * 失效的陈旧世代——审计面看得见历史，`read` 面只认最新）。缺字段 = 没有 gives。
@@ -1133,6 +1143,14 @@ export interface FlowRunOptions {
   sessionFactory?: () => Promise<BrowserSession>;
   verbose?: boolean;
   outDir?: string;
+  /**
+   * S2 ③ **运行期接线**（用户裁定：允许收窄元素池 / 纯运行期不回填 / 仅 nominate 步）。
+   * 传入一个决策 provider（如 `--nominate-provider token-plan`）后：仅对 `nominate: true` 且没有
+   * `instr` 锁的步，在 ②学习映射、①规则都弃权时，用**页面状态 + 页面条件化候选**问它一次；
+   * 提名来自模型（`via=model`）且是元素动作族时，再按该指令**收窄元素池**交给执行器。
+   * 缺省 null = 不接线，行为逐字节不变。
+   */
+  nominateProvider?: DecisionProvider | null;
   /**
    * 是否把学习档案写到 `profileDir`。`false`（plan 的重放门控用）= 一个字都不写：
    * 回填门照跑、报告照报"哪几条过了门"，但磁盘不动、`profile_path` 为空。
@@ -1318,6 +1336,11 @@ export async function runFlow(
   const drift: DriftNote[] = [];
   // NL Flow S2：元素动作提名的记录面（step id → {instruction, via}；不落盘，见 FlowStepResult.nominated）。
   const nominatedOf = new Map<string, { instruction: string | null; via: string }>();
+  // S2 ③ 运行期接线：仅 nominate 步、仅 ②①弃权时问；这里记模型账（咨询/弃权/降级）。
+  const nominateProvider = opts.nominateProvider ?? null;
+  let modelAsks = 0;
+  let modelAbstains = 0;
+  let modelErrors = 0;
   const driftLimit = opts.driftLimit ?? 2;
   let backfillGate: FlowRunResult["backfill_gate"] = "none";
   let committed: string[] = [];
@@ -1389,9 +1412,38 @@ export async function runFlow(
       if (step.nominate) {
         // 键 = 语义步 id（学习档案按站点一份，与 hint 记忆同一键法；应用归属由档案路径承载）
         const instrKey = step.id;
+        let ask: NominationAsk | null = null;
+        if (!step.instr && nominateProvider !== null) {
+          // ③ 运行期接线（用户裁定：仅 nominate 步 / 纯运行期不回填 / 允许收窄元素池）：
+          // 提问前把页面**按本步 URL 守卫导航**到 start 页并抓只读上下文——提名发生在
+          // 执行器导航之前，不补这一步拿到的就是上一步的落点（S0 的教训：没有上下文别问）。
+          // 抓不到上下文 ⇒ 不提问（ask=null），梯级按 ②①⑤ 继续，行为与没接线一致。
+          try {
+            if (urlOf(session.page as never) !== step.url) {
+              await (session.page as unknown as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
+                step.url, { waitUntil: "domcontentloaded", timeout: 30_000 },
+              );
+            }
+            const pageState: StepStateView | null = await captureStepStateView(session.page as never);
+            const baseAsk = contextualProviderNominationAsk(nominateProvider, pageState);
+            if (baseAsk !== null) {
+              ask = async (desc, options) => {
+                modelAsks += 1;
+                try {
+                  const r = await baseAsk(desc, options);
+                  if (r === null) modelAbstains += 1;
+                  return r;
+                } catch (e) {
+                  modelErrors += 1;      // 降级到 ⑤：错误由梯级兜成该档弃权，不打死旅程
+                  throw e;
+                }
+              };
+            }
+          } catch { ask = null; }
+        }
         const nom: { instruction: string | null; via: "rule" | "learned" | "model" | "teacher" | "enumerate" | "locked" } = step.instr
           ? { instruction: step.instr, via: "locked" }
-          : await nominateInstruction({ desc: step.desc, stepKey: instrKey, memory: instrMemory });
+          : await nominateInstruction({ desc: step.desc, stepKey: instrKey, memory: instrMemory, ask });
         if (verbose) console.log(`  [${step.id}] 提名：${nom.instruction} (${nom.via})`);
         if (nom.instruction === "list_pick" && step.list_candidate) {
           const listExec: CompiledStep = { ...step, kind: "list", list: step.list_candidate };
@@ -1410,8 +1462,10 @@ export async function runFlow(
             nominated: { instruction: nom.instruction, via: nom.via },
           });
           if (out.done) {
-            // 提名让信号成立 → 候选映射进指令记忆（staged；重放门在旅程末尾统一裁决）
-            instrMemory?.recordInstruction(instrKey, "list_pick", nom.via);
+            // 提名让信号成立 → 候选映射进指令记忆（staged；重放门在旅程末尾统一裁决）。
+            // **③ 运行期接线是纯运行期**（用户裁定）：模型提名不写学习记忆——否则下一跑就会
+            // 以 ② 命中（"学到的"），把一次在线咨询悄悄变成持久配置。规则/档案档照旧。
+            if (nom.via !== "model") instrMemory?.recordInstruction(instrKey, "list_pick", nom.via);
             if (dataset && step.gives?.length) dataset.write(step.gives[0], out.detail["chosen"], step.id);
           }
           // blocked 的失败计数**只在旅程末尾的 drift 块记一次**（与 hint 块同一模式——
@@ -1423,8 +1477,15 @@ export async function runFlow(
         nominatedOf.set(step.id, { instruction: nom.instruction, via: nom.via });
       }
       if (verbose) console.log(`  [${step.id}] ${bsg.desc}`);
+      // S2 ③ 收窄：只有**模型提名**的元素动作族才窄（用户裁定"允许 ③ 真正收窄元素池"）。
+      // 规则/档案/枚举档保持既有行为（缺省等价：没接 provider 时这条永远为空）。
+      const modelNom = nominatedOf.get(step.id);
+      const elemFamily = modelNom?.via === "model" && (modelNom.instruction === "click" || modelNom.instruction === "fill"
+        || modelNom.instruction === "select" || modelNom.instruction === "check")
+        ? (modelNom.instruction as ElemFamily) : null;
       const { rep, attempt } = await runSubgoalWithRetries(
-        mw as never, bsg, plan, bsg.start_url ?? "", session.page, session.pw, verbose);
+        mw as never, bsg, plan, bsg.start_url ?? "", session.page, session.pw, verbose,
+        elemFamily !== null ? { expectedFamily: elemFamily } : {});
       const methods = ((rep.steps ?? []) as Array<{ method?: string }>)
         .map((t) => t.method ?? "").filter(Boolean);
       // ---- S3 元素动作强制（复核发现 8）：提名/锁定说出的指令，必须由页面**真实执行的动作
@@ -1612,6 +1673,7 @@ export async function runFlow(
       backfillGate, committed, dropped, drift,
       pathStop, pathCrossed, hasEdges, pathVisits: walk.visits(), instrCommitted, instrDropped,
       datasetView: dataset ? dataset.entriesView() : null,
+      nominateProvider, modelAsks, modelAbstains, modelErrors,
     });
   } finally {
     if (own) await session.close();
@@ -1631,6 +1693,9 @@ function finalize(
     pathVisits: Record<string, number>;
     instrCommitted: number; instrDropped: number;
     datasetView: readonly DatasetEntry[] | null;
+    /** S2 ③ 运行期接线的模型账（缺省 null = 没接 provider）。 */
+    nominateProvider: DecisionProvider | null;
+    modelAsks: number; modelAbstains: number; modelErrors: number;
   },
 ): FlowRunResult {
   let rule = 0, layaN = 0, escN = 0, listN = 0, refusedN = 0;
@@ -1658,11 +1723,22 @@ function finalize(
     viaCounts[v] = (viaCounts[v] ?? 0) + 1;
   }
   const hasNominate = Object.keys(viaCounts).length > 0;
+  // ③ 的模型账：只有在接了 provider 的 run 里出现（缺字段 = 没接线，缺省等价纪律）。
+  const modelSection = ctx.nominateProvider !== null
+    ? { asks: ctx.modelAsks, abstains: ctx.modelAbstains, errors: ctx.modelErrors }
+    : undefined;
   const nominate_bill = hasNominate
-    ? { via: viaCounts, committed: ctx.instrCommitted, dropped: ctx.instrDropped, drift: ctx.drift.length }
+    ? {
+      via: viaCounts, committed: ctx.instrCommitted, dropped: ctx.instrDropped, drift: ctx.drift.length,
+      ...(modelSection ? { model: modelSection } : {}),
+    }
     : undefined;
   const billLine = hasNominate
     ? ` · 提名 ${Object.entries(viaCounts).map(([k, v]) => `${k} ${v}`).join(" · ")}`
+      + (modelSection && modelSection.asks > 0
+        ? ` · model ${modelSection.asks}${modelSection.abstains ? `(弃权 ${modelSection.abstains})` : ""}`
+          + `${modelSection.errors ? `(降级 ${modelSection.errors})` : ""}`
+        : "")
       + `（指令落盘 ${ctx.instrCommitted}/撤回 ${ctx.instrDropped}）`
     : "";
   const ok = results.every((r) => r.status === "done" || r.status === "skipped")
@@ -1689,6 +1765,9 @@ function finalize(
       path_crossed: ctx.pathCrossed,
     } : {}),
     ...(nominate_bill ? { nominate_bill } : {}),
+    ...(ctx.nominateProvider !== null
+      ? { nominate_provider: { name: ctx.nominateProvider.name, version: ctx.nominateProvider.version } }
+      : {}),
     ...(ctx.datasetView ? { dataset_view: [...ctx.datasetView] } : {}),
     profile_path: ctx.profileWritten ? ctx.store.pathFor(siteKey) : "",
     ok, secs: Math.round((Date.now() - ctx.t0) / 100) / 10,
@@ -1747,7 +1826,13 @@ export function flowReportMarkdown(r: FlowRunResult): string {
 const USAGE = `usage: semantic-flow --app ID --site KEY [--laya scripted|unsure|onnx|none]
                    [--escalate scripted|llm|none] [--slot k=v ...] [--profile-dir DIR]
                    [--fresh] [--allow-dangerous] [--no-verify-backfill] [--drift-limit N]
-                   [--out DIR] [--dry] [--quiet] [--list]
+                   [--nominate-provider NAME] [--out DIR] [--dry] [--quiet] [--list]
+
+S2 ③ 运行期接线（--nominate-provider）：仅对声明 nominate: true 且无 instr 锁的步，在 ②学习映射、
+①规则都弃权时，用**页面状态 + 页面条件化候选**问一次决策 provider（如 token-plan）；模型提名若是
+元素动作族，则按其**收窄元素池**交给执行器（hint 仍是权威；同页无该族候选 = 结构化停因）。
+纯运行期、不回填指令记忆；不接 = 行为逐字节不变。provider 需显式配置（如 TOKEN_PLAN_ENDPOINT/
+TOKEN_PLAN_API_KEY），缺配置响亮报错。
 
 一份语义模板（apps/<id>/flow.json）+ 站点档案，跑通三级解析与回填环，
 并在站点之间迁移。--dry 只编译不执行；--laya none 是纯规则面（同 app-runner 的 --ablate rules-only）。
@@ -1766,6 +1851,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       slot: { type: "string", multiple: true }, "profile-dir": { type: "string" },
       fresh: { type: "boolean" }, "allow-dangerous": { type: "boolean" },
       "no-verify-backfill": { type: "boolean" }, "drift-limit": { type: "string" },
+      "nominate-provider": { type: "string" },
       out: { type: "string" }, dry: { type: "boolean" }, quiet: { type: "boolean" },
       help: { type: "boolean" },
     },
@@ -1786,6 +1872,23 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     if (!v.app || !v.site) { console.log(); console.log(USAGE); return v.list ? 0 : 2; }
   }
   const laya = String(v.laya ?? "scripted");
+  // S2 ③ 运行期接线：解析决策 provider（显式点名却没配 ⇒ 报错退出，绝不静默降级成"没接线"）。
+  let nominateProvider: DecisionProvider | null = null;
+  const nominateProviderName = v["nominate-provider"] !== undefined ? String(v["nominate-provider"]) : "";
+  if (nominateProviderName !== "") {
+    try {
+      const spec = await resolveProviderSpec(nominateProviderName);
+      if (spec.kind !== "provider") {
+        console.error(`--nominate-provider ${JSON.stringify(nominateProviderName)} 未配置到可用（tier=${spec.tier}）：`
+          + "决策 provider 需要显式配置（例如 TOKEN_PLAN_ENDPOINT / TOKEN_PLAN_API_KEY）。");
+        return 2;
+      }
+      nominateProvider = spec.provider;
+    } catch (e) {
+      console.error(e instanceof Error ? e.message : String(e));
+      return 2;
+    }
+  }
   const escalate = String(v.escalate ?? "scripted");
   if (!["scripted", "unsure", "onnx", "none"].includes(laya)
     || !["scripted", "llm", "none"].includes(escalate)) {
@@ -1851,6 +1954,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       driftLimit,
       profileDir: v["profile-dir"] ?? undefined,
       verbose,
+      ...(nominateProvider !== null ? { nominateProvider } : {}),
     });
     if (!v.quiet) {
       console.log();

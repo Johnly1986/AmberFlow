@@ -649,3 +649,55 @@ describe("pickProposal（ARCHITECTURE_IMPROVEMENTS §2：conf 是两把尺子，
     expect(prop.shape.kind).toBe("none");
   }, 60_000);
 });
+
+/* --------------------------------------- S2 ③ 运行期接线：提名指令收窄元素池 */
+
+describe("expectedFamily：提名指令收窄元素池（规则/模型只在该族里挑；hint 仍权威）", () => {
+  const PAGE_HTML = `<button id="go">Go</button><input id="city" placeholder="城市">`;
+
+  it("收窄到 fill：模型只看到输入框候选，按钮被移出池子（选中输入框 ⇒ needs_value 结构化停）", async () => {
+    const seen: string[] = [];
+    install(fakeAgent((crit) => {
+      seen.push(...Object.values(crit));
+      const r = firstRef(crit);
+      return r ? { choice: r, confidence: 0.95 } : null;
+    }));
+    const rep = await mw({ maxSteps: 1 }).run("继续", dataUrl(PAGE_HTML), {
+      page: asPage(), pw, slots: {}, goalSignalFn: () => false, verbose: false,
+      expectedFamily: "fill",
+    });
+    expect(seen.some((l) => l.includes("城市"))).toBe(true);
+    expect(seen.some((l) => l.includes("Go"))).toBe(false);
+    // 选中的是输入框：没有声明值可填 ⇒ trace 记 needs_value（不是瞎点按钮）
+    const needValue = rep.steps.filter((t) => String(t.how) === "needs_value");
+    expect(needValue.length).toBeGreaterThan(0);
+    expect(needValue.every((t) => String(t.desc).includes("城市"))).toBe(true);
+    expect(rep.steps.some((t) => String(t.desc).includes("Go"))).toBe(false);
+  });
+
+  it("缺省不窄：同一页不传 expectedFamily ⇒ 候选池含按钮（行为逐字节不变）", async () => {
+    const seen: string[] = [];
+    install(fakeAgent((crit) => {
+      seen.push(...Object.values(crit));
+      const r = firstRef(crit);
+      return r ? { choice: r, confidence: 0.95 } : null;
+    }));
+    await mw({ maxSteps: 1 }).run("继续", dataUrl(PAGE_HTML), {
+      page: asPage(), pw, slots: {}, goalSignalFn: () => false, verbose: false,
+    });
+    expect(seen.some((l) => l.includes("Go"))).toBe(true);
+  });
+
+  it("收窄后本页无该族候选 ⇒ 结构化停因 nominated_family_empty（不退全池、不猜）", async () => {
+    install(fakeAgent((crit) => {
+      const r = firstRef(crit);
+      return r ? { choice: r, confidence: 0.95 } : null;
+    }));
+    const rep = await mw({ maxSteps: 1 }).run("继续", dataUrl(`<button id="go">Go</button>`), {
+      page: asPage(), pw, slots: {}, goalSignalFn: () => false, verbose: false,
+      expectedFamily: "select",
+    });
+    expect(rep.stop_code).toBe("nominated_family_empty");
+    expect(rep.stop_reason).toContain('no select candidates');
+  });
+});

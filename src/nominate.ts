@@ -29,11 +29,14 @@
  *
  * 2026-10-18 S0-v2（上下文实验，同一考卷只补页面状态）：nostate 24.8% → **context 63.6%** →
  * **候选按页面条件化 88.5%**（歧义组 7.2% → 92.8%）；本地 laya 带同一份上下文 4.8% → 54.5%。
- * ⇒ **③ 不是不可行，而是"desc-only 题面"不可行**；接线需要页面状态 + 页面条件化候选，
- * 属**显式未做项**（何时问、信号裁决、成本边际要先定），不在本模块偷偷内置。
+ * ⇒ **③ 不是不可行，而是"desc-only 题面"不可行**；接线需要页面状态 + 页面条件化候选。
+ * 2026-10-18 **运行期接线已落地（opt-in，用户裁定）**：`semantic-flow --nominate-provider NAME`，
+ * 仅对 `nominate: true` 且无 `instr` 锁的步、②①弃权时问；模型提名若为元素动作族则**收窄元素池**
+ * （D2）；纯运行期不回填（不写指令记忆）；无上下文不问；抛错/池外 = 该档弃权落 ⑤。
  */
 import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, instructionCriteria, isInstructionName } from "./instructions.ts";
 import type { DecisionProvider } from "./decision-provider.ts";
+import { conditionedInstructionCriteria, pageStateForModel, type StepStateView } from "./page-context.ts";
 
 /**
  * ① 确定性关键词梯级（单一出处：S0 实验台与运行期共用这一份——
@@ -163,4 +166,28 @@ export async function nominateInstruction(input: NominateInput): Promise<Nominat
   // ⑤ 枚举首位（调用方按 order 裁决换条；order 空 = 结构上没得选）
   if (order.length > 0) return { instruction: order[0]!, via: "enumerate", order };
   return { instruction: null, via: "enumerate", order };
+}
+
+/**
+ * **运行期 ③ 的上下文版接线**（S2 ③，用户裁定：允许收窄元素池 / 纯运行期不回填 / 仅 nominate 步）。
+ *
+ * 与 `providerNominationAsk` 的区别：题面里带上**页面状态**（url/title/正文摘要/控件能力摘要），
+ * 候选也按页面条件化（"本页有下拉 1 个（出发时段）"）——这是 S0-v2 里 24.8% → 88.5% 的那一份构造。
+ * **没有页面上下文就不问**（`state` 空 / url 空 ⇒ 返回 null）：S0 的教训是"没有上下文的问法等于让它猜"。
+ * 抛错不在这里吞：梯度主入口 `nominateInstruction` 兜成该档弃权（不打死旅程）。
+ */
+export function contextualProviderNominationAsk(
+  provider: DecisionProvider | null | undefined,
+  state: StepStateView | null | undefined,
+): NominationAsk | null {
+  if (!provider?.askChoice || !state || !state.url) return null;
+  return async (desc, options) => {
+    const res = await provider.askChoice!({
+      goal: desc,
+      instructions: nominationInstructions(desc),
+      criteria: conditionedInstructionCriteria(state, options),
+      state: pageStateForModel(state),
+    });
+    return res?.ref ?? null;
+  };
 }

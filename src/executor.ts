@@ -63,6 +63,7 @@ import {
   esig,
   extractElements,
   extractSlots,
+  filterElemsByFamily,
   firstOf,
   frameAt,
   framesOf,
@@ -70,6 +71,7 @@ import {
   stateText,
   urlOf,
   type Elem,
+  type ElemFamily,
   type ElemPool,
   type PageLike,
 } from "./extraction.ts";
@@ -171,6 +173,11 @@ export type StopCode =
   | "noul_unverified"
   | "host_not_allowed"
   | "config_error"
+  /**
+   * S2 ③ 运行期接线：提名指令收窄元素池后，本页一个该族候选都没有——
+   * 结构化停因（不退全池、不猜）。
+   */
+  | "nominated_family_empty"
   /** P2: a declared command space with NOTHING resolvable on this page (space-empty). */
   | "space_empty"
   /**
@@ -308,6 +315,13 @@ export interface RunOptions {
   outcomeMemoryMode?: "forbid" | "rank";
   /** Cross-run memory of hints LEARNED from successful picks (used when the plan has none). */
   hintMemory?: HintMemoryLike | null;
+  /**
+   * S2 ③ 运行期接线：提名指令**收窄元素池**（可选；缺省 null = 不窄，行为逐字节不变）。
+   * 只作用于"规则/模型挑元素"的候选池——**点名叫的目标（hint）与命令空间不受窄**：
+   * 计划声明的目标仍是权威，族不一致由语义层 `firstExecFamily` 证据面强制如实报 blocked。
+   * 收窄后池子为空 = 结构化停因 `nominated_family_empty`（不猜、不退回全池）。
+   */
+  expectedFamily?: ElemFamily | null;
   /** Reuse an open page (one browser across subgoals); run() then owns nothing. */
   page?: AnyPage | null;
   slots?: Record<string, unknown> | null;
@@ -1517,6 +1531,7 @@ export class BrowserMiddleware {
       verbose = true,
       targetHints = null,
       precondition = null,
+      expectedFamily = null,
       manualGoal = false,
       manualConfirmFn = this.manualConfirmFn,
       reobserve = this.reobserve,
@@ -1698,6 +1713,10 @@ export class BrowserMiddleware {
             }
           }
         }
+        // S2 ③ 运行期接线：提名指令收窄元素池——规则/模型只在该族元素里挑。
+        // `elems` 仍是"全池"（hint 检索/命令空间/证据面用它）；候选池单独一个视图。
+        const pickPool = (pool: ElemPool = elems): ElemPool =>
+          expectedFamily === null ? pool : filterElemsByFamily(pool, expectedFamily);
         let reobserved = false;          // at most ONE wider look per step
         let escalated = false;           // at most ONE escalation per step
         let escalatedPick: string | null = null;
@@ -1815,9 +1834,21 @@ export class BrowserMiddleware {
           // forbidden and re-picked inside ONE step, then laya clicked junk and the
           // subgoal hit `max_steps` after 22 steps. The documented fall-through for
           // a hint that matches nothing is LAYA ("rather than gambling on a token").
+          // 窄池只对"没有命中签名"的目标生效：计划声明的 hint 是权威（命中全池就用它）；
+          // 未命中时规则/模型都只在窄池里找——否则收窄等于没做。
+          const hintHit = curHint !== null && hintMatch(curHint, elems) !== null;
           ruleRef = curHint
-            ? affordanceRule(instruction, elems, curHint)
-            : (navRule(instruction, elems) ?? affordanceRule(instruction, elems, null));
+            ? affordanceRule(instruction, hintHit ? elems : pickPool(), curHint)
+            : (navRule(instruction, pickPool()) ?? affordanceRule(instruction, pickPool(), null));
+        }
+        // 收窄后一个候选都没有：这是"提名指令在这页上无可作用元素"的结构化停因，
+        // 不退全池（那等于没窄）、不猜（红线③的提名面形态）。
+        if (expectedFamily !== null && ruleRef === null && Object.keys(pickPool()).length === 0) {
+          stop("nominated_family_empty",
+            `nominated instruction "${expectedFamily}" narrows the element pool, but this page has `
+            + `no ${expectedFamily} candidates on step ${stepNo}`, stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          break;
         }
         // re-admit refs whose only sin was being covered at an earlier step, but
         // ONLY after this subgoal actually executed something since the block
@@ -1847,8 +1878,8 @@ export class BrowserMiddleware {
           // "pick 1 of the whole 40" — now it becomes "pick 1 of THESE candidates".
           // The tier is a SMALLER QUESTION, never a decider: below floor or no answer,
           // the step re-asks the full pool and every later rung stays as today.
-          let askPool = elems;
-          if (tieredHint && curHint !== null && ruleRef === null) {
+          let askPool = pickPool();
+          if (tieredHint && expectedFamily === null && curHint !== null && ruleRef === null) {
             const cand = hintCandidates(curHint, elems);
             if (cand !== null && cand.decided === null && cand.refs.length > 1) {
               const subset: ElemPool = {};
@@ -1863,7 +1894,7 @@ export class BrowserMiddleware {
           }
           let [picked, pconf, pprobs] = await this.pickElement(
             instruction, pg, askPool, forbiddenSet, noted);
-          if (askPool !== elems && (picked === null || pconf < this.confFloor)) {
+          if (askPool !== elems && tierAsk !== null && (picked === null || pconf < this.confFloor)) {
             // narrowed ask abstained: today's full-pool ask still gets its turn
             if (verbose) console.log(`  step ${stepNo}: tiered hint (${tierAsk!.n} candidates) abstained -> full pool`);
             tierAsk = null;
@@ -1956,8 +1987,10 @@ export class BrowserMiddleware {
                 // refs are positional: re-prune forbids whose ref now names a
                 // different element before re-asking (same rule as the step head).
                 pruneForbids(wide);
+                // 收窄时宽视图也只留该族（否则"加宽重看"会把收窄绕过去）。
+                const wideAsk = pickPool(wide);
                 const [ref2, conf2] = await this.pickElement(
-                  instruction, pg, wide, new Set(Object.keys(forbidden)), noted);
+                  instruction, pg, wideAsk, new Set(Object.keys(forbidden)), noted);
                 // The wider view BECOMES the step's view even when the local model
                 // stays unsure: a stronger reasoner (escalation) must be able to see
                 // what the wider look already found, or widening would be pointless.
@@ -1988,7 +2021,7 @@ export class BrowserMiddleware {
             // nothing it says can invent an element, a value or an action.
             if (!recovered && escalateFn && !escalated) {
               escalated = true;
-              const crit = criteriaView(elems, new Set(Object.keys(forbidden)),
+              const crit = criteriaView(pickPool(), new Set(Object.keys(forbidden)),
                 await ariaInteractiveLines(pg));
               const state = {
                 url: urlOf(pg), title: await pg.title(),

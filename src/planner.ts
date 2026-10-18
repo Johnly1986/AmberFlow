@@ -247,6 +247,8 @@ export interface MiddlewareReport {
  */
 export const NEVER_RETRY_CODES: ReadonlySet<string> = new Set([
   "config_error", "host_not_allowed", "needs_value",
+  // S2 ③：提名指令收窄后本页没有该族候选——同一页重试 N 次也是同一个空集。
+  "nominated_family_empty",
 ]);
 
 export interface MiddlewareLike {
@@ -258,6 +260,8 @@ export interface MiddlewareLike {
 export async function runOnce(
   mw: MiddlewareLike, sg: Subgoal, plan: TaskPlan, url: string,
   page: unknown, pw: unknown,
+  /** S2 ③ 运行期接线等需要的**本次运行附加选项**（缺省空 = 既有行为逐字节不变）。 */
+  extra: Partial<RunOptions> = {},
 ): Promise<MiddlewareReport> {
   try {
     return await mw.run(sg.desc, url, {
@@ -280,6 +284,7 @@ export async function runOnce(
       // so the executor asks the human (the middleware carries `manualConfirmFn`).
       manualGoal: isManualSignal(sg.signal),
       verbose: mw._planVerbose ?? true,
+      ...extra,
     });
   } catch (e) {
     return { done: false, steps: [], stop_reason: `error: ${e}` };
@@ -300,6 +305,8 @@ export function isManualSignal(signal: unknown): boolean {
 export async function runSubgoalWithRetries(
   mw: MiddlewareLike, sg: Subgoal, plan: TaskPlan, url: string,
   page: unknown, pw: unknown, verbose = true,
+  /** 透传给 `mw.run` 的附加 RunOptions（S2 ③：收窄元素池等；缺省空 = 既有行为不变）。 */
+  extra: Partial<RunOptions> = {},
 ): Promise<{ rep: MiddlewareReport; attempt: number; steps: TraceStep[] }> {
   const tries = Number(sg.retries ?? 0) + 1;
   let rep: MiddlewareReport = { done: false, steps: [], stop_reason: "no attempt" };
@@ -311,7 +318,7 @@ export async function runSubgoalWithRetries(
   // "retried" and breaks the report string.
   for (let i = 1; i <= tries; i++) {
     attempt = i;
-    rep = await runOnce(mw, sg, plan, url, page, pw);
+    rep = await runOnce(mw, sg, plan, url, page, pw, extra);
     steps.push(...(rep.steps ?? []));
     if (rep.done) break;
     // D6: a config-class stop is NOT transient. `retries` exists for cold loads and

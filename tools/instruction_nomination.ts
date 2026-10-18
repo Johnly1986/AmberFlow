@@ -36,6 +36,7 @@ import crypto from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { loadPack, expandPack, type AppPack } from "../src/app-pack.ts";
 import { runApp, type AppRunResult, type StepStateView } from "../src/app-runner.ts";
+import { conditionedInstructionCriteria, pageStateForModel } from "../src/page-context.ts";
 import { checkArtifacts, missingPieces, modelConfigError, onnxModelPath } from "../src/model-artifacts.ts";
 import { createLayaOnnxRuntime } from "../src/laya-onnx.ts";
 import { installLayaRuntime, type DecisionAgent } from "../src/model.ts";
@@ -572,38 +573,6 @@ function normalizeDesc(d: string): string {
     .trim();
 }
 
-/** 页面能力摘要 → 一行给人读/给模型读的"本页有什么"（候选条件化臂用；不是站点知识）。 */
-function availabilityLine(state: StepStateView | undefined, name: string): string {
-  if (!state) return "";
-  const a = state.affordances;
-  const list = (xs: string[]): string => (xs.length ? xs.slice(0, 3).join("/") : "");
-  switch (name) {
-    case "click":
-      return `本页可点击元素 ${a.clickables.length} 个${list(a.clickables) ? `（${list(a.clickables)}）` : ""}`;
-    case "fill":
-      return `本页文本输入框 ${a.text_inputs.length} 个${list(a.text_inputs) ? `（${list(a.text_inputs)}）` : ""}`;
-    case "select":
-      return `本页下拉框 ${a.selects.length} 个${list(a.selects) ? `（${list(a.selects)}）` : ""}`;
-    case "check":
-      return `本页勾选框 ${a.checkboxes.length} 个${list(a.checkboxes) ? `（${list(a.checkboxes)}）` : ""}`;
-    case "list_pick":
-      return `本页带价格文本的元素 ${a.prices} 个`;
-    default:
-      return "";
-  }
-}
-
-/** 上下文 state（决策模型看到的"场景"）：页面 URL/标题/正文摘要 + 控件能力摘要。 */
-function contextState(row: Row): Record<string, unknown> | undefined {
-  if (!row.state) return undefined;
-  return {
-    url: row.state.url,
-    title: row.state.title,
-    main_text: row.state.text,
-    affordances: row.state.affordances,
-  };
-}
-
 /**
  * **S0-v2 上下文实验**：与 S0 同一考卷（语料/真值/闭集/问法），只把**页面上下文**补进题面。
  * 对照臂：
@@ -686,15 +655,9 @@ async function runContextReview(outDir: string, providerName: string, limit: num
     console.log(`  ${arm}: ${preds.filter((p) => p !== null).length}/${rows.length} 有答案 · ${(asksOf[arm]!.totalMs / 1000).toFixed(1)}s`);
   };
   await runOnline("nostate", () => undefined);
-  await runOnline("context", (r) => contextState(r));
-  await runOnline("context-candidates", (r) => contextState(r), (r) => {
-    const out: Record<string, string> = {};
-    for (const [name, desc] of Object.entries(INSTRUCTIONS)) {
-      const avail = availabilityLine(r.state, name);
-      out[name] = avail ? `${desc}（本页：${avail}）` : desc;
-    }
-    return out;
-  });
+  await runOnline("context", (r) => (r.state ? pageStateForModel(r.state) : undefined));
+  await runOnline("context-candidates", (r) => (r.state ? pageStateForModel(r.state) : undefined),
+    (r) => (r.state ? conditionedInstructionCriteria(r.state, Object.keys(INSTRUCTIONS)) : { ...INSTRUCTIONS }));
 
   // laya 上下文臂（本地模型同题对照；产物不齐 = 如实 off）
   const layaArm = await loadModelArm((desc) => {

@@ -45,7 +45,7 @@ import { DESTRUCTIVE_PATTERNS } from "./rules.ts";
 import { checkSignal } from "./signals.ts";
 import { checkToolSignal, type ToolSignal } from "./tool-signals.ts";
 import { captureStateView } from "./signal-induction.ts";
-import { extractElements, urlOf } from "./extraction.ts";
+import { captureStepStateView, type StepStateView } from "./page-context.ts";
 import type { StateView } from "./signals.ts";
 import { expandPack, listPacks, loadPack, type AppPack, type ExpandedStep, type PackPolicy } from "./app-pack.ts";
 import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "./plan.ts";
@@ -59,70 +59,9 @@ export function startUrl(u: string): string {
   return new URL(`file://${path.resolve(REPO, u)}`).href;
 }
 
-/** S0 上下文实验用：一步**开始时**的页面状态（只读快照；`captureTraces && captureStateView` 才采）。 */
-export interface StepStateView {
-  url: string;
-  title: string;
-  /** 正文开头一段（决策模型 `main_text` 的形状；压到 240 字，别把整页塞进题面）。 */
-  text: string;
-  /** 本页可交互控件的**能力摘要**（按动作族分组；"页面有什么"的紧凑视图，不是站点知识）。 */
-  affordances: {
-    /** 文本输入框（input 非 checkbox/radio/button + textarea）。 */
-    text_inputs: string[];
-    selects: string[];
-    /** 复选框 / 单选框。 */
-    checkboxes: string[];
-    /** 可点击元素（a / button / input[button|submit]）。 */
-    clickables: string[];
-    /** 带价格形态文本的元素数（list_pick 的页面线索）。 */
-    prices: number;
-  };
-}
-
-const clipText = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}…` : s);
-
-/**
- * 抓一步开始时的页面状态（只读）。**为什么需要它**：S0 考卷把页面藏起来，决策模型只能按词面猜；
- * 上下文实验把页面补上（docs/NOMINATION_QUESTION_SET_ANALYSIS.md §6）。控件分类只看标签/类型，
- * 对任何站点同一套——页面知识进 state，不进代码。
- */
-export async function captureStepStateView(
-  page: Parameters<typeof extractElements>[0],
-): Promise<StepStateView> {
-  const out: StepStateView = {
-    url: (() => { try { return urlOf(page as never); } catch { return ""; } })(),
-    title: "",
-    text: "",
-    affordances: { text_inputs: [], selects: [], checkboxes: [], clickables: [], prices: 0 },
-  };
-  try { out.title = await (page as unknown as { title(): Promise<string> }).title(); } catch { /* 页面瞬态：留空 */ }
-  try {
-    const body = await (page as unknown as { evaluate(expression: string): Promise<unknown> })
-      .evaluate("document.body ? document.body.innerText.replace(/\\s+/g, ' ').trim() : ''");
-    out.text = clipText(String(body ?? ""), 240);
-  } catch { /* 留空，不编 */ }
-  try {
-    const elems = await extractElements(page);
-    const push = (arr: string[], label: string): void => {
-      const l = label.trim();
-      if (l && arr.length < 8 && !arr.includes(l)) arr.push(clipText(l, 40));
-    };
-    for (const e of Object.values(elems)) {
-      const label = String(e.label ?? "").trim();
-      const type = String(e.input_type ?? "").toLowerCase();
-      if (e.tag === "select") push(out.affordances.selects, label);
-      else if (e.tag === "textarea") push(out.affordances.text_inputs, label);
-      else if (e.tag === "input") {
-        if (type === "checkbox" || type === "radio") push(out.affordances.checkboxes, label);
-        else if (type === "button" || type === "submit") push(out.affordances.clickables, label);
-        else push(out.affordances.text_inputs, label);
-      } else if (e.tag === "button" || e.tag === "a") push(out.affordances.clickables, label);
-      if (/[¥￥]\s*\d|\d+\s*元|price/i.test(label)) out.affordances.prices += 1;
-    }
-  } catch { /* 提取失败：留空 */ }
-  return out;
-}
-
+// S0 上下文实验用：页面状态采集的**单一出处**在 `src/page-context.ts`（实验台与运行期共用）；
+// 这里保留同名导出，既有导入面（tools/instruction_nomination.ts 等）不用改。
+export { captureStepStateView, type StepStateView };
 export interface AppRunOptions {
   /** 覆盖包的槽位（`--slot k=v`）。值仍然只来自计划。 */
   slots?: Record<string, unknown>;

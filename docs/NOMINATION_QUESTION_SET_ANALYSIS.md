@@ -219,3 +219,44 @@ export TOKEN_PLAN_API_KEY='…'
 npm run nominate:context                       # = node ... --context --provider token-plan
 npm run nominate:context -- --check            # 离线可复算部分：语料/状态数/歧义组/离线两臂
 ```
+
+## 7. 运行期接线落地（2026-10-18，用户裁定）
+
+三个裁决：**① 允许 ③ 真正收窄元素池；② 纯运行期不回填指令记忆；③ 仅对 `nominate: true` 的步问。**
+
+### 7.1 行为（`semantic-flow --nominate-provider NAME`，缺省不接 = 逐字节不变）
+
+1. **触发面**：仅 `nominate: true` 且没有 `instr` 锁的步；且只在 ②学习映射、①规则都弃权时才问
+   （梯级顺序不动；S0 语料上 ①弃权面 = 27.3%）。
+2. **题面**：问之前按本步 URL 守卫导航到 start 页，抓**只读页面状态**（URL/标题/正文 240 字/控件能力摘要），
+   连同**条件化候选**（"本页有下拉 N 个（出发时段）"）一起发给决策 provider——即 S0-v2 的 88.5% 构造。
+   **抓不到上下文就不问**（没有页面的问法 = 让模型猜，S0 的教训）。
+3. **收窄（D2）**：模型提名是元素动作族（click/fill/select/check）时，把该族作为 `expectedFamily` 交给执行器——
+   规则/模型只在该族元素里挑（点名叫的 hint 仍权威）；窄后本页无该族候选 ⇒ 结构化停因
+   `nominated_family_empty`（不退全池、不猜）。**只有 `via=model` 才窄**；规则/档案/枚举档行为不变。
+4. **fail-closed**：provider 抛错/超时/池外答案 ⇒ 该档弃权，落⑤枚举，旅程不被打死。
+5. **纯运行期**：不写指令记忆（不 staged、不重放门、不影响 ②）；账单只记本次的模型咨询。
+6. **账**：`nominate_bill.model = {asks, abstains, errors}`、结果带 `nominate_provider` 身份、
+   报告行 `· 提名 rule N · model M（…）`。
+
+### 7.2 验证
+
+- 单测（假 provider，真 chromium）：executor 收窄 3 条（窄池只含该族 / 缺省不窄 / 空族结构化停因）；
+  semantic 接线 6 条（上下文与条件化候选真的进题面、①命中不问、池外/抛错落⑤、`instr` 锁不问、D2 空族停因）。
+- **真服务端到端（两次真跑，token-plan `decision-model-preview`）**：
+  1. **收窄正路**：临时应用"只有按钮的页面 + `nominate:true`、描述无规则关键词"→ 模型按页面上下文提名
+     **click** → 收窄元素池 → 执行 → `done`；账单 `提名 model 1 · model 1`、`nominate_provider =
+     token-plan decision-model-preview`；
+  2. **列表页观察（如实记）**：临时应用"价格列表 + `nominate:true`+`list_step`"、描述仍无规则关键词 →
+     模型在"可点击 3 个 / 价格元素 3 个"的条件化候选里提名 **click**（浏览器腿），而不是 list_pick；
+     click 收窄后点中行按钮 → done。**数据腿没有被真模型在这一样本里选中**——说明"哪条指令"仍是
+     模型的判断（两个都能完成时它会选其一），不是规则兜底；要评估数据腿命中率需要专门语料（未做）。
+- 缺省不接时：既有语义流测试与产物逐字节不变（全部复用旧断言）。
+
+### 7.3 仍未做（显式）
+
+1. **⑤ 对元素动作的"按序试"**：当前 claim 不符直接 `instruction_not_honored` / blocked，
+   "枚举猜错"与"模型违规"尚未分开记；这是接线后的下一项。
+2. **成本边际验收**：接线是 opt-in；开启后 ③ 每步（触发面内）~0.45–0.6s 在线咨询，
+   一个 20 步旅程 ≈ 数秒——但"值不值得开"要在目标语料上做 A/B（完成率 vs 咨询成本），本轮未做。
+3. 指令回填学习：按用户裁定**不做**（纯运行期）。

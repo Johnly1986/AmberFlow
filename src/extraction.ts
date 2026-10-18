@@ -35,6 +35,34 @@ export interface Elem {
 export type ElemPool = Record<string, Elem>;
 
 /**
+ * 元素**动作族**（S2 ③ 运行期接线 + 页面状态采集共用）。
+ *
+ * 判据与执行器自己的分类**同一份**（`_isCheckable` / `_isTyping` / `_isSubmit`）：
+ *   - check：input[type=checkbox|radio]
+ *   - select：`<select>`
+ *   - fill：input/textarea（不含 submit/button/checkbox/radio）
+ *   - click：其余（a / button / input[type=submit|button] / 其它可点元素）
+ * 为什么必须单一出处：提名指令收窄元素池时，窄出的池子必须正好是"这条指令能作用的那一族"；
+ * 两处各判一次就会漂移（本仓 hint 语法漂移过两次，同一条教训）。
+ */
+export type ElemFamily = "click" | "fill" | "select" | "check";
+
+export function elemFamily(e: Elem): ElemFamily {
+  const type = String(e.input_type ?? "").toLowerCase();
+  if (e.tag === "input" && (type === "checkbox" || type === "radio")) return "check";
+  if (e.tag === "select") return "select";
+  if ((e.tag === "input" || e.tag === "textarea") && type !== "submit" && type !== "button") return "fill";
+  return "click";
+}
+
+/** 按动作族过滤元素池（收窄用；ref 保留原值）。 */
+export function filterElemsByFamily(elems: ElemPool, family: ElemFamily): ElemPool {
+  const out: ElemPool = {};
+  for (const [ref, e] of Object.entries(elems)) if (elemFamily(e) === family) out[ref] = e;
+  return out;
+}
+
+/**
  * Element signature for stale-forbidden pruning. refs are POSITIONAL
  * (re-indexed on every scan), so after a DOM change a held `e0` can name a
  * different element than when it was forbidden — the overlay bench case proved
