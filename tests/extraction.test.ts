@@ -9,9 +9,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 import * as browserEnv from "../src/browser-env.ts";
 import {
-  addNearContext, ariaInteractiveLines, criteriaView, extractElements, hintLookup,
+  addNearContext, ariaInteractiveLines, criteriaView, elemFamily, extractElements, hintLookup,
   jsInteractiveWidgets, pageText, stateText, type Elem, type ElemPool,
 } from "../src/extraction.ts";
+import { captureStepStateView } from "../src/page-context.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const fixture = (...p: string[]): string => pathToFileURL(path.join(REPO, ...p)).href;
@@ -168,4 +169,62 @@ describe("criteriaView — hybrid rendering rules (unit)", () => {
     const view = criteriaView(elems, new Set(), [["button", "Go"], ["link", "Extra"]]);
     expect(view.e0).toBe('button "Go"');
   });
+});
+
+/* ------------------------- 元素族分类：语义角色优先（结构族 ≠ 语义动作） */
+
+describe("elemFamily — 语义角色优先于标签结构（2026-10-18 推敲）", () => {
+  const el = (x: Partial<Elem> & { tag: string }): Elem => x as Elem;
+  it("ARIA 角色覆盖标签结构：combobox/listbox→select、checkbox/switch→check、textbox→fill", () => {
+    expect(elemFamily(el({ tag: "div", role: "combobox", label: "出发城市" }))).toBe("select");
+    expect(elemFamily(el({ tag: "span", role: "listbox", label: "日期" }))).toBe("select");
+    expect(elemFamily(el({ tag: "div", role: "checkbox", label: "同意" }))).toBe("check");
+    expect(elemFamily(el({ tag: "span", role: "switch", label: "开关" }))).toBe("check");
+    expect(elemFamily(el({ tag: "div", role: "textbox", label: "城市" }))).toBe("fill");
+    expect(elemFamily(el({ tag: "div", role: "searchbox", label: "搜索" }))).toBe("fill");
+    expect(elemFamily(el({ tag: "div", content_editable: true, label: "备注" }))).toBe("fill");
+  });
+  it("原生标签照旧（未出现语义角色时行为不变）：select/checkbox/radio/submit/textarea/button/anchor", () => {
+    expect(elemFamily(el({ tag: "select" }))).toBe("select");
+    expect(elemFamily(el({ tag: "input", input_type: "checkbox" }))).toBe("check");
+    expect(elemFamily(el({ tag: "input", input_type: "radio" }))).toBe("check");
+    expect(elemFamily(el({ tag: "input", input_type: "submit" }))).toBe("click");
+    expect(elemFamily(el({ tag: "input", input_type: "button" }))).toBe("click");
+    expect(elemFamily(el({ tag: "input", input_type: "range" }))).toBe("fill");
+    expect(elemFamily(el({ tag: "textarea" }))).toBe("fill");
+    expect(elemFamily(el({ tag: "button" }))).toBe("click");
+    expect(elemFamily(el({ tag: "a" }))).toBe("click");
+  });
+  it("采集：显式 role / contenteditable 条件落字段（没这些属性的元素不加字段 ⇒ 冻结对拍语料不变）", async () => {
+    await page.goto("about:blank");
+    await page.setContent(`<html><body><main>
+      <div role="combobox" aria-label="出发城市" tabindex="0">北京</div>
+      <div contenteditable="true" aria-label="备注">写点什么</div>
+      <button>普通按钮</button>
+      </main></body></html>`);
+    const elems = await extractElements(page, false);
+    const values = Object.values(elems);
+    const combo = values.find((e) => e.role === "combobox")!;
+    expect(combo).toBeDefined();
+    expect(elemFamily(combo)).toBe("select");
+    const ce = values.find((e) => e.content_editable === true)!;
+    expect(ce).toBeDefined();
+    expect(elemFamily(ce)).toBe("fill");
+    // 没有 role/contenteditable 的元素不带这些键（缺省等价；对拍语料逐字节不变）
+    const plain = values.find((e) => e.tag === "button")!;
+    expect(plain.role).toBeUndefined();
+    expect(plain.content_editable).toBeUndefined();
+  }, 60_000);
+  it("页面上下文摘要按语义族分组：combobox 归入下拉、contenteditable 归入输入框", async () => {
+    await page.goto("about:blank");
+    await page.setContent(`<html><body><main>
+      <div role="combobox" aria-label="出发城市" tabindex="0">北京</div>
+      <div contenteditable="true" aria-label="备注">写点什么</div>
+      <button>提交</button>
+      </main></body></html>`);
+    const state = await captureStepStateView(page as never);
+    expect(state.affordances.selects.some((x) => x.includes("出发城市"))).toBe(true);
+    expect(state.affordances.text_inputs.some((x) => x.includes("备注"))).toBe(true);
+    expect(state.affordances.clickables.some((x) => x.includes("提交"))).toBe(true);
+  }, 60_000);
 });

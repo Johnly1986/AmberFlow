@@ -25,6 +25,10 @@ export interface Elem {
   id?: string;
   input_type?: string;
   href?: string;
+  /** 显式 ARIA 角色（`getAttribute('role')`；没有就不出现——对拍语料逐字节不变）。 */
+  role?: string;
+  /** `contenteditable` 为真（语义上是"可填"，结构上不是 input/textarea）。 */
+  content_editable?: boolean;
   near?: string;
   frame?: number;
   js_events?: unknown;
@@ -49,8 +53,20 @@ export type ElemFamily = "click" | "fill" | "select" | "check";
 
 export function elemFamily(e: Elem): ElemFamily {
   const type = String(e.input_type ?? "").toLowerCase();
+  const role = String(e.role ?? "").toLowerCase();
+  // ---- 语义角色优先（结构族 ≠ 语义动作；2026-10-18 推敲）----
+  // 显式 ARIA 角色说的就是"这个控件能做什么"，比标签名可靠：
+  //   role=combobox/listbox → select（div/span 做的下拉）
+  //   role=checkbox/radio/switch → check
+  //   role=textbox/searchbox/spinbutton → fill（自定义输入控件）
+  if (role === "combobox" || role === "listbox" || role === "menulist") return "select";
+  if (role === "checkbox" || role === "radio" || role === "switch") return "check";
+  if (role === "textbox" || role === "searchbox" || role === "spinbutton") return "fill";
+  if (e.content_editable === true) return "fill";       // contenteditable：可填，但不是 input/textarea
+  // ---- 原生标签（没有显式角色时按结构与 input type 判）----
   if (e.tag === "input" && (type === "checkbox" || type === "radio")) return "check";
   if (e.tag === "select") return "select";
+  if (role === "button" || role === "link") return "click";
   if ((e.tag === "input" || e.tag === "textarea") && type !== "submit" && type !== "button") return "fill";
   return "click";
 }
@@ -211,7 +227,11 @@ export async function locatorAnyFrame(page: PageLike, selector: string): Promise
 
 /* ------------------------------------------------------------------ constants */
 
-export const INTERACTIVE = "a, button, input, select, textarea, [onclick], [role='button']";
+// 扫描面：原生可交互标签 + ARIA 语义角色/可编辑容器（自定义控件由 div/span 实现时，标签结构里
+// 没有"可交互"的证据；不扫进来，语义分类与提名都无从谈起。fixtures 无这些属性 ⇒ 对拍语料不变）。
+export const INTERACTIVE = "a, button, input, select, textarea, [onclick], [role='button']"
+  + ", [role='combobox'], [role='listbox'], [role='textbox'], [role='searchbox'], [role='spinbutton']"
+  + ", [role='checkbox'], [role='radio'], [role='switch'], [contenteditable='true'], [contenteditable='']";
 /** CDP-probed JS-only widgets join every later scan, keeping refs consistent. */
 export const INTERACTIVE_ALL = INTERACTIVE + ", [data-js-ref]";
 export const MAX_ELEMENTS = 40;
@@ -306,6 +326,8 @@ export const EXTRACT_JS = String.raw`(arg) => {
                main: (!e.closest('nav, aside, footer, header') && !!e.closest('main, [role=main], article')),
                data_test: e.getAttribute('data-test') || '', name: e.getAttribute('name') || '',
                id: e.id || '', input_type: (e.getAttribute('type') || '').toLowerCase(),
+               role: (e.getAttribute('role') || '').toLowerCase(),
+               content_editable: e.isContentEditable ? true : false,
                href: href ? href.split('?')[0].replace(/\/+$/, '').split('/').slice(-2).join('/') : ''});
   }
   const ordered = rows.filter((r) => r.main).concat(rows.filter((r) => !r.main)).slice(0, max);
@@ -313,7 +335,9 @@ export const EXTRACT_JS = String.raw`(arg) => {
     const ref = 'e' + pos;
     all[r.i].setAttribute('data-dshref', ref);
     return {ref: ref, dsh_ref: ref, scan: r.i, tag: r.tag, label: r.label,
-            data_test: r.data_test, name: r.name, id: r.id, input_type: r.input_type, href: r.href};
+            data_test: r.data_test, name: r.name, id: r.id, input_type: r.input_type, href: r.href,
+            ...(r.role ? {role: r.role} : {}),
+            ...(r.content_editable ? {content_editable: true} : {})};
   });
 }`;
 
@@ -543,6 +567,11 @@ export async function extractRowsPerElement(page: PageLike, maxElements: number 
     if ((tag === "a" || tag === "button") && !label) continue;
     const href = (await el.getAttribute("href")) ?? "";
     const jsRef = (await el.getAttribute("data-js-ref")) ?? "";
+    const roleAttr = ((await el.getAttribute("role")) ?? "").trim().toLowerCase();
+    let contentEditable = false;
+    try {
+      contentEditable = (await el.evaluate((n: { isContentEditable: boolean }) => n.isContentEditable)) === true;
+    } catch { /* 拿不到就当 false（语义分类退回结构判据） */ }
     elems.push({
       ref: `e${elems.length}`, scan: i, tag, label: label.slice(0, 40),
       data_test: (await el.getAttribute("data-test")) ?? "",
@@ -551,6 +580,8 @@ export async function extractRowsPerElement(page: PageLike, maxElements: number 
       input_type: ((await el.getAttribute("type")) ?? "").toLowerCase(),
       href: href ? href.split("?")[0]!.replace(/\/+$/, "").split("/").slice(-2).join("/") : "",
       ...(jsRef ? { js_ref: jsRef } : {}),
+      ...(roleAttr ? { role: roleAttr } : {}),
+      ...(contentEditable ? { content_editable: true } : {}),
     });
   }
   return elems;

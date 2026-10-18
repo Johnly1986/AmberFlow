@@ -266,3 +266,30 @@ npm run nominate:context -- --check            # 离线可复算部分：语料/
 2. **成本边际验收**：接线是 opt-in；开启后 ③ 每步（触发面内）~0.45–0.6s 在线咨询，
    一个 20 步旅程 ≈ 数秒——但"值不值得开"要在目标语料上做 A/B（完成率 vs 咨询成本），本轮未做。
 3. 指令回填学习：按用户裁定**不做**（纯运行期）。
+
+## 8. 语义角色进元素族分类（2026-10-18，先做 1）
+
+**问题**：修复式窄化用的"族"原来只按标签结构判。结构族 ≠ 语义动作——`div[role=combobox]` 是 click 族
+但语义 select、`contenteditable` 是 click 族但语义 fill、`input[type=range]` 是 fill 族但语义设值；
+更糟的是自定义控件在提取层**根本不可见**（`INTERACTIVE` 选择器只认原生标签 + `[role=button]`）。
+
+**做法**：
+
+1. **提取层条件采集**（`src/extraction.ts`）：新增 `role`（`getAttribute('role')` 小写）与
+   `content_editable`（`isContentEditable`）两个**可选**字段——元素没有这些属性时**不出现字段**，
+   因此冻结对拍语料逐字节不变（`parity:extraction` 6 个夹具已验证）。
+2. **交互选择器扩展**：`INTERACTIVE` 增加 `[role=combobox|listbox|textbox|searchbox|spinbutton|checkbox|radio|switch]`
+   与 `[contenteditable='true'|'']`——自定义控件从"不可见"变成候选（fixtures 无这些属性 ⇒ 既有对拍/应用产物不变）。
+3. **分类语义优先**（`elemFamily`）：显式 ARIA 角色 > contenteditable > 原生标签/type。
+   combobox/listbox → select、checkbox/radio/switch → check、textbox/searchbox/spinbutton → fill。
+4. **下游自动受益**：页面上下文摘要（`page-context`）把 combobox 归入下拉、contenteditable 归入输入框
+   ——候选条件化与模型看到的"本页有什么"因此变准；软先验与有界修复用的族也变准。
+
+**边界（诚实）**：执行器的**动作模型仍是标签驱动**（`_isTyping/_isCheckable/_isSubmit`），所以
+"提名 select、页面是 `div[role=combobox]`"时：分类/上下文/修复都按语义走，但执行动作是 click，
+语义层的证据面仍会如实报 `instruction_not_honored`——这不是 bug，是"语义等价的执行方式还没被声明"。
+下一项（选项 2）是**声明等价表**（如 `select-on-combobox ≡ click`，与既有 `check ≡ click` 同一条机制），
+让证据面承认语义等价的动作，而不是静默当成违规。
+
+**验证**：`tests/extraction.test.ts` 新增 4 条（ARIA 角色覆盖结构 / 原生标签行为不变 / 采集条件落字段 /
+上下文按语义族分组）；`parity:extraction` 逐字节一致；既有 corpus/app 测试不变。
