@@ -43,7 +43,12 @@ select 真值 → list_pick×36、click×30；fill 真值 → click×14；click 
   这正是本轮审查要证伪而没能证伪的东西。
 - 与本地 laya 的差别要按"另一场考试"读：换权重/服务 = 换考卷，数字不迁移（同 graph_sha256 纪律）。
 
-产物：`bench/instruction-nomination-online/nomination-online.json` + `REPORT.md`
+产物：`bench/instruction-nomination-online/nomination-online.json` + `REPORT.md`。
+**重要读法（修正在此之后）**：这组 41/165 的读数**不能当能力证据**——逐行复核发现考卷有三层偏倚
+（题面无状态 83/165 行同一句话跨应用真值不同、标签取 trace 首动作仅 44.8% 的题面读得出、语料排除
+list/check 导致闭集 2/5 结构性不可对、97.6% 的错误是"按文字作答 vs 按实现判分"的错位），见
+[NOMINATION_QUESTION_SET_ANALYSIS.md](NOMINATION_QUESTION_SET_ANALYSIS.md)。③ 不接线的依据因此改为
+**边际读数**（rules 弃权 45 行上模型只对 3 行），而不是 24.8% < 51.5% 这个被标签污染的对比。
 （逐行预测与混淆矩阵在内；离线部分可用 `npm run nominate:online -- --check` 复算）。
 **不替代** S0 冻结产物（`bench/instruction-nomination/` 仍是本地 laya 的账）。
 

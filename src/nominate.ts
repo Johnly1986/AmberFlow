@@ -22,7 +22,10 @@
  * 2026-10-17 线上决策模型复测（同一考卷、同一问法，docs/ONLINE_MODEL_TEST_REVIEW.md）：
  * 更强的线上模型把 ③ 从 8/165 提到 41/165（4.8% → 24.8%），**但仍低于基线 85/165**，
  * 且从不弃权（fill 真值 14/14 全错、select/click 大量塌缩到 list_pick）。
- * ⇒ 这不是"模型不够强"的问题，是 desc-only 提名这个**题形状**的天花板：运行期仍不接 ③。
+ * ⇒ 逐行复核（docs/NOMINATION_QUESTION_SET_ANALYSIS.md）证明**这道题本身不可解**：题面无状态
+ * （83/165 行同一句话跨应用真值不同）、标签取 trace 首动作（题面首动作族与真值吻合仅 44.8%）、
+ * 语料排除 list/check（闭集 2/5 结构性不可对）、97.6% 的错误是"按文字作答 vs 按实现判分"的错位。
+ * 运行期仍不接 ③；不接线的依据是**边际**（rules 弃权 45 行上 ③ 只对 3 行），不是被污染的准确率。
  */
 import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, instructionCriteria, isInstructionName } from "./instructions.ts";
 import type { DecisionProvider } from "./decision-provider.ts";

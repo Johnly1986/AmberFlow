@@ -161,7 +161,7 @@ console.log(rep.completed, rep.traces.length);
 
 ## 延伸阅读
 
-[ARCHITECTURE.md](ARCHITECTURE.md)（模块结构与实测规则）· [DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md)（在线决策模型接入与实测账） · [ONLINE_MODEL_TEST_REVIEW.md](docs/ONLINE_MODEL_TEST_REVIEW.md)（用线上模型审查测试：S0 提名 + LLM 真链路）· [CLAUDE.md](CLAUDE.md)（工程规约）· [apps/INVENTORY.md](apps/INVENTORY.md)（应用清单与"完成"的定义）· [PORTING.md](PORTING.md) / [BACKUP.md](BACKUP.md)（Python 参考实现的迁移与存档）
+[ARCHITECTURE.md](ARCHITECTURE.md)（模块结构与实测规则）· [DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md)（在线决策模型接入与实测账） · [ONLINE_MODEL_TEST_REVIEW.md](docs/ONLINE_MODEL_TEST_REVIEW.md)（用线上模型审查测试：S0 提名 + LLM 真链路） · [NOMINATION_QUESTION_SET_ANALYSIS.md](docs/NOMINATION_QUESTION_SET_ANALYSIS.md)（提名考卷为什么不可解：标签/语料/合同三层偏倚）· [CLAUDE.md](CLAUDE.md)（工程规约）· [apps/INVENTORY.md](apps/INVENTORY.md)（应用清单与"完成"的定义）· [PORTING.md](PORTING.md) / [BACKUP.md](BACKUP.md)（Python 参考实现的迁移与存档）
 
 ## License
 
