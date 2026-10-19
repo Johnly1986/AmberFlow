@@ -1,0 +1,9 @@
+# 冻结语料/生成物按"逐字节全等"做门禁（dumpJs、parity 语料、报告、SVG 漂移检查）。
+# 工作区必须是 LF：否则 core.autocrlf=true 的机器一 checkout 就全红（Windows 实测）。
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.zip binary

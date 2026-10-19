@@ -13,8 +13,13 @@ import path from "node:path";
 
 function glob(pattern: string): string[] {
   // Segment-by-segment expansion (the patterns below use `*` at any depth).
-  const parts = pattern.split(path.sep).filter((p) => p !== "");
-  let bases: string[] = pattern.startsWith(path.sep) ? [path.sep] : ["."];
+  // `path.parse().root` keeps the drive on Windows ("C:\\"): a drive-absolute
+  // pattern does NOT start with `path.sep`, so splitting on the separator would
+  // emit "C:" as an ordinary segment and resolve it against "." (".\\C:") —
+  // measured: candidates() was always empty on Windows, browsers or not.
+  const root = path.parse(pattern).root;
+  const parts = (root ? pattern.slice(root.length) : pattern).split(path.sep).filter((p) => p !== "");
+  let bases: string[] = root ? [root] : ["."];
   for (const part of parts) {
     const next: string[] = [];
     if (!part.includes("*")) {
