@@ -145,6 +145,10 @@ bundle 自带一个浏览器半，在 `plugins.row.config` 注册自己的行配
 - **作用域**：这是 **SystemOne 执行** 的决策模型；LLM 门（LLM 规划器、审计、语义升级）是另一条
   路径，仍从环境变量读 `OPENAI_*`。`plan` 工具的规划阶段与 semantic-template 运行仍走各自的决策面，
   这个页面暂时不会覆盖它们。
+- **编辑仅限 loopback 页面（宿主策略）。** 经非 loopback 地址打开页面时 `ctx.remote.$host.isLoopback`
+  为假，Harness 把 settings 切成 memory 模式：远程页面既不读也不写 Host 配置。因此远程打开时行页面会
+  显示一段说明而不是表单——请在 Host 本机、或通过 SSH 隧道（`ssh -L 8080:127.0.0.1:3080 <host>`）编辑。
+  在 loopback 页面保存的值对所有运行生效，也包括从远程页面发起的运行。
 - **只能改这三个字段**：`repoPath`/`nodeBin`/`timeoutMs`/`allowDangerous`/`toolPrefix`/`envMode`/
   `forwardEnv`/`keepRuns` 仍写在 `cordis.patch.yml`（普通字段的变更会重挂插件；`toolPrefix` 甚至
   会改工具名，不能做成热更新）。

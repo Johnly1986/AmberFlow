@@ -160,6 +160,12 @@ How it behaves:
   semantic escalation) are a separate path and still read `OPENAI_*` from the environment. The `plan`
   tool's planning phase and semantic-template runs keep their own decision planes, so this page does
   not override them yet.
+- **Editing is loopback-only by Harness policy.** A page opened from a non-loopback address makes
+  `ctx.remote.$host.isLoopback` false, and Harness switches settings to memory mode there: the Host
+  configuration is neither read nor written over a remote page. The row page therefore renders a
+  short explanation instead of the form when opened remotely — edit on the Host machine itself, or
+  through an SSH tunnel (`ssh -L 8080:127.0.0.1:3080 <host>`). What you save on a loopback page
+  applies to every run, including runs started from the remote page.
 - **Only these three fields are editable here.** `repoPath`, `nodeBin`, `timeoutMs`,
   `allowDangerous`, `toolPrefix`, `envMode`, `envMode`-forwarding and `keepRuns` stay in
   `cordis.patch.yml` (changing an ordinary field remounts the plugin; `toolPrefix` even renames the

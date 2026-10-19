@@ -61,6 +61,14 @@ window.__ModuleLoader__.load({
         + 'from the environment.',
       summaryUnset: 'Online decision model not configured',
       summaryConfigured: 'Decision model: ',
+      remoteSummary: 'Configuration is editable on the Host machine only (loopback).',
+      remoteTitle: 'Configuration is available from the Host machine only',
+      remoteBody: 'This page is open from a non-loopback address, and DSH does not expose plugin '
+        + 'settings to non-loopback pages (it never reads or writes the Host configuration there). '
+        + 'Open the DSH web URL on the Host machine — http://127.0.0.1:… with the token printed by '
+        + '`dsh web`, or through an SSH tunnel such as `ssh -L 8080:127.0.0.1:3080 <host>` — and edit '
+        + 'the three decision-model fields there. The saved values apply to every run, including '
+        + 'runs started from this remote page.',
     }
     const zh = {
       modelBaseUrl: '决策模型 URL',
@@ -87,6 +95,12 @@ window.__ModuleLoader__.load({
         + 'LLM 门（规划器/审计/语义升级）是另一条路径，仍从环境变量读 OPENAI_*。',
       summaryUnset: '未配置线上决策模型',
       summaryConfigured: '决策模型：',
+      remoteSummary: '配置只能在 Host 本机（loopback）编辑。',
+      remoteTitle: '配置只能在 Host 本机编辑',
+      remoteBody: '当前页面是经非 loopback 地址打开的，DSH 不向非 loopback 页面暴露插件配置'
+        + '（那边既不读也不写 Host 配置）。请在 Host 本机打开 DSH Web（http://127.0.0.1:… 加 '
+        + '`dsh web` 打印的 token），或使用 SSH 隧道（如 `ssh -L 8080:127.0.0.1:3080 <host>`）后'
+        + '编辑这三个决策模型字段。保存后的值对所有运行生效，也包括从当前远程页面发起的运行。',
     }
 
     const INPUT_STYLE = {
@@ -144,6 +158,10 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       const [message, setMessage] = React.useState(null)
 
+      // Non-loopback pages never receive the Host settings document (ui-settings switches to
+      // memory mode there). Say so explicitly instead of rendering an empty configuration body:
+      // the row page exists on every page, but editing is a loopback-only capability.
+      const remoteReadOnly = described.status === 'unavailable'
       const hostBaseUrl = typeof current.modelBaseUrl === 'string' ? current.modelBaseUrl : ''
       const hostName = typeof current.modelName === 'string' ? current.modelName : ''
       const namespaceView = (described.view?.namespaces ?? []).find((view) => view.ns === ENTRY)
@@ -161,10 +179,16 @@ window.__ModuleLoader__.load({
 
       const suffix = hostBaseUrl === '' ? '' : ' @ ' + hostBaseUrl.replace(/^https?:\/\//, '')
       if (props.view === 'summary') {
+        if (remoteReadOnly) return h('span', null, t('remoteSummary'))
         const text = hostName === '' && hostBaseUrl === ''
           ? t('summaryUnset')
           : t('summaryConfigured') + (hostName === '' ? '—' : hostName) + suffix
         return h('span', null, text)
+      }
+      if (remoteReadOnly) {
+        return h('div', { style: { display: 'grid', gap: '10px', maxWidth: '680px' }, 'data-amberflow-config': 'remote' },
+          h('p', { style: { ...LABEL_STYLE, fontSize: '14px' } }, t('remoteTitle')),
+          h('p', { style: HINT_STYLE }, t('remoteBody')))
       }
 
       const ready = snapshot.status === 'ready' && snapshot.writable !== false
@@ -266,14 +290,13 @@ window.__ModuleLoader__.load({
         ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'amberflow-bridge: dictionaries')
         const form = ctx.configForms.get(ENTRY)
         const mirror = ctx.configForms.describe()
-        // The Configure control on the bundle's row exists only while this cell is registered;
-        // `whileServed` ties it to the Host actually serving the settings namespace (the plugin
-        // being active with its volatile fields projected), so a Settings-less deployment shows
-        // no trace of the page.
-        ctx.effect(() => ctx.configForms.whileServed([ENTRY], () => ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
+        // Register the row page unconditionally: even when the Host does not serve settings to this
+        // page (non-loopback access, or a Host without the settings service), the Configure control
+        // must exist so the page can explain WHY it is read-only instead of showing an empty body.
+        ctx.effect(() => ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
           name: 'plugins.row.config',
           key: ROW_KEY,
-        }, (props) => h(BridgeConfigPage, { ...props, form, mirror, t })))), 'amberflow-bridge: configuration page')
+        }, (props) => h(BridgeConfigPage, { ...props, form, mirror, t }))), 'amberflow-bridge: configuration page')
       },
     }
   },

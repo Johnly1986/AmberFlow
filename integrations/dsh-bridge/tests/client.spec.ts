@@ -40,15 +40,46 @@ function loadClient(source: string, label = 'client.js'): { id: string; plugin: 
   // eslint-disable-next-line no-new-func
   new Function('window', source)(fakeWindow)
   if (loaded === undefined) throw new Error(`${label} did not register with __ModuleLoader__`)
-  const react = { createElement: () => null }
-  return { id: loaded.id, plugin: loaded.factory((specifier) => {
-    if (specifier === 'react') return react
-    throw new Error(`unexpected client module request: ${specifier}`)
-  }) }
+  const react = {
+    createElement: (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) =>
+      ({ type, props: { ...(props ?? {}), children } }),
+    useState: (initial: unknown) => [typeof initial === 'function' ? (initial as () => unknown)() : initial, () => {}],
+    useEffect: (callback: () => unknown) => { callback() },
+  }
+  return {
+    id: loaded.id,
+    react,
+    plugin: loaded.factory((specifier) => {
+      if (specifier === 'react') return react
+      throw new Error(`unexpected client module request: ${specifier}`)
+    }),
+  }
+}
+
+interface ElementTree { type: unknown; props: Record<string, unknown> }
+/** Recursively collect the text and element types of a React element tree. */
+function collect(node: unknown, text: string[] = [], types: unknown[] = []): { text: string[]; types: unknown[] } {
+  if (typeof node === 'string' || typeof node === 'number') { text.push(String(node)); return { text, types } }
+  if (Array.isArray(node)) { for (const child of node) collect(child, text, types); return { text, types } }
+  if (node === null || typeof node !== 'object') return { text, types }
+  const element = node as ElementTree
+  if (element.props !== undefined) {
+    types.push(element.type)
+    // Function components are rendered so their text/controls become observable.
+    if (typeof element.type === 'function') {
+      collect((element.type as (props: unknown) => unknown)(element.props), text, types)
+    } else {
+      collect(element.props['children'], text, types)
+    }
+  }
+  return { text, types }
 }
 
 /** A minimal client context: records effects, locale dictionaries, slot cells and injected forms. */
-function fakeContext(): {
+function fakeContext(options: {
+  form?: Record<string, unknown>
+  mirror?: Record<string, unknown>
+} = {}): {
   ctx: unknown
   dictionaries: Array<{ ns: string; dictionaries: Record<string, Record<string, string>> }>
   cells: Registered[]
@@ -58,12 +89,12 @@ function fakeContext(): {
   const cells: Registered[] = []
   const effectLabels: string[] = []
   const form = {
-    getSnapshot: () => ({ status: 'loading', value: undefined, revision: undefined, writable: true }),
+    getSnapshot: () => options.form ?? { status: 'loading', value: undefined, revision: undefined, writable: true },
     subscribe: () => () => {},
     mutate: async () => true,
   }
   const mirror = {
-    getSnapshot: () => ({ status: 'idle', view: undefined }),
+    getSnapshot: () => options.mirror ?? { status: 'idle', view: undefined },
     subscribe: () => () => {},
   }
   const ctx = {
@@ -77,7 +108,7 @@ function fakeContext(): {
         dictionaries.push({ ns, dictionaries: dicts })
         return () => {}
       },
-      bind: () => (key: string) => key,
+      bind: () => (key: string) => dictionaries[0]?.dictionaries.en?.[key] ?? key,
     },
     configForms: {
       get: () => form,
@@ -173,6 +204,62 @@ describe('repository-root install door: generated client bundle', () => {
       'integrations/dsh-bridge/locale/zh.json',
     ]) {
       expect(fs.existsSync(path.join(REPO_ROOT, target)), target).toBe(true)
+    }
+  })
+})
+
+describe('configuration page rendering: loopback vs remote page', () => {
+  const LOOPBACK_FORM = {
+    status: 'ready', value: { modelBaseUrl: '', modelName: '' }, revision: 1, writable: true,
+  }
+  const LOOPBACK_MIRROR = {
+    status: 'ready',
+    view: { namespaces: [{ ns: 'amberflow-bridge', secrets: [{ path: ['modelApiKey'], set: false }] }] },
+  }
+
+  it('loopback + Host-served settings renders the three fields and the Save control', () => {
+    const { plugin } = loadClient(SOURCE)
+    const fake = fakeContext({ form: LOOPBACK_FORM, mirror: LOOPBACK_MIRROR })
+    plugin.apply(fake.ctx)
+    const element = (fake.cells[0]!.component as (props: unknown) => unknown)({ view: 'page' })
+    const { text, types } = collect(element)
+    const joined = text.join(' ')
+    expect(joined).toContain('Decision model URL')
+    expect(joined).toContain('Decision Token Key')
+    expect(joined).toContain('Decision ModelName')
+    expect(joined).toContain('Save')
+    expect(types).toContain('input')
+    expect(types).toContain('button')
+  })
+
+  it('remote (non-loopback) page renders the loopback-only explanation instead of an empty body', () => {
+    // DSH switches ui-settings to memory persistence for non-loopback pages: the settings mirror
+    // is terminally `unavailable`, so the page must explain the restriction rather than render nothing.
+    const { plugin } = loadClient(SOURCE)
+    const fake = fakeContext({
+      form: { status: 'unavailable', value: undefined, revision: undefined, writable: false },
+      mirror: { status: 'unavailable', view: undefined },
+    })
+    plugin.apply(fake.ctx)
+    const element = (fake.cells[0]!.component as (props: unknown) => unknown)({ view: 'page' })
+    const { text, types } = collect(element)
+    const joined = text.join(' ')
+    expect(joined).toContain('Configuration is available from the Host machine only')
+    expect(joined).toContain('SSH tunnel')
+    expect(types).not.toContain('input')
+    expect(types).not.toContain('button')
+  })
+
+  it('root bundle renders the same two states (generated copy stays in sync)', () => {
+    for (const source of [SOURCE, ROOT_SOURCE]) {
+      const { plugin } = loadClient(source)
+      const remote = fakeContext({
+        form: { status: 'unavailable', value: undefined, revision: undefined, writable: false },
+        mirror: { status: 'unavailable', view: undefined },
+      })
+      plugin.apply(remote.ctx)
+      const element = (remote.cells[0]!.component as (props: unknown) => unknown)({ view: 'page' })
+      expect(collect(element).text.join(' ')).toContain('Configuration is available from the Host machine only')
     }
   })
 })

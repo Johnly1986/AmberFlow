@@ -36,7 +36,8 @@ dsh plugin --profile <名称> add github:Johnly1986/AmberFlow          # 仓库�
 dsh plugin --profile <名称> add /绝对路径/AmberFlow                  # 开发态 link：仓库根 bundle，插件与引擎同源
 dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridge   # 只装适配器包（需先 npm run build；引擎由 repoPath 指）
 ```
-配置页在**设置 → 插件 → AmberFlow 桥接 → 组件行 → 配置**：三项分别是 `TOKEN_PLAN_ENDPOINT` /
+配置页在**设置 → 插件 → AmberFlow 桥接 → 组件行 → 配置**（编辑仅限 loopback 页面：经外网打开时页面会
+显示说明，请用 Host 本机地址或 SSH 隧道如 `ssh -L 8080:127.0.0.1:3080 <host>`）：三项分别是 `TOKEN_PLAN_ENDPOINT` /
 `TOKEN_PLAN_API_KEY` / `TOKEN_PLAN_MODEL`（URL 填兼容模式基址，桥自动补 `/systemone`），URL+Token 齐全时
 `amberflow_run` 默认以 `token-plan` 作为决策 provider；留空则继续用本地 ONNX。详见
 [integrations/dsh-bridge/README.md](integrations/dsh-bridge/README.md)。
