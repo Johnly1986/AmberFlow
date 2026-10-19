@@ -28,7 +28,7 @@ step 1: click a "Add to cart" (clicked, rule:match, conf=1.00)
 ## DSH 插件安装
 
 装进 profile 即得四个工具——`amberflow_apps`（列应用）/ `amberflow_run`（跑一个，含 `dry` / `ablate` /
-`slots` / `provider`；**默认跑真模型**）/ `amberflow_learn`（录制归纳）/ `amberflow_plan`（一句话+种子页→模板+档案），
+`slots` / `provider` / `headful`；**默认跑真模型**）/ `amberflow_learn`（录制归纳）/ `amberflow_plan`（一句话+种子页→模板+档案），
 并且插件行自带**配置页**（只设置线上决策模型 URL / Token Key / ModelName；两个安装门都提供）：
 
 ```bash
@@ -84,11 +84,24 @@ CLI 报告、`apps:suite` 表格与 DSH 插件 `amberflow_run` 的 summary 念�
 
 ```bash
 npm run apps -- --list                                  # 有哪些应用
-npm run apps -- --app demo-app --headful            # 有头运行：浏览器窗口可见（窗口在跑引擎的那台机器上）
-npm run apps -- --app demo-app               # 离线整跑一条完整链路
+npm run apps -- --app demo-app                          # 离线整跑一条完整链路
 npm run apps -- --app demo-app --dry                    # 只展开计划，不开浏览器
+npm run apps -- --app demo-app --headful                # 有头运行：浏览器窗口显形（见「看着浏览器跑」）
 npm run apps:suite                                      # 全部离线应用跑完，一行一个给结论
 ```
+
+### 看着浏览器跑（有头 / 挂载）
+
+| 想要的效果 | 怎么做 |
+|---|---|
+| 本机弹一个真窗口 | `npm run apps -- --app <id> --headful`；`npm run semantic -- --app <模板> --site <key> --headful`；`npm run plan:flow -- … --headful`；`npm run learn -- --headful` |
+| 在**你自己**的浏览器里实时看 | Chrome 带 `--remote-debugging-port=9222` 启动，然后 `npm run learn -- --cdp ws://…`（录制结束只断连，不关你的浏览器）；DSH 里就是 `amberflow_learn` 的 `cdp` 参数 |
+| 无显示器的服务器 | 窗口只出现在**跑引擎的那台机器**上：`xvfb-run -a -s "-screen 0 1440x900x24" npm run apps -- --app <id> --headful`，人眼看再配 x11vnc / noVNC；只要证据图就 `ffmpeg -f x11grab -video_size 1440x900 -i $DISPLAY -frames:v 1 win.png` |
+| 从 DSH 插件发起 | `amberflow_run` / `amberflow_plan` 传 `headful: true`（窗口同样开在服务器显示上，不在浏览器页面里） |
+
+有头需要**完整 chromium**：只有 headless shell 的机器会直接点名让你 `npx playwright install chromium`。
+不传旗标就是原来的 headless 面，行为与产物逐字节不变（实测：有头起 `chromium-*/chrome` 且命令行没有
+`--headless`，默认起 `chrome-headless-shell --headless`）。
 
 三类入口，同一个引擎，同一道门槛——**规则模式零模型重放通过，才落盘**：
 
@@ -149,6 +162,7 @@ console.log(rep.completed, rep.traces.length);
 | `npm run plan-cli -- --help` | 手工编排：new / add / edit / check / run（支持 `when` 条件跳过、`retries` 整步重试） |
 | `npm run verify` | 一键门禁：typecheck + 全部测试 + 六层跨实现对拍 |
 | `npm run apps:matrix` | 每个应用的声明成本 / 来源（生成还是手写）/ 站点知识泄漏门禁 |
+| `npm run apps -- --app <id> --headful` | 有头运行：看得见浏览器窗口（服务器需 Xvfb/VNC，见「看着浏览器跑」） |
 | `npm run bench -- --cases bench/cases-live.json --mode-tag live` | 8 个真实站点跑分（要真网络；跳过不等于通过） |
 
 ## 环境变量（都有兜底，全部可不配）
