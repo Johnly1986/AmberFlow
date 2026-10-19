@@ -56,7 +56,8 @@ function browserRoots(): string[] {
 export function chromiumCandidates(): string[] {
   const patterns =
     process.platform === "win32"
-      ? ["chromium-*/chrome-win*/chrome.exe"]
+      ? ["chromium-*/chrome-win*/chrome.exe",
+         "chromium_headless_shell-*/chrome-headless-shell-win*/chrome-headless-shell.exe"]
       : process.platform === "darwin"
         ? ["chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium"]
         : ["chromium-*/chrome-linux*/chrome",

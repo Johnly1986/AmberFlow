@@ -21,6 +21,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import readline from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { chromium } from "playwright";
@@ -504,6 +505,8 @@ export const USAGE = `npm start — 一条命令开始一项工作
         --headful          显示浏览器窗口
 `;
 
-if (process.argv[1] && path.resolve(process.argv[1]) === new URL(import.meta.url).pathname) {
+// 与 src/bench.ts 等同一口径：fileURLToPath 而非 .pathname（后者在 Windows 是 "/E:/…"，
+// 与 path.resolve(argv[1]) 的 "E:\…" 永不相等 ⇒ `npm start` 直接跑文件时 main 不执行）。
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exit(await main());
 }

@@ -44,22 +44,30 @@ describe("chromium resolution (browser_env.py twin)", () => {
   });
 
   it("headed names the missing binary when only the headless shell is installed", () => {
-    // 把解析面收窄到"只有 headless shell"的假浏览器目录（browserRoots 认 HOME 与 env）。
+    // 把解析面收窄到"只有 headless shell"的假浏览器目录。browserRoots 的默认根是
+    // 平台各自的：Linux 认 HOME（~/.cache/ms-playwright），Windows 认 LOCALAPPDATA
+    // （%\LOCALAPPDATA%\ms-playwright）——各自都要指过去，真机上的浏览器才漏不进来。
+    const win = process.platform === "win32";
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "af-headonly-"));
-    const shell = path.join(home, ".cache", "ms-playwright", "chromium_headless_shell-1234",
-      "chrome-headless-shell-linux", "chrome-headless-shell");
+    const root = win ? path.join(home, "ms-playwright") : path.join(home, ".cache", "ms-playwright");
+    const shell = win
+      ? path.join(root, "chromium_headless_shell-1234", "chrome-headless-shell-win64", "chrome-headless-shell.exe")
+      : path.join(root, "chromium_headless_shell-1234", "chrome-headless-shell-linux", "chrome-headless-shell");
     fs.mkdirSync(path.dirname(shell), { recursive: true });
     fs.writeFileSync(shell, "");
     const savedHome = process.env.HOME;
+    const savedLad = process.env.LOCALAPPDATA;
     const savedEnvPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
     delete process.env.PLAYWRIGHT_BROWSERS_PATH;
     process.env.HOME = home;
+    if (win) process.env.LOCALAPPDATA = home;
     try {
       expect(() => launchKwargs(false)).toThrow(/有头运行.*headless shell/s);
       // 同一天花板下 headless 照常可用：报错只针对"有头但没有完整 chromium"。
       expect(String(launchKwargs(true).executablePath)).toContain("headless_shell");
     } finally {
       if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+      if (win) { if (savedLad === undefined) delete process.env.LOCALAPPDATA; else process.env.LOCALAPPDATA = savedLad; }
       if (savedEnvPath !== undefined) process.env.PLAYWRIGHT_BROWSERS_PATH = savedEnvPath;
       fs.rmSync(home, { recursive: true, force: true });
     }
