@@ -27,6 +27,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { appDirs, expandPack, loadPack, validatePack, type AppPack } from "../src/app-pack.ts";
 import { FROZEN_TODAY } from "./frozen-today.ts";
+import { pathToFileURL } from "node:url";
 import { discoverSpecs, emitPlan } from "../src/transfer-task.ts";
 
 const isDict = (v: unknown): v is Record<string, unknown> =>
@@ -95,7 +96,8 @@ export async function flowFor(ref: FlowRef): Promise<Flow> {
   }
   const [file, fn] = ref.source.split("#");
   if (!file || !fn) throw new Error(`generated_from.source 形如 "<模块>#<导出名>"，收到 ${JSON.stringify(ref.source)}`);
-  const mod = (await import(path.join(REPO, file))) as Record<string, unknown>;
+  // 原生绝对路径直接 import 会被 ESM 当成 URL（Windows 上 "E:\…" ⇒ protocol 'e:'）。
+  const mod = (await import(pathToFileURL(path.join(REPO, file)).href)) as Record<string, unknown>;
   const build = mod[fn];
   if (typeof build !== "function") throw new Error(`${file} 没有导出函数 ${fn}`);
   const out = (build as () => unknown)() as PlanLike;
@@ -122,13 +124,20 @@ export const HUMAN_KEYS = [
   "invariants", "notes", "device", "probe",
 ] as const;
 
-/** `file:///repo/x` → `x`（包里用仓库相对路径，运行器再解析回 file://）。 */
+/** `file:///repo/x` → `x`（包里用仓库相对路径，运行器再解析回 file://）。
+ * `fileURLToPath` 是唯一的平台正确换算：Windows 的 file URL 路径是 "/E:/…"，
+ * 与 REPO（"E:\…"）直接字符串比较永远不相等——包因此留下机器绝对路径，
+ * 别的机器一跑 --check 就是"19 处 start_url 漂移"（Windows 实测）。 */
 export function relativize(url: unknown): unknown {
   if (typeof url !== "string") return url;
   const m = /^file:\/\/(.*)$/.exec(url);
   if (!m) return url;
-  const abs = m[1]!;
-  return abs.startsWith(REPO + "/") ? abs.slice(REPO.length + 1) : abs;
+  // 纯字符串口径（不解析、不解码）：冻结包里的 `page.html?from=KMG&…` 与
+  // percent-编码的查询值都是**原样**存进包的，任何 URL 往返都可能改写它们。
+  // Windows 的唯一差别：URL 路径以 "/E:/…" 出现，先去掉盘符前的那个斜杠。
+  const abs = /^\/[A-Za-z]:(\/|\\)/.test(m[1]!) ? m[1]!.slice(1) : m[1]!;
+  const repo = REPO.split(path.sep).join("/");
+  return abs.startsWith(repo + "/") ? abs.slice(repo.length + 1) : abs;
 }
 
 /** 展开内容的稳定指纹：只包含"计划语义"，不含运行期字段（status/obstacle/saved_at）。 */

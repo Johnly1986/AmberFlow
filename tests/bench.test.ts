@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { BenchMiddleware, main, runCase, startUrl, type BenchCase } from "../src/bench.ts";
 import { BrowserMiddleware } from "../src/executor.ts";
@@ -70,7 +71,8 @@ describe("startUrl — relative case paths resolve against the repo root", () =>
     expect(startUrl("https://quotes.toscrape.com/")).toBe("https://quotes.toscrape.com/");
     const u = startUrl("testpages/product.html");
     expect(u.startsWith("file://")).toBe(true);
-    expect(u).toContain(path.join(REPO, "testpages", "product.html"));
+    // the URL carries "/" separators; compare with the platform-correct conversion
+    expect(u).toBe(pathToFileURL(path.join(REPO, "testpages", "product.html")).href);
   });
 });
 

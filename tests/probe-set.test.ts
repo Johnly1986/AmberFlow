@@ -26,7 +26,8 @@ describe("探针集：声明面（站点知识是数据，不是代码）", () =
     expect(s.capture.map((t) => t.id)).toEqual(["flights", "hotels"]);
     expect(s.repeat).toEqual({ id: "flight_mobile_cn", times: 5 });
     expect(s.roles["flight"]).toBe("flight_list_cn");
-    expect(s.resultsDir.endsWith("ctrip/results")).toBe(true);
+    // resultsDir 是给文件系统用的原生路径（Windows 带反斜杠），断言先归一化分隔符
+    expect(s.resultsDir.split(/[\\/]/).join("/").endsWith("ctrip/results")).toBe(true);
     // 每个目标 URL 的主机都在 hosts 里（校验期也是这么要求的）
     for (const t of [...s.http, ...s.alts, ...s.mobile, ...s.capture, ...(s.home ? [s.home] : [])]) {
       expect(s.markers, t.id).toBeTruthy();
@@ -57,7 +58,7 @@ describe("探针集：声明面（站点知识是数据，不是代码）", () =
     expect(s.http).toHaveLength(8);
     expect(markerList(s, "challenge_text")).toContain("Bot or Not");
     expect(markerList(s, "notice_text")).toEqual(["停止提供"]);
-    expect(s.resultsDir.endsWith("transfer/results")).toBe(true);
+    expect(s.resultsDir.split(/[\\/]/).join("/").endsWith("transfer/results")).toBe(true);
   });
 });
 

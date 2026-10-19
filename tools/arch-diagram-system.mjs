@@ -20,6 +20,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const W = 1560, PAD = 11;
 const H = 1288;
@@ -38,7 +39,7 @@ const est = (s, size) => [...s].reduce((n, ch) => {
 const problems = [];
 
 // 单一出处：docs/arch-metrics.json。读不到/缺字段 ⇒ 记问题（不落坏图），不退回旧数字。
-const HERE0 = path.dirname(new URL(import.meta.url).pathname);
+const HERE0 = path.dirname(fileURLToPath(import.meta.url));
 let M = null;
 try {
   M = JSON.parse(fs.readFileSync(path.resolve(HERE0, "..", "docs", "arch-metrics.json"), "utf-8"));
@@ -236,7 +237,7 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" 
 ${out.join("\n")}
 </svg>`;
 
-const HERE = path.dirname(new URL(import.meta.url).pathname);
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const argOf = (name) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : null; };
 const OUT = argOf("--out") ?? path.resolve(HERE, "..", "docs", "architecture-system.svg");
 

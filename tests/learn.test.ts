@@ -31,8 +31,11 @@ function tmp(tag = "learn"): string {
 afterEach(() => {
   // chromium 的 persistent profile 在 close 之后仍可能有尾写（实测 ENOTEMPTY 偶发）；
   // 递归删除带重试是清理，不是隐藏问题——测试本身的断言不变。
+  // Windows：SIGKILL 之后 leveldb 的 LOG 句柄释放可以拖到 1s+（实测 EBUSY），
+  // 重试窗口按平台放宽。
+  const retries = process.platform === "win32" ? 20 : 5;
   while (TMP.length) {
-    fs.rmSync(TMP.pop()!, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    fs.rmSync(TMP.pop()!, { recursive: true, force: true, maxRetries: retries, retryDelay: 200 });
   }
 });
 
@@ -195,8 +198,13 @@ describe("learn：挂到**你自己的**浏览器（--cdp）", () => {
     const fsx = await import("node:fs");
     const cp = await import("node:child_process");
     const profile = tmp("learn-cdp-profile");
-    const bin = (await import("../src/browser-env.ts")).chromiumCandidates()
-      .find((c) => { try { fsx.accessSync(c); return true; } catch { return false; } });
+    // 取**最新**修订的完整 chromium（列表按修订升序、新者在尾）——与 launchKwargs 同一口径。
+    // （原来 .find() 取的是第一个 = 最老：1117 的 connectOverCDP 在 Windows 直接 ECONNRESET，
+    //  learn 以用法错误 exit 2 收场；只装一个浏览器的机器上两种取法没有区别，所以从没暴露。）
+    const full = (await import("../src/browser-env.ts")).chromiumCandidates()
+      .filter((c) => !c.includes("headless"))
+      .filter((c) => { try { fsx.accessSync(c); return true; } catch { return false; } });
+    const bin = full[full.length - 1];
     expect(bin, "需要一个 chromium 可执行文件").toBeTruthy();
     // `--remote-debugging-port=0` + 读 DevToolsActivePort：不抢固定端口，也就不会和别的测试打架
     const child = cp.spawn(bin!, [

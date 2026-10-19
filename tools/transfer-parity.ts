@@ -61,8 +61,11 @@ const rawCorpus = fs.readFileSync(corpusPath, "utf-8");
 // 语料里既有 `file://` URL（子目标的 start_url），也有普通绝对路径（spec 文件），两种都要认。
 const recordedRoot = rawCorpus.match(/"((?:file:\/\/)?\/[^"]*?)\/(?:ctrip|transfer)\//)?.[1]
   ?.replace(/^file:\/\//, "") ?? null;
+// 与 tools/ctrip-parity.ts 同一口径：注入语料的根必须是 JSON/URL 安全形状（"/E:/…"），
+// 反斜杠的 REPO 原样替换会产出非法转义直接把 JSON.parse 炸掉（Windows 实测）。
+const mappedRoot = /^[A-Za-z]:/.test(REPO) ? "/" + REPO.split(path.sep).join("/") : REPO;
 const py = JSON.parse(
-  recordedRoot && recordedRoot !== REPO ? rawCorpus.replaceAll(recordedRoot, REPO) : rawCorpus,
+  recordedRoot && recordedRoot !== mappedRoot ? rawCorpus.replaceAll(recordedRoot, mappedRoot) : rawCorpus,
 ) as Record<string, any>;
 
 let failed = 0;
@@ -133,6 +136,27 @@ for (const [key, spec] of Object.entries(specs)) {
 
 // ---- 迁移度量（Python 的最终语义：spec 自己的 collect_roles 覆盖度量里那份） ----
 const TS_METRICS = TT.migrationMetricsForAll(specs, dates);
+// metrics 的 `spec` 字段是**绝对路径**——跨机器本来就没法逐字比，根映射只修前缀不修形状：
+// Windows 上 ts 侧是 "E:\…\specs\x.json"，语料映射后是 "/E:/…/specs/x.json"（前导斜杠是
+// file:// URL 的形状）。对拍口径把两侧一律归一成"仓库相对 + 正斜杠"——只剥机器根，
+// 比较的内容一字不改（Linux/CI 上两侧同形，归一是恒等变换）。
+const relSpec = (p: unknown): unknown => {
+  if (typeof p !== "string") return p;
+  const slash = p.split(path.sep).join("/");
+  for (const root of [mappedRoot, REPO.split(path.sep).join("/")]) {
+    if (slash.startsWith(root + "/")) return slash.slice(root.length + 1);
+    if (`/${slash}`.startsWith(root)) return `/${slash}`.slice(root.length + 1);
+  }
+  return p;
+};
+for (const key of Object.keys(TS_METRICS.sites)) {
+  const m = TS_METRICS.sites[key] as Record<string, unknown>;
+  if (typeof m.spec === "string") m.spec = relSpec(m.spec);
+}
+for (const key of Object.keys((py["metrics"]?.["sites"] ?? {}) as Record<string, any>)) {
+  const m = (py["metrics"] as Record<string, any>)["sites"][key] as Record<string, unknown>;
+  if (typeof m.spec === "string") m.spec = relSpec(m.spec);
+}
 for (const [key, spec] of Object.entries(specs)) {
   const p = py["metrics"]["sites"][key] as Record<string, any>;
   check(`metrics[${key}]`, TS_METRICS.sites[key], p);

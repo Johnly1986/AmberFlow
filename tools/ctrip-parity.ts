@@ -49,8 +49,13 @@ const rawCorpus = fs.readFileSync(corpusPath, "utf-8");
 // 语料里既有 `file://` URL（子目标的 start_url），也有普通绝对路径（spec 文件），两种都要认。
 const recordedRoot = rawCorpus.match(/"((?:file:\/\/)?\/[^"]*?)\/(?:ctrip|transfer)\//)?.[1]
   ?.replace(/^file:\/\//, "") ?? null;
+// 映射的落点必须是 JSON/URL 安全的形状：Windows 的 REPO 带反斜杠，原样替换会产出
+// "file://E:\nodeproject\…"（非法转义，JSON.parse 当场炸；即便能解析也不是 URL 形状）。
+// TS 侧的 start_url 走 pathToFileURL，产出 "file:///E:/…"——所以注入 "/E:/…"（保留前导斜杠，
+// 前缀 `file://` 拼出正好三个斜杠；正斜杠是 URL 的写法）。非盘符根（Linux/CI）逐字节不变。
+const mappedRoot = /^[A-Za-z]:/.test(REPO) ? "/" + REPO.split(path.sep).join("/") : REPO;
 const py = JSON.parse(
-  recordedRoot && recordedRoot !== REPO ? rawCorpus.replaceAll(recordedRoot, REPO) : rawCorpus,
+  recordedRoot && recordedRoot !== mappedRoot ? rawCorpus.replaceAll(recordedRoot, mappedRoot) : rawCorpus,
 ) as Record<string, any>;
 
 // Pin the clock to the day the frozen corpus was generated: its report embeds a

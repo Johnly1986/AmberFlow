@@ -21,6 +21,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const W = 1560, H = 2320, PAD = 11, RIGHT = 1416;
 const wide = (cp) =>
@@ -41,7 +42,7 @@ const problems = [];
 // 插值，不再手写；JSON 缺失/缺字段记为问题 ⇒ 先检查后写，不落坏图。
 let M = null;
 try {
-  M = JSON.parse(fs.readFileSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "docs", "arch-metrics.json"), "utf-8"));
+  M = JSON.parse(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "docs", "arch-metrics.json"), "utf-8"));
 } catch {
   problems.push("计量缺失：docs/arch-metrics.json 读不到（跑 npm run metrics）");
 }
@@ -364,7 +365,7 @@ if (problems.length) {
   process.exit(1);
 }
 
-const HERE = path.dirname(new URL(import.meta.url).pathname);
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const argOf = (name) => {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : null;

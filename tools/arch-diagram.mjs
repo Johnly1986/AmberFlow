@@ -19,6 +19,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const W = 1560, PAD = 11;
 const wide = (cp) =>
@@ -39,7 +40,7 @@ const problems = [];
 // 图里**能算的数字一律从 arch-metrics.json 插值**，不再手写——否则"图与生成结果一致"的
 // --check 只是自洽门（本轮实测：图里写 1061、实际 1068，--check 照样绿）。
 // JSON 缺失就记为问题（先检查后写 ⇒ 不落盘），而不是悄悄退回旧数字。
-const HERE0 = path.dirname(new URL(import.meta.url).pathname);
+const HERE0 = path.dirname(fileURLToPath(import.meta.url));
 let M = null;
 try {
   M = JSON.parse(fs.readFileSync(path.resolve(HERE0, "..", "docs", "arch-metrics.json"), "utf-8"));
@@ -225,7 +226,7 @@ for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++
 }
 for (const b of boxes) if (b.x + b.w > 1416) problems.push(`越出内容右界：${b.title} 到 ${String(b.x + b.w)}`);
 
-const HERE = path.dirname(new URL(import.meta.url).pathname);
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const argOf = (name) => {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : null;

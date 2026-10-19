@@ -448,7 +448,9 @@ export function writeResultMd(res: SiteResult, spec: FlowSpec, outdir: string): 
   const okn = res.verify.checks.filter((c) => c.ok).length;
   const L: string[] = [
     `# 迁移结果 · ${res.profile}（${res.language}）`, "",
-    `- 流程配置：\`${path.relative(REPO, res.spec)}\`（流程零代码改动）`,
+    // 报告是**文档**（冻结语料按逐字节比），仓库相对路径必须按仓库口径（正斜杠）渲染，
+    // 不能跟着文件分隔符走——Windows 上 path.relative 产出 "transfer\\specs\\…"（实测 14 项漂移）。
+    `- 流程配置：\`${path.relative(REPO, res.spec).split(path.sep).join("/")}\`（流程零代码改动）`,
     `- 站点：${res.profile}；子目标 ${res.subgoals} 个；判分 ${okn}/${res.verify.checks.length}`,
     `- 出发当日（由机票阶段记录决定）：${res.checkin}`, "",
     "## 机票：五天 08:00-18:00 最低价", "",

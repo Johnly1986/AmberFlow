@@ -146,9 +146,17 @@ export interface Learning {
   effect: string[];
 }
 
-/** 仓库相对路径（执行器与包里都用这个口径）。 */
+/** 仓库相对路径（执行器与包里都用这个口径）。
+ * Windows 有两处会把纯字符串口径咬掉：① file URL 的路径是 "/E:/…"，盘符前多一个斜杠，
+ * 不归一掉就永远匹配不上前缀、把机器绝对路径录进包（回放器 path.resolve 出 E:\E:\…，
+ * 每一步都打不开页面）；② REPO 自己是反斜杠的。查询串照旧原样保留（冻结语料的口径）。 */
 export function relUrl(u: string): string {
-  return u.replace(/^file:\/\//, "").replace(REPO + "/", "");
+  const m = /^file:\/\/(.*)$/.exec(u);
+  if (!m) return u;
+  let p = m[1]!;
+  if (/^\/[A-Za-z]:(\/|\\)/.test(p)) p = p.slice(1);
+  const repo = REPO.split(path.sep).join("/");
+  return p.startsWith(repo + "/") ? p.slice(repo.length + 1) : p;
 }
 
 export interface LearnIO {

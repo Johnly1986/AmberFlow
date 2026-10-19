@@ -18,9 +18,12 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { listPacks, loadPack, packHintCoverage } from "../src/app-pack.ts";
 
-const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+// `URL.pathname` keeps the leading slash on Windows ("/E:/…") and path.resolve then
+// doubles the drive ("E:\E:\…") — fileURLToPath is the only correct conversion.
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const argOf = (name: string): string | null => {
   const i = args.indexOf(name);

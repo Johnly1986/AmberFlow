@@ -8,11 +8,15 @@
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const ART = path.join(REPO, "bench", "provider-baselines.json");
+// "/tmp/…" resolves against the current drive on Windows (E:\tmp) and the tool
+// does not mkdir it — os.tmpdir() exists on every platform.
+const OUT = path.join(os.tmpdir(), "pb-test.json");
 
 describe("决策提供者基线对照（bench/provider-baselines.json）", () => {
   it("首轮结论：零智能的 first-candidate 过 3/4，abstain 与 coin-flip 各 0/4", () => {
@@ -31,9 +35,9 @@ describe("决策提供者基线对照（bench/provider-baselines.json）", () =>
     try {
       execFileSync("node", ["--experimental-strip-types", "tools/provider-baselines.ts",
         "--apps", "demo-app", "--providers", "first-candidate",
-        "--out", "/tmp/pb-test.json"], { cwd: REPO, encoding: "utf-8", stdio: "pipe", timeout: 300_000 });
+        "--out", OUT], { cwd: REPO, encoding: "utf-8", stdio: "pipe", timeout: 300_000 });
     } catch { /* 非零退出是结果不是故障 */ }
-    const j = JSON.parse(fs.readFileSync("/tmp/pb-test.json", "utf-8")) as
+    const j = JSON.parse(fs.readFileSync(OUT, "utf-8")) as
       { results: Record<string, Record<string, { ok: boolean; completed: string }>> };
     expect(j.results["demo-app"]?.["first-candidate"]?.ok).toBe(true);
     expect(j.results["demo-app"]?.["first-candidate"]?.completed).toBe("5/5");

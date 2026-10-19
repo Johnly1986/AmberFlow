@@ -5,6 +5,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   REPO, SPECS, deriveFlightSubgoals, deriveHotelSubgoals, deriveSubgoals, loadSpec,
@@ -102,7 +103,10 @@ describe("expansion details", () => {
     const spec = load("ctrip.json");
     const step = stagePhases(spec, "flight").find((p) => p.repeat === "per_date")!.steps[0]!;
     const url = stepUrl(spec, step, { date: DATES[0], wd: "周一", checkin: "" });
-    expect(url).toContain(path.resolve(REPO, spec.site_dir).replace(/^\//, "file:///"));
+    // pathToFileURL is the platform-correct native→file:// conversion; the old
+    // "/"→"file:///" string hack only ever matched on Linux (Windows paths start
+    // with a drive letter, so the replace was a no-op and the check could not hold).
+    expect(url).toContain(pathToFileURL(path.resolve(REPO, spec.site_dir)).href);
     const q = new URL(url).searchParams;
     expect(q.get("date")).toBe(DATES[0]);
     const city = q.get("city") ?? q.get("from") ?? "";
