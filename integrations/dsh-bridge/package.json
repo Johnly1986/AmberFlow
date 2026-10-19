@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-amberflow-bridge",
-  "version": "0.2.0-rc.3",
+  "version": "0.2.0-rc.4",
   "private": true,
   "description": "Bridge plugin exposing the AmberFlow frozen-plan browser engine (apps/learn) as model-facing tools",
   "license": "MIT",
@@ -13,18 +13,23 @@
       "default": "./lib/types/index.js"
     },
     "./src/*": "./src/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "lib/types/**/*.js",
     "lib/types/**/*.d.ts",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "client.js",
+    "icon.svg",
+    "locale/*.json"
   ],
   "scripts": {
     "setup": "node scripts/setup-links.mjs",
     "build": "node node_modules/typescript/bin/tsc -b tsconfig.json",
     "test": "npm run build && node node_modules/vitest/vitest.mjs run",
-    "test:offline": "npm run build && node node_modules/vitest/vitest.mjs run tests/bridge.spec.ts tests/service.spec.ts",
+    "test:offline": "npm run build && node node_modules/vitest/vitest.mjs run tests/bridge.spec.ts tests/service.spec.ts tests/client.spec.ts",
     "test:live": "npm run build && node node_modules/vitest/vitest.mjs run tests/live.spec.ts"
   },
   "dependencies": {
@@ -41,11 +46,22 @@
     "@deepseek-ai/dsh-tools": "*",
     "@deepseek-ai/schemastery": "*",
     "typescript": "*",
-    "vitest": "*"
+    "vitest": "*",
+    "@deepseek-ai/cordis-plugin-loader": "*",
+    "@deepseek-ai/dsh-settings": "*"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
     }
-  }
+  },
+  "icon": "./icon.svg"
 }

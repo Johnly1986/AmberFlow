@@ -51,7 +51,7 @@ run "2d 提名实验台与冻结产物一致（nominate:measure --check --no-mod
 if [ -d integrations/dsh-bridge ]; then
   if [ -n "${DSH_ROOT:-}" ] && [ -d "${DSH_ROOT}/packages/core/tools" ]; then
     run "2e DSH 插件 integrations/dsh-bridge（离线测试，宿主 $DSH_ROOT）" \
-      bash -c "cd integrations/dsh-bridge && node scripts/setup-links.mjs && npm run --silent build && node ../../node_modules/vitest/vitest.mjs run tests/bridge.spec.ts tests/service.spec.ts"
+      bash -c "cd integrations/dsh-bridge && node scripts/setup-links.mjs && npm run --silent build && node ../../node_modules/vitest/vitest.mjs run tests/bridge.spec.ts tests/service.spec.ts tests/client.spec.ts"
   else
     echo
     echo "SKIP: integrations/dsh-bridge 未跑（它是 DSH 的适配器，需要一份 DSH 安装提供宿主包）。"

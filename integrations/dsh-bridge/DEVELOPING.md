@@ -12,7 +12,9 @@
 | 路径 | 作用 |
 |---|---|
 | `src/` | 四个工具与其背后的服务缝（`ctx.amberflow`，供别的插件调用） |
-| `tests/` | 两层：`bridge`/`service`（离线、桩 checkout）与 `live`（真浏览器 + 真 checkout） |
+| `client.js` | 浏览器半：在 `plugins.row.config` 注册配置页（只有模型 URL / Token Key / ModelName 三个字段） |
+| `locale/` `icon.svg` | 插件卡片的显示文案与图标（`locale/en.json` / `locale/zh.json` 提供 meta 标题/描述） |
+| `tests/` | 两层：`bridge`/`service`/`client`（离线、桩 checkout、客户端注册契约）与 `live`（真浏览器 + 真 checkout） |
 | `cordis.patch.yml` | bundle 层：装进 profile 即注册四个工具；`repoPath` 指向本仓库根 |
 | `scripts/setup-links.mjs` | 链入依赖：工具链取自本仓库，宿主包取自 DSH 安装 |
 | `lib/` | 构建产物（git 忽略），入口 `lib/types/index.js` |

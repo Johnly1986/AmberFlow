@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-`dsh-amberflow-bridge` 把一个外部浏览器引擎暴露成四个面向模型的工具。AmberFlow 只规划一次，之后每一步都在**本地**决策，把 DOM 信号当作唯一的完成真相，并且能从一次演示里录制流程；本桥不添加任何自己的浏览器逻辑，只调用那个 checkout 的命令行并归纳其产物。同一个应用可以在一条旅程里混用**多种应用类型**——web/cli/ssh/stdio（交互式进程，如游戏）——清单会报告类型组合以及运行所需的本机服务（例如 ssh 需要可达的本机 sshd）。`amberflow_apps` 列出已声明的应用，并说明每个包是由 spec 生成的、由演示录制的、手写的，还是纯数据源。`amberflow_run` 端到端运行一个应用，返回完成情况、**只列失败**的步骤、拒绝项与不变量结果；加上 `dry` 时则只返回展开后的计划，不执行任何一步。`amberflow_learn` 用一个目标、一个页面和一份录好的动作清单来录制流程，并报告那次"零模型调用回放"，正是它决定录制的流程是否可复现到值得保存。
+`dsh-amberflow-bridge` 把一个外部浏览器引擎暴露成四个面向模型的工具。AmberFlow 只规划一次，之后每一步都在**本地**决策，把 DOM 信号当作唯一的完成真相，并且能从一次演示里录制流程；本桥不添加任何自己的浏览器逻辑，只调用那个 checkout 的命令行并归纳其产物。同一个应用可以在一条旅程里混用**多种应用类型**——web/cli/ssh/stdio（交互式进程，如游戏）——清单会报告类型组合以及运行所需的本机服务（例如 ssh 需要可达的本机 sshd）。插件的**配置页**（设置 → 插件 → 本 bundle 的行 → 配置）只设置三个模型字段：模型 URL、Token Key、ModelName。`amberflow_apps` 列出已声明的应用，并说明每个包是由 spec 生成的、由演示录制的、手写的，还是纯数据源。`amberflow_run` 端到端运行一个应用，返回完成情况、**只列失败**的步骤、拒绝项与不变量结果；加上 `dry` 时则只返回展开后的计划，不执行任何一步。`amberflow_learn` 用一个目标、一个页面和一份录好的动作清单来录制流程，并报告那次"零模型调用回放"，正是它决定录制的流程是否可复现到值得保存。
 
 ## 目录
 
@@ -119,6 +119,33 @@ const Consumer = {
 桥本身**不调用任何 LLM**：决策兜底是 checkout 的本地 ONNX 模型，`learn` 的落盘门槛是零模型调用回放。
 LLM 门（LLM 规划器、或语义流的升级老师）是命令行层的可选项，需要运行 checkout 的机器上有 `OPENAI_*`
 ——它们不是插件的前置要求。
+
+### 配置页：模型 URL / Token Key / ModelName
+
+bundle 自带一个浏览器半，在 `plugins.row.config` 注册自己的行配置页：设置 → 插件 → 本 bundle →
+`amberflow-bridge` 那一行会出现**配置**入口。页面只显示三个字段（它们是插件 Config 里**全部**的
+`.volatile()` 字段）：
+
+| 字段 | 转发到引擎 CLI 的环境变量 | 含义 |
+|---|---|---|
+| **模型 URL** | `OPENAI_BASE_URL` | OpenAI 兼容端点基址（如 `https://…/compatible-mode/v1`） |
+| **Token Key** | `OPENAI_API_KEY` | bearer token；只写不读——Host 不回传，页面只显示"已配置/未设置" |
+| **ModelName** | `PLANNER_MODEL` 与 `AUDIT_MODEL` | LLM 规划器与审计使用的模型 id |
+
+行为：
+
+- **改完即生效，不用重启**：`.volatile()` 字段由 Loader 提交到运行中的引用，桥在
+  `loader/volatile-update` 事件里重读；此后启动的 CLI 调用即使用新端点。保存持久化到当前 profile 的
+  `cordis.patch.yml`。
+- **留空 = 继承**：空字段不会注入任何环境变量，所以"不配置"的部署照旧继承 `envMode`/`forwardEnv`
+  提供的环境；桥本身仍然不需要模型 key。
+- **作用域**：这三项只服务 AmberFlow 的 **LLM 门**（LLM 规划器、审计、语义升级）；默认决策模型是
+  checkout 的本地 ONNX，不受影响；线上决策 provider（`TOKEN_PLAN_*`）仍走自己的环境变量名。
+- **只能改这三个字段**：`repoPath`/`nodeBin`/`timeoutMs`/`allowDangerous`/`toolPrefix`/`envMode`/
+  `forwardEnv`/`keepRuns` 仍写在 `cordis.patch.yml`（普通字段的变更会重挂插件；`toolPrefix` 甚至会
+  改工具名，不能做成热更新）。
+- **安装门说明**：该页面属于 nested 的 `integrations/dsh-bridge` 包，由整包（path/link/npm）安装时加载；
+  整仓库 git 安装走根 `dsh-bundle.yml` 的入口，那条门需要根级 client 入口才能提供同一页面（尚未接线）。
 
 ### 信任边界
 

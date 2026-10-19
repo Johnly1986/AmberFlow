@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "AmberFlow Bridge",
+    "description": "Drive AmberFlow's frozen-plan browser engine from a session: list apps, run one end to end, record a flow, and plan a site-agnostic flow. The configuration page sets the model URL, token key and model name used by the engine's LLM doors."
+  }
+}

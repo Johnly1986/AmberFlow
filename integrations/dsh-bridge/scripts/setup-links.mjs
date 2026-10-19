@@ -26,6 +26,8 @@ const HOST = {
   '@deepseek-ai/cordis': 'vendor/cordis',
   '@deepseek-ai/schemastery': 'vendor/schemastery',
   '@deepseek-ai/dsh-tools': 'packages/core/tools',
+  '@deepseek-ai/dsh-settings': 'packages/settings/settings',
+  '@deepseek-ai/cordis-plugin-loader': 'vendor/loader',
   '@deepseek-ai/dsh-llm': 'packages/llm/llm',
   '@deepseek-ai/dsh-system-prompt': 'packages/core/system-prompt',
 }

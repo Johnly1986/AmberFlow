@@ -13,8 +13,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as Bridge from '@deepseek-ai/dsh-amberflow-bridge'
+import { Config } from '../src/index.ts'
 import {
-  buildEnv, diagnoseFailure, firstLines, flowRunArgs, learnArgs, listApps, parseJsonDocument, planArgs,
+  MODEL_ENV, buildEnv, diagnoseFailure, firstLines, flowRunArgs, formatRequires, formatTypeMix,
+  learnArgs, listApps, modelEnv, parseJsonDocument, planArgs,
   pruneRunDirs, runArgs, runProcess, stripAnsi, summarizeFlow, summarizeLearn, summarizePlan, summarizeRun,
 } from '../src/bridge.ts'
 
@@ -106,6 +108,42 @@ describe('bridge helpers', () => {
     const detail = 'app probe-app 是测量型应用（探针集，17 个目标），没有 journey：请用对应的探针驱动…或用 `npm run apps -- --app probe-app --dry` 只看声明。'
     expect(() => summarizeRun(out, 'probe-app', proc({ code: 2, stderr: detail })))
       .toThrow(/cannot run .*kind='probe'/)
+  })
+
+  it('model configuration becomes child environment (empty fields inherit, configured fields win)', () => {
+    // Hermetic: the assertion "empty config invents nothing" must not depend on the session env.
+    const keys = [MODEL_ENV.baseUrl, MODEL_ENV.apiKey, ...MODEL_ENV.name]
+    const saved = new Map(keys.map((key) => [key, process.env[key]]))
+    for (const key of keys) delete process.env[key]
+    try {
+    const withModel = { ...OPTIONS, model: { baseUrl: 'https://example.test/v1', apiKey: 'sk-test', name: 'm1' } }
+    expect(modelEnv(withModel.model)).toEqual({
+      [MODEL_ENV.baseUrl]: 'https://example.test/v1',
+      [MODEL_ENV.apiKey]: 'sk-test',
+      [MODEL_ENV.name[0]]: 'm1',
+      [MODEL_ENV.name[1]]: 'm1',
+    })
+    expect(modelEnv({ ...withModel.model, baseUrl: '', apiKey: '', name: '' })).toEqual({})
+    const env = buildEnv(withModel)
+    expect(env[MODEL_ENV.baseUrl]).toBe('https://example.test/v1')
+    expect(env[MODEL_ENV.apiKey]).toBe('sk-test')
+    expect(env[MODEL_ENV.name[0]]).toBe('m1')
+    // An empty model section must not invent variables (deployment keeps inheriting).
+    const empty = buildEnv({ ...OPTIONS, model: { baseUrl: '', apiKey: '', name: '' } })
+    for (const key of keys) expect(empty[key]).toBeUndefined()
+    } finally {
+      for (const [key, value] of saved) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+  })
+
+  it('the configuration page can only show the three model fields (sole volatile fields, token is secret)', () => {
+    const dict = (Config as unknown as { dict: Record<string, { meta?: { volatile?: boolean; role?: string } }> }).dict
+    const volatile = Object.entries(dict).filter(([, node]) => node.meta?.volatile === true).map(([key]) => key).sort()
+    expect(volatile).toEqual(['modelApiKey', 'modelBaseUrl', 'modelName'])
+    expect(dict['modelApiKey']!.meta?.role).toBe('secret')
   })
 
   it('runArgs assembles flags, slots and the dangerous switch', () => {

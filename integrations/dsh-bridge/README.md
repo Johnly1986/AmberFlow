@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-amberflow-bridge` exposes an external browser engine as four model-facing tools. AmberFlow plans once and then decides every step **locally**, treats DOM signals as the only completion truth, and can record a flow from one demonstration; the bridge adds no browser logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts. An app may mix **application types** — web/cli/ssh/stdio (interactive processes such as games) in one journey — and the listing reports that mix plus any local service the run needs (e.g. ssh needs a reachable local sshd). `amberflow_apps` lists the declared apps and says whether each pack was generated from a spec, recorded from a demonstration, hand-written, or a pure data source. `amberflow_run` runs one app end to end and returns completion, the FAILED steps only, refusals, and invariant results — or, under `dry`, the expanded plan it did not execute. `amberflow_learn` records a flow from a goal, a page and a recorded action list, and reports the rules-only replay that decides whether it was reproducible enough to save.
+`dsh-amberflow-bridge` exposes an external browser engine as four model-facing tools. AmberFlow plans once and then decides every step **locally**, treats DOM signals as the only completion truth, and can record a flow from one demonstration; the bridge adds no browser logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts. An app may mix **application types** — web/cli/ssh/stdio (interactive processes such as games) in one journey — and the listing reports that mix plus any local service the run needs (e.g. ssh needs a reachable local sshd). The plugin's **configuration page** (Settings → Plugins → this bundle's row → Configure) sets exactly three model fields — Model URL, Token Key, ModelName — used by the engine's LLM doors. `amberflow_apps` lists the declared apps and says whether each pack was generated from a spec, recorded from a demonstration, hand-written, or a pure data source. `amberflow_run` runs one app end to end and returns completion, the FAILED steps only, refusals, and invariant results — or, under `dry`, the expanded plan it did not execute. `amberflow_learn` records a flow from a goal, a page and a recorded action list, and reports the rules-only replay that decides whether it was reproducible enough to save.
 
 ## Table of Contents
 
@@ -133,6 +133,38 @@ The bridge itself calls **no LLM**: the decision fallback is the checkout's loca
 semantic-flow escalation teacher) are CLI-level opt-ins that need `OPENAI_*` on the machine running
 the checkout — they are not a plugin requirement.
 
+### Configuration page: Model URL / Token Key / ModelName
+
+The bundle ships a browser half that registers its own row page at `plugins.row.config`, so
+Settings → Plugins → this bundle → the `amberflow-bridge` row gains a **Configure** control. The page
+shows exactly three fields (they are the only `.volatile()` fields in the plugin's Config):
+
+| Field | Forwarded to the engine CLI as | Meaning |
+|---|---|---|
+| **Model URL** | `OPENAI_BASE_URL` | OpenAI-compatible endpoint base (e.g. `https://…/compatible-mode/v1`) |
+| **Token Key** | `OPENAI_API_KEY` | bearer token; write-only — the Host never returns it, the UI shows only "configured / not set" |
+| **ModelName** | `PLANNER_MODEL` and `AUDIT_MODEL` | model id for the LLM planner and auditor |
+
+How it behaves:
+
+- **Effective without a restart.** `.volatile()` config fields are committed by the Loader into the
+  running references and the bridge re-reads them on `loader/volatile-update`; CLI calls started
+  afterwards see the new endpoint. Saves persist in the active profile's `cordis.patch.yml`.
+- **Unset = inherit.** Empty fields add no environment entries, so a deployment that configures
+  nothing keeps whatever `envMode`/`forwardEnv` provide — the bridge itself still needs no model key.
+- **Scope.** These values drive AmberFlow's **LLM doors** (LLM planner, auditor, semantic
+  escalation). The default decision model is the checkout's local ONNX model and is unaffected;
+  the online decision-provider family (`TOKEN_PLAN_*`) is still configured through its own
+  environment names.
+- **Only these three fields are editable here.** `repoPath`, `nodeBin`, `timeoutMs`,
+  `allowDangerous`, `toolPrefix`, `envMode`, `envMode`-forwarding and `keepRuns` stay in
+  `cordis.patch.yml` (changing an ordinary field remounts the plugin; `toolPrefix` even renames the
+  tools, so it must not be live-edited).
+- **Install-door note.** The page is part of the nested `integrations/dsh-bridge` package, so it is
+  loaded by the path/link/npm install of that package. A whole-repository git install loads the
+  plugin through the repo root's `dsh-bundle.yml`; that door would need a root-level client entry to
+  serve the same page (not wired yet).
+
 ### Trust boundary
 
 The bridge spawns a foreign process from `repoPath` and does not route it through the harness sandbox
@@ -183,6 +215,9 @@ before a browser is launched.
 - The child environment is inherited wholesale by default (trusting the checkout is the stated
   premise). Set `envMode: allowlist` to forward only the run essentials plus `AMBERFLOW_*` and
   `forwardEnv`.
+- Upgrading the package while the Host is already running: the Host keeps the module generation it
+  loaded at startup, so a newly added configuration page (and its Config schema) appears only after
+  the Host process restarts. A fresh install has no such issue.
 - Apps that need a local service (e.g. `ssh` without a reachable sshd) fail **structurally** at
   run time (`requires` in the listing is the heads-up); the bridge does not provision services.
 - `amberflow_learn` cannot demonstrate for you: recording a NEW flow needs a recorded action list,

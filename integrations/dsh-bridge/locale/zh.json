@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "AmberFlow 桥接",
+    "description": "在会话里驱动 AmberFlow 的冻结计划浏览器引擎：列出应用、端到端运行、录制流程、规划站点无关流程。配置页设置引擎 LLM 门使用的模型 URL、Token Key 与 ModelName。"
+  }
+}

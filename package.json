@@ -24,7 +24,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:bridge": "npm --prefix integrations/dsh-bridge run test",
-    "test:bridge:offline": "npm --prefix integrations/dsh-bridge run build && npx vitest run --root integrations/dsh-bridge tests/bridge.spec.ts tests/service.spec.ts",
+    "test:bridge:offline": "npm --prefix integrations/dsh-bridge run build && npx vitest run --root integrations/dsh-bridge tests/bridge.spec.ts tests/service.spec.ts tests/client.spec.ts",
     "parity": "node --experimental-strip-types tools/parity.ts",
     "parity:extraction": "node --experimental-strip-types tools/extraction-parity.ts",
     "parity:executor": "node --experimental-strip-types tools/executor-parity.ts",

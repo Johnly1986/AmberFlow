@@ -35,6 +35,20 @@ export interface BridgeOptions {
   /** Extra environment variable names forwarded in `allowlist` mode (exact keys, no glob). */
   forwardEnv: string[]
   /**
+   * LLM endpoint configured through the plugin's configuration page (the only fields that page
+   * exposes). Empty strings mean "not configured": the child process then keeps whatever the
+   * environment policy already provides (inherit / forwardEnv). These values are written into the
+   * child environment only — never into argv, results, or logs.
+   */
+  model: {
+    /** OpenAI-compatible base URL for AmberFlow's LLM doors (planner/auditor/escalation). */
+    baseUrl: string
+    /** Bearer token for that endpoint. Write-only in the UI; never read back. */
+    apiKey: string
+    /** Model id for the LLM planner and auditor. */
+    name: string
+  }
+  /**
    * Environment used to resolve the USER-scope apps dir ($AMBERFLOW_HOME/apps) when
    * listing. Defaults to the running process's env; tests pin it to a non-existent
    * home so a developer's recorded apps never leak into a listing assertion.
@@ -566,18 +580,50 @@ const ENV_PROXY = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_p
  * @param options - resolved bridge options (env mode + explicit forward list).
  * @returns a fresh env object for `spawn`.
  */
+/**
+ * Environment variables AmberFlow's LLM doors read (`src/planner.ts`, `src/plan-flow.ts`,
+ * `src/audit.ts`): the planner/escalation client and the auditor share one OpenAI-compatible
+ * endpoint; each model door reads its own model id. Kept as one map so tests can pin the contract.
+ */
+export const MODEL_ENV = {
+  baseUrl: 'OPENAI_BASE_URL',
+  apiKey: 'OPENAI_API_KEY',
+  name: ['PLANNER_MODEL', 'AUDIT_MODEL'],
+} as const
+
+/**
+ * Translate the plugin's model configuration into child-process environment entries.
+ * Unset fields are omitted, so a deployment that configures nothing keeps inheriting env vars.
+ * @param model - the resolved model section of the bridge options.
+ * @returns environment entries to merge into the child environment.
+ */
+export function modelEnv(model: BridgeOptions['model'] | undefined): Record<string, string> {
+  const env: Record<string, string> = {}
+  if (model === undefined) return env
+  if (model.baseUrl !== '') env[MODEL_ENV.baseUrl] = model.baseUrl
+  if (model.apiKey !== '') env[MODEL_ENV.apiKey] = model.apiKey
+  if (model.name !== '') for (const key of MODEL_ENV.name) env[key] = model.name
+  return env
+}
+
 export function buildEnv(options: BridgeOptions): NodeJS.ProcessEnv {
-  if (options.envMode === 'inherit') return { ...process.env }
-  const out: NodeJS.ProcessEnv = {}
-  const wanted = [...ENV_BASE, ...ENV_PROXY, ...options.forwardEnv]
-  for (const key of wanted) {
-    if (process.env[key] !== undefined) out[key] = process.env[key]
-  }
-  // Deployment-level overrides for the engine itself (repo path, model hints, timeouts) travel by
-  // name, and AMBERFLOW_* stays forwardable so a checkout configured by env keeps working.
-  for (const key of Object.keys(process.env)) {
-    if (key.startsWith('AMBERFLOW_')) out[key] = process.env[key]
-  }
+  const out: NodeJS.ProcessEnv = (() => {
+    if (options.envMode === 'inherit') return { ...process.env }
+    const env: NodeJS.ProcessEnv = {}
+    const wanted = [...ENV_BASE, ...ENV_PROXY, ...options.forwardEnv]
+    for (const key of wanted) {
+      if (process.env[key] !== undefined) env[key] = process.env[key]
+    }
+    // Deployment-level overrides for the engine itself (repo path, model hints, timeouts) travel by
+    // name, and AMBERFLOW_* stays forwardable so a checkout configured by env keeps working.
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith('AMBERFLOW_')) env[key] = process.env[key]
+    }
+    return env
+  })()
+  // The configuration page is explicit user intent, so it wins over whatever the environment
+  // policy forwarded above (including in `inherit` mode). Empty fields add nothing.
+  Object.assign(out, modelEnv(options.model))
   return out
 }
 

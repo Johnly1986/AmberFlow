@@ -23,6 +23,11 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { Volatile } from '@deepseek-ai/cordis'
+// Type-only Context merges: `loader/volatile-update` (loader) and `ctx.settings` (settings).
+// Erased at runtime — the running host provides both services.
+import type {} from '@deepseek-ai/cordis-plugin-loader'
+import type {} from '@deepseek-ai/dsh-settings'
 import { formatRequires, formatTypeMix, listApps, type BridgeOptions } from './bridge.ts'
 import { createService, runApp, learn, plan, type AmberFlowService } from './service.ts'
 
@@ -79,10 +84,23 @@ export interface Config {
    * own recorded apps can never leak into a listing assertion.
    */
   appsHome?: string
+  /**
+   * Model endpoint used by AmberFlow's LLM doors (LLM planner / auditor / semantic escalation).
+   *
+   * These three fields are the ONLY `.volatile()` fields in this Config, so the plugin's
+   * configuration page (the `plugins.row.config` tab) shows exactly them. They are forwarded to the
+   * engine child process as `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `PLANNER_MODEL`+`AUDIT_MODEL`;
+   * empty means "not configured — keep inheriting the environment".
+   */
+  modelBaseUrl?: Volatile<string>
+  /** Bearer token for {@link modelBaseUrl}. Secret: the settings surface never reads it back. */
+  modelApiKey?: Volatile<string>
+  /** Model id used by the LLM planner and auditor. */
+  modelName?: Volatile<string>
 }
 
 /** Schemastery schema for {@link Config}. */
-export const Config: z<Config> = z.object({
+export const Config = z.object({
   repoPath: z.string(),
   // No schema default on purpose: resolveOptions must tell "unset" from "set" to decide whether
   // the node_modules checkout needs the tsx launcher; `?? process.execPath` applies the fallback.
@@ -94,6 +112,11 @@ export const Config: z<Config> = z.object({
   forwardEnv: z.array(z.string()).default([]),
   keepRuns: z.natural().default(30),
   appsHome: z.string(),
+  // The plugin's configuration page shows exactly these three fields (settings projects only
+  // volatile fields). Empty = inherit the environment; a value is forwarded to the engine CLI.
+  modelBaseUrl: z.string().default('').volatile(),
+  modelApiKey: z.string().role('secret').default('').volatile(),
+  modelName: z.string().default('').volatile(),
 })
 
 /**
@@ -137,6 +160,21 @@ function findTsxCli(fromDirs: string[]): string | undefined {
     }
   }
   return undefined
+}
+
+/**
+ * Read the current value behind a loader Volatile reference. Volatile Config fields are wrapped by
+ * the loader (so an update can commit a new value without remounting the plugin); plain values pass
+ * through unchanged (tests and older loader shapes).
+ * @param value - a volatile reference or a plain config value.
+ * @returns the current plain value, or undefined.
+ */
+function volatileValue<T>(value: T | { get(): T } | undefined): T | undefined {
+  if (value !== undefined && typeof value === 'object' && value !== null
+    && typeof (value as { get?: unknown }).get === 'function') {
+    return (value as { get(): T }).get()
+  }
+  return value as T | undefined
 }
 
 /** Resolve defaults and verify the checkout really is one, at LOAD time rather than first call. */
@@ -187,6 +225,11 @@ function resolveOptions(config: Config): BridgeOptions {
     envMode: config.envMode ?? 'inherit',
     forwardEnv: config.forwardEnv ?? [],
     keepRuns: config.keepRuns ?? 30,
+    model: {
+      baseUrl: (volatileValue(config.modelBaseUrl) ?? '').trim(),
+      apiKey: (volatileValue(config.modelApiKey) ?? '').trim(),
+      name: (volatileValue(config.modelName) ?? '').trim(),
+    },
     ...(config.appsHome === undefined ? {} : { appsEnv: { ...process.env, AMBERFLOW_HOME: config.appsHome } }),
   }
 }
@@ -199,6 +242,23 @@ function resolveOptions(config: Config): BridgeOptions {
 export function apply(ctx: Context, config: Config): void {
   const options = resolveOptions(config)
   const { toolPrefix } = options
+  // The plugin ships its own configuration page (the three model fields), so the generic settings
+  // page must not also generate one for this entry. Optional service: a deployment without Settings
+  // keeps working (page simply absent).
+  ctx.inject(['settings'], (child) => {
+    child.effect(() => child.settings.configure({ auto: false }, ctx.fiber), 'amberflow-bridge: own config page')
+  })
+  // Loader commits `.volatile()` field updates into the running references without remounting the
+  // plugin, then emits this event. Re-resolve into the SAME options object so the tools and the
+  // service (both closed over it) see the new endpoint immediately.
+  ctx.on('loader/volatile-update', () => {
+    try {
+      Object.assign(options, resolveOptions(config))
+    } catch (error) {
+      ctx.logger.warn('amberflow-bridge: could not apply the updated model configuration; keeping the previous values')
+      ctx.logger.warn(error)
+    }
+  })
 
   // Plugin-to-plugin door: another plugin injects `amberflow` and calls the engine directly, running
   // exactly the code the tools run (same options, same gates, same diagnostics).
