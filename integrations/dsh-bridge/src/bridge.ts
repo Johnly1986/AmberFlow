@@ -53,15 +53,68 @@ export interface BridgeOptions {
   tsxCli?: string
 }
 
+/** Adapter kinds that need a local service at run time, with the human-facing hint. */
+const LOCAL_SERVICE_REQUIREMENTS: Record<string, string> = {
+  ssh: 'ssh (needs a reachable local sshd)',
+}
+
+/**
+ * Which adapter the engine will dispatch a step to, matching `src/app-pack.ts`'s `adapterKind`:
+ * an explicit `adapter` wins; otherwise `source` ⇒ `cli`, everything else ⇒ `web`.
+ * The role template is merged first (a role can carry the key), exactly as the engine expands it.
+ * @param step - one journey entry (or role template).
+ * @param roles - the pack's role templates.
+ * @returns the adapter kind, lower-cased.
+ */
+export function stepAdapter(step: Record<string, unknown>, roles: Record<string, Record<string, unknown>>): string {
+  const role = step['role']
+  const template = typeof role === 'string' ? roles[role] : undefined
+  const merged = template === undefined ? step : { ...template, ...step }
+  const explicit = merged['adapter']
+  if (typeof explicit === 'string' && explicit.trim() !== '') return explicit.trim().toLowerCase()
+  return merged['source'] !== undefined ? 'cli' : 'web'
+}
+
+/**
+ * Human-facing type mix for the model surface: `web×2 · cli×3 · ssh×1`.
+ * Sorted by kind so two listings never disagree about ordering.
+ * @param types - adapter counts from {@link AppSummary.types}.
+ * @returns one line, or `''` when the journey declares no steps.
+ */
+export function formatTypeMix(types: Record<string, number>): string {
+  return Object.keys(types).sort().map(kind => `${kind}×${types[kind]}`).join(' · ')
+}
+
+/**
+ * Human-facing local requirements for the model surface.
+ * @param requires - adapter kinds needing local services.
+ * @returns one line, or `''` when nothing is required.
+ */
+export function formatRequires(requires: string[]): string {
+  const k = requires[0]
+  if (k === undefined) return ''
+  return requires.map(x => LOCAL_SERVICE_REQUIREMENTS[x] ?? x).join(' · ')
+}
+
 /** One declared app, as the bridge presents it to the model. */
 export interface AppSummary {
   id: string
   label: string
   goal: string
-  /** Browser steps in the journey. */
+  /** Web (browser) steps in the journey. */
   steps: number
-  /** Tool (CLI/datasource) steps in the journey. */
+  /** Process-family steps (cli/ssh/stdio) in the journey — the engine dispatches them to an adapter. */
   toolSteps: number
+  /**
+   * Adapter kinds used by the journey, as counts (`{ web: 2, cli: 3, ssh: 1, stdio: 1 }`).
+   * A journey may mix several application types; the engine dispatches each step by its `adapter`.
+   */
+  types: Record<string, number>
+  /**
+   * Local services this app needs at run time (e.g. `ssh` needs a reachable sshd). Empty means the
+   * app is self-contained; a non-empty list is a hint for a deployment to check before running.
+   */
+  requires: string[]
   invariants: number
   /** Where this pack came from: generated (spec/source) | recorded (demo) | hand-written. */
   origin: string
@@ -308,6 +361,8 @@ export function listApps(repoPath: string, env: NodeJS.ProcessEnv = process.env)
           goal: asText(flow['goal']),
           steps: Array.isArray(flow['steps']) ? (flow['steps'] as unknown[]).length : 0,
           toolSteps: 0,
+          types: { web: Array.isArray(flow['steps']) ? (flow['steps'] as unknown[]).length : 0 },
+          requires: [],
           invariants: Array.isArray(flow['invariants']) ? (flow['invariants'] as unknown[]).length : 0,
           origin: typeof notes[0] === 'string' && notes[0].startsWith('planned') ? 'planned' : 'hand-written',
           kind: 'semantic-template',
@@ -321,6 +376,7 @@ export function listApps(repoPath: string, env: NodeJS.ProcessEnv = process.env)
       if (fs.existsSync(path.join(dir, entry.name, 'sources'))) {
         out.push({
           id: entry.name, label: entry.name, goal: '', steps: 0, toolSteps: 0,
+          types: {}, requires: [],
           invariants: 0, origin: 'data-source', kind: 'data-source', hosts: [],
         })
       }
@@ -329,13 +385,17 @@ export function listApps(repoPath: string, env: NodeJS.ProcessEnv = process.env)
     const pack = JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<string, unknown>
     const roles = (typeof pack['roles'] === 'object' && pack['roles'] !== null ? pack['roles'] : {}) as Record<string, Record<string, unknown>>
     const journey = asRecords(pack['journey'])
-    // The kind is decided on the MERGED step (role template + inline entry), exactly as the
-    // checkout's `src/app-pack.ts` does: a role whose template carries `source` is a tool step.
-    const isToolStep = (step: Record<string, unknown>): boolean => {
-      const role = step['role']
-      const template = typeof role === 'string' ? roles[role] : undefined
-      return (template === undefined ? step : { ...template, ...step })['source'] !== undefined
-    }
+    // The adapter is decided on the MERGED step (role template + inline entry), exactly as the
+    // checkout's `src/app-pack.ts` does. A journey can mix types: web steps go to the browser
+    // executor, cli/ssh/stdio steps go to their adapters — the listing must not call them all
+    // "browser" (that was the pre-adapter counting rule and it mis-described ssh/stdio steps).
+    const adapters = journey.map(step => stepAdapter(step, roles))
+    const types: Record<string, number> = {}
+    for (const kind of adapters) types[kind] = (types[kind] ?? 0) + 1
+    const requires = Object.keys(types)
+      .filter(kind => LOCAL_SERVICE_REQUIREMENTS[kind] !== undefined)
+      .sort()
+    const isToolStep = (kind: string): boolean => kind !== 'web' 
     const generated = asRecord(pack['generated_from'])
     const recorded = asRecord(pack['recorded_from'])
     // The same predicate the engine's app-runner uses to refuse a spawn (probe defined, no
@@ -345,8 +405,10 @@ export function listApps(repoPath: string, env: NodeJS.ProcessEnv = process.env)
       id: asText(pack['id'], entry.name),
       label: asText(pack['label']),
       goal: asText(pack['goal']),
-      steps: journey.filter(s => !isToolStep(s)).length,
-      toolSteps: journey.filter(isToolStep).length,
+      steps: adapters.filter(kind => kind === 'web').length,
+      toolSteps: adapters.filter(kind => isToolStep(kind)).length,
+      types,
+      requires,
       invariants: Array.isArray(pack['invariants']) ? (pack['invariants'] as unknown[]).length : 0,
       origin: generated !== null
         ? `generated:${asText(generated['spec'], asText(generated['source'], '?'))}`

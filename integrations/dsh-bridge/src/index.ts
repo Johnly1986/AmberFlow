@@ -23,7 +23,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { listApps, type BridgeOptions } from './bridge.ts'
+import { formatRequires, formatTypeMix, listApps, type BridgeOptions } from './bridge.ts'
 import { createService, runApp, learn, plan, type AmberFlowService } from './service.ts'
 
 // The package root is the consumer surface: another plugin imports these without reaching into `src/`
@@ -33,8 +33,9 @@ export {
   type AmberFlowLearnArgs, type AmberFlowPlanArgs, type AmberFlowRunArgs, type AmberFlowService,
 } from './service.ts'
 export {
-  buildEnv, diagnoseFailure, firstLines, flowRunArgs, learnArgs, listApps, parseJsonDocument,
-  parseSource, planArgs, pruneRunDirs, runArgs, runProcess, stripAnsi,
+  buildEnv, diagnoseFailure, firstLines, flowRunArgs, formatRequires, formatTypeMix, learnArgs,
+  listApps, parseJsonDocument,
+  parseSource, planArgs, pruneRunDirs, runArgs, runProcess, stepAdapter, stripAnsi,
   summarizeFlow, summarizeLearn, summarizePlan, summarizeRun,
   type AppSummary, type BridgeOptions, type LearnSummary, type PlanStep, type PlanSummary,
   type ProcessOutcome, type RunSummary,
@@ -214,8 +215,10 @@ export function apply(ctx: Context, config: Config): void {
       + 'sets the engine refuses to run through the app runner (read their declaration only); '
       + '`data-source` rows feed other packs; `semantic-template` rows (flow.json) are site-agnostic '
       + 'SemanticFlow templates — run them with the run tool plus one of their listed `sites`, and '
-      + 'grow a new site\'s profile with the plan tool. Reads '
-      + 'the packs only: no browser, no model, no subprocess.',
+      + 'grow a new site\'s profile with the plan tool. A journey may MIX application types '
+      + '(web/cli/ssh/stdio): each row lists its type mix (e.g. `web×2 · cli×3 · ssh×1`) and any '
+      + 'local service the app needs at run time (e.g. ssh needs a reachable local sshd) — check '
+      + 'that before spending a run. Reads the packs only: no browser, no model, no subprocess.',
     parameters: {
       filter: { type: 'string', description: 'Optional case-insensitive substring match on id/label/goal.' },
     },
@@ -236,6 +239,8 @@ export function apply(ctx: Context, config: Config): void {
                 goal: { type: 'string', required: true },
                 steps: { type: 'integer', required: true },
                 toolSteps: { type: 'integer', required: true },
+                types: { type: 'string', required: true, description: 'Adapter type mix of the journey, e.g. `web×2 · cli×3 · ssh×1` (empty for data sources).' },
+                requires: { type: 'array', required: true, items: { type: 'string' }, description: 'Local services needed at run time (e.g. `ssh` needs a local sshd).' },
                 invariants: { type: 'integer', required: true },
                 origin: { type: 'string', required: true },
                 kind: { type: 'string', required: true },
@@ -251,9 +256,11 @@ export function apply(ctx: Context, config: Config): void {
         text: value.apps.length === 0
           ? 'No apps matched.'
           : value.apps.map(a => `${a.id}${a.label === '' || a.label === a.id ? '' : ` — ${a.label}`} `
-            + `(${a.steps} browser + ${a.toolSteps} tool steps, `
+            + `(${a.steps} browser + ${a.toolSteps} tool steps`
+            + `${a.types ? ` [${a.types}]` : ''}, `
             + `${a.invariants} invariants, ${a.origin}, kind=${a.kind}`
             + `${a.hosts.length ? `, hosts: ${a.hosts.join(',')}` : ''}`
+            + `${a.requires.length ? `, needs local: ${a.requires.map(x => formatRequires([x])).join(', ')}` : ''}`
             + `${a.sites && a.sites.length ? `, sites: ${a.sites.join(',')}` : ''})`).join('\n'),
       }],
     },
@@ -266,7 +273,10 @@ export function apply(ctx: Context, config: Config): void {
           || a.goal.toLowerCase().includes(needle))
         .map(a => ({
           id: a.id, label: a.label, goal: a.goal,
-          steps: a.steps, toolSteps: a.toolSteps, invariants: a.invariants, origin: a.origin,
+          steps: a.steps, toolSteps: a.toolSteps,
+          types: formatTypeMix(a.types),
+          requires: a.requires,
+          invariants: a.invariants, origin: a.origin,
           kind: a.kind, hosts: a.hosts,
           ...(a.sites === undefined ? {} : { sites: a.sites }),
         }))
@@ -378,6 +388,10 @@ export function apply(ctx: Context, config: Config): void {
           // Pack runs: which tier executed (`on` / `off(missing)` / `off(rules-only)` /
           // `off(scripted)`), and the decision-source tally. Absent only on older artifacts.
           model: { type: 'string' },
+          // Multi-type journeys: the declared type mix and local services the app needs (e.g. ssh).
+          // Present only when the pack declares more than one adapter kind / a local requirement.
+          types: { type: 'string' },
+          requires: { type: 'array', items: { type: 'string' } },
           decisions: { type: 'string' },
         },
       },
@@ -411,6 +425,9 @@ export function apply(ctx: Context, config: Config): void {
             + stopped
             + (value.line ? `; ${value.line}` : '')
             + (value.model ? `; model: ${value.model}` : '')
+            + (value.types ? `; types: ${value.types}` : '')
+            + (value.requires && value.requires.length
+              ? `; needs local: ${value.requires.map(x => formatRequires([x])).join(', ')}` : '')
             + (value.decisions ? `\ndecisions: ${value.decisions}` : '')
             + (value.reportPath ? `\nreport: ${value.reportPath}` : '\nno report was written')
             + (value.profilePath ? `\nprofile: ${value.profilePath}` : ''),
@@ -434,6 +451,13 @@ export function apply(ctx: Context, config: Config): void {
         }
         slots.set(key, entry.slice(at + 1))
       }
+      // The listing is filesystem-only; read the declared type mix/requirements from it so a
+      // capability-gated app (e.g. ssh without sshd) is interpretable in the run summary itself.
+      let declared: { types: Record<string, number>; requires: string[] } | null = null
+      try {
+        const row = listApps(options.repoPath, options.appsEnv).find(a => a.id === args.app)
+        declared = row === undefined ? null : { types: row.types, requires: row.requires }
+      } catch { declared = null }
       // The deployment gate lives in the shared call, so the service refuses it identically.
       const { summary } = await runApp(options, {
         app: args.app,
@@ -467,6 +491,10 @@ export function apply(ctx: Context, config: Config): void {
         ...(summary.profilePath === undefined ? {} : { profilePath: summary.profilePath }),
         ...(summary.model === undefined ? {} : { model: summary.model }),
         ...(summary.decisions === undefined ? {} : { decisions: summary.decisions }),
+        ...(declared === null || Object.keys(declared.types).length <= 1
+          ? {} : { types: formatTypeMix(declared.types) }),
+        ...(declared === null || declared.requires.length === 0
+          ? {} : { requires: declared.requires }),
       }
     },
   }))

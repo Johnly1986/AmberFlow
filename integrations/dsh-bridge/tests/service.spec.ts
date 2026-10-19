@@ -51,9 +51,17 @@ describe('service seam (plugin to plugin)', () => {
 
   it('lists apps with the same filtering the tool applies', async () => {
     const { api } = await mount(stubCheckout(PACKS))
-    expect(api.listApps().map(a => a.id)).toEqual(['gen-app', 'hand-app', 'rec-app'])
+    expect(api.listApps().map(a => a.id)).toEqual(['gen-app', 'hand-app', 'mixed-app', 'rec-app'])
     expect(api.listApps('rec').map(a => a.id)).toEqual(['rec-app'])
     expect(api.listApps('generated').map(a => a.origin)).toEqual(['generated:transfer/specs/x.json'])
+  })
+
+  it('exposes the type mix / local requirement through the service seam too', async () => {
+    const { api } = await mount(stubCheckout(PACKS))
+    expect(api.listApps().find(a => a.id === 'mixed-app')).toMatchObject({
+      types: { web: 1, cli: 1, ssh: 1, stdio: 1 },
+      requires: ['ssh'],
+    })
   })
 
   it('runs an app through the CLI and returns the compact summary', async () => {

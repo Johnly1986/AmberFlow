@@ -182,6 +182,27 @@ export const PACKS = {
     recorded_from: { url: 'testpages/product.html', steps: 1, sha256: 'b'.repeat(64) },
   },
   'hand-app': { id: 'hand-app', label: 'hand', goal: 'g', hosted: [], journey: [{ role: 'r1' }] },
+  // A journey that MIXES application types the way the engine's adapter layer allows:
+  // one web step + a cli step + an ssh step + a stdio (interactive process) step.
+  // The listing must report the mix and the local service the ssh step needs.
+  'mixed-app': {
+    id: 'mixed-app',
+    label: 'mixed',
+    goal: 'mixed flow',
+    hosts: [],
+    journey: [
+      { id: 'cart', adapter: 'web', start_url: 'testpages/product.html', desc: 'w', signal: { css_exists: 'main' } },
+      { id: 'query', adapter: 'cli', source: 'tool-x', desc: 'c', signal: { exit_ok: true } },
+      { id: 'remote', adapter: 'ssh', ssh: { host: 'localhost', argv: ['true'] }, desc: 's', signal: { exit_ok: true } },
+      {
+        id: 'game',
+        adapter: 'stdio',
+        stdio: { argv: ['node', 'x'], script: [{ when: '.*', send: '1' }] },
+        desc: 'g',
+        signal: { exit_ok: true },
+      },
+    ],
+  },
 }
 
 /**

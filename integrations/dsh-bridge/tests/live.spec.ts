@@ -89,6 +89,12 @@ describe.skipIf(!HAS_REPO)('live checkout', () => {
     expect(recorded!.origin).toBe('recorded:testpages/product.html')
     expect(apps.some(a => a.origin.startsWith('generated:'))).toBe(true)
     expect(apps.some(a => a.origin === 'hand-written')).toBe(true)
+    // The adapter layer (engine Slice 1–4) is visible through the listing: a mixed journey declares
+    // its type mix and any local service it needs, so the model can check before spending a run.
+    const mixed = apps.find(a => a.id === 'mixed-demo')
+    expect(mixed, 'the all-types demo app should be part of the checkout').toBeDefined()
+    expect(mixed!.types).toBe('cli×3 · ssh×1 · stdio×1 · web×2')
+    expect(mixed!.requires).toEqual(['ssh'])
   }, 60_000)
 
   it('filters by substring across id, label and goal', async () => {

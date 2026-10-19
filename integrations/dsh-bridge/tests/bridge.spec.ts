@@ -30,10 +30,35 @@ describe('bridge helpers', () => {
   it('listApps reports steps, invariants and provenance per pack', () => {
     const repo = stubCheckout(PACKS)
     const apps = listApps(repo, NO_USER_APPS)
-    expect(apps.map(a => a.id)).toEqual(['gen-app', 'hand-app', 'rec-app'])
+    expect(apps.map(a => a.id)).toEqual(['gen-app', 'hand-app', 'mixed-app', 'rec-app'])
     expect(apps[0]).toMatchObject({ steps: 2, toolSteps: 1, invariants: 1, origin: 'generated:transfer/specs/x.json' })
-    expect(apps[2]).toMatchObject({ steps: 1, invariants: 2, origin: 'recorded:testpages/product.html' })
+    expect(apps.find(a => a.id === 'rec-app')).toMatchObject({ steps: 1, invariants: 2, origin: 'recorded:testpages/product.html' })
     expect(apps[1]!.origin).toBe('hand-written')
+  })
+
+  it('listApps reports the application-type mix and the local services a journey needs', () => {
+    const repo = stubCheckout(PACKS)
+    const apps = listApps(repo, NO_USER_APPS)
+    // A mixed journey: web + cli (by source) + ssh + stdio (interactive process).
+    expect(apps.find(a => a.id === 'mixed-app')).toMatchObject({
+      steps: 1,
+      toolSteps: 3,
+      types: { web: 1, cli: 1, ssh: 1, stdio: 1 },
+      requires: ['ssh'],
+    })
+    // Single-type packs stay explicit about their mix; nothing needs a local service.
+    expect(apps.find(a => a.id === 'gen-app')).toMatchObject({ types: { web: 2, cli: 1 }, requires: [] })
+    expect(Bridge.formatTypeMix({ stdio: 1, web: 2, cli: 3, ssh: 1 })).toBe('cli×3 · ssh×1 · stdio×1 · web×2')
+    expect(Bridge.formatRequires(['ssh'])).toBe('ssh (needs a reachable local sshd)')
+    expect(Bridge.formatRequires([])).toBe('')
+  })
+
+  it('stepAdapter mirrors the engine rule: explicit adapter > source ⇒ cli > web', () => {
+    const roles = { r: { adapter: 'ssh', ssh: { host: 'h', argv: ['true'] } } }
+    expect(Bridge.stepAdapter({ adapter: 'stdio' }, roles)).toBe('stdio')
+    expect(Bridge.stepAdapter({ source: 'tool-x' }, roles)).toBe('cli')
+    expect(Bridge.stepAdapter({ desc: 'plain' }, roles)).toBe('web')
+    expect(Bridge.stepAdapter({ role: 'r', desc: 'inline' }, roles)).toBe('ssh')
   })
 
   it('listApps fails loudly on a directory that is not a checkout', () => {
@@ -59,9 +84,9 @@ describe('bridge helpers', () => {
     const apps = listApps(repo, { AMBERFLOW_HOME: home })
     const hand = apps.find(a => a.id === 'hand-app')
     expect(hand!.label).toBe('USER version')                    // shadowed by the user's copy
-    expect(apps.map(a => a.id)).toEqual(['gen-app', 'hand-app', 'my-flow', 'rec-app'])
+    expect(apps.map(a => a.id)).toEqual(['gen-app', 'hand-app', 'mixed-app', 'my-flow', 'rec-app'])
     // with the user scope gone, the SAME listing is exactly the fixture set again
-    expect(listApps(repo, NO_USER_APPS).map(a => a.id)).toEqual(['gen-app', 'hand-app', 'rec-app'])
+    expect(listApps(repo, NO_USER_APPS).map(a => a.id)).toEqual(['gen-app', 'hand-app', 'mixed-app', 'rec-app'])
   })
 
   it('listApps classifies kinds: journey runs, probe is refused by the engine, data-source has no pack', () => {
@@ -294,6 +319,18 @@ describe('bridge plugin', () => {
     expect(value.apps[0]).toMatchObject({ id: 'rec-app', origin: 'recorded:testpages/product.html', steps: 1 })
   })
 
+  it('executes …_apps and surfaces the type mix + local requirement in the model-visible text', async () => {
+    const ctx = await mount(stubCheckout(PACKS))
+    const result = await call(ctx, 'amberflow_apps', { filter: 'mixed' })
+    expect(result.isError).toBe(false)
+    const value = result.value as { apps: { id: string; types: string; requires: string[] }[] }
+    expect(value.apps[0]).toMatchObject({ id: 'mixed-app', requires: ['ssh'] })
+    expect(value.apps[0]!.types).toBe('cli×1 · ssh×1 · stdio×1 · web×1')
+    const text = JSON.stringify(result)
+    expect(text).toContain('ssh×1')
+    expect(text).toContain('needs local: ssh (needs a reachable local sshd)')
+  })
+
   it('executes …_run through the registry and summarizes the real artifact', async () => {
     const ctx = await mount(stubCheckout(PACKS))
     const result = await call(ctx, 'amberflow_run', { app: 'gen-app', ablate: 'stub', no_sources: true })
@@ -313,6 +350,18 @@ describe('bridge plugin', () => {
     expect(value.blockedTotal).toBe(1)
     expect(value.refused).toEqual(['dry run: dangerous'])
     expect(value.invariants).toEqual({ held: 1, total: 2, failed: ['total-shown'] })
+  })
+
+  it('executes …_run for a mixed app and reports its type mix / local requirement', async () => {
+    const ctx = await mount(stubCheckout(PACKS))
+    const result = await call(ctx, 'amberflow_run', { app: 'mixed-app', ablate: 'stub', no_sources: true })
+    expect(result.isError).toBe(false)
+    const value = result.value as { types?: string; requires?: string[] }
+    expect(value.types).toBe('cli×1 · ssh×1 · stdio×1 · web×1')
+    expect(value.requires).toEqual(['ssh'])
+    const text = JSON.stringify(result)
+    expect(text).toContain('types: cli×1 · ssh×1 · stdio×1 · web×1')
+    expect(text).toContain('needs local: ssh (needs a reachable local sshd)')
   })
 
   it('surfaces the model tier and the decision tally (P0: the plugin user must SEE the ladder)', async () => {

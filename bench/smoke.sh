@@ -44,7 +44,8 @@ run "2c 探针基线与探测记录一致（probes:baseline --check）" npm run 
 #    这里就红（冻结产物没有门禁就会静默漂移）。离线部分无条件跑；model 臂见 3e。
 run "2d 提名实验台与冻结产物一致（nominate:measure --check --no-model）" \
   npm run --silent nominate:measure -- --check --no-model
-# 2e 可选门禁：integrations/dsh-bridge 是 DSH 的适配器（把引擎的 CLI 接成三个模型可见工具）。
+# 2e 可选门禁：integrations/dsh-bridge 是 DSH 的适配器（把引擎的 CLI 接成四个模型可见工具：
+#    列出应用 / 运行应用 / 录制流程 / 规划流程）。
 #    它需要一份 DSH 安装提供宿主包（cordis / dsh-tools / schemastery…），因此**不进无条件门禁**：
 #    设了 DSH_ROOT 就实跑它的离线测试，没设就 SKIP 并打印原因（跳过 ≠ 通过）。
 if [ -d integrations/dsh-bridge ]; then

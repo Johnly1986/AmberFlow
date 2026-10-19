@@ -1,5 +1,5 @@
 ---
-description: "The harness side of calling the AmberFlow frozen-plan browser engine: three tools that list its apps, run one end to end, and record a flow from a goal, a page and a recorded action list, for deployments that drive browser automation from a session."
+description: "The harness side of calling the AmberFlow frozen-plan browser engine: four tools that list its apps, run one end to end, record a flow from a goal/page/action list, and plan a site-agnostic flow — for deployments that drive browser automation from a session. A journey may mix application types (web/cli/ssh/stdio)."
 kind: "package-bundle"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-amberflow-bridge` exposes an external browser engine as three model-facing tools. AmberFlow plans once and then decides every step **locally**, treats DOM signals as the only completion truth, and can record a flow from one demonstration; the bridge adds no browser logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts. `amberflow_apps` lists the declared apps and says whether each pack was generated from a spec, recorded from a demonstration, hand-written, or a pure data source. `amberflow_run` runs one app end to end and returns completion, the FAILED steps only, refusals, and invariant results — or, under `dry`, the expanded plan it did not execute. `amberflow_learn` records a flow from a goal, a page and a recorded action list, and reports the rules-only replay that decides whether it was reproducible enough to save.
+`dsh-amberflow-bridge` exposes an external browser engine as four model-facing tools. AmberFlow plans once and then decides every step **locally**, treats DOM signals as the only completion truth, and can record a flow from one demonstration; the bridge adds no browser logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts. An app may mix **application types** — web/cli/ssh/stdio (interactive processes such as games) in one journey — and the listing reports that mix plus any local service the run needs (e.g. ssh needs a reachable local sshd). `amberflow_apps` lists the declared apps and says whether each pack was generated from a spec, recorded from a demonstration, hand-written, or a pure data source. `amberflow_run` runs one app end to end and returns completion, the FAILED steps only, refusals, and invariant results — or, under `dry`, the expanded plan it did not execute. `amberflow_learn` records a flow from a goal, a page and a recorded action list, and reports the rules-only replay that decides whether it was reproducible enough to save.
 
 ## Table of Contents
 
@@ -66,7 +66,7 @@ plugin window runs the same operation). Three channels are supported:
 - **npm or tarball**: pack with `pnpm pack`; the root `package.json` is the bundle, so the git
   behavior above carries over unchanged.
 
-A package that declares `dsh.bundle` joins `dsh.profile.bundles` on install, so the three tools
+A package that declares `dsh.bundle` joins `dsh.profile.bundles` on install, so the four tools
 become available without a hand-written profile patch; a live profile applies that at the next
 config reload. `AMBERFLOW_REPO` overrides the checkout the resolved config names; a path that is
 not a checkout fails at load time.
@@ -111,6 +111,28 @@ summarizes the artifacts the CLI wrote.
   call has neither a terminal nor stdin, and the bridge always passes `--yes`. A call without a
   script is refused before anything is spawned.
 
+### Multi-type applications (web / cli / ssh / stdio)
+
+The engine's adapter layer lets one journey mix application types: a browser step (`web`), a local
+command (`cli`), a remote command over `ssh`, and an interactive process (`stdio`, e.g. a game whose
+prompts are answered line by line) can sit in the same `journey`, and the engine dispatches each step
+by its adapter. Values produced by a step can also travel: a step may declare `returns`, and later
+steps consume the named value (`{dataset:NAME}` in process arguments, or a `{from:"dataset"}` command
+binding on the browser side).
+
+The bridge surfaces what the session needs before spending a run:
+
+- each listing row carries `types` — the journey's adapter mix, e.g. `web×2 · cli×3 · ssh×1 · stdio×1`
+  (sorted; empty for pure data sources) — and `requires` — local services the run needs, e.g. `ssh`
+  needs a reachable local sshd;
+- the run summary repeats those two fields (only when the app mixes types / declares a requirement), so
+  a blocked or refused run caused by a missing local service is interpretable instead of mysterious.
+
+The bridge itself calls **no LLM**: the decision fallback is the checkout's local ONNX model, and
+`learn`'s save gate is a rules-only replay with zero model calls. LLM doors (the LLM planner, or the
+semantic-flow escalation teacher) are CLI-level opt-ins that need `OPENAI_*` on the machine running
+the checkout — they are not a plugin requirement.
+
 ### Trust boundary
 
 The bridge spawns a foreign process from `repoPath` and does not route it through the harness sandbox
@@ -128,7 +150,7 @@ is rejected instead of being silently downgraded.
 
 ## Model Experience
 
-The model sees three tools with narrow schemas. `amberflow_run` answers with PASS or FAIL, the
+The model sees four tools with narrow schemas. `amberflow_run` answers with PASS or FAIL, the
 completion count, invariant counts, the failed steps with their obstacle text, and the report path;
 steps that completed are a count, not rows, so a sixty-step journey costs a line rather than a page.
 Every answer also carries a **tier line** — `model: on` / `off(missing)` / `off(rules-only)` — and, when
@@ -137,6 +159,10 @@ cache 命中 6/12 forwards`): a user learns which ladder actually ran, and the m
 being invisible step-log trivia (docs/LAYA_VALUE_PLAN.md P0/P1). A tool step that failed without being
 refused is named too, and a run that stopped with no failed step
 to name reports its exit code or timeout, so a FAIL says why it failed.
+The apps listing is where a session learns an app's **type mix** (`types`, e.g. `web×2 · cli×3 ·
+ssh×1 · stdio×1`) and any **local service** the run needs (`requires`, e.g. ssh ⇒ local sshd), and
+the run summary repeats both when they apply — a blocked/refused run caused by a missing local
+service is interpretable, not mysterious.
 `dry` answers with the expanded plan instead, so a journey can be inspected without being run.
 `amberflow_learn` answers with the replay it was gated on, including the model-call count, so a flow
 that could not be reproduced is never reported as learned; without a script it refuses immediately,
@@ -157,6 +183,8 @@ before a browser is launched.
 - The child environment is inherited wholesale by default (trusting the checkout is the stated
   premise). Set `envMode: allowlist` to forward only the run essentials plus `AMBERFLOW_*` and
   `forwardEnv`.
+- Apps that need a local service (e.g. `ssh` without a reachable sshd) fail **structurally** at
+  run time (`requires` in the listing is the heads-up); the bridge does not provision services.
 - `amberflow_learn` cannot demonstrate for you: recording a NEW flow needs a recorded action list,
   because the CLI's live recorder needs an interactive terminal. A script-less call is refused up
   front rather than being allowed to fail inside the engine.
@@ -166,7 +194,7 @@ before a browser is launched.
 The package is tested at two levels. `tests/bridge.spec.ts` mounts the plugin on a stub checkout whose
 CLIs mirror the real ones on the points the bridge depends on — `--dry` prints a plan and writes no
 artifact, `learn` refuses without `--script`, stdout carries log lines (one with a brace) before the
-JSON — and drives the three tools through `ctx.tools.execute`, covering argument assembly, provenance
+JSON — and drives the four tools through `ctx.tools.execute`, covering argument assembly, provenance
 parsing, failure-only summarization, load-time validation, the refusal paths and the dry expansion.
 `tests/live.spec.ts` drives the real checkout through the same registry path: a recorded two-step app
 with an `ablate` arm (`stub` | `rules-only`; omit it and the real model runs), a `dry` expansion, a run forced to fail so the FAIL verdict is checked against a real

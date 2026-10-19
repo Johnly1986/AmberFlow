@@ -1,5 +1,5 @@
 ---
-description: "从会话侧调用 AmberFlow 冻结计划浏览器引擎的 harness 接口：三个工具，用于列出应用、端到端运行一个应用，以及用「目标 + 页面 + 录好的动作清单」录制一条流程。"
+description: "从会话侧调用 AmberFlow 冻结计划浏览器引擎的 harness 接口：四个工具，用于列出应用、端到端运行一个应用、用「目标 + 页面 + 录好的动作清单」录制流程，以及规划站点无关的流程。一条旅程可以混用多种应用类型（web/cli/ssh/stdio）。"
 kind: "package-bundle"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-`dsh-amberflow-bridge` 把一个外部浏览器引擎暴露成三个面向模型的工具。AmberFlow 只规划一次，之后每一步都在**本地**决策，把 DOM 信号当作唯一的完成真相，并且能从一次演示里录制流程；本桥不添加任何自己的浏览器逻辑，只调用那个 checkout 的命令行并归纳其产物。`amberflow_apps` 列出已声明的应用，并说明每个包是由 spec 生成的、由演示录制的、手写的，还是纯数据源。`amberflow_run` 端到端运行一个应用，返回完成情况、**只列失败**的步骤、拒绝项与不变量结果；加上 `dry` 时则只返回展开后的计划，不执行任何一步。`amberflow_learn` 用一个目标、一个页面和一份录好的动作清单来录制流程，并报告那次"零模型调用回放"，正是它决定录制的流程是否可复现到值得保存。
+`dsh-amberflow-bridge` 把一个外部浏览器引擎暴露成四个面向模型的工具。AmberFlow 只规划一次，之后每一步都在**本地**决策，把 DOM 信号当作唯一的完成真相，并且能从一次演示里录制流程；本桥不添加任何自己的浏览器逻辑，只调用那个 checkout 的命令行并归纳其产物。同一个应用可以在一条旅程里混用**多种应用类型**——web/cli/ssh/stdio（交互式进程，如游戏）——清单会报告类型组合以及运行所需的本机服务（例如 ssh 需要可达的本机 sshd）。`amberflow_apps` 列出已声明的应用，并说明每个包是由 spec 生成的、由演示录制的、手写的，还是纯数据源。`amberflow_run` 端到端运行一个应用，返回完成情况、**只列失败**的步骤、拒绝项与不变量结果；加上 `dry` 时则只返回展开后的计划，不执行任何一步。`amberflow_learn` 用一个目标、一个页面和一份录好的动作清单来录制流程，并报告那次"零模型调用回放"，正是它决定录制的流程是否可复现到值得保存。
 
 ## 目录
 
@@ -61,7 +61,7 @@ keepRuns: 30                    # optional; 保留最新的 $TMPDIR/dsh-amberflo
   在装载处响亮地失败而不是瞎猜。
 - **npm 或 tarball**：`pnpm pack` 打包；根 package.json 就是 bundle，git 通道的行为原样沿用。
 
-声明了 `dsh.bundle` 的包在安装时会自动加入 `dsh.profile.bundles`，因此三个工具无需手写 profile
+声明了 `dsh.bundle` 的包在安装时会自动加入 `dsh.profile.bundles`，因此四个工具无需手写 profile
 补丁即可用；live profile 会在下一次配置重载时生效。`AMBERFLOW_REPO` 覆盖解析出的 checkout 路径；
 而不是 checkout 的路径会在加载期失败。
 
@@ -102,6 +102,24 @@ const Consumer = {
   `script` 是必填的：命令行唯一的另一个动作来源是人在交互式终端上的现场演示，而工具调用既没有终端
   也没有 stdin，且桥恒定传 `--yes`。缺少 `script` 的调用会在**启动任何进程之前**被拒绝。
 
+### 多类型应用（web / cli / ssh / stdio）
+
+应用支持器层允许一条旅程混用应用类型：浏览器步（`web`）、本地命令（`cli`）、`ssh` 远端命令、
+交互式进程（`stdio`，例如逐行应答提示的游戏）可以出现在同一个 `journey` 里，引擎按每步的
+`adapter` 分派。步骤产出的值也能传递：步骤可声明 `returns`，后续步骤消费具名值（进程参数里的
+`{dataset:NAME}`，或浏览器侧的 `{from:"dataset"}` 命令绑定）。
+
+桥在花一次运行之前先把会话需要的信息摆出来：
+
+- 清单每一行带 `types`——旅程的适配器组合，例如 `web×2 · cli×3 · ssh×1 · stdio×1`（排序固定；
+  纯数据源为空）——以及 `requires`——运行所需的本机服务，例如 `ssh` 需要可达的本机 sshd；
+- 运行摘要会重复这两个字段（仅当应用混用类型 / 声明了本机依赖时），这样"因本机缺服务而 blocked/
+  refused"的运行是可解释的，而不是一头雾水。
+
+桥本身**不调用任何 LLM**：决策兜底是 checkout 的本地 ONNX 模型，`learn` 的落盘门槛是零模型调用回放。
+LLM 门（LLM 规划器、或语义流的升级老师）是命令行层的可选项，需要运行 checkout 的机器上有 `OPENAI_*`
+——它们不是插件的前置要求。
+
 ### 信任边界
 
 本桥会从 `repoPath` 启动一个外部进程，且不经过 harness 的沙箱策略，因此启用本插件意味着信任那个
@@ -111,14 +129,14 @@ checkout。除非部署把 `allowDangerous` 设为 true，危险的工具步一�
 <a id="further-exploration"></a>
 ## 进一步探索
 
-- 本仓库的 `apps/README.md` —— 应用包怎么声明、三个工具所呈现的退出码契约，以及两条"会咬人"的规矩。
+- 本仓库的 `apps/README.md` —— 应用包怎么声明、四个工具所呈现的退出码契约，以及两条"会咬人"的规矩。
 - 本插件所运行的 DSH 安装里的 `packages/core/tools` 与 `packages/browser-use/browser-use` ——
   测试所驱动的工具注册表，以及本桥所补充的树内浏览器自动化服务。
 
 <a id="model-experience"></a>
 ## 模型体验
 
-模型看到三个 schema 很窄的工具。`amberflow_run` 回答 PASS/FAIL、完成计数、不变量计数、带障碍文本
+模型看到四个 schema 很窄的工具。`amberflow_run` 回答 PASS/FAIL、完成计数、不变量计数、带障碍文本
 的失败步骤，以及报告路径；完成的步骤只是计数而不是逐行，所以六十步的旅程只用一行而不是一页。
 **跑了但没被拒绝**的工具步也会被点名；若一次失败没有任何可点名的步骤，摘要会报出退出码或超时，
 因此 FAIL 总会说明它是怎么失败的。`dry` 则改为回答展开后的
@@ -145,7 +163,7 @@ checkout。除非部署把 `allowDangerous` 设为 true，危险的工具步一�
 
 本包在两个层面被测。`tests/bridge.spec.ts` 把插件挂在一个**桩 checkout** 上，其命令行在本桥依赖的
 几点上与真实命令行一致——`--dry` 打印计划且不写产物、`learn` 没有 `--script` 就拒绝、JSON 之前会有
-（其中一行含花括号的）日志行——并通过 `ctx.tools.execute` 驱动三个工具，覆盖参数拼装、血统解析、
+（其中一行含花括号的）日志行——并通过 `ctx.tools.execute` 驱动四个工具，覆盖参数拼装、血统解析、
 只列失败的归纳、加载期校验、各条拒绝路径与 dry 展开。`tests/live.spec.ts` 用同一条注册表路径驱动
 **真实** checkout：以 `ablate` 消融臂跑一个录制的两步应用（不传就是真模型）、一次 `dry` 展开、一次被逼失败的运行（让 FAIL
 判决对照真实产物）、无 script 的拒绝，以及一次真实的录制——它的"零模型调用回放"正是保存的前置条件。

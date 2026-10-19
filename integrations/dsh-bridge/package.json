@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-amberflow-bridge",
-  "version": "0.2.0-rc.2",
+  "version": "0.2.0-rc.3",
   "private": true,
   "description": "Bridge plugin exposing the AmberFlow frozen-plan browser engine (apps/learn) as model-facing tools",
   "license": "MIT",
