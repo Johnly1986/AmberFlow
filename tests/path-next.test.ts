@@ -170,7 +170,8 @@ describe("P4 端到端：冷启动回边（真 chromium，规则模式）", () =
     expect(r.path_visits).toMatchObject({ search: 2, record: 1 });
     expect(r.invariants.every((i) => i.held)).toBe(true);
     expect(r.decisions?.model_asks ?? 0).toBe(0);        // 走向由声明与页面证据决定，不问模型
-  });
+  // 真 chromium 端到端：Windows 冷启动就能吃掉默认 5s 预算（实测 5.01s 超时）
+  }, 60_000);
 
   it("删 `next` 即红：没有回边时 record 被 `when` 跳过，结束状态不变量不成立", async () => {
     const stripped = {
@@ -184,7 +185,7 @@ describe("P4 端到端：冷启动回边（真 chromium，规则模式）", () =
     expect(r.ok).toBe(false);                                  // 能力在承重，不是装饰
     expect(r.subgoals[1]!.status).toBe("skipped");             // record 没有被走到
     expect(r.invariants.find((i) => i.id === "results-recorded")!.held).toBe(false);
-  });
+  }, 60_000);
 
   it("环：无条件自环跑到上界就停，给出结构化 `path_stop`（不挂死、不栈溢出）", async () => {
     const t0 = Date.now();
@@ -206,7 +207,7 @@ describe("P4 端到端：冷启动回边（真 chromium，规则模式）", () =
     expect(r.path_stop!.detail).toMatch(/per-path bound max_step_visits=3/);
     expect(r.subgoals[0]!.status).toBe("blocked");
     expect(Date.now() - t0).toBeLessThan(60_000);              // 上界是真的，不是"等它自己停"
-  });
+  }, 90_000);
 
   it("缺省等价：不声明 `next` 的包，走向仍是自然顺序（进入次数各 1）", async () => {
     const linear = {
@@ -229,7 +230,7 @@ describe("P4 端到端：冷启动回边（真 chromium，规则模式）", () =
     // 声明了 id 但**没有回边**：结果里连 `path_visits` 都不出现（新字段不该只是"多一行"）。
     expect(r.path_visits).toBeUndefined();
     expect(r.path_stop).toBeUndefined();
-  });
+  }, 60_000);   // 真 chromium 端到端，Windows 冷启动吃掉默认 5s
 
   it("混合旅程：浏览器步的 `next` 可以指向工具步（边按整个旅程校验，不按计划的子集）", () => {
     const { pack } = packInTmp("p4-mixed", {
@@ -271,7 +272,7 @@ describe("P4 端到端：冷启动回边（真 chromium，规则模式）", () =
     expect(r.ok).toBe(true);
     expect(r.subgoals.map((s) => s.status)).toEqual(["done", "skipped", "done"]);
     expect(r.path_crossed).toEqual(["crossed-arm (crossed by `next` from add)"]);
-  });
+  }, 60_000);   // 真 chromium 端到端，Windows 冷启动吃掉默认 5s
 
   it("工具步的环也停在上界，且 `completed` 数的是**声明出来的步**（不是跑了几趟）", async () => {
     const r = await run("p4-tool-cycle", {

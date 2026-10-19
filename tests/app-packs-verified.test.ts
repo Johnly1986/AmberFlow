@@ -27,6 +27,10 @@ import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model
 import type { ToolSignal } from "../src/tool-signals.ts";
 import { matrix } from "../tools/apps_matrix.ts";
 import { main as suiteMain, suite } from "../tools/apps_suite.ts";
+import { checkArtifacts } from "../src/model-artifacts.ts";
+// 默认臂 = 真模型：产物不齐的机器上套件在装模型前就响亮拒绝。钉退出码 3/1 的两条按
+// 仓库纪律"跳过 ≠ 通过，但明着跳过"（bench/smoke.sh 模型侧同款）；用法错误(2)不受影响。
+const MODEL_READY = checkArtifacts().ready;
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -690,13 +694,9 @@ describe("第 5 轮：使用者体验修复（对抗性补测）", () => {
     expect(fs.existsSync(path.join(out, "demo-app-plan.json"))).toBe(false);  // 没跑到展开计划
   }, 120_000);
 
-  it("`apps:suite --json` 的 exit_code 与真退出码一致（3 = 未执行；2 = 用法错误且 output 是合法 JSON）", async () => {
-    const r = await captureOut(() => suiteMain(["--only", "demo-app,cli-report", "--json"]));
-    expect(r.code).toBe(3);
-    const payload = JSON.parse(r.out.slice(r.out.indexOf("{")));   // 跳过 npm 前缀（这里直接调 main）
-    expect(payload.exit_code).toBe(3);
-
-    // --only 打错字 + --json：以前是 exit 2 + 空 stdout；现在必须给可解析对象
+  it("`apps:suite --json` 的 exit_code 与真退出码一致（2 = 用法错误且 output 是合法 JSON）", async () => {
+    // --only 打错字 + --json：以前是 exit 2 + 空 stdout；现在必须给可解析对象。
+    // 用法错误先于模型出场（apps_suite 里 unmatched 在装产物之前就返回），所以这条不需要 ONNX。
     const typo = await captureOut(() => suiteMain(["--only", "demo-ap", "--json"]));
     expect(typo.code).toBe(2);
     const errPayload = JSON.parse(typo.out.slice(typo.out.indexOf("{")));
@@ -704,6 +704,13 @@ describe("第 5 轮：使用者体验修复（对抗性补测）", () => {
     expect(errPayload.unmatched).toEqual(["demo-ap"]);
     expect(errPayload.known).toContain("demo-app");
     expect(String(errPayload.error)).toMatch(/没有匹配任何应用/);
+  }, 180_000);
+
+  it.skipIf(!MODEL_READY)("`apps:suite --json` 的 exit_code 与真退出码一致（3 = 未执行）", async () => {
+    const r = await captureOut(() => suiteMain(["--only", "demo-app,cli-report", "--json"]));
+    expect(r.code).toBe(3);
+    const payload = JSON.parse(r.out.slice(r.out.indexOf("{")));   // 跳过 npm 前缀（这里直接调 main）
+    expect(payload.exit_code).toBe(3);
   }, 180_000);
 
   it("hint 匹配不到 -> 走 `matched nothing in a pool of N` 这条消息，而不是 `names no target`", async () => {
@@ -740,7 +747,7 @@ describe("第 5 轮：使用者体验修复（对抗性补测）", () => {
     expect(result.tool_steps[4].done).toBe(false);
   }, 120_000);
 
-  it("坏包只毁自己那一行：suite 逐应用 try/catch，其余照常出表且 exit 1", async () => {
+  it.skipIf(!MODEL_READY)("坏包只毁自己那一行：suite 逐应用 try/catch，其余照常出表且 exit 1", async () => {
     const brokenDir = path.join(REPO, "apps", "zz-verify-broken");
     try {
       fs.mkdirSync(brokenDir, { recursive: true });

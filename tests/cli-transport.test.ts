@@ -302,7 +302,8 @@ describe("runSource：CLI 工具走完整条数据源链路", () => {
     expect(res.tool_version).toBe("stub-tool 1.4.2");
   });
 
-  it("非价格型数据源的报告不再打出 None（选择项按 sort_by 的第一个键渲染）", async () => {
+  // 与下面两条 jq 用例同一个闸：这台机器没装 jq 就跑不了真通道（skipIf 明着跳过 ≠ 通过）。
+  it.skipIf(!hasTool("jq"))("非价格型数据源的报告不再打出 None（选择项按 sort_by 的第一个键渲染）", async () => {
     const res = await runSource(loadSource("bench-cases-shape"), ["2026-10-03"],
       { today: "2026-10-03", verbose: false });
     const md = (await import("../src/datasource.ts")).reportMarkdown(loadSource("bench-cases-shape"), res.dates);

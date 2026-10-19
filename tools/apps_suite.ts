@@ -236,6 +236,19 @@ export async function suite(
   // provider（基线之类）就不该被 laya 的产物卡住——那是另一件事。
   const arm = opts.arm ?? "real";
   const spec = await resolveProviderSpec(opts.provider ?? (arm === "ablate" ? "scripted-stub" : undefined));
+  // 用法错误先于模型出场：`--only` 里有打错的名字时，调用方拿到的是 exit 2 + 候选名单，
+  // 一个字也不会跑——这时产物齐不齐与它无关（无 ONNX 的机器上，打错字曾被产物拒绝挡成报错）。
+  if (only.length > 0) {
+    const known = appDirs().map((d) => path.basename(d)).sort();
+    const unmatched = only.filter((o) => !known.includes(o));
+    if (unmatched.length > 0) {
+      return {
+        rows: [], skipped: [], unmatched, known,
+        cache: { hits: 0, misses: 0, entries: 0 },
+        tier: spec.tier, provider: spec.name,
+      };
+    }
+  }
   if (spec.kind === "laya" && !spec.ablation && !checkArtifacts().ready) {
     // 响亮地拒绝，而不是退回桩：静默换臂会让下面所有数字变成桩的自证。
     throw new Error(`模型产物不齐（缺 ${missingPieces(checkArtifacts()).join("/")}）——`

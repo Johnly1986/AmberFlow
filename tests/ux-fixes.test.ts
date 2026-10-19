@@ -10,6 +10,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { main as appMain, REFUSAL_LABELS, refusalLine } from "../src/app-runner.ts";
 import { main as suiteMain, suite } from "../tools/apps_suite.ts";
+import { checkArtifacts } from "../src/model-artifacts.ts";
+// 这两条断言的是**真模型臂**的退出码梯子（3 = 未执行、4 = 模型边际为 0）。产物不齐的机器上
+// 套件在装模型前就响亮拒绝——用例本身没得跑，按仓库纪律"明着跳过 ≠ 通过"（bench/smoke.sh 同款）。
+const MODEL_READY = checkArtifacts().ready;
 import { runApp } from "../src/app-runner.ts";
 import { loadPack } from "../src/app-pack.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
@@ -44,7 +48,7 @@ describe("① `--slot` 打错名字不再是假绿", () => {
     const code = await quiet(() => appMain(["--app", "demo-app", "--ablate", "stub", "--slot", "coupon=ACME10",
       "--out", tmpDir("slot-ok")]));
     expect(code).toBe(0);
-  });
+  }, 60_000);   // 有浏览器步：Windows 冷启动吃掉默认 5s（实测 5.02s 超时）
 
   it("`--slot` 连 k=v 都不是 -> exit 2", async () => {
     expect(await quiet(() => appMain(["--app", "demo-app", "--slot", "x"]))).toBe(2);
@@ -61,12 +65,12 @@ describe("② `apps:suite`：没跑过的应用不许报绿，坏包不许掀桌
     expect(await quiet(() => suiteMain(["--only", "demo-ap"]))).toBe(2);
   });
 
-  it("有\"未执行\"（危险步没放行）-> exit 3，而不是 0", async () => {
+  it.skipIf(!MODEL_READY)("有\"未执行\"（危险步没放行）-> exit 3，而不是 0", async () => {
     // demo-app 通过 + cli-report 的危险步未放行：以前这一组合是 exit 0。
     expect(await quiet(() => suiteMain(["--only", "demo-app,cli-report"]))).toBe(3);
   }, 180_000);
 
-  it("全部真执行且通过 -> 消融臂 exit 0；真模型臂 exit 4（应用都过但模型边际为 0，不算绿）", async () => {
+  it.skipIf(!MODEL_READY)("全部真执行且通过 -> 消融臂 exit 0；真模型臂 exit 4（应用都过但模型边际为 0，不算绿）", async () => {
     // 两条断言各管一件事：
     //  · 消融臂（--ablate）只看"执行与验收"，全过就是 0（跳过/未执行仍被排除在同一条结论之外）；
     //  · 默认臂是真模型：demo-app 全过，但模型一步也没独立决定 ⇒ 4（docs/ARCHITECTURE_IMPROVEMENTS.md §7）。
@@ -162,7 +166,12 @@ describe("⑤ 副作用与用法错误都要说清", () => {
   }, 180_000);
 
   it("`--out` 建不出来是用法错误（exit 2），不是把 Node 的 mkdir 栈甩给使用者", async () => {
-    const bad = fs.existsSync("/sys") ? "/sys/ux-out-should-fail" : path.join("/proc", "ux-out-should-fail");
+    // 跨平台必然建不出来：在一个**普通文件**下面建目录（ENOTDIR，Linux/Windows 同）。
+    // （原来用 /sys、/proc 判断——Windows 上"管理员在盘根建目录"照样成功，exit 0。）
+    const dir = tmpDir("out-blocked");
+    const blocker = path.join(dir, "afile");
+    fs.writeFileSync(blocker, "");
+    const bad = path.join(blocker, "ux-out-should-fail");
     expect(await quiet(() => appMain(["--app", "demo-app", "--ablate", "stub", "--out", bad]))).toBe(2);
   });
 });
