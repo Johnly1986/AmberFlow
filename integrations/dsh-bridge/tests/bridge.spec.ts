@@ -15,8 +15,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import * as Bridge from '@deepseek-ai/dsh-amberflow-bridge'
 import { Config } from '../src/index.ts'
 import {
-  MODEL_ENV, buildEnv, diagnoseFailure, firstLines, flowRunArgs, formatRequires, formatTypeMix,
-  learnArgs, listApps, modelEnv, parseJsonDocument, planArgs,
+  DECISION_ENV, buildEnv, decisionEnv, diagnoseFailure, firstLines, flowRunArgs, formatRequires,
+  formatTypeMix, learnArgs, listApps, normalizeDecisionEndpoint, parseJsonDocument, planArgs,
   pruneRunDirs, runArgs, runProcess, stripAnsi, summarizeFlow, summarizeLearn, summarizePlan, summarizeRun,
 } from '../src/bridge.ts'
 
@@ -110,26 +110,34 @@ describe('bridge helpers', () => {
       .toThrow(/cannot run .*kind='probe'/)
   })
 
-  it('model configuration becomes child environment (empty fields inherit, configured fields win)', () => {
-    // Hermetic: the assertion "empty config invents nothing" must not depend on the session env.
-    const keys = [MODEL_ENV.baseUrl, MODEL_ENV.apiKey, ...MODEL_ENV.name]
+  it('decision-model configuration becomes TOKEN_PLAN_* env, and the URL is normalized to /systemone', () => {
+    // Hermetic: "empty config invents nothing" must not depend on the session env.
+    const keys = [DECISION_ENV.endpoint, DECISION_ENV.apiKey, DECISION_ENV.model]
     const saved = new Map(keys.map((key) => [key, process.env[key]]))
     for (const key of keys) delete process.env[key]
     try {
-    const withModel = { ...OPTIONS, model: { baseUrl: 'https://example.test/v1', apiKey: 'sk-test', name: 'm1' } }
-    expect(modelEnv(withModel.model)).toEqual({
-      [MODEL_ENV.baseUrl]: 'https://example.test/v1',
-      [MODEL_ENV.apiKey]: 'sk-test',
-      [MODEL_ENV.name[0]]: 'm1',
-      [MODEL_ENV.name[1]]: 'm1',
+    expect(normalizeDecisionEndpoint('https://example.test/compatible-mode/v1')).toBe(
+      'https://example.test/compatible-mode/v1/systemone')
+    expect(normalizeDecisionEndpoint('https://example.test/compatible-mode/v1/')).toBe(
+      'https://example.test/compatible-mode/v1/systemone')
+    expect(normalizeDecisionEndpoint('https://example.test/compatible-mode/v1/systemone')).toBe(
+      'https://example.test/compatible-mode/v1/systemone')
+    expect(normalizeDecisionEndpoint('')).toBe('')
+
+    const decision = { endpoint: 'https://example.test/compatible-mode/v1/systemone', apiKey: 'tp-test', model: 'decision-model-preview' }
+    const withDecision = { ...OPTIONS, decisionModel: decision, decisionProvider: 'token-plan' as const }
+    expect(decisionEnv(decision)).toEqual({
+      [DECISION_ENV.endpoint]: decision.endpoint,
+      [DECISION_ENV.apiKey]: 'tp-test',
+      [DECISION_ENV.model]: 'decision-model-preview',
     })
-    expect(modelEnv({ ...withModel.model, baseUrl: '', apiKey: '', name: '' })).toEqual({})
-    const env = buildEnv(withModel)
-    expect(env[MODEL_ENV.baseUrl]).toBe('https://example.test/v1')
-    expect(env[MODEL_ENV.apiKey]).toBe('sk-test')
-    expect(env[MODEL_ENV.name[0]]).toBe('m1')
-    // An empty model section must not invent variables (deployment keeps inheriting).
-    const empty = buildEnv({ ...OPTIONS, model: { baseUrl: '', apiKey: '', name: '' } })
+    expect(decisionEnv({ endpoint: '', apiKey: '', model: '' })).toEqual({})
+    const env = buildEnv(withDecision)
+    expect(env[DECISION_ENV.endpoint]).toBe(decision.endpoint)
+    expect(env[DECISION_ENV.apiKey]).toBe('tp-test')
+    expect(env[DECISION_ENV.model]).toBe('decision-model-preview')
+    // An empty decision section must not invent variables (deployment keeps inheriting).
+    const empty = buildEnv({ ...OPTIONS, decisionModel: { endpoint: '', apiKey: '', model: '' } })
     for (const key of keys) expect(empty[key]).toBeUndefined()
     } finally {
       for (const [key, value] of saved) {
@@ -137,6 +145,28 @@ describe('bridge helpers', () => {
         else process.env[key] = value
       }
     }
+  })
+
+  it('a fully configured decision model makes runs default to the token-plan provider', () => {
+    const configured = {
+      ...OPTIONS,
+      decisionModel: { endpoint: 'https://example.test/v1/systemone', apiKey: 'tp', model: '' },
+      decisionProvider: 'token-plan' as const,
+    }
+    // Default: the online decision provider is selected without any per-call argument.
+    const byDefault = runArgs(configured, { app: 'demo', outDir: '/tmp/out' })
+    expect(byDefault.join(' ')).toContain('--provider token-plan')
+    // An explicit per-call provider still wins.
+    const explicit = runArgs(configured, { app: 'demo', outDir: '/tmp/out', provider: 'laya-onnx' })
+    expect(explicit.join(' ')).toContain('--provider laya-onnx')
+    expect(explicit.join(' ')).not.toContain('token-plan')
+    // Ablation arms are explicit experiments: they never inherit the default provider.
+    const ablated = runArgs(configured, { app: 'demo', outDir: '/tmp/out', ablate: 'rules-only' })
+    expect(ablated).not.toContain('--provider')
+    // Unconfigured: nothing but the engine's own default plane (no --provider flag).
+    const unconfigured = runArgs({ ...OPTIONS, decisionModel: { endpoint: '', apiKey: '', model: '' } },
+      { app: 'demo', outDir: '/tmp/out' })
+    expect(unconfigured).not.toContain('--provider')
   })
 
   it('the configuration page can only show the three model fields (sole volatile fields, token is secret)', () => {

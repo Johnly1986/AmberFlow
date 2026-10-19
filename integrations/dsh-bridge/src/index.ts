@@ -28,7 +28,7 @@ import type { Volatile } from '@deepseek-ai/cordis'
 // Erased at runtime — the running host provides both services.
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-settings'
-import { formatRequires, formatTypeMix, listApps, type BridgeOptions } from './bridge.ts'
+import { formatRequires, formatTypeMix, listApps, normalizeDecisionEndpoint, type BridgeOptions } from './bridge.ts'
 import { createService, runApp, learn, plan, type AmberFlowService } from './service.ts'
 
 // The package root is the consumer surface: another plugin imports these without reaching into `src/`
@@ -85,17 +85,18 @@ export interface Config {
    */
   appsHome?: string
   /**
-   * Model endpoint used by AmberFlow's LLM doors (LLM planner / auditor / semantic escalation).
+   * Online **decision model** endpoint (token-plan SystemOne provider).
    *
    * These three fields are the ONLY `.volatile()` fields in this Config, so the plugin's
-   * configuration page (the `plugins.row.config` tab) shows exactly them. They are forwarded to the
-   * engine child process as `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `PLANNER_MODEL`+`AUDIT_MODEL`;
-   * empty means "not configured — keep inheriting the environment".
+   * configuration page (`plugins.row.config`) shows exactly them. They are forwarded to the engine
+   * child process as `TOKEN_PLAN_ENDPOINT` / `TOKEN_PLAN_API_KEY` / `TOKEN_PLAN_MODEL`, and when the
+   * URL + token are both set the bridge defaults runs to the `token-plan` decision provider.
+   * Empty means "not configured": runs keep the local ONNX decision model (or rules-only).
    */
   modelBaseUrl?: Volatile<string>
   /** Bearer token for {@link modelBaseUrl}. Secret: the settings surface never reads it back. */
   modelApiKey?: Volatile<string | undefined>
-  /** Model id used by the LLM planner and auditor. */
+  /** Decision model id (`TOKEN_PLAN_MODEL`; empty = the provider's default, `decision-model-preview`). */
   modelName?: Volatile<string>
 }
 
@@ -113,7 +114,9 @@ export const Config = z.object({
   keepRuns: z.natural().default(30),
   appsHome: z.string(),
   // The plugin's configuration page shows exactly these three fields (settings projects only
-  // volatile fields). Empty = inherit the environment; a value is forwarded to the engine CLI.
+  // volatile fields). They configure the ONLINE DECISION MODEL (token-plan SystemOne): URL is
+  // normalized to the /systemone endpoint, token/key/model become TOKEN_PLAN_* for the engine CLI,
+  // and a fully configured pair makes app runs default to the `token-plan` provider.
   modelBaseUrl: z.string().default('').volatile(),
   // No schema default: the settings secret-presence marker is `value !== undefined`, so a default
   // would make an unset token read as "configured" in the configuration page.
@@ -227,11 +230,17 @@ function resolveOptions(config: Config): BridgeOptions {
     envMode: config.envMode ?? 'inherit',
     forwardEnv: config.forwardEnv ?? [],
     keepRuns: config.keepRuns ?? 30,
-    model: {
-      baseUrl: (volatileValue(config.modelBaseUrl) ?? '').trim(),
+    decisionModel: {
+      endpoint: normalizeDecisionEndpoint(volatileValue(config.modelBaseUrl) ?? ''),
       apiKey: (volatileValue(config.modelApiKey) ?? '').trim(),
-      name: (volatileValue(config.modelName) ?? '').trim(),
+      model: (volatileValue(config.modelName) ?? '').trim(),
     },
+    // Auto-select the online decision provider only when the endpoint AND token are both present:
+    // a half-configured page must not break runs that otherwise work on the local model.
+    ...(normalizeDecisionEndpoint(volatileValue(config.modelBaseUrl) ?? '').trim() !== ''
+      && (volatileValue(config.modelApiKey) ?? '').trim() !== ''
+      ? { decisionProvider: 'token-plan' as const }
+      : {}),
     ...(config.appsHome === undefined ? {} : { appsEnv: { ...process.env, AMBERFLOW_HOME: config.appsHome } }),
   }
 }

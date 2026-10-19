@@ -35,19 +35,24 @@ export interface BridgeOptions {
   /** Extra environment variable names forwarded in `allowlist` mode (exact keys, no glob). */
   forwardEnv: string[]
   /**
-   * LLM endpoint configured through the plugin's configuration page (the only fields that page
-   * exposes). Empty strings mean "not configured": the child process then keeps whatever the
-   * environment policy already provides (inherit / forwardEnv). These values are written into the
-   * child environment only — never into argv, results, or logs.
+   * Online **decision model** (token-plan SystemOne provider) configured through the plugin's
+   * configuration page — the only fields that page exposes. Empty strings mean "not configured":
+   * runs keep their normal decision plane (the local ONNX model, or rules-only).
+   *
+   * These values are forwarded to the engine child process as `TOKEN_PLAN_ENDPOINT` /
+   * `TOKEN_PLAN_API_KEY` / `TOKEN_PLAN_MODEL` (never into argv, results or logs), and when the
+   * endpoint + key are both set the bridge defaults app runs to the `token-plan` decision provider.
    */
-  model: {
-    /** OpenAI-compatible base URL for AmberFlow's LLM doors (planner/auditor/escalation). */
-    baseUrl: string
+  decisionModel: {
+    /** Full SystemOne endpoint (`…/compatible-mode/v1/systemone`), normalized from the page's URL. */
+    endpoint: string
     /** Bearer token for that endpoint. Write-only in the UI; never read back. */
     apiKey: string
-    /** Model id for the LLM planner and auditor. */
-    name: string
+    /** Decision model id (`TOKEN_PLAN_MODEL`, e.g. `decision-model-preview`). */
+    model: string
   }
+  /** Provider a run defaults to when the decision model is fully configured. */
+  decisionProvider?: 'token-plan'
   /**
    * Environment used to resolve the USER-scope apps dir ($AMBERFLOW_HOME/apps) when
    * listing. Defaults to the running process's env; tests pin it to a non-existent
@@ -467,7 +472,11 @@ export function runArgs(
   argv.push('--app', args.app, '--out', args.outDir)
   if (args.dry) argv.push('--dry')
   if (args.ablate) argv.push('--ablate', String(args.ablate))
-  if (args.provider) argv.push('--provider', String(args.provider))
+  // An explicitly requested provider wins; otherwise a fully configured decision model makes the
+  // run use the online provider. Ablation arms are explicit experiments, so they never get the
+  // default provider (they measure a different plane).
+  const provider = args.provider ?? (args.ablate === undefined ? options.decisionProvider : undefined)
+  if (provider !== undefined) argv.push('--provider', String(provider))
   if (args.noSources) argv.push('--no-sources')
   if (args.dangerous) argv.push('--allow-dangerous')
   if (args.confirmSafe) argv.push('--confirm-safe')
@@ -581,28 +590,42 @@ const ENV_PROXY = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_p
  * @returns a fresh env object for `spawn`.
  */
 /**
- * Environment variables AmberFlow's LLM doors read (`src/planner.ts`, `src/plan-flow.ts`,
- * `src/audit.ts`): the planner/escalation client and the auditor share one OpenAI-compatible
- * endpoint; each model door reads its own model id. Kept as one map so tests can pin the contract.
+ * Environment variables the token-plan **decision provider** reads
+ * (`src/decision-tokenplan.ts`): one SystemOne endpoint, its bearer token, and the decision model id.
+ * Kept as one map so tests can pin the contract.
  */
-export const MODEL_ENV = {
-  baseUrl: 'OPENAI_BASE_URL',
-  apiKey: 'OPENAI_API_KEY',
-  name: ['PLANNER_MODEL', 'AUDIT_MODEL'],
+export const DECISION_ENV = {
+  endpoint: 'TOKEN_PLAN_ENDPOINT',
+  apiKey: 'TOKEN_PLAN_API_KEY',
+  model: 'TOKEN_PLAN_MODEL',
 } as const
 
 /**
- * Translate the plugin's model configuration into child-process environment entries.
+ * Normalize the URL typed on the configuration page into the engine's SystemOne endpoint.
+ * The page asks for the OpenAI-compatible base URL (for example
+ * `https://host/compatible-mode/v1`); the decision provider needs the `/systemone` suffix.
+ * A value that already names the SystemOne endpoint is kept as-is.
+ * @param baseUrl - the page's model URL.
+ * @returns the endpoint, or `''` when unset.
+ */
+export function normalizeDecisionEndpoint(baseUrl: string): string {
+  const trimmed = baseUrl.trim().replace(/\/+$/, '')
+  if (trimmed === '') return ''
+  return /\/systemone$/i.test(trimmed) ? trimmed : `${trimmed}/systemone`
+}
+
+/**
+ * Translate the plugin's decision-model configuration into child-process environment entries.
  * Unset fields are omitted, so a deployment that configures nothing keeps inheriting env vars.
- * @param model - the resolved model section of the bridge options.
+ * @param decision - the resolved decision-model section of the bridge options.
  * @returns environment entries to merge into the child environment.
  */
-export function modelEnv(model: BridgeOptions['model'] | undefined): Record<string, string> {
+export function decisionEnv(decision: BridgeOptions['decisionModel'] | undefined): Record<string, string> {
   const env: Record<string, string> = {}
-  if (model === undefined) return env
-  if (model.baseUrl !== '') env[MODEL_ENV.baseUrl] = model.baseUrl
-  if (model.apiKey !== '') env[MODEL_ENV.apiKey] = model.apiKey
-  if (model.name !== '') for (const key of MODEL_ENV.name) env[key] = model.name
+  if (decision === undefined) return env
+  if (decision.endpoint !== '') env[DECISION_ENV.endpoint] = decision.endpoint
+  if (decision.apiKey !== '') env[DECISION_ENV.apiKey] = decision.apiKey
+  if (decision.model !== '') env[DECISION_ENV.model] = decision.model
   return env
 }
 
@@ -623,7 +646,7 @@ export function buildEnv(options: BridgeOptions): NodeJS.ProcessEnv {
   })()
   // The configuration page is explicit user intent, so it wins over whatever the environment
   // policy forwarded above (including in `inherit` mode). Empty fields add nothing.
-  Object.assign(out, modelEnv(options.model))
+  Object.assign(out, decisionEnv(options.decisionModel))
   return out
 }
 

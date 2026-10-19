@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-amberflow-bridge` exposes an external browser engine as four model-facing tools. AmberFlow plans once and then decides every step **locally**, treats DOM signals as the only completion truth, and can record a flow from one demonstration; the bridge adds no browser logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts. An app may mix **application types** — web/cli/ssh/stdio (interactive processes such as games) in one journey — and the listing reports that mix plus any local service the run needs (e.g. ssh needs a reachable local sshd). The plugin's **configuration page** (Settings → Plugins → this bundle's row → Configure) sets exactly three model fields — Model URL, Token Key, ModelName — used by the engine's LLM doors. `amberflow_apps` lists the declared apps and says whether each pack was generated from a spec, recorded from a demonstration, hand-written, or a pure data source. `amberflow_run` runs one app end to end and returns completion, the FAILED steps only, refusals, and invariant results — or, under `dry`, the expanded plan it did not execute. `amberflow_learn` records a flow from a goal, a page and a recorded action list, and reports the rules-only replay that decides whether it was reproducible enough to save.
+`dsh-amberflow-bridge` exposes an external browser engine as four model-facing tools. AmberFlow plans once and then decides every step **locally**, treats DOM signals as the only completion truth, and can record a flow from one demonstration; the bridge adds no browser logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts. An app may mix **application types** — web/cli/ssh/stdio (interactive processes such as games) in one journey — and the listing reports that mix plus any local service the run needs (e.g. ssh needs a reachable local sshd). The plugin's **configuration page** (Settings → Plugins → this bundle's row → Configure) sets exactly three fields for the **online decision model** — Model URL, Token Key, ModelName — so runs can use the token-plan SystemOne provider instead of the local ONNX model. `amberflow_apps` lists the declared apps and says whether each pack was generated from a spec, recorded from a demonstration, hand-written, or a pure data source. `amberflow_run` runs one app end to end and returns completion, the FAILED steps only, refusals, and invariant results — or, under `dry`, the expanded plan it did not execute. `amberflow_learn` records a flow from a goal, a page and a recorded action list, and reports the rules-only replay that decides whether it was reproducible enough to save.
 
 ## Table of Contents
 
@@ -133,29 +133,33 @@ The bridge itself calls **no LLM**: the decision fallback is the checkout's loca
 semantic-flow escalation teacher) are CLI-level opt-ins that need `OPENAI_*` on the machine running
 the checkout — they are not a plugin requirement.
 
-### Configuration page: Model URL / Token Key / ModelName
+### Configuration page: the online decision model (token-plan SystemOne)
 
 The bundle ships a browser half that registers its own row page at `plugins.row.config`, so
 Settings → Plugins → this bundle → the `amberflow-bridge` row gains a **Configure** control. The page
-shows exactly three fields (they are the only `.volatile()` fields in the plugin's Config):
+shows exactly three fields (they are the only `.volatile()` fields in the plugin's Config), and they
+configure the **decision model** the engine executes steps with:
 
 | Field | Forwarded to the engine CLI as | Meaning |
 |---|---|---|
-| **Model URL** | `OPENAI_BASE_URL` | OpenAI-compatible endpoint base (e.g. `https://…/compatible-mode/v1`) |
-| **Token Key** | `OPENAI_API_KEY` | bearer token; write-only — the Host never returns it, the UI shows only "configured / not set" |
-| **ModelName** | `PLANNER_MODEL` and `AUDIT_MODEL` | model id for the LLM planner and auditor |
+| **Decision model URL** | `TOKEN_PLAN_ENDPOINT` | token-plan compatible-mode base URL (e.g. `https://…/compatible-mode/v1`); the bridge appends `/systemone` (an already-suffixed value is kept as-is) |
+| **Decision Token Key** | `TOKEN_PLAN_API_KEY` | bearer token; write-only — the Host never returns it, the UI shows only "configured / not set" |
+| **Decision ModelName** | `TOKEN_PLAN_MODEL` | decision model id (e.g. `decision-model-preview`); empty uses the provider default |
 
 How it behaves:
 
+- **Provider default:** with URL **and** token set, the bridge adds `--provider token-plan` to app
+  runs (`amberflow_run`), so the plugin runs on the online decision model without a per-call argument.
+  An explicit `provider` argument still wins, and ablation arms (`ablate`) never inherit the default.
 - **Effective without a restart.** `.volatile()` config fields are committed by the Loader into the
   running references and the bridge re-reads them on `loader/volatile-update`; CLI calls started
   afterwards see the new endpoint. Saves persist in the active profile's `cordis.patch.yml`.
-- **Unset = inherit.** Empty fields add no environment entries, so a deployment that configures
-  nothing keeps whatever `envMode`/`forwardEnv` provide — the bridge itself still needs no model key.
-- **Scope.** These values drive AmberFlow's **LLM doors** (LLM planner, auditor, semantic
-  escalation). The default decision model is the checkout's local ONNX model and is unaffected;
-  the online decision-provider family (`TOKEN_PLAN_*`) is still configured through its own
-  environment names.
+- **Unset = local plane.** Empty fields add no environment entries, so a deployment that configures
+  nothing keeps the local ONNX decision model (or rules-only) — the bridge still needs no model key.
+- **Scope:** this is the **SystemOne execution** decision model. LLM doors (LLM planner, auditor,
+  semantic escalation) are a separate path and still read `OPENAI_*` from the environment. The `plan`
+  tool's planning phase and semantic-template runs keep their own decision planes, so this page does
+  not override them yet.
 - **Only these three fields are editable here.** `repoPath`, `nodeBin`, `timeoutMs`,
   `allowDangerous`, `toolPrefix`, `envMode`, `envMode`-forwarding and `keepRuns` stay in
   `cordis.patch.yml` (changing an ordinary field remounts the plugin; `toolPrefix` even renames the

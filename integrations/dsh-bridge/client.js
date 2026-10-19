@@ -28,54 +28,57 @@ window.__ModuleLoader__.load({
     const NS = 'settings.amberflowBridge'
 
     const en = {
-      modelBaseUrl: 'Model URL',
-      modelBaseUrlHint: 'OpenAI-compatible endpoint, e.g. https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
-      modelApiKey: 'Token Key',
-      modelApiKeyHint: 'Sent to the engine as OPENAI_API_KEY. Write-only: the saved value is never shown again.',
+      modelBaseUrl: 'Decision model URL',
+      modelBaseUrlHint: 'token-plan compatible-mode base URL, e.g. https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1 (the plugin appends /systemone).',
+      modelApiKey: 'Decision Token Key',
+      modelApiKeyHint: 'Sent to the engine as TOKEN_PLAN_API_KEY. Write-only: the saved value is never shown again.',
       modelApiKeySet: 'configured',
       modelApiKeyUnset: 'not set',
       modelApiKeyPlaceholderSet: 'Leave empty to keep the saved token',
       modelApiKeyPlaceholderUnset: 'Paste the token',
-      modelName: 'ModelName',
-      modelNameHint: 'Model id for the LLM planner and auditor, e.g. qwen3.8-flash.',
+      modelName: 'Decision ModelName',
+      modelNameHint: 'Decision model id (TOKEN_PLAN_MODEL); leave empty for the provider default, decision-model-preview.',
       save: 'Save',
       saving: 'Saving…',
-      saved: 'Saved. The engine CLI calls started from now on use this endpoint.',
+      saved: 'Saved. App runs started from now on use this online decision model (token-plan).',
       rejected: 'The Host refused the change (it may have been edited elsewhere first). Reload and retry.',
       nothingChanged: 'Nothing changed.',
       saveFailed: 'Save failed',
       loading: 'Loading the current configuration…',
       unavailable: 'Configuration is not served by this Host (non-loopback browser or missing Settings service).',
       readOnly: 'This Host document is read-only.',
-      hint: 'These settings drive AmberFlow\'s LLM doors (LLM planner, auditor, semantic escalation). '
-        + 'Unset fields keep inheriting the environment. The local ONNX decision model is not affected.',
-      summaryUnset: 'Model endpoint not configured',
-      summaryConfigured: 'Model: ',
+      hint: 'These three fields configure AmberFlow\'s ONLINE DECISION MODEL (token-plan SystemOne). '
+        + 'With URL and token set, app runs use the token-plan decision provider; empty keeps the local ONNX '
+        + 'model (or rules-only). LLM doors (planner/auditor/escalation) are separate and still read OPENAI_* '
+        + 'from the environment.',
+      summaryUnset: 'Online decision model not configured',
+      summaryConfigured: 'Decision model: ',
     }
     const zh = {
-      modelBaseUrl: '模型 URL',
-      modelBaseUrlHint: 'OpenAI 兼容端点，例如 https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
-      modelApiKey: 'Token Key',
-      modelApiKeyHint: '作为 OPENAI_API_KEY 传给引擎。只写不读：保存后不会再回显。',
+      modelBaseUrl: '决策模型 URL',
+      modelBaseUrlHint: 'token-plan 兼容模式基址，例如 https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1（插件会自动补 /systemone）',
+      modelApiKey: '决策模型 Token Key',
+      modelApiKeyHint: '作为 TOKEN_PLAN_API_KEY 传给引擎。只写不读：保存后不会再回显。',
       modelApiKeySet: '已配置',
       modelApiKeyUnset: '未设置',
       modelApiKeyPlaceholderSet: '留空保持已保存的 Token',
       modelApiKeyPlaceholderUnset: '粘贴 Token',
-      modelName: 'ModelName',
-      modelNameHint: 'LLM 规划器与审计使用的模型 id，例如 qwen3.8-flash。',
+      modelName: '决策模型名 ModelName',
+      modelNameHint: '决策模型 id（TOKEN_PLAN_MODEL）；留空用 provider 默认 decision-model-preview。',
       save: '保存',
       saving: '保存中…',
-      saved: '已保存。此后启动的引擎 CLI 调用都会使用该端点。',
+      saved: '已保存。此后启动的引擎运行默认使用该线上决策模型（token-plan）。',
       rejected: 'Host 拒绝了这次修改（可能已被其他页面先改过）。请刷新后重试。',
       nothingChanged: '没有改动。',
       saveFailed: '保存失败',
       loading: '正在读取当前配置…',
       unavailable: '当前 Host 未提供配置（非回环浏览器或缺少 Settings 服务）。',
       readOnly: '该 Host 文档是只读的。',
-      hint: '这三项用于 AmberFlow 的 LLM 门（LLM 规划器、审计、语义升级）；留空则继续继承环境变量。'
-        + '本地 ONNX 决策模型不受影响。',
-      summaryUnset: '未配置模型端点',
-      summaryConfigured: '模型：',
+      hint: '这三项配置 AmberFlow 的**线上决策模型**（token-plan SystemOne）：URL 与 Token 都设置后，'
+        + '应用运行默认走 token-plan 决策 provider；留空则继续用本地 ONNX 模型（或 rules-only）。'
+        + 'LLM 门（规划器/审计/语义升级）是另一条路径，仍从环境变量读 OPENAI_*。',
+      summaryUnset: '未配置线上决策模型',
+      summaryConfigured: '决策模型：',
     }
 
     const INPUT_STYLE = {
@@ -230,7 +233,7 @@ window.__ModuleLoader__.load({
           control: h('input', {
             type: 'text',
             value: draft.name,
-            placeholder: 'qwen3.8-flash',
+            placeholder: 'decision-model-preview',
             spellCheck: false,
             autoComplete: 'off',
             style: INPUT_STYLE,
