@@ -94,7 +94,7 @@ export interface Config {
    */
   modelBaseUrl?: Volatile<string>
   /** Bearer token for {@link modelBaseUrl}. Secret: the settings surface never reads it back. */
-  modelApiKey?: Volatile<string>
+  modelApiKey?: Volatile<string | undefined>
   /** Model id used by the LLM planner and auditor. */
   modelName?: Volatile<string>
 }
@@ -115,7 +115,9 @@ export const Config = z.object({
   // The plugin's configuration page shows exactly these three fields (settings projects only
   // volatile fields). Empty = inherit the environment; a value is forwarded to the engine CLI.
   modelBaseUrl: z.string().default('').volatile(),
-  modelApiKey: z.string().role('secret').default('').volatile(),
+  // No schema default: the settings secret-presence marker is `value !== undefined`, so a default
+  // would make an unset token read as "configured" in the configuration page.
+  modelApiKey: z.string().role('secret').volatile(),
   modelName: z.string().default('').volatile(),
 })
 
