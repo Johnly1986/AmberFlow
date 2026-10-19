@@ -1141,6 +1141,11 @@ export interface FlowRunOptions {
   /** 已学 hint 连续失败多少次算 drift（默认 2）。 */
   driftLimit?: number;
   sessionFactory?: () => Promise<BrowserSession>;
+  /**
+   * **有头运行**（CLI `--headful`）：浏览器窗口可见。默认关 = 与今天逐字节等价（headless）。
+   * 窗口出现在跑引擎的那台机器上（服务器需真实显示器或 Xvfb + VNC/noVNC）。
+   */
+  headful?: boolean;
   verbose?: boolean;
   outDir?: string;
   /**
@@ -1333,7 +1338,7 @@ export async function runFlow(
   const mw = new BrowserMiddleware({ ...mwOpts, escalateFn, hintMemory: memory, dataset });
 
   const own = opts.sessionFactory === undefined;
-  const session = own ? await browserSession(true) : await opts.sessionFactory!();
+  const session = own ? await browserSession(opts.headful !== true) : await opts.sessionFactory!();
   const results: FlowStepResult[] = [];
   const drift: DriftNote[] = [];
   // NL Flow S2：元素动作提名的记录面（step id → {instruction, via}；不落盘，见 FlowStepResult.nominated）。
@@ -1828,7 +1833,7 @@ export function flowReportMarkdown(r: FlowRunResult): string {
 const USAGE = `usage: semantic-flow --app ID --site KEY [--laya scripted|unsure|onnx|none]
                    [--escalate scripted|llm|none] [--slot k=v ...] [--profile-dir DIR]
                    [--fresh] [--allow-dangerous] [--no-verify-backfill] [--drift-limit N]
-                   [--nominate-provider NAME] [--out DIR] [--dry] [--quiet] [--list]
+                   [--nominate-provider NAME] [--out DIR] [--dry] [--quiet] [--headful] [--list]
 
 S2 ③ 运行期接线（--nominate-provider）：仅对声明 nominate: true 且无 instr 锁的步，在 ②学习映射、
 ①规则都弃权时，用**页面状态 + 页面条件化候选**问一次决策 provider（如 token-plan）；模型提名若是
@@ -1856,7 +1861,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       "no-verify-backfill": { type: "boolean" }, "drift-limit": { type: "string" },
       "nominate-provider": { type: "string" },
       out: { type: "string" }, dry: { type: "boolean" }, quiet: { type: "boolean" },
-      help: { type: "boolean" },
+      headful: { type: "boolean" }, help: { type: "boolean" },
     },
   });
   } catch (err) {
@@ -1956,6 +1961,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       verifyBackfill: v["no-verify-backfill"] !== true,
       driftLimit,
       profileDir: v["profile-dir"] ?? undefined,
+      headful: v.headful === true,
       verbose,
       ...(nominateProvider !== null ? { nominateProvider } : {}),
     });

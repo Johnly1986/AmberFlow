@@ -87,6 +87,12 @@ export interface AppRunOptions {
   /** 测试缝：注入会话工厂。 */
   sessionFactory?: () => Promise<BrowserSession>;
   /**
+   * **有头运行**：浏览器窗口可见（CLI `--headful`）。默认关 = 与不传时逐字节等价（headless）。
+   * 窗口开在**跑引擎的那台机器**上：本机要有真实显示器，或用虚拟显示（`xvfb-run -a npm run apps ...`）
+   * 再配 VNC/noVNC 才能被人看见。
+   */
+  headful?: boolean;
+  /**
    * 把旅程**结束时的页面状态**一并返回（`end_state`）：给"不变量归纳"用
    * （`tools/apps-induce.ts` 拿它与"还没动手时的状态"比，挑出真正被这条旅程改变的、稳定的 DOM 事实）。
    * 默认关：普通运行不需要多付一次页面扫描。
@@ -683,7 +689,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     if (holder.session === null) {
       // 包声明了设备就用它（只有手机版页面存在的站点，桌面 DOM 里 hint 必然落空）
       const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
-      holder.session = own ? await browserSession(true, device) : await opts.sessionFactory!();
+      holder.session = own ? await browserSession(opts.headful !== true, device) : await opts.sessionFactory!();
     }
     const s = holder.session;
     // 会话的生命周期由本函数掌握：执行器关掉的是这个壳，真正的 page 留到不变量之后。
@@ -1029,6 +1035,7 @@ export function appReportMarkdown(r: AppRunResult): string {
 
 const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--out DIR]
                   [--model ID] [--provider NAME] [--ablate stub|rules-only] [--no-sources] [--confirm-safe]
+                  [--headful]
                   [--allow-dangerous] [--tiered-hint] [--learn-hints | --hint-memory FILE] [--conf-floor N] [--quiet]
 
 按 apps/<app>/pack.json 跑一条完整应用链路：数据腿 → 浏览器步/工具步 → 结束状态不变量
@@ -1056,7 +1063,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         list: { type: "boolean" }, app: { type: "string" }, dry: { type: "boolean" },
         slot: { type: "string", multiple: true }, out: { type: "string" },
         model: { type: "string" }, ablate: { type: "string" }, provider: { type: "string" },
-        "no-sources": { type: "boolean" }, "confirm-safe": { type: "boolean" },
+        "no-sources": { type: "boolean" }, "confirm-safe": { type: "boolean" }, headful: { type: "boolean" },
         "allow-dangerous": { type: "boolean" },
         "tiered-hint": { type: "boolean" },
         "learn-hints": { type: "boolean" }, "hint-memory": { type: "string" },
@@ -1252,7 +1259,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   try {
     result = await runApp(pack, {
       slots, planPath, outDir, verbose: !v.quiet,
-      sources: !v["no-sources"], confirmSafe: v["confirm-safe"] === true,
+      sources: !v["no-sources"], confirmSafe: v["confirm-safe"] === true, headful: v.headful === true,
       allowDangerous: v["allow-dangerous"] === true,
       // §3：只有**显式给了旗标**才算"本次覆盖"；否则留 undefined，让包声明赢。
       // （以前这里恒传一个布尔，等于 CLI 永远压过 pack——报告还会把来源写成 cli，假账。）

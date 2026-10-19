@@ -36,6 +36,12 @@ export interface AmberFlowRunArgs {
   provider?: string
   /** Skip the data leg. */
   noSources?: boolean
+  /**
+   * Visible browser window on the machine running the engine (pack and template runs alike).
+   * The window is not in the caller's browser page: the deployment host needs a real display, or a
+   * virtual one (`xvfb-run -a`) plus VNC/noVNC, for a human to see it.
+   */
+  headful?: boolean
   /** Permit dangerous tool steps; refused unless the deployment set `allowDangerous`. */
   allowDangerous?: boolean
   /**
@@ -95,6 +101,8 @@ export interface AmberFlowPlanArgs {
   allowDangerous?: boolean
   /** Planner door: `llm` needs OPENAI_* in the environment; default is the engine's offline recipe. */
   planner?: 'scripted' | 'llm'
+  /** Visible browser window on the engine host during the planning walk (engine `--headful`). */
+  headful?: boolean
 }
 
 /**
@@ -185,9 +193,9 @@ export async function runApp(
       app: args.app, site: args.site, outDir,
       ...(args.dry === undefined ? {} : { dry: args.dry }),
       ...(args.ablate === undefined ? {} : { ablate: args.ablate }),
-    ...(args.provider === undefined ? {} : { provider: args.provider }),
       ...(args.provider === undefined ? {} : { provider: args.provider }),
       ...(args.allowDangerous === undefined ? {} : { dangerous: args.allowDangerous }),
+      ...(args.headful === undefined ? {} : { headful: args.headful }),
       ...(args.slots === undefined ? {} : { slots: args.slots }),
     }))
     return { summary: summarizeFlow(outDir, args.app, args.site, outcome), outDir }
@@ -205,6 +213,7 @@ export async function runApp(
     ...(args.ablate === undefined ? {} : { ablate: args.ablate }),
     ...(args.provider === undefined ? {} : { provider: args.provider }),
     ...(args.noSources === undefined ? {} : { noSources: args.noSources }),
+    ...(args.headful === undefined ? {} : { headful: args.headful }),
     ...(args.allowDangerous === undefined ? {} : { dangerous: args.allowDangerous }),
     ...(args.confirmSafe === undefined ? {} : { confirmSafe: args.confirmSafe }),
     ...(args.tieredHint === undefined ? {} : { tieredHint: args.tieredHint }),
@@ -295,6 +304,7 @@ export async function plan(
     ...(args.force === undefined ? {} : { force: args.force }),
     ...(args.allowDangerous === undefined ? {} : { dangerousDemo: args.allowDangerous }),
     ...(args.planner === undefined ? {} : { planner: args.planner }),
+    ...(args.headful === undefined ? {} : { headful: args.headful }),
   }))
   try {
     return summarizePlan(parseSource(outcome))

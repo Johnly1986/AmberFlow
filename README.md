@@ -84,6 +84,7 @@ CLI 报告、`apps:suite` 表格与 DSH 插件 `amberflow_run` 的 summary 念�
 
 ```bash
 npm run apps -- --list                                  # 有哪些应用
+npm run apps -- --app demo-app --headful            # 有头运行：浏览器窗口可见（窗口在跑引擎的那台机器上）
 npm run apps -- --app demo-app               # 离线整跑一条完整链路
 npm run apps -- --app demo-app --dry                    # 只展开计划，不开浏览器
 npm run apps:suite                                      # 全部离线应用跑完，一行一个给结论

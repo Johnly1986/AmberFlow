@@ -176,6 +176,19 @@ describe('bridge helpers', () => {
     expect(dict['modelApiKey']!.meta?.role).toBe('secret')
   })
 
+  it('headful reaches all three browser doors (run / semantic flow / plan)', () => {
+    const run = runArgs(OPTIONS, { app: 'demo', outDir: '/tmp/out', headful: true })
+    expect(run).toContain('--headful')
+    const flow = flowRunArgs(OPTIONS, { app: 'tpl', site: 'site-a', outDir: '/tmp/out', headful: true })
+    expect(flow).toContain('--headful')
+    const plan = planArgs(OPTIONS, { goal: 'g', seed: 's', app: 'a', headful: true })
+    expect(plan).toContain('--headful')
+    // Unset by default: the headless plane is unchanged (缺省等价).
+    expect(runArgs(OPTIONS, { app: 'demo', outDir: '/tmp/out' })).not.toContain('--headful')
+    expect(flowRunArgs(OPTIONS, { app: 'tpl', site: 'site-a', outDir: '/tmp/out' })).not.toContain('--headful')
+    expect(planArgs(OPTIONS, { goal: 'g', seed: 's', app: 'a' })).not.toContain('--headful')
+  })
+
   it('runArgs assembles flags, slots and the dangerous switch', () => {
     const argv = runArgs(OPTIONS, {
       app: 'demo', outDir: '/tmp/out', dry: true, ablate: 'stub', provider: 'coin-flip', noSources: true, dangerous: true,

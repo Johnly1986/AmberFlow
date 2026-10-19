@@ -133,6 +133,29 @@ The bridge itself calls **no LLM**: the decision fallback is the checkout's loca
 semantic-flow escalation teacher) are CLI-level opt-ins that need `OPENAI_*` on the machine running
 the checkout — they are not a plugin requirement.
 
+### Watching the browser (headed runs)
+
+Every browser door can be made visible with `--headful`:
+
+| Surface | How |
+|---|---|
+| Engine CLI | `npm run apps -- --app <id> --headful`; `npm run semantic -- --app <tpl> --site <key> --headful`; `npm run plan:flow -- ... --headful`; `node tools/learn.ts --headful` |
+| DSH tools | `…_run` with `headful: true` (pack and semantic-template apps), `…_plan` with `headful: true`, `…_learn` with `headful: true` (or `cdp` to drive a browser you already have open) |
+
+Two things to know:
+
+- **The window appears on the machine that runs the engine** — the deployment host — not inside the
+  DSH browser page. Over a headless server, give it a display and look at that display:
+  ```bash
+  xvfb-run -a -s "-screen 0 1440x900x24" dsh --profile web --no-open --port 3080   # whole host under Xvfb
+  # 或只包一次运行：xvfb-run -a npm run apps -- --app demo-app --headful
+  # 要人眼看：再配 x11vnc / noVNC，或用 ffmpeg -f x11grab -i $DISPLAY 抓帧
+  ```
+- Headed needs the **full chromium**. Measured here: `--headful` launches `chromium-*/chrome` with no
+  `--headless` flag (a real window, captured on the virtual display), while the default launches
+  `chrome-headless-shell --headless`. If a box only has the headless shell, a headed run stops with a
+  message naming the fix (`npx playwright install chromium`) instead of a Playwright mystery.
+
 ### Configuration page: the online decision model (token-plan SystemOne)
 
 The bundle ships a browser half that registers its own row page at `plugins.row.config`, so

@@ -380,6 +380,10 @@ export function apply(ctx: Context, config: Config): void {
       ablate: { type: 'string', enum: ['stub', 'rules-only'], description: 'ABLATION EXPERIMENT ONLY. `stub` installs a scripted fake model; `rules-only` runs with no model at all. Omit for a normal run (the real decision model is the default).' },
       provider: { type: 'string', description: 'Which decision provider to run on: laya-onnx (default), scripted-stub, none, or a baseline (first-candidate | coin-flip | always-abstain) / any registered provider. Use baselines to measure whether a model beats zero-intelligence search.' },
       no_sources: { type: 'boolean', description: 'Skip the data leg (use already-available data).' },
+      headful: { type: 'boolean', description: 'Open a VISIBLE browser window for the run (engine '
+        + '--headful). The window appears on the machine that runs the engine — the deployment host, '
+        + 'not inside this browser page — so that host needs a real display, or a virtual one '
+        + '(`xvfb-run -a`) plus VNC/noVNC, for a person to watch. Default false (headless).' },
       allow_dangerous: {
         type: 'boolean',
         description: 'Permit dangerous tool steps (dry-run gated). Requires the deployment to enable it.',
@@ -537,6 +541,7 @@ export function apply(ctx: Context, config: Config): void {
         ...(args.ablate === undefined ? {} : { ablate: args.ablate }),
         ...(args.provider === undefined ? {} : { provider: args.provider }),
         ...(args.no_sources === undefined ? {} : { noSources: args.no_sources }),
+        ...(args.headful === undefined ? {} : { headful: args.headful }),
         ...(args.allow_dangerous === undefined ? {} : { allowDangerous: args.allow_dangerous }),
         ...(args.confirm_safe === undefined ? {} : { confirmSafe: args.confirm_safe }),
         ...(args.tiered_hint === undefined ? {} : { tieredHint: args.tiered_hint }),
@@ -681,6 +686,9 @@ export function apply(ctx: Context, config: Config): void {
         description: 'Site key for the profile; defaults to the seed\'s directory name (file) or host (http).',
       },
       force: { type: 'boolean', description: 'Overwrite an existing brand-new template app id (a re-plan).' },
+      headful: { type: 'boolean', description: 'Watch the planning walk in a VISIBLE browser window. '
+        + 'The window opens on the machine running the engine (needs a display there, or `xvfb-run -a` '
+        + 'with VNC/noVNC), not in this browser page. Default false (headless).' },
       planner: {
         type: 'string', enum: ['scripted', 'llm'],
         description: 'Planner door: `llm` needs OPENAI_* on the machine running the checkout; '
@@ -738,6 +746,7 @@ export function apply(ctx: Context, config: Config): void {
         ...(args.site === undefined ? {} : { site: args.site }),
         ...(args.force === undefined ? {} : { force: args.force }),
         ...(args.planner === undefined ? {} : { planner: args.planner }),
+        ...(args.headful === undefined ? {} : { headful: args.headful }),
         ...(args.allow_dangerous === undefined ? {} : { allowDangerous: args.allow_dangerous }),
       })
       return {

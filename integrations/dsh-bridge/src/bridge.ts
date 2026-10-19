@@ -461,6 +461,12 @@ export function runArgs(
     provider?: string
     noSources?: boolean
     dangerous?: boolean
+    /**
+     * Visible browser window for this run (engine `--headful`). The window appears on the machine
+     * running the engine — the deployment host, not the caller's browser page — so it needs a real
+     * display there, or a virtual one (`xvfb-run -a`) plus VNC/noVNC to actually be seen.
+     */
+    headful?: boolean
     /** Ask the engine to refuse destructive actions per dry-run evidence (middle gate). */
     confirmSafe?: boolean
     /** P1 experiment: narrowed model question for an ambiguous-in-tier hint (engine `--tiered-hint`). */
@@ -471,6 +477,7 @@ export function runArgs(
   const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []), '--experimental-strip-types', path.join(options.repoPath, 'src', 'app-runner.ts')]
   argv.push('--app', args.app, '--out', args.outDir)
   if (args.dry) argv.push('--dry')
+  if (args.headful) argv.push('--headful')
   if (args.ablate) argv.push('--ablate', String(args.ablate))
   // An explicitly requested provider wins; otherwise a fully configured decision model makes the
   // run use the online provider. Ablation arms are explicit experiments, so they never get the
@@ -528,6 +535,8 @@ export function flowRunArgs(
     ablate?: "stub" | "rules-only"
     provider?: string
     dangerous?: boolean
+    /** Visible browser window on the engine host (engine `--headful`). */
+    headful?: boolean
     slots?: Record<string, string>
   },
 ): string[] {
@@ -535,6 +544,7 @@ export function flowRunArgs(
     '--experimental-strip-types', path.join(options.repoPath, 'src', 'semantic-flow.ts')]
   argv.push('--app', args.app, '--site', args.site, '--out', args.outDir, '--quiet')
   if (args.dry) argv.push('--dry')
+  if (args.headful) argv.push('--headful')
   // 默认就是真模型面；`ablate` 只做消融实验（rules-only = 不装模型，stub = 会答但永不过闸）。
   if (args.ablate === 'rules-only') argv.push('--laya', 'none', '--escalate', 'none')
   else if (args.ablate === 'stub') argv.push('--laya', 'unsure', '--escalate', 'none')
@@ -563,6 +573,8 @@ export function planArgs(
     force?: boolean
     dangerousDemo?: boolean
     planner?: 'scripted' | 'llm'
+    /** Visible browser window on the engine host during the planning walk (engine `--headful`). */
+    headful?: boolean
   },
 ): string[] {
   const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []),
@@ -572,6 +584,7 @@ export function planArgs(
   if (args.force) argv.push('--force')
   if (args.dangerousDemo) argv.push('--allow-dangerous-demo')
   if (args.planner) argv.push('--planner', args.planner)
+  if (args.headful) argv.push('--headful')
   return argv
 }
 

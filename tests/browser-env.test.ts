@@ -1,6 +1,7 @@
 /**
  * browser-env tests: the cross-platform resolution order, the MV3-safe kwargs,
- * and the persistent-context twin the extension path needs.
+ * the persistent-context twin the extension path needs, and the headed/`--headful` contract
+ * (a window only exists with the full chromium — and the missing piece is named when it doesn't).
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -34,6 +35,34 @@ describe("chromium resolution (browser_env.py twin)", () => {
     expect(kw.args).toContain("--load-extension=/tmp/some-extension");
     expect(kw.args).toContain("--disable-extensions-except=/tmp/some-extension");
     expect(String(kw.executablePath)).not.toContain("headless_shell");
+  });
+
+  it("headed picks the full chromium — a window needs it, the headless shell has none", () => {
+    const kw = launchKwargs(false);
+    expect(kw.headless).toBe(false);
+    expect(String(kw.executablePath)).not.toContain("headless_shell");
+  });
+
+  it("headed names the missing binary when only the headless shell is installed", () => {
+    // 把解析面收窄到"只有 headless shell"的假浏览器目录（browserRoots 认 HOME 与 env）。
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "af-headonly-"));
+    const shell = path.join(home, ".cache", "ms-playwright", "chromium_headless_shell-1234",
+      "chrome-headless-shell-linux", "chrome-headless-shell");
+    fs.mkdirSync(path.dirname(shell), { recursive: true });
+    fs.writeFileSync(shell, "");
+    const savedHome = process.env.HOME;
+    const savedEnvPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
+    delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+    process.env.HOME = home;
+    try {
+      expect(() => launchKwargs(false)).toThrow(/有头运行.*headless shell/s);
+      // 同一天花板下 headless 照常可用：报错只针对"有头但没有完整 chromium"。
+      expect(String(launchKwargs(true).executablePath)).toContain("headless_shell");
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+      if (savedEnvPath !== undefined) process.env.PLAYWRIGHT_BROWSERS_PATH = savedEnvPath;
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("actually launches (and probe() agrees)", async () => {

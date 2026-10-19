@@ -120,6 +120,29 @@ const Consumer = {
 LLM 门（LLM 规划器、或语义流的升级老师）是命令行层的可选项，需要运行 checkout 的机器上有 `OPENAI_*`
 ——它们不是插件的前置要求。
 
+### 看着浏览器跑（有头运行）
+
+每个浏览器入口都能用 `--headful` 显形：
+
+| 面 | 怎么开 |
+|---|---|
+| 引擎 CLI | `npm run apps -- --app <id> --headful`；`npm run semantic -- --app <模板> --site <key> --headful`；`npm run plan:flow -- … --headful`；`node tools/learn.ts --headful` |
+| DSH 工具 | `…_run` 传 `headful: true`（应用包与语义模板都支持）、`…_plan` 传 `headful: true`、`…_learn` 传 `headful: true`（或用 `cdp` 直接驱动你已经开着的浏览器） |
+
+两点要知道：
+
+- **窗口开在"跑引擎的那台机器"上**（也就是部署主机），不会出现在 DSH 的浏览器页面里。服务器无显示器时
+  要给它一个显示并去看那个显示：
+  ```bash
+  xvfb-run -a -s "-screen 0 1440x900x24" dsh --profile web --no-open --port 3080   # 整个宿主跑在虚拟显示下
+  # 或只包一次运行：xvfb-run -a npm run apps -- --app demo-app --headful
+  # 要人眼看：再配 x11vnc / noVNC，或用 ffmpeg -f x11grab -i $DISPLAY 抓帧
+  ```
+- 有头需要**完整 chromium**。本机实测：`--headful` 起的是 `chromium-*/chrome` 且命令行里**没有**
+  `--headless`（真窗口，已在虚拟显示上抓到画面），默认起的是 `chrome-headless-shell --headless`。
+  只有 headless shell 的机器上，有头运行会直接点名缺什么（`npx playwright install chromium`），
+  不会甩一句 Playwright 的天书。
+
 ### 配置页：线上决策模型（token-plan SystemOne）
 
 bundle 自带一个浏览器半，在 `plugins.row.config` 注册自己的行配置页：设置 → 插件 → 本 bundle →

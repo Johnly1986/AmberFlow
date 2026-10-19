@@ -541,6 +541,11 @@ export interface PlanFlowOptions {
   appsDir?: string;               // 落盘根（测试可注入）
   confirmStep?: (p: PlanProposal, sig: InducedSignal) => boolean | Promise<boolean>;
   sessionFactory?: () => Promise<BrowserSession>;
+  /**
+   * **有头运行**（CLI `--headful`）：规划时演示用的浏览器窗口可见。默认关（headless）。
+   * 窗口出现在跑引擎的那台机器上（服务器需真实显示器或 Xvfb + VNC/noVNC）。
+   */
+  headful?: boolean;
   verbose?: boolean;
   maxSteps?: number;
 }
@@ -634,7 +639,7 @@ export async function planFlow(opts: PlanFlowOptions): Promise<PlanFlowResult> {
   }
 
   const ownSession = opts.sessionFactory === undefined;
-  const session = ownSession ? await browserSession(true) : await opts.sessionFactory!();
+  const session = ownSession ? await browserSession(opts.headful !== true) : await opts.sessionFactory!();
   // §3 文字系统路由：首访就把这一页的脚本结论观察进档案（<html lang> 声明优先，
   // 否则按 CJK 占比）——运行期据此选 checkpoint，是 Router 的同一判据落成数据。
   // 观察放在第一轮 goto 之后：会话刚起来时页面还是 about:blank。
@@ -936,6 +941,7 @@ function mergeInto(existingPath: string, fresh: SiteProfile): string {
 
 const USAGE = `usage: plan-flow --goal "..." --seed <page|url> --app ID [--site KEY]
                    [--planner scripted|llm] [--laya scripted|unsure] [--escalate scripted|llm|none]
+                   [--headful]
                    [--yes] [--force] [--allow-dangerous-demo] [--json] [--quiet] [--list]
 
 一句话 + 种子页 → 看页面逐步规划 → 信号归纳 → v2 模板 + 站点档案（重放门控后落盘）。
@@ -967,7 +973,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       site: { type: "string" }, planner: { type: "string" }, laya: { type: "string" },
       escalate: { type: "string" }, yes: { type: "boolean" }, force: { type: "boolean" },
       "allow-dangerous-demo": { type: "boolean" },
-      json: { type: "boolean" }, quiet: { type: "boolean" }, help: { type: "boolean" },
+      json: { type: "boolean" }, quiet: { type: "boolean" }, headful: { type: "boolean" }, help: { type: "boolean" },
     },
   });
   } catch (err) {
@@ -984,6 +990,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   try {
     const result = await planFlow({
       goal: String(v.goal), seedUrl: String(v.seed), app: String(v.app),
+      headful: v.headful === true,
       site: v.site !== undefined ? String(v.site) : siteKeyFor(String(v.seed)),
       ...(plannerKind === "llm"
         ? { planner: llmFlowPlanner({ onStop: (reason, detail) => {

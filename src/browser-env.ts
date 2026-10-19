@@ -97,7 +97,18 @@ export function launchKwargs(headless = true, extensionDir: string | null = null
     kw.args = [...(kw.args as string[] ?? []),
       `--disable-extensions-except=${extensionDir}`, `--load-extension=${extensionDir}`];
   } else if (cands.length) {
-    kw.executablePath = cands[cands.length - 1];
+    if (!headless) {
+      // 有头窗口只能由完整 chromium 提供：headless shell 不显示窗口，用它启动有头模式只会
+      // 得到一句和"缺显示器"无关的费解错误，所以在这里点名缺什么、怎么补。
+      const full = cands.filter((c) => !path.basename(c).includes("headless"));
+      if (!full.length) {
+        throw new Error("有头运行（--headful）需要完整 chromium，但本机只有 headless shell："
+          + "跑 `npx playwright install chromium`，或把 PLAYWRIGHT_BROWSERS_PATH 指向含 chromium-*/ 的目录。");
+      }
+      kw.executablePath = full[full.length - 1];
+    } else {
+      kw.executablePath = cands[cands.length - 1];
+    }
   }
   return kw;
 }
