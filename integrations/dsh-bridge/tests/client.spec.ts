@@ -11,9 +11,17 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { renderRootClient } from '../scripts/client-root-sync.mjs'
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const REPO_ROOT = path.resolve(PKG_ROOT, '..', '..')
 const SOURCE = fs.readFileSync(path.join(PKG_ROOT, 'client.js'), 'utf-8')
+const ROOT_SOURCE = fs.readFileSync(path.join(PKG_ROOT, 'client-root.js'), 'utf-8')
+const REPO_MANIFEST = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8')) as {
+  icon?: string
+  exports?: Record<string, string>
+  dsh?: { client?: { platform?: string; inject?: string[] } }
+}
 
 interface Registered {
   options: { name: string; key?: string; [key: string]: unknown }
@@ -21,7 +29,7 @@ interface Registered {
 }
 
 /** Load the client bundle with a fake module table and a fake React. */
-function loadClient(): { id: string; plugin: { inject: string[]; apply(ctx: unknown): void } } {
+function loadClient(source: string, label = 'client.js'): { id: string; plugin: { inject: string[]; apply(ctx: unknown): void } } {
   let loaded: { id: string; factory: (require: (id: string) => unknown) => { inject: string[]; apply(ctx: unknown): void } } | undefined
   const fakeWindow = {
     __ModuleLoader__: {
@@ -30,8 +38,8 @@ function loadClient(): { id: string; plugin: { inject: string[]; apply(ctx: unkn
   }
   // The bundle is a program, not an ESM module: evaluate it with `window` bound, as the script tag does.
   // eslint-disable-next-line no-new-func
-  new Function('window', SOURCE)(fakeWindow)
-  if (loaded === undefined) throw new Error('client.js did not register with __ModuleLoader__')
+  new Function('window', source)(fakeWindow)
+  if (loaded === undefined) throw new Error(`${label} did not register with __ModuleLoader__`)
   const react = { createElement: () => null }
   return { id: loaded.id, plugin: loaded.factory((specifier) => {
     if (specifier === 'react') return react
@@ -90,14 +98,14 @@ function fakeContext(): {
 
 describe('browser half: registration contract', () => {
   it('registers under the package name and exports the client plugin shape', () => {
-    const { id, plugin } = loadClient()
+    const { id, plugin } = loadClient(SOURCE)
     expect(id).toBe('@deepseek-ai/dsh-amberflow-bridge')
     expect(plugin.inject).toEqual(['slots', 'locale', 'configForms'])
     expect(typeof plugin.apply).toBe('function')
   })
 
   it('registers the row configuration page for this bundle row and the three model labels', () => {
-    const { plugin } = loadClient()
+    const { plugin } = loadClient(SOURCE)
     const fake = fakeContext()
     plugin.apply(fake.ctx)
     // One locale dictionary pair, with the page's copy in both languages.
@@ -124,5 +132,47 @@ describe('browser half: registration contract', () => {
   it('imports no Harness Client package (client bundle purity)', () => {
     expect(SOURCE).not.toMatch(/require\(['"]@deepseek-ai\//)
     expect(SOURCE).toContain("require('react')")
+  })
+})
+
+describe('repository-root install door: generated client bundle', () => {
+  it('client-root.js is in sync with client.js (only the module id and row key differ)', () => {
+    // Editing client.js without regenerating would serve the wrong package id / row key; the
+    // comparison is the guard (`node scripts/client-root-sync.mjs` regenerates).
+    expect(ROOT_SOURCE).toBe(renderRootClient(SOURCE))
+  })
+
+  it('registers under the ROOT package name and root row-config key', () => {
+    const { id, plugin } = loadClient(ROOT_SOURCE, 'client-root.js')
+    expect(id).toBe('amberflow')
+    const fake = fakeContext()
+    plugin.apply(fake.ctx)
+    expect(fake.cells).toHaveLength(1)
+    expect(fake.cells[0]!.options).toMatchObject({
+      name: 'plugins.row.config',
+      key: 'amberflow#amberflow-bridge',
+    })
+    expect(fake.dictionaries[0]!.ns).toBe('settings.amberflowBridge')
+  })
+
+  it('the repository manifest exports the root client bundle, locale and icon', () => {
+    // The DSH client scanner only serves a package-root row: the bundle row must name the package.
+    expect(REPO_MANIFEST.exports?.['.']).toBe('./integrations/dsh-bridge/src/index.ts')
+    expect(REPO_MANIFEST.exports?.['./dsh-plugin']).toBe('./integrations/dsh-bridge/src/index.ts')
+    const bundlePatch = fs.readFileSync(path.join(REPO_ROOT, 'dsh-bundle.yml'), 'utf-8')
+    expect(bundlePatch).toMatch(/id:\s*amberflow-bridge\s*\n\s*name:\s*amberflow\s*$/m)
+    expect(REPO_MANIFEST.exports?.['./client']).toBe('./integrations/dsh-bridge/client-root.js')
+    expect(REPO_MANIFEST.exports?.['./locale/*.json']).toBe('./integrations/dsh-bridge/locale/*.json')
+    expect(REPO_MANIFEST.dsh?.client?.platform).toBe('web')
+    expect(REPO_MANIFEST.dsh?.client?.inject).toEqual(expect.arrayContaining(['@deepseek-ai/dsh-client-locale']))
+    expect(REPO_MANIFEST.icon).toBe('./integrations/dsh-bridge/icon.svg')
+    for (const target of [
+      'integrations/dsh-bridge/client-root.js',
+      'integrations/dsh-bridge/icon.svg',
+      'integrations/dsh-bridge/locale/en.json',
+      'integrations/dsh-bridge/locale/zh.json',
+    ]) {
+      expect(fs.existsSync(path.join(REPO_ROOT, target)), target).toBe(true)
+    }
   })
 })

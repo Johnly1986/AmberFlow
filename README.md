@@ -27,13 +27,19 @@ step 1: click a "Add to cart" (clicked, rule:match, conf=1.00)
 
 ## DSH 插件安装
 
-装进 profile 即得三个工具——`amberflow_apps`（列应用）/ `amberflow_run`（跑一个，含 `dry` / `ablate` / `slots`；**默认跑真模型**）/ `amberflow_learn`（录制归纳）：
+装进 profile 即得四个工具——`amberflow_apps`（列应用）/ `amberflow_run`（跑一个，含 `dry` / `ablate` /
+`slots` / `provider`；**默认跑真模型**）/ `amberflow_learn`（录制归纳）/ `amberflow_plan`（一句话+种子页→模板+档案），
+并且插件行自带**配置页**（只设置线上决策模型 URL / Token Key / ModelName；两个安装门都提供）：
 
 ```bash
 dsh plugin --profile <名称> add github:Johnly1986/AmberFlow          # 仓库直装（见 README 附注：私有库需凭证）
 dsh plugin --profile <名称> add /绝对路径/AmberFlow                  # 开发态 link：仓库根 bundle，插件与引擎同源
-dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridge   # 只装适配器包（引擎由 repoPath 指）
+dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridge   # 只装适配器包（需先 npm run build；引擎由 repoPath 指）
 ```
+配置页在**设置 → 插件 → AmberFlow 桥接 → 组件行 → 配置**：三项分别是 `TOKEN_PLAN_ENDPOINT` /
+`TOKEN_PLAN_API_KEY` / `TOKEN_PLAN_MODEL`（URL 填兼容模式基址，桥自动补 `/systemone`），URL+Token 齐全时
+`amberflow_run` 默认以 `token-plan` 作为决策 provider；留空则继续用本地 ONNX。详见
+[integrations/dsh-bridge/README.md](integrations/dsh-bridge/README.md)。
 或在插件页面直接添加项目地址。开发态 link 之后**重启一次 DSH 进程**：换安装形态时，运行中的进程
 不会自己换掉已加载的桥模块（引擎 CLI 是子进程，倒是立刻用新的）；判据与解释见
 [integrations/dsh-bridge/DEVELOPING.md](integrations/dsh-bridge/DEVELOPING.md)。

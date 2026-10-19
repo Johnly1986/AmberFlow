@@ -3,10 +3,16 @@
 # whole repository, so the plugin entry is addressed as a subpath of the installed package — the
 # form the publish guide shows (`dsh-hello-plugin/startup`) — and Node resolution finds the module.
 #
-# No config and no build script by design: the entry points at the plugin's TypeScript source, which
-# the harness loads under its own TS runtime, so `dsh plugin add <git>` needs no allowBuilds grant;
-# the bridge locates the checkout it ships inside (or AMBERFLOW_REPO / a config override).
-# The nested package keeps its own cordis.patch.yml for link/path installs of `integrations/dsh-bridge`.
+# No config and no build script by design: the package-root "." export points at the plugin's
+# TypeScript source, which the harness loads under its own TS runtime, so `dsh plugin add <git>`
+# needs no allowBuilds grant; the bridge locates the checkout it ships inside (or AMBERFLOW_REPO /
+# a config override). The nested package keeps its own cordis.patch.yml for link/path installs of
+# `integrations/dsh-bridge`.
+#
+# The row names the PACKAGE ROOT (`amberflow`), not a subpath: the DSH client-module scanner only
+# serves a browser half for a package-root row, and the configuration page needs that scanner to
+# find this package's `dsh.client`. `amberflow/dsh-plugin` remains a compatible export alias for
+# older hand-written profile patches.
 - insert:
     - id: amberflow-bridge
-      name: amberflow/dsh-plugin
+      name: amberflow

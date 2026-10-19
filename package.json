@@ -5,11 +5,22 @@
   "type": "module",
   "description": "冻结计划的浏览器自动化中间件：LLM 只规划一次，laya 逐步执行，完成只认 DOM 信号",
   "exports": {
-    "./dsh-plugin": "./integrations/dsh-bridge/src/index.ts"
+    "./dsh-plugin": "./integrations/dsh-bridge/src/index.ts",
+    "./client": "./integrations/dsh-bridge/client-root.js",
+    "./locale/*.json": "./integrations/dsh-bridge/locale/*.json",
+    ".": "./integrations/dsh-bridge/src/index.ts"
   },
   "dsh": {
     "bundle": {
       "patch": "./dsh-bundle.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
     }
   },
   "engines": {
@@ -74,5 +85,6 @@
     "exceljs": "^4.4.0",
     "onnxruntime-node": "^1.30.0",
     "playwright": "1.58.0"
-  }
+  },
+  "icon": "./integrations/dsh-bridge/icon.svg"
 }

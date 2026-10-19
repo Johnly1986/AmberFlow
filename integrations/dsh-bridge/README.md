@@ -52,9 +52,9 @@ plugin window runs the same operation). Three channels are supported:
   installs the nested package; its `cordis.patch.yml` addresses the plugin by package name.
 - **The engine repository itself over git**: `dsh plugin --profile <name> add github:Johnly1986/AmberFlow`
   installs the repo root, whose `dsh.bundle` points at `dsh-bundle.yml` — the row addresses
-  `amberflow/dsh-plugin` (a package subpath). The clone contains the whole engine, so the plugin
-  locates its own checkout; no build script runs, so no `allowBuilds` grant is needed for this
-  package itself (its dependencies that do run install scripts — `onnxruntime-node`, `protobufjs` —
+  `amberflow/dsh-plugin` (a package subpath), and the root package's `dsh.client` now serves the
+  configuration page too. The clone contains the whole engine, so the plugin locates its own
+  checkout; no build script runs, so no `allowBuilds` grant is needed for this package itself (its dependencies that do run install scripts — `onnxruntime-node`, `protobufjs` —
   are the only names to approve if pnpm lists them). Pin commits for installs you trust long-term
   (`#<sha>`), and run `npx playwright install chromium` once where the profile boots. The ONNX
   decision model is a large artifact that deliberately stays out of git: rules-only runs and
@@ -164,10 +164,16 @@ How it behaves:
   `allowDangerous`, `toolPrefix`, `envMode`, `envMode`-forwarding and `keepRuns` stay in
   `cordis.patch.yml` (changing an ordinary field remounts the plugin; `toolPrefix` even renames the
   tools, so it must not be live-edited).
-- **Install-door note.** The page is part of the nested `integrations/dsh-bridge` package, so it is
-  loaded by the path/link/npm install of that package. A whole-repository git install loads the
-  plugin through the repo root's `dsh-bundle.yml`; that door would need a root-level client entry to
-  serve the same page (not wired yet).
+- **Both install doors serve this page.** The bundle ships two byte-equivalent client bundles:
+  `client.js` for the nested `integrations/dsh-bridge` install (module id = package name, row key
+  `@deepseek-ai/dsh-amberflow-bridge#amberflow-bridge`), and the generated `client-root.js` for the
+  repository-root install (`dsh plugin add <repo>`; module id = root package `amberflow`, row key
+  `amberflow#amberflow-bridge`). The repository bundle row names the PACKAGE ROOT (`amberflow`),
+  because the DSH client scanner only serves a browser half for a package-root row — a hand-written
+  profile patch that overrides this row must therefore use `name: amberflow` (the `amberflow/dsh-plugin`
+  export alias keeps old Host-only patches loading, but they get no configuration page). Edit
+  `client.js` only and regenerate with `node integrations/dsh-bridge/scripts/client-root-sync.mjs`;
+  a test pins the generated copy.
 
 ### Trust boundary
 

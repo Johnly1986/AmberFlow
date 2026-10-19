@@ -148,9 +148,13 @@ bundle 自带一个浏览器半，在 `plugins.row.config` 注册自己的行配
 - **只能改这三个字段**：`repoPath`/`nodeBin`/`timeoutMs`/`allowDangerous`/`toolPrefix`/`envMode`/
   `forwardEnv`/`keepRuns` 仍写在 `cordis.patch.yml`（普通字段的变更会重挂插件；`toolPrefix` 甚至
   会改工具名，不能做成热更新）。
-- **安装门说明**：该页面属于 nested 的 `integrations/dsh-bridge` 包，由整包（path/link/npm）安装时
-  加载；整仓库 git 安装走根 `dsh-bundle.yml` 的入口，那条门需要根级 client 入口才能提供同一页面
-  （尚未接线）。
+- **两种安装门都提供本页面**：bundle 带两个逐字一致的 client bundle——`client.js` 供 nested 的
+  `integrations/dsh-bridge` 安装（模块 id = 包名，行 key `@deepseek-ai/dsh-amberflow-bridge#amberflow-bridge`），
+  生成的 `client-root.js` 供仓库根安装（`dsh plugin add <repo>`；模块 id = 根包名 `amberflow`，
+  行 key `amberflow#amberflow-bridge`）。仓库 bundle 的行名是**包根** `amberflow`——DSH 的 client
+  扫描只服务包根行，所以手写的 profile patch 若要覆盖这一行必须写 `name: amberflow`
+  （`amberflow/dsh-plugin` 这个导出别名仍能让旧的 Host-only patch 加载，但不会提供配置页）。只改
+  `client.js`，再用 `node integrations/dsh-bridge/scripts/client-root-sync.mjs` 重新生成；测试会钉住生成结果。
 
 ### 信任边界
 
