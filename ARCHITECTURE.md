@@ -138,6 +138,34 @@ layaapp/__init__.py   应用层公共 API（驱动只 import 这一个）
 依赖方向严格单向：`__init__ → executor → {extraction, rules, audit}`、`planner → {executor, extraction}`。
 顶层同名模块（`browser_agent.py` 等）只剩**兼容 shim**，保证旧 import 与 `python browser_agent.py` 不炸。
 
+### 2.2 应用支持器（AppAdapter）：一种应用类型 = 一个适配器
+
+TS 应用层（`apps/<id>/pack.json` + `src/app-adapters.ts` + `src/app-runner.ts`）把"应用"从
+"浏览器任务的配置"升级成**多类型应用的声明**：
+
+- **应用 = 目录**：`apps/<id>/pack.json` 声明角色/旅程/结束态不变量/数据袋/数据腿/设备面/策略；
+  发现制（没有中央清单），加载期校验（未知键、坏信号、跨类型键、占位符全都红）。
+- **类型抽象**：`src/app-adapters.ts` 的注册表里，一种类型 = 一个 `AppAdapter`——声明面
+  （`stepKeys`/`validateStep`/`expand`）、信号面（web=DOM；进程族=`tool-signals`）、执行（`run`）、
+  能力探测（`ready()`）。内建四种：`web`（浏览器，唯一执行器）、`cli`（本地命令行）、
+  `ssh`（真实 ssh 子进程）、`stdio`（交互式进程/游戏：提示-应答-信号-超时）。
+  步用 `adapter` 键指名类型（缺省按 source 推断，既有包逐字节不变）。
+- **同一流程不限类型**：一条 journey 可以混用几种类型；`next` 走向、重试、危险门、不变量同一套语义。
+  示范应用 `apps/mixed-demo`：web → cli → ssh → cli → web → stdio → cli，7/7 步通过。
+- **返回信号可传递**：任一步在**信号成立后**按 `returns` 抽取观察里的值（进程族：stdout/regex/exit_code），
+  写进运行级数据集（带 `stepId#attempt` 溯源、重跑先失效）；后续步骤以 `{dataset:NAME}`（进程族 argv/输入）
+  或浏览器命令绑定 `{from:"dataset"}` 消费；缺失/陈旧 = 结构化 `needs_value`，绝不猜。
+  加载期对账产者唯一、消费者必须有产者。
+- **类型无关的不变量**：`invariants[i].adapter` 缺省 = web（浏览器结束态）；其它类型 = 旅程结束后的
+  **只读观察探针**（如 ssh `test -s` 验远端产物、cli 验错误路径），拒绝 retries/dangerous/when。
+- **能力闸与语料纪律**：依赖本机服务的类型（ssh 需要 sshd）在套件里由 `ready()` 探测，不可用**如实跳过**
+  （跳过 ≠ 通过）；机器无关的冻结语料（网页提名集）按同一条规则排除能力探测型应用。
+- `when` **有意保持 web-only**：它问的是"这一步在这个页面上适不适用"；进程类步骤没有可问的页面，
+  分支用 `next` 边 + 各自信号表达（不是遗漏，是语义边界）。
+
+设计、验收表与逐片记录：[docs/APP_SUPPORTER_DESIGN.md](docs/APP_SUPPORTER_DESIGN.md)；
+应用写法：[apps/README.md](apps/README.md)。
+
 ## 三、三条并行入口，共用一套核心
 
 | 入口 | 决策方式 | 适用 |

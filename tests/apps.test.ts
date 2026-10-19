@@ -224,7 +224,7 @@ describe("工具步：命令行工具当动作腿", () => {
     ["不变量需要浏览器步", (p: any) => {
       p.journey = p.journey.filter((s: any) => s.source !== undefined);
       p.invariants = [{ id: "x", signal: { css_exists: "#a" } }];
-    }, "invariants need at least one browser step"],
+    }, "web invariants need at least one browser step"],
   ])("%s", (_label, mutate, snippet) => {
     const pack = clone(loadPack("cli-report")) as any;
     mutate(pack);

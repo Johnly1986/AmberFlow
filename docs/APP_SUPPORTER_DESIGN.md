@@ -1,6 +1,6 @@
 # 应用支持器（AppAdapter）：多类型应用、同一流程、返回值传递
 
-**日期**：2026-10-18 ｜ **状态**：设计 + **Slice 1/2/3 已落地**（提交见 git log）｜ **目标**（项目方）：
+**日期**：2026-10-18 ｜ **状态**：设计 + **Slice 1/2/3/4 已落地**（提交见 git log）｜ **目标**（项目方）：
 改进应用层，支持多类型应用（网页、ssh、游戏等），抽象"应用支持器"，**同一流程不应限定应用类型**，
 **返回信号应可以传递**；每次实现都用**真实场景**验证。
 
@@ -292,3 +292,43 @@ CI 的绿色定义仍只有 `bench/smoke.sh`（离线 + 既有夹具）。新增
 
 - 类型无关的 `when` / `invariants[i].adapter`（进程族结束态不变量）仍是 Slice 4；
   stdio 是**行文本协议**（无 pty/TUI 语义）、不支持 retries/dangerous；ssh 的 dangerous/干跑语义未实现。
+
+## 14. Slice 4 落地记录（2026-10-18）：类型无关的结束态不变量 + 类型账 + 收口
+
+**实现**
+
+- `src/app-pack.ts`：`AppInvariant` 增加可选 `adapter`。缺省 = web（在浏览器结束态上求值，既有包语义/
+  产物逐字节不变）；写了类型 = 该类型的**只读观察探针**。加载期按适配器分派校验（借用它的声明面与信号语言）；
+  断言纪律：**拒绝** `retries` / `dangerous` / `when`（证据不能靠重跑、副作用或条件换）；web 不变量仍要求
+  至少一个浏览器步，进程族探针不需要页面。
+- `src/app-runner.ts`：不变量执行按类型分派——web → 会话结束态 DOM 信号；cli/ssh/stdio → 用适配器在旅程结束后
+  跑一次探针（不混进 journey 的 `tool_steps`，账分得清"旅程"与"验收"）；`AppInvariantResult.adapter` 标注类型
+  （web 不写该字段，既有产物不变）。新增**类型账**：混用 ≥2 种类型的旅程在结果/报告里写
+  `step_types`（如 `web×2 · cli×3 · ssh×1 · stdio×1`）；单一类型应用不出现该字段。
+- `apps/mixed-demo`：新增两条进程族不变量——ssh `test -s {out_dir}/ssh-token`（远端产物仍在，只读探针）、
+  cli `--fail`（退出码 3 + stderr 事实，错误路径仍可观察）。**3 条不变量覆盖 web / ssh / cli 三种类型**。
+- `ARCHITECTURE.md` §2.2：应用支持器的架构位置、类型/信号/传值/不变量/能力闸/`when` 边界收口；
+  `apps/README.md` 增补 return/传值/stdio/不变量写法。
+
+**真实场景验收（本轮实测）**
+
+- `apps/mixed-demo` 真实 CLI：**7/7 步通过**、三条不变量全部成立（web/ssh/cli）、类型账
+  `web×2 · cli×3 · ssh×1 · stdio×1`、数据传递 4 条（token/remote/coupon/tries）；
+  套件行 `mixed-demo 7 7/7 1/1 通过（model not needed）`。
+- `tests/app-invariants.test.ts`（6 条，离线）：进程族不变量不需要浏览器步、断言纪律红例、探针成立/失败、
+  单一类型产物无 `step_types`（缺省等价）；`tests/app-mixed.test.ts` 更新为断言三条类型无关不变量 + 类型账。
+- 全量 `apps:suite`（17/18 通过 + 1 危险步未放行）、`npm run verify`、`bench/smoke.sh` 见提交记录。
+
+## 15. 目标达成复核（项目方四条要求 → 证据）
+
+| 要求 | 落地 | 真实场景证据 |
+|---|---|---|
+| 支持多类型应用（网页、ssh、游戏等） | 内建 `web`/`cli`/`ssh`/`stdio` 四种适配器；`AppAdapter` 契约可注册新类型 | ssh：本机 sshd 真跑；游戏：`bench/fixtures/guess-game.mjs` 真实交互进程；web/cli：既有真实套件 |
+| 抽象应用支持器 | `src/app-adapters.ts` 注册表 + 契约（声明面/信号面/执行/能力探测/返回值）；`app-pack`/`app-runner` 按注册表分派，不再写类型分支 | 注册新类型的测试（假适配器即可成为"多一种应用"）；web/cli 迁移桥逐字节不变 |
+| 同一流程不限定应用类型 | 一条 journey 可混用任意已注册类型；`next`/重试/危险门/不变量同一套语义 | `apps/mixed-demo`：web→cli→ssh→cli→web→stdio→cli **7/7** |
+| 返回信号可传递 | `returns`（进程族抽取器）→ 运行级数据集（溯源/失效）→ `{dataset:NAME}` / 浏览器命令绑定 `{from:"dataset"}`；缺失 = `needs_value` | mixed-demo 三条通路：cli→ssh、ssh→浏览器命令绑定、stdio→cli；`tests/app-returns`/`app-stdio`/`app-ssh`/`app-mixed` |
+| 每次实现真实场景验证 | 每片都有真机验收（见 §11–§14） | 真 chromium、真 git/jq、真本机 sshd、真实交互子进程、全量应用套件 |
+
+**明确的非目标/边界**（不算未完成，是设计边界）：`when` 保持 web-only（页面适用性问题）；
+stdio 是行文本协议（无 pty/TUI）；ssh 的 dangerous/干跑语义未实现（加载期拒绝，宁缺毋滥）；
+不变量探针"是否只读"由声明者负责（schema 只能拒绝危险的显式声明）。

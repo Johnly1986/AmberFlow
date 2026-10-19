@@ -147,10 +147,22 @@ export interface ExpandedStep {
   tool?: ProcessStepDecl;
 }
 
+/**
+ * 结束状态不变量（Slice 4 起**类型无关**）。
+ *
+ * 不写 `adapter` = web 不变量（在浏览器结束态上求值；既有包的语义与产物逐字节不变）。
+ * 写了 `adapter`（cli/ssh/stdio…）= 该类型的**只读观察探针**：旅程结束后用同样的进程观察信号
+ * 验一次（例如 ssh 检查远端文件还在、cli 检查错误路径仍可观察）。探针必须是只读观察——
+ * 加载期拒绝 `dangerous`/`retries`，但"任意命令是否只读"无法由 schema 证明，属于声明责任。
+ */
 export interface AppInvariant {
   id: string;
   desc?: string;
-  signal: SignalSpec;
+  /** 缺省 = web（浏览器结束态）；否则用该应用支持器做一次只读观察探针。 */
+  adapter?: string;
+  signal: SignalSpec | Record<string, unknown>;
+  /** 展开期填：非 web 不变量的适配器声明值（web 不变量没有）。 */
+  decl?: unknown;
 }
 
 export interface AppPack {
@@ -424,8 +436,15 @@ export function expandPack(pack: AppPack, overrides: Record<string, unknown> = {
   }
   const plan = new TaskPlan(pack.goal, browserSubgoals as unknown as Array<Partial<Subgoal>>, planPath, slots);
   // 不变量与步骤同一套 `{slot}` 规则（未知占位符已在 `validatePack` 里红过了）。
-  const invariants = (pack.invariants ?? []).map(
-    (inv) => substitute(inv, bag, []) as AppInvariant);
+  // Slice 4：按 `adapter` 分派——web（缺省）= 浏览器结束态断言；其它 = 该类型的只读观察探针。
+  const invariants = (pack.invariants ?? []).map((raw) => {
+    const inv = substitute(raw, bag, []) as AppInvariant;
+    const kind = inv.adapter === undefined || inv.adapter === null ? "web" : String(inv.adapter).trim().toLowerCase();
+    const adapter = getAppAdapter(kind);
+    if (adapter === undefined || kind === "web") return { ...inv, adapter: "web" };
+    const out = adapter.expand({ ...inv, desc: String(inv.desc ?? inv.id) }, `invariants:${inv.id}`);
+    return { ...inv, adapter: kind, decl: out.decl };
+  });
   return { pack, steps, plan, invariants, slots, rolesUsed: [...new Set(used)] };
 }
 
@@ -740,14 +759,52 @@ export function validatePack(pack: AppPack,
   if (pack.probe !== undefined) {
     p.push(...validateProbeBlock(pack.probe, pack.hosts, "probe"));
   }
-  if ((pack.invariants ?? []).length
-    && !pack.journey.some((e) => stepKind((e["role"] ? { ...(roles[String(e["role"])] ?? {}), ...e } : e) as Record<string, unknown>) === "browser")) {
-    p.push("invariants need at least one browser step (they are evaluated on the browser end state)");
-  }
   for (const [i, inv] of (pack.invariants ?? []).entries()) {
     if (!isDict(inv) || !inv["id"] || !isDict(inv["signal"])) {
       p.push(`invariants[${i}] needs {id, signal}`);
+      continue;
     }
+    const where = `invariants[${i}]`;
+    if (typeof inv["id"] !== "string" || !inv["id"].trim()) p.push(`${where}.id must be a non-empty string`);
+    if (inv["desc"] !== undefined && typeof inv["desc"] !== "string") p.push(`${where}.desc must be a string`);
+    const kind = inv["adapter"] === undefined || inv["adapter"] === null
+      ? "web" : String(inv["adapter"]).trim().toLowerCase();
+    const adapter = getAppAdapter(kind);
+    if (adapter === undefined) {
+      p.push(`${where}.adapter: unknown app adapter ${JSON.stringify(kind)} `
+        + `(known: ${listAppAdapterObjects().map((a) => a.kind).join(", ")})`);
+      continue;
+    }
+    if (kind === "web") {
+      // web 不变量：旧口径（在浏览器结束态上求值），不允许写成"探针"绕过 end-state 语义。
+      const allowed = new Set(["id", "desc", "adapter", "signal"]);
+      for (const k of Object.keys(inv)) {
+        if (!allowed.has(k)) p.push(`${where}.${k}: unknown key on a web invariant (known: id, desc, adapter, signal)`);
+      }
+      continue;
+    }
+    // 进程族探针不变量：声明面 = 该适配器的步键 + {id, desc, adapter, signal}；
+    // 但"断言"不许重试、不许是危险动作（证据不能靠重跑/副作用换）。
+    const allowed = new Set<string>(["id", "desc", "adapter", "signal", ...adapter.stepKeys]);
+    for (const k of Object.keys(inv)) {
+      if (!allowed.has(k)) {
+        p.push(`${where}.${k}: unknown key on a ${adapter.label} invariant `
+          + `(known: id, desc, adapter, signal${adapter.stepKeys.length ? ", " + adapter.stepKeys.join(", ") : ""})`);
+      }
+    }
+    if (inv["retries"] !== undefined) p.push(`${where}.retries: 不变量探针不许重试（断言只能观察一次真实状态）`);
+    if (inv["dangerous"] === true) p.push(`${where}.dangerous: 不变量探针必须是只读观察，不许声明危险动作`);
+    if (inv["when"] !== undefined) p.push(`${where}.when: 不变量探针在旅程结束后无条件执行，不接受 when`);
+    // 借用适配器自己的声明面校验（键语义/信号语言/返回值形状）
+    adapter.validateStep({ ...inv, desc: String(inv["desc"] ?? inv["id"]) }, where, p);
+  }
+  // web 不变量需要浏览器步（它们在浏览器结束态上求值）；进程族探针不需要页面。
+  const webInvariants = (pack.invariants ?? []).filter((inv) => isDict(inv)
+    && (inv["adapter"] === undefined || inv["adapter"] === null || inv["adapter"] === "web"));
+  if (webInvariants.length > 0
+    && !pack.journey.some((e) => stepKind((e["role"] ? { ...(roles[String(e["role"])] ?? {}), ...e } : e) as Record<string, unknown>) === "browser")) {
+    p.push("web invariants need at least one browser step (they are evaluated on the browser end state); "
+      + "process invariants can run without a browser");
   }
   // 展开成计划后再用计划自己的校验器过一遍（信号/hint/when/retries 一套口径）。
   // 只有**浏览器步**进计划；工具步的信号是进程观察面的，它们已经在上面按 TOOL_SIGNAL_OPS 校验过。

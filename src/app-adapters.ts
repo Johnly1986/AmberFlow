@@ -398,7 +398,9 @@ export const cliAdapter: AppAdapter = {
     return { decl: tool, tool };
   },
   async run(decl, step, ctx) {
-    const tool = await ctx.runCliStep(step);
+    // 旅程步的 decl === step.tool；不变量探针只有 decl（没有独立的 tool 字段）——统一成 step.tool。
+    const stepWithTool = decl === undefined ? step : { ...step, tool: decl as ProcessStepDecl };
+    const tool = await ctx.runCliStep(stepWithTool);
     const d = decl as ProcessStepDecl | undefined;
     return {
       done: tool.done,

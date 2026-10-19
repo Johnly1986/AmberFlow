@@ -25,14 +25,14 @@
     "flow_apps": 2,
     "flow_steps": 10,
     "declared_lines": {
-      "pack": 3343,
+      "pack": 3467,
       "flow": 238,
       "profile": 175,
-      "total": 3756
+      "total": 3880
     },
     "journey_roles_lines": {
       "lines": 2140,
-      "of_pack_lines": "64.0%"
+      "of_pack_lines": "61.7%"
     },
     "bin_fixture_lines": 101,
     "surfaces": {
@@ -64,7 +64,7 @@
         "reobserve": 0,
         "escalate": 0,
         "rule_match": 205,
-        "secs": 1152.8,
+        "secs": 1219.4,
         "tier": "on"
       }
     },
@@ -77,7 +77,7 @@
         "reobserve": 0,
         "escalate": 0,
         "rule_match": 5,
-        "secs": 2.3,
+        "secs": 4.1,
         "tier": "ablation"
       }
     },
@@ -109,7 +109,7 @@
     }
   },
   "tests": {
-    "count": 1311,
+    "count": 1317,
     "source": "--tests（应来自 `npx vitest list | grep -cE \"^(tests|integrations)/\"`；静态数 `it(` 只有 799，不可用）"
   }
 }

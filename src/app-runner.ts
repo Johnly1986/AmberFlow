@@ -287,6 +287,8 @@ export interface AppInvariantResult {
   id: string;
   desc: string;
   held: boolean;
+  /** Slice 4：非 web 不变量的类型（web 不变量不写此字段，既有产物逐字节不变）。 */
+  adapter?: string;
 }
 
 /**
@@ -328,6 +330,8 @@ export interface AppRunResult {
   subgoals: Array<Record<string, unknown>>;
   tool_steps: ToolStepResult[];
   invariants: AppInvariantResult[];
+  /** Slice 4：混用 ≥2 种应用类型时，按旅程声明的类型计数（缺字段 = 单一类型）。 */
+  step_types?: Record<string, number>;
   sources: AppSourceResult[];
   ok: boolean;
   secs: number;
@@ -834,9 +838,28 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     const live = holder.session;
     // `expanded.invariants`（不是 pack.invariants）：展开期已做槽位替换，与 journey 同一套规则。
     for (const inv of expanded.invariants) {
-      const held = live === null ? false : await checkSignal(live.page as never, inv.signal);
-      invariantResults.push({ id: inv.id, desc: inv.desc ?? inv.id, held });
-      if (verbose) console.log(`  invariant ${inv.id}: ${held ? "held" : "VIOLATED"}`);
+      const kind = inv.adapter ?? "web";
+      let held = false;
+      if (kind === "web") {
+        // web 不变量：在浏览器会话的结束状态上求值（既有语义，逐字节不变）。
+        held = live === null ? false : await checkSignal(live.page as never, inv.signal as never);
+      } else {
+        // 进程族不变量：用该类型的**只读观察探针**在旅程结束后再验一次（如 ssh 看远端文件还在）。
+        const adapter = getAppAdapter(kind);
+        if (adapter !== undefined) {
+          const probe: ExpandedStep = {
+            index: -1, adapter: adapter.kind, kind: adapter.legacyKind,
+            desc: inv.desc ?? inv.id, role: null, id: inv.id, next: [], decl: inv.decl,
+          };
+          const out = await adapter.run(inv.decl, probe, adapterCtx);
+          held = out.done;
+        }
+      }
+      invariantResults.push({
+        id: inv.id, desc: inv.desc ?? inv.id, held,
+        ...(kind !== "web" ? { adapter: kind } : {}),
+      });
+      if (verbose) console.log(`  invariant ${inv.id}${kind === "web" ? "" : ` [${kind}]`}: ${held ? "held" : "VIOLATED"}`);
     }
     // 结束态必须在 session 关掉**之前**抓（否则抓到的是一个已关闭的页面）。
     // 捕获失败不该让一条本来成功的旅程变红，但也不能静默——verbose 下说明原因。
@@ -851,6 +874,10 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     if (holder.session !== null) await holder.session.close();
   }
 
+  // Slice 4：类型账（只在**混用 ≥2 种类型**的旅程里出现，既有应用产物逐字节不变）。
+  const typeCounts: Record<string, number> = {};
+  for (const st of expanded.steps) typeCounts[st.adapter] = (typeCounts[st.adapter] ?? 0) + 1;
+  const stepTypes = Object.keys(typeCounts).length > 1 ? typeCounts : undefined;
   const subgoals = plan.subgoals.map((s) => ({
     desc: s.desc, status: s.status, attempts: s.attempts ?? 1, obstacle: s.obstacle ?? null,
   }));
@@ -869,6 +896,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     roles_used: expanded.rolesUsed, slots: expanded.slots,
     completed: `${doneCount}/${expanded.steps.length}`,
     subgoals, tool_steps: toolSteps, invariants: invariantResults,
+    ...(stepTypes !== undefined ? { step_types: stepTypes } : {}),
     ...(opts.captureTraces ? { step_traces: stepTraces } : {}),
     // Slice 2：返回值传递的审计面（缺省不出现——没有 returns 的包产物逐字节不变）。
     ...(dataset.entriesView().length > 0 ? { dataset_view: [...dataset.entriesView()] } : {}),
@@ -986,9 +1014,15 @@ export function appReportMarkdown(r: AppRunResult): string {
     }
     L.push("", "</details>");
   }
+  if (r.step_types !== undefined) {
+    L.push(`- 应用类型：${Object.entries(r.step_types).map(([k, n]) => `\`${k}\`×${n}`).join(" · ")}（旅程声明）`);
+  }
   if (r.invariants.length) {
-    L.push("", "## 验收（浏览器结束状态不变量）", "", "| 不变量 | 说明 | 结论 |", "|---|---|---|");
-    for (const i of r.invariants) L.push(`| ${i.id} | ${i.desc} | ${i.held ? "成立" : "**不成立**"} |`);
+    L.push("", "## 验收（结束状态不变量：web = 浏览器结束态；其它类型 = 只读观察探针）",
+      "", "| 不变量 | 类型 | 说明 | 结论 |", "|---|---|---|---|");
+    for (const i of r.invariants) {
+      L.push(`| ${i.id} | ${i.adapter ?? "web"} | ${i.desc} | ${i.held ? "成立" : "**不成立**"} |`);
+    }
   }
   return L.join("\n") + "\n";
 }

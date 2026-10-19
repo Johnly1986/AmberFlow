@@ -214,7 +214,7 @@
 <rect x="40" y="924" width="1480" height="108" class="band"/>
 <text x="58" y="948" class="lay">⑥ 分层证据（结论必须能被命令复现，叙述不算证据）</text>
 <rect x="175" y="958" width="420" height="60" class="bxe"/>
-<text x="186" y="977" class="t" font-size="12.5">tests/ 1311 条 + 六层跨实现对拍（冻结语料）</text>
+<text x="186" y="977" class="t" font-size="12.5">tests/ 1317 条 + 六层跨实现对拍（冻结语料）</text>
 <text x="186" y="993" class="s">rules/extraction/executor/datasource/ctrip/transfer</text>
 <text x="186" y="1007" class="s">node-port-poc：ONNX 与 ORT 数值对拍 max|diff| 2.98e-5</text>
 <rect x="610" y="958" width="400" height="60" class="bxe"/>

@@ -54,12 +54,20 @@ d("apps/mixed-demo：web+cli+ssh+stdio 的同一旅程（真实本机 sshd + 真
     const fs = await import("node:fs");
     expect(fs.readFileSync(path.join(out, "ssh-token"), "utf-8").trim()).toBe("widgets");
 
-    // ④ 浏览器结束态不变量（在 cli/ssh/stdio 步骤之后求值）；浏览器侧的优惠券值是数据集喂的
-    expect(res.invariants.map((i) => [i.id, i.held])).toEqual([["coupon-applied", true]]);
+    // ④ 结束态不变量是**类型无关**的：web（浏览器结束态）+ ssh/cli（只读观察探针），全部成立
+    expect(res.invariants.map((i) => [i.id, i.adapter ?? "web", i.held])).toEqual([
+      ["coupon-applied", "web", true],
+      ["remote-token-file", "ssh", true],
+      ["cli-error-path", "cli", true],
+    ]);
+    // ⑤ 类型账：混用 ≥2 种类型时按旅程声明计数（单一类型应用的产物里不出现该字段）
+    expect(res.step_types).toEqual({ web: 2, cli: 3, ssh: 1, stdio: 1 });
 
     // 报告里数据传递是一等公民（不是只藏在 JSON 里）
     const md = appReportMarkdown(res);
     expect(md).toContain("数据传递");
     expect(md).toContain("coupon=\"ACME10\"");
+    expect(md).toContain("应用类型");
+    expect(md).toContain("remote-token-file");
   });
 });
