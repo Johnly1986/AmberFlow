@@ -37,6 +37,30 @@ deepseek-v4.x）——那是 **SystemTwo（规划/审计/老师）** 的通道�
 | 坏 token | 401 `invalid_api_key`（带官方错误码链接） |
 | 坏 body | 400 `InvalidParameter`（说明哪一层校验失败） |
 
+### 1b. choice 的 state 带上文（2026-10-20 实测，A/B 两轮复现）
+
+之前 choice 的 `state` 只有 `{goal}`（`system-one-client.ts:98` 写死），模型看不见页面——
+"conf 0.03 是能力还是信息量"没法分开。现 `stateBuilder` 把 state 扩为
+`goal + url + title + main_text`（复用 `stateText`/`urlOf`，与本地 laya 分支同一口径；
+服务端把 state 当不透明包，实测接受）。消融开关 `TOKEN_PLAN_STATE_CONTEXT=0` 逐字回到旧问法。
+
+剥光 hint 的同批旅程、同一台机、同一把 key 的 A/B（`providers:baseline`）：
+
+| 旅程 | off（只带 goal） | on（带上文） |
+|---|---|---|
+| demo-app（×2 轮） | ✓ 5/5，问 5 | ✓ 5/5，**问 4** |
+| camera-entry | ✓ 4/4，问 7 | ✓ 4/4，问 7 |
+| transfer-trekly | ✓ 19/19，问 26 | ✓ 19/19，问 29 |
+| **ctrip-case（×2 轮）** | **✗，问 23（两轮同数）** | **✓，问 19（两轮同数）** |
+
+判据落在唯一有区分度的旅程上：ctrip-case（first-candidate 7/19、本地 laya 10/19 的那条）
+**判决 ✗→✓、提问 −17%，两轮完全复现**；已全过的旅程上差异在噪声内（trekly 反而 +3 问）。
+结论：**带上文被证实有益，保持默认开**；推广到 jevk5/bailian 需要各自的 A/B（不搭车）。
+
+另记一条对**非确定性**的警惕：改造前同一形状曾观测到 "问 1/过 0、1/5"，本轮同形状 5 问 5 过——
+**单次跑分不可作结论**，这条线上模型不是 laya 那种"同问同答"的确定性引擎（decision-cache 的
+指纹前提在这里不成立，缓存命中≠必然复现）。
+
 profile 吸收的差异：`score_kind=calibrated_prob`（score=confidence、pTop1/pTop2/margin 从分布取，
 **跨 provider 比 score 无意义**）；`minOptions=1`；`validateChoiceInPool=true`（池外答案当没答）；
 `shortlist=false`（不做 k=8 重问，收窄由执行器传子集）。
