@@ -25,6 +25,38 @@ step 1: click a "Add to cart" (clicked, rule:match, conf=1.00)
 
 没有模型权重也能跑：计划点名了目标的步骤由**规则**解决；确实需要模型兜底的步骤会明确说明缺什么，而不是瞎猜或抛异常。
 
+### 用在线决策模型（不装本地 1.7GB 产物）
+
+```bash
+cp configs/amberflowrc.example.json configs/amberflowrc.json   # 本机文件，已被 .gitignore 排除
+```
+
+编辑 `configs/amberflowrc.json`，只填三行（示例见模板 `_doc`；凭据只留在本机这个文件里）：
+
+```json
+{
+  "AMBERFLOW_DEFAULT_DECISION_PROVIDER": "token-plan",
+  "TOKEN_PLAN_ENDPOINT": "https://<你的网关主机>/compatible-mode/v1/systemone",
+  "TOKEN_PLAN_API_KEY": "sk-…"
+}
+```
+
+然后**任何命令都不需要加旗标**——`npm start`、`npm run apps`、`npm run apps:suite`、`npm run bench`、
+`learn`、`plan-cli` 全走同一扇门选决策源（本地产物就绪→本地；配了 provider→在线；都没配→规则档并如实点名）：
+
+```bash
+npm run doctor                 # 确认：「决策档位 token-plan（tier=on）」+ 每个配置值的来源（文件/环境）
+npm start -- --goal "…" --url <页面>          # 演示→归纳→执行，决策问线上模型
+npm run apps -- --app demo-app --headful     # 有头跑一个应用（风险闸门用模型投票）
+npm run bench -- --force-hints off           # 剥光 hint 的臂：模型必然出场（决策来源行可见）
+npm run providers:baseline -- --providers token-plan,first-candidate --out "$TEMP/pb.json"   # 与零智能基线对高下
+```
+
+临时换档：任何命令加 `--provider NAME`（`first-candidate`/`none`/`jevk5`/`bailian`…，名字见 doctor 列表）；
+离线消融臂用 `--ablate stub`（不花在线调用量）。token-plan 的 A/B 开关：`TOKEN_PLAN_STATE_CONTEXT=0`
+回到"只带 goal 的问法"（带页面上下文的实测数据见 [docs/DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md) §1b）。
+读数提醒：旅程每步都有 hint 时模型出场为 0 是**设计**（"能规则化就别猜"）；要量模型就用剥 hint 的对照台。
+
 ## DSH 插件安装
 
 装进 profile 即得四个工具——`amberflow_apps`（列应用）/ `amberflow_run`（跑一个，含 `dry` / `ablate` /
