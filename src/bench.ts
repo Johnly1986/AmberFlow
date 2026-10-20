@@ -117,6 +117,8 @@ export async function runCase(
   outcomeMemory: OutcomeMemoryLike | null = null,
   hintMemory: HintMemoryLike | null = null,
   outcomeMemoryMode: "forbid" | "rank" = "forbid",
+  /** 看着跑（apps/start 同一口径的 `--headful`）；缺省 true，测量臂与 CI 零变化。 */
+  headless = true,
 ): Promise<BenchCaseResult> {
   // `slots` go on the PLAN, not into the per-call options: `runSubgoalWithRetries`
   // passes `plan.slots` (merged with the subgoal's own), so a case-level value bag
@@ -135,7 +137,7 @@ export async function runCase(
     outcomeMemoryMode,
     hintMemory: hintMemory ?? null,
   });
-  const browser = (await browserEnv.launch({ chromium } as never)) as unknown as {
+  const browser = (await browserEnv.launch({ chromium } as never, headless)) as unknown as {
     newPage(): Promise<unknown>; close(): Promise<void>;
   };
   const page = await browser.newPage();
@@ -220,6 +222,8 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
       // 智能缺省：决策源解析与安装走 apps/suite/start/bench 共用的那一扇门
       // （本地产物就绪→本地 checkpoints；配了 provider→在线；都没配→规则档如实降级）。
       provider: { type: "string" },
+      // 看着跑：真起一个有头浏览器窗口（与 apps/start 的 --headful 同口径；CI/测量臂不开）。
+      headful: { type: "boolean" },
     },
   });
   } catch (err) {
@@ -295,10 +299,10 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
     ? createHintMemory({ path: (v["hint-memory-file"] as string | undefined) ?? null })
     : null;
   for (const c of cases) {
-    console.log(`=== ${c.id} (${c.platform}, model=${c.model ?? "english"}) ===`);
+    console.log(`=== ${c.id} (${c.platform}, model=${useCheckpoints ? (c.model ?? "english") : spec.name}) ===`);
     try {
       all.push(await runCase(c, agents, mem, hints,
-        (v["outcome-memory-mode"] as "forbid" | "rank" | undefined) ?? "forbid"));
+        (v["outcome-memory-mode"] as "forbid" | "rank" | undefined) ?? "forbid", !v.headful));
     } catch (e) {
       console.error(e);
       all.push({
