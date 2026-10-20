@@ -14,7 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { applyRcToEnv, loadRc, maskValue, rcStatusLines, RC_REL, resetRcCache } from "../src/rcfile.ts";
+import { applyRcToEnv, loadRc, maskValue, rcStatusLines, RC_REL, REPO_ROOT, resetRcCache } from "../src/rcfile.ts";
 import { checkArtifacts, modelConfigError, onnxModelPath } from "../src/model-artifacts.ts";
 
 let root: string;
@@ -118,6 +118,26 @@ describe("rc：掩码与来源展示（doctor 口径）", () => {
     expect(text).toMatch(/LAYA_ONNX_MODEL=.*文件/);
     expect(text).toMatch(/OPENAI_API_KEY=.*（环境）/);
     expect(text).not.toMatch(/sk-envwins/);        // 凭据值绝不原样进展示
+  });
+});
+
+describe("rc：模板必须无害（原样复制 = 零动作）", () => {
+  it("configs/amberflowrc.example.json 的所有值都是空串（示例值只活在 _doc 里）", () => {
+    // 曾经的真实事故：模板里放了"看起来能用"的占位值（laya / /tmp/… / sk-xxxxxxxx），
+    // 用户原样复制成 amberflowrc.json 后，占位值全部生效 ⇒ 每条命令 exit 2。
+    const ex = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "configs", "amberflowrc.example.json"), "utf-8")) as
+      Record<string, unknown>;
+    for (const [k, v] of Object.entries(ex)) {
+      if (k === "_doc") continue;
+      expect(v, `模板键 ${k} 必须是空串占位`).toBe("");
+    }
+    // 而且这些键都在白名单里——模板自己不能把自己校验红
+    const env: NodeJS.ProcessEnv = {};
+    fs.mkdirSync(path.join(root, "configs"), { recursive: true });
+    fs.copyFileSync(path.join(REPO_ROOT, "configs", "amberflowrc.example.json"), path.join(root, RC_REL));
+    const a = applyRcToEnv(env, root);
+    expect(a.errors).toEqual([]);
+    expect(a.applied).toEqual([]);       // 空值一个都不写
   });
 });
 
