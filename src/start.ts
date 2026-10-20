@@ -35,7 +35,7 @@ import { checkArtifacts, missingPieces, onnxModelPath, type ModelArtifacts } fro
 import { isParseUsageError, usageErrorLine } from "./cli-args.ts";
 import { applyRcToEnv, rcStatusLines } from "./rcfile.ts";
 import {
-  applySpecToRuntime, BUILTIN_LAYA_PROVIDERS, listDecisionProviders, resolveProviderSpec,
+  applySpecToRuntime, BUILTIN_LAYA_PROVIDERS, installDecisionProvider, listDecisionProviders, resolveProviderSpec,
 } from "./decision-provider.ts";
 import { BASELINE_PROVIDERS, registerBaselines } from "./decision-baselines.ts";
 import { PlanningRules, TaskPlan } from "./plan.ts";
@@ -498,7 +498,9 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
   if (spec.kind === "laya" && spec.tier === "off(missing)") {
     // start 的开箱语义=规则档（与旧行为逐字节一致：什么都不装，执行器进 rulesOnly，
     // 点名的步照跑）。不装一个注定把每一步 config-refuse 掉的懒加载 runtime。
+    // **两扇全局都要清**：执行器优先显式 provider，同进程残留会让"规则模式"标签说谎（验证者实测）。
     installLayaRuntime(null);
+    installDecisionProvider(null);
   } else {
     await applySpecToRuntime(spec);
   }

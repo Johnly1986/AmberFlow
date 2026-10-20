@@ -25,7 +25,7 @@ import { TaskPlan, type Subgoal } from "./plan.ts";
 import { checkSignal } from "./signals.ts";
 import { runSubgoalWithRetries } from "./planner.ts";
 import { installLayaRuntime, type DecisionAgent, type LayaRuntime } from "./model.ts";
-import { applySpecToRuntime, resolveProviderSpec } from "./decision-provider.ts";
+import { applySpecToRuntime, installDecisionProvider, resolveProviderSpec } from "./decision-provider.ts";
 import { createOutcomeMemory, type OutcomeMemoryLike } from "./outcome-memory.ts";
 import { createHintMemory, type HintMemoryLike } from "./hint-memory.ts";
 import { applyRcToEnv } from "./rcfile.ts";
@@ -278,7 +278,9 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
   } else if (spec.kind === "laya" && spec.tier === "off(missing)") {
     // 规则档如实降级（旧行为是当场崩）：不装一个逐步 config-refuse 的懒加载 runtime——
     // 执行器进 rulesOnly，语料里被点名的步照规则跑。model_status 如实记 off(missing)。
+    // 两扇全局都清：执行器优先显式 provider，同进程残留会让规则档标签说谎。
     installLayaRuntime(null);
+    installDecisionProvider(null);
     console.log(`决策源：${spec.name}（tier=${spec.tier}）→ 走规则档\n`);
   } else {
     await applySpecToRuntime(spec);
