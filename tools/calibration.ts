@@ -24,6 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { eceScore } from "../src/laya-format.ts";
 import { REPO } from "../src/flow.ts";
+import { applyRcToEnv } from "../src/rcfile.ts";
 
 export interface PickSample {
   case: string;
@@ -140,6 +141,8 @@ export function format(reports: SliceReport[]): string {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   let files = argv.filter((a) => !a.startsWith("-"));
   if (!files.length) {
     const dir = path.join(REPO, "bench", "results");

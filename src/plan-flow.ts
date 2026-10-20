@@ -46,6 +46,7 @@ import {
   type FlowTemplate, type ListExtract, type SiteProfile,
 } from "./semantic-flow.ts";
 import { startUrl } from "./app-runner.ts";
+import { applyRcToEnv } from "./rcfile.ts";
 
 /* ------------------------------------------------------------------ goal 参数提取 */
 
@@ -963,6 +964,8 @@ export function siteKeyFor(seed: string): string {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   let parsed;
   // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
   try {

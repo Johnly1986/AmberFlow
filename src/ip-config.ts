@@ -18,6 +18,7 @@ import { TaskPlan } from "./plan.ts";
 import { checkSignal } from "./signals.ts";
 import { firstOf } from "./extraction.ts";
 import { REPO } from "./flow.ts";
+import { applyRcToEnv } from "./rcfile.ts";
 
 export const PAGES = path.join(REPO, "testpages");
 export const XLSX = path.join(REPO, "camera_ips.xlsx");
@@ -276,6 +277,8 @@ export async function configureAll(
 }
 
 export async function main(argv: string[] = process.argv.slice(2), deps: IpMainDeps = {}): Promise<number> {
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   const file = argv.find((a) => a.endsWith(".xlsx")) ?? XLSX;
   const rows = await ensureXlsx(file);
   console.log(`${rows.length} rows from ${path.basename(file)}\n`);

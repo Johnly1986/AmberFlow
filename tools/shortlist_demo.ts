@@ -14,6 +14,7 @@ import {
   DEFAULT_ONNX_PATH, createLayaOnnxRuntime, findDefaultTokenizerDir,
 } from "../src/laya-onnx.ts";
 import { installLayaRuntime, type Question } from "../src/model.ts";
+import { applyRcToEnv } from "../src/rcfile.ts";
 
 const questions: Record<string, Question> = {
   intent: {
@@ -36,6 +37,8 @@ const questions: Record<string, Question> = {
 };
 
 async function main(): Promise<number> {
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   if (!fs.existsSync(DEFAULT_ONNX_PATH) || !findDefaultTokenizerDir()) {
     console.log("shortlist demo needs the ONNX artifact and the tokenizer cache:");
     console.log(`  model:     ${DEFAULT_ONNX_PATH} (export it; see node-port-poc/README.md)`);

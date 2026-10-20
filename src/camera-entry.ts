@@ -22,6 +22,7 @@ import { firstOf, type LocLike } from "./extraction.ts";
 import { readSheet } from "./ip-config.ts";
 import { routerMaxLoaded } from "./executor.ts";
 import type { ChoiceAnswer, NoulAnswer, Question, RouterLike } from "./model.ts";
+import { applyRcToEnv } from "./rcfile.ts";
 
 export const XLSX = path.join(REPO, "devices.xlsx");
 export const PAGES = path.join(REPO, "testpages");
@@ -232,6 +233,8 @@ export interface CameraMainDeps {
 }
 
 export async function main(deps: CameraMainDeps = {}): Promise<number> {
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   const file = deps.file ?? XLSX;
   const rows = deps.rows ?? await ensureXlsx(file);
   const router = deps.router;

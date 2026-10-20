@@ -32,6 +32,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { findDefaultTokenizerDir } from "./laya-onnx.ts";
 import { onnxModelPath, weightsPathOf, checkArtifacts, missingPieces } from "./model-artifacts.ts";
+import { applyRcToEnv } from "./rcfile.ts";
 
 /** 图/权重对的文件名约定（HF 仓库里 laya 的导出形状）。 */
 const GRAPH_NAME = "laya_dec.onnx";
@@ -150,6 +151,8 @@ export const USAGE = `npm run model:fetch — 决策模型产物的安装通道�
 export async function main(
   argv: string[] = process.argv.slice(2), io: FetchIo = defaultIo, deps: FetchDeps = {},
 ): Promise<number> {
+  // rc 文件坏 = 配置类用法错误：在任何写盘动作之前逐行点名并 exit 2（src/rcfile.ts）。
+  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   let parsed;
   // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
   try {

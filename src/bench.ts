@@ -27,6 +27,7 @@ import { runSubgoalWithRetries } from "./planner.ts";
 import { installLayaRuntime, type DecisionAgent, type LayaRuntime } from "./model.ts";
 import { createOutcomeMemory, type OutcomeMemoryLike } from "./outcome-memory.ts";
 import { createHintMemory, type HintMemoryLike } from "./hint-memory.ts";
+import { applyRcToEnv } from "./rcfile.ts";
 
 export interface BenchCase {
   id: string;
@@ -183,6 +184,8 @@ export interface BenchMainDeps {
 }
 
 export async function main(argv: string[] = process.argv.slice(2), deps: BenchMainDeps = {}): Promise<number> {
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   let parsed;
   // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
   try {

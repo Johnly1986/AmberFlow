@@ -30,6 +30,7 @@ import { runSubgoalWithRetries } from "./planner.ts";
 import { REPO } from "./flow.ts";
 import { expandPack, loadPack } from "./app-pack.ts";
 import { loadProbeSet, shortOf } from "./probe-set.ts";
+import { applyRcToEnv } from "./rcfile.ts";
 
 /**
  * 冻结计划与两个 URL 都来自应用包 `apps/qunar-live/pack.json`（原来写死在这里——
@@ -145,6 +146,8 @@ export function renderReport(records: QunarRecords, checks: QunarCheck[]): strin
 }
 
 export async function main(): Promise<number> {
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   const outdir = RESULTS;
   fs.mkdirSync(outdir, { recursive: true });
 
