@@ -56,6 +56,15 @@ const APPS = (argOf("--apps") ?? "demo-app,camera-entry,transfer-trekly,ctrip-ca
 const PROVIDERS = (argOf("--providers") ?? "always-abstain,first-candidate,coin-flip")
   .split(",").map((x) => x.trim()).filter(Boolean);
 const OUT = argOf("--out") ?? path.join(REPO, "bench", "provider-baselines.json");
+// 默认账本的自守卫（实测事故 2026-10-20：一次 A/B 子集跑把已提交的首轮整本账覆盖成
+// demo×token-plan 一张薄纸，靠 git checkout 才救回）。子集跑要落盘就给它 --out;
+// 想整本重写账本，必须跑全默认批次——覆盖与残缺不可兼得。
+if (!argOf("--out") && (APPS.join(",") !== "demo-app,camera-entry,transfer-trekly,ctrip-case"
+  || PROVIDERS.join(",") !== "always-abstain,first-candidate,coin-flip")) {
+  console.error("拒绝把子集结果写进默认落点 bench/provider-baselines.json（那是已提交的首轮整本账，"
+    + "部分覆盖会毁掉其余格子）。请带 --out <路径>；确要重写整本，跑全默认 apps 与 providers。");
+  process.exit(2);
+}
 
 /** 把 hint 全删掉（roles 模板与 journey 条目都删），写进临时目录——**不动仓库里的包**。 */
 function hintless(app: string, dir: string): string {
