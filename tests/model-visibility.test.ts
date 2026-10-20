@@ -43,6 +43,9 @@ afterAll(() => {
   fs.rmSync(OUT, { recursive: true, force: true });
 });
 
+// runOne 现在吃 applySpecToRuntime 的返回形状（laya 档：stats+asks 都在场）。
+const APPLIED = { stats: () => cached.decisionStats(), asks: () => counted.pickAsks() };
+
 describe("runApp 的决策来源汇总（P1 的第一处出口）", () => {
   it("demo-app：全规则消化 → 咨询 0 次，报告里讲出『model not needed』", async () => {
     const out = tmpDir("mv-demo");
@@ -150,13 +153,13 @@ describe("闸门刻度可声明（换 provider 时缺省 0.25 不再成立）", 
 
 describe("套件的验收数（P1 的验收口径）", () => {
   it("同一张表：slowjet 咨询 ≥1（保险被碰过）；demo-app 为 0；产物落套件目录", async () => {
-    const sj = await runOne(loadPack("transfer-slowjet"), cached, counted);
+    const sj = await runOne(loadPack("transfer-slowjet"), APPLIED);
     expect(sj.status).toBe("passed");
     // 咨询但没过闸门 = slowjet 的真实形状（脚本模型与真 ONNX 在这一步同形：0.16 < 0.25）。
     // 没有"问"这一次咨询、也没有 retries 重跑，这包就是红的——这就是"模型在场"的证据。
     expect(sj.model_asks).toBeGreaterThanOrEqual(1);
     expect(sj.model_steps).toBe(0);
-    const dm = await runOne(loadPack("demo-app"), cached, counted);
+    const dm = await runOne(loadPack("demo-app"), APPLIED);
     expect(dm.model_asks).toBe(0);
     expect(dm.conf_max).toBeNull();
     // 产物落套件目录——matrix 的运行时两列吃的就是这份。
@@ -167,7 +170,7 @@ describe("套件的验收数（P1 的验收口径）", () => {
     // 上一用例已经跑过一遍 slowjet（同一进程、同一缓存实例），每个问的指纹都存了下来。
     // 再跑同一份计划——重试/续跑/消融重跑就是这个形状——同一状态的同一问必须**命中**
     // （`cache:measure` 实测同计划二跑 12 forwards → 0 的离线等价物）。
-    const sj = await runOne(loadPack("transfer-slowjet"), cached, counted);
+    const sj = await runOne(loadPack("transfer-slowjet"), APPLIED);
     expect(sj.cache_saved).toBeGreaterThanOrEqual(1);
   }, 300_000);
 });

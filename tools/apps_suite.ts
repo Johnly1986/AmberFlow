@@ -31,9 +31,9 @@ import { appDirs, expandPack, loadPack, packHintCoverage, type AppPack } from ".
 import { getAppAdapter } from "../src/app-adapters.ts";
 import { runApp, refusalLine, type AppRunResult } from "../src/app-runner.ts";
 import { checkArtifacts, missingPieces } from "../src/model-artifacts.ts";
-import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "../src/decision-cache.ts";
-import { countedProvider, installDecisionProvider, resolveProviderSpec, type ProviderInfo } from "../src/decision-provider.ts";
-import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime, type CountingRuntime } from "../src/model.ts";
+import { type DecisionCacheStats } from "../src/decision-cache.ts";
+import { applySpecToRuntime, resolveProviderSpec, type AppliedSpec, type ProviderInfo } from "../src/decision-provider.ts";
+import { installLayaRuntime } from "../src/model.ts";
 
 /**
  * 套件产物目录：matrix 的运行时两列从这里读（单一出处、**调用时**读 env，测试可隔离）。
@@ -131,11 +131,9 @@ export function unavailableAdapters(pack: AppPack): string[] {
 
 /** 跑一个应用包（离线口径）。返回值就是套件表格里的一行；完整结果另落 `<套件目录>/<app>/` 供 matrix 读。 */
 export async function runOne(
-  pack: AppPack, cached: CachedRuntime | null, counted: CountingRuntime | null, outBase = suiteOutDir("real"),
+  pack: AppPack, applied: AppliedSpec, outBase = suiteOutDir("real"),
   /** 这次跑的层级，**由调用方给**——产物会到处被读（matrix / 桥 / 计量），标签不能靠猜。 */
   tier = "off(scripted)",
-  /** 非 laya provider 的咨询计数（laya 臂用 counted 那条缝，两者不同时存在）。 */
-  providerAsks?: () => number,
   /** 非 laya provider 的身份（名字/版本/能力/自报闸门刻度）——进产物，换模型 A/B 要读它。 */
   providerInfo?: ProviderInfo,
 ): Promise<SuiteRow> {
@@ -144,8 +142,9 @@ export async function runOne(
   fs.mkdirSync(out, { recursive: true });
   // 非 laya 的 provider 没有决策缓存（缓存键是 laya 的 state+questions 形状），
   // 但**必须有咨询计数**——否则梯级账单会把一个真在决策的 provider 记成零出场。
-  const statsOf = (): DecisionCacheStats => cached?.decisionStats() ?? { hits: 0, misses: 0, entries: 0 };
-  const asksOf = (): number => counted?.pickAsks() ?? providerAsks?.() ?? 0;
+  // 两者的有无由 applySpecToRuntime 的返回形状决定（stats 仅 laya 档在场）。
+  const statsOf = (): DecisionCacheStats => applied.stats?.() ?? { hits: 0, misses: 0, entries: 0 };
+  const asksOf = (): number => applied.asks?.() ?? 0;
   const before = statsOf();
   const asksBefore = asksOf();
   const res: AppRunResult = await runApp(pack, {
@@ -256,18 +255,8 @@ export async function suite(
       + `套件默认跑真模型。补齐：npm run model:fetch -- --from <url 或本地路径>；`
       + `确实要跑消融臂：--ablate`);
   }
-  const inner = spec.kind === "laya" ? await spec.make() : null;
-  let providerAsks: (() => number) | null = null;
-  if (spec.kind === "provider") {
-    const counted = countedProvider(spec.provider);
-    installDecisionProvider(counted.provider);
-    providerAsks = counted.asks;
-  } else {
-    installDecisionProvider(null);
-  }
-  const cached = inner === null ? null : withDecisionCache(inner);
-  const counted = cached ? countingRuntime(cached) : null;
-  if (cached && counted) installLayaRuntime(counted);
+  // 安装收敛进 applySpecToRuntime（与 app-runner/start/bench 同一个实现；这里曾是第二份手抄）。
+  const applied = await applySpecToRuntime(spec);
   const rows: SuiteRow[] = [];
   const skipped: string[] = [];
   const seen = new Set<string>();
@@ -307,9 +296,9 @@ export async function suite(
         continue;
       }
       try {
-        rows.push(await runOne(pack, cached, counted,
+        rows.push(await runOne(pack, applied,
           suiteOutDir(opts.provider ?? (opts.arm === "ablate" ? "ablate" : "real")),
-          spec.tier, providerAsks ?? undefined,
+          spec.tier,
           spec.kind === "provider" ? spec.provider : undefined));
       } catch (e) {
         rows.push({
@@ -326,7 +315,7 @@ export async function suite(
   const known = [...seen].sort();
   const unmatched = only.filter((o: string) => !seen.has(o) && !rows.some((r) => r.app === o));
   return {
-    rows, skipped, unmatched, known, cache: cached?.decisionStats() ?? { hits: 0, misses: 0, entries: 0 },
+    rows, skipped, unmatched, known, cache: applied.stats ? applied.stats() : { hits: 0, misses: 0, entries: 0 },
     tier: spec.tier, provider: spec.name,
   };
 }

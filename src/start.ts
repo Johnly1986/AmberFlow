@@ -30,13 +30,14 @@ import { browserSession, BrowserMiddleware, type BrowserSession } from "./execut
 import { extractElements, type Elem, type ElemPool } from "./extraction.ts";
 import { REPO } from "./flow.ts";
 import { induceHint } from "./hint-memory.ts";
-import { LayaNotConfiguredError, installLayaRuntime } from "./model.ts";
+import { LayaNotConfiguredError } from "./model.ts";
 import { checkArtifacts, missingPieces, onnxModelPath, type ModelArtifacts } from "./model-artifacts.ts";
 import { isParseUsageError, usageErrorLine } from "./cli-args.ts";
 import { applyRcToEnv, rcStatusLines } from "./rcfile.ts";
-import { BUILTIN_LAYA_PROVIDERS, listDecisionProviders } from "./decision-provider.ts";
+import {
+  applySpecToRuntime, BUILTIN_LAYA_PROVIDERS, listDecisionProviders, resolveProviderSpec,
+} from "./decision-provider.ts";
 import { BASELINE_PROVIDERS, registerBaselines } from "./decision-baselines.ts";
-import { createLayaOnnxRuntime } from "./laya-onnx.ts";
 import { PlanningRules, TaskPlan } from "./plan.ts";
 
 /** CLI 的默认检查点（与 parseArgs 的 default 同一个字符串；打印副作用时要用到它）。 */
@@ -430,7 +431,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
         goal: { type: "string" }, url: { type: "string" },
         doctor: { type: "boolean" }, demo: { type: "boolean" },
         "dry-run": { type: "boolean" }, headful: { type: "boolean" },
-        target: { type: "string" },
+        target: { type: "string" }, provider: { type: "string" },
         plan: { type: "string", default: DEFAULT_PLAN_PATH },
         help: { type: "boolean" },
       },
@@ -461,6 +462,13 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     await registerTokenPlan();
     const report = doctorReport(preflight());
     for (const l of report.lines) io.out(l);
+    // 生效档位：按缺省配置解析出的**真实决策源**——"缺本地 ONNX"那一行不再误导在线档。
+    try {
+      const dflt = await resolveProviderSpec(undefined);
+      io.out(`决策档位     ${dflt.name}（tier=${dflt.tier}）`);
+    } catch (e) {
+      io.out(`决策档位     解析失败：${e instanceof Error ? e.message : String(e)}`);
+    }
     // 配置来源也是体检的一部分：哪个值从 .amberflowrc.json 来、哪个从环境来，点名给使用者。
     for (const l of rcStatusLines()) io.out(l);
     return report.ok ? 0 : 2;
@@ -476,11 +484,26 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     io.out("  npx playwright install chromium");
     return 2;
   }
-  // Real weights when they are there; otherwise run in rules mode and let a step that
-  // genuinely needs the model say so (never a stack trace, never a guess).
-  if (p.model && !deps.noModel) installLayaRuntime(createLayaOnnxRuntime());
-  else io.out(`（规则模式：模型产物不齐——缺 ${missingPieces(p.artifacts).join("/")}，`
-    + `补齐见 npm run doctor / npm run model:fetch；计划点名的步骤照样能跑）\n`);
+  // 智能缺省（apps/suite/start/bench 四个门同一实现）：解析并安装决策源。
+  // 本地 ONNX 就绪→本地；rc/env 配了在线 provider→在线；都没配→规则模式并**如实点名缺的是谁**——
+  // 永不替用户换模型，也永不甩栈。
+  let spec;
+  try {
+    spec = await resolveProviderSpec(deps.noModel ? "none" : v.provider);
+  } catch (e) {
+    io.out(e instanceof Error ? e.message : String(e));
+    io.out(USAGE);
+    return 2;
+  }
+  await applySpecToRuntime(spec);
+  if (deps.noModel || (spec.kind === "laya" && spec.tier === "off(missing)")) {
+    io.out(`（规则模式：模型产物不齐——缺 ${missingPieces(p.artifacts).join("/")}，`
+      + `补齐见 npm run doctor / npm run model:fetch；计划点名的步骤照样能跑）\n`);
+  } else if (spec.kind === "none") {
+    io.out(`（规则模式：${spec.name}——决策服务未在场，需要模型的步会如实说）\n`);
+  } else if (spec.kind === "provider") {
+    io.out(`决策提供者：${spec.name}（tier=${spec.tier}）\n`);
+  }
 
   const goal = v.goal;
   const url = v.url;
@@ -507,6 +530,8 @@ export const USAGE = `npm start — 一条命令开始一项工作
 
   可选：--target '<hint>'  直接点名目标（跳过选择）
         --plan <文件>      计划保存位置（默认 .task_plan.json）
+        --provider NAME    本次决策提供者（缺省跟随 AMBERFLOW_DEFAULT_DECISION_PROVIDER / 配置文件；
+                           可选名与 npm start -- --doctor 列出的一致）
         --headful          显示浏览器窗口
 `;
 

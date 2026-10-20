@@ -193,3 +193,12 @@ describe("npm start -- --goal ... --url ... — demonstrate once, then run", () 
     expect(fs.existsSync(planPath)).toBe(false);              // and wrote no plan
   }, 180_000);
 });
+
+describe("--provider：与 apps/suite/bench 同一扇决策源的门", () => {
+  it("拼错的 provider 名在浏览器起之前就被用法错误点名（不静默退回缺省）", async () => {
+    const { io, lines } = recording();
+    const code = await main(["--provider", "no-such-decision-provider"], io);
+    expect(code).toBe(2);
+    expect(lines.join("\n")).toMatch(/no-such-decision-provider/);
+  });
+});

@@ -26,8 +26,12 @@
  * （见 `resolveForMiddleware`）。
  */
 import { ariaInteractiveLines, criteriaView, stateText, urlOf, type PageLike } from "./extraction.ts";
+import { withDecisionCache, type DecisionCacheStats } from "./decision-cache.ts";
 import * as layaModelModule from "./model.ts";
-import { getLayaRuntime, type DecisionAgent, type LayaRuntime, type ModelState } from "./model.ts";
+import {
+  getLayaRuntime, installLayaRuntime, countingRuntime,
+  type DecisionAgent, type LayaRuntime, type ModelState,
+} from "./model.ts";
 
 /** 一个决策提供者的身份与能力声明。 */
 export interface ProviderCapabilities {
@@ -254,6 +258,41 @@ export function countedProvider(p: DecisionProvider): { provider: DecisionProvid
       ...(p.doneVote ? { doneVote: (g: string, st: ModelState) => p.doneVote!(g, st) } : {}),
     },
   };
+}
+
+/** 安装的结果：梯级账单与缓存命中率要的数（app-runner/suite/start/bench 共用同一口径）。
+ *  可空性是承重的：报告里 `cache 命中 …` 这一行**只在 stats 在场时打印**（app-runner 的
+ *  summarizeDecisions 判 `cache !== null`），非 laya 档返回零值闭包会多出整行字——逐字节等价纪律。 */
+export interface AppliedSpec {
+  /** 决策缓存的实时统计（仅 laya 档；其余档为 null=报告不打这一行）。 */
+  stats: (() => DecisionCacheStats) | null;
+  /** 模型被真咨询了几次（laya 与在线 provider 都有——计在缓存外面，命中也算咨询；none 为 null）。 */
+  asks: (() => number) | null;
+}
+
+/**
+ * 按 `ProviderSpec` 安装决策源的**唯一**序列。
+ * 前身是两处手抄（app-runner main 的缓存/计数安装与 tools/apps_suite.ts 的同一段），
+ * start 与 bench 接智能缺省是第三、四个安装者——按本仓库"两份实现各扫各的"的复发教训，
+ * 先收敛成一个函数再让四个门都用它。每次先清空两扇全局（provider 与 runtime），
+ * 任何残留都不许悄悄改变这一跑的决策来源。
+ */
+export async function applySpecToRuntime(spec: ProviderSpec): Promise<AppliedSpec> {
+  installDecisionProvider(null);
+  installLayaRuntime(null);
+  if (spec.kind === "none") return { stats: null, asks: null };
+  if (spec.kind === "provider") {
+    // 在线 provider 不套决策缓存（缓存键是 laya 的 state+questions 形状，对别的 provider
+    // 不成立——套错会静默复用别的模型的决策），但咨询计数必须在场，否则梯级账单会把它记成零出场。
+    const counted = countedProvider(spec.provider);
+    installDecisionProvider(counted.provider);
+    return { stats: null, asks: counted.asks };
+  }
+  const inner = await spec.make();
+  const cached = withDecisionCache(inner);
+  const counted = countingRuntime(cached);
+  installLayaRuntime(counted);
+  return { stats: () => cached.decisionStats(), asks: () => counted.pickAsks() };
 }
 
 /**

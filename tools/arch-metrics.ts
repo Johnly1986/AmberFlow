@@ -20,6 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listPacks, loadPack, packHintCoverage } from "../src/app-pack.ts";
+import { checkArtifacts, onnxModelPath } from "../src/model-artifacts.ts";
 
 // `URL.pathname` keeps the leading slash on Windows ("/E:/…") and path.resolve then
 // doubles the drive ("E:\E:\…") — fileURLToPath is the only correct conversion.
@@ -312,7 +313,9 @@ function modelMetrics(): ModelMetrics {
     };
   }
   return {
-    tier: fs.existsSync("/tmp/laya_dec.onnx") ? "on（/tmp/laya_dec.onnx 在位）" : "off(missing)",
+    // tier 判定复用 model-artifacts 的单一口径（此前这里手写第三份 existsSync("/tmp/laya_dec.onnx")——
+    // 产物路径约定一改它就和 doctor/runtime 打架，正是本项目"两份实现各扫各的"的复发形状）。
+    tier: checkArtifacts().ready ? `on（${onnxModelPath()} 在位）` : "off(missing)",
     real_model_corpus: readArm("/tmp/amberflow-suite", "on"),
     ablation_corpus: readArm("/tmp/amberflow-suite-ablate", "ablate"),
     harness,

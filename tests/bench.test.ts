@@ -140,3 +140,29 @@ describe("main() — case selection, ablations, summary file", () => {
     installLayaRuntime(null);
   }, 60_000);
 });
+
+describe("main() — 智能缺省的 provider 门（bench 与 apps/suite 同一扇门）", () => {
+  it("--provider 档：不加载 checkpoints，summary/per_case 如实记 provider 名与档位", async () => {
+    installScripted();
+    const p = path.join(tmp, "cases-p.json");
+    fs.writeFileSync(p, JSON.stringify({ cases: [CASE] }), "utf-8");
+    const out = path.join(tmp, "rp");
+    const code = await main(["--cases", p, "--out", out, "--provider", "first-candidate"], {});
+    expect(code).toBe(0);
+    const summary = JSON.parse(fs.readFileSync(path.join(out, fs.readdirSync(out)[0]!), "utf-8")).summary;
+    expect(summary.decision_provider).toBe("first-candidate");
+    expect(summary.model_status).toBe("on");
+    expect(summary.per_case[0].model).toBe("first-candidate");   // checkpoint 标签不许冒充决策源
+    const { installDecisionProvider } = await import("../src/decision-provider.ts");
+    installDecisionProvider(null);
+    installLayaRuntime(null);
+  }, 180_000);
+
+  it("--force-model 与 provider 档互斥：用法错误点名，不静默忽略（A/B 白跑是比崩更贵的失败）", async () => {
+    const p = path.join(tmp, "cases-fm.json");
+    fs.writeFileSync(p, JSON.stringify({ cases: [CASE] }), "utf-8");
+    const code = await main(["--cases", p, "--out", path.join(tmp, "rfm"),
+      "--provider", "first-candidate", "--force-model", "english"], {});
+    expect(code).toBe(2);
+  }, 60_000);
+});

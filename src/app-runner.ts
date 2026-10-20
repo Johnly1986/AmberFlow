@@ -35,12 +35,12 @@ import { ensureDir, userAppsDir } from "./amberflow-home.ts";
 import { isParseUsageError, renamedHint, usageErrorLine } from "./cli-args.ts";
 import { applyRcToEnv } from "./rcfile.ts";
 import { cliRunDetailed, defaultDates, loadSource, runSource, urlFor, type CliObservation } from "./datasource.ts";
-import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "./decision-cache.ts";
+import { type CachedRuntime, type DecisionCacheStats } from "./decision-cache.ts";
 import { checkArtifacts, missingPieces, modelConfigError } from "./model-artifacts.ts";
-import { activeProviderInfo, countedProvider, installDecisionProvider, resolveProviderSpec, type ProviderInfo } from "./decision-provider.ts";
+import { activeProviderInfo, applySpecToRuntime, resolveProviderSpec, type ProviderInfo } from "./decision-provider.ts";
 import { BrowserMiddleware, browserSession, type BrowserSession } from "./executor.ts";
 import { REPO } from "./flow.ts";
-import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime } from "./model.ts";
+import { installLayaRuntime } from "./model.ts";
 import { runSubgoalWithRetries } from "./planner.ts";
 import { DESTRUCTIVE_PATTERNS } from "./rules.ts";
 import { checkSignal } from "./signals.ts";
@@ -1199,31 +1199,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // laya 是确定性的，同一问题不该问两次；命中率本身就是要报的数（LAYA_VALUE_PLAN P1）。
   // `rules-only` 消融**不装任何 runtime**（走执行器真正的 rulesOnly 路径），
   // `stub` 消融装一个恒定 0.05 的桩（回答"问了但永远不过闸门"的形状）。两者都不是默认。
-  const inner = spec.kind === "none" ? null : spec.kind === "laya" ? await spec.make() : null;
   if (spec.kind === "laya" && !spec.ablation && !artifacts.ready) {
     console.log(`（模型产物不齐——缺 ${missingPieces(artifacts).join("/")}；需要模型兜底的步会如实 block。`
       + `补齐：npm run model:fetch -- --from <url 或本地路径>）`);
   }
-  // 消融的 rules-only 走**真正的**无 runtime 路径（`getLayaRuntime()` 抛
-  // LayaNotConfiguredError ⇒ 执行器进 rulesOnly 并记下原因），不是"装一个假装是模型的桩"。
-  let runtimeStats: (() => DecisionCacheStats) | null = null;
-  let pickAsks: (() => number) | null = null;
-  if (spec.kind === "none") {
-    installLayaRuntime(null);
-  } else if (spec.kind === "laya" && inner !== null) {
-    const cached = withDecisionCache(inner);
-    const counted = countingRuntime(cached);
-    installLayaRuntime(counted);
-    runtimeStats = () => cached.decisionStats();
-    pickAsks = () => counted.pickAsks();
-  } else if (spec.kind === "provider") {
-    // 非 laya 的 provider：不套决策缓存（它的键是 laya 的 state+questions 形状，
-    // 对别的 provider 不成立——缓存错了会静默复用别的模型的决策），但**要数咨询次数**，
-    // 否则梯级账单会把一个真的在决策的 provider 记成零出场。
-    const counted = countedProvider(spec.provider);
-    installDecisionProvider(counted.provider);
-    pickAsks = counted.asks;
-  }
+  // 安装序列收敛进 applySpecToRuntime——apps/suite/start/bench 四个门共用这一个实现
+  //（此前这里是手抄的一份、apps_suite 里还有第二份；"两份实现各扫各的"是本仓库的复发缺陷形状。
+  //  细则注释跟着函数走了：两层包装各数什么、provider 为什么不套缓存，见 decision-provider.ts。）
+  const applied = await applySpecToRuntime(spec);
 
   // R2：学习环的 sidecar。**学到的永不进被审计的包**（plan-cli `--learn-hints` 的同一条纪律，
   // 由 tests/plan-cli-hints.test.ts 钉过：包文件逐字节不变，学到的只出现在 sidecar）。
@@ -1277,8 +1260,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         capabilities: { choice: spec.kind !== "none", risk: spec.kind === "laya", done: spec.kind === "laya",
           shortlist: spec.kind === "laya", score_kind: spec.kind === "laya" ? ("entropy_conf" as const) : ("rank_only" as const) },
       },
-      runtimeStats: runtimeStats ?? undefined,
-      pickAsks: pickAsks ?? undefined,
+      runtimeStats: applied.stats ?? undefined,
+      pickAsks: applied.asks ?? undefined,
     });
   } catch (e) {
     // 坏包（未知键/角色/占位符/主机……）在 `expandPack` 里就抛出：CLI 的契约是

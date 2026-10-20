@@ -25,6 +25,7 @@ import { TaskPlan, type Subgoal } from "./plan.ts";
 import { checkSignal } from "./signals.ts";
 import { runSubgoalWithRetries } from "./planner.ts";
 import { installLayaRuntime, type DecisionAgent, type LayaRuntime } from "./model.ts";
+import { applySpecToRuntime, resolveProviderSpec } from "./decision-provider.ts";
 import { createOutcomeMemory, type OutcomeMemoryLike } from "./outcome-memory.ts";
 import { createHintMemory, type HintMemoryLike } from "./hint-memory.ts";
 import { applyRcToEnv } from "./rcfile.ts";
@@ -175,6 +176,9 @@ export interface BenchSummary {
   cases_passed: string;
   subgoals_passed: string;
   total_secs: number;
+  /** 这一跑是谁在决策（tier 与 apps/suite 产物同一口径：on / off(missing) / off(ablation:…)）。 */
+  model_status?: string;
+  decision_provider?: string;
   per_case: Array<Record<string, unknown>>;
 }
 
@@ -213,6 +217,9 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
       // Ablation: strip the AUTHORED hints, leaving the model (and any learned hints) to
       // decide — the regime in which a learned hint is measurable.
       "force-hints": { type: "string" },
+      // 智能缺省：决策源解析与安装走 apps/suite/start/bench 共用的那一扇门
+      // （本地产物就绪→本地 checkpoints；配了 provider→在线；都没配→规则档如实降级）。
+      provider: { type: "string" },
     },
   });
   } catch (err) {
@@ -241,17 +248,37 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
     }
   }
 
-  // The model seam: an explicitly injected runtime (tests), or the installed one.
-  // CLI use installs the ONNX runtime on demand; tests inject a scripted one.
-  const runtime = deps.runtime ?? await defaultRuntime();
-  // Load each requested checkpoint exactly once for the whole run.
-  const wanted = [...new Set(cases.map((c) => c.model ?? "english"))].sort();
-  const agents: Record<string, DecisionAgent | null> = {};
-  for (const m of wanted) {
-    agents[m] = m === "router" ? null
-      : await runtime.load("convaiinnovations/laya", { subfolder: m === "english" ? null : "multilingual" });
+  // 智能缺省（apps/suite/start/bench 四门同一实现）：先解析决策源，再决定走哪条腿——
+  // checkpoints 腿只在"真 laya 在场（就绪或测试注入了 runtime）"时才预载；
+  // 配了在线 provider 就直接问 provider；什么都没配 ⇒ 规则档如实降级（以前是当场崩）。
+  let spec;
+  try {
+    spec = await resolveProviderSpec(v.provider);
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    return 2;
   }
-  console.log(`checkpoints loaded: ${JSON.stringify(Object.keys(agents))}\n`);
+  const useCheckpoints = deps.runtime != null || (spec.kind === "laya" && spec.tier === "on");
+  if (v["force-model"] !== undefined && !useCheckpoints) {
+    // 旗标语义只在 checkpoints 上有意义；在别的决策源上静默忽略会让一整轮 A/B 白跑。
+    console.error(`--force-model 选的是 laya checkpoint，在决策源 ${JSON.stringify(spec.name)}（tier=${spec.tier}）上没有意义；换模型用 --provider。`);
+    return 2;
+  }
+  const agents: Record<string, DecisionAgent | null> = {};
+  if (useCheckpoints) {
+    // The model seam: an explicitly injected runtime (tests), or the installed one.
+    const runtime = deps.runtime ?? await defaultRuntime();
+    // Load each requested checkpoint exactly once for the whole run.
+    const wanted = [...new Set(cases.map((c) => c.model ?? "english"))].sort();
+    for (const m of wanted) {
+      agents[m] = m === "router" ? null
+        : await runtime.load("convaiinnovations/laya", { subfolder: m === "english" ? null : "multilingual" });
+    }
+    console.log(`checkpoints loaded: ${JSON.stringify(Object.keys(agents))}\n`);
+  } else {
+    await applySpecToRuntime(spec);
+    console.log(`决策源：${spec.name}（tier=${spec.tier}）\n`);
+  }
 
   const all: BenchCaseResult[] = [];
   const mem = v["outcome-memory"] === "on"
@@ -268,7 +295,8 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
     } catch (e) {
       console.error(e);
       all.push({
-        case: c.id, platform: c.platform, model: c.model ?? "english",
+        // 非 checkpoints 档下 checkpoint 标签是误导——如实写"谁在决策"。
+        case: c.id, platform: c.platform, model: useCheckpoints ? (c.model ?? "english") : spec.name,
         rules: c.rules ?? true, anti_repeat: c.anti_repeat ?? true,
         subgoals_done: "0/0", all_done: false, steps: 0, secs: 0, results: [],
         error: String(e),
@@ -282,11 +310,13 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
   const sgN = all.reduce((n, r) => n + r.results.length, 0);
   const summary: BenchSummary = {
     mode_tag: modeTag,
+    model_status: spec.tier, decision_provider: spec.name,
     cases_passed: `${passed}/${all.length}`,
     subgoals_passed: `${sgOk}/${sgN}`,
     total_secs: Math.round(all.reduce((n, r) => n + r.secs, 0) * 10) / 10,
     per_case: all.map((r) => ({
-      case: r.case, platform: r.platform, model: r.model, rules: r.rules,
+      // 非 checkpoints 档里 runCase 的 model 是 checkpoint 标签——summary 如实改写为决策源名。
+      case: r.case, platform: r.platform, model: useCheckpoints ? r.model : spec.name, rules: r.rules,
       subgoals_done: r.subgoals_done, all_done: r.all_done, steps: r.steps, secs: r.secs, error: r.error,
     })),
   };

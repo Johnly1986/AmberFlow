@@ -202,3 +202,29 @@ describe("askChoice：对调用方给定的闭集做一次 choice（不依赖页
     if (spec.kind === "provider") expect(spec.provider.askChoice).toBeUndefined();
   });
 });
+
+describe("applySpecToRuntime：唯一的安装序列（apps/suite/start/bench 四门同一扇门）", () => {
+  it("三种 kind 的形状；每次先把两扇全局清干净（残留不许悄悄改变这一跑的决策源）", async () => {
+    const { applySpecToRuntime, resolveProviderSpec, activeProviderInfo } = await import("../src/decision-provider.ts");
+    const { getLayaRuntime, installLayaRuntime } = await import("../src/model.ts");
+    const providerSpec = await resolveProviderSpec("first-candidate");
+    await applySpecToRuntime(providerSpec);
+    expect(activeProviderInfo()?.name).toBe("first-candidate");
+    // none 档：连上一跑留下的 provider 全局都必须清掉（此前只有 suite 手抄的那份会清）
+    const a1 = await applySpecToRuntime(await resolveProviderSpec("none"));
+    expect(a1.stats).toBeNull();
+    expect(a1.asks).toBeNull();
+    expect(activeProviderInfo()).toBeNull();
+    expect(() => getLayaRuntime()).toThrow();
+    // provider 档：咨询计数在场、缓存不在场（缓存键是 laya 的形状，套错=静默复用别的模型的决策）
+    const a2 = await applySpecToRuntime(providerSpec);
+    expect(a2.stats).toBeNull();
+    expect(typeof a2.asks?.()).toBe("number");
+    // laya 档（取脚本桩）：两个都在
+    const a3 = await applySpecToRuntime(await resolveProviderSpec("scripted-stub"));
+    expect(a3.stats).toBeTruthy();
+    expect(a3.asks).toBeTruthy();
+    expect(a3.stats!().hits).toBe(0);
+    installLayaRuntime(null);
+  });
+});

@@ -168,7 +168,10 @@ console.log(rep.completed, rep.traces.length);
 ## 环境变量（都有兜底，全部可不配）
 
 这些变量也可以写进 **`configs/amberflowrc.json`**（本机文件，已被 `.gitignore` 排除；模板见
-[`configs/amberflowrc.example.json`](configs/amberflowrc.example.json) 复制一份、删掉不用的键即可）。优先级
+[`configs/amberflowrc.example.json`](configs/amberflowrc.example.json) 复制一份、删掉不用的键即可）。
+`npm start` 与 `npm run bench` 与 apps/suite 走**同一扇门**选决策源：本地产物就绪→本地；配了
+provider（如 `AMBERFLOW_DEFAULT_DECISION_PROVIDER=token-plan`）→在线；都没配→规则档并如实点名缺的是谁
+——日常不需要为"这台机器有没有模型"多敲任何旗标。优先级
 **CLI 旗标 > 环境变量 > 文件 > 内建缺省**——文件只补没人设过的键。白名单之外的键（比如
 `LAYA_TODAY`：展开日期是仓库常量，不该变成机器配置）会在**任何腿出场之前**以用法错误
 (exit 2)点名拒绝。`npm run doctor` 会把生效配置连同**每个值的来源**（文件/环境）一起列出，
