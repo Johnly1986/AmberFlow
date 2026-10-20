@@ -215,3 +215,56 @@ describe("token-plan 的配置判定（显式/默认两档 + 内建端点）", (
     }
   });
 });
+
+describe("configError：启动期就能判定的配置错误（不该跑到一半退化才说）", () => {
+  it("endpoint 少了 /systemone 后缀（实测抄成 /v1 的形状）⇒ 预检点名正确形状", () => {
+    const p = tokenPlanProvider({ endpoint: "https://gw.example/compatible-mode/v1", apiKey: "sk-x" });
+    expect(String(p.configError?.())).toMatch(/要以 \/compatible-mode\/v1\/systemone 结尾/);
+  });
+
+  it("完整形状 + 有 key ⇒ 无配置错误；结尾多一个斜杠也认", () => {
+    expect(tokenPlanProvider({ endpoint: "https://gw.example/compatible-mode/v1/systemone", apiKey: "sk-x" }).configError?.()).toBeNull();
+    expect(tokenPlanProvider({ endpoint: "https://gw.example/compatible-mode/v1/systemone/", apiKey: "sk-x" }).configError?.()).toBeNull();
+  });
+
+  it("缺 key / 缺端点仍按原口径点名", () => {
+    const p = tokenPlanProvider({ endpoint: "", apiKey: "" });
+    expect(String(p.configError?.())).toMatch(/缺 .*API key.* 与 .*端点/);
+  });
+});
+
+describe("choice 的上文：state 从 {goal} 扩到 goal+url+title+main_text", () => {
+  it("默认带上文；页面取不到的段就少带、题照问（fake 页只供 url/title）", async () => {
+    reset({ type: "choice", choice: "e1", confidence: 0.9, probabilities: { e1: 1 } });
+    await P().pick(reqOf());
+    const st = received[0]!.body.state as Record<string, unknown>;
+    expect(st.goal).toContain("wireless mouse");
+    expect(st.url).toBe("file://x");
+    expect(st.title).toBe("Shop");
+    expect("main_text" in st).toBe(false);              // 假页没有 evaluate：少一段，不崩
+  });
+
+  it("消融臂 TOKEN_PLAN_STATE_CONTEXT=0 ⇒ state 逐字回到 {goal}（A/B 对照臂同机一键复现）", async () => {
+    process.env.TOKEN_PLAN_STATE_CONTEXT = "0";
+    try {
+      reset({ type: "choice", choice: "e1", confidence: 0.9, probabilities: { e1: 1 } });
+      await P().pick(reqOf());
+      expect(received[0]!.body.state).toEqual({ goal: "add the wireless mouse to the cart" });
+    } finally {
+      delete process.env.TOKEN_PLAN_STATE_CONTEXT;
+    }
+  });
+
+  it("jevk5 不受影响：没声明 stateBuilder 的 profile，body 是旧形状（默认等价钉在别人身上）", async () => {
+    const { jevk5Provider } = await import("../src/decision-jevk5.ts");
+    let body: Record<string, unknown> | null = null;
+    const fakeFetch = (async (_u: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ answers: { act: { type: "choice", choice: "e1", confidence: 0.5 } } }),
+        { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const p = jevk5Provider({ endpoint: "http://x/v1/systemone", fetchImpl: fakeFetch });
+    await p.pick(reqOf());
+    expect((body as { state: unknown } | null)!.state).toEqual({ goal: "add the wireless mouse to the cart" });
+  });
+});

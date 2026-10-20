@@ -58,6 +58,16 @@ export interface SystemOneProfile {
   validateChoiceInPool: boolean;
   /** 三段的提示词（各家措辞不同，会影响模型行为，故由 profile 提供、不在客户端硬编码）。 */
   choiceInstructions(goal: string): string;
+  /**
+   * choice 题的 `state` 构造（可异步读页面：url/标题/正文窗口）。
+   * 缺省不声明 ⇒ `{goal}` 逐字节照旧（默认等价纪律；jevk5/bailian 今天就是这形状）。
+   * 存在的理由（2026-10-20 实测）：token-plan 的 choice conf 0.03、风险票 0.47——而它
+   * 被问时**看不见页面**（state 只有 goal、criteria 只有 label）。本地 laya 分支从来带
+   * `url/title/main_text`（decision-provider.ts 的 layaProvider.pick）——同一个决策问题，
+   * 两条分支的信息量不该不对称；"pool 是模型的全世界"这条认识论同样适用于观察侧。
+   * 服务端把 state 当不透明包（risk/done 题的 `{action, user_goal}` 已被同一网关接受）。
+   */
+  stateBuilder?(req: ChoiceRequest): Promise<Record<string, unknown>>;
   riskInstructions(goal: string, actionDesc: string): string;
   doneInstructions(goal: string): string;
   /** 服务不可达时的指路串。 */
@@ -83,19 +93,21 @@ export function systemOneErrorText(json: SystemOneReply, status: number): string
   return pick(json.message) ?? pick(json.error) ?? pick(json.code) ?? `(HTTP ${status}，无 error 字段)`;
 }
 
-/** 把一次 pick 请求组装成 SystemOne 的 choice 题；候选不足下限则返回 empty。 */
-function buildChoiceBody(p: SystemOneProfile, req: ChoiceRequest):
-  { body: object; asked: string[] } | { empty: true; asked: number } {
+/** 把一次 pick 请求组装成 SystemOne 的 choice 题；候选不足下限则返回 empty。
+ *  async 只为 `stateBuilder` 读页面而存在；profile 不带 builder 时是纯同步形状 `{goal}`。 */
+async function buildChoiceBody(p: SystemOneProfile, req: ChoiceRequest):
+  Promise<{ body: object; asked: string[] } | { empty: true; asked: number }> {
   const refs = (req.narrow ?? Object.keys(req.elems)).filter(
     (r) => !req.forbidden.has(r) && req.elems[r] !== undefined,
   );
   if (refs.length < p.minOptions) return { empty: true, asked: refs.length };
   const criteria = Object.fromEntries(refs.map((r) => [r, String(req.elems[r]?.["label"] ?? r)]));
+  const state = p.stateBuilder ? await p.stateBuilder(req) : { goal: req.goal };
   return {
     asked: refs,
     body: {
       ...p.extraBody(),
-      state: { goal: req.goal },
+      state,
       questions: { act: { type: "choice", instructions: p.choiceInstructions(req.goal), criteria } },
     },
   };
@@ -143,7 +155,7 @@ export function systemOneClient(p: SystemOneProfile): DecisionProvider {
     ...(p.configError ? { configError: () => p.configError!() } : {}),
 
     async pick(req: ChoiceRequest): Promise<ChoiceOutcome> {
-      const built = buildChoiceBody(p, req);
+      const built = await buildChoiceBody(p, req);
       if ("empty" in built) return emptyOutcome(p.capabilities.score_kind, built.asked);
       const reply = await ask(built.body);
       const a = reply.answers?.["act"];

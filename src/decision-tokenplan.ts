@@ -21,6 +21,7 @@
  * **只从环境按名读，绝不内联**；缺 key 时显式点名 ⇒ 响亮报错，环境默认档 ⇒ 干净落 rules-only。
  */
 import type { DecisionProvider, ProviderCapabilities } from "./decision-provider.ts";
+import { stateText, urlOf } from "./extraction.ts";
 import { systemOneClient, type SystemOneProfile } from "./system-one-client.ts";
 
 const MODEL_DEFAULT = "decision-model-preview";
@@ -96,6 +97,21 @@ export function tokenPlanProvider(opts: TokenPlanOptions = {}): DecisionProvider
     // 问法与百炼同族（同一 decision-model-preview 后端；措辞是实测过的那套）。
     choiceInstructions: (goal) => `Goal: ${goal}. Which single element should be interacted with next `
       + "to make progress on this goal? Ignore branding, navigation and decoration unless the goal requires them.",
+    // **带上文**（2026-10-20）：choice 的 state 从 `{goal}` 扩为 `goal+url+title+main_text`，
+    // 与本地 laya 分支的 pick 同一口径（复用 stateText/urlOf，不新造渲染）——之前模型在
+    // "看不见页面"的条件下被问，conf 0.03 究竟多少归能力、多少归信息量，必须先补上信息量再测。
+    // 消融开关：TOKEN_PLAN_STATE_CONTEXT=0 回到旧问法——A/B 的对照臂必须同机一键可复现。
+    // 任何一段取不到就**少带那一段**（上文是增益，不是新的崩溃来源）。
+    stateBuilder: (env.TOKEN_PLAN_STATE_CONTEXT ?? "") === "0" ? undefined : async (req) => {
+      const st: Record<string, unknown> = { goal: req.goal };
+      try { st.url = urlOf(req.page); } catch { /* 无 url 就不带 */ }
+      try { st.title = await req.page.title(); } catch { /* 同上 */ }
+      try {
+        const text = await stateText(req.page, req.goal);
+        if (text) st.main_text = text;
+      } catch { /* fake page/死页：少正文，题照问 */ }
+      return st;
+    },
     riskInstructions: () => "Judge ONLY the action itself: would performing it trigger an irreversible or "
       + "externally-visible effect (payment, order placement, deletion, sending a message, final submission)? "
       + "Typing into a form field, opening pages, or navigating is NOT risky.",
