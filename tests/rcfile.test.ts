@@ -1,5 +1,5 @@
 /**
- * `.amberflowrc.json` —— 机器事实配置的解析面。
+ * `configs/amberflowrc.json` —— 机器事实配置的解析面。
  *
  * 钉住的不是"文件能读"，而是它和既有纪律的接口：
  * ① 优先级 CLI/env > 文件 > 缺省（文件绝不覆盖已设的环境）；
@@ -14,7 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { applyRcToEnv, loadRc, maskValue, rcStatusLines, RC_FILENAME, resetRcCache } from "../src/rcfile.ts";
+import { applyRcToEnv, loadRc, maskValue, rcStatusLines, RC_REL, resetRcCache } from "../src/rcfile.ts";
 import { checkArtifacts, modelConfigError, onnxModelPath } from "../src/model-artifacts.ts";
 
 let root: string;
@@ -22,11 +22,12 @@ beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), "af-rc-")); rese
 afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); resetRcCache(); });
 
 function writeRc(obj: unknown): void {
-  fs.writeFileSync(path.join(root, RC_FILENAME), typeof obj === "string" ? obj : JSON.stringify(obj), "utf-8");
+  fs.mkdirSync(path.join(root, "configs"), { recursive: true });
+  fs.writeFileSync(path.join(root, RC_REL), typeof obj === "string" ? obj : JSON.stringify(obj), "utf-8");
 }
 
 describe("rc：文件缺席 = 零动作（默认等价）", () => {
-  it("没有 .amberflowrc.json：loadRc 无路径无错，applyRcToEnv 不改 env", () => {
+  it("没有 configs/amberflowrc.json：loadRc 无路径无错，applyRcToEnv 不改 env", () => {
     const load = loadRc(root);
     expect(load.path).toBeNull();
     expect(load.errors).toEqual([]);

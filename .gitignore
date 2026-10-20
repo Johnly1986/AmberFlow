@@ -5,8 +5,8 @@ coverage/
 *.tsbuildinfo
 .npm/
 
-# 本机配置（含凭据）：仓库根 .amberflowrc.json 只活在本地，模板 amberflowrc.example.json 入库
-.amberflowrc.json
+# 本机配置（含凭据）：configs/amberflowrc.json 只活在本地；模板 configs/amberflowrc.example.json 入库
+configs/amberflowrc.json
 
 # 运行时产物：跑分矩阵、查看器输出、计划 checkpoint
 .task_state.json

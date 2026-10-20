@@ -1,5 +1,6 @@
 /**
- * `.amberflowrc.json` —— 仓库根的**机器事实配置**（gitignore 掉，不进 checkout）。
+ * `configs/amberflowrc.json` —— **机器事实配置**（gitignore 掉，不进 checkout；模板
+ * `configs/amberflowrc.example.json` 入库）。
  *
  * 存在的意义：把"这台机器的事"从 shell 里收进一个文件，但**不新造第二套读配置的门**。
  * 每个消费点本来就只有一个 env 读点（`model-artifacts.ts` 的 `onnxModelPath(env)`、
@@ -18,7 +19,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const RC_FILENAME = ".amberflowrc.json";
+export const RC_FILENAME = "amberflowrc.json";
+/** 相对仓库根的配置面文件夹：机器配置统一住这里，不散在根上。 */
+export const RC_DIR = "configs";
+export const RC_REL = path.join(RC_DIR, RC_FILENAME);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, "..");
 
@@ -49,28 +53,28 @@ export interface RcLoad {
 
 /** 读并校验 rc 文件。文件不存在 ⇒ 合法的空配置（默认等价）。 */
 export function loadRc(root: string = REPO_ROOT): RcLoad {
-  const p = path.join(root, RC_FILENAME);
+  const p = path.join(root, RC_REL);
   if (!fs.existsSync(p)) return { path: null, values: {}, errors: [] };
   let raw: unknown;
   try {
     raw = JSON.parse(fs.readFileSync(p, "utf-8"));
   } catch (e) {
-    return { path: p, values: {}, errors: [`${RC_FILENAME} 不是合法 JSON：${e instanceof Error ? e.message : String(e)}`] };
+    return { path: p, values: {}, errors: [`${RC_REL} 不是合法 JSON：${e instanceof Error ? e.message : String(e)}`] };
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return { path: p, values: {}, errors: [`${RC_FILENAME} 顶层必须是对象（键 → 字符串值）`] };
+    return { path: p, values: {}, errors: [`${RC_REL} 顶层必须是对象（键 → 字符串值）`] };
   }
   const values: Record<string, string> = {};
   const errors: string[] = [];
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
     if (k === "_doc") continue;                     // example 文件的自述键，允许存在
     if (!KNOWN_KEYS.has(k)) {
-      errors.push(`${RC_FILENAME} 有未知键 ${JSON.stringify(k)}——已知键见 ${path.basename(root)}/amberflowrc.example.json；`
+      errors.push(`${RC_REL} 有未知键 ${JSON.stringify(k)}——已知键见 configs/amberflowrc.example.json；`
         + "若是刻意想钉的东西（如展开日期），它属于仓库常量，不属于机器配置。");
       continue;
     }
     if (typeof v !== "string") {
-      errors.push(`${RC_FILENAME} 的 ${k} 必须是字符串（收到 ${JSON.stringify(v)}）`);
+      errors.push(`${RC_REL} 的 ${k} 必须是字符串（收到 ${JSON.stringify(v)}）`);
       continue;
     }
     values[k] = v;
@@ -87,7 +91,7 @@ let lastApply: RcApply | null = null;
 
 /** 入口唯一该调的函数：把 rc 的键补进目标 env（缺省 process.env）。幂等。 */
 export function applyRcToEnv(env: NodeJS.ProcessEnv = process.env, root: string = REPO_ROOT): RcApply {
-  if (lastApply && lastApply.path === path.join(root, RC_FILENAME) && env === process.env) {
+  if (lastApply && lastApply.path === path.join(root, RC_REL) && env === process.env) {
     return lastApply;
   }
   const load = loadRc(root);
@@ -121,7 +125,7 @@ export function maskValue(key: string, value: string): string {
 export function rcStatusLines(env: NodeJS.ProcessEnv = process.env, root: string = REPO_ROOT): string[] {
   const load = loadRc(root);
   const lines: string[] = [];
-  lines.push(load.path ? `rc 文件：${load.path}` : `rc 文件：无（${RC_FILENAME} 不存在，全部按 环境变量 > 缺省 走）`);
+  lines.push(load.path ? `rc 文件：${load.path}` : `rc 文件：无（${RC_REL} 不存在，全部按 环境变量 > 缺省 走）`);
   for (const e of load.errors) lines.push(`  ✗ ${e}`);
   for (const { group, keys } of RC_GROUPS) {
     const shown = keys.filter((k) => env[k] !== undefined && env[k] !== "");
