@@ -18,6 +18,7 @@ import type { ModelArtifacts } from "../src/model-artifacts.ts";
 import { BrowserMiddleware } from "../src/executor.ts";
 import { checkSignal } from "../src/signals.ts";
 import { installLayaRuntime } from "../src/model.ts";
+import { checkArtifacts } from "../src/model-artifacts.ts";
 
 afterAll(() => installLayaRuntime(null));
 
@@ -114,6 +115,17 @@ describe("npm start — the bundled job needs no configuration", () => {
     const text = lines.join("\n");
     expect(code).toBe(0);
     expect(text).toMatch(/结果：2\/2/);
+    expect(text).toMatch(/rule:match, rule:match/);
+  }, 180_000);
+
+  it.skipIf(checkArtifacts().ready)("缺产物且未配 provider 的**开箱缺省**与上面同形（验证者抓到的回归：off(missing) 腿曾被装进懒加载 runtime 而逐步 config-refuse）", async () => {
+    installLayaRuntime(null);
+    const { io, lines } = recording();
+    const plan = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "start-defaultrules-")), "plan.json");
+    const code = await main(["--demo", "--plan", plan], io);   // 不给 deps.noModel：走真实缺省解析
+    expect(code).toBe(0);
+    const text = lines.join("\n");
+    expect(text).toMatch(/规则模式/);
     expect(text).toMatch(/rule:match, rule:match/);
   }, 180_000);
 

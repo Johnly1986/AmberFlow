@@ -30,7 +30,7 @@ import { browserSession, BrowserMiddleware, type BrowserSession } from "./execut
 import { extractElements, type Elem, type ElemPool } from "./extraction.ts";
 import { REPO } from "./flow.ts";
 import { induceHint } from "./hint-memory.ts";
-import { LayaNotConfiguredError } from "./model.ts";
+import { installLayaRuntime, LayaNotConfiguredError } from "./model.ts";
 import { checkArtifacts, missingPieces, onnxModelPath, type ModelArtifacts } from "./model-artifacts.ts";
 import { isParseUsageError, usageErrorLine } from "./cli-args.ts";
 import { applyRcToEnv, rcStatusLines } from "./rcfile.ts";
@@ -495,7 +495,13 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     io.out(USAGE);
     return 2;
   }
-  await applySpecToRuntime(spec);
+  if (spec.kind === "laya" && spec.tier === "off(missing)") {
+    // start 的开箱语义=规则档（与旧行为逐字节一致：什么都不装，执行器进 rulesOnly，
+    // 点名的步照跑）。不装一个注定把每一步 config-refuse 掉的懒加载 runtime。
+    installLayaRuntime(null);
+  } else {
+    await applySpecToRuntime(spec);
+  }
   if (deps.noModel || (spec.kind === "laya" && spec.tier === "off(missing)")) {
     io.out(`（规则模式：模型产物不齐——缺 ${missingPieces(p.artifacts).join("/")}，`
       + `补齐见 npm run doctor / npm run model:fetch；计划点名的步骤照样能跑）\n`);

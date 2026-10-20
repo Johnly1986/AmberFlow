@@ -89,8 +89,13 @@ export interface RcApply extends RcLoad {
 
 let lastApply: RcApply | null = null;
 
-/** 入口唯一该调的函数：把 rc 的键补进目标 env（缺省 process.env）。幂等。 */
+/** 入口唯一该调的函数：把 rc 的键补进目标 env（缺省 process.env）。幂等。
+ * 测试进程（vitest 在场）不吸收用户本机配置：测试直接调各 main()，若让
+ * configs/amberflowrc.json 生效，"开箱缺省=规则档"这类断言会随谁的本机文件而漂移
+ * （2026-10-20 实测：token-plan 设成默认档后两条 start 测试在开发机上变红）。
+ * 想测 rc 本身就用注入缝（applyRcToEnv(fakeEnv, tempRoot)），rcfile 测试就是这么做的。 */
 export function applyRcToEnv(env: NodeJS.ProcessEnv = process.env, root: string = REPO_ROOT): RcApply {
+  if (env.VITEST !== undefined) return { path: null, values: {}, errors: [], applied: [] };
   if (lastApply && lastApply.path === path.join(root, RC_REL) && env === process.env) {
     return lastApply;
   }

@@ -275,6 +275,11 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
         : await runtime.load("convaiinnovations/laya", { subfolder: m === "english" ? null : "multilingual" });
     }
     console.log(`checkpoints loaded: ${JSON.stringify(Object.keys(agents))}\n`);
+  } else if (spec.kind === "laya" && spec.tier === "off(missing)") {
+    // 规则档如实降级（旧行为是当场崩）：不装一个逐步 config-refuse 的懒加载 runtime——
+    // 执行器进 rulesOnly，语料里被点名的步照规则跑。model_status 如实记 off(missing)。
+    installLayaRuntime(null);
+    console.log(`决策源：${spec.name}（tier=${spec.tier}）→ 走规则档\n`);
   } else {
     await applySpecToRuntime(spec);
     console.log(`决策源：${spec.name}（tier=${spec.tier}）\n`);
