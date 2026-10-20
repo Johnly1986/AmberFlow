@@ -77,7 +77,17 @@ export function tokenPlanProvider(opts: TokenPlanOptions = {}): DecisionProvider
     configError() {
       const missing: string[] = [];
       if (!keyOf()) missing.push("API key（TOKEN_PLAN_API_KEY 或 DASHSCOPE_API_KEY）");
-      if (!(opts.endpoint ?? env.TOKEN_PLAN_ENDPOINT)) missing.push("端点（TOKEN_PLAN_ENDPOINT，完整 URL）");
+      const ep = opts.endpoint ?? env.TOKEN_PLAN_ENDPOINT ?? "";
+      if (!ep) missing.push("端点（TOKEN_PLAN_ENDPOINT，完整 URL）");
+      // 形状错误同样属于启动期就能判定的配置错误（实测 2026-10-20：endpoint 抄到 /v1 为止、
+      // 少了 /systemone 后缀 ⇒ 网关 400 "url error"，风险闸门悄悄退化成关键词规则——
+      // 那是一次**不正常**的闸门运行，不该等跑到一半才由退化警告说明）。
+      else if (!/\/systemone\/?$/.test(ep)) {
+        const extra = missing.length ? `；另缺 ${missing.join(" 与 ")}` : "";
+        return `TOKEN_PLAN_ENDPOINT=${JSON.stringify(ep)} 不是 SystemOne 的完整 URL——`
+          + "要以 /compatible-mode/v1/systemone 结尾（POST 到 /v1 或 chat 路径，网关回 400 url error）。"
+          + "完整形状见 docs/DECISION_PROVIDER_TOKENPLAN.md" + extra;
+      }
       return missing.length ? `缺 ${missing.join(" 与 ")}` : null;
     },
     extraBody: () => ({ model }),
