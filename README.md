@@ -167,6 +167,13 @@ console.log(rep.completed, rep.traces.length);
 
 ## 环境变量（都有兜底，全部可不配）
 
+这些变量也可以写进**仓库根的 `.amberflowrc.json`**（本机文件，已被 `.gitignore` 排除；模板见
+[`amberflowrc.example.json`](amberflowrc.example.json) 复制一份、删掉不用的键即可）。优先级
+**CLI 旗标 > 环境变量 > 文件 > 内建缺省**——文件只补没人设过的键。白名单之外的键（比如
+`LAYA_TODAY`：展开日期是仓库常量，不该变成机器配置）会在**任何腿出场之前**以用法错误
+(exit 2)点名拒绝。`npm run doctor` 会把生效配置连同**每个值的来源**（文件/环境）一起列出，
+凭据类（`*_API_KEY` 等）只回显掩码后的长度。实现只有一个模块：`src/rcfile.ts`。
+
 | 变量 | 作用 |
 |---|---|
 | `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR` | 本地决策模型产物位置（缺了走规则模式） |

@@ -33,6 +33,7 @@ import { induceHint } from "./hint-memory.ts";
 import { LayaNotConfiguredError, installLayaRuntime } from "./model.ts";
 import { checkArtifacts, missingPieces, onnxModelPath, type ModelArtifacts } from "./model-artifacts.ts";
 import { isParseUsageError, usageErrorLine } from "./cli-args.ts";
+import { applyRcToEnv, rcStatusLines } from "./rcfile.ts";
 import { BUILTIN_LAYA_PROVIDERS, listDecisionProviders } from "./decision-provider.ts";
 import { BASELINE_PROVIDERS, registerBaselines } from "./decision-baselines.ts";
 import { createLayaOnnxRuntime } from "./laya-onnx.ts";
@@ -417,6 +418,8 @@ async function commandDemo(planPath: string, headless: boolean, io: Io, deps: St
 }
 
 export async function main(argv: string[] = process.argv.slice(2), io: Io = defaultIo, deps: StartDeps = {}): Promise<number> {
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（与 parseArgs 同一口气）。
+  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   // 打错的参数对第一次用 `npm start` 的人最劝退：一行点名 + 完整用法，绝不甩堆栈。
   let parsed;
   try {
@@ -458,6 +461,8 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     await registerTokenPlan();
     const report = doctorReport(preflight());
     for (const l of report.lines) io.out(l);
+    // 配置来源也是体检的一部分：哪个值从 .amberflowrc.json 来、哪个从环境来，点名给使用者。
+    for (const l of rcStatusLines()) io.out(l);
     return report.ok ? 0 : 2;
   }
 

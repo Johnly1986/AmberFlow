@@ -33,6 +33,7 @@ import { MockAuditor, type TraceStep } from "./audit.ts";
 import { createHintMemory, type HintMemoryLike } from "./hint-memory.ts";
 import { ensureDir, userAppsDir } from "./amberflow-home.ts";
 import { isParseUsageError, renamedHint, usageErrorLine } from "./cli-args.ts";
+import { applyRcToEnv } from "./rcfile.ts";
 import { cliRunDetailed, defaultDates, loadSource, runSource, urlFor, type CliObservation } from "./datasource.ts";
 import { withDecisionCache, type CachedRuntime, type DecisionCacheStats } from "./decision-cache.ts";
 import { checkArtifacts, missingPieces, modelConfigError } from "./model-artifacts.ts";
@@ -1054,6 +1055,8 @@ export function appsOutDir(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
   let parsed;
   try {

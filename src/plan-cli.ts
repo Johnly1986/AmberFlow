@@ -24,6 +24,7 @@ import { extractElements } from "./extraction.ts";
 import { getAuditor, type AuditVerdict } from "./audit.ts";
 import { createHintMemory, type HintMemoryLike } from "./hint-memory.ts";
 import { isParseUsageError, usageErrorLine } from "./cli-args.ts";
+import { applyRcToEnv } from "./rcfile.ts";
 
 export const DEFAULT_FILE = ".task_plan.json";
 
@@ -261,6 +262,8 @@ Plans live in --file (default ${DEFAULT_FILE}); editing that JSON by hand betwee
 commands works too — \`check\` re-validates whatever is on disk.`;
 
 export async function main(argv: string[] = process.argv.slice(2), io: CliIO = defaultIO): Promise<number> {
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   const [cmd, ...rest] = argv;
   if (!cmd || cmd === "--help" || cmd === "-h") {
     io.out(USAGE);
