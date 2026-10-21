@@ -18,21 +18,21 @@
  * 只录"点一下"和"填一个值"两类动作（其余形状要等动作模型扩展）。
  */
 import crypto from "node:crypto";
-import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
-import { applyRcToEnv } from "../src/rcfile.ts";
+import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
+import { applyRcToEnv } from "../src/support/rcfile.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { loadPack, validatePack, type AppPack } from "../src/app-pack.ts";
-import { ensureDir, userAppsDir } from "../src/amberflow-home.ts";
-import { runApp, startUrl } from "../src/app-runner.ts";
-import { browserSession } from "../src/executor.ts";
-import { extractElements } from "../src/extraction.ts";
-import { hintMatch } from "../src/rules.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
-import { captureStateView, induceSignals } from "../src/signal-induction.ts";
-import { evalSignalOnState, type SignalSpec, type StateView } from "../src/signals.ts";
+import { loadPack, validatePack, type AppPack } from "../src/app/app-pack.ts";
+import { ensureDir, userAppsDir } from "../src/app/amberflow-home.ts";
+import { runApp, startUrl } from "../src/app/app-runner.ts";
+import { browserSession } from "../src/engine/executor.ts";
+import { extractElements } from "../src/engine/extraction.ts";
+import { hintMatch } from "../src/engine/rules.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
+import { captureStateView, induceSignals } from "../src/flow/signal-induction.ts";
+import { evalSignalOnState, type SignalSpec, type StateView } from "../src/engine/signals.ts";
 import { serializePack } from "./spec-to-pack.ts";
 
 export const REPO = path.resolve(import.meta.dirname, "..");
@@ -459,10 +459,10 @@ async function connectPage(opts: {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
   { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   let values;
-  // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
     args: argv,

@@ -12,12 +12,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { TaskPlan } from "../src/plan.ts";
-import { cmdRun } from "../src/plan-cli.ts";
-import { createHintMemory } from "../src/hint-memory.ts";
+import { TaskPlan } from "../src/engine/plan.ts";
+import { cmdRun } from "../src/cli/plan-cli.ts";
+import { createHintMemory } from "../src/model/hint-memory.ts";
 import {
   installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question,
-} from "../src/model.ts";
+} from "../src/model/model.ts";
 
 afterAll(() => installLayaRuntime(null));
 

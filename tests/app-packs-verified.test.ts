@@ -6,7 +6,7 @@
  *      未知角色 / 未声明槽位 / 未知 `{slot}` / 主机没进 `hosts` / 探针目标 id 悬空 /
  *      重复目标 id / `hosts` 写成了裸字符串 / 角色内联覆盖混用两种步型的键。每条都断言
  *      **消息内容**，而不是"它抛了错"。
- *   2. **同一条路径**：离线应用的验收跑 `runApp`（`src/app-runner.ts` 的 `main()` 除
+ *   2. **同一条路径**：离线应用的验收跑 `runApp`（`src/app/app-runner.ts` 的 `main()` 除
  *      argv 解析与 `--ablate` 运行时安装外，全部逻辑都在这里），并用一次真实的
  *      `main()` 子进程证明"没干活 -> 退出码 1"这条链路真的通到进程退出码。
  *
@@ -17,17 +17,17 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { appDirs, expandPack, loadPack, validatePack, type AppPack, type ExpandedStep } from "../src/app-pack.ts";
-import { main as appMain, refusalLine, runApp, runToolStep, startUrl } from "../src/app-runner.ts";
-import { loadProbeSet } from "../src/probe-set.ts";
-import { DEMO_ROWS, FORMS, TYPE_TO_FORM } from "../src/camera-entry.ts";
-import { emitPlan } from "../src/transfer-task.ts";
-import { loadSpec } from "../src/flow.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
-import type { ToolSignal } from "../src/tool-signals.ts";
+import { appDirs, expandPack, loadPack, validatePack, type AppPack, type ExpandedStep } from "../src/app/app-pack.ts";
+import { main as appMain, refusalLine, runApp, runToolStep, startUrl } from "../src/app/app-runner.ts";
+import { loadProbeSet } from "../src/app/probe-set.ts";
+import { DEMO_ROWS, FORMS, TYPE_TO_FORM } from "../src/cli/camera-entry.ts";
+import { emitPlan } from "../src/sites/transfer-task.ts";
+import { loadSpec } from "../src/flow/flow.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
+import type { ToolSignal } from "../src/browser/tool-signals.ts";
 import { matrix } from "../tools/apps_matrix.ts";
 import { main as suiteMain, suite } from "../tools/apps_suite.ts";
-import { checkArtifacts } from "../src/model-artifacts.ts";
+import { checkArtifacts } from "../src/model/model-artifacts.ts";
 // 默认臂 = 真模型：产物不齐的机器上套件在装模型前就响亮拒绝。钉退出码 3/1 的两条按
 // 仓库纪律"跳过 ≠ 通过，但明着跳过"（bench/smoke.sh 模型侧同款）；用法错误(2)不受影响。
 const MODEL_READY = checkArtifacts().ready;
@@ -312,7 +312,7 @@ describe("证伪：把工作弄坏，退出码必须变 1", () => {
     const packPath = tmpPack("falsify-cli", pack);
     const out = tmpDir("falsify-cli-out");
     const r = spawnSync(process.execPath, [
-      "--experimental-strip-types", path.join(REPO, "src", "app-runner.ts"),
+      "--experimental-strip-types", path.join(REPO, "src", "app", "app-runner.ts"),
       "--app", packPath, "--ablate", "stub", "--quiet", "--out", out,
     ], { cwd: REPO, encoding: "utf8" });
     expect(r.status, r.stdout + r.stderr).toBe(1);
@@ -332,7 +332,7 @@ describe("CLI 错误路径：G-A / G-J / G-L 三条修复不得静默回归", ()
     const { code, err } = await captureErr(() => appMain(["--app", "ctrip-live", "--ablate", "stub"]));
     expect(code).toBe(2);
     expect(err).toContain("测量型应用");
-    expect(err).toContain("src/live-probe.ts");                 // 指路到真正的测量入口
+    expect(err).toContain("src/sites/live-probe.ts");                 // 指路到真正的测量入口
     expect(err).toMatch(/\d+ 个目标/);
     expect(err).not.toMatch(/\n\s+at /);                        // 不是栈
   });

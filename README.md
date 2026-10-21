@@ -102,7 +102,7 @@ dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridg
 | 60 个诱饵元素挡在前面：规则落空 + 目标不在池内 = 必 blocked；模型加宽重看（`laya:reobserve`）把它捞回来 | 池子外的目标谁也选不到——模型负责"不轻言放弃"。**但注意口径**：这是夹具里的能力，已验收语料上 `reobserve` 救回 **0** 步（页脚 `梯级账单` 会把它标成 dead rung） | `npx vitest run tests/reobserve.test.ts` |
 | `transfer-slowjet`：冷加载时模型**被问了 5 次、一次都没过闸门**（真模型臂与桩臂同形：`咨询 5 / 过关 0`）；把它救回来的是 `retries`——去掉 `retries` 实测 0/7 | **反面教材（本轮修正）**：以前这里写"没有模型这个应用会红"，实测不成立；红的是没有重试 | `npm run apps:suite -- --only transfer-slowjet`（看页脚 `梯级账单` 与 `模型边际`） |
 | 同一份计划二跑：**12 forwards → 0，9.2s → 1.3s**（Windows+GPU 实测；离线口径由套件页脚 `决策缓存` 给同一形状的两个数） | 确定性模型不该被问第二次：本地、免费、可审计 | `npm run cache:measure`（要 ONNX 产物）；离线看套件页脚 |
-| 诚实边界：中文页面上模型 0.03–0.09（argmax 常仍正确）；checkpoint 路由按**文字系统**切、绝不按置信度切（ECE 0.855 的教训写进了故事） | 我们比谁都清楚它不行在哪——这是可信度，不是减分 | `node --experimental-strip-types src/ctrip-task.ts --no-hints` |
+| 诚实边界：中文页面上模型 0.03–0.09（argmax 常仍正确）；checkpoint 路由按**文字系统**切、绝不按置信度切（ECE 0.855 的教训写进了故事） | 我们比谁都清楚它不行在哪——这是可信度，不是减分 | `node --experimental-strip-types src/sites/ctrip-task.ts --no-hints` |
 
 装不装得模型，跑之前就知道：`npm run doctor` 点名缺哪件（图 / 外置权重 / tokenizer）并给出一条补齐命令
 `npm run model:fetch -- --from <url 或本地路径>`（SHA256 先验后换，坏件绝不覆盖现有产物）。
@@ -207,7 +207,7 @@ provider（如 `AMBERFLOW_DEFAULT_DECISION_PROVIDER=token-plan`）→在线；�
 **CLI 旗标 > 环境变量 > 文件 > 内建缺省**——文件只补没人设过的键。白名单之外的键（比如
 `LAYA_TODAY`：展开日期是仓库常量，不该变成机器配置）会在**任何腿出场之前**以用法错误
 (exit 2)点名拒绝。`npm run doctor` 会把生效配置连同**每个值的来源**（文件/环境）一起列出，
-凭据类（`*_API_KEY` 等）只回显掩码后的长度。实现只有一个模块：`src/rcfile.ts`。
+凭据类（`*_API_KEY` 等）只回显掩码后的长度。实现只有一个模块：`src/support/rcfile.ts`。
 
 | 变量 | 作用 |
 |---|---|

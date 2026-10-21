@@ -19,9 +19,9 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ONNX_PATH, DEFAULT_SHORTLIST_K, LayaTokenizer, createLayaOnnxRuntime,
   findDefaultTokenizerDir, prepareQuestionSequences,
-} from "../src/laya-onnx.ts";
-import { buildSequence } from "../src/laya-format.ts";
-import { scriptedAgent, type ChoiceAnswer, type NoulAnswer, type Question } from "../src/model.ts";
+} from "../src/model/laya-onnx.ts";
+import { buildSequence } from "../src/model/laya-format.ts";
+import { scriptedAgent, type ChoiceAnswer, type NoulAnswer, type Question } from "../src/model/model.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REF_PATH = path.join(here, "..", "node-port-poc", "laya_parity_ref.json");

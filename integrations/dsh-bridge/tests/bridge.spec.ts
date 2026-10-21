@@ -195,7 +195,7 @@ describe('bridge helpers', () => {
       confirmSafe: true, tieredHint: true,
       slots: { date: '2026-10-12', window: '0800-1800' },
     })
-    expect(argv.slice(0, 3)).toEqual(['/usr/bin/node', '--experimental-strip-types', '/repo/src/app-runner.ts'])
+    expect(argv.slice(0, 3)).toEqual(['/usr/bin/node', '--experimental-strip-types', '/repo/src/app/app-runner.ts'])
     expect(argv.join(' ')).toContain('--app demo --out /tmp/out')
     for (const flag of ['--dry', '--ablate', 'stub', '--provider', 'coin-flip', '--no-sources', '--allow-dangerous', '--confirm-safe', '--tiered-hint']) expect(argv).toContain(flag)
     expect(argv.slice(-4)).toEqual(['--slot', 'date=2026-10-12', '--slot', 'window=0800-1800'])
@@ -206,7 +206,7 @@ describe('bridge helpers', () => {
     // exactly what every frozen report and the live tests were recorded against.
     const argv = runArgs(OPTIONS, { app: 'demo', outDir: '/tmp/out' })
     expect(argv).toEqual([
-      '/usr/bin/node', '--experimental-strip-types', '/repo/src/app-runner.ts',
+      '/usr/bin/node', '--experimental-strip-types', '/repo/src/app/app-runner.ts',
       '--app', 'demo', '--out', '/tmp/out',
     ])
     const off = runArgs(OPTIONS, { app: 'demo', outDir: '/tmp/out', tieredHint: false, confirmSafe: false })
@@ -227,7 +227,7 @@ describe('bridge helpers', () => {
   it('with a tsx launcher configured, both CLIs spawn through it (node_modules checkout shape)', () => {
     const opts = { ...OPTIONS, tsxCli: '/opt/tsx/dist/cli.mjs' }
     const run = runArgs(opts, { app: 'demo', outDir: '/tmp/out' })
-    expect(run.slice(0, 4)).toEqual(['/usr/bin/node', '/opt/tsx/dist/cli.mjs', '--experimental-strip-types', '/repo/src/app-runner.ts'])
+    expect(run.slice(0, 4)).toEqual(['/usr/bin/node', '/opt/tsx/dist/cli.mjs', '--experimental-strip-types', '/repo/src/app/app-runner.ts'])
     const learn = learnArgs(opts, { url: 'u', goal: 'g', script: '/tmp/s.json', outDir: '/tmp/out' })
     expect(learn.slice(0, 4)).toEqual(['/usr/bin/node', '/opt/tsx/dist/cli.mjs', '--experimental-strip-types', '/repo/tools/learn.ts'])
   })
@@ -771,7 +771,7 @@ describe('environment and artifact policy', () => {
 })
 
 describe('checkout resolution: config > AMBERFLOW_REPO > self-locate', () => {
-  it('findCheckout walks up to the ancestor holding src/app-runner.ts', () => {
+  it('findCheckout walks up to the ancestor holding src/app/app-runner.ts', () => {
     const repo = stubCheckout(PACKS)
     const deep = path.join(repo, 'integrations', 'dsh-bridge', 'src')
     fs.mkdirSync(deep, { recursive: true })
@@ -826,7 +826,7 @@ describe('checkout under node_modules (git-install shape)', () => {
     const root = tmp('profile')
     const repo = path.join(root, 'node_modules', 'amberflow')
     fs.mkdirSync(path.join(repo, 'src'), { recursive: true })
-    fs.writeFileSync(path.join(repo, 'src', 'app-runner.ts'), 'process.exit(0)')
+    fs.writeFileSync(path.join(repo, 'src', 'app', 'app-runner.ts'), 'process.exit(0)')
     const tsxCli = path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs')
     if (withTsx) {
       fs.mkdirSync(path.dirname(tsxCli), { recursive: true })

@@ -19,8 +19,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listPacks, loadPack, packHintCoverage } from "../src/app-pack.ts";
-import { checkArtifacts, onnxModelPath } from "../src/model-artifacts.ts";
+import { listPacks, loadPack, packHintCoverage } from "../src/app/app-pack.ts";
+import { checkArtifacts, onnxModelPath } from "../src/model/model-artifacts.ts";
 
 // `URL.pathname` keeps the leading slash on Windows ("/E:/…") and path.resolve then
 // doubles the drive ("E:\E:\…") — fileURLToPath is the only correct conversion.

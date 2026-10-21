@@ -13,15 +13,15 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
 import {
   BrowserMiddleware,
   browserSession,
   routerMaxLoaded,
   type AnyPage,
   type PwLike,
-} from "../src/executor.ts";
-import { extractElements, type Elem } from "../src/extraction.ts";
+} from "../src/engine/executor.ts";
+import { extractElements, type Elem } from "../src/engine/extraction.ts";
 import {
   installLayaRuntime,
   scriptedAgent,
@@ -29,8 +29,8 @@ import {
   type DecisionAgent,
   type ModelState,
   type Question,
-} from "../src/model.ts";
-import { checkSignal } from "../src/signals.ts";
+} from "../src/model/model.ts";
+import { checkSignal } from "../src/engine/signals.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const fixture = (...p: string[]): string => pathToFileURL(path.join(REPO, ...p)).href;

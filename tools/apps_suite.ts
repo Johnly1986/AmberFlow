@@ -23,17 +23,17 @@
  * 显示"未跑"，绝不编数。
  */
 import path from "node:path";
-import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
-import { applyRcToEnv } from "../src/rcfile.ts";
+import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
+import { applyRcToEnv } from "../src/support/rcfile.ts";
 import fs from "node:fs";
 import { parseArgs } from "node:util";
-import { appDirs, expandPack, loadPack, packHintCoverage, type AppPack } from "../src/app-pack.ts";
-import { getAppAdapter } from "../src/app-adapters.ts";
-import { runApp, refusalLine, type AppRunResult } from "../src/app-runner.ts";
-import { checkArtifacts, missingPieces } from "../src/model-artifacts.ts";
-import { type DecisionCacheStats } from "../src/decision-cache.ts";
-import { applySpecToRuntime, resolveProviderSpec, type AppliedSpec, type ProviderInfo } from "../src/decision-provider.ts";
-import { installLayaRuntime } from "../src/model.ts";
+import { appDirs, expandPack, loadPack, packHintCoverage, type AppPack } from "../src/app/app-pack.ts";
+import { getAppAdapter } from "../src/app/app-adapters.ts";
+import { runApp, refusalLine, type AppRunResult } from "../src/app/app-runner.ts";
+import { checkArtifacts, missingPieces } from "../src/model/model-artifacts.ts";
+import { type DecisionCacheStats } from "../src/model/decision-cache.ts";
+import { applySpecToRuntime, resolveProviderSpec, type AppliedSpec, type ProviderInfo } from "../src/model/decision-provider.ts";
+import { installLayaRuntime } from "../src/model/model.ts";
 
 /**
  * 套件产物目录：matrix 的运行时两列从这里读（单一出处、**调用时**读 env，测试可隔离）。
@@ -321,10 +321,10 @@ export async function suite(
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
   { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   let values;
-  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
     args: argv,

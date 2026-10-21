@@ -7,7 +7,7 @@
  *   4. 债归零：`apps:matrix` 的债计数为空——包括"声明无关"的那一半（非核心层里写死的主机）。
  */
 import { describe, expect, it } from "vitest";
-import { fillProbeDate, addDays, hostOfUrl, listProbeSets, loadProbeSet, markerList, shortOf, validateProbeBlock } from "../src/probe-set.ts";
+import { fillProbeDate, addDays, hostOfUrl, listProbeSets, loadProbeSet, markerList, shortOf, validateProbeBlock } from "../src/app/probe-set.ts";
 import { matrix } from "../tools/apps_matrix.ts";
 
 const hosts = ["m.ctrip.com", "flights.ctrip.com", "hotels.ctrip.com", "passport.ctrip.com", "www.ctrip.com"];

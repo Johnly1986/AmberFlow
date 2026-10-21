@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSequence, clampTemperature, confidenceFromProbs, pyJsonDumps,
   renderOptions, serializeState, tempBucket, type SeqTokenizer,
-} from "../src/laya-format.ts";
+} from "../src/model/laya-format.ts";
 
 interface Case {
   name: string;

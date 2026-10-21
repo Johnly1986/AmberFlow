@@ -12,19 +12,19 @@
  * reported as REVIEW (and `no-signal` means: declare the step `{manual: true}`).
  */
 import path from "node:path";
-import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
+import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { chromium } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import { extractElements, type PageLike } from "../src/extraction.ts";
-import { hintMatch } from "../src/rules.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { extractElements, type PageLike } from "../src/engine/extraction.ts";
+import { hintMatch } from "../src/engine/rules.ts";
 import {
   captureStateView, induceSignals, signalReproducible, type StateView,
-} from "../src/signal-induction.ts";
-import { evalSignalOnState } from "../src/signals.ts";
-import { REPO } from "../src/flow.ts";
-import { applyRcToEnv } from "../src/rcfile.ts";
+} from "../src/flow/signal-induction.ts";
+import { evalSignalOnState } from "../src/engine/signals.ts";
+import { REPO } from "../src/flow/flow.ts";
+import { applyRcToEnv } from "../src/support/rcfile.ts";
 
 type Page = PageLike & {
   goto(u: string, o?: unknown): Promise<void>;
@@ -64,10 +64,10 @@ async function runOnce(url: string, click: string | null, replays: number): Prom
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
   { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   let values;
-  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
     args: argv,

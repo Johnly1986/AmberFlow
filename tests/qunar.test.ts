@@ -1,16 +1,16 @@
 /**
  * qunar migration test (offline half): the frozen plan, the four-item oracle and
- * the reachability verdicts. The live half is `src/qunar-task.ts` itself — its
+ * the reachability verdicts. The live half is `src/sites/qunar-task.ts` itself — its
  * measured boundary (touchInnerList code:1999) is data, not something a unit test
  * can re-derive offline.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { HOME, buildChecks, buildPlan, renderReport, type QunarRecords } from "../src/qunar-task.ts";
-import { IPHONE_UA, TARGET, looksBlocked, looksLoginRedirect, verdict } from "../src/qunar-probe.ts";
-import { PlanningRules } from "../src/plan.ts";
-import { REPO } from "../src/flow.ts";
+import { HOME, buildChecks, buildPlan, renderReport, type QunarRecords } from "../src/sites/qunar-task.ts";
+import { IPHONE_UA, TARGET, looksBlocked, looksLoginRedirect, verdict } from "../src/sites/qunar-probe.ts";
+import { PlanningRules } from "../src/engine/plan.ts";
+import { REPO } from "../src/flow/flow.ts";
 
 describe("the frozen qunar plan", () => {
   const plan = buildPlan();

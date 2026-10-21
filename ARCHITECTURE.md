@@ -74,8 +74,8 @@
 > [docs/ARCHITECTURE_IMPROVEMENTS.md](docs/ARCHITECTURE_IMPROVEMENTS.md)。
 >
 > **落地状态：P0（形状硬化，不改任何运行结果）、P1（hint 单实现 +
-> tier 候选集，门控 `tieredHint` 默认关）、P2（命令层 `src/actions.ts`）、P3（数据槽层
-> `src/bindings.ts`）、P4（声明式后继 `next`，应用旅程层）、D3/R-4（`inert` 不再是唯一终止依据：
+> tier 候选集，门控 `tieredHint` 默认关）、P2（命令层 `src/engine/actions.ts`）、P3（数据槽层
+> `src/engine/bindings.ts`）、P4（声明式后继 `next`，应用旅程层）、D3/R-4（`inert` 不再是唯一终止依据：
 > `maxEffectiveRepeats` + 结构化 `no_progress`）均已实施并带负例测试**
 > （`tests/executor-p0.test.ts` 21 / `tests/rules-tiered.test.ts` 24 / `tests/actions.test.ts` 15 /
 > `tests/bindings.test.ts` 20 / `tests/path-next.test.ts` 17 / `tests/no-progress.test.ts` 5）；
@@ -140,12 +140,12 @@ layaapp/__init__.py   应用层公共 API（驱动只 import 这一个）
 
 ### 2.2 应用支持器（AppAdapter）：一种应用类型 = 一个适配器
 
-TS 应用层（`apps/<id>/pack.json` + `src/app-adapters.ts` + `src/app-runner.ts`）把"应用"从
+TS 应用层（`apps/<id>/pack.json` + `src/app/app-adapters.ts` + `src/app/app-runner.ts`）把"应用"从
 "浏览器任务的配置"升级成**多类型应用的声明**：
 
 - **应用 = 目录**：`apps/<id>/pack.json` 声明角色/旅程/结束态不变量/数据袋/数据腿/设备面/策略；
   发现制（没有中央清单），加载期校验（未知键、坏信号、跨类型键、占位符全都红）。
-- **类型抽象**：`src/app-adapters.ts` 的注册表里，一种类型 = 一个 `AppAdapter`——声明面
+- **类型抽象**：`src/app/app-adapters.ts` 的注册表里，一种类型 = 一个 `AppAdapter`——声明面
   （`stepKeys`/`validateStep`/`expand`）、信号面（web=DOM；进程族=`tool-signals`）、执行（`run`）、
   能力探测（`ready()`）。内建四种：`web`（浏览器，唯一执行器）、`cli`（本地命令行）、
   `ssh`（真实 ssh 子进程）、`stdio`（交互式进程/游戏：提示-应答-信号-超时）。
@@ -246,7 +246,7 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
 
 - **装得上（P0）**：`npm run model:fetch -- --from <url|file://|本地路径>`——图 + 外置权重 +（可选）tokenizer，
   `.part` 先落、SHA256 **先验后换**（坏件绝不覆盖现有产物）；`doctor` 从"缺"升级成**点名缺哪件 + 一条补齐命令**；
-  三件探测的单一出处是 `src/model-artifacts.ts`（doctor / fetch / 运行器 / 桥共用，防第二套判据漂移）。
+  三件探测的单一出处是 `src/model/model-artifacts.ts`（doctor / fetch / 运行器 / 桥共用，防第二套判据漂移）。
 - **看得见（P1）**：每次运行汇总 `rule N · laya N (conf) · laya:reobserve N · escalate N · 咨询 N · cache 命中 N/M`，
   进 CLI 报告、`apps:suite` 表格、`apps:matrix` 两列与 DSH 桥 `amberflow_run` 的 summary（外加 `model: on|off(missing)` 层级行）。
   口径有两个出处且各有道理：**过关数在 trace 里数**（执行器只把过关的决定写进 trace），
@@ -277,7 +277,7 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
   （实测旧行为：坏 `LAYA_ONNX_MODEL` 把数据腿和第一个工具步都跑掉了，同一错误重试 2 次）；
   `NEVER_RETRY_CODES = {config_error, host_not_allowed}` 让重试环只跑一次。顺带钉死
   `LAYA_ONNX_MODEL` 与 `LAYAA_*` 旧名的优先级单一口径（doctor 与 runtime 曾判得不一致）。
-- **应用落盘移出 checkout**（前提 A）：`src/amberflow-home.ts` 定义 `$AMBERFLOW_HOME/apps`
+- **应用落盘移出 checkout**（前提 A）：`src/app/amberflow-home.ts` 定义 `$AMBERFLOW_HOME/apps`
   （缺省 `~/.amberflow/apps`）；`learn`/`plan:flow` 的新产物默认写用户作用域，
   发现制扫 `[用户目录, 仓库夹具]`、同 id 用户优先——仓库 `apps/` 降为开发夹具，
   `spec_version` 不认识就响亮拒绝（CI 盖不到用户的包，猜 = 静默错）。
@@ -292,7 +292,7 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
   阶梯顺序与四个 `method` 取值一字未动——报告、对拍语料、`apps:suite` 结论不受影响。
   出口打通到 CLI（`--tiered-hint`）与 DSH 桥（`tiered_hint`）。
 
-**P2 已落地（命令层，`src/actions.ts`，门控 = 字段本身：不声明逐字节不变；`tests/actions.test.ts` 15 条）**：
+**P2 已落地（命令层，`src/engine/actions.ts`，门控 = 字段本身：不声明逐字节不变；`tests/actions.test.ts` 15 条）**：
 - **声明半（加载期）**：`COMMAND_OPS = click|check|fill|select|skip` 是引擎能力面（代码），
   应用/计划里的 `commands` 引用它——未知 op、重复 id、`fill` 缺绑定、`skip` 带 target、
   参数来源非 `slot` ⇒ 全部**加载期红**（`validateCommands`，由同一个 `PlanningRules.problems`
@@ -306,7 +306,7 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
   同时"删即是红"：同一步去掉 `commands` 回到两跳深链的旧世界（旧冻结包一字未动，
   `apps:gen --check` 8/8 仍逐字节）。
 
-**P3 已落地（数据槽层，`src/bindings.ts`，门控 = 绑定形状本身：不声明逐字节不变；`tests/bindings.test.ts` 20 条）**：
+**P3 已落地（数据槽层，`src/engine/bindings.ts`，门控 = 绑定形状本身：不声明逐字节不变；`tests/bindings.test.ts` 20 条）**：
 - **三条来源，都必须声明点名**（红线②：模型永不参与选值）：`{from:"slot",key}`（计划数据袋，
   今天的前身是 `--slot k=v` / `plan.slots`）、`{from:"option",key,match}`（**当次观察**到的页面候选
   + `match: value|label|contains`，今天的前身是 `<select>` 标签→值两候选回退）、
@@ -411,7 +411,7 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
    `hotels.ctrip.com` 列表页 SSR 能出酒店名/星级，但未登录访客的价格节点为空（"登录以查看会员价"），「≤300 元」无法判定。
    补充：iPhone/Android UA + 移动视口 + 触摸、`hk./us./sg.trip.com` 三个区域域名 —— 10 次访问 10 次 432，
    说明挡的是**出口 IP**而非 UA/设备/区域；酒店列表在浏览器里会被**重定向到登录页**（`passport.ctrip.com`）。
-   实测与复现见 `src/live-probe.ts`、`src/live-capture.ts` → `ctrip/results/{live_probe.json,live_capture/}`（原 Python 版命令与输出归档在历史 bundle，见 [BACKUP.md](BACKUP.md)）。
+   实测与复现见 `src/sites/live-probe.ts`、`src/sites/live-capture.ts` → `ctrip/results/{live_probe.json,live_capture/}`（原 Python 版命令与输出归档在历史 bundle，见 [BACKUP.md](BACKUP.md)）。
    因此 `ctrip/` 用例跑在**本地复刻站**上，
    票价/房态是本地生成数据（结论只对复刻站成立，不代表真实携程报价）。
 9. **一个子目标只有一次点击——已被 `commands` 开口（P2）**：筛选/排序若停留在页面 JS 状态里，`run()` 每步重新 `goto` 会丢状态、且同一个 hint 会被反复点。
@@ -419,10 +419,10 @@ forbidden / 遮挡重准入 / inert 全部签名化。执行句柄链：
    迁移测试又撞了一次同一堵墙，这次是**选择状态**：SkyBook 的"先勾选、再提交"跨两个子目标时，
    记录那一步在新页面里什么都没勾选，信号永不触发（执行器在 `max_steps` 里打转、然后被 laya 带去点别的按钮）。
    修法仍在配置层：勾选后跳一次 `…&selected=all`，让 `start_url` 完整决定这一步的状态。
-   **"勾选+提交放进一个子目标"现在是可表达的**（2026-10 P2）：步可声明 `commands` 闭集（`src/actions.ts`），
+   **"勾选+提交放进一个子目标"现在是可表达的**（2026-10 P2）：步可声明 `commands` 闭集（`src/engine/actions.ts`），
    声明 × 当次观察实例化成候选，按声明顺序走、每步一个动作、同一子目标内推进
    （`tests/actions.test.ts` 用真 site2 夹具跑通：2 条 executed 命令、1 个子目标、零模型提问、`#hotel-recorded` 落账）。
-   **这一步的参数也不需要猜**（2026-10 P3）：`value` 是**声明式绑定**（`src/bindings.ts`）——
+   **这一步的参数也不需要猜**（2026-10 P3）：`value` 是**声明式绑定**（`src/engine/bindings.ts`）——
    计划槽位、页面候选（`match: value|label|contains`，档内歧义即弃权）、行集（`order: min|max`），
    三种来源都必须点名；命不中 ⇒ 结构化 `needs_value`，页面一个字不改
    （`apps/checkin-binding`：机器值与人读标签不同的真 `<select>`，全程 `rule:match`、零模型提问）。

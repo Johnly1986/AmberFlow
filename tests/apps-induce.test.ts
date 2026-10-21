@@ -10,8 +10,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadPack } from "../src/app-pack.ts";
-import { evalSignalOnState, type StateView } from "../src/signals.ts";
+import { loadPack } from "../src/app/app-pack.ts";
+import { evalSignalOnState, type StateView } from "../src/engine/signals.ts";
 import {
   appendInvariants, captureRun, discriminating, induceOnce, intersect, removeInvariants,
   toInvariant, type Proposal,

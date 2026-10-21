@@ -12,10 +12,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { BrowserMiddleware } from "../src/executor.ts";
-import { checkSignal } from "../src/signals.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer } from "../src/model.ts";
-import { PlanningRules, TaskPlan } from "../src/plan.ts";
+import { BrowserMiddleware } from "../src/engine/executor.ts";
+import { checkSignal } from "../src/engine/signals.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer } from "../src/model/model.ts";
+import { PlanningRules, TaskPlan } from "../src/engine/plan.ts";
 
 afterAll(() => installLayaRuntime(null));
 

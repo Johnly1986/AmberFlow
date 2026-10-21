@@ -8,10 +8,10 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { BenchMiddleware, main, runCase, startUrl, type BenchCase } from "../src/bench.ts";
-import { BrowserMiddleware } from "../src/executor.ts";
-import { REPO } from "../src/flow.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer } from "../src/model.ts";
+import { BenchMiddleware, main, runCase, startUrl, type BenchCase } from "../src/cli/bench.ts";
+import { BrowserMiddleware } from "../src/engine/executor.ts";
+import { REPO } from "../src/flow/flow.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer } from "../src/model/model.ts";
 
 let tmp: string;
 beforeEach(() => {
@@ -153,7 +153,7 @@ describe("main() — 智能缺省的 provider 门（bench 与 apps/suite 同一�
     expect(summary.decision_provider).toBe("first-candidate");
     expect(summary.model_status).toBe("on");
     expect(summary.per_case[0].model).toBe("first-candidate");   // checkpoint 标签不许冒充决策源
-    const { installDecisionProvider } = await import("../src/decision-provider.ts");
+    const { installDecisionProvider } = await import("../src/model/decision-provider.ts");
     installDecisionProvider(null);
     installLayaRuntime(null);
   }, 180_000);

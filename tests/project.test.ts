@@ -16,7 +16,13 @@ import { describe, expect, it } from "vitest";
 import * as api from "../src/index.ts";
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
-const files = fs.readdirSync(SRC).filter((f) => f.endsWith(".ts"));
+function walkTs(dir: string): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name);
+    return e.isDirectory() ? walkTs(p) : (e.name.endsWith(".ts") ? [p] : []);
+  });
+}
+const files = walkTs(SRC);
 
 /** Matches `constructor(` … `public|private|protected|readonly X` in parameters. */
 function hasParameterProperty(src: string): boolean {
@@ -27,7 +33,7 @@ function hasParameterProperty(src: string): boolean {
 
 describe("strip-only compatibility (tool scripts run on node --experimental-strip-types)", () => {
   it.each(files)("%s has no constructor parameter properties", (f) => {
-    const src = fs.readFileSync(path.join(SRC, f), "utf-8");
+    const src = fs.readFileSync(f, "utf-8");
     expect(hasParameterProperty(src), `${f}: parameter property breaks strip-only`).toBe(false);
   });
 

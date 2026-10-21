@@ -12,9 +12,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadPack, validatePack } from "../src/app-pack.ts";
-import { browserSession } from "../src/executor.ts";
-import { extractElements } from "../src/extraction.ts";
+import { loadPack, validatePack } from "../src/app/app-pack.ts";
+import { browserSession } from "../src/engine/executor.ts";
+import { extractElements } from "../src/engine/extraction.ts";
 import {
   executableActions, main as learnMain, packFromLearning, replayCheck, slugOf, startRecorder,
   readRecorded, type Learning,
@@ -201,7 +201,7 @@ describe("learn：挂到**你自己的**浏览器（--cdp）", () => {
     // 取**最新**修订的完整 chromium（列表按修订升序、新者在尾）——与 launchKwargs 同一口径。
     // （原来 .find() 取的是第一个 = 最老：1117 的 connectOverCDP 在 Windows 直接 ECONNRESET，
     //  learn 以用法错误 exit 2 收场；只装一个浏览器的机器上两种取法没有区别，所以从没暴露。）
-    const full = (await import("../src/browser-env.ts")).chromiumCandidates()
+    const full = (await import("../src/browser/browser-env.ts")).chromiumCandidates()
       .filter((c) => !c.includes("headless"))
       .filter((c) => { try { fsx.accessSync(c); return true; } catch { return false; } });
     const bin = full[full.length - 1];

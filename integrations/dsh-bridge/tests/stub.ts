@@ -106,9 +106,10 @@ function learnSource(options: StubOptions): string {
 
 /** A checkout stub that satisfies load-time validation and answers with canned documents. */
 export function stubCheckout(packs: Record<string, unknown>, options: StubOptions = {}): string {  const repo = tmp('amberflow-stub')
-  fs.mkdirSync(path.join(repo, 'src'), { recursive: true })
+  fs.mkdirSync(path.join(repo, 'src', 'app'), { recursive: true })
+  fs.mkdirSync(path.join(repo, 'src', 'flow'), { recursive: true })
   fs.mkdirSync(path.join(repo, 'tools'), { recursive: true })
-  fs.writeFileSync(path.join(repo, 'src', 'app-runner.ts'), [
+  fs.writeFileSync(path.join(repo, 'src', 'app', 'app-runner.ts'), [
     "import fs from 'node:fs'",
     "import path from 'node:path'",
     'const argv = process.argv.slice(2)',
@@ -151,8 +152,8 @@ export function stubCheckout(packs: Record<string, unknown>, options: StubOption
   fs.writeFileSync(path.join(repo, 'tools', 'learn.ts'), learnSource(options))
   // The SemanticFlow door exists in every modern checkout; the dispatch is by the template file,
   // so the CLIs can be written unconditionally and `flow` only controls the template app.
-  fs.writeFileSync(path.join(repo, 'src', 'semantic-flow.ts'), flowSource())
-  fs.writeFileSync(path.join(repo, 'src', 'plan-flow.ts'), planSource())
+  fs.writeFileSync(path.join(repo, 'src', 'flow', 'semantic-flow.ts'), flowSource())
+  fs.writeFileSync(path.join(repo, 'src', 'flow', 'plan-flow.ts'), planSource())
   if (options.flow) {
     fs.mkdirSync(path.join(repo, 'apps', 'flow-app'), { recursive: true })
     fs.writeFileSync(path.join(repo, 'apps', 'flow-app', 'flow.json'), JSON.stringify(FLOW_TEMPLATE))
@@ -206,7 +207,7 @@ export const PACKS = {
 }
 
 /**
- * The canned `src/semantic-flow.ts` CLI: mirrors the real one on the points the bridge depends on
+ * The canned `src/flow/semantic-flow.ts` CLI: mirrors the real one on the points the bridge depends on
  * — `--dry` prints an expansion and writes nothing; a real run drops `<app>-<site>-flow-result.json`
  * (+ report.md) in `--out`, with the engine's `line` tally and `profile_path`; every spawn records
  * argv so a spec can prove the site/laya mapping reached the CLI.
@@ -245,7 +246,7 @@ function flowSource(): string {
 }
 
 /**
- * The canned `src/plan-flow.ts` CLI: logs walk noise BEFORE the JSON document (exactly like the
+ * The canned `src/flow/plan-flow.ts` CLI: logs walk noise BEFORE the JSON document (exactly like the
  * real one) and prints the `--json` envelope; with the deployment-off `--allow-dangerous-demo`
  * it exits 1 printing `{"status":"failed"}` — a failed plan is a result, not a crash.
  */

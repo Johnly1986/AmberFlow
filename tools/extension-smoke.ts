@@ -43,15 +43,15 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type BrowserContext, type Page } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
 import {
   DEFAULT_HOST,
   DEFAULT_PORT,
   startPickerServer,
   type PickerLike,
   type PickerServerHandle,
-} from "../src/picker-server.ts";
-import type { PickDecision } from "../src/picker.ts";
+} from "../src/cli/picker-server.ts";
+import type { PickDecision } from "../src/engine/picker.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** `extension/` and `testpages/` live at the repo root, one level above `tools/`. */

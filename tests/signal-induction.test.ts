@@ -9,13 +9,13 @@
  */
 import { chromium } from "playwright";
 import { describe, expect, it } from "vitest";
-import * as browserEnv from "../src/browser-env.ts";
-import { extractElements, urlOf, type PageLike } from "../src/extraction.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { extractElements, urlOf, type PageLike } from "../src/engine/extraction.ts";
 import {
   captureStateView, diffStates, induceSignals, isVolatile, signalReproducible, stableToken,
   type StateView,
-} from "../src/signal-induction.ts";
-import { checkSignal, evalSignalOnState, matchSelector, type SignalSpec } from "../src/signals.ts";
+} from "../src/flow/signal-induction.ts";
+import { checkSignal, evalSignalOnState, matchSelector, type SignalSpec } from "../src/engine/signals.ts";
 
 const PAGES = new URL("../testpages/", import.meta.url).pathname;
 const el = (tag: string, label: string, extra: Record<string, unknown> = {}, scan = 1) =>

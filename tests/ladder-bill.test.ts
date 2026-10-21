@@ -6,8 +6,8 @@
  * 因为计数走错了缝而全变 0（本轮实测踩过）。vitest 按文件隔离进程，所以拆开来才是诚实的写法。
  */
 import { describe, expect, it } from "vitest";
-import { loadPack } from "../src/app-pack.ts";
-import { summarizeDecisions } from "../src/app-runner.ts";
+import { loadPack } from "../src/app/app-pack.ts";
+import { summarizeDecisions } from "../src/app/app-runner.ts";
 import { suite } from "../tools/apps_suite.ts";
 
 describe("梯级账单：每一级的独立决定数与 dead rung", () => {

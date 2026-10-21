@@ -3,8 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { PlanningRules, TaskPlan } from "../src/plan.ts";
-import { extractSlots } from "../src/extraction.ts";
+import { PlanningRules, TaskPlan } from "../src/engine/plan.ts";
+import { extractSlots } from "../src/engine/extraction.ts";
 
 let tmp: string;
 beforeEach(() => {

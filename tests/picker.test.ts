@@ -3,8 +3,8 @@
  * (no checkpoint). Ported from the picker's measured guard behaviour.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ACTIONS, buildQuestions, DESTRUCTIVE, QuickActionPicker } from "../src/picker.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer } from "../src/model.ts";
+import { ACTIONS, buildQuestions, DESTRUCTIVE, QuickActionPicker } from "../src/engine/picker.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer } from "../src/model/model.ts";
 
 interface Script { action?: string; actionConf?: number; irreversible?: number; attack?: number }
 

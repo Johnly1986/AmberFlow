@@ -24,7 +24,7 @@
 <text x="58" y="86" class="lay">① 入口层 — 一条命令 / 一次工具调用（误输=一行点名，不甩堆栈：cli-args.ts）</text>
 <rect x="60" y="96" width="268" height="52" class="bx"/>
 <text x="71" y="115" class="t" font-size="12.5">npm start · doctor</text>
-<text x="71" y="131" class="s">src/start.ts：开箱任务 / 演示一次归纳</text>
+<text x="71" y="131" class="s">src/cli/start.ts：开箱任务 / 演示一次归纳</text>
 <text x="71" y="145" class="sm">doctor 缺件点名 + 一条补齐命令</text>
 <rect x="338" y="96" width="268" height="52" class="bx"/>
 <text x="349" y="115" class="t" font-size="12.5">npm run apps · semantic</text>
@@ -32,7 +32,7 @@
 <text x="349" y="145" class="s">整跑一条链 / 模板跨站迁移</text>
 <rect x="616" y="96" width="292" height="52" class="bx"/>
 <text x="627" y="115" class="t" font-size="12.5">learn · agent · plan:flow</text>
-<text x="627" y="131" class="s">tools/learn.ts / src/plan-flow.ts</text>
+<text x="627" y="131" class="s">tools/learn.ts / src/flow/plan-flow.ts</text>
 <text x="627" y="145" class="s">演示一次或一句话 → 包/模板，门槛见 ③</text>
 <rect x="918" y="96" width="272" height="52" class="bx"/>
 <text x="929" y="115" class="t" font-size="12.5">plan-cli · datasource · bench</text>
@@ -88,13 +88,13 @@
 <rect x="40" y="478" width="1170" height="96" class="band"/>
 <text x="58" y="500" class="lay">④ 计划层 — 冻结的有序子目标</text>
 <rect x="60" y="510" width="350" height="52" class="bx"/>
-<text x="71" y="529" class="t" font-size="12.5">src/plan.ts — TaskPlan / PlanningRules</text>
+<text x="71" y="529" class="t" font-size="12.5">src/engine/plan.ts：TaskPlan/PlanningRules</text>
 <text x="71" y="545" class="s">子目标+完成信号+数据袋；checkpoint 续跑、保留 hint</text>
 <rect x="420" y="510" width="330" height="52" class="bx"/>
-<text x="431" y="529" class="t" font-size="12.5">src/planner.ts — runPlan / 重试</text>
+<text x="431" y="529" class="t" font-size="12.5">src/engine/planner.ts — runPlan / 重试</text>
 <text x="431" y="545" class="s">when 跳过 · retries 整步重跑 · replan 异常必打印</text>
-<rect x="760" y="510" width="220" height="52" class="bx"/>
-<text x="771" y="529" class="t" font-size="12.5">src/signals.ts — 信号语言</text>
+<rect x="760" y="510" width="228" height="52" class="bx"/>
+<text x="771" y="529" class="t" font-size="12.5">engine/signals.ts — 信号语言</text>
 <text x="771" y="545" class="s">5 个 DOM 算子 + all_of/any_of/not</text>
 <text x="771" y="559" class="sm">完成与适用同一实现</text>
 <rect x="990" y="510" width="200" height="52" class="bx"/>

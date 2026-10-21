@@ -15,10 +15,10 @@ import { describe, expect, it } from "vitest";
 import {
   compileFlow, executableInstructionOrder, validateTemplate,
   type CompiledStep, type FlowTemplate, type SiteProfile,
-} from "../src/semantic-flow.ts";
-import { createInstructionMemory } from "../src/semantic-instructions.ts";
-import { LearnedStore } from "../src/semantic.ts";
-import { nominateInstruction } from "../src/nominate.ts";
+} from "../src/flow/semantic-flow.ts";
+import { createInstructionMemory } from "../src/flow/semantic-instructions.ts";
+import { LearnedStore } from "../src/flow/semantic.ts";
+import { nominateInstruction } from "../src/model/nominate.ts";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
@@ -164,7 +164,7 @@ describe("④⑤候选序与梯级端到端（编译产物上）", () => {
 
 /* ------------------------------------------------- 试点 e2e：学 → 摊销 → drift → 再学 */
 
-import { runFlow, type FlowRunResult } from "../src/semantic-flow.ts";
+import { runFlow, type FlowRunResult } from "../src/flow/semantic-flow.ts";
 
 function nominateApp(opts: { actSel: string; instr?: string; gives?: string[]; desc?: string }): { appsDir: string; site: string; profileDir: string; fixAct: () => void } {
   const rows = [[980, "F3"], [1150, "F5"], [1280, "F1"]].map(([pr, fno]) =>
@@ -354,7 +354,7 @@ describe("S2 试点 e2e（真 chromium）：学 → 摊销 → drift 撤下 → 
 
 /* --------------------------------------------- S2 ③ 运行期接线（fake provider，真 chromium） */
 
-import type { DecisionProvider } from "../src/decision-provider.ts";
+import type { DecisionProvider } from "../src/model/decision-provider.ts";
 import { makeFlowApp as makeApp2, PAGE as PAGE2 } from "./fixtures.ts";
 
 /** 只实现 askChoice 的假决策 provider（记录每次请求；可回指定答案/抛错）。 */

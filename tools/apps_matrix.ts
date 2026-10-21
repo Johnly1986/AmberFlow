@@ -11,19 +11,24 @@
  *      不是依赖）。任何一处命中就退出码 1，所以它可以直接当 CI 门禁。
  */
 import fs from "node:fs";
-import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
+import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { appDirs, loadPack, listPacks, packHintCoverage, type AppPack } from "../src/app-pack.ts";
-import { appsOutDir } from "../src/app-runner.ts";
-import { listSources, loadSource } from "../src/datasource.ts";
-import { REPO } from "../src/flow.ts";
+import { appDirs, loadPack, listPacks, packHintCoverage, type AppPack } from "../src/app/app-pack.ts";
+import { appsOutDir } from "../src/app/app-runner.ts";
+import { listSources, loadSource } from "../src/data/datasource.ts";
+import { REPO } from "../src/flow/flow.ts";
 // 运行时两列的出处：**上一次 `apps:suite` 真跑**落下的 `<app>-result.json`（`decisions` 字段）。
 // 矩阵本体仍是静态声明检查；这两列只是把"跑过的证据"拼上表——没跑过显示"未跑"，绝不编数。
 import { suiteOutDir } from "./apps_suite.ts";
 
-const SHARED = fs.readdirSync(path.join(REPO, "src"))
-  .filter((f) => f.endsWith(".ts")).map((f) => path.join(REPO, "src", f));
+function walkTs(dir: string): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = path.join(dir, e.name);
+    return e.isDirectory() ? walkTs(p) : (e.name.endsWith(".ts") ? [p] : []);
+  });
+}
+const SHARED = walkTs(path.join(REPO, "src"));
 
 /**
  * **核心**共享层：应用/站点知识绝不允许出现的地方（引擎 + 执行器 + 计划 + 应用包本身）。
@@ -289,7 +294,7 @@ export function matrix(): {
 
 export function main(argv: string[] = process.argv.slice(2)): number {
   let values;
-  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({ args: argv, options: { json: { type: "boolean" } } }));
   } catch (err) {

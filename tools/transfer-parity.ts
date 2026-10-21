@@ -23,17 +23,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as C from "../src/ctrip-data.ts";
-import * as D2 from "../src/transfer-data2.ts";
-import * as D3 from "../src/transfer-data3.ts";
-import * as D4 from "../src/transfer-data4.ts";
-import * as D5 from "../src/transfer-data5.ts";
-import * as D6 from "../src/transfer-data6.ts";
-import * as D7 from "../src/transfer-data7.ts";
+import * as C from "../src/data/ctrip-data.ts";
+import * as D2 from "../src/data/transfer-data2.ts";
+import * as D3 from "../src/data/transfer-data3.ts";
+import * as D4 from "../src/data/transfer-data4.ts";
+import * as D5 from "../src/data/transfer-data5.ts";
+import * as D6 from "../src/data/transfer-data6.ts";
+import * as D7 from "../src/data/transfer-data7.ts";
 import {
   deriveFlightSubgoals, deriveHotelSubgoals, shape, specRoles, type FlowSpec,
-} from "../src/flow.ts";
-import * as TT from "../src/transfer-task.ts";
+} from "../src/flow/flow.ts";
+import * as TT from "../src/sites/transfer-task.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, "..");

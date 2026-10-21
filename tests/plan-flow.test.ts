@@ -16,9 +16,9 @@ import {
   extractParams, generalizeQuery, generalizeSignalValues, goalRecipePlanner,
   llmFlowPlanner, pickInducedSignal, planFlow, templatePlanner,
   type PlanProposal, type PlanStepRequest,
-} from "../src/plan-flow.ts";
-import { loadTemplate, runFlow } from "../src/semantic-flow.ts";
-import type { StateView } from "../src/signal-induction.ts";
+} from "../src/flow/plan-flow.ts";
+import { loadTemplate, runFlow } from "../src/flow/semantic-flow.ts";
+import type { StateView } from "../src/flow/signal-induction.ts";
 
 const tmpDir = (): string => fs.mkdtempSync(path.join(os.tmpdir(), "plan-flow-"));
 

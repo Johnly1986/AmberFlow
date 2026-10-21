@@ -6,7 +6,7 @@
  *   2. 校验是点名不是点头：不符就失败退出；没给期望值就打印实测 digest 并明说"未校验"；
  *   3. 不覆盖已有（`--force` 才换）；
  *   4. 不留半途态：一组里某件失败 → 本轮新装的兄弟件一起撤回（重跑不必 --force，旧件未动）；
- *   5. 落点与 doctor 同一约定（`src/model-artifacts.ts`）——两处各写一份路径规则正是
+ *   5. 落点与 doctor 同一约定（`src/model/model-artifacts.ts`）——两处各写一份路径规则正是
  *      本仓库反复钉的"双实现漂移"（见 CLAUDE.md 的 hint grammar 教训）。
  *   通道两条腿都测：`file://` 复制 + 真 http server 的分块下载/404/中途断流。
  */
@@ -16,8 +16,8 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { main, resolveSources } from "../src/model-fetch.ts";
-import { checkArtifacts, onnxModelPath } from "../src/model-artifacts.ts";
+import { main, resolveSources } from "../src/model/model-fetch.ts";
+import { checkArtifacts, onnxModelPath } from "../src/model/model-artifacts.ts";
 
 function tmpDir(tag: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), `${tag}-`));

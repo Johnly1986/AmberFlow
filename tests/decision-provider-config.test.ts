@@ -11,7 +11,7 @@
  * 一致）；测试因此操作 process.env 来配 provider，AMBERFLOW_* 走传入的 env。
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resolveProviderSpec } from "../src/decision-provider.ts";
+import { resolveProviderSpec } from "../src/model/decision-provider.ts";
 
 const ENDPOINT = "https://x.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone";
 const KEYS = ["DASHSCOPE_API_KEY", "BAILIAN_API_KEY", "BAILIAN_ENDPOINT", "BAILIAN_WORKSPACE_ID"] as const;

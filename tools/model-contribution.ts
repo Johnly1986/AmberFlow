@@ -26,20 +26,20 @@
  *   - 这个工具**不执行动作**，只问"选哪个"，所以它不改变任何页面。
  */
 import fs from "node:fs";
-import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
+import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { chromium, type Page } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/executor.ts";
-import { esig, extractElements, type Elem, type ElemPool } from "../src/extraction.ts";
-import { createLayaOnnxRuntime } from "../src/laya-onnx.ts";
-import { installLayaRuntime } from "../src/model.ts";
-import { checkArtifacts, missingPieces, onnxModelPath } from "../src/model-artifacts.ts";
-import { hintMatch } from "../src/rules.ts";
-import { expandPack, listPacks, loadPack, type ExpandedStep } from "../src/app-pack.ts";
-import { startUrl } from "../src/app-runner.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/engine/executor.ts";
+import { esig, extractElements, type Elem, type ElemPool } from "../src/engine/extraction.ts";
+import { createLayaOnnxRuntime } from "../src/model/laya-onnx.ts";
+import { installLayaRuntime } from "../src/model/model.ts";
+import { checkArtifacts, missingPieces, onnxModelPath } from "../src/model/model-artifacts.ts";
+import { hintMatch } from "../src/engine/rules.ts";
+import { expandPack, listPacks, loadPack, type ExpandedStep } from "../src/app/app-pack.ts";
+import { startUrl } from "../src/app/app-runner.ts";
 
 const REPO = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 
@@ -75,7 +75,7 @@ const oneLine = (el: Elem): string => `${el.tag} "${el.label}"${el.id ? ` #${el.
 
 async function main(argv: string[]): Promise<number> {
   let values;
-  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
     args: argv,

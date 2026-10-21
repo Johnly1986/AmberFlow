@@ -15,7 +15,7 @@ import { StringDecoder } from 'node:string_decoder'
 
 /** Resolved deployment options (defaults already applied). */
 export interface BridgeOptions {
-  /** Absolute path of the AmberFlow checkout that owns `src/app-runner.ts`. */
+  /** Absolute path of the AmberFlow checkout that owns `src/app/app-runner.ts`. */
   repoPath: string
   /** Node binary used to run the CLI (defaults to the running interpreter). */
   nodeBin: string
@@ -367,7 +367,7 @@ export function listApps(repoPath: string, env: NodeJS.ProcessEnv = process.env)
     if (!fs.existsSync(file)) {
       // A SemanticFlow template (spec_version 2, site-agnostic): a different family in the SAME
       // directory listing, so the model sees exactly one app surface. It runs through the
-      // checkout's `src/semantic-flow.ts` with a `site`, and `src/plan-flow.ts` grows its per-site
+      // checkout's `src/flow/semantic-flow.ts` with a `site`, and `src/flow/plan-flow.ts` grows its per-site
       // profile — the listing is what tells the model which door a given id belongs to.
       const flowFile = path.join(dir, entry.name, 'flow.json')
       if (fs.existsSync(flowFile)) {
@@ -474,7 +474,7 @@ export function runArgs(
     slots?: Record<string, string>
   },
 ): string[] {
-  const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []), '--experimental-strip-types', path.join(options.repoPath, 'src', 'app-runner.ts')]
+  const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []), '--experimental-strip-types', path.join(options.repoPath, 'src', 'app', 'app-runner.ts')]
   argv.push('--app', args.app, '--out', args.outDir)
   if (args.dry) argv.push('--dry')
   if (args.headful) argv.push('--headful')
@@ -516,7 +516,7 @@ export function learnArgs(
 }
 
 /**
- * The argv for one semantic-flow run (`src/semantic-flow.ts`): the same tool contract as packs,
+ * The argv for one semantic-flow run (`src/flow/semantic-flow.ts`): the same tool contract as packs,
  * dispatched to the site-agnostic template. `ablate` maps to the engine's ablation planes
  * (`--laya none --escalate none` — SiteProfile hints, rules, and list steps only); anything else
  * runs the real decision model (`--laya onnx`) with the LLM teacher (`--escalate llm`), and the
@@ -541,7 +541,7 @@ export function flowRunArgs(
   },
 ): string[] {
   const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []),
-    '--experimental-strip-types', path.join(options.repoPath, 'src', 'semantic-flow.ts')]
+    '--experimental-strip-types', path.join(options.repoPath, 'src', 'flow', 'semantic-flow.ts')]
   argv.push('--app', args.app, '--site', args.site, '--out', args.outDir, '--quiet')
   if (args.dry) argv.push('--dry')
   if (args.headful) argv.push('--headful')
@@ -555,7 +555,7 @@ export function flowRunArgs(
 }
 
 /**
- * The argv for one plan call (`src/plan-flow.ts`): goal + seed → template + site profile, gated by
+ * The argv for one plan call (`src/flow/plan-flow.ts`): goal + seed → template + site profile, gated by
  * a replay before anything is written. `--json --yes` is what makes it a single machine call — the
  * interactive door (per-step y/n) is not available to a tool, and the dangerous-step demo gate is
  * engine-side: `--allow-dangerous-demo` only for fixtures/sandboxes.
@@ -578,7 +578,7 @@ export function planArgs(
   },
 ): string[] {
   const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []),
-    '--experimental-strip-types', path.join(options.repoPath, 'src', 'plan-flow.ts'), '--json', '--yes']
+    '--experimental-strip-types', path.join(options.repoPath, 'src', 'flow', 'plan-flow.ts'), '--json', '--yes']
   argv.push('--goal', args.goal, '--seed', args.seed, '--app', args.app)
   if (args.site) argv.push('--site', args.site)
   if (args.force) argv.push('--force')

@@ -1,7 +1,7 @@
 /** Signal language tests — ported from test_middleware.py + one new unknown-op case. */
 import { describe, expect, it } from "vitest";
-import { checkSignal, SIGNAL_OPS, signalArgs } from "../src/signals.ts";
-import type { LocLike, PageLike } from "../src/extraction.ts";
+import { checkSignal, SIGNAL_OPS, signalArgs } from "../src/engine/signals.ts";
+import type { LocLike, PageLike } from "../src/engine/extraction.ts";
 
 const fakePage = (url: string): PageLike => ({ url });
 

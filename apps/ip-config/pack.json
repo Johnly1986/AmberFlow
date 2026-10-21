@@ -228,7 +228,7 @@
     "已知边界：不变量只看 CAM-1003 的结束状态；前三台设备的保存成功由各自的子目标信号保证（[data-test=save-ok] 同时含「已保存」与**这一行**的 IP），那不是结束状态事实。"
   ],
   "generated_from": {
-    "source": "src/ip-config.ts#buildAppPlan",
+    "source": "src/cli/ip-config.ts#buildAppPlan",
     "plan_sha256": "aa35f078d9c584f9c0b25c3a9b1d109c5172b6010e076c374a6fee61ffbe4342"
   }
 }

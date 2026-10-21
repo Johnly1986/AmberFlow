@@ -7,14 +7,14 @@
  */
 import { afterAll, describe, expect, it } from "vitest";
 import { chromium } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import { BrowserMiddleware } from "../src/executor.ts";
-import { TaskPlan, PlanningRules } from "../src/plan.ts";
-import { runPlan } from "../src/planner.ts";
-import { checkSignal, evalSignalOnState } from "../src/signals.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { BrowserMiddleware } from "../src/engine/executor.ts";
+import { TaskPlan, PlanningRules } from "../src/engine/plan.ts";
+import { runPlan } from "../src/engine/planner.ts";
+import { checkSignal, evalSignalOnState } from "../src/engine/signals.ts";
 import {
   installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question,
-} from "../src/model.ts";
+} from "../src/model/model.ts";
 
 const PAGES = new URL("../testpages/", import.meta.url).pathname;
 const url = (f: string): string => `file://${PAGES}${f}`;

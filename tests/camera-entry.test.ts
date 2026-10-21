@@ -9,8 +9,8 @@ import { describe, expect, it } from "vitest";
 import {
   DEMO_ROWS, FORMS, PAGES, TYPE_TO_FORM, XLSX, decideForm, fillForm, main, route, shortReason,
   type RouterWithPredict,
-} from "../src/camera-entry.ts";
-import type { ChoiceAnswer, NoulAnswer } from "../src/model.ts";
+} from "../src/cli/camera-entry.ts";
+import type { ChoiceAnswer, NoulAnswer } from "../src/model/model.ts";
 
 const html = (f: string): string => fs.readFileSync(path.join(PAGES, f), "utf-8");
 
@@ -178,7 +178,7 @@ function scriptedRouter(): RouterWithPredict {
 /** Minimal Playwright page helper (Node API: `.first` is a method). */
 async function openPage(file: string) {
   const { chromium } = await import("playwright");
-  const browserEnv = await import("../src/browser-env.ts");
+  const browserEnv = await import("../src/browser/browser-env.ts");
   const browser = (await browserEnv.launch({ chromium } as never)) as unknown as {
     newPage(): Promise<unknown>; close(): Promise<void>;
   };

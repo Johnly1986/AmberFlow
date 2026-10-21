@@ -15,9 +15,9 @@
  */
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { BrowserMiddleware } from "../src/executor.ts";
-import { checkSignal } from "../src/signals.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question } from "../src/model.ts";
+import { BrowserMiddleware } from "../src/engine/executor.ts";
+import { checkSignal } from "../src/engine/signals.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question } from "../src/model/model.ts";
 
 afterAll(() => installLayaRuntime(null));
 

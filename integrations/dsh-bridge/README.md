@@ -99,7 +99,7 @@ summarizes the artifacts the CLI wrote.
 - `amberflow_apps` reads `apps/<id>/pack.json` files only: no browser, no model, no subprocess. A
   directory with no `pack.json` but a `sources/` tree is a **pure data source** and is listed with
   origin `data-source`, because other packs reference it by name.
-- `amberflow_run` spawns `src/app-runner.ts --app <id> --out <dir>` and reads `<id>-result.json`.
+- `amberflow_run` spawns `src/app/app-runner.ts --app <id> --out <dir>` and reads `<id>-result.json`.
   The summary lists failures only; the full per-step table stays in `<id>-report.md`, which the
   result names so a caller can read it when the detail matters. `dry` expands the plan and returns
   it: that run writes no artifact and verifies nothing, so it is reported as an expansion rather

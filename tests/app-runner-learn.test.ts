@@ -12,10 +12,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { loadPack } from "../src/app-pack.ts";
-import { runApp } from "../src/app-runner.ts";
-import { createHintMemory } from "../src/hint-memory.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer } from "../src/model.ts";
+import { loadPack } from "../src/app/app-pack.ts";
+import { runApp } from "../src/app/app-runner.ts";
+import { createHintMemory } from "../src/model/hint-memory.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer } from "../src/model/model.ts";
 import { matrix } from "../tools/apps_matrix.ts";
 
 afterAll(() => installLayaRuntime(null));

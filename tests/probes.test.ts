@@ -18,13 +18,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import * as D from "../src/datasource.ts";
-import * as H from "../src/h5-flights.ts";
-import * as LC from "../src/live-capture.ts";
-import * as LP from "../src/live-probe.ts";
-import * as OTA from "../src/ota-probe.ts";
-import * as P from "../src/profiles.ts";
-import type { ElemPool } from "../src/extraction.ts";
+import * as D from "../src/data/datasource.ts";
+import * as H from "../src/data/h5-flights.ts";
+import * as LC from "../src/sites/live-capture.ts";
+import * as LP from "../src/sites/live-probe.ts";
+import * as OTA from "../src/sites/ota-probe.ts";
+import * as P from "../src/data/profiles.ts";
+import type { ElemPool } from "../src/engine/extraction.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, "..");

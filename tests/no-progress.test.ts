@@ -17,10 +17,10 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/executor.ts";
-import { installLayaRuntime, scriptedRuntime, scriptedAgent } from "../src/model.ts";
-import { checkSignal } from "../src/signals.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/engine/executor.ts";
+import { installLayaRuntime, scriptedRuntime, scriptedAgent } from "../src/model/model.ts";
+import { checkSignal } from "../src/engine/signals.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const DEAD = pathToFileURL(path.join(REPO, "testpages", "dead-target.html")).href;

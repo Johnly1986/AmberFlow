@@ -14,11 +14,11 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import * as browserEnv from "../src/browser-env.ts";
-import { BrowserMiddleware, type AnyPage } from "../src/executor.ts";
-import { checkSignal } from "../src/signals.ts";
-import { installLayaRuntime } from "../src/model.ts";
-import { installDecisionProvider, type ChoiceOutcome, type ChoiceRequest, type DecisionProvider } from "../src/decision-provider.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { BrowserMiddleware, type AnyPage } from "../src/engine/executor.ts";
+import { checkSignal } from "../src/engine/signals.ts";
+import { installLayaRuntime } from "../src/model/model.ts";
+import { installDecisionProvider, type ChoiceOutcome, type ChoiceRequest, type DecisionProvider } from "../src/model/decision-provider.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const PRODUCT = pathToFileURL(path.join(REPO, "testpages", "product.html")).href;

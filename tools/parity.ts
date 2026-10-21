@@ -11,8 +11,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractSlots, type ElemPool } from "../src/extraction.ts";
-import { affordanceRule, hintMatch, navRule } from "../src/rules.ts";
+import { extractSlots, type ElemPool } from "../src/engine/extraction.ts";
+import { affordanceRule, hintMatch, navRule } from "../src/engine/rules.ts";
 
 interface Case {
   name: string;

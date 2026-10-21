@@ -1,6 +1,6 @@
 /** Auditor tests — ported from the Python behaviour (mock verdicts + env gate). */
 import { afterEach, describe, expect, it } from "vitest";
-import { getAuditor, LLMAuditor, MockAuditor } from "../src/audit.ts";
+import { getAuditor, LLMAuditor, MockAuditor } from "../src/engine/audit.ts";
 
 afterEach(() => {
   delete process.env.OPENAI_API_KEY;

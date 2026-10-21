@@ -16,15 +16,15 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import * as browserEnv from "../src/browser-env.ts";
-import { BrowserMiddleware, type AnyPage } from "../src/executor.ts";
-import { extractElements, type ElemPool } from "../src/extraction.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime, type DecisionAgent, type LayaRuntime, type ModelState } from "../src/model.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { BrowserMiddleware, type AnyPage } from "../src/engine/executor.ts";
+import { extractElements, type ElemPool } from "../src/engine/extraction.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime, type DecisionAgent, type LayaRuntime, type ModelState } from "../src/model/model.ts";
 import { providerContract } from "./provider-contract.ts";
 import {
   layaProvider, listDecisionProviders, registerDecisionProvider, installProviderFromEnv,
   installDecisionProvider, type ChoiceRequest, type ChoiceOutcome, type DecisionProvider,
-} from "../src/decision-provider.ts";
+} from "../src/model/decision-provider.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const PAGE_URL = pathToFileURL(path.join(REPO, "testpages", "product.html")).href;
@@ -193,8 +193,8 @@ describe("askChoice：对调用方给定的闭集做一次 choice（不依赖页
 
   it("契约：没有 askChoice 的 provider 就是没有这个能力（调用方不得假装问过）", async () => {
     // 内置基线是 provider，但只实现 pick/risk/done（无闭集选择）——梯级遇到它就该 ③ 弃权。
-    const { registerBaselines } = await import("../src/decision-baselines.ts");
-    const { listDecisionProviders, resolveProviderSpec } = await import("../src/decision-provider.ts");
+    const { registerBaselines } = await import("../src/model/decision-baselines.ts");
+    const { listDecisionProviders, resolveProviderSpec } = await import("../src/model/decision-provider.ts");
     registerBaselines();
     expect(listDecisionProviders()).toContain("coin-flip");
     const spec = await resolveProviderSpec("coin-flip", {});
@@ -205,8 +205,8 @@ describe("askChoice：对调用方给定的闭集做一次 choice（不依赖页
 
 describe("applySpecToRuntime：唯一的安装序列（apps/suite/start/bench 四门同一扇门）", () => {
   it("三种 kind 的形状；每次先把两扇全局清干净（残留不许悄悄改变这一跑的决策源）", async () => {
-    const { applySpecToRuntime, resolveProviderSpec, activeProviderInfo } = await import("../src/decision-provider.ts");
-    const { getLayaRuntime, installLayaRuntime } = await import("../src/model.ts");
+    const { applySpecToRuntime, resolveProviderSpec, activeProviderInfo } = await import("../src/model/decision-provider.ts");
+    const { getLayaRuntime, installLayaRuntime } = await import("../src/model/model.ts");
     const providerSpec = await resolveProviderSpec("first-candidate");
     await applySpecToRuntime(providerSpec);
     expect(activeProviderInfo()?.name).toBe("first-candidate");

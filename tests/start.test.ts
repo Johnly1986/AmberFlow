@@ -13,12 +13,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { demoSucceeded, doctorReport, main, preflight, type Io, type Preflight } from "../src/start.ts";
-import type { ModelArtifacts } from "../src/model-artifacts.ts";
-import { BrowserMiddleware } from "../src/executor.ts";
-import { checkSignal } from "../src/signals.ts";
-import { installLayaRuntime } from "../src/model.ts";
-import { checkArtifacts } from "../src/model-artifacts.ts";
+import { demoSucceeded, doctorReport, main, preflight, type Io, type Preflight } from "../src/cli/start.ts";
+import type { ModelArtifacts } from "../src/model/model-artifacts.ts";
+import { BrowserMiddleware } from "../src/engine/executor.ts";
+import { checkSignal } from "../src/engine/signals.ts";
+import { installLayaRuntime } from "../src/model/model.ts";
+import { checkArtifacts } from "../src/model/model-artifacts.ts";
 
 afterAll(() => installLayaRuntime(null));
 

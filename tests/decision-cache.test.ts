@@ -12,10 +12,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { withDecisionCache } from "../src/decision-cache.ts";
+import { withDecisionCache } from "../src/model/decision-cache.ts";
 import {
   installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question,
-} from "../src/model.ts";
+} from "../src/model/model.ts";
 
 const STATE = { goal: "add to cart", url: "https://x/p", title: "P", main_text: "mouse" };
 const QUESTIONS = {

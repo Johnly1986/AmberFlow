@@ -3,7 +3,7 @@
   "LONG-FLOW pack: 3 real production sites, 34 subgoals, no credentials, no payments.",
   "Deliberately NOT part of bench/smoke.sh (these platforms are external and slow/flaky).",
   "Run with",
-  "  node --experimental-strip-types src/bench.ts --cases bench/cases-live-long.json --mode-tag live-long",
+  "  node --experimental-strip-types src/cli/bench.ts --cases bench/cases-live-long.json --mode-tag live-long",
   "Each case is ONE long journey rather than the single-click shapes of",
   "bench/cases-live.json, so it exercises what a short case cannot: state that must",
   "survive a re-goto (a server-side cart), a subgoal that needs SEVERAL actions",

@@ -15,10 +15,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { appReportMarkdown, runApp } from "../src/app-runner.ts";
-import { loadPack } from "../src/app-pack.ts";
-import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
-import { withDecisionCache } from "../src/decision-cache.ts";
+import { appReportMarkdown, runApp } from "../src/app/app-runner.ts";
+import { loadPack } from "../src/app/app-pack.ts";
+import { countingRuntime, installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
+import { withDecisionCache } from "../src/model/decision-cache.ts";
 import { matrix } from "../tools/apps_matrix.ts";
 import { runOne, suite, suiteOutDir } from "../tools/apps_suite.ts";
 

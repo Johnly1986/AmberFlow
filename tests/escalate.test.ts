@@ -12,13 +12,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { chromium } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import { BrowserMiddleware, type EscalationRequest } from "../src/executor.ts";
-import { checkSignal } from "../src/signals.ts";
-import { llmEscalator } from "../src/planner.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { BrowserMiddleware, type EscalationRequest } from "../src/engine/executor.ts";
+import { checkSignal } from "../src/engine/signals.ts";
+import { llmEscalator } from "../src/engine/planner.ts";
 import {
   installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question,
-} from "../src/model.ts";
+} from "../src/model/model.ts";
 
 afterAll(() => installLayaRuntime(null));
 

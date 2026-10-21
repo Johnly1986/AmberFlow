@@ -20,7 +20,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkVersion, cliRun, cliVersion, CLI_KEYS, extract, EXTRACT_KINDS, loadSource, runSource,
   sourceDirs, TRANSPORTS, validateSource, type Source,
-} from "../src/datasource.ts";
+} from "../src/data/datasource.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const STUB = "apps/demo-tool/bin/stub-tool.mjs";
@@ -306,7 +306,7 @@ describe("runSource：CLI 工具走完整条数据源链路", () => {
   it.skipIf(!hasTool("jq"))("非价格型数据源的报告不再打出 None（选择项按 sort_by 的第一个键渲染）", async () => {
     const res = await runSource(loadSource("bench-cases-shape"), ["2026-10-03"],
       { today: "2026-10-03", verbose: false });
-    const md = (await import("../src/datasource.ts")).reportMarkdown(loadSource("bench-cases-shape"), res.dates);
+    const md = (await import("../src/data/datasource.ts")).reportMarkdown(loadSource("bench-cases-shape"), res.dates);
     expect(md.startsWith("# ")).toBe(true);            // 报告正常产出
     expect(md).not.toContain("**None**");
     expect(md).toContain("- 抓取通道：`cli`（`jq`");
@@ -364,7 +364,7 @@ describe("发现制：新应用 = 新目录，引擎不加站点/工具知识", 
   });
 
   it("引擎源码（剥掉块注释）里没有具体工具名——工具名只许出现在配置和注释里", () => {
-    const src = fs.readFileSync(path.join(REPO, "src", "datasource.ts"), "utf-8");
+    const src = fs.readFileSync(path.join(REPO, "src", "data", "datasource.ts"), "utf-8");
     const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, " ");
     expect(codeOnly.length).toBeLessThan(src.length);
     for (const tool of ['"git"', "'git'", '"jq"', "'jq'", "ffprobe", "yt-dlp", "pandoc", "sha256sum"]) {

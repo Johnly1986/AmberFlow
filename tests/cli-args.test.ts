@@ -1,5 +1,5 @@
 /**
- * CLI 用法错误必须走**一行点名**，不是堆栈（src/cli-args.ts 的体例）。
+ * CLI 用法错误必须走**一行点名**，不是堆栈（src/support/cli-args.ts 的体例）。
  *
  * 缺陷来源：开箱测试轮实测——`npm start -- --out /tmp/x`、`plan-cli add` 的坏信号、
  * `apps -- --ap` 打错选项，全部把 parseArgs 的 TypeError 整段甩给第一次用的人。
@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { parseArgs } from "node:util";
-import { isParseUsageError, renamedHint, usageErrorLine } from "../src/cli-args.ts";
+import { isParseUsageError, renamedHint, usageErrorLine } from "../src/support/cli-args.ts";
 
 describe("cli-args — a typo'd flag is a one-liner, not a stack trace", () => {
   it("recognizes Node's usage-error codes", () => {

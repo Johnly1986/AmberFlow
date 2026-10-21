@@ -6,7 +6,7 @@
  */
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadPack, validatePack, type AppPack } from "../src/app-pack.ts";
+import { loadPack, validatePack, type AppPack } from "../src/app/app-pack.ts";
 import {
   DEFAULT_FROM, baselineOf, diffPack, readRecord, verdictsOf,
 } from "../tools/probe-baseline.ts";

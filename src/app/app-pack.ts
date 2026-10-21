@@ -1,0 +1,878 @@
+/**
+ * 应用包（`apps/<app>/pack.json`）—— 应用层的一份声明，零共享代码改动。
+ *
+ * 一个应用包把三样东西绑在一起：
+ *   1. **动作腿**：`journey` 用**角色**（`roles` 里的模板）串起来的一条旅程，展开成冻结计划
+ *      （`TaskPlan`）交给唯一的生产执行器；
+ *   2. **数据腿**：`sources` 引用 `<dir>/sources/*.json` 里的数据源（HTTP 或 CLI 通道），
+ *      由 `src/data/datasource.ts` 的同一套引擎跑；
+ *   3. **验收**：`invariants` 是旅程**结束状态**上的断言（不是子目标信号的重复），
+ *      以及 `slots`/`required_slots` 这套"值只来自计划"的数据袋。
+ *
+ * 三条纪律：
+ *   - **发现制**：`apps/<id>/pack.json` 扫出来，没有中央清单；
+ *   - **加载期校验**：未知键、未知角色、未知占位符、缺必填槽位、坏信号全部在加载时炸
+ *     （信号复用 `PlanningRules.problems`，与冻结计划同一套校验）；
+ *   - **占位符只替换已声明的槽位**（`{coupon}`），其余花括号原样保留——工具参数/JSON 里
+ *     花括号太多，宽松口径才不会误伤。
+ */
+import fs from "node:fs";
+import path from "node:path";
+import { appsSearchPath } from "./amberflow-home.ts";
+import { REPO } from "../flow/flow.ts";
+import { PlanningRules, TaskPlan, type Subgoal } from "../engine/plan.ts";
+import type { SignalSpec } from "../engine/signals.ts";
+import {
+  CLI_STEP_KEYS, SHARED_STEP_KEYS, WEB_STEP_KEYS,
+  getAppAdapter, listAppAdapterObjects, type AppAdapter, type ProcessStepDecl,
+} from "./app-adapters.ts";
+import { validateProbeBlock } from "./probe-set.ts";
+import { loadSource } from "../data/datasource.ts";
+import { extractSlots } from "../engine/extraction.ts";
+
+export const APPS_DIR = path.join(REPO, "apps");
+export const SPEC_VERSION = 1;
+
+/**
+ * **运行期占位符**：由运行器提供，不属于计划的数据袋（值是"写到哪儿"，不是业务数据）。
+ * 目前只有 `{out_dir}`（本次运行的输出目录）——不可逆动作的产物几乎总要落到一个运行期目录里，
+ * 写死绝对路径会让应用包换台机器就不可跑。
+ */
+export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = {
+  out_dir: "{out_dir}",
+  /**
+   * G-K：**每次运行唯一**的标识。`{out_dir}` 是跨运行复用的，所以把"跨调用的状态"（重试计数、
+   * 临时锁、一次性令牌）写在 out_dir 里会让**第二次运行的行为与第一次不同**——实测：
+   * `cli-report` 的"前两次失败"在同一条命令第二次执行时第一次尝试就通过了，验收变成了
+   * 不可复现。要跨调用有状态又不想污染运行之间，就用 `{run_id}`。
+   */
+  run_id: "{run_id}",
+};
+
+/** 包级允许的键；未知键在加载期报错（配置写错了要响亮，不静默）。 */
+export const PACK_KEYS = [
+  "spec_version", "id", "label", "goal", "model", "max_subgoals", "hosts",
+  "slots", "required_slots", "sources", "roles", "journey", "invariants", "notes", "probe", "device",
+  "max_step_visits", "generated_from", "recorded_from", "policy",
+] as const;
+
+/**
+ * **运行策略可以声明**（docs/ARCHITECTURE_IMPROVEMENTS.md §3）。
+ *
+ * 配置面以前被劈成两半："应用是什么"在包里，"这次怎么跑"只在命令行——于是同一个包的含义随
+ * 命令行变，而 `tieredHint`（窄问）这类**属于站点知识**的开关，包作者根本没法为自己的包打开。
+ * 现在包级可以声明这些策略；**缺省 = 今天的行为**（不写 policy 的包逐字节不变），
+ * CLI 显式参数只覆盖本次运行，报告打印生效值与来源。
+ */
+export const POLICY_KEYS = [
+  "tiered_hint", "risk_ask", "reobserve", "max_effective_repeats", "conf_floor",
+] as const;
+
+/**
+ * `risk_ask`：值不值得为"要不要拦"花一次模型前向。
+ * `always` = 今天（非关键词动作每一步都问）；`rules-only` = 只信 `DESTRUCTIVE_PATTERNS`。
+ * 批量运行里 `confirmFn` 默认一律放行 ⇒ 这次前向的答案没人看，`rules-only` 就是把它省下来。
+ */
+export const RISK_ASK_MODES = ["always", "rules-only"] as const;
+
+export interface PackPolicy {
+  tiered_hint?: boolean;
+  risk_ask?: (typeof RISK_ASK_MODES)[number];
+  reobserve?: boolean;
+  max_effective_repeats?: number;
+  /**
+   * 置信度闸门（缺省 0.25）。**为什么要能声明**：闸门比的是 provider 的 `score`，而
+   * `score_kind` 不同的两支不可比（laya 的归一化熵 vs 在线服务的标定概率）——
+   * 换 provider 时 0.25 的含义就变了（实测：token-plan 在 camera-entry 上有一枪 0.20
+   * 被硬阻塞，而 0.20 是它自己的"把握"刻度）。优先级：CLI > pack.policy > provider 自报 > 0.25。
+   */
+  conf_floor?: number;
+}
+
+/**
+ * `device` 允许的键（与 `DeviceSpec` 一一对应）。理由是**只有手机版页面存在**的站点：
+ * 桌面 UA/视口下 DOM 不同、计划点名的目标不在池里，hint 必然落空。设备是站点知识，所以进声明面；
+ * 未知键在加载期报错（写错了要响亮）。
+ */
+export const DEVICE_KEYS = [
+  "user_agent", "viewport", "is_mobile", "has_touch", "locale", "timezone", "device_scale_factor",
+] as const;
+
+/**
+ * 旅程里一步允许的键。**单一出处** = 共享键 + 各应用支持器的专属键（`src/app/app-adapters.ts`）。
+ * 写错类型/写了别的类型的键，加载期就红（"写了没用"不存在）。
+ */
+export const STEP_KEYS = [...SHARED_STEP_KEYS, ...WEB_STEP_KEYS, ...CLI_STEP_KEYS, "adjudicate"] as const;
+// 兼容导出（历史导入面）
+export { EFFECT_KEYS } from "./app-adapters.ts";
+
+/**
+ * **当前已注册适配器的全部步键**（动态）：共享键 + 每个适配器的专属键 + `adjudicate`。
+ * 校验用这个而不是 `STEP_KEYS` 常量——注册一个新类型后，它的键立刻成为合法键。
+ */
+export function appStepKeys(): string[] {
+  return [...new Set([
+    ...SHARED_STEP_KEYS,
+    ...listAppAdapterObjects().flatMap((a) => [...a.stepKeys]),
+    "adjudicate",
+  ])];
+}
+export type { ProcessStepDecl };
+
+
+// 类型归属在 `plan.ts`（步骤语法的一部分）；这里只保留校验用的键集。
+export type { StepEffect } from "../engine/plan.ts";
+
+/**
+ * 展开后的一步。`adapter` 是**类型抽象**（`web` / `cli` / 将来的 `ssh` / `stdio`…），
+ * `decl` 是该适配器自己的声明值；`kind` 只是既有消费者的**兼容视图**（browser/tool）。
+ */
+export interface ExpandedStep {
+  index: number;
+  /** 应用支持器 id（`step.adapter` 显式声明，或按 `source` 推断）。 */
+  adapter: string;
+  /** 兼容视图：web → browser；其它（进程类）→ tool。 */
+  kind: "browser" | "tool";
+  desc: string;
+  role: string | null;
+  /** 步名字（P4：`next` 的落点；此前是死字段）。未声明就是 `null`。 */
+  id: string | null;
+  /** P4 声明式后继：有序候选步 id（无可走就自然顺序）。 */
+  next: string[];
+  /** 适配器自己的声明值（web = Subgoal；cli = ProcessStepDecl）。 */
+  decl: unknown;
+  /** 浏览器步：交给唯一执行器的子目标 */
+  subgoal?: Subgoal;
+  /** 工具步：命令行动作腿的调用参数（signal 是进程观察面的信号） */
+  tool?: ProcessStepDecl;
+}
+
+/**
+ * 结束状态不变量（Slice 4 起**类型无关**）。
+ *
+ * 不写 `adapter` = web 不变量（在浏览器结束态上求值；既有包的语义与产物逐字节不变）。
+ * 写了 `adapter`（cli/ssh/stdio…）= 该类型的**只读观察探针**：旅程结束后用同样的进程观察信号
+ * 验一次（例如 ssh 检查远端文件还在、cli 检查错误路径仍可观察）。探针必须是只读观察——
+ * 加载期拒绝 `dangerous`/`retries`，但"任意命令是否只读"无法由 schema 证明，属于声明责任。
+ */
+export interface AppInvariant {
+  id: string;
+  desc?: string;
+  /** 缺省 = web（浏览器结束态）；否则用该应用支持器做一次只读观察探针。 */
+  adapter?: string;
+  signal: SignalSpec | Record<string, unknown>;
+  /** 展开期填：非 web 不变量的适配器声明值（web 不变量没有）。 */
+  decl?: unknown;
+}
+
+export interface AppPack {
+  /** §3：运行策略声明（缺省 = 今天的行为；未知键加载期报错）。 */
+  policy?: PackPolicy;
+  spec_version: number;
+  id: string;
+  label: string;
+  goal: string;
+  model?: string;
+  max_subgoals?: number;
+  /**
+   * P4：`next` 边的**路径上界**——同一个步 id 在一次运行里最多进入几次（默认 3）。
+   * 环不会挂死：到顶就是结构化停因（`next_cycle`），点名是哪一步、走了几次。
+   */
+  max_step_visits?: number;
+  hosts?: string[];
+  slots?: Record<string, unknown>;
+  required_slots?: string[];
+  sources?: string[];
+  roles?: Record<string, Record<string, unknown>>;
+  journey: Array<Record<string, unknown>>;
+  /**
+   * 这个包是**生成的**：`{ spec, plan_sha256 }`（见 `tools/spec-to-pack.ts`）。
+   *
+   * 它把"对齐"从"两处独立写的东西互验"变成一个构造性质：旅程 = `emitPlan(spec)` 的展开结果，
+   * 而 `plan_sha256` 是展开内容的指纹——改包、改 spec 都会让 `npm run apps:gen -- --check` 变红。
+   * 人写的部分（`invariants` / `notes`）仍然是这个包的一部分，生成器只搬运、不发明。
+   */
+  generated_from?:
+    | { spec: string; plan_sha256: string }
+    | { source: string; plan_sha256: string };
+  /**
+   * 这个包是**演示一次录下来的**（`npm run learn`）：`{ url, steps, sha256 }`。
+   *
+   * 与 `generated_from` 同族：都是"这份文件从哪来"的血统，让 `--check`/回放能判漂移。
+   * 区别在于上游——`generated_from` 的上游是 spec/代码，`recorded_from` 的上游是**一次真实演示**
+   * （人做了一遍，或外层 Agent 带着 goal+url 让它跑了一遍）。**故意不带时间戳**：冻结语料不许依赖时钟。
+   */
+  recorded_from?: { url: string; steps: number; sha256: string };
+  /** 浏览器设备面（只有手机版页面存在的站点必须声明它；见 `executor.DeviceSpec`）。 */
+  device?: Record<string, unknown>;
+  /**
+   * 探针集（测量型应用）：声明要测哪些 URL、站点特征、结果目录。站点知识的**唯一**合法
+   * 去处——驱动只剩"怎么测"。校验见 `probe-set.validateProbeBlock`（含"每个 URL 的主机都
+   * 必须在 `hosts` 里"，否则防泄漏门禁会漏掉它）。
+   */
+  probe?: Record<string, unknown>;
+  invariants?: AppInvariant[];
+  notes?: string[];
+  /** 加载器写入：这个包的文件路径（报告用）。 */
+  _path?: string;
+}
+
+const isDict = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** `apps/<id>/pack.json` 的目录（发现制）。
+ *  P0-6（前提 A）：扫 **用户目录 → 仓库夹具** 两段路径，同 id 用户目录赢——
+ *  应用是用户本地产物，仓库 `apps/` 只是开发夹具；但仓库目录永远在搜索路径里，
+ *  `npm run apps -- --list` 的既有清单不因这次改动少一个包。 */
+export function appDirs(): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const base of appsSearchPath(APPS_DIR)) {
+    let names: string[];
+    try {
+      names = fs.readdirSync(base);
+    } catch {
+      continue;                              // 用户目录还没建出来：正常，跳过
+    }
+    for (const n of names.sort()) {
+      if (seen.has(n)) continue;             // 同名包：用户目录覆盖仓库夹具
+      const p = path.join(base, n, "pack.json");
+      try {
+        if (!fs.statSync(p).isFile()) continue;
+      } catch {
+        continue;                            /* 没有 pack.json 的目录（比如只有 sources 的）不算应用包 */
+      }
+      seen.add(n);
+      out.push(path.join(base, n));
+    }
+  }
+  return out;
+}
+
+/** 已发现的应用包：`[id, label, path]`，按 id 排序。 */
+/**
+ * 这个包的**浏览器步里有多少点名了目标**。两个数，别混：
+ *
+ *   - `hinted` —— 用 `target_hint` / `target_hints` 点名的（审查文档里"98.8% 手写了目标"说的是这个）；
+ *   - `named`  —— **由声明解决、不依赖模型兜底**的：`hinted` 加上用 `commands` 命令闭集点名的步
+ *     （P2 那类步明确"绝不退回全池、绝不问模型"，所以它同样是声明在承重）。
+ *
+ * 为什么放在这里、并且只有一份实现：这两个数被 `apps:suite` 的列、`apps:matrix`、
+ * `tools/arch-metrics.ts` 与两张图同时引用——它们一旦有两份实现，就会有两个值
+ * （本轮已经为这类事付过一次账）。工具步没有 DOM 目标，天然不计入分母。
+ */
+export function packHintCoverage(pack: AppPack): { hinted: number; named: number; browser: number } {
+  const roles = pack.roles ?? {};
+  let hinted = 0, named = 0, browser = 0;
+  for (const e of pack.journey ?? []) {
+    if (!e || typeof e !== "object") continue;
+    const merged: Record<string, unknown> = { ...(roles[String((e as Record<string, unknown>)["role"])] ?? {}), ...(e as object) };
+    if ((e as Record<string, unknown>)["source"] !== undefined) continue;   // 工具步：没有 DOM 目标
+    browser++;
+    const h = merged["target_hints"];
+    const has = (Array.isArray(h) && h.length > 0) || typeof merged["target_hint"] === "string";
+    if (has) hinted++;
+    const cmds = merged["commands"];
+    if (has || (Array.isArray(cmds) && cmds.length > 0)) named++;
+  }
+  return { hinted, named, browser };
+}
+
+export function listPacks(): Array<[string, string, string]> {
+  const out: Array<[string, string, string]> = [];
+  for (const dir of appDirs()) {
+    const p = path.join(dir, "pack.json");
+    try {
+      const pack = JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack;
+      out.push([String(pack.id ?? path.basename(dir)), String(pack.label ?? ""), p]);
+    } catch (e) {
+      out.push([path.basename(dir), `<invalid: ${e instanceof Error ? e.message : String(e)}>`, p]);
+    }
+  }
+  return out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+}
+
+export function loadPack(nameOrPath: string): AppPack {
+  let p = nameOrPath;
+  if (!fs.existsSync(p) || !fs.statSync(p).isFile()) {
+    const hit = appDirs().map((d) => path.join(d, "pack.json"))
+      .find((c) => path.basename(path.dirname(c)) === nameOrPath);
+    if (hit === undefined) {
+      throw new Error(`app pack ${JSON.stringify(nameOrPath)} not found (searched, in order: `
+        + `${appsSearchPath(APPS_DIR).join(", ")})`);
+    }
+    p = hit;
+  }
+  const pack = JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack;
+  pack._path = p;
+  return pack;
+}
+
+/* ------------------------------------------------------------------ 占位符 */
+
+const PLACEHOLDER = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+
+/** 收集一段文本里的占位符名（未知槽位要在加载期就报错）。 */
+function placeholders(text: string): string[] {
+  return [...text.matchAll(PLACEHOLDER)].map((m) => m[1]!);
+}
+
+/** 只替换**已声明**的槽位，其余花括号原样保留（工具参数/JSON 里到处是花括号）。 */
+function substitute(value: unknown, slots: Record<string, unknown>, out: string[]): unknown {
+  if (typeof value === "string") {
+    return value.replace(PLACEHOLDER, (m, k: string) => {
+      if (!(k in slots)) {
+        out.push(`unknown slot placeholder {${k}}`);
+        return m;
+      }
+      return String(slots[k]);
+    });
+  }
+  if (Array.isArray(value)) return value.map((v) => substitute(v, slots, out));
+  if (isDict(value)) {
+    const o: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) o[k] = substitute(v, slots, out);
+    return o;
+  }
+  return value;
+}
+
+/* ------------------------------------------------------------------ 展开 */
+
+export interface ExpandedPack {
+  pack: AppPack;
+  /** 展开后的步骤（按旅程顺序，含浏览器步与工具步） */
+  steps: ExpandedStep[];
+  /** 只含浏览器步的冻结计划（交给 `runPlan` / `runSubgoalWithRetries` 的执行单元） */
+  plan: TaskPlan;
+  /**
+   * 结束状态断言，**已完成槽位替换**：`{checkin}` 与 journey 里的 `{checkin}` 是同一件事，
+   * 展开期一次替换完，运行期不再各处理一遍。
+   */
+  invariants: AppInvariant[];
+  slots: Record<string, unknown>;
+  /** plan 里用到的角色（按出现顺序去重）——角色覆盖率就是一个数字。 */
+  rolesUsed: string[];
+}
+
+/** 一步是工具步还是浏览器步：有 `source` 就是工具步（加载期已保证互斥键不混用）。 */
+/**
+ * 这一步属于哪种应用类型：显式 `adapter` 优先；否则按既有推断（有 `source` ⇒ cli，否则 web）。
+ * **未知类型不在这里炸**——加载期校验会红并列出已知项；这里只回答"类型名是什么"。
+ */
+export function adapterKind(step: Record<string, unknown>): string {
+  const explicit = step["adapter"];
+  if (explicit !== undefined && explicit !== null) return String(explicit).trim().toLowerCase();
+  return step["source"] === undefined ? "web" : "cli";
+}
+
+/**
+ * 兼容视图（既有消费者按 `"browser" | "tool"` 读 `ExpandedStep.kind`）。
+ * 未知类型返回 "browser"（加载期必红，跑到这里之前就失败了）。
+ */
+export function stepKind(step: Record<string, unknown>): "browser" | "tool" {
+  return getAppAdapter(adapterKind(step))?.legacyKind ?? "browser";
+}
+
+/** 展开一步：角色模板 + 内联覆盖 + 槽位替换（两种步型共用）。 */
+function expandStep(
+  entry: Record<string, unknown>, roles: Record<string, Record<string, unknown>>,
+  slots: Record<string, unknown>, problems: string[], index: number,
+): { merged: Record<string, unknown>; role: string | null } {
+  const roleName = entry["role"] === undefined ? null : String(entry["role"]);
+  let merged: Record<string, unknown> = {};
+  if (roleName !== null) {
+    merged = { ...(roles[roleName] ?? {}) };
+  }
+  merged = { ...merged, ...entry };
+  delete merged["role"];
+  const out = substitute(merged, slots, problems) as Record<string, unknown>;
+  if (!out["desc"]) problems.push(`journey[${index}]: step has no desc (role ${roleName ?? "-"})`);
+  return { merged: out, role: roleName };
+}
+
+/**
+ * 包 → 冻结计划（浏览器步）+ 步骤表（含工具步）。**同一份包 + 同一组槽位必须展开出逐字段
+ * 相同的计划**（可复现性由测试钉住）。
+ */
+export function expandPack(pack: AppPack, overrides: Record<string, unknown> = {},
+  planPath = path.join(REPO, ".task_state.json")): ExpandedPack {
+  const slots: Record<string, unknown> = { ...(pack.slots ?? {}), ...overrides };
+  // 替换袋 = 计划槽位 + 运行期占位符（后者替换成自身，留给运行器换成真实输出目录）
+  const bag: Record<string, unknown> = { ...RUNTIME_PLACEHOLDERS, ...slots };
+  const problems = validatePack(pack, { slots });
+  if (problems.length) {
+    throw new Error(`app pack ${pack.id} is invalid:\n  - ${problems.join("\n  - ")}`);
+  }
+  const roles = pack.roles ?? {};
+  const used: string[] = [];
+  const steps: ExpandedStep[] = [];
+  const browserSubgoals: Array<Record<string, unknown>> = [];
+  const subProblems: string[] = [];
+  pack.journey.forEach((entry, i) => {
+    const { merged, role } = expandStep(entry, roles, bag, subProblems, i);
+    if (role !== null) used.push(role);
+    const stepId = merged["id"] === undefined || merged["id"] === null ? null : String(merged["id"]);
+    const stepNext = Array.isArray(merged["next"]) ? (merged["next"] as unknown[]).map((x) => String(x)) : [];
+    const adapter = getAppAdapter(adapterKind(merged));
+    if (adapter === undefined) {
+      // 加载期校验已经报过这条；这里不让它把展开变成"半成品步骤"。
+      subProblems.push(`journey[${i}].adapter: unknown app adapter ${JSON.stringify(adapterKind(merged))} `
+        + `(known: ${listAppAdapterObjects().map((a) => a.kind).join(", ")})`);
+      return;
+    }
+    const out = adapter.expand(merged, `journey[${i}]`);
+    if (out.subgoal) browserSubgoals.push(out.subgoal);
+    steps.push({
+      index: i, adapter: adapter.kind, kind: adapter.legacyKind,
+      desc: String(merged["desc"]), role, id: stepId, next: stepNext,
+      decl: out.decl,
+      ...(out.subgoal ? { subgoal: out.subgoal as Subgoal } : {}),
+      ...(out.tool ? { tool: out.tool } : {}),
+    });
+  });
+  if (subProblems.length) {
+    throw new Error(`app pack ${pack.id} is invalid:\n  - ${subProblems.join("\n  - ")}`);
+  }
+  const plan = new TaskPlan(pack.goal, browserSubgoals as unknown as Array<Partial<Subgoal>>, planPath, slots);
+  // 不变量与步骤同一套 `{slot}` 规则（未知占位符已在 `validatePack` 里红过了）。
+  // Slice 4：按 `adapter` 分派——web（缺省）= 浏览器结束态断言；其它 = 该类型的只读观察探针。
+  const invariants = (pack.invariants ?? []).map((raw) => {
+    const inv = substitute(raw, bag, []) as AppInvariant;
+    const kind = inv.adapter === undefined || inv.adapter === null ? "web" : String(inv.adapter).trim().toLowerCase();
+    const adapter = getAppAdapter(kind);
+    if (adapter === undefined || kind === "web") return { ...inv, adapter: "web" };
+    const out = adapter.expand({ ...inv, desc: String(inv.desc ?? inv.id) }, `invariants:${inv.id}`);
+    return { ...inv, adapter: kind, decl: out.decl };
+  });
+  return { pack, steps, plan, invariants, slots, rolesUsed: [...new Set(used)] };
+}
+
+/* ------------------------------------------------------------------ 校验 */
+
+/**
+ * 结构 + 信号语言校验：**加载期就炸**，不是跑到第 9 步才炸。
+ *
+ * 信号/hint/`when`/`retries` 复用 `PlanningRules.problems`——冻结计划怎么校验，应用包就怎么校验，
+ * 不新开第二套语法校验器（hint 语法漂移过一次，代价是线上目标静默丢失）。
+ */
+export function validatePack(pack: AppPack,
+  opts: { slots?: Record<string, unknown>; sources?: string[] } = {}): string[] {
+  const p: string[] = [];
+  if (!isDict(pack)) return ["pack must be a JSON object"];
+  for (const k of Object.keys(pack)) {
+    if (!(PACK_KEYS as readonly string[]).includes(k) && !k.startsWith("_")) {
+      p.push(`${k}: unknown pack key (known: ${PACK_KEYS.join(", ")})`);
+    }
+  }
+  if (pack.spec_version !== SPEC_VERSION) {
+    p.push(`spec_version must be ${SPEC_VERSION} (got ${JSON.stringify(pack.spec_version)})`);
+  }
+  for (const k of ["id", "label", "goal"] as const) {
+    if (typeof pack[k] !== "string" || !pack[k]) p.push(`${k} is required`);
+  }
+  // G-H：几个"看着能用其实会误导"的类型错误在加载期就报。最典型的是把 `sources` 写成**裸字符串**
+  // ——它会被当列表逐字符遍历，于是报出一串"未知数据源"的伪错误，把人引到错的方向。
+  if (pack.max_subgoals !== undefined
+    && (!Number.isInteger(pack.max_subgoals) || pack.max_subgoals < 1)) {
+    p.push("max_subgoals must be a positive integer");
+  }
+  if (pack.slots !== undefined && !isDict(pack.slots)) {
+    p.push("slots must be an object of slot -> value");
+  }
+  if (pack.required_slots !== undefined
+    && (!Array.isArray(pack.required_slots) || pack.required_slots.some((x) => typeof x !== "string"))) {
+    p.push("required_slots must be a list of slot names");
+  }
+  if (pack.sources !== undefined
+    && (!Array.isArray(pack.sources) || pack.sources.some((x) => typeof x !== "string"))) {
+    p.push("sources must be a list of source names (a bare string would be read as a list of characters)");
+  }
+  if (pack.model !== undefined && typeof pack.model !== "string") {
+    p.push("model must be a string");
+  }
+  // `hosts` 必须是字符串列表：防泄漏门禁（`tools/apps_matrix.ts`）会逐项遍历它。
+  // 写成裸字符串虽然能被 `validateProbeBlock` 的 `asList` 容忍，但门禁会按**字符**建 token
+  // （`\bm\b` 之类），既漏掉真主机又刷出一堆假泄漏 —— 所以在加载期就拒绝。
+  if (pack.hosts !== undefined && (!Array.isArray(pack.hosts) || pack.hosts.some((h) => typeof h !== "string"))) {
+    p.push("hosts must be a list of strings (the leak gate iterates it)");
+  }
+  if (!Array.isArray(pack.journey)) {
+    p.push("journey must be a list of steps");
+    return p;
+  }
+  if (pack.journey.length === 0 && pack.probe === undefined) {
+    // 空旅程只有一个合法理由：这是**测量型应用**（只声明探针集，没有要跑的旅程）。
+    p.push("journey must be a non-empty list of steps (or declare a probe set)");
+    return p;
+  }
+  if (pack.roles !== undefined && !isDict(pack.roles)) p.push("roles must be an object of step templates");
+  if (pack.invariants !== undefined && !Array.isArray(pack.invariants)) p.push("invariants must be a list");
+  if (pack.required_slots !== undefined && !Array.isArray(pack.required_slots)) {
+    p.push("required_slots must be a list of slot names");
+  }
+  // 类型不对时用空袋兜住下游遍历：加载期只该报**那一条**真错，不该再刷出一串"逐字符"的伪错误。
+  const slotsDict = isDict(pack.slots) ? pack.slots : {};
+  const slots = { ...slotsDict, ...(opts.slots ?? {}) };
+  for (const s of Array.isArray(pack.required_slots) ? pack.required_slots : []) {
+    if (!(String(s) in slots)) p.push(`required slot ${JSON.stringify(String(s))} has no value`);
+  }
+  const roles = pack.roles ?? {};
+  /** 其它适配器的专属键写在当前步上 = "写了没用"：点名谁的类型，加载期红。 */
+  const checkForeignKeys = (step: Record<string, unknown>, where: string, adapter: AppAdapter): void => {
+    for (const other of listAppAdapterObjects()) {
+      if (other.kind === adapter.kind) continue;
+      for (const k of other.stepKeys) {
+        if (step[k] === undefined) continue;
+        if ((adapter.stepKeys as readonly string[]).includes(k)) continue;
+        const suffix = adapter.kind === "cli" ? ` (source=${JSON.stringify(String(step["source"]))})` : "";
+        p.push(`${where}.${k}: ${other.label}-only key on a ${adapter.label} step${suffix}`);
+      }
+    }
+  };
+  const checkStep = (step: Record<string, unknown>, where: string): void => {
+    const keys = appStepKeys();
+    for (const k of Object.keys(step)) {
+      if (!keys.includes(k) || k === "role") {
+        p.push(`${where}.${k}: unknown step key (known: ${keys.filter((x) => x !== "role").join(", ")})`);
+      }
+    }
+    const kind = adapterKind(step);
+    const adapter = getAppAdapter(kind);
+    if (adapter === undefined) {
+      p.push(`${where}.adapter: unknown app adapter ${JSON.stringify(kind)} `
+        + `(known: ${listAppAdapterObjects().map((a) => a.kind).join(", ")})`);
+      return;
+    }
+    checkForeignKeys(step, where, adapter);
+    adapter.validateStep(step, where, p);
+  };
+  for (const [name, tpl] of Object.entries(roles)) {
+    if (!isDict(tpl)) { p.push(`roles.${name} must be an object`); continue; }
+    checkStep(tpl as Record<string, unknown>, `roles.${name}`);
+    if (stepKind(tpl as Record<string, unknown>) === "browser" && !tpl["desc"]) {
+      p.push(`roles.${name} needs desc and signal`);
+    }
+  }
+  pack.journey.forEach((entry, i) => {
+    if (!isDict(entry)) { p.push(`journey[${i}] must be an object`); return; }
+    const roleName = entry["role"];
+    if (roleName !== undefined && !(String(roleName) in roles)) {
+      p.push(`journey[${i}]: unknown role ${JSON.stringify(String(roleName))}`);
+    }
+    if (roleName === undefined) {
+      checkStep(entry, `journey[${i}]`);
+    } else {
+      // 角色模板已经校验过；内联覆盖只允许"补字段"，键集合再查一遍
+      for (const k of Object.keys(entry)) {
+        if (!appStepKeys().includes(k)) p.push(`journey[${i}].${k}: unknown step key`);
+      }
+      // 合并后**类型互斥键**仍要查：角色模板走 checkStep，但内联覆盖以前只查键名，
+      // 于是 `{role: <浏览器角色>, args:[...]}` 会把 args 静默丢掉（"写了没用"）。
+      const tpl = roles[String(roleName)];
+      if (isDict(tpl)) {
+        const merged = { ...tpl, ...entry };
+        const adapter = getAppAdapter(adapterKind(merged));
+        if (adapter?.kind === "web" && !merged["start_url"]) {
+          p.push(`journey[${i}]: a browser step needs start_url (neither the role nor the override has one)`);
+        }
+        if (adapter !== undefined) {
+          for (const other of listAppAdapterObjects()) {
+            if (other.kind === adapter.kind) continue;
+            for (const k of other.stepKeys) {
+              if (merged[k] === undefined) continue;
+              if ((adapter.stepKeys as readonly string[]).includes(k)) continue;
+              const suffix = adapter.kind === "cli"
+                ? ` (source=${JSON.stringify(String(merged["source"]))})` : "";
+              p.push(`journey[${i}].${k}: ${other.label}-only key on a ${adapter.label} step${suffix}`);
+            }
+          }
+        }
+      }
+    }
+  });
+  // P4 走向：步 id 必须唯一，`next` 的落点必须在**同一个旅程**里真的存在。
+  // 一条指向空气的边如果拖到运行期才发现，"分支"就变成了一步都不走的静默跳过——
+  // 与 hint 未命中不赌同一条纪律：加载期红。
+  {
+    const merged: Array<Record<string, unknown>> = pack.journey.map((e, i) => {
+      if (!isDict(e)) return { __bad: i } as Record<string, unknown>;
+      const rn = e["role"];
+      const tpl = rn !== undefined && isDict(roles[String(rn)]) ? roles[String(rn)]! : {};
+      return { ...tpl, ...e };
+    });
+    const idAt = new Map<string, number>();
+    merged.forEach((m, i) => {
+      const id = m["id"];
+      if (id === undefined || id === null) return;
+      if (typeof id !== "string" || !id.trim()) {
+        p.push(`journey[${i}].id must be a non-empty string`);
+        return;
+      }
+      if (idAt.has(id)) p.push(`journey[${i}]: duplicate step id '${id}' (next edges need one name per step)`);
+      else idAt.set(id, i);
+    });
+    merged.forEach((m, i) => {
+      const next = m["next"];
+      if (next === undefined || next === null) return;
+      if (!Array.isArray(next) || next.length === 0
+          || !next.every((x) => typeof x === "string" && x.trim() !== "")) {
+        p.push(`journey[${i}].next must be a non-empty list of step ids`);
+        return;
+      }
+      for (const t of next) {
+        if (!idAt.has(String(t))) {
+          p.push(`journey[${i}].next: ${JSON.stringify(String(t))} names no step in this journey`
+            + ` (declared ids: ${[...idAt.keys()].join(", ") || "none"})`);
+        }
+      }
+    });
+    if (pack.max_step_visits !== undefined
+        && (typeof pack.max_step_visits !== "number" || !Number.isInteger(pack.max_step_visits)
+            || pack.max_step_visits < 1)) {
+      p.push("max_step_visits must be a positive integer (the per-path visit bound of `next` edges)");
+    }
+  }
+  // Slice 2（应用支持器）：返回值传递的**加载期对账**——
+  //   ① `returns.NAME` 的产者在一个旅程里唯一（同名两产者 = 谁写的说不清，审计也说不清）；
+  //   ② `{dataset:NAME}` 的消费者必须真有产者（否则运行期必然 needs_value：那是"写了没用"的静默版）。
+  {
+    const DATASET_REF = /\{dataset:([A-Za-z_][A-Za-z0-9_]*)\}/g;
+    const producers = new Map<string, number>();
+    const refs: Array<{ name: string; where: string }> = [];
+    const scanRefs = (value: unknown, where: string): void => {
+      if (typeof value === "string") {
+        for (const m of value.matchAll(DATASET_REF)) refs.push({ name: m[1]!, where });
+        return;
+      }
+      if (Array.isArray(value)) { value.forEach((v, i) => scanRefs(v, `${where}[${i}]`)); return; }
+      if (isDict(value)) for (const [k, v] of Object.entries(value)) scanRefs(v, `${where}.${k}`);
+    };
+    pack.journey.forEach((e, i) => {
+      if (!isDict(e)) return;
+      const rn = e["role"];
+      const tpl = rn !== undefined && isDict(roles[String(rn)]) ? roles[String(rn)]! : {};
+      const merged = { ...tpl, ...e };
+      const ret = merged["returns"];
+      if (isDict(ret)) {
+        for (const name of Object.keys(ret)) {
+          const prev = producers.get(name);
+          if (prev !== undefined) {
+            p.push(`journey[${i}].returns.${name}: also produced by journey[${prev}] (returns names must be unique)`
+              + ` — the dataset would silently keep whichever wrote last`);
+          } else producers.set(name, i);
+        }
+      }
+      scanRefs(merged, `journey[${i}]`);
+    });
+    scanRefs(pack.invariants ?? [], "invariants");
+    for (const ref of refs) {
+      if (!producers.has(ref.name)) {
+        p.push(`${ref.where}: {dataset:${ref.name}} has no producer — no step declares `
+          + `returns.${ref.name} (a value that never gets written is a silent needs_value; declare it)`);
+      }
+    }
+  }
+  // 占位符必须指向已声明的槽位（`required_slots` 或 `slots` 里给了值）。
+  // `invariants` 与 journey 同规则：结束状态断言里写 `{checkin}` 不替换的话，
+  // 那条断言会拿字面量去比对一个永远不会相等的值——**静默假红**，比不写更糟。
+  const seen: string[] = [];
+  substitute({ roles: pack.roles ?? {}, journey: pack.journey, invariants: pack.invariants ?? [] },
+    { ...RUNTIME_PLACEHOLDERS, ...slots }, seen);
+  for (const s of [...new Set(seen)]) p.push(s);
+  // 数据腿：引用的数据源必须真的存在（发现制，不维护清单）
+  for (const s of Array.isArray(pack.sources) ? pack.sources : []) {
+    try {
+      loadSource(String(s));
+    } catch (e) {
+      p.push(`source ${JSON.stringify(String(s))} not found (${e instanceof Error ? e.message : String(e)})`);
+    }
+  }
+  if (pack.device !== undefined) {
+    if (!isDict(pack.device)) {
+      p.push("device must be an object");
+    } else {
+      for (const [k, v] of Object.entries(pack.device)) {
+        if (!(DEVICE_KEYS as readonly string[]).includes(k)) {
+          p.push(`device.${k}: unknown key (known: ${DEVICE_KEYS.join(", ")})`);
+        }
+        if (k === "viewport" && (!isDict(v) || !Number.isFinite(Number(v["width"])) || !Number.isFinite(Number(v["height"])))) {
+          p.push("device.viewport must be {width, height}");
+        }
+        if (k === "user_agent" && (typeof v !== "string" || !v.trim())) {
+          p.push("device.user_agent must be a non-empty string");
+        }
+      }
+    }
+  }
+  if (pack.generated_from !== undefined) {
+    const g = pack.generated_from as Record<string, unknown>;
+    if (!isDict(g)) {
+      p.push("generated_from must be an object {spec, plan_sha256}");
+    } else {
+      // 两种上游二选一：spec 文件，或 `<模块>#<导出名>`（导出函数返回一份应用级计划）
+      const kind = typeof g["spec"] === "string" ? "spec" : typeof g["source"] === "string" ? "source" : null;
+      if (kind === null) {
+        p.push("generated_from needs either .spec or .source (regenerate with npm run apps:gen)");
+      } else if (kind === "spec" && typeof g["source"] === "string") {
+        p.push("generated_from must not carry both .spec and .source");
+      } else {
+        const raw = String(g[kind]);
+        if (!raw.trim()) {
+          p.push(`generated_from.${kind} must be a non-empty string`);
+        } else if (kind === "spec") {
+          if (!fs.existsSync(path.resolve(REPO, raw))) {
+            p.push(`generated_from.spec ${JSON.stringify(raw)} does not exist (regenerate with npm run apps:gen)`);
+          }
+        } else {
+          const [file, fn] = raw.split("#");
+          if (!file || !fn) {
+            p.push(`generated_from.source must look like "<module>#<export>", got ${JSON.stringify(raw)}`);
+          } else if (!fs.existsSync(path.resolve(REPO, file))) {
+            p.push(`generated_from.source module ${JSON.stringify(file)} does not exist`);
+          }
+        }
+      }
+      if (typeof g["plan_sha256"] !== "string" || !/^[0-9a-f]{64}$/.test(String(g["plan_sha256"]))) {
+        p.push("generated_from.plan_sha256 must be a sha256 hex string (regenerate with npm run apps:gen)");
+      }
+      for (const k of Object.keys(g)) {
+        if (!["spec", "source", "plan_sha256"].includes(k)) p.push(`generated_from.${k}: unknown key`);
+      }
+    }
+  }
+  if (pack.recorded_from !== undefined) {
+    const r = pack.recorded_from as Record<string, unknown>;
+    if (!isDict(r)) {
+      p.push("recorded_from must be an object {url, steps, sha256}");
+    } else {
+      if (typeof r["url"] !== "string" || !r["url"].trim()) p.push("recorded_from.url must be a non-empty string");
+      if (!Number.isInteger(r["steps"]) || Number(r["steps"]) <= 0) p.push("recorded_from.steps must be a positive integer");
+      if (typeof r["sha256"] !== "string" || !/^[0-9a-f]{64}$/.test(String(r["sha256"]))) {
+        p.push("recorded_from.sha256 must be a sha256 hex string (re-run npm run learn)");
+      }
+      for (const k of Object.keys(r)) {
+        if (!["url", "steps", "sha256"].includes(k)) p.push(`recorded_from.${k}: unknown key`);
+      }
+    }
+  }
+  if (pack.probe !== undefined) {
+    p.push(...validateProbeBlock(pack.probe, pack.hosts, "probe"));
+  }
+  for (const [i, inv] of (pack.invariants ?? []).entries()) {
+    if (!isDict(inv) || !inv["id"] || !isDict(inv["signal"])) {
+      p.push(`invariants[${i}] needs {id, signal}`);
+      continue;
+    }
+    const where = `invariants[${i}]`;
+    if (typeof inv["id"] !== "string" || !inv["id"].trim()) p.push(`${where}.id must be a non-empty string`);
+    if (inv["desc"] !== undefined && typeof inv["desc"] !== "string") p.push(`${where}.desc must be a string`);
+    const kind = inv["adapter"] === undefined || inv["adapter"] === null
+      ? "web" : String(inv["adapter"]).trim().toLowerCase();
+    const adapter = getAppAdapter(kind);
+    if (adapter === undefined) {
+      p.push(`${where}.adapter: unknown app adapter ${JSON.stringify(kind)} `
+        + `(known: ${listAppAdapterObjects().map((a) => a.kind).join(", ")})`);
+      continue;
+    }
+    if (kind === "web") {
+      // web 不变量：旧口径（在浏览器结束态上求值），不允许写成"探针"绕过 end-state 语义。
+      const allowed = new Set(["id", "desc", "adapter", "signal"]);
+      for (const k of Object.keys(inv)) {
+        if (!allowed.has(k)) p.push(`${where}.${k}: unknown key on a web invariant (known: id, desc, adapter, signal)`);
+      }
+      continue;
+    }
+    // 进程族探针不变量：声明面 = 该适配器的步键 + {id, desc, adapter, signal}；
+    // 但"断言"不许重试、不许是危险动作（证据不能靠重跑/副作用换）。
+    const allowed = new Set<string>(["id", "desc", "adapter", "signal", ...adapter.stepKeys]);
+    for (const k of Object.keys(inv)) {
+      if (!allowed.has(k)) {
+        p.push(`${where}.${k}: unknown key on a ${adapter.label} invariant `
+          + `(known: id, desc, adapter, signal${adapter.stepKeys.length ? ", " + adapter.stepKeys.join(", ") : ""})`);
+      }
+    }
+    if (inv["retries"] !== undefined) p.push(`${where}.retries: 不变量探针不许重试（断言只能观察一次真实状态）`);
+    if (inv["dangerous"] === true) p.push(`${where}.dangerous: 不变量探针必须是只读观察，不许声明危险动作`);
+    if (inv["when"] !== undefined) p.push(`${where}.when: 不变量探针在旅程结束后无条件执行，不接受 when`);
+    // 借用适配器自己的声明面校验（键语义/信号语言/返回值形状）
+    adapter.validateStep({ ...inv, desc: String(inv["desc"] ?? inv["id"]) }, where, p);
+  }
+  // web 不变量需要浏览器步（它们在浏览器结束态上求值）；进程族探针不需要页面。
+  const webInvariants = (pack.invariants ?? []).filter((inv) => isDict(inv)
+    && (inv["adapter"] === undefined || inv["adapter"] === null || inv["adapter"] === "web"));
+  if (webInvariants.length > 0
+    && !pack.journey.some((e) => stepKind((e["role"] ? { ...(roles[String(e["role"])] ?? {}), ...e } : e) as Record<string, unknown>) === "browser")) {
+    p.push("web invariants need at least one browser step (they are evaluated on the browser end state); "
+      + "process invariants can run without a browser");
+  }
+  // 展开成计划后再用计划自己的校验器过一遍（信号/hint/when/retries 一套口径）。
+  // 只有**浏览器步**进计划；工具步的信号是进程观察面的，它们已经在上面按 TOOL_SIGNAL_OPS 校验过。
+  if (!p.length) {
+    try {
+      const browserSteps = pack.journey.map((e, i) => {
+        const merged = e["role"] ? { ...(roles[String(e["role"])] ?? {}), ...e } : { ...e };
+        delete merged["role"];
+        return substitute(merged, { ...RUNTIME_PLACEHOLDERS, ...slots }, []) as Record<string, unknown>;
+      }).filter((step) => stepKind(step) === "browser");
+      if (browserSteps.length) {
+        const plan = new TaskPlan(pack.goal, browserSteps as unknown as Array<Partial<Subgoal>>,
+          ":memory:", slots);
+        const rules = new PlanningRules(pack.max_subgoals ?? 12, true, false);
+        // `next` 的落点按**整个旅程**校验（工具步不进计划，但可以是边的落点）。
+        const journeyIds = new Set<string>();
+        pack.journey.forEach((e, i) => {
+          if (!isDict(e)) return;
+          const rn = e["role"];
+          const tpl = rn !== undefined && isDict(roles[String(rn)]) ? roles[String(rn)]! : {};
+          const id = { ...tpl, ...e }["id"];
+          if (typeof id === "string" && id.trim() !== "") journeyIds.add(id);
+        });
+        // 已知的数据袋键 = 包声明的槽位 + CLI 覆盖 + **目标文本里的 `k=v`** + 角色/步自带的 slots。
+        // 四样缺一样都会把合法的绑定判成"未声明"（假红），所以在这里一次算全。
+        const slotKeys = new Set<string>([
+          ...Object.keys(slots),
+          ...Object.keys(extractSlots(pack.goal ?? "")),
+          ...pack.journey.flatMap((e) => (isDict(e) && isDict(e["slots"]) ? Object.keys(e["slots"]) : [])),
+          ...Object.values(roles).flatMap((r) => (isDict(r) && isDict(r["slots"]) ? Object.keys(r["slots"]) : [])),
+        ]);
+        p.push(...rules.problems(plan, { extraIds: journeyIds, slotKeys }).map((x) => `plan: ${x}`));
+      }
+    } catch (e) {
+      p.push(`plan: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // policy（§3）：未知键 / 错类型 / 越界值都在加载期响亮拒绝——写了就要生效，不许静默忽略。
+  const pol = (pack as Record<string, unknown>)["policy"];
+  if (pol !== undefined) {
+    if (!isDict(pol)) {
+      p.push(`policy: must be an object (keys: ${POLICY_KEYS.join(", ")})`);
+    } else {
+      for (const k of Object.keys(pol)) {
+        if (!(POLICY_KEYS as readonly string[]).includes(k) && !k.startsWith("_")) {
+          p.push(`policy.${k}: unknown policy key (known: ${POLICY_KEYS.join(", ")})`);
+        }
+      }
+      if (pol["tiered_hint"] !== undefined && typeof pol["tiered_hint"] !== "boolean") {
+        p.push("policy.tiered_hint: must be a boolean");
+      }
+      if (pol["reobserve"] !== undefined && typeof pol["reobserve"] !== "boolean") {
+        p.push("policy.reobserve: must be a boolean");
+      }
+      if (pol["risk_ask"] !== undefined && !(RISK_ASK_MODES as readonly string[]).includes(String(pol["risk_ask"]))) {
+        p.push(`policy.risk_ask: must be one of ${RISK_ASK_MODES.join(" | ")}`);
+      }
+      const mer = pol["max_effective_repeats"];
+      if (mer !== undefined && (typeof mer !== "number" || !Number.isInteger(mer) || mer < 1)) {
+        p.push("policy.max_effective_repeats: must be an integer >= 1");
+      }
+      const cf = pol["conf_floor"];
+      if (cf !== undefined && (typeof cf !== "number" || !Number.isFinite(cf) || cf <= 0 || cf > 1)) {
+        p.push("policy.conf_floor: must be a number in (0, 1]");
+      }
+    }
+  }
+
+  return p;
+}

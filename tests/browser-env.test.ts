@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { chromium } from "playwright";
 import {
   chromiumCandidates, launch, launchKwargs, launchPersistentContext, probe,
-} from "../src/browser-env.ts";
+} from "../src/browser/browser-env.ts";
 
 describe("chromium resolution (browser_env.py twin)", () => {
   it("finds the installed full chromium before the headless shell", () => {

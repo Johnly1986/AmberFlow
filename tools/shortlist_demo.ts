@@ -6,15 +6,15 @@
  *
  *   node --experimental-strip-types tools/shortlist_demo.ts
  *
- * Needs the ONNX artifact + the HF tokenizer cache (see src/laya-onnx.ts); the
+ * Needs the ONNX artifact + the HF tokenizer cache (see src/model/laya-onnx.ts); the
  * demo says so instead of failing with a stack trace when they are missing.
  */
 import fs from "node:fs";
 import {
   DEFAULT_ONNX_PATH, createLayaOnnxRuntime, findDefaultTokenizerDir,
-} from "../src/laya-onnx.ts";
-import { installLayaRuntime, type Question } from "../src/model.ts";
-import { applyRcToEnv } from "../src/rcfile.ts";
+} from "../src/model/laya-onnx.ts";
+import { installLayaRuntime, type Question } from "../src/model/model.ts";
+import { applyRcToEnv } from "../src/support/rcfile.ts";
 
 const questions: Record<string, Question> = {
   intent: {
@@ -37,7 +37,7 @@ const questions: Record<string, Question> = {
 };
 
 async function main(): Promise<number> {
-  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
   { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   if (!fs.existsSync(DEFAULT_ONNX_PATH) || !findDefaultTokenizerDir()) {
     console.log("shortlist demo needs the ONNX artifact and the tokenizer cache:");

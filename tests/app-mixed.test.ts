@@ -13,9 +13,9 @@
  */
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { sshReady } from "../src/app-adapters.ts";
-import { loadPack } from "../src/app-pack.ts";
-import { appReportMarkdown, runApp } from "../src/app-runner.ts";
+import { sshReady } from "../src/app/app-adapters.ts";
+import { loadPack } from "../src/app/app-pack.ts";
+import { appReportMarkdown, runApp } from "../src/app/app-runner.ts";
 import { tmpDir } from "./fixtures.ts";
 
 const probe = sshReady();

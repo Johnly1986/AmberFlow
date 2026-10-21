@@ -17,11 +17,11 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { runApp, type AppRunResult } from "../src/app-runner.ts";
-import { expandPack, loadPack, type AppPack } from "../src/app-pack.ts";
-import { PlanningRules, TaskPlan, createPathWalk, DEFAULT_MAX_STEP_VISITS } from "../src/plan.ts";
-import { runPlan } from "../src/planner.ts";
-import { installLayaRuntime, scriptedRuntime, scriptedAgent } from "../src/model.ts";
+import { runApp, type AppRunResult } from "../src/app/app-runner.ts";
+import { expandPack, loadPack, type AppPack } from "../src/app/app-pack.ts";
+import { PlanningRules, TaskPlan, createPathWalk, DEFAULT_MAX_STEP_VISITS } from "../src/engine/plan.ts";
+import { runPlan } from "../src/engine/planner.ts";
+import { installLayaRuntime, scriptedRuntime, scriptedAgent } from "../src/model/model.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const FIXTURE = pathToFileURL(path.join(REPO, "testpages", "cold-search.html")).href;

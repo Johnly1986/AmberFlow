@@ -10,12 +10,12 @@ apps/<app>/
   README.md         # 可选：这个应用自己的说明
 ```
 
-目录是**发现制**：`src/datasource.ts` 的 `sourceDirs()` 会扫 `<repo>/*/sources` 与
+目录是**发现制**：`src/data/datasource.ts` 的 `sourceDirs()` 会扫 `<repo>/*/sources` 与
 `<repo>/apps/*/sources`，没有一张"应用清单"要维护。验证一下：
 
 ```bash
-node --experimental-strip-types src/datasource.ts --list
-node --experimental-strip-types src/datasource.ts --source git-log --out /tmp/apps
+node --experimental-strip-types src/data/datasource.ts --list
+node --experimental-strip-types src/data/datasource.ts --source git-log --out /tmp/apps
 ```
 
 ## 一、数据腿：`transport.client = "cli"`
@@ -167,10 +167,10 @@ npm run apps:gen -- --check                                 # 门禁口径：旅
 | 来源 | 写法 | 什么时候用 |
 |---|---|---|
 | spec 文件 | `{ "spec": "transfer/specs/trekly.json" }` | 流程已经是一份 spec（`emitPlan` 展开） |
-| **模块导出** | `{ "source": "src/ip-config.ts#buildAppPlan" }` | 流程的判断写在**代码**里（例如"保存要认回显的值""规划表写错的行预期被设备页拒绝"）——驱动与生成器共用同一份，谁也漂移不了 |
+| **模块导出** | `{ "source": "src/cli/ip-config.ts#buildAppPlan" }` | 流程的判断写在**代码**里（例如"保存要认回显的值""规划表写错的行预期被设备页拒绝"）——驱动与生成器共用同一份，谁也漂移不了 |
 
 ```bash
-npm run apps:gen -- --write --id ip-config --source src/ip-config.ts#buildAppPlan
+npm run apps:gen -- --write --id ip-config --source src/cli/ip-config.ts#buildAppPlan
 ```
 
 生成物里 `generated_from` 就是这份承诺：**对齐是构造性质，不是人工核对**。
@@ -278,7 +278,7 @@ npm run apps -- --app cli-report --allow-dangerous   # 桩工具：退出码/JSO
 npm run apps -- --app repo-report                    # 真实工具：git（行文本）+ jq（JSON）
 npm run apps -- --app cli-report                     # 不带 --allow-dangerous：危险步被拒绝、不落盘
 
-npm run apps -- --app ctrip-case --no-sources        # 19 个冻结子目标跑本地复刻站（与 src/ctrip-task.ts 的计划逐字段全等）
+npm run apps -- --app ctrip-case --no-sources        # 19 个冻结子目标跑本地复刻站（与 src/sites/ctrip-task.ts 的计划逐字段全等）
 npm run apps -- --app ip-config                     # Excel IP 规划表 → 设备网络页（含"表格写错的那行由设备页自己拒绝"）
 npm run apps -- --app camera-entry                   # Excel 类型列路由两套表单（空类型行用行内证据、坏序列号显式拒绝）
 npm run apps -- --app transfer-voyagio --no-sources  # 第二个复刻站的完整旅程：两页向导（24 步）
@@ -310,7 +310,7 @@ npm run apps:suite -- --json
 
 ## 五、应用支持器（AppAdapter）：一次旅程可以混用多种应用类型
 
-动作腿的类型不再写死在核心。`src/app-adapters.ts` 的**注册表**声明"一种应用类型 = 一个支持器"：
+动作腿的类型不再写死在核心。`src/app/app-adapters.ts` 的**注册表**声明"一种应用类型 = 一个支持器"：
 声明面（该类型的步键 + 加载期校验）、信号面（web = DOM 信号；cli = 进程观察面）、执行（`run`）、
 返回值（`returns`，Slice 2 起）。包里的 journey 是**类型无关**的步骤序列，每步用 `adapter` 指名类型：
 
@@ -413,24 +413,24 @@ stdio 的完成真值仍是进程观察面；`retries`/`dangerous` 不支持（�
             "device_scale_factor": 3 }
 ```
 
-加载期校验（`src/probe-set.ts`）三条硬规矩：
+加载期校验（`src/app/probe-set.ts`）三条硬规矩：
 
 1. **每个 URL 的主机必须在 `hosts` 里**——否则这个主机就在防泄漏门禁的覆盖范围之外，等于把站点知识藏起来；
 2. 占位符只有四个（`{date}` / `{date_slash}` / `{checkout}` / `{checkout_slash}`，纯日历运算，不碰时钟），未知占位符报错；
 3. `browser` / `repeat` / `roles` 只能指向声明过的 http 目标 id，未知键一律报错。
 
-驱动只剩「怎么测」：`src/live-probe.ts`、`src/live-capture.ts`、`src/ota-probe.ts`、`src/qunar-probe.ts`、
-`src/qunar-task.ts` 现在都**不含任何站点标识**，因此它们已进入共享层「核心」名单——
+驱动只剩「怎么测」：`src/sites/live-probe.ts`、`src/sites/live-capture.ts`、`src/sites/ota-probe.ts`、`src/sites/qunar-probe.ts`、
+`src/sites/qunar-task.ts` 现在都**不含任何站点标识**，因此它们已进入共享层「核心」名单——
 再往里面写死一个主机名，`npm run apps:matrix` 立刻报泄漏。
 
 ```bash
-node --experimental-strip-types src/live-probe.ts                 # 携程可达性矩阵（写 ctrip/results/live_probe.json）
-node --experimental-strip-types src/live-probe.ts --out /tmp/x.json
-node --experimental-strip-types src/live-capture.ts --date 2026-10-08
-node --experimental-strip-types src/live-capture.ts --out /tmp/dir # 快照与 summary.json 写到别处（复测不碰冻结语料）
-node --experimental-strip-types src/ota-probe.ts --out /tmp/ota.json
-node --experimental-strip-types src/qunar-probe.ts                # qunar 对照
-node --experimental-strip-types src/qunar-task.ts                 # 抓取计划来自 apps/qunar-live/pack.json 的 journey
+node --experimental-strip-types src/sites/live-probe.ts                 # 携程可达性矩阵（写 ctrip/results/live_probe.json）
+node --experimental-strip-types src/sites/live-probe.ts --out /tmp/x.json
+node --experimental-strip-types src/sites/live-capture.ts --date 2026-10-08
+node --experimental-strip-types src/sites/live-capture.ts --out /tmp/dir # 快照与 summary.json 写到别处（复测不碰冻结语料）
+node --experimental-strip-types src/sites/ota-probe.ts --out /tmp/ota.json
+node --experimental-strip-types src/sites/qunar-probe.ts                # qunar 对照
+node --experimental-strip-types src/sites/qunar-task.ts                 # 抓取计划来自 apps/qunar-live/pack.json 的 journey
 ```
 
 最近一次线上复测（8/8 用例、34/34 子目标、四个探针的逐项观测）：[bench/live-retest/REPORT.md](../bench/live-retest/REPORT.md)。

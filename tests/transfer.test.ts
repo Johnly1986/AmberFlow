@@ -24,24 +24,24 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import * as C from "../src/ctrip-data.ts";
-import * as CT from "../src/ctrip-task.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import * as C from "../src/data/ctrip-data.ts";
+import * as CT from "../src/sites/ctrip-task.ts";
 import {
   deriveFlightSubgoals, deriveHotelSubgoals, deriveSubgoals, loadSpec, migrationMetrics,
   shape, specRoles, validateSpec, type FlowSpec,
-} from "../src/flow.ts";
-import * as TT from "../src/transfer-task.ts";
-import type { Oracle, OracleFlight, OracleHotel } from "../src/transfer-task.ts";
-import * as D2 from "../src/transfer-data2.ts";
-import * as D3 from "../src/transfer-data3.ts";
-import * as D4 from "../src/transfer-data4.ts";
-import * as D5 from "../src/transfer-data5.ts";
-import * as D6 from "../src/transfer-data6.ts";
-import * as D7 from "../src/transfer-data7.ts";
-import { BrowserMiddleware, type PwLike } from "../src/executor.ts";
-import type { MiddlewareLike } from "../src/planner.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
+} from "../src/flow/flow.ts";
+import * as TT from "../src/sites/transfer-task.ts";
+import type { Oracle, OracleFlight, OracleHotel } from "../src/sites/transfer-task.ts";
+import * as D2 from "../src/data/transfer-data2.ts";
+import * as D3 from "../src/data/transfer-data3.ts";
+import * as D4 from "../src/data/transfer-data4.ts";
+import * as D5 from "../src/data/transfer-data5.ts";
+import * as D6 from "../src/data/transfer-data6.ts";
+import * as D7 from "../src/data/transfer-data7.ts";
+import { BrowserMiddleware, type PwLike } from "../src/engine/executor.ts";
+import type { MiddlewareLike } from "../src/engine/planner.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, "..");

@@ -10,7 +10,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { BrowserMiddleware, TaskPlan, runPlan } from "../src/index.ts";
 import {
   installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question,
-} from "../src/model.ts";
+} from "../src/model/model.ts";
 
 const REPO = new URL("..", import.meta.url).pathname;
 const base = `file://${REPO}testpages`;

@@ -10,8 +10,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { nextWeekDates, todayIso } from "../src/datasource.ts";
-import { REPO } from "../src/flow.ts";
+import { nextWeekDates, todayIso } from "../src/data/datasource.ts";
+import { REPO } from "../src/flow/flow.ts";
 
 const prev = process.env.LAYA_TODAY;
 afterEach(() => {

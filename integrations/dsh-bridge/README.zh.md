@@ -90,7 +90,7 @@ const Consumer = {
 
 - `amberflow_apps` 只读 `apps/<id>/pack.json`：不用浏览器、不用模型、不起子进程。没有 `pack.json` 但
   带 `sources/` 的目录是**纯数据源应用**，会以 `data-source` 列出，因为别的包正是按名字引用它们。
-- `amberflow_run` 启动 `src/app-runner.ts --app <id> --out <dir>` 并读取 `<id>-result.json`。
+- `amberflow_run` 启动 `src/app/app-runner.ts --app <id> --out <dir>` 并读取 `<id>-result.json`。
   摘要只列失败项；完整的逐步表格留在 `<id>-report.md` 里，结果会给出它的路径，需要细节时再读。
   摘要还带一行**模型层级**（`model: on` / `off(missing)` / `off(rules-only)`）与"决策来源"小计
   （`rule 19 · laya 1 (conf 0.31) · laya:reobserve 1 · cache 命中 6/12 forwards`）——用户一眼看清

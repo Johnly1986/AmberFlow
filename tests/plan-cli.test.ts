@@ -10,10 +10,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_FILE, cmdAdd, cmdCheck, cmdDel, cmdEdit, cmdMove, cmdNew, cmdReset, cmdRun, cmdShow,
   main, parseSignal, type CliIO,
-} from "../src/plan-cli.ts";
-import { TaskPlan } from "../src/plan.ts";
-import type { BrowserSession } from "../src/executor.ts";
-import type { MiddlewareLike, MiddlewareReport } from "../src/planner.ts";
+} from "../src/cli/plan-cli.ts";
+import { TaskPlan } from "../src/engine/plan.ts";
+import type { BrowserSession } from "../src/engine/executor.ts";
+import type { MiddlewareLike, MiddlewareReport } from "../src/engine/planner.ts";
 
 let tmp: string;
 let file: string;

@@ -11,10 +11,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import { BrowserMiddleware } from "../src/executor.ts";
-import { checkSignal } from "../src/signals.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question } from "../src/model.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { BrowserMiddleware } from "../src/engine/executor.ts";
+import { checkSignal } from "../src/engine/signals.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question } from "../src/model/model.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, "..");

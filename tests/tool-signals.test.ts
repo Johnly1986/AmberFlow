@@ -8,8 +8,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { checkToolSignal, TOOL_SIGNAL_OPS, validateToolSignal, type ToolSignal } from "../src/tool-signals.ts";
-import type { CliObservation } from "../src/datasource.ts";
+import { checkToolSignal, TOOL_SIGNAL_OPS, validateToolSignal, type ToolSignal } from "../src/browser/tool-signals.ts";
+import type { CliObservation } from "../src/data/datasource.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "amberflow-tool-signals-"));
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));

@@ -9,8 +9,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadPack, validatePack, type AppPack } from "../src/app-pack.ts";
-import { discoverSpecs, emitPlan } from "../src/transfer-task.ts";
+import { loadPack, validatePack, type AppPack } from "../src/app/app-pack.ts";
+import { discoverSpecs, emitPlan } from "../src/sites/transfer-task.ts";
 import {
   checkAgainstFlow, flowFor, generatePack, generatedApps, inexpressibleKeys, planSha, serializePack,
   specPathOf, structureFromSeed, type Flow,
@@ -59,9 +59,9 @@ describe("spec → pack：7 个复刻站应用与 spec 展开一致（构造性�
 });
 
 describe("builder → pack：流程来自代码里的应用级计划（第 2 条）", () => {
-  it("apps/ip-config 由 src/ip-config.ts#buildAppPlan 生成，且 check 通过", async () => {
+  it("apps/ip-config 由 src/cli/ip-config.ts#buildAppPlan 生成，且 check 通过", async () => {
     const a = generatedApps().find((x) => x.id === "ip-config")!;
-    expect(a.ref).toEqual({ source: "src/ip-config.ts#buildAppPlan" });
+    expect(a.ref).toEqual({ source: "src/cli/ip-config.ts#buildAppPlan" });
     expect(checkAgainstFlow(a, await flowFor(a.ref))).toEqual([]);
   });
 
@@ -91,10 +91,10 @@ describe("builder → pack：流程来自代码里的应用级计划（第 2 条
     const base = loadPack(path.join(REPO, "apps", "ip-config", "pack.json"));
     const mk = (): AppPack => JSON.parse(JSON.stringify(base)) as AppPack;
     const noModule = mk();
-    (noModule.generated_from as { source: string }).source = "src/ghost.ts#buildAppPlan";
-    expect(validatePack(noModule).join(" | ")).toMatch(/module "src\/ghost\.ts" does not exist/);
+    (noModule.generated_from as { source: string }).source = "src/cli/ghost.ts#buildAppPlan";
+    expect(validatePack(noModule).join(" | ")).toMatch(/module "src\/cli\/ghost\.ts" does not exist/);
     const noFn = mk();
-    (noFn.generated_from as { source: string }).source = "src/ip-config.ts";
+    (noFn.generated_from as { source: string }).source = "src/cli/ip-config.ts";
     expect(validatePack(noFn).join(" | ")).toMatch(/must look like/);
     const both = mk();
     (both.generated_from as unknown as Record<string, unknown>)["spec"] = "transfer/specs/trekly.json";

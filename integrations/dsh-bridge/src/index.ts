@@ -52,7 +52,7 @@ export const inject = ['tools']
 /** Deployment configuration for the bridge. */
 export interface Config {
   /**
-   * Absolute path of the AmberFlow checkout (the one holding `src/app-runner.ts`). Optional:
+   * Absolute path of the AmberFlow checkout (the one holding `src/app/app-runner.ts`). Optional:
    * precedence is config > `AMBERFLOW_REPO` > the checkout this plugin module lives in
    * (a git-installed bundle contains the whole engine, so it self-locates).
    */
@@ -125,7 +125,7 @@ export const Config = z.object({
 })
 
 /**
- * Walk up from a directory looking for a AmberFlow checkout (one holding `src/app-runner.ts`).
+ * Walk up from a directory looking for a AmberFlow checkout (one holding `src/app/app-runner.ts`).
  * Used when no repoPath was configured: a git-installed bundle contains the whole engine, so the
  * plugin can locate its own checkout — a link/path install resolves to the same tree it always used.
  * @param fromDir - the directory to start from (typically this module's).
@@ -134,7 +134,7 @@ export const Config = z.object({
 export function findCheckout(fromDir: string): string | undefined {
   let dir = path.resolve(fromDir)
   for (;;) {
-    if (fs.existsSync(path.join(dir, 'src', 'app-runner.ts'))) return dir
+    if (fs.existsSync(path.join(dir, 'src', 'app', 'app-runner.ts'))) return dir
     const parent = path.dirname(dir)
     if (parent === dir) return undefined
     dir = parent
@@ -195,8 +195,8 @@ function resolveOptions(config: Config): BridgeOptions {
   if (repoPath === undefined) {
     throw new Error('amberflow-bridge: no AmberFlow checkout found — set Config.repoPath or AMBERFLOW_REPO')
   }
-  if (!fs.existsSync(path.join(repoPath, 'src', 'app-runner.ts'))) {
-    throw new Error(`amberflow-bridge: ${repoPath} is not an AmberFlow checkout (missing src/app-runner.ts)`)
+  if (!fs.existsSync(path.join(repoPath, 'src', 'app', 'app-runner.ts'))) {
+    throw new Error(`amberflow-bridge: ${repoPath} is not an AmberFlow checkout (missing src/app/app-runner.ts)`)
   }
   const prefix = config.toolPrefix ?? 'amberflow'
   if (!/^[a-z][a-z0-9_]*$/.test(prefix)) {

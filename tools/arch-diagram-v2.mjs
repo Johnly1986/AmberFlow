@@ -118,8 +118,8 @@ note(800, 62, "图例：白框 = 不变 · 蓝框 = 新增/改动 · 橙框 = �
 /* ══════════════════════════════ ① 入口层 ══════════════════════════════ */
 band(84, 142, "① 入口层（一条命令 / 一次工具调用）—— 只编排，所有浏览器决策仍落到同一个执行循环");
 const entry = [
-  ["npm start · doctor", ["src/start.ts", "演示一次即归纳信号"]],
-  ["npm run apps", ["src/app-runner.ts", "数据腿 → 旅程 → 不变量"]],
+  ["npm start · doctor", ["src/cli/start.ts", "演示一次即归纳信号"]],
+  ["npm run apps", ["src/app/app-runner.ts", "数据腿 → 旅程 → 不变量"]],
   ["learn · agent", ["tools/learn.ts", "录制 → 零模型回放门"]],
   ["plan:flow · semantic", ["plan-flow / semantic-flow", "一句话 + 种子页 → 档案"]],
   ["plan-cli · datasource", ["站点 = 配置", "sources/*.json 发现制"]],
@@ -141,10 +141,10 @@ P("M700,378 V410"); note(714, 400, "expandPack / compileFlow → 冻结计划");
 
 /* ══════════════════════════════ ③ 计划层 ══════════════════════════════ */
 band(410, 100, "③ 计划层");
-box(60, 442, 330, 52, "bx", "src/plan.ts — TaskPlan / PlanningRules", ["有序子目标 + 完成信号 + 数据袋；checkpoint 续跑"]);
-box(402, 442, 330, 52, "bx", "src/planner.ts — runPlan", ["when 跳过 · retries 整步重跑 · replan 必打印"]);
+box(60, 442, 330, 52, "bx", "src/engine/plan.ts：TaskPlan/PlanningRules", ["有序子目标 + 完成信号 + 数据袋；checkpoint 续跑"]);
+box(402, 442, 330, 52, "bx", "src/engine/planner.ts — runPlan", ["when 跳过 · retries 整步重跑 · replan 必打印"]);
 box(744, 442, 330, 52, "bx", "LLM 规划 / 审计（可选）", ["无 OPENAI_* 时 Mock / Scripted 照常全流程"]);
-box(1086, 442, 330, 52, "bx", "src/signals.ts — 信号语言", ["5 个 DOM 算子 + all_of / any_of / not"]);
+box(1086, 442, 330, 52, "bx", "src/engine/signals.ts — 信号语言", ["5 个 DOM 算子 + all_of / any_of / not"]);
 P("M700,510 V546"); note(714, 536, "子目标 + 完成信号 + 数据袋");
 
 /* ══════════════════════════════ ④ 执行层（重点）══════════════════════════════ */
@@ -217,10 +217,10 @@ note(60, 1196, "闭集不可逃逸：决策层返回集合外的 id ⇒ 拒绝�
 /* ══════════════════════════════ ⑤ 模型运行时 ══════════════════════════════ */
 P("M700,1216 V1252"); note(714, 1240, "经决策缓存与咨询计数后问模型");
 band(1252, 148, "⑤ 本地决策模型运行时（可缺席；laya 是当前唯一实现，换决策提供者不动上层）");
-box(60, 1284, 330, 66, "bxm", "src/model.ts — LayaRuntime 缝", ["load / predictShortlist / Router", "测试注入 scriptedRuntime，不碰权重"]);
+box(60, 1284, 330, 66, "bxm", "src/model/model.ts — LayaRuntime 缝", ["load / predictShortlist / Router", "测试注入 scriptedRuntime，不碰权重"]);
 box(402, 1284, 330, 66, "bxm", "laya-onnx.ts + laya-format.ts", ["buildSequence · 温度标定 · shortlist k=8", "checkpoint 按文字系统路由，不按置信度"]);
 box(744, 1284, 330, 66, "bxm", "产物：图 + .onnx.data + tokenizer", ["约 1.7GB，刻意不进 git", "LAYA_ONNX_MODEL 约定 / HF 快照发现"]);
-box(1086, 1284, 330, 66, "bxm", "src/model-artifacts.ts", ["三件齐才算 on（单一出处）", "doctor / 运行器 / 桥 共用"]);
+box(1086, 1284, 330, 66, "bxm", "src/model/model-artifacts.ts", ["三件齐才算 on（单一出处）", "doctor / 运行器 / 桥 共用"]);
 note(60, 1374, `实测（真 ONNX，本机）：浏览器步 ${N.named}/${N.browserSteps} 全由声明解决（${N.hinted} 个 hint 点名 = ${N.hintPct}%，其余走 commands 闭集）；模型 top-1 ${N.top1}%、闸门内 precision ${N.prec}% ⇒ 它是兜底与诊断，不是承重件（详见 ⑨）`, "foot", 1356);
 note(60, 1394, "梯级账单：reobserve / escalate 在已验收语料上救回 0 次 ⇒ dead rung（口径与建议见 ARCHITECTURE_IMPROVEMENTS §5）", "lbl", 1356);
 note(60, 1370, "新增（P0）：配置类错误改为启动期预检、永不重试 —— 实测坏产物路径下数据腿与第一个工具步曾已执行，且同一配置错误被重试 2 次。", "sm", 1356);
@@ -273,8 +273,8 @@ box(60, 1812, 640, 140, "bxe", "已确认缺陷（均已修，逐条留负例）
 box(716, 1812, 700, 140, "bxnew", "迁移顺序（已全部落地，每条附验收台）", [
   "P0 单出口 / 结构化 stop_reason / 遮蔽 / hosts / 预检 —— tests/executor-p0.test.ts 21 条",
   "P1 hint 单实现 + tier 候选集（门控 tieredHint，默认 OFF 逐字节不变）—— 24 条",
-  "P2 src/actions.ts 命令闭集 —— apps/skybook-checksubmit「勾选+提交」1/1 · 15 条",
-  "P3 src/bindings.ts 数据槽层 —— apps/checkin-binding 1/1 + 2/2 · 20 条",
+  "P2 src/engine/actions.ts 命令闭集 —— apps/skybook-checksubmit「勾选+提交」1/1 · 15 条",
+  "P3 src/engine/bindings.ts 数据槽层 —— apps/checkin-binding 1/1 + 2/2 · 20 条",
   "P4 next + 路径上界 / next_cycle —— apps/cold-search-next（删 next 即红）· 17 条",
   "D3/R-4 同一元素重复上界 → no_progress —— tests/no-progress.test.ts 5 条",
   `验收：verify + smoke.sh（PASS）· apps:suite 16/17 · apps:gen --check 8/8 · ${N.tests} 测试`,

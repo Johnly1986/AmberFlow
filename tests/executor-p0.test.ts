@@ -18,16 +18,16 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import { BrowserMiddleware, disallowedHost, type AnyPage, type PwLike } from "../src/executor.ts";
-import { NEVER_RETRY_CODES, runSubgoalWithRetries, runOnce } from "../src/planner.ts";
-import { TaskPlan } from "../src/plan.ts";
-import type { Subgoal } from "../src/plan.ts";
-import { extractSlots } from "../src/extraction.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question } from "../src/model.ts";
-import { checkSignal } from "../src/signals.ts";
-import { modelConfigError } from "../src/model-artifacts.ts";
-import { AppRunConfigError, preflightConfig } from "../src/app-runner.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { BrowserMiddleware, disallowedHost, type AnyPage, type PwLike } from "../src/engine/executor.ts";
+import { NEVER_RETRY_CODES, runSubgoalWithRetries, runOnce } from "../src/engine/planner.ts";
+import { TaskPlan } from "../src/engine/plan.ts";
+import type { Subgoal } from "../src/engine/plan.ts";
+import { extractSlots } from "../src/engine/extraction.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question } from "../src/model/model.ts";
+import { checkSignal } from "../src/engine/signals.ts";
+import { modelConfigError } from "../src/model/model-artifacts.ts";
+import { AppRunConfigError, preflightConfig } from "../src/app/app-runner.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const fixture = (...p: string[]): string => pathToFileURL(path.join(REPO, ...p)).href;
@@ -65,7 +65,7 @@ function chooser(want: string, confidence: number): void {
 /* ------------------------------------------------------------------ D1/D2: source-shape guards */
 
 describe("禁元素/re-prune 收敛为单一出口（D1/D2 的结构守卫）", () => {
-  const src = fs.readFileSync(path.join(REPO, "src", "executor.ts"), "utf-8");
+  const src = fs.readFileSync(path.join(REPO, "src", "engine", "executor.ts"), "utf-8");
 
   it("`forbidden[ref] = esig(el)` 的直接写入只剩 forbid 助手内部那一处", () => {
     const direct = (src.match(/forbidden\[[^\]]+\]\s*=\s*esig\(/g) ?? []);
@@ -194,7 +194,7 @@ describe("敏感字段遮蔽：值不落进快照/trace/报告（D5①）", () =
 
   it("input[type=password/file/hidden] 的值不进 inert 快照比对（只留长度掩码）", () => {
     // VALS_JS 的源码守卫：password/file/hidden 三分支都在，且原值被 '*' 掩掉。
-    const src = fs.readFileSync(path.join(REPO, "src", "executor.ts"), "utf-8");
+    const src = fs.readFileSync(path.join(REPO, "src", "engine", "executor.ts"), "utf-8");
     expect(/t === 'password'\s*\|\|\s*t === 'file'\s*\|\|\s*t === 'hidden'/.test(src)).toBe(true);
     // 遮蔽后仍保留长度，否则"改密码"这种动作会被误判成 inert。
     expect(/\*'\.repeat\(raw\.length\)/.test(src)).toBe(true);

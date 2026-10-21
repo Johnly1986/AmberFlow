@@ -10,11 +10,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   adapterKind, appStepKeys, expandPack, loadPack, stepKind, validatePack, type AppPack,
-} from "../src/app-pack.ts";
+} from "../src/app/app-pack.ts";
 import {
   getAppAdapter, listAppAdapters, registerAppAdapter, requireAppAdapter, resetAppAdapters,
   sshReady, type AppAdapter,
-} from "../src/app-adapters.ts";
+} from "../src/app/app-adapters.ts";
 import { unavailableAdapters } from "../tools/apps_suite.ts";
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;

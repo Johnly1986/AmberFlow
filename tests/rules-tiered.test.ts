@@ -11,11 +11,11 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/executor.ts";
-import { firstIfSame, type Elem, type ElemPool } from "../src/extraction.ts";
-import { hintCandidates, hintMatch } from "../src/rules.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question } from "../src/model.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/engine/executor.ts";
+import { firstIfSame, type Elem, type ElemPool } from "../src/engine/extraction.ts";
+import { hintCandidates, hintMatch } from "../src/engine/rules.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question } from "../src/model/model.ts";
 
 const dataUrl = (html: string): string => `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 const pw: PwLike = { chromium: chromium as unknown as PwLike["chromium"] };

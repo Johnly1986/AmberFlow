@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { REPO_ROOT, RC_GROUPS } from "../src/rcfile.ts";
+import { REPO_ROOT, RC_GROUPS } from "../src/support/rcfile.ts";
 
 const scripts = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf-8")).scripts as
   Record<string, string>;
@@ -65,7 +65,7 @@ describe("入口接线守卫：读配置的入口必须接 rc", () => {
 
   it("守卫本身确实在看：抽样验证已接线的入口与承重模块非空", () => {
     // 防止守卫退化成"永远通过"：承重面判定命中过的文件里，至少有一个确实 import 了 rcfile
-    const sampled = ["src/bench.ts", "src/model-fetch.ts", "tools/provider-baselines.ts"];
+    const sampled = ["src/cli/bench.ts", "src/model/model-fetch.ts", "tools/provider-baselines.ts"];
     for (const f of sampled) {
       expect(fs.readFileSync(path.join(REPO_ROOT, f), "utf-8"), f).toContain("applyRcToEnv");
     }

@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   QTYPES, QTYPE_NAMES, confidenceFromProbs, eceScore, renderOptions, scoreExpectedValue,
   serializeState, tempBucket, toInternal,
-} from "../src/laya-format.ts";
+} from "../src/model/laya-format.ts";
 
 describe("serialize_state", () => {
   it("passes strings through and keeps a dict's non-ASCII text", () => {

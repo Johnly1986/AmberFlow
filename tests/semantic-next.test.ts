@@ -13,7 +13,7 @@
 import { makeFlowApp, PAGE } from "./fixtures.ts";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { validateTemplate, runFlow, type FlowTemplate } from "../src/semantic-flow.ts";
+import { validateTemplate, runFlow, type FlowTemplate } from "../src/flow/semantic-flow.ts";
 
 const template = (specVersion: number, steps: unknown[]): FlowTemplate => ({
   spec_version: specVersion,

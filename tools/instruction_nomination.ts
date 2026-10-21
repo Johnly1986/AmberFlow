@@ -34,18 +34,18 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import { pipeline } from "node:stream/promises";
-import { loadPack, expandPack, type AppPack } from "../src/app-pack.ts";
-import { getAppAdapter } from "../src/app-adapters.ts";
-import { runApp, type AppRunResult, type StepStateView } from "../src/app-runner.ts";
-import { conditionedInstructionCriteria, pageStateForModel } from "../src/page-context.ts";
-import { checkArtifacts, missingPieces, modelConfigError, onnxModelPath } from "../src/model-artifacts.ts";
-import { createLayaOnnxRuntime } from "../src/laya-onnx.ts";
-import { installLayaRuntime, type DecisionAgent } from "../src/model.ts";
-import { ruleNominate } from "../src/nominate.ts";
-import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, instructionCriteria } from "../src/instructions.ts";
-import { nominationInstructions, providerNominationAsk } from "../src/nominate.ts";
-import { resolveProviderSpec, type ProviderInfo } from "../src/decision-provider.ts";
-import { applyRcToEnv } from "../src/rcfile.ts";
+import { loadPack, expandPack, type AppPack } from "../src/app/app-pack.ts";
+import { getAppAdapter } from "../src/app/app-adapters.ts";
+import { runApp, type AppRunResult, type StepStateView } from "../src/app/app-runner.ts";
+import { conditionedInstructionCriteria, pageStateForModel } from "../src/model/page-context.ts";
+import { checkArtifacts, missingPieces, modelConfigError, onnxModelPath } from "../src/model/model-artifacts.ts";
+import { createLayaOnnxRuntime } from "../src/model/laya-onnx.ts";
+import { installLayaRuntime, type DecisionAgent } from "../src/model/model.ts";
+import { ruleNominate } from "../src/model/nominate.ts";
+import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, instructionCriteria } from "../src/model/instructions.ts";
+import { nominationInstructions, providerNominationAsk } from "../src/model/nominate.ts";
+import { resolveProviderSpec, type ProviderInfo } from "../src/model/decision-provider.ts";
+import { applyRcToEnv } from "../src/support/rcfile.ts";
 
 /** 本工具不经执行器，直接问 agent；装运行时只为保持"谁在跑"的单一出处。 */
 function installLayaRuntimeSafe(rt: ReturnType<typeof createLayaOnnxRuntime>): void {
@@ -772,7 +772,7 @@ async function runContextReview(outDir: string, providerName: string, limit: num
 }
 
 async function main(): Promise<number> {
-  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
   { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   const argv = process.argv.slice(2);
   const get = (k: string): string | undefined => {

@@ -37,25 +37,25 @@ npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹�
 npm run bench -- --force-model router    # 同一批用例，按页面选择 checkpoint（laya.Router 语义）
 bash bench/ablate.sh [tag]               # 消融矩阵：english|multilingual × rules on|off
 
-node --experimental-strip-types src/ctrip-task.ts                  # ctrip 用例：19 冻结子目标 + 独立判分 7/7
-node --experimental-strip-types src/ctrip-task.ts --no-hints       # 消融：去掉 hint → 0/7（置信度 0.13）
-node --experimental-strip-types src/transfer-task.ts --site skybook
-node --experimental-strip-types src/transfer-task.ts --site farehaven --no-when    # 去掉条件守卫 → 1/7
-node --experimental-strip-types src/transfer-task.ts --site slowjet --no-retries   # 去掉重试 → 0/7
-node --experimental-strip-types src/transfer-task.ts --metrics-only                # 不装模型、不开浏览器
-node --experimental-strip-types src/datasource.ts --source ctrip-flights-h5        # 真实票价，config 驱动
-node --experimental-strip-types src/datasource.ts --source ctrip-hotels-pc --dates 2026-10-09
-node --experimental-strip-types src/datasource.ts --list                           # 应用包也是配置目录：<repo>/*/sources 与 apps/*/sources
-node --experimental-strip-types src/datasource.ts --source git-log                 # CLI 通道：git 子进程 + lines_regex
-node --experimental-strip-types src/datasource.ts --source bench-cases-shape       # CLI 通道：jq + json_stdout
-node --experimental-strip-types src/qunar-task.ts                                  # qunar 迁移测试（边界已实测）
-node --experimental-strip-types src/ip-config.ts                                   # Excel IP 规划表 → 设备网络页
-node --experimental-strip-types src/camera-entry.ts                                # Excel 类型列路由两套表单
-node --experimental-strip-types src/long-task.ts                                   # 全链路 demo：plan → execute → audit
-node --experimental-strip-types src/path-a.ts [--confirm-safe]                     # Path A：Playwright + 固定动作拾取器
-node --experimental-strip-types src/picker-server.ts                               # Path B：扩展用的本地模型服务
-node --experimental-strip-types src/tune-guard.ts                                  # 注入闸门分离度实测
-node --experimental-strip-types src/live-probe.ts                                  # 携程可达性矩阵（真实站点）
+node --experimental-strip-types src/sites/ctrip-task.ts                  # ctrip 用例：19 冻结子目标 + 独立判分 7/7
+node --experimental-strip-types src/sites/ctrip-task.ts --no-hints       # 消融：去掉 hint → 0/7（置信度 0.13）
+node --experimental-strip-types src/sites/transfer-task.ts --site skybook
+node --experimental-strip-types src/sites/transfer-task.ts --site farehaven --no-when    # 去掉条件守卫 → 1/7
+node --experimental-strip-types src/sites/transfer-task.ts --site slowjet --no-retries   # 去掉重试 → 0/7
+node --experimental-strip-types src/sites/transfer-task.ts --metrics-only                # 不装模型、不开浏览器
+node --experimental-strip-types src/data/datasource.ts --source ctrip-flights-h5        # 真实票价，config 驱动
+node --experimental-strip-types src/data/datasource.ts --source ctrip-hotels-pc --dates 2026-10-09
+node --experimental-strip-types src/data/datasource.ts --list                           # 应用包也是配置目录：<repo>/*/sources 与 apps/*/sources
+node --experimental-strip-types src/data/datasource.ts --source git-log                 # CLI 通道：git 子进程 + lines_regex
+node --experimental-strip-types src/data/datasource.ts --source bench-cases-shape       # CLI 通道：jq + json_stdout
+node --experimental-strip-types src/sites/qunar-task.ts                                  # qunar 迁移测试（边界已实测）
+node --experimental-strip-types src/cli/ip-config.ts                                   # Excel IP 规划表 → 设备网络页
+node --experimental-strip-types src/cli/camera-entry.ts                                # Excel 类型列路由两套表单
+node --experimental-strip-types src/cli/long-task.ts                                   # 全链路 demo：plan → execute → audit
+node --experimental-strip-types src/cli/path-a.ts [--confirm-safe]                     # Path A：Playwright + 固定动作拾取器
+node --experimental-strip-types src/cli/picker-server.ts                               # Path B：扩展用的本地模型服务
+node --experimental-strip-types src/cli/tune-guard.ts                                  # 注入闸门分离度实测
+node --experimental-strip-types src/sites/live-probe.ts                                  # 携程可达性矩阵（真实站点）
 npm run plan-cli -- --help                                                         # 计划 CLI：new/add/edit/check/run
 node --experimental-strip-types tools/learn.ts                                     # 演示一次就录成应用（零参数）
 node --experimental-strip-types tools/learn.ts --json --yes --goal … --url …      # 外层 Agent 的一次调用
@@ -88,19 +88,19 @@ act_on），模型不产出"选哪行"——而且与数据引擎**共用同一�
 自动标注。实测（含中文城市提取、`{slot}` 泛化、查询差分候选三处坑）见 [docs/SEMANTIC_FLOW_M3_REPORT.md](docs/SEMANTIC_FLOW_M3_REPORT.md)；
 每条验收指标钉在哪个测试见方案文档 §8。
 
-线上平台用例：`node --experimental-strip-types src/bench.ts --cases bench/cases-live.json --mode-tag live`（8 个真实站点，见 README 的实测一节）。
+线上平台用例：`node --experimental-strip-types src/cli/bench.ts --cases bench/cases-live.json --mode-tag live`（8 个真实站点，见 README 的实测一节）。
 
 线上复测（2026-10-03，含四个可达性探针的逐项原始观测）：[bench/live-retest/REPORT.md](bench/live-retest/REPORT.md)。
 复测时所有写文件的命令都带 `--out`，**不覆盖已提交的冻结语料**；探针的 URL/特征/结果目录全在
-`apps/{ctrip,ota,qunar}-live/pack.json` 里声明（见 `src/probe-set.ts`）。
+`apps/{ctrip,ota,qunar}-live/pack.json` 里声明（见 `src/app/probe-set.ts`）。
 
-长流程线上用例：`node --experimental-strip-types src/bench.ts --cases bench/cases-live-long.json --mode-tag live-long`
+长流程线上用例：`node --experimental-strip-types src/cli/bench.ts --cases bench/cases-live-long.json --mode-tag live-long`
 （3 个真实站点 / 34 个子目标，一条命令跑完三条完整旅程；不进 CI，外部站点慢且会波动。
 设计、逐子目标信号证据与它暴露的四个真实缺陷见 [bench/LONG_FLOW_REPORT.md](bench/LONG_FLOW_REPORT.md)）。
 
 应用包（应用层）：`npm run apps -- --list` / `npm run apps -- --app demo-app`（离线整跑：
 数据腿 → 混合旅程（工具步 + 浏览器步）→ 结束状态不变量）/ `npm run apps -- --app demo-app --dry`（只展开计划）。
-真实应用：`--app ctrip-case --no-sources`（19 个冻结子目标跑本地复刻站，与 `src/ctrip-task.ts`
+真实应用：`--app ctrip-case --no-sources`（19 个冻结子目标跑本地复刻站，与 `src/sites/ctrip-task.ts`
 的计划**逐字段全等**）、`--app ip-config`（Excel IP 规划表 → 设备网络页，含"表格写错的那行由设备页
 自己拒绝"）、`--app camera-entry`（Excel 类型列路由两套表单：空类型行按**行内证据**显式选页、
 坏序列号那行显式成步）、`--app transfer-voyagio --no-sources`（第二个复刻站：**两页向导** 24 步）、
@@ -152,11 +152,11 @@ act_on），模型不产出"选哪行"——而且与数据引擎**共用同一�
 与已入库的探测记录比——站点变了、或有人手改了包，都会红；`--write` 刷新（只存标量观察，不存 `*_reason`）。
 
 探针集（测量型应用）：`apps/ctrip-live` / `apps/ota-live` / `apps/qunar-live` 声明了全部 URL、站点特征、
-结果目录与判决角色；驱动只剩"怎么测"（`src/live-probe.ts` / `live-capture.ts` / `ota-probe.ts` /
+结果目录与判决角色；驱动只剩"怎么测"（`src/sites/live-probe.ts` / `live-capture.ts` / `ota-probe.ts` /
 `qunar-probe.ts` / `qunar-task.ts`，它们现在都在共享层**核心**名单里）。`npm run apps:matrix` 的债计数：
 **0 处**（含"非核心文件里写死的 http 主机"这一独立的扫描口径）。复测用 `--out`：
-`src/live-probe.ts --out /tmp/x.json` / `src/live-capture.ts --out /tmp/dir` /
-`src/ota-probe.ts --out /tmp/x.json`。
+`src/sites/live-probe.ts --out /tmp/x.json` / `src/sites/live-capture.ts --out /tmp/dir` /
+`src/sites/ota-probe.ts --out /tmp/x.json`。
 
 **Python 参考命令**（`pytest`、`python3 xxx.py`、`pip install -r requirements.txt`）属于**已彻底移除**的参考实现：
 工作树与 git 历史都已删除，磁盘上不再有 Python 文件（见 `BACKUP.md`）。
@@ -165,7 +165,7 @@ act_on），模型不产出"选哪行"——而且与数据引擎**共用同一�
 CI：`.github/workflows/checks.yml` 只做一件事——装 Node 依赖 + chromium，然后跑 `bench/smoke.sh`。
 保持 `bench/smoke.sh` 是"绿色"的唯一定义。
 
-Playwright 需要浏览器：`src/browser-env.ts` 按平台解析 chromium（Playwright 管理的版本，或 `PLAYWRIGHT_BROWSERS_PATH`
+Playwright 需要浏览器：`src/browser/browser-env.ts` 按平台解析 chromium（Playwright 管理的版本，或 `PLAYWRIGHT_BROWSERS_PATH`
 下已安装的 `chromium-*`），MV3 扩展必须走 `launchPersistentContext`。Mock 页面在 `testpages/`，bench 夹具在 `bench/fixtures/`。
 
 LLM planner/auditor 在 `OPENAI_BASE_URL` + `OPENAI_API_KEY`（可加 `PLANNER_MODEL` / `AUDIT_MODEL`）齐备时自动启用；
@@ -178,14 +178,14 @@ LLM planner/auditor 在 `OPENAI_BASE_URL` + `OPENAI_API_KEY`（可加 `PLANNER_M
 
 | Python（备份中） | TypeScript |
 |---|---|
-| `layaapp/planner.py` | `src/plan.ts`（TaskPlan/PlanningRules）+ `src/planner.ts`（runPlan/LLMPlanner） |
-| `layaapp/executor.py` | `src/executor.ts`（BrowserMiddleware，唯一执行器循环） |
-| `layaapp/extraction.py` / `rules.py` / `signals.py` / `audit.py` / `picker.py` | `src/extraction.ts` / `src/rules.ts` / `src/signals.ts` / `src/audit.ts` / `src/picker.ts` |
+| `layaapp/planner.py` | `src/engine/plan.ts`（TaskPlan/PlanningRules）+ `src/engine/planner.ts`（runPlan/LLMPlanner） |
+| `layaapp/executor.py` | `src/engine/executor.ts`（BrowserMiddleware，唯一执行器循环） |
+| `layaapp/extraction.py` / `rules.py` / `signals.py` / `audit.py` / `picker.py` | `src/engine/extraction.ts` / `src/engine/rules.ts` / `src/engine/signals.ts` / `src/engine/audit.ts` / `src/engine/picker.ts` |
 | `layaapp/__init__.py` | `src/index.ts` |
-| `browser_env.py` | `src/browser-env.ts` |
-| `bench/run_bench.py` | `src/bench.ts`（BenchMiddleware 子类化生产循环） |
-| `browser_picker_playwright.py` / `picker_server.py` | `src/path-a.ts` / `src/picker-server.ts` |
-| `datasource.py` / `ctrip/*.py` / `transfer/*.py` / `qunar/*.py` | `src/datasource.ts` / `src/ctrip-*.ts`·`h5-flights`·`live-*` / `src/transfer-*.ts`·`flow`·`ota-probe`·`profiles` / `src/qunar-*.ts` |
+| `browser_env.py` | `src/browser/browser-env.ts` |
+| `bench/run_bench.py` | `src/cli/bench.ts`（BenchMiddleware 子类化生产循环） |
+| `browser_picker_playwright.py` / `picker_server.py` | `src/cli/path-a.ts` / `src/cli/picker-server.ts` |
+| `datasource.py` / `ctrip/*.py` / `transfer/*.py` / `qunar/*.py` | `src/data/datasource.ts` / `src/data/ctrip-data.ts`·`h5-flights`·`live-*` / `src/data/transfer-data*.ts`·`flow.ts`·`ota-probe`·`profiles` / `src/sites/qunar-*.ts` |
 
 Layered, one direction of dependency:
 
@@ -286,7 +286,7 @@ These are empirical findings from this codebase's own experiments — preserve t
   the END state) and `hosts` (documentation + the leak check's input). Discovery is `apps/<id>/pack.json`, load-time
   validation reuses `PlanningRules.problems` (one grammar, not a second one), `{slot}` placeholders substitute ONLY
   declared slots (tool args and JSON payloads are full of braces; an unknown placeholder fails at load), and relative
-  `start_url`s resolve to `file://` from the repo root. `src/app-runner.ts` runs the whole chain in one command
+  `start_url`s resolve to `file://` from the repo root. `src/app/app-runner.ts` runs the whole chain in one command
   (`npm run apps -- --app demo-app`): data leg → journey → invariants → report. The journey is a **mixed step list**
   (browser steps and tool steps, in order): a browser step goes through `runSubgoalWithRetries` — the executor loop is
   still `BrowserMiddleware.run`, and the runner owns the session (created lazily at the FIRST browser step, `close()`
@@ -335,7 +335,7 @@ These are empirical findings from this codebase's own experiments — preserve t
   hint that matches nothing, ask what the app was never allowed to declare.
 - **A tool step is an ACTION LEG, and the three disciplines are what make it safe.** A journey entry with a `source` is a
   tool step: it reuses the CLI transport (argv array, env allowlist, cwd, exit codes, version pin) and adds `args` /
-  `dry_run_args` / `idempotent` / `dangerous`. Its completion truth is the **process observation** — `src/tool-signals.ts`
+  `dry_run_args` / `idempotent` / `dangerous`. Its completion truth is the **process observation** — `src/browser/tool-signals.ts`
   grows the same shape as the DOM language on that surface (`exit_ok`, `exit_code_equals`, `stdout_contains`,
   `stdout_matches`, `stderr_contains`, `json_path_equals` via the datasource path language, `file_exists`, `file_absent`,
   plus recursive `all_of`/`any_of`/`not`), validated at load exactly like the DOM one. Because re-running a CLI command
@@ -449,7 +449,7 @@ These are empirical findings from this codebase's own experiments — preserve t
 - **On Chinese pages the plan's `target_hint` is load-bearing, not decoration.** The ctrip case resolves 19/19 steps by rule with
   hints (zero model calls); stripping them blocks subgoal 1 outright -- confidence **0.13** on the zh homepage, and **0.24** after
   `laya.Router` correctly routes to `multilingual` (Han = 61% of letters). Routing doubles it and still misses the 0.25 floor.
-  Measured: `src/ctrip-task.ts --no-hints [--route]` -> 0/7 both ways. Do not read this as "rules beat the model":
+  Measured: `src/sites/ctrip-task.ts --no-hints [--route]` -> 0/7 both ways. Do not read this as "rules beat the model":
   it says the model's zero-shot ceiling on CJK list pages is below this flow's floor.
 - **A hint is TIERED, and a live list page is why.** `~` hints used to be "substring matches,
   and only usable when every hit is identical"; on real pages that is always ambiguous —
@@ -530,14 +530,14 @@ These are empirical findings from this codebase's own experiments — preserve t
 与 `off(ablation:rules-only)` = **消融实验臂**，`--ablate` 显式才出现；旧的 `--no-model` 把桩标成
 `off(rules-only)`，名实不符，已改名) is written by
   the engine into `<app>-result.json` (`model_status`), read by `apps:matrix`/`apps:suite`/the DSH bridge
-  — one source (`src/model-artifacts.ts`), because doctor and the runtime once disagreed about what
+  — one source (`src/model/model-artifacts.ts`), because doctor and the runtime once disagreed about what
   "artifacts complete" means (a box with graph+weights but no tokenizer read as "真模型" and failed later).
 - **The model author's preset wording is not automatically better.** `laya.presets.guard_questions()`
   phrases prompt-injection as "instructions aimed at the AI system rather than a genuine user request";
   measured on the three fixtures it scores benign pages **0.969 / 0.930**, i.e. ABOVE the 0.95 attack
   threshold (`path-a.ts`) — it would flag a product page. Our hand-written phrasing gives 0.907 / 0.940
   with the injection page at 1.000 for all three. Presets are tuned for USER PROMPTS, not page text;
-  the measured rule stays ours (see `docs/decision-model-survey.md`, variant C in `src/tune-guard.ts`).
+  the measured rule stays ours (see `docs/decision-model-survey.md`, variant C in `src/cli/tune-guard.ts`).
 - **C3-R's top-two margin does NOT transfer — measured, then rejected.** The same-base application
   (ColomboAI C3R) abstains on "low confidence OR small top-two margin". On our data (live pack with
   `--force-rules off`: 70 model picks → 39 good, 5 inert/坏, 26 abstained) the margin points the WRONG way:
@@ -578,7 +578,7 @@ These are empirical findings from this codebase's own experiments — preserve t
   (the floor A/B above is what retired the calibration gate). Same for `npm run cache:measure`.
 
 - **Decision memory has TWO halves: what was decided, and what HAPPENED.** `withDecisionCache` covers the
-  first (round 1). `src/outcome-memory.ts` covers the second: an element that was clicked and changed nothing
+  first (round 1). `src/model/outcome-memory.ts` covers the second: an element that was clicked and changed nothing
   is remembered per (EXACT url + subgoal) by element SIGNATURE (refs are re-indexed every scan, so they must
   never be persisted), skipped while at least one other candidate remains (it can never empty the pool), and
   cleared the moment that element works. Bounded (256 keys / 32 per key, LRU), optionally persisted to JSON,
@@ -599,7 +599,7 @@ These are empirical findings from this codebase's own experiments — preserve t
 
 - **A hint can be EARNED, not only authored.** Authored hints carry the live pack (8/8); strip them and the
   same pack drops to **3/8** (measured with `--force-hints off`, rules still on) — so the lever is the hint
-  layer, not model accuracy. `src/hint-memory.ts` turns an OBSERVED success into a rule: when a MODEL pick
+  layer, not model accuracy. `src/model/hint-memory.ts` turns an OBSERVED success into a rule: when a MODEL pick
   actually advanced the subgoal, the element it touched becomes a hint in the existing grammar
   (`data-test` -> `id` -> `name` -> `tag[near~label]`, and the value must not be volatile: 4+ digits, hashes
   and counters are refused). Keyed by (exact url, subgoal), used ONLY when the plan authored no hint
@@ -647,7 +647,7 @@ These are empirical findings from this codebase's own experiments — preserve t
   report byte for byte, and that report embeds a human-readable 「执行日期」 line — so the gate silently
   expired at midnight: 10/10 -> 9/10 on 2026-10-03 purely because the reference corpus was generated on
   2026-10-02 (`first byte diff @108`). The corpus is a Python artifact and stays untouched; the CLOCK is
-  what gets pinned. `todayIso()` (single implementation in `src/datasource.ts`, now also used by
+  what gets pinned. `todayIso()` (single implementation in `src/data/datasource.ts`, now also used by
   `ctrip-data.ts`/`ctrip-task.ts` instead of their two private copies) honours `LAYA_TODAY=YYYY-MM-DD`
   (malformed values are ignored, never trusted), `nextWeekDates()` derives from it, and
   `tools/ctrip-parity.ts` pins it to the day parsed out of its own corpus. `tests/parity-clock.test.ts`
@@ -704,7 +704,7 @@ These are empirical findings from this codebase's own experiments — preserve t
   6 种语法收敛进 `rules.hintMatchImpl`，`hintMatch ≡ firstIfSame(hintCandidates)` 由 20 例差分逐形状钉死；
   ON 时档内歧义向模型只问那几条候选（实测 OFF 问 15、ON 问 3），窄问弃权即回退整池——
   **阶梯四个 `method` 取值一字未动**。出口打通 CLI `--tiered-hint` 与桥 `tiered_hint`。
-- **P2 命令层已落地（`src/actions.ts`；门控 = `commands` 字段本身，不声明逐字节不变；`tests/actions.test.ts` 15 条）**：
+- **P2 命令层已落地（`src/engine/actions.ts`；门控 = `commands` 字段本身，不声明逐字节不变；`tests/actions.test.ts` 15 条）**：
   声明半 `COMMAND_OPS=click|check|fill|select|skip` 是引擎能力面（代码），包/计划 `commands` 引用它，
   未知 op / 重复 id / fill 缺 slot 绑定 / 参数来源非 slot ⇒ 加载期红（同一个 `PlanningRules.problems`，无第三套语法）；
   实例化半 `instantiateSpace`=声明×当次观察（纯函数），解析不到出局、全空 ⇒ 结构化 `space_empty`
@@ -712,7 +712,7 @@ These are empirical findings from this codebase's own experiments — preserve t
   `needs_value` 停并进 `NEVER_RETRY_CODES`。验收用例兑现：SkyBook"勾选+提交"放进**一个子目标**
   （§七.9 未解边界 → 可表达；真 site2 夹具 2 条 executed 命令、零选择提问、信号落账），
   旧 8 个生成包一字未动（`apps:gen --check` 8/8）。红线（闭集不可逃逸、缺省等价、新知识过零模型重放门）见 review §8。
-- **P3 数据槽层已落地（`src/bindings.ts`；门控 = 绑定形状本身，不声明逐字节不变；`tests/bindings.test.ts` 20 条）**：
+- **P3 数据槽层已落地（`src/engine/bindings.ts`；门控 = 绑定形状本身，不声明逐字节不变；`tests/bindings.test.ts` 20 条）**：
   参数三条来源、都必须点名：`{from:"slot",key}`（计划袋）、`{from:"option",key,match}`（**当次观察**的页面候选
   + `match: value|label|contains`）、`{from:"list",by,order}`（行集 + `order: min|max`）。规则不声明 ⇒ 加载期红
   （"看着像就填"就是猜）；分档匹配、**档内歧义即弃权**（P1 的 tier 纪律用到值上）；解析只有一份实现
@@ -751,4 +751,4 @@ These are empirical findings from this codebase's own experiments — preserve t
   漂移族红格 plain（今天）0/3 → **A2′ 3/3**——模型低置信下其实**选对了**，是闸门把正确答案丢了
   （`bench/drift-real-arm.json` 两条臂都冻结进门禁）。缺省不开 = 全语料逐字节不变。
   顺带修一条潜伏断链：`TaskPlan` 构造器的保留清单**没有 `effect`** ⇒ W1 的 `effect.irreversible`
-  声明从没穿过 pack→plan→executor（0 个包用过它所以从没暴露）；A2′ 依赖这个声明存活，先把它接上（`src/plan.ts`）。
+  声明从没穿过 pack→plan→executor（0 个包用过它所以从没暴露）；A2′ 依赖这个声明存活，先把它接上（`src/engine/plan.ts`）。

@@ -19,11 +19,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserMiddleware } from "../src/executor.ts";
-import { checkSignal } from "../src/signals.ts";
-import { checkArtifacts } from "../src/model-artifacts.ts";
-import { installLayaRuntime } from "../src/model.ts";
-import { createLayaOnnxRuntime } from "../src/laya-onnx.ts";
+import { BrowserMiddleware } from "../src/engine/executor.ts";
+import { checkSignal } from "../src/engine/signals.ts";
+import { checkArtifacts } from "../src/model/model-artifacts.ts";
+import { installLayaRuntime } from "../src/model/model.ts";
+import { createLayaOnnxRuntime } from "../src/model/laya-onnx.ts";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PAGES = path.join(REPO, "testpages", "drift");

@@ -4,8 +4,8 @@
  * see the comments carried over from the Python tests.
  */
 import { describe, expect, it } from "vitest";
-import { affordanceRule, hintMatch, navRule } from "../src/rules.ts";
-import { esig, type Elem, type ElemPool } from "../src/extraction.ts";
+import { affordanceRule, hintMatch, navRule } from "../src/engine/rules.ts";
+import { esig, type Elem, type ElemPool } from "../src/engine/extraction.ts";
 
 /** Same factory as the Python suite's `el()`. */
 function el(ref: string, tag = "button", label = "", dataTest = "", kw: Partial<Elem> = {}): Elem {

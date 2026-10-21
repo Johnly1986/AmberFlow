@@ -7,13 +7,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { PlanningRules, TaskPlan, type Subgoal } from "../src/plan.ts";
+import { PlanningRules, TaskPlan, type Subgoal } from "../src/engine/plan.ts";
 import {
   LLMPlanner, ScriptedPlanner, runPlan, runSubgoalWithRetries, snapshotText,
   type MiddlewareLike, type MiddlewareReport,
-} from "../src/planner.ts";
-import type { BrowserSession } from "../src/executor.ts";
-import type { ElemPool } from "../src/extraction.ts";
+} from "../src/engine/planner.ts";
+import type { BrowserSession } from "../src/engine/executor.ts";
+import type { ElemPool } from "../src/engine/extraction.ts";
 
 let tmp: string;
 beforeEach(() => {

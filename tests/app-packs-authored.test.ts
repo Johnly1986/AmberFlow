@@ -6,8 +6,8 @@
  *   2. **加载期坏包**：克隆一份包做坏，断言 `validatePack` 返回的**精确**报错文本
  *      （不是 `toContain` 一个片段——校验器的价值就在于"响亮且具体"）；
  *   3. 展开后的 `journey` 必须与素材里的冻结计划**逐字段一致**：
- *      ctrip-case 对 `src/ctrip-task.ts` 的 `flightSubgoals`/`hotelSubgoals`，
- *      ip-config 对 `src/ip-config.ts` 的 `buildPlan`。
+ *      ctrip-case 对 `src/sites/ctrip-task.ts` 的 `flightSubgoals`/`hotelSubgoals`，
+ *      ip-config 对 `src/cli/ip-config.ts` 的 `buildPlan`。
  *
  * 两条口径值得单独说：
  *   - 脚本模型对 `choice` 问题**给不出答案**（它只会回 `{noul}`）。所以"19/19 与 8/8 全
@@ -21,13 +21,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { expandPack, loadPack, validatePack } from "../src/app-pack.ts";
-import { runApp, startUrl } from "../src/app-runner.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
-import { buildPlan, DEMO_ROWS } from "../src/ip-config.ts";
-import { DEMO_ROWS as CAM_ROWS, FORMS, TYPE_TO_FORM } from "../src/camera-entry.ts";
-import { discoverSpecs, emitPlan } from "../src/transfer-task.ts";
-import * as CT from "../src/ctrip-task.ts";
+import { expandPack, loadPack, validatePack } from "../src/app/app-pack.ts";
+import { runApp, startUrl } from "../src/app/app-runner.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
+import { buildPlan, DEMO_ROWS } from "../src/cli/ip-config.ts";
+import { DEMO_ROWS as CAM_ROWS, FORMS, TYPE_TO_FORM } from "../src/cli/camera-entry.ts";
+import { discoverSpecs, emitPlan } from "../src/sites/transfer-task.ts";
+import * as CT from "../src/sites/ctrip-task.ts";
 import { matrix } from "../tools/apps_matrix.ts";
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -57,7 +57,7 @@ afterAll(() => installLayaRuntime(null));
 /* ================================================================ A1 */
 
 describe("apps/ctrip-case（A1：携程复刻站 19 个冻结子目标）", () => {
-  it("journey 与 src/ctrip-task.ts 的冻结计划逐字段对齐", () => {
+  it("journey 与 src/sites/ctrip-task.ts 的冻结计划逐字段对齐", () => {
     const frozen = [...CT.flightSubgoals(CT_DATES), ...CT.hotelSubgoals(CT_CHECKIN)];
     const exp = expandPack(loadPack("ctrip-case"), {}, planPath("ctrip-align"));
     expect(exp.plan.subgoals).toHaveLength(19);
@@ -257,7 +257,7 @@ const isBlankRow = (v: unknown): boolean =>
   v === null || v === undefined || v === "" || (typeof v === "number" && Number.isNaN(v));
 
 describe("apps/camera-entry（A3：Excel 类型列路由两套表单）", () => {
-  it("journey 与 src/camera-entry.ts 的类型规则 + fillForm 的字段映射逐字段对齐", () => {
+  it("journey 与 src/cli/camera-entry.ts 的类型规则 + fillForm 的字段映射逐字段对齐", () => {
     const exp = expandPack(loadPack("camera-entry"), {}, planPath("camera-align"));
     expect(exp.plan.subgoals).toHaveLength(CAM_ROWS.length);   // 4 行 = 4 步
     expect(exp.rolesUsed).toEqual([]);

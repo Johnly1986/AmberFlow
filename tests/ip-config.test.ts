@@ -9,9 +9,9 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   DEMO_ROWS, PORTAL, XLSX, buildPlan, configureAll, ensureXlsx, main, readXlsx, settingsUrl,
-} from "../src/ip-config.ts";
-import { PlanningRules } from "../src/plan.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question } from "../src/model.ts";
+} from "../src/cli/ip-config.ts";
+import { PlanningRules } from "../src/engine/plan.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question } from "../src/model/model.ts";
 
 afterAll(() => installLayaRuntime(null));
 

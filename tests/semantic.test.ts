@@ -16,17 +16,17 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   compileFlow, flowReportMarkdown, listFlowApps, loadSiteProfile, loadTemplate,
   runFlow, validateProfile, validateTemplate,
-} from "../src/semantic-flow.ts";
+} from "../src/flow/semantic-flow.ts";
 import {
   LearnedStore, SiteProfileMemory, matchSemanticTarget, semanticToHint,
-} from "../src/semantic.ts";
+} from "../src/flow/semantic.ts";
 import {
   installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question,
-} from "../src/model.ts";
-import { BrowserMiddleware, browserSession } from "../src/executor.ts";
-import { selectBest, selectIndex, type Source } from "../src/datasource.ts";
-import { observeLocale } from "../src/semantic.ts";
-import { checkSignal } from "../src/signals.ts";
+} from "../src/model/model.ts";
+import { BrowserMiddleware, browserSession } from "../src/engine/executor.ts";
+import { selectBest, selectIndex, type Source } from "../src/data/datasource.ts";
+import { observeLocale } from "../src/flow/semantic.ts";
+import { checkSignal } from "../src/engine/signals.ts";
 
 afterAll(() => installLayaRuntime(null));
 

@@ -20,15 +20,15 @@
  * 这些是"不可约残差"——生成器只搬运，不生成；缺 `invariants` 时会**明着提示**（而不是悄悄给一个空壳）。
  */
 import crypto from "node:crypto";
-import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
+import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { appDirs, expandPack, loadPack, validatePack, type AppPack } from "../src/app-pack.ts";
+import { appDirs, expandPack, loadPack, validatePack, type AppPack } from "../src/app/app-pack.ts";
 import { FROZEN_TODAY } from "./frozen-today.ts";
 import { pathToFileURL } from "node:url";
-import { discoverSpecs, emitPlan } from "../src/transfer-task.ts";
+import { discoverSpecs, emitPlan } from "../src/sites/transfer-task.ts";
 
 const isDict = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -77,7 +77,7 @@ export interface Flow {
  * 应用里的每一步都来自**某个上游构件**。两种上游：
  *   - `spec`：`transfer/specs/<key>.json`（经 `emitPlan` 展开）；
  *   - `source`：`<模块>#<导出名>`，导出函数返回一份应用级计划（例如
- *     `src/ip-config.ts#buildAppPlan`：整张 IP 规划表 → 一条旅程，并且把"保存要认回显的值"
+ *     `src/cli/ip-config.ts#buildAppPlan`：整张 IP 规划表 → 一条旅程，并且把"保存要认回显的值"
  *     "规划表写错的行预期被设备页拒绝"这两条判断写在**代码**里，而不是手抄进 JSON）。
  * 判断写在代码里而不是数据里，是因为它本来就是"这个应用验收什么"的语义；写进代码后
  * 驱动与生成器共用同一份，谁也漂移不了。
@@ -467,7 +467,7 @@ export function checkAgainstFlow(entry: { id: string; pack: AppPack }, flow: Flo
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   let values;
-  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
     args: argv,
@@ -489,7 +489,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   --list            有哪些 spec 可生成、哪些应用已挂上生成器
   --check           检查所有已挂上的应用：旅程 == emitPlan(spec) 的展开，且 plan_sha256 匹配
   --write           重新生成（默认所有已挂上的应用；给 --id/--spec 或 --id/--source 可给新应用挂上）
-  --source MOD#FN   流程来自一个导出"应用级计划"的函数（例如 src/ip-config.ts#buildAppPlan）
+  --source MOD#FN   流程来自一个导出"应用级计划"的函数（例如 src/cli/ip-config.ts#buildAppPlan）
   --today YYYY-MM-DD 展开用的"今天"（默认钉住 FROZEN_TODAY=${FROZEN_TODAY}，否则包会随星期漂移）
   --quiet           只输出结论行
 

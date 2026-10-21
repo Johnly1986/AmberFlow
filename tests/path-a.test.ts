@@ -4,13 +4,13 @@
  * scene verification are what is actually under test.
  */
 import { afterAll, describe, expect, it } from "vitest";
-import { PAGES, SCENES, extractState, main as pathAMain, type AnyPage } from "../src/path-a.ts";
-import { GOAL, main as longTaskMain } from "../src/long-task.ts";
-import { PAGES_TO_SCORE, VARIANTS, measure } from "../src/tune-guard.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question } from "../src/model.ts";
-import type { PickDecision, QuickActionPicker } from "../src/picker.ts";
+import { PAGES, SCENES, extractState, main as pathAMain, type AnyPage } from "../src/cli/path-a.ts";
+import { GOAL, main as longTaskMain } from "../src/cli/long-task.ts";
+import { PAGES_TO_SCORE, VARIANTS, measure } from "../src/cli/tune-guard.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer, type Question } from "../src/model/model.ts";
+import type { PickDecision, QuickActionPicker } from "../src/engine/picker.ts";
 import { chromium } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
 
 afterAll(() => installLayaRuntime(null));
 

@@ -6,7 +6,7 @@
  *   cd ts && npx vite-node tools/ctrip-parity.ts
  *
  * 为什么用 vite-node 而不是 `node --experimental-strip-types`：本工具要 import
- * `src/ctrip-task.ts` -> `src/plan.ts`，而 Node 的 strip-only 模式不支持 TS 的
+ * `src/sites/ctrip-task.ts` -> `src/engine/plan.ts`，而 Node 的 strip-only 模式不支持 TS 的
  * **构造器参数属性**（`constructor(public maxSubgoals = 8, ...)`），会在加载时直接报
  * ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX。vite-node 走完整转译，其他对拍工具（executor-parity）
  * 的依赖链没有用到这个语法，所以仍可用 strip-types。
@@ -20,8 +20,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as C from "../src/ctrip-data.ts";
-import * as T from "../src/ctrip-task.ts";
+import * as C from "../src/data/ctrip-data.ts";
+import * as T from "../src/sites/ctrip-task.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, "..");

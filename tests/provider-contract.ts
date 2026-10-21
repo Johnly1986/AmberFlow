@@ -4,7 +4,7 @@
  * 而不是每人一套松紧：抽象的判据是"同一份考卷"。
  */
 import { expect, it } from "vitest";
-import type { ChoiceRequest, ChoiceOutcome, DecisionProvider } from "../src/decision-provider.ts";
+import type { ChoiceRequest, ChoiceOutcome, DecisionProvider } from "../src/model/decision-provider.ts";
 
 /** 由调用方给的页面夹具（契约本身不关心页面从哪来）。 */
 export type PageOf = () => ChoiceRequest["page"];

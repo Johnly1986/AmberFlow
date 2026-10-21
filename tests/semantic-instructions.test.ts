@@ -1,5 +1,5 @@
 /**
- * NL Flow S2：指令学习存储（docs/NL_FLOW_DESIGN.md §7 + src/semantic-instructions.ts）。
+ * NL Flow S2：指令学习存储（docs/NL_FLOW_DESIGN.md §7 + src/flow/semantic-instructions.ts）。
  *
  * 五组钉子：
  *   ① 回填门（红线 2 同款）：staged 只进内存；commitVerified 放行验证过的（replays_ok+1），
@@ -16,10 +16,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { LearnedStore } from "../src/semantic.ts";
-import { createInstructionMemory } from "../src/semantic-instructions.ts";
-import { SiteProfileMemory } from "../src/semantic.ts";
-import { nominateInstruction } from "../src/nominate.ts";
+import { LearnedStore } from "../src/flow/semantic.ts";
+import { createInstructionMemory } from "../src/flow/semantic-instructions.ts";
+import { SiteProfileMemory } from "../src/flow/semantic.ts";
+import { nominateInstruction } from "../src/model/nominate.ts";
 
 const tmpDir = (): { dir: string; store: LearnedStore } => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "amber-instr-mem-"));

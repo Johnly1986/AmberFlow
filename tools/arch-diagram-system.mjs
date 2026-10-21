@@ -100,9 +100,9 @@ const side = (y, h, label) => { R(1225, y, 295, h, "band side"); T(1243, y + 22,
 
 /* ---------------- ① 入口层 ---------------- */
 band(64, 150, "① 入口层 — 一条命令 / 一次工具调用（误输=一行点名，不甩堆栈：cli-args.ts）");
-box(60, 96, 268, 52, "bx", "npm start · doctor", ["src/start.ts：开箱任务 / 演示一次归纳", "$doctor 缺件点名 + 一条补齐命令"]);
+box(60, 96, 268, 52, "bx", "npm start · doctor", ["src/cli/start.ts：开箱任务 / 演示一次归纳", "$doctor 缺件点名 + 一条补齐命令"]);
 box(338, 96, 268, 52, "bx", "npm run apps · semantic", ["app-runner / semantic-flow", "整跑一条链 / 模板跨站迁移"]);
-box(616, 96, 292, 52, "bx", "learn · agent · plan:flow", ["tools/learn.ts / src/plan-flow.ts", "演示一次或一句话 → 包/模板，门槛见 ③"]);
+box(616, 96, 292, 52, "bx", "learn · agent · plan:flow", ["tools/learn.ts / src/flow/plan-flow.ts", "演示一次或一句话 → 包/模板，门槛见 ③"]);
 box(918, 96, 272, 52, "bx", "plan-cli · datasource · bench", ["手写计划；站点=配置；跑分矩阵", "$探针 live-*：URL 全在 pack 声明"]);
 box(60, 158, 546, 44, "bxp", "DSH 插件（integrations/dsh-bridge）：amberflow_apps / run / learn", ["桥起 CLI 子进程、读 *-result.json 归纳 summary；引擎对 DSH 零引用"]);
 box(616, 158, 292, 44, "bxm", "npm run model:fetch（产物通道）", [".part 先落 · SHA256 先验后换 · 半途态整组撤回"]);
@@ -125,9 +125,9 @@ box(918, 392, 272, 60, "bx", "apps:induce · induce_signals", ["跑通一次 →
 
 /* ---------------- ④ 计划层 ---------------- */
 band(478, 96, "④ 计划层 — 冻结的有序子目标");
-box(60, 510, 350, 52, "bx", "src/plan.ts — TaskPlan / PlanningRules", ["子目标+完成信号+数据袋；checkpoint 续跑、保留 hint"]);
-box(420, 510, 330, 52, "bx", "src/planner.ts — runPlan / 重试", ["when 跳过 · retries 整步重跑 · replan 异常必打印"]);
-box(760, 510, 220, 52, "bx", "src/signals.ts — 信号语言", ["5 个 DOM 算子 + all_of/any_of/not", "$完成与适用同一实现"]);
+box(60, 510, 350, 52, "bx", "src/engine/plan.ts：TaskPlan/PlanningRules", ["子目标+完成信号+数据袋；checkpoint 续跑、保留 hint"]);
+box(420, 510, 330, 52, "bx", "src/engine/planner.ts — runPlan / 重试", ["when 跳过 · retries 整步重跑 · replan 异常必打印"]);
+box(760, 510, 228, 52, "bx", "engine/signals.ts — 信号语言", ["5 个 DOM 算子 + all_of/any_of/not", "$完成与适用同一实现"]);
 box(990, 510, 200, 52, "bx", "LLM 规划/审计（可选）", ["OPENAI_* 齐则启用；", "否则内置替身，流程照常"]);
 
 /* ---------------- ⑤ 执行层 ---------------- */

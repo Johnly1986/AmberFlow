@@ -8,16 +8,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { main as appMain, REFUSAL_LABELS, refusalLine } from "../src/app-runner.ts";
+import { main as appMain, REFUSAL_LABELS, refusalLine } from "../src/app/app-runner.ts";
 import { main as suiteMain, suite } from "../tools/apps_suite.ts";
-import { checkArtifacts } from "../src/model-artifacts.ts";
+import { checkArtifacts } from "../src/model/model-artifacts.ts";
 // 这两条断言的是**真模型臂**的退出码梯子（3 = 未执行、4 = 模型边际为 0）。产物不齐的机器上
 // 套件在装模型前就响亮拒绝——用例本身没得跑，按仓库纪律"明着跳过 ≠ 通过"（bench/smoke.sh 同款）。
 const MODEL_READY = checkArtifacts().ready;
-import { runApp } from "../src/app-runner.ts";
-import { loadPack } from "../src/app-pack.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
-import { main as startMain, type Io } from "../src/start.ts";
+import { runApp } from "../src/app/app-runner.ts";
+import { loadPack } from "../src/app/app-pack.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
+import { main as startMain, type Io } from "../src/cli/start.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const TMP: string[] = [];

@@ -15,10 +15,10 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { tokenPlanProvider } from "../src/decision-tokenplan.ts";
-import { resolveProviderSpec } from "../src/decision-provider.ts";
+import { tokenPlanProvider } from "../src/model/decision-tokenplan.ts";
+import { resolveProviderSpec } from "../src/model/decision-provider.ts";
 import { providerContract } from "./provider-contract.ts";
-import type { ChoiceRequest } from "../src/decision-provider.ts";
+import type { ChoiceRequest } from "../src/model/decision-provider.ts";
 
 let replies: Record<string, unknown>[] = [];
 let received: { path: string; auth?: string; body: any }[] = [];
@@ -256,7 +256,7 @@ describe("choice 的上文：state 从 {goal} 扩到 goal+url+title+main_text", 
   });
 
   it("jevk5 不受影响：没声明 stateBuilder 的 profile，body 是旧形状（默认等价钉在别人身上）", async () => {
-    const { jevk5Provider } = await import("../src/decision-jevk5.ts");
+    const { jevk5Provider } = await import("../src/model/decision-jevk5.ts");
     let body: Record<string, unknown> | null = null;
     const fakeFetch = (async (_u: string | URL | Request, init?: RequestInit) => {
       body = JSON.parse(String(init?.body));

@@ -7,12 +7,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
 import {
   addNearContext, ariaInteractiveLines, criteriaView, elemFamily, extractElements, hintLookup,
   jsInteractiveWidgets, pageText, stateText, type Elem, type ElemPool,
-} from "../src/extraction.ts";
-import { captureStepStateView } from "../src/page-context.ts";
+} from "../src/engine/extraction.ts";
+import { captureStepStateView } from "../src/model/page-context.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const fixture = (...p: string[]): string => pathToFileURL(path.join(REPO, ...p)).href;

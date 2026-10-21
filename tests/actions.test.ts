@@ -19,15 +19,15 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/executor.ts";
-import type { Elem, ElemPool } from "../src/extraction.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/engine/executor.ts";
+import type { Elem, ElemPool } from "../src/engine/extraction.ts";
 import {
   COMMAND_OPS, instantiateSpace, resolveCommandValue, validateCommands, type CommandDecl,
-} from "../src/actions.ts";
-import { installLayaRuntime, scriptedRuntime, scriptedAgent } from "../src/model.ts";
-import { PlanningRules, TaskPlan } from "../src/plan.ts";
-import { checkSignal } from "../src/signals.ts";
+} from "../src/engine/actions.ts";
+import { installLayaRuntime, scriptedRuntime, scriptedAgent } from "../src/model/model.ts";
+import { PlanningRules, TaskPlan } from "../src/engine/plan.ts";
+import { checkSignal } from "../src/engine/signals.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const pw: PwLike = { chromium: chromium as unknown as PwLike["chromium"] };

@@ -19,9 +19,9 @@ import {
   startPickerServer,
   type PickerLike,
   type PickerServerHandle,
-} from "../src/picker-server.ts";
-import { ACTIONS, QuickActionPicker, type PickDecision } from "../src/picker.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer } from "../src/model.ts";
+} from "../src/cli/picker-server.ts";
+import { ACTIONS, QuickActionPicker, type PickDecision } from "../src/engine/picker.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime, type Answer } from "../src/model/model.ts";
 
 /* ------------------------------------------------------------------ fixtures */
 

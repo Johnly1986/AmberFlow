@@ -10,8 +10,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadPack, validatePack, type AppPack } from "../src/app-pack.ts";
-import { runApp, type AppRunOptions } from "../src/app-runner.ts";
+import { loadPack, validatePack, type AppPack } from "../src/app/app-pack.ts";
+import { runApp, type AppRunOptions } from "../src/app/app-runner.ts";
 import { tmpDir } from "./fixtures.ts";
 
 function packOf(decl: Record<string, unknown>): AppPack {

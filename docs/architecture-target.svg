@@ -27,11 +27,11 @@
 <text x="58" y="108" class="lay">① 入口层（一条命令 / 一次工具调用）—— 只编排，所有浏览器决策仍落到同一个执行循环</text>
 <rect x="60" y="116" width="216" height="62" class="bx"/>
 <text x="71" y="133" class="t" font-size="11.5">npm start · doctor</text>
-<text x="71" y="149" class="s">src/start.ts</text>
+<text x="71" y="149" class="s">src/cli/start.ts</text>
 <text x="71" y="163" class="s">演示一次即归纳信号</text>
 <rect x="288" y="116" width="216" height="62" class="bx"/>
 <text x="299" y="133" class="t" font-size="11.5">npm run apps</text>
-<text x="299" y="149" class="s">src/app-runner.ts</text>
+<text x="299" y="149" class="s">src/app/app-runner.ts</text>
 <text x="299" y="163" class="s">数据腿 → 旅程 → 不变量</text>
 <rect x="516" y="116" width="216" height="62" class="bx"/>
 <text x="527" y="133" class="t" font-size="11.5">learn · agent</text>
@@ -79,16 +79,16 @@
 <rect x="40" y="410" width="1480" height="100" class="band"/>
 <text x="58" y="434" class="lay">③ 计划层</text>
 <rect x="60" y="442" width="330" height="52" class="bx"/>
-<text x="71" y="461" class="t" font-size="12.5">src/plan.ts — TaskPlan / PlanningRules</text>
+<text x="71" y="461" class="t" font-size="12.5">src/engine/plan.ts：TaskPlan/PlanningRules</text>
 <text x="71" y="477" class="s">有序子目标 + 完成信号 + 数据袋；checkpoint 续跑</text>
 <rect x="402" y="442" width="330" height="52" class="bx"/>
-<text x="413" y="461" class="t" font-size="12.5">src/planner.ts — runPlan</text>
+<text x="413" y="461" class="t" font-size="12.5">src/engine/planner.ts — runPlan</text>
 <text x="413" y="477" class="s">when 跳过 · retries 整步重跑 · replan 必打印</text>
 <rect x="744" y="442" width="330" height="52" class="bx"/>
 <text x="755" y="461" class="t" font-size="12.5">LLM 规划 / 审计（可选）</text>
 <text x="755" y="477" class="s">无 OPENAI_* 时 Mock / Scripted 照常全流程</text>
 <rect x="1086" y="442" width="330" height="52" class="bx"/>
-<text x="1097" y="461" class="t" font-size="12.5">src/signals.ts — 信号语言</text>
+<text x="1097" y="461" class="t" font-size="12.5">src/engine/signals.ts — 信号语言</text>
 <text x="1097" y="477" class="s">5 个 DOM 算子 + all_of / any_of / not</text>
 <path class="ln" d="M700,510 V546" marker-end="url(#arr)"/>
 <text x="714" y="536" class="lbl">子目标 + 完成信号 + 数据袋</text>
@@ -194,7 +194,7 @@
 <rect x="40" y="1252" width="1480" height="148" class="band"/>
 <text x="58" y="1276" class="lay">⑤ 本地决策模型运行时（可缺席；laya 是当前唯一实现，换决策提供者不动上层）</text>
 <rect x="60" y="1284" width="330" height="66" class="bxm"/>
-<text x="71" y="1303" class="t" font-size="12.5">src/model.ts — LayaRuntime 缝</text>
+<text x="71" y="1303" class="t" font-size="12.5">src/model/model.ts — LayaRuntime 缝</text>
 <text x="71" y="1319" class="s">load / predictShortlist / Router</text>
 <text x="71" y="1333" class="s">测试注入 scriptedRuntime，不碰权重</text>
 <rect x="402" y="1284" width="330" height="66" class="bxm"/>
@@ -206,7 +206,7 @@
 <text x="755" y="1319" class="s">约 1.7GB，刻意不进 git</text>
 <text x="755" y="1333" class="s">LAYA_ONNX_MODEL 约定 / HF 快照发现</text>
 <rect x="1086" y="1284" width="330" height="66" class="bxm"/>
-<text x="1097" y="1303" class="t" font-size="12.5">src/model-artifacts.ts</text>
+<text x="1097" y="1303" class="t" font-size="12.5">src/model/model-artifacts.ts</text>
 <text x="1097" y="1319" class="s">三件齐才算 on（单一出处）</text>
 <text x="1097" y="1333" class="s">doctor / 运行器 / 桥 共用</text>
 <text x="60" y="1374" class="foot">实测（真 ONNX，本机）：浏览器步 173/175 全由声明解决（170 个 hint 点名 = 97.1%，其余走 commands 闭集）；模型 top-1 25%、闸门内 precision 15% ⇒ 它是兜底与诊断，不是承重件（详见 ⑨）</text>
@@ -271,8 +271,8 @@
 <text x="727" y="1831" class="t" font-size="12">迁移顺序（已全部落地，每条附验收台）</text>
 <text x="727" y="1847" class="s">P0 单出口 / 结构化 stop_reason / 遮蔽 / hosts / 预检 —— tests/executor-p0.test.ts 21 条</text>
 <text x="727" y="1861" class="s">P1 hint 单实现 + tier 候选集（门控 tieredHint，默认 OFF 逐字节不变）—— 24 条</text>
-<text x="727" y="1875" class="s">P2 src/actions.ts 命令闭集 —— apps/skybook-checksubmit「勾选+提交」1/1 · 15 条</text>
-<text x="727" y="1889" class="s">P3 src/bindings.ts 数据槽层 —— apps/checkin-binding 1/1 + 2/2 · 20 条</text>
+<text x="727" y="1875" class="s">P2 src/engine/actions.ts 命令闭集 —— apps/skybook-checksubmit「勾选+提交」1/1 · 15 条</text>
+<text x="727" y="1889" class="s">P3 src/engine/bindings.ts 数据槽层 —— apps/checkin-binding 1/1 + 2/2 · 20 条</text>
 <text x="727" y="1903" class="s">P4 next + 路径上界 / next_cycle —— apps/cold-search-next（删 next 即红）· 17 条</text>
 <text x="727" y="1917" class="s">D3/R-4 同一元素重复上界 → no_progress —— tests/no-progress.test.ts 5 条</text>
 <text x="727" y="1931" class="s">验收：verify + smoke.sh（PASS）· apps:suite 16/17 · apps:gen --check 8/8 · 1317 测试</text>

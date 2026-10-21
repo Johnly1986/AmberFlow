@@ -14,9 +14,9 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { jevk5Provider } from "../src/decision-jevk5.ts";
+import { jevk5Provider } from "../src/model/decision-jevk5.ts";
 import { providerContract } from "./provider-contract.ts";
-import type { ChoiceRequest } from "../src/decision-provider.ts";
+import type { ChoiceRequest } from "../src/model/decision-provider.ts";
 
 /** 服务端的可编程响应 + 收到的请求体。 */
 let replies: Record<string, unknown>[] = [];

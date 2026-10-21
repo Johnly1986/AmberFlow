@@ -11,8 +11,8 @@ import {
   REPO, SPECS, deriveFlightSubgoals, deriveHotelSubgoals, deriveSubgoals, loadSpec,
   migrationMetrics, roles, shape, specRoles, stagePhases, stepUrl, validateSpec,
   type FlowSpec,
-} from "../src/flow.ts";
-import type { Subgoal } from "../src/plan.ts";
+} from "../src/flow/flow.ts";
+import type { Subgoal } from "../src/engine/plan.ts";
 
 const DATES = ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"];
 const WD: Record<string, string> = {

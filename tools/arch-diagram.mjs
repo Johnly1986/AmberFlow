@@ -95,8 +95,8 @@ const band = (y, h, label) => { R(40, y, W - 80, h, "band"); T(58, y + 24, label
 
 /* ---------------- L1 入口 ---------------- */
 band(70, 236, "① 入口层（一条命令 / 一次工具调用）");
-box(175, 106, 210, 78, "bx", "npm start · doctor", ["src/start.ts", "开箱任务；演示一次即归纳信号", "缺件点名 + 一条补齐命令"]);
-box(400, 106, 210, 78, "bx", "npm run apps", ["src/app-runner.ts", "数据腿 → 旅程 → 结束态不变量", "--dry / --ablate / --slot"]);
+box(175, 106, 210, 78, "bx", "npm start · doctor", ["src/cli/start.ts", "开箱任务；演示一次即归纳信号", "缺件点名 + 一条补齐命令"]);
+box(400, 106, 210, 78, "bx", "npm run apps", ["src/app/app-runner.ts", "数据腿 → 旅程 → 结束态不变量", "--dry / --ablate / --slot"]);
 box(625, 106, 210, 78, "bx", "npm run learn · agent", ["tools/learn.ts --json --yes", "演示一次 → 录成应用包", "零模型重放通过才落盘"]);
 box(850, 106, 225, 78, "bx", "plan:flow · semantic", ["plan-flow / semantic-flow", "一句话+种子页 → 模板+站点档案", "跨站迁移 · 回填重放门"]);
 box(1090, 106, 175, 78, "bx", "plan-cli · datasource", ["plan_cli / datasource", "手写计划；站点=配置", "sources/*.json 发现制"]);
@@ -107,7 +107,7 @@ box(175, 196, 620, 84, "bxp", "DSH 插件模式（integrations/dsh-bridge）", [
   "$引擎对 DSH 零引用：桥起 CLI 子进程，读 *-result.json 归纳 summary",
   "$summary 带 model: on|off(missing) 与决策来源小计；危险步默认拒绝",
 ]);
-box(810, 196, 250, 84, "bxm", "npm run model:fetch", ["src/model-fetch.ts → 装进 ⑤ 的约定路径", "图 + 权重（+ tokenizer）", ".part 先落，SHA256 先验后换", "半途态整组撤回，不覆盖已有"]);
+box(810, 196, 257, 84, "bxm", "npm run model:fetch", ["src/model/model-fetch.ts → ⑤ 的约定路径", "图 + 权重（+ tokenizer）", ".part 先落，SHA256 先验后换", "半途态整组撤回，不覆盖已有"]);
 box(1075, 196, 340, 98, "bxe", "度量与门禁（同一条命令可复现）", [
   "apps:matrix 声明成本 / 0 代码行 / 站点知识泄漏与债",
   "apps:suite 逐应用真跑 + 模型账 · apps:gen --check",
@@ -127,10 +127,10 @@ T(58, 438, `新增一个应用 = 新目录；应用目录里的应用逻辑代�
 
 /* ---------------- L3 计划 ---------------- */
 band(460, 92, "③ 计划层");
-box(175, 492, 330, 50, "bx", "src/plan.ts — TaskPlan / PlanningRules", ["有序子目标 + 完成信号 + 数据袋 · checkpoint 续跑"]);
-box(520, 492, 330, 50, "bx", "src/planner.ts — runPlan / 重试", ["when 跳过 · retries 整步重跑 · replan 异常必打印"]);
+box(175, 492, 330, 50, "bx", "src/engine/plan.ts：TaskPlan/PlanningRules", ["有序子目标 + 完成信号 + 数据袋 · checkpoint 续跑"]);
+box(520, 492, 330, 50, "bx", "src/engine/planner.ts — runPlan / 重试", ["when 跳过 · retries 整步重跑 · replan 异常必打印"]);
 box(865, 492, 300, 50, "bx", "LLM 规划 / 审计（可选）", ["OPENAI_* 齐则启用，否则 Mock/Scripted 照常全流程"]);
-box(1180, 492, 235, 50, "bx", "src/signals.ts — 信号语言", ["5 个 DOM 算子 + all_of/any_of/not"]);
+box(1180, 492, 235, 50, "bx", "engine/signals.ts — 信号语言", ["5 个 DOM 算子 + all_of/any_of/not"]);
 
 T(58, 548, "P4：步 id/next + createPathWalk（路径上界 → next_cycle）；runPlan 拒绝 next 边——声明式后继只在应用旅程层生效；signal 与 when 走同一个走查器", "lbl");
 
@@ -157,7 +157,7 @@ chain.forEach(([t, ls], i) => {
   box(x0 + i * (cw + gap), 604, cw, 72, cls, t, ls, { titleSize: 11.5, titleDy: 17 });
   if (i) P(`M${x0 + i * (cw + gap) - gap},640 H${x0 + i * (cw + gap)}`);
 });
-box(60, 690, 400, 68, "bx", "工具步（命令行当动作腿）", ["src/tool-signals.ts：exit_ok / stdout / json_path / file_exists", "retries 需 idempotent；dangerous 需 dry_run_args；拒绝不落盘"]);
+box(60, 690, 400, 82, "bx", "工具步（命令行当动作腿）", ["src/browser/tool-signals.ts：", "exit_ok / stdout / json_path / file_exists", "retries 需 idempotent；dangerous 需 dry_run_args；拒绝不落盘"]);
 box(475, 690, 330, 68, "bxm", "决策缓存 + 咨询计数", ["decision-cache.ts：精确指纹，同问不重答", "model.ts countingRuntime：出场率在运行时缝上数"]);
 box(820, 690, 315, 68, "bxm", "记忆两本账", ["hint-memory.ts：回填过了重放门才落盘", "outcome-memory.ts：失败动作按签名禁复用"]);
 box(1150, 690, 265, 68, "bxe", "运行结果 = 可核对的证据", ["<app>-result.json：model_status", "<app>-report.md：逐步表 + 决策来源小计"]);
@@ -165,10 +165,10 @@ T(58, 776, "低置信 break 的那次咨询不在 trace 留 method——咨询�
 
 /* ---------------- L5 模型运行时 ---------------- */
 band(792, 134, "⑤ 模型运行时（可缺席——缺了走规则模式，需要模型的步骤如实 block）");
-box(175, 826, 260, 66, "bxm", "src/model.ts — LayaRuntime 缝", ["load / predictShortlist / Router", "测试注入 scriptedRuntime，不碰权重"]);
+box(175, 826, 260, 66, "bxm", "src/model/model.ts — LayaRuntime", ["load / predictShortlist / Router", "测试注入 scriptedRuntime，不碰权重"]);
 box(450, 826, 300, 66, "bxm", "laya-onnx.ts + laya-format.ts", ["buildSequence · 温度标定 · shortlist k=8", "checkpoint 按文字系统路由，不按置信度"]);
 box(765, 826, 320, 66, "bxm", "产物：图 + .onnx.data + tokenizer", ["约 1.7GB，刻意不进 git", "LAYA_ONNX_MODEL 约定 / HF 快照发现"]);
-box(1100, 826, 315, 66, "bxm", "src/model-artifacts.ts", ["三件齐才算 on（单一出处）", "doctor / fetch / 运行器 / 桥 共用"]);
+box(1100, 826, 315, 66, "bxm", "src/model/model-artifacts.ts", ["三件齐才算 on（单一出处）", "doctor / fetch / 运行器 / 桥 共用"]);
 T(58, 906, `实测（真 ONNX，本机）：浏览器步 ${N.named}/${N.browserSteps} 全由声明解决（其中 ${N.hinted} 用 hint 点名 = ${N.hintPct}%，其余走 commands 闭集）；模型 top-1 ${N.top1}%、闸门内 precision ${N.prec}%（两把不可比的尺子：passthrough AUC ${N.aucPt} / shortlist AUC ${N.aucSl}）`, "lbl");
 
 

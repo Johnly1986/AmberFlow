@@ -18,20 +18,20 @@
  * （写回不是终点，验收才是）。归纳出来的不变量带着来源注释（哪次运行、什么状态变化），方便人 review。
  */
 import fs from "node:fs";
-import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
+import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import {
   appDirs, loadPack, expandPack, type AppPack,
-} from "../src/app-pack.ts";
-import { runApp } from "../src/app-runner.ts";
-import { browserSession } from "../src/executor.ts";
-import { startUrl } from "../src/app-runner.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
-import { captureStateView, induceSignals, type InducedCandidate } from "../src/signal-induction.ts";
-import { evalSignalOnState, type SignalSpec, type StateView } from "../src/signals.ts";
-import { applyRcToEnv } from "../src/rcfile.ts";
+} from "../src/app/app-pack.ts";
+import { runApp } from "../src/app/app-runner.ts";
+import { browserSession } from "../src/engine/executor.ts";
+import { startUrl } from "../src/app/app-runner.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
+import { captureStateView, induceSignals, type InducedCandidate } from "../src/flow/signal-induction.ts";
+import { evalSignalOnState, type SignalSpec, type StateView } from "../src/engine/signals.ts";
+import { applyRcToEnv } from "../src/support/rcfile.ts";
 
 export const REPO = path.resolve(import.meta.dirname, "..");
 
@@ -204,10 +204,10 @@ export function existingSignals(pack: AppPack): string[] {
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
-  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/rcfile.ts）。
+  // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
   { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   let values;
-  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
     args: argv,

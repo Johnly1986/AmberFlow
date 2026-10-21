@@ -19,17 +19,17 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/executor.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/engine/executor.ts";
 import {
   OPTION_MATCHES, LIST_ORDERS, optionCandidatesFrom, resolveBinding, validateBinding,
   type OptionBinding, type ValueBinding,
-} from "../src/bindings.ts";
-import { validateCommands, type CommandDecl } from "../src/actions.ts";
-import { expandPack, loadPack } from "../src/app-pack.ts";
-import { installLayaRuntime, scriptedRuntime, scriptedAgent } from "../src/model.ts";
-import { checkSignal } from "../src/signals.ts";
-import { selectIndex } from "../src/datasource.ts";
+} from "../src/engine/bindings.ts";
+import { validateCommands, type CommandDecl } from "../src/engine/actions.ts";
+import { expandPack, loadPack } from "../src/app/app-pack.ts";
+import { installLayaRuntime, scriptedRuntime, scriptedAgent } from "../src/model/model.ts";
+import { checkSignal } from "../src/engine/signals.ts";
+import { selectIndex } from "../src/data/datasource.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const pw: PwLike = { chromium: chromium as unknown as PwLike["chromium"] };

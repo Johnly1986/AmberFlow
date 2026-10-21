@@ -21,14 +21,14 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import * as C from "../src/ctrip-data.ts";
-import * as T from "../src/ctrip-task.ts";
-import { PlanningRules } from "../src/plan.ts";
-import { SIGNAL_OPS } from "../src/signals.ts";
-import type { MiddlewareLike } from "../src/planner.ts";
-import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/executor.ts";
-import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import * as C from "../src/data/ctrip-data.ts";
+import * as T from "../src/sites/ctrip-task.ts";
+import { PlanningRules } from "../src/engine/plan.ts";
+import { SIGNAL_OPS } from "../src/engine/signals.ts";
+import type { MiddlewareLike } from "../src/engine/planner.ts";
+import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/engine/executor.ts";
+import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, "..");
@@ -407,8 +407,8 @@ describe("复刻站 + 端到端（真浏览器，脚本模型）", () => {
       await p.goto(String(sg.start_url));
       const sel = sg.target_hint!;
       expect.soft(await p.locator(sel).count(), `${sg.desc} -> ${sel}`).toBeGreaterThanOrEqual(1);
-      const spec = sg.signal as import("../src/signals.ts").SignalSpec;
-      const { checkSignal } = await import("../src/signals.ts");
+      const spec = sg.signal as import("../src/engine/signals.ts").SignalSpec;
+      const { checkSignal } = await import("../src/engine/signals.ts");
       expect.soft(await checkSignal(p as unknown as AnyPage, spec), `${sg.desc} 点击前信号应为假`).toBe(false);
     }
   }, 120_000);

@@ -11,8 +11,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import { extractElements } from "../src/extraction.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { extractElements } from "../src/engine/extraction.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, "..");

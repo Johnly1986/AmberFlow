@@ -15,7 +15,7 @@ PREFIX="${1:-ablate}"
 run () { # run <tag> <bench 参数...>
   local tag="$1"; shift
   echo "### $PREFIX-$tag"
-  if "$NODE" "$STRIP" src/bench.ts --mode-tag "$PREFIX-$tag" "$@" > "/tmp/$PREFIX-$tag.log" 2>&1; then
+  if "$NODE" "$STRIP" src/cli/bench.ts --mode-tag "$PREFIX-$tag" "$@" > "/tmp/$PREFIX-$tag.log" 2>&1; then
     grep -E '"cases_passed"|"subgoals_passed"|"total_secs"' "/tmp/$PREFIX-$tag.log" | tr -d ' '
   else
     echo "  FAILED (see /tmp/$PREFIX-$tag.log)"; tail -3 "/tmp/$PREFIX-$tag.log"

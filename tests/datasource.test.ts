@@ -5,7 +5,7 @@
  * report_markdown 文本）在 `npm test` 里被 TS 引擎重算比对。
  *
  * 三条口径值得单独说：
- *  1. "引擎不认识站点"是源码级测试：读 `src/datasource.ts` 的文本、剥掉块注释，
+ *  1. "引擎不认识站点"是源码级测试：读 `src/data/datasource.ts` 的文本、剥掉块注释，
  *     再 grep 站点/用例词（Python 版剥的是 docstring，同理）。
  *  2. 真实夹具（从真实抓取裁剪）必须过：H5 线路页 6 条真实票价、酒店页 3 家酒店
  *     但价格节点为空（"价格需登录"）。
@@ -23,7 +23,7 @@ import {
   extract, fieldValue, FileNotFoundError, inWindow, listSources, loadSource, main,
   matches, nextWeekDates, reportMarkdown, resolve, selectBest, selectIndex, sourceDirs, urlFor,
   validateSource, type Source,
-} from "../src/datasource.ts";
+} from "../src/data/datasource.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, "..");
@@ -161,7 +161,7 @@ describe("validateSource 在加载时炸", () => {
 
 describe("引擎无站点知识", () => {
   it("剥掉块注释后的引擎源码里没有站点/用例词", () => {
-    const src = fs.readFileSync(path.join(here, "..", "src", "datasource.ts"), "utf-8");
+    const src = fs.readFileSync(path.join(here, "..", "src", "data", "datasource.ts"), "utf-8");
     // 块注释 = Python 的 docstring（承载"为什么是 curl"这类站点事实），代码与
     // 字符串照查 —— 与 ctrip/test_ctrip.py::test_the_engine_knows_no_site 同口径。
     const codeOnly = src.replace(/\/\*[\s\S]*?\*\//g, " ");

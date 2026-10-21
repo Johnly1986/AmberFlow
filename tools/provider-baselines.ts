@@ -39,7 +39,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { applyRcToEnv } from "../src/rcfile.ts";
+import { applyRcToEnv } from "../src/support/rcfile.ts";
 // rc 接线与其它 CLI 入口同一口径（缺了它，configs/amberflowrc.json 里的凭据/端点对这条命令不可见）。
 { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); process.exit(2); } }
 
@@ -87,7 +87,7 @@ function run(file: string, app: string, provider: string, outDir: string): Cell 
   // **应用未通过时 app-runner 退出码非 0，那是结果不是故障**：这里不能拿退出码当异常，
   // 否则"没通过的基线"会被记成"跑挂了"（本轮第一版就这么错过三格数据）。
   try {
-    execFileSync("node", ["--experimental-strip-types", "src/app-runner.ts",
+    execFileSync("node", ["--experimental-strip-types", "src/app/app-runner.ts",
       "--app", file, "--no-sources", "--provider", provider, "--out", outDir],
     { cwd: REPO, stdio: "pipe", timeout: 600_000 });
   } catch { /* 非零退出：产物里自有分晓 */ }

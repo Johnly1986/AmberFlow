@@ -13,9 +13,9 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { bailianProvider } from "../src/decision-bailian.ts";
+import { bailianProvider } from "../src/model/decision-bailian.ts";
 import { providerContract } from "./provider-contract.ts";
-import type { ChoiceRequest } from "../src/decision-provider.ts";
+import type { ChoiceRequest } from "../src/model/decision-provider.ts";
 
 let replies: Record<string, unknown>[] = [];
 let received: { path: string; auth?: string; body: any }[] = [];

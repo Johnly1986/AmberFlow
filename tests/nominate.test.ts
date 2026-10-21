@@ -6,7 +6,7 @@
  *   ② 梯级顺序与证据面：①→②→③→④→⑤ 命中即停；via 如实记档；答案**不在闭集内 = 弃权**
  *      （fail closed，绝不现造指令）；③④ 抛错 = 该档弃权，绝不打死整条计划。
  *   ③ ⑤枚举序：调用方声明优先、未知名剔除、去重；空了回落缺省序（缺省序即 S0 测过的那张）。
- *   ④ 单一出处：S0 实验台的规则词表就是 `src/nominate.ts` 这一份（结构守卫——
+ *   ④ 单一出处：S0 实验台的规则词表就是 `src/model/nominate.ts` 这一份（结构守卫——
  *      工具文件里不许再出现关键词副本，改动 = 换考卷，必须重跑 S0）。
  */
 import fs from "node:fs";
@@ -14,11 +14,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, instructionCriteria, isInstructionName,
-} from "../src/instructions.ts";
+} from "../src/model/instructions.ts";
 import {
   nominateInstruction, nominationInstructions, providerNominationAsk, ruleNominate,
-} from "../src/nominate.ts";
-import type { ClosedSetRequest, DecisionProvider } from "../src/decision-provider.ts";
+} from "../src/model/nominate.ts";
+import type { ClosedSetRequest, DecisionProvider } from "../src/model/decision-provider.ts";
 
 describe("①档规则：确定性关键词梯级，数据规则优先", () => {
   it("五类动词各归各档；数据规则词先于 select 的『选择』", () => {
@@ -113,7 +113,7 @@ describe("梯级：命中即停、闭集 fail-closed、坏 ask 不打死计划",
 describe("S3 注册表：组合声明与自校验", () => {
   it("list_pick 声明了 compose（三个已注册原语、有序）与 outputs（chosen: row）；全表自校验无问题", async () => {
     const { INSTRUCTION_SET, validateInstructionRegistry, getInstruction, COMPOSE_PRIMITIVES } =
-      await import("../src/instructions.ts");
+      await import("../src/model/instructions.ts");
     expect(validateInstructionRegistry()).toEqual([]);
     const lp = getInstruction("list_pick")!;
     expect(lp.compose).toEqual(["extract_rows", "select", "act_on_row"]);
@@ -139,15 +139,15 @@ describe("③档的考卷：指令闭集与 criteria（S0 实验台同一份）"
   });
 });
 
-describe("④单一出处：关键词梯级只许活在 src/nominate.ts 一处（仓库级结构守卫）", () => {
-  it("tools/instruction_nomination.ts 从 src/nominate.ts 取规则——词表改动必须重跑 S0", () => {
+describe("④单一出处：关键词梯级只许活在 src/model/nominate.ts 一处（仓库级结构守卫）", () => {
+  it("tools/instruction_nomination.ts 从 src/model/nominate.ts 取规则——词表改动必须重跑 S0", () => {
     const tool = fs.readFileSync(
       path.resolve(import.meta.dirname, "..", "tools", "instruction_nomination.ts"), "utf-8",
     );
     expect(/最低价\|最低|最便宜\|/.test(tool), "关键词梯级的正则副本不许再出现（注释举例不算）").toBe(false);
     expect(/function ruleNominate|const ruleNominate/.test(tool),
-      "规则函数只许活在 src/nominate.ts 一处").toBe(false);
-    expect(tool).toContain("from \"../src/nominate.ts\"");
+      "规则函数只许活在 src/model/nominate.ts 一处").toBe(false);
+    expect(tool).toContain("from \"../src/model/nominate.ts\"");
   });
 
   it("src/ tools/ integrations/ 全域都不得再出现第二份梯级正则（只扫 .ts，排除定义处）", () => {
@@ -159,7 +159,7 @@ describe("④单一出处：关键词梯级只许活在 src/nominate.ts 一处�
         const p = path.join(dir, e.name);
         if (e.isDirectory()) { walk(p); continue; }
         if (!e.name.endsWith(".ts")) continue;
-        if (path.resolve(p) === path.resolve(import.meta.dirname, "..", "src", "nominate.ts")) continue;
+        if (path.resolve(p) === path.resolve(import.meta.dirname, "..", "src", "model", "nominate.ts")) continue;
         const src = fs.readFileSync(p, "utf-8");
         // 梯级正则的特征片段（带 `|` 的交替），不是散文里提到的"最低价"
         if (/最低价\|最低|最便宜\|最贵/.test(src)) offenders.push(path.relative(path.resolve(import.meta.dirname, ".."), p));

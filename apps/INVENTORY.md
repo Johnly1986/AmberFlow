@@ -22,16 +22,16 @@
 
 | # | 应用 | 素材（现有代码/夹具） | 离线? | 验收命令 | 状态 |
 |---|---|---|---|---|---|
-| A1 | `apps/ctrip-case` | `ctrip/site/*.html` 复刻站 + `src/ctrip-task.ts` 的 19 冻结子目标 + 独立判分 7/7 | ✅ | `npm run apps -- --app ctrip-case --no-sources` | **已完成**（独立复核：19/19、与冻结计划逐字段全等、3 条不变量） |
-| A2 | `apps/ip-config` | `src/ip-config.ts`（Excel IP 规划表 → 设备网络页）+ `testpages/` | ✅ | `npm run apps -- --app ip-config` | **已完成**（独立复核：8/8；表格写错的 CAM-1003 是**显式一步**、由设备页自己的拒绝文案判定） |
-| A3 | `apps/camera-entry` | `src/camera-entry.ts`（Excel 类型列路由两套表单）+ `testpages/` | ✅ | `npm run apps -- --app camera-entry` | **已完成**（4/4；空类型行用行内证据显式选页、CAM-12 被拒行显式成步；独立复核 confirmed） |
+| A1 | `apps/ctrip-case` | `ctrip/site/*.html` 复刻站 + `src/sites/ctrip-task.ts` 的 19 冻结子目标 + 独立判分 7/7 | ✅ | `npm run apps -- --app ctrip-case --no-sources` | **已完成**（独立复核：19/19、与冻结计划逐字段全等、3 条不变量） |
+| A2 | `apps/ip-config` | `src/cli/ip-config.ts`（Excel IP 规划表 → 设备网络页）+ `testpages/` | ✅ | `npm run apps -- --app ip-config` | **已完成**（独立复核：8/8；表格写错的 CAM-1003 是**显式一步**、由设备页自己的拒绝文案判定） |
+| A3 | `apps/camera-entry` | `src/cli/camera-entry.ts`（Excel 类型列路由两套表单）+ `testpages/` | ✅ | `npm run apps -- --app camera-entry` | **已完成**（4/4；空类型行用行内证据显式选页、CAM-12 被拒行显式成步；独立复核 confirmed） |
 | A4 | `apps/transfer-voyagio` | `transfer/site5` + `specs/voyagio.json`（6 个 phase = **两页向导**） | ✅ | `npm run apps -- --app transfer-voyagio --no-sources` | **已完成**（24/24；与 `emitPlan("voyagio")` 全字段全等） |
 | A5 | `apps/transfer-slowjet` | `transfer/site7` + `specs/slowjet.json`（**冷启动重试**） | ✅ | `npm run apps -- --app transfer-slowjet --no-sources` | **已完成**（19/19；`retries` 真的被用上：有子目标 attempts>1） |
 | A6a | `apps/transfer-trekly` | `transfer/site3`：价格上限是 **`<input type=range>` 滑块**（19 步） | ✅ | `npm run apps -- --app transfer-trekly --no-sources` | **已完成**（19/19；三条结束状态不变量含 `#row-count` 32→12；独立复核：滑块四重证据 + 删除语义相同） |
 | A6b | `apps/transfer-farehaven` | `transfer/site6`：**条件浮层 `when`**（24 步，5 条 when） | ✅ | `npm run apps -- --app transfer-farehaven --no-sources` | **已完成**（20 done + **4 skipped**；独立复核：删掉 when → exit 1 且恰好那 4 步 blocked，说明是被区分性验证的） |
 | A6c | `apps/transfer-skybook` | `transfer/site2`：**23 步**（本批最大）、唯一的**分页**骨架；5 个角色模板覆盖 19/23 步 | ✅ | `npm run apps -- --app transfer-skybook --no-sources` | **已完成**（23/23；独立复核：23/23 全字段 0 diffs；信号 8 种 / 5 个重复组，其中 1 组跨页面已作边界记录） |
 | A6d | `apps/transfer-flyquest` | `transfer/site4`：结果页**只能靠提交搜索表单**到达（有序 `target_hints`） | ✅ | `npm run apps -- --app transfer-flyquest --no-sources` | **已完成**（19/19；独立复核：退化成单 hint → exit 1 且恰好那 5 步 attempt 1 blocked） |
-| A7 | `apps/qunar-live`（旅程 + 探针同一包） | `touch.qunar.com` **H5 手机版**机票；边界见 `src/qunar-task.ts` | ❌ 需网络 + 真模型 | `npm run apps -- --app qunar-live --out /tmp/qunar` | **已完成**（**2/2**，两步都 `rule:match`，46.5s）——前提是包里声明了 `device`（见 §五） |
+| A7 | `apps/qunar-live`（旅程 + 探针同一包） | `touch.qunar.com` **H5 手机版**机票；边界见 `src/sites/qunar-task.ts` | ❌ 需网络 + 真模型 | `npm run apps -- --app qunar-live --out /tmp/qunar` | **已完成**（**2/2**，两步都 `rule:match`，46.5s）——前提是包里声明了 `device`（见 §五） |
 | A8 | `apps/checkin-binding` | `testpages/checkin.html`：机器值（`2026-10-13`）与人读标签（`10月13日 周二`）**不同**的真 `<select>`；P3 数据槽层的验收台 | ✅ | `npm run apps -- --app checkin-binding` | **已完成**（1/1 步、2/2 不变量、零模型提问；负例"规则命不中 ⇒ `needs_value` 且页面一个字没改"钉在 `tests/bindings.test.ts`） |
 | A9 | `apps/cold-search-next` | `testpages/cold-search.html`：站点状态活在 sessionStorage 里（每个子目标都会重新 `goto`，页面自己记不住"搜过几次"）；P4 声明式后继 `next` 的验收台 | ✅ | `npm run apps -- --app cold-search-next` | **已完成**（2/2 步、`search` **走两遍**、1/1 不变量；删 `next` 即红、无条件自环 → `next_cycle` 结构化停因，钉在 `tests/path-next.test.ts`） |
 | — | `apps/skybook-checksubmit` | `transfer/site2/hotels.html`：P2 命令闭集的验收台（"勾选 + 提交"放进**一个**子目标） | ✅ | `npm run apps -- --app skybook-checksubmit` | **已完成**（旧 8 个生成包 `apps:gen --check` 8/8 不漂；负例钉在 `tests/actions.test.ts`） |

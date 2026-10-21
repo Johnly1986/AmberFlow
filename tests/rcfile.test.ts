@@ -14,8 +14,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { applyRcToEnv, loadRc, maskValue, rcStatusLines, RC_REL, REPO_ROOT, resetRcCache } from "../src/rcfile.ts";
-import { checkArtifacts, modelConfigError, onnxModelPath } from "../src/model-artifacts.ts";
+import { applyRcToEnv, loadRc, maskValue, rcStatusLines, RC_REL, REPO_ROOT, resetRcCache } from "../src/support/rcfile.ts";
+import { checkArtifacts, modelConfigError, onnxModelPath } from "../src/model/model-artifacts.ts";
 
 let root: string;
 beforeEach(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), "af-rc-")); resetRcCache(); });

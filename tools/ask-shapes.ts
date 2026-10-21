@@ -21,15 +21,15 @@
  * 所以 `--repeat` 的默认值是 3，输出**每一次**的结果与汇总，不写"平均分"。
  */
 import { parseArgs } from "node:util";
-import { isParseUsageError, usageErrorLine } from "../src/cli-args.ts";
+import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
 import { chromium, type Page } from "playwright";
-import * as browserEnv from "../src/browser-env.ts";
-import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/executor.ts";
-import { extractElements, hintLookup, type Elem, type ElemPool } from "../src/extraction.ts";
-import { createLayaOnnxRuntime } from "../src/laya-onnx.ts";
-import { installLayaRuntime } from "../src/model.ts";
-import { checkArtifacts, missingPieces } from "../src/model-artifacts.ts";
-import { hintCandidates, hintMatch } from "../src/rules.ts";
+import * as browserEnv from "../src/browser/browser-env.ts";
+import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/engine/executor.ts";
+import { extractElements, hintLookup, type Elem, type ElemPool } from "../src/engine/extraction.ts";
+import { createLayaOnnxRuntime } from "../src/model/laya-onnx.ts";
+import { installLayaRuntime } from "../src/model/model.ts";
+import { checkArtifacts, missingPieces } from "../src/model/model-artifacts.ts";
+import { hintCandidates, hintMatch } from "../src/engine/rules.ts";
 
 const describeEl = (el: Elem | undefined): string =>
   el === undefined ? "(没答/无此元素)" : `${el.tag} "${el.label}"${el.href ? ` href=…${String(el.href).slice(-28)}` : ""}`;
@@ -41,7 +41,7 @@ const isRight = (el: Elem | undefined, expect: string | null): boolean | null =>
 
 async function main(argv: string[]): Promise<number> {
   let values;
-  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/cli-args.ts 的体例）。
+  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
     args: argv,

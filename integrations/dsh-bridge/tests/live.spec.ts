@@ -21,7 +21,7 @@ import * as Bridge from '@deepseek-ai/dsh-amberflow-bridge'
 // AMBERFLOW_REPO (or the pre-rename LAYAWEBUSE_REPO) overrides it for split layouts.
 const REPO = process.env['AMBERFLOW_REPO'] ?? process.env['LAYAWEBUSE_REPO']
   ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
-const HAS_REPO = fs.existsSync(path.join(REPO, 'src', 'app-runner.ts'))
+const HAS_REPO = fs.existsSync(path.join(REPO, 'src', 'app', 'app-runner.ts'))
 /**
  * Written straight to stderr: Vitest intercepts `console.*` during collection, so a `console.warn`
  * here is swallowed and the "skipped with the reason printed" contract would be a lie.
