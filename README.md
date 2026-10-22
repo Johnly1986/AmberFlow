@@ -197,6 +197,29 @@ console.log(rep.completed, rep.traces.length);
 | `npm run apps:matrix` | 每个应用的声明成本 / 来源（生成还是手写）/ 站点知识泄漏门禁 |
 | `npm run apps -- --app <id> --headful` | 有头运行：看得见浏览器窗口（服务器需 Xvfb/VNC，见「看着浏览器跑」） |
 | `npm run bench -- --cases bench/cases-live.json --mode-tag live` | 8 个真实站点跑分（要真网络；跳过不等于通过） |
+| `npm run apps -- --help` / `npm run bench -- --help` | 两个入口的完整用法（各自专属旗标只在 `--help` 里列全） |
+
+### apps 与 bench：同一个名字同一件事
+
+两个入口共用一张旗标表（`src/support/cli-args.ts` 的 `SHARED_RUN_OPTIONS`），同一个名字在两个入口是
+同一个意思；各自的专属旗标只有"挑什么来跑"那一项——apps 挑**应用包**（`--app`），bench 挑**语料**
+（`--cases`）。
+
+| 共用旗标 | 含义 |
+|---|---|
+| `--model ID` | 换 laya checkpoint（换决策源用 `--provider`；旧名 `--force-model`） |
+| `--provider NAME` | 换决策源：`laya-onnx` / `stub` / `none` / 基线 / `jevk5` / `bailian` / `token-plan` |
+| `--ablate stub\|rules-only` | 消融臂：`stub` = 脚本桩，`rules-only` = 规则档（旧名 `--no-model`） |
+| `--conf-floor N` | 置信度闸门刻度（0<N≤1；旧名 `--force-conf-floor`） |
+| `--force-hints off` | 剥掉计划点名的 hint，逼模型出场（消融旗标，只有这一档） |
+| `--learn-hints` / `--hint-memory FILE` | R2 学习环：默认 sidecar / 显式落点（旧名 `--hint-memory-file`） |
+| `--headful` / `--quiet` / `--out DIR` | 浏览器显形 / 只留机器读的 summary / 产物落点 |
+
+旧名在升级窗口里**仍认**（旧桥、旧脚本抄来的命令不会炸），只是不再列进用法；给错了会得到
+**一行点名 + usage + exit 2**，不是 `parseArgs` 的堆栈。
+
+`npm run apps -- --app demo-app` 里那个 `--` 是 npm/shell 的参数分隔符，由每个入口统一吃掉——
+Windows 的 shell 会把它原样留给子进程，而留着它的后果是后面所有旗标被当成位置参数（"传了却像没传"）。
 
 ## 环境变量（都有兜底，全部可不配）
 

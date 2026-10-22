@@ -127,6 +127,8 @@ export const BENCH_ONLY_OPTIONS: CliOptions = {
   "outcome-memory": { type: "string" },
   "outcome-memory-file": { type: "string" },
   "outcome-memory-mode": { type: "string" },
+  /** 规则层消融：只有 bench 有（apps 的规则档走 `--ablate rules-only`，不是开关）。 */
+  "force-rules": { type: "string" },
 };
 
 /** apps 专属：应用包与槽位（bench 直接吃语料，没有这层）。 */
@@ -144,7 +146,6 @@ export const APP_ONLY_OPTIONS: CliOptions = {
 /** bench 的旧名（升级窗口）：**只认不列**——usage 里只出现对齐后的名字。 */
 const BENCH_LEGACY_OPTIONS: CliOptions = {
   "force-model": { type: "string" },
-  "force-rules": { type: "string" },
   "force-conf-floor": { type: "string" },
   "hint-memory-file": { type: "string" },
 };

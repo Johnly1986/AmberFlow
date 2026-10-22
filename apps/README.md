@@ -90,13 +90,36 @@ node --experimental-strip-types src/data/datasource.ts --source git-log --out /t
 跑一条完整链路：
 
 ```bash
-npm run apps -- --list                                  # 发现了哪些应用包
-npm run apps -- --app demo-app --dry                     # 只展开计划（不开浏览器、不装模型）
-npm run apps -- --app demo-app                # 离线整跑（默认走真模型；缺产物时如实降级）
-npm run apps -- --app demo-app                            # 真模型（需要产物；缺了 `npm run model:fetch` 补）
+npm run apps -- --list                                   # 发现了哪些应用包
+npm run apps -- --app demo-app --dry                     # 只展开计划（不开浏览器、不装模型、不跑数据腿）
+npm run apps -- --app demo-app                           # 整跑：数据腿 → 旅程 → 不变量（默认走真模型；缺产物时如实降级）
+npm run apps -- --app demo-app --ablate stub             # 脚本桩臂：不装 1.7GB 产物也能整跑（套件默认臂）
+npm run apps -- --app demo-app --out /tmp/hello           # 产物落点（默认 apps/<id>/out）
 npm run apps:matrix                                      # 度量：声明行 / 代码行 / 防泄漏 + 上次套件的模型咨询两列
 npm run apps:suite                                       # 一条命令验收所有离线旅程应用（结论表 + 退出码）
 ```
+
+### 命令行旗标（与 bench 对齐）
+
+`npm run apps` 与 `npm run bench` 共用一张旗标表（`src/support/cli-args.ts` 的 `SHARED_RUN_OPTIONS`）——
+**同一个名字在两个入口是同一个意思**；各自的专属旗标只有"挑什么来跑"那一项：apps 挑**应用包**，
+bench 挑**语料**。完整用法看 `npm run apps -- --help`，摘要：
+
+| 旗标 | 作用 |
+|---|---|
+| `--list` | 列出发现到的应用包（不给 `--app` 也走这里，并附 usage） |
+| `--app ID\|路径` | 要跑的应用：包 id，或直接给 `pack.json` 的路径 |
+| `--dry` | 只展开计划——**不跑数据腿**，所以 `source_slots` 声明的槽位若没有默认值会直说并 exit 2 |
+| `--slot k=v` | 覆盖槽位（可重复；键必须在包里声明过，见下） |
+| `--no-sources` | 不跑数据腿（`source_slots` 因此没有观测值 ⇒ 响亮地炸，不静默回落默认值） |
+| `--allow-dangerous` / `--confirm-safe` | 放行危险工具步 / 非交互确认（危险步没放行是 exit 1，并在输出里写明"未执行"） |
+| `--tiered-hint` | P1 实验开关：hint 档内歧义时改问"这几个候选里哪个"（默认关 = 行为不变） |
+| `--model ID` · `--provider NAME` · `--ablate stub\|rules-only` · `--conf-floor N` · `--force-hints off` · `--headful` · `--quiet` · `--learn-hints` · `--hint-memory FILE` | **与 bench 同名同义**（对照表见根 [README.md](../README.md) 的「apps 与 bench：同一个名字同一件事」） |
+
+打错旗标得到的是**一行点名 + usage + exit 2**，不是 `parseArgs` 的堆栈；旧名
+（`--no-model` → `--ablate stub|rules-only`、`--hint-memory-file` → `--hint-memory FILE`）在升级窗口里仍认。
+`npm run apps -- --app demo-app` 里那个 `--` 是 npm/shell 的参数分隔符，由入口统一吃掉——Windows 的
+shell 会把它原样留给子进程，留着它的后果是后面的旗标全被当成位置参数（"传了却像没传"）。
 
 每次运行都带**两行模型账**（`docs/LAYA_VALUE_PLAN.md` P0/P1：保险的价值要看得见）：
 
