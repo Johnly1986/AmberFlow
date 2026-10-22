@@ -23,8 +23,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import readline from "node:readline/promises";
-import { parseArgs } from "node:util";
 import { chromium } from "playwright";
+import { defaultPlanPath } from "../app/amberflow-home.ts";
 import * as browserEnv from "../browser/browser-env.ts";
 import { browserSession, BrowserMiddleware, type BrowserSession } from "../engine/executor.ts";
 import { extractElements, type Elem, type ElemPool } from "../engine/extraction.ts";
@@ -32,7 +32,7 @@ import { REPO } from "../flow/flow.ts";
 import { induceHint } from "../model/hint-memory.ts";
 import { installLayaRuntime, LayaNotConfiguredError } from "../model/model.ts";
 import { checkArtifacts, missingPieces, onnxModelPath, type ModelArtifacts } from "../model/model-artifacts.ts";
-import { isParseUsageError, usageErrorLine } from "../support/cli-args.ts";
+import { cliBool, cliString, parseCliArgs } from "../support/cli-args.ts";
 import { applyRcToEnv, rcStatusLines } from "../support/rcfile.ts";
 import {
   applySpecToRuntime, BUILTIN_LAYA_PROVIDERS, installDecisionProvider, listDecisionProviders, resolveProviderSpec,
@@ -40,8 +40,14 @@ import {
 import { BASELINE_PROVIDERS, registerBaselines } from "../model/decision-baselines.ts";
 import { PlanningRules, TaskPlan } from "../engine/plan.ts";
 
-/** CLI 的默认检查点（与 parseArgs 的 default 同一个字符串；打印副作用时要用到它）。 */
-export const DEFAULT_PLAN_PATH = ".task_plan.json";
+/**
+ * CLI 的默认检查点（`parseArgs` 的 default 与"打印副作用"读同一个值）。
+ *
+ * 落在**用户作用域**（`$AMBERFLOW_HOME/task_plan.json`，默认 `~/.amberflow/`），
+ * 不写 checkout：运行产物不该让 `git status` 变脏，也不该被另一个 checkout 覆盖
+ * （与用户作用域迁移同一个理由，见 `src/app/amberflow-home.ts`）。要换位置给 `--plan`。
+ */
+export const DEFAULT_PLAN_PATH = defaultPlanPath();
 import type { SignalSpec } from "../engine/signals.ts";
 import { runPlan } from "../engine/planner.ts";
 import { affordanceRule } from "../engine/rules.ts";
@@ -357,7 +363,8 @@ async function commandJob(
     }
     io.out("");
     io.out(`计划检查点：${opts.plan}`
-      + (opts.plan === DEFAULT_PLAN_PATH ? "（默认落在仓库根目录，会出现在版本控制状态里）" : ""));
+      + (opts.plan === DEFAULT_PLAN_PATH
+        ? `（默认落在用户作用域 ${DEFAULT_PLAN_PATH}，不进版本控制）` : ""));
     io.out("");
     io.out("接着做：npm run plan-cli -- show           # 看这份计划");
     io.out("        npm run plan-cli -- add 1 \"下一步描述\" --signal 'css_exists=#id' --url <页面>");
@@ -406,7 +413,7 @@ async function commandDemo(planPath: string, headless: boolean, io: Io, deps: St
   io.out(`每步的判定方式：${rep.traces.map((t) => t.method).join(", ") || "（无步骤）"}`);
   io.out("");
   io.out(`计划检查点：${planPath}`);
-  io.out("  （本次运行已把它更新：版本控制会让你看到这一处改动；不想动工作区就加 --plan /tmp/your-plan.json）");
+  io.out("  （本次运行已把它更新；默认落在用户作用域，不进版本控制——想换位置就加 --plan /tmp/your-plan.json）");
   io.out("");
   io.out("这份计划全部由「计划点名目标 + DOM 信号」解决，没有用到模型权重。");
   io.out("换成你自己的页面：npm start -- --goal \"<你要做的事>\" --url <页面地址>");
@@ -422,35 +429,28 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（与 parseArgs 同一口气）。
   { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   // 打错的参数对第一次用 `npm start` 的人最劝退：一行点名 + 完整用法，绝不甩堆栈。
-  let parsed;
-  try {
-    parsed = parseArgs({
-      args: argv,
-      allowPositionals: true,
-      options: {
-        goal: { type: "string" }, url: { type: "string" },
-        doctor: { type: "boolean" }, demo: { type: "boolean" },
-        "dry-run": { type: "boolean" }, headful: { type: "boolean" },
-        target: { type: "string" }, provider: { type: "string" },
-        plan: { type: "string", default: DEFAULT_PLAN_PATH },
-        help: { type: "boolean" },
-      },
-    });
-  } catch (err) {
-    if (!isParseUsageError(err)) throw err;
-    io.out(usageErrorLine(err));
-    io.out("");
-    io.out(USAGE);
-    return 2;
-  }
-  const v = parsed.values;
-  const headless = !v.headful;
+  // （`parseCliArgs` 顺手吃掉命令行里的空命令 `--`：见 src/support/cli-args.ts。）
+  const cli = parseCliArgs(argv, {
+    allowPositionals: true,
+    options: {
+      goal: { type: "string" }, url: { type: "string" },
+      doctor: { type: "boolean" }, demo: { type: "boolean" },
+      "dry-run": { type: "boolean" }, headful: { type: "boolean" },
+      target: { type: "string" }, provider: { type: "string" },
+      plan: { type: "string", default: DEFAULT_PLAN_PATH },
+      help: { type: "boolean" },
+    },
+    usage: USAGE, say: io.out,
+  });
+  if (!cli.ok) return cli.code;
+  const v = cli.values;
+  const headless = !cliBool(v, "headful");
 
-  if (v.help) {
+  if (cliBool(v, "help")) {
     io.out(USAGE);
     return 0;
   }
-  if (v.doctor) {
+  if (cliBool(v, "doctor")) {
     // 外部 provider 的注册**不需要权重/服务在场**（只有真调用才需要）——先注册，
     // 体检才列得出"能选谁"（jevk5 / bailian）。否则 doctor 的 provider 行会漏掉它们，
     // 而代码注释早就声称"doctor 能列出它"——这里把那句话变成真的。
@@ -489,7 +489,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
   // 永不替用户换模型，也永不甩栈。
   let spec;
   try {
-    spec = await resolveProviderSpec(deps.noModel ? "none" : v.provider);
+    spec = await resolveProviderSpec(deps.noModel ? "none" : cliString(v, "provider"));
   } catch (e) {
     io.out(e instanceof Error ? e.message : String(e));
     io.out(USAGE);
@@ -513,12 +513,13 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     io.out(`决策提供者：${spec.name}（tier=${spec.tier}）\n`);
   }
 
-  const goal = v.goal;
-  const url = v.url;
+  const goal = cliString(v, "goal");
+  const url = cliString(v, "url");
+  const plan = cliString(v, "plan") ?? DEFAULT_PLAN_PATH;
   if (goal && url) {
     return commandJob(goal, url, {
-      plan: String(v.plan), target: (v.target as string | undefined) ?? null,
-      dryRun: Boolean(v["dry-run"]), headless,
+      plan, target: cliString(v, "target") ?? null,
+      dryRun: cliBool(v, "dry-run"), headless,
     }, io, deps);
   }
   if (goal || url) {
@@ -526,7 +527,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     io.out('  npm start -- --goal "把商品加入购物车" --url https://shop.example.com/p/1');
     return 2;
   }
-  return commandDemo(String(v.plan), headless, io, deps);
+  return commandDemo(plan, headless, io, deps);
 }
 
 export const USAGE = `npm start — 一条命令开始一项工作
@@ -537,7 +538,7 @@ export const USAGE = `npm start — 一条命令开始一项工作
   npm start -- --goal ... --url ... --dry-run      只生成计划，不执行
 
   可选：--target '<hint>'  直接点名目标（跳过选择）
-        --plan <文件>      计划保存位置（默认 .task_plan.json）
+        --plan <文件>      计划保存位置（默认 $AMBERFLOW_HOME/task_plan.json，即 ~/.amberflow/ 下）
         --provider NAME    本次决策提供者（缺省跟随 AMBERFLOW_DEFAULT_DECISION_PROVIDER / 配置文件；
                            可选名与 npm start -- --doctor 列出的一致）
         --headful          显示浏览器窗口

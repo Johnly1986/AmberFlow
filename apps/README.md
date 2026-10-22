@@ -148,7 +148,7 @@ npm run apps:suite                                       # 一条命令验收所
 1. **浏览器步必须有一个能点到的目标**：`target_hint` / `target_hints`（计划点名 → 零模型调用），或至少让规则/
    laya 能在元素池里命中一个元素。缺了就会 `blocked`，报错直说
    `step N names no target: no target_hint(s), no rule matched any of the K element(s)…`。
-2. **`--slot k=v` 的键必须在包里声明过**（`slots` / `required_slots`）：打错名字现在 exit 2 并列出已声明的槽位
+2. **`--slot k=v` 的键必须在包里声明过**（`slots` / `required_slots` / `source_slots`）：打错名字现在 exit 2 并列出已声明的槽位
    （以前是静默忽略 + 假绿）。
 
 一个可复制粘贴的最小应用在 [../README.md](../README.md) 的"应用层"一节（整包 JSON，逐字节复制即可跑绿）。
@@ -191,6 +191,10 @@ npm run apps:gen -- --write --id ip-config --source src/cli/ip-config.ts#buildAp
   "slots": { "coupon": "ACME10" },     // 数据袋：值只来自计划，模型不许发明
   "required_slots": ["coupon"],        // 缺了就加载期报错
   "sources": ["demo-tool"],            // 数据腿：本目录或别的应用的 source
+  "source_slots": {                    // 数据腿的结果回写槽位：观测值 > 包里的默认值 > （--slot 仍最优先）
+    "cheapest": { "source": "demo-tool", "select": "cheapest", "field": "label" },
+    "n": { "source": "demo-tool", "count": "rows" }
+  },
   "roles": {
     "apply-coupon": {                  // 角色 = 可复用的步骤模板（desc/signal/hint/slots/when/retries）
       "desc": "在购物车输入优惠券 {coupon} 并应用",
@@ -212,6 +216,9 @@ npm run apps:gen -- --write --id ip-config --source src/cli/ip-config.ts#buildAp
 - **角色优先，别复制步骤**：同一套角色在多个应用间复用，矩阵里"角色数"就是一个数字；
   跨应用比的是"映射了几个角色"，不是"抄了几段步骤"。
 - **`{slot}` 占位符只替换已声明的槽位**，其余花括号原样保留；未知占位符加载期报错。
+- **`source_slots` 让数据腿把查到的值写回槽位**：`{source, select|count, field?}` 点名到具体的
+  取值点（数据源没声明这个 `select`/`count` 就加载期红）。没查到就是没值（响亮地炸），
+  不静默回落到包里的默认值；`--no-sources` 时不回写。报告的"数据腿"段会列出本次回写了什么。
 - **`invariants` 在会话结束状态上求值**（同一个 page、同一份 cookie），所以能表达"下单后购物车已清空"
   这类验收。它看不见**中间**要求——中间要求写成子目标信号。
 - **校验复用冻结计划那一套**：`PlanningRules.problems` 负责信号/hint/`when`/`retries`，

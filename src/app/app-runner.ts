@@ -27,14 +27,16 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { MockAuditor, type TraceStep } from "../engine/audit.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 import { ensureDir, userAppsDir } from "./amberflow-home.ts";
-import { isParseUsageError, renamedHint, usageErrorLine } from "../support/cli-args.ts";
+import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../support/cli-args.ts";
 import { applyRcToEnv } from "../support/rcfile.ts";
-import { cliRunDetailed, defaultDates, loadSource, runSource, urlFor, type CliObservation } from "../data/datasource.ts";
+import {
+  cliRunDetailed, defaultDates, loadSource, previewTable, runSource, urlFor,
+  type CliObservation, type PreviewTable,
+} from "../data/datasource.ts";
 import { type CachedRuntime, type DecisionCacheStats } from "../model/decision-cache.ts";
 import { checkArtifacts, missingPieces, modelConfigError } from "../model/model-artifacts.ts";
 import { activeProviderInfo, applySpecToRuntime, resolveProviderSpec, type ProviderInfo } from "../model/decision-provider.ts";
@@ -48,7 +50,10 @@ import { checkToolSignal, type ToolSignal } from "../browser/tool-signals.ts";
 import { captureStateView } from "../flow/signal-induction.ts";
 import { captureStepStateView, type StepStateView } from "../model/page-context.ts";
 import type { StateView } from "../engine/signals.ts";
-import { expandPack, listPacks, loadPack, type AppPack, type ExpandedStep, type PackPolicy } from "./app-pack.ts";
+import {
+  expandPack, listPacks, loadPack, resolveSourceSlots, validatePack,
+  type AppPack, type ExpandedStep, type PackPolicy, type SourceObservation,
+} from "./app-pack.ts";
 import { getAppAdapter, substituteDatasetPlaceholders, type AdapterRunContext } from "./app-adapters.ts";
 import { DatasetStore, type DatasetEntry } from "../engine/dataset.ts";
 import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "../engine/plan.ts";
@@ -329,6 +334,12 @@ export interface AppSourceResult {
   rows: number;
   counts: Record<string, number>;
   selects: Record<string, string>;
+  /**
+   * 数据源声明了 `report.preview` 时的"前 N 条原始行"（`previewTable` 算，与数据源
+   * 报告同一个实现）。counts/selects 是**结论**，原始行是**证据**——报告两者都要有，
+   * 否则"为什么是这个数"只能靠信。
+   */
+  preview?: PreviewTable;
   tool_version?: string;
 }
 
@@ -347,6 +358,11 @@ export interface AppRunResult {
   /** Slice 4：混用 ≥2 种应用类型时，按旅程声明的类型计数（缺字段 = 单一类型）。 */
   step_types?: Record<string, number>;
   sources: AppSourceResult[];
+  /**
+   * 数据腿**真的写回槽位**的那部分（`source_slots` 的回写结果）。缺字段 = 没有回写
+   * （缺省等价纪律）。有了它，报告才说得出"这个值是查出来的，还是人写死的"。
+   */
+  source_slots?: Record<string, string>;
   ok: boolean;
   secs: number;
   /**
@@ -441,15 +457,12 @@ export async function runToolStep(
     if (typeof v === "string") {
       // Slice 2：`{dataset:NAME}` 从运行级数据集现读（缺失 = 结构化 needs_value，绝不猜；
       // 与 `{out_dir}`/`{run_id}` 同一条"运行期占位符"纪律，只是值来自前序步骤）。
-      return v.split("{out_dir}").join(outDir).split("{run_id}").join(runId)
-        .replace(/\{dataset:([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, name: string) => {
-          const ent = opts.dataset?.read(name) ?? null;
-          if (ent === null || ent.value === undefined || ent.value === null) {
-            missingDataset.add(name);
-            return m;
-          }
-          return typeof ent.value === "string" ? ent.value : JSON.stringify(ent.value);
-        });
+      // 替换的**唯一实现**在 `app-adapters.substituteDatasetPlaceholders`——以前这里
+      // 手抄了一份同名的正则，两份实现各扫各的正是本仓库的复发缺陷形状。
+      const withRuntime = v.split("{out_dir}").join(outDir).split("{run_id}").join(runId);
+      const { value, missing } = substituteDatasetPlaceholders(withRuntime, opts.dataset);
+      for (const m of missing) missingDataset.add(m);
+      return value;
     }
     if (Array.isArray(v)) return v.map(sub);
     if (typeof v === "object" && v !== null) {
@@ -574,17 +587,77 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const t0 = Date.now();
   // 预检在**任何**腿之前：坏配置不该先跑数据腿再报错（I-1 的"0 副作用"就是这个位置）。
   preflightConfig(opts);
-  const expanded = expandPack(pack, slots, planPath);
   // 数据源的**配置**也在跑之前全部加载：`loadSource` 会在加载期跑 `validate_source`
   // （未知抽取器/op/transport 键、错的捕获组数……）。以前第 2 个源的坏配置要等第 1 个源
   // 真的打完网络才浮出来——网络副作用已经发生，报错却在半路。加载不产生副作用。
   {
     const cfgNames = new Set<string>();
+    const isObj = (x: unknown): x is Record<string, unknown> =>
+      typeof x === "object" && x !== null && !Array.isArray(x);
     for (const n of pack.sources ?? []) cfgNames.add(String(n));
-    for (const s of expanded.steps) if (s.adapter === "cli" && s.tool) cfgNames.add(String(s.tool.source));
+    // 工具步引用的数据源同样在这一段加载（不再等展开之后——展开现在要等数据腿跑完，
+    // 因为数据腿的结果要回写槽位）。
+    for (const e of pack.journey ?? []) {
+      if (!isObj(e)) continue;
+      const rn = e["role"];
+      const tpl = rn !== undefined && isObj(pack.roles?.[String(rn)]) ? pack.roles![String(rn)]! : {};
+      const merged = { ...tpl, ...e };
+      if (merged["source"] !== undefined) cfgNames.add(String(merged["source"]));
+    }
     for (const n of cfgNames) loadSource(n);
   }
+  // 坏包在**任何网络动作之前**就炸：校验是纯函数，放在数据腿之前是"0 副作用"纪律的另一半
+  // （以前坏包要等数据腿打完一圈网络才被发现）。
+  {
+    const problems = validatePack(pack, { slots: { ...(pack.slots ?? {}), ...slots } });
+    if (problems.length) {
+      throw new Error(`app pack ${pack.id} is invalid:\n  - ${problems.join("\n  - ")}`);
+    }
+  }
   let endState: StateView | undefined;
+
+  // ---- 数据腿：同一套数据源引擎（HTTP 或 CLI 通道） -------------------------
+  // 它现在跑在**展开之前**：数据腿的结果要回写槽位（`source_slots`），而槽位替换发生在展开期。
+  // 顺序从"展开 → 数据腿"改成"校验 → 数据腿 → 展开"，坏包仍然在任何网络动作之前就被拒
+  // （校验已在上面单独跑过一遍）。
+  const sourceResults: AppSourceResult[] = [];
+  /** 数据腿的观察面（回写槽位的输入；与报告里的 counts/selects 同一份数据）。 */
+  const observed: Record<string, SourceObservation> = {};
+  if (sources) {
+    for (const name of pack.sources ?? []) {
+      const src = loadSource(String(name));
+      const dates = defaultDates(src);
+      const res = await runSource(src, dates, { verbose: false });
+      const day = Object.values(res.dates)[0] as Record<string, any> | undefined;
+      const counts = (day?.counts ?? {}) as Record<string, number>;
+      const selects: Record<string, string> = {};
+      const selectsFull: Record<string, Record<string, string> | null> = {};
+      for (const [k, row] of Object.entries((day?.selects ?? {}) as Record<string, any>)) {
+        // 回写槽位要能取到**具体字段**（`selects` 只留一个"主值"是给报告看的；
+        // 声明里点名 `field` 时得有整行）。
+        selectsFull[k] = row
+          ? Object.fromEntries(Object.entries(row as Record<string, unknown>)
+            .map(([f, v]) => [f, String(v ?? "")]))
+          : null;
+        if (row) selects[k] = String(row.price ?? row.id ?? row.name ?? "");
+      }
+      observed[String(name)] = { selects: selectsFull, counts };
+      const pv = previewTable(src, res.dates);
+      sourceResults.push({
+        name: String(name), rows: (day?.rows ?? []).length, counts, selects,
+        ...(pv ? { preview: pv } : {}),
+        ...(res.tool_version ? { tool_version: res.tool_version } : {}),
+      });
+      if (verbose) console.log(`  source ${name}: ${(day?.rows ?? []).length} 条 ${JSON.stringify(counts)}`);
+    }
+  }
+
+  // ---- 数据腿 → 槽位（回写的唯一实现在 `app-pack.resolveSourceSlots`） --------
+  // 优先级：包里的默认值 < **数据腿查到的观测值** < CLI 显式 `--slot`。
+  // 观测值压过默认值正是这条声明存在的理由（"打开榜首"的 URL 不该是人抄进包里的过期字面量）；
+  // 而人这次显式给的值压过观测值——那是"这次就用这个"的显式意图。
+  const sourceSlots = resolveSourceSlots(pack, observed);
+  const expanded = expandPack(pack, { ...sourceSlots, ...slots }, planPath);
   const plan = expanded.plan;
   // 相对 start_url 按仓库根解析成 file://（与 bench 同一口径）：应用包写仓库内路径，
   // 不写死绝对路径，换机器/换 checkout 目录仍然可跑。
@@ -608,25 +681,6 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
         .reduce((k, key) => k + (Array.isArray(sets[key]) ? (sets[key] as unknown[]).length : 0), 0);
       console.log(`  测量型应用（探针集）：${n} 个目标；测量入口见 apps/README.md 的探针一节`);
     }
-  }
-
-  // ---- 数据腿：同一套数据源引擎（HTTP 或 CLI 通道） -------------------------
-  const sourceResults: AppSourceResult[] = [];
-  for (const name of pack.sources ?? []) {
-    const src = loadSource(String(name));
-    const dates = defaultDates(src);
-    const res = await runSource(src, dates, { verbose: false });
-    const day = Object.values(res.dates)[0] as Record<string, any> | undefined;
-    const counts = (day?.counts ?? {}) as Record<string, number>;
-    const selects: Record<string, string> = {};
-    for (const [k, row] of Object.entries((day?.selects ?? {}) as Record<string, any>)) {
-      if (row) selects[k] = String(row.price ?? row.id ?? row.name ?? "");
-    }
-    sourceResults.push({
-      name: String(name), rows: (day?.rows ?? []).length, counts, selects,
-      ...(res.tool_version ? { tool_version: res.tool_version } : {}),
-    });
-    if (verbose) console.log(`  source ${name}: ${(day?.rows ?? []).length} 条 ${JSON.stringify(counts)}`);
   }
 
   // ---- 旅程：逐步骤按类型执行（浏览器步走执行器，工具步走命令行） -----------
@@ -952,7 +1006,10 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     ...(mw.riskDegraded ? { risk_degraded: mw.riskDegraded } : {}),
     // 在线 provider 掉线/没配好 ⇒ 本次跑降级到 rules-only——同样必须出现在产物里（同 risk_degraded）。
     ...(mw.providerDegraded ? { provider_degraded: mw.providerDegraded } : {}),
-    sources: sourceResults, ok, secs: Math.round((Date.now() - t0) / 100) / 10,
+    sources: sourceResults,
+    // 数据腿**真的写回**了哪些槽位（缺省等价：没回写就不出现这个字段）。
+    ...(Object.keys(sourceSlots).length > 0 ? { source_slots: sourceSlots } : {}),
+    ok, secs: Math.round((Date.now() - t0) / 100) / 10,
   };
 }
 
@@ -996,6 +1053,20 @@ export function appReportMarkdown(r: AppRunResult): string {
     L.push("", "## 数据腿", "", "| 数据源 | 行数 | counts | selects | 工具版本 |", "|---|---|---|---|---|");
     for (const s of r.sources) {
       L.push(`| ${s.name} | ${s.rows} | ${JSON.stringify(s.counts)} | ${JSON.stringify(s.selects)} | ${s.tool_version ?? "-"} |`);
+    }
+    // preview 行：数据源声明了 `report.preview` 就把前 N 条**原始行**带进应用报告——
+    // counts/selects 是结论，原始行是它的证据（"为什么是这个数"不该只能靠信）。
+    for (const s of r.sources) {
+      if (!s.preview || s.preview.rows.length === 0) continue;
+      L.push("", `**${s.name} · ${s.preview.date} 前 ${s.preview.rows.length} 条（原始行）**`, "",
+        `| ${s.preview.columns.join(" | ")} |`, `|${"---|".repeat(s.preview.columns.length)}`);
+      for (const row of s.preview.rows) {
+        L.push(`| ${s.preview.columns.map((c) => row[c] ?? "").join(" | ")} |`);
+      }
+    }
+    if (r.source_slots !== undefined && Object.keys(r.source_slots).length > 0) {
+      L.push("", `- 数据腿回写槽位：${Object.entries(r.source_slots)
+        .map(([k, v]) => `\`${k}\`=\`${v}\``).join(" ｜ ")}（观测值压过包里的默认值；本次显式 --slot 仍最优先）`);
     }
   }
   if (r.subgoals.length) {
@@ -1051,16 +1122,21 @@ export function appReportMarkdown(r: AppRunResult): string {
 }
 
 const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--out DIR]
-                  [--model ID] [--provider NAME] [--ablate stub|rules-only] [--force-hints off] [--no-sources] [--confirm-safe]
-                  [--headful]
-                  [--allow-dangerous] [--tiered-hint] [--learn-hints | --hint-memory FILE] [--conf-floor N] [--quiet]
+                  [--model ID] [--provider NAME] [--ablate stub|rules-only] [--force-hints off]
+                  [--conf-floor N] [--no-sources] [--confirm-safe] [--headful] [--allow-dangerous]
+                  [--tiered-hint] [--learn-hints | --hint-memory FILE] [--quiet]
 
 按 apps/<app>/pack.json 跑一条完整应用链路：数据腿 → 浏览器步/工具步 → 结束状态不变量
+--model ID     换 laya checkpoint（与 bench 同名同义；换决策源用 --provider）
+--ablate       消融臂：stub = 脚本桩，rules-only = 规则档（与 bench 同一取值集合）
+--conf-floor N 置信度闸门刻度（0<N≤1）：换 provider（score_kind 不同）时缺省 0.25 不再成立，
+               本旗标 = 本次覆盖；包可用 policy.conf_floor 声明；provider 可自报 floor
 --tiered-hint  P1 实验开关：hint 档内歧义向模型问更小的问题（默认关 = 行为逐字节不变）
 --learn-hints  R2 学习环：模型选对的步变成规则（sidecar，永不写进被审计的包；authored 恒优先）
                落点默认 $AMBERFLOW_HOME/hint-memory/<app>.json，--hint-memory FILE 显式指定
---conf-floor N 置信度闸门刻度（0<N≤1）：换 provider（score_kind 不同）时缺省 0.25 不再成立，
-               本旗标 = 本次覆盖；包可用 policy.conf_floor 声明；provider 可自报 floor`;
+
+数据腿的结果按包的 source_slots 回写槽位（观测值 > 包里的默认值；--slot 仍最优先）；
+--no-sources 时不回写——那时只由包默认值与 --slot 提供值。`;
 
 /**
  * app-runner 默认产物目录（**调用时**读 env，测试可隔离——与 apps_suite 的 suiteOutDir 同一纪律）。
@@ -1074,43 +1150,21 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
   { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
-  let parsed;
-  try {
-    parsed = parseArgs({
-      args: argv, allowPositionals: true,
-      options: {
-        list: { type: "boolean" }, app: { type: "string" }, dry: { type: "boolean" },
-        slot: { type: "string", multiple: true }, out: { type: "string" },
-        model: { type: "string" }, ablate: { type: "string" }, provider: { type: "string" },
-        "no-sources": { type: "boolean" }, "confirm-safe": { type: "boolean" }, headful: { type: "boolean" },
-        "allow-dangerous": { type: "boolean" },
-        "tiered-hint": { type: "boolean" },
-        // 消融臂（与 bench 同名）：内存里剥掉计划点名的 hint，让规则包办的步改由决策层回答。
-        "force-hints": { type: "string" },
-        "learn-hints": { type: "boolean" }, "hint-memory": { type: "string" },
-        "conf-floor": { type: "string" },
-        quiet: { type: "boolean" }, help: { type: "boolean" },
-      },
-    });
-  } catch (err) {
-    if (!isParseUsageError(err)) throw err;
-    const line = usageErrorLine(err);
-    console.error(line);
-    const hint = renamedHint(line);        // 旧调用方（升级窗口的旧桥）要知道新写法
-    if (hint) console.error(hint);
-    console.error();
-    console.error(USAGE);
-    return 2;
-  }
-  const v = parsed.values;
-  if (v.help) { console.log(USAGE); return 0; }
-  if (v.list || !v.app) {
+  // 旗标表与 bench 共用一张（`appOptions()`）：同一个名字在两个入口是同一件事。
+  const cli = parseCliArgs(argv, { allowPositionals: true, options: appOptions(), usage: USAGE });
+  if (!cli.ok) return cli.code;
+  const v = cli.values;
+  if (cliBool(v, "help")) { console.log(USAGE); return 0; }
+  if (cliBool(v, "list") || cliString(v, "app") === undefined) {
     for (const [id, label, p] of listPacks()) console.log(`${id.padEnd(22)} ${label}  ${p}`);
-    if (!v.app) { console.log(); console.log(USAGE); return v.list ? 0 : 2; }
+    if (cliString(v, "app") === undefined) {
+      console.log(); console.log(USAGE);
+      return cliBool(v, "list") ? 0 : 2;
+    }
   }
 
   const slots: Record<string, unknown> = {};
-  for (const s of v.slot ?? []) {
+  for (const s of cliStrings(v, "slot")) {
     const i = s.indexOf("=");
     if (i <= 0) { console.error(`--slot needs k=v, got ${JSON.stringify(s)}`); return 2; }
     const key = s.slice(0, i);
@@ -1126,7 +1180,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   let pack: AppPack;
   try {
-    pack = loadPack(String(v.app));
+    pack = loadPack(String(cliString(v, "app")));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     return 2;
@@ -1134,9 +1188,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   // 槽位名打错曾是**静默**的：`--slot coupn=X` 会被原样塞进计划，值谁也没用上，而应用照旧"通过"。
   // 值只来自计划，但键必须有出处——不在声明里就是用法错误（exit 2），并且把已声明的列出来。
+  // `source_slots` 的键同样是**已声明**的槽位（值由数据腿回填，人也可以显式覆盖）。
   const declaredSlots = new Set([
     ...Object.keys(pack.slots ?? {}),
     ...((pack.required_slots ?? []) as string[]),
+    ...Object.keys(pack.source_slots ?? {}),
   ]);
   const unknownSlots = Object.keys(slots).filter((k) => !declaredSlots.has(k));
   if (unknownSlots.length) {
@@ -1147,7 +1203,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 2;
   }
 
-  const outDir = path.resolve(v.out ?? appsOutDir());
+  const outDir = path.resolve(cliString(v, "out") ?? appsOutDir());
   // 输出目录建不出来时是**用法错误**，不该把 Node 的 mkdir 栈甩给使用者（`--out /sys/x`）。
   try {
     fs.mkdirSync(outDir, { recursive: true });
@@ -1176,19 +1232,20 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // 所以名字里带 ablate、产物里带 ablation 前缀，谁都不会把它当成日常模式。
   // （旧 `--no-model` 有两个问题：① 它装的其实是脚本桩，却把层级标成 `off(rules-only)`；
   //  ② "no model" 听起来像默认路径的替代，于是所有文档示例都带着它跑，真模型反而从没上过场。）
-  const ablate = v.ablate;
+  const ablate = cliString(v, "ablate");
   if (ablate !== undefined && ablate !== "stub" && ablate !== "rules-only") {
     console.error(`--ablate 只接受 stub | rules-only（收到 ${JSON.stringify(ablate)}）`);
     return 2;
   }
-  if (v["force-hints"] !== undefined && v["force-hints"] !== "off") {
-    console.error(`--force-hints 只接受 off（收到 ${JSON.stringify(v["force-hints"])}）——它是消融旗标，只有"剥掉"这一档。`);
+  const forceHints = cliString(v, "force-hints");
+  if (forceHints !== undefined && forceHints !== "off") {
+    console.error(`--force-hints 只接受 off（收到 ${JSON.stringify(forceHints)}）——它是消融旗标，只有"剥掉"这一档。`);
     return 2;
   }
   // §provider 层：`--provider` 选决策模型（换模型做测试的那条路）；`--ablate` 保留为消融简写。
   // 解析与安装分开做（resolveProviderSpec），因为中间必须插进**决策缓存与咨询计数**——
   // 少了它们，`模型边际`/`梯级账单`/缓存命中率三组数就不存在了。
-  const providerWanted = v.provider
+  const providerWanted = cliString(v, "provider")
     ?? (ablate === "stub" ? "scripted-stub" : ablate === "rules-only" ? "none" : undefined);
   let spec;
   try {
@@ -1200,7 +1257,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const artifacts = checkArtifacts();
   const modelStatus = spec.tier;
 
-  if (v.dry) {
+  if (cliBool(v, "dry")) {
+    // `--dry` 不跑数据腿，所以 `source_slots` 声明的槽位没有观测值可填。包里给了默认值就
+    // 用默认值；没给就**直说**（而不是让展开报一个看不懂的"未知占位符"）。
+    const unfilled = Object.keys(pack.source_slots ?? {})
+      .filter((k) => !Object.prototype.hasOwnProperty.call({ ...(pack.slots ?? {}), ...slots }, k));
+    if (unfilled.length) {
+      console.error(`--dry 不跑数据腿：槽位 ${unfilled.map((k) => JSON.stringify(k)).join(", ")} 的值由数据腿回填`
+        + `（声明见包的 source_slots）；要看真实值请去掉 --dry，或给包补一个默认值。`);
+      return 2;
+    }
     let dryOut;
     try {
       dryOut = expandPack(pack, slots, planPath);
@@ -1236,9 +1302,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // `--hint-memory FILE` 显式指定。都不给 ⇒ null ⇒ 执行器与产物逐字节不变。
   let hintMemory: HintMemoryLike | null = null;
   let hintMemoryPath: string | null = null;
-  if (v["learn-hints"] === true || v["hint-memory"]) {
-    hintMemoryPath = v["hint-memory"]
-      ? path.resolve(String(v["hint-memory"]))
+  const hintMemoryArg = cliString(v, "hint-memory");
+  if (cliBool(v, "learn-hints") || hintMemoryArg !== undefined) {
+    hintMemoryPath = hintMemoryArg !== undefined && hintMemoryArg !== "on"
+      ? path.resolve(hintMemoryArg)
       : path.join(path.dirname(userAppsDir()), "hint-memory", `${pack.id}.json`);
     try {
       ensureDir(path.dirname(hintMemoryPath));
@@ -1247,17 +1314,18 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       return 2;
     }
     hintMemory = createHintMemory({ path: hintMemoryPath });
-    if (!v.quiet) {
+    if (!cliBool(v, "quiet")) {
       console.log(`learned hints: ${hintMemory.stats?.().entries ?? 0} known（sidecar ${hintMemoryPath}）`);
     }
   }
 
   // --conf-floor：显式覆盖闸门刻度；范围错误是**用法错误**（退出码 2），不是静默忽略。
   let cliConfFloor: number | undefined;
-  if (v["conf-floor"] !== undefined) {
-    const n = Number(v["conf-floor"]);
+  const confFloorArg = cliString(v, "conf-floor");
+  if (confFloorArg !== undefined) {
+    const n = Number(confFloorArg);
     if (!Number.isFinite(n) || n <= 0 || n > 1) {
-      console.error(`--conf-floor 要是 (0, 1] 之间的数（拿到 ${JSON.stringify(v["conf-floor"])}）`);
+      console.error(`--conf-floor 要是 (0, 1] 之间的数（拿到 ${JSON.stringify(confFloorArg)}）`);
       return 2;
     }
     cliConfFloor = n;
@@ -1266,17 +1334,17 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   let result: AppRunResult;
   try {
     result = await runApp(pack, {
-      slots, planPath, outDir, verbose: !v.quiet,
-      sources: !v["no-sources"], confirmSafe: v["confirm-safe"] === true, headful: v.headful === true,
-      allowDangerous: v["allow-dangerous"] === true,
+      slots, planPath, outDir, verbose: !cliBool(v, "quiet"),
+      sources: !cliBool(v, "no-sources"), confirmSafe: cliBool(v, "confirm-safe"), headful: cliBool(v, "headful"),
+      allowDangerous: cliBool(v, "allow-dangerous"),
       // §3：只有**显式给了旗标**才算"本次覆盖"；否则留 undefined，让包声明赢。
       // （以前这里恒传一个布尔，等于 CLI 永远压过 pack——报告还会把来源写成 cli，假账。）
-      tieredHint: v["tiered-hint"] === true ? true : undefined,
-      forceHints: v["force-hints"] === "off" ? true : undefined,
+      tieredHint: cliBool(v, "tiered-hint") ? true : undefined,
+      forceHints: forceHints === "off" ? true : undefined,
       hintMemory, hintMemoryPath,
       confFloor: cliConfFloor,
       providerFloor: activeProviderInfo()?.floor,
-      modelId: v.model ?? pack.model ?? "english",
+      modelId: cliString(v, "model") ?? pack.model ?? "english",
       modelStatus,
       providerInfo: activeProviderInfo() ?? {
         name: spec.name, version: spec.kind === "laya" ? "runtime" : "n/a",
@@ -1306,7 +1374,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const mdPath = path.join(outDir, `${pack.id}-report.md`);
   fs.writeFileSync(jsonPath, JSON.stringify(result, null, 2), "utf-8");
   fs.writeFileSync(mdPath, appReportMarkdown(result), "utf-8");
-  if (!v.quiet) {
+  if (!cliBool(v, "quiet")) {
     console.log();
     console.log(appReportMarkdown(result));
     // R2 的账（plan-cli 同一形状）：known = sidecar 里现存几条；reused = 本次真的按它命中的次数。

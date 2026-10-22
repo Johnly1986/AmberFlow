@@ -18,7 +18,7 @@
  * 只录"点一下"和"填一个值"两类动作（其余形状要等动作模型扩展）。
  */
 import crypto from "node:crypto";
-import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
+import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../src/support/cli-args.ts";
 import { applyRcToEnv } from "../src/support/rcfile.ts";
 import fs from "node:fs";
 import os from "node:os";
@@ -465,7 +465,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
-    args: argv,
+    args: stripArgSeparators(argv),
     options: {
       url: { type: "string" }, goal: { type: "string" }, id: { type: "string" },
       cdp: { type: "string" }, script: { type: "string" }, yes: { type: "boolean" },

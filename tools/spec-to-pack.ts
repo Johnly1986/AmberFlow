@@ -20,7 +20,7 @@
  * 这些是"不可约残差"——生成器只搬运，不生成；缺 `invariants` 时会**明着提示**（而不是悄悄给一个空壳）。
  */
 import crypto from "node:crypto";
-import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
+import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../src/support/cli-args.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -470,7 +470,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
-    args: argv,
+    args: stripArgSeparators(argv),
     options: {
       write: { type: "boolean" }, check: { type: "boolean" }, list: { type: "boolean" },
       id: { type: "string" }, spec: { type: "string" }, source: { type: "string" },

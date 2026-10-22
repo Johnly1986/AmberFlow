@@ -21,7 +21,7 @@
  * 所以 `--repeat` 的默认值是 3，输出**每一次**的结果与汇总，不写"平均分"。
  */
 import { parseArgs } from "node:util";
-import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
+import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../src/support/cli-args.ts";
 import { chromium, type Page } from "playwright";
 import * as browserEnv from "../src/browser/browser-env.ts";
 import { BrowserMiddleware, type AnyPage, type PwLike } from "../src/engine/executor.ts";
@@ -44,7 +44,7 @@ async function main(argv: string[]): Promise<number> {
   // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
-    args: argv,
+    args: stripArgSeparators(argv),
     options: {
       url: { type: "string" },
       goal: { type: "string" },

@@ -38,6 +38,17 @@ export function userAppsDir(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
+ * 计划检查点的默认落点：`$AMBERFLOW_HOME/task_plan.json`。
+ *
+ * 它以前写在**仓库根**（`.task_plan.json`）——运行产物被塞进引擎的安装目录：git status
+ * 变脏、多 checkout 互相覆盖、升级即丢（与用户作用域迁移同一个理由）。`start` 与
+ * `plan-cli` 共用这一个函数：两个入口各写一个默认值，就是"同一件事两个落点"的复发形状。
+ */
+export function defaultPlanPath(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(amberflowHome(env), "task_plan.json");
+}
+
+/**
  * 应用包的**搜索路径**（发现制的目录序列，按优先级）：用户目录在前、仓库夹具在后。
  * `repoApps` 由调用方传入（`app-pack.ts` 的 `APPS_DIR`），本模块不认识仓库布局——
  * 和"引擎不认识站点"同一个口径：路径知识在调用方，这里只定义"用户作用域"。

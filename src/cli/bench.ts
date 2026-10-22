@@ -12,10 +12,9 @@
  * too, in the prototype chain.
  */
 import fs from "node:fs";
-import { isParseUsageError, usageErrorLine } from "../support/cli-args.ts";
+import { benchOptions, cliBool, cliString, parseCliArgs } from "../support/cli-args.ts";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { parseArgs } from "node:util";
 import { chromium } from "playwright";
 import * as browserEnv from "../browser/browser-env.ts";
 import { MockAuditor, type Auditor } from "../engine/audit.ts";
@@ -189,62 +188,72 @@ export interface BenchMainDeps {
   runtime?: LayaRuntime;
 }
 
+/**
+ * bench 的用法（与 apps 对齐后的旗标名）。两张旗标表共用 `SHARED_RUN_OPTIONS`
+ * ——同一个名字在两个入口是同一件事，剩下的才是各自专属的（bench 的语料层、apps 的包层）。
+ */
+const USAGE = `usage: bench [--cases FILE] [--only ID] [--fixtures-only] [--mode-tag TAG] [--out DIR]
+             [--model ID | --provider NAME | --ablate stub|rules-only] [--conf-floor N] [--force-hints off]
+             [--force-rules on|off] [--headful] [--quiet] [--help]
+             [--outcome-memory on] [--outcome-memory-file FILE] [--outcome-memory-mode forbid|rank]
+             [--learn-hints | --hint-memory FILE]
+
+在冻结语料上跑对照（bench/cases.json）：浏览器步 → 完成信号 → 逐用例结论
+--model ID       换 laya checkpoint（只在 checkpoints 档有意义；换决策源用 --provider）
+--ablate         消融臂：stub = 脚本桩，rules-only = 规则档（与 apps 同一取值集合）
+--conf-floor N   置信度闸门刻度（0<N≤1）；旧名 --force-conf-floor 仍认
+--quiet          只留机器读的 summary JSON（过程行不打印）
+R2 学习环：--learn-hints 用默认 sidecar，--hint-memory FILE 显式指定落点（旧写法 --hint-memory on 仍认）
+
+旧名（升级窗口仍认，不再列进新文档）：--force-model → --model，--force-conf-floor → --conf-floor，
+--hint-memory-file → --hint-memory FILE`;
+
 export async function main(argv: string[] = process.argv.slice(2), deps: BenchMainDeps = {}): Promise<number> {
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
   { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
-  let parsed;
-  // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
-  try {
-    parsed = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: {
-      cases: { type: "string" }, out: { type: "string" }, "mode-tag": { type: "string" },
-      only: { type: "string" }, "fixtures-only": { type: "boolean" },
-      "force-model": { type: "string" }, "force-rules": { type: "string" },
-      // Ablation knob: the confidence floor is a GATE, so its setting must be
-      // measurable on the same cases (see docs/decision-model-survey.md).
-      "force-conf-floor": { type: "string" },
-      // Outcome memory: remember elements that proved inert on a page+subgoal so a
-      // retry does not walk into them again (see src/model/outcome-memory.ts).
-      "outcome-memory": { type: "string" },
-      "outcome-memory-file": { type: "string" },
-      // forbid (default) removes a remembered-inert element; rank keeps it and annotates
-      // it in the model's view (the two ways to use the same observation).
-      "outcome-memory-mode": { type: "string" },
-      // Learned hints: remember the stable handle of a pick that WORKED, so the next run
-      // of the same page+subgoal needs no model call (see src/model/hint-memory.ts).
-      "hint-memory": { type: "string" },
-      "hint-memory-file": { type: "string" },
-      // Ablation: strip the AUTHORED hints, leaving the model (and any learned hints) to
-      // decide — the regime in which a learned hint is measurable.
-      "force-hints": { type: "string" },
-      // 智能缺省：决策源解析与安装走 apps/suite/start/bench 共用的那一扇门
-      // （本地产物就绪→本地 checkpoints；配了 provider→在线；都没配→规则档如实降级）。
-      provider: { type: "string" },
-      // 看着跑：真起一个有头浏览器窗口（与 apps/start 的 --headful 同口径；CI/测量臂不开）。
-      headful: { type: "boolean" },
-    },
-  });
-  } catch (err) {
-    if (!isParseUsageError(err)) throw err;
-    console.error(usageErrorLine(err));
+  // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
+  // 旗标表与 apps 共用一张（`benchOptions()`），两个入口的同一件事同一个名字。
+  const cli = parseCliArgs(argv, { allowPositionals: true, options: benchOptions(), usage: USAGE });
+  if (!cli.ok) return cli.code;
+  const v = cli.values;
+  if (cliBool(v, "help")) { console.log(USAGE); return 0; }
+  const quiet = cliBool(v, "quiet");
+  const say = (line: string): void => { if (!quiet) console.log(line); };
+  const casesPath = path.resolve(cliString(v, "cases") ?? path.join(REPO, "bench", "cases.json"));
+  const outdir = path.resolve(cliString(v, "out") ?? path.join(REPO, "bench", "results"));
+  const modeTag = cliString(v, "mode-tag") ?? "baseline";
+
+  // 对齐后的名字优先，旧名（`--force-model` / `--force-conf-floor`）在升级窗口里仍认。
+  const forcedModel = cliString(v, "model") ?? cliString(v, "force-model");
+  const ablate = cliString(v, "ablate");
+  if (ablate !== undefined && ablate !== "stub" && ablate !== "rules-only") {
+    console.error(`--ablate 只接受 stub | rules-only（收到 ${JSON.stringify(ablate)}）`);
     return 2;
   }
-  const v = parsed.values;
-  const casesPath = v.cases ? path.resolve(v.cases) : path.join(REPO, "bench", "cases.json");
-  const outdir = path.resolve(v.out ?? path.join(REPO, "bench", "results"));
-  const modeTag = v["mode-tag"] ?? "baseline";
+  const confFloorRaw = cliString(v, "conf-floor") ?? cliString(v, "force-conf-floor");
+  let confFloor: number | undefined;
+  if (confFloorRaw !== undefined) {
+    confFloor = Number(confFloorRaw);
+    if (!Number.isFinite(confFloor) || confFloor <= 0 || confFloor > 1) {
+      console.error(`--conf-floor 要是 (0, 1] 之间的数（拿到 ${JSON.stringify(confFloorRaw)}）`);
+      return 2;
+    }
+  }
+  if (cliString(v, "force-hints") !== undefined && cliString(v, "force-hints") !== "off") {
+    console.error(`--force-hints 只接受 off（收到 ${JSON.stringify(cliString(v, "force-hints"))}）——它是消融旗标，只有"剥掉"这一档。`);
+    return 2;
+  }
 
   let cases = (JSON.parse(fs.readFileSync(casesPath, "utf-8")) as { cases: BenchCase[] }).cases;
-  if (v.only) cases = cases.filter((c) => c.id === v.only);
-  if (v["fixtures-only"]) cases = cases.filter((c) => c.platform.startsWith("fixture:"));
+  const only = cliString(v, "only");
+  if (only) cases = cases.filter((c) => c.id === only);
+  if (cliBool(v, "fixtures-only")) cases = cases.filter((c) => c.platform.startsWith("fixture:"));
   if (!cases.length) throw new Error("no cases selected");
   for (const c of cases) {
-    if (v["force-model"]) c.model = String(v["force-model"]);
-    if (v["force-rules"] !== undefined) c.rules = v["force-rules"] === "on";
-    if (v["force-conf-floor"] !== undefined) c.conf_floor = Number(v["force-conf-floor"]);
-    if (v["force-hints"] === "off") {
+    if (forcedModel) c.model = forcedModel;
+    if (cliString(v, "force-rules") !== undefined) c.rules = cliString(v, "force-rules") === "on";
+    if (confFloor !== undefined) c.conf_floor = confFloor;
+    if (cliString(v, "force-hints") === "off") {
       for (const sg of c.subgoals ?? []) {
         delete (sg as { target_hint?: string }).target_hint;
         delete (sg as { target_hints?: string[] }).target_hints;
@@ -255,17 +264,20 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
   // 智能缺省（apps/suite/start/bench 四门同一实现）：先解析决策源，再决定走哪条腿——
   // checkpoints 腿只在"真 laya 在场（就绪或测试注入了 runtime）"时才预载；
   // 配了在线 provider 就直接问 provider；什么都没配 ⇒ 规则档如实降级（以前是当场崩）。
+  // `--ablate` 与 apps 同一个取值集合（stub → scripted-stub；rules-only → none）。
+  const providerWanted = cliString(v, "provider")
+    ?? (ablate === "stub" ? "scripted-stub" : ablate === "rules-only" ? "none" : undefined);
   let spec;
   try {
-    spec = await resolveProviderSpec(v.provider);
+    spec = await resolveProviderSpec(providerWanted);
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     return 2;
   }
   const useCheckpoints = deps.runtime != null || (spec.kind === "laya" && spec.tier === "on");
-  if (v["force-model"] !== undefined && !useCheckpoints) {
+  if (forcedModel !== undefined && !useCheckpoints) {
     // 旗标语义只在 checkpoints 上有意义；在别的决策源上静默忽略会让一整轮 A/B 白跑。
-    console.error(`--force-model 选的是 laya checkpoint，在决策源 ${JSON.stringify(spec.name)}（tier=${spec.tier}）上没有意义；换模型用 --provider。`);
+    console.error(`--model 选的是 laya checkpoint，在决策源 ${JSON.stringify(spec.name)}（tier=${spec.tier}）上没有意义；换模型用 --provider。`);
     return 2;
   }
   const agents: Record<string, DecisionAgent | null> = {};
@@ -278,31 +290,37 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
       agents[m] = m === "router" ? null
         : await runtime.load("convaiinnovations/laya", { subfolder: m === "english" ? null : "multilingual" });
     }
-    console.log(`checkpoints loaded: ${JSON.stringify(Object.keys(agents))}\n`);
+    say(`checkpoints loaded: ${JSON.stringify(Object.keys(agents))}\n`);
   } else if (spec.kind === "laya" && spec.tier === "off(missing)") {
     // 规则档如实降级（旧行为是当场崩）：不装一个逐步 config-refuse 的懒加载 runtime——
     // 执行器进 rulesOnly，语料里被点名的步照规则跑。model_status 如实记 off(missing)。
     // 两扇全局都清：执行器优先显式 provider，同进程残留会让规则档标签说谎。
     installLayaRuntime(null);
     installDecisionProvider(null);
-    console.log(`决策源：${spec.name}（tier=${spec.tier}）→ 走规则档\n`);
+    say(`决策源：${spec.name}（tier=${spec.tier}）→ 走规则档\n`);
   } else {
     await applySpecToRuntime(spec);
-    console.log(`决策源：${spec.name}（tier=${spec.tier}）\n`);
+    say(`决策源：${spec.name}（tier=${spec.tier}）\n`);
   }
 
   const all: BenchCaseResult[] = [];
-  const mem = v["outcome-memory"] === "on"
-    ? createOutcomeMemory({ path: (v["outcome-memory-file"] as string | undefined) ?? null })
+  const mem = cliString(v, "outcome-memory") === "on"
+    ? createOutcomeMemory({ path: cliString(v, "outcome-memory-file") ?? null })
     : null;
-  const hints = v["hint-memory"] === "on"
-    ? createHintMemory({ path: (v["hint-memory-file"] as string | undefined) ?? null })
-    : null;
+  // R2 学习环：与 apps 同一个旗标口径——`--learn-hints`（默认 sidecar）或
+  // `--hint-memory FILE`（显式落点）；bench 的旧写法 `--hint-memory on` 等同 `--learn-hints`。
+  const hintMemoryRaw = cliString(v, "hint-memory") ?? cliString(v, "hint-memory-file");
+  const wantsHintMemory = cliBool(v, "learn-hints") || hintMemoryRaw !== undefined;
+  const hintMemoryPath = wantsHintMemory
+    ? (hintMemoryRaw !== undefined && hintMemoryRaw !== "on" ? path.resolve(hintMemoryRaw) : null)
+    : undefined;
+  const hints = hintMemoryPath !== undefined ? createHintMemory({ path: hintMemoryPath }) : null;
   for (const c of cases) {
-    console.log(`=== ${c.id} (${c.platform}, model=${useCheckpoints ? (c.model ?? "english") : spec.name}) ===`);
+    say(`=== ${c.id} (${c.platform}, model=${useCheckpoints ? (c.model ?? "english") : spec.name}) ===`);
     try {
       all.push(await runCase(c, agents, mem, hints,
-        (v["outcome-memory-mode"] as "forbid" | "rank" | undefined) ?? "forbid", !v.headful));
+        (cliString(v, "outcome-memory-mode") as "forbid" | "rank" | undefined) ?? "forbid",
+        !cliBool(v, "headful")));
     } catch (e) {
       console.error(e);
       all.push({
@@ -313,7 +331,7 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
         error: String(e),
       });
     }
-    console.log();
+    say("");
   }
 
   const passed = all.filter((r) => r.all_done).length;

@@ -52,9 +52,53 @@ export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = {
 /** 包级允许的键；未知键在加载期报错（配置写错了要响亮，不静默）。 */
 export const PACK_KEYS = [
   "spec_version", "id", "label", "goal", "model", "max_subgoals", "hosts",
-  "slots", "required_slots", "sources", "roles", "journey", "invariants", "notes", "probe", "device",
+  "slots", "required_slots", "sources", "source_slots", "roles", "journey", "invariants", "notes",
+  "probe", "device",
   "max_step_visits", "generated_from", "recorded_from", "policy",
 ] as const;
+
+/**
+ * **数据腿的结果回写槽位**（`source_slots`）——一条声明，把"数据源查到了什么"接到
+ * "旅程用什么值去走"。
+ *
+ * 以前数据腿与旅程是两条**各跑各的**腿：`sources` 跑完只进报告（rows/counts/selects），
+ * 旅程用的槽位只能是人写死的默认值（`slots`）——于是"打开榜首番剧"这种应用必须先把
+ * 榜首 URL 抄进包里，抄完就过期，而数据腿明明刚刚查到了它。
+ *
+ * 声明形状（`{slot: {source, select|count, field?}}`）：
+ *   "top_anime_url": { "source": "bilibili-anime-rank", "select": "top", "field": "url" }
+ *
+ * 三条纪律：
+ *   - **只有一个产者**：多个数据源往同一个槽位写，谁最后写谁赢——加载期拒绝重名；
+ *   - **取值点名到字段**：`select` 必须在该数据源的 `selects` 里、`count` 必须在 `counts` 里（加载期查）；
+ *   - **没查到就是没查到**：回写值是空的槽位按"占位符没有值"处理（响亮），不回落到包里的默认值。
+ */
+export interface SourceSlotBinding {
+  /** 数据源名：必须是本包 `sources` 里的一员。 */
+  source: string;
+  /** 取该数据源 `selects.<key>` 选中行的某个字段（不给 `field` 就取该行的主值）。 */
+  select?: string;
+  /** 取该数据源 `counts.<key>` 的数（写回字符串形式的数字）。 */
+  count?: string;
+  /** 取行里的哪个字段；`select` 专用。 */
+  field?: string;
+}
+
+/** 一个数据源跑完后的观察面（回写槽位只用这两张表——与数据腿报告同一口径）。 */
+export interface SourceObservation {
+  selects: Record<string, Record<string, string> | null>;
+  counts: Record<string, number>;
+}
+
+/** 行里的"主值"（与数据腿报告里 selects 列的渲染同一顺序：price → id → name）。 */
+function rowMainValue(row: Record<string, string> | null): string {
+  if (!row) return "";
+  for (const k of ["price", "id", "name"] as const) {
+    const v = row[k];
+    if (v !== undefined && v !== null && String(v) !== "") return String(v);
+  }
+  return "";
+}
 
 /**
  * **运行策略可以声明**（docs/ARCHITECTURE_IMPROVEMENTS.md §3）。
@@ -183,6 +227,8 @@ export interface AppPack {
   slots?: Record<string, unknown>;
   required_slots?: string[];
   sources?: string[];
+  /** 数据腿的结果回写槽位（声明式；见 `SourceSlotBinding` 的三条纪律）。 */
+  source_slots?: Record<string, SourceSlotBinding>;
   roles?: Record<string, Record<string, unknown>>;
   journey: Array<Record<string, unknown>>;
   /**
@@ -448,6 +494,42 @@ export function expandPack(pack: AppPack, overrides: Record<string, unknown> = {
   return { pack, steps, plan, invariants, slots, rolesUsed: [...new Set(used)] };
 }
 
+/**
+ * 数据腿结果 → 槽位（**回写的唯一实现**）。
+ *
+ * 为什么放在这里：应用层的"数据腿跑完了"有三个出口（应用运行器、`--dry` 的声明视图、
+ * 将来的其它驱动），每个出口各写一份"从 selects 里抠字段"的逻辑，就会有第二份口径——
+ * 本仓库为这种事付过账（hint 语法、`{dataset:NAME}` 替换都是两份实现）。
+ *
+ * 只认声明过的取值点，取不到就**不写**（保留调用方给的既有值）；写回的是观测值，
+ * 不是"猜一个差不多的"。
+ */
+export function resolveSourceSlots(
+  pack: AppPack, observed: Record<string, SourceObservation>,
+): Record<string, string> {
+  const decl = pack.source_slots;
+  if (!isDict(decl)) return {};
+  const out: Record<string, string> = {};
+  for (const [slot, b] of Object.entries(decl)) {
+    if (!isDict(b)) continue;
+    const obs = observed[String(b["source"])];
+    if (obs === undefined) continue;                 // 没跑（--no-sources / 源被跳过）：不写，让占位符响亮
+    if (b["select"] !== undefined) {
+      const row = obs.selects[String(b["select"])] ?? null;
+      if (row === null) continue;
+      const f = b["field"];
+      const v = f === undefined ? rowMainValue(row) : row[String(f)];
+      if (v === undefined || v === null || String(v) === "") continue;
+      out[slot] = String(v);
+    } else if (b["count"] !== undefined) {
+      const n = obs.counts[String(b["count"])];
+      if (n === undefined) continue;
+      out[slot] = String(n);
+    }
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ 校验 */
 
 /**
@@ -488,6 +570,70 @@ export function validatePack(pack: AppPack,
     && (!Array.isArray(pack.sources) || pack.sources.some((x) => typeof x !== "string"))) {
     p.push("sources must be a list of source names (a bare string would be read as a list of characters)");
   }
+  // 数据腿回写槽位：取值点必须在**数据源自己的声明里**真的存在——
+  // "写了一个永远取不到的 select 名"在运行期只会表现为"槽位没值"，而那与"数据源没查到"
+  // 长得一模一样。加载期点名，两种失败就不必靠猜。
+  if (pack.source_slots !== undefined) {
+    if (!isDict(pack.source_slots)) {
+      p.push("source_slots must be an object of slot -> {source, select|count, field?}");
+    } else {
+      const declared = new Set((Array.isArray(pack.sources) ? pack.sources : []).map((x) => String(x)));
+      for (const [slot, raw] of Object.entries(pack.source_slots)) {
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(slot)) {
+          p.push(`source_slots.${slot}: slot names must match [A-Za-z_][A-Za-z0-9_]* (a {slot} placeholder can only name such a slot)`);
+          continue;
+        }
+        if (!isDict(raw)) {
+          p.push(`source_slots.${slot} must be an object {source, select|count, field?}`);
+          continue;
+        }
+        const src = raw["source"];
+        if (typeof src !== "string" || !src) {
+          p.push(`source_slots.${slot}.source is required (which source's result fills this slot)`);
+          continue;
+        }
+        if (!declared.has(src)) {
+          p.push(`source_slots.${slot}.source ${JSON.stringify(src)} is not one of this pack's sources`
+            + ` (declared: ${[...declared].join(", ") || "none"})`);
+          continue;
+        }
+        const sel = raw["select"];
+        const cnt = raw["count"];
+        if ((sel === undefined) === (cnt === undefined)) {
+          p.push(`source_slots.${slot} needs exactly one of .select (a row) or .count (a number)`);
+          continue;
+        }
+        if (raw["field"] !== undefined && typeof raw["field"] !== "string") {
+          p.push(`source_slots.${slot}.field must be a string`);
+        }
+        try {
+          const conf = loadSource(src) as unknown as Record<string, unknown>;
+          // `selects` / `counts` 在数据源里是**列表**（`[{key, label, sort_by}]`），不是字典。
+          const keysOf = (k: string): string[] => {
+            const v = conf[k];
+            return Array.isArray(v)
+              ? v.map((x) => (isDict(x) ? String(x["key"] ?? "") : "")).filter(Boolean)
+              : isDict(v) ? Object.keys(v) : [];
+          };
+          if (sel !== undefined) {
+            const keys = keysOf("selects");
+            if (!keys.includes(String(sel))) {
+              p.push(`source_slots.${slot}.select ${JSON.stringify(String(sel))} is not declared by source `
+                + `${JSON.stringify(src)} (declares: ${keys.join(", ") || "none"})`);
+            }
+          } else {
+            const keys = keysOf("counts");
+            if (!keys.includes(String(cnt))) {
+              p.push(`source_slots.${slot}.count ${JSON.stringify(String(cnt))} is not declared by source `
+                + `${JSON.stringify(src)} (declares: ${keys.join(", ") || "none"})`);
+            }
+          }
+        } catch {
+          /* 数据源本身找不到：下面"数据腿"那段会点名它，这里不重复报 */
+        }
+      }
+    }
+  }
   if (pack.model !== undefined && typeof pack.model !== "string") {
     p.push("model must be a string");
   }
@@ -514,6 +660,18 @@ export function validatePack(pack: AppPack,
   // 类型不对时用空袋兜住下游遍历：加载期只该报**那一条**真错，不该再刷出一串"逐字符"的伪错误。
   const slotsDict = isDict(pack.slots) ? pack.slots : {};
   const slots = { ...slotsDict, ...(opts.slots ?? {}) };
+  /**
+   * **占位符的声明集**：数据腿回写的槽位在加载期还没有值（要等数据腿跑完才有），
+   * 但它们是**已声明**的槽位——旅程里写 `{top_anime_url}` 不该在加载期就被判未知。
+   * 真没填上（数据源没查到、`--no-sources`）时，展开期拿的是**真实值袋**再替一次，
+   * 那时它才是真的未知槽位，并且会响亮地炸——不是静默回落到一个空字符串。
+   */
+  const declaredSlots: Record<string, unknown> = { ...slots };
+  if (isDict(pack.source_slots)) {
+    for (const k of Object.keys(pack.source_slots)) {
+      if (!(k in declaredSlots)) declaredSlots[k] = "";
+    }
+  }
   for (const s of Array.isArray(pack.required_slots) ? pack.required_slots : []) {
     if (!(String(s) in slots)) p.push(`required slot ${JSON.stringify(String(s))} has no value`);
   }
@@ -678,7 +836,7 @@ export function validatePack(pack: AppPack,
   // 那条断言会拿字面量去比对一个永远不会相等的值——**静默假红**，比不写更糟。
   const seen: string[] = [];
   substitute({ roles: pack.roles ?? {}, journey: pack.journey, invariants: pack.invariants ?? [] },
-    { ...RUNTIME_PLACEHOLDERS, ...slots }, seen);
+    { ...RUNTIME_PLACEHOLDERS, ...declaredSlots }, seen);
   for (const s of [...new Set(seen)]) p.push(s);
   // 数据腿：引用的数据源必须真的存在（发现制，不维护清单）
   for (const s of Array.isArray(pack.sources) ? pack.sources : []) {

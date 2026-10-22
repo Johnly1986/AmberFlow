@@ -18,6 +18,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { main, resolveSources } from "../src/model/model-fetch.ts";
 import { checkArtifacts, onnxModelPath } from "../src/model/model-artifacts.ts";
+import { MODELS_DIR } from "../src/support/paths.ts";
 
 function tmpDir(tag: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), `${tag}-`));
@@ -155,8 +156,9 @@ describe("model-artifacts — 单一出处的缺件点名", () => {
     expect(checkArtifacts(onnx, () => path.join(dest, "tokenizer")).ready).toBe(true);
   });
 
-  it("落点约定：LAYA_ONNX_MODEL 优先，缺省 /tmp/laya_dec.onnx（与 doctor/运行器同一处）", () => {
-    expect(onnxModelPath({})).toBe("/tmp/laya_dec.onnx");
+  it("落点约定：LAYA_ONNX_MODEL 优先，缺省 项目目录/models/laya_dec.onnx（与 doctor/运行器同一处）", () => {
+    // 模型产物统一落在项目目录 `models/`（图/权重/tokenizer 同处一地），不再散在 /tmp 与 HF 缓存两处。
+    expect(onnxModelPath({})).toBe(path.join(MODELS_DIR, "laya_dec.onnx"));
     expect(onnxModelPath({ LAYA_ONNX_MODEL: "/x/laya_dec.onnx" })).toBe("/x/laya_dec.onnx");
     // 旧名 LAYAA_* 仍然认（兼容既有部署），但新名优先。
     expect(onnxModelPath({ LAYAA_ONNX_MODEL: "/y/l.onnx" })).toBe("/y/l.onnx");

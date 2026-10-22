@@ -23,10 +23,16 @@ import { browserSession, BrowserMiddleware } from "../engine/executor.ts";
 import { extractElements } from "../engine/extraction.ts";
 import { getAuditor, type AuditVerdict } from "../engine/audit.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
-import { isParseUsageError, usageErrorLine } from "../support/cli-args.ts";
+import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../support/cli-args.ts";
 import { applyRcToEnv } from "../support/rcfile.ts";
+import { defaultPlanPath } from "../app/amberflow-home.ts";
 
-export const DEFAULT_FILE = ".task_plan.json";
+/**
+ * 计划文件的默认落点：与 `npm start` 同一处——**用户作用域** `$AMBERFLOW_HOME/task_plan.json`
+ * （`src/app/amberflow-home.ts`）。以前它俩各写一个默认值（一个仓库根、一个相对路径），
+ * 于是"我的计划在哪"取决于你是从哪个入口进来的。
+ */
+export const DEFAULT_FILE = defaultPlanPath();
 
 /** `op=value` or `op=selector|value`, with the operator's arity enforced. */
 export function parseSignal(s: string): SignalSpec {
@@ -264,7 +270,8 @@ commands works too — \`check\` re-validates whatever is on disk.`;
 export async function main(argv: string[] = process.argv.slice(2), io: CliIO = defaultIO): Promise<number> {
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
   { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
-  const [cmd, ...rest] = argv;
+  // 空命令 `--`（npm 的分隔符）在这里吃掉：`npm run plan-cli -- --help` 不该变成"没有子命令"。
+  const [cmd, ...rest] = stripArgSeparators(argv);
   if (!cmd || cmd === "--help" || cmd === "-h") {
     io.out(USAGE);
     return cmd ? 0 : 1;

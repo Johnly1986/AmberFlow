@@ -21,7 +21,8 @@ step 1: click a "Add to cart" (clicked, rule:match, conf=1.00)
 结果：2/2   步骤 2   跳过 0   重试 0
 ```
 
-> `npm start` 会把计划检查点写进仓库根 `.task_plan.json`（已进 `.gitignore`，不脏工作区）；想换个位置就加 `--plan /tmp/my-plan.json`。
+> `npm start` 的计划检查点默认写在**用户作用域**：`$AMBERFLOW_HOME/task_plan.json`（默认 `~/.amberflow/`），不进 checkout；想换个位置就加 `--plan /tmp/my-plan.json`。
+> 模型产物的默认下载落点是**项目目录 `models/`**（图 + 外置权重 + tokenizer 同处一地，已进 `.gitignore`）；换位置用 `LAYA_ONNX_MODEL`。
 
 没有模型权重也能跑：计划点名了目标的步骤由**规则**解决；确实需要模型兜底的步骤会明确说明缺什么，而不是瞎猜或抛异常。
 

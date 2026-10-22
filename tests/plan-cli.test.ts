@@ -12,6 +12,7 @@ import {
   main, parseSignal, type CliIO,
 } from "../src/cli/plan-cli.ts";
 import { TaskPlan } from "../src/engine/plan.ts";
+import { amberflowHome } from "../src/app/amberflow-home.ts";
 import type { BrowserSession } from "../src/engine/executor.ts";
 import type { MiddlewareLike, MiddlewareReport } from "../src/engine/planner.ts";
 
@@ -102,8 +103,9 @@ describe("CRUD surface", () => {
     expect(plan.subgoals[0]!.obstacle).toBeNull();
   });
 
-  it("the default plan file matches the Python CLI's contract", () => {
-    expect(DEFAULT_FILE).toBe(".task_plan.json");
+  it("the default plan file lives in the user's home, not in the checkout", () => {
+    // 运行产物不写 checkout：`npm start` 与 plan-cli 共用同一个默认落点（`defaultPlanPath`）。
+    expect(DEFAULT_FILE).toBe(path.join(amberflowHome(), "task_plan.json"));
   });
 });
 

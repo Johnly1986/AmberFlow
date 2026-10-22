@@ -8,6 +8,12 @@ coverage/
 # 本机配置（含凭据）：configs/amberflowrc.json 只活在本地；模板 configs/amberflowrc.example.json 入库
 configs/amberflowrc.json
 
+# 模型产物（大文件缓存）：默认下载到项目目录 models/（图 + 外置权重 + tokenizer）
+/models/
+
+# 用户作用域目录（AMBERFLOW_HOME 的仓库内形态；默认是 ~/.amberflow，不在 checkout 里）
+/.amberflow/
+
 # 运行时产物：跑分矩阵、查看器输出、计划 checkpoint
 .task_state.json
 .task_plan.json

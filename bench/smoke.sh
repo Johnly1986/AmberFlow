@@ -20,7 +20,8 @@ cd "$(dirname "$0")/.."
 NODE="${NODE:-node}"
 STRIP="--experimental-strip-types"
 OUT="${SMOKE_OUT:-${TMPDIR:-/tmp}/layawebuse-smoke}"
-ARTIFACT="${LAYA_ONNX_PATH:-/tmp/laya_dec.onnx}"
+# 模型产物的默认落点与引擎一致：项目目录 models/（src/support/paths.ts 的 MODELS_DIR）
+ARTIFACT="${LAYA_ONNX_PATH:-models/laya_dec.onnx}"
 fail=0
 
 run () { # run <标题> <命令...>

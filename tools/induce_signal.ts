@@ -12,7 +12,7 @@
  * reported as REVIEW (and `no-signal` means: declare the step `{manual: true}`).
  */
 import path from "node:path";
-import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
+import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../src/support/cli-args.ts";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { chromium } from "playwright";
@@ -70,7 +70,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
-    args: argv,
+    args: stripArgSeparators(argv),
     options: {
       url: { type: "string" }, click: { type: "string" },
       replays: { type: "string" }, json: { type: "boolean" },
