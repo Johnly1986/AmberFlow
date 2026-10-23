@@ -8,6 +8,7 @@
 
 ```bash
 npm ci && npx playwright install chromium
+npm link           # 可选但推荐：让统一入口 `amber` 进 PATH（`npm ci` 不会装它；跳过就用 `npx amber …`）
 npm start          # 在仓库自带页面上跑一份真实计划：离线、零配置
 npm run doctor     # 环境体检：Node / chromium / 决策模型 / 可选 provider / LLM，缺什么给什么命令
 npm run apps -- --app ctrip-case --provider coin-flip   # 换决策模型跑（laya-onnx|stub|none|基线|jevk5|bailian|token-plan|自注册）
@@ -60,15 +61,22 @@ npm run providers:baseline -- --providers token-plan,first-candidate --out "$TEM
 
 ## 统一入口：`amber`
 
-三种等价的叫法，按你的安装形态挑一个（`bin` 提供 `amber`，`npm ci` **不会**把它放进 PATH）：
+`package.json` 的 `bin` 提供 `amber`，但 **`npm ci` 只链接依赖的 bin，不会把根包的 `amber` 放进 PATH**。
+所以裸敲 `amber …` 之前要先 link 一次（全局装过则不必）：
 
 ```bash
-npx amber --help          # checkout 内直接跑
-npm run amber -- --help   # 不需要 npm link
-amber --help              # 执行过 npm link / 全局安装之后
+npm link          # 只需一次：让 `amber` 进 PATH
+amber --version   # 验证；之后本文所有 `amber …` 都能直接敲
 ```
 
-上面四条命令的对应写法：
+不想改全局环境时，下面两种写法等价、随时可用（把 `amber` 换成它们即可）：
+
+```bash
+npx amber run --demo            # checkout 内直接跑（npx 会认本包的 bin，不会去下载同名包）
+npm run amber -- run --demo     # 等价；`npm run cli -- …` 是同一个入口的旧名字
+```
+
+上面四条命令的对应写法（**已 `npm link`**）：
 
 ```bash
 amber run --demo                                                     # 在仓库自带页面上跑一份真实计划（计划默认存 ./.amberflow/plan.json）
@@ -76,6 +84,9 @@ amber doctor                                                         # 环境体
 amber run ctrip-case --provider coin-flip                            # 换决策模型跑（与 npm run apps 同一扇门）
 amber dev providers baseline --providers token-plan,first-candidate --out "$TEMP/pb.json"   # 与零智能基线对高下
 ```
+
+敲 `amber` 时如果报 `CommandNotFoundException` / `command not found`，就是还没 link ——
+`amber doctor` 会把这件事作为「CLI 入口」一项直接点名，并给出当前可用的写法。
 
 `amber` 无参数是**首页**：Node / Chromium / 决策源 / 应用清单 / 下一步——不需要记住任何子命令就能开始。
 任何命令加 `--json` 后 stdout 只有一个信封对象（人类进度与诊断走 stderr）；`amber help --all` 列出

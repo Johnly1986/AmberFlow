@@ -547,19 +547,24 @@ describe("amber doctor — 体检不替你做决定", () => {
     const r = await cli(["doctor", "--json"], { runEntry: 0 });
     const o = r.json();
     expect(o.command).toBe("doctor");
-    for (const key of ["node", "chromium", "model", "llm", "provider", "config", "apps", "report"]) {
+    for (const key of ["node", "chromium", "model", "llm", "provider", "cli", "config", "apps", "report"]) {
       expect(o.data, key).toHaveProperty(key);
     }
     expect(o.data.config.layers.map((l: { name: string }) => l.name)).toContain("用户配置");
+    // 裸 `amber` 能不能敲：只断言形状，值取决于跑测试的机器有没有 npm link。
+    expect(typeof o.data.cli.linked).toBe("boolean");
+    expect(Array.isArray(o.data.cli.fallbacks)).toBe(true);
+    expect(o.data.cli.fallbacks.length === 0).toBe(o.data.cli.linked);
     const want = o.data.node.ok && o.data.chromium.ok ? 0 : 2;
     expect(r.code).toBe(want);
     expect(o.exit_code).toBe(want);
   });
 
-  it("人类输出有报告 / 配置层 / 应用计数；--verbose 补上四个路径", async () => {
+  it("人类输出有报告 / CLI 入口 / 配置层 / 应用计数；--verbose 补上四个路径", async () => {
     const plain = await cli(["doctor"], { runEntry: 0 });
     expect(plain.code).toBe(0);
     expect(plain.out).toContain("AmberFlow doctor");
+    expect(plain.out).toContain("CLI 入口");
     expect(plain.out).toContain("用户配置");
     expect(plain.out).toContain("应用：");
     expect(plain.out).not.toContain("工作目录：");

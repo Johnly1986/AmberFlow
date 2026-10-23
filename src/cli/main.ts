@@ -9,6 +9,7 @@ import { makeContext, say, emitJson, type CliContext, type GlobalOptions } from 
 import { CliError, EXIT, formatCliError, usageError } from "./errors.ts";
 import { errorEnvelope, successEnvelope } from "./json.ts";
 import { runNodeEntry, type EntryRunner } from "./process.ts";
+import { detectCliInvocation, INVOKE_FALLBACKS, LINK_HINT } from "./invocation.ts";
 
 export interface MainOptions {
   cwd?: string;
@@ -266,6 +267,7 @@ async function home(ctx: CliContext): Promise<number> {
   const { listAppInfos } = await import("./commands/apps.ts");
   const apps = listAppInfos(ctx);
   const user = apps.filter((a) => a.source === "user").length;
+  const invocation = detectCliInvocation(ctx.baseEnv);
 
   if (ctx.globals.json) {
     emitJson(ctx, successEnvelope("amber", {
@@ -276,6 +278,8 @@ async function home(ctx: CliContext): Promise<number> {
       provider,
       apps: { total: apps.length, user, builtin: apps.length - user },
       shown: apps.slice(0, 10),
+      // 裸 `amber` 不在 PATH 时，`next` 里的写法照抄会 CommandNotFound——先说清楚。
+      cli: { linked: invocation.linked, path: invocation.path, fallbacks: invocation.linked ? [] : [...INVOKE_FALLBACKS] },
     }, { next: ["amber run demo-app", "amber record https://shop.example.com", "amber doctor"] }));
     return 0;
   }
@@ -298,6 +302,13 @@ async function home(ctx: CliContext): Promise<number> {
   say(ctx, "  amber run demo-app                 先跑一个内置示例");
   say(ctx, "  amber record https://shop.example.com   录一条自己的流程");
   say(ctx, "  amber doctor                       环境有问题时先体检");
+  if (!invocation.linked) {
+    // 只在这条捷径真的不存在时说：否则就是把"照抄报错"留给用户自己踩。
+    say(ctx, "");
+    say(ctx, "提示：裸 amber 还不在 PATH（npm ci 不会装根包的 bin）。");
+    say(ctx, `  现在可用：${INVOKE_FALLBACKS.join("  或  ")}`);
+    say(ctx, `  想直接敲 amber：执行一次 ${LINK_HINT}`);
+  }
   return 0;
 }
 

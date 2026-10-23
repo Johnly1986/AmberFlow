@@ -9,6 +9,7 @@ import { REPO } from "../../support/paths.ts";
 import { ensureDir, userAppsDir } from "../../app/amberflow-home.ts";
 import { listAppInfos } from "./apps.ts";
 import { userConfigPath, projectConfigPath, resolveConfig } from "../config-store.ts";
+import { cliInvocationLine, detectCliInvocation, INVOKE_FALLBACKS, LINK_HINT } from "../invocation.ts";
 import { missingPieces } from "../../model/model-artifacts.ts";
 
 export async function runDoctor(args: string[], ctx: CliContext): Promise<number> {
@@ -73,6 +74,7 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
   }
 
   const report = doctorReport(p);
+  const invocation = detectCliInvocation(ctx.baseEnv);
   const config = resolveConfig(ctx.baseEnv, ctx.cwd, ctx.explicitConfig);
   const apps = listAppInfos(ctx);
   const userCount = apps.filter((a) => a.source === "user").length;
@@ -97,6 +99,13 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
       },
       llm: { configured: p.llm },
       provider: { default: providerDefault, error: providerError, available: providers },
+      // 裸 `amber` 能不能敲：这是"照着 README 复制却 CommandNotFound"的唯一线索。
+      cli: {
+        linked: invocation.linked,
+        path: invocation.path,
+        fallbacks: invocation.linked ? [] : [...INVOKE_FALLBACKS],
+        link_hint: invocation.linked ? null : LINK_HINT,
+      },
       config: {
         layers: config.layers.map((l) => ({
           name: l.name, path: l.path, exists: l.exists, count: Object.keys(l.values).length, errors: l.errors,
@@ -126,6 +135,9 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
   say(ctx, "AmberFlow doctor");
   say(ctx, "");
   for (const line of report.lines) say(ctx, line);
+  const invocationLine = cliInvocationLine(invocation);
+  say(ctx, `CLI 入口     ${invocationLine.status}`);
+  for (const hint of invocationLine.hints) say(ctx, `             ${hint}`);
   say(ctx, "");
   for (const line of config.layers.flatMap((l) => [
     `${l.name}：${l.path ?? "（无）"}${l.exists ? `（${Object.keys(l.values).length} 项）` : "（不存在）"}`,

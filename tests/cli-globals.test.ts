@@ -36,6 +36,9 @@ describe("amber — 首页（无参数）", () => {
     expect(o.data.apps.total).toBe(o.data.apps.builtin + o.data.apps.user);
     expect(o.data.shown.length).toBeLessThanOrEqual(10);
     expect(o.next).toContain("amber doctor");
+    // 首页要说清楚"裸 amber 能不能敲"——照抄 next 里的写法却不认命令，是这个包的经典坑。
+    expect(typeof o.data.cli.linked).toBe("boolean");
+    expect(Array.isArray(o.data.cli.fallbacks)).toBe(true);
   });
 });
 

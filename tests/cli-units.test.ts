@@ -21,6 +21,9 @@ import {
 import { diag, emitJson, makeContext, say, type CliContext } from "../src/cli/context.ts";
 import { runExecutable } from "../src/cli/process.ts";
 import { emitPlanStatus } from "../src/cli/plan-result.ts";
+import {
+  cliInvocationLine, detectCliInvocation, INVOKE_FALLBACKS, LINK_HINT,
+} from "../src/cli/invocation.ts";
 import { TaskPlan } from "../src/engine/plan.ts";
 import { ctxOf, workspace } from "./cli-harness.ts";
 
@@ -91,6 +94,67 @@ describe("args.ts — 无歧义的旗标归一化", () => {
     })();
     expect(err).toBeInstanceOf(CliError);
     expect((err as CliError).exitCode).toBe(EXIT.USAGE);
+  });
+});
+
+/* ------------------------------------------------------------- invocation */
+
+describe("invocation.ts — 裸 amber 到底在不在 PATH", () => {
+  it("PATH 里没有 amber 就是没 link（这正是 README 照抄报错的根因）", () => {
+    const ws = workspace();
+    try {
+      const inv = detectCliInvocation({ PATH: ws.cwd });
+      expect(inv).toEqual({ linked: false, path: null });
+    } finally {
+      ws.cleanup();
+    }
+  });
+
+  it("PATH 里有可执行垫片就是已 link，并回传命中的绝对路径", () => {
+    const ws = workspace();
+    try {
+      const bin = path.join(ws.cwd, "bin");
+      fs.mkdirSync(bin, { recursive: true });
+      // Windows 认 .cmd；POSIX 认无扩展名的那一个。两种都建，断言同一件事。
+      for (const name of ["amber", "amber.cmd"]) {
+        fs.writeFileSync(path.join(bin, name), "", "utf-8");
+      }
+      const inv = detectCliInvocation({ PATH: [path.join(ws.cwd, "nope"), bin].join(path.delimiter) });
+      expect(inv.linked).toBe(true);
+      expect(inv.path).toBe(path.join(bin, process.platform === "win32" ? "amber.cmd" : "amber"));
+    } finally {
+      ws.cleanup();
+    }
+  });
+
+  it("node_modules/.bin 里的不算：它只在 npm 派生的进程里出现在 PATH", () => {
+    const ws = workspace();
+    try {
+      const localBin = path.join(ws.cwd, "node_modules", ".bin");
+      fs.mkdirSync(localBin, { recursive: true });
+      for (const name of ["amber", "amber.cmd"]) fs.writeFileSync(path.join(localBin, name), "", "utf-8");
+      expect(detectCliInvocation({ PATH: localBin }).linked).toBe(false);
+    } finally {
+      ws.cleanup();
+    }
+  });
+
+  it("目录不存在 / PATH 为空都不抛（这只是提示，不是故障）", () => {
+    expect(detectCliInvocation({}).linked).toBe(false);
+    expect(detectCliInvocation({ PATH: `${path.sep}definitely${path.sep}missing` }).linked).toBe(false);
+  });
+
+  it("提示里同时给出现在的三条可用写法和一次性的 npm link", () => {
+    const missing = cliInvocationLine({ linked: false, path: null });
+    expect(missing.status).toContain("npm ci");
+    expect(missing.hints.join(" ")).toContain("npx amber");
+    expect(missing.hints.join(" ")).toContain("npm run amber --");
+    expect(missing.hints.join(" ")).toContain(LINK_HINT);
+    expect(INVOKE_FALLBACKS).toContain("npm run cli -- …");
+
+    const linked = cliInvocationLine({ linked: true, path: "/usr/local/bin/amber" });
+    expect(linked.status).toContain("/usr/local/bin/amber");
+    expect(linked.hints).toEqual([]);          // 已 link 就不要噪音
   });
 });
 
