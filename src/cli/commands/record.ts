@@ -65,15 +65,15 @@ export async function runRecord(args: string[], ctx: CliContext): Promise<number
   const url = positional ?? v.url;
   if (v.script && !url && !v.cdp) {
     throw usageError("--script 回放仍需要一个页面：请同时给 --url 或 --cdp", {
-      next: ["amber record https://your.site --script ./demo-actions.json --yes"],
+      next: ["amber record https://shop.example.com --script ./demo-actions.json --yes"],
     });
   }
   if (!url && !v.cdp && !ctx.isTTY) {
     throw usageError("record 需要 --url <页面> 或 --cdp <ws://…>", {
       hint: "非 TTY 不等待输入；CI / Agent 请给 --url 或 --cdp。",
       next: [
-        "amber record https://your.site --name my-app",
-        "amber record https://your.site --script ./demo-actions.json --yes",
+        "amber record https://shop.example.com --name my-app",
+        "amber record https://shop.example.com --script ./demo-actions.json --yes",
       ],
     });
   }

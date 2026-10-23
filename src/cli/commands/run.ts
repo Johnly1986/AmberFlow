@@ -188,14 +188,16 @@ function baseEnvFor(v: Values, ctx: CliContext): NodeJS.ProcessEnv {
 }
 
 async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext): Promise<number> {
+  // 槽位拼写（`--slot city` 少了 `=值`）必须在起浏览器之前点名：旧入口只会在
+  // 展开包时报一句看不懂的话，而这一步根本不需要任何外部依赖。
+  let slots: Record<string, string>;
+  try {
+    slots = parseSlots(v.slot as string[] | undefined);
+  } catch (err) {
+    throw usageError(err instanceof Error ? err.message : String(err));
+  }
   if (bool(v["dry-run"]) && (bool(v.json) || ctx.globals.json)) {
     const { loadPack, expandPack } = await import("../../app/app-pack.ts");
-    let slots: Record<string, string>;
-    try {
-      slots = parseSlots(v.slot as string[] | undefined);
-    } catch (err) {
-      throw usageError(err instanceof Error ? err.message : String(err));
-    }
     let pack;
     try {
       pack = loadPack(app);

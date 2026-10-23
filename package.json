@@ -32,7 +32,7 @@
   "scripts": {
     "prepare": "node scripts/bootstrap.mjs",
     "start": "node --experimental-strip-types src/cli/start.ts",
-    "cli": "node --experimental-strip-types src/cli/main.ts",
+    "amber": "node --experimental-strip-types src/cli/main.ts",
     "doctor": "node --experimental-strip-types src/cli/start.ts --doctor",
     "model:fetch": "node --experimental-strip-types src/model/model-fetch.ts",
     "typecheck": "tsc --noEmit",

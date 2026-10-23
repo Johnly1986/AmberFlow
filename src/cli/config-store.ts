@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { REPO } from "../support/paths.ts";
 import { amberflowHome } from "../app/amberflow-home.ts";
-import { loadRc, maskValue, RC_GROUPS } from "../support/rcfile.ts";
+import { applyRcToEnv, maskValue, RC_GROUPS } from "../support/rcfile.ts";
 
 /** 新配置层沿用旧 rc 的白名单：只有同一个键集合，迁移才不是“再发明一套”。 */
 export const CONFIG_KEYS: readonly string[] = [...new Set(RC_GROUPS.flatMap((g) => g.keys))];
@@ -85,38 +85,42 @@ export function resolveConfig(
   cwd: string,
   explicitConfig: string | null = null,
 ): ResolvedConfig {
-  const legacyLoad = baseEnv.VITEST !== undefined
-    ? { path: null, values: {}, errors: [] as string[] }
-    : loadRc(REPO);
-  const legacy: ConfigLayer = {
-    name: "旧 rc", path: legacyLoad.path ?? legacyConfigPath(), exists: legacyLoad.path !== null,
-    values: legacyLoad.values, errors: legacyLoad.errors,
-  };
-
-  const layers: ConfigLayer[] = [legacy];
-  if (explicitConfig) {
-    layers.push(readConfigFile(path.resolve(cwd, explicitConfig), "显式配置"));
-  } else {
-    layers.push(readConfigFile(userConfigPath(baseEnv), "用户配置"));
-    layers.push(readConfigFile(projectConfigPath(cwd), "项目配置"));
-  }
-
   const env = { ...baseEnv };
   const values: ResolvedConfig["values"] = {};
+  const filled = (key: string): boolean => {
+    const v = baseEnv[key];
+    return v !== undefined && v !== "";
+  };
   for (const key of CONFIG_KEYS) {
-    const envValue = baseEnv[key];
-    if (envValue !== undefined && envValue !== "") {
-      values[key] = { value: envValue, source: "环境变量", secret: isSecretKey(key) };
-      continue;
-    }
-    for (const layer of layers) {
-      const v = layer.values[key];
-      if (v === undefined || v === "") continue;
+    if (!filled(key)) continue;
+    values[key] = { value: baseEnv[key]!, source: "环境变量", secret: isSecretKey(key) };
+  }
+
+  // 用户 / 项目层按声明顺序叠加：项目配置盖住用户配置，环境变量盖住两者。
+  const fileLayers: ConfigLayer[] = explicitConfig
+    ? [readConfigFile(path.resolve(cwd, explicitConfig), "显式配置")]
+    : [readConfigFile(userConfigPath(baseEnv), "用户配置"), readConfigFile(projectConfigPath(cwd), "项目配置")];
+  for (const layer of fileLayers) {
+    for (const [key, v] of Object.entries(layer.values)) {
+      if (v === "" || filled(key)) continue;
       env[key] = v;
       values[key] = { value: v, source: layer.name, secret: isSecretKey(key) };
     }
   }
 
+  // 旧 rc 是层叠里最低的一层：读它的唯一实现是 rcfile 的 applyRcToEnv()，
+  // 它只补 env 里仍为空的键——所以用户/项目/环境变量天然盖住它。
+  const legacyLoad = applyRcToEnv(env, REPO);
+  const legacy: ConfigLayer = {
+    name: "旧 rc", path: legacyLoad.path ?? legacyConfigPath(), exists: legacyLoad.path !== null,
+    values: legacyLoad.values, errors: legacyLoad.errors,
+  };
+  for (const key of legacyLoad.applied) {
+    if (values[key] || filled(key)) continue;
+    values[key] = { value: legacyLoad.values[key]!, source: legacy.name, secret: isSecretKey(key) };
+  }
+
+  const layers: ConfigLayer[] = [legacy, ...fileLayers];
   return {
     layers,
     values,

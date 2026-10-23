@@ -60,8 +60,15 @@ npm run providers:baseline -- --providers token-plan,first-candidate --out "$TEM
 
 ## 统一入口：`amber`
 
-`package.json` 的 `bin` 提供 `amber`：在 checkout 里用 `npx amber …`（`npm ci` **不会**把它放进 PATH）；
-执行过 `npm link` 或全局安装后可直接用 `amber …`。上面四条命令的对应写法：
+三种等价的叫法，按你的安装形态挑一个（`bin` 提供 `amber`，`npm ci` **不会**把它放进 PATH）：
+
+```bash
+npx amber --help          # checkout 内直接跑
+npm run amber -- --help   # 不需要 npm link
+amber --help              # 执行过 npm link / 全局安装之后
+```
+
+上面四条命令的对应写法：
 
 ```bash
 amber run --demo                                                     # 在仓库自带页面上跑一份真实计划（计划默认存 ./.amberflow/plan.json）
@@ -70,7 +77,31 @@ amber run ctrip-case --provider coin-flip                            # 换决策
 amber dev providers baseline --providers token-plan,first-candidate --out "$TEMP/pb.json"   # 与零智能基线对高下
 ```
 
-任何命令加 `--json` 后 stdout 只有一个信封对象（人类进度走 stderr）；`amber help --all` 列出全部命令与高级旗标。
+`amber` 无参数是**首页**：Node / Chromium / 决策源 / 应用清单 / 下一步——不需要记住任何子命令就能开始。
+任何命令加 `--json` 后 stdout 只有一个信封对象（人类进度与诊断走 stderr）；`amber help --all` 列出
+全部命令与高级旗标；`amber completion bash|zsh|fish|powershell` 给补全脚本。
+
+### 退出码（写脚本 / Agent 只需要认这张表）
+
+| 码 | 含义 | 你会看到 |
+|---|---|---|
+| 0 | 成功 | `data` 里是结果 |
+| 1 | 未完成 | 计划 / 应用没跑完；`data.steps` 里有每一步的状态 |
+| 2 | 用法 / 配置错误 | **一行**点名哪个旗标或哪一层配置不对（不是堆栈） |
+| 3 | 被策略挡住 | 例如不带 `--force` 删内置应用、非交互缺 `--yes` |
+| 4 | 质量门禁（仅 `amber dev`） | 套件没过门槛，绿色不替它背书 |
+| 130 | 中断 | Ctrl-C；不假装成功 |
+
+`--json` 时错误也是同一个形状：`{"ok":false,"exit_code":2,"error":{"code":"USAGE","message":"…","hint":"…","next":["…"]}}`
+——`hint` 回答"那我该写什么"，`next` 是可以直接抄的下一条命令。
+
+### 非交互（CI / Agent）不用猜
+
+- `amber record` 非 TTY 必须给 `--url` 或 `--cdp`；
+- `amber run --plan <文件>` 非 TTY 默认 `--confirm deny`；要放行显式给 `--yes`
+  （`--yes` **不**隐含 `--allow-dangerous`）；
+- `amber apps remove <id>` 非 TTY 必须给 `--yes`；
+- 需要人来回答的场景一律报错并给出可抄的写法，**不替你选、不静默继续**。
 
 ### 新旧对照
 
@@ -81,12 +112,17 @@ amber dev providers baseline --providers token-plan,first-candidate --out "$TEMP
 | `amber record --url <页面>` | `npm run learn -- --url …` | **默认有头**；要旧 headless 加 `--headless` |
 | `amber plan new "<目标>"` | `npm run plan-cli -- new "<目标>"` | 计划默认 `./.amberflow/plan.json`；步骤 1-based，且有 `描述slug-短哈希` 稳定 id |
 | `amber apps list / show / check / path / remove` | `npm run apps -- --list / --app <id>` | `amber apps` 无子命令即 list（旧 `npm run apps` 无参数仍报错） |
-| `amber config get / set / unset / show / path` | 编辑 `configs/amberflowrc.json` | 分层生效：旧 rc < 用户 < 项目 < 环境；`amber doctor` 点出每个值的来源 |
+| `amber config get / set / unset / show / path / init / edit` | 编辑 `configs/amberflowrc.json` | 分层生效：旧 rc < 用户 < 项目 < 环境；`amber doctor` 点出每个值的来源 |
+| `amber model status / path` | — | 三件产物（图 / 外置权重 / tokenizer）缺哪件点名哪件 |
 | `amber model fetch --from <url 或本地路径>` | `npm run model:fetch -- --from …` | SHA256 先验后换、坏件不覆盖。同一约束 |
 | `amber dev suite / matrix / bench / parity / verify` | `npm run apps:suite / apps:matrix / bench / verify` | 维护者命令都收在 `amber dev` |
-| `amber legacy <旧命令>` | — | 兼容转发器：按**旧行为**执行旧入口并提示新写法 |
+| `amber completion <shell>` | — | 补全脚本：`bash` / `zsh` / `fish` / `powershell` |
+| `amber legacy <旧命令>` | `npm run <旧命令>` | 兼容转发器：按**旧行为**执行旧入口并提示新写法 |
 
-旧 npm script 全部保留并照旧行为执行（TTY 下会提示新写法）；迁移是**旧命令不删、新命令并行**。
+旧 npm script 全部保留并照旧行为执行；迁移是**旧命令不删、新命令并行**——`amber legacy`（不带参数）
+打印完整的旧 → 新对照表，任何一条旧命令都能查到它的新写法。配置分层
+**旧 rc < 用户配置 < 项目配置 < 环境变量**（`amber config show` 点名每个值的来源），
+新命令不写旧 rc。
 
 ## DSH 插件安装
 
@@ -279,7 +315,7 @@ provider（如 `AMBERFLOW_DEFAULT_DECISION_PROVIDER=token-plan`）→在线；�
 
 ## 延伸阅读
 
-[ARCHITECTURE.md](ARCHITECTURE.md)（模块结构与实测规则）· [DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md)（在线决策模型接入与实测账） · [ONLINE_MODEL_TEST_REVIEW.md](docs/ONLINE_MODEL_TEST_REVIEW.md)（用线上模型审查测试：S0 提名 + LLM 真链路） · [NOMINATION_QUESTION_SET_ANALYSIS.md](docs/NOMINATION_QUESTION_SET_ANALYSIS.md)（提名考卷为什么不可解：标签/语料/合同三层偏倚）· [CLAUDE.md](CLAUDE.md)（工程规约）· [apps/INVENTORY.md](apps/INVENTORY.md)（应用清单与"完成"的定义）· [PORTING.md](PORTING.md) / [BACKUP.md](BACKUP.md)（Python 参考实现的迁移与存档）
+[ARCHITECTURE.md](ARCHITECTURE.md)（模块结构与实测规则）· [docs/CLI_REDESIGN.md](docs/CLI_REDESIGN.md)（`amber` 入口的分组、旗标归一与退出码契约）· [DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md)（在线决策模型接入与实测账） · [ONLINE_MODEL_TEST_REVIEW.md](docs/ONLINE_MODEL_TEST_REVIEW.md)（用线上模型审查测试：S0 提名 + LLM 真链路） · [NOMINATION_QUESTION_SET_ANALYSIS.md](docs/NOMINATION_QUESTION_SET_ANALYSIS.md)（提名考卷为什么不可解：标签/语料/合同三层偏倚）· [CLAUDE.md](CLAUDE.md)（工程规约）· [apps/INVENTORY.md](apps/INVENTORY.md)（应用清单与"完成"的定义）· [PORTING.md](PORTING.md) / [BACKUP.md](BACKUP.md)（Python 参考实现的迁移与存档）
 
 ## License
 

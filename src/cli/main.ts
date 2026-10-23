@@ -48,7 +48,11 @@ function extractConfig(argv: string[]): { args: string[]; config: string | null 
     const a = argv[i]!;
     if (a === "--config") {
       const v = argv[i + 1];
-      if (v === undefined) throw usageError("--config 需要一个文件路径", { next: ["amber --help"] });
+      // 与 --timeout 同一口径：值以 `-` 开头说明用户漏写了路径，悄悄把后面的旗标
+      // 当文件名会变成"配了却像没配"的静默失败。
+      if (v === undefined || v.startsWith("-")) {
+        throw usageError("--config 需要一个文件路径", { next: ["amber --help"] });
+      }
       config = v;
       i++;
       continue;
@@ -272,7 +276,7 @@ async function home(ctx: CliContext): Promise<number> {
       provider,
       apps: { total: apps.length, user, builtin: apps.length - user },
       shown: apps.slice(0, 10),
-    }, { next: ["amber run demo-app", "amber record https://your.site", "amber doctor"] }));
+    }, { next: ["amber run demo-app", "amber record https://shop.example.com", "amber doctor"] }));
     return 0;
   }
 
@@ -292,7 +296,7 @@ async function home(ctx: CliContext): Promise<number> {
   say(ctx, "");
   say(ctx, "下一步：");
   say(ctx, "  amber run demo-app                 先跑一个内置示例");
-  say(ctx, "  amber record https://your.site     录一条自己的流程");
+  say(ctx, "  amber record https://shop.example.com   录一条自己的流程");
   say(ctx, "  amber doctor                       环境有问题时先体检");
   return 0;
 }

@@ -334,7 +334,7 @@ async function appsRemove(args: string[], ctx: CliContext): Promise<number> {
   }
   if (inBuiltin && !parsed.values.force) {
     throw blockedError(`拒绝删除内置应用 '${pack.id}'`, {
-      hint: "内置包属于仓库夹具；确实要删加 --force（仍可用 git 恢复）。",
+      hint: "内置包属于仓库夹具；确实要删加 --force（删错可从仓库历史恢复）。",
       next: ["amber apps remove <id> --force"],
     });
   }
