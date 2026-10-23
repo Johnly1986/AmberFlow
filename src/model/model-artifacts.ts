@@ -10,16 +10,18 @@
  *   图（.onnx）· 外置权重（.onnx.data）· tokenizer（HF 快照目录或 LAYA_TOKENIZER_DIR）
  *
  * 三件**齐**才算 `on`；缺哪件，doctor 就点名哪件并给出补齐命令。约定的落点仍是
- * `LAYA_ONNX_MODEL`（旧名 `LAYAA_ONNX_MODEL` 兼容）指向的 `.onnx` 路径，默认 /tmp。
+ * `LAYA_ONNX_MODEL`（旧名 `LAYAA_ONNX_MODEL` 兼容）指向的 `.onnx` 路径，
+ * 默认**项目目录 `models/` 下**（见 `MODELS_DIR`：图/权重/tokenizer 同处一地）。
  */
 import fs from "node:fs";
 import path from "node:path";
 
+import { MODELS_DIR } from "../support/paths.ts";
 import { findDefaultTokenizerDir } from "./laya-onnx.ts";
 
 /** 图/权重是否齐全只看这两个文件；tokenizer 由 laya-onnx 的发现逻辑回答。 */
 export interface ModelArtifacts {
-  /** ONNX 图的路径（约定：`LAYA_ONNX_MODEL` / `LAYAA_ONNX_MODEL` / 默认 /tmp/laya_dec.onnx）。 */
+  /** ONNX 图的路径（约定：`LAYA_ONNX_MODEL` / `LAYAA_ONNX_MODEL` / 默认 `models/laya_dec.onnx`）。 */
   onnxPath: string;
   /** 外置权重路径（图的 `.onnx` + `.data`——与 onnxruntime 的外部数据约定一致）。 */
   dataPath: string;
@@ -33,8 +35,11 @@ export interface ModelArtifacts {
   ready: boolean;
 }
 
-/** 默认图路径（与 `src/model/laya-onnx.ts` 的 `DEFAULT_ONNX_PATH` 同一约定）。 */
-export const DEFAULT_ONNX_PATH = "/tmp/laya_dec.onnx";
+/**
+ * 默认图路径：项目目录 `models/laya_dec.onnx`（`MODELS_DIR` 是这一落点的单一出处，
+ * `src/model/laya-onnx.ts` 也读它——两处写死两个默认值曾经正是"两处实现"的形状）。
+ */
+export const DEFAULT_ONNX_PATH = path.join(MODELS_DIR, "laya_dec.onnx");
 
 /** 约定的图路径：环境变量优先（`LAYAA_*` 是旧名，兼容保留）。 */
 export function onnxModelPath(env: NodeJS.ProcessEnv = process.env): string {

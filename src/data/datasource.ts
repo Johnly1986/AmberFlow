@@ -1039,6 +1039,35 @@ export async function renderAndSnapshot(html: string): Promise<Rendered> {
 
 /* ---------------------------------------------------------------- 报告 */
 
+/**
+ * 报告里的"前 N 条原始行"（数据源的 `report.preview`）的**单一实现**。
+ *
+ * 为什么要单独拎出来：这段"取最早一天、按 `columns` 投影、截 `limit` 行"以前只写在
+ * `reportMarkdown` 里，于是应用运行器的数据腿**没有** preview 可展示——同一份声明在两个
+ * 出口长出两个形状（一个看得到原始行、一个只看得到 counts/selects）。现在报告（`reportMarkdown`）
+ * 与应用报告（`app-runner.appReportMarkdown`）都读这一个函数。
+ */
+export interface PreviewTable {
+  /** 展示哪一天（取最早的一天：与报告表格同一口径）。 */
+  date: string;
+  columns: string[];
+  /** 已按 `columns` 投影成字符串（报告只负责排版，不再各扫一遍行）。 */
+  rows: Array<Record<string, string>>;
+}
+
+export function previewTable(source: Source, perDate: Record<string, DateEntry>): PreviewTable | null {
+  const rep = (source["report"] || {}) as Record<string, any>;
+  if (!pyTruthy(rep["preview"]) || !pyTruthy(perDate)) return null;
+  const pv = rep["preview"] as Record<string, any>;
+  const columns = (getOr(pv, "columns", []) as unknown[]).map(pyStr);
+  const limit = Number(pyStr(getOr(pv, "limit", 8)));
+  const date = Object.keys(perDate).sort()[0]!;
+  const take = Number.isFinite(limit) && limit >= 0 ? limit : 0;
+  const rows = ((getOr(perDate[date]!, "rows", []) as Row[]) || []).slice(0, take)
+    .map((r) => Object.fromEntries(columns.map((c) => [c, pyStr(getOr(r, c, ""))])));
+  return { date, columns, rows };
+}
+
 export function reportMarkdown(
   source: Source,
   perDate: Record<string, DateEntry>,
@@ -1137,15 +1166,11 @@ export function reportMarkdown(
       }
     }
   }
-  if (pyTruthy(rep["preview"]) && pyTruthy(perDate)) {
-    const pv = rep["preview"] as Record<string, any>;
-    const cols = (getOr(pv, "columns", []) as unknown[]).map(pyStr);
-    const limit = pyStr(getOr(pv, "limit", 8));
-    const first = Object.keys(perDate).sort()[0]!;
-    const rows = ((getOr(perDate[first], "rows", []) as Row[]) || []).slice(0, Number(limit));
-    L.push("", `## ${first} 前 ${rows.length} 条（原始行）`, "",
-      "| " + cols.join(" | ") + " |", "|" + "---|".repeat(cols.length));
-    for (const r of rows) L.push("| " + cols.map((c) => pyStr(getOr(r, c, ""))).join(" | ") + " |");
+  const pv = previewTable(source, perDate);
+  if (pv) {
+    L.push("", `## ${pv.date} 前 ${pv.rows.length} 条（原始行）`, "",
+      "| " + pv.columns.join(" | ") + " |", "|" + "---|".repeat(pv.columns.length));
+    for (const r of pv.rows) L.push("| " + pv.columns.map((c) => pyStr(getOr(r, c, ""))).join(" | ") + " |");
   }
   if (pyTruthy(rendered)) {
     const r = rendered as Record<string, any>;

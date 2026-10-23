@@ -1,0 +1,44 @@
+{
+  "name": "bilibili-anime-rank",
+  "label": "B 站番剧排行榜（公开接口，近期热度榜）",
+  "transport": {
+    "client": "curl",
+    "url_template": "https://api.bilibili.com/pgc/season/rank/web/list?day=3&season_type=4",
+    "note": "公开接口，无需登录；season_type=4 = 番剧；day=3 表示近 3 天热度窗口。返回 data.list 已是排名顺序，第 0 项即榜首。",
+    "block_markers": ["访问权限不足"]
+  },
+  "constants": {},
+  "extract": {
+    "kind": "json_stdout",
+    "rows": "data.list",
+    "fields": {
+      "rank": "rank",
+      "title": "title",
+      "badge": "badge",
+      "url": "url"
+    }
+  },
+  "counts": [
+    { "key": "rows", "label": "榜单条数" }
+  ],
+  "selects": [
+    {
+      "key": "top",
+      "label": "榜首",
+      "sort_by": ["rank"]
+    }
+  ],
+  "report": {
+    "title": "B 站番剧排行榜（公开接口）",
+    "source_note": "`api.bilibili.com/pgc/season/rank/web/list?day=3&season_type=4` 的 `data.list`",
+    "preview": {
+      "columns": ["rank", "title", "badge", "url"],
+      "limit": 5
+    },
+    "notes": [
+      "口径声明：本源取的是 B 站官方**番剧排行榜（近期热度窗口）**榜首，不是「年度榜单」。B 站没有对外的「年度最热番剧」接口，这个口径是可达且可复现的近似，差异不粉饰。",
+      "`data.list` 的顺序就是榜单顺序，`rank` 字段为名次。",
+      "同一份接口在浏览器腿上拿不到：番剧详情页未登录不可见，会返回「请先登录或注册」。"
+    ]
+  }
+}

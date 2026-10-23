@@ -31,7 +31,7 @@
  *   node --experimental-strip-types src/flow/semantic-flow.ts --app flight-cheapest --site site-b --dry
  */
 import fs from "node:fs";
-import { isParseUsageError, usageErrorLine } from "../support/cli-args.ts";
+import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../support/cli-args.ts";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -1855,7 +1855,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     parsed = parseArgs({
-    args: argv, allowPositionals: true,
+    args: stripArgSeparators(argv), allowPositionals: true,
     options: {
       list: { type: "boolean" }, app: { type: "string" }, site: { type: "string" },
       laya: { type: "string" }, escalate: { type: "string" },

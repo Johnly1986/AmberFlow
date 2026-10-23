@@ -16,7 +16,7 @@
  * `bench/live-retest/REPORT.md` 的冻结语料里；把它复制进包只会制造第二份会漂移的散文。
  */
 import fs from "node:fs";
-import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
+import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../src/support/cli-args.ts";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { appDirs, loadPack, type AppPack } from "../src/app/app-pack.ts";
@@ -111,7 +111,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
-    args: argv,
+    args: stripArgSeparators(argv),
     options: {
       write: { type: "boolean" }, check: { type: "boolean" }, from: { type: "string" },
       app: { type: "string" }, quiet: { type: "boolean" }, help: { type: "boolean" },

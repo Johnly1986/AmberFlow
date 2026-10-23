@@ -26,7 +26,7 @@
  *   - 这个工具**不执行动作**，只问"选哪个"，所以它不改变任何页面。
  */
 import fs from "node:fs";
-import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
+import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../src/support/cli-args.ts";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -78,7 +78,7 @@ async function main(argv: string[]): Promise<number> {
   // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
-    args: argv,
+    args: stripArgSeparators(argv),
     options: {
       apps: { type: "string" },          // 逗号分隔；默认全部有浏览器步的包
       json: { type: "boolean", default: false },

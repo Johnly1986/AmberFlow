@@ -24,7 +24,7 @@
  *     --app flight-cheapest-planned --site site-b --yes
  */
 import fs from "node:fs";
-import { isParseUsageError, usageErrorLine } from "../support/cli-args.ts";
+import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../support/cli-args.ts";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -970,7 +970,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     parsed = parseArgs({
-    args: argv, allowPositionals: true,
+    args: stripArgSeparators(argv), allowPositionals: true,
     options: {
       goal: { type: "string" }, seed: { type: "string" }, app: { type: "string" },
       site: { type: "string" }, planner: { type: "string" }, laya: { type: "string" },

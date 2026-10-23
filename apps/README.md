@@ -90,13 +90,36 @@ node --experimental-strip-types src/data/datasource.ts --source git-log --out /t
 跑一条完整链路：
 
 ```bash
-npm run apps -- --list                                  # 发现了哪些应用包
-npm run apps -- --app demo-app --dry                     # 只展开计划（不开浏览器、不装模型）
-npm run apps -- --app demo-app                # 离线整跑（默认走真模型；缺产物时如实降级）
-npm run apps -- --app demo-app                            # 真模型（需要产物；缺了 `npm run model:fetch` 补）
+npm run apps -- --list                                   # 发现了哪些应用包
+npm run apps -- --app demo-app --dry                     # 只展开计划（不开浏览器、不装模型、不跑数据腿）
+npm run apps -- --app demo-app                           # 整跑：数据腿 → 旅程 → 不变量（默认走真模型；缺产物时如实降级）
+npm run apps -- --app demo-app --ablate stub             # 脚本桩臂：不装 1.7GB 产物也能整跑（套件默认臂）
+npm run apps -- --app demo-app --out /tmp/hello           # 产物落点（默认 apps/<id>/out）
 npm run apps:matrix                                      # 度量：声明行 / 代码行 / 防泄漏 + 上次套件的模型咨询两列
 npm run apps:suite                                       # 一条命令验收所有离线旅程应用（结论表 + 退出码）
 ```
+
+### 命令行旗标（与 bench 对齐）
+
+`npm run apps` 与 `npm run bench` 共用一张旗标表（`src/support/cli-args.ts` 的 `SHARED_RUN_OPTIONS`）——
+**同一个名字在两个入口是同一个意思**；各自的专属旗标只有"挑什么来跑"那一项：apps 挑**应用包**，
+bench 挑**语料**。完整用法看 `npm run apps -- --help`，摘要：
+
+| 旗标 | 作用 |
+|---|---|
+| `--list` | 列出发现到的应用包（不给 `--app` 也走这里，并附 usage） |
+| `--app ID\|路径` | 要跑的应用：包 id，或直接给 `pack.json` 的路径 |
+| `--dry` | 只展开计划——**不跑数据腿**，所以 `source_slots` 声明的槽位若没有默认值会直说并 exit 2 |
+| `--slot k=v` | 覆盖槽位（可重复；键必须在包里声明过，见下） |
+| `--no-sources` | 不跑数据腿（`source_slots` 因此没有观测值 ⇒ 响亮地炸，不静默回落默认值） |
+| `--allow-dangerous` / `--confirm-safe` | 放行危险工具步 / 非交互确认（危险步没放行是 exit 1，并在输出里写明"未执行"） |
+| `--tiered-hint` | P1 实验开关：hint 档内歧义时改问"这几个候选里哪个"（默认关 = 行为不变） |
+| `--model ID` · `--provider NAME` · `--ablate stub\|rules-only` · `--conf-floor N` · `--force-hints off` · `--headful` · `--quiet` · `--learn-hints` · `--hint-memory FILE` | **与 bench 同名同义**（对照表见根 [README.md](../README.md) 的「apps 与 bench：同一个名字同一件事」） |
+
+打错旗标得到的是**一行点名 + usage + exit 2**，不是 `parseArgs` 的堆栈；旧名
+（`--no-model` → `--ablate stub|rules-only`、`--hint-memory-file` → `--hint-memory FILE`）在升级窗口里仍认。
+`npm run apps -- --app demo-app` 里那个 `--` 是 npm/shell 的参数分隔符，由入口统一吃掉——Windows 的
+shell 会把它原样留给子进程，留着它的后果是后面的旗标全被当成位置参数（"传了却像没传"）。
 
 每次运行都带**两行模型账**（`docs/LAYA_VALUE_PLAN.md` P0/P1：保险的价值要看得见）：
 
@@ -148,7 +171,7 @@ npm run apps:suite                                       # 一条命令验收所
 1. **浏览器步必须有一个能点到的目标**：`target_hint` / `target_hints`（计划点名 → 零模型调用），或至少让规则/
    laya 能在元素池里命中一个元素。缺了就会 `blocked`，报错直说
    `step N names no target: no target_hint(s), no rule matched any of the K element(s)…`。
-2. **`--slot k=v` 的键必须在包里声明过**（`slots` / `required_slots`）：打错名字现在 exit 2 并列出已声明的槽位
+2. **`--slot k=v` 的键必须在包里声明过**（`slots` / `required_slots` / `source_slots`）：打错名字现在 exit 2 并列出已声明的槽位
    （以前是静默忽略 + 假绿）。
 
 一个可复制粘贴的最小应用在 [../README.md](../README.md) 的"应用层"一节（整包 JSON，逐字节复制即可跑绿）。
@@ -191,6 +214,10 @@ npm run apps:gen -- --write --id ip-config --source src/cli/ip-config.ts#buildAp
   "slots": { "coupon": "ACME10" },     // 数据袋：值只来自计划，模型不许发明
   "required_slots": ["coupon"],        // 缺了就加载期报错
   "sources": ["demo-tool"],            // 数据腿：本目录或别的应用的 source
+  "source_slots": {                    // 数据腿的结果回写槽位：观测值 > 包里的默认值 > （--slot 仍最优先）
+    "cheapest": { "source": "demo-tool", "select": "cheapest", "field": "label" },
+    "n": { "source": "demo-tool", "count": "rows" }
+  },
   "roles": {
     "apply-coupon": {                  // 角色 = 可复用的步骤模板（desc/signal/hint/slots/when/retries）
       "desc": "在购物车输入优惠券 {coupon} 并应用",
@@ -212,6 +239,9 @@ npm run apps:gen -- --write --id ip-config --source src/cli/ip-config.ts#buildAp
 - **角色优先，别复制步骤**：同一套角色在多个应用间复用，矩阵里"角色数"就是一个数字；
   跨应用比的是"映射了几个角色"，不是"抄了几段步骤"。
 - **`{slot}` 占位符只替换已声明的槽位**，其余花括号原样保留；未知占位符加载期报错。
+- **`source_slots` 让数据腿把查到的值写回槽位**：`{source, select|count, field?}` 点名到具体的
+  取值点（数据源没声明这个 `select`/`count` 就加载期红）。没查到就是没值（响亮地炸），
+  不静默回落到包里的默认值；`--no-sources` 时不回写。报告的"数据腿"段会列出本次回写了什么。
 - **`invariants` 在会话结束状态上求值**（同一个 page、同一份 cookie），所以能表达"下单后购物车已清空"
   这类验收。它看不见**中间**要求——中间要求写成子目标信号。
 - **校验复用冻结计划那一套**：`PlanningRules.problems` 负责信号/hint/`when`/`retries`，

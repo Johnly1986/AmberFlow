@@ -23,7 +23,7 @@
  * 显示"未跑"，绝不编数。
  */
 import path from "node:path";
-import { isParseUsageError, usageErrorLine } from "../src/support/cli-args.ts";
+import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../src/support/cli-args.ts";
 import { applyRcToEnv } from "../src/support/rcfile.ts";
 import fs from "node:fs";
 import { parseArgs } from "node:util";
@@ -327,7 +327,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     ({ values } = parseArgs({
-    args: argv,
+    args: stripArgSeparators(argv),
     options: {
       only: { type: "string" }, json: { type: "boolean" },
       ablate: { type: "boolean" }, provider: { type: "string" },

@@ -28,6 +28,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { MODELS_DIR } from "../support/paths.ts";
 import {
   QTYPES, buildSequence, clampTemperature, confidenceFromProbs, pyJsonDumps,
   renderOptions, serializeState, softmaxWithTemperature, tempBucket,
@@ -43,8 +44,15 @@ import type {
 /** HF cache repo directory for the checkpoint. */
 const HF_REPO_DIR = "models--convaiinnovations--laya";
 
-/** Where the ONNX graph lives unless `opts.onnxPath` says otherwise (`LAYAA_ONNX_MODEL` / `LAYA_ONNX_MODEL` env). */
-export const DEFAULT_ONNX_PATH = "/tmp/laya_dec.onnx";
+/**
+ * Where the ONNX graph lives unless `opts.onnxPath` says otherwise
+ * (`LAYAA_ONNX_MODEL` / `LAYA_ONNX_MODEL` env).
+ *
+ * 默认落点是**项目目录 `models/`**（`src/support/paths.ts` 的 `MODELS_DIR`）：模型产物
+ * 统一在这一处——`npm run model:fetch` 往这儿写，运行期从这儿读，不再一半在 `/tmp`、
+ * 一半在 HF 缓存里。
+ */
+export const DEFAULT_ONNX_PATH = path.join(MODELS_DIR, "laya_dec.onnx");
 
 /** Python's `DEFAULT_SHORTLIST_K` is 20; the executor's pick ladder asks for 8. */
 export const DEFAULT_SHORTLIST_K = 8;
@@ -69,6 +77,11 @@ function hfHubRoots(): string[] {
 export function findDefaultTokenizerDir(): string | null {
   const override = process.env.LAYAA_TOKENIZER_DIR ?? process.env.LAYA_TOKENIZER_DIR;
   if (override && fs.existsSync(path.join(override, "tokenizer.json"))) return override;
+
+  // 项目目录 `models/tokenizer/`：`npm run model:fetch` 的默认落点（与图同处一地），
+  // 优先于 HF 缓存——"下载到哪就读哪"不该靠两次猜测。HF 快照仍是既有安装的回退。
+  const local = path.join(MODELS_DIR, "tokenizer");
+  if (fs.existsSync(path.join(local, "tokenizer.json"))) return local;
 
   const found: Array<{ dir: string; mtime: number }> = [];
   for (const root of hfHubRoots()) {
@@ -366,7 +379,7 @@ function loadOrt(): Promise<OrtModule> {
 /* -------------------------------------------------------------- the runtime */
 
 export interface CreateLayaOnnxRuntimeOptions {
-  /** Default `/tmp/laya_dec.onnx`; the `LAYAA_ONNX_MODEL` / `LAYA_ONNX_MODEL` env overrides the default. */
+  /** Default `<repo>/models/laya_dec.onnx`; the `LAYAA_ONNX_MODEL` / `LAYA_ONNX_MODEL` env overrides it. */
   onnxPath?: string;
   /** Default: glob the HF cache snapshot's `tokenizer/` dir. */
   tokenizerDir?: string;

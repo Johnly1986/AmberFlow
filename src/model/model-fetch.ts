@@ -8,7 +8,7 @@
  * `--from` 给 `.onnx` 文件（权重按 onnxruntime 的 external-data 约定取 `.onnx.data` 兄弟件），
  * 或给一个**目录/URL 前缀**（按 `laya_dec.onnx` + `laya_dec.onnx.data` 找）。目标落点沿用
  * 全仓库的同一约定（`src/model/model-artifacts.ts`）：`LAYA_ONNX_MODEL` 环境变量，默认
- * `/tmp/laya_dec.onnx`——doctor 报的路径与这里装的路径永远是同一个。
+ * 项目目录 `models/laya_dec.onnx`——doctor 报的路径与这里装的路径永远是同一个。
  *
  * 四条纪律（和这个仓库对"落盘"的一切要求同源）：
  *   1. **先验后换**：写到 `.part`，算完 SHA256 才 rename 就位——坏产物绝不覆盖好产物；
@@ -23,7 +23,7 @@
  * 流式下载不吞内存。
  */
 import crypto from "node:crypto";
-import { isParseUsageError, usageErrorLine } from "../support/cli-args.ts";
+import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../support/cli-args.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -139,7 +139,7 @@ export const USAGE = `npm run model:fetch — 决策模型产物的安装通道�
       或给一个目录/URL 前缀（自动找 laya_dec.onnx + laya_dec.onnx.data）。
 
   可选：
-    --out <path>            图的落点（默认沿用 LAYA_ONNX_MODEL 约定，缺省 /tmp/laya_dec.onnx）
+    --out <path>            图的落点（默认沿用 LAYA_ONNX_MODEL 约定，缺省 项目目录/models/laya_dec.onnx）
     --sha256-onnx <hex64>   图的期望 SHA256（给了就必须等值，不符不安装）
     --sha256-data <hex64>   权重的期望 SHA256
     --tokenizer <path|url>  tokenizer.json（装到 <out 目录>/tokenizer/，并打印 LAYA_TOKENIZER_DIR 用法）
@@ -157,7 +157,7 @@ export async function main(
   // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {
     parsed = parseArgs({
-    args: argv, allowPositionals: false,
+    args: stripArgSeparators(argv), allowPositionals: false,
     options: {
       from: { type: "string" }, out: { type: "string" },
       "sha256-onnx": { type: "string" }, "sha256-data": { type: "string" },
