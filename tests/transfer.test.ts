@@ -22,24 +22,21 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chromium, type Browser } from "playwright";
-import * as browserEnv from "../src/browser/browser-env.ts";
+import { describe, expect, it } from "vitest";
 import * as C from "../src/data/ctrip-data.ts";
-import * as CT from "../src/sites/ctrip-task.ts";
+import * as CT from "../src/data/ctrip-oracle.ts";
 import {
   deriveFlightSubgoals, deriveHotelSubgoals, deriveSubgoals, loadSpec, migrationMetrics,
   shape, specRoles, validateSpec, type FlowSpec,
 } from "../src/flow/flow.ts";
-import * as TT from "../src/sites/transfer-task.ts";
-import type { Oracle, OracleFlight, OracleHotel } from "../src/sites/transfer-task.ts";
+import * as TT from "../src/flow/transfer-flow.ts";
+import type { Oracle, OracleFlight, OracleHotel } from "../src/flow/transfer-flow.ts";
 import * as D2 from "../src/data/transfer-data2.ts";
 import * as D3 from "../src/data/transfer-data3.ts";
 import * as D4 from "../src/data/transfer-data4.ts";
 import * as D5 from "../src/data/transfer-data5.ts";
 import * as D6 from "../src/data/transfer-data6.ts";
 import * as D7 from "../src/data/transfer-data7.ts";
-import { BrowserMiddleware, type PwLike } from "../src/engine/executor.ts";
 import type { MiddlewareLike } from "../src/engine/planner.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
 
@@ -442,30 +439,6 @@ describe("verifyWith：同一套判分口径，只把数据源作为参数传入
 });
 
 /* ================================================================ argv */
-
-describe("main 的参数解析（Python argparse 的同名开关）", () => {
-  it("解析 10 个开关", () => {
-    expect(TT.parseArgv([])).toEqual({});
-    expect(TT.parseArgv(["--site", "skybook", "--both", "--metrics-only"])).toEqual(
-      { site: "skybook", both: true, metricsOnly: true });
-    expect(TT.parseArgv(["--list-sites", "--no-when", "--no-retries", "--quiet"])).toEqual(
-      { listSites: true, noWhen: true, noRetries: true, quiet: true });
-    expect(TT.parseArgv(["--emit-plan", "skybook", "--out", "/tmp/x", "--max-steps", "6"])).toEqual(
-      { emitPlan: "skybook", out: "/tmp/x", maxSteps: 6 });
-    expect(TT.parseArgv(["--site=slowjet", "--out=/tmp/y", "--max-steps=9"])).toEqual(
-      { site: "slowjet", out: "/tmp/y", maxSteps: 9 });
-    expect(() => TT.parseArgv(["--nope"])).toThrow(/unrecognized argument/);
-  });
-
-  it("--metrics-only 不开浏览器就能算出 7 个站点的度量（与 Python 同数）", () => {
-    const m = TT.migrationMetricsForAll(TT.discoverSpecs(), DATES);
-    expect(Object.keys(m.sites)).toHaveLength(7);
-    expect((m.sites["skybook"] as { subgoals: unknown }).subgoals).toEqual({ baseline: 19, other: 23 });
-  });
-});
-
-/* ================================================================ 报告排版 */
-
 describe("writeResultMd：忠实记录 → 报告（对齐 Python 的排版）", () => {
   function synth(key: string): { spec: FlowSpec; res: TT.SiteResult } {
     const spec = load(key);
@@ -523,94 +496,4 @@ describe("writeResultMd：忠实记录 → 报告（对齐 Python 的排版）",
       fs.rmSync(outdir, { recursive: true, force: true });
     }
   });
-});
-
-/* ================================================================ 端到端 */
-
-const pwLike: PwLike = { chromium: chromium as unknown as PwLike["chromium"] };
-let browser: Browser | null = null;
-
-const scriptedAgentImpl = scriptedAgent((key, _state, questions) => {
-  const q = questions[key];
-  if (!q) return undefined;
-  if (q.type === "noul") return { noul: 0.02 };
-  const crit = (q.criteria ?? {}) as Record<string, unknown>;
-  const keys = Object.keys(crit);
-  const probs: Record<string, number> = {};
-  for (const k of keys) probs[k] = keys.length ? 1 / keys.length : 0;
-  return { choice: keys[0] ?? "", probabilities: probs, confidence: 0.05 };
-});
-
-function makeMw(): TT.MiddlewareWithAuditor {
-  const mw = new BrowserMiddleware({
-    maxSteps: 6, confFloor: 0.25, confirmFn: (desc: string) => CT.demoUser(desc, true),
-  });
-  (mw as unknown as { _planVerbose: boolean })._planVerbose = false;
-  return mw as unknown as TT.MiddlewareWithAuditor;
-}
-
-describe("runSite 端到端（真浏览器 file:// + 脚本模型，不加载 ONNX）", () => {
-  beforeAll(async () => {
-    try {
-      browser = (await browserEnv.launch(pwLike)) as unknown as Browser;
-    } catch {
-      browser = null;
-    }
-    installLayaRuntime(scriptedRuntime(scriptedAgentImpl));
-  }, 120_000);
-
-  afterAll(async () => {
-    installLayaRuntime(null);
-    await browser?.close();
-  });
-
-  it("skybook：23 个子目标全过、判分 7/7、blocked=null、报告落盘", async (ctx) => {
-    if (!browser) ctx.skip();
-    const outdir = fs.mkdtempSync(path.join(os.tmpdir(), "transfer-skybook-"));
-    try {
-      const res = await TT.runSite("skybook", load("skybook"), makeMw(), outdir, { verbose: false });
-      expect(res.blocked).toBeNull();
-      expect(res.verify.checks).toHaveLength(7);
-      expect(res.verify.checks.filter((c) => !c.ok)).toEqual([]);
-      expect(res.verify.ok).toBe(true);
-      expect(res.subgoals).toBe(23);
-      expect(res.records.flights).toHaveLength(5);
-      expect([...new Set(res.records.flights.map((f) => f.date))].sort()).toEqual([...DATES].sort());
-      // 出发当日由**执行结果**（而不是判分口径）决定
-      const picked = res.records.flights.reduce((best, r) => (r.price < best.price
-        || (r.price === best.price && r.date < best.date) ? r : best));
-      expect(res.checkin).toBe(picked.date);
-      expect(res.checkin).toBe(D2.bestOverall(D2.buildFlights(DATES), DATES)![0]);
-      expect(res.records.hotels).toHaveLength(D2.hotelsUnder(D2.buildHotels(), 300).length);
-      expect(res.records.hotels.map((h) => h.id))
-        .toEqual(D2.hotelsUnder(D2.buildHotels(), 300).map((h) => h.id));
-      expect(res.skipped).toBe(0);
-      expect(res.retried).toBe(0);
-      expect(res.audit.verdict).toBe("APPROVE");
-      const md = TT.writeResultMd(res, load("skybook"), outdir);
-      const text = fs.readFileSync(md, "utf-8");
-      expect(text).toContain("# 迁移结果 · skybook-replica2（en）");
-      expect(text).toContain("## 机票：五天 08:00-18:00 最低价");
-      expect(text).toContain("共记录 15 家");
-    } finally {
-      fs.rmSync(outdir, { recursive: true, force: true });
-    }
-  }, 300_000);
-
-  it("farehaven --no-when 消融：阻塞在第一个没有遮罩的日期，1/7（对照 Python）", async (ctx) => {
-    if (!browser) ctx.skip();
-    const outdir = fs.mkdtempSync(path.join(os.tmpdir(), "transfer-farehaven-"));
-    try {
-      const res = await TT.runSite("farehaven", load("farehaven"), makeMw(), outdir, {
-        verbose: false, dropWhen: true,
-      });
-      expect(res.blocked).not.toBeNull();
-      expect(res.verify.ok).toBe(false);
-      // 10-05 那天的记录已经写进去了（阻塞发生在 10-06 的"关遮罩"步）
-      expect(res.records.flights).toHaveLength(1);
-      expect(res.verify.checks.filter((c) => c.ok)).toHaveLength(1);
-    } finally {
-      fs.rmSync(outdir, { recursive: true, force: true });
-    }
-  }, 300_000);
 });

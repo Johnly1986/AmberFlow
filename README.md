@@ -57,6 +57,36 @@ npm run providers:baseline -- --providers token-plan,first-candidate --out "$TEM
 回到"只带 goal 的问法"（带页面上下文的实测数据见 [docs/DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md) §1b）。
 读数提醒：旅程每步都有 hint 时模型出场为 0 是**设计**（"能规则化就别猜"）；要量模型就用剥 hint 的对照台。
 
+## 统一入口：`amber`
+
+`package.json` 的 `bin` 提供 `amber`：在 checkout 里用 `npx amber …`（`npm ci` **不会**把它放进 PATH）；
+执行过 `npm link` 或全局安装后可直接用 `amber …`。上面四条命令的对应写法：
+
+```bash
+amber run --demo                                                     # 在仓库自带页面上跑一份真实计划（计划默认存 ./.amberflow/plan.json）
+amber doctor                                                         # 环境体检；--fix 只在缺件时建目录 / 装 Chromium
+amber run ctrip-case --provider coin-flip                            # 换决策模型跑（与 npm run apps 同一扇门）
+amber dev providers baseline --providers token-plan,first-candidate --out "$TEMP/pb.json"   # 与零智能基线对高下
+```
+
+任何命令加 `--json` 后 stdout 只有一个信封对象（人类进度走 stderr）；`amber help --all` 列出全部命令与高级旗标。
+
+### 新旧对照
+
+| 新写法 | 旧写法 | 说明 |
+|---|---|---|
+| `amber`（无参数） | — | 首页：状态 + 应用列表 + 下一步 |
+| `amber run <应用>` / `--demo` / `--goal "<目标>" --url <页面>` | `npm run apps -- --app <id>` / `npm start` / `npm start -- --goal …` | 语义同一扇门；计划默认 `./.amberflow/plan.json`（旧 `start --plan` 语义不变） |
+| `amber record --url <页面>` | `npm run learn -- --url …` | **默认有头**；要旧 headless 加 `--headless` |
+| `amber plan new "<目标>"` | `npm run plan-cli -- new "<目标>"` | 计划默认 `./.amberflow/plan.json`；步骤 1-based，且有 `描述slug-短哈希` 稳定 id |
+| `amber apps list / show / check / path / remove` | `npm run apps -- --list / --app <id>` | `amber apps` 无子命令即 list（旧 `npm run apps` 无参数仍报错） |
+| `amber config get / set / unset / show / path` | 编辑 `configs/amberflowrc.json` | 分层生效：旧 rc < 用户 < 项目 < 环境；`amber doctor` 点出每个值的来源 |
+| `amber model fetch --from <url 或本地路径>` | `npm run model:fetch -- --from …` | SHA256 先验后换、坏件不覆盖。同一约束 |
+| `amber dev suite / matrix / bench / parity / verify` | `npm run apps:suite / apps:matrix / bench / verify` | 维护者命令都收在 `amber dev` |
+| `amber legacy <旧命令>` | — | 兼容转发器：按**旧行为**执行旧入口并提示新写法 |
+
+旧 npm script 全部保留并照旧行为执行（TTY 下会提示新写法）；迁移是**旧命令不删、新命令并行**。
+
 ## DSH 插件安装
 
 装进 profile 即得四个工具——`amberflow_apps`（列应用）/ `amberflow_run`（跑一个，含 `dry` / `ablate` /
@@ -102,7 +132,7 @@ dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridg
 | 60 个诱饵元素挡在前面：规则落空 + 目标不在池内 = 必 blocked；模型加宽重看（`laya:reobserve`）把它捞回来 | 池子外的目标谁也选不到——模型负责"不轻言放弃"。**但注意口径**：这是夹具里的能力，已验收语料上 `reobserve` 救回 **0** 步（页脚 `梯级账单` 会把它标成 dead rung） | `npx vitest run tests/reobserve.test.ts` |
 | `transfer-slowjet`：冷加载时模型**被问了 5 次、一次都没过闸门**（真模型臂与桩臂同形：`咨询 5 / 过关 0`）；把它救回来的是 `retries`——去掉 `retries` 实测 0/7 | **反面教材（本轮修正）**：以前这里写"没有模型这个应用会红"，实测不成立；红的是没有重试 | `npm run apps:suite -- --only transfer-slowjet`（看页脚 `梯级账单` 与 `模型边际`） |
 | 同一份计划二跑：**12 forwards → 0，9.2s → 1.3s**（Windows+GPU 实测；离线口径由套件页脚 `决策缓存` 给同一形状的两个数） | 确定性模型不该被问第二次：本地、免费、可审计 | `npm run cache:measure`（要 ONNX 产物）；离线看套件页脚 |
-| 诚实边界：中文页面上模型 0.03–0.09（argmax 常仍正确）；checkpoint 路由按**文字系统**切、绝不按置信度切（ECE 0.855 的教训写进了故事） | 我们比谁都清楚它不行在哪——这是可信度，不是减分 | `node --experimental-strip-types src/sites/ctrip-task.ts --no-hints` |
+| 诚实边界：中文页面上模型 0.03–0.09（argmax 常仍正确）；checkpoint 路由按**文字系统**切、绝不按置信度切（ECE 0.855 的教训写进了故事） | 我们比谁都清楚它不行在哪——这是可信度，不是减分 | `npm run apps -- --app ctrip-case --no-sources` |
 
 装不装得模型，跑之前就知道：`npm run doctor` 点名缺哪件（图 / 外置权重 / tokenizer）并给出一条补齐命令
 `npm run model:fetch -- --from <url 或本地路径>`（SHA256 先验后换，坏件绝不覆盖现有产物）。

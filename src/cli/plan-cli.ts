@@ -179,6 +179,8 @@ export function cmdReset(file: string, io: CliIO = defaultIO): void {
 export interface RunArgs {
   file: string; max: number; reset: boolean; confirm: "allow" | "deny" | "ask";
   replan: boolean;
+  /** 新 CLI 的 `run/plan run --headful`；旧 plan-cli 缺省仍是 headless。 */
+  headful?: boolean;
   /**
    * Sidecar path for LEARNED HINTS (see src/model/hint-memory.ts). The memory lives in its own
    * file on purpose: a frozen plan is an audited artifact and a run must not rewrite it.
@@ -230,9 +232,11 @@ export async function cmdRun(a: RunArgs, io: CliIO = defaultIO, deps: RunDeps = 
   const mw = (deps.middleware ?? new BrowserMiddleware({ confirmFn, hintMemory: hints })) as BrowserMiddleware;
   const start = plan.subgoals.find((s) => s.start_url)?.start_url ?? null;
   if (start === null) throw new Error("no subgoal has a start_url");
+  const sessionFactory = deps.sessionFactory
+    ?? (a.headful ? async () => browserSession(false) : undefined);
   const rep = await runPlan(mw as never, plan, {
     startUrl: start, planner, rules,
-    sessionFactory: deps.sessionFactory as never,
+    ...(sessionFactory ? { sessionFactory: sessionFactory as never } : {}),
   });
   const finished = plan.subgoals.every((s) => s.status === "done" || s.status === "skipped");
   const auditor = (mw as unknown as { auditor?: ReturnType<typeof getAuditor> }).auditor ?? getAuditor();
@@ -279,6 +283,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: CliIO = d
         llm: { type: "boolean" }, url: { type: "string" }, hint: { type: "string" },
         desc: { type: "string" }, signal: { type: "string" },
         confirm: { type: "string" }, reset: { type: "boolean" }, replan: { type: "boolean" },
+        headful: { type: "boolean" },
         "hint-memory": { type: "string" }, "learn-hints": { type: "boolean" },
       },
     });
@@ -350,6 +355,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: CliIO = d
           file, max, reset: Boolean(parsed.values.reset),
           confirm: (parsed.values.confirm ?? "ask") as RunArgs["confirm"],
           replan: Boolean(parsed.values.replan),
+          headful: Boolean(parsed.values.headful),
           // --learn-hints keeps the memory NEXT TO the plan (a sidecar), never inside it
           hintMemory: (parsed.values["hint-memory"] as string | undefined)
             ?? (learn ? `${file}.hints.json` : null),

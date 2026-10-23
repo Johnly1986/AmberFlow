@@ -21,7 +21,7 @@ import { appDirs, expandPack, loadPack, validatePack, type AppPack, type Expande
 import { main as appMain, refusalLine, runApp, runToolStep, startUrl } from "../src/app/app-runner.ts";
 import { loadProbeSet } from "../src/app/probe-set.ts";
 import { DEMO_ROWS, FORMS, TYPE_TO_FORM } from "../src/cli/camera-entry.ts";
-import { emitPlan } from "../src/sites/transfer-task.ts";
+import { emitPlan } from "../src/flow/transfer-flow.ts";
 import { loadSpec } from "../src/flow/flow.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
 import type { ToolSignal } from "../src/browser/tool-signals.ts";
@@ -93,6 +93,11 @@ beforeAll(() => {
 afterAll(() => {
   installLayaRuntime(null);
   for (const d of tmpDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  // 保险清扫：坏包夹具写进真实仓库 apps/（`zz-*`）。测试体挂起/超时时 finally 不保证执行，
+  // 文件收尾必须摘干净——否则同文件与 arch-metrics 的下一次全仓库枚举会踩到它。
+  for (const d of ["zz-verify-broken", "zz-matrix-broken"]) {
+    fs.rmSync(path.join(REPO, "apps", d), { recursive: true, force: true });
+  }
 });
 
 /* ==================================================== 坏包：加载期报错（消息点名） */
@@ -139,7 +144,15 @@ describe("坏应用包：加载期失败，且消息点出是哪一处", () => {
 
   it("合法包零问题：仓库里现有的每个应用包都通过 validatePack", () => {
     for (const dir of appDirs()) {
-      const pack = loadPack(path.join(dir, "pack.json"));
+      let pack: AppPack;
+      try {
+        pack = loadPack(path.join(dir, "pack.json"));
+      } catch (e) {
+        // 沙盒夹具（`zz-*`，各测试自建自拆）只毁创建它的那个测试：挂起/超时暂留的残目录
+        // 不掀翻这条全仓库枚举；真实 `apps/<id>` 的包坏了仍然响亮红。
+        if (path.basename(dir).startsWith("zz-")) continue;
+        throw e;
+      }
       expect(validatePack(pack), `${pack.id}: ${JSON.stringify(validatePack(pack))}`).toEqual([]);
     }
   });
@@ -332,7 +345,7 @@ describe("CLI 错误路径：G-A / G-J / G-L 三条修复不得静默回归", ()
     const { code, err } = await captureErr(() => appMain(["--app", "ctrip-live", "--ablate", "stub"]));
     expect(code).toBe(2);
     expect(err).toContain("测量型应用");
-    expect(err).toContain("src/sites/live-probe.ts");                 // 指路到真正的测量入口
+    expect(err).toContain("npm run probes:baseline -- --check");                 // 指路到真正的测量入口
     expect(err).toMatch(/\d+ 个目标/);
     expect(err).not.toMatch(/\n\s+at /);                        // 不是栈
   });

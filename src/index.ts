@@ -51,11 +51,7 @@ export * as transferData4 from "./data/transfer-data4.ts";
 export * as transferData5 from "./data/transfer-data5.ts";
 export * as transferData6 from "./data/transfer-data6.ts";
 export * as transferData7 from "./data/transfer-data7.ts";
-export {
-  discoverSpecs, emitPlan, migrationMetricsForAll, oracleFor, runSite,
-  runSubgoals as runTransferSubgoals, writeResultMd,
-} from "./sites/transfer-task.ts";
-export * as transferTask from "./sites/transfer-task.ts";
+// transfer spec 机器（discoverSpecs/emitPlan/判分）现居 `src/flow/transfer-flow.ts`，按需直取。
 // Path A (fixed-action picker) + the flagship demo + the guard measurement.
 export { ATTACK_THRESHOLD, PAGES, SCENES, extractState } from "./cli/path-a.ts";
 export * as pathA from "./cli/path-a.ts";
@@ -68,18 +64,9 @@ export { createPickerServer, startPickerServer } from "./cli/picker-server.ts";
 export * as pickerServer from "./cli/picker-server.ts";
 // ctrip/transfer network + probe tools (each exports a CLI `main` -> namespaced).
 export * as h5Flights from "./data/h5-flights.ts";
-export * as liveProbe from "./sites/live-probe.ts";
-export * as liveCapture from "./sites/live-capture.ts";
-export * as otaProbe from "./sites/ota-probe.ts";
 export { CTRIP, SKYBOOK, PROFILES } from "./data/profiles.ts";
-// qunar: the ctrip flow skeleton replayed on a real site (plan + oracle + probe).
-export { HOME as QUNAR_HOME, buildChecks as buildQunarChecks, buildPlan as buildQunarPlan } from "./sites/qunar-task.ts";
-export * as qunarTask from "./sites/qunar-task.ts";
-export * as qunarProbe from "./sites/qunar-probe.ts";
+// qunar 线上用例统一走 `apps/qunar-live/pack.json`（配置即流程；旧驱动已删）。
 export * as datasource from "./data/datasource.ts";
 // ctrip scenario: data + oracle + task (its `main` joins the namespaced set).
+// ctrip scenario: data + oracle（机器居 `src/data/ctrip-oracle.ts`，按需直取；驱动已删）。
 export * as ctrip from "./data/ctrip-data.ts";
-export {
-  GOAL, demoUser, flightSubgoals, harvest, hotelSubgoals, makePlan, pageUrl,
-} from "./sites/ctrip-task.ts";
-export * as ctripTask from "./sites/ctrip-task.ts";

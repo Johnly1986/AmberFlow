@@ -385,7 +385,7 @@ export interface RunOptions {
    */
   hosts?: string[] | null;
   /**
-   * P1 TIERED HINT (docs/EXECUTION_LAYER_SPLIT_PLAN.md M0, default OFF): when the
+   * P1 TIERED HINT (docs/ARCHITECTURE_REVIEW.md, P1 tieredHint; default OFF): when the
    * plan's `target_hint` resolves to a TIER that is ambiguous inside (several
    * genuinely different candidates), rules.ts used to collapse that to `null` and
    * the step fell to laya over the WHOLE pool — "pick 1 of 40" for what is really

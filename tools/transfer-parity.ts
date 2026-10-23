@@ -33,7 +33,7 @@ import * as D7 from "../src/data/transfer-data7.ts";
 import {
   deriveFlightSubgoals, deriveHotelSubgoals, shape, specRoles, type FlowSpec,
 } from "../src/flow/flow.ts";
-import * as TT from "../src/sites/transfer-task.ts";
+import * as TT from "../src/flow/transfer-flow.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, "..");

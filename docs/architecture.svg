@@ -47,10 +47,10 @@
 <text x="1101" y="155" class="s">手写计划；站点=配置</text>
 <text x="1101" y="169" class="s">sources/*.json 发现制</text>
 <rect x="1280" y="106" width="135" height="78" class="bx"/>
-<text x="1291" y="125" class="t" font-size="12.5">bench · 探针</text>
-<text x="1291" y="141" class="s">bench.ts / live-*</text>
+<text x="1291" y="125" class="t" font-size="12.5">bench · 基线</text>
+<text x="1291" y="141" class="s">bench.ts / apps:gen</text>
 <text x="1291" y="155" class="s">冻结计划跑分矩阵</text>
-<text x="1291" y="169" class="s">可达性长流程实测</text>
+<text x="1291" y="169" class="s">可达性记录已冻结</text>
 <rect x="175" y="196" width="620" height="84" class="bxp"/>
 <text x="186" y="215" class="t" font-size="12.5">DSH 插件模式（integrations/dsh-bridge）</text>
 <text x="186" y="231" class="s">四个工具：apps 列包 · run 跑应用 · learn 录流程 · plan 出模板</text>

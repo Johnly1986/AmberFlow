@@ -6,7 +6,7 @@
  *   2. **加载期坏包**：克隆一份包做坏，断言 `validatePack` 返回的**精确**报错文本
  *      （不是 `toContain` 一个片段——校验器的价值就在于"响亮且具体"）；
  *   3. 展开后的 `journey` 必须与素材里的冻结计划**逐字段一致**：
- *      ctrip-case 对 `src/sites/ctrip-task.ts` 的 `flightSubgoals`/`hotelSubgoals`，
+ *      ctrip-case 对 `src/data/ctrip-oracle.ts` 的 `flightSubgoals`/`hotelSubgoals`，
  *      ip-config 对 `src/cli/ip-config.ts` 的 `buildPlan`。
  *
  * 两条口径值得单独说：
@@ -26,8 +26,8 @@ import { runApp, startUrl } from "../src/app/app-runner.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
 import { buildPlan, DEMO_ROWS } from "../src/cli/ip-config.ts";
 import { DEMO_ROWS as CAM_ROWS, FORMS, TYPE_TO_FORM } from "../src/cli/camera-entry.ts";
-import { discoverSpecs, emitPlan } from "../src/sites/transfer-task.ts";
-import * as CT from "../src/sites/ctrip-task.ts";
+import { discoverSpecs, emitPlan } from "../src/flow/transfer-flow.ts";
+import * as CT from "../src/data/ctrip-oracle.ts";
 import { matrix } from "../tools/apps_matrix.ts";
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -57,7 +57,7 @@ afterAll(() => installLayaRuntime(null));
 /* ================================================================ A1 */
 
 describe("apps/ctrip-case（A1：携程复刻站 19 个冻结子目标）", () => {
-  it("journey 与 src/sites/ctrip-task.ts 的冻结计划逐字段对齐", () => {
+  it("journey 与 src/data/ctrip-oracle.ts 的冻结计划逐字段对齐", () => {
     const frozen = [...CT.flightSubgoals(CT_DATES), ...CT.hotelSubgoals(CT_CHECKIN)];
     const exp = expandPack(loadPack("ctrip-case"), {}, planPath("ctrip-align"));
     expect(exp.plan.subgoals).toHaveLength(19);
@@ -246,6 +246,21 @@ describe("两个新应用包：应用目录是数据（0 行代码 / 0 泄漏 / 
     expect(ip.tokens).toEqual([]);
     expect(leaks, JSON.stringify(leaks)).toEqual([]);
     expect(debt, JSON.stringify(debt)).toEqual([]);
+  });
+
+  it("残缺 pack.json 只毁自己那一行：matrix 出 load-failed 行，不掀桌（与 apps:suite 同一纪律）", () => {
+    const brokenDir = path.join(import.meta.dirname, "..", "apps", "zz-matrix-broken");
+    try {
+      fs.mkdirSync(brokenDir, { recursive: true });
+      fs.writeFileSync(path.join(brokenDir, "pack.json"), "{ this is not json", "utf-8");
+      const { rows } = matrix();
+      const broken = rows.find((r) => r.app === "zz-matrix-broken");
+      expect(broken).toBeDefined();
+      expect(broken).toMatchObject({ kind: "load-failed", code: 0 });
+      expect(rows.find((r) => r.app === "ctrip-case")).toBeDefined();   // 其余行照常
+    } finally {
+      fs.rmSync(brokenDir, { recursive: true, force: true });           // 不留脏目录
+    }
   });
 });
 

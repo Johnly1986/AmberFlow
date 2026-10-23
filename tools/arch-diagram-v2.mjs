@@ -123,7 +123,7 @@ const entry = [
   ["learn · agent", ["tools/learn.ts", "录制 → 零模型回放门"]],
   ["plan:flow · semantic", ["plan-flow / semantic-flow", "一句话 + 种子页 → 档案"]],
   ["plan-cli · datasource", ["站点 = 配置", "sources/*.json 发现制"]],
-  ["bench · 探针", ["bench.ts / live-*", "跑分矩阵 · 可达性实测"]],
+  ["bench · 基线", ["bench.ts / apps:gen", "跑分矩阵 · 探针记录冻结"]],
 ];
 entry.forEach(([t, ls], i) => box(60 + i * 228, 116, 216, 62, "bx", t, ls, { titleSize: 11.5, titleDy: 17 }));
 box(60, 186, 670, 30, "bxp", "DSH 插件模式：列包 · 跑应用 · 录流程 · 出模板（引擎对 DSH 零引用）", [], { titleSize: 11 });

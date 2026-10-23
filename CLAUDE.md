@@ -37,25 +37,21 @@ npm run bench:fixtures                   # 冻结计划跑分矩阵的离线夹�
 npm run bench -- --force-model router    # 同一批用例，按页面选择 checkpoint（laya.Router 语义）
 bash bench/ablate.sh [tag]               # 消融矩阵：english|multilingual × rules on|off
 
-node --experimental-strip-types src/sites/ctrip-task.ts                  # ctrip 用例：19 冻结子目标 + 独立判分 7/7
-node --experimental-strip-types src/sites/ctrip-task.ts --no-hints       # 消融：去掉 hint → 0/7（置信度 0.13）
-node --experimental-strip-types src/sites/transfer-task.ts --site skybook
-node --experimental-strip-types src/sites/transfer-task.ts --site farehaven --no-when    # 去掉条件守卫 → 1/7
-node --experimental-strip-types src/sites/transfer-task.ts --site slowjet --no-retries   # 去掉重试 → 0/7
-node --experimental-strip-types src/sites/transfer-task.ts --metrics-only                # 不装模型、不开浏览器
+npm run apps -- --app ctrip-case --no-sources             # ctrip 用例：19 冻结子目标 + 独立判分 7/7（判分机器 src/data/ctrip-oracle.ts）
+npm run apps -- --app transfer-skybook --no-sources       # 复刻站 #6：分页骨架 23 步
+npm run apps -- --app transfer-farehaven --no-sources     # 去掉条件守卫的消融口见 tests（--no-when 在测试里）
 node --experimental-strip-types src/data/datasource.ts --source ctrip-flights-h5        # 真实票价，config 驱动
 node --experimental-strip-types src/data/datasource.ts --source ctrip-hotels-pc --dates 2026-10-09
 node --experimental-strip-types src/data/datasource.ts --list                           # 应用包也是配置目录：<repo>/*/sources 与 apps/*/sources
 node --experimental-strip-types src/data/datasource.ts --source git-log                 # CLI 通道：git 子进程 + lines_regex
 node --experimental-strip-types src/data/datasource.ts --source bench-cases-shape       # CLI 通道：jq + json_stdout
-node --experimental-strip-types src/sites/qunar-task.ts                                  # qunar 迁移测试（边界已实测）
 node --experimental-strip-types src/cli/ip-config.ts                                   # Excel IP 规划表 → 设备网络页
 node --experimental-strip-types src/cli/camera-entry.ts                                # Excel 类型列路由两套表单
 node --experimental-strip-types src/cli/long-task.ts                                   # 全链路 demo：plan → execute → audit
 node --experimental-strip-types src/cli/path-a.ts [--confirm-safe]                     # Path A：Playwright + 固定动作拾取器
 node --experimental-strip-types src/cli/picker-server.ts                               # Path B：扩展用的本地模型服务
 node --experimental-strip-types src/cli/tune-guard.ts                                  # 注入闸门分离度实测
-node --experimental-strip-types src/sites/live-probe.ts                                  # 携程可达性矩阵（真实站点）
+npm run probes:baseline -- --check                        # 探针数据是冻结记录，此门禁校验包声明与记录一致
 npm run plan-cli -- --help                                                         # 计划 CLI：new/add/edit/check/run
 node --experimental-strip-types tools/learn.ts                                     # 演示一次就录成应用（零参数）
 node --experimental-strip-types tools/learn.ts --json --yes --goal … --url …      # 外层 Agent 的一次调用
@@ -100,7 +96,7 @@ act_on），模型不产出"选哪行"——而且与数据引擎**共用同一�
 
 应用包（应用层）：`npm run apps -- --list` / `npm run apps -- --app demo-app`（离线整跑：
 数据腿 → 混合旅程（工具步 + 浏览器步）→ 结束状态不变量）/ `npm run apps -- --app demo-app --dry`（只展开计划）。
-真实应用：`--app ctrip-case --no-sources`（19 个冻结子目标跑本地复刻站，与 `src/sites/ctrip-task.ts`
+真实应用：`--app ctrip-case --no-sources`（19 个冻结子目标跑本地复刻站，与 `src/data/ctrip-oracle.ts`
 的计划**逐字段全等**）、`--app ip-config`（Excel IP 规划表 → 设备网络页，含"表格写错的那行由设备页
 自己拒绝"）、`--app camera-entry`（Excel 类型列路由两套表单：空类型行按**行内证据**显式选页、
 坏序列号那行显式成步）、`--app transfer-voyagio --no-sources`（第二个复刻站：**两页向导** 24 步）、
@@ -152,11 +148,10 @@ act_on），模型不产出"选哪行"——而且与数据引擎**共用同一�
 与已入库的探测记录比——站点变了、或有人手改了包，都会红；`--write` 刷新（只存标量观察，不存 `*_reason`）。
 
 探针集（测量型应用）：`apps/ctrip-live` / `apps/ota-live` / `apps/qunar-live` 声明了全部 URL、站点特征、
-结果目录与判决角色；驱动只剩"怎么测"（`src/sites/live-probe.ts` / `live-capture.ts` / `ota-probe.ts` /
-`qunar-probe.ts` / `qunar-task.ts`，它们现在都在共享层**核心**名单里）。`npm run apps:matrix` 的债计数：
+结果目录与判决角色。探针驱动已于 2026-10-21 删除（用例统一走配置；探针数据是**冻结记录**，
+`npm run probes:baseline -- --check` 校验包声明与已入库记录一致，`--write` 刷新）。`npm run apps:matrix` 的债计数：
 **0 处**（含"非核心文件里写死的 http 主机"这一独立的扫描口径）。复测用 `--out`：
-`src/sites/live-probe.ts --out /tmp/x.json` / `src/sites/live-capture.ts --out /tmp/dir` /
-`src/sites/ota-probe.ts --out /tmp/x.json`。
+复测通道已随驱动退役关闭——探针数据按冻结语料对待，改动包里的 probe 声明会被 probes:baseline 抓住。
 
 **Python 参考命令**（`pytest`、`python3 xxx.py`、`pip install -r requirements.txt`）属于**已彻底移除**的参考实现：
 工作树与 git 历史都已删除，磁盘上不再有 Python 文件（见 `BACKUP.md`）。
@@ -185,7 +180,7 @@ LLM planner/auditor 在 `OPENAI_BASE_URL` + `OPENAI_API_KEY`（可加 `PLANNER_M
 | `browser_env.py` | `src/browser/browser-env.ts` |
 | `bench/run_bench.py` | `src/cli/bench.ts`（BenchMiddleware 子类化生产循环） |
 | `browser_picker_playwright.py` / `picker_server.py` | `src/cli/path-a.ts` / `src/cli/picker-server.ts` |
-| `datasource.py` / `ctrip/*.py` / `transfer/*.py` / `qunar/*.py` | `src/data/datasource.ts` / `src/data/ctrip-data.ts`·`h5-flights`·`live-*` / `src/data/transfer-data*.ts`·`flow.ts`·`ota-probe`·`profiles` / `src/sites/qunar-*.ts` |
+| `datasource.py` / `ctrip/*.py` / `transfer/*.py` / `qunar/*.py` | `src/data/datasource.ts` / `src/data/ctrip-data.ts`·`ctrip-oracle.ts`·`h5-flights` / `src/data/transfer-data*.ts`·`src/flow/transfer-flow.ts`·`profiles` / （qunar 驱动已删，统一走 `apps/qunar-live` 配置） |
 
 Layered, one direction of dependency:
 
@@ -449,7 +444,7 @@ These are empirical findings from this codebase's own experiments — preserve t
 - **On Chinese pages the plan's `target_hint` is load-bearing, not decoration.** The ctrip case resolves 19/19 steps by rule with
   hints (zero model calls); stripping them blocks subgoal 1 outright -- confidence **0.13** on the zh homepage, and **0.24** after
   `laya.Router` correctly routes to `multilingual` (Han = 61% of letters). Routing doubles it and still misses the 0.25 floor.
-  Measured: `src/sites/ctrip-task.ts --no-hints [--route]` -> 0/7 both ways. Do not read this as "rules beat the model":
+  Measured: the `--no-hints` ablation ran 0/7 both ways (on the pre-2026-10-21 driver; the frozen plan and oracle live on in `src/data/ctrip-oracle.ts` + `apps/ctrip-case`). Do not read this as "rules beat the model":
   it says the model's zero-shot ceiling on CJK list pages is below this flow's floor.
 - **A hint is TIERED, and a live list page is why.** `~` hints used to be "substring matches,
   and only usable when every hit is identical"; on real pages that is always ambiguous —

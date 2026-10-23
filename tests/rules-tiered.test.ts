@@ -1,5 +1,5 @@
 /**
- * P1：hint 的**档内歧义变成候选集**（docs/EXECUTION_LAYER_SPLIT_PLAN.md §6 M0）。
+ * P1：hint 的**档内歧义变成候选集**（docs/ARCHITECTURE_REVIEW.md 执行层三段化 P1）。
  *
  * 两件事各自钉死：
  *   ① 单一实现 + 缺省等价——`hintCandidates` 是 `hintMatch` 的同一个走查器（`hintMatchImpl`）

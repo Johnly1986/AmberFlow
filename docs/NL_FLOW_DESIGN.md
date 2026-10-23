@@ -17,12 +17,12 @@ drift 撤下 → 再学**；②档案档在①规则之前——证据序）；
 **S4** 提名账单进结果与报告行（dead-rung 自报）。
 **测试复核处置轮（同日）**：复核抓到的 2 真缺陷与 4 缺口已全修；未修 5 条全部落地或判定维持——
 组合指令 DAG + 数据集生产写入/重跑失效（§2.3 规则 3 自此有生产触发者）、元素动作**证据面强制**（`instruction_not_honored`）、model 臂权重指纹、公共测试夹具面。
-报告：[TEST_REVIEW_NLFLOW.md](TEST_REVIEW_NLFLOW.md) §6。
+报告：复核处置记录已随 2026-10 的文档清理删除，要点并入本节。
 **最终验收（2026-10-15）**：`npm run verify` 退出码 0（**1221/1221 测试 + 六层对拍逐字节一致**）、
 `bash bench/smoke.sh` **PASS**（含 `apps:gen --check`）、工作树干净（提交 `8ad9ed6`/`354d0ef`/`bd4ffc5`/
 `b501088`/`c1fadd2`）。未做项均为显式裁定或可选（③窄问 runner 接线、④老师档、S0 换问法 A/B、组合 DAG），
 逐条记在 §10，不挂空 schema。文中其余"预期"仍是外推，落地一条改一条。
-**来源**：项目方设想，与 [SYSTEM12_POSITIONING_REVIEW.md](SYSTEM12_POSITIONING_REVIEW.md) 的定位评审同一条讨论线。
+**来源**：项目方设想（2026-10 定位评审讨论线）。
 **与既有系统的关系**：本设计**不推翻** SemanticFlow / 应用包 / 执行器任何已落地机制——
 信号语言、绑定、梯级卫生、学习门全部复用；差异只有一处：**指令的选择从"写清单时声明"
 推迟到"运行期提名"**（晚绑定），并为此补一个**具名数据集**承担跨步参数传递。
@@ -262,7 +262,7 @@ for step in steps:                                  # 序列推进；next 声明
 | 阶段 | 内容 | 门禁/验收 |
 |---|---|---|
 | **S0 实验台**（先测后立）**——✅ 工具已落地（`npm run nominate:measure`）；全语料数字见 `bench/instruction-nomination/REPORT.md`；⚠ 读法修正见 [NOMINATION_QUESTION_SET_ANALYSIS.md](NOMINATION_QUESTION_SET_ANALYSIS.md)** | 冻结语料的 NL 步，测提名正确率：③ 真模型臂 vs `first-candidate` 基线 vs ⑤ 枚举（真值 = 已验收语料的**实际执行**）。**该考卷的三层偏倚**：题面无状态（83/165 行同一句话跨应用真值不同）、标签取 trace 首动作（题面首动作族与真值吻合仅 44.8%）、语料排除 list/check（闭集 2/5 结构性不可对）——线上模型复测 41/165 仍 < 基线 85，两个模型都被判低于傻基线 ⇒ **题目无效**；③ 的依据改为边际（rules 弃权行 3/45） | 冻结产物 + 报告 + 线上复测产物。**停止条件**：③ 正确率 ≤ 基线且 ⑤ 收回失败 ⇒ 设想降级为现状（声明指令 + 模型只挑元素）。**S0-v2（上下文实验）已落地**（`npm run nominate:context`；补页面状态 63.6%、候选条件化 88.5%、歧义组 92.8%），③ 的题面构造问题解决；**运行期接线未做**（显式下一项） |
-| **S1 数据集**——**✅ 已落地并过全量验收**（**复核处置**：数据集曾只有消费面（裁定「随 S3 组合层一并接」）——现生产面已随 S3 落地：`gives` 声明 → 信号成立后 `dataset.write`、指令重放门前 `invalidateStep`（§2.3 规则 3 自此有生产触发者）、`dataset_view` 审计面。勘误：原「demo-app 改写一例」不精确——pack 面无产出指令，端到端例由 `flight-nominate` 试点夹具承担（见 TEST_REVIEW_NLFLOW.md §6））（`verify` 1179/1179 + 六层对拍绿） | `dataset store`（`src/dataset.ts`：具名/溯源/generation 失效）+ `{from:"dataset"}` 绑定（第四来源）+ `RunOptions.dataset`（缺省 null 逐字节不变） | `tests/dataset.test.ts` 11 条：needs_value / 重跑失效（陈旧世代不可读）/ 溯源 / 坏档案报错 / 真执行器端到端 |
+| **S1 数据集**——**✅ 已落地并过全量验收**（**复核处置**：数据集曾只有消费面（裁定「随 S3 组合层一并接」）——现生产面已随 S3 落地：`gives` 声明 → 信号成立后 `dataset.write`、指令重放门前 `invalidateStep`（§2.3 规则 3 自此有生产触发者）、`dataset_view` 审计面。勘误：原「demo-app 改写一例」不精确——pack 面无产出指令，端到端例由 `flight-nominate` 试点夹具承担）（`verify` 1179/1179 + 六层对拍绿） | `dataset store`（`src/dataset.ts`：具名/溯源/generation 失效）+ `{from:"dataset"}` 绑定（第四来源）+ `RunOptions.dataset`（缺省 null 逐字节不变） | `tests/dataset.test.ts` 11 条：needs_value / 重跑失效（陈旧世代不可读）/ 溯源 / 坏档案报错 / 真执行器端到端 |
 | **S2 提名梯级**——**◐ 已落地并过三臂 e2e**（核心：`src/instructions.ts` + `src/nominate.ts`，**②档案档在①规则前——证据序**，站点级已验证映射优先于全局启发式；数据面：`src/semantic-instructions.ts` 学习存储（档案 `instructions` 段 + staged 回填门 + drift 撤下 + 读-合并-写修 lost-update）；**试点接线：`semantic-flow` 的 `nominate`/`instr` 步**——`list_step` 降格为 list_pick 候选参数（值与规则仍是声明，红线②），runner 梯级裁决用不用它，list_pick 走确定性数据腿、过**指令回填门**（同运行重放）落盘，元素动作提名只进报告不落盘（其摊销证据属 hint 环）；list 分支补按本步 URL 的守卫导航。测试：`tests/nominate.test.ts` 11 + `tests/semantic-instructions.test.ts` 13 + `tests/semantic-nominate.test.ts` 11（含三臂 e2e：**学→摊销→drift 撤下→再学**））。**③ 运行期接线已落地（2026-10-18，opt-in）**：`semantic-flow --nominate-provider NAME`——仅 `nominate: true` 且无 `instr` 锁的步、②学习映射与①规则都弃权时，用**页面状态 + 页面条件化候选**问一次决策 provider；模型提名若是元素动作族，则作为**软先验**交给执行器（族内优先排序、**不丢其他族元素与上下文**；只有解析出的动作族与提名不符时才做一次**有界修复**，仍不成立 ⇒ `nominated_family_empty`/`nominated_family_mismatch` 结构化停因；hint 仍权威）——硬过滤被否：结构族 ≠ 语义动作（div-combobox/contenteditable/range 都是反例；已把**语义角色**扫进族分类：
 > `role=combobox/listbox→select`、`role=checkbox/switch→check`、`contenteditable/role=textbox→fill`，
 > 证据面仍按执行动作判，语义等价声明表是下一项）；纯运行期不回填、无上下文不问、provider 抛错/池外 = 该档弃权落⑤；账单加模型档（asks/abstains/errors）+ provider 身份。测试：executor 收窄 3 条 + semantic 接线 6 条；真服务端到端已验证（token-plan：模型按页面提名 click → 收窄执行 → done，账单 model 1）。**仍未做**：⑤ 对元素动作的按序重试（claim 不符当前直接 blocked，枚举猜错与模型违规尚未分开记） | ①②③⑤ 接 semantic-flow 试点（一个应用）；④ 挂既有 escalate | 首跑/二跑/漂移三臂；二跑零模型；删 `instr` 锁定即回到现状行为 |

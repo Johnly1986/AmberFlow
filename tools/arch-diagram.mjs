@@ -100,7 +100,7 @@ box(400, 106, 210, 78, "bx", "npm run apps", ["src/app/app-runner.ts", "数据�
 box(625, 106, 210, 78, "bx", "npm run learn · agent", ["tools/learn.ts --json --yes", "演示一次 → 录成应用包", "零模型重放通过才落盘"]);
 box(850, 106, 225, 78, "bx", "plan:flow · semantic", ["plan-flow / semantic-flow", "一句话+种子页 → 模板+站点档案", "跨站迁移 · 回填重放门"]);
 box(1090, 106, 175, 78, "bx", "plan-cli · datasource", ["plan_cli / datasource", "手写计划；站点=配置", "sources/*.json 发现制"]);
-box(1280, 106, 135, 78, "bx", "bench · 探针", ["bench.ts / live-*", "冻结计划跑分矩阵", "可达性长流程实测"]);
+box(1280, 106, 135, 78, "bx", "bench · 基线", ["bench.ts / apps:gen", "冻结计划跑分矩阵", "可达性记录已冻结"]);
 
 box(175, 196, 620, 84, "bxp", "DSH 插件模式（integrations/dsh-bridge）", [
   "四个工具：apps 列包 · run 跑应用 · learn 录流程 · plan 出模板",

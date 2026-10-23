@@ -157,7 +157,7 @@ export function doctorReport(p: Preflight): { ok: boolean; lines: string[] } {
 }
 
 /** The bundled job: two subgoals over `testpages/`, resolved entirely by plan-named targets. */
-function demoPlan(planPath: string): TaskPlan {
+export function demoPlan(planPath: string): TaskPlan {
   const base = `file://${path.join(REPO, "testpages")}`;
   return new TaskPlan(
     "在示例商店把无线鼠标加入购物车并打开购物车页",

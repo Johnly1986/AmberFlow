@@ -40,6 +40,8 @@ const readJson = (p: string): Record<string, unknown> | null => {
 interface Corpus {
   app_dirs: number;
   packs_with_journey: number;
+  /** 加载失败的 pack 只毁自己那一行（matrix/suite 同一纪律），如实报数而不是掀桌。 */
+  packs_load_failed: number;
   journey_entries: number;
   browser_steps: number;
   tool_steps: number;
@@ -79,6 +81,7 @@ function corpus(): Corpus {
   const appsDir = path.join(REPO, "apps");
   let packLines = 0, flowLines = 0, profileLines = 0, binLines = 0;
   let packs = 0, journeyEntries = 0, browser = 0, tool = 0, hinted = 0, jrLines = 0, namedTotal = 0;
+  let packsLoadFailed = 0;
   let flowApps = 0, flowSteps = 0;
   let hintsSteps = 0, cmdDecls = 0, urlStateSteps = 0;
   const cmdPackSet = new Set<string>();
@@ -100,11 +103,20 @@ function corpus(): Corpus {
     const packPath = path.join(dir, "pack.json");
     const flowPath = path.join(dir, "flow.json");
     if (fs.existsSync(packPath)) {
+      let pack: Record<string, unknown>;
+      let cov: ReturnType<typeof packHintCoverage>;
+      try {
+        pack = loadPack(packPath) as unknown as Record<string, unknown>;
+        // 覆盖率走单一实现 `packHintCoverage`（套件/matrix/图共用同一口径），本地不再数一遍。
+        cov = packHintCoverage(pack as never);
+      } catch {
+        // 残缺 pack.json 只毁自己那一行（与 apps_matrix / apps:suite 的 load-failed 同一纪律）：
+        // 计量刷新不因一个手改坏/悬挂测试暂留的沙盒坏包掀桌（该目录 flow/sites/bin 侧面随之整行跳过）。
+        packsLoadFailed++;
+        continue;
+      }
       packs++;
       packLines += nonEmpty(fs.readFileSync(packPath, "utf-8"));
-      const pack = loadPack(packPath) as unknown as Record<string, unknown>;
-      // 覆盖率走单一实现 `packHintCoverage`（套件/matrix/图共用同一口径），本地不再数一遍。
-      const cov = packHintCoverage(pack as never);
       browser += cov.browser; hinted += cov.hinted; tool += cov === undefined ? 0 : 0;
       namedTotal += cov.named;
       const roles = (pack["roles"] ?? {}) as Record<string, Record<string, unknown>>;
@@ -165,6 +177,7 @@ function corpus(): Corpus {
   return {
     app_dirs: fs.readdirSync(appsDir).length,
     packs_with_journey: packs,
+    packs_load_failed: packsLoadFailed,
     journey_entries: journeyEntries,
     browser_steps: browser,
     tool_steps: tool,

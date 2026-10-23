@@ -41,9 +41,8 @@ const CORE = new Set([
   "flow.ts", "hint-memory.ts", "index.ts", "model.ts", "model-artifacts.ts", "outcome-memory.ts",
   "picker.ts", "plan.ts", "planner.ts", "probe-set.ts", "rules.ts", "signal-induction.ts",
   "signals.ts", "start.ts", "tool-signals.ts",
-  // 探测/任务驱动：站点知识已全部搬进 apps/<id>/pack.json（见 probe-set.ts 的说明），
-  // 所以它们也进核心层——再往这里写死一个主机名，门禁就会红。
-  "live-capture.ts", "live-probe.ts", "ota-probe.ts", "qunar-probe.ts", "qunar-task.ts",
+  // 探测/任务驱动已于 2026-10-21 删除：用例统一走 apps/<id>/pack.json（配置即流程），
+  // 探针数据是冻结记录（bench/live-retest/），由 probes:baseline 门禁校验。
 ]);
 
 /** 不是站点知识的"主机"：本地地址与文档示例。 */
@@ -205,7 +204,22 @@ export function matrix(): {
   const rows: Row[] = [];
   const binAcc = { bin: 0 };            // bin/ 桩夹具的行数（不计入"应用逻辑"，但要在头条里说明）
   for (const dir of appDirs()) {
-    const pack = loadPack(path.join(dir, "pack.json"));
+    // 逐应用容错（与 apps_suite 同一纪律：坏包只毁自己那一行，不许掀掉整张矩阵）。
+    // 没有这层，一个残缺 pack.json（比如被中断的测试夹具）会让泄漏门禁整桌崩掉。
+    let pack: AppPack;
+    try {
+      pack = loadPack(path.join(dir, "pack.json"));
+    } catch (e) {
+      rows.push({
+        app: path.basename(dir), kind: "load-failed",
+        sources: 0, roles: 0, steps: 0, toolSteps: 0, invariants: 0,
+        declared: jsonLines(path.join(dir, "pack.json")), code: 0, tokens: [],
+        policy: "", hintCoverage: "", learn: "", generated: null,
+        modelAsks: null, confMax: null, reobserve: null,
+      });
+      void e;
+      continue;
+    }
     const srcDir = path.join(dir, "sources");
     const sources = fs.existsSync(srcDir)
       ? fs.readdirSync(srcDir).filter((f) => f.endsWith(".json")).length : 0;

@@ -239,6 +239,17 @@ export async function main(
   }
 
   if (v.tokenizer) {
+    // tokenizer.json 单件不够：AutoTokenizer 还读同目录的 tokenizer_config.json
+    // （HF 快照两件都有；只装一件会在运行期报 reading 'tokenizer_class'）。本地源顺手带上。
+    const cfgSrc = path.join(path.dirname(String(v.tokenizer)), "tokenizer_config.json");
+    const cfgDest = path.join(path.dirname(tokDest), "tokenizer_config.json");
+    if (fs.existsSync(cfgSrc)) {
+      fs.mkdirSync(path.dirname(cfgDest), { recursive: true });
+      fs.copyFileSync(cfgSrc, cfgDest);
+      io.out(`  已就位：${cfgDest}（AutoTokenizer 需要）`);
+    } else {
+      io.out("提示：源里没有 tokenizer_config.json——AutoTokenizer 可能需要它（本地目录源才自动带上）");
+    }
     io.out("");
     io.out(`tokenizer 装到了非 HF 位置；让引擎找到它：export LAYA_TOKENIZER_DIR=${path.dirname(tokDest)}`);
   }

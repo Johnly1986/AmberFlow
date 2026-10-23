@@ -2,6 +2,9 @@
   "name": "amberflow",
   "version": "1.0.0",
   "private": true,
+  "bin": {
+    "amber": "bin/amber.mjs"
+  },
   "type": "module",
   "description": "冻结计划的浏览器自动化中间件：LLM 只规划一次，laya 逐步执行，完成只认 DOM 信号",
   "exports": {
@@ -29,6 +32,7 @@
   "scripts": {
     "prepare": "node scripts/bootstrap.mjs",
     "start": "node --experimental-strip-types src/cli/start.ts",
+    "cli": "node --experimental-strip-types src/cli/main.ts",
     "doctor": "node --experimental-strip-types src/cli/start.ts --doctor",
     "model:fetch": "node --experimental-strip-types src/model/model-fetch.ts",
     "typecheck": "tsc --noEmit",
@@ -52,7 +56,6 @@
     "plan-cli": "node --experimental-strip-types tools/plan_cli.ts",
     "apps:matrix": "node --experimental-strip-types tools/apps_matrix.ts",
     "shortlist": "node --experimental-strip-types tools/shortlist_demo.ts",
-    "qunar": "node --experimental-strip-types src/sites/qunar-task.ts",
     "ip-config": "node --experimental-strip-types src/cli/ip-config.ts",
     "camera-entry": "node --experimental-strip-types src/cli/camera-entry.ts",
     "picker-server": "node --experimental-strip-types src/cli/picker-server.ts",

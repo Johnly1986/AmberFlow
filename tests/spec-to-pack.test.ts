@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadPack, validatePack, type AppPack } from "../src/app/app-pack.ts";
-import { discoverSpecs, emitPlan } from "../src/sites/transfer-task.ts";
+import { discoverSpecs, emitPlan } from "../src/flow/transfer-flow.ts";
 import {
   checkAgainstFlow, flowFor, generatePack, generatedApps, inexpressibleKeys, planSha, serializePack,
   specPathOf, structureFromSeed, type Flow,

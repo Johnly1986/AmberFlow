@@ -2,12 +2,7 @@
  * 迁移执行器 —— `transfer/transfer_task.py` 的 TS 孪生：配置（`specs/<site>.json`）→
  * 冻结计划 → 生产循环 → 判分 → 迁移度量。
  *
- *     tsx src/sites/transfer-task.ts --list-sites         # 有哪些站点 spec
- *     tsx src/sites/transfer-task.ts --site skybook       # 迁移目标（复刻站 #2）
- *     tsx src/sites/transfer-task.ts --site ctrip         # 同一骨架跑回携程复刻站
- *     tsx src/sites/transfer-task.ts --both               # 两个都跑，写一份对比
- *     tsx src/sites/transfer-task.ts --metrics-only       # 只算迁移指标，不开浏览器
- *     tsx src/sites/transfer-task.ts --emit-plan skybook  # 配置 → 冻结计划 JSON
+ *     （原驱动 CLI 已于 2026-10-21 删除；用例统一走 apps/<id>/pack.json。本文件只留机器。）
  *
  * 这个文件里**没有**任何站点知识：站点来自 `transfer/specs/*.json`，数据模块名写在
  * spec 的 `data_module` 里（TS 侧用注册表映射到已移植模块），判分复用携程的判分口径
@@ -39,7 +34,7 @@ import {
   type FlowSpec,
 } from "../flow/flow.ts";
 import * as C from "../data/ctrip-data.ts";
-import * as CT from "./ctrip-task.ts";
+import * as CT from "../data/ctrip-oracle.ts";
 import * as D2 from "../data/transfer-data2.ts";
 import * as D3 from "../data/transfer-data3.ts";
 import * as D4 from "../data/transfer-data4.ts";
@@ -47,10 +42,7 @@ import * as D5 from "../data/transfer-data5.ts";
 import * as D6 from "../data/transfer-data6.ts";
 import * as D7 from "../data/transfer-data7.ts";
 import { TaskPlan, type Subgoal } from "../engine/plan.ts";
-import { runSubgoalWithRetries, type MiddlewareLike } from "../engine/planner.ts";
 import { browserSession, BrowserMiddleware } from "../engine/executor.ts";
-import type { AnyPage, PwLike } from "../engine/executor.ts";
-import { getLayaRuntime, installLayaRuntime } from "../model/model.ts";
 import type { AuditVerdict, Auditor, TraceStep } from "../engine/audit.ts";
 
 export const RESULTS = path.join(REPO, "transfer", "results");
@@ -140,71 +132,6 @@ export interface Ledger {
   hotels: HotelRecord[];
   skipped: number;
   retried: number;
-}
-
-/* ---------------------------------------------------------------- 执行 */
-
-/** 站点自己的账本：点了「记录」才会往里写。 */
-export async function harvest(page: AnyPage, ledgerJs: string): Promise<Partial<Ledger>> {
-  try {
-    // Playwright TS 的 evaluate 把字符串当表达式；把 `window.__XXX` 的名字取出来，
-    // 传真正的函数（见文件头偏差说明 2）。
-    const m = /window\.(__[A-Za-z0-9_]+)/.exec(ledgerJs);
-    if (!m) return {};
-    const key = m[1]!;
-    const rec = await page.evaluate(
-      (name: string) => (globalThis as unknown as Record<string, unknown>)[name], key);
-    return (rec as Partial<Ledger>) ?? {};
-  } catch {
-    return {};
-  }
-}
-
-/** Python 的方法名逐字保留（执行器之外没有别的名字依赖它）。 */
-export const _harvest = harvest;
-
-export interface RunSubgoalsResult {
-  traces: TraceStep[];
-  /** 第一个没拿到 DOM 信号的子目标的 stop_reason；全过则为 null。 */
-  blocked: string | null;
-  records: Ledger;
-}
-
-/**
- * 按顺序跑完一份计划；任一子目标没拿到 DOM 信号就停下（后面的阶段要用前面阶段的记录）。
- *
- * retries / when / 子目标级 slots / hint 列表只有一份实现
- * （`planner.runSubgoalWithRetries`）—— 这里只加任务级的那部分：每个 done 的子目标之后
- * 收割账本，遇到阻塞就停整条流程。
- */
-export async function runSubgoals(
-  mw: MiddlewareLike, page: AnyPage, pw: PwLike, plan: TaskPlan, ledgerJs: string,
-  verbose = true,
-): Promise<RunSubgoalsResult> {
-  const traces: TraceStep[] = [];
-  const got: Ledger = { flights: [], hotels: [], skipped: 0, retried: 0 };
-  for (let i = 0; i < plan.subgoals.length; i++) {
-    const sg = plan.subgoals[i]!;
-    if (verbose) console.log(`  [subgoal ${i + 1}/${plan.subgoals.length}] ${sg.desc}`);
-    const { rep, attempt, steps } = await runSubgoalWithRetries(
-      mw, sg, plan, sg.start_url ?? "", page, pw, verbose);
-    traces.push(...steps);
-    if (attempt > 1) {
-      got.retried += 1;
-      if (verbose) console.log(`    [retried] ${sg.desc} 成功于第 ${attempt} 次尝试`);
-    }
-    if (rep.skipped) got.skipped += 1;
-    if (!rep.done) {
-      if (verbose) console.log(`    -> BLOCKED after ${attempt} attempt(s): ${rep.stop_reason}`);
-      return { traces, blocked: rep.stop_reason, records: got };
-    }
-    const rec = await harvest(page, ledgerJs);
-    for (const k of ["flights", "hotels"] as const) {
-      got[k].push(...(((rec[k] as never[]) ?? []) as never[]));
-    }
-    if (verbose) console.log(`    -> done (${rep.stop_reason})`);
-  }
-  return { traces, blocked: null, records: got };
 }
 
 /* ---------------------------------------------------------------- 消融 */
@@ -313,12 +240,6 @@ export function verifyWith(oracle: Oracle, records: Partial<Ledger>, checkin: st
   };
 }
 
-/* ---------------------------------------------------------------- runSite */
-
-export interface MiddlewareWithAuditor extends MiddlewareLike {
-  auditor: Auditor;
-}
-
 export interface StepRecord {
   step?: unknown;
   desc?: unknown;
@@ -344,79 +265,6 @@ export interface SiteResult {
   audit: AuditVerdict;
   subgoals: number;
   steps: StepRecord[];
-}
-
-export interface RunSiteOptions {
-  verbose?: boolean;
-  dropWhen?: boolean;
-  dropRetries?: boolean;
-}
-
-export async function runSite(
-  key: string, spec: FlowSpec, mw: MiddlewareWithAuditor, outdir: string,
-  opts: RunSiteOptions = {},
-): Promise<SiteResult> {
-  const { verbose = true, dropWhen = false, dropRetries = false } = opts;
-  const oracle = oracleFor(spec);
-  const dates = oracle.nextWeekDates();
-  const goal = CT.GOAL;
-  const state = path.join(outdir, `state_${key}.json`);
-  fs.mkdirSync(outdir, { recursive: true });
-  console.log(`\n=== ${key}（${spec.name}, ${spec.language}）===`);
-  const session = await browserSession();
-  let traces: TraceStep[] = [];
-  let block: string | null = null;
-  let records: Ledger = { flights: [], hotels: [], skipped: 0, retried: 0 };
-  let fSubgoals = 0;
-  let hSubgoals = 0;
-  let checkin: string | null = null;
-  try {
-    const flightSgs = deriveFlightSubgoals(spec, dates, oracle.weekdayCn);
-    const fplan = new TaskPlan(goal, _prepare(flightSgs, dropWhen, dropRetries), state, spec.slots ?? null);
-    fSubgoals = fplan.subgoals.length;
-    console.log(`-- 阶段一：机票 ${fplan.subgoals.length} 个子目标`);
-    const r1 = await runSubgoals(mw, session.page, session.pw, fplan, String(spec.ledger_js ?? ""), verbose);
-    traces = r1.traces;
-    block = r1.blocked;
-    records = r1.records;
-    if (block === null && records.flights.length) {
-      checkin = records.flights.reduce((best, r) => (r.price < best.price
-        || (r.price === best.price && r.date < best.date) ? r : best)).date;
-      const hotelSgs = deriveHotelSubgoals(spec, checkin);
-      const hplan = new TaskPlan(goal, _prepare(hotelSgs, dropWhen, dropRetries), state, spec.slots ?? null);
-      hSubgoals = hplan.subgoals.length;
-      console.log(`-- 阶段二：酒店（出发当日 = ${checkin}）${hplan.subgoals.length} 个子目标`);
-      const r2 = await runSubgoals(mw, session.page, session.pw, hplan, String(spec.ledger_js ?? ""), verbose);
-      traces = traces.concat(r2.traces);
-      block = r2.blocked;
-      records.hotels = r2.records.hotels;
-      records.skipped += r2.records.skipped;
-      records.retried += r2.records.retried;
-    } else if (block === null) {
-      block = "机票阶段没有记录到任何航班，无法确定出发当日";
-    }
-  } finally {
-    await session.close();
-  }
-
-  // 判分代码不动，只换数据源（Python 是临时替换 CT.C）
-  const ver = verifyWith(oracle, records, checkin);
-  const verdict = await mw.auditor.audit(goal, traces, block === null);
-  if (records.skipped) console.log(`-- 条件子目标跳过 ${records.skipped} 个（前置条件不成立，未动作）`);
-  if (records.retried) console.log(`-- 重试后成功的子目标 ${records.retried} 个`);
-  console.log(`-- 判分 ${ver.checks.filter((c) => c.ok).length}/${ver.checks.length}；`
-    + `blocked=${block}；audit=${verdict.verdict}`);
-  return {
-    site: key, profile: spec.name, language: spec.language,
-    spec: spec._path ?? "", dates, checkin, records,
-    skipped: records.skipped, retried: records.retried,
-    dropped_when: dropWhen, dropped_retries: dropRetries,
-    verify: ver, blocked: block, audit: verdict,
-    subgoals: fSubgoals + (checkin ? hSubgoals : 0),
-    steps: traces.map((t) => ({
-      step: t.step, desc: t.desc, how: t.how, method: t.method, conf: t.conf,
-    })),
-  };
 }
 
 /* ---------------------------------------------------------------- 产出 */
@@ -503,67 +351,11 @@ export function emitPlan(key: string, spec: FlowSpec, outdir: string): string {
   return plan.path;
 }
 
-/* ---------------------------------------------------------------- main */
-
-export interface MainOptions {
-  site?: string;
-  both?: boolean;
-  metricsOnly?: boolean;
-  emitPlan?: string;
-  listSites?: boolean;
-  out?: string;
-  maxSteps?: number;
-  quiet?: boolean;
-  noWhen?: boolean;
-  noRetries?: boolean;
-}
-
-/** `argparse` 的最小等价物（与 ctrip-task 同一惯例，多了迁移专属开关）。 */
-export function parseArgv(argv: readonly string[]): MainOptions {
-  const o: MainOptions = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]!;
-    const next = (): string => String(argv[++i]);
-    switch (a) {
-      case "--site": o.site = next(); break;
-      case "--both": o.both = true; break;
-      case "--metrics-only": o.metricsOnly = true; break;
-      case "--emit-plan": o.emitPlan = next(); break;
-      case "--list-sites": o.listSites = true; break;
-      case "--out": o.out = next(); break;
-      case "--max-steps": o.maxSteps = Number(next()); break;
-      case "--quiet": o.quiet = true; break;
-      case "--no-when": o.noWhen = true; break;
-      case "--no-retries": o.noRetries = true; break;
-      default:
-        if (a.startsWith("--site=")) o.site = a.slice(7);
-        else if (a.startsWith("--emit-plan=")) o.emitPlan = a.slice(12);
-        else if (a.startsWith("--out=")) o.out = a.slice(6);
-        else if (a.startsWith("--max-steps=")) o.maxSteps = Number(a.slice(12));
-        else throw new Error(`unrecognized argument: ${a}`);
-    }
-  }
-  return o;
-}
-
-/** 没装 runtime 时惰性装 ONNX 实现（离线测试会先装脚本模型，不会走到这里）。 */
-async function ensureRuntime(): Promise<void> {
-  try {
-    getLayaRuntime();
-    return;
-  } catch {
-    /* not configured yet */
-  }
-  const m = await import("../model/laya-onnx.ts");
-  installLayaRuntime(m.createLayaOnnxRuntime());
-}
-
 export interface MigrationMetricsFile {
   baseline: string;
   sites: Record<string, Record<string, unknown>>;
 }
 
-/** 基准（携程手写计划）+ 每个 spec 展开后的迁移度量。不开浏览器。 */
 export function migrationMetricsForAll(
   specs: Record<string, FlowSpec>, dates: readonly string[],
 ): MigrationMetricsFile {
@@ -587,92 +379,4 @@ export function migrationMetricsForAll(
     };
   }
   return { baseline: "ctrip/ctrip_task.py 手写计划（未经配置）", sites };
-}
-
-export async function main(argv?: readonly string[]): Promise<number> {
-  const args = parseArgv(argv === undefined ? process.argv.slice(2) : argv);
-  const specs = discoverSpecs();
-  const outdir = args.out ?? RESULTS;
-  fs.mkdirSync(outdir, { recursive: true });
-  const verbose = !args.quiet;
-
-  if (args.listSites || args.emitPlan) {
-    for (const [key, spec] of Object.entries(specs)) {
-      if (args.emitPlan && key !== args.emitPlan) continue;
-      if (args.emitPlan) console.log(`${key}: ${emitPlan(key, spec, outdir)}`);
-      else {
-        console.log(`${key.padEnd(10)} ${String(spec.name).padEnd(20)} `
-          + `${String(spec.language ?? "").padEnd(6)} shape=${shape(spec).join(" · ")}  ${spec._path}`);
-      }
-    }
-    return 0;
-  }
-
-  if (args.site && !(args.site in specs)) {
-    throw new Error(`argument --site: invalid choice: '${args.site}' (choose from ${JSON.stringify(Object.keys(specs).sort())})`);
-  }
-  const sites = args.site ?? "skybook";
-  const dates = C.nextWeekDates();
-  const metrics = migrationMetricsForAll(specs, dates);
-  console.log("=== 迁移指标（基准：携程手写计划）===");
-  for (const [key, m] of Object.entries(metrics.sites)) {
-    const sub = m.subgoals as { baseline: number; other: number };
-    const acts = m.actions as { baseline: number; other: number };
-    const shapeM = m.shape as { baseline: string[]; other: string[] };
-    console.log(`  ${key.padEnd(9)} 子目标 ${sub.baseline} vs ${sub.other}；`
-      + `共享角色 ${String(m.shared_roles)}，描述逐字相同 ${String(m.desc_identical_raw)}`
-      + `（归一化 ${String(m.desc_identical_normalized)}）；`
-      + `三件套改写 ${JSON.stringify(m.fields_changed)}；动作 ${JSON.stringify(acts)}；`
-      + `多出的角色 ${JSON.stringify(m.extra_roles)}`);
-    console.log(`            形状 baseline ${shapeM.baseline.join(" · ")}`);
-    console.log(`            形状 ${key.padEnd(8)} ${shapeM.other.join(" · ")}`);
-  }
-
-  if (args.metricsOnly) {
-    fs.writeFileSync(path.join(outdir, "migration_metrics.json"),
-      JSON.stringify({ baseline: metrics.baseline, sites: metrics.sites }, null, 2), "utf-8");
-    console.log(`\n写入 ${path.join(outdir, "migration_metrics.json")}`);
-    return 0;
-  }
-
-  // 只有真跑站点时才需要模型 runtime（--metrics-only 不开浏览器、不装模型）。
-  await ensureRuntime();
-  const mw = new BrowserMiddleware({
-    maxSteps: args.maxSteps ?? 6,
-    confirmFn: (desc: string) => CT.demoUser(desc, !verbose),
-  }) as unknown as MiddlewareWithAuditor;
-  (mw as unknown as { _planVerbose: boolean })._planVerbose = verbose;
-  console.log(`\nmiddleware ready (auditor=${mw.auditor.constructor.name}, `
-    + `sites=${args.both ? "all" : sites})`);
-  const keys = args.both ? Object.keys(specs).sort() : [sites];
-  const results: SiteResult[] = [];
-  for (const k of keys) {
-    results.push(await runSite(k, specs[k]!, mw, outdir, {
-      verbose, dropWhen: args.noWhen, dropRetries: args.noRetries,
-    }));
-  }
-  for (const res of results) {
-    console.log(`  写入 ${writeResultMd(res, specs[res.site]!, outdir)}`);
-  }
-  const payload = {
-    goal: CT.GOAL,
-    metrics,
-    runs: results.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => k !== "steps"))),
-    steps: Object.fromEntries(results.map((r) => [r.site, r.steps])),
-  };
-  fs.writeFileSync(path.join(outdir, "migration_metrics.json"),
-    JSON.stringify(payload, null, 2), "utf-8");
-  const ok = results.every((r) => r.verify.ok && r.blocked === null);
-  console.log("\n=== 结论 ===");
-  for (const r of results) {
-    console.log(`  ${r.site.padEnd(8)} 判分 `
-      + `${r.verify.checks.filter((c) => c.ok).length}/${r.verify.checks.length}`
-      + `  blocked=${r.blocked}`);
-  }
-  console.log(`迁移是否成立（同一骨架 + 配置，只换适配器，各站点都判分通过）：${ok ? "是" : "否"}`);
-  return ok ? 0 : 1;
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().then((code) => process.exit(code));
 }

@@ -103,7 +103,7 @@ band(64, 150, "① 入口层 — 一条命令 / 一次工具调用（误输=一�
 box(60, 96, 268, 52, "bx", "npm start · doctor", ["src/cli/start.ts：开箱任务 / 演示一次归纳", "$doctor 缺件点名 + 一条补齐命令"]);
 box(338, 96, 268, 52, "bx", "npm run apps · semantic", ["app-runner / semantic-flow", "整跑一条链 / 模板跨站迁移"]);
 box(616, 96, 292, 52, "bx", "learn · agent · plan:flow", ["tools/learn.ts / src/flow/plan-flow.ts", "演示一次或一句话 → 包/模板，门槛见 ③"]);
-box(918, 96, 272, 52, "bx", "plan-cli · datasource · bench", ["手写计划；站点=配置；跑分矩阵", "$探针 live-*：URL 全在 pack 声明"]);
+box(918, 96, 272, 52, "bx", "plan-cli · datasource · bench", ["手写计划；站点=配置；跑分矩阵", "$探针记录冻结：probes:baseline 校验"]);
 box(60, 158, 546, 44, "bxp", "DSH 插件（integrations/dsh-bridge）：amberflow_apps / run / learn", ["桥起 CLI 子进程、读 *-result.json 归纳 summary；引擎对 DSH 零引用"]);
 box(616, 158, 292, 44, "bxm", "npm run model:fetch（产物通道）", [".part 先落 · SHA256 先验后换 · 半途态整组撤回"]);
 box(918, 158, 272, 44, "bxe", "度量与门禁（一条命令可复现）", ["matrix/suite/gen/probes/nominate --check", "$提名实验台：冻结产物复算不一致即红"]);

@@ -446,7 +446,17 @@ async function connectPage(opts: {
       close: async () => { await browser.close().catch(() => {}); },
     };
   }
-  if (!opts.url) throw new Error("没有可用的页面：给 --url，或用 --cdp 连上你正在用的浏览器");
+  if (!opts.url) {
+    // 新 `amber record` 在 TTY 下允许空白页起步：打开可见浏览器，让用户自己导航。
+    // 回放仍必须给 --url / --cdp（否则不知道要回到哪一页），由 wrapper 在入口挡住。
+    const session = await browserSession(opts.headless);
+    const page = session.page;
+    return {
+      page, attached: false,
+      url: pageUrl(page), title: await page.title().catch(() => ""),
+      close: () => session.close(),
+    };
+  }
   const session = await browserSession(opts.headless);
   const page = session.page;
   await (page as unknown as { goto(u: string, o?: unknown): Promise<unknown> })
@@ -483,6 +493,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (values.help) { console.log(USAGE); return 0; }
 
   const interactive = Boolean(process.stdin.isTTY) && !values.yes;
+  // `--json` 时 stdout 只能有一个对象；交互提示必须走 stderr。
+  const promptOut = values.json ? process.stderr : process.stdout;
   const say = (l: string): void => { if (!values.json) console.log(l); };
   const io: LearnIO = {
     out: say,
@@ -492,7 +504,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         throw new Error(`需要确认但没有终端：${q}（CI/Agent 请加 --yes）`);
       }
       const rl = await import("node:readline/promises");
-      const r = rl.createInterface({ input: process.stdin, output: process.stdout });
+      const r = rl.createInterface({ input: process.stdin, output: promptOut });
       try {
         const a = (await r.question(`${q} [${dflt ? "y" : "n"}] `)).trim().toLowerCase();
         return a === "" ? dflt : a.startsWith("y");
@@ -525,7 +537,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
     if (interactive && !values.goal) {
       const rl = await import("node:readline/promises");
-      const r = rl.createInterface({ input: process.stdin, output: process.stdout });
+      const r = rl.createInterface({ input: process.stdin, output: promptOut });
       try {
         const a = (await r.question(`你要做什么？（直接回车 = 「${conn.title}」）\n> `)).trim();
         if (a) values.goal = a;
@@ -549,7 +561,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       say("现在请你在页面上按正常方式把这件事做一遍（我只能录「点击」和「填值」两种动作，");
       say("元素没有 data-test / id / name 的话我会拒绝录制并告诉你）。做完回到这里按回车。");
       const rl = await import("node:readline/promises");
-      const r = rl.createInterface({ input: process.stdin, output: process.stdout });
+      const r = rl.createInterface({ input: process.stdin, output: promptOut });
       try { await r.question("做完按回车 > "); } finally { r.close(); }
       // 重新回到起点，按录下来的动作"正式"跑一遍并逐步抓状态
       const bag = await readRecorded(conn.page);
@@ -673,5 +685,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
-  process.exit(await main());
+  // 不用 process.exit：stdout 被管道捕获时，它可能在 JSON 写完前截断流。
+  process.exitCode = await main();
 }

@@ -28,7 +28,7 @@ import { parseArgs } from "node:util";
 import { appDirs, expandPack, loadPack, validatePack, type AppPack } from "../src/app/app-pack.ts";
 import { FROZEN_TODAY } from "./frozen-today.ts";
 import { pathToFileURL } from "node:url";
-import { discoverSpecs, emitPlan } from "../src/sites/transfer-task.ts";
+import { discoverSpecs, emitPlan } from "../src/flow/transfer-flow.ts";
 
 const isDict = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);

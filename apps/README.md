@@ -278,7 +278,7 @@ npm run apps -- --app cli-report --allow-dangerous   # 桩工具：退出码/JSO
 npm run apps -- --app repo-report                    # 真实工具：git（行文本）+ jq（JSON）
 npm run apps -- --app cli-report                     # 不带 --allow-dangerous：危险步被拒绝、不落盘
 
-npm run apps -- --app ctrip-case --no-sources        # 19 个冻结子目标跑本地复刻站（与 src/sites/ctrip-task.ts 的计划逐字段全等）
+npm run apps -- --app ctrip-case --no-sources        # 19 个冻结子目标跑本地复刻站（与 src/data/ctrip-oracle.ts 的冻结计划逐字段全等）
 npm run apps -- --app ip-config                     # Excel IP 规划表 → 设备网络页（含"表格写错的那行由设备页自己拒绝"）
 npm run apps -- --app camera-entry                   # Excel 类型列路由两套表单（空类型行用行内证据、坏序列号显式拒绝）
 npm run apps -- --app transfer-voyagio --no-sources  # 第二个复刻站的完整旅程：两页向导（24 步）
@@ -419,18 +419,13 @@ stdio 的完成真值仍是进程观察面；`retries`/`dangerous` 不支持（�
 2. 占位符只有四个（`{date}` / `{date_slash}` / `{checkout}` / `{checkout_slash}`，纯日历运算，不碰时钟），未知占位符报错；
 3. `browser` / `repeat` / `roles` 只能指向声明过的 http 目标 id，未知键一律报错。
 
-驱动只剩「怎么测」：`src/sites/live-probe.ts`、`src/sites/live-capture.ts`、`src/sites/ota-probe.ts`、`src/sites/qunar-probe.ts`、
-`src/sites/qunar-task.ts` 现在都**不含任何站点标识**，因此它们已进入共享层「核心」名单——
+探针驱动已于 2026-10-21 删除：站点知识在包里、探针数据是冻结记录（`npm run probes:baseline -- --check` 校验），
+复测通道随驱动退役关闭——
 再往里面写死一个主机名，`npm run apps:matrix` 立刻报泄漏。
 
 ```bash
-node --experimental-strip-types src/sites/live-probe.ts                 # 携程可达性矩阵（写 ctrip/results/live_probe.json）
-node --experimental-strip-types src/sites/live-probe.ts --out /tmp/x.json
-node --experimental-strip-types src/sites/live-capture.ts --date 2026-10-08
-node --experimental-strip-types src/sites/live-capture.ts --out /tmp/dir # 快照与 summary.json 写到别处（复测不碰冻结语料）
-node --experimental-strip-types src/sites/ota-probe.ts --out /tmp/ota.json
-node --experimental-strip-types src/sites/qunar-probe.ts                # qunar 对照
-node --experimental-strip-types src/sites/qunar-task.ts                 # 抓取计划来自 apps/qunar-live/pack.json 的 journey
+npm run probes:baseline -- --check                      # 包 probe 声明 ↔ 已入库冻结记录逐项比对
+npm run apps -- --app qunar-live --out /tmp/qunar       # qunar 线上旅程（走配置；需真网络 + 真模型）
 ```
 
 最近一次线上复测（8/8 用例、34/34 子目标、四个探针的逐项观测）：[bench/live-retest/REPORT.md](../bench/live-retest/REPORT.md)。

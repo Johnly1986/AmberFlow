@@ -140,7 +140,7 @@ export interface AppRunOptions {
   pickAsks?: () => number;
   /**
    * P1 `tieredHint` 的出口（默认关 = 今天逐字节）：hint 档内歧义变成对模型的更小提问。
-   * 由 `--tiered-hint` / 桥的 `tiered_hint` 打开，用于线上包 A/B（EXECUTION_LAYER_SPLIT_PLAN §4#1）。
+   * 由 `--tiered-hint` / 桥的 `tiered_hint` 打开，用于线上包 A/B（docs/ARCHITECTURE_REVIEW.md 执行层三段化 P1）。
    */
   tieredHint?: boolean;
   /**
@@ -1164,7 +1164,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const n = ["http", "alts", "mobile", "capture"]
       .reduce((k, key) => k + (Array.isArray(sets[key]) ? (sets[key] as unknown[]).length : 0), 0);
     console.error(`app ${pack.id} 是测量型应用（探针集，${n} 个目标），没有 journey：`
-      + "请用对应的探针驱动（src/sites/live-probe.ts / live-capture.ts / ota-probe.ts / qunar-probe.ts），"
+      + "探针数据是冻结记录（bench/live-retest/REPORT.md；`npm run probes:baseline -- --check` 校验），"
       + "或用 `npm run apps -- --app " + pack.id + " --dry` 只看声明。");
     return 2;
   }

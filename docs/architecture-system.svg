@@ -37,7 +37,7 @@
 <rect x="918" y="96" width="272" height="52" class="bx"/>
 <text x="929" y="115" class="t" font-size="12.5">plan-cli · datasource · bench</text>
 <text x="929" y="131" class="s">手写计划；站点=配置；跑分矩阵</text>
-<text x="929" y="145" class="sm">探针 live-*：URL 全在 pack 声明</text>
+<text x="929" y="145" class="sm">探针记录冻结：probes:baseline 校验</text>
 <rect x="60" y="158" width="546" height="44" class="bxp"/>
 <text x="71" y="177" class="t" font-size="12.5">DSH 插件（integrations/dsh-bridge）：amberflow_apps / run / learn</text>
 <text x="71" y="193" class="s">桥起 CLI 子进程、读 *-result.json 归纳 summary；引擎对 DSH 零引用</text>
