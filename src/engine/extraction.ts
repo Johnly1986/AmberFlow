@@ -13,6 +13,8 @@
  * hint_lookup's multi-word labels in the Python version.
  */
 
+import { parseHint, type ParsedHint } from "./hint.ts";
+
 /* ------------------------------------------------------------------ element model */
 
 export interface Elem {
@@ -402,7 +404,7 @@ const NEAR_JS = String.raw`(arg) => {` + COLLECT_JS + String.raw`
 const PASS_NEAR = compile("arg", `return (${NEAR_JS})(arg);`);
 /** target_hint recovery pass (stamps data-hintref in the same pass). */
 const HINT_HEAD = String.raw`(arg) => {
-            const h = arg.hint, all = [];
+            const all = [], p = arg.parsed, h = arg.hint;
             __collectAll(document, arg.sel, all);
             const labelOf = (e) => {
                 const first = e.childNodes.length ? String(e.childNodes[0].textContent||'').trim() : '';
@@ -410,33 +412,29 @@ const HINT_HEAD = String.raw`(arg) => {
                         (e.innerText||'').trim() || e.placeholder || e.value || '').replace(/\s+/g,' ').trim();
             };
             const hits = [];
-            let m;
-            if (h.startsWith('#')) {
+            if (p.kind === 'id') {
                 all.forEach((e, i) => {
-                    if ((e.id || '').toLowerCase() === h.slice(1)) hits.push(i);
+                    if ((e.id || '').toLowerCase() === p.value) hits.push(i);
                 });
-            } else if ((m = h.match(/^(?:([a-z]+))?\[(?:href|data-test|test|id|name|class|near)~([^\]]+)\]$/))) {
-                const [, pre, v] = m;
+            } else if (p.kind === 'attrSubstr') {
                 all.forEach((e, i) => {
-                    const tag = e.tagName.toLowerCase();
-                    if (pre && tag !== pre) return;
+                    if (p.tag && e.tagName.toLowerCase() !== p.tag) return;
                     const hay = (e.getAttribute('href')||'') + ' ' + (e.getAttribute('data-test')||'') + ' ' +
                                 (e.id||'') + ' ' + (e.name||'') + ' ' + labelOf(e);
-                    if (hay.toLowerCase().includes(v.toLowerCase())) hits.push(i);
+                    if (hay.toLowerCase().includes(p.value)) hits.push(i);
                 });
-            } else if ((m = h.match(/^(?:([a-z]+))?\[([a-z-]+)=([^\]]+)\]$/))) {
-                const [, pre, k, v] = m;
-                const attr = k === 'test' ? 'data-test' : k === 'type' ? 'type' : k;
+            } else if (p.kind === 'attrEq') {
                 all.forEach((e, i) => {
-                    const tag = e.tagName.toLowerCase();
-                    if (pre && tag !== pre) return;
-                    if ((e.getAttribute(attr)||'').toLowerCase() === v.toLowerCase()) hits.push(i);
+                    if (p.tag && e.tagName.toLowerCase() !== p.tag) return;
+                    if ((e.getAttribute(p.attr)||'').toLowerCase() === p.value) hits.push(i);
                 });
-            } else if (/^(button|link|a|input|textarea|select)$/.test(h)) {
-                const want = h === 'link' ? 'a' : h;
+            } else if (p.kind === 'tag') {
+                const want = p.tag === 'link' ? 'a' : p.tag;
                 all.forEach((e, i) => { if (e.tagName.toLowerCase() === want) hits.push(i); });
             } else {
-                const tok = h.toLowerCase();
+                // 裸词；nearToken（无括号的 tag~token）在池侧有近邻上下文、DOM 侧没有，
+                // 维持回捞路径的旧行为：按整串做裸词匹配（几乎不命中，等于"回捞不到"）。
+                const tok = p.kind === 'nearToken' ? h : p.token;
                 all.forEach((e, i) => {
                     const lab = labelOf(e).toLowerCase(), dt = (e.getAttribute('data-test')||'').toLowerCase();
                     if (dt === tok || dt.includes('-'+tok) || lab === tok || lab.split(/\s+/).includes(tok))
@@ -782,6 +780,14 @@ export async function addNearContext(page: PageLike, elems: ElemPool): Promise<v
  * rows ate all 40 slots and the plan's target was simply absent).
  * Winners are stamped `data-hintref` in the same pass that identifies them.
  */
+/**
+ * `hint_lookup` 的调用参数：**解析只做一次**，页面函数拿到的是 `parsed`（P0-B）。
+ * 导出它是为了差分测试能核验"两面用的是同一个解析结果"，而不是各解析一遍。
+ */
+export function hintLookupArgs(hint: string): { hint: string; parsed: ParsedHint; sel: string } {
+  return { hint: hint.trim().toLowerCase(), parsed: parseHint(hint), sel: INTERACTIVE_ALL };
+}
+
 export async function hintLookup(page: PageLike, hint: string): Promise<ElemPool> {
   const out: ElemPool = {};
   const frames = framesOf(page);
@@ -789,7 +795,7 @@ export async function hintLookup(page: PageLike, hint: string): Promise<ElemPool
     let rows: Array<Record<string, unknown>> | null = null;
     try {
       rows = (await frames[fi]!.evaluate(PASS_HINT,
-        { hint: hint.trim().toLowerCase(), sel: INTERACTIVE_ALL })) as Array<Record<string, unknown>> | null;
+        hintLookupArgs(hint))) as Array<Record<string, unknown>> | null;
     } catch {
       continue;
     }

@@ -11,6 +11,7 @@
  * Ported 1:1 from `layaapp/rules.py`; the Python unit tests are the spec.
  */
 import { firstIfSame, type ElemPool } from "./extraction.ts";
+import { parseHint, poolAttr } from "./hint.ts";
 
 export const STOP_TOKENS = new Set([
   "page", "open", "click", "then", "with", "this", "that", "into", "from",
@@ -143,11 +144,6 @@ export function affordanceRule(
   return null;
 }
 
-const ATTR_ALIASES: Record<string, string> = {
-  test: "data_test", "data-test": "data_test", type: "input_type",
-};
-const alias = (k: string): string => ATTR_ALIASES[k] ?? k;
-
 /**
  * target_hint grammar (frozen-plan disambiguation):
  *     id           #searchInput
@@ -182,7 +178,7 @@ export interface HintCandidates {
 
 /** The 6 hint grammars, single-parsed; `sink` (if given) records the candidate set. */
 function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | null): string | null {
-  const h = hint.trim().toLowerCase();
+  const parsed = parseHint(hint);
   const entries = Object.entries(elems);
   /** Record the strongest tier's refs, then resolve exactly as before. */
   const emit = (refs: string[], tier: number): string | null => {
@@ -190,16 +186,13 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
     return firstIfSame(new Set(refs), elems);
   };
 
-  if (h.startsWith("#")) {
-    return emit(entries.filter(([, e]) => String(e.id ?? "").toLowerCase() === h.slice(1)).map(([r]) => r), 0);
+  if (parsed.kind === "id") {
+    return emit(entries.filter(([, e]) => String(e.id ?? "").toLowerCase() === parsed.value).map(([r]) => r), 0);
   }
-  if (h.includes("[") && h.split("[", 2)[1]!.includes("~")) {
-    // attr~substr: substring attribute match, e.g. a[href~travel_2]
-    const [pre, restRaw] = [h.slice(0, h.indexOf("[")), h.slice(h.indexOf("[") + 1)];
-    const rest = restRaw.replace(/\]$/, "");
-    const tilde = rest.indexOf("~");
-    const k = alias(rest.slice(0, tilde));
-    const v = rest.slice(tilde + 1);
+  if (parsed.kind === "attrSubstr") {
+    const pre = parsed.tag;
+    const k = poolAttr(parsed.attr);
+    const v = parsed.value;
     const cf = (x: unknown): string => String(x ?? "").toLowerCase();
     const hitList = entries.filter(([, e]) => (!pre || e.tag === pre) && cf(e[k]).includes(v));
     // TIERED resolution, measured on live pages. A substring hint that names a
@@ -219,33 +212,27 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
     if (slug.length) return emit(slug.map(([r]) => r), 2);
     return emit(hitList.map(([r]) => r), 3);
   }
-  if (h.split("[").pop()!.includes("~")) {
+  if (parsed.kind === "nearToken") {
     // near~token: the container identity line (add_near_context) disambiguates
     // grids of identical labels — e.g. button[near~onesie] when six
     // "Add to cart" buttons share the DOM and only their product names differ.
-    const pre = h.slice(0, h.indexOf("[") >= 0 ? h.indexOf("[") : 0);
-    const after = h.includes("[") ? h.slice(h.indexOf("[") + 1) : h;
-    const tok = after.replace(/\]$/, "").split("~").slice(-1)[0]!;
     const refs = entries
-      .filter(([, e]) => (!pre || e.tag === pre) && String(e.near ?? "").toLowerCase().includes(tok))
+      .filter(([, e]) => (!parsed.tag || e.tag === parsed.tag) && String(e.near ?? "").toLowerCase().includes(parsed.token))
       .map(([r]) => r);
     return emit(refs, 0);
   }
-  if (h.includes("[")) {
-    const pre = h.slice(0, h.indexOf("["));
-    const rest = h.slice(h.indexOf("[") + 1);
-    const eq = rest.indexOf("=");
-    const k = alias(eq >= 0 ? rest.slice(0, eq) : rest);
+  if (parsed.kind === "attrEq") {
+    const k = poolAttr(parsed.attr);
     // case-FOLDED comparison: the hint is lower-cased on entry but device ids
     // are routinely upper-case (data-test="net-CAM-1001"); a raw `==` silently
     // missed and the plan-named target fell back to laya (~0.03 conf).
-    const v = (eq >= 0 ? rest.slice(eq + 1) : "").replace(/\]$/, "").replace(/^['"]|['"]$/g, "");
     const refs = entries
-      .filter(([, e]) => (!pre || e.tag === pre) && String(e[k] ?? "").toLowerCase() === v)
+      .filter(([, e]) => (!parsed.tag || e.tag === parsed.tag) && String(e[k] ?? "").toLowerCase() === parsed.value)
       .map(([r]) => r);
     return emit(refs, 0);
   }
-  if (["button", "link", "input", "textarea", "select"].includes(h)) {
+  if (parsed.kind === "tag") {
+    const h = parsed.tag;
     const want: Record<string, string[]> = {
       button: ["button"], link: ["a"], input: ["input"], textarea: ["textarea"], select: ["select"],
     };
@@ -272,6 +259,7 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
   //   3. a word contains it
   // Only the strongest non-empty tier is considered; genuine ambiguity inside it
   // still returns null.
+  const h = parsed.token;
   const whole = new Set<string>();
   const tiers: Array<Set<string>> = [new Set(), new Set(), new Set()];
   for (const [r, e] of entries) {
