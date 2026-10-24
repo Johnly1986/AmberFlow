@@ -2,9 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { APPS_DIR, listPacks, loadPack, type AppPack } from "../../app/app-pack.ts";
+import { isDeclarativeScriptSource, parseDeclarativeScript } from "../../app/declarative.ts";
 import { validateApp } from "../../app/cross-ref.ts";
 import {
   dryRunFlow, loadApp, loadScriptApp, resolveApp, resolveScriptPath, scriptDisplayPath,
+  type LoadedScriptApp,
 } from "../../app/app-script.ts";
 import { userAppsDir } from "../../app/amberflow-home.ts";
 import type { CliContext } from "../context.ts";
@@ -31,9 +33,25 @@ function sourceOf(p: string, ctx: CliContext): "user" | "built-in" {
   return inside(path.resolve(p), path.resolve(userAppsDir(ctx.env))) ? "user" : "built-in";
 }
 
+/**
+ * 同步读一个应用点位：`pack.json` 或**带标记的**声明式数据脚本。
+ * 手写脚本返回 null——它是被发现的（列表里有它），只是同步列表拿不到步骤数；
+ * 异步路径（show/check/run/explain）能读任意脚本。
+ */
 function readPackAt(p: string): AppPack | null {
   try {
-    const pack = JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack;
+    let pack: AppPack;
+    if (p.endsWith(".json")) {
+      pack = JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack;
+    } else {
+      const src = fs.readFileSync(p, "utf-8");
+      if (!isDeclarativeScriptSource(src)) return null;
+      const parts = parseDeclarativeScript(src);
+      pack = {
+        ...(parts.meta as unknown as AppPack),
+        journey: parts.journey,
+      } as AppPack;
+    }
     pack._path = p;
     return pack;
   } catch {
@@ -44,7 +62,13 @@ function readPackAt(p: string): AppPack | null {
 function infoOf(id: string, label: string, p: string, ctx: CliContext): AppInfo {
   const pack = readPackAt(p);
   if (!pack) {
-    return { id, label, path: p, source: sourceOf(p, ctx), steps: 0, kind: "unknown", error: "pack.json 不是合法 JSON" };
+    // 手写脚本：能发现、但不假装知道它的步骤数（异步 show/check 才读得了）。
+    // 旧版这里对所有非 JSON 文件报 "pack.json 不是合法 JSON"——L3 之后每个应用都中招。
+    return {
+      id: path.basename(path.dirname(p)), label, path: p,
+      source: sourceOf(p, ctx), steps: 0, kind: "unknown",
+      error: p.endsWith(".json") ? "pack.json 不是合法 JSON" : null,
+    };
   }
   return {
     id: pack.id ?? id,
@@ -118,6 +142,133 @@ function printShow(ctx: CliContext, pack: AppPack): void {
   });
 }
 
+/** `amber apps new <id>`：生成一个**可跑**的应用骨架（默认 flow；`--kind data` 生成声明式数据脚本）。 */
+async function appsNew(args: string[], ctx: CliContext): Promise<number> {
+  const parsed = parseSimple(args, {
+    json: { type: "boolean" }, help: { type: "boolean" },
+    kind: { type: "string" }, dir: { type: "string" }, force: { type: "boolean" }, print: { type: "boolean" },
+  });
+  if (parsed.values.help) {
+    say(ctx, "用法：amber apps new <id> [--kind flow|data] [--dir <目录>] [--force] [--print] [--json]");
+    return 0;
+  }
+  const id = parsed.positionals[0];
+  if (!id) throw usageError("apps new 需要一个应用 id", { next: ["amber apps new my-app"] });
+  if (parsed.positionals.length > 1) throw usageError("apps new 只接受一个 id");
+  if (!/^[a-z][a-z0-9-]*$/.test(id)) {
+    throw usageError(`应用 id ${JSON.stringify(id)} 不合法`, {
+      hint: "小写字母开头，只含小写字母 / 数字 / 连字符（它同时是目录名与 `amber run` 的参数）。",
+    });
+  }
+  const kind = typeof parsed.values.kind === "string" && parsed.values.kind ? parsed.values.kind : "flow";
+  if (kind !== "flow" && kind !== "data") {
+    throw usageError("--kind 只接受 flow | data", {
+      hint: "flow = 运行期控制流（默认，适合有循环/条件/重试的流程）；"
+        + "data = 声明式数据脚本（固定形状、工具链可同步读取）。",
+    });
+  }
+  const dir = typeof parsed.values.dir === "string" && parsed.values.dir
+    ? path.resolve(ctx.cwd, parsed.values.dir)
+    : path.join(userAppsDir(ctx.env), id);
+  const file = path.join(dir, "app.mjs");
+  const source = kind === "data" ? dataScriptTemplate(id) : flowScriptTemplate(id);
+  const next = [`amber apps check ${id}`, `amber apps explain ${id}`, `amber run ${id}`];
+  if (parsed.values.print) {
+    if (jsonWanted(ctx, parsed.values)) {
+      emitJson(ctx, successEnvelope("apps new", { app: id, kind, path: file, source }, { next }));
+    } else {
+      say(ctx, source);
+    }
+    return 0;
+  }
+  if (fs.existsSync(file) && !parsed.values.force) {
+    throw usageError(`已存在 ${file}`, {
+      hint: "换一个 id，或加 --force 覆盖（旧的 app.mjs 会被替换）。",
+      next: ["amber apps list"],
+    });
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, source, "utf-8");
+  if (jsonWanted(ctx, parsed.values)) {
+    emitJson(ctx, successEnvelope("apps new", { app: id, kind, path: file }, { next }));
+  } else {
+    say(ctx, `✓ 已生成 ${file}（${kind === "flow" ? "flow 脚本" : "声明式数据脚本"}）`);
+    say(ctx, "  这是**可跑**的骨架（用仓库自带的 testpages/portal.html），先验证再改：");
+    for (const n of next) say(ctx, `    ${n}`);
+    say(ctx, "  改入口页 / 目标 / 完成条件见 docs/APP_SCRIPT_AUTHORING.md。");
+  }
+  return 0;
+}
+
+/** 生成 flow 骨架：普通 JS，循环/条件/重试直接写。 */
+function flowScriptTemplate(id: string): string {
+  return `/**
+ * ${id} —— flow 应用：控制流写在脚本里（循环 / 条件 / 重试都是普通 JS）。
+ *
+ * 分工：脚本管走向；引擎管一步之内的一切（元素池 / 选元素 / 闸门 / 动作 / 证据判定）。
+ * 脚本拿不到模型文本或分数，只能看到 { ok, stopCode, reason? }；完成只认 done 信号。
+ */
+export const meta = (kit) => ({
+  id: ${JSON.stringify(id)},
+  label: ${JSON.stringify(id)},
+  goal: "把这条流程要达成的结果写清楚（一句话）",
+  hosts: [],                          // 线上应用：声明允许访问的主机（导航信封 + 防泄漏门禁）
+  slots: {},                          // 数据槽：值只能来自声明/观察（不写进 goal 文本）
+  invariants: [                       // 结束态断言：用 ctx.done() 验收
+    { id: "on-target", desc: "结束时确实到了目标页", signal: kit.judge.url("camera_a.html") },
+  ],
+});
+
+export async function flow(ctx) {
+  await ctx.open("testpages/portal.html");   // ← 你的入口页（仓库内相对路径或 http(s)://）
+
+  const r = await ctx.step("点击「枪机 / 筒机 录入」", {   // ← 这一步做什么
+    act: ctx.hint("[data-test=entry-fixed]"),              // ← 目标：ctx.hint / ctx.hints / ctx.command 闭集
+    done: ctx.judge.url("camera_a.html"),                  // ← 完成条件（证据面；绝不猜）
+  });
+  if (!r.ok) throw new Error(\`第一步没完成：\${r.stopCode ?? "blocked"}\${r.reason ? \`（\${r.reason}）\` : ""}\`);
+
+  // 运行期循环/重试示例（需要时打开）：
+  // for (let attempt = 0; attempt < 3; attempt += 1) {
+  //   const retry = await ctx.step("重试一次", { act: ctx.hint("button[type=submit]"), done: ctx.judge.url("next.html") });
+  //   if (retry.ok) break;
+  // }
+
+  await ctx.done();   // 结束态不变量在这里验收；失败会抛 invariant_failed
+}
+`;
+}
+
+/** 生成声明式数据脚本骨架（固定形状 + 标记：`apps:matrix` / `apps:gen` 等工具能同步读取）。 */
+function dataScriptTemplate(id: string): string {
+  return `// @amberflow:declarative-data —— 声明式数据脚本（固定形状；想写循环/条件请用 --kind flow）
+// 数据 + 旅程 + 验收三段，全部是 JSON 可表达的字面量；工具链（apps:matrix / apps:gen /
+// apps:migrate）能同步读取与比对。手写这个形状时保持 "const META/DATA/JOURNEY = ..." 原样。
+const META = {
+  "id": ${JSON.stringify(id)},
+  "label": ${JSON.stringify(id)},
+  "goal": "把这条流程要达成的结果写清楚（一句话）",
+  "hosts": [],
+  "slots": {},
+  "invariants": [
+    { "id": "on-target", "desc": "结束时确实到了目标页", "signal": { "url_contains": "camera_a.html" } }
+  ]
+};
+const DATA = {};
+const JOURNEY = [
+  {
+    "desc": "点击「枪机 / 筒机 录入」",
+    "start_url": "testpages/portal.html",
+    "target_hint": "[data-test=entry-fixed]",
+    "signal": { "url_contains": "camera_a.html" }
+  }
+];
+
+export const meta = () => META;
+export const app = () => ({ data: DATA, exec: JOURNEY });
+`;
+}
+
 export async function runApps(args: string[], ctx: CliContext): Promise<number> {
   let sub = args[0];
   let rest = args.slice(1);
@@ -135,6 +286,8 @@ export async function runApps(args: string[], ctx: CliContext): Promise<number> 
   switch (sub) {
     case "list":
       return appsList(rest, ctx);
+    case "new":
+      return appsNew(rest, ctx);
     case "show":
       return appsShow(rest, ctx);
     case "check":
@@ -150,7 +303,7 @@ export async function runApps(args: string[], ctx: CliContext): Promise<number> 
       return appsRemove(rest, ctx);
     default:
       throw usageError(`未知的 apps 子命令 '${sub}'`, {
-        hint: "可用：list / show / check / explain / emit / path / remove",
+        hint: "可用：list / new / show / check / explain / emit / path / remove",
         next: ["amber apps --help"],
       });
   }
@@ -187,34 +340,71 @@ function appsList(args: string[], ctx: CliContext): number {
   return 0;
 }
 
-function appsShow(args: string[], ctx: CliContext): number {
+async function appsShow(args: string[], ctx: CliContext): Promise<number> {
   const parsed = parseSimple(args, { json: { type: "boolean" }, help: { type: "boolean" } });
   if (parsed.values.help) {
-    say(ctx, "用法：amber apps show <应用> [--json]");
+    say(ctx, "用法：amber apps show <应用|脚本路径> [--json]");
     return 0;
   }
   const id = parsed.positionals[0];
-  if (!id) throw usageError("apps show 需要一个应用 id 或 pack.json 路径", { next: ["amber apps list"] });
+  if (!id) throw usageError("apps show 需要一个应用 id 或脚本路径", { next: ["amber apps list"] });
   if (parsed.positionals.length > 1) throw usageError("apps show 只接受一个应用");
-  let pack: AppPack;
+  let resolved: Awaited<ReturnType<typeof resolveApp>>;
   try {
-    pack = loadPack(id);
+    resolved = await resolveApp(id);
   } catch (err) {
     throw usageError(`找不到应用 '${id}'`, {
       hint: err instanceof Error ? err.message : String(err),
       next: ["amber apps list"],
     });
   }
+  const pack = resolved.pack;
+  const script = resolved.script;
+  const shownPath = script?.scriptPath ?? pack._path ?? id;
   if (jsonWanted(ctx, parsed.values)) {
-    const p = pack._path ?? id;
     emitJson(ctx, successEnvelope("apps show", {
-      app: pack.id, label: pack.label, goal: pack.goal, path: p,
-      source: sourceOf(p, ctx), pack,
-    }, { next: [`amber run ${pack.id}`] }));
+      app: pack.id, label: pack.label, goal: pack.goal, path: shownPath,
+      source: sourceOf(shownPath, ctx),
+      ...(script === null ? {} : {
+        mode: script.mode, script: scriptDisplayPath(script.scriptPath), plan_sha256: script.planSha256,
+      }),
+      pack,
+    }, {
+      next: script === null
+        ? [`amber run ${pack.id}`]
+        : [`amber apps explain ${scriptDisplayPath(script.scriptPath)}`, `amber run ${pack.id}`],
+    }));
     return 0;
   }
-  printShow(ctx, pack);
+  if (script !== null) printShowScript(script, ctx);
+  else printShow(ctx, pack);
   return 0;
+}
+
+/** `show` 对脚本应用的形态：声明面 + 路径 + 下一步（flow 的步骤在运行期，不假装有静态列表）。 */
+function printShowScript(loaded: LoadedScriptApp, ctx: CliContext): void {
+  const pack = loaded.pack;
+  say(ctx, `${pack.id} — ${pack.label ?? ""}`.trim());
+  say(ctx, `  目标：${pack.goal}`);
+  say(ctx, `  形态：${loaded.mode === "flow" ? "flow 脚本（步骤在运行期产生）" : "声明式数据脚本"} · ${sourceLabel(sourceOf(loaded.scriptPath, ctx))}`);
+  say(ctx, `  路径：${scriptDisplayPath(loaded.scriptPath)}`);
+  say(ctx, `  plan_sha256：${loaded.planSha256.slice(0, 16)}…`);
+  if (pack.hosts?.length) say(ctx, `  hosts：${pack.hosts.join(", ")}`);
+  if (pack.slots && Object.keys(pack.slots).length) say(ctx, `  参数：${Object.keys(pack.slots).join(", ")}`);
+  if (pack.journey?.length) {
+    say(ctx, "  步骤：");
+    for (const [i, step] of pack.journey.entries()) {
+      const kind = step.source !== undefined ? "工具" : "浏览器";
+      say(ctx, `    [${i + 1}]  ${kind}  ${String(step.desc ?? step.role ?? "")}`);
+    }
+  } else {
+    say(ctx, "  步骤：运行期产生（flow）——用 `amber apps explain` 看 dry 调用序列");
+  }
+  if (pack.invariants?.length) {
+    say(ctx, `  验收条件（${pack.invariants.length}）：`);
+    for (const inv of pack.invariants) say(ctx, `    - ${inv.id}: ${inv.desc ?? ""}`);
+  }
+  say(ctx, `  下一步：amber apps explain ${scriptDisplayPath(loaded.scriptPath)}`);
 }
 
 async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
@@ -369,7 +559,8 @@ async function appsExplain(args: string[], ctx: CliContext): Promise<number> {
     say(ctx, "");
     for (const ev of rows) {
       const head = `${String(ev.i).padStart(2, " ")}. [${ev.call}] ${ev.desc ?? ""}`;
-      say(ctx, `${head}${ev.url ? ` → ${ev.url}` : ""}${ev.ok === false ? `  ✗ ${ev.stop_code ?? "failed"}` : ""}`);
+      const where = ev.url === undefined || ev.url === "about:blank" ? "（当前页）" : ev.url;
+      say(ctx, `${head} → ${where}${ev.ok === false ? `  ✗ ${ev.stop_code ?? "failed"}` : ""}`);
     }
     if (invs.length) {
       say(ctx, "");
@@ -440,17 +631,30 @@ async function appsEmit(args: string[], ctx: CliContext): Promise<number> {
     json: { type: "boolean" }, help: { type: "boolean" }, out: { type: "string" },
   });
   if (parsed.values.help) {
-    say(ctx, "用法：amber apps emit <脚本路径> [--out <文件>] [--json]");
+    say(ctx, "用法：amber apps emit <声明式脚本> [--out <文件>] [--json]（flow 脚本没有静态 IR）");
     return 0;
   }
   const target = parsed.positionals[0];
   if (!target) throw usageError("apps emit 需要一个脚本路径", { next: ["amber apps explain <脚本>"] });
   if (parsed.positionals.length > 1) throw usageError("apps emit 只接受一个脚本");
-  const loaded = await loadScriptApp(target);
+  let loaded: LoadedScriptApp;
+  try {
+    const resolved = await resolveApp(target);
+    loaded = resolved.script ?? (await loadScriptApp(target));
+  } catch (err) {
+    throw usageError(`找不到脚本 '${target}'`, { hint: err instanceof Error ? err.message : String(err) });
+  }
+  if (loaded.mode === "flow") {
+    // flow 没有静态 IR：强 emit 要么是假的空 journey，要么是"不应发生"的内部错误——两者都在骗人。
+    throw usageError("apps emit 不支持 flow 脚本：步骤在运行期产生，没有静态 IR", {
+      hint: "用 amber apps explain <脚本> 看 dry 调用序列；声明式（数据）脚本才可 emit。",
+      next: [`amber apps explain ${scriptDisplayPath(loaded.scriptPath)}`],
+    });
+  }
   const outPath = path.resolve(
     typeof parsed.values.out === "string" && parsed.values.out
       ? parsed.values.out
-      : path.join(path.dirname(loaded.scriptPath), "pack.json"),
+      : path.join(ctx.cwd, ".amberflow", "emit", `${loaded.pack.id}.json`),
   );
   const pack: Record<string, unknown> = {
     ...(loaded.pack as unknown as Record<string, unknown>),
@@ -472,7 +676,7 @@ async function appsEmit(args: string[], ctx: CliContext): Promise<number> {
   return 0;
 }
 
-function appsPath(args: string[], ctx: CliContext): number {
+async function appsPath(args: string[], ctx: CliContext): Promise<number> {
   const parsed = parseSimple(args, { json: { type: "boolean" }, help: { type: "boolean" } });
   if (parsed.values.help) {
     say(ctx, "用法：amber apps path <应用>");
@@ -481,18 +685,21 @@ function appsPath(args: string[], ctx: CliContext): number {
   const id = parsed.positionals[0];
   if (!id) throw usageError("apps path 需要一个应用 id", { next: ["amber apps list"] });
   if (parsed.positionals.length > 1) throw usageError("apps path 只接受一个应用");
-  let pack: AppPack;
+  let resolved: Awaited<ReturnType<typeof resolveApp>>;
   try {
-    pack = loadPack(id);
+    resolved = await resolveApp(id);
   } catch (err) {
     throw usageError(`找不到应用 '${id}'`, {
       hint: err instanceof Error ? err.message : String(err),
       next: ["amber apps list"],
     });
   }
-  const p = pack._path ?? id;
+  const p = resolved.script?.scriptPath ?? resolved.pack._path ?? id;
   if (jsonWanted(ctx, parsed.values)) {
-    emitJson(ctx, successEnvelope("apps path", { app: pack.id, path: p }));
+    emitJson(ctx, successEnvelope("apps path", {
+      app: resolved.pack.id, path: p,
+      ...(resolved.script === null ? {} : { mode: resolved.script.mode }),
+    }));
   } else {
     say(ctx, p);
   }
@@ -511,16 +718,17 @@ async function appsRemove(args: string[], ctx: CliContext): Promise<number> {
   const id = parsed.positionals[0];
   if (!id) throw usageError("apps remove 需要一个应用 id", { next: ["amber apps list"] });
   if (parsed.positionals.length > 1) throw usageError("apps remove 只接受一个应用");
-  let pack: AppPack;
+  let resolved: Awaited<ReturnType<typeof resolveApp>>;
   try {
-    pack = loadPack(id);
+    resolved = await resolveApp(id);
   } catch (err) {
     throw usageError(`找不到应用 '${id}'`, {
       hint: err instanceof Error ? err.message : String(err),
       next: ["amber apps list"],
     });
   }
-  const packPath = path.resolve(pack._path ?? "");
+  const pack = resolved.pack;
+  const packPath = path.resolve(resolved.script?.scriptPath ?? pack._path ?? "");
   const dir = path.dirname(packPath);
   const userRoot = path.resolve(userAppsDir(ctx.env));
   const builtinRoot = path.resolve(APPS_DIR);

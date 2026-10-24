@@ -90,8 +90,12 @@ export function resolveScriptPath(idOrPath: string): string | null {
     return fs.existsSync(p) ? p : null;
   }
   for (const dir of appDirs()) {
+    // `appDirs()` 返回的是**应用目录**（`apps/<id>` 或 `$AMBERFLOW_HOME/apps/<id>`），
+    // 所以按 id 找脚本是 `dir/app.mjs`，不是 `dir/<id>/app.mjs`（曾经的差一错误让
+    // `amber run <用户应用 id>` 在修好发现制之后仍然找不到）。
+    if (path.basename(dir) !== idOrPath) continue;
     for (const name of SCRIPT_FILENAMES) {
-      const p = path.join(dir, idOrPath, name);
+      const p = path.join(dir, name);
       if (fs.existsSync(p)) return p;
     }
   }
@@ -136,6 +140,7 @@ export async function loadScriptApp(idOrPath: string): Promise<LoadedScriptApp> 
   if (problems.length) {
     throw new Error(`app script ${scriptPath} is invalid:\n  - ${problems.join("\n  - ")}`);
   }
+  pack._path = scriptPath;   // 与 loadPack 同一口径：应用点位要能回答"它在哪"
   return {
     pack,
     mode,
@@ -167,6 +172,12 @@ export async function resolveApp(idOrPath: string): Promise<{ pack: AppPack; scr
       const script = await loadScriptApp(scriptPath);
       return { pack: script.pack, script };
     }
+  }
+  // 显式给了一个存在的 JSON 路径：当作旧夹具读（不强制改成脚本）。
+  if (/\.json$/i.test(idOrPath)) {
+    try {
+      if (fs.statSync(idOrPath).isFile()) return { pack: loadPack(idOrPath), script: null };
+    } catch { /* 不是文件：继续按 id 找 */ }
   }
   return { pack: loadPack(idOrPath), script: null };
 }

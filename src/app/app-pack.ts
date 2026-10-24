@@ -27,7 +27,7 @@ import {
   getAppAdapter, listAppAdapterObjects, type AppAdapter, type ProcessStepDecl,
 } from "./app-adapters.ts";
 import { validateProbeBlock } from "./probe-set.ts";
-import { appDataFileInDir, isDeclarativeScriptSource, lowerDeclarative, parseDeclarativeScript } from "./declarative.ts";
+import { DECLARATIVE_MARKER, appDataFileInDir, isDeclarativeScriptSource, lowerDeclarative, parseDeclarativeScript } from "./declarative.ts";
 import { loadSource } from "../data/datasource.ts";
 import { extractSlots } from "../engine/extraction.ts";
 
@@ -335,13 +335,20 @@ export function listPacks(): Array<[string, string, string]> {
     const p = appDataFile(dir);
     if (p === null) continue;
     try {
-      const raw = p.endsWith(".json")
-        ? JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack
-        : lowerDeclarative(...(() => {
-            const parts = parseDeclarativeScript(fs.readFileSync(p, "utf-8"));
-            return [parts.meta, { data: parts.data, exec: parts.journey }] as const;
-          })());
-      out.push([String(raw.id ?? path.basename(dir)), String(raw.label ?? ""), p]);
+      if (p.endsWith(".json")) {
+        const raw = JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack;
+        out.push([String(raw.id ?? path.basename(dir)), String(raw.label ?? ""), p]);
+      } else {
+        const src = fs.readFileSync(p, "utf-8");
+        if (!isDeclarativeScriptSource(src)) {
+          // 手写脚本：发现得到，但同步列表拿不到 id/label（要读得走异步加载器）——
+          // 目录名就是应用 id（`amber apps show <id>` 会走异步路径）。
+          out.push([path.basename(dir), "", p]);
+          continue;
+        }
+        const parts = parseDeclarativeScript(src);
+        out.push([String(parts.meta.id ?? path.basename(dir)), String(parts.meta.label ?? ""), p]);
+      }
     } catch (e) {
       out.push([path.basename(dir), `<invalid: ${e instanceof Error ? e.message : String(e)}>`, p]);
     }
@@ -377,12 +384,23 @@ export function loadPack(nameOrPath: string): AppPack {
     }
     p = f;
   }
-  const pack = p.endsWith(".json")
-    ? JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack
-    : lowerDeclarative(...(() => {
-        const parts = parseDeclarativeScript(fs.readFileSync(p, "utf-8"));
-        return [parts.meta, { data: parts.data, exec: parts.journey }] as const;
-      })());
+  let pack: AppPack;
+  if (p.endsWith(".json")) {
+    pack = JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack;
+  } else {
+    const src = fs.readFileSync(p, "utf-8");
+    if (!isDeclarativeScriptSource(src)) {
+      // 同步 API 读不了任意代码（那是 `import()` 的活）；给一条能照做的错误，而不是
+      // 一句"不是合法 JSON"（用户手写脚本时看到过这句话，完全不知道下一步是什么）。
+      throw new Error(
+        `${p} 是手写应用脚本（没有 ${DECLARATIVE_MARKER} 标记）：同步 loadPack() 只能读`
+        + `「pack.json」或「固定 META/DATA/JOURNEY 形状的声明式数据脚本」。`
+        + ` 用异步入口（amber apps show/check/run <id>）或把它改成带标记的数据脚本（apps new 可生成）。`,
+      );
+    }
+    const parts = parseDeclarativeScript(src);
+    pack = lowerDeclarative(parts.meta, { data: parts.data, exec: parts.journey });
+  }
   pack._path = p;
   return pack;
 }

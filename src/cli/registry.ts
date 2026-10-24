@@ -73,6 +73,8 @@ amber run --demo [--save-plan <文件>] [选项]`,
       "--provider <名字>         决策源；默认 auto",
       "--skip-data               跳过数据腿（旧 --no-sources）",
       "--allow-dangerous         放行危险工具步；不带则结构化拒绝并 exit 3",
+      "--emit-trace <文件>       脚本应用：把本次执行轨迹（三个 sha + 逐次 ctx 调用）写成文件",
+      "--replay <文件>           脚本应用：按已记录轨迹重放（版本/槽位不一致直接拒跑）",
       "--remember                开启学习环 sidecar（旧 --learn-hints）",
       "--memory <文件>           指定 sidecar 落点",
       "--reset / --replan        仅 --plan 模式：重置步骤状态 / 重新规划",
@@ -140,6 +142,7 @@ amber plan run [--plan <文件>] [--reset] [--replan] [--confirm allow|ask|deny]
     summary: "列出 / 查看 / 校验应用",
     usage: `amber apps list [--json]
 amber apps show <应用> [--json]
+amber apps new <id> [--kind flow|data] [--dir <目录>] [--force] [--print] [--json]
 amber apps check [<应用|脚本>] [--json]
 amber apps explain <脚本> [--json]
 amber apps emit <脚本> [--out <文件>] [--json]
@@ -149,8 +152,12 @@ amber apps remove <应用> [--yes] [--force]`,
       "amber apps explain $AMBERFLOW_HOME/apps/my-app/app.mjs",
       "amber apps emit $AMBERFLOW_HOME/apps/my-app/app.mjs --out /tmp/my-app.json"],
     flags: [
+      "--kind flow|data           apps new 的形态：flow=运行期控制流（默认）；data=声明式数据脚本",
+      "--dir <目录>               apps new 的落点（默认 $AMBERFLOW_HOME/apps/<id>）",
+      "--force                    apps new 允许覆盖已存在的 app.mjs",
+      "--print                    apps new 只打印源码、不落盘",
       "--json                    机器可读输出",
-      "--out <文件>              apps emit 的落点（默认 <脚本目录>/pack.json）",
+      "--out <文件>              apps emit 的落点（默认 ./.amberflow/emit/<id>.json；flow 脚本不可 emit）",
       "--yes                     确认删除（非 TTY 必须给）",
       "--force                   允许删除内置应用（危险）",
     ],
@@ -162,6 +169,10 @@ amber apps remove <应用> [--yes] [--force]`,
     usage: "amber doctor [--json] [--fix] [--verbose]",
     examples: ["amber doctor", "amber doctor --json", "amber doctor --fix"],
     flags: [
+      "--kind flow|data           apps new 的形态：flow=运行期控制流（默认）；data=声明式数据脚本",
+      "--dir <目录>               apps new 的落点（默认 $AMBERFLOW_HOME/apps/<id>）",
+      "--force                    apps new 允许覆盖已存在的 app.mjs",
+      "--print                    apps new 只打印源码、不落盘",
       "--json                    机器可读输出",
       "--fix                     只做安全、可逆的修复",
       "--verbose                 输出配置来源与调试信息",
@@ -185,6 +196,10 @@ amber config edit [--project]`,
     ],
     flags: [
       "--project                 读写项目配置 ./.amberflow/config.json",
+      "--kind flow|data           apps new 的形态：flow=运行期控制流（默认）；data=声明式数据脚本",
+      "--dir <目录>               apps new 的落点（默认 $AMBERFLOW_HOME/apps/<id>）",
+      "--force                    apps new 允许覆盖已存在的 app.mjs",
+      "--print                    apps new 只打印源码、不落盘",
       "--json                    机器可读输出",
       "--config <文件>           显式配置（全局选项；替换用户/项目两层）",
     ],

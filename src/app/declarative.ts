@@ -64,7 +64,16 @@ export interface DeclarativeParts {
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** 一个应用目录里的数据文件：`pack.json`（旧格式）或带标记的声明式 `app.mjs`（L3 主格式）。 */
+/**
+ * 一个应用目录里的**应用文件**：`pack.json`（旧格式）或 `app.mjs`（L3 主格式）。
+ *
+ * 注意两个概念要分开：
+ *   - **发现**（这个函数）：任何 `app.mjs` 都算一个应用——包括手写的（没有标记）；
+ *   - **同步读取**（`loadPack`）：只有带 `@amberflow:declarative-data` 标记、固定
+ *     `META/DATA/JOURNEY` 形状的数据脚本能同步解析；手写脚本走异步的 `loadScriptApp`/CLI。
+ * 以前发现也要求标记，导致用户手写的 `app.mjs` 在 `apps list`/按 id 的命令里**不存在**——
+ * 那是把"同步读不了"错当成了"不算应用"。
+ */
 export function appDataFileInDir(dir: string): string | null {
   const json = path.join(dir, "pack.json");
   try {
@@ -73,7 +82,7 @@ export function appDataFileInDir(dir: string): string | null {
   for (const name of ["app.mjs", "app.js", "app.ts"]) {
     const p = path.join(dir, name);
     try {
-      if (fs.statSync(p).isFile() && isDeclarativeScriptSource(fs.readFileSync(p, "utf-8"))) return p;
+      if (fs.statSync(p).isFile()) return p;
     } catch { /* 读不了就当没有 */ }
   }
   return null;

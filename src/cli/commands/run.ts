@@ -27,6 +27,8 @@ const OPTIONS = {
   provider: { type: "string" as const },
   "skip-data": { type: "boolean" as const },
   "allow-dangerous": { type: "boolean" as const },
+  "emit-trace": { type: "string" as const },
+  replay: { type: "string" as const },
   remember: { type: "boolean" as const },
   memory: { type: "string" as const },
   reset: { type: "boolean" as const },
@@ -197,16 +199,33 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
     throw usageError(err instanceof Error ? err.message : String(err));
   }
   if (bool(v["dry-run"]) && (bool(v.json) || ctx.globals.json)) {
-    const { loadPack, expandPack } = await import("../../app/app-pack.ts");
-    let pack;
+    const { resolveApp, dryRunFlow } = await import("../../app/app-script.ts");
+    const { expandPack } = await import("../../app/app-pack.ts");
+    let resolved;
     try {
-      pack = loadPack(app);
+      resolved = await resolveApp(app);
     } catch (err) {
       throw usageError(`找不到应用 '${app}'`, {
         hint: err instanceof Error ? err.message : String(err),
         next: ["amber apps list"],
       });
     }
+    if (resolved.script?.mode === "flow") {
+      const dry = await dryRunFlow(resolved.script, { slots });
+      const pack = resolved.pack;
+      const envelope = successEnvelope("run", {
+        mode: "flow", dry_run: true, app: pack.id, label: pack.label, goal: pack.goal,
+        slots, problems: dry.problems,
+        events: dry.trace.events.map((e) => ({ i: e.i, call: e.call, desc: e.desc, url: e.url })),
+      }, { exitCode: dry.problems.length ? 2 : 0, next: dry.problems.length ? ["amber apps check <脚本>"] : [`amber run ${pack.id}`] });
+      if (dry.problems.length) {
+        envelope.ok = false;
+        envelope.error = { code: "USAGE", message: "dry-run 发现配置错误", hint: dry.problems.join("；"), next: ["amber apps check <脚本>"] };
+      }
+      emitJson(ctx, envelope);
+      return dry.problems.length ? 2 : 0;
+    }
+    const pack = resolved.pack;
     let expanded;
     try {
       expanded = expandPack(pack, slots, path.resolve(ctx.cwd, DEFAULT_PLAN));
@@ -226,6 +245,10 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   if (bool(v["skip-data"])) args.push("--no-sources");
   if (bool(v["allow-dangerous"])) args.push("--allow-dangerous");
   if (bool(v.remember)) args.push("--learn-hints");
+  const emitTrace = str(v["emit-trace"]);
+  if (emitTrace !== undefined) args.push("--emit-trace", emitTrace);
+  const replay = str(v.replay);
+  if (replay !== undefined) args.push("--replay", replay);
   for (const s of flatList(v.slot as string[] | undefined)) args.push("--slot", s);
   for (const [key, flag] of [
     ["out", "--out"], ["provider", "--provider"], ["memory", "--hint-memory"],
@@ -391,6 +414,10 @@ async function runPlanFile(v: Values, ctx: CliContext): Promise<number> {
   }
   if (confirm) args.push("--confirm", confirm);
   if (bool(v.remember)) args.push("--learn-hints");
+  const emitTrace = str(v["emit-trace"]);
+  if (emitTrace !== undefined) args.push("--emit-trace", emitTrace);
+  const replay = str(v.replay);
+  if (replay !== undefined) args.push("--replay", replay);
   if (str(v.memory)) args.push("--hint-memory", str(v.memory)!);
   if (bool(v.headful)) args.push("--headful");
   if (planMax !== null) args.push("--max", String(planMax));

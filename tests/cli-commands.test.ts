@@ -482,7 +482,7 @@ describe("amber apps — 发现制目录的两个作用域", () => {
   it("未知子命令 → 用法错误并列出可用子命令", async () => {
     const r = await cli(["apps", "nope", "--json"]);
     expect(r.code).toBe(2);
-    expect(r.json().error.hint).toContain("list / show / check / explain / emit / path / remove");
+    expect(r.json().error.hint).toContain("list / new / show / check / explain / emit / path / remove");
   });
 
   it("show / path / check 都要求一个应用；多给就报", async () => {

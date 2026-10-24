@@ -44,9 +44,9 @@ describe("脚本加载：确定性", () => {
 });
 
 describe("回退：没有脚本走旧路径；--no-scripts 强制旧路径", () => {
-  it("仓库应用没有脚本 → loadApp 与 loadPack 逐字段相同", async () => {
+  it("仓库应用：loadApp 与 loadPack 读同一个应用，逐字段相同（含 _path）", async () => {
     const viaLoadApp = await loadApp("camera-entry");
-    const viaLoadPack = loadPack(path.join(REPO, "apps/camera-entry/pack.json"));
+    const viaLoadPack = loadPack(path.join(REPO, "apps/camera-entry/app.mjs"));
     expect(viaLoadApp).toEqual(viaLoadPack);
   });
 
@@ -55,16 +55,17 @@ describe("回退：没有脚本走旧路径；--no-scripts 强制旧路径", () 
     process.env.AMBERFLOW_NO_SCRIPTS = "1";
     try {
       expect(scriptsDisabled()).toBe(true);
-      expect(await loadApp("camera-entry")).toEqual(loadPack(path.join(REPO, "apps/camera-entry/pack.json")));
+      expect(await loadApp("camera-entry")).toEqual(loadPack(path.join(REPO, "apps/camera-entry/app.mjs")));
     } finally {
       if (prev === undefined) delete process.env.AMBERFLOW_NO_SCRIPTS; else process.env.AMBERFLOW_NO_SCRIPTS = prev;
     }
   });
 
-  it("resolveScriptPath：显式路径可用；不存在的路径 → null；无脚本的应用 → null", () => {
+  it("resolveScriptPath：显式路径可用；不存在的路径/应用 → null；按 id 能找到应用目录下的脚本", () => {
     expect(resolveScriptPath(path.join(REPO, "tests/fixtures/scripts/cli-report.mjs"))).not.toBeNull();
     expect(resolveScriptPath(path.join(tmp, "nope.mjs"))).toBeNull();
-    expect(resolveScriptPath("camera-entry")).toBeNull();
+    expect(resolveScriptPath("no-such-app")).toBeNull();
+    expect(resolveScriptPath("camera-entry")).toBe(path.join(REPO, "apps/camera-entry/app.mjs"));
   });
 });
 

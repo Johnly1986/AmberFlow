@@ -56,7 +56,7 @@ import {
 } from "./app-pack.ts";
 import { getAppAdapter, substituteDatasetPlaceholders, type AdapterRunContext } from "./app-adapters.ts";
 import { validateApp } from "./cross-ref.ts";
-import { loadApp, resolveApp, type LoadedScriptApp } from "./app-script.ts";
+import { dryRunFlow, loadApp, resolveApp, type LoadedScriptApp } from "./app-script.ts";
 import { StopError, createCtx, type ToolRunRequest, type ToolRunResult } from "./ctx.ts";
 import { createReplayCtx } from "./ctx-replay.ts";
 import {
@@ -1478,6 +1478,29 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const modelStatus = spec.tier;
 
   if (cliBool(v, "dry")) {
+    // 脚本应用（flow）没有静态旅程：dry-run = dry 跑一遍调用序列（与 check/explain 同一实现）。
+    if (scriptApp !== null && scriptApp.mode === "flow") {
+      const dry = await dryRunFlow(scriptApp, {
+        slots: slots as Record<string, string>,
+        ...(cliString(v, "out") === undefined ? {} : { outDir: cliString(v, "out") }),
+      });
+      const planLike = {
+        app: scriptApp.pack.id, label: scriptApp.pack.label, goal: scriptApp.pack.goal,
+        mode: "flow", dry_run: true, slots, problems: dry.problems,
+        events: dry.trace.events.map((e) => ({
+          i: e.i, call: e.call, desc: e.desc, url: e.url,
+          ...(e.stop_code === undefined ? {} : { stop_code: e.stop_code }),
+        })),
+        invariants: (scriptApp.pack.invariants ?? []).map((inv) => ({ id: inv.id, desc: inv.desc })),
+        model_status: modelStatus,
+      };
+      console.log(JSON.stringify(planLike, null, 2));
+      if (dry.problems.length) {
+        console.error(`flow dry-run 发现配置错误：\n  - ${dry.problems.join("\n  - ")}`);
+        return 2;
+      }
+      return 0;
+    }
     // `--dry` 不跑数据腿，所以 `source_slots` 声明的槽位没有观测值可填。包里给了默认值就
     // 用默认值；没给就**直说**（而不是让展开报一个看不懂的"未知占位符"）。
     const unfilled = Object.keys(pack.source_slots ?? {})
