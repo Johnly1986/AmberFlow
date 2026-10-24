@@ -25,7 +25,7 @@ const LOADS_CONFIG = /(model-artifacts|decision-provider|decision-tokenplan|deci
 const KNOWN_KEYS = RC_GROUPS.flatMap((g) => g.keys);
 // 策略线：这一族对**冻结语料**做静态比对，刻意不碰机器配置（时钟由 tools/frozen-today.ts
 // 的代码常量钉死，provider 由脚本注入）——给它们接 rc 反而会把对拍变成"随机器漂移"。
-const OFFLINE_FAMILY = /-parity\.[a-z]+|(apps_matrix|arch-metrics|spec-to-pack|probe-baseline|gate-signals|model-contribution)\.ts/;
+const OFFLINE_FAMILY = /-parity\.[a-z]+|(apps_matrix|arch-metrics|spec-to-pack|apps_migrate|probe-baseline|gate-signals|model-contribution)\.ts/;
 
 function loadsConfig(file: string, seen = new Set<string>()): string | null {
   if (seen.has(file)) return null;
