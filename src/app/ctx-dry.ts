@@ -14,6 +14,7 @@ import { validateCommands } from "../engine/actions.ts";
 import { validateToolSignal } from "../browser/tool-signals.ts";
 import { createKit, type CommandDecl } from "./kit.ts";
 import { pushEvent, type AppTrace } from "./trace.ts";
+import { listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
 import { StopError, type Ctx, type CtxBudget, type SourceObservationView, type StepRequest, type StepResult } from "./ctx.ts";
 
 export interface DryCtxDeps {
@@ -145,14 +146,33 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       min: (rows, by) => pickRow(rows, by, "min"),
       max: (rows, by) => pickRow(rows, by, "max"),
     },
-    run: async (source, args, req) => {
-      const p = validateToolRun(source, args, req as never, false);
-      if (p.length) throw new StopError("config_error", problems(p).join("；"));
+    run: (async (sourceOrStep: unknown, args?: string[], req?: unknown): Promise<StepResult> => {
+      if (typeof sourceOrStep === "string") {
+        const p = validateToolRun(sourceOrStep, args ?? [], req as never, false);
+        if (p.length) throw new StopError("config_error", problems(p).join("；"));
+        checkBudget();
+        budget.stepsUsed += 1;
+        pushEvent(trace, { call: "run", desc: (req as { desc?: string } | undefined)?.desc ?? sourceOrStep, ok: true, result: { source: sourceOrStep } });
+        return { ok: true, evidence: { url: currentUrl, attempts: 1, elapsedMs: 0 } };
+      }
+      const step = sourceOrStep as Record<string, unknown>;
+      if (step === null || typeof step !== "object" || Array.isArray(step)) {
+        throw new StopError("config_error", "ctx.run: the declaration form needs an object");
+      }
+      if (step["done"] === undefined || typeof step["done"] !== "object" || step["done"] === null) {
+        throw new StopError("config_error", "ctx.run: done signal is required");
+      }
+      const adapter = typeof step["adapter"] === "string" && step["adapter"]
+        ? step["adapter"]
+        : step["ssh"] !== undefined ? "ssh" : step["stdio"] !== undefined ? "stdio" : "cli";
+      try { requireAppAdapter(adapter); } catch {
+        throw new StopError("config_error", `ctx.run: unknown app adapter ${JSON.stringify(adapter)} (known: ${listAppAdapters().join(", ")})`);
+      }
       checkBudget();
       budget.stepsUsed += 1;
-      pushEvent(trace, { call: "run", desc: (req as { desc?: string }).desc ?? source, ok: true, result: { source } });
+      pushEvent(trace, { call: "run", desc: String(step["desc"] ?? `${adapter} step`), ok: true, result: { adapter } });
       return { ok: true, evidence: { url: currentUrl, attempts: 1, elapsedMs: 0 } };
-    },
+    }) as Ctx["run"],
     dangerous: async (req) => {
       const p = validateToolRun(req?.source, req?.args, req as never, true);
       if (p.length) throw new StopError("config_error", problems(p).join("；"));

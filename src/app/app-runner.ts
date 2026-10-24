@@ -597,6 +597,60 @@ export function preflightConfig(opts: AppRunOptions = {}): void {
   }
 }
 
+/** §3 生效策略的形状（`effective_policy` 产物字段的单一出处）。 */
+export interface EffectivePolicy {
+  tiered_hint: { value: boolean; source: "cli" | "pack" | "default" };
+  risk_ask: { value: "always" | "rules-only"; source: "pack" | "default" };
+  reobserve: { value: boolean; source: "pack" | "default" };
+  max_effective_repeats: { value: number; source: "pack" | "default" };
+  conf_floor: { value: number; source: "cli" | "pack" | "provider" | "default" };
+}
+
+/**
+ * §3：运行策略的**生效值与来源**（CLI 本次显式 > pack.policy > provider 自报 > 缺省）。
+ *
+ * 为什么抽成函数：旧的 `runApp` 与脚本驱动（`runScriptApp`）是两条执行入口——
+ * 同名的 `policy.conf_floor` 必须在两条路上生效成**同一个值**，否则"包里写了策略"
+ * 会随应用形态（数据脚本 vs flow 脚本）时灵时不灵。构造与报告读同一个对象，不分头各猜。
+ */
+export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
+  policy: EffectivePolicy; anyDeclared: boolean;
+} {
+  // §3：运行策略的**生效值与来源**在这里一次算清（构造与报告读同一个对象，不分两头各猜一遍）。
+  // 优先级：CLI(本次显式) > pack.policy(声明) > 缺省(= 今天)。缺省一个都没动。
+  const declaredPolicy = ((pack as unknown as Record<string, unknown>)["policy"] ?? {}) as PackPolicy;
+  const policy: EffectivePolicy = {
+    tiered_hint: {
+      value: opts.tieredHint ?? declaredPolicy.tiered_hint ?? false,
+      source: opts.tieredHint !== undefined ? "cli" as const
+        : declaredPolicy.tiered_hint !== undefined ? "pack" as const : "default" as const,
+    },
+    risk_ask: {
+      value: declaredPolicy.risk_ask ?? "always",
+      source: declaredPolicy.risk_ask !== undefined ? "pack" as const : "default" as const,
+    },
+    reobserve: {
+      value: declaredPolicy.reobserve ?? true,
+      source: declaredPolicy.reobserve !== undefined ? "pack" as const : "default" as const,
+    },
+    max_effective_repeats: {
+      value: declaredPolicy.max_effective_repeats ?? 3,
+      source: declaredPolicy.max_effective_repeats !== undefined ? "pack" as const : "default" as const,
+    },
+    // 闸门刻度：CLI（本次显式）> pack.policy > provider 自报 > 0.25。
+    // 换 provider 时缺省刻度不再成立（score_kind 不可比）——这是这条声明面的存在理由。
+    conf_floor: opts.confFloor !== undefined
+      ? { value: opts.confFloor, source: "cli" as const }
+      : declaredPolicy.conf_floor !== undefined
+        ? { value: declaredPolicy.conf_floor, source: "pack" as const }
+        : opts.providerFloor !== undefined
+          ? { value: opts.providerFloor, source: "provider" as const }
+          : { value: 0.25, source: "default" as const },
+  };
+  const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
+  return { policy, anyDeclared };
+}
+
 /** 跑一个应用包。返回结构化结果（报告与退出码都由调用方决定）。 */
 export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<AppRunResult> {
   const {
@@ -704,38 +758,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   }
 
   // ---- 旅程：逐步骤按类型执行（浏览器步走执行器，工具步走命令行） -----------
-  // §3：运行策略的**生效值与来源**在这里一次算清（构造与报告读同一个对象，不分两头各猜一遍）。
-  // 优先级：CLI(本次显式) > pack.policy(声明) > 缺省(= 今天)。缺省一个都没动。
-  const declaredPolicy = ((pack as unknown as Record<string, unknown>)["policy"] ?? {}) as PackPolicy;
-  const policy = {
-    tiered_hint: {
-      value: opts.tieredHint ?? declaredPolicy.tiered_hint ?? false,
-      source: opts.tieredHint !== undefined ? "cli" as const
-        : declaredPolicy.tiered_hint !== undefined ? "pack" as const : "default" as const,
-    },
-    risk_ask: {
-      value: declaredPolicy.risk_ask ?? "always",
-      source: declaredPolicy.risk_ask !== undefined ? "pack" as const : "default" as const,
-    },
-    reobserve: {
-      value: declaredPolicy.reobserve ?? true,
-      source: declaredPolicy.reobserve !== undefined ? "pack" as const : "default" as const,
-    },
-    max_effective_repeats: {
-      value: declaredPolicy.max_effective_repeats ?? 3,
-      source: declaredPolicy.max_effective_repeats !== undefined ? "pack" as const : "default" as const,
-    },
-    // 闸门刻度：CLI（本次显式）> pack.policy > provider 自报 > 0.25。
-    // 换 provider 时缺省刻度不再成立（score_kind 不可比）——这是这条声明面的存在理由。
-    conf_floor: opts.confFloor !== undefined
-      ? { value: opts.confFloor, source: "cli" as const }
-      : declaredPolicy.conf_floor !== undefined
-        ? { value: declaredPolicy.conf_floor, source: "pack" as const }
-        : opts.providerFloor !== undefined
-          ? { value: opts.providerFloor, source: "provider" as const }
-          : { value: 0.25, source: "default" as const },
-  };
-  const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
+  // §3：运行策略的生效值与来源见 `resolveRunPolicy`（脚本驱动共用同一份）。
+  const { policy, anyDeclared } = resolveRunPolicy(pack, opts);
   // Slice 2（应用支持器）：运行级数据集——步骤信号成立后写入 `returns`，后续步骤以
   // `{dataset:NAME}` 消费；重跑（next 回边）前先失效，下游不会读到陈旧世代。
   const dataset = opts.dataset ?? new DatasetStore();
@@ -1003,7 +1027,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     ...(endState ? { end_state: endState } : {}),
     // §3：生效策略**只在非缺省时写进产物**（与 path_visits 同一纪律）。
     // 来源三态要说清：CLI 本次覆盖 / 包声明 / 都没写——否则报告看不出这次跑的和上次是不是同一件事。
-    ...(anyDeclared ? { effective_policy: policy } : {}),
+    ...(anyDeclared && policy !== null ? { effective_policy: policy } : {}),
     // 换模型测试的对照靠这个字段：层级只说"有没有决策层"，身份才说"是哪一家"。
     ...(opts.providerInfo ? { decision_provider: opts.providerInfo } : {}),
     ...(opts.modelStatus !== undefined ? { model_status: opts.modelStatus } : {}),
@@ -1204,6 +1228,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   let stopCode: string | undefined;
   let stopReason: string | undefined;
   let invariants: AppInvariantResult[] = [];
+  // §3：策略在两条分支外声明（重放分支不构造执行器，但产物字段的形状要一致）。
+  let policy: EffectivePolicy | null = null;
+  let anyDeclared = false;
 
   if (opts.replayTrace !== undefined) {
     const recorded = readTrace(opts.replayTrace);
@@ -1238,6 +1265,11 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       }
       return holder.session;
     };
+    // §3：与 `runApp` 共用同一份策略解析——否则脚本应用会静默忽略 pack.policy
+    // （同一个 `policy.conf_floor` 在数据脚本上生效、在 flow 脚本上不生效）。
+    const resolvedPolicy = resolveRunPolicy(pack, opts);
+    policy = resolvedPolicy.policy;
+    anyDeclared = resolvedPolicy.anyDeclared;
     let mw: BrowserMiddleware | null = null;
     const getMw = (): BrowserMiddleware => {
       if (mw === null) {
@@ -1246,9 +1278,14 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           auditor: new MockAuditor(),
           hosts: (pack.hosts ?? null) as string[] | null,
           maxSteps: 8,
-          confFloor: 0.25,
+          confFloor: resolvedPolicy.policy.conf_floor.value,
           riskyThreshold: 0.6,
           doneThreshold: 0.5,
+          tieredHint: resolvedPolicy.policy.tiered_hint.value,
+          riskAsk: resolvedPolicy.policy.risk_ask.value === "rules-only" ? "rules-only" : "always",
+          reobserve: resolvedPolicy.policy.reobserve.value,
+          maxEffectiveRepeats: resolvedPolicy.policy.max_effective_repeats.value,
+          hintMemory: opts.hintMemory ?? null,
           confirmFn: opts.confirmSafe
             ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
             : () => true,
@@ -1258,6 +1295,48 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     };
     /** 工具步：接到既有 `runToolStep`（干跑/确认/幂等重试的唯一实现，不复制）。 */
     const toolRunner = async (req: ToolRunRequest): Promise<ToolRunResult> => {
+      // ① 非 cli 适配器：与声明式 journey 用**同一份**适配器实现（validate → expand → run）。
+      //    以前 ctx.run 硬编码 `adapter:"cli"`，声明式能写的 ssh/stdio 步在 flow 脚本里不可表达。
+      if (req.adapter !== undefined && req.adapter !== "cli") {
+        const adapter = getAppAdapter(req.adapter);
+        const base = { code: null as number | null, stdout: "", stderr: "", attempts: 0 };
+        if (adapter === undefined) {
+          return { ok: false, stopCode: "config_error", reason: `unknown app adapter ${JSON.stringify(req.adapter)}`, ...base };
+        }
+        const where = `ctx.run(${JSON.stringify(req.desc)})`;
+        const raw = { ...(req.rawStep ?? {}), signal: req.done };
+        const problems: string[] = [];
+        let decl: unknown;
+        try {
+          adapter.validateStep(raw, where, problems);
+          if (!problems.length) decl = adapter.expand(raw, where).decl;
+        } catch (e) {
+          return { ok: false, stopCode: "config_error", reason: e instanceof Error ? e.message : String(e), ...base };
+        }
+        if (problems.length) return { ok: false, stopCode: "config_error", reason: problems.join("；"), ...base };
+        const step = {
+          index: 0, adapter: adapter.kind, kind: adapter.legacyKind,
+          desc: req.desc, role: null, id: null, next: [], decl,
+        } as unknown as ExpandedStep;
+        const adapterCtx = {
+          outDir, verbose, runId, dataset: null,
+          runWebStep: async (): Promise<{ done: boolean }> => { throw new Error("ctx.run: browser steps go through ctx.step()"); },
+          runCliStep: async (): Promise<ToolStepResult> => { throw new Error("ctx.run: use the cli form for cli steps"); },
+        };
+        const out = await adapter.run(decl, step, adapterCtx);
+        const t = out.tool;
+        const stopCode = out.done ? undefined : (t?.refused ?? "tool_failed");
+        return {
+          ok: out.done,
+          ...(stopCode === undefined ? {} : { stopCode }),
+          ...(t?.refused === undefined ? {} : { refused: t.refused }),
+          ...(t?.stderr ? { reason: t.stderr.split("\n")[0]!.slice(0, 300) } : {}),
+          code: t?.code ?? null, stdout: t?.stdout ?? "", stderr: t?.stderr ?? "",
+          attempts: t?.attempts ?? 1,
+          ...(t?.dry_run ? { dryRun: t.dry_run } : {}),
+        };
+      }
+      // ② cli（默认）：接到 runToolStep。
       const decl = {
         source: req.source,
         args: req.args ?? [],
@@ -1277,6 +1356,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       return {
         ok: r.done,
         ...(stopCode === undefined ? {} : { stopCode }),
+        ...(stopCode === undefined ? {} : { reason: refusalLine(stopCode) }),
         ...(r.refused === undefined ? {} : { refused: r.refused }),
         code: r.code, stdout: r.stdout, stderr: r.stderr, attempts: r.attempts,
         ...(r.dry_run === null ? {} : { dryRun: r.dry_run }),
@@ -1287,6 +1367,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       slots: slots as Record<string, string>,
       runtime: { outDir, runId, today: process.env.LAYA_TODAY ?? "" },
       ensureSession, mw: getMw, trace, toolRunner,
+      allowSources: opts.sources !== false,
       ...(opts.maxSteps === undefined ? {} : { maxSteps: opts.maxSteps }),
       verbose,
     });
@@ -1333,6 +1414,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     sources: [],
     ok,
     secs: (Date.now() - t0) / 1000,
+    // §3：生效策略只在非缺省时进产物（与 runApp 同一纪律）；模型层级照写（脚本应用同样要能说清）。
+    ...(anyDeclared && policy !== null ? { effective_policy: policy } : {}),
+    ...(opts.modelStatus === undefined ? {} : { model_status: opts.modelStatus }),
     script: {
       mode: "flow",
       script_path: loaded.scriptPath,
@@ -1574,6 +1658,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     cliConfFloor = n;
   }
 
+  // 脚本应用的 hint 是脚本里的调用参数，没有"声明层"可剥：--force-hints 在这里是**静默无效**，
+  // 所以直接拒绝（接受一个不生效的旗标 = 假账）。
+  if (forceHints === "off" && scriptApp !== null && scriptApp.flow !== undefined) {
+    console.error("--force-hints off 只适用于声明式应用：flow 脚本的 hint 由脚本调用声明，没有可剥的声明层。");
+    return 2;
+  }
   let result: AppRunResult;
   try {
     result = scriptApp !== null && scriptApp.flow !== undefined
@@ -1581,6 +1671,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           slots, outDir, verbose: !cliBool(v, "quiet"),
           sources: !cliBool(v, "no-sources"), confirmSafe: cliBool(v, "confirm-safe"),
           headful: cliBool(v, "headful"), allowDangerous: cliBool(v, "allow-dangerous"),
+          // §3/学习环：与 runApp 同一组旗标（以前脚本应用静默忽略它们）。
+          tieredHint: cliBool(v, "tiered-hint") ? true : undefined,
+          hintMemory, hintMemoryPath,
+          confFloor: cliConfFloor,
+          providerFloor: activeProviderInfo()?.floor,
+          modelStatus,
+          ...(cliString(v, "emit-trace") === undefined ? {} : { emitTrace: cliString(v, "emit-trace") }),
+          ...(cliString(v, "replay") === undefined ? {} : { replayTrace: cliString(v, "replay") }),
         })
       : await runApp(pack, {
       slots, planPath, outDir, verbose: !cliBool(v, "quiet"),

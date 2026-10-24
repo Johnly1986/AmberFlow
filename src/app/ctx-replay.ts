@@ -47,9 +47,13 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
 
   const stepResult = (ev: TraceEvent): StepResult => {
     const ok = ev.ok === true;
+    const recorded = isObj(ev.result) && typeof ev.result["reason"] === "string"
+      ? ev.result["reason"] as string
+      : undefined;
     return {
       ok,
       ...(ev.stop_code === undefined ? {} : { stopCode: ev.stop_code }),
+      ...(recorded === undefined ? {} : { reason: recorded }),
       evidence: { url: ev.url ?? currentUrl, attempts: 1, elapsedMs: 0 },
     };
   };
@@ -129,12 +133,17 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       min: (rows, by) => pickRow(rows, by, "min"),
       max: (rows, by) => pickRow(rows, by, "max"),
     },
-    run: async (source, args, req) => {
+    run: (async (sourceOrStep: unknown, args?: string[], req?: unknown): Promise<StepResult> => {
       void args;
-      const ev = nextEvent("run", req.desc === undefined ? {} : { desc: req.desc });
+      const desc = typeof sourceOrStep === "string"
+        ? (req as { desc?: string } | undefined)?.desc
+        : (typeof (sourceOrStep as Record<string, unknown>)["desc"] === "string"
+            ? String((sourceOrStep as Record<string, unknown>)["desc"])
+            : undefined);
+      const ev = nextEvent("run", desc === undefined ? {} : { desc });
       consume();
       return stepResult(ev);
-    },
+    }) as Ctx["run"],
     dangerous: async (req) => {
       const ev = nextEvent("dangerous", { desc: req.desc });
       consume();

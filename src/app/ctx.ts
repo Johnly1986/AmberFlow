@@ -19,6 +19,7 @@ import {
 import { firstOf, locatorAnyFrame, type PageLike } from "../engine/extraction.ts";
 import { checkSignal } from "../engine/signals.ts";
 import { defaultDates, loadSource, runSource } from "../data/datasource.ts";
+import { listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
 import { REPO } from "../flow/flow.ts";
 import { createKit, type CommandDecl, type DomSignal, type TargetDecl, type ValueBinding } from "./kit.ts";
 import { pushEvent, type AppTrace } from "./trace.ts";
@@ -56,6 +57,8 @@ export interface StepEvidence {
 export interface StepResult {
   ok: boolean;
   stopCode?: string;
+  /** 引擎给出的人可读原因（与 `stopCode` 配对；排障/分支用，**不是**模型自由文本）。 */
+  reason?: string;
   evidence: StepEvidence;
 }
 
@@ -71,6 +74,13 @@ export interface ToolRunRequest {
   desc: string;
   source: string;
   done: Record<string, unknown>;
+  /**
+   * 应用支持器：`cli`（默认）/ `ssh` / `stdio`。非 cli 时用 `rawStep` 里的声明块
+   * （`{ssh:{...}}` / `{stdio:{...}}`），由对应适配器校验、展开、执行——与声明式
+   * 应用的支持器是**同一份实现**（不另写一套）。
+   */
+  adapter?: string;
+  rawStep?: Record<string, unknown>;
   args?: string[];
   dryRunArgs?: string[];
   idempotent?: boolean;
@@ -81,6 +91,7 @@ export interface ToolRunRequest {
 export interface ToolRunResult {
   ok: boolean;
   stopCode?: string;
+  reason?: string;
   refused?: string;
   code: number | null;
   stdout: string;
@@ -124,10 +135,17 @@ export interface Ctx {
   hints(...hints: string[]): TargetDecl;
   command(op: string, target?: string, value?: ValueBinding): CommandDecl;
   readonly value: ReturnType<typeof createKit>["value"];
+  /** ① 命令行形式：`ctx.run("demo-tool", ["--flag"], { done })`。 */
   run(source: string, args: string[], req: {
-    done: Record<string, unknown>; desc?: string;
+    done: Record<string, unknown>; desc?: string; adapter?: string;
     idempotent?: boolean; retries?: number; dryRunArgs?: string[];
   }): Promise<StepResult>;
+  /**
+   * ② 声明形式（任意应用支持器）：`ctx.run({ adapter?: "cli"|"ssh"|"stdio", ssh?: {...}, stdio?: {...}, done })`。
+   * 与声明式应用的 `journey` 步是同一套声明面（同一份校验/展开/执行实现），
+   * 所以"声明式能表达的进程类型，flow 脚本也表达得了"。
+   */
+  run(step: Record<string, unknown> & { done: Record<string, unknown> }): Promise<StepResult>;
   dangerous(req: {
     desc: string; source: string; args: string[]; dryRunArgs: string[];
     done: Record<string, unknown>; idempotent?: boolean; retries?: number;
@@ -149,6 +167,8 @@ export interface CtxDeps {
   sourceRunner?: (name: string) => Promise<SourceObservationView>;
   /** 工具步：由驱动接到 `runToolStep`（干跑/确认/幂等重试的既有实现）。 */
   toolRunner?: (req: ToolRunRequest) => Promise<ToolRunResult>;
+  /** `--skip-data`：数据腿被显式跳过时，`ctx.source()` 报结构化错误（不静默跑网络）。 */
+  allowSources?: boolean;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -254,15 +274,21 @@ export function createCtx(deps: CtxDeps): Ctx {
       throw new StopError("config_error", `ctx.step ${JSON.stringify(desc)} crashed: ${e instanceof Error ? e.message : String(e)}`);
     }
     budget.stepsUsed += 1;
+    const reason = typeof rep.stop_reason === "string" && rep.stop_reason ? rep.stop_reason : undefined;
     const result: StepResult = {
       ok: rep.done === true,
       ...(rep.stop_code === undefined ? {} : { stopCode: rep.stop_code }),
+      ...(reason === undefined ? {} : { reason }),
       evidence: { url: startUrl, attempts: 1, elapsedMs: Date.now() - started },
     };
     record(result.ok, {
       desc, url: startUrl,
       ...(result.stopCode === undefined ? {} : { stop_code: result.stopCode }),
-      result: { ok: result.ok, stop_code: result.stopCode ?? null, elapsed_ms: result.evidence.elapsedMs },
+      result: {
+        ok: result.ok, stop_code: result.stopCode ?? null,
+        ...(reason === undefined ? {} : { reason }),
+        elapsed_ms: result.evidence.elapsedMs,
+      },
     });
     return result;
   };
@@ -291,6 +317,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     const result: StepResult = {
       ok,
       ...(stopCode === undefined ? {} : { stopCode }),
+      ...(r.reason === undefined ? {} : { reason: r.reason }),
       evidence: { url: currentUrl, attempts: r.attempts ?? 1, elapsedMs: Date.now() - started },
     };
     pushEvent(trace, {
@@ -301,6 +328,68 @@ export function createCtx(deps: CtxDeps): Ctx {
     });
     return result;
   };
+  /** 声明形式：挑适配器 → 交给驱动（与声明式 journey 同一套适配器实现）。 */
+  const runDeclaredTool = async (step: Record<string, unknown>, dangerous: boolean): Promise<StepResult> => {
+    if (step === null || typeof step !== "object" || Array.isArray(step)) {
+      throw new StopError("config_error", "ctx.run: the declaration form needs an object like { stdio: {...}, done: {...} }");
+    }
+    const done = step["done"];
+    if (done === undefined || done === null || typeof done !== "object") {
+      throw new StopError("config_error", "ctx.run: done signal is required (completion is the process observation)");
+    }
+    const adapter = typeof step["adapter"] === "string" && step["adapter"]
+      ? step["adapter"]
+      : step["ssh"] !== undefined ? "ssh"
+        : step["stdio"] !== undefined ? "stdio"
+          : "cli";
+    if (adapter === "web") {
+      throw new StopError("config_error", "ctx.run: the web adapter is not a process step; use ctx.step() for browser steps");
+    }
+    try {
+      requireAppAdapter(adapter);
+    } catch {
+      throw new StopError("config_error", `ctx.run: unknown app adapter ${JSON.stringify(adapter)} (known: ${listAppAdapters().join(", ")})`);
+    }
+    if (adapter === "cli") {
+      // 声明形式的 cli 步与命令行形式完全等价（args/dryRunArgs/idempotent/retries 都认）。
+      const source = typeof step["source"] === "string" ? step["source"] : "";
+      const cliArgs = Array.isArray(step["args"]) ? (step["args"] as unknown[]).map(String) : [];
+      const cliReq: ToolRunRequest = {
+        desc: typeof step["desc"] === "string" && step["desc"] ? step["desc"] : `cli:${source || "declared"}`,
+        source, done: done as Record<string, unknown>, adapter: "cli", rawStep: step,
+        ...(Array.isArray(step["dryRunArgs"]) ? { dryRunArgs: (step["dryRunArgs"] as unknown[]).map(String) } : {}),
+        ...(step["idempotent"] === true ? { idempotent: true } : {}),
+        ...(typeof step["retries"] === "number" ? { retries: step["retries"] } : {}),
+        ...(dangerous ? { dangerous: true } : {}),
+      };
+      return runTool(source, cliArgs, cliReq, dangerous);
+    }
+    if (deps.toolRunner === undefined) throw new StopError("config_error", "ctx.run: no tool runner wired in this build");
+    checkBudget();
+    const started = Date.now();
+    const desc = typeof step["desc"] === "string" && step["desc"] ? step["desc"] : `${adapter} step`;
+    const r = await deps.toolRunner({
+      desc, source: typeof step["source"] === "string" ? step["source"] : `${adapter}:declared`,
+      done: done as Record<string, unknown>, adapter, rawStep: step,
+      ...(dangerous ? { dangerous: true } : {}),
+    });
+    budget.stepsUsed += 1;
+    const ok = r.ok === true;
+    const stopCode = r.stopCode ?? (ok ? undefined : (r.refused ?? "tool_failed"));
+    const result: StepResult = {
+      ok,
+      ...(stopCode === undefined ? {} : { stopCode }),
+      ...(r.reason === undefined ? {} : { reason: r.reason }),
+      evidence: { url: currentUrl, attempts: r.attempts ?? 1, elapsedMs: Date.now() - started },
+    };
+    pushEvent(trace, {
+      call: dangerous ? "dangerous" : "run", desc, ok,
+      ...(stopCode === undefined ? {} : { stop_code: stopCode }),
+      result: { adapter, code: r.code, refused: r.refused ?? null },
+    });
+    return result;
+  };
+
   const kit = createKit();
   const ctx: Ctx = {
     judge: kit.judge,
@@ -384,6 +473,9 @@ export function createCtx(deps: CtxDeps): Ctx {
       return ok;
     },
     source: async (name) => {
+      if (deps.allowSources === false) {
+        throw new StopError("config_error", `ctx.source(${JSON.stringify(name)})：本次运行带 --skip-data，数据腿被显式跳过`);
+      }
       if (deps.sourceRunner) {
         const obs = await deps.sourceRunner(name);
         pushEvent(trace, { call: "source", desc: name, result: { counts: obs.counts, rows: obs.rows.length } });
@@ -403,9 +495,13 @@ export function createCtx(deps: CtxDeps): Ctx {
       min: (rows, by) => pickRow(rows, by, "min"),
       max: (rows, by) => pickRow(rows, by, "max"),
     },
-    run: async (source, args, req) => {
-      return runTool(source, args, req as ToolRunRequest, false);
-    },
+    run: (async (sourceOrStep: unknown, args?: string[], req?: unknown): Promise<StepResult> => {
+      if (typeof sourceOrStep === "string") {
+        return runTool(sourceOrStep, args ?? [], req as ToolRunRequest, false);
+      }
+      const step = sourceOrStep as Record<string, unknown>;
+      return runDeclaredTool(step, false);
+    }) as Ctx["run"],
     dangerous: async (req) => {
       if (!Array.isArray(req?.dryRunArgs) || req.dryRunArgs.length === 0) {
         throw new StopError("config_error", "ctx.dangerous requires dryRunArgs (a failed dry run must never apply)");
