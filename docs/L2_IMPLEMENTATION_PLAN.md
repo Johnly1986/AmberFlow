@@ -322,7 +322,7 @@ npm run verify && bash bench/smoke.sh        # 先确认基线是绿的
 | 步 | 内容 | 退出条件 |
 |---|---|---|
 | **L3.1** ✅ 完成（2026-10-25，`tools/apps_migrate.ts`） | `npm run apps:migrate -- --app <id> [--write]` / `--all --check`：把 `pack.json` 转成声明式 `app.mjs`（数据内联，含 roles/probe/invariants） | **22/22 逐字段 0 diff**（`tests/apps-migrate.test.ts` 23 条） |
-| **L3.2** | 21 个 `apps/<id>/app.mjs` 生成并提交；`apps:matrix` 来源列加 `script`；`apps:check` 默认校验脚本 | `apps:suite` 全绿；`pack.json` 仍在（可回退） |
+| **L3.2** ✅ 完成（2026-10-25，`c698bcd`） | 22 个 `apps/<id>/app.mjs` 生成并提交（带 `@amberflow:declarative-data` 标记）；`apps:matrix` 增加 `script`/`logic` 列（数据脚本不计代码行）；`apps:migrate --all --check` 进 smoke（2b2） | 22/22 0 diff；`verify` exit 0（1600+ 测试）；矩阵 22 declarative / 0 code / 0 logic / 0 leaks / 0 debt |
 | **L3.3** | 切换**默认**：`loadApp` 只找脚本（`AMBERFLOW_JSON_APPS=1` 为过渡逃生口）；`apps list` 发现脚本；`apps:gen --check` 改比"脚本展开 == 冻结计划" | 全量 `verify` 绿；旧 JSON 仍能通过逃生口跑 |
 | **L3.4** | 删除 `pack.json` / `flow.json` / `transfer/specs` 与其加载路径；39 个引用文件逐个改（测试/工具/CLI）；六层对拍对象改为"脚本展开" | `npm run test:parity` 逐字节一致（**输出相同则不需要重冻**；出现差异才走 §5.4 的一次性重冻） |
 | **L3.5** | 文档收口（README/ARCHITECTURE/CLAUDE.md 的身份描述）+ 全量验证 | `verify` + `smoke` + `apps:suite` + 对拍 + 工作树干净 |
