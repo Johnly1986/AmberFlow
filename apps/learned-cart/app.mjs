@@ -6,9 +6,10 @@ const META = {
   "label": "录制的流程（2 步，来自 testpages/product.html）",
   "goal": "把无线鼠标加入购物车并打开购物车页",
   "model": "english",
-  "max_subgoals": 4,
+  "maxSubgoals": 4,
   "hosts": [],
   "slots": {},
+  "requiredSlots": [],
   "sources": [],
   "notes": [
     "本文件由 `npm run learn` 从**一次真实演示**录制：`journey` 是录下来的，`invariants` 是结束态归纳出来的候选。",
@@ -37,7 +38,6 @@ const META = {
       }
     }
   ],
-  "requiredSlots": [],
   "recordedFrom": {
     "url": "testpages/product.html",
     "steps": 2,

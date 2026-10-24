@@ -9,6 +9,10 @@ const META = {
   "slots": {
     "checkin": "2026-10-13"
   },
+  "requiredSlots": [
+    "checkin"
+  ],
+  "sources": [],
   "notes": [
     "这是 P3（数据槽层，src/bindings.ts）的示范包：`value: {from:'option', key:'checkin', match:'value'}` 是**声明式绑定**——值来自计划数据袋，候选来自当次观察到的 `<select>` option，匹配规则必须声明。",
     "夹具 testpages/checkin.html 刻意让机器值（`2026-10-13`）与人读标签（`10月13日 周二`）不同：旧世界的 `_slotValue` 只有子串猜测 + label→value 两候选回退，而这里两条规则各走各的档（match:value / match:label）。",
@@ -40,9 +44,6 @@ const META = {
         }
       }
     }
-  ],
-  "requiredSlots": [
-    "checkin"
   ]
 };
 const DATA = {};

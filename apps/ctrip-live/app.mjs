@@ -16,6 +16,9 @@ const META = {
     "us.trip.com",
     "sg.trip.com"
   ],
+  "slots": {},
+  "requiredSlots": [],
+  "sources": [],
   "notes": [
     "这份探针集原来写死在 src/live-probe.ts 与 src/live-capture.ts 里（矩阵的『债』那一栏）。搬进应用包后：驱动只剩『怎么测』，站点知识全在数据里，而且这些主机自动进入防泄漏门禁的覆盖范围。",
     "`gate_text` 与 `block_text` 故意不合并：前者是 shape() 里那个已提交字段（只认风控品牌词），后者是 looksBlocked() 的正文特征表——合并会悄悄改变已提交测量字段的含义。",
@@ -216,7 +219,8 @@ const META = {
         "hotels": "login_required"
       }
     }
-  }
+  },
+  "invariants": []
 };
 const DATA = {};
 const JOURNEY = [];

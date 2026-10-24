@@ -6,13 +6,14 @@ const META = {
   "label": "SlowJet 复刻站（site7）：冷启动重试的 19 步（离线）",
   "goal": "我下周要去北京出差，周一至周五都可以，从昆明出发。搜索早8点至晚6点最低价的机票并记录。另外再搜索出发当日价格300以内的酒店记录",
   "model": "english",
-  "max_subgoals": 19,
+  "maxSubgoals": 19,
   "hosts": [],
   "slots": {
     "window": "0800-1800",
     "sort": "price_asc",
     "cap": "300"
   },
+  "requiredSlots": [],
   "sources": [],
   "notes": [
     "本文件由 `npm run apps:gen` 从 `transfer/specs/slowjet.json` 生成：旅程逐字段等于该来源的展开结果，",
@@ -123,7 +124,6 @@ const META = {
       }
     }
   ],
-  "requiredSlots": [],
   "generatedFrom": {
     "spec": "transfer/specs/slowjet.json",
     "plan_sha256": "6fed4bb69cbc5c1913794343d7503bdfa77454046b2e9603362a251023849635"

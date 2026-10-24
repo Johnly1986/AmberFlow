@@ -6,13 +6,14 @@ const META = {
   "label": "FareHaven 复刻站（site6）：条件浮层 when 的 24 步（离线，含 skipped）",
   "goal": "我下周要去北京出差，周一至周五都可以，从昆明出发。搜索早8点至晚6点最低价的机票并记录。另外再搜索出发当日价格300以内的酒店记录",
   "model": "english",
-  "max_subgoals": 24,
+  "maxSubgoals": 24,
   "hosts": [],
   "slots": {
     "window": "0800-1800",
     "sort": "price_asc",
     "cap": "300"
   },
+  "requiredSlots": [],
   "sources": [],
   "notes": [
     "本文件由 `npm run apps:gen` 从 `transfer/specs/farehaven.json` 生成：旅程逐字段等于该来源的展开结果，",
@@ -139,7 +140,6 @@ const META = {
       }
     }
   ],
-  "requiredSlots": [],
   "generatedFrom": {
     "spec": "transfer/specs/farehaven.json",
     "plan_sha256": "d75e6c7badeb79b5a7360043de8dae04258ea448c4951059701201fe5e4ea746"

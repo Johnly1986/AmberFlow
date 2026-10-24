@@ -8,12 +8,15 @@ const META = {
   "model": "english",
   "hosts": [],
   "slots": {},
+  "requiredSlots": [],
+  "sources": [],
   "notes": [
     "工具步与浏览器步共用同一套旅程词汇（signal / retries / 干跑 / 确认），只是完成真值长在进程观察面上：退出码、stdout、stderr、产物文件。",
     "三条纪律：`retries > 0` 必须显式 `idempotent: true`；`dangerous: true` 必须有 `dry_run_args`；危险步默认**拒绝**，要 `--allow-dangerous`（或注入确认钩子）才真跑。",
     "`{out_dir}` 是运行期占位符（本次运行的输出目录），不是计划里的值——产物落到运行期目录，应用包才机器无关。",
     "这条链路全部离线（桩工具），所以能进 CI；真实工具（git / jq）的对应物是 apps/repo-report。"
-  ]
+  ],
+  "invariants": []
 };
 const DATA = {};
 const JOURNEY = [

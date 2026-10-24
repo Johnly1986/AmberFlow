@@ -13,7 +13,7 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dryRunFlow, loadScriptApp } from "../src/app/app-script.ts";
 import { runScriptApp } from "../src/app/app-runner.ts";
-import { readTrace, sameEventSequence, validateTrace } from "../src/app/trace.ts";
+import { readTrace, sameEventSequence, sameEventStructure, validateTrace } from "../src/app/trace.ts";
 import { REPO } from "../src/flow/flow.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "amberflow-ctx-"));
@@ -93,6 +93,23 @@ describe("L2 ctx：真实跑（浏览器 + 执行器）", () => {
       verbose: false, replayTrace: tracePath, slots: { coupon: "OTHER" },
     })).rejects.toThrow(/inputs mismatch/);
   }, 180_000);
+
+  it("L2 一致性：dry 与真实运行的调用序列相同；真实两次运行的结构相同（忽略耗时）", async () => {
+    const loaded = await loadScriptApp(FLOW);
+    const out = fs.mkdtempSync(path.join(tmp, "conform-"));
+    const dry = await dryRunFlow(loaded);
+    const t1 = path.join(out, "r1.json");
+    const t2 = path.join(out, "r2.json");
+    const r1 = await runScriptApp(loaded, { verbose: false, headful: false, emitTrace: t1 });
+    const r2 = await runScriptApp(loaded, { verbose: false, headful: false, emitTrace: t2 });
+    expect(r1.ok && r2.ok).toBe(true);
+    // E2（三实现一致性）：dry 的调用序列就是真实运行的调用序列（结构面）。
+    const pick = (events: Array<{ call: string; desc?: string; ok?: boolean }>) =>
+      events.map((e) => ({ call: e.call, desc: e.desc ?? null, ok: e.ok ?? null }));
+    expect(pick(readTrace(t1).events)).toEqual(pick(dry.trace.events));
+    // P3（真实运行的确定性）：同一脚本+输入两次运行结构相同；耗时证据不参与。
+    expect(sameEventStructure(readTrace(t1), readTrace(t2))).toBe(true);
+  }, 240_000);
 
   it("预算耗尽 = 结构化停因（不是挂死）", async () => {
     const loaded = await loadScriptApp(FLOW);

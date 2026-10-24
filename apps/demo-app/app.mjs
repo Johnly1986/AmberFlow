@@ -6,11 +6,14 @@ const META = {
   "label": "应用包示范：CLI 数据腿 + 浏览器动作腿 + 结束状态验收（全部离线）",
   "goal": "在自带的商店夹具上走一条完整下单链路：加购 → 打开购物车 → 用计划里的优惠券 → 结算到感谢页",
   "model": "english",
-  "max_subgoals": 8,
+  "maxSubgoals": 8,
   "hosts": [],
   "slots": {
     "coupon": "ACME10"
   },
+  "requiredSlots": [
+    "coupon"
+  ],
   "sources": [
     "demo-tool"
   ],
@@ -117,9 +120,6 @@ const META = {
         }
       }
     }
-  ],
-  "requiredSlots": [
-    "coupon"
   ]
 };
 const DATA = {};

@@ -107,6 +107,7 @@ act_on），模型不产出"选哪行"——而且与数据引擎**共用同一�
 `--app transfer-flyquest --no-sources`（第七个：结果页**只能靠提交搜索表单**到达）。
 线上应用：`--app qunar-live --out /tmp/qunar`（真网络 + 真模型，**包里声明了 iPhone 设备面**；见下条规则）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
 原始观测 → 结论，含 11 处缺陷与 3 处共享层修补）：[bench/APP_VERIFY_REPORT.md](bench/APP_VERIFY_REPORT.md)。
+作者指南（两种形态 / ctx API / 错误码 / 扩展配方）：`docs/APP_SCRIPT_AUTHORING.md`。
 新增一个应用 = 新目录 `apps/<id>/`（**声明式 `app.mjs`**（`export const meta/app`，数据脚本；要控制流就 `export async function flow(ctx)`）+ 可选 `sources/*.json`），**共享层零改动**；
 **也可以"演示一次"就录出来**：`npm run learn`（人：连他正开着的浏览器 `--cdp`——**挂载模式也认 `--url`**，
 给了就导航那一页，退出**只断开不关闭**；实测过不给 `--url` 会停在 about:blank 然后拿用户的选择器点不到东西。

@@ -9,6 +9,10 @@ const META = {
   "slots": {
     "q": "琥珀"
   },
+  "requiredSlots": [
+    "q"
+  ],
+  "sources": [],
   "notes": [
     "P4（`next` 声明式后继）的示范包：`search` 声明 `next: [\"search\", \"record\"]`——按序取第一个『此刻适用』的候选，适用性问的就是该步自己的 `when`（与『这一步适不适用』同一个问题，同一套信号语言）。",
     "为什么不是 `retries`：那一次搜索**成功了**（信号成立），只是结果还没到位。`retries` 只重跑失败的步，表达不了『成功了但后置条件不满足，回去再来一遍』——回边能。",
@@ -28,9 +32,6 @@ const META = {
         ]
       }
     }
-  ],
-  "requiredSlots": [
-    "q"
   ]
 };
 const DATA = {};

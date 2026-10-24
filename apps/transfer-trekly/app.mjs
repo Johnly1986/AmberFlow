@@ -6,13 +6,14 @@ const META = {
   "label": "Trekly 复刻站（site3）：价格上限是 range 滑块的 19 步（离线）",
   "goal": "我下周要去北京出差，周一至周五都可以，从昆明出发。搜索早8点至晚6点最低价的机票并记录。另外再搜索出发当日价格300以内的酒店记录",
   "model": "english",
-  "max_subgoals": 19,
+  "maxSubgoals": 19,
   "hosts": [],
   "slots": {
     "window": "0800-1800",
     "sort": "price_asc",
     "cap": "300"
   },
+  "requiredSlots": [],
   "sources": [],
   "notes": [
     "本文件由 `npm run apps:gen` 从 `transfer/specs/trekly.json` 生成：旅程逐字段等于该来源的展开结果，",
@@ -125,7 +126,6 @@ const META = {
       }
     }
   ],
-  "requiredSlots": [],
   "generatedFrom": {
     "spec": "transfer/specs/trekly.json",
     "plan_sha256": "3dfd02dbf13b84aaa69505efecc17fb4e999d173dd7463b19691cdf7f2176de3"

@@ -6,7 +6,7 @@ const META = {
   "label": "B 站最热番剧：进站 → 番剧索引按热度排序 → 打开榜首番剧（真实站点，要真网络）",
   "goal": "进入 www.bilibili.com，找到今年最热番剧并打开它的播放页",
   "model": "english",
-  "max_subgoals": 8,
+  "maxSubgoals": 8,
   "hosts": [
     "www.bilibili.com",
     "api.bilibili.com"
@@ -15,6 +15,7 @@ const META = {
     "top_anime_url": "https://www.bilibili.com/bangumi/play/ss28747",
     "oid": "478818261"
   },
+  "requiredSlots": [],
   "sources": [
     "bilibili-anime-rank",
     "bilibili-anime-comments"

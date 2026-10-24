@@ -8,11 +8,14 @@ const META = {
   "model": "english",
   "hosts": [],
   "slots": {},
+  "requiredSlots": [],
+  "sources": [],
   "notes": [
     "这条链路用的是**真实**命令行工具（git / jq），因此不进 CI：缺工具时测试跳过，产物也会随仓库状态变化。",
     "`git-log` 是 30 天窗口：在一个很久没有提交的旧 checkout 上它合理地返回 0 行——那时这条 signal 会不成立（这正是 audit 该报的东西，不是 bug）。",
     "读取类工具步不声明 `idempotent`，所以默认不重试；要重试必须显式 `idempotent: true`。"
-  ]
+  ],
+  "invariants": []
 };
 const DATA = {};
 const JOURNEY = [

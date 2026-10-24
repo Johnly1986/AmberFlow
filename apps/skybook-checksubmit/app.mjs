@@ -6,6 +6,9 @@ const META = {
   "label": "SkyBook 复刻站示范：一个子目标里完成「勾选 + 提交」（P2 命令闭集）",
   "goal": "在 SkyBook 酒店页勾选当前页显示的全部酒店，并记录它们",
   "hosts": [],
+  "slots": {},
+  "requiredSlots": [],
+  "sources": [],
   "notes": [
     "这是 ARCHITECTURE.md §七.9 那条边界的**示范包**：「先勾选、再提交」放进一个子目标。",
     "旧世界的写法要两个子目标 + 一次 URL 深链（&selected=all），因为每步重新 goto 会丢勾选状态；",

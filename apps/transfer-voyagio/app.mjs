@@ -6,13 +6,14 @@ const META = {
   "label": "Voyagio 复刻站（site5）：两页向导 + 结果/酒店记录（24 步，离线）",
   "goal": "我下周要去北京出差，周一至周五都可以，从昆明出发。搜索早8点至晚6点最低价的机票并记录。另外再搜索出发当日价格300以内的酒店记录",
   "model": "english",
-  "max_subgoals": 24,
+  "maxSubgoals": 24,
   "hosts": [],
   "slots": {
     "window": "0800-1800",
     "sort": "price_asc",
     "cap": "300"
   },
+  "requiredSlots": [],
   "sources": [],
   "notes": [
     "本文件由 `npm run apps:gen` 从 `transfer/specs/voyagio.json` 生成：旅程逐字段等于该来源的展开结果，",
@@ -142,7 +143,6 @@ const META = {
       }
     }
   ],
-  "requiredSlots": [],
   "generatedFrom": {
     "spec": "transfer/specs/voyagio.json",
     "plan_sha256": "b49875b34d537b4713b759f55bd0031c023824fff3d5481b3afcee7586ce6cca"

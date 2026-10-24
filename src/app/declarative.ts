@@ -24,12 +24,61 @@ import type { AppPack } from "./app-pack.ts";
 /** 标记：只有带它的 `.mjs` 才算"数据脚本"（别的代码文件仍然算逻辑，见 apps:matrix）。 */
 export const DECLARATIVE_MARKER = "@amberflow:declarative-data";
 
+/**
+ * meta 的字段表（**唯一清单**）：序列化（IR→脚本）与降级（脚本→IR）都读它。
+ *
+ * 为什么要有这张表：字段原来在**三处**各写一遍（类型 / lower 的逐字段搬运 / 序列化的
+ * `MIGRATE_FIELDS`），加一个字段漏一处就是"静默丢字段"。现在加字段只改这张表。
+ *
+ * `meta` = 脚本面的 canonical 名字（camelCase）；`pack` = IR/pack.json 面（snake_case）；
+ * `aliases` = 旧脚本里的写法（只读兼容，序列化只写 canonical）。
+ */
+export interface MetaField {
+  readonly meta: string;
+  readonly pack: string;
+  readonly aliases?: readonly string[];
+}
+
+export const META_FIELD_MAP: readonly MetaField[] = [
+  { meta: "id", pack: "id" },
+  { meta: "label", pack: "label" },
+  { meta: "goal", pack: "goal" },
+  { meta: "model", pack: "model" },
+  { meta: "maxSubgoals", pack: "max_subgoals", aliases: ["max_subgoals"] },
+  { meta: "hosts", pack: "hosts" },
+  { meta: "slots", pack: "slots" },
+  { meta: "requiredSlots", pack: "required_slots", aliases: ["required_slots"] },
+  { meta: "sources", pack: "sources" },
+  { meta: "device", pack: "device" },
+  { meta: "notes", pack: "notes" },
+  { meta: "policy", pack: "policy" },
+  // 迁移/高级用法：步骤模板与探针声明原样搬运（L3 迁移需要；不是常用作者面）。
+  { meta: "roles", pack: "roles" },
+  { meta: "probe", pack: "probe" },
+  { meta: "invariants", pack: "invariants" },
+  { meta: "recordedFrom", pack: "recorded_from", aliases: ["recorded_from"] },
+  // 生成器血统（`--check`/`--write` 靠它发现"这个应用由 spec 管"）。
+  { meta: "generatedFrom", pack: "generated_from", aliases: ["generated_from"] },
+] as const;
+
+const META_NAMES = new Set(META_FIELD_MAP.flatMap((f) => [f.meta, ...(f.aliases ?? [])]));
+
+/** 从一个脚本 meta 对象里取某字段（canonical 优先，旧别名兜底）。 */
+function metaValue(meta: Record<string, unknown>, field: MetaField): unknown {
+  if (meta[field.meta] !== undefined) return meta[field.meta];
+  for (const a of field.aliases ?? []) if (meta[a] !== undefined) return meta[a];
+  return undefined;
+}
+
+const FIELD = Object.fromEntries(META_FIELD_MAP.map((f) => [f.pack, f])) as Record<string, MetaField>;
+
+/** 脚本面对外的 meta 形状（canonical；旧 snake 名字在类型里保留为 deprecated 可选）。 */
 export interface ScriptMeta {
   id: string;
   label?: string;
   goal: string;
   model?: string;
-  max_subgoals?: number;
+  maxSubgoals?: number;
   hosts?: string[];
   slots?: Record<string, string>;
   requiredSlots?: string[];
@@ -37,13 +86,16 @@ export interface ScriptMeta {
   device?: Record<string, unknown>;
   notes?: string[];
   policy?: Record<string, unknown>;
-  /** 迁移/高级用法：步骤模板与探针声明原样搬运（L3 迁移需要；不是常用作者面）。 */
   roles?: Record<string, unknown>;
   probe?: Record<string, unknown>;
   invariants?: Array<Record<string, unknown>>;
   recordedFrom?: Record<string, unknown>;
-  /** 生成器血统（`--check`/`--write` 靠它发现"这个应用由 spec 管"）。 */
   generatedFrom?: Record<string, unknown>;
+  /** 旧写法（仍可读）：`max_subgoals` 等；新脚本请用 canonical 名字。 */
+  max_subgoals?: number;
+  required_slots?: string[];
+  recorded_from?: Record<string, unknown>;
+  generated_from?: Record<string, unknown>;
 }
 
 export interface ScriptDraft {
@@ -154,15 +206,48 @@ export function parseDeclarativeScript(src: string): DeclarativeParts {
 
 /**
  * 把声明面/动作面**降级**成今天的 IR（`AppPack`）。唯一翻译点（L1 加载器与同步读取共用）。
+ *
+ * 未知 meta 字段**响亮拒绝**（`_` 开头视为注释）：拼错 `invaraints` 之类如果静默忽略，
+ * 表现会是"不变量没生效"而不是"你拼错了"——那是本仓库最反对的一类假绿。
  */
 export function lowerDeclarative(meta: ScriptMeta, draft: ScriptDraft): AppPack {
   if (!isObj(meta)) throw new Error("app script: meta must be an object");
   if (!isObj(draft)) throw new Error("app script: app must be an object");
-  if (typeof meta.id !== "string" || !meta.id.trim()) throw new Error("app script: meta.id must be a non-empty string");
-  if (typeof meta.goal !== "string" || !meta.goal.trim()) throw new Error("app script: meta.goal must be a non-empty string");
+
+  const m = meta as unknown as Record<string, unknown>;
+  const unknown = Object.keys(m).filter((k) => !META_NAMES.has(k) && !k.startsWith("_"));
+  if (unknown.length) {
+    throw new Error(`app script: meta.${unknown[0]}: unknown field (known: `
+      + `${META_FIELD_MAP.map((f) => f.meta).join(", ")}; keys starting with "_" are ignored)`);
+  }
+  const draftUnknown = Object.keys(draft as unknown as Record<string, unknown>)
+    .filter((k) => !["data", "judge", "exec"].includes(k));
+  if (draftUnknown.length) {
+    throw new Error(`app script: app.${draftUnknown[0]}: unknown field (known: data, judge, exec)`);
+  }
+
+  const str = (f: MetaField): string | undefined => {
+    const v = metaValue(m, f);
+    return v === undefined ? undefined : String(v);
+  };
+  const id = metaValue(m, FIELD["id"]!);
+  const goal = metaValue(m, FIELD["goal"]!);
+  if (typeof id !== "string" || !id.trim()) throw new Error("app script: meta.id must be a non-empty string");
+  if (typeof goal !== "string" || !goal.trim()) throw new Error("app script: meta.goal must be a non-empty string");
   if (!Array.isArray(draft.exec)) throw new Error("app script: app.exec must be a list of steps");
 
-  const slots: Record<string, unknown> = { ...(isObj(meta.slots) ? meta.slots : {}) };
+  const asList = (f: MetaField, label: string): unknown[] => {
+    const v = metaValue(m, f);
+    if (v === undefined) return [];
+    if (!Array.isArray(v)) throw new Error(`app script: meta.${f.meta} must be a list`);
+    void label;
+    return [...v];
+  };
+
+  // 槽位：meta.slots + app.data（字符串进 slots，`{kind:"source"}` 进 source_slots）。
+  const slots: Record<string, unknown> = isObj(metaValue(m, FIELD["slots"]!))
+    ? { ...(metaValue(m, FIELD["slots"]!) as Record<string, unknown>) }
+    : {};
   const sourceSlots: Record<string, unknown> = {};
   for (const [key, v] of Object.entries(isObj(draft.data) ? draft.data : {})) {
     if (typeof v === "string") { slots[key] = v; continue; }
@@ -178,56 +263,43 @@ export function lowerDeclarative(meta: ScriptMeta, draft: ScriptDraft): AppPack 
     throw new Error(`app script: data.${key}: value must be a string literal or a source binding`);
   }
 
+  const declaredInvariants = metaValue(m, FIELD["invariants"]!);
   const pack: Record<string, unknown> = {
     spec_version: 1,
-    id: meta.id,
-    goal: meta.goal,
-    ...(meta.label === undefined ? {} : { label: meta.label }),
-    ...(meta.model === undefined ? {} : { model: meta.model }),
-    ...(meta.max_subgoals === undefined ? {} : { max_subgoals: meta.max_subgoals }),
-    hosts: Array.isArray(meta.hosts) ? [...meta.hosts] : [],
+    id,
+    goal,
+    hosts: asList(FIELD["hosts"]!, "hosts"),
     slots,
-    required_slots: Array.isArray(meta.requiredSlots) ? [...meta.requiredSlots] : [],
-    sources: Array.isArray(meta.sources) ? [...meta.sources] : [],
+    required_slots: asList(FIELD["required_slots"]!, "requiredSlots"),
+    sources: asList(FIELD["sources"]!, "sources"),
     journey: [...draft.exec],
-    invariants: [...(meta.invariants ?? draft.judge?.invariants ?? [])],
+    invariants: [
+      ...(Array.isArray(declaredInvariants)
+        ? declaredInvariants
+        : (draft.judge?.invariants ?? [])),
+    ],
   };
+  // 其余字段按表直搬（undefined = 缺席；与"缺省等价"纪律一致）。
+  for (const f of META_FIELD_MAP) {
+    if (["id", "goal", "hosts", "slots", "required_slots", "sources", "invariants"].includes(f.pack)) continue;
+    const v = metaValue(m, f);
+    if (v === undefined) continue;
+    pack[f.pack] = Array.isArray(v) ? [...v] : v;
+  }
   if (Object.keys(sourceSlots).length) pack["source_slots"] = sourceSlots;
-  if (meta.roles !== undefined) pack["roles"] = meta.roles;
-  if (meta.probe !== undefined) pack["probe"] = meta.probe;
-  if (Array.isArray(meta.notes)) pack["notes"] = [...meta.notes];
-  if (meta.device !== undefined) pack["device"] = meta.device;
-  if (meta.policy !== undefined) pack["policy"] = meta.policy;
-  if (meta.recordedFrom !== undefined) pack["recorded_from"] = meta.recordedFrom;
-  if (meta.generatedFrom !== undefined) pack["generated_from"] = meta.generatedFrom;
+  void str;
   return pack as unknown as AppPack;
 }
-
-/** META/DATA/JOURNEY 需要搬运的字段（`journey`/`source_slots` 走 `app()`）。 */
-const MIGRATE_FIELDS = [
-  "id", "label", "goal", "model", "max_subgoals", "hosts", "slots", "required_slots",
-  "sources", "device", "notes", "policy", "roles", "probe", "invariants", "recorded_from", "generated_from",
-] as const;
 
 /** IR → 声明式脚本源码。**只搬运，不发明**（迁移与 `apps:gen` 共用；打标记 = 数据）。 */
 export function packToScriptSource(pack: AppPack): string {
   const raw = pack as unknown as Record<string, unknown>;
   const meta: Record<string, unknown> = {};
-  for (const k of MIGRATE_FIELDS) {
-    if (raw[k] === undefined) continue;
-    meta[k] = raw[k];
-  }
-  if (meta["required_slots"] !== undefined) {
-    meta["requiredSlots"] = meta["required_slots"];
-    delete meta["required_slots"];
-  }
-  if (meta["recorded_from"] !== undefined) {
-    meta["recordedFrom"] = meta["recorded_from"];
-    delete meta["recorded_from"];
-  }
-  if (meta["generated_from"] !== undefined) {
-    meta["generatedFrom"] = meta["generated_from"];
-    delete meta["generated_from"];
+  // 顺序由表决定（canonical 名字）：表是唯一清单，加字段只改 `META_FIELD_MAP`。
+  for (const f of META_FIELD_MAP) {
+    const v = raw[f.pack];
+    if (v === undefined) continue;
+    meta[f.meta] = v;
   }
   const sourceSlots = (raw["source_slots"] ?? {}) as Record<string, Record<string, unknown>>;
   const data: Record<string, unknown> = {};

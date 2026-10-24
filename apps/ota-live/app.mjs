@@ -15,6 +15,9 @@ const META = {
     "www.expedia.com",
     "www.kayak.com"
   ],
+  "slots": {},
+  "requiredSlots": [],
+  "sources": [],
   "notes": [
     "「哪些站点值得再渲染一次」是机械规则（HTTP 层回了 >5000 B 的 HTML，最多前 3 个），不需要数据；「哪些站点、什么 URL、什么算挑战页/下线公告」全在这里声明。",
     "实测结论（已提交语料 transfer/results/ota_probe.json）：本环境下没有任何一家匿名可访问的 OTA 会抛出价格列表。",
@@ -94,7 +97,8 @@ const META = {
         "fallback_for_transfer": "用「结构不同、同类任务」的复刻站验证迁移（transfer/），真实站点一侧等能过风控的出口 IP + 登录态，驱动可原样复用"
       }
     }
-  }
+  },
+  "invariants": []
 };
 const DATA = {};
 const JOURNEY = [];

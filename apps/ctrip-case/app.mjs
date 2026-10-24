@@ -6,9 +6,10 @@ const META = {
   "label": "携程复刻站：19 个冻结子目标（机票 筛选/排序/记录 × 5 天 + 酒店 上限/排序/记录）",
   "goal": "我下周要去北京出差，周一至周五都可以，从昆明出发。搜索早8点至晚6点最低价的机票并记录。另外再搜索出发当日价格300以内的酒店记录",
   "model": "english",
-  "max_subgoals": 19,
+  "maxSubgoals": 19,
   "hosts": [],
   "slots": {},
+  "requiredSlots": [],
   "sources": [],
   "notes": [
     "本文件由 `npm run apps:gen` 从 `transfer/specs/ctrip.json` 生成：旅程逐字段等于该来源的展开结果，",
@@ -119,7 +120,6 @@ const META = {
       }
     }
   ],
-  "requiredSlots": [],
   "generatedFrom": {
     "spec": "transfer/specs/ctrip.json",
     "plan_sha256": "186a1cdfc0a9362f08e6b9d795b3ba5bdc78cca2f07e1fe057d84b332b39972f"

@@ -6,9 +6,10 @@ const META = {
   "label": "Excel 类型列路由两套设备录入表单（3 行录入成功 + 1 行被表单拒绝）",
   "goal": "按 Excel 规划表把每台设备录入对应的表单页；识别出的类型用规则选页，空类型按行内证据显式选页；坏序列号由表单自己拒绝并如实报出来",
   "model": "english",
-  "max_subgoals": 4,
+  "maxSubgoals": 4,
   "hosts": [],
   "slots": {},
+  "requiredSlots": [],
   "sources": [],
   "notes": [
     "材料：src/camera-entry.ts 的 FORMS.form_a / FORMS.form_b（data-test 选择器）、TYPE_TO_FORM（枪机/筒机→form_a，球机/PTZ→form_b）、DEMO_ROWS（4 行）；页面 testpages/portal.html → camera_a.html / camera_b.html → entry_success.html。",

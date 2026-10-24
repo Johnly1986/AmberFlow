@@ -6,7 +6,11 @@ const META = {
   "label": "应用包示范：同一旅程混用 web + cli + ssh + stdio（真实 sshd + 真实交互进程）",
   "goal": "加购一件商品 → cli 产出令牌 → 真实 ssh 把令牌写到远端再读回 → cli 消费远端值 → 浏览器用数据集里的优惠券码填表并应用 → 玩一局真实交互式猜数字游戏 → cli 消费游戏的返回值",
   "model": "english",
-  "max_subgoals": 8,
+  "maxSubgoals": 8,
+  "hosts": [],
+  "slots": {},
+  "requiredSlots": [],
+  "sources": [],
   "notes": [
     "这是**多类型应用**的完整示范：一条旅程里依次执行 web → cli → ssh → cli → web → stdio → cli，类型由适配器注册表分派，runner 里没有类型分支。",
     "返回值传递覆盖三条通路：① cli→ssh（cli 的 stdout_regex → 数据集 → ssh 远端命令的 {dataset:token}）；② ssh→数据集→浏览器命令绑定（{from:\"dataset\", key:\"coupon\"} 填表）；③ stdio→cli（游戏的返回值 → 数据集 → 下一 cli 步 argv）。缺失值一律结构化 needs_value，不猜。",

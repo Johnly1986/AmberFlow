@@ -6,9 +6,10 @@ const META = {
   "label": "Excel IP 规划表 → 设备网络设置页（4 行：3 行保存成功 + 1 行被设备页拒绝）",
   "goal": "按 Excel IP 规划表把每台设备的 ip / 子网掩码 / 网关写进它自己的网络设置页；表格里写错的那一行必须由设备页自己的校验拒绝，并被如实报出来",
   "model": "english",
-  "max_subgoals": 8,
+  "maxSubgoals": 8,
   "hosts": [],
   "slots": {},
+  "requiredSlots": [],
   "sources": [],
   "notes": [
     "本文件由 `npm run apps:gen` 从 `src/cli/ip-config.ts#buildAppPlan` 生成：旅程逐字段等于该来源的展开结果，",
@@ -73,7 +74,6 @@ const META = {
       }
     }
   ],
-  "requiredSlots": [],
   "generatedFrom": {
     "source": "src/cli/ip-config.ts#buildAppPlan",
     "plan_sha256": "aa35f078d9c584f9c0b25c3a9b1d109c5172b6010e076c374a6fee61ffbe4342"

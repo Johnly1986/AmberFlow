@@ -88,6 +88,8 @@ node --experimental-strip-types src/data/datasource.ts --source git-log --out /t
 
 `apps/<app>/app.mjs` 把三样东西绑在一起：**动作腿**（`journey` 用 `roles` 里的模板串起来）、
 **数据腿**（`sources` 引用数据源配置）、**验收**（`invariants` 是旅程结束状态上的断言）。
+新应用先看 **[应用脚本作者指南](../docs/APP_SCRIPT_AUTHORING.md)**（形态选择 / ctx API / 错误码 / 扩展配方）；
+脚手架：`amber apps new <id>`（flow）或 `--kind data`（声明式）。
 它只是把同样的数据写成了 JS（`export const meta = ...` / `export const app = ...`，**没有控制流**），
 所以 `loadPack` 仍能同步读它；`pack.json` 作为旧格式继续可读（冻结夹具）。
 生成/迁移：`npm run apps:gen -- --write`（spec → app.mjs）与 `npm run apps:migrate -- --all --check`

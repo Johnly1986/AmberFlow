@@ -6,12 +6,13 @@ const META = {
   "label": "SkyBook 复刻站（site2）：23 步（五天筛选/排序/记录 + 酒店勾选两页），离线",
   "goal": "我下周要去北京出差，周一至周五都可以，从昆明出发。搜索早8点至晚6点最低价的机票并记录。另外再搜索出发当日价格300以内的酒店记录",
   "model": "english",
-  "max_subgoals": 23,
+  "maxSubgoals": 23,
   "hosts": [],
   "slots": {
     "window": "0800-1800",
     "sort": "price_asc"
   },
+  "requiredSlots": [],
   "sources": [],
   "notes": [
     "本文件由 `npm run apps:gen` 从 `transfer/specs/skybook.json` 生成：旅程逐字段等于该来源的展开结果，",
@@ -156,7 +157,6 @@ const META = {
       }
     }
   ],
-  "requiredSlots": [],
   "generatedFrom": {
     "spec": "transfer/specs/skybook.json",
     "plan_sha256": "a5349fcf90d25cc5a7e7a6a293bafce7c9b15eedf999f0e1ca3157f9141a315c"
