@@ -422,8 +422,10 @@ export { meta, flow } from "../../legacy/from-pack.mjs";   // 内部：loadPack 
 | 数据 | `source` / `data.{min,max}` | `runSource` / 同一份 min-max 语义 |
 | 收尾 | `done` | 结束态不变量（`checkSignal`）；失败 = `invariant_failed` |
 
+**已接线**：`ctx.run` / `ctx.dangerous`（工具步）——经 `CtxDeps.toolRunner` 接到既有 `runToolStep`
+（干跑/确认/幂等重试的唯一实现），驱动里把 `ToolRunRequest` 装成 `ExpandedStep`；危险步默认 `refused: dangerous`。
+
 **本版未接线（调用会抛明确 `config_error`，不静默）**：
-`ctx.openPage`（`meta.site.pages` 映射）、`ctx.read.attr`、`ctx.rows` / `ctx.extract`（Q5 的 v1 只给 extract，但需要 `meta.site.listExtract` 先入 schema）、
-`ctx.run` / `ctx.dangerous`（工具步；`runToolStep` **已存在**，只差把 `ExpandedStep` 声明面接进 kit）。
+`ctx.openPage`（`meta.site.pages` 映射）、`ctx.read.attr`、`ctx.rows` / `ctx.extract`（Q5 的 v1 只给 extract，但需要 `meta.site.listExtract` 先入 schema）。
 **实现备注**：`StepResult.evidence` 实际只有 `{url, attempts, elapsedMs}`（草案里的 `elements` 暂无公开缝）；
 审计口径不变：脚本仍只看 `stopCode`，`method`/`conf` 只在 trace。

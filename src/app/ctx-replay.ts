@@ -129,11 +129,16 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       min: (rows, by) => pickRow(rows, by, "min"),
       max: (rows, by) => pickRow(rows, by, "max"),
     },
-    run: async () => {
-      throw new StopError("config_error", "ctx.run (tool steps) is not available in this L2 build yet");
+    run: async (source, args, req) => {
+      void args;
+      const ev = nextEvent("run", req.desc === undefined ? {} : { desc: req.desc });
+      consume();
+      return stepResult(ev);
     },
-    dangerous: async () => {
-      throw new StopError("config_error", "ctx.dangerous is not available in this L2 build yet");
+    dangerous: async (req) => {
+      const ev = nextEvent("dangerous", { desc: req.desc });
+      consume();
+      return stepResult(ev);
     },
     done: async () => { nextEvent("done"); },
   };

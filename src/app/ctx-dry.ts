@@ -11,6 +11,7 @@
 import { disallowedHost } from "../engine/executor.ts";
 import { validateSignalSpec } from "../engine/signals.ts";
 import { validateCommands } from "../engine/actions.ts";
+import { validateToolSignal } from "../browser/tool-signals.ts";
 import { createKit, type CommandDecl } from "./kit.ts";
 import { pushEvent, type AppTrace } from "./trace.ts";
 import { StopError, type Ctx, type CtxBudget, type SourceObservationView, type StepRequest, type StepResult } from "./ctx.ts";
@@ -68,10 +69,16 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     return p;
   };
 
-  const recordStep = (desc: string, ok = true, stopCode?: string): StepResult => {
+  const recordStep = (desc: string, done?: unknown, ok = true, stopCode?: string): StepResult => {
     checkBudget();
     budget.stepsUsed += 1;
-    pushEvent(trace, { call: "step", desc, ok, ...(stopCode === undefined ? {} : { stop_code: stopCode }) });
+    pushEvent(trace, {
+      call: "step", desc, url: currentUrl, ok,
+      ...(stopCode === undefined ? {} : { stop_code: stopCode }),
+      // dry 的审计额外记**声明的完成条件**（它是计划数据，不是模型产出）：
+      // `apps explain` 与"脚本 vs 既有 journey"对照都靠它。
+      ...(done === undefined ? {} : { result: { done } }),
+    });
     return { ok, ...(stopCode === undefined ? {} : { stopCode }), evidence: { url: currentUrl, attempts: 1, elapsedMs: 0 } };
   };
 
@@ -114,7 +121,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     step: async (desc, req) => {
       const p = validateStep(`ctx.step(${JSON.stringify(desc)})`, req);
       if (p.length) throw new StopError("config_error", problems(p).join("；"));
-      return recordStep(desc);
+      currentUrl = req.url ?? currentUrl;
+      return recordStep(desc, req.done);
     },
     url: () => currentUrl,
     read: {
@@ -137,17 +145,52 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       min: (rows, by) => pickRow(rows, by, "min"),
       max: (rows, by) => pickRow(rows, by, "max"),
     },
-    run: async () => {
-      throw new StopError("config_error", "ctx.run (tool steps) is not available in this L2 build yet");
+    run: async (source, args, req) => {
+      const p = validateToolRun(source, args, req as never, false);
+      if (p.length) throw new StopError("config_error", problems(p).join("；"));
+      checkBudget();
+      budget.stepsUsed += 1;
+      pushEvent(trace, { call: "run", desc: (req as { desc?: string }).desc ?? source, ok: true, result: { source } });
+      return { ok: true, evidence: { url: currentUrl, attempts: 1, elapsedMs: 0 } };
     },
-    dangerous: async () => {
-      throw new StopError("config_error", "ctx.dangerous is not available in this L2 build yet");
+    dangerous: async (req) => {
+      const p = validateToolRun(req?.source, req?.args, req as never, true);
+      if (p.length) throw new StopError("config_error", problems(p).join("；"));
+      checkBudget();
+      budget.stepsUsed += 1;
+      pushEvent(trace, { call: "dangerous", desc: req.desc, ok: true, result: { source: req.source } });
+      return { ok: true, evidence: { url: currentUrl, attempts: 1, elapsedMs: 0 } };
     },
     done: async () => {
       pushEvent(trace, { call: "done", ok: true });
       return;
     },
   };
+}
+
+/** 工具步的声明面校验（dry 也要查：未知信号算子 / 危险步缺干跑，都该在 check 里红）。 */
+function validateToolRun(
+  source: unknown, args: unknown, req: { done?: unknown; dryRunArgs?: unknown },
+  dangerous: boolean,
+): string[] {
+  const p: string[] = [];
+  if (typeof source !== "string" || !source.trim()) p.push("source must be a non-empty string");
+  if (args !== undefined && (!Array.isArray(args) || args.some((a) => typeof a !== "string"))) p.push("args must be a list of strings");
+  if (req === null || typeof req !== "object" || req.done === undefined || req.done === null) {
+    p.push("done signal is required");
+  } else if (typeof req.done !== "object" || Array.isArray(req.done)) {
+    p.push("done signal must be an object");
+  } else {
+    p.push(...validateToolSignal(req.done as never, "ctx.run"));
+  }
+  if (req !== null && typeof req === "object" && req.dryRunArgs !== undefined
+    && (!Array.isArray(req.dryRunArgs) || req.dryRunArgs.some((a) => typeof a !== "string"))) {
+    p.push("dryRunArgs must be a list of strings");
+  }
+  if (dangerous && (!Array.isArray(req?.dryRunArgs) || (req.dryRunArgs as unknown[]).length === 0)) {
+    p.push("ctx.dangerous requires dryRunArgs (a failed dry run must never apply)");
+  }
+  return p;
 }
 
 function pickRow<T extends Record<string, unknown>>(rows: T[], by: string, order: "min" | "max"): T | null {

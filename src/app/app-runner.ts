@@ -57,7 +57,7 @@ import {
 import { getAppAdapter, substituteDatasetPlaceholders, type AdapterRunContext } from "./app-adapters.ts";
 import { validateApp } from "./cross-ref.ts";
 import { loadApp, resolveApp, type LoadedScriptApp } from "./app-script.ts";
-import { StopError, createCtx } from "./ctx.ts";
+import { StopError, createCtx, type ToolRunRequest, type ToolRunResult } from "./ctx.ts";
 import { createReplayCtx } from "./ctx-replay.ts";
 import {
   finishTrace, inputsSha256, newTrace, readTrace, replayCompatibility, writeTrace, type AppTrace,
@@ -1256,11 +1256,37 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       }
       return mw;
     };
+    /** 工具步：接到既有 `runToolStep`（干跑/确认/幂等重试的唯一实现，不复制）。 */
+    const toolRunner = async (req: ToolRunRequest): Promise<ToolRunResult> => {
+      const decl = {
+        source: req.source,
+        args: req.args ?? [],
+        dry_run_args: req.dryRunArgs ?? null,
+        signal: req.done as never,
+        retries: req.retries ?? 0,
+        idempotent: req.idempotent === true,
+        dangerous: req.dangerous === true,
+        returns: null,
+      };
+      const step = {
+        index: 0, adapter: "cli", kind: "tool",
+        desc: req.desc, role: null, id: null, next: [], decl, tool: decl,
+      } as unknown as ExpandedStep;
+      const r = await runToolStep(step, { ...opts, outDir, runId, verbose });
+      const stopCode = r.done ? undefined : (r.refused ?? "tool_failed");
+      return {
+        ok: r.done,
+        ...(stopCode === undefined ? {} : { stopCode }),
+        ...(r.refused === undefined ? {} : { refused: r.refused }),
+        code: r.code, stdout: r.stdout, stderr: r.stderr, attempts: r.attempts,
+        ...(r.dry_run === null ? {} : { dryRun: r.dry_run }),
+      };
+    };
     const ctx = createCtx({
       pack: pack as never,
       slots: slots as Record<string, string>,
       runtime: { outDir, runId, today: process.env.LAYA_TODAY ?? "" },
-      ensureSession, mw: getMw, trace,
+      ensureSession, mw: getMw, trace, toolRunner,
       ...(opts.maxSteps === undefined ? {} : { maxSteps: opts.maxSteps }),
       verbose,
     });

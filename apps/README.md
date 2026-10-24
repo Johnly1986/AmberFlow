@@ -604,5 +604,7 @@ amber run <应用> --replay /tmp/run.trace.json       # 重放：不重新决策
 
 - **审计产物是轨迹，不是静态计划**：`trace.done` + `stop_code` + 每次调用的 `{ok, stop_code}`；
   `sameEventSequence` 是确定性判据（同一脚本+输入两次运行必须相同）。
-- **本版边界**：`ctx.run`/`ctx.dangerous`（工具步）、`ctx.openPage`（站点页映射）、`ctx.read.attr`、
-  `ctx.rows`/`ctx.extract` 尚未接线（调用会给出明确 `config_error`，不静默）；L1 的声明式路径不受影响。
+- **工具步也走 ctx**：`ctx.run(source, args, {done})` 与 `ctx.dangerous({...dryRunArgs})` 接到既有
+  `runToolStep`（干跑/确认/幂等重试的唯一实现）；危险步默认 `refused: dangerous`，`--allow-dangerous` 才执行。
+- **本版边界**：`ctx.openPage`（站点页映射）、`ctx.read.attr`、`ctx.rows`/`ctx.extract` 尚未接线
+  （调用会给出明确 `config_error`，不静默）；L1 的声明式路径不受影响。

@@ -13,7 +13,6 @@
  *   - 值只来自声明/观察/派生：`read.*` 是只读观察，`source()` 是数据腿观察。
  */
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import {
   disallowedHost, type BrowserMiddleware, type BrowserSession, type RunReport,
 } from "../engine/executor.ts";
@@ -67,6 +66,29 @@ export interface SourceObservationView {
   version?: string;
 }
 
+/** 工具步的请求（进程观察面；完成真值 = exit/stdout/stderr/产物）。 */
+export interface ToolRunRequest {
+  desc: string;
+  source: string;
+  done: Record<string, unknown>;
+  args?: string[];
+  dryRunArgs?: string[];
+  idempotent?: boolean;
+  dangerous?: boolean;
+  retries?: number;
+}
+
+export interface ToolRunResult {
+  ok: boolean;
+  stopCode?: string;
+  refused?: string;
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  attempts: number;
+  dryRun?: unknown;
+}
+
 export interface CtxBudget {
   maxSteps: number;
   stepsUsed: number;
@@ -102,8 +124,14 @@ export interface Ctx {
   hints(...hints: string[]): TargetDecl;
   command(op: string, target?: string, value?: ValueBinding): CommandDecl;
   readonly value: ReturnType<typeof createKit>["value"];
-  run(source: string, args: string[], req: { done: DomSignal }): Promise<StepResult>;
-  dangerous(req: Record<string, unknown>): Promise<StepResult>;
+  run(source: string, args: string[], req: {
+    done: Record<string, unknown>; desc?: string;
+    idempotent?: boolean; retries?: number; dryRunArgs?: string[];
+  }): Promise<StepResult>;
+  dangerous(req: {
+    desc: string; source: string; args: string[]; dryRunArgs: string[];
+    done: Record<string, unknown>; idempotent?: boolean; retries?: number;
+  }): Promise<StepResult>;
   done(): Promise<void>;
 }
 
@@ -119,6 +147,8 @@ export interface CtxDeps {
   verbose?: boolean;
   /** 数据腿：与 `runApp` 的同一实现（`runSource` + `defaultDates`）。 */
   sourceRunner?: (name: string) => Promise<SourceObservationView>;
+  /** 工具步：由驱动接到 `runToolStep`（干跑/确认/幂等重试的既有实现）。 */
+  toolRunner?: (req: ToolRunRequest) => Promise<ToolRunResult>;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -127,7 +157,9 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
 /** 相对仓库路径 → `file://`（与 app/bench 同一口径：包写仓库内路径，不写死绝对路径）。 */
 function resolveUrl(u: string): string {
   if (/^(https?|file):/i.test(u)) return u;
-  return pathToFileURL(path.isAbsolute(u) ? u : path.join(REPO, u)).href;
+  // 与 `app-runner.startUrl` 同一口径：用 `new URL("file://" + path)` 而不是 `pathToFileURL`，
+  // 因为后者会把 `?sn=CAM-1001` 当成文件名百分号编码掉（实测 ERR_FILE_NOT_FOUND）。
+  return new URL(`file://${path.resolve(REPO, u)}`).href;
 }
 
 function assertAct(req: StepRequest): void {
@@ -235,6 +267,40 @@ export function createCtx(deps: CtxDeps): Ctx {
     return result;
   };
 
+  const runTool = async (source: string, args: string[], req: ToolRunRequest, dangerous: boolean): Promise<StepResult> => {
+    if (typeof source !== "string" || !source.trim()) throw new StopError("config_error", "ctx.run: source must be a non-empty string");
+    if (!Array.isArray(args) || args.some((a) => typeof a !== "string")) throw new StopError("config_error", "ctx.run: args must be a list of strings");
+    if (req === null || typeof req !== "object" || req.done === undefined || req.done === null) {
+      throw new StopError("config_error", "ctx.run: done signal is required (completion is the process observation)");
+    }
+    if (dangerous && (!Array.isArray(req.dryRunArgs) || req.dryRunArgs.length === 0)) {
+      throw new StopError("config_error", "ctx.dangerous requires dryRunArgs (a failed dry run must never apply)");
+    }
+    if (deps.toolRunner === undefined) {
+      throw new StopError("config_error", "ctx.run: no tool runner wired in this build");
+    }
+    checkBudget();
+    const started = Date.now();
+    const r = await deps.toolRunner({
+      ...req, desc: req.desc ?? (dangerous ? `dangerous ${source}` : `run ${source}`),
+      source, args, ...(dangerous ? { dangerous: true } : {}),
+    });
+    budget.stepsUsed += 1;
+    const ok = r.ok === true;
+    const stopCode = r.stopCode ?? (ok ? undefined : (r.refused ?? "tool_failed"));
+    const result: StepResult = {
+      ok,
+      ...(stopCode === undefined ? {} : { stopCode }),
+      evidence: { url: currentUrl, attempts: r.attempts ?? 1, elapsedMs: Date.now() - started },
+    };
+    pushEvent(trace, {
+      call: dangerous ? "dangerous" : "run",
+      desc: req.desc ?? source, ok,
+      ...(stopCode === undefined ? {} : { stop_code: stopCode }),
+      result: { source, code: r.code, refused: r.refused ?? null, dry_run: r.dryRun ?? null },
+    });
+    return result;
+  };
   const kit = createKit();
   const ctx: Ctx = {
     judge: kit.judge,
@@ -337,11 +403,14 @@ export function createCtx(deps: CtxDeps): Ctx {
       min: (rows, by) => pickRow(rows, by, "min"),
       max: (rows, by) => pickRow(rows, by, "max"),
     },
-    run: async () => {
-      throw new StopError("config_error", "ctx.run (tool steps) is not available in this L2 build yet");
+    run: async (source, args, req) => {
+      return runTool(source, args, req as ToolRunRequest, false);
     },
-    dangerous: async () => {
-      throw new StopError("config_error", "ctx.dangerous is not available in this L2 build yet");
+    dangerous: async (req) => {
+      if (!Array.isArray(req?.dryRunArgs) || req.dryRunArgs.length === 0) {
+        throw new StopError("config_error", "ctx.dangerous requires dryRunArgs (a failed dry run must never apply)");
+      }
+      return runTool(req.source, req.args, req as ToolRunRequest, true);
     },
     done: async () => {
       if (closed) throw new StopError("config_error", "ctx.done called twice");
