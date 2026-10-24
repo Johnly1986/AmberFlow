@@ -51,10 +51,11 @@ import { captureStateView } from "../flow/signal-induction.ts";
 import { captureStepStateView, type StepStateView } from "../model/page-context.ts";
 import type { StateView } from "../engine/signals.ts";
 import {
-  expandPack, listPacks, loadPack, resolveSourceSlots, validatePack,
+  expandPack, listPacks, loadPack, resolveSourceSlots,
   type AppPack, type ExpandedStep, type PackPolicy, type SourceObservation,
 } from "./app-pack.ts";
 import { getAppAdapter, substituteDatasetPlaceholders, type AdapterRunContext } from "./app-adapters.ts";
+import { validateApp } from "./cross-ref.ts";
 import { DatasetStore, type DatasetEntry } from "../engine/dataset.ts";
 import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "../engine/plan.ts";
 
@@ -609,7 +610,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   // 坏包在**任何网络动作之前**就炸：校验是纯函数，放在数据腿之前是"0 副作用"纪律的另一半
   // （以前坏包要等数据腿打完一圈网络才被发现）。
   {
-    const problems = validatePack(pack, { slots: { ...(pack.slots ?? {}), ...slots } });
+    const problems = validateApp(pack, { slots: { ...(pack.slots ?? {}), ...slots } });
     if (problems.length) {
       throw new Error(`app pack ${pack.id} is invalid:\n  - ${problems.join("\n  - ")}`);
     }

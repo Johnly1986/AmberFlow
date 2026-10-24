@@ -20,6 +20,7 @@ import * as browserEnv from "../browser/browser-env.ts";
 import { MockAuditor, type Auditor } from "../engine/audit.ts";
 import { BrowserMiddleware } from "../engine/executor.ts";
 import { REPO } from "../flow/flow.ts";
+import { validateSignalSpec } from "../engine/signals.ts";
 import { TaskPlan, type Subgoal } from "../engine/plan.ts";
 import { checkSignal } from "../engine/signals.ts";
 import { runSubgoalWithRetries } from "../engine/planner.ts";
@@ -40,6 +41,53 @@ export interface BenchCase {
   slots?: Record<string, unknown>;
   goal: string;
   subgoals: Array<Partial<Subgoal>>;
+}
+
+
+/**
+ * 基准用例的加载期校验（P0-C）：用例包过去只靠 `BenchCase` 的**编译期**类型，运行时是裸
+ * `JSON.parse`——少了 `signal`、`start_url` 指到不存在的文件、`slots` 写成数组，都要等跑到
+ * 那一步才炸（或更糟：静默地当成"没有信号"）。这里把三件事变成加载期错误：
+ *
+ *   1. 用例/子目标的结构与必填字段；
+ *   2. 完成信号必须走**同一套语法**（`validateSignalSpec`，与计划/应用包同一个走查器）；
+ *   3. 非 `http(s)` 的 `start_url` 必须真的指向仓库里的文件（fixtures 少了文件是配置错误，
+ *      不是"这个 case 偶尔挂"）。
+ */
+export function validateBenchCase(c: BenchCase, where = "case"): string[] {
+  const problems: string[] = [];
+  if (typeof c !== "object" || c === null) return [`${where}: case must be an object`];
+  if (typeof c.id !== "string" || !c.id.trim()) problems.push(`${where}: id must be a non-empty string`);
+  if (typeof c.platform !== "string" || !c.platform.trim()) problems.push(`${where}: platform must be a non-empty string`);
+  if (typeof c.goal !== "string" || !c.goal.trim()) problems.push(`${where}: goal must be a non-empty string`);
+  if (c.slots !== undefined && (typeof c.slots !== "object" || c.slots === null || Array.isArray(c.slots))) {
+    problems.push(`${where}: slots must be an object`);
+  }
+  if (!Array.isArray(c.subgoals) || c.subgoals.length === 0) {
+    problems.push(`${where}: subgoals must be a non-empty list`);
+    return problems;
+  }
+  c.subgoals.forEach((sg, i) => {
+    const at = `${where}.subgoals[${i}]`;
+    if (typeof sg !== "object" || sg === null || Array.isArray(sg)) { problems.push(`${at}: subgoal must be an object`); return; }
+    const sig = (sg as { signal?: unknown }).signal;
+    if (sig === undefined || sig === null || typeof sig !== "object" || Array.isArray(sig) || !Object.keys(sig as object).length) {
+      problems.push(`${at}: missing done-signal (a subgoal without ` + "`signal`" + ` can never be verified done)`);
+    } else {
+      problems.push(...validateSignalSpec(sig, at));
+    }
+    const url = (sg as { start_url?: unknown }).start_url;
+    if (url === undefined) problems.push(`${at}: missing start_url`);
+    else if (typeof url !== "string" || !url.trim()) problems.push(`${at}: start_url must be a non-empty string`);
+    else if (!/^https?:\/\//i.test(url) && !fs.existsSync(path.isAbsolute(url) ? url : path.join(REPO, url))) {
+      problems.push(`${at}: start_url file not found: ${url}`);
+    }
+    const slots = (sg as { slots?: unknown }).slots;
+    if (slots !== undefined && (typeof slots !== "object" || slots === null || Array.isArray(slots))) {
+      problems.push(`${at}: slots must be an object`);
+    }
+  });
+  return problems;
 }
 
 export interface BenchCaseResult {
@@ -245,6 +293,10 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
   }
 
   let cases = (JSON.parse(fs.readFileSync(casesPath, "utf-8")) as { cases: BenchCase[] }).cases;
+  {
+    const problems = cases.flatMap((c, i) => validateBenchCase(c, `case[${i}] ${JSON.stringify(c?.id ?? "?")}`));
+    if (problems.length) throw new Error(`bench cases ${JSON.stringify(casesPath)} are invalid:\n  - ${problems.join("\n  - ")}`);
+  }
   const only = cliString(v, "only");
   if (only) cases = cases.filter((c) => c.id === only);
   if (cliBool(v, "fixtures-only")) cases = cases.filter((c) => c.platform.startsWith("fixture:"));

@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { APPS_DIR, listPacks, loadPack, validatePack, type AppPack } from "../../app/app-pack.ts";
+import { APPS_DIR, listPacks, loadPack, type AppPack } from "../../app/app-pack.ts";
+import { validateApp } from "../../app/cross-ref.ts";
 import { userAppsDir } from "../../app/amberflow-home.ts";
 import type { CliContext } from "../context.ts";
 import { say, emitJson } from "../context.ts";
@@ -234,7 +235,7 @@ function appsCheck(args: string[], ctx: CliContext): number {
   for (const t of targets) {
     try {
       const pack = loadPack(t.path ?? t.id);
-      const problems = validatePack(pack);
+      const problems = validateApp(pack);
       results.push({ app: pack.id, path: pack._path ?? t.path ?? t.id, problems });
     } catch (err) {
       results.push({ app: t.id, path: t.path ?? t.id, problems: [err instanceof Error ? err.message : String(err)] });
