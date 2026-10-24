@@ -51,11 +51,12 @@ import { captureStateView } from "../flow/signal-induction.ts";
 import { captureStepStateView, type StepStateView } from "../model/page-context.ts";
 import type { StateView } from "../engine/signals.ts";
 import {
-  expandPack, listPacks, loadPack, resolveSourceSlots,
+  expandPack, listPacks, resolveSourceSlots,
   type AppPack, type ExpandedStep, type PackPolicy, type SourceObservation,
 } from "./app-pack.ts";
 import { getAppAdapter, substituteDatasetPlaceholders, type AdapterRunContext } from "./app-adapters.ts";
 import { validateApp } from "./cross-ref.ts";
+import { loadApp } from "./app-script.ts";
 import { DatasetStore, type DatasetEntry } from "../engine/dataset.ts";
 import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "../engine/plan.ts";
 
@@ -1181,7 +1182,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   let pack: AppPack;
   try {
-    pack = loadPack(String(cliString(v, "app")));
+    pack = await loadApp(String(cliString(v, "app")));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     return 2;
