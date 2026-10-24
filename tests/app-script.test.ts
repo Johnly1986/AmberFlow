@@ -71,7 +71,7 @@ describe("回退：没有脚本走旧路径；--no-scripts 强制旧路径", () 
 describe("契约：坏脚本加载期就红（不静默回退）", () => {
   const cases: Array<[string, string, RegExp]> = [
     ["缺 meta 导出", `export const app = () => ({ exec: [] });`, /missing "export const meta/],
-    ["缺 app 导出", `export const meta = () => ({ id: "t", goal: "g" });`, /missing "export const app/],
+    ["缺 app 导出", `export const meta = () => ({ id: "t", goal: "g" });`, /needs either "export const app/],
     ["meta 返回非对象", `export const meta = () => null; export const app = () => ({ exec: [] });`, /meta\(kit\) must return an object/],
     ["exec 不是列表", `${goodMeta} export const app = () => ({ exec: "nope" });`, /exec must be a list/],
     ["构建期抛错", `export const meta = () => { throw new Error("boom-meta"); }; export const app = () => ({ exec: [] });`, /building the declarative app threw: boom-meta/],

@@ -558,3 +558,51 @@ amber apps emit    $AMBERFLOW_HOME/apps/my-app/app.mjs --out /tmp/my-app.json   
 - **等价证据**：`tests/fixtures/scripts/camera-entry.mjs`（web 4 步 + 3 不变量）与
   `cli-report.mjs`（5 个工具步，含重试/幂等/危险步）展开后与既有 `pack.json` **逐字段 0 diff**
   （`tests/app-script-equivalence.test.ts`）。
+
+## 九、L2：`flow(ctx)` 运行期（脚本接管控制流）
+
+同一个脚本可以从"声明式"升级为"运行期"——**只改导出**：
+
+```js
+// $AMBERFLOW_HOME/apps/my-app/app.mjs
+export const meta = (kit) => ({ id: "my-app", goal: "…", hosts: ["shop.example.com"], slots: { coupon: "SAVE10" } });
+
+export async function flow(ctx) {            // ← L2：步骤在运行期产生
+  await ctx.open("https://shop.example.com/");
+  if (!(await ctx.holds(ctx.judge.exists("[data-test=promo]")))) {   // 运行期条件
+    await ctx.done(); return;
+  }
+  for (let i = 0; i < 2; i += 1) {                                  // 运行期循环 = 重试
+    const r = await ctx.step("加入购物车", {
+      act: ctx.hint("[data-test=add-to-cart]"),
+      done: ctx.judge.text("[data-test=cart-count]", "1"),
+    });
+    if (r.ok) break;
+  }
+  await ctx.done();                                                 // 结束态不变量在这里验收
+}
+```
+
+分工不变：**脚本管走向**（循环/条件/重试是普通 JS），**引擎管一步之内**
+（元素池 / 选元素 / 闸门 / 动作 / 证据判定 / 绑定）。脚本拿不到模型文本或分数，
+只能看到 `{ok, stopCode}`；完成只由 `ctx.step({done})` 的证据面裁决。
+
+三条命令（不动作）：
+
+```bash
+amber apps check   <脚本>                 # dry 跑一遍调用序列 + 同一套语法/命令校验
+amber apps explain <脚本>                 # 把 dry 的调用序列渲染成人话（L2 应用没有静态步骤表）
+amber apps emit    <脚本> --out x.json    # meta 快照（L2 的步骤在运行期，快照只含声明面）
+```
+
+运行与审计：
+
+```bash
+amber run <应用> --emit-trace /tmp/run.trace.json   # 轨迹 = app/script/inputs 三个 sha + 逐次 ctx 调用
+amber run <应用> --replay /tmp/run.trace.json       # 重放：不重新决策；脚本版本或槽位不一致直接拒跑
+```
+
+- **审计产物是轨迹，不是静态计划**：`trace.done` + `stop_code` + 每次调用的 `{ok, stop_code}`；
+  `sameEventSequence` 是确定性判据（同一脚本+输入两次运行必须相同）。
+- **本版边界**：`ctx.run`/`ctx.dangerous`（工具步）、`ctx.openPage`（站点页映射）、`ctx.read.attr`、
+  `ctx.rows`/`ctx.extract` 尚未接线（调用会给出明确 `config_error`，不静默）；L1 的声明式路径不受影响。

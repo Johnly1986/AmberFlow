@@ -406,3 +406,24 @@ export { meta, flow } from "../../legacy/from-pack.mjs";   // 内部：loadPack 
 
 **下一步（等拍板）**：先在仓库外写一个**纯原型**（不接真执行器，只把 `ctx` 接口 + dry 实现跑通），
 用上面 3 个应用的 dry 输出做对照；再决定是否接 `BrowserMiddleware`。
+---
+
+## 12. 实现状态（2026-10-24，commit `ebe2c0a`）
+
+**已实现**（`src/app/{ctx,ctx-dry,ctx-replay,trace}.ts`，测试 `tests/{ctx,trace}.test.ts`）：
+
+| 类 | 成员 | 实现方式 |
+|---|---|---|
+| 元信息 | `app` / `slots` / `runtime` / `budget` / `log` | 只读对象；`log` 只进 trace（不污染 stdout） |
+| 导航 | `open` / `arrive` | `hosts` 信封在 `open`/`step` 起点强制；`arrive` = 无目标的 `mw.run` |
+| 执行 | `step` | `mw.run`（唯一执行循环）；`act` 必填；完成由 `checkSignal` 裁决 |
+| 观察 | `url` / `read.{text,value,count}` / `holds` | `locatorAnyFrame` / `checkSignal` |
+| 构造器 | `judge.*` / `tool.*` / `hint` / `hints` / `command` / `value.*` | 与 L1 `kit` **同一份实现**（复用，不复制） |
+| 数据 | `source` / `data.{min,max}` | `runSource` / 同一份 min-max 语义 |
+| 收尾 | `done` | 结束态不变量（`checkSignal`）；失败 = `invariant_failed` |
+
+**本版未接线（调用会抛明确 `config_error`，不静默）**：
+`ctx.openPage`（`meta.site.pages` 映射）、`ctx.read.attr`、`ctx.rows` / `ctx.extract`（Q5 的 v1 只给 extract，但需要 `meta.site.listExtract` 先入 schema）、
+`ctx.run` / `ctx.dangerous`（工具步；`runToolStep` **已存在**，只差把 `ExpandedStep` 声明面接进 kit）。
+**实现备注**：`StepResult.evidence` 实际只有 `{url, attempts, elapsedMs}`（草案里的 `elements` 暂无公开缝）；
+审计口径不变：脚本仍只看 `stopCode`，`method`/`conf` 只在 trace。

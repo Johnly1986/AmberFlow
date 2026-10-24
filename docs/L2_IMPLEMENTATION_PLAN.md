@@ -296,3 +296,19 @@ L3 (15–25d) 删 JSON：39/18/9/18/33 文件 + 一次显式重冻（另立）
 git switch -c l2/p0-convergence
 npm run verify && bash bench/smoke.sh        # 先确认基线是绿的
 ```
+---
+
+## 14. 实施状态（2026-10-24）
+
+| 阶段 | 状态 | 提交 | 证据 |
+|---|---|---|---|
+| **P0** | ✅ 完成 | `c6e7486` / `5c2c37e` / `4333a2e` | 单语法差分/契约测试；`apps:gen --check` 8/8；六层对拍 67/67；`verify` exit 0 |
+| **L1** | ✅ 完成 | `34a6a81` / `94bd1b5` | 两应用 0 diff；24 条新测试；`apps/`+`tsconfig.json` 零改动；`verify` exit 0 |
+| **L2 核心** | ✅ 完成 | `ebe2c0a` | flow 夹具真实跑通（1.9s、不变量成立）；dry/replay/预算/版本闸门 13+9 条测试；141 条 apps/CLI 回归绿 |
+| L2 试点（3 应用） | ◐ 部分 | — | 已用 `flow-demo-app` 覆盖 web 4 步 + 运行期循环；`checkin-binding` / `ip-config` / `transfer-trekly` 的 loop 版与 dry-vs-journey 对照待做 |
+| S2 录制产脚本 | ⬜ 未开始 | — | 门禁口径已定（0 前向回放） |
+| L3 删 JSON | ⬜ 未开始 | — | 迁移面与重冻协议见 §7 |
+
+**L2 实现中记录的两处偏差**：
+1. `validatePack` 新增 `allowEmptyJourney`：flow 脚本没有静态旅程是**合法形态**，否则每个 flow 脚本都会被"journey 必须非空"挡住；步骤级校验移到每次 `ctx.step`（同一套 walker）。
+2. `ctx.run`/`ctx.dangerous`/`openPage` 未接线（见 `L2_CTX_API_DRAFT.md` §12 的"未接线"清单）——L2 的验收试点都是浏览器步，工具步接线留到 S2/L3 前。
