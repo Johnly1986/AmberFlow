@@ -35,6 +35,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { loadPack, expandPack, type AppPack } from "../src/app/app-pack.ts";
+import { appDataFileInDir } from "../src/app/declarative.ts";
 import { getAppAdapter } from "../src/app/app-adapters.ts";
 import { runApp, type AppRunResult, type StepStateView } from "../src/app/app-runner.ts";
 import { conditionedInstructionCriteria, pageStateForModel } from "../src/model/page-context.ts";
@@ -93,8 +94,8 @@ function discoverOfflineJourneyPacks(): Array<{ pack: AppPack; path: string }> {
   const root = path.resolve(import.meta.dirname, "..", "apps");
   const out: Array<{ pack: AppPack; path: string }> = [];
   for (const dir of fs.readdirSync(root).sort()) {
-    const p = path.join(root, dir, "pack.json");
-    if (!fs.existsSync(p)) continue;
+    const p = appDataFileInDir(path.join(root, dir));
+    if (p === null) continue;
     try {
       const pack = loadPack(p);
       const live = Array.isArray(pack.hosts) && pack.hosts.length > 0;

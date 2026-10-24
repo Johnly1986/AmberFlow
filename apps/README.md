@@ -5,7 +5,8 @@
 ```
 apps/<app>/
   sources/*.json    # 数据腿：这个应用从哪取数（HTTP 抓取 或 命令行工具），怎么抽字段
-  pack.json         # 动作腿（规划中）：旅程怎么走（roles/phases/signals/invariants）
+  app.mjs           # 动作腿（L3 起权威格式）：**声明式数据脚本**（`export const meta/app`，无控制流）；
+                    #   pack.json 是旧格式，仍可读（冻结夹具）；带控制流用 `export async function flow(ctx)`（L2）
   bin/              # 可选：这个应用自带的可执行文件（桩工具/包装脚本）
   README.md         # 可选：这个应用自己的说明
 ```
@@ -83,10 +84,14 @@ node --experimental-strip-types src/data/datasource.ts --source git-log --out /t
 
 `html_regex` 保持原样（它是 HTML 口径，`split` 后会**丢掉第一块**）；行文本有自己的抽取器，别复用。
 
-## 二、动作腿：`pack.json`（角色 → 冻结计划 → 结束状态验收）
+## 二、动作腿：`app.mjs`（声明式数据脚本：角色 → 冻结计划 → 结束状态验收）
 
-`apps/<app>/pack.json` 把三样东西绑在一起：**动作腿**（`journey` 用 `roles` 里的模板串起来）、
+`apps/<app>/app.mjs` 把三样东西绑在一起：**动作腿**（`journey` 用 `roles` 里的模板串起来）、
 **数据腿**（`sources` 引用数据源配置）、**验收**（`invariants` 是旅程结束状态上的断言）。
+它只是把同样的数据写成了 JS（`export const meta = ...` / `export const app = ...`，**没有控制流**），
+所以 `loadPack` 仍能同步读它；`pack.json` 作为旧格式继续可读（冻结夹具）。
+生成/迁移：`npm run apps:gen -- --write`（spec → app.mjs）与 `npm run apps:migrate -- --all --check`
+（脚本必须能由自身重新生成，逐字节；smoke 2b2 门禁）。
 跑一条完整链路：
 
 ```bash
@@ -108,7 +113,7 @@ bench 挑**语料**。完整用法看 `npm run apps -- --help`，摘要：
 | 旗标 | 作用 |
 |---|---|
 | `--list` | 列出发现到的应用包（不给 `--app` 也走这里，并附 usage） |
-| `--app ID\|路径` | 要跑的应用：包 id，或直接给 `pack.json` 的路径 |
+| `--app ID\|路径` | 要跑的应用：包 id，或直接给数据文件路径（`app.mjs` / 旧 `pack.json`） |
 | `--dry` | 只展开计划——**不跑数据腿**，所以 `source_slots` 声明的槽位若没有默认值会直说并 exit 2 |
 | `--slot k=v` | 覆盖槽位（可重复；键必须在包里声明过，见下） |
 | `--no-sources` | 不跑数据腿（`source_slots` 因此没有观测值 ⇒ 响亮地炸，不静默回落默认值） |
@@ -409,7 +414,7 @@ stdio 的完成真值仍是进程观察面；`retries`/`dangerous` 不支持（�
 
 ## 六、探针集：把「线上能不能打开」也变成数据
 
-测量型应用（探针）与旅程型应用共用一个 `pack.json`，只是声明的是 `probe` 块而不是 `journey`：
+测量型应用（探针）与旅程型应用共用一个数据文件（`app.mjs`；旧 `pack.json`），只是声明的是 `probe` 块而不是 `journey`：
 
 ```jsonc
 {
@@ -552,7 +557,7 @@ amber apps explain $AMBERFLOW_HOME/apps/my-app/app.mjs    # 展开成人话计�
 amber apps emit    $AMBERFLOW_HOME/apps/my-app/app.mjs --out /tmp/my-app.json   # IR 快照（带 generated_from 血统）
 ```
 
-- **回退**：`AMBERFLOW_NO_SCRIPTS=1` 强制走旧 `pack.json` 路径（没有脚本时行为与今天逐字节相同）。
+- **回退**：`AMBERFLOW_NO_SCRIPTS=1` 强制走旧 `pack.json` 路径（仅当目录里还留着 `pack.json`；L3 后仓库应用只有 `app.mjs`）。
 - **边界**：L1 是**声明式**脚本（构建期灵活，运行期零新语义）；运行期循环/条件（`flow(ctx)`）在 L2。
   模型侧数字（置信度/决策档）**不进脚本**：脚本只看 `stopCode`（红线②的 L2 形态）。
 - **等价证据**：`tests/fixtures/scripts/camera-entry.mjs`（web 4 步 + 3 不变量）与

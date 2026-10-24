@@ -16,49 +16,12 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
 import { listPacks, loadPack, expandPack, type AppPack } from "../src/app/app-pack.ts";
+import { packToScriptSource } from "../src/app/declarative.ts";
 import { isParseUsageError, stripArgSeparators } from "../src/support/cli-args.ts";
 import { REPO } from "../src/flow/flow.ts";
 
-/** 需要逐项搬运的顶层字段（`journey`/`source_slots` 走 `app()`）。 */
-const META_FIELDS = [
-  "id", "label", "goal", "model", "max_subgoals", "hosts", "slots", "required_slots",
-  "sources", "device", "notes", "policy", "roles", "probe", "invariants", "recorded_from",
-] as const;
-
-/** 生成声明式脚本源码：**数据内联、无判断**。 */
-export function packToScriptSource(pack: AppPack): string {
-  const raw = pack as unknown as Record<string, unknown>;
-  const meta: Record<string, unknown> = {};
-  for (const k of META_FIELDS) {
-    if (raw[k] === undefined) continue;
-    meta[k] = raw[k];
-  }
-  // `required_slots` 在脚本面叫 `requiredSlots`（lower 的唯一翻译点）。
-  if (meta["required_slots"] !== undefined) {
-    meta["requiredSlots"] = meta["required_slots"];
-    delete meta["required_slots"];
-  }
-  if (meta["recorded_from"] !== undefined) {
-    meta["recordedFrom"] = meta["recorded_from"];
-    delete meta["recorded_from"];
-  }
-  const sourceSlots = (raw["source_slots"] ?? {}) as Record<string, Record<string, unknown>>;
-  const data: Record<string, unknown> = {};
-  for (const [k, b] of Object.entries(sourceSlots)) data[k] = { kind: "source", ...b };
-  const journey = (raw["journey"] ?? []) as unknown[];
-  return `// @amberflow:declarative-data —— 本文件是**数据**（迁移生成），不是逻辑：
-//   应用目录仍受"0 行逻辑代码"约束；只有带这个标记的文件允许出现在 apps/<id>/ 下。
-// 由 \`npm run apps:migrate -- --app ${String(raw["id"] ?? "?")} --write\` 生成；改来源再重新生成，不要手改。
-// 迁移口径：脚本的 meta()/app() 只是把 pack.json 的字段逐项搬运（含 roles/probe/invariants/journey），
-// 不含任何判断；\`apps:migrate --all --check\` 用 expandPack 逐字段对照来源包。
-const META = ${JSON.stringify(meta, null, 2)};
-const DATA = ${JSON.stringify(data, null, 2)};
-const JOURNEY = ${JSON.stringify(journey, null, 2)};
-
-export const meta = () => META;
-export const app = () => ({ data: DATA, exec: JOURNEY });
-`;
-}
+// 生成器本体在 `src/app/declarative.ts`（与 `apps:gen` 共用同一份；这里只做 CLI/校验）。
+export { DECLARATIVE_MARKER, packToScriptSource } from "../src/app/declarative.ts";
 
 /** 生成到临时文件并用**真实加载器**读回来对照（与 `apps:migrate --check` 同一实现）。 */
 export async function verifyMigration(pack: AppPack): Promise<{ problems: string[]; source: string }> {
@@ -81,6 +44,9 @@ export async function verifyMigration(pack: AppPack): Promise<{ problems: string
     cmp("rolesUsed", a.rolesUsed, b.rolesUsed);
     cmp("hosts", loaded.pack.hosts ?? [], pack.hosts ?? []);
     cmp("sources", loaded.pack.sources ?? [], pack.sources ?? []);
+    // 源码也要逐字节一致：否则"手改了 app.mjs 却仍能展开成自己"会静默通过（生成物必须可重放）。
+    const regenerated = packToScriptSource(loaded.pack);
+    if (fs.readFileSync(file, "utf-8") !== regenerated) problems.push("source bytes: app.mjs ≠ 由它自己重新生成的结果");
   } catch (e) {
     problems.push(`load/validate failed: ${e instanceof Error ? e.message : String(e)}`);
   } finally {

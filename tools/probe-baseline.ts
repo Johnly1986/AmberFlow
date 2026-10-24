@@ -19,7 +19,8 @@ import fs from "node:fs";
 import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../src/support/cli-args.ts";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { appDirs, loadPack, type AppPack } from "../src/app/app-pack.ts";
+import { appDataFile, appDirs, loadPack, type AppPack } from "../src/app/app-pack.ts";
+import { packToScriptSource } from "../src/app/declarative.ts";
 
 export const REPO = path.resolve(import.meta.dirname, "..");
 /** 默认的探测记录：已入库的线上复测（2026-10-03）。 */
@@ -137,7 +138,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const record = readRecord(from);
   const only = values.app ? [values.app] : null;
   const packs = appDirs()
-    .map((dir) => loadPack(path.join(dir, "pack.json")))
+    .map((dir) => loadPack(appDataFile(dir) ?? path.join(dir, "pack.json")))
     .filter((p) => (p as { probe?: unknown }).probe !== undefined)
     .filter((p) => !only || only.includes(p.id));
 
@@ -148,14 +149,18 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       if (!rec) { if (!values.quiet) console.log(`- ${pack.id}：记录里没有它的探测结果，跳过`); continue; }
       const probe = (pack as { probe: Record<string, unknown> }).probe;
       probe["baseline"] = { verdicts: rec.verdicts };
-      const file = path.join(REPO, "apps", pack.id, "pack.json");
-      const raw = JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, unknown>;
-      const rawProbe = raw["probe"] as Record<string, unknown>;
-      rawProbe["baseline"] = { verdicts: rec.verdicts };
-      fs.writeFileSync(file, JSON.stringify(raw, null, 2) + "\n");
+      const file = appDataFile(path.join(REPO, "apps", pack.id)) ?? path.join(REPO, "apps", pack.id, "pack.json");
+      if (file.endsWith(".json")) {
+        const raw = JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, unknown>;
+        const rawProbe = raw["probe"] as Record<string, unknown>;
+        rawProbe["baseline"] = { verdicts: rec.verdicts };
+        fs.writeFileSync(file, JSON.stringify(raw, null, 2) + "\n");
+      } else {
+        fs.writeFileSync(file, packToScriptSource(pack));
+      }
       wrote++;
       if (!values.quiet) {
-        console.log(`已写入 apps/${pack.id}/pack.json ← ${from}（${Object.keys(rec.verdicts).length} 项判决）`);
+        console.log(`已写入 ${path.relative(REPO, file)} ← ${from}（${Object.keys(rec.verdicts).length} 项判决）`);
       }
     }
     console.log(`probes:baseline：更新了 ${wrote} 个应用包`);

@@ -323,8 +323,8 @@ npm run verify && bash bench/smoke.sh        # 先确认基线是绿的
 |---|---|---|
 | **L3.1** ✅ 完成（2026-10-25，`tools/apps_migrate.ts`） | `npm run apps:migrate -- --app <id> [--write]` / `--all --check`：把 `pack.json` 转成声明式 `app.mjs`（数据内联，含 roles/probe/invariants） | **22/22 逐字段 0 diff**（`tests/apps-migrate.test.ts` 23 条） |
 | **L3.2** ✅ 完成（2026-10-25，`c698bcd`） | 22 个 `apps/<id>/app.mjs` 生成并提交（带 `@amberflow:declarative-data` 标记）；`apps:matrix` 增加 `script`/`logic` 列（数据脚本不计代码行）；`apps:migrate --all --check` 进 smoke（2b2） | 22/22 0 diff；`verify` exit 0（1600+ 测试）；矩阵 22 declarative / 0 code / 0 logic / 0 leaks / 0 debt |
-| **L3.3** | 切换**默认**：`loadApp` 只找脚本（`AMBERFLOW_JSON_APPS=1` 为过渡逃生口）；`apps list` 发现脚本；`apps:gen --check` 改比"脚本展开 == 冻结计划" | 全量 `verify` 绿；旧 JSON 仍能通过逃生口跑 |
-| **L3.4** | 删除 `pack.json` / `flow.json` / `transfer/specs` 与其加载路径；39 个引用文件逐个改（测试/工具/CLI）；六层对拍对象改为"脚本展开" | `npm run test:parity` 逐字节一致（**输出相同则不需要重冻**；出现差异才走 §5.4 的一次性重冻） |
+| **L3.3** ✅ 并入 L3.4（2026-10-25） | 不需要新增 `AMBERFLOW_JSON_APPS`：`loadPack` 改为**同步解析声明式数据脚本**，所以"默认即脚本"——旧的 `AMBERFLOW_NO_SCRIPTS=1` 仍保留原语义（回退到 `pack.json`，若还在） | `apps:gen --check` 8/8；`apps list/show/path` 全部指向 `app.mjs` |
+| **L3.4** ✅ 完成（2026-10-25） | 删除 22 个 `apps/*/pack.json`；新增 `src/app/declarative.ts`（标记 + 同步解析 `META/DATA/JOURNEY` + 唯一 lower/生成器）；`loadPack`/`appDirs`/`listPacks`/`probe-set`/`apps:matrix`/`arch-metrics` 改数据文件发现；`learn`/`apps-induce` 改**写** `app.mjs`；`apps:gen` 直接生成 `app.mjs`；smoke 2b2 改**逐字节**可重放校验 | 全量测试绿（107 文件 / 1607 条）；六层对拍 67/67 **未重冻**（输出逐字节相同）；`apps:migrate --all --check` 22/22 字节级 |
 | **L3.5** | 文档收口（README/ARCHITECTURE/CLAUDE.md 的身份描述）+ 全量验证 | `verify` + `smoke` + `apps:suite` + 对拍 + 工作树干净 |
 
 **关键杠杆**：L3.1 的 0-diff 保证"脚本展开 == 今天的计划"，因此六层对拍的**语料不必重冻**；

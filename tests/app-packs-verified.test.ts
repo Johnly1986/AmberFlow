@@ -526,7 +526,7 @@ describe("第 2 轮：camera-entry / transfer-voyagio / transfer-slowjet", () =>
       const codeFiles = files.filter((f) => /\.(ts|js|mjs|cjs)$/.test(f)
         && !fs.readFileSync(path.join(dir, f), "utf-8").includes("@amberflow:declarative-data"));
       expect(codeFiles, `${id} code files`).toEqual([]);
-      expect(files.sort()).toEqual(["app.mjs", "pack.json"]);
+      expect(files.sort()).toEqual(["app.mjs"]);
     }
     const { rows, leaks, debt } = matrix();
     expect(leaks, JSON.stringify(leaks)).toEqual([]);

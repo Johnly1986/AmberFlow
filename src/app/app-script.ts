@@ -18,41 +18,18 @@ import { REPO } from "../flow/flow.ts";
 import { appDirs, loadPack, type AppPack } from "./app-pack.ts";
 import { validateApp } from "./cross-ref.ts";
 import { createKit, type Kit } from "./kit.ts";
+import {
+  lowerDeclarative, parseDeclarativeScript, isDeclarativeScriptSource,
+  type ScriptDraft, type ScriptMeta,
+} from "./declarative.ts";
+export type { ScriptDraft, ScriptMeta } from "./declarative.ts";
+export { DECLARATIVE_MARKER, packToScriptSource } from "./declarative.ts";
 import { StopError, type Ctx } from "./ctx.ts";
 import { createDryCtx } from "./ctx-dry.ts";
 import { finishTrace, inputsSha256, newTrace, type AppTrace } from "./trace.ts";
 
 /** 脚本文件名（按优先级）。`.ts` 靠 Node 22.6+ 的 strip-types 解释，仍不进项目编译。 */
 export const SCRIPT_FILENAMES = ["app.mjs", "app.js", "app.ts"] as const;
-
-export interface ScriptMeta {
-  id: string;
-  label?: string;
-  goal: string;
-  model?: string;
-  max_subgoals?: number;
-  hosts?: string[];
-  slots?: Record<string, string>;
-  requiredSlots?: string[];
-  sources?: string[];
-  device?: Record<string, unknown>;
-  notes?: string[];
-  policy?: Record<string, unknown>;
-  /** 迁移/高级用法：步骤模板与探针声明原样搬运（L3 迁移需要；不是常用作者面）。 */
-  roles?: Record<string, unknown>;
-  probe?: Record<string, unknown>;
-  invariants?: Array<Record<string, unknown>>;
-  recordedFrom?: Record<string, unknown>;
-}
-
-export interface ScriptDraft {
-  /** ① 数据槽：常量写进 `slots`；`kit.data.source(...)` 写进 `source_slots`。 */
-  data?: Record<string, unknown>;
-  /** ② 决策判断（应用级）：只有 `invariants` 在这一层（每步的 done/when 在 exec 里）。 */
-  judge?: { invariants?: Array<Record<string, unknown>> };
-  /** ③ 决策执行：步骤列表（`kit.step`/`kit.go`/`kit.run` 产出）。 */
-  exec: Array<Record<string, unknown>>;
-}
 
 export interface ScriptModule {
   meta?: (kit: Kit) => ScriptMeta;
@@ -121,64 +98,8 @@ export function resolveScriptPath(idOrPath: string): string | null {
   return null;
 }
 
-/**
- * 把声明面/动作面**降级**成今天的 IR（`AppPack`）。这是唯一翻译点：
- * 三段骨架 → `slots`/`source_slots`/`journey`/`invariants`/`hosts`/`sources`/…
- *
- * 校验不在这里做（契约：降级只搬运；`validateApp` 是唯一裁判）。
- */
-export function lowerScriptApp(meta: ScriptMeta, draft: ScriptDraft): AppPack {
-  if (!isObj(meta)) throw new Error("app script: meta(kit) must return an object");
-  if (!isObj(draft)) throw new Error("app script: app(kit) must return an object");
-  if (typeof meta.id !== "string" || !meta.id.trim()) throw new Error("app script: meta.id must be a non-empty string");
-  if (typeof meta.goal !== "string" || !meta.goal.trim()) throw new Error("app script: meta.goal must be a non-empty string");
-  if (!Array.isArray(draft.exec)) throw new Error("app script: app(kit).exec must be a list of steps");
-  if (!meta.id.trim()) throw new Error("app script: meta.id must be a non-empty string");
-
-  const slots: Record<string, unknown> = { ...(isObj(meta.slots) ? meta.slots : {}) };
-  const sourceSlots: Record<string, unknown> = {};
-  for (const [key, v] of Object.entries(isObj(draft.data) ? draft.data : {})) {
-    if (typeof v === "string") {
-      slots[key] = v;
-      continue;
-    }
-    if (isObj(v) && v["kind"] === "source") {
-      if (typeof v["source"] !== "string" || !v["source"]) {
-        throw new Error(`app script: data.${key}: source binding needs a non-empty "source"`);
-      }
-      const binding: Record<string, unknown> = { source: v["source"] };
-      for (const k of ["select", "count", "field"] as const) {
-        if (v[k] !== undefined) binding[k] = v[k];
-      }
-      sourceSlots[key] = binding;
-      continue;
-    }
-    throw new Error(`app script: data.${key}: value must be a string literal or kit.data.source(...)`);
-  }
-
-  const pack: Record<string, unknown> = {
-    spec_version: 1,
-    id: meta.id,
-    goal: meta.goal,
-    ...(meta.label === undefined ? {} : { label: meta.label }),
-    ...(meta.model === undefined ? {} : { model: meta.model }),
-    ...(meta.max_subgoals === undefined ? {} : { max_subgoals: meta.max_subgoals }),
-    hosts: Array.isArray(meta.hosts) ? [...meta.hosts] : [],
-    slots,
-    required_slots: Array.isArray(meta.requiredSlots) ? [...meta.requiredSlots] : [],
-    sources: Array.isArray(meta.sources) ? [...meta.sources] : [],
-    journey: [...draft.exec],
-    invariants: [...(meta.invariants ?? draft.judge?.invariants ?? [])],
-  };
-  if (Object.keys(sourceSlots).length) pack["source_slots"] = sourceSlots;
-  if (meta.roles !== undefined) pack["roles"] = meta.roles;
-  if (meta.probe !== undefined) pack["probe"] = meta.probe;
-  if (Array.isArray(meta.notes)) pack["notes"] = [...meta.notes];
-  if (meta.device !== undefined) pack["device"] = meta.device;
-  if (meta.policy !== undefined) pack["policy"] = meta.policy;
-  if (meta.recordedFrom !== undefined) pack["recorded_from"] = meta.recordedFrom;
-  return pack as unknown as AppPack;
-}
+/** 把声明面/动作面降级成 IR（唯一实现在 `declarative.lowerDeclarative`；此处保留 L1 的导出名）。 */
+export const lowerScriptApp = lowerDeclarative;
 
 /**
  * 加载并校验一个应用脚本。**任何契约/校验错误都在这里抛**（带脚本路径与逐条 problem），
@@ -208,7 +129,7 @@ export async function loadScriptApp(idOrPath: string): Promise<LoadedScriptApp> 
   } catch (e) {
     throw new Error(`app script ${scriptPath}: building the declarative app threw: ${e instanceof Error ? e.message : String(e)}`);
   }
-  const pack = lowerScriptApp(meta, draft);
+  const pack = lowerDeclarative(meta, draft);
   // flow 模式没有静态旅程：跳过"空旅程/web 不变量需要浏览器步"两条结构性检查；
   // 步骤级校验发生在每次 ctx 调用（真实执行器/同一套 PlanningRules）。
   const problems = validateApp(pack, mode === "flow" ? { allowEmptyJourney: true } : {});

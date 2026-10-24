@@ -33,7 +33,7 @@ import { hintMatch } from "../src/engine/rules.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
 import { captureStateView, induceSignals } from "../src/flow/signal-induction.ts";
 import { evalSignalOnState, type SignalSpec, type StateView } from "../src/engine/signals.ts";
-import { serializePack } from "./spec-to-pack.ts";
+import { packToScriptSource } from "../src/app/declarative.ts";
 
 export const REPO = path.resolve(import.meta.dirname, "..");
 
@@ -664,8 +664,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const packDir = ensureDir(path.resolve(values["pack-dir"] ?? userAppsDir()));
     const dir = path.join(packDir, id);
     fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, "pack.json");
-    fs.writeFileSync(file, serializePack(pack));
+    // L3.4：录出来的应用也写**声明式脚本**（数据脚本，带 recordedFrom 血统）——不再产出 JSON。
+    const file = path.join(dir, "app.mjs");
+    fs.writeFileSync(file, packToScriptSource(pack));
     const rel = path.relative(REPO, file);
     result.saved = rel.startsWith("..") ? file : rel;   // 用户作用域的包显示绝对路径，仓库内的保持相对
 

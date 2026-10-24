@@ -1,8 +1,6 @@
-// @amberflow:declarative-data —— 本文件是**数据**（迁移生成），不是逻辑：
+// @amberflow:declarative-data —— 本文件是**数据**（迁移/生成），不是逻辑：
 //   应用目录仍受"0 行逻辑代码"约束；只有带这个标记的文件允许出现在 apps/<id>/ 下。
-// 由 `npm run apps:migrate -- --app transfer-skybook --write` 生成；改来源再重新生成，不要手改。
-// 迁移口径：脚本的 meta()/app() 只是把 pack.json 的字段逐项搬运（含 roles/probe/invariants/journey），
-// 不含任何判断；`apps:migrate --all --check` 用 expandPack 逐字段对照来源包。
+// 由 `npm run apps:migrate -- --app transfer-skybook --write` 或 apps:gen 生成；改来源再重新生成，不要手改。
 const META = {
   "id": "transfer-skybook",
   "label": "SkyBook 复刻站（site2）：23 步（五天筛选/排序/记录 + 酒店勾选两页），离线",
@@ -16,6 +14,9 @@ const META = {
   },
   "sources": [],
   "notes": [
+    "本文件由 `npm run apps:gen` 从 `transfer/specs/skybook.json` 生成：旅程逐字段等于该来源的展开结果，",
+    "改流程请改 spec 再重新生成，不要手改 journey（手改会被 `npm run apps:gen -- --check` 抓到）。",
+    "**人写的只有这里的 invariants 与 notes**（结束状态要成立什么、以及为什么这样定）——生成器不发明判断。",
     "本文件由 `npm run apps:gen` 从 `transfer/specs/skybook.json` 生成：旅程逐字段等于 `emitPlan(\"skybook\")` 的展开结果，",
     "改流程请改 spec 再重新生成，不要手改 journey（手改会被 `npm run apps:gen -- --check` 抓到）。",
     "**人写的只有这里的 invariants 与 notes**（结束状态要成立什么、以及为什么这样定）——生成器不发明判断。",
@@ -155,7 +156,11 @@ const META = {
       }
     }
   ],
-  "requiredSlots": []
+  "requiredSlots": [],
+  "generatedFrom": {
+    "spec": "transfer/specs/skybook.json",
+    "plan_sha256": "a5349fcf90d25cc5a7e7a6a293bafce7c9b15eedf999f0e1ca3157f9141a315c"
+  }
 };
 const DATA = {};
 const JOURNEY = [

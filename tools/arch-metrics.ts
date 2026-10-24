@@ -20,6 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listPacks, loadPack, packHintCoverage } from "../src/app/app-pack.ts";
+import { appDataFileInDir } from "../src/app/declarative.ts";
 import { checkArtifacts, onnxModelPath } from "../src/model/model-artifacts.ts";
 
 // `URL.pathname` keeps the leading slash on Windows ("/E:/…") and path.resolve then
@@ -100,9 +101,9 @@ function corpus(): Corpus {
 
   for (const id of fs.readdirSync(appsDir)) {
     const dir = path.join(appsDir, id);
-    const packPath = path.join(dir, "pack.json");
+    const packPath = appDataFileInDir(dir) ?? path.join(dir, "pack.json");
     const flowPath = path.join(dir, "flow.json");
-    if (fs.existsSync(packPath)) {
+    if (appDataFileInDir(dir) !== null) {
       let pack: Record<string, unknown>;
       let cov: ReturnType<typeof packHintCoverage>;
       try {

@@ -108,21 +108,21 @@ describe("learn：落盘门槛（零前向回放）与血统", () => {
       "--script", script, "--yes", "--id", "learned-test", "--pack-dir", packDir, "--out", dir, "--quiet",
     ]);
     expect(code).toBe(0);
-    const file = path.join(packDir, "learned-test", "pack.json");
+    const file = path.join(packDir, "learned-test", "app.mjs");
     expect(fs.existsSync(file)).toBe(true);
     const pack = loadPack(file);
     expect(validatePack(pack)).toEqual([]);
     expect(pack.recorded_from).toMatchObject({ url: "testpages/product.html", steps: 2 });
     expect(String(pack.recorded_from!.sha256)).toMatch(/^[0-9a-f]{64}$/);
     // 血统必须活着落进文件（serializePack 漏键会让矩阵把它当"手写"——这曾经真的发生过）
-    expect(JSON.parse(fs.readFileSync(file, "utf-8")).recorded_from).toBeTruthy();
+    expect(fs.readFileSync(file, "utf-8")).toContain("recordedFrom");
     const replay = await replayCheck(pack, dir);
     expect({ ok: replay.ok, forwards: replay.forwards }).toEqual({ ok: true, forwards: 0 });
     expect(replay.invariants).toMatch(/^2\/2$/);
   }, 600_000);
 
   it("门槛有牙齿：把一个信号改坏，回放必须红（而不是照旧通过）", async () => {
-    const pack = loadPack(path.join(REPO, "apps", "learned-cart", "pack.json"));
+    const pack = loadPack("learned-cart");
     const doctored = JSON.parse(JSON.stringify(pack)) as typeof pack;
     (doctored.journey[0] as Record<string, unknown>)["signal"] =
       { css_text_equals: ["[data-test=cart-count]", "99"] };
@@ -144,7 +144,7 @@ describe("learn：落盘门槛（零前向回放）与血统", () => {
   }, 300_000);
 
   it("包结构：journey 是录下来的、invariants 是归纳出来的（而且是 runner 形状那次运行归纳的）", () => {
-    const pack = loadPack(path.join(REPO, "apps", "learned-cart", "pack.json"));
+    const pack = loadPack("learned-cart");
     expect(pack.journey).toHaveLength(2);
     expect(pack.journey[0]).toMatchObject({
       start_url: "testpages/product.html", target_hint: "[data-test=add-to-cart]",
@@ -230,7 +230,7 @@ describe("learn：挂到**你自己的**浏览器（--cdp）", () => {
         "--script", script, "--yes", "--id", "learned-cdp", "--pack-dir", packDir, "--out", dir, "--quiet",
       ]);
       expect(code).toBe(0);
-      const file = path.join(packDir, "learned-cdp", "pack.json");
+      const file = path.join(packDir, "learned-cdp", "app.mjs");
       expect(fs.existsSync(file)).toBe(true);
       expect(loadPack(file).recorded_from).toMatchObject({ steps: 2 });
       // "只断开不关闭"：attached 模式下别人的窗口里有别人的会话，不许被我们关掉

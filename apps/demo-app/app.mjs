@@ -1,8 +1,6 @@
-// @amberflow:declarative-data —— 本文件是**数据**（迁移生成），不是逻辑：
+// @amberflow:declarative-data —— 本文件是**数据**（迁移/生成），不是逻辑：
 //   应用目录仍受"0 行逻辑代码"约束；只有带这个标记的文件允许出现在 apps/<id>/ 下。
-// 由 `npm run apps:migrate -- --app demo-app --write` 生成；改来源再重新生成，不要手改。
-// 迁移口径：脚本的 meta()/app() 只是把 pack.json 的字段逐项搬运（含 roles/probe/invariants/journey），
-// 不含任何判断；`apps:migrate --all --check` 用 expandPack 逐字段对照来源包。
+// 由 `npm run apps:migrate -- --app demo-app --write` 或 apps:gen 生成；改来源再重新生成，不要手改。
 const META = {
   "id": "demo-app",
   "label": "应用包示范：CLI 数据腿 + 浏览器动作腿 + 结束状态验收（全部离线）",

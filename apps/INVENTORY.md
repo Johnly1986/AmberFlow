@@ -7,7 +7,7 @@
 
 一道题只有同时满足下面五条，才算做完：
 
-1. **声明在 `apps/<id>/pack.json`**：roles / journey / slots / sources / invariants / hosts
+1. **声明在 `apps/<id>/app.mjs`**（声明式数据脚本，L3 起；旧 `pack.json` 仍可读）：roles / journey / slots / sources / invariants / hosts
    （测量型应用则是 `probe` 块）。加载期校验必须能挡住坏配置（未知键、未知角色、未声明槽位、
    URL 主机没进 `hosts`……），而且是**响亮地**挡住。
 2. **有一条能跑的命令**：`npm run apps -- --app <id> ...`（离线应用用 ``，

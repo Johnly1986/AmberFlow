@@ -14,7 +14,7 @@ import fs from "node:fs";
 import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../src/support/cli-args.ts";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { appDirs, loadPack, listPacks, packHintCoverage, type AppPack } from "../src/app/app-pack.ts";
+import { appDataFile, appDirs, loadPack, listPacks, packHintCoverage, type AppPack } from "../src/app/app-pack.ts";
 import { appsOutDir } from "../src/app/app-runner.ts";
 import { listSources, loadSource } from "../src/data/datasource.ts";
 import { REPO } from "../src/flow/flow.ts";
@@ -82,8 +82,8 @@ function declaredTokens(appDir: string): string[] {
     const s = String(t ?? "").trim().toLowerCase();
     if (s && !GENERIC.has(s)) out.add(s);
   };
-  const packFile = path.join(appDir, "pack.json");
-  if (fs.existsSync(packFile)) {
+  const packFile = appDataFile(appDir);
+  if (packFile !== null) {
     const pack = loadPack(packFile);
     for (const h of pack.hosts ?? []) push(h);
   }
@@ -230,12 +230,12 @@ export function matrix(): {
     // 没有这层，一个残缺 pack.json（比如被中断的测试夹具）会让泄漏门禁整桌崩掉。
     let pack: AppPack;
     try {
-      pack = loadPack(path.join(dir, "pack.json"));
+      pack = loadPack(appDataFile(dir) ?? path.join(dir, "pack.json"));
     } catch (e) {
       rows.push({
         app: path.basename(dir), kind: "load-failed",
         sources: 0, roles: 0, steps: 0, toolSteps: 0, invariants: 0,
-        declared: jsonLines(path.join(dir, "pack.json")), code: 0, tokens: [],
+        declared: jsonLines(appDataFile(dir) ?? path.join(dir, "pack.json")), code: 0, tokens: [],
         ...appScriptOf(dir),
         policy: "", hintCoverage: "", learn: "", generated: null,
         modelAsks: null, confMax: null, reobserve: null,
@@ -257,7 +257,7 @@ export function matrix(): {
       steps: pack.journey.length,
       toolSteps: pack.journey.filter((e) => (e as Record<string, unknown>)["source"] !== undefined).length,
       invariants: (pack.invariants ?? []).length,
-      declared: jsonLines(path.join(dir, "pack.json")),
+      declared: jsonLines(appDataFile(dir) ?? path.join(dir, "pack.json")),
       code: appCodeLines(dir, binAcc),
       ...appScriptOf(dir),
       tokens: declaredTokens(dir),

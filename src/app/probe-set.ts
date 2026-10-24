@@ -20,6 +20,7 @@
  */
 import fs from "node:fs";
 import { REPO } from "../support/paths.ts";
+import { appDataFileInDir, readDataFile } from "./declarative.ts";
 
 export { REPO };
 import path from "node:path";
@@ -266,20 +267,20 @@ export function validateProbeBlock(probe: unknown, hostsRaw: unknown, where = "p
   return p;
 }
 
-function dirsWithPack(): string[] {
+function dirsWithData(): string[] {
   if (!fs.existsSync(APPS_DIR)) return [];
   return fs.readdirSync(APPS_DIR, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && fs.existsSync(path.join(APPS_DIR, e.name, "pack.json")))
+    .filter((e) => e.isDirectory() && appDataFileInDir(path.join(APPS_DIR, e.name)) !== null)
     .map((e) => path.join(APPS_DIR, e.name))
     .sort();
 }
 
 export function listProbeSets(): Array<[string, string, string]> {
   const out: Array<[string, string, string]> = [];
-  for (const dir of dirsWithPack()) {
-    const p = path.join(dir, "pack.json");
+  for (const dir of dirsWithData()) {
+    const p = appDataFileInDir(dir)!;
     try {
-      const raw = JSON.parse(fs.readFileSync(p, "utf-8")) as Record<string, unknown>;
+      const raw = readDataFile(p);
       if (raw["probe"] === undefined) continue;
       out.push([String(raw["id"] ?? path.basename(dir)), String(raw["label"] ?? ""), p]);
     } catch {
@@ -289,17 +290,25 @@ export function listProbeSets(): Array<[string, string, string]> {
   return out;
 }
 
-/** 按应用目录名或 `pack.json` 路径加载探针集（发现制：没有清单文件）。 */
+/** 按应用目录名或数据文件路径加载探针集（发现制：没有清单文件）。 */
 export function loadProbeSet(nameOrPath: string): ProbeSet {
   let p = nameOrPath;
-  if (!fs.existsSync(p) || !fs.statSync(p).isFile()) {
-    const hit = dirsWithPack().find((d) => path.basename(d) === nameOrPath);
-    if (hit === undefined) {
-      throw new Error(`probe set ${JSON.stringify(nameOrPath)} not found under ${APPS_DIR}`);
+  const isFile = (x: string): boolean => { try { return fs.statSync(x).isFile(); } catch { return false; } };
+  if (!isFile(p)) {
+    const dirOfPath = path.dirname(p);
+    let f: string | null = null;
+    try { if (fs.statSync(dirOfPath).isDirectory()) f = appDataFileInDir(dirOfPath); } catch { /* 按 id 找 */ }
+    if (f === null) {
+      const hit = dirsWithData().find((d) => path.basename(d) === nameOrPath);
+      if (hit === undefined) {
+        throw new Error(`probe set ${JSON.stringify(nameOrPath)} not found under ${APPS_DIR}`);
+      }
+      f = appDataFileInDir(hit);
     }
-    p = path.join(hit, "pack.json");
+    if (f === null) throw new Error(`probe set ${JSON.stringify(nameOrPath)} has no data file`);
+    p = f;
   }
-  const pack = JSON.parse(fs.readFileSync(p, "utf-8")) as Record<string, unknown>;
+  const pack = readDataFile(p);
   const probe = pack["probe"];
   if (!isDict(probe)) throw new Error(`${p}: no probe block (this app is not a probe set)`);
   const problems = validateProbeBlock(probe, pack["hosts"], "probe");

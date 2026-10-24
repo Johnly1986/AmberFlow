@@ -503,7 +503,7 @@ describe("amber apps — 发现制目录的两个作用域", () => {
 
     const p = await cli(["apps", "path", "demo-app", "--json"], { runEntry: 0 });
     expect(p.code).toBe(0);
-    expect(p.json().data.path).toMatch(/pack\.json$/);
+    expect(p.json().data.path).toMatch(/app\.mjs$/);
   });
 
   it("内置应用默认删不掉（退出码 3 = 被策略挡住），--force 才放行", async () => {

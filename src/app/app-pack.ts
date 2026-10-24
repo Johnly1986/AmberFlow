@@ -27,6 +27,7 @@ import {
   getAppAdapter, listAppAdapterObjects, type AppAdapter, type ProcessStepDecl,
 } from "./app-adapters.ts";
 import { validateProbeBlock } from "./probe-set.ts";
+import { appDataFileInDir, isDeclarativeScriptSource, lowerDeclarative, parseDeclarativeScript } from "./declarative.ts";
 import { loadSource } from "../data/datasource.ts";
 import { extractSlots } from "../engine/extraction.ts";
 
@@ -270,6 +271,14 @@ const isDict = (v: unknown): v is Record<string, unknown> =>
  *  P0-6（前提 A）：扫 **用户目录 → 仓库夹具** 两段路径，同 id 用户目录赢——
  *  应用是用户本地产物，仓库 `apps/` 只是开发夹具；但仓库目录永远在搜索路径里，
  *  `npm run apps -- --list` 的既有清单不因这次改动少一个包。 */
+/**
+ * 一个应用目录里的**数据文件**：`pack.json`（旧格式）或**声明式 app.mjs**（L3 起的主格式）。
+ * 同步可读是 `loadPack` 的契约（39 处调用方不改成异步）——所以只认带标记的数据脚本。
+ */
+export function appDataFile(dir: string): string | null {
+  return appDataFileInDir(dir);
+}
+
 export function appDirs(): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -282,14 +291,10 @@ export function appDirs(): string[] {
     }
     for (const n of names.sort()) {
       if (seen.has(n)) continue;             // 同名包：用户目录覆盖仓库夹具
-      const p = path.join(base, n, "pack.json");
-      try {
-        if (!fs.statSync(p).isFile()) continue;
-      } catch {
-        continue;                            /* 没有 pack.json 的目录（比如只有 sources 的）不算应用包 */
-      }
+      const dir = path.join(base, n);
+      if (appDataFile(dir) === null) continue; /* 没有数据文件的目录（比如只有 sources 的）不算应用包 */
       seen.add(n);
-      out.push(path.join(base, n));
+      out.push(dir);
     }
   }
   return out;
@@ -327,10 +332,16 @@ export function packHintCoverage(pack: AppPack): { hinted: number; named: number
 export function listPacks(): Array<[string, string, string]> {
   const out: Array<[string, string, string]> = [];
   for (const dir of appDirs()) {
-    const p = path.join(dir, "pack.json");
+    const p = appDataFile(dir);
+    if (p === null) continue;
     try {
-      const pack = JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack;
-      out.push([String(pack.id ?? path.basename(dir)), String(pack.label ?? ""), p]);
+      const raw = p.endsWith(".json")
+        ? JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack
+        : lowerDeclarative(...(() => {
+            const parts = parseDeclarativeScript(fs.readFileSync(p, "utf-8"));
+            return [parts.meta, { data: parts.data, exec: parts.journey }] as const;
+          })());
+      out.push([String(raw.id ?? path.basename(dir)), String(raw.label ?? ""), p]);
     } catch (e) {
       out.push([path.basename(dir), `<invalid: ${e instanceof Error ? e.message : String(e)}>`, p]);
     }
@@ -338,18 +349,40 @@ export function listPacks(): Array<[string, string, string]> {
   return out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 }
 
+/**
+ * 读一个应用包（同步）。
+ *
+ * L3 起"应用"的权威文件是**声明式 `app.mjs`**（带 `@amberflow:declarative-data` 标记）——
+ * 它是数据、形状固定，所以能像 JSON 一样同步读；`pack.json` 仍被接受（旧夹具/显式路径）。
+ * 带控制流的 `flow` 脚本不走这里（异步 `loadScriptApp`）。
+ */
 export function loadPack(nameOrPath: string): AppPack {
   let p = nameOrPath;
-  if (!fs.existsSync(p) || !fs.statSync(p).isFile()) {
-    const hit = appDirs().map((d) => path.join(d, "pack.json"))
-      .find((c) => path.basename(path.dirname(c)) === nameOrPath);
-    if (hit === undefined) {
+  const isFile = (x: string): boolean => { try { return fs.statSync(x).isFile(); } catch { return false; } };
+  if (!isFile(p)) {
+    // 显式路径的兄弟目录（删掉 pack.json 之后 `apps/x/pack.json` 这类路径仍要能解析）；
+    // 否则按 id 在发现制目录里找。
+    const dirOfPath = path.dirname(p);
+    let f: string | null = null;
+    try {
+      if (fs.statSync(dirOfPath).isDirectory()) f = appDataFile(dirOfPath);
+    } catch { /* 不是目录：继续按 id 找 */ }
+    if (f === null) {
+      const dir = appDirs().find((d) => path.basename(d) === nameOrPath);
+      if (dir !== undefined) f = appDataFile(dir);
+    }
+    if (f === null) {
       throw new Error(`app pack ${JSON.stringify(nameOrPath)} not found (searched, in order: `
         + `${appsSearchPath(APPS_DIR).join(", ")})`);
     }
-    p = hit;
+    p = f;
   }
-  const pack = JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack;
+  const pack = p.endsWith(".json")
+    ? JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack
+    : lowerDeclarative(...(() => {
+        const parts = parseDeclarativeScript(fs.readFileSync(p, "utf-8"));
+        return [parts.meta, { data: parts.data, exec: parts.journey }] as const;
+      })());
   pack._path = p;
   return pack;
 }

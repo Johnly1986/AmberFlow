@@ -88,7 +88,7 @@ act_on），模型不产出"选哪行"——而且与数据引擎**共用同一�
 
 线上复测（2026-10-03，含四个可达性探针的逐项原始观测）：[bench/live-retest/REPORT.md](bench/live-retest/REPORT.md)。
 复测时所有写文件的命令都带 `--out`，**不覆盖已提交的冻结语料**；探针的 URL/特征/结果目录全在
-`apps/{ctrip,ota,qunar}-live/pack.json` 里声明（见 `src/app/probe-set.ts`）。
+`apps/{ctrip,ota,qunar}-live/app.mjs` 里声明（旧 `pack.json` 仍可读；见 `src/app/probe-set.ts`）。
 
 长流程线上用例：`node --experimental-strip-types src/cli/bench.ts --cases bench/cases-live-long.json --mode-tag live-long`
 （3 个真实站点 / 34 个子目标，一条命令跑完三条完整旅程；不进 CI，外部站点慢且会波动。
@@ -107,7 +107,7 @@ act_on），模型不产出"选哪行"——而且与数据引擎**共用同一�
 `--app transfer-flyquest --no-sources`（第七个：结果页**只能靠提交搜索表单**到达）。
 线上应用：`--app qunar-live --out /tmp/qunar`（真网络 + 真模型，**包里声明了 iPhone 设备面**；见下条规则）。清单与"完成一个应用"的五条定义：[apps/INVENTORY.md](apps/INVENTORY.md)；独立复核（题 → 命令 →
 原始观测 → 结论，含 11 处缺陷与 3 处共享层修补）：[bench/APP_VERIFY_REPORT.md](bench/APP_VERIFY_REPORT.md)。
-新增一个应用 = 新目录 `apps/<id>/`（`pack.json` + 可选 `sources/*.json`），**共享层零改动**；
+新增一个应用 = 新目录 `apps/<id>/`（**声明式 `app.mjs`**（`export const meta/app`，数据脚本；要控制流就 `export async function flow(ctx)`）+ 可选 `sources/*.json`），**共享层零改动**；
 **也可以"演示一次"就录出来**：`npm run learn`（人：连他正开着的浏览器 `--cdp`——**挂载模式也认 `--url`**，
 给了就导航那一页，退出**只断开不关闭**；实测过不给 `--url` 会停在 about:blank 然后拿用户的选择器点不到东西。
 或给 `--url`；他做一遍，
@@ -274,11 +274,11 @@ These are empirical findings from this codebase's own experiments — preserve t
   (git), JSON (`jq`), and the pre-existing curl/httpx HTTP clients whose 163-item parity corpus is untouched except the
   two "unknown value" messages. Adding an app = a directory under `apps/` (see `apps/README.md`), never a new branch in
   the engine.
-- **An application is a DIRECTORY, not a driver -- and its cost is a measured number.** `apps/<id>/pack.json` declares
+- **An application is a DIRECTORY, not a driver -- and its cost is a measured number.** Since L3 the authoritative file is a **declarative `app.mjs`** (marked `@amberflow:declarative-data`: fixed-shape `const META/DATA/JOURNEY` literals that `loadPack` parses synchronously, so all call sites stay sync); `apps/<id>/pack.json` remains readable as a legacy fixture. Either declares
   the app: `roles` (reusable step templates: desc/signal/hint/slots/when/retries), `journey` (which roles, in what
   order — inline steps merge over the template), `slots` + `required_slots` (the data bag; values still only ever come
   from the plan), `sources` (its data leg — the same datasource engine, HTTP or CLI channel), `invariants` (assertions on
-  the END state) and `hosts` (documentation + the leak check's input). Discovery is `apps/<id>/pack.json`, load-time
+  the END state) and `hosts` (documentation + the leak check's input). Discovery is `apps/<id>/app.mjs` (or legacy `pack.json`), load-time
   validation reuses `PlanningRules.problems` (one grammar, not a second one), `{slot}` placeholders substitute ONLY
   declared slots (tool args and JSON payloads are full of braces; an unknown placeholder fails at load), and relative
   `start_url`s resolve to `file://` from the repo root. `src/app/app-runner.ts` runs the whole chain in one command
@@ -293,7 +293,7 @@ These are empirical findings from this codebase's own experiments — preserve t
   inside app dirs (currently 0 — apps are data)** and a leak check that fails if any app-declared host or CLI tool name
   appears in the CORE shared modules (word-boundary match after stripping block comments; `git` must not match `digit`).
   Site knowledge in per-site drivers is reported as DEBT, never as an exemption; the probe family has since been
-  migrated into `apps/<id>/pack.json` probe sets, so that number is now 0 and those drivers joined the CORE list.
+  migrated into `apps/<id>/app.mjs` probe sets, so that number is now 0 and those drivers joined the CORE list.
   Two roles keep this honest (`apps/INVENTORY.md`): an **author** writes the packs, an **independent verifier** reproduces
   every claim from commands and raw output (never from narration), tries to FALSIFY invariants on temp copies, and files
   defects with a minimal repro. Its first pass found 11 problems, 6 of which are fixed: role inline-overrides silently
@@ -345,7 +345,7 @@ These are empirical findings from this codebase's own experiments — preserve t
 - **A probe is DATA too -- and the debt meter must not need a declaration to see it.** The last site knowledge in
   shared code lived in the probe/task drivers (`live-probe` / `live-capture` / `ota-probe` / `qunar-probe` /
   `qunar-task`): URL tables, gate/login markers, result dirs, even the frozen plan of the qunar task. It now lives in
-  `apps/<id>/pack.json` under a `probe` block (`date`, `results_dir`, `home`/`http`/`alts`/`mobile`/`capture`
+  `apps/<id>/app.mjs` (or legacy `pack.json`) under a `probe` block (`date`, `results_dir`, `home`/`http`/`alts`/`mobile`/`capture`
   targets with `{date}`-family placeholders, `browser` re-verification ids, `repeat{id,times}`, `roles` = which
   declared target a verdict should read, `markers` = the observed strings/regexes, `login` = redirect hosts/paths/
   titles). Three load-time rules keep the declaration honest: **every URL's host must be in `hosts`** (otherwise the

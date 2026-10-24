@@ -26,6 +26,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { appDirs, expandPack, loadPack, validatePack, type AppPack } from "../src/app/app-pack.ts";
+import { packToScriptSource } from "../src/app/declarative.ts";
 import { FROZEN_TODAY } from "./frozen-today.ts";
 import { pathToFileURL } from "node:url";
 import { discoverSpecs, emitPlan } from "../src/flow/transfer-flow.ts";
@@ -523,7 +524,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         return 2;
       }
       const dir = path.join(REPO, "apps", values.id);
-      const existing = fs.existsSync(path.join(dir, "pack.json")) ? loadPack(path.join(dir, "pack.json")) : null;
+      const existing = (() => {
+        try { return loadPack(path.join(dir, "pack.json")); } catch { return null; }
+      })();
       targets.push({ id: values.id, ref: values.source ? { source: values.source } : { spec: specPathOf(values.spec!) }, keep: existing });
     } else {
       for (const a of generatedApps()) targets.push({ id: a.id, ref: a.ref, keep: a.pack });
@@ -537,7 +540,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       if (t.keep) {
         const dropped = inexpressibleKeys(t.keep, gen.pack as unknown as Record<string, unknown>);
         if (dropped.length) {
-          console.error(`拒绝写回 apps/${t.id}/pack.json：这些键生成器表达不了，写回等于删掉它们——`
+          console.error(`拒绝写回 apps/${t.id}/app.mjs：这些键生成器表达不了，写回等于删掉它们——`
             + `${dropped.join(", ")}。要么把判断移回 ${flow.label}，要么把这个包从生成器里摘出来`
             + `（去掉 generated_from）。什么都没写。`);
           return 1;
@@ -545,9 +548,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       }
       const dir = path.join(REPO, "apps", t.id);
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, "pack.json"), serializePack(gen.pack));
+      fs.writeFileSync(path.join(dir, "app.mjs"), packToScriptSource(gen.pack));
       if (!values.quiet) {
-        console.log(`已生成 apps/${t.id}/pack.json  ← ${flow.label}（${gen.steps} 步，plan_sha256 ${gen.planSha.slice(0, 12)}…）`);
+        console.log(`已生成 apps/${t.id}/app.mjs  ← ${flow.label}（${gen.steps} 步，plan_sha256 ${gen.planSha.slice(0, 12)}…）`);
         if ((gen.pack.invariants ?? []).length === 0) {
           console.log(`  ⚠ ${t.id} 的 invariants 为空：生成器不会替你发明"什么必须成立"——它只验证动作腿跑完。`);
         }

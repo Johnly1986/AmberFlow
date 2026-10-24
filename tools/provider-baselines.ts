@@ -40,6 +40,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { applyRcToEnv } from "../src/support/rcfile.ts";
+import { appDataFileInDir } from "../src/app/declarative.ts";
+import { loadPack } from "../src/app/app-pack.ts";
 // rc 接线与其它 CLI 入口同一口径（缺了它，configs/amberflowrc.json 里的凭据/端点对这条命令不可见）。
 { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); process.exit(2); } }
 
@@ -67,9 +69,18 @@ if (!argOf("--out") && (APPS.join(",") !== "demo-app,camera-entry,transfer-trekl
 }
 
 /** 把 hint 全删掉（roles 模板与 journey 条目都删），写进临时目录——**不动仓库里的包**。 */
+/** 应用的数据文件（`app.mjs` 或旧 `pack.json`）。 */
+function appDataFileFor(app: string): string {
+  const f = appDataFileInDir(path.join(REPO, "apps", app));
+  if (f === null) throw new Error(`应用 ${app} 没有数据文件（app.mjs / pack.json）`);
+  return f;
+}
+
 function hintless(app: string, dir: string): string {
-  const pack = JSON.parse(fs.readFileSync(path.join(REPO, "apps", app, "pack.json"), "utf-8")) as
-    { roles?: Record<string, Record<string, unknown>>; journey?: Array<Record<string, unknown>> };
+  // 读**降级后的 IR**（不是原始 META）：删 hint 的临时包要能被 app-runner 直接加载。
+  const pack = loadPack(appDataFileFor(app)) as unknown as
+    { roles?: Record<string, Record<string, unknown>>; journey?: Array<Record<string, unknown>>; _path?: string };
+  delete pack._path;
   const strip = (o: Record<string, unknown> | undefined): void => {
     if (!o) return;
     delete o.target_hint; delete o.target_hints;

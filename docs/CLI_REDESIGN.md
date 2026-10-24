@@ -43,9 +43,9 @@ amber dev ...                 # 维护者命令：suite/matrix/bench/verify/pari
 | `package.json` scripts | 46 | 用户需要从 46 个名字里找到自己要的那个 |
 | CLI 入口文件 | 15+ | `start`、`app-runner`、`plan-cli`、`plan-flow`、`semantic-flow`、`learn`、`bench`、`apps_suite`、`apps_matrix`、`spec-to-pack`、`model-fetch`、`provider-baselines`、`ip-config`、`camera-entry`、`picker-server` … |
 | 旗标名 | 约 59 | 扫描 15 个入口文件得到（含少量内部参数） |
-| 应用包 | 20 | `apps/*/pack.json`，其中 3 个是测量型 |
+| 应用包 | 20 | `apps/*/app.mjs`（声明式数据脚本；旧 `pack.json` 仍可读），其中 3 个是测量型 |
 | 「跑一条流程」的入口 | 6 | `start` / `apps` / `plan-cli run` / `semantic` / `bench` / `apps:suite` |
-| 「创建一条流程」的入口 | 5+ | `start --goal` / `learn` / `plan:flow` / `plan-cli new` / `apps:gen` / 手写 `pack.json` |
+| 「创建一条流程」的入口 | 5+ | `start --goal` / `learn` / `plan:flow` / `plan-cli new` / `apps:gen` / 手写 `app.mjs` |
 
 ### 1.2 用户旅程中的摩擦
 
@@ -276,7 +276,7 @@ amber run --demo [--save-plan <文件>] [选项]
 
 | 输入 | 行为 |
 |---|---|
-| `amber run <应用>` | 按 id 或路径加载 `pack.json`，跑完整旅程 |
+| `amber run <应用>` | 按 id 或路径加载应用数据文件（`app.mjs` / 旧 `pack.json`），跑完整旅程 |
 | `amber run --plan [文件]` | 跑计划 JSON；新入口不给文件时用默认 `./.amberflow/plan.json`。旧 `plan-cli run` 由兼容层转发，仍用旧默认 `.task_plan.json`，不随新入口改变 |
 | `amber run --goal ... --url ...` | 一次性：打开页面 → 演示一步 → 归纳信号 → 执行；生成的计划默认保存到 `./.amberflow/plan.json`，用 `--save-plan` 改。旧 `start --goal` 由兼容层转发，仍以 `.task_plan.json` 为保存位置（旧 `start --plan` 即该位置） |
 | `amber run --demo` | 旧 `npm start` 的开箱计划（`testpages/`，2 步）；不是参考应用包 `demo-app` |
@@ -284,7 +284,7 @@ amber run --demo [--save-plan <文件>] [选项]
 | `amber run` + 非 TTY | 列出应用，提示 `amber run <id>`，exit 2，不替用户选 |
 | 应用 + `--goal` 同时给 | 用法错误，说明二选一 |
 
-`demo-app` 是 `apps/demo-app/pack.json` 里的参考应用包（数据腿 + 浏览器腿 + 验收条件）；`--demo` 是旧 `npm start` 的零配置开箱计划。两者都保留，但不要互相替代，也不要用同一个结果 JSON 做等价性断言。
+`demo-app` 是 `apps/demo-app/app.mjs` 里的参考应用（数据腿 + 浏览器腿 + 验收条件）；`--demo` 是旧 `npm start` 的零配置开箱计划。两者都保留，但不要互相替代，也不要用同一个结果 JSON 做等价性断言。
 
 `--plan` 只与 `--plan` 模式搭配；`--goal` / `--demo` 要保存计划用 `--save-plan`。`--demo` + `--plan`、`--goal` + `--plan` 都是用法错误（只有兼容层会把旧 `start --plan` 翻译成 `--save-plan`）。
 
@@ -385,7 +385,7 @@ amber record https://shop.example.com --script ./demo-actions.json --yes --json
 ```text
 ✔ 已录制 add-to-cart（2 步）
   零模型回放：通过
-  包：~/.amberflow/apps/add-to-cart/pack.json
+  包：~/.amberflow/apps/add-to-cart/app.mjs
   下一步：amber run add-to-cart
 ```
 
@@ -1031,7 +1031,7 @@ $ amber record https://shop.example.com --name add-to-cart
 目标：把商品加入购物车
 ...
 ✔ 已录制 add-to-cart（2 步）
-  包：~/.amberflow/apps/add-to-cart/pack.json
+  包：~/.amberflow/apps/add-to-cart/app.mjs
 
 $ amber run add-to-cart
 ✔ add-to-cart  2/2 步

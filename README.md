@@ -190,7 +190,7 @@ CLI 报告、`apps:suite` 表格与 DSH 插件 `amberflow_run` 的 summary 念�
 
 ## 把你的流程固化成应用
 
-一个应用 = 一个目录 `apps/<id>/pack.json`（纯数据）：数据腿 + 旅程（浏览器步 / 命令行工具步）+ 结束状态不变量。**加一个应用不需要改共享层一行代码。**
+一个应用 = 一个目录 `apps/<id>/app.mjs`（**声明式数据脚本**：数据腿 + 旅程（浏览器步 / 命令行工具步）+ 结束状态不变量）。它只是把数据写成了 JS（`export const meta` + `export const app`），不含控制流；要循环/条件就把 `app` 换成 `export async function flow(ctx)`（见 [apps/README.md](apps/README.md) §九）。**加一个应用不需要改共享层一行代码。**
 
 ```bash
 npm run apps -- --list                                  # 有哪些应用
@@ -219,27 +219,31 @@ npm run apps:suite                                      # 全部离线应用跑�
 |---|---|
 | 一个浏览器 + 会点鼠标 | `npm run learn`——连上你正开着的浏览器（`--cdp`）或给 `--url`，做一遍，信号与不变量自动归纳，你只回 y/n |
 | 一份 spec / Excel / 代码里的计划 | `npm run apps:gen -- --spec <key>`（`--check` 可进 CI：改 spec 忘重新生成就会红） |
-| 只想手写 | 复制下面的最小 `pack.json` 起个新目录 |
+| 只想手写 | 复制下面的最小 `app.mjs` 起个新目录 |
 
-最小可跑的 `pack.json`（选择器用仓库自带页面，复制即跑）：
+最小可跑的 `app.mjs`（声明式数据；选择器用仓库自带页面，复制即跑）：
 
-```json
-{
-  "spec_version": 1,
-  "id": "hello",
-  "label": "最小离线应用",
-  "goal": "在门户页进入枪机/筒机录入",
-  "journey": [{
-    "desc": "点击「枪机 / 筒机 录入」",
-    "start_url": "testpages/portal.html",
-    "target_hint": "[data-test=entry-fixed]",
-    "signal": { "url_contains": "camera_a.html" }
+```js
+// apps/hello/app.mjs —— 声明式应用：数据 + 旅程 + 结束状态不变量（没有控制流）
+export const meta = () => ({
+  id: "hello",
+  label: "最小离线应用",
+  goal: "在门户页进入枪机/筒机录入",
+  hosts: [],
+  invariants: [
+    { id: "on-camera-a", desc: "结束时停在 camera_a 录入页",
+      signal: { url_contains: "camera_a.html" } },
+  ],
+});
+
+export const app = () => ({
+  exec: [{
+    desc: "点击「枪机 / 筒机 录入」",
+    start_url: "testpages/portal.html",
+    target_hint: "[data-test=entry-fixed]",
+    signal: { url_contains: "camera_a.html" },
   }],
-  "invariants": [
-    { "id": "on-camera-a", "desc": "结束时停在 camera_a 录入页",
-      "signal": { "url_contains": "camera_a.html" } }
-  ]
-}
+});
 ```
 
 ```bash

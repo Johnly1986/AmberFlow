@@ -11,7 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { appDirs, loadPack, validatePack, type AppPack } from "../src/app/app-pack.ts";
+import { appDataFile, appDirs, loadPack, validatePack, type AppPack } from "../src/app/app-pack.ts";
 import { validateBenchCase } from "../src/cli/bench.ts";
 import { REPO } from "../src/flow/flow.ts";
 import { appSourceNames, validateApp } from "../src/app/cross-ref.ts";
@@ -54,8 +54,8 @@ describe("validateApp：对既有应用包零假阳性", () => {
     const dirs = appDirs();
     let seen = 0;
     for (const dir of dirs) {
-      const p = path.join(dir, "pack.json");
-      if (!fs.existsSync(p)) continue;
+      const p = appDataFile(dir);
+      if (p === null) continue;
       const pack = loadPack(p);
       const base = validatePack(pack);
       const withSources = validateApp(pack);

@@ -1,8 +1,6 @@
-// @amberflow:declarative-data —— 本文件是**数据**（迁移生成），不是逻辑：
+// @amberflow:declarative-data —— 本文件是**数据**（迁移/生成），不是逻辑：
 //   应用目录仍受"0 行逻辑代码"约束；只有带这个标记的文件允许出现在 apps/<id>/ 下。
-// 由 `npm run apps:migrate -- --app transfer-trekly --write` 生成；改来源再重新生成，不要手改。
-// 迁移口径：脚本的 meta()/app() 只是把 pack.json 的字段逐项搬运（含 roles/probe/invariants/journey），
-// 不含任何判断；`apps:migrate --all --check` 用 expandPack 逐字段对照来源包。
+// 由 `npm run apps:migrate -- --app transfer-trekly --write` 或 apps:gen 生成；改来源再重新生成，不要手改。
 const META = {
   "id": "transfer-trekly",
   "label": "Trekly 复刻站（site3）：价格上限是 range 滑块的 19 步（离线）",
@@ -17,6 +15,9 @@ const META = {
   },
   "sources": [],
   "notes": [
+    "本文件由 `npm run apps:gen` 从 `transfer/specs/trekly.json` 生成：旅程逐字段等于该来源的展开结果，",
+    "改流程请改 spec 再重新生成，不要手改 journey（手改会被 `npm run apps:gen -- --check` 抓到）。",
+    "**人写的只有这里的 invariants 与 notes**（结束状态要成立什么、以及为什么这样定）——生成器不发明判断。",
     "本文件由 `npm run apps:gen` 从 `transfer/specs/trekly.json` 生成：旅程逐字段等于 `emitPlan(\"trekly\")` 的展开结果，",
     "改流程请改 spec 再重新生成，不要手改 journey（手改会被 `npm run apps:gen -- --check` 抓到）。",
     "**人写的只有这里的 invariants 与 notes**（结束状态要成立什么、以及为什么这样定）——生成器不发明判断。",
@@ -124,7 +125,11 @@ const META = {
       }
     }
   ],
-  "requiredSlots": []
+  "requiredSlots": [],
+  "generatedFrom": {
+    "spec": "transfer/specs/trekly.json",
+    "plan_sha256": "3dfd02dbf13b84aaa69505efecc17fb4e999d173dd7463b19691cdf7f2176de3"
+  }
 };
 const DATA = {};
 const JOURNEY = [
