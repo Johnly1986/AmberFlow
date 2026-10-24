@@ -312,3 +312,22 @@ npm run verify && bash bench/smoke.sh        # 先确认基线是绿的
 **L2 实现中记录的两处偏差**：
 1. `validatePack` 新增 `allowEmptyJourney`：flow 脚本没有静态旅程是**合法形态**，否则每个 flow 脚本都会被"journey 必须非空"挡住；步骤级校验移到每次 `ctx.step`（同一套 walker）。
 2. `ctx.run`/`ctx.dangerous`/`openPage` 未接线（见 `L2_CTX_API_DRAFT.md` §12 的"未接线"清单）——L2 的验收试点都是浏览器步，工具步接线留到 S2/L3 前。
+
+---
+
+## 15. L3 执行计划（删 JSON，分 5 步，每步可独立验收）
+
+前置（L2 已完成）：`resolveApp` 脚本优先、`runScriptApp` 第二条驱动、trace 审计、dry/check/explain。
+
+| 步 | 内容 | 退出条件 |
+|---|---|---|
+| **L3.1** ✅ 完成（2026-10-25，`tools/apps_migrate.ts`） | `npm run apps:migrate -- --app <id> [--write]` / `--all --check`：把 `pack.json` 转成声明式 `app.mjs`（数据内联，含 roles/probe/invariants） | **22/22 逐字段 0 diff**（`tests/apps-migrate.test.ts` 23 条） |
+| **L3.2** | 21 个 `apps/<id>/app.mjs` 生成并提交；`apps:matrix` 来源列加 `script`；`apps:check` 默认校验脚本 | `apps:suite` 全绿；`pack.json` 仍在（可回退） |
+| **L3.3** | 切换**默认**：`loadApp` 只找脚本（`AMBERFLOW_JSON_APPS=1` 为过渡逃生口）；`apps list` 发现脚本；`apps:gen --check` 改比"脚本展开 == 冻结计划" | 全量 `verify` 绿；旧 JSON 仍能通过逃生口跑 |
+| **L3.4** | 删除 `pack.json` / `flow.json` / `transfer/specs` 与其加载路径；39 个引用文件逐个改（测试/工具/CLI）；六层对拍对象改为"脚本展开" | `npm run test:parity` 逐字节一致（**输出相同则不需要重冻**；出现差异才走 §5.4 的一次性重冻） |
+| **L3.5** | 文档收口（README/ARCHITECTURE/CLAUDE.md 的身份描述）+ 全量验证 | `verify` + `smoke` + `apps:suite` + 对拍 + 工作树干净 |
+
+**关键杠杆**：L3.1 的 0-diff 保证"脚本展开 == 今天的计划"，因此六层对拍的**语料不必重冻**；
+只有 L3.4 出现非预期差异时才启用一次性重冻协议（一次性/显式/单独提交）。
+**风险**：`tests/app-packs-authored.test.ts`（pack ↔ oracle 逐字段）、`tools/spec-to-pack.ts`（spec → pack）、
+`tools/apps_matrix.ts`（声明行统计）都要在 L3.4 一起改；它们各自有独立验收，不能"顺手改绿"。

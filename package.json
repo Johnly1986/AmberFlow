@@ -67,6 +67,7 @@
     "hint:measure": "node --experimental-strip-types tools/hint_measure.ts",
     "apps:suite": "node --experimental-strip-types tools/apps_suite.ts",
     "apps:gen": "node --experimental-strip-types tools/spec-to-pack.ts",
+    "apps:migrate": "node --experimental-strip-types tools/apps_migrate.ts",
     "probes:baseline": "node --experimental-strip-types tools/probe-baseline.ts",
     "apps:induce": "node --experimental-strip-types tools/apps-induce.ts",
     "learn": "node --experimental-strip-types tools/learn.ts",

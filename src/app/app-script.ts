@@ -38,6 +38,9 @@ export interface ScriptMeta {
   device?: Record<string, unknown>;
   notes?: string[];
   policy?: Record<string, unknown>;
+  /** 迁移/高级用法：步骤模板与探针声明原样搬运（L3 迁移需要；不是常用作者面）。 */
+  roles?: Record<string, unknown>;
+  probe?: Record<string, unknown>;
   invariants?: Array<Record<string, unknown>>;
   recordedFrom?: Record<string, unknown>;
 }
@@ -168,6 +171,8 @@ export function lowerScriptApp(meta: ScriptMeta, draft: ScriptDraft): AppPack {
     invariants: [...(meta.invariants ?? draft.judge?.invariants ?? [])],
   };
   if (Object.keys(sourceSlots).length) pack["source_slots"] = sourceSlots;
+  if (meta.roles !== undefined) pack["roles"] = meta.roles;
+  if (meta.probe !== undefined) pack["probe"] = meta.probe;
   if (Array.isArray(meta.notes)) pack["notes"] = [...meta.notes];
   if (meta.device !== undefined) pack["device"] = meta.device;
   if (meta.policy !== undefined) pack["policy"] = meta.policy;
