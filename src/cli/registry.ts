@@ -140,12 +140,17 @@ amber plan run [--plan <文件>] [--reset] [--replan] [--confirm allow|ask|deny]
     summary: "列出 / 查看 / 校验应用",
     usage: `amber apps list [--json]
 amber apps show <应用> [--json]
-amber apps check [<应用>] [--json]
+amber apps check [<应用|脚本>] [--json]
+amber apps explain <脚本> [--json]
+amber apps emit <脚本> [--out <文件>] [--json]
 amber apps path <应用>
 amber apps remove <应用> [--yes] [--force]`,
-    examples: ["amber apps list", "amber apps show demo-app", "amber apps check transfer-slowjet"],
+    examples: ["amber apps list", "amber apps show demo-app", "amber apps check transfer-slowjet",
+      "amber apps explain $AMBERFLOW_HOME/apps/my-app/app.mjs",
+      "amber apps emit $AMBERFLOW_HOME/apps/my-app/app.mjs --out /tmp/my-app.json"],
     flags: [
       "--json                    机器可读输出",
+      "--out <文件>              apps emit 的落点（默认 <脚本目录>/pack.json）",
       "--yes                     确认删除（非 TTY 必须给）",
       "--force                   允许删除内置应用（危险）",
     ],

@@ -3,6 +3,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { APPS_DIR, listPacks, loadPack, type AppPack } from "../../app/app-pack.ts";
 import { validateApp } from "../../app/cross-ref.ts";
+import { loadApp, loadScriptApp, resolveScriptPath, scriptDisplayPath } from "../../app/app-script.ts";
 import { userAppsDir } from "../../app/amberflow-home.ts";
 import type { CliContext } from "../context.ts";
 import { say, emitJson } from "../context.ts";
@@ -136,6 +137,10 @@ export async function runApps(args: string[], ctx: CliContext): Promise<number> 
       return appsShow(rest, ctx);
     case "check":
       return appsCheck(rest, ctx);
+    case "explain":
+      return appsExplain(rest, ctx);
+    case "emit":
+      return appsEmit(rest, ctx);
     case "path":
       return appsPath(rest, ctx);
     case "remove":
@@ -143,7 +148,7 @@ export async function runApps(args: string[], ctx: CliContext): Promise<number> 
       return appsRemove(rest, ctx);
     default:
       throw usageError(`未知的 apps 子命令 '${sub}'`, {
-        hint: "可用：list / show / check / path / remove",
+        hint: "可用：list / show / check / explain / emit / path / remove",
         next: ["amber apps --help"],
       });
   }
@@ -210,7 +215,7 @@ function appsShow(args: string[], ctx: CliContext): number {
   return 0;
 }
 
-function appsCheck(args: string[], ctx: CliContext): number {
+async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
   const parsed = parseSimple(args, { json: { type: "boolean" }, help: { type: "boolean" } });
   if (parsed.values.help) {
     say(ctx, "用法：amber apps check [<应用>] [--json]");
@@ -234,7 +239,7 @@ function appsCheck(args: string[], ctx: CliContext): number {
   const results: Array<{ app: string; path: string; problems: string[] }> = [];
   for (const t of targets) {
     try {
-      const pack = loadPack(t.path ?? t.id);
+      const pack = await loadApp(t.path ?? t.id);
       const problems = validateApp(pack);
       results.push({ app: pack.id, path: pack._path ?? t.path ?? t.id, problems });
     } catch (err) {
@@ -272,6 +277,156 @@ function appsCheck(args: string[], ctx: CliContext): number {
     ? `${bad.length}/${results.length} 个应用包未通过校验。`
     : `${results.length} 个应用包全部通过校验。`);
   return exitCode;
+}
+
+/** 把信号渲染成人话（explain 用；未识别算子原样 JSON，绝不假装理解）。 */
+function renderSignal(spec: unknown): string {
+  if (typeof spec !== "object" || spec === null || Array.isArray(spec)) return JSON.stringify(spec);
+  const parts: string[] = [];
+  for (const [op, arg] of Object.entries(spec as Record<string, unknown>)) {
+    if (op === "all_of" || op === "any_of") {
+      const kids = Array.isArray(arg) ? arg.map(renderSignal) : [renderSignal(arg)];
+      parts.push(`${op === "all_of" ? "全部" : "任一"}（${kids.join("；")}）`);
+    } else if (op === "not") {
+      parts.push(`非（${renderSignal(arg)}）`);
+    } else if (op === "manual") {
+      parts.push(`人工确认：${String(arg)}`);
+    } else if (op === "url_contains") {
+      parts.push(`URL 含「${String(arg)}」`);
+    } else if (op === "css_exists") {
+      parts.push(`存在 ${String(arg)}`);
+    } else if (op === "css_text_contains") {
+      const [sel, want] = arg as unknown[];
+      parts.push(`${String(sel)} 含「${String(want)}」`);
+    } else if (op === "css_text_equals") {
+      const [sel, want] = arg as unknown[];
+      parts.push(`${String(sel)} 等于「${String(want)}」`);
+    } else if (op === "css_value_equals") {
+      const [sel, want] = arg as unknown[];
+      parts.push(`${String(sel)} 的值等于「${String(want)}」`);
+    } else if (op === "exit_ok") {
+      parts.push("退出码在成功白名单里");
+    } else if (op === "exit_code_equals") {
+      parts.push(`退出码 = ${String(arg)}`);
+    } else if (op === "stdout_contains") {
+      parts.push(`stdout 含「${String(arg)}」`);
+    } else if (op === "stdout_matches") {
+      parts.push(`stdout 匹配 /${String(arg)}/`);
+    } else if (op === "stderr_contains") {
+      parts.push(`stderr 含「${String(arg)}」`);
+    } else if (op === "json_path_equals") {
+      const [p, want] = arg as unknown[];
+      parts.push(`JSON ${String(p)} = ${String(want)}`);
+    } else if (op === "file_exists") {
+      parts.push(`文件存在 ${String(arg)}`);
+    } else if (op === "file_absent") {
+      parts.push(`文件不存在 ${String(arg)}`);
+    } else {
+      parts.push(`${op}=${JSON.stringify(arg)}`);
+    }
+  }
+  return parts.join(" 且 ");
+}
+
+/** `amber apps explain <脚本>`：把三段骨架展开成人话（不动作、不开浏览器）。 */
+async function appsExplain(args: string[], ctx: CliContext): Promise<number> {
+  const parsed = parseSimple(args, { json: { type: "boolean" }, help: { type: "boolean" } });
+  if (parsed.values.help) {
+    say(ctx, "用法：amber apps explain <脚本路径|应用 id> [--json]");
+    return 0;
+  }
+  const target = parsed.positionals[0];
+  if (!target) throw usageError("apps explain 需要一个脚本路径或应用 id", { next: ["amber apps list"] });
+  if (parsed.positionals.length > 1) throw usageError("apps explain 只接受一个应用");
+  const loaded = await loadScriptApp(target);
+  const pack = loaded.pack;
+  const invs = pack.invariants ?? [];
+  const steps = pack.journey.map((entry, i) => {
+    const e = entry as Record<string, unknown>;
+    const isTool = typeof e["source"] === "string";
+    const targets = Array.isArray(e["target_hints"])
+      ? (e["target_hints"] as string[])
+      : typeof e["target_hint"] === "string" ? [e["target_hint"] as string] : [];
+    const commands = Array.isArray(e["commands"]) ? (e["commands"] as unknown[]).length : 0;
+    return {
+      index: i + 1,
+      kind: isTool ? "tool" : "browser",
+      desc: String(e["desc"] ?? ""),
+      start_url: typeof e["start_url"] === "string" ? e["start_url"] : undefined,
+      source: isTool ? String(e["source"]) : undefined,
+      targets, commands,
+      done: renderSignal(e["signal"]),
+      when: e["when"] === undefined ? undefined : renderSignal(e["when"]),
+    };
+  });
+  if (jsonWanted(ctx, parsed.values)) {
+    emitJson(ctx, successEnvelope("apps explain", {
+      app: pack.id, goal: pack.goal, script: scriptDisplayPath(loaded.scriptPath),
+      plan_sha256: loaded.planSha256,
+      hosts: pack.hosts ?? [], sources: pack.sources ?? [],
+      slots: pack.slots ?? {}, source_slots: (pack as unknown as Record<string, unknown>)["source_slots"] ?? {},
+      steps,
+      invariants: invs.map((inv) => ({ id: inv.id, desc: inv.desc, done: renderSignal(inv.signal) })),
+    }, { next: [`amber run ${pack.id}`] }));
+    return 0;
+  }
+  say(ctx, `${pack.id} — ${pack.goal}`);
+  say(ctx, "");
+  for (const st of steps) {
+    const where = st.kind === "tool" ? `工具 ${st.source}` : st.start_url ? `页面 ${st.start_url}` : "当前页面";
+    say(ctx, `${String(st.index).padStart(2, " ")}. [${st.kind}] ${st.desc}`);
+    say(ctx, `     ${where}`);
+    if (st.targets.length) say(ctx, `     目标（按序）：${st.targets.join(" → ")}`);
+    if (st.commands) say(ctx, `     命令闭集：${st.commands} 条`);
+    say(ctx, `     完成：${st.done}`);
+    if (st.when) say(ctx, `     适用：${st.when}`);
+  }
+  if (invs.length) {
+    say(ctx, "");
+    say(ctx, "结束态不变量：");
+    for (const inv of invs) say(ctx, `  - ${inv.id}${inv.desc ? `：${inv.desc}` : ""}`);
+  }
+  say(ctx, "");
+  say(ctx, `脚本：${scriptDisplayPath(loaded.scriptPath)}  plan_sha256=${loaded.planSha256.slice(0, 16)}…`);
+  return 0;
+}
+
+/** `amber apps emit <脚本> [--out]`：把脚本展开成 IR 快照（审计/交接用；默认不落盘）。 */
+async function appsEmit(args: string[], ctx: CliContext): Promise<number> {
+  const parsed = parseSimple(args, {
+    json: { type: "boolean" }, help: { type: "boolean" }, out: { type: "string" },
+  });
+  if (parsed.values.help) {
+    say(ctx, "用法：amber apps emit <脚本路径> [--out <文件>] [--json]");
+    return 0;
+  }
+  const target = parsed.positionals[0];
+  if (!target) throw usageError("apps emit 需要一个脚本路径", { next: ["amber apps explain <脚本>"] });
+  if (parsed.positionals.length > 1) throw usageError("apps emit 只接受一个脚本");
+  const loaded = await loadScriptApp(target);
+  const outPath = path.resolve(
+    typeof parsed.values.out === "string" && parsed.values.out
+      ? parsed.values.out
+      : path.join(path.dirname(loaded.scriptPath), "pack.json"),
+  );
+  const pack: Record<string, unknown> = {
+    ...(loaded.pack as unknown as Record<string, unknown>),
+    generated_from: { source: `${loaded.scriptPath}#app`, plan_sha256: loaded.planSha256 },
+  };
+  const problems = validateApp(pack as never);
+  if (problems.length) throw usageError(`展开结果不合法（不应发生；脚本已过校验）`, { hint: problems.join("；") });
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  fs.writeFileSync(outPath, JSON.stringify(pack, null, 2) + "\n", "utf-8");
+  if (jsonWanted(ctx, parsed.values)) {
+    emitJson(ctx, successEnvelope("apps emit", {
+      app: loaded.pack.id, script: scriptDisplayPath(loaded.scriptPath),
+      out: outPath, plan_sha256: loaded.planSha256, script_sha256: loaded.scriptSha256,
+    }, { next: [`amber apps check ${outPath}`] }));
+  } else {
+    say(ctx, `已展开：${outPath}`);
+    say(ctx, `plan_sha256=${loaded.planSha256}`);
+  }
+  return 0;
 }
 
 function appsPath(args: string[], ctx: CliContext): number {

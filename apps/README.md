@@ -512,3 +512,49 @@ npm run probes:baseline -- --from <新探针结果.json> --write   # 用一次�
 | **交互式 TTY 工具**（`ssh` 提问、编辑器） | 明确不做。真需要人参与就走 `{"signal":{"manual":true}}` + 人工背书 |
 | **阶段性不变量**（旅程中途的验收） | 没做。中间要求现阶段写成子目标信号；`invariants` 只长在浏览器结束状态上 |
 
+
+## 八、应用脚本（L1）：隔离、零构建、可核验
+
+应用也可以写成**脚本**而不是手写 JSON。脚本与项目主体隔离：
+
+- **位置**：`$AMBERFLOW_HOME/apps/<id>/app.mjs`（或 `.ts`，运行期 strip-types）。仓库里只有**夹具**
+  （`tests/fixtures/scripts/`）——应用是用户本地的，checkout 里的 `apps/` 仍是开发夹具（见 `src/app/amberflow-home.ts`）。
+- **不进项目编译**：`tsconfig.json` 的 `include` 只有 `src/**`、`tests/**`、`tools/**`；脚本为零构建
+  （不 tsc、不 bundler、不进 vitest 收集面），运行期用 `import()` 加载（先例 `tools/spec-to-pack.ts`）。
+- **零 import**：脚本 `export` 两个函数，`kit` 由引擎注入——不依赖仓库内部模块，升级引擎不用重写脚本。
+
+```js
+// $AMBERFLOW_HOME/apps/my-app/app.mjs
+export const meta = (kit) => ({          // 声明面：任何网络动作之前可校验
+  id: "my-app", goal: "把商品加入购物车",
+  hosts: ["shop.example.com"], slots: { coupon: "SAVE10" }, sources: [],
+  invariants: [kit.judge.url("cart.html")],
+});
+
+export const app = (kit) => ({           // 动作面：三段骨架
+  data: { note: "hello" },               // ① 数据槽（常量 / kit.data.source(...) 数据腿回写）
+  exec: [                                // ③ 决策执行（每步自带 ② 决策判断）
+    kit.go("https://shop.example.com/", { done: kit.judge.exists("[data-test=home]") }),
+    kit.step("加入购物车", {
+      act: kit.hints("[data-test=add-to-cart]"),
+      done: kit.judge.all(kit.judge.text("[data-test=cart-count]", "1"),
+                          kit.judge.url("cart.html")),
+    }),
+  ],
+});
+```
+
+三条命令（都不启动浏览器、不动作）：
+
+```bash
+amber apps check   $AMBERFLOW_HOME/apps/my-app/app.mjs    # 构建+校验；problems 带路径（Agent 自纠）
+amber apps explain $AMBERFLOW_HOME/apps/my-app/app.mjs    # 展开成人话计划（人核验）
+amber apps emit    $AMBERFLOW_HOME/apps/my-app/app.mjs --out /tmp/my-app.json   # IR 快照（带 generated_from 血统）
+```
+
+- **回退**：`AMBERFLOW_NO_SCRIPTS=1` 强制走旧 `pack.json` 路径（没有脚本时行为与今天逐字节相同）。
+- **边界**：L1 是**声明式**脚本（构建期灵活，运行期零新语义）；运行期循环/条件（`flow(ctx)`）在 L2。
+  模型侧数字（置信度/决策档）**不进脚本**：脚本只看 `stopCode`（红线②的 L2 形态）。
+- **等价证据**：`tests/fixtures/scripts/camera-entry.mjs`（web 4 步 + 3 不变量）与
+  `cli-report.mjs`（5 个工具步，含重试/幂等/危险步）展开后与既有 `pack.json` **逐字段 0 diff**
+  （`tests/app-script-equivalence.test.ts`）。
