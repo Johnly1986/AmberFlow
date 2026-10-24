@@ -22,6 +22,7 @@ import path from "node:path";
 import type { CliObservation } from "../data/datasource.ts";
 import { REPO } from "../flow/flow.ts";
 import { resolve } from "../data/datasource.ts";
+import { validateSignalSpec, type SignalGrammar } from "../engine/signals.ts";
 
 export type ToolSignal = Record<string, unknown>;
 
@@ -40,9 +41,16 @@ export const TOOL_SIGNAL_OPS: Readonly<Record<string, number>> = {
   file_absent: 1,
 };
 
-function asList(v: unknown): unknown[] {
-  return Array.isArray(v) ? v : [v];
-}
+/**
+ * 进程观察面的语法描述。**组合算子与递归规则不在这里**——它们来自
+ * `signals.validateSignalSpec` 这唯一一份实现；本文件只声明"这个面的叶子有哪些"。
+ */
+export const TOOL_SIGNAL_GRAMMAR: SignalGrammar = {
+  ops: TOOL_SIGNAL_OPS,
+  label: "tool signal",
+  listKnown: true,
+};
+
 const s = (v: unknown): string => (v === null || v === undefined ? "" : String(v));
 
 /** `file_*` 的路径：绝对路径照用，相对路径按仓库根解析（与 start_url 同口径）。 */
@@ -51,45 +59,12 @@ export function artifactPath(p: string): string {
 }
 
 /**
- * 加载期校验：未知算子、参数个数、组合递归。**形状与浏览器面校验同构**，
- * 所以应用包里的坏信号跑到第 9 步才炸是不可能发生的。
+ * 加载期校验：未知算子、参数个数、组合递归。**走的是与浏览器面同一个走查器**
+ * （`signals.validateSignalSpec`），本文件只提供叶子算子表——所以"两套语法同构"
+ * 不再是靠人成对改的纪律，而是构造性质。
  */
 export function validateToolSignal(spec: ToolSignal, where = "signal"): string[] {
-  const problems: string[] = [];
-  const walk = (node: unknown, at: string): void => {
-    if (typeof node !== "object" || node === null || Array.isArray(node)) {
-      problems.push(`${at}: signal must be an object`);
-      return;
-    }
-    const entries = Object.entries(node as Record<string, unknown>);
-    if (!entries.length) problems.push(`${at}: empty signal`);
-    for (const [op, args] of entries) {
-      if (!(op in TOOL_SIGNAL_OPS)) {
-        problems.push(`${at}: unknown tool signal op '${op}' (known: ${Object.keys(TOOL_SIGNAL_OPS).join(", ")})`);
-        continue;
-      }
-      if (op === "all_of" || op === "any_of") {
-        const list = asList(args);
-        if (!Array.isArray(args) || list.length === 0) {
-          problems.push(`${at}: ${op} needs a non-empty list of signals`);
-          continue;
-        }
-        list.forEach((child, i) => walk(child, `${at}.${op}[${i}]`));
-        continue;
-      }
-      if (op === "not") {
-        walk(args, `${at}.not`);
-        continue;
-      }
-      // `exit_ok` 是"无参叶子"（与浏览器面的 `manual` 同型）：值为 true/0 都行，值本身不参与
-      if (op === "exit_ok") continue;
-      const want = TOOL_SIGNAL_OPS[op]!;
-      const got = Array.isArray(args) ? args.length : 1;
-      if (got !== want) problems.push(`${at}: ${op} needs ${want} argument(s)`);
-    }
-  };
-  walk(spec, where);
-  return problems;
+  return validateSignalSpec(spec, where, TOOL_SIGNAL_GRAMMAR);
 }
 
 /** 求值：一个叶子只看一个事实，组合只做逻辑（不可能比叶子更宽松）。 */

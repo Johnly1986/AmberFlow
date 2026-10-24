@@ -202,3 +202,80 @@ export const SIGNAL_OPS: Readonly<Record<string, number>> = {
 export function signalArgs(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [v];
 }
+
+/* ------------------------------------------------------------------ 语法校验 */
+
+/**
+ * 一个**观察面**的语法描述：算子表 + 报错措辞。
+ *
+ * 语法只有一份（下面的 `validateSignalSpec`）；DOM 面与进程面的差别**只有**叶子算子表，
+ * 组合算子（`all_of`/`any_of`/`not`）与递归/路径/arity 规则必须同构——否则"同一套语言"
+ * 只是口号（两套校验器漂移过一次：`when` 漏校验，见 `plan.ts` 的注释）。
+ */
+export interface SignalGrammar {
+  /** 算子 → 参数个数；**0 = 无参叶子**（DOM 的 `manual`、进程面的 `exit_ok`），值不参与校验。 */
+  readonly ops: Readonly<Record<string, number>>;
+  /** 报错里的面名：`signal` / `tool signal`（保留既有消息措辞，测试按原文断言）。 */
+  readonly label: string;
+  /** 未知算子是否附上已知算子表（进程面是给人配 CLI 的，附上更好；DOM 面保持原文）。 */
+  readonly listKnown?: boolean;
+}
+
+/** 浏览器/DOM 观察面的语法（`signal` 与 `when` 共用）。 */
+export const DOM_SIGNAL_GRAMMAR: SignalGrammar = { ops: SIGNAL_OPS, label: "signal" };
+
+/**
+ * **唯一**的信号语法走查器。返回 problem 字符串（与 `PlanningRules.problems` 同款口径：
+ * 错误是数据，由调用方汇总），不抛、不依赖浏览器。
+ *
+ * - 组合算子递归校验（`all_of` 空列表、`not` 不是对象、嵌套坏算子都要在**加载期**红）；
+ * - 无参叶子（arity 0）只看键、不看值；
+ * - `allowEmpty`：DOM 面把"空信号"的措辞放在调用方（`missing done-signal` /
+ *   `must be a non-empty signal`），进程面则要求"empty signal"——两种都必须保留，所以做成选项。
+ */
+export function validateSignalSpec(
+  spec: unknown,
+  where: string,
+  grammar: SignalGrammar = DOM_SIGNAL_GRAMMAR,
+  opts: { allowEmpty?: boolean } = {},
+): string[] {
+  const problems: string[] = [];
+  const walk = (node: unknown, at: string): void => {
+    if (typeof node !== "object" || node === null || Array.isArray(node)) {
+      problems.push(`${at}: signal must be an object`);
+      return;
+    }
+    const entries = Object.entries(node as Record<string, unknown>);
+    if (!entries.length && !opts.allowEmpty) problems.push(`${at}: empty signal`);
+    for (const [op, args] of entries) {
+      if (!(op in grammar.ops)) {
+        const known = grammar.listKnown ? ` (known: ${Object.keys(grammar.ops).join(", ")})` : "";
+        problems.push(`${at}: unknown ${grammar.label} op '${op}'${known}`);
+        continue;
+      }
+      if (op === "all_of" || op === "any_of") {
+        if (!Array.isArray(args) || args.length === 0) {
+          problems.push(`${at}: ${op} needs a non-empty list of signals`);
+          continue;
+        }
+        args.forEach((child, i) => walk(child, `${at}.${op}[${i}]`));
+        continue;
+      }
+      if (op === "not") {
+        if (typeof args !== "object" || args === null || Array.isArray(args)) {
+          problems.push(`${at}: not needs one signal`);
+          continue;
+        }
+        walk(args, `${at}.not`);
+        continue;
+      }
+      const arity = grammar.ops[op]!;
+      if (arity === 0) continue;
+      if (signalArgs(args).length !== arity) {
+        problems.push(`${at}: ${op} needs ${arity} argument(s)`);
+      }
+    }
+  };
+  walk(spec, where);
+  return problems;
+}
