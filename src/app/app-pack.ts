@@ -539,7 +539,16 @@ export function resolveSourceSlots(
  * 不新开第二套语法校验器（hint 语法漂移过一次，代价是线上目标静默丢失）。
  */
 export function validatePack(pack: AppPack,
-  opts: { slots?: Record<string, unknown>; sources?: string[] } = {}): string[] {
+  opts: {
+    slots?: Record<string, unknown>; sources?: string[];
+    /**
+     * L2 脚本（`flow(ctx)`）没有静态旅程：步骤在运行期由脚本产生。
+     * 打开它只跳过"空旅程"与"web 不变量需要浏览器步"这两条**结构性**检查，
+     * 其余（信号/hint/命令/槽位/数据源/device/policy）照旧——步骤级校验发生在
+     * 每次 `ctx.step` 调用（同一套 `PlanningRules`/`validateCommands`）。
+     */
+    allowEmptyJourney?: boolean;
+  } = {}): string[] {
   const p: string[] = [];
   if (!isDict(pack)) return ["pack must be a JSON object"];
   for (const k of Object.keys(pack)) {
@@ -647,8 +656,9 @@ export function validatePack(pack: AppPack,
     p.push("journey must be a list of steps");
     return p;
   }
-  if (pack.journey.length === 0 && pack.probe === undefined) {
+  if (pack.journey.length === 0 && pack.probe === undefined && !opts.allowEmptyJourney) {
     // 空旅程只有一个合法理由：这是**测量型应用**（只声明探针集，没有要跑的旅程）。
+    // L2 脚本（flow 模式）是第二个理由：步骤在运行期产生（见 allowEmptyJourney）。
     p.push("journey must be a non-empty list of steps (or declare a probe set)");
     return p;
   }
@@ -959,7 +969,7 @@ export function validatePack(pack: AppPack,
   // web 不变量需要浏览器步（它们在浏览器结束态上求值）；进程族探针不需要页面。
   const webInvariants = (pack.invariants ?? []).filter((inv) => isDict(inv)
     && (inv["adapter"] === undefined || inv["adapter"] === null || inv["adapter"] === "web"));
-  if (webInvariants.length > 0
+  if (webInvariants.length > 0 && !opts.allowEmptyJourney
     && !pack.journey.some((e) => stepKind((e["role"] ? { ...(roles[String(e["role"])] ?? {}), ...e } : e) as Record<string, unknown>) === "browser")) {
     p.push("web invariants need at least one browser step (they are evaluated on the browser end state); "
       + "process invariants can run without a browser");

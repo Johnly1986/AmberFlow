@@ -18,6 +18,9 @@ import { REPO } from "../flow/flow.ts";
 import { appDirs, loadPack, type AppPack } from "./app-pack.ts";
 import { validateApp } from "./cross-ref.ts";
 import { createKit, type Kit } from "./kit.ts";
+import { StopError, type Ctx } from "./ctx.ts";
+import { createDryCtx } from "./ctx-dry.ts";
+import { finishTrace, inputsSha256, newTrace, type AppTrace } from "./trace.ts";
 
 /** 脚本文件名（按优先级）。`.ts` 靠 Node 22.6+ 的 strip-types 解释，仍不进项目编译。 */
 export const SCRIPT_FILENAMES = ["app.mjs", "app.js", "app.ts"] as const;
@@ -50,11 +53,17 @@ export interface ScriptDraft {
 
 export interface ScriptModule {
   meta?: (kit: Kit) => ScriptMeta;
+  /** L1：声明式应用（`data` + `exec`）。与 `flow` 二选一。 */
   app?: (kit: Kit) => ScriptDraft;
+  /** L2：运行期控制流。提供它 = 脚本接管走向（步骤在运行期产生）。 */
+  flow?: (ctx: Ctx) => Promise<unknown>;
 }
 
 export interface LoadedScriptApp {
   pack: AppPack;
+  mode: "declarative" | "flow";
+  /** L2 的入口（declarative 模式下为 undefined）。 */
+  flow?: (ctx: Ctx) => Promise<unknown>;
   scriptPath: string;
   /** 脚本源字节的 sha256（运行结果里记账用；与 `plan_sha256` 一起构成"跑了哪一版"）。 */
   scriptSha256: string;
@@ -179,24 +188,32 @@ export async function loadScriptApp(idOrPath: string): Promise<LoadedScriptApp> 
   const source = fs.readFileSync(scriptPath);
   const mod = (await import(pathToFileURL(scriptPath).href)) as ScriptModule;
   if (typeof mod.meta !== "function") throw new Error(`app script ${scriptPath}: missing "export const meta = (kit) => ({...})"`);
-  if (typeof mod.app !== "function") throw new Error(`app script ${scriptPath}: missing "export const app = (kit) => ({...})"`);
+  const mode: "declarative" | "flow" = typeof mod.flow === "function" ? "flow" : "declarative";
+  if (mode === "declarative" && typeof mod.app !== "function") {
+    throw new Error(`app script ${scriptPath}: needs either "export const app = (kit) => ({...})" (declarative) `
+      + `or "export default async function flow(ctx) {...}" / "export const flow = async (ctx) => {...}"`);
+  }
 
   const kit = createKit();
   let meta: ScriptMeta;
-  let draft: ScriptDraft;
+  let draft: ScriptDraft = { exec: [] };
   try {
     meta = mod.meta(kit);
-    draft = mod.app(kit);
+    if (mode === "declarative") draft = mod.app!(kit);
   } catch (e) {
     throw new Error(`app script ${scriptPath}: building the declarative app threw: ${e instanceof Error ? e.message : String(e)}`);
   }
   const pack = lowerScriptApp(meta, draft);
-  const problems = validateApp(pack);
+  // flow 模式没有静态旅程：跳过"空旅程/web 不变量需要浏览器步"两条结构性检查；
+  // 步骤级校验发生在每次 ctx 调用（真实执行器/同一套 PlanningRules）。
+  const problems = validateApp(pack, mode === "flow" ? { allowEmptyJourney: true } : {});
   if (problems.length) {
     throw new Error(`app script ${scriptPath} is invalid:\n  - ${problems.join("\n  - ")}`);
   }
   return {
     pack,
+    mode,
+    ...(mode === "flow" ? { flow: mod.flow } : {}),
     scriptPath,
     scriptSha256: sha256(source),
     planSha256: sha256(canonicalJson(pack)),
@@ -210,15 +227,72 @@ export async function loadScriptApp(idOrPath: string): Promise<LoadedScriptApp> 
  * 注意：脚本存在但坏了 → 抛错（不静默回退）。
  */
 export async function loadApp(idOrPath: string): Promise<AppPack> {
+  return (await resolveApp(idOrPath)).pack;
+}
+
+/**
+ * 拿一个应用的**完整信息**（脚本时带上 `flow` 与两个 hash）；没有脚本则退回旧 `pack.json`。
+ * 驱动（`runScriptApp`）需要在 `pack` 之外拿到 `flow` 与版本指纹，所以入口是它而不是 `loadApp`。
+ */
+export async function resolveApp(idOrPath: string): Promise<{ pack: AppPack; script: LoadedScriptApp | null }> {
   if (!scriptsDisabled()) {
     const scriptPath = resolveScriptPath(idOrPath);
-    if (scriptPath !== null) return (await loadScriptApp(scriptPath)).pack;
+    if (scriptPath !== null) {
+      const script = await loadScriptApp(scriptPath);
+      return { pack: script.pack, script };
+    }
   }
-  return loadPack(idOrPath);
+  return { pack: loadPack(idOrPath), script: null };
 }
 
 /** 仓库内脚本的相对路径（记账/报告用；用户作用域返回绝对路径）。 */
 export function scriptDisplayPath(scriptPath: string): string {
   const rel = path.relative(REPO, scriptPath);
   return rel.startsWith("..") ? scriptPath : rel;
+}
+
+/**
+ * **dry 跑一遍 flow**：不动作、不开浏览器，但把每次调用都校验一遍并记进 trace。
+ * 这是 `amber apps check/explain` 对 L2 脚本的落法（与真实运行同一套调用序列）。
+ *
+ * 返回 `problems`（空 = 通过）：dry 的成功**不代表**页面状态会成立，它证明的是
+ * "脚本的调用序列在语法/命令/信号层面是合法的"。
+ */
+export async function dryRunFlow(loaded: LoadedScriptApp, opts: {
+  slots?: Record<string, string>;
+  outDir?: string;
+  runId?: string;
+} = {}): Promise<{ trace: AppTrace; problems: string[] }> {
+  if (loaded.mode !== "flow" || loaded.flow === undefined) {
+    throw new Error(`app ${loaded.pack.id}: dryRunFlow needs a flow(ctx) script (got ${loaded.mode})`);
+  }
+  const slots: Record<string, string> = {
+    ...((loaded.pack.slots ?? {}) as Record<string, string>),
+    ...(opts.slots ?? {}),
+  };
+  const trace = newTrace({
+    app: loaded.pack.id,
+    script_sha256: loaded.scriptSha256,
+    inputs_sha256: inputsSha256(slots, (loaded.pack.hosts ?? []) as string[]),
+  });
+  const slotKeys = new Set<string>([
+    ...Object.keys(slots),
+    ...((loaded.pack.required_slots ?? []) as string[]),
+  ]);
+  const ctx = createDryCtx({
+    pack: loaded.pack as never,
+    slots,
+    runtime: { outDir: opts.outDir ?? "(dry)", runId: opts.runId ?? "(dry)", today: process.env.LAYA_TODAY ?? "" },
+    trace,
+    slotKeys,
+  });
+  const problems: string[] = [];
+  try {
+    await loaded.flow(ctx);
+  } catch (e) {
+    if (e instanceof StopError) problems.push(`${e.code}: ${e.message}`);
+    else problems.push(`flow threw: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  finishTrace(trace, { done: problems.length === 0 });
+  return { trace, problems };
 }

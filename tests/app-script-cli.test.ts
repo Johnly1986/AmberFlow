@@ -17,6 +17,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "amberflow-app-cli-"));
 afterAll(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 const CAMERA = path.join(REPO, "tests/fixtures/scripts/camera-entry.mjs");
+const FLOW = path.join(REPO, "tests/fixtures/scripts/flow-demo-app.mjs");
 const CLI_REPORT = path.join(REPO, "tests/fixtures/scripts/cli-report.mjs");
 
 describe("amber apps check：脚本可直接校验", () => {
@@ -82,5 +83,34 @@ describe("amber apps emit：IR 快照（带血统）", () => {
 
     const check = await cli(["apps", "check", out]);
     expect(check.code).toBe(0);
+  });
+});
+
+describe("L2 flow 脚本：check / explain 走 dry（不动作）", () => {
+  it("apps check <flow 脚本> → exit 0（dry 跑一遍调用序列）", async () => {
+    const r = await cli(["apps", "check", FLOW]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("flow-demo-app");
+  });
+
+  it("apps explain <flow 脚本> --json：mode=flow，事件里能看到 open/step/done", async () => {
+    const r = await cli(["apps", "explain", FLOW, "--json"]);
+    const env = r.json();
+    expect(env.data.mode).toBe("flow");
+    expect(env.data.problems).toEqual([]);
+    const calls = (env.data.events as Array<{ call: string }>).map((e) => e.call);
+    expect(calls).toContain("open");
+    expect(calls.filter((c) => c === "step")).toHaveLength(4);
+    expect(calls[calls.length - 1]).toBe("done");
+    expect(env.data.invariants).toHaveLength(1);
+  });
+
+  it("apps explain <坏 flow 脚本> → exit 2，problems 点名（不假绿）", async () => {
+    const bad = path.join(tmp, "bad-flow.mjs");
+    fs.writeFileSync(bad, `export const meta = () => ({ id: "bad-flow", label: "x", goal: "g", hosts: [] });
+export async function flow(ctx) { await ctx.step("s", { act: ctx.hint("#a"), done: { magic: 1 } }); }`, "utf-8");
+    const r = await cli(["apps", "explain", bad, "--json"]);
+    expect(r.code).toBe(2);
+    expect(JSON.stringify(r.json().data.problems)).toMatch(/unknown signal op 'magic'/);
   });
 });

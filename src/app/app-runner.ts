@@ -56,7 +56,12 @@ import {
 } from "./app-pack.ts";
 import { getAppAdapter, substituteDatasetPlaceholders, type AdapterRunContext } from "./app-adapters.ts";
 import { validateApp } from "./cross-ref.ts";
-import { loadApp } from "./app-script.ts";
+import { loadApp, resolveApp, type LoadedScriptApp } from "./app-script.ts";
+import { StopError, createCtx } from "./ctx.ts";
+import { createReplayCtx } from "./ctx-replay.ts";
+import {
+  finishTrace, inputsSha256, newTrace, readTrace, replayCompatibility, writeTrace, type AppTrace,
+} from "./trace.ts";
 import { DatasetStore, type DatasetEntry } from "../engine/dataset.ts";
 import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "../engine/plan.ts";
 
@@ -436,6 +441,19 @@ export interface AppRunResult {
     /** `captureStateView: true` 时这一步**开始时**的页面状态（缺字段 = 没开，缺省等价纪律）。 */
     state_view?: StepStateView;
   }>;
+  /**
+   * L2 脚本应用的运行账（缺字段 = 旧 `pack.json` 应用，产物逐字节不变）。
+   * 脚本应用的"完成了什么"在**轨迹**里，不在静态计划里——这三样是审计最小集。
+   */
+  script?: {
+    mode: "flow";
+    script_path: string;
+    script_sha256: string;
+    plan_sha256: string;
+    trace_path?: string;
+    stop_code?: string;
+    stop_reason?: string;
+  };
 }
 
 /** 跑一个工具步：干跑（若声明）→ 确认（若不可逆）→ apply（按幂等性决定重试）。 */
@@ -1126,9 +1144,11 @@ export function appReportMarkdown(r: AppRunResult): string {
 const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--out DIR]
                   [--model ID] [--provider NAME] [--ablate stub|rules-only] [--force-hints off]
                   [--conf-floor N] [--no-sources] [--confirm-safe] [--headful] [--allow-dangerous]
-                  [--tiered-hint] [--learn-hints | --hint-memory FILE] [--quiet]
+                  [--tiered-hint] [--learn-hints | --hint-memory FILE]
+                  [--emit-trace FILE] [--replay FILE] [--quiet]
 
 按 apps/<app>/pack.json 跑一条完整应用链路：数据腿 → 浏览器步/工具步 → 结束状态不变量
+应用也可以是隔离脚本（app.mjs / app.ts）：flow(ctx) 接管走向，运行时仍由引擎执行每一步
 --model ID     换 laya checkpoint（与 bench 同名同义；换决策源用 --provider）
 --ablate       消融臂：stub = 脚本桩，rules-only = 规则档（与 bench 同一取值集合）
 --conf-floor N 置信度闸门刻度（0<N≤1）：换 provider（score_kind 不同）时缺省 0.25 不再成立，
@@ -1136,6 +1156,8 @@ const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [-
 --tiered-hint  P1 实验开关：hint 档内歧义向模型问更小的问题（默认关 = 行为逐字节不变）
 --learn-hints  R2 学习环：模型选对的步变成规则（sidecar，永不写进被审计的包；authored 恒优先）
                落点默认 $AMBERFLOW_HOME/hint-memory/<app>.json，--hint-memory FILE 显式指定
+--emit-trace F 脚本应用：把本次执行轨迹（app/script/inputs 三个 sha + 逐次 ctx 调用）写成 F
+--replay F     脚本应用：按 F 里的轨迹重放（不重新决策；脚本版本或输入槽位不一致直接拒跑）
 
 数据腿的结果按包的 source_slots 回写槽位（观测值 > 包里的默认值；--slot 仍最优先）；
 --no-sources 时不回写——那时只由包默认值与 --slot 提供值。`;
@@ -1146,6 +1168,173 @@ const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [-
  */
 export function appsOutDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.AMBERFLOW_APPS_OUT ?? path.join(os.tmpdir(), "amberflow-apps");
+}
+
+
+/**
+ * L2：跑一个 `flow(ctx)` 脚本应用。与 `runApp` 并列的**第二条驱动**——
+ * 旧 JSON 应用完全不走这里（存量零迁移），运行时仍然只认数据与证据面。
+ *
+ * 复用同一批缝：`browserSession` / `BrowserMiddleware` / `runSource` / `checkSignal`。
+ * 脚本负责控制流；一步之内的一切仍归引擎（见 `src/app/ctx.ts` 的注释）。
+ */
+export interface ScriptRunOptions extends AppRunOptions {
+  maxSteps?: number;
+  /** 把本次执行轨迹写成 JSON（审计/交接）。 */
+  emitTrace?: string;
+  /** 按一条已记录的轨迹重放（不重新决策；版本/输入不一致直接拒跑）。 */
+  replayTrace?: string;
+}
+
+export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptions = {}): Promise<AppRunResult> {
+  if (loaded.mode !== "flow" || typeof loaded.flow !== "function") {
+    throw new Error(`app ${loaded.pack.id}: runScriptApp needs a flow(ctx) script (got ${loaded.mode})`);
+  }
+  const pack = loaded.pack;
+  const t0 = Date.now();
+  const slots: Record<string, unknown> = { ...(pack.slots ?? {}), ...(opts.slots ?? {}) };
+  const planPath = opts.planPath ?? path.join(os.tmpdir(), "amberflow-apps", `${pack.id}-plan.json`);
+  const outDir = opts.outDir ?? path.dirname(planPath);
+  const runId = opts.runId ?? `${Date.now().toString(36)}-${process.pid}`;
+  const inputs = inputsSha256(slots, (pack.hosts ?? []) as string[]);
+  const trace = newTrace({ app: pack.id, script_sha256: loaded.scriptSha256, inputs_sha256: inputs });
+  const verbose = opts.verbose !== false;
+
+  let ok = false;
+  let stopCode: string | undefined;
+  let stopReason: string | undefined;
+  let invariants: AppInvariantResult[] = [];
+
+  if (opts.replayTrace !== undefined) {
+    const recorded = readTrace(opts.replayTrace);
+    const problems = replayCompatibility(recorded, {
+      app: pack.id, script_sha256: loaded.scriptSha256, inputs_sha256: inputs,
+    });
+    if (problems.length) throw new Error(`replay refused:\n  - ${problems.join("\n  - ")}`);
+    const { ctx, remaining } = createReplayCtx({
+      pack: pack as never, slots: slots as Record<string, string>,
+      runtime: { outDir, runId, today: process.env.LAYA_TODAY ?? "" },
+      trace: recorded, maxSteps: opts.maxSteps,
+    });
+    try {
+      await loaded.flow(ctx);
+      ok = true;
+      if (remaining() > 0) throw new StopError("trace_mismatch", `replay: script stopped but ${remaining()} recorded event(s) were not consumed`);
+    } catch (e) {
+      if (e instanceof StopError) { stopCode = e.code; stopReason = e.message; }
+      else throw e;
+    }
+    invariants = invariantsFromTrace(recorded, pack);
+  } else {
+    preflightConfig(opts);
+    for (const n of pack.sources ?? []) loadSource(String(n));
+    const holder: { session: BrowserSession | null } = { session: null };
+    const ensureSession = async (): Promise<BrowserSession> => {
+      if (holder.session === null) {
+        const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
+        holder.session = opts.sessionFactory !== undefined
+          ? await opts.sessionFactory()
+          : await browserSession(opts.headful !== true, device);
+      }
+      return holder.session;
+    };
+    let mw: BrowserMiddleware | null = null;
+    const getMw = (): BrowserMiddleware => {
+      if (mw === null) {
+        mw = new BrowserMiddleware({
+          modelId: pack.model ?? "english",
+          auditor: new MockAuditor(),
+          hosts: (pack.hosts ?? null) as string[] | null,
+          maxSteps: 8,
+          confFloor: 0.25,
+          riskyThreshold: 0.6,
+          doneThreshold: 0.5,
+          confirmFn: opts.confirmSafe
+            ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
+            : () => true,
+        });
+      }
+      return mw;
+    };
+    const ctx = createCtx({
+      pack: pack as never,
+      slots: slots as Record<string, string>,
+      runtime: { outDir, runId, today: process.env.LAYA_TODAY ?? "" },
+      ensureSession, mw: getMw, trace,
+      ...(opts.maxSteps === undefined ? {} : { maxSteps: opts.maxSteps }),
+      verbose,
+    });
+    try {
+      await loaded.flow(ctx);
+      ok = true;
+    } catch (e) {
+      if (e instanceof StopError) { stopCode = e.code; stopReason = e.message; }
+      else throw e;
+    } finally {
+      if (holder.session !== null) { try { await holder.session.close(); } catch { /* 关会话失败不该掩盖运行结果 */ } }
+    }
+    invariants = invariantsFromTrace(trace, pack ?? {});
+  }
+
+  finishTrace(trace, {
+    done: ok,
+    ...(stopCode === undefined ? {} : { stop_code: stopCode }),
+    ...(stopReason === undefined ? {} : { stop_reason: stopReason }),
+    invariants_ok: invariants.every((i) => i.held),
+  });
+  const tracePath = opts.emitTrace === undefined ? undefined : writeTrace(opts.emitTrace, trace);
+  if (verbose) {
+    console.log(`=== app ${pack.id} (script/flow) ===`);
+    for (const ev of trace.events) {
+      if (ev.call === "log") continue;
+      console.log(`  ${String(ev.i).padStart(2, " ")}. ${ev.call}${ev.desc ? ` ${ev.desc}` : ""}${ev.url ? ` → ${ev.url}` : ""}`
+        + `${ev.ok === false ? ` [${ev.stop_code ?? "failed"}]` : ""}`);
+    }
+  }
+
+  const result: AppRunResult = {
+    app: pack.id,
+    label: pack.label ?? pack.id,
+    goal: pack.goal,
+    pack_path: loaded.scriptPath,
+    plan_path: planPath,
+    roles_used: [],
+    slots,
+    completed: `${trace.events.filter((e) => e.call === "step" || e.call === "arrive").length} step(s) via flow(ctx)`,
+    subgoals: [],
+    tool_steps: [],
+    invariants,
+    sources: [],
+    ok,
+    secs: (Date.now() - t0) / 1000,
+    script: {
+      mode: "flow",
+      script_path: loaded.scriptPath,
+      script_sha256: loaded.scriptSha256,
+      plan_sha256: loaded.planSha256,
+      ...(tracePath === undefined ? {} : { trace_path: tracePath }),
+      ...(stopCode === undefined ? {} : { stop_code: stopCode }),
+      ...(stopReason === undefined ? {} : { stop_reason: stopReason }),
+    },
+  };
+  return result;
+}
+
+/** 从 trace 的 `done` 事件里取不变量结果（脚本应用的验收事实）。 */
+function invariantsFromTrace(
+  trace: AppTrace,
+  pack: { invariants?: ReadonlyArray<{ id?: string; desc?: string }> },
+): AppInvariantResult[] {
+  const done = [...trace.events].reverse().find((e) => e.call === "done");
+  const raw = done !== undefined && typeof done.result === "object" && done.result !== null
+    ? (done.result as { invariants?: unknown }).invariants
+    : undefined;
+  const details = Array.isArray(raw) ? raw as Array<{ id?: unknown; held?: unknown }> : [];
+  return (pack.invariants ?? []).map((inv) => {
+    const id = String(inv.id ?? "?");
+    const hit = details.find((d) => String(d.id ?? "?") === id);
+    return { id, desc: String(inv.desc ?? ""), held: hit?.held === true };
+  });
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
@@ -1181,8 +1370,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   let pack: AppPack;
+  let scriptApp: LoadedScriptApp | null = null;
   try {
-    pack = await loadApp(String(cliString(v, "app")));
+    const resolved = await resolveApp(String(cliString(v, "app")));
+    pack = resolved.pack;
+    scriptApp = resolved.script;
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     return 2;
@@ -1335,7 +1527,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   let result: AppRunResult;
   try {
-    result = await runApp(pack, {
+    result = scriptApp !== null && scriptApp.flow !== undefined
+      ? await runScriptApp(scriptApp, {
+          slots, outDir, verbose: !cliBool(v, "quiet"),
+          sources: !cliBool(v, "no-sources"), confirmSafe: cliBool(v, "confirm-safe"),
+          headful: cliBool(v, "headful"), allowDangerous: cliBool(v, "allow-dangerous"),
+        })
+      : await runApp(pack, {
       slots, planPath, outDir, verbose: !cliBool(v, "quiet"),
       sources: !cliBool(v, "no-sources"), confirmSafe: cliBool(v, "confirm-safe"), headful: cliBool(v, "headful"),
       allowDangerous: cliBool(v, "allow-dangerous"),

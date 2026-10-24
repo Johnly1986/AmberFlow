@@ -3,7 +3,9 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { APPS_DIR, listPacks, loadPack, type AppPack } from "../../app/app-pack.ts";
 import { validateApp } from "../../app/cross-ref.ts";
-import { loadApp, loadScriptApp, resolveScriptPath, scriptDisplayPath } from "../../app/app-script.ts";
+import {
+  dryRunFlow, loadApp, loadScriptApp, resolveApp, resolveScriptPath, scriptDisplayPath,
+} from "../../app/app-script.ts";
 import { userAppsDir } from "../../app/amberflow-home.ts";
 import type { CliContext } from "../context.ts";
 import { say, emitJson } from "../context.ts";
@@ -239,8 +241,13 @@ async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
   const results: Array<{ app: string; path: string; problems: string[] }> = [];
   for (const t of targets) {
     try {
-      const pack = await loadApp(t.path ?? t.id);
-      const problems = validateApp(pack);
+      const resolved = await resolveApp(t.path ?? t.id);
+      const pack = resolved.pack;
+      const problems = validateApp(pack, resolved.script?.mode === "flow" ? { allowEmptyJourney: true } : {});
+      if (resolved.script !== null && resolved.script.mode === "flow") {
+        const dry = await dryRunFlow(resolved.script);
+        problems.push(...dry.problems);
+      }
       results.push({ app: pack.id, path: pack._path ?? t.path ?? t.id, problems });
     } catch (err) {
       results.push({ app: t.id, path: t.path ?? t.id, problems: [err instanceof Error ? err.message : String(err)] });
@@ -338,9 +345,45 @@ async function appsExplain(args: string[], ctx: CliContext): Promise<number> {
   const target = parsed.positionals[0];
   if (!target) throw usageError("apps explain 需要一个脚本路径或应用 id", { next: ["amber apps list"] });
   if (parsed.positionals.length > 1) throw usageError("apps explain 只接受一个应用");
-  const loaded = await loadScriptApp(target);
-  const pack = loaded.pack;
+  const resolved = await resolveApp(target);
+  const pack = resolved.pack;
+  const loaded = resolved.script ?? (await loadScriptApp(target));
   const invs = pack.invariants ?? [];
+  if (loaded.mode === "flow") {
+    // L2：步骤在运行期产生——explain 就是"dry 跑一遍，把调用序列渲染成人话"。
+    const dry = await dryRunFlow(loaded);
+    const rows = dry.trace.events.map((ev) => ({
+      i: ev.i, call: ev.call, desc: ev.desc, url: ev.url,
+      ok: ev.ok === undefined ? null : ev.ok,
+      ...(ev.stop_code === undefined ? {} : { stop_code: ev.stop_code }),
+    }));
+    if (jsonWanted(ctx, parsed.values)) {
+      emitJson(ctx, successEnvelope("apps explain", {
+        app: pack.id, goal: pack.goal, script: scriptDisplayPath(loaded.scriptPath),
+        mode: "flow", plan_sha256: loaded.planSha256, problems: dry.problems, events: rows,
+        invariants: invs.map((inv) => ({ id: inv.id, desc: inv.desc, done: renderSignal(inv.signal) })),
+      }, { exitCode: dry.problems.length ? 2 : 0, next: dry.problems.length ? ["amber apps check <脚本>"] : [`amber run ${pack.id}`] }));
+      return dry.problems.length ? 2 : 0;
+    }
+    say(ctx, `${pack.id} — ${pack.goal}（flow 脚本：dry 调用序列）`);
+    say(ctx, "");
+    for (const ev of rows) {
+      const head = `${String(ev.i).padStart(2, " ")}. [${ev.call}] ${ev.desc ?? ""}`;
+      say(ctx, `${head}${ev.url ? ` → ${ev.url}` : ""}${ev.ok === false ? `  ✗ ${ev.stop_code ?? "failed"}` : ""}`);
+    }
+    if (invs.length) {
+      say(ctx, "");
+      say(ctx, "结束态不变量：");
+      for (const inv of invs) say(ctx, `  - ${inv.id}${inv.desc ? `：${inv.desc}` : ""}`);
+    }
+    if (dry.problems.length) {
+      say(ctx, "");
+      for (const p of dry.problems) say(ctx, `✗ ${p}`);
+    }
+    say(ctx, "");
+    say(ctx, `脚本：${scriptDisplayPath(loaded.scriptPath)}  plan_sha256=${loaded.planSha256.slice(0, 16)}…`);
+    return dry.problems.length ? 2 : 0;
+  }
   const steps = pack.journey.map((entry, i) => {
     const e = entry as Record<string, unknown>;
     const isTool = typeof e["source"] === "string";

@@ -141,6 +141,10 @@ export const APP_ONLY_OPTIONS: CliOptions = {
   "confirm-safe": { type: "boolean" },
   "allow-dangerous": { type: "boolean" },
   "tiered-hint": { type: "boolean" },
+  /** L2 脚本应用：把本次执行轨迹写成 JSON（审计/交接）。 */
+  "emit-trace": { type: "string" },
+  /** L2 脚本应用：按一条已记录轨迹重放（版本/输入不一致直接拒跑）。 */
+  replay: { type: "string" },
 };
 
 /** bench 的旧名（升级窗口）：**只认不列**——usage 里只出现对齐后的名字。 */

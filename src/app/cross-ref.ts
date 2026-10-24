@@ -36,6 +36,8 @@ export function appSourceNames(pack: AppPack): string[] {
 
 export interface ValidateAppOptions {
   slots?: Record<string, unknown>;
+  /** L2 flow 脚本没有静态旅程（见 `validatePack` 的 allowEmptyJourney）。 */
+  allowEmptyJourney?: boolean;
   /** 测试/工具可指定数据源目录（与 `loadSource(name, dirs)` 同口径；缺省 = 发现制默认根）。 */
   sourceDirs?: string[] | null;
 }
@@ -47,7 +49,10 @@ export interface ValidateAppOptions {
  * `validateSource` 报，统一加 `source "<name>":` 前缀，让作者一眼知道是哪个文件。
  */
 export function validateApp(pack: AppPack, opts: ValidateAppOptions = {}): string[] {
-  const problems = validatePack(pack, opts.slots === undefined ? {} : { slots: opts.slots });
+  const problems = validatePack(pack, {
+    ...(opts.slots === undefined ? {} : { slots: opts.slots }),
+    ...(opts.allowEmptyJourney === true ? { allowEmptyJourney: true } : {}),
+  });
   for (const name of appSourceNames(pack)) {
     let src: ReturnType<typeof loadSource>;
     try {
