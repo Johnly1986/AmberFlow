@@ -325,9 +325,31 @@ npm run verify && bash bench/smoke.sh        # 先确认基线是绿的
 | **L3.2** ✅ 完成（2026-10-25，`c698bcd`） | 22 个 `apps/<id>/app.mjs` 生成并提交（带 `@amberflow:declarative-data` 标记）；`apps:matrix` 增加 `script`/`logic` 列（数据脚本不计代码行）；`apps:migrate --all --check` 进 smoke（2b2） | 22/22 0 diff；`verify` exit 0（1600+ 测试）；矩阵 22 declarative / 0 code / 0 logic / 0 leaks / 0 debt |
 | **L3.3** ✅ 并入 L3.4（2026-10-25） | 不需要新增 `AMBERFLOW_JSON_APPS`：`loadPack` 改为**同步解析声明式数据脚本**，所以"默认即脚本"——旧的 `AMBERFLOW_NO_SCRIPTS=1` 仍保留原语义（回退到 `pack.json`，若还在） | `apps:gen --check` 8/8；`apps list/show/path` 全部指向 `app.mjs` |
 | **L3.4** ✅ 完成（2026-10-25） | 删除 22 个 `apps/*/pack.json`；新增 `src/app/declarative.ts`（标记 + 同步解析 `META/DATA/JOURNEY` + 唯一 lower/生成器）；`loadPack`/`appDirs`/`listPacks`/`probe-set`/`apps:matrix`/`arch-metrics` 改数据文件发现；`learn`/`apps-induce` 改**写** `app.mjs`；`apps:gen` 直接生成 `app.mjs`；smoke 2b2 改**逐字节**可重放校验 | 全量测试绿（107 文件 / 1607 条）；六层对拍 67/67 **未重冻**（输出逐字节相同）；`apps:migrate --all --check` 22/22 字节级 |
-| **L3.5** | 文档收口（README/ARCHITECTURE/CLAUDE.md 的身份描述）+ 全量验证 | `verify` + `smoke` + `apps:suite` + 对拍 + 工作树干净 |
+| **L3.5** ✅ 完成（2026-10-25，`926cd7d`） | 文档收口：README / apps/README / apps/INVENTORY / CLI_REDESIGN / CLAUDE.md / 本计划都改为「声明式 app.mjs」身份描述 | `bash bench/smoke.sh` → **SMOKE: PASS**（typecheck + 全部测试 + 对拍 67/67 逐字节 + apps:gen 8/8 + migrate 22/22 + probes 3/3 + nominate 一致） |
 
 **关键杠杆**：L3.1 的 0-diff 保证"脚本展开 == 今天的计划"，因此六层对拍的**语料不必重冻**；
 只有 L3.4 出现非预期差异时才启用一次性重冻协议（一次性/显式/单独提交）。
 **风险**：`tests/app-packs-authored.test.ts`（pack ↔ oracle 逐字段）、`tools/spec-to-pack.ts`（spec → pack）、
 `tools/apps_matrix.ts`（声明行统计）都要在 L3.4 一起改；它们各自有独立验收，不能"顺手改绿"。
+
+---
+
+## 16. L3 收口（2026-10-25）
+
+**L3 的目标已达成**：应用格式**不再有 JSON 运行期/作者面** —— 22 个 `apps/*/pack.json` 已删除，
+`apps/<id>/app.mjs`（声明式数据脚本）是唯一格式；`npm run apps` / `apps:check` / `apps:matrix` /
+`apps:gen` / `learn` / `apps:induce` / 探针基线全部走它。带控制流的 `flow(ctx)` 脚本是 L2 的升级面。
+
+**关键证据链**：
+- `src/app/declarative.ts` 的**同步解析**（`META/DATA/JOURNEY` 固定形状 + `@amberflow:declarative-data` 标记）
+  是让 39 处同步调用点零改动的支点；
+- `apps:migrate --all --check` 22/22 **逐字节可重放**（smoke 2b2，手改会被抓）；
+- `apps:gen --check` 8/8（spec → 脚本展开一致）；
+- 六层对拍 **67/67 逐字节一致，冻结语料未重冻** —— 因为脚本展开与今天的计划相同（重冻协议未触发，
+  这就是当初把"0 diff"设为 L3.1 闸门的用意）；
+- `bash bench/smoke.sh` → **SMOKE: PASS**。
+
+**L3.4 的有意边界（记录在案，不是遗漏）**：`apps/<id>/flow.json`（语义流模板）与 `transfer/specs/*.json`
+（transfer 生成器/对拍输入）**没有删**。它们不是"应用格式"：前者是独立的 SemanticFlow 子系统（`npm run
+semantic`）的输入，后者是 transfer 生成器与冻结对拍语料的输入；删掉需要重写这两个子系统，不属于
+"应用格式去 JSON"的范围。若要把它们也迁到脚本，应作为独立立项（S6+），并有各自的验收台。
