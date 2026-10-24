@@ -1,0 +1,83 @@
+// @amberflow:declarative-data —— 本文件是**数据**（迁移生成），不是逻辑：
+//   应用目录仍受"0 行逻辑代码"约束；只有带这个标记的文件允许出现在 apps/<id>/ 下。
+// 由 `npm run apps:migrate -- --app checkin-binding --write` 生成；改来源再重新生成，不要手改。
+// 迁移口径：脚本的 meta()/app() 只是把 pack.json 的字段逐项搬运（含 roles/probe/invariants/journey），
+// 不含任何判断；`apps:migrate --all --check` 用 expandPack 逐字段对照来源包。
+const META = {
+  "id": "checkin-binding",
+  "label": "P3 数据槽层示范：一个子目标里「select 具名绑定 + 确认」（候选来自页面，规则是声明的）",
+  "goal": "在示例酒店页选择入住日期并确认",
+  "hosts": [],
+  "slots": {
+    "checkin": "2026-10-13"
+  },
+  "notes": [
+    "这是 P3（数据槽层，src/bindings.ts）的示范包：`value: {from:'option', key:'checkin', match:'value'}` 是**声明式绑定**——值来自计划数据袋，候选来自当次观察到的 `<select>` option，匹配规则必须声明。",
+    "夹具 testpages/checkin.html 刻意让机器值（`2026-10-13`）与人读标签（`10月13日 周二`）不同：旧世界的 `_slotValue` 只有子串猜测 + label→value 两候选回退，而这里两条规则各走各的档（match:value / match:label）。",
+    "规则命不中 ⇒ 结构化 `needs_value` 停（绝不挑最近的一天），页面一个字都不改——负例钉在 tests/bindings.test.ts。",
+    "命令闭集（P2）让『选中 + 确认』待在同一个子目标里；参数绑定（P3）让这次选中不需要任何模型判断：全程 rule:match、零模型选择提问。",
+    "`invariants` 里的 `{checkin}` 与 journey 里的同一套占位符规则（展开期替换）——断言必须比的是计划里那一天，不是字面量。",
+    "验收：`npm run apps -- --app checkin-binding` → 1/1 步、2/2 不变量。"
+  ],
+  "invariants": [
+    {
+      "id": "date-actually-selected",
+      "desc": "结束状态下 select 的真实值就是计划里那一天（不是页面上长得像的那一天）",
+      "signal": {
+        "css_value_equals": [
+          "[data-test=checkin]",
+          "{checkin}"
+        ]
+      }
+    },
+    {
+      "id": "no-unselected-banner",
+      "desc": "结束状态里没有「请先选择日期」——确认按钮那次点击真的带着值",
+      "signal": {
+        "not": {
+          "css_text_contains": [
+            "[data-test=summary]",
+            "请先选择"
+          ]
+        }
+      }
+    }
+  ],
+  "requiredSlots": [
+    "checkin"
+  ]
+};
+const DATA = {};
+const JOURNEY = [
+  {
+    "id": "pick-and-confirm",
+    "desc": "选择入住日期 {checkin} 并确认",
+    "start_url": "testpages/checkin.html",
+    "commands": [
+      {
+        "id": "pick-date",
+        "op": "select",
+        "target": "[data-test=checkin]",
+        "value": {
+          "from": "option",
+          "key": "checkin",
+          "match": "value"
+        }
+      },
+      {
+        "id": "confirm",
+        "op": "click",
+        "target": "[data-test=confirm]"
+      }
+    ],
+    "signal": {
+      "css_text_equals": [
+        "[data-test=summary]",
+        "入住 {checkin}"
+      ]
+    }
+  }
+];
+
+export const meta = () => META;
+export const app = () => ({ data: DATA, exec: JOURNEY });

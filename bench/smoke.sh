@@ -38,6 +38,10 @@ if [ "$fail" -eq 0 ]; then npm run --silent test || fail=1; fi
 run "2/3 六层跨实现对拍" npm run --silent test:parity
 # 生成的包必须与 spec 的展开一致（构造性质；改 spec 没重新生成、或手改了 journey，这里就红）
 run "2b 应用包与 spec 展开一致（apps:gen --check）" npm run --silent apps:gen -- --check --quiet
+# 2b2 L3.1：应用脚本必须与来源包**逐字段一致**（改包没重新迁移、或手改 app.mjs，这里就红）。
+#     与 2b 是同一类构造性质：源→产物由工具保证，不靠人复核。
+run "2b2 应用脚本与来源包一致（apps:migrate --all --check）" \
+  npm run --silent apps:migrate -- --all --check --quiet
 # 探针基线：包里的判决必须等于已入库探测记录（站点变了/有人手改包，都会在这里变红）
 run "2c 探针基线与探测记录一致（probes:baseline --check）" npm run --silent probes:baseline -- --check --quiet
 # 2d 提名实验台的冻结产物（S0 证据）：语料计数 + 规则/基线/枚举三臂 + 闭集/序必须与

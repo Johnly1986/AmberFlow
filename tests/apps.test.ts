@@ -165,9 +165,12 @@ describe("应用层度量：代码行与防泄漏", () => {
 });
 
 describe("应用包与数据源的位置约定", () => {
-  it("app 目录只放声明（JSON）与可选的 bin/，不放业务代码", () => {
+  it("app 目录只放声明（JSON + 迁移生成的**数据脚本**）与可选的 bin/，不放业务代码", () => {
     for (const dir of appDirs()) {
-      const stray = fs.readdirSync(dir).filter((f) => /\.(ts|js|mjs|cjs)$/.test(f));
+      // L3.2：`app.mjs` 允许存在，但必须是带 `@amberflow:declarative-data` 标记的迁移数据；
+      // 手写逻辑（无标记）仍然红——"应用是数据"这条纪律没被放松，只是数据也可以写成脚本。
+      const stray = fs.readdirSync(dir).filter((f) => /\.(ts|js|mjs|cjs)$/.test(f)
+        && !fs.readFileSync(path.join(dir, f), "utf-8").includes("@amberflow:declarative-data"));
       expect(stray, `${dir} 顶层不该有代码文件`).toEqual([]);
     }
   });

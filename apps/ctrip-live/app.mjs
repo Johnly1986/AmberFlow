@@ -1,0 +1,227 @@
+// @amberflow:declarative-data —— 本文件是**数据**（迁移生成），不是逻辑：
+//   应用目录仍受"0 行逻辑代码"约束；只有带这个标记的文件允许出现在 apps/<id>/ 下。
+// 由 `npm run apps:migrate -- --app ctrip-live --write` 生成；改来源再重新生成，不要手改。
+// 迁移口径：脚本的 meta()/app() 只是把 pack.json 的字段逐项搬运（含 roles/probe/invariants/journey），
+// 不含任何判断；`apps:migrate --all --check` 用 expandPack 逐字段对照来源包。
+const META = {
+  "id": "ctrip-live",
+  "label": "携程线上可达性探针（机票 / 酒店 / 手机模拟 / 区域域名 / DOM 抓取）",
+  "goal": "测量携程（及 Trip.com）在本环境到底能不能打开、能拿到什么真实数据，并把结论写成可复算的原始观测",
+  "hosts": [
+    "flights.ctrip.com",
+    "m.ctrip.com",
+    "www.ctrip.com",
+    "hotels.ctrip.com",
+    "passport.ctrip.com",
+    "www.trip.com",
+    "hk.trip.com",
+    "us.trip.com",
+    "sg.trip.com"
+  ],
+  "notes": [
+    "这份探针集原来写死在 src/live-probe.ts 与 src/live-capture.ts 里（矩阵的『债』那一栏）。搬进应用包后：驱动只剩『怎么测』，站点知识全在数据里，而且这些主机自动进入防泄漏门禁的覆盖范围。",
+    "`gate_text` 与 `block_text` 故意不合并：前者是 shape() 里那个已提交字段（只认风控品牌词），后者是 looksBlocked() 的正文特征表——合并会悄悄改变已提交测量字段的含义。",
+    "判决要引用的目标 id 通过 `roles` 声明（flight/hotel/api/trip…），驱动不再写死 id。",
+    "实测结论（已提交语料 ctrip/results/live_probe.json、live_capture/summary.json）：任何 UA/设备/区域组合都拿不到机票列表（432 风控），酒店页只 SSR 出名称/星级、价格在登录墙后。"
+  ],
+  "probe": {
+    "date": "2026-10-05",
+    "results_dir": "ctrip/results",
+    "home": {
+      "id": "home",
+      "label": "首页预热（拿 cookie，再点机票入口）",
+      "short": "www.ctrip.com",
+      "url": "https://www.ctrip.com/"
+    },
+    "http": [
+      {
+        "id": "flight_list_cn",
+        "label": "携程 PC 机票列表（昆明→北京 2026-10-05）",
+        "short": "flights.ctrip.com",
+        "url": "https://flights.ctrip.com/online/list/oneway-kmg-bjs?depdate={date}"
+      },
+      {
+        "id": "flight_mobile_cn",
+        "label": "携程手机版机票（KMG→BJS 2026-10-05）",
+        "short": "m.ctrip.com",
+        "url": "https://m.ctrip.com/html5/flight/swift/domestic/KMG/BJS/{date}"
+      },
+      {
+        "id": "flight_trip_com",
+        "label": "Trip.com 机票搜索（携程集团海外站）",
+        "short": "Trip.com",
+        "url": "https://www.trip.com/flights/showfarefirst?dcity=kmg&acity=bjs&ddate={date}&triptype=ow&class=y&quantity=1&locale=zh-CN&curr=CNY"
+      },
+      {
+        "id": "flight_api_retired",
+        "label": "老机票数据接口 /itinerary/api/12808/products",
+        "short": "flights.ctrip.com",
+        "url": "https://flights.ctrip.com/itinerary/api/12808/products"
+      },
+      {
+        "id": "hotel_list_cn",
+        "label": "携程 PC 酒店列表（北京 2026-10-05 入住）",
+        "short": "hotels.ctrip.com",
+        "url": "https://hotels.ctrip.com/hotels/list?city=1&checkin={date_slash}&checkout={checkout_slash}"
+      },
+      {
+        "id": "hotel_home_cn",
+        "label": "携程首页（酒店搜索入口）",
+        "short": "www.ctrip.com",
+        "url": "https://www.ctrip.com/"
+      }
+    ],
+    "browser": [
+      "flight_list_cn",
+      "flight_api_retired"
+    ],
+    "repeat": {
+      "id": "flight_mobile_cn",
+      "times": 5
+    },
+    "alts": [
+      {
+        "id": "itinerary-oneway",
+        "label": "行程页（单程）",
+        "short": "flights.ctrip.com",
+        "url": "https://flights.ctrip.com/itinerary/oneway/kmg-bjs?date={date}"
+      },
+      {
+        "id": "itinerary-sortbyprice",
+        "label": "行程页 + 按价格排序",
+        "short": "flights.ctrip.com",
+        "url": "https://flights.ctrip.com/itinerary/oneway/KMG-BJS?date={date}&sortByPrice=true"
+      },
+      {
+        "id": "lowestprice-channel",
+        "label": "低价频道",
+        "short": "flights.ctrip.com",
+        "url": "https://flights.ctrip.com/lowestprice/oneway-kmg-bjs"
+      },
+      {
+        "id": "mobile-lowestprice",
+        "label": "手机版低价页",
+        "short": "m.ctrip.com",
+        "url": "https://m.ctrip.com/html5/flight/lowestprice/KMG/BJS"
+      },
+      {
+        "id": "list-lowprice-param",
+        "label": "列表页 + lowprice 参数",
+        "short": "flights.ctrip.com",
+        "url": "https://flights.ctrip.com/online/list/oneway-kmg-bjs?depdate={date}&lowprice_value=1"
+      }
+    ],
+    "mobile": [
+      {
+        "id": "ctrip-mobile-flight",
+        "label": "手机版机票（iPhone / Android UA）",
+        "short": "m.ctrip.com",
+        "url": "https://m.ctrip.com/html5/flight/swift/domestic/KMG/BJS/{date}"
+      },
+      {
+        "id": "trip-hk-flight",
+        "label": "Trip.com 香港站",
+        "short": "hk.trip.com",
+        "url": "https://hk.trip.com/flights/showfarefirst?dcity=kmg&acity=bjs&ddate={date}&triptype=ow&class=y&quantity=1&locale=zh-HK&curr=CNY"
+      },
+      {
+        "id": "trip-us-flight",
+        "label": "Trip.com 美国站",
+        "short": "us.trip.com",
+        "url": "https://us.trip.com/flights/showfarefirst?dcity=kmg&acity=bjs&ddate={date}&triptype=ow&class=y&quantity=1&locale=en-US&curr=CNY"
+      },
+      {
+        "id": "trip-sg-flight",
+        "label": "Trip.com 新加坡站",
+        "short": "sg.trip.com",
+        "url": "https://sg.trip.com/flights/showfarefirst?dcity=kmg&acity=bjs&ddate={date}&triptype=ow&class=y&quantity=1&locale=en-SG&curr=CNY"
+      }
+    ],
+    "capture": [
+      {
+        "id": "flights",
+        "label": "携程机票列表：昆明 → 北京（单程）",
+        "short": "flights.ctrip.com",
+        "url": "https://flights.ctrip.com/online/list/oneway-kmg-bjs?depdate={date}&cabin=y_s&adult=1&child=0&infant=0"
+      },
+      {
+        "id": "hotels",
+        "label": "携程酒店列表：北京（入住当日 / 次日离店）",
+        "short": "hotels.ctrip.com",
+        "url": "https://hotels.ctrip.com/hotels/list?city=1&checkin={date_slash}&checkout={checkout_slash}"
+      }
+    ],
+    "roles": {
+      "flight": "flight_list_cn",
+      "mobile_flight": "flight_mobile_cn",
+      "trip": "flight_trip_com",
+      "api": "flight_api_retired",
+      "hotel": "hotel_list_cn",
+      "hotel_home": "hotel_home_cn"
+    },
+    "markers": {
+      "gate_text": [
+        "whaleguard"
+      ],
+      "block_text": [
+        "whaleguard",
+        "challenge validation",
+        "bot or not",
+        "verify that you are a real user"
+      ],
+      "challenge_text": [
+        "Challenge Validation"
+      ],
+      "login_text": [
+        "登录以查看会员价",
+        "以查看会员价",
+        "账号密码登录",
+        "扫码登录",
+        "登录首页"
+      ],
+      "price_re": "[¥￥]\\s?\\d[\\d,]*",
+      "flight_rows": [
+        "flight-card",
+        "flight-list"
+      ],
+      "hotel_cards": [
+        "hotelName",
+        "class=\"hotel-card\""
+      ],
+      "empty_price_re": "class=\"price-line\">\\s*</div>",
+      "hotel_name_re": "class=\"hotelName\">([^<]{2,40})</span>",
+      "hotel_total_re": "找到([\\d,]+)家酒店"
+    },
+    "login": {
+      "hosts": [
+        "passport.ctrip.com"
+      ],
+      "paths": [
+        "/login"
+      ],
+      "titles": [
+        "登录首页",
+        "sign in"
+      ]
+    },
+    "baseline": {
+      "verdicts": {
+        "flight_search": "BLOCKED",
+        "hotel_price": "LOGIN_REQUIRED",
+        "flight_alt_shapes_all_432": "true",
+        "mobile_and_regional_all_432": "true",
+        "usable_for_case": "false",
+        "fallback": "ctrip/site/ 本地复刻站（同一交互路径 / 同一用例口径），见 ctrip/ctrip_task.py",
+        "captured": "0",
+        "total": "2",
+        "flights": "blocked",
+        "hotels": "login_required"
+      }
+    }
+  }
+};
+const DATA = {};
+const JOURNEY = [];
+
+export const meta = () => META;
+export const app = () => ({ data: DATA, exec: JOURNEY });

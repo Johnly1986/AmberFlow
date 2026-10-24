@@ -204,20 +204,27 @@ describe("坏探针集：loadProbeSet 加载期失败，且消息点出是哪一
 
 /* ==================================================== gateway：apps:matrix */
 
-describe("门禁：apps:matrix 的泄漏与债都为空，应用目录 0 行代码", () => {
-  it("leaks / debt 都为空，且每个应用目录的代码行数为 0", () => {
+describe("门禁：apps:matrix 的泄漏与债都为空，应用目录 0 行逻辑代码", () => {
+  it("leaks / debt 都为空；应用脚本只允许**带迁移标记的声明式数据**（逻辑行 0）", () => {
     const { rows, leaks, debt } = matrix();
     expect(leaks, JSON.stringify(leaks)).toEqual([]);
     expect(debt, JSON.stringify(debt)).toEqual([]);
     expect(rows.length).toBeGreaterThanOrEqual(9);
-    for (const r of rows) expect(r.code, `${r.app} 代码行`).toBe(0);
-    // 应用目录里真的没有代码文件（顶层与子目录都不许有 .ts/.js/.mjs/.cjs，bin/ 除外）
+    for (const r of rows) {
+      expect(r.code, `${r.app} 代码行`).toBe(0);
+      expect(r.logic, `${r.app} 逻辑行（应用目录只允许声明式数据脚本）`).toBe(0);
+    }
+    // L3.2 起的口径：`app.mjs` 允许存在，但必须带 `@amberflow:declarative-data` 标记
+    // （迁移生成的数据脚本）；手写逻辑（无标记）依然算代码文件，红。
     const codeFiles: string[] = [];
     const walk = (d: string): void => {
       for (const e of fs.readdirSync(d, { withFileTypes: true })) {
         const p = path.join(d, e.name);
         if (e.isDirectory()) { if (e.name !== "bin") walk(p); }
-        else if (/\.(ts|js|mjs|cjs)$/.test(e.name)) codeFiles.push(p);
+        else if (/\.(ts|js|mjs|cjs)$/.test(e.name)) {
+          const src = fs.readFileSync(p, "utf-8");
+          if (!src.includes("@amberflow:declarative-data")) codeFiles.push(p);
+        }
       }
     };
     for (const dir of appDirs()) walk(dir);
@@ -510,12 +517,16 @@ describe("第 2 轮：camera-entry / transfer-voyagio / transfer-slowjet", () =>
     expect(res2.subgoals.filter((s) => s.status === "blocked")).toHaveLength(5);
   }, 240_000);
 
-  it("第 2 轮门禁：三个新目录只有 JSON，matrix 仍然 0 代码行 / 0 泄漏 / 0 债", () => {
+  it("第 2 轮门禁：目录只有 JSON + 迁移数据脚本，matrix 仍然 0 逻辑行 / 0 泄漏 / 0 债", () => {
     for (const id of ["camera-entry", "transfer-voyagio", "transfer-slowjet", "transfer-trekly", "transfer-farehaven", "transfer-skybook", "transfer-flyquest"]) {
       expect(validatePack(loadPack(id)), id).toEqual([]);
-      const files = fs.readdirSync(path.join(REPO, "apps", id));
-      expect(files.filter((f) => /\.(ts|js|mjs|cjs)$/.test(f)), `${id} code files`).toEqual([]);
-      expect(files).toEqual(["pack.json"]);
+      const dir = path.join(REPO, "apps", id);
+      const files = fs.readdirSync(dir);
+      // L3.2：`app.mjs` 是**迁移生成的数据**（带标记），不是逻辑；未标记的代码文件仍然红。
+      const codeFiles = files.filter((f) => /\.(ts|js|mjs|cjs)$/.test(f)
+        && !fs.readFileSync(path.join(dir, f), "utf-8").includes("@amberflow:declarative-data"));
+      expect(codeFiles, `${id} code files`).toEqual([]);
+      expect(files.sort()).toEqual(["app.mjs", "pack.json"]);
     }
     const { rows, leaks, debt } = matrix();
     expect(leaks, JSON.stringify(leaks)).toEqual([]);

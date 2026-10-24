@@ -22,7 +22,7 @@ import { REPO } from "../src/flow/flow.ts";
 /** 需要逐项搬运的顶层字段（`journey`/`source_slots` 走 `app()`）。 */
 const META_FIELDS = [
   "id", "label", "goal", "model", "max_subgoals", "hosts", "slots", "required_slots",
-  "sources", "device", "notes", "policy", "roles", "probe", "invariants",
+  "sources", "device", "notes", "policy", "roles", "probe", "invariants", "recorded_from",
 ] as const;
 
 /** 生成声明式脚本源码：**数据内联、无判断**。 */
@@ -38,11 +38,17 @@ export function packToScriptSource(pack: AppPack): string {
     meta["requiredSlots"] = meta["required_slots"];
     delete meta["required_slots"];
   }
+  if (meta["recorded_from"] !== undefined) {
+    meta["recordedFrom"] = meta["recorded_from"];
+    delete meta["recorded_from"];
+  }
   const sourceSlots = (raw["source_slots"] ?? {}) as Record<string, Record<string, unknown>>;
   const data: Record<string, unknown> = {};
   for (const [k, b] of Object.entries(sourceSlots)) data[k] = { kind: "source", ...b };
   const journey = (raw["journey"] ?? []) as unknown[];
-  return `// 由 \`npm run apps:migrate -- --app ${String(raw["id"] ?? "?")} --write\` 生成；改来源再重新生成，不要手改。
+  return `// @amberflow:declarative-data —— 本文件是**数据**（迁移生成），不是逻辑：
+//   应用目录仍受"0 行逻辑代码"约束；只有带这个标记的文件允许出现在 apps/<id>/ 下。
+// 由 \`npm run apps:migrate -- --app ${String(raw["id"] ?? "?")} --write\` 生成；改来源再重新生成，不要手改。
 // 迁移口径：脚本的 meta()/app() 只是把 pack.json 的字段逐项搬运（含 roles/probe/invariants/journey），
 // 不含任何判断；\`apps:migrate --all --check\` 用 expandPack 逐字段对照来源包。
 const META = ${JSON.stringify(meta, null, 2)};

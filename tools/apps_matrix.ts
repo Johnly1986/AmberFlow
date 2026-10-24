@@ -22,6 +22,19 @@ import { REPO } from "../src/flow/flow.ts";
 // 矩阵本体仍是静态声明检查；这两列只是把"跑过的证据"拼上表——没跑过显示"未跑"，绝不编数。
 import { suiteOutDir } from "./apps_suite.ts";
 
+/** 应用脚本（app.mjs / app.ts）的种类与逻辑行数：迁移生成的数据脚本不算逻辑。 */
+function appScriptOf(dir: string): { script: "none" | "declarative" | "flow"; logic: number } {
+  for (const name of ["app.mjs", "app.js", "app.ts"]) {
+    const p = path.join(dir, name);
+    if (!fs.existsSync(p)) continue;
+    const src = fs.readFileSync(p, "utf-8");
+    if (src.includes("@amberflow:declarative-data")) return { script: "declarative", logic: 0 };
+    const logic = src.split("\n").filter((l) => l.trim() !== "" && !l.trim().startsWith("//")).length;
+    return { script: "flow", logic };
+  }
+  return { script: "none", logic: 0 };
+}
+
 function walkTs(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const p = path.join(dir, e.name);
@@ -101,6 +114,11 @@ function appCodeLines(appDir: string, into: { bin: number } = { bin: 0 }): numbe
       const p = path.join(d, e.name);
       if (e.isDirectory()) walk(p);
       else if (/\.(ts|js|mjs|cjs)$/.test(e.name)) {
+        // L3.2：带迁移标记的 app.mjs 是**数据**（声明式 JSON 的等价物），不计入"应用代码行"。
+        // 手写逻辑（无标记）照旧计入 —— 这条纪律没有被放松，只是把"数据脚本"排除在外。
+        const marked = e.name.endsWith(".mjs")
+          && fs.readFileSync(p, "utf-8").includes("@amberflow:declarative-data");
+        if (marked) continue;
         if (/[/\\]bin[/\\]/.test(p)) into.bin += jsonLines(p);
         else n += jsonLines(p);
       }
@@ -179,6 +197,10 @@ interface Row {
   invariants: number;
   declared: number;
   code: number;
+  /** 应用脚本的种类：`none` = 只有 pack.json；`declarative` = 迁移生成的**数据**脚本；`flow` = 带控制流。 */
+  script: "none" | "declarative" | "flow";
+  /** 应用脚本里的**逻辑行**（declarative 恒为 0；flow 计入；`code` 仍只数 .ts）。 */
+  logic: number;
   tokens: string[];
   /** 这个包是**生成的**吗？`spec` 就是它的上游（`generated_from`）；手写的是 `null`。 */
   generated: string | null;
@@ -214,6 +236,7 @@ export function matrix(): {
         app: path.basename(dir), kind: "load-failed",
         sources: 0, roles: 0, steps: 0, toolSteps: 0, invariants: 0,
         declared: jsonLines(path.join(dir, "pack.json")), code: 0, tokens: [],
+        ...appScriptOf(dir),
         policy: "", hintCoverage: "", learn: "", generated: null,
         modelAsks: null, confMax: null, reobserve: null,
       });
@@ -236,6 +259,7 @@ export function matrix(): {
       invariants: (pack.invariants ?? []).length,
       declared: jsonLines(path.join(dir, "pack.json")),
       code: appCodeLines(dir, binAcc),
+      ...appScriptOf(dir),
       tokens: declaredTokens(dir),
       policy: declaredPolicy(pack), hintCoverage: hintCoverageOf(pack),
       learn: learnColumn(pack.id),
@@ -263,7 +287,8 @@ export function matrix(): {
       policy: "", hintCoverage: "-", learn: "-",          // 只有数据腿的目录：没有旅程，也就没有点名与策略
       declared: fs.readdirSync(d).filter((f) => f.endsWith(".json"))
         .reduce((n, f) => n + jsonLines(path.join(d, f)), 0),
-      code: appCodeLines(path.dirname(d), binAcc), tokens: declaredTokens(path.dirname(d)),
+      code: appCodeLines(path.dirname(d), binAcc), ...appScriptOf(path.dirname(d)),
+      tokens: declaredTokens(path.dirname(d)),
     });
   }
   rows.sort((a, b) => (a.app < b.app ? -1 : a.app > b.app ? 1 : 0));
