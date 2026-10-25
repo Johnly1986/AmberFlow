@@ -19,7 +19,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import type { AppPack } from "./app-pack.ts";
+import type { AppPack, PackSite } from "./app-pack.ts";
 
 /** 标记：只有带它的 `.mjs` 才算"数据脚本"（别的代码文件仍然算逻辑，见 apps:matrix）。 */
 export const DECLARATIVE_MARKER = "@amberflow:declarative-data";
@@ -50,6 +50,7 @@ export const META_FIELD_MAP: readonly MetaField[] = [
   { meta: "requiredSlots", pack: "required_slots", aliases: ["required_slots"] },
   { meta: "sources", pack: "sources" },
   { meta: "device", pack: "device" },
+  { meta: "site", pack: "site" },
   { meta: "notes", pack: "notes" },
   { meta: "policy", pack: "policy" },
   // 迁移/高级用法：步骤模板与探针声明原样搬运（L3 迁移需要；不是常用作者面）。
@@ -84,6 +85,8 @@ export interface ScriptMeta {
   requiredSlots?: string[];
   sources?: string[];
   device?: Record<string, unknown>;
+  /** 站点面声明：页面角色（openPage）/ 命名行抽取（extract）。 */
+  site?: PackSite;
   notes?: string[];
   policy?: Record<string, unknown>;
   roles?: Record<string, unknown>;

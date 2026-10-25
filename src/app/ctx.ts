@@ -121,7 +121,16 @@ export interface Ctx {
     text(selector: string): Promise<string | null>;
     value(selector: string): Promise<string | null>;
     count(selector: string): Promise<number>;
+    /** 读一个属性（不存在/超时 → null）。 */
+    attr(selector: string, attr: string): Promise<string | null>;
   };
+  /**
+   * Q5 的决定：v1 **不开放**行抽取的新语法；调用会给结构化 `config_error`。
+   * 命名行抽取用 `ctx.extract(name)`（走 `meta.site.listExtract` 声明）。
+   */
+  rows(spec: { row: string; fields: Record<string, string> }): Promise<Array<Record<string, string>>>;
+  /** 用 `meta.site.listExtract[name]` 抽行（行选择器 + 字段选择器；字段值 `"."` = 行自身文本）。 */
+  extract(name: string): Promise<Array<Record<string, string>>>;
   holds(sig: DomSignal): Promise<boolean>;
   source(name: string): Promise<SourceObservationView>;
   readonly data: {
@@ -154,7 +163,11 @@ export interface Ctx {
 }
 
 export interface CtxDeps {
-  pack: { id: string; label?: string; goal: string; hosts?: string[] | null; invariants?: Array<Record<string, unknown>> };
+  pack: {
+    id: string; label?: string; goal: string; hosts?: string[] | null;
+    invariants?: Array<Record<string, unknown>>;
+    site?: { pages?: Record<string, string>; listExtract?: Record<string, { rows: string; fields: Record<string, string> }> };
+  };
   slots: Record<string, string>;
   runtime: { outDir: string; runId: string; today: string };
   ensureSession(): Promise<BrowserSession>;
@@ -169,6 +182,8 @@ export interface CtxDeps {
   toolRunner?: (req: ToolRunRequest) => Promise<ToolRunResult>;
   /** `--skip-data`：数据腿被显式跳过时，`ctx.source()` 报结构化错误（不静默跑网络）。 */
   allowSources?: boolean;
+  /** 每次 `ctx.step`/`arrive` 的实际执行报告（驱动用它汇总决策账，套件/矩阵念同一份数）。 */
+  onRunReport?: (rep: RunReport) => void;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -243,6 +258,26 @@ export function createCtx(deps: CtxDeps): Ctx {
 
   const record = (ok: boolean | undefined, extra: Record<string, unknown> = {}): void => {
     pushEvent(trace, { call: "step", ok, ...extra });
+  };
+
+  /** 所有导航的唯一实现（open / openPage 共用；hosts 信封在打开之前强制）。 */
+  const navigate = async (
+    rawUrl: string, call: "open" | "openPage", label: string, timeoutMs?: number, desc?: string,
+  ): Promise<void> => {
+    const url = resolveUrl(rawUrl);
+    if (hosts && hosts.length && disallowedHost(url, hosts)) {
+      throw new StopError("host_not_allowed", `${label}: ${JSON.stringify(url)} is outside the declared hosts envelope (${hosts.join(", ")})`);
+    }
+    const p = await page();
+    try {
+      await (p as unknown as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
+        url, { waitUntil: "domcontentloaded", timeout: timeoutMs ?? 30_000 },
+      );
+    } catch (e) {
+      throw new StopError("config_error", `${label}(${JSON.stringify(url)}) failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    currentUrl = url;
+    pushEvent(trace, { call, url, ...(desc === undefined ? {} : { desc }) });
   };
 
   const runOneStep = async (desc: string, req: {
@@ -406,25 +441,20 @@ export function createCtx(deps: CtxDeps): Ctx {
       pushEvent(trace, { call: "log", desc: msg, ...(data === undefined ? {} : { result: data }) });
       if (deps.verbose) console.log(`  [flow] ${msg}`);
     },
-    open: async (u, o = {}) => {
-      const url = resolveUrl(u);
-      if (hosts && hosts.length && disallowedHost(url, hosts)) {
-        throw new StopError("host_not_allowed", `ctx.open: ${JSON.stringify(url)} is outside the declared hosts envelope (${hosts.join(", ")})`);
-      }
-      const p = await page();
-      try {
-        await (p as unknown as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
-          url, { waitUntil: "domcontentloaded", timeout: o.timeoutMs ?? 30_000 },
-        );
-      } catch (e) {
-        throw new StopError("config_error", `ctx.open(${JSON.stringify(url)}) failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
-      currentUrl = url;
-      pushEvent(trace, { call: "open", url });
-    },
+    open: async (u, o = {}) => { await navigate(u, "open", "ctx.open", o.timeoutMs); },
     openPage: async (role) => {
-      throw new StopError("config_error", `ctx.openPage(${JSON.stringify(role)}) is not available in this build: `
-        + "site page maps (meta.site.pages) are not wired yet; use ctx.open(url)");
+      if (typeof role !== "string" || !role.trim()) {
+        throw new StopError("config_error", "ctx.openPage: role must be a non-empty string");
+      }
+      const pages = (pack.site?.pages ?? {}) as Record<string, string>;
+      const url = pages[role];
+      if (typeof url !== "string" || !url.trim()) {
+        const known = Object.keys(pages);
+        throw new StopError("config_error",
+          `ctx.openPage(${JSON.stringify(role)}): no such page role in meta.site.pages`
+          + ` (known: ${known.length ? known.join(", ") : "none declared"})${known.length ? "" : " — declare meta.site.pages or use ctx.open(url)"}`);
+      }
+      await navigate(url, "openPage", `ctx.openPage(${JSON.stringify(role)})`, undefined, role);
     },
     arrive: async (u, req) => {
       if (!isObj(req) || !isObj(req.done) || !Object.keys(req.done).length) {
@@ -440,30 +470,45 @@ export function createCtx(deps: CtxDeps): Ctx {
     url: () => currentUrl,
     read: {
       text: async (sel) => {
+        let value: string | null = null;
         try {
           const loc = await locatorAnyFrame(await page(), sel);
-          if (loc === null) return null;
-          return String(await firstOf(loc).innerText({ timeout: 1500 }));
-        } catch {
-          return null;
-        }
+          if (loc !== null) value = String(await firstOf(loc).innerText({ timeout: 1500 }));
+        } catch { value = null; }
+        pushEvent(trace, { call: "read", desc: `text(${sel})`, result: value });
+        return value;
       },
       value: async (sel) => {
+        let value: string | null = null;
         try {
           const loc = await locatorAnyFrame(await page(), sel);
-          if (loc === null) return null;
-          return String(await firstOf(loc).inputValue({ timeout: 1500 }));
-        } catch {
-          return null;
-        }
+          if (loc !== null) value = String(await firstOf(loc).inputValue({ timeout: 1500 }));
+        } catch { value = null; }
+        pushEvent(trace, { call: "read", desc: `value(${sel})`, result: value });
+        return value;
       },
       count: async (sel) => {
+        let value = 0;
         try {
           const loc = await locatorAnyFrame(await page(), sel);
-          return loc === null ? 0 : Number(await loc.count());
-        } catch {
-          return 0;
-        }
+          value = loc === null ? 0 : Number(await loc.count());
+        } catch { value = 0; }
+        pushEvent(trace, { call: "read", desc: `count(${sel})`, result: value });
+        return value;
+      },
+      attr: async (sel, attr) => {
+        if (typeof sel !== "string" || !sel.trim()) throw new StopError("config_error", "ctx.read.attr: selector must be a non-empty string");
+        if (typeof attr !== "string" || !attr.trim()) throw new StopError("config_error", "ctx.read.attr: attribute name must be a non-empty string");
+        let value: string | null = null;
+        try {
+          const loc = await locatorAnyFrame(await page(), sel);
+          if (loc !== null) {
+            const inner = firstOf(loc) as { getAttribute?(n: string, o?: { timeout?: number }): Promise<string | null> };
+            if (typeof inner.getAttribute === "function") value = await inner.getAttribute(attr, { timeout: 1500 });
+          }
+        } catch { value = null; }
+        pushEvent(trace, { call: "read", desc: `attr(${sel}, ${attr})`, result: value });
+        return value;
       },
     },
     holds: async (sig) => {
@@ -494,6 +539,55 @@ export function createCtx(deps: CtxDeps): Ctx {
     data: {
       min: (rows, by) => pickRow(rows, by, "min"),
       max: (rows, by) => pickRow(rows, by, "max"),
+    },
+    rows: async () => {
+      throw new StopError("config_error", "ctx.rows is closed in v1 (Q5: no new extraction grammar); "
+        + "declare named row extraction in meta.site.listExtract and call ctx.extract(name)");
+    },
+    extract: async (name) => {
+      if (typeof name !== "string" || !name.trim()) throw new StopError("config_error", "ctx.extract: name must be a non-empty string");
+      const spec = pack.site?.listExtract?.[name];
+      if (spec === undefined) {
+        const known = Object.keys(pack.site?.listExtract ?? {});
+        throw new StopError("config_error",
+          `ctx.extract(${JSON.stringify(name)}): meta.site.listExtract has no such entry`
+          + ` (known: ${known.length ? known.join(", ") : "none declared"})`);
+      }
+      const p = await page();
+      const rowsLoc = await locatorAnyFrame(p, spec.rows);
+      const rows: Array<Record<string, string>> = [];
+      let truncated = false;
+      if (rowsLoc !== null) {
+        const all = rowsLoc.all === undefined ? null : await rowsLoc.all();
+        if (all === null) {
+          throw new StopError("config_error", "ctx.extract needs a Playwright locator (locator.all() is not available here)");
+        }
+        const cap = 500;
+        truncated = all.length > cap;
+        for (const row of all.slice(0, cap)) {
+          const locators = row as {
+            locator?: (s: string) => { first(): { innerText(o?: { timeout?: number }): Promise<string>; inputValue(o?: { timeout?: number }): Promise<string> } };
+            innerText?: (o?: { timeout?: number }) => Promise<string>;
+          };
+          const rec: Record<string, string> = {};
+          for (const [field, cellSel] of Object.entries(spec.fields)) {
+            let value = "";
+            try {
+              if (cellSel === "." || cellSel === ":scope") {
+                if (typeof locators.innerText === "function") value = await locators.innerText({ timeout: 1500 });
+              } else if (typeof locators.locator === "function") {
+                const cell = locators.locator(cellSel).first();
+                try { value = await cell.innerText({ timeout: 1500 }); }
+                catch { value = await cell.inputValue({ timeout: 1500 }); }
+              }
+            } catch { value = ""; }
+            rec[field] = String(value ?? "").trim();
+          }
+          rows.push(rec);
+        }
+      }
+      pushEvent(trace, { call: "extract", desc: name, result: { rows, truncated } });
+      return rows;
     },
     run: (async (sourceOrStep: unknown, args?: string[], req?: unknown): Promise<StepResult> => {
       if (typeof sourceOrStep === "string") {

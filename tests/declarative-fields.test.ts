@@ -22,6 +22,7 @@ const SAMPLES: Record<string, unknown> = {
   required_slots: ["a"],
   sources: ["demo-tool"],
   device: { is_mobile: true },
+  site: { pages: { home: "testpages/portal.html" }, listExtract: { rows: { rows: ".row", fields: { name: ".name" } } } },
   notes: ["note"],
   policy: { conf_floor: 0.4 },
   roles: { r: { desc: "d", start_url: "testpages/portal.html", target_hint: "#x", signal: { url_contains: "x" } } },

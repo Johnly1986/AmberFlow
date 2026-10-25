@@ -20,7 +20,7 @@ interface AppInfo {
   path: string;
   source: "user" | "built-in";
   steps: number;
-  kind: "journey" | "measure" | "unknown";
+  kind: "journey" | "measure" | "flow" | "unknown";
   error: string | null;
 }
 
@@ -66,7 +66,9 @@ function infoOf(id: string, label: string, p: string, ctx: CliContext): AppInfo 
     // 旧版这里对所有非 JSON 文件报 "pack.json 不是合法 JSON"——L3 之后每个应用都中招。
     return {
       id: path.basename(path.dirname(p)), label, path: p,
-      source: sourceOf(p, ctx), steps: 0, kind: "unknown",
+      source: sourceOf(p, ctx), steps: 0,
+      // 非 JSON 的数据文件 = 手写脚本（同步列表读不了它的步骤；flow 的步骤本来就在运行期产生）。
+      kind: p.endsWith(".json") ? "unknown" : "flow",
       error: p.endsWith(".json") ? "pack.json 不是合法 JSON" : null,
     };
   }
@@ -86,7 +88,9 @@ export function listAppInfos(ctx: CliContext): AppInfo[] {
 }
 
 function kindLabel(kind: AppInfo["kind"]): string {
-  return kind === "journey" ? "旅程" : kind === "measure" ? "测量" : "未知";
+  return kind === "journey" ? "旅程"
+    : kind === "measure" ? "测量"
+      : kind === "flow" ? "flow 脚本（运行期步骤）" : "未知";
 }
 
 function sourceLabel(source: AppInfo["source"]): string {

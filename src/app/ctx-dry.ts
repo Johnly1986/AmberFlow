@@ -18,7 +18,11 @@ import { listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
 import { StopError, type Ctx, type CtxBudget, type SourceObservationView, type StepRequest, type StepResult } from "./ctx.ts";
 
 export interface DryCtxDeps {
-  pack: { id: string; label?: string; goal: string; hosts?: string[] | null; invariants?: Array<Record<string, unknown>> };
+  pack: {
+    id: string; label?: string; goal: string; hosts?: string[] | null;
+    invariants?: Array<Record<string, unknown>>;
+    site?: { pages?: Record<string, string>; listExtract?: Record<string, { rows: string; fields: Record<string, string> }> };
+  };
   slots: Record<string, string>;
   runtime: { outDir: string; runId: string; today: string };
   trace: AppTrace;
@@ -105,7 +109,19 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       pushEvent(trace, { call: "open", url });
     },
     openPage: async (role) => {
-      throw new StopError("config_error", `ctx.openPage(${JSON.stringify(role)}) is not available in this build; use ctx.open(url)`);
+      if (typeof role !== "string" || !role.trim()) {
+        throw new StopError("config_error", "ctx.openPage: role must be a non-empty string");
+      }
+      const pages = (pack.site?.pages ?? {}) as Record<string, string>;
+      const url = pages[role];
+      if (typeof url !== "string" || !url.trim()) {
+        const known = Object.keys(pages);
+        throw new StopError("config_error",
+          `ctx.openPage(${JSON.stringify(role)}): no such page role in meta.site.pages`
+          + ` (known: ${known.length ? known.join(", ") : "none declared"})${known.length ? "" : " — declare meta.site.pages or use ctx.open(url)"}`);
+      }
+      currentUrl = url;
+      pushEvent(trace, { call: "openPage", desc: role, url });
     },
     arrive: async (u, req) => {
       const p = [
@@ -130,6 +146,10 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       text: async (sel) => { pushEvent(trace, { call: "read", desc: `text(${sel})`, result: null }); return null; },
       value: async (sel) => { pushEvent(trace, { call: "read", desc: `value(${sel})`, result: null }); return null; },
       count: async (sel) => { pushEvent(trace, { call: "read", desc: `count(${sel})`, result: 0 }); return 0; },
+      attr: async (sel, attr) => {
+        pushEvent(trace, { call: "read", desc: `attr(${sel}, ${attr})`, result: null });
+        return null;
+      },
     },
     holds: async (sig) => {
       const p = isObj(sig) && Object.keys(sig).length ? validateSignalSpec(sig, "ctx.holds") : ["ctx.holds needs a non-empty signal"];
@@ -145,6 +165,22 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     data: {
       min: (rows, by) => pickRow(rows, by, "min"),
       max: (rows, by) => pickRow(rows, by, "max"),
+    },
+    rows: async () => {
+      throw new StopError("config_error", "ctx.rows is closed in v1 (Q5: no new extraction grammar); "
+        + "declare named row extraction in meta.site.listExtract and call ctx.extract(name)");
+    },
+    extract: async (name) => {
+      if (typeof name !== "string" || !name.trim()) throw new StopError("config_error", "ctx.extract: name must be a non-empty string");
+      const spec = pack.site?.listExtract?.[name];
+      if (spec === undefined) {
+        const known = Object.keys(pack.site?.listExtract ?? {});
+        throw new StopError("config_error",
+          `ctx.extract(${JSON.stringify(name)}): meta.site.listExtract has no such entry`
+          + ` (known: ${known.length ? known.join(", ") : "none declared"})`);
+      }
+      pushEvent(trace, { call: "extract", desc: name, result: { rows: [], truncated: false } });
+      return [];
     },
     run: (async (sourceOrStep: unknown, args?: string[], req?: unknown): Promise<StepResult> => {
       if (typeof sourceOrStep === "string") {

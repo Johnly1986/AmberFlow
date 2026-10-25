@@ -353,3 +353,22 @@ npm run verify && bash bench/smoke.sh        # 先确认基线是绿的
 （transfer 生成器/对拍输入）**没有删**。它们不是"应用格式"：前者是独立的 SemanticFlow 子系统（`npm run
 semantic`）的输入，后者是 transfer 生成器与冻结对拍语料的输入；删掉需要重写这两个子系统，不属于
 "应用格式去 JSON"的范围。若要把它们也迁到脚本，应作为独立立项（S6+），并有各自的验收台。
+
+
+---
+
+## 17. L3 功能项补齐（2026-10-25，审计后收口）
+
+L2 草案里最后三个"未接线"成员与套件验收面已补齐：
+
+| 项 | 内容 | 验证 |
+|---|---|---|
+| `ctx.openPage(role)` | `meta.site.pages` 角色 → URL；与 `ctx.open` 共用导航实现（`hosts` 信封同权） | `tests/ctx-site.test.ts`（dry/真实/坏角色） |
+| `ctx.extract(name)` | `meta.site.listExtract` 命名行抽取（rows + fields；`"."` = 行自身文本；≤500 行） | 同上（真实抽到 2 行 + replay） |
+| `ctx.read.attr(sel, attr)` | 读属性（不存在 → null） | 同上 |
+| `ctx.rows` | 按 Q5 v1 关闭：结构化 `config_error` 指向 extract | 同上 |
+| 观察进 trace | text/value/count/attr/extract 也记 trace（否则带读取的脚本无法重放） | ctx-site replay 用例 |
+| site schema | `site` 块加载期校验（形状/选择器/未知键） | ctx-site 校验用例 + declarative 字段表 round-trip |
+| `apps:suite` 脚本臂 | 手写 flow 应用被识别并走 `runScriptApp`；步骤=实际执行数；决策账同口径 | `tests/apps-suite-script.test.ts` |
+| 决策账 | `runScriptApp` 汇总 `summarizeDecisions`（与 runApp 同一函数） | 套件行 model_asks 等字段 + ctx suite 测试 |
+| `apps list` | 手写脚本显示"flow 脚本（运行期步骤）"，不再"未知" | CLI 测试沿用 |

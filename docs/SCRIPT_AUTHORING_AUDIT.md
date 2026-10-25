@@ -38,9 +38,9 @@
 | # | 严重度 | 发现 | 状态 |
 |---|---|---|---|
 | P1 | 高 | 应用"发现"有两套规则（列表用 `listPacks` 的同步规则、运行用 `resolveApp` 的异步规则），用户脚本在 CLI 里**半可见**。 | ✅ 统一：发现 = 有数据文件；读取按同步/异步能力分流，错误消息可照做 |
-| P2 | 中 | `apps:suite` 不覆盖 flow 脚本应用（`apps/` 里没有 flow 应用；套件走 `runApp` 的静态旅程）。脚本应用缺"一条命令验收"。 | ⬜ 未做（需给 suite 增加 script 臂，属独立特性） |
+| P2 | 中 | `apps:suite` 不覆盖 flow 脚本应用（`apps/` 里没有 flow 应用；套件走 `runApp` 的静态旅程）。脚本应用缺"一条命令验收"。 | ✅ 套件增加脚本臂（`runFlowOne`）：flow 应用被识别、真执行、决策账同口径（`apps-suite-script` 测试） |
 | P3 | 中 | trace 的"确定性"只在 dry 层被断言；真实 trace 带每次不同的耗时，没有结构比较器。 | ✅ `sameEventStructure`（忽略耗时）+ 真实两次运行结构一致测试（`tests/ctx.test.ts`） |
-| P4 | 低 | `apps list` 对手写脚本显示"0 步 · 未知"（同步读不了 steps）——诚实但信息少。 | ◐ 可接受；`show/explain` 是异步完整视图 |
+| P4 | 低 | `apps list` 对手写脚本显示"0 步 · 未知"（同步读不了 steps）——诚实但信息少。 | ✅ 显示改为"flow 脚本（运行期步骤）"；`show/explain` 是异步完整视图 |
 | P5 | 中 | 没有单一"脚本作者指南"：API、错误码、trace/replay、策略、限制散在 README/代码注释。 | ✅ `docs/APP_SCRIPT_AUTHORING.md` |
 
 ### 2.2 可拓展性
@@ -64,7 +64,8 @@
 ## 四、明确未做（不假装）
 
 1. flow 脚本配置错误的**脚本行号**（需要 source map / 运行时栈整形；收益中等）。
-2. `apps:suite` 的脚本臂（P2）——需要新的验收口径（dry? 真跑? trace?），是独立特性。
-3. `ctx.openPage` / `ctx.read.attr` / `ctx.rows` / `ctx.extract` 仍未接线（L2 文档已列）。
-4. 脚本信任边界：脚本是**进程内任意代码**，防御仍是"用户作用域 + `--no-scripts` + 结果里的
+2. 脚本信任边界：脚本是**进程内任意代码**，防御仍是"用户作用域 + `--no-scripts` + 结果里的
    `script_sha256`"；沙箱化未做。
+3. `ctx.rows({row, fields})` 按 Q5 在 v1 关闭（`extract(name)` 已接线，是声明式替代）。
+4. `apps:suite` 的 flow 行 `hint 覆盖` 列恒为 0/0（hint 是运行期调用参数，静态数不出来；
+   看 `amber apps explain` 的 dry 序列，别拿 0 当"没用 hint"的证据）。

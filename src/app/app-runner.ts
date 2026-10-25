@@ -448,6 +448,8 @@ export interface AppRunResult {
   script?: {
     mode: "flow";
     script_path: string;
+    /** 执行了多少个 `ctx.step`/`ctx.arrive`（含未完成的尝试；flow 的"步骤总数"只能是运行期事实）。 */
+    steps: number;
     script_sha256: string;
     plan_sha256: string;
     trace_path?: string;
@@ -1231,6 +1233,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   // §3：策略在两条分支外声明（重放分支不构造执行器，但产物字段的形状要一致）。
   let policy: EffectivePolicy | null = null;
   let anyDeclared = false;
+  /** 每次 ctx.step/arrive 的执行报告 → 决策账（与 runApp 同一份 `summarizeDecisions`）。 */
+  const decisionSteps: TraceStep[] = [];
 
   if (opts.replayTrace !== undefined) {
     const recorded = readTrace(opts.replayTrace);
@@ -1368,6 +1372,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       runtime: { outDir, runId, today: process.env.LAYA_TODAY ?? "" },
       ensureSession, mw: getMw, trace, toolRunner,
       allowSources: opts.sources !== false,
+      onRunReport: (rep) => { decisionSteps.push(...(rep.steps as TraceStep[])); },
       ...(opts.maxSteps === undefined ? {} : { maxSteps: opts.maxSteps }),
       verbose,
     });
@@ -1399,6 +1404,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     }
   }
 
+  const stepCount = trace.events.filter((e) => e.call === "step" || e.call === "arrive").length;
+  const stats = opts.runtimeStats ? opts.runtimeStats() : null;
+  const decisions = summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0);
   const result: AppRunResult = {
     app: pack.id,
     label: pack.label ?? pack.id,
@@ -1417,9 +1425,11 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // §3：生效策略只在非缺省时进产物（与 runApp 同一纪律）；模型层级照写（脚本应用同样要能说清）。
     ...(anyDeclared && policy !== null ? { effective_policy: policy } : {}),
     ...(opts.modelStatus === undefined ? {} : { model_status: opts.modelStatus }),
+    decisions,
     script: {
       mode: "flow",
       script_path: loaded.scriptPath,
+      steps: stepCount,
       script_sha256: loaded.scriptSha256,
       plan_sha256: loaded.planSha256,
       ...(tracePath === undefined ? {} : { trace_path: tracePath }),

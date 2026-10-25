@@ -65,7 +65,8 @@ export async function flow(ctx) {
 | 元信息 | `ctx.app` / `ctx.slots` / `ctx.runtime` / `ctx.budget` / `ctx.log(msg, data?)` | `slots` 只读；`runtime = {outDir, runId, today}` |
 | 导航 | `ctx.open(url)` / `ctx.arrive(url, {done, desc?})` | `arrive` = 无目标的导航步；`hosts` 信封在起点强制 |
 | 执行 | `ctx.step(desc, {act, done, url?, slots?, when?, timeoutMs?})` | `act` 必填；`done` 必填；返回 `{ok, stopCode?, reason?, evidence}` |
-| 观察 | `ctx.url()` / `ctx.read.{text,value,count}(sel)` / `ctx.holds(signal)` | 只读；读不到返回 null/0 |
+| 观察 | `ctx.url()` / `ctx.read.{text,value,count,attr}(sel[, attr])` / `ctx.holds(signal)` | 只读；读不到返回 null/0 |
+| 站点面 | `ctx.openPage(role)` / `ctx.extract(name)` / `ctx.rows(...)`（v1 关闭） | 声明在 `meta.site`（见 §3.1）；`rows` 调用给结构化错误 |
 | 构造器 | `ctx.judge.*` / `ctx.tool.*` / `ctx.hint()` / `ctx.hints()` / `ctx.command()` / `ctx.value.*` | 与声明式 kit **同一份实现** |
 | 数据 | `ctx.source(name)` / `ctx.data.{min,max}(rows, by)` | 数据腿按需拉取；`--skip-data` 时 `source` 报结构化错误 |
 | 进程 | `ctx.run(...)` / `ctx.dangerous({...dryRunArgs})` | 见 §6；危险步默认拒绝 |
@@ -73,6 +74,35 @@ export async function flow(ctx) {
 
 **控制流是你的**：重试就是 `for`，分支就是 `if`，子流程就是函数。引擎只管"一步之内"
 （元素池 / 选元素 / 闸门 / 动作 / 证据 / 绑定）——脚本拿不到模型文本或分数，只能看结构化结果。
+
+### 3.1 站点面：`meta.site`（页面角色 / 命名行抽取）
+
+站点相关的数据**声明在应用自己的 meta 里**（与 hint / 探针同一条纪律：不进共享代码）：
+
+```js
+export const meta = (kit) => ({
+  id: "price-watch", label: "盯价", goal: "读列表页最低价", hosts: [], slots: {},
+  site: {
+    pages: { home: "testpages/portal.html" },                 // 角色 → URL（openPage 用）
+    listExtract: {                                            // 命名行抽取（extract 用）
+      entries: { rows: "nav.menu a", fields: { label: "." } }, // "." = 行自身文本
+    },
+  },
+});
+
+export async function flow(ctx) {
+  await ctx.openPage("home");                                  // 找不到角色 = config_error（点名已知角色）
+  const rows = await ctx.extract("entries");                   // Array<{ field: string }>
+  const href = await ctx.read.attr("[data-test=entry-fixed]", "href");   // 不存在 → null
+  const n = await ctx.read.count("nav.menu a");
+  await ctx.done();
+}
+```
+
+- `ctx.extract(name)` 的字段选择器是**行内相对选择器**；`rows` 最多取 500 行（超出在 trace 里标 `truncated`）。
+- `ctx.rows({row, fields})` 是 Q5 明确**不开放**的新语法：调用会给结构化 `config_error` 指向 `extract(name)`。
+- dry 模式下 `extract` 返回 `[]`、`read.attr` 返回 `null`（没有页面）——脚本在 dry 期不要依赖观察值。
+- 观察类调用（text/value/count/attr/extract）都会进 trace，所以带读取的脚本可以 `--replay`。
 
 ## 4. 声明式数据脚本：固定形状 + 标记
 
@@ -166,8 +196,8 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 
 - **脚本是进程内任意代码**：信任边界 = "用户作用域 + 不放仓库 + `AMBERFLOW_NO_SCRIPTS=1` 可关"；
   结果里带 `script_sha256`。沙箱未做。
-- 未接线（调用会给明确 `config_error`）：`ctx.openPage`（站点页映射）、`ctx.read.attr`、
-  `ctx.rows` / `ctx.extract`。
+- `ctx.openPage` / `ctx.extract` / `ctx.read.attr` 已接线（声明在 `meta.site`，见 §3.1）；
+  仅 `ctx.rows({row, fields})` 按 Q5 在 v1 关闭（结构化错误指向 `extract(name)`）。
 - `ctx` 是**运行期面**：不要指望 `ctx.page` / locator / 模型分数——那是执行器内部（红线②）。
 - flow 应用目前没有静态 IR 可 `emit`（`apps emit` 会拒绝）；审计能力用 `--emit-trace` 的轨迹。
 
@@ -191,5 +221,5 @@ amber run <id|路径> [--dry-run] [--headful] [--slot k=v] [--out DIR]
           [--allow-dangerous] [--conf-floor N] [--tiered-hint]
           [--emit-trace F] [--replay F] [--json]
 npm run apps:matrix     # 声明面度量（来源/步骤/代码行/泄漏/债）
-npm run apps:suite      # 全部旅程型应用验收（真模型臂；缺 ONNX 时按消融臂说明运行）
+npm run apps:suite      # 全部旅程型应用验收（声明式 + flow 脚本两条臂；真模型臂；缺 ONNX 时按消融臂说明运行）
 ```

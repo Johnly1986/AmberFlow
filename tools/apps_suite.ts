@@ -27,9 +27,10 @@ import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../src/su
 import { applyRcToEnv } from "../src/support/rcfile.ts";
 import fs from "node:fs";
 import { parseArgs } from "node:util";
-import { appDirs, expandPack, loadPack, packHintCoverage, type AppPack } from "../src/app/app-pack.ts";
+import { appDataFile, appDirs, expandPack, loadPack, packHintCoverage, type AppPack } from "../src/app/app-pack.ts";
+import { loadScriptApp, type LoadedScriptApp } from "../src/app/app-script.ts";
 import { getAppAdapter } from "../src/app/app-adapters.ts";
-import { runApp, refusalLine, type AppRunResult } from "../src/app/app-runner.ts";
+import { runApp, runScriptApp, refusalLine, type AppRunResult } from "../src/app/app-runner.ts";
 import { checkArtifacts, missingPieces } from "../src/model/model-artifacts.ts";
 import { type DecisionCacheStats } from "../src/model/decision-cache.ts";
 import { applySpecToRuntime, resolveProviderSpec, type AppliedSpec, type ProviderInfo } from "../src/model/decision-provider.ts";
@@ -211,6 +212,66 @@ export function suiteExitCode(a: {
 }
 
 /**
+ * 套件的**脚本臂**：用 `flow(ctx)` 的运行时入口跑一个应用（走 `runScriptApp`）。
+ *
+ * 与 `runOne` 的差别只有"谁决定步骤"：flow 的步骤是运行期产生的，所以
+ *   - `steps` 用**实际执行次数**（trace 的 step/arrive 事件数，含未完成的尝试）；
+ *   - `completed` 用脚本驱动给的字符串（"N step(s) via flow(ctx)"）；
+ *   - 决策账来自 `runScriptApp` 的 `decisions`（与 runApp 同一份 `summarizeDecisions`）。
+ * `hint 覆盖` 列对 flow 是声明面（journey 为空 ⇒ 0/0）：hint 是脚本运行期调用参数，
+ * 静态数不出来——看 `amber apps explain` 的 dry 序列，别拿 0 当"没用 hint"的证据。
+ */
+async function runFlowOne(
+  loaded: LoadedScriptApp, applied: AppliedSpec, outBase: string,
+  tier: string, providerInfo?: ProviderInfo,
+): Promise<SuiteRow> {
+  const pack = loaded.pack;
+  const out = path.join(outBase, pack.id);
+  fs.mkdirSync(out, { recursive: true });
+  const statsOf = (): DecisionCacheStats => applied.stats?.() ?? { hits: 0, misses: 0, entries: 0 };
+  const asksOf = (): number => applied.asks?.() ?? 0;
+  const before = statsOf();
+  const asksBefore = asksOf();
+  const res: AppRunResult = await runScriptApp(loaded, {
+    verbose: false, sources: false, outDir: out,
+    modelStatus: tier,
+    ...(providerInfo ? { providerInfo, providerFloor: providerInfo.floor } : {}),
+    runtimeStats: () => {
+      const after = statsOf();
+      return { hits: after.hits - before.hits, misses: after.misses - before.misses, entries: after.entries };
+    },
+    pickAsks: () => asksOf() - asksBefore,
+  });
+  fs.writeFileSync(path.join(out, `${pack.id}-result.json`), JSON.stringify(res, null, 2), "utf-8");
+  const steps = res.script?.steps ?? 0;
+  const held = res.invariants.filter((i) => i.held).length;
+  const onlyDangerous = !res.ok && res.script?.stop_code === "dangerous";
+  const status: SuiteStatus = res.ok ? "passed" : onlyDangerous ? "needs-dangerous-opt-in" : "failed";
+  const d = res.decisions!;
+  const hints = packHintCoverage(pack);
+  return {
+    app: pack.id,
+    steps,
+    completed: res.completed,
+    skipped: 0,
+    invariants: `${held}/${res.invariants.length}`,
+    status,
+    secs: res.secs,
+    ...(onlyDangerous ? { note: refusalLine("dangerous") } : {}),
+    model_asks: d.model_asks,
+    model_steps: d.model_steps,
+    conf_max: d.conf.max,
+    reobserve: d.reobserve,
+    rule_steps: d.ladder?.rule ?? 0,
+    escalate: d.ladder?.escalate ?? 0,
+    adjudicated: d.ladder?.adjudicated ?? 0,
+    hint_hinted: hints.hinted, hint_named: hints.named, hint_browser: hints.browser,
+    cache_saved: d.cache?.hits ?? 0,
+    ...(res.risk_degraded ? { risk_degraded: String(res.risk_degraded) } : {}),
+  };
+}
+
+/**
  * 跑完整套离线旅程应用。
  *
  * **默认臂就是真模型**（`arm: "real"`）——产物不齐直接拒绝，不再悄悄退回脚本桩：
@@ -266,23 +327,63 @@ export async function suite(
       // **逐应用容错**：一个坏包/坏目录只该影响它自己那一行。以前 loadPack 在 try 之外，
       // 一个加载失败会掀掉整张表——包括已经跑完的十几行（实测：198s 的工作换来一张空表）。
       let pack: AppPack;
+      let flowScript: LoadedScriptApp | null = null;
+      const dataFile = appDataFile(dir);
       try {
-        pack = loadPack(path.join(dir, "pack.json"));
+        pack = loadPack(dataFile ?? path.join(dir, "pack.json"));
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!only.length || only.includes(name)) {
-          rows.push({
-            app: name, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
-            status: "failed", secs: 0, note: `加载失败：${msg}`,
-            model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, adjudicated: 0, hint_hinted: 0, hint_named: 0, hint_browser: 0,
-          });
+        // 手写 flow 脚本：同步 loadPack 读不了任意代码 → 走异步加载器，交给脚本臂。
+        if (dataFile !== null && !dataFile.endsWith(".json")) {
+          try {
+            const loaded = await loadScriptApp(dataFile);
+            if (loaded.mode === "flow") { pack = loaded.pack; flowScript = loaded; }
+            else throw e;
+          } catch {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!only.length || only.includes(name)) {
+              rows.push({
+                app: name, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
+                status: "failed", secs: 0, note: `加载失败：${msg}`,
+                model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, adjudicated: 0, hint_hinted: 0, hint_named: 0, hint_browser: 0,
+              });
+            }
+            continue;
+          }
+        } else {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!only.length || only.includes(name)) {
+            rows.push({
+              app: name, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
+              status: "failed", secs: 0, note: `加载失败：${msg}`,
+              model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, adjudicated: 0, hint_hinted: 0, hint_named: 0, hint_browser: 0,
+            });
+          }
+          continue;
         }
-        continue;
       }
       seen.add(pack.id);
       if (only.length && !only.includes(pack.id)) continue;
-      if (!Array.isArray(pack.journey) || pack.journey.length === 0) {
+      if (pack.probe !== undefined || (!flowScript && (!Array.isArray(pack.journey) || pack.journey.length === 0))) {
         skipped.push(`${pack.id}（测量型应用：只声明 probe，要真网络）`);
+        continue;
+      }
+      if (flowScript !== null) {
+        if (isLive(pack)) {
+          skipped.push(`${pack.id}（线上旅程：start_url 是 http(s)，要真网络）`);
+          continue;
+        }
+        try {
+          rows.push(await runFlowOne(flowScript, applied,
+            suiteOutDir(opts.provider ?? (opts.arm === "ablate" ? "ablate" : "real")),
+            spec.tier,
+            spec.kind === "provider" ? spec.provider : undefined));
+        } catch (e) {
+          rows.push({
+            app: pack.id, steps: 0, completed: "0/0", skipped: 0, invariants: "-",
+            status: "failed", secs: 0, model_asks: 0, model_steps: 0, conf_max: null, reobserve: 0, cache_saved: 0, rule_steps: 0, escalate: 0, adjudicated: 0, hint_hinted: 0, hint_named: 0, hint_browser: 0,
+            note: `运行崩了：${e instanceof Error ? e.message : String(e)}`,
+          });
+        }
         continue;
       }
       if (isLive(pack)) {

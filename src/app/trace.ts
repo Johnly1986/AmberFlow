@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 export type TraceCall =
-  | "open" | "openPage" | "arrive" | "step" | "read" | "holds" | "source"
+  | "open" | "openPage" | "arrive" | "step" | "read" | "extract" | "holds" | "source"
   | "run" | "dangerous" | "done" | "log";
 
 export interface TraceEvent {

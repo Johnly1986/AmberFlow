@@ -54,9 +54,60 @@ export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = {
 export const PACK_KEYS = [
   "spec_version", "id", "label", "goal", "model", "max_subgoals", "hosts",
   "slots", "required_slots", "sources", "source_slots", "roles", "journey", "invariants", "notes",
-  "probe", "device",
+  "probe", "device", "site",
   "max_step_visits", "generated_from", "recorded_from", "policy",
 ] as const;
+
+/**
+ * 站点面的声明（`meta.site` / pack `site`）：页面角色 → URL，以及可命名的行抽取。
+ *
+ * 为什么是数据而不是新 ctx 语法：`openPage(role)` 与 `extract(name)` 的语义就是
+ * "把站点知识声明出来"，与 hint/探针同一条纪律——站点相关的东西不许写进共享代码。
+ * Q5 的决定：v1 只给 `extract(name)`（走这里），不开放 `rows({row, fields})` 的新语法。
+ */
+export interface PackSite {
+  /** 页面角色 → URL（仓库相对路径或 http(s)）。`ctx.openPage(role)` 用。 */
+  pages?: Record<string, string>;
+  /** 命名行抽取：`rows` = 行选择器；`fields` = 字段 → 行内选择器（`"."` = 行自身文本）。 */
+  listExtract?: Record<string, { rows: string; fields: Record<string, string> }>;
+}
+
+/** 加载期校验 `site` 块（形状错 = 报清楚，别等运行期取不到）。 */
+export function validateSiteBlock(site: unknown, where: string, p: string[]): void {
+  if (!isDict(site)) { p.push(`${where} must be an object`); return; }
+  for (const k of Object.keys(site)) {
+    if (k !== "pages" && k !== "listExtract") p.push(`${where}.${k}: unknown key (known: pages, listExtract)`);
+  }
+  if (site["pages"] !== undefined) {
+    if (!isDict(site["pages"])) p.push(`${where}.pages must be an object of role -> url`);
+    else {
+      for (const [role, url] of Object.entries(site["pages"] as Record<string, unknown>)) {
+        if (typeof url !== "string" || !url.trim()) p.push(`${where}.pages.${role}: non-empty url string required`);
+      }
+    }
+  }
+  if (site["listExtract"] !== undefined) {
+    if (!isDict(site["listExtract"])) {
+      p.push(`${where}.listExtract must be an object of name -> {rows, fields}`);
+    } else {
+      for (const [name, spec] of Object.entries(site["listExtract"] as Record<string, unknown>)) {
+        const at = `${where}.listExtract.${name}`;
+        if (!isDict(spec)) { p.push(`${at}: must be {rows, fields}`); continue; }
+        for (const k of Object.keys(spec)) {
+          if (k !== "rows" && k !== "fields") p.push(`${at}.${k}: unknown key (known: rows, fields)`);
+        }
+        if (typeof spec["rows"] !== "string" || !spec["rows"].trim()) p.push(`${at}.rows: non-empty selector string required`);
+        if (!isDict(spec["fields"])) {
+          p.push(`${at}.fields must be an object of field -> selector`);
+        } else {
+          for (const [field, sel] of Object.entries(spec["fields"] as Record<string, unknown>)) {
+            if (typeof sel !== "string" || !sel.trim()) p.push(`${at}.fields.${field}: non-empty selector string required`);
+          }
+        }
+      }
+    }
+  }
+}
 
 /**
  * **数据腿的结果回写槽位**（`source_slots`）——一条声明，把"数据源查到了什么"接到
@@ -252,6 +303,8 @@ export interface AppPack {
   recorded_from?: { url: string; steps: number; sha256: string };
   /** 浏览器设备面（只有手机版页面存在的站点必须声明它；见 `executor.DeviceSpec`）。 */
   device?: Record<string, unknown>;
+  /** 站点面声明（页面角色 / 命名行抽取）；见 `PackSite`。 */
+  site?: PackSite;
   /**
    * 探针集（测量型应用）：声明要测哪些 URL、站点特征、结果目录。站点知识的**唯一**合法
    * 去处——驱动只剩"怎么测"。校验见 `probe-set.validateProbeBlock`（含"每个 URL 的主机都
@@ -622,6 +675,7 @@ export function validatePack(pack: AppPack,
   if (pack.slots !== undefined && !isDict(pack.slots)) {
     p.push("slots must be an object of slot -> value");
   }
+  if (pack.site !== undefined) validateSiteBlock(pack.site, "site", p);
   if (pack.required_slots !== undefined
     && (!Array.isArray(pack.required_slots) || pack.required_slots.some((x) => typeof x !== "string"))) {
     p.push("required_slots must be a list of slot names");

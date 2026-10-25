@@ -84,7 +84,8 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       currentUrl = u;
     },
     openPage: async (role) => {
-      throw new StopError("config_error", `ctx.openPage(${JSON.stringify(role)}) is not available in this build; use ctx.open(url)`);
+      const ev = nextEvent("openPage", { desc: role });
+      if (typeof ev.url === "string" && ev.url) currentUrl = ev.url;
     },
     arrive: async (u, req) => {
       const ev = nextEvent("arrive", req.desc === undefined ? {} : { desc: req.desc });
@@ -112,6 +113,10 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
         const ev = nextEvent("read", { desc: `count(${sel})` });
         return Number(ev.result ?? 0);
       },
+      attr: async (sel, attr) => {
+        const ev = nextEvent("read", { desc: `attr(${sel}, ${attr})` });
+        return ev.result === null || ev.result === undefined ? null : String(ev.result);
+      },
     },
     holds: async (sig) => {
       void sig;
@@ -132,6 +137,16 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
     data: {
       min: (rows, by) => pickRow(rows, by, "min"),
       max: (rows, by) => pickRow(rows, by, "max"),
+    },
+    rows: async () => {
+      throw new StopError("config_error", "ctx.rows is closed in v1 (Q5: no new extraction grammar); "
+        + "declare named row extraction in meta.site.listExtract and call ctx.extract(name)");
+    },
+    extract: async (name) => {
+      const ev = nextEvent("extract", { desc: name });
+      const rec = isObj(ev.result) ? ev.result : {};
+      const rows = Array.isArray(rec["rows"]) ? (rec["rows"] as Array<Record<string, string>>) : [];
+      return rows;
     },
     run: (async (sourceOrStep: unknown, args?: string[], req?: unknown): Promise<StepResult> => {
       void args;

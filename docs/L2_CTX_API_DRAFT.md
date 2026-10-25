@@ -408,7 +408,7 @@ export { meta, flow } from "../../legacy/from-pack.mjs";   // 内部：loadPack 
 用上面 3 个应用的 dry 输出做对照；再决定是否接 `BrowserMiddleware`。
 ---
 
-## 12. 实现状态（2026-10-24，commit `ebe2c0a`）
+## 12. 实现状态（2026-10-25，全部成员已接线）
 
 **已实现**（`src/app/{ctx,ctx-dry,ctx-replay,trace}.ts`，测试 `tests/{ctx,trace}.test.ts`）：
 
@@ -417,7 +417,8 @@ export { meta, flow } from "../../legacy/from-pack.mjs";   // 内部：loadPack 
 | 元信息 | `app` / `slots` / `runtime` / `budget` / `log` | 只读对象；`log` 只进 trace（不污染 stdout） |
 | 导航 | `open` / `arrive` | `hosts` 信封在 `open`/`step` 起点强制；`arrive` = 无目标的 `mw.run` |
 | 执行 | `step` | `mw.run`（唯一执行循环）；`act` 必填；完成由 `checkSignal` 裁决 |
-| 观察 | `url` / `read.{text,value,count}` / `holds` | `locatorAnyFrame` / `checkSignal` |
+| 观察 | `url` / `read.{text,value,count,attr}` / `holds` | `locatorAnyFrame` / `checkSignal`；**观察也进 trace**（否则带 read 的脚本无法重放） |
+| 站点面 | `openPage(role)` / `extract(name)` / `rows(spec)`（v1 关闭） | `meta.site.pages` / `meta.site.listExtract` 声明；`rows` 按 Q5 给结构化 `config_error` |
 | 构造器 | `judge.*` / `tool.*` / `hint` / `hints` / `command` / `value.*` | 与 L1 `kit` **同一份实现**（复用，不复制） |
 | 数据 | `source` / `data.{min,max}` | `runSource` / 同一份 min-max 语义 |
 | 收尾 | `done` | 结束态不变量（`checkSignal`）；失败 = `invariant_failed` |
@@ -425,7 +426,12 @@ export { meta, flow } from "../../legacy/from-pack.mjs";   // 内部：loadPack 
 **已接线**：`ctx.run` / `ctx.dangerous`（工具步）——经 `CtxDeps.toolRunner` 接到既有 `runToolStep`
 （干跑/确认/幂等重试的唯一实现），驱动里把 `ToolRunRequest` 装成 `ExpandedStep`；危险步默认 `refused: dangerous`。
 
-**本版未接线（调用会抛明确 `config_error`，不静默）**：
-`ctx.openPage`（`meta.site.pages` 映射）、`ctx.read.attr`、`ctx.rows` / `ctx.extract`（Q5 的 v1 只给 extract，但需要 `meta.site.listExtract` 先入 schema）。
+**站点面已接线**（2026-10-25）：
+- `ctx.openPage(role)`：`meta.site.pages` 映射，走与 `ctx.open` 同一条导航实现（`hosts` 信封同样生效）；
+- `ctx.extract(name)`：`meta.site.listExtract[name]` 的 `rows` + `fields`（字段值 `"."` = 行自身文本）；
+- `ctx.read.attr(sel, attr)`：属性不存在 → `null`；
+- `ctx.rows(spec)`：按 Q5 决定 **v1 不开放**，调用给结构化 `config_error` 并指向 `extract(name)`。
+- 站点面 schema 的加载期校验：`site.pages` 必须是非空字符串映射、`listExtract` 每项必须是
+  `{rows, fields}` 且选择器非空；`site` 块未知键报错（`validateSiteBlock`）。
 **实现备注**：`StepResult.evidence` 实际只有 `{url, attempts, elapsedMs}`（草案里的 `elements` 暂无公开缝）；
 审计口径不变：脚本仍只看 `stopCode`，`method`/`conf` 只在 trace。

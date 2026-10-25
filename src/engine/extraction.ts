@@ -143,6 +143,8 @@ export function extractSlots(instruction: string): Record<string, string> {
 export interface InnerLoc {
   innerText(opts?: { timeout?: number }): Promise<string> | string;
   inputValue(opts?: { timeout?: number }): Promise<string> | string;
+  /** 读属性（Playwright Locator.getAttribute 的同一语义：不存在 → null）。可选：测试替身可能没有。 */
+  getAttribute?(name: string, opts?: { timeout?: number }): Promise<string | null> | string | null;
 }
 export interface LocLike {
   count(): Promise<number> | number;
