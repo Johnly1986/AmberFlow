@@ -187,8 +187,9 @@ amber config init [--project]
 amber config edit [--project]`,
     examples: [
       "amber config path",
-      "amber config set AMBERFLOW_DEFAULT_DECISION_PROVIDER token-plan",
-      "amber config set TOKEN_PLAN_API_KEY sk-... --project",
+      "amber config set AMBERFLOW_DECISION_BASE_URL https://<服务地址>",
+      "amber config set AMBERFLOW_DECISION_MODEL jev-latest",
+      "amber config set AMBERFLOW_DECISION_API_KEY sk-... --project",
     ],
     flags: [
       "--project                 读写项目配置 ./.amberflow/config.json",

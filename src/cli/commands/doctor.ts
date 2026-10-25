@@ -42,6 +42,7 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
     import("../../model/decision-jevk5.ts").then((m) => m.registerJevK5()),
     import("../../model/decision-bailian.ts").then((m) => m.registerBailian()),
     import("../../model/decision-tokenplan.ts").then((m) => m.registerTokenPlan()),
+    import("../../model/decision-service.ts").then((m) => m.registerDecisionService()),
   ]);
   baselines.registerBaselines();
 

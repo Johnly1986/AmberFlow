@@ -6,6 +6,10 @@
 > 上游：[MODEL_PURPOSE_ARCH_REVIEW_2.md](MODEL_PURPOSE_ARCH_REVIEW_2.md)（模型边际实测）、
 > [DECISION_PROVIDER_BAILIAN.md](DECISION_PROVIDER_BAILIAN.md) / [DECISION_PROVIDER_JEVK5.md](DECISION_PROVIDER_JEVK5.md)（两个在线 provider）。
 
+> 统一接入面（2026-10-25）：服务地址 + 模型名 + 密钥三键（`AMBERFLOW_DECISION_*`）已落地，
+> 见 [DECISION_SERVICE_CONFIG.md](DECISION_SERVICE_CONFIG.md)。本文的"一份 systemOneClient + profile 表"
+> 仍是协议层设计；统一配置层就是给新服务填 profile 的用户面。
+
 ## 0. 一句话
 
 laya、JevK5、百炼 decision-model-preview **说的是同一种协议**（System One：`{state, questions:{qid:{type:choice|noul|score,…}}} → {answers:{qid:{choice|noul|score, confidence, probabilities}}}`，一次前向、不生成文本）。
