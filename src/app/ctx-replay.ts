@@ -90,7 +90,7 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
     },
     arrive: async (u, req) => {
       const ev = nextEvent("arrive", req.desc === undefined ? {} : { desc: req.desc });
-      currentUrl = u;
+      currentUrl = typeof ev.url === "string" && ev.url ? ev.url : u;
       consume();
       return stepResult(ev);
     },

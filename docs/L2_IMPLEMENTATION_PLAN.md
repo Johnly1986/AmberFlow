@@ -321,11 +321,11 @@ npm run verify && bash bench/smoke.sh        # 先确认基线是绿的
 
 | 步 | 内容 | 退出条件 |
 |---|---|---|
-| **L3.1** ✅ 完成（2026-10-25，`tools/apps_migrate.ts`） | `npm run apps:migrate -- --app <id> [--write]` / `--all --check`：把 `pack.json` 转成声明式 `app.mjs`（数据内联，含 roles/probe/invariants） | **22/22 逐字段 0 diff**（`tests/apps-migrate.test.ts` 23 条） |
-| **L3.2** ✅ 完成（2026-10-25，`c698bcd`） | 22 个 `apps/<id>/app.mjs` 生成并提交（带 `@amberflow:declarative-data` 标记）；`apps:matrix` 增加 `script`/`logic` 列（数据脚本不计代码行）；`apps:migrate --all --check` 进 smoke（2b2） | 22/22 0 diff；`verify` exit 0（1600+ 测试）；矩阵 22 declarative / 0 code / 0 logic / 0 leaks / 0 debt |
+| **L3.1** ✅ 完成（2026-10-25，`tools/apps_migrate.ts`） | `npm run apps:migrate -- --app <id> [--write]` / `--all --check`：把 `pack.json` 转成声明式 `app.mjs`（数据内联，含 roles/probe/invariants） | **21/21 逐字段 0 diff**（`tests/apps-migrate.test.ts` 23 条）；口径：仓库内 21 个应用，用户作用域应用另计 |
+| **L3.2** ✅ 完成（2026-10-25，`c698bcd`） | 21 个 `apps/<id>/app.mjs` 生成并提交（带 `@amberflow:declarative-data` 标记）；`apps:matrix` 增加 `script`/`logic` 列（数据脚本不计代码行）；`apps:migrate --all --check` 进 smoke（2b2） | 21/21 0 diff；`verify` exit 0（1600+ 测试）；矩阵（干净 HOME）21 declarative / 0 code / 0 logic / 0 leaks / 0 debt |
 | **L3.3** ✅ 并入 L3.4（2026-10-25） | 不需要新增 `AMBERFLOW_JSON_APPS`：`loadPack` 改为**同步解析声明式数据脚本**，所以"默认即脚本"——旧的 `AMBERFLOW_NO_SCRIPTS=1` 仍保留原语义（回退到 `pack.json`，若还在） | `apps:gen --check` 8/8；`apps list/show/path` 全部指向 `app.mjs` |
-| **L3.4** ✅ 完成（2026-10-25） | 删除 22 个 `apps/*/pack.json`；新增 `src/app/declarative.ts`（标记 + 同步解析 `META/DATA/JOURNEY` + 唯一 lower/生成器）；`loadPack`/`appDirs`/`listPacks`/`probe-set`/`apps:matrix`/`arch-metrics` 改数据文件发现；`learn`/`apps-induce` 改**写** `app.mjs`；`apps:gen` 直接生成 `app.mjs`；smoke 2b2 改**逐字节**可重放校验 | 全量测试绿（107 文件 / 1607 条）；六层对拍 67/67 **未重冻**（输出逐字节相同）；`apps:migrate --all --check` 22/22 字节级 |
-| **L3.5** ✅ 完成（2026-10-25，`926cd7d`） | 文档收口：README / apps/README / apps/INVENTORY / CLI_REDESIGN / CLAUDE.md / 本计划都改为「声明式 app.mjs」身份描述 | `bash bench/smoke.sh` → **SMOKE: PASS**（typecheck + 全部测试 + 对拍 67/67 逐字节 + apps:gen 8/8 + migrate 22/22 + probes 3/3 + nominate 一致） |
+| **L3.4** ✅ 完成（2026-10-25） | 删除 21 个 `apps/*/pack.json`；新增 `src/app/declarative.ts`（标记 + 同步解析 `META/DATA/JOURNEY` + 唯一 lower/生成器）；`loadPack`/`appDirs`/`listPacks`/`probe-set`/`apps:matrix`/`arch-metrics` 改数据文件发现；`learn`/`apps-induce` 改**写** `app.mjs`；`apps:gen` 直接生成 `app.mjs`；smoke 2b2 改**逐字节**可重放校验 | 全量测试绿（107 文件 / 1607 条）；六层对拍 67/67 **未重冻**（输出逐字节相同）；`apps:migrate --all --check` 21/21 字节级（仓库口径） |
+| **L3.5** ✅ 完成（2026-10-25，`926cd7d`） | 文档收口：README / apps/README / apps/INVENTORY / CLI_REDESIGN / CLAUDE.md / 本计划都改为「声明式 app.mjs」身份描述 | `bash bench/smoke.sh` → **SMOKE: PASS**（typecheck + 全部测试 + 对拍 67/67 逐字节 + apps:gen 8/8 + migrate 21/21 + probes 3/3 + nominate 一致） |
 
 **关键杠杆**：L3.1 的 0-diff 保证"脚本展开 == 今天的计划"，因此六层对拍的**语料不必重冻**；
 只有 L3.4 出现非预期差异时才启用一次性重冻协议（一次性/显式/单独提交）。
@@ -336,14 +336,14 @@ npm run verify && bash bench/smoke.sh        # 先确认基线是绿的
 
 ## 16. L3 收口（2026-10-25）
 
-**L3 的目标已达成**：应用格式**不再有 JSON 运行期/作者面** —— 22 个 `apps/*/pack.json` 已删除，
+**L3 的目标已达成**：应用格式**不再有 JSON 运行期/作者面** —— 21 个 `apps/*/pack.json` 已删除，
 `apps/<id>/app.mjs`（声明式数据脚本）是唯一格式；`npm run apps` / `apps:check` / `apps:matrix` /
 `apps:gen` / `learn` / `apps:induce` / 探针基线全部走它。带控制流的 `flow(ctx)` 脚本是 L2 的升级面。
 
 **关键证据链**：
 - `src/app/declarative.ts` 的**同步解析**（`META/DATA/JOURNEY` 固定形状 + `@amberflow:declarative-data` 标记）
   是让 39 处同步调用点零改动的支点；
-- `apps:migrate --all --check` 22/22 **逐字节可重放**（smoke 2b2，手改会被抓）；
+- `apps:migrate --all --check` 21/21 **逐字节可重放**（smoke 2b2，手改会被抓；用户作用域应用另计）；
 - `apps:gen --check` 8/8（spec → 脚本展开一致）；
 - 六层对拍 **67/67 逐字节一致，冻结语料未重冻** —— 因为脚本展开与今天的计划相同（重冻协议未触发，
   这就是当初把"0 diff"设为 L3.1 闸门的用意）；
@@ -395,3 +395,22 @@ L2 草案里最后三个"未接线"成员与套件验收面已补齐：
 - **手写 flow 在 `apps list --json` 的 label 为空**：回退目录名；
 - **`--force-hints off` 在 --dry-run 下静默放过**：guard 提前到 dry 分支之前。
 回归测试：`tests/acceptance-fixes.test.ts`（18 条）+ `script-cli-ux`/`script-policy`/`ctx-site` 扩展。
+
+### 17.2 子代理二轮复核（R1–R9）后的修复批
+
+二轮复核（L3 打包复验 + 修复复核）又发现 9 条残留，已修：
+- **R1 高**：脚本 `try { await ctx.done() } catch {}` 吞掉不变量失败 → 产物仍报绿；
+  现在 runScriptApp 按 done 事件的 held 判决"粘住"（`invariant_failed`），suite 也要求
+  `ok && invariants.every(held)` 才打"通过"；
+- **R2 高**：302/重定向落到 hosts 外主机未被拦、`ctx.url()` 报的是请求 URL（撒谎）；
+  现在 navigate 落地后校验 `urlOf(page)` 并把它写进 `currentUrl`/trace；arrive 轮询期间同样检查；
+- **R3 中高**：dry 补静态判定——missing_done、web 不变量零导航、`ctx.source`/`ctx.run` 源名、
+  adapter.validateStep（ssh 缺 host 等）、web adapter 拒绝；
+- **R4 中**：重放一条"记录为失败"的轨迹不再报"通过"（done=false → 按记录的 stop_code 失败）；
+- **R5 中**：replay.arrive 从 trace 恢复落地 URL（arrive 后 `ctx.url()` 三实现一致）；
+- **R6 中**：NO_SCRIPTS 下 resolveApp 直接给可行动错误（不再"手写脚本→用异步入口"自相矛盾）；
+- **R7 中**：用户作用域有手写 flow 脚本时，`apps:gen --check` / `apps:migrate --all --check`
+  跳过（不再裸栈/打红声明式门禁）；
+- **R8 低**：`ctx.done()` 之后禁止再动作（dry 与真实同权）；
+- **R9 低**：接受（flow 作者自管控制流；套件无"步骤失败"列）——记录在验收文档残余项。
+回归：`tests/acceptance-fixes.test.ts` 扩到 30 条（R1–R8 全有反例）。

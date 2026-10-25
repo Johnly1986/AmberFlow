@@ -22,7 +22,7 @@
 |---|---|---|
 | A 用户旅程 | 11/12 PASS | 发现 1 个 P1：`apps explain` 对坏脚本报 INTERNAL/exit 1（应为 exit 2）；另有 3 个 UX/文档问题 |
 | B ctx API | 主路径 PASS，4a FAIL | 发现 7 条：dry hosts 漏检、`ctx.arrive` 漂移、`ctx.command` 无 id、`ctx.url` 三实现不一致、dry 允许 done 两次、cli retries 纪律绕过、`sameEventStructure` 忽略 result |
-| C L3 打包 | **运行失败（无结论）** | 代理进程失败，未留下报告；已安排复验（见 §5） |
+| C L3 打包 | **复验通过** | 首轮代理进程失败；二轮复验（§6）全项 PASS，另指出 5 条文档口径问题（§7） |
 | D 破坏性审计 | 13 项 PASS / 5 项 FAIL | 发现 8 条，最重：**flow 不调 `ctx.done()` 却 ok=true/套件"通过"**、dry hosts、flow 不变量 signal 不校验、NO_SCRIPTS 挡不住 explain/emit 的 import |
 
 ## 3. 缺陷清单与修复状态（已全部修复并有回归测试）
@@ -66,4 +66,31 @@
 4. `ctx.openPage` 指向仓库内不存在的文件时 dry 仍绿（真跑 `ERR_FILE_NOT_FOUND`；可静态 stat，未做）。
 5. flow 应用在 `apps:suite` 的 `hint 覆盖` 列恒 0/0（hint 是运行期参数，静态数不出来；文档已说明）。
 6. 脚本沙箱未做（信任边界仍是"用户作用域 + `AMBERFLOW_NO_SCRIPTS=1` + `script_sha256`"）。
-7. 代理 C（L3 打包验收）本轮运行失败，**已另行复验**（见同批提交后的复验记录/命令输出）。
+7. ~~代理 C 运行失败~~ → **已复验**（见 §6）；复验暴露的文档口径问题已在 §7 修正。
+
+
+## 6. 二轮复验（2026-10-25，修复提交后）
+
+| 复验者 | 范围 | 结果 |
+|---|---|---|
+| **C2（新派）** | L3 打包/门禁 | 17 项 PASS：pack.json=0、app.mjs=21、8 个 `src/app/*`、apps:gen 8/8、migrate 21/21（仓库口径）、probes 3/3、nominate OK、parity 67/67、matrix 21 declarative/0 code/0 logic/0 leaks/0 debt、loadPack 同步读、suite 两臂、修复回归 18 条、ctx 三测 16 条 |
+| **E（新派，红队）** | 修复复核 + 残留假绿 | 必测 A1–A6 全 PASS（missing_done、dry hosts 四入口、invariant signal、NO_SCRIPTS 8 入口无 import、arrive 轨迹+replay、command/retries/done 纪律）；另跑回归 44 条全绿。**但指出 9 条残留 R1–R9** |
+
+**二轮残留（已修，见 §3 修复批 2）**：R1 吞掉 done 失败仍报绿；R2 302 落地主机未校验/`ctx.url()` 撒谎；
+R3 dry 不覆盖静态可判定声明错误；R4 失败轨迹重放报"通过"；R5 replay.arrive URL 漂移；R6 NO_SCRIPTS 错误
+不可行动；R7 用户作用域 flow 脚本打红 `apps:gen/migrate`；R8 done 后仍可动作；R9 套件无"步骤失败"列（接受）。
+
+修复后回归：`tests/acceptance-fixes.test.ts` 30 条（R1–R8 每条都有反例），`tests/ctx-pilots.test.ts`
+按解析后 URL 归一化；`bash bench/smoke.sh` 复跑见提交记录。
+
+## 7. 二轮复验指出的文档口径问题（已修）
+
+1. **应用数量口径**：仓库内是 **21** 个应用（21 个 `app.mjs`、删除 21 个 `pack.json`）；此前多处写 22
+   （把用户作用域的 `dsh-learn-probe` 算进去了）。本计划已改为「仓库 21；用户作用域应用另计」。
+2. **README 绝对化**："一个应用 = `apps/<id>/app.mjs`" 会让人误以为纯数据源目录（`bench-cases` /
+   `demo-tool` / `git-log` / 保留 flow.json 的模板应用）也是这种形态——已限定为"**旅程型**应用"。
+3. **suite 默认臂文档过期**：`apps/README.md` 与 `tools/apps_suite.ts` 的 usage 仍写"默认臂=脚本桩 /
+   `--real-model`"；实际默认=真模型、`--ablate`=消融臂。已同步。
+4. **等价性声明的口径**：`apps/README.md` 仍写"与既有 `pack.json` 逐字段 0 diff"；pack.json 已删，
+   `loadPack("apps/x/pack.json")` 实际解析到 `app.mjs`。已改为"与迁移前的历史包 0 diff"。
+5. **matrix/migrate 的 22/22**：依赖用户作用域；文档统一标注口径（仓库 21/21；含用户作用域时 22/22）。

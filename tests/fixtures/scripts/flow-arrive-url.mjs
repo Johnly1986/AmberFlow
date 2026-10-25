@@ -20,5 +20,7 @@ export async function flow(ctx) {
     done: ctx.judge.url("portal.html"),
   });
   if (!r.ok) throw new Error(`arrive 失败：${r.stopCode} ${r.reason ?? ""}`);
+  // arrive 之后也要看：replay 曾把 currentUrl 设回脚本原始串（三实现漂移的盲区）。
+  if (!ctx.url().startsWith("file://")) throw new Error(`arrive 后 ctx.url() 未解析：${ctx.url()}`);
   await ctx.done();
 }

@@ -50,12 +50,17 @@ describe("回退：没有脚本走旧路径；--no-scripts 强制旧路径", () 
     expect(viaLoadApp).toEqual(viaLoadPack);
   });
 
-  it("AMBERFLOW_NO_SCRIPTS=1 时 scriptsDisabled()=true，且 loadApp 仍拿得到旧包", async () => {
+  it("AMBERFLOW_NO_SCRIPTS=1：scriptsDisabled()=true，脚本应用被明确拒绝（信任边界：不 import）", async () => {
     const prev = process.env.AMBERFLOW_NO_SCRIPTS;
     process.env.AMBERFLOW_NO_SCRIPTS = "1";
     try {
       expect(scriptsDisabled()).toBe(true);
-      expect(await loadApp("camera-entry")).toEqual(loadPack(path.join(REPO, "apps/camera-entry/app.mjs")));
+      await expect(loadApp("camera-entry")).rejects.toThrow(/scripts are disabled \(AMBERFLOW_NO_SCRIPTS=1\)/);
+      // 显式 JSON 路径仍可读（回退通道没有被一起关掉）。
+      const js = JSON.stringify({ ...loadPack(path.join(REPO, "apps/camera-entry/app.mjs")), _path: undefined });
+      const file = path.join(tmp, "legacy-pack.json");
+      fs.writeFileSync(file, js, "utf-8");
+      expect((await loadApp(file)).id).toBe("camera-entry");
     } finally {
       if (prev === undefined) delete process.env.AMBERFLOW_NO_SCRIPTS; else process.env.AMBERFLOW_NO_SCRIPTS = prev;
     }

@@ -245,8 +245,11 @@ async function runFlowOne(
   fs.writeFileSync(path.join(out, `${pack.id}-result.json`), JSON.stringify(res, null, 2), "utf-8");
   const steps = res.script?.steps ?? 0;
   const held = res.invariants.filter((i) => i.held).length;
+  const invariantsHeld = res.invariants.every((i) => i.held);
   const onlyDangerous = !res.ok && res.script?.stop_code === "dangerous";
-  const status: SuiteStatus = res.ok ? "passed" : onlyDangerous ? "needs-dangerous-opt-in" : "failed";
+  // 通过的前提：脚本报告 ok **且** 声明的不变量全部成立（"0/1 · 通过"这种自相矛盾不许出现）。
+  const status: SuiteStatus = res.ok && invariantsHeld
+    ? "passed" : onlyDangerous ? "needs-dangerous-opt-in" : "failed";
   const d = res.decisions!;
   const hints = packHintCoverage(pack);
   return {
@@ -441,9 +444,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 2;
   }
   if (values.help) {
-    console.log("usage: apps-suite [--only id,id] [--json] [--verbose] [--real-model]\n\n"
+    console.log("usage: apps-suite [--only id,id] [--json] [--verbose] [--ablate] [--provider NAME]\n\n"
       + "一条命令跑完所有旅程型应用的验收（离线口径）\n\n"
-      + "默认臂是**脚本桩**（确定性、CI 可跑、不碰 1.7 GB 权重）；`--real-model` 换真 ONNX 那一臂。\n"
+      + "默认臂是**真模型**（产物不齐会明确拒绝）；`--ablate` 换脚本桩消融臂。\n"
       + "退出码：0=全部真执行且通过 ｜ 1=有未通过（含加载失败） ｜ "
       + "2=用法错误（--only 未命中任何应用） ｜ 3=有\"未执行\"（危险步未放行，不算全绿） ｜ "
       + "4=真模型臂**边际为 0**（应用都过了，但模型一步也没独立决定 ⇒ \"弹性\"不成立）\n"

@@ -16,7 +16,7 @@ import path from "node:path";
 import {
   disallowedHost, type BrowserMiddleware, type BrowserSession, type RunReport,
 } from "../engine/executor.ts";
-import { firstOf, locatorAnyFrame, type PageLike } from "../engine/extraction.ts";
+import { firstOf, locatorAnyFrame, urlOf, type PageLike } from "../engine/extraction.ts";
 import { checkSignal } from "../engine/signals.ts";
 import { defaultDates, loadSource, runSource } from "../data/datasource.ts";
 import { listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
@@ -255,6 +255,10 @@ export function createCtx(deps: CtxDeps): Ctx {
   const hosts = (pack.hosts ?? null) as string[] | null;
   let currentUrl = "about:blank";
   let closed = false;
+  /** `ctx.done()` 已验收：之后不许再有动作（结束态不变量必须在"结束"之后求值）。 */
+  const assertOpen = (label: string): void => {
+    if (closed) throw new StopError("config_error", `${label}: ctx.done() was already called; no actions after the end-state acceptance`);
+  };
 
   const page = async (): Promise<PageLike> => {
     const s = await deps.ensureSession();
@@ -277,6 +281,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     rawUrl: string, call: "open" | "openPage" | "arrive", label: string,
     timeoutMs?: number, desc?: string, traceIt = true,
   ): Promise<void> => {
+    assertOpen(label);
     const url = resolveCtxUrl(rawUrl);
     if (hosts && hosts.length && disallowedHost(url, hosts)) {
       throw new StopError("host_not_allowed", `${label}: ${JSON.stringify(url)} is outside the declared hosts envelope (${hosts.join(", ")})`);
@@ -289,14 +294,21 @@ export function createCtx(deps: CtxDeps): Ctx {
     } catch (e) {
       throw new StopError("config_error", `${label}(${JSON.stringify(url)}) failed: ${e instanceof Error ? e.message : String(e)}`);
     }
-    currentUrl = url;
-    if (traceIt) pushEvent(trace, { call, url, ...(desc === undefined ? {} : { desc }) });
+    // 落地检查：请求 URL 过了信封不代表**最终页面**也过了（302/重定向可以跨主机）。
+    const landed = urlOf(p);
+    if (landed && hosts && hosts.length && disallowedHost(landed, hosts)) {
+      throw new StopError("host_not_allowed",
+        `${label}: landed on ${JSON.stringify(landed)} outside the declared hosts envelope (${hosts.join(", ")})`);
+    }
+    currentUrl = landed || url;
+    if (traceIt) pushEvent(trace, { call, url: currentUrl, ...(desc === undefined ? {} : { desc }) });
   };
 
   const runOneStep = async (desc: string, req: {
     url?: string; done: DomSignal | Record<string, unknown>; act?: TargetDecl | CommandDecl[];
     slots?: Record<string, string>; when?: DomSignal | null; timeoutMs?: number;
   }): Promise<StepResult> => {
+    assertOpen(`ctx.step(${JSON.stringify(desc)})`);
     checkBudget();
     const started = Date.now();
     const startUrl = resolveCtxUrl(req.url ?? currentUrl);
@@ -358,12 +370,20 @@ export function createCtx(deps: CtxDeps): Ctx {
       throw new StopError("config_error",
         `ctx.run: retries=${req.retries} needs idempotent: true (re-running a process can be irreversible)`);
     }
+    assertOpen(`ctx.run` + (req.desc ? ` ${JSON.stringify(req.desc)}` : ""));
     checkBudget();
     const started = Date.now();
-    const r = await deps.toolRunner({
-      ...req, desc: req.desc ?? (dangerous ? `dangerous ${source}` : `run ${source}`),
-      source, args, ...(dangerous ? { dangerous: true } : {}),
-    });
+    let r: ToolRunResult;
+    try {
+      r = await deps.toolRunner({
+        ...req, desc: req.desc ?? (dangerous ? `dangerous ${source}` : `run ${source}`),
+        source, args, ...(dangerous ? { dangerous: true } : {}),
+      });
+    } catch (e) {
+      // 工具源名/配置错（如 loadSource 抛）不能变成裸栈：给结构化 config_error。
+      throw new StopError("config_error",
+        `ctx.run: ${e instanceof Error ? e.message : String(e)}`);
+    }
     budget.stepsUsed += 1;
     const ok = r.ok === true;
     const stopCode = r.stopCode ?? (ok ? undefined : (r.refused ?? "tool_failed"));
@@ -421,11 +441,16 @@ export function createCtx(deps: CtxDeps): Ctx {
     checkBudget();
     const started = Date.now();
     const desc = typeof step["desc"] === "string" && step["desc"] ? step["desc"] : `${adapter} step`;
-    const r = await deps.toolRunner({
-      desc, source: typeof step["source"] === "string" ? step["source"] : `${adapter}:declared`,
-      done: done as Record<string, unknown>, adapter, rawStep: step,
-      ...(dangerous ? { dangerous: true } : {}),
-    });
+    let r: ToolRunResult;
+    try {
+      r = await deps.toolRunner({
+        desc, source: typeof step["source"] === "string" ? step["source"] : `${adapter}:declared`,
+        done: done as Record<string, unknown>, adapter, rawStep: step,
+        ...(dangerous ? { dangerous: true } : {}),
+      });
+    } catch (e) {
+      throw new StopError("config_error", `ctx.run: ${e instanceof Error ? e.message : String(e)}`);
+    }
     budget.stepsUsed += 1;
     const ok = r.ok === true;
     const stopCode = r.stopCode ?? (ok ? undefined : (r.refused ?? "tool_failed"));
@@ -488,10 +513,16 @@ export function createCtx(deps: CtxDeps): Ctx {
       const deadline = Date.now() + timeout;
       let held = false;
       let waitErr: unknown;
+      let hostViolation: string | null = null;
       try {
         const p = await page();
         const pAny = p as unknown as { waitForTimeout?(ms: number): Promise<void> };
         do {
+          const landed = urlOf(p);
+          if (landed) {
+            if (hosts && hosts.length && disallowedHost(landed, hosts)) { hostViolation = landed; break; }
+            currentUrl = landed;
+          }
           try {
             if (await checkSignal(p as never, req.done as never)) { held = true; break; }
           } catch (e) { waitErr = e; break; }        // 坏信号 = 配置错误，别轮询到超时
@@ -500,10 +531,12 @@ export function createCtx(deps: CtxDeps): Ctx {
         } while (Date.now() < deadline);
       } catch (e) { waitErr = e; }
       budget.stepsUsed += 1;
-      const stopCode = held ? undefined : "arrive_signal_not_held";
+      const stopCode = held ? undefined : (hostViolation !== null ? "host_not_allowed" : "arrive_signal_not_held");
       const reason = held ? undefined
-        : `arrive: navigation finished but done-signal never held within ${timeout}ms`
-          + (waitErr instanceof Error ? ` (${waitErr.message})` : "");
+        : hostViolation !== null
+          ? `arrive: landed on ${JSON.stringify(hostViolation)} outside the declared hosts envelope (${hosts?.join(", ")})`
+          : `arrive: navigation finished but done-signal never held within ${timeout}ms`
+            + (waitErr instanceof Error ? ` (${waitErr.message})` : "");
       const result: StepResult = {
         ok: held,
         ...(stopCode === undefined ? {} : { stopCode }),

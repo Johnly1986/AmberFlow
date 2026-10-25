@@ -374,7 +374,13 @@ export function serializePack(pack: AppPack): string {
 export function generatedApps(): Array<{ id: string; dir: string; ref: FlowRef; pack: AppPack }> {
   const out: Array<{ id: string; dir: string; ref: FlowRef; pack: AppPack }> = [];
   for (const dir of appDirs()) {
-    const pack = loadPack(path.join(dir, "pack.json"));
+    // 手写 flow 脚本没有声明式 IR 可读（同步 loadPack 读不了任意代码）——不是生成器的目标，跳过。
+    let pack: AppPack;
+    try {
+      pack = loadPack(path.join(dir, "pack.json"));
+    } catch {
+      continue;
+    }
     const ref = refOf(pack);
     if (ref) out.push({ id: pack.id, dir, ref, pack });
   }

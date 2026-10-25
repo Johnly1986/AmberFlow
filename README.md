@@ -190,7 +190,7 @@ CLI 报告、`apps:suite` 表格与 DSH 插件 `amberflow_run` 的 summary 念�
 
 ## 把你的流程固化成应用
 
-一个应用 = 一个目录 `apps/<id>/app.mjs`（**声明式数据脚本**：数据腿 + 旅程（浏览器步 / 命令行工具步）+ 结束状态不变量）。先读 **[应用脚本作者指南](docs/APP_SCRIPT_AUTHORING.md)**（两种形态怎么选、ctx API、错误码、trace/replay、扩展配方）。它只是把数据写成了 JS（`export const meta` + `export const app`），不含控制流；要循环/条件就把 `app` 换成 `export async function flow(ctx)`（见 [apps/README.md](apps/README.md) §九）。**加一个应用不需要改共享层一行代码。**
+一个**旅程型**应用 = 一个目录 `apps/<id>/app.mjs`（**声明式数据脚本**：数据腿 + 旅程（浏览器步 / 命令行工具步）+ 结束状态不变量）；纯数据源目录只需 `sources/*.json`（见 apps/README）。先读 **[应用脚本作者指南](docs/APP_SCRIPT_AUTHORING.md)**（两种形态怎么选、ctx API、错误码、trace/replay、扩展配方）。它只是把数据写成了 JS（`export const meta` + `export const app`），不含控制流；要循环/条件就把 `app` 换成 `export async function flow(ctx)`（见 [apps/README.md](apps/README.md) §九）。**加一个应用不需要改共享层一行代码。**
 
 ```bash
 npm run apps -- --list                                  # 有哪些应用

@@ -177,7 +177,13 @@ export async function loadApp(idOrPath: string): Promise<AppPack> {
  * 驱动（`runScriptApp`）需要在 `pack` 之外拿到 `flow` 与版本指纹，所以入口是它而不是 `loadApp`。
  */
 export async function resolveApp(idOrPath: string): Promise<{ pack: AppPack; script: LoadedScriptApp | null }> {
-  if (!scriptsDisabled()) {
+  if (scriptsDisabled()) {
+    // 脚本被禁用时不要把"手写脚本"错报成"找不到/不是合法 JSON"：直接说清怎么恢复。
+    if (!/\.json$/i.test(idOrPath)) {
+      throw new Error(`scripts are disabled (AMBERFLOW_NO_SCRIPTS=1): ${JSON.stringify(idOrPath)} is a script app; `
+        + "unset AMBERFLOW_NO_SCRIPTS to use it, or pass a legacy pack.json path");
+    }
+  } else {
     const scriptPath = resolveScriptPath(idOrPath);
     if (scriptPath !== null) {
       const script = await loadScriptApp(scriptPath);
@@ -240,6 +246,18 @@ export async function dryRunFlow(loaded: LoadedScriptApp, opts: {
   } catch (e) {
     if (e instanceof StopError) problems.push(`${e.code}: ${e.message}`);
     else problems.push(`flow threw: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  // “声明了不变量但没验收”在 dry 路径上通常就能看出来（除非 done 只在不可达分支）：
+  // 缺失时给一条 problem，避免 check 假绿后真跑才报 missing_done。
+  if (problems.length === 0 && (loaded.pack.invariants ?? []).length > 0) {
+    const hasDone = trace.events.some((e) => e.call === "done");
+    const browserish = trace.events.some((e) => e.call === "open" || e.call === "openPage"
+      || e.call === "arrive" || e.call === "step");
+    if (!hasDone) {
+      problems.push("flow: declared end-state invariants but ctx.done() was never called on the dry path");
+    } else if (!browserish) {
+      problems.push("flow: web invariants need at least one browser navigation (open/openPage/arrive)");
+    }
   }
   finishTrace(trace, { done: problems.length === 0 });
   return { trace, problems };

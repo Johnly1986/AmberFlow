@@ -213,3 +213,164 @@ export async function flow(ctx) { await ctx.done(); }`);
     expect(p.join(" | ")).toMatch(/unknown signal op 'url_containz' \(known: /);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 第二轮子代理复核发现的残留缺陷（R1/R2/R3/R4/R5/R7/R8）
+// ---------------------------------------------------------------------------
+import { createServer } from "node:http";
+import { execFileSync } from "node:child_process";
+
+describe("R1) done 的失败判决粘住：脚本 try/catch 吞掉异常也照样失败", () => {
+  it("invariant 不成立 + 剧本吞掉 ctx.done() 异常 → ok=false / invariant_failed", async () => {
+    const file = writeScript("swallow", `export const meta = (kit) => ({
+  id: "swallow", label: "x", goal: "g", hosts: [], slots: [],
+  invariants: [{ id: "never", signal: kit.judge.url("nowhere.example") }],
+});
+export async function flow(ctx) {
+  await ctx.open("testpages/portal.html");
+  try { await ctx.done(); } catch { /* 故意吞掉：产物仍必须报失败 */ }
+}`);
+    const loaded = await loadScriptApp(file);
+    const outDir = fs.mkdtempSync(path.join(tmp, "swallow-"));
+    const res = await runScriptApp(loaded, { verbose: false, outDir });
+    expect(res.ok).toBe(false);
+    expect(res.script?.stop_code).toBe("invariant_failed");
+    expect(res.invariants.every((i) => !i.held)).toBe(true);
+  }, 120_000);
+});
+
+describe("R2) hosts 信封看**落地** URL（302 跨主机不能绕）", () => {
+  it("302 到域名不在 hosts 里 → 运行失败 host_not_allowed", async () => {
+    const server = createServer((req, res) => {
+      if (req.url === "/start") {
+        const host = req.headers.host ?? "";
+        const port = host.split(":")[1] ?? "80";
+        res.writeHead(302, { Location: `http://localhost:${port}/landed` });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end("<html><body>landed</body></html>");
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    try {
+      const file = writeScript("redirect", `export const meta = (kit) => ({
+  id: "redirect", label: "x", goal: "g", hosts: ["127.0.0.1"], slots: [],
+  site: { pages: { home: "http://127.0.0.1:${port}/start" } },
+  invariants: [{ id: "on-home", signal: kit.judge.url("landed") }],
+});
+export async function flow(ctx) {
+  await ctx.openPage("home");
+  await ctx.done();
+}`);
+      const loaded = await loadScriptApp(file);
+      const outDir = fs.mkdtempSync(path.join(tmp, "redirect-"));
+      const res = await runScriptApp(loaded, { verbose: false, outDir });
+      expect(res.ok).toBe(false);
+      expect(res.script?.stop_code).toBe("host_not_allowed");
+      expect(res.script?.stop_reason).toMatch(/landed on|localhost/);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  }, 120_000);
+});
+
+describe("R3) dry 覆盖可静态判定的声明错误", () => {
+  async function dryProblems(body: string, tag: string, metaExtra = ""): Promise<string> {
+    const file = writeScript(tag, `export const meta = (kit) => ({
+  id: ${JSON.stringify(tag)}, label: "x", goal: "g", hosts: [], slots: [],${metaExtra}
+});
+export async function flow(ctx) {
+${body}
+}`);
+    return (await dryRunFlow(await loadScriptApp(file))).problems.join(" | ");
+  }
+
+  it("声明 invariants 但 dry 路径从不 ctx.done() → problem", async () => {
+    const p = await dryProblems('  ctx.log("no done");', "dry-nodone",
+      '\n  invariants: [{ id: "i", signal: { url_contains: "x" } }],');
+    expect(p).toMatch(/ctx\.done\(\) was never called/);
+  });
+
+  it("web 不变量但零浏览器动作 → problem", async () => {
+    const p = await dryProblems('  await ctx.done();', "dry-nonav",
+      '\n  invariants: [{ id: "i", signal: { url_contains: "x" } }],');
+    expect(p).toMatch(/need at least one browser navigation/);
+  });
+
+  it("ctx.source 未知数据源 → dry 点名", async () => {
+    expect(await dryProblems('  await ctx.source("no-such-source");', "dry-source"))
+      .toMatch(/no-such-source/);
+  });
+
+  it("ctx.run 未知工具源 → dry 点名", async () => {
+    expect(await dryProblems('  await ctx.run("no-such-tool", [], { done: ctx.tool.exitOk(0) });', "dry-tool"))
+      .toMatch(/no-such-tool/);
+  });
+
+  it("ssh 声明缺 host → dry 点名（适配器 validateStep 在 check 期跑）", async () => {
+    const p = await dryProblems('  await ctx.run({ adapter: "ssh", ssh: { argv: ["true"] }, done: ctx.tool.exitOk(0) });', "dry-ssh");
+    expect(p).toMatch(/ssh\.host: non-empty string required/);
+  });
+
+  it("adapter:web 不能当进程步 → dry 拒绝", async () => {
+    expect(await dryProblems('  await ctx.run({ adapter: "web", web: {}, done: ctx.tool.exitOk(0) });', "dry-web"))
+      .toMatch(/web adapter is not a process step/);
+  });
+});
+
+describe("R4/R5) 失败轨迹重放 & arrive 后 URL", () => {
+  it("重放一条 missing_done 的失败轨迹：结论也必须是失败", async () => {
+    const loaded = await loadScriptApp(path.join(REPO, "tests/fixtures/scripts/flow-missing-done.mjs"));
+    const outDir = fs.mkdtempSync(path.join(tmp, "replay-fail-"));
+    const tracePath = path.join(outDir, "trace.json");
+    const first = await runScriptApp(loaded, { verbose: false, outDir, emitTrace: tracePath });
+    expect(first.ok).toBe(false);
+    const replay = await runScriptApp(loaded, { verbose: false, replayTrace: tracePath });
+    expect(replay.ok).toBe(false);
+    expect(replay.script?.stop_code).toBe("missing_done");
+  }, 120_000);
+
+  it("flow-arrive-url：arrive 之后 ctx.url 也是 file://，重放通过（R5 盲区已覆盖）", async () => {
+    const loaded = await loadScriptApp(path.join(REPO, "tests/fixtures/scripts/flow-arrive-url.mjs"));
+    const outDir = fs.mkdtempSync(path.join(tmp, "arrive2-"));
+    const tracePath = path.join(outDir, "trace.json");
+    const first = await runScriptApp(loaded, { verbose: false, outDir, emitTrace: tracePath });
+    expect(first.ok).toBe(true);
+    expect((await runScriptApp(loaded, { verbose: false, replayTrace: tracePath })).ok).toBe(true);
+  }, 120_000);
+});
+
+describe("R8) done 之后禁止再动作", () => {
+  it("dry 也拒绝 done 之后的 open", async () => {
+    const file = writeScript("done-then-open", `export const meta = (kit) => ({ id: "done-then-open", label: "x", goal: "g", hosts: [], slots: [] });
+export async function flow(ctx) {
+  await ctx.open("testpages/portal.html");
+  await ctx.done();
+  await ctx.open("testpages/camera_a.html");
+}`);
+    const dry = await dryRunFlow(await loadScriptApp(file));
+    expect(dry.problems.join(" | ")).toMatch(/no actions after the end-state acceptance/);
+  });
+});
+
+describe("R7) 用户作用域的手写 flow 脚本不应打红声明式工具", () => {
+  it("apps:gen --check 与 apps:migrate --all --check 跳过手写 flow 应用而不是裸栈", () => {
+    const home = fs.mkdtempSync(path.join(tmp, "home-flow-"));
+    const dir = path.join(home, "apps", "user-flow");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.copyFileSync(path.join(REPO, "tests/fixtures/scripts/flow-demo-app.mjs"), path.join(dir, "app.mjs"));
+    const env = { ...process.env, AMBERFLOW_HOME: home };
+    for (const [tool, args] of [
+      ["tools/spec-to-pack.ts", ["--check", "--quiet"]],
+      ["tools/apps_migrate.ts", ["--all", "--check", "--quiet"]],
+    ] as const) {
+      const out = execFileSync("node", ["--experimental-strip-types", tool, ...args], {
+        cwd: REPO, env, encoding: "utf-8", stdio: "pipe", timeout: 120_000,
+      });
+      expect(out.trim(), tool).not.toMatch(/is a hand-written script/);
+    }
+  }, 180_000);
+});

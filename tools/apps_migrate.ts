@@ -85,8 +85,17 @@ async function main(argv: string[]): Promise<number> {
     return 2;
   }
   let bad = 0;
+  let skipped = 0;
   for (const t of targets) {
-    const pack = loadPack(t.packPath);
+    let pack;
+    try {
+      pack = loadPack(t.packPath);
+    } catch (e) {
+      // 手写 flow 脚本没有声明式 IR；它不是迁移对象（跳过并说明，不让它把 --all --check 打红）。
+      skipped += 1;
+      if (!quiet) console.log(`- ${t.id}：跳过（${e instanceof Error ? e.message.split("\n")[0] : String(e)}）`);
+      continue;
+    }
     const { problems, source } = await verifyMigration(pack);
     if (problems.length) { bad += 1; console.error(`✗ ${t.id}: ${problems.join(" | ")}`); continue; }
     if (v.write === true) {
@@ -98,7 +107,10 @@ async function main(argv: string[]): Promise<number> {
       if (v.all !== true) console.log(source);
     }
   }
-  if (!quiet && targets.length > 1) console.log(`\n${targets.length - bad}/${targets.length} 个应用迁移后与来源包逐字段一致`);
+  if (!quiet && targets.length > 1) {
+    console.log(`\n${targets.length - bad - skipped}/${targets.length - skipped} 个应用迁移后与来源包逐字段一致`
+      + (skipped ? `（跳过 ${skipped} 个非声明式脚本）` : ""));
+  }
   return bad ? 1 : 0;
 }
 

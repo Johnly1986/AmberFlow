@@ -100,7 +100,7 @@ node --experimental-strip-types src/data/datasource.ts --source git-log --out /t
 npm run apps -- --list                                   # 发现了哪些应用包
 npm run apps -- --app demo-app --dry                     # 只展开计划（不开浏览器、不装模型、不跑数据腿）
 npm run apps -- --app demo-app                           # 整跑：数据腿 → 旅程 → 不变量（默认走真模型；缺产物时如实降级）
-npm run apps -- --app demo-app --ablate stub             # 脚本桩臂：不装 1.7GB 产物也能整跑（套件默认臂）
+npm run apps -- --app demo-app --ablate stub             # 脚本桩臂：不装 1.7GB 产物也能整跑（消融臂；套件默认真模型）
 npm run apps -- --app demo-app --out /tmp/hello           # 产物落点（默认 apps/<id>/out）
 npm run apps:matrix                                      # 度量：声明行 / 代码行 / 防泄漏 + 上次套件的模型咨询两列
 npm run apps:suite                                       # 一条命令验收所有离线旅程应用（结论表 + 退出码）
@@ -137,7 +137,7 @@ shell 会把它原样留给子进程，留着它的后果是后面的旗标全�
   `apps:suite` 的"模型咨询"列与 `apps:matrix` 的两列读的是**上一次真跑**落下的 `*-result.json`；
   matrix 上"未跑"≠0——前者是没证据，后者是真跑过且规则消化了全部（结论列直接写 `model not needed`）。
 - **模型边际**（`模型边际` 列）：梯级只有低一级没决定才轮到模型，所以 `model_steps` 就是模型在这条
-  语料上的**独立贡献**。桩臂打"未测"（它的 0 是构造出来的，不是证据）；真模型臂（`--real-model`）
+  语料上的**独立贡献**。桩臂打"未测"（它的 0 是构造出来的，不是证据）；真模型臂（默认；缺产物会明确拒绝）
   若合计为 0 ⇒ 退出码 4 + 页脚写明"运行期弹性主张不成立"。出处：
   [docs/ARCHITECTURE_IMPROVEMENTS.md](../docs/ARCHITECTURE_IMPROVEMENTS.md) §5/§7。
 
@@ -564,7 +564,7 @@ amber apps emit    $AMBERFLOW_HOME/apps/my-app/app.mjs --out /tmp/my-app.json   
 - **边界**：L1 是**声明式**脚本（构建期灵活，运行期零新语义）；运行期循环/条件（`flow(ctx)`）在 L2。
   模型侧数字（置信度/决策档）**不进脚本**：脚本只看 `stopCode`（红线②的 L2 形态）。
 - **等价证据**：`tests/fixtures/scripts/camera-entry.mjs`（web 4 步 + 3 不变量）与
-  `cli-report.mjs`（5 个工具步，含重试/幂等/危险步）展开后与既有 `pack.json` **逐字段 0 diff**
+  `cli-report.mjs`（5 个工具步，含重试/幂等/危险步）展开后与迁移前的历史包 **逐字段 0 diff**
   （`tests/app-script-equivalence.test.ts`）。
 
 ## 九、L2：`flow(ctx)` 运行期（脚本接管控制流）

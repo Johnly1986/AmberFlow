@@ -1256,6 +1256,12 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       else throw e;
     }
     invariants = invariantsFromTrace(recorded, pack);
+    // 轨迹本身记录的是失败运行：重放的结论也必须失败（"结构一致"不等于"那次运行成功"）。
+    if (recorded.done !== true) {
+      ok = false;
+      stopCode = recorded.stop_code ?? "replay_recorded_failure";
+      stopReason = recorded.stop_reason ?? "the recorded run did not complete successfully";
+    }
   } else {
     preflightConfig(opts);
     for (const n of pack.sources ?? []) loadSource(String(n));
@@ -1390,11 +1396,20 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
 
   // 声明了结束态不变量却从未调用 ctx.done()：**验收根本没发生**。
   // 以前这里 ok 仍为 true（suite 甚至会打"0/1 不变量 · 通过"）——那是最坏的一类假绿。
-  if (opts.replayTrace === undefined && ok && (pack.invariants ?? []).length > 0
+  const declaredInvariants = (pack.invariants ?? []).length;
+  if (opts.replayTrace === undefined && ok && declaredInvariants > 0
     && !trace.events.some((e) => e.call === "done")) {
     ok = false;
     stopCode = "missing_done";
     stopReason = "flow ended without ctx.done(): declared end-state invariants were never verified";
+  }
+  // done 的失败判决**粘住**：脚本可以 `try { await ctx.done() } catch {}` 吞掉异常，
+  // 但产物不能因此报绿——不变量没成立就是没通过（否则报告同页会写"不变量不成立"+"通过"）。
+  if (ok && declaredInvariants > 0 && !invariants.every((i) => i.held)) {
+    ok = false;
+    stopCode = "invariant_failed";
+    stopReason = "declared end-state invariants did not hold: "
+      + invariants.filter((i) => !i.held).map((i) => i.id).join(", ");
   }
   finishTrace(trace, {
     done: ok,

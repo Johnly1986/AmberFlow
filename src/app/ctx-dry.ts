@@ -14,7 +14,8 @@ import { validateCommands } from "../engine/actions.ts";
 import { validateToolSignal } from "../browser/tool-signals.ts";
 import { createKit, type CommandDecl } from "./kit.ts";
 import { pushEvent, type AppTrace } from "./trace.ts";
-import { listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
+import { getAppAdapter, listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
+import { loadSource } from "../data/datasource.ts";
 import {
   normalizeCommandIds, resolveCtxUrl, StopError,
   type Ctx, type CtxBudget, type SourceObservationView, type StepRequest, type StepResult,
@@ -57,6 +58,10 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
    * dry 也执行 **hosts 信封**（与真实 ctx 同一判定）：否则 `apps check` 会放过一个
    * 真实运行必然 `host_not_allowed` 的脚本——那是"dry 假绿"（实测：openPage/arrive/step 都漏）。
    */
+  const assertNotDone = (label: string): void => {
+    if (doneCalled) throw new StopError("config_error", `${label}: ctx.done() was already called; no actions after the end-state acceptance`);
+  };
+
   const assertHost = (rawUrl: string, label: string): void => {
     if (!hosts || hosts.length === 0) return;
     const url = resolveCtxUrl(rawUrl);
@@ -118,12 +123,14 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     budget,
     log: (msg) => { pushEvent(trace, { call: "log", desc: msg }); },
     open: async (u) => {
+      assertNotDone("ctx.open");
       const url = resolveCtxUrl(u);
       assertHost(u, "ctx.open");
       currentUrl = url;
       pushEvent(trace, { call: "open", url });
     },
     openPage: async (role) => {
+      assertNotDone("ctx.openPage");
       if (typeof role !== "string" || !role.trim()) {
         throw new StopError("config_error", "ctx.openPage: role must be a non-empty string");
       }
@@ -141,6 +148,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       pushEvent(trace, { call: "openPage", desc: role, url: resolved });
     },
     arrive: async (u, req) => {
+      assertNotDone("ctx.arrive");
       const p = [
         ...(isObj(req?.done) && Object.keys(req.done).length ? [] : [`ctx.arrive: done signal is required`]),
         ...(isObj(req?.done) && Object.keys(req.done).length ? validateSignalSpec(req.done, "ctx.arrive") : []),
@@ -179,6 +187,12 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       return true;
     },
     source: async (name) => {
+      if (typeof name !== "string" || !name.trim()) throw new StopError("config_error", "ctx.source: name must be a non-empty string");
+      try {
+        loadSource(name);        // 数据源配置在加载期校验（未知源名在这里就红，不等真跑）
+      } catch (e) {
+        throw new StopError("config_error", `ctx.source(${JSON.stringify(name)}): ${e instanceof Error ? e.message : String(e)}`);
+      }
       const obs: SourceObservationView = { counts: {}, selects: {}, rows: [] };
       pushEvent(trace, { call: "source", desc: name, result: { counts: {}, rows: 0 } });
       return obs;
@@ -207,6 +221,9 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       if (typeof sourceOrStep === "string") {
         const p = validateToolRun(sourceOrStep, args ?? [], req as never, false);
         if (p.length) throw new StopError("config_error", problems(p).join("；"));
+        try { loadSource(sourceOrStep); } catch (e) {
+          throw new StopError("config_error", `ctx.run(${JSON.stringify(sourceOrStep)}): ${e instanceof Error ? e.message : String(e)}`);
+        }
         checkBudget();
         budget.stepsUsed += 1;
         pushEvent(trace, { call: "run", desc: (req as { desc?: string } | undefined)?.desc ?? sourceOrStep, ok: true, result: { source: sourceOrStep } });
@@ -222,8 +239,24 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       const adapter = typeof step["adapter"] === "string" && step["adapter"]
         ? step["adapter"]
         : step["ssh"] !== undefined ? "ssh" : step["stdio"] !== undefined ? "stdio" : "cli";
+      if (adapter === "web") {
+        throw new StopError("config_error", "ctx.run: the web adapter is not a process step; use ctx.step() for browser steps");
+      }
       try { requireAppAdapter(adapter); } catch {
         throw new StopError("config_error", `ctx.run: unknown app adapter ${JSON.stringify(adapter)} (known: ${listAppAdapters().join(", ")})`);
+      }
+      // 让适配器自己的声明面校验跑一遍（ssh 缺 host / stdio 坏 script / 未知键都在 check 期红）。
+      const adapterObj = getAppAdapter(adapter)!;
+      if (adapter !== "cli") {
+        const ap: string[] = [];
+        adapterObj.validateStep({ ...step, signal: step["done"] }, "ctx.run", ap);
+        if (ap.length) throw new StopError("config_error", ap.join("；"));
+      } else {
+        const src = typeof step["source"] === "string" ? step["source"] : "";
+        if (!src.trim()) throw new StopError("config_error", "ctx.run: the cli form needs a non-empty source");
+        try { loadSource(src); } catch (e) {
+          throw new StopError("config_error", `ctx.run: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
       checkBudget();
       budget.stepsUsed += 1;
