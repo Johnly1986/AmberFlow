@@ -137,6 +137,25 @@ describe("验收回归：坏脚本 explain 口径 / 手写脚本 label", () => {
   });
 });
 
+describe("apps list --json 的机器消费者字段（DSH 桥 / 外部 Agent）", () => {
+  it("声明面摘要：类型混合 / 工具步 / 不变量 / 来源", async () => {
+    const r = await cli(["apps", "list", "--json"], { home: ws.home });
+    const apps = r.json().data.apps as Array<Record<string, unknown>>;
+    const demo = apps.find((a) => a["id"] === "demo-app");
+    expect(demo?.types).toEqual({ cli: 1, web: 4 });
+    expect(demo?.toolSteps).toBe(1);
+    expect(demo?.invariants).toBe(2);
+    expect(demo?.origin).toBe("hand-written");
+    const mixed = apps.find((a) => a["id"] === "mixed-demo");
+    expect(mixed?.types).toEqual({ web: 2, cli: 3, ssh: 1, stdio: 1 });
+    expect(mixed?.toolSteps).toBe(5);
+    const learned = apps.find((a) => a["id"] === "learned-cart");
+    expect(learned?.origin).toBe("recorded:testpages/product.html");
+    const generated = apps.find((a) => a["id"] === "transfer-slowjet");
+    expect(String(generated?.origin)).toMatch(/^generated:transfer\/specs\/slowjet\.json/);
+  });
+});
+
 describe("amber apps new：脚手架（可跑、可检查、两种形态）", () => {
   it("默认 flow：check 通过 + dry-run 可预演", async () => {
     const dir = tmpDir("new-flow");

@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { APPS_DIR, listPacks, loadPack, type AppPack } from "../../app/app-pack.ts";
-import { isDeclarativeScriptSource, parseDeclarativeScript } from "../../app/declarative.ts";
+import { APPS_DIR, adapterKind, listPacks, loadPack, type AppPack } from "../../app/app-pack.ts";
+import { isDeclarativeScriptSource, lowerDeclarative, parseDeclarativeScript } from "../../app/declarative.ts";
 import { validateApp } from "../../app/cross-ref.ts";
 import {
   dryRunFlow, loadApp, loadScriptApp, resolveApp, resolveScriptPath, scriptDisplayPath,
@@ -22,6 +22,46 @@ interface AppInfo {
   steps: number;
   kind: "journey" | "measure" | "flow" | "unknown";
   error: string | null;
+  // ↓ 给机器消费者（DSH 桥的 `amberflow_apps` 工具）：声明面的类型混合 / 不变量 / 面包屑。
+  // 手写 flow 脚本同步读不了 meta，这些字段缺省为空（不假装知道）。
+  types?: Record<string, number>;
+  toolSteps?: number;
+  invariants?: number;
+  hosts?: string[];
+  origin?: string;
+}
+
+/** 从已加载的声明式包里数出机器消费者要的字段（角色模板 + 内联覆盖，与执行器同一判定）。 */
+function packSummary(pack: AppPack): Pick<AppInfo, "types" | "toolSteps" | "invariants" | "hosts" | "origin"> {
+  const roles = (pack.roles ?? {}) as Record<string, Record<string, unknown>>;
+  const types: Record<string, number> = {};
+  for (const entry of Array.isArray(pack.journey) ? pack.journey : []) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const inline = entry as Record<string, unknown>;
+    const role = inline["role"];
+    const template = role === undefined ? undefined : roles[String(role)];
+    const merged = template === undefined ? inline : { ...template, ...inline };
+    const kind = adapterKind(merged);
+    types[kind] = (types[kind] ?? 0) + 1;
+  }
+  const toolSteps = Object.entries(types)
+    .filter(([kind]) => kind !== "web")
+    .reduce((n, [, count]) => n + count, 0);
+  const rec = pack as unknown as Record<string, unknown>;
+  const gen = rec["generated_from"];
+  const recorded = rec["recorded_from"];
+  const origin = gen !== null && typeof gen === "object"
+    ? `generated:${String((gen as Record<string, unknown>)["spec"] ?? (gen as Record<string, unknown>)["source"] ?? "?")}`
+    : recorded !== null && typeof recorded === "object"
+      ? `recorded:${String((recorded as Record<string, unknown>)["url"] ?? "?")}`
+      : "hand-written";
+  return {
+    types,
+    toolSteps,
+    invariants: Array.isArray(pack.invariants) ? pack.invariants.length : 0,
+    hosts: Array.isArray(pack.hosts) ? pack.hosts.filter((h): h is string => typeof h === "string") : [],
+    origin,
+  };
 }
 
 function inside(child: string, parent: string): boolean {
@@ -46,11 +86,10 @@ function readPackAt(p: string): AppPack | null {
     } else {
       const src = fs.readFileSync(p, "utf-8");
       if (!isDeclarativeScriptSource(src)) return null;
+      // 数据脚本的 `app()` 就是 `{ data: DATA, exec: JOURNEY }`；同步读取走**同一个**翻译点
+      // （`lowerDeclarative`），否则 camelCase 的 recordedFrom/generatedFrom 等元数据会在列表里丢失。
       const parts = parseDeclarativeScript(src);
-      pack = {
-        ...(parts.meta as unknown as AppPack),
-        journey: parts.journey,
-      } as AppPack;
+      pack = lowerDeclarative(parts.meta, { data: parts.data, exec: parts.journey });
     }
     pack._path = p;
     return pack;
@@ -70,6 +109,7 @@ function infoOf(id: string, label: string, p: string, ctx: CliContext): AppInfo 
       // 非 JSON 的数据文件 = 手写脚本（同步列表读不了它的步骤；flow 的步骤本来就在运行期产生）。
       kind: p.endsWith(".json") ? "unknown" : "flow",
       error: p.endsWith(".json") ? "pack.json 不是合法 JSON" : null,
+      types: {}, toolSteps: 0, invariants: 0, hosts: [],
     };
   }
   return {
@@ -80,6 +120,7 @@ function infoOf(id: string, label: string, p: string, ctx: CliContext): AppInfo 
     steps: Array.isArray(pack.journey) ? pack.journey.length : 0,
     kind: pack.probe ? "measure" : Array.isArray(pack.journey) ? "journey" : "unknown",
     error: null,
+    ...packSummary(pack),
   };
 }
 

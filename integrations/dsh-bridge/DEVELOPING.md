@@ -21,6 +21,11 @@
 | `scripts/setup-links.mjs` | 链入依赖：工具链取自本仓库，宿主包取自 DSH 安装 |
 | `lib/` | 构建产物（git 忽略），入口 `lib/types/index.js` |
 
+**应用列表与 L3 格式**：`listApps` 先用文件系统扫描 `pack.json` / `flow.json` / `sources`
+（数据源、语义模板、旧包），再调用 checkout 自己的 `src/cli/main.ts apps list --json`
+把 **`app.mjs`**（声明式数据脚本与手写 flow 脚本）合并进来——L3 之后前者才是应用的标准形态，
+桥不自己解析任意代码，`types/toolSteps/invariants/hosts/origin` 全部来自引擎的同一份摘要。
+
 ## 构建与测试
 
 ```bash

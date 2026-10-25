@@ -825,7 +825,7 @@ describe('checkout under node_modules (git-install shape)', () => {
   function profileTree(withTsx: boolean): { repo: string; tsxCli: string } {
     const root = tmp('profile')
     const repo = path.join(root, 'node_modules', 'amberflow')
-    fs.mkdirSync(path.join(repo, 'src'), { recursive: true })
+    fs.mkdirSync(path.join(repo, 'src', 'app'), { recursive: true })
     fs.writeFileSync(path.join(repo, 'src', 'app', 'app-runner.ts'), 'process.exit(0)')
     const tsxCli = path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs')
     if (withTsx) {

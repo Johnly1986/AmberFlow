@@ -7,7 +7,7 @@
  * @module @deepseek-ai/dsh-amberflow-bridge/bridge
  */
 
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -350,6 +350,69 @@ export function appsDirsWith(repoPath: string, env: NodeJS.ProcessEnv = process.
  * @param env - environment for AMBERFLOW_HOME resolution.
  * @returns one summary per declared app, sorted by id; user apps shadow same-named fixtures.
  */
+/**
+ * The checkout's own `apps list --json` — the single-source view that understands the L3 formats
+ * (`app.mjs` declarative data scripts + hand-written flow scripts). The bridge's filesystem scanner
+ * predates L3 and only sees `pack.json` / `flow.json` / `sources`, so the two are merged here:
+ * filesystem rows keep the legacy/data-source/semantic-template families, CLI rows replace them for
+ * app.mjs apps (and add the richer declaration summary the engine computes).
+ *
+ * Only called when the checkout actually has a CLI (`src/cli/main.ts`); stub checkouts used by the
+ * tests have none, so they keep exercising the filesystem scanner alone.
+ */
+function checkoutCliApps(repoPath: string, env: NodeJS.ProcessEnv): AppSummary[] {
+  const main = path.join(repoPath, 'src', 'cli', 'main.ts')
+  if (!fs.existsSync(main)) return []
+  const runEnv = { ...process.env, ...env }
+  const res = spawnSync(process.execPath, ['--experimental-strip-types', main, 'apps', 'list', '--json'], {
+    cwd: repoPath, env: runEnv, encoding: 'utf8', timeout: 20_000, maxBuffer: 16 * 1024 * 1024,
+  })
+  if (res.status !== 0 || typeof res.stdout !== 'string') return []
+  let parsed: unknown
+  try { parsed = JSON.parse(res.stdout) } catch { return [] }
+  const envelope = asRecord(parsed)
+  const data = envelope === null ? null : asRecord(envelope['data'])
+  const rows = data === null ? [] : data['apps']
+  if (!Array.isArray(rows)) return []
+  const out: AppSummary[] = []
+  for (const raw of rows) {
+    const row = asRecord(raw)
+    if (row === null) continue
+    const id = asText(row['id'])
+    if (id === '') continue
+    const types: Record<string, number> = {}
+    const rawTypes = asRecord(row['types'])
+    if (rawTypes !== null) {
+      for (const [kind, count] of Object.entries(rawTypes)) {
+        if (typeof count === 'number') types[kind] = count
+      }
+    }
+    const kinds = Object.keys(types)
+    const engineKind = asText(row['kind'])
+    const totalSteps = typeof row['steps'] === 'number' ? row['steps'] : 0
+    const toolSteps = typeof row['toolSteps'] === 'number' ? row['toolSteps'] : 0
+    out.push({
+      id,
+      label: asText(row['label'], id),
+      goal: asText(row['goal']),
+      // 引擎的 steps 是"旅程总步数"；桥对模型展示的是 web 步 + tool 步两列（不重复计数）。
+      steps: Math.max(0, totalSteps - toolSteps),
+      toolSteps,
+      types,
+      requires: kinds.filter(kind => LOCAL_SERVICE_REQUIREMENTS[kind] !== undefined).sort(),
+      invariants: typeof row['invariants'] === 'number' ? row['invariants'] : 0,
+      origin: asText(row['origin'], 'hand-written'),
+      // 手写 flow 脚本在引擎里是 "flow"：对模型来说它仍是一个可直接 `_run` 的旅程型应用
+      // （只是没有静态步骤表），所以桥把它归到 journey，模型不会误以为它是测量/模板。
+      kind: engineKind === 'measure' ? 'probe' : 'journey',
+      hosts: Array.isArray(row['hosts'])
+        ? (row['hosts'] as unknown[]).filter((h): h is string => typeof h === 'string')
+        : [],
+    })
+  }
+  return out
+}
+
 export function listApps(repoPath: string, env: NodeJS.ProcessEnv = process.env): AppSummary[] {
   const dirs = appsDirsWith(repoPath, env)
   if (!dirs.some((d) => fs.existsSync(d))) {
@@ -441,7 +504,11 @@ export function listApps(repoPath: string, env: NodeJS.ProcessEnv = process.env)
     })
   }
   }
-  return out.sort((a, b) => a.id.localeCompare(b.id))
+  // 合并 checkout 的 `apps list --json`：L3 的 app.mjs 应用只有它能读；按 id 覆盖
+  // 文件系统扫描对同一 id 的分类（例如同时有 sources/ 与 app.mjs 的应用不该被当成 data-source）。
+  const byId = new Map(out.map(row => [row.id, row] as const))
+  for (const row of checkoutCliApps(repoPath, env)) byId.set(row.id, row)
+  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))
 }
 
 /**
