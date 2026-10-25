@@ -60,13 +60,14 @@
 
 ## 5. 未修复 / 接受为残余（记录，不假装）
 
-1. **语法错误无行号**：problem 只有 `Unexpected token '}'`（有脚本路径头）。需要 source-map 整形，收益中等。
-2. `run --dry-run --json` 在**加载失败**时 envelope 无 `problems`（message/hint 有真实原因）。
-3. `amber doctor --help` 混入其它命令的旗标（registry 的通用 flags 组装问题，历史遗留）。
-4. `ctx.openPage` 指向仓库内不存在的文件时 dry 仍绿（真跑 `ERR_FILE_NOT_FOUND`；可静态 stat，未做）。
-5. flow 应用在 `apps:suite` 的 `hint 覆盖` 列恒 0/0（hint 是运行期参数，静态数不出来；文档已说明）。
+1. ~~语法错误无行号~~ → **已修**（B1）：dry 运行期错误带 `at app.mjs:行:列`，语法错误用 `node --check` 回填 `app.mjs:行`。
+2. ~~`run --dry-run --json` 加载失败无 problems~~ → **已修**（B2）：envelope 的 `data.problems` 带真因。
+3. ~~`amber doctor --help` 混入其它命令旗标~~ → **已修**（B3）：`--kind/--dir/--print/--force` 只出现在 `apps` 帮助里。
+4. ~~`ctx.openPage` 指向不存在文件时 dry 仍绿~~ → **已修**（B4）：dry 静态检查仓库内相对路径存在性（带 `?query` 不误判）。
+5. ~~suite 的 flow 行 hint 覆盖列恒 0/0~~ → **已修**（B5）：显示"-（flow 运行期）"且不参与声明面聚合。
 6. 脚本沙箱未做（信任边界仍是"用户作用域 + `AMBERFLOW_NO_SCRIPTS=1` + `script_sha256`"）。
 7. ~~代理 C 运行失败~~ → **已复验**（见 §6）；复验暴露的文档口径问题已在 §7 修正。
+8. 仍接受：R9（suite 无"步骤失败"列）、matrix 对用户作用域 flow 脚本计逻辑行（仅文档）、flow 运行期配置错误首错即停（安全设计）。
 
 
 ## 6. 二轮复验（2026-10-25，修复提交后）

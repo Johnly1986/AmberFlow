@@ -207,6 +207,21 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
     } catch (err) {
       const why = err instanceof Error ? err.message : String(err);
       const missing = /not found|ENOENT|no such/i.test(why);
+      if (bool(v["dry-run"]) && (bool(v.json) || ctx.globals.json)) {
+        // 机器可读的 dry-run 信封必须能区分"加载失败"与"没问题"：problems 里放真因。
+        const envelope = successEnvelope("run", {
+          mode: "app", dry_run: true, app, problems: [why],
+        }, { exitCode: 2, next: ["amber apps check <应用|脚本>", "amber apps list"] });
+        envelope.ok = false;
+        envelope.error = {
+          code: "USAGE",
+          message: missing ? `找不到应用 '${app}'` : `应用 '${app}' 无法加载`,
+          hint: why,
+          next: ["amber apps check <应用|脚本>"],
+        };
+        emitJson(ctx, envelope);
+        return 2;
+      }
       throw usageError(missing ? `找不到应用 '${app}'` : `应用 '${app}' 无法加载`, {
         hint: why,
         next: ["amber apps list", "amber apps check <应用|脚本>"],

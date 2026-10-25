@@ -305,13 +305,13 @@ npm run verify && bash bench/smoke.sh        # 先确认基线是绿的
 | **P0** | ✅ 完成 | `c6e7486` / `5c2c37e` / `4333a2e` | 单语法差分/契约测试；`apps:gen --check` 8/8；六层对拍 67/67；`verify` exit 0 |
 | **L1** | ✅ 完成 | `34a6a81` / `94bd1b5` | 两应用 0 diff；24 条新测试；`apps/`+`tsconfig.json` 零改动；`verify` exit 0 |
 | **L2 核心** | ✅ 完成 | `ebe2c0a` | flow 夹具真实跑通（1.9s、不变量成立）；dry/replay/预算/版本闸门 13+9 条测试；141 条 apps/CLI 回归绿 |
-| L2 试点（3 应用） | ◐ 部分 | — | 已用 `flow-demo-app` 覆盖 web 4 步 + 运行期循环；`checkin-binding` / `ip-config` / `transfer-trekly` 的 loop 版与 dry-vs-journey 对照待做 |
-| S2 录制产脚本 | ⬜ 未开始 | — | 门禁口径已定（0 前向回放） |
-| L3 删 JSON | ⬜ 未开始 | — | 迁移面与重冻协议见 §7 |
+| L2 试点（3 应用） | ◐ 部分 | — | `flow-demo-app`（web 4 步 + 运行期循环）与 `flow-ip-config`（4 行循环 + 运行期 if，与 journey 逐字段对照，`tests/ctx-pilots.test.ts`）已完成；`checkin-binding` / `transfer-trekly` 的 loop 版仍待做（见 §18） |
+| S2 录制产脚本 | ✅ 已具备（文档回填） | `926cd7d`/`6ac541d` | `learn` 现在写 `app.mjs`（数据脚本 + `recordedFrom`），0 前向回放门禁不变；`tests/learn.test.ts` 在 114 文件全量里通过。若要求**录成 flow 形态**则另计（backlog） |
+| L3 删 JSON | ✅ 完成 | `461c647`…`07f72a6` | 见 §15–§17：21 个 app.mjs、pack.json 清零、对拍未重冻、两轮子代理验收 |
 
 **L2 实现中记录的两处偏差**：
 1. `validatePack` 新增 `allowEmptyJourney`：flow 脚本没有静态旅程是**合法形态**，否则每个 flow 脚本都会被"journey 必须非空"挡住；步骤级校验移到每次 `ctx.step`（同一套 walker）。
-2. `ctx.run`/`ctx.dangerous`/`openPage` 未接线（见 `L2_CTX_API_DRAFT.md` §12 的"未接线"清单）——L2 的验收试点都是浏览器步，工具步接线留到 S2/L3 前。
+2. ~~`ctx.run`/`ctx.dangerous`/`openPage` 未接线~~ → 已全部接线（`ctx.run/dangerous` 见 `12c22b2`；`openPage/extract/read.attr` 见 `6ac541d` 与 `docs/L2_CTX_API_DRAFT.md` §12）。
 
 ---
 
@@ -414,3 +414,20 @@ L2 草案里最后三个"未接线"成员与套件验收面已补齐：
 - **R8 低**：`ctx.done()` 之后禁止再动作（dry 与真实同权）；
 - **R9 低**：接受（flow 作者自管控制流；套件无"步骤失败"列）——记录在验收文档残余项。
 回归：`tests/acceptance-fixes.test.ts` 扩到 30 条（R1–R8 全有反例）。
+
+
+---
+
+## 18. 剩余工作 backlog（2026-10-25 收口）
+
+以下**不是未完成的半成品**：主链路（P0→L3 + 验收）已合入 `origin/main` 且门禁全绿；这里是需要产品/排期决策的后续项。
+
+| # | 项目 | 现状 | 剩余 | 规模 |
+|---|---|---|---|---|
+| A1 | `flow.json` / `transfer/specs` 也脚本化（S6+） | 按 L3.4 有意保留（SemanticFlow / transfer 生成器的输入，不是应用格式） | 重写两个子系统与其对拍台；需产品确认是否推进"完全去 JSON" | 大，独立立项 |
+| A2 | S2 的"flow 形态录制" | `learn` 已产数据脚本（等价 L1 声明式 + 回放门禁） | 若要录成 `flow(ctx)` 形态（循环/条件）是新增工作 | 中（3–5 人日量级，未估算确认） |
+| A3 | L2 试点收尾 | `flow-demo-app` / `flow-ip-config` 已完成 | `checkin-binding`（具名绑定+确认）、`transfer-trekly`（命令闭集+滑块）的 flow 版 + dry-vs-journey 对照 | 小–中 |
+| A4 | `--watch` / `--resume` | 未实现（全仓无 `--watch`；`run --resume` 不存在） | 计划 §5 曾列为 CLI 交付物；需决定是否仍要（`--resume` 对脚本应用应显式拒绝） | 中 |
+| C1 | 脚本沙箱 | 无；信任边界 = 用户作用域 + `AMBERFLOW_NO_SCRIPTS=1`（8 入口已验证不 import）+ `script_sha256` | 沙箱化（isolate/worker/权限面）是产品化前置 | 大 |
+| C2 | 真模型环境验收 | 本机无 ONNX（`models/` 空）：suite 真模型臂、bench 模型侧、dsh-bridge 在 smoke 里 SKIP | 在有产物机器跑 `npm run apps:suite`、`bench:fixtures`；DSH 环境跑 bridge 测试 | 环境依赖 |
+| B1 | 残余小修 | 本轮已修：错误行号、`run --dry-run --json` 的 problems、doctor help 串台、openPage 文件存在性、suite flow hint 列标注 | 仍接受：suite 无"步骤失败"列（R9）、matrix 对用户作用域 flow 计逻辑行（仅文档） | — |

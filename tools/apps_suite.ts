@@ -92,6 +92,8 @@ export interface SuiteRow {
   cache_saved: number;
   /** 风险判定退化的原因（provider 的风险头调用失败 ⇒ 本次只用关键词规则）。缺字段 = 没退化。 */
   risk_degraded?: string;
+  /** flow 脚本应用：hint 是运行期调用参数，声明面的 hint 覆盖列对它不适用。 */
+  flow?: true;
 }
 
 /**
@@ -254,6 +256,7 @@ async function runFlowOne(
   const hints = packHintCoverage(pack);
   return {
     app: pack.id,
+    flow: true,
     steps,
     completed: res.completed,
     skipped: 0,
@@ -504,7 +507,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const table = rows.map((r) => [r.app, String(r.steps), r.completed, String(r.skipped),
     r.invariants, `${r.model_asks}${r.conf_max !== null ? `(conf ${r.model_steps ? `✓` : r.conf_max.toFixed(2)})` : ""}`,
     String(r.reobserve), `${r.secs}s`, verdict(r), marginal(r),
-    r.hint_browser ? `${r.hint_hinted}(声明 ${r.hint_named})/${r.hint_browser}` : "-"]);
+    r.flow ? "-（flow 运行期）" : r.hint_browser ? `${r.hint_hinted}(声明 ${r.hint_named})/${r.hint_browser}` : "-"]);
   const widths = head.map((h, i) => Math.max(h.length, ...table.map((r) => r[i]!.length)));
   const line = (cells: string[]): string => cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
   console.log(line(head));
@@ -561,9 +564,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     ...(rungAdjudicated ? [["adjudicate(A2′)", rungAdjudicated] as [string, number]] : []),
   ];
   const dead = rungs.filter(([, n]) => n === 0).map(([k]) => k);
-  const hintHinted = rows.reduce((n, r) => n + r.hint_hinted, 0);
-  const hintNamed = rows.reduce((n, r) => n + r.hint_named, 0);
-  const hintBrowser = rows.reduce((n, r) => n + r.hint_browser, 0);
+  // flow 行没有静态 hint 覆盖（运行期参数）；把它们排除出聚合，避免用 0 稀释分母。
+  const hintRows = rows.filter((r) => r.flow !== true);
+  const hintHinted = hintRows.reduce((n, r) => n + r.hint_hinted, 0);
+  const hintNamed = hintRows.reduce((n, r) => n + r.hint_named, 0);
+  const hintBrowser = hintRows.reduce((n, r) => n + r.hint_browser, 0);
   if (hintBrowser > 0) {
     const pct = ((100 * hintHinted) / hintBrowser).toFixed(1);
     const npct = ((100 * hintNamed) / hintBrowser).toFixed(1);

@@ -29,7 +29,8 @@ amber apps explain my-app     # 人话：每一步做什么、完成条件、结
 amber run my-app --dry-run    # 预演：flow 打印调用序列；声明式打印展开后的计划
 ```
 
-- `check` 的 problems 带路径，可直接照着改；**dry 通过 ≠ 页面状态会成立**（它证明的是调用序列合法）。
+- `check` 的 problems 带路径，可直接照着改；flow 的运行期/语法错误会尽量带 `app.mjs:行:列`；
+  **dry 通过 ≠ 页面状态会成立**（它证明的是调用序列合法）。
 - flow 的配置错误一次报一个（迭代式）；语法错误只有 Node 的一句话（行号不在 problems 里）。
 
 ## 3. flow 脚本：形状与运行期面

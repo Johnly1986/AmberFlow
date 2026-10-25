@@ -15,7 +15,7 @@
 |---|---|---|---|
 | U1 | 高 | 没有脚手架：新用户只能照 README 抄一个 `app.mjs`。且 README 示例是 `export const meta/app`（手写声明式），而 L3 的同步工具链只认**带标记的固定形状**（`const META/DATA/JOURNEY`），照抄的脚本 `apps list` 不显示、按 id 找不到——文档与工具链对不上。 | ✅ `amber apps new <id>`（默认 flow 可跑骨架；`--kind data` 生成固定形状；`--print/--dir/--force`） |
 | U2 | 高 | 用户作用域的手写 `app.mjs` **完全不可按 id 使用**：`amber run hello` / `apps check hello` / `show` / `path` / `remove` 都报 "app pack not found"。两处原因：① 发现制只认带标记的数据脚本；② 按 id 找脚本拼成 `dir/<id>/app.mjs`（差一）。 | ✅ 发现制接受任意 `app.mjs`；按 id 与按路径等价（`tests/script-cli-ux.test.ts`） |
-| U3 | 中 | 坏作者错误的可迭代性：`apps check` 对 flow 只报**第一个**配置错误；语法错误只有 "Unexpected identifier 'is'"（无行号）。 | ◐ 消息保留；行号/聚合未做（单独立项） |
+| U3 | 中 | 坏作者错误的可迭代性：`apps check` 对 flow 只报**第一个**配置错误；语法错误只有 "Unexpected identifier 'is'"（无行号）。 | ✅ 行号已补（dry 运行期错误带 `at app.mjs:行:列`；语法错误在 import 失败时用 `node --check` 回填 `app.mjs:行`）。**聚合仍为首错**：运行期配置错误停在不安全点，语义上不该继续执行后续调用 |
 | U4 | 中 | `apps explain` 里每一步都显示 `→ about:blank`（step 未给 URL = 当前页），读起来像 bug。 | ✅ 显示"（当前页）" |
 
 ### 1.2 健壮性（用户会踩的坑）
@@ -63,9 +63,9 @@
 
 ## 四、明确未做（不假装）
 
-1. flow 脚本配置错误的**脚本行号**（需要 source map / 运行时栈整形；收益中等）。
-2. 脚本信任边界：脚本是**进程内任意代码**，防御仍是"用户作用域 + `--no-scripts` + 结果里的
+1. 脚本信任边界：脚本是**进程内任意代码**，防御仍是"用户作用域 + `--no-scripts` + 结果里的
    `script_sha256`"；沙箱化未做。
 3. `ctx.rows({row, fields})` 按 Q5 在 v1 关闭（`extract(name)` 已接线，是声明式替代）。
+4. flow 运行期配置错误的**多错聚合**（当前首错即停，属安全设计，不是可迭代性缺陷）。
 4. `apps:suite` 的 flow 行 `hint 覆盖` 列恒为 0/0（hint 是运行期调用参数，静态数不出来；
    看 `amber apps explain` 的 dry 序列，别拿 0 当"没用 hint"的证据）。

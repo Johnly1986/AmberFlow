@@ -11,6 +11,7 @@
  * 21 个既有包一个字节都不动；`AMBERFLOW_NO_SCRIPTS=1` 强制走旧路径。
  */
 import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -109,6 +110,42 @@ export const lowerScriptApp = lowerDeclarative;
  * 加载并校验一个应用脚本。**任何契约/校验错误都在这里抛**（带脚本路径与逐条 problem），
  * 绝不"降级成没加载到"：脚本存在但坏了，就是配置错误，不许静默回退到旧 JSON。
  */
+/**
+ * 从异常栈里找"脚本文件:行:列"（ESM 帧形如 `at flow (file:///…/app.mjs:12:13)`）。
+ * 目的：flow 的配置/语法错误在 check/explain 时能指向**作者代码行**（审计 U3）。
+ */
+export function scriptErrorLocation(err: unknown, scriptPath: string): string | null {
+  if (!(err instanceof Error) || typeof err.stack !== "string") return null;
+  const href = pathToFileURL(scriptPath).href;
+  const candidates = [href, scriptPath];
+  for (const line of err.stack.split("\n")) {
+    for (const token of candidates) {
+      const idx = line.indexOf(token);
+      if (idx < 0) continue;
+      const rest = line.slice(idx + token.length);
+      const m = rest.match(/^:(\d+):(\d+)/) ?? rest.match(/^:(\d+)/);
+      if (m) return `${path.basename(scriptPath)}:${m[1]}${m[2] === undefined ? "" : `:${m[2]}`}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * 语法错误的行号：ESM 的 SyntaxError 栈里**没有**用户文件帧（Node 只在 loader 内部失败），
+ * 所以在 import 失败时用 `node --check` 复核一次（只在错误路径跑，正常加载零开销）。
+ */
+function syntaxCheckLocation(scriptPath: string): string | null {
+  try {
+    const res = spawnSync(process.execPath, ["--check", scriptPath], { encoding: "utf8", timeout: 10_000 });
+    const text = String(res.stderr ?? "");
+    const m = text.match(/^(.*?):(\d+)\s*$/m);
+    if (m !== null && path.resolve(m[1]!) === path.resolve(scriptPath)) {
+      return `${path.basename(scriptPath)}:${m[2]}`;
+    }
+  } catch { /* 取不到行号就退回纯消息 */ }
+  return null;
+}
+
 export async function loadScriptApp(idOrPath: string): Promise<LoadedScriptApp> {
   // 信任边界：`AMBERFLOW_NO_SCRIPTS=1` 时**一个脚本都不 import**（脚本是进程内任意代码）。
   // 以前只有 resolveApp 绕开脚本，但 apps explain/emit 直接调本函数 —— env 挡不住顶层副作用（实测）。
@@ -122,7 +159,14 @@ export async function loadScriptApp(idOrPath: string): Promise<LoadedScriptApp> 
       + `(looked for ${SCRIPT_FILENAMES.join("/")} under ${appDirs().join(", ")})`);
   }
   const source = fs.readFileSync(scriptPath);
-  const mod = (await import(pathToFileURL(scriptPath).href)) as ScriptModule;
+  let mod: ScriptModule;
+  try {
+    mod = (await import(pathToFileURL(scriptPath).href)) as ScriptModule;
+  } catch (e) {
+    const loc = scriptErrorLocation(e, scriptPath) ?? syntaxCheckLocation(scriptPath);
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`app script ${scriptPath}${loc ? ` (at ${loc})` : ""}: import failed: ${msg}`);
+  }
   if (typeof mod.meta !== "function") throw new Error(`app script ${scriptPath}: missing "export const meta = (kit) => ({...})"`);
   if (typeof mod.flow === "function" && typeof mod.app === "function") {
     // 静默选一个会让另一个变成永不校验/永不执行的死代码（实测：app 里非法字段也全绿）。
@@ -244,8 +288,10 @@ export async function dryRunFlow(loaded: LoadedScriptApp, opts: {
   try {
     await loaded.flow(ctx);
   } catch (e) {
-    if (e instanceof StopError) problems.push(`${e.code}: ${e.message}`);
-    else problems.push(`flow threw: ${e instanceof Error ? e.message : String(e)}`);
+    const loc = scriptErrorLocation(e, loaded.scriptPath);
+    const at = loc === null ? "" : ` (at ${loc})`;
+    if (e instanceof StopError) problems.push(`${e.code}: ${e.message}${at}`);
+    else problems.push(`flow threw: ${e instanceof Error ? e.message : String(e)}${at}`);
   }
   // “声明了不变量但没验收”在 dry 路径上通常就能看出来（除非 done 只在不可达分支）：
   // 缺失时给一条 problem，避免 check 假绿后真跑才报 missing_done。

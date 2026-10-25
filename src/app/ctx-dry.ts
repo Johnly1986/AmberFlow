@@ -8,7 +8,11 @@
  *
  * 不做的事：不验证页面状态、不判完成（那必须有真页面）。dry 的成功**不代表**运行会成功。
  */
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { disallowedHost } from "../engine/executor.ts";
+import { REPO } from "../flow/flow.ts";
 import { validateSignalSpec } from "../engine/signals.ts";
 import { validateCommands } from "../engine/actions.ts";
 import { validateToolSignal } from "../browser/tool-signals.ts";
@@ -60,6 +64,25 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
    */
   const assertNotDone = (label: string): void => {
     if (doneCalled) throw new StopError("config_error", `${label}: ctx.done() was already called; no actions after the end-state acceptance`);
+  };
+
+  /**
+   * dry 的静态可判定项：**仓库内相对路径**必须存在（真跑 `goto` 会 ERR_FILE_NOT_FOUND）。
+   * 带 scheme 的 URL（http/file 绝对路径/运行时产物）不做存在性检查——它们可能由前序步骤生成。
+   */
+  const assertNavigable = (rawUrl: string, label: string): void => {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(rawUrl)) return;
+    // 与真实导航同口径：`?query`/`#hash` 是查询，不是文件名的一部分。
+    let file: string;
+    try {
+      file = fileURLToPath(new URL(`file://${path.resolve(REPO, rawUrl)}`));
+    } catch {
+      return;
+    }
+    if (!fs.existsSync(file)) {
+      throw new StopError("config_error",
+        `${label}: ${JSON.stringify(rawUrl)} does not exist under the repo root (dry check; the real run would fail to open it)`);
+    }
   };
 
   const assertHost = (rawUrl: string, label: string): void => {
@@ -124,6 +147,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     log: (msg) => { pushEvent(trace, { call: "log", desc: msg }); },
     open: async (u) => {
       assertNotDone("ctx.open");
+      assertNavigable(u, "ctx.open");
       const url = resolveCtxUrl(u);
       assertHost(u, "ctx.open");
       currentUrl = url;
@@ -142,6 +166,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
           `ctx.openPage(${JSON.stringify(role)}): no such page role in meta.site.pages`
           + ` (known: ${known.length ? known.join(", ") : "none declared"})${known.length ? "" : " — declare meta.site.pages or use ctx.open(url)"}`);
       }
+      assertNavigable(url, `ctx.openPage(${JSON.stringify(role)})`);
       assertHost(url, `ctx.openPage(${JSON.stringify(role)})`);
       const resolved = resolveCtxUrl(url);
       currentUrl = resolved;
@@ -154,6 +179,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
         ...(isObj(req?.done) && Object.keys(req.done).length ? validateSignalSpec(req.done, "ctx.arrive") : []),
       ];
       if (p.length) throw new StopError("config_error", p.join("；"));
+      assertNavigable(u, "ctx.arrive");
       assertHost(u, "ctx.arrive");
       const resolved = resolveCtxUrl(u);
       currentUrl = resolved;
@@ -166,6 +192,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       const p = validateStep(`ctx.step(${JSON.stringify(desc)})`, req);
       if (p.length) throw new StopError("config_error", problems(p).join("；"));
       const effectiveUrl = req.url ?? (currentUrl === "about:blank" ? undefined : currentUrl);
+      if (req.url !== undefined) assertNavigable(req.url, `ctx.step(${JSON.stringify(desc)})`);
       if (effectiveUrl !== undefined) assertHost(effectiveUrl, `ctx.step(${JSON.stringify(desc)})`);
       if (req.url !== undefined) currentUrl = resolveCtxUrl(req.url);
       return recordStep(desc, req.done);
