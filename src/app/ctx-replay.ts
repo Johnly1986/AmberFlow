@@ -79,9 +79,10 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
     budget,
     log: (msg, data) => { nextEvent("log", { desc: msg }); void data; },
     open: async (u) => {
-      // trace 里记的是**解析后**的 URL（file://），脚本给的是仓库相对路径——调用序列只比调用本身。
-      nextEvent("open");
-      currentUrl = u;
+      // trace 里记的是**解析后**的 URL（file://），脚本给的是仓库相对路径——调用序列只比调用本身；
+      // currentUrl 用 trace 里的值，保证 `ctx.url()` 在 dry/真实/replay 三处一致。
+      const ev = nextEvent("open");
+      currentUrl = typeof ev.url === "string" && ev.url ? ev.url : u;
     },
     openPage: async (role) => {
       const ev = nextEvent("openPage", { desc: role });
@@ -96,6 +97,7 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
     step: async (desc, req) => {
       void req;
       const ev = nextEvent("step", { desc });
+      if (typeof ev.url === "string" && ev.url) currentUrl = ev.url;
       consume();
       return stepResult(ev);
     },

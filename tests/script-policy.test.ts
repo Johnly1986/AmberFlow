@@ -71,6 +71,11 @@ export async function flow(ctx) { await ctx.done(); }
       const code = await appMain(["--app", "fh-app", "--force-hints", "off"]);
       expect(code).toBe(2);
       expect(logged.join("\n")).toContain("只适用于声明式应用");
+      // dry 分支曾提前 return、静默接受同一个旗标（子代理验收复现）——现在两处都拒绝。
+      logged.length = 0;
+      const dryCode = await appMain(["--app", "fh-app", "--force-hints", "off", "--dry"]);
+      expect(dryCode).toBe(2);
+      expect(logged.join("\n")).toContain("只适用于声明式应用");
     } finally {
       console.error = origErr;
       if (prev === undefined) delete process.env.AMBERFLOW_HOME; else process.env.AMBERFLOW_HOME = prev;

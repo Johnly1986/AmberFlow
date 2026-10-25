@@ -15,7 +15,10 @@ import { validateToolSignal } from "../browser/tool-signals.ts";
 import { createKit, type CommandDecl } from "./kit.ts";
 import { pushEvent, type AppTrace } from "./trace.ts";
 import { listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
-import { StopError, type Ctx, type CtxBudget, type SourceObservationView, type StepRequest, type StepResult } from "./ctx.ts";
+import {
+  normalizeCommandIds, resolveCtxUrl, StopError,
+  type Ctx, type CtxBudget, type SourceObservationView, type StepRequest, type StepResult,
+} from "./ctx.ts";
 
 export interface DryCtxDeps {
   pack: {
@@ -48,6 +51,20 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
   };
 
   const problems = (p: string[]): string[] => p.map((x) => `flow: ${x}`);
+  let doneCalled = false;
+
+  /**
+   * dry 也执行 **hosts 信封**（与真实 ctx 同一判定）：否则 `apps check` 会放过一个
+   * 真实运行必然 `host_not_allowed` 的脚本——那是"dry 假绿"（实测：openPage/arrive/step 都漏）。
+   */
+  const assertHost = (rawUrl: string, label: string): void => {
+    if (!hosts || hosts.length === 0) return;
+    const url = resolveCtxUrl(rawUrl);
+    if (disallowedHost(url, hosts)) {
+      throw new StopError("host_not_allowed",
+        `${label}: ${JSON.stringify(url)} is outside the declared hosts envelope (${hosts.join(", ")})`);
+    }
+  };
 
   const validateStep = (where: string, req: StepRequest): string[] => {
     const p: string[] = [];
@@ -62,7 +79,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       for (const c of req.act) {
         if (!isObj(c) || typeof c.op !== "string") { p.push(`${where}: command needs {op, ...} (build with kit.command())`); continue; }
       }
-      validateCommands(req.act as CommandDecl[], where, p, deps.slotKeys);
+      validateCommands(normalizeCommandIds(req.act as CommandDecl[]), where, p, deps.slotKeys);
     } else if (!isObj(req.act) || (req.act.kind !== "hint" && req.act.kind !== "hints")) {
       p.push(`${where}: act must be kit.hint()/kit.hints() or an array of kit.command(...)`);
     } else if (req.act.kind === "hint") {
@@ -101,10 +118,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     budget,
     log: (msg) => { pushEvent(trace, { call: "log", desc: msg }); },
     open: async (u) => {
-      const url = /^(https?|file):/i.test(u) ? u : u;
-      if (hosts && hosts.length && disallowedHost(url, hosts)) {
-        throw new StopError("host_not_allowed", `ctx.open: ${JSON.stringify(url)} is outside the declared hosts envelope (${hosts.join(", ")})`);
-      }
+      const url = resolveCtxUrl(u);
+      assertHost(u, "ctx.open");
       currentUrl = url;
       pushEvent(trace, { call: "open", url });
     },
@@ -120,8 +135,10 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
           `ctx.openPage(${JSON.stringify(role)}): no such page role in meta.site.pages`
           + ` (known: ${known.length ? known.join(", ") : "none declared"})${known.length ? "" : " — declare meta.site.pages or use ctx.open(url)"}`);
       }
-      currentUrl = url;
-      pushEvent(trace, { call: "openPage", desc: role, url });
+      assertHost(url, `ctx.openPage(${JSON.stringify(role)})`);
+      const resolved = resolveCtxUrl(url);
+      currentUrl = resolved;
+      pushEvent(trace, { call: "openPage", desc: role, url: resolved });
     },
     arrive: async (u, req) => {
       const p = [
@@ -129,16 +146,20 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
         ...(isObj(req?.done) && Object.keys(req.done).length ? validateSignalSpec(req.done, "ctx.arrive") : []),
       ];
       if (p.length) throw new StopError("config_error", p.join("；"));
-      currentUrl = u;
+      assertHost(u, "ctx.arrive");
+      const resolved = resolveCtxUrl(u);
+      currentUrl = resolved;
       checkBudget();
       budget.stepsUsed += 1;
-      pushEvent(trace, { call: "arrive", desc: req?.desc, url: u, ok: true });
-      return { ok: true, evidence: { url: u, attempts: 1, elapsedMs: 0 } };
+      pushEvent(trace, { call: "arrive", desc: req?.desc, url: resolved, ok: true });
+      return { ok: true, evidence: { url: resolved, attempts: 1, elapsedMs: 0 } };
     },
     step: async (desc, req) => {
       const p = validateStep(`ctx.step(${JSON.stringify(desc)})`, req);
       if (p.length) throw new StopError("config_error", problems(p).join("；"));
-      currentUrl = req.url ?? currentUrl;
+      const effectiveUrl = req.url ?? (currentUrl === "about:blank" ? undefined : currentUrl);
+      if (effectiveUrl !== undefined) assertHost(effectiveUrl, `ctx.step(${JSON.stringify(desc)})`);
+      if (req.url !== undefined) currentUrl = resolveCtxUrl(req.url);
       return recordStep(desc, req.done);
     },
     url: () => currentUrl,
@@ -218,6 +239,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       return { ok: true, evidence: { url: currentUrl, attempts: 1, elapsedMs: 0 } };
     },
     done: async () => {
+      if (doneCalled) throw new StopError("config_error", "ctx.done called twice");
+      doneCalled = true;
       pushEvent(trace, { call: "done", ok: true });
       return;
     },
@@ -245,6 +268,10 @@ function validateToolRun(
   }
   if (dangerous && (!Array.isArray(req?.dryRunArgs) || (req.dryRunArgs as unknown[]).length === 0)) {
     p.push("ctx.dangerous requires dryRunArgs (a failed dry run must never apply)");
+  }
+  const retries = Number((req as { retries?: unknown })?.retries ?? 0);
+  if (retries > 0 && (req as { idempotent?: unknown })?.idempotent !== true) {
+    p.push(`retries=${retries} needs idempotent: true (re-running a process can be irreversible)`);
   }
   return p;
 }

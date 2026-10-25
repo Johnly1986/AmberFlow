@@ -222,7 +222,7 @@ export interface SignalGrammar {
 }
 
 /** 浏览器/DOM 观察面的语法（`signal` 与 `when` 共用）。 */
-export const DOM_SIGNAL_GRAMMAR: SignalGrammar = { ops: SIGNAL_OPS, label: "signal" };
+export const DOM_SIGNAL_GRAMMAR: SignalGrammar = { ops: SIGNAL_OPS, label: "signal", listKnown: true };
 
 /**
  * **唯一**的信号语法走查器。返回 problem 字符串（与 `PlanningRules.problems` 同款口径：

@@ -205,9 +205,11 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
     try {
       resolved = await resolveApp(app);
     } catch (err) {
-      throw usageError(`找不到应用 '${app}'`, {
-        hint: err instanceof Error ? err.message : String(err),
-        next: ["amber apps list"],
+      const why = err instanceof Error ? err.message : String(err);
+      const missing = /not found|ENOENT|no such/i.test(why);
+      throw usageError(missing ? `找不到应用 '${app}'` : `应用 '${app}' 无法加载`, {
+        hint: why,
+        next: ["amber apps list", "amber apps check <应用|脚本>"],
       });
     }
     if (resolved.script?.mode === "flow") {

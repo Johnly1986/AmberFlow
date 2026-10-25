@@ -11,7 +11,7 @@
 | 导出 | `export const meta` + `export async function flow(ctx)` | `export const meta` + `export const app` |
 | 能写什么 | 普通 JS：循环、条件、重试、组合调用 | 纯数据：`journey` 步骤列表 + `invariants` |
 | 适合 | 有分支/循环/重试/需要看中间结果的流程 | 线性流程、由生成器产出、要能被工具同步比对 |
-| 工具链 | 异步读取（`apps show/check/expect/run/explain`） | 同步读取（矩阵/生成器/迁移工具也能读） |
+| 工具链 | 异步读取（`apps show/check/explain/run`） | 同步读取（矩阵/生成器/迁移工具也能读） |
 | 生成 | `amber apps new <id>`（默认） | `amber apps new <id> --kind data` |
 
 一条命令生成可跑骨架（用仓库自带的 `testpages/portal.html`，生成即可 check/dry-run）：
@@ -101,6 +101,9 @@ export async function flow(ctx) {
 
 - `ctx.extract(name)` 的字段选择器是**行内相对选择器**；`rows` 最多取 500 行（超出在 trace 里标 `truncated`）。
 - `ctx.rows({row, fields})` 是 Q5 明确**不开放**的新语法：调用会给结构化 `config_error` 指向 `extract(name)`。
+- `ctx.open` / `ctx.openPage` 之后 `ctx.url()` 已是**解析后**的 URL（仓库相对路径 → `file://`）；dry/replay/真实三处一致。
+- `ctx.arrive(url, {done})` 是**纯导航**：goto + 等信号，不做元素选择、不花模型（记录为 `arrive`，不是 `step`）。
+- **hosts 信封在 dry 期也执行**：`openPage` / `arrive` / `step({url})` 的越界主机在 `apps check` 就红。
 - dry 模式下 `extract` 返回 `[]`、`read.attr` 返回 `null`（没有页面）——脚本在 dry 期不要依赖观察值。
 - 观察类调用（text/value/count/attr/extract）都会进 trace，所以带读取的脚本可以 `--replay`。
 
@@ -162,7 +165,7 @@ const b = await ctx.run({
   只在非缺省时出现，并写明来源（`cli` / `pack` / `provider` / `default`）。
 - CLI：`--conf-floor N`、`--tiered-hint`、`--learn-hints` / `--hint-memory FILE`、`--ablate stub|rules-only`。
 - `--force-hints off` **只适用于声明式应用**：flow 的 hint 是脚本调用参数，没有声明层可剥——
-  CLI 会明确拒绝（exit 2），而不是静默无效。
+  CLI 会明确拒绝（exit 2，**含 --dry-run**），而不是静默无效。
 
 ## 8. 执行轨迹与重放（审计/交接）
 
@@ -173,7 +176,8 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 
 - `trace.done` + `stop_code` + 每次调用的 `{ok, stop_code}` 是审计事实；`result` 里另带 `reason`/`adapter`/耗时。
 - `inputs_sha256` 只含槽位与 hosts（**不含** outDir/runId）：重放因此可跨机器。
-- 真实运行两次的**结构**（调用序列 + 结果）应一致；耗时字段不参与比较（`sameEventStructure`）。
+- 真实运行两次的**结构**应一致：调用序列 + 结果（`result` 里除耗时外的字段）；耗时证据不参与比较
+  （`sameEventStructure`）。
 
 ## 9. 错误码与排查
 
@@ -186,6 +190,8 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `budget_exceeded` | 步预算/截止时间用完——检查死循环，或调大预算 |
 | `invariant_failed` | `ctx.done()` 时结束态不变量不成立——看是流程没走完还是页面变了 |
 | `trace_mismatch` | 重放时脚本与轨迹的调用序列不一致——版本/输入变了，重新跑而不是重放 |
+| `missing_done` | 声明了结束态不变量却从未调用 `ctx.done()`——验收没发生，不能报绿 |
+| `arrive_signal_not_held` | `ctx.arrive` 导航完成但 done 信号在超时内未成立 |
 | `dangerous` / `declined` / `dry-run-failed` / `tool-unavailable` / `needs_value` | 工具步的显式拒绝类别（`REFUSAL_LABELS` 有一句话解释 + 怎么补救） |
 | 其它（如 `max_steps`、`low_confidence`、`blocked`） | 执行器结构化停因，原样透出 |
 

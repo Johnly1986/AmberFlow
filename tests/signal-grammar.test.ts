@@ -60,7 +60,9 @@ describe("信号语法：唯一走查器（跨面构造性质）", () => {
 
   it("路径逐层展开（嵌套能定位到第几个孩子）", () => {
     const dom = validateSignalSpec({ all_of: [{ any_of: [{ magic: 1 }] }] }, "subgoal[3]");
-    expect(dom).toEqual(["subgoal[3].all_of[0].any_of[0]: unknown signal op 'magic'"]);
+    expect(dom).toEqual([
+      `subgoal[3].all_of[0].any_of[0]: unknown signal op 'magic' (known: ${Object.keys(DOM_SIGNAL_GRAMMAR.ops).join(", ")})`,
+    ]);
     const tool = validateToolSignal({ all_of: [{ any_of: [{ magic: 1 }] }] }, "step 2");
     expect(tool.join(" | ")).toContain("step 2.all_of[0].any_of[0]: unknown tool signal op 'magic'");
   });

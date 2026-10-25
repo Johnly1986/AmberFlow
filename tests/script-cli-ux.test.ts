@@ -118,6 +118,25 @@ describe("用户作用域的手写脚本：按 id 就能用", () => {
   });
 });
 
+describe("验收回归：坏脚本 explain 口径 / 手写脚本 label", () => {
+  it("坏脚本（只有 meta）→ apps explain exit 2（配置错误，不是 INTERNAL）", async () => {
+    const bad = path.join(ws.home, "bad-explain.mjs");
+    fs.writeFileSync(bad, `export const meta = () => ({ id: "bad", goal: "g" });`, "utf-8");
+    const r = await cli(["apps", "explain", bad]);
+    expect(r.code).toBe(2);
+    expect(r.out + r.err).not.toContain("未预期的内部错误");
+    expect(r.out + r.err).toMatch(/无法加载|needs either "export const app/);
+  });
+
+  it("手写 flow 脚本在 apps list --json 里 label 回退到目录名（不再空串）", async () => {
+    const r = await cli(["apps", "list", "--json"], { home: ws.home });
+    const hello = (r.json().data.apps as Array<{ id: string; label: string; kind: string }>)
+      .find((a) => a.id === "hello");
+    expect(hello?.kind).toBe("flow");
+    expect(hello?.label).toBe("hello");
+  });
+});
+
 describe("amber apps new：脚手架（可跑、可检查、两种形态）", () => {
   it("默认 flow：check 通过 + dry-run 可预演", async () => {
     const dir = tmpDir("new-flow");

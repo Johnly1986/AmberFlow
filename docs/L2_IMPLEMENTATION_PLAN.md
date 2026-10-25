@@ -372,3 +372,26 @@ L2 草案里最后三个"未接线"成员与套件验收面已补齐：
 | `apps:suite` 脚本臂 | 手写 flow 应用被识别并走 `runScriptApp`；步骤=实际执行数；决策账同口径 | `tests/apps-suite-script.test.ts` |
 | 决策账 | `runScriptApp` 汇总 `summarizeDecisions`（与 runApp 同一函数） | 套件行 model_asks 等字段 + ctx suite 测试 |
 | `apps list` | 手写脚本显示"flow 脚本（运行期步骤）"，不再"未知" | CLI 测试沿用 |
+
+
+### 17.1 子代理验收后的修复批（2026-10-25）
+
+4 个子代理独立验收（用户旅程 / ctx API / L3 打包 / 破坏性审计；打包代理运行失败，另派复验）后，
+按严重度修掉：
+- **flow 未调用 `ctx.done()` 却报绿**（声明了不变量）：现在 `ok=false, stop_code=missing_done`；
+- **dry 的 hosts 信封只守 `open`**：`openPage`/`arrive`/`step(url)` 现在与真实同一判定；
+- **flow 的 web 不变量 signal 不校验**：`validatePack` 现在对 `invariants[].signal` 走 `validateSignalSpec`；
+- **`ctx.arrive` 三实现漂移**：真实实现改为"goto + 等信号"（不选元素、不花模型），trace 记 `arrive`；
+- **`ctx.url()` 三实现分叉**：open/openPage/arrive 的 URL 统一解析（file://），replay 从 trace 恢复；
+- **`ctx.command()` 缺 id 不可用**：ctx 补稳定 id（`cmd<N>_<op>`），kit.command 也可显式给 id；
+- **cli 工具步 retries>0 未要求 idempotent**：dry 与真实 ctx 都拒绝；
+- **dry 允许 `ctx.done()` 两次**：dry 也报 `ctx.done called twice`；
+- **`sameEventStructure` 忽略 result**：现在纳入 result（剥离 `elapsed_ms`）；
+- **`AMBERFLOW_NO_SCRIPTS=1` 挡不住 explain/emit 的 import**：`loadScriptApp` 入口硬拒绝；
+- **app+flow 同时导出静默取 flow**：现在加载期报错；
+- **最小脚本缺 label 被拒**：label 回落 id；
+- **DOM 未知信号算子不列 known**：`DOM_SIGNAL_GRAMMAR` 加 `listKnown`；
+- **`apps explain` 加载失败报 INTERNAL**：改为 usageError(exit 2)；
+- **手写 flow 在 `apps list --json` 的 label 为空**：回退目录名；
+- **`--force-hints off` 在 --dry-run 下静默放过**：guard 提前到 dry 分支之前。
+回归测试：`tests/acceptance-fixes.test.ts`（18 条）+ `script-cli-ux`/`script-policy`/`ctx-site` 扩展。

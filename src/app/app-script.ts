@@ -110,6 +110,12 @@ export const lowerScriptApp = lowerDeclarative;
  * 绝不"降级成没加载到"：脚本存在但坏了，就是配置错误，不许静默回退到旧 JSON。
  */
 export async function loadScriptApp(idOrPath: string): Promise<LoadedScriptApp> {
+  // 信任边界：`AMBERFLOW_NO_SCRIPTS=1` 时**一个脚本都不 import**（脚本是进程内任意代码）。
+  // 以前只有 resolveApp 绕开脚本，但 apps explain/emit 直接调本函数 —— env 挡不住顶层副作用（实测）。
+  if (scriptsDisabled()) {
+    throw new Error(`scripts are disabled (AMBERFLOW_NO_SCRIPTS=1): refusing to import ${idOrPath}; `
+      + "unset it to run scripts, or keep using a legacy pack.json fixture");
+  }
   const scriptPath = resolveScriptPath(idOrPath);
   if (scriptPath === null) {
     throw new Error(`app script not found for ${JSON.stringify(idOrPath)} `
@@ -118,6 +124,11 @@ export async function loadScriptApp(idOrPath: string): Promise<LoadedScriptApp> 
   const source = fs.readFileSync(scriptPath);
   const mod = (await import(pathToFileURL(scriptPath).href)) as ScriptModule;
   if (typeof mod.meta !== "function") throw new Error(`app script ${scriptPath}: missing "export const meta = (kit) => ({...})"`);
+  if (typeof mod.flow === "function" && typeof mod.app === "function") {
+    // 静默选一个会让另一个变成永不校验/永不执行的死代码（实测：app 里非法字段也全绿）。
+    throw new Error(`app script ${scriptPath}: exports both "app" and "flow" — export exactly one `
+      + `(declarative app() OR runtime flow(ctx))`);
+  }
   const mode: "declarative" | "flow" = typeof mod.flow === "function" ? "flow" : "declarative";
   if (mode === "declarative" && typeof mod.app !== "function") {
     throw new Error(`app script ${scriptPath}: needs either "export const app = (kit) => ({...})" (declarative) `

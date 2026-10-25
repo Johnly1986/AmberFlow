@@ -119,8 +119,9 @@ describe("PlanningRules — the same rules validate LLM output and manual edits"
     const rules = new PlanningRules(2);
     expect(rules.problems(new TaskPlan("g", [{ desc: "x", signal: { css_text_equals: "#x" } }])))
       .toEqual(["subgoal[0]: css_text_equals needs 2 argument(s)"]);
-    expect(rules.problems(new TaskPlan("g", [{ desc: "x", signal: { nope: "1" } }])))
-      .toEqual(["subgoal[0]: unknown signal op 'nope'"]);
+    // 消息现在带 known 清单（与 tool/command 面同一口径）；前缀仍与 Python 参考口径一致。
+    expect(rules.problems(new TaskPlan("g", [{ desc: "x", signal: { nope: "1" } }]))[0])
+      .toMatch(/^subgoal\[0\]: unknown signal op 'nope'( \(known: .*\))?$/);
   });
 
   it("caps subgoal count and validates hint shapes", () => {

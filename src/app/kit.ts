@@ -116,7 +116,8 @@ export interface Kit {
   run(source: string, req: RunRequest): StepDecl;
   hint(hint: string): TargetDecl;
   hints(...hints: string[]): TargetDecl;
-  command(op: string, target?: string, value?: ValueBinding): CommandDecl;
+  /** 命令闭集的一项；`id` 可省略（ctx 会补稳定名），需要稳定审计名时自己给。 */
+  command(op: string, target?: string, value?: ValueBinding, id?: string): CommandDecl;
   value: {
     literal(v: string): ValueBinding;
     slot(key: string): ValueBinding;
@@ -212,10 +213,11 @@ export function createKit(): Kit {
     }),
     hint: (hint) => ({ kind: "hint", hint }),
     hints: (...hints) => ({ kind: "hints", hints }),
-    command: (op, target, value) => ({
+    command: (op, target, value, id) => ({
       ...(target === undefined ? {} : { target }),
       op,
       ...(value === undefined ? {} : { value }),
+      ...(id === undefined ? {} : { id }),
     }),
     value: valueKit,
   };

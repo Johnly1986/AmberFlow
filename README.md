@@ -222,30 +222,37 @@ npm run apps:suite                                      # 全部离线应用跑�
 | 一份 spec / Excel / 代码里的计划 | `npm run apps:gen -- --spec <key>`（`--check` 可进 CI：改 spec 忘重新生成就会红） |
 | 只想手写 | 复制下面的最小 `app.mjs` 起个新目录 |
 
-最小可跑的 `app.mjs`（声明式数据；选择器用仓库自带页面，复制即跑）：
+最小可跑的 `app.mjs`（**flow 形态**；选择器用仓库自带页面，复制即跑；`amber apps new` 生成的就是这一种）：
 
 ```js
-// apps/hello/app.mjs —— 声明式应用：数据 + 旅程 + 结束状态不变量（没有控制流）
-export const meta = () => ({
+// apps/hello/app.mjs —— flow 应用：控制流在脚本里（循环/条件/重试都是普通 JS）
+// 不需要 import：kit 由 meta(kit) 注入，ctx 由 flow(ctx) 注入。
+export const meta = (kit) => ({
   id: "hello",
   label: "最小离线应用",
   goal: "在门户页进入枪机/筒机录入",
   hosts: [],
+  slots: {},
   invariants: [
     { id: "on-camera-a", desc: "结束时停在 camera_a 录入页",
-      signal: { url_contains: "camera_a.html" } },
+      signal: kit.judge.url("camera_a.html") },
   ],
 });
 
-export const app = () => ({
-  exec: [{
-    desc: "点击「枪机 / 筒机 录入」",
-    start_url: "testpages/portal.html",
-    target_hint: "[data-test=entry-fixed]",
-    signal: { url_contains: "camera_a.html" },
-  }],
-});
+export async function flow(ctx) {
+  await ctx.open("testpages/portal.html");
+  const r = await ctx.step("点击「枪机 / 筒机 录入」", {
+    act: ctx.hint("[data-test=entry-fixed]"),
+    done: ctx.judge.url("camera_a.html"),
+  });
+  if (!r.ok) throw new Error(`失败：${r.stopCode} ${r.reason ?? ""}`);
+  await ctx.done();
+}
 ```
+
+> 想写"纯数据"形态（可被 `apps:matrix`/`apps:gen` 同步读取）用 `amber apps new <id> --kind data`
+> 或 `npm run apps:migrate`；固定形状见 [apps/README.md](apps/README.md) 与
+> [应用脚本作者指南](docs/APP_SCRIPT_AUTHORING.md) §4。
 
 ```bash
 npm run apps -- --app hello --out /tmp/hello   # 期望 exit 0 + "结果：**通过**"

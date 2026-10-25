@@ -1388,6 +1388,14 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     invariants = invariantsFromTrace(trace, pack ?? {});
   }
 
+  // 声明了结束态不变量却从未调用 ctx.done()：**验收根本没发生**。
+  // 以前这里 ok 仍为 true（suite 甚至会打"0/1 不变量 · 通过"）——那是最坏的一类假绿。
+  if (opts.replayTrace === undefined && ok && (pack.invariants ?? []).length > 0
+    && !trace.events.some((e) => e.call === "done")) {
+    ok = false;
+    stopCode = "missing_done";
+    stopReason = "flow ended without ctx.done(): declared end-state invariants were never verified";
+  }
   finishTrace(trace, {
     done: ok,
     ...(stopCode === undefined ? {} : { stop_code: stopCode }),
@@ -1556,6 +1564,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     console.error(`--force-hints 只接受 off（收到 ${JSON.stringify(forceHints)}）——它是消融旗标，只有"剥掉"这一档。`);
     return 2;
   }
+  // 脚本应用的 hint 是运行期调用参数，没有"声明层"可剥：在 **dry 分支之前**拒绝，
+  // 否则 `--dry-run --force-hints off` 会静默 exit 0（与文档/非 dry 行为不一致，实测）。
+  if (forceHints === "off" && scriptApp !== null && scriptApp.flow !== undefined) {
+    console.error("--force-hints off 只适用于声明式应用：flow 脚本的 hint 由脚本调用声明，没有可剥的声明层。");
+    return 2;
+  }
   // §provider 层：`--provider` 选决策模型（换模型做测试的那条路）；`--ablate` 保留为消融简写。
   // 解析与安装分开做（resolveProviderSpec），因为中间必须插进**决策缓存与咨询计数**——
   // 少了它们，`模型边际`/`梯级账单`/缓存命中率三组数就不存在了。
@@ -1668,12 +1682,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     cliConfFloor = n;
   }
 
-  // 脚本应用的 hint 是脚本里的调用参数，没有"声明层"可剥：--force-hints 在这里是**静默无效**，
-  // 所以直接拒绝（接受一个不生效的旗标 = 假账）。
-  if (forceHints === "off" && scriptApp !== null && scriptApp.flow !== undefined) {
-    console.error("--force-hints off 只适用于声明式应用：flow 脚本的 hint 由脚本调用声明，没有可剥的声明层。");
-    return 2;
-  }
   let result: AppRunResult;
   try {
     result = scriptApp !== null && scriptApp.flow !== undefined

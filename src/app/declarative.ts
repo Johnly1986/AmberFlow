@@ -290,6 +290,8 @@ export function lowerDeclarative(meta: ScriptMeta, draft: ScriptDraft): AppPack 
     pack[f.pack] = Array.isArray(v) ? [...v] : v;
   }
   if (Object.keys(sourceSlots).length) pack["source_slots"] = sourceSlots;
+  // label 是给人看的；没写就用 id（validatePack 要求 label，但最小脚本不该被"标签"挡住）。
+  if (typeof pack["label"] !== "string" || !String(pack["label"]).trim()) pack["label"] = String(id);
   void str;
   return pack as unknown as AppPack;
 }

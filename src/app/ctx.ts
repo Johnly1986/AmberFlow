@@ -189,8 +189,8 @@ export interface CtxDeps {
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** 相对仓库路径 → `file://`（与 app/bench 同一口径：包写仓库内路径，不写死绝对路径）。 */
-function resolveUrl(u: string): string {
+/** 相对仓库路径 → `file://`（与 app/bench 同一口径；dry/replay 也用这一份，host/URL 语义才同口径）。 */
+export function resolveCtxUrl(u: string): string {
   if (/^(https?|file):/i.test(u)) return u;
   // 与 `app-runner.startUrl` 同一口径：用 `new URL("file://" + path)` 而不是 `pathToFileURL`，
   // 因为后者会把 `?sn=CAM-1001` 当成文件名百分号编码掉（实测 ERR_FILE_NOT_FOUND）。
@@ -207,6 +207,18 @@ function assertAct(req: StepRequest): void {
   }
 }
 
+/**
+ * 命令闭集补 id：`ctx.command(...)` 不强制作者写 id，但执行器的闭集要求每个选项有名字。
+ * 缺省补「序号 + op」的稳定 id（不随运行变化；重放/forbidden 语义仍稳定）。
+ */
+export function normalizeCommandIds(commands: CommandDecl[]): CommandDecl[] {
+  return commands.map((c, i) => {
+    const rec = c as unknown as Record<string, unknown>;
+    if (typeof rec["id"] === "string" && String(rec["id"]).trim()) return c;
+    return { ...(c as object), id: `cmd${i + 1}_${String(rec["op"] ?? "op")}` } as CommandDecl;
+  });
+}
+
 /** 把 `StepRequest` 的目标声明摊成 `RunOptions` 的字段。 */
 function targetOptions(act: TargetDecl | CommandDecl[]): {
   targetHint?: string | null; targetHints?: string[] | null; commands?: CommandDecl[] | null;
@@ -217,7 +229,7 @@ function targetOptions(act: TargetDecl | CommandDecl[]): {
         throw new StopError("config_error", `ctx.step: act[${i}] is not a command (needs {op, ...}; build it with kit.command())`);
       }
     }
-    return { commands: act };
+    return { commands: normalizeCommandIds(act) };
   }
   if (!isObj(act) || (act.kind !== "hint" && act.kind !== "hints")) {
     throw new StopError("config_error", "ctx.step: act must be kit.hint()/kit.hints() or an array of kit.command(...)");
@@ -262,9 +274,10 @@ export function createCtx(deps: CtxDeps): Ctx {
 
   /** 所有导航的唯一实现（open / openPage 共用；hosts 信封在打开之前强制）。 */
   const navigate = async (
-    rawUrl: string, call: "open" | "openPage", label: string, timeoutMs?: number, desc?: string,
+    rawUrl: string, call: "open" | "openPage" | "arrive", label: string,
+    timeoutMs?: number, desc?: string, traceIt = true,
   ): Promise<void> => {
-    const url = resolveUrl(rawUrl);
+    const url = resolveCtxUrl(rawUrl);
     if (hosts && hosts.length && disallowedHost(url, hosts)) {
       throw new StopError("host_not_allowed", `${label}: ${JSON.stringify(url)} is outside the declared hosts envelope (${hosts.join(", ")})`);
     }
@@ -277,7 +290,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       throw new StopError("config_error", `${label}(${JSON.stringify(url)}) failed: ${e instanceof Error ? e.message : String(e)}`);
     }
     currentUrl = url;
-    pushEvent(trace, { call, url, ...(desc === undefined ? {} : { desc }) });
+    if (traceIt) pushEvent(trace, { call, url, ...(desc === undefined ? {} : { desc }) });
   };
 
   const runOneStep = async (desc: string, req: {
@@ -286,7 +299,7 @@ export function createCtx(deps: CtxDeps): Ctx {
   }): Promise<StepResult> => {
     checkBudget();
     const started = Date.now();
-    const startUrl = resolveUrl(req.url ?? currentUrl);
+    const startUrl = resolveCtxUrl(req.url ?? currentUrl);
     if (hosts && hosts.length && disallowedHost(startUrl, hosts)) {
       throw new StopError("host_not_allowed", `ctx.step: ${JSON.stringify(startUrl)} is outside the declared hosts envelope (${hosts.join(", ")})`);
     }
@@ -339,6 +352,11 @@ export function createCtx(deps: CtxDeps): Ctx {
     }
     if (deps.toolRunner === undefined) {
       throw new StopError("config_error", "ctx.run: no tool runner wired in this build");
+    }
+    // 与声明式适配器同一条纪律（load 期就该红；ctx 在运行期补一次，flow 也逃不掉）。
+    if ((req.retries ?? 0) > 0 && req.idempotent !== true) {
+      throw new StopError("config_error",
+        `ctx.run: retries=${req.retries} needs idempotent: true (re-running a process can be irreversible)`);
     }
     checkBudget();
     const started = Date.now();
@@ -460,8 +478,45 @@ export function createCtx(deps: CtxDeps): Ctx {
       if (!isObj(req) || !isObj(req.done) || !Object.keys(req.done).length) {
         throw new StopError("config_error", "ctx.arrive: done signal is required");
       }
-      const r = await runOneStep(req.desc ?? `到达 ${u}`, { url: u, done: req.done });
-      return r;
+      checkBudget();
+      const started = Date.now();
+      const label = req.desc ?? `到达 ${u}`;
+      // 纯导航：只 goto + 等信号，**不做元素选择、不花模型**（以前误走 step 路径：
+      // 记录成 step、还会因选不到元素而 no_model_runtime —— 三实现漂移，replay 必 mismatch）。
+      await navigate(u, "arrive", label, req.timeoutMs, req.desc, false);
+      const timeout = req.timeoutMs ?? 15_000;
+      const deadline = Date.now() + timeout;
+      let held = false;
+      let waitErr: unknown;
+      try {
+        const p = await page();
+        const pAny = p as unknown as { waitForTimeout?(ms: number): Promise<void> };
+        do {
+          try {
+            if (await checkSignal(p as never, req.done as never)) { held = true; break; }
+          } catch (e) { waitErr = e; break; }        // 坏信号 = 配置错误，别轮询到超时
+          if (typeof pAny.waitForTimeout === "function") await pAny.waitForTimeout(200);
+          else await new Promise((r) => setTimeout(r, 200));
+        } while (Date.now() < deadline);
+      } catch (e) { waitErr = e; }
+      budget.stepsUsed += 1;
+      const stopCode = held ? undefined : "arrive_signal_not_held";
+      const reason = held ? undefined
+        : `arrive: navigation finished but done-signal never held within ${timeout}ms`
+          + (waitErr instanceof Error ? ` (${waitErr.message})` : "");
+      const result: StepResult = {
+        ok: held,
+        ...(stopCode === undefined ? {} : { stopCode }),
+        ...(reason === undefined ? {} : { reason }),
+        evidence: { url: currentUrl, attempts: 1, elapsedMs: Date.now() - started },
+      };
+      pushEvent(trace, {
+        call: "arrive", desc: req.desc, url: currentUrl, ok: held,
+        ...(stopCode === undefined ? {} : { stop_code: stopCode }),
+        result: { ok: held, ...(stopCode === undefined ? {} : { stop_code: stopCode }),
+          ...(reason === undefined ? {} : { reason }), elapsed_ms: result.evidence.elapsedMs },
+      });
+      return result;
     },
     step: async (desc, req) => {
       assertAct(req);

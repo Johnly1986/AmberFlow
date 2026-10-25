@@ -559,7 +559,8 @@ amber apps explain $AMBERFLOW_HOME/apps/my-app/app.mjs    # 展开成人话计�
 amber apps emit    $AMBERFLOW_HOME/apps/my-app/app.mjs --out /tmp/my-app.json   # IR 快照（带 generated_from 血统）
 ```
 
-- **回退**：`AMBERFLOW_NO_SCRIPTS=1` 强制走旧 `pack.json` 路径（仅当目录里还留着 `pack.json`；L3 后仓库应用只有 `app.mjs`）。
+- **禁用脚本**：`AMBERFLOW_NO_SCRIPTS=1` 时**不 import 任何脚本**（信任边界；`apps explain/emit` 也拒绝）；
+  目录里若还留着旧 `pack.json`，仍可读。
 - **边界**：L1 是**声明式**脚本（构建期灵活，运行期零新语义）；运行期循环/条件（`flow(ctx)`）在 L2。
   模型侧数字（置信度/决策档）**不进脚本**：脚本只看 `stopCode`（红线②的 L2 形态）。
 - **等价证据**：`tests/fixtures/scripts/camera-entry.mjs`（web 4 步 + 3 不变量）与

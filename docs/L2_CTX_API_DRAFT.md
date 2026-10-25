@@ -433,5 +433,8 @@ export { meta, flow } from "../../legacy/from-pack.mjs";   // 内部：loadPack 
 - `ctx.rows(spec)`：按 Q5 决定 **v1 不开放**，调用给结构化 `config_error` 并指向 `extract(name)`。
 - 站点面 schema 的加载期校验：`site.pages` 必须是非空字符串映射、`listExtract` 每项必须是
   `{rows, fields}` 且选择器非空；`site` 块未知键报错（`validateSiteBlock`）。
+- **dry 也执行 hosts 信封**（open/openPage/arrive/step(url) 同一判定）；`open`/`openPage` 后
+  `ctx.url()` 是解析后的 URL，dry/replay/真实三处一致；`arrive` 是纯导航（goto+等信号，
+  记录为 `arrive` 而非 `step`）。
 **实现备注**：`StepResult.evidence` 实际只有 `{url, attempts, elapsedMs}`（草案里的 `elements` 暂无公开缝）；
 审计口径不变：脚本仍只看 `stopCode`，`method`/`conf` 只在 trace。

@@ -65,7 +65,7 @@ function infoOf(id: string, label: string, p: string, ctx: CliContext): AppInfo 
     // 手写脚本：能发现、但不假装知道它的步骤数（异步 show/check 才读得了）。
     // 旧版这里对所有非 JSON 文件报 "pack.json 不是合法 JSON"——L3 之后每个应用都中招。
     return {
-      id: path.basename(path.dirname(p)), label, path: p,
+      id: path.basename(path.dirname(p)), label: label || path.basename(path.dirname(p)), path: p,
       source: sourceOf(p, ctx), steps: 0,
       // 非 JSON 的数据文件 = 手写脚本（同步列表读不了它的步骤；flow 的步骤本来就在运行期产生）。
       kind: p.endsWith(".json") ? "unknown" : "flow",
@@ -539,9 +539,25 @@ async function appsExplain(args: string[], ctx: CliContext): Promise<number> {
   const target = parsed.positionals[0];
   if (!target) throw usageError("apps explain 需要一个脚本路径或应用 id", { next: ["amber apps list"] });
   if (parsed.positionals.length > 1) throw usageError("apps explain 只接受一个应用");
-  const resolved = await resolveApp(target);
+  let resolved: Awaited<ReturnType<typeof resolveApp>>;
+  try {
+    resolved = await resolveApp(target);
+  } catch (err) {
+    throw usageError(`无法加载应用 '${target}'`, {
+      hint: err instanceof Error ? err.message : String(err),
+      next: ["amber apps list", "amber apps new <id>"],
+    });
+  }
   const pack = resolved.pack;
-  const loaded = resolved.script ?? (await loadScriptApp(target));
+  let loaded: LoadedScriptApp;
+  try {
+    loaded = resolved.script ?? (await loadScriptApp(target));
+  } catch (err) {
+    throw usageError(`无法加载脚本 '${target}'`, {
+      hint: err instanceof Error ? err.message : String(err),
+      next: ["amber apps new <id>"],
+    });
+  }
   const invs = pack.invariants ?? [];
   if (loaded.mode === "flow") {
     // L2：步骤在运行期产生——explain 就是"dry 跑一遍，把调用序列渲染成人话"。

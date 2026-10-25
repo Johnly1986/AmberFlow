@@ -21,7 +21,7 @@ import path from "node:path";
 import { appsSearchPath } from "./amberflow-home.ts";
 import { REPO } from "../flow/flow.ts";
 import { PlanningRules, TaskPlan, type Subgoal } from "../engine/plan.ts";
-import type { SignalSpec } from "../engine/signals.ts";
+import { validateSignalSpec, type SignalSpec } from "../engine/signals.ts";
 import {
   CLI_STEP_KEYS, SHARED_STEP_KEYS, WEB_STEP_KEYS,
   getAppAdapter, listAppAdapterObjects, type AppAdapter, type ProcessStepDecl,
@@ -1054,6 +1054,9 @@ export function validatePack(pack: AppPack,
       for (const k of Object.keys(inv)) {
         if (!allowed.has(k)) p.push(`${where}.${k}: unknown key on a web invariant (known: id, desc, adapter, signal)`);
       }
+      // 信号语法也要在这里查：flow 应用没有 journey，旧路径（TaskPlan 展开）永远不会走，
+      // 于是 `signal: { url_containz: ... }` 这种 typo 在 check 期全绿、运行期才炸（实测）。
+      p.push(...validateSignalSpec(inv["signal"], `${where}.signal`));
       continue;
     }
     // 进程族探针不变量：声明面 = 该适配器的步键 + {id, desc, adapter, signal}；

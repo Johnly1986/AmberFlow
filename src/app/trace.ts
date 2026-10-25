@@ -158,10 +158,19 @@ export function replayCompatibility(
  * （dry 的等价性仍用逐字段的 `sameEventSequence`）。
  */
 export function sameEventStructure(a: AppTrace, b: AppTrace): boolean {
-  const pick = (t: AppTrace) => t.events.map((e) => ({
-    call: e.call, desc: e.desc ?? null, url: e.url ?? null,
-    ok: e.ok ?? null, stop_code: e.stop_code ?? null,
-  }));
+  const pick = (t: AppTrace) => t.events.map((e) => {
+    // result 里的耗时是每次都会变的证据，剥掉；其余（ok/stop_code/reason/rows…）属于结构。
+    let result: unknown = e.result ?? null;
+    if (typeof result === "object" && result !== null && !Array.isArray(result)) {
+      const { elapsed_ms: _ignored, ...rest } = result as Record<string, unknown>;
+      void _ignored;
+      result = rest;
+    }
+    return {
+      call: e.call, desc: e.desc ?? null, url: e.url ?? null,
+      ok: e.ok ?? null, stop_code: e.stop_code ?? null, result,
+    };
+  });
   return canonicalJson(pick(a)) === canonicalJson(pick(b));
 }
 
