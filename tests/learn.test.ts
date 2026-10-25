@@ -28,15 +28,39 @@ function tmp(tag = "learn"): string {
   TMP.push(d);
   return d;
 }
-afterEach(() => {
-  // chromium 的 persistent profile 在 close 之后仍可能有尾写（实测 ENOTEMPTY 偶发）；
-  // 递归删除带重试是清理，不是隐藏问题——测试本身的断言不变。
-  // Windows：SIGKILL 之后 leveldb 的 LOG 句柄释放可以拖到 1s+（实测 EBUSY），
-  // 重试窗口按平台放宽。
-  const retries = process.platform === "win32" ? 20 : 5;
-  while (TMP.length) {
-    fs.rmSync(TMP.pop()!, { recursive: true, force: true, maxRetries: retries, retryDelay: 200 });
+/**
+ * 清理一个临时目录：重试到时限；仍失败就**改名留待系统清理**。
+ *
+ * 为什么清理不能把测试弄红：chromium 的 persistent profile 在 close 之后仍可能有尾写
+ * （实测 `ENOTEMPTY .../Default` 偶发，机器负载高时更容易中）。断言一个字没变，
+ * 变的是"把清理失败的传染性切断"——否则一条测试基础设施的尾写会让整条 smoke 假红。
+ */
+function cleanupTemp(dir: string): void {
+  const deadline = Date.now() + (process.platform === "win32" ? 20_000 : 10_000);
+  for (;;) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== "ENOTEMPTY" && code !== "EBUSY" && code !== "EPERM") {
+        console.warn(`[learn.test] 临时目录清理失败（${code}）：${dir}`);
+        return;
+      }
+      if (Date.now() > deadline) {
+        try { fs.renameSync(dir, `${dir}.stale-${process.pid}-${Date.now()}`); } catch { /* 尽力而为 */ }
+        console.warn(`[learn.test] 临时目录清理超时（chromium 尾写），已改名留待系统清理：${dir}`);
+        return;
+      }
+      // afterEach 是同步上下文：同步小睡，不引入异步 IPC。
+      const until = Date.now() + 150;
+      while (Date.now() < until) { /* spin */ }
+    }
   }
+}
+
+afterEach(() => {
+  while (TMP.length) cleanupTemp(TMP.pop()!);
 });
 
 const ACTIONS = [
