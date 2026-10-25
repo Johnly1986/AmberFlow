@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { dryRunFlow, loadScriptApp } from "../src/app/app-script.ts";
 import { runScriptApp } from "../src/app/app-runner.ts";
 import { expandPack, loadPack } from "../src/app/app-pack.ts";
+import { resolveCtxUrl } from "../src/app/ctx.ts";
 import { REPO } from "../src/flow/flow.ts";
 
 const FLOW = path.join(REPO, "tests/fixtures/scripts/flow-ip-config.mjs");
@@ -25,13 +26,15 @@ describe("L2 试点：ip-config 循环版 == 既有 pack 展开", () => {
       .filter((e) => e.call === "step")
       .map((e) => ({
         desc: e.desc,
-        start_url: e.url,
+        // dry 的 trace 现在记录**解析后**的 URL（与真实/重放同一口径）；对照时把 journey 的
+        // 仓库相对 start_url 也解析一次再比。
+        start_url: e.url === undefined ? undefined : resolveCtxUrl(e.url),
         signal: (e.result as { done?: unknown } | undefined)?.done,
       }));
     const expanded = expandPack(loadPack(PACK));
     const expected = expanded.steps.map((s) => ({
       desc: s.desc,
-      start_url: s.subgoal?.start_url,
+      start_url: s.subgoal?.start_url === undefined ? undefined : resolveCtxUrl(String(s.subgoal.start_url)),
       signal: s.subgoal?.signal,
     }));
     expect(actual).toEqual(expected);
