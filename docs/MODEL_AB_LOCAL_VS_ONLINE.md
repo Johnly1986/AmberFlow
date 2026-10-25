@@ -106,3 +106,60 @@
   ```
 
   批量脚本：`/tmp/ab-run.sh`（本次临时脚本，逻辑即 §1 的两条命令 × 5 应用）。
+
+## 5. multilingual checkpoint 尝试（2026-10-25）
+
+### 5.1 为什么不是"装一个现成 ONNX"
+
+HF 仓库 `convaiinnovations/laya` 只提供 **safetensors**（英文根目录 + `multilingual/` 子目录 +
+`typed-decisions/` 子目录），**没有任何 ONNX 文件**；本仓库的本地 ONNX 端口只认
+`models/*.onnx` + `.onnx.data`（生产也只加载一份权重，`--model multilingual` 不切权重——这一点
+`docs/DECISION_MODEL_PURPOSE_REVIEW.md` 早有记录）。所以先按 POC 记录的口径自己导出了一份。
+
+### 5.2 导出与校验（一次性、本机）
+
+- 用已安装的 `laya 0.3.5` 加载 `multilingual` 权重（ModernBERT 编码器 + 2 层决策头），
+  `torch.onnx.export(dynamo=True, opset_version=21, external_data=True)` 导出；
+- I/O 契约与英文图完全一致：`input_ids [1,seq] i64 · attention_mask [1,seq] i64 ·
+  marker_pos [1,nopt] i64 · marker_mask [1,nopt] bool · qtype [1] i64` →
+  `logits [1,nopt] f32 · act_logits [1,2] f32`（seq/nopt 动态）；
+- 数值对拍（torch vs onnxruntime）：**logits max|diff| 1.19e-05，act_logits 9.0e-03**；
+- 产物：`models/laya_dec_multilingual.onnx`（5.7 MB）+ `.data`（1.2 GB），均在 `.gitignore` 的
+  `models/` 下，**未入库**；
+- 运行方式（tokenizer 必须显式指向多语言目录；config 会从同一层目录的 `rl_agent_config.json` 读到）：
+
+  ```bash
+  LAYA_ONNX_MODEL=$PWD/models/laya_dec_multilingual.onnx \
+  LAYA_TOKENIZER_DIR=~/.cache/huggingface/hub/models--convaiinnovations--laya/snapshots/*/multilingual/tokenizer \
+  amber run camera-entry --without-hints --provider laya-onnx --checkpoint multilingual
+  ```
+
+### 5.3 引擎修复：多语言 tokenizer 的特殊 token
+
+第一次跑 multilingual 时报告 `tokenizer … has no [CLS] token id` → provider 退化 rules-only。
+原因：英文 checkpoint 的 tokenizer 用 BERT 风格 `[CLS]/[SEP]/[MASK]/[PAD]`，multilingual
+（ModernBERT）用 `<bos>/<eos>/<mask>/<pad>`（其 tokenizer_config 把 cls/sep 映射到 bos/eos）。
+已给 `LayaTokenizer.fromDir` 加同义回退（先同名、再按 checkpoint 家族），并保持错误消息点名。
+改动在 `src/model/laya-onnx.ts`，英文图行为不变。
+
+### 5.4 结果（no-hint 同一批 CJK 应用；对照 §2 的英文本地模型）
+
+| 应用 | 本地英文 laya | 本地 multilingual laya |
+|---|---|---|
+| camera-entry | ✗ 0/4，1/3 不变量；咨询 4 / 执行 0；conf —；34.6 s | ✗ **1/4**，1/3；咨询 6 / **执行 3**；conf **0.217–0.379**；22.9 s |
+| ip-config | ✗ 4/8，1/3；咨询 4 / 执行 0；conf —；29.8 s | ✗ 4/8，1/3；咨询 4 / 执行 0；conf —（最高 0.16 仍低于闸门）；11.5 s |
+
+- **多语言确实换成了另一套权重/分词器**（同样的输入契约，camera-entry 的决策执行数 0→3、
+  置信度从不可用变为 0.217–0.379；`model_status=on`、无 provider 降级）。
+- 但在这批**剥掉 hint** 的 CJK 夹具上，它仍不足以过 0.25 的置信闸门（camera-entry 首步 0.12），
+  与 token-plan（0.36–1.00）差距明显。**结论：multilingual 是可用的一档本地备选，不是
+  "换个模型就能替代线上"**；不要为此调低 floor。
+- **正常路径（带 hint）下 multilingual 是安全的替换**：camera-entry 4/4、3/3 不变量、0 咨询、16.9 s
+  通过——模型只在规则/hint 兜不住时才出场，这正是产品要的分工。
+
+### 5.5 边界
+
+- 这份 multilingual ONNX 是**本机自行导出**（官方仓库没有 ONNX），未随仓库分发；换机需按 §5.2 重导。
+- 版本：`laya 0.3.5` / `torch 2.11.0+cpu` / `onnx 1.23.1` / `onnxruntime 1.30.0`；导出器为
+  `dynamo=True, opset 21`——与仓库 POC 记录（`node-port-poc/README.md`）一致。
+- 单次运行；未做 multilingual 的置信校准/温度重拟合，也不建议在生产里用未校准的本地 conf 决策。

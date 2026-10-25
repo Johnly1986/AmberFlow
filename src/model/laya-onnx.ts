@@ -260,17 +260,23 @@ export class LayaTokenizer implements SeqTokenizer {
     const { AutoTokenizer } = await import("@huggingface/transformers");
     const tok = (await AutoTokenizer.from_pretrained(dir)) as unknown as HfTokenizerLike;
     const added = readAddedTokens(path.join(dir, "tokenizer.json"));
-    const pick = (name: string, live: number | null | undefined): number => {
+    // English checkpoint 用 BERT 风格 `[CLS]/[SEP]/[MASK]/[PAD]`；multilingual checkpoint 的
+    // tokenizer（ModernBERT）用 `<bos>/<eos>/<mask>/<pad>`（tokenizer_config 把 cls/sep 映射到
+    // bos/eos）。同名优先级不变，缺失时按 checkpoint 家族回退——否则多语言 checkpoint 会被
+    // 误判成"没有 [CLS]，provider 不可用"（本次实测）。
+    const pick = (names: readonly string[], live: number | null | undefined): number => {
       if (typeof live === "number" && Number.isFinite(live)) return live;
-      const id = added[name];
-      if (typeof id !== "number") throw new Error(`tokenizer at ${dir} has no ${name} token id`);
-      return id;
+      for (const name of names) {
+        const id = added[name];
+        if (typeof id === "number") return id;
+      }
+      throw new Error(`tokenizer at ${dir} has no ${names.join("/")} token id`);
     };
     return new LayaTokenizer(tok, {
-      cls: pick("[CLS]", tok.cls_token_id),
-      sep: pick("[SEP]", tok.sep_token_id),
-      mask: pick("[MASK]", tok.mask_token_id),
-      pad: pick("[PAD]", tok.pad_token_id),
+      cls: pick(["[CLS]", "<bos>"], tok.cls_token_id),
+      sep: pick(["[SEP]", "<eos>"], tok.sep_token_id),
+      mask: pick(["[MASK]", "<mask>"], tok.mask_token_id),
+      pad: pick(["[PAD]", "<pad>"], tok.pad_token_id),
     });
   }
 

@@ -12,6 +12,7 @@
  *     argument (state where the criteria belong) cannot pass silently.
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -27,6 +28,24 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const REF_PATH = path.join(here, "..", "node-port-poc", "laya_parity_ref.json");
 const ONNX_PATH = process.env.LAYAA_ONNX_MODEL ?? process.env.LAYA_ONNX_MODEL ?? DEFAULT_ONNX_PATH;
 const TOKENIZER_DIR = process.env.LAYAA_TOKENIZER_DIR ?? process.env.LAYA_TOKENIZER_DIR ?? findDefaultTokenizerDir();
+
+/** The multilingual checkpoint's tokenizer from the HF cache, when that checkpoint is present. */
+function findMultilingualTokenizer(): string | null {
+  const root = process.env.HF_HOME ?? path.join(os.homedir(), ".cache", "huggingface");
+  const snapshots = path.join(root, "hub", "models--convaiinnovations--laya", "snapshots");
+  let names: string[];
+  try {
+    names = fs.readdirSync(snapshots);
+  } catch {
+    return null;
+  }
+  for (const name of names) {
+    const dir = path.join(snapshots, name, "multilingual", "tokenizer");
+    if (fs.existsSync(path.join(dir, "tokenizer.json"))) return dir;
+  }
+  return null;
+}
+const MULTILINGUAL_TOKENIZER = findMultilingualTokenizer();
 
 const MISSING = [
   fs.existsSync(ONNX_PATH) ? null : `graph ${ONNX_PATH}`,
@@ -244,3 +263,22 @@ it.runIf(HEAVY)("two options still run the model", async () => {
   expect(["a", "b"]).toContain(a.choice);
   expect(Object.keys(a.probabilities).sort()).toEqual(["a", "b"]);
 }, 120_000);
+
+
+describe("multilingual checkpoint tokenizer (skipped unless cached)", () => {
+  it.skipIf(MULTILINGUAL_TOKENIZER === null)(
+    "maps the ModernBERT special tokens (<bos>/<eos>/<mask>/<pad>) to cls/sep/mask/pad",
+    async () => {
+      // 英文 checkpoint 用 BERT 风格 `[CLS]/[SEP]/[MASK]/[PAD]`；multilingual 用
+      // `<bos>/<eos>/<mask>/<pad>`。缺这一层回退会把多语言 checkpoint 误判成
+      // "no [CLS] token id" 并静默降级到 rules-only（本次实测踩到）。
+      const tok = await LayaTokenizer.fromDir(MULTILINGUAL_TOKENIZER!);
+      expect(tok.clsTokenId).toBe(2);      // <bos>
+      expect(tok.sepTokenId).toBe(1);      // <eos>
+      expect(tok.maskTokenId).toBe(4);     // <mask>
+      expect(tok.padTokenId).toBe(0);      // <pad>
+      expect(tok.maskToken).toBe("<mask>");
+    },
+    30_000,
+  );
+});
