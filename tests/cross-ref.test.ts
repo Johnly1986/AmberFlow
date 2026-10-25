@@ -51,18 +51,29 @@ describe("appSourceNames：数据源名的唯一收集处", () => {
 
 describe("validateApp：对既有应用包零假阳性", () => {
   it("全部仓库应用包：validateApp 不产生 validatePack 之外的问题", () => {
-    const dirs = appDirs();
-    let seen = 0;
-    for (const dir of dirs) {
-      const p = appDataFile(dir);
-      if (p === null) continue;
-      const pack = loadPack(p);
-      const base = validatePack(pack);
-      const withSources = validateApp(pack);
-      expect(withSources.filter((x) => !base.includes(x)), pack.id).toEqual([]);
-      seen += 1;
+    // 只扫**仓库内**应用：用户作用域（$AMBERFLOW_HOME/apps）可能被并行测试/录制同时写入，
+    // 读到半个 JSON 是测试隔离问题，不是应用包的问题（本用例的断言对象是仓库快照）。
+    const home = path.join(tmp, "isolated-home");
+    fs.mkdirSync(path.join(home, "apps"), { recursive: true });
+    const prevHome = process.env.AMBERFLOW_HOME;
+    process.env.AMBERFLOW_HOME = home;
+    try {
+      const dirs = appDirs();
+      let seen = 0;
+      for (const dir of dirs) {
+        const p = appDataFile(dir);
+        if (p === null) continue;
+        const pack = loadPack(p);
+        const base = validatePack(pack);
+        const withSources = validateApp(pack);
+        expect(withSources.filter((x) => !base.includes(x)), pack.id).toEqual([]);
+        seen += 1;
+      }
+      expect(seen).toBeGreaterThan(10);          // 至少扫到仓库里的应用包
+    } finally {
+      if (prevHome === undefined) delete process.env.AMBERFLOW_HOME;
+      else process.env.AMBERFLOW_HOME = prevHome;
     }
-    expect(seen).toBeGreaterThan(10);          // 至少扫到仓库里的应用包
   });
 });
 
