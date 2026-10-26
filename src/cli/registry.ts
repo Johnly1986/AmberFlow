@@ -273,7 +273,7 @@ export function commandHelp(name: string): string {
     "常用选项：",
     ...spec.flags.map((f) => `  ${f}`),
     "",
-    "退出码：0=成功 1=未完成 2=用法/配置错误 3=被策略挡住 4=质量门禁（仅 dev） 130=中断",
+    "退出码：0=成功 1=未完成 2=用法/配置错误 3=未执行/被挡住 130=中断",
   ];
   if (spec.related.length) lines.push(`相关命令：${spec.related.join(" · ")}`);
   return lines.join("\n");

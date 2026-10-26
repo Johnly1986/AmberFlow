@@ -76,4 +76,4 @@ online/cases/probe/*.json
 
 ## 文档
 
-`README.md`、`ARCHITECTURE.md`、`docs/APP_SCRIPT_AUTHORING.md`、`docs/MANUAL_STEPS_AND_PACE.md`、`docs/DECISION_SERVICE_CONFIG.md`。不要引用已删除的旧报告/基准/应用清单。
+`README.md`、`ARCHITECTURE.md`、`docs/APP_SCRIPT_AUTHORING.md`、`docs/MANUAL_STEPS_AND_PACE.md`、`docs/DECISION_SERVICE_CONFIG.md`、`docs/AGENT_INTERFACE_IMPLEMENTATION.md`。不要引用已删除的旧报告/基准/应用清单。

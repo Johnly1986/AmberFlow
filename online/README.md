@@ -62,7 +62,16 @@ npm run online -- --tier deep
 npm run online -- --tier probe
 npm run online -- --case books-next-page --headed
 ```
+undefined用 JSON，不要解析人类可读表格：
 
+```bash
+npm run online -- --validate --json
+npm run online -- --list --json --tier all
+npm run online -- --tier smoke --json
+```
+
+`--list --json` 返回 `{ tier, cases: [{ id, site, tier, goal, tags }] }`；
+`--validate --json` 返回 `{ ok, sites, cases, valid }`；`--tier … --json` 返回 suite 摘要与 `evidence_dir`。
 证据写 `$AMBERFLOW_HOME/online-runs/<run-id>/` 或 `--out`；不要提交。退出码 `0/1/2/3`，跳过不等于通过。
 
 ## 站点选择

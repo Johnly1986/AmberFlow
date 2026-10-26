@@ -30,11 +30,11 @@ const USAGE = `usage: online [--validate] [--list] [--dry] [--tier smoke|core|de
   --site SITE  只跑一个站点
   --headed     显示浏览器窗口
   --out DIR    证据目录（缺省 $AMBERFLOW_HOME/online-runs/<run-id>）
-  --json       stdout 只输出 summary JSON
+  --json       list/validate/run 都输出结构化 JSON
   --require-all 有 blocked/unreachable/skipped 也按失败处理（定时任务用）`;
 
-function printCases(cases: Array<{ id: string; site: string; tier: string }>): void {
-  for (const c of cases) console.log(`${c.id}\t${c.site}\t${c.tier}`);
+function printCases(cases: Array<{ id: string; site: string; tier: string; goal: string }>): void {
+  for (const c of cases) console.log(`${c.id}\t${c.site}\t${c.tier}\t${c.goal}`);
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
@@ -75,7 +75,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 2;
   }
   if (cliBool(v, "validate")) {
-    console.log(`online: ${bundle.sites.size} site(s), ${bundle.cases.length} case(s) valid`);
+    if (cliBool(v, "json")) {
+      console.log(JSON.stringify({ ok: true, sites: bundle.sites.size, cases: bundle.cases.length, valid: true }, null, 2));
+    } else {
+      console.log(`online: ${bundle.sites.size} site(s), ${bundle.cases.length} case(s) valid`);
+    }
     return 0;
   }
 
@@ -94,7 +98,17 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     console.error(`没有选中任何 case（tier=${tierRaw}${cliString(v, "case") ? `, case=${cliString(v, "case")}` : ""}${cliString(v, "site") ? `, site=${cliString(v, "site")}` : ""}）`);
     return 2;
   }
-  if (cliBool(v, "list")) { printCases(cases); return 0; }
+  if (cliBool(v, "list")) {
+    if (cliBool(v, "json")) {
+      console.log(JSON.stringify({
+        tier: tierRaw,
+        cases: cases.map((c) => ({ id: c.id, site: c.site, tier: c.tier, goal: c.goal, tags: c.tags ?? [] })),
+      }, null, 2));
+    } else {
+      printCases(cases);
+    }
+    return 0;
+  }
   if (cliBool(v, "dry")) {
     console.log(JSON.stringify({
       tier: tierRaw, cases: cases.map((c) => ({ id: c.id, site: c.site, tier: c.tier, goal: c.goal, subgoals: c.subgoals?.length ?? 0 })),

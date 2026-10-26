@@ -148,6 +148,7 @@ docs/           当前有效的设计/接入文档
 - [应用脚本作者指南](docs/APP_SCRIPT_AUTHORING.md)
 - [人工步骤与运行节奏](docs/MANUAL_STEPS_AND_PACE.md)
 - [统一决策服务配置](docs/DECISION_SERVICE_CONFIG.md)
+- [Agent 接口实施文档](docs/AGENT_INTERFACE_IMPLEMENTATION.md)
 - [工程约束与 Agent 指南](CLAUDE.md)
 
 ## 开发
