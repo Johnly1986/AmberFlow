@@ -35,6 +35,7 @@ import { checkArtifacts, missingPieces, onnxModelPath, type ModelArtifacts } fro
 import { cliBool, cliString, parseCliArgs } from "../support/cli-args.ts";
 import { rcStatusLines } from "../support/rcfile.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
+import { parseRunDefaults } from "../support/run-defaults.ts";
 import {
   applySpecToRuntime, BUILTIN_LAYA_PROVIDERS, installDecisionProvider, listDecisionProviders, resolveProviderSpec,
 } from "../model/decision-provider.ts";
@@ -445,7 +446,12 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
   });
   if (!cli.ok) return cli.code;
   const v = cli.values;
-  const headless = !cliBool(v, "headful");
+  const { defaults: runDefaults, errors: runDefaultErrors } = parseRunDefaults();
+  if (runDefaultErrors.length) {
+    for (const e of runDefaultErrors) io.out(e);
+    return 2;
+  }
+  const headless = !(cliBool(v, "headful") || runDefaults.headful === true);
 
   if (cliBool(v, "help")) {
     io.out(USAGE);

@@ -47,6 +47,9 @@ export const RC_GROUPS: Array<{ group: string; keys: string[] }> = [
     "AMBERFLOW_REPO", "LAYAWEBUSE_REPO"] },
   { group: "路由偏好", keys: ["CAMERA_ROUTE"] },
   { group: "人工步骤与操作节奏", keys: ["AMBERFLOW_STEP_DELAY_MS", "AMBERFLOW_ACTION_DELAY_MS"] },
+  { group: "运行参数（CLI 旗标的配置默认值）", keys: [
+    "AMBERFLOW_HEADFUL", "AMBERFLOW_FORCE_HINTS", "AMBERFLOW_CONF_FLOOR",
+    "AMBERFLOW_TIERED_HINT", "AMBERFLOW_CONFIRM_SAFE", "AMBERFLOW_NO_SOURCES", "AMBERFLOW_QUIET"] },
 ];
 const KNOWN_KEYS = new Set(RC_GROUPS.flatMap((g) => g.keys));
 

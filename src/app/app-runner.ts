@@ -34,6 +34,7 @@ import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 import { ensureDir, userAppsDir } from "./amberflow-home.ts";
 import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../support/cli-args.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
+import { parseRunDefaults } from "../support/run-defaults.ts";
 import {
   cliRunDetailed, defaultDates, loadSource, previewTable, runSource, urlFor,
   type CliObservation, type PreviewTable,
@@ -176,6 +177,11 @@ export interface AppRunOptions {
   confFloor?: number;
   /** provider 自报的闸门刻度（`ProviderInfo.floor`；CLI 装了 provider 就传进来）。 */
   providerFloor?: number;
+  /**
+   * `confFloor` 的来源：`cli`（本次命令旗标）或 `config`（配置文件默认值）。
+   * 只影响 `effective_policy` 的账，不改变数值；缺省按 `cli` 记（兼容既有调用）。
+   */
+  confFloorSource?: "cli" | "config";
   /**
    * 人工步的接入钩子（测试/嵌入方）。缺省 = 终端交互提示；返回 false = 人放弃。
    * CLI 不提供"自动 yes"：人工步必须真的有人；这是它与"自动登录"的分界。
@@ -455,7 +461,7 @@ export interface AppRunResult {
     risk_ask: { value: "always" | "rules-only"; source: "pack" | "default" };
     reobserve: { value: boolean; source: "pack" | "default" };
     max_effective_repeats: { value: number; source: "pack" | "default" };
-    conf_floor: { value: number; source: "cli" | "pack" | "provider" | "default" };
+    conf_floor: { value: number; source: "cli" | "config" | "pack" | "provider" | "default" };
   };
   /** 本次实际用的决策提供者身份（CLI 解析后传进来；未提供则缺字段）。 */
   providerInfo?: ProviderInfo;
@@ -661,7 +667,7 @@ export interface EffectivePolicy {
   risk_ask: { value: "always" | "rules-only"; source: "pack" | "default" };
   reobserve: { value: boolean; source: "pack" | "default" };
   max_effective_repeats: { value: number; source: "pack" | "default" };
-  conf_floor: { value: number; source: "cli" | "pack" | "provider" | "default" };
+  conf_floor: { value: number; source: "cli" | "config" | "pack" | "provider" | "default" };
 }
 
 /**
@@ -698,7 +704,7 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
     // 闸门刻度：CLI（本次显式）> pack.policy > provider 自报 > 0.25。
     // 换 provider 时缺省刻度不再成立（score_kind 不可比）——这是这条声明面的存在理由。
     conf_floor: opts.confFloor !== undefined
-      ? { value: opts.confFloor, source: "cli" as const }
+      ? { value: opts.confFloor, source: (opts.confFloorSource ?? "cli") as "cli" | "config" }
       : declaredPolicy.conf_floor !== undefined
         ? { value: declaredPolicy.conf_floor, source: "pack" as const }
         : opts.providerFloor !== undefined
@@ -1652,6 +1658,18 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (!cli.ok) return cli.code;
   const v = cli.values;
   if (cliBool(v, "help")) { console.log(USAGE); return 0; }
+  // 运行参数的配置默认值（全局 < 项目 < 环境变量；CLI 旗标仍最优先）。
+  // 解析错误 = 配置类用法错误：在任何腿/任何副作用之前 exit 2。
+  const { defaults: runDefaults, errors: runDefaultErrors } = parseRunDefaults();
+  if (runDefaultErrors.length) {
+    for (const e of runDefaultErrors) console.error(e);
+    return 2;
+  }
+  const quiet = cliBool(v, "quiet") || runDefaults.quiet === true;
+  const headful = cliBool(v, "headful") || runDefaults.headful === true;
+  const confirmSafe = cliBool(v, "confirm-safe") || runDefaults.confirmSafe === true;
+  const noSources = cliBool(v, "no-sources") || runDefaults.noSources === true;
+  const tieredHint = cliBool(v, "tiered-hint") || runDefaults.tieredHint === true;
   if (cliBool(v, "list") || cliString(v, "app") === undefined) {
     for (const [id, label, p] of listPacks()) console.log(`${id.padEnd(22)} ${label}  ${p}`);
     if (cliString(v, "app") === undefined) {
@@ -1737,7 +1755,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     console.error(`--ablate 只接受 stub | rules-only（收到 ${JSON.stringify(ablate)}）`);
     return 2;
   }
-  const forceHints = cliString(v, "force-hints");
+  const forceHints = cliString(v, "force-hints") ?? (runDefaults.forceHintsOff ? "off" : undefined);
   if (forceHints !== undefined && forceHints !== "off") {
     console.error(`--force-hints 只接受 off（收到 ${JSON.stringify(forceHints)}）——它是消融旗标，只有"剥掉"这一档。`);
     return 2;
@@ -1843,14 +1861,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       return 2;
     }
     hintMemory = createHintMemory({ path: hintMemoryPath });
-    if (!cliBool(v, "quiet")) {
+    if (!quiet) {
       console.log(`learned hints: ${hintMemory.stats?.().entries ?? 0} known（sidecar ${hintMemoryPath}）`);
     }
   }
 
   // --conf-floor：显式覆盖闸门刻度；范围错误是**用法错误**（退出码 2），不是静默忽略。
   let cliConfFloor: number | undefined;
-  const confFloorArg = cliString(v, "conf-floor");
+  const confFloorFromCli = cliString(v, "conf-floor") !== undefined;
+  const confFloorArg = cliString(v, "conf-floor")
+    ?? (runDefaults.confFloor === undefined ? undefined : String(runDefaults.confFloor));
   if (confFloorArg !== undefined) {
     const n = Number(confFloorArg);
     if (!Number.isFinite(n) || n <= 0 || n > 1) {
@@ -1864,28 +1884,30 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   try {
     result = scriptApp !== null && scriptApp.flow !== undefined
       ? await runScriptApp(scriptApp, {
-          slots, outDir, verbose: !cliBool(v, "quiet"),
-          sources: !cliBool(v, "no-sources"), confirmSafe: cliBool(v, "confirm-safe"),
-          headful: cliBool(v, "headful"), allowDangerous: cliBool(v, "allow-dangerous"),
+          slots, outDir, verbose: !quiet,
+          sources: !noSources, confirmSafe,
+          headful, allowDangerous: cliBool(v, "allow-dangerous"),
           // §3/学习环：与 runApp 同一组旗标（以前脚本应用静默忽略它们）。
-          tieredHint: cliBool(v, "tiered-hint") ? true : undefined,
+          tieredHint: tieredHint ? true : undefined,
           hintMemory, hintMemoryPath,
           confFloor: cliConfFloor,
+          ...(cliConfFloor === undefined ? {} : { confFloorSource: confFloorFromCli ? "cli" as const : "config" as const }),
           providerFloor: activeProviderInfo()?.floor,
           modelStatus,
           ...(cliString(v, "emit-trace") === undefined ? {} : { emitTrace: cliString(v, "emit-trace") }),
           ...(cliString(v, "replay") === undefined ? {} : { replayTrace: cliString(v, "replay") }),
         })
       : await runApp(pack, {
-      slots, planPath, outDir, verbose: !cliBool(v, "quiet"),
-      sources: !cliBool(v, "no-sources"), confirmSafe: cliBool(v, "confirm-safe"), headful: cliBool(v, "headful"),
+      slots, planPath, outDir, verbose: !quiet,
+      sources: !noSources, confirmSafe, headful,
       allowDangerous: cliBool(v, "allow-dangerous"),
       // §3：只有**显式给了旗标**才算"本次覆盖"；否则留 undefined，让包声明赢。
       // （以前这里恒传一个布尔，等于 CLI 永远压过 pack——报告还会把来源写成 cli，假账。）
-      tieredHint: cliBool(v, "tiered-hint") ? true : undefined,
+      tieredHint: tieredHint ? true : undefined,
       forceHints: forceHints === "off" ? true : undefined,
       hintMemory, hintMemoryPath,
       confFloor: cliConfFloor,
+      ...(cliConfFloor === undefined ? {} : { confFloorSource: confFloorFromCli ? "cli" as const : "config" as const }),
       providerFloor: activeProviderInfo()?.floor,
       modelId: cliString(v, "model") ?? pack.model ?? "english",
       modelStatus,
@@ -1917,7 +1939,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const mdPath = path.join(outDir, `${pack.id}-report.md`);
   fs.writeFileSync(jsonPath, JSON.stringify(result, null, 2), "utf-8");
   fs.writeFileSync(mdPath, appReportMarkdown(result), "utf-8");
-  if (!cliBool(v, "quiet")) {
+  if (!quiet) {
     console.log();
     console.log(appReportMarkdown(result));
     // R2 的账（plan-cli 同一形状）：known = sidecar 里现存几条；reused = 本次真的按它命中的次数。

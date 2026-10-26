@@ -190,6 +190,8 @@ amber config edit [--project]`,
       "amber config set AMBERFLOW_DECISION_BASE_URL https://<服务地址>",
       "amber config set AMBERFLOW_DECISION_MODEL jev-latest",
       "amber config set AMBERFLOW_DECISION_API_KEY sk-... --project",
+      "amber config set AMBERFLOW_HEADFUL 1 --project   # 项目配置：仅这个 checkout 生效",
+      "amber config set AMBERFLOW_CONF_FLOOR 0.3        # 全局配置：所有项目默认",
     ],
     flags: [
       "--project                 读写项目配置 ./.amberflow/config.json",

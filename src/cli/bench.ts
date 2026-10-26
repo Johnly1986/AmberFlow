@@ -29,6 +29,7 @@ import { applySpecToRuntime, installDecisionProvider, resolveProviderSpec } from
 import { createOutcomeMemory, type OutcomeMemoryLike } from "../model/outcome-memory.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
+import { parseRunDefaults } from "../support/run-defaults.ts";
 
 export interface BenchCase {
   id: string;
@@ -265,7 +266,13 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
   if (!cli.ok) return cli.code;
   const v = cli.values;
   if (cliBool(v, "help")) { console.log(USAGE); return 0; }
-  const quiet = cliBool(v, "quiet");
+  const { defaults: runDefaults, errors: runDefaultErrors } = parseRunDefaults();
+  if (runDefaultErrors.length) {
+    for (const e of runDefaultErrors) console.error(e);
+    return 2;
+  }
+  const quiet = cliBool(v, "quiet") || runDefaults.quiet === true;
+  const headful = cliBool(v, "headful") || runDefaults.headful === true;
   const say = (line: string): void => { if (!quiet) console.log(line); };
   const casesPath = path.resolve(cliString(v, "cases") ?? path.join(REPO, "bench", "cases.json"));
   const outdir = path.resolve(cliString(v, "out") ?? path.join(REPO, "bench", "results"));
@@ -278,7 +285,8 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
     console.error(`--ablate 只接受 stub | rules-only（收到 ${JSON.stringify(ablate)}）`);
     return 2;
   }
-  const confFloorRaw = cliString(v, "conf-floor") ?? cliString(v, "force-conf-floor");
+  const confFloorRaw = cliString(v, "conf-floor") ?? cliString(v, "force-conf-floor")
+    ?? (runDefaults.confFloor === undefined ? undefined : String(runDefaults.confFloor));
   let confFloor: number | undefined;
   if (confFloorRaw !== undefined) {
     confFloor = Number(confFloorRaw);
@@ -287,8 +295,9 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
       return 2;
     }
   }
-  if (cliString(v, "force-hints") !== undefined && cliString(v, "force-hints") !== "off") {
-    console.error(`--force-hints 只接受 off（收到 ${JSON.stringify(cliString(v, "force-hints"))}）——它是消融旗标，只有"剥掉"这一档。`);
+  const forceHints = cliString(v, "force-hints") ?? (runDefaults.forceHintsOff ? "off" : undefined);
+  if (forceHints !== undefined && forceHints !== "off") {
+    console.error(`--force-hints 只接受 off（收到 ${JSON.stringify(forceHints)}）——它是消融旗标，只有"剥掉"这一档。`);
     return 2;
   }
 
@@ -305,7 +314,7 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
     if (forcedModel) c.model = forcedModel;
     if (cliString(v, "force-rules") !== undefined) c.rules = cliString(v, "force-rules") === "on";
     if (confFloor !== undefined) c.conf_floor = confFloor;
-    if (cliString(v, "force-hints") === "off") {
+    if (forceHints === "off") {
       for (const sg of c.subgoals ?? []) {
         delete (sg as { target_hint?: string }).target_hint;
         delete (sg as { target_hints?: string[] }).target_hints;
@@ -372,7 +381,7 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
     try {
       all.push(await runCase(c, agents, mem, hints,
         (cliString(v, "outcome-memory-mode") as "forbid" | "rank" | undefined) ?? "forbid",
-        !cliBool(v, "headful")));
+        !headful));
     } catch (e) {
       console.error(e);
       all.push({

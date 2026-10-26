@@ -317,8 +317,11 @@ Windows 的 shell 会把它原样留给子进程，而留着它的后果是后�
 [`configs/amberflowrc.example.json`](configs/amberflowrc.example.json) 复制一份、删掉不用的键即可）。
 `npm start` 与 `npm run bench` 与 apps/suite 走**同一扇门**选决策源：本地产物就绪→本地；配了
 provider（如 `AMBERFLOW_DEFAULT_DECISION_PROVIDER=token-plan`）→在线；都没配→规则档并如实点名缺的是谁
-——日常不需要为"这台机器有没有模型"多敲任何旗标。优先级
-**CLI 旗标 > 环境变量 > 文件 > 内建缺省**——文件只补没人设过的键。白名单之外的键（比如
+——日常不需要为"这台机器有没有模型"多敲任何旗标。配置分两层：**全局配置**
+`$AMBERFLOW_HOME/config.json`（`amber config set ...`）与**项目配置**
+`./.amberflow/config.json`（`amber config set ... --project`）；**项目配置盖住全局配置**。
+优先级 **CLI 旗标 > 环境变量 > 项目配置 > 全局配置 > 旧 rc > 内建缺省**——文件只补没人设过的键。
+`--allow-dangerous` 这类安全旗标**不放进配置默认值**，必须每次在命令里显式出现。白名单之外的键（比如
 `LAYA_TODAY`：展开日期是仓库常量，不该变成机器配置）会在**任何腿出场之前**以用法错误
 (exit 2)点名拒绝。`npm run doctor` 会把生效配置连同**每个值的来源**（文件/环境）一起列出，
 凭据类（`*_API_KEY` 等）只回显掩码后的长度。实现只有一个模块：`src/support/rcfile.ts`。
@@ -337,6 +340,10 @@ provider（如 `AMBERFLOW_DEFAULT_DECISION_PROVIDER=token-plan`）→在线；�
 | `BAILIAN_ENDPOINT` 或 `BAILIAN_WORKSPACE_ID`(+`BAILIAN_REGION`) | 百炼 systemone 端点（workspace 作用域）；起法见 docs/DECISION_PROVIDER_BAILIAN.md |
 | `OPENAI_BASE_URL` + `OPENAI_API_KEY` | 启用 LLM 规划与审计（不配则用内置替身，流程照常） |
 | `AMBERFLOW_STEP_DELAY_MS` / `AMBERFLOW_ACTION_DELAY_MS` | 全局运行节奏默认（毫秒；应用配置表 `pace` 优先）；人工步骤与 `pace` 详见 [docs/MANUAL_STEPS_AND_PACE.md](docs/MANUAL_STEPS_AND_PACE.md) |
+| `AMBERFLOW_HEADFUL` | `--headful` 的配置默认值（`1/true/on` 开，`0/false/off` 关；CLI 旗标仍优先） |
+| `AMBERFLOW_FORCE_HINTS` | `--force-hints` 的配置默认值（只接受 `off`，消融口径） |
+| `AMBERFLOW_CONF_FLOOR` | `--conf-floor` 的配置默认值（`(0,1]`；本次 CLI 仍优先） |
+| `AMBERFLOW_TIERED_HINT` / `AMBERFLOW_CONFIRM_SAFE` / `AMBERFLOW_NO_SOURCES` / `AMBERFLOW_QUIET` | 同名旗标的配置默认值（布尔；CLI 旗标仍优先） |
 | `AMBERFLOW_REPO` | DSH 桥指向的 checkout（旧名 `LAYAWEBUSE_REPO` 仍兼容） |
 
 ## 延伸阅读
