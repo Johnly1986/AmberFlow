@@ -27,7 +27,7 @@ step 1: click a "Add to cart" (clicked, rule:match, conf=1.00)
 
 没有模型权重也能跑：计划点名了目标的步骤由**规则**解决；确实需要模型兜底的步骤会明确说明缺什么，而不是瞎猜或抛异常。
 
-### 用在线决策模型（不装本地 1.7GB 产物）
+### 用在线决策模型
 
 ```bash
 cp configs/amberflowrc.example.json configs/amberflowrc.json   # 本机文件，已被 .gitignore 排除
@@ -60,7 +60,7 @@ npm run providers:baseline -- --providers token-plan,first-candidate --out "$TEM
 回到"只带 goal 的问法"（带页面上下文的实测数据见 [docs/DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md) §1b）。
 读数提醒：旅程每步都有 hint 时模型出场为 0 是**设计**（"能规则化就别猜"）；要量模型就用剥 hint 的对照台。
 
-## 统一入口：`amber`
+## 命令行入口
 
 `package.json` 的 `bin` 提供 `amber`，但 **`npm ci` 只链接依赖的 bin，不会把根包的 `amber` 放进 PATH**。
 所以裸敲 `amber …` 之前要先 link 一次（全局装过则不必）：
@@ -74,7 +74,7 @@ amber --version   # 验证；之后本文所有 `amber …` 都能直接敲
 
 ```bash
 npx amber run --demo            # checkout 内直接跑（npx 会认本包的 bin，不会去下载同名包）
-npm run amber -- run --demo     # 等价；`npm run cli -- …` 是同一个入口的旧名字
+npm run amber -- run --demo     # 等价写法
 ```
 
 上面四条命令的对应写法（**已 `npm link`**）：
@@ -93,7 +93,7 @@ amber dev providers baseline --providers token-plan,first-candidate --out "$TEMP
 任何命令加 `--json` 后 stdout 只有一个信封对象（人类进度与诊断走 stderr）；`amber help --all` 列出
 全部命令与高级旗标；`amber completion bash|zsh|fish|powershell` 给补全脚本。
 
-### 退出码（写脚本 / Agent 只需要认这张表）
+### 退出码
 
 | 码 | 含义 | 你会看到 |
 |---|---|---|
@@ -107,7 +107,7 @@ amber dev providers baseline --providers token-plan,first-candidate --out "$TEMP
 `--json` 时错误也是同一个形状：`{"ok":false,"exit_code":2,"error":{"code":"USAGE","message":"…","hint":"…","next":["…"]}}`
 ——`hint` 回答"那我该写什么"，`next` 是可以直接抄的下一条命令。
 
-### 非交互（CI / Agent）不用猜
+### 非交互
 
 - `amber record` 非 TTY 必须给 `--url` 或 `--cdp`；
 - `amber run --plan <文件>` 非 TTY 默认 `--confirm deny`；要放行显式给 `--yes`
@@ -115,26 +115,22 @@ amber dev providers baseline --providers token-plan,first-candidate --out "$TEMP
 - `amber apps remove <id>` 非 TTY 必须给 `--yes`；
 - 需要人来回答的场景一律报错并给出可抄的写法，**不替你选、不静默继续**。
 
-### 新旧对照
+### 命令一览
 
-| 新写法 | 旧写法 | 说明 |
-|---|---|---|
-| `amber`（无参数） | — | 首页：状态 + 应用列表 + 下一步 |
-| `amber run <应用>` / `--demo` / `--goal "<目标>" --url <页面>` | `npm run apps -- --app <id>` / `npm start` / `npm start -- --goal …` | 语义同一扇门；计划默认 `./.amberflow/plan.json`（旧 `start --plan` 语义不变） |
-| `amber record --url <页面>` | `npm run learn -- --url …` | **默认有头**；要旧 headless 加 `--headless` |
-| `amber plan new "<目标>"` | `npm run plan-cli -- new "<目标>"` | 计划默认 `./.amberflow/plan.json`；步骤 1-based，且有 `描述slug-短哈希` 稳定 id |
-| `amber apps list / show / check / path / remove` | `npm run apps -- --list / --app <id>` | `amber apps` 无子命令即 list（旧 `npm run apps` 无参数仍报错） |
-| `amber config get / set / unset / show / path / init / edit` | 编辑 `configs/amberflowrc.json` | 分层生效：旧 rc < 用户 < 项目 < 环境；`amber doctor` 点出每个值的来源 |
-| `amber model status / path` | — | 三件产物（图 / 外置权重 / tokenizer）缺哪件点名哪件 |
-| `amber model fetch --from <url 或本地路径>` | `npm run model:fetch -- --from …` | SHA256 先验后换、坏件不覆盖。同一约束 |
-| `amber dev suite / matrix / bench / parity / verify` | `npm run apps:suite / apps:matrix / bench / verify` | 维护者命令都收在 `amber dev` |
-| `amber completion <shell>` | — | 补全脚本：`bash` / `zsh` / `fish` / `powershell` |
-| `amber legacy <旧命令>` | `npm run <旧命令>` | 兼容转发器：按**旧行为**执行旧入口并提示新写法 |
+| 命令 | 用途 |
+|---|---|
+| `amber` | 首页：环境状态、应用清单与下一步 |
+| `amber run <应用>` / `--demo` / `--goal "<目标>" --url <页面>` | 跑应用、跑自带演示或一次性目标 |
+| `amber record --url <页面>` | 打开页面录制一次并归纳应用 |
+| `amber plan new "<目标>"` | 手工新建计划；步骤 id 稳定、可从 `1` 起编辑 |
+| `amber apps list / show / check / path / remove` | 应用管理 |
+| `amber config get / set / unset / show / path / init / edit` | 全局配置与项目配置 |
+| `amber model status / path / fetch` | 本地决策模型产物 |
+| `amber dev suite / matrix / bench / parity / verify` | 维护者套件与对拍 |
+| `amber completion bash / zsh / fish / powershell` | 补全脚本 |
 
-旧 npm script 全部保留并照旧行为执行；迁移是**旧命令不删、新命令并行**——`amber legacy`（不带参数）
-打印完整的旧 → 新对照表，任何一条旧命令都能查到它的新写法。配置分层
-**旧 rc < 用户配置 < 项目配置 < 环境变量**（`amber config show` 点名每个值的来源），
-新命令不写旧 rc。
+`amber` 无参数即首页；任何命令加 `--json` 后 stdout 只有信封对象，人类进度与诊断走 stderr。
+`amber help --all` 列出全部命令与高级旗标。
 
 ## DSH 插件安装
 
@@ -148,9 +144,10 @@ dsh plugin --profile <名称> add /绝对路径/AmberFlow                  # 开
 dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridge   # 只装适配器包（需先 npm run build；引擎由 repoPath 指）
 ```
 配置页在**设置 → 插件 → AmberFlow 桥接 → 组件行 → 配置**（编辑仅限 loopback 页面：经外网打开时页面会
-显示说明，请用 Host 本机地址或 SSH 隧道如 `ssh -L 8080:127.0.0.1:3080 <host>`）：三项分别是 `TOKEN_PLAN_ENDPOINT` /
-`TOKEN_PLAN_API_KEY` / `TOKEN_PLAN_MODEL`（URL 填兼容模式基址，桥自动补 `/systemone`），URL+Token 齐全时
-`amberflow_run` 默认以 `token-plan` 作为决策 provider；留空则继续用本地 ONNX。详见
+显示说明，请用 Host 本机地址或 SSH 隧道如 `ssh -L 8080:127.0.0.1:3080 <host>`）：三项分别是
+Decision model URL、Token Key、ModelName；桥按统一配置转发 `AMBERFLOW_DECISION_BASE_URL` /
+`AMBERFLOW_DECISION_API_KEY` / `AMBERFLOW_DECISION_MODEL`，URL+Token 齐全时 `amberflow_run` 默认使用
+`decision-service`，留空则使用本地 ONNX。详见
 [integrations/dsh-bridge/README.md](integrations/dsh-bridge/README.md)。
 或在插件页面直接添加项目地址。开发态 link 之后**重启一次 DSH 进程**：换安装形态时，运行中的进程
 不会自己换掉已加载的桥模块（引擎 CLI 是子进程，倒是立刻用新的）；判据与解释见
@@ -167,19 +164,19 @@ dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridg
 
 ## 为什么本地还养一个模型
 
-**分工先说清楚**（本轮独立审查的结论，不是口号）：**流程能被规则与声明解决，就不该让模型猜。**
+**分工先说清楚**：**流程能被规则与声明解决，就不该让模型猜。**
 承重的是声明 + 规则 + 编译器/录制器——已验收语料里 **浏览器步 171/171 全由声明解决**
 （其中 169 = 98.8% 用 `target_hint` 点名，其余 2 步走 `commands` 闭集；`apps:suite` 页脚每天报这两行数），
 真模型跑完整批语料时 **201 步里只被咨询 5 次、独立决定 0 步**
 （`npm run apps:suite -- --real-model` 的 `模型边际` 列；桩臂这一列打"未测"）。
-模型的位置是**兜底 + 诊断**，而兜底现在有了数字：边际为 0 时套件**退出码 4**，绿色不再替它背书。
+模型的位置是**兜底 + 诊断**，而兜底有数字：边际为 0 时套件**退出码 4**，绿色不替它背书。
 
 那"保险"到底值不值，四组数字，每组都有当场可跑的复现命令：
 
 | 数字 | 它证明什么 | 怎么复现 |
 |---|---|---|
 | 60 个诱饵元素挡在前面：规则落空 + 目标不在池内 = 必 blocked；模型加宽重看（`laya:reobserve`）把它捞回来 | 池子外的目标谁也选不到——模型负责"不轻言放弃"。**但注意口径**：这是夹具里的能力，已验收语料上 `reobserve` 救回 **0** 步（页脚 `梯级账单` 会把它标成 dead rung） | `npx vitest run tests/reobserve.test.ts` |
-| `transfer-slowjet`：冷加载时模型**被问了 5 次、一次都没过闸门**（真模型臂与桩臂同形：`咨询 5 / 过关 0`）；把它救回来的是 `retries`——去掉 `retries` 实测 0/7 | **反面教材（本轮修正）**：以前这里写"没有模型这个应用会红"，实测不成立；红的是没有重试 | `npm run apps:suite -- --only transfer-slowjet`（看页脚 `梯级账单` 与 `模型边际`） |
+| `transfer-slowjet`：冷加载时模型**被问了 5 次、一次都没过闸门**（真模型臂与桩臂同形：`咨询 5 / 过关 0`）；把它救回来的是 `retries`——去掉 `retries` 实测 0/7 | 这里红的原因是**没有重试**，不是"没有模型"；模型被咨询不等于模型决定 | `npm run apps:suite -- --only transfer-slowjet`（看页脚 `梯级账单` 与 `模型边际`） |
 | 同一份计划二跑：**12 forwards → 0，9.2s → 1.3s**（Windows+GPU 实测；离线口径由套件页脚 `决策缓存` 给同一形状的两个数） | 确定性模型不该被问第二次：本地、免费、可审计 | `npm run cache:measure`（要 ONNX 产物）；离线看套件页脚 |
 | 诚实边界：中文页面上模型 0.03–0.09（argmax 常仍正确）；checkpoint 路由按**文字系统**切、绝不按置信度切（ECE 0.855 的教训写进了故事） | 我们比谁都清楚它不行在哪——这是可信度，不是减分 | `npm run apps -- --app ctrip-case --no-sources` |
 
@@ -202,7 +199,32 @@ npm run apps -- --app demo-app --headful                # 有头运行：浏览�
 npm run apps:suite                                      # 全部离线应用跑完，一行一个给结论
 ```
 
-### 看着浏览器跑（有头 / 挂载）
+### 人工步骤与运行节奏
+
+登录、验证码、人工确认可以写成旅程里的 `manual` 步；运行节奏写在应用配置表的 `pace` 块里。
+
+```jsonc
+// apps/<id>/app.mjs 的 META 或 pack.json 顶层
+"pace": { "between_steps_ms": 800, "between_actions_ms": 300 }
+```
+
+```jsonc
+// journey 里的一步：人完成，引擎等待并验证声明的信号
+{
+  "adapter": "manual",
+  "desc": "登录并完成短信验证",
+  "start_url": "https://example.com/login",
+  "instructions": "在浏览器里完成登录，然后回终端按 Enter",
+  "signal": { "manual": true }
+}
+```
+
+- `signal` 必填：`{ "manual": true }` 是人工自证；写 DOM 信号时，人确认后引擎还会再验一次。
+- 有 `manual` 步时浏览器自动打开可见窗口；默认在终端等待人工确认，非交互环境会失败并说明原因。
+- `npm run apps:suite` 会跳过含人工步的应用；请用 `npm run apps -- --app <id>` 单跑。
+- 人工步骤不保存账号密码，不自动处理验证码/2FA。详见 [文档](docs/MANUAL_STEPS_AND_PACE.md)。
+
+### 看着浏览器跑
 
 | 想要的效果 | 怎么做 |
 |---|---|
@@ -211,9 +233,8 @@ npm run apps:suite                                      # 全部离线应用跑�
 | 无显示器的服务器 | 窗口只出现在**跑引擎的那台机器**上：`xvfb-run -a -s "-screen 0 1440x900x24" npm run apps -- --app <id> --headful`，人眼看再配 x11vnc / noVNC；只要证据图就 `ffmpeg -f x11grab -video_size 1440x900 -i $DISPLAY -frames:v 1 win.png` |
 | 从 DSH 插件发起 | `amberflow_run` / `amberflow_plan` 传 `headful: true`（窗口同样开在服务器显示上，不在浏览器页面里） |
 
-有头需要**完整 chromium**：只有 headless shell 的机器会直接点名让你 `npx playwright install chromium`。
-不传旗标就是原来的 headless 面，行为与产物逐字节不变（实测：有头起 `chromium-*/chrome` 且命令行没有
-`--headless`，默认起 `chrome-headless-shell --headless`）。
+有头需要**完整 chromium**：只有 headless shell 的机器会直接提示安装
+`npx playwright install chromium`。默认 headless；传 `--headful` 时打开可见窗口。
 
 三类入口，同一个引擎，同一道门槛——**规则模式零模型重放通过，才落盘**：
 
@@ -289,7 +310,7 @@ console.log(rep.completed, rep.traces.length);
 | `npm run bench -- --cases bench/cases-live.json --mode-tag live` | 8 个真实站点跑分（要真网络；跳过不等于通过） |
 | `npm run apps -- --help` / `npm run bench -- --help` | 两个入口的完整用法（各自专属旗标只在 `--help` 里列全） |
 
-### apps 与 bench：同一个名字同一件事
+### apps 与 bench
 
 两个入口共用一张旗标表（`src/support/cli-args.ts` 的 `SHARED_RUN_OPTIONS`），同一个名字在两个入口是
 同一个意思；各自的专属旗标只有"挑什么来跑"那一项——apps 挑**应用包**（`--app`），bench 挑**语料**
@@ -297,36 +318,41 @@ console.log(rep.completed, rep.traces.length);
 
 | 共用旗标 | 含义 |
 |---|---|
-| `--model ID` | 换 laya checkpoint（换决策源用 `--provider`；旧名 `--force-model`） |
+| `--model ID` | 换 laya checkpoint（换决策源用 `--provider`） |
 | `--provider NAME` | 换决策源：`laya-onnx` / `stub` / `none` / 基线 / `jevk5` / `bailian` / `token-plan` |
-| `--ablate stub\|rules-only` | 消融臂：`stub` = 脚本桩，`rules-only` = 规则档（旧名 `--no-model`） |
-| `--conf-floor N` | 置信度闸门刻度（0<N≤1；旧名 `--force-conf-floor`） |
+| `--ablate stub\|rules-only` | 消融臂：`stub` = 脚本桩，`rules-only` = 规则档 |
+| `--conf-floor N` | 置信度闸门刻度（0<N≤1） |
 | `--force-hints off` | 剥掉计划点名的 hint，逼模型出场（消融旗标，只有这一档） |
-| `--learn-hints` / `--hint-memory FILE` | R2 学习环：默认 sidecar / 显式落点（旧名 `--hint-memory-file`） |
+| `--learn-hints` / `--hint-memory FILE` | R2 学习环：默认 sidecar / 显式落点 |
 | `--headful` / `--quiet` / `--out DIR` | 浏览器显形 / 只留机器读的 summary / 产物落点 |
 
-旧名在升级窗口里**仍认**（旧桥、旧脚本抄来的命令不会炸），只是不再列进用法；给错了会得到
-**一行点名 + usage + exit 2**，不是 `parseArgs` 的堆栈。
+旗标写法不对会得到**一行点名 + usage + exit 2**，不是 `parseArgs` 的堆栈。
 
 `npm run apps -- --app demo-app` 里那个 `--` 是 npm/shell 的参数分隔符，由每个入口统一吃掉——
 Windows 的 shell 会把它原样留给子进程，而留着它的后果是后面所有旗标被当成位置参数（"传了却像没传"）。
 
-## 环境变量（都有兜底，全部可不配）
+## 配置与环境变量
 
-这些变量也可以写进 **`configs/amberflowrc.json`**（本机文件，已被 `.gitignore` 排除；模板见
-[`configs/amberflowrc.example.json`](configs/amberflowrc.example.json) 复制一份、删掉不用的键即可）。
-`npm start` 与 `npm run bench` 与 apps/suite 走**同一扇门**选决策源：本地产物就绪→本地；配了
-provider（如 `AMBERFLOW_DEFAULT_DECISION_PROVIDER=token-plan`）→在线；都没配→规则档并如实点名缺的是谁
-——日常不需要为"这台机器有没有模型"多敲任何旗标。配置分两层：**全局配置**
-`$AMBERFLOW_HOME/config.json`（`amber config set ...`）与**项目配置**
-`./.amberflow/config.json`（`amber config set ... --project`）；**项目配置盖住全局配置**。
-优先级 **CLI 旗标 > 环境变量 > 项目配置 > 全局配置 > 旧 rc > 内建缺省**——文件只补没人设过的键。
-`--allow-dangerous` 这类安全旗标**不放进配置默认值**，必须每次在命令里显式出现。白名单之外的键（比如
-`LAYA_TODAY`：展开日期是仓库常量，不该变成机器配置）会在**任何腿出场之前**以用法错误
-(exit 2)点名拒绝。`npm run doctor` 会把生效配置连同**每个值的来源**（文件/环境）一起列出，
-凭据类（`*_API_KEY` 等）只回显掩码后的长度。实现只有一个模块：`src/support/rcfile.ts`。
+配置分两层：**全局配置** `$AMBERFLOW_HOME/config.json`，用 `amber config set KEY VALUE` 写入；
+**项目配置** `./.amberflow/config.json`，用 `amber config set KEY VALUE --project` 写入。
+**项目配置盖住全局配置**。层叠顺序：
 
-| 变量 | 作用 |
+```text
+CLI 旗标 > 环境变量 > 项目配置 > 全局配置 > configs/amberflowrc.json 兼容层 > 内建缺省
+```
+
+文件只补没人设过的键；白名单之外的键（例如 `LAYA_TODAY`）在任何运行前以用法错误 `exit 2` 点名。
+`amber config show` 与 `amber doctor` 会显示每个值的来源；凭据只回显掩码后的长度。
+`--allow-dangerous` 这类安全旗标不提供配置默认值，必须每次在命令里显式出现。
+
+```bash
+amber config set AMBERFLOW_HEADFUL 1 --project
+amber config set AMBERFLOW_CONF_FLOOR 0.3
+amber config set AMBERFLOW_FORCE_HINTS off --project
+amber config show
+```
+
+| 键 | 作用 |
 |---|---|
 | `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR` | 本地决策模型产物位置（缺了走规则模式） |
 | `AMBERFLOW_DECISION_BASE_URL` / `AMBERFLOW_DECISION_MODEL` / `AMBERFLOW_DECISION_API_KEY` | **统一决策服务配置**：服务地址 + 模型名 + 密钥（`amber config set` 或环境变量）；配了地址即默认走 `decision-service`；`AMBERFLOW_DECISION_PROTOCOL` 选 `systemone`（默认）或 `openai-decisions`。完整说明见 [docs/DECISION_SERVICE_CONFIG.md](docs/DECISION_SERVICE_CONFIG.md) |
@@ -344,11 +370,11 @@ provider（如 `AMBERFLOW_DEFAULT_DECISION_PROVIDER=token-plan`）→在线；�
 | `AMBERFLOW_FORCE_HINTS` | `--force-hints` 的配置默认值（只接受 `off`，消融口径） |
 | `AMBERFLOW_CONF_FLOOR` | `--conf-floor` 的配置默认值（`(0,1]`；本次 CLI 仍优先） |
 | `AMBERFLOW_TIERED_HINT` / `AMBERFLOW_CONFIRM_SAFE` / `AMBERFLOW_NO_SOURCES` / `AMBERFLOW_QUIET` | 同名旗标的配置默认值（布尔；CLI 旗标仍优先） |
-| `AMBERFLOW_REPO` | DSH 桥指向的 checkout（旧名 `LAYAWEBUSE_REPO` 仍兼容） |
+| `AMBERFLOW_REPO` | DSH 桥指向的 checkout（兼容 `LAYAWEBUSE_REPO`） |
 
 ## 延伸阅读
 
-[ARCHITECTURE.md](ARCHITECTURE.md)（模块结构与实测规则）· [docs/CLI_REDESIGN.md](docs/CLI_REDESIGN.md)（`amber` 入口的分组、旗标归一与退出码契约）· [DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md)（在线决策模型接入与实测账） · [ONLINE_MODEL_TEST_REVIEW.md](docs/ONLINE_MODEL_TEST_REVIEW.md)（用线上模型审查测试：S0 提名 + LLM 真链路） · [NOMINATION_QUESTION_SET_ANALYSIS.md](docs/NOMINATION_QUESTION_SET_ANALYSIS.md)（提名考卷为什么不可解：标签/语料/合同三层偏倚）· [CLAUDE.md](CLAUDE.md)（工程规约）· [apps/INVENTORY.md](apps/INVENTORY.md)（应用清单与"完成"的定义）· [PORTING.md](PORTING.md) / [BACKUP.md](BACKUP.md)（Python 参考实现的迁移与存档）
+[ARCHITECTURE.md](ARCHITECTURE.md)（模块结构与实测规则）· [docs/CLI_REDESIGN.md](docs/CLI_REDESIGN.md)（`amber` 入口的分组、旗标归一与退出码契约）· [DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md)（在线决策模型接入与实测账） · [ONLINE_MODEL_TEST_REVIEW.md](docs/ONLINE_MODEL_TEST_REVIEW.md)（用线上模型审查测试：S0 提名 + LLM 真链路） · [NOMINATION_QUESTION_SET_ANALYSIS.md](docs/NOMINATION_QUESTION_SET_ANALYSIS.md)（提名考卷为什么不可解：标签/语料/合同三层偏倚）· [CLAUDE.md](CLAUDE.md)（工程规约）· [apps/INVENTORY.md](apps/INVENTORY.md)（应用清单与"完成"的定义）· 
 
 ## License
 
