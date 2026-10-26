@@ -28,6 +28,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createInterface } from "node:readline/promises";
 import { MockAuditor, type TraceStep } from "../engine/audit.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 import { ensureDir, userAppsDir } from "./amberflow-home.ts";
@@ -40,7 +41,7 @@ import {
 import { type CachedRuntime, type DecisionCacheStats } from "../model/decision-cache.ts";
 import { checkArtifacts, missingPieces, modelConfigError } from "../model/model-artifacts.ts";
 import { activeProviderInfo, applySpecToRuntime, resolveProviderSpec, type ProviderInfo } from "../model/decision-provider.ts";
-import { BrowserMiddleware, browserSession, type BrowserSession } from "../engine/executor.ts";
+import { BrowserMiddleware, browserSession, disallowedHost, type BrowserSession } from "../engine/executor.ts";
 import { REPO } from "../flow/flow.ts";
 import { installLayaRuntime } from "../model/model.ts";
 import { runSubgoalWithRetries } from "../engine/planner.ts";
@@ -52,9 +53,12 @@ import { captureStepStateView, type StepStateView } from "../model/page-context.
 import type { StateView } from "../engine/signals.ts";
 import {
   expandPack, listPacks, resolveSourceSlots,
-  type AppPack, type ExpandedStep, type PackPolicy, type SourceObservation,
+  type AppPack, type ExpandedStep, type PackPace, type PackPolicy, type SourceObservation,
 } from "./app-pack.ts";
-import { getAppAdapter, substituteDatasetPlaceholders, type AdapterRunContext } from "./app-adapters.ts";
+import {
+  getAppAdapter, substituteDatasetPlaceholders,
+  type AdapterRunContext, type ManualStepDecl, type ManualStepRequest, type ManualStepRun,
+} from "./app-adapters.ts";
 import { validateApp } from "./cross-ref.ts";
 import { dryRunFlow, loadApp, resolveApp, type LoadedScriptApp } from "./app-script.ts";
 import { StopError, createCtx, type ToolRunRequest, type ToolRunResult } from "./ctx.ts";
@@ -172,7 +176,48 @@ export interface AppRunOptions {
   confFloor?: number;
   /** provider 自报的闸门刻度（`ProviderInfo.floor`；CLI 装了 provider 就传进来）。 */
   providerFloor?: number;
+  /**
+   * 人工步的接入钩子（测试/嵌入方）。缺省 = 终端交互提示；返回 false = 人放弃。
+   * CLI 不提供"自动 yes"：人工步必须真的有人；这是它与"自动登录"的分界。
+   */
+  manualHandler?: (req: ManualStepRequest) => boolean | Promise<boolean>;
+  /** 运行节奏覆盖（本次显式；缺省 = pack.pace > 环境变量 > 0）。 */
+  pace?: PackPace;
 }
+
+/** 一次运行的节奏生效值（报告只写非零值；缺省字段不出现 = 与今天逐字节一致）。 */
+export interface ResolvedPace {
+  between_steps_ms: number;
+  between_actions_ms: number;
+}
+
+/** 环境默认节奏（可被 pack/本次覆盖；坏值 = 配置类错误，响亮而不是静默当 0）。 */
+export function resolvePace(
+  pack: Pick<AppPack, "pace">,
+  opts: Pick<AppRunOptions, "pace"> = {},
+  env: NodeJS.ProcessEnv = process.env,
+): ResolvedPace {
+  const fromEnv = (key: string): number | undefined => {
+    const raw = env[key];
+    if (raw === undefined || raw === "") return undefined;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 0 || n > 60_000) {
+      throw new AppRunConfigError(`${key}=${JSON.stringify(raw)} 不合法：需要 0..60000 的整数毫秒`);
+    }
+    return n;
+  };
+  const pick = (key: keyof PackPace): number => {
+    const explicit = opts.pace?.[key];
+    if (explicit !== undefined) return explicit;
+    const declared = pack.pace?.[key];
+    if (declared !== undefined) return declared;
+    const envKey = key === "between_steps_ms" ? "AMBERFLOW_STEP_DELAY_MS" : "AMBERFLOW_ACTION_DELAY_MS";
+    return fromEnv(envKey) ?? 0;
+  };
+  return { between_steps_ms: pick("between_steps_ms"), between_actions_ms: pick("between_actions_ms") };
+}
+
+const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
  * 一次运行的"决策来源"汇总（LAYA_VALUE_PLAN P1）——把散在 step 日志里的判定方式变成三组数：
@@ -365,6 +410,17 @@ export interface AppRunResult {
   /** Slice 4：混用 ≥2 种应用类型时，按旅程声明的类型计数（缺字段 = 单一类型）。 */
   step_types?: Record<string, number>;
   sources: AppSourceResult[];
+  /** 人工步骤的执行记录（缺字段 = 旅程里没有人工步，既有产物逐字节不变）。 */
+  manual_steps?: Array<{
+    index: number;
+    desc: string;
+    done: boolean;
+    /** 人自证（`{manual:true}`），不是 DOM 验证。 */
+    attested?: boolean;
+    reason?: string;
+  }>;
+  /** 本次生效的节奏（缺字段 = 全 0 = 与今天逐字节一致）。 */
+  pace?: ResolvedPace;
   /**
    * 数据腿**真的写回槽位**的那部分（`source_slots` 的回写结果）。缺字段 = 没有回写
    * （缺省等价纪律）。有了它，报告才说得出"这个值是查出来的，还是人写死的"。
@@ -653,6 +709,24 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
   return { policy, anyDeclared };
 }
 
+/** 人工步的默认接入方式：终端里由人确认；非 TTY 不假装有人。 */
+async function promptManualOnTty(req: ManualStepRequest): Promise<boolean> {
+  if (!process.stdin.isTTY) {
+    throw new Error("manual step needs an interactive terminal (TTY)；"
+      + "测试/嵌入方请注入 manualHandler，或直接在终端里运行");
+  }
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    console.log(`\n[manual] ${req.desc}`);
+    if (req.instructions) console.log(`  ${req.instructions}`);
+    if (req.url) console.log(`  页面：${req.url}`);
+    const answer = await rl.question("  完成后按 Enter 继续；输入 n 放弃：");
+    return answer.trim().toLowerCase() !== "n";
+  } finally {
+    rl.close();
+  }
+}
+
 /** 跑一个应用包。返回结构化结果（报告与退出码都由调用方决定）。 */
 export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<AppRunResult> {
   const {
@@ -663,6 +737,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const t0 = Date.now();
   // 预检在**任何**腿之前：坏配置不该先跑数据腿再报错（I-1 的"0 副作用"就是这个位置）。
   preflightConfig(opts);
+  // 节奏：本次显式 > pack.pace > 环境变量 > 0。缺省全 0 = 与今天逐字节一致。
+  const pace = resolvePace(pack, opts);
   // 数据源的**配置**也在跑之前全部加载：`loadSource` 会在加载期跑 `validate_source`
   // （未知抽取器/op/transport 键、错的捕获组数……）。以前第 2 个源的坏配置要等第 1 个源
   // 真的打完网络才浮出来——网络副作用已经发生，报错却在半路。加载不产生副作用。
@@ -735,6 +811,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const sourceSlots = resolveSourceSlots(pack, observed);
   const expanded = expandPack(pack, { ...sourceSlots, ...slots }, planPath);
   const plan = expanded.plan;
+  // 有一个人工步 = 整个旅程必须看得见浏览器（登录/验证码需要人操作）；注入会话时由调用方负责。
+  const hasManual = expanded.steps.some((st) => st.adapter === "manual");
   // 相对 start_url 按仓库根解析成 file://（与 bench 同一口径）：应用包写仓库内路径，
   // 不写死绝对路径，换机器/换 checkout 目录仍然可跑。
   for (const sg of plan.subgoals) {
@@ -790,6 +868,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     maxEffectiveRepeats: policy.max_effective_repeats.value,
     // R2：学习环（不开 = null = 今天逐字节；authored hint 恒优先于学到的）。
     hintMemory: opts.hintMemory ?? null,
+    // 动作间最小等待（应用配置表 `pace.between_actions_ms` / 环境变量；0 = 今天的行为）。
+    actionDelayMs: pace.between_actions_ms,
     // 批量运行器的默认：风险只记录不阻断；`confirmSafe` 时拒绝破坏性动作。
     confirmFn: confirmSafe
       ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
@@ -804,14 +884,66 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     if (holder.session === null) {
       // 包声明了设备就用它（只有手机版页面存在的站点，桌面 DOM 里 hint 必然落空）
       const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
-      holder.session = own ? await browserSession(opts.headful !== true, device) : await opts.sessionFactory!();
+      // 人工步默认开可见窗口：人要在里面登录/过验证码；`--headful` 只是显式同义。
+      const headless = opts.headful !== true && !hasManual;
+      holder.session = own ? await browserSession(headless, device) : await opts.sessionFactory!();
     }
     const s = holder.session;
     // 会话的生命周期由本函数掌握：执行器关掉的是这个壳，真正的 page 留到不变量之后。
     return { page: s.page, pw: s.pw, browser: s.browser, close: async () => {} };
   };
 
+  const runManualStep = async (decl: ManualStepDecl, st: ExpandedStep): Promise<ManualStepRun> => {
+    let page: BrowserSession["page"] | null = null;
+    let url: string | null = null;
+    if (decl.start_url !== null) {
+      const target = startUrl(decl.start_url);
+      const denied = disallowedHost(target, pack.hosts ?? null);
+      if (denied !== null) {
+        return { done: false, reason: `host_not_allowed: '${denied}' is not among the declared hosts` };
+      }
+      const shell = await getShell();
+      try {
+        await (shell.page as unknown as { goto(u: string, o?: unknown): Promise<unknown> })
+          .goto(target, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      } catch (e) {
+        return { done: false, reason: `navigation_failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+      page = shell.page;
+      url = target;
+    } else if (holder.session !== null) {
+      page = holder.session.page;
+      try { url = String((page as unknown as { url(): string }).url()); } catch { url = null; }
+    }
+    if (verbose) {
+      console.log(`  [manual] step ${st.index}: ${decl.desc}`);
+      if (decl.instructions) console.log(`    ${decl.instructions}`);
+      if (url) console.log(`    页面：${url}`);
+    }
+    let approved: boolean;
+    const req: ManualStepRequest = {
+      index: st.index, desc: decl.desc,
+      instructions: decl.instructions ?? "", url,
+    };
+    try {
+      approved = opts.manualHandler !== undefined
+        ? await opts.manualHandler(req)
+        : await promptManualOnTty(req);
+    } catch (e) {
+      return { done: false, reason: `manual_handler_error: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    if (!approved) return { done: false, reason: "declined" };
+    // `{manual:true}` = 人自证（报告记 attested）；任何 DOM 信号都要引擎再验一遍。
+    if ("manual" in decl.signal) return { done: true, attested: true };
+    if (page === null) {
+      return { done: false, reason: "manual DOM signal needs a page (declare start_url or run after a browser step)" };
+    }
+    const held = await checkSignal(page as never, decl.signal);
+    return held ? { done: true, attested: false } : { done: false, reason: "manual_signal_not_held" };
+  };
+
   const toolSteps: ToolStepResult[] = [];
+  const manualSteps: NonNullable<AppRunResult["manual_steps"]> = [];
   const invariantResults: AppInvariantResult[] = [];
   /** 每一步的判定方式（trace 原样收集）——P1 的出场率/挽回数从这儿数出来，不另造机制。 */
   const decisionSteps: TraceStep[] = [];
@@ -874,6 +1006,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       return { done: rep.done };
     },
     runCliStep: async (st: ExpandedStep) => runToolStep(st, runOpts),
+    runManualStep,
   };
   try {
     let i = 0;
@@ -907,6 +1040,20 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       for (const by of returnsByStep.get(stepKey) ?? []) dataset.invalidateStep(by);
       returnsByStep.delete(stepKey);
       const outcome = await adapter.run(step.decl, step, adapterCtx);
+      if (step.adapter === "manual") {
+        manualSteps.push({
+          index: step.index, desc: step.desc, done: outcome.done,
+          // 显式写 false：报告能区分"DOM 验过"与"人自证"，缺字段会让两种证据看起来一样。
+          attested: outcome.attested === true,
+          ...(outcome.reason === undefined ? {} : { reason: outcome.reason }),
+        });
+        if (verbose) {
+          console.log(`  [manual] step ${step.index}: ${outcome.done ? "done" : `not done (${outcome.reason ?? "unknown"})`}`
+            + `${outcome.attested === true ? " [human attestation]" : ""}`);
+        }
+      }
+      // 步间最小等待（应用配置表 `pace.between_steps_ms` / 环境变量；0 = 今天的行为）。
+      if (pace.between_steps_ms > 0) await sleepMs(pace.between_steps_ms);
       if (outcome.tool) {
         if (outcome.done && outcome.returns !== undefined) {
           // 声明的抽取执行过了：哪怕一个都没抽到，也在证据面留 {}（"执行了，只是没抽到"）。
@@ -1004,12 +1151,14 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   }));
   const browserOk = subgoals.every((s) => s.status === "done" || s.status === "skipped");
   const toolsOk = toolSteps.every((t) => t.done);
+  const manualOk = manualSteps.every((m) => m.done);
   // 路径上界到顶 = 这次旅程没有走完（即使被环卷进去的那一步恰好是工具步，也不能算绿）。
-  const ok = browserOk && toolsOk && invariantResults.every((i) => i.held) && pathStopOut === undefined;
+  const ok = browserOk && toolsOk && manualOk && invariantResults.every((i) => i.held) && pathStopOut === undefined;
   // 数的是**声明出来的步**，不是"跑了几趟"：`next` 回边会让同一个工具步跑很多遍，
   // 那样 `completed` 会写出 `100/2` 这种读不通的数（真要读趟数看 `path_visits`）。
   const doneCount = subgoals.filter((s) => s.status === "done" || s.status === "skipped").length
-    + new Set(toolSteps.filter((t) => t.done).map((t) => t.index)).size;
+    + new Set(toolSteps.filter((t) => t.done).map((t) => t.index)).size
+    + new Set(manualSteps.filter((m) => m.done).map((m) => m.index)).size;
   const stats = opts.runtimeStats ? opts.runtimeStats() : null;
   return {
     app: pack.id, label: pack.label, goal: pack.goal,
@@ -1017,6 +1166,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     roles_used: expanded.rolesUsed, slots: expanded.slots,
     completed: `${doneCount}/${expanded.steps.length}`,
     subgoals, tool_steps: toolSteps, invariants: invariantResults,
+    ...(manualSteps.length ? { manual_steps: manualSteps } : {}),
+    ...(pace.between_steps_ms > 0 || pace.between_actions_ms > 0 ? { pace } : {}),
     ...(stepTypes !== undefined ? { step_types: stepTypes } : {}),
     ...(opts.captureTraces ? { step_traces: stepTraces } : {}),
     // Slice 2：返回值传递的审计面（缺省不出现——没有 returns 的包产物逐字节不变）。
@@ -1153,6 +1304,15 @@ export function appReportMarkdown(r: AppRunResult): string {
       if (t.stderr) L.push(`  - stderr: ${JSON.stringify(t.stderr.slice(0, 200))}`);
     }
     L.push("", "</details>");
+  }
+  if (r.manual_steps !== undefined && r.manual_steps.length) {
+    L.push("", "## 人工步骤（登录/验证码/人工确认）", "",
+      "| # | 步骤 | 结论 | 证据 |", "|---|---|---|---|");
+    for (const m of r.manual_steps) {
+      const verdict = m.done ? "完成" : `**未完成**（${m.reason ?? "unknown"}）`;
+      const evidence = m.attested === true ? "人自证（{manual:true}，非 DOM 验证）" : "人完成后引擎验过声明的信号";
+      L.push(`| ${m.index} | ${m.desc} | ${verdict} | ${evidence} |`);
+    }
   }
   if (r.step_types !== undefined) {
     L.push(`- 应用类型：${Object.entries(r.step_types).map(([k, n]) => `\`${k}\`×${n}`).join(" · ")}（旅程声明）`);
@@ -1332,6 +1492,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           outDir, verbose, runId, dataset: null,
           runWebStep: async (): Promise<{ done: boolean }> => { throw new Error("ctx.run: browser steps go through ctx.step()"); },
           runCliStep: async (): Promise<ToolStepResult> => { throw new Error("ctx.run: use the cli form for cli steps"); },
+          runManualStep: async (): Promise<ManualStepRun> => ({
+            done: false, reason: "manual steps are declared in the journey, not executed through ctx.run",
+          }),
         };
         const out = await adapter.run(decl, step, adapterCtx);
         const t = out.tool;

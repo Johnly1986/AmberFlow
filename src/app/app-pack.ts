@@ -55,8 +55,23 @@ export const PACK_KEYS = [
   "spec_version", "id", "label", "goal", "model", "max_subgoals", "hosts",
   "slots", "required_slots", "sources", "source_slots", "roles", "journey", "invariants", "notes",
   "probe", "device", "site",
-  "max_step_visits", "generated_from", "recorded_from", "policy",
+  "max_step_visits", "generated_from", "recorded_from", "policy", "pace",
 ] as const;
+
+/**
+ * **运行节奏声明**（应用配置表里的 `pace` 块）：步与步之间、同一子目标内动作与动作之间的
+ * 最小等待。缺省 = 0（与今天逐字节一致）；只对声明/配置了值的应用生效。
+ *
+ * 为什么放在**应用声明**里：节奏是"这个站点/这个旅程能承受多快"，属于站点知识；
+ * 全局环境变量只是默认值（见 `AMBERFLOW_STEP_DELAY_MS` / `AMBERFLOW_ACTION_DELAY_MS`），
+ * 应用表里的值优先。它不是反爬对抗，而是**降载/礼貌客户端**的显式配置。
+ */
+export interface PackPace {
+  /** 两个旅程步之间（含工具步/人工步）的最小等待，毫秒。 */
+  between_steps_ms?: number;
+  /** 同一浏览器子目标内，两次动作之间的最小等待，毫秒。 */
+  between_actions_ms?: number;
+}
 
 /**
  * 站点面的声明（`meta.site` / pack `site`）：页面角色 → URL，以及可命名的行抽取。
@@ -264,6 +279,8 @@ export interface AppInvariant {
 export interface AppPack {
   /** §3：运行策略声明（缺省 = 今天的行为；未知键加载期报错）。 */
   policy?: PackPolicy;
+  /** 运行节奏（步/动作间最小等待；缺省 = 0 = 今天的行为）。 */
+  pace?: PackPace;
   spec_version: number;
   id: string;
   label: string;
@@ -750,6 +767,24 @@ export function validatePack(pack: AppPack,
   }
   if (pack.model !== undefined && typeof pack.model !== "string") {
     p.push("model must be a string");
+  }
+  if (pack.pace !== undefined) {
+    if (!isDict(pack.pace)) {
+      p.push("pace must be an object {between_steps_ms, between_actions_ms}");
+    } else {
+      for (const k of Object.keys(pack.pace)) {
+        if (k !== "between_steps_ms" && k !== "between_actions_ms") {
+          p.push(`pace.${k}: unknown key (known: between_steps_ms, between_actions_ms)`);
+        }
+      }
+      for (const k of ["between_steps_ms", "between_actions_ms"] as const) {
+        const v = (pack.pace as Record<string, unknown>)[k];
+        if (v === undefined) continue;
+        if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 60_000) {
+          p.push(`pace.${k}: must be an integer 0..60000 (got ${JSON.stringify(v)})`);
+        }
+      }
+    }
   }
   // `hosts` 必须是字符串列表：防泄漏门禁（`tools/apps_matrix.ts`）会逐项遍历它。
   // 写成裸字符串虽然能被 `validateProbeBlock` 的 `asList` 容忍，但门禁会按**字符**建 token

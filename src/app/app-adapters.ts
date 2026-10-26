@@ -26,6 +26,7 @@ import { checkToolSignal, validateToolSignal, type ToolSignal } from "../browser
 import type { ToolStepResult } from "./app-runner.ts";
 import type { ExpandedStep } from "./app-pack.ts";
 import type { Subgoal } from "../engine/plan.ts";
+import { validateSignalSpec, type SignalSpec } from "../engine/signals.ts";
 
 /** 所有适配器共用的步键（`adapter` 是类型选择器，任何类型都可以写）。 */
 export const SHARED_STEP_KEYS = [
@@ -196,10 +197,41 @@ export interface AdapterStepExpand {
 export interface AdapterStepRun {
   /** 该步是否已按**它自己的信号**成立完成。 */
   done: boolean;
+  /** 人工步：人自证（`{manual:true}`）——报告必须与 DOM 验证区分。 */
+  attested?: boolean;
+  /** 人工步：未完成的结构化原因（declined / manual_signal_not_held …）。 */
+  reason?: string;
   /** 进程类步的结构化结果（runner 原样放进 `tool_steps`；web 步没有）。 */
   tool?: ToolStepResult;
   /** 本步声明并经信号成立后抽取出的返回值（runner 写进运行级数据集）。 */
   returns?: Record<string, unknown>;
+}
+
+/** 人工步声明（`adapter: "manual"`）：完成由人，证据由声明的 signal 决定。 */
+export interface ManualStepDecl {
+  desc: string;
+  instructions: string | null;
+  /** 人工操作前导航到的页面（登录/验证码页）；空 = 人工在外部完成，不碰浏览器。 */
+  start_url: string | null;
+  /** `{manual:true}` = 人工自证；DOM 信号 = 人工完成后仍要由引擎验一遍。 */
+  signal: SignalSpec;
+}
+
+/** 人工步的接入请求（终端提示/测试钩子拿到同一份信息）。 */
+export interface ManualStepRequest {
+  index: number;
+  desc: string;
+  instructions: string;
+  /** 人工操作前已导航到的页面 URL（没有 start_url 且没有浏览器时 = null）。 */
+  url: string | null;
+}
+
+/** 人工步运行结果（runner 填；`attested` = 人自证，不是 DOM 验证）。 */
+export interface ManualStepRun {
+  done: boolean;
+  attested?: boolean;
+  /** 未完成的结构化原因（declined / no-terminal / signal-not-held / host-not-allowed …）。 */
+  reason?: string;
 }
 
 /** 运行上下文：runner 提供的服务面（迁移桥；新适配器不依赖这些回调，自己实现 run）。 */
@@ -211,6 +243,8 @@ export interface AdapterRunContext {
   runWebStep(step: ExpandedStep): Promise<{ done: boolean }>;
   /** 迁移桥：cli 适配器把执行委托给 runner 的工具步服务。 */
   runCliStep(step: ExpandedStep): Promise<ToolStepResult>;
+  /** 人工步：runner 负责可见浏览器/导航/等待人/验 signal（执行器不参与）。 */
+  runManualStep(decl: ManualStepDecl, step: ExpandedStep): Promise<ManualStepRun>;
   /** 运行级数据集读取面（`{dataset:NAME}` 占位符；缺失 = needs_value，绝不猜）。 */
   readonly dataset?: DatasetReader | null;
   /** 本次运行的唯一标识（`{run_id}` 占位符；与 `{out_dir}` 同一族运行期占位符）。 */
@@ -338,6 +372,70 @@ export const webAdapter: AppAdapter = {
   async run(_decl, _step, ctx) {
     const r = await ctx.runWebStep(_step);
     return { done: r.done };
+  },
+};
+
+/** `manual` 类型专属键（人工步骤的声明面；`signal` 是共享键）。 */
+export const MANUAL_STEP_KEYS = ["start_url", "instructions"] as const;
+
+/**
+ * `manual`：**人工步骤**——登录、短信/验证码、二次确认、需要人判断的页面操作。
+ *
+ * 证据纪律：人工步必须声明 `signal`。
+ *   - `{manual:true}` = 人自证（trace/报告显式记 `attested`，绝不冒充 DOM 验证）；
+ *   - DOM 信号 = 人完成后由引擎再验一遍（验不过 → blocked，不静默算绿）。
+ *
+ * 执行：runner 负责（可见浏览器/导航/终端等待），执行器不参与；非交互环境由
+ * `--manual-handler` 注入缝（测试/嵌入方）或 `ready()` 如实跳过（套件）。
+ */
+export const manualAdapter: AppAdapter = {
+  kind: "manual",
+  legacyKind: "browser",
+  label: "manual",
+  stepKeys: MANUAL_STEP_KEYS,
+  validateStep(step, where, p) {
+    if (typeof step["desc"] !== "string" || !String(step["desc"]).trim()) {
+      p.push(`${where}: a manual step needs desc (what the human is asked to do)`);
+    }
+    if (step["signal"] === undefined) {
+      p.push(`${where}: a manual step needs a signal ({manual:true} = the human attests, or a DOM signal)`);
+    } else {
+      p.push(...validateSignalSpec(step["signal"], `${where}.signal`));
+    }
+    if (step["start_url"] !== undefined) {
+      if (typeof step["start_url"] !== "string" || !String(step["start_url"]).trim()) {
+        p.push(`${where}.start_url: non-empty string required`);
+      }
+    }
+    if (step["instructions"] !== undefined && typeof step["instructions"] !== "string") {
+      p.push(`${where}.instructions: must be a string`);
+    }
+    // 人工步没有自动重试/返回值：声明了却静默忽略，等于"写了没用"。
+    if (step["retries"] !== undefined && Number(step["retries"]) > 0) {
+      p.push(`${where}.retries: a manual step does not retry（需要人再来一次就再跑一步）`);
+    }
+    if (step["returns"] !== undefined) {
+      p.push(`${where}.returns: a manual step has no process observation to extract from`);
+    }
+  },
+  expand(merged) {
+    const decl: ManualStepDecl = {
+      desc: String(merged["desc"] ?? ""),
+      instructions: merged["instructions"] === undefined || merged["instructions"] === null
+        ? null : String(merged["instructions"]),
+      start_url: merged["start_url"] === undefined || merged["start_url"] === null
+        ? null : String(merged["start_url"]),
+      signal: (merged["signal"] ?? {}) as SignalSpec,
+    };
+    return { decl };
+  },
+  async run(decl, step, ctx) {
+    return ctx.runManualStep(decl as ManualStepDecl, step);
+  },
+  ready() {
+    // 套件是**批处理**：不启用人工步，也不假装能跑（否则在开发者的 TTY 里会挂在那里等人）。
+    // 人工步只适合直接用 `npm run apps -- --app ...` 单跑（TTY 下由人确认）。
+    return { ready: false, reason: "manual step needs a human; run this app directly (apps:suite is batch)" };
   },
 };
 
@@ -820,6 +918,7 @@ export const stdioAdapter: AppAdapter = {
 
 // 内建注册：顺序无关（注册表按 kind 查）。
 registerAppAdapter(webAdapter);
+registerAppAdapter(manualAdapter);
 registerAppAdapter(cliAdapter);
 registerAppAdapter(sshAdapter);
 registerAppAdapter(stdioAdapter);
@@ -833,6 +932,7 @@ export function appAdapterStepKeys(): string[] {
 export function resetAppAdapters(): void {
   registry.clear();
   registerAppAdapter(webAdapter);
+  registerAppAdapter(manualAdapter);
   registerAppAdapter(cliAdapter);
   registerAppAdapter(sshAdapter);
   registerAppAdapter(stdioAdapter);

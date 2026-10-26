@@ -47,11 +47,11 @@ function fakeAdapter(opts: { kind?: string } = {}): AppAdapter {
 afterEach(() => resetAppAdapters());
 
 describe("①注册表：一种应用类型 = 一个支持器", () => {
-  it("内建 web/cli；未知 id 响亮报错并列出已知项（绝不静默退回）", () => {
-    expect(listAppAdapters()).toEqual(["cli", "ssh", "stdio", "web"]);
+  it("内建 web/cli/manual；未知 id 响亮报错并列出已知项（绝不静默退回）", () => {
+    expect(listAppAdapters()).toEqual(["cli", "manual", "ssh", "stdio", "web"]);
     expect(getAppAdapter("web")!.legacyKind).toBe("browser");
     expect(getAppAdapter("cli")!.legacyKind).toBe("tool");
-    expect(() => requireAppAdapter("telnet")).toThrow(/未知的应用支持器.*telnet.*cli, ssh, stdio, web/);
+    expect(() => requireAppAdapter("telnet")).toThrow(/未知的应用支持器.*telnet.*cli, manual, ssh, stdio, web/);
   });
 
   it("注册新类型后：步键立刻合法、包能通过校验并展开出 adapter/decl（不改 app-pack 分支）", () => {

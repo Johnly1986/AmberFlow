@@ -46,6 +46,7 @@ export const RC_GROUPS: Array<{ group: string; keys: string[] }> = [
     "PLAYWRIGHT_BROWSERS_PATH", "AMBERFLOW_HOME", "AMBERFLOW_APPS_OUT", "AMBERFLOW_SUITE_OUT",
     "AMBERFLOW_REPO", "LAYAWEBUSE_REPO"] },
   { group: "路由偏好", keys: ["CAMERA_ROUTE"] },
+  { group: "人工步骤与操作节奏", keys: ["AMBERFLOW_STEP_DELAY_MS", "AMBERFLOW_ACTION_DELAY_MS"] },
 ];
 const KNOWN_KEYS = new Set(RC_GROUPS.flatMap((g) => g.keys));
 

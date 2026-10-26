@@ -362,6 +362,10 @@ npm run apps:suite -- --json
   一个字节都不用改；切片 1 的全部产物与套件结果逐字节/逐行不变。
 - **专属键白名单**：写错类型（web 步带 `source`、cli 步带 `start_url`）**加载期就红**并点名归属。
 - **加一种应用类型 = 注册一个支持器**，不改 `app-pack` / `app-runner` 的核心分支。
+- **人工步骤**：`adapter: "manual"`（登录/验证码/人工确认），人完成、引擎验声明的信号；
+  有这种步时浏览器默认可见。**运行节奏**：`pace.between_steps_ms` / `pace.between_actions_ms`
+  写在包顶层（也可用 `AMBERFLOW_STEP_DELAY_MS` / `_ACTION_DELAY_MS` 做全局默认）。
+  见 [docs/MANUAL_STEPS_AND_PACE.md](../docs/MANUAL_STEPS_AND_PACE.md)。
 
 **ssh 步**（真实本机 sshd）与 **stdio 步**（交互式进程/游戏）见示范应用 `apps/mixed-demo`：
 

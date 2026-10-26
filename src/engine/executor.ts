@@ -428,6 +428,11 @@ export interface MiddlewareOptions {
   confirmFn?: (desc: string) => boolean | Promise<boolean>;
   /** Human oracle for `{manual: true}` subgoals (see RunOptions.manualGoal). */
   manualConfirmFn?: ((desc: string, stateExcerpt: string) => boolean | Promise<boolean>) | null;
+  /**
+   * 两次实际动作之间的最小等待（毫秒）；0/缺省 = 今天的行为。由应用配置表的
+   * `pace.between_actions_ms` 传入——给需要降载的站点用，不是反爬对抗。
+   */
+  actionDelayMs?: number;
   /** See RunOptions.reobserve (default ON). */
   reobserve?: boolean;
   /** See RunOptions.escalateFn (default: none — the local model is the last word). */
@@ -751,6 +756,8 @@ export class BrowserMiddleware {
   doneThreshold: number;
   confirmFn: (desc: string) => boolean | Promise<boolean>;
   manualConfirmFn: ((desc: string, stateExcerpt: string) => boolean | Promise<boolean>) | null = null;
+  /** See MiddlewareOptions.actionDelayMs. */
+  actionDelayMs = 0;
   reobserve = true;
   escalateFn: EscalatorLike | null = null;
   /** No runtime installed: rules/hints only. Set by `ready()` (see RULES-ONLY MODE). */
@@ -818,6 +825,7 @@ export class BrowserMiddleware {
     this.doneThreshold = opts.doneThreshold ?? 0.5;
     this.confirmFn = opts.confirmFn ?? DEFAULT_CONFIRM;
     this.manualConfirmFn = opts.manualConfirmFn ?? null;
+    this.actionDelayMs = opts.actionDelayMs ?? 0;
     this.reobserve = opts.reobserve ?? true;
     this.escalateFn = opts.escalateFn ?? null;
     this.outcomeMemory = opts.outcomeMemory ?? null;
@@ -2405,6 +2413,9 @@ export class BrowserMiddleware {
         // 不挂在 antiRepeat 下（那是循环通用卫生），因为"一次裁决"是 A2′ 的语义本身：
         // 走到这里 = 执行了、非惰性、信号没成立 ⇒ 这一格裁判已给出"不算"，禁掉换下一个候选。
         if (method === "laya:adjudicated" && executed) forbid(ref, el, "adjudicated-missed");
+        // 动作间最小等待：只在实际执行过动作、且还要继续要下一个动作时付。
+        // 放在所有"这步已经结束/这块元素被禁"的分支之后，done 的路径不会多等。
+        if (executed && this.actionDelayMs > 0) await sleep(this.actionDelayMs);
       }
     } finally {
       // Only close the browser run() launched itself: an injected page/pw belongs

@@ -336,6 +336,7 @@ provider（如 `AMBERFLOW_DEFAULT_DECISION_PROVIDER=token-plan`）→在线；�
 | `DASHSCOPE_API_KEY`（别名 `BAILIAN_API_KEY`） | 百炼决策模型的 API token（`--provider bailian` 时用）——**只进环境变量，绝不写进代码/产物/提交** |
 | `BAILIAN_ENDPOINT` 或 `BAILIAN_WORKSPACE_ID`(+`BAILIAN_REGION`) | 百炼 systemone 端点（workspace 作用域）；起法见 docs/DECISION_PROVIDER_BAILIAN.md |
 | `OPENAI_BASE_URL` + `OPENAI_API_KEY` | 启用 LLM 规划与审计（不配则用内置替身，流程照常） |
+| `AMBERFLOW_STEP_DELAY_MS` / `AMBERFLOW_ACTION_DELAY_MS` | 全局运行节奏默认（毫秒；应用配置表 `pace` 优先）；人工步骤与 `pace` 详见 [docs/MANUAL_STEPS_AND_PACE.md](docs/MANUAL_STEPS_AND_PACE.md) |
 | `AMBERFLOW_REPO` | DSH 桥指向的 checkout（旧名 `LAYAWEBUSE_REPO` 仍兼容） |
 
 ## 延伸阅读

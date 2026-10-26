@@ -158,6 +158,9 @@ const b = await ctx.run({
 `dryRunArgs` 且干跑失败绝不 apply；危险步**默认拒绝**（`--allow-dangerous` 才执行），拒绝会带
 `stopCode="dangerous"` 与人话 `reason`，脚本可以据此分支（例如记录"本次未放行"后继续）。
 可用适配器：`cli` / `ssh` / `stdio`（`web` 步走 `ctx.step`）。
+**人工步** `adapter: "manual"`（登录/验证码/人工确认）与运行节奏 `pace` 见
+[MANUAL_STEPS_AND_PACE.md](MANUAL_STEPS_AND_PACE.md)；人工步也需要声明 `signal`
+（`{manual:true}` = 人自证，或 DOM 信号由引擎复核）。
 
 ## 7. 策略、消融与学习环
 
