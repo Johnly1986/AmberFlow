@@ -183,10 +183,7 @@ function validateGoalFlags(v: Values): void {
   if (str(v.slot) || Array.isArray(v.slot)) throw usageError("--slot 只用于应用包");
 }
 
-function baseEnvFor(v: Values, ctx: CliContext): NodeJS.ProcessEnv {
-  const provider = str(v.provider);
-  return provider ? { ...ctx.env, AMBERFLOW_DECISION_PROVIDER: provider } : ctx.env;
-}
+
 
 async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext): Promise<number> {
   // 槽位拼写（`--slot city` 少了 `=值`）必须在起浏览器之前点名：旧入口只会在
@@ -279,7 +276,7 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
 
   const jsonMode = bool(v.json) || ctx.globals.json;
   if (!jsonMode) {
-    return ctx.runEntry("src/app/app-runner.ts", args, { cwd: ctx.cwd, env: baseEnvFor(v, ctx) });
+    return ctx.runEntry("src/app/app-runner.ts", args, { cwd: ctx.cwd, env: ctx.env });
   }
 
   let appId = path.basename(app, path.extname(app));
@@ -302,7 +299,7 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   const startedAt = Date.now();
   const code = await ctx.runEntry("src/app/app-runner.ts", args, {
     cwd: ctx.cwd,
-    env: baseEnvFor(v, ctx),
+    env: ctx.env,
     stdoutToStderr: true,
   });
 
@@ -396,7 +393,7 @@ async function runPlanFile(v: Values, ctx: CliContext): Promise<number> {
     }
     const args = ["check", "--file", planPath];
     if (planMax !== null) args.push("--max", String(planMax));
-    return ctx.runEntry("tools/plan_cli.ts", args, { cwd: ctx.cwd, env: baseEnvFor(v, ctx) });
+    return ctx.runEntry("tools/plan_cli.ts", args, { cwd: ctx.cwd, env: ctx.env });
   }
   const { TaskPlan, PlanningRules } = await import("../../engine/plan.ts");
   const plan = TaskPlan.load(path.resolve(ctx.cwd, planPath));
@@ -438,14 +435,14 @@ async function runPlanFile(v: Values, ctx: CliContext): Promise<number> {
   if (bool(v.headful)) args.push("--headful");
   if (planMax !== null) args.push("--max", String(planMax));
   if (!jsonMode) {
-    return ctx.runEntry("tools/plan_cli.ts", args, { cwd: ctx.cwd, env: baseEnvFor(v, ctx) });
+    return ctx.runEntry("tools/plan_cli.ts", args, { cwd: ctx.cwd, env: ctx.env });
   }
 
   // plan-cli 把进度打在 stdout；JSON 模式转到 stderr，跑完重读计划文件，
   // 用步骤状态生成统一信封。执行器本身仍由旧入口负责。
   const code = await ctx.runEntry("tools/plan_cli.ts", args, {
     cwd: ctx.cwd,
-    env: baseEnvFor(v, ctx),
+    env: ctx.env,
     stdoutToStderr: true,
   });
   return emitPlanStatus(ctx, {
@@ -490,11 +487,11 @@ async function runDemo(v: Values, savePlan: string, headful: boolean, ctx: CliCo
   if (headful) args.push("--headful");
   if (str(v.provider)) args.push("--provider", str(v.provider)!);
   if (!jsonMode) {
-    return ctx.runEntry("src/cli/start.ts", args, { cwd: ctx.cwd, env: baseEnvFor(v, ctx) });
+    return ctx.runEntry("src/cli/start.ts", args, { cwd: ctx.cwd, env: ctx.env });
   }
   const code = await ctx.runEntry("src/cli/start.ts", args, {
     cwd: ctx.cwd,
-    env: baseEnvFor(v, ctx),
+    env: ctx.env,
     stdoutToStderr: true,
   });
   return emitPlanStatus(ctx, {
@@ -516,11 +513,11 @@ async function runGoal(
   if (str(v.provider)) args.push("--provider", str(v.provider)!);
   const jsonMode = bool(v.json) || ctx.globals.json;
   if (!jsonMode) {
-    return ctx.runEntry("src/cli/start.ts", args, { cwd: ctx.cwd, env: baseEnvFor(v, ctx) });
+    return ctx.runEntry("src/cli/start.ts", args, { cwd: ctx.cwd, env: ctx.env });
   }
   const code = await ctx.runEntry("src/cli/start.ts", args, {
     cwd: ctx.cwd,
-    env: baseEnvFor(v, ctx),
+    env: ctx.env,
     stdoutToStderr: true,
   });
   return emitPlanStatus(ctx, {

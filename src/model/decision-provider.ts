@@ -210,23 +210,15 @@ export function describeActiveProvider(): string {
   return `${i.name} ${i.version}（score=${i.capabilities.score_kind}${cap ? `，${cap}` : ""}）`;
 }
 
-/**
- * 从环境变量/参数解析要用的 provider。
- * `AMBERFLOW_DECISION_PROVIDER=<name>`；未注册的名字**响亮报错**（拼错 provider 名
- * 却静默退回默认，是换模型测试里最难查的一类错——和"CI 的绿来自脚本桩"同一族）。
- */
-export async function installProviderFromEnv(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
-  const want = env.AMBERFLOW_DECISION_PROVIDER;
-  if (!want) return null;
-  const factory = registry.get(want);
-  if (!factory) {
-    throw new Error(`未知的决策提供者 ${JSON.stringify(want)}（已注册：${listDecisionProviders().join(", ") || "无"}）`);
-  }
-  active = await factory();
-  return active.name;
-}
+/* ── 选择：三件套 / 显式名字 → 哪扇门（CLI 与配置都走这一个函数） ─────────── */
 
-/* ── 选择：一个名字 → 哪扇门（CLI / env 都走这一个函数，不分两头各猜一遍） ──── */
+/*
+ * 选择规则（2026-10-26 项目方纠正）：
+ *   - 线上：有 `AMBERFLOW_DECISION_BASE_URL` 就是线上服务，地址/密钥/模型三件套足够，
+ *     **不再需要 provider 键**；协议按 URL 推断，必要时用 `AMBERFLOW_DECISION_PROTOCOL` 覆盖。
+ *   - 本地：没有服务地址时用本地模型，`AMBERFLOW_DECISION_MODEL` 选 checkpoint。
+ *   - `--provider NAME` 只保留为实验/消融/兼容旧适配器的**命令行**入口，不写进配置。
+ */
 
 /** 内建名字：走旧的 `LayaRuntime` 门（checkpoint 路由、换入换出都在执行器那边）。 */
 export const BUILTIN_LAYA_PROVIDERS = ["laya-onnx", "scripted-stub", "none"] as const;
@@ -296,11 +288,12 @@ export async function applySpecToRuntime(spec: ProviderSpec): Promise<AppliedSpe
 }
 
 /**
- * 按名字**解析**该装什么（不安装）。三扇门，一个入口：
- *   `laya-onnx`      真 ONNX 端口（默认）；产物不齐时 tier 如实写 `off(missing)`
+ * 按**三件套或显式名字**解析该装什么（不安装）。四个门，一个入口：
+ *   有 `AMBERFLOW_DECISION_BASE_URL` → 统一决策服务（不需要 provider 键）
+ *   `laya-onnx`      没有服务地址时的本地端口；产物不齐时 tier 如实写 `off(missing)`
  *   `scripted-stub`  脚本桩（**消融臂**：它的"过关 0"是构造出来的）
  *   `none`           不装决策层（**消融臂**：执行器进 rules-only）
- *   其它             注册表里的 provider（基线 `coin-flip` 等，或嵌入方自己注册的）
+ *   其它             `--provider NAME` 显式点名的实验/兼容 provider
  *
  * 未注册的名字**报错并列出可选项**——拼错 provider 名却静默退回默认，会让一整轮 A/B 白跑。
  */
@@ -319,24 +312,27 @@ export async function resolveProviderSpec(
   // token-plan MaaS 网关（同一 SystemOne 协议，共享端点、Token 只从环境读）。
   const { registerTokenPlan } = await import("./decision-tokenplan.ts");
   await registerTokenPlan();
-  // 环境默认档：显式 provider > 显式默认档 > 本地 laya。
-  // 统一决策服务不再因为"配了地址"就自动接管；要用它必须显式给 provider
-  // （`--provider decision-service` 或 `AMBERFLOW_DECISION_PROVIDER=decision-service`）。
-  const explicitProvider = name ?? env.AMBERFLOW_DECISION_PROVIDER ?? null;
-  const wanted = explicitProvider
-    ?? env.AMBERFLOW_DEFAULT_DECISION_PROVIDER
-    ?? "laya-onnx";
-  // 统一决策服务只在真的选到它时注册（不让一个没在跑的服务污染 doctor 的可用列表）。
+
+  // 线上/本地是**三件套的有无**，不是另一个开关：有服务地址就走统一服务，
+  // 没有就用本地 checkpoint。`--provider NAME` 只作为本次实验的显式覆盖。
+  const explicitName = name ?? null;
+  const serviceConfigured = (env.AMBERFLOW_DECISION_BASE_URL ?? "").trim() !== "";
+  const wanted = explicitName ?? (serviceConfigured ? "decision-service" : "laya-onnx");
+
   if (wanted === "decision-service") {
-    const { registerDecisionService } = await import("./decision-service.ts");
+    const { registerDecisionService, decisionServiceProvider } = await import("./decision-service.ts");
     await registerDecisionService();
+    // 用调用方传进来的 env 构造（测试与嵌套入口可以传不同的配置面），
+    // 而不是让 factory 去读 process.env 的另一份快照。
+    const provider = decisionServiceProvider(env);
+    const ce = provider.configError?.();
+    if (ce) throw new Error(`决策服务未配置：${ce}`);
+    return { kind: "provider", name: provider.name, tier: "on", ablation: false, provider };
   }
+
   const extra = listDecisionProviders().filter(
     (n) => !(BASELINE_PROVIDERS as readonly string[]).includes(n)
       && !(BUILTIN_LAYA_PROVIDERS as readonly string[]).includes(n));
-  // "显式" = 调用方传了名字或设了 AMBERFLOW_DECISION_PROVIDER；
-  // 显式却没配好 ⇒ 响亮报错（不能把"我配了服务"悄悄降级成"没人要模型"）。
-  const explicit = explicitProvider != null;
   if (wanted === "none") {
     return { kind: "none", name: "none", tier: "off(ablation:rules-only)", ablation: true };
   }
@@ -363,14 +359,10 @@ export async function resolveProviderSpec(
       [...BUILTIN_LAYA_PROVIDERS, ...BASELINE_PROVIDERS, ...extra].join(", ")}`);
   }
   const p = await factory();
-  // 在线服务没配好（缺 key/端点）时，**解析时就分两种处理**，而不是装一个每步都抛的 provider：
-  //   ① 显式点名（--provider bailian / env）却没配 ⇒ 响亮报错指路（用户要的就是它）；
-  //   ② 环境默认档没配 ⇒ 干净落到 rules-only（没人要求在线模型，声明照样能跑——开箱不受影响）。
+  // 实验/兼容 provider 只有在 `--provider NAME` 点名时才会走到这里；没配好就解析期报错，
+  // 不装一个每步都抛的 provider，也不悄悄降级成"没人要模型"。
   const ce = p.configError?.();
-  if (ce) {
-    if (explicit) throw new Error(`决策提供者 ${JSON.stringify(wanted)} 未配置：${ce}`);
-    return { kind: "none", name: `rules-only(${wanted} 未配置)`, tier: "off(no decision service configured)", ablation: true };
-  }
+  if (ce) throw new Error(`决策提供者 ${JSON.stringify(wanted)} 未配置：${ce}`);
   return { kind: "provider", name: p.name, tier: "on", ablation: false, provider: p };
 }
 

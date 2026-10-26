@@ -22,7 +22,7 @@ import { extractElements, type ElemPool } from "../src/engine/extraction.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime, type DecisionAgent, type LayaRuntime, type ModelState } from "../src/model/model.ts";
 import { providerContract } from "./provider-contract.ts";
 import {
-  layaProvider, listDecisionProviders, registerDecisionProvider, installProviderFromEnv,
+  layaProvider, listDecisionProviders, registerDecisionProvider, resolveProviderSpec,
   installDecisionProvider, type ChoiceRequest, type ChoiceOutcome, type DecisionProvider,
 } from "../src/model/decision-provider.ts";
 
@@ -141,8 +141,8 @@ describe("② 可替换：契约跑在三个 provider 上（后两个不碰 laya
   }), page, pool);
 });
 
-describe("③ 注册表：换 provider 是配置，不是改代码", () => {
-  it("未注册的名字响亮报错（拼错 provider 名不能静默退回默认）", async () => {
+describe("③ 注册表：--provider 显式点名，不写进配置", () => {
+  it("未注册的名字响亮报错；显式名字能选中；没有名字也没有服务地址 ⇒ 本地", async () => {
     registerDecisionProvider("test-rank-only", () => ({
       name: "test-rank-only", version: "1",
       capabilities: { choice: true, risk: false, done: false, shortlist: false, score_kind: "rank_only" },
@@ -152,13 +152,15 @@ describe("③ 注册表：换 provider 是配置，不是改代码", () => {
       },
     }));
     expect(listDecisionProviders()).toContain("test-rank-only");
-    await expect(installProviderFromEnv({ AMBERFLOW_DECISION_PROVIDER: "test-rank-typo" }))
+    await expect(resolveProviderSpec("test-rank-typo", {}))
       .rejects.toThrow(/未知的决策提供者.*test-rank-typo/);
-    const changed = await installProviderFromEnv({ AMBERFLOW_DECISION_PROVIDER: "test-rank-only" });
-    expect(changed).toBe("test-rank-only");
-    // 没设 env ⇒ 不动当前 provider（缺省等价的纪律）
-    installDecisionProvider(null);
-    expect(await installProviderFromEnv({})).toBeNull();
+    const changed = await resolveProviderSpec("test-rank-only", {});
+    expect(changed.kind).toBe("provider");
+    expect(changed.name).toBe("test-rank-only");
+    // 没有显式名字、也没有服务地址 ⇒ 本地 laya（不是"没人要模型"）
+    const local = await resolveProviderSpec(undefined, {});
+    expect(local.kind).toBe("laya");
+    expect(local.name).toBe("laya-onnx");
   });
 });
 

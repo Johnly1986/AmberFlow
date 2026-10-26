@@ -37,7 +37,6 @@ cp configs/amberflowrc.example.json configs/amberflowrc.json   # 本机文件，
 
 ```json
 {
-  "AMBERFLOW_DECISION_PROVIDER": "token-plan",
   "AMBERFLOW_DECISION_BASE_URL": "https://<你的网关主机>/compatible-mode/v1",
   "AMBERFLOW_DECISION_MODEL": "decision-model-preview",
   "AMBERFLOW_DECISION_API_KEY": "sk-…"
@@ -45,10 +44,11 @@ cp configs/amberflowrc.example.json configs/amberflowrc.json   # 本机文件，
 ```
 
 然后**任何命令都不需要加旗标**——`npm start`、`npm run apps`、`npm run apps:suite`、`npm run bench`、
-`learn`、`plan-cli` 全走同一扇门选决策源（本地产物就绪→本地；配了 provider→在线；都没配→规则档并如实点名）：
+`learn`、`plan-cli` 全走同一扇门选决策源（有服务地址→在线；没有地址且本地产物就绪→本地；都没配→规则档并如实点名）。
+地址、密钥、模型就是完整的选择依据，不再需要额外的 provider 键。
 
 ```bash
-npm run doctor                 # 确认：「决策档位 token-plan（tier=on）」+ 每个配置值的来源（文件/环境）
+npm run doctor                 # 确认：「决策档位 decision-service（tier=on）」+ 每个配置值的来源（文件/环境）
 npm start -- --goal "…" --url <页面>          # 演示→归纳→执行，决策问线上模型
 npm run apps -- --app demo-app --headful     # 有头跑一个应用（风险闸门用模型投票）
 npm run bench -- --force-hints off           # 剥光 hint 的臂：模型必然出场（决策来源行可见）
@@ -316,11 +316,11 @@ console.log(rep.completed, rep.traces.length);
 同一个意思；各自的专属旗标只有"挑什么来跑"那一项——apps 挑**应用包**（`--app`），bench 挑**语料**
 （`--cases`）。
 
-模型选择不在命令行：未提供 provider 时，`AMBERFLOW_DECISION_MODEL` 选本地 checkpoint（`english` / `multilingual`）；提供 provider 时，它是该服务的模型名。
+模型选择不在命令行：没有服务地址时，`AMBERFLOW_DECISION_MODEL` 选本地 checkpoint（`english` / `multilingual`）；有服务地址时，它是该线上服务的模型名。`--provider` 只用于实验/消融，不写进配置。
 
 | 共用旗标 | 含义 |
 |---|---|
-| `--provider NAME` | 换决策源：`laya-onnx` / `stub` / `none` / 基线 / `jevk5` / `bailian` / `token-plan` |
+| `--provider NAME` | 仅本次实验/消融换决策源：`laya-onnx` / `stub` / `none` / 基线 / `jevk5` / `bailian` / `token-plan` |
 | `--ablate stub\|rules-only` | 消融臂：`stub` = 脚本桩，`rules-only` = 规则档 |
 | `--conf-floor N` | 置信度闸门刻度（0<N≤1） |
 | `--force-hints off` | 剥掉计划点名的 hint，逼模型出场（消融旗标，只有这一档） |
@@ -356,15 +356,10 @@ amber config show
 | 键 | 作用 |
 |---|---|
 | `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR` | 本地决策模型产物位置（缺了走规则模式） |
-| `AMBERFLOW_DECISION_MODEL` | **模型名**：未提供 provider 时选本地 checkpoint（`english` / `multilingual`）；提供 provider 时是该服务的模型名。模型名只走配置。 |
-| `AMBERFLOW_DECISION_BASE_URL` / `AMBERFLOW_DECISION_API_KEY` | **统一决策服务配置**：服务地址 + 密钥；`AMBERFLOW_DECISION_PROTOCOL` 选 `systemone`（默认）或 `openai-decisions`。地址/密钥本身不会自动选服务，使用服务还需提供 provider。完整说明见 [docs/DECISION_SERVICE_CONFIG.md](docs/DECISION_SERVICE_CONFIG.md) |
-| `AMBERFLOW_DECISION_PROVIDER` | 选决策提供者：`decision-service` / `laya-onnx` / `scripted-stub` / `none` / 基线 / `jevk5` / `bailian` / `token-plan`。未提供时使用本地模型。 |
-| `TOKEN_PLAN_ENDPOINT` | token-plan MaaS 网关的 SystemOne 端点（完整 URL，要带 `/compatible-mode/v1/systemone`）；**端点只从环境读**（共享层不写死外部主机） |
-| `TOKEN_PLAN_API_KEY` | token-plan 的 token（回退 `DASHSCOPE_API_KEY`）；只从环境读，绝不进代码/产物/提交。见 [docs/DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md) |
+| `AMBERFLOW_DECISION_MODEL` | **模型名**：没有服务地址时选本地 checkpoint（`english` / `multilingual`）；有服务地址时是该服务的模型名。模型名只走配置。 |
+| `AMBERFLOW_DECISION_BASE_URL` / `AMBERFLOW_DECISION_API_KEY` | **线上决策服务三件套的地址与密钥**：只要地址在就走线上服务，不需要额外 provider；`AMBERFLOW_DECISION_PROTOCOL` 选 `systemone`（默认）或 `openai-decisions`。完整说明见 [docs/DECISION_SERVICE_CONFIG.md](docs/DECISION_SERVICE_CONFIG.md) |
+| 实验/兼容 provider 变量（`TOKEN_PLAN_*`、`JEVK5_ENDPOINT`、`BAILIAN_*`、`DASHSCOPE_API_KEY`） | 只在 `--provider NAME` 显式点名时用；正常接入线上服务只用上面的三件套 |
 | `PLANNER_TIMEOUT` | `plan:flow --planner llm` 的规划调用超时（秒，默认 120；30s 对推理模型+整页快照太紧） |
-| `JEVK5_ENDPOINT` | JevK5 的 `/v1/systemone` 地址（`--provider jevk5` 时用；起法见 docs/DECISION_PROVIDER_JEVK5.md） |
-| `DASHSCOPE_API_KEY`（别名 `BAILIAN_API_KEY`） | 百炼决策模型的 API token（`--provider bailian` 时用）——**只进环境变量，绝不写进代码/产物/提交** |
-| `BAILIAN_ENDPOINT` 或 `BAILIAN_WORKSPACE_ID`(+`BAILIAN_REGION`) | 百炼 systemone 端点（workspace 作用域）；模型名用 `AMBERFLOW_DECISION_MODEL`；起法见 docs/DECISION_PROVIDER_BAILIAN.md |
 | `OPENAI_BASE_URL` + `OPENAI_API_KEY` | 启用 LLM 规划与审计（不配则用内置替身，流程照常） |
 | `AMBERFLOW_STEP_DELAY_MS` / `AMBERFLOW_ACTION_DELAY_MS` | 全局运行节奏默认（毫秒；应用配置表 `pace` 优先）；人工步骤与 `pace` 详见 [docs/MANUAL_STEPS_AND_PACE.md](docs/MANUAL_STEPS_AND_PACE.md) |
 | `AMBERFLOW_HEADFUL` | `--headful` 的配置默认值（`1/true/on` 开，`0/false/off` 关；CLI 旗标仍优先） |

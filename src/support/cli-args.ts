@@ -91,7 +91,7 @@ export type CliValues = Record<string, CliValue>;
  *
  * 两个入口共用同一张表：闸门刻度、学习环、消融等旗标在 apps 与 bench 同名同义；
  * 各自专属的（案例文件 / 应用包）另起一张。
- * 模型名不走命令行：未提供 provider 时由 `AMBERFLOW_DECISION_MODEL` 选本地 checkpoint。
+ * 模型名不走命令行：没有服务地址时由 `AMBERFLOW_DECISION_MODEL` 选本地 checkpoint。
  */
 export const SHARED_RUN_OPTIONS: CliOptions = {
   out: { type: "string" },

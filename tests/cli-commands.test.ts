@@ -585,7 +585,10 @@ describe("amber doctor — 体检不替你做决定", () => {
   it("决策源解析失败只是警告，不改变只看核心项的退出码", async () => {
     const r = await cli(["doctor", "--json"], {
       runEntry: 0,
-      env: { AMBERFLOW_DECISION_PROVIDER: "definitely-not-a-provider" },
+      env: {
+        AMBERFLOW_DECISION_BASE_URL: "http://127.0.0.1:1",
+        AMBERFLOW_DECISION_PROTOCOL: "definitely-not-a-protocol",
+      },
     });
     const o = r.json();
     expect(o.data.provider.error).toBeTruthy();

@@ -143,12 +143,14 @@ export function doctorReport(p: Preflight): { ok: boolean; lines: string[] } {
   lines.push(p.model
     ? `决策模型     ${p.artifacts.onnxPath}  ✓ 真模型（图 + 权重 + tokenizer 齐）`
     : MODEL_MISSING_LINE(p.artifacts));
-  // 换模型测试的入口要在体检里看得见：只报"模型在不在"不够，还要报"能选谁"。
+  // 换模型测试的入口要在体检里看得见：只报"模型在不在"不够，还要报"怎么选"。
   registerBaselines();
   const selectable = [...BUILTIN_LAYA_PROVIDERS, ...BASELINE_PROVIDERS,
     ...listDecisionProviders().filter((n) => !(BASELINE_PROVIDERS as readonly string[]).includes(n))];
-  lines.push(`决策提供者   ${selectable.join(" | ")}（--provider NAME / AMBERFLOW_DECISION_PROVIDER；`
-    + "基线对照 `npm run providers:baseline`）");
+  lines.push("决策源       有 AMBERFLOW_DECISION_BASE_URL → 线上服务（另配 _MODEL / _API_KEY 三件套）；"
+    + "无地址 → 本地 laya（AMBERFLOW_DECISION_MODEL=english|multilingual）");
+  lines.push(`实验 provider ${selectable.join(" | ")}（仅 --provider NAME；基线对照 `
+    + "`npm run providers:baseline`）");
   lines.push(`LLM 规划/审计 ${p.llm ? "✓ 已配置" : "— 未配置（用内置替身，全流程照常）"}`);
   const ok = p.nodeOk && p.chromium !== null;
   if (!ok) {
@@ -523,7 +525,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     io.out(`决策提供者：${spec.name}（tier=${spec.tier}）\n`);
   }
 
-  // 本地模型只在没有 provider 时使用；checkpoint 名由 AMBERFLOW_DECISION_MODEL 配置。
+  // 本地模型只在没有服务地址时使用；checkpoint 名由 AMBERFLOW_DECISION_MODEL 配置。
   let localModelId: string | undefined;
   if (spec.kind === "laya" && !spec.ablation) {
     try {
@@ -560,8 +562,7 @@ export const USAGE = `npm start — 一条命令开始一项工作
 
   可选：--target '<hint>'  直接点名目标（跳过选择）
         --plan <文件>      计划保存位置（默认 $AMBERFLOW_HOME/task_plan.json，即 ~/.amberflow/ 下）
-        --provider NAME    本次决策提供者（缺省跟随 AMBERFLOW_DEFAULT_DECISION_PROVIDER / 配置文件；
-                           可选名与 npm start -- --doctor 列出的一致）
+        --provider NAME    仅本次实验/消融的决策提供者覆盖（不进配置；缺省由三件套或本地模型决定）
         --headful          显示浏览器窗口
 `;
 

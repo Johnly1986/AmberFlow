@@ -41,31 +41,30 @@ describe("原始工具入口读统一配置层", () => {
     expect(result.applied).not.toContain("AMBERFLOW_DECISION_MODEL");
   });
 
-  it("补完之后没有 provider 时默认走本地模型", async () => {
+  it("补完之后：有服务地址走线上，没有地址走本地（不需要 provider 键）", async () => {
     const home = homeWith({
       AMBERFLOW_DECISION_BASE_URL: "http://127.0.0.1:8008",
       AMBERFLOW_DECISION_MODEL: "kev-onnx",
     });
     for (const key of ["AMBERFLOW_DECISION_BASE_URL", "AMBERFLOW_DECISION_MODEL", "AMBERFLOW_DECISION_API_KEY",
-      "AMBERFLOW_DECISION_PROTOCOL", "AMBERFLOW_DEFAULT_DECISION_PROVIDER", "AMBERFLOW_DECISION_PROVIDER"]) {
+      "AMBERFLOW_DECISION_PROTOCOL"]) {
       delete process.env[key];
     }
     process.env.AMBERFLOW_HOME = home;
     const result = applyConfiguredEnv(process.env, REPO, { includeFiles: true });
     expect(result.errors).toEqual([]);
-    const spec = await resolveProviderSpec(undefined, process.env);
-    expect(spec.name).toBe("laya-onnx");
-
-    const home2 = homeWith({
-      AMBERFLOW_DECISION_BASE_URL: "http://127.0.0.1:8008",
-      AMBERFLOW_DECISION_MODEL: "kev-onnx",
-      AMBERFLOW_DECISION_PROVIDER: "decision-service",
-    });
-    process.env.AMBERFLOW_HOME = home2;
-    applyConfiguredEnv(process.env, REPO, { includeFiles: true });
     const service = await resolveProviderSpec(undefined, process.env);
     expect(service.name).toBe("decision-service");
     expect(service.tier).toBe("on");
+
+    const localHome = homeWith({ AMBERFLOW_DECISION_MODEL: "kev-onnx" });
+    process.env.AMBERFLOW_HOME = localHome;
+    delete process.env.AMBERFLOW_DECISION_BASE_URL;
+    delete process.env.AMBERFLOW_DECISION_API_KEY;
+    const localResult = applyConfiguredEnv(process.env, REPO, { includeFiles: true });
+    expect(localResult.errors).toEqual([]);
+    const local = await resolveProviderSpec(undefined, process.env);
+    expect(local.name).toBe("laya-onnx");
   });
 
   it("配置层里的未知键照样报错（入口应 exit 2，不是静默忽略）", () => {

@@ -188,17 +188,10 @@ describe("token-plan 的配置判定（显式/默认两档 + 内建端点）", (
     }
   });
 
-  it("环境默认档指向未配置的 token-plan ⇒ 干净落 rules-only（没人要求它）", async () => {
-    const savedA = process.env.TOKEN_PLAN_API_KEY, savedD = process.env.DASHSCOPE_API_KEY;
-    const savedE = process.env.TOKEN_PLAN_ENDPOINT;
-    delete process.env.TOKEN_PLAN_API_KEY; delete process.env.DASHSCOPE_API_KEY; delete process.env.TOKEN_PLAN_ENDPOINT;
-    try {
-      const spec = await resolveProviderSpec(undefined, { AMBERFLOW_DEFAULT_DECISION_PROVIDER: "token-plan" });
-      expect(spec.kind).toBe("none");
-    } finally {
-      if (savedA !== undefined) process.env.TOKEN_PLAN_API_KEY = savedA;
-      if (savedD !== undefined) process.env.DASHSCOPE_API_KEY = savedD;
-    }
+  it("旧 AMBERFLOW_DEFAULT_DECISION_PROVIDER 不再选 provider；没有服务地址 ⇒ 本地", async () => {
+    const spec = await resolveProviderSpec(undefined, { AMBERFLOW_DEFAULT_DECISION_PROVIDER: "token-plan" });
+    expect(spec.kind).toBe("laya");
+    expect(spec.name).toBe("laya-onnx");
   });
 
   it("配了 key ⇒ 走在线 provider（tier=on，名字如实写 token-plan）", async () => {

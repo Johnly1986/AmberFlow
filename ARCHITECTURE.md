@@ -65,7 +65,7 @@
 > 元素与上下文；解析族不符时一次**有界修复**，仍不成立 = `nominated_family_empty`/`nominated_family_mismatch`
 > 结构化停因；hint 仍权威——硬过滤被否，结构族 ≠ 语义动作）；纯运行期不回填、无上下文不问、抛错/池外落⑤；
 > 账单加模型档。缺省不接 = 行为逐字节不变。设计/实测：[docs/NOMINATION_QUESTION_SET_ANALYSIS.md](docs/NOMINATION_QUESTION_SET_ANALYSIS.md) §6–§7
-> （`AMBERFLOW_DECISION_PROVIDER`；缝与契约见 [docs/DECISION_INTERFACE_SURVEY.md](docs/DECISION_INTERFACE_SURVEY.md) §7，
+> （线上由地址/密钥/模型三件套选择，本地由"没有地址"选择；`--provider` 仅实验覆盖。缝与契约见 [docs/DECISION_INTERFACE_SURVEY.md](docs/DECISION_INTERFACE_SURVEY.md) §7，
 > 外部模型接入示例 [docs/DECISION_PROVIDER_JEVK5.md](docs/DECISION_PROVIDER_JEVK5.md)；
 > 基线对照 `npm run providers:baseline`）。
 >

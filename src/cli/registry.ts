@@ -187,7 +187,6 @@ amber config init [--project]
 amber config edit [--project]`,
     examples: [
       "amber config path",
-      "amber config set AMBERFLOW_DECISION_PROVIDER decision-service",
       "amber config set AMBERFLOW_DECISION_BASE_URL https://<服务地址>",
       "amber config set AMBERFLOW_DECISION_MODEL jev-latest",
       "amber config set AMBERFLOW_DECISION_API_KEY sk-... --project",

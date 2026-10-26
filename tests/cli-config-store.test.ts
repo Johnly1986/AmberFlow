@@ -23,8 +23,11 @@ describe("配置键的校验面", () => {
   it("白名单非空且不重复（CONFIG_KEYS 就是 rc 分组的去重并集）", () => {
     expect(CONFIG_KEYS.length).toBeGreaterThan(10);
     expect(new Set(CONFIG_KEYS).size).toBe(CONFIG_KEYS.length);
-    expect(CONFIG_KEYS).toContain("AMBERFLOW_DECISION_PROVIDER");
+    expect(CONFIG_KEYS).toContain("AMBERFLOW_DECISION_BASE_URL");
     expect(CONFIG_KEYS).toContain("TOKEN_PLAN_API_KEY");
+    // provider 不再是配置键：线上由三件套选，本地由"没有地址"选。
+    expect(CONFIG_KEYS).not.toContain("AMBERFLOW_DECISION_PROVIDER");
+    expect(CONFIG_KEYS).not.toContain("AMBERFLOW_DEFAULT_DECISION_PROVIDER");
   });
 
   it("已知键 / 密钥类键的判定", () => {

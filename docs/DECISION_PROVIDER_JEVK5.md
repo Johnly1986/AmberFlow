@@ -1,7 +1,7 @@
 # 接入 JevK5（https://github.com/allebee/jevk5）
 
 > 代码：[src/decision-jevk5.ts](../src/decision-jevk5.ts) ｜ 测试：[tests/decision-jevk5.test.ts](../tests/decision-jevk5.test.ts)（假服务，CI 不需要权重）
-> ｜ 选择入口：`--provider jevk5` / `AMBERFLOW_DECISION_PROVIDER=jevk5` / 插件参数 `provider`
+> ｜ 选择入口：实验/对照用 `--provider jevk5`；正常接入用地址/密钥/模型三件套（`AMBERFLOW_DECISION_*`，见 [DECISION_SERVICE_CONFIG.md](DECISION_SERVICE_CONFIG.md)）
 
 ## 为什么它接得上
 

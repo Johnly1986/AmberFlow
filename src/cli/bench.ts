@@ -333,7 +333,7 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
     return 2;
   }
   const useCheckpoints = deps.runtime != null || (spec.kind === "laya" && spec.tier === "on");
-  // 本地模型只在没有 provider 时使用；checkpoint 名由 AMBERFLOW_DECISION_MODEL 配置。
+  // 本地模型只在没有服务地址时使用；checkpoint 名由 AMBERFLOW_DECISION_MODEL 配置。
   // 在线 provider 的模型名也走同一个键，但不在本地检查点白名单里校验。
   if (useCheckpoints && configuredDecisionModel() !== null) {
     let checkpoint: string;

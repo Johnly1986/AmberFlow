@@ -1,5 +1,5 @@
 /**
- * 本地检查点选择：`AMBERFLOW_DECISION_MODEL` 在没有 provider 时选本地 checkpoint。
+ * 本地检查点选择：没有服务地址时，`AMBERFLOW_DECISION_MODEL` 选本地 checkpoint。
  * 命令行不再有 `--model` / `--checkpoint`；模型名只走配置。
  */
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,8 +13,8 @@ afterEach(() => {
 });
 
 function clean(extra: Record<string, string> = {}): void {
-  for (const k of ["AMBERFLOW_DECISION_MODEL", "AMBERFLOW_DECISION_PROVIDER",
-    "AMBERFLOW_DEFAULT_DECISION_PROVIDER"]) delete process.env[k];
+  for (const k of ["AMBERFLOW_DECISION_MODEL", "AMBERFLOW_DECISION_BASE_URL",
+    "AMBERFLOW_DECISION_API_KEY"]) delete process.env[k];
   Object.assign(process.env, extra);
 }
 
@@ -30,15 +30,15 @@ describe("AMBERFLOW_DECISION_MODEL — 本地 checkpoint", () => {
     expect(resolveLocalCheckpoint(process.env)).toBe("english");
   });
 
-  it("router 只对 benchmark 臂开放；在线模型名不是本地 checkpoint，报错指路 provider", () => {
+  it("router 只对 benchmark 臂开放；在线模型名不是本地 checkpoint，报错指路三件套", () => {
     clean({ AMBERFLOW_DECISION_MODEL: "router" });
     expect(resolveLocalCheckpoint(process.env, null, { allowRouter: true })).toBe("router");
     expect(() => resolveLocalCheckpoint(process.env)).toThrow(/不是本地 checkpoint/);
     clean({ AMBERFLOW_DECISION_MODEL: "decision-model-preview" });
-    expect(() => resolveLocalCheckpoint(process.env)).toThrow(/设置 provider/);
+    expect(() => resolveLocalCheckpoint(process.env)).toThrow(/三件套/);
   });
 
-  it("app-runner 在没有 provider 时用配置的本地 checkpoint；在线模型名会 exit 2", async () => {
+  it("app-runner 在没有服务地址时用配置的本地 checkpoint；在线模型名会 exit 2", async () => {
     clean({ AMBERFLOW_DECISION_MODEL: "multilingual" });
     expect(await appMain(["--app", "demo-app", "--dry"])).toBe(0);
 

@@ -16,8 +16,6 @@ const prev = { ...process.env };
 afterEach(() => {
   for (const key of Object.keys(process.env)) if (!(key in prev)) delete process.env[key];
   Object.assign(process.env, prev);
-  delete process.env.AMBERFLOW_DECISION_PROVIDER;
-  delete process.env.AMBERFLOW_DEFAULT_DECISION_PROVIDER;
 });
 afterAll(() => { Object.assign(process.env, prev); });
 
@@ -142,19 +140,18 @@ describe("统一配置按 protocol 分发", () => {
     expect(serviceConfigError(process.env)).toBeNull();
   });
 
-  it("配置好 OpenAI Decisions 后默认解析到 decision-service；缺 key 在解析期报错", async () => {
+  it("配置好 OpenAI Decisions 后按地址解析到 decision-service；缺 key 在解析期报错", async () => {
     for (const key of DECISION_SERVICE_KEYS) delete process.env[key];
     process.env.AMBERFLOW_DECISION_BASE_URL = "http://127.0.0.1:9000";
     process.env.AMBERFLOW_DECISION_PROTOCOL = "openai-decisions";
     process.env.AMBERFLOW_DECISION_API_KEY = "k";
-    process.env.AMBERFLOW_DECISION_PROVIDER = "decision-service";
     const spec = await resolveProviderSpec(undefined, process.env);
     expect(spec.name).toBe("decision-service");
     expect(spec.tier).toBe("on");
 
     delete process.env.AMBERFLOW_DECISION_API_KEY;
     process.env.AMBERFLOW_DECISION_BASE_URL = "https://api.openai.com/v1/decisions";
-    // provider 仍是显式 decision-service：缺 key 必须在解析期报错，而不是退回本地。
+    // 地址在就是要用服务：缺 key 必须在解析期报错，而不是退回本地。
     await expect(resolveProviderSpec(undefined, process.env)).rejects.toThrow(/缺 API key/);
   });
 });

@@ -13,8 +13,8 @@
  * 第三个尤其重要：以前要测"没有模型兜底"只能跑 `--ablate rules-only`，那同时改变了
  * 好几件事（不装 runtime、风险头、完成投票）。`always-abstain` 只改一件事。
  *
- * 注册在 `registerBaselines()`（幂等）。用 `--provider coin-flip` /
- * `AMBERFLOW_DECISION_PROVIDER=coin-flip` 选中，见 `applyDecisionSelection`。
+ * 注册在 `registerBaselines()`（幂等）。用 `--provider coin-flip` 选中（仅实验/对照，
+ * 不写进配置），见 `applyDecisionSelection`。
  */
 import {
   registerDecisionProvider, type ChoiceOutcome, type ChoiceRequest, type DecisionProvider,

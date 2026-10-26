@@ -1780,7 +1780,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
   const artifacts = checkArtifacts();
   const modelStatus = spec.tier;
-  // 本地模型只在没有 provider 时使用；checkpoint 名由 AMBERFLOW_DECISION_MODEL 配置。
+  // 本地模型只在没有服务地址时使用；checkpoint 名由 AMBERFLOW_DECISION_MODEL 配置。
   // 在线 provider 的模型名也走同一个键，但由 provider 自己解析，不在本地检查点白名单里校验。
   let localModelId: string | undefined;
   if (spec.kind === "laya" && !spec.ablation) {

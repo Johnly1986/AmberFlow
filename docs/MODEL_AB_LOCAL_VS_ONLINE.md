@@ -28,8 +28,8 @@
    决策模型     /root/coding/AmberFlow/models/laya_dec.onnx  ✓ 真模型（图 + 权重 + tokenizer 齐）
    ```
 
-   之后不带 `LAYA_ONNX_MODEL` 也能用本地模型（用户配置默认 provider 仍是 `token-plan`，
-   本次对比显式传 `--provider`）。
+   之后不带 `LAYA_ONNX_MODEL` 也能用本地模型（用户配置里有线上三件套时默认走线上，
+   本次对比显式传 `--provider laya-onnx`）。
 
 ## 1. 方法
 

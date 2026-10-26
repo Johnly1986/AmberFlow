@@ -166,7 +166,7 @@ npm run apps -- --app ctrip-case --provider laya-onnx        # 默认：真 ONNX
 npm run apps -- --app ctrip-case --provider coin-flip        # 基线：可复现的随机
 npm run apps -- --app ctrip-case --provider first-candidate  # 基线：只有名次
 npm run apps -- --app ctrip-case --provider none             # 消融臂：不装决策层
-AMBERFLOW_DECISION_PROVIDER=coin-flip npm run apps:suite     # 整批换
+npm run apps:suite -- --provider coin-flip                   # 整批换（仅实验/对照）
 ```
 
 自己接一个：实现 `DecisionProvider`（`src/decision-provider.ts`）→ `registerDecisionProvider("我的模型", () => mine)`

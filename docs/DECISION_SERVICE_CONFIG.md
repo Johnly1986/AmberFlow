@@ -1,7 +1,9 @@
 # 统一决策服务配置：服务地址 + 模型名 + 密钥
 
 > 2026-10-25。目的：决策模型接入面的**唯一推荐形式**，不再要求用户记每家 provider 各一套变量名
-> （`TOKEN_PLAN_*` / `BAILIAN_*` / `JEVK5_*` / `DASHSCOPE_API_KEY` …）再额外指定 provider 名。
+> （`TOKEN_PLAN_*` / `BAILIAN_*` / `JEVK5_*` / `DASHSCOPE_API_KEY` …）。
+> 2026-10-26 进一步收口：**地址/密钥/模型三件套就是完整的选择依据**，不再有 provider 配置键。
+> 有 `AMBERFLOW_DECISION_BASE_URL` 就走线上服务；没有地址就用本地模型。
 
 ## 1. 三个主键 + 可选键
 
@@ -60,14 +62,13 @@ amber config set AMBERFLOW_DECISION_BASE_URL http://localhost:8008
 amber config set AMBERFLOW_DECISION_MIN_OPTIONS 2   # JevK5 才需要
 ```
 
-配置好地址后仍需**提供 provider** 才会走服务：`AMBERFLOW_DECISION_PROVIDER=decision-service`
-（或 `--provider decision-service`）。未提供 provider 时使用本地模型，地址/密钥本身不会自动切换决策源。
-显式点名但缺地址/远程缺 key ⇒ 解析期 exit 2，不静默降级。
+只要地址在，就会走统一服务，**不需要** provider 键；没有地址才使用本地模型。
+地址在但远程缺 key、或协议写错 ⇒ 解析期 exit 2，不静默降级；本地自托管（localhost）允许无 key。
 
-## 4. 与旧 provider 的关系（兼容，不是替代）
+## 4. 与实验/兼容 provider 的关系（仅 `--provider`）
 
 - 旧的 `--provider token-plan|bailian|jevk5` 与它们各自的变量仍然有效（各自有实测过的提示词/选项下限/
-  池外校验/闸门刻度），适合做 A/B 对照；统一层是**接入新服务的推荐面**。
+  池外校验/闸门刻度），适合做 A/B 对照；它们**不再从配置里选择**，只能命令行显式点名。
 - 迁移对照：
 
 | 旧 | 统一 |
@@ -77,14 +78,14 @@ amber config set AMBERFLOW_DECISION_MIN_OPTIONS 2   # JevK5 才需要
 | `TOKEN_PLAN_API_KEY`（回退 `DASHSCOPE_API_KEY`） | `AMBERFLOW_DECISION_API_KEY` |
 | `BAILIAN_ENDPOINT` / `BAILIAN_MODEL` / `BAILIAN_API_KEY` | 同上三键 |
 | `JEVK5_ENDPOINT` | `AMBERFLOW_DECISION_BASE_URL=http://…:8090` + `AMBERFLOW_DECISION_MIN_OPTIONS=2` |
-| `AMBERFLOW_DEFAULT_DECISION_PROVIDER` | 可作为默认 provider；仍建议显式 `AMBERFLOW_DECISION_PROVIDER=decision-service` |
+| `AMBERFLOW_DECISION_PROVIDER` / `AMBERFLOW_DEFAULT_DECISION_PROVIDER` | **已移除**：不再需要；有地址即线上，`--provider` 仅本次实验 |
 | token-plan 的 `floor=0.2` | `AMBERFLOW_DECISION_FLOOR=0.2`（统一层不猜刻度） |
 
-- **本地 ONNX（laya）不走这层**：它不是服务地址型配置；本地 checkpoint 名由 `AMBERFLOW_DECISION_MODEL`
-  选择（`english` / `multilingual`，未设置时用应用包声明或 `english`），权重位置仍用
-  `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR`。
-- **DSH 插件配置页**转发同一组三元组（URL / Token Key / ModelName），默认 provider 为
-  `decision-service`。
+- **本地 ONNX（laya）不走这层**：它不是服务地址型配置；没有服务地址时，本地 checkpoint 名由
+  `AMBERFLOW_DECISION_MODEL` 选择（`english` / `multilingual`，未设置时用应用包声明或 `english`），
+  权重位置仍用 `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR`。
+- **DSH 插件配置页**转发同一组三元组（URL / Token Key / ModelName）；有地址即选
+  `decision-service`，没有地址回本地，不再需要 provider 字段。
 
 ## 5. OpenAI Decisions API（已实现，2026-10-26）
 

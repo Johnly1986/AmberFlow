@@ -261,9 +261,13 @@ async function home(ctx: CliContext): Promise<number> {
   } catch {
     // 首页是轻量状态页：体检模块自己坏了也不该让 amber 无输出。
   }
-  const provider = ctx.env.AMBERFLOW_DECISION_PROVIDER
-    ?? ctx.env.AMBERFLOW_DEFAULT_DECISION_PROVIDER
-    ?? (modelReady ? "auto → local" : "auto → rules");
+  const serviceUrl = (ctx.env.AMBERFLOW_DECISION_BASE_URL ?? "").trim();
+  const modelName = (ctx.env.AMBERFLOW_DECISION_MODEL ?? "").trim();
+  const provider = serviceUrl
+    ? `service → ${serviceUrl}${modelName ? `（${modelName}）` : ""}`
+    : modelReady
+      ? `local → ${modelName || "english"}`
+      : "rules-only";
   const { listAppInfos } = await import("./commands/apps.ts");
   const apps = listAppInfos(ctx);
   const user = apps.filter((a) => a.source === "user").length;

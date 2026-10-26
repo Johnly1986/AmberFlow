@@ -3,9 +3,11 @@
  * 每家 provider 各一套环境变量（`TOKEN_PLAN_*` / `BAILIAN_*` / `JEVK5_*` / `DASHSCOPE_*`）。
  *
  * 为什么需要它（2026-10-25 项目方提出）：调研发现决策模型已经收敛成两条协议
- * （TypeSafe **System One**、OpenAI **Decisions API**），而本仓接一家服务就要记一套变量名、
- * 还要额外指定 `AMBERFLOW_DEFAULT_DECISION_PROVIDER`——配置面先于协议面分裂了。
+ * （TypeSafe **System One**、OpenAI **Decisions API**），而本仓接一家服务就要记一套变量名。
  * 统一层把"接一个新服务"变成改三个值（地址/模型/密钥），provider 细节交给协议适配器。
+ *
+ * 选择规则（2026-10-26 项目方纠正）：**有服务地址就是线上服务**，不再需要 provider 键；
+ * 没有地址才用本地模型。地址/密钥/模型三件套本身就是完整的选择依据。
  *
  * 本轮支持：
  *   - `AMBERFLOW_DECISION_BASE_URL`  服务地址（host、`…/v1`、`…/compatible-mode/v1` 或完整
@@ -17,9 +19,9 @@
  *     `AMBERFLOW_DECISION_TIMEOUT_MS`、`AMBERFLOW_DECISION_STATE_CONTEXT`（`0` 关闭带上文）、
  *     `AMBERFLOW_DECISION_MIN_OPTIONS`（choice 选项下限，自托管 JevK5 需要 2）
  *
- * 设计纪律（与旧 provider 相同）：
+ * 设计纪律：
  *   1. 端点/密钥**每次现读**（测试可临时注入；启动后改配置也生效）；
- *   2. 缺配置分两种——显式点名 ⇒ 解析期响亮报错；环境默认 ⇒ 干净落 rules-only；
+ *   2. 既然配了服务地址就是要用服务：缺密钥/坏协议在解析期响亮报错，不静默降级；
  *   3. 错误消息点名缺什么、怎么补；不把外部主机/密钥写进代码或默认值。
  */
 import type { DecisionProvider, ProviderCapabilities } from "./decision-provider.ts";
@@ -254,7 +256,7 @@ export function decisionServiceProvider(env: NodeJS.ProcessEnv = process.env): D
 }
 
 let registered = false;
-/** 注册进 provider 注册表（`--provider decision-service`）。幂等。 */
+/** 注册进 provider 注册表（有服务地址时自动选中；`--provider decision-service` 也可显式点名）。幂等。 */
 export async function registerDecisionService(): Promise<void> {
   if (registered) return;
   const { registerDecisionProvider } = await import("./decision-provider.ts");

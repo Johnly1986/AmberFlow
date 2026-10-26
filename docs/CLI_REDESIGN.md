@@ -467,7 +467,7 @@ amber doctor [--json] [--fix] [--verbose]
 - Node ≥ 22.6；
 - Playwright / Chromium（完整版与 headless shell 分开报）；
 - 本地决策模型三件套（图 / 权重 / tokenizer）；
-- 决策源解析结果：`auto → local | provider | rules`，以及来源（flag / env / 项目配置 / 用户配置 / 默认）；
+- 决策源解析结果：`service | local | rules`，以及来源（地址三件套 / 本地产物 / 默认）；
 - 配置文件的层叠情况与密钥掩码；
 - 应用目录可写、可发现的应用数；
 - 可选：`OPENAI_BASE_URL` / `OPENAI_API_KEY`。
@@ -483,7 +483,7 @@ AmberFlow doctor
   Chromium      1.58.0   ✓
   决策模型      off(missing)：缺权重 laya_dec.onnx.data
                 → amber model fetch --from <url 或本地路径>
-  决策源        auto → rules（本地产物不齐，且未配置在线 provider）
+  决策源        rules（本地产物不齐，且未配置服务地址）
   配置文件      ~/.amberflow/config.json（2 项）· 环境变量（1 项）
   应用          21 个（1 个用户 / 20 个内置）
 
@@ -968,7 +968,7 @@ src/cli/
 | 静态转发器无法处理 `--list` / `--app` 分流 | 所有旧 script 统一调用 `main.ts legacy <old-name>`，由代码分流，不写死目标命令 |
 | `bench/smoke.sh` / `repo-integrity` 仍引用旧 script | Phase 0 先补转发器断言；Phase 3 继续保留旧 script；Phase 4 删除转发器前把两者切到新命令 |
 | `amber` 不在 PATH | `package.json` 声明 `bin`；README 用 `npx amber`；`npm link` 作为可选步骤；错误提示里给出替代命令 |
-| provider 改名破坏配置 | 规范名不变；只加 `auto` / `local` / `rules` 别名 |
+| provider 配置再次分叉 | 线上只认地址/密钥/模型三件套；本地由"没有地址"选择；`--provider` 仅实验 |
 | 用户配置迁移丢密钥 | 旧 `configs/amberflowrc.json` 只读兼容；`config init` 不覆盖已有文件 |
 | 帮助文本再次漂移 | 帮助由 registry 生成；README 示例进 smoke test |
 | Windows 启动垫片复杂 | `spawn` + `process.execPath`，转发 SIGINT / SIGTERM，不用 shell；Phase 3 可选编译到 `dist/` |

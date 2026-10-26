@@ -1,7 +1,7 @@
 # 接入 token-plan MaaS 决策模型（SystemOne 协议）
 
 > 代码：[src/decision-tokenplan.ts](../src/decision-tokenplan.ts) ｜ 测试：[tests/decision-tokenplan.test.ts](../tests/decision-tokenplan.test.ts)（假服务，CI 不需要网络/凭据）
-> ｜ 选择入口：`--provider token-plan` / `AMBERFLOW_DECISION_PROVIDER=token-plan` / 套件 `--provider token-plan`
+> ｜ 选择入口：实验/对照用 `--provider token-plan`；正常接入用地址/密钥/模型三件套（`AMBERFLOW_DECISION_*`，见 [DECISION_SERVICE_CONFIG.md](DECISION_SERVICE_CONFIG.md)）
 > ｜ 本次实测日期：2026-10-15（凭据只从环境读，绝不进代码/产物/提交）
 
 ## 为什么它接得上
@@ -209,7 +209,7 @@ npm run probe:tokenplan            # 逐条打印 HTTP 码 + 原始 JSON（§1 �
 
 - **不进 CI**：网络与凭据不满足仓库"CI 永不依赖在线服务"的红线；CI 用假服务契约测试（已钉）。
 - **token 绝不进代码/产物/提交**；`--provider token-plan` 的报错只指路，不回显 token。
-- **不做默认档**：缺省仍是 `laya-onnx`（`AMBERFLOW_DEFAULT_DECISION_PROVIDER` 可改）——在线服务的
+- **不做默认档**：没有 `AMBERFLOW_DECISION_BASE_URL` 时缺省仍是 `laya-onnx`——在线服务的
   延迟/可用性/成本不该成为开箱默认；换模型的目的仍是**测量**，不是替换承重件。
 - **"某模型更好"的结论必须带咨询数与耗时**（本节 §3.2 已摊开）；跨 provider 比 `score` 无意义，
   闸门刻度必须由 provider 自报 + 实测。

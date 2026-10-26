@@ -1,7 +1,7 @@
 # 接入阿里百炼决策模型 `decision-model-preview`
 
 > 代码：[src/decision-bailian.ts](../src/decision-bailian.ts) ｜ 测试：[tests/decision-bailian.test.ts](../tests/decision-bailian.test.ts)（假服务，CI 不碰网络、不碰真 key）
-> ｜ 选择入口：`--provider bailian` / `AMBERFLOW_DECISION_PROVIDER=bailian` / 插件参数 `provider`
+> ｜ 选择入口：实验/对照用 `--provider bailian`；正常接入用地址/密钥/模型三件套（`AMBERFLOW_DECISION_*`，见 [DECISION_SERVICE_CONFIG.md](DECISION_SERVICE_CONFIG.md)）
 > ｜ API 契约：<https://help.aliyun.com/zh/model-studio/decision-model-api>
 
 ## 为什么它接得上
