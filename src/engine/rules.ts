@@ -10,7 +10,7 @@
  *
  * Ported 1:1 from `layaapp/rules.py`; the Python unit tests are the spec.
  */
-import { firstIfSame, type ElemPool } from "./extraction.ts";
+import { firstIfSame, type Elem, type ElemPool } from "./extraction.ts";
 import { parseHint, poolAttr } from "./hint.ts";
 
 export const STOP_TOKENS = new Set([
@@ -299,4 +299,42 @@ export function hintCandidates(hint: string, elems: ElemPool): HintCandidates | 
   const sink: HintCandidates = { refs: [], tier: -1, decided: null };
   hintMatchImpl(hint, elems, sink);
   return sink.refs.length ? sink : null;
+}
+
+/**
+ * 给一个已观察到的元素生成**可验证的**候选 hint。
+ *
+ * 这不是第二套 hint 语法：每个候选都交给同一个 `hintMatch` 验证，只有
+ * “恰好命中该元素（不是别的元素、不是多个元素）”的才保留。Agent 的 inspect
+ * 因此拿到的是可直接写进 `target_hint` 的安全候选，而不是猜出来的选择器。
+ *
+ * 顺序：data-test / id / name / href 精确值，最后是唯一可见文本。最多 4 条。
+ */
+export function suggestHints(
+  elem: Elem,
+  elems: ElemPool,
+): string[] {
+  const out: string[] = [];
+  const push = (hint: string): void => {
+    if (!hint || out.includes(hint)) return;
+    if (hintMatch(hint, elems) !== elem.ref) return;
+    const cand = hintCandidates(hint, elems);
+    if (cand === null || cand.refs.length !== 1) return;
+    out.push(hint);
+  };
+  if (elem.data_test) {
+    push(`[data-test=${elem.data_test}]`);
+    push(`${elem.tag}[data-test=${elem.data_test}]`);
+  }
+  if (elem.id) push(`#${elem.id}`);
+  if (elem.name) {
+    push(`[name=${elem.name}]`);
+    push(`${elem.tag}[name=${elem.name}]`);
+  }
+  if (elem.href) {
+    push(`${elem.tag}[href=${elem.href}]`);
+  }
+  const label = String(elem.label ?? "").trim();
+  if (label.length >= 2 && label.length <= 80) push(label);
+  return out.slice(0, 4);
 }

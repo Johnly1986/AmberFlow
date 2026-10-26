@@ -11,12 +11,12 @@
 
 | 路径 | 作用 |
 |---|---|
-| `src/` | 四个工具与其背后的服务缝（`ctx.amberflow`，供别的插件调用） |
+| `src/` | 工具与其背后的服务缝（`ctx.amberflow`，供别的插件调用） |
 | `client.js` | 浏览器半：在 `plugins.row.config` 注册配置页（只有决策模型 URL / Token Key / ModelName 三个字段） |
 | `client-root.js` | **生成文件**：仓库根安装门的 client bundle（`node scripts/client-root-sync.mjs` 重新生成） |
 | `scripts/client-root-sync.mjs` | `client.js` → `client-root.js` 的唯一生成器（改 id/行 key；测试钉住一致性） |
 | `locale/` `icon.svg` | 插件卡片的显示文案与图标（`locale/en.json` / `locale/zh.json` 提供 meta 标题/描述） |
-| `cordis.patch.yml` | bundle 层：装进 profile 即注册四个工具；`repoPath` 指向本仓库根 |
+| `cordis.patch.yml` | bundle 层：装进 profile 即注册这些工具；`repoPath` 指向本仓库根 |
 | `scripts/setup-links.mjs` | 链入依赖：工具链取自本仓库，宿主包取自 DSH 安装 |
 | `lib/` | 构建产物（git 忽略），入口 `lib/types/index.js` |
 

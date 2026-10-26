@@ -178,6 +178,14 @@ export interface AppRunOptions {
   confFloor?: number;
   /** provider 自报的闸门刻度（`ProviderInfo.floor`；CLI 装了 provider 就传进来）。 */
   providerFloor?: number;
+  /** 非交互调用遇到 manual 步时：不启动浏览器，直接返回 needs_human 结果。 */
+  manualFailFast?: boolean;
+  /** 分段运行：只跑第 N 步（1-based，`expanded.steps` 的声明序号）。不能与 fromStep 同用。 */
+  onlyStep?: number;
+  /** 分段运行：从第 N 步开始（1-based）。 */
+  fromStep?: number;
+  /** 分段运行：本次最多执行几步（与脚本应用的 ctx maxSteps 区分）。 */
+  segmentMaxSteps?: number;
   /**
    * `confFloor` 的来源：`cli`（本次命令旗标）或 `config`（配置文件默认值）。
    * 只影响 `effective_policy` 的账，不改变数值；缺省按 `cli` 记（兼容既有调用）。
@@ -434,6 +442,12 @@ export interface AppRunResult {
    */
   source_slots?: Record<string, string>;
   ok: boolean;
+  /** 本次是分段运行：`ok` 只代表段内步骤成功，不代表整条旅程验收。 */
+  partial?: true;
+  /** 完整旅程且不变量成立；分段跑为 false。 */
+  verified?: boolean;
+  /** 本次实际执行的声明步骤区间（1-based，闭区间）。 */
+  segment?: { from: number; to: number };
   secs: number;
   /**
    * P4 走向的显式停因：`next` 边把同一个步 id 走进了环，路径上界到顶就停在这里——
@@ -818,8 +832,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const sourceSlots = resolveSourceSlots(pack, observed);
   const expanded = expandPack(pack, { ...sourceSlots, ...slots }, planPath);
   const plan = expanded.plan;
-  // 有一个人工步 = 整个旅程必须看得见浏览器（登录/验证码需要人操作）；注入会话时由调用方负责。
-  const hasManual = expanded.steps.some((st) => st.adapter === "manual");
+  // 人工步默认开可见窗口：人在里面登录/过验证码；未选中的段内人工步不影响本次 headless 选择。
   // 相对 start_url 按仓库根解析成 file://：应用包写仓库内路径，
   // 不写死绝对路径，换机器/换 checkout 目录仍然可跑。
   for (const sg of plan.subgoals) {
@@ -892,7 +905,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       // 包声明了设备就用它（只有手机版页面存在的站点，桌面 DOM 里 hint 必然落空）
       const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
       // 人工步默认开可见窗口：人要在里面登录/过验证码；`--headful` 只是显式同义。
-      const headless = opts.headful !== true && !hasManual;
+      const headless = opts.headful !== true && !manualInSegment;
       holder.session = own ? await browserSession(headless, device) : await opts.sessionFactory!();
     }
     const s = holder.session;
@@ -1015,10 +1028,61 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     runCliStep: async (st: ExpandedStep) => runToolStep(st, runOpts),
     runManualStep,
   };
+  // ---- 分段调试：只跑一段声明步骤（Phase 3）。完整跑保持原逻辑。 -----------------
+  const segmentRequested = opts.onlyStep !== undefined || opts.fromStep !== undefined
+    || opts.segmentMaxSteps !== undefined;
+  if (opts.onlyStep !== undefined && opts.fromStep !== undefined) {
+    throw new AppRunConfigError("only_step 与 from_step 不能同时使用");
+  }
+  for (const [name, n] of [["only_step", opts.onlyStep], ["from_step", opts.fromStep], ["max_steps", opts.segmentMaxSteps]] as const) {
+    if (n !== undefined && (!Number.isInteger(n) || n < 1)) {
+      throw new AppRunConfigError(`${name} 需要正整数（收到 ${String(n)}）`);
+    }
+  }
+  const segmentStart = opts.onlyStep !== undefined ? opts.onlyStep - 1
+    : opts.fromStep !== undefined ? opts.fromStep - 1 : 0;
+  if (segmentStart >= expanded.steps.length) {
+    throw new AppRunConfigError(`step ${segmentStart + 1} 超出范围：这次展开只有 ${expanded.steps.length} 步`);
+  }
+  const segmentLimit = opts.onlyStep !== undefined ? 1
+    : opts.segmentMaxSteps ?? Number.POSITIVE_INFINITY;
+  const segmentEnd = Math.min(expanded.steps.length, segmentStart + segmentLimit);
+  const segmentSteps = expanded.steps.slice(segmentStart, segmentEnd);
+  const manualInSegment = segmentSteps.some((st) => st.adapter === "manual");
+  // 非交互调用（桥）遇到本段的 manual 步：不猜、不假装有人在，也不在没有显示器时硬拉
+  // headed 浏览器（那会变成一句 Playwright 启动失败）。直接返回结构化 needs_human。
+  if (manualInSegment && opts.manualFailFast === true && opts.manualHandler === undefined && !process.stdin.isTTY) {
+    const manualSteps = segmentSteps
+      .filter((st) => st.adapter === "manual")
+      .map((st) => ({ index: st.index, desc: st.desc, done: false, attested: false, reason: "needs_interactive_terminal" }));
+    const selectedBrowserIndices = new Set(segmentSteps
+      .map((st, i) => browserIndexOf[segmentStart + i] ?? -1)
+      .filter((j) => j >= 0));
+    return {
+      app: pack.id, label: pack.label, goal: pack.goal,
+      pack_path: pack._path ?? "", plan_path: planPath,
+      roles_used: expanded.rolesUsed, slots: expanded.slots,
+      completed: `0/${segmentSteps.length}`,
+      subgoals: plan.subgoals.map((sg, j) => ({
+        desc: sg.desc,
+        status: selectedBrowserIndices.has(j) ? (sg.status ?? "pending") : "skipped",
+        attempts: sg.attempts ?? 0, obstacle: sg.obstacle ?? null,
+      })),
+      tool_steps: [], invariants: [], manual_steps: manualSteps,
+      sources: [], ok: false, secs: 0,
+      decisions: summarizeDecisions([], null, 0),
+      ...(segmentRequested ? { partial: true as const, segment: { from: segmentStart + 1, to: segmentEnd } } : {}),
+    };
+  }
+  const executedIndices = new Set<number>();
+  let executedCount = 0;
   try {
-    let i = 0;
-    while (i < expanded.steps.length) {
+    let i = segmentStart;
+    while (i < expanded.steps.length && i < segmentEnd && executedCount < segmentLimit) {
+      if (i < segmentStart) break;
       const step = expanded.steps[i]!;
+      executedIndices.add(i);
+      executedCount++;
       // 进入这一步：同一个步 id 走太多遍 = 声明的 `next` 边成了环。
       const over = walk.enter(i);
       if (over !== null) {
@@ -1109,6 +1173,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       }
     }
     // ---- 验收：结束状态上的不变量（同一会话、同一 cookie/页面） -------------
+    // 分段跑不验收整条旅程：它不是“完整流程通过”，只是“这一段通过”。
+    if (!segmentRequested) {
     // 显式再标注一次类型：`session` 是在 `getShell` 闭包里赋值的，控制流分析看不到。
     const live = holder.session;
     // `expanded.invariants`（不是 pack.invariants）：展开期已做槽位替换，与 journey 同一套规则。
@@ -1145,6 +1211,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
         if (verbose) console.log(`  end-state capture failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
+    }
   } finally {
     if (holder.session !== null) await holder.session.close();
   }
@@ -1153,17 +1220,33 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const typeCounts: Record<string, number> = {};
   for (const st of expanded.steps) typeCounts[st.adapter] = (typeCounts[st.adapter] ?? 0) + 1;
   const stepTypes = Object.keys(typeCounts).length > 1 ? typeCounts : undefined;
+  // 分段跑：没进入的浏览器步不是“阻塞”，而是“本次没走”；标成 skipped，避免摘要把
+  // `from_step` 之前的 pending 误报成 blocked。
+  const selectedBrowserSubgoals = plan.subgoals.filter((_, j) => {
+    for (const idx of executedIndices) if (browserIndexOf[idx] === j) return true;
+    return false;
+  });
+  if (segmentRequested) {
+    const selected = new Set(selectedBrowserSubgoals);
+    for (const sg of plan.subgoals) {
+      if (!selected.has(sg) && sg.status === "pending") sg.status = "skipped";
+    }
+  }
   const subgoals = plan.subgoals.map((s) => ({
     desc: s.desc, status: s.status, attempts: s.attempts ?? 1, obstacle: s.obstacle ?? null,
   }));
-  const browserOk = subgoals.every((s) => s.status === "done" || s.status === "skipped");
+  const browserOk = (segmentRequested ? selectedBrowserSubgoals : subgoals)
+    .every((s) => s.status === "done" || s.status === "skipped");
   const toolsOk = toolSteps.every((t) => t.done);
   const manualOk = manualSteps.every((m) => m.done);
   // 路径上界到顶 = 这次旅程没有走完（即使被环卷进去的那一步恰好是工具步，也不能算绿）。
-  const ok = browserOk && toolsOk && manualOk && invariantResults.every((i) => i.held) && pathStopOut === undefined;
+  const ok = browserOk && toolsOk && manualOk
+    && (segmentRequested ? true : invariantResults.every((i) => i.held))
+    && pathStopOut === undefined;
   // 数的是**声明出来的步**，不是"跑了几趟"：`next` 回边会让同一个工具步跑很多遍，
   // 那样 `completed` 会写出 `100/2` 这种读不通的数（真要读趟数看 `path_visits`）。
-  const doneCount = subgoals.filter((s) => s.status === "done" || s.status === "skipped").length
+  const doneCount = (segmentRequested ? selectedBrowserSubgoals : subgoals)
+    .filter((s) => s.status === "done" || s.status === "skipped").length
     + new Set(toolSteps.filter((t) => t.done).map((t) => t.index)).size
     + new Set(manualSteps.filter((m) => m.done).map((m) => m.index)).size;
   const stats = opts.runtimeStats ? opts.runtimeStats() : null;
@@ -1171,7 +1254,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     app: pack.id, label: pack.label, goal: pack.goal,
     pack_path: pack._path ?? "", plan_path: planPath,
     roles_used: expanded.rolesUsed, slots: expanded.slots,
-    completed: `${doneCount}/${expanded.steps.length}`,
+    completed: `${doneCount}/${segmentRequested ? executedIndices.size : expanded.steps.length}`,
     subgoals, tool_steps: toolSteps, invariants: invariantResults,
     ...(manualSteps.length ? { manual_steps: manualSteps } : {}),
     ...(pace.between_steps_ms > 0 || pace.between_actions_ms > 0 ? { pace } : {}),
@@ -1213,7 +1296,10 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     sources: sourceResults,
     // 数据腿**真的写回**了哪些槽位（缺省等价：没回写就不出现这个字段）。
     ...(Object.keys(sourceSlots).length > 0 ? { source_slots: sourceSlots } : {}),
-    ok, secs: Math.round((Date.now() - t0) / 100) / 10,
+    ok,
+    verified: !segmentRequested && ok,
+    ...(segmentRequested ? { partial: true as const, segment: { from: segmentStart + 1, to: segmentEnd } } : {}),
+    secs: Math.round((Date.now() - t0) / 100) / 10,
   };
 }
 
@@ -1337,7 +1423,7 @@ export function appReportMarkdown(r: AppRunResult): string {
 const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--out DIR]
                   [--provider NAME] [--ablate stub|rules-only] [--force-hints off]
                   [--conf-floor N] [--no-sources] [--confirm-safe] [--headful] [--allow-dangerous]
-                  [--tiered-hint] [--learn-hints | --hint-memory FILE]
+                  [--tiered-hint] [--trace] [--only-step N | --from-step N] [--max-steps N] [--learn-hints | --hint-memory FILE]
                   [--emit-trace FILE] [--replay FILE] [--quiet]
 
 按 apps/<app>/pack.json 跑一条完整应用链路：数据腿 → 浏览器步/工具步 → 结束状态不变量
@@ -1346,6 +1432,8 @@ const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [-
 --conf-floor N 置信度闸门刻度（0<N≤1）：换 provider（score_kind 不同）时缺省 0.25 不再成立，
                本旗标 = 本次覆盖；包可用 policy.conf_floor 声明；provider 可自报 floor
 --tiered-hint  P1 实验开关：hint 档内歧义向模型问更小的问题（默认关 = 行为逐字节不变）
+--trace        结果 JSON 带每步执行证据（step_traces；给调试/桥摘要用）
+--only-step N  只跑第 N 步；--from-step N 从第 N 步开始；--max-steps N 本段最多几步（均 1-based）
 --learn-hints  R2 学习环：模型选对的步变成规则（sidecar，永不写进被审计的包；authored 恒优先）
                落点默认 $AMBERFLOW_HOME/hint-memory/<app>.json，--hint-memory FILE 显式指定
 --emit-trace F 脚本应用：把本次执行轨迹（app/script/inputs 三个 sha + 逐次 ctx 调用）写成 F
@@ -1670,6 +1758,20 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const confirmSafe = cliBool(v, "confirm-safe") || runDefaults.confirmSafe === true;
   const noSources = cliBool(v, "no-sources") || runDefaults.noSources === true;
   const tieredHint = cliBool(v, "tiered-hint") || runDefaults.tieredHint === true;
+  const parsePositive = (key: string): number | undefined => {
+    const raw = cliString(v, key);
+    if (raw === undefined) return undefined;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1) return NaN;
+    return n;
+  };
+  const onlyStep = parsePositive("only-step");
+  const fromStep = parsePositive("from-step");
+  const segmentMaxSteps = parsePositive("max-steps");
+  for (const [name, n] of [["--only-step", onlyStep], ["--from-step", fromStep], ["--max-steps", segmentMaxSteps]] as const) {
+    if (n !== undefined && Number.isNaN(n)) { console.error(`${name} 需要正整数`); return 2; }
+  }
+  if (onlyStep !== undefined && fromStep !== undefined) { console.error("--only-step 与 --from-step 只能选一个"); return 2; }
   if (cliBool(v, "list") || cliString(v, "app") === undefined) {
     for (const [id, label, p] of listPacks()) console.log(`${id.padEnd(22)} ${label}  ${p}`);
     if (cliString(v, "app") === undefined) {
@@ -1762,6 +1864,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
   // 脚本应用的 hint 是运行期调用参数，没有"声明层"可剥：在 **dry 分支之前**拒绝，
   // 否则 `--dry-run --force-hints off` 会静默 exit 0（与文档/非 dry 行为不一致，实测）。
+  if (scriptApp !== null && scriptApp.mode === "flow" && (onlyStep !== undefined || fromStep !== undefined || segmentMaxSteps !== undefined)) {
+    console.error("--only-step/--from-step/--max-steps 只适用于声明式应用：flow 脚本的步骤由脚本控制");
+    return 2;
+  }
   if (forceHints === "off" && scriptApp !== null && scriptApp.flow !== undefined) {
     console.error("--force-hints off 只适用于声明式应用：flow 脚本的 hint 由脚本调用声明，没有可剥的声明层。");
     return 2;
@@ -1896,7 +2002,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     result = scriptApp !== null && scriptApp.flow !== undefined
       ? await runScriptApp(scriptApp, {
           slots, outDir, verbose: !quiet,
-          sources: !noSources, confirmSafe,
+          sources: !noSources, confirmSafe, captureTraces: cliBool(v, "trace"),
+          onlyStep, fromStep, segmentMaxSteps,
           headful, allowDangerous: cliBool(v, "allow-dangerous"),
           // §3/学习环：与 runApp 同一组旗标（以前脚本应用静默忽略它们）。
           tieredHint: tieredHint ? true : undefined,
@@ -1911,7 +2018,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         })
       : await runApp(pack, {
       slots, planPath, outDir, verbose: !quiet,
-      sources: !noSources, confirmSafe, headful,
+      sources: !noSources, confirmSafe, headful, captureTraces: cliBool(v, "trace"),
+      onlyStep, fromStep, segmentMaxSteps, manualFailFast: cliBool(v, "manual-fail-fast"),
       allowDangerous: cliBool(v, "allow-dangerous"),
       // §3：只有**显式给了旗标**才算"本次覆盖"；否则留 undefined，让包声明赢。
       // （以前这里恒传一个布尔，等于 CLI 永远压过 pack——报告还会把来源写成 cli，假账。）

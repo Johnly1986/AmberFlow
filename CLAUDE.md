@@ -17,6 +17,7 @@ npm run online -- --tier deep          # 长流程
 npm run online -- --tier probe         # 风控/可达性探针，非门禁
 npm run online -- --case <id> --headed
 npm start -- --goal "..." --url ...    # 一次性目标：演示 → 计划 → 执行
+npx amber inspect --url <URL> --json   # 只读观察；写 target_hint 前先看页面
 npm run apps -- --app <id>             # 用户作用域应用
 npm run learn                          # 演示一次，录成应用
 npm run plan:flow -- --goal ... --seed <url> --app <id>

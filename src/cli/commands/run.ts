@@ -8,6 +8,8 @@ import { usageError, usageFromParseError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { emitPlanStatus } from "../plan-result.ts";
 import { flatList, injectOptionalValue, normalizeAliases, parseSlots } from "../args.ts";
+import { toAgentRunView } from "../../app/agent-view.ts";
+import type { AppRunResult } from "../../app/app-runner.ts";
 
 export const DEFAULT_PLAN = "./.amberflow/plan.json";
 
@@ -37,6 +39,10 @@ const OPTIONS = {
   max: { type: "string" as const },
   "min-confidence": { type: "string" as const },
   "tiered-hint": { type: "boolean" as const },
+  trace: { type: "boolean" as const },
+  "only-step": { type: "string" as const },
+  "from-step": { type: "string" as const },
+  "max-steps": { type: "string" as const },
   "without-hints": { type: "boolean" as const },
   ablate: { type: "string" as const },
   json: { type: "boolean" as const },
@@ -263,6 +269,11 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
     if (val !== undefined) args.push(flag, val);
   }
   if (bool(v["tiered-hint"])) args.push("--tiered-hint");
+  if (bool(v.trace) || bool(v.json) || ctx.globals.json) args.push("--trace");
+  for (const [key, flag] of [["only-step", "--only-step"], ["from-step", "--from-step"], ["max-steps", "--max-steps"]] as const) {
+    const val = str(v[key]);
+    if (val !== undefined) args.push(flag, val);
+  }
   if (bool(v["without-hints"])) args.push("--force-hints", "off");
   if (bool(v.quiet) || ctx.globals.quiet) args.push("--quiet");
 
@@ -312,11 +323,16 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
     : ["amber doctor", `amber run ${appId} --headful`];
   if (result) {
     const subgoals = Array.isArray(result.subgoals) ? result.subgoals as Array<Record<string, unknown>> : [];
+    const view = toAgentRunView(result as unknown as AppRunResult, {
+      outDir, resultPath, reportPath,
+      partial: result["partial"] === true,
+    });
     const data = {
       ...result,
+      ...view,
       app: appId,
       skipped: subgoals.filter((s) => s.status === "skipped").length,
-      steps: subgoals,
+      steps: view.steps,
       artifacts: { result_json: resultPath, report_md: reportPath },
     };
     const envelope = successEnvelope("run", data, { exitCode: code, next });

@@ -108,6 +108,9 @@ amber apps check <id>
 | `npm run online -- --tier …` | 真实站点测试套件 |
 | `npm run check` | `typecheck` + 配置示例一致性 + 线上用例离线校验 |
 | `npm run doctor` | 环境、配置、决策源体检 |
+| `npx amber inspect --url <URL> --json` | 只读观察页面元素与候选 hint |
+| `npx amber apps new <id> --format pack` | 创建可结构化编辑的 pack.json 应用 |
+| `npx amber apps set-step <id> --index N --step-file <json>` | 原子改一步并校验 |
 | `npm run learn` | 演示一次，生成应用 |
 | `npm run plan:flow` | 一句话 + 种子页 → 语义模板 + 站点档案 |
 | `npm run semantic -- --app <id> --site <site>` | 运行语义模板 |

@@ -29,13 +29,19 @@ import type { Volatile } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-settings'
 import { formatRequires, formatTypeMix, listApps, normalizeDecisionEndpoint, type BridgeOptions } from './bridge.ts'
-import { createService, runApp, learn, plan, type AmberFlowService } from './service.ts'
+import {
+  appCheck, appShow, createApp, inspect, learn, online, plan, removeStep, runApp, setInvariant, setStep, status,
+  createService, type AmberFlowService,
+} from './service.ts'
 
 // The package root is the consumer surface: another plugin imports these without reaching into `src/`
 // (a published package ships only `lib/`).
 export {
-  learn, newOutDir, runApp, plan,
-  type AmberFlowLearnArgs, type AmberFlowPlanArgs, type AmberFlowRunArgs, type AmberFlowService,
+  appCheck, appShow, createApp, inspect, learn, newOutDir, online, plan, removeStep, runApp, setStep, status,
+  type AmberFlowAppCheck, type AmberFlowAppDetail, type AmberFlowCreateArgs, type AmberFlowInspect,
+  type AmberFlowInspectArgs, type AmberFlowLearnArgs, type AmberFlowOnline, type AmberFlowOnlineArgs,
+  type AmberFlowPlanArgs, type AmberFlowRemoveStepArgs, type AmberFlowRunArgs, type AmberFlowService,
+  type AmberFlowSetInvariantArgs, type AmberFlowSetStepArgs, type AmberFlowStatus,
 } from './service.ts'
 export {
   buildEnv, diagnoseFailure, firstLines, flowRunArgs, formatRequires, formatTypeMix, learnArgs,
@@ -279,17 +285,13 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_apps`,
     description:
-      'List the browser/CLI apps declared in the AmberFlow checkout, with their step counts, '
-      + 'invariant counts and where each pack came from (generated from a spec/source, recorded from '
-      + 'a demonstrated flow, hand-written, or a pure data source with no journey of its own). '
-      + 'Each row carries a kind: `journey` apps run under the run tool; `probe` apps are measurement '
-      + 'sets the engine refuses to run through the app runner (read their declaration only); '
-      + '`data-source` rows feed other packs; `semantic-template` rows (flow.json) are site-agnostic '
-      + 'SemanticFlow templates — run them with the run tool plus one of their listed `sites`, and '
-      + 'grow a new site\'s profile with the plan tool. A journey may MIX application types '
-      + '(web/cli/ssh/stdio): each row lists its type mix (e.g. `web×2 · cli×3 · ssh×1`) and any '
-      + 'local service the app needs at run time (e.g. ssh needs a reachable local sshd) — check '
-      + 'that before spending a run. Reads the packs only: no browser, no model, no subprocess.',
+      'List the apps declared in the user scope (and any packs in the checkout), with step counts, '
+      + 'invariant counts and the declaration file. Each row carries a kind: `journey` apps run under '
+      + 'the run tool; `semantic-template` rows (flow.json) are site-agnostic SemanticFlow templates — '
+      + 'run them with the run tool plus one of their listed `sites`; `probe` rows are measurement '
+      + 'sets the runner refuses to execute. A journey may MIX application types (web/cli/ssh/stdio): '
+      + 'each row lists its type mix and any local service the app needs at run time. Reads the packs '
+      + 'only: no browser, no model, no subprocess.',
     parameters: {
       filter: { type: 'string', description: 'Optional case-insensitive substring match on id/label/goal.' },
     },
@@ -358,17 +360,12 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_run`,
     description:
-      'Run one declared AmberFlow app end to end (data leg -> browser/tool steps -> end-state '
-      + 'invariants) and return a compact summary: completion, the FAILED subgoals only, refusals, '
-      + 'invariant results, and a `model: on|off(missing)` tier line saying whether the local '
-      + 'decision model was in play at all — plus the per-step decision tally (rule vs laya vs '
-      + 'reobserve vs cache). The full per-step table stays in the report file named by the result, '
-      + 'read it with the read tool when you need the detail. `ablate` runs an ABLATION arm (scripted stub, or no '
-      + 'forward passes); `dry` expands the plan and returns it instead of executing anything, so it '
-      + 'verifies nothing and writes no report. Semantic templates (`kind=semantic-template` in the '
-      + 'apps listing) additionally REQUIRE `site` and report a resolution-level tally line '
-      + '(rule/laya/escalate/backfill counts). A non-zero exit with no artifact means the run never '
-      + 'reached the verify stage; the cause is included.',
+      'Run one declared app: data leg -> browser/tool steps -> end-state invariants. By default it '
+      + 'runs the whole journey; use only_step/from_step/max_steps to debug one segment, which reports '
+      + 'status=partial and verified=false. Returns a compact summary with status, failed steps, '
+      + 'invariants, model tier, result/report paths and the first structured failure. Semantic '
+      + 'templates (`kind=semantic-template`) additionally require `site`. `dry` only expands the '
+      + 'plan; `ablate` is an explicit ablation arm, not a routine mode.',
     parameters: {
       app: { type: 'string', required: true, description: 'The app id from `' + toolPrefix + '_apps`.' },
       site: {
@@ -378,7 +375,7 @@ export function apply(ctx: Context, config: Config): void {
       },
       dry: { type: 'boolean', description: 'Only expand the plan; do not open a browser or run tools.' },
       ablate: { type: 'string', enum: ['stub', 'rules-only'], description: 'ABLATION EXPERIMENT ONLY. `stub` installs a scripted fake model; `rules-only` runs with no model at all. Omit for a normal run (the real decision model is the default).' },
-      provider: { type: 'string', description: 'Which decision provider to run on: laya-onnx (default), scripted-stub, none, or a baseline (first-candidate | coin-flip | always-abstain) / any registered provider. Use baselines to measure whether a model beats zero-intelligence search.' },
+      provider: { type: 'string', description: 'Override the decision provider for this call (laya-onnx, decision-service, a baseline, or an ablation). Omit to use the configured three-key service, or the local model when no service URL is set.' },
       no_sources: { type: 'boolean', description: 'Skip the data leg (use already-available data).' },
       headful: { type: 'boolean', description: 'Open a VISIBLE browser window for the run (engine '
         + '--headful). The window appears on the machine that runs the engine — the deployment host, '
@@ -404,6 +401,10 @@ export function apply(ctx: Context, config: Config): void {
         description: 'Values for declared slots, as "key=value" entries (e.g. ["date=2026-10-12"]).',
         items: { type: 'string' },
       },
+      only_step: { type: 'integer', description: 'Run only this 1-based declared step.' },
+      from_step: { type: 'integer', description: 'Start at this 1-based declared step.' },
+      max_steps: { type: 'integer', description: 'Execute at most this many steps in this call.' },
+      trace: { type: 'boolean', description: 'Include per-step execution evidence in the result.' },
     },
     output: {
       schema: {
@@ -468,6 +469,36 @@ export function apply(ctx: Context, config: Config): void {
           types: { type: 'string' },
           requires: { type: 'array', items: { type: 'string' } },
           decisions: { type: 'string' },
+          status: { type: 'string' },
+          verified: { type: 'boolean' },
+          partial: { type: 'boolean' },
+          resultPath: { type: 'string' },
+          outDir: { type: 'string' },
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                index: { type: 'integer', required: true },
+                desc: { type: 'string', required: true },
+                status: { type: 'string', required: true },
+                method: { type: 'string' },
+                stop_code: { type: 'string' },
+                obstacle: { type: 'string' },
+              },
+            },
+          },
+          failure: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              step: { type: 'integer', required: true },
+              desc: { type: 'string', required: true },
+              stop_code: { type: 'string' },
+              obstacle: { type: 'string' },
+            },
+          },
         },
       },
       render: (_args, value) => {
@@ -489,14 +520,19 @@ export function apply(ctx: Context, config: Config): void {
             ? '; stopped: timed out'
             : value.exitCode === undefined ? '' : `; stopped: exit ${value.exitCode}`
           : ''
+        const status = value.status ?? (value.ok ? 'passed' : 'failed')
         return [{
           type: 'text',
-          text: `${value.ok ? 'PASS' : 'FAIL'} ${value.completed}`
+          text: `${status.toUpperCase()} ${value.completed}`
+            + `; verified ${value.verified === true ? 'yes' : 'no'}`
+            + (value.partial ? ' (partial run)' : '')
             + `; invariants ${value.invariants.held}/${value.invariants.total}`
             + (value.blockedTotal ? `; blocked ${value.blockedTotal}: `
               + value.blocked.map(b => `${b.desc} (${b.obstacle})`).join(' | ') : '')
             + (value.failedTools.length ? `; tool steps failed: ${value.failedTools.join(' | ')}` : '')
             + (value.refused.length ? `; not executed: ${value.refused.join(', ')}` : '')
+            + (value.failure ? `; first failure: step ${value.failure.step} ${value.failure.desc}`
+              + `${value.failure.stop_code ? ` (${value.failure.stop_code})` : ''}` : '')
             + stopped
             + (value.line ? `; ${value.line}` : '')
             + (value.model ? `; model: ${value.model}` : '')
@@ -504,6 +540,7 @@ export function apply(ctx: Context, config: Config): void {
             + (value.requires && value.requires.length
               ? `; needs local: ${value.requires.map(x => formatRequires([x])).join(', ')}` : '')
             + (value.decisions ? `\ndecisions: ${value.decisions}` : '')
+            + (value.resultPath ? `\nresult: ${value.resultPath}` : '')
             + (value.reportPath ? `\nreport: ${value.reportPath}` : '\nno report was written')
             + (value.profilePath ? `\nprofile: ${value.profilePath}` : ''),
         }]
@@ -545,6 +582,10 @@ export function apply(ctx: Context, config: Config): void {
         ...(args.allow_dangerous === undefined ? {} : { allowDangerous: args.allow_dangerous }),
         ...(args.confirm_safe === undefined ? {} : { confirmSafe: args.confirm_safe }),
         ...(args.tiered_hint === undefined ? {} : { tieredHint: args.tiered_hint }),
+        ...(args.only_step === undefined ? {} : { onlyStep: args.only_step }),
+        ...(args.from_step === undefined ? {} : { fromStep: args.from_step }),
+        ...(args.max_steps === undefined ? {} : { maxSteps: args.max_steps }),
+        ...(args.trace === undefined ? {} : { trace: args.trace }),
         // `Object.fromEntries` defines own properties, so even a `__proto__` slot reaches the CLI.
         ...(args.slots === undefined ? {} : { slots: Object.fromEntries(slots) }),
       })
@@ -567,11 +608,320 @@ export function apply(ctx: Context, config: Config): void {
         ...(summary.profilePath === undefined ? {} : { profilePath: summary.profilePath }),
         ...(summary.model === undefined ? {} : { model: summary.model }),
         ...(summary.decisions === undefined ? {} : { decisions: summary.decisions }),
+        ...(summary.status === undefined ? {} : { status: summary.status }),
+        ...(summary.verified === undefined ? {} : { verified: summary.verified }),
+        ...(summary.partial === undefined ? {} : { partial: summary.partial }),
+        ...(summary.resultPath === undefined ? {} : { resultPath: summary.resultPath }),
+        outDir: summary.outDir,
+        ...(summary.steps === undefined ? {} : { steps: summary.steps }),
+        ...(summary.failure === undefined ? {} : { failure: summary.failure }),
         ...(declared === null || Object.keys(declared.types).length <= 1
           ? {} : { types: formatTypeMix(declared.types) }),
         ...(declared === null || declared.requires.length === 0
           ? {} : { requires: declared.requires }),
       }
+    },
+  }))
+
+  const appDetailSchema = {
+    type: 'object' as const,
+    additionalProperties: false,
+    properties: {
+      app: { type: 'string', required: true },
+      label: { type: 'string', required: true },
+      goal: { type: 'string', required: true },
+      path: { type: 'string', required: true },
+      source: { type: 'string', required: true },
+      mode: { type: 'string' },
+      hosts: { type: 'array', required: true, items: { type: 'string' } },
+      slots: { type: 'object', required: true, additionalProperties: true },
+      required_slots: { type: 'array', required: true, items: { type: 'string' } },
+      journey: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
+      invariants: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
+      sites: { type: 'array', items: { type: 'string' } },
+    },
+  } as const
+
+  ctx.tools.register(defineTool({
+    name: `${toolPrefix}_status`,
+    description:
+      'Report the environment the engine will run in: Node, Chromium, local model artifacts, the '
+      + 'effective decision source (online service or local), and whether the outer LLM is configured. '
+      + 'Reads only; no browser, no model call, no secrets (API keys are masked).',
+    parameters: {},
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean', required: true },
+          node: { type: 'object', required: true, additionalProperties: true },
+          chromium: { type: 'object', required: true, additionalProperties: true },
+          model: { type: 'object', required: true, additionalProperties: true },
+          provider: { type: 'object', required: true, additionalProperties: true },
+          llm: { type: 'object', required: true, additionalProperties: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `${value.ok ? 'READY' : 'CHECK'}; node ${String((value.node as any).version ?? '?')}; `
+          + `chromium ${(value.chromium as any).ok === true ? 'ok' : 'missing'}; `
+          + `model ${(value.model as any).ready === true ? 'ready' : 'missing'}; `
+          + `decision ${String(((value.provider as any).default ?? {}).name ?? '?')}; `
+          + `outer LLM ${(value.llm as any).configured === true ? 'configured' : 'stub'}`,
+      }],
+    },
+    async execute() {
+      return status(options)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: `${toolPrefix}_app_show`,
+    description:
+      'Read one app declaration: hosts, slots, ordered journey steps, invariants and the writable file. '
+      + 'Use this before editing a step; it is filesystem-only (no browser, no run).',
+    parameters: {
+      app: { type: 'string', required: true, description: 'The app id from the apps tool.' },
+    },
+    output: { schema: appDetailSchema, render: (_args, value) => [{
+      type: 'text',
+      text: `${value.app} — ${value.goal} (${value.journey.length} steps, ${value.invariants.length} invariants, hosts ${value.hosts.join(',') || '-'})\n`
+        + value.journey.map((s: any, i: number) => `  [${i + 1}] ${String(s.desc ?? '')}${s.target_hint ? ` ← ${String(s.target_hint)}` : ''}`).join('\n'),
+    }] },
+    async execute(args) {
+      return appShow(options, args.app)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: `${toolPrefix}_app_check`,
+    description:
+      'Statically validate one app (schema, hints, signals, slots, hosts) without launching a browser. '
+      + 'Returns per-app problems; an empty list means it is loadable.',
+    parameters: {
+      app: { type: 'string', required: true, description: 'The app id from the apps tool.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean', required: true },
+          checked: { type: 'integer', required: true },
+          results: {
+            type: 'array',
+            required: true,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                app: { type: 'string', required: true },
+                path: { type: 'string', required: true },
+                problems: { type: 'array', required: true, items: { type: 'string' } },
+              },
+            },
+          },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.ok
+          ? 'VALID'
+          : value.results.map(r => `${r.app}: ${r.problems.join('; ')}`).join('\n'),
+      }],
+    },
+    async execute(args) {
+      return appCheck(options, args.app)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: `${toolPrefix}_inspect`,
+    description:
+      'Observe a live page without acting: title, URL, a bounded list of interactive elements, and '
+      + 'verified hint candidates for each. Use this before writing a step target_hint. No clicks, no '
+      + 'typing, no model call; only http(s) URLs.',
+    parameters: {
+      url: { type: 'string', required: true, description: 'The http(s) page to observe.' },
+      max_elements: { type: 'integer', description: 'Default 60, max 200.' },
+      include_text: { type: 'boolean', description: 'Include a bounded body-text excerpt.' },
+      headful: { type: 'boolean', description: 'Show a browser window on the engine host.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean', required: true },
+          url: { type: 'string', required: true },
+          title: { type: 'string', required: true },
+          elements: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
+          element_count: { type: 'integer', required: true },
+          truncated: { type: 'boolean', required: true },
+          text: { type: 'string' },
+          screenshot_path: { type: 'string' },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `${value.title} — ${value.url}\n`
+          + value.elements.map((e: any) => `  ${String(e.ref ?? '')} ${String(e.tag ?? '')} ${String(e.label ?? '')}`
+            + `${Array.isArray(e.hint_candidates) && e.hint_candidates.length ? `  hints: ${e.hint_candidates.join(' | ')}` : ''}`).join('\n')
+          + (value.truncated ? `\n(truncated to ${value.element_count} elements)` : ''),
+      }],
+    },
+    async execute(args) {
+      return inspect(options, {
+        url: args.url,
+        ...(args.max_elements === undefined ? {} : { maxElements: args.max_elements }),
+        ...(args.include_text === undefined ? {} : { includeText: args.include_text }),
+        ...(args.headful === undefined ? {} : { headful: args.headful }),
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: `${toolPrefix}_online`,
+    description:
+      'Use the real-site regression suite: list cases, validate declarations offline, or run a tier. '
+      + 'Never counts blocked/unreachable/skipped as passed; evidence is written outside the repo and '
+      + 'the path is returned.',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['list', 'validate', 'run'] },
+      tier: { type: 'string', description: 'smoke | core | deep | probe | all | default' },
+      case: { type: 'string', description: 'Run one case id.' },
+      site: { type: 'string', description: 'Restrict to one site.' },
+      headful: { type: 'boolean' },
+      require_all: { type: 'boolean', description: 'Treat skipped/blocked as failure (scheduled runs).' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean', required: true },
+          action: { type: 'string', required: true },
+          tier: { type: 'string' },
+          sites: { type: 'integer' },
+          cases: { type: 'integer' },
+          valid: { type: 'boolean' },
+          passed: { type: 'integer' },
+          failed: { type: 'integer' },
+          skipped: { type: 'integer' },
+          evidence_dir: { type: 'string' },
+          cases_detail: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          reason: { type: 'string' },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.action === 'validate'
+          ? `VALID ${String(value.sites)} sites / ${String(value.cases)} cases`
+          : value.action === 'list'
+            ? `${String(value.cases_detail?.length ?? 0)} cases`
+            : `${value.ok ? 'PASS' : 'FAIL'} ${String(value.passed)} passed / ${String(value.failed)} failed / ${String(value.skipped)} skipped`
+              + (value.evidence_dir ? `\nevidence: ${value.evidence_dir}` : ''),
+      }],
+    },
+    async execute(args) {
+      return online(options, {
+        action: args.action as 'list' | 'validate' | 'run',
+        ...(args.tier === undefined ? {} : { tier: args.tier }),
+        ...(args.case === undefined ? {} : { case: args.case }),
+        ...(args.site === undefined ? {} : { site: args.site }),
+        ...(args.headful === undefined ? {} : { headful: args.headful }),
+        ...(args.require_all === undefined ? {} : { requireAll: args.require_all }),
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: `${toolPrefix}_app_create`,
+    description:
+      'Create a data-pack app skeleton under the user scope. It starts with one placeholder step; '
+      + 'replace it with app_set_step. Only pack declarations can be written here — arbitrary flow '
+      + 'scripts are not created by the bridge.',
+    parameters: {
+      id: { type: 'string', required: true, description: 'Lowercase id; also the directory name.' },
+      goal: { type: 'string', description: 'One-line goal.' },
+      hosts: { type: 'array', items: { type: 'string' }, description: 'Allowed hosts (default example.com).' },
+    },
+    output: { schema: appDetailSchema, render: (_args, value) => [{
+      type: 'text',
+      text: `CREATED ${value.app} (${value.path}); next: ${toolPrefix}_app_set_step`,
+    }] },
+    async execute(args) {
+      return createApp(options, {
+        id: args.id,
+        ...(args.goal === undefined ? {} : { goal: args.goal }),
+        ...(args.hosts === undefined ? {} : { hosts: args.hosts }),
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: `${toolPrefix}_app_set_step`,
+    description:
+      'Atomically replace (or append) one journey step of a data-pack app and validate it. Invalid '
+      + 'input writes nothing. Use step fields desc / start_url / target_hint / signal / slots / when / '
+      + 'retries. Flow-script apps are refused.',
+    parameters: {
+      app: { type: 'string', required: true },
+      index: { type: 'integer', required: true, description: '1-based step index; length+1 appends.' },
+      step: { type: 'object', required: true, additionalProperties: true, description: 'The step declaration.' },
+      hosts: { type: 'array', items: { type: 'string' }, description: 'Add allowed hosts while writing.' },
+    },
+    output: { schema: appDetailSchema, render: (_args, value) => [{
+      type: 'text',
+      text: `UPDATED ${value.app} (${value.journey.length} steps); next: ${toolPrefix}_app_check then ${toolPrefix}_run`,
+    }] },
+    async execute(args) {
+      return setStep(options, {
+        app: args.app,
+        index: args.index,
+        step: args.step as Record<string, unknown>,
+        ...(args.hosts === undefined ? {} : { hosts: args.hosts }),
+      })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: `${toolPrefix}_app_set_invariant`,
+    description:
+      'Replace the end-state invariants of a data-pack app and validate them. Use this after writing '
+      + 'steps so a full run verifies the real destination, not the placeholder host.',
+    parameters: {
+      app: { type: 'string', required: true },
+      invariants: {
+        type: 'array',
+        required: true,
+        items: { type: 'object', additionalProperties: true },
+        description: 'Array of { id, desc, signal }; signal uses the engine signal grammar.',
+      },
+    },
+    output: { schema: appDetailSchema, render: (_args, value) => [{
+      type: 'text',
+      text: `UPDATED ${value.app} (${value.invariants.length} invariants)`,
+    }] },
+    async execute(args) {
+      return setInvariant(options, { app: args.app, invariants: args.invariants as Array<Record<string, any>> })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: `${toolPrefix}_app_remove_step`,
+    description: 'Remove one journey step (the app must keep at least one) and revalidate it.',
+    parameters: {
+      app: { type: 'string', required: true },
+      index: { type: 'integer', required: true, description: '1-based step index.' },
+    },
+    output: { schema: appDetailSchema, render: (_args, value) => [{
+      type: 'text',
+      text: `UPDATED ${value.app} (${value.journey.length} steps)`,
+    }] },
+    async execute(args) {
+      return removeStep(options, { app: args.app, index: args.index })
     },
   }))
 
@@ -588,7 +938,7 @@ export function apply(ctx: Context, config: Config): void {
       + 'and the local decision runtime on the machine running the checkout.',
     parameters: {
       goal: { type: 'string', required: true, description: 'One line describing the flow to perform.' },
-      url: { type: 'string', required: true, description: 'The page to start from (a URL or a repo-relative fixture path).' },
+      url: { type: 'string', required: true, description: 'The http(s) page to start from.' },
       script: {
         type: 'string',
         required: true,
@@ -619,6 +969,7 @@ export function apply(ctx: Context, config: Config): void {
           forwards: { type: 'integer', required: true },
           completed: { type: 'string', required: true },
           invariants: { type: 'string', required: true },
+          problems: { type: 'array', items: { type: 'string' } },
           saved: { type: 'string' },
         },
       },
@@ -626,7 +977,8 @@ export function apply(ctx: Context, config: Config): void {
         type: 'text',
         text: `${value.status}: ${value.app} (${value.steps} steps) — rules-only replay: `
           + `${value.completed}, ${value.invariants}, ${value.forwards} model call(s); `
-          + (value.saved ? `saved to ${value.saved}` : 'NOT saved'),
+          + (value.saved ? `saved to ${value.saved}` : 'NOT saved')
+          + (value.problems && value.problems.length ? `; failed invariants: ${value.problems.join(', ')}` : ''),
       }],
     },
     async execute(args) {
@@ -647,6 +999,7 @@ export function apply(ctx: Context, config: Config): void {
         forwards: summary.forwards,
         completed: summary.completed,
         invariants: summary.invariants,
+        ...(summary.problems === undefined ? {} : { problems: summary.problems }),
         ...(summary.saved ? { saved: summary.saved } : {}),
       }
     },
@@ -678,7 +1031,7 @@ export function apply(ctx: Context, config: Config): void {
       },
       seed: {
         type: 'string', required: true,
-        description: 'Seed page: a seed URL (or a repo-relative path).',
+        description: 'Seed page: an http(s) URL.',
       },
       app: { type: 'string', required: true, description: 'App id to write apps/<id>/flow.json under.' },
       site: {
@@ -723,6 +1076,7 @@ export function apply(ctx: Context, config: Config): void {
             },
           },
           gate: { type: 'string', required: true },
+          blocked: { type: 'array', items: { type: 'string' } },
           templatePath: { type: 'string', required: true },
           profilePath: { type: 'string', required: true },
           error: { type: 'string', required: true },
@@ -735,7 +1089,8 @@ export function apply(ctx: Context, config: Config): void {
             + `\ntemplate: ${value.templatePath}\nprofile: ${value.profilePath}`
             + (value.steps.some(s => s.signal_source === 'contract')
               ? '\n(steps with signal_source=contract carry only the page-role URL fact)' : '')
-          : `NOT planned (${value.app} @ ${value.site}) — nothing was written: ${value.error}`,
+          : `NOT planned (${value.app} @ ${value.site}) — nothing was written: ${value.error}`
+            + (value.blocked && value.blocked.length ? `\nblocked:\n${value.blocked.map(b => `  - ${b}`).join('\n')}` : ''),
       }],
     },
     async execute(args) {
@@ -756,6 +1111,7 @@ export function apply(ctx: Context, config: Config): void {
         site: summary.site,
         steps: summary.steps,
         gate: summary.gate,
+        ...(summary.blocked === undefined ? {} : { blocked: summary.blocked }),
         templatePath: summary.templatePath,
         profilePath: summary.profilePath,
         error: summary.error,

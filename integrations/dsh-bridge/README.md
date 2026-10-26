@@ -1,5 +1,5 @@
 ---
-description: "The harness side of calling the AmberFlow frozen-plan browser engine: four tools that list its apps, run one end to end, record a flow from a goal/page/action list, and plan a site-agnostic flow — for deployments that drive browser automation from a session. A journey may mix application types (web/cli/ssh/stdio)."
+description: "The harness side of calling the AmberFlow frozen-plan browser engine: model-facing tools that observe a page, author a data-pack app step by step, run one app or a segment, record a flow, plan a site-agnostic flow, and run the online suite — for deployments that drive browser automation from a session. A journey may mix application types (web/cli/ssh/stdio)."
 kind: "package-bundle"
 ---
 
@@ -9,7 +9,9 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-amberflow-bridge` exposes an external browser engine as four model-facing tools. AmberFlow plans once and then decides every step **locally**, treats DOM signals as the only completion truth, and can record a flow from one demonstration; the bridge adds no browser logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts. An app may mix **application types** — web/cli/ssh/stdio (interactive processes such as games) in one journey — and the listing reports that mix plus any local service the run needs (e.g. ssh needs a reachable local sshd). The plugin's **configuration page** (Settings → Plugins → this bundle's row → Configure) sets exactly three fields for the **online decision model** — Model URL, Token Key, ModelName — so runs can use the unified `decision-service` provider (System One) instead of the local ONNX model — the same three keys `amber config set` writes for the engine CLI. `amberflow_apps` lists the declared apps and says whether each pack was generated from a spec, recorded from a demonstration, hand-written, or a pure data source. `amberflow_run` runs one app end to end and returns completion, the FAILED steps only, refusals, and invariant results — or, under `dry`, the expanded plan it did not execute. `amberflow_learn` records a flow from a goal, a page and a recorded action list, and reports the rules-only replay that decides whether it was reproducible enough to save.
+`dsh-amberflow-bridge` exposes an external browser engine as model-facing tools. AmberFlow plans once and then decides every step **locally**, treats DOM signals as the only completion truth, and can record a flow from one demonstration; the bridge adds no browser logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts. An app may mix **application types** — web/cli/ssh/stdio (interactive processes such as games) in one journey — and the listing reports that mix plus any local service the run needs (e.g. ssh needs a reachable local sshd). The plugin's **configuration page** (Settings → Plugins → this bundle's row → Configure) sets exactly three fields for the **online decision model** — Model URL, Token Key, ModelName — so runs can use the unified `decision-service` provider (System One) instead of the local ONNX model — the same three keys `amber config set` writes for the engine CLI. `amberflow_apps` lists the declared apps and says whether each pack was generated from a spec, recorded from a demonstration, hand-written, or a pure data source. `amberflow_run` runs one app end to end and returns completion, the FAILED steps only, refusals, and invariant results — or, under `dry`, the expanded plan it did not execute. `amberflow_learn` records a flow from a goal, a page and a recorded action list, and reports the rules-only replay that decides whether it was reproducible enough to save.
+
+The authoring path for an Agent is `amberflow_status` → `amberflow_inspect` → `amberflow_app_create` → `amberflow_app_set_step` → `amberflow_app_check` → `amberflow_run` with `only_step`/`from_step` → `amberflow_run` full → `amberflow_online`. `amberflow_app_show` returns the declaration, `amberflow_app_set_invariant` sets end-state acceptance, and `amberflow_app_remove_step` takes a step out.
 
 ## Table of Contents
 
@@ -66,7 +68,7 @@ plugin window runs the same operation). Three channels are supported:
 - **npm or tarball**: pack with `pnpm pack`; the root `package.json` is the bundle, so the git
   behavior above carries over unchanged.
 
-A package that declares `dsh.bundle` joins `dsh.profile.bundles` on install, so the four tools
+A package that declares `dsh.bundle` joins `dsh.profile.bundles` on install, so the tools
 become available without a hand-written profile patch; a live profile applies that at the next
 config reload. `AMBERFLOW_REPO` overrides the checkout the resolved config names; a path that is
 not a checkout fails at load time.
@@ -221,7 +223,7 @@ is rejected instead of being silently downgraded.
 
 ## Model Experience
 
-The model sees four tools with narrow schemas. `amberflow_run` answers with PASS or FAIL, the
+The model sees a set of tools with narrow schemas: observe (`inspect`), inspect/validate the declaration (`app_show` / `app_check`), author (`app_create` / `app_set_step` / `app_set_invariant` / `app_remove_step`), run (`run` with optional `only_step` / `from_step`), and regress (`online`). `amberflow_run` answers with PASS or FAIL, the
 completion count, invariant counts, the failed steps with their obstacle text, and the report path;
 steps that completed are a count, not rows, so a sixty-step journey costs a line rather than a page.
 Every answer also carries a **tier line** — `model: on` / `off(missing)` / `off(rules-only)` — and, when

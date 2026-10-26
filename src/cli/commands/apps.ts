@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { APPS_DIR, adapterKind, listPacks, loadPack, type AppPack } from "../../app/app-pack.ts";
-import { isDeclarativeScriptSource, lowerDeclarative, parseDeclarativeScript } from "../../app/declarative.ts";
+import { isDeclarativeScriptSource, lowerDeclarative, packToScriptSource, parseDeclarativeScript } from "../../app/declarative.ts";
 import { validateApp } from "../../app/cross-ref.ts";
 import {
   dryRunFlow, loadApp, loadScriptApp, resolveApp, resolveScriptPath, scriptDisplayPath,
@@ -191,10 +191,10 @@ function printShow(ctx: CliContext, pack: AppPack): void {
 async function appsNew(args: string[], ctx: CliContext): Promise<number> {
   const parsed = parseSimple(args, {
     json: { type: "boolean" }, help: { type: "boolean" },
-    kind: { type: "string" }, dir: { type: "string" }, force: { type: "boolean" }, print: { type: "boolean" },
+    kind: { type: "string" }, format: { type: "string" }, goal: { type: "string" }, dir: { type: "string" }, host: { type: "string", multiple: true }, force: { type: "boolean" }, print: { type: "boolean" },
   });
   if (parsed.values.help) {
-    say(ctx, "用法：amber apps new <id> [--kind flow|data] [--dir <目录>] [--force] [--print] [--json]");
+    say(ctx, "用法：amber apps new <id> [--kind flow|data] [--format app|pack] [--goal <目标>] [--host HOST] [--dir <目录>] [--force] [--print] [--json]");
     return 0;
   }
   const id = parsed.positionals[0];
@@ -212,15 +212,21 @@ async function appsNew(args: string[], ctx: CliContext): Promise<number> {
         + "data = 声明式数据脚本（固定形状、工具链可同步读取）。",
     });
   }
+  const format = typeof parsed.values.format === "string" && parsed.values.format ? parsed.values.format : "app";
+  if (format !== "app" && format !== "pack") {
+    throw usageError("--format 只接受 app | pack", { hint: "app = 固定形状 app.mjs；pack = 传统 pack.json（只读数据，便于程序编辑）。" });
+  }
   const dir = typeof parsed.values.dir === "string" && parsed.values.dir
     ? path.resolve(ctx.cwd, parsed.values.dir)
     : path.join(userAppsDir(ctx.env), id);
-  const file = path.join(dir, "app.mjs");
-  const source = kind === "data" ? dataScriptTemplate(id) : flowScriptTemplate(id);
+  const file = path.join(dir, format === "pack" ? "pack.json" : "app.mjs");
+  const source = format === "pack"
+    ? JSON.stringify(packTemplate(id, hostsOf(parsed.values.host), typeof parsed.values.goal === "string" ? parsed.values.goal : undefined), null, 2) + "\n"
+    : kind === "data" ? dataScriptTemplate(id) : flowScriptTemplate(id);
   const next = [`amber apps check ${id}`, `amber apps explain ${id}`, `amber run ${id}`];
   if (parsed.values.print) {
     if (jsonWanted(ctx, parsed.values)) {
-      emitJson(ctx, successEnvelope("apps new", { app: id, kind, path: file, source }, { next }));
+      emitJson(ctx, successEnvelope("apps new", { app: id, kind, format, path: file, source }, { next }));
     } else {
       say(ctx, source);
     }
@@ -235,14 +241,184 @@ async function appsNew(args: string[], ctx: CliContext): Promise<number> {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(file, source, "utf-8");
   if (jsonWanted(ctx, parsed.values)) {
-    emitJson(ctx, successEnvelope("apps new", { app: id, kind, path: file }, { next }));
+    emitJson(ctx, successEnvelope("apps new", { app: id, kind, format, path: file }, { next }));
   } else {
-    say(ctx, `✓ 已生成 ${file}（${kind === "flow" ? "flow 脚本" : "声明式数据脚本"}）`);
+    say(ctx, `✓ 已生成 ${file}（${format === "pack" ? "pack.json" : kind === "flow" ? "flow 脚本" : "声明式数据脚本"}）`);
     say(ctx, "  这是**可跑**的骨架（把入口页换成你的真实 URL），先验证再改：");
     for (const n of next) say(ctx, `    ${n}`);
     say(ctx, "  改入口页 / 目标 / 完成条件见 docs/APP_SCRIPT_AUTHORING.md。");
   }
   return 0;
+}
+
+/** 解析可编辑的声明式应用；flow 脚本拒绝（桥不写任意代码）。 */
+async function editableApp(id: string): Promise<{ pack: AppPack; file: string }> {
+  const resolved = await resolveApp(id);
+  if (resolved.script !== null && resolved.script.mode === "flow") {
+    throw usageError(`${id} 是 flow 脚本：结构化编辑只支持声明式应用`, {
+      hint: "flow 的步骤由运行期脚本决定，不能用 set-step 改；请直接编辑 app.mjs 或改用声明式应用。",
+      next: [`amber apps show ${id}`],
+    });
+  }
+  const file = resolved.script?.scriptPath ?? resolved.pack._path;
+  if (!file) throw usageError(`找不到 ${id} 的可写文件`);
+  return { pack: resolved.pack, file };
+}
+
+function writeEditable(file: string, pack: AppPack): void {
+  const clean = { ...(pack as unknown as Record<string, unknown>) };
+  delete clean._path;
+  const body = file.endsWith(".json")
+    ? JSON.stringify(clean, null, 2) + "\n"
+    : packToScriptSource(clean as unknown as AppPack);
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, body, "utf-8");
+  fs.renameSync(tmp, file);
+}
+
+/** `amber apps set-step <id> --index N --step-file step.json`：原子改一步并校验。 */
+async function appsSetStep(args: string[], ctx: CliContext): Promise<number> {
+  const parsed = parseSimple(args, {
+    index: { type: "string" }, "step-file": { type: "string" }, step: { type: "string" },
+    host: { type: "string", multiple: true }, json: { type: "boolean" }, help: { type: "boolean" },
+  });
+  if (parsed.values.help) {
+    say(ctx, "用法：amber apps set-step <id> --index N --step-file <json> [--json]");
+    say(ctx, "  step 字段：desc / start_url / target_hint / target_hints / signal / slots / when / retries");
+    return 0;
+  }
+  const id = parsed.positionals[0];
+  if (!id) throw usageError("apps set-step 需要应用 id", { next: ["amber apps list"] });
+  const index = Number(parsed.values.index);
+  if (!Number.isInteger(index) || index < 1) throw usageError("--index 需要正整数（1-based）");
+  const inline = typeof parsed.values.step === "string" ? parsed.values.step : undefined;
+  const fileArg = typeof parsed.values["step-file"] === "string" ? parsed.values["step-file"] : undefined;
+  if (inline === undefined && fileArg === undefined) throw usageError("需要 --step '<json>' 或 --step-file <文件>");
+  let step: unknown;
+  try {
+    step = JSON.parse(inline ?? fs.readFileSync(path.resolve(ctx.cwd, fileArg!), "utf-8"));
+  } catch (err) {
+    throw usageError(`step JSON 解析失败：${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (step === null || typeof step !== "object" || Array.isArray(step)) throw usageError("step 必须是 JSON 对象");
+  const { pack, file } = await editableApp(id);
+  const journey = [...(pack.journey ?? [])];
+  if (index > journey.length + 1) {
+    throw usageError(`--index ${index} 超出范围：当前 ${journey.length} 步（最多可追加到 ${journey.length + 1}）`);
+  }
+  journey[index - 1] = step as Record<string, unknown>;
+  const extraHosts = hostsOf(parsed.values.host).filter((h) => h !== "example.com" || (parsed.values.host !== undefined));
+  const nextPack = { ...pack, journey, ...(parsed.values.host === undefined ? {} : { hosts: [...new Set([...(pack.hosts ?? []), ...extraHosts])] }) };
+  const problems = validateApp(nextPack);
+  if (problems.length) {
+    const envelope = successEnvelope("apps set-step", { app: id, index, problems }, { exitCode: 2, next: [`amber apps show ${id}`] });
+    envelope.ok = false;
+    envelope.error = { code: "USAGE", message: "step 未通过校验，未写入", hint: problems.join("；"), next: [`amber apps show ${id}`] };
+    emitJson(ctx, envelope);
+    return 2;
+  }
+  writeEditable(file, nextPack);
+  const next = [`amber apps check ${id}`, `amber run ${id} --only-step ${index}`];
+  if (jsonWanted(ctx, parsed.values)) {
+    emitJson(ctx, successEnvelope("apps set-step", { app: id, index, path: file, steps: journey.length }, { next }));
+  } else {
+    say(ctx, `✓ 已更新 ${id} 第 ${index} 步（共 ${journey.length} 步）`);
+    for (const n of next) say(ctx, `    ${n}`);
+  }
+  return 0;
+}
+
+/** `amber apps set-invariant <id> --invariants-file <json>`：替换结束态验收条件。 */
+async function appsSetInvariant(args: string[], ctx: CliContext): Promise<number> {
+  const parsed = parseSimple(args, {
+    "invariants-file": { type: "string" }, invariant: { type: "string" },
+    json: { type: "boolean" }, help: { type: "boolean" },
+  });
+  if (parsed.values.help) {
+    say(ctx, "用法：amber apps set-invariant <id> --invariants-file <json> [--json]");
+    say(ctx, "  JSON 是数组：[{ id, desc, signal }]；signal 与 validateSignalSpec 同一套语法。");
+    return 0;
+  }
+  const id = parsed.positionals[0];
+  if (!id) throw usageError("apps set-invariant 需要应用 id", { next: ["amber apps list"] });
+  const inline = typeof parsed.values.invariant === "string" ? parsed.values.invariant : undefined;
+  const fileArg = typeof parsed.values["invariants-file"] === "string" ? parsed.values["invariants-file"] : undefined;
+  if (inline === undefined && fileArg === undefined) throw usageError("需要 --invariant '<json>' 或 --invariants-file <文件>");
+  let invariants: unknown;
+  try {
+    invariants = JSON.parse(inline ?? fs.readFileSync(path.resolve(ctx.cwd, fileArg!), "utf-8"));
+  } catch (err) {
+    throw usageError(`invariants JSON 解析失败：${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!Array.isArray(invariants)) throw usageError("invariants 必须是数组");
+  const { pack, file } = await editableApp(id);
+  const nextPack = { ...pack, invariants: invariants as AppPack["invariants"] };
+  const problems = validateApp(nextPack);
+  if (problems.length) throw usageError("invariants 未通过校验，未写入", { hint: problems.join("；") });
+  writeEditable(file, nextPack);
+  if (jsonWanted(ctx, parsed.values)) {
+    emitJson(ctx, successEnvelope("apps set-invariant", { app: id, path: file, invariants: invariants.length }, {
+      next: [`amber apps check ${id}`, `amber run ${id}`],
+    }));
+  } else {
+    say(ctx, `✓ 已更新 ${id} 的 ${invariants.length} 条验收条件`);
+  }
+  return 0;
+}
+
+/** `amber apps remove-step <id> --index N`：删除一步并校验。 */
+async function appsRemoveStep(args: string[], ctx: CliContext): Promise<number> {
+  const parsed = parseSimple(args, { index: { type: "string" }, json: { type: "boolean" }, help: { type: "boolean" } });
+  if (parsed.values.help) {
+    say(ctx, "用法：amber apps remove-step <id> --index N [--json]");
+    return 0;
+  }
+  const id = parsed.positionals[0];
+  if (!id) throw usageError("apps remove-step 需要应用 id", { next: ["amber apps list"] });
+  const index = Number(parsed.values.index);
+  if (!Number.isInteger(index) || index < 1) throw usageError("--index 需要正整数（1-based）");
+  const { pack, file } = await editableApp(id);
+  const journey = [...(pack.journey ?? [])];
+  if (index > journey.length) throw usageError(`--index ${index} 超出范围：当前 ${journey.length} 步`);
+  if (journey.length <= 1) throw usageError("不能删掉最后一步：应用至少保留一个步骤");
+  journey.splice(index - 1, 1);
+  const nextPack = { ...pack, journey };
+  const problems = validateApp(nextPack);
+  if (problems.length) throw usageError("删除后应用不合法", { hint: problems.join("；") });
+  writeEditable(file, nextPack);
+  if (jsonWanted(ctx, parsed.values)) {
+    emitJson(ctx, successEnvelope("apps remove-step", { app: id, removed: index, path: file, steps: journey.length }, {
+      next: [`amber apps check ${id}`, `amber run ${id}`],
+    }));
+  } else {
+    say(ctx, `✓ 已删除 ${id} 第 ${index} 步（剩 ${journey.length} 步）`);
+  }
+  return 0;
+}
+
+/** 生成最小 pack.json（可被程序直接读写；比 app.mjs 更容易做结构化编辑）。 */
+function hostsOf(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw.map(String) : typeof raw === "string" ? [raw] : [];
+  const hosts = list.map((h) => h.trim().toLowerCase()).filter(Boolean);
+  return hosts.length ? [...new Set(hosts)] : ["example.com"];
+}
+
+function packTemplate(id: string, hosts: string[] = ["example.com"], goal?: string): AppPack {
+  return {
+    spec_version: 1,
+    id,
+    label: id,
+    goal: goal ?? "把这条流程要达成的结果写清楚（一句话）",
+    hosts,
+    slots: {},
+    journey: [{
+      desc: "打开入口页",
+      start_url: "https://example.com",
+      target_hint: "h1",
+      signal: { url_contains: "example.com" },
+    }],
+    invariants: [{ id: "on-target", desc: "结束时确实在目标站", signal: { url_contains: "example.com" } }],
+  };
 }
 
 /** 生成 flow 骨架：普通 JS，循环/条件/重试直接写。 */
@@ -333,6 +509,12 @@ export async function runApps(args: string[], ctx: CliContext): Promise<number> 
       return appsList(rest, ctx);
     case "new":
       return appsNew(rest, ctx);
+    case "set-step":
+      return appsSetStep(rest, ctx);
+    case "remove-step":
+      return appsRemoveStep(rest, ctx);
+    case "set-invariant":
+      return appsSetInvariant(rest, ctx);
     case "show":
       return appsShow(rest, ctx);
     case "check":
@@ -348,7 +530,7 @@ export async function runApps(args: string[], ctx: CliContext): Promise<number> 
       return appsRemove(rest, ctx);
     default:
       throw usageError(`未知的 apps 子命令 '${sub}'`, {
-        hint: "可用：list / new / show / check / explain / emit / path / remove",
+        hint: "可用：list / new / show / check / explain / emit / path / remove / set-step / remove-step / set-invariant",
         next: ["amber apps --help"],
       });
   }

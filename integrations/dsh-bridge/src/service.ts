@@ -12,8 +12,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  diagnoseFailure, flowRunArgs, learnArgs, listApps as listAppSummaries, parseSource, planArgs,
-  pruneRunDirs, runArgs, runProcess, summarizeFlow, summarizeLearn, summarizePlan, summarizeRun,
+  cliArgs, diagnoseFailure, flowRunArgs, learnArgs, listApps as listAppSummaries, parseJsonDocument,
+  parseSource, planArgs, pruneRunDirs, runArgs, runProcess, summarizeFlow, summarizeLearn,
+  summarizePlan, summarizeRun,
   type AppSummary, type BridgeOptions, type LearnSummary, type PlanSummary, type RunSummary,
 } from './bridge.ts'
 
@@ -57,6 +58,14 @@ export interface AmberFlowRunArgs {
   tieredHint?: boolean
   /** Values for declared slots. */
   slots?: Record<string, string>
+  /** 分段运行：只跑第 N 步（1-based）。 */
+  onlyStep?: number
+  /** 分段运行：从第 N 步开始（1-based）。 */
+  fromStep?: number
+  /** 分段运行：本段最多几步。 */
+  maxSteps?: number
+  /** 结果里带逐步骤 trace。 */
+  trace?: boolean
 }
 
 /** One `learn` call, mirroring the `…_learn` tool parameters with camelCase names. */
@@ -108,6 +117,109 @@ export interface AmberFlowPlanArgs {
 /**
  * What another plugin can call. Every method is the exact code path the corresponding tool runs.
  */
+/** One CLI JSON envelope's data field (shape owned by the command, not the bridge). */
+export type CliData = Record<string, any>
+
+export interface AmberFlowInspectArgs {
+  url: string
+  maxElements?: number
+  includeText?: boolean
+  headful?: boolean
+}
+
+export interface AmberFlowOnlineArgs {
+  action: 'list' | 'validate' | 'run'
+  tier?: string
+  case?: string
+  site?: string
+  headful?: boolean
+  requireAll?: boolean
+}
+
+export interface AmberFlowCreateArgs {
+  id: string
+  goal?: string
+  hosts?: string[]
+}
+
+export interface AmberFlowSetStepArgs {
+  app: string
+  index: number
+  step: Record<string, unknown>
+  hosts?: string[]
+}
+
+export interface AmberFlowRemoveStepArgs {
+  app: string
+  index: number
+}
+
+export interface AmberFlowSetInvariantArgs {
+  app: string
+  invariants: Array<Record<string, any>>
+}
+
+/** One `…_status` call: environment/model/browser facts, already masked by the CLI. */
+export interface AmberFlowStatus {
+  ok: boolean
+  node: CliData
+  chromium: CliData
+  model: CliData
+  provider: CliData
+  llm: CliData
+}
+
+/** One `…_app_show` call: the declaration an Agent edits against. */
+export interface AmberFlowAppDetail {
+  app: string
+  label: string
+  goal: string
+  path: string
+  source: string
+  mode?: string
+  hosts: string[]
+  slots: Record<string, any>
+  required_slots: string[]
+  journey: Array<Record<string, any>>
+  invariants: Array<Record<string, any>>
+  sites?: string[]
+}
+
+/** One `…_app_check` call. */
+export interface AmberFlowAppCheck {
+  ok: boolean
+  checked: number
+  results: Array<{ app: string; path: string; problems: string[] }>
+}
+
+/** One `…_inspect` call: bounded page observation. */
+export interface AmberFlowInspect {
+  ok: boolean
+  url: string
+  title: string
+  elements: Array<Record<string, any>>
+  element_count: number
+  truncated: boolean
+  text?: string
+  screenshot_path?: string
+}
+
+/** One `…_online` call. */
+export interface AmberFlowOnline {
+  ok: boolean
+  action: string
+  tier?: string
+  sites?: number
+  cases?: number
+  valid?: boolean
+  passed?: number
+  failed?: number
+  skipped?: number
+  evidence_dir?: string
+  cases_detail?: Array<Record<string, any>>
+  reason?: string
+}
+
 export interface AmberFlowService {
   /**
    * List the declared apps.
@@ -136,6 +248,24 @@ export interface AmberFlowService {
    * @returns the plan summary (status, steps with signal provenance, written paths).
    */
   plan(args: AmberFlowPlanArgs): Promise<PlanSummary>
+  /** Environment/model/browser status, no secrets. */
+  status(): Promise<AmberFlowStatus>
+  /** Full declaration of one app (steps/invariants/hosts). */
+  appShow(app: string): Promise<AmberFlowAppDetail>
+  /** Static validation of one app; no browser. */
+  appCheck(app: string): Promise<AmberFlowAppCheck>
+  /** Read-only page observation. */
+  inspect(args: AmberFlowInspectArgs): Promise<AmberFlowInspect>
+  /** List/validate/run the real-site suite. */
+  online(args: AmberFlowOnlineArgs): Promise<AmberFlowOnline>
+  /** Create a data-pack app skeleton. */
+  createApp(args: AmberFlowCreateArgs): Promise<AmberFlowAppDetail>
+  /** Atomically replace one journey step and validate. */
+  setStep(args: AmberFlowSetStepArgs): Promise<AmberFlowAppDetail>
+  /** Replace end-state invariants and validate. */
+  setInvariant(args: AmberFlowSetInvariantArgs): Promise<AmberFlowAppDetail>
+  /** Remove one journey step and validate. */
+  removeStep(args: AmberFlowRemoveStepArgs): Promise<AmberFlowAppDetail>
 }
 
 /** One temp run directory per call, so artifacts never collide between sessions. */
@@ -217,6 +347,11 @@ export async function runApp(
     ...(args.allowDangerous === undefined ? {} : { dangerous: args.allowDangerous }),
     ...(args.confirmSafe === undefined ? {} : { confirmSafe: args.confirmSafe }),
     ...(args.tieredHint === undefined ? {} : { tieredHint: args.tieredHint }),
+    ...(args.onlyStep === undefined ? {} : { onlyStep: args.onlyStep }),
+    ...(args.fromStep === undefined ? {} : { fromStep: args.fromStep }),
+    ...(args.maxSteps === undefined ? {} : { maxSteps: args.maxSteps }),
+    trace: args.trace ?? true,
+    manualFailFast: true,
     ...(args.slots === undefined ? {} : { slots: args.slots }),
   }))
   return { summary: summarizeRun(outDir, args.app, outcome, `${options.toolPrefix}_run`), outDir }
@@ -313,6 +448,196 @@ export async function plan(
   }
 }
 
+function record(value: unknown): CliData {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as CliData
+    : {}
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : []
+}
+
+function records(value: unknown): CliData[] {
+  return Array.isArray(value) ? value.map(record) : []
+}
+
+/** Run one `amber … --json` command and return its envelope. Throws only when the CLI emitted none. */
+async function cliJson(options: BridgeOptions, args: string[]): Promise<CliData> {
+  const outcome = await runProcess(options, cliArgs(options, args))
+  const doc = parseJsonDocument(parseSource(outcome))
+  if (doc === null) {
+    throw new Error(diagnoseFailure('amber ' + args.join(' '), outcome))
+  }
+  return doc
+}
+
+function dataOf(doc: CliData): CliData {
+  return record(doc['data'])
+}
+
+function ensureOk(doc: CliData, what: string): CliData {
+  if (doc['ok'] === true) return doc
+  const e = record(doc['error'])
+  const msg = String(e['message'] ?? 'command failed')
+  const hint = typeof e['hint'] === 'string' && e['hint'] !== '' ? `: ${e['hint']}` : ''
+  throw new Error(`${what}: ${msg}${hint}`)
+}
+
+function detailOf(d: CliData): AmberFlowAppDetail {
+  const pack = record(d['pack'])
+  return {
+    app: String(d['app'] ?? pack['id'] ?? ''),
+    label: String(d['label'] ?? pack['label'] ?? ''),
+    goal: String(d['goal'] ?? pack['goal'] ?? ''),
+    path: String(d['path'] ?? ''),
+    source: String(d['source'] ?? ''),
+    ...(typeof d['mode'] === 'string' ? { mode: d['mode'] } : {}),
+    hosts: strings(pack['hosts']),
+    slots: record(pack['slots']),
+    required_slots: strings(pack['required_slots']),
+    journey: Array.isArray(pack['journey']) ? pack['journey'] : [],
+    invariants: Array.isArray(pack['invariants']) ? pack['invariants'] : [],
+    ...(Array.isArray(pack['sites']) ? { sites: strings(pack['sites']) } : {}),
+  }
+}
+
+/** Environment/model/browser facts (doctor's JSON data). */
+export async function status(options: BridgeOptions): Promise<AmberFlowStatus> {
+  const doc = await cliJson(options, ['doctor', '--json'])
+  const d = dataOf(doc)
+  return {
+    ok: doc['ok'] === true,
+    node: record(d['node']),
+    chromium: record(d['chromium']),
+    model: record(d['model']),
+    provider: record(d['provider']),
+    llm: record(d['llm']),
+  }
+}
+
+/** The full declaration of one app, for an Agent that wants to edit a step. */
+export async function appShow(options: BridgeOptions, app: string): Promise<AmberFlowAppDetail> {
+  const doc = await cliJson(options, ['apps', 'show', app, '--json'])
+  ensureOk(doc, 'app_show')
+  return detailOf(dataOf(doc))
+}
+
+/** Static validation of one app; no browser. */
+export async function appCheck(options: BridgeOptions, app: string): Promise<AmberFlowAppCheck> {
+  const doc = await cliJson(options, ['apps', 'check', app, '--json'])
+  const d = dataOf(doc)
+  return {
+    ok: d['ok'] === true,
+    checked: Number(d['checked'] ?? 0),
+    results: records(d['results']).map((r) => ({
+      app: String(r['app'] ?? ''),
+      path: String(r['path'] ?? ''),
+      problems: strings(r['problems']),
+    })),
+  }
+}
+
+/** Read-only page observation. */
+export async function inspect(options: BridgeOptions, args: AmberFlowInspectArgs): Promise<AmberFlowInspect> {
+  const argv = ['inspect', '--url', args.url, '--json']
+  if (args.maxElements !== undefined) argv.push('--max-elements', String(args.maxElements))
+  if (args.includeText === true) argv.push('--text')
+  if (args.headful === true) argv.push('--headed')
+  const doc = await cliJson(options, argv)
+  const d = dataOf(doc)
+  return {
+    ok: doc['ok'] === true,
+    url: String(d['url'] ?? args.url),
+    title: String(d['title'] ?? ''),
+    elements: records(d['elements']),
+    element_count: Number(d['element_count'] ?? 0),
+    truncated: d['truncated'] === true,
+    ...(typeof d['text'] === 'string' ? { text: d['text'] } : {}),
+    ...(typeof d['screenshot_path'] === 'string' ? { screenshot_path: d['screenshot_path'] } : {}),
+  }
+}
+
+/** List/validate/run the real-site suite through the same CLI JSON contract. */
+export async function online(options: BridgeOptions, args: AmberFlowOnlineArgs): Promise<AmberFlowOnline> {
+  if (args.action === 'validate') {
+    const doc = await cliJson(options, ['online', '--validate', '--json'])
+    const d = doc
+    return { ok: doc['ok'] === true, action: 'validate', sites: Number(d['sites'] ?? 0), cases: Number(d['cases'] ?? 0), valid: d['valid'] === true }
+  }
+  if (args.action === 'list') {
+    const argv = ['online', '--list', '--json']
+    if (args.tier !== undefined) argv.push('--tier', args.tier)
+    const doc = await cliJson(options, argv)
+    const d = doc
+    return { ok: true, action: 'list', ...(typeof d['tier'] === 'string' ? { tier: d['tier'] } : {}), cases_detail: records(d['cases']) }
+  }
+  const argv = ['online', '--json']
+  if (args.tier !== undefined) argv.push('--tier', args.tier)
+  if (args.case !== undefined) argv.push('--case', args.case)
+  if (args.site !== undefined) argv.push('--site', args.site)
+  if (args.headful === true) argv.push('--headed')
+  if (args.requireAll === true) argv.push('--require-all')
+  const doc = await cliJson(options, argv)
+  const d = doc
+  const failed = Number(d['failed'] ?? 0)
+  const skipped = Number(d['skipped'] ?? 0)
+  return {
+    ok: failed === 0 && (skipped === 0 || args.requireAll !== true),
+    action: 'run',
+    ...(typeof d['tier'] === 'string' ? { tier: d['tier'] } : {}),
+    passed: Number(d['passed'] ?? 0),
+    failed,
+    skipped,
+    ...(typeof d['evidence_dir'] === 'string' ? { evidence_dir: d['evidence_dir'] } : {}),
+    cases_detail: records(d['cases']),
+    ...(typeof d['reason'] === 'string' ? { reason: d['reason'] } : {}),
+  }
+}
+
+/** Create a data-pack app skeleton (the only writable app form through the bridge). */
+export async function createApp(options: BridgeOptions, args: AmberFlowCreateArgs): Promise<AmberFlowAppDetail> {
+  const argv = ['apps', 'new', args.id, '--format', 'pack', '--json']
+  if (args.goal !== undefined) argv.push('--goal', args.goal)
+  for (const host of args.hosts ?? []) argv.push('--host', host)
+  ensureOk(await cliJson(options, argv), 'app_create')
+  return appShow(options, args.id)
+}
+
+/** Replace one journey step atomically; invalid input writes nothing. */
+export async function setStep(options: BridgeOptions, args: AmberFlowSetStepArgs): Promise<AmberFlowAppDetail> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-amberflow-edit-'))
+  const file = path.join(dir, 'step.json')
+  try {
+    fs.writeFileSync(file, JSON.stringify(args.step, null, 2), 'utf-8')
+    const argv = ['apps', 'set-step', args.app, '--index', String(args.index), '--step-file', file, '--json']
+    for (const host of args.hosts ?? []) argv.push('--host', host)
+    ensureOk(await cliJson(options, argv), 'app_set_step')
+    return appShow(options, args.app)
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ }
+  }
+}
+
+/** Replace the end-state invariants; invalid input writes nothing. */
+export async function setInvariant(options: BridgeOptions, args: AmberFlowSetInvariantArgs): Promise<AmberFlowAppDetail> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-amberflow-inv-'))
+  const file = path.join(dir, 'invariants.json')
+  try {
+    fs.writeFileSync(file, JSON.stringify(args.invariants, null, 2), 'utf-8')
+    ensureOk(await cliJson(options, ['apps', 'set-invariant', args.app, '--invariants-file', file, '--json']), 'app_set_invariant')
+    return appShow(options, args.app)
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ }
+  }
+}
+
+/** Remove one journey step (the app must keep at least one). */
+export async function removeStep(options: BridgeOptions, args: AmberFlowRemoveStepArgs): Promise<AmberFlowAppDetail> {
+  ensureOk(await cliJson(options, ['apps', 'remove-step', args.app, '--index', String(args.index), '--json']), 'app_remove_step')
+  return appShow(options, args.app)
+}
+
 /**
  * Build the service for one deployment.
  * @param options - resolved bridge options.
@@ -336,6 +661,15 @@ export function createService(options: BridgeOptions): AmberFlowService {
     plan(args) {
       return plan(options, args)
     },
+    status() { return status(options) },
+    appShow(app) { return appShow(options, app) },
+    appCheck(app) { return appCheck(options, app) },
+    inspect(args) { return inspect(options, args) },
+    online(args) { return online(options, args) },
+    createApp(args) { return createApp(options, args) },
+    setStep(args) { return setStep(options, args) },
+    setInvariant(args) { return setInvariant(options, args) },
+    removeStep(args) { return removeStep(options, args) },
   }
 }
 

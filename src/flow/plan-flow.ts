@@ -1027,7 +1027,16 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(msg);
-    if (v.json) console.log(JSON.stringify({ status: "failed", error: msg }, null, 2));
+    if (v.json) {
+      const blocked = msg.split("\n").slice(1)
+        .filter((line) => line.startsWith("  - ")).map((line) => line.slice(4));
+      const gate = /replay gate FAILED — nothing was written: ([^\n]+)/.exec(msg)?.[1];
+      console.log(JSON.stringify({
+        status: "failed", error: msg,
+        ...(gate === undefined ? {} : { gate }),
+        ...(blocked.length ? { blocked } : {}),
+      }, null, 2));
+    }
     return 1;
   }
 }

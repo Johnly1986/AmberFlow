@@ -115,6 +115,14 @@ export const APP_ONLY_OPTIONS: CliOptions = {
   list: { type: "boolean" },
   app: { type: "string" },
   dry: { type: "boolean" },
+  /** 结果里带每步执行证据（step_traces）；不执行额外页面扫描。 */
+  trace: { type: "boolean" },
+  /** 分段运行（1-based，声明步骤序号；与 --from-step 互斥）。 */
+  "only-step": { type: "string" },
+  "from-step": { type: "string" },
+  "max-steps": { type: "string" },
+  /** 非交互：遇到 manual 步直接返回 needs_human，不拉 headed 浏览器。 */
+  "manual-fail-fast": { type: "boolean" },
   slot: { type: "string", multiple: true },
   "no-sources": { type: "boolean" },
   "confirm-safe": { type: "boolean" },

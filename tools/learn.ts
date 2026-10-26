@@ -644,7 +644,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       app: id, url: learning.url, goal: finalGoal, steps: learning.steps.length,
       signals: learning.steps.map((s) => s.signal),
       invariants: learning.invariants.map((i) => ({ id: i.id, signal: i.signal })),
-      replay: { ok: replay.ok, forwards: replay.forwards, completed: replay.completed, invariants: replay.invariants },
+      replay: { ok: replay.ok, forwards: replay.forwards, completed: replay.completed, invariants: replay.invariants, failing: replay.failing },
       verified,
       saved: false as boolean | string,
     };

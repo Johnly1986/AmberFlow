@@ -201,6 +201,10 @@ async function dispatch(command: string, rest: string[], ctx: CliContext, rawRes
       const { runApps } = await import("./commands/apps.ts");
       return runApps(rest, ctx);
     }
+    case "inspect": {
+      const { runInspect } = await import("./commands/inspect.ts");
+      return runInspect(rest, ctx);
+    }
     case "doctor": {
       const { runDoctor } = await import("./commands/doctor.ts");
       return runDoctor(rest, ctx);

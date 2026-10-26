@@ -538,6 +538,11 @@ export function runArgs(
     confirmSafe?: boolean
     /** P1 experiment: narrowed model question for an ambiguous-in-tier hint (engine `--tiered-hint`). */
     tieredHint?: boolean
+    onlyStep?: number
+    fromStep?: number
+    maxSteps?: number
+    trace?: boolean
+    manualFailFast?: boolean
     slots?: Record<string, string>
   },
 ): string[] {
@@ -556,6 +561,11 @@ export function runArgs(
   if (args.dangerous) argv.push('--allow-dangerous')
   if (args.confirmSafe) argv.push('--confirm-safe')
   if (args.tieredHint) argv.push('--tiered-hint')
+  if (args.onlyStep !== undefined) argv.push('--only-step', String(args.onlyStep))
+  if (args.fromStep !== undefined) argv.push('--from-step', String(args.fromStep))
+  if (args.maxSteps !== undefined) argv.push('--max-steps', String(args.maxSteps))
+  if (args.trace) argv.push('--trace')
+  if (args.manualFailFast) argv.push('--manual-fail-fast')
   for (const [key, value] of Object.entries(args.slots ?? {})) argv.push('--slot', `${key}=${value}`)
   return argv
 }
@@ -827,6 +837,18 @@ export interface RunSummary {
   invariants: { held: number; total: number; failed: string[] }
   /** The expanded steps of a dry run (bounded by {@link MAX_PLAN_STEPS}); empty otherwise. */
   plan: PlanStep[]
+  /** 本次运行的模型可见状态：passed/partial/failed/blocked/dry/needs_human。 */
+  status?: string
+  /** 完整旅程 + 不变量成立；分段/停止/dry 为 false。 */
+  verified?: boolean
+  /** 本次只跑了分段（only/from/max）。 */
+  partial?: boolean
+  /** 固定结果 JSON 的路径；Agent 需要详细步骤时读它。 */
+  resultPath?: string
+  /** 有界的逐步骤视图（失败/完成都可读）。 */
+  steps?: Array<{ index: number; desc: string; status: string; method?: string; stop_code?: string; obstacle?: string }>
+  /** 第一个失败步骤的结构化原因。 */
+  failure?: { step: number; desc: string; stop_code?: string; obstacle?: string }
   /** Total expanded steps of a dry run; 0 otherwise. */
   planSteps: number
   outDir: string
@@ -872,6 +894,8 @@ export interface PlanSummary {
   steps: { id: string; desc: string; signal_source: string }[]
   /** The gate run's tally line — same shape as {@link RunSummary.line}. */
   gate: string
+  /** Blocked steps when the replay gate failed; absent when no gate diagnostics were produced. */
+  blocked?: string[]
   /** Absolute paths once written; '' when the plan wrote nothing (a failed gate never does). */
   templatePath: string
   profilePath: string
@@ -973,7 +997,7 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
         blocked: [], blockedTotal: 0, refused: [], failedTools: [],
         invariants: { held: 0, total: 0, failed: [] },
         plan: plan.steps.slice(0, MAX_PLAN_STEPS), planSteps: plan.steps.length,
-        outDir, reportPath: '', stdoutTail: outcome.stdout, timedOut: false,
+        outDir, reportPath: '', stdoutTail: outcome.stdout, timedOut: false, status: 'dry', verified: false,
         ...(plan.model === undefined ? {} : { model: plan.model }),
       }
     }
@@ -1020,6 +1044,31 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
     .filter(t => t['done'] !== true && asText(t['refused']) === '')
     .map(t => `${asText(t['desc'])}: signal not held (exit ${asText(t['code'], '?')})`)
   const invariants = asRecords(raw['invariants'])
+  const traces = asRecords(raw['step_traces'])
+  const rawSteps = traces.length ? traces : subgoals
+  const subgoalMeta = new Map(subgoals.map((sg, i) => [i + 1, sg]))
+  const steps = rawSteps.slice(0, 20).map((st, i) => {
+    const methods = Array.isArray(st['methods']) ? st['methods'].map(String).filter(Boolean) : []
+    const status = asText(st['status'], 'unknown')
+    const index = typeof st['index'] === 'number' ? (traces.length ? st['index'] + 1 : st['index']) : i + 1
+    const meta = subgoalMeta.get(index) ?? {}
+    const stop = asText(st['stop_code']) || asText(meta['stop_code'])
+    const obstacle = asText(st['obstacle']) || asText(meta['obstacle'])
+    return {
+      index,
+      desc: asText(st['desc'], `step ${i + 1}`),
+      status,
+      ...(methods.length ? { method: methods[methods.length - 1]! } : {}),
+      ...(stop !== '' ? { stop_code: stop } : {}),
+      ...(obstacle !== '' ? { obstacle } : {}),
+    }
+  })
+  const failed = steps.find(st => st.status === 'blocked' || st.status === 'failed' || st.status === 'refused')
+  const partial = raw['partial'] === true
+  const manualPending = asRecords(raw['manual_steps']).some(m => m['done'] !== true)
+  const status = manualPending ? 'needs_human'
+    : partial ? 'partial' : raw['ok'] === true && outcome.code === 0 ? 'passed'
+    : blocked.length ? 'blocked' : failedTools.length ? 'failed' : invariants.some(i => i['held'] !== true) ? 'failed' : 'failed'
   return {
     ok: raw['ok'] === true && outcome.code === 0,
     exitCode: outcome.code,
@@ -1037,6 +1086,12 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
     plan: [],
     planSteps: 0,
     outDir,
+    resultPath,
+    status,
+    verified: partial ? false : raw['ok'] === true && outcome.code === 0,
+    ...(partial ? { partial: true } : {}),
+    steps,
+    ...(failed ? { failure: { step: failed.index, desc: failed.desc, ...(failed.stop_code ? { stop_code: failed.stop_code } : {}), ...(failed.obstacle ? { obstacle: failed.obstacle } : {}) } } : {}),
     // Only name a report that is really there: a killed run can leave the artifact without one, and
     // a path the caller cannot open is worse than saying so.
     reportPath: fs.existsSync(path.join(outDir, `${app}-report.md`))
@@ -1084,6 +1139,8 @@ export interface LearnSummary {
   forwards: number
   completed: string
   invariants: string
+  /** Invariant ids that failed on the rules-only replay (why `saved` is false). */
+  problems?: string[]
   /** Where the pack was written; absolute once it passed through the service, `false` when not saved. */
   saved: string | false
 }
@@ -1109,6 +1166,8 @@ export function summarizeLearn(stdout: string): LearnSummary {
     forwards: asNumber(replay['forwards'], -1),
     completed: asText(replay['completed']),
     invariants: asText(replay['invariants']),
+    ...(Array.isArray(replay['failing']) && (replay['failing'] as unknown[]).length
+      ? { problems: (replay['failing'] as unknown[]).map(String) } : {}),
     saved: typeof saved === 'string' && saved !== '' ? saved : false,
   }
 }
@@ -1188,6 +1247,15 @@ export function summarizeFlow(
     plan: [],
     planSteps: 0,
     outDir,
+    resultPath,
+    status: raw['ok'] === true && outcome.code === 0 ? 'passed' : 'failed',
+    verified: raw['ok'] === true && outcome.code === 0,
+    steps: steps.slice(0, 20).map((st, i) => ({
+      index: typeof st['index'] === 'number' ? st['index'] + 1 : i + 1,
+      desc: asText(st['desc'], `step ${i + 1}`),
+      status: asText(st['status'], 'unknown'),
+      ...(asText(st['obstacle']) !== '' ? { obstacle: asText(st['obstacle']) } : {}),
+    })),
     reportPath: fs.existsSync(path.join(outDir, `${app}-${site}-flow-report.md`))
       ? path.join(outDir, `${app}-${site}-flow-report.md`)
       : '',
@@ -1233,8 +1301,24 @@ export function summarizePlan(stdout: string): PlanSummary {
       id: asText(s['id']), desc: asText(s['desc']), signal_source: asText(s['signal_source']),
     })),
     gate: asText(doc['gate']),
+    ...(Array.isArray(doc['blocked']) && (doc['blocked'] as unknown[]).length
+      ? { blocked: (doc['blocked'] as unknown[]).map(String) } : {}),
     templatePath: typeof written?.['flow'] === 'string' ? written['flow'] : '',
     profilePath: typeof written?.['profile'] === 'string' ? written['profile'] : '',
     error: asText(doc['error']),
   }
+}
+
+/**
+ * The argv for one `amber` CLI call (JSON door). The bridge only adapts; all command semantics
+ * live in the checkout's CLI, so a tool can never drift into a second implementation.
+ */
+export function cliArgs(options: BridgeOptions, args: string[]): string[] {
+  return [
+    options.nodeBin,
+    ...(options.tsxCli !== undefined ? [options.tsxCli] : []),
+    '--experimental-strip-types',
+    path.join(options.repoPath, 'src', 'cli', 'main.ts'),
+    ...args,
+  ]
 }

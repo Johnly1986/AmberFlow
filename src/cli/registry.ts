@@ -24,6 +24,7 @@ export const GLOBAL_USAGE = `AmberFlow — 冻结计划的浏览器自动化
   record    演示一次，生成应用
   plan      创建 / 编辑 / 校验计划
   apps      列出 / 查看 / 校验应用
+  inspect   只读观察页面元素与候选 hint
   doctor    环境、配置、决策源体检
   config    查看 / 修改机器配置
   model     本地决策模型状态与安装
@@ -68,6 +69,10 @@ amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]`,
       "--provider <名字>         仅本次实验/消融覆盖；默认三件套或本地模型",
       "--skip-data               跳过数据腿（旧 --no-sources）",
       "--allow-dangerous         放行危险工具步；不带则结构化拒绝并 exit 3",
+      "--only-step N             只跑第 N 步（1-based；声明式应用）",
+      "--from-step N             从第 N 步开始（1-based）",
+      "--max-steps N             本段最多执行几步",
+      "--trace                   结果 JSON 带每步执行证据（step_traces）",
       "--emit-trace <文件>       脚本应用：把本次执行轨迹（三个 sha + 逐次 ctx 调用）写成文件",
       "--replay <文件>           脚本应用：按已记录轨迹重放（版本/槽位不一致直接拒跑）",
       "--remember                开启学习环 sidecar（旧 --learn-hints）",
@@ -137,17 +142,26 @@ amber plan run [--plan <文件>] [--reset] [--replan] [--confirm allow|ask|deny]
     summary: "列出 / 查看 / 校验应用",
     usage: `amber apps list [--json]
 amber apps show <应用> [--json]
-amber apps new <id> [--kind flow|data] [--dir <目录>] [--force] [--print] [--json]
+amber apps new <id> [--kind flow|data] [--format app|pack] [--host HOST] [--dir <目录>] [--force] [--print] [--json]
 amber apps check [<应用|脚本>] [--json]
 amber apps explain <脚本> [--json]
 amber apps emit <脚本> [--out <文件>] [--json]
 amber apps path <应用>
+amber apps set-step <应用> --index N --step-file <json> [--host HOST]
+amber apps set-invariant <应用> --invariants-file <json>
+amber apps remove-step <应用> --index N
 amber apps remove <应用> [--yes] [--force]`,
     examples: ["amber apps list", "amber apps check $AMBERFLOW_HOME/apps/my-app/app.mjs",
       "amber apps explain $AMBERFLOW_HOME/apps/my-app/app.mjs",
       "amber apps emit $AMBERFLOW_HOME/apps/my-app/app.mjs --out /tmp/my-app.json"],
     flags: [
       "--kind flow|data           apps new 的形态：flow=运行期控制流（默认）；data=声明式数据脚本",
+      "--format app|pack          apps new 的落盘格式：app=app.mjs；pack=pack.json（便于结构化编辑）",
+      "--host HOST                apps new / set-step 的允许主机；可重复",
+      "--index N                  set-step / remove-step 的 1-based 步骤序号",
+      "--step-file <json>         set-step 的步骤 JSON 文件（desc/start_url/target_hint/signal…）",
+      "--invariants-file <json>   set-invariant 的验收条件数组",
+      "--goal <一句话>            apps new 的目标（pack 格式）",
       "--dir <目录>               apps new 的落点（默认 $AMBERFLOW_HOME/apps/<id>）",
       "--force                    apps new 允许覆盖已存在的 app.mjs",
       "--print                    apps new 只打印源码、不落盘",
@@ -157,6 +171,25 @@ amber apps remove <应用> [--yes] [--force]`,
       "--force                   允许删除内置应用（危险）",
     ],
     related: ["run", "record"],
+  },
+  {
+    name: "inspect",
+    summary: "只读观察页面元素与候选 hint",
+    usage: 'amber inspect --url <http(s) URL> [--max-elements N] [--text] [--screenshot FILE] [--headed] [--json]',
+    examples: [
+      "amber inspect --url https://books.toscrape.com/ --json",
+      'amber inspect --url https://quotes.toscrape.com/login --text',
+    ],
+    flags: [
+      "--url <URL>               必填；只接受 http(s)",
+      "--max-elements N          默认 60，最多 200",
+      "--text                    附带截断后的正文摘要",
+      "--screenshot FILE         写一张当前视口截图（路径，不内联）",
+      "--timeout MS              导航超时，默认 30000",
+      "--headed                  显示浏览器窗口",
+      "--json                    输出 JSON envelope",
+    ],
+    related: ["run", "apps", "doctor"],
   },
   {
     name: "doctor",

@@ -139,11 +139,12 @@ CLI JSON（唯一契约）
 DSH bridge（薄适配：拼 argv、解析 JSON、投影有界摘要）
 ```
 
-新增一个共享的 **Agent 视图模块**，避免 CLI 和桥各写一份摘要：
+新增 **Agent 视图模块**，避免 CLI 和桥各自定义状态语义：
 
 - `src/app/agent-view.ts`（新）
   - `toAgentRunView(result, paths)`：把 `AppRunResult` 投影成稳定、有界的 `status/steps/failure/artifacts`
-  - CLI 的 `--json` 和桥的 summarize 都调用它
+  - CLI 的 `--json` 直接调用它；桥在自己的 `summarizeRun` 里按同一组字段投影（桥是独立包，
+    不跨 rootDir import；两边都以 `AppRunResult` + result JSON 为唯一真相）
 
 ---
 
@@ -202,6 +203,7 @@ passed | partial | failed | blocked | invalid | skipped | needs_human | infra_er
 | `amberflow_app_create` | `amber apps new --format pack` | 创建数据型应用骨架 |
 | `amberflow_app_set_step` | `amber apps set-step` | 原子增改一个步骤并校验 |
 | `amberflow_app_remove_step` | `amber apps remove-step` | 删除一个步骤并 reindex |
+| `amberflow_app_set_invariant` | `amber apps set-invariant` | 替换结束态验收条件 |
 | `amberflow_manual_resume` | `amber run --resume <session>` | 人工步骤完成后继续 |
 
 #### P2
@@ -354,6 +356,7 @@ passed | partial | failed | blocked | invalid | skipped | needs_human | infra_er
    - 用 `packToScriptSource` 写回；临时文件 + rename；失败回滚并报 problems。
    - 只允许 `mode=declarative`；flow 脚本拒绝并指路到文件系统。
 3. `amber apps remove-step`：删除 + 重排 index；至少保留一步。
+4. `amber apps set-invariant`：替换验收条件并校验。
 4. 桥新增 `_app_create` / `_app_set_step` / `_app_remove_step`，每个写入后自动 `_app_check`，失败返回 `invalid` 和 problems。
 
 验收：
@@ -367,9 +370,9 @@ passed | partial | failed | blocked | invalid | skipped | needs_human | infra_er
 1. 桥新增 `_online`：`list/validate/run`，输出 `tier/passed/failed/skipped/evidencePath/cases[]`。
 2. `amber online` 的 `--list/--validate` JSON 已就绪；补 `cases[]` 的 `goal/subgoals/invariants`。
 3. 人工步：
-   - `run` 返回 `status=needs_human`、`instructions`、`url`、`sessionDir`。
-   - `run --resume <sessionDir>` 从人工步之后继续。
-   - 不自动过、不伪造 TTY。
+   - 非交互调用遇到 manual 步直接返回 `status=needs_human` + result/report 路径，不启动浏览器。
+   - 不自动过、不伪造 TTY；人工在终端跑 `amber run` 完成。
+   - 跨进程 `--resume` 不做（见 §10 的设计边界）。
 4. `_learn` / `_plan` 失败时补 `problems` / `blocked_steps` / `gate`，仍保持“不通过不落盘”。
 
 ---
@@ -380,9 +383,9 @@ passed | partial | failed | blocked | invalid | skipped | needs_human | infra_er
 |---|---|
 | `src/support/cli-args.ts` | 增加 segment/trace 旗标 |
 | `src/app/app-runner.ts` | RunSegment、段内循环、partial/verified、结果字段 |
-| `src/app/agent-view.ts` | 新：统一 Agent 运行视图 |
+| `src/app/agent-view.ts` | 新：CLI Agent 运行视图（桥按同一字段契约投影） |
 | `src/cli/commands/inspect.ts` | 新：只读页面观察 |
-| `src/cli/commands/apps.ts` | `set-step` / `remove-step` / `new --format pack` |
+| `src/cli/commands/apps.ts` | `set-step` / `remove-step` / `set-invariant` / `new --format pack` |
 | `src/cli/registry.ts` | 注册 `inspect`、新 flags、帮助文案 |
 | `src/cli/main.ts` | dispatch `inspect` |
 | `src/cli/online.ts` | list/validate JSON（已完成） |
@@ -458,3 +461,28 @@ Phase 5 online / 人工交接  ← 最后补回归与真实登录
 ```
 
 原则：**先暴露，后新增；先只读，后写入；先 CLI，后桥。**
+
+---
+
+## 10. 落地状态（2026-10-27）
+
+已落地并通过真实站点/DSH 工具验证：
+
+- Phase 0：`online --list/--validate --json`、帮助退出码一致性。
+- Phase 1：`agent-view.ts`；`amber run --json` 与桥的 `status/verified/partial/steps/failure/artifacts`；
+  `_status` / `_app_show` / `_app_check`；`resultPath/outDir`。
+- Phase 2：`amber inspect` + `suggestHints` + `_inspect`；在 books/quotes 等真实页面通过。
+- Phase 3：`RunSegment`（`only_step/from_step/max_steps`）与 `partial/verified/segment`；
+  CLI 与桥同名参数；未执行的段外步骤在结果中标 `skipped`，不再误报 blocked。
+- Phase 4：`apps new --format pack`、`apps set-step`、`apps remove-step`、`apps set-invariant`；
+  桥的 `_app_create` / `_app_set_step` / `_app_set_invariant` / `_app_remove_step`。
+- Phase 5：`_online`（list/validate/run）；`_learn` 回放失败返回 failed invariants；
+  `_plan` 失败返回 gate + blocked steps；人工步在非交互调用中直接返回 `status=needs_human`
+  （不拉 headed 浏览器、不自动过、不假装有人在）。
+
+P2 设计边界（有意不做，不属于“未完成”）：
+
+- 人工步的跨进程 `--resume` 不做：没有人在场时，引擎不能保持一个“等人操作”的浏览器会话；
+  当前行为是明确返回 `needs_human`，人工在终端跑 `amber run` 完成。若将来要做，必须单独评审
+  持久会话、凭据与清理，不能顺手塞进桥。
+- `--manual` 在无显示器环境不硬拉 headed 浏览器；非交互调用使用 `manual_fail_fast` 直接返回。

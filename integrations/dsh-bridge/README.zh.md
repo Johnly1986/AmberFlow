@@ -1,5 +1,5 @@
 ---
-description: "从会话侧调用 AmberFlow 冻结计划浏览器引擎的 harness 接口：四个工具，用于列出应用、端到端运行一个应用、用「目标 + 页面 + 录好的动作清单」录制流程，以及规划站点无关的流程。一条旅程可以混用多种应用类型（web/cli/ssh/stdio）。"
+description: "从会话侧调用 AmberFlow 冻结计划浏览器引擎的 harness 接口：一组模型可见工具，用于观察页面、逐步编写应用、运行应用/分段、录制流程、规划站点无关流程，以及跑线上套件。一条旅程可以混用多种应用类型（web/cli/ssh/stdio）。"
 kind: "package-bundle"
 ---
 
@@ -61,7 +61,7 @@ keepRuns: 30                    # optional; 保留最新的 $TMPDIR/dsh-amberflo
   在装载处响亮地失败而不是瞎猜。
 - **npm 或 tarball**：`pnpm pack` 打包；根 package.json 就是 bundle，git 通道的行为原样沿用。
 
-声明了 `dsh.bundle` 的包在安装时会自动加入 `dsh.profile.bundles`，因此四个工具无需手写 profile
+声明了 `dsh.bundle` 的包在安装时会自动加入 `dsh.profile.bundles`，因此工具无需手写 profile
 补丁即可用；live profile 会在下一次配置重载时生效。`AMBERFLOW_REPO` 覆盖解析出的 checkout 路径；
 而不是 checkout 的路径会在加载期失败。
 
@@ -192,7 +192,7 @@ checkout。除非部署把 `allowDangerous` 设为 true，危险的工具步一�
 <a id="further-exploration"></a>
 ## 进一步探索
 
-- 本仓库的 `apps/README.md` —— 应用包怎么声明、四个工具所呈现的退出码契约，以及两条"会咬人"的规矩。
+- 本仓库的 `apps/README.md` —— 应用包怎么声明、工具所呈现的退出码契约，以及两条"会咬人"的规矩。
 - 本插件所运行的 DSH 安装里的 `packages/core/tools` 与 `packages/browser-use/browser-use` ——
   测试所驱动的工具注册表，以及本桥所补充的树内浏览器自动化服务。
 
