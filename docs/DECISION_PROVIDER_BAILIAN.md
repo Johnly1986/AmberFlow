@@ -46,7 +46,7 @@ criteria 的 key 就是元素 ref，`ChoiceOutcome.ref` 直接对上；`noul` �
 
 - `DASHSCOPE_API_KEY`（官方推荐名；也接受别名 `BAILIAN_API_KEY`）——**API token**；
 - `BAILIAN_ENDPOINT`（完整 URL）**或** `BAILIAN_WORKSPACE_ID`（+ 可选 `BAILIAN_REGION`，默认 `cn-beijing`）——端点是 workspace 作用域的，二者必须给一个；
-- 可选 `BAILIAN_MODEL`（默认 `decision-model-preview`）。
+- 可选 `AMBERFLOW_DECISION_MODEL`（默认 `decision-model-preview`；`BAILIAN_MODEL` 仍兼容）。
 
 缺 key / 缺端点时 provider 在**真调用**时报错指路（不静默退回 laya、不瞎选），而**注册不需要**它们——
 所以 `npm run doctor` 能列出 `bailian`，没配好时错误信息告诉你缺哪一件。

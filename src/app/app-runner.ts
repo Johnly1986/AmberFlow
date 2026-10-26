@@ -41,6 +41,7 @@ import {
 } from "../data/datasource.ts";
 import { type CachedRuntime, type DecisionCacheStats } from "../model/decision-cache.ts";
 import { checkArtifacts, missingPieces, modelConfigError } from "../model/model-artifacts.ts";
+import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
 import { activeProviderInfo, applySpecToRuntime, resolveProviderSpec, type ProviderInfo } from "../model/decision-provider.ts";
 import { BrowserMiddleware, browserSession, disallowedHost, type BrowserSession } from "../engine/executor.ts";
 import { REPO } from "../flow/flow.ts";
@@ -1334,14 +1335,13 @@ export function appReportMarkdown(r: AppRunResult): string {
 }
 
 const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--out DIR]
-                  [--model ID] [--provider NAME] [--ablate stub|rules-only] [--force-hints off]
+                  [--provider NAME] [--ablate stub|rules-only] [--force-hints off]
                   [--conf-floor N] [--no-sources] [--confirm-safe] [--headful] [--allow-dangerous]
                   [--tiered-hint] [--learn-hints | --hint-memory FILE]
                   [--emit-trace FILE] [--replay FILE] [--quiet]
 
 按 apps/<app>/pack.json 跑一条完整应用链路：数据腿 → 浏览器步/工具步 → 结束状态不变量
 应用也可以是隔离脚本（app.mjs / app.ts）：flow(ctx) 接管走向，运行时仍由引擎执行每一步
---model ID     换 laya checkpoint（与 bench 同名同义；换决策源用 --provider）
 --ablate       消融臂：stub = 脚本桩，rules-only = 规则档（与 bench 同一取值集合）
 --conf-floor N 置信度闸门刻度（0<N≤1）：换 provider（score_kind 不同）时缺省 0.25 不再成立，
                本旗标 = 本次覆盖；包可用 policy.conf_floor 声明；provider 可自报 floor
@@ -1780,6 +1780,17 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
   const artifacts = checkArtifacts();
   const modelStatus = spec.tier;
+  // 本地模型只在没有 provider 时使用；checkpoint 名由 AMBERFLOW_DECISION_MODEL 配置。
+  // 在线 provider 的模型名也走同一个键，但由 provider 自己解析，不在本地检查点白名单里校验。
+  let localModelId: string | undefined;
+  if (spec.kind === "laya" && !spec.ablation) {
+    try {
+      localModelId = resolveLocalCheckpoint(process.env, pack.model ?? "english");
+    } catch (e) {
+      console.error(e instanceof Error ? e.message : String(e));
+      return 2;
+    }
+  }
 
   if (cliBool(v, "dry")) {
     // 脚本应用（flow）没有静态旅程：dry-run = dry 跑一遍调用序列（与 check/explain 同一实现）。
@@ -1894,6 +1905,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           ...(cliConfFloor === undefined ? {} : { confFloorSource: confFloorFromCli ? "cli" as const : "config" as const }),
           providerFloor: activeProviderInfo()?.floor,
           modelStatus,
+          ...(localModelId === undefined ? {} : { modelId: localModelId }),
           ...(cliString(v, "emit-trace") === undefined ? {} : { emitTrace: cliString(v, "emit-trace") }),
           ...(cliString(v, "replay") === undefined ? {} : { replayTrace: cliString(v, "replay") }),
         })
@@ -1909,7 +1921,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       confFloor: cliConfFloor,
       ...(cliConfFloor === undefined ? {} : { confFloorSource: confFloorFromCli ? "cli" as const : "config" as const }),
       providerFloor: activeProviderInfo()?.floor,
-      modelId: cliString(v, "model") ?? pack.model ?? "english",
+      modelId: localModelId ?? pack.model ?? "english",
       modelStatus,
       providerInfo: activeProviderInfo() ?? {
         name: spec.name, version: spec.kind === "laya" ? "runtime" : "n/a",

@@ -1,10 +1,11 @@
 {
-  "_doc": "把它复制成同目录的 amberflowrc.json 就是无害的——本模板所有值都留空（空串=没设、被忽略），你只填自己要覆盖的那几行。示例：\"LAYA_ONNX_MODEL\": \"D:/models/laya_dec.onnx\"（权重按约定放同名 laya_dec.onnx.data）；\"PLAYWRIGHT_BROWSERS_PATH\": \"C:/Users/you/AppData/Local/ms-playwright\"；\"AMBERFLOW_DEFAULT_DECISION_PROVIDER\": \"laya-onnx\"（可选 laya-onnx / token-plan / jevk5 / bailian / none——名字必须与 npm run doctor 列出的完全一致）；\"TOKEN_PLAN_ENDPOINT\": \"https://<主机>/compatible-mode/v1/systemone\" 配 \"TOKEN_PLAN_API_KEY\": \"sk-…\"；\"OPENAI_BASE_URL\": \"https://…/v1\" 配 \"OPENAI_API_KEY\": \"sk-…\"（外层规划/审计，不配走内置替身）。优先级：CLI 旗标 > 环境变量 > 本文件 > 内建缺省；本文件的键若已在环境里设过，以环境为准（不覆盖）。凭据只留在本机这个文件里，绝不进计划/包/报告等被审计的产物。未知键会让所有 npm run 命令在任何腿出场之前以用法错误(exit 2)点名拒绝。",
+  "_doc": "把它复制成同目录的 amberflowrc.json 就是无害的——本模板所有值都留空（空串=没设、被忽略），你只填自己要覆盖的那几行。示例：\"LAYA_ONNX_MODEL\": \"D:/models/laya_dec.onnx\"（权重按约定放同名 laya_dec.onnx.data）；\"PLAYWRIGHT_BROWSERS_PATH\": \"C:/Users/you/AppData/Local/ms-playwright\"；\"AMBERFLOW_DECISION_PROVIDER\": \"decision-service\"（未提供 provider 时使用本地模型；可选名见 npm run doctor）；\"AMBERFLOW_DECISION_BASE_URL\": \"https://<主机>/compatible-mode/v1\" 配 \"AMBERFLOW_DECISION_MODEL\" 与 \"AMBERFLOW_DECISION_API_KEY\"；\"OPENAI_BASE_URL\": \"https://…/v1\" 配 \"OPENAI_API_KEY\": \"sk-…\"（外层规划/审计，不配走内置替身）。优先级：CLI 旗标 > 环境变量 > 本文件 > 内建缺省；本文件的键若已在环境里设过，以环境为准（不覆盖）。凭据只留在本机这个文件里，绝不进计划/包/报告等被审计的产物。未知键会让所有 npm run 命令在任何腿出场之前以用法错误(exit 2)点名拒绝。",
   "LAYA_ONNX_MODEL": "",
   "LAYA_TOKENIZER_DIR": "",
   "PLAYWRIGHT_BROWSERS_PATH": "",
   "AMBERFLOW_HOME": "",
   "AMBERFLOW_DECISION_BASE_URL": "",
+  "AMBERFLOW_DECISION_PROVIDER": "",
   "AMBERFLOW_DECISION_MODEL": "",
   "AMBERFLOW_DECISION_API_KEY": "",
   "AMBERFLOW_DECISION_PROTOCOL": "",

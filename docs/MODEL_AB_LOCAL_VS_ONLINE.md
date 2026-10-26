@@ -113,7 +113,7 @@
 
 HF 仓库 `convaiinnovations/laya` 只提供 **safetensors**（英文根目录 + `multilingual/` 子目录 +
 `typed-decisions/` 子目录），**没有任何 ONNX 文件**；本仓库的本地 ONNX 端口只认
-`models/*.onnx` + `.onnx.data`（生产也只加载一份权重，`--model multilingual` 不切权重——这一点
+`models/*.onnx` + `.onnx.data`（生产也只加载一份权重，`AMBERFLOW_DECISION_MODEL=multilingual` 不改权重文件——这一点
 `docs/DECISION_MODEL_PURPOSE_REVIEW.md` 早有记录）。所以先按 POC 记录的口径自己导出了一份。
 
 ### 5.2 导出与校验（一次性、本机）
@@ -131,7 +131,7 @@ HF 仓库 `convaiinnovations/laya` 只提供 **safetensors**（英文根目录 +
   ```bash
   LAYA_ONNX_MODEL=$PWD/models/laya_dec_multilingual.onnx \
   LAYA_TOKENIZER_DIR=~/.cache/huggingface/hub/models--convaiinnovations--laya/snapshots/*/multilingual/tokenizer \
-  amber run camera-entry --without-hints --provider laya-onnx --checkpoint multilingual
+  AMBERFLOW_DECISION_MODEL=multilingual amber run camera-entry --without-hints --provider laya-onnx
   ```
 
 ### 5.3 引擎修复：多语言 tokenizer 的特殊 token

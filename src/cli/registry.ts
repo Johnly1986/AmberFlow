@@ -187,6 +187,7 @@ amber config init [--project]
 amber config edit [--project]`,
     examples: [
       "amber config path",
+      "amber config set AMBERFLOW_DECISION_PROVIDER decision-service",
       "amber config set AMBERFLOW_DECISION_BASE_URL https://<服务地址>",
       "amber config set AMBERFLOW_DECISION_MODEL jev-latest",
       "amber config set AMBERFLOW_DECISION_API_KEY sk-... --project",
@@ -266,7 +267,7 @@ export function globalHelp(includeAdvanced = false): string {
   return `${GLOBAL_USAGE}
 
 高级选项（默认隐藏）：
-  --ablate --without-hints --tiered-hint --min-confidence --checkpoint --nominate-provider
+  --ablate --without-hints --tiered-hint --min-confidence --nominate-provider
   这些选项主要给 dev / 兼容层使用；用户命令只在确有必要时暴露。`;
 }
 

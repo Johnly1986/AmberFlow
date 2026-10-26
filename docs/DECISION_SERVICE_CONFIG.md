@@ -60,9 +60,9 @@ amber config set AMBERFLOW_DECISION_BASE_URL http://localhost:8008
 amber config set AMBERFLOW_DECISION_MIN_OPTIONS 2   # JevK5 才需要
 ```
 
-配置好地址后：**不设 `AMBERFLOW_DEFAULT_DECISION_PROVIDER` 也会默认用 `decision-service`**；
-显式 `--provider decision-service` 可强制点名（显式点名但缺地址/远程缺 key ⇒ 解析期 exit 2，不静默降级）。
-未配置统一服务时仍旧默认 `laya-onnx`（本地 ONNX，行为不变）。
+配置好地址后仍需**提供 provider** 才会走服务：`AMBERFLOW_DECISION_PROVIDER=decision-service`
+（或 `--provider decision-service`）。未提供 provider 时使用本地模型，地址/密钥本身不会自动切换决策源。
+显式点名但缺地址/远程缺 key ⇒ 解析期 exit 2，不静默降级。
 
 ## 4. 与旧 provider 的关系（兼容，不是替代）
 
@@ -73,16 +73,18 @@ amber config set AMBERFLOW_DECISION_MIN_OPTIONS 2   # JevK5 才需要
 | 旧 | 统一 |
 |---|---|
 | `TOKEN_PLAN_ENDPOINT` | `AMBERFLOW_DECISION_BASE_URL`（token-plan 的 `…/compatible-mode/v1`） |
-| `TOKEN_PLAN_MODEL` | `AMBERFLOW_DECISION_MODEL` |
+| `TOKEN_PLAN_MODEL` / `BAILIAN_MODEL` | `AMBERFLOW_DECISION_MODEL`（服务模型名；本地 checkpoint 也用同一个键） |
 | `TOKEN_PLAN_API_KEY`（回退 `DASHSCOPE_API_KEY`） | `AMBERFLOW_DECISION_API_KEY` |
 | `BAILIAN_ENDPOINT` / `BAILIAN_MODEL` / `BAILIAN_API_KEY` | 同上三键 |
 | `JEVK5_ENDPOINT` | `AMBERFLOW_DECISION_BASE_URL=http://…:8090` + `AMBERFLOW_DECISION_MIN_OPTIONS=2` |
-| `AMBERFLOW_DEFAULT_DECISION_PROVIDER` | 不用设（配了地址即默认）；要显式就 `AMBERFLOW_DECISION_PROVIDER=decision-service` |
+| `AMBERFLOW_DEFAULT_DECISION_PROVIDER` | 可作为默认 provider；仍建议显式 `AMBERFLOW_DECISION_PROVIDER=decision-service` |
 | token-plan 的 `floor=0.2` | `AMBERFLOW_DECISION_FLOOR=0.2`（统一层不猜刻度） |
 
-- **本地 ONNX（laya）不走这层**：它不是服务地址型配置，仍用 `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR`。
-- **DSH 插件配置页**已经是同样的三元组（URL / Token Key / ModelName），但桥当前仍映射到
-  `token-plan` profile；等桥切换到 `decision-service` 后可完全共用一张配置。
+- **本地 ONNX（laya）不走这层**：它不是服务地址型配置；本地 checkpoint 名由 `AMBERFLOW_DECISION_MODEL`
+  选择（`english` / `multilingual`，未设置时用应用包声明或 `english`），权重位置仍用
+  `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR`。
+- **DSH 插件配置页**转发同一组三元组（URL / Token Key / ModelName），默认 provider 为
+  `decision-service`。
 
 ## 5. OpenAI Decisions API（已实现，2026-10-26）
 

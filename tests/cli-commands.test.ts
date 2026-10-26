@@ -30,7 +30,7 @@ describe("amber run — 一扇门、四种模式", () => {
   it("应用模式：新旗标翻译成 app-runner 的旧旗标", async () => {
     const r = await cli([
       "run", "demo-app", "--headful", "--skip-data", "--allow-dangerous", "--remember",
-      "--slot", "city=上海", "--checkpoint", "p.onnx", "--min-confidence", "0.3",
+      "--slot", "city=上海", "--min-confidence", "0.3",
       "--without-hints", "--out", "out-dir",
     ], { runEntry: 0 });
     expect(r.code).toBe(0);
@@ -38,9 +38,17 @@ describe("amber run — 一扇门、四种模式", () => {
     expect(entry).toBe("src/app/app-runner.ts");
     expect(args).toEqual(expect.arrayContaining([
       "--app", "demo-app", "--headful", "--no-sources", "--allow-dangerous", "--learn-hints",
-      "--slot", "city=上海", "--model", "p.onnx", "--conf-floor", "0.3",
+      "--slot", "city=上海", "--conf-floor", "0.3",
       "--force-hints", "off", "--out", "out-dir",
     ]));
+  });
+
+  it("--model / --checkpoint 已从命令行移除（模型走 AMBERFLOW_DECISION_MODEL 配置）", async () => {
+    for (const flag of ["--model", "--checkpoint"]) {
+      const r = await cli(["run", "demo-app", flag, "x", "--json"], { runEntry: 0 });
+      expect(r.code, flag).toBe(2);
+      expect(r.json().error.code, flag).toBe("USAGE");
+    }
   });
 
   it("旧旗标别名也被归一化（--dry / --no-sources / --learn-hints）", async () => {

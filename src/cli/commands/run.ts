@@ -36,7 +36,6 @@ const OPTIONS = {
   confirm: { type: "string" as const },
   target: { type: "string" as const },
   max: { type: "string" as const },
-  checkpoint: { type: "string" as const },
   "min-confidence": { type: "string" as const },
   "tiered-hint": { type: "boolean" as const },
   "without-hints": { type: "boolean" as const },
@@ -269,7 +268,7 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   for (const s of flatList(v.slot as string[] | undefined)) args.push("--slot", s);
   for (const [key, flag] of [
     ["out", "--out"], ["provider", "--provider"], ["memory", "--hint-memory"],
-    ["checkpoint", "--model"], ["min-confidence", "--conf-floor"], ["ablate", "--ablate"],
+    ["min-confidence", "--conf-floor"], ["ablate", "--ablate"],
   ] as const) {
     const val = str(v[key]);
     if (val !== undefined) args.push(flag, val);

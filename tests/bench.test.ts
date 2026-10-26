@@ -127,16 +127,23 @@ describe("main() — case selection, ablations, summary file", () => {
       .rejects.toThrow(/no cases selected/);
   });
 
-  it("--force-rules / --force-model override every case", async () => {
+  it("--force-rules 覆盖每个用例；本地 checkpoint 由 AMBERFLOW_DECISION_MODEL 配置", async () => {
     installScripted();
     const cases = writeCases([CASE]);
     const out = path.join(tmp, "r3");
-    await main(["--cases", cases, "--out", out, "--force-rules", "off", "--force-model", "english"],
-      { runtime: scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 }))) });
-    const file = fs.readdirSync(out)[0]!;
-    const detail = JSON.parse(fs.readFileSync(path.join(out, file), "utf-8")).detail;
-    expect(detail[0].rules).toBe(false);
-    expect(detail[0].model).toBe("english");
+    const prev = process.env.AMBERFLOW_DECISION_MODEL;
+    process.env.AMBERFLOW_DECISION_MODEL = "multilingual";
+    try {
+      await main(["--cases", cases, "--out", out, "--force-rules", "off"],
+        { runtime: scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 }))) });
+      const file = fs.readdirSync(out)[0]!;
+      const detail = JSON.parse(fs.readFileSync(path.join(out, file), "utf-8")).detail;
+      expect(detail[0].rules).toBe(false);
+      expect(detail[0].model).toBe("multilingual");
+    } finally {
+      if (prev === undefined) delete process.env.AMBERFLOW_DECISION_MODEL;
+      else process.env.AMBERFLOW_DECISION_MODEL = prev;
+    }
     installLayaRuntime(null);
   }, 60_000);
 });
@@ -158,11 +165,18 @@ describe("main() — 智能缺省的 provider 门（bench 与 apps/suite 同一�
     installLayaRuntime(null);
   }, 180_000);
 
-  it("--force-model 与 provider 档互斥：用法错误点名，不静默忽略（A/B 白跑是比崩更贵的失败）", async () => {
+  it("本地 checkpoint 配置在 provider 档不参与校验（它只服务未提供 provider 的路径）", async () => {
     const p = path.join(tmp, "cases-fm.json");
     fs.writeFileSync(p, JSON.stringify({ cases: [CASE] }), "utf-8");
-    const code = await main(["--cases", p, "--out", path.join(tmp, "rfm"),
-      "--provider", "first-candidate", "--force-model", "english"], {});
-    expect(code).toBe(2);
+    const prev = process.env.AMBERFLOW_DECISION_MODEL;
+    process.env.AMBERFLOW_DECISION_MODEL = "decision-model-preview";
+    try {
+      const code = await main(["--cases", p, "--out", path.join(tmp, "rfm"),
+        "--provider", "first-candidate"], {});
+      expect(code).toBe(0);
+    } finally {
+      if (prev === undefined) delete process.env.AMBERFLOW_DECISION_MODEL;
+      else process.env.AMBERFLOW_DECISION_MODEL = prev;
+    }
   }, 60_000);
 });

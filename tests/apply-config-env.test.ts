@@ -32,7 +32,7 @@ describe("原始工具入口读统一配置层", () => {
       AMBERFLOW_DECISION_API_KEY: "from-config",
     });
     const env: NodeJS.ProcessEnv = { ...process.env, AMBERFLOW_HOME: home, AMBERFLOW_DECISION_MODEL: "from-env" };
-    const result = applyConfiguredEnv(env, REPO);
+    const result = applyConfiguredEnv(env, REPO, { includeFiles: true });
     expect(result.errors).toEqual([]);
     expect(env.AMBERFLOW_DECISION_BASE_URL).toBe("http://127.0.0.1:8008");
     expect(env.AMBERFLOW_DECISION_API_KEY).toBe("from-config");
@@ -41,7 +41,7 @@ describe("原始工具入口读统一配置层", () => {
     expect(result.applied).not.toContain("AMBERFLOW_DECISION_MODEL");
   });
 
-  it("补完之后 resolveProviderSpec 的默认档就是统一服务", async () => {
+  it("补完之后没有 provider 时默认走本地模型", async () => {
     const home = homeWith({
       AMBERFLOW_DECISION_BASE_URL: "http://127.0.0.1:8008",
       AMBERFLOW_DECISION_MODEL: "kev-onnx",
@@ -51,17 +51,27 @@ describe("原始工具入口读统一配置层", () => {
       delete process.env[key];
     }
     process.env.AMBERFLOW_HOME = home;
-    const result = applyConfiguredEnv(process.env, REPO);
+    const result = applyConfiguredEnv(process.env, REPO, { includeFiles: true });
     expect(result.errors).toEqual([]);
     const spec = await resolveProviderSpec(undefined, process.env);
-    expect(spec.name).toBe("decision-service");
-    expect(spec.tier).toBe("on");
+    expect(spec.name).toBe("laya-onnx");
+
+    const home2 = homeWith({
+      AMBERFLOW_DECISION_BASE_URL: "http://127.0.0.1:8008",
+      AMBERFLOW_DECISION_MODEL: "kev-onnx",
+      AMBERFLOW_DECISION_PROVIDER: "decision-service",
+    });
+    process.env.AMBERFLOW_HOME = home2;
+    applyConfiguredEnv(process.env, REPO, { includeFiles: true });
+    const service = await resolveProviderSpec(undefined, process.env);
+    expect(service.name).toBe("decision-service");
+    expect(service.tier).toBe("on");
   });
 
   it("配置层里的未知键照样报错（入口应 exit 2，不是静默忽略）", () => {
     const home = homeWith({ AMBERFLOW_DECISION_BASE_URL: "http://127.0.0.1:8008", NOT_A_KEY: "x" });
     const env: NodeJS.ProcessEnv = { ...process.env, AMBERFLOW_HOME: home };
-    const result = applyConfiguredEnv(env, REPO);
+    const result = applyConfiguredEnv(env, REPO, { includeFiles: true });
     expect(result.errors.join("\n")).toMatch(/NOT_A_KEY/);
   });
 });

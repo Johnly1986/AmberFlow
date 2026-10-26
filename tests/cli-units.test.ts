@@ -35,8 +35,8 @@ describe("args.ts — 无歧义的旗标归一化", () => {
   it("旧旗标一对一换成新旗标（只认无歧义的那些）", () => {
     expect(normalizeAliases(["--dry", "--no-sources", "--learn-hints", "--hint-memory"]))
       .toEqual(["--dry-run", "--skip-data", "--remember", "--memory"]);
-    expect(normalizeAliases(["--conf-floor", "0.5", "--model", "p.onnx", "--hint", "#add"]))
-      .toEqual(["--min-confidence", "0.5", "--checkpoint", "p.onnx", "--target", "#add"]);
+    expect(normalizeAliases(["--conf-floor", "0.5", "--hint", "#add"]))
+      .toEqual(["--min-confidence", "0.5", "--target", "#add"]);
   });
 
   it("--plan 不放进全局表：它的含义依赖命令（保存位置 vs 输入）", () => {

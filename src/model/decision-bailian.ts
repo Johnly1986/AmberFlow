@@ -41,7 +41,7 @@ const CAPABILITIES: ProviderCapabilities = {
 
 export function bailianProvider(opts: BailianOptions = {}): DecisionProvider {
   const env = process.env;
-  const model = opts.model ?? env.BAILIAN_MODEL ?? MODEL_DEFAULT;
+  const model = opts.model ?? env.AMBERFLOW_DECISION_MODEL ?? env.BAILIAN_MODEL ?? MODEL_DEFAULT;
   const profile: SystemOneProfile = {
     name: "bailian",
     version: opts.version ?? model,

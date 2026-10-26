@@ -36,6 +36,7 @@ import { cliBool, cliString, parseCliArgs } from "../support/cli-args.ts";
 import { rcStatusLines } from "../support/rcfile.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";
+import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
 import {
   applySpecToRuntime, BUILTIN_LAYA_PROVIDERS, installDecisionProvider, listDecisionProviders, resolveProviderSpec,
 } from "../model/decision-provider.ts";
@@ -255,7 +256,7 @@ async function chooseTarget(
  */
 async function commandJob(
   goal: string, url: string, opts: { plan: string; target: string | null; dryRun: boolean; headless: boolean },
-  io: Io, deps: StartDeps,
+  io: Io, deps: StartDeps, modelId?: string,
 ): Promise<number> {
   const own = deps.session ? null : await browserSession(opts.headless);
   const session = (deps.session ?? own)!;
@@ -349,7 +350,7 @@ async function commandJob(
     }
 
     io.out("");
-    const mw = new BrowserMiddleware({ confirmFn: () => true, manualConfirmFn: async () => {
+    const mw = new BrowserMiddleware({ confirmFn: () => true, ...(modelId === undefined ? {} : { modelId }), manualConfirmFn: async () => {
       const a = await io.ask("这一步完成了么？(y/N) > ");
       return a === "y" || a === "Y";
     } });
@@ -396,13 +397,15 @@ export function demoSucceeded(rep: { plan: { subgoals: Array<{ status: string }>
   return rep.plan.subgoals.length > 0 && rep.plan.subgoals.every((s) => s.status === "done");
 }
 
-async function commandDemo(planPath: string, headless: boolean, io: Io, deps: StartDeps): Promise<number> {
+async function commandDemo(
+  planPath: string, headless: boolean, io: Io, deps: StartDeps, modelId?: string,
+): Promise<number> {
   const plan = demoPlan(planPath);
   const problems = new PlanningRules().problems(plan);
   if (problems.length) throw new Error(`内置示例计划不合法：${problems.join("; ")}`);
   io.out("开箱任务（仓库自带的示例商店，离线运行）：");
   io.out(`  ${plan.goal}\n`);
-  const mw = new BrowserMiddleware({ confirmFn: () => true });
+  const mw = new BrowserMiddleware({ confirmFn: () => true, ...(modelId === undefined ? {} : { modelId }) });
   const url = plan.subgoals[0]!.start_url!;
   const buf: string[] = [];
   const sink: Io = { out: (l) => { buf.push(l); io.out(l); }, ask: io.ask };
@@ -520,6 +523,17 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     io.out(`决策提供者：${spec.name}（tier=${spec.tier}）\n`);
   }
 
+  // 本地模型只在没有 provider 时使用；checkpoint 名由 AMBERFLOW_DECISION_MODEL 配置。
+  let localModelId: string | undefined;
+  if (spec.kind === "laya" && !spec.ablation) {
+    try {
+      localModelId = resolveLocalCheckpoint(process.env, "english");
+    } catch (e) {
+      io.out(e instanceof Error ? e.message : String(e));
+      return 2;
+    }
+  }
+
   const goal = cliString(v, "goal");
   const url = cliString(v, "url");
   const plan = cliString(v, "plan") ?? DEFAULT_PLAN_PATH;
@@ -527,14 +541,14 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     return commandJob(goal, url, {
       plan, target: cliString(v, "target") ?? null,
       dryRun: cliBool(v, "dry-run"), headless,
-    }, io, deps);
+    }, io, deps, localModelId);
   }
   if (goal || url) {
     io.out("--goal 和 --url 要一起给，例如：");
     io.out('  npm start -- --goal "把商品加入购物车" --url https://shop.example.com/p/1');
     return 2;
   }
-  return commandDemo(plan, headless, io, deps);
+  return commandDemo(plan, headless, io, deps, localModelId);
 }
 
 export const USAGE = `npm start — 一条命令开始一项工作

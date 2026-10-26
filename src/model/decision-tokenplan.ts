@@ -53,7 +53,7 @@ const SUGGESTED_FLOOR = 0.2;
 
 export function tokenPlanProvider(opts: TokenPlanOptions = {}): DecisionProvider {
   const env = process.env;
-  const model = opts.model ?? env.TOKEN_PLAN_MODEL ?? MODEL_DEFAULT;
+  const model = opts.model ?? env.AMBERFLOW_DECISION_MODEL ?? env.TOKEN_PLAN_MODEL ?? MODEL_DEFAULT;
   const keyOf = (): string =>
     (opts.apiKey ?? env.TOKEN_PLAN_API_KEY ?? env.DASHSCOPE_API_KEY ?? "").trim();
   const profile: SystemOneProfile = {

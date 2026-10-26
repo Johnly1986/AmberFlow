@@ -11,7 +11,6 @@ const ALIASES: Record<string, string> = {
   "--learn-hints": "--remember",
   "--hint-memory": "--memory",
   "--conf-floor": "--min-confidence",
-  "--model": "--checkpoint",
   "--hint": "--target",
 };
 

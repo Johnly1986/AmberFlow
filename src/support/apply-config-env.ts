@@ -26,9 +26,14 @@ export interface AppliedConfigEnv {
 export function applyConfiguredEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
   cwd: string = process.cwd(),
+  opts: { includeFiles?: boolean } = {},
 ): AppliedConfigEnv {
   const rc = applyRcToEnv(baseEnv);
   const errors = [...rc.errors];
+  // 测试进程不吸收开发者本机的用户/项目配置：直接调入口的用例会随谁的本机配置漂移。
+  // 需要测配置层的用例显式传 { includeFiles: true }（并自己指定 AMBERFLOW_HOME）。
+  const includeFiles = opts.includeFiles ?? baseEnv.VITEST === undefined;
+  if (!includeFiles) return { applied: [], errors };
   let resolved;
   try {
     resolved = resolveConfig(baseEnv, cwd);

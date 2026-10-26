@@ -22,7 +22,9 @@ import { cli, workspace } from "./cli-harness.ts";
 
 const prevEnv = { ...process.env };
 function setEnv(values: Record<string, string | undefined>): void {
-  for (const key of DECISION_SERVICE_KEYS) delete process.env[key];
+  for (const key of [...DECISION_SERVICE_KEYS, "AMBERFLOW_DECISION_PROVIDER", "AMBERFLOW_DEFAULT_DECISION_PROVIDER"]) {
+    delete process.env[key];
+  }
   for (const [k, v] of Object.entries(values)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -218,8 +220,15 @@ describe("线协议映射（假 System One 服务）", () => {
     expect(seen[1]!.body.questions.act.type).toBe("choice");
   });
 
-  it("解析器：配了服务地址就默认用它；显式点名但没配好 → 响亮报错", async () => {
+  it("没有 provider 时默认本地；显式点名 decision-service 才用服务；点名但没配好 → 响亮报错", async () => {
     setEnv({ AMBERFLOW_DECISION_BASE_URL: base, AMBERFLOW_DECISION_API_KEY: "test-key", AMBERFLOW_DECISION_MODEL: "m" });
+    const local = await resolveProviderSpec(undefined, process.env);
+    expect(local.name).toBe("laya-onnx");
+
+    setEnv({
+      AMBERFLOW_DECISION_BASE_URL: base, AMBERFLOW_DECISION_API_KEY: "test-key",
+      AMBERFLOW_DECISION_MODEL: "m", AMBERFLOW_DECISION_PROVIDER: "decision-service",
+    });
     const spec = await resolveProviderSpec(undefined, process.env);
     expect(spec.name).toBe("decision-service");
     expect(spec.tier).toBe("on");

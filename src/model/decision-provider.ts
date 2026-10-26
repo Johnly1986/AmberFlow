@@ -319,13 +319,13 @@ export async function resolveProviderSpec(
   // token-plan MaaS 网关（同一 SystemOne 协议，共享端点、Token 只从环境读）。
   const { registerTokenPlan } = await import("./decision-tokenplan.ts");
   await registerTokenPlan();
-  const { decisionServiceConfigured } = await import("./decision-service.ts");
-  const serviceOn = decisionServiceConfigured(env);
-  // 环境默认档：显式 provider > 显式默认档 > 统一决策服务（配了服务地址就用它）> 本地 laya。
+  // 环境默认档：显式 provider > 显式默认档 > 本地 laya。
+  // 统一决策服务不再因为"配了地址"就自动接管；要用它必须显式给 provider
+  // （`--provider decision-service` 或 `AMBERFLOW_DECISION_PROVIDER=decision-service`）。
   const explicitProvider = name ?? env.AMBERFLOW_DECISION_PROVIDER ?? null;
   const wanted = explicitProvider
     ?? env.AMBERFLOW_DEFAULT_DECISION_PROVIDER
-    ?? (serviceOn ? "decision-service" : "laya-onnx");
+    ?? "laya-onnx";
   // 统一决策服务只在真的选到它时注册（不让一个没在跑的服务污染 doctor 的可用列表）。
   if (wanted === "decision-service") {
     const { registerDecisionService } = await import("./decision-service.ts");
@@ -334,9 +334,9 @@ export async function resolveProviderSpec(
   const extra = listDecisionProviders().filter(
     (n) => !(BASELINE_PROVIDERS as readonly string[]).includes(n)
       && !(BUILTIN_LAYA_PROVIDERS as readonly string[]).includes(n));
-  // "显式" = 调用方传了名字、设了 AMBERFLOW_DECISION_PROVIDER，或统一服务地址让默认档落到它；
+  // "显式" = 调用方传了名字或设了 AMBERFLOW_DECISION_PROVIDER；
   // 显式却没配好 ⇒ 响亮报错（不能把"我配了服务"悄悄降级成"没人要模型"）。
-  const explicit = explicitProvider != null || wanted === "decision-service";
+  const explicit = explicitProvider != null;
   if (wanted === "none") {
     return { kind: "none", name: "none", tier: "off(ablation:rules-only)", ablation: true };
   }

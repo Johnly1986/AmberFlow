@@ -73,7 +73,7 @@ profile 吸收的差异：`score_kind=calibrated_prob`（score=confidence、pTop
 ```bash
 export TOKEN_PLAN_ENDPOINT='https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone'
 export TOKEN_PLAN_API_KEY='<token-plan 的 token>'      # 回退 DASHSCOPE_API_KEY；绝不内联进命令/代码/产物
-# 可选：TOKEN_PLAN_MODEL=decision-model-preview（默认就是它）
+# 可选：AMBERFLOW_DECISION_MODEL=decision-model-preview（默认就是它；TOKEN_PLAN_MODEL 仍兼容）
 
 npm run apps -- --app demo-app --provider token-plan            # 单应用
 npm run apps:suite -- --provider token-plan                     # 整批语料换模型

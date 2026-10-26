@@ -79,11 +79,11 @@ describe("cli-args — apps 与 bench 的旗标表对齐", () => {
       expect(Object.keys(appOptions()), `apps 缺共用旗标 ${name}`).toContain(name);
       expect(Object.keys(benchOptions()), `bench 缺共用旗标 ${name}`).toContain(name);
     }
-    // 对齐后同一件事不再有三个名字（旧名仍在表里，但只认不列）
-    expect(Object.keys(SHARED_RUN_OPTIONS)).toContain("model");
+    // 模型名不走命令行：两个入口都不再有 model / force-model 旗标。
+    expect(Object.keys(SHARED_RUN_OPTIONS)).not.toContain("model");
+    expect(Object.keys(benchOptions())).not.toContain("force-model");
     expect(Object.keys(SHARED_RUN_OPTIONS)).toContain("conf-floor");
     expect(Object.keys(SHARED_RUN_OPTIONS)).toContain("ablate");
-    expect(Object.keys(benchOptions())).toContain("force-model");       // 升级窗口的旧名
     expect(Object.keys(benchOptions())).toContain("force-conf-floor");
   });
 

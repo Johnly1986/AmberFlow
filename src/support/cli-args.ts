@@ -89,18 +89,14 @@ export type CliValues = Record<string, CliValue>;
 /**
  * `apps` 与 `bench` 的**共用旗标**——同一个名字在两个入口必须是同一件事。
  *
- * 以前两张 options 表各写各的，于是同一件事有了三个名字：换模型在 apps 叫 `--model`、
- * 在 bench 叫 `--force-model`；闸门刻度在 apps 叫 `--conf-floor`、在 bench 叫
- * `--force-conf-floor`；学习环在 apps 是 `--learn-hints | --hint-memory FILE`、
- * 在 bench 是 `--hint-memory on | --hint-memory-file`。对齐不靠记性，靠这一份表：
- * 两个入口都从 `benchOptions()` / `appOptions()` 出，各自专属的另起一张。
+ * 两个入口共用同一张表：闸门刻度、学习环、消融等旗标在 apps 与 bench 同名同义；
+ * 各自专属的（案例文件 / 应用包）另起一张。
+ * 模型名不走命令行：未提供 provider 时由 `AMBERFLOW_DECISION_MODEL` 选本地 checkpoint。
  */
 export const SHARED_RUN_OPTIONS: CliOptions = {
   out: { type: "string" },
   provider: { type: "string" },
   headful: { type: "boolean" },
-  /** 换模型（laya checkpoint 名）。bench 旧名 `--force-model` 仍认。 */
-  model: { type: "string" },
   /** 消融臂：`stub` = 脚本桩，`rules-only` = 规则档（两个入口同一个取值集合）。 */
   ablate: { type: "string" },
   /** 消融：内存里剥掉计划点名的 hint（只有 `off` 一档）。 */
@@ -149,7 +145,6 @@ export const APP_ONLY_OPTIONS: CliOptions = {
 
 /** bench 的旧名（升级窗口）：**只认不列**——usage 里只出现对齐后的名字。 */
 const BENCH_LEGACY_OPTIONS: CliOptions = {
-  "force-model": { type: "string" },
   "force-conf-floor": { type: "string" },
   "hint-memory-file": { type: "string" },
 };

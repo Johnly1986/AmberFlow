@@ -121,7 +121,7 @@ bench 挑**语料**。完整用法看 `npm run apps -- --help`，摘要：
 | `--no-sources` | 不跑数据腿（`source_slots` 因此没有观测值 ⇒ 响亮地炸，不静默回落默认值） |
 | `--allow-dangerous` / `--confirm-safe` | 放行危险工具步 / 非交互确认（危险步没放行是 exit 1，并在输出里写明"未执行"） |
 | `--tiered-hint` | P1 实验开关：hint 档内歧义时改问"这几个候选里哪个"（默认关 = 行为不变） |
-| `--model ID` · `--provider NAME` · `--ablate stub\|rules-only` · `--conf-floor N` · `--force-hints off` · `--headful` · `--quiet` · `--learn-hints` · `--hint-memory FILE` | **与 bench 同名同义**（对照表见根 [README.md](../README.md) 的「apps 与 bench：同一个名字同一件事」） |
+| `--provider NAME` · `--ablate stub\|rules-only` · `--conf-floor N` · `--force-hints off` · `--headful` · `--quiet` · `--learn-hints` · `--hint-memory FILE` | **与 bench 同名同义**（对照表见根 [README.md](../README.md) 的「apps 与 bench」）；模型名用 `AMBERFLOW_DECISION_MODEL` 配置 |
 
 打错旗标得到的是**一行点名 + usage + exit 2**，不是 `parseArgs` 的堆栈；旧名
 （`--no-model` → `--ablate stub|rules-only`、`--hint-memory-file` → `--hint-memory FILE`）在升级窗口里仍认。

@@ -26,6 +26,7 @@ import { checkSignal } from "../engine/signals.ts";
 import { runSubgoalWithRetries } from "../engine/planner.ts";
 import { installLayaRuntime, type DecisionAgent, type LayaRuntime } from "../model/model.ts";
 import { applySpecToRuntime, installDecisionProvider, resolveProviderSpec } from "../model/decision-provider.ts";
+import { configuredDecisionModel, resolveLocalCheckpoint } from "../model/checkpoint.ts";
 import { createOutcomeMemory, type OutcomeMemoryLike } from "../model/outcome-memory.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
@@ -242,20 +243,18 @@ export interface BenchMainDeps {
  * ——同一个名字在两个入口是同一件事，剩下的才是各自专属的（bench 的语料层、apps 的包层）。
  */
 const USAGE = `usage: bench [--cases FILE] [--only ID] [--fixtures-only] [--mode-tag TAG] [--out DIR]
-             [--model ID | --provider NAME | --ablate stub|rules-only] [--conf-floor N] [--force-hints off]
+             [--provider NAME | --ablate stub|rules-only] [--conf-floor N] [--force-hints off]
              [--force-rules on|off] [--headful] [--quiet] [--help]
              [--outcome-memory on] [--outcome-memory-file FILE] [--outcome-memory-mode forbid|rank]
              [--learn-hints | --hint-memory FILE]
 
 在冻结语料上跑对照（bench/cases.json）：浏览器步 → 完成信号 → 逐用例结论
---model ID       换 laya checkpoint（只在 checkpoints 档有意义；换决策源用 --provider）
 --ablate         消融臂：stub = 脚本桩，rules-only = 规则档（与 apps 同一取值集合）
 --conf-floor N   置信度闸门刻度（0<N≤1）；旧名 --force-conf-floor 仍认
 --quiet          只留机器读的 summary JSON（过程行不打印）
 R2 学习环：--learn-hints 用默认 sidecar，--hint-memory FILE 显式指定落点（旧写法 --hint-memory on 仍认）
 
-旧名（升级窗口仍认，不再列进新文档）：--force-model → --model，--force-conf-floor → --conf-floor，
---hint-memory-file → --hint-memory FILE`;
+--force-conf-floor 仍认；--hint-memory-file 仍认`;
 
 export async function main(argv: string[] = process.argv.slice(2), deps: BenchMainDeps = {}): Promise<number> {
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
@@ -278,8 +277,7 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
   const outdir = path.resolve(cliString(v, "out") ?? path.join(REPO, "bench", "results"));
   const modeTag = cliString(v, "mode-tag") ?? "baseline";
 
-  // 对齐后的名字优先，旧名（`--force-model` / `--force-conf-floor`）在升级窗口里仍认。
-  const forcedModel = cliString(v, "model") ?? cliString(v, "force-model");
+  // 旧名 `--force-conf-floor` 在升级窗口里仍认。
   const ablate = cliString(v, "ablate");
   if (ablate !== undefined && ablate !== "stub" && ablate !== "rules-only") {
     console.error(`--ablate 只接受 stub | rules-only（收到 ${JSON.stringify(ablate)}）`);
@@ -311,7 +309,6 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
   if (cliBool(v, "fixtures-only")) cases = cases.filter((c) => c.platform.startsWith("fixture:"));
   if (!cases.length) throw new Error("no cases selected");
   for (const c of cases) {
-    if (forcedModel) c.model = forcedModel;
     if (cliString(v, "force-rules") !== undefined) c.rules = cliString(v, "force-rules") === "on";
     if (confFloor !== undefined) c.conf_floor = confFloor;
     if (forceHints === "off") {
@@ -336,10 +333,17 @@ export async function main(argv: string[] = process.argv.slice(2), deps: BenchMa
     return 2;
   }
   const useCheckpoints = deps.runtime != null || (spec.kind === "laya" && spec.tier === "on");
-  if (forcedModel !== undefined && !useCheckpoints) {
-    // 旗标语义只在 checkpoints 上有意义；在别的决策源上静默忽略会让一整轮 A/B 白跑。
-    console.error(`--model 选的是 laya checkpoint，在决策源 ${JSON.stringify(spec.name)}（tier=${spec.tier}）上没有意义；换模型用 --provider。`);
-    return 2;
+  // 本地模型只在没有 provider 时使用；checkpoint 名由 AMBERFLOW_DECISION_MODEL 配置。
+  // 在线 provider 的模型名也走同一个键，但不在本地检查点白名单里校验。
+  if (useCheckpoints && configuredDecisionModel() !== null) {
+    let checkpoint: string;
+    try {
+      checkpoint = resolveLocalCheckpoint(process.env, undefined, { allowRouter: true });
+    } catch (e) {
+      console.error(e instanceof Error ? e.message : String(e));
+      return 2;
+    }
+    for (const c of cases) c.model = checkpoint;
   }
   const agents: Record<string, DecisionAgent | null> = {};
   if (useCheckpoints) {

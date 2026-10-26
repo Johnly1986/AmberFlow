@@ -598,7 +598,7 @@ amber dev legacy <ip-config|camera-entry|long-task|path-a|tune-guard>
 
 **高级（默认帮助隐藏）**
 
-`--ablate`、`--without-hints`、`--tiered-hint`、`--min-confidence`、`--checkpoint`、`--nominate-provider`
+`--ablate`、`--without-hints`、`--tiered-hint`、`--min-confidence`、`--nominate-provider`
 
 别名归一化（解析前自动转换，保证旧脚本继续工作）：
 
@@ -610,7 +610,6 @@ amber dev legacy <ip-config|camera-entry|long-task|path-a|tune-guard>
 | `--learn-hints` | `--remember` |
 | `--hint-memory FILE` | `--memory FILE` |
 | `--conf-floor N` | `--min-confidence N` |
-| `--model ID` | `--checkpoint ID` |
 | `--hint H` | `--target H` |
 | `--file FILE` | `--plan FILE`（`plan new` 时映射到 `--save-plan FILE`） |
 | `--id ID`（record） | `--name ID` |
