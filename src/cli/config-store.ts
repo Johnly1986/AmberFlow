@@ -2,18 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { REPO } from "../support/paths.ts";
 import { amberflowHome } from "../app/amberflow-home.ts";
-import { applyRcToEnv, maskValue, RC_GROUPS } from "../support/rcfile.ts";
+import { applyRcToEnv } from "../support/rcfile.ts";
+import { CONFIG_KEYS, isSecretKey, maskValue } from "../support/config-schema.ts";
 
-/** 新配置层沿用旧 rc 的白名单：只有同一个键集合，迁移才不是“再发明一套”。 */
-export const CONFIG_KEYS: readonly string[] = [...new Set(RC_GROUPS.flatMap((g) => g.keys))];
+export { CONFIG_KEYS, isSecretKey };
 const KNOWN = new Set(CONFIG_KEYS);
 
 export function isKnownConfigKey(key: string): boolean {
   return KNOWN.has(key);
-}
-
-export function isSecretKey(key: string): boolean {
-  return /API_KEY|SECRET|PASSWORD|ACCESS_TOKEN/.test(key);
 }
 
 export interface ConfigLayer {

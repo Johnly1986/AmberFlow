@@ -100,9 +100,9 @@ export function tokenPlanProvider(opts: TokenPlanOptions = {}): DecisionProvider
     // **带上文**（2026-10-20）：choice 的 state 从 `{goal}` 扩为 `goal+url+title+main_text`，
     // 与本地 laya 分支的 pick 同一口径（复用 stateText/urlOf，不新造渲染）——之前模型在
     // "看不见页面"的条件下被问，conf 0.03 究竟多少归能力、多少归信息量，必须先补上信息量再测。
-    // 消融开关：TOKEN_PLAN_STATE_CONTEXT=0 回到旧问法——A/B 的对照臂必须同机一键可复现。
+    // 消融开关：AMBERFLOW_DECISION_STATE_CONTEXT=0（旧名 TOKEN_PLAN_STATE_CONTEXT 兼容）回到旧问法。
     // 任何一段取不到就**少带那一段**（上文是增益，不是新的崩溃来源）。
-    stateBuilder: (env.TOKEN_PLAN_STATE_CONTEXT ?? "") === "0" ? undefined : async (req) => {
+    stateBuilder: ((env.AMBERFLOW_DECISION_STATE_CONTEXT ?? env.TOKEN_PLAN_STATE_CONTEXT) ?? "") === "0" ? undefined : async (req) => {
       const st: Record<string, unknown> = { goal: req.goal };
       try { st.url = urlOf(req.page); } catch { /* 无 url 就不带 */ }
       try { st.title = await req.page.title(); } catch { /* 同上 */ }

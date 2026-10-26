@@ -28,19 +28,11 @@ import type { DecisionProvider, ProviderCapabilities } from "./decision-provider
 import { stateText, urlOf } from "../engine/extraction.ts";
 import { systemOneClient, type SystemOneProfile } from "./system-one-client.ts";
 import { normalizeOpenAIDecisionsEndpoint, openaiDecisionsProvider } from "./decision-openai.ts";
+import { DECISION_SERVICE_KEYS } from "../support/config-schema.ts";
 
-/** 统一配置键（同时登记进 `rcfile.ts` 的白名单，`amber config` 才能读写）。 */
-export const DECISION_SERVICE_KEYS = [
-  "AMBERFLOW_DECISION_BASE_URL",
-  "AMBERFLOW_DECISION_MODEL",
-  "AMBERFLOW_DECISION_API_KEY",
-  "AMBERFLOW_DECISION_PROTOCOL",
-  "AMBERFLOW_DECISION_FLOOR",
-  "AMBERFLOW_DECISION_SCORE_KIND",
-  "AMBERFLOW_DECISION_TIMEOUT_MS",
-  "AMBERFLOW_DECISION_STATE_CONTEXT",
-  "AMBERFLOW_DECISION_MIN_OPTIONS",
-] as const;
+export { DECISION_SERVICE_KEYS };
+
+
 
 export type DecisionServiceProtocol = "systemone" | "openai-decisions";
 export const SUPPORTED_PROTOCOLS: readonly DecisionServiceProtocol[] = ["systemone"];

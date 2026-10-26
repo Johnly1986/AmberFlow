@@ -9,15 +9,7 @@
  * 必须每次在命令里显式出现。安全类旗标没有配置默认值。
  */
 
-export const RUN_DEFAULT_KEYS = [
-  "AMBERFLOW_HEADFUL",
-  "AMBERFLOW_FORCE_HINTS",
-  "AMBERFLOW_CONF_FLOOR",
-  "AMBERFLOW_TIERED_HINT",
-  "AMBERFLOW_CONFIRM_SAFE",
-  "AMBERFLOW_NO_SOURCES",
-  "AMBERFLOW_QUIET",
-] as const;
+export { RUN_DEFAULT_KEYS } from "./config-schema.ts";
 
 export interface RunDefaults {
   headful?: boolean;

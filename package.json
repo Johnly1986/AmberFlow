@@ -37,7 +37,7 @@
     "doctor": "node --experimental-strip-types src/cli/start.ts --doctor",
     "model:fetch": "node --experimental-strip-types src/model/model-fetch.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run online:validate",
+    "check": "npm run typecheck && npm run config:example:check && npm run online:validate",
     "online": "node --experimental-strip-types src/cli/online.ts",
     "online:validate": "node --experimental-strip-types src/cli/online.ts --validate",
     "apps": "node --experimental-strip-types src/app/app-runner.ts",
@@ -46,7 +46,9 @@
     "plan-cli": "node --experimental-strip-types tools/plan_cli.ts",
     "picker-server": "node --experimental-strip-types src/cli/picker-server.ts",
     "learn": "node --experimental-strip-types tools/learn.ts",
-    "agent": "node --experimental-strip-types tools/learn.ts --json --yes"
+    "agent": "node --experimental-strip-types tools/learn.ts --json --yes",
+    "config:example": "node --experimental-strip-types tools/config-example.ts",
+    "config:example:check": "node --experimental-strip-types tools/config-example.ts --check"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

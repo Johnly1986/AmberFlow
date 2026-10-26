@@ -10,7 +10,7 @@
 npm ci
 npx playwright install chromium
 npm run doctor                         # 环境 / 配置 / 决策源体检
-npm run check                          # typecheck + online --validate（PR 门禁）
+npm run check                          # typecheck + 配置示例一致性 + online --validate（PR 门禁）
 npm run online -- --tier smoke         # 真实站点快速可达性
 npm run online -- --tier core          # 短流程
 npm run online -- --tier deep          # 长流程

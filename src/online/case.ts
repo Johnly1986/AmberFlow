@@ -8,13 +8,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { REPO } from "../support/paths.ts";
 import { validateSignalSpec } from "../engine/signals.ts";
+import { isSecretKey } from "../support/config-schema.ts";
 import type {
   OnlineBundle, OnlineCase, OnlineOracle, OnlineSite, OnlineSubgoal, OnlineTier,
 } from "./types.ts";
 
 const TIERS: readonly OnlineTier[] = ["smoke", "core", "deep", "probe"];
 const FORBIDDEN_URL = /(^|[/:])(testpages|bench\/fixtures|transfer\/site|ctrip\/site|semantic\/site|qunar\/results)(\/|$)|^file:/i;
-const SECRET_KEY = /(api[_-]?key|secret|password|access[_-]?token)/i;
 
 export function onlineRoot(root: string = REPO): string {
   return path.join(root, "online");
@@ -146,7 +146,7 @@ function checkSecrets(value: unknown, where: string, problems: string[]): void {
   }
   if (!isObject(value)) return;
   for (const [k, v] of Object.entries(value)) {
-    if (SECRET_KEY.test(k)) {
+    if (isSecretKey(k)) {
       if (typeof v !== "string" || !v.includes("{{env:")) {
         problems.push(`${where}.${k}: 凭据只能写成 {{env:NAME}} 或 {{env:NAME|default}}，不能是明文`);
       }

@@ -77,7 +77,9 @@ amber config show
 amber doctor
 ```
 
-`--provider NAME` 只用于本次实验/消融/兼容旧适配器，不写进配置。完整说明见 [docs/DECISION_SERVICE_CONFIG.md](docs/DECISION_SERVICE_CONFIG.md)。
+`--provider NAME` 只用于本次实验/消融/兼容旧适配器，不写进配置。配置键与默认值的唯一出处是
+`src/support/config-schema.ts`；`configs/amberflowrc.example.json` 由 `npm run config:example` 生成。
+完整说明见 [docs/DECISION_SERVICE_CONFIG.md](docs/DECISION_SERVICE_CONFIG.md)。
 
 ## 应用与录制
 
@@ -104,13 +106,14 @@ amber apps check <id>
 | `npm start -- --goal ... --url ...` | 一次性目标：演示 → 计划 → 执行 |
 | `npm run apps -- --app <id>` | 运行用户应用 |
 | `npm run online -- --tier …` | 真实站点测试套件 |
-| `npm run check` | `typecheck` + 线上用例离线校验 |
+| `npm run check` | `typecheck` + 配置示例一致性 + 线上用例离线校验 |
 | `npm run doctor` | 环境、配置、决策源体检 |
 | `npm run learn` | 演示一次，生成应用 |
 | `npm run plan:flow` | 一句话 + 种子页 → 语义模板 + 站点档案 |
 | `npm run semantic -- --app <id> --site <site>` | 运行语义模板 |
 | `npm run plan-cli -- …` | 计划 CRUD 与执行 |
 | `npm run model:fetch -- --from <url|路径>` | 安装本地决策模型产物 |
+| `npm run config:example` | 从配置 schema 重新生成示例 |
 | `npm run picker-server` | MV3 扩展的本地模型服务 |
 
 完整帮助：`npx amber --help`、`npx amber <command> --help`。
@@ -150,7 +153,7 @@ docs/           当前有效的设计/接入文档
 ## 开发
 
 ```bash
-npm run check                    # 类型检查 + 线上用例离线校验
+npm run check                    # 类型检查 + 配置示例一致性 + 线上用例离线校验
 npm run online -- --tier smoke   # 真实站点（需要网络）
 ```
 

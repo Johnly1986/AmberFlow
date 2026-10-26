@@ -26,6 +26,8 @@
 
 配置优先级与原有层叠一致：**CLI 旗标 > 环境变量 > 项目配置 > 用户配置 > 旧 rc > 内建缺省**
 （`amber config set` / `--project` / 环境变量三种渠道都行）。`amber config show` 对 API key 做掩码。
+配置键与默认值的唯一出处是 [src/support/config-schema.ts](../src/support/config-schema.ts)；
+示例由 `npm run config:example` 生成，`npm run check` 会校验示例没有漂移。
 
 ## 2. 地址归一化
 
@@ -67,8 +69,9 @@ amber config set AMBERFLOW_DECISION_MIN_OPTIONS 2   # JevK5 才需要
 
 ## 4. 与实验/兼容 provider 的关系（仅 `--provider`）
 
-- 旧的 `--provider token-plan|bailian|jevk5` 与它们各自的变量仍然有效（各自有实测过的提示词/选项下限/
-  池外校验/闸门刻度），适合做 A/B 对照；它们**不再从配置里选择**，只能命令行显式点名。
+- 旧的 `--provider token-plan|bailian|jevk5` 与它们各自的**环境变量**仍然有效（各自有实测过的提示词/选项下限/
+  池外校验/闸门刻度），适合做 A/B 对照；它们不属于配置面（`amber config set` 不认），也不再从配置里选择，
+  只能命令行显式点名 + 环境变量。
 - 迁移对照：
 
 | 旧 | 统一 |
