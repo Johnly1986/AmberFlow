@@ -243,7 +243,7 @@ function validateLearned(site: string, file: LearnedSiteFile): void {
 /** 站点档案的落盘点：`<dir>/<site>.profile.json`（人可读、可提交为迁移证据）。 */
 export class LearnedStore {
   /** 显式字段而非 parameter property：工具脚本跑在 `node --experimental-strip-types` 下，
-   *  它剥不掉参数属性（tests/project.test.ts 钉住这一条）。 */
+   *  它剥不掉参数属性（历史回归 钉住这一条）。 */
   readonly dir: string;
 
   constructor(dir: string) {

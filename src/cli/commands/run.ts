@@ -18,7 +18,6 @@ const OPTIONS = {
   "save-plan": { type: "string" as const },
   goal: { type: "string" as const },
   url: { type: "string" as const },
-  demo: { type: "boolean" as const },
   "dry-run": { type: "boolean" as const },
   headful: { type: "boolean" as const },
   headless: { type: "boolean" as const },
@@ -81,7 +80,7 @@ export async function runRun(args: string[], ctx: CliContext): Promise<number> {
   const positional = parsed.positionals;
   if (positional.length > 1) {
     throw usageError(`run 最多接受一个应用名（收到 ${positional.length} 个）`, {
-      hint: "模式只能选一个：应用 / --plan / --goal / --demo。",
+      hint: "模式只能选一个：应用 / --plan / --goal。",
       next: ["amber run --help"],
     });
   }
@@ -89,7 +88,6 @@ export async function runRun(args: string[], ctx: CliContext): Promise<number> {
   const app = positional[0];
   const goal = str(v.goal);
   const url = str(v.url);
-  const demo = bool(v.demo);
   const savePlan = str(v["save-plan"]);
   const headful = bool(v.headful);
   const headless = bool(v.headless);
@@ -101,11 +99,8 @@ export async function runRun(args: string[], ctx: CliContext): Promise<number> {
   if ((goal || url) && app) {
     throw usageError("应用名与 --goal 只能二选一", { hint: "要跑应用包用 amber run <id>；要一次性任务用 --goal + --url。" });
   }
-  if (demo && (app || goal || url || planGiven)) {
-    throw usageError("--demo 不能与应用 / --goal / --plan 同用");
-  }
-  if (planGiven && (app || goal || url || demo)) {
-    throw usageError("--plan 不能与应用 / --goal / --demo 同用");
+  if (planGiven && (app || goal || url)) {
+    throw usageError("--plan 不能与应用 / --goal 同用");
   }
   if (goal && !url) {
     throw usageError("--goal 需要同时给 --url", {
@@ -116,13 +111,13 @@ export async function runRun(args: string[], ctx: CliContext): Promise<number> {
     throw usageError("--url 需要同时给 --goal");
   }
   if (savePlan && planGiven) {
-    throw usageError("--save-plan 只用于 --goal / --demo；--plan 是输入文件");
+    throw usageError("--save-plan 只用于 --goal；--plan 是输入文件");
   }
   if (savePlan && app) {
-    throw usageError("--save-plan 只用于 --goal / --demo，不用于应用包");
+    throw usageError("--save-plan 只用于 --goal，不用于应用包");
   }
 
-  const mode = planGiven ? "plan" : goal ? "goal" : demo ? "demo" : app ? "app" : "pick";
+  const mode = planGiven ? "plan" : goal ? "goal" : app ? "app" : "pick";
   if (mode === "app" || mode === "pick") {
     validateAppFlags(v, mode);
   } else if (mode === "plan") {
@@ -137,9 +132,6 @@ export async function runRun(args: string[], ctx: CliContext): Promise<number> {
   if (mode === "plan") {
     return runPlanFile({ ...v, planPath: planFile ?? DEFAULT_PLAN }, ctx);
   }
-  if (mode === "demo") {
-    return runDemo(v, savePlan ?? DEFAULT_PLAN, headful, ctx);
-  }
   if (mode === "goal") {
     return runGoal(v, goal!, url!, savePlan ?? DEFAULT_PLAN, headful, ctx);
   }
@@ -147,7 +139,7 @@ export async function runRun(args: string[], ctx: CliContext): Promise<number> {
 }
 
 function validateAppFlags(v: Values, mode: "app" | "pick"): void {
-  if (str(v["save-plan"])) throw usageError("--save-plan 只用于 --goal / --demo");
+  if (str(v["save-plan"])) throw usageError("--save-plan 只用于 --goal");
   if (bool(v.reset) || bool(v.replan) || str(v.confirm)) {
     throw usageError("--reset / --replan / --confirm 只用于 --plan 模式", {
       hint: mode === "pick" ? "选定应用后不支持计划状态旗标。" : undefined,
@@ -157,7 +149,7 @@ function validateAppFlags(v: Values, mode: "app" | "pick"): void {
 }
 
 function validatePlanFlags(v: Values): void {
-  if (str(v["save-plan"])) throw usageError("--save-plan 只用于 --goal / --demo");
+  if (str(v["save-plan"])) throw usageError("--save-plan 只用于 --goal");
   if (bool(v["skip-data"])) throw usageError("--skip-data 只用于应用包");
   if (bool(v["allow-dangerous"])) throw usageError("--allow-dangerous 只用于应用包 / 一次性目标");
   if (str(v.out)) throw usageError("--out 暂不用于 --plan 模式", { hint: "计划执行器把结果写到计划同目录；--out 留给应用包运行。" });
@@ -454,54 +446,6 @@ async function runPlanFile(v: Values, ctx: CliContext): Promise<number> {
   });
 }
 
-async function runDemo(v: Values, savePlan: string, headful: boolean, ctx: CliContext): Promise<number> {
-  if (bool(v["dry-run"])) {
-    // demo 的计划是固定的，dry-run 不需要浏览器；直接生成/校验/落盘，保持与执行同一份计划。
-    const [{ demoPlan }, { PlanningRules }] = await Promise.all([
-      import("../start.ts"),
-      import("../../engine/plan.ts"),
-    ]);
-    const file = path.resolve(ctx.cwd, savePlan);
-    const plan = demoPlan(file);
-    const issues = new PlanningRules().problems(plan);
-    if (issues.length) throw usageError(`demo 计划不合法：${issues.join("; ")}`);
-    plan.save();
-    if (bool(v.json) || ctx.globals.json) {
-      emitJson(ctx, successEnvelope("run", {
-        mode: "demo", dry_run: true, path: savePlan, goal: plan.goal,
-        steps: plan.subgoals.map((s, i) => ({
-          index: i + 1, desc: s.desc, signal: s.signal, start_url: s.start_url ?? null,
-        })),
-        skipped: 0,
-      }, { next: [`amber run --plan ${savePlan}`] }));
-    } else {
-      say(ctx, `已生成 demo 计划（dry-run，未执行）：${savePlan}`);
-      say(ctx, `  ${plan.goal}`);
-      plan.subgoals.forEach((s, i) => say(ctx, `  [${i + 1}] ${s.desc}`));
-      say(ctx, `下一步：amber run --plan ${savePlan}`);
-    }
-    return 0;
-  }
-  const jsonMode = bool(v.json) || ctx.globals.json;
-  const args = ["--plan", savePlan];
-  if (headful) args.push("--headful");
-  if (str(v.provider)) args.push("--provider", str(v.provider)!);
-  if (!jsonMode) {
-    return ctx.runEntry("src/cli/start.ts", args, { cwd: ctx.cwd, env: ctx.env });
-  }
-  const code = await ctx.runEntry("src/cli/start.ts", args, {
-    cwd: ctx.cwd,
-    env: ctx.env,
-    stdoutToStderr: true,
-  });
-  return emitPlanStatus(ctx, {
-    file: path.resolve(ctx.cwd, savePlan),
-    pathLabel: savePlan,
-    mode: "demo",
-    code,
-  });
-}
-
 async function runGoal(
   v: Values, goal: string, url: string, savePlan: string, headful: boolean, ctx: CliContext,
 ): Promise<number> {
@@ -547,7 +491,7 @@ async function runPick(originalArgs: string[], ctx: CliContext): Promise<number>
     envelope.error = {
       code: "USAGE",
       message: "run 在 JSON 模式下需要一个应用或显式模式",
-      hint: "用 amber run <id> / --plan / --goal / --demo 指定。",
+      hint: "用 amber run <id> / --plan / --goal 指定。",
       next: ["amber run <id>", "amber apps list"],
     };
     emitJson(ctx, envelope);

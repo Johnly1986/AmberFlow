@@ -1,13 +1,9 @@
 /**
  * **探针集（probe set）**：把"线上到底能不能打开、能拿到什么"这套测量做成声明式数据。
  *
- * 应用层已经有一条纪律：站点知识属于 `apps/<id>/`，共享层代码不许出现站点标识
- * （`npm run apps:matrix` 的门禁 + 债计数）。探针驱动（`live-probe` / `live-capture` /
- * `ota-probe` / `qunar-probe`）原本是这条纪律的最后一块债：URL、UA 之外的站点特征、
- * 结果目录、判决要引用的目标 id 全写死在 `src/*.ts` 里。现在它们都搬进
- * `apps/<id>/pack.json` 的 `probe` 块，驱动只剩"怎么测"的机械动作。
- *
- *   apps/ctrip-live/pack.json   → { hosts, probe: { date, results_dir, http, alts, mobile, ... } }
+ * 站点知识属于站点档案；共享层代码不许出现站点标识。
+ * 探针声明（hosts / URL / 风控与登录标记 / 判决角色）属于用户应用或 `online/`，
+ * 驱动只剩"怎么测"的机械动作。
  *
  * `probe` 块与 `journey` **互斥可选**：一个应用可以只声明探针（测量型应用），也可以
  * 探针 + 旅程都有。加载期校验两件事（都为了不让声明"写了没用"）：

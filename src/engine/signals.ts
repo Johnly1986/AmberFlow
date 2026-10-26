@@ -195,7 +195,7 @@ export const SIGNAL_OPS: Readonly<Record<string, number>> = {
  *
  * Runtime values may be a scalar or a 1/2-element list: `checkSignal` unwraps a
  * single-element list, plan_cli parses `op=value` into a list, and
- * bench/cases.json — the frozen-plan format — writes bare scalars. Validation
+ * 线上用例的 signal 允许裸标量；校验器把单元素列表折成标量。
  * must accept the same shapes the executor accepts (and must not call `.length`
  * on a number).
  */

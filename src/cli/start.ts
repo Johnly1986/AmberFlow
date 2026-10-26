@@ -7,7 +7,6 @@
  * and the hard part of a plan is not the prose, it is the completion signal (a DOM fact
  * that is false before the step and true after it) plus naming the target.
  *
- *   npm start                                     # 开箱任务：仓库自带页面上跑一份真实计划
  *   npm start -- --goal "把商品加入购物车" --url <页面>   # 演示一次 → 归纳信号+点名目标 → 直接执行
  *   npm start -- --doctor                          # 只体检环境
  *
@@ -28,7 +27,6 @@ import { defaultPlanPath } from "../app/amberflow-home.ts";
 import * as browserEnv from "../browser/browser-env.ts";
 import { browserSession, BrowserMiddleware, type BrowserSession } from "../engine/executor.ts";
 import { extractElements, type Elem, type ElemPool } from "../engine/extraction.ts";
-import { REPO } from "../flow/flow.ts";
 import { induceHint } from "../model/hint-memory.ts";
 import { installLayaRuntime, LayaNotConfiguredError } from "../model/model.ts";
 import { checkArtifacts, missingPieces, onnxModelPath, type ModelArtifacts } from "../model/model-artifacts.ts";
@@ -149,8 +147,7 @@ export function doctorReport(p: Preflight): { ok: boolean; lines: string[] } {
     ...listDecisionProviders().filter((n) => !(BASELINE_PROVIDERS as readonly string[]).includes(n))];
   lines.push("决策源       有 AMBERFLOW_DECISION_BASE_URL → 线上服务（另配 _MODEL / _API_KEY 三件套）；"
     + "无地址 → 本地 laya（AMBERFLOW_DECISION_MODEL=english|multilingual）");
-  lines.push(`实验 provider ${selectable.join(" | ")}（仅 --provider NAME；基线对照 `
-    + "`npm run providers:baseline`）");
+  lines.push(`实验 provider ${selectable.join(" | ")}（仅 --provider NAME，不写进配置）`);
   lines.push(`LLM 规划/审计 ${p.llm ? "✓ 已配置" : "— 未配置（用内置替身，全流程照常）"}`);
   const ok = p.nodeOk && p.chromium !== null;
   if (!ok) {
@@ -161,34 +158,10 @@ export function doctorReport(p: Preflight): { ok: boolean; lines: string[] } {
   } else {
     lines.push("");
     if (!p.model) lines.push("规则模式也能跑：计划点名目标的步骤不需要模型权重。");
-    lines.push("现在就可以开始：npm start           # 在仓库自带页面上跑一份真实计划");
-    lines.push("               npm start -- --goal \"把商品加入购物车\" --url <你的页面>");
+    lines.push("现在就可以开始：npm start -- --goal \"把商品加入购物车\" --url <你的页面>");
+    lines.push("               npm run online -- --tier smoke     # 先看真实站点是否可达");
   }
   return { ok, lines };
-}
-
-/** The bundled job: two subgoals over `testpages/`, resolved entirely by plan-named targets. */
-export function demoPlan(planPath: string): TaskPlan {
-  const base = `file://${path.join(REPO, "testpages")}`;
-  return new TaskPlan(
-    "在示例商店把无线鼠标加入购物车并打开购物车页",
-    [
-      {
-        desc: "把 Wireless Mouse X200 加入购物车",
-        signal: { css_text_equals: ["[data-test=cart-count]", "1"] },
-        start_url: `${base}/product.html`,
-        target_hint: "[data-test=add-to-cart]",
-      },
-      {
-        desc: "打开购物车页",
-        signal: { url_contains: "cart.html" },
-        start_url: `${base}/product.html`,
-        target_hint: "[data-test=cart-link]",
-      },
-    ],
-    planPath,
-    {},
-  );
 }
 
 /** A CSS selector from the element's STABLE handles — never a positional guess. */
@@ -390,48 +363,6 @@ async function commandJob(
   }
 }
 
-/**
- * 开箱 demo 的完成判定：只认**子目标状态**，不认二手口径。
- * 两个方向都错过（2026-10-14 开箱测试轮审查）：`startsWith(String(traces.length))` 不带斜杠
- * 把 1/2（第二步阻塞）判成绿；带重试时 traces 比子目标数多，会把 2/2 的成功判成红。
- */
-export function demoSucceeded(rep: { plan: { subgoals: Array<{ status: string }> } }): boolean {
-  return rep.plan.subgoals.length > 0 && rep.plan.subgoals.every((s) => s.status === "done");
-}
-
-async function commandDemo(
-  planPath: string, headless: boolean, io: Io, deps: StartDeps, modelId?: string,
-): Promise<number> {
-  const plan = demoPlan(planPath);
-  const problems = new PlanningRules().problems(plan);
-  if (problems.length) throw new Error(`内置示例计划不合法：${problems.join("; ")}`);
-  io.out("开箱任务（仓库自带的示例商店，离线运行）：");
-  io.out(`  ${plan.goal}\n`);
-  const mw = new BrowserMiddleware({ confirmFn: () => true, ...(modelId === undefined ? {} : { modelId }) });
-  const url = plan.subgoals[0]!.start_url!;
-  const buf: string[] = [];
-  const sink: Io = { out: (l) => { buf.push(l); io.out(l); }, ask: io.ask };
-  const injected = deps.session ?? null;
-  const rep = await runPlan(mw as never, plan, {
-    startUrl: url, verbose: true,
-    ...(injected ? { sessionFactory: async () => injected } : {}),
-  });
-  io.out(`\n结果：${rep.completed}   步骤 ${rep.traces.length}   跳过 ${rep.skipped}   重试 ${rep.retried}`);
-  io.out(`每步的判定方式：${rep.traces.map((t) => t.method).join(", ") || "（无步骤）"}`);
-  io.out("");
-  io.out(`计划检查点：${planPath}`);
-  io.out("  （本次运行已把它更新；默认落在用户作用域，不进版本控制——想换位置就加 --plan /tmp/your-plan.json）");
-  io.out("");
-  io.out("这份计划全部由「计划点名目标 + DOM 信号」解决，没有用到模型权重。");
-  io.out("换成你自己的页面：npm start -- --goal \"<你要做的事>\" --url <页面地址>");
-  void headless;
-  // 完成与否只认**子目标状态**："N/M" 与 trace 计数都是二手口径——带重试时 traces 会比子目标
-  // 数多，`startsWith(String(traces.length))` 会把绿的判成红；不带斜杠（"1/2" 以 "1" 开头）
-  // 又会把只完成一半的开箱判成绿（2026-10-14 开箱测试轮审查发现的两个方向）。
-  const doneCount = rep.plan.subgoals.filter((s) => s.status === "done").length;
-  return rep.plan.subgoals.length > 0 && doneCount === rep.plan.subgoals.length ? 0 : 1;
-}
-
 export async function main(argv: string[] = process.argv.slice(2), io: Io = defaultIo, deps: StartDeps = {}): Promise<number> {
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（与 parseArgs 同一口气）。
   { const rc = applyConfiguredEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
@@ -441,7 +372,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     allowPositionals: true,
     options: {
       goal: { type: "string" }, url: { type: "string" },
-      doctor: { type: "boolean" }, demo: { type: "boolean" },
+      doctor: { type: "boolean" },
       "dry-run": { type: "boolean" }, headful: { type: "boolean" },
       target: { type: "string" }, provider: { type: "string" },
       plan: { type: "string", default: DEFAULT_PLAN_PATH },
@@ -496,7 +427,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     io.out("  npx playwright install chromium");
     return 2;
   }
-  // 智能缺省（apps/suite/start/bench 四个门同一实现）：解析并安装决策源。
+  // 智能缺省（apps/start/online 同一实现）：解析并安装决策源。
   // 本地 ONNX 就绪→本地；rc/env 配了在线 provider→在线；都没配→规则模式并**如实点名缺的是谁**——
   // 永不替用户换模型，也永不甩栈。
   let spec;
@@ -550,12 +481,12 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     io.out('  npm start -- --goal "把商品加入购物车" --url https://shop.example.com/p/1');
     return 2;
   }
-  return commandDemo(plan, headless, io, deps, localModelId);
+  io.out(USAGE);
+  return 2;
 }
 
 export const USAGE = `npm start — 一条命令开始一项工作
 
-  npm start                                        开箱任务：仓库自带页面上跑一份真实计划
   npm start -- --goal "把商品加入购物车" --url <页面>   演示一次 → 归纳完成信号 + 点名目标 → 执行
   npm start -- --doctor                            只体检环境（Node / chromium / 模型 / LLM）
   npm start -- --goal ... --url ... --dry-run      只生成计划，不执行
@@ -566,7 +497,7 @@ export const USAGE = `npm start — 一条命令开始一项工作
         --headful          显示浏览器窗口
 `;
 
-// 与 src/cli/bench.ts 等同一口径：fileURLToPath 而非 .pathname（后者在 Windows 是 "/E:/…"，
+// fileURLToPath 而非 .pathname（后者在 Windows 是 "/E:/…"，
 // 与 path.resolve(argv[1]) 的 "E:\…" 永不相等 ⇒ `npm start` 直接跑文件时 main 不执行）。
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exit(await main());

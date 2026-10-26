@@ -1,0 +1,15 @@
+{
+  "id": "python-home",
+  "site": "python",
+  "tier": "smoke",
+  "goal": "打开 python.org 首页并确认标题存在",
+  "start_url": "https://www.python.org/",
+  "tags": ["navigation", "public"],
+  "invariants": [
+    {
+      "id": "heading-visible",
+      "desc": "首页主标题包含 Python",
+      "signal": { "css_text_contains": ["body", "Python"] }
+    }
+  ]
+}

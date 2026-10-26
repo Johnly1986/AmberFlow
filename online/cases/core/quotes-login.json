@@ -1,0 +1,47 @@
+{
+  "id": "quotes-login",
+  "site": "quotes",
+  "tier": "core",
+  "goal": "在 Quotes to Scrape 登录后再登出",
+  "slots": {
+    "username": "{{env:ONLINE_QUOTES_USER|recon-user}}",
+    "password": "{{env:ONLINE_QUOTES_PASSWORD|recon-pass}}"
+  },
+  "subgoals": [
+    {
+      "desc": "填写演示账号并提交登录表单",
+      "start_url": "https://quotes.toscrape.com/login",
+      "target_hints": ["#username", "#password", "input[type=submit]"],
+      "slots": {
+        "username": "{{env:ONLINE_QUOTES_USER|recon-user}}",
+        "password": "{{env:ONLINE_QUOTES_PASSWORD|recon-pass}}"
+      },
+      "signal": { "css_exists": "a[href='/logout']" },
+      "retries": 2
+    },
+    {
+      "desc": "点击 Logout 回到未登录状态",
+      "start_url": "https://quotes.toscrape.com/",
+      "target_hint": "a[href~logout]",
+      "signal": {
+        "all_of": [
+          { "css_exists": "a[href='/login']" },
+          { "not": { "css_exists": "a[href='/logout']" } }
+        ]
+      },
+      "retries": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "signed-out",
+      "desc": "最终回到未登录状态",
+      "signal": {
+        "all_of": [
+          { "css_exists": "a[href='/login']" },
+          { "not": { "css_exists": "a[href='/logout']" } }
+        ]
+      }
+    }
+  ]
+}

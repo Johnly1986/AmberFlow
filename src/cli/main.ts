@@ -138,7 +138,7 @@ function parseInvocation(rawArgv: string[]): Invocation {
 
 function commandPath(command: string | null, rest: string[]): string {
   if (!command) return "amber";
-  if (["apps", "config", "plan", "model", "dev"].includes(command) && rest[0] && !rest[0].startsWith("-")) {
+  if (["apps", "config", "plan", "model", "online"].includes(command) && rest[0] && !rest[0].startsWith("-")) {
     return `${command} ${rest[0]}`;
   }
   return command;
@@ -213,14 +213,9 @@ async function dispatch(command: string, rest: string[], ctx: CliContext, rawRes
       const { runModel } = await import("./commands/model.ts");
       return runModel(rest, ctx);
     }
-    case "dev": {
-      const { runDev } = await import("./commands/dev.ts");
-      return runDev(rest, ctx);
-    }
-    case "legacy": {
-      const { runLegacy } = await import("./legacy.ts");
-      // 兼容层必须看到用户原样输入的旧旗标；全局解析只在错误/JSON 面做旁路。
-      return runLegacy(rawRest[0], rawRest.slice(1), ctx);
+    case "online": {
+      const { main: onlineMain } = await import("./online.ts");
+      return onlineMain(rest);
     }
     case "completion": {
       return completion(rest, ctx);
@@ -284,7 +279,7 @@ async function home(ctx: CliContext): Promise<number> {
       shown: apps.slice(0, 10),
       // 裸 `amber` 不在 PATH 时，`next` 里的写法照抄会 CommandNotFound——先说清楚。
       cli: { linked: invocation.linked, path: invocation.path, fallbacks: invocation.linked ? [] : [...INVOKE_FALLBACKS] },
-    }, { next: ["amber run demo-app", "amber record https://shop.example.com", "amber doctor"] }));
+    }, { next: ["amber online --tier smoke", "amber record https://shop.example.com", "amber doctor"] }));
     return 0;
   }
 
@@ -294,7 +289,7 @@ async function home(ctx: CliContext): Promise<number> {
   say(ctx, `  Chromium    ${chromium ? "✓" : "✗ 未找到"}${chromium ? `  ${chromium}` : ""}`);
   say(ctx, `  决策源      ${provider}`);
   say(ctx, "");
-  say(ctx, `应用（${user} 个用户 / ${apps.length - user} 个内置）`);
+  say(ctx, `应用（${apps.length} 个用户）`);
   const shown = apps.slice(0, 10);
   if (!shown.length) say(ctx, "  （没有发现应用）");
   for (const a of shown) {
@@ -303,7 +298,8 @@ async function home(ctx: CliContext): Promise<number> {
   if (apps.length > shown.length) say(ctx, `  … 还有 ${apps.length - shown.length} 个，运行 amber apps list 查看。`);
   say(ctx, "");
   say(ctx, "下一步：");
-  say(ctx, "  amber run demo-app                 先跑一个内置示例");
+  say(ctx, "  amber online --tier smoke          跑一轮真实站点可达性");
+  say(ctx, '  amber run --goal "把商品加入购物车" --url <页面>');
   say(ctx, "  amber record https://shop.example.com   录一条自己的流程");
   say(ctx, "  amber doctor                       环境有问题时先体检");
   if (!invocation.linked) {
@@ -420,7 +416,7 @@ export async function main(argv: string[] = process.argv.slice(2), options: Main
   const resolved = resolveConfig(baseEnv, cwd, invocation.explicitConfig);
   const command = invocation.command;
   const exemptConfigErrors = command === "config" || command === "doctor"
-    || command === "legacy" || command === null;
+    || command === "online" || command === null;
   if (resolved.errors.length && !exemptConfigErrors) {
     return reportError(ctx, commandPath(command, invocation.rest), new CliError("CONFIG",
       `配置不合法：\n${resolved.errors.map((e) => `  - ${e}`).join("\n")}`, {

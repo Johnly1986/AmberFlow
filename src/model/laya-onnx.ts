@@ -17,7 +17,7 @@
  * Everything here is lazy: constructing a runtime touches nothing, `load()`
  * checks the artifacts, and the 1.7 GB session/weights are only mapped on the
  * first `predict`. That keeps `npm test` green and fast on a box without the
- * checkpoint (see tests/laya-onnx.test.ts, which skips the heavy cases).
+ * checkpoint (see 历史回归, which skips the heavy cases).
  *
  * `node-port-poc/laya.mjs` proved the numbers (probs max|diff| 2.98e-5 vs Python
  * ORT); this file is that proof turned into a module, reusing `laya-format.ts`
@@ -452,7 +452,7 @@ class LayaOnnxAgent implements DecisionAgent {
     // greater than specified axis dim value [1]". Torch has no such limit, so the
     // Python reference answers it fine. Here the answer is trivial (one option is
     // the argmax, and the entropy confidence of a 1-option distribution is 1.0),
-    // so it is answered without a forward pass. Found by the fixture bench matrix
+    // so it is answered without a forward pass. Found by the historical matrix
     // (`spa-overlay-dismiss`: the overlay leaves exactly one pickable element).
     const answers: Record<string, Answer> = {};
     const runnable: Record<string, Question> = {};

@@ -148,7 +148,7 @@ Two things to know:
   DSH browser page. Over a headless server, give it a display and look at that display:
   ```bash
   xvfb-run -a -s "-screen 0 1440x900x24" dsh --profile web --no-open --port 3080   # whole host under Xvfb
-  # 或只包一次运行：xvfb-run -a npm run apps -- --app demo-app --headful
+  # 或只包一次运行：xvfb-run -a npm run online -- --tier smoke --headed
   # 要人眼看：再配 x11vnc / noVNC，或用 ffmpeg -f x11grab -i $DISPLAY 抓帧
   ```
 - Headed needs the **full chromium**. Measured here: `--headful` launches `chromium-*/chrome` with no
@@ -265,11 +265,4 @@ before a browser is launched.
 
 ### Dev Note
 
-The package is tested at two levels. `tests/bridge.spec.ts` mounts the plugin on a stub checkout whose
-CLIs mirror the real ones on the points the bridge depends on — `--dry` prints a plan and writes no
-artifact, `learn` refuses without `--script`, stdout carries log lines (one with a brace) before the
-JSON — and drives the four tools through `ctx.tools.execute`, covering argument assembly, provenance
-parsing, failure-only summarization, load-time validation, the refusal paths and the dry expansion.
-`tests/live.spec.ts` drives the real checkout through the same registry path: a recorded two-step app
-with an `ablate` arm (`stub` | `rules-only`; omit it and the real model runs), a `dry` expansion, a run forced to fail so the FAIL verdict is checked against a real
-artifact, the script-less refusal, and a real recording whose zero-forward replay gates the save.
+本包不再携带测试文件；在真实 DSH 进程里手工加载验证，或设 `DSH_ROOT` 后运行 `npm run setup && npm run build`。

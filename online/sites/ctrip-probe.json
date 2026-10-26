@@ -1,0 +1,9 @@
+{
+  "id": "ctrip-probe",
+  "hosts": ["flights.ctrip.com", "www.ctrip.com"],
+  "home": "https://www.ctrip.com/",
+  "locale": "zh-CN",
+  "timeout_ms": 45000,
+  "blocked_markers": ["Access Denied", "403 Forbidden", "whaleguard", "验证码", "安全验证"],
+  "login_markers": ["passport.ctrip.com", "/login"]
+}

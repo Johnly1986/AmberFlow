@@ -118,7 +118,7 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
     }, {
       exitCode,
       diagnostics: config.errors,
-      next: exitCode ? ["amber config show", "amber doctor --fix"] : ["amber run demo-app"],
+      next: exitCode ? ["amber config show", "amber doctor --fix"] : ["amber online --tier smoke"],
     });
     if (exitCode !== 0) {
       envelope.ok = false;

@@ -1,0 +1,27 @@
+{
+  "id": "python-search",
+  "site": "python",
+  "tier": "core",
+  "goal": "在 python.org 的 asyncio 搜索结果中打开第二页",
+  "subgoals": [
+    {
+      "desc": "在 asyncio 搜索结果页点击下一页",
+      "start_url": "https://www.python.org/search/?q=asyncio&submit=",
+      "target_hint": "a[href~page=2]",
+      "signal": { "url_contains": "page=2" },
+      "retries": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "results-second-page",
+      "desc": "第二页 URL 和正文仍指向 asyncio 搜索",
+      "signal": {
+        "all_of": [
+          { "url_contains": "page=2" },
+          { "css_text_contains": ["body", "asyncio"] }
+        ]
+      }
+    }
+  ]
+}

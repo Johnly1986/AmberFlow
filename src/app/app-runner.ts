@@ -8,7 +8,7 @@
  *        ↓
  *   验收（`invariants` 在**同一个浏览器会话的结束状态**上断言）
  *
- * 它**不分叉执行器**：浏览器步就是 `runSubgoalWithRetries`（bench 用的同一个入口，执行循环
+ * 它**不分叉执行器**：浏览器步就是 `runSubgoalWithRetries`（执行循环
  * 始终是 `BrowserMiddleware.run`），只是把会话的生命周期握在自己手里——会话在**第一个**浏览器
  * 步时才创建，并且推迟 `close()`，好让旅程结束后的不变量还能在同一页面/cookie 上求值。
  * 之所以不再整段交给 `runPlan`：旅程现在混了两种面（DOM / 进程），`runPlan` 只认识 DOM 步。
@@ -20,9 +20,9 @@
  *      `confirmToolStep`）点头才执行；拒绝会作为显式结果上报，不是静默跳过。
  *
  *   node --experimental-strip-types src/app/app-runner.ts --list
- *   node --experimental-strip-types src/app/app-runner.ts --app demo-app                  # 真模型（默认）
- *   node --experimental-strip-types src/app/app-runner.ts --app demo-app --ablate stub     # 消融：脚本桩
- *   node --experimental-strip-types src/app/app-runner.ts --app demo-app --dry          # 只展开计划
+ *   node --experimental-strip-types src/app/app-runner.ts --app <id>                  # 真模型（默认）
+ *   node --experimental-strip-types src/app/app-runner.ts --app <id> --ablate stub     # 消融：脚本桩
+ *   node --experimental-strip-types src/app/app-runner.ts --app <id> --dry             # 只展开计划
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -74,7 +74,7 @@ import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "../engine/plan.ts";
 /** 进程内运行序号：保证同一毫秒内连续两次运行也不会撞上同一个 `{run_id}`。 */
 let RUN_SEQ = 0;
 
-/** 相对 start_url 按仓库根解析成 file://（与 bench 同一口径）。 */
+/** 相对 start_url 按仓库根解析成 file://。 */
 export function startUrl(u: string): string {
   if (u.includes("://")) return u;
   return new URL(`file://${path.resolve(REPO, u)}`).href;
@@ -118,7 +118,7 @@ export interface AppRunOptions {
    */
   captureState?: boolean;
   /**
-   * `--force-hints off`（bench 同名旗标的 apps 臂）：**只在内存里**剥掉计划点名的
+   * `--force-hints off`：**只在内存里**剥掉计划点名的
    * `target_hint`/`target_hints`，让本来被规则包办的步改由决策层回答——"模型到底行不行"
    * 的对照跑法。**包文件一个字节不动**（它是被审计的冻结产物，剥完不许落回去）。
    * 结果 JSON 会写 `hint_ablation: true`：消融跑的产物不许冒充普通跑。
@@ -642,8 +642,8 @@ export async function runToolStep(
 export class AppRunConfigError extends Error {}
 
 /**
- * 启动期预检（P0-5，实测见 bench/IMPROVEMENT_BACKLOG.md I-1）：
- * `LAYA_ONNX_MODEL=/tmp/definitely-missing.onnx npm run apps -- --app demo-app` 之前会
+ * 启动期预检（P0-5）：
+ * `LAYA_ONNX_MODEL=/tmp/definitely-missing.onnx npm run apps -- --app <id>` 之前会
  * 把**数据腿与第一个工具步都执行掉**，然后在第一个需要模型的步被同一个配置错误挡住，
  * 并且**重试了 2 次**——配置错误是瞬时的，重跑一百遍还是同一句话，副作用却已经落了盘。
  *
@@ -820,7 +820,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const plan = expanded.plan;
   // 有一个人工步 = 整个旅程必须看得见浏览器（登录/验证码需要人操作）；注入会话时由调用方负责。
   const hasManual = expanded.steps.some((st) => st.adapter === "manual");
-  // 相对 start_url 按仓库根解析成 file://（与 bench 同一口径）：应用包写仓库内路径，
+  // 相对 start_url 按仓库根解析成 file://：应用包写仓库内路径，
   // 不写死绝对路径，换机器/换 checkout 目录仍然可跑。
   for (const sg of plan.subgoals) {
     if (sg.start_url) sg.start_url = startUrl(sg.start_url);
@@ -1342,7 +1342,7 @@ const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [-
 
 按 apps/<app>/pack.json 跑一条完整应用链路：数据腿 → 浏览器步/工具步 → 结束状态不变量
 应用也可以是隔离脚本（app.mjs / app.ts）：flow(ctx) 接管走向，运行时仍由引擎执行每一步
---ablate       消融臂：stub = 脚本桩，rules-only = 规则档（与 bench 同一取值集合）
+--ablate       消融臂：stub = 脚本桩，rules-only = 规则档
 --conf-floor N 置信度闸门刻度（0<N≤1）：换 provider（score_kind 不同）时缺省 0.25 不再成立，
                本旗标 = 本次覆盖；包可用 policy.conf_floor 声明；provider 可自报 floor
 --tiered-hint  P1 实验开关：hint 档内歧义向模型问更小的问题（默认关 = 行为逐字节不变）
@@ -1653,7 +1653,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
   { const rc = applyConfiguredEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
-  // 旗标表与 bench 共用一张（`appOptions()`）：同一个名字在两个入口是同一件事。
+  // 旗标表由 `appOptions()` 统一声明。
   const cli = parseCliArgs(argv, { allowPositionals: true, options: appOptions(), usage: USAGE });
   if (!cli.ok) return cli.code;
   const v = cli.values;
@@ -1738,7 +1738,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const n = ["http", "alts", "mobile", "capture"]
       .reduce((k, key) => k + (Array.isArray(sets[key]) ? (sets[key] as unknown[]).length : 0), 0);
     console.error(`app ${pack.id} 是测量型应用（探针集，${n} 个目标），没有 journey：`
-      + "探针数据是冻结记录（bench/live-retest/REPORT.md；`npm run probes:baseline -- --check` 校验），"
+      + "探针数据不再入库；真实站点测试请用 `npm run online -- --tier probe`。"
       + "或用 `npm run apps -- --app " + pack.id + " --dry` 只看声明。");
     return 2;
   }
@@ -1849,13 +1849,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     console.log(`（模型产物不齐——缺 ${missingPieces(artifacts).join("/")}；需要模型兜底的步会如实 block。`
       + `补齐：npm run model:fetch -- --from <url 或本地路径>）`);
   }
-  // 安装序列收敛进 applySpecToRuntime——apps/suite/start/bench 四个门共用这一个实现
+  // 安装序列收敛进 applySpecToRuntime——apps/start/online 共用这一个实现
   //（此前这里是手抄的一份、apps_suite 里还有第二份；"两份实现各扫各的"是本仓库的复发缺陷形状。
   //  细则注释跟着函数走了：两层包装各数什么、provider 为什么不套缓存，见 decision-provider.ts。）
   const applied = await applySpecToRuntime(spec);
 
   // R2：学习环的 sidecar。**学到的永不进被审计的包**（plan-cli `--learn-hints` 的同一条纪律，
-  // 由 tests/plan-cli-hints.test.ts 钉过：包文件逐字节不变，学到的只出现在 sidecar）。
+  // 由 历史回归 钉过：包文件逐字节不变，学到的只出现在 sidecar）。
   // 默认落 `$AMBERFLOW_HOME/hint-memory/<app>.json`（用户作用域，不写 checkout）；
   // `--hint-memory FILE` 显式指定。都不给 ⇒ null ⇒ 执行器与产物逐字节不变。
   let hintMemory: HintMemoryLike | null = null;

@@ -61,10 +61,10 @@ export function renamedHint(line: string): string | null {
 /* ------------------------------------------------------------------ 空命令 `--` */
 
 /**
- * 吃掉命令行里的**空命令** `--`（npm / shell 的参数分隔符：`npm run apps -- --app demo-app`）。
+ * 吃掉命令行里的**空命令** `--`（npm / shell 的参数分隔符：`npm run apps -- --app <id>`）。
  *
  * 它既不是旗标也不是位置参数，留在 argv 里只有一个后果：`parseArgs` 把它后面的旗标
- * 全当成位置参数吃掉——表现是"明明传了 `--app demo-app`，却像什么都没传"（apps 直接打印
+ * 全当成位置参数吃掉——表现是"明明传了 `--app <id>`，却像什么都没传"（apps 直接打印
  * 清单 + usage、exit 2）。Windows 的 shell 与不少包装脚本会把这个分隔符原样留给子进程，
  * 所以**每个入口**都得做这件事，而每个入口各做一遍就是本仓库的复发缺陷形状——放在这里，一处。
  */
@@ -87,10 +87,7 @@ export type CliValue = string | boolean | Array<string | boolean> | undefined;
 export type CliValues = Record<string, CliValue>;
 
 /**
- * `apps` 与 `bench` 的**共用旗标**——同一个名字在两个入口必须是同一件事。
- *
- * 两个入口共用同一张表：闸门刻度、学习环、消融等旗标在 apps 与 bench 同名同义；
- * 各自专属的（案例文件 / 应用包）另起一张。
+ * `apps` 的运行旗标：闸门刻度、学习环、消融等。
  * 模型名不走命令行：没有服务地址时由 `AMBERFLOW_DECISION_MODEL` 选本地 checkpoint。
  */
 export const SHARED_RUN_OPTIONS: CliOptions = {
@@ -101,33 +98,19 @@ export const SHARED_RUN_OPTIONS: CliOptions = {
   ablate: { type: "string" },
   /** 消融：内存里剥掉计划点名的 hint（只有 `off` 一档）。 */
   "force-hints": { type: "string" },
-  /** 置信度闸门刻度（0<N≤1）。bench 旧名 `--force-conf-floor` 仍认。 */
+  /** 置信度闸门刻度（0<N≤1）。 */
   "conf-floor": { type: "string" },
   /** R2 学习环：开，落点用默认 sidecar。 */
   "learn-hints": { type: "boolean" },
   /**
-   * R2 学习环的 sidecar 落点。`FILE` = 显式路径；bench 的 `on`（旧写法）= 默认 sidecar，
-   * 与 `--learn-hints` 同义——两个入口同一个旗标，值语义也对齐了。
+   * R2 学习环的 sidecar 落点。`FILE` = 显式路径；与 `--learn-hints` 同义。
    */
   "hint-memory": { type: "string" },
   quiet: { type: "boolean" },
   help: { type: "boolean" },
 };
 
-/** bench 专属：语料与对照跑法（apps 没有"用例文件"这层）。 */
-export const BENCH_ONLY_OPTIONS: CliOptions = {
-  cases: { type: "string" },
-  "mode-tag": { type: "string" },
-  only: { type: "string" },
-  "fixtures-only": { type: "boolean" },
-  "outcome-memory": { type: "string" },
-  "outcome-memory-file": { type: "string" },
-  "outcome-memory-mode": { type: "string" },
-  /** 规则层消融：只有 bench 有（apps 的规则档走 `--ablate rules-only`，不是开关）。 */
-  "force-rules": { type: "string" },
-};
-
-/** apps 专属：应用包与槽位（bench 直接吃语料，没有这层）。 */
+/** apps 专属：应用包与槽位。 */
 export const APP_ONLY_OPTIONS: CliOptions = {
   list: { type: "boolean" },
   app: { type: "string" },
@@ -143,16 +126,6 @@ export const APP_ONLY_OPTIONS: CliOptions = {
   replay: { type: "string" },
 };
 
-/** bench 的旧名（升级窗口）：**只认不列**——usage 里只出现对齐后的名字。 */
-const BENCH_LEGACY_OPTIONS: CliOptions = {
-  "force-conf-floor": { type: "string" },
-  "hint-memory-file": { type: "string" },
-};
-
-export function benchOptions(): CliOptions {
-  return { ...SHARED_RUN_OPTIONS, ...BENCH_ONLY_OPTIONS, ...BENCH_LEGACY_OPTIONS };
-}
-
 export function appOptions(): CliOptions {
   return { ...SHARED_RUN_OPTIONS, ...APP_ONLY_OPTIONS };
 }
@@ -165,7 +138,7 @@ export type CliParseResult =
 
 export interface CliParseSpec {
   options: CliOptions;
-  /** 给了就把 usage 一并打出来（apps/bench/start 的体例）；没给就只报一行。 */
+  /** 给了就把 usage 一并打出来（apps/start 的体例）；没给就只报一行。 */
   usage?: string;
   allowPositionals?: boolean;
   /** 输出去向（默认 console.error；注入式 CLI 接到自己的 io 上）。 */

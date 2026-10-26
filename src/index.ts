@@ -33,40 +33,8 @@ export * from "./engine/executor.ts";
 export * from "./engine/planner.ts";
 export * from "./flow/flow.ts";
 export * from "./cli/plan-cli.ts";
-// The drivers below each export a CLI `main`, which would collide under
-// `export *`: re-export their named pieces and keep the module under a namespace.
-export { BenchMiddleware, runCase, startUrl, type BenchCase, type BenchCaseResult } from "./cli/bench.ts";
-export * as bench from "./cli/bench.ts";
-export {
-  DEMO_ROWS, PORTAL, XLSX, buildPlan, configureAll, ensureXlsx, readXlsx, settingsUrl,
-  type IpResult, type IpRow,
-} from "./cli/ip-config.ts";
-export * as ipConfig from "./cli/ip-config.ts";
-export { FORMS, TYPE_TO_FORM, decideForm, fillForm, ensureXlsx as ensureCameraXlsx, maxLoaded } from "./cli/camera-entry.ts";
-export * as cameraEntry from "./cli/camera-entry.ts";
-// transfer migration layer: 6 replica inventories + the migration runner (namespaced `main`s).
-export * as transferData2 from "./data/transfer-data2.ts";
-export * as transferData3 from "./data/transfer-data3.ts";
-export * as transferData4 from "./data/transfer-data4.ts";
-export * as transferData5 from "./data/transfer-data5.ts";
-export * as transferData6 from "./data/transfer-data6.ts";
-export * as transferData7 from "./data/transfer-data7.ts";
-// transfer spec 机器（discoverSpecs/emitPlan/判分）现居 `src/flow/transfer-flow.ts`，按需直取。
-// Path A (fixed-action picker) + the flagship demo + the guard measurement.
-export { ATTACK_THRESHOLD, PAGES, SCENES, extractState } from "./cli/path-a.ts";
-export * as pathA from "./cli/path-a.ts";
-export { GOAL as LONG_TASK_GOAL } from "./cli/long-task.ts";
-export * as longTask from "./cli/long-task.ts";
-export { VARIANTS, measure } from "./cli/tune-guard.ts";
-export * as tuneGuard from "./cli/tune-guard.ts";
-// Path B: the local model service the MV3 extension talks to (namespaced `main`).
+// Path B：MV3 扩展用的本地模型服务（命名空间导出，避免 `main` 冲突）。
 export { createPickerServer, startPickerServer } from "./cli/picker-server.ts";
 export * as pickerServer from "./cli/picker-server.ts";
-// ctrip/transfer network + probe tools (each exports a CLI `main` -> namespaced).
-export * as h5Flights from "./data/h5-flights.ts";
-export { CTRIP, SKYBOOK, PROFILES } from "./data/profiles.ts";
-// qunar 线上用例统一走 `apps/qunar-live/pack.json`（配置即流程；旧驱动已删）。
+// 通用数据腿：站点知识在配置里，引擎本身不认识站点。
 export * as datasource from "./data/datasource.ts";
-// ctrip scenario: data + oracle + task (its `main` joins the namespaced set).
-// ctrip scenario: data + oracle（机器居 `src/data/ctrip-oracle.ts`，按需直取；驱动已删）。
-export * as ctrip from "./data/ctrip-data.ts";

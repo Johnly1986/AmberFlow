@@ -27,9 +27,7 @@ export const GLOBAL_USAGE = `AmberFlow — 冻结计划的浏览器自动化
   doctor    环境、配置、决策源体检
   config    查看 / 修改机器配置
   model     本地决策模型状态与安装
-
-维护者：
-  dev       套件、基准、对拍、测量（amber dev --help）
+  online    真实站点测试套件（校验 / smoke / core / deep / probe）
 
 全局选项：
   -h, --help       显示帮助
@@ -43,12 +41,12 @@ export const GLOBAL_USAGE = `AmberFlow — 冻结计划的浏览器自动化
   --timeout SEC    覆盖单步 / 整体超时（按命令定义）
 
 示例：
-  amber run --demo
-  amber run demo-app
+  amber online --tier smoke
+  amber run --goal "把商品加入购物车" --url https://shop.example.com/p/1
   amber record https://shop.example.com --name add-to-cart
   amber doctor
 
-退出码：0=成功 1=未完成 2=用法/配置错误 3=被策略挡住 4=质量门禁（仅 dev） 130=中断`;
+退出码：0=成功 1=未完成 2=用法/配置错误 3=未执行/被挡住 130=中断`;
 
 export const COMMANDS: readonly CommandSpec[] = [
   {
@@ -56,11 +54,8 @@ export const COMMANDS: readonly CommandSpec[] = [
     summary: "运行应用、计划或一次性目标",
     usage: `amber run [应用] [选项]
 amber run --plan [文件] [选项]
-amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]
-amber run --demo [--save-plan <文件>] [选项]`,
+amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]`,
     examples: [
-      "amber run --demo",
-      "amber run demo-app",
       'amber run --goal "把无线鼠标加入购物车" --url https://shop.example.com/p/1',
     ],
     flags: [
@@ -70,7 +65,7 @@ amber run --demo [--save-plan <文件>] [选项]`,
       "--save-plan <文件>        生成计划的保存位置；默认 ./.amberflow/plan.json",
       "--out <目录>              结果 JSON / Markdown 的落点",
       "--slot k=v                覆盖包声明的参数；可重复",
-      "--provider <名字>         决策源；默认 auto",
+      "--provider <名字>         仅本次实验/消融覆盖；默认三件套或本地模型",
       "--skip-data               跳过数据腿（旧 --no-sources）",
       "--allow-dangerous         放行危险工具步；不带则结构化拒绝并 exit 3",
       "--emit-trace <文件>       脚本应用：把本次执行轨迹（三个 sha + 逐次 ctx 调用）写成文件",
@@ -148,7 +143,7 @@ amber apps explain <脚本> [--json]
 amber apps emit <脚本> [--out <文件>] [--json]
 amber apps path <应用>
 amber apps remove <应用> [--yes] [--force]`,
-    examples: ["amber apps list", "amber apps show demo-app", "amber apps check transfer-slowjet",
+    examples: ["amber apps list", "amber apps check $AMBERFLOW_HOME/apps/my-app/app.mjs",
       "amber apps explain $AMBERFLOW_HOME/apps/my-app/app.mjs",
       "amber apps emit $AMBERFLOW_HOME/apps/my-app/app.mjs --out /tmp/my-app.json"],
     flags: [
@@ -224,36 +219,29 @@ amber model path [--json]`,
     related: ["doctor", "config"],
   },
   {
-    name: "dev",
-    summary: "套件、基准、对拍、测量",
-    usage: `amber dev suite [--only id,id] [--json] [--provider NAME] [--ablate]
-amber dev matrix [--json]
-amber dev verify
-amber dev bench [--cases 文件] [--out 目录] [--provider NAME] [--fixtures-only] ...
-amber dev parity [rules|extraction|executor|datasource|ctrip|transfer|all]
-amber dev measure <cache|hints|calibration|contribution|nominations|probes|metrics|gate>
-amber dev providers <baseline|probe|tokenplan|nominate> [--apps ...] [--providers ...] [--out ...]
-amber dev generate [--list|--check|--write ...]
-amber dev shortlist
-amber dev induce ...
-amber dev plan-flow ...
-amber dev semantic --app ID --site KEY ...
-amber dev serve picker [--host HOST] [--port PORT]
-amber dev legacy <ip-config|camera-entry|long-task|path-a|tune-guard>`,
+    name: "online",
+    summary: "真实站点测试套件",
+    usage: `amber online --validate
+amber online --list [--tier smoke|core|deep|probe|all|default]
+amber online [--tier smoke|core|deep|probe|all|default] [--case ID] [--site SITE]
+             [--headed] [--out DIR] [--json] [--provider NAME] [--require-all]`,
     examples: [
-      "amber dev suite --only demo-app",
-      "amber dev parity all",
-      "amber dev verify",
+      "amber online --validate",
+      "amber online --tier smoke",
+      "amber online --tier probe --require-all",
     ],
     flags: [
-      "--json                    只有 suite / matrix 包 envelope；其余子命令原样转发",
-      "--only id,id              只跑指定应用",
-      "--provider NAME           指定决策源",
-      "--out <目录>              产物落点",
-      "--fixtures-only           仅跑夹具（bench）",
-      "--ablate                  套件对照臂",
+      "--validate                离线校验全部 site/case（PR 门禁）",
+      "--list                    列出选中的 case",
+      "--tier                    缺省 default = smoke+core；all = smoke+core+deep",
+      "--case / --site           只跑一个 case / 站点",
+      "--headed                  显示浏览器窗口",
+      "--out DIR                 证据目录（默认 $AMBERFLOW_HOME/online-runs）",
+      "--require-all             blocked/unreachable 也按失败处理",
+      "--json                    stdout 只输出 summary JSON",
+      "--provider NAME           本次决策源覆盖",
     ],
-    related: ["run", "apps"],
+    related: ["run", "doctor"],
   },
 ];
 
@@ -267,7 +255,7 @@ export function globalHelp(includeAdvanced = false): string {
 
 高级选项（默认隐藏）：
   --ablate --without-hints --tiered-hint --min-confidence --nominate-provider
-  这些选项主要给 dev / 兼容层使用；用户命令只在确有必要时暴露。`;
+  这些选项主要给实验/消融使用；日常命令只在确有必要时暴露。`;
 }
 
 export function commandHelp(name: string): string {

@@ -101,7 +101,7 @@ export function orderElemsByFamily(elems: ElemPool, family: ElemFamily): ElemPoo
 /**
  * Element signature for stale-forbidden pruning. refs are POSITIONAL
  * (re-indexed on every scan), so after a DOM change a held `e0` can name a
- * different element than when it was forbidden — the overlay bench case proved
+ * different element than when it was forbidden — an overlay case proved
  * that poisons healthy elements.
  */
 export function esig(e: Elem): [string, string, string] {
@@ -688,7 +688,7 @@ export async function ariaInteractiveLines(page: PageLike): Promise<Array<[strin
  * Model-facing criteria: hybrid rendering — ARIA *role* (a11y normalization) with
  * OUR label text and attribute suffixes kept.
  *
- * Measured (testpages/product.html): old tag+label -> correct button 0.49 vs logo
+ * Measured on an e-commerce product page: old tag+label -> correct button 0.49 vs logo
  * 0.20; PURE aria role+name -> logo wins 0.59 vs 0.07 (regression); role + our
  * label/attrs -> 0.50 vs 0.18 (this function). The ` [test=..] -> href` suffixes
  * are load-bearing even though rules/hints never read this text.

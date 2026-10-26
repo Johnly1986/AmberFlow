@@ -3,7 +3,6 @@
  * 让流程从"写出来"变成**跑出来**。
  *
  *   人：      npm run learn                       # 连上你正开着的浏览器；你做一遍，或我按 goal 跑一遍
- *   批量：    npm run apps:gen -- --spec/--source # 上游数据/代码 → 包（已有，另一扇门）
  *   Agent：   npm run agent -- --goal "…" --url <页面> --json   # 一次调用，返回结构化结果 + 验收候选
  *
  * 设计原则（都来自使用者反馈，不是我的偏好）：
@@ -225,7 +224,7 @@ export async function learnFromActions(
   const kept = ind.candidates
     .filter((c) => c.stability >= 2 || c.kind === "url")
     .filter((c) => evalSignalOnState(c.signal, startState) === false && evalSignalOnState(c.signal, end) === true);
-  // 去重：① URL 候选只留**最短**的（`/cart.html`、`/testpages/cart.html`、`/AmberFlow/testpages/cart.html`
+  // 去重：① URL 候选只留**最短**的（`/cart.html`、`/shop/cart.html`、`/checkout/cart.html`
   // 说的是同一件事，短的那个还是判别力最强的）；② 同一选择器的只剩一条。
   const urls = kept.filter((c) => c.kind === "url")
     .map((c) => String((c.signal as { url_contains?: string }).url_contains ?? ""))

@@ -1,8 +1,6 @@
 # 应用脚本作者指南（flow / 声明式 · 校验 · 轨迹 · 扩展）
 
 > 面向"要接入/修改一条业务流程"的人（也面向替你写脚本的 Agent）。
-> 设计动机与实施状态见 [L2_CTX_API_DRAFT.md](L2_CTX_API_DRAFT.md)、[L2_IMPLEMENTATION_PLAN.md](L2_IMPLEMENTATION_PLAN.md)；
-> 审计发现见 [SCRIPT_AUTHORING_AUDIT.md](SCRIPT_AUTHORING_AUDIT.md)。
 
 ## 1. 两种形态，先选一个
 
@@ -14,7 +12,7 @@
 | 工具链 | 异步读取（`apps show/check/explain/run`） | 同步读取（矩阵/生成器/迁移工具也能读） |
 | 生成 | `amber apps new <id>`（默认） | `amber apps new <id> --kind data` |
 
-一条命令生成可跑骨架（用仓库自带的 `testpages/portal.html`，生成即可 check/dry-run）：
+一条命令生成可跑骨架（用 `https://example.com` 占位，生成后改成你的真实入口页）：
 
 ```bash
 amber apps new my-app                        # 默认 flow，落到 $AMBERFLOW_HOME/apps/my-app/app.mjs
@@ -84,7 +82,7 @@ export async function flow(ctx) {
 export const meta = (kit) => ({
   id: "price-watch", label: "盯价", goal: "读列表页最低价", hosts: [], slots: {},
   site: {
-    pages: { home: "testpages/portal.html" },                 // 角色 → URL（openPage 用）
+    pages: { home: "https://example.com" },                 // 角色 → URL（openPage 用）
     listExtract: {                                            // 命名行抽取（extract 用）
       entries: { rows: "nav.menu a", fields: { label: "." } }, // "." = 行自身文本
     },
@@ -113,10 +111,10 @@ export async function flow(ctx) {
 ```js
 // @amberflow:declarative-data —— 这一行是标记：它声明"本文件是数据，不是逻辑"
 const META = { id: "my-data", label: "…", goal: "…", hosts: [], slots: {}, invariants: [ … ] };
-const DATA = {};                       // 数据槽；`{ kind: "source", source: "demo-tool", select: … }` 是数据腿绑定
+const DATA = {};                       // 数据槽；`{ kind: "source", source: "my-tool", select: … }` 是数据腿绑定
 const JOURNEY = [                      // 只是数据：desc / start_url / target_hint(s) / signal / slots / when / retries
-  { desc: "打开页面", start_url: "testpages/portal.html", target_hint: "[data-test=entry-fixed]",
-    signal: { url_contains: "camera_a.html" } },
+  { desc: "打开页面", start_url: "https://example.com", target_hint: "h1",
+    signal: { url_contains: "example.com" } },
 ];
 export const meta = () => META;
 export const app = () => ({ data: DATA, exec: JOURNEY });
@@ -124,7 +122,6 @@ export const app = () => ({ data: DATA, exec: JOURNEY });
 
 - 手写时保持 `const META/DATA/JOURNEY = …` 这三个名字与标记不动（同步工具按固定形状解析，不执行代码）。
 - 想要循环/条件 → 用默认的 flow 形态；不要给声明式脚本塞函数（它会被当成普通值或校验失败）。
-- 由 `apps:gen` 生成的应用就是这种形态：**改来源（spec）再重新生成，不要手改**。
 
 ## 5. 完成信号与结束态不变量
 
@@ -143,7 +140,7 @@ export const app = () => ({ data: DATA, exec: JOURNEY });
 
 ```js
 // ① 命令行形式
-const a = await ctx.run("demo-tool", ["--flag"], { done: ctx.tool.exitOk(0) });
+const a = await ctx.run("my-tool", ["--flag"], { done: ctx.tool.exitOk(0) });
 // ② 声明形式（任意支持器；形状 = 声明式 journey 的一步）
 const b = await ctx.run({
   desc: "在远端跑一条只读命令",
@@ -215,11 +212,11 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 
 | 想加什么 | 触点（按顺序） | 验证台 |
 |---|---|---|
-| **ctx 新成员** | `Ctx` 接口 → 三个实现（`ctx.ts` / `ctx-dry.ts` / `ctx-replay.ts`）→ `tests/ctx.test.ts` 的 dry-vs-real 调用序列断言 | 同一脚本 dry 与真实运行的结构一致性测试 |
-| **meta 新字段** | `declarative.ts` 的 `META_FIELD_MAP`（**唯一清单**，序列化与降级共用）→（若需运行期支持）`ctx`/执行器 | 表驱动 round-trip + `apps:migrate --all --check` |
-| **新信号算子** | DOM 面：`signals.ts` 的 `DOM_SIGNAL_GRAMMAR` + `checkSignal`；进程面：`browser/tool-signals.ts` 的 `TOOL_SIGNAL_OPS` + `checkToolSignal`（校验走同一 walker） | `tests/signal-grammar.test.ts` / `tests/cli-transport` 等 |
-| **新应用支持器** | `app-adapters.ts` 实现 `AppAdapter`（kind/legacyKind/validateStep/expand/run）并注册；`ctx.run` 声明形式自动可用（它只按注册表分派） | 支持器自己的单测 + `tests/ctx-adapters.test.ts` |
-| **新 CLI 旗标** | `src/support/cli-args.ts` 选项 → `src/cli/registry.ts` help → 命令实现 → 转发到 app-runner（若适用） | 命令层测试（`tests/cli-harness.ts` 可断言转发参数） |
+| **ctx 新成员** | `Ctx` 接口 → 三个实现（`ctx.ts` / `ctx-dry.ts` / `ctx-replay.ts`） | 同一脚本 dry 与真实运行的结构一致性 |
+| **meta 新字段** | `declarative.ts` 的 `META_FIELD_MAP`（**唯一清单**，序列化与降级共用）→（若需运行期支持）`ctx`/执行器 | 手工加载/运行一个带新字段的包 |
+| **新信号算子** | DOM 面：`signals.ts` 的 `DOM_SIGNAL_GRAMMAR` + `checkSignal`；进程面：`browser/tool-signals.ts` 的 `TOOL_SIGNAL_OPS` + `checkToolSignal`（校验走同一 walker） | `amber apps check` + 手工执行 |
+| **新应用支持器** | `app-adapters.ts` 实现 `AppAdapter`（kind/legacyKind/validateStep/expand/run）并注册；`ctx.run` 声明形式自动可用（它只按注册表分派） | 手工执行一个使用该 adapter 的包 |
+| **新 CLI 旗标** | `src/support/cli-args.ts` 选项 → `src/cli/registry.ts` help → 命令实现 → 转发到 app-runner（若适用） | `amber <cmd> --help` + 手工执行 |
 
 ## 12. 命令速查
 
@@ -230,6 +227,6 @@ amber apps check [<id|路径>] / explain <id|路径> / emit <声明式脚本> [-
 amber run <id|路径> [--dry-run] [--headful] [--slot k=v] [--out DIR]
           [--allow-dangerous] [--conf-floor N] [--tiered-hint]
           [--emit-trace F] [--replay F] [--json]
-npm run apps:matrix     # 声明面度量（来源/步骤/代码行/泄漏/债）
-npm run apps:suite      # 全部旅程型应用验收（声明式 + flow 脚本两条臂；真模型臂；缺 ONNX 时按消融臂说明运行）
+npm run online          # 真实站点测试（smoke + core）
+npm run check           # typecheck + 线上用例离线校验
 ```

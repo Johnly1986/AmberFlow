@@ -678,7 +678,7 @@ export function apply(ctx: Context, config: Config): void {
       },
       seed: {
         type: 'string', required: true,
-        description: 'Seed page: a repo-relative path (semantic/site-a/index.html) or a URL.',
+        description: 'Seed page: a seed URL (or a repo-relative path).',
       },
       app: { type: 'string', required: true, description: 'App id to write apps/<id>/flow.json under.' },
       site: {

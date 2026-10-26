@@ -1,9 +1,0 @@
-<!DOCTYPE html>
-<html lang="zh">
-<head><meta charset="utf-8"><title>登记完成</title><style>body{font-family:sans-serif;max-width:640px;margin:40px auto}</style></head>
-<body>
-<main><h1 data-test="done-title">登记成功</h1><p data-test="done-serial"></p></main>
-<script>document.querySelector("[data-test='done-serial']").textContent =
-  new URLSearchParams(location.search).get("serial") || "";</script>
-</body>
-</html>

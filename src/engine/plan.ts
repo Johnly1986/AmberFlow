@@ -157,7 +157,7 @@ export function createPathWalk(
 export class PlanningRules {
   // NOTE: explicit fields, not constructor parameter properties — the repo's
   // tool scripts run under `node --experimental-strip-types`, which cannot strip
-  // parameter properties (tests/project.test.ts guards this).
+  // parameter properties (历史回归 guards this).
   maxSubgoals: number;
   requireSignal: boolean;
   requireStartUrl: boolean;
@@ -207,7 +207,7 @@ export class PlanningRules {
    *   调用方（应用包加载器）把旅程里**全部**步 id 传进来，边就按旅程校验而不是按计划的子集校验。
    * @param opts.slotKeys - 已知的数据袋键。给了就顺带校"命令绑定的键必须声明过"——
    *   槽位名打错在运行期才变成 `needs_value` 已经太晚（D6：配置类错误要在加载期红）。
-   *   不传（计划 CLI/bench 那条路）时不做这项检查，旧行为不变。
+   *   不传（计划 CLI 那条路）时不做这项检查，旧行为不变。
    */
   problems(plan: TaskPlan, opts: { extraIds?: ReadonlySet<string>; slotKeys?: ReadonlySet<string> } = {}): string[] {
     const issues: string[] = [];

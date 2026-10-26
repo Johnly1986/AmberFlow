@@ -1,0 +1,15 @@
+{
+  "id": "wiki-en-home",
+  "site": "wikipedia",
+  "tier": "smoke",
+  "goal": "打开英文维基百科首页并确认标题地标",
+  "start_url": "https://en.wikipedia.org/wiki/Main_Page",
+  "tags": ["navigation", "public", "cjk-free"],
+  "invariants": [
+    {
+      "id": "heading-visible",
+      "desc": "首页有 #firstHeading",
+      "signal": { "css_text_contains": ["body", "Welcome to Wikipedia"] }
+    }
+  ]
+}

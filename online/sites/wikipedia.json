@@ -1,0 +1,9 @@
+{
+  "id": "wikipedia",
+  "hosts": ["en.wikipedia.org", "zh.wikipedia.org"],
+  "home": "https://en.wikipedia.org/wiki/Main_Page",
+  "locale": "en-US",
+  "timeout_ms": 60000,
+  "blocked_markers": ["Access Denied", "403 Forbidden", "Request blocked", "Our servers are currently under maintenance"],
+  "login_markers": []
+}

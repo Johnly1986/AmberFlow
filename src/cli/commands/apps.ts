@@ -238,7 +238,7 @@ async function appsNew(args: string[], ctx: CliContext): Promise<number> {
     emitJson(ctx, successEnvelope("apps new", { app: id, kind, path: file }, { next }));
   } else {
     say(ctx, `✓ 已生成 ${file}（${kind === "flow" ? "flow 脚本" : "声明式数据脚本"}）`);
-    say(ctx, "  这是**可跑**的骨架（用仓库自带的 testpages/portal.html），先验证再改：");
+    say(ctx, "  这是**可跑**的骨架（把入口页换成你的真实 URL），先验证再改：");
     for (const n of next) say(ctx, `    ${n}`);
     say(ctx, "  改入口页 / 目标 / 完成条件见 docs/APP_SCRIPT_AUTHORING.md。");
   }
@@ -257,19 +257,19 @@ export const meta = (kit) => ({
   id: ${JSON.stringify(id)},
   label: ${JSON.stringify(id)},
   goal: "把这条流程要达成的结果写清楚（一句话）",
-  hosts: [],                          // 线上应用：声明允许访问的主机（导航信封 + 防泄漏门禁）
+  hosts: ["example.com"],              // 线上应用：声明允许访问的主机（导航信封 + 防泄漏门禁）
   slots: {},                          // 数据槽：值只能来自声明/观察（不写进 goal 文本）
   invariants: [                       // 结束态断言：用 ctx.done() 验收
-    { id: "on-target", desc: "结束时确实到了目标页", signal: kit.judge.url("camera_a.html") },
+    { id: "on-target", desc: "结束时确实到了目标页", signal: kit.judge.url("example.com") },
   ],
 });
 
 export async function flow(ctx) {
-  await ctx.open("testpages/portal.html");   // ← 你的入口页（仓库内相对路径或 http(s)://）
+  await ctx.open("https://example.com");   // ← 你的入口页（真实 http(s):// URL）
 
   const r = await ctx.step("点击「枪机 / 筒机 录入」", {   // ← 这一步做什么
     act: ctx.hint("[data-test=entry-fixed]"),              // ← 目标：ctx.hint / ctx.hints / ctx.command 闭集
-    done: ctx.judge.url("camera_a.html"),                  // ← 完成条件（证据面；绝不猜）
+    done: ctx.judge.url("example.com"),                    // ← 完成条件（证据面；绝不猜）
   });
   if (!r.ok) throw new Error(\`第一步没完成：\${r.stopCode ?? "blocked"}\${r.reason ? \`（\${r.reason}）\` : ""}\`);
 
@@ -284,28 +284,28 @@ export async function flow(ctx) {
 `;
 }
 
-/** 生成声明式数据脚本骨架（固定形状 + 标记：`apps:matrix` / `apps:gen` 等工具能同步读取）。 */
+/** 生成声明式数据脚本骨架（固定形状 + 标记）。 */
 function dataScriptTemplate(id: string): string {
   return `// @amberflow:declarative-data —— 声明式数据脚本（固定形状；想写循环/条件请用 --kind flow）
-// 数据 + 旅程 + 验收三段，全部是 JSON 可表达的字面量；工具链（apps:matrix / apps:gen /
-// apps:migrate）能同步读取与比对。手写这个形状时保持 "const META/DATA/JOURNEY = ..." 原样。
+// 数据 + 旅程 + 验收三段，全部是 JSON 可表达的字面量；手写这个形状时保持
+// "const META/DATA/JOURNEY = ..." 原样。
 const META = {
   "id": ${JSON.stringify(id)},
   "label": ${JSON.stringify(id)},
   "goal": "把这条流程要达成的结果写清楚（一句话）",
-  "hosts": [],
+  "hosts": ["example.com"],
   "slots": {},
   "invariants": [
-    { "id": "on-target", "desc": "结束时确实到了目标页", "signal": { "url_contains": "camera_a.html" } }
+    { "id": "on-target", "desc": "结束时确实到了目标页", "signal": { "url_contains": "example.com" } }
   ]
 };
 const DATA = {};
 const JOURNEY = [
   {
     "desc": "点击「枪机 / 筒机 录入」",
-    "start_url": "testpages/portal.html",
+    "start_url": "https://example.com",
     "target_hint": "[data-test=entry-fixed]",
-    "signal": { "url_contains": "camera_a.html" }
+    "signal": { "url_contains": "example.com" }
   }
 ];
 

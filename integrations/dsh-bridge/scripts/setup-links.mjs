@@ -3,12 +3,12 @@
  * Link what this package needs into `node_modules`.
  *
  * Two different owners:
- * - the TOOLCHAIN (typescript / vitest / @types) comes from this repository, because the package now
+ * - the TOOLCHAIN (typescript / @types) comes from this repository, because the package now
  *   lives inside AmberFlow and builds with that checkout's tooling;
  * - the HOST packages (`@deepseek-ai/*`) come from a DSH installation, because this package is a DSH
  *   plugin: the running DSH process provides those, and they are what it resolves at runtime too.
  *
- * The links are compile/test-time only. At runtime DSH loads the plugin under tsx from its own
+ * The links are compile-time only. At runtime DSH loads the plugin under tsx from its own
  * checkout, whose path mappings resolve the host packages to the same sources — one module instance.
  *
  * `DSH_ROOT` selects the installation to build against.
@@ -32,7 +32,7 @@ const HOST = {
   '@deepseek-ai/dsh-system-prompt': 'packages/core/system-prompt',
 }
 /** Tooling, relative to this repository's node_modules. */
-const TOOLING = ['typescript', 'vitest', '@types']
+const TOOLING = ['typescript', '@types']
 
 let made = 0
 let missing = 0

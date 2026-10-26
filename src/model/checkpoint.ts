@@ -3,7 +3,7 @@
  *
  * 模型名只有一个配置键（`AMBERFLOW_DECISION_MODEL`）：
  *   - 没有 `AMBERFLOW_DECISION_BASE_URL`：它选本地 checkpoint（`english` / `multilingual`；
- *     bench 额外支持 `router`）；
+ *     测试臂额外支持 `router`）；
  *   - 有 `AMBERFLOW_DECISION_BASE_URL`：它作为该线上服务的模型名。
  *
  * 本地模型只在**没有服务地址**时使用；因此把在线模型名填进本地模式会在开跑前报错，而不是
@@ -22,7 +22,7 @@ export function configuredDecisionModel(env: NodeJS.ProcessEnv = process.env): s
 
 /**
  * 本地 checkpoint 名：配置 > 包声明 > `english`。
- * 允许集合按入口给（apps 不接受 `router`；bench 的 router 是一个测量臂）。
+ * 允许集合按入口给（apps 不接受 `router`；`router` 是测量臂）。
  */
 export function resolveLocalCheckpoint(
   env: NodeJS.ProcessEnv = process.env,

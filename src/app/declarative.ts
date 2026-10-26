@@ -21,7 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { AppPack, PackSite } from "./app-pack.ts";
 
-/** 标记：只有带它的 `.mjs` 才算"数据脚本"（别的代码文件仍然算逻辑，见 apps:matrix）。 */
+/** 标记：只有带它的 `.mjs` 才算"数据脚本"（别的代码文件仍然算逻辑）。 */
 export const DECLARATIVE_MARKER = "@amberflow:declarative-data";
 
 /**
@@ -296,7 +296,7 @@ export function lowerDeclarative(meta: ScriptMeta, draft: ScriptDraft): AppPack 
   return pack as unknown as AppPack;
 }
 
-/** IR → 声明式脚本源码。**只搬运，不发明**（迁移与 `apps:gen` 共用；打标记 = 数据）。 */
+/** IR → 声明式脚本源码。**只搬运，不发明**（打标记 = 数据）。 */
 export function packToScriptSource(pack: AppPack): string {
   const raw = pack as unknown as Record<string, unknown>;
   const meta: Record<string, unknown> = {};
@@ -312,7 +312,7 @@ export function packToScriptSource(pack: AppPack): string {
   const journey = (raw["journey"] ?? []) as unknown[];
   return `// ${DECLARATIVE_MARKER} —— 本文件是**数据**（迁移/生成），不是逻辑：
 //   应用目录仍受"0 行逻辑代码"约束；只有带这个标记的文件允许出现在 apps/<id>/ 下。
-// 由 \`npm run apps:migrate -- --app ${String(raw["id"] ?? "?")} --write\` 或 apps:gen 生成；改来源再重新生成，不要手改。
+// 由外部生成器产出；改来源再重新生成，不要手改。
 const META = ${JSON.stringify(meta, null, 2)};
 const DATA = ${JSON.stringify(data, null, 2)};
 const JOURNEY = ${JSON.stringify(journey, null, 2)};

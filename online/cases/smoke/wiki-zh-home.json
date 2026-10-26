@@ -1,0 +1,16 @@
+{
+  "id": "wiki-zh-home",
+  "site": "wikipedia",
+  "tier": "smoke",
+  "goal": "打开中文维基百科首页并确认标题地标",
+  "model": "multilingual",
+  "start_url": "https://zh.wikipedia.org/wiki/Wikipedia:%E9%A6%96%E9%A1%B5",
+  "tags": ["navigation", "public", "cjk"],
+  "invariants": [
+    {
+      "id": "heading-visible",
+      "desc": "首页标题含维基百科",
+      "signal": { "css_text_contains": ["#firstHeading", "维基百科"] }
+    }
+  ]
+}

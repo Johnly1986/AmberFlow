@@ -27,10 +27,7 @@
   ],
   "scripts": {
     "setup": "node scripts/setup-links.mjs",
-    "build": "node node_modules/typescript/bin/tsc -b tsconfig.json",
-    "test": "npm run build && node node_modules/vitest/vitest.mjs run",
-    "test:offline": "npm run build && node node_modules/vitest/vitest.mjs run tests/bridge.spec.ts tests/service.spec.ts tests/client.spec.ts",
-    "test:live": "npm run build && node node_modules/vitest/vitest.mjs run tests/live.spec.ts"
+    "build": "node node_modules/typescript/bin/tsc -b tsconfig.json"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "*"
@@ -46,7 +43,6 @@
     "@deepseek-ai/dsh-tools": "*",
     "@deepseek-ai/schemastery": "*",
     "typescript": "*",
-    "vitest": "*",
     "@deepseek-ai/cordis-plugin-loader": "*",
     "@deepseek-ai/dsh-settings": "*"
   },

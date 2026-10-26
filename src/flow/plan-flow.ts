@@ -17,7 +17,7 @@
  * （红线 2——计划阶段没有"重放"可言，模板第一次跑就是首迁，回填环自己收第一站）。
  *
  *   node --experimental-strip-types src/flow/plan-flow.ts \
- *     --goal "在携程订5月18日昆明到北京价格最低的机票" --seed semantic/site-a/index.html \
+ *     --goal "订5月18日昆明到北京价格最低的机票" --seed https://example.com \
  *     --app flight-cheapest-planned --site site-a --yes
  *   迁移模式（模板已存在 = 只为本站产档案、必要时放宽语义目标的同义词）：
  *   node --experimental-strip-types src/flow/plan-flow.ts --goal "同上" --seed .../site-b/home.html \

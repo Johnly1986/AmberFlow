@@ -1,0 +1,9 @@
+{
+  "id": "python",
+  "hosts": ["www.python.org", "python.org"],
+  "home": "https://www.python.org/",
+  "locale": "en-US",
+  "timeout_ms": 60000,
+  "blocked_markers": ["Access Denied", "403 Forbidden", "Request blocked"],
+  "login_markers": []
+}

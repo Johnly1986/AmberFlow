@@ -304,7 +304,7 @@ export interface AppPack {
    * 这个包是**生成的**：`{ spec, plan_sha256 }`（见 `tools/spec-to-pack.ts`）。
    *
    * 它把"对齐"从"两处独立写的东西互验"变成一个构造性质：旅程 = `emitPlan(spec)` 的展开结果，
-   * 而 `plan_sha256` 是展开内容的指纹——改包、改 spec 都会让 `npm run apps:gen -- --check` 变红。
+   * 而 `plan_sha256` 是展开内容的指纹——改包或改来源都会让它变化。
    * 人写的部分（`invariants` / `notes`）仍然是这个包的一部分，生成器只搬运、不发明。
    */
   generated_from?:
@@ -378,7 +378,7 @@ export function appDirs(): string[] {
  *   - `named`  —— **由声明解决、不依赖模型兜底**的：`hinted` 加上用 `commands` 命令闭集点名的步
  *     （P2 那类步明确"绝不退回全池、绝不问模型"，所以它同样是声明在承重）。
  *
- * 为什么放在这里、并且只有一份实现：这两个数被 `apps:suite` 的列、`apps:matrix`、
+ * 为什么放在这里、并且只有一份实现：这两个数被运行结果与线上套件读取，
  * `tools/arch-metrics.ts` 与两张图同时引用——它们一旦有两份实现，就会有两个值
  * （本轮已经为这类事付过一次账）。工具步没有 DOM 目标，天然不计入分母。
  */
@@ -1021,7 +1021,7 @@ export function validatePack(pack: AppPack,
       // 两种上游二选一：spec 文件，或 `<模块>#<导出名>`（导出函数返回一份应用级计划）
       const kind = typeof g["spec"] === "string" ? "spec" : typeof g["source"] === "string" ? "source" : null;
       if (kind === null) {
-        p.push("generated_from needs either .spec or .source (regenerate with npm run apps:gen)");
+        p.push("generated_from needs either .spec or .source");
       } else if (kind === "spec" && typeof g["source"] === "string") {
         p.push("generated_from must not carry both .spec and .source");
       } else {
@@ -1030,7 +1030,7 @@ export function validatePack(pack: AppPack,
           p.push(`generated_from.${kind} must be a non-empty string`);
         } else if (kind === "spec") {
           if (!fs.existsSync(path.resolve(REPO, raw))) {
-            p.push(`generated_from.spec ${JSON.stringify(raw)} does not exist (regenerate with npm run apps:gen)`);
+            p.push(`generated_from.spec ${JSON.stringify(raw)} does not exist`);
           }
         } else {
           const [file, fn] = raw.split("#");
@@ -1042,7 +1042,7 @@ export function validatePack(pack: AppPack,
         }
       }
       if (typeof g["plan_sha256"] !== "string" || !/^[0-9a-f]{64}$/.test(String(g["plan_sha256"]))) {
-        p.push("generated_from.plan_sha256 must be a sha256 hex string (regenerate with npm run apps:gen)");
+        p.push("generated_from.plan_sha256 must be a sha256 hex string");
       }
       for (const k of Object.keys(g)) {
         if (!["spec", "source", "plan_sha256"].includes(k)) p.push(`generated_from.${k}: unknown key`);

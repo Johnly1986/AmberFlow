@@ -1,0 +1,16 @@
+{
+  "id": "hn-home",
+  "site": "hn",
+  "tier": "smoke",
+  "goal": "打开 Hacker News 首页并确认提交列表存在",
+  "start_url": "https://news.ycombinator.com/",
+  "tags": ["navigation", "public"],
+  "invariants": [
+    {
+      "id": "stories-visible",
+      "desc": "首页有 story 列表",
+      "signal": { "css_exists": "tr.athing" }
+    }
+  ],
+  "oracle": { "kind": "css_count", "selector": "tr.athing", "min": 1 }
+}

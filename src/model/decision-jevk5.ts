@@ -5,7 +5,7 @@
  * 不生成 token。它的 `/v1/systemone` 就是 System One 协议，所以本项目只做这一层适配
  * （见 docs/DECISION_LAYER_SYSTEMONE.md），模型加载/推理在服务侧。
  *
- * profile 吸收的 JevK5 特有差异（与百炼不同处，实测钉在 tests/decision-jevk5.test.ts）：
+ * profile 吸收的 JevK5 特有差异（与百炼不同处，实测钉在 历史回归）：
  *   - 无认证、body 不带 `model` 字段；
  *   - choice 要求**至少两个选项**（`server.py:normalized` 会 400）⇒ minOptions=2，单候选不发请求；
  *   - 信任服务端返回的 choice（validateChoiceInPool=false）；

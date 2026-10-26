@@ -51,8 +51,8 @@
   会得到结构化原因 `manual_handler_error: ... needs an interactive terminal`。
 - 测试/嵌入方注入 `manualHandler({desc, instructions, url})`；返回 `false` = 人放弃，
   该步记 `done:false, reason:"declined"`，整个旅程 `ok=false`。
-- `apps:suite` 是批处理：**总是**把含 `manual` 步的应用如实跳过（跳过 ≠ 通过），
-  不会挂在那里等人；人工步请在终端里直接用 `npm run apps -- --app <id>` 单跑。
+- 批处理/自动化入口遇到 `manual` 步会如实跳过（跳过 ≠ 通过），不会挂在那里等人；
+  人工步请在终端里直接用 `npm run apps -- --app <id>` 单跑。
 - 人工步**不存账号/密码**、不自动识别验证码/2FA；本版本没有凭据保管。
   要做自动重登是另一个更高风险的功能，必须单独评审（OS keychain/加密库、origin 白名单、
   人工过闸、审计与删除）。
@@ -79,10 +79,7 @@
 - 站点 ToS 禁止自动化的，不应使用本功能；线上验收需授权与频率预算。
 - 不提供指纹伪装、代理池、UA 轮换等规避手段；这些既不在本功能里，也不该进仓库。
 
-## 5. 测试
+## 5. 验证
 
-```bash
-npx vitest run tests/app-manual-pace.test.ts
-```
-
-覆盖：加载期校验、人确认/放弃、非 TTY、DOM 信号无页面、`pace` 优先级与坏值。
+在真实站点或你自己的应用上跑一次带 `manual` 步的流程：`npm run apps -- --app <id>`；
+确认浏览器可见、终端提示可交互、产物里的 `manual_steps` 与 `pace` 字段正确。

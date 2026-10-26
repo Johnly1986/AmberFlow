@@ -127,7 +127,7 @@ interface ValidationItem {
 /** A failure that maps 1:1 onto a FastAPI HTTPException / validation response. */
 class HttpError extends Error {
   // NB: explicit fields, not parameter properties — `node --experimental-strip-types`
-  // (tests/project.test.ts) cannot strip parameter properties.
+  // (历史回归) cannot strip parameter properties.
   readonly status: number;
   readonly body: unknown;
 

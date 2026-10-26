@@ -16,7 +16,6 @@
 | `client-root.js` | **生成文件**：仓库根安装门的 client bundle（`node scripts/client-root-sync.mjs` 重新生成） |
 | `scripts/client-root-sync.mjs` | `client.js` → `client-root.js` 的唯一生成器（改 id/行 key；测试钉住一致性） |
 | `locale/` `icon.svg` | 插件卡片的显示文案与图标（`locale/en.json` / `locale/zh.json` 提供 meta 标题/描述） |
-| `tests/` | 两层：`bridge`/`service`/`client`（离线、桩 checkout、客户端注册契约）与 `live`（真浏览器 + 真 checkout） |
 | `cordis.patch.yml` | bundle 层：装进 profile 即注册四个工具；`repoPath` 指向本仓库根 |
 | `scripts/setup-links.mjs` | 链入依赖：工具链取自本仓库，宿主包取自 DSH 安装 |
 | `lib/` | 构建产物（git 忽略），入口 `lib/types/index.js` |
@@ -31,18 +30,15 @@
 ```bash
 npm run setup          # 链依赖；DSH_ROOT=/path/to/deepseek-harness 指定宿主安装
 npm run build          # tsc -b → lib/types/*.js + *.d.ts（不需要打包器：tsc 会把 ./x.ts 改写成 ./x.js）
-npm run test:offline   # 73 条，离线，CI 可跑
-npm run test:live      # 真机；需要 chromium + 本仓库，录制那条还需要 ONNX 产物
-npm test               # build + 全部
+npm run build          # 只编译；桥接测试已随离线测试资产一并删除
 ```
 
-本仓库的门禁（`bash bench/smoke.sh`）里有一步 **2d** 会跑它的离线测试——**只有**设了 `DSH_ROOT`
-且那确实是一份 DSH 安装时才跑，否则打印 SKIP 原因跳过。跳过不等于通过。
+本仓库的 PR 门禁只做 `typecheck` 与线上用例声明校验，不跑桥接测试。
+要验证桥接，设 `DSH_ROOT` 后在真实 DSH 进程里手工加载。
 
 `npm run setup` 建立的链接**只服务于编译期**。运行时不需要它们：DSH 进程自己提供宿主包，并按它
 checkout 的 tsconfig paths 解析到这些包的**源码**——插件因此与宿主共用同一个模块实例。
-本仓库自己的 `vitest.config.ts` 把 `integrations/**` 排除在外，所以本包的 `*.spec.ts` 不会混进
-引擎的 873 条测试。
+仓库不再有统一的 vitest 配置；桥接包是独立包，测试文件已删除。
 
 > 双语文档：`README.md` / `README.zh.md` 两边同步维护。原来那份 `README.i18n.yaml`（DSH 仓库的
 > "中英段落哈希配对记录"）已删除——校验它的门禁脚本住在 DSH 仓库里、只认自己仓库内的路径，

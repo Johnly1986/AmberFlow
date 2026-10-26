@@ -5,8 +5,8 @@
  * `decision-model-preview`，与百炼 workspace 端点**同一种协议**；同一个 base 上还挂着 OpenAI
  * 兼容的 chat 模型（qwen3.x / glm-5.x / deepseek-v4.x，`/chat/completions`）——那是 SystemTwo
  * （规划/审计/老师）的通道，不归本 provider 管。
- * **端点只从环境读（`TOKEN_PLAN_ENDPOINT`）**：共享层的"外部主机不许写死"纪律（apps:matrix 的
- * 泄漏门禁）与 LLM 的 `OPENAI_BASE_URL` 同一条——完整 URL 见 docs/DECISION_PROVIDER_TOKENPLAN.md。
+ * **端点只从环境读（`TOKEN_PLAN_ENDPOINT`）**：共享层的"外部主机不许写死"纪律
+ * 与 LLM 的 `OPENAI_BASE_URL` 同一条。
  *
  * 2026-10-15 实测（`POST …/compatible-mode/v1/systemone`，token 只从环境读）：
  *   - choice 3 选项：`{answers:{act:{type:"choice",choice,confidence:0.97,probabilities:{e1:0.98,e2:0.02,e3:0}}}}`

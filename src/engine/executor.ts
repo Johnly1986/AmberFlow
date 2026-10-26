@@ -3,7 +3,7 @@
  * `layaapp/executor.py`.
  *
  * `BrowserMiddleware` is THE execution loop — one implementation shared by the
- * demos, the CLI, the batch entries and the benchmark harness (BenchMiddleware
+ * the CLI, the app layer and the online test suite (all share this loop)
  * subclasses it and only picks the checkpoint / flips ablation switches). Per step
  * it discovers interactive elements (`extraction.ts`), resolves the pick by rule
  * or plan-named hint (`rules.ts`), otherwise asks laya, gates on confidence and
@@ -153,7 +153,7 @@ type Sig = [string, string, string];
  * Structured stop cause (docs/ARCHITECTURE_REVIEW.md D4 / P0-2).
  *
  * The loop used to terminate on 12 free-text `stop_reason` strings, so every
- * downstream consumer (apps:suite exit codes, the DSH bridge, reports, refusal
+ * downstream consumer (online suite exit codes, the DSH bridge, reports, refusal
  * labels) had to STRING-MATCH prose. `stop_code` is the data; `stop_reason`
  * stays the human rendering — byte-identical to what the frozen parity corpus
  * records (the Python reference asserted those strings; fixture-level rule:
@@ -793,7 +793,7 @@ export class BrowserMiddleware {
    */
   decision: DecisionProvider | null = null;
   /**
-   * 风险头调用失败的原因（null = 没失败过）。报告与 `apps:suite` 要把它显式说出来：
+   * 风险头调用失败的原因（null = 没失败过）。报告与线上套件要把它显式说出来：
    * 一次"退化成关键词判定"的运行和一次正常运行**不是同一件事**，不许混在同一个绿色里。
    */
   riskDegraded: string | null = null;
@@ -848,7 +848,7 @@ export class BrowserMiddleware {
     // **决策提供者层的入口**（docs/DECISION_INTERFACE_SURVEY.md 的落地）：
     //   ① 显式装了 provider（换模型测试走这条）⇒ 直接用它，不要求 laya runtime 存在；
     //   ② 否则走旧门：装了 `LayaRuntime` 就就地包一层适配器 ⇒ 行为与今天逐字段相同
-    //      （等价由 tests/decision-provider.test.ts 钉住，不是"看着一样"）；
+    //      （等价由 历史回归 钉住，不是"看着一样"）；
     //   ③ 两者都没有 ⇒ rules-only（下面那段既有逻辑，一个字没改）。
     const explicit = decisionProviderOrNull();
     if (explicit) {
@@ -1054,7 +1054,7 @@ export class BrowserMiddleware {
       return { ref: null, conf: 0.0, probs: {}, passthrough: true };
     }
     // 视图构造、state 渲染、短名单重问、两支各自的 conf 口径——**全部在适配器里**，
-    // 且与替换前的实现逐字段等价（tests/decision-provider.test.ts ①）。
+    // 且与替换前的实现逐字段等价（历史回归 ①）。
     // **在线 provider 掉线/没配好 ⇒ 优雅降级到 rules-only**（与"本地模型不在位"同一条路）：
     // 缺 key/缺端点/网络不可达时，不该把整条计划崩掉，也不该每步再敲一次坏服务——
     // 声明点名的步照跑，需要选目标的步按 rules-only 如实 block。这是"默认在线 provider"
@@ -2375,7 +2375,7 @@ export class BrowserMiddleware {
         // page with a running countdown/carousel is NEVER inert: the evidence chain breaks,
         // anti-repeat does not fire, and the same dead button is clicked until `max_steps` —
         // a noise signal must not be the loop's only terminator. Measured on
-        // testpages/dead-target.html (50 ms tick): 8 clicks on the dead button, `max_steps`,
+        // dead-target fixture (50 ms tick): 8 clicks on the dead button, `max_steps`,
         // 4.5 s. The count is keyed by element SIGNATURE (refs are positional and re-indexed
         // every scan) and reset by nothing: within ONE subgoal a repeat is a repeat.
         {

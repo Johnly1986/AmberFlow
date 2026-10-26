@@ -144,7 +144,7 @@ export interface Ctx {
   hints(...hints: string[]): TargetDecl;
   command(op: string, target?: string, value?: ValueBinding): CommandDecl;
   readonly value: ReturnType<typeof createKit>["value"];
-  /** ① 命令行形式：`ctx.run("demo-tool", ["--flag"], { done })`。 */
+  /** ① 命令行形式：`ctx.run("my-tool", ["--flag"], { done })`。 */
   run(source: string, args: string[], req: {
     done: Record<string, unknown>; desc?: string; adapter?: string;
     idempotent?: boolean; retries?: number; dryRunArgs?: string[];
@@ -189,7 +189,7 @@ export interface CtxDeps {
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** 相对仓库路径 → `file://`（与 app/bench 同一口径；dry/replay 也用这一份，host/URL 语义才同口径）。 */
+/** 相对仓库路径 → `file://`（dry/replay 也用这一份，host/URL 语义才同口径）。 */
 export function resolveCtxUrl(u: string): string {
   if (/^(https?|file):/i.test(u)) return u;
   // 与 `app-runner.startUrl` 同一口径：用 `new URL("file://" + path)` 而不是 `pathToFileURL`，

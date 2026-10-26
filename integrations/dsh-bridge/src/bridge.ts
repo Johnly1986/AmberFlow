@@ -330,9 +330,8 @@ export function parseJsonDocument(stdout: string): Record<string, unknown> | nul
 
 /**
  * The app search path (mirrors `src/amberflow-home.ts` in the engine — the ONE place the
- * precedence rule lives twice, kept honest by `tests/user-scope.test.ts` here and the
- * engine's own discovery tests): `$AMBERFLOW_HOME/apps` first, the checkout's `apps/`
- * as development fixtures after; a same-named user app shadows the fixture.
+ * precedence rule lives twice, kept honest by the engine's discovery rules):
+ * `$AMBERFLOW_HOME/apps` first, then the checkout's `apps/` (if present).
  * @param repoPath - absolute path of the AmberFlow checkout.
  * @param env - environment to resolve AMBERFLOW_HOME from.
  * @returns the directories to scan, in precedence order.

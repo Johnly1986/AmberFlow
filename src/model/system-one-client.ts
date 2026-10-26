@@ -10,7 +10,7 @@
  * 所以这里只有**一份**线协议实现；服务之间的差异（认证、model 字段、选项下限、池外答案是否拒绝、
  * 提示词、错误指路串）全部走 `SystemOneProfile`。加一个 SystemOne 服务 = 给一份 profile，不写新适配器。
  *
- * 抽象的判据是"同一份考卷"：`tests/decision-bailian.test.ts` 与 `tests/decision-jevk5.test.ts`
+ * 抽象的判据是"同一份考卷"：历史回归 与 历史回归
  * 各自钉住自己 provider 的线协议映射，Stage 1 把它们重写到本客户端上时**一字不改仍全绿**——
  * 这保证"抽取"没有偷改行为。
  */

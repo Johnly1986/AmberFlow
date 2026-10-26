@@ -135,7 +135,7 @@ LLM 门（LLM 规划器、或语义流的升级老师）是命令行层的可选
   要给它一个显示并去看那个显示：
   ```bash
   xvfb-run -a -s "-screen 0 1440x900x24" dsh --profile web --no-open --port 3080   # 整个宿主跑在虚拟显示下
-  # 或只包一次运行：xvfb-run -a npm run apps -- --app demo-app --headful
+  # 或只包一次运行：xvfb-run -a npm run online -- --tier smoke --headed
   # 要人眼看：再配 x11vnc / noVNC，或用 ffmpeg -f x11grab -i $DISPLAY 抓帧
   ```
 - 有头需要**完整 chromium**。本机实测：`--headful` 起的是 `chromium-*/chrome` 且命令行里**没有**
@@ -224,9 +224,4 @@ checkout。除非部署把 `allowDangerous` 设为 true，危险的工具步一�
 
 ### 开发备注
 
-本包在两个层面被测。`tests/bridge.spec.ts` 把插件挂在一个**桩 checkout** 上，其命令行在本桥依赖的
-几点上与真实命令行一致——`--dry` 打印计划且不写产物、`learn` 没有 `--script` 就拒绝、JSON 之前会有
-（其中一行含花括号的）日志行——并通过 `ctx.tools.execute` 驱动四个工具，覆盖参数拼装、血统解析、
-只列失败的归纳、加载期校验、各条拒绝路径与 dry 展开。`tests/live.spec.ts` 用同一条注册表路径驱动
-**真实** checkout：以 `ablate` 消融臂跑一个录制的两步应用（不传就是真模型）、一次 `dry` 展开、一次被逼失败的运行（让 FAIL
-判决对照真实产物）、无 script 的拒绝，以及一次真实的录制——它的"零模型调用回放"正是保存的前置条件。
+本包不再携带测试文件；在真实 DSH 进程里手工加载验证，或设 `DSH_ROOT` 后运行 `npm run setup && npm run build`。

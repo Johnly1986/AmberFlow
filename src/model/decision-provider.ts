@@ -19,7 +19,7 @@
  * 3. **`undefined` 与 `null` 是两种结果**：`undefined` = 答了但没有可用元素（该说人话：
  *    hint 没命中 / 这一步没点名），`null` = 根本没答（action space exhausted）。
  *    这条区别是承重的——本轮把它抹平成 `null` 时，两条 UX 测试当场打红
- *    （见 `tests/executor.test.ts` 里那条"§2 答了但没给出可用元素"）。
+ *    （见 历史回归 里那条"§2 答了但没给出可用元素"）。
  *
  * 与旧缝的关系：`LayaRuntime` **保留**，它是 laya 的实现细节；`layaProvider()` 把它包成
  * provider。`installLayaRuntime()` 仍是 51 个文件在用的那扇门，两扇门最终汇到同一处
@@ -252,7 +252,7 @@ export function countedProvider(p: DecisionProvider): { provider: DecisionProvid
   };
 }
 
-/** 安装的结果：梯级账单与缓存命中率要的数（app-runner/suite/start/bench 共用同一口径）。
+/** 安装的结果：梯级账单与缓存命中率要的数（app-runner/start/online 共用同一口径）。
  *  可空性是承重的：报告里 `cache 命中 …` 这一行**只在 stats 在场时打印**（app-runner 的
  *  summarizeDecisions 判 `cache !== null`），非 laya 档返回零值闭包会多出整行字——逐字节等价纪律。 */
 export interface AppliedSpec {
@@ -265,7 +265,7 @@ export interface AppliedSpec {
 /**
  * 按 `ProviderSpec` 安装决策源的**唯一**序列。
  * 前身是两处手抄（app-runner main 的缓存/计数安装与 tools/apps_suite.ts 的同一段），
- * start 与 bench 接智能缺省是第三、四个安装者——按本仓库"两份实现各扫各的"的复发教训，
+ * start 与 online 接智能缺省是后续安装者——按本仓库"两份实现各扫各的"的复发教训，
  * 先收敛成一个函数再让四个门都用它。每次先清空两扇全局（provider 与 runtime），
  * 任何残留都不许悄悄改变这一跑的决策来源。
  */
@@ -391,7 +391,7 @@ export async function applyDecisionSelection(
  * `pick()` **逐字照抄**今天 `BrowserMiddleware.pickInner` 的调用序列（criteria_view →
  * `agentFor(state)` → `predictShortlist(k=8)` → 两支各自的 conf 口径），
  * 这样 Stage 2 把执行器接过来时，行为不是"应该一样"而是**被测试钉住一样**
- * （`tests/decision-provider.test.ts` 拿同一份夹具比 `provider.pick()` 与
+ * （历史回归 拿同一份夹具比 `provider.pick()` 与
  * `mw.pickProposal()` 的每个字段）。
  */
 export function layaProvider(opts: {

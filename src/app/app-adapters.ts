@@ -435,7 +435,7 @@ export const manualAdapter: AppAdapter = {
   ready() {
     // 套件是**批处理**：不启用人工步，也不假装能跑（否则在开发者的 TTY 里会挂在那里等人）。
     // 人工步只适合直接用 `npm run apps -- --app ...` 单跑（TTY 下由人确认）。
-    return { ready: false, reason: "manual step needs a human; run this app directly (apps:suite is batch)" };
+    return { ready: false, reason: "manual step needs a human; run this app directly (batch runners skip it)" };
   },
 };
 
