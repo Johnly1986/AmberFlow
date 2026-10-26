@@ -79,7 +79,11 @@ describe("配置可用性（解析期就红）", () => {
     expect(serviceConfigError({
       AMBERFLOW_DECISION_BASE_URL: "http://127.0.0.1:8008",
       AMBERFLOW_DECISION_PROTOCOL: "openai-decisions",
-    })).toMatch(/还没实现/);
+    })).toBeNull();                                   // 本地 Decisions 兼容网关可无 key
+    expect(serviceConfigError({
+      AMBERFLOW_DECISION_BASE_URL: "https://api.openai.com/v1/decisions",
+      AMBERFLOW_DECISION_PROTOCOL: "openai-decisions",
+    })).toMatch(/缺 API key/);
     expect(serviceConfigError({
       AMBERFLOW_DECISION_BASE_URL: "https://x.example",
       AMBERFLOW_DECISION_API_KEY: "k",

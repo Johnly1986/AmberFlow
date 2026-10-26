@@ -28,7 +28,7 @@ import { installLayaRuntime, type DecisionAgent, type LayaRuntime } from "../mod
 import { applySpecToRuntime, installDecisionProvider, resolveProviderSpec } from "../model/decision-provider.ts";
 import { createOutcomeMemory, type OutcomeMemoryLike } from "../model/outcome-memory.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
-import { applyRcToEnv } from "../support/rcfile.ts";
+import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 
 export interface BenchCase {
   id: string;
@@ -258,7 +258,7 @@ R2 学习环：--learn-hints 用默认 sidecar，--hint-memory FILE 显式指定
 
 export async function main(argv: string[] = process.argv.slice(2), deps: BenchMainDeps = {}): Promise<number> {
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
-  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
+  { const rc = applyConfiguredEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   // 旗标表与 apps 共用一张（`benchOptions()`），两个入口的同一件事同一个名字。
   const cli = parseCliArgs(argv, { allowPositionals: true, options: benchOptions(), usage: USAGE });

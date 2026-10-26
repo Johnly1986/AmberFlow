@@ -24,6 +24,7 @@ import { DEMO_ROWS, FORMS, TYPE_TO_FORM } from "../src/cli/camera-entry.ts";
 import { emitPlan } from "../src/flow/transfer-flow.ts";
 import { loadSpec } from "../src/flow/flow.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
+import { installDecisionProvider } from "../src/model/decision-provider.ts";
 import type { ToolSignal } from "../src/browser/tool-signals.ts";
 import { matrix } from "../tools/apps_matrix.ts";
 import { main as suiteMain, suite } from "../tools/apps_suite.ts";
@@ -88,6 +89,7 @@ const hasTool = (bin: string): boolean => {
 };
 
 beforeAll(() => {
+  installDecisionProvider(null);              // 直接调 main() 的用例可能装了 provider，这里清掉
   installLayaRuntime(scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 }))));
 });
 afterAll(() => {
@@ -738,6 +740,7 @@ describe("第 5 轮：使用者体验修复（对抗性补测）", () => {
   }, 180_000);
 
   it("hint 匹配不到 -> 走 `matched nothing in a pool of N` 这条消息，而不是 `names no target`", async () => {
+    installDecisionProvider(null);
     installLayaRuntime(scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 }))));
     const dir = tmpDir("r5-badhint");
     const packPath = path.join(dir, "pack.json");

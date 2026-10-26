@@ -25,6 +25,7 @@
 import type { DecisionProvider, ProviderCapabilities } from "./decision-provider.ts";
 import { stateText, urlOf } from "../engine/extraction.ts";
 import { systemOneClient, type SystemOneProfile } from "./system-one-client.ts";
+import { normalizeOpenAIDecisionsEndpoint, openaiDecisionsProvider } from "./decision-openai.ts";
 
 /** 统一配置键（同时登记进 `rcfile.ts` 的白名单，`amber config` 才能读写）。 */
 export const DECISION_SERVICE_KEYS = [
@@ -119,19 +120,6 @@ export function normalizeSystemOneEndpoint(raw: string): string {
   return url.toString().replace(/\/$/, "");
 }
 
-/** OpenAI Decisions 端点（预留给下一步适配器；本文件暂不实现该协议）。 */
-export function normalizeOpenAIDecisionsEndpoint(raw: string): string {
-  const url = new URL(withScheme(raw.trim()));
-  let pathname = url.pathname.replace(/\/+$/, "");
-  if (!/\/decisions$/i.test(pathname)) {
-    pathname = /\/v1$/i.test(pathname) ? `${pathname}/decisions` : `${pathname}/v1/decisions`;
-  }
-  url.pathname = pathname;
-  url.search = "";
-  url.hash = "";
-  return url.toString().replace(/\/$/, "");
-}
-
 function isLocalHost(raw: string): boolean {
   try {
     const host = new URL(withScheme(raw)).hostname.toLowerCase();
@@ -159,15 +147,13 @@ export function serviceConfigError(env: NodeJS.ProcessEnv = process.env): string
       + "http://localhost:8008；也可直接给完整 …/v1/systemone）";
   }
   const protocol = serviceProtocol(env);
-  if (protocol === "openai-decisions") {
-    return "AMBERFLOW_DECISION_PROTOCOL=openai-decisions 还没实现（当前只支持 systemone）；"
-      + "可先用支持 System One 的网关，或等 OpenAI Decisions 适配器落地";
-  }
-  if (protocol !== "systemone") {
-    return `AMBERFLOW_DECISION_PROTOCOL=${JSON.stringify(protocol)} 不支持（当前只支持 systemone）`;
+  if (protocol !== "systemone" && protocol !== "openai-decisions") {
+    return `AMBERFLOW_DECISION_PROTOCOL=${JSON.stringify(protocol)} 不支持`
+      + "（当前支持 systemone / openai-decisions）";
   }
   try {
-    normalizeSystemOneEndpoint(base);
+    if (protocol === "openai-decisions") normalizeOpenAIDecisionsEndpoint(base);
+    else normalizeSystemOneEndpoint(base);
   } catch (e) {
     return e instanceof Error ? e.message : String(e);
   }
@@ -249,11 +235,21 @@ export function systemOneServiceProfile(env: NodeJS.ProcessEnv = process.env): S
   };
 }
 
-/** 统一配置 → DecisionProvider（名字固定 `decision-service`，协议差异由 profile 决定）。 */
+/** 统一配置 → DecisionProvider（名字固定 `decision-service`，协议由 AMBERFLOW_DECISION_PROTOCOL 决定）。 */
 export function decisionServiceProvider(env: NodeJS.ProcessEnv = process.env): DecisionProvider {
+  const floor = parseFloatInRange(env.AMBERFLOW_DECISION_FLOOR, "AMBERFLOW_DECISION_FLOOR");
+  if (serviceProtocol(env) === "openai-decisions") {
+    return openaiDecisionsProvider({
+      endpoint: normalizeOpenAIDecisionsEndpoint(serviceBaseUrl(env)),
+      model: serviceModel(env),
+      apiKey: serviceApiKey(env),
+      ...(floor === null ? {} : { floor }),
+      timeoutMs: Number(envOf(env.AMBERFLOW_DECISION_TIMEOUT_MS) || "30000"),
+      configError: () => serviceConfigError(env),
+    });
+  }
   const profile = systemOneServiceProfile(env);
   const provider = systemOneClient(profile);
-  const floor = parseFloatInRange(env.AMBERFLOW_DECISION_FLOOR, "AMBERFLOW_DECISION_FLOOR");
   return floor === null ? provider : { ...provider, floor };
 }
 

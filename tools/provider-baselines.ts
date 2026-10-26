@@ -39,11 +39,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { applyRcToEnv } from "../src/support/rcfile.ts";
+import { applyConfiguredEnv } from "../src/support/apply-config-env.ts";
 import { appDataFileInDir } from "../src/app/declarative.ts";
 import { loadPack } from "../src/app/app-pack.ts";
 // rc 接线与其它 CLI 入口同一口径（缺了它，configs/amberflowrc.json 里的凭据/端点对这条命令不可见）。
-{ const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); process.exit(2); } }
+{ const rc = applyConfiguredEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); process.exit(2); } }
 
 // `URL.pathname` keeps the leading slash on Windows ("/E:/…") → path.resolve doubles the
 // drive ("E:\E:\…"). fileURLToPath is the only correct native↔URL conversion (Windows 实测).

@@ -326,7 +326,7 @@ provider（如 `AMBERFLOW_DEFAULT_DECISION_PROVIDER=token-plan`）→在线；�
 | 变量 | 作用 |
 |---|---|
 | `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR` | 本地决策模型产物位置（缺了走规则模式） |
-| `AMBERFLOW_DECISION_BASE_URL` / `AMBERFLOW_DECISION_MODEL` / `AMBERFLOW_DECISION_API_KEY` | **统一决策服务配置**：服务地址 + 模型名 + 密钥（`amber config set` 或环境变量）；配了地址即默认走 `decision-service`。完整说明见 [docs/DECISION_SERVICE_CONFIG.md](docs/DECISION_SERVICE_CONFIG.md) |
+| `AMBERFLOW_DECISION_BASE_URL` / `AMBERFLOW_DECISION_MODEL` / `AMBERFLOW_DECISION_API_KEY` | **统一决策服务配置**：服务地址 + 模型名 + 密钥（`amber config set` 或环境变量）；配了地址即默认走 `decision-service`；`AMBERFLOW_DECISION_PROTOCOL` 选 `systemone`（默认）或 `openai-decisions`。完整说明见 [docs/DECISION_SERVICE_CONFIG.md](docs/DECISION_SERVICE_CONFIG.md) |
 | `AMBERFLOW_DECISION_PROVIDER` | 选决策提供者：`decision-service` / `laya-onnx`（默认）/ `scripted-stub` / `none` / 基线 / `jevk5` / `bailian` / `token-plan` |
 | `TOKEN_PLAN_ENDPOINT` | token-plan MaaS 网关的 SystemOne 端点（完整 URL，要带 `/compatible-mode/v1/systemone`）；**端点只从环境读**（共享层不写死外部主机） |
 | `TOKEN_PLAN_API_KEY` | token-plan 的 token（回退 `DASHSCOPE_API_KEY`）；只从环境读，绝不进代码/产物/提交。见 [docs/DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md) |

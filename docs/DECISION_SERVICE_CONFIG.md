@@ -15,7 +15,7 @@
 
 | 键 | 默认 | 含义 |
 |---|---|---|
-| `AMBERFLOW_DECISION_PROTOCOL` | 按 URL 推断 | `systemone`（当前唯一支持）；`openai-decisions` 预留给下一步 |
+| `AMBERFLOW_DECISION_PROTOCOL` | 按 URL 推断 | `systemone`（TypeSafe/Jev/Kev/百炼/自托管）或 `openai-decisions`（OpenAI `POST /v1/decisions` 及兼容网关） |
 | `AMBERFLOW_DECISION_FLOOR` | 全局面板 0.25 | 该服务的置信闸门刻度（0–1）；跨服务刻度不可比，见 `score_kind` |
 | `AMBERFLOW_DECISION_SCORE_KIND` | `calibrated_prob` | `calibrated_prob` / `entropy_conf` / `rank_only`（服务自报语义） |
 | `AMBERFLOW_DECISION_TIMEOUT_MS` | `30000` | 单次请求超时 |
@@ -33,7 +33,7 @@
 | `http://localhost:8008` | `http://localhost:8008/v1/systemone` |
 | `https://host/compatible-mode/v1` | `https://host/compatible-mode/v1/systemone` |
 | `https://host/compatible-mode/v1/systemone` | 原样 |
-| `https://api.openai.com/v1/decisions` | 推断协议为 `openai-decisions`（当前会报"还没实现"） |
+| `https://api.openai.com` / `…/v1/decisions` | 推断协议为 `openai-decisions`，补成 `…/v1/decisions` |
 
 协议默认按 URL 推断（含 `/decisions` 才是 OpenAI Decisions，否则 System One）。
 
@@ -84,9 +84,32 @@ amber config set AMBERFLOW_DECISION_MIN_OPTIONS 2   # JevK5 才需要
 - **DSH 插件配置页**已经是同样的三元组（URL / Token Key / ModelName），但桥当前仍映射到
   `token-plan` profile；等桥切换到 `decision-service` 后可完全共用一张配置。
 
-## 5. OpenAI Decisions API（下一步）
+## 5. OpenAI Decisions API（已实现，2026-10-26）
 
-调研结论：OpenAI 的 `POST /v1/decisions` 已是 GA 的决策协议（`gpt-6-luna`），但形状与 System One
-不同（`predicate` vs `noul`、数组 vs map、`probabilities[]` vs map、`refusal` 答案）。统一配置层
-已经预留 `AMBERFLOW_DECISION_PROTOCOL=openai-decisions` 和地址归一化；适配器尚未实现——显式选它会
-在解析期给出明确错误，而不是悄悄走错协议。
+调研结论：OpenAI 的 `POST /v1/decisions` 已是 GA 的决策协议（当前原生只支持 `gpt-6-luna`）。
+统一配置层已把它接成同一个 `decision-service` provider（`AMBERFLOW_DECISION_PROTOCOL=openai-decisions`）：
+
+```bash
+amber config set AMBERFLOW_DECISION_BASE_URL https://api.openai.com
+amber config set AMBERFLOW_DECISION_PROTOCOL openai-decisions
+amber config set AMBERFLOW_DECISION_MODEL gpt-6-luna
+amber config set AMBERFLOW_DECISION_API_KEY sk-...
+```
+
+协议映射（与 System One 的差异都收在 `src/model/decision-openai.ts`）：
+
+| 我们的概念 | System One | OpenAI Decisions |
+|---|---|---|
+| 风险/完成票 | `noul` | `predicate`（返回 `probability`） |
+| 选元素/闭集选择 | `choice`（criteria map） | `choice`（`choices[]` 数组，value/description） |
+| 题目容器 | `questions` map | `questions[]`（`name` 标识） |
+| 概率 | `probabilities` map | `probabilities[]`（value→probability） |
+| 拒答 | 无显式字段 | `refusal` 答案 → 映射成"没答"（pick 返回 null；风险题拒绝会抛错，不伪装成低风险） |
+
+边界：
+- 原生 OpenAI 端点只接受 `gpt-6-luna`；网关（如 GoModel 这类 `/v1/decisions` 转 System One 的实现）
+  可以填别的决策模型名——按网关文档为准。
+- 本仓未用真实 key 跑过 OpenAI 官方端点（本机没有凭据）；适配器用假服务钉住线协议，
+  要接真服务时把 URL/KEY/MODEL 换掉即可。
+- `predicate` 概率的刻度与 `confidence` 同属标定概率（`score_kind=calibrated_prob`），
+  但**不要**和 laya 的归一化熵跨源比较。

@@ -36,7 +36,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { QuickActionPicker, type PickDecision } from "../engine/picker.ts";
-import { applyRcToEnv } from "../support/rcfile.ts";
+import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -471,7 +471,7 @@ export async function main(
   deps: PickerServerMainDeps = {},
 ): Promise<number> {
   // rc 文件坏 = 配置类用法错误：在服务起来之前逐行点名并 exit 2（src/support/rcfile.ts）。
-  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
+  { const rc = applyConfiguredEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   const log = deps.log ?? ((line: string) => console.log(line));
   let args: PickerServerArgs;
   try {

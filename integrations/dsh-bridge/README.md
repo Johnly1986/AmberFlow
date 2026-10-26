@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-amberflow-bridge` exposes an external browser engine as four model-facing tools. AmberFlow plans once and then decides every step **locally**, treats DOM signals as the only completion truth, and can record a flow from one demonstration; the bridge adds no browser logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts. An app may mix **application types** — web/cli/ssh/stdio (interactive processes such as games) in one journey — and the listing reports that mix plus any local service the run needs (e.g. ssh needs a reachable local sshd). The plugin's **configuration page** (Settings → Plugins → this bundle's row → Configure) sets exactly three fields for the **online decision model** — Model URL, Token Key, ModelName — so runs can use the token-plan SystemOne provider instead of the local ONNX model. `amberflow_apps` lists the declared apps and says whether each pack was generated from a spec, recorded from a demonstration, hand-written, or a pure data source. `amberflow_run` runs one app end to end and returns completion, the FAILED steps only, refusals, and invariant results — or, under `dry`, the expanded plan it did not execute. `amberflow_learn` records a flow from a goal, a page and a recorded action list, and reports the rules-only replay that decides whether it was reproducible enough to save.
+`dsh-amberflow-bridge` exposes an external browser engine as four model-facing tools. AmberFlow plans once and then decides every step **locally**, treats DOM signals as the only completion truth, and can record a flow from one demonstration; the bridge adds no browser logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts. An app may mix **application types** — web/cli/ssh/stdio (interactive processes such as games) in one journey — and the listing reports that mix plus any local service the run needs (e.g. ssh needs a reachable local sshd). The plugin's **configuration page** (Settings → Plugins → this bundle's row → Configure) sets exactly three fields for the **online decision model** — Model URL, Token Key, ModelName — so runs can use the unified `decision-service` provider (System One) instead of the local ONNX model — the same three keys `amber config set` writes for the engine CLI. `amberflow_apps` lists the declared apps and says whether each pack was generated from a spec, recorded from a demonstration, hand-written, or a pure data source. `amberflow_run` runs one app end to end and returns completion, the FAILED steps only, refusals, and invariant results — or, under `dry`, the expanded plan it did not execute. `amberflow_learn` records a flow from a goal, a page and a recorded action list, and reports the rules-only replay that decides whether it was reproducible enough to save.
 
 ## Table of Contents
 
@@ -156,7 +156,7 @@ Two things to know:
   `chrome-headless-shell --headless`. If a box only has the headless shell, a headed run stops with a
   message naming the fix (`npx playwright install chromium`) instead of a Playwright mystery.
 
-### Configuration page: the online decision model (token-plan SystemOne)
+### Configuration page: the unified decision service (System One)
 
 The bundle ships a browser half that registers its own row page at `plugins.row.config`, so
 Settings → Plugins → this bundle → the `amberflow-bridge` row gains a **Configure** control. The page
@@ -165,13 +165,13 @@ configure the **decision model** the engine executes steps with:
 
 | Field | Forwarded to the engine CLI as | Meaning |
 |---|---|---|
-| **Decision model URL** | `TOKEN_PLAN_ENDPOINT` | token-plan compatible-mode base URL (e.g. `https://…/compatible-mode/v1`); the bridge appends `/systemone` (an already-suffixed value is kept as-is) |
-| **Decision Token Key** | `TOKEN_PLAN_API_KEY` | bearer token; write-only — the Host never returns it, the UI shows only "configured / not set" |
-| **Decision ModelName** | `TOKEN_PLAN_MODEL` | decision model id (e.g. `decision-model-preview`); empty uses the provider default |
+| **Decision model URL** | `AMBERFLOW_DECISION_BASE_URL` | service base URL (e.g. `https://…/compatible-mode/v1` or `http://localhost:8008`); the bridge normalizes it to the `/systemone` endpoint (an already-suffixed value is kept as-is) |
+| **Decision Token Key** | `AMBERFLOW_DECISION_API_KEY` | bearer token; write-only — the Host never returns it, the UI shows only "configured / not set" |
+| **Decision ModelName** | `AMBERFLOW_DECISION_MODEL` | decision model id (e.g. `decision-model-preview`); empty uses the provider default |
 
 How it behaves:
 
-- **Provider default:** with URL **and** token set, the bridge adds `--provider token-plan` to app
+- **Provider default:** with URL **and** token set, the bridge adds `--provider decision-service` to app
   runs (`amberflow_run`), so the plugin runs on the online decision model without a per-call argument.
   An explicit `provider` argument still wins, and ablation arms (`ablate`) never inherit the default.
 - **Effective without a restart.** `.volatile()` config fields are committed by the Loader into the

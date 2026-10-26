@@ -17,7 +17,7 @@ import { withDecisionCache, type CachedRuntime } from "../src/model/decision-cac
 import { createLayaOnnxRuntime } from "../src/model/laya-onnx.ts";
 import { REPO } from "../src/flow/flow.ts";
 import { installLayaRuntime, type DecisionAgent, type LayaRuntime, type ModelState, type PredictResult, type Question } from "../src/model/model.ts";
-import { applyRcToEnv } from "../src/support/rcfile.ts";
+import { applyConfiguredEnv } from "../src/support/apply-config-env.ts";
 
 const CASES = JSON.parse(fs.readFileSync(path.join(REPO, "bench", "cases.json"), "utf-8")).cases as BenchCase[];
 
@@ -57,7 +57,7 @@ async function runTwice(rt: LayaRuntime, cases: BenchCase[], agentsFor: (id: str
 
 export async function main(): Promise<number> {
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
-  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
+  { const rc = applyConfiguredEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   const wanted = process.argv.slice(2).filter((a) => !a.startsWith("-"));
   const cases = (wanted.length ? CASES.filter((c) => wanted.includes(c.id)) : CASES).slice(0, 3);
   console.log(`cases: ${cases.map((c) => c.id).join(", ")}\n`);

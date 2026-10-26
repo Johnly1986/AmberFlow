@@ -46,7 +46,7 @@ import { ruleNominate } from "../src/model/nominate.ts";
 import { DEFAULT_ENUM_ORDER, INSTRUCTION_NAMES, instructionCriteria } from "../src/model/instructions.ts";
 import { nominationInstructions, providerNominationAsk } from "../src/model/nominate.ts";
 import { resolveProviderSpec, type ProviderInfo } from "../src/model/decision-provider.ts";
-import { applyRcToEnv } from "../src/support/rcfile.ts";
+import { applyConfiguredEnv } from "../src/support/apply-config-env.ts";
 
 /** 本工具不经执行器，直接问 agent；装运行时只为保持"谁在跑"的单一出处。 */
 function installLayaRuntimeSafe(rt: ReturnType<typeof createLayaOnnxRuntime>): void {
@@ -774,7 +774,7 @@ async function runContextReview(outDir: string, providerName: string, limit: num
 
 async function main(): Promise<number> {
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
-  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
+  { const rc = applyConfiguredEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   const argv = process.argv.slice(2);
   const get = (k: string): string | undefined => {
     const i = argv.indexOf(`--${k}`);

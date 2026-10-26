@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-`dsh-amberflow-bridge` 把一个外部浏览器引擎暴露成四个面向模型的工具。AmberFlow 只规划一次，之后每一步都在**本地**决策，把 DOM 信号当作唯一的完成真相，并且能从一次演示里录制流程；本桥不添加任何自己的浏览器逻辑，只调用那个 checkout 的命令行并归纳其产物。同一个应用可以在一条旅程里混用**多种应用类型**——web/cli/ssh/stdio（交互式进程，如游戏）——清单会报告类型组合以及运行所需的本机服务（例如 ssh 需要可达的本机 sshd）。插件的**配置页**（设置 → 插件 → 本 bundle 的行 → 配置）只设置三个字段，用来配置**线上决策模型**（token-plan SystemOne）：模型 URL、Token Key、ModelName。`amberflow_apps` 列出已声明的应用，并说明每个包是由 spec 生成的、由演示录制的、手写的，还是纯数据源。`amberflow_run` 端到端运行一个应用，返回完成情况、**只列失败**的步骤、拒绝项与不变量结果；加上 `dry` 时则只返回展开后的计划，不执行任何一步。`amberflow_learn` 用一个目标、一个页面和一份录好的动作清单来录制流程，并报告那次"零模型调用回放"，正是它决定录制的流程是否可复现到值得保存。
+`dsh-amberflow-bridge` 把一个外部浏览器引擎暴露成四个面向模型的工具。AmberFlow 只规划一次，之后每一步都在**本地**决策，把 DOM 信号当作唯一的完成真相，并且能从一次演示里录制流程；本桥不添加任何自己的浏览器逻辑，只调用那个 checkout 的命令行并归纳其产物。同一个应用可以在一条旅程里混用**多种应用类型**——web/cli/ssh/stdio（交互式进程，如游戏）——清单会报告类型组合以及运行所需的本机服务（例如 ssh 需要可达的本机 sshd）。插件的**配置页**（设置 → 插件 → 本 bundle 的行 → 配置）只设置三个字段，用来配置**统一决策服务**（System One）：服务 URL、Token Key、ModelName——与引擎 CLI `amber config set` 写的是同一组 `AMBERFLOW_DECISION_*` 键。`amberflow_apps` 列出已声明的应用，并说明每个包是由 spec 生成的、由演示录制的、手写的，还是纯数据源。`amberflow_run` 端到端运行一个应用，返回完成情况、**只列失败**的步骤、拒绝项与不变量结果；加上 `dry` 时则只返回展开后的计划，不执行任何一步。`amberflow_learn` 用一个目标、一个页面和一份录好的动作清单来录制流程，并报告那次"零模型调用回放"，正是它决定录制的流程是否可复现到值得保存。
 
 ## 目录
 
@@ -143,7 +143,7 @@ LLM 门（LLM 规划器、或语义流的升级老师）是命令行层的可选
   只有 headless shell 的机器上，有头运行会直接点名缺什么（`npx playwright install chromium`），
   不会甩一句 Playwright 的天书。
 
-### 配置页：线上决策模型（token-plan SystemOne）
+### 配置页：统一决策服务（System One）
 
 bundle 自带一个浏览器半，在 `plugins.row.config` 注册自己的行配置页：设置 → 插件 → 本 bundle →
 `amberflow-bridge` 那一行会出现**配置**入口。页面只显示三个字段（它们是插件 Config 里**全部**的
@@ -151,14 +151,14 @@ bundle 自带一个浏览器半，在 `plugins.row.config` 注册自己的行配
 
 | 字段 | 转发到引擎 CLI 的环境变量 | 含义 |
 |---|---|---|
-| **决策模型 URL** | `TOKEN_PLAN_ENDPOINT` | token-plan 兼容模式基址（如 `https://…/compatible-mode/v1`）；桥自动补 `/systemone`（已带后缀则原样） |
-| **决策模型 Token Key** | `TOKEN_PLAN_API_KEY` | bearer token；只写不读——Host 不回传，页面只显示"已配置/未设置" |
-| **决策模型名 ModelName** | `TOKEN_PLAN_MODEL` | 决策模型 id（如 `decision-model-preview`）；留空用 provider 默认 |
+| **决策模型 URL** | `AMBERFLOW_DECISION_BASE_URL` | 决策服务基址（如 `https://…/compatible-mode/v1` 或 `http://localhost:8008`）；桥自动归一成 `/systemone`（已带后缀则原样） |
+| **决策模型 Token Key** | `AMBERFLOW_DECISION_API_KEY` | bearer token；只写不读——Host 不回传，页面只显示"已配置/未设置" |
+| **决策模型名 ModelName** | `AMBERFLOW_DECISION_MODEL` | 决策模型 id（如 `decision-model-preview`）；留空用 provider 默认 |
 
 行为：
 
 - **provider 默认值**：URL 与 Token 都设置后，桥给应用运行（`amberflow_run`）自动加
-  `--provider token-plan`，插件无需每次传参就走线上决策模型；显式传 `provider` 仍优先，消融臂
+  `--provider decision-service`，插件无需每次传参就走统一决策服务；显式传 `provider` 仍优先，消融臂
   （`ablate`）不会继承这个默认值。
 - **改完即生效，不用重启**：`.volatile()` 字段由 Loader 提交到运行中的引用，桥在
   `loader/volatile-update` 事件里重读；此后启动的 CLI 调用即使用新端点。保存持久化到 profile 的

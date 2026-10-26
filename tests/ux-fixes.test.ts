@@ -17,6 +17,7 @@ const MODEL_READY = checkArtifacts().ready;
 import { runApp } from "../src/app/app-runner.ts";
 import { loadPack } from "../src/app/app-pack.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
+import { installDecisionProvider } from "../src/model/decision-provider.ts";
 import { main as startMain, type Io } from "../src/cli/start.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
@@ -106,6 +107,7 @@ describe("② `apps:suite`：没跑过的应用不许报绿，坏包不许掀桌
 
 describe("③ 缺目标时的报错要说人话（身份 B 唯一一次被迫读源码的原因）", () => {
   it("没有 target_hint 的浏览器步 -> 报错直说\"names no target\"与补救办法", async () => {
+    installDecisionProvider(null);
     installLayaRuntime(scriptedRuntime(scriptedAgent(() => ({ noul: 0.05 }))));
     const dir = tmpDir("nohint");
     const packPath = path.join(dir, "pack.json");

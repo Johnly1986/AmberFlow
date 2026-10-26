@@ -24,7 +24,7 @@ import { extractElements } from "../engine/extraction.ts";
 import { getAuditor, type AuditVerdict } from "../engine/audit.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../support/cli-args.ts";
-import { applyRcToEnv } from "../support/rcfile.ts";
+import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { defaultPlanPath } from "../app/amberflow-home.ts";
 
 /**
@@ -273,7 +273,7 @@ commands works too — \`check\` re-validates whatever is on disk.`;
 
 export async function main(argv: string[] = process.argv.slice(2), io: CliIO = defaultIO): Promise<number> {
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
-  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
+  { const rc = applyConfiguredEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   // 空命令 `--`（npm 的分隔符）在这里吃掉：`npm run plan-cli -- --help` 不该变成"没有子命令"。
   const [cmd, ...rest] = stripArgSeparators(argv);
   if (!cmd || cmd === "--help" || cmd === "-h") {

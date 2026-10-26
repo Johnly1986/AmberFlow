@@ -32,7 +32,7 @@ import { startUrl } from "../src/app/app-runner.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
 import { captureStateView, induceSignals, type InducedCandidate } from "../src/flow/signal-induction.ts";
 import { evalSignalOnState, type SignalSpec, type StateView } from "../src/engine/signals.ts";
-import { applyRcToEnv } from "../src/support/rcfile.ts";
+import { applyConfiguredEnv } from "../src/support/apply-config-env.ts";
 
 export const REPO = path.resolve(import.meta.dirname, "..");
 
@@ -218,7 +218,7 @@ export function existingSignals(pack: AppPack): string[] {
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
-  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
+  { const rc = applyConfiguredEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   let values;
   // 打错的参数 → 一行点名，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   try {

@@ -35,24 +35,25 @@ export interface BridgeOptions {
   /** Extra environment variable names forwarded in `allowlist` mode (exact keys, no glob). */
   forwardEnv: string[]
   /**
-   * Online **decision model** (token-plan SystemOne provider) configured through the plugin's
-   * configuration page — the only fields that page exposes. Empty strings mean "not configured":
-   * runs keep their normal decision plane (the local ONNX model, or rules-only).
+   * Unified **decision service** (System One protocol) configured through the plugin's
+   * configuration page — the only fields that page exposes (URL / key / model name). Empty strings
+   * mean "not configured": runs keep their normal decision plane (local ONNX, or rules-only).
    *
-   * These values are forwarded to the engine child process as `TOKEN_PLAN_ENDPOINT` /
-   * `TOKEN_PLAN_API_KEY` / `TOKEN_PLAN_MODEL` (never into argv, results or logs), and when the
-   * endpoint + key are both set the bridge defaults app runs to the `token-plan` decision provider.
+   * These values are forwarded to the engine child process as the unified
+   * `AMBERFLOW_DECISION_BASE_URL` / `_API_KEY` / `_MODEL` keys (never into argv, results or logs),
+   * and when URL + key are both set the bridge defaults app runs to the `decision-service`
+   * provider — the same three-key configuration the engine CLI's `amber config set` writes.
    */
   decisionModel: {
     /** Full SystemOne endpoint (`…/compatible-mode/v1/systemone`), normalized from the page's URL. */
     endpoint: string
     /** Bearer token for that endpoint. Write-only in the UI; never read back. */
     apiKey: string
-    /** Decision model id (`TOKEN_PLAN_MODEL`, e.g. `decision-model-preview`). */
+    /** Decision model id (`AMBERFLOW_DECISION_MODEL`, e.g. `decision-model-preview`). */
     model: string
   }
   /** Provider a run defaults to when the decision model is fully configured. */
-  decisionProvider?: 'token-plan'
+  decisionProvider?: 'decision-service'
   /**
    * Environment used to resolve the USER-scope apps dir ($AMBERFLOW_HOME/apps) when
    * listing. Defaults to the running process's env; tests pin it to a non-existent
@@ -549,6 +550,7 @@ export function runArgs(
   // An explicitly requested provider wins; otherwise a fully configured decision model makes the
   // run use the online provider. Ablation arms are explicit experiments, so they never get the
   // default provider (they measure a different plane).
+  // 显式 provider 赢；否则配置好的决策服务把 run 默认到统一 provider（ablate 是另一条决策面，不继承）。
   const provider = args.provider ?? (args.ablate === undefined ? options.decisionProvider : undefined)
   if (provider !== undefined) argv.push('--provider', String(provider))
   if (args.noSources) argv.push('--no-sources')
@@ -670,14 +672,13 @@ const ENV_PROXY = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_p
  * @returns a fresh env object for `spawn`.
  */
 /**
- * Environment variables the token-plan **decision provider** reads
- * (`src/decision-tokenplan.ts`): one SystemOne endpoint, its bearer token, and the decision model id.
- * Kept as one map so tests can pin the contract.
+ * Unified decision-service environment variables (`src/model/decision-service.ts`):
+ * service address, bearer key, and model id. One map so tests can pin the contract.
  */
 export const DECISION_ENV = {
-  endpoint: 'TOKEN_PLAN_ENDPOINT',
-  apiKey: 'TOKEN_PLAN_API_KEY',
-  model: 'TOKEN_PLAN_MODEL',
+  endpoint: 'AMBERFLOW_DECISION_BASE_URL',
+  apiKey: 'AMBERFLOW_DECISION_API_KEY',
+  model: 'AMBERFLOW_DECISION_MODEL',
 } as const
 
 /**

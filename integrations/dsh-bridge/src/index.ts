@@ -85,18 +85,18 @@ export interface Config {
    */
   appsHome?: string
   /**
-   * Online **decision model** endpoint (token-plan SystemOne provider).
+   * Unified **decision service** endpoint (System One protocol).
    *
    * These three fields are the ONLY `.volatile()` fields in this Config, so the plugin's
    * configuration page (`plugins.row.config`) shows exactly them. They are forwarded to the engine
-   * child process as `TOKEN_PLAN_ENDPOINT` / `TOKEN_PLAN_API_KEY` / `TOKEN_PLAN_MODEL`, and when the
-   * URL + token are both set the bridge defaults runs to the `token-plan` decision provider.
+   * child process as `AMBERFLOW_DECISION_BASE_URL` / `_API_KEY` / `_MODEL`, and when the URL +
+   * token are both set the bridge defaults runs to the `decision-service` provider.
    * Empty means "not configured": runs keep the local ONNX decision model (or rules-only).
    */
   modelBaseUrl?: Volatile<string>
   /** Bearer token for {@link modelBaseUrl}. Secret: the settings surface never reads it back. */
   modelApiKey?: Volatile<string | undefined>
-  /** Decision model id (`TOKEN_PLAN_MODEL`; empty = the provider's default, `decision-model-preview`). */
+  /** Decision model id (`AMBERFLOW_DECISION_MODEL`; empty = the provider's default). */
   modelName?: Volatile<string>
 }
 
@@ -114,9 +114,9 @@ export const Config = z.object({
   keepRuns: z.natural().default(30),
   appsHome: z.string(),
   // The plugin's configuration page shows exactly these three fields (settings projects only
-  // volatile fields). They configure the ONLINE DECISION MODEL (token-plan SystemOne): URL is
-  // normalized to the /systemone endpoint, token/key/model become TOKEN_PLAN_* for the engine CLI,
-  // and a fully configured pair makes app runs default to the `token-plan` provider.
+  // volatile fields). They configure the unified decision service (System One): URL is normalized
+  // to the /systemone endpoint, token/key/model become AMBERFLOW_DECISION_* for the engine CLI,
+  // and a fully configured pair makes app runs default to the `decision-service` provider.
   modelBaseUrl: z.string().default('').volatile(),
   // No schema default: the settings secret-presence marker is `value !== undefined`, so a default
   // would make an unset token read as "configured" in the configuration page.
@@ -239,7 +239,7 @@ function resolveOptions(config: Config): BridgeOptions {
     // a half-configured page must not break runs that otherwise work on the local model.
     ...(normalizeDecisionEndpoint(volatileValue(config.modelBaseUrl) ?? '').trim() !== ''
       && (volatileValue(config.modelApiKey) ?? '').trim() !== ''
-      ? { decisionProvider: 'token-plan' as const }
+      ? { decisionProvider: 'decision-service' as const }
       : {}),
     ...(config.appsHome === undefined ? {} : { appsEnv: { ...process.env, AMBERFLOW_HOME: config.appsHome } }),
   }

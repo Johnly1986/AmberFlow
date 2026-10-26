@@ -110,7 +110,7 @@ describe('bridge helpers', () => {
       .toThrow(/cannot run .*kind='probe'/)
   })
 
-  it('decision-model configuration becomes TOKEN_PLAN_* env, and the URL is normalized to /systemone', () => {
+  it('decision-model configuration becomes unified AMBERFLOW_DECISION_* env, and the URL is normalized to /systemone', () => {
     // Hermetic: "empty config invents nothing" must not depend on the session env.
     const keys = [DECISION_ENV.endpoint, DECISION_ENV.apiKey, DECISION_ENV.model]
     const saved = new Map(keys.map((key) => [key, process.env[key]]))
@@ -125,7 +125,7 @@ describe('bridge helpers', () => {
     expect(normalizeDecisionEndpoint('')).toBe('')
 
     const decision = { endpoint: 'https://example.test/compatible-mode/v1/systemone', apiKey: 'tp-test', model: 'decision-model-preview' }
-    const withDecision = { ...OPTIONS, decisionModel: decision, decisionProvider: 'token-plan' as const }
+    const withDecision = { ...OPTIONS, decisionModel: decision, decisionProvider: 'decision-service' as const }
     expect(decisionEnv(decision)).toEqual({
       [DECISION_ENV.endpoint]: decision.endpoint,
       [DECISION_ENV.apiKey]: 'tp-test',
@@ -147,19 +147,19 @@ describe('bridge helpers', () => {
     }
   })
 
-  it('a fully configured decision model makes runs default to the token-plan provider', () => {
+  it('a fully configured decision model makes runs default to the decision-service provider', () => {
     const configured = {
       ...OPTIONS,
       decisionModel: { endpoint: 'https://example.test/v1/systemone', apiKey: 'tp', model: '' },
-      decisionProvider: 'token-plan' as const,
+      decisionProvider: 'decision-service' as const,
     }
     // Default: the online decision provider is selected without any per-call argument.
     const byDefault = runArgs(configured, { app: 'demo', outDir: '/tmp/out' })
-    expect(byDefault.join(' ')).toContain('--provider token-plan')
+    expect(byDefault.join(' ')).toContain('--provider decision-service')
     // An explicit per-call provider still wins.
     const explicit = runArgs(configured, { app: 'demo', outDir: '/tmp/out', provider: 'laya-onnx' })
     expect(explicit.join(' ')).toContain('--provider laya-onnx')
-    expect(explicit.join(' ')).not.toContain('token-plan')
+    expect(explicit.join(' ')).not.toContain('decision-service')
     // Ablation arms are explicit experiments: they never inherit the default provider.
     const ablated = runArgs(configured, { app: 'demo', outDir: '/tmp/out', ablate: 'rules-only' })
     expect(ablated).not.toContain('--provider')

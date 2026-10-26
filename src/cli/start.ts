@@ -33,7 +33,8 @@ import { induceHint } from "../model/hint-memory.ts";
 import { installLayaRuntime, LayaNotConfiguredError } from "../model/model.ts";
 import { checkArtifacts, missingPieces, onnxModelPath, type ModelArtifacts } from "../model/model-artifacts.ts";
 import { cliBool, cliString, parseCliArgs } from "../support/cli-args.ts";
-import { applyRcToEnv, rcStatusLines } from "../support/rcfile.ts";
+import { rcStatusLines } from "../support/rcfile.ts";
+import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import {
   applySpecToRuntime, BUILTIN_LAYA_PROVIDERS, installDecisionProvider, listDecisionProviders, resolveProviderSpec,
 } from "../model/decision-provider.ts";
@@ -427,7 +428,7 @@ async function commandDemo(planPath: string, headless: boolean, io: Io, deps: St
 
 export async function main(argv: string[] = process.argv.slice(2), io: Io = defaultIo, deps: StartDeps = {}): Promise<number> {
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（与 parseArgs 同一口气）。
-  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
+  { const rc = applyConfiguredEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   // 打错的参数对第一次用 `npm start` 的人最劝退：一行点名 + 完整用法，绝不甩堆栈。
   // （`parseCliArgs` 顺手吃掉命令行里的空命令 `--`：见 src/support/cli-args.ts。）
   const cli = parseCliArgs(argv, {

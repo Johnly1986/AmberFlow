@@ -1,12 +1,12 @@
 /**
  * 结构守卫：**凡是会起浏览器 / 载决策 provider / 读产物路径或 LLM 端点的 npm-script 入口，
- * 必须接线 `applyRcToEnv()`**。
+ * 必须接线 `applyConfiguredEnv()`（2026-10-26 起；它内含旧 rc 的 `applyRcToEnv()`）**。
  *
  * 起因（2026-10-20 实测）：第一版只接了 5 个"主要"入口，`providers:baseline` 没接——
  * 用户在 configs/amberflowrc.json 里填好的 key 对那条命令不可见，报"缺 API key"。
  * 这正是本仓库反复点名的缺陷形状："同一个问题，只开了一半的门"。
  * 守卫口径（可判定，不靠自觉）：入口文件**直接** import 这些承重模块，或**直接**读白名单
- * 环境变量 ⇒ 源码里必须出现 applyRcToEnv。离线冻结语料对拍（*-parity、apps:matrix、
+ * 环境变量 ⇒ 源码里必须出现 applyRcToEnv 或 applyConfiguredEnv。离线冻结语料对拍（*-parity、apps:matrix、
  * arch-metrics）刻意不碰环境，不在射程内。
  */
 import fs from "node:fs";
@@ -51,23 +51,23 @@ describe("入口接线守卫：读配置的入口必须接 rc", () => {
     })
     .filter((f) => {
       const src = fs.readFileSync(path.join(REPO_ROOT, f), "utf-8");
-      if (src.includes("applyRcToEnv")) return false;
+      if (src.includes("applyRcToEnv") || src.includes("applyConfiguredEnv")) return false;
       // 间接也算达标：入口只是 main() 的薄壳，且它 import 的实现文件里接了线
       const imported = [...src.matchAll(/from "(\.[^"]+\.ts)"/g)].map((m) => path.resolve(path.dirname(path.join(REPO_ROOT, f)), m[1]!));
-      return !imported.some((p) => fs.existsSync(p) && fs.readFileSync(p, "utf-8").includes("applyRcToEnv"));
+      return !imported.some((p) => fs.existsSync(p) && /apply(?:RcToEnv|ConfiguredEnv)/.test(fs.readFileSync(p, "utf-8")));
     });
 
   it.each(offenders.length ? offenders : ["(无漏接入口)"])(
-    "入口 %s 要么不读机器配置，要么接 applyRcToEnv", (f) => {
+    "入口 %s 要么不读机器配置，要么接 applyConfiguredEnv/applyRcToEnv", (f) => {
       if (f === "(无漏接入口)") return;                 // 全绿：0 个违例者，断言即通过本条
-      expect(fs.readFileSync(path.join(REPO_ROOT, f), "utf-8")).toContain("applyRcToEnv");
+      expect(fs.readFileSync(path.join(REPO_ROOT, f), "utf-8")).toMatch(/apply(?:RcToEnv|ConfiguredEnv)/);
     });
 
   it("守卫本身确实在看：抽样验证已接线的入口与承重模块非空", () => {
     // 防止守卫退化成"永远通过"：承重面判定命中过的文件里，至少有一个确实 import 了 rcfile
     const sampled = ["src/cli/bench.ts", "src/model/model-fetch.ts", "tools/provider-baselines.ts"];
     for (const f of sampled) {
-      expect(fs.readFileSync(path.join(REPO_ROOT, f), "utf-8"), f).toContain("applyRcToEnv");
+      expect(fs.readFileSync(path.join(REPO_ROOT, f), "utf-8"), f).toMatch(/apply(?:RcToEnv|ConfiguredEnv)/);
     }
     expect(entryFiles.length).toBeGreaterThan(20);      // scripts 解析本身别瞎
     // 豁免名单不是空转：离线家族确实命中了 scripts 里的入口，且承重入口也在射程里——

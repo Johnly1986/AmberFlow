@@ -32,7 +32,7 @@ import { MockAuditor, type TraceStep } from "../engine/audit.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 import { ensureDir, userAppsDir } from "./amberflow-home.ts";
 import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../support/cli-args.ts";
-import { applyRcToEnv } from "../support/rcfile.ts";
+import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import {
   cliRunDetailed, defaultDates, loadSource, previewTable, runSource, urlFor,
   type CliObservation, type PreviewTable,
@@ -1482,7 +1482,7 @@ function invariantsFromTrace(
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
-  { const rc = applyRcToEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
+  { const rc = applyConfiguredEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   // 旗标表与 bench 共用一张（`appOptions()`）：同一个名字在两个入口是同一件事。
   const cli = parseCliArgs(argv, { allowPositionals: true, options: appOptions(), usage: USAGE });
