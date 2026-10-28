@@ -26,6 +26,8 @@
 
 配置优先级与原有层叠一致：**CLI 旗标 > 环境变量 > 项目配置 > 用户配置 > 旧 rc > 内建缺省**
 （`amber config set` / `--project` / 环境变量三种渠道都行）。`amber config show` 对 API key 做掩码。
+闸门刻度的生效顺序是：**`--conf-floor`（或配置 `AMBERFLOW_CONF_FLOOR`）> `AMBERFLOW_DECISION_FLOOR` > 全局面板 0.25**——
+前者是"本次/本项目的运行参数覆盖"，后者是"这个决策服务自报的刻度"，报告里 `conf_floor.source`（cli/config/provider）会写明本次用了哪一层。
 配置键与默认值的唯一出处是 [src/support/config-schema.ts](../src/support/config-schema.ts)；
 示例由 `npm run config:example` 生成，`npm run check` 会校验示例没有漂移。
 

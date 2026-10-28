@@ -195,6 +195,8 @@ export async function dryRunFlow(loaded: LoadedScriptApp, opts: {
   slots?: Record<string, string>;
   outDir?: string;
   runId?: string;
+  /** 时钟缝：`ctx.runtime.today`（`--today YYYY-MM-DD`）；空缺 = 系统日期。 */
+  today?: string;
 } = {}): Promise<{ trace: AppTrace; problems: string[] }> {
   const slots: Record<string, string> = {
     ...((loaded.pack.slots ?? {}) as Record<string, string>),
@@ -212,7 +214,7 @@ export async function dryRunFlow(loaded: LoadedScriptApp, opts: {
   const ctx = createDryCtx({
     pack: loaded.pack as never,
     slots,
-    runtime: { outDir: opts.outDir ?? "(dry)", runId: opts.runId ?? "(dry)", today: process.env.LAYA_TODAY ?? "" },
+    runtime: { outDir: opts.outDir ?? "(dry)", runId: opts.runId ?? "(dry)", today: opts.today ?? "" },
     trace,
     slotKeys,
   });

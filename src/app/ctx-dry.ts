@@ -19,7 +19,7 @@ import { validateToolSignal } from "../browser/tool-signals.ts";
 import { createKit, type CommandDecl } from "./kit.ts";
 import { pushEvent, type AppTrace } from "./trace.ts";
 import { getAppAdapter, listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
-import { loadSource } from "../data/datasource.ts";
+import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, ValueError } from "../data/datasource.ts";
 import {
   normalizeCommandIds, resolveCtxUrl, StopError,
   type Ctx, type CtxBudget, type SourceObservationView, type StepRequest, type StepResult,
@@ -30,6 +30,8 @@ export interface DryCtxDeps {
     id: string; label?: string; goal: string; hosts?: string[] | null;
     invariants?: Array<Record<string, unknown>>;
     site?: { pages?: Record<string, string>; listExtract?: Record<string, { rows: string; fields: Record<string, string> }> };
+    /** 数据腿回写槽位的键集（环封口校验用，与 live ctx 同一规则）。 */
+    source_slots?: Record<string, unknown> | null;
   };
   slots: Record<string, string>;
   runtime: { outDir: string; runId: string; today: string };
@@ -240,10 +242,29 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       pushEvent(trace, { call: "waitFor", ok: true, result: { dry: true, timeout_ms: timeoutMs, poll_ms: pollMs } });
       return true;
     },
-    source: async (name) => {
+    source: async (name, sourceOpts = {}) => {
       if (typeof name !== "string" || !name.trim()) throw new StopError("config_error", "ctx.source: name must be a non-empty string");
       try {
         loadSource(name);        // 数据源配置在加载期校验（未知源名在这里就红，不等真跑）
+      } catch (e) {
+        throw new StopError("config_error", `ctx.source(${JSON.stringify(name)}): ${e instanceof Error ? e.message : String(e)}`);
+      }
+      // dry 也把日期参数过一遍：坏值/缺槽位/环引用在这里就红（与真跑同一文法），不等起腿。
+      const src = loadSource(name);
+      try {
+        const producerSlots = new Set(Object.keys(deps.pack.source_slots ?? {}));
+        for (const ph of defaultDatesSlotNames(src)) {
+          if (producerSlots.has(ph)) {
+            throw new ValueError(`source 的 default_dates 引用 {${ph}}，但 ${ph} 由数据腿回写`
+              + `（source_slots）——数据腿参数不允许引用数据腿产物`);
+          }
+        }
+        if (sourceOpts.dates !== undefined) {
+          const raws = Array.isArray(sourceOpts.dates) ? sourceOpts.dates : [sourceOpts.dates];
+          for (const r of raws) parseDatesValue(String(r), deps.runtime.today || undefined);
+        } else {
+          defaultDates(src, deps.slots, deps.runtime.today || undefined);
+        }
       } catch (e) {
         throw new StopError("config_error", `ctx.source(${JSON.stringify(name)}): ${e instanceof Error ? e.message : String(e)}`);
       }

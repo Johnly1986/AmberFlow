@@ -18,7 +18,7 @@ import {
 } from "../engine/executor.ts";
 import { firstOf, locatorAnyFrame, urlOf, type PageLike } from "../engine/extraction.ts";
 import { checkSignal } from "../engine/signals.ts";
-import { defaultDates, loadSource, runSource } from "../data/datasource.ts";
+import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, runSource, ValueError } from "../data/datasource.ts";
 import { listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
 import { REPO } from "../flow/flow.ts";
 import { PageStateStore, type PageState } from "./page-state.ts";
@@ -78,6 +78,17 @@ export interface SourceObservationView {
   selects: Record<string, Record<string, string> | null>;
   rows: Array<Record<string, string>>;
   version?: string;
+  /**
+   * 按日期键控的完整观察（多日期范围在这里；`counts/selects/rows` 仍是第一天的快照，
+   * 与 source_slots 回写同一口径）。只有成功取到数的日期进这张表；被风控挡住的日期
+   * 不出现（错误进数据腿报告）。
+   */
+  byDate?: Record<string, {
+    url?: string;
+    counts: Record<string, number>;
+    selects: Record<string, Record<string, string> | null>;
+    rows: Array<Record<string, string>>;
+  }>;
 }
 
 /** 工具步的请求（进程观察面；完成真值 = exit/stdout/stderr/产物）。 */
@@ -160,7 +171,7 @@ export interface Ctx {
     Promise<Array<Record<string, string>>>;
   holds(sig: DomSignal): Promise<boolean>;
   waitFor(sig: DomSignal, opts?: { timeoutMs?: number; pollMs?: number }): Promise<boolean>;
-  source(name: string): Promise<SourceObservationView>;
+  source(name: string, opts?: { dates?: string | string[] }): Promise<SourceObservationView>;
   readonly data: {
     min<T extends Record<string, unknown>>(rows: T[], by: string): T | null;
     max<T extends Record<string, unknown>>(rows: T[], by: string): T | null;
@@ -197,6 +208,8 @@ export interface CtxDeps {
     id: string; label?: string; goal: string; hosts?: string[] | null;
     invariants?: Array<Record<string, unknown>>;
     site?: { pages?: Record<string, string>; listExtract?: Record<string, { rows: string; fields: Record<string, string> }> };
+    /** 数据腿回写槽位的**键集**（环封口校验用：数据腿参数不许引用数据腿产物）。 */
+    source_slots?: Record<string, unknown> | null;
   };
   slots: Record<string, string>;
   runtime: { outDir: string; runId: string; today: string };
@@ -207,7 +220,7 @@ export interface CtxDeps {
   deadline?: number;
   verbose?: boolean;
   /** 数据腿：与 `runApp` 的同一实现（`runSource` + `defaultDates`）。 */
-  sourceRunner?: (name: string) => Promise<SourceObservationView>;
+  sourceRunner?: (name: string, opts?: { dates?: string | string[] }) => Promise<SourceObservationView>;
   /** 工具步：由驱动接到 `runToolStep`（干跑/确认/幂等重试的既有实现）。 */
   toolRunner?: (req: ToolRunRequest) => Promise<ToolRunResult>;
   /** `--skip-data`：数据腿被显式跳过时，`ctx.source()` 报结构化错误（不静默跑网络）。 */
@@ -810,23 +823,62 @@ export function createCtx(deps: CtxDeps): Ctx {
       });
       return held;
     },
-    source: async (name) => {
+    source: async (name, sourceOpts = {}) => {
       if (deps.allowSources === false) {
         throw new StopError("config_error", `ctx.source(${JSON.stringify(name)})：本次运行带 --skip-data，数据腿被显式跳过`);
       }
       if (deps.sourceRunner) {
-        const obs = await deps.sourceRunner(name);
+        const obs = await deps.sourceRunner(name, sourceOpts);
         pushEvent(trace, { call: "source", desc: name, result: { counts: obs.counts, rows: obs.rows.length } });
         return obs;
       }
       const src = loadSource(name);
-      const res = await runSource(src, defaultDates(src), { verbose: false });
+      // 环封口：数据腿的日期参数只能来自包默认/CLI 槽位——引用 source_slots 产物
+      // 是循环依赖（那些值要等数据腿跑完才存在），加载已知就拒绝。
+      const producerSlots = new Set(Object.keys(deps.pack.source_slots ?? {}));
+      for (const ph of defaultDatesSlotNames(src)) {
+        if (producerSlots.has(ph)) {
+          throw new StopError("config_error", `source ${JSON.stringify(name)} 的 default_dates 引用 {${ph}}，`
+            + `但 ${ph} 由数据腿回写（source_slots）——数据腿参数不允许引用数据腿产物`);
+        }
+      }
+      let dates: string[];
+      try {
+        if (sourceOpts.dates !== undefined) {
+          const raws = Array.isArray(sourceOpts.dates) ? sourceOpts.dates : [sourceOpts.dates];
+          dates = raws.flatMap((r) => parseDatesValue(String(r), deps.runtime.today || undefined));
+        } else {
+          dates = defaultDates(src, slots, deps.runtime.today || undefined);
+        }
+      } catch (e) {
+        // 坏日期参数/缺槽位值是配置类错误：ValueError → 结构化 StopError，不裸抛。
+        if (e instanceof ValueError) {
+          throw new StopError("config_error", `ctx.source(${JSON.stringify(name)}): ${e.message}`);
+        }
+        throw e;
+      }
+      const res = await runSource(src, dates, { verbose: false, today: deps.runtime.today || undefined });
       const day = Object.values(res.dates)[0] as unknown as Record<string, unknown> | undefined;
       const counts = (day?.["counts"] ?? {}) as Record<string, number>;
       const selects = (day?.["selects"] ?? {}) as Record<string, Record<string, string> | null>;
       const rows = (day?.["rows"] ?? []) as Array<Record<string, string>>;
-      const obs: SourceObservationView = { counts, selects, rows, ...(res.tool_version ? { version: res.tool_version } : {}) };
-      pushEvent(trace, { call: "source", desc: name, result: { counts, rows: rows.length } });
+      const byDate: NonNullable<SourceObservationView["byDate"]> = {};
+      for (const [dateKey, entry] of Object.entries(res.dates)) {
+        const e = entry as unknown as Record<string, unknown>;
+        if (e["error"] !== undefined) continue;
+        byDate[dateKey] = {
+          ...(e["url"] !== undefined ? { url: String(e["url"]) } : {}),
+          counts: (e["counts"] ?? {}) as Record<string, number>,
+          selects: (e["selects"] ?? {}) as Record<string, Record<string, string> | null>,
+          rows: (e["rows"] ?? []) as Array<Record<string, string>>,
+        };
+      }
+      const obs: SourceObservationView = {
+        counts, selects, rows,
+        ...(res.tool_version ? { version: res.tool_version } : {}),
+        ...(Object.keys(byDate).length ? { byDate } : {}),
+      };
+      pushEvent(trace, { call: "source", desc: name, result: { counts, rows: rows.length, dates: Object.keys(byDate) } });
       return obs;
     },
     data: {

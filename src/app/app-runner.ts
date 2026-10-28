@@ -36,7 +36,7 @@ import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../sup
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";
 import {
-  cliRunDetailed, defaultDates, loadSource, previewTable, runSource, urlFor,
+  cliRunDetailed, defaultDates, loadSource, previewTable, runSource, urlFor, ValueError,
   type CliObservation, type PreviewTable,
 } from "../data/datasource.ts";
 import { type CachedRuntime, type DecisionCacheStats } from "../model/decision-cache.ts";
@@ -86,6 +86,19 @@ export { captureStepStateView, type StepStateView };
 export interface AppRunOptions {
   /** 覆盖包的槽位（`--slot k=v`）。值仍然只来自计划。 */
   slots?: Record<string, unknown>;
+  /**
+   * 时钟缝：把"今天"钉成 `YYYY-MM-DD`（CLI `--today`）。影响数据腿的相对日期表达式
+   * （`day_offset` / `next_week` / `weekday_cn`）与 flow 脚本的 `ctx.runtime.today`。
+   * 空缺 = 系统日期。（2026-10-28 起不再是环境变量 `LAYA_TODAY`——时钟不是机器配置，
+   * 是本次调用的显式参数。）
+   */
+  today?: string;
+  /**
+   * 数据腿/工具步日期参数的**完整值袋**（包默认 + CLI `--slot`；调用方负责合并）。
+   * 缺省回落到 `slots`（只有 CLI 覆盖）——两个调用方（runApp 的旅程与脚本 toolRunner）
+   * 都显式传合并后的袋，source JSON 里的 `{slot}` 占位符从这解析。
+   */
+  slotBag?: Record<string, unknown>;
   /** 计划 checkpoint 的落盘位置。 */
   planPath?: string;
   /** 跑数据腿（默认跑）。 */
@@ -359,7 +372,7 @@ export interface ToolStepResult {
    *   tool-unavailable —— 命令根本起不来（缺二进制 / 超时被杀 / argv 非法）：
    *                       这是**结果**不是崩溃——上层要能在结果 JSON 里读到它。
    */
-  refused?: "dangerous" | "declined" | "dry-run-failed" | "tool-unavailable" | "needs_value";
+  refused?: "dangerous" | "declined" | "dry-run-failed" | "tool-unavailable" | "needs_value" | "config_error";
   dry_run: { code: number; ok: boolean; stdout: string; argv: string[] } | null;
   code: number | null;
   ok: boolean;
@@ -389,6 +402,7 @@ export const REFUSAL_LABELS: Record<string, string> = {
   "dry-run-failed": "未执行（干跑没通过，所以没有 apply）",
   "tool-unavailable": "未执行（命令起不来：缺二进制 / 超时 / argv 非法）",
   "needs_value": "未执行（{dataset:NAME} 引用的数据没有值——前序步骤没产生它或已失效；不猜）",
+  "config_error": "未执行（source 日期参数配置错：default_dates/槽位值非法或缺值——补 --slot 或修 source JSON）",
 };
 
 /** 给 CLI 用的一行短语（不带 Markdown 反引号）。 */
@@ -408,6 +422,17 @@ export interface AppSourceResult {
    */
   preview?: PreviewTable;
   tool_version?: string;
+  /**
+   * 按日期键控的完整观察（声明了 `default_dates: "{slot}"` / 范围且解析出多日期时）。
+   * `rows`/`counts` 仍是第一天的快照（与 source_slots 回写同一口径）；被风控挡住的
+   * 日期不进这张表（错误进数据源报告）。
+   */
+  byDate?: Record<string, {
+    url?: string;
+    counts: Record<string, number>;
+    selects: Record<string, Record<string, string> | null>;
+    rows: Array<Record<string, string>>;
+  }>;
 }
 
 export interface AppRunResult {
@@ -553,7 +578,6 @@ export async function runToolStep(
 ): Promise<ToolStepResult> {
   const rawTool = step.tool!;
   const src = loadSource(rawTool.source);
-  const target = urlFor(src, defaultDates(src)[0]!);
   // `{out_dir}` 是运行期占位符（写到哪儿），不是计划里的值：在这里换成真实输出目录
   const outDir = opts.outDir ?? path.dirname(opts.planPath ?? path.join(os.tmpdir(), "app"));
   // `{run_id}`：**每次运行唯一**（进程内单调序号 + 毫秒时间戳 + pid），给"跨调用有状态"的参数用
@@ -598,6 +622,21 @@ export async function runToolStep(
       + `（{dataset:NAME} 只认前序步骤在信号成立后写的值；没有就停，不猜）`;
     if (opts.verbose) console.log(`  [${step.index}] tool ${t.source}: NEEDS_VALUE (${base.stderr})`);
     return base;
+  }
+
+  // 工具步的 source URL（default_dates / {slot} 日期参数在这里解析）。
+  // 坏日期参数/缺槽位值是**配置类结果**（结构化 refusal），不是崩溃——上层能在结果 JSON 里读到。
+  let target: string;
+  try {
+    target = urlFor(src, defaultDates(src, opts.slotBag ?? opts.slots ?? null, opts.today)[0]!);
+  } catch (e) {
+    if (e instanceof ValueError) {
+      base.refused = "config_error";
+      base.stderr = `source ${t.source}: ${e.message}`;
+      if (opts.verbose) console.log(`  [${step.index}] tool ${t.source}: CONFIG_ERROR (${base.stderr})`);
+      return base;
+    }
+    throw e;
   }
 
   const unavailable = (e: unknown): void => {
@@ -829,10 +868,13 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   /** 数据腿的观察面（回写槽位的输入；与报告里的 counts/selects 同一份数据）。 */
   const observed: Record<string, SourceObservation> = {};
   if (sources) {
+    // 数据腿的日期参数值袋 = 包默认槽位 + 本次 CLI 槽位（**不含** source_slots 产物——
+    // 环封口由 validateApp 在上面校验：default_dates 引用数据腿产物 = 加载期拒绝）。
+    const legSlots: Record<string, unknown> = { ...(pack.slots ?? {}), ...slots };
     for (const name of pack.sources ?? []) {
       const src = loadSource(String(name));
-      const dates = defaultDates(src);
-      const res = await runSource(src, dates, { verbose: false });
+      const dates = defaultDates(src, legSlots, opts.today);
+      const res = await runSource(src, dates, { verbose: false, today: opts.today });
       const day = Object.values(res.dates)[0] as Record<string, any> | undefined;
       const counts = (day?.counts ?? {}) as Record<string, number>;
       const selects: Record<string, string> = {};
@@ -848,10 +890,23 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       }
       observed[String(name)] = { selects: selectsFull, counts };
       const pv = previewTable(src, res.dates);
+      // 多日期范围在这里保留完整观察（`dates` 键控）；回写槽位仍取第一天，口径不变。
+      const byDate: NonNullable<AppSourceResult["byDate"]> = {};
+      for (const [dateKey, entry] of Object.entries(res.dates)) {
+        const e = entry as Record<string, any>;
+        if (e?.error !== undefined) continue;
+        byDate[dateKey] = {
+          ...(e.url !== undefined ? { url: String(e.url) } : {}),
+          counts: (e.counts ?? {}) as Record<string, number>,
+          selects: (e.selects ?? {}) as Record<string, Record<string, string> | null>,
+          rows: (e.rows ?? []) as Array<Record<string, string>>,
+        };
+      }
       sourceResults.push({
         name: String(name), rows: (day?.rows ?? []).length, counts, selects,
         ...(pv ? { preview: pv } : {}),
         ...(res.tool_version ? { tool_version: res.tool_version } : {}),
+        ...(Object.keys(byDate).length ? { byDate } : {}),
       });
       if (verbose) console.log(`  source ${name}: ${(day?.rows ?? []).length} 条 ${JSON.stringify(counts)}`);
     }
@@ -896,7 +951,11 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   // `{dataset:NAME}` 消费；重跑（next 回边）前先失效，下游不会读到陈旧世代。
   const dataset = opts.dataset ?? new DatasetStore();
   const returnsByStep = new Map<string, string[]>();
-  const runOpts: AppRunOptions = { ...opts, dataset };
+  const runOpts: AppRunOptions = {
+    ...opts, dataset,
+    // 工具步的 source JSON 日期参数用同一个值袋（包默认 + CLI 覆盖）。
+    slotBag: { ...(pack.slots ?? {}), ...(opts.slots ?? {}) },
+  };
   const mw = new BrowserMiddleware({
     modelId,
     auditor: new MockAuditor(),
@@ -1481,8 +1540,12 @@ const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [-
                落点默认 $AMBERFLOW_HOME/hint-memory/<app>.json，--hint-memory FILE 显式指定
 --emit-trace F 把本次执行轨迹（app/script/inputs 三个 sha + 逐次 ctx 调用）写成 F
 --replay F     按 F 里的轨迹重放（不重新决策；脚本版本或输入槽位不一致直接拒跑）
+--today DATE   把"今天"钉成 YYYY-MM-DD：数据腿相对日期表达式（next_week/day_offset/weekday_cn）
+               与 ctx.runtime.today 都用它；空缺 = 系统日期
 
-数据腿的结果按 meta.sources 按需加载（ctx.source）；--no-sources 时不跑网络/进程。
+数据腿的结果按 meta.sources 按需加载（ctx.source(name, { dates? })）；--no-sources 时不跑网络/进程。
+数据腿的日期参数走声明槽位：source JSON 的 default_dates 写 "{slot}"（如 "{dates}"），
+值从 包默认 slots + CLI --slot 解析（单日 / A..B 范围 / next_week）；不许引用 source_slots 产物（环）。
 --dry 只跑 dry 调用序列（不开浏览器、不调模型）；--list 列出发现的 flow 应用。`;
 
 /**
@@ -1539,7 +1602,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     if (problems.length) throw new Error(`replay refused:\n  - ${problems.join("\n  - ")}`);
     const { ctx, remaining } = createReplayCtx({
       pack: pack as never, slots: slots as Record<string, string>,
-      runtime: { outDir, runId, today: process.env.LAYA_TODAY ?? "" },
+      runtime: { outDir, runId, today: opts.today ?? "" },
       trace: recorded, maxSteps: opts.maxSteps,
     });
     try {
@@ -1662,7 +1725,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         index: 0, adapter: "cli", kind: "tool",
         desc: req.desc, role: null, id: null, next: [], decl, tool: decl,
       } as unknown as ExpandedStep;
-      const r = await runToolStep(step, { ...opts, outDir, runId, verbose });
+      const r = await runToolStep(step, { ...opts, outDir, runId, verbose, slotBag: slots });
       const stopCode = r.done ? undefined : (r.refused ?? "tool_failed");
       return {
         ok: r.done,
@@ -1676,7 +1739,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     const ctx = createCtx({
       pack: pack as never,
       slots: slots as Record<string, string>,
-      runtime: { outDir, runId, today: process.env.LAYA_TODAY ?? "" },
+      runtime: { outDir, runId, today: opts.today ?? "" },
       ensureSession, mw: getMw, trace, toolRunner,
       allowSources: opts.sources !== false,
       manualRunner: opts.manualHandler !== undefined || process.stdin.isTTY
@@ -1906,6 +1969,20 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     slots[key] = s.slice(i + 1);
   }
 
+  // --today：时钟缝（数据腿相对日期表达式 + ctx.runtime.today）。格式错是**用法错误**
+  // （exit 2）；空缺 = 系统日期。2026-10-28 起不再是环境变量 LAYA_TODAY。
+  let today: string | undefined;
+  {
+    const raw = cliString(v, "today");
+    if (raw !== undefined) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
+        console.error(`--today 要是 YYYY-MM-DD（拿到 ${JSON.stringify(raw)}）`);
+        return 2;
+      }
+      today = raw.trim();
+    }
+  }
+
   let loaded: LoadedScriptApp;
   try {
     loaded = await loadScriptApp(String(cliString(v, "app")));
@@ -1968,6 +2045,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (cliBool(v, "dry")) {
     const dry = await dryRunFlow(loaded, {
       slots: slots as Record<string, string>,
+      ...(today === undefined ? {} : { today }),
       ...(cliString(v, "out") === undefined ? {} : { outDir: cliString(v, "out") }),
     });
     const planLike = {
@@ -2035,6 +2113,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   try {
     result = await runScriptApp(loaded, {
       slots, outDir, verbose: !quiet,
+      ...(today === undefined ? {} : { today }),
       sources: !noSources, confirmSafe, captureTraces: cliBool(v, "trace"),
       maxSteps,
       manualFailFast: cliBool(v, "manual-fail-fast"),

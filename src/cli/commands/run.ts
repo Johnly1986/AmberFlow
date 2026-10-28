@@ -25,6 +25,7 @@ const OPTIONS = {
   headless: { type: "boolean" as const },
   out: { type: "string" as const },
   slot: { type: "string" as const, multiple: true },
+  today: { type: "string" as const },
   provider: { type: "string" as const },
   "skip-data": { type: "boolean" as const },
   "allow-dangerous": { type: "boolean" as const },
@@ -161,6 +162,7 @@ function validatePlanFlags(v: Values): void {
   if (bool(v["allow-dangerous"])) throw usageError("--allow-dangerous 只用于应用运行 / 一次性目标");
   if (str(v.out)) throw usageError("--out 暂不用于 --plan 模式", { hint: "计划执行器把结果写到计划同目录；--out 留给应用运行。" });
   if (str(v.slot) || Array.isArray(v.slot)) throw usageError("--slot 只用于应用运行");
+  if (str(v.today)) throw usageError("--today 只用于应用运行");
   if (str(v.target)) throw usageError("--target 只用于 --goal 模式");
   if (bool(v.remember) || str(v.memory)) {
     // plan-cli 有旧名 --learn-hints / --hint-memory，分别映射到 sidecar。
@@ -182,6 +184,7 @@ function validateGoalFlags(v: Values): void {
   }
   if (str(v.out)) throw usageError("--out 只用于应用运行");
   if (str(v.slot) || Array.isArray(v.slot)) throw usageError("--slot 只用于应用运行");
+  if (str(v.today)) throw usageError("--today 只用于应用运行");
 }
 
 
@@ -223,7 +226,10 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
         next: ["amber apps list", "amber apps check <应用|脚本>"],
       });
     }
-    const dry = await dryRunFlow(resolved.script, { slots });
+    const dry = await dryRunFlow(resolved.script, {
+      slots,
+      ...(str(v.today) === undefined ? {} : { today: str(v.today) }),
+    });
     const pack = resolved.pack;
     const envelope = successEnvelope("run", {
       mode: "flow", dry_run: true, status: "dry", verified: false, partial: false,
@@ -255,6 +261,13 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   const replay = str(v.replay);
   if (replay !== undefined) args.push("--replay", replay);
   for (const s of flatList(v.slot as string[] | undefined)) args.push("--slot", s);
+  const todayArg = str(v.today);
+  if (todayArg !== undefined) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(todayArg.trim())) {
+      throw usageError(`--today 要是 YYYY-MM-DD（收到 ${JSON.stringify(todayArg)}）`);
+    }
+    args.push("--today", todayArg.trim());
+  }
   for (const [key, flag] of [
     ["out", "--out"], ["provider", "--provider"], ["memory", "--hint-memory"],
     ["min-confidence", "--conf-floor"], ["ablate", "--ablate"],

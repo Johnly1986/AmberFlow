@@ -137,7 +137,8 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       const ev = nextEvent("waitFor");
       return ev.ok === true;
     },
-    source: async (name) => {
+    source: async (name, opts) => {
+      void opts;
       const ev = nextEvent("source", { desc: name });
       // trace 只记摘要（counts/行数），不记整张表：重放能对齐"调用发生过"，不重放数据内容。
       const summary = isObj(ev.result) ? ev.result : {};

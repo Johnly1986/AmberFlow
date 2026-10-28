@@ -127,13 +127,13 @@ export async function flow(ctx) {
 
 | 类别 | 成员 | 说明 |
 |---|---|---|
-| 元信息 | `ctx.app` / `ctx.slots` / `ctx.runtime` / `ctx.budget` / `ctx.log(msg, data?)` | `slots` 只读；`runtime = {outDir, runId, today}` |
+| 元信息 | `ctx.app` / `ctx.slots` / `ctx.runtime` / `ctx.budget` / `ctx.log(msg, data?)` | `slots` 只读；`runtime = {outDir, runId, today}`；`today` = CLI `--today YYYY-MM-DD` 钉住的"今天"，没钉 = 系统日期 |
 | 导航 | `ctx.open(url)` / `ctx.openPage(role)` / `ctx.arrive(url, {done, desc?, id?, timeoutMs?})` | `arrive` = 纯导航 + 等信号，不做元素选择、不花模型；`hosts` 信封在起点与落地都强制 |
 | 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, when?, timeoutMs? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}` |
 | 人工步 | `ctx.manual(desc, { done, instructions?, id? })` | 见 §7；非 TTY 返回 `needs_human`，不假装有人 |
 | 观察 | `ctx.url()` / `ctx.read.{text,value,count,attr}(sel[, attr])` / `ctx.holds(signal)` / `ctx.waitFor(signal, {timeoutMs?, pollMs?})` | 只读；读不到返回 `null` / `0`；`waitFor` 轮询到 bounded deadline，返回 boolean |
 | 站点面 | `ctx.openPage(role)` / `ctx.extract(nameOrSpec)` / `ctx.rows(...)`（v1 关闭） | 具名抽取声明在 `meta.site.listExtract`；inline 抽取用 `{ rows, fields, maxItems? }`；`rows` 调用给结构化错误 |
-| 数据 | `ctx.source(name)` / `ctx.data.{min,max}(rows, by)` | 数据腿按需拉取；`--skip-data` 时 `source` 报结构化错误 |
+| 数据 | `ctx.source(name, {dates?})` / `ctx.data.{min,max}(rows, by)` | 数据腿按需拉取；`--skip-data` 时 `source` 报结构化错误。`dates` 显式给本次范围（单日 / `A..B` / `next_week`）；缺省按 source JSON 的 `default_dates`（支持 `"{slot}"` 占位符，从包默认 + `--slot` 解析；不许引用 `source_slots` 产物）。观察视图 `byDate` 按日期保留完整 counts/selects/rows |
 | 进程 | `ctx.run(...)` / `ctx.dangerous({...dryRunArgs})` | 见 §6；危险步默认拒绝 |
 | 构造器 | `ctx.judge.*` / `ctx.tool.*` / `ctx.hint()` / `ctx.hints()` / `ctx.command()` / `ctx.value.*` | 与 `kit` 同一份实现；命令 op 见下 |
 | 收尾 | `ctx.done()` | 结束态不变量验收；之后不允许再有动作 |
@@ -297,7 +297,7 @@ amber apps list / show <id|路径> [--code] / path <id> / remove <id> [--yes]
 amber apps new <id> [--goal G] [--host H] [--url U] [--dir D] [--print] [--force]
 amber apps check [<id|路径>] / explain <id|路径>
 amber run <id|路径> [--dry-run] [--max-steps N] [--trace] [--headful]
-                    [--slot k=v] [--out DIR] [--allow-dangerous]
+                    [--slot k=v] [--today YYYY-MM-DD] [--out DIR] [--allow-dangerous]
                     [--emit-trace F] [--replay F] [--json]
 amber record <页面> [--name ID] [--goal G] [--apps-dir DIR] [--yes]
 amber inspect --url <URL> [--json]

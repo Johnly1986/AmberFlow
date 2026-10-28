@@ -51,7 +51,7 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
       { key: "AMBERFLOW_DECISION_MODEL", description: "线上模型名；无服务地址时是本地 checkpoint（空 = english；可填 multilingual）" },
       { key: "AMBERFLOW_DECISION_API_KEY", secret: true, description: "线上服务密钥；本地自托管可空" },
       { key: "AMBERFLOW_DECISION_PROTOCOL", description: "systemone 或 openai-decisions；空 = 按 URL 自动推断" },
-      { key: "AMBERFLOW_DECISION_FLOOR", description: "闸门刻度；空 = 不覆盖 provider 自报/全局 0.25" },
+      { key: "AMBERFLOW_DECISION_FLOOR", description: "闸门刻度；空 = 不覆盖 provider 自报/全局 0.25；会被 --conf-floor（或 AMBERFLOW_CONF_FLOOR）覆盖" },
       { key: "AMBERFLOW_DECISION_SCORE_KIND", default: "calibrated_prob", description: "score 语义：calibrated_prob/entropy_conf/rank_only" },
       { key: "AMBERFLOW_DECISION_TIMEOUT_MS", default: "30000", description: "单次请求超时（毫秒）" },
       { key: "AMBERFLOW_DECISION_STATE_CONTEXT", default: "1", description: "1 = choice 题带 url/title/正文；0 = 只带 goal" },
@@ -65,7 +65,6 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
       { key: "OPENAI_API_KEY", secret: true, description: "外层 LLM 密钥" },
       { key: "PLANNER_MODEL", default: "gpt-4o-mini", description: "规划模型名" },
       { key: "AUDIT_MODEL", default: "gpt-4o-mini", description: "审计模型名" },
-      { key: "PLANNER_TIMEOUT", default: "120", description: "规划调用超时（秒）" },
     ],
   },
   {
@@ -88,7 +87,7 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
     group: "运行参数（CLI 旗标的配置默认值）",
     keys: [
       { key: "AMBERFLOW_HEADFUL", default: "0", description: "1 = 显示浏览器窗口" },
-      { key: "AMBERFLOW_CONF_FLOOR", description: "闸门刻度覆盖；空 = 不覆盖 provider/0.25" },
+      { key: "AMBERFLOW_CONF_FLOOR", description: "闸门刻度覆盖；空 = 不覆盖。优先级：--conf-floor / 此键 > AMBERFLOW_DECISION_FLOOR > 全局 0.25" },
       { key: "AMBERFLOW_TIERED_HINT", default: "0", description: "1 = 打开 tiered hint 实验" },
       { key: "AMBERFLOW_CONFIRM_SAFE", default: "0", description: "1 = 危险动作仍逐次确认" },
       { key: "AMBERFLOW_NO_SOURCES", default: "0", description: "1 = 跳过应用数据腿" },

@@ -17,7 +17,6 @@
   "OPENAI_API_KEY": "",
   "PLANNER_MODEL": "gpt-4o-mini",
   "AUDIT_MODEL": "gpt-4o-mini",
-  "PLANNER_TIMEOUT": "120",
   "PLAYWRIGHT_BROWSERS_PATH": "",
   "AMBERFLOW_HOME": "",
   "AMBERFLOW_APPS_OUT": "",
