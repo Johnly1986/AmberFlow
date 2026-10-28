@@ -22,29 +22,36 @@ online/cases/<tier>/<case>.json   # 用例
 
 ```jsonc
 {
-  "id": "books-next-page",
+  "id": "books-category",
   "site": "books",
   "tier": "core",
-  "goal": "从首页打开目录第二页",
+  "goal": "从 Books to Scrape 首页打开 Travel 分类",
   "start_url": "https://books.toscrape.com/",
-  "timeout_ms": 60000,
-  "model": "english",                // 可选；本地模式用，线上 provider 由配置决定
-  "slots": {},
   "subgoals": [
     {
-      "desc": "点击 next",
+      "desc": "点击 Travel 分类链接",
       "start_url": "https://books.toscrape.com/",
-      "target_hint": "next",
-      "signal": { "url_contains": "page-2.html" },
+      "target_hint": "a[href~travel_2]",
+      "signal": { "url_contains": "travel_2" },
       "retries": 2
     }
   ],
   "invariants": [
-    { "id": "second-page", "desc": "停在第二页", "signal": { "url_contains": "page-2.html" } }
-  ],
-  "oracle": { "kind": "css_count", "selector": "article.product_pod", "min": 1 }
+    {
+      "id": "category-page",
+      "desc": "分类页标题是 Travel 且仍有商品",
+      "signal": {
+        "all_of": [
+          { "css_text_contains": ["h1", "Travel"] },
+          { "css_exists": "article.product_pod" }
+        ]
+      }
+    }
+  ]
 }
 ```
+
+可选字段（上面示例未用到的）：`timeout_ms` / `model` / `slots` / `oracle` / `expect`。
 
 - `start_url` 只能是 `http(s)://`；主机必须在 site 的 `hosts` 里。`file://`、旧夹具路径会被拒绝。
 - 日期：`{{today}}`、`{{today+7d}}`、`{{next_monday}}`。
@@ -55,19 +62,21 @@ online/cases/<tier>/<case>.json   # 用例
 ## 运行
 
 ```bash
-npm run online:validate
-npm run online -- --tier smoke
-npm run online -- --tier core
-npm run online -- --tier deep
-npm run online -- --tier probe
-npm run online -- --case books-next-page --headed
+npm run test:validate                  # 离线校验全部 site/case（PR 门禁）
+npm run test -- --tier smoke           # 快速可达性
+npm run test -- --tier core            # 短流程
+npm run test -- --tier deep            # 长流程
+npm run test -- --tier probe           # 探针，非门禁
+npm run test -- --case books-category --headful
+npm run test -- --list
 ```
-undefined用 JSON，不要解析人类可读表格：
+
+机器可读输出用 `--json`，不要解析人类可读表格：
 
 ```bash
-npm run online -- --validate --json
-npm run online -- --list --json --tier all
-npm run online -- --tier smoke --json
+npm run test -- --validate --json
+npm run test -- --list --json --tier all
+npm run test -- --tier smoke --json
 ```
 
 `--list --json` 返回 `{ tier, cases: [{ id, site, tier, goal, tags }] }`；
@@ -81,6 +90,6 @@ npm run online -- --tier smoke --json
 ## 新增一个 case
 
 1. 在 `online/sites/` 声明主机与页面标记。
-2. 在对应 tier 写 case，先 `npm run online:validate`。
-3. 先跑 `--case <id> --headed` 确认动作与信号；再跑两次确认稳定。
+2. 在对应 tier 写 case，先 `npm run test:validate`。
+3. 先跑 `--case <id> --headful` 确认动作与信号；再跑两次确认稳定。
 4. 失败时看 `cases/<id>-failure.png` / `.html`，修 selector/signal，不添加 golden 快照。

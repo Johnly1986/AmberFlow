@@ -83,7 +83,7 @@ npm run learn       # 同一入口的 npm 脚本（不传参数时现场演示�
 
 | 命令 | 用途 |
 |---|---|
-| `npx amber run <id\|app.mjs>` | 运行 flow 应用；`--dry-run` / `--trace` / `--max-steps N` / `--slot k=v` / `--allow-dangerous` / `--manual-fail-fast` |
+| `npx amber run <id\|app.mjs>` | 运行 flow 应用；`--dry-run` / `--trace` / `--max-steps N` / `--slot k=v` / `--today YYYY-MM-DD` / `--allow-dangerous` / `--manual-fail-fast` |
 | `npx amber run --plan [文件]` | 运行计划文件（`--reset` / `--replan` / `--confirm allow\|ask\|deny`） |
 | `npx amber run --goal "..." --url ...` | 一次性目标：演示 → 计划 → 执行（`--save-plan`） |
 | `npx amber record [页面]` | 演示一次，生成 flow 应用（`--name` / `--goal` / `--apps-dir` / `--script`） |
@@ -132,7 +132,7 @@ npm run test -- --tier smoke           # 快速可达性
 npm run test -- --tier core            # 短流程
 npm run test -- --tier deep            # 长流程
 npm run test -- --tier probe           # 探针，非门禁
-npm run test -- --case books-next-page --headful
+npm run test -- --case books-category --headful
 npm run test -- --list
 ```
 
@@ -197,7 +197,6 @@ docs/           当前有效的设计/接入文档
 - [Agent 接口（脚本化应用）](docs/AGENT_INTERFACE.md)
 - [应用脚本作者指南](docs/APP_SCRIPT_AUTHORING.md)
 - [人工步骤与运行节奏](docs/MANUAL_STEPS_AND_PACE.md)
-- [运行时改进计划（SPA / 真实站点）](docs/RUNTIME_IMPROVEMENTS.md)
 - [统一决策服务配置](docs/DECISION_SERVICE_CONFIG.md)
 - [工程约束与 Agent 指南](CLAUDE.md)
 

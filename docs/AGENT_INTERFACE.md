@@ -250,9 +250,9 @@ amber apps remove <id> [--yes] [--force]
 ```json
 {
   "action": "run",
-  "tier": "core",
-  "case": "the-internet-nested-frames",
-  "site": "the-internet",
+  "tier": "deep",
+  "case": "saucedemo-checkout",
+  "site": "saucedemo",
   "headful": false,
   "require_all": false,
   "max_steps": 8,

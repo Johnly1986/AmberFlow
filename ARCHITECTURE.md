@@ -144,7 +144,3 @@ docs/             当前有效的设计/接入文档
 - 作者回路：用用户作用域临时应用跑 `apps new → apps check → apps explain → run --dry-run → run --max-steps`。
 - 手动/定时：`npm run test -- --tier smoke`、`core`，有网络与模型时再跑 `deep`；`probe` 单独跑并按 3 退出。
 - 线上任务产物作为 CI artifact 保存；仓库内不留运行结果。
-
-## 7. 运行时改进方向
-
-当前已知的 SPA / 真实站点改进方向集中在 `PageState`、action 后 settle、pool ready gate、失败语义分层、证据面和 host/frame 边界；详见 [docs/RUNTIME_IMPROVEMENTS.md](docs/RUNTIME_IMPROVEMENTS.md)。
