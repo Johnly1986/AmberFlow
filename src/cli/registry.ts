@@ -18,6 +18,8 @@ export const GLOBAL_USAGE = `AmberFlow — 冻结计划的浏览器自动化
 
 用法：
   amber <命令> [选项]
+  在源码 checkout 里就地跑：node --experimental-strip-types src/cli/main.ts <命令> [选项]
+  （npx amber 需要先把 bin 链进 node_modules，如 npm link；否则会挂在远端同名包上）
 
 日常命令：
   run       运行应用、计划或一次性目标

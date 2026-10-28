@@ -293,11 +293,13 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_apps`,
     description:
-      'List the flow apps the checkout can run, via `amber apps list --json`. Every row names the '
-      + 'app id, label, one-line goal, the writable script path (`apps/<id>/app.mjs`), its source '
-      + '(user scope or checkout fixture), invariant count and allowed hosts. There is only ONE app '
-      + 'format — a JS flow script — so there is no static step table: steps are runtime facts. A row '
-      + 'carrying `error` failed to load. Starts no browser and calls no model.',
+      'List the flow apps this machine can run, via `amber apps list --json`. Apps live in the user '
+      + 'scope (`$AMBERFLOW_HOME/apps/<id>/app.mjs`, by default ~/.amberflow/apps) — the repository '
+      + 'ships no apps, whatever is under its `apps/` is a development fixture. Every row names the '
+      + 'app id, label, one-line goal, the writable script path, its source (user scope or checkout '
+      + 'fixture), invariant count and allowed hosts. There is only ONE app format — a JS flow '
+      + 'script — so there is no static step table: steps are runtime facts. A row carrying `error` '
+      + 'failed to load. Starts no browser and calls no model.',
     parameters: {
       filter: { type: 'string', description: 'Optional case-insensitive substring match on id/label/goal.' },
     },
@@ -359,7 +361,8 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_run`,
     description:
-      'Run one flow app (`apps/<id>/app.mjs`) end to end: the script\'s `flow(ctx)` owns the control '
+      'Run one flow app (a user-scope `app.mjs`; the repository ships no apps) end to end: the '
+      + 'script\'s `flow(ctx)` owns the control '
       + 'flow (if/for/while, sub-functions), the engine decides each step\'s target, gate, action and '
       + 'completion signal, and the declared end-state invariants are the only pass/fail truth. '
       + '`max_steps` is an EXECUTION BUDGET, not a step index: the script runs under its own control '
@@ -371,7 +374,7 @@ export function apply(ctx: Context, config: Config): void {
     parameters: {
       app: { type: 'string', required: true, description: 'The app id from `' + toolPrefix + '_apps`.' },
       dry: { type: 'boolean', description: 'Only dry-run the script\'s call sequence; no browser, no tools.' },
-      ablate: { type: 'string', enum: ['stub', 'rules-only'], description: 'ABLATION EXPERIMENT ONLY. `stub` installs a scripted fake model; `rules-only` runs with no model at all. Omit for a normal run (the real decision model is the default).' },
+      ablate: { type: 'string', enum: ['stub', 'rules-only'], description: 'ABLATION EXPERIMENT ONLY. `stub` installs a scripted fake model; `rules-only` runs with no model at all. Omit to use the plane the checkout is configured with: the online service when AMBERFLOW_DECISION_BASE_URL is set, otherwise the local model (run `npm run doctor` in the checkout to see which one resolves).' },
       provider: { type: 'string', description: 'Override the decision provider for this call (laya-onnx, decision-service, a baseline, or an ablation). Omit to use the configured three-key service, or the local model when no service URL is set.' },
       no_sources: { type: 'boolean', description: 'Skip the data leg (use already-available data).' },
       headful: { type: 'boolean', description: 'Open a VISIBLE browser window for the run (engine '

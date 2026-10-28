@@ -93,6 +93,21 @@ function flowScriptTemplate(id: string, goal: string, hosts: string[], startUrl:
  *
  * 分工：脚本只写“要达成什么 + 怎么算完成”；点哪里由引擎的规则/决策层决定。
  * 控制流（if/for/while）只用于真实分支/循环；脚本拿不到模型文本或分数，完成只认 done 信号。
+ *
+ * done 不许猜（这条最容易踩，实测教训）：写信号之前先看这一页真的长什么样——
+ *   amber inspect --url <入口页> --json
+ * 能用的 done 必须「动作前不成立、动作后成立」。凭想象写的文案会把一次真的成功
+ * 判成 no_progress：实测连点四次同一个按钮、每次都算 inert，最后停在预算上。
+ *
+ * ctx 只有这些面（没有 pageUrl()：入口页角色写在 meta.site.pages，用 openPage 取）：
+ *   openPage(role) / open(url) / arrive(url, {done}) / step(desc, {id, act, done, url, slots, when, timeoutMs})
+ *   / manual(desc, {done}) / url() / read.text|value|count|attr / rows / extract / holds / waitFor
+ *   / source / run / done() / fail(code, reason) / hint / hints / command
+ *   / judge.url|exists|text|equals|value|all|any|not|manual
+ *
+ * act 省略 = 这一步完全交给决策层，成败取决于模型。实测同一张结果页：不点名时
+ * conf 0.19–0.54 且连点错元素；点名 a[href~page=2] 后单步 conf 0.98–1.00 通过。
+ * 有稳定句柄（data-test / id / name / 唯一 label）就写 act，别赌。
  */
 export const meta = (kit) => ({
   id: ${JSON.stringify(id)},
@@ -109,10 +124,11 @@ export const meta = (kit) => ({
 export async function flow(ctx) {
   await ctx.openPage("home");   // ← 入口页在 meta.site.pages 里声明
 
-  // 决策语句：只写目标 + 完成证据，让引擎决定点哪里；需要稳定锚点时再加 act。
+  // 决策语句：目标 + 完成证据。done 写成 inspect 看到的事实；有稳定锚点就点名 act。
   // const r = await ctx.step("把商品加入购物车", {
   //   id: "add-to-cart",
-  //   done: ctx.judge.url("cart"),
+  //   act: ctx.hint("[data-test=add-to-cart]"),   // 省略 act = 完全交给决策层（见顶部说明）
+  //   done: ctx.judge.url("cart"),               // ← 换成这一页动作后真的会成立的信号
   // });
   // if (!r.ok) ctx.fail(r.stopCode ?? "step_failed", r.reason);
 

@@ -14,7 +14,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { REPO } from "../flow/flow.ts";
-import { appDirs, type AppPack } from "./app-pack.ts";
+import { appDirs, APPS_DIR, type AppPack } from "./app-pack.ts";
+import { appsSearchPath } from "./amberflow-home.ts";
 import { validateApp } from "./cross-ref.ts";
 import { createKit, type Kit } from "./kit.ts";
 import { lowerMeta, type ScriptMeta } from "./app-meta.ts";
@@ -125,8 +126,16 @@ function syntaxCheckLocation(scriptPath: string): string | null {
 export async function loadScriptApp(idOrPath: string): Promise<LoadedScriptApp> {
   const scriptPath = resolveScriptPath(idOrPath);
   if (scriptPath === null) {
-    throw new Error(`app script not found for ${JSON.stringify(idOrPath)} `
-      + `(looked for ${SCRIPT_FILENAMES.join("/")} under ${appDirs().join(", ")})`);
+    // 报错要说"找了哪些根目录"，不是"哪些目录里有应用"：用户作用域还没建出来时
+    // appDirs() 是空数组，只打印它等于什么都没打印（实测：`… under )`）。
+    const roots = appsSearchPath(APPS_DIR);
+    const isId = /^[a-z0-9][a-z0-9_-]*$/i.test(idOrPath);
+    throw new Error(`app script not found for ${JSON.stringify(idOrPath)} — `
+      + `looked for ${SCRIPT_FILENAMES.join("/")} under: `
+      + roots.map((r) => `${r}${fs.existsSync(r) ? "" : "（不存在）"}`).join(" ; ")
+      + `\n  应用只有一种格式：${roots[0]!}${path.sep}<id>${path.sep}app.mjs`
+      + "（用户作用域；仓库 `apps/` 只是开发夹具）"
+      + `\n  创建它：${isId ? `amber apps new ${idOrPath}` : "amber apps new <id>"} --url <入口页>`);
   }
   const source = fs.readFileSync(scriptPath);
   let mod: ScriptModule;
