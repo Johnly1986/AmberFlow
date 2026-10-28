@@ -10,7 +10,7 @@
  * 三条设计规矩（都是本轮实测换来的，不是审美）：
  *
  * 1. **provider 自报家底**（`capabilities`）。闸门与报告只能读它声明会给的信号。
- *    横评（docs/DECISION_INTERFACE_SURVIEWS.md…见 DECISION_INTERFACE_SURVEY.md）的结论是：
+ *    横评的结论是：
  *    "枚举候选 + 选一个"是市场通用形状，但**每个候选上的概率不是**——browser-use 那类
  *    纯生成式 agent 的输出里根本没有概率字段。所以概率必须是**可选**的。
  * 2. **`score_kind` 说明那个数该怎么读**，跨 kind 不许比。`rank_only` 的 provider 给不出
@@ -127,7 +127,7 @@ export interface ClosedSetChoice {
 export interface DecisionProvider extends ProviderInfo {
   pick(req: ChoiceRequest): Promise<ChoiceOutcome>;
   /**
-   * 能力：对**调用方给定的闭集**做一次 choice（S2 ③ 提名；docs/NL_FLOW_DESIGN.md §4）。
+   * 能力：对**调用方给定的闭集**做一次 choice（S2 ③ 提名）。
    * 不实现 = 该 provider 不能做提名窄问；梯级按"③ 弃权"往下走（fail closed，不猜）。
    * 实现方必须自己保证返回的 ref 在 `criteria` 内（池外答案 → null）。
    */
@@ -166,10 +166,6 @@ export function listDecisionProviders(): string[] {
   return [...registry.keys()].sort();
 }
 
-export function hasDecisionProvider(name: string): boolean {
-  return registry.has(name);
-}
-
 /** 装上当前 provider（`null` = 不装，执行器进 rules-only）。 */
 export function installDecisionProvider(p: DecisionProvider | null): void {
   active = p;
@@ -196,18 +192,6 @@ export function activeProviderInfo(): ProviderInfo | null {
   if (!active) return null;
   const { name, version, capabilities, floor } = active;
   return { name, version, capabilities: { ...capabilities }, ...(floor !== undefined ? { floor } : {}) };
-}
-
-/** 一行给人看的身份串：`laya-onnx 0.3.5（entropy_conf，支持短名单）`。 */
-export function describeActiveProvider(): string {
-  const i = activeProviderInfo();
-  if (!i) return "无（规则模式）";
-  const cap = [
-    i.capabilities.shortlist ? "短名单" : null,
-    i.capabilities.risk ? "风险头" : null,
-    i.capabilities.done ? "完成投票" : null,
-  ].filter(Boolean).join("/");
-  return `${i.name} ${i.version}（score=${i.capabilities.score_kind}${cap ? `，${cap}` : ""}）`;
 }
 
 /* ── 选择：三件套 / 显式名字 → 哪扇门（CLI 与配置都走这一个函数） ─────────── */

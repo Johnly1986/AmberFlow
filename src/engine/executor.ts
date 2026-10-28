@@ -152,7 +152,7 @@ export interface BrowserHandle extends BrowserLike {
 type Sig = [string, string, string];
 
 /**
- * Structured stop cause (docs/ARCHITECTURE_REVIEW.md D4 / P0-2).
+ * Structured stop cause .
  *
  * The loop used to terminate on 12 free-text `stop_reason` strings, so every
  * downstream consumer (online suite exit codes, the DSH bridge, reports, refusal
@@ -377,7 +377,7 @@ export interface RunOptions {
   /** `when` guard: evaluated after navigation, before any action. */
   precondition?: SignalSpec | null;
   /**
-   * P2 COMMAND SPACE (docs/ARCHITECTURE_REVIEW.md §6, the "check + submit in ONE
+   * P2 COMMAND SPACE (the "check + submit in ONE
    * subgoal" use case): an ORDERED CLOSED SET of commands this step may execute,
    * declared by the app config and validated at load (`actions.validateCommands`).
    * When present, the step acts ON THE SPACE, not on the pool:
@@ -392,7 +392,7 @@ export interface RunOptions {
    */
   commands?: CommandDecl[] | null;
   /**
-   * NL Flow S1（docs/NL_FLOW_DESIGN.md §2.3/§5）：`dataset` 绑定来源的读取面。
+   * NL Flow S1：`dataset` 绑定来源的读取面。
    * 命令参数可声明 `{"from":"dataset","key":"…"}` 引用**前序步骤的具名产出**；
    * 解析在绑定那一刻现读最新 generation——陈旧世代不可读。缺省 null ⇒ 该来源
    * 结构化 `needs_value`（没有数据集就没有值，绝不猜）。不声明 dataset 绑定的包：
@@ -423,7 +423,7 @@ export interface RunOptions {
    */
   hosts?: string[] | null;
   /**
-   * P1 TIERED HINT (docs/ARCHITECTURE_REVIEW.md, P1 tieredHint; default OFF): when the
+   * P1 TIERED HINT (default OFF): when the
    * plan's `target_hint` resolves to a TIER that is ambiguous inside (several
    * genuinely different candidates), rules.ts used to collapse that to `null` and
    * the step fell to laya over the WHOLE pool — "pick 1 of 40" for what is really
@@ -530,7 +530,7 @@ function asFunction(src: string): (...args: any[]) => any {
 
 /** Every input's current value — inner_text misses fills, and values drive validation.
  *
- * SECRET REDACTION (P0-3, docs/ARCHITECTURE_REVIEW.md D5①): `password`/`file`/`hidden`
+ * SECRET REDACTION (P0-3): `password`/`file`/`hidden`
  * inputs keep their SHAPE (a per-character mask) but never their content. The inert
  * check compares this string, so a typed password still CHANGES the snapshot
  * (`"" -> "*"` -> `"**"`) without leaking the value into a snapshot, a trace line or
@@ -605,7 +605,7 @@ function sigEq(a: Sig, b: Sig): boolean {
 }
 
 /**
- * Navigation envelope (P0-4, docs/ARCHITECTURE_REVIEW.md D5② / backlog R-5).
+ * Navigation envelope (P0-4).
  *
  * `hosts` used to be a LOAD-TIME fact only: type-checked in `app-pack.ts`, the input
  * of the leak gate — and never consulted at runtime, so any pack could navigate to
@@ -907,7 +907,7 @@ export class BrowserMiddleware {
    */
   private async ready(): Promise<void> {
     if (this._ready) return;
-    // **决策提供者层的入口**（docs/DECISION_INTERFACE_SURVEY.md 的落地）：
+    // **决策提供者层的入口**：
     //   ① 显式装了 provider（换模型测试走这条）⇒ 直接用它，不要求 laya runtime 存在；
     //   ② 否则走旧门：装了 `LayaRuntime` 就就地包一层适配器 ⇒ 行为与今天逐字段相同
     //      （等价由 历史回归 钉住，不是"看着一样"）；
@@ -1057,7 +1057,7 @@ export class BrowserMiddleware {
   /* -- laya calls (each one forward pass) ---------------------------------- */
 
   /**
-   * 一次"选元素"的**完整提案**（docs/ARCHITECTURE_IMPROVEMENTS.md §2）。
+   * 一次"选元素"的**完整提案**。
    *
    * 为什么要结构而不是一个 float：`conf` 今天承载**两个不可比的量**——
    * passthrough（池 ≤ k）是 `1 − 归一化熵`，shortlist（池 > k）是**子集上的 max(probs)**。

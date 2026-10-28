@@ -3,7 +3,7 @@
  *
  * JevK5 与 laya/百炼是**同一类东西**：给一个状态和一道类型化的题，一次前向返回每个选项的概率，
  * 不生成 token。它的 `/v1/systemone` 就是 System One 协议，所以本项目只做这一层适配
- * （见 docs/DECISION_LAYER_SYSTEMONE.md），模型加载/推理在服务侧。
+ * ，模型加载/推理在服务侧。
  *
  * profile 吸收的 JevK5 特有差异（与百炼不同处，实测钉在 历史回归）：
  *   - 无认证、body 不带 `model` 字段；

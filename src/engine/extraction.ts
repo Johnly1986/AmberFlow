@@ -185,10 +185,6 @@ export const ACTION_ADAPTERS: readonly ActionAdapter[] = [
   DRAG_ADAPTER, SCROLL_ADAPTER, SLIDER_ADAPTER, CHECK_ADAPTER, SELECT_ADAPTER, FILL_ADAPTER, CLICK_ADAPTER,
 ];
 
-export function actionAdapterFor(e: Elem): ActionAdapter | null {
-  return ACTION_ADAPTERS.find((a) => a.canApply(e)) ?? null;
-}
-
 export function actionCapabilities(e: Elem): ActionCapability[] {
   const out: ActionCapability[] = [];
   for (const adapter of ACTION_ADAPTERS) if (adapter.canApply(e) && !out.includes(adapter.kind)) out.push(adapter.kind);
@@ -299,15 +295,6 @@ export function urlOf(page: PageLike): string {
   return typeof page.url === "function" ? page.url() : page.url;
 }
 
-let anyFrameSearch: ((page: PageLike, selector: string) => LocLike | null | Promise<LocLike | null>) | null = null;
-
-/** Test hook: install a fake frame search (the real one needs Playwright). */
-export function setLocatorAnyFrame(
-  fn: ((page: PageLike, selector: string) => LocLike | null | Promise<LocLike | null>) | null,
-): void {
-  anyFrameSearch = fn;
-}
-
 /** Main frame first, then at most `limit` child frames (ad iframes must not eat the budget). */
 export function framesOf(page: PageLike, limit = 6): FrameLike[] {
   try {
@@ -336,7 +323,6 @@ export function frameAt(page: PageLike, index: number): FrameLike | undefined {
  * embedded form's own field), where `page.locator` never looks.
  */
 export async function locatorAnyFrame(page: PageLike, selector: string): Promise<LocLike | null> {
-  if (anyFrameSearch) return await anyFrameSearch(page, selector);
   if (page.frames !== undefined || page.locator !== undefined) {
     for (const fr of framesOf(page)) {
       try {

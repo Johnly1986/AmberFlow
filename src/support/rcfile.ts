@@ -100,9 +100,6 @@ export function applyRcToEnv(env: NodeJS.ProcessEnv = process.env, root: string 
   return result;
 }
 
-/** 测试缝：清掉幂等缓存（进程内换了 rc 文件内容时用）。 */
-export function resetRcCache(): void { lastApply = null; }
-
 /** doctor 的"配置来源"段：每个生效键点名它是从 env 还是文件来的。
  * 来源判断按 `loadRc` 的值比对，不依赖 applyRcToEnv 的写入痕迹——否则同一进程内
  * 先 apply 再展示时，键已在 env 里、重算的 applied 就不含它，会把"文件"错标成"环境"。 */

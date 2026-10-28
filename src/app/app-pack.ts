@@ -166,7 +166,7 @@ function rowMainValue(row: Record<string, string> | null): string {
 }
 
 /**
- * **运行策略可以声明**（docs/ARCHITECTURE_IMPROVEMENTS.md §3）。
+ * **运行策略可以声明**。
  *
  * 配置面以前被劈成两半："应用是什么"在包里，"这次怎么跑"只在命令行——于是同一个包的含义随
  * 命令行变，而 `tieredHint`（窄问）这类**属于站点知识**的开关，包作者根本没法为自己的包打开。

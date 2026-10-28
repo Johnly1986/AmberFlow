@@ -153,34 +153,3 @@ export function replayCompatibility(
   }
   return p;
 }
-
-/**
- * 两次运行的**结构**是否一致：只比 "调用了什么 + 参数 + 结果"（call/desc/url/ok/stop_code），
- * 忽略 `result` 里像耗时这类每次都会变的证据。真实运行的确定性主张用这个口径
- * （dry 的等价性仍用逐字段的 `sameEventSequence`）。
- */
-export function sameEventStructure(a: AppTrace, b: AppTrace): boolean {
-  const pick = (t: AppTrace) => t.events.map((e) => {
-    // result 里的耗时是每次都会变的证据，剥掉；其余（ok/stop_code/reason/rows…）属于结构。
-    let result: unknown = e.result ?? null;
-    if (typeof result === "object" && result !== null && !Array.isArray(result)) {
-      const { elapsed_ms: _ignored, ...rest } = result as Record<string, unknown>;
-      void _ignored;
-      result = rest;
-    }
-    return {
-      call: e.call, desc: e.desc ?? null, url: e.url ?? null,
-      ok: e.ok ?? null, stop_code: e.stop_code ?? null, result,
-    };
-  });
-  return canonicalJson(pick(a)) === canonicalJson(pick(b));
-}
-
-/** 两次运行的事件序列是否一致（确定性/重放的判据；只比"调用 + 结果"这些事实）。 */
-export function sameEventSequence(a: AppTrace, b: AppTrace): boolean {
-  const pick = (t: AppTrace) => t.events.map((e) => ({
-    call: e.call, desc: e.desc ?? null, url: e.url ?? null,
-    ok: e.ok ?? null, stop_code: e.stop_code ?? null, result: e.result ?? null,
-  }));
-  return canonicalJson(pick(a)) === canonicalJson(pick(b));
-}

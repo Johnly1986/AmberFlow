@@ -1,5 +1,5 @@
 /**
- * **SystemOne 客户端**（docs/DECISION_LAYER_SYSTEMONE.md，Stage 1）——本项目对决策服务的全部知识。
+ * **SystemOne 客户端**——本项目对决策服务的全部知识。
  *
  * laya、JevK5、百炼 decision-model-preview 说的是同一种协议（TypeSafe System One）：
  *   请求 `{ [extra...], state, questions: { qid: { type: choice|noul|score, instructions, criteria } } }`

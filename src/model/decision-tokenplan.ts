@@ -47,7 +47,6 @@ const CAPABILITIES: ProviderCapabilities = {
  * 上模型对某个元素的把握是 0.20，在全局缺省 0.25 下被硬阻塞；floor≤0.20 即恢复 4/4 且不变量全绿
  * （0.20/0.15/0.10 三档同形，松闸没带来错点——每步仍由该步信号裁决）。
  * **边界**：这是单包单点测出来的刻度，不是普适校准；包可用 `policy.conf_floor` 覆盖、CLI 可本次覆盖。
- * 见 docs/DECISION_PROVIDER_TOKENPLAN.md §闸门刻度。
  */
 const SUGGESTED_FLOOR = 0.2;
 
@@ -65,7 +64,7 @@ export function tokenPlanProvider(opts: TokenPlanOptions = {}): DecisionProvider
       return opts.endpoint ?? env.TOKEN_PLAN_ENDPOINT ?? null;
     },
     endpointHint: "设 TOKEN_PLAN_ENDPOINT（完整 URL，要带 …/compatible-mode/v1/systemone；"
-      + "共享层的泄漏门禁不许把外部主机写进代码/默认值）。完整示例见 docs/DECISION_PROVIDER_TOKENPLAN.md",
+      + "共享层的泄漏门禁不许把外部主机写进代码/默认值）",
     // key 每次现读（不缓存进闭包）：测试可临时注入，也没有"启动时没配、之后配了读不到"的坑。
     resolveAuth() {
       const key = keyOf();
@@ -87,7 +86,7 @@ export function tokenPlanProvider(opts: TokenPlanOptions = {}): DecisionProvider
         const extra = missing.length ? `；另缺 ${missing.join(" 与 ")}` : "";
         return `TOKEN_PLAN_ENDPOINT=${JSON.stringify(ep)} 不是 SystemOne 的完整 URL——`
           + "要以 /compatible-mode/v1/systemone 结尾（POST 到 /v1 或 chat 路径，网关回 400 url error）。"
-          + "完整形状见 docs/DECISION_PROVIDER_TOKENPLAN.md" + extra;
+          + "完整形状见本条错误信息里的结尾说明" + extra;
       }
       return missing.length ? `缺 ${missing.join(" 与 ")}` : null;
     },

@@ -160,10 +160,10 @@ export function affordanceRule(
  * `decided` is a candidate `hintMatch` already settles to on its own (the
  * submit-preference on a bare `input`/`button` tag). `hintMatch` is
  * `decided ?? firstIfSame(refs)` — so the two views are the SAME single
- * implementation and can never drift into a second hint grammar (the mistake
- * ARCHITECTURE_REVIEW.md and CLAUDE.md both charge for).
+ * implementation and can never drift into a second hint grammar (both the
+ * engine review and this guide charge for that mistake).
  *
- * Why this exists (docs/ARCHITECTURE_REVIEW.md, P1 tieredHint): in-tier
+ * Why this exists (P1 tieredHint): in-tier
  * ambiguity used to collapse to `null`, degrading "pick one of these few" back
  * into "pick one of the whole pool" — measured 17 candidates → 0.23 BLOCKED,
  * 0.29 coin-flip. `hintCandidates` hands the DECIDER the narrowed subset.

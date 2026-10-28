@@ -45,10 +45,6 @@ export function blockedError(message: string, opts: { hint?: string | null; next
   return new CliError("BLOCKED", message, { ...opts, exitCode: EXIT.BLOCKED });
 }
 
-export function incompleteError(message: string, opts: { hint?: string | null; next?: string[] } = {}): CliError {
-  return new CliError("INCOMPLETE", message, { ...opts, exitCode: EXIT.INCOMPLETE });
-}
-
 /** 把 Node `parseArgs` 的异常翻译成统一的一行用法错误。 */
 export function usageFromParseError(err: unknown): CliError {
   const raw = err instanceof Error ? err.message : String(err);

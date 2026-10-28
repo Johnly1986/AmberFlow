@@ -14,7 +14,8 @@
  *                                   `…/v1/systemone` 都行；System One 会自动补 `/v1/systemone`）
  *   - `AMBERFLOW_DECISION_MODEL`     模型名（随请求体 `model` 发；服务不要求时可空）
  *   - `AMBERFLOW_DECISION_API_KEY`   密钥（Bearer；本地自托管无认证可留空）
- *   - 可选：`AMBERFLOW_DECISION_PROTOCOL`（默认 `systemone`；`openai-decisions` 预留未实现）、
+ *   - 可选：`AMBERFLOW_DECISION_PROTOCOL`（缺省按 URL 推断；显式可填 `systemone` /
+ *     `openai-decisions`，两条协议都已实现）、
  *     `AMBERFLOW_DECISION_FLOOR`（闸门刻度）、`AMBERFLOW_DECISION_SCORE_KIND`、
  *     `AMBERFLOW_DECISION_TIMEOUT_MS`、`AMBERFLOW_DECISION_STATE_CONTEXT`（`0` 关闭带上文）、
  *     `AMBERFLOW_DECISION_MIN_OPTIONS`（choice 选项下限，自托管 JevK5 需要 2）
@@ -35,7 +36,6 @@ export { DECISION_SERVICE_KEYS };
 
 
 export type DecisionServiceProtocol = "systemone" | "openai-decisions";
-export const SUPPORTED_PROTOCOLS: readonly DecisionServiceProtocol[] = ["systemone"];
 
 const CAPABILITIES: ProviderCapabilities = {
   choice: true,
@@ -60,11 +60,6 @@ export function serviceModel(env: NodeJS.ProcessEnv = process.env): string {
 
 export function serviceApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return envOf(env.AMBERFLOW_DECISION_API_KEY);
-}
-
-/** 是否配置了统一决策服务（只看服务地址；密钥是否缺失由 `serviceConfigError` 回答）。 */
-export function decisionServiceConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  return serviceBaseUrl(env) !== "";
 }
 
 /** 协议：显式 `AMBERFLOW_DECISION_PROTOCOL` 优先；否则按 URL 形状推断（默认 systemone）。 */

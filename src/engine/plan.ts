@@ -14,7 +14,7 @@ import { validateSignalSpec, type SignalSpec } from "./signals.ts";
 import { validateCommands, type CommandDecl } from "./actions.ts";
 
 /**
- * 一步的可逆性声明（docs/ARCHITECTURE_IMPROVEMENTS.md §4）。
+ * 一步的可逆性声明。
  *
  * 曾经还有第二个键 `verify_after`（`signal` | `none`）。项目方裁定：
  * **`none` 不允许存在**——"动作后不要求证据也算完成"就是放松红线③；
@@ -89,7 +89,7 @@ const EDITABLE = new Set([
 /**
  * P4 走向的**路径上界**：同一个步 id 在一次运行里最多被进入多少次。
  *
- * `maxSteps=8` 是**每一步**的预算，不是**每一条路径**的（docs/ARCHITECTURE_REVIEW.md X4）：
+ * `maxSteps=8` 是**每一步**的预算，不是**每一条路径**的：
  * 一旦允许 `next` 边，环就必须有一个显式的上界，跑出结构化停因，而不是挂死或栈溢出。
  * 默认 3 = "一条回边最多把同一步再走两次"；应用包可用 `max_step_visits` 覆盖。
  */

@@ -103,12 +103,6 @@ export const RC_GROUPS: Array<{ group: string; keys: string[] }> = CONFIG_GROUPS
 
 export const CONFIG_KEYS: readonly string[] = CONFIG_GROUPS.flatMap((g) => g.keys.map((k) => k.key));
 
-export const CONFIG_DEFAULTS: Readonly<Record<string, string>> = Object.fromEntries(
-  CONFIG_GROUPS.flatMap((g) => g.keys)
-    .filter((k): k is ConfigKeySpec & { default: string } => k.default !== undefined)
-    .map((k) => [k.key, k.default]),
-);
-
 function keysOfGroup(group: string): readonly string[] {
   const found = CONFIG_GROUPS.find((g) => g.group === group);
   return found ? found.keys.map((k) => k.key) : [];
@@ -129,10 +123,6 @@ export function isSecretKey(key: string): boolean {
 /** doctor/config 的唯一掩码入口：秘密只留长度。 */
 export function maskValue(key: string, value: string): string {
   return isSecretKey(key) ? `${"*".repeat(Math.min(value.length, 12))}（长度 ${value.length}，已掩码）` : value;
-}
-
-export function defaultForKey(key: string): string | undefined {
-  return CONFIG_DEFAULTS[key];
 }
 
 export const CONFIG_DOC = [

@@ -138,14 +138,14 @@ export interface AppRunOptions {
    */
   forceHints?: boolean;
   /**
-   * S0（NL Flow，docs/NL_FLOW_DESIGN.md §10-S0）：把每个浏览器子目标的执行证据带进结果
+   * S0（NL Flow）：把每个浏览器子目标的执行证据带进结果
    * （`step_traces`：desc / 状态 / 每一步的 how、desc、method）。提名实验台用它从
    * **已验收语料的实际执行**里取真值指令（truth = 这一步真的执行了什么动作）。
    * 默认关：不开时结果 JSON 与今天逐字节相同（缺省等价纪律，`end_state` 同款）。
    */
   captureTraces?: boolean;
   /**
-   * S0 上下文实验（docs/NOMINATION_QUESTION_SET_ANALYSIS.md §6）：把**每步开始时**的页面状态
+   * S0 上下文实验：把**每步开始时**的页面状态
    * 采进 `step_traces[i].state_view`（URL/标题/正文摘要/控件能力摘要）。**缺省关**：
    * 不开时与 captureTraces 既有行为逐字节不变（只在需要时多付一次导航 + 一次提取）。
    */
@@ -171,7 +171,7 @@ export interface AppRunOptions {
   pickAsks?: () => number;
   /**
    * P1 `tieredHint` 的出口（默认关 = 今天逐字节）：hint 档内歧义变成对模型的更小提问。
-   * 由 `--tiered-hint` / 桥的 `tiered_hint` 打开，用于线上包 A/B（docs/ARCHITECTURE_REVIEW.md 执行层三段化 P1）。
+   * 由 `--tiered-hint` / 桥的 `tiered_hint` 打开，用于线上包 A/B。
    */
   tieredHint?: boolean;
   /**
@@ -186,7 +186,7 @@ export interface AppRunOptions {
   /**
    * 置信度闸门的**本次覆盖**（`--conf-floor N`）。不传 = 让 pack.policy / provider 自报 / 0.25 接管。
    * 为什么需要它：闸门比的是 provider 的 `score`，换 provider（score_kind 不同）时缺省刻度不再成立——
-   * 实测 token-plan 在 camera-entry 上有一枪 0.20 被 0.25 硬阻塞（见 docs/DECISION_PROVIDER_TOKENPLAN.md）。
+   * 实测 token-plan 在 camera-entry 上有一枪 0.20 被 0.25 硬阻塞。
    */
   confFloor?: number;
   /** provider 自报的闸门刻度（`ProviderInfo.floor`；CLI 装了 provider 就传进来）。 */
@@ -274,7 +274,7 @@ export interface AppDecisions {
   /** 决策缓存（装了才有）：命中数与提问总数。 */
   cache: { hits: number, misses: number } | null;
   /**
-   * 梯级账单（ARCHITECTURE_IMPROVEMENTS §5）：每一级"到达 / 决定 / 问了但没过闸门"。
+   * 梯级账单：每一级"到达 / 决定 / 问了但没过闸门"。
    * **救回**的诚实定义 = 该级独立决定的步数（低一级没决定的那一步才轮得到它——
    * trace 里 `method` 就是这么记的，所以不需要反事实重跑）。整条梯级在语料上决定 0 步
    * 就是 `dead rung`，由套件在**聚合层**判定（单应用看不出全貌，见 tools/apps_suite.ts）。
@@ -1074,7 +1074,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const walk = createPathWalk(expanded.steps, pack.max_step_visits ?? DEFAULT_MAX_STEP_VISITS);
   const pathCrossed: string[] = [];
   let pathStopOut: AppRunResult["path_stop"];
-  // 应用支持器运行上下文（docs/APP_SUPPORTER_DESIGN.md §2）：web/cli 两个内建适配器
+  // 应用支持器运行上下文：web/cli 两个内建适配器
   // **迁移桥**——执行委托回下面两个服务（执行循环本身不搬进适配器）；新类型自己实现 run。
   const appRunId = `${Date.now().toString(36)}-${process.pid}`;
   const adapterCtx: AdapterRunContext = {

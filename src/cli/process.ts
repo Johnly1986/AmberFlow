@@ -17,12 +17,6 @@ export type EntryRunner = (
   opts?: RunEntryOptions,
 ) => Promise<number>;
 
-export type ExecutableRunner = (
-  command: string,
-  args: string[],
-  opts?: RunEntryOptions & { shell?: boolean; stdoutToStderr?: boolean },
-) => Promise<number>;
-
 function normalizeExit(code: number | null, signal: NodeJS.Signals | null): number {
   if (signal === "SIGINT") return 130;
   if (code === null) return 1;

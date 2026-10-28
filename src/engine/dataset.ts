@@ -1,5 +1,5 @@
 /**
- * 具名数据集（NL Flow S1，docs/NL_FLOW_DESIGN.md §2.3）——跨步参数传递的唯一管道。
+ * 具名数据集（NL Flow S1）——跨步参数传递的唯一管道。
  *
  * 设计文档 §2.3 的三条硬规则，这里各有一条实现对应：
  *
@@ -147,8 +147,4 @@ export class DatasetStore implements DatasetReader {
     }
     return store;
   }
-}
-
-export function createDataset(): DatasetStore {
-  return new DatasetStore();
 }
