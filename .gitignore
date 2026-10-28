@@ -18,12 +18,6 @@ configs/amberflowrc.json
 .task_state.json
 .task_plan.json
 bench/results/
-qunar/results/list_direct.png
-qunar/results/home_rendered.html
-ctrip/results/real_flights.*
-ctrip/results/ctrip-flights-h5.*
-ctrip/results/ctrip-hotels-pc.*
-ctrip/results/ablation-*/
 
 # 编辑器 / 系统
 .DS_Store

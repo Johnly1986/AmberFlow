@@ -12,7 +12,8 @@
  *   - `confidence` 就是 `max(probs)`（`jevk5/prompt.py:answer`）——score 读 confidence，
  *     pTop1/pTop2/margin 从 probabilities 取；score_kind=calibrated_prob。
  *
- * 本机跑不动它（4B bf16 要 ~9GB GPU），所以对着服务端线协议写，契约测试用假 `/v1/systemone`（CI 不需权重）。
+ * 本机没有 4B bf16 的 CUDA 余量（~9GB），但 GGUF 路径已经通了：llama-server + jevk5-gguf-serve.py 桥
+ * （见 docs/DECISION_PROVIDER_JEVK5.md 的 B 节），Q8_0 choice 239 ms/题。契约测试仍用假 `/v1/systemone`（CI 不需权重）。
  * 起真服务见 docs/DECISION_PROVIDER_JEVK5.md。
  */
 import type { DecisionProvider, ProviderCapabilities } from "./decision-provider.ts";

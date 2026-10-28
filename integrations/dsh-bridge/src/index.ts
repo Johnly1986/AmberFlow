@@ -6,11 +6,19 @@
  * that engine as CLIs (`app-runner`, `learn`). This plugin turns those CLIs into model-facing tools
  * so a DSH session can drive them — and it deliberately adds **no browser logic of its own**:
  *
- * - `…_apps`  — list declared apps by reading `apps/<id>/pack.json` (no subprocess, no browser).
+ * - `…_apps`  — list declared apps by reading the checkout's app dirs (pack.json / app.mjs /
+ *               flow.json / sources) — no subprocess, no browser.
  * - `…_run`   — run a declared app and return a compact summary of its artifacts.
- * - `…_learn` — hand over "goal + page" once: the engine records the flow, induces the completion
- *               signals and the end-state invariants, and only saves the pack when a **rules-only
- *               replay with zero model calls** passes.
+ * - `…_learn` — hand over "page + recorded action list": the engine runs the flow once, induces the
+ *               completion signals and the end-state invariants, and only saves the pack when a
+ *               **rules-only replay with zero model calls** passes.
+ * - `…_plan`  — walk a seed page into a SemanticFlow template plus that site's profile, gated by a
+ *               full replay before anything is written.
+ *
+ * The model-facing text of these four doors lives ONLY in the `description` / parameter strings below.
+ * Capability narrative belongs to the package description (README + `locale/*.json` meta), not here,
+ * and the goal-driven one-shot door (`amber run --goal`) is a terminal flow — it is not exposed as a
+ * prompt and nothing here plans from a goal sentence.
  *
  * Trust boundary, stated out loud: the bridge spawns a foreign process from `repoPath`. It does not
  * route through the harness sandbox policy, so enabling this plugin means trusting that checkout.
@@ -279,17 +287,13 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_apps`,
     description:
-      'List the browser/CLI apps declared in the AmberFlow checkout, with their step counts, '
-      + 'invariant counts and where each pack came from (generated from a spec/source, recorded from '
-      + 'a demonstrated flow, hand-written, or a pure data source with no journey of its own). '
-      + 'Each row carries a kind: `journey` apps run under the run tool; `probe` apps are measurement '
-      + 'sets the engine refuses to run through the app runner (read their declaration only); '
-      + '`data-source` rows feed other packs; `semantic-template` rows (flow.json) are site-agnostic '
-      + 'SemanticFlow templates — run them with the run tool plus one of their listed `sites`, and '
-      + 'grow a new site\'s profile with the plan tool. A journey may MIX application types '
-      + '(web/cli/ssh/stdio): each row lists its type mix (e.g. `web×2 · cli×3 · ssh×1`) and any '
-      + 'local service the app needs at run time (e.g. ssh needs a reachable local sshd) — check '
-      + 'that before spending a run. Reads the packs only: no browser, no model, no subprocess.',
+      'List the apps declared in the AmberFlow checkout (id, label, goal, step and invariant counts, '
+      + 'origin, kind, hosts, sites). The `kind` column decides the door: `journey` rows run under '
+      + 'the run tool; `probe` and `data-source` rows are read-only — the engine refuses them through '
+      + 'the app runner; a `semantic-template` row needs one of its own listed `sites`. A row can mix '
+      + 'adapter types (web/cli/ssh/stdio) and name a local service the run needs (ssh needs a '
+      + 'reachable sshd) — check that before spending a run. Reads files only: no browser, no model, '
+      + 'no subprocess.',
     parameters: {
       filter: { type: 'string', description: 'Optional case-insensitive substring match on id/label/goal.' },
     },
@@ -358,32 +362,22 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_run`,
     description:
-      'Run one declared AmberFlow app end to end (data leg -> browser/tool steps -> end-state '
-      + 'invariants) and return a compact summary: completion, the FAILED subgoals only, refusals, '
-      + 'invariant results, and a `model: on|off(missing)` tier line saying whether the local '
-      + 'decision model was in play at all — plus the per-step decision tally (rule vs laya vs '
-      + 'reobserve vs cache). The full per-step table stays in the report file named by the result, '
-      + 'read it with the read tool when you need the detail. `ablate` runs an ABLATION arm (scripted stub, or no '
-      + 'forward passes); `dry` expands the plan and returns it instead of executing anything, so it '
-      + 'verifies nothing and writes no report. Semantic templates (`kind=semantic-template` in the '
-      + 'apps listing) additionally REQUIRE `site` and report a resolution-level tally line '
-      + '(rule/laya/escalate/backfill counts). A non-zero exit with no artifact means the run never '
-      + 'reached the verify stage; the cause is included.',
+      'Run one declared app end to end — data leg, then the journey, then the end-state invariants — '
+      + 'and return a compact summary: the completion count, only the failed, blocked or refused '
+      + 'steps, and the report file path. `dry` executes nothing and `ablate` replaces the decision '
+      + 'model with a fake or removes it: neither verifies anything, so do not read either as a pass.',
     parameters: {
       app: { type: 'string', required: true, description: 'The app id from `' + toolPrefix + '_apps`.' },
       site: {
         type: 'string',
-        description: 'Semantic templates only: one of the site keys listed by `' + toolPrefix
-          + '_apps`. Pack apps must not pass it.',
+        description: 'Required for a `semantic-template` row, set to one of the `sites` listed for it; '
+          + 'must not be set for a pack app.',
       },
-      dry: { type: 'boolean', description: 'Only expand the plan; do not open a browser or run tools.' },
-      ablate: { type: 'string', enum: ['stub', 'rules-only'], description: 'ABLATION EXPERIMENT ONLY. `stub` installs a scripted fake model; `rules-only` runs with no model at all. Omit for a normal run (the real decision model is the default).' },
-      provider: { type: 'string', description: 'Which decision provider to run on: laya-onnx (default), scripted-stub, none, or a baseline (first-candidate | coin-flip | always-abstain) / any registered provider. Use baselines to measure whether a model beats zero-intelligence search.' },
+      dry: { type: 'boolean', description: 'Expand the plan and return it instead of executing anything: no browser, no tools, no report, nothing verified.' },
+      ablate: { type: 'string', enum: ['stub', 'rules-only'], description: 'ABLATION ONLY: `stub` = a scripted model that never clears the confidence gate; `rules-only` = no model at all. Omit for the provider this checkout configures.' },
+      provider: { type: 'string', description: 'Decision provider for this run, by name: laya-onnx (needs the checkout\'s model artifacts), decision-service (reads AMBERFLOW_DECISION_BASE_URL / _API_KEY / _MODEL), token-plan, bailian, jevk5, scripted-stub, none, or a baseline (first-candidate | coin-flip | always-abstain). Omit to use the checkout\'s configured default; `npm run doctor` in the checkout prints which provider resolves.' },
       no_sources: { type: 'boolean', description: 'Skip the data leg (use already-available data).' },
-      headful: { type: 'boolean', description: 'Open a VISIBLE browser window for the run (engine '
-        + '--headful). The window appears on the machine that runs the engine — the deployment host, '
-        + 'not inside this browser page — so that host needs a real display, or a virtual one '
-        + '(`xvfb-run -a`) plus VNC/noVNC, for a person to watch. Default false (headless).' },
+      headful: { type: 'boolean', description: 'Open a visible browser window on the machine running the engine — that machine needs a display. Default headless.' },
       allow_dangerous: {
         type: 'boolean',
         description: 'Permit dangerous tool steps (dry-run gated). Requires the deployment to enable it.',
@@ -395,13 +389,14 @@ export function apply(ctx: Context, config: Config): void {
       },
       tiered_hint: {
         type: 'boolean',
-        description: 'P1 experiment: when the plan\'s target_hint resolves to an ambiguous tier, '
-          + 'the model is asked a SMALLER question (only that tier\'s candidates, not the whole pool). '
-          + 'Off by default — behavior identical to before; use it for A/B runs.',
+        description: 'When the plan\'s `target_hint` resolves to an ambiguous tier, ask the model the '
+          + 'narrower question (that tier\'s candidates only, not the whole pool). Off by default; '
+          + 'use it for A/B runs.',
       },
       slots: {
         type: 'array',
-        description: 'Values for declared slots, as "key=value" entries (e.g. ["date=2026-10-12"]).',
+        description: 'Values for slots the app declares, as "key=value" entries. A key the pack does '
+          + 'not name is a usage error, not a silent ignore.',
         items: { type: 'string' },
       },
     },
@@ -578,16 +573,17 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_learn`,
     description:
-      'Hand one browser flow to AmberFlow so it can be recorded instead of hand-written: give the '
-      + 'recorded action list plus the page it starts from, and the engine runs it once, induces each '
-      + "step's completion signal and the end-state invariants from the observed transitions, and "
-      + 'saves the pack ONLY when a rules-only replay with zero model calls still passes. The result '
-      + 'reports that replay honestly, so a flow that cannot be reproduced is never reported as learned. '
-      + 'A live demonstration is NOT available through a tool call — the engine records from a human '
-      + 'on an interactive terminal and a tool call has none — so `script` is required. Needs a browser '
-      + 'and the local decision runtime on the machine running the checkout.',
+      'Record a browser flow into an app pack: give the start page and a recorded action list, the '
+      + 'engine runs the flow once, induces each step\'s completion signal and the end-state '
+      + 'invariants from the observed transitions, and saves the pack only when a replay with zero '
+      + 'model calls passes — a flow it cannot reproduce comes back NOT saved. Needs a browser and a '
+      + 'working decision plane on the machine running the checkout.',
     parameters: {
-      goal: { type: 'string', required: true, description: 'One line describing the flow to perform.' },
+      goal: {
+        type: 'string', required: true,
+        description: 'One line naming the flow. It becomes the pack label and the default app id; '
+          + 'nothing is planned from this text (see `script`).',
+      },
       url: { type: 'string', required: true, description: 'The page to start from (a URL or a repo-relative fixture path).' },
       script: {
         type: 'string',
@@ -655,26 +651,18 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_plan`,
     description:
-      'Turn ONE sentence plus a seed page into a site-agnostic SemanticFlow template (spec_version 2 '
-      + 'flow.json) plus that site\'s profile: the engine looks at each page as it walks the flow, '
-      + 'proposes each step semantically (no selectors in the template), executes it through the same '
-      + 'decision ladder the run tool uses, and INDUCES each step\'s completion signal from TWO '
-      + 'independent demonstrations (discriminating + reproducible, or the plan stops instead of '
-      + 'guessing). Page-role filenames, query parameter names, fill bindings and row extraction are '
-      + 'observed into the SITE PROFILE; learned hints are NOT written here (the run-time backfill '
-      + 'ring earns those on the first real runs). The template + profile are written ONLY when a '
-      + 'replay gate — compiling and running the whole journey — passes; a failed gate writes nothing '
-      + 'and reports the blocked steps. Re-running with an existing app id plans the SAME template '
-      + 'onto a new site (migration: only the new site\'s profile is produced). Needs a browser; '
-      + 'pass `planner: "llm"` for the LLM planner (requires OPENAI_* env), default is the offline '
-      + 'goal-recipe planner. A dangerous step (purchase) is never demonstrated unless this '
-      + 'deployment allows dangerous actions AND the caller passes allow_dangerous — on a real site '
-      + 'a demo click is a real order.',
+      'Grow a site-agnostic SemanticFlow template (flow.json, spec_version 2) plus that site\'s '
+      + 'profile by walking the flow on a seed page: each step is proposed semantically, executed '
+      + 'through the same decision ladder as the run tool, and its completion signal is induced from '
+      + 'two independent demonstrations — when nothing discriminates, the plan stops instead of '
+      + 'guessing. Nothing is written unless the replay gate passes; a failed gate reports the blocked '
+      + 'steps and writes no file. Running an existing `app` id onto another seed plans the same '
+      + 'template onto that new site. Learned hints are not written here.',
     parameters: {
       goal: {
         type: 'string', required: true,
-        description: 'The user sentence, as said ("订一张5月18日昆明到北京价格最低的机票") — '
-          + 'the engine extracts date/cities/intents into the slot bag; values never come from prose later.',
+        description: 'One line stating the task. This tool takes no value arguments, so anything the '
+          + 'flow must bind comes from the pages it walks — not from this sentence.',
       },
       seed: {
         type: 'string', required: true,
@@ -686,18 +674,18 @@ export function apply(ctx: Context, config: Config): void {
         description: 'Site key for the profile; defaults to the seed\'s directory name (file) or host (http).',
       },
       force: { type: 'boolean', description: 'Overwrite an existing brand-new template app id (a re-plan).' },
-      headful: { type: 'boolean', description: 'Watch the planning walk in a VISIBLE browser window. '
-        + 'The window opens on the machine running the engine (needs a display there, or `xvfb-run -a` '
-        + 'with VNC/noVNC), not in this browser page. Default false (headless).' },
+      headful: { type: 'boolean', description: 'Watch the planning walk in a visible browser window on '
+        + 'the machine running the engine — that machine needs a display. Default headless.' },
       planner: {
         type: 'string', enum: ['scripted', 'llm'],
-        description: 'Planner door: `llm` needs OPENAI_* on the machine running the checkout; '
-          + 'the default offline recipe covers goal-shaped flows on fixtures/sandboxes.',
+        description: 'Planner door: `scripted` (default) is the offline goal-recipe planner; `llm` '
+          + 'needs OPENAI_* on the machine running the checkout.',
       },
       allow_dangerous: {
         type: 'boolean',
-        description: 'Demonstrate the dangerous step (purchase click) during the walk. Deployment-'
-          + 'gated; fixtures/sandboxes only.',
+        description: 'Demonstrate the dangerous step (a purchase click) during the walk. '
+          + 'Deployment-gated, and on a real site that demo click is a real order — use fixtures or '
+          + 'sandboxes.',
       },
     },
     output: {

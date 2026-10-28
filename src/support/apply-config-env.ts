@@ -6,9 +6,12 @@
  * `applyRcToEnv()`，于是 `amber config set AMBERFLOW_DECISION_BASE_URL …` 写的统一配置
  * 对它们不可见——同一台机器，"amber run" 能用线上服务、"npm run apps" 却报缺端点。
  *
- * 这个模块把两件事按 CLI 同一次序做掉（旧 rc 仍是最低层，环境变量仍最高）：
- *   1. `applyRcToEnv()`（旧 rc 的单一实现）；
- *   2. `resolveConfig()` 的新层叠（用户/项目/显式配置），只补仍为空的键。
+ * 这个模块按 CLI 同一次序做掉层叠（环境变量仍最高，旧 rc 仍是最低层）：
+ *   1. `resolveConfig()`（用户/项目/显式配置 + 内部把旧 rc 当最低层吸收）；
+ *   2. 把解析出的值补进 env，真环境变量已设置的键不覆盖。
+ * 注意不要先单独调 `applyRcToEnv(process.env)`：旧 rc 的值一旦先落进 env，
+ * `resolveConfig` 会把它当"环境变量"（最高层），项目/用户配置就永远盖不住它
+ * （2026-10-28 实测：旧 rc 的 AMBERFLOW_DECISION_PROVIDER 压住项目配置）。
  * 返回 errors 供入口决定 exit 2；`applied` 供测试/doctor 断言。
  *
  * 注意：它**只写 process.env**，不缓存；入口各自在 `main()` 第一行调用一次即可（与旧 rc 相同）。
@@ -28,12 +31,14 @@ export function applyConfiguredEnv(
   cwd: string = process.cwd(),
   opts: { includeFiles?: boolean } = {},
 ): AppliedConfigEnv {
-  const rc = applyRcToEnv(baseEnv);
-  const errors = [...rc.errors];
-  // 测试进程不吸收开发者本机的用户/项目配置：直接调入口的用例会随谁的本机配置漂移。
-  // 需要测配置层的用例显式传 { includeFiles: true }（并自己指定 AMBERFLOW_HOME）。
   const includeFiles = opts.includeFiles ?? baseEnv.VITEST === undefined;
-  if (!includeFiles) return { applied: [], errors };
+  if (!includeFiles) {
+    // 测试进程不吸收开发者本机的用户/项目配置：直接调入口的用例会随谁的本机配置漂移。
+    // 需要测配置层的用例显式传 { includeFiles: true }（并自己指定 AMBERFLOW_HOME）。
+    const rc = applyRcToEnv(baseEnv);
+    return { applied: [], errors: [...rc.errors] };
+  }
+  const errors: string[] = [];
   let resolved;
   try {
     resolved = resolveConfig(baseEnv, cwd);

@@ -44,6 +44,20 @@ pip install --no-deps "jevk5 @ git+https://github.com/allebee/jevk5@v0.3.0"
 ```
 （`JevK5GGUF` 读 `llama-server` 的答案字母 log-prob，与 CUDA 同一套读出；README 报 CPU 上 4B 约 0.6 s/次。）
 
+**B 的一个坑（2026-10-28 实测补桥）**：上游 `jevk5-serve`（`jevk5/server.py`）把后端**写死**成进程内
+CUDA 的 `JevK5`，`JevK5GGUF` 只是 Python 客户端——llama-server 起来**并不会**自动有 `/v1/systemone`。
+好在 `JevK5GGUF.decide(state, question)` 与 handler 调的 `model.decide(...)` 完全同签名，一个几十行的
+桥就能把官方 handler 架在 GGUF 上（含掉线时结构化 400，不裸栈）：
+
+```bash
+python ~/.amberflow/bin/jevk5-gguf-serve.py --llama-url http://127.0.0.1:8080 --port 8090
+# --temperature 默认 1.367（4B v0.3 的标定值；9B 用 1.089、2B 用 1.42——各文件的值在 GGUF 卡上）
+```
+
+Windows + CUDA（RTX 3070 Ti 8 GB）实测全栈：llama.cpp b11946（cu12.4）全层入显存（约 6.2/8 GB），
+`jevk5-4b-v0.3-Q8_0.gguf`（SHA256 对上游 SHA256SUMS 逐字符一致）choice 239 ms/题、noul 101 ms/题；
+`providers:baseline` 删 hint 后 demo-app **✓ 5/5（问 4/过 4）**。
+
 **C. JevK5-Lite（437M DeBERTa，纯 CPU，实验性）**——校准是强项、精度不是：
 JevBench 231 公开题上 hard tier 0.405（4B GPU 是 0.739）、p50 71–205 ms（16 线程）。
 
@@ -63,9 +77,9 @@ npm run apps:suite -- --provider jevk5                        # 整批语料换�
 
 | 无 hint 旅程 | first-candidate | coin-flip | laya（真 ONNX） | **jevk5** |
 |---|---|---|---|---|
-| demo-app | ✓ 5/5 | ✗ 2/5 | ✗ 3/5 | **待测** |
+| demo-app | ✓ 5/5 | ✗ 2/5 | ✗ 3/5 | **✓ 5/5（问 4/过 4，Q8_0 本机实测 2026-10-28）** |
 | camera-entry | ✓ 4/4 | ✗ 0/4 | ✗ 0/4 | **待测（中文页）** |
-| transfer-trekly | ✓ 19/19 | ✗ 0/19 | ✗ 0/19 | **待测** |
+| transfer-trekly | ✓ 19/19 | ✗ 0/19 | ✗ 0/19 | **✓ 19/19（问 27/过 27，Q8_0 本机实测 2026-10-28）** |
 | ctrip-case | ✗ 7/19 | ✗ 0/19 | ✗ 10/19 | **待测（中文页）** |
 
 **最后一列我没有数**：这台机器跑不动 JevK5（3.7 GB 内存 / 2 核 / 无 llama.cpp，4B bf16 要 ~9 GB GPU），
