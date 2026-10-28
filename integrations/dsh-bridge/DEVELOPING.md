@@ -15,7 +15,7 @@
 | `src/` | 工具与其背后的服务缝（`ctx.amberflow`，供别的插件调用） |
 | `client.js` | 浏览器半：在 `plugins.row.config` 注册配置页（只有决策模型 URL / Token Key / ModelName 三个字段） |
 | `client-root.js` | **生成文件**：仓库根安装门的 client bundle（`node scripts/client-root-sync.mjs` 重新生成） |
-| `scripts/client-root-sync.mjs` | `client.js` → `client-root.js` 的唯一生成器（改 id/行 key；测试钉住一致性） |
+| `scripts/client-root-sync.mjs` | `client.js` → `client-root.js` 的唯一生成器（改 id/行 key 后重新生成） |
 | `locale/` `icon.svg` | 插件卡片的显示文案与图标（`locale/en.json` / `locale/zh.json` 提供 meta 标题/描述） |
 | `cordis.patch.yml` | bundle 层：装进 profile 即注册这些工具；`repoPath` 指向本仓库根 |
 | `scripts/setup-links.mjs` | 链入依赖：工具链取自本仓库，宿主包取自 DSH 安装 |
@@ -32,7 +32,6 @@
 ```bash
 npm run setup          # 链依赖；DSH_ROOT=/path/to/deepseek-harness 指定宿主安装
 npm run build          # tsc -b → lib/types/*.js + *.d.ts（不需要打包器：tsc 会把 ./x.ts 改写成 ./x.js）
-npm run build          # 只编译；桥接测试已随离线测试资产一并删除
 ```
 
 本仓库的 PR 门禁只做 `typecheck` 与线上用例声明校验，不跑桥接测试。
@@ -42,9 +41,7 @@ npm run build          # 只编译；桥接测试已随离线测试资产一并�
 checkout 的 tsconfig paths 解析到这些包的**源码**——插件因此与宿主共用同一个模块实例。
 仓库不再有统一的 vitest 配置；桥接包是独立包，测试文件已删除。
 
-> 双语文档：`README.md` / `README.zh.md` 两边同步维护。原来那份 `README.i18n.yaml`（DSH 仓库的
-> "中英段落哈希配对记录"）已删除——校验它的门禁脚本住在 DSH 仓库里、只认自己仓库内的路径，
-> 搬过来之后既校验不了也重录不了，留着只会变成一份会骗人的记录。
+> 双语文档：`README.md` / `README.zh.md` 两边同步维护。
 
 ## 装进 / 移出 DSH profile
 

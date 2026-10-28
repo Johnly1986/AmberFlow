@@ -1,9 +1,8 @@
 # 统一决策服务配置：服务地址 + 模型名 + 密钥
 
-> 2026-10-25。目的：决策模型接入面的**唯一推荐形式**，不再要求用户记每家 provider 各一套变量名
-> （`TOKEN_PLAN_*` / `BAILIAN_*` / `JEVK5_*` / `DASHSCOPE_API_KEY` …）。
-> 2026-10-26 进一步收口：**地址/密钥/模型三件套就是完整的选择依据**，不再有 provider 配置键。
-> 有 `AMBERFLOW_DECISION_BASE_URL` 就走线上服务；没有地址就用本地模型。
+> 决策模型接入面的**唯一推荐形式**：**地址/密钥/模型三件套就是完整的选择依据**，不再有 provider
+> 配置键（也不再要求用户记每家 provider 各一套变量名）。有 `AMBERFLOW_DECISION_BASE_URL` 就走
+> 线上服务；没有地址就用本地模型。
 
 ## 1. 三个主键 + 可选键
 
@@ -92,7 +91,7 @@ amber config set AMBERFLOW_DECISION_MIN_OPTIONS 2   # JevK5 才需要
 - **DSH 插件配置页**转发同一组三元组（URL / Token Key / ModelName）；有地址即选
   `decision-service`，没有地址回本地，不再需要 provider 字段。
 
-## 5. OpenAI Decisions API（已实现，2026-10-26）
+## 5. OpenAI Decisions API（已实现）
 
 调研结论：OpenAI 的 `POST /v1/decisions` 已是 GA 的决策协议（当前原生只支持 `gpt-6-luna`）。
 统一配置层已把它接成同一个 `decision-service` provider（`AMBERFLOW_DECISION_PROTOCOL=openai-decisions`）：
