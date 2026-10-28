@@ -1,0 +1,9 @@
+{
+  "id": "hn",
+  "hosts": ["news.ycombinator.com"],
+  "home": "https://news.ycombinator.com/",
+  "locale": "en-US",
+  "timeout_ms": 60000,
+  "blocked_markers": ["Access Denied", "403 Forbidden", "Request blocked"],
+  "login_markers": []
+}

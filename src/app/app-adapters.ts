@@ -1,5 +1,5 @@
 /**
- * **应用支持器（AppAdapter）**——应用层的类型抽象（docs/APP_SUPPORTER_DESIGN.md）。
+ * **应用支持器（AppAdapter）**——应用层的类型抽象。
  *
  * 为什么要这层：应用层原来只有两种步型，且靠"有没有 `source` 键"隐式判定、核心两处
  * （`app-pack` 的校验/展开 + `app-runner` 的分派）各写一遍类型知识。想加 ssh / 游戏 /
@@ -435,7 +435,7 @@ export const manualAdapter: AppAdapter = {
   ready() {
     // 套件是**批处理**：不启用人工步，也不假装能跑（否则在开发者的 TTY 里会挂在那里等人）。
     // 人工步只适合直接用 `npm run apps -- --app ...` 单跑（TTY 下由人确认）。
-    return { ready: false, reason: "manual step needs a human; run this app directly (apps:suite is batch)" };
+    return { ready: false, reason: "manual step needs a human; run this app directly (batch runners skip it)" };
   },
 };
 
@@ -684,9 +684,6 @@ export function sshReady(): { ready: boolean; reason?: string } {
   return sshProbe;
 }
 
-/** 测试/嵌入方重置可用性缓存（环境变化后重新探测）。 */
-export function resetSshProbe(): void { sshProbe = null; }
-
 /* ------------------------------------------------------------- 内建：stdio */
 
 /** stdio（游戏/任意交互式进程）步的声明键。 */
@@ -922,18 +919,3 @@ registerAppAdapter(manualAdapter);
 registerAppAdapter(cliAdapter);
 registerAppAdapter(sshAdapter);
 registerAppAdapter(stdioAdapter);
-
-/** 已注册适配器的全部专属键（`STEP_KEYS` 的单一出处）。 */
-export function appAdapterStepKeys(): string[] {
-  return listAppAdapterObjects().flatMap((a) => [...a.stepKeys]);
-}
-
-/** 测试/嵌入方：把注册表还原成只有内建适配器（避免测试之间互相污染）。 */
-export function resetAppAdapters(): void {
-  registry.clear();
-  registerAppAdapter(webAdapter);
-  registerAppAdapter(manualAdapter);
-  registerAppAdapter(cliAdapter);
-  registerAppAdapter(sshAdapter);
-  registerAppAdapter(stdioAdapter);
-}

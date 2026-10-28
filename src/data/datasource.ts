@@ -3,7 +3,7 @@
  *
  * 把"从站点取数"变成**配置**（`<site>/sources/*.json`）而不是脚本：URL 模板、
  * 日期参数怎么算、从哪取行、每个字段的路径与算子、时间窗、选优规则、报告列与
- * 说明，全部是配置。引擎自己**不认识任何站点**（见 tests/datasource.test.ts 的
+ * 说明，全部是配置。引擎自己**不认识任何站点**（见 历史回归 的
  * "引擎无站点知识"测试：读本文件源码、剥掉块注释后 grep 站点词）。
  *
  * 结构（与 Python 版一一对应）：
@@ -761,18 +761,18 @@ function todayEpochDay(): number {
 }
 
 /**
- * Today in local time as `YYYY-MM-DD`. `LAYA_TODAY=YYYY-MM-DD` PINS it.
+ * Today in local time as `YYYY-MM-DD`.显式 `override`（`--today` / `RunOptions.today`）PINS it。
  *
  * Why a pin exists: the frozen cross-runtime corpora contain a human-readable
  * 「执行日期」line, so a byte-comparison against them silently expires at midnight —
  * measured: the ctrip parity layer went 10/10 -> 9/10 on 2026-10-03 purely because the
  * reference corpus was generated on 2026-10-02. CI must not depend on the wall clock, so
- * the parity tools pin the clock to the day their corpus was generated. A malformed pin
- * is ignored rather than trusted.
+ * the parity tools pass the day their corpus was generated **explicitly**（`--today`
+ * / `RunOptions.today`）. It used to be an env var (`LAYA_TODAY`)，已按配置面收口删除：
+ * 时钟不是机器配置，是本次调用的显式参数。A malformed pin is ignored rather than trusted.
  */
 export function todayIso(override?: string | null): string {
-  const pinned = override ?? process.env.LAYA_TODAY;
-  if (pinned && /^\d{4}-\d{2}-\d{2}$/.test(pinned)) return pinned;
+  if (override && /^\d{4}-\d{2}-\d{2}$/.test(override)) return override;
   return epochDayToIso(todayEpochDay());
 }
 
@@ -822,12 +822,89 @@ export function nextWeekDates(today?: DateLike | null): string[] {
   return [0, 1, 2, 3, 4].map((i) => epochDayToIso(mon + i));
 }
 
-/** `default_dates`：省略 -> 今天；列表 -> 原样；`"next_week"` -> 上面的具名表达式。 */
-export function defaultDates(source: Source): string[] {
+/** `2026-13-01` 这类形状合法但日历不存在的日期在这里响亮拒绝（round-trip 校验）。 */
+function isoDateOrThrow(s: string): string {
+  const iso = epochDayToIso(dateToEpochDay(s));
+  if (iso !== s) throw new ValueError(`invalid calendar date ${pyRepr(s)}`);
+  return s;
+}
+
+/**
+ * 日期参数值 → ISO 日期列表。三种写法：单日 `2026-11-02`、闭区间范围
+ * `2026-11-02..2026-11-06`（含两端，最多 31 天）、具名表达式 `next_week`。
+ * 这是槽位/`--slot`/`ctx.source({dates})` 的统一值文法——坏值响亮抛 ValueError。
+ * `today` 是相对表达式（next_week）的锚（`--today` 钉住的时钟）；缺省 = 系统日期。
+ */
+export function parseDatesValue(raw: string, today?: DateLike | null): string[] {
+  const t = raw.trim();
+  if (t === "next_week") return nextWeekDates(today ?? undefined);
+  const range = /^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/.exec(t);
+  if (range) {
+    const a = dateToEpochDay(isoDateOrThrow(range[1]!));
+    const b = dateToEpochDay(isoDateOrThrow(range[2]!));
+    if (b < a) throw new ValueError(`date range ${pyRepr(t)}: start is after end`);
+    if (b - a > 30) throw new ValueError(`date range ${pyRepr(t)}: spans ${b - a + 1} days (max 31)`);
+    return Array.from({ length: b - a + 1 }, (_, i) => epochDayToIso(a + i));
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return [isoDateOrThrow(t)];
+  throw new ValueError(`unrecognized dates value ${pyRepr(t)} (known: ISO date, 'A..B' range, 'next_week')`);
+}
+
+/** 整串恰好是 `{name}` 占位符时返回 name，否则 null（槽位键与 `{slot}` 占位符同一文法）。 */
+function slotPlaceholder(raw: string): string | null {
+  const m = /^\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(raw.trim());
+  return m ? m[1]! : null;
+}
+
+/** 收集一段 default_dates 声明里引用的全部 `{slot}` 名（应用层环封口校验用）。 */
+export function defaultDatesSlotNames(source: Source): string[] {
   const d = source["default_dates"];
-  if (Array.isArray(d)) return d.map(pyStr);
-  if (d === "next_week") return nextWeekDates();
-  return [todayIso()];
+  const names = new Set<string>();
+  const scan = (raw: unknown): void => {
+    if (typeof raw !== "string") return;
+    const ph = slotPlaceholder(raw);
+    if (ph !== null) names.add(ph);
+  };
+  if (typeof d === "string" && d !== "next_week") scan(d);
+  if (Array.isArray(d)) for (const x of d) scan(x);
+  return [...names].sort();
+}
+
+/**
+ * `default_dates`：省略 -> 今天；`"next_week"` -> 下个工作日；字符串 -> ISO 日期 /
+ * `A..B` 范围 / `{slot}` 槽位占位符（从 `slots` 值袋解析；没给 `slots` 而源声明了
+ * `{slot}` = 缺值，响亮抛）；列表 -> 逐项展开后拼接。
+ * 给了 `slots` 的调用方（应用数据腿）能把声明槽位接进来；`today` 是所有相对表达式
+ * （next_week）与"今天"缺省值的锚——调用方必须把 `--today` 钉住的时钟传进来，
+ * 否则钉时钟只对 day_offset 生效、next_week 仍走墙钟（那就是"看似钉了"）。
+ */
+export function defaultDates(
+  source: Source, slots?: Record<string, unknown> | null, today?: DateLike | null,
+): string[] {
+  const d = source["default_dates"];
+  const resolve = (raw: unknown): string[] => {
+    if (typeof raw !== "string") return [pyStr(raw)];
+    const ph = slotPlaceholder(raw);
+    if (ph !== null) {
+      const v = slots?.[ph];
+      if (v === undefined || v === null || String(v) === "") {
+        throw new ValueError(`default_dates {${ph}}: slot ${pyRepr(ph)} has no value`
+          + `（--slot ${ph}=<ISO 日期 | A..B | next_week>，或在应用 meta.slots 里给默认值）`);
+      }
+      return parseDatesValue(String(v), today);
+    }
+    // 非占位符：ISO 日期/范围就地校验；其它（模板片段等）原样透传，与旧行为一致。
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw.trim()) || /^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
+      return parseDatesValue(raw, today);
+    }
+    return [raw];
+  };
+  if (typeof d === "string") {
+    if (d === "next_week") return nextWeekDates(today ?? undefined);
+    return resolve(d);
+  }
+  if (Array.isArray(d)) return d.flatMap(resolve);
+  return [todayIso(typeof today === "string" ? today : undefined)];
 }
 
 class MissingKey extends Error {
@@ -1346,8 +1423,23 @@ export function validateSource(src: Source): string[] {
   }
   const dd = src["default_dates"];
   if (typeof dd === "string" && dd !== "next_week") {
-    p.push(`default_dates ${pyRepr(dd)}: unknown named expression (known: 'next_week'; `
-      + "or use a list of ISO dates)");
+    // 字符串形态：具名表达式 / ISO 日期 / A..B 范围 / {slot} 占位符（应用数据腿在
+    // 运行期从槽位值袋解析）。其它字符串仍然响亮拒绝——配了却像没配就是配置错误。
+    const ph = /^\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(dd.trim());
+    if (ph === null && !/^\d{4}-\d{2}-\d{2}(\.\.\d{4}-\d{2}-\d{2})?$/.test(dd.trim())) {
+      p.push(`default_dates ${pyRepr(dd)}: unknown named expression (known: 'next_week', ISO date, `
+        + "'A..B' range, '{slot}' placeholder; or use a list of ISO dates)");
+    }
+  }
+  if (Array.isArray(dd)) {
+    for (const [i, item] of dd.entries()) {
+      if (typeof item !== "string") continue;
+      const ph = /^\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(item.trim());
+      if (ph === null && !/^\d{4}-\d{2}-\d{2}(\.\.\d{4}-\d{2}-\d{2})?$/.test(item.trim())) {
+        p.push(`default_dates[${i}] ${pyRepr(item)}: expected an ISO date, an 'A..B' range `
+          + "or a '{slot}' placeholder");
+      }
+    }
   }
   const dparams = (((src["date"] as any) || {}).params || {}) as Record<string, unknown>;
   for (const [k, v] of Object.entries(dparams)) {

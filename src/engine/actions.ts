@@ -1,7 +1,7 @@
 /**
  * 命令层（④a，P2 落地）——把"一步 = 一个指针"改成"一步 = 一个**命令闭集**"。
  *
- * 出处是这场重审自己的话（docs/ARCHITECTURE_REVIEW.md §0）：执行层的真正问题不是
+ * 出处是这场重审自己的话：执行层的真正问题不是
  * "少了一层命令层"，而是 `run()` 把"实例化动作空间 / 选择 / 应用动作"揉在同一个可变
  * 状态机里。本模块只接前两件事的一半，且**全部可选**：不声明 `commands` 的包，
  * 展开结果、计划文件、执行路径与今天逐字节相同（缺省等价的硬约束，§8.4）。
@@ -33,11 +33,11 @@ import type { DatasetReader } from "./dataset.ts";
 import type { ElemPool } from "./extraction.ts";
 
 /** 引擎能力面的动词表（代码）。新增一个面/原语是新 provider，不是在配置里造词。 */
-export const COMMAND_OPS = ["click", "check", "fill", "select", "skip"] as const;
+export const COMMAND_OPS = ["click", "check", "fill", "select", "scroll", "drag", "skip"] as const;
 export type CommandOp = (typeof COMMAND_OPS)[number];
 
 /** 需要参数绑定的 op；`skip` 无 target；其余必须点名一个 target。 */
-const VALUE_OPS: ReadonlySet<string> = new Set(["fill", "select"]);
+const VALUE_OPS: ReadonlySet<string> = new Set(["fill", "select", "drag"]);
 const NO_TARGET_OPS: ReadonlySet<string> = new Set(["skip"]);
 
 /**

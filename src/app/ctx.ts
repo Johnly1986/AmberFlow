@@ -18,9 +18,10 @@ import {
 } from "../engine/executor.ts";
 import { firstOf, locatorAnyFrame, urlOf, type PageLike } from "../engine/extraction.ts";
 import { checkSignal } from "../engine/signals.ts";
-import { defaultDates, loadSource, runSource } from "../data/datasource.ts";
+import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, runSource, ValueError } from "../data/datasource.ts";
 import { listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
 import { REPO } from "../flow/flow.ts";
+import { PageStateStore, type PageState } from "./page-state.ts";
 import { createKit, type CommandDecl, type DomSignal, type TargetDecl, type ValueBinding } from "./kit.ts";
 import { pushEvent, type AppTrace } from "./trace.ts";
 
@@ -37,13 +38,19 @@ export class StopError extends Error {
 export interface StepRequest {
   /** **必填**：完成只由引擎按信号裁决。 */
   done: DomSignal;
-  /** **必填**：目标（kit.hint/hints）或命令闭集。纯导航步用 `arrive`。 */
-  act: TargetDecl | CommandDecl[];
+  /**
+   * **可选**：目标（kit.hint/hints）或命令闭集。
+   *
+   * 省略 = 把“点哪里”交给引擎的规则/决策层——这是默认的**决策语句**写法。
+   * 只有需要稳定锚点、或必须收窄候选集时才写 hint/命令闭集；纯导航步用 `arrive`。
+   */
+  act?: TargetDecl | CommandDecl[];
   /** 这一步的起点 URL（缺省 = 当前页）；相对仓库路径按仓库根解析成 `file://`。 */
   url?: string;
   slots?: Record<string, string>;
   /** 适用性守卫（在动作前判定；不成立 = 这一步不执行，返回 ok=false + stopCode="precondition_skipped"）。 */
   when?: DomSignal;
+  /** 稳定步骤标识（进 trace / step_traces / failure；缺省时按执行序号记录）。 */
   id?: string;
   timeoutMs?: number;
 }
@@ -52,10 +59,14 @@ export interface StepEvidence {
   url: string;
   attempts: number;
   elapsedMs: number;
+  /** 动作/导航落地后的 PageState（同一运行内可比较 poolVersion）。 */
+  pageState?: Readonly<PageState>;
 }
 
 export interface StepResult {
   ok: boolean;
+  /** 请求里声明的稳定步骤标识（透传；没给就没有）。 */
+  id?: string;
   stopCode?: string;
   /** 引擎给出的人可读原因（与 `stopCode` 配对；排障/分支用，**不是**模型自由文本）。 */
   reason?: string;
@@ -67,6 +78,17 @@ export interface SourceObservationView {
   selects: Record<string, Record<string, string> | null>;
   rows: Array<Record<string, string>>;
   version?: string;
+  /**
+   * 按日期键控的完整观察（多日期范围在这里；`counts/selects/rows` 仍是第一天的快照，
+   * 与 source_slots 回写同一口径）。只有成功取到数的日期进这张表；被风控挡住的日期
+   * 不出现（错误进数据腿报告）。
+   */
+  byDate?: Record<string, {
+    url?: string;
+    counts: Record<string, number>;
+    selects: Record<string, Record<string, string> | null>;
+    rows: Array<Record<string, string>>;
+  }>;
 }
 
 /** 工具步的请求（进程观察面；完成真值 = exit/stdout/stderr/产物）。 */
@@ -106,6 +128,13 @@ export interface CtxBudget {
   deadline: number;
 }
 
+/** flow 里的人工步请求（`ctx.manual`）。 */
+export interface ManualRequest {
+  desc: string;
+  instructions: string;
+  url: string | null;
+}
+
 export interface Ctx {
   readonly app: Readonly<{ id: string; label?: string; goal: string }>;
   readonly slots: Readonly<Record<string, string>>;
@@ -114,8 +143,13 @@ export interface Ctx {
   log(msg: string, data?: unknown): void;
   open(url: string, opts?: { timeoutMs?: number }): Promise<void>;
   openPage(role: string): Promise<void>;
-  arrive(url: string, req: { done: DomSignal; desc?: string; timeoutMs?: number }): Promise<StepResult>;
+  arrive(url: string, req: { done: DomSignal; desc?: string; id?: string; timeoutMs?: number }): Promise<StepResult>;
   step(desc: string, req: StepRequest): Promise<StepResult>;
+  /**
+   * 人工步：登录/验证码/人工确认。人完成并确认后，可选 DOM 信号由引擎再验一遍。
+   * `{manual:true}` 信号 = 人自证；非 TTY 且开了 manualFailFast 时返回 needs_human，不拉有头浏览器。
+   */
+  manual(desc: string, req: { done: DomSignal; instructions?: string; id?: string }): Promise<StepResult>;
   url(): string;
   readonly read: {
     text(selector: string): Promise<string | null>;
@@ -129,10 +163,15 @@ export interface Ctx {
    * 命名行抽取用 `ctx.extract(name)`（走 `meta.site.listExtract` 声明）。
    */
   rows(spec: { row: string; fields: Record<string, string> }): Promise<Array<Record<string, string>>>;
-  /** 用 `meta.site.listExtract[name]` 抽行（行选择器 + 字段选择器；字段值 `"."` = 行自身文本）。 */
-  extract(name: string): Promise<Array<Record<string, string>>>;
+  /**
+   * 具名结构化抽取：`meta.site.listExtract[name]`，或 inline `{ rows, fields, maxItems? }`。
+   * 行选择器 + 字段选择器；字段值 `"."` = 行自身文本。引擎负责观察与证据，不做业务解释。
+   */
+  extract(name: string | { rows: string; fields: Record<string, string>; maxItems?: number }):
+    Promise<Array<Record<string, string>>>;
   holds(sig: DomSignal): Promise<boolean>;
-  source(name: string): Promise<SourceObservationView>;
+  waitFor(sig: DomSignal, opts?: { timeoutMs?: number; pollMs?: number }): Promise<boolean>;
+  source(name: string, opts?: { dates?: string | string[] }): Promise<SourceObservationView>;
   readonly data: {
     min<T extends Record<string, unknown>>(rows: T[], by: string): T | null;
     max<T extends Record<string, unknown>>(rows: T[], by: string): T | null;
@@ -140,11 +179,13 @@ export interface Ctx {
   // 纯构造器（与 L1 kit 同一份实现；脚本里 `ctx.judge.*` / `ctx.hint()` / `ctx.command()`）
   readonly judge: ReturnType<typeof createKit>["judge"];
   readonly tool: ReturnType<typeof createKit>["tool"];
+  /** 结构化终止：抛带 stop_code 的 StopError，结果仍走引擎既有分类（不是裸栈）。 */
+  fail(code: string, reason?: string): never;
   hint(hint: string): TargetDecl;
   hints(...hints: string[]): TargetDecl;
   command(op: string, target?: string, value?: ValueBinding): CommandDecl;
   readonly value: ReturnType<typeof createKit>["value"];
-  /** ① 命令行形式：`ctx.run("demo-tool", ["--flag"], { done })`。 */
+  /** ① 命令行形式：`ctx.run("my-tool", ["--flag"], { done })`。 */
   run(source: string, args: string[], req: {
     done: Record<string, unknown>; desc?: string; adapter?: string;
     idempotent?: boolean; retries?: number; dryRunArgs?: string[];
@@ -167,6 +208,8 @@ export interface CtxDeps {
     id: string; label?: string; goal: string; hosts?: string[] | null;
     invariants?: Array<Record<string, unknown>>;
     site?: { pages?: Record<string, string>; listExtract?: Record<string, { rows: string; fields: Record<string, string> }> };
+    /** 数据腿回写槽位的**键集**（环封口校验用：数据腿参数不许引用数据腿产物）。 */
+    source_slots?: Record<string, unknown> | null;
   };
   slots: Record<string, string>;
   runtime: { outDir: string; runId: string; today: string };
@@ -177,19 +220,33 @@ export interface CtxDeps {
   deadline?: number;
   verbose?: boolean;
   /** 数据腿：与 `runApp` 的同一实现（`runSource` + `defaultDates`）。 */
-  sourceRunner?: (name: string) => Promise<SourceObservationView>;
+  sourceRunner?: (name: string, opts?: { dates?: string | string[] }) => Promise<SourceObservationView>;
   /** 工具步：由驱动接到 `runToolStep`（干跑/确认/幂等重试的既有实现）。 */
   toolRunner?: (req: ToolRunRequest) => Promise<ToolRunResult>;
   /** `--skip-data`：数据腿被显式跳过时，`ctx.source()` 报结构化错误（不静默跑网络）。 */
   allowSources?: boolean;
   /** 每次 `ctx.step`/`arrive` 的实际执行报告（驱动用它汇总决策账，套件/矩阵念同一份数）。 */
   onRunReport?: (rep: RunReport) => void;
+  /** 人工步的接入点（默认 = TTY 提示；嵌入方可注入）。 */
+  manualRunner?: (req: ManualRequest) => boolean | Promise<boolean>;
+  /** 非交互：遇到人工步直接 needs_human，不创建有头浏览器。 */
+  manualFailFast?: boolean;
+  /** 步间最小等待（`meta.pace.between_steps_ms`；0 = 不等待）。 */
+  stepDelayMs?: number;
+  /** action 后 done 信号总等待窗口（毫秒；缺省 2000）。 */
+  doneTimeoutMs?: number;
+  /** action 后 done 信号轮询间隔（毫秒；缺省 120）。 */
+  donePollMs?: number;
+  /** pool ready gate 最大等待（毫秒；缺省 700）。 */
+  poolReadyTimeoutMs?: number;
+  /** pool ready gate 轮询间隔（毫秒；缺省 100）。 */
+  poolReadyPollMs?: number;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** 相对仓库路径 → `file://`（与 app/bench 同一口径；dry/replay 也用这一份，host/URL 语义才同口径）。 */
+/** 相对仓库路径 → `file://`（dry/replay 也用这一份，host/URL 语义才同口径）。 */
 export function resolveCtxUrl(u: string): string {
   if (/^(https?|file):/i.test(u)) return u;
   // 与 `app-runner.startUrl` 同一口径：用 `new URL("file://" + path)` 而不是 `pathToFileURL`，
@@ -202,9 +259,7 @@ function assertAct(req: StepRequest): void {
   if (req.done === undefined || req.done === null || !isObj(req.done) || !Object.keys(req.done).length) {
     throw new StopError("config_error", "ctx.step: done signal is required (completion only comes from the evidence surface)");
   }
-  if (req.act === undefined || req.act === null) {
-    throw new StopError("config_error", "ctx.step: act is required (declare kit.hint()/kit.hints()/commands; pure navigation uses ctx.arrive)");
-  }
+  // act 省略 = 让引擎决策目标；只有显式给了 act 才校验它的形状（真正形状由 targetOptions/执行器校验）。
 }
 
 /**
@@ -255,6 +310,8 @@ export function createCtx(deps: CtxDeps): Ctx {
   const hosts = (pack.hosts ?? null) as string[] | null;
   let currentUrl = "about:blank";
   let closed = false;
+  /** flow 运行期的单一 PageState 事实源（不是 Playwright page 对象的替代）。 */
+  const pageState = new PageStateStore();
   /** `ctx.done()` 已验收：之后不许再有动作（结束态不变量必须在"结束"之后求值）。 */
   const assertOpen = (label: string): void => {
     if (closed) throw new StopError("config_error", `${label}: ctx.done() was already called; no actions after the end-state acceptance`);
@@ -274,6 +331,13 @@ export function createCtx(deps: CtxDeps): Ctx {
 
   const record = (ok: boolean | undefined, extra: Record<string, unknown> = {}): void => {
     pushEvent(trace, { call: "step", ok, ...extra });
+  };
+
+  /** `meta.pace.between_steps_ms`：步与步之间（不是第一步之前）。 */
+  const paceBeforeStep = async (): Promise<void> => {
+    const delay = deps.stepDelayMs ?? 0;
+    if (delay <= 0 || budget.stepsUsed === 0) return;
+    await new Promise((r) => setTimeout(r, delay));
   };
 
   /** 所有导航的唯一实现（open / openPage 共用；hosts 信封在打开之前强制）。 */
@@ -301,15 +365,17 @@ export function createCtx(deps: CtxDeps): Ctx {
         `${label}: landed on ${JSON.stringify(landed)} outside the declared hosts envelope (${hosts.join(", ")})`);
     }
     currentUrl = landed || url;
+    pageState.update(p, "settled");
     if (traceIt) pushEvent(trace, { call, url: currentUrl, ...(desc === undefined ? {} : { desc }) });
   };
 
   const runOneStep = async (desc: string, req: {
     url?: string; done: DomSignal | Record<string, unknown>; act?: TargetDecl | CommandDecl[];
-    slots?: Record<string, string>; when?: DomSignal | null; timeoutMs?: number;
+    slots?: Record<string, string>; when?: DomSignal | null; id?: string; timeoutMs?: number;
   }): Promise<StepResult> => {
     assertOpen(`ctx.step(${JSON.stringify(desc)})`);
     checkBudget();
+    await paceBeforeStep();
     const started = Date.now();
     const startUrl = resolveCtxUrl(req.url ?? currentUrl);
     if (hosts && hosts.length && disallowedHost(startUrl, hosts)) {
@@ -320,6 +386,15 @@ export function createCtx(deps: CtxDeps): Ctx {
     const opts: Record<string, unknown> = {
       goalSignalFn: (p: unknown) => checkSignal(p as never, req.done as never),
       page: session.page,
+      // 不带 url = 决策语句在当前页上执行；带 url 才先导航。整页重载会丢 SPA 状态。
+      ...(req.url === undefined ? { skipNavigation: true } : {}),
+      poolReady: true,
+      ...(deps.poolReadyTimeoutMs === undefined ? {} : { poolReadyTimeoutMs: deps.poolReadyTimeoutMs }),
+      ...(deps.poolReadyPollMs === undefined ? {} : { poolReadyPollMs: deps.poolReadyPollMs }),
+      ...(deps.doneTimeoutMs === undefined ? {} : { doneTimeoutMs: deps.doneTimeoutMs }),
+      ...(deps.donePollMs === undefined ? {} : { donePollMs: deps.donePollMs }),
+      // 带 url 的步：domcontentloaded 对 SPA 太早，给面板一个短稳定窗口再抽取。
+      ...(req.url === undefined ? {} : { settleMs: 700 }),
       pw: session.pw,
       slots: { ...slots, ...(req.slots ?? {}) },
       verbose: deps.verbose === true,
@@ -333,21 +408,36 @@ export function createCtx(deps: CtxDeps): Ctx {
       // 执行器把"动作失败"当结果而不是异常（既有语义）；走到这里只可能是配置级错误。
       throw new StopError("config_error", `ctx.step ${JSON.stringify(desc)} crashed: ${e instanceof Error ? e.message : String(e)}`);
     }
+    deps.onRunReport?.(rep);
     budget.stepsUsed += 1;
+    // 动作可能导航到另一个页面；`ctx.step` 之后的下一条语句必须从**落地页**开始，
+    // 否则 `ctx.step({url?})` 会把上一页当成当前页（实测：Maps 已打开，下一步却又回到 google.com）。
+    const landed = urlOf(session.page) || startUrl;
+    currentUrl = landed;
+    const landedState = pageState.update(session.page as unknown as PageLike, "settled");
     const reason = typeof rep.stop_reason === "string" && rep.stop_reason ? rep.stop_reason : undefined;
     const result: StepResult = {
       ok: rep.done === true,
+      ...(req.id === undefined ? {} : { id: req.id }),
       ...(rep.stop_code === undefined ? {} : { stopCode: rep.stop_code }),
       ...(reason === undefined ? {} : { reason }),
-      evidence: { url: startUrl, attempts: 1, elapsedMs: Date.now() - started },
+      evidence: { url: landed, attempts: 1, elapsedMs: Date.now() - started, pageState: landedState },
     };
     record(result.ok, {
-      desc, url: startUrl,
+      desc, url: landed,
+      ...(req.id === undefined ? {} : { id: req.id }),
       ...(result.stopCode === undefined ? {} : { stop_code: result.stopCode }),
       result: {
         ok: result.ok, stop_code: result.stopCode ?? null,
         ...(reason === undefined ? {} : { reason }),
         elapsed_ms: result.evidence.elapsedMs,
+        // PageState 的紧凑证据；不记 observedAt（每次运行都会变，不属于结构）。
+        page_state: {
+          page_id: landedState.pageId,
+          readiness: landedState.readiness,
+          pool_version: landedState.poolVersion,
+          frame_origins: landedState.frameOrigins,
+        },
       },
     });
     return result;
@@ -372,6 +462,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     }
     assertOpen(`ctx.run` + (req.desc ? ` ${JSON.stringify(req.desc)}` : ""));
     checkBudget();
+    await paceBeforeStep();
     const started = Date.now();
     let r: ToolRunResult;
     try {
@@ -439,6 +530,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     }
     if (deps.toolRunner === undefined) throw new StopError("config_error", "ctx.run: no tool runner wired in this build");
     checkBudget();
+    await paceBeforeStep();
     const started = Date.now();
     const desc = typeof step["desc"] === "string" && step["desc"] ? step["desc"] : `${adapter} step`;
     let r: ToolRunResult;
@@ -504,6 +596,7 @@ export function createCtx(deps: CtxDeps): Ctx {
         throw new StopError("config_error", "ctx.arrive: done signal is required");
       }
       checkBudget();
+      await paceBeforeStep();
       const started = Date.now();
       const label = req.desc ?? `到达 ${u}`;
       // 纯导航：只 goto + 等信号，**不做元素选择、不花模型**（以前误走 step 路径：
@@ -522,6 +615,7 @@ export function createCtx(deps: CtxDeps): Ctx {
           if (landed) {
             if (hosts && hosts.length && disallowedHost(landed, hosts)) { hostViolation = landed; break; }
             currentUrl = landed;
+            pageState.update(p as PageLike, "settled");
           }
           try {
             if (await checkSignal(p as never, req.done as never)) { held = true; break; }
@@ -539,12 +633,14 @@ export function createCtx(deps: CtxDeps): Ctx {
             + (waitErr instanceof Error ? ` (${waitErr.message})` : "");
       const result: StepResult = {
         ok: held,
+        ...(req.id === undefined ? {} : { id: req.id }),
         ...(stopCode === undefined ? {} : { stopCode }),
         ...(reason === undefined ? {} : { reason }),
         evidence: { url: currentUrl, attempts: 1, elapsedMs: Date.now() - started },
       };
       pushEvent(trace, {
         call: "arrive", desc: req.desc, url: currentUrl, ok: held,
+        ...(req.id === undefined ? {} : { id: req.id }),
         ...(stopCode === undefined ? {} : { stop_code: stopCode }),
         result: { ok: held, ...(stopCode === undefined ? {} : { stop_code: stopCode }),
           ...(reason === undefined ? {} : { reason }), elapsed_ms: result.evidence.elapsedMs },
@@ -554,6 +650,102 @@ export function createCtx(deps: CtxDeps): Ctx {
     step: async (desc, req) => {
       assertAct(req);
       return runOneStep(desc, { ...req, when: req.when ?? null });
+    },
+    manual: async (desc, req) => {
+      assertOpen(`ctx.manual(${JSON.stringify(desc)})`);
+      if (req === null || typeof req !== "object" || req.done === undefined || req.done === null) {
+        throw new StopError("config_error", "ctx.manual: done signal is required");
+      }
+      if (deps.manualFailFast === true) {
+        const stopCode = "needs_human";
+        const reason = "manual step needs a human; --manual-fail-fast is set";
+        pushEvent(trace, {
+          call: "manual", desc, ...(req.id === undefined ? {} : { id: req.id }),
+          url: currentUrl, ok: false, stop_code: stopCode,
+          result: { needs_human: true, reason },
+        });
+        return {
+          ok: false, ...(req.id === undefined ? {} : { id: req.id }), stopCode, reason,
+          evidence: { url: currentUrl, attempts: 0, elapsedMs: 0 },
+        };
+      }
+      if (deps.manualRunner === undefined) {
+        if (!process.stdin.isTTY) {
+          const stopCode = "needs_human";
+          const reason = "manual step needs an interactive terminal (non-TTY)";
+          pushEvent(trace, {
+            call: "manual", desc, ...(req.id === undefined ? {} : { id: req.id }),
+            url: currentUrl, ok: false, stop_code: stopCode,
+            result: { needs_human: true, reason },
+          });
+          return {
+            ok: false, ...(req.id === undefined ? {} : { id: req.id }),
+            stopCode, reason,
+            evidence: { url: currentUrl, attempts: 0, elapsedMs: 0 },
+          };
+        }
+        throw new StopError("config_error", "ctx.manual: no manual runner wired in this build");
+      }
+      checkBudget();
+      await paceBeforeStep();
+      const started = Date.now();
+      const session = await deps.ensureSession();
+      const pageUrl = urlOf(session.page) || currentUrl;
+      if (pageUrl) pageState.update(session.page as unknown as PageLike, "interactive");
+      let approved = false;
+      try {
+        approved = await deps.manualRunner({
+          desc,
+          instructions: typeof req.instructions === "string" ? req.instructions : "",
+          url: pageUrl,
+        });
+      } catch (e) {
+        const reason = `manual handler failed: ${e instanceof Error ? e.message : String(e)}`;
+        pushEvent(trace, {
+          call: "manual", desc, ...(req.id === undefined ? {} : { id: req.id }),
+          url: pageUrl, ok: false, stop_code: "manual_handler_error", result: { reason },
+        });
+        return {
+          ok: false, ...(req.id === undefined ? {} : { id: req.id }),
+          stopCode: "manual_handler_error", reason,
+          evidence: { url: pageUrl, attempts: 0, elapsedMs: Date.now() - started },
+        };
+      }
+      budget.stepsUsed += 1;
+      const manualLeaf = isObj(req.done) && Object.prototype.hasOwnProperty.call(req.done, "manual");
+      let ok = approved;
+      let stopCode: string | undefined = approved ? undefined : "manual_declined";
+      let reason: string | undefined = approved ? undefined : "human declined the manual step";
+      if (approved) {
+        if (!manualLeaf) {
+          try {
+            ok = await checkSignal(session.page as never, req.done as never);
+          } catch (e) {
+            throw new StopError("config_error", `ctx.manual(${JSON.stringify(desc)}) signal: ${e instanceof Error ? e.message : String(e)}`);
+          }
+          if (!ok) {
+            stopCode = "manual_signal_not_held";
+            reason = "human confirmed, but the declared DOM signal is not held";
+          }
+        }
+      }
+      const result: StepResult = {
+        ok,
+        ...(req.id === undefined ? {} : { id: req.id }),
+        ...(stopCode === undefined ? {} : { stopCode }),
+        ...(reason === undefined ? {} : { reason }),
+        evidence: { url: pageUrl, attempts: 1, elapsedMs: Date.now() - started },
+      };
+      pushEvent(trace, {
+        call: "manual", desc, ...(req.id === undefined ? {} : { id: req.id }),
+        url: pageUrl, ok,
+        ...(stopCode === undefined ? {} : { stop_code: stopCode }),
+        result: { approved, attested: manualLeaf, ...(reason === undefined ? {} : { reason }) },
+      });
+      return result;
+    },
+    fail: (code, reason) => {
+      throw new StopError(typeof code === "string" && code.trim() ? code : "flow_failed", reason ?? "");
     },
     url: () => currentUrl,
     read: {
@@ -605,23 +797,88 @@ export function createCtx(deps: CtxDeps): Ctx {
       pushEvent(trace, { call: "holds", ok });
       return ok;
     },
-    source: async (name) => {
+    waitFor: async (sig, opts = {}) => {
+      if (!isObj(sig) || !Object.keys(sig).length) throw new StopError("config_error", "ctx.waitFor needs a non-empty signal");
+      const timeoutMs = Math.max(0, Number(opts.timeoutMs ?? 15_000));
+      const pollMs = Math.max(1, Number(opts.pollMs ?? 200));
+      const started = Date.now();
+      const deadline = started + timeoutMs;
+      const p = await page();
+      let held = false;
+      // 轮询语义：至少检查一次；最后一次 sleep 裁到 deadline，不让“下一次会越界”提前退出。
+      while (true) {
+        try {
+          if (await checkSignal(p as never, sig as never)) { held = true; break; }
+        } catch (e) {
+          throw new StopError("config_error", `ctx.waitFor: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        const now = Date.now();
+        if (now >= deadline) break;
+        await new Promise((r) => setTimeout(r, Math.max(1, Math.min(pollMs, deadline - now))));
+      }
+      if (held) pageState.update(p as PageLike, "settled");
+      pushEvent(trace, {
+        call: "waitFor", ok: held,
+        result: { timeout_ms: timeoutMs, poll_ms: pollMs, elapsed_ms: Date.now() - started },
+      });
+      return held;
+    },
+    source: async (name, sourceOpts = {}) => {
       if (deps.allowSources === false) {
         throw new StopError("config_error", `ctx.source(${JSON.stringify(name)})：本次运行带 --skip-data，数据腿被显式跳过`);
       }
       if (deps.sourceRunner) {
-        const obs = await deps.sourceRunner(name);
+        const obs = await deps.sourceRunner(name, sourceOpts);
         pushEvent(trace, { call: "source", desc: name, result: { counts: obs.counts, rows: obs.rows.length } });
         return obs;
       }
       const src = loadSource(name);
-      const res = await runSource(src, defaultDates(src), { verbose: false });
+      // 环封口：数据腿的日期参数只能来自包默认/CLI 槽位——引用 source_slots 产物
+      // 是循环依赖（那些值要等数据腿跑完才存在），加载已知就拒绝。
+      const producerSlots = new Set(Object.keys(deps.pack.source_slots ?? {}));
+      for (const ph of defaultDatesSlotNames(src)) {
+        if (producerSlots.has(ph)) {
+          throw new StopError("config_error", `source ${JSON.stringify(name)} 的 default_dates 引用 {${ph}}，`
+            + `但 ${ph} 由数据腿回写（source_slots）——数据腿参数不允许引用数据腿产物`);
+        }
+      }
+      let dates: string[];
+      try {
+        if (sourceOpts.dates !== undefined) {
+          const raws = Array.isArray(sourceOpts.dates) ? sourceOpts.dates : [sourceOpts.dates];
+          dates = raws.flatMap((r) => parseDatesValue(String(r), deps.runtime.today || undefined));
+        } else {
+          dates = defaultDates(src, slots, deps.runtime.today || undefined);
+        }
+      } catch (e) {
+        // 坏日期参数/缺槽位值是配置类错误：ValueError → 结构化 StopError，不裸抛。
+        if (e instanceof ValueError) {
+          throw new StopError("config_error", `ctx.source(${JSON.stringify(name)}): ${e.message}`);
+        }
+        throw e;
+      }
+      const res = await runSource(src, dates, { verbose: false, today: deps.runtime.today || undefined });
       const day = Object.values(res.dates)[0] as unknown as Record<string, unknown> | undefined;
       const counts = (day?.["counts"] ?? {}) as Record<string, number>;
       const selects = (day?.["selects"] ?? {}) as Record<string, Record<string, string> | null>;
       const rows = (day?.["rows"] ?? []) as Array<Record<string, string>>;
-      const obs: SourceObservationView = { counts, selects, rows, ...(res.tool_version ? { version: res.tool_version } : {}) };
-      pushEvent(trace, { call: "source", desc: name, result: { counts, rows: rows.length } });
+      const byDate: NonNullable<SourceObservationView["byDate"]> = {};
+      for (const [dateKey, entry] of Object.entries(res.dates)) {
+        const e = entry as unknown as Record<string, unknown>;
+        if (e["error"] !== undefined) continue;
+        byDate[dateKey] = {
+          ...(e["url"] !== undefined ? { url: String(e["url"]) } : {}),
+          counts: (e["counts"] ?? {}) as Record<string, number>,
+          selects: (e["selects"] ?? {}) as Record<string, Record<string, string> | null>,
+          rows: (e["rows"] ?? []) as Array<Record<string, string>>,
+        };
+      }
+      const obs: SourceObservationView = {
+        counts, selects, rows,
+        ...(res.tool_version ? { version: res.tool_version } : {}),
+        ...(Object.keys(byDate).length ? { byDate } : {}),
+      };
+      pushEvent(trace, { call: "source", desc: name, result: { counts, rows: rows.length, dates: Object.keys(byDate) } });
       return obs;
     },
     data: {
@@ -632,15 +889,27 @@ export function createCtx(deps: CtxDeps): Ctx {
       throw new StopError("config_error", "ctx.rows is closed in v1 (Q5: no new extraction grammar); "
         + "declare named row extraction in meta.site.listExtract and call ctx.extract(name)");
     },
-    extract: async (name) => {
-      if (typeof name !== "string" || !name.trim()) throw new StopError("config_error", "ctx.extract: name must be a non-empty string");
-      const spec = pack.site?.listExtract?.[name];
-      if (spec === undefined) {
-        const known = Object.keys(pack.site?.listExtract ?? {});
+    extract: async (nameOrSpec) => {
+      let spec: { rows: string; fields: Record<string, string>; maxItems?: number };
+      if (typeof nameOrSpec === "string") {
+        if (!nameOrSpec.trim()) throw new StopError("config_error", "ctx.extract: name must be a non-empty string");
+        const named = pack.site?.listExtract?.[nameOrSpec];
+        if (named === undefined) {
+          const known = Object.keys(pack.site?.listExtract ?? {});
+          throw new StopError("config_error",
+            `ctx.extract(${JSON.stringify(nameOrSpec)}): meta.site.listExtract has no such entry`
+            + ` (known: ${known.length ? known.join(", ") : "none declared"})`);
+        }
+        spec = named;
+      } else if (isObj(nameOrSpec) && typeof nameOrSpec["rows"] === "string" && nameOrSpec["rows"].trim()
+          && isObj(nameOrSpec["fields"])) {
+        spec = { rows: nameOrSpec["rows"], fields: nameOrSpec["fields"] as Record<string, string> };
+        if (typeof nameOrSpec["maxItems"] === "number") spec.maxItems = nameOrSpec["maxItems"];
+      } else {
         throw new StopError("config_error",
-          `ctx.extract(${JSON.stringify(name)}): meta.site.listExtract has no such entry`
-          + ` (known: ${known.length ? known.join(", ") : "none declared"})`);
+          "ctx.extract needs a declared name or { rows, fields, maxItems? } structure");
       }
+      const extractName = typeof nameOrSpec === "string" ? nameOrSpec : `inline:${spec.rows}`;
       const p = await page();
       const rowsLoc = await locatorAnyFrame(p, spec.rows);
       const rows: Array<Record<string, string>> = [];
@@ -650,7 +919,7 @@ export function createCtx(deps: CtxDeps): Ctx {
         if (all === null) {
           throw new StopError("config_error", "ctx.extract needs a Playwright locator (locator.all() is not available here)");
         }
-        const cap = 500;
+        const cap = Math.max(1, Math.min(500, Math.floor(spec.maxItems ?? 500)));
         truncated = all.length > cap;
         for (const row of all.slice(0, cap)) {
           const locators = row as {
@@ -674,7 +943,7 @@ export function createCtx(deps: CtxDeps): Ctx {
           rows.push(rec);
         }
       }
-      pushEvent(trace, { call: "extract", desc: name, result: { rows, truncated } });
+      pushEvent(trace, { call: "extract", desc: extractName, result: { rows, truncated } });
       return rows;
     },
     run: (async (sourceOrStep: unknown, args?: string[], req?: unknown): Promise<StepResult> => {

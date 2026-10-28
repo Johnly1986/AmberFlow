@@ -1,0 +1,96 @@
+{
+  "id": "saucedemo-checkout",
+  "site": "saucedemo",
+  "tier": "deep",
+  "goal": "在 Swag Labs 登录，把最便宜的两件商品加入购物车并完成一次演示下单",
+  "slots": {
+    "username": "{{env:ONLINE_SAUCEDEMO_USER|standard_user}}",
+    "password": "{{env:ONLINE_SAUCEDEMO_PASSWORD|secret_sauce}}",
+    "firstName": "Ada",
+    "lastName": "Lovelace",
+    "postalCode": "75001"
+  },
+  "subgoals": [
+    {
+      "desc": "用演示账号登录",
+      "start_url": "https://www.saucedemo.com/",
+      "target_hints": ["#user-name", "#password", "#login-button"],
+      "slots": {
+        "username": "{{env:ONLINE_SAUCEDEMO_USER|standard_user}}",
+        "password": "{{env:ONLINE_SAUCEDEMO_PASSWORD|secret_sauce}}"
+      },
+      "signal": { "css_exists": "#inventory_container" },
+      "retries": 2
+    },
+    {
+      "desc": "按价格从低到高排序并把最便宜的商品加入购物车",
+      "start_url": "https://www.saucedemo.com/inventory.html",
+      "target_hints": [
+        "select[data-test=product-sort-container]",
+        "button[data-test=add-to-cart-sauce-labs-onesie]"
+      ],
+      "slots": { "sort": "lohi" },
+      "signal": { "css_text_equals": ["[data-test=shopping-cart-badge]", "1"] },
+      "retries": 2
+    },
+    {
+      "desc": "把第二便宜的商品也加入购物车",
+      "start_url": "https://www.saucedemo.com/inventory.html",
+      "target_hint": "button[data-test=add-to-cart-sauce-labs-bike-light]",
+      "signal": { "css_text_equals": ["[data-test=shopping-cart-badge]", "2"] },
+      "retries": 2
+    },
+    {
+      "desc": "打开购物车",
+      "start_url": "https://www.saucedemo.com/inventory.html",
+      "target_hint": "a[data-test=shopping-cart-link]",
+      "signal": { "url_contains": "cart.html" },
+      "retries": 2
+    },
+    {
+      "desc": "进入结算第一步",
+      "start_url": "https://www.saucedemo.com/cart.html",
+      "target_hint": "button[data-test=checkout]",
+      "signal": { "url_contains": "checkout-step-one.html" },
+      "retries": 2
+    },
+    {
+      "desc": "填写收货人信息并继续",
+      "start_url": "https://www.saucedemo.com/checkout-step-one.html",
+      "target_hints": ["#first-name", "#last-name", "#postal-code", "#continue"],
+      "slots": {
+        "firstName": "Ada",
+        "lastName": "Lovelace",
+        "postalCode": "75001"
+      },
+      "signal": { "url_contains": "checkout-step-two.html" },
+      "retries": 2
+    },
+    {
+      "desc": "提交演示订单",
+      "start_url": "https://www.saucedemo.com/checkout-step-two.html",
+      "target_hint": "#finish",
+      "signal": { "css_text_contains": ["[data-test=complete-header]", "Thank you"] },
+      "retries": 2
+    },
+    {
+      "desc": "退出登录回到登录页",
+      "start_url": "https://www.saucedemo.com/inventory.html",
+      "target_hints": ["#react-burger-menu-btn", "#logout_sidebar_link"],
+      "signal": { "css_exists": "#login-button" },
+      "retries": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "order-complete",
+      "desc": "最终停在登录页（订单已完成、会话已退出）",
+      "signal": {
+        "all_of": [
+          { "css_exists": "#login-button" },
+          { "url_contains": "saucedemo.com" }
+        ]
+      }
+    }
+  ]
+}

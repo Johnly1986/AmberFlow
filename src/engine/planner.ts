@@ -40,23 +40,6 @@ export interface PlannerLike {
   replan(plan: TaskPlan, obstacle: Subgoal, rules?: PlanningRules | null): TaskPlan | Promise<TaskPlan>;
 }
 
-export class ScriptedPlanner implements PlannerLike {
-  subgoals: Partial<Subgoal>[];
-
-  constructor(subgoals: Partial<Subgoal>[]) {
-    this.subgoals = subgoals;
-  }
-
-  makePlan(goal: string): TaskPlan {
-    return new TaskPlan(goal, this.subgoals);
-  }
-
-  /** Scripted policy: returning the SAME plan tells runPlan "no amendment". */
-  replan(plan: TaskPlan, _obstacle?: Subgoal, _rules?: PlanningRules | null): TaskPlan {
-    return plan;
-  }
-}
-
 export type ChatFn = (user: string, system: string) => Promise<Record<string, unknown>>;
 
 export interface LLMPlannerOptions {
@@ -238,7 +221,7 @@ export interface MiddlewareReport {
 }
 
 /**
- * Stops that a retry CANNOT fix (docs/ARCHITECTURE_REVIEW.md D6 / backlog I-1):
+ * Stops that a retry CANNOT fix :
  * `config_error` re-runs the same broken path, `host_not_allowed` re-walks into the
  * same undeclared host, and a command-mode `needs_value` re-reads the same plan
  * data bag — all three say the identical sentence on every attempt, each attempt
@@ -383,8 +366,8 @@ export async function runPlan(
     throw new Error(
       `runPlan cannot honour \`next\` edges (${withEdges.length} subgoal(s) declare them: `
       + `${withEdges.map((s) => JSON.stringify(String(s.id ?? s.desc))).join(", ")}). `
-      + "Declarative successors are driven by the app journey runner "
-      + "(`npm run apps -- --app <id>`, apps/<id>/pack.json); move the branch there or drop the edges "
+      + "Declarative successors are driven by the app flow script "
+      + "(`npm run apps -- --app <id>`, apps/<id>/app.mjs); move the branch there or drop the edges "
       + "— a silently ignored edge would look like a plan that ran.",
     );
   }

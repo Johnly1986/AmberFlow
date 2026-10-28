@@ -1,0 +1,27 @@
+{
+  "id": "quotes-js-page",
+  "site": "quotes",
+  "tier": "core",
+  "goal": "在 Quotes to Scrape 的 JS 渲染列表打开第二页",
+  "subgoals": [
+    {
+      "desc": "点击 JS 列表的 Next",
+      "start_url": "https://quotes.toscrape.com/js/",
+      "target_hint": "Next",
+      "signal": { "url_contains": "/js/page/2" },
+      "retries": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "js-second-page",
+      "desc": "第二页仍有 JS 渲染的 quote",
+      "signal": {
+        "all_of": [
+          { "url_contains": "/js/page/2" },
+          { "css_exists": ".quote" }
+        ]
+      }
+    }
+  ]
+}

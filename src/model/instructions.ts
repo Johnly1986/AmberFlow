@@ -1,11 +1,11 @@
 /**
- * 指令注册表（NL Flow S2，docs/NL_FLOW_DESIGN.md §2.2）——提名梯级的**闭集**。
+ * 指令注册表（NL Flow S2）——提名梯级的**闭集**。
  *
  * 两半分界（与命令层 `actions.ts` 同一条裁定）：
  *   - **能力面是代码**：本表就是"运行期可以被提名的指令"全集——闭集不可逃逸，
  *     提名答案不在集合内 = 弃权（fail closed），绝不为凑答案现造一条指令。
  *   - **组合是配置（S3 已落地）**：组合指令由**原语名按序声明成管线**（`compose`），
- *     由 `semantic-flow` 的组合解释器按声明执行——今天唯一成员是 `list_pick`
+ *     由应用脚本/执行器的组合面按声明执行——今天唯一成员是 `list_pick`
  *     （extract_rows → select → act_on_row）。参数（`by`/`order`/行选择器）永远来自
  *     声明（模板 × 档案），解释器不发明任何东西（红线②）。
  *
@@ -52,12 +52,6 @@ export const INSTRUCTION_SET: readonly InstructionDecl[] = [
   },
 ];
 
-export const INSTRUCTION_NAMES: readonly string[] = INSTRUCTION_SET.map((i) => i.name);
-
-export function getInstruction(name: string): InstructionDecl | null {
-  return INSTRUCTION_SET.find((i) => i.name === name) ?? null;
-}
-
 /**
  * 注册表自校验（加载期跑一次）：compose 只能引用已注册原语、原语不重复、
  * 声明的指令名唯一。违反 = 抛错——注册表是代码，坏注册表不该活到运行期。
@@ -83,22 +77,6 @@ export function validateInstructionRegistry(): string[] {
   }
   return problems;
 }
-
-/** ③ 窄问的 criteria（名字 → 文案），即 S0 实验台测过的那张考卷。 */
-export function instructionCriteria(): Record<string, string> {
-  return Object.fromEntries(INSTRUCTION_SET.map((i) => [i.name, i.desc]));
-}
-
-export function isInstructionName(v: unknown): v is string {
-  return typeof v === "string" && INSTRUCTION_NAMES.includes(v);
-}
-
-/**
- * ⑤ 枚举裁决的缺省序（S0 实测：本语料真值 ∈ {click, fill, select}，序内覆盖 100%，
- * 真值平均位置 0.88 —— 裁决兜回来的代价有界）。序是**声明的**，调用方可覆盖；
- * 新指令进闭集时要同步看 S0 报告的"真值分布"一列。
- */
-export const DEFAULT_ENUM_ORDER: readonly string[] = ["click", "fill", "select", "check", "list_pick"];
 
 // 注册表是代码：坏注册表不该活到运行期（加载期响亮失败）。
 {

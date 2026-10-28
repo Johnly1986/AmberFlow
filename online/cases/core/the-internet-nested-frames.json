@@ -1,0 +1,14 @@
+{
+  "id": "the-internet-nested-frames",
+  "site": "the-internet",
+  "tier": "core",
+  "goal": "从嵌套 frame 中读取 MIDDLE 文本",
+  "start_url": "https://the-internet.herokuapp.com/nested_frames",
+  "invariants": [
+    {
+      "id": "middle-frame-text",
+      "desc": "frame 内文本可见",
+      "signal": { "css_text_contains": ["#content", "MIDDLE"] }
+    }
+  ]
+}

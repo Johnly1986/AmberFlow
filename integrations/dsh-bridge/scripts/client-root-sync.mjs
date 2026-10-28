@@ -9,7 +9,7 @@
  *     package (`amberflow`), so the browser half has to register under that package name and key.
  *
  * Both bundles must stay byte-identical apart from those two identifiers, so this file is the ONE
- * generator: run it after editing `client.js`. `tests/client.spec.ts` pins the generated file to
+ * generator: run it after editing `client.js`. the generated file is kept in sync by
  * this transform, so a stale copy fails the test instead of silently serving the wrong key.
  */
 import fs from 'node:fs'

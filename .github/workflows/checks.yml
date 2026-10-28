@@ -1,33 +1,53 @@
 name: checks
 
-# "绿色"的唯一定义就是 bench/smoke.sh：类型检查 + 单元测试 + 六层跨实现对拍，
-# 外加（有 ONNX 产物时）冻结计划夹具跑分与 ctrip/transfer 两个用例的端到端。
-# 无 Python、无网络、无外部站点。
-"on":
+on:
   push:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "30 18 * * *"
 
 jobs:
-  offline:
-    name: offline gate (typecheck + tests + parity)
+  check:
+    name: typecheck + online case validation
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-
       - name: Install dependencies
         run: npm ci
+      - name: Check
+        run: npm run check
 
-      - name: Install chromium (playwright)
+  online:
+    name: live online suite
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install chromium
         run: npx playwright install --with-deps chromium
-
-      - name: Offline gate
-        run: bash bench/smoke.sh
-        # 模型侧的 3 步（夹具跑分 / ctrip / transfer）需要 1.7GB 的 ONNX 产物；
-        # CI 上没有它时会打印 SKIP 原因。要把它变成硬失败：SMOKE_REQUIRE_MODEL=1
+      - name: Smoke live sites
+        env:
+          AMBERFLOW_DECISION_BASE_URL: ${{ secrets.AMBERFLOW_DECISION_BASE_URL }}
+          AMBERFLOW_DECISION_MODEL: ${{ secrets.AMBERFLOW_DECISION_MODEL }}
+          AMBERFLOW_DECISION_API_KEY: ${{ secrets.AMBERFLOW_DECISION_API_KEY }}
+        run: npm run online -- --tier smoke --require-all
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: online-runs
+          path: ~/.amberflow/online-runs
+          if-no-files-found: ignore

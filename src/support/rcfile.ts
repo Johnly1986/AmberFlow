@@ -9,8 +9,8 @@
  * 优先级天然是 CLI 旗标 > 环境变量 > 文件 > 内建缺省，且文件缺席时零动作（默认等价纪律）。
  *
  * 三条纪律：
- * - **未知键响亮拒绝**（与 pack/source 的加载期校验同一口气）：`LAYA_TODAY` 写进来会被拒——
- *   展开日期是仓库常量（tools/frozen-today.ts），谁把它变成"机器配置"，谁就复活周日绿周一红。
+ * - **未知键响亮拒绝**（与 pack/source 的加载期校验同一口气）：不在 schema 里的键写进来会被拒，
+ *   而不是"配了却像没配"。
  * - **凭据只在本机文件里**：文件被 gitignore；doctor 展示按 P0 掩码纪律只留长度，
  *   任何被审计产物（计划/包/报告）都不许出现这些值。
  * - **单一实现**：只有这个模块懂 rc 文件；入口只调 `applyRcToEnv()`，别处再解析就是缺陷。
@@ -26,32 +26,11 @@ export const RC_FILENAME = "amberflowrc.json";
 export const RC_DIR = "configs";
 export const RC_REL = path.join(RC_DIR, RC_FILENAME);
 
-/** 允许出现在 rc 里的键（白名单即校验面）。分组只影响 doctor 的展示顺序。 */
-export const RC_GROUPS: Array<{ group: string; keys: string[] }> = [
-  { group: "决策模型产物", keys: [
-    "LAYA_ONNX_MODEL", "LAYAA_ONNX_MODEL", "LAYA_TOKENIZER_DIR", "LAYAA_TOKENIZER_DIR",
-    "HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"] },
-  { group: "决策服务（统一配置）", keys: [
-    "AMBERFLOW_DECISION_BASE_URL", "AMBERFLOW_DECISION_MODEL", "AMBERFLOW_DECISION_API_KEY",
-    "AMBERFLOW_DECISION_PROTOCOL", "AMBERFLOW_DECISION_FLOOR", "AMBERFLOW_DECISION_SCORE_KIND",
-    "AMBERFLOW_DECISION_TIMEOUT_MS", "AMBERFLOW_DECISION_STATE_CONTEXT", "AMBERFLOW_DECISION_MIN_OPTIONS"] },
-  { group: "决策 provider", keys: [
-    "AMBERFLOW_DECISION_PROVIDER", "AMBERFLOW_DEFAULT_DECISION_PROVIDER",
-    "TOKEN_PLAN_ENDPOINT", "TOKEN_PLAN_API_KEY", "TOKEN_PLAN_MODEL",
-    "JEVK5_ENDPOINT", "BAILIAN_ENDPOINT", "BAILIAN_API_KEY", "BAILIAN_MODEL",
-    "BAILIAN_REGION", "BAILIAN_WORKSPACE_ID", "DASHSCOPE_API_KEY"] },
-  { group: "外层 LLM（planner/auditor）", keys: [
-    "OPENAI_BASE_URL", "OPENAI_API_KEY", "PLANNER_MODEL", "AUDIT_MODEL", "PLANNER_TIMEOUT"] },
-  { group: "浏览器与落盘", keys: [
-    "PLAYWRIGHT_BROWSERS_PATH", "AMBERFLOW_HOME", "AMBERFLOW_APPS_OUT", "AMBERFLOW_SUITE_OUT",
-    "AMBERFLOW_REPO", "LAYAWEBUSE_REPO"] },
-  { group: "路由偏好", keys: ["CAMERA_ROUTE"] },
-  { group: "人工步骤与操作节奏", keys: ["AMBERFLOW_STEP_DELAY_MS", "AMBERFLOW_ACTION_DELAY_MS"] },
-  { group: "运行参数（CLI 旗标的配置默认值）", keys: [
-    "AMBERFLOW_HEADFUL", "AMBERFLOW_FORCE_HINTS", "AMBERFLOW_CONF_FLOOR",
-    "AMBERFLOW_TIERED_HINT", "AMBERFLOW_CONFIRM_SAFE", "AMBERFLOW_NO_SOURCES", "AMBERFLOW_QUIET"] },
-];
-const KNOWN_KEYS = new Set(RC_GROUPS.flatMap((g) => g.keys));
+/* 配置面的唯一声明在 `config-schema.ts`；这里只保留 rc 文件读写与 doctor 展示。 */
+import { CONFIG_KEYS, RC_GROUPS, isSecretKey, maskValue } from "./config-schema.ts";
+
+export { RC_GROUPS, isSecretKey, maskValue };
+const KNOWN_KEYS = new Set(CONFIG_KEYS);
 
 export interface RcLoad {
   path: string | null;
@@ -119,17 +98,6 @@ export function applyRcToEnv(env: NodeJS.ProcessEnv = process.env, root: string 
   const result = { ...load, applied };
   if (env === process.env) lastApply = result;
   return result;
-}
-
-/** 测试缝：清掉幂等缓存（进程内换了 rc 文件内容时用）。 */
-export function resetRcCache(): void { lastApply = null; }
-
-// 只掩真凭据（*_API_KEY / SECRET / PASSWORD / ACCESS_TOKEN）；主机类（*_ENDPOINT / BASE_URL）
-// 回显给用户自己的终端不构成泄漏，掩了反而让人看不懂自己的配置。
-const SECRETISH = /API_KEY|SECRET|PASSWORD|ACCESS_TOKEN/;
-/** doctor 口径：值只留掩码后的长度，键名原样。 */
-export function maskValue(key: string, value: string): string {
-  return SECRETISH.test(key) ? `${"*".repeat(Math.min(value.length, 12))}（长度 ${value.length}，已掩码）` : value;
 }
 
 /** doctor 的"配置来源"段：每个生效键点名它是从 env 还是文件来的。

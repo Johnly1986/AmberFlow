@@ -11,7 +11,6 @@
  * module never imports onnxruntime.
  */
 import { getLayaRuntime, type ChoiceAnswer, type NoulAnswer, type PredictResult, type Question } from "../model/model.ts";
-import { firstOf, urlOf, type PageLike } from "./extraction.ts";
 
 /** name -> (human description, css selector for execution). */
 export const ACTIONS: Record<string, [string, string]> = {
@@ -28,20 +27,6 @@ export const ACTIONS: Record<string, [string, string]> = {
 
 /** Actions that must never auto-execute; always confirm with the human. */
 export const DESTRUCTIVE = new Set(["checkout", "apply_coupon"]);
-
-/** Compact state: laya encodes the whole state as JSON in a 512-token window. */
-export async function extractState(page: PageLike): Promise<Record<string, unknown>> {
-  const main = page.locator!("main");
-  const buttons = page.locator!("button:visible, a:visible");
-  return {
-    url: urlOf(page),
-    title: await (page as unknown as { title(): Promise<string> }).title(),
-    main_text: String(await firstOf(main).innerText({ timeout: 2000 })).slice(0, 600),
-    visible_buttons: ((await (buttons as unknown as {
-      allInnerTexts(): Promise<string[]>;
-    }).allInnerTexts()) ?? []).slice(0, 20),
-  };
-}
 
 export function buildQuestions(): Record<string, Question> {
   return {

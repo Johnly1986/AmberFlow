@@ -5,8 +5,8 @@
  * `decision-model-preview`，与百炼 workspace 端点**同一种协议**；同一个 base 上还挂着 OpenAI
  * 兼容的 chat 模型（qwen3.x / glm-5.x / deepseek-v4.x，`/chat/completions`）——那是 SystemTwo
  * （规划/审计/老师）的通道，不归本 provider 管。
- * **端点只从环境读（`TOKEN_PLAN_ENDPOINT`）**：共享层的"外部主机不许写死"纪律（apps:matrix 的
- * 泄漏门禁）与 LLM 的 `OPENAI_BASE_URL` 同一条——完整 URL 见 docs/DECISION_PROVIDER_TOKENPLAN.md。
+ * **端点只从环境读（`TOKEN_PLAN_ENDPOINT`）**：共享层的"外部主机不许写死"纪律
+ * 与 LLM 的 `OPENAI_BASE_URL` 同一条。
  *
  * 2026-10-15 实测（`POST …/compatible-mode/v1/systemone`，token 只从环境读）：
  *   - choice 3 选项：`{answers:{act:{type:"choice",choice,confidence:0.97,probabilities:{e1:0.98,e2:0.02,e3:0}}}}`
@@ -47,7 +47,6 @@ const CAPABILITIES: ProviderCapabilities = {
  * 上模型对某个元素的把握是 0.20，在全局缺省 0.25 下被硬阻塞；floor≤0.20 即恢复 4/4 且不变量全绿
  * （0.20/0.15/0.10 三档同形，松闸没带来错点——每步仍由该步信号裁决）。
  * **边界**：这是单包单点测出来的刻度，不是普适校准；包可用 `policy.conf_floor` 覆盖、CLI 可本次覆盖。
- * 见 docs/DECISION_PROVIDER_TOKENPLAN.md §闸门刻度。
  */
 const SUGGESTED_FLOOR = 0.2;
 
@@ -65,7 +64,7 @@ export function tokenPlanProvider(opts: TokenPlanOptions = {}): DecisionProvider
       return opts.endpoint ?? env.TOKEN_PLAN_ENDPOINT ?? null;
     },
     endpointHint: "设 TOKEN_PLAN_ENDPOINT（完整 URL，要带 …/compatible-mode/v1/systemone；"
-      + "共享层的泄漏门禁不许把外部主机写进代码/默认值）。完整示例见 docs/DECISION_PROVIDER_TOKENPLAN.md",
+      + "共享层的泄漏门禁不许把外部主机写进代码/默认值）",
     // key 每次现读（不缓存进闭包）：测试可临时注入，也没有"启动时没配、之后配了读不到"的坑。
     resolveAuth() {
       const key = keyOf();
@@ -87,7 +86,7 @@ export function tokenPlanProvider(opts: TokenPlanOptions = {}): DecisionProvider
         const extra = missing.length ? `；另缺 ${missing.join(" 与 ")}` : "";
         return `TOKEN_PLAN_ENDPOINT=${JSON.stringify(ep)} 不是 SystemOne 的完整 URL——`
           + "要以 /compatible-mode/v1/systemone 结尾（POST 到 /v1 或 chat 路径，网关回 400 url error）。"
-          + "完整形状见 docs/DECISION_PROVIDER_TOKENPLAN.md" + extra;
+          + "完整形状见本条错误信息里的结尾说明" + extra;
       }
       return missing.length ? `缺 ${missing.join(" 与 ")}` : null;
     },
@@ -100,9 +99,9 @@ export function tokenPlanProvider(opts: TokenPlanOptions = {}): DecisionProvider
     // **带上文**（2026-10-20）：choice 的 state 从 `{goal}` 扩为 `goal+url+title+main_text`，
     // 与本地 laya 分支的 pick 同一口径（复用 stateText/urlOf，不新造渲染）——之前模型在
     // "看不见页面"的条件下被问，conf 0.03 究竟多少归能力、多少归信息量，必须先补上信息量再测。
-    // 消融开关：TOKEN_PLAN_STATE_CONTEXT=0 回到旧问法——A/B 的对照臂必须同机一键可复现。
+    // 消融开关：AMBERFLOW_DECISION_STATE_CONTEXT=0（旧名 TOKEN_PLAN_STATE_CONTEXT 兼容）回到旧问法。
     // 任何一段取不到就**少带那一段**（上文是增益，不是新的崩溃来源）。
-    stateBuilder: (env.TOKEN_PLAN_STATE_CONTEXT ?? "") === "0" ? undefined : async (req) => {
+    stateBuilder: ((env.AMBERFLOW_DECISION_STATE_CONTEXT ?? env.TOKEN_PLAN_STATE_CONTEXT) ?? "") === "0" ? undefined : async (req) => {
       const st: Record<string, unknown> = { goal: req.goal };
       try { st.url = urlOf(req.page); } catch { /* 无 url 就不带 */ }
       try { st.title = await req.page.title(); } catch { /* 同上 */ }

@@ -11,7 +11,7 @@ export async function emitPlanStatus(
   opts: {
     file: string;
     pathLabel: string;
-    mode: "plan" | "demo" | "goal";
+    mode: "plan" | "goal";
     command?: string;
     code: number;
     dryRun?: boolean;

@@ -1,0 +1,15 @@
+{
+  "id": "saucedemo-login",
+  "site": "saucedemo",
+  "tier": "smoke",
+  "goal": "打开 Swag Labs 登录页并确认登录表单存在",
+  "start_url": "https://www.saucedemo.com/",
+  "tags": ["navigation", "public", "demo-auth"],
+  "invariants": [
+    {
+      "id": "login-form",
+      "desc": "登录按钮存在",
+      "signal": { "css_exists": "#login-button" }
+    }
+  ]
+}

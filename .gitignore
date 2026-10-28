@@ -14,17 +14,14 @@ configs/amberflowrc.json
 # 用户作用域目录（AMBERFLOW_HOME 的仓库内形态；默认是 ~/.amberflow，不在 checkout 里）
 /.amberflow/
 
-# 运行时产物：跑分矩阵、查看器输出、计划 checkpoint
+# 运行产物：计划 checkpoint、线上测试证据
 .task_state.json
 .task_plan.json
-bench/results/
+/online-runs/
+/online-out/
 
 # 编辑器 / 系统
 .DS_Store
 .idea/
 .vscode/
 *.swp
-
-# 注意：qunar/results/QUNAR_RESULT.md、ctrip/results/live_probe.json、
-# ctrip/results/live_capture/summary.json、transfer/results/ota_probe.json
-# 是测试读取的**真实站点实测记录**，必须进版本控制，不要加入忽略列表。

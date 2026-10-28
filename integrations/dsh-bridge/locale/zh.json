@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "AmberFlow 桥接",
-    "description": "在会话里驱动 AmberFlow 的冻结计划浏览器引擎：列出应用、端到端运行、录制流程、规划站点无关流程。配置页设置运行应用时使用的线上决策模型（token-plan SystemOne）URL、Token Key 与 ModelName。"
+    "description": "在会话里驱动 AmberFlow 的脚本化 flow 应用：列出并读取应用、校验脚本调用序列、带执行预算运行应用、把一次演示录成 app.mjs，以及跑线上套件。配置页设置运行应用时使用的线上决策模型（token-plan SystemOne）URL、Token Key 与 ModelName。"
   }
 }

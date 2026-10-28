@@ -1,0 +1,9 @@
+{
+  "id": "qunar-h5",
+  "site": "qunar-probe",
+  "tier": "probe",
+  "goal": "观察去哪儿 H5 机票首页在移动设备面下的可达性（只记录观测，不作为通过标准）",
+  "start_url": "https://touch.qunar.com/h5/flight/",
+  "expect": ["blocked", "unreachable", "login_required", "captured"],
+  "tags": ["probe", "mobile"]
+}

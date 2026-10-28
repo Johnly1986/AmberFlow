@@ -1,0 +1,9 @@
+{
+  "id": "ctrip-flights",
+  "site": "ctrip-probe",
+  "tier": "probe",
+  "goal": "观察携程机票列表在本环境能否被匿名访问（只记录 blocked/unreachable，不作为通过标准）",
+  "start_url": "https://flights.ctrip.com/online/list/oneway-kmg-bjs?depdate={{today+7d}}",
+  "expect": ["blocked", "unreachable", "login_required", "captured"],
+  "tags": ["probe", "anti-bot"]
+}

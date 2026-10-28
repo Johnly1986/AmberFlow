@@ -77,7 +77,7 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
   const report = doctorReport(p);
   const invocation = detectCliInvocation(ctx.baseEnv);
   const config = resolveConfig(ctx.baseEnv, ctx.cwd, ctx.explicitConfig);
-  const apps = listAppInfos(ctx);
+  const apps = await listAppInfos(ctx);
   const userCount = apps.filter((a) => a.source === "user").length;
   let providerDefault: { name: string; tier: string } | null = null;
   let providerError: string | null = null;
@@ -118,7 +118,7 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
     }, {
       exitCode,
       diagnostics: config.errors,
-      next: exitCode ? ["amber config show", "amber doctor --fix"] : ["amber run demo-app"],
+      next: exitCode ? ["amber config show", "amber doctor --fix"] : ["amber test --tier smoke"],
     });
     if (exitCode !== 0) {
       envelope.ok = false;

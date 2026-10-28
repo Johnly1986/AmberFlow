@@ -1,7 +1,7 @@
 /**
  * 数据槽层（④c，P3 落地）——参数的**来源**与**声明式候选规则**。
  *
- * 出处：docs/ARCHITECTURE_REVIEW.md §6.1 的表（"数据槽层 = 绑定，阶段 = 绑定期（运行期），
+ * 出处：绑定层设计重审的表（"数据槽层 = 绑定，阶段 = 绑定期（运行期），
  * 权威 = 值的来源与声明式选择规则，失败行为 = 缺值 → `needs_value`（今天已有的正确行为）"）
  * 与 §7-P3 行（"先接 `<select>` 与 `list_extract` 两处**已有前身**"）。
  *
@@ -12,7 +12,7 @@
  *   2. **运行期解析**：`resolveBinding` 是**纯函数**（声明 × 当次观察 → 值或结构化缺值原因）。
  *
  * 红线②（不发明取值）在这里的落地形式：**模型永远不参与选值**——来源面四种
- * （NL Flow S1 起加 `dataset`，docs/NL_FLOW_DESIGN.md §2.3/§5），且每一种都必须由声明点名：
+ * （NL Flow S1 起加 `dataset`），且每一种都必须由声明点名：
  *
  * | 来源 | 形状 | 今天的前身 |
  * |---|---|---|
@@ -33,7 +33,6 @@ import type { DatasetReader } from "./dataset.ts";
 
 /** 引擎能力面：参数来源（代码，不是用户词表）。 */
 export const BINDING_SOURCES = ["slot", "option", "list", "dataset"] as const;
-export type BindingSource = (typeof BINDING_SOURCES)[number];
 /** 页面候选的声明式匹配规则（红线②：规则必须声明，不接受"看着像就填"）。 */
 export const OPTION_MATCHES = ["value", "label", "contains"] as const;
 export type OptionMatch = (typeof OPTION_MATCHES)[number];
@@ -182,11 +181,6 @@ export function validateBinding(
   } else if (typeof order !== "string" || !(LIST_ORDERS as readonly string[]).includes(order)) {
     problems.push(`${where}: value.order must be one of ${LIST_ORDERS.join("|")} (got ${JSON.stringify(order)})`);
   }
-}
-
-/** 规范化一条已被 `validateBinding` 认可的绑定（类型收窄用；不做校验）。 */
-export function asBinding(value: unknown): ValueBinding {
-  return value as ValueBinding;
 }
 
 /**

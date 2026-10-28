@@ -1,5 +1,5 @@
 /**
- * 原始工具入口（`npm run apps` / `apps:suite` / `bench` / `tools/*` …）的**统一配置引导**。
+ * 原始工具入口（`npm run apps` / `npm run test` / `tools/*` …）的**统一配置引导**。
  *
  * 背景：`amber` CLI 的 `main.ts` 会把「旧 rc < 用户配置 < 项目配置 < 环境变量」解析进
  * `process.env` 再分派；但直接用 `node tools/...`（npm run 脚本的常态）的入口只调了

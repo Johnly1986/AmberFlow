@@ -1,7 +1,7 @@
 /**
  * **阿里百炼（Model Studio / DashScope）决策模型 provider** —— `decision-model-preview`。
  *
- * 它是 `systemOneClient` 的一份 profile（见 docs/DECISION_LAYER_SYSTEMONE.md）：百炼走 TypeSafe
+ * 它是 `systemOneClient` 的一份 profile：百炼走 TypeSafe
  * System One（`POST /compatible-mode/v1/systemone`），本项目只适配这一层协议，模型加载/推理在服务侧。
  * API 契约：https://help.aliyun.com/zh/model-studio/decision-model-api
  *
@@ -58,7 +58,7 @@ export function bailianProvider(opts: BailianOptions = {}): DecisionProvider {
       return null;
     },
     endpointHint: "设 BAILIAN_ENDPOINT（全 URL），或 BAILIAN_WORKSPACE_ID（+可选 BAILIAN_REGION，"
-      + `默认 ${REGION_DEFAULT}）。端点是 workspace 作用域的，起法与契约见 docs/DECISION_PROVIDER_BAILIAN.md`,
+      + `默认 ${REGION_DEFAULT}）。端点是 workspace 作用域的`,
     // key 每次现读（不缓存进闭包）：测试可临时注入，也不会有"启动时没配、之后配了读不到"的坑。
     resolveAuth() {
       const key = (opts.apiKey ?? env.DASHSCOPE_API_KEY ?? env.BAILIAN_API_KEY ?? "").trim();

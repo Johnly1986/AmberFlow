@@ -1,0 +1,28 @@
+{
+  "id": "books-next-page",
+  "site": "books",
+  "tier": "core",
+  "goal": "从 Books to Scrape 首页打开目录第二页",
+  "subgoals": [
+    {
+      "desc": "点击目录的 next 链接",
+      "start_url": "https://books.toscrape.com/",
+      "target_hint": "next",
+      "signal": { "url_contains": "page-2.html" },
+      "retries": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "second-page",
+      "desc": "最终停在第二页且仍有商品",
+      "signal": {
+        "all_of": [
+          { "url_contains": "page-2.html" },
+          { "css_exists": "article.product_pod" }
+        ]
+      }
+    }
+  ],
+  "oracle": { "kind": "css_count", "selector": "article.product_pod", "min": 1 }
+}

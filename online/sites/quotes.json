@@ -1,0 +1,9 @@
+{
+  "id": "quotes",
+  "hosts": ["quotes.toscrape.com"],
+  "home": "https://quotes.toscrape.com/",
+  "locale": "en-US",
+  "timeout_ms": 60000,
+  "blocked_markers": ["Access Denied", "403 Forbidden", "Request blocked"],
+  "login_markers": ["/login"]
+}

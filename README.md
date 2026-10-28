@@ -1,382 +1,206 @@
 # AmberFlow
 
-> **冻结计划的浏览器自动化中间件**（TypeScript / Node ≥ 22.6）：LLM 只规划一次，执行由本地规则与决策模型逐步完成，演示一次后既可端侧执行，也可以手动规划。
->
-> 规则保证可复现，Laya 保证不轻言放弃，信号保证不作弊。
+**决策任务流引擎**，是把一次"决策"拆成一串可编排的任务节点（取数 → 校验 → 打分 → 判规则 → 执行），由引擎按预设流程自动调度执行、并返回带依据的结果的运行时系统。
 
-## 安装运行
+## 安装
 
-```bash
-npm ci && npx playwright install chromium
-npm link           # 可选但推荐：让统一入口 `amber` 进 PATH（`npm ci` 不会装它；跳过就用 `npx amber …`）
-npm start          # 在仓库自带页面上跑一份真实计划：离线、零配置
-npm run doctor     # 环境体检：Node / chromium / 决策模型 / 可选 provider / LLM，缺什么给什么命令
-npm run apps -- --app ctrip-case --provider coin-flip   # 换决策模型跑（laya-onnx|stub|none|基线|jevk5|bailian|token-plan|自注册）
-npm run providers:baseline   # 决策提供者对照台：零智能基线 first-candidate 是任何新模型要赢的线
-```
-
-成功的样子（`npm start` 会逐步打印判定依据，最后一行是结论）：
-
-```
-step 1: click a "Add to cart" (clicked, rule:match, conf=1.00)
-结果：2/2   步骤 2   跳过 0   重试 0
-```
-
-> `npm start` 的计划检查点默认写在**用户作用域**：`$AMBERFLOW_HOME/task_plan.json`（默认 `~/.amberflow/`），不进 checkout；想换个位置就加 `--plan /tmp/my-plan.json`。
-> 模型产物的默认下载落点是**项目目录 `models/`**（图 + 外置权重 + tokenizer 同处一地，已进 `.gitignore`）；换位置用 `LAYA_ONNX_MODEL`。
-
-没有模型权重也能跑：计划点名了目标的步骤由**规则**解决；确实需要模型兜底的步骤会明确说明缺什么，而不是瞎猜或抛异常。
-
-### 用在线决策模型
+需要 Node ≥ 22.6。
 
 ```bash
-cp configs/amberflowrc.example.json configs/amberflowrc.json   # 本机文件，已被 .gitignore 排除
+npm ci
+npx playwright install chromium
+npm run doctor
 ```
 
-编辑 `configs/amberflowrc.json`，只填三行（示例见模板 `_doc`；凭据只留在本机这个文件里）：
+`npm run doctor` 会点名 Node、chromium、决策模型产物与配置来源；缺什么给什么命令。
 
-```json
-{
-  "AMBERFLOW_DECISION_PROVIDER": "token-plan",
-  "AMBERFLOW_DECISION_BASE_URL": "https://<你的网关主机>/compatible-mode/v1",
-  "AMBERFLOW_DECISION_MODEL": "decision-model-preview",
-  "AMBERFLOW_DECISION_API_KEY": "sk-…"
-}
-```
-
-然后**任何命令都不需要加旗标**——`npm start`、`npm run apps`、`npm run apps:suite`、`npm run bench`、
-`learn`、`plan-cli` 全走同一扇门选决策源（本地产物就绪→本地；配了 provider→在线；都没配→规则档并如实点名）：
+## 快速开始
 
 ```bash
-npm run doctor                 # 确认：「决策档位 token-plan（tier=on）」+ 每个配置值的来源（文件/环境）
-npm start -- --goal "…" --url <页面>          # 演示→归纳→执行，决策问线上模型
-npm run apps -- --app demo-app --headful     # 有头跑一个应用（风险闸门用模型投票）
-npm run bench -- --force-hints off           # 剥光 hint 的臂：模型必然出场（决策来源行可见）
-npm run providers:baseline -- --providers token-plan,first-candidate --out "$TEMP/pb.json"   # 与零智能基线对高下
+# 1) 生成一个可跑的 flow 骨架（默认落到 $AMBERFLOW_HOME/apps/<id>/app.mjs）
+npx amber apps new my-app --goal "把商品加入购物车" --url https://shop.example.com/p/1
+
+# 2) 只读观察真实页面，拿元素与候选 hint
+npx amber inspect --url https://shop.example.com/p/1 --json
+
+# 3) 编辑 app.mjs，然后离线校验调用序列（不开浏览器、不调模型）
+npx amber apps check my-app
+npx amber apps explain my-app
+
+# 4) dry-run → 用执行预算试跑 → 完整运行
+npx amber run my-app --dry-run
+npx amber run my-app --max-steps 3 --trace
+npx amber run my-app --trace
+
+# 等价入口：npm run apps -- --app my-app
 ```
 
-临时换档：任何命令加 `--provider NAME`（`first-candidate`/`none`/`jevk5`/`bailian`…，名字见 doctor 列表）；
-离线消融臂用 `--ablate stub`（不花在线调用量）。token-plan 的 A/B 开关：`TOKEN_PLAN_STATE_CONTEXT=0`
-回到"只带 goal 的问法"（带页面上下文的实测数据见 [docs/DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md) §1b）。
-读数提醒：旅程每步都有 hint 时模型出场为 0 是**设计**（"能规则化就别猜"）；要量模型就用剥 hint 的对照台。
+`--max-steps N` 是 `ctx.step` / `ctx.arrive` 的**执行预算**，不是“从第 N 步开始”。脚本按自己的控制流执行，预算用满时以 `partial` 停下（status=`partial`、exit 0、`verified=false`），已执行的步骤与 trace 保留。
 
-## 命令行入口
-
-`package.json` 的 `bin` 提供 `amber`，但 **`npm ci` 只链接依赖的 bin，不会把根包的 `amber` 放进 PATH**。
-所以裸敲 `amber …` 之前要先 link 一次（全局装过则不必）：
+一次性目标仍然可用（演示 → 计划 → 执行，不落成应用）：
 
 ```bash
-npm link          # 只需一次：让 `amber` 进 PATH
-amber --version   # 验证；之后本文所有 `amber …` 都能直接敲
+npm start -- --goal "把商品加入购物车" --url https://shop.example.com/p/1
 ```
 
-不想改全局环境时，下面两种写法等价、随时可用（把 `amber` 换成它们即可）：
+## 应用模型
+
+- **位置**：`$AMBERFLOW_HOME/apps/<id>/app.mjs`（默认 `~/.amberflow/apps`）。用户作用域，跟着用户走，不写进 checkout。
+- **形状**：`export const meta = (kit) => ({ id, label, goal, hosts, slots, invariants, ... })` 只声明应用级事实；`export async function flow(ctx) { ... }` 是唯一流程。没有静态步骤表，也没有第二种应用格式。
+- **不是仓库分享品**：仓库 `apps/`（若存在）只是开发夹具，不是内置应用；没有开箱 demo。应用正文请以用户目录里的 `app.mjs` 为准。
+- **调试靠调用序列**：`apps show --code` 看当前源码与版本锚点，`apps explain` 看 dry 调用序列，`ctx.step` 的 `id` 与 `--trace` 提供稳定锚点。
 
 ```bash
-npx amber run --demo            # checkout 内直接跑（npx 会认本包的 bin，不会去下载同名包）
-npm run amber -- run --demo     # 等价写法
+npx amber apps list                          # 列出可运行应用（用户 + 仓库夹具）
+npx amber apps show my-app --code            # 路径、meta、当前源码、版本 sha
+npx amber apps explain my-app                # dry 跑一遍 flow，展示调用序列
+npx amber apps check my-app                  # 加载 + dry 调用序列校验（exit 2 = 有问题）
+npx amber apps path my-app                   # 唯一可写位置
+npx amber apps remove my-app --yes --force   # 删除（非 TTY 必须 --yes）
 ```
 
-上面四条命令的对应写法（**已 `npm link`**）：
+完整作者接口见 [docs/APP_SCRIPT_AUTHORING.md](docs/APP_SCRIPT_AUTHORING.md)；Agent / DSH 桥的稳定契约见 [docs/AGENT_INTERFACE.md](docs/AGENT_INTERFACE.md)。
+
+### 录制一个应用
 
 ```bash
-amber run --demo                                                     # 在仓库自带页面上跑一份真实计划（计划默认存 ./.amberflow/plan.json）
-amber doctor                                                         # 环境体检；--fix 只在缺件时建目录 / 装 Chromium
-amber run ctrip-case --provider coin-flip                            # 换决策模型跑（与 npm run apps 同一扇门）
-amber dev providers baseline --providers token-plan,first-candidate --out "$TEMP/pb.json"   # 与零智能基线对高下
+# 演示一次，归纳完成信号，生成 flow 脚本；零模型调用回放不过就不落盘
+npx amber record https://shop.example.com --name my-app --goal "把商品加入购物车"
+
+# 用录好的动作回放（CI / Agent）
+npx amber record https://shop.example.com --script ./demo-actions.json --yes --json
+
+npm run learn       # 同一入口的 npm 脚本（不传参数时现场演示）
 ```
 
-敲 `amber` 时如果报 `CommandNotFoundException` / `command not found`，就是还没 link ——
-`amber doctor` 会把这件事作为「CLI 入口」一项直接点名，并给出当前可用的写法。
+`--apps-dir <目录>` 是应用落点；默认 `$AMBERFLOW_HOME/apps`，不要写进 checkout。
 
-`amber` 无参数是**首页**：Node / Chromium / 决策源 / 应用清单 / 下一步——不需要记住任何子命令就能开始。
-任何命令加 `--json` 后 stdout 只有一个信封对象（人类进度与诊断走 stderr）；`amber help --all` 列出
-全部命令与高级旗标；`amber completion bash|zsh|fish|powershell` 给补全脚本。
-
-### 退出码
-
-| 码 | 含义 | 你会看到 |
-|---|---|---|
-| 0 | 成功 | `data` 里是结果 |
-| 1 | 未完成 | 计划 / 应用没跑完；`data.steps` 里有每一步的状态 |
-| 2 | 用法 / 配置错误 | **一行**点名哪个旗标或哪一层配置不对（不是堆栈） |
-| 3 | 被策略挡住 | 例如不带 `--force` 删内置应用、非交互缺 `--yes` |
-| 4 | 质量门禁（仅 `amber dev`） | 套件没过门槛，绿色不替它背书 |
-| 130 | 中断 | Ctrl-C；不假装成功 |
-
-`--json` 时错误也是同一个形状：`{"ok":false,"exit_code":2,"error":{"code":"USAGE","message":"…","hint":"…","next":["…"]}}`
-——`hint` 回答"那我该写什么"，`next` 是可以直接抄的下一条命令。
-
-### 非交互
-
-- `amber record` 非 TTY 必须给 `--url` 或 `--cdp`；
-- `amber run --plan <文件>` 非 TTY 默认 `--confirm deny`；要放行显式给 `--yes`
-  （`--yes` **不**隐含 `--allow-dangerous`）；
-- `amber apps remove <id>` 非 TTY 必须给 `--yes`；
-- 需要人来回答的场景一律报错并给出可抄的写法，**不替你选、不静默继续**。
-
-### 命令一览
+## 命令一览
 
 | 命令 | 用途 |
 |---|---|
-| `amber` | 首页：环境状态、应用清单与下一步 |
-| `amber run <应用>` / `--demo` / `--goal "<目标>" --url <页面>` | 跑应用、跑自带演示或一次性目标 |
-| `amber record --url <页面>` | 打开页面录制一次并归纳应用 |
-| `amber plan new "<目标>"` | 手工新建计划；步骤 id 稳定、可从 `1` 起编辑 |
-| `amber apps list / show / check / path / remove` | 应用管理 |
-| `amber config get / set / unset / show / path / init / edit` | 全局配置与项目配置 |
-| `amber model status / path / fetch` | 本地决策模型产物 |
-| `amber dev suite / matrix / bench / parity / verify` | 维护者套件与对拍 |
-| `amber completion bash / zsh / fish / powershell` | 补全脚本 |
+| `npx amber run <id\|app.mjs>` | 运行 flow 应用；`--dry-run` / `--trace` / `--max-steps N` / `--slot k=v` / `--today YYYY-MM-DD` / `--allow-dangerous` / `--manual-fail-fast` |
+| `npx amber run --plan [文件]` | 运行计划文件（`--reset` / `--replan` / `--confirm allow\|ask\|deny`） |
+| `npx amber run --goal "..." --url ...` | 一次性目标：演示 → 计划 → 执行（`--save-plan`） |
+| `npx amber record [页面]` | 演示一次，生成 flow 应用（`--name` / `--goal` / `--apps-dir` / `--script`） |
+| `npx amber apps list` | 列出应用 |
+| `npx amber apps show <id\|脚本>` | 查看 meta、路径、版本 sha；`--code` 返回完整源码 |
+| `npx amber apps new <id>` | 生成可跑的 flow 骨架（`--goal` / `--host` / `--url` / `--dir` / `--print` / `--force`） |
+| `npx amber apps check [<id\|脚本>]` | 加载 + dry 调用序列校验 |
+| `npx amber apps explain <id\|脚本>` | dry 调用序列与人话视图 |
+| `npx amber apps path <id>` | 打印应用脚本路径 |
+| `npx amber apps remove <id>` | 删除应用（`--yes` / `--force`） |
+| `npx amber inspect --url <URL>` | 只读观察页面元素与候选 hint（不点击、不输入、不调模型） |
+| `npx amber plan new/show/add/edit/rm/move/check/reset/run` | 计划文件的创建、编辑、校验与执行 |
+| `npx amber doctor` | 环境、配置、决策源体检（`--fix` 只做安全可逆修复） |
+| `npx amber config show/get/set/unset/init/path/edit` | 全局 / 项目配置 |
+| `npx amber model status/fetch/path` | 本地决策模型状态与安装 |
+| `npx amber test --validate\|--list\|--tier ...` | 真实站点测试套件 |
+| `npm start -- --goal ... --url ...` | 一次性目标（npm 入口） |
+| `npm run apps -- --app <id>` | 运行用户作用域应用（与 `amber run <id>` 同一运行器） |
+| `npm run check` | `typecheck` + 配置示例一致性 + 线上用例离线校验（PR 门禁） |
+| `npm run test -- --tier ...` | 真实站点测试套件（联网） |
+| `npm run learn` | 演示一次，生成 flow 应用 |
+| `npm run agent -- --goal ... --url ...` | 外层 Agent 的一次录制调用（`learn --json --yes`） |
+| `npm run plan-cli -- ...` | 计划 CRUD / 执行入口 |
+| `npm run model:fetch -- --from <url\|路径>` | 安装本地决策模型产物 |
+| `npm run config:example` | 从配置 schema 重新生成示例 |
+| `npm run picker-server` | MV3 扩展的本地模型服务 |
 
-`amber` 无参数即首页；任何命令加 `--json` 后 stdout 只有信封对象，人类进度与诊断走 stderr。
-`amber help --all` 列出全部命令与高级旗标。
+完整帮助：`npx amber --help`、`npx amber <command> --help`。命令表的唯一出处是 `src/cli/registry.ts`。
 
-## DSH 插件安装
+## 线上测试套件
 
-装进 profile 即得四个工具——`amberflow_apps`（列应用）/ `amberflow_run`（跑一个，含 `dry` / `ablate` /
-`slots` / `provider` / `headful`；**默认跑真模型**）/ `amberflow_learn`（录制归纳）/ `amberflow_plan`（一句话+种子页→模板+档案），
-并且插件行自带**配置页**（只设置线上决策模型 URL / Token Key / ModelName；两个安装门都提供）：
+`online/` 是仓库唯一的测试声明层（**不是**应用流程格式，也不是应用的第二作者面）：
+
+```
+online/
+  sites/*.json          # 站点档案：hosts / home / locale / device / 风控与登录标记
+  cases/smoke/*.json    # 单页可达 + 关键地标
+  cases/core/*.json     # 2–6 步短流程
+  cases/deep/*.json     # 有状态长流程
+  cases/probe/*.json    # 风控/可达性探针，非门禁
+```
 
 ```bash
-dsh plugin --profile <名称> add github:Johnly1986/AmberFlow          # 仓库直装（见 README 附注：私有库需凭证）
-dsh plugin --profile <名称> add /绝对路径/AmberFlow                  # 开发态 link：仓库根 bundle，插件与引擎同源
-dsh plugin --profile <名称> add /绝对路径/AmberFlow/integrations/dsh-bridge   # 只装适配器包（需先 npm run build；引擎由 repoPath 指）
+npm run test:validate                  # 离线校验全部 site/case（PR 门禁）
+npm run test -- --tier smoke           # 快速可达性
+npm run test -- --tier core            # 短流程
+npm run test -- --tier deep            # 长流程
+npm run test -- --tier probe           # 探针，非门禁
+npm run test -- --case books-category --headful
+npm run test -- --list
 ```
-配置页在**设置 → 插件 → AmberFlow 桥接 → 组件行 → 配置**（编辑仅限 loopback 页面：经外网打开时页面会
-显示说明，请用 Host 本机地址或 SSH 隧道如 `ssh -L 8080:127.0.0.1:3080 <host>`）：三项分别是
-Decision model URL、Token Key、ModelName；桥按统一配置转发 `AMBERFLOW_DECISION_BASE_URL` /
-`AMBERFLOW_DECISION_API_KEY` / `AMBERFLOW_DECISION_MODEL`，URL+Token 齐全时 `amberflow_run` 默认使用
-`decision-service`，留空则使用本地 ONNX。详见
-[integrations/dsh-bridge/README.md](integrations/dsh-bridge/README.md)。
-或在插件页面直接添加项目地址。开发态 link 之后**重启一次 DSH 进程**：换安装形态时，运行中的进程
-不会自己换掉已加载的桥模块（引擎 CLI 是子进程，倒是立刻用新的）；判据与解释见
-[integrations/dsh-bridge/DEVELOPING.md](integrations/dsh-bridge/DEVELOPING.md)。
 
+**用例格式**：`id` / `site` / `tier` / `goal` / `subgoals[]` / `invariants[]` / 可选 `oracle`、`expect`。子目标复用执行器计划语法：`desc`、`start_url`、`target_hint`、`target_hints`、`signal`、`slots`、`when`、`retries`。Case 只能引用真实 `http(s)` URL；`file://`、旧夹具路径、明文凭据会在加载期被拒绝。日期用 `{{today}}` / `{{today+7d}}` / `{{next_monday}}`，凭据用 `{{env:NAME|default}}`。
 
-## 三条硬约束
+**证据**：每次运行写 `$AMBERFLOW_HOME/online-runs/<run-id>/` 或 `--out` 指定目录，包含 `summary.json`、`report.md`、逐 case JSON，失败时附截图与 DOM。**运行结果不提交**；它是本次观察，不是下一次运行的 golden 文件。
 
-- **不重规划**——任务开始时冻结成一份计划（有序子目标 + 每步完成信号 + 数据袋），执行器只按计划推进。
-- **不发明取值**——要填的值只来自计划的数据袋（`slots`），模型无权产生值。
-- **不信模型说"完成"**——子目标完成与否由该步自己的 DOM/URL 信号判定，模型判断仅作记录。
+**退出码**：`0` 全部应跑用例通过；`1` 有真实失败；`2` 用法/配置/校验错误；`3` 有 `blocked` / `unreachable` / `login_required` / 未执行（跳过不等于通过）。`--require-all` 把 `3` 视为失败。
 
-分工原则：**规则先于模型**——计划 `target_hint` 点名目标即零成本解决，规则拿不准才问本地模型，模型也不过confidence闸门才考虑升级（默认不接外部 LLM）。
+站点不可达、风控挑战、需要登录都按事实分类；不绕过反爬、不代过验证码、不保存账号密码。探针用例只记录环境观测。
 
-## 为什么本地还养一个模型
+## 决策模型配置
 
-**分工先说清楚**：**流程能被规则与声明解决，就不该让模型猜。**
-承重的是声明 + 规则 + 编译器/录制器——已验收语料里 **浏览器步 171/171 全由声明解决**
-（其中 169 = 98.8% 用 `target_hint` 点名，其余 2 步走 `commands` 闭集；`apps:suite` 页脚每天报这两行数），
-真模型跑完整批语料时 **201 步里只被咨询 5 次、独立决定 0 步**
-（`npm run apps:suite -- --real-model` 的 `模型边际` 列；桩臂这一列打"未测"）。
-模型的位置是**兜底 + 诊断**，而兜底有数字：边际为 0 时套件**退出码 4**，绿色不替它背书。
-
-那"保险"到底值不值，四组数字，每组都有当场可跑的复现命令：
-
-| 数字 | 它证明什么 | 怎么复现 |
-|---|---|---|
-| 60 个诱饵元素挡在前面：规则落空 + 目标不在池内 = 必 blocked；模型加宽重看（`laya:reobserve`）把它捞回来 | 池子外的目标谁也选不到——模型负责"不轻言放弃"。**但注意口径**：这是夹具里的能力，已验收语料上 `reobserve` 救回 **0** 步（页脚 `梯级账单` 会把它标成 dead rung） | `npx vitest run tests/reobserve.test.ts` |
-| `transfer-slowjet`：冷加载时模型**被问了 5 次、一次都没过闸门**（真模型臂与桩臂同形：`咨询 5 / 过关 0`）；把它救回来的是 `retries`——去掉 `retries` 实测 0/7 | 这里红的原因是**没有重试**，不是"没有模型"；模型被咨询不等于模型决定 | `npm run apps:suite -- --only transfer-slowjet`（看页脚 `梯级账单` 与 `模型边际`） |
-| 同一份计划二跑：**12 forwards → 0，9.2s → 1.3s**（Windows+GPU 实测；离线口径由套件页脚 `决策缓存` 给同一形状的两个数） | 确定性模型不该被问第二次：本地、免费、可审计 | `npm run cache:measure`（要 ONNX 产物）；离线看套件页脚 |
-| 诚实边界：中文页面上模型 0.03–0.09（argmax 常仍正确）；checkpoint 路由按**文字系统**切、绝不按置信度切（ECE 0.855 的教训写进了故事） | 我们比谁都清楚它不行在哪——这是可信度，不是减分 | `npm run apps -- --app ctrip-case --no-sources` |
-
-装不装得模型，跑之前就知道：`npm run doctor` 点名缺哪件（图 / 外置权重 / tokenizer）并给出一条补齐命令
-`npm run model:fetch -- --from <url 或本地路径>`（SHA256 先验后换，坏件绝不覆盖现有产物）。
-跑完之后，每次运行的结果里都有两行：`model: on|off(missing)` 与"决策来源"一行
-（`rule 19 · laya 1 (conf 0.31) · laya:reobserve 1 · cache 命中 6/12 forwards`）——
-CLI 报告、`apps:suite` 表格与 DSH 插件 `amberflow_run` 的 summary 念的是**同一份账**。
-
-## 把你的流程固化成应用
-
-一个**旅程型**应用 = 一个目录 `apps/<id>/app.mjs`（**声明式数据脚本**：数据腿 + 旅程（浏览器步 / 命令行工具步）+ 结束状态不变量）；纯数据源目录只需 `sources/*.json`（见 apps/README）。先读 **[应用脚本作者指南](docs/APP_SCRIPT_AUTHORING.md)**（两种形态怎么选、ctx API、错误码、trace/replay、扩展配方）。它只是把数据写成了 JS（`export const meta` + `export const app`），不含控制流；要循环/条件就把 `app` 换成 `export async function flow(ctx)`（见 [apps/README.md](apps/README.md) §九）。**加一个应用不需要改共享层一行代码。**
+线上服务使用**地址、密钥、模型**三件套：
 
 ```bash
-npm run apps -- --list                                  # 有哪些应用
-amber apps new my-app                                    # 生成可跑骨架（默认 flow；--kind data 声明式）
-npm run apps -- --app demo-app                          # 离线整跑一条完整链路
-npm run apps -- --app demo-app --dry                    # 只展开计划，不开浏览器
-npm run apps -- --app demo-app --headful                # 有头运行：浏览器窗口显形（见「看着浏览器跑」）
-npm run apps:suite                                      # 全部离线应用跑完，一行一个给结论
+amber config set AMBERFLOW_DECISION_BASE_URL https://<服务地址>/compatible-mode/v1
+amber config set AMBERFLOW_DECISION_MODEL decision-model-preview
+amber config set AMBERFLOW_DECISION_API_KEY sk-…
 ```
 
-### 人工步骤与运行节奏
-
-登录、验证码、人工确认可以写成旅程里的 `manual` 步；运行节奏写在应用配置表的 `pace` 块里。
-
-```jsonc
-// apps/<id>/app.mjs 的 META 或 pack.json 顶层
-"pace": { "between_steps_ms": 800, "between_actions_ms": 300 }
-```
-
-```jsonc
-// journey 里的一步：人完成，引擎等待并验证声明的信号
-{
-  "adapter": "manual",
-  "desc": "登录并完成短信验证",
-  "start_url": "https://example.com/login",
-  "instructions": "在浏览器里完成登录，然后回终端按 Enter",
-  "signal": { "manual": true }
-}
-```
-
-- `signal` 必填：`{ "manual": true }` 是人工自证；写 DOM 信号时，人确认后引擎还会再验一次。
-- 有 `manual` 步时浏览器自动打开可见窗口；默认在终端等待人工确认，非交互环境会失败并说明原因。
-- `npm run apps:suite` 会跳过含人工步的应用；请用 `npm run apps -- --app <id>` 单跑。
-- 人工步骤不保存账号密码，不自动处理验证码/2FA。详见 [文档](docs/MANUAL_STEPS_AND_PACE.md)。
-
-### 看着浏览器跑
-
-| 想要的效果 | 怎么做 |
-|---|---|
-| 本机弹一个真窗口 | `npm run apps -- --app <id> --headful`；`npm run semantic -- --app <模板> --site <key> --headful`；`npm run plan:flow -- … --headful`；`npm run learn -- --headful` |
-| 在**你自己**的浏览器里实时看 | Chrome 带 `--remote-debugging-port=9222` 启动，然后 `npm run learn -- --cdp ws://…`（录制结束只断连，不关你的浏览器）；DSH 里就是 `amberflow_learn` 的 `cdp` 参数 |
-| 无显示器的服务器 | 窗口只出现在**跑引擎的那台机器**上：`xvfb-run -a -s "-screen 0 1440x900x24" npm run apps -- --app <id> --headful`，人眼看再配 x11vnc / noVNC；只要证据图就 `ffmpeg -f x11grab -video_size 1440x900 -i $DISPLAY -frames:v 1 win.png` |
-| 从 DSH 插件发起 | `amberflow_run` / `amberflow_plan` 传 `headful: true`（窗口同样开在服务器显示上，不在浏览器页面里） |
-
-有头需要**完整 chromium**：只有 headless shell 的机器会直接提示安装
-`npx playwright install chromium`。默认 headless；传 `--headful` 时打开可见窗口。
-
-三类入口，同一个引擎，同一道门槛——**规则模式零模型重放通过，才落盘**：
-
-| 你手上有 | 入口 |
-|---|---|
-| 一个浏览器 + 会点鼠标 | `npm run learn`——连上你正开着的浏览器（`--cdp`）或给 `--url`，做一遍，信号与不变量自动归纳，你只回 y/n |
-| 一份 spec / Excel / 代码里的计划 | `npm run apps:gen -- --spec <key>`（`--check` 可进 CI：改 spec 忘重新生成就会红） |
-| 只想手写 | 复制下面的最小 `app.mjs` 起个新目录 |
-
-最小可跑的 `app.mjs`（**flow 形态**；选择器用仓库自带页面，复制即跑；`amber apps new` 生成的就是这一种）：
-
-```js
-// apps/hello/app.mjs —— flow 应用：控制流在脚本里（循环/条件/重试都是普通 JS）
-// 不需要 import：kit 由 meta(kit) 注入，ctx 由 flow(ctx) 注入。
-export const meta = (kit) => ({
-  id: "hello",
-  label: "最小离线应用",
-  goal: "在门户页进入枪机/筒机录入",
-  hosts: [],
-  slots: {},
-  invariants: [
-    { id: "on-camera-a", desc: "结束时停在 camera_a 录入页",
-      signal: kit.judge.url("camera_a.html") },
-  ],
-});
-
-export async function flow(ctx) {
-  await ctx.open("testpages/portal.html");
-  const r = await ctx.step("点击「枪机 / 筒机 录入」", {
-    act: ctx.hint("[data-test=entry-fixed]"),
-    done: ctx.judge.url("camera_a.html"),
-  });
-  if (!r.ok) throw new Error(`失败：${r.stopCode} ${r.reason ?? ""}`);
-  await ctx.done();
-}
-```
-
-> 想写"纯数据"形态（可被 `apps:matrix`/`apps:gen` 同步读取）用 `amber apps new <id> --kind data`
-> 或 `npm run apps:migrate`；固定形状见 [apps/README.md](apps/README.md) 与
-> [应用脚本作者指南](docs/APP_SCRIPT_AUTHORING.md) §4。
+只要 `AMBERFLOW_DECISION_BASE_URL` 在，就走线上服务；没有地址才使用本地模型。本地模式用 `AMBERFLOW_DECISION_MODEL=english|multilingual` 选 checkpoint，权重位置用 `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR`。
 
 ```bash
-npm run apps -- --app hello --out /tmp/hello   # 期望 exit 0 + "结果：**通过**"
-```
-
-两条省时间的规则：**浏览器步必须点名得到目标**（`target_hint`，或规则能在元素池里命中）；**`--slot k=v` 的键必须在包里声明过**（打错名字是用法错误，不是静默忽略）。
-
-## 在代码里用
-
-```ts
-import { BrowserMiddleware, TaskPlan, runPlan } from "./src/index.ts";
-
-const plan = new TaskPlan("把无线鼠标加入购物车并打开购物车页", [
-  { desc: "加入购物车",
-    signal: { css_text_equals: ["[data-test=cart-count]", "1"] },   // 完成只认这个信号
-    start_url: "https://example.com/product.html",                  // 换成你的页面；pack 层支持仓库相对路径
-    target_hint: "[data-test=add-to-cart]" },                       // 点名目标 → 零模型调用
-], ".task_plan.json", { /* slots：取值只来自这里 */ });
-
-const rep = await runPlan(new BrowserMiddleware(), plan);
-console.log(rep.completed, rep.traces.length);
-```
-
-## 命令速查
-
-| 命令 | 一句话 |
-|---|---|
-| `npm start -- --goal "…" --url <页面>` | 打开页面演示一次 → 归纳信号 → 执行（`--dry-run` 只看计划，`--headful` 显形浏览器） |
-| `npm run plan-cli -- --help` | 手工编排：new / add / edit / check / run（支持 `when` 条件跳过、`retries` 整步重试） |
-| `npm run verify` | 一键门禁：typecheck + 全部测试 + 六层跨实现对拍 |
-| `npm run apps:matrix` | 每个应用的声明成本 / 来源（生成还是手写）/ 站点知识泄漏门禁 |
-| `npm run apps -- --app <id> --headful` | 有头运行：看得见浏览器窗口（服务器需 Xvfb/VNC，见「看着浏览器跑」） |
-| `npm run bench -- --cases bench/cases-live.json --mode-tag live` | 8 个真实站点跑分（要真网络；跳过不等于通过） |
-| `npm run apps -- --help` / `npm run bench -- --help` | 两个入口的完整用法（各自专属旗标只在 `--help` 里列全） |
-
-### apps 与 bench
-
-两个入口共用一张旗标表（`src/support/cli-args.ts` 的 `SHARED_RUN_OPTIONS`），同一个名字在两个入口是
-同一个意思；各自的专属旗标只有"挑什么来跑"那一项——apps 挑**应用包**（`--app`），bench 挑**语料**
-（`--cases`）。
-
-模型选择不在命令行：未提供 provider 时，`AMBERFLOW_DECISION_MODEL` 选本地 checkpoint（`english` / `multilingual`）；提供 provider 时，它是该服务的模型名。
-
-| 共用旗标 | 含义 |
-|---|---|
-| `--provider NAME` | 换决策源：`laya-onnx` / `stub` / `none` / 基线 / `jevk5` / `bailian` / `token-plan` |
-| `--ablate stub\|rules-only` | 消融臂：`stub` = 脚本桩，`rules-only` = 规则档 |
-| `--conf-floor N` | 置信度闸门刻度（0<N≤1） |
-| `--force-hints off` | 剥掉计划点名的 hint，逼模型出场（消融旗标，只有这一档） |
-| `--learn-hints` / `--hint-memory FILE` | R2 学习环：默认 sidecar / 显式落点 |
-| `--headful` / `--quiet` / `--out DIR` | 浏览器显形 / 只留机器读的 summary / 产物落点 |
-
-旗标写法不对会得到**一行点名 + usage + exit 2**，不是 `parseArgs` 的堆栈。
-
-`npm run apps -- --app demo-app` 里那个 `--` 是 npm/shell 的参数分隔符，由每个入口统一吃掉——
-Windows 的 shell 会把它原样留给子进程，而留着它的后果是后面所有旗标被当成位置参数（"传了却像没传"）。
-
-## 配置与环境变量
-
-配置分两层：**全局配置** `$AMBERFLOW_HOME/config.json`，用 `amber config set KEY VALUE` 写入；
-**项目配置** `./.amberflow/config.json`，用 `amber config set KEY VALUE --project` 写入。
-**项目配置盖住全局配置**。层叠顺序：
-
-```text
-CLI 旗标 > 环境变量 > 项目配置 > 全局配置 > configs/amberflowrc.json 兼容层 > 内建缺省
-```
-
-文件只补没人设过的键；白名单之外的键（例如 `LAYA_TODAY`）在任何运行前以用法错误 `exit 2` 点名。
-`amber config show` 与 `amber doctor` 会显示每个值的来源；凭据只回显掩码后的长度。
-`--allow-dangerous` 这类安全旗标不提供配置默认值，必须每次在命令里显式出现。
-
-```bash
-amber config set AMBERFLOW_HEADFUL 1 --project
-amber config set AMBERFLOW_CONF_FLOOR 0.3
-amber config set AMBERFLOW_FORCE_HINTS off --project
 amber config show
+amber doctor
 ```
 
-| 键 | 作用 |
-|---|---|
-| `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR` | 本地决策模型产物位置（缺了走规则模式） |
-| `AMBERFLOW_DECISION_MODEL` | **模型名**：未提供 provider 时选本地 checkpoint（`english` / `multilingual`）；提供 provider 时是该服务的模型名。模型名只走配置。 |
-| `AMBERFLOW_DECISION_BASE_URL` / `AMBERFLOW_DECISION_API_KEY` | **统一决策服务配置**：服务地址 + 密钥；`AMBERFLOW_DECISION_PROTOCOL` 选 `systemone`（默认）或 `openai-decisions`。地址/密钥本身不会自动选服务，使用服务还需提供 provider。完整说明见 [docs/DECISION_SERVICE_CONFIG.md](docs/DECISION_SERVICE_CONFIG.md) |
-| `AMBERFLOW_DECISION_PROVIDER` | 选决策提供者：`decision-service` / `laya-onnx` / `scripted-stub` / `none` / 基线 / `jevk5` / `bailian` / `token-plan`。未提供时使用本地模型。 |
-| `TOKEN_PLAN_ENDPOINT` | token-plan MaaS 网关的 SystemOne 端点（完整 URL，要带 `/compatible-mode/v1/systemone`）；**端点只从环境读**（共享层不写死外部主机） |
-| `TOKEN_PLAN_API_KEY` | token-plan 的 token（回退 `DASHSCOPE_API_KEY`）；只从环境读，绝不进代码/产物/提交。见 [docs/DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md) |
-| `PLANNER_TIMEOUT` | `plan:flow --planner llm` 的规划调用超时（秒，默认 120；30s 对推理模型+整页快照太紧） |
-| `JEVK5_ENDPOINT` | JevK5 的 `/v1/systemone` 地址（`--provider jevk5` 时用；起法见 docs/DECISION_PROVIDER_JEVK5.md） |
-| `DASHSCOPE_API_KEY`（别名 `BAILIAN_API_KEY`） | 百炼决策模型的 API token（`--provider bailian` 时用）——**只进环境变量，绝不写进代码/产物/提交** |
-| `BAILIAN_ENDPOINT` 或 `BAILIAN_WORKSPACE_ID`(+`BAILIAN_REGION`) | 百炼 systemone 端点（workspace 作用域）；模型名用 `AMBERFLOW_DECISION_MODEL`；起法见 docs/DECISION_PROVIDER_BAILIAN.md |
-| `OPENAI_BASE_URL` + `OPENAI_API_KEY` | 启用 LLM 规划与审计（不配则用内置替身，流程照常） |
-| `AMBERFLOW_STEP_DELAY_MS` / `AMBERFLOW_ACTION_DELAY_MS` | 全局运行节奏默认（毫秒；应用配置表 `pace` 优先）；人工步骤与 `pace` 详见 [docs/MANUAL_STEPS_AND_PACE.md](docs/MANUAL_STEPS_AND_PACE.md) |
-| `AMBERFLOW_HEADFUL` | `--headful` 的配置默认值（`1/true/on` 开，`0/false/off` 关；CLI 旗标仍优先） |
-| `AMBERFLOW_FORCE_HINTS` | `--force-hints` 的配置默认值（只接受 `off`，消融口径） |
-| `AMBERFLOW_CONF_FLOOR` | `--conf-floor` 的配置默认值（`(0,1]`；本次 CLI 仍优先） |
-| `AMBERFLOW_TIERED_HINT` / `AMBERFLOW_CONFIRM_SAFE` / `AMBERFLOW_NO_SOURCES` / `AMBERFLOW_QUIET` | 同名旗标的配置默认值（布尔；CLI 旗标仍优先） |
-| `AMBERFLOW_REPO` | DSH 桥指向的 checkout（兼容 `LAYAWEBUSE_REPO`） |
+`--provider NAME` 只用于本次实验/消融，不写进配置。配置键与默认值的唯一出处是 `src/support/config-schema.ts`；`configs/amberflowrc.example.json` 由 `npm run config:example` 生成。完整说明见 [docs/DECISION_SERVICE_CONFIG.md](docs/DECISION_SERVICE_CONFIG.md)。
 
-## 延伸阅读
+## 硬约束
 
-[ARCHITECTURE.md](ARCHITECTURE.md)（模块结构与实测规则）· [docs/CLI_REDESIGN.md](docs/CLI_REDESIGN.md)（`amber` 入口的分组、旗标归一与退出码契约）· [DECISION_PROVIDER_TOKENPLAN.md](docs/DECISION_PROVIDER_TOKENPLAN.md)（在线决策模型接入与实测账） · [ONLINE_MODEL_TEST_REVIEW.md](docs/ONLINE_MODEL_TEST_REVIEW.md)（用线上模型审查测试：S0 提名 + LLM 真链路） · [NOMINATION_QUESTION_SET_ANALYSIS.md](docs/NOMINATION_QUESTION_SET_ANALYSIS.md)（提名考卷为什么不可解：标签/语料/合同三层偏倚）· [CLAUDE.md](CLAUDE.md)（工程规约）· [apps/INVENTORY.md](apps/INVENTORY.md)（应用清单与"完成"的定义）· 
+- **完成信号是唯一真相**：模型说“完成了”只是 advisory；DOM/URL 信号成立才算完成。
+- **值只来自计划或观察**：模型不能发明槽位值；缺值返回结构化 `needs_value`，不猜。
+- **不做离线夹具验证**：线上测试只跑真实 `http(s)`；不提交真实站点结果、截图或 golden 语料。
+- **不绕过反爬**：遇到 challenge/登录墙按 `blocked` / `login_required` 记录并跳过；不伪造指纹、不轮换代理、不代过验证码。
+- **凭据只从环境/本机配置按名读**：用例中只允许 `{{env:NAME}}`，运行产物掩码；不写进计划、应用或报告，也不提交。
+- **模型只选定/风险/完成票**：动作来自脚本的 `ctx.step` / `ctx.run`，模型不生成自由文本动作。
+- **人工步骤不自动过**：需要人确认/登录/2FA 的环节必须由人完成，引擎不假装有人在，也不会替人确认。
+- **危险工具步默认拒绝**：必须有 `dryRunArgs`，干跑 → 人类确认 → 执行；`--allow-dangerous` 才放行，失败/拒绝都是结构化结果。
 
-## License
+## 目录
 
-Apache-2.0
+```
+src/
+  engine/       执行器、计划、信号、提取、规则、审计
+  model/        决策提供者、缓存、学习、ONNX 运行时
+  app/          flow 应用：加载器、meta 投影、运行期 ctx、轨迹、适配器、运行器
+  flow/         信号归纳与共享基础
+  cli/          amber 命令入口
+  browser/      chromium 与工具信号
+  data/         通用数据腿（站点知识在配置里）
+integrations/
+  dsh-bridge/   DSH 桥：只拼 CLI、解析 JSON、投影有界摘要
+online/         真实站点测试套件（本仓库唯一的测试声明）
+docs/           当前有效的设计/接入文档
+```
+
+## 文档
+
+- [架构](ARCHITECTURE.md)
+- [Agent 接口（脚本化应用）](docs/AGENT_INTERFACE.md)
+- [应用脚本作者指南](docs/APP_SCRIPT_AUTHORING.md)
+- [人工步骤与运行节奏](docs/MANUAL_STEPS_AND_PACE.md)
+- [统一决策服务配置](docs/DECISION_SERVICE_CONFIG.md)
+- [工程约束与 Agent 指南](CLAUDE.md)
+
+## 开发
+
+```bash
+npm run check                    # 类型检查 + 配置示例一致性 + 线上用例离线校验
+npm run test -- --tier smoke   # 真实站点（需要网络）
+```
+
+仓库不包含单元测试、离线测试夹具或基准语料；合并请求的自动门禁只做类型检查与用例声明校验。真实站点的回归由手动/定时线上任务承担。

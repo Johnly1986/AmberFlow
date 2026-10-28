@@ -3,45 +3,39 @@
  * 每家 provider 各一套环境变量（`TOKEN_PLAN_*` / `BAILIAN_*` / `JEVK5_*` / `DASHSCOPE_*`）。
  *
  * 为什么需要它（2026-10-25 项目方提出）：调研发现决策模型已经收敛成两条协议
- * （TypeSafe **System One**、OpenAI **Decisions API**），而本仓接一家服务就要记一套变量名、
- * 还要额外指定 `AMBERFLOW_DEFAULT_DECISION_PROVIDER`——配置面先于协议面分裂了。
+ * （TypeSafe **System One**、OpenAI **Decisions API**），而本仓接一家服务就要记一套变量名。
  * 统一层把"接一个新服务"变成改三个值（地址/模型/密钥），provider 细节交给协议适配器。
+ *
+ * 选择规则（2026-10-26 项目方纠正）：**有服务地址就是线上服务**，不再需要 provider 键；
+ * 没有地址才用本地模型。地址/密钥/模型三件套本身就是完整的选择依据。
  *
  * 本轮支持：
  *   - `AMBERFLOW_DECISION_BASE_URL`  服务地址（host、`…/v1`、`…/compatible-mode/v1` 或完整
  *                                   `…/v1/systemone` 都行；System One 会自动补 `/v1/systemone`）
  *   - `AMBERFLOW_DECISION_MODEL`     模型名（随请求体 `model` 发；服务不要求时可空）
  *   - `AMBERFLOW_DECISION_API_KEY`   密钥（Bearer；本地自托管无认证可留空）
- *   - 可选：`AMBERFLOW_DECISION_PROTOCOL`（默认 `systemone`；`openai-decisions` 预留未实现）、
+ *   - 可选：`AMBERFLOW_DECISION_PROTOCOL`（缺省按 URL 推断；显式可填 `systemone` /
+ *     `openai-decisions`，两条协议都已实现）、
  *     `AMBERFLOW_DECISION_FLOOR`（闸门刻度）、`AMBERFLOW_DECISION_SCORE_KIND`、
  *     `AMBERFLOW_DECISION_TIMEOUT_MS`、`AMBERFLOW_DECISION_STATE_CONTEXT`（`0` 关闭带上文）、
  *     `AMBERFLOW_DECISION_MIN_OPTIONS`（choice 选项下限，自托管 JevK5 需要 2）
  *
- * 设计纪律（与旧 provider 相同）：
+ * 设计纪律：
  *   1. 端点/密钥**每次现读**（测试可临时注入；启动后改配置也生效）；
- *   2. 缺配置分两种——显式点名 ⇒ 解析期响亮报错；环境默认 ⇒ 干净落 rules-only；
+ *   2. 既然配了服务地址就是要用服务：缺密钥/坏协议在解析期响亮报错，不静默降级；
  *   3. 错误消息点名缺什么、怎么补；不把外部主机/密钥写进代码或默认值。
  */
 import type { DecisionProvider, ProviderCapabilities } from "./decision-provider.ts";
 import { stateText, urlOf } from "../engine/extraction.ts";
 import { systemOneClient, type SystemOneProfile } from "./system-one-client.ts";
 import { normalizeOpenAIDecisionsEndpoint, openaiDecisionsProvider } from "./decision-openai.ts";
+import { DECISION_SERVICE_KEYS } from "../support/config-schema.ts";
 
-/** 统一配置键（同时登记进 `rcfile.ts` 的白名单，`amber config` 才能读写）。 */
-export const DECISION_SERVICE_KEYS = [
-  "AMBERFLOW_DECISION_BASE_URL",
-  "AMBERFLOW_DECISION_MODEL",
-  "AMBERFLOW_DECISION_API_KEY",
-  "AMBERFLOW_DECISION_PROTOCOL",
-  "AMBERFLOW_DECISION_FLOOR",
-  "AMBERFLOW_DECISION_SCORE_KIND",
-  "AMBERFLOW_DECISION_TIMEOUT_MS",
-  "AMBERFLOW_DECISION_STATE_CONTEXT",
-  "AMBERFLOW_DECISION_MIN_OPTIONS",
-] as const;
+export { DECISION_SERVICE_KEYS };
+
+
 
 export type DecisionServiceProtocol = "systemone" | "openai-decisions";
-export const SUPPORTED_PROTOCOLS: readonly DecisionServiceProtocol[] = ["systemone"];
 
 const CAPABILITIES: ProviderCapabilities = {
   choice: true,
@@ -66,11 +60,6 @@ export function serviceModel(env: NodeJS.ProcessEnv = process.env): string {
 
 export function serviceApiKey(env: NodeJS.ProcessEnv = process.env): string {
   return envOf(env.AMBERFLOW_DECISION_API_KEY);
-}
-
-/** 是否配置了统一决策服务（只看服务地址；密钥是否缺失由 `serviceConfigError` 回答）。 */
-export function decisionServiceConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  return serviceBaseUrl(env) !== "";
 }
 
 /** 协议：显式 `AMBERFLOW_DECISION_PROTOCOL` 优先；否则按 URL 形状推断（默认 systemone）。 */
@@ -254,7 +243,7 @@ export function decisionServiceProvider(env: NodeJS.ProcessEnv = process.env): D
 }
 
 let registered = false;
-/** 注册进 provider 注册表（`--provider decision-service`）。幂等。 */
+/** 注册进 provider 注册表（有服务地址时自动选中；`--provider decision-service` 也可显式点名）。幂等。 */
 export async function registerDecisionService(): Promise<void> {
   if (registered) return;
   const { registerDecisionProvider } = await import("./decision-provider.ts");

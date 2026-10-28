@@ -1,0 +1,27 @@
+{
+  "id": "hn-newest",
+  "site": "hn",
+  "tier": "core",
+  "goal": "从 Hacker News 首页打开 newest 页面",
+  "subgoals": [
+    {
+      "desc": "点击 newest 链接",
+      "start_url": "https://news.ycombinator.com/",
+      "target_hint": "a[href=newest]",
+      "signal": { "url_contains": "/newest" },
+      "retries": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "newest-page",
+      "desc": "newest 页面仍有 story 列表",
+      "signal": {
+        "all_of": [
+          { "url_contains": "/newest" },
+          { "css_exists": "tr.athing" }
+        ]
+      }
+    }
+  ]
+}

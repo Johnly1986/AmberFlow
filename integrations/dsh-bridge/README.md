@@ -1,5 +1,5 @@
 ---
-description: "The harness side of calling the AmberFlow frozen-plan browser engine: four tools that list its apps, run one end to end, record a flow from a goal/page/action list, and plan a site-agnostic flow — for deployments that drive browser automation from a session. A journey may mix application types (web/cli/ssh/stdio)."
+description: "The harness side of calling the AmberFlow browser engine: model-facing tools that observe a page, list and read flow apps, generate an app.mjs skeleton, validate a script's call sequence, run one flow app (with an execution budget), record a flow into a flow app, and run the real-site suite — for deployments that drive browser automation from a session."
 kind: "package-bundle"
 ---
 
@@ -9,7 +9,11 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-amberflow-bridge` exposes an external browser engine as four model-facing tools. AmberFlow plans once and then decides every step **locally**, treats DOM signals as the only completion truth, and can record a flow from one demonstration; the bridge adds no browser logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts. An app may mix **application types** — web/cli/ssh/stdio (interactive processes such as games) in one journey — and the listing reports that mix plus any local service the run needs (e.g. ssh needs a reachable local sshd). The plugin's **configuration page** (Settings → Plugins → this bundle's row → Configure) sets exactly three fields for the **online decision model** — Model URL, Token Key, ModelName — so runs can use the unified `decision-service` provider (System One) instead of the local ONNX model — the same three keys `amber config set` writes for the engine CLI. `amberflow_apps` lists the declared apps and says whether each pack was generated from a spec, recorded from a demonstration, hand-written, or a pure data source. `amberflow_run` runs one app end to end and returns completion, the FAILED steps only, refusals, and invariant results — or, under `dry`, the expanded plan it did not execute. `amberflow_learn` records a flow from a goal, a page and a recorded action list, and reports the rules-only replay that decides whether it was reproducible enough to save.
+`dsh-amberflow-bridge` exposes an external browser engine as model-facing tools. AmberFlow has exactly ONE app format: a **flow script** at `$AMBERFLOW_HOME/apps/<id>/app.mjs` (or in the checkout's fixtures) exporting `meta` and `flow(ctx)`. The script owns the control flow — `if`, `for`, `while`, sub-functions — while the engine owns each step's target, gate, action and completion signal, and DOM signals are the only completion truth. The bridge adds no browser or app logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts.
+
+The plugin ships **nine** tools: `amberflow_status` (environment/model facts), `amberflow_apps` (list flow apps through `amber apps list --json`), `amberflow_app_show` (metadata + current `app.mjs` source + version anchors), `amberflow_app_check` (load + dry-run the call sequence, no browser), `amberflow_inspect` (read-only page observation and hint candidates), `amberflow_app_create` (generate a flow skeleton with `amber apps new`), `amberflow_run` (run one app; `max_steps` is an execution budget), `amberflow_learn` (record a flow into a flow app, gated by a rules-only replay of the generated script), and `amberflow_test` (real-site regression suite). The plugin's **configuration page** (Settings → Plugins → this bundle's row → Configure) sets exactly three fields for the **online decision model** — Model URL, Token Key, ModelName — so runs can use the unified `decision-service` provider (System One) instead of the local ONNX model — the same three keys `amber config set` writes for the engine CLI.
+
+The authoring loop for an Agent is `amberflow_status` → `amberflow_apps` → `amberflow_app_show` (read `path` and the current source) → **edit `app.mjs` with the file tools** → `amberflow_app_check` → `amberflow_inspect` (look at the real page before writing a hint) → `amberflow_run` with `max_steps`/`trace` for structured feedback → `amberflow_run` full → `amberflow_test`. There is no step-number editing interface: a script has no static step table, steps are runtime facts, and the script version is the only flow version.
 
 ## Table of Contents
 
@@ -34,19 +38,15 @@ timeoutMs: 900000               # optional; live runs are slow by nature
 allowDangerous: false           # optional; gates dry-run-gated tool steps
 toolPrefix: amberflow          # optional; the model-visible tool-name prefix
 envMode: inherit                # optional; `allowlist` strips session secrets from the child env
-forwardEnv: []                  # optional; `allowlist` 模式下额外转发的环境变量名
+forwardEnv: []                  # optional; extra env var names forwarded in `allowlist` mode
 keepRuns: 30                    # optional; newest $TMPDIR/dsh-amberflow-* dirs kept; 0 disables GC
 ```
 
 ### When to choose it
 
-Choose it when a session should drive a flow that must stay reproducible: the engine refuses to
-invent a target, reports completion only from a DOM signal, and refuses to save a recorded flow
-unless a replay with zero model calls still passes. Choose a pixel-level browser tool instead when
-the task depends on what a page looks like, or when no checkout is available to call.
+Choose it when a session should drive a flow that must stay reproducible: the engine refuses to invent a target, reports completion only from a DOM signal, and refuses to save a recorded flow unless a replay of the generated script with zero model calls still passes. Choose a pixel-level browser tool instead when the task depends on what a page looks like, or when no checkout is available to call.
 
-Install it into a profile as a bundle — `dsh plugin --profile <name> add <path-or-package>` (the
-plugin window runs the same operation). Three channels are supported:
+Install it into a profile as a bundle — `dsh plugin --profile <name> add <path-or-package>` (the plugin window runs the same operation). Three channels are supported:
 
 - **Path / link** (this repository's development shape): `dsh plugin --profile web add /absolute/path/to/AmberFlow/integrations/dsh-bridge`
   installs the nested package; its `cordis.patch.yml` addresses the plugin by package name.
@@ -66,7 +66,7 @@ plugin window runs the same operation). Three channels are supported:
 - **npm or tarball**: pack with `pnpm pack`; the root `package.json` is the bundle, so the git
   behavior above carries over unchanged.
 
-A package that declares `dsh.bundle` joins `dsh.profile.bundles` on install, so the four tools
+A package that declares `dsh.bundle` joins `dsh.profile.bundles` on install, so the tools
 become available without a hand-written profile patch; a live profile applies that at the next
 config reload. `AMBERFLOW_REPO` overrides the checkout the resolved config names; a path that is
 not a checkout fails at load time.
@@ -74,9 +74,10 @@ not a checkout fails at load time.
 ### Call it from another plugin
 
 Other plugins can inject the service instead of calling a tool. The bridge provides `ctx.amberflow`
-with `listApps`, `run`, and `learn` — the same code the tools run, so the deployment gate and the
-failure diagnostics cannot drift between the two doors. The tools stay the model-facing door; the
-service is the plugin-facing one, and it needs no `callId`, no signal, and no tool name.
+with `listApps`, `run`, `learn`, `status`, `appShow`, `appCheck`, `inspect`, `test`, and
+`createApp` — the same code the tools run, so the deployment gate and the failure diagnostics cannot
+drift between the two doors. The tools stay the model-facing door; the service is the plugin-facing
+one, and it needs no `callId`, no signal, and no tool name.
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
@@ -86,7 +87,7 @@ const Consumer = {
   name: 'consumer',
   inject: ['amberflow'],
   apply(ctx: Context) {
-    return ctx.amberflow.run({ app: 'learned-cart', noModel: true })
+    return ctx.amberflow.run({ app: 'learned-cart', maxSteps: 3 })
   },
 }
 ```
@@ -94,44 +95,39 @@ const Consumer = {
 ## Understand the implementation
 
 Each tool is a thin wrapper: it assembles an argv, runs one child process with a hard timeout, and
-summarizes the artifacts the CLI wrote.
+summarizes the JSON the CLI wrote. Business semantics stay in the checkout; the bridge never scans
+the apps directory, never interprets app source, and never writes app code.
 
-- `amberflow_apps` reads `apps/<id>/pack.json` files only: no browser, no model, no subprocess. A
-  directory with no `pack.json` but a `sources/` tree is a **pure data source** and is listed with
-  origin `data-source`, because other packs reference it by name.
+- `amberflow_apps` spawns `amber apps list --json` and projects the envelope's rows: id, label, goal,
+  writable path, source (`user` / `built-in`), `kind=flow`, invariant count, hosts, and an `error` for
+  a script that failed to load. There is no static step count — steps are runtime facts — so a row
+  never pretends to know how many steps will run. Listing starts no browser and calls no model.
+- `amberflow_app_show` spawns `amber apps show <id> --json --code` and returns the path, metadata,
+  `script_sha256` / `plan_sha256` (the "which version did I change" anchors) and the current script
+  source. `path` is the only place to write; the Agent edits it with its own file tools.
+- `amberflow_app_check` spawns `amber apps check <id> --json`: the script is loaded (import + `meta`
+  contract + validation) and its `flow(ctx)` call sequence is dry-run, so problems come with the
+  script line when the CLI can locate it. Exit code 2 means problems; the bridge reports them.
+- `amberflow_app_create` spawns `amber apps new <id> --json` (optional `--goal` / `--host`) and then
+  returns `app_show`. Only the flow skeleton is generated — there is no step/format/kind parameter,
+  and no JSON app format.
 - `amberflow_run` spawns `src/app/app-runner.ts --app <id> --out <dir>` and reads `<id>-result.json`.
   The summary lists failures only; the full per-step table stays in `<id>-report.md`, which the
-  result names so a caller can read it when the detail matters. `dry` expands the plan and returns
-  it: that run writes no artifact and verifies nothing, so it is reported as an expansion rather
-  than as a PASS or a FAIL.
-- `amberflow_learn` spawns `tools/learn.ts --json --yes`, which performs the flow once, induces
-  each step's completion signal and the end-state invariants, and saves the pack only when the
-  rules-only replay passes; the bridge reports that replay verbatim. `script` is required, because
-  the CLI's only other action source is a human demonstration on an interactive terminal: a tool
-  call has neither a terminal nor stdin, and the bridge always passes `--yes`. A call without a
-  script is refused before anything is spawned.
-
-### Multi-type applications (web / cli / ssh / stdio)
-
-The engine's adapter layer lets one journey mix application types: a browser step (`web`), a local
-command (`cli`), a remote command over `ssh`, and an interactive process (`stdio`, e.g. a game whose
-prompts are answered line by line) can sit in the same `journey`, and the engine dispatches each step
-by its adapter. Values produced by a step can also travel: a step may declare `returns`, and later
-steps consume the named value (`{dataset:NAME}` in process arguments, or a `{from:"dataset"}` command
-binding on the browser side).
-
-The bridge surfaces what the session needs before spending a run:
-
-- each listing row carries `types` — the journey's adapter mix, e.g. `web×2 · cli×3 · ssh×1 · stdio×1`
-  (sorted; empty for pure data sources) — and `requires` — local services the run needs, e.g. `ssh`
-  needs a reachable local sshd;
-- the run summary repeats those two fields (only when the app mixes types / declares a requirement), so
-  a blocked or refused run caused by a missing local service is interpretable instead of mysterious.
+  result names so a caller can read it when the detail matters. `dry` dry-runs the script's call
+  sequence (`--dry`, no browser) and returns it: that run writes no artifact and verifies nothing, so
+  it is reported as an expansion rather than as a PASS or a FAIL. `max_steps` is an **execution
+  budget** (`--max-steps`), not a step index; the trace flag defaults on for the bridge.
+- `amberflow_learn` spawns `tools/learn.ts --json --yes`, which performs the flow once, induces each
+  step's completion signal and the end-state invariants, and writes a **flow app** (`app.mjs`) only
+  when a rules-only replay of the generated script passes; the bridge reports that replay verbatim.
+  `script` is required, because the CLI's only other action source is a human demonstration on an
+  interactive terminal: a tool call has neither a terminal nor stdin, and the bridge always passes
+  `--yes`. A call without a script is refused before anything is spawned. `apps_dir` overrides where
+  the app lands (`--apps-dir`; the default is the user-scope `$AMBERFLOW_HOME/apps`).
 
 The bridge itself calls **no LLM**: the decision fallback is the checkout's local ONNX model, and
-`learn`'s save gate is a rules-only replay with zero model calls. LLM doors (the LLM planner, or the
-semantic-flow escalation teacher) are CLI-level opt-ins that need `OPENAI_*` on the machine running
-the checkout — they are not a plugin requirement.
+`learn`'s save gate is a rules-only replay with zero model calls. LLM doors are CLI-level opt-ins
+that need `OPENAI_*` on the machine running the checkout — they are not a plugin requirement.
 
 ### Watching the browser (headed runs)
 
@@ -139,8 +135,8 @@ Every browser door can be made visible with `--headful`:
 
 | Surface | How |
 |---|---|
-| Engine CLI | `npm run apps -- --app <id> --headful`; `npm run semantic -- --app <tpl> --site <key> --headful`; `npm run plan:flow -- ... --headful`; `node tools/learn.ts --headful` |
-| DSH tools | `…_run` with `headful: true` (pack and semantic-template apps), `…_plan` with `headful: true`, `…_learn` with `headful: true` (or `cdp` to drive a browser you already have open) |
+| Engine CLI | `amber run <app> --headful`; `amber inspect --url <URL> --headed`; `node tools/learn.ts --headful` |
+| DSH tools | `…_run` with `headful: true`, `…_inspect` with `headful: true`, `…_learn` with `headful: true` (or `cdp` to drive a browser you already have open) |
 
 Two things to know:
 
@@ -148,7 +144,7 @@ Two things to know:
   DSH browser page. Over a headless server, give it a display and look at that display:
   ```bash
   xvfb-run -a -s "-screen 0 1440x900x24" dsh --profile web --no-open --port 3080   # whole host under Xvfb
-  # 或只包一次运行：xvfb-run -a npm run apps -- --app demo-app --headful
+  # 或只包一次运行：xvfb-run -a amber test --tier smoke --headful
   # 要人眼看：再配 x11vnc / noVNC，或用 ffmpeg -f x11grab -i $DISPLAY 抓帧
   ```
 - Headed needs the **full chromium**. Measured here: `--headful` launches `chromium-*/chrome` with no
@@ -179,10 +175,8 @@ How it behaves:
   afterwards see the new endpoint. Saves persist in the active profile's `cordis.patch.yml`.
 - **Unset = local plane.** Empty fields add no environment entries, so a deployment that configures
   nothing keeps the local ONNX decision model (or rules-only) — the bridge still needs no model key.
-- **Scope:** this is the **SystemOne execution** decision model. LLM doors (LLM planner, auditor,
-  semantic escalation) are a separate path and still read `OPENAI_*` from the environment. The `plan`
-  tool's planning phase and semantic-template runs keep their own decision planes, so this page does
-  not override them yet.
+- **Scope:** this is the **SystemOne execution** decision model. LLM doors are a separate path and
+  still read `OPENAI_*` from the environment.
 - **Editing is loopback-only by Harness policy.** A page opened from a non-loopback address makes
   `ctx.remote.$host.isLoopback` false, and Harness switches settings to memory mode there: the Host
   configuration is neither read nor written over a remote page. The row page therefore renders a
@@ -213,31 +207,28 @@ is rejected instead of being silently downgraded.
 
 ## Further Exploration
 
-- This repository's `apps/README.md` — how an app pack is declared, the exit-code contract the tools
-  surface, and the two biting rules.
+- `docs/AGENT_INTERFACE.md` — the authoritative contract for this interface (apps, CLI JSON, bridge
+  tools), and `docs/APP_SCRIPT_AUTHORING.md` — how a flow app's `meta` / `flow(ctx)` are written.
 - Inside the DSH installation this plugin runs in: `packages/core/tools` is the registry whose
-  schemas and dispatch the tests exercise, and `packages/browser-use/browser-use` is the in-tree
-  browser automation service this bridge complements.
+  schemas and dispatch the bridge's tool definitions target.
 
 ## Model Experience
 
-The model sees four tools with narrow schemas. `amberflow_run` answers with PASS or FAIL, the
-completion count, invariant counts, the failed steps with their obstacle text, and the report path;
-steps that completed are a count, not rows, so a sixty-step journey costs a line rather than a page.
-Every answer also carries a **tier line** — `model: on` / `off(missing)` / `off(rules-only)` — and, when
-the artifact has it, the per-step **decision tally** (`rule 19 · laya 1 (conf 0.31) · laya:reobserve 1 ·
-cache 命中 6/12 forwards`): a user learns which ladder actually ran, and the model's appearances stop
-being invisible step-log trivia (docs/LAYA_VALUE_PLAN.md P0/P1). A tool step that failed without being
-refused is named too, and a run that stopped with no failed step
-to name reports its exit code or timeout, so a FAIL says why it failed.
-The apps listing is where a session learns an app's **type mix** (`types`, e.g. `web×2 · cli×3 ·
-ssh×1 · stdio×1`) and any **local service** the run needs (`requires`, e.g. ssh ⇒ local sshd), and
-the run summary repeats both when they apply — a blocked/refused run caused by a missing local
-service is interpretable, not mysterious.
-`dry` answers with the expanded plan instead, so a journey can be inspected without being run.
-`amberflow_learn` answers with the replay it was gated on, including the model-call count, so a flow
-that could not be reproduced is never reported as learned; without a script it refuses immediately,
-before a browser is launched.
+The model sees a set of tools with narrow schemas: list/read (`apps` / `app_show`), validate
+(`app_check`), observe (`inspect`), author (`app_create` + its own file edits to `app.mjs`), run
+(`run` with an optional execution budget), record (`learn`), and regress (`test`).
+`amberflow_run` answers with PASS or FAIL, the completion count, invariant counts, the failed steps
+with their obstacle text, and the report path; steps that completed are a count, not rows, so a
+sixty-step flow costs a line rather than a page. Every answer also carries a **tier line** —
+`model: on` / `off(missing)` / `off(rules-only)` — and, when the artifact has it, the per-step
+**decision tally** (`rule 19 · laya 1 (conf 0.31) · laya:reobserve 1 · cache 命中 6/12 forwards`):
+a user learns which ladder actually ran, and the model's appearances stop being invisible step-log
+trivia. A tool step that failed without being refused is named too, and a run that stopped with no
+failed step to name reports its exit code or timeout, so a FAIL says why it failed.
+`dry` answers with the script's dry-run call sequence instead, so a flow can be inspected without
+being run. `amberflow_learn` answers with the replay it was gated on, including the model-call count,
+so a flow that could not be reproduced is never reported as learned; without a script it refuses
+immediately, before a browser is launched.
 
 ## Known Limitations and Deferred Work
 
@@ -248,28 +239,18 @@ before a browser is launched.
   directory has to outlive the call. Artifacts are per call, never shared. `keepRuns` caps how many
   of the newest `dsh-amberflow-*` directories survive; a directory is only removed an hour after
   its last write, so a slow live run is never pruned under it.
-- App listings mark `kind=probe` packs (measurement sets the engine refuses to run through the app
-  runner) and `data-source` packs, and `…_run` turns the engine's probe refusal into that guidance —
-  but the probe drivers themselves are still not exposed as a tool.
 - The child environment is inherited wholesale by default (trusting the checkout is the stated
   premise). Set `envMode: allowlist` to forward only the run essentials plus `AMBERFLOW_*` and
   `forwardEnv`.
 - Upgrading the package while the Host is already running: the Host keeps the module generation it
   loaded at startup, so a newly added configuration page (and its Config schema) appears only after
   the Host process restarts. A fresh install has no such issue.
-- Apps that need a local service (e.g. `ssh` without a reachable sshd) fail **structurally** at
-  run time (`requires` in the listing is the heads-up); the bridge does not provision services.
+- The bridge does not edit app source: there is no step/index editing tool, because a flow script has
+  no static step table. The Agent reads and writes `app.mjs` itself.
 - `amberflow_learn` cannot demonstrate for you: recording a NEW flow needs a recorded action list,
   because the CLI's live recorder needs an interactive terminal. A script-less call is refused up
   front rather than being allowed to fail inside the engine.
 
 ### Dev Note
 
-The package is tested at two levels. `tests/bridge.spec.ts` mounts the plugin on a stub checkout whose
-CLIs mirror the real ones on the points the bridge depends on — `--dry` prints a plan and writes no
-artifact, `learn` refuses without `--script`, stdout carries log lines (one with a brace) before the
-JSON — and drives the four tools through `ctx.tools.execute`, covering argument assembly, provenance
-parsing, failure-only summarization, load-time validation, the refusal paths and the dry expansion.
-`tests/live.spec.ts` drives the real checkout through the same registry path: a recorded two-step app
-with an `ablate` arm (`stub` | `rules-only`; omit it and the real model runs), a `dry` expansion, a run forced to fail so the FAIL verdict is checked against a real
-artifact, the script-less refusal, and a real recording whose zero-forward replay gates the save.
+本包不再携带测试文件；在真实 DSH 进程里手工加载验证，或设 `DSH_ROOT` 后运行 `npm run setup && npm run build`。

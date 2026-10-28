@@ -10,7 +10,7 @@
  * 三条设计规矩（都是本轮实测换来的，不是审美）：
  *
  * 1. **provider 自报家底**（`capabilities`）。闸门与报告只能读它声明会给的信号。
- *    横评（docs/DECISION_INTERFACE_SURVIEWS.md…见 DECISION_INTERFACE_SURVEY.md）的结论是：
+ *    横评的结论是：
  *    "枚举候选 + 选一个"是市场通用形状，但**每个候选上的概率不是**——browser-use 那类
  *    纯生成式 agent 的输出里根本没有概率字段。所以概率必须是**可选**的。
  * 2. **`score_kind` 说明那个数该怎么读**，跨 kind 不许比。`rank_only` 的 provider 给不出
@@ -19,7 +19,7 @@
  * 3. **`undefined` 与 `null` 是两种结果**：`undefined` = 答了但没有可用元素（该说人话：
  *    hint 没命中 / 这一步没点名），`null` = 根本没答（action space exhausted）。
  *    这条区别是承重的——本轮把它抹平成 `null` 时，两条 UX 测试当场打红
- *    （见 `tests/executor.test.ts` 里那条"§2 答了但没给出可用元素"）。
+ *    （见 历史回归 里那条"§2 答了但没给出可用元素"）。
  *
  * 与旧缝的关系：`LayaRuntime` **保留**，它是 laya 的实现细节；`layaProvider()` 把它包成
  * provider。`installLayaRuntime()` 仍是 51 个文件在用的那扇门，两扇门最终汇到同一处
@@ -127,7 +127,7 @@ export interface ClosedSetChoice {
 export interface DecisionProvider extends ProviderInfo {
   pick(req: ChoiceRequest): Promise<ChoiceOutcome>;
   /**
-   * 能力：对**调用方给定的闭集**做一次 choice（S2 ③ 提名；docs/NL_FLOW_DESIGN.md §4）。
+   * 能力：对**调用方给定的闭集**做一次 choice（S2 ③ 提名）。
    * 不实现 = 该 provider 不能做提名窄问；梯级按"③ 弃权"往下走（fail closed，不猜）。
    * 实现方必须自己保证返回的 ref 在 `criteria` 内（池外答案 → null）。
    */
@@ -166,10 +166,6 @@ export function listDecisionProviders(): string[] {
   return [...registry.keys()].sort();
 }
 
-export function hasDecisionProvider(name: string): boolean {
-  return registry.has(name);
-}
-
 /** 装上当前 provider（`null` = 不装，执行器进 rules-only）。 */
 export function installDecisionProvider(p: DecisionProvider | null): void {
   active = p;
@@ -198,35 +194,15 @@ export function activeProviderInfo(): ProviderInfo | null {
   return { name, version, capabilities: { ...capabilities }, ...(floor !== undefined ? { floor } : {}) };
 }
 
-/** 一行给人看的身份串：`laya-onnx 0.3.5（entropy_conf，支持短名单）`。 */
-export function describeActiveProvider(): string {
-  const i = activeProviderInfo();
-  if (!i) return "无（规则模式）";
-  const cap = [
-    i.capabilities.shortlist ? "短名单" : null,
-    i.capabilities.risk ? "风险头" : null,
-    i.capabilities.done ? "完成投票" : null,
-  ].filter(Boolean).join("/");
-  return `${i.name} ${i.version}（score=${i.capabilities.score_kind}${cap ? `，${cap}` : ""}）`;
-}
+/* ── 选择：三件套 / 显式名字 → 哪扇门（CLI 与配置都走这一个函数） ─────────── */
 
-/**
- * 从环境变量/参数解析要用的 provider。
- * `AMBERFLOW_DECISION_PROVIDER=<name>`；未注册的名字**响亮报错**（拼错 provider 名
- * 却静默退回默认，是换模型测试里最难查的一类错——和"CI 的绿来自脚本桩"同一族）。
+/*
+ * 选择规则（2026-10-26 项目方纠正）：
+ *   - 线上：有 `AMBERFLOW_DECISION_BASE_URL` 就是线上服务，地址/密钥/模型三件套足够，
+ *     **不再需要 provider 键**；协议按 URL 推断，必要时用 `AMBERFLOW_DECISION_PROTOCOL` 覆盖。
+ *   - 本地：没有服务地址时用本地模型，`AMBERFLOW_DECISION_MODEL` 选 checkpoint。
+ *   - `--provider NAME` 只保留为实验/消融/兼容旧适配器的**命令行**入口，不写进配置。
  */
-export async function installProviderFromEnv(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
-  const want = env.AMBERFLOW_DECISION_PROVIDER;
-  if (!want) return null;
-  const factory = registry.get(want);
-  if (!factory) {
-    throw new Error(`未知的决策提供者 ${JSON.stringify(want)}（已注册：${listDecisionProviders().join(", ") || "无"}）`);
-  }
-  active = await factory();
-  return active.name;
-}
-
-/* ── 选择：一个名字 → 哪扇门（CLI / env 都走这一个函数，不分两头各猜一遍） ──── */
 
 /** 内建名字：走旧的 `LayaRuntime` 门（checkpoint 路由、换入换出都在执行器那边）。 */
 export const BUILTIN_LAYA_PROVIDERS = ["laya-onnx", "scripted-stub", "none"] as const;
@@ -260,7 +236,7 @@ export function countedProvider(p: DecisionProvider): { provider: DecisionProvid
   };
 }
 
-/** 安装的结果：梯级账单与缓存命中率要的数（app-runner/suite/start/bench 共用同一口径）。
+/** 安装的结果：梯级账单与缓存命中率要的数（app-runner/start/online 共用同一口径）。
  *  可空性是承重的：报告里 `cache 命中 …` 这一行**只在 stats 在场时打印**（app-runner 的
  *  summarizeDecisions 判 `cache !== null`），非 laya 档返回零值闭包会多出整行字——逐字节等价纪律。 */
 export interface AppliedSpec {
@@ -273,7 +249,7 @@ export interface AppliedSpec {
 /**
  * 按 `ProviderSpec` 安装决策源的**唯一**序列。
  * 前身是两处手抄（app-runner main 的缓存/计数安装与 tools/apps_suite.ts 的同一段），
- * start 与 bench 接智能缺省是第三、四个安装者——按本仓库"两份实现各扫各的"的复发教训，
+ * start 与 online 接智能缺省是后续安装者——按本仓库"两份实现各扫各的"的复发教训，
  * 先收敛成一个函数再让四个门都用它。每次先清空两扇全局（provider 与 runtime），
  * 任何残留都不许悄悄改变这一跑的决策来源。
  */
@@ -296,11 +272,12 @@ export async function applySpecToRuntime(spec: ProviderSpec): Promise<AppliedSpe
 }
 
 /**
- * 按名字**解析**该装什么（不安装）。三扇门，一个入口：
- *   `laya-onnx`      真 ONNX 端口（默认）；产物不齐时 tier 如实写 `off(missing)`
+ * 按**三件套或显式名字**解析该装什么（不安装）。四个门，一个入口：
+ *   有 `AMBERFLOW_DECISION_BASE_URL` → 统一决策服务（不需要 provider 键）
+ *   `laya-onnx`      没有服务地址时的本地端口；产物不齐时 tier 如实写 `off(missing)`
  *   `scripted-stub`  脚本桩（**消融臂**：它的"过关 0"是构造出来的）
  *   `none`           不装决策层（**消融臂**：执行器进 rules-only）
- *   其它             注册表里的 provider（基线 `coin-flip` 等，或嵌入方自己注册的）
+ *   其它             `--provider NAME` 显式点名的实验/兼容 provider
  *
  * 未注册的名字**报错并列出可选项**——拼错 provider 名却静默退回默认，会让一整轮 A/B 白跑。
  */
@@ -319,24 +296,27 @@ export async function resolveProviderSpec(
   // token-plan MaaS 网关（同一 SystemOne 协议，共享端点、Token 只从环境读）。
   const { registerTokenPlan } = await import("./decision-tokenplan.ts");
   await registerTokenPlan();
-  // 环境默认档：显式 provider > 显式默认档 > 本地 laya。
-  // 统一决策服务不再因为"配了地址"就自动接管；要用它必须显式给 provider
-  // （`--provider decision-service` 或 `AMBERFLOW_DECISION_PROVIDER=decision-service`）。
-  const explicitProvider = name ?? env.AMBERFLOW_DECISION_PROVIDER ?? null;
-  const wanted = explicitProvider
-    ?? env.AMBERFLOW_DEFAULT_DECISION_PROVIDER
-    ?? "laya-onnx";
-  // 统一决策服务只在真的选到它时注册（不让一个没在跑的服务污染 doctor 的可用列表）。
+
+  // 线上/本地是**三件套的有无**，不是另一个开关：有服务地址就走统一服务，
+  // 没有就用本地 checkpoint。`--provider NAME` 只作为本次实验的显式覆盖。
+  const explicitName = name ?? null;
+  const serviceConfigured = (env.AMBERFLOW_DECISION_BASE_URL ?? "").trim() !== "";
+  const wanted = explicitName ?? (serviceConfigured ? "decision-service" : "laya-onnx");
+
   if (wanted === "decision-service") {
-    const { registerDecisionService } = await import("./decision-service.ts");
+    const { registerDecisionService, decisionServiceProvider } = await import("./decision-service.ts");
     await registerDecisionService();
+    // 用调用方传进来的 env 构造（测试与嵌套入口可以传不同的配置面），
+    // 而不是让 factory 去读 process.env 的另一份快照。
+    const provider = decisionServiceProvider(env);
+    const ce = provider.configError?.();
+    if (ce) throw new Error(`决策服务未配置：${ce}`);
+    return { kind: "provider", name: provider.name, tier: "on", ablation: false, provider };
   }
+
   const extra = listDecisionProviders().filter(
     (n) => !(BASELINE_PROVIDERS as readonly string[]).includes(n)
       && !(BUILTIN_LAYA_PROVIDERS as readonly string[]).includes(n));
-  // "显式" = 调用方传了名字或设了 AMBERFLOW_DECISION_PROVIDER；
-  // 显式却没配好 ⇒ 响亮报错（不能把"我配了服务"悄悄降级成"没人要模型"）。
-  const explicit = explicitProvider != null;
   if (wanted === "none") {
     return { kind: "none", name: "none", tier: "off(ablation:rules-only)", ablation: true };
   }
@@ -363,14 +343,10 @@ export async function resolveProviderSpec(
       [...BUILTIN_LAYA_PROVIDERS, ...BASELINE_PROVIDERS, ...extra].join(", ")}`);
   }
   const p = await factory();
-  // 在线服务没配好（缺 key/端点）时，**解析时就分两种处理**，而不是装一个每步都抛的 provider：
-  //   ① 显式点名（--provider bailian / env）却没配 ⇒ 响亮报错指路（用户要的就是它）；
-  //   ② 环境默认档没配 ⇒ 干净落到 rules-only（没人要求在线模型，声明照样能跑——开箱不受影响）。
+  // 实验/兼容 provider 只有在 `--provider NAME` 点名时才会走到这里；没配好就解析期报错，
+  // 不装一个每步都抛的 provider，也不悄悄降级成"没人要模型"。
   const ce = p.configError?.();
-  if (ce) {
-    if (explicit) throw new Error(`决策提供者 ${JSON.stringify(wanted)} 未配置：${ce}`);
-    return { kind: "none", name: `rules-only(${wanted} 未配置)`, tier: "off(no decision service configured)", ablation: true };
-  }
+  if (ce) throw new Error(`决策提供者 ${JSON.stringify(wanted)} 未配置：${ce}`);
   return { kind: "provider", name: p.name, tier: "on", ablation: false, provider: p };
 }
 
@@ -399,7 +375,7 @@ export async function applyDecisionSelection(
  * `pick()` **逐字照抄**今天 `BrowserMiddleware.pickInner` 的调用序列（criteria_view →
  * `agentFor(state)` → `predictShortlist(k=8)` → 两支各自的 conf 口径），
  * 这样 Stage 2 把执行器接过来时，行为不是"应该一样"而是**被测试钉住一样**
- * （`tests/decision-provider.test.ts` 拿同一份夹具比 `provider.pick()` 与
+ * （历史回归 拿同一份夹具比 `provider.pick()` 与
  * `mw.pickProposal()` 的每个字段）。
  */
 export function layaProvider(opts: {

@@ -1,0 +1,16 @@
+{
+  "id": "quotes-home",
+  "site": "quotes",
+  "tier": "smoke",
+  "goal": "打开 Quotes to Scrape 首页并确认 quote 列表存在",
+  "start_url": "https://quotes.toscrape.com/",
+  "tags": ["navigation", "public"],
+  "invariants": [
+    {
+      "id": "quotes-visible",
+      "desc": "首页至少渲染出一条 quote",
+      "signal": { "css_exists": ".quote" }
+    }
+  ],
+  "oracle": { "kind": "css_count", "selector": ".quote", "min": 1 }
+}

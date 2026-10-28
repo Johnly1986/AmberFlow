@@ -1,7 +1,8 @@
 # 开发与部署
 
-这个包是 **DSH 的适配器**：把本仓库（AmberFlow）的冻结计划引擎接成三个模型可见的工具
-（`amberflow_apps` / `_run` / `_learn`）。它住在 `integrations/dsh-bridge/`，与引擎同仓库、同版本线。
+这个包是 **DSH 的适配器**：把本仓库（AmberFlow）的脚本化应用引擎接成九个模型可见的工具
+（`amberflow_status` / `_apps` / `_app_show` / `_app_check` / `_inspect` / `_app_create` / `_run` /
+`_learn` / `_test`）。它住在 `integrations/dsh-bridge/`，与引擎同仓库、同版本线。
 
 依赖方向是**单向**的：本包 → 本仓库（用 `repoPath` 起它的 CLI 子进程并读产物）；引擎对 DSH 与本包
 **零引用**。除此之外它还需要 DSH 的宿主包（`@deepseek-ai/cordis` / `-dsh-tools` / `-schemastery`），
@@ -11,49 +12,43 @@
 
 | 路径 | 作用 |
 |---|---|
-| `src/` | 四个工具与其背后的服务缝（`ctx.amberflow`，供别的插件调用） |
+| `src/` | 工具与其背后的服务缝（`ctx.amberflow`，供别的插件调用） |
 | `client.js` | 浏览器半：在 `plugins.row.config` 注册配置页（只有决策模型 URL / Token Key / ModelName 三个字段） |
 | `client-root.js` | **生成文件**：仓库根安装门的 client bundle（`node scripts/client-root-sync.mjs` 重新生成） |
-| `scripts/client-root-sync.mjs` | `client.js` → `client-root.js` 的唯一生成器（改 id/行 key；测试钉住一致性） |
+| `scripts/client-root-sync.mjs` | `client.js` → `client-root.js` 的唯一生成器（改 id/行 key 后重新生成） |
 | `locale/` `icon.svg` | 插件卡片的显示文案与图标（`locale/en.json` / `locale/zh.json` 提供 meta 标题/描述） |
-| `tests/` | 两层：`bridge`/`service`/`client`（离线、桩 checkout、客户端注册契约）与 `live`（真浏览器 + 真 checkout） |
-| `cordis.patch.yml` | bundle 层：装进 profile 即注册四个工具；`repoPath` 指向本仓库根 |
+| `cordis.patch.yml` | bundle 层：装进 profile 即注册这些工具；`repoPath` 指向本仓库根 |
 | `scripts/setup-links.mjs` | 链入依赖：工具链取自本仓库，宿主包取自 DSH 安装 |
 | `lib/` | 构建产物（git 忽略），入口 `lib/types/index.js` |
 
-**应用列表与 L3 格式**：`listApps` 先用文件系统扫描 `pack.json` / `flow.json` / `sources`
-（数据源、语义模板、旧包），再调用 checkout 自己的 `src/cli/main.ts apps list --json`
-把 **`app.mjs`**（声明式数据脚本与手写 flow 脚本）合并进来——L3 之后前者才是应用的标准形态，
-桥不自己解析任意代码，`types/toolSteps/invariants/hosts/origin` 全部来自引擎的同一份摘要。
+**应用只有一种格式**：`apps/<id>/app.mjs` 里的 `meta` + `flow(ctx)`（`docs/AGENT_INTERFACE.md`）。
+桥不扫描 apps 目录、不解释应用源码：`listApps` 调 checkout 自己的 `src/cli/main.ts apps list --json`，
+把信封里的行投影成 id/label/goal/path/source/kind/invariants/hosts/error。`app_show` 调
+`apps show --json --code`，`app_create` 调 `apps new --json`；桥只做参数适配、JSON 解析与有界摘要。
+脚本没有静态步骤表，所以列表行没有步骤数（`steps` 恒为 0，步骤是运行期事实）。
 
 ## 构建与测试
 
 ```bash
 npm run setup          # 链依赖；DSH_ROOT=/path/to/deepseek-harness 指定宿主安装
 npm run build          # tsc -b → lib/types/*.js + *.d.ts（不需要打包器：tsc 会把 ./x.ts 改写成 ./x.js）
-npm run test:offline   # 73 条，离线，CI 可跑
-npm run test:live      # 真机；需要 chromium + 本仓库，录制那条还需要 ONNX 产物
-npm test               # build + 全部
 ```
 
-本仓库的门禁（`bash bench/smoke.sh`）里有一步 **2d** 会跑它的离线测试——**只有**设了 `DSH_ROOT`
-且那确实是一份 DSH 安装时才跑，否则打印 SKIP 原因跳过。跳过不等于通过。
+本仓库的 PR 门禁只做 `typecheck` 与线上用例声明校验，不跑桥接测试。
+要验证桥接，设 `DSH_ROOT` 后在真实 DSH 进程里手工加载。
 
 `npm run setup` 建立的链接**只服务于编译期**。运行时不需要它们：DSH 进程自己提供宿主包，并按它
 checkout 的 tsconfig paths 解析到这些包的**源码**——插件因此与宿主共用同一个模块实例。
-本仓库自己的 `vitest.config.ts` 把 `integrations/**` 排除在外，所以本包的 `*.spec.ts` 不会混进
-引擎的 873 条测试。
+仓库不再有统一的 vitest 配置；桥接包是独立包，测试文件已删除。
 
-> 双语文档：`README.md` / `README.zh.md` 两边同步维护。原来那份 `README.i18n.yaml`（DSH 仓库的
-> "中英段落哈希配对记录"）已删除——校验它的门禁脚本住在 DSH 仓库里、只认自己仓库内的路径，
-> 搬过来之后既校验不了也重录不了，留着只会变成一份会骗人的记录。
+> 双语文档：`README.md` / `README.zh.md` 两边同步维护。
 
 ## 装进 / 移出 DSH profile
 
 两条通道，按"插件与引擎谁跟着谁走"选：
 
 ```bash
-# ① 仓库根 bundle（dsh-bundle.yml 的 row 名是 amberflow/dsh-plugin，进程用整仓库）
+# ① 仓库根 bundle（dsh-bundle.yml 的 row 名是 amberflow，进程用整仓库）
 dsh plugin --profile <name> add /path/to/AmberFlow
 
 # ② 只装嵌套包（进程用这一份包，宿主包仍由 DSH 提供）
@@ -67,7 +62,7 @@ dsh plugin --profile <name> remove @deepseek-ai/dsh-amberflow-bridge
 
 ```yaml
 - id: amberflow-bridge           # 与 dsh-bundle.yml 的 row id 一致
-  name: "amberflow/dsh-plugin"
+  name: amberflow
   config:
     repoPath: /path/to/AmberFlow
 ```
@@ -83,8 +78,8 @@ dsh plugin --profile <name> remove @deepseek-ai/dsh-amberflow-bridge
 判据（哪个模块真的在跑，一秒就能测）：
 
 - 工具 schema：新桥有 `tiered_hint` 参数（P1 加的）；`amberflow_run` 的参数表里没有它 = 跑的是旧模块；
-- 用户作用域：`amberflow_apps` 列不列出 `$AMBERFLOW_HOME/apps` 里的包（本地桥的
-  `appsDirsWith` 会列，旧版的 `listApps` 只看 checkout 的 `apps/`）。
+- 用户作用域：`amberflow_apps` 是否列出 `$AMBERFLOW_HOME/apps` 里的应用（新桥通过 `amber apps list --json`
+  发现用户作用域；旧桥的文件系统扫描只看 checkout 的 `apps/`）。
 
 结论：**换安装形态之后重启一次 DSH 进程**（重启的是宿主进程，不是另起一个 server）。之后每次
 改本仓库的 `src/`，引擎侧照旧立刻生效（CLI 是子进程现读文件），改桥自己的 `src/` 则需要 HMR

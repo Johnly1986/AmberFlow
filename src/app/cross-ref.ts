@@ -12,7 +12,7 @@
  * 调用方只需记住一个名字，不再需要知道"应用路径少校验了哪一半"。
  */
 import { validatePack, type AppPack } from "./app-pack.ts";
-import { loadSource, validateSource } from "../data/datasource.ts";
+import { defaultDatesSlotNames, loadSource, validateSource } from "../data/datasource.ts";
 
 const isDict = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -61,6 +61,19 @@ export function validateApp(pack: AppPack, opts: ValidateAppOptions = {}): strin
       continue;                                   // 缺失：validatePack 已用既有文案报过
     }
     for (const p of validateSource(src)) problems.push(`source ${JSON.stringify(name)}: ${p}`);
+    // 环封口：数据腿的日期参数只能来自包默认/CLI 槽位。引用 source_slots 产物是
+    // 循环依赖（那些值要等数据腿跑完才存在）——加载期响亮拒绝，不等到起腿。
+    // 可达面说明：flow 脚本的 meta 刻意**没有** sourceSlots 字段（flow 应用没有
+    // "数据腿回写槽位"语义——脚本直接消费 ctx.source 的观察值），所以 flow 应用
+    // 结构上造不出这个环；本守卫守的是 pack-IR 面（tools/learn.ts 等直构 AppPack
+    // 走 runApp/validateApp 的调用方），ctx live/dry 的同款检查同理依赖 deps.pack。
+    const producerSlots = new Set(Object.keys(pack.source_slots ?? {}));
+    for (const ph of defaultDatesSlotNames(src)) {
+      if (producerSlots.has(ph)) {
+        problems.push(`source ${JSON.stringify(name)}: default_dates 引用 {${ph}}，但 ${ph} 由数据腿回写`
+          + `（source_slots）——数据腿参数不允许引用数据腿产物（循环依赖）`);
+      }
+    }
   }
   return problems;
 }

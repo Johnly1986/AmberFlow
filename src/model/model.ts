@@ -96,11 +96,6 @@ export function getLayaRuntime(): LayaRuntime {
  * ------------------------------------------------------------------ test doubles
  */
 
-export interface ScriptedAnswer {
-  /** matched against the question key the executor asks (`act`, `r`, `d`, ...) */
-  [questionKey: string]: Answer | ((state: ModelState) => Answer);
-}
-
 /**
  * A scripted agent: answers come from a function, so executor tests can drive
  * every branch (pick / risk / done) without a checkpoint. Shape-compatible with

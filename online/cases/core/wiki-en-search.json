@@ -1,0 +1,27 @@
+{
+  "id": "wiki-en-search",
+  "site": "wikipedia",
+  "tier": "core",
+  "goal": "从英文维基百科搜索结果打开 Alan Turing 条目",
+  "subgoals": [
+    {
+      "desc": "打开搜索结果中的 Alan Turing 条目",
+      "start_url": "https://en.wikipedia.org/w/index.php?search=Alan+Turing&fulltext=1",
+      "target_hint": "a[href~Alan_Turing]",
+      "signal": { "css_text_contains": ["#firstHeading", "Alan Turing"] },
+      "retries": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "turing-article",
+      "desc": "最终停在 Alan Turing 文章页",
+      "signal": {
+        "all_of": [
+          { "url_contains": "Alan_Turing" },
+          { "css_text_contains": ["#firstHeading", "Alan Turing"] }
+        ]
+      }
+    }
+  ]
+}

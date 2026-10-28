@@ -1,7 +1,7 @@
 /**
  * **页面上下文与条件化候选**（S0-v2 实测的单一出处，也是 S2 ③ 运行期接线的一环）。
  *
- * 为什么有这个模块（docs/NOMINATION_QUESTION_SET_ANALYSIS.md §6）：把提名题面从"一句孤立的描述"
+ * 为什么有这个模块：把提名题面从"一句孤立的描述"
  * 变成"这一步开始时的页面 + 按页面条件化的候选"后，同一个决策模型在 S0 考卷上从 24.8% → 63.6%
  * （只补页面状态）→ 88.5%（候选也条件化）；跨实现歧义组 7.2% → 92.8%。
  * **实验台与运行期必须共用这一份构造**：改措辞/改摘要 = 换实验，两边一起变。
@@ -10,7 +10,6 @@
  * 控件分类走 `extraction.elemFamily()`（与执行器同一判据）。
  */
 import { elemFamily, extractElements, urlOf, type ElemPool } from "../engine/extraction.ts";
-import { instructionCriteria } from "./instructions.ts";
 
 /** 一步**开始时**的页面状态（只读快照；`captureStateView` 开关才采）。 */
 export interface StepStateView {
@@ -70,43 +69,5 @@ export async function captureStepStateView(
       if (/[¥￥]\s*\d|\d+\s*元|price/i.test(label)) out.affordances.prices += 1;
     }
   } catch { /* 提取失败：留空 */ }
-  return out;
-}
-
-/** 页面状态 → 决策 provider 的 `state`（SystemOne 认识的字段形状）。 */
-export function pageStateForModel(state: StepStateView): Record<string, unknown> {
-  return { url: state.url, title: state.title, main_text: state.text, affordances: state.affordances };
-}
-
-/** 一条指令在本页的**可用性一句话**（候选条件化用；只描述页面，不透露答案）。 */
-export function availabilityLine(state: StepStateView, name: string): string {
-  const a = state.affordances;
-  const list = (xs: string[]): string => (xs.length ? `（${xs.slice(0, 3).join("/")}）` : "");
-  switch (name) {
-    case "click": return `本页可点击元素 ${a.clickables.length} 个${list(a.clickables)}`;
-    case "fill": return `本页文本输入框 ${a.text_inputs.length} 个${list(a.text_inputs)}`;
-    case "select": return `本页下拉框 ${a.selects.length} 个${list(a.selects)}`;
-    case "check": return `本页勾选框 ${a.checkboxes.length} 个${list(a.checkboxes)}`;
-    case "list_pick": return `本页带价格文本的元素 ${a.prices} 个`;
-    default: return "";
-  }
-}
-
-/**
- * 条件化候选（提名闭集的 criteria）：指令描述 + 本页可用性。
- * `options` 缺省 = 全部指令（S0 的 5 条）；调用方传子集时按其过滤。
- */
-export function conditionedInstructionCriteria(
-  state: StepStateView,
-  options?: readonly string[],
-): Record<string, string> {
-  const all = instructionCriteria();
-  const names = options ?? Object.keys(all);
-  const out: Record<string, string> = {};
-  for (const name of names) {
-    if (!(name in all)) continue;
-    const avail = availabilityLine(state, name);
-    out[name] = avail ? `${all[name]}（本页：${avail}）` : all[name]!;
-  }
   return out;
 }

@@ -1,5 +1,5 @@
 /**
- * 具名数据集（NL Flow S1，docs/NL_FLOW_DESIGN.md §2.3）——跨步参数传递的唯一管道。
+ * 具名数据集（NL Flow S1）——跨步参数传递的唯一管道。
  *
  * 设计文档 §2.3 的三条硬规则，这里各有一条实现对应：
  *
@@ -12,7 +12,7 @@
  *      **陈旧世代不可读**（`read` 返回 null ⇒ 下游 `needs_value` 结构化停、页面零副作用），
  *      错误停在当步，绝不静默级联（验收 §11.5 的负例）。
  *
- * 两条实现决定（都钉在 `tests/dataset.test.ts`）：
+ * 两条实现决定（都钉在 历史回归）：
  *   - **generation 单调**：write 到已存在的键、或 invalidate，都恰好 +1——每次状态迁移
  *     一个世代，审计可以数（"重跑后旧 generation 引用 = 0"由 `read` 只认最新保证）。
  *   - **陈旧不可读**：`read` 只返回最新且未陈旧的条目；陈旧条目只能从 `entriesView()`
@@ -147,8 +147,4 @@ export class DatasetStore implements DatasetReader {
     }
     return store;
   }
-}
-
-export function createDataset(): DatasetStore {
-  return new DatasetStore();
 }

@@ -1,0 +1,27 @@
+{
+  "id": "books-category",
+  "site": "books",
+  "tier": "core",
+  "goal": "从 Books to Scrape 首页打开 Travel 分类",
+  "subgoals": [
+    {
+      "desc": "点击 Travel 分类链接",
+      "start_url": "https://books.toscrape.com/",
+      "target_hint": "a[href~travel_2]",
+      "signal": { "url_contains": "travel_2" },
+      "retries": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "category-page",
+      "desc": "分类页标题是 Travel 且仍有商品",
+      "signal": {
+        "all_of": [
+          { "css_text_contains": ["h1", "Travel"] },
+          { "css_exists": "article.product_pod" }
+        ]
+      }
+    }
+  ]
+}

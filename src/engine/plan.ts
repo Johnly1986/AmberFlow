@@ -14,7 +14,7 @@ import { validateSignalSpec, type SignalSpec } from "./signals.ts";
 import { validateCommands, type CommandDecl } from "./actions.ts";
 
 /**
- * 一步的可逆性声明（docs/ARCHITECTURE_IMPROVEMENTS.md §4）。
+ * 一步的可逆性声明。
  *
  * 曾经还有第二个键 `verify_after`（`signal` | `none`）。项目方裁定：
  * **`none` 不允许存在**——"动作后不要求证据也算完成"就是放松红线③；
@@ -89,7 +89,7 @@ const EDITABLE = new Set([
 /**
  * P4 走向的**路径上界**：同一个步 id 在一次运行里最多被进入多少次。
  *
- * `maxSteps=8` 是**每一步**的预算，不是**每一条路径**的（docs/ARCHITECTURE_REVIEW.md X4）：
+ * `maxSteps=8` 是**每一步**的预算，不是**每一条路径**的：
  * 一旦允许 `next` 边，环就必须有一个显式的上界，跑出结构化停因，而不是挂死或栈溢出。
  * 默认 3 = "一条回边最多把同一步再走两次"；应用包可用 `max_step_visits` 覆盖。
  */
@@ -157,7 +157,7 @@ export function createPathWalk(
 export class PlanningRules {
   // NOTE: explicit fields, not constructor parameter properties — the repo's
   // tool scripts run under `node --experimental-strip-types`, which cannot strip
-  // parameter properties (tests/project.test.ts guards this).
+  // parameter properties (历史回归 guards this).
   maxSubgoals: number;
   requireSignal: boolean;
   requireStartUrl: boolean;
@@ -207,7 +207,7 @@ export class PlanningRules {
    *   调用方（应用包加载器）把旅程里**全部**步 id 传进来，边就按旅程校验而不是按计划的子集校验。
    * @param opts.slotKeys - 已知的数据袋键。给了就顺带校"命令绑定的键必须声明过"——
    *   槽位名打错在运行期才变成 `needs_value` 已经太晚（D6：配置类错误要在加载期红）。
-   *   不传（计划 CLI/bench 那条路）时不做这项检查，旧行为不变。
+   *   不传（计划 CLI 那条路）时不做这项检查，旧行为不变。
    */
   problems(plan: TaskPlan, opts: { extraIds?: ReadonlySet<string>; slotKeys?: ReadonlySet<string> } = {}): string[] {
     const issues: string[] = [];

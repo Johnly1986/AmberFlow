@@ -1,20 +1,20 @@
 /**
- * 应用包（`apps/<app>/pack.json`）—— 应用层的一份声明，零共享代码改动。
+ * 应用的**内部 IR**（不在磁盘上存在）与加载期校验。
  *
- * 一个应用包把三样东西绑在一起：
- *   1. **动作腿**：`journey` 用**角色**（`roles` 里的模板）串起来的一条旅程，展开成冻结计划
- *      （`TaskPlan`）交给唯一的生产执行器；
- *   2. **数据腿**：`sources` 引用 `<dir>/sources/*.json` 里的数据源（HTTP 或 CLI 通道），
- *      由 `src/data/datasource.ts` 的同一套引擎跑；
- *   3. **验收**：`invariants` 是旅程**结束状态**上的断言（不是子目标信号的重复），
- *      以及 `slots`/`required_slots` 这套"值只来自计划"的数据袋。
+ * 作者面只有 `apps/<id>/app.mjs` 的 `flow(ctx)`；`AppPack` 是加载器把 `meta` 投影出来的
+ * 运行期结构，供执行器、报告、不变量和参数校验共用。它**不是**可编辑文件格式：
+ * 没有 `pack.json`，没有声明式数据脚本，也没有语义模板。
+ *
+ * IR 保留三块信息：
+ *   1. **元数据**：id/label/goal/hosts/slots/sources/site/policy/pace/...；
+ *   2. **结束态验收**：`invariants`（在 `ctx.done()` 时求值）；
+ *   3. **空 journey**：flow 的步骤是运行期事实，`journey` 永远为空，只为复用既有校验/报告形状。
  *
  * 三条纪律：
- *   - **发现制**：`apps/<id>/pack.json` 扫出来，没有中央清单；
- *   - **加载期校验**：未知键、未知角色、未知占位符、缺必填槽位、坏信号全部在加载时炸
+ *   - **发现制**：`apps/<id>/app.mjs` 扫出来，没有中央清单；
+ *   - **加载期校验**：未知 meta 键、未知槽位、坏信号、坏数据源全部在加载时炸
  *     （信号复用 `PlanningRules.problems`，与冻结计划同一套校验）；
- *   - **占位符只替换已声明的槽位**（`{coupon}`），其余花括号原样保留——工具参数/JSON 里
- *     花括号太多，宽松口径才不会误伤。
+ *   - **占位符只替换已声明的槽位**（`{coupon}`），其余花括号原样保留。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -26,8 +26,6 @@ import {
   CLI_STEP_KEYS, SHARED_STEP_KEYS, WEB_STEP_KEYS,
   getAppAdapter, listAppAdapterObjects, type AppAdapter, type ProcessStepDecl,
 } from "./app-adapters.ts";
-import { validateProbeBlock } from "./probe-set.ts";
-import { DECLARATIVE_MARKER, appDataFileInDir, isDeclarativeScriptSource, lowerDeclarative, parseDeclarativeScript } from "./declarative.ts";
 import { loadSource } from "../data/datasource.ts";
 import { extractSlots } from "../engine/extraction.ts";
 
@@ -168,7 +166,7 @@ function rowMainValue(row: Record<string, string> | null): string {
 }
 
 /**
- * **运行策略可以声明**（docs/ARCHITECTURE_IMPROVEMENTS.md §3）。
+ * **运行策略可以声明**。
  *
  * 配置面以前被劈成两半："应用是什么"在包里，"这次怎么跑"只在命令行——于是同一个包的含义随
  * 命令行变，而 `tieredHint`（窄问）这类**属于站点知识**的开关，包作者根本没法为自己的包打开。
@@ -177,6 +175,7 @@ function rowMainValue(row: Record<string, string> | null): string {
  */
 export const POLICY_KEYS = [
   "tiered_hint", "risk_ask", "reobserve", "max_effective_repeats", "conf_floor",
+  "done_timeout_ms", "done_poll_ms", "pool_ready_timeout_ms", "pool_ready_poll_ms",
 ] as const;
 
 /**
@@ -198,6 +197,14 @@ export interface PackPolicy {
    * 被硬阻塞，而 0.20 是它自己的"把握"刻度）。优先级：CLI > pack.policy > provider 自报 > 0.25。
    */
   conf_floor?: number;
+  /** action 后 done 信号的总等待窗口（毫秒；缺省 2000）。 */
+  done_timeout_ms?: number;
+  /** action 后 done 信号轮询间隔（毫秒；缺省 120）。 */
+  done_poll_ms?: number;
+  /** 元素池 ready gate 的最大等待（毫秒；缺省 700）。 */
+  pool_ready_timeout_ms?: number;
+  /** 元素池 ready gate 的轮询间隔（毫秒；缺省 100）。 */
+  pool_ready_poll_ms?: number;
 }
 
 /**
@@ -304,7 +311,7 @@ export interface AppPack {
    * 这个包是**生成的**：`{ spec, plan_sha256 }`（见 `tools/spec-to-pack.ts`）。
    *
    * 它把"对齐"从"两处独立写的东西互验"变成一个构造性质：旅程 = `emitPlan(spec)` 的展开结果，
-   * 而 `plan_sha256` 是展开内容的指纹——改包、改 spec 都会让 `npm run apps:gen -- --check` 变红。
+   * 而 `plan_sha256` 是展开内容的指纹——改包或改来源都会让它变化。
    * 人写的部分（`invariants` / `notes`）仍然是这个包的一部分，生成器只搬运、不发明。
    */
   generated_from?:
@@ -337,20 +344,33 @@ export interface AppPack {
 const isDict = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** `apps/<id>/pack.json` 的目录（发现制）。
- *  P0-6（前提 A）：扫 **用户目录 → 仓库夹具** 两段路径，同 id 用户目录赢——
- *  应用是用户本地产物，仓库 `apps/` 只是开发夹具；但仓库目录永远在搜索路径里，
- *  `npm run apps -- --list` 的既有清单不因这次改动少一个包。 */
-/**
- * 一个应用目录里的**数据文件**：`pack.json`（旧格式）或**声明式 app.mjs**（L3 起的主格式）。
- * 同步可读是 `loadPack` 的契约（39 处调用方不改成异步）——所以只认带标记的数据脚本。
- */
-export function appDataFile(dir: string): string | null {
-  return appDataFileInDir(dir);
+/** 应用目录里的脚本名（与 `app-script.ts` 的优先级一致；这里不 import 它以免循环依赖）。 */
+export const APP_SCRIPT_FILENAMES = ["app.mjs", "app.js", "app.ts"] as const;
+
+/** 一个应用目录里的 flow 脚本（没有脚本 = 不是应用）。 */
+export function appScriptFile(dir: string): string | null {
+  for (const name of APP_SCRIPT_FILENAMES) {
+    const p = path.join(dir, name);
+    try {
+      if (fs.statSync(p).isFile()) return p;
+    } catch { /* 读不了就当没有 */ }
+  }
+  return null;
 }
 
-export function appDirs(): string[] {
-  const out: string[] = [];
+export interface AppDirEntry {
+  /** 目录名（= 应用 id 的默认发现键）。 */
+  id: string;
+  dir: string;
+  script: string;
+}
+
+/**
+ * 发现所有应用目录（用户目录 → 仓库夹具，同 id 用户目录赢）。
+ * 判据只有一个：目录里有 `app.mjs`（或 `app.js`/`app.ts`）。
+ */
+export function listAppDirs(): AppDirEntry[] {
+  const out: AppDirEntry[] = [];
   const seen = new Set<string>();
   for (const base of appsSearchPath(APPS_DIR)) {
     let names: string[];
@@ -360,119 +380,20 @@ export function appDirs(): string[] {
       continue;                              // 用户目录还没建出来：正常，跳过
     }
     for (const n of names.sort()) {
-      if (seen.has(n)) continue;             // 同名包：用户目录覆盖仓库夹具
+      if (seen.has(n)) continue;             // 同名应用：用户目录覆盖仓库夹具
       const dir = path.join(base, n);
-      if (appDataFile(dir) === null) continue; /* 没有数据文件的目录（比如只有 sources 的）不算应用包 */
+      const script = appScriptFile(dir);
+      if (script === null) continue;
       seen.add(n);
-      out.push(dir);
+      out.push({ id: n, dir, script });
     }
   }
   return out;
 }
 
-/** 已发现的应用包：`[id, label, path]`，按 id 排序。 */
-/**
- * 这个包的**浏览器步里有多少点名了目标**。两个数，别混：
- *
- *   - `hinted` —— 用 `target_hint` / `target_hints` 点名的（审查文档里"98.8% 手写了目标"说的是这个）；
- *   - `named`  —— **由声明解决、不依赖模型兜底**的：`hinted` 加上用 `commands` 命令闭集点名的步
- *     （P2 那类步明确"绝不退回全池、绝不问模型"，所以它同样是声明在承重）。
- *
- * 为什么放在这里、并且只有一份实现：这两个数被 `apps:suite` 的列、`apps:matrix`、
- * `tools/arch-metrics.ts` 与两张图同时引用——它们一旦有两份实现，就会有两个值
- * （本轮已经为这类事付过一次账）。工具步没有 DOM 目标，天然不计入分母。
- */
-export function packHintCoverage(pack: AppPack): { hinted: number; named: number; browser: number } {
-  const roles = pack.roles ?? {};
-  let hinted = 0, named = 0, browser = 0;
-  for (const e of pack.journey ?? []) {
-    if (!e || typeof e !== "object") continue;
-    const merged: Record<string, unknown> = { ...(roles[String((e as Record<string, unknown>)["role"])] ?? {}), ...(e as object) };
-    if ((e as Record<string, unknown>)["source"] !== undefined) continue;   // 工具步：没有 DOM 目标
-    browser++;
-    const h = merged["target_hints"];
-    const has = (Array.isArray(h) && h.length > 0) || typeof merged["target_hint"] === "string";
-    if (has) hinted++;
-    const cmds = merged["commands"];
-    if (has || (Array.isArray(cmds) && cmds.length > 0)) named++;
-  }
-  return { hinted, named, browser };
-}
-
-export function listPacks(): Array<[string, string, string]> {
-  const out: Array<[string, string, string]> = [];
-  for (const dir of appDirs()) {
-    const p = appDataFile(dir);
-    if (p === null) continue;
-    try {
-      if (p.endsWith(".json")) {
-        const raw = JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack;
-        out.push([String(raw.id ?? path.basename(dir)), String(raw.label ?? ""), p]);
-      } else {
-        const src = fs.readFileSync(p, "utf-8");
-        if (!isDeclarativeScriptSource(src)) {
-          // 手写脚本：发现得到，但同步列表拿不到 id/label（要读得走异步加载器）——
-          // 目录名就是应用 id（`amber apps show <id>` 会走异步路径）。
-          out.push([path.basename(dir), "", p]);
-          continue;
-        }
-        const parts = parseDeclarativeScript(src);
-        out.push([String(parts.meta.id ?? path.basename(dir)), String(parts.meta.label ?? ""), p]);
-      }
-    } catch (e) {
-      out.push([path.basename(dir), `<invalid: ${e instanceof Error ? e.message : String(e)}>`, p]);
-    }
-  }
-  return out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-}
-
-/**
- * 读一个应用包（同步）。
- *
- * L3 起"应用"的权威文件是**声明式 `app.mjs`**（带 `@amberflow:declarative-data` 标记）——
- * 它是数据、形状固定，所以能像 JSON 一样同步读；`pack.json` 仍被接受（旧夹具/显式路径）。
- * 带控制流的 `flow` 脚本不走这里（异步 `loadScriptApp`）。
- */
-export function loadPack(nameOrPath: string): AppPack {
-  let p = nameOrPath;
-  const isFile = (x: string): boolean => { try { return fs.statSync(x).isFile(); } catch { return false; } };
-  if (!isFile(p)) {
-    // 显式路径的兄弟目录（删掉 pack.json 之后 `apps/x/pack.json` 这类路径仍要能解析）；
-    // 否则按 id 在发现制目录里找。
-    const dirOfPath = path.dirname(p);
-    let f: string | null = null;
-    try {
-      if (fs.statSync(dirOfPath).isDirectory()) f = appDataFile(dirOfPath);
-    } catch { /* 不是目录：继续按 id 找 */ }
-    if (f === null) {
-      const dir = appDirs().find((d) => path.basename(d) === nameOrPath);
-      if (dir !== undefined) f = appDataFile(dir);
-    }
-    if (f === null) {
-      throw new Error(`app pack ${JSON.stringify(nameOrPath)} not found (searched, in order: `
-        + `${appsSearchPath(APPS_DIR).join(", ")})`);
-    }
-    p = f;
-  }
-  let pack: AppPack;
-  if (p.endsWith(".json")) {
-    pack = JSON.parse(fs.readFileSync(p, "utf-8")) as AppPack;
-  } else {
-    const src = fs.readFileSync(p, "utf-8");
-    if (!isDeclarativeScriptSource(src)) {
-      // 同步 API 读不了任意代码（那是 `import()` 的活）；给一条能照做的错误，而不是
-      // 一句"不是合法 JSON"（用户手写脚本时看到过这句话，完全不知道下一步是什么）。
-      throw new Error(
-        `${p} 是手写应用脚本（没有 ${DECLARATIVE_MARKER} 标记）：同步 loadPack() 只能读`
-        + `「pack.json」或「固定 META/DATA/JOURNEY 形状的声明式数据脚本」。`
-        + ` 用异步入口（amber apps show/check/run <id>）或把它改成带标记的数据脚本（apps new 可生成）。`,
-      );
-    }
-    const parts = parseDeclarativeScript(src);
-    pack = lowerDeclarative(parts.meta, { data: parts.data, exec: parts.journey });
-  }
-  pack._path = p;
-  return pack;
+/** 已发现应用目录（按 id 排序）。 */
+export function appDirs(): string[] {
+  return listAppDirs().map((e) => e.dir);
 }
 
 /* ------------------------------------------------------------------ 占位符 */
@@ -1021,7 +942,7 @@ export function validatePack(pack: AppPack,
       // 两种上游二选一：spec 文件，或 `<模块>#<导出名>`（导出函数返回一份应用级计划）
       const kind = typeof g["spec"] === "string" ? "spec" : typeof g["source"] === "string" ? "source" : null;
       if (kind === null) {
-        p.push("generated_from needs either .spec or .source (regenerate with npm run apps:gen)");
+        p.push("generated_from needs either .spec or .source");
       } else if (kind === "spec" && typeof g["source"] === "string") {
         p.push("generated_from must not carry both .spec and .source");
       } else {
@@ -1030,7 +951,7 @@ export function validatePack(pack: AppPack,
           p.push(`generated_from.${kind} must be a non-empty string`);
         } else if (kind === "spec") {
           if (!fs.existsSync(path.resolve(REPO, raw))) {
-            p.push(`generated_from.spec ${JSON.stringify(raw)} does not exist (regenerate with npm run apps:gen)`);
+            p.push(`generated_from.spec ${JSON.stringify(raw)} does not exist`);
           }
         } else {
           const [file, fn] = raw.split("#");
@@ -1042,7 +963,7 @@ export function validatePack(pack: AppPack,
         }
       }
       if (typeof g["plan_sha256"] !== "string" || !/^[0-9a-f]{64}$/.test(String(g["plan_sha256"]))) {
-        p.push("generated_from.plan_sha256 must be a sha256 hex string (regenerate with npm run apps:gen)");
+        p.push("generated_from.plan_sha256 must be a sha256 hex string");
       }
       for (const k of Object.keys(g)) {
         if (!["spec", "source", "plan_sha256"].includes(k)) p.push(`generated_from.${k}: unknown key`);
@@ -1063,9 +984,6 @@ export function validatePack(pack: AppPack,
         if (!["url", "steps", "sha256"].includes(k)) p.push(`recorded_from.${k}: unknown key`);
       }
     }
-  }
-  if (pack.probe !== undefined) {
-    p.push(...validateProbeBlock(pack.probe, pack.hosts, "probe"));
   }
   for (const [i, inv] of (pack.invariants ?? []).entries()) {
     if (!isDict(inv) || !inv["id"] || !isDict(inv["signal"])) {
@@ -1181,6 +1099,12 @@ export function validatePack(pack: AppPack,
       const cf = pol["conf_floor"];
       if (cf !== undefined && (typeof cf !== "number" || !Number.isFinite(cf) || cf <= 0 || cf > 1)) {
         p.push("policy.conf_floor: must be a number in (0, 1]");
+      }
+      for (const k of ["done_timeout_ms", "done_poll_ms", "pool_ready_timeout_ms", "pool_ready_poll_ms"]) {
+        const v = pol[k];
+        if (v !== undefined && (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 60_000)) {
+          p.push(`policy.${k}: must be an integer in [0, 60000]`);
+        }
       }
     }
   }

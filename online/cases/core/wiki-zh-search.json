@@ -1,0 +1,28 @@
+{
+  "id": "wiki-zh-search",
+  "site": "wikipedia",
+  "tier": "core",
+  "goal": "从中文维基百科搜索结果打开 艾伦·图灵 条目",
+  "model": "multilingual",
+  "subgoals": [
+    {
+      "desc": "打开搜索结果中的 艾伦·图灵 条目",
+      "start_url": "https://zh.wikipedia.org/w/index.php?search=%E5%9B%BE%E7%81%B5&fulltext=1",
+      "target_hint": "艾伦·图灵",
+      "signal": { "css_text_contains": ["#firstHeading", "艾伦·图灵"] },
+      "retries": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "turing-article",
+      "desc": "最终停在 艾伦·图灵 文章页",
+      "signal": {
+        "all_of": [
+          { "url_contains": "zh.wikipedia.org" },
+          { "css_text_contains": ["#firstHeading", "艾伦·图灵"] }
+        ]
+      }
+    }
+  ]
+}

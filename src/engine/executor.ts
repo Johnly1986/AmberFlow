@@ -3,7 +3,7 @@
  * `layaapp/executor.py`.
  *
  * `BrowserMiddleware` is THE execution loop — one implementation shared by the
- * demos, the CLI, the batch entries and the benchmark harness (BenchMiddleware
+ * the CLI, the app layer and the online test suite (all share this loop)
  * subclasses it and only picks the checkpoint / flips ablation switches). Per step
  * it discovers interactive elements (`extraction.ts`), resolves the pick by rule
  * or plan-named hint (`rules.ts`), otherwise asks laya, gates on confidence and
@@ -65,6 +65,7 @@ import {
   extractSlots,
   elemFamily,
   filterElemsByFamily,
+  actionCapabilities,
   firstOf,
   frameAt,
   framesOf,
@@ -72,6 +73,7 @@ import {
   orderElemsByFamily,
   stateText,
   urlOf,
+  type ActionCapability,
   type Elem,
   type ElemFamily,
   type ElemPool,
@@ -150,10 +152,10 @@ export interface BrowserHandle extends BrowserLike {
 type Sig = [string, string, string];
 
 /**
- * Structured stop cause (docs/ARCHITECTURE_REVIEW.md D4 / P0-2).
+ * Structured stop cause .
  *
  * The loop used to terminate on 12 free-text `stop_reason` strings, so every
- * downstream consumer (apps:suite exit codes, the DSH bridge, reports, refusal
+ * downstream consumer (online suite exit codes, the DSH bridge, reports, refusal
  * labels) had to STRING-MATCH prose. `stop_code` is the data; `stop_reason`
  * stays the human rendering — byte-identical to what the frozen parity corpus
  * records (the Python reference asserted those strings; fixture-level rule:
@@ -164,6 +166,11 @@ export type StopCode =
   | "dom_goal_signal"
   | "precondition_skipped"
   | "no_model_runtime"
+  | "page_not_ready"
+  | "target_not_found"
+  | "target_ambiguous"
+  | "action_unsupported"
+  | "done_not_held"
   | "action_space_exhausted"
   | "hint_matched_nothing"
   | "step_names_no_target"
@@ -174,6 +181,8 @@ export type StopCode =
   | "manual_confirmation"
   | "noul_unverified"
   | "host_not_allowed"
+  | "frame_not_allowed"
+  | "popup_not_allowed"
   | "config_error"
   /**
    * S2 ③ 运行期接线（改版）：提名族是软先验；**有界修复**时本页一个该族候选都没有。
@@ -200,6 +209,7 @@ interface AnyLoc {
   click(opts?: Record<string, unknown>): Promise<void>;
   fill(value: string, opts?: Record<string, unknown>): Promise<void>;
   selectOption(value: unknown, opts?: Record<string, unknown>): Promise<void>;
+  dragTo?(target: unknown, opts?: Record<string, unknown>): Promise<void>;
   count(): Promise<number> | number;
   all(): Promise<unknown[]>;
   evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
@@ -243,6 +253,14 @@ export interface RunReport {
   stop_step?: number;
   steps: TraceStep[];
   audit: AuditVerdictLike;
+  /** 结构化诊断：失败时不要求 Agent 再读源码/自己探页面。 */
+  diagnostics?: {
+    pool_size: number;
+    waited_ms?: number;
+    frame_origins?: string[];
+    target?: string | null;
+    candidates?: string[];
+  };
 }
 
 /**
@@ -330,6 +348,26 @@ export interface RunOptions {
   expectedFamily?: ElemFamily | null;
   /** Reuse an open page (one browser across subgoals); run() then owns nothing. */
   page?: AnyPage | null;
+  /**
+   * 当前页已经就位：不要再 `goto(startUrl)`。flow 的 `ctx.step` 不带 `url` 时用它——
+   * SPA 的下一步必须接着当前 DOM 走，不能每一步都整页重载（Google Maps 实测：重载会丢筛选面板状态）。
+   */
+  skipNavigation?: boolean;
+  /** 导航后、抽取元素前的稳定等待（ms）；SPA 的 domcontentloaded 早于面板渲染。 */
+  settleMs?: number;
+  /**
+   * 元素池 ready gate：导航/当前页还没渲染出交互元素时，不要立刻判 `space_empty`。
+   * flow 的 `ctx.step` 打开它；计划/线上用例可按需打开。
+   */
+  poolReady?: boolean;
+  /** pool ready gate 的最大等待；0 = 只看一次。 */
+  poolReadyTimeoutMs?: number;
+  /** pool ready gate 的轮询间隔。 */
+  poolReadyPollMs?: number;
+  /** action 后 done 信号的轮询间隔；0 = 只看一次。 */
+  donePollMs?: number;
+  /** action 后 done 信号的总等待窗口。 */
+  doneTimeoutMs?: number;
   slots?: Record<string, unknown> | null;
   targetHint?: string | null;
   /** Reuse a live playwright object; run() then leaves it alone. */
@@ -339,7 +377,7 @@ export interface RunOptions {
   /** `when` guard: evaluated after navigation, before any action. */
   precondition?: SignalSpec | null;
   /**
-   * P2 COMMAND SPACE (docs/ARCHITECTURE_REVIEW.md §6, the "check + submit in ONE
+   * P2 COMMAND SPACE (the "check + submit in ONE
    * subgoal" use case): an ORDERED CLOSED SET of commands this step may execute,
    * declared by the app config and validated at load (`actions.validateCommands`).
    * When present, the step acts ON THE SPACE, not on the pool:
@@ -354,7 +392,7 @@ export interface RunOptions {
    */
   commands?: CommandDecl[] | null;
   /**
-   * NL Flow S1（docs/NL_FLOW_DESIGN.md §2.3/§5）：`dataset` 绑定来源的读取面。
+   * NL Flow S1：`dataset` 绑定来源的读取面。
    * 命令参数可声明 `{"from":"dataset","key":"…"}` 引用**前序步骤的具名产出**；
    * 解析在绑定那一刻现读最新 generation——陈旧世代不可读。缺省 null ⇒ 该来源
    * 结构化 `needs_value`（没有数据集就没有值，绝不猜）。不声明 dataset 绑定的包：
@@ -381,11 +419,11 @@ export interface RunOptions {
    * Navigation envelope (see `disallowedHost`): when non-empty, `run()` refuses
    * to open a `start_url` whose host is not declared, and stops the subgoal if
    * an executed action lands on an undeclared host. Default: no envelope —
-   * behaviour identical to before. `apps/<id>/pack.json`'s `hosts` feeds this.
+   * behaviour identical to before. `meta.hosts` from `apps/<id>/app.mjs` feeds this.
    */
   hosts?: string[] | null;
   /**
-   * P1 TIERED HINT (docs/ARCHITECTURE_REVIEW.md, P1 tieredHint; default OFF): when the
+   * P1 TIERED HINT (default OFF): when the
    * plan's `target_hint` resolves to a TIER that is ambiguous inside (several
    * genuinely different candidates), rules.ts used to collapse that to `null` and
    * the step fell to laya over the WHOLE pool — "pick 1 of 40" for what is really
@@ -492,7 +530,7 @@ function asFunction(src: string): (...args: any[]) => any {
 
 /** Every input's current value — inner_text misses fills, and values drive validation.
  *
- * SECRET REDACTION (P0-3, docs/ARCHITECTURE_REVIEW.md D5①): `password`/`file`/`hidden`
+ * SECRET REDACTION (P0-3): `password`/`file`/`hidden`
  * inputs keep their SHAPE (a per-character mask) but never their content. The inert
  * check compares this string, so a typed password still CHANGES the snapshot
  * (`"" -> "*"` -> `"**"`) without leaking the value into a snapshot, a trace line or
@@ -537,15 +575,6 @@ function firstLoc(loc: any): AnyLoc {
 /** Budget for the ONE wider look a low-confidence decision is allowed to take. */
 const WIDER_ELEMENTS = 120;
 
-/**
- * SPA settle window: how long a done-signal gets to become true after an executed
- * action before the loop spends another step. Client-side routing updates the url
- * immediately and re-renders afterwards — measured 30-230 ms on the live saucedemo
- * long flow — and a single check there is a coin flip.
- */
-const SPA_SETTLE_MS = 120;
-const SPA_SETTLE_POLLS = 4;
-
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 function round3(n: number): number {
@@ -576,7 +605,7 @@ function sigEq(a: Sig, b: Sig): boolean {
 }
 
 /**
- * Navigation envelope (P0-4, docs/ARCHITECTURE_REVIEW.md D5② / backlog R-5).
+ * Navigation envelope (P0-4).
  *
  * `hosts` used to be a LOAD-TIME fact only: type-checked in `app-pack.ts`, the input
  * of the leak gate — and never consulted at runtime, so any pack could navigate to
@@ -588,6 +617,39 @@ function sigEq(a: Sig, b: Sig): boolean {
  * Matching: exact host, or any SUBDOMAIN of a declared host. `file:`/`about:`/
  * `data:` carry no host and pass — the envelope guards the NETWORK, not the fixture.
  */
+/** Frame URL 的 host gate：host 边界覆盖 frame，而不是只覆盖顶层导航。 */
+/**
+ * Popup / new tab 的 host gate：只看当前 page.url 会漏掉 `window.open()` 开出的新页。
+ * 这里扫描同一 browser context 的所有 page；`pages` 在 Playwright 里是数组属性，替身可能给函数。
+ */
+export function deniedContextUrl(page: PageLike, hosts: string[] | null | undefined): string | null {
+  if (!hosts || hosts.length === 0) return null;
+  // Playwright 的 page.context 是方法；替身可能直接给对象。
+  const contextValue = (page as unknown as { context?: unknown }).context;
+  const context = (typeof contextValue === "function" ? contextValue.call(page) : contextValue) as
+    | { pages?: ArrayLike<PageLike> | (() => ArrayLike<PageLike>) }
+    | undefined;
+  const rawPages = typeof context?.pages === "function" ? context.pages() : context?.pages;
+  const pages = Array.from(rawPages ?? []);
+  for (const p of pages) {
+    const u = typeof p.url === "function" ? p.url() : p.url;
+    if (typeof u !== "string" || !u.trim()) continue;
+    if (disallowedHost(u, hosts) !== null) return u;
+  }
+  return null;
+}
+
+export function deniedFrameUrl(page: PageLike, hosts: string[] | null | undefined): string | null {
+  if (!hosts || hosts.length === 0) return null;
+  for (const frame of framesOf(page, 64)) {
+    const u = typeof frame.url === "function" ? frame.url() : frame.url;
+    if (typeof u !== "string" || !u.trim()) continue;
+    const denied = disallowedHost(u, hosts);
+    if (denied !== null) return u;
+  }
+  return null;
+}
+
 export function disallowedHost(url: string, hosts: string[] | null | undefined): string | null {
   if (!hosts || hosts.length === 0) return null;
   let u: URL;
@@ -793,7 +855,7 @@ export class BrowserMiddleware {
    */
   decision: DecisionProvider | null = null;
   /**
-   * 风险头调用失败的原因（null = 没失败过）。报告与 `apps:suite` 要把它显式说出来：
+   * 风险头调用失败的原因（null = 没失败过）。报告与线上套件要把它显式说出来：
    * 一次"退化成关键词判定"的运行和一次正常运行**不是同一件事**，不许混在同一个绿色里。
    */
   riskDegraded: string | null = null;
@@ -845,10 +907,10 @@ export class BrowserMiddleware {
    */
   private async ready(): Promise<void> {
     if (this._ready) return;
-    // **决策提供者层的入口**（docs/DECISION_INTERFACE_SURVEY.md 的落地）：
+    // **决策提供者层的入口**：
     //   ① 显式装了 provider（换模型测试走这条）⇒ 直接用它，不要求 laya runtime 存在；
     //   ② 否则走旧门：装了 `LayaRuntime` 就就地包一层适配器 ⇒ 行为与今天逐字段相同
-    //      （等价由 tests/decision-provider.test.ts 钉住，不是"看着一样"）；
+    //      （等价由 历史回归 钉住，不是"看着一样"）；
     //   ③ 两者都没有 ⇒ rules-only（下面那段既有逻辑，一个字没改）。
     const explicit = decisionProviderOrNull();
     if (explicit) {
@@ -995,7 +1057,7 @@ export class BrowserMiddleware {
   /* -- laya calls (each one forward pass) ---------------------------------- */
 
   /**
-   * 一次"选元素"的**完整提案**（docs/ARCHITECTURE_IMPROVEMENTS.md §2）。
+   * 一次"选元素"的**完整提案**。
    *
    * 为什么要结构而不是一个 float：`conf` 今天承载**两个不可比的量**——
    * passthrough（池 ≤ k）是 `1 − 归一化熵`，shortlist（池 > k）是**子集上的 max(probs)**。
@@ -1054,7 +1116,7 @@ export class BrowserMiddleware {
       return { ref: null, conf: 0.0, probs: {}, passthrough: true };
     }
     // 视图构造、state 渲染、短名单重问、两支各自的 conf 口径——**全部在适配器里**，
-    // 且与替换前的实现逐字段等价（tests/decision-provider.test.ts ①）。
+    // 且与替换前的实现逐字段等价（历史回归 ①）。
     // **在线 provider 掉线/没配好 ⇒ 优雅降级到 rules-only**（与"本地模型不在位"同一条路）：
     // 缺 key/缺端点/网络不可达时，不该把整条计划崩掉，也不该每步再敲一次坏服务——
     // 声明点名的步照跑，需要选目标的步按 rules-only 如实 block。这是"默认在线 provider"
@@ -1423,8 +1485,41 @@ export class BrowserMiddleware {
      * （`{from:"option"}`），所以 `<select>` 直接按值选——见下面 select 分支的注释。
      */
     bound?: { value: unknown; byValue?: boolean } | null,
+    op?: string,
   ): Promise<[string, unknown]> {
     const tag = el.tag;
+    if (op === "drag") {
+      const loc = await this._locatorFor(page, el);
+      if (loc === null) return ["stale_ref", null];
+      const destSel = bound && bound.value !== undefined && bound.value !== null ? String(bound.value) : "";
+      if (!destSel.trim()) return ["needs_value", null];
+      const dragTo = (firstLoc(loc) as unknown as { dragTo?: (t: unknown, o?: unknown) => Promise<void> }).dragTo;
+      if (typeof dragTo !== "function") return ["action_unsupported", "locator has no dragTo"];
+      try {
+        await dragTo.call(firstLoc(loc), page.locator(destSel), { timeout: 5000 });
+      } catch (e) {
+        return ["action_failed", describeActionError(e)];
+      }
+      return ["dragged", destSel];
+    }
+    if (op === "scroll") {
+      const loc = await this._locatorFor(page, el);
+      if (loc === null) return ["stale_ref", null];
+      try {
+        await firstLoc(loc).evaluate((node: unknown) => {
+          const el = node as { scrollIntoView(o?: unknown): void };
+          const anyEl = node as { scrollIntoViewIfNeeded?: (o?: unknown) => void };
+          if (typeof anyEl.scrollIntoViewIfNeeded === "function") {
+            anyEl.scrollIntoViewIfNeeded({ block: "center", behavior: "instant" });
+          } else {
+            el.scrollIntoView({ block: "center", behavior: "instant" });
+          }
+        });
+      } catch (e) {
+        return ["action_failed", describeActionError(e)];
+      }
+      return ["scrolled", null];
+    }
     if (tag === "input" || tag === "textarea" || tag === "select") {
       if (this._isSubmit(el)) return this._clickOnly(page, el);
       // P2: a command-space fill/select arrives with its value ALREADY BOUND BY NAME
@@ -1560,6 +1655,13 @@ export class BrowserMiddleware {
       dataset = this.dataset,
       effect,
       adjudicate = false,
+      skipNavigation = false,
+      settleMs = 0,
+      poolReady = false,
+      poolReadyTimeoutMs = 700,
+      poolReadyPollMs = 100,
+      donePollMs = 120,
+      doneTimeoutMs = 2000,
     } = opts;
 
     // The navigation envelope: run-level declaration wins, else the middleware's
@@ -1589,6 +1691,8 @@ export class BrowserMiddleware {
     let stopReason = "max_steps";
     let stopCode: StopCode = "max_steps";
     let stopStep: number | undefined;
+    let lastPoolSize = 0;
+    let lastPoolWaitedMs = 0;
     /** ONE place where the loop decides to stop (D1/D4): sets code + step, and the
      *  human string when given. Every stop site goes through here. */
     const stop = (code: StopCode, detail?: string, at?: number): void => {
@@ -1678,7 +1782,38 @@ export class BrowserMiddleware {
         page = (await browser.newPage()) as AnyPage;
       }
       const pg = page as AnyPage;
-      await pg.goto(startUrl, { waitUntil: "domcontentloaded", timeout: this.gotoTimeout });
+      if (opts.skipNavigation !== true) {
+        await pg.goto(startUrl, { waitUntil: "domcontentloaded", timeout: this.gotoTimeout });
+        if (typeof opts.settleMs === "number" && opts.settleMs > 0) {
+          await new Promise((r) => setTimeout(r, opts.settleMs));
+        }
+      }
+      if (hostGate && hostGate.length) {
+        const deniedPopup = deniedContextUrl(pg, hostGate);
+        if (deniedPopup !== null) {
+          const why = `popup not allowed: ${deniedPopup} is outside the declared hosts envelope `
+            + `(${hostGate.join(", ")}) — popup/new-tab origins are part of the same host gate`;
+          if (verbose) console.log(`  -> REFUSED before navigation: ${why}`);
+          return {
+            goal: instruction, done: false,
+            stop_reason: why, stop_code: "popup_not_allowed",
+            steps: [],
+            audit: { verdict: "REJECT", reasons: [why], auditor: "navigation-envelope" },
+          };
+        }
+        const deniedFrame = deniedFrameUrl(pg, hostGate);
+        if (deniedFrame !== null) {
+          const why = `frame not allowed: ${deniedFrame} is outside the declared hosts envelope `
+            + `(${hostGate.join(", ")}) — frame origins are part of the same host gate`;
+          if (verbose) console.log(`  -> REFUSED before navigation: ${why}`);
+          return {
+            goal: instruction, done: false,
+            stop_reason: why, stop_code: "frame_not_allowed",
+            steps: [],
+            audit: { verdict: "REJECT", reasons: [why], auditor: "navigation-envelope" },
+          };
+        }
+      }
       // "Does this step apply?" — asked on the page the step will act on, before
       // spending a single step. A skipped subgoal reports done, so the plan
       // moves on exactly as if the step had succeeded.
@@ -1692,7 +1827,31 @@ export class BrowserMiddleware {
       }
 
       for (let stepNo = 1; stepNo <= this.maxSteps; stepNo++) {
-        let elems = await extractElements(pg);
+        // P0 pool ready gate：SPA 的 domcontentloaded 可能先于交互元素渲染。
+        // 这里只做“pool 非空”这一件事；目标是否存在、动作是否可执行仍由后面分支判断。
+        let elems: ElemPool;
+        let poolWaitedMs = 0;
+        if (poolReady) {
+          const readyStarted = Date.now();
+          const readyDeadline = readyStarted + Math.max(0, poolReadyTimeoutMs);
+          elems = await extractElements(pg);
+          while (Object.keys(elems).length === 0 && Date.now() < readyDeadline) {
+            await sleep(poolReadyPollMs);
+            elems = await extractElements(pg);
+          }
+          poolWaitedMs = Date.now() - readyStarted;
+        } else {
+          elems = await extractElements(pg);
+        }
+        lastPoolSize = Object.keys(elems).length;
+        lastPoolWaitedMs = poolWaitedMs;
+        if (poolReady && Object.keys(elems).length === 0) {
+          stop("page_not_ready",
+            `page not ready: element pool stayed empty after ${poolWaitedMs}ms `
+            + `(poolReadyTimeoutMs=${poolReadyTimeoutMs}) on step ${stepNo}`, stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          break;
+        }
         // OUTCOME MEMORY: skip elements a previous attempt already proved inert on
         // this page+subgoal — but only while something else remains to choose from
         // (a remembered element must never empty the pool).
@@ -1770,11 +1929,25 @@ export class BrowserMiddleware {
             cmdI = i + 1;
           }
           if (cmdPick === null) {
+            // 区分“目标不存在”和“目标存在但歧义”：歧义不是空间为空，而是候选集 > 1。
+            const ambiguous = cmdSpace.find((c) => {
+              if (c.op === "skip" || !c.target) return false;
+              const cand = hintCandidates(c.target, elems);
+              return cand !== null && cand.decided === null && cand.refs.length > 1;
+            });
+            if (ambiguous?.target) {
+              const cand = hintCandidates(ambiguous.target, elems)!;
+              stop("target_ambiguous",
+                `command ${JSON.stringify(ambiguous.id)} matches ${cand.refs.length} distinct candidates `
+                + `(${cand.refs.join(", ")}) for target ${JSON.stringify(ambiguous.target)} on step ${stepNo}`, stepNo);
+              if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+              break;
+            }
             if (cmdDone.size >= cmdSpace.length) {
-              stop("action_space_exhausted",
+              stop("done_not_held",
                 `commands exhausted (${cmdDone.size}/${cmdSpace.length} acted) but the done-signal never held on step ${stepNo}`, stepNo);
             } else {
-              stop("space_empty",
+              stop("target_not_found",
                 `command space matches nothing on this page — pending unresolved: `
                 + `${pendingUnresolved.join(", ") || "-"} (unresolvable candidates are OUT; the space never falls back to the full pool) on step ${stepNo}`, stepNo);
             }
@@ -1818,7 +1991,8 @@ export class BrowserMiddleware {
         let commandValue: unknown;
         let commandByValue = false;
         let commandBindMissing: string | null = null;
-        if (commandMode && cmdPick && (cmdPick.cmd.op === "fill" || cmdPick.cmd.op === "select")) {
+        if (commandMode && cmdPick
+            && (cmdPick.cmd.op === "fill" || cmdPick.cmd.op === "select" || cmdPick.cmd.op === "drag")) {
           // P3: an `option` source is an OBSERVATION at bind time — read this page's
           // candidate list now (never assumed, never remembered from another run).
           let boundOptions: OptionCandidate[] | undefined;
@@ -2119,6 +2293,19 @@ export class BrowserMiddleware {
           }
         }
         const el = elems[ref]!;
+        // ActionAdapter 能力面：命令闭集声明的 op 必须是当前元素已声明的能力。
+        // 这不是新的动作生成路径，只是把"跑了才发现不支持"提前到执行前。
+        if (commandMode && cmdPick) {
+          const caps = actionCapabilities(el);
+          const op = String(cmdPick.cmd.op);
+          if (op !== "skip" && !caps.includes(op as ActionCapability)) {
+            stop("action_unsupported",
+              `command ${JSON.stringify(cmdPick.cmd.id)} declares op '${op}', but element ${ref} `
+              + `(${el.tag} "${el.label}") only declares [${caps.join(", ")}] on step ${stepNo}`, stepNo);
+            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            break;
+          }
+        }
         const verb = this._isTyping(el) ? "type text into" : "click";
         const desc = `${verb} ${el.tag} "${el.label}"`;
         // DRY RUN stops HERE: the target is resolved (rule hint / local model /
@@ -2204,7 +2391,9 @@ export class BrowserMiddleware {
         // reports why, instead of burning 5 s + an inert step.
         let how: string | null = null;
         let arg: unknown = null;
-        if (!this._isTyping(el)) {
+        const isScrollCommand = commandMode && cmdPick && String(cmdPick.cmd.op) === "scroll";
+        const isDragCommand = commandMode && cmdPick && String(cmdPick.cmd.op) === "drag";
+        if (!this._isTyping(el) && !isScrollCommand && !isDragCommand) {
           const reason = await this.occludedReason(pg, el);
           if (reason === "__clicked__") {
             try {
@@ -2227,15 +2416,20 @@ export class BrowserMiddleware {
         if (how === null) {
           // Submit-type inputs carry their label in `value` and must be clicked,
           // never filled — `_executeElement`'s input branch would return
-          // needs_value otherwise.
-          if (!this._isTyping(el)) {
+          // needs_value otherwise. scroll 是 viewport 语义，必须走专用分支。
+          if (isScrollCommand || isDragCommand) {
+            [how, arg] = await this._executeElement(pg, el, slots,
+              commandMode ? { value: commandValue, byValue: commandByValue } : null,
+              isDragCommand ? "drag" : "scroll");
+          } else if (!this._isTyping(el)) {
             [how, arg] = await this._clickOnly(pg, el);
           } else {
             [how, arg] = await this._executeElement(pg, el, slots,
-              commandMode ? { value: commandValue, byValue: commandByValue } : null);
+              commandMode ? { value: commandValue, byValue: commandByValue } : null,
+              commandMode ? String(cmdPick!.cmd.op) : undefined);
           }
         }
-        const executed = how === "clicked" || how === "filled";
+        const executed = how === "clicked" || how === "filled" || how === "scrolled" || how === "dragged";
         if (!executed) {
           // needs_value / stale_ref: this element cannot advance the plan right
           // now; forbid and try another (no model call).
@@ -2250,7 +2444,8 @@ export class BrowserMiddleware {
           continue;
         }
         const post = await this.snapshot(pg);
-        const inert = JSON.stringify(pre) === JSON.stringify(post);   // url+text+input-values all identical
+        // scroll 改变的是 viewport，不是 url/text/input 快照；不能把“快照没变”误判成 inert。
+        const inert = (how === "scrolled" || how === "dragged") ? false : JSON.stringify(pre) === JSON.stringify(post);
         // P2: an executed command is ACTED whether or not the page moved — the walk
         // must not re-drive the same command next step (its element is forbidden on
         // inert anyway, but the closed set advances by the command's identity, not the
@@ -2286,6 +2481,16 @@ export class BrowserMiddleware {
           if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
         }
+        if (hostGate && hostGate.length) {
+          const landedPopup = deniedContextUrl(pg, hostGate);
+          if (landedPopup !== null) {
+            stop("popup_not_allowed",
+              `action opened ${landedPopup} outside the declared hosts envelope `
+              + `(${hostGate.join(", ")}) on step ${stepNo}`, stepNo);
+            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            break;
+          }
+        }
 
         if (executed && !inert && this._learnedHintApplied && method === "rule:match") {
           (hintMemory as HintMemoryLike | null)?.countUsed?.(1);
@@ -2320,15 +2525,31 @@ export class BrowserMiddleware {
         // asynchronously (the live burger click *was* inert, and so is a click whose
         // handler only schedules the change).
         if (goalSignalFn && executed) {
-          for (let k = 0; k < SPA_SETTLE_POLLS; k++) {
-            await sleep(SPA_SETTLE_MS);
+          const settleDeadline = Date.now() + Math.max(0, doneTimeoutMs);
+          let poll = 0;
+          while (Date.now() < settleDeadline) {
+            await sleep(Math.max(1, donePollMs));
+            poll++;
             if (await goalSignalFn(pg)) {
               done = true;
               stop("dom_goal_signal", "dom goal signal", stepNo);
               if (verbose) {
                 console.log(`  step ${stepNo}: -> done (dom goal signal, `
-                  + `settled after ${(k + 1) * SPA_SETTLE_MS} ms)`);
+                  + `settled after ${poll * Math.max(1, donePollMs)} ms)`);
               }
+              break;
+            }
+          }
+          // Popup 可能在 action 之后几十/几百 ms 才 commit；done 轮询结束后再扫一次 context，
+          // 避免“done 已成立，但同一 action 悄悄打开了外域新 tab”。
+          if (hostGate && hostGate.length) {
+            const settledPopup = deniedContextUrl(pg, hostGate);
+            if (settledPopup !== null) {
+              done = false;
+              stop("popup_not_allowed",
+                `action opened ${settledPopup} outside the declared hosts envelope `
+                + `(${hostGate.join(", ")}) on step ${stepNo}`, stepNo);
+              if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
               break;
             }
           }
@@ -2375,7 +2596,7 @@ export class BrowserMiddleware {
         // page with a running countdown/carousel is NEVER inert: the evidence chain breaks,
         // anti-repeat does not fire, and the same dead button is clicked until `max_steps` —
         // a noise signal must not be the loop's only terminator. Measured on
-        // testpages/dead-target.html (50 ms tick): 8 clicks on the dead button, `max_steps`,
+        // dead-target fixture (50 ms tick): 8 clicks on the dead button, `max_steps`,
         // 4.5 s. The count is keyed by element SIGNATURE (refs are positional and re-indexed
         // every scan) and reset by nothing: within ONE subgoal a repeat is a repeat.
         {
@@ -2424,9 +2645,18 @@ export class BrowserMiddleware {
     }
 
     const verdict = (await this.auditor.audit(instruction, trace, done)) as AuditVerdict;
+    const stoppedCode = stopCode as StopCode;
+    const diagnostics: RunReport["diagnostics"] | undefined = (
+      stoppedCode === "page_not_ready" || stoppedCode === "target_not_found"
+      || stoppedCode === "target_ambiguous" || stoppedCode === "action_space_exhausted"
+    ) ? {
+      pool_size: lastPoolSize,
+      ...(poolReady ? { waited_ms: lastPoolWaitedMs } : {}),
+    } : undefined;
     return {
       goal: instruction, done, stop_reason: stopReason, steps: trace, audit: verdict,
       stop_code: stopCode,
+      ...(diagnostics !== undefined ? { diagnostics } : {}),
       ...(stopStep !== undefined ? { stop_step: stopStep } : {}),
       ...(manualDone ? { manual: true } : {}),
       ...(dryRan ? { dry_run: true } : {}),
