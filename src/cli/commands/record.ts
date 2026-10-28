@@ -42,7 +42,7 @@ export async function runRecord(args: string[], ctx: CliContext): Promise<number
       options: {
         name: { type: "string" }, id: { type: "string" },
         goal: { type: "string" }, cdp: { type: "string" }, url: { type: "string" },
-        out: { type: "string" }, "pack-dir": { type: "string" }, script: { type: "string" },
+        out: { type: "string" }, "apps-dir": { type: "string" }, script: { type: "string" },
         yes: { type: "boolean" }, json: { type: "boolean" },
         headless: { type: "boolean" }, headful: { type: "boolean" },
         quiet: { type: "boolean" }, help: { type: "boolean" },
@@ -86,7 +86,7 @@ export async function runRecord(args: string[], ctx: CliContext): Promise<number
   if (v.cdp) oldArgs.push("--cdp", v.cdp);
   if (v.goal) oldArgs.push("--goal", v.goal);
   if (v.out) oldArgs.push("--out", v.out);
-  if (v["pack-dir"]) oldArgs.push("--pack-dir", v["pack-dir"]);
+  if (v["apps-dir"]) oldArgs.push("--apps-dir", v["apps-dir"]);
   if (v.script) oldArgs.push("--script", v.script);
   if (v.yes || ctx.globals.yes) oldArgs.push("--yes");
   if (v.json || ctx.globals.json) oldArgs.push("--json");

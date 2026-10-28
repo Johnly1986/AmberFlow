@@ -383,8 +383,8 @@ export async function runPlan(
     throw new Error(
       `runPlan cannot honour \`next\` edges (${withEdges.length} subgoal(s) declare them: `
       + `${withEdges.map((s) => JSON.stringify(String(s.id ?? s.desc))).join(", ")}). `
-      + "Declarative successors are driven by the app journey runner "
-      + "(`npm run apps -- --app <id>`, apps/<id>/pack.json); move the branch there or drop the edges "
+      + "Declarative successors are driven by the app flow script "
+      + "(`npm run apps -- --app <id>`, apps/<id>/app.mjs); move the branch there or drop the edges "
       + "— a silently ignored edge would look like a plan that ran.",
     );
   }

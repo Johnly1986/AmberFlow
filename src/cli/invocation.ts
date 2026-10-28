@@ -2,7 +2,7 @@
  * 「这台机器上 `amber` 到底叫什么」—— 一个只在必要时说真话的检测器。
  *
  * 起因（2026-10-23 实测）：`npm ci` 只链接**依赖**的 bin，不会把根包自己的
- * `bin.amber` 放进 PATH。于是 README 里每一句 `npm run online` 在裸 checkout 上
+ * `bin.amber` 放进 PATH。于是 README 里每一句 `npm run test` 在裸 checkout 上
  * 都会得到 `CommandNotFoundException`，而仓库里没有任何一处会提前说出来——
  * 用户只能自己猜"是不是装错了"。
  *

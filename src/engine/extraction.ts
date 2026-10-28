@@ -73,6 +73,128 @@ export function elemFamily(e: Elem): ElemFamily {
   return "click";
 }
 
+/**
+ * 元素能力面：同一条结构化规则给出"它到底能做什么"。
+ * `elemFamily` 仍然是提名/修复用的单一动作族；`actionCapabilities` 面向 PoolView/inspect，
+ * 可以表达 role=slider / input[type=range] 这类特殊控件。注意：native range 目前
+ * 可由引擎的 `fill` 动作驱动；div[role=slider] 仍是 click 族，当前动作集不能设 aria-valuenow。
+ */
+export type ActionCapability = "click" | "fill" | "select" | "check" | "slider" | "scroll" | "drag";
+
+/** 执行动作所需的最小 locator 面；由执行器/PoolView 的调用方提供。 */
+export interface ActionLocatorLike {
+  click(opts?: Record<string, unknown>): Promise<void>;
+  fill(value: string, opts?: Record<string, unknown>): Promise<void>;
+  selectOption(value: unknown, opts?: Record<string, unknown>): Promise<void>;
+  evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
+}
+
+/**
+ * ActionAdapter：把"元素能做什么"从动作散布改成显式能力面。
+ * `canApply` 是 PoolView / inspect 的静态能力判定；`apply` 是执行器未来接入的同一能力面。
+ * 模型不能发明动作；它只能点能力面里已声明的 kind。
+ */
+export interface ActionAdapter {
+  kind: ActionCapability;
+  canApply(e: Elem): boolean;
+  apply(loc: ActionLocatorLike, opts?: { value?: string; timeoutMs?: number }): Promise<[string, unknown]>;
+}
+
+const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+const CLICK_ADAPTER: ActionAdapter = {
+  kind: "click",
+  canApply: (e) => elemFamily(e) === "click",
+  async apply(loc, { timeoutMs = 5000 } = {}) {
+    await loc.click({ timeout: timeoutMs });
+    return ["clicked", null];
+  },
+};
+
+const CHECK_ADAPTER: ActionAdapter = {
+  kind: "check",
+  canApply: (e) => elemFamily(e) === "check",
+  async apply(loc, { timeoutMs = 5000 } = {}) {
+    await loc.click({ timeout: timeoutMs });
+    return ["clicked", null];
+  },
+};
+
+const FILL_ADAPTER: ActionAdapter = {
+  kind: "fill",
+  canApply: (e) => elemFamily(e) === "fill",
+  async apply(loc, { value, timeoutMs = 5000 } = {}) {
+    if (value === undefined || value === null) return ["needs_value", null];
+    await loc.fill(String(value), { timeout: timeoutMs });
+    return ["filled", value];
+  },
+};
+
+const SELECT_ADAPTER: ActionAdapter = {
+  kind: "select",
+  canApply: (e) => elemFamily(e) === "select",
+  async apply(loc, { value, timeoutMs = 5000 } = {}) {
+    if (value === undefined || value === null) return ["needs_value", null];
+    try {
+      await loc.selectOption({ label: String(value) }, { timeout: Math.min(1500, timeoutMs) });
+    } catch {
+      await loc.selectOption({ value: String(value) }, { timeout: timeoutMs });
+    }
+    return ["filled", value];
+  },
+};
+
+const SLIDER_ADAPTER: ActionAdapter = {
+  kind: "slider",
+  canApply: (e) => String(e.role ?? "").toLowerCase() === "slider"
+    || (e.tag === "input" && String(e.input_type ?? "").toLowerCase() === "range"),
+  async apply(loc, { value, timeoutMs = 5000 } = {}) {
+    if (value === undefined || value === null) return ["needs_value", null];
+    await loc.fill(String(value), { timeout: timeoutMs });
+    return ["filled", value];
+  },
+};
+
+const DRAG_ADAPTER: ActionAdapter = {
+  kind: "drag",
+  canApply: (e) => e.draggable === true
+    || String(e.role ?? "").toLowerCase() === "slider"
+    || (e.tag === "input" && String(e.input_type ?? "").toLowerCase() === "range"),
+  async apply(loc, { value, timeoutMs = 5000 } = {}) {
+    if (value === undefined || value === null || !String(value).trim()) return ["needs_value", null];
+    const dragTo = (loc as unknown as { dragTo?: (target: unknown, o?: unknown) => Promise<void> }).dragTo;
+    if (typeof dragTo !== "function") return ["action_unsupported", "locator has no dragTo"];
+    await dragTo.call(loc, { selector: String(value) }, { timeout: timeoutMs });
+    return ["dragged", value];
+  },
+};
+
+const SCROLL_ADAPTER: ActionAdapter = {
+  kind: "scroll",
+  canApply: () => true,   // scrollIntoView 是 viewport 语义，任何已定位元素都可用
+  async apply(loc) {
+    await loc.evaluate(String.raw`(el) => {
+      if (typeof el.scrollIntoViewIfNeeded === 'function') el.scrollIntoViewIfNeeded({ block: 'center', behavior: 'instant' });
+      else el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    }`);
+    return ["scrolled", null];
+  },
+};
+
+export const ACTION_ADAPTERS: readonly ActionAdapter[] = [
+  DRAG_ADAPTER, SCROLL_ADAPTER, SLIDER_ADAPTER, CHECK_ADAPTER, SELECT_ADAPTER, FILL_ADAPTER, CLICK_ADAPTER,
+];
+
+export function actionAdapterFor(e: Elem): ActionAdapter | null {
+  return ACTION_ADAPTERS.find((a) => a.canApply(e)) ?? null;
+}
+
+export function actionCapabilities(e: Elem): ActionCapability[] {
+  const out: ActionCapability[] = [];
+  for (const adapter of ACTION_ADAPTERS) if (adapter.canApply(e) && !out.includes(adapter.kind)) out.push(adapter.kind);
+  return out;
+}
+
 /** 按动作族过滤元素池（**只用于有界修复**；ref 保留原值）。 */
 export function filterElemsByFamily(elems: ElemPool, family: ElemFamily): ElemPool {
   const out: ElemPool = {};
@@ -235,7 +357,8 @@ export async function locatorAnyFrame(page: PageLike, selector: string): Promise
 // 没有"可交互"的证据；不扫进来，语义分类与提名都无从谈起。fixtures 无这些属性 ⇒ 对拍语料不变）。
 export const INTERACTIVE = "a, button, input, select, textarea, [onclick], [role='button']"
   + ", [role='combobox'], [role='listbox'], [role='textbox'], [role='searchbox'], [role='spinbutton']"
-  + ", [role='checkbox'], [role='radio'], [role='switch'], [contenteditable='true'], [contenteditable='']";
+  + ", [role='checkbox'], [role='radio'], [role='switch'], [role='slider'], [contenteditable='true'], [contenteditable='']"
+  + ", [draggable='true']";
 /** CDP-probed JS-only widgets join every later scan, keeping refs consistent. */
 export const INTERACTIVE_ALL = INTERACTIVE + ", [data-js-ref]";
 export const MAX_ELEMENTS = 40;
@@ -270,7 +393,10 @@ export const COLLECT_JS = String.raw`
 export const EXTRACT_JS = String.raw`(arg) => {
   const sel = arg.sel, max = arg.max;
   const WS = /[ \t\n\r\f\v]+/g;
-  const norm = (t) => (t || '').replace(WS, ' ').trim();
+  // Material/Google 的图标是 private-use 字形（\ue8ba 等），会出现在按钮文本里；
+  // 它是装饰，不是人可读标签。先剥掉 PUA 再折叠空白，否则 Hotels 按钮的 label 会是
+  // \ue8baHotels，ctx.hints("Hotels") 匹配不到（Google Maps 实测）。
+  const norm = (t) => (t || '').replace(/[\uE000-\uF8FF]/g, '').replace(WS, ' ').trim();
   const all = [];
   __collectAll(document, sel, all);
   const labelOf = (e, tag) => {
@@ -332,6 +458,7 @@ export const EXTRACT_JS = String.raw`(arg) => {
                id: e.id || '', input_type: (e.getAttribute('type') || '').toLowerCase(),
                role: (e.getAttribute('role') || '').toLowerCase(),
                content_editable: e.isContentEditable ? true : false,
+               draggable: (e.getAttribute('draggable') || '').toLowerCase() === 'true',
                href: href ? href.split('?')[0].replace(/\/+$/, '').split('/').slice(-2).join('/') : ''});
   }
   const ordered = rows.filter((r) => r.main).concat(rows.filter((r) => !r.main)).slice(0, max);
@@ -341,7 +468,8 @@ export const EXTRACT_JS = String.raw`(arg) => {
     return {ref: ref, dsh_ref: ref, scan: r.i, tag: r.tag, label: r.label,
             data_test: r.data_test, name: r.name, id: r.id, input_type: r.input_type, href: r.href,
             ...(r.role ? {role: r.role} : {}),
-            ...(r.content_editable ? {content_editable: true} : {})};
+            ...(r.content_editable ? {content_editable: true} : {}),
+            ...(r.draggable ? {draggable: true} : {})};
   });
 }`;
 

@@ -1,17 +1,30 @@
 /**
- * Pure helpers behind the AmberFlow bridge: build the argv for the external CLI, read the
- * artifacts it writes, and summarize them into a **context-cheap** shape.
+ * Pure helpers behind the AmberFlow bridge: build the argv for the external CLIs, read the
+ * artifacts they write, and summarize them into a **context-cheap** shape.
  *
- * No spawning happens here, so the process policy lives in exactly one place (`runProcess`) and
- * everything else stays unit-testable without a browser, a model, or the external repo.
+ * No spawning happens here beyond `runProcess` / `listApps`, so the process policy lives in exactly
+ * one place and everything else stays unit-testable without a browser, a model, or the external repo.
+ *
+ * The app surface has exactly ONE author model: `apps/<id>/app.mjs` with `meta` + `flow(ctx)`. Apps
+ * are listed through the checkout's own `amber apps list --json` door; the bridge never scans the
+ * apps directory or interprets app source itself.
  * @module @deepseek-ai/dsh-amberflow-bridge/bridge
  */
 
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
+
+/**
+ * A JSON value, structurally identical to the harness's own `JsonValue` so tool outputs (and the
+ * schemas they are checked against) line up without importing the host package's internals.
+ */
+export type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject
+
+/** A JSON object (a CLI envelope, an artifact, one tool-output record). */
+export interface JsonObject { [key: string]: JsonValue }
 
 /** Resolved deployment options (defaults already applied). */
 export interface BridgeOptions {
@@ -55,9 +68,9 @@ export interface BridgeOptions {
   /** Provider a run defaults to when the decision model is fully configured. */
   decisionProvider?: 'decision-service'
   /**
-   * Environment used to resolve the USER-scope apps dir ($AMBERFLOW_HOME/apps) when
-   * listing. Defaults to the running process's env; tests pin it to a non-existent
-   * home so a developer's recorded apps never leak into a listing assertion.
+   * Extra environment entries merged into the child process that lists apps — a deployment-level
+   * `AMBERFLOW_HOME` override (`Config.appsHome`), so the listing resolves the same user scope every
+   * other bridge call would. Undefined means "use the deployment's own environment".
    */
   appsEnv?: NodeJS.ProcessEnv
   /**
@@ -73,82 +86,28 @@ export interface BridgeOptions {
   tsxCli?: string
 }
 
-/** Adapter kinds that need a local service at run time, with the human-facing hint. */
-const LOCAL_SERVICE_REQUIREMENTS: Record<string, string> = {
-  ssh: 'ssh (needs a reachable local sshd)',
-}
-
-/**
- * Which adapter the engine will dispatch a step to, matching `src/app-pack.ts`'s `adapterKind`:
- * an explicit `adapter` wins; otherwise `source` ⇒ `cli`, everything else ⇒ `web`.
- * The role template is merged first (a role can carry the key), exactly as the engine expands it.
- * @param step - one journey entry (or role template).
- * @param roles - the pack's role templates.
- * @returns the adapter kind, lower-cased.
- */
-export function stepAdapter(step: Record<string, unknown>, roles: Record<string, Record<string, unknown>>): string {
-  const role = step['role']
-  const template = typeof role === 'string' ? roles[role] : undefined
-  const merged = template === undefined ? step : { ...template, ...step }
-  const explicit = merged['adapter']
-  if (typeof explicit === 'string' && explicit.trim() !== '') return explicit.trim().toLowerCase()
-  return merged['source'] !== undefined ? 'cli' : 'web'
-}
-
-/**
- * Human-facing type mix for the model surface: `web×2 · cli×3 · ssh×1`.
- * Sorted by kind so two listings never disagree about ordering.
- * @param types - adapter counts from {@link AppSummary.types}.
- * @returns one line, or `''` when the journey declares no steps.
- */
-export function formatTypeMix(types: Record<string, number>): string {
-  return Object.keys(types).sort().map(kind => `${kind}×${types[kind]}`).join(' · ')
-}
-
-/**
- * Human-facing local requirements for the model surface.
- * @param requires - adapter kinds needing local services.
- * @returns one line, or `''` when nothing is required.
- */
-export function formatRequires(requires: string[]): string {
-  const k = requires[0]
-  if (k === undefined) return ''
-  return requires.map(x => LOCAL_SERVICE_REQUIREMENTS[x] ?? x).join(' · ')
-}
-
 /** One declared app, as the bridge presents it to the model. */
 export interface AppSummary {
   id: string
   label: string
   goal: string
-  /** Web (browser) steps in the journey. */
-  steps: number
-  /** Process-family steps (cli/ssh/stdio) in the journey — the engine dispatches them to an adapter. */
-  toolSteps: number
+  /** Absolute path of the writable flow script (`…/apps/<id>/app.mjs`). */
+  path: string
+  /** Where the app came from: `user` (user scope) or `built-in` (checkout fixtures). */
+  source: string
+  /** The only app format there is: a flow script (`meta` + `flow(ctx)`). */
+  kind: 'flow'
   /**
-   * Adapter kinds used by the journey, as counts (`{ web: 2, cli: 3, ssh: 1, stdio: 1 }`).
-   * A journey may mix several application types; the engine dispatches each step by its `adapter`.
+   * Static script steps. Always 0: a flow script has no step table, its steps are runtime facts
+   * produced by `ctx.step` / `ctx.arrive` / `ctx.run` as the script executes.
    */
-  types: Record<string, number>
-  /**
-   * Local services this app needs at run time (e.g. `ssh` needs a reachable sshd). Empty means the
-   * app is self-contained; a non-empty list is a hint for a deployment to check before running.
-   */
-  requires: string[]
+  steps: 0
+  /** Declared end-state invariants (script `meta.invariants`). */
   invariants: number
-  /** Where this pack came from: generated (spec/source) | recorded (demo) | hand-written. */
-  origin: string
-  /**
-   * What `_run` can do with it. `journey` runs end to end; `probe` is a measurement set the engine
-   * refuses to run through app-runner (its drivers live in the checkout), so the model learns it
-   * from the listing instead of burning a spawn; `data-source` has no pack.json at all;
-   * `semantic-template` is a site-agnostic SemanticFlow template (flow.json) — run it with
-   * `…_run` plus a `site` from its `sites` map, and grow its per-site profile with `…_plan`.
-   */
-  kind: 'journey' | 'probe' | 'data-source' | 'semantic-template'
+  /** Hosts the app is allowed to touch. */
   hosts: string[]
-  /** For semantic templates: the declared site keys (each backed by `apps/<id>/sites/<site>.profile.json`). */
-  sites?: string[]
+  /** Load/validation problem the CLI reported while listing; absent when the app loaded cleanly. */
+  error?: string
 }
 
 /** A process result, with the output bounded so one call cannot flood the session. */
@@ -157,9 +116,9 @@ export interface ProcessOutcome {
   /** Bounded excerpt of stdout (head + tail) — the only form a summary may surface. */
   stdout: string
   /**
-   * The COMPLETE stdout, kept because parsing needs it: a `--dry` plan or a `learn` document can be
-   * larger than the excerpt window, and a truncated JSON document does not parse — which would turn
-   * a successful call into "no document found". Never surfaced to the model.
+   * The COMPLETE stdout, kept because parsing needs it: a dry-run call sequence or a `learn`
+   * document can be larger than the excerpt window, and a truncated JSON document does not parse —
+   * which would turn a successful call into "no document found". Never surfaced to the model.
    *
    * Optional so a caller that only ever reads the excerpt can omit it; the parsers then fall back to
    * {@link stdout}, which is correct for small documents and degrades to the old behaviour otherwise.
@@ -177,8 +136,8 @@ const TAIL = 800
 const MAX_FAILURES = 6
 /** Lines of diagnostics one failure message keeps. */
 const DIAGNOSTIC_LINES = 6
-/** Cap on how many expanded steps one dry-run summary lists. */
-const MAX_PLAN_STEPS = 40
+/** Cap on how many steps/calls one summary lists (a dry invocation sequence is a full list). */
+const MAX_STEPS = 20
 /** How long 'close' may lag 'exit' before the outcome settles anyway, ms (see runProcess). */
 const STDIO_GRACE_MS = 1000
 
@@ -254,9 +213,9 @@ function asNumber(value: unknown, fallback: number): number {
  * @param value - the parsed field.
  * @returns the object, or null when the field is missing or not a plain object.
  */
-function asRecord(value: unknown): Record<string, unknown> | null {
+function asRecord(value: unknown): JsonObject | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? value as JsonObject
     : null
 }
 
@@ -265,10 +224,20 @@ function asRecord(value: unknown): Record<string, unknown> | null {
  * @param value - the parsed field.
  * @returns the object entries, or an empty array.
  */
-function asRecords(value: unknown): Record<string, unknown>[] {
+function asRecords(value: unknown): JsonObject[] {
   return Array.isArray(value)
-    ? (value as unknown[]).filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null)
+    ? (value as unknown[]).filter((v): v is JsonObject => typeof v === 'object' && v !== null)
     : []
+}
+
+/**
+ * Read a JSON field as a list of strings; non-strings are dropped rather than stringified into
+ * `[object Object]` entries.
+ * @param value - the parsed field.
+ * @returns the string entries, or an empty array.
+ */
+function asStrings(value: unknown): string[] {
+  return Array.isArray(value) ? (value as unknown[]).filter((v): v is string => typeof v === 'string') : []
 }
 
 /**
@@ -310,8 +279,8 @@ function balancedSlice(stream: string, start: number): string | null {
  * @param stdout - the process output.
  * @returns the parsed object, or null when the stream carries no JSON object.
  */
-export function parseJsonDocument(stdout: string): Record<string, unknown> | null {
-  let found: Record<string, unknown> | null = null
+export function parseJsonDocument(stdout: string): JsonObject | null {
+  let found: JsonObject | null = null
   for (let at = stdout.indexOf('{'); at >= 0; at = stdout.indexOf('{', at + 1)) {
     if (at !== 0 && stdout.charAt(at - 1) !== '\n') continue
     const slice = balancedSlice(stdout, at)
@@ -319,7 +288,7 @@ export function parseJsonDocument(stdout: string): Record<string, unknown> | nul
     try {
       const doc: unknown = JSON.parse(slice)
       if (typeof doc === 'object' && doc !== null && !Array.isArray(doc)) {
-        found = doc as Record<string, unknown>
+        found = doc as JsonObject
       }
     } catch {
       // Not a document starting here; keep looking for the real one.
@@ -329,191 +298,83 @@ export function parseJsonDocument(stdout: string): Record<string, unknown> | nul
 }
 
 /**
- * The app search path (mirrors `src/amberflow-home.ts` in the engine — the ONE place the
- * precedence rule lives twice, kept honest by the engine's discovery rules):
- * `$AMBERFLOW_HOME/apps` first, then the checkout's `apps/` (if present).
- * @param repoPath - absolute path of the AmberFlow checkout.
- * @param env - environment to resolve AMBERFLOW_HOME from.
- * @returns the directories to scan, in precedence order.
+ * The `error` field of a CLI JSON envelope as one sentence (message + hint + next steps).
+ * @param doc - the parsed envelope.
+ * @returns a human-readable failure sentence.
  */
-export function appsDirsWith(repoPath: string, env: NodeJS.ProcessEnv = process.env): string[] {
-  const repoApps = path.join(repoPath, 'apps')
-  const home = String(env.AMBERFLOW_HOME ?? '').trim()
-  const userApps = home !== '' ? path.resolve(home, 'apps') : path.join(os.homedir(), '.amberflow', 'apps')
-  return userApps === repoApps ? [repoApps] : [userApps, repoApps]
+function envelopeError(doc: JsonObject): string {
+  const error = asRecord(doc['error'])
+  const message = asText(error?.['message'], 'command failed')
+  const hint = asText(error?.['hint'])
+  const next = error === null || !Array.isArray(error['next'])
+    ? []
+    : (error['next'] as unknown[]).map(String).filter(x => x !== '')
+  const extras = [hint, next.length === 0 ? '' : `next: ${next.join(', ')}`].filter(x => x !== '')
+  return extras.length === 0 ? message : `${message} (${extras.join('; ')})`
 }
 
 /**
- * Read every `apps/<id>/pack.json` in the search path (user scope + checkout) and summarize it.
- * Deliberately filesystem-only: listing apps needs no browser, no model and no subprocess.
- * @param repoPath - absolute path of the AmberFlow checkout.
- * @param env - environment for AMBERFLOW_HOME resolution.
- * @returns one summary per declared app, sorted by id; user apps shadow same-named fixtures.
- */
-/**
- * The checkout's own `apps list --json` — the single-source view that understands the L3 formats
- * (`app.mjs` declarative data scripts + hand-written flow scripts). The bridge's filesystem scanner
- * predates L3 and only sees `pack.json` / `flow.json` / `sources`, so the two are merged here:
- * filesystem rows keep the legacy/data-source/semantic-template families, CLI rows replace them for
- * app.mjs apps (and add the richer declaration summary the engine computes).
+ * List the apps the checkout can run, through its own JSON door: `amber apps list --json`.
  *
- * Only called when the checkout actually has a CLI (`src/cli/main.ts`); stub checkouts used by the
- * tests have none, so they keep exercising the filesystem scanner alone.
+ * This is the ONE app view: the CLI owns discovery and app loading (importing user-scope scripts is
+ * the established trust boundary), so the bridge neither scans `apps/` nor interprets app source.
+ * Listing starts no browser and calls no model.
+ * @param options - resolved bridge options (names the checkout and the tool prefix).
+ * @param filter - optional case-insensitive substring match on id, label or goal.
+ * @returns one summary per app, sorted by id.
+ * @throws when the CLI produced no envelope, or answered with a failed one.
  */
-function checkoutCliApps(repoPath: string, env: NodeJS.ProcessEnv): AppSummary[] {
-  const main = path.join(repoPath, 'src', 'cli', 'main.ts')
-  if (!fs.existsSync(main)) return []
-  const runEnv = { ...process.env, ...env }
-  const res = spawnSync(process.execPath, ['--experimental-strip-types', main, 'apps', 'list', '--json'], {
-    cwd: repoPath, env: runEnv, encoding: 'utf8', timeout: 20_000, maxBuffer: 16 * 1024 * 1024,
-  })
-  if (res.status !== 0 || typeof res.stdout !== 'string') return []
-  let parsed: unknown
-  try { parsed = JSON.parse(res.stdout) } catch { return [] }
-  const envelope = asRecord(parsed)
-  const data = envelope === null ? null : asRecord(envelope['data'])
-  const rows = data === null ? [] : data['apps']
-  if (!Array.isArray(rows)) return []
+export async function listApps(options: BridgeOptions, filter = ''): Promise<AppSummary[]> {
+  const outcome = await runProcess(options, cliArgs(options, ['apps', 'list', '--json']), options.appsEnv)
+  const doc = parseJsonDocument(parseSource(outcome))
+  if (doc === null) {
+    const cause = firstLines(outcome.stderr) || firstLines(outcome.stdout)
+    throw new Error(
+      `amberflow-bridge: ${options.toolPrefix}_apps could not list apps — `
+      + `\`amber apps list --json\` produced no JSON envelope `
+      + `(${outcome.timedOut ? 'timed out' : `exit ${outcome.code ?? 'killed'}`})`
+      + (cause === '' ? '' : `: ${cause}`),
+    )
+  }
+  if (doc['ok'] !== true) {
+    throw new Error(`amberflow-bridge: ${options.toolPrefix}_apps failed: ${envelopeError(doc)}`)
+  }
+  const data = asRecord(doc['data'])
+  const rows = data === null ? [] : asRecords(data['apps'])
+  const needle = filter.trim().toLowerCase()
   const out: AppSummary[] = []
-  for (const raw of rows) {
-    const row = asRecord(raw)
-    if (row === null) continue
+  for (const row of rows) {
     const id = asText(row['id'])
     if (id === '') continue
-    const types: Record<string, number> = {}
-    const rawTypes = asRecord(row['types'])
-    if (rawTypes !== null) {
-      for (const [kind, count] of Object.entries(rawTypes)) {
-        if (typeof count === 'number') types[kind] = count
-      }
-    }
-    const kinds = Object.keys(types)
-    const engineKind = asText(row['kind'])
-    const totalSteps = typeof row['steps'] === 'number' ? row['steps'] : 0
-    const toolSteps = typeof row['toolSteps'] === 'number' ? row['toolSteps'] : 0
+    const label = asText(row['label'], id)
+    const goal = asText(row['goal'])
+    if (needle !== ''
+      && !id.toLowerCase().includes(needle)
+      && !label.toLowerCase().includes(needle)
+      && !goal.toLowerCase().includes(needle)) continue
+    const problem = asText(row['error'])
     out.push({
       id,
-      label: asText(row['label'], id),
-      goal: asText(row['goal']),
-      // 引擎的 steps 是"旅程总步数"；桥对模型展示的是 web 步 + tool 步两列（不重复计数）。
-      steps: Math.max(0, totalSteps - toolSteps),
-      toolSteps,
-      types,
-      requires: kinds.filter(kind => LOCAL_SERVICE_REQUIREMENTS[kind] !== undefined).sort(),
-      invariants: typeof row['invariants'] === 'number' ? row['invariants'] : 0,
-      origin: asText(row['origin'], 'hand-written'),
-      // 手写 flow 脚本在引擎里是 "flow"：对模型来说它仍是一个可直接 `_run` 的旅程型应用
-      // （只是没有静态步骤表），所以桥把它归到 journey，模型不会误以为它是测量/模板。
-      kind: engineKind === 'measure' ? 'probe' : 'journey',
-      hosts: Array.isArray(row['hosts'])
-        ? (row['hosts'] as unknown[]).filter((h): h is string => typeof h === 'string')
-        : [],
+      label,
+      goal,
+      path: asText(row['path']),
+      source: asText(row['source'], 'user'),
+      kind: 'flow',
+      steps: 0,
+      invariants: asNumber(row['invariants'], 0),
+      hosts: asStrings(row['hosts']),
+      ...(problem === '' ? {} : { error: problem }),
     })
   }
-  return out
-}
-
-export function listApps(repoPath: string, env: NodeJS.ProcessEnv = process.env): AppSummary[] {
-  const dirs = appsDirsWith(repoPath, env)
-  if (!dirs.some((d) => fs.existsSync(d))) {
-    throw new Error(`no apps/ directory under ${repoPath} (searched: ${dirs.join(', ')})`)
-  }
-  const out: AppSummary[] = []
-  const seen = new Set<string>()
-  for (const dir of dirs) {
-  if (!fs.existsSync(dir)) continue
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    if (seen.has(entry.name)) continue           // user scope wins over the repo fixture
-    seen.add(entry.name)
-    const file = path.join(dir, entry.name, 'pack.json')
-    if (!fs.existsSync(file)) {
-      // A SemanticFlow template (spec_version 2, site-agnostic): a different family in the SAME
-      // directory listing, so the model sees exactly one app surface. It runs through the
-      // checkout's `src/flow/semantic-flow.ts` with a `site`, and `src/flow/plan-flow.ts` grows its per-site
-      // profile — the listing is what tells the model which door a given id belongs to.
-      const flowFile = path.join(dir, entry.name, 'flow.json')
-      if (fs.existsSync(flowFile)) {
-        const flow = JSON.parse(fs.readFileSync(flowFile, 'utf-8')) as Record<string, unknown>
-        const sites = asRecord(flow['sites'])
-        const notes = Array.isArray(flow['notes']) ? (flow['notes'] as unknown[]) : []
-        out.push({
-          id: asText(flow['id'], entry.name),
-          label: asText(flow['label'], entry.name),
-          goal: asText(flow['goal']),
-          steps: Array.isArray(flow['steps']) ? (flow['steps'] as unknown[]).length : 0,
-          toolSteps: 0,
-          types: { web: Array.isArray(flow['steps']) ? (flow['steps'] as unknown[]).length : 0 },
-          requires: [],
-          invariants: Array.isArray(flow['invariants']) ? (flow['invariants'] as unknown[]).length : 0,
-          origin: typeof notes[0] === 'string' && notes[0].startsWith('planned') ? 'planned' : 'hand-written',
-          kind: 'semantic-template',
-          hosts: [],
-          sites: sites === null ? [] : Object.keys(sites),
-        })
-        continue
-      }
-      // A declared app with no journey of its own: a pure data source other packs reference by name
-      // (`apps/<id>/sources`, e.g. `git-log`). Listing it is what makes a `source` resolvable.
-      if (fs.existsSync(path.join(dir, entry.name, 'sources'))) {
-        out.push({
-          id: entry.name, label: entry.name, goal: '', steps: 0, toolSteps: 0,
-          types: {}, requires: [],
-          invariants: 0, origin: 'data-source', kind: 'data-source', hosts: [],
-        })
-      }
-      continue
-    }
-    const pack = JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<string, unknown>
-    const roles = (typeof pack['roles'] === 'object' && pack['roles'] !== null ? pack['roles'] : {}) as Record<string, Record<string, unknown>>
-    const journey = asRecords(pack['journey'])
-    // The adapter is decided on the MERGED step (role template + inline entry), exactly as the
-    // checkout's `src/app-pack.ts` does. A journey can mix types: web steps go to the browser
-    // executor, cli/ssh/stdio steps go to their adapters — the listing must not call them all
-    // "browser" (that was the pre-adapter counting rule and it mis-described ssh/stdio steps).
-    const adapters = journey.map(step => stepAdapter(step, roles))
-    const types: Record<string, number> = {}
-    for (const kind of adapters) types[kind] = (types[kind] ?? 0) + 1
-    const requires = Object.keys(types)
-      .filter(kind => LOCAL_SERVICE_REQUIREMENTS[kind] !== undefined)
-      .sort()
-    const isToolStep = (kind: string): boolean => kind !== 'web' 
-    const generated = asRecord(pack['generated_from'])
-    const recorded = asRecord(pack['recorded_from'])
-    // The same predicate the engine's app-runner uses to refuse a spawn (probe defined, no
-    // journey): surface it in the listing instead of letting `_run` discover it by burning a call.
-    const isProbe = pack['probe'] !== undefined && journey.length === 0
-    out.push({
-      id: asText(pack['id'], entry.name),
-      label: asText(pack['label']),
-      goal: asText(pack['goal']),
-      steps: adapters.filter(kind => kind === 'web').length,
-      toolSteps: adapters.filter(kind => isToolStep(kind)).length,
-      types,
-      requires,
-      invariants: Array.isArray(pack['invariants']) ? (pack['invariants'] as unknown[]).length : 0,
-      origin: generated !== null
-        ? `generated:${asText(generated['spec'], asText(generated['source'], '?'))}`
-        : recorded !== null
-          ? `recorded:${asText(recorded['url'], '?')}`
-          : 'hand-written',
-      kind: isProbe ? 'probe' : 'journey',
-      hosts: Array.isArray(pack['hosts'])
-        ? (pack['hosts'] as unknown[]).filter((h): h is string => typeof h === 'string')
-        : [],
-    })
-  }
-  }
-  // 合并 checkout 的 `apps list --json`：L3 的 app.mjs 应用只有它能读；按 id 覆盖
-  // 文件系统扫描对同一 id 的分类（例如同时有 sources/ 与 app.mjs 的应用不该被当成 data-source）。
-  const byId = new Map(out.map(row => [row.id, row] as const))
-  for (const row of checkoutCliApps(repoPath, env)) byId.set(row.id, row)
-  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))
+  return out.sort((a, b) => a.id.localeCompare(b.id))
 }
 
 /**
- * The argv for one `app-runner` invocation. The external CLI is the contract, so the flags are
+ * The argv for one app-runner invocation. The external CLI is the contract, so the flags are
  * assembled here (and asserted in tests) instead of being strung together at the call site.
+ *
+ * `--max-steps` is an **execution budget**, not a step index: the script runs under its own control
+ * flow and stops with `budget_exceeded` when the budget is used up.
  * @param options - resolved bridge options.
  * @param args - the model-facing call arguments.
  * @returns argv including the node binary as element 0.
@@ -538,8 +399,7 @@ export function runArgs(
     confirmSafe?: boolean
     /** P1 experiment: narrowed model question for an ambiguous-in-tier hint (engine `--tiered-hint`). */
     tieredHint?: boolean
-    onlyStep?: number
-    fromStep?: number
+    /** Execution budget for this call (engine `--max-steps`), not a 1-based step selector. */
     maxSteps?: number
     trace?: boolean
     manualFailFast?: boolean
@@ -554,15 +414,12 @@ export function runArgs(
   // An explicitly requested provider wins; otherwise a fully configured decision model makes the
   // run use the online provider. Ablation arms are explicit experiments, so they never get the
   // default provider (they measure a different plane).
-  // 显式 provider 赢；否则配置好的决策服务把 run 默认到统一 provider（ablate 是另一条决策面，不继承）。
   const provider = args.provider ?? (args.ablate === undefined ? options.decisionProvider : undefined)
   if (provider !== undefined) argv.push('--provider', String(provider))
   if (args.noSources) argv.push('--no-sources')
   if (args.dangerous) argv.push('--allow-dangerous')
   if (args.confirmSafe) argv.push('--confirm-safe')
   if (args.tieredHint) argv.push('--tiered-hint')
-  if (args.onlyStep !== undefined) argv.push('--only-step', String(args.onlyStep))
-  if (args.fromStep !== undefined) argv.push('--from-step', String(args.fromStep))
   if (args.maxSteps !== undefined) argv.push('--max-steps', String(args.maxSteps))
   if (args.trace) argv.push('--trace')
   if (args.manualFailFast) argv.push('--manual-fail-fast')
@@ -572,14 +429,16 @@ export function runArgs(
 
 /**
  * The argv for one `learn` invocation: the recorded-flow door. `--json --yes` is what makes it a
- * single machine call instead of an interactive demo.
+ * single machine call instead of an interactive demo. The recording is induced into a flow app
+ * (`app.mjs`); nothing is written unless the replay gate passes. `--apps-dir` names where that app
+ * lands (the CLI's `--pack-dir` is only a legacy alias).
  * @param options - resolved bridge options.
  * @param args - the model-facing call arguments.
  * @returns argv including the node binary as element 0.
  */
 export function learnArgs(
   options: BridgeOptions,
-  args: { url?: string; goal?: string; id?: string; cdp?: string; script?: string; packDir?: string; outDir: string; headful?: boolean },
+  args: { url?: string; goal?: string; id?: string; cdp?: string; script?: string; appsDir?: string; outDir: string; headful?: boolean },
 ): string[] {
   const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []), '--experimental-strip-types', path.join(options.repoPath, 'tools', 'learn.ts'), '--json', '--yes']
   if (args.url) argv.push('--url', args.url)
@@ -587,82 +446,9 @@ export function learnArgs(
   if (args.id) argv.push('--id', args.id)
   if (args.cdp) argv.push('--cdp', args.cdp)
   if (args.script) argv.push('--script', args.script)
-  if (args.packDir) argv.push('--pack-dir', args.packDir)
+  if (args.appsDir) argv.push('--apps-dir', args.appsDir)
   if (args.headful) argv.push('--headful')
   argv.push('--out', args.outDir)
-  return argv
-}
-
-/**
- * The argv for one semantic-flow run (`src/flow/semantic-flow.ts`): the same tool contract as packs,
- * dispatched to the site-agnostic template. `ablate` maps to the engine's ablation planes
- * (`--laya none --escalate none` — SiteProfile hints, rules, and list steps only); anything else
- * runs the real decision model (`--laya onnx`) with the LLM teacher (`--escalate llm`), and the
- * model/endpoint's absence degrades exactly like the pack door: blocked steps, honest counts.
- * @param options - resolved bridge options.
- * @param args - the model-facing call arguments (`site` selects the profile to run against).
- * @returns argv including the node binary as element 0.
- */
-export function flowRunArgs(
-  options: BridgeOptions,
-  args: {
-    app: string
-    site: string
-    outDir: string
-    dry?: boolean
-    ablate?: "stub" | "rules-only"
-    provider?: string
-    dangerous?: boolean
-    /** Visible browser window on the engine host (engine `--headful`). */
-    headful?: boolean
-    slots?: Record<string, string>
-  },
-): string[] {
-  const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []),
-    '--experimental-strip-types', path.join(options.repoPath, 'src', 'flow', 'semantic-flow.ts')]
-  argv.push('--app', args.app, '--site', args.site, '--out', args.outDir, '--quiet')
-  if (args.dry) argv.push('--dry')
-  if (args.headful) argv.push('--headful')
-  // 默认就是真模型面；`ablate` 只做消融实验（rules-only = 不装模型，stub = 会答但永不过闸）。
-  if (args.ablate === 'rules-only') argv.push('--laya', 'none', '--escalate', 'none')
-  else if (args.ablate === 'stub') argv.push('--laya', 'unsure', '--escalate', 'none')
-  else argv.push('--laya', 'onnx', '--escalate', 'llm')
-  if (args.dangerous) argv.push('--allow-dangerous')
-  for (const [key, value] of Object.entries(args.slots ?? {})) argv.push('--slot', `${key}=${value}`)
-  return argv
-}
-
-/**
- * The argv for one plan call (`src/flow/plan-flow.ts`): goal + seed → template + site profile, gated by
- * a replay before anything is written. `--json --yes` is what makes it a single machine call — the
- * interactive door (per-step y/n) is not available to a tool, and the dangerous-step demo gate is
- * engine-side: `--allow-dangerous-demo` only for fixtures/sandboxes.
- * @param options - resolved bridge options.
- * @param args - the model-facing call arguments.
- * @returns argv including the node binary as element 0.
- */
-export function planArgs(
-  options: BridgeOptions,
-  args: {
-    goal: string
-    seed: string
-    app: string
-    site?: string
-    force?: boolean
-    dangerousDemo?: boolean
-    planner?: 'scripted' | 'llm'
-    /** Visible browser window on the engine host during the planning walk (engine `--headful`). */
-    headful?: boolean
-  },
-): string[] {
-  const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []),
-    '--experimental-strip-types', path.join(options.repoPath, 'src', 'flow', 'plan-flow.ts'), '--json', '--yes']
-  argv.push('--goal', args.goal, '--seed', args.seed, '--app', args.app)
-  if (args.site) argv.push('--site', args.site)
-  if (args.force) argv.push('--force')
-  if (args.dangerousDemo) argv.push('--allow-dangerous-demo')
-  if (args.planner) argv.push('--planner', args.planner)
-  if (args.headful) argv.push('--headful')
   return argv
 }
 
@@ -675,11 +461,6 @@ const ENV_BASE = [
 ]
 const ENV_PROXY = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy']
 
-/**
- * The environment for one engine child process.
- * @param options - resolved bridge options (env mode + explicit forward list).
- * @returns a fresh env object for `spawn`.
- */
 /**
  * Unified decision-service environment variables (`src/model/decision-service.ts`):
  * service address, bearer key, and model id. One map so tests can pin the contract.
@@ -719,6 +500,11 @@ export function decisionEnv(decision: BridgeOptions['decisionModel'] | undefined
   return env
 }
 
+/**
+ * The environment for one engine child process.
+ * @param options - resolved bridge options (env mode + explicit forward list).
+ * @returns a fresh env object for `spawn`.
+ */
 export function buildEnv(options: BridgeOptions): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = (() => {
     if (options.envMode === 'inherit') return { ...process.env }
@@ -747,9 +533,15 @@ export function buildEnv(options: BridgeOptions): NodeJS.ProcessEnv {
  * harness sandbox policy: a deployment that enables this plugin is trusting `repoPath`.
  * @param options - resolved bridge options.
  * @param argv - full argv (element 0 is the binary).
+ * @param envOverride - extra entries merged over the deployment environment (used to point the
+ *   listing at a configured `AMBERFLOW_HOME`).
  * @returns the exit code (null when killed), bounded stdout/stderr, and whether the timeout fired.
  */
-export function runProcess(options: BridgeOptions, argv: string[]): Promise<ProcessOutcome> {
+export function runProcess(
+  options: BridgeOptions,
+  argv: string[],
+  envOverride?: NodeJS.ProcessEnv,
+): Promise<ProcessOutcome> {
   const [bin, ...args] = argv
   if (bin === undefined || bin === '') {
     return Promise.reject(new Error('runProcess: argv must name a binary'))
@@ -757,7 +549,7 @@ export function runProcess(options: BridgeOptions, argv: string[]): Promise<Proc
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, {
       cwd: options.repoPath,
-      env: buildEnv(options),
+      env: { ...buildEnv(options), ...(envOverride ?? {}) },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let stdout = ''
@@ -804,12 +596,22 @@ export function runProcess(options: BridgeOptions, argv: string[]): Promise<Proc
   })
 }
 
-/** One step of an expanded (dry-run) plan. */
-export interface PlanStep {
+/** One step (or one dry-run call) in the compact, model-facing run view. */
+export interface RunStep {
   index: number
-  /** `browser` or `tool`. */
-  kind: string
   desc: string
+  /** `done` / `blocked` / `failed` / `refused` for executed steps; `ok` / `failed` for dry calls. */
+  status: string
+  /** Stable author anchor (`ctx.step(..., { id })`); absent when the step had none. */
+  id?: string
+  /** Which `ctx` call produced this row (`open` / `step` / `arrive` / `done` / `run`); dry runs only. */
+  call?: string
+  /** Page the call acted from; dry runs only. */
+  url?: string
+  /** How the engine resolved the step (browser steps, when the artifact records it). */
+  method?: string
+  stop_code?: string
+  obstacle?: string
 }
 
 /** The compact, model-facing view of one app run. */
@@ -822,7 +624,7 @@ export interface RunSummary {
   ok: boolean
   /** Process exit code, `null` when it was killed (the timeout path). */
   exitCode: number | null
-  /** True when `--dry` only expanded the plan: nothing ran and nothing was verified. */
+  /** True when `--dry` only expanded the flow's call sequence: nothing ran and nothing was verified. */
   dry: boolean
   completed: string
   /** Failed subgoals only — the full per-step table lives in the report file. */
@@ -835,43 +637,29 @@ export interface RunSummary {
    */
   failedTools: string[]
   invariants: { held: number; total: number; failed: string[] }
-  /** The expanded steps of a dry run (bounded by {@link MAX_PLAN_STEPS}); empty otherwise. */
-  plan: PlanStep[]
   /** 本次运行的模型可见状态：passed/partial/failed/blocked/dry/needs_human。 */
   status?: string
   /** 完整旅程 + 不变量成立；分段/停止/dry 为 false。 */
   verified?: boolean
-  /** 本次只跑了分段（only/from/max）。 */
+  /** 本次只跑了分段（max_steps 预算用满）。 */
   partial?: boolean
   /** 固定结果 JSON 的路径；Agent 需要详细步骤时读它。 */
   resultPath?: string
-  /** 有界的逐步骤视图（失败/完成都可读）。 */
-  steps?: Array<{ index: number; desc: string; status: string; method?: string; stop_code?: string; obstacle?: string }>
+  /** 有界的逐步骤视图（失败/完成都可读）；dry 运行是调用序列。 */
+  steps?: RunStep[]
   /** 第一个失败步骤的结构化原因。 */
   failure?: { step: number; desc: string; stop_code?: string; obstacle?: string }
-  /** Total expanded steps of a dry run; 0 otherwise. */
-  planSteps: number
   outDir: string
   /** The report to read, or '' when the run wrote none (a dry run, or one killed before it did). */
   reportPath: string
   stdoutTail: string
   timedOut: boolean
   /**
-   * Semantic-flow runs only: the engine's per-level tally line
-   * (`rule N · laya M · escalate K (written back W) · list L · blocked B`) — the migration
-   * evidence in one string. Absent for pack apps.
-   */
-  line?: string
-  /** Semantic-flow runs only: where the learned site profile was written ('' when none was). */
-  profilePath?: string
-  /**
    * Which tier the run executed on — **`on` is the default and the only normal one** (real ONNX
    * model in place); `off(missing)` means the artifacts are absent, so the rules ladder did
    * everything a rule could and model-needed steps blocked honestly; `off(ablation:stub)` /
    * `off(ablation:rules-only)` mark an explicit **ablation arm** (`ablate`), i.e. an experiment
    * that answers "what happens without this layer" — never a routine way to run.
-   * Read from the engine's `model_status` in the artifact (pack door) or, for the semantic door,
-   * from the honest tier with a fallback onto the requested plane (`laya: onnx|none|scripted`).
    * Absent only for artifacts written by older engines: no line rather than a guess.
    */
   model?: string
@@ -881,26 +669,6 @@ export interface RunSummary {
    * SEE the ladder working instead of reading step logs. Absent for older artifacts.
    */
   decisions?: string
-}
-
-/** What one `…_plan` call answered: the planned template + site profile, or the honest failure. */
-export interface PlanSummary {
-  /** `planned` = the replay gate passed and files were written; `failed` = nothing was written. */
-  status: string
-  ok: boolean
-  app: string
-  site: string
-  /** The planned steps with where each completion signal came from (induced | contract). */
-  steps: { id: string; desc: string; signal_source: string }[]
-  /** The gate run's tally line — same shape as {@link RunSummary.line}. */
-  gate: string
-  /** Blocked steps when the replay gate failed; absent when no gate diagnostics were produced. */
-  blocked?: string[]
-  /** Absolute paths once written; '' when the plan wrote nothing (a failed gate never does). */
-  templatePath: string
-  profilePath: string
-  /** Failure cause when status is `failed`; '' otherwise. */
-  error: string
 }
 
 /**
@@ -950,73 +718,98 @@ export function pruneRunDirs(keep: number, minAgeMs = 3_600_000, root = os.tmpdi
 }
 
 /**
- * Read a `--dry` expansion out of the CLI's stdout.
+ * Read the flow dry-run document out of the CLI's stdout.
+ *
+ * A script app has no static step table: `--dry` dry-runs the script (same implementation as
+ * `apps check`) and prints its call sequence as `events[]`. Each event becomes one row of the
+ * summary's `steps[]`, so the model sees what the script WOULD call without a browser opening.
  * @param stdout - the process output.
- * @returns the plan, or null when the stream is not an expansion document.
+ * @returns the dry call sequence, or null when the stream is not a dry-run document.
  */
-function readDryPlan(stdout: string): { app: string; steps: PlanStep[]; model?: string } | null {
+function readDryRun(stdout: string): { app: string; steps: RunStep[]; model?: string; problems: string[] } | null {
   const doc = parseJsonDocument(stdout)
-  if (doc === null || !Array.isArray(doc['steps'])) return null
-  const steps = asRecords(doc['steps'])
-  if (steps.length !== (doc['steps'] as unknown[]).length) return null
+  if (doc === null) return null
+  const events = asRecords(doc['events'])
+  const hasEvents = Array.isArray(doc['events'])
+  const hasSteps = Array.isArray(doc['steps'])
+  if (!hasEvents && !hasSteps) return null
+  const steps = hasEvents
+    ? events.map((ev, i): RunStep => {
+      const call = asText(ev['call'])
+      const index = typeof ev['i'] === 'number' ? ev['i'] : i + 1
+      const desc = asText(ev['desc']) || (call === '' ? `call ${String(index)}` : call)
+      const url = asText(ev['url'])
+      const stopCode = asText(ev['stop_code'])
+      return {
+        index,
+        desc,
+        status: ev['ok'] === false ? 'failed' : 'ok',
+        ...(call === '' ? {} : { call }),
+        ...(url === '' ? {} : { url }),
+        ...(stopCode === '' ? {} : { stop_code: stopCode }),
+      }
+    })
+    // Older/expanded shapes print static steps; keep them readable rather than rejecting the doc.
+    : asRecords(doc['steps']).map((st, i): RunStep => ({
+      index: typeof st['index'] === 'number' ? st['index'] : i + 1,
+      desc: asText(st['desc'], `step ${String(i + 1)}`),
+      status: 'planned',
+    }))
+  const problems = Array.isArray(doc['problems']) ? (doc['problems'] as unknown[]).map(String) : []
   const model = asText(doc['model_status'])
   return {
     app: asText(doc['app']),
-    steps: steps.map((step, i) => ({
-      index: asNumber(step['index'], i),
-      kind: asText(step['kind']),
-      desc: asText(step['desc']),
-    })),
+    steps,
+    problems,
     ...(model === '' ? {} : { model }),
   }
 }
 
 /**
- * Summarize `app-runner`'s artifacts. Only FAILURES are listed: the whole step table is a file the
- * caller can read, and a 60-step journey should not be pasted into a session by default.
+ * Summarize an `app-runner` run's artifacts. Only FAILURES are listed: the whole step table is a
+ * file the caller can read, and a 60-step flow should not be pasted into a session by default.
  *
- * A run may legitimately produce no `<app>-result.json` and still succeed: `--dry` expands the plan,
- * prints it, verifies nothing and writes nothing, exiting 0. That is an expansion, not a failure, so
- * it is summarized as such instead of being reported as "the run did not reach the artifact stage".
+ * A run may legitimately produce no `<app>-result.json` and still succeed: `--dry` dry-runs the
+ * script (or expands the flow), prints its call sequence, verifies nothing and writes nothing,
+ * exiting 0. That is an expansion, not a failure, so it is summarized as such instead of being
+ * reported as "the run did not reach the artifact stage".
  * @param outDir - the run directory the bridge passed as `--out`.
  * @param app - the app id.
  * @param outcome - the finished process.
- * @param runTool - the model-visible run tool name, used when translating the engine's probe refusal.
+ * @param runTool - the model-visible run tool name, used in diagnostics.
  * @returns the compact summary.
- * @throws when the run ended without a result artifact and without an expansion to show for it.
+ * @throws when the run ended without a result artifact and without an expansion to show for it, or
+ *   when the dry run found problems in the script's call sequence.
  */
 export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcome, runTool?: string): RunSummary {
   const resultPath = path.join(outDir, `${app}-result.json`)
   if (!fs.existsSync(resultPath)) {
-    // Parse the FULL stdout: a 24-step plan is several kilobytes and the display excerpt would cut
+    // Parse the FULL stdout: a call sequence is several kilobytes and the display excerpt would cut
     // the document in half, which looks exactly like "this was not a dry run".
-    const plan = readDryPlan(parseSource(outcome))
-    if (plan !== null && outcome.code === 0 && !outcome.timedOut) {
+    const dry = readDryRun(parseSource(outcome))
+    if (dry !== null && dry.problems.length > 0) {
+      throw new Error(
+        `${runTool ?? `${app} run`}: the dry run found problems in the script's call sequence: `
+        + `${dry.problems.join('; ')}`,
+      )
+    }
+    if (dry !== null && outcome.code === 0 && !outcome.timedOut) {
       return {
         ok: true, exitCode: outcome.code, dry: true, completed: '',
         blocked: [], blockedTotal: 0, refused: [], failedTools: [],
         invariants: { held: 0, total: 0, failed: [] },
-        plan: plan.steps.slice(0, MAX_PLAN_STEPS), planSteps: plan.steps.length,
+        steps: dry.steps.slice(0, MAX_STEPS),
         outDir, reportPath: '', stdoutTail: outcome.stdout, timedOut: false, status: 'dry', verified: false,
-        ...(plan.model === undefined ? {} : { model: plan.model }),
+        ...(dry.model === undefined ? {} : { model: dry.model }),
       }
     }
     const detail = firstLines(outcome.stderr) || firstLines(outcome.stdout)
-    // The engine refuses probe packs with a CLI-worded pointer to its own drivers (and sometimes to
-    // `--dry`, which the model just did). Translate that into what THIS door offers instead.
-    if (/没有 journey|测量型/.test(detail)) {
-      throw new Error(
-        `amberflow-bridge: ${JSON.stringify(app)} is a measurement probe (no journey) and cannot run `
-        + `through ${runTool ?? 'the …_run tool'}; read its declaration with the apps tool `
-        + `(kind='probe') or run the checkout's probe drivers directly. CLI said: ${detail}`,
-      )
-    }
     throw new Error(
       `no ${app}-result.json in ${outDir} (exit ${outcome.code ?? 'killed'}) — run did not reach the artifact stage`
       + (detail ? `; cause: ${detail}` : ''),
     )
   }
-  let raw: Record<string, unknown>
+  let raw: JsonObject
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(resultPath, 'utf-8'))
     // Shape matters as much as syntax: a stray array or scalar parses fine and would otherwise be
@@ -1024,7 +817,7 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
       throw new Error('not a JSON object')
     }
-    raw = parsed as Record<string, unknown>
+    raw = parsed as JsonObject
   } catch (error) {
     // A result file cut short (killed mid-write) must read as a diagnosis, not a bare SyntaxError.
     throw new Error(
@@ -1044,20 +837,27 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
     .filter(t => t['done'] !== true && asText(t['refused']) === '')
     .map(t => `${asText(t['desc'])}: signal not held (exit ${asText(t['code'], '?')})`)
   const invariants = asRecords(raw['invariants'])
+  // Flow scripts run behind `ctx.step` / `ctx.arrive`, whose trace is the step table: the runner
+  // records it under `steps` when it can (agent view) and `step_traces` on the browser path. Older
+  // artifacts used `subgoals`; keep that fallback so a stale result still summarizes.
   const traces = asRecords(raw['step_traces'])
-  const rawSteps = traces.length ? traces : subgoals
+  const agentSteps = asRecords(raw['steps'])
+  const rawSteps = agentSteps.length ? agentSteps : traces.length ? traces : subgoals
   const subgoalMeta = new Map(subgoals.map((sg, i) => [i + 1, sg]))
-  const steps = rawSteps.slice(0, 20).map((st, i) => {
+  const indexOffset = agentSteps.length ? 0 : traces.length ? 1 : 0
+  const steps = rawSteps.slice(0, MAX_STEPS).map((st, i): RunStep => {
     const methods = Array.isArray(st['methods']) ? st['methods'].map(String).filter(Boolean) : []
     const status = asText(st['status'], 'unknown')
-    const index = typeof st['index'] === 'number' ? (traces.length ? st['index'] + 1 : st['index']) : i + 1
+    const index = typeof st['index'] === 'number' ? st['index'] + indexOffset : i + 1
     const meta = subgoalMeta.get(index) ?? {}
+    const id = asText(st['id'])
     const stop = asText(st['stop_code']) || asText(meta['stop_code'])
     const obstacle = asText(st['obstacle']) || asText(meta['obstacle'])
     return {
       index,
       desc: asText(st['desc'], `step ${i + 1}`),
       status,
+      ...(id === '' ? {} : { id }),
       ...(methods.length ? { method: methods[methods.length - 1]! } : {}),
       ...(stop !== '' ? { stop_code: stop } : {}),
       ...(obstacle !== '' ? { obstacle } : {}),
@@ -1065,7 +865,12 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
   })
   const failed = steps.find(st => st.status === 'blocked' || st.status === 'failed' || st.status === 'refused')
   const partial = raw['partial'] === true
-  const manualPending = asRecords(raw['manual_steps']).some(m => m['done'] !== true)
+  // A flow script reports "a human must act here" as a structured stop on the script record
+  // (`ctx.manual` on a non-TTY call), not as a per-step table entry; older artifacts used
+  // `manual_steps`. Both must read as `needs_human`, never as a plain failure.
+  const scriptInfo = asRecord(raw['script'])
+  const scriptStop = scriptInfo === null ? '' : asText(scriptInfo['stop_code'])
+  const manualPending = asRecords(raw['manual_steps']).some(m => m['done'] !== true) || scriptStop === 'needs_human'
   const status = manualPending ? 'needs_human'
     : partial ? 'partial' : raw['ok'] === true && outcome.code === 0 ? 'passed'
     : blocked.length ? 'blocked' : failedTools.length ? 'failed' : invariants.some(i => i['held'] !== true) ? 'failed' : 'failed'
@@ -1083,8 +888,6 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
       total: invariants.length,
       failed: invariants.filter(i => i['held'] !== true).map(i => asText(i['id'])),
     },
-    plan: [],
-    planSteps: 0,
     outDir,
     resultPath,
     status,
@@ -1106,7 +909,7 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
 }
 
 /** `model_status` / `decisions.line` from the artifact; keys omitted when an older engine wrote none. */
-function modelFields(raw: Record<string, unknown>): { model?: string, decisions?: string } {
+function modelFields(raw: JsonObject): { model?: string, decisions?: string } {
   const out: { model?: string, decisions?: string } = {}
   const status = asText(raw['model_status'])
   if (status !== '') out.model = status
@@ -1141,7 +944,8 @@ export interface LearnSummary {
   invariants: string
   /** Invariant ids that failed on the rules-only replay (why `saved` is false). */
   problems?: string[]
-  /** Where the pack was written; absolute once it passed through the service, `false` when not saved. */
+  /** Where the flow app (`app.mjs`) was written; absolute once it passed through the service,
+   * `false` when the replay gate refused to save it. */
   saved: string | false
 }
 
@@ -1169,143 +973,6 @@ export function summarizeLearn(stdout: string): LearnSummary {
     ...(Array.isArray(replay['failing']) && (replay['failing'] as unknown[]).length
       ? { problems: (replay['failing'] as unknown[]).map(String) } : {}),
     saved: typeof saved === 'string' && saved !== '' ? saved : false,
-  }
-}
-
-/**
- * Summarize a semantic-flow run's artifact (`<app>-<site>-flow-result.json`), into the SAME
- * shape as {@link summarizeRun} plus the migration line. Only failures are listed; the per-step
- * table lives in the report file the summary names.
- *
- * A `--dry` semantic run expands the compiled steps and writes nothing — same contract as packs,
- * so the expansion is summarized as `dry: true`, not as a missing artifact.
- * @param outDir - the run directory the bridge passed as `--out`.
- * @param app - the template id.
- * @param site - the site key the template ran against.
- * @param outcome - the finished process.
- * @returns the compact summary.
- * @throws when the run ended without a result artifact and without an expansion to show for it.
- */
-export function summarizeFlow(
-  outDir: string, app: string, site: string, outcome: ProcessOutcome,
-): RunSummary {
-  const resultPath = path.join(outDir, `${app}-${site}-flow-result.json`)
-  if (!fs.existsSync(resultPath)) {
-    const plan = readDryPlan(parseSource(outcome))
-    if (plan !== null && outcome.code === 0 && !outcome.timedOut) {
-      return {
-        ok: true, exitCode: outcome.code, dry: true, completed: '',
-        blocked: [], blockedTotal: 0, refused: [], failedTools: [],
-        invariants: { held: 0, total: 0, failed: [] },
-        plan: plan.steps.slice(0, MAX_PLAN_STEPS), planSteps: plan.steps.length,
-        outDir, reportPath: '', stdoutTail: outcome.stdout, timedOut: false,
-      }
-    }
-    const detail = firstLines(outcome.stderr) || firstLines(outcome.stdout)
-    throw new Error(
-      `no ${app}-${site}-flow-result.json in ${outDir} (exit ${outcome.code ?? 'killed'})`
-      + ' — the semantic run did not reach the artifact stage'
-      + (detail ? `; cause: ${detail}` : ''),
-    )
-  }
-  let raw: Record<string, unknown>
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(resultPath, 'utf-8'))
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      throw new Error('not a JSON object')
-    }
-    raw = parsed as Record<string, unknown>
-  } catch (error) {
-    throw new Error(
-      `unreadable ${app}-${site}-flow-result.json in ${outDir}: `
-      + (error instanceof Error ? error.message : 'not valid JSON'),
-    )
-  }
-  const steps = asRecords(raw['steps'])
-  const blocked = steps
-    .filter(s => s['status'] === 'blocked')
-    .map(s => ({ desc: asText(s['desc']), obstacle: asText(s['obstacle'], 'blocked') }))
-  const refused = steps
-    .filter(s => s['status'] === 'refused')
-    .map(s => `${asText(s['desc'])}: ${asText(s['obstacle'], 'refused')}`)
-  const doneCount = steps.filter(s => s['status'] === 'done' || s['status'] === 'skipped').length
-  const invariants = asRecords(raw['invariants'])
-  return {
-    ok: raw['ok'] === true && outcome.code === 0,
-    exitCode: outcome.code,
-    dry: false,
-    completed: `${String(doneCount)}/${String(steps.length)}`,
-    blocked: blocked.slice(0, MAX_FAILURES),
-    blockedTotal: blocked.length,
-    refused,
-    failedTools: [],
-    invariants: {
-      held: invariants.filter(i => i['held'] === true).length,
-      total: invariants.length,
-      failed: invariants.filter(i => i['held'] !== true).map(i => asText(i['id'])),
-    },
-    plan: [],
-    planSteps: 0,
-    outDir,
-    resultPath,
-    status: raw['ok'] === true && outcome.code === 0 ? 'passed' : 'failed',
-    verified: raw['ok'] === true && outcome.code === 0,
-    steps: steps.slice(0, 20).map((st, i) => ({
-      index: typeof st['index'] === 'number' ? st['index'] + 1 : i + 1,
-      desc: asText(st['desc'], `step ${i + 1}`),
-      status: asText(st['status'], 'unknown'),
-      ...(asText(st['obstacle']) !== '' ? { obstacle: asText(st['obstacle']) } : {}),
-    })),
-    reportPath: fs.existsSync(path.join(outDir, `${app}-${site}-flow-report.md`))
-      ? path.join(outDir, `${app}-${site}-flow-report.md`)
-      : '',
-    stdoutTail: outcome.stdout,
-    timedOut: outcome.timedOut,
-    line: asText(raw['line']),
-    profilePath: asText(raw['profile_path']),
-    // Tier: the engine's honest `model_status` when present; otherwise the older artifacts'
-    // requested plane (`laya: onnx|…`) read the P0 way. No field at all = no tier line, never a guess.
-    ...(() => {
-      const fields = modelFields(raw)
-      if (fields.model !== undefined) return fields
-      const plane = asText(raw['laya'])
-      if (plane === '') return fields
-      if (plane === 'onnx') return { ...fields, model: 'on' }
-      if (plane === 'none') return { ...fields, model: 'off(rules-only)' }
-      return { ...fields, model: 'off(scripted)' }
-    })(),
-  }
-}
-
-/**
- * Summarize `plan-flow --json` output: the replay gate is the engine's contract, so the tool
- * reports `status: planned` only when files were written. A failed plan prints
- * `{"status":"failed","error":…}` — that is a RESULT, not a crash, and it is surfaced as such.
- * @param stdout - the CLI's stdout (it prints one JSON document, walk lines before it).
- * @returns the compact plan summary; template/profile paths absolute.
- * @throws when the CLI produced no machine-readable document at all.
- */
-export function summarizePlan(stdout: string): PlanSummary {
-  const doc = parseJsonDocument(stdout)
-  if (doc === null) {
-    throw new Error(`plan printed no JSON document; first lines: ${firstLines(stdout) || '(empty)'}`)
-  }
-  const written = asRecord(doc['written'])
-  const steps = asRecords(doc['steps'])
-  return {
-    status: asText(doc['status'], 'unknown'),
-    ok: doc['ok'] === true,
-    app: asText(doc['app']),
-    site: asText(doc['site']),
-    steps: steps.map(s => ({
-      id: asText(s['id']), desc: asText(s['desc']), signal_source: asText(s['signal_source']),
-    })),
-    gate: asText(doc['gate']),
-    ...(Array.isArray(doc['blocked']) && (doc['blocked'] as unknown[]).length
-      ? { blocked: (doc['blocked'] as unknown[]).map(String) } : {}),
-    templatePath: typeof written?.['flow'] === 'string' ? written['flow'] : '',
-    profilePath: typeof written?.['profile'] === 'string' ? written['profile'] : '',
-    error: asText(doc['error']),
   }
 }
 

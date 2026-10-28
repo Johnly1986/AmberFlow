@@ -28,7 +28,7 @@ export const GLOBAL_USAGE = `AmberFlow — 冻结计划的浏览器自动化
   doctor    环境、配置、决策源体检
   config    查看 / 修改机器配置
   model     本地决策模型状态与安装
-  online    真实站点测试套件（校验 / smoke / core / deep / probe）
+  test      真实站点测试套件（校验 / smoke / core / deep / probe）
 
 全局选项：
   -h, --help       显示帮助
@@ -42,7 +42,7 @@ export const GLOBAL_USAGE = `AmberFlow — 冻结计划的浏览器自动化
   --timeout SEC    覆盖单步 / 整体超时（按命令定义）
 
 示例：
-  amber online --tier smoke
+  amber test --tier smoke
   amber run --goal "把商品加入购物车" --url https://shop.example.com/p/1
   amber record https://shop.example.com --name add-to-cart
   amber doctor
@@ -61,19 +61,19 @@ amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]`,
     ],
     flags: [
       "--headful / --headless    显示 / 不显示浏览器窗口（run 默认 headless）",
-      "--dry-run                 只展开、校验、打印计划，不执行",
+      "--dry-run                 只做 dry 调用序列/展开校验，不执行",
       "--plan [文件]             输入的计划文件；默认 ./.amberflow/plan.json",
       "--save-plan <文件>        生成计划的保存位置；默认 ./.amberflow/plan.json",
       "--out <目录>              结果 JSON / Markdown 的落点",
-      "--slot k=v                覆盖包声明的参数；可重复",
+      "--slot k=v                覆盖应用声明的参数；可重复",
       "--provider <名字>         仅本次实验/消融覆盖；默认三件套或本地模型",
       "--skip-data               跳过数据腿（旧 --no-sources）",
       "--allow-dangerous         放行危险工具步；不带则结构化拒绝并 exit 3",
-      "--only-step N             只跑第 N 步（1-based；声明式应用）",
-      "--from-step N             从第 N 步开始（1-based）",
-      "--max-steps N             本段最多执行几步",
+      "--confirm-safe            危险动作仍逐次按干跑证据确认",
+      "--manual-fail-fast        非交互遇到人工步直接 needs_human，不拉有头浏览器",
+      "--max-steps N             ctx.step/arrive 执行预算（调试用；用满后 partial）",
       "--trace                   结果 JSON 带每步执行证据（step_traces）",
-      "--emit-trace <文件>       脚本应用：把本次执行轨迹（三个 sha + 逐次 ctx 调用）写成文件",
+      "--emit-trace <文件>       脚本应用：把本次执行轨迹（script/inputs 两个 sha + 逐次 ctx 调用）写成文件",
       "--replay <文件>           脚本应用：按已记录轨迹重放（版本/槽位不一致直接拒跑）",
       "--remember                开启学习环 sidecar（旧 --learn-hints）",
       "--memory <文件>           指定 sidecar 落点",
@@ -97,7 +97,7 @@ amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]`,
       "--id <id>                 兼容旧名；等价 --name",
       '--goal "<一句话>"         目标；默认用页面标题',
       "--out <目录>              录制 / 回放中间产物的落点",
-      "--pack-dir <目录>         应用包落点；默认 $AMBERFLOW_HOME/apps",
+      "--apps-dir <目录>        应用落点；默认 $AMBERFLOW_HOME/apps",
       "--script <文件>           用录好的动作回放，不做现场演示",
       "--headless                无窗口录制；默认 record 是 headful",
       "--yes                     不再逐条确认",
@@ -141,34 +141,25 @@ amber plan run [--plan <文件>] [--reset] [--replan] [--confirm allow|ask|deny]
     name: "apps",
     summary: "列出 / 查看 / 校验应用",
     usage: `amber apps list [--json]
-amber apps show <应用> [--json]
-amber apps new <id> [--kind flow|data] [--format app|pack] [--host HOST] [--dir <目录>] [--force] [--print] [--json]
+amber apps show <应用|脚本> [--code] [--json]
+amber apps new <id> [--goal <目标>] [--host HOST] [--url <入口页>] [--dir <目录>] [--force] [--print] [--json]
 amber apps check [<应用|脚本>] [--json]
-amber apps explain <脚本> [--json]
-amber apps emit <脚本> [--out <文件>] [--json]
-amber apps path <应用>
-amber apps set-step <应用> --index N --step-file <json> [--host HOST]
-amber apps set-invariant <应用> --invariants-file <json>
-amber apps remove-step <应用> --index N
+amber apps explain <应用|脚本> [--json]
+amber apps path <应用> [--json]
 amber apps remove <应用> [--yes] [--force]`,
     examples: ["amber apps list", "amber apps check $AMBERFLOW_HOME/apps/my-app/app.mjs",
       "amber apps explain $AMBERFLOW_HOME/apps/my-app/app.mjs",
-      "amber apps emit $AMBERFLOW_HOME/apps/my-app/app.mjs --out /tmp/my-app.json"],
+      "amber apps new my-app --url https://shop.example.com/ --goal \"把商品加入购物车\""],
     flags: [
-      "--kind flow|data           apps new 的形态：flow=运行期控制流（默认）；data=声明式数据脚本",
-      "--format app|pack          apps new 的落盘格式：app=app.mjs；pack=pack.json（便于结构化编辑）",
-      "--host HOST                apps new / set-step 的允许主机；可重复",
-      "--index N                  set-step / remove-step 的 1-based 步骤序号",
-      "--step-file <json>         set-step 的步骤 JSON 文件（desc/start_url/target_hint/signal…）",
-      "--invariants-file <json>   set-invariant 的验收条件数组",
-      "--goal <一句话>            apps new 的目标（pack 格式）",
+      "--goal <一句话>            apps new 的目标",
+      "--host HOST                apps new 的允许主机；可重复（缺省从 --url 推断）",
+      "--url <http(s) URL>        apps new 的入口页",
       "--dir <目录>               apps new 的落点（默认 $AMBERFLOW_HOME/apps/<id>）",
-      "--force                    apps new 允许覆盖已存在的 app.mjs",
+      "--code                     apps show 返回完整源码（供 Agent 直接看/编辑）",
+      "--force                    apps new 覆盖已存在文件 / apps remove 允许删内置应用",
       "--print                    apps new 只打印源码、不落盘",
       "--json                    机器可读输出",
-      "--out <文件>              apps emit 的落点（默认 ./.amberflow/emit/<id>.json；flow 脚本不可 emit）",
       "--yes                     确认删除（非 TTY 必须给）",
-      "--force                   允许删除内置应用（危险）",
     ],
     related: ["run", "record"],
   },
@@ -252,24 +243,28 @@ amber model path [--json]`,
     related: ["doctor", "config"],
   },
   {
-    name: "online",
+    name: "test",
     summary: "真实站点测试套件",
-    usage: `amber online --validate
-amber online --list [--tier smoke|core|deep|probe|all|default]
-amber online [--tier smoke|core|deep|probe|all|default] [--case ID] [--site SITE]
-             [--headed] [--out DIR] [--json] [--provider NAME] [--require-all]`,
+    usage: `amber test --validate
+amber test --list [--tier smoke|core|deep|probe|all|default]
+amber test [--tier smoke|core|deep|probe|all|default] [--case ID] [--site SITE]
+           [--headful | --headless] [--out DIR] [--json] [--provider NAME]
+           [--require-all] [--max-steps N] [--timeout SEC]`,
     examples: [
-      "amber online --validate",
-      "amber online --tier smoke",
-      "amber online --tier probe --require-all",
+      "amber test --validate",
+      "amber test --tier smoke",
+      "amber test --tier probe --require-all",
     ],
     flags: [
       "--validate                离线校验全部 site/case（PR 门禁）",
       "--list                    列出选中的 case",
+      "--dry-run                 只展开选中的 case，不执行",
       "--tier                    缺省 default = smoke+core；all = smoke+core+deep",
       "--case / --site           只跑一个 case / 站点",
-      "--headed                  显示浏览器窗口",
+      "--headful / --headless    显示 / 不显示浏览器窗口（test 默认 headless）",
       "--out DIR                 证据目录（默认 $AMBERFLOW_HOME/online-runs）",
+      "--max-steps N             每个 case 内子目标预算（缺省 8）",
+      "--timeout SEC             覆盖 site/case 超时",
       "--require-all             blocked/unreachable 也按失败处理",
       "--json                    stdout 只输出 summary JSON",
       "--provider NAME           本次决策源覆盖",
@@ -287,7 +282,7 @@ export function globalHelp(includeAdvanced = false): string {
   return `${GLOBAL_USAGE}
 
 高级选项（默认隐藏）：
-  --ablate --without-hints --tiered-hint --min-confidence --nominate-provider
+  --ablate --tiered-hint --min-confidence
   这些选项主要给实验/消融使用；日常命令只在确有必要时暴露。`;
 }
 

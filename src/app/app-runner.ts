@@ -1,12 +1,12 @@
 /**
- * 应用运行器 —— 一份 `apps/<app>/pack.json` 跑完一条完整链路：
+ * 应用运行器 —— `apps/<app>/app.mjs` 的 `flow(ctx)` 跑完一条完整链路：
  *
  *   数据腿（`sources`，同一套 datasource 引擎）
  *        ↓
- *   旅程（`journey`）：**浏览器步** → 冻结计划 → 唯一的生产执行器
- *                      **工具步**   → 命令行工具（进程观察面信号 + 干跑/确认/幂等）
+ *   脚本（`flow`）：`ctx.step` / `ctx.arrive` → 唯一的生产执行器
+ *                   `ctx.run` / `ctx.dangerous` → 进程观察面信号 + 干跑/确认/幂等
  *        ↓
- *   验收（`invariants` 在**同一个浏览器会话的结束状态**上断言）
+ *   验收（`ctx.done()` 在同一浏览器会话的结束状态上断言 `meta.invariants`）
  *
  * 它**不分叉执行器**：浏览器步就是 `runSubgoalWithRetries`（执行循环
  * 始终是 `BrowserMiddleware.run`），只是把会话的生命周期握在自己手里——会话在**第一个**浏览器
@@ -54,7 +54,7 @@ import { captureStateView } from "../flow/signal-induction.ts";
 import { captureStepStateView, type StepStateView } from "../model/page-context.ts";
 import type { StateView } from "../engine/signals.ts";
 import {
-  expandPack, listPacks, resolveSourceSlots,
+  expandPack, listAppDirs, resolveSourceSlots,
   type AppPack, type ExpandedStep, type PackPace, type PackPolicy, type SourceObservation,
 } from "./app-pack.ts";
 import {
@@ -62,7 +62,7 @@ import {
   type AdapterRunContext, type ManualStepDecl, type ManualStepRequest, type ManualStepRun,
 } from "./app-adapters.ts";
 import { validateApp } from "./cross-ref.ts";
-import { dryRunFlow, loadApp, resolveApp, type LoadedScriptApp } from "./app-script.ts";
+import { dryRunFlow, loadScriptApp, type LoadedScriptApp } from "./app-script.ts";
 import { StopError, createCtx, type ToolRunRequest, type ToolRunResult } from "./ctx.ts";
 import { createReplayCtx } from "./ctx-replay.ts";
 import {
@@ -472,11 +472,11 @@ export interface AppRunResult {
   /** 本次实际用的决策提供者（名字/版本/能力）。换模型 A/B 的对照就靠它。 */
   decision_provider?: ProviderInfo;
   effective_policy?: {
-    tiered_hint: { value: boolean; source: "cli" | "pack" | "default" };
-    risk_ask: { value: "always" | "rules-only"; source: "pack" | "default" };
-    reobserve: { value: boolean; source: "pack" | "default" };
-    max_effective_repeats: { value: number; source: "pack" | "default" };
-    conf_floor: { value: number; source: "cli" | "config" | "pack" | "provider" | "default" };
+    tiered_hint: { value: boolean; source: "cli" | "app" | "default" };
+    risk_ask: { value: "always" | "rules-only"; source: "app" | "default" };
+    reobserve: { value: boolean; source: "app" | "default" };
+    max_effective_repeats: { value: number; source: "app" | "default" };
+    conf_floor: { value: number; source: "cli" | "config" | "app" | "provider" | "default" };
   };
   /** 本次实际用的决策提供者身份（CLI 解析后传进来；未提供则缺字段）。 */
   providerInfo?: ProviderInfo;
@@ -515,9 +515,21 @@ export interface AppRunResult {
     descs: string[];
     /** 全部 trace 行的判定方式（与 `decisions.ladder` 同一口径）。 */
     methods: string[];
+    /** step/arrive 的落地 URL；tool 步没有。 */
+    url?: string;
+    /** 失败时的结构化停因。 */
+    stop_code?: string;
+    /** 该次调用的结构化结果摘要（与 trace event 的 result 同一口径）。 */
+    result?: unknown;
     /** `captureStateView: true` 时这一步**开始时**的页面状态（缺字段 = 没开，缺省等价纪律）。 */
     state_view?: StepStateView;
+    /** 该 step 曾 transient failed，但后续 step / done 信号成立（仅引擎/驱动观察，不改变完成真值）。 */
+    recovered?: boolean;
+    /** 恢复它的后续 step 标识/描述（仅 recovered=true 时出现）。 */
+    recovered_by?: string | null;
   }>;
+  /** `ctx.log` 摘要（Agent 不必再读 emit-trace 就能看到业务事实）。 */
+  logs?: Array<{ i: number; desc: string; result?: unknown }>;
   /**
    * L2 脚本应用的运行账（缺字段 = 旧 `pack.json` 应用，产物逐字节不变）。
    * 脚本应用的"完成了什么"在**轨迹**里，不在静态计划里——这三样是审计最小集。
@@ -678,53 +690,73 @@ export function preflightConfig(opts: AppRunOptions = {}): void {
 
 /** §3 生效策略的形状（`effective_policy` 产物字段的单一出处）。 */
 export interface EffectivePolicy {
-  tiered_hint: { value: boolean; source: "cli" | "pack" | "default" };
-  risk_ask: { value: "always" | "rules-only"; source: "pack" | "default" };
-  reobserve: { value: boolean; source: "pack" | "default" };
-  max_effective_repeats: { value: number; source: "pack" | "default" };
-  conf_floor: { value: number; source: "cli" | "config" | "pack" | "provider" | "default" };
+  tiered_hint: { value: boolean; source: "cli" | "app" | "default" };
+  risk_ask: { value: "always" | "rules-only"; source: "app" | "default" };
+  reobserve: { value: boolean; source: "app" | "default" };
+  max_effective_repeats: { value: number; source: "app" | "default" };
+  conf_floor: { value: number; source: "cli" | "config" | "app" | "provider" | "default" };
+  done_timeout_ms: { value: number; source: "app" | "default" };
+  done_poll_ms: { value: number; source: "app" | "default" };
+  pool_ready_timeout_ms: { value: number; source: "app" | "default" };
+  pool_ready_poll_ms: { value: number; source: "app" | "default" };
 }
 
 /**
- * §3：运行策略的**生效值与来源**（CLI 本次显式 > pack.policy > provider 自报 > 缺省）。
+ * §3：运行策略的**生效值与来源**（CLI 本次显式 > meta.policy > provider 自报 > 缺省）。
  *
  * 为什么抽成函数：旧的 `runApp` 与脚本驱动（`runScriptApp`）是两条执行入口——
- * 同名的 `policy.conf_floor` 必须在两条路上生效成**同一个值**，否则"包里写了策略"
+ * 同名的 `policy.conf_floor` 必须在两条路上生效成**同一个值**，否则"meta 里写了策略"
  * 会随应用形态（数据脚本 vs flow 脚本）时灵时不灵。构造与报告读同一个对象，不分头各猜。
  */
 export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
   policy: EffectivePolicy; anyDeclared: boolean;
 } {
   // §3：运行策略的**生效值与来源**在这里一次算清（构造与报告读同一个对象，不分两头各猜一遍）。
-  // 优先级：CLI(本次显式) > pack.policy(声明) > 缺省(= 今天)。缺省一个都没动。
+  // 优先级：CLI(本次显式) > meta.policy(声明) > 缺省(= 今天)。缺省一个都没动。
   const declaredPolicy = ((pack as unknown as Record<string, unknown>)["policy"] ?? {}) as PackPolicy;
   const policy: EffectivePolicy = {
     tiered_hint: {
       value: opts.tieredHint ?? declaredPolicy.tiered_hint ?? false,
       source: opts.tieredHint !== undefined ? "cli" as const
-        : declaredPolicy.tiered_hint !== undefined ? "pack" as const : "default" as const,
+        : declaredPolicy.tiered_hint !== undefined ? "app" as const : "default" as const,
     },
     risk_ask: {
       value: declaredPolicy.risk_ask ?? "always",
-      source: declaredPolicy.risk_ask !== undefined ? "pack" as const : "default" as const,
+      source: declaredPolicy.risk_ask !== undefined ? "app" as const : "default" as const,
     },
     reobserve: {
       value: declaredPolicy.reobserve ?? true,
-      source: declaredPolicy.reobserve !== undefined ? "pack" as const : "default" as const,
+      source: declaredPolicy.reobserve !== undefined ? "app" as const : "default" as const,
     },
     max_effective_repeats: {
       value: declaredPolicy.max_effective_repeats ?? 3,
-      source: declaredPolicy.max_effective_repeats !== undefined ? "pack" as const : "default" as const,
+      source: declaredPolicy.max_effective_repeats !== undefined ? "app" as const : "default" as const,
     },
-    // 闸门刻度：CLI（本次显式）> pack.policy > provider 自报 > 0.25。
+    // 闸门刻度：CLI（本次显式）> meta.policy > provider 自报 > 0.25。
     // 换 provider 时缺省刻度不再成立（score_kind 不可比）——这是这条声明面的存在理由。
     conf_floor: opts.confFloor !== undefined
       ? { value: opts.confFloor, source: (opts.confFloorSource ?? "cli") as "cli" | "config" }
       : declaredPolicy.conf_floor !== undefined
-        ? { value: declaredPolicy.conf_floor, source: "pack" as const }
+        ? { value: declaredPolicy.conf_floor, source: "app" as const }
         : opts.providerFloor !== undefined
           ? { value: opts.providerFloor, source: "provider" as const }
           : { value: 0.25, source: "default" as const },
+    done_timeout_ms: {
+      value: declaredPolicy.done_timeout_ms ?? 2000,
+      source: declaredPolicy.done_timeout_ms !== undefined ? "app" as const : "default" as const,
+    },
+    done_poll_ms: {
+      value: declaredPolicy.done_poll_ms ?? 120,
+      source: declaredPolicy.done_poll_ms !== undefined ? "app" as const : "default" as const,
+    },
+    pool_ready_timeout_ms: {
+      value: declaredPolicy.pool_ready_timeout_ms ?? 700,
+      source: declaredPolicy.pool_ready_timeout_ms !== undefined ? "app" as const : "default" as const,
+    },
+    pool_ready_poll_ms: {
+      value: declaredPolicy.pool_ready_poll_ms ?? 100,
+      source: declaredPolicy.pool_ready_poll_ms !== undefined ? "app" as const : "default" as const,
+    },
   };
   const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
   return { policy, anyDeclared };
@@ -967,6 +999,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const invariantResults: AppInvariantResult[] = [];
   /** 每一步的判定方式（trace 原样收集）——P1 的出场率/挽回数从这儿数出来，不另造机制。 */
   const decisionSteps: TraceStep[] = [];
+  /** 每个 `ctx.step` 一次 mw.run；这里按调用顺序保留它的动作 trace，供 step_traces 补 hows/descs/methods。 */
+  const decisionStepGroups: TraceStep[][] = [];
   // S0（NL Flow）：`captureTraces` 开着才收集（见 AppRunOptions.captureTraces）。
   const stepTraces: NonNullable<AppRunResult["step_traces"]> = [];
   // 浏览器步在 `plan.subgoals` 里的下标：`next` 允许跳步，所以不能再靠一个自增计数器
@@ -1308,9 +1342,9 @@ export function appReportMarkdown(r: AppRunResult): string {
   const L: string[] = [
     `# 应用运行报告：${r.label}（\`${r.app}\`）`,
     "",
-    `- 应用包：\`${r.pack_path}\``,
+    `- 应用脚本：\`${r.pack_path}\``,
     `- 目标：${r.goal}`,
-    `- 结果：**${r.ok ? "通过" : "未通过"}** ｜ 步骤 ${r.completed} ｜ 用时 ${r.secs}s`,
+    `- 结果：**${r.ok ? "通过" : r.partial === true ? "部分执行（预算用满）" : "未通过"}** ｜ 步骤 ${r.completed} ｜ 用时 ${r.secs}s`,
     ...(r.model_status !== undefined
       ? [`- 模型层级：\`${r.model_status}\`（on=真 ONNX 在位；off(missing)=缺产物，走的是规则模式）`] : []),
     ...(r.decision_provider
@@ -1321,7 +1355,7 @@ export function appReportMarkdown(r: AppRunResult): string {
       ? [`- 生效策略：${Object.entries(r.effective_policy)
           .filter(([, v]) => v.source !== "default")
           .map(([k, v]) => `\`${k}=${String(v.value)}\`(${v.source})`).join(" ")}`
-        + `｜优先级 cli=本次命令覆盖 > pack=包声明 > default=今天的行为`] : []),
+        + `｜优先级 cli=本次命令覆盖 > app=meta 声明 > default=今天的行为`] : []),
     `- 角色：${r.roles_used.map((x) => `\`${x}\``).join(", ") || "（未用角色模板）"}`,
     ...(r.dataset_view !== undefined && r.dataset_view.length > 0
       ? [`- 数据传递：${r.dataset_view.map((e) => `\`${e.key}=${JSON.stringify(e.value ?? null)}\``
@@ -1379,6 +1413,13 @@ export function appReportMarkdown(r: AppRunResult): string {
         + (r.decisions.model_steps === 0 ? "（model not needed——能规则化就别猜）" : ""));
     }
   }
+  if (r.step_traces !== undefined && r.step_traces.length) {
+    L.push("", "## 执行轨迹（flow 的 ctx.step / ctx.arrive）", "",
+      "| # | id | 说明 | 状态 | URL | 停因 |", "|---|---|---|---|---|---|");
+    for (const t of r.step_traces) {
+      L.push(`| ${t.index + 1} | ${t.id ?? "-"} | ${t.desc.slice(0, 80)} | ${t.status} | ${t.url ?? "-"} | ${t.stop_code ?? "-"} |`);
+    }
+  }
   if (r.tool_steps.length) {
     L.push("", "## 动作腿：工具步（命令行）", "",
       "| # | 步骤 | 数据源 | 退出码 | 结论 | 尝试 | 干跑 |", "|---|---|---|---|---|---|---|");
@@ -1403,7 +1444,9 @@ export function appReportMarkdown(r: AppRunResult): string {
       "| # | 步骤 | 结论 | 证据 |", "|---|---|---|---|");
     for (const m of r.manual_steps) {
       const verdict = m.done ? "完成" : `**未完成**（${m.reason ?? "unknown"}）`;
-      const evidence = m.attested === true ? "人自证（{manual:true}，非 DOM 验证）" : "人完成后引擎验过声明的信号";
+      const evidence = m.done
+        ? m.attested === true ? "人自证（{manual:true}，非 DOM 验证）" : "人完成后引擎验过声明的信号"
+        : `未完成：${m.reason ?? "unknown"}`;
       L.push(`| ${m.index} | ${m.desc} | ${verdict} | ${evidence} |`);
     }
   }
@@ -1421,44 +1464,41 @@ export function appReportMarkdown(r: AppRunResult): string {
 }
 
 const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--out DIR]
-                  [--provider NAME] [--ablate stub|rules-only] [--force-hints off]
+                  [--provider NAME] [--ablate stub|rules-only]
                   [--conf-floor N] [--no-sources] [--confirm-safe] [--headful] [--allow-dangerous]
-                  [--tiered-hint] [--trace] [--only-step N | --from-step N] [--max-steps N] [--learn-hints | --hint-memory FILE]
-                  [--emit-trace FILE] [--replay FILE] [--quiet]
+                  [--tiered-hint] [--trace] [--max-steps N] [--manual-fail-fast]
+                  [--learn-hints | --hint-memory FILE] [--emit-trace FILE] [--replay FILE] [--quiet]
 
-按 apps/<app>/pack.json 跑一条完整应用链路：数据腿 → 浏览器步/工具步 → 结束状态不变量
-应用也可以是隔离脚本（app.mjs / app.ts）：flow(ctx) 接管走向，运行时仍由引擎执行每一步
+按 apps/<app>/app.mjs 的 flow(ctx) 跑一条应用：数据腿 → 脚本产生的浏览器/工具步 → 结束状态不变量
+应用只有一种格式：flow 脚本（没有 pack.json / 声明式数据脚本 / 语义模板）。
 --ablate       消融臂：stub = 脚本桩，rules-only = 规则档
 --conf-floor N 置信度闸门刻度（0<N≤1）：换 provider（score_kind 不同）时缺省 0.25 不再成立，
-               本旗标 = 本次覆盖；包可用 policy.conf_floor 声明；provider 可自报 floor
+               本旗标 = 本次覆盖；meta.policy.conf_floor 可声明；provider 可自报 floor
 --tiered-hint  P1 实验开关：hint 档内歧义向模型问更小的问题（默认关 = 行为逐字节不变）
---trace        结果 JSON 带每步执行证据（step_traces；给调试/桥摘要用）
---only-step N  只跑第 N 步；--from-step N 从第 N 步开始；--max-steps N 本段最多几步（均 1-based）
---learn-hints  R2 学习环：模型选对的步变成规则（sidecar，永不写进被审计的包；authored 恒优先）
+--trace        结果 JSON 带每步执行证据（step_traces）
+--max-steps N  本次运行的 ctx.step/arrive 执行预算（调试用；用满后结果 partial，不是跳步）
+--learn-hints  R2 学习环：模型选对的步变成规则（sidecar，永不写进被审计的脚本；authored 恒优先）
                落点默认 $AMBERFLOW_HOME/hint-memory/<app>.json，--hint-memory FILE 显式指定
---emit-trace F 脚本应用：把本次执行轨迹（app/script/inputs 三个 sha + 逐次 ctx 调用）写成 F
---replay F     脚本应用：按 F 里的轨迹重放（不重新决策；脚本版本或输入槽位不一致直接拒跑）
+--emit-trace F 把本次执行轨迹（app/script/inputs 三个 sha + 逐次 ctx 调用）写成 F
+--replay F     按 F 里的轨迹重放（不重新决策；脚本版本或输入槽位不一致直接拒跑）
 
-数据腿的结果按包的 source_slots 回写槽位（观测值 > 包里的默认值；--slot 仍最优先）；
---no-sources 时不回写——那时只由包默认值与 --slot 提供值。`;
+数据腿的结果按 meta.sources 按需加载（ctx.source）；--no-sources 时不跑网络/进程。
+--dry 只跑 dry 调用序列（不开浏览器、不调模型）；--list 列出发现的 flow 应用。`;
 
 /**
- * app-runner 默认产物目录（**调用时**读 env，测试可隔离——与 apps_suite 的 suiteOutDir 同一纪律）。
- * matrix 的"学到/复用"列读的就是这里：那是"上一次真跑"的证据，没跑过显示"未跑"。
+ * app-runner 默认产物目录（**调用时**读 env，测试可隔离）。
  */
 export function appsOutDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.AMBERFLOW_APPS_OUT ?? path.join(os.tmpdir(), "amberflow-apps");
 }
 
-
 /**
- * L2：跑一个 `flow(ctx)` 脚本应用。与 `runApp` 并列的**第二条驱动**——
- * 旧 JSON 应用完全不走这里（存量零迁移），运行时仍然只认数据与证据面。
- *
- * 复用同一批缝：`browserSession` / `BrowserMiddleware` / `runSource` / `checkSignal`。
+ * 跑一个 `flow(ctx)` 应用。运行时仍然只认数据与证据面：
+ * 复用 `browserSession` / `BrowserMiddleware` / `runSource` / `checkSignal`。
  * 脚本负责控制流；一步之内的一切仍归引擎（见 `src/app/ctx.ts` 的注释）。
  */
 export interface ScriptRunOptions extends AppRunOptions {
+  /** `ctx.step`/`arrive` 的执行预算（`--max-steps`；用满后结果 partial）。 */
   maxSteps?: number;
   /** 把本次执行轨迹写成 JSON（审计/交接）。 */
   emitTrace?: string;
@@ -1467,9 +1507,6 @@ export interface ScriptRunOptions extends AppRunOptions {
 }
 
 export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptions = {}): Promise<AppRunResult> {
-  if (loaded.mode !== "flow" || typeof loaded.flow !== "function") {
-    throw new Error(`app ${loaded.pack.id}: runScriptApp needs a flow(ctx) script (got ${loaded.mode})`);
-  }
   const pack = loaded.pack;
   const t0 = Date.now();
   const slots: Record<string, unknown> = { ...(pack.slots ?? {}), ...(opts.slots ?? {}) };
@@ -1479,6 +1516,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   const inputs = inputsSha256(slots, (pack.hosts ?? []) as string[]);
   const trace = newTrace({ app: pack.id, script_sha256: loaded.scriptSha256, inputs_sha256: inputs });
   const verbose = opts.verbose !== false;
+  // 节奏：CLI 显式 > meta.pace > 环境变量 > 0；与 runApp 共用同一个解析实现。
+  const pace = resolvePace(pack, opts);
 
   let ok = false;
   let stopCode: string | undefined;
@@ -1489,6 +1528,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   let anyDeclared = false;
   /** 每次 ctx.step/arrive 的执行报告 → 决策账（与 runApp 同一份 `summarizeDecisions`）。 */
   const decisionSteps: TraceStep[] = [];
+  /** 每个 `ctx.step` 一次 mw.run；这里按调用顺序保留它的动作 trace，供 step_traces 补 hows/descs/methods。 */
+  const decisionStepGroups: TraceStep[][] = [];
 
   if (opts.replayTrace !== undefined) {
     const recorded = readTrace(opts.replayTrace);
@@ -1527,9 +1568,11 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           ? await opts.sessionFactory()
           : await browserSession(opts.headful !== true, device);
       }
-      return holder.session;
+      const session = holder.session;
+      if (session === null) throw new Error("browser session was not created");
+      return session;
     };
-    // §3：与 `runApp` 共用同一份策略解析——否则脚本应用会静默忽略 pack.policy
+    // §3：与 `runApp` 共用同一份策略解析——否则脚本应用会静默忽略 meta.policy
     // （同一个 `policy.conf_floor` 在数据脚本上生效、在 flow 脚本上不生效）。
     const resolvedPolicy = resolveRunPolicy(pack, opts);
     policy = resolvedPolicy.policy;
@@ -1549,6 +1592,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           riskAsk: resolvedPolicy.policy.risk_ask.value === "rules-only" ? "rules-only" : "always",
           reobserve: resolvedPolicy.policy.reobserve.value,
           maxEffectiveRepeats: resolvedPolicy.policy.max_effective_repeats.value,
+          actionDelayMs: pace.between_actions_ms,
           hintMemory: opts.hintMemory ?? null,
           confirmFn: opts.confirmSafe
             ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
@@ -1635,7 +1679,23 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       runtime: { outDir, runId, today: process.env.LAYA_TODAY ?? "" },
       ensureSession, mw: getMw, trace, toolRunner,
       allowSources: opts.sources !== false,
-      onRunReport: (rep) => { decisionSteps.push(...(rep.steps as TraceStep[])); },
+      manualRunner: opts.manualHandler !== undefined || process.stdin.isTTY
+        ? async (req) => {
+            const handler = opts.manualHandler ?? promptManualOnTty;
+            return handler({ index: 0, desc: req.desc, instructions: req.instructions, url: req.url });
+          }
+        : undefined,
+      manualFailFast: opts.manualFailFast === true,
+      stepDelayMs: pace.between_steps_ms,
+      doneTimeoutMs: policy.done_timeout_ms.value,
+      donePollMs: policy.done_poll_ms.value,
+      poolReadyTimeoutMs: policy.pool_ready_timeout_ms.value,
+      poolReadyPollMs: policy.pool_ready_poll_ms.value,
+      onRunReport: (rep) => {
+        const steps = rep.steps as TraceStep[];
+        decisionSteps.push(...steps);
+        decisionStepGroups.push(steps);
+      },
       ...(opts.maxSteps === undefined ? {} : { maxSteps: opts.maxSteps }),
       verbose,
     });
@@ -1649,6 +1709,15 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       if (holder.session !== null) { try { await holder.session.close(); } catch { /* 关会话失败不该掩盖运行结果 */ } }
     }
     invariants = invariantsFromTrace(trace, pack ?? {});
+  }
+
+  // 人工步不能因为脚本“没 ctx.fail 就继续走”而变绿：人工没完成是全局未完成，
+  // 即使后续步骤和结束态不变量都成立。脚本可以吞异常，但产物不能吞事实。
+  const failedManual = trace.events.find((e) => e.call === "manual" && e.ok !== true);
+  if (failedManual !== undefined) {
+    ok = false;
+    stopCode = stopCode ?? failedManual.stop_code ?? "needs_human";
+    stopReason = stopReason ?? `manual step did not complete: ${failedManual.desc ?? failedManual.id ?? "?"}`;
   }
 
   // 声明了结束态不变量却从未调用 ctx.done()：**验收根本没发生**。
@@ -1668,6 +1737,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     stopReason = "declared end-state invariants did not hold: "
       + invariants.filter((i) => !i.held).map((i) => i.id).join(", ");
   }
+  // `--max-steps N` 是执行预算：用满时已经执行的步骤是事实，不是“配置错误”。
+  const partial = stopCode === "budget_exceeded" && opts.maxSteps !== undefined;
   finishTrace(trace, {
     done: ok,
     ...(stopCode === undefined ? {} : { stop_code: stopCode }),
@@ -1684,7 +1755,47 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     }
   }
 
+  const stepEvents = trace.events.filter((e) => e.call === "step" || e.call === "arrive" || e.call === "manual");
   const stepCount = trace.events.filter((e) => e.call === "step" || e.call === "arrive").length;
+  const manualSteps = trace.events.filter((e) => e.call === "manual").map((e, i) => ({
+    index: i,
+    desc: e.desc ?? "",
+    done: e.ok === true,
+    ...(e.ok === true && typeof e.result === "object" && e.result !== null
+      && (e.result as Record<string, unknown>)["attested"] === true ? { attested: true } : {}),
+    ...(e.stop_code === undefined ? {} : { reason: e.stop_code }),
+  }));
+  const TRANSIENT_STOP_CODES = new Set([
+    "page_not_ready", "space_empty", "action_space_exhausted", "low_confidence",
+    "no_progress", "stale_ref", "hint_matched_nothing",
+  ]);
+  let stepActionCursor = 0;
+  const stepTraces: NonNullable<AppRunResult["step_traces"]> = stepEvents.map((e, i) => {
+    const laterOk = stepEvents.slice(i + 1).find((s) => s.ok === true);
+    const recovered = e.ok === false
+      && e.stop_code !== undefined && TRANSIENT_STOP_CODES.has(e.stop_code)
+      && laterOk !== undefined;
+    // 只给 `ctx.step` 补动作证据；`ctx.arrive` / `ctx.manual` 不走 mw.run，没有动作 trace。
+    const group = e.call === "step" ? decisionStepGroups[stepActionCursor++] ?? [] : [];
+    const executed = group.filter((s) => s.executed === true);
+    return {
+      index: i,
+      id: e.id ?? null,
+      desc: e.desc ?? "",
+      status: recovered ? "recovered" : (e.ok === false ? "failed" : "done"),
+      hows: executed.map((s) => String(s.how ?? "")),
+      descs: executed.map((s) => String(s.desc ?? "")),
+      methods: group.map((s) => String(s.method ?? "")).filter(Boolean),
+      ...(e.url === undefined ? {} : { url: e.url }),
+      // `dom_goal_signal` 这类是“done 已成立”的执行事实，不是失败；成功步不把它渲染成停因。
+      ...(e.ok === false && e.stop_code !== undefined ? { stop_code: e.stop_code } : {}),
+      ...(e.result === undefined ? {} : { result: e.result }),
+      ...(recovered ? { recovered: true, recovered_by: laterOk!.id ?? laterOk!.desc ?? null } : {}),
+    };
+  });
+  const logs = trace.events.filter((e) => e.call === "log").map((e) => ({
+    i: e.i, desc: e.desc ?? "", ...(e.result === undefined ? {} : { result: e.result }),
+  }));
   const stats = opts.runtimeStats ? opts.runtimeStats() : null;
   const decisions = summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0);
   const result: AppRunResult = {
@@ -1701,11 +1812,16 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     invariants,
     sources: [],
     ok,
+    ...(partial ? { partial: true as const } : {}),
+    ...(manualSteps.length ? { manual_steps: manualSteps } : {}),
+    ...(pace.between_steps_ms > 0 || pace.between_actions_ms > 0 ? { pace } : {}),
     secs: (Date.now() - t0) / 1000,
     // §3：生效策略只在非缺省时进产物（与 runApp 同一纪律）；模型层级照写（脚本应用同样要能说清）。
     ...(anyDeclared && policy !== null ? { effective_policy: policy } : {}),
     ...(opts.modelStatus === undefined ? {} : { model_status: opts.modelStatus }),
     decisions,
+    step_traces: stepTraces,
+    ...(logs.length ? { logs } : {}),
     script: {
       mode: "flow",
       script_path: loaded.scriptPath,
@@ -1737,17 +1853,16 @@ function invariantsFromTrace(
   });
 }
 
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
   { const rc = applyConfiguredEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
-  // 旗标表由 `appOptions()` 统一声明。
   const cli = parseCliArgs(argv, { allowPositionals: true, options: appOptions(), usage: USAGE });
   if (!cli.ok) return cli.code;
   const v = cli.values;
   if (cliBool(v, "help")) { console.log(USAGE); return 0; }
   // 运行参数的配置默认值（全局 < 项目 < 环境变量；CLI 旗标仍最优先）。
-  // 解析错误 = 配置类用法错误：在任何腿/任何副作用之前 exit 2。
   const { defaults: runDefaults, errors: runDefaultErrors } = parseRunDefaults();
   if (runDefaultErrors.length) {
     for (const e of runDefaultErrors) console.error(e);
@@ -1758,25 +1873,23 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const confirmSafe = cliBool(v, "confirm-safe") || runDefaults.confirmSafe === true;
   const noSources = cliBool(v, "no-sources") || runDefaults.noSources === true;
   const tieredHint = cliBool(v, "tiered-hint") || runDefaults.tieredHint === true;
-  const parsePositive = (key: string): number | undefined => {
-    const raw = cliString(v, key);
-    if (raw === undefined) return undefined;
-    const n = Number(raw);
-    if (!Number.isInteger(n) || n < 1) return NaN;
-    return n;
-  };
-  const onlyStep = parsePositive("only-step");
-  const fromStep = parsePositive("from-step");
-  const segmentMaxSteps = parsePositive("max-steps");
-  for (const [name, n] of [["--only-step", onlyStep], ["--from-step", fromStep], ["--max-steps", segmentMaxSteps]] as const) {
-    if (n !== undefined && Number.isNaN(n)) { console.error(`${name} 需要正整数`); return 2; }
+  const maxStepsRaw = cliString(v, "max-steps");
+  let maxSteps: number | undefined;
+  if (maxStepsRaw !== undefined) {
+    maxSteps = Number(maxStepsRaw);
+    if (!Number.isInteger(maxSteps) || maxSteps < 1) {
+      console.error(`--max-steps 需要正整数（收到 ${JSON.stringify(maxStepsRaw)}）`);
+      return 2;
+    }
   }
-  if (onlyStep !== undefined && fromStep !== undefined) { console.error("--only-step 与 --from-step 只能选一个"); return 2; }
   if (cliBool(v, "list") || cliString(v, "app") === undefined) {
-    for (const [id, label, p] of listPacks()) console.log(`${id.padEnd(22)} ${label}  ${p}`);
+    for (const entry of listAppDirs()) console.log(`${entry.id.padEnd(22)} ${entry.script}`);
     if (cliString(v, "app") === undefined) {
-      console.log(); console.log(USAGE);
-      return cliBool(v, "list") ? 0 : 2;
+      if (!cliBool(v, "list")) {
+        console.log(); console.log(USAGE);
+        return 2;
+      }
+      return 0;
     }
   }
 
@@ -1785,8 +1898,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     const i = s.indexOf("=");
     if (i <= 0) { console.error(`--slot needs k=v, got ${JSON.stringify(s)}`); return 2; }
     const key = s.slice(0, i);
-    // 同名给两次曾经是**静默 last-wins**：`--slot coupon=A --slot coupon=B` 里 A 悄悄消失。
-    // 与"打错槽位名"同一类缺陷（值没被用上而使用者以为生效），所以同样按用法错误处理。
     if (Object.prototype.hasOwnProperty.call(slots, key)) {
       console.error(`--slot ${JSON.stringify(key)} 给了两次（${JSON.stringify(slots[key])} 与 `
         + `${JSON.stringify(s.slice(i + 1))}）：一个槽位只能有一个值`);
@@ -1795,24 +1906,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     slots[key] = s.slice(i + 1);
   }
 
-  let pack: AppPack;
-  let scriptApp: LoadedScriptApp | null = null;
+  let loaded: LoadedScriptApp;
   try {
-    const resolved = await resolveApp(String(cliString(v, "app")));
-    pack = resolved.pack;
-    scriptApp = resolved.script;
+    loaded = await loadScriptApp(String(cliString(v, "app")));
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
     return 2;
   }
+  const pack = loaded.pack;
 
-  // 槽位名打错曾是**静默**的：`--slot coupn=X` 会被原样塞进计划，值谁也没用上，而应用照旧"通过"。
-  // 值只来自计划，但键必须有出处——不在声明里就是用法错误（exit 2），并且把已声明的列出来。
-  // `source_slots` 的键同样是**已声明**的槽位（值由数据腿回填，人也可以显式覆盖）。
+  // 槽位名打错曾是**静默**的：不在声明里就是用法错误（exit 2），并且把已声明的列出来。
   const declaredSlots = new Set([
     ...Object.keys(pack.slots ?? {}),
     ...((pack.required_slots ?? []) as string[]),
-    ...Object.keys(pack.source_slots ?? {}),
   ]);
   const unknownSlots = Object.keys(slots).filter((k) => !declaredSlots.has(k));
   if (unknownSlots.length) {
@@ -1824,57 +1930,20 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   const outDir = path.resolve(cliString(v, "out") ?? appsOutDir());
-  // 输出目录建不出来时是**用法错误**，不该把 Node 的 mkdir 栈甩给使用者（`--out /sys/x`）。
   try {
     fs.mkdirSync(outDir, { recursive: true });
   } catch (e) {
     console.error(`--out ${JSON.stringify(outDir)} 建不出来：${e instanceof Error ? e.message : String(e)}`);
     return 2;
   }
-  const planPath = path.join(outDir, `${pack.id}-plan.json`);
-
-  // 测量型应用（只声明 probe、没有 journey）走 app 运行器是没有意义的：它会"通过 0/0"。
-  // 与其给一个什么都没证明的绿色，不如指路到真正的测量入口。
-  if (pack.probe !== undefined && (pack.journey ?? []).length === 0) {
-    const sets = pack.probe as Record<string, unknown>;
-    const n = ["http", "alts", "mobile", "capture"]
-      .reduce((k, key) => k + (Array.isArray(sets[key]) ? (sets[key] as unknown[]).length : 0), 0);
-    console.error(`app ${pack.id} 是测量型应用（探针集，${n} 个目标），没有 journey：`
-      + "探针数据不再入库；真实站点测试请用 `npm run online -- --tier probe`。"
-      + "或用 `npm run apps -- --app " + pack.id + " --dry` 只看声明。");
-    return 2;
-  }
 
   // 模型层级在哪一层，**每个出口都要回答**（dry 也不例外——桥的 summary 靠它写
   // `model: on|off(missing)`，用户先要知道此刻跑在哪个层级，再谈结果可不可信）。
-  // 默认**只有一个层级**：真模型。`--ablate` 是**消融实验**的开关，不是"另一种跑法"——
-  // 它的存在只为回答"没有这一层会怎样"（本仓库的每条主张都靠这种 A/B 立起来），
-  // 所以名字里带 ablate、产物里带 ablation 前缀，谁都不会把它当成日常模式。
-  // （旧 `--no-model` 有两个问题：① 它装的其实是脚本桩，却把层级标成 `off(rules-only)`；
-  //  ② "no model" 听起来像默认路径的替代，于是所有文档示例都带着它跑，真模型反而从没上过场。）
   const ablate = cliString(v, "ablate");
   if (ablate !== undefined && ablate !== "stub" && ablate !== "rules-only") {
     console.error(`--ablate 只接受 stub | rules-only（收到 ${JSON.stringify(ablate)}）`);
     return 2;
   }
-  const forceHints = cliString(v, "force-hints") ?? (runDefaults.forceHintsOff ? "off" : undefined);
-  if (forceHints !== undefined && forceHints !== "off") {
-    console.error(`--force-hints 只接受 off（收到 ${JSON.stringify(forceHints)}）——它是消融旗标，只有"剥掉"这一档。`);
-    return 2;
-  }
-  // 脚本应用的 hint 是运行期调用参数，没有"声明层"可剥：在 **dry 分支之前**拒绝，
-  // 否则 `--dry-run --force-hints off` 会静默 exit 0（与文档/非 dry 行为不一致，实测）。
-  if (scriptApp !== null && scriptApp.mode === "flow" && (onlyStep !== undefined || fromStep !== undefined || segmentMaxSteps !== undefined)) {
-    console.error("--only-step/--from-step/--max-steps 只适用于声明式应用：flow 脚本的步骤由脚本控制");
-    return 2;
-  }
-  if (forceHints === "off" && scriptApp !== null && scriptApp.flow !== undefined) {
-    console.error("--force-hints off 只适用于声明式应用：flow 脚本的 hint 由脚本调用声明，没有可剥的声明层。");
-    return 2;
-  }
-  // §provider 层：`--provider` 选决策模型（换模型做测试的那条路）；`--ablate` 保留为消融简写。
-  // 解析与安装分开做（resolveProviderSpec），因为中间必须插进**决策缓存与咨询计数**——
-  // 少了它们，`模型边际`/`梯级账单`/缓存命中率三组数就不存在了。
   const providerWanted = cliString(v, "provider")
     ?? (ablate === "stub" ? "scripted-stub" : ablate === "rules-only" ? "none" : undefined);
   let spec;
@@ -1886,8 +1955,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
   const artifacts = checkArtifacts();
   const modelStatus = spec.tier;
-  // 本地模型只在没有服务地址时使用；checkpoint 名由 AMBERFLOW_DECISION_MODEL 配置。
-  // 在线 provider 的模型名也走同一个键，但由 provider 自己解析，不在本地检查点白名单里校验。
   let localModelId: string | undefined;
   if (spec.kind === "laya" && !spec.ablation) {
     try {
@@ -1899,71 +1966,38 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   if (cliBool(v, "dry")) {
-    // 脚本应用（flow）没有静态旅程：dry-run = dry 跑一遍调用序列（与 check/explain 同一实现）。
-    if (scriptApp !== null && scriptApp.mode === "flow") {
-      const dry = await dryRunFlow(scriptApp, {
-        slots: slots as Record<string, string>,
-        ...(cliString(v, "out") === undefined ? {} : { outDir: cliString(v, "out") }),
-      });
-      const planLike = {
-        app: scriptApp.pack.id, label: scriptApp.pack.label, goal: scriptApp.pack.goal,
-        mode: "flow", dry_run: true, slots, problems: dry.problems,
-        events: dry.trace.events.map((e) => ({
-          i: e.i, call: e.call, desc: e.desc, url: e.url,
-          ...(e.stop_code === undefined ? {} : { stop_code: e.stop_code }),
-        })),
-        invariants: (scriptApp.pack.invariants ?? []).map((inv) => ({ id: inv.id, desc: inv.desc })),
-        model_status: modelStatus,
-      };
-      console.log(JSON.stringify(planLike, null, 2));
-      if (dry.problems.length) {
-        console.error(`flow dry-run 发现配置错误：\n  - ${dry.problems.join("\n  - ")}`);
-        return 2;
-      }
-      return 0;
-    }
-    // `--dry` 不跑数据腿，所以 `source_slots` 声明的槽位没有观测值可填。包里给了默认值就
-    // 用默认值；没给就**直说**（而不是让展开报一个看不懂的"未知占位符"）。
-    const unfilled = Object.keys(pack.source_slots ?? {})
-      .filter((k) => !Object.prototype.hasOwnProperty.call({ ...(pack.slots ?? {}), ...slots }, k));
-    if (unfilled.length) {
-      console.error(`--dry 不跑数据腿：槽位 ${unfilled.map((k) => JSON.stringify(k)).join(", ")} 的值由数据腿回填`
-        + `（声明见包的 source_slots）；要看真实值请去掉 --dry，或给包补一个默认值。`);
+    const dry = await dryRunFlow(loaded, {
+      slots: slots as Record<string, string>,
+      ...(cliString(v, "out") === undefined ? {} : { outDir: cliString(v, "out") }),
+    });
+    const planLike = {
+      app: pack.id, label: pack.label, goal: pack.goal,
+      mode: "flow", dry_run: true, slots, problems: dry.problems,
+      events: dry.trace.events.map((e) => ({
+        i: e.i, call: e.call, id: e.id, desc: e.desc, url: e.url,
+        ok: e.ok ?? null,
+        ...(e.stop_code === undefined ? {} : { stop_code: e.stop_code }),
+      })),
+      invariants: (pack.invariants ?? []).map((inv) => ({ id: inv.id, desc: inv.desc })),
+      model_status: modelStatus,
+    };
+    console.log(JSON.stringify(planLike, null, 2));
+    if (dry.problems.length) {
+      console.error(`flow dry-run 发现配置错误：\n  - ${dry.problems.join("\n  - ")}`);
       return 2;
     }
-    let dryOut;
-    try {
-      dryOut = expandPack(pack, slots, planPath);
-    } catch (e) {                                  // 坏包也要干净地报错（exit 2），不是抛栈
-      console.error(e instanceof Error ? e.message : String(e));
-      return 2;
-    }
-    const { plan, steps, rolesUsed } = dryOut;
-    console.log(JSON.stringify({
-      app: pack.id, roles_used: rolesUsed, slots: plan.slots,
-      goal: plan.goal, steps, subgoals: plan.subgoals, model_status: modelStatus,
-    }, null, 2));
     return 0;
   }
 
-  // 两层包装，各数一件事：缓存记"省下的重复提问"（零成本率），计数记"模型被咨询过几次"
+  // 两层包装，各数一件事：缓存记“省下的重复提问”（零成本率），计数记“模型被咨询过几次”
   // （出场率）——计数在缓存**外面**：命中也是一次咨询，只是没花 forward。
-  // laya 是确定性的，同一问题不该问两次；命中率本身就是要报的数（LAYA_VALUE_PLAN P1）。
-  // `rules-only` 消融**不装任何 runtime**（走执行器真正的 rulesOnly 路径），
-  // `stub` 消融装一个恒定 0.05 的桩（回答"问了但永远不过闸门"的形状）。两者都不是默认。
   if (spec.kind === "laya" && !spec.ablation && !artifacts.ready) {
     console.log(`（模型产物不齐——缺 ${missingPieces(artifacts).join("/")}；需要模型兜底的步会如实 block。`
       + `补齐：npm run model:fetch -- --from <url 或本地路径>）`);
   }
-  // 安装序列收敛进 applySpecToRuntime——apps/start/online 共用这一个实现
-  //（此前这里是手抄的一份、apps_suite 里还有第二份；"两份实现各扫各的"是本仓库的复发缺陷形状。
-  //  细则注释跟着函数走了：两层包装各数什么、provider 为什么不套缓存，见 decision-provider.ts。）
   const applied = await applySpecToRuntime(spec);
 
-  // R2：学习环的 sidecar。**学到的永不进被审计的包**（plan-cli `--learn-hints` 的同一条纪律，
-  // 由 历史回归 钉过：包文件逐字节不变，学到的只出现在 sidecar）。
-  // 默认落 `$AMBERFLOW_HOME/hint-memory/<app>.json`（用户作用域，不写 checkout）；
-  // `--hint-memory FILE` 显式指定。都不给 ⇒ null ⇒ 执行器与产物逐字节不变。
+  // R2：学习环的 sidecar。学到的永不进被审计的脚本（与 plan-cli 同一条纪律）。
   let hintMemory: HintMemoryLike | null = null;
   let hintMemoryPath: string | null = null;
   const hintMemoryArg = cliString(v, "hint-memory");
@@ -1999,51 +2033,25 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   let result: AppRunResult;
   try {
-    result = scriptApp !== null && scriptApp.flow !== undefined
-      ? await runScriptApp(scriptApp, {
-          slots, outDir, verbose: !quiet,
-          sources: !noSources, confirmSafe, captureTraces: cliBool(v, "trace"),
-          onlyStep, fromStep, segmentMaxSteps,
-          headful, allowDangerous: cliBool(v, "allow-dangerous"),
-          // §3/学习环：与 runApp 同一组旗标（以前脚本应用静默忽略它们）。
-          tieredHint: tieredHint ? true : undefined,
-          hintMemory, hintMemoryPath,
-          confFloor: cliConfFloor,
-          ...(cliConfFloor === undefined ? {} : { confFloorSource: confFloorFromCli ? "cli" as const : "config" as const }),
-          providerFloor: activeProviderInfo()?.floor,
-          modelStatus,
-          ...(localModelId === undefined ? {} : { modelId: localModelId }),
-          ...(cliString(v, "emit-trace") === undefined ? {} : { emitTrace: cliString(v, "emit-trace") }),
-          ...(cliString(v, "replay") === undefined ? {} : { replayTrace: cliString(v, "replay") }),
-        })
-      : await runApp(pack, {
-      slots, planPath, outDir, verbose: !quiet,
-      sources: !noSources, confirmSafe, headful, captureTraces: cliBool(v, "trace"),
-      onlyStep, fromStep, segmentMaxSteps, manualFailFast: cliBool(v, "manual-fail-fast"),
-      allowDangerous: cliBool(v, "allow-dangerous"),
-      // §3：只有**显式给了旗标**才算"本次覆盖"；否则留 undefined，让包声明赢。
-      // （以前这里恒传一个布尔，等于 CLI 永远压过 pack——报告还会把来源写成 cli，假账。）
+    result = await runScriptApp(loaded, {
+      slots, outDir, verbose: !quiet,
+      sources: !noSources, confirmSafe, captureTraces: cliBool(v, "trace"),
+      maxSteps,
+      manualFailFast: cliBool(v, "manual-fail-fast"),
+      headful, allowDangerous: cliBool(v, "allow-dangerous"),
       tieredHint: tieredHint ? true : undefined,
-      forceHints: forceHints === "off" ? true : undefined,
       hintMemory, hintMemoryPath,
       confFloor: cliConfFloor,
       ...(cliConfFloor === undefined ? {} : { confFloorSource: confFloorFromCli ? "cli" as const : "config" as const }),
       providerFloor: activeProviderInfo()?.floor,
-      modelId: localModelId ?? pack.model ?? "english",
       modelStatus,
-      providerInfo: activeProviderInfo() ?? {
-        name: spec.name, version: spec.kind === "laya" ? "runtime" : "n/a",
-        capabilities: { choice: spec.kind !== "none", risk: spec.kind === "laya", done: spec.kind === "laya",
-          shortlist: spec.kind === "laya", score_kind: spec.kind === "laya" ? ("entropy_conf" as const) : ("rank_only" as const) },
-      },
+      ...(localModelId === undefined ? {} : { modelId: localModelId }),
+      ...(cliString(v, "emit-trace") === undefined ? {} : { emitTrace: cliString(v, "emit-trace") }),
+      ...(cliString(v, "replay") === undefined ? {} : { replayTrace: cliString(v, "replay") }),
       runtimeStats: applied.stats ?? undefined,
       pickAsks: applied.asks ?? undefined,
     });
   } catch (e) {
-    // 坏包（未知键/角色/占位符/主机……）在 `expandPack` 里就抛出：CLI 的契约是
-    // "报清楚 + 退出码 2"，不是把栈甩给用户。
-    // 配置类错误单独走 stdout（I-1 验收：`model-unavailable` 出现在输出里、
-    // 退出码非 0、产物文件**不存在**——预检在任何腿之前，这里没有可落的盘）。
     if (e instanceof AppRunConfigError) {
       console.log(e.message);
       console.log(`（未开跑：0 步、0 副作用；配置类错误不进重试循环）`);
@@ -2062,14 +2070,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (!quiet) {
     console.log();
     console.log(appReportMarkdown(result));
-    // R2 的账（plan-cli 同一形状）：known = sidecar 里现存几条；reused = 本次真的按它命中的次数。
     if (result.hint_memory) {
       console.log(`learned hints: ${result.hint_memory.entries} known, `
         + `${result.hint_memory.used} reused this run（sidecar ${result.hint_memory.path}）`);
     }
     console.log(`写入 ${jsonPath} 与 ${mdPath}`);
   }
-  return result.ok ? 0 : 1;
+  // 执行预算用满 = 主动停在半路；它不是“失败”，但也不是完整验收。
+  return result.ok || result.partial === true ? 0 : 1;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -15,14 +15,15 @@ import { emitJson, say } from "../context.ts";
 import { usageError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { browserSession } from "../../engine/executor.ts";
-import { extractElements, type Elem } from "../../engine/extraction.ts";
-import { suggestHints } from "../../engine/rules.ts";
+import { extractElements } from "../../engine/extraction.ts";
+import { poolView } from "../../engine/pool-view.ts";
 import { parseCliArgs } from "../../support/cli-args.ts";
 
-const USAGE = `usage: inspect --url <http(s) URL> [--max-elements N] [--text] [--screenshot FILE]
+const USAGE = `usage: inspect --url <http(s) URL> [--max-elements N] [--text] [--pool] [--screenshot FILE]
                [--timeout MS] [--headed] [--json]
 
-只看页面，不点击、不填值、不调用模型。输出有界元素与可验证的 hint 候选。`;
+只看页面，不点击、不填值、不调用模型。输出有界元素与可验证的 hint 候选；
+--pool 输出引擎实际看到的 pool 视图（action_family/frame_origin/hint_candidates）。`;
 
 type InspectElement = {
   ref: string;
@@ -48,6 +49,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
         url: { type: "string" },
         "max-elements": { type: "string" },
         text: { type: "boolean" },
+        pool: { type: "boolean" },
         screenshot: { type: "string" },
         timeout: { type: "string" },
         headed: { type: "boolean" },
@@ -71,6 +73,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
   const max = Math.min(200, Math.max(1, Math.floor(num(v["max-elements"]) ?? 60)));
   const timeout = Math.min(120_000, Math.max(1_000, Math.floor(num(v.timeout) ?? 30_000)));
   const wantJson = ctx.globals.json || v.json === true;
+  const wantPool = v.pool === true;
 
   let session;
   try {
@@ -91,23 +94,18 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     await page.goto(url, { waitUntil: "domcontentloaded", timeout });
     await new Promise((r) => setTimeout(r, 500));
     const pool = await extractElements(page as never, true, max);
-    const elements: InspectElement[] = Object.values(pool)
-      .filter((e) => typeof e.ref === "string")
-      .slice(0, max)
-      .map((e) => {
-        const extra: Record<string, unknown> = {};
-        for (const k of ["name", "id", "data_test", "href", "input_type", "role", "near"] as const) {
-          const val = (e as Elem)[k];
-          if (val !== undefined && val !== "") extra[k] = val;
-        }
-        return {
-          ref: e.ref!,
-          tag: e.tag,
-          label: e.label ?? "",
-          hint_candidates: suggestHints(e as Elem, pool),
-          ...extra,
-        };
-      });
+    const view = poolView(pool, page as never, max);
+    const frameOrigins = view.frame_origins;
+    const elements: InspectElement[] = view.elements.map((e) => ({
+      ref: e.ref,
+      tag: e.tag,
+      label: e.label,
+      hint_candidates: e.hint_candidates,
+      action_family: e.action_family,
+      action_capabilities: e.action_capabilities,
+      frame_origin: e.frame_origin,
+      ...e.extras,
+    }));
     const text = v.text === true
       ? String(await page.evaluate("document.body ? document.body.innerText : ''")).slice(0, 800)
       : "";
@@ -122,8 +120,10 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       requested_url: url,
       title: String(await page.title()),
       elements,
-      element_count: Object.keys(pool).length,
-      truncated: Object.keys(pool).length > max,
+      element_count: view.count,
+      truncated: view.truncated,
+      ...(wantPool ? { frame_origins: view.frame_origins } : {}),
+      ...(wantPool ? { pool: view } : {}),
       ...(text ? { text } : {}),
       ...(screenshotPath ? { screenshot_path: screenshotPath } : {}),
     };

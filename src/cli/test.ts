@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * `amber online` / `npm run online` —— 真实线上用例入口。
+ * `amber test` / `npm run test` —— 真实站点测试入口。
  *
- * 离线校验（PR 门禁）与联网运行分开：
- *   online --validate       只读 JSON，不开浏览器、不联网
- *   online --tier smoke     快速可达性 + 地标
- *   online --tier core      短流程
- *   online --tier deep      有状态长流程
- *   online --tier probe     风控/可达性探针（非门禁）
+ * 离线校验（PR 门禁）与联网运行分开；常用旗标与 run 对齐：
+ *   test --validate         只读 JSON，不开浏览器、不联网
+ *   test --tier smoke       快速可达性 + 地标
+ *   test --tier core        短流程
+ *   test --tier deep        有状态长流程
+ *   test --tier probe       风控/可达性探针（非门禁）
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,23 +18,35 @@ import {
 } from "../online/case.ts";
 import { runSuite } from "../online/runner.ts";
 
-const USAGE = `usage: online [--validate] [--list] [--dry] [--tier smoke|core|deep|probe|all|default]
-              [--case ID] [--site SITE] [--headed] [--out DIR] [--json]
-              [--provider NAME] [--require-all] [--verbose | --quiet] [--help]
+const USAGE = `usage: test [--validate] [--list] [--dry-run] [--tier smoke|core|deep|probe|all|default]
+             [--case ID] [--site SITE] [--headful | --headless] [--out DIR] [--json]
+             [--provider NAME] [--require-all] [--max-steps N] [--timeout SEC]
+             [--verbose | --quiet] [--help]
 
   --validate   离线校验全部 site/case（PR 门禁；不开浏览器、不联网）
   --list       列出 case（id / site / tier）
-  --dry        只展开并打印选中的 case（不执行）
+  --dry-run    只展开并打印选中的 case（不执行）
   --tier       缺省 default = smoke + core；all = smoke + core + deep；probe 需显式
   --case ID    只跑一个 case
   --site SITE  只跑一个站点
-  --headed     显示浏览器窗口
+  --headful    显示浏览器窗口；--headless 显式无窗口（缺省 headless）
   --out DIR    证据目录（缺省 $AMBERFLOW_HOME/online-runs/<run-id>）
   --json       list/validate/run 都输出结构化 JSON
+  --max-steps  每个 case 内子目标的执行预算（缺省 8）
+  --timeout    每个 case 的整体超时秒数（覆盖 site/case 声明）
   --require-all 有 blocked/unreachable/skipped 也按失败处理（定时任务用）`;
 
 function printCases(cases: Array<{ id: string; site: string; tier: string; goal: string }>): void {
   for (const c of cases) console.log(`${c.id}\t${c.site}\t${c.tier}\t${c.goal}`);
+}
+
+function numberArg(raw: string | undefined, flag: string): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    console.error(`${flag} 需要正整数（收到 ${JSON.stringify(raw)}）`);
+    process.exit(2);
+  }
+  return n;
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
@@ -49,15 +61,18 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     options: {
       validate: { type: "boolean" },
       list: { type: "boolean" },
-      dry: { type: "boolean" },
+      "dry-run": { type: "boolean" },
       tier: { type: "string" },
       case: { type: "string" },
       site: { type: "string" },
-      headed: { type: "boolean" },
+      headful: { type: "boolean" },
+      headless: { type: "boolean" },
       out: { type: "string" },
       json: { type: "boolean" },
       provider: { type: "string" },
       "require-all": { type: "boolean" },
+      "max-steps": { type: "string" },
+      timeout: { type: "string" },
       verbose: { type: "boolean" },
       quiet: { type: "boolean" },
       help: { type: "boolean" },
@@ -66,19 +81,23 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (!cli.ok) return cli.code;
   const v = cli.values;
   if (cliBool(v, "help")) { console.log(USAGE); return 0; }
+  if (cliBool(v, "headful") && cliBool(v, "headless")) {
+    console.error("--headful 与 --headless 只能选一个");
+    return 2;
+  }
 
   let bundle;
-  try { bundle = loadBundle(); } catch (e) { console.error(`online: ${e instanceof Error ? e.message : String(e)}`); return 2; }
+  try { bundle = loadBundle(); } catch (e) { console.error(`test: ${e instanceof Error ? e.message : String(e)}`); return 2; }
   const problems = validateBundle(bundle);
   if (problems.length) {
-    for (const p of problems) console.error(`online: ${p}`);
+    for (const p of problems) console.error(`test: ${p}`);
     return 2;
   }
   if (cliBool(v, "validate")) {
     if (cliBool(v, "json")) {
       console.log(JSON.stringify({ ok: true, sites: bundle.sites.size, cases: bundle.cases.length, valid: true }, null, 2));
     } else {
-      console.log(`online: ${bundle.sites.size} site(s), ${bundle.cases.length} case(s) valid`);
+      console.log(`test: ${bundle.sites.size} site(s), ${bundle.cases.length} case(s) valid`);
     }
     return 0;
   }
@@ -109,7 +128,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
     return 0;
   }
-  if (cliBool(v, "dry")) {
+  if (cliBool(v, "dry-run")) {
     console.log(JSON.stringify({
       tier: tierRaw, cases: cases.map((c) => ({ id: c.id, site: c.site, tier: c.tier, goal: c.goal, subgoals: c.subgoals?.length ?? 0 })),
     }, null, 2));
@@ -122,18 +141,20 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   let suite, code, dir;
   try {
     ({ suite, code, dir } = await runSuite(cases, bundle.sites, {
-    headless: !cliBool(v, "headed"),
+    headless: !(cliBool(v, "headful") || cliBool(v, "headless")),
+    ...(cliString(v, "max-steps") === undefined ? {} : { maxSteps: numberArg(cliString(v, "max-steps"), "--max-steps") }),
+    ...(cliString(v, "timeout") === undefined ? {} : { timeoutSec: numberArg(cliString(v, "timeout"), "--timeout") }),
     ...(cliString(v, "provider") === undefined ? {} : { provider: cliString(v, "provider") }),
     ...(cliString(v, "out") === undefined ? {} : { out: cliString(v, "out") }),
     tier: tierRaw,
     verbose,
     requireAll: cliBool(v, "require-all"),
     }));
-  } catch (e) { console.error(`online: ${e instanceof Error ? e.message : String(e)}`); return 2; }
+  } catch (e) { console.error(`test: ${e instanceof Error ? e.message : String(e)}`); return 2; }
   if (json) {
     console.log(JSON.stringify({ ...suite, evidence_dir: path.resolve(dir) }, null, 2));
   } else {
-    console.log(`online: ${suite.passed} passed / ${suite.failed} failed / ${suite.skipped} skipped · ${(suite.duration_ms / 1000).toFixed(1)}s`);
+    console.log(`test: ${suite.passed} passed / ${suite.failed} failed / ${suite.skipped} skipped · ${(suite.duration_ms / 1000).toFixed(1)}s`);
     console.log(`evidence: ${path.resolve(dir)}`);
     for (const c of suite.cases) {
       if (c.status !== "passed") console.log(`  ${c.status.padEnd(15)} ${c.id}${c.reason ? ` — ${c.reason}` : ""}`);

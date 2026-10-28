@@ -23,16 +23,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { loadPack, validatePack, type AppPack } from "../src/app/app-pack.ts";
+import { validatePack, type AppPack } from "../src/app/app-pack.ts";
 import { ensureDir, userAppsDir } from "../src/app/amberflow-home.ts";
-import { runApp, startUrl } from "../src/app/app-runner.ts";
+import { runApp, runScriptApp, startUrl } from "../src/app/app-runner.ts";
 import { browserSession } from "../src/engine/executor.ts";
 import { extractElements } from "../src/engine/extraction.ts";
 import { hintMatch } from "../src/engine/rules.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
 import { captureStateView, induceSignals } from "../src/flow/signal-induction.ts";
 import { evalSignalOnState, type SignalSpec, type StateView } from "../src/engine/signals.ts";
-import { packToScriptSource } from "../src/app/declarative.ts";
+import { packToFlowSource } from "../src/app/app-meta.ts";
+import { loadScriptApp } from "../src/app/app-script.ts";
 
 export const REPO = path.resolve(import.meta.dirname, "..");
 
@@ -385,6 +386,8 @@ export interface ReplayResult {
   ok: boolean; forwards: number; asked: string[]; completed: string; invariants: string;
   /** 具体哪几条不变量在这一次运行里不成立（写回/剔除要精确到 id）。 */
   failing: string[];
+  /** 脚本无法加载/运行时的原因（产物生成器自己的错误，不是“流程失败”）。 */
+  error?: string;
 }
 
 /** 用规则模式重跑一遍：**0 次模型调用**且通过，才算这份录制的流程可复现。 */
@@ -406,16 +409,50 @@ export async function replayCheck(pack: AppPack, outDir: string): Promise<Replay
   }
 }
 
+/** 生成的 flow 脚本的落盘门槛：零前向 replay 必须通过（与 pack 门同一口径）。 */
+export async function replayScriptCheck(source: string, outDir: string): Promise<ReplayResult> {
+  const dir = fs.mkdtempSync(path.join(outDir, "learn-script-"));
+  const file = path.join(dir, "app.mjs");
+  fs.writeFileSync(file, source, "utf-8");
+  const asked: string[] = [];
+  installLayaRuntime(scriptedRuntime(scriptedAgent((key) => { asked.push(key); return { noul: 0.05 }; })));
+  try {
+    const loaded = await loadScriptApp(file);
+    const res = await runScriptApp(loaded, {
+      verbose: false, sources: false,
+      outDir: path.join(dir, "out"),
+      planPath: path.join(dir, "plan.json"),
+    });
+    return {
+      ok: res.ok,
+      forwards: asked.filter((k) => k === "act").length,
+      asked,
+      completed: res.completed,
+      invariants: `${res.invariants.filter((i) => i.held).length}/${res.invariants.length}`,
+      failing: res.invariants.filter((i) => !i.held).map((i) => String(i.id)),
+    };
+  } catch (e) {
+    return {
+      ok: false, forwards: asked.filter((k) => k === "act").length, asked,
+      completed: "", invariants: "0/0", failing: [],
+      error: e instanceof Error ? e.message : String(e),
+    };
+  } finally {
+    installLayaRuntime(null);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
 /* ------------------------------------------------------------------ CLI */
 
 const USAGE = `usage: learn [--url <页面>] [--goal "<一句话>"] [--id <应用名>] [--cdp <ws://…>]
-             [--script <录好的动作.json>] [--yes] [--json] [--pack-dir DIR] [--out DIR] [--headful]
+             [--script <录好的动作.json>] [--yes] [--json] [--apps-dir DIR] [--out DIR] [--headful]
 
   不做任何参数也能用：连上你正在用的浏览器，用当前页；目标回车即用页面标题。
   --script   用一串录好的动作代替人现场演示（CI/测试用；格式见 README）
   --yes      不再逐条确认（外层 Agent 用；等价于 npm run agent）
   --json     输出结构化结果（一次调用的形状）
-  --pack-dir 包的落点；默认 $AMBERFLOW_HOME/apps（用户作用域，不写进 checkout）
+  --apps-dir 应用落点；默认 $AMBERFLOW_HOME/apps（用户作用域，不写进 checkout）
 退出码：0=已录制且零前向回放通过 ｜ 1=录了但回放不过（**不落盘**）｜ 2=用法/环境问题`;
 
 /** id 的唯一出处（演示前后来回用，避免两处算法漂移）。 */
@@ -478,7 +515,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     options: {
       url: { type: "string" }, goal: { type: "string" }, id: { type: "string" },
       cdp: { type: "string" }, script: { type: "string" }, yes: { type: "boolean" },
-      json: { type: "boolean" }, "pack-dir": { type: "string" }, out: { type: "string" },
+      json: { type: "boolean" }, "apps-dir": { type: "string" }, "pack-dir": { type: "string" }, out: { type: "string" },
       headful: { type: "boolean" }, quiet: { type: "boolean" }, help: { type: "boolean" },
     },
   }));
@@ -622,61 +659,88 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     // 按"区分性 / 稳定句柄 / 复跑一致"三关，把它剔除并写进 notes，而不是留着或改信号。
     let replay = await replayCheck(pack, outDir);
     const dropped: string[] = [];
-    if (replay.failing.length) {
-      for (const id of replay.failing) {
-        const idx = (pack.invariants ?? []).findIndex((i) => i.id === id);
+    const dropFailing = (failing: string[]): string[] => {
+      const out: string[] = [];
+      for (const fid of failing) {
+        const idx = (pack.invariants ?? []).findIndex((i) => i.id === fid);
         if (idx < 0) continue;
         const inv = (pack.invariants as Array<{ id: string; signal: unknown }>)[idx]!;
-        dropped.push(`${id} ${JSON.stringify(inv.signal)}`);
+        out.push(`${fid} ${JSON.stringify(inv.signal)}`);
         (pack.invariants as unknown[]).splice(idx, 1);
       }
-      if (dropped.length) {
+      return out;
+    };
+    if (replay.failing.length) {
+      const removed = dropFailing(replay.failing);
+      dropped.push(...removed);
+      if (removed.length) {
         say("");
-        say(`复跑里不成立的候选不变量已剔除（不可复现，按三关纪律不该留在包里）：`);
-        for (const d of dropped) say(`  - ${d}`);
+        say(`复跑里不成立的候选不变量已剔除（不可复现，按三关纪律不该留在应用里）：`);
+        for (const d of removed) say(`  - ${d}`);
         (pack.notes as string[]).push(
-          `演示/归纳时出现过、但复跑不成立的候选（**故意不写进 invariants**，因为复现不了）：${dropped.join("；")}`);
+          `演示/归纳时出现过、但复跑不成立的候选（**故意不写进 invariants**，因为复现不了）：${removed.join("；")}`);
         replay = await replayCheck(pack, outDir);
       }
     }
-    const verified = replay.ok && replay.forwards === 0;
+
+    // 最后一道门必须落在**生成出来的 flow 脚本**上：pack 回放通过不等于脚本语义等价。
+    let source = packToFlowSource(pack);
+    let scriptReplay = await replayScriptCheck(source, outDir);
+    if (!scriptReplay.ok && scriptReplay.failing.length) {
+      const removed = dropFailing(scriptReplay.failing);
+      dropped.push(...removed);
+      if (removed.length) {
+        say("");
+        say(`生成脚本里不成立的不变量已剔除：`);
+        for (const d of removed) say(`  - ${d}`);
+        (pack.notes as string[]).push(
+          `生成脚本复跑时出现过、但不成立的候选（故意不写进 invariants）：${removed.join("；")}`);
+        source = packToFlowSource(pack);
+        scriptReplay = await replayScriptCheck(source, outDir);
+      }
+    }
+    const verified = scriptReplay.ok && scriptReplay.forwards === 0;
     const result = {
       app: id, url: learning.url, goal: finalGoal, steps: learning.steps.length,
       signals: learning.steps.map((s) => s.signal),
       invariants: learning.invariants.map((i) => ({ id: i.id, signal: i.signal })),
-      replay: { ok: replay.ok, forwards: replay.forwards, completed: replay.completed, invariants: replay.invariants, failing: replay.failing },
+      replay: {
+        ok: scriptReplay.ok, forwards: scriptReplay.forwards,
+        completed: scriptReplay.completed, invariants: scriptReplay.invariants,
+        failing: scriptReplay.failing,
+        ...(scriptReplay.error === undefined ? {} : { error: scriptReplay.error }),
+      },
       verified,
       saved: false as boolean | string,
     };
 
     if (!verified) {
-      console.error(`回放没通过（${replay.completed}，不变量 ${replay.invariants}`
-        + `${replay.failing.length ? `，不成立：${replay.failing.join(", ")}` : ""}，`
-        + `模型调用 ${replay.forwards} 次）`
+      console.error(`回放没通过（${scriptReplay.completed}，不变量 ${scriptReplay.invariants}`
+        + `${scriptReplay.failing.length ? `，不成立：${scriptReplay.failing.join(", ")}` : ""}`
+        + `${scriptReplay.error ? `，错误：${scriptReplay.error}` : ""}，`
+        + `模型调用 ${scriptReplay.forwards} 次）`
         + "：这次录制**没有落盘**——流程要么不稳定，要么某一步的信号不是真正判据。重新演示一次。");
       if (values.json) console.log(JSON.stringify({ ...result, status: "replay-failed" }, null, 2));
       return 1;
     }
 
-    // 落点默认移出 checkout（P0-⑥ / 前提 A）：应用是用户本地产物，录一次不该写进
-    // 引擎的安装目录。`--pack-dir` 仍可显式指到任意目录（含仓库 apps/，开发夹具用）。
-    const packDir = ensureDir(path.resolve(values["pack-dir"] ?? userAppsDir()));
+    // 落点默认移出 checkout：应用是用户本地产物，录一次不该写进引擎的安装目录。
+    const packDir = ensureDir(path.resolve(values["apps-dir"] ?? values["pack-dir"] ?? userAppsDir()));
     const dir = path.join(packDir, id);
     fs.mkdirSync(dir, { recursive: true });
-    // L3.4：录出来的应用也写**声明式脚本**（数据脚本，带 recordedFrom 血统）——不再产出 JSON。
     const file = path.join(dir, "app.mjs");
-    fs.writeFileSync(file, packToScriptSource(pack));
+    fs.writeFileSync(file, source);
     const rel = path.relative(REPO, file);
-    result.saved = rel.startsWith("..") ? file : rel;   // 用户作用域的包显示绝对路径，仓库内的保持相对
+    result.saved = rel.startsWith("..") ? file : rel;   // 用户作用域的应用显示绝对路径，仓库内的保持相对
 
     if (values.json) {
       console.log(JSON.stringify({ ...result, status: "ok" }, null, 2));
     } else {
       say("");
       say(`✓ 已写 ${result.saved}`);
-      say(`✓ 规则模式回放：**0 次模型调用**，${replay.completed} 完成，不变量 ${replay.invariants}`);
+      say(`✓ 生成脚本的规则模式回放：**0 次模型调用**，${scriptReplay.completed} 完成，不变量 ${scriptReplay.invariants}`);
       say(`  跑它：npm run apps -- --app ${id} --no-sources`);
-      say("  要加条件/重试就手写 `when`/`retries`（这两项不录制）；页面变了会报 recorded-flow drift，重新演示即可。");
+      say("  要加条件/重试就直接改 flow(ctx) 里的 JS；页面变了会报 recorded-flow drift，重新演示即可。");
     }
     return 0;
   } finally {

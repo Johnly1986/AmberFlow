@@ -1,14 +1,12 @@
 /**
- * **应用脚本加载器**（L1）：`app.mjs`/`app.ts`（隔离、零构建、运行期解释）
- * → `meta(kit)`/`app(kit)` → `lower()` → 今天的 `AppPack`（IR）→ 同一套加载期校验。
+ * **应用脚本加载器**：`apps/<id>/app.mjs`（`app.mjs` / `app.js` / `app.ts`，运行期 `import()`）
+ * → `meta(kit)` → `flow(ctx)` → 内部 `AppPack` IR → 同一套加载期校验。
  *
- * 为什么不是编译：项目方 2026-10-24 的口径是**脚本与项目主体隔离、与项目编译无关**。
- * 所以这里的路径是：运行期动态 `import()`（先例 `tools/spec-to-pack.ts:100`），
- * 脚本**不 import 仓库任何模块**（kit 由引擎注入），不在 `tsconfig.json` 的 include 里，
- * 也不进 `vitest` 的收集面（没有 `*.test.*` 文件名）。
+ * 现在只有一种应用格式：**flow 脚本**。没有 `pack.json`，没有声明式数据脚本，没有语义模板。
+ * 脚本与项目主体隔离：不 import 仓库任何模块（`kit` 由引擎注入），不在 `tsconfig.json` 的 include 里。
  *
- * 零行为变化的承诺（L1）：脚本只是**新增一条加载路径**。没有脚本时走 `loadPack`，
- * 21 个既有包一个字节都不动；`AMBERFLOW_NO_SCRIPTS=1` 强制走旧路径。
+ * 任何契约/校验错误都在这里抛（带脚本路径与逐条 problem），绝不“降级成没加载到”：
+ * 脚本存在但坏了，就是配置错误，不允许静默回退到另一种格式。
  */
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -16,15 +14,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { REPO } from "../flow/flow.ts";
-import { appDirs, loadPack, type AppPack } from "./app-pack.ts";
+import { appDirs, type AppPack } from "./app-pack.ts";
 import { validateApp } from "./cross-ref.ts";
 import { createKit, type Kit } from "./kit.ts";
-import {
-  lowerDeclarative, parseDeclarativeScript, isDeclarativeScriptSource,
-  type ScriptDraft, type ScriptMeta,
-} from "./declarative.ts";
-export type { ScriptDraft, ScriptMeta } from "./declarative.ts";
-export { DECLARATIVE_MARKER, packToScriptSource } from "./declarative.ts";
+import { lowerMeta, type ScriptMeta } from "./app-meta.ts";
 import { StopError, type Ctx } from "./ctx.ts";
 import { createDryCtx } from "./ctx-dry.ts";
 import { finishTrace, inputsSha256, newTrace, type AppTrace } from "./trace.ts";
@@ -34,28 +27,26 @@ export const SCRIPT_FILENAMES = ["app.mjs", "app.js", "app.ts"] as const;
 
 export interface ScriptModule {
   meta?: (kit: Kit) => ScriptMeta;
-  /** L1：声明式应用（`data` + `exec`）。与 `flow` 二选一。 */
-  app?: (kit: Kit) => ScriptDraft;
-  /** L2：运行期控制流。提供它 = 脚本接管走向（步骤在运行期产生）。 */
+  /** 唯一入口：运行期控制流。 */
   flow?: (ctx: Ctx) => Promise<unknown>;
+  /** 已移除的声明式出口；保留检测位以给出可照做的迁移错误。 */
+  app?: unknown;
 }
 
 export interface LoadedScriptApp {
   pack: AppPack;
-  mode: "declarative" | "flow";
-  /** L2 的入口（declarative 模式下为 undefined）。 */
-  flow?: (ctx: Ctx) => Promise<unknown>;
+  flow: (ctx: Ctx) => Promise<unknown>;
   scriptPath: string;
-  /** 脚本源字节的 sha256（运行结果里记账用；与 `plan_sha256` 一起构成"跑了哪一版"）。 */
+  /** 脚本源字节的 sha256（运行结果里记账用；与 `plan_sha256` 一起构成“跑了哪一版”）。 */
   scriptSha256: string;
-  /** 展开后的 IR 的 sha256（同一脚本两次运行必须相同 = 确定性）。 */
+  /** 生成的 IR 的 sha256（同一脚本两次加载必须相同 = 确定性）。 */
   planSha256: string;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** 确定性序列化：键排序，便于算 `plan_sha256` 与做"两次构建必须一致"的断言。 */
+/** 确定性序列化：键排序，便于算 `plan_sha256`。 */
 export function canonicalJson(value: unknown): string {
   const walk = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(walk);
@@ -73,27 +64,16 @@ export function sha256(text: string | Buffer): string {
   return crypto.createHash("sha256").update(text).digest("hex");
 }
 
-/** 脚本是否被强制关闭（`--no-scripts` 的等效环境变量；CLI 旗标在 L1-2 接上）。 */
-export function scriptsDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const v = env.AMBERFLOW_NO_SCRIPTS;
-  return v === "1" || v === "true";
-}
-
 /** 解析脚本路径：显式路径优先；否则按 `appDirs()`（用户目录在前、仓库夹具在后）发现。 */
 export function resolveScriptPath(idOrPath: string): string | null {
   const looksLikeScript = /\.(mjs|js|ts)$/i.test(idOrPath);
   const looksLikePath = looksLikeScript || idOrPath.includes("/") || idOrPath.includes("\\");
   if (looksLikePath) {
-    // 显式路径：**只接受脚本扩展名**。`pack.json` 走旧路径（否则会把 JSON 当模块 import，
-    // Node 会报 "needs an import attribute of type: json"——那是入口判断错，不是用户写错）。
     if (!looksLikeScript) return null;
     const p = path.resolve(idOrPath);
     return fs.existsSync(p) ? p : null;
   }
   for (const dir of appDirs()) {
-    // `appDirs()` 返回的是**应用目录**（`apps/<id>` 或 `$AMBERFLOW_HOME/apps/<id>`），
-    // 所以按 id 找脚本是 `dir/app.mjs`，不是 `dir/<id>/app.mjs`（曾经的差一错误让
-    // `amber run <用户应用 id>` 在修好发现制之后仍然找不到）。
     if (path.basename(dir) !== idOrPath) continue;
     for (const name of SCRIPT_FILENAMES) {
       const p = path.join(dir, name);
@@ -103,16 +83,9 @@ export function resolveScriptPath(idOrPath: string): string | null {
   return null;
 }
 
-/** 把声明面/动作面降级成 IR（唯一实现在 `declarative.lowerDeclarative`；此处保留 L1 的导出名）。 */
-export const lowerScriptApp = lowerDeclarative;
-
 /**
- * 加载并校验一个应用脚本。**任何契约/校验错误都在这里抛**（带脚本路径与逐条 problem），
- * 绝不"降级成没加载到"：脚本存在但坏了，就是配置错误，不许静默回退到旧 JSON。
- */
-/**
- * 从异常栈里找"脚本文件:行:列"（ESM 帧形如 `at flow (file:///…/app.mjs:12:13)`）。
- * 目的：flow 的配置/语法错误在 check/explain 时能指向**作者代码行**（审计 U3）。
+ * 从异常栈里找“脚本文件:行:列”（ESM 帧形如 `at flow (file:///…/app.mjs:12:13)`）。
+ * 目的：flow 的配置/语法错误在 check/explain 时能指向**作者代码行**。
  */
 export function scriptErrorLocation(err: unknown, scriptPath: string): string | null {
   if (!(err instanceof Error) || typeof err.stack !== "string") return null;
@@ -146,13 +119,10 @@ function syntaxCheckLocation(scriptPath: string): string | null {
   return null;
 }
 
+/**
+ * 加载并校验一个应用脚本。**任何契约/校验错误都在这里抛**（带脚本路径与逐条 problem）。
+ */
 export async function loadScriptApp(idOrPath: string): Promise<LoadedScriptApp> {
-  // 信任边界：`AMBERFLOW_NO_SCRIPTS=1` 时**一个脚本都不 import**（脚本是进程内任意代码）。
-  // 以前只有 resolveApp 绕开脚本，但 apps explain/emit 直接调本函数 —— env 挡不住顶层副作用（实测）。
-  if (scriptsDisabled()) {
-    throw new Error(`scripts are disabled (AMBERFLOW_NO_SCRIPTS=1): refusing to import ${idOrPath}; `
-      + "unset it to run scripts, or keep using a legacy pack.json fixture");
-  }
   const scriptPath = resolveScriptPath(idOrPath);
   if (scriptPath === null) {
     throw new Error(`app script not found for ${JSON.stringify(idOrPath)} `
@@ -167,80 +137,45 @@ export async function loadScriptApp(idOrPath: string): Promise<LoadedScriptApp> 
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(`app script ${scriptPath}${loc ? ` (at ${loc})` : ""}: import failed: ${msg}`);
   }
-  if (typeof mod.meta !== "function") throw new Error(`app script ${scriptPath}: missing "export const meta = (kit) => ({...})"`);
-  if (typeof mod.flow === "function" && typeof mod.app === "function") {
-    // 静默选一个会让另一个变成永不校验/永不执行的死代码（实测：app 里非法字段也全绿）。
-    throw new Error(`app script ${scriptPath}: exports both "app" and "flow" — export exactly one `
-      + `(declarative app() OR runtime flow(ctx))`);
+  if (typeof mod.meta !== "function") {
+    throw new Error(`app script ${scriptPath}: missing "export const meta = (kit) => ({...})"`);
   }
-  const mode: "declarative" | "flow" = typeof mod.flow === "function" ? "flow" : "declarative";
-  if (mode === "declarative" && typeof mod.app !== "function") {
-    throw new Error(`app script ${scriptPath}: needs either "export const app = (kit) => ({...})" (declarative) `
-      + `or "export default async function flow(ctx) {...}" / "export const flow = async (ctx) => {...}"`);
+  if (mod.app !== undefined) {
+    throw new Error(`app script ${scriptPath}: "app()" / declarative-data was removed — `
+      + `export "flow(ctx)" instead (one author model: JS control flow)`);
+  }
+  if (typeof mod.flow !== "function") {
+    throw new Error(`app script ${scriptPath}: missing "export async function flow(ctx) { ... }"`);
   }
 
   const kit = createKit();
   let meta: ScriptMeta;
-  let draft: ScriptDraft = { exec: [] };
   try {
     meta = mod.meta(kit);
-    if (mode === "declarative") draft = mod.app!(kit);
   } catch (e) {
-    throw new Error(`app script ${scriptPath}: building the declarative app threw: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(`app script ${scriptPath}: meta(kit) threw: ${e instanceof Error ? e.message : String(e)}`);
   }
-  const pack = lowerDeclarative(meta, draft);
-  // flow 模式没有静态旅程：跳过"空旅程/web 不变量需要浏览器步"两条结构性检查；
+  const pack = lowerMeta(meta);
+  // flow 没有静态旅程：跳过“空旅程 / web 不变量需要浏览器步”两条结构性检查；
   // 步骤级校验发生在每次 ctx 调用（真实执行器/同一套 PlanningRules）。
-  const problems = validateApp(pack, mode === "flow" ? { allowEmptyJourney: true } : {});
+  const problems = validateApp(pack, { allowEmptyJourney: true });
   if (problems.length) {
     throw new Error(`app script ${scriptPath} is invalid:\n  - ${problems.join("\n  - ")}`);
   }
-  pack._path = scriptPath;   // 与 loadPack 同一口径：应用点位要能回答"它在哪"
+  pack._path = scriptPath;
   return {
     pack,
-    mode,
-    ...(mode === "flow" ? { flow: mod.flow } : {}),
+    flow: mod.flow,
     scriptPath,
     scriptSha256: sha256(source),
     planSha256: sha256(canonicalJson(pack)),
   };
 }
 
-/**
- * 统一的"拿一个应用"入口：**有脚本用脚本，没有脚本走旧 JSON**；
- * `AMBERFLOW_NO_SCRIPTS=1` 强制旧路径（回退可验：与今天逐字节等价）。
- *
- * 注意：脚本存在但坏了 → 抛错（不静默回退）。
- */
-export async function loadApp(idOrPath: string): Promise<AppPack> {
-  return (await resolveApp(idOrPath)).pack;
-}
-
-/**
- * 拿一个应用的**完整信息**（脚本时带上 `flow` 与两个 hash）；没有脚本则退回旧 `pack.json`。
- * 驱动（`runScriptApp`）需要在 `pack` 之外拿到 `flow` 与版本指纹，所以入口是它而不是 `loadApp`。
- */
-export async function resolveApp(idOrPath: string): Promise<{ pack: AppPack; script: LoadedScriptApp | null }> {
-  if (scriptsDisabled()) {
-    // 脚本被禁用时不要把"手写脚本"错报成"找不到/不是合法 JSON"：直接说清怎么恢复。
-    if (!/\.json$/i.test(idOrPath)) {
-      throw new Error(`scripts are disabled (AMBERFLOW_NO_SCRIPTS=1): ${JSON.stringify(idOrPath)} is a script app; `
-        + "unset AMBERFLOW_NO_SCRIPTS to use it, or pass a legacy pack.json path");
-    }
-  } else {
-    const scriptPath = resolveScriptPath(idOrPath);
-    if (scriptPath !== null) {
-      const script = await loadScriptApp(scriptPath);
-      return { pack: script.pack, script };
-    }
-  }
-  // 显式给了一个存在的 JSON 路径：当作旧夹具读（不强制改成脚本）。
-  if (/\.json$/i.test(idOrPath)) {
-    try {
-      if (fs.statSync(idOrPath).isFile()) return { pack: loadPack(idOrPath), script: null };
-    } catch { /* 不是文件：继续按 id 找 */ }
-  }
-  return { pack: loadPack(idOrPath), script: null };
+/** 统一入口：拿一个应用的完整信息（`pack` + `flow` + 两个版本指纹）。 */
+export async function resolveApp(idOrPath: string): Promise<{ pack: AppPack; script: LoadedScriptApp }> {
+  const script = await loadScriptApp(idOrPath);
+  return { pack: script.pack, script };
 }
 
 /** 仓库内脚本的相对路径（记账/报告用；用户作用域返回绝对路径）。 */
@@ -251,19 +186,16 @@ export function scriptDisplayPath(scriptPath: string): string {
 
 /**
  * **dry 跑一遍 flow**：不动作、不开浏览器，但把每次调用都校验一遍并记进 trace。
- * 这是 `amber apps check/explain` 对 L2 脚本的落法（与真实运行同一套调用序列）。
+ * 这是 `amber apps check/explain` 的落法（与真实运行同一套调用序列）。
  *
  * 返回 `problems`（空 = 通过）：dry 的成功**不代表**页面状态会成立，它证明的是
- * "脚本的调用序列在语法/命令/信号层面是合法的"。
+ * “脚本的调用序列在语法/命令/信号层面是合法的”。
  */
 export async function dryRunFlow(loaded: LoadedScriptApp, opts: {
   slots?: Record<string, string>;
   outDir?: string;
   runId?: string;
 } = {}): Promise<{ trace: AppTrace; problems: string[] }> {
-  if (loaded.mode !== "flow" || loaded.flow === undefined) {
-    throw new Error(`app ${loaded.pack.id}: dryRunFlow needs a flow(ctx) script (got ${loaded.mode})`);
-  }
   const slots: Record<string, string> = {
     ...((loaded.pack.slots ?? {}) as Record<string, string>),
     ...(opts.slots ?? {}),

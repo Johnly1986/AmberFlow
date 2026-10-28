@@ -75,7 +75,6 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
       { key: "AMBERFLOW_HOME", description: "用户作用域目录；空 = ~/.amberflow" },
       { key: "AMBERFLOW_APPS_OUT", description: "应用运行产物目录；空 = 系统临时目录/amberflow-apps" },
       { key: "AMBERFLOW_REPO", legacy: ["LAYAWEBUSE_REPO"], description: "DSH 桥指向的 checkout；空 = 自动发现" },
-      { key: "AMBERFLOW_NO_SCRIPTS", default: "0", description: "1 = 禁止加载 app.mjs 脚本，只走旧 pack.json" },
     ],
   },
   {
@@ -89,7 +88,6 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
     group: "运行参数（CLI 旗标的配置默认值）",
     keys: [
       { key: "AMBERFLOW_HEADFUL", default: "0", description: "1 = 显示浏览器窗口" },
-      { key: "AMBERFLOW_FORCE_HINTS", description: "只接受 off；空 = 不剥 hint" },
       { key: "AMBERFLOW_CONF_FLOOR", description: "闸门刻度覆盖；空 = 不覆盖 provider/0.25" },
       { key: "AMBERFLOW_TIERED_HINT", default: "0", description: "1 = 打开 tiered hint 实验" },
       { key: "AMBERFLOW_CONFIRM_SAFE", default: "0", description: "1 = 危险动作仍逐次确认" },

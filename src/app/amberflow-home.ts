@@ -3,7 +3,7 @@
  * 不是仓库的分享品**。
  *
  * 为什么默认落盘必须移出 checkout：
- *   - 用户录一个包（`learn`）或规划一个包（`plan:flow`）写进 `<repo>/apps`，等于往引擎的
+ *   - 用户录一个应用（`learn`）写进 `<repo>/apps`，等于往引擎的
  *     安装目录里塞东西：升级即丢、git status 变脏、多 checkout 之间互相看不见；
  *   - 仓库不再内置应用，应用只住 `$AMBERFLOW_HOME/apps`，跟着用户走。
  *

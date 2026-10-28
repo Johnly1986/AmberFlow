@@ -1,16 +1,21 @@
 /**
  * AmberFlow bridge — the harness side of "the engine is called, not embedded".
  *
- * AmberFlow is a frozen-plan browser engine: an LLM (or a human) authors a flow once, the engine
- * decides every step locally, and **DOM signals are the only completion truth**. It already exposes
- * that engine as CLIs (`app-runner`, `learn`). This plugin turns those CLIs into model-facing tools
- * so a DSH session can drive them — and it deliberately adds **no browser logic of its own**:
+ * AmberFlow runs **flow apps**: one JS script per app (`apps/<id>/app.mjs` exporting `meta` and
+ * `flow(ctx)`), where the script owns the control flow and the engine owns each step's target, gate,
+ * action and completion signal. DOM signals are the only completion truth. This plugin turns the
+ * checkout's CLIs into model-facing tools so a DSH session can drive them — and it deliberately adds
+ * **no app logic of its own**:
  *
- * - `…_apps`  — list declared apps by reading `apps/<id>/pack.json` (no subprocess, no browser).
- * - `…_run`   — run a declared app and return a compact summary of its artifacts.
- * - `…_learn` — hand over "goal + page" once: the engine records the flow, induces the completion
- *               signals and the end-state invariants, and only saves the pack when a **rules-only
- *               replay with zero model calls** passes.
+ * - `…_apps`      — list flow apps through `amber apps list --json` (no browser, no model).
+ * - `…_app_show`  — metadata + the current `app.mjs` source + version anchors.
+ * - `…_app_check` — load the script and dry-run its call sequence (no browser).
+ * - `…_app_create`— generate a flow skeleton; the Agent edits the file itself.
+ * - `…_run`       — run one flow app and return a compact summary of its artifacts.
+ * - `…_inspect` / `…_status` / `…_online` — read-only page observation, environment facts, real-site
+ *                   regression suite.
+ * - `…_learn`     — one recording: induce signals and write a flow app only when a rules-only replay
+ *                   of the generated script passes.
  *
  * Trust boundary, stated out loud: the bridge spawns a foreign process from `repoPath`. It does not
  * route through the harness sandbox policy, so enabling this plugin means trusting that checkout.
@@ -28,32 +33,36 @@ import type { Volatile } from '@deepseek-ai/cordis'
 // Erased at runtime — the running host provides both services.
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-settings'
-import { formatRequires, formatTypeMix, listApps, normalizeDecisionEndpoint, type BridgeOptions } from './bridge.ts'
+import { listApps, normalizeDecisionEndpoint, type BridgeOptions } from './bridge.ts'
 import {
-  appCheck, appShow, createApp, inspect, learn, online, plan, removeStep, runApp, setInvariant, setStep, status,
+  appCheck, appShow, createApp, inspect, learn, runApp, status, test,
   createService, type AmberFlowService,
 } from './service.ts'
 
 // The package root is the consumer surface: another plugin imports these without reaching into `src/`
 // (a published package ships only `lib/`).
 export {
-  appCheck, appShow, createApp, inspect, learn, newOutDir, online, plan, removeStep, runApp, setStep, status,
+  appCheck, appShow, createApp, inspect, learn, newOutDir, runApp, status, test,
   type AmberFlowAppCheck, type AmberFlowAppDetail, type AmberFlowCreateArgs, type AmberFlowInspect,
-  type AmberFlowInspectArgs, type AmberFlowLearnArgs, type AmberFlowOnline, type AmberFlowOnlineArgs,
-  type AmberFlowPlanArgs, type AmberFlowRemoveStepArgs, type AmberFlowRunArgs, type AmberFlowService,
-  type AmberFlowSetInvariantArgs, type AmberFlowSetStepArgs, type AmberFlowStatus,
+  type AmberFlowInspectArgs, type AmberFlowLearnArgs, type AmberFlowTest, type AmberFlowTestArgs,
+  type AmberFlowRunArgs, type AmberFlowService, type AmberFlowStatus,
 } from './service.ts'
 export {
-  buildEnv, diagnoseFailure, firstLines, flowRunArgs, formatRequires, formatTypeMix, learnArgs,
-  listApps, parseJsonDocument,
-  parseSource, planArgs, pruneRunDirs, runArgs, runProcess, stepAdapter, stripAnsi,
-  summarizeFlow, summarizeLearn, summarizePlan, summarizeRun,
-  type AppSummary, type BridgeOptions, type LearnSummary, type PlanStep, type PlanSummary,
-  type ProcessOutcome, type RunSummary,
+  buildEnv, diagnoseFailure, firstLines, learnArgs, listApps, parseJsonDocument, parseSource,
+  pruneRunDirs, runArgs, runProcess, stripAnsi, summarizeLearn, summarizeRun,
+  type AppSummary, type BridgeOptions, type LearnSummary, type ProcessOutcome, type RunStep,
+  type RunSummary,
 } from './bridge.ts'
 
 export const name = 'amberflow-bridge'
 export const inject = ['tools']
+
+/** Read one field of an opaque JSON object (CLI data, tool output) for rendering. */
+function field(value: unknown, key: string): unknown {
+  return typeof value === 'object' && value !== null
+    ? (value as { [key: string]: unknown })[key]
+    : undefined
+}
 
 /** Deployment configuration for the bridge. */
 export interface Config {
@@ -85,9 +94,8 @@ export interface Config {
    */
   keepRuns?: number
   /**
-   * Override for the USER-scope apps dir root (`$AMBERFLOW_HOME`, listed as `$AMBERFLOW_HOME/apps`
-   * before the checkout's fixture `apps/`). Tests pin this to a non-existent path so a developer's
-   * own recorded apps can never leak into a listing assertion.
+   * Override for the USER-scope apps root (`$AMBERFLOW_HOME`): the listing call runs with this
+   * `AMBERFLOW_HOME`, so `amber apps list` resolves the same scope the CLI's runs write into.
    */
   appsHome?: string
   /**
@@ -247,7 +255,7 @@ function resolveOptions(config: Config): BridgeOptions {
       && (volatileValue(config.modelApiKey) ?? '').trim() !== ''
       ? { decisionProvider: 'decision-service' as const }
       : {}),
-    ...(config.appsHome === undefined ? {} : { appsEnv: { ...process.env, AMBERFLOW_HOME: config.appsHome } }),
+    ...(config.appsHome === undefined ? {} : { appsEnv: { AMBERFLOW_HOME: config.appsHome } }),
   }
 }
 
@@ -285,13 +293,11 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_apps`,
     description:
-      'List the apps declared in the user scope (and any packs in the checkout), with step counts, '
-      + 'invariant counts and the declaration file. Each row carries a kind: `journey` apps run under '
-      + 'the run tool; `semantic-template` rows (flow.json) are site-agnostic SemanticFlow templates — '
-      + 'run them with the run tool plus one of their listed `sites`; `probe` rows are measurement '
-      + 'sets the runner refuses to execute. A journey may MIX application types (web/cli/ssh/stdio): '
-      + 'each row lists its type mix and any local service the app needs at run time. Reads the packs '
-      + 'only: no browser, no model, no subprocess.',
+      'List the flow apps the checkout can run, via `amber apps list --json`. Every row names the '
+      + 'app id, label, one-line goal, the writable script path (`apps/<id>/app.mjs`), its source '
+      + '(user scope or checkout fixture), invariant count and allowed hosts. There is only ONE app '
+      + 'format — a JS flow script — so there is no static step table: steps are runtime facts. A row '
+      + 'carrying `error` failed to load. Starts no browser and calls no model.',
     parameters: {
       filter: { type: 'string', description: 'Optional case-insensitive substring match on id/label/goal.' },
     },
@@ -310,15 +316,12 @@ export function apply(ctx: Context, config: Config): void {
                 id: { type: 'string', required: true },
                 label: { type: 'string', required: true },
                 goal: { type: 'string', required: true },
-                steps: { type: 'integer', required: true },
-                toolSteps: { type: 'integer', required: true },
-                types: { type: 'string', required: true, description: 'Adapter type mix of the journey, e.g. `web×2 · cli×3 · ssh×1` (empty for data sources).' },
-                requires: { type: 'array', required: true, items: { type: 'string' }, description: 'Local services needed at run time (e.g. `ssh` needs a local sshd).' },
-                invariants: { type: 'integer', required: true },
-                origin: { type: 'string', required: true },
+                path: { type: 'string', required: true },
+                source: { type: 'string', required: true },
                 kind: { type: 'string', required: true },
+                invariants: { type: 'integer', required: true },
                 hosts: { type: 'array', required: true, items: { type: 'string' } },
-                sites: { type: 'array', items: { type: 'string' } },
+                error: { type: 'string' },
               },
             },
           },
@@ -328,52 +331,46 @@ export function apply(ctx: Context, config: Config): void {
         type: 'text',
         text: value.apps.length === 0
           ? 'No apps matched.'
-          : value.apps.map(a => `${a.id}${a.label === '' || a.label === a.id ? '' : ` — ${a.label}`} `
-            + `(${a.steps} browser + ${a.toolSteps} tool steps`
-            + `${a.types ? ` [${a.types}]` : ''}, `
-            + `${a.invariants} invariants, ${a.origin}, kind=${a.kind}`
-            + `${a.hosts.length ? `, hosts: ${a.hosts.join(',')}` : ''}`
-            + `${a.requires.length ? `, needs local: ${a.requires.map(x => formatRequires([x])).join(', ')}` : ''}`
-            + `${a.sites && a.sites.length ? `, sites: ${a.sites.join(',')}` : ''})`).join('\n'),
+          : value.apps.map(a => `${a.id}${a.label === '' || a.label === a.id ? '' : ` — ${a.label}`}`
+            + ` (${String(a.invariants)} invariants, ${a.source}`
+            + `${a.hosts.length ? `, hosts: ${a.hosts.join(',')}` : ''})`
+            + `\n  app.mjs: ${a.path}`
+            + (a.error === undefined ? '' : `\n  load error: ${a.error}`)).join('\n'),
       }],
     },
-    execute(args) {
-      const needle = (args.filter ?? '').toLowerCase()
-      const apps = listApps(options.repoPath, options.appsEnv)
-        .filter(a => !needle
-          || a.id.toLowerCase().includes(needle)
-          || a.label.toLowerCase().includes(needle)
-          || a.goal.toLowerCase().includes(needle))
-        .map(a => ({
-          id: a.id, label: a.label, goal: a.goal,
-          steps: a.steps, toolSteps: a.toolSteps,
-          types: formatTypeMix(a.types),
-          requires: a.requires,
-          invariants: a.invariants, origin: a.origin,
-          kind: a.kind, hosts: a.hosts,
-          ...(a.sites === undefined ? {} : { sites: a.sites }),
-        }))
-      return Promise.resolve({ apps })
+    async execute(args) {
+      const apps = await listApps(options, args.filter ?? '')
+      return {
+        apps: apps.map(a => ({
+          id: a.id,
+          label: a.label,
+          goal: a.goal,
+          path: a.path,
+          source: a.source,
+          kind: a.kind,
+          invariants: a.invariants,
+          hosts: a.hosts,
+          ...(a.error === undefined ? {} : { error: a.error }),
+        })),
+      }
     },
   }))
 
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_run`,
     description:
-      'Run one declared app: data leg -> browser/tool steps -> end-state invariants. By default it '
-      + 'runs the whole journey; use only_step/from_step/max_steps to debug one segment, which reports '
-      + 'status=partial and verified=false. Returns a compact summary with status, failed steps, '
-      + 'invariants, model tier, result/report paths and the first structured failure. Semantic '
-      + 'templates (`kind=semantic-template`) additionally require `site`. `dry` only expands the '
-      + 'plan; `ablate` is an explicit ablation arm, not a routine mode.',
+      'Run one flow app (`apps/<id>/app.mjs`) end to end: the script\'s `flow(ctx)` owns the control '
+      + 'flow (if/for/while, sub-functions), the engine decides each step\'s target, gate, action and '
+      + 'completion signal, and the declared end-state invariants are the only pass/fail truth. '
+      + '`max_steps` is an EXECUTION BUDGET, not a step index: the script runs under its own control '
+      + 'flow and stops with `budget_exceeded` when the budget is used up (status=partial, '
+      + 'verified=false). By default it runs the whole flow. `trace` defaults to true. `dry` only '
+      + 'dry-runs the call sequence without a browser; `ablate` is an explicit ablation arm, not a '
+      + 'routine mode. Returns a compact summary with status, failed steps, invariants, model tier, '
+      + 'result/report paths and the first structured failure.',
     parameters: {
       app: { type: 'string', required: true, description: 'The app id from `' + toolPrefix + '_apps`.' },
-      site: {
-        type: 'string',
-        description: 'Semantic templates only: one of the site keys listed by `' + toolPrefix
-          + '_apps`. Pack apps must not pass it.',
-      },
-      dry: { type: 'boolean', description: 'Only expand the plan; do not open a browser or run tools.' },
+      dry: { type: 'boolean', description: 'Only dry-run the script\'s call sequence; no browser, no tools.' },
       ablate: { type: 'string', enum: ['stub', 'rules-only'], description: 'ABLATION EXPERIMENT ONLY. `stub` installs a scripted fake model; `rules-only` runs with no model at all. Omit for a normal run (the real decision model is the default).' },
       provider: { type: 'string', description: 'Override the decision provider for this call (laya-onnx, decision-service, a baseline, or an ablation). Omit to use the configured three-key service, or the local model when no service URL is set.' },
       no_sources: { type: 'boolean', description: 'Skip the data leg (use already-available data).' },
@@ -392,19 +389,22 @@ export function apply(ctx: Context, config: Config): void {
       },
       tiered_hint: {
         type: 'boolean',
-        description: 'P1 experiment: when the plan\'s target_hint resolves to an ambiguous tier, '
-          + 'the model is asked a SMALLER question (only that tier\'s candidates, not the whole pool). '
-          + 'Off by default — behavior identical to before; use it for A/B runs.',
+        description: 'P1 experiment: when a target hint resolves to an ambiguous tier, the model is '
+          + 'asked a SMALLER question (only that tier\'s candidates, not the whole pool). Off by '
+          + 'default — behavior identical to before; use it for A/B runs.',
       },
       slots: {
         type: 'array',
         description: 'Values for declared slots, as "key=value" entries (e.g. ["date=2026-10-12"]).',
         items: { type: 'string' },
       },
-      only_step: { type: 'integer', description: 'Run only this 1-based declared step.' },
-      from_step: { type: 'integer', description: 'Start at this 1-based declared step.' },
-      max_steps: { type: 'integer', description: 'Execute at most this many steps in this call.' },
-      trace: { type: 'boolean', description: 'Include per-step execution evidence in the result.' },
+      max_steps: {
+        type: 'integer',
+        description: 'Execution budget for this call (engine `--max-steps`), NOT a 1-based step '
+          + 'index. When the budget is used up the script stops with `budget_exceeded` '
+          + '(status=partial, verified=false).',
+      },
+      trace: { type: 'boolean', description: 'Include per-step execution evidence in the result. Defaults to true.' },
     },
     output: {
       schema: {
@@ -440,34 +440,12 @@ export function apply(ctx: Context, config: Config): void {
               failed: { type: 'array', required: true, items: { type: 'string' } },
             },
           },
-          planSteps: { type: 'integer', required: true },
-          plan: {
-            type: 'array',
-            required: true,
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                index: { type: 'integer', required: true },
-                kind: { type: 'string', required: true },
-                desc: { type: 'string', required: true },
-              },
-            },
-          },
           reportPath: { type: 'string', required: true },
           timedOut: { type: 'boolean', required: true },
           stdoutTail: { type: 'string', required: true },
-          // Semantic-flow runs only: the rule/laya/escalate/backfill tally line, and the learned
-          // site profile the backfill ring wrote (when it wrote one).
-          line: { type: 'string' },
-          profilePath: { type: 'string' },
-          // Pack runs: which tier executed (`on` / `off(missing)` / `off(rules-only)` /
-          // `off(scripted)`), and the decision-source tally. Absent only on older artifacts.
+          // Which tier executed (`on` / `off(missing)` / `off(rules-only)` / `off(scripted)`) and the
+          // decision-source tally. Absent only on older artifacts.
           model: { type: 'string' },
-          // Multi-type journeys: the declared type mix and local services the app needs (e.g. ssh).
-          // Present only when the pack declares more than one adapter kind / a local requirement.
-          types: { type: 'string' },
-          requires: { type: 'array', items: { type: 'string' } },
           decisions: { type: 'string' },
           status: { type: 'string' },
           verified: { type: 'boolean' },
@@ -483,6 +461,9 @@ export function apply(ctx: Context, config: Config): void {
                 index: { type: 'integer', required: true },
                 desc: { type: 'string', required: true },
                 status: { type: 'string', required: true },
+                id: { type: 'string' },
+                call: { type: 'string' },
+                url: { type: 'string' },
                 method: { type: 'string' },
                 stop_code: { type: 'string' },
                 obstacle: { type: 'string' },
@@ -505,10 +486,11 @@ export function apply(ctx: Context, config: Config): void {
         if (value.dry) {
           return [{
             type: 'text',
-            text: `DRY ${value.planSteps} step(s) expanded — nothing executed, nothing verified`
+            text: `DRY ${String(value.steps?.length ?? 0)} call(s) — nothing executed, nothing verified`
               + (value.model ? ` (model tier: ${value.model})` : '')
-              + (value.plan.length
-                ? `:\n${value.plan.map(s => `${s.index}. [${s.kind}] ${s.desc}`).join('\n')}`
+              + (value.steps && value.steps.length
+                ? `:\n${value.steps.map(s => `${String(s.index)}. [${s.call ?? 'step'}] ${s.desc}`
+                  + `${s.url ? ` → ${s.url}` : ''}`).join('\n')}`
                 : ''),
           }]
         }
@@ -518,31 +500,26 @@ export function apply(ctx: Context, config: Config): void {
         const stopped = !value.ok && named === 0
           ? value.timedOut
             ? '; stopped: timed out'
-            : value.exitCode === undefined ? '' : `; stopped: exit ${value.exitCode}`
+            : value.exitCode === undefined ? '' : `; stopped: exit ${String(value.exitCode)}`
           : ''
         const status = value.status ?? (value.ok ? 'passed' : 'failed')
         return [{
           type: 'text',
           text: `${status.toUpperCase()} ${value.completed}`
             + `; verified ${value.verified === true ? 'yes' : 'no'}`
-            + (value.partial ? ' (partial run)' : '')
-            + `; invariants ${value.invariants.held}/${value.invariants.total}`
-            + (value.blockedTotal ? `; blocked ${value.blockedTotal}: `
+            + (value.partial ? ' (partial run: execution budget used up)' : '')
+            + `; invariants ${String(value.invariants.held)}/${String(value.invariants.total)}`
+            + (value.blockedTotal ? `; blocked ${String(value.blockedTotal)}: `
               + value.blocked.map(b => `${b.desc} (${b.obstacle})`).join(' | ') : '')
             + (value.failedTools.length ? `; tool steps failed: ${value.failedTools.join(' | ')}` : '')
             + (value.refused.length ? `; not executed: ${value.refused.join(', ')}` : '')
-            + (value.failure ? `; first failure: step ${value.failure.step} ${value.failure.desc}`
+            + (value.failure ? `; first failure: step ${String(value.failure.step)} ${value.failure.desc}`
               + `${value.failure.stop_code ? ` (${value.failure.stop_code})` : ''}` : '')
             + stopped
-            + (value.line ? `; ${value.line}` : '')
             + (value.model ? `; model: ${value.model}` : '')
-            + (value.types ? `; types: ${value.types}` : '')
-            + (value.requires && value.requires.length
-              ? `; needs local: ${value.requires.map(x => formatRequires([x])).join(', ')}` : '')
             + (value.decisions ? `\ndecisions: ${value.decisions}` : '')
             + (value.resultPath ? `\nresult: ${value.resultPath}` : '')
-            + (value.reportPath ? `\nreport: ${value.reportPath}` : '\nno report was written')
-            + (value.profilePath ? `\nprofile: ${value.profilePath}` : ''),
+            + (value.reportPath ? `\nreport: ${value.reportPath}` : '\nno report was written'),
         }]
       },
     },
@@ -563,17 +540,9 @@ export function apply(ctx: Context, config: Config): void {
         }
         slots.set(key, entry.slice(at + 1))
       }
-      // The listing is filesystem-only; read the declared type mix/requirements from it so a
-      // capability-gated app (e.g. ssh without sshd) is interpretable in the run summary itself.
-      let declared: { types: Record<string, number>; requires: string[] } | null = null
-      try {
-        const row = listApps(options.repoPath, options.appsEnv).find(a => a.id === args.app)
-        declared = row === undefined ? null : { types: row.types, requires: row.requires }
-      } catch { declared = null }
       // The deployment gate lives in the shared call, so the service refuses it identically.
       const { summary } = await runApp(options, {
         app: args.app,
-        ...(args.site === undefined ? {} : { site: args.site }),
         ...(args.dry === undefined ? {} : { dry: args.dry }),
         ...(args.ablate === undefined ? {} : { ablate: args.ablate }),
         ...(args.provider === undefined ? {} : { provider: args.provider }),
@@ -582,8 +551,6 @@ export function apply(ctx: Context, config: Config): void {
         ...(args.allow_dangerous === undefined ? {} : { allowDangerous: args.allow_dangerous }),
         ...(args.confirm_safe === undefined ? {} : { confirmSafe: args.confirm_safe }),
         ...(args.tiered_hint === undefined ? {} : { tieredHint: args.tiered_hint }),
-        ...(args.only_step === undefined ? {} : { onlyStep: args.only_step }),
-        ...(args.from_step === undefined ? {} : { fromStep: args.from_step }),
         ...(args.max_steps === undefined ? {} : { maxSteps: args.max_steps }),
         ...(args.trace === undefined ? {} : { trace: args.trace }),
         // `Object.fromEntries` defines own properties, so even a `__proto__` slot reaches the CLI.
@@ -599,13 +566,9 @@ export function apply(ctx: Context, config: Config): void {
         refused: summary.refused,
         failedTools: summary.failedTools,
         invariants: summary.invariants,
-        planSteps: summary.planSteps,
-        plan: summary.plan,
         reportPath: summary.reportPath,
         timedOut: summary.timedOut,
         stdoutTail: summary.stdoutTail,
-        ...(summary.line === undefined ? {} : { line: summary.line }),
-        ...(summary.profilePath === undefined ? {} : { profilePath: summary.profilePath }),
         ...(summary.model === undefined ? {} : { model: summary.model }),
         ...(summary.decisions === undefined ? {} : { decisions: summary.decisions }),
         ...(summary.status === undefined ? {} : { status: summary.status }),
@@ -615,10 +578,6 @@ export function apply(ctx: Context, config: Config): void {
         outDir: summary.outDir,
         ...(summary.steps === undefined ? {} : { steps: summary.steps }),
         ...(summary.failure === undefined ? {} : { failure: summary.failure }),
-        ...(declared === null || Object.keys(declared.types).length <= 1
-          ? {} : { types: formatTypeMix(declared.types) }),
-        ...(declared === null || declared.requires.length === 0
-          ? {} : { requires: declared.requires }),
       }
     },
   }))
@@ -630,15 +589,21 @@ export function apply(ctx: Context, config: Config): void {
       app: { type: 'string', required: true },
       label: { type: 'string', required: true },
       goal: { type: 'string', required: true },
+      /** The ONE writable location: `apps/<id>/app.mjs`. */
       path: { type: 'string', required: true },
       source: { type: 'string', required: true },
-      mode: { type: 'string' },
+      script_sha256: { type: 'string', required: true },
+      plan_sha256: { type: 'string', required: true },
       hosts: { type: 'array', required: true, items: { type: 'string' } },
       slots: { type: 'object', required: true, additionalProperties: true },
       required_slots: { type: 'array', required: true, items: { type: 'string' } },
-      journey: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
+      sources: { type: 'array', required: true, items: { type: 'string' } },
       invariants: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
-      sites: { type: 'array', items: { type: 'string' } },
+      policy: { type: 'object', additionalProperties: true },
+      pace: { type: 'object', additionalProperties: true },
+      /** Current script source (`--code`). */
+      code: { type: 'string' },
+      code_truncated: { type: 'boolean' },
     },
   } as const
 
@@ -664,11 +629,11 @@ export function apply(ctx: Context, config: Config): void {
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `${value.ok ? 'READY' : 'CHECK'}; node ${String((value.node as any).version ?? '?')}; `
-          + `chromium ${(value.chromium as any).ok === true ? 'ok' : 'missing'}; `
-          + `model ${(value.model as any).ready === true ? 'ready' : 'missing'}; `
-          + `decision ${String(((value.provider as any).default ?? {}).name ?? '?')}; `
-          + `outer LLM ${(value.llm as any).configured === true ? 'configured' : 'stub'}`,
+        text: `${value.ok ? 'READY' : 'CHECK'}; node ${String(field(value.node, 'version') ?? '?')}; `
+          + `chromium ${field(value.chromium, 'ok') === true ? 'ok' : 'missing'}; `
+          + `model ${field(value.model, 'ready') === true ? 'ready' : 'missing'}; `
+          + `decision ${String(field(field(value.provider, 'default'), 'name') ?? '?')}; `
+          + `outer LLM ${field(value.llm, 'configured') === true ? 'configured' : 'stub'}`,
       }],
     },
     async execute() {
@@ -679,16 +644,28 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_app_show`,
     description:
-      'Read one app declaration: hosts, slots, ordered journey steps, invariants and the writable file. '
-      + 'Use this before editing a step; it is filesystem-only (no browser, no run).',
+      'Read one flow app: metadata (hosts, slots, sources, invariants, policy, pace), the writable '
+      + 'script path, both version anchors (`script_sha256` / `plan_sha256`) and the CURRENT source of '
+      + '`app.mjs`. Use this before editing; it loads the script (no browser, no run). The Agent reads '
+      + 'and edits the file itself — this bridge never writes app code.',
     parameters: {
       app: { type: 'string', required: true, description: 'The app id from the apps tool.' },
     },
-    output: { schema: appDetailSchema, render: (_args, value) => [{
-      type: 'text',
-      text: `${value.app} — ${value.goal} (${value.journey.length} steps, ${value.invariants.length} invariants, hosts ${value.hosts.join(',') || '-'})\n`
-        + value.journey.map((s: any, i: number) => `  [${i + 1}] ${String(s.desc ?? '')}${s.target_hint ? ` ← ${String(s.target_hint)}` : ''}`).join('\n'),
-    }] },
+    output: {
+      schema: appDetailSchema,
+      render: (_args, value) => [{
+        type: 'text',
+        text: `${value.app} — ${value.goal}`
+          + `\npath: ${value.path} (${value.source})`
+          + `\nhosts: ${value.hosts.join(',') || '-'}`
+          + ` · slots: ${Object.keys(value.slots).join(',') || '-'}`
+          + ` · required: ${value.required_slots.join(',') || '-'}`
+          + ` · invariants: ${String(value.invariants.length)}`
+          + `\nscript_sha256: ${value.script_sha256} · plan_sha256: ${value.plan_sha256}`
+          + (value.code_truncated === true ? '\n(code truncated by the CLI; read the path for the rest)' : '')
+          + (value.code === undefined ? '' : `\n\n${value.code}`),
+      }],
+    },
     async execute(args) {
       return appShow(options, args.app)
     },
@@ -697,8 +674,10 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_app_check`,
     description:
-      'Statically validate one app (schema, hints, signals, slots, hosts) without launching a browser. '
-      + 'Returns per-app problems; an empty list means it is loadable.',
+      'Statically validate one flow app: load `app.mjs` (meta contract + imports) and dry-run its '
+      + '`flow(ctx)` call sequence, checking targets/signals/slots/commands without launching a '
+      + 'browser. Returns per-app problems (with script line when available); an empty list means the '
+      + 'script is loadable and its call sequence is legal — not that page state will hold.',
     parameters: {
       app: { type: 'string', required: true, description: 'The app id from the apps tool.' },
     },
@@ -740,7 +719,7 @@ export function apply(ctx: Context, config: Config): void {
     name: `${toolPrefix}_inspect`,
     description:
       'Observe a live page without acting: title, URL, a bounded list of interactive elements, and '
-      + 'verified hint candidates for each. Use this before writing a step target_hint. No clicks, no '
+      + 'verified hint candidates for each. Use this before writing a step target hint. No clicks, no '
       + 'typing, no model call; only http(s) URLs.',
     parameters: {
       url: { type: 'string', required: true, description: 'The http(s) page to observe.' },
@@ -766,9 +745,12 @@ export function apply(ctx: Context, config: Config): void {
       render: (_args, value) => [{
         type: 'text',
         text: `${value.title} — ${value.url}\n`
-          + value.elements.map((e: any) => `  ${String(e.ref ?? '')} ${String(e.tag ?? '')} ${String(e.label ?? '')}`
-            + `${Array.isArray(e.hint_candidates) && e.hint_candidates.length ? `  hints: ${e.hint_candidates.join(' | ')}` : ''}`).join('\n')
-          + (value.truncated ? `\n(truncated to ${value.element_count} elements)` : ''),
+          + value.elements.map(e => {
+            const hints = field(e, 'hint_candidates')
+            return `  ${String(field(e, 'ref') ?? '')} ${String(field(e, 'tag') ?? '')} ${String(field(e, 'label') ?? '')}`
+              + `${Array.isArray(hints) && hints.length ? `  hints: ${hints.map(String).join(' | ')}` : ''}`
+          }).join('\n')
+          + (value.truncated ? `\n(truncated to ${String(value.element_count)} elements)` : ''),
       }],
     },
     async execute(args) {
@@ -782,7 +764,7 @@ export function apply(ctx: Context, config: Config): void {
   }))
 
   ctx.tools.register(defineTool({
-    name: `${toolPrefix}_online`,
+    name: `${toolPrefix}_test`,
     description:
       'Use the real-site regression suite: list cases, validate declarations offline, or run a tier. '
       + 'Never counts blocked/unreachable/skipped as passed; evidence is written outside the repo and '
@@ -794,6 +776,8 @@ export function apply(ctx: Context, config: Config): void {
       site: { type: 'string', description: 'Restrict to one site.' },
       headful: { type: 'boolean' },
       require_all: { type: 'boolean', description: 'Treat skipped/blocked as failure (scheduled runs).' },
+      max_steps: { type: 'integer', description: 'Per-case subgoal execution budget (default 8).' },
+      timeout_sec: { type: 'integer', description: 'Override site/case timeout in seconds.' },
     },
     output: {
       schema: {
@@ -825,13 +809,15 @@ export function apply(ctx: Context, config: Config): void {
       }],
     },
     async execute(args) {
-      return online(options, {
+      return test(options, {
         action: args.action as 'list' | 'validate' | 'run',
         ...(args.tier === undefined ? {} : { tier: args.tier }),
         ...(args.case === undefined ? {} : { case: args.case }),
         ...(args.site === undefined ? {} : { site: args.site }),
         ...(args.headful === undefined ? {} : { headful: args.headful }),
         ...(args.require_all === undefined ? {} : { requireAll: args.require_all }),
+        ...(args.max_steps === undefined ? {} : { maxSteps: args.max_steps }),
+        ...(args.timeout_sec === undefined ? {} : { timeoutSec: args.timeout_sec }),
       })
     },
   }))
@@ -839,18 +825,23 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_app_create`,
     description:
-      'Create a data-pack app skeleton under the user scope. It starts with one placeholder step; '
-      + 'replace it with app_set_step. Only pack declarations can be written here — arbitrary flow '
-      + 'scripts are not created by the bridge.',
+      'Create a flow app skeleton under the user scope via `amber apps new`: `apps/<id>/app.mjs` '
+      + 'with `meta` + an empty `flow(ctx)` to fill in. Returns the new app, its writable path and its '
+      + 'current source. Only the skeleton is generated — the Agent edits the script itself; there is '
+      + 'no step/format/kind parameter and no JSON app format.',
     parameters: {
       id: { type: 'string', required: true, description: 'Lowercase id; also the directory name.' },
-      goal: { type: 'string', description: 'One-line goal.' },
-      hosts: { type: 'array', items: { type: 'string' }, description: 'Allowed hosts (default example.com).' },
+      goal: { type: 'string', description: 'One-line goal written into `meta.goal`.' },
+      hosts: { type: 'array', items: { type: 'string' }, description: 'Allowed hosts (repeatable `--host`).' },
     },
-    output: { schema: appDetailSchema, render: (_args, value) => [{
-      type: 'text',
-      text: `CREATED ${value.app} (${value.path}); next: ${toolPrefix}_app_set_step`,
-    }] },
+    output: {
+      schema: appDetailSchema,
+      render: (_args, value) => [{
+        type: 'text',
+        text: `CREATED ${value.app} at ${value.path}; next: edit the app.mjs, then `
+          + `${toolPrefix}_app_check, then ${toolPrefix}_run`,
+      }],
+    },
     async execute(args) {
       return createApp(options, {
         id: args.id,
@@ -861,81 +852,17 @@ export function apply(ctx: Context, config: Config): void {
   }))
 
   ctx.tools.register(defineTool({
-    name: `${toolPrefix}_app_set_step`,
-    description:
-      'Atomically replace (or append) one journey step of a data-pack app and validate it. Invalid '
-      + 'input writes nothing. Use step fields desc / start_url / target_hint / signal / slots / when / '
-      + 'retries. Flow-script apps are refused.',
-    parameters: {
-      app: { type: 'string', required: true },
-      index: { type: 'integer', required: true, description: '1-based step index; length+1 appends.' },
-      step: { type: 'object', required: true, additionalProperties: true, description: 'The step declaration.' },
-      hosts: { type: 'array', items: { type: 'string' }, description: 'Add allowed hosts while writing.' },
-    },
-    output: { schema: appDetailSchema, render: (_args, value) => [{
-      type: 'text',
-      text: `UPDATED ${value.app} (${value.journey.length} steps); next: ${toolPrefix}_app_check then ${toolPrefix}_run`,
-    }] },
-    async execute(args) {
-      return setStep(options, {
-        app: args.app,
-        index: args.index,
-        step: args.step as Record<string, unknown>,
-        ...(args.hosts === undefined ? {} : { hosts: args.hosts }),
-      })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: `${toolPrefix}_app_set_invariant`,
-    description:
-      'Replace the end-state invariants of a data-pack app and validate them. Use this after writing '
-      + 'steps so a full run verifies the real destination, not the placeholder host.',
-    parameters: {
-      app: { type: 'string', required: true },
-      invariants: {
-        type: 'array',
-        required: true,
-        items: { type: 'object', additionalProperties: true },
-        description: 'Array of { id, desc, signal }; signal uses the engine signal grammar.',
-      },
-    },
-    output: { schema: appDetailSchema, render: (_args, value) => [{
-      type: 'text',
-      text: `UPDATED ${value.app} (${value.invariants.length} invariants)`,
-    }] },
-    async execute(args) {
-      return setInvariant(options, { app: args.app, invariants: args.invariants as Array<Record<string, any>> })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: `${toolPrefix}_app_remove_step`,
-    description: 'Remove one journey step (the app must keep at least one) and revalidate it.',
-    parameters: {
-      app: { type: 'string', required: true },
-      index: { type: 'integer', required: true, description: '1-based step index.' },
-    },
-    output: { schema: appDetailSchema, render: (_args, value) => [{
-      type: 'text',
-      text: `UPDATED ${value.app} (${value.journey.length} steps)`,
-    }] },
-    async execute(args) {
-      return removeStep(options, { app: args.app, index: args.index })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
     name: `${toolPrefix}_learn`,
     description:
       'Hand one browser flow to AmberFlow so it can be recorded instead of hand-written: give the '
       + 'recorded action list plus the page it starts from, and the engine runs it once, induces each '
       + "step's completion signal and the end-state invariants from the observed transitions, and "
-      + 'saves the pack ONLY when a rules-only replay with zero model calls still passes. The result '
-      + 'reports that replay honestly, so a flow that cannot be reproduced is never reported as learned. '
-      + 'A live demonstration is NOT available through a tool call — the engine records from a human '
-      + 'on an interactive terminal and a tool call has none — so `script` is required. Needs a browser '
-      + 'and the local decision runtime on the machine running the checkout.',
+      + 'writes a **flow app** (`apps/<id>/app.mjs`) ONLY when a rules-only replay of the generated '
+      + 'script with zero model calls still passes. The result reports that replay honestly, so a flow '
+      + 'that cannot be reproduced is never reported as learned. A live demonstration is NOT available '
+      + 'through a tool call — the engine records from a human on an interactive terminal and a tool '
+      + 'call has none — so `script` is required. Needs a browser and the local decision runtime on the '
+      + 'machine running the checkout.',
     parameters: {
       goal: { type: 'string', required: true, description: 'One line describing the flow to perform.' },
       url: { type: 'string', required: true, description: 'The http(s) page to start from.' },
@@ -950,11 +877,11 @@ export function apply(ctx: Context, config: Config): void {
       id: { type: 'string', description: 'App id to save under (defaults to a slug of host+goal).' },
       cdp: { type: 'string', description: 'CDP websocket URL of the browser to attach to; selects the browser, not the actions.' },
       headful: { type: 'boolean', description: 'Launch a visible browser for the recording (debug aid for a flaky flow).' },
-      pack_dir: {
+      apps_dir: {
         type: 'string',
-        description: 'Directory to write the pack into. Defaults to the user-scope apps dir '
-        + '($AMBERFLOW_HOME/apps, or ~/.amberflow/apps) — NOT inside the checkout. '
-        + 'Recorded apps are user config; the repo\'s apps/ are only development fixtures.',
+        description: 'Directory to write the flow app into (the CLI\'s `--apps-dir`). Defaults to '
+        + 'the user-scope apps dir ($AMBERFLOW_HOME/apps, or ~/.amberflow/apps) — NOT inside the '
+        + 'checkout. Recorded apps are user config; the checkout\'s apps/ are only development fixtures.',
       },
     },
     output: {
@@ -975,9 +902,9 @@ export function apply(ctx: Context, config: Config): void {
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `${value.status}: ${value.app} (${value.steps} steps) — rules-only replay: `
-          + `${value.completed}, ${value.invariants}, ${value.forwards} model call(s); `
-          + (value.saved ? `saved to ${value.saved}` : 'NOT saved')
+        text: `${value.status}: ${value.app} (${String(value.steps)} steps) — rules-only replay of the `
+          + `generated script: ${value.completed}, ${value.invariants}, ${String(value.forwards)} model call(s); `
+          + (value.saved ? `saved as a flow app at ${value.saved}` : 'NOT saved')
           + (value.problems && value.problems.length ? `; failed invariants: ${value.problems.join(', ')}` : ''),
       }],
     },
@@ -989,7 +916,7 @@ export function apply(ctx: Context, config: Config): void {
         ...(args.id === undefined ? {} : { id: args.id }),
         ...(args.cdp === undefined ? {} : { cdp: args.cdp }),
         ...(args.headful === undefined ? {} : { headful: args.headful }),
-        ...(args.pack_dir === undefined ? {} : { packDir: args.pack_dir }),
+        ...(args.apps_dir === undefined ? {} : { appsDir: args.apps_dir }),
       })
       return {
         status: summary.status,
@@ -1001,120 +928,6 @@ export function apply(ctx: Context, config: Config): void {
         invariants: summary.invariants,
         ...(summary.problems === undefined ? {} : { problems: summary.problems }),
         ...(summary.saved ? { saved: summary.saved } : {}),
-      }
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: `${toolPrefix}_plan`,
-    description:
-      'Turn ONE sentence plus a seed page into a site-agnostic SemanticFlow template (spec_version 2 '
-      + 'flow.json) plus that site\'s profile: the engine looks at each page as it walks the flow, '
-      + 'proposes each step semantically (no selectors in the template), executes it through the same '
-      + 'decision ladder the run tool uses, and INDUCES each step\'s completion signal from TWO '
-      + 'independent demonstrations (discriminating + reproducible, or the plan stops instead of '
-      + 'guessing). Page-role filenames, query parameter names, fill bindings and row extraction are '
-      + 'observed into the SITE PROFILE; learned hints are NOT written here (the run-time backfill '
-      + 'ring earns those on the first real runs). The template + profile are written ONLY when a '
-      + 'replay gate — compiling and running the whole journey — passes; a failed gate writes nothing '
-      + 'and reports the blocked steps. Re-running with an existing app id plans the SAME template '
-      + 'onto a new site (migration: only the new site\'s profile is produced). Needs a browser; '
-      + 'pass `planner: "llm"` for the LLM planner (requires OPENAI_* env), default is the offline '
-      + 'goal-recipe planner. A dangerous step (purchase) is never demonstrated unless this '
-      + 'deployment allows dangerous actions AND the caller passes allow_dangerous — on a real site '
-      + 'a demo click is a real order.',
-    parameters: {
-      goal: {
-        type: 'string', required: true,
-        description: 'The user sentence, as said ("订一张5月18日昆明到北京价格最低的机票") — '
-          + 'the engine extracts date/cities/intents into the slot bag; values never come from prose later.',
-      },
-      seed: {
-        type: 'string', required: true,
-        description: 'Seed page: an http(s) URL.',
-      },
-      app: { type: 'string', required: true, description: 'App id to write apps/<id>/flow.json under.' },
-      site: {
-        type: 'string',
-        description: 'Site key for the profile; defaults to the seed\'s directory name (file) or host (http).',
-      },
-      force: { type: 'boolean', description: 'Overwrite an existing brand-new template app id (a re-plan).' },
-      headful: { type: 'boolean', description: 'Watch the planning walk in a VISIBLE browser window. '
-        + 'The window opens on the machine running the engine (needs a display there, or `xvfb-run -a` '
-        + 'with VNC/noVNC), not in this browser page. Default false (headless).' },
-      planner: {
-        type: 'string', enum: ['scripted', 'llm'],
-        description: 'Planner door: `llm` needs OPENAI_* on the machine running the checkout; '
-          + 'the default offline recipe covers goal-shaped flows on fixtures/sandboxes.',
-      },
-      allow_dangerous: {
-        type: 'boolean',
-        description: 'Demonstrate the dangerous step (purchase click) during the walk. Deployment-'
-          + 'gated; fixtures/sandboxes only.',
-      },
-    },
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          status: { type: 'string', required: true },
-          ok: { type: 'boolean', required: true },
-          app: { type: 'string', required: true },
-          site: { type: 'string', required: true },
-          steps: {
-            type: 'array',
-            required: true,
-            items: {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                id: { type: 'string', required: true },
-                desc: { type: 'string', required: true },
-                signal_source: { type: 'string', required: true },
-              },
-            },
-          },
-          gate: { type: 'string', required: true },
-          blocked: { type: 'array', items: { type: 'string' } },
-          templatePath: { type: 'string', required: true },
-          profilePath: { type: 'string', required: true },
-          error: { type: 'string', required: true },
-        },
-      },
-      render: (_args, value) => [{
-        type: 'text',
-        text: value.status === 'planned'
-          ? `PLANNED ${value.app} @ ${value.site}: ${value.steps.length} step(s), gate: ${value.gate}`
-            + `\ntemplate: ${value.templatePath}\nprofile: ${value.profilePath}`
-            + (value.steps.some(s => s.signal_source === 'contract')
-              ? '\n(steps with signal_source=contract carry only the page-role URL fact)' : '')
-          : `NOT planned (${value.app} @ ${value.site}) — nothing was written: ${value.error}`
-            + (value.blocked && value.blocked.length ? `\nblocked:\n${value.blocked.map(b => `  - ${b}`).join('\n')}` : ''),
-      }],
-    },
-    async execute(args) {
-      const summary = await plan(options, {
-        goal: args.goal,
-        seed: args.seed,
-        app: args.app,
-        ...(args.site === undefined ? {} : { site: args.site }),
-        ...(args.force === undefined ? {} : { force: args.force }),
-        ...(args.planner === undefined ? {} : { planner: args.planner }),
-        ...(args.headful === undefined ? {} : { headful: args.headful }),
-        ...(args.allow_dangerous === undefined ? {} : { allowDangerous: args.allow_dangerous }),
-      })
-      return {
-        status: summary.status,
-        ok: summary.ok,
-        app: summary.app,
-        site: summary.site,
-        steps: summary.steps,
-        gate: summary.gate,
-        ...(summary.blocked === undefined ? {} : { blocked: summary.blocked }),
-        templatePath: summary.templatePath,
-        profilePath: summary.profilePath,
-        error: summary.error,
       }
     },
   }))

@@ -33,11 +33,11 @@ import type { DatasetReader } from "./dataset.ts";
 import type { ElemPool } from "./extraction.ts";
 
 /** 引擎能力面的动词表（代码）。新增一个面/原语是新 provider，不是在配置里造词。 */
-export const COMMAND_OPS = ["click", "check", "fill", "select", "skip"] as const;
+export const COMMAND_OPS = ["click", "check", "fill", "select", "scroll", "drag", "skip"] as const;
 export type CommandOp = (typeof COMMAND_OPS)[number];
 
 /** 需要参数绑定的 op；`skip` 无 target；其余必须点名一个 target。 */
-const VALUE_OPS: ReadonlySet<string> = new Set(["fill", "select"]);
+const VALUE_OPS: ReadonlySet<string> = new Set(["fill", "select", "drag"]);
 const NO_TARGET_OPS: ReadonlySet<string> = new Set(["skip"]);
 
 /**

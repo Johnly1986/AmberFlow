@@ -14,8 +14,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 export type TraceCall =
-  | "open" | "openPage" | "arrive" | "step" | "read" | "extract" | "holds" | "source"
-  | "run" | "dangerous" | "done" | "log";
+  | "open" | "openPage" | "arrive" | "step" | "read" | "extract" | "holds" | "waitFor" | "source"
+  | "run" | "dangerous" | "manual" | "done" | "log";
 
 export interface TraceEvent {
   /** 第几次 ctx 调用（1-based，贯穿一次运行）。 */
@@ -23,6 +23,8 @@ export interface TraceEvent {
   call: TraceCall;
   /** 步骤/调用的说明（`step`/`arrive` 有）。 */
   desc?: string;
+  /** 作者声明的稳定步骤标识（`ctx.step({ id })` / `ctx.arrive({ id })`）。 */
+  id?: string;
   url?: string;
   ok?: boolean;
   stop_code?: string;

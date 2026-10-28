@@ -96,8 +96,6 @@ export const SHARED_RUN_OPTIONS: CliOptions = {
   headful: { type: "boolean" },
   /** 消融臂：`stub` = 脚本桩，`rules-only` = 规则档（两个入口同一个取值集合）。 */
   ablate: { type: "string" },
-  /** 消融：内存里剥掉计划点名的 hint（只有 `off` 一档）。 */
-  "force-hints": { type: "string" },
   /** 置信度闸门刻度（0<N≤1）。 */
   "conf-floor": { type: "string" },
   /** R2 学习环：开，落点用默认 sidecar。 */
@@ -117,9 +115,7 @@ export const APP_ONLY_OPTIONS: CliOptions = {
   dry: { type: "boolean" },
   /** 结果里带每步执行证据（step_traces）；不执行额外页面扫描。 */
   trace: { type: "boolean" },
-  /** 分段运行（1-based，声明步骤序号；与 --from-step 互斥）。 */
-  "only-step": { type: "string" },
-  "from-step": { type: "string" },
+  /** flow 的执行预算：本次最多执行几个 ctx.step/arrive（调试用）。 */
   "max-steps": { type: "string" },
   /** 非交互：遇到 manual 步直接返回 needs_human，不拉 headed 浏览器。 */
   "manual-fail-fast": { type: "boolean" },

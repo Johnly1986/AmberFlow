@@ -30,6 +30,10 @@ export interface RunOptions {
   verbose?: boolean;
   tier?: string;
   requireAll?: boolean;
+  /** 与 `run --max-steps` 同名的子目标执行预算；缺省 8。 */
+  maxSteps?: number;
+  /** 与 run 的 `--timeout` 对齐：覆盖 site/case 的毫秒超时。 */
+  timeoutSec?: number;
 }
 
 type PageAny = any;
@@ -56,8 +60,10 @@ export async function prepareDecisionSource(provider?: string): Promise<{ name: 
   return { name: spec.name, tier: spec.tier };
 }
 
-function tmo(site: OnlineSite, c: OnlineCase): number {
-  return Math.max(5_000, Math.min(300_000, c.timeout_ms ?? site.timeout_ms ?? 60_000));
+function tmo(site: OnlineSite, c: OnlineCase, timeoutSec?: number): number {
+  const declared = c.timeout_ms ?? site.timeout_ms ?? 60_000;
+  const override = timeoutSec === undefined ? undefined : timeoutSec * 1000;
+  return Math.max(5_000, Math.min(300_000, override ?? declared));
 }
 
 async function pageText(page: PageAny): Promise<string> {
@@ -65,10 +71,10 @@ async function pageText(page: PageAny): Promise<string> {
 }
 
 async function classify(
-  page: PageAny, site: OnlineSite, target: string,
+  page: PageAny, site: OnlineSite, target: string, timeoutMs?: number,
 ): Promise<{ status: "blocked" | "unreachable" | "login_required" | "captured"; reason: string }> {
   try {
-    const resp = await page.goto(target, { waitUntil: "domcontentloaded", timeout: site.timeout_ms ?? 60_000 });
+    const resp = await page.goto(target, { waitUntil: "domcontentloaded", timeout: timeoutMs ?? site.timeout_ms ?? 60_000 });
     const code = typeof resp?.status === "function" ? resp.status() : 0;
     if (code === 401 || code === 403 || code === 429) {
       return { status: "blocked", reason: `HTTP ${code}` };
@@ -89,9 +95,9 @@ async function classify(
   }
 }
 
-function newMiddleware(): BrowserMiddleware {
+function newMiddleware(maxSteps = 8): BrowserMiddleware {
   return new BrowserMiddleware({
-    maxSteps: 8,
+    maxSteps,
     confFloor: 0.25,
     confirmFn: () => true,
     manualConfirmFn: null,
@@ -103,6 +109,7 @@ async function runOneCase(
 ): Promise<{ outcome: CaseOutcome; page?: PageAny }> {
   const t0 = Date.now();
   c = expandEnvValue(c, process.env) as OnlineCase;
+  const caseTimeout = tmo(site, c, opts.timeoutSec);
   const out: CaseOutcome = {
     id: c.id, site: c.site, tier: c.tier, status: "failed",
     duration_ms: 0, subgoals: [], invariants: [],
@@ -114,12 +121,12 @@ async function runOneCase(
     session = await browserSession(opts.headless !== false, c.device ?? site.device ?? null);
     const page: PageAny = session.page;
     pageRef = page;
-    page.setDefaultTimeout?.(tmo(site, c));
+    page.setDefaultTimeout?.(caseTimeout);
     const target = c.start_url ?? site.home;
     if (!/^https?:\/\//i.test(target)) throw new Error(`start_url must be http(s): ${target}`);
     if (isLocalhost(target) && site.allow_local !== true) throw new Error("localhost is not allowed by site.allow_local");
 
-    const pre = await classify(page, site, target);
+    const pre = await classify(page, site, target, caseTimeout);
     if (pre.status !== "captured") {
       out.status = pre.status === "blocked" ? "blocked" : pre.status === "login_required" ? "login_required" : "unreachable";
       out.reason = pre.reason;
@@ -129,7 +136,7 @@ async function runOneCase(
 
     if ((c.subgoals ?? []).length > 0) {
       const plan = new TaskPlan(c.goal, c.subgoals ?? [], path.join(os.tmpdir(), `online-${c.id}.json`), c.slots ?? {});
-      const mw = newMiddleware();
+      const mw = newMiddleware(opts.maxSteps);
       for (const sg of plan.subgoals) {
         const { rep, attempt, steps } = await runSubgoalWithRetries(
           mw as never, sg, plan, String(sg.start_url), page, session.pw, false,

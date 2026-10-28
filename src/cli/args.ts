@@ -18,16 +18,6 @@ export function normalizeAliases(args: readonly string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
-    // 旧 `--force-hints off` 是双 token 的布尔别名，不能靠单词映射。
-    if (a === "--force-hints" && args[i + 1] === "off") {
-      out.push("--without-hints");
-      i++;
-      continue;
-    }
-    if (a === "--force-hints=off") {
-      out.push("--without-hints");
-      continue;
-    }
     out.push(ALIASES[a] ?? a);
   }
   return out;

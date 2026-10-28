@@ -52,6 +52,7 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       : undefined;
     return {
       ok,
+      ...(ev.id === undefined ? {} : { id: ev.id }),
       ...(ev.stop_code === undefined ? {} : { stopCode: ev.stop_code }),
       ...(recorded === undefined ? {} : { reason: recorded }),
       evidence: { url: ev.url ?? currentUrl, attempts: 1, elapsedMs: 0 },
@@ -101,6 +102,12 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       consume();
       return stepResult(ev);
     },
+    manual: async (desc, req) => {
+      const ev = nextEvent("manual", { desc });
+      if (typeof ev.url === "string" && ev.url) currentUrl = ev.url;
+      consume();
+      return stepResult(ev);
+    },
     url: () => currentUrl,
     read: {
       text: async (sel) => {
@@ -125,6 +132,11 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       const ev = nextEvent("holds");
       return ev.ok === true;
     },
+    waitFor: async (sig, opts) => {
+      void sig; void opts;
+      const ev = nextEvent("waitFor");
+      return ev.ok === true;
+    },
     source: async (name) => {
       const ev = nextEvent("source", { desc: name });
       // trace 只记摘要（counts/行数），不记整张表：重放能对齐"调用发生过"，不重放数据内容。
@@ -144,8 +156,13 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       throw new StopError("config_error", "ctx.rows is closed in v1 (Q5: no new extraction grammar); "
         + "declare named row extraction in meta.site.listExtract and call ctx.extract(name)");
     },
-    extract: async (name) => {
-      const ev = nextEvent("extract", { desc: name });
+    extract: async (nameOrSpec) => {
+      const desc = typeof nameOrSpec === "string"
+        ? nameOrSpec
+        : isObj(nameOrSpec) && typeof nameOrSpec["rows"] === "string"
+          ? `inline:${nameOrSpec["rows"]}`
+          : "";
+      const ev = nextEvent("extract", { desc });
       const rec = isObj(ev.result) ? ev.result : {};
       const rows = Array.isArray(rec["rows"]) ? (rec["rows"] as Array<Record<string, string>>) : [];
       return rows;
@@ -165,6 +182,9 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       const ev = nextEvent("dangerous", { desc: req.desc });
       consume();
       return stepResult(ev);
+    },
+    fail: (code, reason) => {
+      throw new StopError(typeof code === "string" && code.trim() ? code : "flow_failed", reason ?? "");
     },
     done: async () => { nextEvent("done"); },
   };

@@ -1,0 +1,9 @@
+{
+  "id": "the-internet",
+  "hosts": ["the-internet.herokuapp.com"],
+  "home": "https://the-internet.herokuapp.com/",
+  "locale": "en-US",
+  "timeout_ms": 60000,
+  "blocked_markers": ["Access Denied", "403 Forbidden", "Request blocked"],
+  "login_markers": []
+}

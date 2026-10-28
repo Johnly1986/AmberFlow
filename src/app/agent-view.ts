@@ -80,7 +80,7 @@ function traceSteps(result: AppRunResult): AgentStepView[] {
       desc: text(t["desc"]) || `step ${i + 1}`,
       status,
       ...(methods.length ? { method: methods[methods.length - 1] } : {}),
-      ...(sg?.stop_code ? { stop_code: sg.stop_code } : {}),
+      ...(typeof t["stop_code"] === "string" ? { stop_code: t["stop_code"] } : sg?.stop_code ? { stop_code: sg.stop_code } : {}),
       ...(sg?.obstacle ? { obstacle: sg.obstacle } : {}),
     };
   });
@@ -126,14 +126,16 @@ export function agentRunStatus(result: AppRunResult, partial: boolean, dry: bool
   if (dry) return "dry";
   const manual = (result.manual_steps ?? []).some((m) => !m.done);
   if (manual) return "needs_human";
+  if (result.script?.stop_code === "needs_human") return "needs_human";
   const blocked = (result.subgoals ?? []).some((s) => (s as Record<string, unknown>)["status"] === "blocked");
   const failedTools = (result.tool_steps ?? []).some((t) => !t.ok && !t.refused);
   const refused = (result.tool_steps ?? []).some((t) => t.refused !== undefined);
   if (blocked || failedTools) return "blocked";
   if (refused) return "blocked";
+  // 执行预算用满 = 主动停在半路：不变量没求值不是“失败”，是这次只跑了前 N 步。
+  if (partial) return "partial";
   const invariantFailed = (result.invariants ?? []).some((i) => !i.held);
   if (invariantFailed) return "failed";
-  if (partial) return "partial";
   return result.ok ? "passed" : "failed";
 }
 
@@ -164,12 +166,11 @@ export function toAgentRunView(
   const app = result.app || "app";
   const next: string[] = [];
   if (dry) next.push(`amber run ${app}`, `amber apps show ${app}`);
-  else if (status === "passed") next.push(`amber online --tier smoke`, `amber apps show ${app}`);
-  else if (status === "partial") next.push(`amber run ${app} --from-step ${(failedStep?.index ?? 1) + 1}`);
+  else if (status === "passed") next.push(`amber test --tier smoke`, `amber apps show ${app}`);
+  else if (status === "partial") next.push(`amber run ${app} --trace`, `amber apps explain ${app}`);
   else if (status === "needs_human") next.push(`amber run ${app} --headful`, `amber apps show ${app}`);
   else if (status === "blocked" || status === "failed") {
-    if (failedStep) next.push(`amber run ${app} --only-step ${failedStep.index} --headful`);
-    next.push(`amber apps show ${app}`, `amber apps check ${app}`);
+    next.push(`amber apps explain ${app}`, `amber apps check ${app}`, `amber apps show ${app}`);
   } else next.push(`amber apps show ${app}`, `amber apps check ${app}`);
 
   return {

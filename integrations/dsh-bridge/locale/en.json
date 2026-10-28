@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "AmberFlow Bridge",
-    "description": "Drive AmberFlow's frozen-plan browser engine from a session: list apps, run one end to end, record a flow, and plan a site-agnostic flow. The configuration page sets the online decision model (token-plan SystemOne) URL, token key and model name used when running apps."
+    "description": "Drive AmberFlow's scripted flow apps from a session: list and read apps, check a script's call sequence, run a flow app with an execution budget, record a flow into an app.mjs, and run the real-site suite. The configuration page sets the online decision model (token-plan SystemOne) URL, token key and model name used when running apps."
   }
 }

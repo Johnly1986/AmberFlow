@@ -101,35 +101,36 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     } else {
       p.push(...validateSignalSpec(req.done, where));
     }
-    if (req.act === undefined || req.act === null) {
-      p.push(`${where}: act is required (pure navigation uses ctx.arrive)`);
-    } else if (Array.isArray(req.act)) {
-      for (const c of req.act) {
-        if (!isObj(c) || typeof c.op !== "string") { p.push(`${where}: command needs {op, ...} (build with kit.command())`); continue; }
+    if (req.act !== undefined && req.act !== null) {
+      if (Array.isArray(req.act)) {
+        for (const c of req.act) {
+          if (!isObj(c) || typeof c.op !== "string") { p.push(`${where}: command needs {op, ...} (build with kit.command())`); continue; }
+        }
+        validateCommands(normalizeCommandIds(req.act as CommandDecl[]), where, p, deps.slotKeys);
+      } else if (!isObj(req.act) || (req.act.kind !== "hint" && req.act.kind !== "hints")) {
+        p.push(`${where}: act must be kit.hint()/kit.hints() or an array of kit.command(...)`);
+      } else if (req.act.kind === "hint") {
+        if (typeof req.act.hint !== "string" || !req.act.hint.trim()) p.push(`${where}: hint must be a non-empty string`);
+      } else if (!Array.isArray(req.act.hints) || !req.act.hints.length) {
+        p.push(`${where}: hints must be a non-empty list`);
       }
-      validateCommands(normalizeCommandIds(req.act as CommandDecl[]), where, p, deps.slotKeys);
-    } else if (!isObj(req.act) || (req.act.kind !== "hint" && req.act.kind !== "hints")) {
-      p.push(`${where}: act must be kit.hint()/kit.hints() or an array of kit.command(...)`);
-    } else if (req.act.kind === "hint") {
-      if (typeof req.act.hint !== "string" || !req.act.hint.trim()) p.push(`${where}: hint must be a non-empty string`);
-    } else if (!Array.isArray(req.act.hints) || !req.act.hints.length) {
-      p.push(`${where}: hints must be a non-empty list`);
     }
     if (req.when !== undefined && req.when !== null) p.push(...validateSignalSpec(req.when, `${where}.when`));
     return p;
   };
 
-  const recordStep = (desc: string, done?: unknown, ok = true, stopCode?: string): StepResult => {
+  const recordStep = (desc: string, done?: unknown, ok = true, stopCode?: string, id?: string): StepResult => {
     checkBudget();
     budget.stepsUsed += 1;
     pushEvent(trace, {
       call: "step", desc, url: currentUrl, ok,
+      ...(id === undefined ? {} : { id }),
       ...(stopCode === undefined ? {} : { stop_code: stopCode }),
       // dry 的审计额外记**声明的完成条件**（它是计划数据，不是模型产出）：
       // `apps explain` 与"脚本 vs 既有 journey"对照都靠它。
       ...(done === undefined ? {} : { result: { done } }),
     });
-    return { ok, ...(stopCode === undefined ? {} : { stopCode }), evidence: { url: currentUrl, attempts: 1, elapsedMs: 0 } };
+    return { ok, ...(id === undefined ? {} : { id }), ...(stopCode === undefined ? {} : { stopCode }), evidence: { url: currentUrl, attempts: 1, elapsedMs: 0 } };
   };
 
   const kitCtx = createKit();
@@ -185,8 +186,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       currentUrl = resolved;
       checkBudget();
       budget.stepsUsed += 1;
-      pushEvent(trace, { call: "arrive", desc: req?.desc, url: resolved, ok: true });
-      return { ok: true, evidence: { url: resolved, attempts: 1, elapsedMs: 0 } };
+      pushEvent(trace, { call: "arrive", desc: req?.desc, url: resolved, ok: true, ...(req?.id === undefined ? {} : { id: req.id }) });
+      return { ok: true, ...(req?.id === undefined ? {} : { id: req.id }), evidence: { url: resolved, attempts: 1, elapsedMs: 0 } };
     },
     step: async (desc, req) => {
       const p = validateStep(`ctx.step(${JSON.stringify(desc)})`, req);
@@ -195,7 +196,23 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       if (req.url !== undefined) assertNavigable(req.url, `ctx.step(${JSON.stringify(desc)})`);
       if (effectiveUrl !== undefined) assertHost(effectiveUrl, `ctx.step(${JSON.stringify(desc)})`);
       if (req.url !== undefined) currentUrl = resolveCtxUrl(req.url);
-      return recordStep(desc, req.done);
+      return recordStep(desc, req.done, true, undefined, req.id);
+    },
+    manual: async (desc, req) => {
+      assertNotDone(`ctx.manual(${JSON.stringify(desc)})`);
+      if (req === null || typeof req !== "object" || req.done === undefined || req.done === null) {
+        throw new StopError("config_error", "ctx.manual: done signal is required");
+      }
+      const p = validateSignalSpec(req.done, `ctx.manual(${JSON.stringify(desc)})`);
+      if (p.length) throw new StopError("config_error", p.join("；"));
+      checkBudget();
+      budget.stepsUsed += 1;
+      pushEvent(trace, {
+        call: "manual", desc, url: currentUrl, ok: true,
+        ...(req.id === undefined ? {} : { id: req.id }),
+        result: { dry: true, instructions: req.instructions ?? "" },
+      });
+      return { ok: true, ...(req.id === undefined ? {} : { id: req.id }), evidence: { url: currentUrl, attempts: 1, elapsedMs: 0 } };
     },
     url: () => currentUrl,
     read: {
@@ -211,6 +228,16 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       const p = isObj(sig) && Object.keys(sig).length ? validateSignalSpec(sig, "ctx.holds") : ["ctx.holds needs a non-empty signal"];
       if (p.length) throw new StopError("config_error", problems(p).join("；"));
       pushEvent(trace, { call: "holds", ok: true, result: true });
+      return true;
+    },
+    waitFor: async (sig, opts = {}) => {
+      const p = isObj(sig) && Object.keys(sig).length
+        ? validateSignalSpec(sig, "ctx.waitFor")
+        : ["ctx.waitFor needs a non-empty signal"];
+      if (p.length) throw new StopError("config_error", problems(p).join("；"));
+      const timeoutMs = Math.max(0, Number(opts.timeoutMs ?? 15_000));
+      const pollMs = Math.max(1, Number(opts.pollMs ?? 200));
+      pushEvent(trace, { call: "waitFor", ok: true, result: { dry: true, timeout_ms: timeoutMs, poll_ms: pollMs } });
       return true;
     },
     source: async (name) => {
@@ -232,16 +259,26 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       throw new StopError("config_error", "ctx.rows is closed in v1 (Q5: no new extraction grammar); "
         + "declare named row extraction in meta.site.listExtract and call ctx.extract(name)");
     },
-    extract: async (name) => {
-      if (typeof name !== "string" || !name.trim()) throw new StopError("config_error", "ctx.extract: name must be a non-empty string");
-      const spec = pack.site?.listExtract?.[name];
-      if (spec === undefined) {
-        const known = Object.keys(pack.site?.listExtract ?? {});
+    extract: async (nameOrSpec) => {
+      let extractName: string;
+      if (typeof nameOrSpec === "string") {
+        if (!nameOrSpec.trim()) throw new StopError("config_error", "ctx.extract: name must be a non-empty string");
+        const spec = pack.site?.listExtract?.[nameOrSpec];
+        if (spec === undefined) {
+          const known = Object.keys(pack.site?.listExtract ?? {});
+          throw new StopError("config_error",
+            `ctx.extract(${JSON.stringify(nameOrSpec)}): meta.site.listExtract has no such entry`
+            + ` (known: ${known.length ? known.join(", ") : "none declared"})`);
+        }
+        extractName = nameOrSpec;
+      } else if (isObj(nameOrSpec) && typeof nameOrSpec["rows"] === "string" && nameOrSpec["rows"].trim()
+          && isObj(nameOrSpec["fields"])) {
+        extractName = `inline:${nameOrSpec["rows"]}`;
+      } else {
         throw new StopError("config_error",
-          `ctx.extract(${JSON.stringify(name)}): meta.site.listExtract has no such entry`
-          + ` (known: ${known.length ? known.join(", ") : "none declared"})`);
+          "ctx.extract needs a declared name or { rows, fields, maxItems? } structure");
       }
-      pushEvent(trace, { call: "extract", desc: name, result: { rows: [], truncated: false } });
+      pushEvent(trace, { call: "extract", desc: extractName, result: { rows: [], truncated: false } });
       return [];
     },
     run: (async (sourceOrStep: unknown, args?: string[], req?: unknown): Promise<StepResult> => {
@@ -297,6 +334,9 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       budget.stepsUsed += 1;
       pushEvent(trace, { call: "dangerous", desc: req.desc, ok: true, result: { source: req.source } });
       return { ok: true, evidence: { url: currentUrl, attempts: 1, elapsedMs: 0 } };
+    },
+    fail: (code, reason) => {
+      throw new StopError(typeof code === "string" && code.trim() ? code : "flow_failed", reason ?? "");
     },
     done: async () => {
       if (doneCalled) throw new StopError("config_error", "ctx.done called twice");

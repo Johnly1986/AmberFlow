@@ -159,7 +159,7 @@ export function doctorReport(p: Preflight): { ok: boolean; lines: string[] } {
     lines.push("");
     if (!p.model) lines.push("规则模式也能跑：计划点名目标的步骤不需要模型权重。");
     lines.push("现在就可以开始：npm start -- --goal \"把商品加入购物车\" --url <你的页面>");
-    lines.push("               npm run online -- --tier smoke     # 先看真实站点是否可达");
+    lines.push("               npm run test -- --tier smoke     # 先看真实站点是否可达");
   }
   return { ok, lines };
 }

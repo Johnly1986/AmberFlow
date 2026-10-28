@@ -28,6 +28,8 @@ const OPTIONS = {
   provider: { type: "string" as const },
   "skip-data": { type: "boolean" as const },
   "allow-dangerous": { type: "boolean" as const },
+  "confirm-safe": { type: "boolean" as const },
+  "manual-fail-fast": { type: "boolean" as const },
   "emit-trace": { type: "string" as const },
   replay: { type: "string" as const },
   remember: { type: "boolean" as const },
@@ -40,10 +42,7 @@ const OPTIONS = {
   "min-confidence": { type: "string" as const },
   "tiered-hint": { type: "boolean" as const },
   trace: { type: "boolean" as const },
-  "only-step": { type: "string" as const },
-  "from-step": { type: "string" as const },
   "max-steps": { type: "string" as const },
-  "without-hints": { type: "boolean" as const },
   ablate: { type: "string" as const },
   json: { type: "boolean" as const },
   quiet: { type: "boolean" as const },
@@ -156,10 +155,12 @@ function validateAppFlags(v: Values, mode: "app" | "pick"): void {
 
 function validatePlanFlags(v: Values): void {
   if (str(v["save-plan"])) throw usageError("--save-plan 只用于 --goal");
-  if (bool(v["skip-data"])) throw usageError("--skip-data 只用于应用包");
-  if (bool(v["allow-dangerous"])) throw usageError("--allow-dangerous 只用于应用包 / 一次性目标");
-  if (str(v.out)) throw usageError("--out 暂不用于 --plan 模式", { hint: "计划执行器把结果写到计划同目录；--out 留给应用包运行。" });
-  if (str(v.slot) || Array.isArray(v.slot)) throw usageError("--slot 只用于应用包");
+  if (str(v["max-steps"])) throw usageError("--max-steps 只用于应用运行（计划用 --max）");
+  if (bool(v["confirm-safe"]) || bool(v["manual-fail-fast"])) throw usageError("--confirm-safe / --manual-fail-fast 只用于应用运行");
+  if (bool(v["skip-data"])) throw usageError("--skip-data 只用于应用运行");
+  if (bool(v["allow-dangerous"])) throw usageError("--allow-dangerous 只用于应用运行 / 一次性目标");
+  if (str(v.out)) throw usageError("--out 暂不用于 --plan 模式", { hint: "计划执行器把结果写到计划同目录；--out 留给应用运行。" });
+  if (str(v.slot) || Array.isArray(v.slot)) throw usageError("--slot 只用于应用运行");
   if (str(v.target)) throw usageError("--target 只用于 --goal 模式");
   if (bool(v.remember) || str(v.memory)) {
     // plan-cli 有旧名 --learn-hints / --hint-memory，分别映射到 sidecar。
@@ -171,14 +172,16 @@ function validatePlanFlags(v: Values): void {
 }
 
 function validateGoalFlags(v: Values): void {
-  if (bool(v["skip-data"])) throw usageError("--skip-data 只用于应用包");
+  if (str(v["max-steps"])) throw usageError("--max-steps 只用于应用运行");
+  if (bool(v["confirm-safe"]) || bool(v["manual-fail-fast"])) throw usageError("--confirm-safe / --manual-fail-fast 只用于应用运行");
+  if (bool(v["skip-data"])) throw usageError("--skip-data 只用于应用运行");
   if (bool(v["allow-dangerous"])) throw usageError("--allow-dangerous 只用于应用包");
   if (bool(v.remember) || str(v.memory)) throw usageError("--remember / --memory 只用于应用包 / --plan");
   if (bool(v.reset) || bool(v.replan) || str(v.confirm)) {
     throw usageError("--reset / --replan / --confirm 只用于 --plan 模式");
   }
-  if (str(v.out)) throw usageError("--out 只用于应用包运行");
-  if (str(v.slot) || Array.isArray(v.slot)) throw usageError("--slot 只用于应用包");
+  if (str(v.out)) throw usageError("--out 只用于应用运行");
+  if (str(v.slot) || Array.isArray(v.slot)) throw usageError("--slot 只用于应用运行");
 }
 
 
@@ -194,8 +197,7 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   }
   if (bool(v["dry-run"]) && (bool(v.json) || ctx.globals.json)) {
     const { resolveApp, dryRunFlow } = await import("../../app/app-script.ts");
-    const { expandPack } = await import("../../app/app-pack.ts");
-    let resolved;
+    let resolved: Awaited<ReturnType<typeof resolveApp>>;
     try {
       resolved = await resolveApp(app);
     } catch (err) {
@@ -221,40 +223,32 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
         next: ["amber apps list", "amber apps check <应用|脚本>"],
       });
     }
-    if (resolved.script?.mode === "flow") {
-      const dry = await dryRunFlow(resolved.script, { slots });
-      const pack = resolved.pack;
-      const envelope = successEnvelope("run", {
-        mode: "flow", dry_run: true, app: pack.id, label: pack.label, goal: pack.goal,
-        slots, problems: dry.problems,
-        events: dry.trace.events.map((e) => ({ i: e.i, call: e.call, desc: e.desc, url: e.url })),
-      }, { exitCode: dry.problems.length ? 2 : 0, next: dry.problems.length ? ["amber apps check <脚本>"] : [`amber run ${pack.id}`] });
-      if (dry.problems.length) {
-        envelope.ok = false;
-        envelope.error = { code: "USAGE", message: "dry-run 发现配置错误", hint: dry.problems.join("；"), next: ["amber apps check <脚本>"] };
-      }
-      emitJson(ctx, envelope);
-      return dry.problems.length ? 2 : 0;
-    }
+    const dry = await dryRunFlow(resolved.script, { slots });
     const pack = resolved.pack;
-    let expanded;
-    try {
-      expanded = expandPack(pack, slots, path.resolve(ctx.cwd, DEFAULT_PLAN));
-    } catch (err) {
-      throw usageError(err instanceof Error ? err.message : String(err));
+    const envelope = successEnvelope("run", {
+      mode: "flow", dry_run: true, status: "dry", verified: false, partial: false,
+      app: pack.id, label: pack.label, goal: pack.goal,
+      slots, problems: dry.problems,
+      events: dry.trace.events.map((e) => ({
+        i: e.i, call: e.call, id: e.id, desc: e.desc, url: e.url,
+        ok: e.ok ?? null,
+        ...(e.stop_code === undefined ? {} : { stop_code: e.stop_code }),
+      })),
+    }, { exitCode: dry.problems.length ? 2 : 0, next: dry.problems.length ? ["amber apps check <脚本>"] : [`amber run ${pack.id}`] });
+    if (dry.problems.length) {
+      envelope.ok = false;
+      envelope.error = { code: "USAGE", message: "dry-run 发现配置错误", hint: dry.problems.join("；"), next: ["amber apps check <脚本>"] };
     }
-    emitJson(ctx, successEnvelope("run", {
-      mode: "app", dry_run: true, app: pack.id, label: pack.label, goal: pack.goal,
-      slots: expanded.plan.slots, steps: expanded.steps, skipped: 0,
-      subgoals: expanded.plan.subgoals, roles_used: expanded.rolesUsed,
-    }, { next: [`amber run ${pack.id}`] }));
-    return 0;
+    emitJson(ctx, envelope);
+    return dry.problems.length ? 2 : 0;
   }
   const args = ["--app", app];
   if (bool(v["dry-run"])) args.push("--dry");
   if (headful) args.push("--headful");
   if (bool(v["skip-data"])) args.push("--no-sources");
   if (bool(v["allow-dangerous"])) args.push("--allow-dangerous");
+  if (bool(v["confirm-safe"])) args.push("--confirm-safe");
+  if (bool(v["manual-fail-fast"])) args.push("--manual-fail-fast");
   if (bool(v.remember)) args.push("--learn-hints");
   const emitTrace = str(v["emit-trace"]);
   if (emitTrace !== undefined) args.push("--emit-trace", emitTrace);
@@ -270,11 +264,8 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   }
   if (bool(v["tiered-hint"])) args.push("--tiered-hint");
   if (bool(v.trace) || bool(v.json) || ctx.globals.json) args.push("--trace");
-  for (const [key, flag] of [["only-step", "--only-step"], ["from-step", "--from-step"], ["max-steps", "--max-steps"]] as const) {
-    const val = str(v[key]);
-    if (val !== undefined) args.push(flag, val);
-  }
-  if (bool(v["without-hints"])) args.push("--force-hints", "off");
+  const maxStepsArg = str(v["max-steps"]);
+  if (maxStepsArg !== undefined) args.push("--max-steps", maxStepsArg);
   if (bool(v.quiet) || ctx.globals.quiet) args.push("--quiet");
 
   const jsonMode = bool(v.json) || ctx.globals.json;
@@ -284,10 +275,10 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
 
   let appId = path.basename(app, path.extname(app));
   try {
-    const { loadPack } = await import("../../app/app-pack.ts");
-    appId = loadPack(app).id;
+    const { loadScriptApp } = await import("../../app/app-script.ts");
+    appId = (await loadScriptApp(app)).pack.id;
   } catch {
-    // 包坏了交给 app-runner 报错；这里只负责给结果文件一个安全的名字。
+    // 脚本坏了交给 app-runner 报错；这里只负责给结果文件一个安全的名字。
   }
 
   // app-runner 的人类进度先转到 stderr；跑完再从固定产物路径读结果，
@@ -327,6 +318,9 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
       outDir, resultPath, reportPath,
       partial: result["partial"] === true,
     });
+    const partial = view.partial === true;
+    const exitCode = partial ? 0 : code;
+    const next = view.next.length ? view.next : [`amber apps show ${appId}`];
     const data = {
       ...result,
       ...view,
@@ -335,18 +329,21 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
       steps: view.steps,
       artifacts: { result_json: resultPath, report_md: reportPath },
     };
-    const envelope = successEnvelope("run", data, { exitCode: code, next });
-    if (code !== 0) {
+    const envelope = successEnvelope("run", data, { exitCode, next });
+    if (code !== 0 && !partial) {
       envelope.ok = false;
       envelope.error = {
-        code: code === 3 ? "BLOCKED" : code === 2 ? "USAGE" : "INCOMPLETE",
-        message: `应用 ${appId} 未通过（退出码 ${code}）`,
+        code: view.status === "needs_human" ? "NEEDS_HUMAN"
+          : code === 3 ? "BLOCKED" : code === 2 ? "USAGE" : "INCOMPLETE",
+        message: view.status === "needs_human"
+          ? `应用 ${appId} 需要人工介入（非 TTY 或人工步未完成）`
+          : `应用 ${appId} 未通过（退出码 ${code}）`,
         hint: "完整步骤结果在 data 里；人类报告在 stderr 与 artifacts.report_md。",
         next,
       };
     }
     emitJson(ctx, envelope);
-    return code;
+    return exitCode;
   }
 
   const envelope = successEnvelope("run", {
@@ -493,11 +490,11 @@ async function runGoal(
 
 async function runPick(originalArgs: string[], ctx: CliContext): Promise<number> {
   const { listAppInfos } = await import("./apps.ts");
-  const apps = listAppInfos(ctx);
+  const apps = await listAppInfos(ctx);
   if (ctx.globals.json) {
     const envelope = successEnvelope("run", {
       mode: "pick", skipped: 0,
-      apps: apps.map((a) => ({ id: a.id, label: a.label, source: a.source, steps: a.steps })),
+      apps: apps.map((a) => ({ id: a.id, label: a.label, source: a.source, invariants: a.invariants })),
     }, {
       exitCode: 2,
       diagnostics: ["非交互 / JSON 模式不替用户选择应用。"],

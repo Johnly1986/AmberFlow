@@ -2,7 +2,7 @@
 
 ## 仓库是什么
 
-冻结计划的浏览器自动化中间件（TypeScript，Node ≥ 22.6）。计划由人给出，执行器逐步选元素、动作、检查可验证信号；模型只做选择/风险/完成票，不生成动作。仓库不包含单元测试、离线夹具、复刻站、生成器数据或真实站点冻结证据；验证由 `online/` 真实站点套件承担。
+冻结计划的浏览器自动化中间件（TypeScript，Node ≥ 22.6）。计划由人给出，执行器逐步选元素、动作、检查可验证信号；模型只做选择/风险/完成票，不生成动作。应用只有一种格式：`$AMBERFLOW_HOME/apps/<id>/app.mjs` 的 `meta` + `flow(ctx)` 脚本。仓库不包含单元测试、离线夹具、复刻站、内置应用或真实站点冻结证据；验证由 `online/` 真实站点套件承担。
 
 ## 命令
 
@@ -10,24 +10,38 @@
 npm ci
 npx playwright install chromium
 npm run doctor                         # 环境 / 配置 / 决策源体检
-npm run check                          # typecheck + 配置示例一致性 + online --validate（PR 门禁）
-npm run online -- --tier smoke         # 真实站点快速可达性
-npm run online -- --tier core          # 短流程
-npm run online -- --tier deep          # 长流程
-npm run online -- --tier probe         # 风控/可达性探针，非门禁
-npm run online -- --case <id> --headed
+npm run check                          # typecheck + 配置示例一致性 + test:validate（PR 门禁）
+npm run test -- --tier smoke         # 真实站点快速可达性
+npm run test -- --tier core          # 短流程
+npm run test -- --tier deep          # 长流程
+npm run test -- --tier probe         # 风控/可达性探针，非门禁
+npm run test -- --case <id> --headful
 npm start -- --goal "..." --url ...    # 一次性目标：演示 → 计划 → 执行
-npx amber inspect --url <URL> --json   # 只读观察；写 target_hint 前先看页面
-npm run apps -- --app <id>             # 用户作用域应用
+npx amber inspect --url <URL> --json   # 只读观察；写 act hint 前先看页面
+npx amber apps new <id> --url <URL>    # 生成 flow 骨架（$AMBERFLOW_HOME/apps/<id>/app.mjs）
+npx amber apps check <id>              # 加载 + dry 调用序列校验
+npx amber apps explain <id>            # dry 调用序列
+npx amber run <id> --trace             # 运行 flow 应用
+npm run apps -- --app <id>             # 用户作用域应用（同一运行器）
 npm run learn                          # 演示一次，录成应用
-npm run plan:flow -- --goal ... --seed <url> --app <id>
-npm run semantic -- --app <id> --site <site>
+npx amber record https://<页面> --name <id>   # 同一入口的 CLI 形式
 npm run plan-cli -- ...
 npm run model:fetch -- --from <url|路径>
 npm run picker-server
 ```
 
-没有 `npm test` / `npm run verify` / `bench/smoke.sh`；不要引用已删除的 `tests/`、`bench/`、`testpages/`、`apps/` 内置包、`transfer/`、`ctrip/`、`qunar/`、`semantic/`、`sites/` 或 `tools/` 旧工具。
+`npm run test` 是真实站点套件，不是单元测试；没有 `npm run verify`。PR 门禁只走 `npm run check`，真实站点回归走 `npm run test`（声明数据在 `online/`）。
+
+## 应用模型
+
+- 只有一种格式：`$AMBERFLOW_HOME/apps/<id>/app.mjs`（也接受 `app.js` / `app.ts`），导出 `meta(kit)` 与 `flow(ctx)`。
+- `meta` 是唯一声明面（id/label/goal/hosts/slots/requiredSlots/sources/device/site/notes/policy/pace/invariants/recordedFrom/generatedFrom）；未知字段加载期报错。
+- 流程默认由决策语句组成（`ctx.step(goal, { done })`）；控制流只用于真实分支/循环/重试。没有静态步骤表。
+- `ctx.step(goal, { id?, act?, done, url?, slots?, when?, timeoutMs? })`；`done` 必填，`act` 省略 = 引擎决策目标（默认决策语句写法）。`id` 进 trace / `step_traces` / failure；`ctx.fail(code, reason)` 抛结构化停因。
+- `amber run --max-steps N` 是 `ctx.step` / `ctx.arrive` 的执行预算，不是“从第 N 步开始”；用满时 `status=partial`、exit 0、`verified=false`。
+- 仓库 `apps/`（若存在）只是开发夹具；没有内置 demo 应用。应用正文以用户目录里的 `app.mjs` 为准。
+- 硬编码 hint/URL/业务值只作为必要锚点/数据：优先 `meta.site.pages` + `ctx.openPage`、`meta.slots`/`ctx.source`，不要把选择逻辑写死在流程里。
+- Agent / DSH 桥的稳定契约见 `docs/AGENT_INTERFACE.md`；作者指南见 `docs/APP_SCRIPT_AUTHORING.md`。
 
 ## 测试
 
@@ -53,10 +67,14 @@ online/cases/probe/*.json
 - `src/engine/executor.ts`：唯一执行循环 `BrowserMiddleware.run`。不要为应用层/线上套件另写执行器。
 - `src/engine/signals.ts`：完成信号语言；`checkSignal` 同时回答“完成”和“when 是否适用”。
 - `src/engine/plan.ts` / `planner.ts`：TaskPlan、PlanningRules、`runPlan`、`runSubgoalWithRetries`。
-- `src/app/`：应用包运行时（数据腿 + 浏览器/工具/SSH/stdio 步 + 结束态不变量 + 人工步 + pace）。
-- `src/flow/`：语义流、计划流、信号归纳。
+- `src/app/app-script.ts`：`loadScriptApp`（import → `meta(kit)` → `lowerMeta` → `validateApp`）与 `dryRunFlow`。
+- `src/app/app-meta.ts`：`meta` → 内部 IR 的唯一字段映射；未知字段在此拒绝。
+- `src/app/ctx.ts`：`flow(ctx)` 的唯一运行期面（`step` / `arrive` / `manual` / `run` / `read` / `extract` / `done` / `fail` / 预算 / `meta.pace`）。
+- `src/app/app-runner.ts`：`runScriptApp` 持有会话、跑脚本、在 `ctx.done()` 验收不变量、写 trace / result / report。
+- `src/app/`：适配器、轨迹、数据集与运行器；应用层只有 flow 这一种作者模型。
+- `src/flow/signal-induction.ts`：从演示 before/after 归纳候选信号（录制用）。
 - `src/model/`：决策提供者、SystemOne/OpenAI Decisions、缓存、学习、ONNX。
-- `src/cli/`：amber 命令与 `online` 入口。
+- `src/cli/`：amber 命令与 `test` 入口。`src/cli/registry.ts` 是帮助与命令表的唯一出处。
 - `src/online/`：线上用例加载、校验、运行、独立 oracle、证据。
 - `src/data/datasource.ts`：通用数据腿；站点知识放配置，不写进引擎。
 
@@ -74,7 +92,8 @@ online/cases/probe/*.json
 - 凭据只从环境/本机配置按名读；用例里只允许 env 占位符。
 - 运行产物、截图、DOM、真实站点记录不进仓库；`.gitignore` 已覆盖 `online-runs/`。
 - 新增站点/用例优先写成数据；共享层不认识具体站点。
+- 应用脚本是进程内任意代码：信任边界 = “用户作用域 + 不放仓库”；结果带 `script_sha256`，沙箱未做。
 
 ## 文档
 
-`README.md`、`ARCHITECTURE.md`、`docs/APP_SCRIPT_AUTHORING.md`、`docs/MANUAL_STEPS_AND_PACE.md`、`docs/DECISION_SERVICE_CONFIG.md`、`docs/AGENT_INTERFACE_IMPLEMENTATION.md`。不要引用已删除的旧报告/基准/应用清单。
+`README.md`、`ARCHITECTURE.md`、`docs/AGENT_INTERFACE.md`、`docs/APP_SCRIPT_AUTHORING.md`、`docs/MANUAL_STEPS_AND_PACE.md`、`docs/RUNTIME_IMPROVEMENTS.md`、`docs/DECISION_SERVICE_CONFIG.md`。不要引用已删除的旧报告/基准/应用清单。
