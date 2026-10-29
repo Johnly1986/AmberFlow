@@ -2263,13 +2263,13 @@ export class BrowserMiddleware {
             }
           }
         }
-        // R2b：词面零重叠守卫（宽扫的第二个触发器）。窄池 ≤8 且模型提名的 label 与指令
-        // 零词面重叠时，是"自信地错"的典型形态——低置信恢复等不到（模型不觉得自己错，
-        // m.ctrip 实证：指令"出发地" vs 提名"组合交通出行"，conf 0.71 过闸点走页脚）。
-        // 执行前强制一次宽扫重问（宽池含 R2 启发式伪按钮），重问结果照常过闸；
-        // 无更优则保留原提名。只对稀疏池生效——常规站点的池大到进不了此分支（零回归面）。
-        if (ref !== null && !reobserved && method !== "escalate"
-            && Object.keys(elems).length <= 8
+        // R2b：词面零重叠守卫（宽扫的第二个触发器）。模型提名（非规则命中、非满置信）
+        // 的 label 与指令零词面重叠（CJK 二元组/ASCII 词）时，是"自信地错"的典型形态——
+        // 低置信恢复等不到（模型不觉得自己错，m.ctrip 实证：指令"出发地" vs 提名
+        // "组合交通出行"，conf 0.71 过闸点走页脚）。执行前强制一次宽扫重问（宽池含 R2/
+        // R2c 启发式候选），重问结果照常过闸；无更优则保留原提名。规则命中与 conf=1.00
+        // 的模型提名不触发（books/quotes/hn 全量 rule:match conf=1.00 实证零回归面）。
+        if (ref !== null && !reobserved && method === "laya" && conf < 0.9
             && !lexicalOverlap(instruction, String(elems[ref]?.label ?? ""))) {
           reobserved = true;
           const wideR2b = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true });

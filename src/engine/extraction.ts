@@ -829,7 +829,16 @@ export const HEURISTIC_WIDGET_JS = String.raw`(arg) => {
   for (const e of all) {
     if (cands.length >= 400) break;
     if (e.getAttribute('data-dshref')) continue;
-    if (e.querySelector('a, button, input, select, textarea, label')) continue;
+    // R2c：容器排除只针对含**可见**交互后代的容器——"可见 div + 隐藏 input 存值"的
+    // 表单容器本身就是人点的伪按钮（m.ctrip City_city-wrap 实证：textContent
+    // "北京上海"，内含 0x0 隐藏 input，被旧过滤器整枝丢掉）。全部交互后代都不可见
+    // 时，容器按伪按钮候选保留。
+    let hasVisibleCtrl = false;
+    for (const c of e.querySelectorAll('a, button, input, select, textarea, label')) {
+      const cb = (() => { const r = c.getClientRects(); for (let k = 0; k < r.length; k++) if (r[k].width > 0 && r[k].height > 0) return true; return false; })();
+      if (cb) { hasVisibleCtrl = true; break; }
+    }
+    if (hasVisibleCtrl) continue;
     if (e.closest('nav, aside, footer, header')) continue;
     const txt = norm(e.innerText || '');
     if (!txt || txt.length > 60) continue;

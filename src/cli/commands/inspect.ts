@@ -15,7 +15,7 @@ import { emitJson, say } from "../context.ts";
 import { usageError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { browserSession } from "../../engine/executor.ts";
-import { extractElements, WIDE_POOL_ELEMENTS } from "../../engine/extraction.ts";
+import { extractElements, INTERACTIVE_ALL, WIDE_POOL_ELEMENTS } from "../../engine/extraction.ts";
 import { poolView } from "../../engine/pool-view.ts";
 import { parseCliArgs } from "../../support/cli-args.ts";
 
@@ -129,6 +129,26 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       screenshot(opts: { path: string; fullPage?: boolean }): Promise<unknown>;
     };
     await page.goto(url, { waitUntil: "domcontentloaded", timeout });
+    // R2c：迟水合盲区——m.ctrip 实证 domcontentloaded+500ms 时表单未渲染
+    // （City_city-wrap textContent 空），约 2s 后 "北京上海" 才出现。等 load 完成
+    // + 交互元素计数连续 3 次读数稳定（上限 3s）再抽取：观察工具没有预算压力，
+    // 正确性优先；不等待时主池/宽池都可能在"半渲染"页面上扫描。
+    try {
+      await page.evaluate("new Promise((res) => { if (document.readyState === 'complete') res(); else window.addEventListener('load', () => res(), { once: true }); })");
+    } catch { /* load 已过或执行环境不支持：自然落到稳定轮询 */ }
+    {
+      const countSel = JSON.stringify(INTERACTIVE_ALL);
+      let last = -1;
+      let stable = 0;
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 300));
+        let n = -1;
+        try { n = Number(await page.evaluate(`document.querySelectorAll(${countSel}).length`)); } catch { n = -1; }
+        if (n === last) { stable++; if (stable >= 2) break; } else { stable = 0; }
+        last = n;
+      }
+    }
     await new Promise((r) => setTimeout(r, 500));
     // --probe：只读探测，放在元素池抽取**之前**——结论不受 --max-elements 截断影响
     // （01 轮 B2：exists/text 类 done 信号此前没有验证面）。
