@@ -473,6 +473,9 @@ export function apply(ctx: Context, config: Config): void {
               },
             },
           },
+          // 06-C：dry/real 摘要的展示截断标注（配合 bridge.ts 的 steps_total 透传）。
+          steps_total: { type: 'integer' },
+          steps_truncated: { type: 'boolean' },
           failure: {
             type: 'object',
             additionalProperties: false,
@@ -489,7 +492,11 @@ export function apply(ctx: Context, config: Config): void {
         if (value.dry) {
           return [{
             type: 'text',
-            text: `DRY ${String(value.steps?.length ?? 0)} call(s) — nothing executed, nothing verified`
+            text: `DRY ${String(value.steps?.length ?? 0)} call(s)`
+              + (value.steps_truncated === true
+                ? ` (display truncated: showing ${String(value.steps?.length ?? 0)} of ${String(value.steps_total ?? '?')}; the full sequence was validated)`
+                : '')
+              + ` — nothing executed, nothing verified`
               + (value.model ? ` (model tier: ${value.model})` : '')
               + (value.steps && value.steps.length
                 ? `:\n${value.steps.map(s => `${String(s.index)}. [${s.call ?? 'step'}] ${s.desc}`
@@ -500,7 +507,10 @@ export function apply(ctx: Context, config: Config): void {
         const named = value.blockedTotal + value.failedTools.length + value.refused.length
         // A run can also stop without a failed step to name — killed at the timeout, or a non-zero
         // exit the artifact does not reflect — so say that rather than printing a bare FAIL.
-        const stopped = !value.ok && named === 0
+        // C8 (round 04, 已改待重启验证): a PARTIAL budget stop is an intended stop and already
+        // carries its own "(partial run: execution budget used up)" note — the bare
+        // "; stopped: exit 0" suffix read like an abnormal halt, so suppress it for partial runs.
+        const stopped = !value.ok && named === 0 && value.partial !== true
           ? value.timedOut
             ? '; stopped: timed out'
             : value.exitCode === undefined ? '' : `; stopped: exit ${String(value.exitCode)}`
@@ -729,6 +739,13 @@ export function apply(ctx: Context, config: Config): void {
       max_elements: { type: 'integer', description: 'Default 60, max 200.' },
       include_text: { type: 'boolean', description: 'Include a bounded body-text excerpt.' },
       headful: { type: 'boolean', description: 'Show a browser window on the engine host.' },
+      probes: {
+        type: 'array', items: { type: 'string' },
+        description:
+          'Read-only CSS selector probes (repeatable, max 10): existence count + up to 5 text '
+          + 'excerpts each. Use for non-interactive done signals (h1/.class) that the interactive '
+          + 'element pool cannot show.',
+      },
     },
     output: {
       schema: {
@@ -741,6 +758,7 @@ export function apply(ctx: Context, config: Config): void {
           elements: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
           element_count: { type: 'integer', required: true },
           truncated: { type: 'boolean', required: true },
+          probes: { type: 'array', items: { type: 'object', additionalProperties: true } },
           text: { type: 'string' },
           screenshot_path: { type: 'string' },
         },
@@ -753,7 +771,12 @@ export function apply(ctx: Context, config: Config): void {
             return `  ${String(field(e, 'ref') ?? '')} ${String(field(e, 'tag') ?? '')} ${String(field(e, 'label') ?? '')}`
               + `${Array.isArray(hints) && hints.length ? `  hints: ${hints.map(String).join(' | ')}` : ''}`
           }).join('\n')
-          + (value.truncated ? `\n(truncated to ${String(value.element_count)} elements)` : ''),
+          + (value.truncated ? `\n(truncated to ${String(value.element_count)} elements)` : '')
+          + (Array.isArray(value.probes) && value.probes.length
+            ? `\nprobes:\n${value.probes.map(p => `  ${String(field(p, 'selector') ?? '')} → `
+              + (field(p, 'error') !== undefined ? String(field(p, 'error'))
+                : `${String(field(p, 'count') ?? '')} hit ${JSON.stringify((field(p, 'texts') as unknown[] ?? []).slice(0, 1))}`)).join('\n')}`
+            : ''),
       }],
     },
     async execute(args) {
@@ -762,6 +785,7 @@ export function apply(ctx: Context, config: Config): void {
         ...(args.max_elements === undefined ? {} : { maxElements: args.max_elements }),
         ...(args.include_text === undefined ? {} : { includeText: args.include_text }),
         ...(args.headful === undefined ? {} : { headful: args.headful }),
+        ...(args.probes === undefined ? {} : { probes: args.probes }),
       })
     },
   }))
@@ -836,6 +860,11 @@ export function apply(ctx: Context, config: Config): void {
       id: { type: 'string', required: true, description: 'Lowercase id; also the directory name.' },
       goal: { type: 'string', description: 'One-line goal written into `meta.goal`.' },
       hosts: { type: 'array', items: { type: 'string' }, description: 'Allowed hosts (repeatable `--host`).' },
+      url: {
+        type: 'string',
+        description: 'Entry page forwarded to the CLI `--url`: `site.pages.home` becomes this real '
+          + 'page instead of the example.com placeholder, and its host joins the allowed hosts.',
+      },
     },
     output: {
       schema: appDetailSchema,
@@ -850,6 +879,7 @@ export function apply(ctx: Context, config: Config): void {
         id: args.id,
         ...(args.goal === undefined ? {} : { goal: args.goal }),
         ...(args.hosts === undefined ? {} : { hosts: args.hosts }),
+        ...(args.url === undefined ? {} : { url: args.url }),
       })
     },
   }))

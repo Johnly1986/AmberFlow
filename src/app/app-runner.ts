@@ -214,9 +214,16 @@ export interface AppRunOptions {
 }
 
 /** 一次运行的节奏生效值（报告只写非零值；缺省字段不出现 = 与今天逐字节一致）。 */
+export type PaceSource = "explicit" | "meta" | "env" | "default";
 export interface ResolvedPace {
   between_steps_ms: number;
   between_actions_ms: number;
+  /**
+   * 每个字段的生效来源（与 `effective_policy` 同一标源纪律；01 轮 B5：作者看到 1000ms
+   * 却不知从哪来）。`env` 含入口引导时从 `configs/amberflowrc.json` / amber config 吸收进
+   * 环境变量的值——想区分到具体文件，用 `amber doctor` / `amber config show` 对照。
+   */
+  sources: { between_steps_ms: PaceSource; between_actions_ms: PaceSource };
 }
 
 /** 环境默认节奏（可被 pack/本次覆盖；坏值 = 配置类错误，响亮而不是静默当 0）。 */
@@ -234,15 +241,22 @@ export function resolvePace(
     }
     return n;
   };
-  const pick = (key: keyof PackPace): number => {
+  const pick = (key: keyof PackPace): { value: number; source: PaceSource } => {
     const explicit = opts.pace?.[key];
-    if (explicit !== undefined) return explicit;
+    if (explicit !== undefined) return { value: explicit, source: "explicit" };
     const declared = pack.pace?.[key];
-    if (declared !== undefined) return declared;
+    if (declared !== undefined) return { value: declared, source: "meta" };
     const envKey = key === "between_steps_ms" ? "AMBERFLOW_STEP_DELAY_MS" : "AMBERFLOW_ACTION_DELAY_MS";
-    return fromEnv(envKey) ?? 0;
+    const fromE = fromEnv(envKey);
+    return fromE !== undefined ? { value: fromE, source: "env" } : { value: 0, source: "default" };
   };
-  return { between_steps_ms: pick("between_steps_ms"), between_actions_ms: pick("between_actions_ms") };
+  const steps = pick("between_steps_ms");
+  const actions = pick("between_actions_ms");
+  return {
+    between_steps_ms: steps.value,
+    between_actions_ms: actions.value,
+    sources: { between_steps_ms: steps.source, between_actions_ms: actions.source },
+  };
 }
 
 const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -441,7 +455,8 @@ export interface AppRunResult {
   goal: string;
   pack_path: string;
   plan_path: string;
-  roles_used: string[];
+  /** 角色模板出场（01 轮 B7：flow 脚本路径恒空——空则整字段省略，产物不再带无解释的 `[]`）。 */
+  roles_used?: string[];
   slots: Record<string, unknown>;
   completed: string;
   subgoals: Array<Record<string, unknown>>;
@@ -1154,7 +1169,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     return {
       app: pack.id, label: pack.label, goal: pack.goal,
       pack_path: pack._path ?? "", plan_path: planPath,
-      roles_used: expanded.rolesUsed, slots: expanded.slots,
+      ...(expanded.rolesUsed.length ? { roles_used: expanded.rolesUsed } : {}), slots: expanded.slots,
       completed: `0/${segmentSteps.length}`,
       subgoals: plan.subgoals.map((sg, j) => ({
         desc: sg.desc,
@@ -1346,7 +1361,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   return {
     app: pack.id, label: pack.label, goal: pack.goal,
     pack_path: pack._path ?? "", plan_path: planPath,
-    roles_used: expanded.rolesUsed, slots: expanded.slots,
+    ...(expanded.rolesUsed.length ? { roles_used: expanded.rolesUsed } : {}), slots: expanded.slots,
     completed: `${doneCount}/${segmentRequested ? executedIndices.size : expanded.steps.length}`,
     subgoals, tool_steps: toolSteps, invariants: invariantResults,
     ...(manualSteps.length ? { manual_steps: manualSteps } : {}),
@@ -1415,7 +1430,7 @@ export function appReportMarkdown(r: AppRunResult): string {
           .filter(([, v]) => v.source !== "default")
           .map(([k, v]) => `\`${k}=${String(v.value)}\`(${v.source})`).join(" ")}`
         + `｜优先级 cli=本次命令覆盖 > app=meta 声明 > default=今天的行为`] : []),
-    `- 角色：${r.roles_used.map((x) => `\`${x}\``).join(", ") || "（未用角色模板）"}`,
+    `- 角色：${(r.roles_used ?? []).map((x) => `\`${x}\``).join(", ") || "（未用角色模板）"}`,
     ...(r.dataset_view !== undefined && r.dataset_view.length > 0
       ? [`- 数据传递：${r.dataset_view.map((e) => `\`${e.key}=${JSON.stringify(e.value ?? null)}\``
         + `${e.stale ? "（陈旧）" : ""}（${e.writtenBy}）`).join(" ｜ ")}`]
@@ -1818,7 +1833,11 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     }
   }
 
-  const stepEvents = trace.events.filter((e) => e.call === "step" || e.call === "arrive" || e.call === "manual");
+  // 08-C：flow 路径的进程步（run/dangerous）同样进 step_traces——记录层一直有事件
+  // （ctx.ts runTool/声明形式各有 pushEvent），缺的只是这里的投影准入；成功步嵌套
+  // result 无 stop_code（B6 口径），失败行带 stop_code，作者不再只能靠脚本自 log。
+  const stepEvents = trace.events.filter((e) =>
+    e.call === "step" || e.call === "arrive" || e.call === "manual" || e.call === "run" || e.call === "dangerous");
   const stepCount = trace.events.filter((e) => e.call === "step" || e.call === "arrive").length;
   const manualSteps = trace.events.filter((e) => e.call === "manual").map((e, i) => ({
     index: i,
@@ -1841,11 +1860,14 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // 只给 `ctx.step` 补动作证据；`ctx.arrive` / `ctx.manual` 不走 mw.run，没有动作 trace。
     const group = e.call === "step" ? decisionStepGroups[stepActionCursor++] ?? [] : [];
     const executed = group.filter((s) => s.executed === true);
+    // when 守卫跳过的步（ok:false + precondition_skipped）不是失败：与声明式路径同一口径记成
+    // "skipped"（见上方 rep.skipped 分支），审计者扫表即可分清“执行完成/不适用/失败”。
+    const skippedStep = e.ok === false && e.stop_code === "precondition_skipped";
     return {
       index: i,
       id: e.id ?? null,
       desc: e.desc ?? "",
-      status: recovered ? "recovered" : (e.ok === false ? "failed" : "done"),
+      status: recovered ? "recovered" : (e.ok === false ? (skippedStep ? "skipped" : "failed") : "done"),
       hows: executed.map((s) => String(s.how ?? "")),
       descs: executed.map((s) => String(s.desc ?? "")),
       methods: group.map((s) => String(s.method ?? "")).filter(Boolean),
@@ -1867,7 +1889,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     goal: pack.goal,
     pack_path: loaded.scriptPath,
     plan_path: planPath,
-    roles_used: [],
+    // flow 脚本路径没有角色模板（01 轮 B7）：空字段整条省略，产物不再带无解释的 roles_used:[]。
     slots,
     completed: `${trace.events.filter((e) => e.call === "step" || e.call === "arrive").length} step(s) via flow(ctx)`,
     subgoals: [],

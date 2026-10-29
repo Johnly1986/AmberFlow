@@ -391,7 +391,12 @@ export function createCtx(deps: CtxDeps): Ctx {
       poolReady: true,
       ...(deps.poolReadyTimeoutMs === undefined ? {} : { poolReadyTimeoutMs: deps.poolReadyTimeoutMs }),
       ...(deps.poolReadyPollMs === undefined ? {} : { poolReadyPollMs: deps.poolReadyPollMs }),
-      ...(deps.doneTimeoutMs === undefined ? {} : { doneTimeoutMs: deps.doneTimeoutMs }),
+      ...(req.timeoutMs === undefined
+        // 04-F：步级 timeoutMs 以前声明了却从未接进执行器——现在映射到该步的 done 等待上限
+        // （本次显式 > meta.policy.done_timeout_ms）。它约束的是"动作后等信号成立"的窗口，
+        // 不约束整步挂钟时长（模型咨询/导航耗时不在其内）。
+        ? (deps.doneTimeoutMs === undefined ? {} : { doneTimeoutMs: deps.doneTimeoutMs })
+        : { doneTimeoutMs: req.timeoutMs }),
       ...(deps.donePollMs === undefined ? {} : { donePollMs: deps.donePollMs }),
       // 带 url 的步：domcontentloaded 对 SPA 太早，给面板一个短稳定窗口再抽取。
       ...(req.url === undefined ? {} : { settleMs: 700 }),
@@ -416,8 +421,12 @@ export function createCtx(deps: CtxDeps): Ctx {
     currentUrl = landed;
     const landedState = pageState.update(session.page as unknown as PageLike, "settled");
     const reason = typeof rep.stop_reason === "string" && rep.stop_reason ? rep.stop_reason : undefined;
+    // when 守卫不成立的步（rep.skipped）= “不适用”，不是“完成”：执行器在计划层把它记成
+    // done 让流程前进，但 ctx.step 对作者返回 ok:false + stopCode="precondition_skipped"
+    // （与 §4 文档和本文件 when 字段注释一致），脚本据 stopCode 分支。跳过步同样消耗预算。
+    const skipped = rep.skipped === true;
     const result: StepResult = {
-      ok: rep.done === true,
+      ok: rep.done === true && !skipped,
       ...(req.id === undefined ? {} : { id: req.id }),
       ...(rep.stop_code === undefined ? {} : { stopCode: rep.stop_code }),
       ...(reason === undefined ? {} : { reason }),
@@ -428,7 +437,10 @@ export function createCtx(deps: CtxDeps): Ctx {
       ...(req.id === undefined ? {} : { id: req.id }),
       ...(result.stopCode === undefined ? {} : { stop_code: result.stopCode }),
       result: {
-        ok: result.ok, stop_code: result.stopCode ?? null,
+        ok: result.ok,
+        // 成功步不写 stop_code：`dom_goal_signal` 这类是执行器的“完成依据”停因，不是失败分类，
+        // 放在名为 stop_code 的字段里会把成功读成失败（01 轮 B6）。完成动作证据在 hows/methods 行里。
+        ...(result.ok ? {} : { stop_code: result.stopCode ?? null }),
         ...(reason === undefined ? {} : { reason }),
         elapsed_ms: result.evidence.elapsedMs,
         // PageState 的紧凑证据；不记 observedAt（每次运行都会变，不属于结构）。
@@ -488,7 +500,8 @@ export function createCtx(deps: CtxDeps): Ctx {
       call: dangerous ? "dangerous" : "run",
       desc: req.desc ?? source, ok,
       ...(stopCode === undefined ? {} : { stop_code: stopCode }),
-      result: { source, code: r.code, refused: r.refused ?? null, dry_run: r.dryRun ?? null },
+      // 08-C：attempts 进事件 result（此前只在脚本侧 evidence 里，投影面读不到）。
+      result: { source, attempts: r.attempts ?? 1, code: r.code, refused: r.refused ?? null, dry_run: r.dryRun ?? null },
     });
     return result;
   };
@@ -555,7 +568,8 @@ export function createCtx(deps: CtxDeps): Ctx {
     pushEvent(trace, {
       call: dangerous ? "dangerous" : "run", desc, ok,
       ...(stopCode === undefined ? {} : { stop_code: stopCode }),
-      result: { adapter, code: r.code, refused: r.refused ?? null },
+      // 08-C：声明形式同 cli 面——attempts 进事件 result。
+      result: { adapter, attempts: r.attempts ?? 1, code: r.code, refused: r.refused ?? null },
     });
     return result;
   };
@@ -626,11 +640,18 @@ export function createCtx(deps: CtxDeps): Ctx {
       } catch (e) { waitErr = e; }
       budget.stepsUsed += 1;
       const stopCode = held ? undefined : (hostViolation !== null ? "host_not_allowed" : "arrive_signal_not_held");
-      const reason = held ? undefined
+      const failReason = held ? undefined
         : hostViolation !== null
           ? `arrive: landed on ${JSON.stringify(hostViolation)} outside the declared hosts envelope (${hosts?.join(", ")})`
           : `arrive: navigation finished but done-signal never held within ${timeout}ms`
             + (waitErr instanceof Error ? ` (${waitErr.message})` : "");
+      // 06-D：与 ctx.step 记录面同形——成功也留"到达依据"文案，嵌套 result 带 page_state；
+      // 不为 arrive 伪造 method/hows（它没有决策流水，差异是语义不是缺陷）。
+      const reason = held ? "arrive signal held" : failReason;
+      let arrivedState: ReturnType<typeof pageState.update> | null = null;
+      if (held) {
+        try { arrivedState = pageState.update((await page()) as PageLike, "settled"); } catch { /* 记录面让位事实 */ }
+      }
       const result: StepResult = {
         ok: held,
         ...(req.id === undefined ? {} : { id: req.id }),
@@ -639,11 +660,19 @@ export function createCtx(deps: CtxDeps): Ctx {
         evidence: { url: currentUrl, attempts: 1, elapsedMs: Date.now() - started },
       };
       pushEvent(trace, {
-        call: "arrive", desc: req.desc, url: currentUrl, ok: held,
+        call: "arrive", desc: req.desc ?? label, url: currentUrl, ok: held,
         ...(req.id === undefined ? {} : { id: req.id }),
         ...(stopCode === undefined ? {} : { stop_code: stopCode }),
         result: { ok: held, ...(stopCode === undefined ? {} : { stop_code: stopCode }),
-          ...(reason === undefined ? {} : { reason }), elapsed_ms: result.evidence.elapsedMs },
+          ...(reason === undefined ? {} : { reason }), elapsed_ms: result.evidence.elapsedMs,
+          ...(arrivedState === null ? {} : {
+            page_state: {
+              page_id: arrivedState.pageId,
+              readiness: arrivedState.readiness,
+              pool_version: arrivedState.poolVersion,
+              frame_origins: arrivedState.frameOrigins,
+            },
+          }) },
       });
       return result;
     },

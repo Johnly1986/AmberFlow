@@ -1283,7 +1283,15 @@ export function loadSource(name: string, dirs?: string[] | null): Source {
       }
     });
     if (found === undefined) {
-      throw new FileNotFoundError(`source ${pyRepr(name)} not found in ` + ds.map(String).join(", "));
+      // 08-A1/08-B 明示：空搜索面不能以空格截尾；源注册表的发现面只有 checkout（REPO 根各
+      // */sources + REPO/apps/*/sources），用户作用域应用永远找不到——一行把出路说清。
+      const where = ds.length
+        ? ds.map(String).join(", ")
+        : "(no sources dirs discovered — the registry scans the checkout's site dirs and apps/*/sources only)";
+      throw new FileNotFoundError(
+        `source ${pyRepr(name)} not found in ${where}`
+        + (ds.length ? "" : " — user-scope apps have no cli source registry; for process steps use the declared form ctx.run({stdio|ssh: ..., done: ...})"),
+      );
     }
     p = found;
   }

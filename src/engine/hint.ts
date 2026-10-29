@@ -53,8 +53,12 @@ export function parseHint(hint: string): ParsedHint {
     return { kind: "attrSubstr", tag, attr: DOM_ATTR[rest.slice(0, tilde)] ?? rest.slice(0, tilde), value: rest.slice(tilde + 1) };
   }
   if (h.split("[").pop()!.includes("~")) {
-    const tag = h.slice(0, h.indexOf("[") >= 0 ? h.indexOf("[") : 0);
-    const after = h.includes("[") ? h.slice(h.indexOf("[") + 1) : h;
+    // 04-E：无括号的 `tag~token` 是文档声明的合法形状（:40），但旧实现无括号时走
+    // `indexOf("[") >= 0 ? … : 0` 分支——tag 恒为空串。按 "~" 切开：前段是 tag，后段是 token。
+    const bracket = h.indexOf("[");
+    const tilde = h.indexOf("~");
+    const tag = bracket >= 0 ? h.slice(0, bracket) : h.slice(0, tilde);
+    const after = bracket >= 0 ? h.slice(bracket + 1) : h.slice(tilde + 1);
     return { kind: "nearToken", tag, token: after.replace(/\]$/, "").split("~").slice(-1)[0]! };
   }
   if (h.includes("[")) {

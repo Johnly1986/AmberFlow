@@ -1688,8 +1688,12 @@ export class BrowserMiddleware {
     let done = false;
     let manualDone = false;          // done because a HUMAN attested, not a DOM signal
     let dryRan = false;              // stopped at the dry-run probe (nothing executed)
-    let stopReason = "max_steps";
     let stopCode: StopCode = "max_steps";
+    // 03-D5：这个默认值只在"动作循环自然用满、没有任何站点显式 stop"时存活——以前 reason
+    // 就是裸三个字符（对比 no_progress 的详文），作者无从判断预算与进度。现在带数字。
+    let stopReason =
+      `subgoal action budget used up (${this.maxSteps} action step(s) tried) without the done-signal ever holding — `
+      + `raise the budget, narrow the target, or check what the page did after each action`;
     let stopStep: number | undefined;
     let lastPoolSize = 0;
     let lastPoolWaitedMs = 0;
@@ -1944,12 +1948,23 @@ export class BrowserMiddleware {
               break;
             }
             if (cmdDone.size >= cmdSpace.length) {
+              // 04-A：skip 命令"按定义解决"后从未评估过 done——宣布 "never held" 之前必须先查
+              // 一遍信号（与 :2499 正常评估同形；不改评估顺序，只补这条死路的评估缺失）。
+              // 这让"零动作验证步"（skip+done）从机制性必死变成合法可用。
+              if (goalSignalFn && (await goalSignalFn(pg))) {
+                done = true;
+                stop("dom_goal_signal", "dom goal signal (commands resolved without action; signal held)", stepNo);
+                if (verbose) console.log(`  step ${stepNo}: -> done (signal held after exhausted commands, 04-A)`);
+                break;
+              }
               stop("done_not_held",
                 `commands exhausted (${cmdDone.size}/${cmdSpace.length} acted) but the done-signal never held on step ${stepNo}`, stepNo);
             } else {
               stop("target_not_found",
                 `command space matches nothing on this page — pending unresolved: `
-                + `${pendingUnresolved.join(", ") || "-"} (unresolvable candidates are OUT; the space never falls back to the full pool) on step ${stepNo}`, stepNo);
+                + `${pendingUnresolved.join(", ") || "-"} (unresolvable candidates are OUT; the space never falls back to the full pool) on step ${stepNo}. `
+                + `hint 语法是六形状闭集（#id / tag[attr~substr] / tag~token / tag[attr=value] / 角色词 / 裸词；属性名只有 test→data-test、type→type 参与匹配）——`
+                + `容器/后代 CSS（如 "#outer input"）会被当成一个永不命中的形状，报"matches nothing"而非语法错误`, stepNo);
             }
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
@@ -2306,7 +2321,16 @@ export class BrowserMiddleware {
             break;
           }
         }
-        const verb = this._isTyping(el) ? "type text into" : "click";
+        // 05-B：动作文案按命令 op 派生（此前只有 typing/click 两态，scroll 步
+        // 出现 `hows:["scrolled"]` 配 `descs:["click a \"…\""]` 的自相矛盾行）。
+        // 非命令模式保持原语义（typing→click 两态）；desc 只进展示与风险票措辞，不是功能键。
+        const cmdOpName = commandMode && cmdPick ? String(cmdPick.cmd.op) : "";
+        const verb = cmdOpName === "scroll" ? "scroll to"
+          : cmdOpName === "drag" ? "drag"
+          : cmdOpName === "check" ? "check"
+          : cmdOpName === "fill" ? (this._isTyping(el) ? "type text into" : "fill")
+          : cmdOpName === "select" ? "select"
+          : this._isTyping(el) ? "type text into" : "click";
         const desc = `${verb} ${el.tag} "${el.label}"`;
         // DRY RUN stops HERE: the target is resolved (rule hint / local model /
         // re-observe / escalate) and probed, and nothing on the page is touched —
@@ -2435,7 +2459,7 @@ export class BrowserMiddleware {
           // now; forbid and try another (no model call).
           forbid(ref, el, String(how));
           trace.push({
-            step: stepNo, desc: `click ${el.tag} "${el.label}"`, how,
+            step: stepNo, desc, how,
             executed: false, method, conf: round3(conf),
             ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
             url: urlOf(pg),

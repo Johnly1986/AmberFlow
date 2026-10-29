@@ -18,7 +18,7 @@ export const meta = (kit) => ({
 ```
 
 - 单位毫秒，合法值 `0..60000` 的整数；未知键 / 负数 / 小数在**加载期**报错（`amber apps check` 就红）。缺省 = 0。
-- 优先级：**本次显式（嵌入方运行参数） > `meta.pace` > 环境变量 > 0**。
+- 优先级：**本次显式（嵌入方运行参数） > `meta.pace` > 环境变量 > 0**。“环境变量”一层含入口引导时从 `configs/amberflowrc.json` / `amber config` 吸收进来的值——机器配置也能设出非零节奏；凡 `pace` 出现在结果里，`pace.sources` 逐字段点名来源（`explicit` / `meta` / `env` / `default`），别猜 1000ms 从哪来。
 - 全局默认（所有应用，可被 `meta.pace` 覆盖）：
 
 | 环境变量 | 含义 |
@@ -61,7 +61,8 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
   "manual_steps": [
     { "index": 0, "desc": "登录并完成短信验证", "done": false, "reason": "needs_human" }
   ],
-  "pace": { "between_steps_ms": 800, "between_actions_ms": 300 },
+  "pace": { "between_steps_ms": 800, "between_actions_ms": 300,
+            "sources": { "between_steps_ms": "meta", "between_actions_ms": "env" } },
   "step_traces": [
     { "index": 0, "id": "login", "desc": "登录并完成短信验证", "status": "failed", "stop_code": "needs_human" }
   ]

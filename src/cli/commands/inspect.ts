@@ -19,11 +19,44 @@ import { extractElements } from "../../engine/extraction.ts";
 import { poolView } from "../../engine/pool-view.ts";
 import { parseCliArgs } from "../../support/cli-args.ts";
 
-const USAGE = `usage: inspect --url <http(s) URL> [--max-elements N] [--text] [--pool] [--screenshot FILE]
-               [--timeout MS] [--headed] [--json]
+const USAGE = `usage: inspect --url <http(s) URL> [--max-elements N] [--text] [--pool] [--probe SEL]...
+               [--screenshot FILE] [--timeout MS] [--headed] [--json]
 
 只看页面，不点击、不填值、不调用模型。输出有界元素与可验证的 hint 候选；
---pool 输出引擎实际看到的 pool 视图（action_family/frame_origin/hint_candidates）。`;
+--pool 输出引擎实际看到的 pool 视图（action_family/frame_origin/hint_candidates）。
+--probe 可重复（最多 10 个）：对**任意 CSS selector**（含 h1/文本类非交互元素）做只读
+探测，返回存在数与至多 5 条文本摘录（单条 120 字符截断）——补“元素池只含可行动元素”
+的观察缺口；--json 输出落 probes[] 字段。`;
+
+type ProbeOutcome = { selector: string; count?: number; texts?: string[]; error?: string };
+
+/** 只读探测一个 selector：存在数 + 前 5 条文本摘录。坏 selector 如实报错，不崩。 */
+async function probeSelector(
+  page: { evaluate(script: string): Promise<unknown> },
+  selector: string,
+): Promise<ProbeOutcome> {
+  if (!selector.trim()) return { selector, error: "empty selector" };
+  const sel = JSON.stringify(selector.trim());
+  let count: unknown;
+  try {
+    count = await page.evaluate(`document.querySelectorAll(${sel}).length`);
+  } catch (e) {
+    const first = (e instanceof Error ? e.message : String(e)).split("\n")[0];
+    return { selector, error: `invalid selector: ${first}` };
+  }
+  if (typeof count !== "number") return { selector, error: "evaluate returned no count" };
+  if (count === 0) return { selector, count: 0 };
+  let texts: string[] = [];
+  try {
+    const raw = await page.evaluate(
+      `Array.from(document.querySelectorAll(${sel})).slice(0, 5).map((el) => (el.textContent || "").trim())`,
+    );
+    if (Array.isArray(raw)) texts = raw.map(String).map((t) => (t.length > 120 ? `${t.slice(0, 120)}…` : t));
+  } catch {
+    // 文本取失败不影响存在性结论（例如元素被 detach）；如实只留 count。
+  }
+  return { selector, count, ...(texts.length ? { texts } : {}) };
+}
 
 type InspectElement = {
   ref: string;
@@ -50,6 +83,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
         "max-elements": { type: "string" },
         text: { type: "boolean" },
         pool: { type: "boolean" },
+        probe: { type: "string", multiple: true },
         screenshot: { type: "string" },
         timeout: { type: "string" },
         headed: { type: "boolean" },
@@ -93,6 +127,12 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     };
     await page.goto(url, { waitUntil: "domcontentloaded", timeout });
     await new Promise((r) => setTimeout(r, 500));
+    // --probe：只读探测，放在元素池抽取**之前**——结论不受 --max-elements 截断影响
+    // （01 轮 B2：exists/text 类 done 信号此前没有验证面）。
+    const probeList = (parsed.values.probe ?? []).filter((s): s is string => typeof s === "string" && s.trim() !== "");
+    const probes: ProbeOutcome[] = [];
+    for (const s of probeList.slice(0, 10)) probes.push(await probeSelector(page, s));
+    if (probeList.length > 10) probes.push({ selector: `…另有 ${probeList.length - 10} 个`, error: "超出 10 个探测上限，未探测" });
     const pool = await extractElements(page as never, true, max);
     const view = poolView(pool, page as never, max);
     const frameOrigins = view.frame_origins;
@@ -126,6 +166,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       ...(wantPool ? { pool: view } : {}),
       ...(text ? { text } : {}),
       ...(screenshotPath ? { screenshot_path: screenshotPath } : {}),
+      ...(probes.length ? { probes } : {}),
     };
     if (wantJson) {
       emitJson(ctx, successEnvelope("inspect", data, {
@@ -138,6 +179,12 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     for (const e of elements) {
       say(ctx, `  ${e.ref.padEnd(6)} ${e.tag.padEnd(8)} ${e.label.slice(0, 60)}`
         + `${e.hint_candidates.length ? `  hints: ${e.hint_candidates.join(" | ")}` : ""}`);
+    }
+    for (const p of probes) {
+      const verdict = p.error !== undefined ? p.error
+        : p.count === 0 ? "无命中"
+        : `${p.count} 命中${p.texts?.length ? `：${p.texts.join(" / ")}` : ""}`;
+      say(ctx, `  probe  ${p.selector} → ${verdict}`);
     }
     if (text) say(ctx, `\n文本摘要：${text}`);
     return 0;

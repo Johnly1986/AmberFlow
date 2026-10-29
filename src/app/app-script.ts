@@ -164,7 +164,14 @@ export async function loadScriptApp(idOrPath: string): Promise<LoadedScriptApp> 
   } catch (e) {
     throw new Error(`app script ${scriptPath}: meta(kit) threw: ${e instanceof Error ? e.message : String(e)}`);
   }
-  const pack = lowerMeta(meta);
+  let pack: ReturnType<typeof lowerMeta>;
+  try {
+    pack = lowerMeta(meta);
+  } catch (e) {
+    // lowerMeta 的消息不带路径（01 轮 B9）：在这里补上，让“哪个 app 的 meta 错了”一眼可见。
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`app script ${scriptPath}: ${msg.replace(/^app script:\s*/, "")}`);
+  }
   // flow 没有静态旅程：跳过“空旅程 / web 不变量需要浏览器步”两条结构性检查；
   // 步骤级校验发生在每次 ctx 调用（真实执行器/同一套 PlanningRules）。
   const problems = validateApp(pack, { allowEmptyJourney: true });

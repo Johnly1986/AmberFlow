@@ -72,17 +72,51 @@ const asList = (v: unknown, field: string): unknown[] => {
   return [...v];
 };
 
+/** 小编辑距离（近邻拼写建议用；meta 字段面很小，O(n·m) 足够）。 */
+function editDistance(a: string, b: string): number {
+  const prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const upLeft = diag;
+      diag = prev[j];
+      prev[j] = Math.min(
+        prev[j] + 1,
+        prev[j - 1] + 1,
+        upLeft + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+  }
+  return prev[b.length];
+}
+
+/** “你是不是想写 X”：离已知字段足够近才建议，宁缺毋滥。 */
+function didYouMean(key: string, known: string[]): string {
+  let best = "";
+  let bestD = Infinity;
+  for (const k of known) {
+    const d = editDistance(key.toLowerCase(), k.toLowerCase());
+    if (d < bestD) { bestD = d; best = k; }
+  }
+  const limit = Math.max(2, Math.round(key.length / 3));
+  return best !== "" && bestD <= limit ? ` (did you mean "${best}"?)` : "";
+}
+
 /**
  * `meta` → 内部 IR。**未知 meta 字段响亮拒绝**（`_` 开头视为注释）：
  * 拼错 `invaraints` 如果静默忽略，表现会是“不变量没生效”而不是“你拼错了”。
+ * 一次报**全部**未知项并给近邻建议（01 轮 B9：只报首个、无建议，多拼错要修一轮才见一个）。
  */
 export function lowerMeta(meta: ScriptMeta): AppPack {
   if (!isObj(meta)) throw new Error("app script: meta must be an object");
   const m = meta as unknown as Record<string, unknown>;
+  const known = META_FIELD_MAP.map((f) => f.meta);
   const unknown = Object.keys(m).filter((k) => !META_NAMES.has(k) && !k.startsWith("_"));
   if (unknown.length) {
-    throw new Error(`app script: meta.${unknown[0]}: unknown field (known: `
-      + `${META_FIELD_MAP.map((f) => f.meta).join(", ")}; keys starting with "_" are ignored)`);
+    const detail = unknown.map((k) => `meta.${k}${didYouMean(k, known)}`).join(", ");
+    throw new Error(`app script: unknown field(s) ${detail} (known: `
+      + `${known.join(", ")}; keys starting with "_" are ignored)`);
   }
   const id = m["id"];
   const goal = m["goal"];

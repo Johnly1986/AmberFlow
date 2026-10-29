@@ -392,7 +392,8 @@ function validateToolRun(
   }
   const retries = Number((req as { retries?: unknown })?.retries ?? 0);
   if (retries > 0 && (req as { idempotent?: unknown })?.idempotent !== true) {
-    p.push(`retries=${retries} needs idempotent: true (re-running a process can be irreversible)`);
+    // 08-A3：与运行期 ctx.ts 的同款校验**逐字同文案**（含 ctx.run: 前缀）——双拦面只差外层命名空间。
+    p.push(`ctx.run: retries=${retries} needs idempotent: true (re-running a process can be irreversible)`);
   }
   return p;
 }

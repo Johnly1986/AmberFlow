@@ -97,6 +97,10 @@ export interface AmberFlowInspectArgs {
   maxElements?: number
   includeText?: boolean
   headful?: boolean
+  /** Read-only CSS selector probes (E3): existence count + up to 5 text excerpts each. The
+   *  element pool only carries actionable elements, so `exists`/`text` done signals over
+   *  h1/.class had no verification surface through the bridge until now. */
+  probes?: string[]
 }
 
 export interface AmberFlowTestArgs {
@@ -114,6 +118,9 @@ export interface AmberFlowCreateArgs {
   id: string
   goal?: string
   hosts?: string[]
+  /** Entry page forwarded to the CLI's `--url` (B4b): with it the skeleton's `site.pages.home`
+   *  is the real page and hosts stays closed; without it the placeholder example.com skeleton. */
+  url?: string
 }
 
 /** One `…_status` call: environment/model/browser facts, already masked by the CLI. */
@@ -167,6 +174,8 @@ export interface AmberFlowInspect {
   elements: JsonObject[]
   element_count: number
   truncated: boolean
+  /** Read-only selector probe outcomes (E3): {selector, count, texts} or {selector, error}. */
+  probes?: JsonObject[]
   text?: string
   screenshot_path?: string
 }
@@ -444,6 +453,8 @@ export async function inspect(options: BridgeOptions, args: AmberFlowInspectArgs
   if (args.maxElements !== undefined) argv.push('--max-elements', String(args.maxElements))
   if (args.includeText === true) argv.push('--text')
   if (args.headful === true) argv.push('--headed')
+  // E3 (已改待重启验证): forward the read-only selector probes the 02-round CLI added.
+  for (const sel of args.probes ?? []) argv.push('--probe', sel)
   const doc = await cliJson(options, argv)
   const d = dataOf(doc)
   return {
@@ -453,6 +464,7 @@ export async function inspect(options: BridgeOptions, args: AmberFlowInspectArgs
     elements: records(d['elements']),
     element_count: Number(d['element_count'] ?? 0),
     truncated: d['truncated'] === true,
+    ...(Array.isArray(d['probes']) && d['probes'].length ? { probes: records(d['probes']) } : {}),
     ...(typeof d['text'] === 'string' ? { text: d['text'] } : {}),
     ...(typeof d['screenshot_path'] === 'string' ? { screenshot_path: d['screenshot_path'] } : {}),
   }
@@ -514,6 +526,9 @@ export async function createApp(options: BridgeOptions, args: AmberFlowCreateArg
   const argv = ['apps', 'new', args.id, '--json']
   if (args.goal !== undefined) argv.push('--goal', args.goal)
   for (const host of args.hosts ?? []) argv.push('--host', host)
+  // B4b (已改待重启验证): the CLI's --url was never forwarded, so every bridge-created skeleton
+  // landed on the example.com placeholder even when the agent knew the real entry page.
+  if (args.url !== undefined && args.url !== '') argv.push('--url', args.url)
   ensureOk(await cliJson(options, argv), 'app_create')
   return appShow(options, args.id)
 }

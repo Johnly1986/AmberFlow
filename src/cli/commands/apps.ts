@@ -85,8 +85,8 @@ function printList(ctx: CliContext, apps: AppInfo[]): void {
   }
 }
 
-/** flow 骨架：普通 JS，循环/条件/重试直接写。 */
-function flowScriptTemplate(id: string, goal: string, hosts: string[], startUrl: string): string {
+/** flow 骨架：普通 JS，循环/条件/重试直接写。`placeholder` = 入口页仍是占位 example.com。 */
+function flowScriptTemplate(id: string, goal: string, hosts: string[], startUrl: string, placeholder: boolean): string {
   const host = hosts[0] ?? "example.com";
   return `/**
  * ${id} —— flow 应用：流程优先由决策语句组成（ctx.step(goal, { done })）。
@@ -94,27 +94,33 @@ function flowScriptTemplate(id: string, goal: string, hosts: string[], startUrl:
  * 分工：脚本只写“要达成什么 + 怎么算完成”；点哪里由引擎的规则/决策层决定。
  * 控制流（if/for/while）只用于真实分支/循环；脚本拿不到模型文本或分数，完成只认 done 信号。
  *
- * done 不许猜（这条最容易踩，实测教训）：写信号之前先看这一页真的长什么样——
+ * done 不许猜（这条最容易踩）：写信号之前先看这一页真的长什么样——
  *   amber inspect --url <入口页> --json
- * 能用的 done 必须「动作前不成立、动作后成立」。凭想象写的文案会把一次真的成功
- * 判成 no_progress：实测连点四次同一个按钮、每次都算 inert，最后停在预算上。
+ * inspect 只列“可行动”元素；h1/文本类 done 信号另需实证（原始 HTML 或运行 trace）。
+ * 任何选择器——包括文档与上游示例给的——落笔前都要对目标页核实一次。
+ * 能用的 done 必须「动作前不成立、动作后成立」。凭想象写的文案可能把一次真的成功
+ * 判成 no_progress（曾有单次实测：连点四次同一按钮每次都算 inert，最后停在预算上
+ * ——历史个例，非普适结论）。
  *
  * ctx 只有这些面（没有 pageUrl()：入口页角色写在 meta.site.pages，用 openPage 取）：
  *   openPage(role) / open(url) / arrive(url, {done}) / step(desc, {id, act, done, url, slots, when, timeoutMs})
  *   / manual(desc, {done}) / url() / read.text|value|count|attr / rows / extract / holds / waitFor
  *   / source / run / done() / fail(code, reason) / hint / hints / command
  *   / judge.url|exists|text|equals|value|all|any|not|manual
+ *   （when 守卫跳过的步返回 ok:false + stopCode=precondition_skipped，同样消耗预算。）
  *
- * act 省略 = 这一步完全交给决策层，成败取决于模型。实测同一张结果页：不点名时
- * conf 0.19–0.54 且连点错元素；点名 a[href~page=2] 后单步 conf 0.98–1.00 通过。
- * 有稳定句柄（data-test / id / name / 唯一 label）就写 act，别赌。
+ * act 省略 = 决策语句：引擎的规则/决策层按 goal 文本与 done 证据选目标。命中与否
+ * 取决于 goal 与页面候选的可分辨度；歧义大时会升级模型裁决——规则命中和模型裁决
+ * 都是正常路径，不必预设哪条一定稳。需要钉死某个目标、或页面有稳定句柄
+ * （data-test / id / name / 唯一 label）时，写 act: ctx.hint(...) 收窄候选即可。
+ * 跑得不稳先查 trace 的 stopCode/reason 与 decisions 行，再决定要不要加锚点。
  */
 export const meta = (kit) => ({
   id: ${JSON.stringify(id)},
   label: ${JSON.stringify(id)},
   goal: ${JSON.stringify(goal)},
   hosts: ${JSON.stringify(hosts)},       // 允许访问的主机（导航信封 + 防泄漏门禁）
-  site: { pages: { home: ${JSON.stringify(startUrl)} } }, // 页面角色：流程里不重复硬编码 URL
+  site: { pages: { home: ${JSON.stringify(startUrl)} } },${placeholder ? " // TODO: 占位入口页，换成真实 URL" : " // 页面角色：流程里不重复硬编码 URL"}
   slots: {},                              // 数据槽：值只能来自声明/观察（不写进 goal 文本）
   invariants: [                           // 结束态断言：用 ctx.done() 验收
     { id: "on-target", desc: "结束时确实到了目标页", signal: kit.judge.url(${JSON.stringify(host)}) },
@@ -170,15 +176,19 @@ async function appsNew(args: string[], ctx: CliContext): Promise<number> {
       hint: "小写字母开头，只含小写字母 / 数字 / 连字符（它同时是目录名与 amber run 的参数）。",
     });
   }
-  const startUrl = typeof parsed.values.url === "string" && parsed.values.url
-    ? parsed.values.url
-    : "https://example.com/";
-  if (!/^https?:\/\//i.test(startUrl)) {
-    throw usageError(`--url 需要真实 http(s):// 页面（收到 ${JSON.stringify(startUrl)}）`);
+  // B4a（01 轮）：只有显式给了 --url 才补入口页主机；占位 example.com 绝不进 hosts 信封——
+  // 作者只声明了真实主机时，导航门禁里就该只有那个主机，别“悄悄放宽一半还无人报错”。
+  const givenUrl = typeof parsed.values.url === "string" && parsed.values.url ? parsed.values.url : "";
+  if (givenUrl && !/^https?:\/\//i.test(givenUrl)) {
+    throw usageError(`--url 需要真实 http(s):// 页面（收到 ${JSON.stringify(givenUrl)}）`);
   }
   const hosts = hostsOf(parsed.values.host);
-  const inferred = hostFromUrl(startUrl);
-  // 入口页必须在 hosts 信封内：作者只给了 --host 别的站时，补上入口页主机，避免骨架一跑就 host_not_allowed。
+  const startUrl = givenUrl !== ""
+    ? givenUrl
+    : hosts.length ? `https://${hosts[0]}/` : "https://example.com/";
+  const placeholder = givenUrl === "" && hosts.length === 0;
+  const inferred = givenUrl !== "" ? hostFromUrl(givenUrl) : null;
+  // 显式入口页必须在 hosts 信封内：补上入口页主机，避免骨架一跑就 host_not_allowed。
   if (inferred !== null && !hosts.includes(inferred)) hosts.unshift(inferred);
   const finalHosts = hosts.length ? [...new Set(hosts)] : ["example.com"];
   const goal = typeof parsed.values.goal === "string" && parsed.values.goal
@@ -188,7 +198,7 @@ async function appsNew(args: string[], ctx: CliContext): Promise<number> {
     ? path.resolve(ctx.cwd, parsed.values.dir)
     : path.join(userAppsDir(ctx.env), id);
   const file = path.join(dir, "app.mjs");
-  const source = flowScriptTemplate(id, goal, finalHosts, startUrl);
+  const source = flowScriptTemplate(id, goal, finalHosts, startUrl, placeholder);
   const next = [`amber apps check ${id}`, `amber apps explain ${id}`, `amber run ${id}`];
   if (parsed.values.print) {
     if (jsonWanted(ctx, parsed.values)) {

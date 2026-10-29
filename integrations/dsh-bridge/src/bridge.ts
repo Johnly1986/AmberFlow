@@ -647,6 +647,9 @@ export interface RunSummary {
   resultPath?: string
   /** 有界的逐步骤视图（失败/完成都可读）；dry 运行是调用序列。 */
   steps?: RunStep[]
+  /** 06-C：展示被 MAX_STEPS 截断时的全量数与标注位——无声截断会让读者以为序列到此为止。 */
+  steps_total?: number
+  steps_truncated?: boolean
   /** 第一个失败步骤的结构化原因。 */
   failure?: { step: number; desc: string; stop_code?: string; obstacle?: string }
   outDir: string
@@ -799,6 +802,9 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
         blocked: [], blockedTotal: 0, refused: [], failedTools: [],
         invariants: { held: 0, total: 0, failed: [] },
         steps: dry.steps.slice(0, MAX_STEPS),
+        ...(dry.steps.length > MAX_STEPS
+          ? { steps_total: dry.steps.length, steps_truncated: true }
+          : {}),
         outDir, reportPath: '', stdoutTail: outcome.stdout, timedOut: false, status: 'dry', verified: false,
         ...(dry.model === undefined ? {} : { model: dry.model }),
       }
@@ -894,6 +900,9 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
     verified: partial ? false : raw['ok'] === true && outcome.code === 0,
     ...(partial ? { partial: true } : {}),
     steps,
+    // 06-C：真实路径同样标注截断（agent-view 的 truncated 旗标 + 本地 slice 长度双来源）。
+    ...(rawSteps.length > MAX_STEPS ? { steps_total: rawSteps.length, steps_truncated: true }
+      : raw['truncated'] === true ? { steps_truncated: true } : {}),
     ...(failed ? { failure: { step: failed.index, desc: failed.desc, ...(failed.stop_code ? { stop_code: failed.stop_code } : {}), ...(failed.obstacle ? { obstacle: failed.obstacle } : {}) } } : {}),
     // Only name a report that is really there: a killed run can leave the artifact without one, and
     // a path the caller cannot open is worse than saying so.
