@@ -58,12 +58,14 @@ import * as browserEnv from "../browser/browser-env.ts";
 import type { BrowserLike, LaunchOptions } from "../browser/browser-env.ts";
 import {
   INTERACTIVE_ALL,
+  WIDE_POOL_ELEMENTS,
   ariaInteractiveLines,
   criteriaView,
   esig,
   extractElements,
   extractSlots,
   elemFamily,
+  lexicalOverlap,
   filterElemsByFamily,
   actionCapabilities,
   firstOf,
@@ -573,7 +575,7 @@ function firstLoc(loc: any): AnyLoc {
 }
 
 /** Budget for the ONE wider look a low-confidence decision is allowed to take. */
-const WIDER_ELEMENTS = 120;
+const WIDER_ELEMENTS = WIDE_POOL_ELEMENTS;
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -2175,7 +2177,7 @@ export class BrowserMiddleware {
             let widePick: { ref: string; conf: number } | null = null;
             if (reobserve && !reobserved && ref !== null) {
               reobserved = true;
-              const wide = await extractElements(pg, true, WIDER_ELEMENTS);
+              const wide = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true });
               if (Object.keys(wide).length > Object.keys(elems).length) {
                 // refs are positional: re-prune forbids whose ref now names a
                 // different element before re-asking (same rule as the step head).
@@ -2258,6 +2260,35 @@ export class BrowserMiddleware {
                   `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`, stepNo);
                 break;
               }
+            }
+          }
+        }
+        // R2b：词面零重叠守卫（宽扫的第二个触发器）。窄池 ≤8 且模型提名的 label 与指令
+        // 零词面重叠时，是"自信地错"的典型形态——低置信恢复等不到（模型不觉得自己错，
+        // m.ctrip 实证：指令"出发地" vs 提名"组合交通出行"，conf 0.71 过闸点走页脚）。
+        // 执行前强制一次宽扫重问（宽池含 R2 启发式伪按钮），重问结果照常过闸；
+        // 无更优则保留原提名。只对稀疏池生效——常规站点的池大到进不了此分支（零回归面）。
+        if (ref !== null && !reobserved && method !== "escalate"
+            && Object.keys(elems).length <= 8
+            && !lexicalOverlap(instruction, String(elems[ref]?.label ?? ""))) {
+          reobserved = true;
+          const wideR2b = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true });
+          if (Object.keys(wideR2b).length > Object.keys(elems).length) {
+            pruneForbids(wideR2b);
+            const wideAskR2b = orderedPool(wideR2b);
+            const [ref2, conf2] = await this.pickElement(
+              instruction, pg, wideAskR2b, new Set(Object.keys(forbidden)), noted);
+            elems = wideR2b;
+            if (ref2 !== null && conf2 >= floor) {
+              ref = ref2;
+              conf = conf2;
+              method = "laya:reobserve";
+              if (verbose) {
+                console.log(`  step ${stepNo}: R2b relevance widen -> ${ref} conf=${conf2.toFixed(2)}`);
+              }
+            } else if (verbose) {
+              console.log(`  step ${stepNo}: R2b relevance widen -> keep original `
+                + `(${ref2 === null ? "no pick" : `conf ${conf2.toFixed(2)}`} below floor)`);
             }
           }
         }

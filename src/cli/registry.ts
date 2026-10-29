@@ -169,7 +169,7 @@ amber apps remove <应用> [--yes] [--force]`,
   {
     name: "inspect",
     summary: "只读观察页面元素与候选 hint",
-    usage: 'amber inspect --url <http(s) URL> [--max-elements N] [--text] [--pool] [--probe SEL]... [--screenshot FILE] [--headed] [--json]',
+    usage: 'amber inspect --url <http(s) URL> [--max-elements N] [--wide] [--text] [--pool] [--probe SEL]... [--screenshot FILE] [--headed] [--json]',
     examples: [
       "amber inspect --url https://books.toscrape.com/ --json",
       'amber inspect --url https://quotes.toscrape.com/login --text',
@@ -178,6 +178,7 @@ amber apps remove <应用> [--yes] [--force]`,
     flags: [
       "--url <URL>               必填；只接受 http(s)",
       "--max-elements N          默认 60，最多 200",
+      "--wide                    宽扫参数抽池（120 上限 + R2 启发式伪按钮，heuristic 标记；主池语义不变）",
       "--text                    附带截断后的正文摘要",
       "--pool                    输出引擎视角的完整 pool 视图",
       "--probe SEL               可重复（≤10）：对任意 CSS selector（含非交互元素）只读探测存在数与文本摘录，--json 落 probes[]",

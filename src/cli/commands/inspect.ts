@@ -15,15 +15,17 @@ import { emitJson, say } from "../context.ts";
 import { usageError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { browserSession } from "../../engine/executor.ts";
-import { extractElements } from "../../engine/extraction.ts";
+import { extractElements, WIDE_POOL_ELEMENTS } from "../../engine/extraction.ts";
 import { poolView } from "../../engine/pool-view.ts";
 import { parseCliArgs } from "../../support/cli-args.ts";
 
-const USAGE = `usage: inspect --url <http(s) URL> [--max-elements N] [--text] [--pool] [--probe SEL]...
+const USAGE = `usage: inspect --url <http(s) URL> [--max-elements N] [--wide] [--text] [--pool] [--probe SEL]...
                [--screenshot FILE] [--timeout MS] [--headed] [--json]
 
 只看页面，不点击、不填值、不调用模型。输出有界元素与可验证的 hint 候选；
 --pool 输出引擎实际看到的 pool 视图（action_family/frame_origin/hint_candidates）。
+--wide 用执行器低置信恢复路径的**宽扫参数**（120 上限 + R2 启发式伪按钮候选，
+heuristic 标记可辨）抽池——给 Agent 看"宽扫后模型能看见什么"；主池语义不变。
 --probe 可重复（最多 10 个）：对**任意 CSS selector**（含 h1/文本类非交互元素）做只读
 探测，返回存在数与至多 5 条文本摘录（单条 120 字符截断）——补“元素池只含可行动元素”
 的观察缺口；--json 输出落 probes[] 字段。`;
@@ -83,6 +85,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
         "max-elements": { type: "string" },
         text: { type: "boolean" },
         pool: { type: "boolean" },
+        wide: { type: "boolean" },
         probe: { type: "string", multiple: true },
         screenshot: { type: "string" },
         timeout: { type: "string" },
@@ -133,8 +136,14 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     const probes: ProbeOutcome[] = [];
     for (const s of probeList.slice(0, 10)) probes.push(await probeSelector(page, s));
     if (probeList.length > 10) probes.push({ selector: `…另有 ${probeList.length - 10} 个`, error: "超出 10 个探测上限，未探测" });
-    const pool = await extractElements(page as never, true, max);
-    const view = poolView(pool, page as never, max);
+    // --wide：执行器低置信恢复路径的宽扫参数（120 上限 + R2 启发式伪按钮）。
+    // 主池语义不变（不带 --wide 时逐字节今天）；heuristic 候选带标记，审计可辨。
+    const wide = v.wide === true;
+    const poolMax = wide ? Math.max(max, WIDE_POOL_ELEMENTS) : max;
+    const pool = await extractElements(
+      page as never, true, poolMax, wide ? { widgets: true } : undefined);
+    const heuristicCount = Object.values(pool).filter((e) => e.heuristic === true).length;
+    const view = poolView(pool, page as never, poolMax);
     const frameOrigins = view.frame_origins;
     const elements: InspectElement[] = view.elements.map((e) => ({
       ref: e.ref,
@@ -162,6 +171,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       elements,
       element_count: view.count,
       truncated: view.truncated,
+      ...(wide ? { wide: true, heuristic_count: heuristicCount } : {}),
       ...(wantPool ? { frame_origins: view.frame_origins } : {}),
       ...(wantPool ? { pool: view } : {}),
       ...(text ? { text } : {}),

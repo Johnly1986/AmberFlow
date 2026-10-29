@@ -341,13 +341,20 @@ export async function locatorAnyFrame(page: PageLike, selector: string): Promise
 
 // 扫描面：原生可交互标签 + ARIA 语义角色/可编辑容器（自定义控件由 div/span 实现时，标签结构里
 // 没有"可交互"的证据；不扫进来，语义分类与提名都无从谈起。fixtures 无这些属性 ⇒ 对拍语料不变）。
-export const INTERACTIVE = "a, button, input, select, textarea, [onclick], [role='button']"
+// R1 扩面：`label` 入扫描面，但延迟裁决——关联表单控件自身可见时跳过（点 label ≡ 点控件，
+// 避免同控件双份候选）；控件不可见或无关联时保留（此时 label 是唯一可点击面）。
+export const INTERACTIVE = "a, button, input, select, textarea, label, [onclick], [role='button']"
   + ", [role='combobox'], [role='listbox'], [role='textbox'], [role='searchbox'], [role='spinbutton']"
   + ", [role='checkbox'], [role='radio'], [role='switch'], [role='slider'], [contenteditable='true'], [contenteditable='']"
   + ", [draggable='true']";
 /** CDP-probed JS-only widgets join every later scan, keeping refs consistent. */
 export const INTERACTIVE_ALL = INTERACTIVE + ", [data-js-ref]";
 export const MAX_ELEMENTS = 40;
+/**
+ * 低置信恢复路径宽扫的元素预算（executor 的 ONE wider look；R2 起同通道展开
+ * 启发式伪按钮候选）。单一出处：executor 与 inspect --wide 共用。
+ */
+export const WIDE_POOL_ELEMENTS = 120;
 
 /** Roles the accessibility snapshot renders as interactive leaves. */
 export const ARIA_INTERACTIVE_ROLES = [
@@ -406,6 +413,8 @@ export const EXTRACT_JS = String.raw`(arg) => {
     return norm(label).slice(0, 40);
   };
   const rows = [];
+  const labelRows = [];   // R1a：label 延迟裁决（见下）
+  const hiddenCtrls = []; // R1b：不可见表单控件的 scan 索引（见下）
   for (let i = 0; i < all.length; i++) {
     const e = all[i];
     // A NON-ZERO BOX is required, not just a layout box: Wikipedia's language
@@ -433,8 +442,30 @@ export const EXTRACT_JS = String.raw`(arg) => {
       const cs = getComputedStyle(e);
       vis = cs.display !== 'none' && cs.visibility !== 'hidden' && hasBox;
     }
-    if (!vis) continue;
+    if (!vis) {
+      // R1b：不可见的表单控件不直接入池，但记下来——后置为它找「可见 label wrapper」代理
+      //（携程式「可见自绘 div + 隐藏 input 存值」：人点的是 div，input 自己 0x0）。
+      const tg0 = e.tagName.toLowerCase();
+      if (tg0 === 'input' || tg0 === 'select' || tg0 === 'textarea') hiddenCtrls.push(i);
+      continue;
+    }
     const tag = e.tagName.toLowerCase();
+    if (tag === 'label') {
+      // R1a：label 延迟裁决。关联控件可见 → 冗余，跳过；控件不可见或无关联 → 保留
+      //（自定义控件包在 label 里、或控件本身被隐藏时，label 是唯一可点击面）。
+      let assoc = null;
+      try { assoc = e.control || null; } catch (err) { assoc = null; }
+      if (!assoc) {
+        const fid = e.getAttribute('for');
+        if (fid) { try { assoc = document.getElementById(fid); } catch (err2) { assoc = null; } }
+      }
+      if (!assoc) { try { assoc = e.querySelector('input, select, textarea, button'); } catch (err3) { assoc = null; } }
+      labelRows.push({ i: i, tag: tag, label: labelOf(e, tag),
+        main: (!e.closest('nav, aside, footer, header') && !!e.closest('main, [role=main], article')),
+        data_test: e.getAttribute('data-test') || '', name: '', id: e.id || '', input_type: '',
+        role: '', content_editable: false, draggable: false, href: '', assoc: assoc });
+      continue;
+    }
     const label = labelOf(e, tag);
     if ((tag === 'a' || tag === 'button') && !label) continue;
     const href = e.getAttribute('href') || '';
@@ -446,6 +477,50 @@ export const EXTRACT_JS = String.raw`(arg) => {
                content_editable: e.isContentEditable ? true : false,
                draggable: (e.getAttribute('draggable') || '').toLowerCase() === 'true',
                href: href ? href.split('?')[0].replace(/\/+$/, '').split('/').slice(-2).join('/') : ''});
+  }
+  // ---- R1a/R1b 后置裁决（都在 slice 前，占 max 预算；代理一律 non-main 排尾）----
+  const idxOf = new Map();
+  for (let i = 0; i < all.length; i++) idxOf.set(all[i], i);
+  const stamped = new Set(rows.map((r) => r.i));
+  for (const lr of labelRows) {
+    if (lr.assoc) {
+      const ai = idxOf.get(lr.assoc);
+      if (ai !== undefined && stamped.has(ai)) continue;   // 关联控件自己已在池
+      if (ai === undefined) {
+        // 关联控件不在扫描结果里：只要它有可见盒就不重复入池（保险面）
+        let cv = false;
+        try { cv = lr.assoc.getClientRects().length > 0; } catch (err4) { cv = false; }
+        if (cv) continue;
+      }
+    }
+    rows.push(lr); stamped.add(lr.i);
+  }
+  // R1b：不可见表单控件 → 可见 label wrapper 代理入池（点 wrapper 等价于操作控件；
+  // wrapper 一定是 label 标签，必在扫描面内，ref/stamp 机制不变）。
+  const wrapperSeen = new Set();
+  for (const ci of hiddenCtrls) {
+    if (rows.length >= max) break;
+    const e = all[ci];
+    let w = null;
+    try { w = e.closest('label'); } catch (err) { w = null; }
+    if (!w && e.id) {
+      try { w = document.querySelector('label[for="' + CSS.escape(e.id) + '"]'); } catch (err2) { w = null; }
+    }
+    if (!w || wrapperSeen.has(w)) continue;
+    wrapperSeen.add(w);
+    const wi = idxOf.get(w);
+    if (wi === undefined || stamped.has(wi)) continue;   // wrapper 已在池（R1a 保留的 label 行即是）
+    const wb = (() => { const r = w.getClientRects(); for (let k = 0; k < r.length; k++) if (r[k].width > 0 && r[k].height > 0) return true; return false; })();
+    let wv;
+    if (w.checkVisibility) wv = wb && w.checkVisibility({checkVisibilityCSS: true, checkOpacity: false});
+    else { const cs = getComputedStyle(w); wv = cs.display !== 'none' && cs.visibility !== 'hidden' && wb; }
+    if (!wv) continue;
+    const wl = labelOf(w, 'label') || labelOf(e, 'input');
+    rows.push({ i: wi, tag: w.tagName.toLowerCase(), label: norm(wl).slice(0, 40), main: false,
+      data_test: w.getAttribute('data-test') || '', name: e.getAttribute('name') || '',
+      id: w.id || e.id || '', input_type: (e.getAttribute('type') || '').toLowerCase(),
+      role: (w.getAttribute('role') || '').toLowerCase(), content_editable: false, draggable: false, href: '' });
+    stamped.add(wi);
   }
   const ordered = rows.filter((r) => r.main).concat(rows.filter((r) => !r.main)).slice(0, max);
   return ordered.map((r, pos) => {
@@ -604,6 +679,7 @@ const FN_WRAPPER = compile("e", String.raw`const own = (e.value || '').trim();
  */
 export async function extractElements(
   page: PageLike, jsProbe = true, maxElements: number = MAX_ELEMENTS,
+  opts?: { widgets?: boolean },
 ): Promise<ElemPool> {
   if (jsProbe) {
     try {
@@ -633,6 +709,12 @@ export async function extractElements(
     }
   }
   await addNearContext(page, elems);
+  // R2：宽扫通道（opts.widgets）才展开启发式伪按钮——ref 续主池编号，主池字节不变。
+  if (opts?.widgets) {
+    const startRef = Object.keys(elems).length;
+    const extra = await extractHeuristicWidgets(page, startRef, maxElements - startRef);
+    for (const row of extra) if (row.ref) elems[row.ref] = row;
+  }
   return elems;
 }
 
@@ -699,6 +781,102 @@ export async function extractRowsPerElement(page: PageLike, maxElements: number 
     });
   }
   return elems;
+}
+
+/**
+ * R2b：指令与候选 label 的词面重叠判定（ASCII 词 + CJK 二元组）。
+ * 零重叠 = 池里可能与指令词面相关的候选一个都没有——模型在"盲选"
+ * （m.ctrip 实证：指令"出发地" vs 提名"组合交通出行"，conf 0.71 照样过闸）。
+ * 宽扫恢复的第二个触发器判据；纯函数，可单测。
+ */
+export function lexicalOverlap(instruction: string, label: string): boolean {
+  const li = String(label ?? "").toLowerCase();
+  if (!li) return false;
+  const ins = String(instruction ?? "");
+  for (const w of ins.toLowerCase().match(/[a-z0-9]{2,}/g) ?? []) {
+    if (li.includes(w)) return true;
+  }
+  for (const seq of ins.match(/[\u4e00-\u9fff]+/g) ?? []) {
+    if (seq.length === 1) {
+      if (li.includes(seq)) return true;
+      continue;
+    }
+    for (let i = 0; i + 2 <= seq.length; i++) {
+      if (li.includes(seq.slice(i, i + 2))) return true;
+    }
+  }
+  return false;
+}
+
+/* ------------------------------------------------------------------ R2: heuristic widgets */
+
+/**
+ * R2 启发式伪按钮（可见 + 有文本的自绘控件）：**只服务低置信失败路径的宽扫通道**
+ * （executor.ts WIDER pass），主池永不收——"池=模型的全部世界，宁缺勿滥"不破。
+ * 动机（m.ctrip 实证）：零 ARIA 的 SPA 自绘控件（div 文本按钮、事件委托在根节点）
+ * 结构白名单与 CDP listener 探针都收不进来，模型世界缺失 → 盲选漂移。
+ * 判据：div/span/li/td/article + 可见非零盒 + 自文本 1..60 字 + 非容器
+ * （内部无原生交互元素）+ 非 nav/aside/footer/header + 未在主池（无 data-dshref）。
+ * 只留最内层（嵌套候选去重）；每候选盖 data-dshref（ref 续主池编号），点击解析机制不变。
+ * 带 `heuristic: true` 标记，PoolView/审计可辨。
+ */
+export const HEURISTIC_WIDGET_JS = String.raw`(arg) => {
+  const WS = /[ \t\n\r\f\v]+/g;
+  const norm = (t) => (t || '').replace(/[\uE000-\uF8FF]/g, '').replace(WS, ' ').trim();
+  const all = [];
+  __collectAll(document, 'div, span, li, td, article', all);
+  const cands = [];
+  for (const e of all) {
+    if (cands.length >= 400) break;
+    if (e.getAttribute('data-dshref')) continue;
+    if (e.querySelector('a, button, input, select, textarea, label')) continue;
+    if (e.closest('nav, aside, footer, header')) continue;
+    const txt = norm(e.innerText || '');
+    if (!txt || txt.length > 60) continue;
+    const hasBox = (() => { const r = e.getClientRects(); for (let k = 0; k < r.length; k++) if (r[k].width > 0 && r[k].height > 0) return true; return false; })();
+    let vis;
+    if (e.checkVisibility) vis = hasBox && e.checkVisibility({checkVisibilityCSS: true, checkOpacity: false});
+    else { const cs = getComputedStyle(e); vis = cs.display !== 'none' && cs.visibility !== 'hidden' && hasBox; }
+    if (!vis) continue;
+    cands.push(e);
+  }
+  const kept = cands.filter((c) => !cands.some((o) => o !== c && c.contains(o)));
+  return kept.slice(0, arg.max).map((e, pos) => {
+    const ref = 'e' + (arg.startRef + pos);
+    e.setAttribute('data-dshref', ref);
+    const tag = e.tagName.toLowerCase();
+    return { tag: tag, label: norm(e.innerText || '').slice(0, 40),
+      main: (!e.closest('nav, aside, footer, header') && !!e.closest('main, [role=main], article')),
+      data_test: e.getAttribute('data-test') || '', name: e.getAttribute('name') || '',
+      id: e.id || '', input_type: (e.getAttribute('type') || '').toLowerCase(),
+      role: (e.getAttribute('role') || '').toLowerCase() };
+  });
+}`;
+
+const PASS_HEURISTIC = compile("arg", `${COLLECT_JS}\nreturn (${HEURISTIC_WIDGET_JS})(arg);`);
+
+export async function extractHeuristicWidgets(
+  page: PageLike, startRef: number, max: number,
+): Promise<Elem[]> {
+  if (max <= 0) return [];
+  try {
+    const rows = (await page.evaluate!(PASS_HEURISTIC, { startRef: startRef, max: max })) as
+      Array<Record<string, unknown>> | null;
+    return (rows ?? []).map((r, k): Elem => ({
+      ref: `e${startRef + k}`,
+      scan: -1,
+      tag: String(r["tag"] ?? "div"),
+      label: String(r["label"] ?? "").slice(0, 40),
+      data_test: String(r["data_test"] ?? ""),
+      name: String(r["name"] ?? ""),
+      id: String(r["id"] ?? ""),
+      input_type: String(r["input_type"] ?? ""),
+      role: String(r["role"] ?? ""),
+      heuristic: true,
+    }));
+  } catch {
+    return [];   // silent by design: recovery only
+  }
 }
 
 /* ------------------------------------------------------------------ CDP probe */
