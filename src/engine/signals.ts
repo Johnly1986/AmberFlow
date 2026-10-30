@@ -10,6 +10,10 @@
  * API is; the port is ASYNC (browser I/O in Node). Callers await it either way.
  */
 import { firstOf, locatorAnyFrame, urlOf, type PageLike } from "./extraction.ts";
+// 算子表本体在叶子模块 `signal-ops.ts`（零 import）：`grammar-prompt.ts` 要引用它生成
+// 提示词/报错文案，不应为此拖入本模块背后的 extraction 链。此处 re-export 保持 API。
+import { SIGNAL_OPS } from "./signal-ops.ts";
+export { SIGNAL_OPS };
 
 export type SignalSpec = Record<string, unknown>;
 
@@ -176,19 +180,7 @@ export function matchSelector(elems: StateView["elems"], selector: string): Stat
   return out;
 }
 
-export const SIGNAL_OPS: Readonly<Record<string, number>> = {
-  // composition (leaves stay DOM facts, so composing cannot weaken them)
-  all_of: 1,
-  any_of: 1,
-  not: 1,
-  // a human attestation: never verifiable from the DOM, so it blocks without a human
-  manual: 0,
-  url_contains: 1,
-  css_exists: 1,
-  css_text_equals: 2,
-  css_text_contains: 2,
-  css_value_equals: 2,
-};
+// SIGNAL_OPS 已移至 `./signal-ops.ts`（见文件头 re-export）；值 = 算子参数个数，0 = 无参叶子。
 
 /**
  * Normalise a signal value to its argument list.

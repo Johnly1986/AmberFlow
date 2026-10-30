@@ -102,6 +102,8 @@ import {
   navRule,
 } from "./rules.ts";
 import { checkSignal, type SignalSpec } from "./signals.ts";
+// 语法报错文案的唯一出处：形状清单不再手抄（grammar-prompt import 时自证与 parseHint 对齐）。
+import { HINT_CLOSED_SET_TEXT } from "./grammar-prompt.ts";
 import { LayaNotConfiguredError, type LayaRuntime } from "../model/model.ts";
 import { induceHint } from "../model/hint-memory.ts";
 import { instantiateSpace, resolveCommandValue, type CommandDecl } from "./actions.ts";
@@ -1965,8 +1967,7 @@ export class BrowserMiddleware {
               stop("target_not_found",
                 `command space matches nothing on this page — pending unresolved: `
                 + `${pendingUnresolved.join(", ") || "-"} (unresolvable candidates are OUT; the space never falls back to the full pool) on step ${stepNo}. `
-                + `hint 语法是六形状闭集（#id / tag[attr~substr] / tag~token / tag[attr=value] / 角色词 / 裸词；属性名只有 test→data-test、type→type 参与匹配）——`
-                + `容器/后代 CSS（如 "#outer input"）会被当成一个永不命中的形状，报"matches nothing"而非语法错误`, stepNo);
+                + HINT_CLOSED_SET_TEXT, stepNo);
             }
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
@@ -2106,9 +2107,17 @@ export class BrowserMiddleware {
           // the same failure as "every element is forbidden" — say which one it is.
           if (this.rulesOnly) {
             stop("no_model_runtime",
-              `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`, stepNo);
+              `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`
+              // 规划引导：计划点了名、规则没解出来、模型又不在/弃权——当场送闭集。
+              + (curHint !== null && ruleRef === null
+                  ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
+                  : ""), stepNo);
           } else {
-            stop("action_space_exhausted", `action space exhausted on step ${stepNo}`, stepNo);
+            stop("action_space_exhausted",
+              `action space exhausted on step ${stepNo}`
+              + (curHint !== null && ruleRef === null
+                  ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
+                  : ""), stepNo);
           }
           if (verbose && this.rulesOnly) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
@@ -2153,7 +2162,11 @@ export class BrowserMiddleware {
             // No runtime installed and no rule/hint resolved this step: say exactly that.
             // Reporting "low confidence 0.00" here would blame the model for not existing.
             stop("no_model_runtime",
-              `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`, stepNo);
+              `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`
+              // 同 low_confidence：hint 被点名却没解出来时，当场送闭集（规划引导，见 2026-10-29 实测）。
+              + (curHint !== null && ruleRef === null
+                  ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
+                  : ""), stepNo);
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
           } else if (!(adjudicate && ref !== null)
@@ -2257,7 +2270,12 @@ export class BrowserMiddleware {
                 }
               } else {
                 stop("low_confidence",
-                  `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`, stepNo);
+                  `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`
+                  // 规划引导：计划点了名、规则却没解出来——当场把闭集送给作者，省一次读源码确诊
+                  // （2026-10-29 实测：act hint 落空静默回退模型，报错无提示，Agent 读完 hint.ts/rules.ts 才定位）。
+                  + (curHint !== null && ruleRef === null
+                      ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
+                      : ""), stepNo);
                 break;
               }
             }

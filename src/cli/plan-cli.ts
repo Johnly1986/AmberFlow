@@ -84,7 +84,10 @@ export async function cmdNew(a: NewArgs, io: CliIO = defaultIO): Promise<TaskPla
   if (a.llm) {
     if (!process.env.OPENAI_BASE_URL || !process.env.OPENAI_API_KEY) {
       throw new Error("--llm needs OPENAI_BASE_URL + OPENAI_API_KEY (PLANNER_MODEL optional); "
-        + "without them use the manual skeleton");
+        + "without them use the manual skeleton. "
+        + "LLM planning is suspended for now: step decisions run on the three-key decision "
+        + "service or the local laya-onnx model (docs/DECISION_SERVICE_CONFIG.md); "
+        + "author flows as apps instead (npm run learn / amber apps new).");
     }
     // Snapshot the page first: the planner can only write done-signals and
     // target_hints if it sees the same element space the executor will see.

@@ -174,6 +174,10 @@ export interface AmberFlowInspect {
   elements: JsonObject[]
   element_count: number
   truncated: boolean
+  /** 空池诊断（planning-playbook）：主池近空而页面上交互元素多——重 JS SPA 的典型形态。 */
+  pool_near_empty?: boolean
+  /** 页面上 INTERACTIVE_ALL 的水合后读数（仅 pool_near_empty 时出现）。 */
+  interactive_on_page?: number
   /** Read-only selector probe outcomes (E3): {selector, count, texts} or {selector, error}. */
   probes?: JsonObject[]
   text?: string
@@ -432,9 +436,11 @@ export async function appShow(options: BridgeOptions, app: string): Promise<Ambe
   return detailOf(dataOf(doc))
 }
 
-/** Static validation of one app (load + dry call sequence); no browser. */
-export async function appCheck(options: BridgeOptions, app: string): Promise<AmberFlowAppCheck> {
-  const doc = await cliJson(options, ['apps', 'check', app, '--json'])
+/** Static validation of one app (load + dry call sequence); no browser. `slots` forward as `--slot k=v`. */
+export async function appCheck(options: BridgeOptions, app: string, slots?: string[]): Promise<AmberFlowAppCheck> {
+  const argv = ['apps', 'check', app, '--json']
+  for (const s of slots ?? []) argv.push('--slot', s)
+  const doc = await cliJson(options, argv)
   const d = dataOf(doc)
   return {
     ok: d['ok'] === true,
@@ -464,6 +470,9 @@ export async function inspect(options: BridgeOptions, args: AmberFlowInspectArgs
     elements: records(d['elements']),
     element_count: Number(d['element_count'] ?? 0),
     truncated: d['truncated'] === true,
+    ...(d['pool_near_empty'] === true
+      ? { pool_near_empty: true, interactive_on_page: Number(d['interactive_on_page'] ?? 0) }
+      : {}),
     ...(Array.isArray(d['probes']) && d['probes'].length ? { probes: records(d['probes']) } : {}),
     ...(typeof d['text'] === 'string' ? { text: d['text'] } : {}),
     ...(typeof d['screenshot_path'] === 'string' ? { screenshot_path: d['screenshot_path'] } : {}),

@@ -10,8 +10,8 @@
  * AmberFlow bridge — browser half: the plugin's own configuration page.
  *
  * Registers into the Plugins settings page at `plugins.row.config`, keyed
- * `<package name>#<row id>`. The page edits the THREE model fields the bridge
- * exposes (Model URL / Token Key / ModelName) through the shared
+ * `<package name>#<row id>`. The page edits the model fields the bridge exposes
+ * (Model URL / Token Key / ModelName) plus the 步间距 (step gap) through the shared
  * `ctx.configForms` service, so a save persists into the active profile's patch
  * and the Host applies it through the normal Loader path (the bridge's
  * `loader/volatile-update` listener then re-reads the values without a remount).
@@ -46,6 +46,10 @@ window.__ModuleLoader__.load({
       modelApiKeyPlaceholderUnset: 'Paste the token',
       modelName: 'Decision ModelName',
       modelNameHint: 'Decision model id (TOKEN_PLAN_MODEL); leave empty for the provider default, decision-model-preview.',
+      stepGapMs: 'Step gap (ms)',
+      stepGapMsHint: 'Minimum wait between two engine steps, 0–60000 ms (forwarded as AMBERFLOW_STEP_DELAY_MS). An app that declares its own meta.pace keeps winning. 0 = no wait.',
+      stepGapInvalid: 'Step gap must be an integer between 0 and 60000.',
+      stepGapSummary: 'step gap',
       save: 'Save',
       saving: 'Saving…',
       saved: 'Saved. App runs started from now on use this online decision model (token-plan).',
@@ -55,9 +59,10 @@ window.__ModuleLoader__.load({
       loading: 'Loading the current configuration…',
       unavailable: 'Configuration is not served by this Host (non-loopback browser or missing Settings service).',
       readOnly: 'This Host document is read-only.',
-      hint: 'These three fields configure AmberFlow\'s ONLINE DECISION MODEL (token-plan SystemOne). '
+      hint: 'The model fields configure AmberFlow\'s ONLINE DECISION MODEL (token-plan SystemOne). '
         + 'With URL and token set, app runs use the token-plan decision provider; empty keeps the local ONNX '
-        + 'model (or rules-only). LLM doors (planner/auditor/escalation) are separate and still read OPENAI_* '
+        + 'model (or rules-only). The step gap slows the pace between engine steps (politeness / rate-limit '
+        + 'headroom). LLM doors (planner/auditor/escalation) are separate and still read OPENAI_* '
         + 'from the environment.',
       summaryUnset: 'Online decision model not configured',
       summaryConfigured: 'Decision model: ',
@@ -67,8 +72,8 @@ window.__ModuleLoader__.load({
         + 'settings to non-loopback pages (it never reads or writes the Host configuration there). '
         + 'Open the DSH web URL on the Host machine — http://127.0.0.1:… with the token printed by '
         + '`dsh web`, or through an SSH tunnel such as `ssh -L 8080:127.0.0.1:3080 <host>` — and edit '
-        + 'the three decision-model fields there. The saved values apply to every run, including '
-        + 'runs started from this remote page.',
+        + 'the decision-model fields and the step gap there. The saved values apply to every run, '
+        + 'including runs started from this remote page.',
     }
     const zh = {
       modelBaseUrl: '决策模型 URL',
@@ -81,6 +86,11 @@ window.__ModuleLoader__.load({
       modelApiKeyPlaceholderUnset: '粘贴 Token',
       modelName: '决策模型名 ModelName',
       modelNameHint: '决策模型 id（TOKEN_PLAN_MODEL）；留空用 provider 默认 decision-model-preview。',
+      stepGapMs: '步间距（毫秒）',
+      stepGapMsHint: '两次执行步（ctx.step / arrive / manual / run）之间的最小等待，0–60000 毫秒'
+        + '（作为 AMBERFLOW_STEP_DELAY_MS 传给引擎；应用自己声明的 meta.pace 仍优先）。0 = 不等待。',
+      stepGapInvalid: '步间距必须是 0–60000 之间的整数。',
+      stepGapSummary: '步间距',
       save: '保存',
       saving: '保存中…',
       saved: '已保存。此后启动的引擎运行默认使用该线上决策模型（token-plan）。',
@@ -90,8 +100,9 @@ window.__ModuleLoader__.load({
       loading: '正在读取当前配置…',
       unavailable: '当前 Host 未提供配置（非回环浏览器或缺少 Settings 服务）。',
       readOnly: '该 Host 文档是只读的。',
-      hint: '这三项配置 AmberFlow 的**线上决策模型**（token-plan SystemOne）：URL 与 Token 都设置后，'
+      hint: '模型三项配置 AmberFlow 的**线上决策模型**（token-plan SystemOne）：URL 与 Token 都设置后，'
         + '应用运行默认走 token-plan 决策 provider；留空则继续用本地 ONNX 模型（或 rules-only）。'
+        + '步间距用于放慢引擎步与步之间的节奏（降载/限频余量）。'
         + 'LLM 门（规划器/审计/语义升级）是另一条路径，仍从环境变量读 OPENAI_*。',
       summaryUnset: '未配置线上决策模型',
       summaryConfigured: '决策模型：',
@@ -100,7 +111,7 @@ window.__ModuleLoader__.load({
       remoteBody: '当前页面是经非 loopback 地址打开的，DSH 不向非 loopback 页面暴露插件配置'
         + '（那边既不读也不写 Host 配置）。请在 Host 本机打开 DSH Web（http://127.0.0.1:… 加 '
         + '`dsh web` 打印的 token），或使用 SSH 隧道（如 `ssh -L 8080:127.0.0.1:3080 <host>`）后'
-        + '编辑这三个决策模型字段。保存后的值对所有运行生效，也包括从当前远程页面发起的运行。',
+        + '编辑决策模型字段与步间距。保存后的值对所有运行生效，也包括从当前远程页面发起的运行。',
     }
 
     const INPUT_STYLE = {
@@ -154,7 +165,7 @@ window.__ModuleLoader__.load({
       const snapshot = useSnapshot(form)
       const described = useSnapshot(mirror)
       const current = snapshot.value ?? {}
-      const [draft, setDraft] = React.useState({ baseUrl: '', name: '', token: '' })
+      const [draft, setDraft] = React.useState({ baseUrl: '', name: '', token: '', stepGap: '' })
       const [busy, setBusy] = React.useState(false)
       const [message, setMessage] = React.useState(null)
 
@@ -164,6 +175,11 @@ window.__ModuleLoader__.load({
       const remoteReadOnly = described.status === 'unavailable'
       const hostBaseUrl = typeof current.modelBaseUrl === 'string' ? current.modelBaseUrl : ''
       const hostName = typeof current.modelName === 'string' ? current.modelName : ''
+      // 步间距 (step gap): Host value is a number (schema default 0); render the integer ms.
+      const hostStepGapNum = typeof current.stepGapMs === 'number' && Number.isFinite(current.stepGapMs)
+        ? Math.round(current.stepGapMs)
+        : 0
+      const hostStepGap = String(hostStepGapNum)
       const namespaceView = (described.view?.namespaces ?? []).find((view) => view.ns === ENTRY)
       const tokenSet = (namespaceView?.secrets ?? []).some((secret) =>
         Array.isArray(secret.path) && secret.path[0] === 'modelApiKey' && secret.set === true)
@@ -174,15 +190,18 @@ window.__ModuleLoader__.load({
         // A new revision (initial load, save, external edit) rebases the visible fields; the
         // write-only token field is always emptied. The status message is not cleared here so a
         // just-saved confirmation survives the revision bump it caused.
-        setDraft({ baseUrl: hostBaseUrl, name: hostName, token: '' })
+        setDraft({ baseUrl: hostBaseUrl, name: hostName, token: '', stepGap: hostStepGap })
       }, [snapshot.revision, snapshot.status])
 
       const suffix = hostBaseUrl === '' ? '' : ' @ ' + hostBaseUrl.replace(/^https?:\/\//, '')
       if (props.view === 'summary') {
         if (remoteReadOnly) return h('span', null, t('remoteSummary'))
+        const gapText = hostStepGapNum > 0
+          ? ' · ' + t('stepGapSummary') + ' ' + String(hostStepGapNum) + 'ms'
+          : ''
         const text = hostName === '' && hostBaseUrl === ''
-          ? t('summaryUnset')
-          : t('summaryConfigured') + (hostName === '' ? '—' : hostName) + suffix
+          ? t('summaryUnset') + gapText
+          : t('summaryConfigured') + (hostName === '' ? '—' : hostName) + suffix + gapText
         return h('span', null, text)
       }
       if (remoteReadOnly) {
@@ -193,12 +212,21 @@ window.__ModuleLoader__.load({
 
       const ready = snapshot.status === 'ready' && snapshot.writable !== false
       const save = async () => {
+        // 步间距 first: client-side range check so an obviously wrong value never reaches the Host
+        // (the Host schema validates again — z.natural().max(60000)).
+        const nextGapRaw = draft.stepGap.trim()
+        const nextGap = nextGapRaw === '' ? 0 : Number(nextGapRaw)
+        if (!Number.isInteger(nextGap) || nextGap < 0 || nextGap > 60000) {
+          setMessage({ kind: 'error', text: t('stepGapInvalid') })
+          return
+        }
         const ops = []
         const nextBaseUrl = draft.baseUrl.trim()
         const nextName = draft.name.trim()
         if (nextBaseUrl !== hostBaseUrl) ops.push({ op: 'set', path: ['modelBaseUrl'], value: nextBaseUrl })
         if (nextName !== hostName) ops.push({ op: 'set', path: ['modelName'], value: nextName })
         if (draft.token !== '') ops.push({ op: 'set', path: ['modelApiKey'], value: draft.token })
+        if (nextGap !== hostStepGapNum) ops.push({ op: 'set', path: ['stepGapMs'], value: nextGap })
         if (ops.length === 0) {
           setMessage({ kind: 'warn', text: t('nothingChanged') })
           return
@@ -270,6 +298,21 @@ window.__ModuleLoader__.load({
             autoComplete: 'off',
             style: INPUT_STYLE,
             onChange: (event) => setDraft((previous) => ({ ...previous, name: event.target.value })),
+          }),
+        }),
+        h(Field, {
+          label: t('stepGapMs'),
+          hint: t('stepGapMsHint'),
+          control: h('input', {
+            type: 'number',
+            min: 0,
+            max: 60000,
+            step: 100,
+            value: draft.stepGap,
+            spellCheck: false,
+            autoComplete: 'off',
+            style: INPUT_STYLE,
+            onChange: (event) => setDraft((previous) => ({ ...previous, stepGap: event.target.value })),
           }),
         }),
         h('p', { style: HINT_STYLE }, t('hint')),

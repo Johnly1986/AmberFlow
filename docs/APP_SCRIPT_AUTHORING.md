@@ -3,6 +3,28 @@
 > 面向“要接入/修改一条业务流程”的人，也面向替你写脚本的 Agent。
 > Agent 与 DSH 桥的稳定契约见 [AGENT_INTERFACE.md](AGENT_INTERFACE.md)；本篇讲作者面。
 
+## 0. 30 秒快速路径（引擎引导，唯一出处 `src/engine/planning-playbook.ts`）
+
+> 本节两段文字由引擎模块生成，`npm run prompt-hit` 第 6 层逐字校验——改文案先改模块再跑工具，勿手抄改写。
+> 同一份五步法也写在 `apps new` 骨架注释头部与桥 `_app_create` 工具描述里（同一出处，多面分发）。
+
+```text
+高效规划五步法（Planning Playbook）：
+① 先看再写：amber inspect --url <页> --json 拿验证过的 hint_candidates——有候选照抄，别自创选择器；
+② 单步探针先行：先写 1 步探针应用（arrive + read）验证四件事：页面可达 / 无登录墙 / 无验证码 / 目标数据在 DOM。探针 30 秒判死刑，好过全流程应用跑 5 轮；
+③ 正式应用参数化：单段/单城 + slots，1 步 flow；早停守卫（命中登录墙/验证码特征 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；
+④ 离线分支校验：amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列；
+⑤ 真跑留证：amber run <id> --trace；失败先看 trace 的 stopCode/reason——reason 自带修正指引。
+```
+
+```text
+失败特征速查（只判不绕，命中即 ctx.fail("blocked:…") 早停）：
+- body 极短（<200 字符）+「登录/注册」浮层 = 登录墙：换可匿名读价的来源或如实标 blocked，别重试表单；
+- 卡片价格处全是「登录看低价」= 服务端价格闸：匿名会话拿不到价格，不是渲染问题，早停；
+- 价格列全是「查价」+ 页尾「服务器异常」= 站点限流：等待与重试无效，早停；
+- 「依次点击图标验证 / 滑动拼图」= 验证码：不代过，立即早停。
+```
+
 ## 1. 只有一种格式
 
 应用是**用户作用域的一段 JS 流程**：
@@ -146,8 +168,8 @@ export async function flow(ctx) {
   `scroll` 把目标滚入视口；`drag` 的 value 是落点 selector（可来自槽位），只在 `[draggable=true]` 或 slider 族元素上声明能力。
   `skip` = 按定义解决的零动作命令：全部命令解决后引擎会**评估一次 done 信号**再判成败——"导航由 arrive 完成、本步只验证到达"的守卫步合法可用（04-A 修复；此前 skip 步的 done 从未被评估，必报 `done_not_held`）。
   不在能力面内的 op 会得到 `action_unsupported`，目标歧义是 `target_ambiguous`，目标不存在是 `target_not_found`。
-- **act hint 是六形状语法闭集**（唯一解析器 `src/engine/hint.ts`）：`#id` ｜ `tag[attr~substr]` ｜ `tag~token` ｜ `tag[attr=value]`（值去引号、全小写折叠）｜ 角色词 `button|link|input|textarea|select` ｜ 裸词（按 label 匹配）。属性名参与匹配的只有 `test`（→`data-test`/`data_test`）与 `type`（→`input_type`）；`title`、`href` 等不在池字段模型里。**容器/后代 CSS（如 `#outer input`）不是语法错误——会被解析成一个永不命中的形状，报 `target_not_found`（"matches nothing"）**。
-- **hint 与 done 信号是两个观察面**：`ctx.judge.*` 的 selector 走 DOM 查询面（任意 CSS 可用）；act hint 走上述语法闭集 + 元素池投影。`inspect --probe` 数的是 DOM——probe 命中数 ≠ hint 可命中，别互相推断（03-D2/D3；报错 reason 现附闭集提示）。
+- **act hint 是六形状语法闭集**（唯一解析器 `src/engine/hint.ts`，语法**描述**的唯一出处 `src/engine/grammar-prompt.ts`，`npm run prompt-hit` 校验示例可命中、报错/提示词/桥描述不漂移）：`#id` ｜ `tag[attr~substr]` ｜ `tag~token` ｜ `tag[attr=value]`（值去引号、全小写折叠）｜ 角色词 `button|link|input|textarea|select` ｜ 裸词（按 label 匹配）。属性名按池字段匹配：test→data-test、type→input_type、href、name、id、role、near；class、title 等不在池字段模型里，永不命中（本句由 grammar-prompt 的 ATTR_MATCH_MODEL_TEXT 生成，prompt-hit 逐字校验，勿手改）。**容器/后代 CSS（如 `#outer input`）不是语法错误——会被解析成一个永不命中的形状**；命令空间的 `target_not_found` reason 附闭集提示，而 act hint 落空会**静默回退模型决策**、报 `low_confidence` 不附提示——写 hint 前先 `inspect` 拿验证过的 `hint_candidates`。
+- **hint 与 done 信号是两个观察面**：`ctx.judge.*` 的 selector 走 DOM 查询面（任意 CSS 可用）；act hint 走上述语法闭集 + 元素池投影。`inspect --probe` 数的是 DOM——probe 命中数 ≠ hint 可命中，别互相推断（03-D2/D3；闭集提示只出现在命令空间 `target_not_found` 的 reason 里）。
 - 停因 reason 里的 "on step N" 是**子目标内动作步号**，与 CLI/`step_traces` 的流步号不是一个口径（04-B）。
 - `ctx.step` 的 `timeoutMs` 约束的是**本步动作后等待 done 信号成立的窗口**（映射该步的 `done_timeout_ms`），不约束整步挂钟时长——模型咨询、导航渲染不在其内（04-F）。
 - 导航：`ctx.open/openPage` 只做 goto（domcontentloaded），**不等 done/信号/settle**；要"导航 + 等落地证据"用 `ctx.arrive(url, { done })`（04-C 实测：open 后半路即返，arrive 带轮询等待）。

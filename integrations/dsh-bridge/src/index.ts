@@ -38,6 +38,9 @@ import {
   appCheck, appShow, createApp, inspect, learn, runApp, status, test,
   createService, type AmberFlowService,
 } from './service.ts'
+// 语法/规划引导生成物（勿手改）：唯一出处是引擎的 grammar-prompt.ts 与 planning-playbook.ts，
+// 这里只收字符串（桥不 import 引擎代码）；漂移由 `npm run prompt-hit` 校验。
+import { HINT_LEARN_NOTE, PLAN_PLAYBOOK_SHORT } from './grammar.generated.ts'
 
 // The package root is the consumer surface: another plugin imports these without reaching into `src/`
 // (a published package ships only `lib/`).
@@ -101,17 +104,24 @@ export interface Config {
   /**
    * Unified **decision service** endpoint (System One protocol).
    *
-   * These three fields are the ONLY `.volatile()` fields in this Config, so the plugin's
-   * configuration page (`plugins.row.config`) shows exactly them. They are forwarded to the engine
-   * child process as `AMBERFLOW_DECISION_BASE_URL` / `_API_KEY` / `_MODEL`, and when the URL +
-   * token are both set the bridge defaults runs to the `decision-service` provider.
-   * Empty means "not configured": runs keep the local ONNX decision model (or rules-only).
+   * These three fields plus {@link Config.stepGapMs} are the ONLY `.volatile()` fields in this
+   * Config, so the plugin's configuration page (`plugins.row.config`) shows exactly them. They are
+   * forwarded to the engine child process as `AMBERFLOW_DECISION_BASE_URL` / `_API_KEY` / `_MODEL`,
+   * and when the URL + token are both set the bridge defaults runs to the `decision-service`
+   * provider. Empty means "not configured": runs keep the local ONNX decision model (or rules-only).
    */
   modelBaseUrl?: Volatile<string>
   /** Bearer token for {@link modelBaseUrl}. Secret: the settings surface never reads it back. */
   modelApiKey?: Volatile<string | undefined>
   /** Decision model id (`AMBERFLOW_DECISION_MODEL`; empty = the provider's default). */
   modelName?: Volatile<string>
+  /**
+   * 步间距 (step gap, ms): minimum wait between two engine steps (`ctx.step` / `arrive` / `manual` /
+   * `run`), forwarded to the engine child process as `AMBERFLOW_STEP_DELAY_MS`. The engine resolves
+   * pace by precedence "explicit > `meta.pace` > env > 0", so an app that declares its own
+   * `meta.pace` keeps winning over this machine-level default. `0` (default) adds nothing.
+   */
+  stepGapMs?: Volatile<number>
 }
 
 /** Schemastery schema for {@link Config}. */
@@ -136,6 +146,10 @@ export const Config = z.object({
   // would make an unset token read as "configured" in the configuration page.
   modelApiKey: z.string().role('secret').volatile(),
   modelName: z.string().default('').volatile(),
+  // 步间距 (step gap): the pace field on the configuration page. Forwarded to the engine as
+  // AMBERFLOW_STEP_DELAY_MS — the engine's `env` pace layer, which an app's own meta.pace still
+  // overrides. 0..60000 ms like meta.pace; 0 (default) forwards nothing.
+  stepGapMs: z.natural().max(60_000).default(0).volatile(),
 })
 
 /**
@@ -234,6 +248,9 @@ function resolveOptions(config: Config): BridgeOptions {
       )
     }
   }
+  // 步间距 from the configuration page: read through the volatile wrapper like the model fields.
+  // Defensively clamped to 0..60000 (the schema already enforces it; NaN/debris reads as 0).
+  const rawStepGapMs = Number(volatileValue(config.stepGapMs) ?? 0)
   return {
     repoPath,
     nodeBin: config.nodeBin ?? process.execPath,
@@ -249,6 +266,9 @@ function resolveOptions(config: Config): BridgeOptions {
       apiKey: (volatileValue(config.modelApiKey) ?? '').trim(),
       model: (volatileValue(config.modelName) ?? '').trim(),
     },
+    stepGapMs: Number.isFinite(rawStepGapMs)
+      ? Math.min(60_000, Math.max(0, Math.floor(rawStepGapMs)))
+      : 0,
     // Auto-select the online decision provider only when the endpoint AND token are both present:
     // a half-configured page must not break runs that otherwise work on the local model.
     ...(normalizeDecisionEndpoint(volatileValue(config.modelBaseUrl) ?? '').trim() !== ''
@@ -267,9 +287,9 @@ function resolveOptions(config: Config): BridgeOptions {
 export function apply(ctx: Context, config: Config): void {
   const options = resolveOptions(config)
   const { toolPrefix } = options
-  // The plugin ships its own configuration page (the three model fields), so the generic settings
-  // page must not also generate one for this entry. Optional service: a deployment without Settings
-  // keeps working (page simply absent).
+  // The plugin ships its own configuration page (the three model fields plus the step gap), so the
+  // generic settings page must not also generate one for this entry. Optional service: a deployment
+  // without Settings keeps working (page simply absent).
   ctx.inject(['settings'], (child) => {
     child.effect(() => child.settings.configure({ auto: false }, ctx.fiber), 'amberflow-bridge: own config page')
   })
@@ -693,6 +713,12 @@ export function apply(ctx: Context, config: Config): void {
       + 'script is loadable and its call sequence is legal — not that page state will hold.',
     parameters: {
       app: { type: 'string', required: true, description: 'The app id from the apps tool.' },
+      slots: {
+        type: 'array', items: { type: 'string' },
+        description: 'Values for declared slots as "k=v" entries (repeatable), forwarded as `--slot` to '
+          + 'the dry validation — validate slot-parameterized branches offline. Required slots still need '
+          + 'a declared (possibly empty-string) default in meta.',
+      },
     },
     output: {
       schema: {
@@ -724,7 +750,7 @@ export function apply(ctx: Context, config: Config): void {
       }],
     },
     async execute(args) {
-      return appCheck(options, args.app)
+      return appCheck(options, args.app, args.slots)
     },
   }))
 
@@ -758,6 +784,8 @@ export function apply(ctx: Context, config: Config): void {
           elements: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
           element_count: { type: 'integer', required: true },
           truncated: { type: 'boolean', required: true },
+          pool_near_empty: { type: 'boolean' },
+          interactive_on_page: { type: 'integer' },
           probes: { type: 'array', items: { type: 'object', additionalProperties: true } },
           text: { type: 'string' },
           screenshot_path: { type: 'string' },
@@ -766,6 +794,9 @@ export function apply(ctx: Context, config: Config): void {
       render: (_args, value) => [{
         type: 'text',
         text: `${value.title} — ${value.url}\n`
+          + (value.pool_near_empty === true
+            ? `⚠ pool_near_empty (page has ${String(value.interactive_on_page ?? '?')} interactive elements; main pool barely picked any - heavy JS SPA). Try --wide --pool, or a 1-step probe app first.\n`
+            : '')
           + value.elements.map(e => {
             const hints = field(e, 'hint_candidates')
             return `  ${String(field(e, 'ref') ?? '')} ${String(field(e, 'tag') ?? '')} ${String(field(e, 'label') ?? '')}`
@@ -855,7 +886,8 @@ export function apply(ctx: Context, config: Config): void {
       'Create a flow app skeleton under the user scope via `amber apps new`: `apps/<id>/app.mjs` '
       + 'with `meta` + an empty `flow(ctx)` to fill in. Returns the new app, its writable path and its '
       + 'current source. Only the skeleton is generated — the Agent edits the script itself; there is '
-      + 'no step/format/kind parameter and no JSON app format.',
+      + 'no step/format/kind parameter and no JSON app format. '
+      + PLAN_PLAYBOOK_SHORT,
     parameters: {
       id: { type: 'string', required: true, description: 'Lowercase id; also the directory name.' },
       goal: { type: 'string', description: 'One-line goal written into `meta.goal`.' },
@@ -905,6 +937,7 @@ export function apply(ctx: Context, config: Config): void {
         description:
           'Path to the recorded action list: a JSON array of '
           + '{"op":"click"|"type","hint":"<selector hint>"[,"value":"…"][,"label":"…"]} entries. '
+          + HINT_LEARN_NOTE + ' '
           + 'Required, and the only action source that works without a terminal.',
       },
       id: { type: 'string', description: 'App id to save under (defaults to a slug of host+goal).' },

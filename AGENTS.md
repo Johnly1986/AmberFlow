@@ -34,7 +34,6 @@ npx amber run <id> --trace             # 运行 flow 应用
 npm run apps -- --app <id>             # 用户作用域应用（同一运行器）
 npm run learn                          # 演示一次，录成应用
 npx amber record https://<页面> --name <id>   # 同一入口的 CLI 形式
-npm run plan-cli -- ...
 npm run model:fetch -- --from <url|路径>
 npm run picker-server
 ```

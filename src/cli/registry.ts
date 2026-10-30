@@ -111,7 +111,7 @@ amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]`,
   {
     name: "plan",
     summary: "创建 / 编辑 / 校验计划",
-    usage: `amber plan new "<目标>" [--url <页面>] [--llm] [--max <N>] [--save-plan <文件>]
+    usage: `amber plan new "<目标>" [--url <页面>] [--save-plan <文件>]
 amber plan show [--plan <文件>]
 amber plan add "<描述>" (--signal <op=value> | --signal-file <json>) [--url <页面>] [--target <hint>] [--at <编号|id>] [--plan <文件>]
 amber plan edit <编号|id> [--desc ...] [--signal ... | --signal-file <json>] [--url ...] [--target ...] [--plan <文件>]
@@ -133,8 +133,6 @@ amber plan run [--plan <文件>] [--reset] [--replan] [--confirm allow|ask|deny]
       "--target <hint>           目标提示（旧 --hint）",
       "--at <编号|id>            插入位置；编号统一 1-based",
       "--to <位置>               move 的目标位置；1-based",
-      "--llm                     用外层 LLM 生成骨架",
-      "--max <N>                 LLM 生成步数上限，默认 8",
       "--reset / --replan        plan run 的重置 / 重新规划",
       "--confirm allow|ask|deny  plan run 的人工确认策略",
     ],
@@ -146,8 +144,8 @@ amber plan run [--plan <文件>] [--reset] [--replan] [--confirm allow|ask|deny]
     usage: `amber apps list [--json]
 amber apps show <应用|脚本> [--code] [--json]
 amber apps new <id> [--goal <目标>] [--host HOST] [--url <入口页>] [--dir <目录>] [--force] [--print] [--json]
-amber apps check [<应用|脚本>] [--json]
-amber apps explain <应用|脚本> [--json]
+amber apps check [<应用|脚本>] [--slot k=v]... [--json]
+amber apps explain <应用|脚本> [--slot k=v]... [--json]
 amber apps path <应用> [--json]
 amber apps remove <应用> [--yes] [--force]`,
     examples: ["amber apps list", "amber apps check $AMBERFLOW_HOME/apps/my-app/app.mjs",
@@ -159,6 +157,7 @@ amber apps remove <应用> [--yes] [--force]`,
       "--url <http(s) URL>        apps new 的入口页",
       "--dir <目录>               apps new 的落点（默认 $AMBERFLOW_HOME/apps/<id>）",
       "--code                     apps show 返回完整源码（供 Agent 直接看/编辑）",
+      "--slot k=v                apps check/explain 的 dry 槽位（可重复）；分支校验不启浏览器。加载期必填槽仍需 meta 声明默认（可空串）",
       "--force                    apps new 覆盖已存在文件 / apps remove 允许删内置应用",
       "--print                    apps new 只打印源码、不落盘",
       "--json                    机器可读输出",
@@ -188,6 +187,23 @@ amber apps remove <应用> [--yes] [--force]`,
       "--json                    输出 JSON envelope",
     ],
     related: ["run", "apps", "doctor"],
+  },
+  {
+    name: "schema",
+    summary: "引擎语义契约（Agent 无源码自描述面：facts/signals/hints/commands/budget/…）",
+    usage: "amber schema ctx [--topic <节>] [--out <文件>] [--check] [--json]",
+    examples: [
+      "amber schema ctx --json",
+      "amber schema ctx --topic signals",
+      "amber schema ctx --out dist/schema/ctx.json && amber schema ctx --check",
+    ],
+    flags: [
+      "--topic <节>             只输出一节：facts / signals / hints / commands / budget / navigation / flow_control / dry / stopcodes",
+      "--out <文件>              把契约写成 JSON 快照（构建/发布物；缺省落点 dist/schema/ctx.json）",
+      "--check                   与快照比对，漂移 exit 2（CI 新鲜度）",
+      "--json                    输出 JSON envelope",
+    ],
+    related: ["inspect", "apps"],
   },
   {
     name: "doctor",

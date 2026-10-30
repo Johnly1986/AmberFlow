@@ -12,6 +12,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { validateSignalSpec, type SignalSpec } from "./signals.ts";
 import { validateCommands, type CommandDecl } from "./actions.ts";
+// 语法描述的唯一出处：hint 形状行与信号算子行由 grammar-prompt 生成，不再手抄
+// （grammar-prompt import 时自证与 parseHint / SIGNAL_OPS 对齐）。
+import { hintPromptTokens, signalPromptLines } from "./grammar-prompt.ts";
 
 /**
  * 一步的可逆性声明。
@@ -183,15 +186,10 @@ export class PlanningRules {
       "Planning rules (hard constraints):",
       `- at most ${this.maxSubgoals} subgoals, ordered, each independently verifiable`,
       '- when the page elements are given, add "target_hint" naming the element the',
-      "  subgoal drives: #id | tag[attr=value] | tag[attr~substr] | tag[near~token] |",
-      "  tag | bare-token. It is resolved by rule at zero model cost; omit it only when",
-      "  the target is genuinely ambiguous in the snapshot",
+      `  subgoal drives: ${hintPromptTokens()}. It is resolved by rule at zero model`,
+      "  cost; omit it only when the target is genuinely ambiguous in the snapshot",
       "- every subgoal MUST carry a done-signal, one of:",
-      "    url_contains: substring of the final url  (op=value)",
-      "    css_exists: css selector that must exist  (op=value)",
-      "    css_text_equals: selector|exact text",
-      "    css_text_contains: selector|substring of the element's text",
-      "    css_value_equals: selector|exact input value",
+      ...signalPromptLines().map((l) => `    ${l}`),
     ];
     if (this.requireStartUrl) lines.push("- every subgoal needs an explicit start_url");
     if (this.forbiddenWords.length) {

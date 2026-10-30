@@ -70,6 +70,9 @@ import {
 } from "./trace.ts";
 import { DatasetStore, type DatasetEntry } from "../engine/dataset.ts";
 import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "../engine/plan.ts";
+// 规划引导：run 失败时按停因给一行「下一步建议」（唯一出处 planning-playbook.ts，
+// 只进 report.md 与 stdout，不动 result JSON 契约——桥解析零风险）。
+import { nextForStop } from "../engine/planning-playbook.ts";
 
 /** 进程内运行序号：保证同一毫秒内连续两次运行也不会撞上同一个 `{run_id}`。 */
 let RUN_SEQ = 0;
@@ -1412,7 +1415,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
 }
 
 /** 结构化结果 → 人读的 Markdown（应用级证据：数据腿 + 旅程 + 不变量）。 */
-export function appReportMarkdown(r: AppRunResult): string {
+export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): string {
   const L: string[] = [
     `# 应用运行报告：${r.label}（\`${r.app}\`）`,
     "",
@@ -1446,6 +1449,7 @@ export function appReportMarkdown(r: AppRunResult): string {
     ...(r.path_crossed !== undefined && r.path_crossed.length
       ? ["- **跨过的步**（声明式边跨过去，记成 skipped）：" + r.path_crossed.join("、")]
       : []),
+    ...(nextHint ? ["", `> **下一步建议**：${nextHint}`] : []),
   ];
   if (r.sources.length) {
     L.push("", "## 数据腿", "", "| 数据源 | 行数 | counts | selects | 工具版本 |", "|---|---|---|---|---|");
@@ -2166,11 +2170,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   const jsonPath = path.join(outDir, `${pack.id}-result.json`);
   const mdPath = path.join(outDir, `${pack.id}-report.md`);
+  // 规划引导：失败时按停因给一行「下一步建议」（flow 级 stop_code 优先，步级兜底）。
+  const nextHint = runNextHint(result);
   fs.writeFileSync(jsonPath, JSON.stringify(result, null, 2), "utf-8");
-  fs.writeFileSync(mdPath, appReportMarkdown(result), "utf-8");
+  fs.writeFileSync(mdPath, appReportMarkdown(result, nextHint), "utf-8");
   if (!quiet) {
     console.log();
-    console.log(appReportMarkdown(result));
+    console.log(appReportMarkdown(result, nextHint));
+    if (nextHint) console.log(`下一步建议：${nextHint}`);
     if (result.hint_memory) {
       console.log(`learned hints: ${result.hint_memory.entries} known, `
         + `${result.hint_memory.used} reused this run（sidecar ${result.hint_memory.path}）`);
@@ -2179,6 +2186,21 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
   // 执行预算用满 = 主动停在半路；它不是“失败”，但也不是完整验收。
   return result.ok || result.partial === true ? 0 : 1;
+}
+
+/**
+ * run 失败时的一行「下一步建议」（planning-playbook.nextForStop）：flow 级停因优先
+ * （`ctx.fail` 的 code / 预算），其次第一个带 stop_code 的步，再退到第一个失败步的
+ * `result.stopCode`。命中不了映射表就返回 null——宁可不建议，不给泛泛而谈。
+ */
+function runNextHint(r: AppRunResult): string | null {
+  if (r.ok) return null;
+  const code = r.script?.stop_code
+    ?? (r.step_traces ?? []).find((t) => t.stop_code !== undefined)?.stop_code
+    ?? (r.step_traces ?? [])
+      .map((t) => (t.result as { stopCode?: unknown } | undefined)?.stopCode)
+      .find((c) => typeof c === "string" && c !== "");
+  return typeof code === "string" && code !== "" ? nextForStop(code) : null;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -49,8 +49,9 @@ export interface BridgeOptions {
   forwardEnv: string[]
   /**
    * Unified **decision service** (System One protocol) configured through the plugin's
-   * configuration page — the only fields that page exposes (URL / key / model name). Empty strings
-   * mean "not configured": runs keep their normal decision plane (local ONNX, or rules-only).
+   * configuration page (URL / key / model name — the page also exposes a step-gap field resolved
+   * separately as {@link BridgeOptions.stepGapMs}). Empty strings mean "not configured": runs keep
+   * their normal decision plane (local ONNX, or rules-only).
    *
    * These values are forwarded to the engine child process as the unified
    * `AMBERFLOW_DECISION_BASE_URL` / `_API_KEY` / `_MODEL` keys (never into argv, results or logs),
@@ -67,6 +68,13 @@ export interface BridgeOptions {
   }
   /** Provider a run defaults to when the decision model is fully configured. */
   decisionProvider?: 'decision-service'
+  /**
+   * 步间距 (step gap, ms) configured on the plugin's page: minimum wait between two engine steps,
+   * forwarded to the child process as `AMBERFLOW_STEP_DELAY_MS`. The engine resolves pace as
+   * "explicit > `meta.pace` > env > 0", so an app declaring `meta.pace` still wins over this
+   * machine-level default. `undefined`/`0` adds nothing.
+   */
+  stepGapMs?: number
   /**
    * Extra environment entries merged into the child process that lists apps — a deployment-level
    * `AMBERFLOW_HOME` override (`Config.appsHome`), so the listing resolves the same user scope every
@@ -523,6 +531,12 @@ export function buildEnv(options: BridgeOptions): NodeJS.ProcessEnv {
   // The configuration page is explicit user intent, so it wins over whatever the environment
   // policy forwarded above (including in `inherit` mode). Empty fields add nothing.
   Object.assign(out, decisionEnv(options.decisionModel))
+  // Same explicit-intent rule for the page's 步间距 (step gap): it overrides a forwarded
+  // AMBERFLOW_STEP_DELAY_MS, while the engine still lets an app's own meta.pace win (its pace
+  // precedence is explicit > meta > env > 0). 0/undefined forwards nothing.
+  if (options.stepGapMs !== undefined && options.stepGapMs > 0) {
+    out.AMBERFLOW_STEP_DELAY_MS = String(Math.round(options.stepGapMs))
+  }
   return out
 }
 

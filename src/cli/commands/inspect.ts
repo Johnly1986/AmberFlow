@@ -17,6 +17,8 @@ import { successEnvelope } from "../json.ts";
 import { browserSession } from "../../engine/executor.ts";
 import { extractElements, INTERACTIVE_ALL, WIDE_POOL_ELEMENTS } from "../../engine/extraction.ts";
 import { poolView } from "../../engine/pool-view.ts";
+import { poolNearEmpty, nextForInspect } from "../../engine/planning-playbook.ts";
+import { matchSelector } from "../../engine/signals.ts";
 import { parseCliArgs } from "../../support/cli-args.ts";
 
 const USAGE = `usage: inspect --url <http(s) URL> [--max-elements N] [--wide] [--text] [--pool] [--probe SEL]...
@@ -136,6 +138,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     try {
       await page.evaluate("new Promise((res) => { if (document.readyState === 'complete') res(); else window.addEventListener('load', () => res(), { once: true }); })");
     } catch { /* load 已过或执行环境不支持：自然落到稳定轮询 */ }
+    let interactiveOnPage = -1;   // 水合循环的最后读数（-1 = 页面函数不可用）；空池诊断复用它
     {
       const countSel = JSON.stringify(INTERACTIVE_ALL);
       let last = -1;
@@ -148,6 +151,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
         if (n === last) { stable++; if (stable >= 2) break; } else { stable = 0; }
         last = n;
       }
+      interactiveOnPage = last;
     }
     await new Promise((r) => setTimeout(r, 500));
     // --probe：只读探测，放在元素池抽取**之前**——结论不受 --max-elements 截断影响
@@ -165,6 +169,49 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     const heuristicCount = Object.values(pool).filter((e) => e.heuristic === true).length;
     const view = poolView(pool, page as never, poolMax);
     const frameOrigins = view.frame_origins;
+    // advisories（自描述运行时 · P0-B）：把「引擎已知、作者看不见」的信息差当场说出来。
+    // 依据 2026-10-30 实测：3/5 次运行失败属此类（ogs.google.com 跨源 frame 1 次、
+    // 仅 aria-label 的出行模式 radio 2 次）——inspect 当时就有能力预警。
+    // 措辞红线：只说「引擎元素池无法指向」，不说「不可点击/不存在」。
+    const mainOrigin = u.origin;
+    const advisories: Array<Record<string, unknown>> = [];
+    const foreign = frameOrigins.filter((o) => o && o !== mainOrigin);
+    if (foreign.length) {
+      advisories.push({
+        kind: "frame_host",
+        origins: foreign,
+        message: `池含跨源 frame（${foreign.join("、")}）：meta.hosts 不声明这些主机时，其内元素的动作步将报 frame_not_allowed。`,
+      });
+    }
+    for (const p of probes) {
+      if (p.error !== undefined || typeof p.count !== "number") continue;
+      // 池命中用 matchSelector（池可表达子集：#id / tag / [attr=v] / [attr~v] / 逗号表）——
+      // 与 act hint 的可指向性同口径；DOM probe 是主 frame 任意 CSS。
+      const poolHits = matchSelector(pool, p.selector);
+      if (p.count > 0 && poolHits === null) {
+        advisories.push({
+          kind: "pool_inexpressible",
+          probe: p.selector,
+          dom_hits: p.count,
+          message: `probe「${p.selector}」DOM 命中 ${p.count} 但选择器超出元素池可表达子集（类/伪类/后代组合器）：act hint 不可命中；judge.exists（任意 CSS、跨 frame）仍可用。`,
+        });
+      } else if (p.count > 0 && poolHits !== null && poolHits.length === 0) {
+        advisories.push({
+          kind: "not_in_pool",
+          probe: p.selector,
+          dom_hits: p.count,
+          message: `probe「${p.selector}」主 frame DOM 命中 ${p.count} 但引擎元素池 0 命中：元素可能仅带池外属性（aria-label/class 等永不入池），act hint 永不命中——改用池内句柄（data-test/id/name/href/可见文本）或深链/直达 URL。`,
+        });
+      } else if (p.count === 0 && poolHits !== null && poolHits.length > 0) {
+        advisories.push({
+          kind: "pool_only",
+          probe: p.selector,
+          pool_hits: poolHits.length,
+          message: `probe「${p.selector}」主 frame DOM 未命中但池内有 ${poolHits.length} 个（子 frame）：judge.exists 可跨 frame 命中；对其动作需 meta.hosts 声明该 frame origin，否则 frame_not_allowed。`,
+        });
+      }
+    }
+    const shownAdvisories = advisories.slice(0, 8);
     const elements: InspectElement[] = view.elements.map((e) => ({
       ref: e.ref,
       tag: e.tag,
@@ -184,6 +231,10 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       fs.mkdirSync(path.dirname(path.resolve(screenshotPath)), { recursive: true });
       await page.screenshot({ path: screenshotPath, fullPage: false });
     }
+    // 空池诊断（planning-playbook）：页面上交互元素多而池几乎没收进来 = 重 JS SPA 的典型
+    // 形态（2026-10-29 实测：两个 Agent 都是"跑了才发现池是空的"，才转入宽扫/SSR 深挖）。
+    // 判定与建议来自唯一出处；建议写进 envelope 的 next（Agent 调用即得）。
+    const nearEmpty = poolNearEmpty(view.count, Math.max(0, interactiveOnPage));
     const data = {
       url: page.url(),
       requested_url: url,
@@ -191,21 +242,30 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       elements,
       element_count: view.count,
       truncated: view.truncated,
+      ...(nearEmpty ? { pool_near_empty: true, interactive_on_page: interactiveOnPage } : {}),
       ...(wide ? { wide: true, heuristic_count: heuristicCount } : {}),
       ...(wantPool ? { frame_origins: view.frame_origins } : {}),
       ...(wantPool ? { pool: view } : {}),
       ...(text ? { text } : {}),
       ...(screenshotPath ? { screenshot_path: screenshotPath } : {}),
       ...(probes.length ? { probes } : {}),
+      ...(shownAdvisories.length ? { advisories: shownAdvisories } : {}),
     };
     if (wantJson) {
       emitJson(ctx, successEnvelope("inspect", data, {
-        next: [`amber run --goal "<目标>" --url ${url}`, "amber doctor"],
+        next: nextForInspect(view.count, Math.max(0, interactiveOnPage), url),
       }));
       return 0;
     }
     say(ctx, `${data.title} — ${data.url}`);
     say(ctx, `元素 ${data.element_count} 个${data.truncated ? `（只显示前 ${max}）` : ""}`);
+    if (nearEmpty) {
+      // 措辞按实测分开：页面上有交互元素而池没收进来 = 池投影问题；页面上一个都没有 =
+      // SPA 未水合/渲染进 shadow DOM——前者试 --wide，后者宽扫也救不了，直接走探针/运行时取证。
+      say(ctx, interactiveOnPage > 0
+        ? `⚠ 主池近空而页面上有 ${interactiveOnPage} 个交互元素（池投影盲区）：试 --wide --pool，或 1 步探针应用先行（见 docs/APP_SCRIPT_AUTHORING.md 快速路径）`
+        : "⚠ 主池为空且页面未渲染出交互元素（重 JS SPA 未水合或渲染进 shadow DOM）：宽扫也难救，直接 1 步探针应用先行（arrive + read，见 docs/APP_SCRIPT_AUTHORING.md 快速路径）");
+    }
     for (const e of elements) {
       say(ctx, `  ${e.ref.padEnd(6)} ${e.tag.padEnd(8)} ${e.label.slice(0, 60)}`
         + `${e.hint_candidates.length ? `  hints: ${e.hint_candidates.join(" | ")}` : ""}`);
@@ -216,6 +276,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
         : `${p.count} 命中${p.texts?.length ? `：${p.texts.join(" / ")}` : ""}`;
       say(ctx, `  probe  ${p.selector} → ${verdict}`);
     }
+    for (const a of shownAdvisories) say(ctx, `  ⚠ ${String(a.message)}`);
     if (text) say(ctx, `\n文本摘要：${text}`);
     return 0;
   } finally {

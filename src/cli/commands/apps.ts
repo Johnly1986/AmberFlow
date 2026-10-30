@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { APPS_DIR, listAppDirs, type AppDirEntry } from "../../app/app-pack.ts";
 import { validateApp } from "../../app/cross-ref.ts";
 import { dryRunFlow, loadScriptApp, scriptDisplayPath } from "../../app/app-script.ts";
+import { PLAN_PLAYBOOK_TEXT } from "../../engine/planning-playbook.ts";
 import { userAppsDir } from "../../app/amberflow-home.ts";
 import type { CliContext } from "../context.ts";
 import { say, emitJson } from "../context.ts";
@@ -88,11 +89,16 @@ function printList(ctx: CliContext, apps: AppInfo[]): void {
 /** flow 骨架：普通 JS，循环/条件/重试直接写。`placeholder` = 入口页仍是占位 example.com。 */
 function flowScriptTemplate(id: string, goal: string, hosts: string[], startUrl: string, placeholder: boolean): string {
   const host = hosts[0] ?? "example.com";
+  // 规划引导（唯一出处 planning-playbook.ts）：骨架注释是 Agent 建应用的第一眼——
+  // 工具结果直接带源码，这里的五步法在"要写应用的那个瞬间"被读到。
+  const playbook = PLAN_PLAYBOOK_TEXT.split("\n").map((l) => (l ? ` * ${l}` : " *")).join("\n");
   return `/**
  * ${id} —— flow 应用：流程优先由决策语句组成（ctx.step(goal, { done })）。
  *
  * 分工：脚本只写“要达成什么 + 怎么算完成”；点哪里由引擎的规则/决策层决定。
  * 控制流（if/for/while）只用于真实分支/循环；脚本拿不到模型文本或分数，完成只认 done 信号。
+ *
+${playbook}
  *
  * done 不许猜（这条最容易踩）：写信号之前先看这一页真的长什么样——
  *   amber inspect --url <入口页> --json
@@ -310,11 +316,12 @@ async function appsShow(args: string[], ctx: CliContext): Promise<number> {
 }
 
 async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
-  const parsed = parseSimple(args, { json: { type: "boolean" }, help: { type: "boolean" } });
+  const parsed = parseSimple(args, { json: { type: "boolean" }, help: { type: "boolean" }, slot: { type: "string", multiple: true } });
   if (parsed.values.help) {
-    say(ctx, "用法：amber apps check [<应用|脚本>] [--json]");
+    say(ctx, "用法：amber apps check [<应用|脚本>] [--slot k=v]... [--json]");
     return 0;
   }
+  const slots = parseSlotArgs(parsed.values.slot);
   if (parsed.positionals.length > 1) throw usageError("apps check 最多接受一个应用");
   const requested = parsed.positionals[0];
   const targets = requested
@@ -335,7 +342,7 @@ async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
     try {
       const loaded = await loadScriptApp(t.script);
       const problems = validateApp(loaded.pack, { allowEmptyJourney: true });
-      const dry = await dryRunFlow(loaded);
+      const dry = await dryRunFlow(loaded, { slots });
       problems.push(...dry.problems);
       results.push({ app: loaded.pack.id, path: loaded.scriptPath, problems });
     } catch (err) {
@@ -426,11 +433,12 @@ function renderSignal(spec: unknown): string {
 
 /** `amber apps explain <脚本>`：dry 跑一遍 flow，把调用序列渲染成人话。 */
 async function appsExplain(args: string[], ctx: CliContext): Promise<number> {
-  const parsed = parseSimple(args, { json: { type: "boolean" }, help: { type: "boolean" } });
+  const parsed = parseSimple(args, { json: { type: "boolean" }, help: { type: "boolean" }, slot: { type: "string", multiple: true } });
   if (parsed.values.help) {
-    say(ctx, "用法：amber apps explain <脚本路径|应用 id> [--json]");
+    say(ctx, "用法：amber apps explain <脚本路径|应用 id> [--slot k=v]... [--json]");
     return 0;
   }
+  const slots = parseSlotArgs(parsed.values.slot);
   const target = parsed.positionals[0];
   if (!target) throw usageError("apps explain 需要一个脚本路径或应用 id", { next: ["amber apps list"] });
   if (parsed.positionals.length > 1) throw usageError("apps explain 只接受一个应用");
@@ -444,7 +452,7 @@ async function appsExplain(args: string[], ctx: CliContext): Promise<number> {
     });
   }
   const pack = loaded.pack;
-  const dry = await dryRunFlow(loaded);
+  const dry = await dryRunFlow(loaded, { slots });
   const invs = pack.invariants ?? [];
   const rows = dry.trace.events.map((ev) => ({
     i: ev.i, call: ev.call, id: ev.id, desc: ev.desc, url: ev.url,
@@ -627,6 +635,20 @@ function parseSimple(args: string[], options: Record<string, { type: "boolean" |
   } catch (err) {
     throw usageFromParseError(err);
   }
+}
+
+/** `--slot k=v`（可重复）→ Record；重复键 / 缺 `=` 都在用法层红（对齐桥的同名防重复逻辑）。 */
+function parseSlotArgs(entries: unknown): Record<string, string> {
+  const slots: Record<string, string> = {};
+  for (const raw of Array.isArray(entries) ? entries : []) {
+    const s = String(raw);
+    const at = s.indexOf("=");
+    if (at <= 0) throw usageError(`--slot 需要 k=v 形式，收到 ${JSON.stringify(s)}`);
+    const key = s.slice(0, at);
+    if (key in slots) throw usageError(`--slot 重复键 ${JSON.stringify(key)}`);
+    slots[key] = s.slice(at + 1);
+  }
+  return slots;
 }
 
 function jsonWanted(ctx: CliContext, v: { json?: boolean }): boolean {

@@ -138,7 +138,7 @@ function parseInvocation(rawArgv: string[]): Invocation {
 
 function commandPath(command: string | null, rest: string[]): string {
   if (!command) return "amber";
-  if (["apps", "config", "plan", "model", "test"].includes(command) && rest[0] && !rest[0].startsWith("-")) {
+  if (["apps", "config", "plan", "model", "test", "schema"].includes(command) && rest[0] && !rest[0].startsWith("-")) {
     return `${command} ${rest[0]}`;
   }
   return command;
@@ -204,6 +204,10 @@ async function dispatch(command: string, rest: string[], ctx: CliContext, rawRes
     case "inspect": {
       const { runInspect } = await import("./commands/inspect.ts");
       return runInspect(rest, ctx);
+    }
+    case "schema": {
+      const { runSchema } = await import("./commands/schema.ts");
+      return runSchema(rest, ctx);
     }
     case "doctor": {
       const { runDoctor } = await import("./commands/doctor.ts");
