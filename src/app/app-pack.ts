@@ -51,7 +51,7 @@ export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = {
 /** 包级允许的键；未知键在加载期报错（配置写错了要响亮，不静默）。 */
 export const PACK_KEYS = [
   "spec_version", "id", "label", "goal", "model", "max_subgoals", "hosts",
-  "slots", "required_slots", "sources", "source_slots", "roles", "journey", "invariants", "notes",
+  "slots", "required_slots", "secret_slots", "sources", "source_slots", "roles", "journey", "invariants", "notes",
   "probe", "device", "site",
   "max_step_visits", "generated_from", "recorded_from", "policy", "pace",
 ] as const;
@@ -302,6 +302,8 @@ export interface AppPack {
   hosts?: string[];
   slots?: Record<string, unknown>;
   required_slots?: string[];
+  /** 声明为敏感槽位的键：产物/报告/stdout 一律掩码（M0 P0）。 */
+  secret_slots?: string[];
   sources?: string[];
   /** 数据腿的结果回写槽位（声明式；见 `SourceSlotBinding` 的三条纪律）。 */
   source_slots?: Record<string, SourceSlotBinding>;

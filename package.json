@@ -1,12 +1,20 @@
 {
   "name": "amberflow",
   "version": "2.0.0",
-  "private": true,
   "bin": {
     "amber": "bin/amber.mjs"
   },
   "type": "module",
-  "description": "鍐荤粨璁″垝鐨勬祻瑙堝櫒鑷姩鍖栦腑闂翠欢锛歀LM 鍙鍒掍竴娆★紝laya 閫愭鎵ц锛屽畬鎴愬彧璁?DOM 淇″彿",
+  "description": "冻结计划的浏览器自动化中间件：计划由人给出，执行器逐步选择元素、动作并检查可验证信号；模型只做选择、风险与完成票，不生成动作。",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Johnly1986/AmberFlow.git"
+  },
+  "homepage": "https://github.com/Johnly1986/AmberFlow#readme",
+  "bugs": {
+    "url": "https://github.com/Johnly1986/AmberFlow/issues"
+  },
   "exports": {
     "./dsh-plugin": "./integrations/dsh-bridge/src/index.ts",
     "./client": "./integrations/dsh-bridge/client-root.js",
@@ -37,7 +45,7 @@
     "doctor": "node --experimental-strip-types src/cli/start.ts --doctor",
     "model:fetch": "node --experimental-strip-types src/model/model-fetch.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run config:example:check && npm run schema:check && npm run prompt-hit && npm run test:validate",
+    "check": "npm run typecheck && npm run config:example:check && npm run schema:check && npm run prompt-hit && npm run secret-scan && npm run examples-check && npm run test:validate",
     "test": "node --experimental-strip-types src/cli/test.ts",
     "test:validate": "node --experimental-strip-types src/cli/test.ts --validate",
     "apps": "node --experimental-strip-types src/app/app-runner.ts",
@@ -48,7 +56,11 @@
     "config:example": "node --experimental-strip-types tools/config-example.ts",
     "config:example:check": "node --experimental-strip-types tools/config-example.ts --check",
     "schema:check": "node --experimental-strip-types src/cli/main.ts schema ctx --check",
-    "prompt-hit": "node --experimental-strip-types tools/prompt-hit.ts"
+    "prompt-hit": "node --experimental-strip-types tools/prompt-hit.ts",
+    "secret-scan": "node --experimental-strip-types tools/secret-scan.ts",
+    "examples-check": "node --experimental-strip-types tools/examples-check.ts",
+    "check:ci": "node --experimental-strip-types src/cli/main.ts schema ctx --out dist/schema/ctx.json && npm run check",
+    "precheck": "node --experimental-strip-types tools/schema-ensure.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -59,5 +71,27 @@
     "onnxruntime-node": "^1.30.0",
     "playwright": "1.58.0"
   },
-  "icon": "./integrations/dsh-bridge/icon.svg"
+  "files": [
+    "bin/",
+    "src/",
+    "tools/",
+    "configs/",
+    "scripts/",
+    "docs/",
+    "examples/",
+    "online/",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "dsh-bundle.yml",
+    "integrations/dsh-bridge/src/",
+    "integrations/dsh-bridge/client.js",
+    "integrations/dsh-bridge/client-root.js",
+    "integrations/dsh-bridge/cordis.patch.yml",
+    "integrations/dsh-bridge/icon.svg",
+    "integrations/dsh-bridge/locale/"
+  ],
+  "icon": "./integrations/dsh-bridge/icon.svg",
+  "publishConfig": {
+    "access": "public"
+  }
 }

@@ -43,7 +43,7 @@ npm run picker-server
 ## 应用模型
 
 - 只有一种格式：`$AMBERFLOW_HOME/apps/<id>/app.mjs`（也接受 `app.js` / `app.ts`），导出 `meta(kit)` 与 `flow(ctx)`。
-- `meta` 是唯一声明面（id/label/goal/hosts/slots/requiredSlots/sources/device/site/notes/policy/pace/invariants/recordedFrom/generatedFrom）；未知字段加载期报错。
+- `meta` 是唯一声明面（id/label/goal/hosts/slots/requiredSlots/secretSlots/sources/device/site/notes/policy/pace/invariants/recordedFrom/generatedFrom）；未知字段加载期报错。
 - 流程默认由决策语句组成（`ctx.step(goal, { done })`）；控制流只用于真实分支/循环/重试。没有静态步骤表。
 - `ctx.step(goal, { id?, act?, done, url?, slots?, when?, timeoutMs? })`；`done` 必填，`act` 省略 = 引擎决策目标（默认决策语句写法）。`id` 进 trace / `step_traces` / failure；`ctx.fail(code, reason)` 抛结构化停因。
 - `amber run --max-steps N` 是 `ctx.step` / `ctx.arrive` 的执行预算，不是“从第 N 步开始”；用满时 `status=partial`、exit 0、`verified=false`。
@@ -68,7 +68,7 @@ online/cases/probe/*.json
 - 日期用 `{{today}}` / `{{today+7d}}` / `{{next_monday}}`；凭据只允许 `{{env:NAME|default}}`。
 - 运行证据写 `$AMBERFLOW_HOME/online-runs/<run-id>/`，**不要提交**；失败截图/DOM 只作为本次观察。
 - 退出码 0 全过、1 真失败、2 校验/用法、3 blocked/unreachable/未执行（跳过 ≠ 通过）。
-- 不绕过反爬、不代过验证码、不保存账号密码；探针只记录环境事实。
+- 不绕过反爬（不伪造指纹、不轮换代理、不规避风控/速率限制）；验证环节（登录/2FA/验证码等）可在用户授权下代过；凭据可由用户在本机配置/环境变量/受支持的凭据存储中保存、引擎按名读取，明文凭据不得进入用例/产物/仓库；探针只记录环境事实。
 
 ## 架构
 
@@ -96,9 +96,10 @@ online/cases/probe/*.json
 - 值只来自计划/观察；缺值返回 `needs_value`，不猜。
 - 动作失败/不可达/配置错误变成结构化结果与 trace，不抛裸栈给用户。
 - 危险工具步必须干跑 + 人类确认；默认拒绝。
-- **浏览器腿不照上面这条走**：应用批量运行给执行器装的 `confirmFn` 缺省是「一律放行」，风险票只记录不阻断；只有 `--confirm-safe` 或配置 `AMBERFLOW_CONFIRM_SAFE=1` 才按干跑证据逐次拒绝破坏性动作（`src/app/app-runner.ts` 的 `confirmSafe` 分支）。执行器自带的拒绝型 `DEFAULT_CONFIRM` 只在没人覆盖它时生效——别把「默认拒绝」当成浏览器步的现状。
+- **浏览器腿（M0 起默认安全）**：应用批量运行给执行器装的 `confirmFn` 缺省按干跑证据拒绝破坏性动作；`--confirm-unsafe` 或 `AMBERFLOW_CONFIRM_SAFE=0` 才恢复旧的「风险只记录不阻断」（`src/app/app-runner.ts` 的 `confirmSafe` 分支）。执行器自带的拒绝型 `DEFAULT_CONFIRM` 仍只在没人覆盖它时生效。
 - 人工步不自动过；非 TTY 不假装有人。
-- 凭据只从环境/本机配置按名读；用例里只允许 env 占位符。
+- 凭据由用户在本机配置/环境变量/受支持的凭据存储中保存，引擎按名读取（本机配置文件已被 .gitignore）；用例里只允许 env 占位符，任何明文凭据不得进入用例/产物/仓库。
+- 敏感槽位在 `meta.secretSlots` 声明（加载期校验必须是已声明槽位）；result/report/stdout/dry 输出前一律掩码为 `***`。`--slot k=v` 的明文会进进程参数/桥 argv，敏感值用 `--slot-file`（JSON）或 env/本机配置。
 - 运行产物、截图、DOM、真实站点记录不进仓库；`.gitignore` 已覆盖 `online-runs/`。
 - 新增站点/用例优先写成数据；共享层不认识具体站点。
 - 应用脚本是进程内任意代码：信任边界 = “用户作用域 + 不放仓库”；结果带 `script_sha256`，沙箱未做。

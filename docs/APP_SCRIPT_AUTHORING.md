@@ -11,18 +11,18 @@
 ```text
 高效规划五步法（Planning Playbook）：
 ① 先看再写：amber inspect --url <页> --json 拿验证过的 hint_candidates——有候选照抄，别自创选择器；
-② 单步探针先行：先写 1 步探针应用（arrive + read）验证四件事：页面可达 / 无登录墙 / 无验证码 / 目标数据在 DOM。探针 30 秒判死刑，好过全流程应用跑 5 轮；
-③ 正式应用参数化：单段/单城 + slots，1 步 flow；早停守卫（命中登录墙/验证码特征 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；
+② 单步探针先行：先写 1 步探针应用（arrive + read）验证四件事：页面可达 / 登录与验证可处理 / 无风控拦截 / 目标数据在 DOM。探针 30 秒判死刑，好过全流程应用跑 5 轮；
+③ 正式应用参数化：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；
 ④ 离线分支校验：amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列；
 ⑤ 真跑留证：amber run <id> --trace；失败先看 trace 的 stopCode/reason——reason 自带修正指引。
 ```
 
 ```text
-失败特征速查（只判不绕，命中即 ctx.fail("blocked:…") 早停）：
-- body 极短（<200 字符）+「登录/注册」浮层 = 登录墙：换可匿名读价的来源或如实标 blocked，别重试表单；
+失败特征速查（只判不绕反爬风控：命中反爬风控即 ctx.fail("blocked:…") 早停；验证环节可代过）：
+- body 极短（<200 字符）+「登录/注册」浮层 = 登录墙：换可匿名读价的来源，或用凭据 + 验证步骤处理；无凭据/无授权时如实标 blocked，别重试表单；
 - 卡片价格处全是「登录看低价」= 服务端价格闸：匿名会话拿不到价格，不是渲染问题，早停；
 - 价格列全是「查价」+ 页尾「服务器异常」= 站点限流：等待与重试无效，早停；
-- 「依次点击图标验证 / 滑动拼图」= 验证码：不代过，立即早停。
+- 「依次点击图标验证 / 滑动拼图」= 验证码：属验证环节，可在用户授权下由人工步/注入处理器代过；若站点同时以风控/限流拦截（反爬），不绕，立即早停。
 ```
 
 ## 1. 只有一种格式
@@ -72,6 +72,7 @@ npx amber run my-app --max-steps 3 --trace # 执行预算 + 每步证据（加 -
 npx amber run my-app --trace               # 完整运行
 ```
 
+- 敏感槽位：值建议走环境变量/本机配置；CLI 用 `--slot-file FILE`（JSON 对象）而不是 `--slot`，并在 `meta.secretSlots` 声明槽位名——result/report/stdout/dry 会掩码为 `***`。
 - `apps check` 不打开浏览器：它证明“脚本能加载、调用序列合法、信号/命令/槽位可校验”，**不证明页面状态会成立**。
 - `inspect` 只读：标题、URL、有界元素、候选 hint；不点击、不输入、不调模型。元素池视图**只含可行动元素**——写 `exists` / `text` 类完成信号前先 `inspect --probe "<selector>"`（可重复，最多 10 个；只读返回存在数与前 5 条文本，`--json` 落 `probes[]`），别用 raw HTTP 之外的口子。**任何选择器——包括本文档与上游示例给的——落笔前都要对目标页实证一次**（02 轮 C6 的教训）。
 - `run --max-steps N` 是 `ctx.step` / `ctx.arrive` 的**执行预算**，不是“从第 N 步开始”。用满预算时 `status=partial`、exit 0、`verified=false`，已执行步骤与 trace 保留。
@@ -100,6 +101,7 @@ export const meta = (kit) => ({
   hosts: ["shop.example.com"],     // 允许访问的主机（导航信封 + 防泄漏门禁）
   site: { pages: { home: "https://shop.example.com/" } },  // 页面角色：流程里不重复硬编码 URL
   slots: { coupon: "SAVE10" },     // 数据槽：值只能来自声明 / 观察
+  secretSlots: ["password"],       // 敏感槽位：产物掩码；值走 env/本机配置或 --slot-file
   policy: { conf_floor: 0.4 },     // 可选：运行策略（见 §8）
   pace: { between_steps_ms: 200 }, // 可选：运行节奏（见 MANUAL_STEPS_AND_PACE.md）
   invariants: [                    // 结束态断言；在 ctx.done() 时验收
@@ -115,6 +117,7 @@ export const meta = (kit) => ({
 | `id` / `label` / `goal` | 应用标识与一句话目标；`id`、`goal` 必填，`label` 缺省 = `id` |
 | `hosts` | 允许的主机列表；导航信封在 dry 与真实运行都执行 |
 | `slots` / `requiredSlots` | 数据槽与必填槽；缺值返回 `needs_value`，不猜 |
+| `secretSlots` | 敏感槽位名单（如 `password`、`otp`）：result/report/stdout/dry 输出时掩码为 `***`；值仍建议走 env/本机配置，别写进 app.mjs |
 | `sources` | 数据腿名（`ctx.source(name)` 按名字按需加载） |
 | `device` | 浏览器设备面（只有手机版页面的站点需要声明） |
 | `site` | 站点面：页面角色 `pages`、命名行抽取 `listExtract`（见 §5） |
@@ -246,7 +249,7 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 - **非 TTY**（批处理 / Agent 调用）不会假装有人在，也不会为它拉一个没人能看见的有头浏览器：返回 `ok:false, stopCode:"needs_human"`。
 - **`--manual-fail-fast`**：在调用任何人工处理器之前直接返回 `needs_human`，注入的处理器也覆盖不了。
 - **TTY** 下给终端提示（`Enter` 继续 / `n` 放弃）；人放弃 = `manual_declined`。浏览器默认仍是 headless——要让人在页面上操作请加 `--headful`，没有显示器用 `xvfb-run` + VNC。
-- 人工步不自动过、不保存账号密码、不识别验证码/2FA；引擎只验证最终信号。详见 [MANUAL_STEPS_AND_PACE.md](MANUAL_STEPS_AND_PACE.md)。
+- 人工步不自动过；验证环节（登录/2FA/验证码）可在用户授权下由人工步/注入处理器代过，不绕反爬；凭据由用户在本机配置/环境变量/受支持的凭据存储中保存、引擎按名读取且不写入产物（本版本未内置凭据保险箱）；引擎只验证最终信号。详见 [MANUAL_STEPS_AND_PACE.md](MANUAL_STEPS_AND_PACE.md)。
 
 ## 8. 运行策略、节奏与学习环
 

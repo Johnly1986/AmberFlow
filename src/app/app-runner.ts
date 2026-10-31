@@ -62,6 +62,7 @@ import {
   type AdapterRunContext, type ManualStepDecl, type ManualStepRequest, type ManualStepRun,
 } from "./app-adapters.ts";
 import { validateApp } from "./cross-ref.ts";
+import { SECRET_SLOT_NAME, maskSecretSlots, scrubSecrets, secretSlotKeys, secretValuesFromSlots } from "./redaction.ts";
 import { dryRunFlow, loadScriptApp, type LoadedScriptApp } from "./app-script.ts";
 import { StopError, createCtx, type ToolRunRequest, type ToolRunResult } from "./ctx.ts";
 import { createReplayCtx } from "./ctx-replay.ts";
@@ -840,11 +841,15 @@ async function promptManualOnTty(req: ManualStepRequest): Promise<boolean> {
 /** 跑一个应用包。返回结构化结果（报告与退出码都由调用方决定）。 */
 export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<AppRunResult> {
   const {
-    slots = {}, sources = true, confirmSafe = false, verbose = true,
+    slots = {}, sources = true, confirmSafe = true, verbose = true,
     planPath = path.join(os.tmpdir(), "amberflow-apps", `${pack.id}-plan.json`),
     modelId = pack.model ?? "english",
   } = opts;
   const t0 = Date.now();
+  const secretKeys = secretSlotKeys(
+    [...Object.keys(pack.slots ?? {}), ...((pack.required_slots ?? []) as string[]), ...Object.keys(slots)],
+    pack.secret_slots,
+  );
   // 预检在**任何**腿之前：坏配置不该先跑数据腿再报错（I-1 的"0 副作用"就是这个位置）。
   preflightConfig(opts);
   // 节奏：本次显式 > pack.pace > 环境变量 > 0。缺省全 0 = 与今天逐字节一致。
@@ -999,7 +1004,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     hintMemory: opts.hintMemory ?? null,
     // 动作间最小等待（应用配置表 `pace.between_actions_ms` / 环境变量；0 = 今天的行为）。
     actionDelayMs: pace.between_actions_ms,
-    // 批量运行器的默认：风险只记录不阻断；`confirmSafe` 时拒绝破坏性动作。
+    // M0 起默认安全：拒绝破坏性浏览器动作；`confirmSafe: false`（CLI `--confirm-unsafe`
+    // 或 AMBERFLOW_CONFIRM_SAFE=0）才恢复旧的"风险只记录不阻断"。
     confirmFn: confirmSafe
       ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
       : () => true,
@@ -1172,7 +1178,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     return {
       app: pack.id, label: pack.label, goal: pack.goal,
       pack_path: pack._path ?? "", plan_path: planPath,
-      ...(expanded.rolesUsed.length ? { roles_used: expanded.rolesUsed } : {}), slots: expanded.slots,
+      ...(expanded.rolesUsed.length ? { roles_used: expanded.rolesUsed } : {}),
+      slots: maskSecretSlots(expanded.slots, secretKeys),
       completed: `0/${segmentSteps.length}`,
       subgoals: plan.subgoals.map((sg, j) => ({
         desc: sg.desc,
@@ -1364,7 +1371,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   return {
     app: pack.id, label: pack.label, goal: pack.goal,
     pack_path: pack._path ?? "", plan_path: planPath,
-    ...(expanded.rolesUsed.length ? { roles_used: expanded.rolesUsed } : {}), slots: expanded.slots,
+    ...(expanded.rolesUsed.length ? { roles_used: expanded.rolesUsed } : {}),
+    slots: maskSecretSlots(expanded.slots, secretKeys),
     completed: `${doneCount}/${segmentRequested ? executedIndices.size : expanded.steps.length}`,
     subgoals, tool_steps: toolSteps, invariants: invariantResults,
     ...(manualSteps.length ? { manual_steps: manualSteps } : {}),
@@ -1406,7 +1414,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     ...(mw.providerDegraded ? { provider_degraded: mw.providerDegraded } : {}),
     sources: sourceResults,
     // 数据腿**真的写回**了哪些槽位（缺省等价：没回写就不出现这个字段）。
-    ...(Object.keys(sourceSlots).length > 0 ? { source_slots: sourceSlots } : {}),
+    ...(Object.keys(sourceSlots).length > 0
+      ? { source_slots: maskSecretSlots(sourceSlots, secretKeys) as Record<string, string> }
+      : {}),
     ok,
     verified: !segmentRequested && ok,
     ...(segmentRequested ? { partial: true as const, segment: { from: segmentStart + 1, to: segmentEnd } } : {}),
@@ -1541,9 +1551,81 @@ export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): st
   return L.join("\n") + "\n";
 }
 
-const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--out DIR]
+/** HTML 转义：证据报告 v0 的唯一出口（页面/应用来的值都要走这里）。 */
+function htmlEscape(s: unknown): string {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+/** 结构化结果 → 人可读 HTML 证据报告（v0：结论/槽位/步骤/不变量/证据锚点）。 */
+export function appReportHtml(r: AppRunResult, nextHint?: string | null): string {
+  const status = r.partial === true ? "partial" : r.ok ? (r.verified === false ? "ok（未验收）" : "ok") : "failed";
+  const title = `应用运行报告：${r.label}（${r.app}）`;
+  const L: string[] = [];
+  L.push("<!doctype html>");
+  L.push('<html lang="zh-CN"><head><meta charset="utf-8">');
+  L.push(`<title>${htmlEscape(title)}</title>`);
+  L.push("<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:960px;margin:32px auto;padding:0 20px;line-height:1.55;color:#1f2328}h1{font-size:1.5rem}h2{font-size:1.1rem;margin-top:1.8rem;border-bottom:1px solid #d0d7de;padding-bottom:.3rem}table{border-collapse:collapse;width:100%;margin:.6rem 0}th,td{border:1px solid #d0d7de;padding:.45rem .6rem;text-align:left;vertical-align:top}th{background:#f6f8fa;width:22%}code{background:#f6f8fa;padding:.1rem .3rem;border-radius:4px}.ok{color:#1a7f37;font-weight:600}.bad{color:#cf222e;font-weight:600}.muted{color:#57606a;font-size:.9rem}</style>");
+  L.push("</head><body>");
+  L.push(`<h1>${htmlEscape(title)}</h1>`);
+  L.push('<p class="muted">由 <code>amber run</code> 生成；原始证据见同目录的 <code>-result.json</code> / <code>-report.md</code>（如有 <code>-report.html</code> 之外的文件）。</p>');
+  L.push("<table>");
+  L.push(`<tr><th>目标</th><td>${htmlEscape(r.goal)}</td></tr>`);
+  L.push(`<tr><th>结论</th><td><span class="${r.ok ? "ok" : "bad"}">${htmlEscape(status)}</span>（完成 ${htmlEscape(r.completed)}；${htmlEscape(r.secs)}s）</td></tr>`);
+  L.push(`<tr><th>应用</th><td><code>${htmlEscape(r.app)}</code> — ${htmlEscape(r.label)}</td></tr>`);
+  if (r.script !== undefined) {
+    L.push(`<tr><th>脚本</th><td><code>${htmlEscape(r.script.script_sha256)}</code>；${r.script.steps} 个 ctx.step/arrive</td></tr>`);
+  }
+  L.push("</table>");
+  const slotKeys = Object.keys(r.slots ?? {});
+  L.push("<h2>槽位（敏感槽位已脱敏）</h2>");
+  if (slotKeys.length === 0) {
+    L.push("<p>（无槽位）</p>");
+  } else {
+    L.push("<table><tr><th>键</th><th>值</th></tr>");
+    for (const k of slotKeys) L.push(`<tr><td><code>${htmlEscape(k)}</code></td><td>${htmlEscape(JSON.stringify(r.slots[k]))}</td></tr>`);
+    L.push("</table>");
+  }
+  L.push("<h2>执行证据</h2>");
+  if (r.step_traces !== undefined && r.step_traces.length > 0) {
+    L.push("<table><tr><th>#</th><th>步骤</th><th>结论</th><th>停因 / URL</th></tr>");
+    for (const s of r.step_traces) {
+      L.push(`<tr><td>${htmlEscape(s.index)}</td><td>${htmlEscape(s.id ?? s.desc)}</td><td>${htmlEscape(s.status)}</td><td>${htmlEscape(s.stop_code ?? s.url ?? "")}</td></tr>`);
+    }
+    L.push("</table>");
+  } else {
+    L.push(`<p>flow 脚本执行了 ${r.script?.steps ?? 0} 个 ctx.step/arrive；${r.script?.trace_path !== undefined ? `trace：<code>${htmlEscape(r.script.trace_path)}</code>` : "未落 trace（用 --emit-trace FILE 留证）"}。</p>`);
+  }
+  if (r.invariants.length > 0) {
+    L.push("<h2>验收（结束状态不变量）</h2><table><tr><th>不变量</th><th>结论</th><th>说明</th></tr>");
+    for (const inv of r.invariants) L.push(`<tr><td><code>${htmlEscape(inv.id)}</code></td><td>${inv.held ? '<span class="ok">成立</span>' : '<span class="bad">不成立</span>'}</td><td>${htmlEscape(inv.desc)}</td></tr>`);
+    L.push("</table>");
+  }
+  if (r.manual_steps !== undefined && r.manual_steps.length > 0) {
+    L.push("<h2>人工步骤</h2><table><tr><th>#</th><th>步骤</th><th>结论</th></tr>");
+    for (const m of r.manual_steps) L.push(`<tr><td>${htmlEscape(m.index)}</td><td>${htmlEscape(m.desc)}</td><td>${m.done ? '<span class="ok">完成</span>' : `<span class="bad">未完成（${htmlEscape(m.reason ?? "unknown")}）</span>`}</td></tr>`);
+    L.push("</table>");
+  }
+  if (r.sources.length > 0) {
+    L.push("<h2>数据腿</h2><table><tr><th>源</th><th>行数</th></tr>");
+    for (const s of r.sources) L.push(`<tr><td><code>${htmlEscape(s.name)}</code></td><td>${htmlEscape(s.rows)}</td></tr>`);
+    L.push("</table>");
+  }
+  const stopCode = r.script?.stop_code;
+  if (stopCode !== undefined) L.push(`<h2>结构化停因</h2><p><code>${htmlEscape(stopCode)}</code>：${htmlEscape(r.script?.stop_reason ?? "")}</p>`);
+  if (nextHint) L.push(`<h2>下一步建议</h2><p>${htmlEscape(nextHint)}</p>`);
+  L.push('<p class="muted">本报告是 v0：只呈现结构化结果与已脱敏槽位；失败截图/DOM 可能含 PII，按证据敏感性处理。</p>');
+  L.push("</body></html>");
+  return L.join("\n") + "\n";
+}
+
+const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--slot-file FILE] [--out DIR]
                   [--provider NAME] [--ablate stub|rules-only]
-                  [--conf-floor N] [--no-sources] [--confirm-safe] [--headful] [--allow-dangerous]
+                  [--conf-floor N] [--no-sources] [--confirm-safe | --confirm-unsafe] [--headful] [--allow-dangerous]
                   [--tiered-hint] [--trace] [--max-steps N] [--manual-fail-fast]
                   [--learn-hints | --hint-memory FILE] [--emit-trace FILE] [--replay FILE] [--quiet]
 
@@ -1561,6 +1643,8 @@ const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [-
 --replay F     按 F 里的轨迹重放（不重新决策；脚本版本或输入槽位不一致直接拒跑）
 --today DATE   把"今天"钉成 YYYY-MM-DD：数据腿相对日期表达式（next_week/day_offset/weekday_cn）
                与 ctx.runtime.today 都用它；空缺 = 系统日期
+--slot-file F  从 JSON 对象读槽位（避免明文进 argv/进程列表）；与 --slot 同名时 --slot 优先
+               敏感槽位建议用 meta.secretSlots 声明：产物/报告/stdout 会自动掩码
 
 数据腿的结果按 meta.sources 按需加载（ctx.source(name, { dates? })）；--no-sources 时不跑网络/进程。
 数据腿的日期参数走声明槽位：source JSON 的 default_dates 写 "{slot}"（如 "{dates}"），
@@ -1592,6 +1676,11 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   const pack = loaded.pack;
   const t0 = Date.now();
   const slots: Record<string, unknown> = { ...(pack.slots ?? {}), ...(opts.slots ?? {}) };
+  const secretKeys = secretSlotKeys(
+    [...Object.keys(slots), ...((pack.required_slots ?? []) as string[])],
+    pack.secret_slots,
+  );
+  const secretValues = secretValuesFromSlots(slots, secretKeys);
   const planPath = opts.planPath ?? path.join(os.tmpdir(), "amberflow-apps", `${pack.id}-plan.json`);
   const outDir = opts.outDir ?? path.dirname(planPath);
   const runId = opts.runId ?? `${Date.now().toString(36)}-${process.pid}`;
@@ -1676,7 +1765,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           maxEffectiveRepeats: resolvedPolicy.policy.max_effective_repeats.value,
           actionDelayMs: pace.between_actions_ms,
           hintMemory: opts.hintMemory ?? null,
-          confirmFn: opts.confirmSafe
+          confirmFn: opts.confirmSafe === false
             ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
             : () => true,
         });
@@ -1827,7 +1916,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     ...(stopReason === undefined ? {} : { stop_reason: stopReason }),
     invariants_ok: invariants.every((i) => i.held),
   });
-  const tracePath = opts.emitTrace === undefined ? undefined : writeTrace(opts.emitTrace, trace);
+  const tracePath = opts.emitTrace === undefined ? undefined : writeTrace(opts.emitTrace, scrubSecrets(trace, secretValues));
   if (verbose) {
     console.log(`=== app ${pack.id} (script/flow) ===`);
     for (const ev of trace.events) {
@@ -1894,7 +1983,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     pack_path: loaded.scriptPath,
     plan_path: planPath,
     // flow 脚本路径没有角色模板（01 轮 B7）：空字段整条省略，产物不再带无解释的 roles_used:[]。
-    slots,
+    slots: maskSecretSlots(slots, secretKeys),
     completed: `${trace.events.filter((e) => e.call === "step" || e.call === "arrive").length} step(s) via flow(ctx)`,
     subgoals: [],
     tool_steps: [],
@@ -1922,7 +2011,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       ...(stopReason === undefined ? {} : { stop_reason: stopReason }),
     },
   };
-  return result;
+  return scrubSecrets(result, secretValues);
 }
 
 /** 从 trace 的 `done` 事件里取不变量结果（脚本应用的验收事实）。 */
@@ -1959,7 +2048,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
   const quiet = cliBool(v, "quiet") || runDefaults.quiet === true;
   const headful = cliBool(v, "headful") || runDefaults.headful === true;
-  const confirmSafe = cliBool(v, "confirm-safe") || runDefaults.confirmSafe === true;
+  const confirmUnsafe = cliBool(v, "confirm-unsafe");
+  const confirmSafe = !confirmUnsafe && (cliBool(v, "confirm-safe") || runDefaults.confirmSafe !== false);
   const noSources = cliBool(v, "no-sources") || runDefaults.noSources === true;
   const tieredHint = cliBool(v, "tiered-hint") || runDefaults.tieredHint === true;
   const maxStepsRaw = cliString(v, "max-steps");
@@ -1983,16 +2073,56 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   const slots: Record<string, unknown> = {};
+  const cliSlotKeys = new Set<string>();
   for (const s of cliStrings(v, "slot")) {
     const i = s.indexOf("=");
     if (i <= 0) { console.error(`--slot needs k=v, got ${JSON.stringify(s)}`); return 2; }
     const key = s.slice(0, i);
+    cliSlotKeys.add(key);
     if (Object.prototype.hasOwnProperty.call(slots, key)) {
       console.error(`--slot ${JSON.stringify(key)} 给了两次（${JSON.stringify(slots[key])} 与 `
         + `${JSON.stringify(s.slice(i + 1))}）：一个槽位只能有一个值`);
       return 2;
     }
     slots[key] = s.slice(i + 1);
+  }
+  const slotFileArg = cliString(v, "slot-file");
+  if (slotFileArg !== undefined) {
+    let raw: unknown;
+    const slotFile = path.resolve(slotFileArg);
+    try {
+      try {
+        const st = fs.statSync(slotFile);
+        if (process.platform !== "win32" && (st.mode & 0o077) !== 0) {
+          console.error(`[warn] --slot-file ${slotFile} 对 group/other 可读（mode ${(st.mode & 0o777).toString(8)}）；建议 chmod 600`);
+        }
+      } catch { /* stat 失败交给下面的 readFileSync 报清楚 */ }
+      raw = JSON.parse(fs.readFileSync(slotFile, "utf-8"));
+    } catch (e) {
+      console.error(`--slot-file 读不了或不是 JSON：${e instanceof Error ? e.message : String(e)}`);
+      return 2;
+    }
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+      console.error("--slot-file 顶层必须是对象（槽位名 → 值）");
+      return 2;
+    }
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      const t = typeof value;
+      if (t !== "string" && t !== "number" && t !== "boolean") {
+        console.error(`--slot-file 的 ${JSON.stringify(key)} 必须是字符串/数字/布尔`);
+        return 2;
+      }
+      if (Object.prototype.hasOwnProperty.call(slots, key)) {
+        console.error(`--slot-file 的 ${JSON.stringify(key)} 被 --slot 覆盖`);
+        continue;
+      }
+      slots[key] = value;
+    }
+  }
+  for (const key of cliSlotKeys) {
+    if (SECRET_SLOT_NAME.test(key)) {
+      console.error(`[warn] --slot ${JSON.stringify(key)} 的明文会出现在进程参数/桥 argv；敏感值请用 --slot-file（或 meta/env）`);
+    }
   }
 
   // --today：时钟缝（数据腿相对日期表达式 + ctx.runtime.today）。格式错是**用法错误**
@@ -2074,9 +2204,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       ...(today === undefined ? {} : { today }),
       ...(cliString(v, "out") === undefined ? {} : { outDir: cliString(v, "out") }),
     });
+    const drySecretKeys = secretSlotKeys([...declaredSlots, ...Object.keys(slots)], pack.secret_slots);
+  const drySecretValues = secretValuesFromSlots(slots, drySecretKeys);
     const planLike = {
       app: pack.id, label: pack.label, goal: pack.goal,
-      mode: "flow", dry_run: true, slots, problems: dry.problems,
+      mode: "flow", dry_run: true, slots: maskSecretSlots(slots, drySecretKeys), problems: dry.problems,
       events: dry.trace.events.map((e) => ({
         i: e.i, call: e.call, id: e.id, desc: e.desc, url: e.url,
         ok: e.ok ?? null,
@@ -2085,7 +2217,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       invariants: (pack.invariants ?? []).map((inv) => ({ id: inv.id, desc: inv.desc })),
       model_status: modelStatus,
     };
-    console.log(JSON.stringify(planLike, null, 2));
+    console.log(JSON.stringify(scrubSecrets(planLike, drySecretValues), null, 2));
     if (dry.problems.length) {
       console.error(`flow dry-run 发现配置错误：\n  - ${dry.problems.join("\n  - ")}`);
       return 2;
@@ -2170,10 +2302,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   const jsonPath = path.join(outDir, `${pack.id}-result.json`);
   const mdPath = path.join(outDir, `${pack.id}-report.md`);
+  const htmlPath = path.join(outDir, `${pack.id}-report.html`);
   // 规划引导：失败时按停因给一行「下一步建议」（flow 级 stop_code 优先，步级兜底）。
   const nextHint = runNextHint(result);
   fs.writeFileSync(jsonPath, JSON.stringify(result, null, 2), "utf-8");
   fs.writeFileSync(mdPath, appReportMarkdown(result, nextHint), "utf-8");
+  fs.writeFileSync(htmlPath, appReportHtml(result, nextHint), "utf-8");
   if (!quiet) {
     console.log();
     console.log(appReportMarkdown(result, nextHint));
@@ -2182,7 +2316,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       console.log(`learned hints: ${result.hint_memory.entries} known, `
         + `${result.hint_memory.used} reused this run（sidecar ${result.hint_memory.path}）`);
     }
-    console.log(`写入 ${jsonPath} 与 ${mdPath}`);
+    console.log(`写入 ${jsonPath}、${mdPath} 与 ${htmlPath}`);
   }
   // 执行预算用满 = 主动停在半路；它不是“失败”，但也不是完整验收。
   return result.ok || result.partial === true ? 0 : 1;

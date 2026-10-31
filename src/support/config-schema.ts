@@ -89,7 +89,7 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
       { key: "AMBERFLOW_HEADFUL", default: "0", description: "1 = 显示浏览器窗口" },
       { key: "AMBERFLOW_CONF_FLOOR", description: "闸门刻度覆盖；空 = 不覆盖。优先级：--conf-floor / 此键 > AMBERFLOW_DECISION_FLOOR > 全局 0.25" },
       { key: "AMBERFLOW_TIERED_HINT", default: "0", description: "1 = 打开 tiered hint 实验" },
-      { key: "AMBERFLOW_CONFIRM_SAFE", default: "0", description: "1 = 危险动作仍逐次确认" },
+      { key: "AMBERFLOW_CONFIRM_SAFE", default: "1", description: "1 = 危险动作仍逐次确认（默认，安全）；0 = 放行（旧行为，需显式）" },
       { key: "AMBERFLOW_NO_SOURCES", default: "0", description: "1 = 跳过应用数据腿" },
       { key: "AMBERFLOW_QUIET", default: "0", description: "1 = 只输出结论" },
     ],

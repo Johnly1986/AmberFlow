@@ -27,6 +27,7 @@ export const META_FIELD_MAP: readonly MetaField[] = [
   { meta: "hosts", pack: "hosts" },
   { meta: "slots", pack: "slots" },
   { meta: "requiredSlots", pack: "required_slots" },
+  { meta: "secretSlots", pack: "secret_slots" },
   { meta: "sources", pack: "sources" },
   { meta: "device", pack: "device" },
   { meta: "site", pack: "site" },
@@ -51,6 +52,8 @@ export interface ScriptMeta {
   hosts?: string[];
   slots?: Record<string, unknown>;
   requiredSlots?: string[];
+  /** 敏感槽位（如 password/token）：产物自动掩码；值仍来自声明/观察。 */
+  secretSlots?: string[];
   sources?: string[];
   device?: Record<string, unknown>;
   /** 站点面声明：页面角色（openPage）/ 命名行抽取（extract）。 */
@@ -138,8 +141,24 @@ export function lowerMeta(meta: ScriptMeta): AppPack {
     journey: [],
     invariants: asList(m["invariants"], "invariants"),
   };
+  const secretSlotsRaw = asList(m["secretSlots"], "secretSlots");
+  if (!secretSlotsRaw.every((x): x is string => typeof x === "string" && x.trim() !== "")) {
+    throw new Error("app script: meta.secretSlots must be a list of non-empty strings");
+  }
+  const secretSlots = secretSlotsRaw as string[];
+  const declaredSlots = new Set<string>([
+    ...Object.keys(isObj(m["slots"]) ? m["slots"] : {}),
+    ...asList(m["requiredSlots"], "requiredSlots").map(String),
+  ]);
+  for (const k of secretSlots) {
+    if (!declaredSlots.has(k)) {
+      throw new Error(`app script: meta.secretSlots 含未声明槽位 ${JSON.stringify(k)}`
+        + `（已声明：${[...declaredSlots].sort().join(", ") || "无"}）`);
+    }
+  }
+  if (secretSlots.length > 0) pack["secret_slots"] = secretSlots;
   for (const f of META_FIELD_MAP) {
-    if (["id", "goal", "hosts", "slots", "required_slots", "sources", "invariants"].includes(f.pack)) continue;
+    if (["id", "goal", "hosts", "slots", "required_slots", "secret_slots", "sources", "invariants"].includes(f.pack)) continue;
     const v = m[f.meta];
     if (v === undefined) continue;
     pack[f.pack] = Array.isArray(v) ? [...v] : v;

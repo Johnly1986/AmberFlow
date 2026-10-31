@@ -6,7 +6,8 @@
  * 这里只做"env → 强类型默认值"的解析；配置文件本身由 `config-store` 读进 env。
  *
  * 为什么 `--allow-dangerous` 不在这里：危险动作的默认放行不能是"某台机器上悄悄配过"，
- * 必须每次在命令里显式出现。安全类旗标没有配置默认值。
+ * 必须每次在命令里显式出现。`AMBERFLOW_CONFIRM_SAFE` 的缺省是 `1`（安全）；只有显式配 `0`
+ * 或命令行 `--confirm-unsafe` 才恢复旧的放行行为。
  */
 
 export { RUN_DEFAULT_KEYS } from "./config-schema.ts";

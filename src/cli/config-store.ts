@@ -154,11 +154,17 @@ function readRawObject(file: string): Record<string, unknown> {
   return { ...(raw as Record<string, unknown>) };
 }
 
+/** 本机配置可能含凭据：写后收紧到 0600（Windows 无 POSIX 模式，忽略失败）。 */
+function secureConfigWrite(file: string, content: string): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content, "utf-8");
+  try { fs.chmodSync(file, 0o600); } catch { /* Windows / 不支持的 fs */ }
+}
+
 export function writeConfigValue(file: string, key: string, value: string): void {
   const raw = readRawObject(file);
   raw[key] = value;
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(raw, null, 2)}\n`, "utf-8");
+  secureConfigWrite(file, `${JSON.stringify(raw, null, 2)}\n`);
 }
 
 export function removeConfigValue(file: string, key: string): boolean {
@@ -166,13 +172,12 @@ export function removeConfigValue(file: string, key: string): boolean {
   const raw = readRawObject(file);
   if (!(key in raw)) return false;
   delete raw[key];
-  fs.writeFileSync(file, `${JSON.stringify(raw, null, 2)}\n`, "utf-8");
+  secureConfigWrite(file, `${JSON.stringify(raw, null, 2)}\n`);
   return true;
 }
 
 export function initConfigFile(file: string): boolean {
   if (fs.existsSync(file)) return false;
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, "{}\n", "utf-8");
+  secureConfigWrite(file, "{}\n");
   return true;
 }

@@ -20,6 +20,13 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      # `npm run check` includes `schema:check` (`amber schema ctx --check`), which compares the
+      # engine's rendered context contract against the snapshot at dist/schema/ctx.json. `dist/` is
+      # gitignored (it is a build artifact, not committed), so a clean checkout has no snapshot and
+      # the old job always died with SCHEMA_SNAPSHOT_MISSING. Generate the snapshot from the current
+      # sources first; a stale snapshot in a dev checkout still fails its own `schema:check` run.
+      - name: Generate ctx schema snapshot
+        run: node --experimental-strip-types src/cli/main.ts schema ctx --out dist/schema/ctx.json
       - name: Check
         run: npm run check
 
@@ -43,7 +50,9 @@ jobs:
           AMBERFLOW_DECISION_BASE_URL: ${{ secrets.AMBERFLOW_DECISION_BASE_URL }}
           AMBERFLOW_DECISION_MODEL: ${{ secrets.AMBERFLOW_DECISION_MODEL }}
           AMBERFLOW_DECISION_API_KEY: ${{ secrets.AMBERFLOW_DECISION_API_KEY }}
-        run: npm run online -- --tier smoke --require-all
+        # There is no `online` npm script; the live suite entry point is `test` (src/cli/test.ts).
+        # `--require-all` keeps the scheduled-run semantics: blocked/unreachable/skipped fails too.
+        run: npm run test -- --tier smoke --require-all
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4

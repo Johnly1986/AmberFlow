@@ -1,28 +1,55 @@
 name: bridge
-# The DSH plugin lives in this repo (integrations/dsh-bridge). Its offline specs are hermetic:
-# host packages resolve from npm (the package's own `exports` map makes the self-import work), the
-# checkout is stubbed in-process — so CI can gate every bridge change without a browser, a model,
-# or a DSH installation. live.spec.ts (real CLIs + chromium) runs locally and in deployments.
+# The DSH plugin lives in this repo (integrations/dsh-bridge). It is a DSH *host* plugin: its
+# sources resolve host packages (@deepseek-ai/cordis / -dsh-tools / -schemastery) from a DSH
+# installation, and its vitest specs were removed (integrations/dsh-bridge/DEVELOPING.md
+# 「构建与测试」). The previous job ran `npm install` + `npx vitest ... tests/*.spec.ts` in that
+# directory; there is no tests/ dir and no vitest dependency, so it was permanently red.
+#
+# This workflow gates what a clean checkout can actually run offline — no browser, no model, no DSH
+# install, no extra dependencies:
+#   1. every bridge TypeScript source parses under Node >= 22.6 (--experimental-strip-types --check)
+#      plus the bridge scripts parse under Node (--check);
+#   2. the generated repo-root client bundle (integrations/dsh-bridge/client-root.js) is
+#      byte-identical to what scripts/client-root-sync.mjs renders from client.js, and the root
+#      package.json still exports it (the git-install door). The generator itself re-checks the
+#      root exports["./client"] value, then `git diff --exit-code` fails on drift.
+#
+# A real bridge load/build stays a deployment check (needs a DSH installation):
+#   cd integrations/dsh-bridge && DSH_ROOT=/path/to/deepseek-harness npm run setup && npm run build
+# then load the plugin in a real DSH process. The root `npm run check` already validates the
+# generated grammar.generated.ts (bridge artifact) in the checks workflow.
 "on":
   push:
     paths:
       - 'integrations/**'
+      - 'package.json'
       - '.github/workflows/bridge.yml'
   pull_request:
   workflow_dispatch:
 jobs:
   offline:
-    name: bridge offline specs (no browser, no DSH install)
+    name: bridge sources parse + client bundle sync (no browser, no DSH install)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install bridge dependencies
-        run: npm install --no-audit --no-fund
-        working-directory: integrations/dsh-bridge
-      - name: Run hermetic bridge specs
-        run: npx vitest run tests/bridge.spec.ts tests/service.spec.ts
-        working-directory: integrations/dsh-bridge
+      - name: Parse bridge sources
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(integrations/dsh-bridge/src/*.ts integrations/dsh-bridge/scripts/*.mjs)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no bridge sources found under integrations/dsh-bridge" >&2
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            node --experimental-strip-types --check "$f"
+            echo "ok   $f"
+          done
+      - name: Regenerate repo-root client bundle
+        run: node integrations/dsh-bridge/scripts/client-root-sync.mjs
+      - name: Fail on generated client bundle drift
+        run: git diff --exit-code -- integrations/dsh-bridge/client-root.js

@@ -120,10 +120,14 @@ export const APP_ONLY_OPTIONS: CliOptions = {
   /** 非交互：遇到 manual 步直接返回 needs_human，不拉 headed 浏览器。 */
   "manual-fail-fast": { type: "boolean" },
   slot: { type: "string", multiple: true },
+  /** 从 JSON 文件读槽位（避免敏感值进 argv）。 */
+  "slot-file": { type: "string" },
   /** 时钟缝：把"今天"钉成 YYYY-MM-DD（数据腿相对日期表达式 + ctx.runtime.today）。 */
   today: { type: "string" },
   "no-sources": { type: "boolean" },
   "confirm-safe": { type: "boolean" },
+  /** 显式恢复旧行为：危险浏览器动作不再逐次拒绝（M0 默认已翻转为安全）。 */
+  "confirm-unsafe": { type: "boolean" },
   "allow-dangerous": { type: "boolean" },
   "tiered-hint": { type: "boolean" },
   /** L2 脚本应用：把本次执行轨迹写成 JSON（审计/交接）。 */

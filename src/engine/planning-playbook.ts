@@ -17,23 +17,23 @@
 /** 五步法全文（文档逐字嵌入 + apps new 骨架注释逐字插入，prompt-hit 校验）。 */
 export const PLAN_PLAYBOOK_TEXT = `高效规划五步法（Planning Playbook）：
 ① 先看再写：amber inspect --url <页> --json 拿验证过的 hint_candidates——有候选照抄，别自创选择器；
-② 单步探针先行：先写 1 步探针应用（arrive + read）验证四件事：页面可达 / 无登录墙 / 无验证码 / 目标数据在 DOM。探针 30 秒判死刑，好过全流程应用跑 5 轮；
-③ 正式应用参数化：单段/单城 + slots，1 步 flow；早停守卫（命中登录墙/验证码特征 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；
+② 单步探针先行：先写 1 步探针应用（arrive + read）验证四件事：页面可达 / 登录与验证可处理 / 无风控拦截 / 目标数据在 DOM。探针 30 秒判死刑，好过全流程应用跑 5 轮；
+③ 正式应用参数化：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；
 ④ 离线分支校验：amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列；
 ⑤ 真跑留证：amber run <id> --trace；失败先看 trace 的 stopCode/reason——reason 自带修正指引。`;
 
 /** 压缩版（桥 `_app_create` 工具描述用；生成物逐字分发，工具描述不能太长）。 */
-export const PLAN_PLAYBOOK_SHORT = `高效规划五步法：① inspect 先看（验证过的 hint_candidates 可照抄）→ ② 单步探针先行（1 步 arrive+read 验证：页面可达 / 无登录墙 / 无验证码 / 目标数据在 DOM）→ ③ 正式应用参数化（slots + 早停守卫 + meta.policy 声明 done_timeout_ms）→ ④ apps check <id> --slot k=v 离线分支校验 → ⑤ run --trace 真跑，失败看 stopCode/reason。`;
+export const PLAN_PLAYBOOK_SHORT = `高效规划五步法：① inspect 先看（验证过的 hint_candidates 可照抄）→ ② 单步探针先行（1 步 arrive+read 验证：页面可达 / 登录与验证可处理 / 无风控拦截 / 数据在 DOM）→ ③ 正式应用参数化（slots + 早停守卫 + meta.policy 声明 done_timeout_ms）→ ④ apps check <id> --slot k=v 离线分支校验 → ⑤ run --trace 真跑，失败看 stopCode/reason。`;
 
 /**
- * 失败特征速查（**通用风控判定，只判不绕**：判定 + 早停，不含任何绕过手段）。
+ * 失败特征速查（**通用风控判定，只判不绕反爬风控**：判定 + 早停，不含任何绕反爬手段；验证环节可代过）。
  * 实测来源：m.ctrip.com 五轮移动站取证（2026-10-29），特征本身是通用模式。
  */
-export const FAILURE_SIGNS_TEXT = `失败特征速查（只判不绕，命中即 ctx.fail("blocked:…") 早停）：
-- body 极短（<200 字符）+「登录/注册」浮层 = 登录墙：换可匿名读价的来源或如实标 blocked，别重试表单；
+export const FAILURE_SIGNS_TEXT = `失败特征速查（只判不绕反爬风控：命中反爬风控即 ctx.fail("blocked:…") 早停；验证环节可代过）：
+- body 极短（<200 字符）+「登录/注册」浮层 = 登录墙：换可匿名读价的来源，或用凭据 + 验证步骤处理；无凭据/无授权时如实标 blocked，别重试表单；
 - 卡片价格处全是「登录看低价」= 服务端价格闸：匿名会话拿不到价格，不是渲染问题，早停；
 - 价格列全是「查价」+ 页尾「服务器异常」= 站点限流：等待与重试无效，早停；
-- 「依次点击图标验证 / 滑动拼图」= 验证码：不代过，立即早停。`;
+- 「依次点击图标验证 / 滑动拼图」= 验证码：属验证环节，可在用户授权下由人工步/注入处理器代过；若站点同时以风控/限流拦截（反爬），不绕，立即早停。`;
 
 /** inspect 的空池判定（绝对近空，或相对近空：页面上交互元素多而池几乎没收进来）。 */
 export function poolNearEmpty(poolCount: number, interactiveOnPage: number): boolean {
@@ -51,8 +51,8 @@ export function nextForInspect(poolCount: number, interactiveOnPage: number, url
   }
   return [
     `amber inspect --url ${url} --wide --pool   # 宽扫：含启发式伪按钮的真实 label（heuristic 标记可辨）`,
-    "1 步探针应用先行（五步法②）：arrive + read 验证可达/无登录墙/无验证码/数据在 DOM，再写正式应用",
-    "probe/DOM 命中 ≠ hint 可命中；登录墙/验证码等失败特征与早停配方见 docs/APP_SCRIPT_AUTHORING.md 快速路径",
+    "1 步探针应用先行（五步法②）：arrive + read 验证可达/登录与验证可处理/无风控拦截/数据在 DOM，再写正式应用",
+    "probe/DOM 命中 ≠ hint 可命中；反爬风控/登录墙等失败特征与早停/代过配方见 docs/APP_SCRIPT_AUTHORING.md 快速路径",
   ];
 }
 
