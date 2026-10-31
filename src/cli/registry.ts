@@ -3,11 +3,22 @@
  *
  * 目标不是把设计文档抄一遍，而是让 `amber --help` / `amber help <cmd>` 与实际
  * 分发表同源：新增命令时只改这里和 main.ts 的 switch，不会出现"帮助里有、入口没有"。
+ *
+ * 三层提示词系统（docs/PROMPT_SYSTEM.md）中的工具层（层 2）：
+ *   `when` = 何时用（与 src/support/help-map.ts 的 WHEN_TO_USE 同源互证）；
+ *   `flow` = 实践流程（只写正向流程，≤4 行；失败回流由层 3 STOP_NEXT 承载）。
+ * 两字段均进 `commandHelp()` 人类文本与 `amber help <cmd> --json` 结构化输出。
  */
+
+import { OVERVIEW_TEXT, WHEN_TO_USE } from "../support/help-map.ts";
 
 export interface CommandSpec {
   name: string;
   summary: string;
+  /** 何时用（层 2；与 help-map 的 WHEN_TO_USE 同一条，双向校验）。 */
+  when?: string;
+  /** 实践流程（层 2；正向流程按序，失败回流见层 3）。 */
+  flow?: string[];
   usage: string;
   examples: string[];
   flags: string[];
@@ -16,21 +27,23 @@ export interface CommandSpec {
 
 export const GLOBAL_USAGE = `AmberFlow — 冻结计划的浏览器自动化
 
+${OVERVIEW_TEXT}
+
 用法：
   amber <命令> [选项]
   在源码 checkout 里就地跑：node --experimental-strip-types src/cli/main.ts <命令> [选项]
   （npx amber 需要先把 bin 链进 node_modules，如 npm link；否则会挂在远端同名包上）
 
-日常命令：
-  run       运行应用、计划或一次性目标
-  record    演示一次，生成应用
-  plan      创建 / 编辑 / 校验计划
-  apps      列出 / 查看 / 校验应用
-  inspect   只读观察页面元素与候选 hint
-  doctor    环境、配置、决策源体检
-  config    查看 / 修改机器配置
-  model     本地决策模型状态与安装
-  test      真实站点测试套件（校验 / smoke / core / deep / probe）
+日常命令（何时用）：
+  run       运行应用、计划或一次性目标${whenFor("run")}
+  record    演示一次，生成应用${whenFor("record")}
+  plan      创建 / 编辑 / 校验计划${whenFor("plan")}
+  apps      列出 / 查看 / 校验应用${whenFor("apps")}
+  inspect   只读观察页面元素与候选 hint${whenFor("inspect")}
+  doctor    环境、配置、决策源体检${whenFor("doctor")}
+  config    查看 / 修改机器配置${whenFor("config")}
+  model     本地决策模型状态与安装${whenFor("model")}
+  test      真实站点测试套件（校验 / smoke / core / deep / probe）${whenFor("test")}
 
 全局选项：
   -h, --help       显示帮助
@@ -49,12 +62,25 @@ export const GLOBAL_USAGE = `AmberFlow — 冻结计划的浏览器自动化
   amber record https://shop.example.com --name add-to-cart
   amber doctor
 
+引擎语义契约（facts/signals/hints/commands/budget/…）：amber schema ctx --json
 退出码：0=成功 1=未完成 2=用法/配置错误 3=未执行/被挡住 130=中断`;
+
+/** 从 help-map 取某命令的 when，拼进日常命令行（缺省等价于不显示）。 */
+function whenFor(cmd: string): string {
+  const hit = WHEN_TO_USE.find((w) => w.cmd === cmd);
+  return hit ? ` —— ${hit.when}` : "";
+}
 
 export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "run",
     summary: "运行应用、计划或一次性目标",
+    when: "应用过了 check，要真跑或按预算试跑",
+    flow: [
+      "先 --dry-run 验调用序列（不启浏览器）",
+      "再 --max-steps 3 --trace 预算试跑，拿结构化反馈",
+      "最后完整运行；失败看停因 next（amber help run --json 的 flow 之外，回流建议由停因自带）",
+    ],
     usage: `amber run [应用] [选项]
 amber run --plan [文件] [选项]
 amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]`,
@@ -89,6 +115,12 @@ amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]`,
   {
     name: "record",
     summary: "演示一次，生成应用",
+    when: "宁可演示一次也不想手写流程时",
+    flow: [
+      "准备好入口页与目标，交互终端里现场演示（或 --script 回放录好的动作）",
+      "引擎归纳完成信号与结束态不变量，回放门通过才落盘 app.mjs",
+      "落盘后按 apps check → run --max-steps 调试回路走",
+    ],
     usage: "amber record [页面] [选项]",
     examples: [
       "amber record https://shop.example.com --name add-to-cart",
@@ -111,6 +143,11 @@ amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]`,
   {
     name: "plan",
     summary: "创建 / 编辑 / 校验计划",
+    when: "想把计划写成文件再执行（一次性目标除外）",
+    flow: [
+      "plan new 建计划，逐条 plan add（每条带 --signal 完成信号）",
+      "plan check 离线校验后再 plan run（或 amber run --plan）",
+    ],
     usage: `amber plan new "<目标>" [--url <页面>] [--save-plan <文件>]
 amber plan show [--plan <文件>]
 amber plan add "<描述>" (--signal <op=value> | --signal-file <json>) [--url <页面>] [--target <hint>] [--at <编号|id>] [--plan <文件>]
@@ -141,6 +178,12 @@ amber plan run [--plan <文件>] [--reset] [--replan] [--confirm allow|ask|deny]
   {
     name: "apps",
     summary: "列出 / 查看 / 校验应用",
+    when: "创建、查看、离线校验一个应用",
+    flow: [
+      "apps new <id> 生成骨架 → 编辑 app.mjs",
+      "apps check [--slot k=v] 离线校验各分支调用序列（逐分支给 --slot）",
+      "apps explain 看 dry 调用序列，再进 run 的调试回路",
+    ],
     usage: `amber apps list [--json]
 amber apps show <应用|脚本> [--code] [--json]
 amber apps new <id> [--goal <目标>] [--host HOST] [--url <入口页>] [--dir <目录>] [--force] [--print] [--json]
@@ -168,6 +211,12 @@ amber apps remove <应用> [--yes] [--force]`,
   {
     name: "inspect",
     summary: "只读观察页面元素与候选 hint",
+    when: "写流程前先只读看一眼真实页面",
+    flow: [
+      "写任何 hint/信号前先 inspect --json 拿验证过的 hint_candidates",
+      "exists/text 类信号先 --probe <selector> 实证命中数",
+      "空池时 --wide --pool 宽扫取证（建议会自动出现在 next 里）",
+    ],
     usage: 'amber inspect --url <http(s) URL> [--max-elements N] [--wide] [--text] [--pool] [--probe SEL]... [--screenshot FILE] [--headed] [--json]',
     examples: [
       "amber inspect --url https://books.toscrape.com/ --json",
@@ -191,6 +240,11 @@ amber apps remove <应用> [--yes] [--force]`,
   {
     name: "schema",
     summary: "引擎语义契约（Agent 无源码自描述面：facts/signals/hints/commands/budget/…）",
+    when: "无源码时查引擎语义契约",
+    flow: [
+      "amber schema ctx --json 看完整契约（九节 + overview）",
+      "不确定某算子/hint/停因语义时 --topic <节> 只查那一节",
+    ],
     usage: "amber schema ctx [--topic <节>] [--out <文件>] [--check] [--json]",
     examples: [
       "amber schema ctx --json",
@@ -208,6 +262,11 @@ amber apps remove <应用> [--yes] [--force]`,
   {
     name: "doctor",
     summary: "环境、配置、决策源体检",
+    when: "环境、浏览器、决策源有问题先体检",
+    flow: [
+      "先 doctor 看点名清单：缺什么给什么命令",
+      "配置问题接 amber config show 看层叠来源",
+    ],
     usage: "amber doctor [--json] [--fix] [--verbose]",
     examples: ["amber doctor", "amber doctor --json", "amber doctor --fix"],
     flags: [
@@ -220,6 +279,10 @@ amber apps remove <应用> [--yes] [--force]`,
   {
     name: "config",
     summary: "查看 / 修改机器配置",
+    when: "查看或修改机器/项目配置",
+    flow: [
+      "config show 看层叠与来源；改键用 config set KEY VALUE（--project 只进本项目）",
+    ],
     usage: `amber config path [--project]
 amber config show [--json]
 amber config get <KEY>
@@ -245,6 +308,10 @@ amber config edit [--project]`,
   {
     name: "model",
     summary: "本地决策模型状态与安装",
+    when: "本地决策模型的安装与状态",
+    flow: [
+      "model status 看产物是否齐；缺图/权重用 model fetch --from <url|路径> 安装",
+    ],
     usage: `amber model status [--json]
 amber model fetch --from <url|路径> [--to <onnx>] [--sha256-onnx <hex>] [--sha256-data <hex>] [--tokenizer <路径|url>] [--sha256-tokenizer <hex>] [--force] [--json]
 amber model path [--json]`,
@@ -268,6 +335,12 @@ amber model path [--json]`,
   {
     name: "test",
     summary: "真实站点测试套件",
+    when: "跑真实站点回归（声明在 online/）",
+    flow: [
+      "--validate 离线校验全部声明（PR 门禁，不联网）",
+      "--tier smoke 先跑可达性，core/deep 有网络与模型时再跑",
+      "失败看退出码分层：1 真失败 / 3 blocked/unreachable（探针事实，非门禁）",
+    ],
     usage: `amber test --validate
 amber test --list [--tier smoke|core|deep|probe|all|default]
 amber test [--tier smoke|core|deep|probe|all|default] [--case ID] [--site SITE]
@@ -318,16 +391,31 @@ export function commandHelp(name: string): string {
     "语法：",
     ...spec.usage.split("\n").map((l) => `  ${l}`),
     "",
+    "何时用：",
+    `  ${spec.when ?? whenFallback(name)}`,
+  ];
+  if (spec.flow?.length) {
+    lines.push("", "实践流程：", ...spec.flow.map((f) => `  ${f}`));
+  }
+  lines.push(
+    "",
     "示例：",
     ...spec.examples.map((e) => `  ${e}`),
     "",
     "常用选项：",
     ...spec.flags.map((f) => `  ${f}`),
     "",
+    "引擎语义契约：amber schema ctx --json",
     "退出码：0=成功 1=未完成 2=用法/配置错误 3=未执行/被挡住 130=中断",
-  ];
+  );
   if (spec.related.length) lines.push(`相关命令：${spec.related.join(" · ")}`);
   return lines.join("\n");
+}
+
+/** registry 没写 when 时从 help-map 兜底（双向一致的校验会让这行防御极少触发）。 */
+function whenFallback(name: string): string {
+  const hit = WHEN_TO_USE.find((w) => w.cmd === name);
+  return hit ? hit.when : "见 amber --help 的日常命令一节";
 }
 
 /** 编辑距离，只用于“你是不是想用 …”的短名单。 */

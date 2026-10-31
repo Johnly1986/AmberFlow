@@ -16,11 +16,12 @@
 
 import { SIGNAL_OPS } from "../engine/signal-ops.ts";
 import { COMMAND_OPS } from "../engine/actions.ts";
-import { nextForStop } from "../engine/planning-playbook.ts";
+import { nextForStop, EXEMPT_NEXT, STOP_ESCALATION_TEXT } from "../engine/planning-playbook.ts";
+import { OVERVIEW_TEXT, WHEN_TO_USE } from "./help-map.ts";
 
 /** 可查询的节名（`--topic`）。 */
 export const SCHEMA_TOPICS = [
-  "facts", "signals", "hints", "commands", "budget", "navigation", "flow_control", "dry", "stopcodes",
+  "overview", "facts", "signals", "hints", "commands", "budget", "navigation", "flow_control", "dry", "stopcodes",
 ] as const;
 export type SchemaTopic = (typeof SCHEMA_TOPICS)[number];
 
@@ -106,8 +107,9 @@ const DRY = {
   rule: "一切基于观察值的 ctx.fail/分支/断言必须用 ctx.runtime.runId === \"(dry)\" 守卫；check VALID ≠ 每条分支被走过",
 };
 
-/** stopCode 一句话表（与 docs/APP_SCRIPT_AUTHORING.md §10 同步；--check 防漂移）。 */
-const STOPCODE_MEANING: Readonly<Record<string, string>> = {
+/** stopCode 一句话表（与 docs/APP_SCRIPT_AUTHORING.md §10 同步；--check 防漂移；
+ *  导出供 prompt-hit coverage 组做 STOP_NEXT ⊆ 键集闭环校验）。 */
+export const STOPCODE_MEANING: Readonly<Record<string, string>> = {
   config_error: "脚本声明/运行配置错——改声明，不要重试",
   host_not_allowed: "目标主机不在 meta.hosts 信封内",
   budget_exceeded: "步预算/截止时间用完",
@@ -128,6 +130,10 @@ const STOPCODE_MEANING: Readonly<Record<string, string>> = {
   hint_matched_nothing: "target_hint 在池内零命中",
   step_names_no_target: "步骤未点名目标且规则/模型都没有可用候选",
   needs_value: "声明了 slot 绑定但值不存在（绝不猜）",
+  manual_signal_not_held: "人工步：人已确认但 DOM 信号复核未过——未完成，不会静默算绿",
+  manual_declined: "人工步：人在 TTY 里主动放弃",
+  needs_human: "人工步需要人：非 TTY 不假装有人，不拉有头浏览器",
+  hint_matched_no_target: "target_hint 在池内零命中（reason 附闭集提示）",
   trace_mismatch: "重放与轨迹版本/输入不一致——重跑，不要重放",
 };
 
@@ -140,12 +146,23 @@ function stopcodesSection(): Record<string, unknown> {
   return out;
 }
 
+/** 概述层（层 1，唯一出处 help-map）：无源码 Agent 的第一眼 + 命令「何时用」速查。 */
+function overviewSection(): Record<string, unknown> {
+  return {
+    overview: OVERVIEW_TEXT,
+    when_to_use: WHEN_TO_USE,
+    commands_help: "amber help <命令> --json（结构化 when/flow/flags）",
+    escalation: STOP_ESCALATION_TEXT,
+  };
+}
+
 /** 渲染完整契约（确定性输出：键序固定、无时间戳——--check 依赖这一点）。 */
 export function renderSchemaCtx(): Record<string, unknown> {
   return {
     schema: "amberflow.ctx-contract",
     note: "无源码世界的 Agent 语义契约：全部事实标注源码出处；引擎行为以本契约为准（快照经 --check 防漂移）",
     topics: [...SCHEMA_TOPICS],
+    overview: overviewSection(),
     facts: CTX_FACTS,
     sections: {
       signals: { ops: SIGNAL_OPS, semantics: SIGNAL_SEMANTICS, done_rule: FLOW_CONTROL.done_rule },
@@ -156,6 +173,7 @@ export function renderSchemaCtx(): Record<string, unknown> {
       flow_control: FLOW_CONTROL,
       dry: DRY,
       stopcodes: stopcodesSection(),
+      next_exempt: EXEMPT_NEXT,
     },
   };
 }

@@ -4,7 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { REPO } from "../support/paths.ts";
 import { CONFIG_KEYS, resolveConfig } from "./config-store.ts";
-import { COMMANDS, commandHelp, globalHelp, suggestion } from "./registry.ts";
+import { commandHelp, commandSpec, COMMANDS, globalHelp, suggestion } from "./registry.ts";
+import { OVERVIEW_TEXT } from "../support/help-map.ts";
 import { makeContext, say, emitJson, type CliContext, type GlobalOptions } from "./context.ts";
 import { CliError, EXIT, formatCliError, usageError } from "./errors.ts";
 import { errorEnvelope, successEnvelope } from "./json.ts";
@@ -279,6 +280,7 @@ async function home(ctx: CliContext): Promise<number> {
   if (ctx.globals.json) {
     emitJson(ctx, successEnvelope("amber", {
       version,
+      overview: OVERVIEW_TEXT,
       node: { version: node, ok: nodeOk },
       chromium,
       modelReady,
@@ -291,6 +293,11 @@ async function home(ctx: CliContext): Promise<number> {
     return 0;
   }
 
+  // 概述层（层 1，唯一出处 help-map）：首页是纯 CLI 用户的第一眼。
+  for (const line of OVERVIEW_TEXT.split("。")) {
+    if (line.trim()) say(ctx, line.trim() + "。");
+  }
+  say(ctx, "");
   say(ctx, `AmberFlow ${version}`);
   say(ctx, "");
   say(ctx, `  Node        ${node}  ${nodeOk ? "✓" : "✗ 需要 ≥ 22.6"}`);
@@ -403,6 +410,23 @@ export async function main(argv: string[] = process.argv.slice(2), options: Main
   if (invocation.command === "help") {
     const all = invocation.rest.includes("--all") || invocation.rest.includes("-a");
     const topic = invocation.rest.find((a) => !a.startsWith("-"));
+    // 层 2 的 Agent 正规通道（docs/PROMPT_SYSTEM.md §3.2）：`--json` 下输出
+    // 结构化 CommandSpec（含 when/flow），人类文本与机器契约并存。
+    if (topic && COMMANDS.some((c) => c.name === topic) && ctx.globals.json) {
+      const spec = commandSpec(topic)!;
+      emitJson(ctx, successEnvelope("help", {
+        command: spec.name,
+        summary: spec.summary,
+        when: spec.when ?? null,
+        flow: spec.flow ?? [],
+        usage: spec.usage,
+        examples: spec.examples,
+        flags: spec.flags,
+        related: spec.related,
+        semantic_contract: "amber schema ctx --json",
+      }));
+      return 0;
+    }
     if (!topic || all) {
       say(ctx, globalHelp(all));
       return 0;

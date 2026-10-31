@@ -38,9 +38,10 @@ import {
   appCheck, appShow, createApp, inspect, learn, runApp, status, test,
   createService, type AmberFlowService,
 } from './service.ts'
-// 语法/规划引导生成物（勿手改）：唯一出处是引擎的 grammar-prompt.ts 与 planning-playbook.ts，
-// 这里只收字符串（桥不 import 引擎代码）；漂移由 `npm run prompt-hit` 校验。
-import { HINT_LEARN_NOTE, PLAN_PLAYBOOK_SHORT } from './grammar.generated.ts'
+// 语法/规划引导/概述层生成物（勿手改）：唯一出处是引擎的 grammar-prompt.ts、
+// planning-playbook.ts 与 help-map.ts，这里只收字符串（桥不 import 引擎代码）；
+// 漂移由 `npm run prompt-hit` 校验。
+import { HINT_LEARN_NOTE, OVERVIEW_TEXT, PLAN_PLAYBOOK_SHORT, STOP_ESCALATION_TEXT } from './grammar.generated.ts'
 
 // The package root is the consumer surface: another plugin imports these without reaching into `src/`
 // (a published package ships only `lib/`).
@@ -287,6 +288,10 @@ function resolveOptions(config: Config): BridgeOptions {
 export function apply(ctx: Context, config: Config): void {
   const options = resolveOptions(config)
   const { toolPrefix } = options
+  // Layer-1 overview (single source: engine help-map.ts, distributed verbatim via the
+  // generated module — the bridge-side Agent has no AGENTS.md to read). Logging it once
+  // here makes the plugin's index description and every tool registration share one text.
+  ctx.logger.info(`amberflow-bridge: ${OVERVIEW_TEXT}`)
   // The plugin ships its own configuration page (the three model fields plus the step gap), so the
   // generic settings page must not also generate one for this entry. Optional service: a deployment
   // without Settings keeps working (page simply absent).
@@ -390,7 +395,8 @@ export function apply(ctx: Context, config: Config): void {
       + 'verified=false). By default it runs the whole flow. `trace` defaults to true. `dry` only '
       + 'dry-runs the call sequence without a browser; `ablate` is an explicit ablation arm, not a '
       + 'routine mode. Returns a compact summary with status, failed steps, invariants, model tier, '
-      + 'result/report paths and the first structured failure.',
+      + 'result/report paths and the first structured failure. Escalation rule: '
+      + STOP_ESCALATION_TEXT,
     parameters: {
       app: { type: 'string', required: true, description: 'The app id from `' + toolPrefix + '_apps`.' },
       dry: { type: 'boolean', description: 'Only dry-run the script\'s call sequence; no browser, no tools.' },

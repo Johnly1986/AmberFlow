@@ -18,8 +18,8 @@ import { renderSchemaCtx, SCHEMA_TOPICS } from "../../support/schema-gen.ts";
 
 const USAGE = `usage: schema ctx [--topic <节>] [--out <文件>] [--check] [--json]
 
-引擎语义契约（Agent 无源码自描述面）：facts/signals/hints/commands/budget/
-navigation/flow_control/dry/stopcodes 九节，事实逐条标注源码出处。
+引擎语义契约（Agent 无源码自描述面）：overview/facts/signals/hints/commands/budget/
+navigation/flow_control/dry/stopcodes 十节，事实逐条标注源码出处。
 --out  把完整契约写成 JSON 快照（构建/发布物；落 package dist/schema/ctx.json）
 --check 与快照比对（键序敏感的确定性输出）；漂移 exit 2，hint 指路重新生成`;
 
@@ -68,10 +68,12 @@ export async function runSchema(args: string[], ctx: CliContext): Promise<number
         next: ["amber schema ctx --json"],
       });
     }
-    // facts 在契约顶层（不在 sections）；其余节从 sections 取。
+    // facts / overview 在契约顶层（不在 sections）；其余节从 sections 取。
     data = topic === "facts"
       ? { schema: payload.schema, topic, facts: payload.facts }
-      : { schema: payload.schema, topic, section: sections[topic] };
+      : topic === "overview"
+        ? { schema: payload.schema, topic, overview: payload.overview }
+        : { schema: payload.schema, topic, section: sections[topic] };
   }
 
   // --check：与快照比对（整契约或同 topic 切片，同一渲染器输出，键序确定）。

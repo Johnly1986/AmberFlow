@@ -73,7 +73,7 @@ import { DatasetStore, type DatasetEntry } from "../engine/dataset.ts";
 import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "../engine/plan.ts";
 // 规划引导：run 失败时按停因给一行「下一步建议」（唯一出处 planning-playbook.ts，
 // 只进 report.md 与 stdout，不动 result JSON 契约——桥解析零风险）。
-import { nextForStop } from "../engine/planning-playbook.ts";
+import { nextForStop, STOP_ESCALATION_TEXT } from "../engine/planning-playbook.ts";
 
 /** 进程内运行序号：保证同一毫秒内连续两次运行也不会撞上同一个 `{run_id}`。 */
 let RUN_SEQ = 0;
@@ -2311,7 +2311,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (!quiet) {
     console.log();
     console.log(appReportMarkdown(result, nextHint));
-    if (nextHint) console.log(`下一步建议：${nextHint}`);
+    if (nextHint) {
+      console.log(`下一步建议：${nextHint}`);
+      // 停手出口（唯一出处 planning-playbook）：回流建议必须带"何时停止自愈"。
+      console.log(`停手规则：${STOP_ESCALATION_TEXT}`);
+    }
     if (result.hint_memory) {
       console.log(`learned hints: ${result.hint_memory.entries} known, `
         + `${result.hint_memory.used} reused this run（sidecar ${result.hint_memory.path}）`);

@@ -59,6 +59,8 @@ export function nextForInspect(poolCount: number, interactiveOnPage: number, url
 /**
  * run 失败的下一步建议（按停因映射；只收实测验证过的停因，未知 code 返回 null——
  * 宁可不建议，不给泛泛而谈）。hint 未命中的语法纠正由 executor 停因 reason 自带。
+ * 键集纪律：schema-gen 的 STOPCODE_MEANING 键集 ⊆ STOP_NEXT ∪ EXEMPT_NEXT
+ * （prompt-hit coverage 组断言）——新增停因要么给 next，要么显式豁免。
  */
 const STOP_NEXT: Readonly<Record<string, string>> = {
   max_steps: "预算用尽：先看 trace 各步的 stopCode/reason 找第一个失败；多数是目标不可分辨或页面未变——按五步法② 收窄为单步探针",
@@ -67,7 +69,42 @@ const STOP_NEXT: Readonly<Record<string, string>> = {
   done_not_held: "命令闭集已走完但 done 未成立：检查 done 信号是否真的会在动作后成立",
   low_confidence: "决策层低置信：看 trace 的 decisions 行与候选 label；有稳定句柄（id / data-test / 唯一 label）就写 act hint 收窄（六形状闭集见 docs/APP_SCRIPT_AUTHORING.md）",
   no_model_runtime: "rules-only 模式需要规则命中：加 target_hint，或配置决策源（docs/DECISION_SERVICE_CONFIG.md）",
+  config_error: "停因 reason 自带具体声明错误；改 meta/声明后先 amber apps check <id>（离线）再重跑",
+  host_not_allowed: "目标主机加进 meta.hosts，或改用 meta.site.pages + ctx.openPage；amber apps check 离线可验",
+  invariant_failed: "看 steps[] 最后一步是否真的到达结束页；amber inspect --probe 实证不变量选择器后再改",
+  missing_done: "flow 末尾补 ctx.done()；声明了结束态不变量就必须验收，不能跳过",
+  needs_value: "slot 缺值：值必须来自任务输入或数据源（--slot k=v 传入）；没有真实值就如实返回 needs_value 给上游，不要造默认值",
+  trace_mismatch: "重放条件不符（脚本版本/输入变了）：重新完整运行，不要重放",
+  precondition_skipped: "不是失败：按 stopCode 分支继续；误跳则修 when 条件（先 inspect 实证前提信号）",
+  hint_matched_nothing: "hint 在池内零命中：reason 自带六形状闭集提示；先 inspect 拿验证过的 hint_candidates 再改（别自创选择器）",
 };
+
+/**
+ * 显式豁免清单：确实没有可建议下一跳的停因（不进 STOP_NEXT，coverage 组放行）。
+ * 每条豁免必须写理由——新增停因时若给不出工程动作，也必须在这里留理由，不许静默漏。
+ */
+export const EXEMPT_NEXT: Readonly<Record<string, string>> = {
+  manual_declined: "人主动放弃人工步——没有工程动作可建议，交给人决策",
+  manual_signal_not_held: "人已确认但 DOM 信号复核未过——人工步失败特征速查见 docs/APP_SCRIPT_AUTHORING.md，无自动回流路径",
+  needs_human: "非 TTY 需要人：换 TTY 跑或 --headful + 真人介入；引擎不假装有人（docs/MANUAL_STEPS_AND_PACE.md）",
+  page_not_ready: "页面未稳定是暂态：执行器已带重试；反复出现才需要人查页面本身，无确定性回流动作",
+  frame_not_allowed: "与 host_not_allowed 同源（frame origin 信封）：按 host_not_allowed 的路径修 meta.hosts",
+  popup_not_allowed: "与 host_not_allowed 同源（popup origin 信封）：按 host_not_allowed 的路径修 meta.hosts",
+  action_unsupported: "目标存在但动作 op 不在能力面内：换动作或换目标是业务决策，无单一回流路径（命令闭集见 amber schema ctx --topic commands）",
+  target_not_found: "停因 reason 已自带闭集提示（executor 消费 HINT_CLOSED_SET_TEXT）：改 hint 或换目标按 reason 指引走",
+  target_ambiguous: "收窄 hint 是业务判断：参照 reason 与 trace 候选 label 手工收窄；inspect 拿 hint_candidates",
+  action_space_exhausted: "候选被禁用到只剩边界：说明页面与声明严重不符，需要人重新评估目标，无自动回流",
+  hint_matched_no_target: "target_hint 在池内零命中：reason 自带闭集提示，按 reason 指引改 hint",
+  step_names_no_target: "步骤未点名目标且规则/模型都无候选：写明目标或加 target_hint，属声明层修复，按 config_error 同路径处理",
+};
+
+/**
+ * 停手出口（兜底规则，层 3 终止条件）：回流建议必须带"何时停止自愈"——
+ * 调用方 Agent 最危险的行为是反复改脚本重跑真实站点。投放面：run 失败输出
+ * （runNextHint 附在 next 之后）、桥生成物、文档逐字块。
+ */
+export const STOP_ESCALATION_TEXT =
+  "同一停因按 next 修正后重跑仍出现 2 次以上 → 停手：如实上报 stopCode / reason / 已试过的修正，等待人或上游决策；不要再自行迭代脚本或重试。";
 
 export function nextForStop(code: string): string | null {
   return STOP_NEXT[code] ?? null;
