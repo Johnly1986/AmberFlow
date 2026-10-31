@@ -1,199 +1,116 @@
 # AmberFlow
 
-**决策任务流引擎**，是把一次"决策"拆成一串可编排的任务节点（取数 → 校验 → 打分 → 判规则 → 执行），由引擎按预设流程自动调度执行、并返回带依据的结果的运行时系统。
+**浏览器自动化，每一步都能证明做对了。**
 
-## 安装
+AmberFlow 是一个**可验证的浏览器执行内核**：流程先被冻结，执行器按页面信号逐步完成任务；模型只参与元素选择与风险评估，不生成动作、也不替你做「完成」结论。每次运行都会留下可读、可追溯、可复现的证据。
 
-需要 Node ≥ 22.6。
+它面向真实的工作流——登录后的受控系统、内部工具、测试环境——而不是「让 AI 随便点」的演示玩具。
+
+---
+
+## 为什么需要 AmberFlow
+
+| 常见问题 | AmberFlow 的做法 | 你得到的结果 |
+|---|---|---|
+| AI Agent「看起来点完了」，但不知道是否真的成功 | 完成只认页面信号（URL / DOM），模型没有完成裁判权 | 绿就是绿，红就是红，可复核 |
+| RPA / 脚本改版即碎，失败也说不清原因 | 流程冻结 + 结构化停因 + 每次运行留痕 | 失败能定位、能复现、能交给别人看 |
+| 测试回归「跳过也算过」，证据散落在各处 | 退出码区分通过/失败/阻塞；每次运行三份证据 | CI 诚实门 + 可交付的证据包 |
+| 数据 / 凭据不能出域 | 私有部署、本地或自带模型；凭据本地按名读取 | 数据留在你自己的环境 |
+| 自动化一旦登录后就没人敢碰 | 登录/2FA/验证码可在用户授权下处理，凭据不进日志与报告 | 可以覆盖真实的登录后流程 |
+
+## 适合谁
+
+- **测试 / QA 团队与测试外包商**：把「录制一遍 → 登录后回归 → 产出证据」变成可交付物。
+- **受监管 / 数据不出域的组织**：私有部署，证据可带走，凭据不经第三方。
+- **Agent / 工具开发者**：把「可验证的浏览器执行」接入自己的 agent 工作流（DSH 桥已可用）。
+
+**不适合**：无人值守的生产 RPA 平台、消费者个人自动化、任何需要绕过反爬或验证码黑产的场景。AmberFlow 的边界是明确的：**不绕反爬**、不伪造指纹、不轮换代理；验证环节只做用户授权内的「代过」。
+
+## 你会得到什么
+
+- **一次录制，可重复回放**：演示一遍即可生成流程；规则档回放不通过就不会落盘。
+- **每一步都有依据**：完成由页面信号判定，失败给出结构化原因和下一步建议。
+- **三份证据**：`*-result.json`、`*-report.md`、`*-report.html`，敏感槽位自动掩码；需要时还可保留执行轨迹用于重放。
+- **默认安全**：破坏性浏览器动作默认按干跑证据拒绝；需要显式放行才执行。凭据与敏感值默认不进产物。
+- **可选私有部署**：本地模型或自带线上模型；Apache-2.0，可嵌进你自己的环境。
+
+## 5 分钟上手
+
+需要 **Node ≥ 22.6** 与 Chromium。
 
 ```bash
+git clone https://github.com/Johnly1986/AmberFlow.git
+cd AmberFlow
 npm ci
 npx playwright install chromium
-npm run doctor
+npm run doctor          # 体检：Node / Chromium / 模型与配置
+npm run examples-check  # 离线跑通 4 个示例（零网络、零模型）
 ```
 
-`npm run doctor` 会点名 Node、chromium、决策模型产物与配置来源；缺什么给什么命令。
-
-## 快速开始
+从示例开始，把应用复制到你的用户目录：
 
 ```bash
-# 1) 生成一个可跑的 flow 骨架（默认落到 $AMBERFLOW_HOME/apps/<id>/app.mjs）
-npx amber apps new my-app --goal "把商品加入购物车" --url https://shop.example.com/p/1
+mkdir -p "$HOME/.amberflow/apps"
+cp -R examples/apps/01-basic-step "$HOME/.amberflow/apps/"
 
-# 2) 只读观察真实页面，拿元素与候选 hint
-npx amber inspect --url https://shop.example.com/p/1 --json
-
-# 3) 编辑 app.mjs，然后离线校验调用序列（不开浏览器、不调模型）
-npx amber apps check my-app
-npx amber apps explain my-app
-
-# 4) dry-run → 用执行预算试跑 → 完整运行
-npx amber run my-app --dry-run
-npx amber run my-app --max-steps 3 --trace
-npx amber run my-app --trace
-
-# 等价入口：npm run apps -- --app my-app
+# 在 checkout 里用这个入口（`npx amber` 在 checkout 内会挂住，原因见命令帮助）
+node --experimental-strip-types src/cli/main.ts apps check 01-basic-step
+node --experimental-strip-types src/cli/main.ts run 01-basic-step --dry-run
+node --experimental-strip-types src/cli/main.ts run 01-basic-step
 ```
 
-`--max-steps N` 是 `ctx.step` / `ctx.arrive` 的**执行预算**，不是“从第 N 步开始”。脚本按自己的控制流执行，预算用满时以 `partial` 停下（status=`partial`、exit 0、`verified=false`），已执行的步骤与 trace 保留。
+> 仓库内为什么不用 `npx amber`：本包的 bin 没链进 `node_modules/.bin`，`npx` 会去解析远端同名包。就地用上面的 `node --experimental-strip-types src/cli/main.ts`，或者先 `npm link` 后直接用 `amber`。npm 包发布准备中（当前 2.0.0 未发布，建议从源码使用）。
 
-一次性目标仍然可用（演示 → 计划 → 执行，不落成应用）：
+创建自己的应用：
 
 ```bash
-npm start -- --goal "把商品加入购物车" --url https://shop.example.com/p/1
+node --experimental-strip-types src/cli/main.ts apps new my-app \
+  --goal "把商品加入购物车" --url https://shop.example.com/p/1
+node --experimental-strip-types src/cli/main.ts inspect --url https://shop.example.com/p/1 --json
+# 编辑 $AMBERFLOW_HOME/apps/my-app/app.mjs 后：
+node --experimental-strip-types src/cli/main.ts apps check my-app
+node --experimental-strip-types src/cli/main.ts run my-app --trace
 ```
 
-## 应用模型
+应用就是用户目录下的 `app.mjs`（`meta` + `flow(ctx)`），不写进仓库、不依赖中央清单；仓库永远不内置应用。更多作者体验见 [examples/README.md](examples/README.md) 与 [docs/APP_SCRIPT_AUTHORING.md](docs/APP_SCRIPT_AUTHORING.md)。
 
-- **位置**：`$AMBERFLOW_HOME/apps/<id>/app.mjs`（默认 `~/.amberflow/apps`）。用户作用域，跟着用户走，不写进 checkout。
-- **形状**：`export const meta = (kit) => ({ id, label, goal, hosts, slots, invariants, ... })` 只声明应用级事实；`export async function flow(ctx) { ... }` 是唯一流程。没有静态步骤表，也没有第二种应用格式。
-- **不是仓库分享品**：仓库 `apps/`（若存在）只是开发夹具，不是内置应用；没有开箱 demo。应用正文请以用户目录里的 `app.mjs` 为准。
-- **调试靠调用序列**：`apps show --code` 看当前源码与版本锚点，`apps explain` 看 dry 调用序列，`ctx.step` 的 `id` 与 `--trace` 提供稳定锚点。
+## 证据与安全
 
-```bash
-npx amber apps list                          # 列出可运行应用（用户 + 仓库夹具）
-npx amber apps show my-app --code            # 路径、meta、当前源码、版本 sha
-npx amber apps explain my-app                # dry 跑一遍 flow，展示调用序列
-npx amber apps check my-app                  # 加载 + dry 调用序列校验（exit 2 = 有问题）
-npx amber apps path my-app                   # 唯一可写位置
-npx amber apps remove my-app --yes --force   # 删除（非 TTY 必须 --yes）
-```
+- **产物默认落盘**：每次运行写 `*-result.json` / `*-report.md` / `*-report.html`；证据默认不进仓库，失败截图/DOM 按敏感数据处理。
+- **敏感值默认掩码**：槽位可在 `meta.secretSlots` 声明，产物/报告/stdout 中显示 `***`；CLI 敏感值建议用 `--slot-file`（JSON）而不是 `--slot`。
+- **凭据模型**：凭据由用户在本机配置 / 环境变量 / 受支持存储保存，引擎按名读取；明文不进用例、计划、报告、trace 或仓库。详见 [SECURITY.md](SECURITY.md)。
+- **反爬与验证边界**：不绕反爬、不伪造指纹、不轮换代理、不规避风控/限流；验证环节（登录/2FA/验证码）可在用户授权下由人工步或注入处理器代过。站点 ToS 由使用者负责。
+- **默认安全**：破坏性浏览器动作默认拒绝；确需放行时显式使用 `--confirm-unsafe`（或 `AMBERFLOW_CONFIRM_SAFE=0`），并自行承担风险。
 
-完整作者接口见 [docs/APP_SCRIPT_AUTHORING.md](docs/APP_SCRIPT_AUTHORING.md)；Agent / DSH 桥的稳定契约见 [docs/AGENT_INTERFACE.md](docs/AGENT_INTERFACE.md)。
+## 当前状态
 
-### 录制一个应用
+AmberFlow 2.0.0 是**未发布**版本，正在从「可运行」走向「可交付」：
 
-```bash
-# 演示一次，归纳完成信号，生成 flow 脚本；零模型调用回放不过就不落盘
-npx amber record https://shop.example.com --name my-app --goal "把商品加入购物车"
+- 已具备：可验证执行内核、录制→回放、证据报告、真实站点回归套件、DSH Agent 桥、离线示例与离线校验、默认安全与凭据脱敏。
+- 规划/待补：认证后的回归闭环（会话复用、验证处理器、认证感知录制）、HTML 证据报告增强、npm 正式发布、私有部署交付包。
+- **明确不做**：无人值守 RPA 平台、消费者个人自动化、任何绕过反爬的灰色需求。当前不承诺 SLA/驻场，只适合受控环境的小团队试点。
 
-# 用录好的动作回放（CI / Agent）
-npx amber record https://shop.example.com --script ./demo-actions.json --yes --json
-
-npm run learn       # 同一入口的 npm 脚本（不传参数时现场演示）
-```
-
-`--apps-dir <目录>` 是应用落点；默认 `$AMBERFLOW_HOME/apps`，不要写进 checkout。
-
-## 命令一览
-
-| 命令 | 用途 |
-|---|---|
-| `npx amber run <id\|app.mjs>` | 运行 flow 应用；`--dry-run` / `--trace` / `--max-steps N` / `--slot k=v` / `--today YYYY-MM-DD` / `--allow-dangerous` / `--manual-fail-fast` |
-| `npx amber run --plan [文件]` | 运行计划文件（`--reset` / `--replan` / `--confirm allow\|ask\|deny`） |
-| `npx amber run --goal "..." --url ...` | 一次性目标：演示 → 计划 → 执行（`--save-plan`） |
-| `npx amber record [页面]` | 演示一次，生成 flow 应用（`--name` / `--goal` / `--apps-dir` / `--script`） |
-| `npx amber apps list` | 列出应用 |
-| `npx amber apps show <id\|脚本>` | 查看 meta、路径、版本 sha；`--code` 返回完整源码 |
-| `npx amber apps new <id>` | 生成可跑的 flow 骨架（`--goal` / `--host` / `--url` / `--dir` / `--print` / `--force`） |
-| `npx amber apps check [<id\|脚本>]` | 加载 + dry 调用序列校验 |
-| `npx amber apps explain <id\|脚本>` | dry 调用序列与人话视图 |
-| `npx amber apps path <id>` | 打印应用脚本路径 |
-| `npx amber apps remove <id>` | 删除应用（`--yes` / `--force`） |
-| `npx amber inspect --url <URL>` | 只读观察页面元素与候选 hint（不点击、不输入、不调模型） |
-| `npx amber plan new/show/add/edit/rm/move/check/reset/run` | 计划文件的创建、编辑、校验与执行 |
-| `npx amber doctor` | 环境、配置、决策源体检（`--fix` 只做安全可逆修复） |
-| `npx amber config show/get/set/unset/init/path/edit` | 全局 / 项目配置 |
-| `npx amber model status/fetch/path` | 本地决策模型状态与安装 |
-| `npx amber test --validate\|--list\|--tier ...` | 真实站点测试套件 |
-| `npm start -- --goal ... --url ...` | 一次性目标（npm 入口） |
-| `npm run apps -- --app <id>` | 运行用户作用域应用（与 `amber run <id>` 同一运行器） |
-| `npm run check` | `typecheck` + 配置示例一致性 + 线上用例离线校验（PR 门禁） |
-| `npm run test -- --tier ...` | 真实站点测试套件（联网） |
-| `npm run learn` | 演示一次，生成 flow 应用 |
-| `npm run agent -- --goal ... --url ...` | 外层 Agent 的一次录制调用（`learn --json --yes`） |
-| `npm run plan-cli -- ...` | 计划 CRUD / 执行入口 |
-| `npm run model:fetch -- --from <url\|路径>` | 安装本地决策模型产物 |
-| `npm run config:example` | 从配置 schema 重新生成示例 |
-| `npm run picker-server` | MV3 扩展的本地模型服务 |
-
-完整帮助：`npx amber --help`、`npx amber <command> --help`。命令表的唯一出处是 `src/cli/registry.ts`。
-
-## 线上测试套件
-
-`online/` 是仓库唯一的测试声明层（**不是**应用流程格式，也不是应用的第二作者面）：
-
-```
-online/
-  sites/*.json          # 站点档案：hosts / home / locale / device / 风控与登录标记
-  cases/smoke/*.json    # 单页可达 + 关键地标
-  cases/core/*.json     # 2–6 步短流程
-  cases/deep/*.json     # 有状态长流程
-  cases/probe/*.json    # 风控/可达性探针，非门禁
-```
-
-```bash
-npm run test:validate                  # 离线校验全部 site/case（PR 门禁）
-npm run test -- --tier smoke           # 快速可达性
-npm run test -- --tier core            # 短流程
-npm run test -- --tier deep            # 长流程
-npm run test -- --tier probe           # 探针，非门禁
-npm run test -- --case books-category --headful
-npm run test -- --list
-```
-
-**用例格式**：`id` / `site` / `tier` / `goal` / `subgoals[]` / `invariants[]` / 可选 `oracle`、`expect`。子目标复用执行器计划语法：`desc`、`start_url`、`target_hint`、`target_hints`、`signal`、`slots`、`when`、`retries`。Case 只能引用真实 `http(s)` URL；`file://`、旧夹具路径、明文凭据会在加载期被拒绝。日期用 `{{today}}` / `{{today+7d}}` / `{{next_monday}}`，凭据用 `{{env:NAME|default}}`。
-
-**证据**：每次运行写 `$AMBERFLOW_HOME/online-runs/<run-id>/` 或 `--out` 指定目录，包含 `summary.json`、`report.md`、逐 case JSON，失败时附截图与 DOM。**运行结果不提交**；它是本次观察，不是下一次运行的 golden 文件。
-
-**退出码**：`0` 全部应跑用例通过；`1` 有真实失败；`2` 用法/配置/校验错误；`3` 有 `blocked` / `unreachable` / `login_required` / 未执行（跳过不等于通过）。`--require-all` 把 `3` 视为失败。
-
-站点不可达、风控挑战、需要登录都按事实分类；不绕过反爬、不代过验证码、不保存账号密码。探针用例只记录环境观测。
-
-## 决策模型配置
-
-线上服务使用**地址、密钥、模型**三件套：
-
-```bash
-amber config set AMBERFLOW_DECISION_BASE_URL https://<服务地址>/compatible-mode/v1
-amber config set AMBERFLOW_DECISION_MODEL decision-model-preview
-amber config set AMBERFLOW_DECISION_API_KEY sk-…
-```
-
-只要 `AMBERFLOW_DECISION_BASE_URL` 在，就走线上服务；没有地址才使用本地模型。本地模式用 `AMBERFLOW_DECISION_MODEL=english|multilingual` 选 checkpoint，权重位置用 `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR`。
-
-```bash
-amber config show
-amber doctor
-```
-
-`--provider NAME` 只用于本次实验/消融，不写进配置。配置键与默认值的唯一出处是 `src/support/config-schema.ts`；`configs/amberflowrc.example.json` 由 `npm run config:example` 生成。完整说明见 [docs/DECISION_SERVICE_CONFIG.md](docs/DECISION_SERVICE_CONFIG.md)。
-
-## 硬约束
-
-行为硬规则（完成只认信号、值只来自计划/观察、危险步默认拒绝、人工步不自动过、凭据按名读、产物不进仓库等）的唯一出处见 [AGENTS.md](AGENTS.md) 的「硬规则」一节，此处不重复。面向使用者的一条公开承诺：**不绕过反爬**——遇到 challenge/登录墙按 `blocked` / `login_required` 记录并跳过；不伪造指纹、不轮换代理、不代过验证码。
-
-## 目录
-
-```
-src/
-  engine/       执行器、计划、信号、提取、规则、审计
-  model/        决策提供者、缓存、学习、ONNX 运行时
-  app/          flow 应用：加载器、meta 投影、运行期 ctx、轨迹、适配器、运行器
-  flow/         信号归纳与共享基础
-  cli/          amber 命令入口
-  browser/      chromium 与工具信号
-  data/         通用数据腿（站点知识在配置里）
-integrations/
-  dsh-bridge/   DSH 桥：只拼 CLI、解析 JSON、投影有界摘要
-online/         真实站点测试套件（本仓库唯一的测试声明）
-docs/           当前有效的设计/接入文档
-```
+完整变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 文档
 
-- [架构](ARCHITECTURE.md)
-- [Agent 接口（脚本化应用）](docs/AGENT_INTERFACE.md)
+- [离线示例与用法](examples/README.md)
 - [应用脚本作者指南](docs/APP_SCRIPT_AUTHORING.md)
+- [Agent / DSH 接入契约](docs/AGENT_INTERFACE.md)
 - [人工步骤与运行节奏](docs/MANUAL_STEPS_AND_PACE.md)
-- [统一决策服务配置](docs/DECISION_SERVICE_CONFIG.md)
-- [工程约束与 Agent 指南（跨 harness 唯一出处）](AGENTS.md)
+- [决策服务配置](docs/DECISION_SERVICE_CONFIG.md)
+- [安全策略](SECURITY.md)
+- [变更记录](CHANGELOG.md)
 
-## 开发
+## 开发与贡献
 
 ```bash
-npm run check                    # 类型检查 + 配置示例一致性 + 线上用例离线校验
-npm run test -- --tier smoke   # 真实站点（需要网络）
+npm run check              # PR 门禁：类型检查 + 配置一致性 + 提示词/信号校验 + 泄露扫描 + 示例校验 + 用例声明
+npm run test -- --tier smoke   # 真实站点（需要网络；跳过 ≠ 通过）
 ```
 
-仓库不包含单元测试、离线测试夹具或基准语料；合并请求的自动门禁只做类型检查与用例声明校验。真实站点的回归由手动/定时线上任务承担。
+仓库没有单元测试与离线夹具是**设计决定**：真实站点套件是唯一测试层；运行证据不进仓库。发现问题请通过 issue 反馈，安全问题请走 [SECURITY.md](SECURITY.md) 的报告渠道。
+
+## License
+
+Apache-2.0，见 [LICENSE](LICENSE)。
