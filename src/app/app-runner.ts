@@ -1767,9 +1767,12 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           maxEffectiveRepeats: resolvedPolicy.policy.max_effective_repeats.value,
           actionDelayMs: pace.between_actions_ms,
           hintMemory: opts.hintMemory ?? null,
+          // 语义必须与 runApp 的 confirmFn 一致：默认按干跑证据拒绝破坏性动作；
+          // `--confirm-unsafe`（confirmSafe === false）才放行。历史上这里曾反接
+          // （默认放行、unsafe 反而拒绝）——e2e 实测抓出，改回同向。
           confirmFn: opts.confirmSafe === false
-            ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
-            : () => true,
+            ? () => true
+            : (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x)),
         });
       }
       return mw;

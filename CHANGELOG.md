@@ -83,6 +83,16 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - 本机配置写入后 chmod `0600`（Windows 无 POSIX 模式时忽略失败）；新增 `SECURITY.md` 写凭据模型、
   证据脱敏、信任边界、反爬/验证边界与已知缺口。
 
+### 安全修复（2026-10-31，未发布）
+
+- **修复 flow 应用浏览器腿的 confirmFn 分支反接**：M0 翻转默认时把安全分支写进了
+  `runScriptApp` 的错误侧——flow 应用此前默认**放行**破坏性动作，`--confirm-unsafe`
+  反而拒绝。现已与 `runApp`/文档语义一致（默认按干跑证据拒绝破坏性动作）。
+  e2e 实测（受控本地页面 + `effect: { irreversible: true }` 声明）：默认
+  `RISKY → risk-declined` 拒绝（exit 1）；`--confirm-unsafe` 放行且 done 成立（exit 0）。
+- `amber run` 补转发 `--slot-file` / `--confirm-unsafe`（此前 help 列出但 CLI 层静默忽略）；
+  `amber run --dry-run --json` 的 envelope 掩码敏感槽位（第三个明文出口封堵）。
+
 ### 提示词系统补全（2026-10-31，未发布）
 
 - 层 3 覆盖闭环：`STOPCODE_MEANING` 补 `max_steps` / `noul_unverified` / `no_progress` /
