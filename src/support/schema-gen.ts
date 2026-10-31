@@ -135,6 +135,24 @@ export const STOPCODE_MEANING: Readonly<Record<string, string>> = {
   needs_human: "人工步需要人：非 TTY 不假装有人，不拉有头浏览器",
   hint_matched_no_target: "target_hint 在池内零命中（reason 附闭集提示）",
   trace_mismatch: "重放与轨迹版本/输入不一致——重跑，不要重放",
+  max_steps: "子目标动作步数预算用完（每次调用缺省 8）：收窄目标或按五步法② 改流程",
+  noul_unverified: "模型声称 done 但无 DOM 信号可验证——补可验证完成信号，完成只认信号",
+  no_progress: "同一元素有效执行多次而信号从不成立——目标疑似死元素或信号永不成立",
+  space_empty: "声明的命令空间在页面无任何可解析元素",
+  nominated_family_empty: "提名族软先验在该页无候选（S2③）",
+  nominated_family_mismatch: "动作族与提名不符且有界修复未解出（S2③）",
+};
+
+/**
+ * 执行器内部停因边界：这些 StopCode **有意不进** agent 契约表（逐条写理由，
+ * prompt-hit coverage 组对 executor StopCode union 做双向闭环）。
+ */
+export const EXECUTOR_ONLY_STOPCODES: Readonly<Record<string, string>> = {
+  dom_goal_signal: "done 信号直接成立的成功出口（无动作即命中/命令解析即命中）——不是失败停因",
+  dry_run: "干跑探针出口（--dry-run/预检：只报告 would-do，不执行）",
+  dry_run_not_actionable: "干跑判定目标不可执行——结构化拒绝，回流见工具步 refusal 语义",
+  manual_needs_human: "执行器级人工步无 confirmFn——应用层已映射为 needs_human（含 TTY/--headful 指引）",
+  manual_confirmation: "人工确认（human oracle）通过——成功路径结束码，不是失败停因",
 };
 
 /** 停因 → 下一步（从 planning-playbook 真源取，未收录的如实标 null）。 */

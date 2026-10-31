@@ -27,3 +27,6 @@ configs/amberflowrc.json
 *.swp
 iterations/*
 travel/*
+
+# 私有方向分析文档（项目所有者指定不入库）
+/docs/direction/

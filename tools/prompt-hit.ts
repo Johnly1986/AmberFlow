@@ -33,12 +33,12 @@ import { REPO } from "../src/support/paths.ts";
 import { parseHint } from "../src/engine/hint.ts";
 import { SIGNAL_OPS } from "../src/engine/signal-ops.ts";
 import { HINT_SHAPES, SIGNAL_OP_PROMPT, ATTR_MATCH_MODEL_TEXT } from "../src/engine/grammar-prompt.ts";
-import { PLAN_PLAYBOOK_TEXT, FAILURE_SIGNS_TEXT, PLAN_PLAYBOOK_SHORT, STOP_ESCALATION_TEXT, EXEMPT_NEXT, nextForStop } from "../src/engine/planning-playbook.ts";
+import { PLAN_PLAYBOOK_TEXT, FAILURE_SIGNS_TEXT, PLAN_PLAYBOOK_SHORT, STOP_ESCALATION_TEXT, STOP_NEXT, EXEMPT_NEXT, nextForStop } from "../src/engine/planning-playbook.ts";
 import { hintMatch } from "../src/engine/rules.ts";
 import { validateSignalSpec } from "../src/engine/signals.ts";
-import { OVERVIEW_TEXT, WHEN_TO_USE } from "../src/support/help-map.ts";
-import { STOPCODE_MEANING } from "../src/support/schema-gen.ts";
-import { COMMANDS, commandSpec } from "../src/cli/registry.ts";
+import { HOME_NEXT, OVERVIEW_TEXT, WHEN_TO_USE } from "../src/support/help-map.ts";
+import { STOPCODE_MEANING, EXECUTOR_ONLY_STOPCODES } from "../src/support/schema-gen.ts";
+import { COMMANDS, commandSpec, helpCommandsPayload } from "../src/cli/registry.ts";
 
 const fix = process.argv.includes("--fix");
 if (process.argv.filter((a) => a !== "--fix").length > 2) {
@@ -187,6 +187,9 @@ if (!docText.includes(PLAN_PLAYBOOK_TEXT)) {
 if (!docText.includes(FAILURE_SIGNS_TEXT)) {
   problems.push("doc: docs/APP_SCRIPT_AUTHORING.md 未包含失败特征速查（FAILURE_SIGNS_TEXT）——从 planning-playbook.ts 逐字复制");
 }
+if (!docText.includes(STOP_ESCALATION_TEXT)) {
+  problems.push("doc: docs/APP_SCRIPT_AUTHORING.md 未包含停手规则（STOP_ESCALATION_TEXT）——从 planning-playbook.ts 逐字复制");
+}
 
 /* ---- 7. overview：概述层多面一致 ------------------------------------------- */
 // 概述（层 1）的唯一出处是 help-map.ts；AGENTS.md 与桥生成物都必须逐字含它，
@@ -284,6 +287,54 @@ for (const code of Object.keys(EXEMPT_NEXT)) {
   ).includes("EXECUTION BUDGET");
   if (!bridgeHasBudget) {
     problems.push("coverage: 桥 amberflow_run 的 max_steps 描述未含 EXECUTION BUDGET 关键句——三处同一事实需一致");
+  }
+}
+{
+  // 反向闭环：STOP_NEXT 的键必须在 schema 契约里（死 next/拼错键不会静默）。
+  for (const code of Object.keys(STOP_NEXT)) {
+    if (!(code in STOPCODE_MEANING)) {
+      problems.push(`coverage: STOP_NEXT 的 '${code}' 不在 schema STOPCODE_MEANING——补 schema 或删除死条目`);
+    }
+  }
+  // executor StopCode union 闭环：union ⊆ 契约 ∪ 内部码边界（双向）。
+  const executorSrc = fs.readFileSync(path.join(REPO, "src", "engine", "executor.ts"), "utf-8");
+  const unionMatch = executorSrc.match(/export type StopCode =([\s\S]*?);/);
+  if (!unionMatch) {
+    problems.push("coverage: 无法从 executor.ts 解析 StopCode union");
+  } else {
+    const unionCodes = [...unionMatch[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]!);
+    for (const code of unionCodes) {
+      if (!(code in STOPCODE_MEANING) && !(code in EXECUTOR_ONLY_STOPCODES)) {
+        problems.push(`coverage: executor StopCode '${code}' 既不在 schema 契约也不在 EXECUTOR_ONLY_STOPCODES——补 schema 或声明内部码边界`);
+      }
+    }
+    for (const code of Object.keys(EXECUTOR_ONLY_STOPCODES)) {
+      if (!unionCodes.includes(code)) {
+        problems.push(`coverage: EXECUTOR_ONLY_STOPCODES 的 '${code}' 不在 executor StopCode union——死条目`);
+      }
+    }
+  }
+  // 层 1 单源接线：首页 next 必须来自 help-map 的 HOME_NEXT（含死链检查）。
+  for (const h of HOME_NEXT) {
+    if (!COMMANDS.some((c) => c.name === h.cmd)) {
+      problems.push(`overview: HOME_NEXT 的 '${h.cmd}' 不是 registry 命令——死条目`);
+    }
+  }
+  const mainText = fs.readFileSync(path.join(REPO, "src", "cli", "main.ts"), "utf-8");
+  if (!mainText.includes("HOME_NEXT")) {
+    problems.push("overview: 首页 next 未接 help-map 的 HOME_NEXT——单源失效");
+  }
+  // 层 1 桥投放：OVERVIEW_TEXT 必须接进桥工具描述（仅 logger 不算投放）。
+  const bridgeIndexText = fs.readFileSync(path.join(REPO, "integrations", "dsh-bridge", "src", "index.ts"), "utf-8");
+  if (!bridgeIndexText.includes("OVERVIEW_TEXT +")) {
+    problems.push("overview: 桥未把 OVERVIEW_TEXT 接进工具描述（status 头部）——层 1 未投放");
+  }
+  // 层 2 列表面：help --json 的命令清单 when 与 help-map 一致。
+  for (const entry of helpCommandsPayload()) {
+    const hit = WHEN_TO_USE.find((w) => w.cmd === entry.name);
+    if (hit && entry.when !== hit.when) {
+      problems.push(`coverage: help 命令清单 '${String(entry.name)}' 的 when 与 help-map 不一致`);
+    }
   }
 }
 

@@ -4,8 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { REPO } from "../support/paths.ts";
 import { CONFIG_KEYS, resolveConfig } from "./config-store.ts";
-import { commandHelp, commandSpec, COMMANDS, globalHelp, suggestion } from "./registry.ts";
-import { OVERVIEW_TEXT } from "../support/help-map.ts";
+import { commandHelp, commandSpec, COMMANDS, globalHelp, helpCommandsPayload, suggestion } from "./registry.ts";
+import { HOME_NEXT, OVERVIEW_TEXT } from "../support/help-map.ts";
 import { makeContext, say, emitJson, type CliContext, type GlobalOptions } from "./context.ts";
 import { CliError, EXIT, formatCliError, usageError } from "./errors.ts";
 import { errorEnvelope, successEnvelope } from "./json.ts";
@@ -289,7 +289,7 @@ async function home(ctx: CliContext): Promise<number> {
       shown: apps.slice(0, 10),
       // 裸 `amber` 不在 PATH 时，`next` 里的写法照抄会 CommandNotFound——先说清楚。
       cli: { linked: invocation.linked, path: invocation.path, fallbacks: invocation.linked ? [] : [...INVOKE_FALLBACKS] },
-    }, { next: ["amber test --tier smoke", "amber record https://shop.example.com", "amber doctor"] }));
+    }, { next: HOME_NEXT.map((h) => "amber " + [h.cmd, h.args ?? ""].filter(Boolean).join(" ")) }));
     return 0;
   }
 
@@ -313,10 +313,9 @@ async function home(ctx: CliContext): Promise<number> {
   if (apps.length > shown.length) say(ctx, `  … 还有 ${apps.length - shown.length} 个，运行 amber apps list 查看。`);
   say(ctx, "");
   say(ctx, "下一步：");
-  say(ctx, "  amber test --tier smoke            跑一轮真实站点可达性");
-  say(ctx, '  amber run --goal "把商品加入购物车" --url <页面>');
-  say(ctx, "  amber record https://shop.example.com   录一条自己的流程");
-  say(ctx, "  amber doctor                       环境有问题时先体检");
+  for (const h of HOME_NEXT) {
+    say(ctx, `  ${("amber " + [h.cmd, h.args ?? ""].filter(Boolean).join(" ")).padEnd(44)} ${h.why}`);
+  }
   if (!invocation.linked) {
     // 只在这条捷径真的不存在时说：否则就是把"照抄报错"留给用户自己踩。
     say(ctx, "");
@@ -424,6 +423,15 @@ export async function main(argv: string[] = process.argv.slice(2), options: Main
         flags: spec.flags,
         related: spec.related,
         semantic_contract: "amber schema ctx --json",
+      }));
+      return 0;
+    }
+    // 层 2 索引面：`amber help --json`（无命令名）输出结构化命令清单（不再回落人类文本）。
+    if (ctx.globals.json) {
+      emitJson(ctx, successEnvelope("help", {
+        commands: helpCommandsPayload(),
+        semantic_contract: "amber schema ctx --json",
+        detail: "amber help <命令> --json",
       }));
       return 0;
     }

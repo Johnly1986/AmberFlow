@@ -1460,6 +1460,7 @@ export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): st
       ? ["- **跨过的步**（声明式边跨过去，记成 skipped）：" + r.path_crossed.join("、")]
       : []),
     ...(nextHint ? ["", `> **下一步建议**：${nextHint}`] : []),
+    ...(!r.ok ? ["", `> **停手规则**：${STOP_ESCALATION_TEXT}`] : []),
   ];
   if (r.sources.length) {
     L.push("", "## 数据腿", "", "| 数据源 | 行数 | counts | selects | 工具版本 |", "|---|---|---|---|---|");
@@ -1618,6 +1619,7 @@ export function appReportHtml(r: AppRunResult, nextHint?: string | null): string
   const stopCode = r.script?.stop_code;
   if (stopCode !== undefined) L.push(`<h2>结构化停因</h2><p><code>${htmlEscape(stopCode)}</code>：${htmlEscape(r.script?.stop_reason ?? "")}</p>`);
   if (nextHint) L.push(`<h2>下一步建议</h2><p>${htmlEscape(nextHint)}</p>`);
+  if (!r.ok) L.push(`<h2>停手规则</h2><p>${htmlEscape(STOP_ESCALATION_TEXT)}</p>`);
   L.push('<p class="muted">本报告是 v0：只呈现结构化结果与已脱敏槽位；失败截图/DOM 可能含 PII，按证据敏感性处理。</p>');
   L.push("</body></html>");
   return L.join("\n") + "\n";
@@ -2311,11 +2313,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (!quiet) {
     console.log();
     console.log(appReportMarkdown(result, nextHint));
-    if (nextHint) {
-      console.log(`下一步建议：${nextHint}`);
-      // 停手出口（唯一出处 planning-playbook）：回流建议必须带"何时停止自愈"。
-      console.log(`停手规则：${STOP_ESCALATION_TEXT}`);
-    }
+    if (nextHint) console.log(`下一步建议：${nextHint}`);
+    // 停手出口（唯一出处 planning-playbook）：失败即输出，不依赖 next 是否存在——
+    // 否则停因类豁免（needs_human 等）既无回流建议也无终止条件。
+    if (!result.ok) console.log(`停手规则：${STOP_ESCALATION_TEXT}`);
     if (result.hint_memory) {
       console.log(`learned hints: ${result.hint_memory.entries} known, `
         + `${result.hint_memory.used} reused this run（sidecar ${result.hint_memory.path}）`);

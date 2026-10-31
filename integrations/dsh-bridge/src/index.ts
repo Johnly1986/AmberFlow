@@ -649,7 +649,8 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_status`,
     description:
-      'Report the environment the engine will run in: Node, Chromium, local model artifacts, the '
+      OVERVIEW_TEXT + '\n\n'
+      + 'Report the environment the engine will run in: Node, Chromium, local model artifacts, the '
       + 'effective decision source (online service or local), and whether the outer LLM is configured. '
       + 'Reads only; no browser, no model call, no secrets (API keys are masked).',
     parameters: {},

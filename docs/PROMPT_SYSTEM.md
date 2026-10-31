@@ -70,7 +70,7 @@ Agent 在三个时机拿到同一出处的提示词——**索引命中时知道
 ```ts
 export const OVERVIEW_TEXT = `AmberFlow 是冻结计划的浏览器自动化引擎：
 计划由人给出（app.mjs 的 flow(ctx) 脚本），引擎逐步选元素、执行动作、
-验证完成信号；模型只做选择票，不生成动作，完成只认 DOM/工具信号。
+验证完成信号；模型只做选择/风险/完成票（完成票仅 advisory），不生成动作，完成只认 DOM/工具信号。
 什么时候用：要在真实网站上自动化一条可验证的流程（采集、下单、巡检、回归），
 且希望每一步有结构化证据与完成裁决时。
 从哪开始：已安装 → amber doctor 体检；checkout 内 → node --experimental-strip-types
@@ -91,10 +91,10 @@ src/cli/main.ts doctor`——与首页 `INVOKE_FALLBACKS` 同一口径）。"从
 
 | 投放面 | 方式 | 校验组 |
 |---|---|---|
-| `amber` 无参首页 | 开头插 `OVERVIEW_TEXT`，"下一步"改为从 `WHEN_TO_USE` 生成 | overview |
+| `amber` 无参首页 | 开头插 `OVERVIEW_TEXT`；"下一步"由 help-map 的 `HOME_NEXT` 单源渲染（`amber <cmd> [args] — why`） | overview |
 | `amber --help` | GLOBAL_USAGE 头部加一段概述（由 registry 引 help-map 渲染） | overview |
 | AGENTS.md「引擎概述」节 | 最小逐字块嵌入 `OVERVIEW_TEXT`（带"勿手抄"标注，不重写既有内容） | overview |
-| DSH 桥插件描述 | `integrations/dsh-bridge/src/grammar.generated.ts` 增加 `OVERVIEW_TEXT` 生成物——桥侧无 AGENTS.md 可读，插件描述承载**完整概述**，不改写 | overview |
+| DSH 桥 | `OVERVIEW_TEXT` 生成物接进 `amberflow_status` 工具描述**头部** + 插件加载日志——桥侧无 AGENTS.md 可读，Agent 首个工具调用即见完整概述（prompt-hit 断言接线，仅 logger 不算投放） | overview |
 | `amber schema ctx` 新增 `overview` 节 | schema-gen 从 help-map 取 | schema `--check` |
 
 ### 2.3 设计要点
@@ -155,18 +155,17 @@ meta 字段从 `META_FIELD_MAP` 渲染。层 2 不新增手抄表，只把既有
 
 ### 4.1 STOP_NEXT 全量收录（保持"只收验证过的"纪律，但补齐回流路径明确的）
 
-`planning-playbook.ts` 的 `STOP_NEXT` 补齐 schema stopcodes 节里已有明确
-语义的停因（每个都有"回到正确流程"的下一跳）：
+落地后（2026-10-31）：`STOP_NEXT` **28 条**、`EXEMPT_NEXT` **3 条**（`manual_declined` /
+`page_not_ready` / `action_space_exhausted`——确实无工程动作）。较初版晋升 9 条原豁免
+（`needs_human`、`frame_not_allowed`、`popup_not_allowed`、`manual_signal_not_held`、
+`action_unsupported`、`target_not_found`、`target_ambiguous`、`hint_matched_no_target`、
+`step_names_no_target`——它们都有明确回流路径，不该躺在豁免清单里），并新收录 6 条
+执行器停因（`max_steps`、`noul_unverified`、`no_progress`、`space_empty`、
+`nominated_family_empty/mismatch`）。完整清单唯一出处 `planning-playbook.ts`，schema
+契约表（`STOPCODE_MEANING`，31 键）与之双向闭环。
 
-| 新增停因 | next（回流路径） |
-|---|---|
-| `config_error` | 停因 reason 自带具体声明错误；改 meta/声明后先 `apps check`（离线）再重跑 |
-| `host_not_allowed` | 目标主机加进 `meta.hosts`，或改用 `meta.site.pages` + `openPage`；`apps check` 离线可验 |
-| `invariant_failed` | 看 steps[] 最后一步是否真的到达结束页；`inspect --probe` 实证不变量选择器 |
-| `missing_done` | flow 末尾补 `ctx.done()`；声明了不变量就必须验收 |
-| `needs_value` | slot 缺值：值必须来自任务输入或数据源（`--slot k=v` 传入）；**没有真实值就如实返回 needs_value 给上游，不要造默认值** |
-| `trace_mismatch` | 重放条件不符：重新完整运行，不要重放 |
-| `precondition_skipped` | 不是失败：按 stopCode 分支继续；误跳则修 when 条件（先 inspect 实证） |
+措辞示例（`needs_value`）：值必须来自任务输入或数据源（`--slot k=v` 传入）；**没有真实值
+就如实返回 needs_value 给上游，不要造默认值**——引擎红线是"值绝不来自猜测"。
 
 措辞纪律：`needs_value` 的 next 不允许出现"声明默认值"的诱导表述——引擎红线
 是"值绝不来自猜测"，提示词不能教 Agent 绕过它。
@@ -179,21 +178,25 @@ meta 字段从 `META_FIELD_MAP` 渲染。层 2 不新增手抄表，只把既有
 > 已试过的修正，等待人或上游决策；不要再自行迭代脚本或重试。
 
 实测依据：调用方 Agent 最危险的行为是反复改脚本重跑真实站点——回流建议必须
-带终止条件，否则层 3 反而放大无效重试。该文本进 run 失败输出（`runNextHint`
-附在 next 之后）、文档逐字块、桥生成物。
+带终止条件，否则层 3 反而放大无效重试。投放面（2026-10-31 落地）：run 失败**即**输出
+（stdout / report.md / report.html，不依赖 next 是否存在——豁免类停因也有终止条件）、
+docs/APP_SCRIPT_AUTHORING.md 逐字块（prompt-hit doc 组断言）、桥 `amberflow_run`
+工具描述与生成物。
 
 ### 4.3 键集校验闭环（防"收录不全"悄悄回潮）
 
-prompt-hit 新增 coverage 组断言：
+prompt-hit coverage 组断言（2026-10-31 起为**双向 + executor 闭环**）：
 
-```
-schema STOPCODE_MEANING 键集 ⊆ STOP_NEXT 键集 ∪ 显式豁免清单（EXEMPT_NEXT）
-```
-
-- 豁免清单收"确实没有可建议下一跳"的停因（如 `manual_declined`——人放弃，
-  没有工程动作可建议），豁免要写一行理由注释。
-- 这样新增 stopcode 时：要么给 next，要么显式豁免，二选一，不会静默漏。
-- 注意：`STOPCODE_MEANING`（schema-gen）与 `STOP_NEXT`（planning-playbook）
+- `STOPCODE_MEANING ⊆ STOP_NEXT ∪ EXEMPT_NEXT`（漏收录即红）；
+- `STOP_NEXT ⊆ STOPCODE_MEANING`（死 next / 拼错键即红——初版只查单向，
+  `max_steps` 有 next 无 schema 文档都不会红）；
+- executor `StopCode` union ⊆ `STOPCODE_MEANING ∪ EXECUTOR_ONLY_STOPCODES`
+  （schema-gen 导出内部码边界，逐条写理由：`dom_goal_signal`/`manual_confirmation`
+  是成功出口，`dry_run*` 是干跑专用，`manual_needs_human` 在应用层映射为
+  `needs_human`）——"覆盖率 100%" 不再只是对手写表的自我证明。
+- 豁免清单只收"确实没有可建议下一跳"的停因，豁免写一行理由注释；
+  有回流路径的一律晋升进 `STOP_NEXT`。
+- `STOPCODE_MEANING`（schema-gen）与 `STOP_NEXT`（planning-playbook）
   分属两个模块，校验时从两边 import 键集比对，不改任何一边的真源地位。
 
 ### 4.4 CliError 与 playbook 同源
@@ -214,16 +217,17 @@ schema STOPCODE_MEANING 键集 ⊆ STOP_NEXT 键集 ∪ 显式豁免清单（EXE
 | pool | 示例 hint 在合成池恰好命中 | 已有 |
 | plan | 信号样本判定 ↔ 声明 | 已有 |
 | bridge | 桥生成物同步（grammar + playbook + **overview**） | 扩展 |
-| doc | 文档逐字含 ATTR_MATCH_MODEL_TEXT / PLAN_PLAYBOOK_TEXT / FAILURE_SIGNS_TEXT | 已有 |
-| overview（新） | AGENTS.md 逐字含 OVERVIEW_TEXT；长度预算（概述 ≤400 字符、when ≤40、flow ≤4 行）；WHEN_TO_USE 与 registry when 双向一致；overview 进桥生成物 | 新增 |
-| coverage（新） | STOPCODE_MEANING 键集 ⊆ STOP_NEXT ∪ EXEMPT_NEXT；CLI next 无死链；三处（首页/help/桥）同一事实抽查一致 | 新增 |
+| doc | 文档逐字含 ATTR_MATCH_MODEL_TEXT / PLAN_PLAYBOOK_TEXT / FAILURE_SIGNS_TEXT / STOP_ESCALATION_TEXT | 扩展 |
+| overview（新） | AGENTS.md 逐字含 OVERVIEW_TEXT；长度预算（概述 ≤400 字符、when ≤40、flow ≤4 行）；WHEN_TO_USE 与 registry when 双向一致（registry 由 help-map 投影）；HOME_NEXT 单源渲染首页 next；overview 进桥生成物**并接进 status 工具描述** | 新增 |
+| coverage（新） | 停因三表双向闭环（schema ↔ STOP_NEXT/EXEMPT ↔ executor union，内部码边界见 EXECUTOR_ONLY_STOPCODES）；CLI/agent-view/playbook 的 next 无死链；registry help/AGENTS/桥同一事实（max-steps=执行预算）抽查一致 | 新增 |
 
 ## 6. 可验收判据
 
 1. **维护性**：新增一个投放面（如又一种 harness 入口）时，零文案改动——只加
    一处渲染接线 + 一条 coverage 断言；文案本体不改。
-2. **覆盖完整性**：STOP_NEXT 覆盖率 = (STOPCODE_MEANING 键集 − EXEMPT_NEXT)
-   / STOPCODE_MEANING 键集 = 100%，由 coverage 组持续断言。
+2. **覆盖完整性**：stopcode 三表闭环（schema ↔ STOP_NEXT/EXEMPT ↔ executor union）
+   由 coverage 组双向断言；有回流路径的停因 100% 进 STOP_NEXT，豁免仅剩
+   「确实无工程动作」的三条。
 3. **一致可查**：同一事实（抽查项：`--max-steps` 是执行预算的表述）在首页、
    `amber help run`、桥 `amberflow_run` 工具描述三处文本一致（逐字或语义等价
    由断言钉住）。
@@ -246,7 +250,7 @@ schema STOPCODE_MEANING 键集 ⊆ STOP_NEXT 键集 ∪ 显式豁免清单（EXE
 |---|---|---|---|
 | Claude Code | CLAUDE.md → AGENTS.md 概述节 | `amber help` / `amber help <cmd> --json` / `amber schema ctx` | 停因 reason + `next` 字段 |
 | Codex / Cursor 等 | AGENTS.md（同一份） | 同上 | 同上 |
-| DSH / WorkBuddy 桥 | 插件描述（OVERVIEW_TEXT 生成物，完整概述——桥侧无 AGENTS.md） | 工具描述 + 参数描述 | 工具结果的 `next`/停因映射（桥透传） |
+| DSH / WorkBuddy 桥 | `amberflow_status` 工具描述头部（OVERVIEW_TEXT 生成物，完整概述）+ 插件加载日志 | 工具描述 + 参数描述 + `amber help <cmd> --json` | 工具结果的 `next`/停因映射（桥透传）+ 停手规则 |
 | 纯 CLI 用户 | `amber` 首页 | `amber --help` | 错误块「提示 / 下一步」 |
 
 关键约束：同一层在不同 harness 上**逐字相同**（生成物或逐字嵌入），差异只允许

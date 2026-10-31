@@ -12,7 +12,7 @@
 > 三层提示词系统（概述/工具/提示层）的设计出处见 `docs/PROMPT_SYSTEM.md`。
 
 ```text
-AmberFlow 是冻结计划的浏览器自动化引擎：计划由人给出（app.mjs 的 flow(ctx) 脚本），引擎逐步选元素、执行动作、验证完成信号；模型只做选择票，不生成动作，完成只认 DOM/工具信号。什么时候用：要在真实网站上自动化一条可验证的流程（采集、下单、巡检、回归），且希望每一步有结构化证据与完成裁决时。从哪开始：已安装 → amber doctor 体检；checkout 内 → node --experimental-strip-types src/cli/main.ts doctor（裸 amber 不在 PATH，npx amber 会挂住）。
+AmberFlow 是冻结计划的浏览器自动化引擎：计划由人给出（app.mjs 的 flow(ctx) 脚本），引擎逐步选元素、执行动作、验证完成信号；模型只做选择/风险/完成票（完成票仅 advisory），不生成动作，完成只认 DOM/工具信号。什么时候用：要在真实网站上自动化一条可验证的流程（采集、下单、巡检、回归），且希望每一步有结构化证据与完成裁决时。从哪开始：已安装 → amber doctor 体检；checkout 内 → node --experimental-strip-types src/cli/main.ts doctor（裸 amber 不在 PATH，npx amber 会挂住）。
 ```
 
 ## 仓库是什么

@@ -309,6 +309,8 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `trace_mismatch` | 重放时脚本与轨迹的调用序列/版本/输入不一致——重新跑，不要重放 |
 | 其它（如 `low_confidence`、`max_steps`、`blocked`） | 执行器结构化停因，原样透出 |
 
+**停手规则**（层 3 出口；唯一出处 `src/engine/planning-playbook.ts`，失败即随 `next` 输出）：同一停因按 next 修正后重跑仍出现 2 次以上 → 停手：如实上报 stopCode / reason / 已试过的修正，等待人或上游决策；不要再自行迭代脚本或重试。
+
 排查顺序：`apps check`（声明）→ `inspect`（页面）→ `apps explain`（序列）→ `run --dry-run`（预演）→
 `run --max-steps N --trace`（有预算的真跑）→ 看 trace 里第一次 `ok:false` 的 `stop_code/reason`。
 

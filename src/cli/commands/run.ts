@@ -10,6 +10,7 @@ import { emitPlanStatus } from "../plan-result.ts";
 import { flatList, injectOptionalValue, normalizeAliases, parseSlots } from "../args.ts";
 import { toAgentRunView } from "../../app/agent-view.ts";
 import type { AppRunResult } from "../../app/app-runner.ts";
+import { maskSecretSlots, secretSlotKeys } from "../../app/redaction.ts";
 
 export const DEFAULT_PLAN = "./.amberflow/plan.json";
 
@@ -30,6 +31,8 @@ const OPTIONS = {
   "skip-data": { type: "boolean" as const },
   "allow-dangerous": { type: "boolean" as const },
   "confirm-safe": { type: "boolean" as const },
+  "confirm-unsafe": { type: "boolean" as const },
+  "slot-file": { type: "string" as const },
   "manual-fail-fast": { type: "boolean" as const },
   "emit-trace": { type: "string" as const },
   replay: { type: "string" as const },
@@ -157,7 +160,10 @@ function validateAppFlags(v: Values, mode: "app" | "pick"): void {
 function validatePlanFlags(v: Values): void {
   if (str(v["save-plan"])) throw usageError("--save-plan 只用于 --goal");
   if (str(v["max-steps"])) throw usageError("--max-steps 只用于应用运行（计划用 --max）");
-  if (bool(v["confirm-safe"]) || bool(v["manual-fail-fast"])) throw usageError("--confirm-safe / --manual-fail-fast 只用于应用运行");
+  if (bool(v["confirm-safe"]) || bool(v["confirm-unsafe"]) || bool(v["manual-fail-fast"])) {
+    throw usageError("--confirm-safe / --confirm-unsafe / --manual-fail-fast 只用于应用运行");
+  }
+  if (str(v["slot-file"])) throw usageError("--slot-file 只用于应用运行");
   if (bool(v["skip-data"])) throw usageError("--skip-data 只用于应用运行");
   if (bool(v["allow-dangerous"])) throw usageError("--allow-dangerous 只用于应用运行 / 一次性目标");
   if (str(v.out)) throw usageError("--out 暂不用于 --plan 模式", { hint: "计划执行器把结果写到计划同目录；--out 留给应用运行。" });
@@ -175,7 +181,10 @@ function validatePlanFlags(v: Values): void {
 
 function validateGoalFlags(v: Values): void {
   if (str(v["max-steps"])) throw usageError("--max-steps 只用于应用运行");
-  if (bool(v["confirm-safe"]) || bool(v["manual-fail-fast"])) throw usageError("--confirm-safe / --manual-fail-fast 只用于应用运行");
+  if (bool(v["confirm-safe"]) || bool(v["confirm-unsafe"]) || bool(v["manual-fail-fast"])) {
+    throw usageError("--confirm-safe / --confirm-unsafe / --manual-fail-fast 只用于应用运行");
+  }
+  if (str(v["slot-file"])) throw usageError("--slot-file 只用于应用运行");
   if (bool(v["skip-data"])) throw usageError("--skip-data 只用于应用运行");
   if (bool(v["allow-dangerous"])) throw usageError("--allow-dangerous 只用于应用包");
   if (bool(v.remember) || str(v.memory)) throw usageError("--remember / --memory 只用于应用包 / --plan");
@@ -197,6 +206,29 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
     slots = parseSlots(v.slot as string[] | undefined);
   } catch (err) {
     throw usageError(err instanceof Error ? err.message : String(err));
+  }
+  const slotFile = str(v["slot-file"]);
+  if (slotFile !== undefined) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(fs.readFileSync(path.resolve(slotFile), "utf-8"));
+    } catch (err) {
+      throw usageError(`--slot-file 读不了或不是 JSON：${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+      throw usageError("--slot-file 顶层必须是对象（槽位名 → 值）");
+    }
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      const t = typeof value;
+      if (t !== "string" && t !== "number" && t !== "boolean") {
+        throw usageError(`--slot-file 的 ${JSON.stringify(key)} 必须是字符串/数字/布尔`);
+      }
+      if (key in slots) {
+        console.error(`[warn] --slot-file 的 ${JSON.stringify(key)} 被 --slot 覆盖`);
+        continue;
+      }
+      slots[key] = String(value);
+    }
   }
   if (bool(v["dry-run"]) && (bool(v.json) || ctx.globals.json)) {
     const { resolveApp, dryRunFlow } = await import("../../app/app-script.ts");
@@ -231,10 +263,14 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
       ...(str(v.today) === undefined ? {} : { today: str(v.today) }),
     });
     const pack = resolved.pack;
+    const secretKeys = secretSlotKeys(
+      [...Object.keys(slots), ...((pack.secret_slots ?? []) as string[])],
+      pack.secret_slots,
+    );
     const envelope = successEnvelope("run", {
       mode: "flow", dry_run: true, status: "dry", verified: false, partial: false,
       app: pack.id, label: pack.label, goal: pack.goal,
-      slots, problems: dry.problems,
+      slots: maskSecretSlots(slots, secretKeys), problems: dry.problems,
       events: dry.trace.events.map((e) => ({
         i: e.i, call: e.call, id: e.id, desc: e.desc, url: e.url,
         ok: e.ok ?? null,
@@ -254,6 +290,8 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   if (bool(v["skip-data"])) args.push("--no-sources");
   if (bool(v["allow-dangerous"])) args.push("--allow-dangerous");
   if (bool(v["confirm-safe"])) args.push("--confirm-safe");
+  if (bool(v["confirm-unsafe"])) args.push("--confirm-unsafe");
+  if (slotFile !== undefined) args.push("--slot-file", slotFile);
   if (bool(v["manual-fail-fast"])) args.push("--manual-fail-fast");
   if (bool(v.remember)) args.push("--learn-hints");
   const emitTrace = str(v["emit-trace"]);

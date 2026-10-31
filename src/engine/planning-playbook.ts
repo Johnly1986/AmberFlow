@@ -62,7 +62,7 @@ export function nextForInspect(poolCount: number, interactiveOnPage: number, url
  * 键集纪律：schema-gen 的 STOPCODE_MEANING 键集 ⊆ STOP_NEXT ∪ EXEMPT_NEXT
  * （prompt-hit coverage 组断言）——新增停因要么给 next，要么显式豁免。
  */
-const STOP_NEXT: Readonly<Record<string, string>> = {
+export const STOP_NEXT: Readonly<Record<string, string>> = {
   max_steps: "预算用尽：先看 trace 各步的 stopCode/reason 找第一个失败；多数是目标不可分辨或页面未变——按五步法② 收窄为单步探针",
   budget_exceeded: "ctx.step 预算用满（status=partial、verified=false）：调高 --max-steps 或按五步法② 收窄流程",
   arrive_signal_not_held: "导航完成但 done 信号未成立：确认「动作前不成立、动作后成立」；重 JS SPA 先 inspect --wide --pool 或运行时取证",
@@ -77,6 +77,20 @@ const STOP_NEXT: Readonly<Record<string, string>> = {
   trace_mismatch: "重放条件不符（脚本版本/输入变了）：重新完整运行，不要重放",
   precondition_skipped: "不是失败：按 stopCode 分支继续；误跳则修 when 条件（先 inspect 实证前提信号）",
   hint_matched_nothing: "hint 在池内零命中：reason 自带六形状闭集提示；先 inspect 拿验证过的 hint_candidates 再改（别自创选择器）",
+  needs_human: "非 TTY 遇到人工步：换交互终端重跑，或 --headful 让真人完成后再继续；引擎不假装有人（docs/MANUAL_STEPS_AND_PACE.md）",
+  frame_not_allowed: "frame origin 不在信封内：把该 origin 加进 meta.hosts（或改用 meta.site.pages + ctx.openPage）；apps check 离线可验",
+  popup_not_allowed: "popup origin 不在信封内：把该 origin 加进 meta.hosts；apps check 离线可验",
+  manual_signal_not_held: "人已确认但 DOM 信号复核未过：确认该步真的完成，并复核 done 信号选择器（inspect --probe 实证）；不会静默算绿",
+  action_unsupported: "动作不在能力面内：查 amber schema ctx --topic commands 的命令闭集，换成支持的动作或改目标",
+  target_not_found: "目标零命中：按 reason 的六形状闭集提示改 hint；先 inspect 拿验证过的 hint_candidates（别自创选择器）",
+  target_ambiguous: "多候选歧义：按 trace 候选 label 收窄 hint（id / data-test / 唯一 label）；inspect 拿 hint_candidates",
+  hint_matched_no_target: "target_hint 在池内零命中：按 reason 的闭集提示改 hint；先 inspect 拿候选",
+  step_names_no_target: "步骤未点名目标且无候选：写明目标或加 target_hint（先 inspect）；属声明层修复，apps check 离线可验",
+  noul_unverified: "模型声称 done 但无 DOM 信号可验证：补一个可验证的完成信号（url/css_*）；不要依赖模型口头 done",
+  no_progress: "同一元素有效执行多次而信号从不成立：目标疑似死元素或信号永不成立——换目标/修 done 信号（inspect 实证）",
+  space_empty: "声明的命令空间在页面无任何可解析元素：先 inspect --wide --pool 实证页面；环境与声明严重不符时修声明",
+  nominated_family_empty: "提名族在该页无候选：inspect 实证该族元素是否存在；修 roles/meta 提名或放宽提名",
+  nominated_family_mismatch: "动作族与提名不符：按 inspect 实证改提名，或改用页面真实控件族",
 };
 
 /**
@@ -85,17 +99,8 @@ const STOP_NEXT: Readonly<Record<string, string>> = {
  */
 export const EXEMPT_NEXT: Readonly<Record<string, string>> = {
   manual_declined: "人主动放弃人工步——没有工程动作可建议，交给人决策",
-  manual_signal_not_held: "人已确认但 DOM 信号复核未过——人工步失败特征速查见 docs/APP_SCRIPT_AUTHORING.md，无自动回流路径",
-  needs_human: "非 TTY 需要人：换 TTY 跑或 --headful + 真人介入；引擎不假装有人（docs/MANUAL_STEPS_AND_PACE.md）",
   page_not_ready: "页面未稳定是暂态：执行器已带重试；反复出现才需要人查页面本身，无确定性回流动作",
-  frame_not_allowed: "与 host_not_allowed 同源（frame origin 信封）：按 host_not_allowed 的路径修 meta.hosts",
-  popup_not_allowed: "与 host_not_allowed 同源（popup origin 信封）：按 host_not_allowed 的路径修 meta.hosts",
-  action_unsupported: "目标存在但动作 op 不在能力面内：换动作或换目标是业务决策，无单一回流路径（命令闭集见 amber schema ctx --topic commands）",
-  target_not_found: "停因 reason 已自带闭集提示（executor 消费 HINT_CLOSED_SET_TEXT）：改 hint 或换目标按 reason 指引走",
-  target_ambiguous: "收窄 hint 是业务判断：参照 reason 与 trace 候选 label 手工收窄；inspect 拿 hint_candidates",
   action_space_exhausted: "候选被禁用到只剩边界：说明页面与声明严重不符，需要人重新评估目标，无自动回流",
-  hint_matched_no_target: "target_hint 在池内零命中：reason 自带闭集提示，按 reason 指引改 hint",
-  step_names_no_target: "步骤未点名目标且规则/模型都无候选：写明目标或加 target_hint，属声明层修复，按 config_error 同路径处理",
 };
 
 /**

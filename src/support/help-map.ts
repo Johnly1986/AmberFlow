@@ -16,7 +16,7 @@
 /** 概述全文（≤400 字符；含两条差异声明，纠正"直接写 Playwright"的错误心智）。 */
 export const OVERVIEW_TEXT =
   "AmberFlow 是冻结计划的浏览器自动化引擎：计划由人给出（app.mjs 的 flow(ctx) 脚本），"
-  + "引擎逐步选元素、执行动作、验证完成信号；模型只做选择票，不生成动作，完成只认 DOM/工具信号。"
+  + "引擎逐步选元素、执行动作、验证完成信号；模型只做选择/风险/完成票（完成票仅 advisory），不生成动作，完成只认 DOM/工具信号。"
   + "什么时候用：要在真实网站上自动化一条可验证的流程（采集、下单、巡检、回归），"
   + "且希望每一步有结构化证据与完成裁决时。"
   + "从哪开始：已安装 → amber doctor 体检；checkout 内 → "
@@ -40,4 +40,18 @@ export const WHEN_TO_USE: readonly WhenToUse[] = [
   { cmd: "config", when: "查看或修改机器/项目配置" },
   { cmd: "model", when: "本地决策模型的安装与状态" },
   { cmd: "test", when: "跑真实站点回归（声明在 online/）" },
+];
+
+/** 首页「下一步」的唯一出处（单源渲染，不许手抄；prompt-hit 断言 cmd 都是 registry 命令）。 */
+export interface HomeNext {
+  readonly cmd: string;
+  readonly args?: string;
+  readonly why: string;
+}
+
+export const HOME_NEXT: readonly HomeNext[] = [
+  { cmd: "test", args: "--tier smoke", why: "跑一轮真实站点可达性" },
+  { cmd: "run", args: '--goal "把商品加入购物车" --url <页面>', why: "直接跑一条一次性目标" },
+  { cmd: "record", args: "https://shop.example.com", why: "录一条自己的流程" },
+  { cmd: "doctor", why: "环境有问题时先体检" },
 ];

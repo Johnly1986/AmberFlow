@@ -93,7 +93,22 @@ export async function runSchema(args: string[], ctx: CliContext): Promise<number
     try { snap = JSON.parse(snapRaw); } catch (e) {
       throw new CliError("SCHEMA_SNAPSHOT_INVALID", `快照不是合法 JSON：${snapPath}（${e instanceof Error ? e.message : String(e)}）`, { exitCode: 2 });
     }
-    const same = JSON.stringify(snap) === JSON.stringify(data);
+    // topic 模式下 data 是切片：把快照切成同形状再比（否则切片 vs 全量必然 drift）。
+    let snapCompare: unknown = snap;
+    if (topic !== null) {
+      const snapRec = snap as Record<string, unknown>;
+      if (snapRec.topic === topic) {
+        snapCompare = snap; // 快照本身就是同 topic 切片（--out 与 --check 同 topic）
+      } else {
+        const sections = snapRec.sections as Record<string, unknown> | undefined;
+        snapCompare = topic === "facts"
+          ? { schema: snapRec.schema, topic, facts: snapRec.facts }
+          : topic === "overview"
+            ? { schema: snapRec.schema, topic, overview: snapRec.overview }
+            : { schema: snapRec.schema, topic, section: sections?.[topic] };
+      }
+    }
+    const same = JSON.stringify(snapCompare) === JSON.stringify(data);
     if (ctx.globals.json) {
       emitJson(ctx, successEnvelope("schema.check", { snapshot: snapPath, match: same, drifts: same ? [] : ["payload != snapshot（语义表或注记变了）"] }));
     } else {

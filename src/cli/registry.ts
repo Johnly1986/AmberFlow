@@ -75,11 +75,11 @@ export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "run",
     summary: "运行应用、计划或一次性目标",
-    when: "应用过了 check，要真跑或按预算试跑",
+    when: whenOf("run"),
     flow: [
       "先 --dry-run 验调用序列（不启浏览器）",
       "再 --max-steps 3 --trace 预算试跑，拿结构化反馈",
-      "最后完整运行；失败看停因 next（amber help run --json 的 flow 之外，回流建议由停因自带）",
+      "最后完整运行；失败看停因 next——失败输出自带回流建议与停手规则",
     ],
     usage: `amber run [应用] [选项]
 amber run --plan [文件] [选项]
@@ -93,12 +93,14 @@ amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]`,
       "--plan [文件]             输入的计划文件；默认 ./.amberflow/plan.json",
       "--save-plan <文件>        生成计划的保存位置；默认 ./.amberflow/plan.json",
       "--out <目录>              结果 JSON / Markdown 的落点",
-      "--slot k=v                覆盖应用声明的参数；可重复",
+      "--slot k=v                覆盖应用声明的参数；可重复（敏感值用 --slot-file）",
+      "--slot-file FILE          从 JSON 对象读槽位：敏感值不进 argv/进程列表",
       "--today YYYY-MM-DD        把今天钉成指定日期（数据腿相对日期表达式 / ctx.runtime.today）",
       "--provider <名字>         仅本次实验/消融覆盖；默认三件套或本地模型",
       "--skip-data               跳过数据腿（旧 --no-sources）",
       "--allow-dangerous         放行危险工具步；不带则结构化拒绝并 exit 3",
-      "--confirm-safe            危险动作仍逐次按干跑证据确认",
+      "--confirm-safe            危险动作逐次按干跑证据确认（M0 起默认已开启）",
+      "--confirm-unsafe          恢复旧行为：破坏性浏览器动作放行（默认按干跑证据拒绝）",
       "--manual-fail-fast        非交互遇到人工步直接 needs_human，不拉有头浏览器",
       "--max-steps N             ctx.step/arrive 执行预算（调试用；用满后 partial）",
       "--trace                   结果 JSON 带每步执行证据（step_traces）",
@@ -115,7 +117,7 @@ amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]`,
   {
     name: "record",
     summary: "演示一次，生成应用",
-    when: "宁可演示一次也不想手写流程时",
+    when: whenOf("record"),
     flow: [
       "准备好入口页与目标，交互终端里现场演示（或 --script 回放录好的动作）",
       "引擎归纳完成信号与结束态不变量，回放门通过才落盘 app.mjs",
@@ -143,7 +145,7 @@ amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]`,
   {
     name: "plan",
     summary: "创建 / 编辑 / 校验计划",
-    when: "想把计划写成文件再执行（一次性目标除外）",
+    when: whenOf("plan"),
     flow: [
       "plan new 建计划，逐条 plan add（每条带 --signal 完成信号）",
       "plan check 离线校验后再 plan run（或 amber run --plan）",
@@ -178,7 +180,7 @@ amber plan run [--plan <文件>] [--reset] [--replan] [--confirm allow|ask|deny]
   {
     name: "apps",
     summary: "列出 / 查看 / 校验应用",
-    when: "创建、查看、离线校验一个应用",
+    when: whenOf("apps"),
     flow: [
       "apps new <id> 生成骨架 → 编辑 app.mjs",
       "apps check [--slot k=v] 离线校验各分支调用序列（逐分支给 --slot）",
@@ -211,7 +213,7 @@ amber apps remove <应用> [--yes] [--force]`,
   {
     name: "inspect",
     summary: "只读观察页面元素与候选 hint",
-    when: "写流程前先只读看一眼真实页面",
+    when: whenOf("inspect"),
     flow: [
       "写任何 hint/信号前先 inspect --json 拿验证过的 hint_candidates",
       "exists/text 类信号先 --probe <selector> 实证命中数",
@@ -240,7 +242,7 @@ amber apps remove <应用> [--yes] [--force]`,
   {
     name: "schema",
     summary: "引擎语义契约（Agent 无源码自描述面：facts/signals/hints/commands/budget/…）",
-    when: "无源码时查引擎语义契约",
+    when: whenOf("schema"),
     flow: [
       "amber schema ctx --json 看完整契约（九节 + overview）",
       "不确定某算子/hint/停因语义时 --topic <节> 只查那一节",
@@ -262,7 +264,7 @@ amber apps remove <应用> [--yes] [--force]`,
   {
     name: "doctor",
     summary: "环境、配置、决策源体检",
-    when: "环境、浏览器、决策源有问题先体检",
+    when: whenOf("doctor"),
     flow: [
       "先 doctor 看点名清单：缺什么给什么命令",
       "配置问题接 amber config show 看层叠来源",
@@ -279,7 +281,7 @@ amber apps remove <应用> [--yes] [--force]`,
   {
     name: "config",
     summary: "查看 / 修改机器配置",
-    when: "查看或修改机器/项目配置",
+    when: whenOf("config"),
     flow: [
       "config show 看层叠与来源；改键用 config set KEY VALUE（--project 只进本项目）",
     ],
@@ -308,7 +310,7 @@ amber config edit [--project]`,
   {
     name: "model",
     summary: "本地决策模型状态与安装",
-    when: "本地决策模型的安装与状态",
+    when: whenOf("model"),
     flow: [
       "model status 看产物是否齐；缺图/权重用 model fetch --from <url|路径> 安装",
     ],
@@ -335,7 +337,7 @@ amber model path [--json]`,
   {
     name: "test",
     summary: "真实站点测试套件",
-    when: "跑真实站点回归（声明在 online/）",
+    when: whenOf("test"),
     flow: [
       "--validate 离线校验全部声明（PR 门禁，不联网）",
       "--tier smoke 先跑可达性，core/deep 有网络与模型时再跑",
@@ -371,6 +373,16 @@ amber test [--tier smoke|core|deep|probe|all|default] [--case ID] [--site SITE]
 
 export function commandSpec(name: string): CommandSpec | undefined {
   return COMMANDS.find((c) => c.name === name);
+}
+
+/** `amber help --json`（无命令名）的命令清单：层 2 的索引面（结构化，不再给人类文本）。 */
+export function helpCommandsPayload(): Array<Record<string, unknown>> {
+  return COMMANDS.map((c) => ({
+    name: c.name,
+    summary: c.summary,
+    when: c.when ?? null,
+    flow: c.flow ?? [],
+  }));
 }
 
 export function globalHelp(includeAdvanced = false): string {
@@ -410,6 +422,11 @@ export function commandHelp(name: string): string {
   );
   if (spec.related.length) lines.push(`相关命令：${spec.related.join(" · ")}`);
   return lines.join("\n");
+}
+
+/** help-map 是 when 的唯一出处：registry 只投影（prompt-hit overview 组双向校验）。 */
+function whenOf(cmd: string): string | undefined {
+  return WHEN_TO_USE.find((w) => w.cmd === cmd)?.when;
 }
 
 /** registry 没写 when 时从 help-map 兜底（双向一致的校验会让这行防御极少触发）。 */

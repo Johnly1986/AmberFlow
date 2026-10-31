@@ -83,6 +83,26 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - 本机配置写入后 chmod `0600`（Windows 无 POSIX 模式时忽略失败）；新增 `SECURITY.md` 写凭据模型、
   证据脱敏、信任边界、反爬/验证边界与已知缺口。
 
+### 提示词系统补全（2026-10-31，未发布）
+
+- 层 3 覆盖闭环：`STOPCODE_MEANING` 补 `max_steps` / `noul_unverified` / `no_progress` /
+  `space_empty` / `nominated_family_empty|mismatch`；prompt-hit 改**双向**断言
+  （STOP_NEXT ⊆ schema 且 schema ⊆ STOP_NEXT ∪ EXEMPT），并新增 executor `StopCode`
+  union ↔ 契约/内部码边界（`EXECUTOR_ONLY_STOPCODES`，逐条理由）闭环——覆盖率不再只是
+  对手写表的自我证明。
+- 豁免收紧：`needs_human`、`frame_not_allowed`、`popup_not_allowed`、`manual_signal_not_held`、
+  `action_unsupported`、`target_not_found`、`target_ambiguous`、`hint_matched_no_target`、
+  `step_names_no_target` 晋升为可执行 next（STOP_NEXT 28 条 / EXEMPT 3 条）；
+  **停手规则改为失败即输出**（stdout/report.md/report.html），不再依赖 next 是否存在。
+- 层 1 真正进桥：`OVERVIEW_TEXT` 接进 `amberflow_status` 工具描述头部（prompt-hit 断言接线）；
+  概述措辞修正为「模型只做选择/风险/完成票（完成票仅 advisory）」。
+- 层 2 补全：`amber help --json`（无命令名）输出结构化命令清单；registry `when` 改由
+  help-map 单源投影；`run` 帮助补 `--slot-file` / `--confirm-unsafe` 并修正 `--confirm-safe`
+  语义描述；首页「下一步」改由 help-map `HOME_NEXT` 单源渲染。
+- `amber schema ctx --check --topic <节>` 修复：快照按同 topic 切片比较（此前切片 vs
+  全量必然 drift，为既有缺陷，本版修复）。
+- 停手规则进 `docs/APP_SCRIPT_AUTHORING.md` 逐字块（prompt-hit doc 组断言）。
+
 ### M0 可用性（2026-10-31，未发布）
 
 - **默认安全**：应用批量运行的 `confirmFn` 缺省从「一律放行」翻转为按干跑证据拒绝破坏性浏览器动作；
