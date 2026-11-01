@@ -59,6 +59,22 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - `LLMPlanner`（System-2 计划起草）与裸读 `OPENAI_*` 的 `llmEscalator`（含 `snapshotText`）：
   规划归 Agent，escalation 由 `src/model/provider-escalator.ts` 经 provider 缝承接。
 
+### 修复
+
+- **纯验证步停因如实化**（2026-11-01 产品评审 P1）：无 target_hint、无命令空间的子目标在
+  规则档被挡时，不再误报「no model runtime: needs a model pick」——当场评估 done 信号并
+  区分两种实况：「信号已成立但本步未声明动作 → 声明 `commands:[{"op":"skip"}]` 或点名
+  target_hint」/「信号不成立 → 点名、声明命令或提供决策模型」。
+- `plan check --probe`（P1b，opt-in 在线探针）：离线规则通过后，把每个 start_url 真实到达
+  一遍（只读、不动作）——点名步核对 target_hint 能否在实况元素池解析，零动作验证步核对
+  done 信号此刻是否成立；发现机制性必挡项 exit 1（`amber plan check --probe` 同语义）。
+- inspect 输出随附说明（P3）：hint_candidates 可直接用作 hint（**非 CSS** 语法），href 等
+  字段是元素池投影——文本输出加一行标注，`--json` 增 `hint_syntax` 字段。
+- 示例 01-basic-step 信号锚点更新（P4）：h1 锚点在 example.com 实况漂移中已消失，
+  改锚 `<title>` 文本并加「锚点纪律」注释（抄示例前先 inspect 核对实况）。
+- 双载体定位（P2）：文档与 `plan-cli` USAGE 明确——**应用唯一编写格式是 app.mjs**（不接受
+  JSON 应用描述），plan JSON 是逐步调试/续跑的轻载体；`plan new` 输出附定位提示。
+
 ### 安全
 
 - 完成只认信号，模型 done 票仅 advisory；值只来自计划/观察，缺值返回 `needs_value`。

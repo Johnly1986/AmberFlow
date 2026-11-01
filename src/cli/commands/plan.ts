@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { PlanningRules, TaskPlan, type Subgoal } from "../../engine/plan.ts";
 import type { SignalSpec } from "../../engine/signals.ts";
-import { cmdNew, parseSignal, type CliIO } from "../plan-cli.ts";
+import { cmdNew, parseSignal, probePlan, type CliIO } from "../plan-cli.ts";
 import type { CliContext } from "../context.ts";
 import { say, emitJson } from "../context.ts";
 import { usageError, usageFromParseError } from "../errors.ts";
@@ -376,24 +376,29 @@ function planMove(args: string[], ctx: CliContext): number {
   return 0;
 }
 
-function planCheck(args: string[], ctx: CliContext): number {
+async function planCheck(args: string[], ctx: CliContext): Promise<number> {
   const parsed = parse(args, {
-    plan: { type: "string" }, max: { type: "string" }, json: { type: "boolean" }, help: { type: "boolean" },
+    plan: { type: "string" }, max: { type: "string" }, probe: { type: "boolean" },
+    json: { type: "boolean" }, help: { type: "boolean" },
   });
   if (parsed.values.help) {
-    say(ctx, "用法：amber plan check [--plan <文件>] [--max <N>]");
+    say(ctx, "用法：amber plan check [--plan <文件>] [--max <N>] [--probe]");
     return 0;
+  }
+  if (parsed.values.probe && wantsJson(ctx, parsed.values)) {
+    throw usageError("--probe 暂只支持文本输出（去掉 --json 再试）", {
+      hint: "探针输出是给人读的逐条核对行；结构化信号核对请用 amber inspect --url <页面> --json。",
+    });
   }
   const file = path.resolve(ctx.cwd, stringValue(parsed.values.plan) ?? DEFAULT_PLAN);
   const plan = loadPlan(file);
   const max = parseMax(parsed.values.max);
-  const issues = new PlanningRules(max).problems(plan);
-  const code = issues.length ? 2 : 0;
-  if (wantsJson(ctx, parsed.values)) {
-    const envelope = successEnvelope("plan check", {
-      path: file, steps: plan.subgoals.length, ok: issues.length === 0, problems: issues,
-    }, { exitCode: code, next: issues.length ? ["amber plan show"] : ["amber plan run"] });
-    if (issues.length) {
+  const issues = new PlanningRules(Number(max)).problems(plan);
+  if (issues.length) {
+    if (wantsJson(ctx, parsed.values)) {
+      const envelope = successEnvelope("plan check", {
+        path: file, steps: plan.subgoals.length, ok: false, problems: issues,
+      }, { exitCode: 2, next: ["amber plan show"] });
       envelope.ok = false;
       envelope.error = {
         code: "USAGE",
@@ -401,15 +406,26 @@ function planCheck(args: string[], ctx: CliContext): number {
         hint: "按 problems 修正计划；plan check 本身不启动浏览器。",
         next: ["amber plan show"],
       };
+      emitJson(ctx, envelope);
+    } else {
+      say(ctx, "INVALID:");
+      for (const issue of issues) say(ctx, `  - ${issue}`);
     }
-    emitJson(ctx, envelope);
-  } else if (issues.length) {
-    say(ctx, "INVALID:");
-    for (const issue of issues) say(ctx, `  - ${issue}`);
-  } else {
-    say(ctx, `OK: ${plan.subgoals.length} 个步骤通过计划规则`);
+    return 2;
   }
-  return code;
+  if (!parsed.values.probe) {
+    if (wantsJson(ctx, parsed.values)) {
+      emitJson(ctx, successEnvelope("plan check", {
+        path: file, steps: plan.subgoals.length, ok: true, problems: [],
+      }, { exitCode: 0, next: ["amber plan run"] }));
+    } else {
+      say(ctx, `OK: ${plan.subgoals.length} 个步骤通过计划规则`);
+    }
+    return 0;
+  }
+  // P1b：opt-in 在线探针——离线规则过了之后，实况核对 hint 解析与验证步信号。
+  const probeIO: CliIO = { out: (s) => say(ctx, s), ask: async () => false };
+  return await probePlan(file, probeIO) ? 0 : 1;
 }
 
 function planReset(args: string[], ctx: CliContext): number {

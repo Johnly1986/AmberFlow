@@ -2106,6 +2106,22 @@ export class BrowserMiddleware {
           // In rules-only mode a null ref usually means "no runtime to ask", which is not
           // the same failure as "every element is forbidden" — say which one it is.
           if (this.rulesOnly) {
+            // 诚实停因（2026-11-01 产品评审 P1）：这一步**什么动作都没声明**（无 target_hint、
+            // 无命令空间）时，"缺模型"是个谎言——真正的问题要么是"信号已成立但这步没声明
+            // 零动作命令，引擎不肯替作者宣布完成"，要么是"信号根本不成立"。当场评估一次
+            // 信号（只在走向停止时付这一次），把实况和出路说出口，而不是把用户引去装模型。
+            if (curHint === null && cmdSpace.length === 0) {
+              const held = goalSignalFn ? (await goalSignalFn(pg)) : false;
+              stop("no_model_runtime",
+                `step ${stepNo} declares no action (no target_hint, no commands) and rules-only has no model `
+                + `to pick one — its done-signal ${held ? "ALREADY holds on this page: declare a zero-action "
+                    + 'command (commands: [{"op":"skip"}]) on this subgoal, or name a target_hint, so the '
+                    + "signal can be honored"
+                  : "does not hold on this page either: name a target_hint, declare commands, "
+                    + "or provide a decision model"}`, stepNo);
+              if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+              break;
+            }
             stop("no_model_runtime",
               `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`
               // 规划引导：计划点了名、规则没解出来、模型又不在/弃权——当场送闭集。

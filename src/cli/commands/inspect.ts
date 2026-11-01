@@ -229,6 +229,9 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       url: page.url(),
       requested_url: url,
       title: String(await page.title()),
+      // P3（2026-11-01 产品评审）：hint 语法不是 CSS、href 等字段是池投影——实测有 Agent
+      // 把 `a[href=…]` 投影误当 CSS 选择器用。把这两句话随每次观察一起给出去。
+      hint_syntax: "hint_candidates 可直接用作 --hint / ctx.hint（非 CSS 语法）；href 等字段是元素池投影，仅供识别",
       elements,
       element_count: view.count,
       truncated: view.truncated,
@@ -249,6 +252,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     }
     say(ctx, `${data.title} — ${data.url}`);
     say(ctx, `元素 ${data.element_count} 个${data.truncated ? `（只显示前 ${max}）` : ""}`);
+    say(ctx, "（hints 可直接当 --hint / ctx.hint 用——不是 CSS；href 等字段是池投影，仅供识别）");
     if (nearEmpty) {
       // 措辞按实测分开：页面上有交互元素而池没收进来 = 池投影问题；页面上一个都没有 =
       // SPA 未水合/渲染进 shadow DOM——前者试 --wide，后者宽扫也救不了，直接走探针/运行时取证。

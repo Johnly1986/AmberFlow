@@ -159,7 +159,7 @@ amber plan add "<描述>" (--signal <op=value> | --signal-file <json>) [--url <�
 amber plan edit <编号|id> [--desc ...] [--signal ... | --signal-file <json>] [--url ...] [--target ...] [--plan <文件>]
 amber plan rm <编号|id> [--plan <文件>]
 amber plan move <编号|id> --to <位置> [--plan <文件>]
-amber plan check [--plan <文件>]
+amber plan check [--plan <文件>] [--probe]
 amber plan reset [--plan <文件>]
 amber plan run [--plan <文件>] [--reset] [--confirm allow|ask|deny] [--escalate]`,
     examples: [
@@ -177,6 +177,7 @@ amber plan run [--plan <文件>] [--reset] [--confirm allow|ask|deny] [--escalat
       "--to <位置>               move 的目标位置；1-based",
       "--reset                    plan run 的重置步骤状态",
       "--escalate                 plan run 低置信时经决策源 askChoice 点名一次（opt-in）",
+      "--probe                    plan check 的 opt-in 在线探针：实况核对 hint 解析与验证步信号",
       "--confirm allow|ask|deny  plan run 的人工确认策略",
     ],
     related: ["run", "apps"],

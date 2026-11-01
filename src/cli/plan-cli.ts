@@ -20,8 +20,9 @@
 import { parseArgs } from "node:util";
 import { PlanningRules, TaskPlan } from "../engine/plan.ts";
 import { runPlan, type PlannerLike } from "../engine/planner.ts";
-import { SIGNAL_OPS, type SignalSpec } from "../engine/signals.ts";
+import { SIGNAL_OPS, checkSignal, type SignalSpec } from "../engine/signals.ts";
 import { browserSession, BrowserMiddleware, type EscalatorLike } from "../engine/executor.ts";
+import { extractElements } from "../engine/extraction.ts";
 import { getAuditor, type AuditVerdict } from "../engine/audit.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 import { applySpecToRuntime, installDecisionProvider, resolveProviderSpec } from "../model/decision-provider.ts";
@@ -92,6 +93,8 @@ export async function cmdNew(a: NewArgs, io: CliIO = defaultIO): Promise<TaskPla
   plan.path = a.file;
   plan.save();
   io.out(`saved to ${a.file}`);
+  io.out("定位提示：plan JSON 是逐步调试/续跑的轻载体；应用的唯一编写格式是 app.mjs"
+    + "（amber apps new / npm run learn）——命令空间与结束态不变量只在 app 面有一等支持。");
   io.out(JSON.stringify(plan.subgoals, null, 2));
   return plan;
 }
@@ -153,6 +156,74 @@ export function cmdCheck(file: string, max: number, io: CliIO = defaultIO): bool
   }
   io.out(`OK: ${plan.subgoals.length} subgoals pass the planning rules`);
   return true;
+}
+
+/**
+ * 信号可判定性探针（P1b，2026-11-01 产品评审）：opt-in 在线预检——`check --probe`。
+ *
+ * plan check 是纯离线校验，对「信号在目标页永远不成立」「hint 在实况页不存在」零提示；
+ * 执行时才挡、且（修复前）停因误导。探针把每个 start_url 真实到达一遍（只读观察，
+ * 不执行任何动作）：
+ *   - 点名步：target_hint 在实况元素池里能否解析；
+ *   - 零动作验证步（无 target、无 commands）：done 信号此刻是否成立——不成立 = 规则档必挡；
+ *   - 命令步：信号此刻状态只作情报（动作后评估，未成立属预期）。
+ * 失败（hint 未解析 / 验证步信号不成立 / 打不开页面）→ false（exit 1）。
+ * 探针不代替真实执行，只回答"这份计划在当前实况页上有没有机制性必挡项"。
+ */
+export async function probePlan(file: string, io: CliIO = defaultIO): Promise<boolean> {
+  const plan = loadPlan(file);
+  const urls = [...new Set(plan.subgoals
+    .map((s) => s.start_url)
+    .filter((u): u is string => typeof u === "string" && u !== ""))];
+  if (!urls.length) {
+    io.out("PROBE 跳过：没有任何子目标声明 start_url");
+    return true;
+  }
+  // 动态 import：start.ts 静态引 playwright（chromium），拖进来会让 new/add/check 等纯
+  // 离线路径也背上浏览器启动成本——只有真探针才付这笔。
+  const { findByHint } = await import("./start.ts");
+  io.out(`PROBE：${urls.length} 个 start_url 逐一到达并实证（只读观察，不执行任何动作）`);
+  let failed = false;
+  const session = await browserSession(true);
+  try {
+    for (const url of urls) {
+      io.out(`  → ${url}`);
+      try {
+        await session.page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+      } catch (e) {
+        io.out(`    ✗ 打不开：${(e as Error).message}`);
+        failed = true;
+        continue;
+      }
+      const elems = await extractElements(session.page);
+      for (let i = 0; i < plan.subgoals.length; i++) {
+        const sg = plan.subgoals[i]!;
+        if (sg.start_url !== url) continue;
+        const hasCmds = Array.isArray(sg.commands) && sg.commands.length > 0;
+        const head = `    [${i}] ${sg.desc}`;
+        if (sg.target_hint) {
+          const found = findByHint(elems, sg.target_hint);
+          io.out(`${head}\n      target_hint ${JSON.stringify(sg.target_hint)}：${found
+            ? "在实况元素池命中 ✓"
+            : "未命中 ✗（inspect --url 复核 hint；动态页注意水合时机）"}`);
+          if (!found) failed = true;
+        } else if (!hasCmds) {
+          const holds = await checkSignal(session.page as never, sg.signal);
+          io.out(`${head}\n      零动作验证步：done 信号此刻${holds
+            ? "成立 ✓"
+            : "不成立 → 规则档必挡 ✗（inspect --probe 核对选择器；声明 skip 命令救不了不成立的信号）"}`);
+          if (!holds) failed = true;
+        } else {
+          const holds = await checkSignal(session.page as never, sg.signal);
+          io.out(`${head}\n      命令步：done 信号此刻${holds ? "已成立" : "未成立（动作后评估，属预期）"}`);
+        }
+      }
+    }
+  } finally {
+    await session.close();
+  }
+  io.out(failed ? "PROBE：发现机制性必挡项 ✗（先修计划再 run）" : "PROBE：全部可判定 ✓");
+  return !failed;
 }
 
 export function cmdReset(file: string, io: CliIO = defaultIO): void {
@@ -273,9 +344,13 @@ const USAGE = `Plan CLI: hand-built plans（规划归 Agent，LLM 起草/重规�
   plan-cli new "goal..." [--url URL] [--max N]
   plan-cli add IDX "desc" --signal OP=VALUE [--url URL] [--hint HINT]
   plan-cli edit IDX [--desc D] [--signal S] [--url U] [--hint H]
-  plan-cli move IDX TO | del IDX | show | check | reset
+  plan-cli move IDX TO | del IDX | show | check [--probe] | reset
   plan-cli run [--confirm allow|deny|ask] [--reset] [--escalate] [--provider NAME]
                [--learn-hints | --hint-memory FILE]   # learned hints live in a SIDECAR
+
+载体定位：plan JSON 是**逐步调试 / 续跑**的轻载体；应用的唯一编写格式是 app.mjs
+（amber apps new / npm run learn）——命令空间（含零动作验证步）与结束态不变量只在
+app 面有一等支持。check --probe 是 opt-in 在线探针：实况核对 hint 解析与验证步信号。
 
 Plans live in --file (default ${DEFAULT_FILE}); editing that JSON by hand between
 commands works too — \`check\` re-validates whatever is on disk.`;
@@ -299,6 +374,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: CliIO = d
         url: { type: "string" }, hint: { type: "string" },
         desc: { type: "string" }, signal: { type: "string" },
         confirm: { type: "string" }, reset: { type: "boolean" },
+        probe: { type: "boolean" },
         escalate: { type: "boolean" }, provider: { type: "string" },
         headful: { type: "boolean" },
         "hint-memory": { type: "string" }, "learn-hints": { type: "boolean" },
@@ -360,8 +436,12 @@ export async function main(argv: string[] = process.argv.slice(2), io: CliIO = d
         cmdMove(file, from, to, io);
         return 0;
       }
-      case "check":
-        return cmdCheck(file, max, io) ? 0 : 1;
+      case "check": {
+        const rulesOk = cmdCheck(file, max, io);
+        if (!rulesOk) return 1;
+        if (parsed.values.probe) return await probePlan(file, io) ? 0 : 1;
+        return 0;
+      }
       case "reset":
         cmdReset(file, io);
         return 0;

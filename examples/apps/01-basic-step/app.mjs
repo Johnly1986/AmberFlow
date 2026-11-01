@@ -4,6 +4,10 @@
  * 离线可验：`apps check` / `run --dry-run` 只把调用序列 dry 一遍——不开浏览器、不调模型、
  * 不联网。真跑需要本机装好 chromium；本示例的入口是公开的 https://example.com/。
  *
+ * ⚠ 锚点纪律（2026-11-01 核对）：本示例的信号锚在 `<title>` 文本——它是该页当前
+ * 真实存在的结构。页面会漂移（曾经存在、后被移除的 h1 就是前车之鉴）：抄这个示例前，
+ * 先 `amber inspect --url <入口页> --json` 核对你要写的锚点在实况页上成立。
+ *
  * 抄这个示例时通常只改三处：入口 URL、完成信号（done）、结束态不变量（invariants）。
  */
 export const meta = (kit) => ({
@@ -23,7 +27,7 @@ export async function flow(ctx) {
   const arrived = await ctx.arrive("https://example.com/", {
     id: "arrive-home",
     desc: "到达 example.com",
-    done: ctx.judge.all(ctx.judge.url("example.com"), ctx.judge.exists("h1")),
+    done: ctx.judge.all(ctx.judge.url("example.com"), ctx.judge.text("title", "Example Domain")),
   });
   if (!arrived.ok) ctx.fail(arrived.stopCode ?? "arrive_failed", arrived.reason);
 
@@ -34,7 +38,7 @@ export async function flow(ctx) {
   const verified = await ctx.step("确认示例页标题", {
     id: "verify-heading",
     act: [ctx.command("skip")],
-    done: ctx.judge.text("h1", "Example Domain"),
+    done: ctx.judge.text("title", "Example Domain"),
   });
   if (!verified.ok) ctx.fail(verified.stopCode ?? "step_failed", verified.reason);
 
