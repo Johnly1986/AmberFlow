@@ -681,7 +681,7 @@ export interface RunSummary {
    */
   model?: string
   /**
-   * The decision-source tally (`rule 19 · laya 1 (conf 0.31) · laya:reobserve 1 · cache 6/12`)
+   * The decision-source tally (`rule 19 · model 1 (decision-service, conf 0.31) · reobserve 1 · cache 6/12`)
    * from the engine's `decisions.line` — model appearances in one string, so a plugin user can
    * SEE the ladder working instead of reading step logs. Absent for older artifacts.
    */

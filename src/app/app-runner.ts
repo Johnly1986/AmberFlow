@@ -273,17 +273,17 @@ const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, 
 export interface AppDecisions {
   /** 浏览器动作腿里"有判定"的步数（trace 条目数；跳过的子目标不产生判定）。 */
   total_steps: number;
-  /** 各判定方式的计数：`rule:match` / `laya` / `laya:reobserve` / `escalate` / `manual` / 其他。 */
+  /** 各判定方式的计数：`rule:match` / 决策源真名（`decision-service`、本地档 `laya`）+ `:reobserve`/`:adjudicated` 后缀 / `escalate` / 其他。 */
   by_method: Record<string, number>;
   /**
    * 模型被咨询的决策数（运行时缝上数的，含没过置信闸门的那些）。
-   * `laya`/`laya:reobserve` 只统计**过关并执行了**的咨询；咨询而没过闸门不在 trace 里留
+   * 模型票只统计**过关并执行了**的咨询；咨询而没过闸门不在 trace 里留
    * `method`（执行器在 `low confidence` 处直接 break），所以"保险碰没碰过"必须看这个数。
    */
   model_asks: number;
-  /** 过关执行的模型步：`laya` + `laya:reobserve`（escalate 是远程老师，另列）。 */
+  /** 过关执行的模型步（含 :reobserve/:adjudicated 变体；escalate 是老师点名，另列）。 */
   model_steps: number;
-  /** 加宽重看（`laya:reobserve`）的步数——从"低置信要停"边缘救回来的那一步。 */
+  /** 加宽重看（`<provider>:reobserve`）的步数——从"低置信要停"边缘救回来的那一步。 */
   reobserve: number;
   /** escalate 步数（LLM 老师点名，非本地模型）。 */
   escalate: number;
@@ -297,8 +297,8 @@ export interface AppDecisions {
    * trace 里 `method` 就是这么记的，所以不需要反事实重跑）。整条梯级在语料上决定 0 步
    * 就是 `dead rung`，由套件在**聚合层**判定（单应用看不出全貌，见 tools/apps_suite.ts）。
    */
-  ladder: { rule: number; laya: number; reobserve: number; escalate: number; adjudicated: number; asked_not_passed: number };
-  /** 一行汇总，人读与机器读同一份：`rule 19 · laya 1 (conf 0.31) · 咨询 5 · laya:reobserve 1 · cache 6/12`。 */
+  ladder: { rule: number; model: number; reobserve: number; escalate: number; adjudicated: number; asked_not_passed: number };
+  /** 一行汇总，人读与机器读同一份：`rule 19 · model 1 (decision-service, conf 0.31) · 咨询 5 · reobserve 1 · cache 6/12`。 */
   line: string;
 }
 
@@ -308,37 +308,56 @@ export function summarizeDecisions(
 ): AppDecisions {
   const byMethod: Record<string, number> = {};
   const modelConfs: number[] = [];
+  const modelBases = new Set<string>();   // 本次出现过的决策源名（去重；进汇总行）
+  const bucketed = new Set<string>();     // 已进 rule/model/escalate 桶的 method 名；其余进 extra
+  let rule = 0, model = 0, reobserve = 0, adjudicated = 0, escalate = 0;
   for (const t of steps) {
     const m = typeof t["method"] === "string" ? t["method"] : "other";
     byMethod[m] = (byMethod[m] ?? 0) + 1;
-    if ((m === "laya" || m === "laya:reobserve" || m === "laya:adjudicated") && typeof t["conf"] === "number") {
-      modelConfs.push(t["conf"]);
+    // 粗分类读 trace 自带的 decision_kind（2026-11-01 ④：method 显示名跟着 provider 走，
+    // 聚合不能跟着显示名漂）；无该字段的旧 trace（replay 的历史证据）按旧精确串回退。
+    const kind = t["decision_kind"];
+    const isModel = kind === "model"
+      || (kind === undefined && (m === "laya" || m === "laya:reobserve" || m === "laya:adjudicated"));
+    if (isModel) {
+      model += 1;
+      bucketed.add(m);
+      modelBases.add(m.replace(/:(reobserve|adjudicated)$/, ""));
+      if (m.endsWith(":reobserve")) reobserve += 1;
+      if (m.endsWith(":adjudicated")) adjudicated += 1;
+      if (typeof t["conf"] === "number") modelConfs.push(t["conf"]);
+    } else if (kind === "rule" || (kind === undefined && m === "rule:match")) {
+      rule += 1;
+      bucketed.add(m);
+    } else if (kind === "escalate" || (kind === undefined && m === "escalate")) {
+      escalate += 1;
+      bucketed.add(m);
     }
   }
-  const laya = byMethod["laya"] ?? 0;
-  const reobserve = byMethod["laya:reobserve"] ?? 0;
-  const adjudicated = byMethod["laya:adjudicated"] ?? 0;
-  const escalate = byMethod["escalate"] ?? 0;
+  // 汇总行里模型票内联决策源真名（单源时）；混源/未知就不点名，明细在 by_method/traces。
+  const baseTag = modelBases.size === 1 ? [...modelBases][0]! : "";
+  const confTag = modelConfs.length ? `conf ${Math.max(...modelConfs).toFixed(2)}` : "";
+  const modelTags = [baseTag, confTag].filter(Boolean).join(", ");
   const parts = [
-    `rule ${byMethod["rule:match"] ?? 0}`,
-    `laya ${laya}` + (modelConfs.length ? ` (conf ${Math.max(...modelConfs).toFixed(2)})` : ""),
-    `laya:reobserve ${reobserve}`,
+    `rule ${rule}`,
+    `model ${model}` + (modelTags ? ` (${modelTags})` : ""),
+    `reobserve ${reobserve}`,
     // A2′：只有真发生过裁决才出现在这一行（缺省等价的纪律，同 path_visits）。
-    ...(adjudicated ? [`laya:adjudicated ${adjudicated}`] : []),
+    ...(adjudicated ? [`adjudicated ${adjudicated}`] : []),
     `escalate ${escalate}`,
   ];
   // 咨询数与过关数并排放：差值就是"问了但没过闸门"的那几次——它们不在 trace 里，
   // 但它们是保险被碰过的直接证据（slowjet 的冷加载正是这一形状）。
   // A2′：裁决过的也算"过了"（被执行了，只是没过置信闸门、改由信号裁决），否则会把
   // 一次真救回来的裁决错记成"问了没用"。
-  const passed = laya + reobserve + adjudicated;
+  const passed = model;
   if (modelAsks !== passed) {
     parts.push(`模型被咨询 ${modelAsks} 次`
       + (modelAsks > passed ? `（${modelAsks - passed} 次未过闸门）` : ""));
   }
-  const extra = Object.entries(byMethod)
-    .filter(([m]) => !["rule:match", "laya", "laya:reobserve", "laya:adjudicated", "escalate"].includes(m));
-  for (const [m, n] of extra) parts.push(`${m} ${n}`);
+  for (const [m, n] of Object.entries(byMethod)) {
+    if (!bucketed.has(m)) parts.push(`${m} ${n}`);
+  }
   if (cache !== null) {
     parts.push(`cache 命中 ${cache.hits}/${cache.hits + cache.misses} forwards`);
   }
@@ -346,15 +365,17 @@ export function summarizeDecisions(
     total_steps: steps.length,
     by_method: byMethod,
     model_asks: modelAsks,
-    model_steps: laya + reobserve + adjudicated,
+    model_steps: model,
     reobserve,
     escalate,
     ladder: {
-      rule: byMethod["rule:match"] ?? 0,
-      laya, reobserve, escalate,
+      rule,
+      // 梯级账单（2026-11-01 ④ 起键名 model）：决策源真名进 trace.method，聚合按粗分类。
+      model,
+      reobserve, escalate,
       // A2′：裁决级单独计数（梯级账单要能看见"这一级今天兜回过没有"）。
       adjudicated,
-      asked_not_passed: Math.max(0, modelAsks - (laya + reobserve + adjudicated)),
+      asked_not_passed: Math.max(0, modelAsks - model),
     },
     conf: {
       n: modelConfs.length,

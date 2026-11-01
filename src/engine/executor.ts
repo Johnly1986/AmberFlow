@@ -415,7 +415,8 @@ export interface RunOptions {
    * 加载期已校验，见 `plan.ts`），于是当规则/窄问/加宽/升级**都拿不下**、本来要 `low_confidence`
    * 阻塞时，**让本地模型的低置信选择被执行，由这一步自己的 DOM 信号事后裁决**——
    * 与老师提名同一认识论（执行 + 信号定生死），只是爆炸半径由声明限定：每个元素一次机会
-   * （裁决过未确认即禁），不可逆的步绝不允许开这个口。trace 记 `laya:adjudicated`。
+   * （裁决过未确认即禁），不可逆的步绝不允许开这个口。trace 记 `<provider>:adjudicated`
+   * （本地 laya 档即 `laya:adjudicated`）。
    * 不写 = 今天逐字节（低置信即阻塞）。
    */
   adjudicate?: boolean;
@@ -1094,6 +1095,16 @@ export class BrowserMiddleware {
       entropyConf: picked.conf,
       probs: picked.probs,
     };
+  }
+
+  /**
+   * 决策票在 trace `method` 里的显示名：provider 自报其名（decision-service / 基线名…）。
+   * legacy runtime 被包装时的名字（`laya(legacy-runtime)`）归一化为 `laya`——本地 laya 档
+   * 的 method 串保持逐字节不变；换任何别的 provider，标签就是那个 provider 的真名。
+   */
+  private modelLabel(): string {
+    const n = this.decision?.name ?? "laya";
+    return n === "laya(legacy-runtime)" ? "laya" : n;
   }
 
   /**
@@ -2057,13 +2068,20 @@ export class BrowserMiddleware {
         }
         let ref: string | null = null;
         let conf = 0;
-        let method = "laya";
+        // 方法标签跟着决策源走（2026-11-01 ④）：provider 自报其名（decision-service / 基线名…）；
+        // legacy runtime 包装的归一化为 "laya"——本地 laya 档的 method 串逐字节不变。
+        const mm = this.modelLabel();
+        let method = mm;
+        // 粗分类（聚合用）：rule=规则/闭集解析，model=provider 决策票，escalate=老师点名。
+        // 显示名交给 method（可含 :reobserve/:adjudicated 后缀），聚合读这个字段。
+        let decisionKind: "rule" | "model" | "escalate" = "model";
         let layaMargin: number | null = null;      // C3-R top-two margin (diagnostic)
         let tierAsk: { n: number; tier: number } | null = null;   // P1 diagnostic: the narrowed question
         if (ruleRef && !(ruleRef in forbidden)) {
           ref = ruleRef;
           conf = 1.0;
           method = "rule:match";
+          decisionKind = "rule";
         } else {
           // the rule's target is forbidden (inert or tried) -> fall through to
           // laya with the reduced action space instead of re-hitting a known-dead
@@ -2099,7 +2117,7 @@ export class BrowserMiddleware {
           }
           ref = picked;
           conf = pconf;
-          method = "laya";
+          method = mm;
           layaMargin = topTwoMargin(pprobs);
         }
         if (ref === null) {
@@ -2199,7 +2217,7 @@ export class BrowserMiddleware {
             // target that never entered it cannot be chosen no matter how good the
             // model is. Take ONE wider look and re-ask before blocking the subgoal.
             // Only the way to stopping pays for the extra scan; the pick is recorded
-            // as `laya:reobserve` so a widened step is visible in the trace/audit.
+            // as `<provider>:reobserve` so a widened step is visible in the trace/audit.
             let recovered = false;
             // A2′：加宽重看即便没过闸门，它看到的候选也可能比窄池那一个更好——
             // 记下来，若这一步声明了裁决资格，就用**最后一次观察到的**低置信选择（elems 已是宽视图）。
@@ -2224,7 +2242,7 @@ export class BrowserMiddleware {
                 if (ref2 !== null && conf2 >= floor) {
                   ref = ref2;
                   conf = conf2;
-                  method = "laya:reobserve";
+                  method = `${mm}:reobserve`;
                   recovered = true;
                   if (verbose) {
                     console.log(`  step ${stepNo}: re-observed wider `
@@ -2259,6 +2277,7 @@ export class BrowserMiddleware {
                 if (pick && crit[pick] !== undefined && !(pick in forbidden)) {
                   ref = pick;
                   method = "escalate";
+                  decisionKind = "escalate";
                   escalatedPick = pick;
                   recovered = true;
                   if (verbose) console.log(`  step ${stepNo}: escalated -> ${pick}`);
@@ -2279,7 +2298,7 @@ export class BrowserMiddleware {
               if (adjudicate && bestPick !== null && !this.rulesOnly) {
                 ref = bestPick.ref;
                 conf = bestPick.conf;
-                method = "laya:adjudicated";
+                method = `${mm}:adjudicated`;
                 if (verbose) {
                   console.log(`  step ${stepNo}: adjudicating below gate (${ref} `
                     + `conf=${conf.toFixed(2)} < floor ${floor.toFixed(2)}) — the step's own signal judges`);
@@ -2303,7 +2322,7 @@ export class BrowserMiddleware {
         // "组合交通出行"，conf 0.71 过闸点走页脚）。执行前强制一次宽扫重问（宽池含 R2/
         // R2c 启发式候选），重问结果照常过闸；无更优则保留原提名。规则命中与 conf=1.00
         // 的模型提名不触发（books/quotes/hn 全量 rule:match conf=1.00 实证零回归面）。
-        if (ref !== null && !reobserved && method === "laya" && conf < 0.9
+        if (ref !== null && !reobserved && method === mm && conf < 0.9
             && !lexicalOverlap(instruction, String(elems[ref]?.label ?? ""))) {
           reobserved = true;
           const wideR2b = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true });
@@ -2316,7 +2335,7 @@ export class BrowserMiddleware {
             if (ref2 !== null && conf2 >= floor) {
               ref = ref2;
               conf = conf2;
-              method = "laya:reobserve";
+              method = `${mm}:reobserve`;
               if (verbose) {
                 console.log(`  step ${stepNo}: R2b relevance widen -> ${ref} conf=${conf2.toFixed(2)}`);
               }
@@ -2353,7 +2372,7 @@ export class BrowserMiddleware {
             }
             if (repaired === null) {
               const [rp, rconf] = await this.pickElement(instruction, pg, narrow, forbiddenSet, noted);
-              if (rp !== null && rconf >= repairFloor) repaired = { ref: rp, conf: rconf, method: "laya" };
+              if (rp !== null && rconf >= repairFloor) repaired = { ref: rp, conf: rconf, method: mm };
             }
             if (repaired === null) {
               stop("nominated_family_mismatch",
@@ -2545,9 +2564,10 @@ export class BrowserMiddleware {
         }
         trace.push({
           step: stepNo, desc, how, value: redactValue(el, arg), risky, executed, confirmed, method,
+          decision_kind: decisionKind,
           conf: round3(conf), ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
           ...(nominatedRepair ? { nominated_family_repair: true } : {}),
-          ...(method.startsWith("laya") && layaMargin !== null
+          ...(decisionKind === "model" && layaMargin !== null
             ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}),
           ...(method === "escalate" && escalatedPick ? { escalated: true } : {}),
           ...(prevented ? { prevented } : {}),
@@ -2589,7 +2609,7 @@ export class BrowserMiddleware {
           // A MODEL pick that actually advanced the subgoal is a hint we EARNED: record
           // it (stable handles only, via induceHint) so the next run of this exact url +
           // subgoal resolves by rule at zero model cost. Rule hits need no help.
-          if (hintMemory && this._hintKey && (method.startsWith("laya") || method === "escalate")) {
+          if (hintMemory && this._hintKey && (decisionKind === "model" || decisionKind === "escalate")) {
             const learned = induceHint(el);
             if (learned) {
               hintMemory.record(this._hintKey, learned);
@@ -2717,12 +2737,12 @@ export class BrowserMiddleware {
           // after any fill that did not advance it. Rule hits on clicks stay
           // exempt: two subgoals may legitimately drive the same button, and the
           // inert guard catches dead loops.
-          if (method === "laya" || how === "filled") forbid(ref, el, "anti-repeat");
+          if (method === mm || how === "filled") forbid(ref, el, "anti-repeat");
         }
         // A2′：裁决过一次的元素不配第二次机会——声明说"错了白跑"，白跑一次就是它的全部代价。
         // 不挂在 antiRepeat 下（那是循环通用卫生），因为"一次裁决"是 A2′ 的语义本身：
         // 走到这里 = 执行了、非惰性、信号没成立 ⇒ 这一格裁判已给出"不算"，禁掉换下一个候选。
-        if (method === "laya:adjudicated" && executed) forbid(ref, el, "adjudicated-missed");
+        if (method === `${mm}:adjudicated` && executed) forbid(ref, el, "adjudicated-missed");
         // 动作间最小等待：只在实际执行过动作、且还要继续要下一个动作时付。
         // 放在所有"这步已经结束/这块元素被禁"的分支之后，done 的路径不会多等。
         if (executed && this.actionDelayMs > 0) await sleep(this.actionDelayMs);

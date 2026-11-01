@@ -198,7 +198,7 @@ checkout。除非部署把 `allowDangerous` 设为 true，危险的工具步一�
 录制（`learn`）、回归（`test`）。`amberflow_run` 回答 PASS/FAIL、完成计数、不变量计数、带障碍文本
 的失败步骤，以及报告路径；完成的步骤只是计数而不是逐行，所以六十步的流程只用一行而不是一页。
 每个回答还带一行**模型层级**（`model: on` / `off(missing)` / `off(rules-only)`），以及产物里有时的
-逐步骤**决策小计**（`rule 19 · laya 1 (conf 0.31) · laya:reobserve 1 · cache 命中 6/12 forwards`）：
+逐步骤**决策小计**（`rule 19 · model 1 (decision-service, conf 0.31) · reobserve 1 · cache 命中 6/12 forwards`）：
 用户一眼看清这次跑在哪一层、模型出场没有。**跑了但没被拒绝**的工具步也会被点名；若一次失败没有任何
 可点名的步骤，摘要会报出退出码或超时，因此 FAIL 总会说明它是怎么失败的。`dry` 则改为回答脚本的
 dry 调用序列，让人不运行也能检查一条 flow。`amberflow_learn` 回答它被把关的那次回放（含模型调用

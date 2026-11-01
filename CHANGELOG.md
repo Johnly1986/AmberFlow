@@ -65,6 +65,12 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   规则档被挡时，不再误报「no model runtime: needs a model pick」——当场评估 done 信号并
   区分两种实况：「信号已成立但本步未声明动作 → 声明 `commands:[{"op":"skip"}]` 或点名
   target_hint」/「信号不成立 → 点名、声明命令或提供决策模型」。
+- **trace 方法标签跟决策源走**（2026-11-01 二轮评审④）：`method` 不再硬编码 `laya`——
+  provider 自报真名（线上档 `decision-service`、消融基线真名；本地 laya 档归一化仍为
+  `laya`，逐字节不变），后缀 `<name>:reobserve` / `<name>:adjudicated` 动态拼接；
+  trace step 增 `decision_kind`（rule/model/escalate）粗分类字段。`decisions.line` 汇总
+  `laya 1` → `model 1 (decision-service, conf …)`；ladder JSON 键 `laya` → `model`
+  （2.0.0 未发布窗口一次改净；旧 trace 回退按旧串聚合，重放不受影响）。
 - `plan check --probe`（P1b，opt-in 在线探针）：离线规则通过后，把每个 start_url 真实到达
   一遍（只读、不动作）——点名步核对 target_hint 能否在实况元素池解析，零动作验证步核对
   done 信号此刻是否成立；发现机制性必挡项 exit 1（`amber plan check --probe` 同语义）。

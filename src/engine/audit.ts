@@ -14,6 +14,8 @@ export interface TraceStep {
   risky?: boolean;
   executed?: boolean;
   confirmed?: boolean;
+  /** 粗分类（聚合口径）：rule=规则/闭集解析，model=provider 决策票，escalate=老师点名。 */
+  decision_kind?: "rule" | "model" | "escalate";
   [k: string]: unknown;
 }
 

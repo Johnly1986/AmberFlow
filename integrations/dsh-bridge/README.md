@@ -221,7 +221,7 @@ The model sees a set of tools with narrow schemas: list/read (`apps` / `app_show
 with their obstacle text, and the report path; steps that completed are a count, not rows, so a
 sixty-step flow costs a line rather than a page. Every answer also carries a **tier line** —
 `model: on` / `off(missing)` / `off(rules-only)` — and, when the artifact has it, the per-step
-**decision tally** (`rule 19 · laya 1 (conf 0.31) · laya:reobserve 1 · cache 命中 6/12 forwards`):
+**decision tally** (`rule 19 · model 1 (decision-service, conf 0.31) · reobserve 1 · cache 命中 6/12 forwards`):
 a user learns which ladder actually ran, and the model's appearances stop being invisible step-log
 trivia. A tool step that failed without being refused is named too, and a run that stopped with no
 failed step to name reports its exit code or timeout, so a FAIL says why it failed.
