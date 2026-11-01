@@ -8,9 +8,25 @@
 
 ## 1. 统一决策函数入口：规划决策与流程执行同源
 
-**状态**：open ｜ **优先级建议**：P1
+**状态**：done（2026-11-01 落地）｜ **优先级建议**：P1
 
-### 现状（问题）
+> **落地记录（2026-11-01，前提变更后重定义范围）**：项目方前提——**规划任务在 Agent 内完成，
+> 本系统不做独立规划**。据此本条从「两条 LLM 入口合并」改为「收缩 + 重接」：
+>
+> - 引擎内 LLM 规划/重规划面**移除**（原验收 #2 的「规划侧改走 provider spec」以此形式落地）：
+>   `LLMPlanner`、`plan-cli new --llm`、`plan-cli run --replan`（及 `amber plan new/run` 的
+>   `--llm`/`--replan` 转发）与 `PLANNER_MODEL` 配置键都不再存在；被挡子目标以
+>   `blocked + obstacle` 结构化结果返回，由 Agent 决定下一步。
+> - `llmEscalator`（步级决策，非规划）由 `src/model/provider-escalator.ts` 承接：经
+>   `DecisionProvider.askChoice` 闭集窄问（池外 → null，双层 fail-closed），原裸读
+>   `OPENAI_*` 的实现删除；接线为 opt-in（`--escalate`），`askChoice` 计入 `countedProvider`
+>   咨询计数（满足原验收 #1/#3）。
+> - `plan-cli run` 接入与 start/apps/online 相同的决策源解析（满足原验收 #4：
+>   同一 `--provider` 覆盖对执行与 escalation 同时生效）。
+> - `OPENAI_BASE_URL`/`OPENAI_API_KEY` 只剩事后审计（`LLMAuditor`）一个消费者；
+>   边界说明见 `docs/DECISION_SERVICE_CONFIG.md` §6。
+
+### 现状（问题，落地前存档）
 
 决策目前有**两个不同入口**，行为与可观测性不一致：
 
@@ -130,3 +146,4 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 
 #3 依赖 #2 的候选契约；#1 独立可先行。建议顺序：**#1 → #2 → #3**；
 每条独立成提交，行为等价性验收先行（#2 的逐字节对比是硬门）。
+**进度（2026-11-01）**：#1 已完成（规划归 Agent 前提下重定义落地，见条目内落地记录）；下一步 #2。

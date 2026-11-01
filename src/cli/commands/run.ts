@@ -39,7 +39,7 @@ const OPTIONS = {
   remember: { type: "boolean" as const },
   memory: { type: "string" as const },
   reset: { type: "boolean" as const },
-  replan: { type: "boolean" as const },
+  escalate: { type: "boolean" as const },
   confirm: { type: "string" as const },
   target: { type: "string" as const },
   max: { type: "string" as const },
@@ -149,8 +149,8 @@ export async function runRun(args: string[], ctx: CliContext): Promise<number> {
 
 function validateAppFlags(v: Values, mode: "app" | "pick"): void {
   if (str(v["save-plan"])) throw usageError("--save-plan 只用于 --goal");
-  if (bool(v.reset) || bool(v.replan) || str(v.confirm)) {
-    throw usageError("--reset / --replan / --confirm 只用于 --plan 模式", {
+  if (bool(v.reset) || bool(v.escalate) || str(v.confirm)) {
+    throw usageError("--reset / --escalate / --confirm 只用于 --plan 模式", {
       hint: mode === "pick" ? "选定应用后不支持计划状态旗标。" : undefined,
     });
   }
@@ -188,8 +188,8 @@ function validateGoalFlags(v: Values): void {
   if (bool(v["skip-data"])) throw usageError("--skip-data 只用于应用运行");
   if (bool(v["allow-dangerous"])) throw usageError("--allow-dangerous 只用于应用包");
   if (bool(v.remember) || str(v.memory)) throw usageError("--remember / --memory 只用于应用包 / --plan");
-  if (bool(v.reset) || bool(v.replan) || str(v.confirm)) {
-    throw usageError("--reset / --replan / --confirm 只用于 --plan 模式");
+  if (bool(v.reset) || bool(v.escalate) || str(v.confirm)) {
+    throw usageError("--reset / --escalate / --confirm 只用于 --plan 模式");
   }
   if (str(v.out)) throw usageError("--out 只用于应用运行");
   if (str(v.slot) || Array.isArray(v.slot)) throw usageError("--slot 只用于应用运行");
@@ -470,7 +470,9 @@ async function runPlanFile(v: Values, ctx: CliContext): Promise<number> {
   const jsonMode = bool(v.json) || ctx.globals.json;
   const args = ["run", "--file", planPath];
   if (bool(v.reset)) args.push("--reset");
-  if (bool(v.replan)) args.push("--replan");
+  if (bool(v.escalate)) args.push("--escalate");
+  const planProvider = str(v.provider);
+  if (planProvider) args.push("--provider", planProvider);
   const confirm = str(v.confirm) ?? (ctx.globals.yes ? "allow" : ctx.isTTY ? null : "deny");
   if (confirm && !["allow", "ask", "deny"].includes(confirm)) {
     throw usageError("--confirm 只能是 allow / ask / deny");

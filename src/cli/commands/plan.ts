@@ -185,12 +185,12 @@ export async function runPlan(args: string[], ctx: CliContext): Promise<number> 
 
 async function planNew(args: string[], ctx: CliContext): Promise<number> {
   const parsed = parse(args, {
-    url: { type: "string" }, llm: { type: "boolean" }, max: { type: "string" },
+    url: { type: "string" },
     "save-plan": { type: "string" }, plan: { type: "string" },
     json: { type: "boolean" }, help: { type: "boolean" },
   });
   if (parsed.values.help) {
-    say(ctx, '用法：amber plan new "<目标>" [--url <页面>] [--llm] [--max <N>] [--save-plan <文件>]');
+    say(ctx, '用法：amber plan new "<目标>" [--url <页面>] [--save-plan <文件>]');
     return 0;
   }
   if (parsed.values.plan) {
@@ -201,7 +201,6 @@ async function planNew(args: string[], ctx: CliContext): Promise<number> {
   const displayFile = stringValue(parsed.values["save-plan"]) ?? DEFAULT_PLAN;
   // main() 允许测试注入 cwd；cmdNew/save 用的是进程 cwd，所以这里先锚定到 ctx.cwd。
   const file = path.resolve(ctx.cwd, displayFile);
-  const max = parseMax(parsed.values.max);
 
   const buffer: string[] = [];
   const io: CliIO = {
@@ -211,10 +210,7 @@ async function planNew(args: string[], ctx: CliContext): Promise<number> {
   let plan: TaskPlan;
   const url = stringValue(parsed.values.url);
   try {
-    plan = await cmdNew({
-      goal, file, llm: Boolean(parsed.values.llm),
-      url: url ?? null, max,
-    }, io);
+    plan = await cmdNew({ goal, file, url: url ?? null }, io);
   } catch (err) {
     throw usageError(err instanceof Error ? err.message : String(err));
   }
@@ -440,14 +436,15 @@ function planReset(args: string[], ctx: CliContext): number {
 async function planRun(args: string[], ctx: CliContext): Promise<number> {
   const parsed = parse(args, {
     plan: { type: "string" }, max: { type: "string" },
-    reset: { type: "boolean" }, replan: { type: "boolean" },
+    reset: { type: "boolean" }, escalate: { type: "boolean" },
+    provider: { type: "string" },
     confirm: { type: "string" }, "learn-hints": { type: "boolean" },
     "hint-memory": { type: "string" }, remember: { type: "boolean" },
     memory: { type: "string" }, headful: { type: "boolean" },
     json: { type: "boolean" }, help: { type: "boolean" },
   });
   if (parsed.values.help) {
-    say(ctx, "用法：amber plan run [--plan <文件>] [--reset] [--replan] [--confirm allow|ask|deny]");
+    say(ctx, "用法：amber plan run [--plan <文件>] [--reset] [--confirm allow|ask|deny] [--escalate] [--provider <名字>]");
     return 0;
   }
   const confirm = stringValue(parsed.values.confirm)
@@ -482,7 +479,9 @@ async function planRun(args: string[], ctx: CliContext): Promise<number> {
   const memory = stringValue(parsed.values.memory) ?? stringValue(parsed.values["hint-memory"]);
   const argv = ["run", "--file", file];
   if (parsed.values.reset) argv.push("--reset");
-  if (parsed.values.replan) argv.push("--replan");
+  if (parsed.values.escalate) argv.push("--escalate");
+  const providerName = stringValue(parsed.values.provider);
+  if (providerName) argv.push("--provider", providerName);
   if (confirm) argv.push("--confirm", confirm);
   if (remember) argv.push("--learn-hints");
   if (memory) argv.push("--hint-memory", memory);

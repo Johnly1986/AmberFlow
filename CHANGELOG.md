@@ -38,12 +38,26 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   移除 provider 配置键与命令行模型旗标，`--provider` 只用于本次实验/消融。
 - 应用作者模型收敛为 flow 脚本：仓库不再是「决策任务流引擎」，`flow.json` / `pack.json`
   声明式应用与语义模板被 `app.mjs` 取代。
+- **统一决策函数入口**（BACKLOG #1；前提：规划归 Agent）：执行侧 provider 缝成为引擎唯一
+  决策入口。`plan-cli run` 接入与 start/apps/online 相同的决策源解析（三件套 / 本地 laya /
+  `--provider` 本次覆盖）；低置信 escalation 梯级改走 `DecisionProvider.askChoice` 闭集窄问
+  （`plan-cli run --escalate` / `amber run --plan --escalate` / `amber plan run --escalate`，
+  opt-in 缺省关），provider 不支持 `askChoice` 时梯级缺席并如实打印；`askChoice` 计入
+  咨询计数（`countedProvider`）。
+- **规划归 Agent**：移除引擎内 LLM 规划/重规划面——`plan-cli new --llm` 与
+  `plan-cli run --replan`（及 `amber plan new --llm`、`--replan` 转发）不再存在，被挡子目标
+  照旧以 `blocked + obstacle` 结构化结果返回，由 Agent 决定下一步。
+- `PLANNER_MODEL` 配置键移除（旧 rc 残留会在加载期以未知键拒绝，删掉该键即可）；
+  `OPENAI_BASE_URL` / `OPENAI_API_KEY` 只剩事后审计（`LLMAuditor`）一个消费者，
+  配置组更名为「外层 LLM（事后审计）」。
 
 ### 移除
 
 - `pack.json`、声明式数据脚本、语义模板等旧应用格式。
 - 离线夹具、复刻测试页、内置应用与真实站点冻结证据；`vitest` 单测与 parity 工具链。
 - 历史报告 / 基准 / 应用清单等过时文档（当前事实以 `AGENTS.md`、`ARCHITECTURE.md`、`docs/` 为准）。
+- `LLMPlanner`（System-2 计划起草）与裸读 `OPENAI_*` 的 `llmEscalator`（含 `snapshotText`）：
+  规划归 Agent，escalation 由 `src/model/provider-escalator.ts` 经 provider 缝承接。
 
 ### 安全
 

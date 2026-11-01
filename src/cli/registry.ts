@@ -109,7 +109,9 @@ amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]`,
       "--replay <文件>           脚本应用：按已记录轨迹重放（版本/槽位不一致直接拒跑）",
       "--remember                开启学习环 sidecar（旧 --learn-hints）",
       "--memory <文件>           指定 sidecar 落点",
-      "--reset / --replan        仅 --plan 模式：重置步骤状态 / 重新规划",
+      "--reset                    仅 --plan 模式：重置步骤状态",
+      "--escalate                 仅 --plan 模式：低置信时经决策源 askChoice 点名一次（opt-in）",
+      "--provider <名字>          仅 --plan 模式：本次决策源覆盖（同 run 的 --provider）",
       "--confirm allow|ask|deny  仅 --plan 模式：人工确认策略",
       "--json / --quiet / --verbose  输出契约",
     ],
@@ -159,7 +161,7 @@ amber plan rm <编号|id> [--plan <文件>]
 amber plan move <编号|id> --to <位置> [--plan <文件>]
 amber plan check [--plan <文件>]
 amber plan reset [--plan <文件>]
-amber plan run [--plan <文件>] [--reset] [--replan] [--confirm allow|ask|deny]`,
+amber plan run [--plan <文件>] [--reset] [--confirm allow|ask|deny] [--escalate]`,
     examples: [
       'amber plan new "把商品加入购物车" --url https://shop.example.com/p/1',
       'amber plan add "打开购物车" --signal url_contains=cart.html --target "#cart-link"',
@@ -173,7 +175,8 @@ amber plan run [--plan <文件>] [--reset] [--replan] [--confirm allow|ask|deny]
       "--target <hint>           目标提示（旧 --hint）",
       "--at <编号|id>            插入位置；编号统一 1-based",
       "--to <位置>               move 的目标位置；1-based",
-      "--reset / --replan        plan run 的重置 / 重新规划",
+      "--reset                    plan run 的重置步骤状态",
+      "--escalate                 plan run 低置信时经决策源 askChoice 点名一次（opt-in）",
       "--confirm allow|ask|deny  plan run 的人工确认策略",
     ],
     related: ["run", "apps"],

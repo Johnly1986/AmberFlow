@@ -120,3 +120,18 @@ amber config set AMBERFLOW_DECISION_API_KEY sk-...
   要接真服务时把 URL/KEY/MODEL 换掉即可。
 - `predicate` 概率的刻度与 `confidence` 同属标定概率（`score_kind=calibrated_prob`），
   但**不要**和 laya 的归一化熵跨源比较。
+
+## 6. 决策入口唯一：escalation 与审计的边界（2026-11）
+
+- **步级决策只有这一个入口**：执行（apps / online / start / plan run）统一按三件套或本地
+  laya 解析（`resolveProviderSpec` → `applySpecToRuntime`）；`--provider` 仅本次实验/消融。
+  低置信恢复的 escalation 梯级（`--escalate`，opt-in 缺省关）也走同一个 provider 缝——经
+  `DecisionProvider.askChoice` 闭集窄问点名，只许选已展示的候选、池外答案一律弃权
+  （fail closed，双层校验）；provider 不支持 `askChoice` 时梯级缺席并如实打印，
+  绝不悄悄降级成一个每步都抛错的梯级，也绝不猜。
+- **规划归 Agent**：引擎内没有 LLM 规划/重规划面（原 `plan-cli new --llm` 与
+  `plan-cli run --replan` 已移除）。计划由人/Agent 给出（`TaskPlan` JSON 或 `app.mjs` 都是
+  冻结计划的载体），被挡的子目标以 `blocked + obstacle` 结构化结果返回，由 Agent 决定下一步。
+- **`OPENAI_BASE_URL` / `OPENAI_API_KEY` 只剩一个消费者**：事后审计（`LLMAuditor`，评估
+  性质——不在环、不规划）。`PLANNER_MODEL` 配置键已移除；旧 rc 里残留会在加载期以
+  未知键拒绝，删掉该键即可。

@@ -1,11 +1,13 @@
 /**
- * Plan CLI — TS twin of `plan_cli.py`: LLM-drafted OR hand-built plans, both
- * constrained by the same `PlanningRules`, validated before anything runs.
+ * Plan CLI — TS twin of `plan_cli.py`: hand-built plans（规划归 Agent：LLM 起草/重规划面
+ * 已移除——引擎只执行冻结计划）, constrained by the same `PlanningRules`, validated
+ * before anything runs.
  *
- *   plan-cli new "goal..." [--llm] [--url URL]
+ *   plan-cli new "goal..." [--url URL]
  *   plan-cli add 0 "desc" --signal op=value [--url URL] [--hint HINT]
  *   plan-cli edit 1 --desc ... --signal ... --url ... [--hint HINT]
  *   plan-cli move 2 0 | del 1 | show | check | reset | run [--confirm allow|deny|ask]
+ *                                                            [--escalate] [--provider NAME]
  *
  * Signal syntax (`--signal`): url_contains=SUBSTR | css_exists=SEL |
  *   css_text_equals=SEL|TEXT | css_text_contains=SEL|TEXT | css_value_equals=SEL|VALUE
@@ -17,12 +19,14 @@
  */
 import { parseArgs } from "node:util";
 import { PlanningRules, TaskPlan } from "../engine/plan.ts";
-import { LLMPlanner, runPlan, type PlannerLike } from "../engine/planner.ts";
+import { runPlan, type PlannerLike } from "../engine/planner.ts";
 import { SIGNAL_OPS, type SignalSpec } from "../engine/signals.ts";
-import { browserSession, BrowserMiddleware } from "../engine/executor.ts";
-import { extractElements } from "../engine/extraction.ts";
+import { browserSession, BrowserMiddleware, type EscalatorLike } from "../engine/executor.ts";
 import { getAuditor, type AuditVerdict } from "../engine/audit.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
+import { applySpecToRuntime, installDecisionProvider, resolveProviderSpec } from "../model/decision-provider.ts";
+import { installLayaRuntime } from "../model/model.ts";
+import { providerEscalator } from "../model/provider-escalator.ts";
 import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../support/cli-args.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { defaultPlanPath } from "../app/amberflow-home.ts";
@@ -76,38 +80,14 @@ const defaultIO: CliIO = {
 };
 
 export interface NewArgs {
-  goal: string; file: string; llm: boolean; url: string | null; max: number;
+  goal: string; file: string; url: string | null;
 }
 
 export async function cmdNew(a: NewArgs, io: CliIO = defaultIO): Promise<TaskPlan> {
-  let plan: TaskPlan;
-  if (a.llm) {
-    if (!process.env.OPENAI_BASE_URL || !process.env.OPENAI_API_KEY) {
-      throw new Error("--llm needs OPENAI_BASE_URL + OPENAI_API_KEY (PLANNER_MODEL optional); "
-        + "without them use the manual skeleton. "
-        + "LLM planning is suspended for now: step decisions run on the three-key decision "
-        + "service or the local laya-onnx model (docs/DECISION_SERVICE_CONFIG.md); "
-        + "author flows as apps instead (npm run learn / amber apps new).");
-    }
-    // Snapshot the page first: the planner can only write done-signals and
-    // target_hints if it sees the same element space the executor will see.
-    let elems = null;
-    if (a.url) {
-      const session = await browserSession();
-      try {
-        await session.page.goto(a.url, { waitUntil: "domcontentloaded", timeout: 30000 });
-        elems = await extractElements(session.page);
-        io.out(`snapshot: ${Object.keys(elems).length} interactive elements from ${a.url}`);
-      } finally {
-        await session.close();
-      }
-    }
-    plan = await new LLMPlanner().makePlan(a.goal, {
-      rules: new PlanningRules(a.max), startUrl: a.url, elems,
-    });
-  } else {
-    plan = new TaskPlan(a.goal, []);      // manual skeleton: fill with `add`
-  }
+  // 规划归 Agent（2026-11）：计划起草不再有 LLM 面（原 `new --llm` 已移除）。这里只
+  // 产出手工骨架，由人/Agent 用 `add` 逐条补齐——引擎只执行冻结计划；步级决策照旧走
+  // 统一决策源（docs/DECISION_SERVICE_CONFIG.md）。
+  const plan = new TaskPlan(a.goal, []);      // manual skeleton: fill with `add`
   if (a.url) for (const s of plan.subgoals) if (!s.start_url) s.start_url = a.url;
   plan.path = a.file;
   plan.save();
@@ -187,7 +167,10 @@ export function cmdReset(file: string, io: CliIO = defaultIO): void {
 
 export interface RunArgs {
   file: string; max: number; reset: boolean; confirm: "allow" | "deny" | "ask";
-  replan: boolean;
+  /** 低置信恢复的最后一级：经 provider 缝的 askChoice 闭集点名（opt-in；缺省关）。 */
+  escalate?: boolean;
+  /** 决策源覆盖（仅本次，不进配置）：与 `--provider` 全局语义一致。 */
+  provider?: string | null;
   /** 新 CLI 的 `run/plan run --headful`；旧 plan-cli 缺省仍是 headless。 */
   headful?: boolean;
   /**
@@ -230,21 +213,44 @@ export async function cmdRun(a: RunArgs, io: CliIO = defaultIO, deps: RunDeps = 
     deny: () => false,
     ask: (d: string) => io.ask(`  CONFIRM '${d}'?`),
   }[a.confirm];
-  let planner: PlannerLike | null = deps.planner ?? null;
-  if (a.replan && !planner) {
-    if (!process.env.OPENAI_BASE_URL || !process.env.OPENAI_API_KEY) {
-      throw new Error("--replan needs OPENAI_BASE_URL + OPENAI_API_KEY");
-    }
-    planner = new LLMPlanner();
-  }
   const hints = deps.hintMemory ?? (a.hintMemory ? createHintMemory({ path: a.hintMemory }) : null);
-  const mw = (deps.middleware ?? new BrowserMiddleware({ confirmFn, hintMemory: hints })) as BrowserMiddleware;
+  let escalateFn: EscalatorLike | null = null;
+  if (!deps.middleware) {
+    // 统一决策解析（BACKLOG #1）：plan-cli 与 start/apps/online 走**同一个门**——
+    // 有 AMBERFLOW_DECISION_BASE_URL 即线上服务，无地址用本地 laya；`--provider` 只作
+    // 本次实验/消融覆盖。本地产物不齐 = 规则档，两扇全局都清（与 start 同语义），
+    // 绝不装一个每步都抛错的 runtime，也绝不悄悄换模型。
+    let spec;
+    try {
+      spec = await resolveProviderSpec(a.provider ?? null);
+    } catch (e) {
+      throw new Error(`决策源解析失败：${(e as Error).message}`);
+    }
+    if (spec.kind === "laya" && spec.tier === "off(missing)") {
+      installLayaRuntime(null);
+      installDecisionProvider(null);
+    } else {
+      await applySpecToRuntime(spec);
+    }
+    if (a.escalate) {
+      escalateFn = providerEscalator();
+      if (!escalateFn) {
+        io.out("⚠ --escalate：当前决策源没有 askChoice 闭集窄问能力（无 provider 或该 provider 不支持）"
+          + "——梯级缺席，低置信步照原样阻塞。");
+      }
+    }
+  }
+  const mw = (deps.middleware ?? new BrowserMiddleware({
+    confirmFn,
+    hintMemory: hints,
+    ...(escalateFn ? { escalateFn } : {}),
+  })) as BrowserMiddleware;
   const start = plan.subgoals.find((s) => s.start_url)?.start_url ?? null;
   if (start === null) throw new Error("no subgoal has a start_url");
   const sessionFactory = deps.sessionFactory
     ?? (a.headful ? async () => browserSession(false) : undefined);
   const rep = await runPlan(mw as never, plan, {
-    startUrl: start, planner, rules,
+    startUrl: start, planner: deps.planner ?? null, rules,
     ...(sessionFactory ? { sessionFactory: sessionFactory as never } : {}),
   });
   const finished = plan.subgoals.every((s) => s.status === "done" || s.status === "skipped");
@@ -262,13 +268,13 @@ export async function cmdRun(a: RunArgs, io: CliIO = defaultIO, deps: RunDeps = 
 
 /* ------------------------------------------------------------------ entry */
 
-const USAGE = `Plan CLI: LLM-drafted OR hand-built plans, both constrained by the same rules.
+const USAGE = `Plan CLI: hand-built plans（规划归 Agent，LLM 起草/重规划面已移除）, constrained by the same rules.
 
-  plan-cli new "goal..." [--llm] [--url URL] [--max N]
+  plan-cli new "goal..." [--url URL] [--max N]
   plan-cli add IDX "desc" --signal OP=VALUE [--url URL] [--hint HINT]
   plan-cli edit IDX [--desc D] [--signal S] [--url U] [--hint H]
   plan-cli move IDX TO | del IDX | show | check | reset
-  plan-cli run [--confirm allow|deny|ask] [--reset] [--replan]
+  plan-cli run [--confirm allow|deny|ask] [--reset] [--escalate] [--provider NAME]
                [--learn-hints | --hint-memory FILE]   # learned hints live in a SIDECAR
 
 Plans live in --file (default ${DEFAULT_FILE}); editing that JSON by hand between
@@ -290,9 +296,10 @@ export async function main(argv: string[] = process.argv.slice(2), io: CliIO = d
       allowPositionals: true,
       options: {
         file: { type: "string" }, max: { type: "string" },
-        llm: { type: "boolean" }, url: { type: "string" }, hint: { type: "string" },
+        url: { type: "string" }, hint: { type: "string" },
         desc: { type: "string" }, signal: { type: "string" },
-        confirm: { type: "string" }, reset: { type: "boolean" }, replan: { type: "boolean" },
+        confirm: { type: "string" }, reset: { type: "boolean" },
+        escalate: { type: "boolean" }, provider: { type: "string" },
         headful: { type: "boolean" },
         "hint-memory": { type: "string" }, "learn-hints": { type: "boolean" },
       },
@@ -319,8 +326,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: CliIO = d
   try {
     switch (cmd) {
       case "new":
-        await cmdNew({ goal: pos[0] ?? "", file, llm: Boolean(parsed.values.llm),
-                      url: parsed.values.url ?? null, max }, io);
+        await cmdNew({ goal: pos[0] ?? "", file, url: parsed.values.url ?? null }, io);
         return 0;
       case "show":
         cmdShow(file, io);
@@ -364,7 +370,8 @@ export async function main(argv: string[] = process.argv.slice(2), io: CliIO = d
         const outcome = await cmdRun({
           file, max, reset: Boolean(parsed.values.reset),
           confirm: (parsed.values.confirm ?? "ask") as RunArgs["confirm"],
-          replan: Boolean(parsed.values.replan),
+          escalate: Boolean(parsed.values.escalate),
+          provider: parsed.values.provider ?? null,
           headful: Boolean(parsed.values.headful),
           // --learn-hints keeps the memory NEXT TO the plan (a sidecar), never inside it
           hintMemory: (parsed.values["hint-memory"] as string | undefined)
@@ -377,10 +384,10 @@ export async function main(argv: string[] = process.argv.slice(2), io: CliIO = d
         return 2;
     }
   } catch (err) {
-    // 三类**已知**的"你给错了"消息（信号语法 / 没有计划 / --llm 缺 env）：一行点名，
+    // 三类**已知**的"你给错了"消息（信号语法 / 没有计划 / 决策源未配置）：一行点名，
     // 不甩堆栈；其余异常是真 bug，原样上抛（吞掉它比堆栈更糟——"崩了"必须看得见）。
     const m = (err as Error)?.message ?? "";
-    if (/unknown signal op|needs 'selector\|value'|^no plan at |--llm needs/.test(m)) {
+    if (/unknown signal op|needs 'selector\|value'|^no plan at |^决策源解析失败/.test(m)) {
       io.out(`参数用法不对：${m}`);
       return 2;
     }

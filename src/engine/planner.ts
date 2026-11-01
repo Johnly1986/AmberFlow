@@ -3,10 +3,12 @@
  *
  * `run_plan` executes a frozen plan subgoal by subgoal in ONE browser session;
  * `runSubgoalWithRetries` is the single implementation of `retries` (a retry is
- * the WHOLE subgoal: fresh navigation, re-evaluated `when`, re-scanned pool);
- * `LLMPlanner` is the System-2 drafter whose prompt carries the executor's own
- * element rendering (`snapshotText`), because a hint written against any other
- * rendering could never match extraction.
+ * the WHOLE subgoal: fresh navigation, re-evaluated `when`, re-scanned pool).
+ *
+ * 规划归 Agent（2026-11 前提）：引擎内没有 LLM 规划/重规划面——计划由人/Agent 给出
+ * （TaskPlan JSON 或 app.mjs），本模块只执行冻结计划。原 `LLMPlanner`（System-2 起草）
+ * 与裸读 `OPENAI_*` 的 `llmEscalator` 已移除；低置信恢复的 escalation 梯级走 provider 缝
+ * （`src/model/provider-escalator.ts`，经 `DecisionProvider.askChoice` 闭集窄问）。
  *
  * PORT FIX (Python audit H1): the reference `run_plan` prints a replan exception
  * and then reads `amended`, which is unbound on the FIRST exception — the run
@@ -14,24 +16,11 @@
  * Here the exception leaves `amended = null` and the loop continues blocked;
  * `test_run_plan_replan_exception_does_not_kill_the_run` pins it.
  */
-import { criteriaView, extractSlots, type ElemPool } from "./extraction.ts";
+import { extractSlots } from "./extraction.ts";
 import { PlanningRules, TaskPlan, type Subgoal } from "./plan.ts";
 import { checkSignal } from "./signals.ts";
-import { browserSession, type BrowserSession, type EscalatorLike, type RunOptions } from "./executor.ts";
+import { browserSession, type BrowserSession, type RunOptions } from "./executor.ts";
 import type { TraceStep } from "./audit.ts";
-
-/* ------------------------------------------------------------------ snapshot */
-
-/**
- * Model-facing rendering of the page's interactive elements, for the PLANNER.
- * Reuses `criteriaView` — the executor's own model-facing format — so the planner
- * writes signals and target_hints against EXACTLY the element space the executor
- * will see.
- */
-export function snapshotText(elems: ElemPool, limit = 40): string {
-  if (!elems || Object.keys(elems).length === 0) return "";
-  return Object.values(criteriaView(elems, new Set(), null)).slice(0, limit).join("\n");
-}
 
 /* ------------------------------------------------------------------ planners */
 
@@ -40,173 +29,11 @@ export interface PlannerLike {
   replan(plan: TaskPlan, obstacle: Subgoal, rules?: PlanningRules | null): TaskPlan | Promise<TaskPlan>;
 }
 
-export type ChatFn = (user: string, system: string) => Promise<Record<string, unknown>>;
-
-export interface LLMPlannerOptions {
-  baseUrl?: string;
-  apiKey?: string;
-  model?: string;
-  timeout?: number;
-  /** Test seam: replace the HTTP call (defaults to the OpenAI-compatible fetch). */
-  chatFn?: ChatFn;
-}
-
 /**
- * The deliberative rung: an LLM consulted when the LOCAL decision model is unsure.
- *
- * C3-R's two-tier design (System-One fast path + separate deliberative path) adapted
- * to this project's contract: the escalator is a PICKER. It is shown exactly the
- * criteria view the local model saw and must answer with one of those refs; anything
- * else — an invented element, a value, an action — is rejected here AND again in the
- * executor. It fails CLOSED (null = abstain), so an unreachable endpoint degrades to
- * the local model's abstention rather than to a guessed click.
- *
- * Needs OPENAI_BASE_URL + OPENAI_API_KEY (same env as the planner), or an injected
- * `chatFn` (the test seam).
+ * The deliberative rung — MOVED (2026-11): escalation now goes through the provider
+ * seam via `DecisionProvider.askChoice`; see `src/model/provider-escalator.ts`.
+ * The old `llmEscalator` (raw `OPENAI_*` reads, hardcoded `/chat/completions`) is gone.
  */
-export function llmEscalator(opts: {
-  baseUrl?: string; apiKey?: string; model?: string; timeout?: number;
-  chatFn?: (user: string, system: string) => Promise<string>;
-} = {}): EscalatorLike {
-  const base = (opts.baseUrl ?? process.env.OPENAI_BASE_URL ?? "").replace(/\/+$/, "");
-  const key = opts.apiKey ?? process.env.OPENAI_API_KEY ?? "";
-  const model = opts.model ?? process.env.PLANNER_MODEL ?? "gpt-4o-mini";
-  const timeout = (opts.timeout ?? 30) * 1000;
-
-  const system = "You are a stronger reasoner consulted by a browser-automation harness when its local "
-    + "decision model is unsure. You are given a goal and a NUMBERED list of candidate elements that "
-    + "ALREADY EXIST on the page. Choose the single element that best advances the goal. "
-    + 'Reply ONLY with JSON: {"ref": "<candidate id>"}, or {"ref": null} if none of them does. '
-    + "You may NOT invent elements, values or actions, and you may not propose steps.";
-
-  const chat = opts.chatFn ?? (async (user: string, sys: string): Promise<string> => {
-    if (!base) throw new Error("llmEscalator needs OPENAI_BASE_URL");
-    if (!key) throw new Error("llmEscalator needs OPENAI_API_KEY");
-    const r = await fetch(`${base}/chat/completions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model, temperature: 0,
-        messages: [{ role: "system", content: sys }, { role: "user", content: user }],
-      }),
-      signal: AbortSignal.timeout(timeout),
-    });
-    if (!r.ok) throw new Error(`llmEscalator HTTP ${r.status}`);
-    const body = (await r.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    return body.choices?.[0]?.message?.content ?? "";
-  });
-
-  return async (req) => {
-    const lines = Object.entries(req.criteria).map(([ref, line]) => `${ref}: ${line}`).join("\n");
-    const user = `Goal: ${req.instruction}\nWhy the local model abstained: ${req.why}\n`
-      + `Page: ${req.url} — ${req.title}\n\nCandidates:\n${lines}\n\n`
-      + 'Reply with {"ref": "<one of the ids above, or null>"}.';
-    try {
-      const reply = await chat(user, system);
-      const m = /\{[\s\S]*?\}/.exec(reply ?? "");
-      if (!m) return null;
-      const parsed = JSON.parse(m[0]) as { ref?: unknown };
-      const ref = typeof parsed.ref === "string" ? parsed.ref : null;
-      // the contract: only an element the harness actually showed
-      return ref !== null && Object.prototype.hasOwnProperty.call(req.criteria, ref) ? ref : null;
-    } catch {
-      return null;                                   // fail closed: abstain, never guess
-    }
-  };
-}
-
-export class LLMPlanner implements PlannerLike {
-  static SYSTEM =
-    "You decompose a browser-automation goal into 2-6 sequential subgoals. "
-    + "Each subgoal must be verifiable from the page. Reply ONLY with JSON: "
-    + '{"subgoals": [{"desc": "...", "signal": {"url_contains": "..."} | '
-    + '{"css_exists": "..."} | {"css_text_contains": ["sel", "text"]} , '
-    + '"start_url": null, "target_hint": "#id | tag[attr=value] | tag[near~token] | null}]}\n'
-    + "When the user message lists the page's interactive elements, use exactly that "
-    + "list to choose done-signals and to write each subgoal's target_hint; a hint is "
-    + "resolved by rule at no model cost, so give one whenever the target is "
-    + "unambiguous in that list.";
-
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  timeout: number;
-  chatFn: ChatFn;
-
-  constructor(opts: LLMPlannerOptions = {}) {
-    const base = opts.baseUrl ?? process.env.OPENAI_BASE_URL;
-    const key = opts.apiKey ?? process.env.OPENAI_API_KEY;
-    if (!base) throw new Error("LLMPlanner needs OPENAI_BASE_URL");
-    if (!key) throw new Error("LLMPlanner needs OPENAI_API_KEY");
-    this.baseUrl = base.replace(/\/+$/, "");
-    this.apiKey = key;
-    this.model = opts.model ?? process.env.PLANNER_MODEL ?? "gpt-4o-mini";
-    this.timeout = opts.timeout ?? 30.0;
-    this.chatFn = opts.chatFn ?? ((user, system) => this.httpChat(user, system));
-  }
-
-  private async httpChat(user: string, system: string): Promise<Record<string, unknown>> {
-    const r = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: this.model, temperature: 0,
-        messages: [{ role: "system", content: system }, { role: "user", content: user }],
-      }),
-      signal: AbortSignal.timeout(this.timeout * 1000),
-    });
-    if (!r.ok) throw new Error(`planner endpoint ${r.status}`);
-    const body = (await r.json()) as { choices: Array<{ message: { content: string } }> };
-    const c = body.choices[0]!.message.content;
-    return JSON.parse(c.slice(c.indexOf("{"), c.lastIndexOf("}") + 1)) as Record<string, unknown>;
-  }
-
-  /** (system, user) for one planning call. Pure and offline-testable. */
-  buildMessages(
-    goal: string, rules: PlanningRules | null = null, startUrl?: string | null,
-    elems?: ElemPool | null, extra?: Record<string, unknown> | null,
-  ): [string, string] {
-    const system = rules === null ? LLMPlanner.SYSTEM : `${LLMPlanner.SYSTEM}\n\n${rules.promptText()}`;
-    let user = goal;
-    if (startUrl) user += `\n\nstart_url: ${startUrl}`;
-    if (elems) {
-      user += "\n\nInteractive elements currently on the page "
-        + "(rendered exactly as the executor sees them; use these for signals "
-        + "and target_hints):\n" + snapshotText(elems);
-    }
-    if (extra) user += `\n\n${JSON.stringify(extra)}`;
-    return [system, user];
-  }
-
-  async makePlan(
-    goal: string, opts: { rules?: PlanningRules | null; startUrl?: string | null; elems?: ElemPool | null } = {},
-  ): Promise<TaskPlan> {
-    const rules = opts.rules ?? null;
-    const [system, user] = this.buildMessages(goal, rules, opts.startUrl ?? null, opts.elems ?? null);
-    const d = await this.chatFn(user, system);
-    const plan = new TaskPlan(goal, (d.subgoals as Partial<Subgoal>[]) ?? []);
-    if (rules) {
-      const issues = rules.problems(plan);
-      if (issues.length) throw new Error(`LLM plan violates planning rules:\n  ${issues.join("\n  ")}`);
-    }
-    return plan;
-  }
-
-  async replan(
-    plan: TaskPlan, obstacle: Subgoal, rules: PlanningRules | null = null, elems?: ElemPool | null,
-  ): Promise<TaskPlan> {
-    const [system, user] = this.buildMessages(plan.goal, rules, null, elems ?? null,
-      { plan_so_far: plan.subgoals, blocked_subgoal: obstacle });
-    const d = await this.chatFn(user, system);
-    const amended = new TaskPlan(plan.goal, (d.subgoals as Partial<Subgoal>[]) ?? []);
-    amended.path = plan.path;
-    if (rules) {
-      const issues = rules.problems(amended);
-      if (issues.length) throw new Error(`amended plan violates planning rules:\n  ${issues.join("\n  ")}`);
-    }
-    return amended;
-  }
-}
 
 /* ------------------------------------------------------------------ runner */
 

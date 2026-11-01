@@ -1086,9 +1086,8 @@ export function countRows(rows: Row[], source: Source, spec: Record<string, any>
  * 渲染与元素抽取走 harness 自己。playwright 只在调用时动态载入。
  *
  * `snapshot` 就是 `layaapp.snapshot_text` 的等价物：复用执行器自己的
- * `criteria_view` 渲染空间（`planner.snapshotText` 是同一个三行函数；这里直接
- * 复用 `extraction.criteriaView` 是为了让 `--render` 在 Node 的 strip-only 模式下
- * 也能跑 —— planner.ts 用了 Node 不支持剥离的参数属性）。
+ * `criteria_view` 渲染空间（这里直接复用 `extraction.criteriaView`，是为了让
+ * `--render` 在 Node 的 strip-only 模式下也能跑）。
  */
 export async function renderAndSnapshot(html: string): Promise<Rendered> {
   const pw: any = await import("playwright");

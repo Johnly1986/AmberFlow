@@ -232,6 +232,11 @@ export function countedProvider(p: DecisionProvider): { provider: DecisionProvid
       async pick(req) { n += 1; return p.pick(req); },
       ...(p.risk ? { risk: (g: string, d: string) => p.risk!(g, d) } : {}),
       ...(p.doneVote ? { doneVote: (g: string, st: ModelState) => p.doneVote!(g, st) } : {}),
+      // escalation（askChoice 闭集窄问）也是一次真咨询：不记账的话，"老师点名"会
+      // 在梯级账单里记成零出场。askChoice 缺席（能力未声明）时什么都不加。
+      ...(p.askChoice
+        ? { askChoice: async (req: ClosedSetRequest) => { n += 1; return p.askChoice!(req); } }
+        : {}),
     },
   };
 }

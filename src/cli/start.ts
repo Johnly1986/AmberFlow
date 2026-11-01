@@ -148,7 +148,7 @@ export function doctorReport(p: Preflight): { ok: boolean; lines: string[] } {
   lines.push("决策源       有 AMBERFLOW_DECISION_BASE_URL → 线上服务（另配 _MODEL / _API_KEY 三件套）；"
     + "无地址 → 本地 laya（AMBERFLOW_DECISION_MODEL=english|multilingual）");
   lines.push(`实验 provider ${selectable.join(" | ")}（仅 --provider NAME，不写进配置）`);
-  lines.push(`LLM 规划/审计 ${p.llm ? "✓ 已配置" : "— 未配置（用内置替身，全流程照常）"}`);
+  lines.push(`LLM 审计     ${p.llm ? "✓ 已配置" : "— 未配置（用内置替身，全流程照常；规划归 Agent，不经 LLM）"}`);
   const ok = p.nodeOk && p.chromium !== null;
   if (!ok) {
     lines.push("");
@@ -346,7 +346,7 @@ async function commandJob(
     io.out("");
     io.out("接着做：npm run plan-cli -- show           # 看这份计划");
     io.out("        npm run plan-cli -- add 1 \"下一步描述\" --signal 'css_exists=#id' --url <页面>");
-    io.out("        npm run plan-cli -- run [--replan]  # 再跑一次（可续跑）");
+    io.out("        npm run plan-cli -- run  # 再跑一次（可续跑）");
     return rep.completed.startsWith("1/") ? 0 : 1;
   } catch (err) {
     if (err instanceof LayaNotConfiguredError || /laya runtime not configured/.test(String(err))) {

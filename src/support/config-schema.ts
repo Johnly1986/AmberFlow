@@ -59,11 +59,10 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
     ],
   },
   {
-    group: "外层 LLM（planner/auditor）",
+    group: "外层 LLM（事后审计）",
     keys: [
-      { key: "OPENAI_BASE_URL", description: "OpenAI 兼容服务地址；空 = 用内置替身" },
-      { key: "OPENAI_API_KEY", secret: true, description: "外层 LLM 密钥" },
-      { key: "PLANNER_MODEL", default: "gpt-4o-mini", description: "规划模型名" },
+      { key: "OPENAI_BASE_URL", description: "OpenAI 兼容服务地址（仅供事后审计 LLMAuditor）；空 = 用内置替身。规划归 Agent：引擎内没有 LLM 规划面" },
+      { key: "OPENAI_API_KEY", secret: true, description: "外层 LLM 密钥（事后审计用）" },
       { key: "AUDIT_MODEL", default: "gpt-4o-mini", description: "审计模型名" },
     ],
   },
