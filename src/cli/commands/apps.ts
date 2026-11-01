@@ -110,16 +110,25 @@ ${playbook}
  *
  * ctx 只有这些面（没有 pageUrl()：入口页角色写在 meta.site.pages，用 openPage 取）：
  *   openPage(role) / open(url) / arrive(url, {done}) / step(desc, {id, act, done, url, slots, when, timeoutMs})
- *   / manual(desc, {done}) / url() / read.text|value|count|attr / rows / extract / holds / waitFor
+ *   / manual(desc, {done}) / url() / read.text|value|count|attr / extract / holds / waitFor
  *   / source / run / done() / fail(code, reason) / hint / hints / command
  *   / judge.url|exists|text|equals|value|all|any|not|manual
  *   （when 守卫跳过的步返回 ok:false + stopCode=precondition_skipped，同样消耗预算。）
+ *
+ * 值绑定写法（fill/select/drag 的值只认 slot，绝不猜）：对象字面量
+ *   ctx.command("fill", "#username", { from: "slot", key: "username" })
+ *   ——key 必须在 meta.slots 声明；缺值 = 结构化 needs_value。没有 ctx.value.fromSlot 之类的函数面。
+ *   extract 到的数据要落盘：app.mjs 是 Node ESM 脚本，直接 import node:fs 写
+ *   $AMBERFLOW_HOME/apps/<id>/outputs/（详见 amber schema ctx --topic data_out）。
  *
  * act 省略 = 决策语句：引擎的规则/决策层按 goal 文本与 done 证据选目标。命中与否
  * 取决于 goal 与页面候选的可分辨度；歧义大时会升级模型裁决——规则命中和模型裁决
  * 都是正常路径，不必预设哪条一定稳。需要钉死某个目标、或页面有稳定句柄
  * （data-test / id / name / 唯一 label）时，写 act: ctx.hint(...) 收窄候选即可。
  * 跑得不稳先查 trace 的 stopCode/reason 与 decisions 行，再决定要不要加锚点。
+ *
+ * 学习捷径：现有应用就是最好的范例——amber apps list 看有哪些，
+ * amber apps show <id> --code 直接读完整源码（extract/守卫/落盘的现成写法）。
  */
 export const meta = (kit) => ({
   id: ${JSON.stringify(id)},

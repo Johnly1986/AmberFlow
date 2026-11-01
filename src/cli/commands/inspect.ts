@@ -20,17 +20,7 @@ import { poolView } from "../../engine/pool-view.ts";
 import { poolNearEmpty, nextForInspect } from "../../engine/planning-playbook.ts";
 import { matchSelector } from "../../engine/signals.ts";
 import { parseCliArgs } from "../../support/cli-args.ts";
-
-const USAGE = `usage: inspect --url <http(s) URL> [--max-elements N] [--wide] [--text] [--pool] [--probe SEL]...
-               [--screenshot FILE] [--timeout MS] [--headed] [--json]
-
-只看页面，不点击、不填值、不调用模型。输出有界元素与可验证的 hint 候选；
---pool 输出引擎实际看到的 pool 视图（action_family/frame_origin/hint_candidates）。
---wide 用执行器低置信恢复路径的**宽扫参数**（120 上限 + R2 启发式伪按钮候选，
-heuristic 标记可辨）抽池——给 Agent 看"宽扫后模型能看见什么"；主池语义不变。
---probe 可重复（最多 10 个）：对**任意 CSS selector**（含 h1/文本类非交互元素）做只读
-探测，返回存在数与至多 5 条文本摘录（单条 120 字符截断）——补“元素池只含可行动元素”
-的观察缺口；--json 输出落 probes[] 字段。`;
+import { commandHelp } from "../registry.ts";
 
 type ProbeOutcome = { selector: string; count?: number; texts?: string[]; error?: string };
 
@@ -101,7 +91,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     throw usageError(`inspect 参数不对：${msg}`, { next: ["amber inspect --url https://example.com --json"] });
   }
   const v = parsed.values;
-  if (v.help) { say(ctx, USAGE); return 0; }
+  if (v.help) { say(ctx, commandHelp("inspect")); return 0; }
   const url = typeof v.url === "string" ? v.url.trim() : "";
   if (!url) throw usageError("inspect 需要 --url <http(s) URL>", { next: ['amber inspect --url https://example.com --json'] });
   let u: URL;

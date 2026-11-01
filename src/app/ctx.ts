@@ -356,7 +356,15 @@ export function createCtx(deps: CtxDeps): Ctx {
         url, { waitUntil: "domcontentloaded", timeout: timeoutMs ?? 30_000 },
       );
     } catch (e) {
-      throw new StopError("config_error", `${label}(${JSON.stringify(url)}) failed: ${e instanceof Error ? e.message : String(e)}`);
+      // 网络/可达性失败 ≠ 声明错误：DNS 解析失败、连接拒绝、导航超时都是「站点此刻
+      // 不可达」，正确动作是验证可达后重试/放宽 --timeout，不是改声明。只有其余
+      // 异常（如畸形 URL）才归 config_error（改声明，不要重试）。
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/Timeout .*ms exceeded|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_REFUSED|ERR_CONNECTION_TIMED_OUT|ERR_CONNECTION_RESET|ERR_INTERNET_DISCONNECTED|ERR_NAVIGATION_ABORTED/.test(msg)) {
+        throw new StopError("unreachable",
+          `${label}(${JSON.stringify(url)}) unreachable: ${msg}——先验证站点可达（curl/fetch），再放宽 --timeout 或稍后重试；不是声明错误，改 meta 无效`);
+      }
+      throw new StopError("config_error", `${label}(${JSON.stringify(url)}) failed: ${msg}`);
     }
     // 落地检查：请求 URL 过了信封不代表**最终页面**也过了（302/重定向可以跨主机）。
     const landed = urlOf(p);

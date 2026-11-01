@@ -70,6 +70,7 @@ export const STOP_NEXT: Readonly<Record<string, string>> = {
   low_confidence: "决策层低置信：看 trace 的 decisions 行与候选 label；有稳定句柄（id / data-test / 唯一 label）就写 act hint 收窄（六形状闭集见 docs/APP_SCRIPT_AUTHORING.md）",
   no_model_runtime: "rules-only 模式需要规则命中：加 target_hint，或配置决策源（docs/DECISION_SERVICE_CONFIG.md）",
   config_error: "停因 reason 自带具体声明错误；改 meta/声明后先 amber apps check <id>（离线）再重跑",
+  unreachable: "站点此刻不可达（DNS/连接/导航超时）：先 curl/fetch 验证站点可达——可达则放宽 --timeout（秒，覆盖导航 goto 缺省 30s）或稍后重试；不是声明错误，改 meta 无效",
   host_not_allowed: "目标主机加进 meta.hosts，或改用 meta.site.pages + ctx.openPage；amber apps check 离线可验",
   invariant_failed: "看 steps[] 最后一步是否真的到达结束页；amber inspect --probe 实证不变量选择器后再改",
   missing_done: "flow 末尾补 ctx.done()；声明了结束态不变量就必须验收，不能跳过",

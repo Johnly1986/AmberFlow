@@ -172,6 +172,17 @@ export function createKit(): Kit {
     option: (key, match) => ({ from: "option", key, match }),
     list: (by, order) => ({ from: "list", by, order }),
   };
+  // 层 3（错误自带修正指引）：值绑定没有 fromSlot 这类面——实测首用 Agent 会猜。
+  // 未知属性访问当场报清楚可用面，而不是让 TypeError「is not a function」裸抛。
+  const valueKitGuarded = new Proxy(valueKit, {
+    get(t, prop: string) {
+      if (prop in t) return (t as Record<string, unknown>)[prop];
+      throw new Error(
+        `kit.value.${String(prop)} 不存在。值绑定的可用面：kit.value.slot(key) / literal(v) / option(key, match) / list(by, order)，`
+        + `或直接写对象字面量 { from: "slot", key: "…" }（fill/select/drag 的值只认 slot，绝不猜）`,
+      );
+    },
+  });
 
   return {
     data: {
@@ -213,12 +224,23 @@ export function createKit(): Kit {
     }),
     hint: (hint) => ({ kind: "hint", hint }),
     hints: (...hints) => ({ kind: "hints", hints }),
-    command: (op, target, value, id) => ({
-      ...(target === undefined ? {} : { target }),
-      op,
-      ...(value === undefined ? {} : { value }),
-      ...(id === undefined ? {} : { id }),
-    }),
-    value: valueKit,
+    command: (op, target, value, id) => {
+      // 形态防御（层 3：错误自带正确写法）：值绑定是对象字面量（或 kit.value.* 的返回值），
+      // 不是函数调用链——实测首用 Agent 会猜成 ctx.value.fromSlot(...) 这类不存在的面。
+      if (value !== undefined && (typeof value !== "object" || value === null || Array.isArray(value))) {
+        throw new Error(
+          `kit.command("${op}", …): 第三参值绑定必须是对象字面量，如 { from: "slot", key: "username" }`
+          + `（或 kit.value.slot("username") / kit.value.literal("…")）；收到的是 ${typeof value}`
+          + (typeof value === "function" ? "——没有 ctx.value.fromSlot 这类函数面" : ""),
+        );
+      }
+      return {
+        ...(target === undefined ? {} : { target }),
+        op,
+        ...(value === undefined ? {} : { value }),
+        ...(id === undefined ? {} : { id }),
+      };
+    },
+    value: valueKitGuarded,
   };
 }

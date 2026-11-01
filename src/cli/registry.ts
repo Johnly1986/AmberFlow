@@ -48,13 +48,13 @@ ${OVERVIEW_TEXT}
 全局选项：
   -h, --help       显示帮助
   -V, --version    显示版本
-  --json           机器可读输出
+  --json           机器可读输出（⚠ PowerShell 管道/重定向会强转 UTF-16 加 BOM；机器消费用 --out 落盘或进程内直读 stdout）
   -q, --quiet      只输出结论
   --verbose        输出逐步骤细节
   --no-color       禁用颜色
   --yes            非交互确认（不隐含 --allow-dangerous）
   --config FILE    指定配置文件
-  --timeout SEC    覆盖单步 / 整体超时（按命令定义）
+  --timeout SEC    覆盖超时（秒）：run = 导航 goto（缺省 30s）；test = site/case 超时
 
 示例：
   amber test --tier smoke
@@ -80,6 +80,7 @@ export const COMMANDS: readonly CommandSpec[] = [
       "先 --dry-run 验调用序列（不启浏览器）",
       "再 --max-steps 3 --trace 预算试跑，拿结构化反馈",
       "最后完整运行；失败看停因 next——失败输出自带回流建议与停手规则",
+      "导航超时（unreachable）先放宽 --timeout（秒）重试，不是声明错误",
     ],
     usage: `amber run [应用] [选项]
 amber run --plan [文件] [选项]

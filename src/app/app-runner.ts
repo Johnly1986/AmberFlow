@@ -1432,6 +1432,9 @@ export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): st
     `- 应用脚本：\`${r.pack_path}\``,
     `- 目标：${r.goal}`,
     `- 结果：**${r.ok ? "通过" : r.partial === true ? "部分执行（预算用满）" : "未通过"}** ｜ 步骤 ${r.completed} ｜ 用时 ${r.secs}s`,
+    ...(r.script?.stop_code !== undefined
+      ? [`- **结构化停因**：\`${r.script.stop_code}\`：${String(r.script.stop_reason ?? "").split("\n")[0].slice(0, 160)}`]
+      : []),
     ...(r.model_status !== undefined
       ? [`- 模型层级：\`${r.model_status}\`（on=真 ONNX 在位；off(missing)=缺产物，走的是规则模式）`] : []),
     ...(r.decision_provider
@@ -1989,7 +1992,15 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     plan_path: planPath,
     // flow 脚本路径没有角色模板（01 轮 B7）：空字段整条省略，产物不再带无解释的 roles_used:[]。
     slots: maskSecretSlots(slots, secretKeys),
-    completed: `${trace.events.filter((e) => e.call === "step" || e.call === "arrive").length} step(s) via flow(ctx)`,
+    // 步数只计 step/arrive（预算面）；只读观察调用免费不占预算（F10 口径），
+    // 但审计上照样发生了——一行标注，避免「步骤 0」被误读成「什么都没跑」。
+    completed: `${trace.events.filter((e) => e.call === "step" || e.call === "arrive").length} step(s) via flow(ctx)`
+      + `${(() => {
+        const free = trace.events.filter((e) =>
+          e.call === "read" || e.call === "extract" || e.call === "holds" || e.call === "waitFor").length;
+        const navs = trace.events.filter((e) => e.call === "open" || e.call === "openPage").length;
+        return free > 0 ? ` + ${free} 只读观察调用（waitFor/extract/read 等，免费不占预算）${navs > 0 ? ` + ${navs} 导航` : ""}` : "";
+      })()}`,
     subgoals: [],
     tool_steps: [],
     invariants,
@@ -2316,6 +2327,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (!quiet) {
     console.log();
     console.log(appReportMarkdown(result, nextHint));
+    // 停因摘要（stdout 一行，不再只藏在 result.json 深层）：失败时 Agent 第一眼可见。
+    if (!result.ok && result.script?.stop_code !== undefined) {
+      console.log(`停因：${result.script.stop_code}：${String(result.script.stop_reason ?? "").split("\n")[0].slice(0, 160)}`);
+    }
     if (nextHint) console.log(`下一步建议：${nextHint}`);
     // 停手出口（唯一出处 planning-playbook）：失败即输出，不依赖 next 是否存在——
     // 否则停因类豁免（needs_human 等）既无回流建议也无终止条件。

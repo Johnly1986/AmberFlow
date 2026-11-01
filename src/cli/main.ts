@@ -312,6 +312,10 @@ async function home(ctx: CliContext): Promise<number> {
   }
   if (apps.length > shown.length) say(ctx, `  … 还有 ${apps.length - shown.length} 个，运行 amber apps list 查看。`);
   say(ctx, "");
+  say(ctx, "规划新流程（高效规划五步法全文见 apps new 骨架注释）：");
+  say(ctx, "  ① amber inspect --url <页> 先看再写 → ② 1 步探针应用先行 → ③ 正式应用参数化");
+  say(ctx, "  ④ amber apps check <id> --slot k=v 离线分支校验 → ⑤ amber run <id> --trace 真跑留证");
+  say(ctx, "");
   say(ctx, "下一步：");
   for (const h of HOME_NEXT) {
     say(ctx, `  ${("amber " + [h.cmd, h.args ?? ""].filter(Boolean).join(" ")).padEnd(44)} ${h.why}`);

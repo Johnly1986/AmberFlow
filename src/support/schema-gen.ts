@@ -21,7 +21,7 @@ import { OVERVIEW_TEXT, WHEN_TO_USE } from "./help-map.ts";
 
 /** 可查询的节名（`--topic`）。 */
 export const SCHEMA_TOPICS = [
-  "overview", "facts", "signals", "hints", "commands", "budget", "navigation", "flow_control", "dry", "stopcodes",
+  "overview", "facts", "signals", "hints", "commands", "budget", "navigation", "flow_control", "dry", "data_out", "stopcodes",
 ] as const;
 export type SchemaTopic = (typeof SCHEMA_TOPICS)[number];
 
@@ -98,6 +98,19 @@ const FLOW_CONTROL = {
   done_rule: "能用的 done 必须「动作前不成立、动作后成立」；动作前已成立的信号对验证零贡献",
 };
 
+/**
+ * 采集数据出口（data_out）：「extract 到的数据怎么落盘」的契约——采集类任务的
+ * 刚需，此前三层提示均未回答（实测两轮独立靠猜）。ctx 面板不提供写文件原语，
+ * 但 app.mjs 本身是 Node ESM 脚本，可直接 import node:fs 写产物。
+ */
+const DATA_OUT = {
+  extraction: "ctx.extract({rows, fields}) 返回行对象数组；字段值 \".\" = 行自身文本；dry 期返回 []（断言须守卫 ctx.runtime.runId===\"(dry)\"）",
+  persistence: "app.mjs 是 Node ESM 脚本：可直接 import { writeFileSync } from \"node:fs\" 把 extract 结果写成 JSON——引擎不提供写文件原语，也不拦进程内 IO",
+  recommended_path: "$AMBERFLOW_HOME/apps/<id>/outputs/（应用目录旁，与应用同生命周期）；跨平台路径用 import.meta.dirname（Node ≥20.11）拼接，不要用 new URL().pathname（Windows 会带 /C:/ 前缀）",
+  run_artifacts: "每次运行另落三件套到临时目录（stdout 尾行打印路径）：<id>-result.json（含 script.stop_code/stop_reason）/<id>-report.md/<id>-report.html",
+  masking: "meta.secretSlots 声明的槽位在 result/report/stdout 一律掩码 ***——不要把敏感值写进自定义产物文件",
+};
+
 /** dry 模拟面（createDryCtx 实证全表，06-B）。 */
 const DRY = {
   step_arrive_run_manual: "恒返回 ok:true，when 不评估（precondition_skipped 分支结构性不可预演）",
@@ -111,6 +124,7 @@ const DRY = {
  *  导出供 prompt-hit coverage 组做 STOP_NEXT ⊆ 键集闭环校验）。 */
 export const STOPCODE_MEANING: Readonly<Record<string, string>> = {
   config_error: "脚本声明/运行配置错——改声明，不要重试",
+  unreachable: "站点不可达（DNS/连接/导航超时）——验证可达后重试/放宽 --timeout，不是声明错",
   host_not_allowed: "目标主机不在 meta.hosts 信封内",
   budget_exceeded: "步预算/截止时间用完",
   invariant_failed: "ctx.done() 时结束态不变量不成立",
@@ -170,6 +184,7 @@ function overviewSection(): Record<string, unknown> {
     overview: OVERVIEW_TEXT,
     when_to_use: WHEN_TO_USE,
     commands_help: "amber help <命令> --json（结构化 when/flow/flags）",
+    json_consumption: "机器消费 --json 输出：进程内直读 stdout 或 --out 落盘后读文件；Windows PowerShell 管道/重定向会强转 UTF-16 加 BOM，JSON.parse 会挂",
     escalation: STOP_ESCALATION_TEXT,
   };
 }
@@ -190,6 +205,7 @@ export function renderSchemaCtx(): Record<string, unknown> {
       navigation: NAVIGATION,
       flow_control: FLOW_CONTROL,
       dry: DRY,
+      data_out: DATA_OUT,
       stopcodes: stopcodesSection(),
       next_exempt: EXEMPT_NEXT,
     },
