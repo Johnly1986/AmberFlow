@@ -122,7 +122,7 @@ export const meta = (kit) => ({
 | 字段 | 说明 |
 |---|---|
 | `id` / `label` / `goal` | 应用标识与一句话目标；`id`、`goal` 必填，`label` 缺省 = `id` |
-| `hosts` | 允许的主机列表；导航信封在 dry 与真实运行都执行 |
+| `hosts` | 允许的主机列表；导航信封在 dry 与真实运行都执行。**要预判重定向落点**：链接 href 的主机变体（apex ↔ `www.`）与 301 后的真实落点都要进信封——实测 href 指 `iana.org`、实际落 `www.iana.org`，只声明 href 侧会在落地撞 `host_not_allowed`（2026-11-01） |
 | `slots` / `requiredSlots` | 数据槽与必填槽；缺值返回 `needs_value`，不猜 |
 | `secretSlots` | 敏感槽位名单（如 `password`、`otp`）：result/report/stdout/dry 输出时掩码为 `***`；值仍建议走 env/本机配置，别写进 app.mjs |
 | `sources` | 数据腿名（`ctx.source(name)` 按名字按需加载） |
@@ -176,7 +176,7 @@ export async function flow(ctx) {
 - 导航同样优先用 `meta.site.pages` + `ctx.openPage(role)`，而不是在流程里重复硬编码 URL；业务值优先用 `meta.slots` / `ctx.source`，不要写死在 `flow` 里。**运行期才知道的 URL**（如命中链接的相对 href）可在 flow 里 `new URL(href, ctx.url())` 绝对化——URL 全局构造器在脚本进程可用（06 轮实证），这是"角色覆盖不到的动态地址"的正规通道，不是硬编码豁免。
 - 命令闭集的 op 是引擎能力面：`click` / `check` / `fill` / `select` / `scroll` / `drag` / `skip`。
   `scroll` 把目标滚入视口；`drag` 的 value 是落点 selector（可来自槽位），只在 `[draggable=true]` 或 slider 族元素上声明能力。
-  `skip` = 按定义解决的零动作命令：全部命令解决后引擎会**评估一次 done 信号**再判成败——"导航由 arrive 完成、本步只验证到达"的守卫步合法可用（04-A 修复；此前 skip 步的 done 从未被评估，必报 `done_not_held`）。
+  `skip` = 按定义解决的零动作命令：全部命令解决后引擎会**评估一次 done 信号**再判成败——"导航由 arrive 完成、本步只验证到达"的守卫步合法可用（04-A 修复；此前 skip 步的 done 从未被评估，必报 `done_not_held`）。守卫步写法：`act: [ctx.command("skip")]`（完整可跑示例见 `examples/apps/01-basic-step` 步骤②）。
   不在能力面内的 op 会得到 `action_unsupported`，目标歧义是 `target_ambiguous`，目标不存在是 `target_not_found`。
 - **act hint 是六形状语法闭集**（唯一解析器 `src/engine/hint.ts`，语法**描述**的唯一出处 `src/engine/grammar-prompt.ts`，`npm run prompt-hit` 校验示例可命中、报错/提示词/桥描述不漂移）：`#id` ｜ `tag[attr~substr]` ｜ `tag~token` ｜ `tag[attr=value]`（值去引号、全小写折叠）｜ 角色词 `button|link|input|textarea|select` ｜ 裸词（按 label 匹配）。属性名按池字段匹配：test→data-test、type→input_type、href、name、id、role、near；class、title 等不在池字段模型里，永不命中（本句由 grammar-prompt 的 ATTR_MATCH_MODEL_TEXT 生成，prompt-hit 逐字校验，勿手改）。**容器/后代 CSS（如 `#outer input`）不是语法错误——会被解析成一个永不命中的形状**；命令空间的 `target_not_found` reason 附闭集提示，而 act hint 落空会**静默回退模型决策**、报 `low_confidence` 不附提示——写 hint 前先 `inspect` 拿验证过的 `hint_candidates`。
 - **hint 与 done 信号是两个观察面**：`ctx.judge.*` 的 selector 走 DOM 查询面（任意 CSS 可用）；act hint 走上述语法闭集 + 元素池投影。`inspect --probe` 数的是 DOM——probe 命中数 ≠ hint 可命中，别互相推断（03-D2/D3；闭集提示只出现在命令空间 `target_not_found` 的 reason 里）。
@@ -225,6 +225,9 @@ export async function flow(ctx) {
 完成只认证据面，构造器都来自 `kit` / `ctx`：
 
 - DOM：`ctx.judge.url(...)`、`exists`、`text`、`equals`、`value`、`all(...)`、`any(...)`、`not(...)`；
+- 组合器是**变参**不是数组：`ctx.judge.all(ctx.judge.url("a"), ctx.judge.text("h1","x"))` ✔；
+  `all([a, b])` 加载期 INVALID（2026-11-01 实测：初次使用者首个就在这里被 apps check 拦下，
+  报错定位准确、一次修正）。
 - 进程：`ctx.tool.exitOk()`、`exitCode(n)`、`stdoutContains`、`stdoutMatches`、`stderrContains`、`jsonPath`、`fileExists`、`fileAbsent`；
 - 组合器可嵌套。**不要用“看起来完成了”代替证据**：`ctx.step` 返回的 `ok` 就是 done 信号是否成立。
 - **可用的 done = 「动作前不成立、动作后成立」**（判据，05/06 轮案例实证）：动作前已成立的信号（如任何页都真的 `exists("h1")`）在验证面**零贡献**——这一步的绿完全外包给 goal 语义与模型恰好点对，落点再意外也判绿（r06 `wide-done-sample` 实录）。守卫/到达/翻页步尤其警惕；用位置类选择器（`nth-child`/`nth-of-type`）前先实证**动作前命中数为 0**——站点数据可能自带"第 11 条"（r05 实证 `div.quote:nth-of-type(11)` 未滚动已真）。翻页类 done 优先用 URL 参数片段或**下一页独有内容锚**，别用两页共有的 h1/容器。
