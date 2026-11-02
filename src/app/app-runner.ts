@@ -474,6 +474,28 @@ export interface AppSourceResult {
   }>;
 }
 
+/**
+ * A1 子改动③：executor 已执行动作的 after 内容签名（`TraceStep.after`，DOM diff 的最小形态：
+ * 动作后一次观察的 {url, pool_size, first_text?}）。executor 侧形状是数据性的（`TraceStep` 带
+ * 索引签名），透传前在这里收口成显式形状——形状不对按 null 记，不透传垃圾。
+ */
+export interface AfterSignature {
+  url: string;
+  pool_size: number;
+  first_text?: string;
+}
+
+function asAfterSignature(v: unknown): AfterSignature | null {
+  if (typeof v !== "object" || v === null) return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o["url"] !== "string" || typeof o["pool_size"] !== "number") return null;
+  return {
+    url: o["url"],
+    pool_size: o["pool_size"],
+    ...(typeof o["first_text"] === "string" ? { first_text: o["first_text"] as string } : {}),
+  };
+}
+
 export interface AppRunResult {
   app: string;
   label: string;
@@ -580,6 +602,13 @@ export interface AppRunResult {
     descs: string[];
     /** 全部 trace 行的判定方式（与 `decisions.ladder` 同一口径）。 */
     methods: string[];
+    /**
+     * 每个已执行动作的 after 内容签名（与 `hows` 一一对齐；该动作无签名记 null；
+     * **整步所有动作都没有签名时整个字段省略**）。A1 子改动③：动作后一次观察的
+     * `{url, pool_size, first_text?}`——相邻动作的 `after.first_text` 对比即可判
+     * 「点击后列表是否前进」。done 立即成立的收尾动作没有下一次观察，不补签名。
+     */
+    afters?: Array<AfterSignature | null>;
     /** step/arrive 的落地 URL；tool 步没有。 */
     url?: string;
     /** 失败时的结构化停因。 */
@@ -1145,6 +1174,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       decisionSteps.push(...steps);
       if (opts.captureTraces) {
         const executed = rep.steps.filter((t) => t.executed);
+        // A1 子改动③：after 签名与 hows 一一对齐；全 null 时整字段省略（产物最小纪律）。
+        const afters = executed.map((t) => asAfterSignature(t.after));
         stepTraces.push({
           index: st.index ?? 0,
           id: st.id ?? null,
@@ -1153,6 +1184,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
           hows: executed.map((t) => String(t.how ?? "")),
           descs: executed.map((t) => String(t.desc ?? "")),
           methods: rep.steps.map((t) => String(t.method ?? "")).filter(Boolean),
+          ...(afters.some((a) => a !== null) ? { afters } : {}),
           ...(stateView ? { state_view: stateView } : {}),
         });
       }
@@ -1982,6 +2014,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // 只给 `ctx.step` 补动作证据；`ctx.arrive` / `ctx.manual` 不走 mw.run，没有动作 trace。
     const group = e.call === "step" ? decisionStepGroups[stepActionCursor++] ?? [] : [];
     const executed = group.filter((s) => s.executed === true);
+    // A1 子改动③：after 签名与 hows 一一对齐；全 null 时整字段省略（产物最小纪律）。
+    const afters = executed.map((s) => asAfterSignature(s.after));
     // when 守卫跳过的步（ok:false + precondition_skipped）不是失败：与声明式路径同一口径记成
     // "skipped"（见上方 rep.skipped 分支），审计者扫表即可分清“执行完成/不适用/失败”。
     const skippedStep = e.ok === false && e.stop_code === "precondition_skipped";
@@ -1993,6 +2027,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       hows: executed.map((s) => String(s.how ?? "")),
       descs: executed.map((s) => String(s.desc ?? "")),
       methods: group.map((s) => String(s.method ?? "")).filter(Boolean),
+      ...(afters.some((a) => a !== null) ? { afters } : {}),
       ...(e.url === undefined ? {} : { url: e.url }),
       // `dom_goal_signal` 这类是“done 已成立”的执行事实，不是失败；成功步不把它渲染成停因。
       ...(e.ok === false && e.stop_code !== undefined ? { stop_code: e.stop_code } : {}),

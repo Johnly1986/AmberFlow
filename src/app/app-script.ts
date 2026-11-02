@@ -201,6 +201,36 @@ export function scriptDisplayPath(scriptPath: string): string {
 }
 
 /**
+ * 信号 lint（A1 子改动②）：两种**已知假绿形态**的静态检查——只警告、不判 FAIL，dry run 仍 VALID。
+ * 只读 `SignalSpec` 的数据形状，不改 `checkSignal` 的运行时语义（11 轮真站实测的行为依据）：
+ *   (i)  done 顶层是裸 not(...)：池被清空/重渲染的瞬间，否定式空洞成立（假绿 + 0 卡）；
+ *   (ii) done 是 any(...) 且分支里有 not(exists(...))、同时该步声明了 ≥2 个命令：多动作闭集的
+ *        中间态（第一击点开菜单）即可让 not(exists) 分支成立（菜单类两连击假绿）。
+ * exists 取 `css_exists`（信号语言里唯一的纯存在算子）；只查顶层与 any 的直接分支，不递归，
+ * 判不出的形状宁可不报（lint 是提示，不是裁决）。
+ */
+function signalLintProblems(done: unknown, where: string, commandCount: number): string[] {
+  if (!isObj(done)) return [];
+  const out: string[] = [];
+  if (Object.keys(done).length === 1 && "not" in done) {
+    out.push(`信号 lint: ${where}: done 顶层是裸 not(...) — `
+      + "否定式 done 建议配正向 exists 约束（空池/重渲染瞬间会空洞成立）");
+  }
+  if ("any_of" in done && Array.isArray(done.any_of) && commandCount >= 2) {
+    const notExistsBranch = (done.any_of as unknown[]).some((b) => {
+      if (!isObj(b) || !("not" in b)) return false;
+      const inner = b["not"];
+      return isObj(inner) && "css_exists" in inner;
+    });
+    if (notExistsBranch) {
+      out.push(`信号 lint: ${where}: done=any(...) 含 not(exists(...)) 分支且该步声明了 ${commandCount} 个命令 — `
+        + "not(exists) 分支可能在中间态成立（菜单类两连击假绿）");
+    }
+  }
+  return out;
+}
+
+/**
  * **dry 跑一遍 flow**：不动作、不开浏览器，但把每次调用都校验一遍并记进 trace。
  * 这是 `amber apps check/explain` 的落法（与真实运行同一套调用序列）。
  *
@@ -234,9 +264,24 @@ export async function dryRunFlow(loaded: LoadedScriptApp, opts: {
     trace,
     slotKeys,
   });
+  // A1 子改动②：dry 的 step 事件只记 done 声明（result.done），不记 act 命令数——lint (ii) 需要
+  // "该步声明了几个命令"。ctx-dry 是既有契约面不在本任务改动范围，调用侧把 step 包一层：
+  // 每个 step 事件号 → act 命令数（dry 的 step 校验失败时本就不落事件，两侧天然对齐）。
+  const stepCommandCount = new Map<number, number>();
+  const baseStep = ctx.step.bind(ctx);
+  const dryCtx: Ctx = {
+    ...ctx,
+    step: async (desc, req) => {
+      const n = Array.isArray(req.act) ? req.act.length : 0;
+      const res = await baseStep(desc, req);
+      const last = trace.events[trace.events.length - 1];
+      if (last !== undefined && last.call === "step") stepCommandCount.set(last.i, n);
+      return res;
+    },
+  };
   const problems: string[] = [];
   try {
-    await loaded.flow(ctx);
+    await loaded.flow(dryCtx);
   } catch (e) {
     const loc = scriptErrorLocation(e, loaded.scriptPath);
     const at = loc === null ? "" : ` (at ${loc})`;
@@ -253,6 +298,17 @@ export async function dryRunFlow(loaded: LoadedScriptApp, opts: {
       problems.push("flow: declared end-state invariants but ctx.done() was never called on the dry path");
     } else if (!browserish) {
       problems.push("flow: web invariants need at least one browser navigation (open/openPage/arrive)");
+    }
+  }
+  // A1 子改动②：信号 lint 逐 step 出警告。只警告不判 FAIL——不进 problems（check 的
+  // VALID/exit code 只认 problems），也不写进 trace（它是给作者的提示，不是运行事实）；
+  // 打到 stderr：终端可见，且不污染 `--json` 的 stdout 信封。
+  for (const ev of trace.events) {
+    if (ev.call !== "step") continue;
+    const where = `ctx.step(${JSON.stringify(ev.desc ?? "")})`;
+    const done = isObj(ev.result) ? ev.result["done"] : undefined;
+    for (const w of signalLintProblems(done, where, stepCommandCount.get(ev.i) ?? 0)) {
+      console.error(w);
     }
   }
   finishTrace(trace, { done: problems.length === 0 });

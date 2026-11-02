@@ -694,6 +694,19 @@ function safeUrl(obj: unknown): string {
 }
 
 /**
+ * A1 子改动③（逐步动作后内容签名，DOM diff 的最小形态）：池首候选文本。
+ * 按提取写入序（= 观察序）取第一个带非空 label 的元素，截 ~60 字符；空池返回 null。
+ * 只读内存里已有的池，不新增页面往返。
+ */
+function firstPoolText(pool: ElemPool): string | null {
+  for (const e of Object.values(pool)) {
+    const t = String(e.label ?? "").trim();
+    if (t) return t.slice(0, 60);
+  }
+  return null;
+}
+
+/**
  * Python's `input("CONFIRM ...")` default. There is no synchronous stdin prompt
  * in Node, and a risky action must never be silently approved — so the port
  * refuses unless the caller supplies `confirmFn`.
@@ -1688,6 +1701,14 @@ export class BrowserMiddleware {
     const cmdSpace: CommandDecl[] = (commands ?? []).filter((c) => c && typeof c.id === "string");
     const cmdDone = new Set<string>();
     let cmdI = 0;
+    // A1（2026-11 真站实测）：act 是多动作命令闭集（N≥2）时，done 必须等**全部命令走完**才评估——
+    // 以前每个动作后都判一次 done，第一击点开菜单的中间态就能让信号成立（trace 里 hows 记了
+    // clicked、status 却是 done），第二个命令从未执行，整轮"排序成功"全为假绿。"走完"沿用既有
+    // walk 语义：skip 按定义解决、执行成功、或目标已 forbidden 而 walk 放行；中途某命令解析失败
+    // 仍走既有 target_not_found / action_unsupported / needs_value 结构化停因（本改动不加诊断）。
+    // N≤1（单动作/无命令步）恒真——评估时机逐字节不变；04-A 的"全部命令耗尽后才查信号"本来就是
+    // 这个语义，本闸门只是把逐动作评估点对齐到它。
+    const cmdWalkComplete = (): boolean => cmdSpace.length < 2 || cmdDone.size >= cmdSpace.length;
     // D3/R-4: element signature -> how many times this subgoal effectively drove it while the
     // done-signal stayed false. Keyed by SIGNATURE (refs are positional); see the check below.
     const effectiveRuns: Record<string, number> = {};
@@ -1700,6 +1721,12 @@ export class BrowserMiddleware {
     this.targetHint = this.targetHints.length ? null : targetHint;
 
     const trace: TraceStep[] = [];
+    // A1 子改动③：逐步动作后的轻量 after 签名 {url, pool_size, first_text}，挂在**已执行动作**
+    // 的 trace 事件上。动作事件先落账，签名在下一次观察（下一动作步首的那次池提取——内存里
+    // 已有的池）补上，它就是上一动作后的页面状态；复用既有提取、零新增页面往返。相邻两个动作
+    // 事件的 after.first_text 对一眼，即可判"点击成功但列表是否前进"。done 立即成立的最后动作
+    // 没有下一次观察，不补（完成已由信号裁决）；补签动作见循环头部的落账点。
+    let pendingAfterIdx: number | null = null;
     let done = false;
     let manualDone = false;          // done because a HUMAN attested, not a DOM signal
     let dryRan = false;              // stopped at the dry-run probe (nothing executed)
@@ -1864,6 +1891,21 @@ export class BrowserMiddleware {
         }
         lastPoolSize = Object.keys(elems).length;
         lastPoolWaitedMs = poolWaitedMs;
+        // A1 子改动③：上一次已执行动作的 after 签名在这里落账——本步步首的这次提取就是上一动作
+        // 后的页面状态。放在 walk/hintLookup 之前（hint 注入的元素不算观察事实）、放在 poolReady
+        // 空池停因之前（动作后页面真被清空也照实记 {pool_size:0}）。
+        if (pendingAfterIdx !== null) {
+          const prev = trace[pendingAfterIdx];
+          if (prev !== undefined && prev.after === undefined) {
+            const ft = firstPoolText(elems);
+            prev.after = {
+              url: urlOf(pg),
+              pool_size: lastPoolSize,
+              ...(ft === null ? {} : { first_text: ft }),
+            };
+          }
+          pendingAfterIdx = null;
+        }
         if (poolReady && Object.keys(elems).length === 0) {
           stop("page_not_ready",
             `page not ready: element pool stayed empty after ${poolWaitedMs}ms `
@@ -2575,6 +2617,8 @@ export class BrowserMiddleware {
           ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question
           inert, url: urlOf(pg),
         });
+        // A1 子改动③：这个已执行动作的 after 签名等下一次观察落账（见循环头部的落账点）。
+        pendingAfterIdx = trace.length - 1;
         if (verbose) {
           console.log(`  step ${stepNo}: ${desc} (${how}, ${method}, conf=${conf.toFixed(2)}${inert ? ", inert" : ""})`);
         }
@@ -2605,7 +2649,9 @@ export class BrowserMiddleware {
           (hintMemory as HintMemoryLike | null)?.countUsed?.(1);
         }
         if (executed && !inert) this._advanceHint();
-        if (goalSignalFn && (await goalSignalFn(pg))) {
+        // A1：多动作闭集（N≥2）未走完时，中间动作不评估 done（goalSignalFn 不付这次页面往返）；
+        // 同时上面"信号成立才学的 hint"也自然不会学到中间态。单命令/无命令步恒真，逐字节原行为。
+        if (goalSignalFn && cmdWalkComplete() && (await goalSignalFn(pg))) {
           // A MODEL pick that actually advanced the subgoal is a hint we EARNED: record
           // it (stable handles only, via induceHint) so the next run of this exact url +
           // subgoal resolves by rule at zero model cost. Rule hits need no help.
@@ -2634,19 +2680,23 @@ export class BrowserMiddleware {
         // asynchronously (the live burger click *was* inert, and so is a click whose
         // handler only schedules the change).
         if (goalSignalFn && executed) {
-          const settleDeadline = Date.now() + Math.max(0, doneTimeoutMs);
-          let poll = 0;
-          while (Date.now() < settleDeadline) {
-            await sleep(Math.max(1, donePollMs));
-            poll++;
-            if (await goalSignalFn(pg)) {
-              done = true;
-              stop("dom_goal_signal", "dom goal signal", stepNo);
-              if (verbose) {
-                console.log(`  step ${stepNo}: -> done (dom goal signal, `
-                  + `settled after ${poll * Math.max(1, donePollMs)} ms)`);
+          // A1：闭集未走完时中间动作不进入 done 轮询（评估推迟到最后一个命令之后；单命令步不变）。
+          // popup 复扫不 gate：它不是 done 评估，是导航信封的安全复扫，逐动作都该付。
+          if (cmdWalkComplete()) {
+            const settleDeadline = Date.now() + Math.max(0, doneTimeoutMs);
+            let poll = 0;
+            while (Date.now() < settleDeadline) {
+              await sleep(Math.max(1, donePollMs));
+              poll++;
+              if (await goalSignalFn(pg)) {
+                done = true;
+                stop("dom_goal_signal", "dom goal signal", stepNo);
+                if (verbose) {
+                  console.log(`  step ${stepNo}: -> done (dom goal signal, `
+                    + `settled after ${poll * Math.max(1, donePollMs)} ms)`);
+                }
+                break;
               }
-              break;
             }
           }
           // Popup 可能在 action 之后几十/几百 ms 才 commit；done 轮询结束后再扫一次 context，
