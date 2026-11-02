@@ -173,6 +173,8 @@ export interface AppRunOptions {
   runtimeStats?: () => DecisionCacheStats;
   /** 模型咨询计数的取数口（`countingRuntime` 包一层就给；同样是跑完读一次）。 */
   pickAsks?: () => number;
+  /** A3：ask 抛错计数的取数口（`countedProvider` 的失败账；在线 provider 档才有）。 */
+  pickFailedAsks?: () => number;
   /**
    * P1 `tieredHint` 的出口（默认关 = 今天逐字节）：hint 档内歧义变成对模型的更小提问。
    * 由 `--tiered-hint` / 桥的 `tiered_hint` 打开，用于线上包 A/B。
@@ -281,6 +283,12 @@ export interface AppDecisions {
    * `method`（执行器在 `low confidence` 处直接 break），所以"保险碰没碰过"必须看这个数。
    */
   model_asks: number;
+  /**
+   * A3：ask **抛错**的次数（HTTP 403/超时/DNS 等基础设施失败）。它与"未过闸门"是两回事：
+   * 闸门是对模型意见打分，抛错说明根本没拿到意见——混在一起会把一次 403 伪装成
+   * 「模型很没把握」。只统计在线 provider 档（countedProvider 的失败账；laya 档恒 0）。
+   */
+  failed_asks: number;
   /** 过关执行的模型步（含 :reobserve/:adjudicated 变体；escalate 是老师点名，另列）。 */
   model_steps: number;
   /** 加宽重看（`<provider>:reobserve`）的步数——从"低置信要停"边缘救回来的那一步。 */
@@ -302,9 +310,11 @@ export interface AppDecisions {
   line: string;
 }
 
-/** trace + 咨询计数 → 汇总。口径写死在这一个函数里，套件/矩阵/桥/报告四处念同一份数。 */
+/** trace + 咨询计数 → 汇总。口径写死在这一个函数里，套件/矩阵/桥/报告四处念同一份数。
+ *  A3：`failedAsks` 是 ask 抛错（基础设施失败）的次数——它算「被咨询」（敲门发生了），
+ *  但**不算**「未过闸门」（没有意见可打分）。 */
 export function summarizeDecisions(
-  steps: TraceStep[], cache: DecisionCacheStats | null, modelAsks = 0,
+  steps: TraceStep[], cache: DecisionCacheStats | null, modelAsks = 0, failedAsks = 0,
 ): AppDecisions {
   const byMethod: Record<string, number> = {};
   const modelConfs: number[] = [];
@@ -350,10 +360,16 @@ export function summarizeDecisions(
   // 但它们是保险被碰过的直接证据（slowjet 的冷加载正是这一形状）。
   // A2′：裁决过的也算"过了"（被执行了，只是没过置信闸门、改由信号裁决），否则会把
   // 一次真救回来的裁决错记成"问了没用"。
+  // A3：抛错的 ask 单独成账（"K 次失败"）——它是基础设施故障，不是模型意见没过闸门；
+  // 把它混进「未过闸门」会把一次 403 说成「模型很没把握」（R3/R8 排查被这句话带偏）。
   const passed = model;
-  if (modelAsks !== passed) {
-    parts.push(`模型被咨询 ${modelAsks} 次`
-      + (modelAsks > passed ? `（${modelAsks - passed} 次未过闸门）` : ""));
+  const gateMissed = Math.max(0, modelAsks - passed - failedAsks);
+  if (modelAsks !== passed || failedAsks > 0) {
+    const detail = [
+      ...(gateMissed > 0 ? [`${gateMissed} 次未过闸门`] : []),
+      ...(failedAsks > 0 ? [`${failedAsks} 次失败`] : []),
+    ].join("，");
+    parts.push(`模型被咨询 ${modelAsks} 次` + (detail ? `（${detail}）` : ""));
   }
   for (const [m, n] of Object.entries(byMethod)) {
     if (!bucketed.has(m)) parts.push(`${m} ${n}`);
@@ -365,6 +381,7 @@ export function summarizeDecisions(
     total_steps: steps.length,
     by_method: byMethod,
     model_asks: modelAsks,
+    failed_asks: failedAsks,
     model_steps: model,
     reobserve,
     escalate,
@@ -375,7 +392,9 @@ export function summarizeDecisions(
       reobserve, escalate,
       // A2′：裁决级单独计数（梯级账单要能看见"这一级今天兜回过没有"）。
       adjudicated,
-      asked_not_passed: Math.max(0, modelAsks - model),
+      // A3：`asked_not_passed` 只数"问了、模型真给了意见、但没过闸门"的——抛错的那几次
+      // 挪进 `failed_asks`（顶层字段），不再把基础设施失败伪装成低置信。
+      asked_not_passed: gateMissed,
     },
     conf: {
       n: modelConfs.length,
@@ -1448,7 +1467,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     ...(opts.modelStatus !== undefined ? { model_status: opts.modelStatus } : {}),
     // 消融跑要能被产物读出来（不声明 ⇒ 字段缺席，逐字节与今天相同）。
     ...(opts.forceHints === true ? { hint_ablation: true } : {}),
-    decisions: summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0),
+    decisions: summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0,
+      opts.pickFailedAsks ? opts.pickFailedAsks() : 0),
     // R2：学习环的账——只在**开了**的时候写字段（缺省等价纪律，同 path_visits）。
     // `rejected` 要 cast：接口只承诺 entries/used，它是 HintMemory 实现多给的——
     // 跨实现注入（测试桩/别的记忆）时不能假设它在。
@@ -1755,6 +1775,13 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   // §3：策略在两条分支外声明（重放分支不构造执行器，但产物字段的形状要一致）。
   let policy: EffectivePolicy | null = null;
   let anyDeclared = false;
+  /**
+   * A3：在线 provider 掉线/没配好 ⇒ pick 抛错、本次降级 rules-only 的原因。
+   * **管道修复**：runApp（声明式路径）一直把 `mw.providerDegraded` 写进 result，
+   * 但 flow 脚本路径的执行器是惰性创建的局部 `mw`，旧代码从没把它读出来——
+   * R3/R8 实测 result 的 provider_degraded 一直是空。收尾时读一次，两条路径同账。
+   */
+  let providerDegraded: string | null = null;
   /** 每次 ctx.step/arrive 的执行报告 → 决策账（与 runApp 同一份 `summarizeDecisions`）。 */
   const decisionSteps: TraceStep[] = [];
   /** 每个 `ctx.step` 一次 mw.run；这里按调用顺序保留它的动作 trace，供 step_traces 补 hows/descs/methods。 */
@@ -1806,10 +1833,12 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     const resolvedPolicy = resolveRunPolicy(pack, opts);
     policy = resolvedPolicy.policy;
     anyDeclared = resolvedPolicy.anyDeclared;
-    let mw: BrowserMiddleware | null = null;
+    // 裸 `let` 会被 TS 的控制流收窄成 never（闭包里的赋值它看不见）——与上面的 session
+    // 同一个坑，用 holder：收尾要把 `providerDegraded` 从执行器实例上读出来（A3）。
+    const mwHolder: { current: BrowserMiddleware | null } = { current: null };
     const getMw = (): BrowserMiddleware => {
-      if (mw === null) {
-        mw = new BrowserMiddleware({
+      if (mwHolder.current === null) {
+        mwHolder.current = new BrowserMiddleware({
           modelId: pack.model ?? "english",
           auditor: new MockAuditor(),
           hosts: (pack.hosts ?? null) as string[] | null,
@@ -1831,7 +1860,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
             : (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x)),
         });
       }
-      return mw;
+      return mwHolder.current;
     };
     /** 工具步：接到既有 `runToolStep`（干跑/确认/幂等重试的唯一实现，不复制）。 */
     const toolRunner = async (req: ToolRunRequest): Promise<ToolRunResult> => {
@@ -1939,6 +1968,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       else throw e;
     } finally {
       if (holder.session !== null) { try { await holder.session.close(); } catch { /* 关会话失败不该掩盖运行结果 */ } }
+      // A3：决策源降级的原因只活在执行器实例上——脚本抛 StopError 也不能把它弄丢
+      //（拿不到场就记 null：重放分支没有执行器，字段缺席 = 没降级，与 runApp 同口径）。
+      providerDegraded = mwHolder.current?.providerDegraded || null;
     }
     invariants = invariantsFromTrace(trace, pack ?? {});
   }
@@ -2039,7 +2071,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     i: e.i, desc: e.desc ?? "", ...(e.result === undefined ? {} : { result: e.result }),
   }));
   const stats = opts.runtimeStats ? opts.runtimeStats() : null;
-  const decisions = summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0);
+  const decisions = summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0,
+    opts.pickFailedAsks ? opts.pickFailedAsks() : 0);
   const result: AppRunResult = {
     app: pack.id,
     label: pack.label ?? pack.id,
@@ -2070,6 +2103,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     ...(anyDeclared && policy !== null ? { effective_policy: policy } : {}),
     ...(opts.modelStatus === undefined ? {} : { model_status: opts.modelStatus }),
     decisions,
+    // A3：与 runApp（声明式路径）同账——降级发生过就必须出现在产物里。
+    ...(providerDegraded ? { provider_degraded: providerDegraded } : {}),
     step_traces: stepTraces,
     ...(logs.length ? { logs } : {}),
     script: {
@@ -2359,6 +2394,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       ...(cliString(v, "replay") === undefined ? {} : { replayTrace: cliString(v, "replay") }),
       runtimeStats: applied.stats ?? undefined,
       pickAsks: applied.asks ?? undefined,
+      pickFailedAsks: applied.failedAsks ?? undefined,
     });
   } catch (e) {
     if (e instanceof AppRunConfigError) {

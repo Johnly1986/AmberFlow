@@ -1332,6 +1332,17 @@ export class BrowserMiddleware {
   }
 
   /**
+   * A3（决策源对齐与失败透传）：pick 抛错降级过 ⇒ 把真实原因（HTTP 状态码 + 服务错误关键句）
+   * 编进 `no_model_runtime` 的停因。降级不该把基础设施事实吞掉——「rules-only 没模型」与
+   * 「配了决策源但它 403 了」是两件事，停因必须分得清。空串 = 本次 rules-only 是
+   * 「本来就没装模型」（LayaNotConfiguredError 路径），后缀缺席，输出逐字节不变。
+   */
+  private degradedReasonSuffix(): string {
+    const d = this.providerDegraded.trim();
+    return d === "" ? "" : `（决策源不可用：${d.slice(0, 240)}）`;
+  }
+
+  /**
    * 一次提问的全部事实：选了什么、conf 怎么来的（passthrough 与否决定它的含义）、原始概率。
    * `pickElement` 是它的三元组视图（保持既有调用点与 trace 口径不变），`pickProposal` 是带形状的视图。
    */
@@ -2392,7 +2403,8 @@ export class BrowserMiddleware {
                     + 'command (commands: [{"op":"skip"}]) on this subgoal, or name a target_hint, so the '
                     + "signal can be honored"
                   : "does not hold on this page either: name a target_hint, declare commands, "
-                    + "or provide a decision model"}`, stepNo);
+                    + "or provide a decision model"}`
+                + this.degradedReasonSuffix(), stepNo);
               if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
               break;
             }
@@ -2401,7 +2413,9 @@ export class BrowserMiddleware {
               // 规划引导：计划点了名、规则没解出来、模型又不在/弃权——当场送闭集。
               + (curHint !== null && ruleRef === null
                   ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
-                  : ""), stepNo);
+                  : "")
+              // A3：provider 是抛错降级（而非本来就没装）时，把 HTTP 事实带上——排查不必再猜。
+              + this.degradedReasonSuffix(), stepNo);
           } else {
             stop("action_space_exhausted",
               `action space exhausted on step ${stepNo}`
@@ -2456,7 +2470,9 @@ export class BrowserMiddleware {
               // 同 low_confidence：hint 被点名却没解出来时，当场送闭集（规划引导，见 2026-10-29 实测）。
               + (curHint !== null && ruleRef === null
                   ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
-                  : ""), stepNo);
+                  : "")
+              // A3：同上——降级原因（HTTP 状态码 + 服务错误关键句）随停因透出。
+              + this.degradedReasonSuffix(), stepNo);
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
           } else if (!(adjudicate && ref !== null)

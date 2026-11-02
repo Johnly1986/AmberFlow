@@ -222,20 +222,41 @@ export type ProviderSpec =
   | { kind: "provider"; name: string; tier: "on"; ablation: false; provider: DecisionProvider }
   | { kind: "none"; name: string; tier: string; ablation: true };
 
-/** 给 provider 套一层咨询计数（基线 provider 也要出场数，否则梯级账单会把它算成零咨询）。 */
-export function countedProvider(p: DecisionProvider): { provider: DecisionProvider; asks: () => number } {
+/**
+ * 给 provider 套一层咨询计数（基线 provider 也要出场数，否则梯级账单会把它算成零咨询）。
+ * A3 补了一本**失败账**：ask 抛错（HTTP 403/超时/DNS……）是基础设施失败，不是"模型给的意见
+ * 没过闸门"——闸门是对意见打分，抛错说明根本没拿到意见。旧行为把抛错的 ask 也计进 asks，
+ * 让「模型被咨询 1 次（1 次未过闸门）」去掩盖一次 403；现在失败单独记 `failedAsks`，
+ * 汇总行如实分开（「N 次未过闸门，K 次失败」）。计数仍先于调用：无论服务答没答，
+ * 敲门这个动作本身发生了。
+ */
+export function countedProvider(p: DecisionProvider): {
+  provider: DecisionProvider; asks: () => number; failedAsks: () => number;
+} {
   let n = 0;
+  let failed = 0;
   return {
     asks: () => n,
+    failedAsks: () => failed,
     provider: {
       ...p,
-      async pick(req) { n += 1; return p.pick(req); },
+      async pick(req) {
+        n += 1;
+        try { return await p.pick(req); }
+        catch (e) { failed += 1; throw e; }
+      },
       ...(p.risk ? { risk: (g: string, d: string) => p.risk!(g, d) } : {}),
       ...(p.doneVote ? { doneVote: (g: string, st: ModelState) => p.doneVote!(g, st) } : {}),
       // escalation（askChoice 闭集窄问）也是一次真咨询：不记账的话，"老师点名"会
       // 在梯级账单里记成零出场。askChoice 缺席（能力未声明）时什么都不加。
       ...(p.askChoice
-        ? { askChoice: async (req: ClosedSetRequest) => { n += 1; return p.askChoice!(req); } }
+        ? {
+            askChoice: async (req: ClosedSetRequest) => {
+              n += 1;
+              try { return await p.askChoice!(req); }
+              catch (e) { failed += 1; throw e; }
+            },
+          }
         : {}),
     },
   };
@@ -249,6 +270,12 @@ export interface AppliedSpec {
   stats: (() => DecisionCacheStats) | null;
   /** 模型被真咨询了几次（laya 与在线 provider 都有——计在缓存外面，命中也算咨询；none 为 null）。 */
   asks: (() => number) | null;
+  /**
+   * A3：ask **抛错**的次数（在线 provider 档；laya/none 为 null——laya 的失败走
+   * configError/产物路径，不按"每次咨询"记账）。汇总时与 asks 分开报：
+   * 「未过闸门」只算模型真给过意见的，基础设施失败进 failed_asks。
+   */
+  failedAsks?: (() => number) | null;
 }
 
 /**
@@ -261,19 +288,19 @@ export interface AppliedSpec {
 export async function applySpecToRuntime(spec: ProviderSpec): Promise<AppliedSpec> {
   installDecisionProvider(null);
   installLayaRuntime(null);
-  if (spec.kind === "none") return { stats: null, asks: null };
+  if (spec.kind === "none") return { stats: null, asks: null, failedAsks: null };
   if (spec.kind === "provider") {
     // 在线 provider 不套决策缓存（缓存键是 laya 的 state+questions 形状，对别的 provider
     // 不成立——套错会静默复用别的模型的决策），但咨询计数必须在场，否则梯级账单会把它记成零出场。
     const counted = countedProvider(spec.provider);
     installDecisionProvider(counted.provider);
-    return { stats: null, asks: counted.asks };
+    return { stats: null, asks: counted.asks, failedAsks: counted.failedAsks };
   }
   const inner = await spec.make();
   const cached = withDecisionCache(inner);
   const counted = countingRuntime(cached);
   installLayaRuntime(counted);
-  return { stats: () => cached.decisionStats(), asks: () => counted.pickAsks() };
+  return { stats: () => cached.decisionStats(), asks: () => counted.pickAsks(), failedAsks: null };
 }
 
 /**

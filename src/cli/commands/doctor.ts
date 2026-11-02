@@ -21,6 +21,7 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
       options: {
         json: { type: "boolean" }, fix: { type: "boolean" },
         verbose: { type: "boolean" }, help: { type: "boolean" },
+        "ask-probe": { type: "boolean" },
       },
     });
   } catch (err) {
@@ -88,6 +89,11 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
     providerError = err instanceof Error ? err.message : String(err);
   }
   const providers = provider.listDecisionProviders();
+  // A3（决策源对齐）：opt-in 真实 ask 探针（--ask-probe）。doctor 的静态检查只看"配置项在不在"，
+  // 看不出凭据是否真能过网关——实测有"配置齐全 + 403 AccessDenied.Unpurchased"的组合，
+  // 引擎当时把它吞成静默降级。探针走与运行时**同一**装配路径真发一次最小 ask。
+  // 医生只诊断：探针成败**不改变退出码**（exitCode 与它无关），失败只如实多报一行。
+  const askProbe = v["ask-probe"] === true ? await runAskProbe(provider) : null;
   // 决策源解析失败是“可用性警告”，不是核心阻塞项；退出码只看 Node / Chromium / 配置。
   const exitCode = report.ok && config.errors.length === 0 ? 0 : 2;
 
@@ -99,7 +105,11 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
         ready: p.model, artifacts: p.artifacts, missing: p.model ? [] : missingPieces(p.artifacts),
       },
       llm: { configured: p.llm },
-      provider: { default: providerDefault, error: providerError, available: providers },
+      provider: {
+        default: providerDefault, error: providerError, available: providers,
+        // A3：--ask-probe 跑过才出现这个字段（缺省等价：普通 doctor 的 JSON 形状不变）。
+        ...(askProbe === null ? {} : { ask_probe: askProbe }),
+      },
       // 裸 `amber` 能不能敲：这是"照着 README 复制却 CommandNotFound"的唯一线索。
       cli: {
         linked: invocation.linked,
@@ -128,6 +138,10 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
         hint: "先修 Node / Chromium / 配置；amber doctor --fix 只做安全修复。",
         next: ["amber config show", "amber doctor --fix"],
       };
+    }
+    if (askProbe === null) {
+      // JSON 模式 stdout 只能有一个对象：提示走 stderr（diag），信封形状不变。
+      diag(ctx, "提示：加 --ask-probe 用当前三件套真实发一次 ask（探针只诊断，不改退出码）");
     }
     emitJson(ctx, envelope);
     return exitCode;
@@ -161,9 +175,72 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
   } else if (providerError) {
     say(ctx, `当前决策源：解析失败（${providerError}）`);
   }
+  // A3：探针结果单独一行（或未发请求时的提示）。成败都不动退出码——医生只诊断。
+  if (askProbe === null) {
+    say(ctx, "ask 探针     未发请求——加 --ask-probe 用当前三件套真实发一次 ask（只诊断，不改退出码）");
+  } else if (askProbe.ok) {
+    say(ctx, `ask 探针     ✓ ${askProbe.provider}：ref=${JSON.stringify(askProbe.ref)} conf=${askProbe.conf?.toFixed(2) ?? "-"}`);
+  } else {
+    say(ctx, `ask 探针     ✗ ${askProbe.error ?? "未知失败"}`);
+  }
   if (exitCode !== 0) {
     say(ctx, "");
     say(ctx, "下一步：amber doctor --fix / amber config show");
   }
   return exitCode;
+}
+
+/** A3：`doctor --ask-probe` 的一次结果。医生只诊断：成败都不影响 doctor 的退出码。 */
+interface AskProbeResult {
+  /** 实际装配的决策源名（探针跳过/装配失败时如实给名字或 unknown）。 */
+  provider: string;
+  ok: boolean;
+  /** ok=true：模型在最小考卷（3 个假候选）里选中的 ref 与把握值。 */
+  ref?: string | null;
+  conf?: number;
+  /** ok=false：HTTP 状态码 + 错误关键句（或跳过原因）；文本只来自响应体/网络错误，绝无凭据。 */
+  error?: string;
+}
+
+/**
+ * `--ask-probe`：用与运行时**完全相同**的装配路径（resolveProviderSpec → applySpecToRuntime →
+ * provider.pick）真实发一次最小 pick 请求。doctor 的静态段只证明"配置项在不在"，
+ * 证明不了"凭据真的能过网关"——2026-11-02 实测：三层配置齐全、doctor 全绿，
+ * 三件套凭据在网关上是 403 AccessDenied.Unpurchased，而引擎把这次失败吞成
+ * 「模型被咨询 1 次（1 次未过闸门）」静默降级。这个探针就是那类故障的直达检查：
+ * HTTP 成败给 ref/conf，失败给状态码+错误关键句（不含也不回显任何凭据）。
+ */
+async function runAskProbe(
+  provider: typeof import("../../model/decision-provider.ts"),
+): Promise<AskProbeResult> {
+  let name = "unknown";
+  try {
+    const spec = await provider.resolveProviderSpec(undefined);
+    name = spec.name;
+    if (spec.kind !== "provider") {
+      return { provider: name, ok: false,
+        error: `当前默认决策源是 ${spec.name}（tier=${spec.tier}）——没有在线 HTTP 决策源可探测`
+          + "（探针只测三件套；本地模型请用真实运行验证）" };
+    }
+    // 与运行时同一安装序列（含计数包装）：probe 看到的就是跑应用时看到的那个 provider。
+    await provider.applySpecToRuntime(spec);
+    const p = provider.getDecisionProvider();
+    // 最小考卷：假页面（stateText 取不到正文就走「fake page 少正文」的既有容错路径）
+    // + 3 个假候选。只考 HTTP 层能不能过、服务答不答——不考模型的题感。
+    const page = { url: "https://amberflow.ask-probe.invalid/", title: async () => "amberflow doctor ask probe" };
+    const out = await p.pick({
+      goal: "doctor ask probe", page,
+      elems: {
+        e1: { tag: "button", label: "搜索" },
+        e2: { tag: "textbox", label: "出发地" },
+        e3: { tag: "link", label: "下一页" },
+      },
+      forbidden: new Set(), notes: null, narrow: null, k: 8,
+    });
+    return { provider: p.name, ok: true, ref: out.ref ?? null, conf: out.score };
+  } catch (e) {
+    // 单行化 + 截断：错误关键句进一行诊断（服务错误体/网络 cause；凭据不在此列）。
+    const text = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim();
+    return { provider: name, ok: false, error: text.slice(0, 300) };
+  }
 }

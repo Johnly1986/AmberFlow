@@ -78,8 +78,15 @@ export interface SystemOneProfile {
   fetchImpl?: typeof fetch;
 }
 
-/** 从错误体抽一句人读的原因——对象字段先挖 .message/.code，再兜底 stringify，绝不 [object Object]。 */
-export function systemOneErrorText(json: SystemOneReply, status: number): string {
+/**
+ * 从错误体抽一句人读的原因——对象字段先挖 .message/.code，再兜底 stringify，绝不 [object Object]。
+ * A3（2026-11-02 实测 token-plan 403）：`.code`（AccessDenied.Unpurchased）与 `.message`（人话）
+ * 是两句话，message-first 的旧口径会把可检索的 machine code 整个丢掉——负路径排查靠的就是
+ * 这个 code。现在 code 与人话并排透出；非 JSON 错误体（网关 HTML/纯文本兜底页）也把原文
+ * 关键句带回来，不再输出「(HTTP 403，无 error 字段)」这种没内容的行。
+ * 密钥纪律：这里只碰**响应体**与状态码——请求头（Authorization）永不进入错误文本。
+ */
+export function systemOneErrorText(json: SystemOneReply, status: number, rawBody = ""): string {
   const pick = (v: unknown): string | null => {
     if (typeof v === "string" && v.trim()) return v.trim();
     if (v && typeof v === "object") {
@@ -90,7 +97,31 @@ export function systemOneErrorText(json: SystemOneReply, status: number): string
     }
     return null;
   };
-  return pick(json.message) ?? pick(json.error) ?? pick(json.code) ?? `(HTTP ${status}，无 error 字段)`;
+  const code = pick(json.code) ?? pick((json.error as Record<string, unknown> | undefined)?.code) ?? "";
+  let text = pick(json.message) ?? pick(json.error) ?? pick(json.code)
+    ?? (rawBody.trim() ? rawBody.trim().slice(0, 200) : `(HTTP ${status}，无 error 字段)`);
+  if (code !== "" && !text.includes(code)) text = `${code}：${text}`;
+  return text.slice(0, 200);
+}
+
+/** Node 的 fetch 网络失败把真话放在 `cause` 链里（getaddrinfo ENOTFOUND / ECONNREFUSED /
+ *  TimeoutError）——只透出顶层 "fetch failed" 等于没说。沿 cause 走到底，把每层 message
+ *  拼成一行（有深度上限，防循环引用）；首层带 Error.name（TimeoutError 这类机器可查的名字）。 */
+function netErrorText(e: unknown): string {
+  const parts: string[] = [];
+  let cur: unknown = e;
+  for (let depth = 0; depth < 4; depth++) {
+    if (!(cur instanceof Error)) {
+      if (typeof cur === "string" && cur.trim()) parts.push(cur.trim());
+      break;
+    }
+    const m = cur.message.trim();
+    const withName = cur.name && cur.name !== "Error" ? `${cur.name}: ${m}` : m;
+    if (withName && !parts.includes(withName)) parts.push(withName);
+    cur = cur.cause;
+    if (cur === undefined || cur === null) break;
+  }
+  return (parts.length ? parts.join(" ← ") : "未知网络错误").slice(0, 200);
 }
 
 /** 把一次 pick 请求组装成 SystemOne 的 choice 题；候选不足下限则返回 empty。
@@ -136,11 +167,19 @@ export function systemOneClient(p: SystemOneProfile): DecisionProvider {
     try {
       res = await doFetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
     } catch (e) {
-      throw new Error(`${p.label} 服务不可达（${url}）：${(e as Error).message}。${p.unreachableHint}`);
+      // A3：网络层失败（DNS/拒连/超时）把 cause 链里的真话带出去，不再只有笼统的 "fetch failed"。
+      throw new Error(`${p.label} 服务不可达（${url}）：${netErrorText(e)}。${p.unreachableHint}`);
     }
-    const json = (await res.json().catch(() => null)) as SystemOneReply | null;
-    if (!res.ok) throw new Error(`${p.label} 返回 ${res.status}：${systemOneErrorText(json ?? {}, res.status)}`);
-    return json ?? {};
+    // A3：响应体先按文本读一次再解析——非 JSON 的 2xx 不再静默变成"没答/低分"
+    // （那是把基础设施故障伪装成模型意见），非 JSON 的错误体原文也能进错误消息。
+    const raw = await res.text().catch(() => "");
+    let json: SystemOneReply | null = null;
+    try { json = raw === "" ? null : (JSON.parse(raw) as SystemOneReply); } catch { /* 非 JSON：走下方透传 */ }
+    if (!res.ok) throw new Error(`${p.label} 返回 ${res.status}：${systemOneErrorText(json ?? {}, res.status, raw)}`);
+    if (json === null) {
+      throw new Error(`${p.label} 返回 ${res.status}，但响应体不是 JSON：${raw.trim().slice(0, 200) || "（空 body）"}`);
+    }
+    return json;
   }
 
   async function noul(state: object, instructions: string): Promise<number> {

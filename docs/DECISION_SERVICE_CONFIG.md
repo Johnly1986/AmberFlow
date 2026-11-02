@@ -135,3 +135,64 @@ amber config set AMBERFLOW_DECISION_API_KEY sk-...
 - **`OPENAI_BASE_URL` / `OPENAI_API_KEY` 只剩一个消费者**：事后审计（`LLMAuditor`，评估
   性质——不在环、不规划）。`PLANNER_MODEL` 配置键已移除；旧 rc 里残留会在加载期以
   未知键拒绝，删掉该键即可。
+
+## 7. 桥与 CLI：两条决策配置面（A3，2026-11-02）
+
+同一份三件套有两个**注入面**，排查凭据问题前先分清这次运行走的是哪一条：
+
+| | 桥通道（DSH 插件） | CLI 直跑（`amber run` / `npm run apps` / `npm start`） |
+|---|---|---|
+| 凭据从哪来 | DSH 插件配置页 → 桥以 **decisionEnv 注入子进程环境变量** | 配置层叠读进 `process.env`（`src/support/apply-config-env.ts`） |
+| 生效顺序 | **注入的环境变量最高**——真环境变量已设置的键，配置文件盖不住它 | 旧 rc < 用户配置（`~/.amberflow/config.json`）< 项目配置（`<repo>/.amberflow/config.json`）< 环境变量 |
+| 典型错位 | 桥侧没配 → 子进程落到本机配置层的凭据 | 本机配置层里躺着一套**过期的/未购买的**凭据，CLI 拿它去敲门 |
+
+两条面共享同一个装配路径（`resolveProviderSpec` → `applySpecToRuntime` → `provider.pick`），
+也共享同一份 HTTP 帮手（`src/model/system-one-client.ts`）——所以"桥能用、CLI 直跑 403"
+不是引擎分叉，而是**两条面喂进去的凭据不同**。
+
+### 7.1 真实案例：403 AccessDenied.Unpurchased 被吞成「未过闸门」（2026-11-02 实证）
+
+症状（修复前的行为，排查时按这个形状认）：
+
+- `amber doctor` 全绿——它只查配置项**在不在**，不真发请求；
+- 应用运行里决策步被报成 `no_model_runtime: … rules-only has no model to pick one`，
+  decisions 行写「**模型被咨询 1 次（1 次未过闸门）**」——把一次基础设施失败说成"模型很没把握"；
+- 旧版 result JSON 的 `provider_degraded` 为空（flow 路径的管道断点，已修）。
+
+根因：CLI 直跑读了本机用户配置里的一套 token-plan 凭据，网关对它回
+`HTTP 403 {"error":{"code":"AccessDenied.Unpurchased",…}}`（workspace 未购买该模型）；
+而引擎当时把非 2xx 的真实原因吞掉、静默降级 rules-only。
+
+A3 修复后的透传链（每一环都带 HTTP 事实）：
+
+1. HTTP 帮手把非 2xx 变成 `HTTP <status>` + 响应体关键句（含 machine code）：
+   `统一决策服务 返回 403：AccessDenied.Unpurchased：Access to model denied. …`
+   （2xx 但响应体不是 JSON 也响亮报错，不再伪装成"没答"；网络层失败透出 `cause` 链里的
+   DNS/拒连/超时原因；密钥永不进错误文本。）
+2. 执行器把降级原因编进停因：`no_model_runtime: …（决策源不可用：统一决策服务 返回 403：AccessDenied.Unpurchased…）`。
+3. result JSON：`provider_degraded` 非空（声明式与 flow 两条路径同账）；
+   `decisions.failed_asks` 单独记账，line 写成「模型被咨询 N 次（M 次未过闸门，K 次失败）」——
+   闸门是对模型意见打分，抛错没拿到意见，不算"未过闸门"。
+
+### 7.2 排查路径（按序）
+
+```bash
+# ① 医生探针（只诊断，不改退出码）：走与运行时同一装配路径真发一次最小 ask
+amber doctor --ask-probe
+#    ✓ → ref/conf 正常返回；✗ → 一行内给 HTTP 状态码 + 错误关键句（如 AccessDenied.Unpurchased）
+
+# ② 原始对照（密钥不落命令行/终端回显；二选一）：
+curl -sS -X POST "<BASE_URL>/chat/completions" \
+  -H "Authorization: Bearer $AMBERFLOW_DECISION_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model":"<模型名>","messages":[{"role":"user","content":"ping"}]}'   # 共享网关的 chat 面，与 systemone 同一套凭据
+# 或对 systemone 面：POST <BASE_URL>/systemone，body 形状见 src/model/system-one-client.ts 头注释
+
+# ③ 分清配置面：同一台机器上桥能跑、CLI 报 403 ⇒ 先对比两侧实际生效的三件套
+amber config show        # CLI 侧：层叠与来源（key 掩码）
+# 桥侧：DSH 插件配置页的 URL/Token/Model 三项
+```
+
+判读：`401 invalid_api_key` = key 错/失效；`403 AccessDenied.Unpurchased` = 凭据有效但该
+workspace 未购买此模型（换可用的凭据面，或在服务侧开通）；`404 model_not_found` = 模型名错；
+429 = 限流；超时/DNS 见错误文本里的 cause 关键句。修复后用 `amber doctor --ask-probe` 复验，
+再跑一次真实应用确认 `decisions.failed_asks=0`。
