@@ -6,15 +6,18 @@
 ## 0. 30 秒快速路径（引擎引导，唯一出处 `src/engine/planning-playbook.ts`）
 
 > 本节两段文字由引擎模块生成，`npm run prompt-hit` 第 6 层逐字校验——改文案先改模块再跑工具，勿手抄改写。
-> 同一份五步法也写在 `apps new` 骨架注释头部与桥 `_app_create` 工具描述里（同一出处，多面分发）。
+> 同一份六步法（v2.1）也写在 `apps new` 骨架注释头部与桥 `_app_create` 工具描述里（同一出处，多面分发）。
 
 ```text
-高效规划五步法（Planning Playbook）：
-① 先看再写：amber inspect --url <页> --json 拿验证过的 hint_candidates——有候选照抄，别自创选择器；
-② 单步探针先行：先写 1 步探针应用（arrive + read）验证四件事：页面可达 / 登录与验证可处理 / 无风控拦截 / 目标数据在 DOM。探针 30 秒判死刑，好过全流程应用跑 5 轮；
-③ 正式应用参数化：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；
-④ 离线分支校验：amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列；
-⑤ 真跑留证：amber run <id> --trace；失败先看 trace 的 stopCode/reason——reason 自带修正指引。
+高效规划六步法 v2.1（走查先行——先用引擎把流程按真实步序走通，再写正式应用）：
+① inspect 先看：amber inspect --url <页> --json 拿验证过的 hint_candidates——有候选照抄，别自创选择器；同时核对目标 op 在能力面内（amber schema ctx --topic commands）与词面真的在池里（probe/DOM 命中 ≠ hint 可命中）；
+② 全流程走查：按真实步序用引擎走通一遍，五样产出物全带出来——能力墙清单（哪步走不通、卡在什么停因）/ 产品事实清单（真实文案、控件、URL 规律——done 与 hint 只能从这里来）/ 提槽清单（哪些值随任务变化、进 meta.slots）/ done 素材（每步动作前后页面各长什么样）/ 绕行决策（走不通的步骤就地找等价路径：换入口页、换来源、换控件族；反爬风控不绕，早停）；
+   走查工具二选一：探针链（每步一个 1 步微型应用：arrive+read 验证页面可达 / 登录与验证可处理 / 无风控拦截 / 数据在 DOM——探针 30 秒判死刑，好过全流程应用跑 5 轮）或 plan 面草稿（plan new → plan add --signal … → plan check --probe 只读预检 → plan run 真执行）；
+③ 规划应用：提槽 + done 双向清单——done 四形态：正向锚（url_* / css_*）、否定配 exists（裸 not 在空池/重渲染瞬间空洞成立）、多动作后判（两连击的第一击是中间态，不算完成）、状态前进自检（信号跟着页面真前进，不是恒真）；
+   值只认 slot：fill/select/drag 的值来自任务输入或数据源（缺值如实 needs_value，不猜）；采样与分块：虚拟列表按视口采样（池里只有已渲染的行，滚动/翻页分块取全）、长流程分块成多个短应用、多源双腿（meta.sources 数据腿 + 浏览器腿互核）；
+④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列——stderr 的两条信号 lint（裸 not / any 含 not(exists)）当场改掉再进 ⑤；
+⑤ 真跑留证：amber run <id> --trace；失败先看 trace 的 stopCode/reason——reason 自带池快照判别（「目标不在页面」还是「候选在而闸门拒/闭集约束」）与决策源降级原因；被杀有 run-killed.json 部分证据；
+⑥ 失败取证判别：最小取证探针先区分引擎缺陷 / 产品事实 / 任务口径再动手——A/B（单变量重跑）、对照（--provider 换决策源或 rules-only 消融）、双腿取数（数据腿核产品事实）；判别不了就上报，别靠反复重跑收敛。
 ```
 
 ```text
@@ -24,6 +27,57 @@
 - 价格列全是「查价」+ 页尾「服务器异常」= 站点限流：等待与重试无效，早停；
 - 「依次点击图标验证 / 滑动拼图」= 验证码：属验证环节，可在用户授权下由人工步/注入处理器代过；若站点同时以风控/限流拦截（反爬），不绕，立即早停。
 ```
+
+## 0.5 走查先行（六步法 ②）：先走通，再写应用
+
+12 轮真站实测的结论：最贵的返工集中在「静态看页面 → 直接写正式应用」的缺口——页面看得懂
+不等于流程走得通。写正式应用之前，先用引擎命令行**按真实步序把流程走通一遍**，五样产出物
+全带出来（每一样都直接落成正式应用里的一段声明）：
+
+| 产出物 | 内容 | 落进正式应用的哪里 |
+| --- | --- | --- |
+| 能力墙清单 | 哪几步走不通、卡在什么停因（目标不可分辨 / 需登录 / 风控 / 数据不在 DOM） | 早停守卫 `ctx.fail("blocked:…")` 与长流程分块切分点 |
+| 产品事实清单 | 真实文案、控件族、URL 规律、数据形状 | `done` 信号与 `act` 锚点（只认这里，不许猜） |
+| 提槽清单 | 哪些值随任务输入 / 数据源变化 | `meta.slots`（fill/select/drag 只认 slot） |
+| done 素材 | 每步「动作前不成立、动作后成立」的具体信号 | 各步 `done`（拿不准先 `amber inspect --probe "<selector>"` 实证） |
+| 绕行决策 | 走不通的步骤选哪条等价路径 | 换入口页（`meta.site.pages` + `openPage`）/ 换来源（多源双腿）/ 换控件族；**反爬风控不绕，早停** |
+
+两种走查工具（按流程形态二选一，也可混用）：
+
+- **探针链**：每步一个 1 步微型 flow 应用——`apps new <id>-probe<N>` → `arrive + read` 或单个
+  `ctx.step` → `amber run <id>-probe<N> --trace`。适合交互步为主、必须真实动作才能看到下一态的
+  流程；一枚探针 30 秒判死刑，好过全流程应用跑 5 轮。
+- **plan 面草稿**：`plan new → plan add --signal … → plan check --probe → plan run`。适合线性流程
+  快速串步：`plan check --probe` 是只读预检（实况核对 hint 解析与验证步信号，不执行动作），
+  `plan run` 才真执行。
+
+最小走查示例（3 步流程「开列表 → 进详情 → 读标题」；URL / 信号均为示意占位，落笔前对目标页实证）：
+
+```bash
+npx amber plan new "读列表第一条的详情标题" --url https://example.org/list --save-plan ./.amberflow/plan.json
+npx amber plan add "点进第一条详情" --signal url_contains=detail --target "a~detail"
+npx amber plan add "读到标题" --signal css_text_equals=h1|Example
+npx amber plan check --probe        # 只读预检：hint 解析与验证步信号实况核对
+npx amber plan run                  # 真执行；卡住的那步就是能力墙清单要记的那步
+```
+
+同一流程的探针链形态（第 1 枚探针示意）：
+
+```js
+// $AMBERFLOW_HOME/apps/list-probe1/app.mjs —— 走查探针：只验证第一步
+export const meta = (kit) => ({
+  id: "list-probe1", label: "走查探针①", goal: "列表页可达，第一条详情可进",
+  hosts: ["example.org"], site: { pages: { home: "https://example.org/list" } },
+});
+export async function flow(ctx) {
+  await ctx.openPage("home");
+  const r = await ctx.step("点进第一条详情", { done: ctx.judge.url("detail") });
+  if (!r.ok) ctx.fail(r.stopCode ?? "step_failed", r.reason);   // 走不通 → 记能力墙，就地找等价路径
+}
+```
+
+走查走通后按六步法 ③④⑤⑥ 规划、落地、验证；写 `done` 之前回看 §0 的失败特征速查与 §6
+的信号语言，别凭走查时的印象凭空写信号。
 
 ## 1. 只有一种格式
 

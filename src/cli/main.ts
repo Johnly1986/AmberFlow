@@ -312,9 +312,9 @@ async function home(ctx: CliContext): Promise<number> {
   }
   if (apps.length > shown.length) say(ctx, `  … 还有 ${apps.length - shown.length} 个，运行 amber apps list 查看。`);
   say(ctx, "");
-  say(ctx, "规划新流程（高效规划五步法全文见 apps new 骨架注释）：");
-  say(ctx, "  ① amber inspect --url <页> 先看再写 → ② 1 步探针应用先行 → ③ 正式应用参数化");
-  say(ctx, "  ④ amber apps check <id> --slot k=v 离线分支校验 → ⑤ amber run <id> --trace 真跑留证");
+  say(ctx, "规划新流程（高效规划六步法 v2.1 全文见 apps new 骨架注释）：");
+  say(ctx, "  ① amber inspect 先看再写 → ② 全流程走查（探针链 / plan check --probe）→ ③ 规划应用（slots + done 清单）");
+  say(ctx, "  ④ amber apps check <id> --slot k=v 离线分支校验 + 信号 lint → ⑤ amber run <id> --trace 真跑留证 → ⑥ 失败取证判别");
   say(ctx, "");
   say(ctx, "下一步：");
   for (const h of HOME_NEXT) {

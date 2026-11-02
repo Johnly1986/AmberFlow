@@ -11,19 +11,25 @@
  *   ⑥ 文档快速路径（docs/APP_SCRIPT_AUTHORING.md 逐字嵌入，prompt-hit 第 6 层校验）。
  *
  * 蒸馏自 2026-10-29 双代理实测（93 min 任务分解：纯执行 4%、取证 26%、迭代改版 16%——
- * 本 playbook 压的就是那 42% 的规划期信息获取成本）。叶子模块：零 import。
+ * 本 playbook 压的就是那 42% 的规划期信息获取成本）。v2.1（六步、走查先行）并入 12 轮
+ * 真站实测的结论：骨架正确但覆盖不全，最贵的返工全部发生在「静态看页面 → 直接写正式
+ * 应用」的缺口里——②走查先行就是补这个缺口（走查工具与产出物详见
+ * docs/APP_SCRIPT_AUTHORING.md「走查先行」节）。叶子模块：零 import。
  */
 
-/** 五步法全文（文档逐字嵌入 + apps new 骨架注释逐字插入，prompt-hit 校验）。 */
-export const PLAN_PLAYBOOK_TEXT = `高效规划五步法（Planning Playbook）：
-① 先看再写：amber inspect --url <页> --json 拿验证过的 hint_candidates——有候选照抄，别自创选择器；
-② 单步探针先行：先写 1 步探针应用（arrive + read）验证四件事：页面可达 / 登录与验证可处理 / 无风控拦截 / 目标数据在 DOM。探针 30 秒判死刑，好过全流程应用跑 5 轮；
-③ 正式应用参数化：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；
-④ 离线分支校验：amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列；
-⑤ 真跑留证：amber run <id> --trace；失败先看 trace 的 stopCode/reason——reason 自带修正指引。`;
+/** 六步法 v2.1 全文（文档逐字嵌入 + apps new 骨架注释逐字插入，prompt-hit 校验）。 */
+export const PLAN_PLAYBOOK_TEXT = `高效规划六步法 v2.1（走查先行——先用引擎把流程按真实步序走通，再写正式应用）：
+① inspect 先看：amber inspect --url <页> --json 拿验证过的 hint_candidates——有候选照抄，别自创选择器；同时核对目标 op 在能力面内（amber schema ctx --topic commands）与词面真的在池里（probe/DOM 命中 ≠ hint 可命中）；
+② 全流程走查：按真实步序用引擎走通一遍，五样产出物全带出来——能力墙清单（哪步走不通、卡在什么停因）/ 产品事实清单（真实文案、控件、URL 规律——done 与 hint 只能从这里来）/ 提槽清单（哪些值随任务变化、进 meta.slots）/ done 素材（每步动作前后页面各长什么样）/ 绕行决策（走不通的步骤就地找等价路径：换入口页、换来源、换控件族；反爬风控不绕，早停）；
+   走查工具二选一：探针链（每步一个 1 步微型应用：arrive+read 验证页面可达 / 登录与验证可处理 / 无风控拦截 / 数据在 DOM——探针 30 秒判死刑，好过全流程应用跑 5 轮）或 plan 面草稿（plan new → plan add --signal … → plan check --probe 只读预检 → plan run 真执行）；
+③ 规划应用：提槽 + done 双向清单——done 四形态：正向锚（url_* / css_*）、否定配 exists（裸 not 在空池/重渲染瞬间空洞成立）、多动作后判（两连击的第一击是中间态，不算完成）、状态前进自检（信号跟着页面真前进，不是恒真）；
+   值只认 slot：fill/select/drag 的值来自任务输入或数据源（缺值如实 needs_value，不猜）；采样与分块：虚拟列表按视口采样（池里只有已渲染的行，滚动/翻页分块取全）、长流程分块成多个短应用、多源双腿（meta.sources 数据腿 + 浏览器腿互核）；
+④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列——stderr 的两条信号 lint（裸 not / any 含 not(exists)）当场改掉再进 ⑤；
+⑤ 真跑留证：amber run <id> --trace；失败先看 trace 的 stopCode/reason——reason 自带池快照判别（「目标不在页面」还是「候选在而闸门拒/闭集约束」）与决策源降级原因；被杀有 run-killed.json 部分证据；
+⑥ 失败取证判别：最小取证探针先区分引擎缺陷 / 产品事实 / 任务口径再动手——A/B（单变量重跑）、对照（--provider 换决策源或 rules-only 消融）、双腿取数（数据腿核产品事实）；判别不了就上报，别靠反复重跑收敛。`;
 
 /** 压缩版（桥 `_app_create` 工具描述用；生成物逐字分发，工具描述不能太长）。 */
-export const PLAN_PLAYBOOK_SHORT = `高效规划五步法：① inspect 先看（验证过的 hint_candidates 可照抄）→ ② 单步探针先行（1 步 arrive+read 验证：页面可达 / 登录与验证可处理 / 无风控拦截 / 数据在 DOM）→ ③ 正式应用参数化（slots + 早停守卫 + meta.policy 声明 done_timeout_ms）→ ④ apps check <id> --slot k=v 离线分支校验 → ⑤ run --trace 真跑，失败看 stopCode/reason。`;
+export const PLAN_PLAYBOOK_SHORT = `高效规划六步法 v2.1（走查先行）：① inspect 先看（验证过的 hint_candidates 照抄 + 核对 op 能力面与词面在池）→ ② 全流程走查（探针链或 plan check --probe 按真实步序走通，带出能力墙/产品事实/提槽/done 素材/绕行决策五样）→ ③ 规划应用（slots + done 正向锚/否定配 exists/多动作后判/状态前进自检 + 分块采样）→ ④ apps check <id> --slot k=v 离线分支校验 + 信号 lint（裸 not / any 含 not(exists)）→ ⑤ run --trace 真跑，失败看 stopCode/reason（reason 自带池快照判别）→ ⑥ 失败取证判别（引擎缺陷/产品事实/任务口径；A/B、对照、双腿取数）。`;
 
 /**
  * 失败特征速查（**通用风控判定，只判不绕反爬风控**：判定 + 早停，不含任何绕反爬手段；验证环节可代过）。
@@ -51,7 +57,7 @@ export function nextForInspect(poolCount: number, interactiveOnPage: number, url
   }
   return [
     `amber inspect --url ${url} --wide --pool   # 宽扫：含启发式伪按钮的真实 label（heuristic 标记可辨）`,
-    "1 步探针应用先行（五步法②）：arrive + read 验证可达/登录与验证可处理/无风控拦截/数据在 DOM，再写正式应用",
+    "走查先行（六步法②）：1 步探针（arrive + read）验证可达/登录与验证可处理/无风控拦截/数据在 DOM，按真实步序走通再写正式应用",
     "probe/DOM 命中 ≠ hint 可命中；反爬风控/登录墙等失败特征与早停/代过配方见 docs/APP_SCRIPT_AUTHORING.md 快速路径",
   ];
 }
@@ -63,8 +69,8 @@ export function nextForInspect(poolCount: number, interactiveOnPage: number, url
  * （prompt-hit coverage 组断言）——新增停因要么给 next，要么显式豁免。
  */
 export const STOP_NEXT: Readonly<Record<string, string>> = {
-  max_steps: "预算用尽：先看 trace 各步的 stopCode/reason 找第一个失败；多数是目标不可分辨或页面未变——按五步法② 收窄为单步探针",
-  budget_exceeded: "ctx.step 预算用满（status=partial、verified=false）：调高 --max-steps 或按五步法② 收窄流程",
+  max_steps: "预算用尽：先看 trace 各步的 stopCode/reason 找第一个失败；多数是目标不可分辨或页面未变——按六步法② 用单步探针把该步走通",
+  budget_exceeded: "ctx.step 预算用满（status=partial、verified=false）：调高 --max-steps，或按六步法② 走查收窄流程（分块/找等价路径）",
   arrive_signal_not_held: "导航完成但 done 信号未成立：确认「动作前不成立、动作后成立」；重 JS SPA 先 inspect --wide --pool 或运行时取证",
   done_not_held: "命令闭集已走完但 done 未成立：检查 done 信号是否真的会在动作后成立",
   low_confidence: "决策层低置信：看 trace 的 decisions 行与候选 label；有稳定句柄（id / data-test / 唯一 label）就写 act hint 收窄（六形状闭集见 docs/APP_SCRIPT_AUTHORING.md）",
