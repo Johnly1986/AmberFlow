@@ -395,7 +395,11 @@ export function apply(ctx: Context, config: Config): void {
       + 'verified=false). By default it runs the whole flow. `trace` defaults to true. `dry` only '
       + 'dry-runs the call sequence without a browser; `ablate` is an explicit ablation arm, not a '
       + 'routine mode. Returns a compact summary with status, failed steps, invariants, model tier, '
-      + 'result/report paths and the first structured failure. Escalation rule: '
+      + 'result/report paths and the first structured failure. The bridge also enforces a hard '
+      + 'wall-clock cap per call: 900 s by default (the deployment `timeoutMs` config), overridden '
+      + 'per call by `timeout_sec` — raise it for long flows instead of being killed with the '
+      + 'completed work lost; a killed run writes `run-killed.json` into its outDir as partial '
+      + 'evidence. Escalation rule: '
       + STOP_ESCALATION_TEXT,
     parameters: {
       app: { type: 'string', required: true, description: 'The app id from `' + toolPrefix + '_apps`.' },
@@ -432,6 +436,14 @@ export function apply(ctx: Context, config: Config): void {
         description: 'Execution budget for this call (engine `--max-steps`), NOT a 1-based step '
           + 'index. When the budget is used up the script stops with `budget_exceeded` '
           + '(status=partial, verified=false).',
+      },
+      timeout_sec: {
+        type: 'integer',
+        description: 'Hard wall-clock cap for THIS call, in seconds: the bridge kills the engine '
+          + 'child process when the call exceeds it. Default 900 (the deployment `timeoutMs` '
+          + 'config); raise it for a long flow (deep tier, many pages) instead of losing the run at '
+          + '15 minutes, or split the flow into smaller apps. Integer, 1..7200; a run killed at the '
+          + 'cap leaves `run-killed.json` in its outDir with the partial evidence.',
       },
       trace: { type: 'boolean', description: 'Include per-step execution evidence in the result. Defaults to true.' },
     },
@@ -591,6 +603,7 @@ export function apply(ctx: Context, config: Config): void {
         ...(args.confirm_safe === undefined ? {} : { confirmSafe: args.confirm_safe }),
         ...(args.tiered_hint === undefined ? {} : { tieredHint: args.tiered_hint }),
         ...(args.max_steps === undefined ? {} : { maxSteps: args.max_steps }),
+        ...(args.timeout_sec === undefined ? {} : { timeoutSec: args.timeout_sec }),
         ...(args.trace === undefined ? {} : { trace: args.trace }),
         // `Object.fromEntries` defines own properties, so even a `__proto__` slot reaches the CLI.
         ...(args.slots === undefined ? {} : { slots: Object.fromEntries(slots) }),

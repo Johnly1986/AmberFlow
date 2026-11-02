@@ -134,6 +134,12 @@ export interface ProcessOutcome {
   stdoutFull?: string
   stderr: string
   timedOut: boolean
+  /**
+   * The wall-clock cap the call ran under, ms — the timeout that fired when {@link timedOut} is
+   * true. Optional so a hand-built outcome (an older caller, a test) stays valid; the killed-run
+   * evidence then records `null` instead of guessing.
+   */
+  timeoutMs?: number
 }
 
 /** Characters of each end of a child process's output one call keeps — enough to diagnose, small
@@ -148,6 +154,8 @@ const DIAGNOSTIC_LINES = 6
 const MAX_STEPS = 20
 /** How long 'close' may lag 'exit' before the outcome settles anyway, ms (see runProcess). */
 const STDIO_GRACE_MS = 1000
+/** Output-tail characters one killed run keeps in `run-killed.json` (see writeRunKilledEvidence). */
+const KILLED_TAIL_CHARS = 4000
 
 /**
  * Keep BOTH ends: a CLI that fails typically prints the cause FIRST and its usage block LAST, so a
@@ -582,7 +590,14 @@ export function runProcess(
       clearTimeout(timer)
       stdout += stdoutDecoder.end()
       stderr += stderrDecoder.end()
-      resolve({ code, stdout: excerpt(stdout), stdoutFull: stdout, stderr: excerpt(stderr), timedOut })
+      resolve({
+        code,
+        stdout: excerpt(stdout),
+        stdoutFull: stdout,
+        stderr: excerpt(stderr),
+        timedOut,
+        timeoutMs: options.timeoutMs,
+      })
     }
     const timer = setTimeout(() => {
       timedOut = true
@@ -783,6 +798,43 @@ function readDryRun(stdout: string): { app: string; steps: RunStep[]; model?: st
 }
 
 /**
+ * Persist what a killed run managed to produce, so the evidence outlives the session.
+ *
+ * A run the bridge kills at its wall-clock cap (or by an external signal) usually leaves NO result
+ * artifact — the caller sees "run did not reach the artifact stage" and, once the temp directory is
+ * pruned, nothing at all. This writes `run-killed.json` beside where the artifacts would have been:
+ * the app, why the run stopped, when, the effective cap, and the tails of both output streams (the
+ * completed steps live only there). Best-effort by design: a failed write is swallowed — the caller
+ * still gets the throw that names the run as killed — and the file is pruned together with its
+ * directory, so `keepRuns` housekeeping is deliberately not changed for it.
+ * @param outDir - the run directory the bridge passed as `--out`.
+ * @param app - the app id.
+ * @param outcome - the finished (killed) process.
+ * @returns the evidence file's absolute path, or '' when the write failed.
+ */
+function writeRunKilledEvidence(outDir: string, app: string, outcome: ProcessOutcome): string {
+  const evidence: JsonObject = {
+    app,
+    timedOut: outcome.timedOut,
+    exit_code: outcome.code,
+    killed_at: new Date().toISOString(),
+    timeout_ms: outcome.timeoutMs ?? null,
+    stdout_tail: parseSource(outcome).slice(-KILLED_TAIL_CHARS),
+    stderr_tail: outcome.stderr.slice(-KILLED_TAIL_CHARS),
+    note: 'Partial evidence of a run the bridge killed before the engine wrote its result artifact: '
+      + 'the completed steps live only in these output tails. Rerun with a larger timeout_sec (or '
+      + 'split the flow). This file is pruned together with the run directory (keepRuns).',
+  }
+  const evidencePath = path.join(outDir, 'run-killed.json')
+  try {
+    fs.writeFileSync(evidencePath, JSON.stringify(evidence, null, 2))
+    return evidencePath
+  } catch {
+    return ''
+  }
+}
+
+/**
  * Summarize an `app-runner` run's artifacts. Only FAILURES are listed: the whole step table is a
  * file the caller can read, and a 60-step flow should not be pasted into a session by default.
  *
@@ -795,8 +847,9 @@ function readDryRun(stdout: string): { app: string; steps: RunStep[]; model?: st
  * @param outcome - the finished process.
  * @param runTool - the model-visible run tool name, used in diagnostics.
  * @returns the compact summary.
- * @throws when the run ended without a result artifact and without an expansion to show for it, or
- *   when the dry run found problems in the script's call sequence.
+ * @throws when the run ended without a result artifact and without an expansion to show for it (a
+ *   killed run has its output tails persisted to `run-killed.json` first, and the message names
+ *   that file), or when the dry run found problems in the script's call sequence.
  */
 export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcome, runTool?: string): RunSummary {
   const resultPath = path.join(outDir, `${app}-result.json`)
@@ -823,10 +876,17 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
         ...(dry.model === undefined ? {} : { model: dry.model }),
       }
     }
+    // A run killed at the wall-clock cap (or by an external signal) leaves no artifact: persist its
+    // output tails BEFORE reporting, so the evidence survives the directory's pruning and the caller
+    // learns where to read it. The dry exemption above is untouched — an expansion that exited 0
+    // wrote nothing because it ran nothing, not because it was killed.
+    const killed = outcome.timedOut || outcome.code === null
+    const evidencePath = killed ? writeRunKilledEvidence(outDir, app, outcome) : ''
     const detail = firstLines(outcome.stderr) || firstLines(outcome.stdout)
     throw new Error(
       `no ${app}-result.json in ${outDir} (exit ${outcome.code ?? 'killed'}) — run did not reach the artifact stage`
-      + (detail ? `; cause: ${detail}` : ''),
+      + (detail ? `; cause: ${detail}` : '')
+      + (evidencePath === '' ? '' : ` — partial evidence: ${evidencePath}`),
     )
   }
   let raw: JsonObject

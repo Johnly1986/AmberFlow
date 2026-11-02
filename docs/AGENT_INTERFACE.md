@@ -217,7 +217,7 @@ amber apps remove <id> [--yes] [--force]
 | `amberflow_app_check` | `amber apps check --json` | 加载 + dry 调用序列校验 |
 | `amberflow_inspect` | `amber inspect --json` | 只读页面观察与候选 hint |
 | `amberflow_app_create` | `amber apps new … --json` | 生成 flow 骨架 |
-| `amberflow_run` | `app-runner`（与 `amber run` 同一运行器） | 运行；`max_steps` 是执行预算 |
+| `amberflow_run` | `app-runner`（与 `amber run` 同一运行器） | 运行；`max_steps` 是执行预算，`timeout_sec` 是本次墙钟上限 |
 | `amberflow_learn` | `learn --json` | 一次录制 → 归纳信号 → 生成 `app.mjs` flow（回放门通过才落盘） |
 | `amberflow_test` | `amber test … --json` | 真实站点回归；`max_steps` / `timeout_sec` 与 CLI 对齐 |
 
@@ -232,6 +232,7 @@ amber apps remove <id> [--yes] [--force]
   "dry": false,
   "trace": true,
   "max_steps": 3,
+  "timeout_sec": 1800,
   "no_sources": false,
   "headful": false,
   "allow_dangerous": false,
@@ -244,6 +245,14 @@ amber apps remove <id> [--yes] [--force]
 ```
 
 移除 `site`（没有语义模板门）、`only_step`、`from_step`。
+
+`amberflow_run` 的墙钟上限由桥自己执行（不是引擎 CLI 旗标）：缺省 900 秒（部署配置
+`timeoutMs`，15 分钟——真实站点流程本来就慢）；`timeout_sec`（整数，1–7200）只对本次调用
+覆盖。超时或被杀的运行通常没有 result/report 工件，桥会在本次 outDir 落盘
+`run-killed.json`（app、timedOut、exit_code、killed_at、timeout_ms、stdout/stderr 尾部与
+note），并让错误消息引用该路径——已完成步骤的证据至少在目录被 prune 之前可查一次（该文件
+与 outDir 一起被 `keepRuns` 清理，prune 策略不因此改变）。长流程（deep 层级、多页）应调大
+`timeout_sec` 或拆成小应用，而不是默认在 15 分钟被杀。
 
 `amberflow_test` 参数：
 

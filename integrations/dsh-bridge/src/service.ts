@@ -59,6 +59,14 @@ export interface AmberFlowRunArgs {
    * (`status=partial`, `verified=false`).
    */
   maxSteps?: number
+  /**
+   * Hard wall-clock cap for THIS call, in seconds: the bridge kills the engine child process when the
+   * call exceeds it. Defaults to the deployment's `timeoutMs` (900 s — live runs are slow by nature);
+   * a long flow (deep tier, many pages) passes a larger value here instead of being killed with all
+   * its completed work lost. Integer, 1..{@link MAX_RUN_TIMEOUT_SEC}; a killed run leaves
+   * `run-killed.json` in its outDir with the partial evidence.
+   */
+  timeoutSec?: number
   /** Include per-step execution evidence in the result. Defaults to true for the bridge. */
   trace?: boolean
   /** Values for declared slots. */
@@ -239,6 +247,9 @@ export function newOutDir(tag: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), `dsh-amberflow-${tag}-`))
 }
 
+/** 防呆上限：单次 run 的墙钟覆盖最多 2 小时——比这更长的流程应拆成小应用，而不是占住一个调用。 */
+const MAX_RUN_TIMEOUT_SEC = 7200
+
 /**
  * Whether a value is a usable reference: a non-empty string. A plugin calling the service can be
  * plain JavaScript, so a field the TYPE marks required still needs a runtime guard.
@@ -254,7 +265,8 @@ function isFilled(value: unknown): value is string {
  * @param options - resolved bridge options.
  * @param args - the run arguments.
  * @returns the summary plus the directory the artifacts were written to.
- * @throws when the deployment forbids dangerous steps or the run produced no artifact.
+ * @throws when the deployment forbids dangerous steps, when `timeoutSec` is not an integer in
+ *   1..7200, or the run produced no artifact.
  */
 export async function runApp(
   options: BridgeOptions, args: AmberFlowRunArgs,
@@ -265,9 +277,24 @@ export async function runApp(
       + `set Config.allowDangerous=true to allow ${options.toolPrefix}_run with allow_dangerous`,
     )
   }
+  // 防呆 before spawning anything: a bad per-call wall-clock cap is a usage error, so refuse it here
+  // (both doors — the tool and this service — go through this function) instead of silently clamping.
+  if (args.timeoutSec !== undefined
+    && (!Number.isInteger(args.timeoutSec) || args.timeoutSec <= 0 || args.timeoutSec > MAX_RUN_TIMEOUT_SEC)) {
+    throw new Error(
+      `amberflow-bridge: ${options.toolPrefix}_run timeout_sec must be an integer in 1..${MAX_RUN_TIMEOUT_SEC} `
+      + `seconds (omit it to use the deployment timeoutMs: ${Math.round(options.timeoutMs / 1000)} s)`,
+    )
+  }
   const outDir = newOutDir('run')
   pruneRunDirs(options.keepRuns)
-  const outcome = await runProcess(options, runArgs(options, {
+  // Per-call wall-clock override: runProcess reads `timeoutMs` off the options it is given, so this
+  // one call runs under a shallow clone. runArgs still reads the ORIGINAL options — the timeout is a
+  // bridge-side spawn policy, never an engine CLI flag.
+  const spawnOptions: BridgeOptions = args.timeoutSec === undefined
+    ? options
+    : { ...options, timeoutMs: args.timeoutSec * 1000 }
+  const outcome = await runProcess(spawnOptions, runArgs(options, {
     app: args.app,
     outDir,
     ...(args.dry === undefined ? {} : { dry: args.dry }),
