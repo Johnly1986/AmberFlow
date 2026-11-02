@@ -281,9 +281,31 @@ export async function flow(ctx) {
 ```
 
 - `ctx.extract(name)` 的字段选择器是**行内相对选择器**；`rows` 最多取 500 行（超出在 trace 里标 `truncated`）。
+- `fields` 只做**行内文本投影**：每个字段值取单元格元素的 `innerText`（表单控件回退 `inputValue`；
+  实现：`src/app/ctx.ts` 的 extract 字段循环）。**不支持属性投影**——`fields: { al: "[aria-label]" }`
+  这类属性选择器能定位到单元格，但读到的仍是它的文本：图标型元素（aria-label 有值、无可见文本）
+  的字段恒为空（R11 实测）。属性值单独用 `ctx.read.attr(selector, attr)` 取（不存在 → null）。
 - `ctx.rows({row, fields})` 是 v1 明确**不开放**的新语法：调用给结构化 `config_error` 指向 `extract(name)`。
 - dry 模式下 `extract` 返回 `[]`、`read.attr` 返回 `null`、`waitFor` 立即返回 `true`（没有页面）——脚本在 dry 期不要依赖观察值；**一切基于观察值的 `ctx.fail`/分支/断言都必须用 `ctx.runtime.runId === "(dry)"` 守卫**：`apps check` 与 `--dry-run` 会真跑 flow，没有守卫的数据驱动停会把合法脚本判成 problems（03-D1 配方；需要严格断言数据时，只在真实运行里停）。**dry 模拟面全表**（06-B，`createDryCtx` 实证）：`step`/`arrive`/`run`/`manual` 恒返回 `ok:true` 且 **`when` 不评估**（stopCode 恒空 ⇒ `precondition_skipped`/末页 exhausted 这类分支在 dry 结构性不可预演）；`read.*` 返 null/0；`url()` 是最近声明值；步预算照常计数。结论：**dry 验调用序列与声明形状，不验分支覆盖**——check VALID ≠ 脚本每条分支都被走过，守卫分支的正确性只有真实运行能证明。**循环特别警告**（09-B，r09-retry-demo 实录）：`step` 模拟恒 `ok:true` ⇒ 以"步骤成功"为 break 条件的 `while/for` 会在 dry **假成功早退**，随后未守卫的终局 `ctx.fail` 把 dry 判红（报错自曝 `ok:true` yet exhausted 的矛盾即此坑）——dry 预演只到声明面为止，循环语义一律真实运行验；各分支的**声明校验**可用 `run --dry --slot <k>=<v>` 逐分支触达（08 实证，不占真实额度）。
 - 观察类调用（text/value/count/attr/extract）都进 trace，所以带读取的脚本可以 `--replay`。进程步（`run`/`dangerous`）自 08-C 修复起同样进 `step_traces`（成功步无 stop_code、attempts/exit code 在嵌套 result 里）。
+
+### 池文本 ≠ 页面 innerText（R11/R12 实证）
+
+元素池给模型看的 `label` **不是页面 `innerText` 的拷贝**，是一条合成投影（`src/engine/extraction.ts`）。
+两面文本对不上不是 bug——应用层脚本必须分清用哪一面：
+
+- **来源分歧**：池 label 优先取**属性**而非正文，顺序是 `aria-label` → `title` → 首个子节点文本 →
+  `innerText` → placeholder/value（`EXTRACT_JS` 的 `labelOf`）。广告卡片的 aria-label 带完整事实
+  （"Ad · $175/night"），卡片可见文本却写 "Sponsored"（R12 实测——两个面都"对"，来源不同）；
+  "Prices starting from …" 这类价格事实也可能只活在属性里：池里有、DOM 文本里没有（R11 实测）。
+- **合成与归一**：PUA 图标字形剥离、空白折叠、40 字截断；表单控件把 label wrapper 拼成
+  `label / wrapper`；select 的当前值以 `[now=…]` 呈现；重复 label 附 `[near=…]` 容器身份行
+  （来自祖先容器的 innerText 行，过滤纯价格行）。低置信宽扫还会合成**启发式伪按钮**
+  （可见自绘 div/span 的 innerText，标 `heuristic: true`）——这些行只在池投影里存在。
+- **正确做法**：hint/词面匹配按**池文本**写（模型看到的词面就是池投影）；对 DOM 文本解析
+  （`ctx.read.text` / `ctx.extract` 的 fields）按**真实 innerText** 写——把池文本上的正则直接搬到
+  DOM 解析，Ad 锚与属性化价格这两类分歧都会 miss。两面疑似不一致时，先用 `amber inspect`
+  对照池投影与页面文本再落笔。
 
 ## 6. 完成信号与结束态不变量
 

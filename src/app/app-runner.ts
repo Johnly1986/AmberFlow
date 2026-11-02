@@ -44,6 +44,7 @@ import { checkArtifacts, missingPieces, modelConfigError } from "../model/model-
 import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
 import { activeProviderInfo, applySpecToRuntime, resolveProviderSpec, type ProviderInfo } from "../model/decision-provider.ts";
 import { BrowserMiddleware, browserSession, disallowedHost, type BrowserSession } from "../engine/executor.ts";
+import { urlOf } from "../engine/extraction.ts";
 import { REPO } from "../flow/flow.ts";
 import { installLayaRuntime } from "../model/model.ts";
 import { runSubgoalWithRetries } from "../engine/planner.ts";
@@ -515,6 +516,26 @@ function asAfterSignature(v: unknown): AfterSignature | null {
   };
 }
 
+/**
+ * B2（P5 证据增强）：本次运行的**环境与会话**事实。数据类任务的结论（如「最低价」）受
+ * 会话/日期/币种影响（R5 会话缓存、R6 两轮 2/8 变动、R8 三会话刻画），结果不带这些字段时
+ * Agent 每轮都要自建判别实验。口径**只增不改**：run_id/时间戳必有；会话页面上拿不到的键
+ * 省略（不硬造）——replay 等无会话路径自然缺 final_url/viewport/user_agent。
+ */
+export interface AppRunEnv {
+  /** 与 `{run_id}` 占位符 / trace 同源的本次运行唯一标识。 */
+  run_id: string;
+  /** 运行开始/结束时刻（ISO 8601 UTC）。 */
+  started_at: string;
+  finished_at: string;
+  /** 会话收尾时的页面 URL（在会话关闭**前**读；读不到/无会话省略）。 */
+  final_url?: string;
+  /** 会话视口（页面 `viewportSize()` 优先，`meta.device` 声明兜底；拿不到省略）。 */
+  viewport?: { width: number; height: number };
+  /** 会话的实际 User-Agent（页面 `navigator.userAgent`；拿不到省略）。 */
+  user_agent?: string;
+}
+
 export interface AppRunResult {
   app: string;
   label: string;
@@ -560,6 +581,11 @@ export interface AppRunResult {
   /** 本次实际执行的声明步骤区间（1-based，闭区间）。 */
   segment?: { from: number; to: number };
   secs: number;
+  /**
+   * B2（P5）：环境与会话（见 `AppRunEnv`）。flow 路径（`runScriptApp`）恒有
+   * （run_id/时间戳必有）；旧声明式路径不带 ⇒ 报告同节也整体省略，排版不变。
+   */
+  env?: AppRunEnv;
   /**
    * P4 走向的显式停因：`next` 边把同一个步 id 走进了环，路径上界到顶就停在这里——
    * 结构化的 code（不是散文），点名哪一步、进入了几次（§7-P4 的验收台：不是挂死、不是栈溢出）。
@@ -1560,6 +1586,16 @@ export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): st
     ...(nextHint ? ["", `> **下一步建议**：${nextHint}`] : []),
     ...(!r.ok ? ["", `> **停手规则**：${STOP_ESCALATION_TEXT}`] : []),
   ];
+  if (r.env !== undefined) {
+    // B2（P5）：环境与会话一行小节——数据类任务的结论受会话/日期/币种影响（R5/R6/R8），
+    // 与 result JSON 的 `env` 同一份内容，紧挨「结果」；缺字段（旧声明式路径）整节省略，排版不变。
+    const env = r.env;
+    L.push("", "## 环境与会话", "",
+      `- run_id \`${env.run_id}\` ｜ started \`${env.started_at}\` ｜ finished \`${env.finished_at}\``
+      + (env.final_url !== undefined ? ` ｜ final_url \`${env.final_url}\`` : "")
+      + (env.viewport !== undefined ? ` ｜ viewport ${env.viewport.width}×${env.viewport.height}` : "")
+      + (env.user_agent !== undefined ? ` ｜ UA \`${env.user_agent}\`` : ""));
+  }
   if (r.sources.length) {
     L.push("", "## 数据腿", "", "| 数据源 | 行数 | counts | selects | 工具版本 |", "|---|---|---|---|---|");
     for (const s of r.sources) {
@@ -1819,6 +1855,14 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
    * R3/R8 实测 result 的 provider_degraded 一直是空。收尾时读一次，两条路径同账。
    */
   let providerDegraded: string | null = null;
+  /**
+   * B2（P5）：会话收尾的环境/会话事实（final_url/viewport/user_agent）。与 providerDegraded
+   * 同一个「收尾读一次」先例——区别是这三样必须读在**会话关闭之前**（关了就读不到 URL 了）；
+   * 拿不到就保持 undefined，结果里键省略（缺省等价：不硬造）。
+   */
+  let finalUrl: string | undefined;
+  let envViewport: { width: number; height: number } | undefined;
+  let envUserAgent: string | undefined;
   /** 每次 ctx.step/arrive 的执行报告 → 决策账（与 runApp 同一份 `summarizeDecisions`）。 */
   const decisionSteps: TraceStep[] = [];
   /** 每个 `ctx.step` 一次 mw.run；这里按调用顺序保留它的动作 trace，供 step_traces 补 hows/descs/methods。 */
@@ -2006,7 +2050,33 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       if (e instanceof StopError) { stopCode = e.code; stopReason = e.message; }
       else throw e;
     } finally {
-      if (holder.session !== null) { try { await holder.session.close(); } catch { /* 关会话失败不该掩盖运行结果 */ } }
+      // B2（P5）：先读会话事实再关会话（关了就读不到 final_url 了）；读失败按缺键处理，
+      // 不让证据采集影响运行结果本身。字段语义见 `AppRunEnv`。
+      const liveSession = holder.session;
+      if (liveSession !== null) {
+        try {
+          const u = urlOf(liveSession.page);
+          if (u) finalUrl = String(u);
+        } catch { /* 拿不到就省略 */ }
+        try {
+          const vp = (liveSession.page as unknown as { viewportSize?: () => unknown }).viewportSize?.();
+          if (typeof vp === "object" && vp !== null
+            && Number.isFinite((vp as { width?: unknown }).width)
+            && Number.isFinite((vp as { height?: unknown }).height)) {
+            envViewport = {
+              width: Number((vp as { width: unknown }).width),
+              height: Number((vp as { height: unknown }).height),
+            };
+          }
+        } catch { /* 拿不到就省略 */ }
+        try {
+          const ua = await (liveSession.page as unknown as {
+            evaluate?: (fn: () => unknown) => Promise<unknown>;
+          }).evaluate?.(() => navigator.userAgent);
+          if (typeof ua === "string" && ua.trim()) envUserAgent = ua;
+        } catch { /* 拿不到就省略 */ }
+        try { await liveSession.close(); } catch { /* 关会话失败不该掩盖运行结果 */ }
+      }
       // A3：决策源降级的原因只活在执行器实例上——脚本抛 StopError 也不能把它弄丢
       //（拿不到场就记 null：重放分支没有执行器，字段缺席 = 没降级，与 runApp 同口径）。
       providerDegraded = mwHolder.current?.providerDegraded || null;
@@ -2112,6 +2182,12 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   const stats = opts.runtimeStats ? opts.runtimeStats() : null;
   const decisions = summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0,
     opts.pickFailedAsks ? opts.pickFailedAsks() : 0);
+  // B2（P5）：页面属性拿不到时退回 `meta.device` 的声明值（声明了才有；都没有就省略键，
+  // 不硬造）。有设备声明时页面属性本来就是同一个值，这条兜底只服务无页面属性的替身会话。
+  const envDevice = (pack.device ?? {}) as { viewport?: { width: number; height: number }; user_agent?: string };
+  if (envViewport === undefined && envDevice.viewport !== undefined) envViewport = envDevice.viewport;
+  if (envUserAgent === undefined && envDevice.user_agent !== undefined) envUserAgent = envDevice.user_agent;
+  const finishedAtIso = new Date().toISOString();
   const result: AppRunResult = {
     app: pack.id,
     label: pack.label ?? pack.id,
@@ -2140,6 +2216,17 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     ...(manualSteps.length ? { manual_steps: manualSteps } : {}),
     ...(pace.between_steps_ms > 0 || pace.between_actions_ms > 0 ? { pace } : {}),
     secs: (Date.now() - t0) / 1000,
+    // B2（P5 证据增强）：环境与会话——run_id/时间戳必有；final_url/viewport/user_agent
+    // 只在真会话上收（收不到的键省略；replay 无会话自然缺键）。secret 值若出现在
+    // final_url/UA 里由收尾的 scrubSecrets 统一掩码。
+    env: {
+      run_id: runId,
+      started_at: new Date(t0).toISOString(),
+      finished_at: finishedAtIso,
+      ...(finalUrl === undefined ? {} : { final_url: finalUrl }),
+      ...(envViewport === undefined ? {} : { viewport: envViewport }),
+      ...(envUserAgent === undefined ? {} : { user_agent: envUserAgent }),
+    },
     // §3：生效策略只在非缺省时进产物（与 runApp 同一纪律）；模型层级照写（脚本应用同样要能说清）。
     ...(anyDeclared && policy !== null ? { effective_policy: policy } : {}),
     ...(opts.modelStatus === undefined ? {} : { model_status: opts.modelStatus }),
