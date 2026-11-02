@@ -1502,6 +1502,23 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   };
 }
 
+/**
+ * B3-1（P13）：这次运行**真的走到验收了吗**——报告不变量结论列的措辞判据。
+ * flow 路径上 `ctx.done()` 要么全部成立（ok 保持 true），要么抛 `invariant_failed`——
+ * 所以 `ok` / `stop_code=invariant_failed` 都意味着验收发生过；其余 ok=false 的停因态
+ * （budget_exceeded / missing_done / 中途停）里 `held:false` 只是 invariantsFromTrace
+ * 对"没有 done 事件"的缺省值，不是失败判决——结论列要说「未验收」，不冤枉不变量。
+ */
+function acceptanceReached(r: AppRunResult): boolean {
+  return r.ok || r.script?.stop_code === "invariant_failed";
+}
+
+/** B3-1：不变量结论列（Markdown）——验收发生过才允许说「不成立」，没到验收点说「未验收」。 */
+function invariantVerdictMd(r: AppRunResult, held: boolean): string {
+  if (held) return "成立";
+  return acceptanceReached(r) ? "**不成立**" : "**未验收（预算未到验收点）**";
+}
+
 /** 结构化结果 → 人读的 Markdown（应用级证据：数据腿 + 旅程 + 不变量）。 */
 export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): string {
   const L: string[] = [
@@ -1627,7 +1644,7 @@ export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): st
     L.push("", "## 验收（结束状态不变量：web = 浏览器结束态；其它类型 = 只读观察探针）",
       "", "| 不变量 | 类型 | 说明 | 结论 |", "|---|---|---|---|");
     for (const i of r.invariants) {
-      L.push(`| ${i.id} | ${i.adapter ?? "web"} | ${i.desc} | ${i.held ? "成立" : "**不成立**"} |`);
+      L.push(`| ${i.id} | ${i.adapter ?? "web"} | ${i.desc} | ${invariantVerdictMd(r, i.held)} |`);
     }
   }
   return L.join("\n") + "\n";
@@ -1684,7 +1701,12 @@ export function appReportHtml(r: AppRunResult, nextHint?: string | null): string
   }
   if (r.invariants.length > 0) {
     L.push("<h2>验收（结束状态不变量）</h2><table><tr><th>不变量</th><th>结论</th><th>说明</th></tr>");
-    for (const inv of r.invariants) L.push(`<tr><td><code>${htmlEscape(inv.id)}</code></td><td>${inv.held ? '<span class="ok">成立</span>' : '<span class="bad">不成立</span>'}</td><td>${htmlEscape(inv.desc)}</td></tr>`);
+    for (const inv of r.invariants) {
+      const verdict = inv.held
+        ? '<span class="ok">成立</span>'
+        : acceptanceReached(r) ? '<span class="bad">不成立</span>' : '<span class="bad">未验收（预算未到验收点）</span>';
+      L.push(`<tr><td><code>${htmlEscape(inv.id)}</code></td><td>${verdict}</td><td>${htmlEscape(inv.desc)}</td></tr>`);
+    }
     L.push("</table>");
   }
   if (r.manual_steps !== undefined && r.manual_steps.length > 0) {

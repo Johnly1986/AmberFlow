@@ -2673,9 +2673,16 @@ export class BrowserMiddleware {
           const caps = actionCapabilities(el);
           const op = String(cmdPick.cmd.op);
           if (op !== "skip" && !caps.includes(op as ActionCapability)) {
+            // B1：fill（命令闭集里唯一的取值/打字 op）被拒时点名出路——只说"元素不声明这个 op"
+            // 用户不知道怎么走（12 轮实测：Maps 搜索框 role=combobox 归 select 族，fill 被拒）。
+            // click/scroll 被拒的出路不同（A2 停因判别已覆盖），不加这句。
+            const remedy = op === "fill"
+              ? `。该输入族不支持命令 ${op}——改用决策语句（省略 act，值经 slots 绑定）或深链直达目标 URL`
+              : "";
             stop("action_unsupported",
               `command ${JSON.stringify(cmdPick.cmd.id)} declares op '${op}', but element ${ref} `
-              + `(${el.tag} "${el.label}") only declares [${caps.join(", ")}] on step ${stepNo}`, stepNo);
+              + `(${el.tag} "${el.label}") only declares [${caps.join(", ")}] on step ${stepNo}`
+              + remedy, stepNo);
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
           }

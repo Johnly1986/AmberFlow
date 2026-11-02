@@ -55,7 +55,8 @@ export function parseSlots(values: readonly string[] | undefined): Record<string
   const slots: Record<string, string> = {};
   for (const item of flatList(values)) {
     const eq = item.indexOf("=");
-    if (eq <= 0) throw new Error(`--slot 要写成 k=v（收到 ${JSON.stringify(item)}）`);
+    if (eq <= 0) throw new Error(`--slot 要写成 k=v（收到 ${JSON.stringify(item)}）`
+      + `（--slot 的值会先按逗号拆成多个 k=v；值本身含逗号时无法表达——列表型值请改用 --slot-file JSON）`);
     slots[item.slice(0, eq)] = item.slice(eq + 1);
   }
   return slots;
