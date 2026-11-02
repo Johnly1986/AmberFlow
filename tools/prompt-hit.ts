@@ -179,10 +179,10 @@ if (docText.includes("title、href 等不在池字段模型里")) {
 }
 
 /* ---- 6. doc：快速路径 ↔ planning-playbook --------------------------------- */
-// 引擎引导的五步法/失败速查同样逐字进文档——「引擎告诉 Agent 怎么规划」的文案不许手抄。
+// 引擎引导的六步法/失败速查同样逐字进文档——「引擎告诉 Agent 怎么规划」的文案不许手抄。
 
 if (!docText.includes(PLAN_PLAYBOOK_TEXT)) {
-  problems.push("doc: docs/APP_SCRIPT_AUTHORING.md 未包含高效规划五步法（PLAN_PLAYBOOK_TEXT）——从 planning-playbook.ts 逐字复制");
+  problems.push("doc: docs/APP_SCRIPT_AUTHORING.md 未包含高效规划六步法 v2.1（PLAN_PLAYBOOK_TEXT）——从 planning-playbook.ts 逐字复制");
 }
 if (!docText.includes(FAILURE_SIGNS_TEXT)) {
   problems.push("doc: docs/APP_SCRIPT_AUTHORING.md 未包含失败特征速查（FAILURE_SIGNS_TEXT）——从 planning-playbook.ts 逐字复制");

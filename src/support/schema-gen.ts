@@ -149,7 +149,7 @@ export const STOPCODE_MEANING: Readonly<Record<string, string>> = {
   needs_human: "人工步需要人：非 TTY 不假装有人，不拉有头浏览器",
   hint_matched_no_target: "target_hint 在池内零命中（reason 附闭集提示）",
   trace_mismatch: "重放与轨迹版本/输入不一致——重跑，不要重放",
-  max_steps: "子目标动作步数预算用完（每次调用缺省 8）：收窄目标或按五步法② 改流程",
+  max_steps: "子目标动作步数预算用完（每次调用缺省 8）：按六步法② 走查收窄流程",
   noul_unverified: "模型声称 done 但无 DOM 信号可验证——补可验证完成信号，完成只认信号",
   no_progress: "同一元素有效执行多次而信号从不成立——目标疑似死元素或信号永不成立",
   space_empty: "声明的命令空间在页面无任何可解析元素",

@@ -91,6 +91,7 @@ amber run --goal "<目标>" --url <页面> [--save-plan <文件>] [选项]`,
     flags: [
       "--headful / --headless    显示 / 不显示浏览器窗口（run 默认 headless）",
       "--dry-run                 只做 dry 调用序列/展开校验，不执行",
+      "--walk                    调试/走查（仅应用运行）——ctx.step 同页重锚（origin+path 同）不重导航保留 SPA 状态；与 --dry-run 互斥；结果自报 walk:true",
       "--plan [文件]             输入的计划文件；默认 ./.amberflow/plan.json",
       "--save-plan <文件>        生成计划的保存位置；默认 ./.amberflow/plan.json",
       "--out <目录>              结果 JSON / Markdown 的落点",

@@ -160,6 +160,28 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - 离线示例：`examples/apps/` 4 个零网络/零模型样板 + `tools/examples-check.ts`；`npm run examples-check`
   接入 `npm run check`，`examples/` 随 npm 包分发。
 
+### 执行取证与走查批次（2026-11-02，未发布）
+
+- **done 信号多动作闭集**（A1）：一步内多命令闭集全部执行完才判 done——不在中间态误判完成；
+  dry-run 增两条信号 lint（裸 `not` / `any` 含 `not(exists)`，stderr 非致命、不改退出码）；
+  `step_traces.afters` 逐步记录动作后的内容签名，事后可核对每步实动了什么。
+- **解析失败判别**（A2）：`target_not_found` / `low_confidence` 的 reason 附池快照答案——
+  区分「目标不在页面」与「候选在而闸门拒/闭集约束」，失败看 reason 即可判别，不必再开浏览器取证。
+- **决策源对齐**（A3）：ask 失败透传 HTTP 事实（machine code / cause 链 / 2xx 非 JSON 响亮
+  报错）；`failed_asks` 独立计数；`no_model_runtime` 附降级原因；flow 路径 `provider_degraded`
+  管道修复；`amber doctor --ask-probe` 用当前三件套真实发一次最小 ask（探针只诊断，不改退出码）。
+- **DSH 桥超时**（A4）：`amberflow_run` 增 `timeout_sec`（1..7200 秒）硬墙钟上限——长流程
+  调大预算而不是被默认上限杀掉；被杀落盘 `run-killed.json`，部分证据不再丢失。
+- **高效规划六步法 v2.1**（A5）：五步法 → 六步法，走查先行——先用引擎把流程按真实步序走通，
+  再写正式应用；planning-playbook 真源同步骨架注释、inspect next、run 失败 next 与文档逐字块。
+- **`amber run --walk` 单会话走查模式**（A6，调试旗标，默认关）：`ctx.step` 同页重锚
+  （origin+path 同）不重导航、保留 SPA 状态，跨页显式 url 照常导航；与 `--dry-run` 互斥；
+  结果自报 `walk:true`——适合复现「只在演进状态出现」的问题；正式跑不用 walk，每步重导航
+  （起点 URL 确定性）才是 done 判定确定性来源。
+- **B 组修正**（B1/B3/B2/B5/B6）：`action_unsupported(fill)` 附修正指引；PARTIAL 报告的
+  不变量措辞「不成立」→「未验收」（验收未发生态）；`--slot k=v` 逗号拆分行为说明；结果 JSON /
+  report 增 env 环境与会话字段（run_id / 时间戳 / final_url / viewport / UA，缺省等价）；
+  extract 字段投影与池文本分歧文档化（设计如此非 bug，附行号证据）。
 
 ### 发布形态（M0 决定）
 
