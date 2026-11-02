@@ -47,6 +47,7 @@ const OPTIONS = {
   "tiered-hint": { type: "boolean" as const },
   trace: { type: "boolean" as const },
   "max-steps": { type: "string" as const },
+  walk: { type: "boolean" as const },
   ablate: { type: "string" as const },
   json: { type: "boolean" as const },
   quiet: { type: "boolean" as const },
@@ -160,6 +161,7 @@ function validateAppFlags(v: Values, mode: "app" | "pick"): void {
 function validatePlanFlags(v: Values): void {
   if (str(v["save-plan"])) throw usageError("--save-plan 只用于 --goal");
   if (str(v["max-steps"])) throw usageError("--max-steps 只用于应用运行（计划用 --max）");
+  if (bool(v.walk)) throw usageError("--walk 只用于应用运行");
   if (bool(v["confirm-safe"]) || bool(v["confirm-unsafe"]) || bool(v["manual-fail-fast"])) {
     throw usageError("--confirm-safe / --confirm-unsafe / --manual-fail-fast 只用于应用运行");
   }
@@ -181,6 +183,7 @@ function validatePlanFlags(v: Values): void {
 
 function validateGoalFlags(v: Values): void {
   if (str(v["max-steps"])) throw usageError("--max-steps 只用于应用运行");
+  if (bool(v.walk)) throw usageError("--walk 只用于应用运行");
   if (bool(v["confirm-safe"]) || bool(v["confirm-unsafe"]) || bool(v["manual-fail-fast"])) {
     throw usageError("--confirm-safe / --confirm-unsafe / --manual-fail-fast 只用于应用运行");
   }
@@ -199,6 +202,12 @@ function validateGoalFlags(v: Values): void {
 
 
 async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext): Promise<number> {
+  // A6 防呆：walk 是真跑调试模式，dry 只展开调用序列、没有浏览器——同给是用法错误（exit 2）。
+  if (bool(v.walk) && bool(v["dry-run"])) {
+    throw usageError("--walk 与 --dry-run 互斥：walk 是真跑调试模式（ctx.step 同页重锚不重导航），dry 无浏览器、无导航可言", {
+      next: ["amber run " + app + " --walk --trace", "amber run " + app + " --dry-run"],
+    });
+  }
   // 槽位拼写（`--slot city` 少了 `=值`）必须在起浏览器之前点名：旧入口只会在
   // 展开包时报一句看不懂的话，而这一步根本不需要任何外部依赖。
   let slots: Record<string, string>;
@@ -317,6 +326,8 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   if (bool(v.trace) || bool(v.json) || ctx.globals.json) args.push("--trace");
   const maxStepsArg = str(v["max-steps"]);
   if (maxStepsArg !== undefined) args.push("--max-steps", maxStepsArg);
+  // A6：walk 调试旗标转发给 app-runner（真跑模式；dry 已在上方互斥拒绝）。
+  if (bool(v.walk)) args.push("--walk");
   if (bool(v.quiet) || ctx.globals.quiet) args.push("--quiet");
 
   const jsonMode = bool(v.json) || ctx.globals.json;

@@ -54,6 +54,15 @@ export interface AmberFlowRunArgs {
    */
   tieredHint?: boolean
   /**
+   * Walk DEBUG mode for this run (engine `--walk`), default off: `ctx.step` stops reloading the
+   * page when its declared `url` re-anchors to the current page (same origin+path; query/hash
+   * ignored), so SPA client state survives across steps for single-session walk-throughs and
+   * forensics. Cross-page explicit urls and ctx.open/openPage/arrive still navigate. Debug
+   * surface only — formal runs keep the re-navigation semantics; the result marks `walk: true`.
+   * Mutually exclusive with `dry`.
+   */
+  walk?: boolean
+  /**
    * Execution budget for this call (engine `--max-steps`), NOT a 1-based step index: the script runs
    * under its own control flow and stops with `budget_exceeded` when the budget is used up
    * (`status=partial`, `verified=false`).
@@ -286,6 +295,16 @@ export async function runApp(
       + `seconds (omit it to use the deployment timeoutMs: ${Math.round(options.timeoutMs / 1000)} s)`,
     )
   }
+  // A6 fool-proofing: walk is a LIVE-run debug mode (ctx.step stops re-anchoring to the current
+  // page); dry has no browser and no navigation, so combining them is a usage error, not a flag
+  // one side silently drops.
+  if (args.walk === true && args.dry === true) {
+    throw new Error(
+      `amberflow-bridge: ${options.toolPrefix}_run walk and dry are mutually exclusive — walk is a `
+      + 'live-run debug mode (ctx.step keeps SPA state across steps by not re-navigating to the '
+      + 'current page), dry only expands the call sequence with no browser',
+    )
+  }
   const outDir = newOutDir('run')
   pruneRunDirs(options.keepRuns)
   // Per-call wall-clock override: runProcess reads `timeoutMs` off the options it is given, so this
@@ -305,6 +324,7 @@ export async function runApp(
     ...(args.allowDangerous === undefined ? {} : { dangerous: args.allowDangerous }),
     ...(args.confirmSafe === undefined ? {} : { confirmSafe: args.confirmSafe }),
     ...(args.tieredHint === undefined ? {} : { tieredHint: args.tieredHint }),
+    ...(args.walk === undefined ? {} : { walk: args.walk }),
     ...(args.maxSteps === undefined ? {} : { maxSteps: args.maxSteps }),
     trace: args.trace ?? true,
     manualFailFast: true,

@@ -21,7 +21,7 @@
 export const PLAN_PLAYBOOK_TEXT = `高效规划六步法 v2.1（走查先行——先用引擎把流程按真实步序走通，再写正式应用）：
 ① inspect 先看：amber inspect --url <页> --json 拿验证过的 hint_candidates——有候选照抄，别自创选择器；同时核对目标 op 在能力面内（amber schema ctx --topic commands）与词面真的在池里（probe/DOM 命中 ≠ hint 可命中）；
 ② 全流程走查：按真实步序用引擎走通一遍，五样产出物全带出来——能力墙清单（哪步走不通、卡在什么停因）/ 产品事实清单（真实文案、控件、URL 规律——done 与 hint 只能从这里来）/ 提槽清单（哪些值随任务变化、进 meta.slots）/ done 素材（每步动作前后页面各长什么样）/ 绕行决策（走不通的步骤就地找等价路径：换入口页、换来源、换控件族；反爬风控不绕，早停）；
-   走查工具二选一：探针链（每步一个 1 步微型应用：arrive+read 验证页面可达 / 登录与验证可处理 / 无风控拦截 / 数据在 DOM——探针 30 秒判死刑，好过全流程应用跑 5 轮）或 plan 面草稿（plan new → plan add --signal … → plan check --probe 只读预检 → plan run 真执行）；
+   走查工具三选一：探针链（每步一个 1 步微型应用：arrive+read 验证页面可达 / 登录与验证可处理 / 无风控拦截 / 数据在 DOM——探针 30 秒判死刑，好过全流程应用跑 5 轮）或 plan 面草稿（plan new → plan add --signal … → plan check --probe 只读预检 → plan run 真执行）或 walk 模式（amber run <id> --walk 一个临时应用单会话按真实步序 act→read 串完整流程：步声明的 url 与当前页同页就不重导航、SPA 状态跨步保持，跨页显式 url 仍导航——适合复现「只在演进状态出现」的问题）；
 ③ 规划应用：提槽 + done 双向清单——done 四形态：正向锚（url_* / css_*）、否定配 exists（裸 not 在空池/重渲染瞬间空洞成立）、多动作后判（两连击的第一击是中间态，不算完成）、状态前进自检（信号跟着页面真前进，不是恒真）；
    值只认 slot：fill/select/drag 的值来自任务输入或数据源（缺值如实 needs_value，不猜）；采样与分块：虚拟列表按视口采样（池里只有已渲染的行，滚动/翻页分块取全）、长流程分块成多个短应用、多源双腿（meta.sources 数据腿 + 浏览器腿互核）；
 ④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列——stderr 的两条信号 lint（裸 not / any 含 not(exists)）当场改掉再进 ⑤；
@@ -29,7 +29,7 @@ export const PLAN_PLAYBOOK_TEXT = `高效规划六步法 v2.1（走查先行—�
 ⑥ 失败取证判别：最小取证探针先区分引擎缺陷 / 产品事实 / 任务口径再动手——A/B（单变量重跑）、对照（--provider 换决策源或 rules-only 消融）、双腿取数（数据腿核产品事实）；判别不了就上报，别靠反复重跑收敛。`;
 
 /** 压缩版（桥 `_app_create` 工具描述用；生成物逐字分发，工具描述不能太长）。 */
-export const PLAN_PLAYBOOK_SHORT = `高效规划六步法 v2.1（走查先行）：① inspect 先看（验证过的 hint_candidates 照抄 + 核对 op 能力面与词面在池）→ ② 全流程走查（探针链或 plan check --probe 按真实步序走通，带出能力墙/产品事实/提槽/done 素材/绕行决策五样）→ ③ 规划应用（slots + done 正向锚/否定配 exists/多动作后判/状态前进自检 + 分块采样）→ ④ apps check <id> --slot k=v 离线分支校验 + 信号 lint（裸 not / any 含 not(exists)）→ ⑤ run --trace 真跑，失败看 stopCode/reason（reason 自带池快照判别）→ ⑥ 失败取证判别（引擎缺陷/产品事实/任务口径；A/B、对照、双腿取数）。`;
+export const PLAN_PLAYBOOK_SHORT = `高效规划六步法 v2.1（走查先行）：① inspect 先看（验证过的 hint_candidates 照抄 + 核对 op 能力面与词面在池）→ ② 全流程走查（探针链或 plan check --probe 按真实步序走通，或 walk 模式 --walk 单会话串真实步序：同页不重导航、跨页仍导航，带出能力墙/产品事实/提槽/done 素材/绕行决策五样）→ ③ 规划应用（slots + done 正向锚/否定配 exists/多动作后判/状态前进自检 + 分块采样）→ ④ apps check <id> --slot k=v 离线分支校验 + 信号 lint（裸 not / any 含 not(exists)）→ ⑤ run --trace 真跑，失败看 stopCode/reason（reason 自带池快照判别）→ ⑥ 失败取证判别（引擎缺陷/产品事实/任务口径；A/B、对照、双腿取数）。`;
 
 /**
  * 失败特征速查（**通用风控判定，只判不绕反爬风控**：判定 + 早停，不含任何绕反爬手段；验证环节可代过）。

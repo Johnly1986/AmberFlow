@@ -415,6 +415,12 @@ export function runArgs(
     confirmSafe?: boolean
     /** P1 experiment: narrowed model question for an ambiguous-in-tier hint (engine `--tiered-hint`). */
     tieredHint?: boolean
+    /**
+     * Walk DEBUG mode for this run (engine `--walk`): `ctx.step` stops re-navigating when its
+     * declared `url` re-anchors the current page (same origin+path), so SPA client state survives
+     * across steps — single-session walk-through/forensics. Debug surface only.
+     */
+    walk?: boolean
     /** Execution budget for this call (engine `--max-steps`), not a 1-based step selector. */
     maxSteps?: number
     trace?: boolean
@@ -436,6 +442,7 @@ export function runArgs(
   if (args.dangerous) argv.push('--allow-dangerous')
   if (args.confirmSafe) argv.push('--confirm-safe')
   if (args.tieredHint) argv.push('--tiered-hint')
+  if (args.walk) argv.push('--walk')
   if (args.maxSteps !== undefined) argv.push('--max-steps', String(args.maxSteps))
   if (args.trace) argv.push('--trace')
   if (args.manualFailFast) argv.push('--manual-fail-fast')

@@ -12,7 +12,7 @@
 高效规划六步法 v2.1（走查先行——先用引擎把流程按真实步序走通，再写正式应用）：
 ① inspect 先看：amber inspect --url <页> --json 拿验证过的 hint_candidates——有候选照抄，别自创选择器；同时核对目标 op 在能力面内（amber schema ctx --topic commands）与词面真的在池里（probe/DOM 命中 ≠ hint 可命中）；
 ② 全流程走查：按真实步序用引擎走通一遍，五样产出物全带出来——能力墙清单（哪步走不通、卡在什么停因）/ 产品事实清单（真实文案、控件、URL 规律——done 与 hint 只能从这里来）/ 提槽清单（哪些值随任务变化、进 meta.slots）/ done 素材（每步动作前后页面各长什么样）/ 绕行决策（走不通的步骤就地找等价路径：换入口页、换来源、换控件族；反爬风控不绕，早停）；
-   走查工具二选一：探针链（每步一个 1 步微型应用：arrive+read 验证页面可达 / 登录与验证可处理 / 无风控拦截 / 数据在 DOM——探针 30 秒判死刑，好过全流程应用跑 5 轮）或 plan 面草稿（plan new → plan add --signal … → plan check --probe 只读预检 → plan run 真执行）；
+   走查工具三选一：探针链（每步一个 1 步微型应用：arrive+read 验证页面可达 / 登录与验证可处理 / 无风控拦截 / 数据在 DOM——探针 30 秒判死刑，好过全流程应用跑 5 轮）或 plan 面草稿（plan new → plan add --signal … → plan check --probe 只读预检 → plan run 真执行）或 walk 模式（amber run <id> --walk 一个临时应用单会话按真实步序 act→read 串完整流程：步声明的 url 与当前页同页就不重导航、SPA 状态跨步保持，跨页显式 url 仍导航——适合复现「只在演进状态出现」的问题）；
 ③ 规划应用：提槽 + done 双向清单——done 四形态：正向锚（url_* / css_*）、否定配 exists（裸 not 在空池/重渲染瞬间空洞成立）、多动作后判（两连击的第一击是中间态，不算完成）、状态前进自检（信号跟着页面真前进，不是恒真）；
    值只认 slot：fill/select/drag 的值来自任务输入或数据源（缺值如实 needs_value，不猜）；采样与分块：虚拟列表按视口采样（池里只有已渲染的行，滚动/翻页分块取全）、长流程分块成多个短应用、多源双腿（meta.sources 数据腿 + 浏览器腿互核）；
 ④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列——stderr 的两条信号 lint（裸 not / any 含 not(exists)）当场改掉再进 ⑤；
@@ -42,7 +42,7 @@
 | done 素材 | 每步「动作前不成立、动作后成立」的具体信号 | 各步 `done`（拿不准先 `amber inspect --probe "<selector>"` 实证） |
 | 绕行决策 | 走不通的步骤选哪条等价路径 | 换入口页（`meta.site.pages` + `openPage`）/ 换来源（多源双腿）/ 换控件族；**反爬风控不绕，早停** |
 
-两种走查工具（按流程形态二选一，也可混用）：
+走查工具（按流程形态选用，也可混用；第三种 walk 模式见下）：
 
 - **探针链**：每步一个 1 步微型 flow 应用——`apps new <id>-probe<N>` → `arrive + read` 或单个
   `ctx.step` → `amber run <id>-probe<N> --trace`。适合交互步为主、必须真实动作才能看到下一态的
@@ -50,6 +50,17 @@
 - **plan 面草稿**：`plan new → plan add --signal … → plan check --probe → plan run`。适合线性流程
   快速串步：`plan check --probe` 是只读预检（实况核对 hint 解析与验证步信号，不执行动作），
   `plan run` 才真执行。
+
+**walk 模式（A6，调试旗标，默认关）**：`amber run <id> --walk --trace` 让一个临时 flow 应用在
+**一次 run 内**按真实步序 act→read→act→read 串完整流程，用于本节的走查与失败取证。与默认模式的
+差异只有一处：**`ctx.step` 的「起点 URL=当前页」重锚不再重载页面**——步声明的 `url` 与当前页同页
+（origin+path 相同；query/hash 忽略，正是"每步显式给当前 URL"惯例的形状）就不导航，SPA 客户端
+状态跨步保留；指向**另一页**的显式 `url` 仍然导航（显式意图优先），`ctx.open`/`ctx.openPage`/
+`ctx.arrive` 照常。done 判定、停因、after 签名与决策统计全部复用既有机制；结果 JSON 带
+`walk: true`。注意：walk 是**调试面**，正式跑不用 walk——每步重导航（起点 URL 确定性）才是正式
+run 的 done 判定确定性来源；`--walk` 与 `--dry-run`/`dry` 互斥（dry 无浏览器，walk 无意义）。
+适合复现「只在会话内演进状态出现」的问题（R2/R12 实证：同一扩样操作在重导航后的页面与演进页面
+上，一轮成功一轮不增长）。
 
 最小走查示例（3 步流程「开列表 → 进详情 → 读标题」；URL / 信号均为示意占位，落笔前对目标页实证）：
 

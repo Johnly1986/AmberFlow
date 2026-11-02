@@ -426,6 +426,18 @@ export function apply(ctx: Context, config: Config): void {
           + 'asked a SMALLER question (only that tier\'s candidates, not the whole pool). Off by '
           + 'default — behavior identical to before; use it for A/B runs.',
       },
+      walk: {
+        type: 'boolean',
+        description: 'Walk DEBUG mode for this run (engine `--walk`), default off. Single-session '
+          + 'walk-through/forensics: `ctx.step` no longer reloads the page when its declared `url` '
+          + 're-anchors to the CURRENT page (same origin+path; query/hash ignored), so SPA client '
+          + 'state survives across steps — act→read→act→read chains reproduce problems that only '
+          + 'appear on session-evolved state. An explicit url pointing at ANOTHER page still '
+          + 'navigates, and ctx.open/openPage/arrive are unchanged; done judgment, stop codes, '
+          + 'after-signatures and decision stats are identical. Debug surface only: formal runs '
+          + 'keep the re-navigation semantics (that is where their done determinism comes from); '
+          + 'the result JSON marks walk:true. Mutually exclusive with `dry`.',
+      },
       slots: {
         type: 'array',
         description: 'Values for declared slots, as "key=value" entries (e.g. ["date=2026-10-12"]).',
@@ -602,6 +614,7 @@ export function apply(ctx: Context, config: Config): void {
         ...(args.allow_dangerous === undefined ? {} : { allowDangerous: args.allow_dangerous }),
         ...(args.confirm_safe === undefined ? {} : { confirmSafe: args.confirm_safe }),
         ...(args.tiered_hint === undefined ? {} : { tieredHint: args.tiered_hint }),
+        ...(args.walk === undefined ? {} : { walk: args.walk }),
         ...(args.max_steps === undefined ? {} : { maxSteps: args.max_steps }),
         ...(args.timeout_sec === undefined ? {} : { timeoutSec: args.timeout_sec }),
         ...(args.trace === undefined ? {} : { trace: args.trace }),

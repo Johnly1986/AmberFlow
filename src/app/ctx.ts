@@ -231,6 +231,13 @@ export interface CtxDeps {
   manualRunner?: (req: ManualRequest) => boolean | Promise<boolean>;
   /** 非交互：遇到人工步直接 needs_human，不创建有头浏览器。 */
   manualFailFast?: boolean;
+  /**
+   * A6 walk 调试模式（`--walk`，默认关 = 逐字节不变）：`ctx.step` 声明的 `url` 与当前页
+   * **同页**（origin+path 相同；query/hash 忽略）时不再重导航——「url=当前页」的重锚折叠成
+   * 缺省「当前页」语义，SPA 客户端状态跨步保留；指向**另一页**的显式 url 仍然导航
+   * （显式意图优先）。`open`/`openPage`/`arrive` 与 done 判定/停因/after/决策账全部不变。
+   */
+  walk?: boolean;
   /** 步间最小等待（`meta.pace.between_steps_ms`；0 = 不等待）。 */
   stepDelayMs?: number;
   /** action 后 done 信号总等待窗口（毫秒；缺省 2000）。 */
@@ -260,6 +267,23 @@ function assertAct(req: StepRequest): void {
     throw new StopError("config_error", "ctx.step: done signal is required (completion only comes from the evidence surface)");
   }
   // act 省略 = 让引擎决策目标；只有显式给了 act 才校验它的形状（真正形状由 targetOptions/执行器校验）。
+}
+
+/**
+ * A6 walk 的同页判定：origin+path 相同即同页（query/hash 忽略）。
+ * 为什么忽略 query：作者惯例里「每步起点 URL」常写成当前页去 query 的重锚
+ * （如 Maps 的 `cleanUrl(await ctx.url())`）——walk 把它折叠成缺省「当前页」语义（不重导航，
+ * SPA 状态跨步保留）；而真正换页（不同 origin/path）的显式 url 仍然导航，显式意图优先。
+ * 解析不了 URL 的原始串按字面相等兜底。
+ */
+function samePage(a: string, b: string): boolean {
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+    return ua.protocol === ub.protocol && ua.host === ub.host && ua.pathname === ub.pathname;
+  } catch {
+    return a === b;
+  }
 }
 
 /**
@@ -390,12 +414,18 @@ export function createCtx(deps: CtxDeps): Ctx {
       throw new StopError("host_not_allowed", `ctx.step: ${JSON.stringify(startUrl)} is outside the declared hosts envelope (${hosts.join(", ")})`);
     }
     const session = await deps.ensureSession();
-    if (req.url !== undefined) currentUrl = startUrl;
+    // A6 walk 调试模式：步声明的 url 与当前页**同页**（origin+path 相同）=「起点 URL=当前页」
+    // 的重锚，折叠成缺省「当前页」语义——不重导航（SPA 客户端状态跨步保留）；指向另一页的
+    // 显式 url 仍然导航。默认（walk 关）逐字节不变：带 url 就导航。
+    const walkKeepPage = deps.walk === true && req.url !== undefined
+      && samePage(startUrl, urlOf(session.page) || currentUrl);
+    if (req.url !== undefined && !walkKeepPage) currentUrl = startUrl;
     const opts: Record<string, unknown> = {
       goalSignalFn: (p: unknown) => checkSignal(p as never, req.done as never),
       page: session.page,
       // 不带 url = 决策语句在当前页上执行；带 url 才先导航。整页重载会丢 SPA 状态。
-      ...(req.url === undefined ? { skipNavigation: true } : {}),
+      // walk 的同页重锚（walkKeepPage）走同一条「当前页」路径（A6）。
+      ...(req.url === undefined || walkKeepPage ? { skipNavigation: true } : {}),
       poolReady: true,
       ...(deps.poolReadyTimeoutMs === undefined ? {} : { poolReadyTimeoutMs: deps.poolReadyTimeoutMs }),
       ...(deps.poolReadyPollMs === undefined ? {} : { poolReadyPollMs: deps.poolReadyPollMs }),
@@ -407,7 +437,8 @@ export function createCtx(deps: CtxDeps): Ctx {
         : { doneTimeoutMs: req.timeoutMs }),
       ...(deps.donePollMs === undefined ? {} : { donePollMs: deps.donePollMs }),
       // 带 url 的步：domcontentloaded 对 SPA 太早，给面板一个短稳定窗口再抽取。
-      ...(req.url === undefined ? {} : { settleMs: 700 }),
+      // walk 同页重锚没有 goto（页面早已就位），与不带 url 的步同待遇。
+      ...(req.url === undefined || walkKeepPage ? {} : { settleMs: 700 }),
       pw: session.pw,
       slots: { ...slots, ...(req.slots ?? {}) },
       verbose: deps.verbose === true,

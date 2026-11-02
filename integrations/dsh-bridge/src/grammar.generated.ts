@@ -17,7 +17,7 @@ export const HINT_SHAPE_TOKENS: readonly string[] = [
 
 export const HINT_LEARN_NOTE = "A hint is a STABLE-HANDLE CLOSED SET of 6 shapes (#id | tag[attr~substr] | tag~token | tag[attr=value] | tag (button|link|input|textarea|select) | bare-token; only test=data-test and type attribute names take part in matching), NOT arbitrary CSS - container/descendant selectors (e.g. \"#outer input\") parse but can never match (target_not_found).";
 
-export const PLAN_PLAYBOOK_SHORT = "高效规划六步法 v2.1（走查先行）：① inspect 先看（验证过的 hint_candidates 照抄 + 核对 op 能力面与词面在池）→ ② 全流程走查（探针链或 plan check --probe 按真实步序走通，带出能力墙/产品事实/提槽/done 素材/绕行决策五样）→ ③ 规划应用（slots + done 正向锚/否定配 exists/多动作后判/状态前进自检 + 分块采样）→ ④ apps check <id> --slot k=v 离线分支校验 + 信号 lint（裸 not / any 含 not(exists)）→ ⑤ run --trace 真跑，失败看 stopCode/reason（reason 自带池快照判别）→ ⑥ 失败取证判别（引擎缺陷/产品事实/任务口径；A/B、对照、双腿取数）。";
+export const PLAN_PLAYBOOK_SHORT = "高效规划六步法 v2.1（走查先行）：① inspect 先看（验证过的 hint_candidates 照抄 + 核对 op 能力面与词面在池）→ ② 全流程走查（探针链或 plan check --probe 按真实步序走通，或 walk 模式 --walk 单会话串真实步序：同页不重导航、跨页仍导航，带出能力墙/产品事实/提槽/done 素材/绕行决策五样）→ ③ 规划应用（slots + done 正向锚/否定配 exists/多动作后判/状态前进自检 + 分块采样）→ ④ apps check <id> --slot k=v 离线分支校验 + 信号 lint（裸 not / any 含 not(exists)）→ ⑤ run --trace 真跑，失败看 stopCode/reason（reason 自带池快照判别）→ ⑥ 失败取证判别（引擎缺陷/产品事实/任务口径；A/B、对照、双腿取数）。";
 
 export const STOP_ESCALATION_TEXT = "同一停因按 next 修正后重跑仍出现 2 次以上 → 停手：如实上报 stopCode / reason / 已试过的修正，等待人或上游决策；不要再自行迭代脚本或重试。";
 

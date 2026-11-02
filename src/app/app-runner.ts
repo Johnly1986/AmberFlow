@@ -550,6 +550,11 @@ export interface AppRunResult {
   ok: boolean;
   /** 本次是分段运行：`ok` 只代表段内步骤成功，不代表整条旅程验收。 */
   partial?: true;
+  /**
+   * A6：本次是 walk 调试跑（`--walk`：ctx.step 同页重锚不重导航，SPA 状态跨步保留）。
+   * 缺字段 = 正式语义（默认模式逐字节不变）。walk 是调试面——walk 产物不得冒充正式 run。
+   */
+  walk?: true;
   /** 完整旅程且不变量成立；分段跑为 false。 */
   verified?: boolean;
   /** 本次实际执行的声明步骤区间（1-based，闭区间）。 */
@@ -1715,6 +1720,9 @@ const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [-
 --tiered-hint  P1 实验开关：hint 档内歧义向模型问更小的问题（默认关 = 行为逐字节不变）
 --trace        结果 JSON 带每步执行证据（step_traces）
 --max-steps N  本次运行的 ctx.step/arrive 执行预算（调试用；用满后结果 partial，不是跳步）
+--walk         A6 调试：单会话走查/取证——ctx.step 的「起点 URL=当前页」重锚（origin+path 同）
+               不再重导航，SPA 状态跨步保留；跨页显式 url 与 open/openPage/arrive 照常。
+               结果带 walk:true；与 --dry 互斥（dry 无浏览器）
 --learn-hints  R2 学习环：模型选对的步变成规则（sidecar，永不写进被审计的脚本；authored 恒优先）
                落点默认 $AMBERFLOW_HOME/hint-memory/<app>.json，--hint-memory FILE 显式指定
 --emit-trace F 把本次执行轨迹（app/script/inputs 三个 sha + 逐次 ctx 调用）写成 F
@@ -1748,6 +1756,13 @@ export interface ScriptRunOptions extends AppRunOptions {
   emitTrace?: string;
   /** 按一条已记录的轨迹重放（不重新决策；版本/输入不一致直接拒跑）。 */
   replayTrace?: string;
+  /**
+   * A6 walk 调试模式（`--walk`，默认关 = 逐字节不变）：单会话走查/取证——`ctx.step` 的
+   * 「起点 URL=当前页」重锚（origin+path 相同；query/hash 忽略）不再重导航，SPA 状态跨步
+   * 保留；跨页显式 url 与 `open`/`openPage`/`arrive` 照常导航。与 dry 互斥（dry 无浏览器）。
+   * 结果 JSON 带 `walk: true`——walk 产物不得冒充正式 run。
+   */
+  walk?: boolean;
 }
 
 export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptions = {}): Promise<AppRunResult> {
@@ -1958,6 +1973,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         decisionStepGroups.push(steps);
       },
       ...(opts.maxSteps === undefined ? {} : { maxSteps: opts.maxSteps }),
+      // A6 walk：旗标只进 flow 应用路径；缺省关 = ctx 与产物逐字节不变。
+      ...(opts.walk === true ? { walk: true } : {}),
       verbose,
     });
     try {
@@ -2096,6 +2113,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     sources: [],
     ok,
     ...(partial ? { partial: true as const } : {}),
+    // A6：walk 调试跑显式自报——缺字段 = 正式语义；walk 产物不冒充正式 run。
+    ...(opts.walk === true ? { walk: true as const } : {}),
     ...(manualSteps.length ? { manual_steps: manualSteps } : {}),
     ...(pace.between_steps_ms > 0 || pace.between_actions_ms > 0 ? { pace } : {}),
     secs: (Date.now() - t0) / 1000,
@@ -2143,10 +2162,20 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // rc 文件坏 = 配置类用法错误：在任何腿出场之前逐行点名并 exit 2（src/support/rcfile.ts）。
   { const rc = applyConfiguredEnv(); if (rc.errors.length) { for (const e of rc.errors) console.error(e); return 2; } }
   // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
-  const cli = parseCliArgs(argv, { allowPositionals: true, options: appOptions(), usage: USAGE });
+  const cli = parseCliArgs(argv, {
+    allowPositionals: true,
+    // A6 --walk 是 app-runner 专属调试旗标：在本入口并进共用旗标表（共用表文件不动）。
+    options: { ...appOptions(), walk: { type: "boolean" } },
+    usage: USAGE,
+  });
   if (!cli.ok) return cli.code;
   const v = cli.values;
   if (cliBool(v, "help")) { console.log(USAGE); return 0; }
+  // A6 防呆：walk 是真跑调试模式，dry 无浏览器、无导航可言——同给是用法错误（exit 2）。
+  if (cliBool(v, "dry") && cliBool(v, "walk")) {
+    console.error("--walk 与 --dry 互斥：walk 是真跑调试模式（ctx.step 同页重锚不重导航），dry 只展开调用序列、没有浏览器。");
+    return 2;
+  }
   // 运行参数的配置默认值（全局 < 项目 < 环境变量；CLI 旗标仍最优先）。
   const { defaults: runDefaults, errors: runDefaultErrors } = parseRunDefaults();
   if (runDefaultErrors.length) {
@@ -2392,6 +2421,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       ...(localModelId === undefined ? {} : { modelId: localModelId }),
       ...(cliString(v, "emit-trace") === undefined ? {} : { emitTrace: cliString(v, "emit-trace") }),
       ...(cliString(v, "replay") === undefined ? {} : { replayTrace: cliString(v, "replay") }),
+      // A6：walk 调试旗标（默认关 = 不进 opts，产物逐字节不变）。
+      ...(cliBool(v, "walk") ? { walk: true } : {}),
       runtimeStats: applied.stats ?? undefined,
       pickAsks: applied.asks ?? undefined,
       pickFailedAsks: applied.failedAsks ?? undefined,
