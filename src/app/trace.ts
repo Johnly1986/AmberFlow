@@ -15,7 +15,9 @@ import path from "node:path";
 
 export type TraceCall =
   | "open" | "openPage" | "arrive" | "step" | "read" | "extract" | "holds" | "waitFor" | "source"
-  | "run" | "dangerous" | "manual" | "done" | "log";
+  | "run" | "dangerous" | "manual" | "done" | "log"
+  // A3 列表/范围原语：各计 1 flow step；内部 click/滚动不产生独立事件。
+  | "scrollList" | "expand" | "setRange";
 
 export interface TraceEvent {
   /** 第几次 ctx 调用（1-based，贯穿一次运行）。 */
@@ -30,6 +32,11 @@ export interface TraceEvent {
   stop_code?: string;
   /** 只读观察的结果摘要（JSON 可序列化；不包含模型文本）。 */
   result?: unknown;
+  /**
+   * A3：原语的**调用参数**（scrollList/expand/setRange 用）。重放时按它逐字段比对
+   * （`trace_mismatch`），保证"录了什么就回放什么"，不重新决策。
+   */
+  args?: unknown;
 }
 
 export interface AppTrace {

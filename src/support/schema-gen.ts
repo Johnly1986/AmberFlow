@@ -39,6 +39,8 @@ const CTX_FACTS: ReadonlyArray<{ id: string; statement: string; truth: string }>
   { id: "F10", statement: "只读调用免费不占预算：read.text/value/count/attr、extract、holds、waitFor、log、url", truth: "app-runner.ts 计费口径" },
   { id: "F11", statement: "dry 模拟面：step/arrive/run/manual 恒 ok:true 且 when 不评估；read.* 返 null/0；url() 是最近声明值；预算照计——数据驱动的分支/断言必须用 ctx.runtime.runId===(dry) 守卫", truth: "ctx-dry.ts createDryCtx（06-B 实证全表）" },
   { id: "F12", statement: "导航：open/openPage 只做 goto(domcontentloaded) 不等信号；arrive(url,{done}) = 导航 + 轮询等落地证据——「导航后还要等页面状态」一律用 arrive", truth: "ctx.ts / APP_SCRIPT_AUTHORING.md §4（04-C 实测）" },
+  { id: "F13", statement: "列表/范围三原语：ctx.scrollList/ctx.expand/ctx.setRange 各计 1 个 flow step；expand 的内部点击不占预算（maxClicks 缺省 20、timeoutMs 缺省 60000 兜底，行数连续 stableRounds 轮不增长即稳定）", truth: "ctx.ts 三原语实现 + createDryCtx 桩（A3）" },
+  { id: "F14", statement: "三原语失败是结构化结果不是异常：scrollList 找不到滚动容器=not_scrollable、expand 到顶未稳定=expand_not_stable（带完整指标）、setRange 三策略（fill→keyboard→pointer）全失败=slider_not_settable（含已试策略/bbox/当前值）——绝不假装成功", truth: "range.ts + ctx.ts（A3 §4）" },
 ];
 
 /** 信号算子语义注记（表从 SIGNAL_OPS 真源取；语义逐条标出处）。 */
@@ -71,7 +73,7 @@ const COMMAND_FACTS = {
   value_binding: { from: "slot", key_must_be_declared_in: "meta.slots", missing: "needs_value（结构化停，绝不猜值）" },
   submit_inputs: "input[type=submit|button] 是点击目标，永远不填值",
   after_commands: "命令闭集走完后引擎评估一次 done 信号；全部命令解决而 done 不成立 = done_not_held",
-  scroll: "把目标滚入视口；drag 的 value 是落点 selector，仅 [draggable=true]/slider 族声明了能力",
+  scroll: "默认把目标滚入视口；带 to（{to:\"bottom\"|\"top\"|\"page\"}，ctx.command(\"scroll\", sel, {to})）= 把容器滚到该方向（A3）；drag 的 value 是落点 selector，仅 [draggable=true]/slider 族声明了能力",
 };
 
 /** 预算（三层结构，08-A6 实测成文）。 */
@@ -80,6 +82,11 @@ const BUDGET = {
   subgoal_actions: { default: 8, configurable: false, note: "执行器动作循环上限；reason 里的 \"on step N\" 是本层动作号，与流步号两口径" },
   signal_wait: { done_timeout_ms_default: 2000, step_level_override: "timeoutMs", note: "约束动作后等 done 的窗口，不约束整步挂钟（模型咨询/导航渲染不在其内）" },
   free_calls: ["read.text/value/count/attr", "extract", "holds", "waitFor", "log", "url"],
+  list_range_primitives: {
+    each_counts_as: 1,
+    calls: ["ctx.scrollList", "ctx.expand", "ctx.setRange"],
+    note: "每个原语整体计 1 flow step（受 --max-steps 预算约束）；expand 内部点击/滚动**不占**预算，由 maxClicks/timeoutMs 兜底",
+  },
 };
 
 /** 导航语义（04-C 实测）。 */
@@ -96,6 +103,12 @@ const FLOW_CONTROL = {
   fail: "ctx.fail(code, reason) 抛结构化 StopError 终止运行",
   when_guard: "动作前判定；不成立 = 跳过（precondition_skipped、计 1 预算、trace 记 skipped）",
   done_rule: "能用的 done 必须「动作前不成立、动作后成立」；动作前已成立的信号对验证零贡献",
+  list_range_primitives: {
+    scrollList: "滚目标自身或最近可滚动祖先（纯 DOM scrollTop，不做滚轮模拟、不自动滚页面）；找不到容器=not_scrollable",
+    expand: "反复点 load-more/展开控件直到行数连续 stableRounds 轮不增长；到顶未稳定=expand_not_stable（仍返回 clicks/before/after/coverage）",
+    setRange: "三策略 fill→keyboard→pointer（0×0 手柄用最近有尺寸祖先 bbox）；全失败=slider_not_settable，绝不返回假 achieved",
+    billing: "三个原语各计 1 flow step；expand 内部点击不占预算（maxClicks/timeoutMs 兜底）",
+  },
 };
 
 /**
@@ -117,6 +130,7 @@ const DRY = {
   read_extract: "extract 返 []、read.attr 返 null、read.count 返 0、waitFor 立即 true",
   url: "url() 是最近声明值",
   budget: "步预算照常计数",
+  list_range_primitives: "三原语确定性桩：expand {ok:true,clicks:0,before:0,after:0,grew:false,stable:true,coverage:{rows:0}}；scrollList/setRange {ok:true}——但参数校验真做（非法 count/to/value 在 dry 期红）",
   rule: "一切基于观察值的 ctx.fail/分支/断言必须用 ctx.runtime.runId === \"(dry)\" 守卫；check VALID ≠ 每条分支被走过",
 };
 

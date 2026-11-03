@@ -95,6 +95,75 @@ export interface StepResult {
   warnings?: string[];
 }
 
+/** A3 `ctx.scrollList` 选项：方向（缺省 bottom）或像素增量，二选一优先 by。 */
+export interface ScrollListOptions {
+  to?: "bottom" | "top" | "page";
+  /** 相对当前位置的像素增量（给"慢慢滚"的场景；优先于 to）。 */
+  by?: number;
+  /** 滚动后稳定等待（毫秒；缺省 150）。 */
+  settleMs?: number;
+}
+
+/** A3 `ctx.scrollList` 结果：滚动容器的事实（失败也带可判别原因）。 */
+export interface ScrollListResult {
+  ok: boolean;
+  scrollTop?: number;
+  scrollHeight?: number;
+  clientHeight?: number;
+  moved?: boolean;
+  stopCode?: string;
+  reason?: string;
+}
+
+/** A3 `ctx.expand` 的行数读法：`{rows, fields?}` 或 `{selector}`（二选一）。 */
+export type ExpandCount =
+  | { rows: string; fields?: Record<string, string> }
+  | { selector: string };
+
+export interface ExpandOptions {
+  count: ExpandCount;
+  /** 最多点击次数（缺省 20）；内部点击**不占** flow 预算。 */
+  maxClicks?: number;
+  /** 连续多少轮行数不增长即判稳定（缺省 2）。 */
+  stableRounds?: number;
+  /** 每次点击后的稳定等待（毫秒；缺省 800）。 */
+  settleMs?: number;
+  /** 总超时（毫秒；缺省 60000）；到顶未稳定 = 结构化失败但带完整指标。 */
+  timeoutMs?: number;
+}
+
+/** A3 `ctx.expand` 结果：展开过程与最终行数事实（失败也带完整指标，不假装成功）。 */
+export interface ExpandResult {
+  ok: boolean;
+  clicks: number;
+  before: number;
+  after: number;
+  grew: boolean;
+  stable: boolean;
+  coverage: { rows: number };
+  stopCode?: string;
+  reason?: string;
+}
+
+/** A3 `ctx.setRange` 的目标值：绝对值或百分比。 */
+export type RangeValue = { value: number } | { percent: number };
+
+export interface SetRangeOptions {
+  /** 成功判定容差（缺省 0.5；整数滑块不可能像素级精确）。 */
+  tolerance?: number;
+  /** 总超时（毫秒；缺省 10000）。 */
+  timeoutMs?: number;
+}
+
+/** A3 `ctx.setRange` 结果：三道策略的最终事实（失败 = `slider_not_settable`，绝不造假）。 */
+export interface SetRangeResult {
+  ok: boolean;
+  achieved?: number;
+  strategy?: "fill" | "keyboard" | "pointer";
+  stopCode?: string;
+  reason?: string;
+}
+
 export interface SourceObservationView {
   counts: Record<string, number>;
   selects: Record<string, Record<string, string> | null>;
@@ -167,6 +236,23 @@ export interface Ctx {
   openPage(role: string): Promise<void>;
   arrive(url: string, req: { done: DomSignal; desc?: string; id?: string; timeoutMs?: number }): Promise<StepResult>;
   step(desc: string, req: StepRequest): Promise<StepResult>;
+  /**
+   * A3：把目标（hint）自身或其最近可滚动祖先滚到方向 `to`（缺省 bottom）或相对 `by` 像素。
+   * 纯 DOM `scrollTop`（不做滚轮/鼠标模拟，不自动扩散到页面其它区域）；计 1 个 flow step。
+   * 找不到可滚动容器 = `not_scrollable`；目标解析不到 = `target_not_found`。
+   */
+  scrollList(target: string, opts?: ScrollListOptions): Promise<ScrollListResult>;
+  /**
+   * A3：列表展开——反复点击"加载更多/展开"直到行数连续 `stableRounds` 轮不增长。
+   * 内部点击不占 flow 预算（整体计 1 步），由 `maxClicks`/`timeoutMs` 兜底；
+   * 到顶未稳定 = `ok:false` + 完整指标（`expand_not_stable`），不假装成功。
+   */
+  expand(target: string, opts: ExpandOptions): Promise<ExpandResult>;
+  /**
+   * A3：范围控件设值三策略（range fill → ARIA 键盘 → 指针拖拽，0×0 手柄用最近有尺寸祖先）。
+   * 设不了 = `slider_not_settable`（带已试策略/bbox/当前值），计 1 个 flow step。
+   */
+  setRange(target: string, value: RangeValue, opts?: SetRangeOptions): Promise<SetRangeResult>;
   /**
    * 人工步：登录/验证码/人工确认。人完成并确认后，可选 DOM 信号由引擎再验一遍。
    * `{manual:true}` 信号 = 人自证；非 TTY 且开了 manualFailFast 时返回 needs_human，不拉有头浏览器。
@@ -320,6 +406,106 @@ export function normalizeCommandIds(commands: CommandDecl[]): CommandDecl[] {
   });
 }
 
+/* ---- A3 原语参数校验（真实/dry/replay 共用同一份声明面；校验失败 = config_error） ---- */
+
+const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
+
+/** `ctx.scrollList` 的参数声明。非法值**在这里**红（dry 期也能拦住，不留到真跑）。 */
+export function validateScrollListRequest(target: unknown, opts: unknown): void {
+  if (!isNonEmptyString(target)) {
+    throw new StopError("config_error", "ctx.scrollList: target must be a non-empty hint string (e.g. \"Feed list\" or \"#feed\")");
+  }
+  if (opts === undefined) return;
+  if (!isObj(opts)) throw new StopError("config_error", "ctx.scrollList: opts must be an object");
+  const to = opts["to"];
+  if (to !== undefined && to !== "bottom" && to !== "top" && to !== "page") {
+    throw new StopError("config_error", `ctx.scrollList: opts.to must be one of bottom | top | page (got ${JSON.stringify(to)})`);
+  }
+  const by = opts["by"];
+  if (by !== undefined && (typeof by !== "number" || !Number.isFinite(by) || by === 0)) {
+    throw new StopError("config_error", "ctx.scrollList: opts.by must be a non-zero finite number of pixels");
+  }
+  const settle = opts["settleMs"];
+  if (settle !== undefined && (typeof settle !== "number" || !Number.isFinite(settle) || settle < 0)) {
+    throw new StopError("config_error", "ctx.scrollList: opts.settleMs must be a number >= 0");
+  }
+}
+
+/** `ctx.expand` 的参数声明（count 形状/上限都校验；未知形状在 dry 期红）。 */
+export function validateExpandRequest(target: unknown, opts: unknown): void {
+  if (!isNonEmptyString(target)) {
+    throw new StopError("config_error", "ctx.expand: target must be a non-empty hint string (the load-more/expand control)");
+  }
+  if (!isObj(opts)) throw new StopError("config_error", "ctx.expand: opts must be an object like { count: { rows, fields? } }");
+  const count = opts["count"];
+  if (!isObj(count)) {
+    throw new StopError("config_error", "ctx.expand: opts.count is required — { rows: selector, fields? } or { selector }");
+  }
+  const hasRows = count["rows"] !== undefined;
+  const hasSelector = count["selector"] !== undefined;
+  if (hasRows === hasSelector) {
+    throw new StopError("config_error", "ctx.expand: opts.count must have EXACTLY one of rows | selector (got both or neither)");
+  }
+  if (hasRows && !isNonEmptyString(count["rows"])) {
+    throw new StopError("config_error", "ctx.expand: opts.count.rows must be a non-empty selector string");
+  }
+  if (hasSelector && !isNonEmptyString(count["selector"])) {
+    throw new StopError("config_error", "ctx.expand: opts.count.selector must be a non-empty selector string");
+  }
+  if (hasRows && count["fields"] !== undefined) {
+    if (!isObj(count["fields"])) throw new StopError("config_error", "ctx.expand: opts.count.fields must be an object of field -> selector");
+    for (const [k, v] of Object.entries(count["fields"])) {
+      if (!isNonEmptyString(k) || !isNonEmptyString(v)) {
+        throw new StopError("config_error", `ctx.expand: opts.count.fields[${JSON.stringify(k)}] must map a field name to a non-empty selector`);
+      }
+    }
+  }
+  for (const [key, min, max] of [["maxClicks", 1, 500], ["stableRounds", 1, 20]] as const) {
+    const v = opts[key];
+    if (v !== undefined && (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max)) {
+      throw new StopError("config_error", `ctx.expand: opts.${key} must be an integer in [${min}, ${max}] (got ${JSON.stringify(v)})`);
+    }
+  }
+  for (const [key, max] of [["settleMs", 60_000], ["timeoutMs", 600_000]] as const) {
+    const v = opts[key];
+    if (v !== undefined && (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > max)) {
+      throw new StopError("config_error", `ctx.expand: opts.${key} must be a number in [0, ${max}] (got ${JSON.stringify(v)})`);
+    }
+  }
+}
+
+/** `ctx.setRange` 的参数声明：value 二选一、数值有限、percent 在 [0,100]。 */
+export function validateSetRangeRequest(target: unknown, value: unknown, opts: unknown): void {
+  if (!isNonEmptyString(target)) {
+    throw new StopError("config_error", "ctx.setRange: target must be a non-empty hint string (the range/slider control)");
+  }
+  if (!isObj(value)) throw new StopError("config_error", "ctx.setRange: value must be { value: number } or { percent: 0..100 }");
+  const hasValue = value["value"] !== undefined;
+  const hasPercent = value["percent"] !== undefined;
+  if (hasValue === hasPercent) {
+    throw new StopError("config_error", "ctx.setRange: value must have EXACTLY one of {value} | {percent} (got both or neither)");
+  }
+  if (hasValue) {
+    const v = value["value"];
+    if (typeof v !== "number" || !Number.isFinite(v)) throw new StopError("config_error", "ctx.setRange: value.value must be a finite number");
+  } else {
+    const p = value["percent"];
+    if (typeof p !== "number" || !Number.isFinite(p) || p < 0 || p > 100) {
+      throw new StopError("config_error", "ctx.setRange: value.percent must be a number in [0, 100]");
+    }
+  }
+  if (opts === undefined) return;
+  if (!isObj(opts)) throw new StopError("config_error", "ctx.setRange: opts must be an object");
+  const tol = opts["tolerance"];
+  if (tol !== undefined && (typeof tol !== "number" || !Number.isFinite(tol) || tol < 0)) {
+    throw new StopError("config_error", "ctx.setRange: opts.tolerance must be a number >= 0");
+  }
+  const timeout = opts["timeoutMs"];
+  if (timeout !== undefined && (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout < 1 || timeout > 600_000)) {
+    throw new StopError("config_error", "ctx.setRange: opts.timeoutMs must be a number in [1, 600000]");
+  }
+}
+
 /** 把 `StepRequest` 的目标声明摊成 `RunOptions` 的字段。 */
 function targetOptions(act: TargetDecl | CommandDecl[]): {
   targetHint?: string | null; targetHints?: string[] | null; commands?: CommandDecl[] | null;
@@ -354,6 +540,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     deadline: deps.deadline ?? Number.POSITIVE_INFINITY,
   };
   const hosts = (pack.hosts ?? null) as string[] | null;
+  const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
   let currentUrl = "about:blank";
   let closed = false;
   /** flow 运行期的单一 PageState 事实源（不是 Playwright page 对象的替代）。 */
@@ -756,6 +943,141 @@ export function createCtx(deps: CtxDeps): Ctx {
     step: async (desc, req) => {
       assertAct(req);
       return runOneStep(desc, { ...req, when: req.when ?? null });
+    },
+    // ---- A3 列表/范围原语：各计 1 flow step；内部 click/滚动不占预算（由 maxClicks/timeoutMs 兜底）----
+    scrollList: async (target, opts = {}) => {
+      validateScrollListRequest(target, opts);
+      assertOpen("ctx.scrollList");
+      checkBudget();
+      await paceBeforeStep();
+      const p = await page();
+      budget.stepsUsed += 1;
+      const r = await deps.mw().scrollContainer(
+        p as never, target, opts.to ?? "bottom",
+        { ...(opts.by === undefined ? {} : { by: opts.by }), ...(opts.settleMs === undefined ? {} : { settleMs: opts.settleMs }) },
+      );
+      const result: ScrollListResult = {
+        ok: r.ok,
+        ...(r.scrollTop === undefined ? {} : { scrollTop: r.scrollTop }),
+        ...(r.scrollHeight === undefined ? {} : { scrollHeight: r.scrollHeight }),
+        ...(r.clientHeight === undefined ? {} : { clientHeight: r.clientHeight }),
+        ...(r.moved === undefined ? {} : { moved: r.moved }),
+        ...(r.stopCode === undefined ? {} : { stopCode: r.stopCode }),
+        ...(r.reason === undefined ? {} : { reason: r.reason }),
+      };
+      pushEvent(trace, {
+        call: "scrollList", desc: target, ok: result.ok,
+        args: { target, opts },
+        ...(result.stopCode === undefined ? {} : { stop_code: result.stopCode }),
+        result,
+      });
+      try { pageState.update(p, "interactive"); } catch { /* 记录面让位事实 */ }
+      return result;
+    },
+    expand: async (target, opts) => {
+      validateExpandRequest(target, opts);
+      assertOpen("ctx.expand");
+      checkBudget();
+      await paceBeforeStep();
+      const p = await page();
+      budget.stepsUsed += 1;
+      // 行数只用 rows/selector 计数（`count.fields` 仅形状校验，不参与 expand 判定）：直接 DOM 计数
+      // 而不走 ctx.read/extract——内部观察不应写成独立 trace 事件（否则 replay 要额外消费，
+      // extract 还有 maxItems 截断）。coverage.rows = 最终 DOM 行数。
+      const rowSelector = "rows" in opts.count ? opts.count.rows : opts.count.selector;
+      const maxClicks = opts.maxClicks ?? 20;
+      const stableRounds = opts.stableRounds ?? 2;
+      const settleMs = opts.settleMs ?? 800;
+      const timeoutMs = opts.timeoutMs ?? 60_000;
+      const started = Date.now();
+      const countRows = async (): Promise<number> => {
+        try {
+          const n = await p.evaluate!((sel: string) => {
+            const g = globalThis as unknown as { document: { querySelectorAll(s: string): { length: number } } };
+            return g.document.querySelectorAll(sel).length;
+          }, rowSelector);
+          return Number(n) || 0;
+        } catch (e) {
+          throw new StopError("config_error",
+            `ctx.expand: row selector ${JSON.stringify(rowSelector)} is invalid (${e instanceof Error ? e.message : String(e)})`);
+        }
+      };
+      const before = await countRows();
+      let after = before;
+      let clicks = 0;
+      let grew = false;
+      let stable = false;
+      let stableCount = 0;
+      let stopCode: string | undefined;
+      let reason: string | undefined;
+      let clickFailures = 0;
+      let lastClickError: string | undefined;
+      const mw = deps.mw();
+      while (clicks < maxClicks && Date.now() - started < timeoutMs) {
+        const act = await mw.actOnce(p as never, target, "click");
+        clicks += 1;
+        // 点击失败不立即判死：真站的"展开更多"在**到达展开上限**后会变成不可点
+        //（Maps See more 实测：行数稳定后按钮仍在、但点击 timeout）。此时以"行数
+        // 是否还在长"为准——等一拍重读，长出来的算异步到达，连续 stableRounds 轮
+        // 不再长才算稳定（plateau 是这次调用的目标，grew/clicks 仍如实暴露）。
+        if (!act.ok) {
+          clickFailures += 1;
+          lastClickError = act.reason ?? act.stopCode ?? "click failed";
+        }
+        if (settleMs > 0) await sleepMs(settleMs);
+        const now = await countRows();
+        if (now > after) { grew = true; stableCount = 0; } else { stableCount += 1; }
+        after = now;
+        if (stableCount >= stableRounds) { stable = true; break; }
+      }
+      if (!stable && stopCode === undefined) {
+        stopCode = "expand_not_stable";
+        reason = `stopped after ${clicks} click(s)/${Date.now() - started}ms without ${stableRounds} consecutive stable round(s) `
+          + `(maxClicks=${maxClicks}, timeoutMs=${timeoutMs}, rows=${after})`
+          + (clickFailures ? `; ${clickFailures} click(s) failed (last: ${lastClickError ?? "-"})` : "");
+      } else if (stable && clickFailures > 0) {
+        // 稳定但有点击失败：说明到顶后控件不可点（不是本调用的失败，但必须可解释）。
+        reason = `rows stabilized at ${after} after ${clicks} click(s); ${clickFailures} click(s) failed `
+          + `(last: ${lastClickError ?? "-"}) — the expand control no longer accepts clicks`;
+      }
+      const result: ExpandResult = {
+        ok: stable, clicks, before, after, grew, stable,
+        coverage: { rows: after },
+        ...(stopCode === undefined ? {} : { stopCode }),
+        ...(reason === undefined ? {} : { reason }),
+      };
+      pushEvent(trace, {
+        call: "expand", desc: target, ok: result.ok,
+        args: { target, opts },
+        ...(result.stopCode === undefined ? {} : { stop_code: result.stopCode }),
+        result,
+      });
+      try { pageState.update(p, "interactive"); } catch { /* 记录面让位事实 */ }
+      return result;
+    },
+    setRange: async (target, value, opts = {}) => {
+      validateSetRangeRequest(target, value, opts);
+      assertOpen("ctx.setRange");
+      checkBudget();
+      await paceBeforeStep();
+      const p = await page();
+      budget.stepsUsed += 1;
+      const r = await deps.mw().setRange(p as never, target, value, opts);
+      const result: SetRangeResult = {
+        ok: r.ok,
+        ...(r.achieved === undefined ? {} : { achieved: r.achieved }),
+        ...(r.strategy === undefined ? {} : { strategy: r.strategy }),
+        ...(r.stopCode === undefined ? {} : { stopCode: r.stopCode }),
+        ...(r.reason === undefined ? {} : { reason: r.reason }),
+      };
+      pushEvent(trace, {
+        call: "setRange", desc: target, ok: result.ok,
+        args: { target, value, opts },
+        ...(result.stopCode === undefined ? {} : { stop_code: result.stopCode }),
+        result,
+      });
+      try { pageState.update(p, "interactive"); } catch { /* 记录面让位事实 */ }
+      return result;
     },
     manual: async (desc, req) => {
       assertOpen(`ctx.manual(${JSON.stringify(desc)})`);

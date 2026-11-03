@@ -15,7 +15,7 @@
    走查工具三选一：探针链（每步一个 1 步微型应用：arrive+read 验证页面可达 / 登录与验证可处理 / 无风控拦截 / 数据在 DOM——探针 30 秒判死刑，好过全流程应用跑 5 轮）或 plan 面草稿（plan new → plan add --signal … → plan check --probe 只读预检 → plan run 真执行）或 walk 模式（amber run <id> --walk 一个临时应用单会话按真实步序 act→read 串完整流程：步声明的 url 与当前页同页就不重导航、SPA 状态跨步保持，跨页显式 url 仍导航——适合复现「只在演进状态出现」的问题）；
 ③ 规划应用：提槽 + done 双向清单——done 四形态：正向锚（url_* / css_*）、否定配 exists（裸 not 在空池/重渲染瞬间空洞成立）、多动作后判（两连击的第一击是中间态，不算完成）、状态前进自检（信号跟着页面真前进，不是恒真）；
    值只认 slot：fill/select/drag 的值来自任务输入或数据源（缺值如实 needs_value，不猜）；采样与分块：虚拟列表按视口采样（池里只有已渲染的行，滚动/翻页分块取全）、长流程分块成多个短应用、多源双腿（meta.sources 数据腿 + 浏览器腿互核）；
-   候选窗口有界：每步只取 40（宽扫 120）个候选并按当前视口分桶（chrome/viewport 优先，内容优先级见 amber schema ctx），窗口外不等于页面上没有——要穷举列表用滚动/展开分块取证，引擎不自动滚动；hint 用完整 label（≤200）匹配、aria-label 是 label 别名；要回退 A2 前的主内容优先排序在 meta.policy 写 candidate_priority: "main-first"（缺省 bucketed）；
+   候选窗口有界：每步只取 40（宽扫 120）个候选并按当前视口分桶（chrome/viewport 优先，内容优先级见 amber schema ctx），窗口外不等于页面上没有——要穷举列表用 ctx.scrollList/ctx.expand 分块取证（各计 1 flow step，expand 内部点击不占预算；范围控件用 ctx.setRange），引擎不自动滚动；hint 用完整 label（≤200）匹配、aria-label 是 label 别名；要回退 A2 前的主内容优先排序在 meta.policy 写 candidate_priority: "main-first"（缺省 bucketed）；
 ④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列——stderr 的两条信号 lint（裸 not / any 含 not(exists)）当场改掉再进 ⑤；
 ⑤ 真跑留证：amber run <id> --trace；失败先看 trace 的 stopCode/reason——reason 自带池快照判别（「目标不在页面」还是「候选在而闸门拒/闭集约束」）与决策源降级原因；被杀有 run-killed.json 部分证据；
 ⑥ 失败取证判别：最小取证探针先区分引擎缺陷 / 产品事实 / 任务口径再动手——A/B（单变量重跑）、对照（--provider 换决策源或 rules-only 消融）、双腿取数（数据腿核产品事实）；判别不了就上报，别靠反复重跑收敛。
@@ -265,6 +265,41 @@ export async function flow(ctx) {
   **同为 `config_error`，抛出层决定计费**（08 实测）：cli 形式声明校验在①扣费**前** throw（免费）；适配器 toolRunner 内拒绝（如 stdio+retries）在扣费**后**返回（贵一步）。按"动作数"估①必翻车——守卫跳过、被拒声明都计费。
 - 脚本拿不到 `page` / locator、模型文本或分数，只能看 `{ok, stopCode, reason?, evidence}`。
 - 退出码与 Agent 视图（`amber run --json`）：`status` = `passed | partial | failed | blocked | needs_human | dry | invalid | infra_error`；`verified` 只在完整运行且所有不变量成立时为 true。
+
+### 4.6 列表展开与范围控件（A3 三原语）
+
+真实列表页与筛选面板需要三种"窗口外操作"，引擎把它们收敛成三个**结构化、可计费、失败不假装成功**的原语（内部 click/滚动不占 flow 预算；每个原语整体计 1 步，受 `--max-steps` 约束）：
+
+```js
+// 滚动列表：目标自身或最近可滚动祖先；纯 DOM scrollTop，不做滚轮模拟、不自动滚其它区域。
+// 目标可以是列表里的交互元素（最近可滚动祖先即容器），也可以直接是容器本身（如 div[role="feed"]）。
+const s = await ctx.scrollList("Feed list", { to: "bottom" });          // 或 { to:"top"|"page" } / { by: 800 }
+// s = { ok, scrollTop, scrollHeight, clientHeight, moved, stopCode?, reason? }
+// 找不到可滚动容器 = ok:false + stopCode:"not_scrollable"；目标解析不到 = "target_not_found"
+
+// 列表展开：反复点"加载更多/展开"，直到行数连续 stableRounds 轮不增长
+const e = await ctx.expand("Load more", {
+  count: { rows: "#list li", fields: { text: "." } },   // 或 { selector: "#list li" }
+  maxClicks: 20, stableRounds: 2, settleMs: 800, timeoutMs: 60000,
+});
+// e = { ok, clicks, before, after, grew, stable, coverage:{rows}, stopCode?, reason? }
+// ok = 已到稳定 plateau（行数连续 stableRounds 轮不增长），此时 grew/clicks 如实暴露；
+// 到顶未稳定 = ok:false + "expand_not_stable"（仍带完整指标）。
+// 点击失败不会直接判死：真站"展开到顶"后按钮常仍在但不可点（Maps See more 实测）——
+// 失败后等一拍重读行数，长出来的算异步到达，连续 stableRounds 轮不长才算稳定。
+
+// 范围控件：fill（原生 range）→ keyboard（ARIA 手柄 Home/ArrowRight）→ pointer（自绘手柄，0×0 用最近有尺寸祖先）
+const r = await ctx.setRange("Volume", { value: 42 });                  // 或 { percent: 25 }
+// r = { ok, achieved?, strategy:"fill"|"keyboard"|"pointer", stopCode?, reason? }
+// 三道都设不了 = ok:false + "slider_not_settable"（reason 附已试策略/bbox/当前值）
+```
+
+- **计费**：三个原语各计 1 个 flow step；`expand` 内部的点击、`scrollList` 的滚动都**不**占预算，由 `maxClicks`/`timeoutMs` 兜底（`ctx.budget.stepsUsed` 每调用 +1）。
+- **参数校验在 dry 期就红**：`count` 必须恰好一个 `rows|selector`、`maxClicks/stableRounds` 必须正整数、`to` 必须 `bottom|top|page`、`value` 必须恰好一个 `value|percent`——写错在 `amber apps check` 就报 `config_error`，不会留到真跑。`count.fields` 只做**形状校验**：expand 只用 `rows/selector` 数行数（内部 DOM `querySelectorAll` 计数，不写独立 trace 事件、不产生 read/extract 事件，因此 replay 无需额外消费），字段投影不参与稳定判定。
+- **命令面扩展**：`ctx.command("scroll", sel, { to: "bottom" })` 把"滚容器到方向"作为命令闭集的一项（旧 `ctx.command("scroll", sel)` 仍是"把目标滚入视口"，逐字节不变）；`setRange` 不新增 command op。
+- **trace/replay**：三原语的调用参数记入 trace `args`；重放按录制值回放结果，参数不一致直接 `trace_mismatch`（不重新决策）；dry 期是确定性桩（`expand` 返回全零指标、`scrollList/setRange` 返回 `{ok:true}`）。
+- **`expand` 的 plateau 与点击失败**：`ok:true` 只代表"行数已连续 `stableRounds` 轮不增长"，`grew/clicks` 说明长没长、点了几次；到顶后控件不可点不算失败（`reason` 会记 click 失败次数）。只有"点了 `maxClicks` 次/超时仍未稳定"才是 `expand_not_stable`。
+- **失败语义**：全部是**返回结构化结果**而不是抛裸栈；脚本可以据此分支或 `ctx.fail(...)`。真站上"展开了但行数不动/滑到了但值不变"这类现象必须按 `ok/stopCode` 处理，不要假设动作一定成功。
 
 ## 5. 站点面：`meta.site`
 

@@ -5,9 +5,16 @@
  * 纪律：**只重放、不猜**——调用序列、说明、URL 与 trace 不一致就结构化停因
  * （`trace_mismatch`），版本/输入不一致由 `replayCompatibility` 在进入前拒绝。
  */
-import { StopError, type Ctx, type CtxBudget, type SourceObservationView, type StepResult } from "./ctx.ts";
+import {
+  StopError, validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
+  type Ctx, type CtxBudget, type ExpandOptions, type ExpandResult,
+  type RangeValue, type ScrollListOptions, type ScrollListResult,
+  type SetRangeOptions, type SetRangeResult,
+  type SourceObservationView, type StepResult,
+} from "./ctx.ts";
 import { createKit } from "./kit.ts";
 import type { TraceCall, TraceEvent, AppTrace } from "./trace.ts";
+import { canonicalJson } from "./trace.ts";
 
 export interface ReplayCtxDeps {
   pack: { id: string; label?: string; goal: string; hosts?: string[] | null; invariants?: Array<Record<string, unknown>> };
@@ -77,6 +84,22 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
     }
   };
 
+  /** A3 原语重放的参数一致性：录制 args 与脚本调用逐字段比对，不一致即 trace_mismatch。 */
+  const assertPrimitiveArgs = (ev: TraceEvent, want: unknown): void => {
+    const got = ev.args;
+    if (canonicalJson(got) !== canonicalJson(want)) {
+      throw new StopError("trace_mismatch",
+        `replay: ${String(ev.call)} args differ at event #${ev.i}: recorded ${canonicalJson(got)} ≠ script ${canonicalJson(want)}`
+        + "（重放不重新决策：改参数等于另一条流程，请重新录制）");
+    }
+  };
+
+  /** 按录制值还原原语结果（不造假：ok/stopCode/指标全部来自录制事件）。 */
+  const primitiveResult = <T extends { ok: boolean }>(ev: TraceEvent): T => {
+    const rec = isObj(ev.result) ? ev.result : {};
+    return { ...(rec as object), ok: ev.ok === true } as T;
+  };
+
   const kitCtx = createKit();
   const ctx: Ctx = {
     judge: kitCtx.judge,
@@ -112,6 +135,28 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       if (typeof ev.url === "string" && ev.url) currentUrl = ev.url;
       consume();
       return stepResult(ev);
+    },
+    // A3 原语重放：参数必须与录制一致（trace_mismatch），结果按录制值回放，不重新决策。
+    scrollList: async (target, opts = {}) => {
+      validateScrollListRequest(target, opts);
+      const ev = nextEvent("scrollList", { desc: target });
+      assertPrimitiveArgs(ev, { target, opts });
+      consume();
+      return primitiveResult<ScrollListResult>(ev);
+    },
+    expand: async (target, opts) => {
+      validateExpandRequest(target, opts);
+      const ev = nextEvent("expand", { desc: target });
+      assertPrimitiveArgs(ev, { target, opts });
+      consume();
+      return primitiveResult<ExpandResult>(ev);
+    },
+    setRange: async (target, value: RangeValue, opts: SetRangeOptions = {}) => {
+      validateSetRangeRequest(target, value, opts);
+      const ev = nextEvent("setRange", { desc: target });
+      assertPrimitiveArgs(ev, { target, value, opts });
+      consume();
+      return primitiveResult<SetRangeResult>(ev);
     },
     manual: async (desc, req) => {
       const ev = nextEvent("manual", { desc });

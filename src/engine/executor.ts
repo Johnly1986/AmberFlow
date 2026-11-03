@@ -93,6 +93,7 @@ import {
   type RouterLike,
 } from "../model/model.ts";
 import { decisionProviderOrNull, layaProvider, type DecisionProvider } from "../model/decision-provider.ts";
+import { applyRange, type RangeOptions, type RangeOutcome, type RangeValue } from "./range.ts";
 import {
   DESTRUCTIVE_PATTERNS,
   FILLER_TOKENS,
@@ -2048,6 +2049,279 @@ export class BrowserMiddleware {
     return ordered;
   }
 
+  /* -- A3 list/range primitives ------------------------------------------- */
+
+  /** 解析一个 hint 目标到单个可动作元素（actOnce/scrollContainer/setRange 共用）。 */
+  private async _resolveOne(
+    page: AnyPage, target: string, op: string,
+  ): Promise<
+    | { ref: string; el: Elem | null; loc: AnyLoc; poolSize: number; fallback: boolean; cleanup?: () => Promise<void> }
+    | { error: string; poolSize: number }
+  > {
+    const elems = await extractElements(page, true, undefined, { candidatePriority: this.candidatePriority });
+    const poolSize = Object.keys(elems).length;
+    if (typeof target !== "string" || !target.trim()) {
+      return { error: "target must be a non-empty hint string (path_id / bare label / [data-test=…])", poolSize };
+    }
+    const refs = this.resolveCommandRef(target, elems, op, null);
+    if (refs.length) {
+      const ref = refs[0]!;
+      const el = elems[ref]!;
+      const loc = await this._locatorFor(page, el);
+      if (loc !== null) return { ref, el, loc, poolSize, fallback: false };
+    }
+    // A3 回退面：目标可能是**池外元素**——典型是 0×0 的自绘 slider 手柄（提取按可见盒过滤，
+    // 它永远进不了池），或滚轮容器内的不可见控件。这里做一次 DOM 侧候选收集（含 0×0），
+    // 用同一套 hint 语义（hintMatch/可行动优先排序）解析，并给命中的元素打临时探针属性，
+    // 让 locator 能稳定指到它；调用方用完负责 cleanup。
+    const fallback = await this._domFallbackResolve(page, target, op);
+    if (fallback === null) {
+      return { error: `target ${JSON.stringify(target)} matched nothing in a pool of ${poolSize} element(s)`, poolSize };
+    }
+    return { ref: fallback.ref, el: null, loc: fallback.loc, poolSize, fallback: true, cleanup: fallback.cleanup };
+  }
+
+  /**
+   * A3 池外回退解析：DOM 侧收集**全部**匹配选择器的元素（不按可见性过滤），用同一套
+   * hint 语义（rules.hintMatch / resolveCommandRef 的可行动优先）挑一个，给它打一个带
+   * 批次的临时属性 `data-af-probe="<批次>-<序号>"`，返回可重复求值的 locator。
+   */
+  private async _domFallbackResolve(
+    page: AnyPage, target: string, op: string,
+  ): Promise<{ ref: string; loc: AnyLoc; cleanup: () => Promise<void> } | null> {
+    // A3 修正：scrollList 的目标常常是**非交互容器**（`div[role="feed"]`、`main`…），
+    // 它们不在 INTERACTIVE_ALL 扫描面里。滚动语义只需要"能定位到容器"，所以 scroll
+    // 操作把回退面扩到常见容器角色（仍只在池解析失败时走；正常路径零变化）。
+    const fallbackSel = op === "scroll"
+      ? `${INTERACTIVE_ALL}, [role='feed'], [role='list'], [role='main'], [role='region'], [role='article'], [role='listitem'], main`
+      : INTERACTIVE_ALL;
+    const token = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+    let rows: Array<Record<string, unknown>> = [];
+    try {
+      rows = (await page.evaluate((arg: { sel: string; tok: string }) => {
+        const g = globalThis as unknown as {
+          document: { querySelectorAll(s: string): ArrayLike<any> };
+        };
+        const sel = arg.sel, tok = arg.tok;
+        const out: Array<Record<string, unknown>> = [];
+        const all = g.document.querySelectorAll(sel);
+        for (let i = 0; i < all.length; i++) {
+          const e = all[i];
+          const tag = String(e.tagName || "").toLowerCase();
+          const label = String(e.getAttribute("aria-label") || e.getAttribute("title") || e.innerText
+            || e.getAttribute("placeholder") || e.getAttribute("value") || "").replace(/\s+/g, " ").trim().slice(0, 200);
+          e.setAttribute("data-af-probe", tok + "-" + i);
+          out.push({
+            i, tag, label,
+            role: String(e.getAttribute("role") || "").toLowerCase(),
+            id: String(e.id || ""),
+            dt: String(e.getAttribute("data-test") || ""),
+            type: String(e.getAttribute("type") || "").toLowerCase(),
+            draggable: String(e.getAttribute("draggable") || "").toLowerCase() === "true",
+          });
+        }
+        return out;
+      }, { sel: fallbackSel, tok: token })) as Array<Record<string, unknown>>;
+    } catch {
+      rows = [];
+    }
+    const cleanup = async (): Promise<void> => {
+      try {
+        await page.evaluate((tok: string) => {
+          const g = globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<any> } };
+          const all = g.document.querySelectorAll(`[data-af-probe^="${tok}-"]`);
+          for (let i = 0; i < all.length; i++) all[i].removeAttribute("data-af-probe");
+        }, token);
+      } catch { /* 清理失败不影响结论 */ }
+    };
+    if (!rows.length) { await cleanup(); return null; }
+    const synthetic: ElemPool = {};
+    for (const r of rows) {
+      const idx = Number(r["i"]);
+      synthetic[`p${idx}`] = {
+        ref: `p${idx}`, tag: String(r["tag"] ?? ""), label: String(r["label"] ?? "").slice(0, 40),
+        full_label: String(r["label"] ?? "").slice(0, 200),
+        role: String(r["role"] ?? ""), id: String(r["id"] ?? ""), data_test: String(r["dt"] ?? ""),
+        input_type: String(r["type"] ?? ""),
+        ...(r["draggable"] === true ? { draggable: true } : {}),
+      } as Elem;
+    }
+    const refs = this.resolveCommandRef(target, synthetic, op, null);
+    if (!refs.length) { await cleanup(); return null; }
+    const ref = refs[0]!;
+    const idx = ref.slice(1);
+    return {
+      ref,
+      loc: page.locator(`[data-af-probe="${token}-${idx}"]`),
+      cleanup,
+    };
+  }
+
+  /**
+   * A3 `mw.actOnce`：**单动作**解析 + 执行（不评估 done、不占 flow 预算、不写 trace）。
+   *
+   * 列表展开/滚动这类原语内部要重复"点一次"，每次点击都走完整 `run()` 会重新判完成、
+   * 重新承担子目标停因，既贵又语义错位。actOnce 只做"解析一个可动作候选并执行一次"，
+   * 证据口径与 A1 的动作 trace 一致（stale_ref/needs_value/action_failed… 都是结构化结果）。
+   */
+  async actOnce(
+    page: AnyPage, target: string, op: "click" | "check" | "fill" | "select" | "scroll" | "drag" = "click",
+    bind?: { value: unknown; byValue?: boolean } | null,
+  ): Promise<{ ok: boolean; how?: string; ref?: string; changed?: boolean; stopCode?: string; reason?: string }> {
+    const resolved = await this._resolveOne(page, target, op);
+    if ("error" in resolved) return { ok: false, stopCode: "target_not_found", reason: resolved.error };
+    const { ref, el, loc, cleanup } = resolved;
+    const pre = await this.snapshot(page);
+    let how: string | null = null;
+    let arg: unknown = null;
+    try {
+      if (el === null) {
+        // 池外回退（如 0×0 手柄）：直接对探针 locator 点一次（单动作原语的通用兜底）。
+        await firstLoc(loc).click({ timeout: 5000 });
+        how = "clicked";
+      } else if (op === "click" || op === "check") {
+        [how, arg] = await this._clickOnly(page, el);
+      } else if (op === "scroll") {
+        [how, arg] = await this._executeElement(page, el, {}, null, "scroll");
+      } else {
+        [how, arg] = await this._executeElement(page, el,
+          (bind?.value === undefined ? {} : { value: bind.value }), bind ?? null, op);
+      }
+    } catch (e) {
+      if (cleanup !== undefined) await cleanup();
+      return { ok: false, ref, stopCode: "action_failed", reason: describeActionError(e) };
+    }
+    if (cleanup !== undefined) await cleanup();
+    const ok = how !== "stale_ref" && how !== "needs_value" && how !== "action_failed"
+      && how !== "action_unsupported" && how !== null;
+    if (!ok) return { ok: false, ref, how: String(how), stopCode: String(how ?? "action_failed"), reason: describeActionError(arg) };
+    const post = await this.snapshot(page);
+    void loc;
+    return { ok: true, how: String(how), ref, changed: JSON.stringify(pre) !== JSON.stringify(post) };
+  }
+
+  /** A3：把元素（或最近可滚动祖先）滚到 to/by；纯 DOM scrollTop，不做滚轮模拟。 */
+  private async _scrollContainerForElement(
+    page: AnyPage, el: Elem, to: "bottom" | "top" | "page", by?: number, settleMs = 150,
+  ): Promise<{ ok: boolean; scrollTop?: number; scrollHeight?: number; clientHeight?: number; moved?: boolean; stopCode?: string; reason?: string }> {
+    const loc = await this._locatorFor(page, el);
+    if (loc === null) return { ok: false, stopCode: "stale_ref", reason: "the resolved element could not be located anymore" };
+    return this._scrollWithLoc(page, loc, to, by, settleMs);
+  }
+
+  /** A3：对一个已定位的容器执行滚动（scrollContainer 的池外回退面也走它）。 */
+  private async _scrollWithLoc(
+    page: AnyPage, loc: AnyLoc, to: "bottom" | "top" | "page", by?: number, settleMs = 150,
+  ): Promise<{ ok: boolean; scrollTop?: number; scrollHeight?: number; clientHeight?: number; moved?: boolean; stopCode?: string; reason?: string }> {
+    let box: Record<string, unknown> | null = null;
+    try {
+      box = await firstLoc(loc).evaluate((node: any, arg: { to: string; by?: number }) => {
+        // `document`/`getComputedStyle` 跑在浏览器里，不在本仓 TS lib 面上：只就地声明用到的形状
+        // （类型注释在 Node strip-types 下被擦除，函数源码进浏览器仍可执行）。
+        const g = globalThis as unknown as {
+          document: { body: unknown; documentElement: unknown };
+          getComputedStyle: (x: any) => { overflowY: string; overflowX: string };
+        };
+        const doc = g.document;
+        const scrollable = (x: any) => {
+          if (!x || x === doc.body || x === doc.documentElement) return false;
+          const cs = g.getComputedStyle(x);
+          const oy = cs.overflowY, ox = cs.overflowX;
+          const canY = (oy === "auto" || oy === "scroll" || oy === "overlay") && x.scrollHeight > x.clientHeight + 2;
+          const canX = (ox === "auto" || ox === "scroll" || ox === "overlay") && x.scrollWidth > x.clientWidth + 2;
+          return canY || canX;
+        };
+        let t: any = node;
+        if (!scrollable(t)) {
+          let p = node.parentElement;
+          for (let k = 0; k < 32 && p; k++, p = p.parentElement) {
+            if (scrollable(p)) { t = p; break; }
+            if (p === doc.body) break;
+          }
+        }
+        if (!t || !scrollable(t)) return { ok: false, reason: "no scrollable container found on the element or its ancestors" };
+        const before = t.scrollTop;
+        const max = Math.max(0, t.scrollHeight - t.clientHeight);
+        let next = before;
+        if (typeof arg.by === "number") next = before + arg.by;
+        else if (arg.to === "bottom") next = max;
+        else if (arg.to === "top") next = 0;
+        else if (arg.to === "page") next = Math.min(max, before + Math.max(1, Math.round(t.clientHeight * 0.9)));
+        next = Math.max(0, Math.min(max, next));
+        t.scrollTop = next;
+        return { ok: true, before, scrollTop: t.scrollTop, scrollHeight: t.scrollHeight, clientHeight: t.clientHeight };
+      }, { to, ...(by === undefined ? {} : { by }) }) as Record<string, unknown> | null;
+    } catch (e) {
+      return { ok: false, stopCode: "not_scrollable", reason: describeActionError(e) };
+    }
+    if (box === null || box["ok"] !== true) {
+      return { ok: false, stopCode: "not_scrollable", reason: String(box?.["reason"] ?? "scroll failed") };
+    }
+    if (settleMs > 0) await sleep(settleMs);
+    const scrollTop = Number(box["scrollTop"] ?? 0);
+    const before = Number(box["before"] ?? 0);
+    return {
+      ok: true, scrollTop,
+      scrollHeight: Number(box["scrollHeight"] ?? 0),
+      clientHeight: Number(box["clientHeight"] ?? 0),
+      moved: scrollTop !== before,
+    };
+  }
+
+  /**
+   * A3 `mw.scrollContainer`：解析目标 hint → 元素自身或最近可滚动祖先 → 滚到 to/by。
+   * 找不到可滚动容器 = 结构化 `not_scrollable`（不是静默无操作）。
+   */
+  async scrollContainer(
+    page: AnyPage, target: string, to: "bottom" | "top" | "page" = "bottom",
+    opts?: { by?: number; settleMs?: number },
+  ): Promise<{ ok: boolean; scrollTop?: number; scrollHeight?: number; clientHeight?: number; moved?: boolean; stopCode?: string; reason?: string }> {
+    const resolved = await this._resolveOne(page, target, "scroll");
+    if ("error" in resolved) return { ok: false, stopCode: "target_not_found", reason: resolved.error };
+    if (resolved.el !== null) {
+      return this._scrollContainerForElement(page, resolved.el, to, opts?.by, opts?.settleMs ?? 150);
+    }
+    try {
+      return await this._scrollWithLoc(page, resolved.loc, to, opts?.by, opts?.settleMs ?? 150);
+    } finally {
+      if (resolved.cleanup !== undefined) await resolved.cleanup();
+    }
+  }
+
+  /**
+   * A3 `mw.setRange`：解析目标 hint → 定位 → `range.ts` 三策略（fill/keyboard/pointer）。
+   * 目标不存在 = `target_not_found`；存在但设不了 = `slider_not_settable`（绝不假装成功）。
+   */
+  async setRange(
+    page: AnyPage, target: string, value: RangeValue, opts?: RangeOptions,
+  ): Promise<RangeOutcome> {
+    // 真站实测：筛选面板是异步渲染的，刚打开时 DOM 会在一次 re-render 中换掉 slider 节点，
+    // 回退解析打的临时探针属性会随旧节点消失（readState = null）。重解析一次即可恢复——
+    // 这是**解析面**的瞬态，不是"设不了"；只有第二次仍读不到才按 slider_not_settable 报。
+    let last: RangeOutcome | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await sleep(300);
+      const resolved = await this._resolveOne(page, target, "slider");
+      if ("error" in resolved) {
+        const isSliderish = /matched nothing/i.test(resolved.error);
+        last = {
+          ok: false,
+          stopCode: isSliderish ? "target_not_found" : "stale_ref",
+          reason: resolved.error,
+        };
+        continue;
+      }
+      try {
+        const r = await applyRange(page, resolved.loc, value, opts);
+        if (r.ok || !/cannot read the slider state/i.test(String(r.reason ?? ""))) return r;
+        last = r;
+      } finally {
+        if (resolved.cleanup !== undefined) await resolved.cleanup();
+      }
+    }
+    return last ?? { ok: false, stopCode: "slider_not_settable", reason: "slider state could not be read" };
+  }
+
   /* -- the loop ------------------------------------------------------------ */
 
   /**
@@ -3159,9 +3433,18 @@ export class BrowserMiddleware {
           // never filled — `_executeElement`'s input branch would return
           // needs_value otherwise. scroll 是 viewport 语义，必须走专用分支。
           if (isScrollCommand || isDragCommand) {
-            [how, arg] = await this._executeElement(pg, el, slots,
-              commandMode ? { value: commandValue, byValue: commandByValue } : null,
-              isDragCommand ? "drag" : "scroll");
+            // A3：`scroll` 命令可带方向原语 `to`（ctx.command("scroll", sel, {to:"bottom"})）——
+            // 语义是"滚动**容器**到方向"，与旧的"把目标滚入视口"不同；旧调用（无 to）逐字节不变。
+            const scrollTo = isScrollCommand ? cmdPick?.cmd.to : undefined;
+            if (scrollTo !== undefined) {
+              const sr = await this._scrollContainerForElement(pg, el, scrollTo);
+              how = sr.ok ? "scrolled" : "action_failed";
+              arg = sr.ok ? sr.scrollTop : (sr.stopCode ?? "not_scrollable");
+            } else {
+              [how, arg] = await this._executeElement(pg, el, slots,
+                commandMode ? { value: commandValue, byValue: commandByValue } : null,
+                isDragCommand ? "drag" : "scroll");
+            }
           } else if (!this._isTyping(el)) {
             [how, arg] = await this._clickOnly(pg, el);
           } else {

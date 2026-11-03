@@ -13,6 +13,12 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 
 ### 新增
 
+- **A3 列表展开与范围控件三原语**：`ctx.scrollList(target, {to|by})`（滚目标/最近可滚动祖先，纯 DOM
+  scrollTop）、`ctx.expand(target, {count, maxClicks, stableRounds, settleMs, timeoutMs})`（点"加载更多"
+  到行数稳定，内部点击不占 flow 预算）、`ctx.setRange(target, {value|percent})`（fill→keyboard→pointer
+  三策略，0×0 手柄用最近有尺寸祖先 bbox）。三者各计 1 flow step，失败是结构化结果
+  （`not_scrollable` / `expand_not_stable` / `slider_not_settable`），dry 有确定性桩且参数校验真做，
+  trace 记 `args` 供重放逐字比对；`ctx.command("scroll", sel, {to})` 扩展为滚容器到方向（旧调用不变）。
 - 应用唯一格式：`$AMBERFLOW_HOME/apps/<id>/app.mjs` 的 `meta` + `flow(ctx)` 脚本；配套
   `amber apps new/list/show/check/explain/path/remove` 命令面，`apps check` / `apps explain`
   只做加载与 dry 调用序列校验（不开浏览器、不调模型）。

@@ -2209,9 +2209,13 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   // 08-C：flow 路径的进程步（run/dangerous）同样进 step_traces——记录层一直有事件
   // （ctx.ts runTool/声明形式各有 pushEvent），缺的只是这里的投影准入；成功步嵌套
   // result 无 stop_code（B6 口径），失败行带 stop_code，作者不再只能靠脚本自 log。
+  // A3：三原语（scrollList/expand/setRange）各计 1 个 flow step——投影口径必须与
+  // `ctx.budget.stepsUsed` 一致，否则"用了预算的 flow"会在产物里显示成 0 step。
+  const FLOW_STEP_CALLS = new Set(["step", "arrive", "scrollList", "expand", "setRange"]);
   const stepEvents = trace.events.filter((e) =>
-    e.call === "step" || e.call === "arrive" || e.call === "manual" || e.call === "run" || e.call === "dangerous");
-  const stepCount = trace.events.filter((e) => e.call === "step" || e.call === "arrive").length;
+    e.call === "step" || e.call === "arrive" || e.call === "manual" || e.call === "run" || e.call === "dangerous"
+    || e.call === "scrollList" || e.call === "expand" || e.call === "setRange");
+  const stepCount = trace.events.filter((e) => FLOW_STEP_CALLS.has(e.call)).length;
   const manualSteps = trace.events.filter((e) => e.call === "manual").map((e, i) => ({
     index: i,
     desc: e.desc ?? "",
@@ -2293,7 +2297,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     slots: maskSecretSlots(slots, secretKeys),
     // 步数只计 step/arrive（预算面）；只读观察调用免费不占预算（F10 口径），
     // 但审计上照样发生了——一行标注，避免「步骤 0」被误读成「什么都没跑」。
-    completed: `${trace.events.filter((e) => e.call === "step" || e.call === "arrive").length} step(s) via flow(ctx)`
+    completed: `${trace.events.filter((e) => FLOW_STEP_CALLS.has(e.call)).length} step(s) via flow(ctx)`
       + `${(() => {
         const free = trace.events.filter((e) =>
           e.call === "read" || e.call === "extract" || e.call === "holds" || e.call === "waitFor").length;

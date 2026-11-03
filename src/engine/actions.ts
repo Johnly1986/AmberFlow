@@ -56,6 +56,11 @@ export interface CommandDecl {
    * 全部要求声明点名；没有"看着像就填"这一档。
    */
   value?: ValueBinding;
+  /**
+   * A3：`scroll` 的方向原语（`bottom | top | page`；缺省 = 旧语义"滚入视口"）。
+   * 只有 scroll 认它——其它 op 带 `to` 在加载期红（validateCommands）。
+   */
+  to?: "bottom" | "top" | "page";
 }
 
 /** 实例化出的一条可选项：声明 + 当次池里的落点。 */
@@ -116,6 +121,15 @@ export function validateCommands(
     const target = cmd["target"];
     if (typeof target !== "string" || target.trim() === "") {
       problems.push(`${at}: op '${op}' needs a target (a hint-grammar string resolved by hintMatch)`);
+    }
+    // A3：`to` 是 scroll 的方向原语；其它 op 带 to 是声明错误（不静默忽略）。
+    const to = cmd["to"];
+    if (to !== undefined) {
+      if (op !== "scroll") {
+        problems.push(`${at}: op '${op}' takes no 'to' (only scroll accepts {to: "bottom"|"top"|"page"})`);
+      } else if (to !== "bottom" && to !== "top" && to !== "page") {
+        problems.push(`${at}: scroll.to must be one of bottom | top | page (got ${JSON.stringify(to)})`);
+      }
     }
     const value = cmd["value"];
     if (VALUE_OPS.has(op)) {

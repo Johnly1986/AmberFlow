@@ -22,7 +22,11 @@ import { getAppAdapter, listAppAdapters, requireAppAdapter } from "./app-adapter
 import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, ValueError } from "../data/datasource.ts";
 import {
   normalizeCommandIds, resolveCtxUrl, StopError,
-  type Ctx, type CtxBudget, type SourceObservationView, type StepRequest, type StepResult,
+  validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
+  type Ctx, type CtxBudget, type ExpandOptions, type ExpandResult,
+  type RangeValue, type ScrollListOptions, type ScrollListResult,
+  type SetRangeOptions, type SetRangeResult,
+  type SourceObservationView, type StepRequest, type StepResult,
 } from "./ctx.ts";
 
 export interface DryCtxDeps {
@@ -201,6 +205,33 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       if (effectiveUrl !== undefined) assertHost(effectiveUrl, `ctx.step(${JSON.stringify(desc)})`);
       if (req.url !== undefined) currentUrl = resolveCtxUrl(req.url);
       return recordStep(desc, req.done, true, undefined, req.id, req.forceAct === true);
+    },
+    // A3 dry 桩：**参数校验真做**（未知形状/非法值在 dry 期红），动作与结果按文档形状确定性模拟。
+    scrollList: async (target, opts = {}) => {
+      validateScrollListRequest(target, opts);
+      checkBudget();
+      budget.stepsUsed += 1;
+      const result: ScrollListResult = { ok: true };
+      pushEvent(trace, { call: "scrollList", desc: target, ok: true, args: { target, opts }, result });
+      return result;
+    },
+    expand: async (target, opts) => {
+      validateExpandRequest(target, opts);
+      checkBudget();
+      budget.stepsUsed += 1;
+      const result: ExpandResult = {
+        ok: true, clicks: 0, before: 0, after: 0, grew: false, stable: true, coverage: { rows: 0 },
+      };
+      pushEvent(trace, { call: "expand", desc: target, ok: true, args: { target, opts }, result });
+      return result;
+    },
+    setRange: async (target, value, opts = {}) => {
+      validateSetRangeRequest(target, value, opts);
+      checkBudget();
+      budget.stepsUsed += 1;
+      const result: SetRangeResult = { ok: true };
+      pushEvent(trace, { call: "setRange", desc: target, ok: true, args: { target, value, opts }, result });
+      return result;
     },
     manual: async (desc, req) => {
       assertNotDone(`ctx.manual(${JSON.stringify(desc)})`);

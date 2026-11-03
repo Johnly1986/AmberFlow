@@ -25,6 +25,11 @@ export interface CommandDecl {
   op: string;
   target?: string;
   value?: ValueBinding;
+  /**
+   * A3：`scroll` 的**方向原语**（`ctx.command("scroll", sel, { to: "bottom" })`）。
+   * 缺省 = 旧语义（把目标滚入视口）。只有 scroll 认它；其它 op 带 to 在加载期红。
+   */
+  to?: "bottom" | "top" | "page";
 }
 
 /** 值绑定四来源（与 `bindings.ts` 的 `ValueBinding` 同形）。 */
@@ -117,7 +122,16 @@ export interface Kit {
   hint(hint: string): TargetDecl;
   hints(...hints: string[]): TargetDecl;
   /** 命令闭集的一项；`id` 可省略（ctx 会补稳定名），需要稳定审计名时自己给。 */
-  command(op: string, target?: string, value?: ValueBinding, id?: string): CommandDecl;
+  /**
+   * A3：第三参可以是值绑定，也可以是 scroll 的方向 `{ to: "bottom" | "top" | "page" }`；
+   * 旧调用（值绑定/省略）语义不变。
+   */
+  command(
+    op: string,
+    target?: string,
+    value?: ValueBinding | { to: "bottom" | "top" | "page" },
+    id?: string,
+  ): CommandDecl;
   value: {
     literal(v: string): ValueBinding;
     slot(key: string): ValueBinding;
@@ -234,10 +248,16 @@ export function createKit(): Kit {
           + (typeof value === "function" ? "——没有 ctx.value.fromSlot 这类函数面" : ""),
         );
       }
+      // A3：scroll 方向的形态（旧调用不变）。op 不是 scroll 却带 to ⇒ 由 validateCommands 拒。
+      const isTo = typeof value === "object" && value !== null && Object.keys(value).length === 1
+        && typeof (value as Record<string, unknown>)["to"] === "string";
+      const toVal = isTo ? (value as { to: "bottom" | "top" | "page" }).to : undefined;
+      const valueBinding = isTo ? undefined : (value as ValueBinding | undefined);
       return {
         ...(target === undefined ? {} : { target }),
         op,
-        ...(value === undefined ? {} : { value }),
+        ...(valueBinding === undefined ? {} : { value: valueBinding }),
+        ...(toVal === undefined ? {} : { to: toVal }),
         ...(id === undefined ? {} : { id }),
       };
     },
