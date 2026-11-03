@@ -136,7 +136,7 @@ amber config set AMBERFLOW_DECISION_API_KEY sk-...
   性质——不在环、不规划）。`PLANNER_MODEL` 配置键已移除；旧 rc 里残留会在加载期以
   未知键拒绝，删掉该键即可。
 
-## 7. 桥与 CLI：两条决策配置面（A3，2026-11-02）
+## 7. 桥与 CLI：两条决策配置面（A3 建面 / A5 缺省探针与恢复指引，2026-11-02/03）
 
 同一份三件套有两个**注入面**，排查凭据问题前先分清这次运行走的是哪一条：
 
@@ -145,10 +145,18 @@ amber config set AMBERFLOW_DECISION_API_KEY sk-...
 | 凭据从哪来 | DSH 插件配置页 → 桥以 **decisionEnv 注入子进程环境变量** | 配置层叠读进 `process.env`（`src/support/apply-config-env.ts`） |
 | 生效顺序 | **注入的环境变量最高**——真环境变量已设置的键，配置文件盖不住它 | 旧 rc < 用户配置（`~/.amberflow/config.json`）< 项目配置（`<repo>/.amberflow/config.json`）< 环境变量 |
 | 典型错位 | 桥侧没配 → 子进程落到本机配置层的凭据 | 本机配置层里躺着一套**过期的/未购买的**凭据，CLI 拿它去敲门 |
+| 怎么验证 | `amberflow_status`（= `amber doctor --json`）的 `provider.ask_probe`：**部署面**真发一次最小 ask 的结果 | `amber doctor`（缺省含同一探针；`--no-ask-probe` 关闭、`--ask-probe` 强制） |
+| 401/403 时怎么办 | 先看插件配置页的 URL / Token / Model（桥不读本机配置，改本机配置对桥无效） | 先 `amber config show` 看实际生效的层与来源（key 掩码）；`403 AccessDenied.Unpurchased` = workspace 未购买该模型，换可用凭据面或在服务侧开通——**不要改引擎、不自动回退** |
 
 两条面共享同一个装配路径（`resolveProviderSpec` → `applySpecToRuntime` → `provider.pick`），
 也共享同一份 HTTP 帮手（`src/model/system-one-client.ts`）——所以"桥能用、CLI 直跑 403"
 不是引擎分叉，而是**两条面喂进去的凭据不同**。
+
+A5 起 `amber doctor` **缺省**执行一次最小 ask 探针（仅当 `AMBERFLOW_DECISION_BASE_URL` 存在，
+即在线决策源配置了；一次请求，超时由 `AMBERFLOW_DECISION_TIMEOUT_MS` 控制）。`--no-ask-probe`
+关闭它（部署侧不希望默认请求时），`--ask-probe` 强制跑（没有在线源也发，用来确认"真的没配"）。
+探针只诊断：**失败不改变 doctor 退出码**；JSON 里在 `data.provider.ask_probe`
+（`{ok, provider, ref?, conf?, error?}`），文本里打印 HTTP 事实 + 两条通道的恢复指引。
 
 ### 7.1 真实案例：403 AccessDenied.Unpurchased 被吞成「未过闸门」（2026-11-02 实证）
 
@@ -177,9 +185,12 @@ A3 修复后的透传链（每一环都带 HTTP 事实）：
 ### 7.2 排查路径（按序）
 
 ```bash
-# ① 医生探针（只诊断，不改退出码）：走与运行时同一装配路径真发一次最小 ask
-amber doctor --ask-probe
-#    ✓ → ref/conf 正常返回；✗ → 一行内给 HTTP 状态码 + 错误关键句（如 AccessDenied.Unpurchased）
+# ① 医生探针（缺省执行；只诊断，不改退出码）：走与运行时同一装配路径真发一次最小 ask
+amber doctor
+#    ✓ → data.provider.ask_probe 的 ref/conf 正常返回
+#    ✗ → 一行内给 HTTP 状态码 + 错误关键句（如 AccessDenied.Unpurchased），并打印两条通道的恢复指引
+amber doctor --no-ask-probe    # 部署侧不希望默认请求时关闭探针
+amber doctor --ask-probe       # 没有在线源也想强制确认"未配置"时用
 
 # ② 原始对照（密钥不落命令行/终端回显；二选一）：
 curl -sS -X POST "<BASE_URL>/chat/completions" \
@@ -194,5 +205,19 @@ amber config show        # CLI 侧：层叠与来源（key 掩码）
 
 判读：`401 invalid_api_key` = key 错/失效；`403 AccessDenied.Unpurchased` = 凭据有效但该
 workspace 未购买此模型（换可用的凭据面，或在服务侧开通）；`404 model_not_found` = 模型名错；
-429 = 限流；超时/DNS 见错误文本里的 cause 关键句。修复后用 `amber doctor --ask-probe` 复验，
-再跑一次真实应用确认 `decisions.failed_asks=0`。
+429 = 限流；超时/DNS 见错误文本里的 cause 关键句。修复后用 `amber doctor` 复验（缺省探针已发
+请求），再跑一次真实应用确认 `decisions.failed_asks=0`。
+
+### 7.3 恢复指引（A5）：同一条文案出现在哪里
+
+运行结果里 `provider_degraded` 非空、或有步以 `no_model_runtime` 停下时，说明这次撞上的是决策
+通道（配置面/凭据/网关），而不是应用脚本。CLI（`amber run`，含 `--json` 的 stderr 与 envelope
+`next[]`）会追加下面这条指引；ask 失败原因与 `resolveProviderSpec` 的配置失败也带同一句（由
+`src/model/decision-provider.ts` 的 `DECISION_CHANNEL_GUIDANCE` 唯一出处产生）：
+
+> 本机若通过 DSH 桥运行：改用桥工具 amberflow_run（桥使用部署配置）；或 amber config set
+> AMBERFLOW_DECISION_* 更新用户配置（见 docs/DECISION_SERVICE_CONFIG.md）
+
+- **只提示、不自动切换**：引擎不替你换配置面，也不会把桥配置抄进用户配置；
+- 指引里**不含任何密钥**（错误文本只来自响应体/网络 cause）；
+- 走桥的场景改用 `amberflow_run`——桥注入了部署配置，CLI 直跑读的是另一份用户配置。

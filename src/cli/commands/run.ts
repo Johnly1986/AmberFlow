@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import type { CliContext } from "../context.ts";
-import { say, emitJson } from "../context.ts";
+import { say, diag, emitJson } from "../context.ts";
 import { usageError, usageFromParseError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { emitPlanStatus } from "../plan-result.ts";
@@ -62,6 +62,77 @@ function str(v: string | boolean | string[] | undefined): string | undefined {
 
 function bool(v: string | boolean | string[] | undefined): boolean {
   return v === true;
+}
+
+/** A5：在线决策源是否配置（只判断"配置面在不在"；凭据是否真能过网关由运行/探针判定）。 */
+function decisionServiceConfigured(ctx: CliContext): boolean {
+  return (ctx.env.AMBERFLOW_DECISION_BASE_URL ?? "").trim() !== "";
+}
+
+/** 结果落盘目录（与 `src/app/app-runner.ts` 的 appsOutDir 同一规则；这里只用于读回结果）。 */
+function appsResultDir(ctx: CliContext, userOut: string | undefined): string {
+  return path.resolve(
+    ctx.cwd,
+    userOut ?? ctx.env.AMBERFLOW_APPS_OUT ?? path.join(os.tmpdir(), "amberflow-apps"),
+  );
+}
+
+/**
+ * A5：这次运行是否给出了「决策通道」故障证据——
+ * `provider_degraded` 非空（A3 起声明式与 flow 两条路径同账），或有步以 `no_model_runtime` 停下
+ * （配置失败/服务不可达后落到 rules-only）。返回证据标签；不是通道问题时返回 null。
+ */
+function decisionChannelEvidence(result: Record<string, unknown> | null): string | null {
+  if (!result) return null;
+  if (typeof result.provider_degraded === "string" && result.provider_degraded.trim() !== "") {
+    return "provider_degraded";
+  }
+  const codes: string[] = [];
+  for (const field of ["subgoals", "step_traces"]) {
+    const rows = result[field];
+    if (!Array.isArray(rows)) continue;
+    for (const raw of rows) {
+      if (raw === null || typeof raw !== "object") continue;
+      const code = (raw as Record<string, unknown>)["stop_code"];
+      if (typeof code === "string") codes.push(code);
+    }
+  }
+  return codes.includes("no_model_runtime") ? "no_model_runtime" : null;
+}
+
+/**
+ * A5：把「两条通道」恢复指引写进 stderr，并返回指引本身（envelope `next[]` 复用同一句）。
+ * 文案唯一出处是 `DECISION_CHANNEL_GUIDANCE`——只提示，不自动切换配置面、不打印凭据。
+ */
+async function announceDecisionChannelGuidance(ctx: CliContext, why: string): Promise<string> {
+  const { DECISION_CHANNEL_GUIDANCE } = await import("../../model/decision-provider.ts");
+  diag(ctx, `决策通道恢复指引（${why}）：${DECISION_CHANNEL_GUIDANCE}`);
+  return DECISION_CHANNEL_GUIDANCE;
+}
+
+/** A5：非 JSON 模式也读一次结果文件，只为判定决策通道证据（不重新解释运行语义）。 */
+function readFreshRunResult(
+  outDir: string, startedAt: number, appId: string,
+): Record<string, unknown> | null {
+  try {
+    const fresh = (name: string): boolean => {
+      try { return fs.statSync(path.join(outDir, name)).mtimeMs >= startedAt - 2000; } catch { return false; }
+    };
+    // 优先同名结果（应用 id 通常等于脚本文件名）；脚本里的 id 与文件名不同时再退回"最新一份"。
+    const preferred = `${appId}-result.json`;
+    let name = fresh(preferred)
+      ? preferred
+      : fs.readdirSync(outDir)
+        .filter((n) => n.endsWith("-result.json") && fresh(n))
+        .sort((a, b) => fs.statSync(path.join(outDir, b)).mtimeMs - fs.statSync(path.join(outDir, a)).mtimeMs)[0];
+    if (name === undefined) return null;
+    const parsed = JSON.parse(fs.readFileSync(path.join(outDir, name), "utf-8"));
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function maxSteps(v: Values): number {
@@ -332,7 +403,19 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
 
   const jsonMode = bool(v.json) || ctx.globals.json;
   if (!jsonMode) {
-    return ctx.runEntry("src/app/app-runner.ts", args, { cwd: ctx.cwd, env: ctx.env });
+    const startedAt = Date.now();
+    const code = await ctx.runEntry("src/app/app-runner.ts", args, { cwd: ctx.cwd, env: ctx.env });
+    // A5：非 JSON 模式也把「两条通道」指引打到 stderr（子进程的人读报告仍走 stdout）。
+    const evidence = decisionChannelEvidence(readFreshRunResult(
+      appsResultDir(ctx, str(v.out)), startedAt, path.basename(app, path.extname(app)),
+    ));
+    if (evidence) {
+      await announceDecisionChannelGuidance(ctx, evidence);
+    } else if (code === 2 && decisionServiceConfigured(ctx)) {
+      // 连结果文件都没有 = 预检/装配阶段就退了；在线决策源已配置时先给同一条指引（只是提示）。
+      await announceDecisionChannelGuidance(ctx, "run_failed_before_result");
+    }
+    return code;
   }
 
   let appId = path.basename(app, path.extname(app));
@@ -346,10 +429,7 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   // app-runner 的人类进度先转到 stderr；跑完再从固定产物路径读结果，
   // 由 CLI 统一包成 §5.3 的信封。这样不重写执行器，也不让 stdout 混入日志。
   const userOut = str(v.out);
-  const outDir = path.resolve(
-    ctx.cwd,
-    userOut ?? ctx.env.AMBERFLOW_APPS_OUT ?? path.join(os.tmpdir(), "amberflow-apps"),
-  );
+  const outDir = appsResultDir(ctx, userOut);
   const resultPath = path.join(outDir, `${appId}-result.json`);
   const reportPath = path.join(outDir, `${appId}-report.md`);
   const startedAt = Date.now();
@@ -383,6 +463,9 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
     const partial = view.partial === true;
     const exitCode = partial ? 0 : code;
     const next = view.next.length ? view.next : [`amber apps show ${appId}`];
+    // A5：决策通道故障 ⇒ stderr 与 envelope next[] 都给同一指引（只提示，不自动切配置面）。
+    const channelEvidence = decisionChannelEvidence(result);
+    if (channelEvidence) next.push(await announceDecisionChannelGuidance(ctx, channelEvidence));
     const data = {
       ...result,
       ...view,
@@ -408,6 +491,10 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
     return exitCode;
   }
 
+  // A5：没产出结果 + exit 2 + 在线决策源已配置 ⇒ 决策通道是首要嫌疑；stderr 与 next[] 同一指引。
+  if (code === 2 && decisionServiceConfigured(ctx)) {
+    next.push(await announceDecisionChannelGuidance(ctx, "run_failed_before_result"));
+  }
   const envelope = successEnvelope("run", {
     app: appId,
     completed: "0/0",

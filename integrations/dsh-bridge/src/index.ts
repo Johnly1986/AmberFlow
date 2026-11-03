@@ -399,7 +399,10 @@ export function apply(ctx: Context, config: Config): void {
       + 'wall-clock cap per call: 900 s by default (the deployment `timeoutMs` config), overridden '
       + 'per call by `timeout_sec` — raise it for long flows instead of being killed with the '
       + 'completed work lost; a killed run writes `run-killed.json` into its outDir as partial '
-      + 'evidence. Escalation rule: '
+      + 'evidence. It runs with THIS deployment\'s decision config (the bridge injects '
+      + '`AMBERFLOW_DECISION_*`), which may differ from the CLI\'s user-scope config: prefer this '
+      + 'tool over a local `amber run` when the CLI decision plane is stale or returns 401/403. '
+      + 'Escalation rule: '
       + STOP_ESCALATION_TEXT,
     parameters: {
       app: { type: 'string', required: true, description: 'The app id from `' + toolPrefix + '_apps`.' },
@@ -678,7 +681,11 @@ export function apply(ctx: Context, config: Config): void {
       OVERVIEW_TEXT + '\n\n'
       + 'Report the environment the engine will run in: Node, Chromium, local model artifacts, the '
       + 'effective decision source (online service or local), and whether the outer LLM is configured. '
-      + 'Reads only; no browser, no model call, no secrets (API keys are masked).',
+      + 'Reads only; no browser, no model call, no secrets (API keys are masked). It also carries the '
+      + 'default-on ask probe (`provider.ask_probe`): one minimal real ask through the configured '
+      + 'decision plane (the bridge deployment config) — diagnosis only, it never changes ok/exit code. '
+      + 'When it fails, look at the two decision channels (this deployment\'s config vs the CLI user '
+      + 'config) before editing the app.',
     parameters: {},
     output: {
       schema: {
@@ -693,14 +700,22 @@ export function apply(ctx: Context, config: Config): void {
           llm: { type: 'object', required: true, additionalProperties: true },
         },
       },
-      render: (_args, value) => [{
-        type: 'text',
-        text: `${value.ok ? 'READY' : 'CHECK'}; node ${String(field(value.node, 'version') ?? '?')}; `
-          + `chromium ${field(value.chromium, 'ok') === true ? 'ok' : 'missing'}; `
-          + `model ${field(value.model, 'ready') === true ? 'ready' : 'missing'}; `
-          + `decision ${String(field(field(value.provider, 'default'), 'name') ?? '?')}; `
-          + `outer LLM ${field(value.llm, 'configured') === true ? 'configured' : 'stub'}`,
-      }],
+      render: (_args, value) => {
+        // A5：探针只在它真跑过时出现（无在线决策源 / 部署侧关掉时缺省缺席，旧输出不变）。
+        const probe = field(value.provider, 'ask_probe')
+        const probeTag = probe === undefined
+          ? ''
+          : `; ask probe ${field(probe, 'ok') === true ? 'ok' : 'FAILED'}`
+        return [{
+          type: 'text',
+          text: `${value.ok ? 'READY' : 'CHECK'}; node ${String(field(value.node, 'version') ?? '?')}; `
+            + `chromium ${field(value.chromium, 'ok') === true ? 'ok' : 'missing'}; `
+            + `model ${field(value.model, 'ready') === true ? 'ready' : 'missing'}; `
+            + `decision ${String(field(field(value.provider, 'default'), 'name') ?? '?')}`
+            + `${probeTag}; `
+            + `outer LLM ${field(value.llm, 'configured') === true ? 'configured' : 'stub'}`,
+        }]
+      },
     },
     async execute() {
       return status(options)

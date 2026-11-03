@@ -49,6 +49,9 @@ npm run picker-server
 
 `npm run test` 是真实站点套件，不是单元测试；没有 `npm run verify`。PR 门禁只走 `npm run check`，真实站点回归走 `npm run test`（声明数据在 `online/`）。
 
+> 应用运行优先走桥工具（`amberflow_run`）：桥用**部署配置**的决策三件套；CLI 直跑读本机用户配置，
+> 两者可能不同——`amber doctor` 缺省对在线决策源发一次最小 ask 探针，401/403 会直接点出来。
+
 ## 应用模型
 
 - 只有一种格式：`$AMBERFLOW_HOME/apps/<id>/app.mjs`（也接受 `app.js` / `app.ts`），导出 `meta(kit)` 与 `flow(ctx)`。

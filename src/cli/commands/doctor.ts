@@ -22,6 +22,8 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
         json: { type: "boolean" }, fix: { type: "boolean" },
         verbose: { type: "boolean" }, help: { type: "boolean" },
         "ask-probe": { type: "boolean" },
+        // A5：探针改为缺省执行（仅在线决策源存在时）；这两个旗标只用于显式强制/关闭。
+        "no-ask-probe": { type: "boolean" },
       },
     });
   } catch (err) {
@@ -86,14 +88,24 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
     const dflt = await provider.resolveProviderSpec(undefined);
     providerDefault = { name: dflt.name, tier: String(dflt.tier) };
   } catch (err) {
-    providerError = err instanceof Error ? err.message : String(err);
+    // A5：解析期错误已附「两条通道」指引；JSON 的 `provider.error` 仍只放事实（旧字段语义不变），
+    // 指引在文本输出与文档里给。
+    providerError = provider.decisionFailureFact(err);
   }
   const providers = provider.listDecisionProviders();
-  // A3（决策源对齐）：opt-in 真实 ask 探针（--ask-probe）。doctor 的静态检查只看"配置项在不在"，
-  // 看不出凭据是否真能过网关——实测有"配置齐全 + 403 AccessDenied.Unpurchased"的组合，
-  // 引擎当时把它吞成静默降级。探针走与运行时**同一**装配路径真发一次最小 ask。
-  // 医生只诊断：探针成败**不改变退出码**（exitCode 与它无关），失败只如实多报一行。
-  const askProbe = v["ask-probe"] === true ? await runAskProbe(provider) : null;
+  // A3（决策源对齐）：真实 ask 探针。doctor 的静态检查只看"配置项在不在"，看不出凭据是否
+  // 真能过网关——实测有"配置齐全 + 403 AccessDenied.Unpurchased"的组合，引擎把它吞成静默降级。
+  // A5：探针改为**缺省执行**（仅当在线决策源存在：AMBERFLOW_DECISION_BASE_URL 非空），
+  // 否则 doctor 全绿却跑不动应用的错位仍要靠用户想起加旗标才能发现。探针走与运行时**同一**
+  // 装配路径真发一次最小 ask（一次请求）；`--no-ask-probe` 关闭（部署侧不希望默认请求），
+  // `--ask-probe` 强制（没有在线源也发，用来确认"真的没配"）。
+  // 医生只诊断：探针成败**不改变退出码**（exitCode 与它无关），失败只如实多报事实 + 通道指引。
+  const decisionServiceConfigured = (ctx.env.AMBERFLOW_DECISION_BASE_URL ?? "").trim() !== "";
+  const askProbeDisabled = v["no-ask-probe"] === true;
+  const askProbeForced = v["ask-probe"] === true;
+  const askProbe = !askProbeDisabled && (askProbeForced || decisionServiceConfigured)
+    ? await runAskProbe(provider)
+    : null;
   // 决策源解析失败是“可用性警告”，不是核心阻塞项；退出码只看 Node / Chromium / 配置。
   const exitCode = report.ok && config.errors.length === 0 ? 0 : 2;
 
@@ -107,7 +119,8 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
       llm: { configured: p.llm },
       provider: {
         default: providerDefault, error: providerError, available: providers,
-        // A3：--ask-probe 跑过才出现这个字段（缺省等价：普通 doctor 的 JSON 形状不变）。
+        // A5：探针真跑过才出现这个字段（没配在线决策源 / --no-ask-probe 时缺席——
+        // 那种情况下的 JSON 形状与旧版逐字段一致）。
         ...(askProbe === null ? {} : { ask_probe: askProbe }),
       },
       // 裸 `amber` 能不能敲：这是"照着 README 复制却 CommandNotFound"的唯一线索。
@@ -139,9 +152,14 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
         next: ["amber config show", "amber doctor --fix"],
       };
     }
+    // JSON 模式 stdout 只能有一个对象：提示/指引走 stderr（diag），信封形状不变。
     if (askProbe === null) {
-      // JSON 模式 stdout 只能有一个对象：提示走 stderr（diag），信封形状不变。
-      diag(ctx, "提示：加 --ask-probe 用当前三件套真实发一次 ask（探针只诊断，不改退出码）");
+      diag(ctx, askProbeDisabled
+        ? "提示：已按 --no-ask-probe 跳过 ask 探针（探针只诊断，不改退出码）"
+        : "提示：未配置在线决策源（AMBERFLOW_DECISION_BASE_URL），ask 探针未发请求；--ask-probe 可强制");
+    } else if (!askProbe.ok) {
+      diag(ctx, `ask 探针失败：${askProbe.error ?? "未知失败"}`);
+      for (const line of decisionChannelHintLines(provider.DECISION_CHANNEL_GUIDANCE)) diag(ctx, line);
     }
     emitJson(ctx, envelope);
     return exitCode;
@@ -175,13 +193,20 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
   } else if (providerError) {
     say(ctx, `当前决策源：解析失败（${providerError}）`);
   }
-  // A3：探针结果单独一行（或未发请求时的提示）。成败都不动退出码——医生只诊断。
+  // A3/A5：探针结果单独一行（或未发请求时的提示）。成败都不动退出码——医生只诊断。
   if (askProbe === null) {
-    say(ctx, "ask 探针     未发请求——加 --ask-probe 用当前三件套真实发一次 ask（只诊断，不改退出码）");
+    say(ctx, askProbeDisabled
+      ? "ask 探针     已按 --no-ask-probe 跳过（探针只诊断，不改退出码）"
+      : "ask 探针     未发请求——未配置在线决策源（AMBERFLOW_DECISION_BASE_URL）；--ask-probe 可强制");
   } else if (askProbe.ok) {
     say(ctx, `ask 探针     ✓ ${askProbe.provider}：ref=${JSON.stringify(askProbe.ref)} conf=${askProbe.conf?.toFixed(2) ?? "-"}`);
   } else {
     say(ctx, `ask 探针     ✗ ${askProbe.error ?? "未知失败"}`);
+    // A5：失败时把「两条通道」指引当场给全——403 在这个仓里最常见的两个原因就是
+    // 走错了配置面（桥部署配置 vs CLI 用户配置）。只提示，不自动切换。
+    const [bridgeHalf, cliHalf] = provider.DECISION_CHANNEL_GUIDANCE.split("；");
+    say(ctx, `             恢复指引     ① ${bridgeHalf}`);
+    if (cliHalf !== undefined) say(ctx, `                          ② ${cliHalf}`);
   }
   if (exitCode !== 0) {
     say(ctx, "");
@@ -190,7 +215,7 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
   return exitCode;
 }
 
-/** A3：`doctor --ask-probe` 的一次结果。医生只诊断：成败都不影响 doctor 的退出码。 */
+/** A3/A5：`doctor` 缺省 ask 探针（`--no-ask-probe` 可关）的一次结果。医生只诊断：成败都不影响退出码。 */
 interface AskProbeResult {
   /** 实际装配的决策源名（探针跳过/装配失败时如实给名字或 unknown）。 */
   provider: string;
@@ -198,16 +223,20 @@ interface AskProbeResult {
   /** ok=true：模型在最小考卷（3 个假候选）里选中的 ref 与把握值。 */
   ref?: string | null;
   conf?: number;
-  /** ok=false：HTTP 状态码 + 错误关键句（或跳过原因）；文本只来自响应体/网络错误，绝无凭据。 */
+  /**
+   * ok=false：HTTP 状态码 + 错误关键句（或跳过原因）；文本只来自响应体/网络错误，绝无凭据。
+   * A5：统一追加的「两条通道」指引已剥离——JSON 字段要的是可比较的事实，指引在文本/stderr。
+   */
   error?: string;
 }
 
 /**
- * `--ask-probe`：用与运行时**完全相同**的装配路径（resolveProviderSpec → applySpecToRuntime →
- * provider.pick）真实发一次最小 pick 请求。doctor 的静态段只证明"配置项在不在"，
- * 证明不了"凭据真的能过网关"——2026-11-02 实测：三层配置齐全、doctor 全绿，
- * 三件套凭据在网关上是 403 AccessDenied.Unpurchased，而引擎把这次失败吞成
- * 「模型被咨询 1 次（1 次未过闸门）」静默降级。这个探针就是那类故障的直达检查：
+ * `doctor` 缺省执行（在线决策源存在时；`--ask-probe` 强制、`--no-ask-probe` 关闭）的 ask 探针：
+ * 用与运行时**完全相同**的装配路径（resolveProviderSpec → applySpecToRuntime → provider.pick）
+ * 真实发一次最小 pick 请求（一次 HTTP 请求，超时按 `AMBERFLOW_DECISION_TIMEOUT_MS`）。
+ * doctor 的静态段只证明"配置项在不在"，证明不了"凭据真的能过网关"——2026-11-02 实测：
+ * 三层配置齐全、doctor 全绿，三件套凭据在网关上是 403 AccessDenied.Unpurchased，而引擎把这次
+ * 失败吞成「模型被咨询 1 次（1 次未过闸门）」静默降级。这个探针就是那类故障的直达检查：
  * HTTP 成败给 ref/conf，失败给状态码+错误关键句（不含也不回显任何凭据）。
  */
 async function runAskProbe(
@@ -240,7 +269,19 @@ async function runAskProbe(
     return { provider: p.name, ok: true, ref: out.ref ?? null, conf: out.score };
   } catch (e) {
     // 单行化 + 截断：错误关键句进一行诊断（服务错误体/网络 cause；凭据不在此列）。
-    const text = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim();
-    return { provider: name, ok: false, error: text.slice(0, 300) };
+    // A5：剥掉统一追加的通道指引（文本/stderr 会单独给），JSON 字段只留事实。
+    return { provider: name, ok: false, error: provider.decisionFailureFact(e).slice(0, 300) };
   }
+}
+
+/**
+ * A5：把 decision-provider 的统一「两条通道」指引拆成两行（桥 / CLI）。
+ * 文案唯一出处仍是 `DECISION_CHANNEL_GUIDANCE`——这里只排版，不另抄一份。
+ */
+function decisionChannelHintLines(guidance: string): string[] {
+  const [bridgeHalf, cliHalf] = guidance.split("；");
+  return [
+    `  ① ${bridgeHalf}`,
+    ...(cliHalf === undefined ? [] : [`  ② ${cliHalf}`]),
+  ];
 }

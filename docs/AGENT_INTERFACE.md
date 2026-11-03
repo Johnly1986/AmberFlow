@@ -184,6 +184,8 @@ CLI 的 `--json` 输出仍是统一 envelope（`schema_version / command / ok / 
 `verified` 只在完整运行且所有不变量成立时为 true。
 `--max-steps N` 用满预算时 `status=partial`、`verified=false`，`steps` 保留已执行事实。
 `--dry-run` 不打开浏览器，返回 `status=dry` 和 dry 调用序列。
+决策源退化（`data.provider_degraded` 非空）或某步以 `no_model_runtime` 停下时，`stderr` 与
+`next[]` 会追加同一条「两条通道」恢复指引（桥 vs CLI 配置面，见 §3.1）。
 
 ### 应用创建/删除
 
@@ -211,13 +213,13 @@ amber apps remove <id> [--yes] [--force]
 
 | 工具 | CLI | 用途 |
 |---|---|---|
-| `amberflow_status` | `amber doctor --json` | 环境、浏览器、模型层级、配置来源；密钥掩码 |
+| `amberflow_status` | `amber doctor --json` | 环境、浏览器、模型层级、配置来源；缺省含 ask 探针（`data.provider.ask_probe`，一次最小真实 ask，只诊断）；密钥掩码 |
 | `amberflow_apps` | `amber apps list --json` | 列出可运行应用 |
 | `amberflow_app_show` | `amber apps show --json --code` | 路径、元数据、当前源码、版本锚点 |
 | `amberflow_app_check` | `amber apps check --json` | 加载 + dry 调用序列校验 |
 | `amberflow_inspect` | `amber inspect --json` | 只读页面观察与候选 hint |
 | `amberflow_app_create` | `amber apps new … --json` | 生成 flow 骨架 |
-| `amberflow_run` | `app-runner`（与 `amber run` 同一运行器） | 运行；`max_steps` 是执行预算，`timeout_sec` 是本次墙钟上限 |
+| `amberflow_run` | `app-runner`（与 `amber run` 同一运行器） | 运行；**桥用部署配置**决策三件套；`max_steps` 是执行预算，`timeout_sec` 是本次墙钟上限；决策通道故障时结果带恢复指引 |
 | `amberflow_learn` | `learn --json` | 一次录制 → 归纳信号 → 生成 `app.mjs` flow（回放门通过才落盘） |
 | `amberflow_test` | `amber test … --json` | 真实站点回归；`max_steps` / `timeout_sec` 与 CLI 对齐 |
 
@@ -272,6 +274,25 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 `--headful` / `--headless`、`--out`、`--provider`、`--max-steps`、`--timeout` 与
 `amber run` 同名同义；`--validate` / `--list` / `--dry-run` / `--tier` / `--case` /
 `--site` / `--require-all` 是测试套件专属。
+
+### 3.1 决策通道：桥 vs CLI（A5）
+
+同一份决策三件套有两个注入面：**桥通道**（DSH 插件配置页 → 桥注入子进程环境变量，部署配置，
+最高优先）与 **CLI 直跑**（本机用户配置层叠）。两条面喂进同一个装配路径，所以"桥能跑、CLI 直跑
+401/403"不是引擎分叉，而是凭据不同。完整矩阵与 403 判读见
+[docs/DECISION_SERVICE_CONFIG.md](DECISION_SERVICE_CONFIG.md) §7。
+
+- `amber doctor` **缺省**对在线决策源（`AMBERFLOW_DECISION_BASE_URL` 存在时）发一次最小 ask
+  探针；`--no-ask-probe` 关闭。JSON 在 `data.provider.ask_probe = {ok, provider, ref?, conf?, error?}`
+  （失败不影响 doctor 的 ok/退出码）。
+- 运行结果里 `provider_degraded` 非空、或有步以 `no_model_runtime` 停下时，CLI/桥的
+  `stderr` 与 envelope `next[]` 追加同一条指引：
+
+  > 本机若通过 DSH 桥运行：改用桥工具 amberflow_run（桥使用部署配置）；或 amber config set
+  > AMBERFLOW_DECISION_* 更新用户配置（见 docs/DECISION_SERVICE_CONFIG.md）
+
+- 指引**只提示、不自动切换**，也不含任何密钥。走桥的场景请优先用 `amberflow_run`：桥注入的是
+  部署配置，CLI 直跑读的是另一份用户配置。
 
 ---
 

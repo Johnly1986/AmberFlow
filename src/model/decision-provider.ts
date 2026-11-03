@@ -194,6 +194,65 @@ export function activeProviderInfo(): ProviderInfo | null {
   return { name, version, capabilities: { ...capabilities }, ...(floor !== undefined ? { floor } : {}) };
 }
 
+/* ── 决策面「两条通道」恢复指引（A5） ─────────────────────────────────────── */
+
+/*
+ * 同一份三件套有两个注入面（见 docs/DECISION_SERVICE_CONFIG.md §7）：
+ *   - 桥通道：DSH 插件配置页 → 桥注入子进程环境变量（部署配置，最高优先）；
+ *   - CLI 直跑：本机用户配置层叠（~/.amberflow/config.json 等）。
+ * 两边喂进同一个装配路径，所以「桥能用、CLI 直跑 403」不是引擎分叉，而是凭据不同。
+ * 失败时用户要做的第一步不同：走桥的改用桥工具（桥用部署配置），直跑的改用户配置。
+ *
+ * 纪律：只提示、**不自动切换通道**、**不打印任何凭据**。这句指引由 provider 的 ask
+ * 失败、解析期配置失败、doctor 与 run 的出口共用，避免每个入口各说各话。
+ */
+export const DECISION_CHANNEL_GUIDANCE =
+  "本机若通过 DSH 桥运行：改用桥工具 amberflow_run（桥使用部署配置）；"
+  + "或 amber config set AMBERFLOW_DECISION_* 更新用户配置（见 docs/DECISION_SERVICE_CONFIG.md）";
+
+/** 追加指引时的分隔符：保持单行「事实 —— 指引」，报告/停因的排版不被多行破坏。 */
+const DECISION_GUIDANCE_SEP = " —— ";
+/** 判重/剥离用的稳定片段（只用于文案判重，不参与任何决策逻辑）。 */
+const DECISION_GUIDANCE_MARK = "本机若通过 DSH 桥运行";
+
+/** 这段文案是否已经带过通道指引（doctor 的 JSON 诊断要剥掉，避免同一句出现两次）。 */
+export function hasDecisionChannelGuidance(text: string): boolean {
+  return text.includes(DECISION_GUIDANCE_MARK);
+}
+
+/**
+ * 给 ask 失败 / 解析期配置失败的原因统一追加恢复指引；空原因或已带过的不重复追加。
+ * 事实（HTTP 状态码、服务错误关键句）保持在前：排查先看事实，再看指引。
+ */
+export function withDecisionChannelGuidance(reason: string): string {
+  const text = reason.trim();
+  if (text === "" || hasDecisionChannelGuidance(text)) return text;
+  return `${text}${DECISION_GUIDANCE_SEP}${DECISION_CHANNEL_GUIDANCE}`;
+}
+
+/**
+ * 从错误里取「事实部分」：剥掉统一追加的指引。doctor 的 JSON 字段要的是可比较的
+ * HTTP 事实（旧字段语义不变），指引只在人类文本/`next[]` 里出现。
+ */
+export function decisionFailureFact(err: unknown): string {
+  const text = (err instanceof Error ? err.message : String(err)).replace(/\s+/g, " ").trim();
+  const at = text.indexOf(DECISION_GUIDANCE_MARK);
+  return (at < 0 ? text : text.slice(0, at).replace(/[ \t—\-]+$/, "")).trim();
+}
+
+/**
+ * 给一次真咨询的失败套上统一指引。保留错误名与 `cause` 链（A3 的失败透传靠它解包
+ * HTTP 事实）；已是同一条（带过指引）的错误原样返回，不重复包装。
+ */
+function annotateAskFailure(err: unknown): unknown {
+  const message = err instanceof Error ? err.message : String(err);
+  const annotated = withDecisionChannelGuidance(message);
+  if (annotated === message) return err;
+  const wrapped = new Error(annotated, { cause: err });
+  if (err instanceof Error && err.name) wrapped.name = err.name;
+  return wrapped;
+}
+
 /* ── 选择：三件套 / 显式名字 → 哪扇门（CLI 与配置都走这一个函数） ─────────── */
 
 /*
@@ -229,6 +288,10 @@ export type ProviderSpec =
  * 让「模型被咨询 1 次（1 次未过闸门）」去掩盖一次 403；现在失败单独记 `failedAsks`，
  * 汇总行如实分开（「N 次未过闸门，K 次失败」）。计数仍先于调用：无论服务答没答，
  * 敲门这个动作本身发生了。
+ *
+ * A5：失败原因在这里统一附上「两条通道」恢复指引——执行器把这次失败的 message 原样编进
+ * `provider_degraded` 与 `no_model_runtime` 停因，所以入口（run/start/doctor/桥）不必各自补。
+ * 事实在前、指引在后；不打印凭据、不自动切换通道。
  */
 export function countedProvider(p: DecisionProvider): {
   provider: DecisionProvider; asks: () => number; failedAsks: () => number;
@@ -243,7 +306,7 @@ export function countedProvider(p: DecisionProvider): {
       async pick(req) {
         n += 1;
         try { return await p.pick(req); }
-        catch (e) { failed += 1; throw e; }
+        catch (e) { failed += 1; throw annotateAskFailure(e); }
       },
       ...(p.risk ? { risk: (g: string, d: string) => p.risk!(g, d) } : {}),
       ...(p.doneVote ? { doneVote: (g: string, st: ModelState) => p.doneVote!(g, st) } : {}),
@@ -254,7 +317,7 @@ export function countedProvider(p: DecisionProvider): {
             askChoice: async (req: ClosedSetRequest) => {
               n += 1;
               try { return await p.askChoice!(req); }
-              catch (e) { failed += 1; throw e; }
+              catch (e) { failed += 1; throw annotateAskFailure(e); }
             },
           }
         : {}),
@@ -342,7 +405,9 @@ export async function resolveProviderSpec(
     // 而不是让 factory 去读 process.env 的另一份快照。
     const provider = decisionServiceProvider(env);
     const ce = provider.configError?.();
-    if (ce) throw new Error(`决策服务未配置：${ce}`);
+    // A5：配置失败是「两条通道」故障里最常见的一类（CLI 用户配置与桥部署配置不是同一份），
+    // 解析期就带上恢复指引；事实（缺哪个键/什么错）在前，指引在后，绝不回显密钥。
+    if (ce) throw new Error(withDecisionChannelGuidance(`决策服务未配置：${ce}`));
     return { kind: "provider", name: provider.name, tier: "on", ablation: false, provider };
   }
 
@@ -378,7 +443,8 @@ export async function resolveProviderSpec(
   // 实验/兼容 provider 只有在 `--provider NAME` 点名时才会走到这里；没配好就解析期报错，
   // 不装一个每步都抛的 provider，也不悄悄降级成"没人要模型"。
   const ce = p.configError?.();
-  if (ce) throw new Error(`决策提供者 ${JSON.stringify(wanted)} 未配置：${ce}`);
+  // A5：显式点名的 provider 没配好同样附两条通道指引（本次 `--provider` 只覆盖选择，不覆盖配置面）。
+  if (ce) throw new Error(withDecisionChannelGuidance(`决策提供者 ${JSON.stringify(wanted)} 未配置：${ce}`));
   return { kind: "provider", name: p.name, tier: "on", ablation: false, provider: p };
 }
 
