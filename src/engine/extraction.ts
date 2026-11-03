@@ -382,6 +382,10 @@ export const COLLECT_JS = String.raw`
  * data-test, name, id, input type, href, visibility and the main-content flag,
  * ordered main-content-first, each winner stamped with `data-dshref` in the same
  * pass so the element list, scan index and locator handle are single-sourced.
+ *
+ * A4：章值是**批次型**的（`af<批>-e<位>`），本趟提取开头先清掉上一轮的旧章
+ * （一次全页 querySelectorAll，只为不残留位置性 ref）。旧章残留会让同一个
+ * `[data-dshref="e2"]` 命中两个节点——按章取元素的动作层没有别的唯一性判据。
  */
 export const EXTRACT_JS = String.raw`(arg) => {
   const sel = arg.sel, max = arg.max;
@@ -523,10 +527,23 @@ export const EXTRACT_JS = String.raw`(arg) => {
     stamped.add(wi);
   }
   const ordered = rows.filter((r) => r.main).concat(rows.filter((r) => !r.main)).slice(0, max);
+  // A4：盖章前先清掉上一轮的旧章。ref 是**位置性**的（e0/e1…），而页面元素会换位
+  //（列表插入/滚动重排/SPA 复用 DOM）：不清章时同一个元素身上还挂着旧 ref，本轮
+  // 另一个元素又拿到同一个 ref，[data-dshref="e2"] 就会命中两个节点——按章取元素
+  // 从"点错"退化到 Playwright strict mode 直接报错。一次全页 querySelectorAll 的开销
+  // 远小于一次误点，且只在提取期付。
+  try {
+    document.querySelectorAll('[data-dshref]').forEach((e) => e.removeAttribute('data-dshref'));
+  } catch (err) { /* 清理失败不阻断提取：nonce 仍保证新章不撞旧章 */ }
+  // nonce：页内全局递增的批次号，章值 = 批次-位置（如 af3-e2）。旧批次章在清章后
+  // 不残留，跨两次提取也不会共用同一个选择器；同一页多次提取共享计数，所以挂
+  // globalThis（跨导航自动重置——旧 DOM 已经不在了，重号无害）。
+  const nonce = 'af' + ((globalThis.__afStamp = (globalThis.__afStamp | 0) + 1));
   return ordered.map((r, pos) => {
     const ref = 'e' + pos;
-    all[r.i].setAttribute('data-dshref', ref);
-    return {ref: ref, dsh_ref: ref, scan: r.i, tag: r.tag, label: r.label,
+    const stamp = nonce + '-' + ref;
+    all[r.i].setAttribute('data-dshref', stamp);
+    return {ref: ref, dsh_ref: stamp, scan: r.i, tag: r.tag, label: r.label,
             data_test: r.data_test, name: r.name, id: r.id, input_type: r.input_type, href: r.href,
             ...(r.role ? {role: r.role} : {}),
             ...(r.content_editable ? {content_editable: true} : {}),
@@ -593,10 +610,22 @@ const NEAR_JS = String.raw`(arg) => {` + COLLECT_JS + String.raw`
               }
               return out.slice(0, 3); }); }`;
 const PASS_NEAR = compile("arg", `return (${NEAR_JS})(arg);`);
-/** target_hint recovery pass (stamps data-hintref in the same pass). */
+/**
+ * target_hint recovery pass (stamps data-hintref in the same pass). A4：章值同样是
+ * 批次型的（`af<批>-h<n>`），本趟开头先清旧章——理由见 EXTRACT_JS 的注释：
+ * 位置性 ref 的旧章留在换位后的 DOM 上，会让按章取元素命中多个/错位的节点。
+ */
 const HINT_HEAD = String.raw`(arg) => {
             const all = [], p = arg.parsed, h = arg.hint;
             __collectAll(document, arg.sel, all);
+            // A4：与主池同法——先清旧 hint 章再盖新章，章值带页内递增 nonce
+            //（af3-h0，与主池共用 __afStamp 计数）。回捞是同一子目标内的重复调用
+            //（每个 target_hint 一次、宽扫/复观察再一次），不清章会留下上一轮的 hN：
+            // 旧章在 DOM 换位后可能命中另一节点，按章取元素就会点错。
+            try {
+                document.querySelectorAll('[data-hintref]').forEach((e) => e.removeAttribute('data-hintref'));
+            } catch (err) { /* 清理失败不阻断回捞：nonce 保证新章不与旧章同名 */ }
+            const nonce = 'af' + ((globalThis.__afStamp = (globalThis.__afStamp | 0) + 1));
             const labelOf = (e) => {
                 const first = e.childNodes.length ? String(e.childNodes[0].textContent||'').trim() : '';
                 return (e.getAttribute('aria-label') || e.getAttribute('title') || first ||
@@ -640,8 +669,9 @@ const HINT_HEAD = String.raw`(arg) => {
                     const e = all[i];
                     const href = e.getAttribute('href') || '';
                     const ref = 'h' + n;
-                    e.setAttribute('data-hintref', ref);
-                    return {hint_ref: ref, scan: i, tag: e.tagName.toLowerCase(),
+                    const stamp = nonce + '-' + ref;
+                    e.setAttribute('data-hintref', stamp);
+                    return {hint_ref: stamp, scan: i, tag: e.tagName.toLowerCase(),
                             label: labelOf(e).slice(0, 40),
                             data_test: e.getAttribute('data-test') || '',
                             name: e.getAttribute('name') || '', id: e.id || '',

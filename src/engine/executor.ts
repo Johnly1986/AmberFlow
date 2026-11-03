@@ -1100,6 +1100,15 @@ export class BrowserMiddleware {
   /** Ordered hints: each is authoritative for ONE action, then the next takes over. */
   targetHints: string[] = [];
   _hintI = 0;
+  /**
+   * A4 引用唯一性冲突诊断（`_locatorFor` 写入，动作落 trace 时取走）。
+   *
+   * 提取前清旧章 + 批次 nonce 已在源头挡住「旧章残留」；这里接住**仍然多命中**的情况
+   *（页面复制节点、第三方脚本写同名属性）：多命中不得返回 locator（Playwright strict
+   * mode 会报错，`count()` 取首个又会点错元素），回退后把匹配计数与回退结果记成诊断——
+   * 否则「点错元素」只会表现为页面没反应，作者无从判断病因。
+   */
+  _refCollisions: string[] = [];
   lastRouting: Record<string, unknown> | null = null;
   _routedModel: string | null = null;
   private _ready = false;
@@ -1478,6 +1487,14 @@ export class BrowserMiddleware {
 
   /* -- execution ----------------------------------------------------------- */
 
+  /** A4：取走并清空引用冲突诊断（没有冲突时返回 null ⇒ trace 不新增字段）。 */
+  _drainRefCollisions(): string[] | null {
+    if (this._refCollisions.length === 0) return null;
+    const out = this._refCollisions;
+    this._refCollisions = [];
+    return out;
+  }
+
   /**
    * Stable handle for an element we just inspected.
    *
@@ -1487,10 +1504,26 @@ export class BrowserMiddleware {
    * pass that identified the element (data-dshref from extraction, data-hintref
    * from hint recovery), then data-js-ref (CDP probe), then data-test, id, name,
    * input type, and a positional fallback into the same frame's scan.
+   *
+   * A4：`data-dshref`/`data-hintref` 是提取期写下的**唯一句柄**，同一章值在页面上
+   * 必须唯一。恰好 1 个才返回；多个 = 句柄已失效（页面复制节点/旧章残留），不得返回
+   * 那个 locator（strict mode 报错或点中第一个都等于点错元素），继续走 id/name/scan
+   * 回退，并把匹配计数与回退结果记进冲突诊断。其它选择器（data-test/id/name/type）
+   * 本来就是「可重复」语义，闸门不改变它们的行为与顺序。
    */
   async _locatorFor(page: AnyPage, el: Elem): Promise<AnyLoc | null> {
     let scope: any = page;
     if (el["frame"]) scope = frameAt(page, el["frame"] as number) ?? page;
+    const collisions: string[] = [];
+    /** 回退命中时落诊断：冲突事实 + 最终用哪条路解析，作者一眼看出病因与后果。 */
+    const hit = (loc: AnyLoc, how: string): AnyLoc => {
+      for (const c of collisions) this._refCollisions.push(`${c}; fell back to ${how}`);
+      return loc;
+    };
+    const miss = (): null => {
+      for (const c of collisions) this._refCollisions.push(`${c}; fell back to nothing (stale_ref)`);
+      return null;
+    };
     const chain: Array<[string, string]> = [
       ["dsh_ref", "[data-dshref='%s']"],
       ["hint_ref", "[data-hintref='%s']"],
@@ -1498,29 +1531,35 @@ export class BrowserMiddleware {
       ["data_test", "[data-test='%s']"],
     ];
     for (const [key, selector] of chain) {
-      if (el[key]) {
-        const loc = scope.locator(selector.replace("%s", String(el[key])));
-        if (await loc.count()) return loc as AnyLoc;
+      if (!el[key]) continue;
+      const sel = selector.replace("%s", String(el[key]));
+      const loc = scope.locator(sel);
+      const n = await loc.count();
+      if (key === "dsh_ref" || key === "hint_ref") {
+        if (n === 1) return hit(loc as AnyLoc, "the exact stamp");
+        if (n > 1) collisions.push(`${sel} matched ${n} elements`);
+        continue;                                   // 0 个同样继续回退（旧行为）
       }
+      if (n) return hit(loc as AnyLoc, `${key}`);
     }
     if (el["id"]) {
       const loc = scope.locator(`#${el["id"]}`);
-      if (await loc.count()) return loc as AnyLoc;
+      if (await loc.count()) return hit(loc as AnyLoc, "id");
     }
     if (el["name"]) {
       const loc = scope.locator(`${el.tag}[name='${el["name"]}']`);
-      if (await loc.count()) return loc as AnyLoc;
+      if (await loc.count()) return hit(loc as AnyLoc, "name");
     }
     if (el["input_type"]) {
       const loc = scope.locator(`${el.tag}[type='${el["input_type"]}']`);
-      if (await loc.count()) return loc as AnyLoc;
+      if (await loc.count()) return hit(loc as AnyLoc, "input type");
     }
     // positional fallback: refs are indices into THAT FRAME's scan. Never index
     // off the ref string — namespaced refs ("f1:e3") are not numeric.
-    if (el["scan"] === undefined) return null;
+    if (el["scan"] === undefined) return miss();
     const allm = (await scope.locator(INTERACTIVE_ALL).all()) as AnyLoc[];
-    if ((el["scan"] as number) < allm.length) return allm[el["scan"] as number]!;
-    return null;
+    if ((el["scan"] as number) < allm.length) return hit(allm[el["scan"] as number]!, "positional scan");
+    return miss();
   }
 
   /**
@@ -1943,6 +1982,16 @@ export class BrowserMiddleware {
     this.targetHint = this.targetHints.length ? null : targetHint;
 
     const trace: TraceStep[] = [];
+    // A4：上一次子目标/上一次 run 没被 trace 取走的残留冲突诊断不跨步——本子目标从
+    // 干净账本开始，避免"这一步行里出现上一步的冲突"这类错位证据。
+    this._drainRefCollisions();
+    // A4：动作落 trace 时顺带取走引用冲突诊断。没有冲突 ⇒ 空对象 ⇒ 产物字段不变；
+    // 有冲突 ⇒ 该步 trace 多一个 `ref_collision`（含选择器、匹配计数、回退结果），
+    // 与既有 forbid/diagnostic 同一种"失败要能自解释"的口径。
+    const refCollision = (): Record<string, unknown> => {
+      const c = this._drainRefCollisions();
+      return c === null ? {} : { ref_collision: c };
+    };
     // A1 子改动③：逐步动作后的轻量 after 签名 {url, pool_size, first_text}，挂在**已执行动作**
     // 的 trace 事件上。动作事件先落账，签名在下一次观察（下一动作步首的那次池提取——内存里
     // 已有的池）补上，它就是上一动作后的页面状态；复用既有提取、零新增页面往返。相邻两个动作
@@ -2716,6 +2765,7 @@ export class BrowserMiddleware {
             dry_run: true, actionable: probe.actionable,
             ...(probe.reason === null ? {} : { reason: probe.reason }),
             would: `${el.tag} "${el.label}"`, url: urlOf(pg),
+            ...refCollision(),
           });
           if (verbose) {
             console.log(`  step ${stepNo}: DRY-RUN `
@@ -2727,7 +2777,7 @@ export class BrowserMiddleware {
         // structurally, and never with a guessed value. (The substring-heuristic path
         // below is the old behaviour; a command space replaces guessing with binding.)
         if (commandMode && commandBindMissing !== null) {
-          trace.push({ step: stepNo, desc, how: "needs_value", executed: false, method, conf: 1.0, command: cmdPick!.cmd.id, url: urlOf(pg) });
+          trace.push({ step: stepNo, desc, how: "needs_value", executed: false, method, conf: 1.0, command: cmdPick!.cmd.id, url: urlOf(pg), ...refCollision() });
           stop("needs_value",
             `command ${JSON.stringify(cmdPick!.cmd.id)}: ${commandBindMissing} `
             + `— a declared binding either has its value in the plan or the step stops (红线②: never guessed) on step ${stepNo}`, stepNo);
@@ -2750,7 +2800,7 @@ export class BrowserMiddleware {
           // never filled.
           if (this._slotValue(el, slots) === null && !this._isSubmit(el)) {
             forbid(ref, el, "needs_value");
-            trace.push({ step: stepNo, desc, how: "needs_value", executed: false, method, conf: round3(conf), url: urlOf(pg) });
+            trace.push({ step: stepNo, desc, how: "needs_value", executed: false, method, conf: round3(conf), url: urlOf(pg), ...refCollision() });
             if (verbose) console.log(`  step ${stepNo}: (needs_value, rule) -> skip ${ref}`);
             continue;
           }
@@ -2771,7 +2821,7 @@ export class BrowserMiddleware {
           confirmed = await this.confirmFn(desc);
           if (!confirmed) {
             forbid(ref, el, "risk-declined");
-            trace.push({ step: stepNo, desc, risky: true, executed: false, confirmed: false, url: urlOf(pg) });
+            trace.push({ step: stepNo, desc, risky: true, executed: false, confirmed: false, url: urlOf(pg), ...refCollision() });
             continue;
           }
         }
@@ -2798,7 +2848,7 @@ export class BrowserMiddleware {
             if (reason.startsWith("not-actionable-or-covered") && !reAdmitted.has(ref)) {
               blockedRetry[ref] = [stepNo, trace.length];
             }
-            trace.push({ step: stepNo, desc, how: reason, executed: false, method, conf: round3(conf), url: urlOf(pg) });
+            trace.push({ step: stepNo, desc, how: reason, executed: false, method, conf: round3(conf), url: urlOf(pg), ...refCollision() });
             if (verbose) console.log(`  step ${stepNo}: (${reason}, ${method}) -> skip ${ref}`);
             continue;
           }
@@ -2829,6 +2879,7 @@ export class BrowserMiddleware {
             executed: false, method, conf: round3(conf),
             ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
             url: urlOf(pg),
+            ...refCollision(),
           });
           if (verbose) console.log(`  step ${stepNo}: (${how}, ${method}) -> skip ${ref}`);
           continue;
@@ -2856,6 +2907,7 @@ export class BrowserMiddleware {
           ...(noted ? { noted: Object.keys(noted).length } : {}),
           ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question
           inert, url: urlOf(pg),
+          ...refCollision(),
         });
         // A1 子改动③：这个已执行动作的 after 签名等下一次观察落账（见循环头部的落账点）。
         pendingAfterIdx = trace.length - 1;

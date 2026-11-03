@@ -269,6 +269,30 @@ export function resolvePace(
 const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
+ * A4：运行收尾清理提取期写在页面上的两类盖章属性。
+ *
+ * 为什么要在关会话前做：`_locatorFor` 按 `[data-dshref]` / `[data-hintref]` 取元素，
+ * 章值（`af<批>-e<位>`）只在本轮提取内唯一。注入的 `sessionFactory` 可能把同一个页面
+ * 复用给下一次运行/下一个应用，残留旧章会让后续解析多命中。这是**会话卫生**，不是
+ * 结果的一部分：页面已崩、已导航或替身没有 evaluate 都吞掉，绝不影响 result/trace。
+ *
+ * 写成真函数（不是字符串）：Playwright 的 Node 绑定的 `evaluate(string)` 只把字符串
+ * 当表达式求值，箭头函数串不会被调用（见执行器 PORT NOTE 3）。`document` 不在本仓的
+ * TS lib 面上（lib 只有 ES2022），所以只就地声明用到的这一小块形状。
+ */
+const cleanStampAttrs = (): void => {
+  const doc = (globalThis as unknown as {
+    document?: { querySelectorAll(sel: string): ArrayLike<{ removeAttribute(name: string): void }> };
+  }).document;
+  if (!doc) return;
+  const els = doc.querySelectorAll("[data-dshref],[data-hintref]");
+  for (let i = 0; i < els.length; i++) {
+    els[i].removeAttribute("data-dshref");
+    els[i].removeAttribute("data-hintref");
+  }
+};
+
+/**
  * 一次运行的"决策来源"汇总（LAYA_VALUE_PLAN P1）——把散在 step 日志里的判定方式变成三组数：
  * 出场率（模型步/总步 + conf）、reobserve 挽回、缓存节约。**纯汇总口径，无新机制**：
  * 数据就是执行器 trace 里已有的 `method`/`conf`，这里只是数一遍。
@@ -2075,6 +2099,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           }).evaluate?.(() => navigator.userAgent);
           if (typeof ua === "string" && ua.trim()) envUserAgent = ua;
         } catch { /* 拿不到就省略 */ }
+        // A4：关会话前清章（复用会话时旧章不该跨运行残留）。best-effort，失败吞掉。
+        try { await liveSession.page.evaluate(cleanStampAttrs); } catch { /* 清理失败不影响结果 */ }
         try { await liveSession.close(); } catch { /* 关会话失败不该掩盖运行结果 */ }
       }
       // A3：决策源降级的原因只活在执行器实例上——脚本抛 StopError 也不能把它弄丢
