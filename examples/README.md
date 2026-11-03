@@ -20,6 +20,7 @@
 | `02-slots-and-signals` | `slots` / `requiredSlots`（值只来自声明）+ `all_of` / `not` 组合信号 + 槽位绑定命令 |
 | `03-secret-slots` | `meta.secretSlots: ["password"]`：产物 / report / stdout / dry 输出一律掩码 `***` |
 | `04-manual-verify` | `ctx.manual` 人工步（登录 / 2FA）；非 TTY 返回 `needs_human`，不假装有人 |
+| `05-done-evidence` | A1 动作执行证据：零动作命令 `skip` + `forceAct: true` 声明 + `StepResult` 的 `executed/executed_actions/skipped_actions/done_preheld/warnings` 判读（零执行不等于静默 done） |
 
 ## 离线校验（推荐先跑这个）
 

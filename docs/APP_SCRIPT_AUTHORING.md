@@ -17,7 +17,7 @@
    值只认 slot：fill/select/drag 的值来自任务输入或数据源（缺值如实 needs_value，不猜）；采样与分块：虚拟列表按视口采样（池里只有已渲染的行，滚动/翻页分块取全）、长流程分块成多个短应用、多源双腿（meta.sources 数据腿 + 浏览器腿互核）；
    候选窗口有界：每步只取 40（宽扫 120）个候选并按当前视口分桶（chrome/viewport 优先，内容优先级见 amber schema ctx），窗口外不等于页面上没有——要穷举列表用 ctx.scrollList/ctx.expand 分块取证（各计 1 flow step，expand 内部点击不占预算；范围控件用 ctx.setRange），引擎不自动滚动；hint 用完整 label（≤200）匹配、aria-label 是 label 别名；要回退 A2 前的主内容优先排序在 meta.policy 写 candidate_priority: "main-first"（缺省 bucketed）；
 ④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列——stderr 的两条信号 lint（裸 not / any 含 not(exists)）当场改掉再进 ⑤；
-⑤ 真跑留证：amber run <id> --trace；失败先看 trace 的 stopCode/reason——reason 自带池快照判别（「目标不在页面」还是「候选在而闸门拒/闭集约束」）与决策源降级原因；被杀有 run-killed.json 部分证据；
+⑤ 真跑留证：amber run <id> --trace；失败先看 trace 的 stopCode/reason——reason 自带池快照判别（「目标不在页面」还是「候选在而闸门拒/闭集约束」）与决策源降级原因；动作步再看 executed/changed 与 skipped_actions/done_preheld——done=true 但零执行时先看跳过原因，别把「信号本来就成立」当成动作推进；被杀有 run-killed.json 部分证据；
 ⑥ 失败取证判别：最小取证探针先区分引擎缺陷 / 产品事实 / 任务口径再动手——A/B（单变量重跑）、对照（--provider 换决策源或 rules-only 消融）、双腿取数（数据腿核产品事实）；判别不了就上报，别靠反复重跑收敛。
 ```
 
@@ -292,6 +292,8 @@ const e = await ctx.expand("Load more", {
 const r = await ctx.setRange("Volume", { value: 42 });                  // 或 { percent: 25 }
 // r = { ok, achieved?, strategy:"fill"|"keyboard"|"pointer", stopCode?, reason? }
 // 三道都设不了 = ok:false + "slider_not_settable"（reason 附已试策略/bbox/当前值）
+// 面板 re-render 会把 slider 节点换掉（探针属性随旧节点消失）：解析面瞬态重试一次（300ms），
+// 第二次仍读不到才按 slider_not_settable 报——瞬态不是"设不了"。
 ```
 
 - **计费**：三个原语各计 1 个 flow step；`expand` 内部的点击、`scrollList` 的滚动都**不**占预算，由 `maxClicks`/`timeoutMs` 兜底（`ctx.budget.stepsUsed` 每调用 +1）。
@@ -300,6 +302,39 @@ const r = await ctx.setRange("Volume", { value: 42 });                  // 或 {
 - **trace/replay**：三原语的调用参数记入 trace `args`；重放按录制值回放结果，参数不一致直接 `trace_mismatch`（不重新决策）；dry 期是确定性桩（`expand` 返回全零指标、`scrollList/setRange` 返回 `{ok:true}`）。
 - **`expand` 的 plateau 与点击失败**：`ok:true` 只代表"行数已连续 `stableRounds` 轮不增长"，`grew/clicks` 说明长没长、点了几次；到顶后控件不可点不算失败（`reason` 会记 click 失败次数）。只有"点了 `maxClicks` 次/超时仍未稳定"才是 `expand_not_stable`。
 - **失败语义**：全部是**返回结构化结果**而不是抛裸栈；脚本可以据此分支或 `ctx.fail(...)`。真站上"展开了但行数不动/滑到了但值不变"这类现象必须按 `ok/stopCode` 处理，不要假设动作一定成功。
+
+### 4.7 动作执行证据（A1：executed / skipped_actions / done_preheld）
+
+`done=true` 只说明**完成信号成立**，不说明"这一步真的动过页面"。A1 把"动作是否执行、为什么没执行、
+done 是不是动作前就已成立"变成结构化证据（全部**可选字段**：不适用就不出现，旧产物形状不变）：
+
+**`ctx.step` 选项 `forceAct?: boolean`（声明面）**
+- 命令步即使 done 信号在**动作前**已成立，也先把命令闭集执行完，再评估 done（"这一步必须真的动一下"）。
+- 引擎当前没有"done 已成立就跳过动作"的短路，缺省行为本来就先动作；`forceAct` 是给未来短路的出口，
+  也是作者意图的显式声明；dry/replay 只记录/回放声明，不重新决策。
+
+**`StepResult`（以及 `trace` / `RunReport` / report.md 的「动作执行证据」小节）**
+| 字段 | 含义 |
+|---|---|
+| `executed?: boolean` | 本步是否有动作**真的执行**（命令步/发生过动作尝试时出现；false 必须配 `skipped_actions`） |
+| `executed_actions?: Array<{op,target,ref,how,desc,changed}>` | 每个已执行动作的身份与结果；`changed` = pre/post 快照是否变化 |
+| `skipped_actions?: Array<{command_id?,ref?,target?,reason,detail?}>` | 每条"为什么没动作"的结构化原因（`target_ambiguous` / `target_not_found` / `forbidden` / `not-actionable-or-covered` / `stale_ref` / `needs_value` / `action_unsupported` / `attempt_limit` …） |
+| `done_preheld?: boolean` | 命令步在**动作前**对 done 的预评估结果（只命令步出现；不改变执行顺序） |
+| `warnings?: string[]` | 运行期诚实话，如 `suspected_async`（值只在产生时出现） |
+
+**判读规则（写脚本/审查时按这个读）**
+- `done_preheld=true`：done 在动作**之前**已成立 ⇒ 这一步的 `done` 来自信号本身，不是这次动作推进的；
+  不要把它当作"动作成功"的证据（`forceAct` 下仍会执行命令闭集）。
+- **零执行步骤**：`executed=false` + `skipped_actions`（例：命令目标歧义/被覆盖/候选全败）——完成裁决
+  仍可能为真（信号本来就成立），此时 `stop_reason` 会追加 `executed 0 action(s); skipped: …`，
+  这是"诚实完成"，不是静默 done。零动作验证步用 `act: [ctx.command("skip")]` 显式收窄动作面。
+- `suspected_async`：click 执行了、但 pre/post 快照没变、随后 done 却成立 ⇒ 效果异步到达（如点击后
+  1s 才长出新行）。引擎记 warning，**不** forbid 该元素、**不**写 outcome memory inert——它不是死元素。
+- `changed=false` 且 done 不成立仍按既有 inert/anti-repeat 逻辑处理（死循环拦截不变）。
+- trace 行上还有 `changed`（仅执行步）、`skipped/skip_reason`（仅未执行步）、`done_preheld`/`force_act`
+  声明；`after` 仅在"动作后有下一次观察"时补（done 立即成立的收尾动作没有下一跳，故不补）。
+
+**完整示例**：`examples/apps/05-done-evidence`（零动作命令 + `forceAct:true` + 证据判读，dry 可校验）。
 
 ## 5. 站点面：`meta.site`
 

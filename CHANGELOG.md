@@ -13,6 +13,18 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 
 ### 新增
 
+- **A1 动作执行证据与 done 诚实性**：命令步在动作前对 done 做一次预评估（`done_preheld`，只记录、
+  不改变执行顺序）；`StepResult` / trace / `RunReport` / report.md 新增「动作执行证据」——
+  `executed`、`executed_actions`（op/ref/how/changed）、`skipped_actions`（每条"为什么没动作"的
+  结构化原因）、`warnings`（如 `suspected_async`）；零执行步骤以 `executed=false` + 跳过证据 + 停因
+  摘要 `executed 0 action(s)` 诚实呈现（不静默 done）；click 快照未变但 done 成立 = `suspected_async`
+  （async 效果，不 forbid、不写 inert 记忆）；`ctx.step` 新增 `forceAct` 声明（done 预成立也先执行
+  命令闭集）；新增示例 `examples/apps/05-done-evidence` 与开发脚本 `scripts/done-evidence-check.mjs`。
+- **A5 决策面通道引导**：`amber doctor` 缺省发一次最小 ask 探针（`ask_probe` 进 JSON，旧字段不变、
+  失败不改退出码，可 `--no-ask-probe` 关闭）；`decision-provider` 的 ask 失败/`no_model_runtime`
+  统一附恢复指引（桥 `amberflow_run` 用部署配置 vs CLI `AMBERFLOW_DECISION_*` 用户配置，403 处理
+  见 `docs/DECISION_SERVICE_CONFIG.md` 两条通道矩阵）；`run` 的 stderr 与 next[] 同步；不打印密钥、
+  不自动切换。
 - **A3 列表展开与范围控件三原语**：`ctx.scrollList(target, {to|by})`（滚目标/最近可滚动祖先，纯 DOM
   scrollTop）、`ctx.expand(target, {count, maxClicks, stableRounds, settleMs, timeoutMs})`（点"加载更多"
   到行数稳定，内部点击不占 flow 预算）、`ctx.setRange(target, {value|percent})`（fill→keyboard→pointer
@@ -73,6 +85,11 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 
 ### 修复
 
+- **A4 引用盖章唯一化**：提取前清旧章 + 批次 nonce（`data-dshref` 章值 `af<批>-e<位>`，
+  `data-hintref` 用 `af<批>-h<n>`），消除"元素换位后旧 ref 章残留 → 同一选择器命中多个节点"的
+  点错隐患；`_locatorFor` 对引用章加唯一性闸门（恰好 1 个才用；>1 记 `ref_collision` 诊断并回退
+  id/name/scan，最终 null 交动作层 `stale_ref`）；run 收尾 best-effort 清理两类章属性；
+  开发脚本 `scripts/ref-stamp-collision.mjs`。
 - **纯验证步停因如实化**（2026-11-01 产品评审 P1）：无 target_hint、无命令空间的子目标在
   规则档被挡时，不再误报「no model runtime: needs a model pick」——当场评估 done 信号并
   区分两种实况：「信号已成立但本步未声明动作 → 声明 `commands:[{"op":"skip"}]` 或点名
