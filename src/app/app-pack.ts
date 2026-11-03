@@ -176,6 +176,7 @@ function rowMainValue(row: Record<string, string> | null): string {
 export const POLICY_KEYS = [
   "tiered_hint", "risk_ask", "reobserve", "max_effective_repeats", "conf_floor",
   "done_timeout_ms", "done_poll_ms", "pool_ready_timeout_ms", "pool_ready_poll_ms",
+  "candidate_priority",
 ] as const;
 
 /**
@@ -205,6 +206,11 @@ export interface PackPolicy {
   pool_ready_timeout_ms?: number;
   /** 元素池 ready gate 的轮询间隔（毫秒；缺省 100）。 */
   pool_ready_poll_ms?: number;
+  /**
+   * A2 候选窗口排序策略：`bucketed`（缺省，分桶配额 chrome/viewport/...）或
+   * `main-first`（回退 A2 之前的 main 内容优先排序）。显式声明才进 effective_policy。
+   */
+  candidate_priority?: "bucketed" | "main-first";
 }
 
 /**
@@ -1101,6 +1107,10 @@ export function validatePack(pack: AppPack,
       const cf = pol["conf_floor"];
       if (cf !== undefined && (typeof cf !== "number" || !Number.isFinite(cf) || cf <= 0 || cf > 1)) {
         p.push("policy.conf_floor: must be a number in (0, 1]");
+      }
+      const cp = pol["candidate_priority"];
+      if (cp !== undefined && cp !== "bucketed" && cp !== "main-first") {
+        p.push('policy.candidate_priority: must be one of "bucketed" | "main-first"');
       }
       for (const k of ["done_timeout_ms", "done_poll_ms", "pool_ready_timeout_ms", "pool_ready_poll_ms"]) {
         const v = pol[k];

@@ -55,7 +55,8 @@ export const HINT_SHAPES: readonly HintShape[] = [
   },
   {
     token: "裸词", en: "bare-token", example: "travel",
-    kind: "bare", note: "唯一标签 / data-test 词（多候选即歧义，宁缺勿错）",
+    kind: "bare",
+    note: "唯一标签 / data-test 词（大小写不敏感；完整 label 的词边界/前缀匹配；多候选即歧义，宁缺勿错）",
   },
 ];
 
@@ -121,6 +122,7 @@ const HINT_TOKEN_LINE_EN = HINT_SHAPES.map((s) => s.en).join(" | ");
 export const MATCHABLE_POOL_ATTRS: readonly string[] = [
   "test→data-test",
   "type→input_type",
+  "aria-label→label",
   "href",
   "name",
   "id",
@@ -128,10 +130,14 @@ export const MATCHABLE_POOL_ATTRS: readonly string[] = [
   "near",
 ];
 
-/** 属性匹配模型的权威表述（docs/APP_SCRIPT_AUTHORING.md 必须逐字包含，prompt-hit 校验）。 */
+/**
+ * 属性匹配模型的权威表述（docs/APP_SCRIPT_AUTHORING.md 必须逐字包含，prompt-hit 校验）。
+ * A2：DOM 的 aria-label 在提取期已并进 label（labelOf 优先读它），所以
+ * `[aria-label~x]`/`[aria-label=y]` 按 **label** 匹配——不是第二个字段模型。
+ */
 export const ATTR_MATCH_MODEL_TEXT =
   `属性名按池字段匹配：${MATCHABLE_POOL_ATTRS.join("、")}`
-  + `；class、title 等不在池字段模型里，永不命中`;
+  + `；aria-label 是 label 的别名（提取期已并进 label），class、title 等不在池字段模型里，永不命中`;
 
 /**
  * target_not_found 报错里的闭集提示（executor.ts 消费）。
@@ -141,6 +147,19 @@ export const HINT_CLOSED_SET_TEXT =
   `hint 语法是 ${HINT_SHAPES.length} 形状闭集（${HINT_TOKEN_LINE_CN}；`
   + `${ATTR_MATCH_MODEL_TEXT}）——`
   + `容器/后代 CSS（如 "#outer input"）会被当成一个永不命中的形状，报"matches nothing"而非语法错误`;
+
+/**
+ * A2 候选窗口/可寻址的权威表述（规划引导与作者文档共用；docs/APP_SCRIPT_AUTHORING.md
+ * 逐字包含，prompt-hit 的 doc 组不校验这段，但「唯一出处」纪律仍适用）。
+ */
+export const CANDIDATE_WINDOW_TEXT =
+  "候选窗口是**有界快照**：每步只取 40（宽扫 120）个候选，按桶配额来自当前视口——"
+  + "chrome 8 / viewport 16 / contentNear 8 / mainOffscreen 6 / other 2，不足时按 "
+  + "viewport→contentNear→mainOffscreen→other 顺延；窗口外不等于页面上没有（inspect --json 的 "
+  + "window 会给出窗口外可见交互），引擎不自动滚动。真正需要读完整列表时用滚动/展开原语分块取证。"
+  + "hint 匹配用**完整标签**（≤200，full_label）而不是模型视图的 40 字前缀："
+  + "裸词按大小写不敏感的词边界/前缀匹配，`[aria-label~x]` 是 label 的别名。"
+  + "要回退 A2 之前的主内容优先排序，在 meta.policy 写 candidate_priority: 'main-first'";
 
 /** 英文提示词里的 hint 形状行（plan.ts promptText 消费）。 */
 export function hintPromptTokens(): string {

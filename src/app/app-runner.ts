@@ -895,6 +895,8 @@ export interface EffectivePolicy {
   done_poll_ms: { value: number; source: "app" | "default" };
   pool_ready_timeout_ms: { value: number; source: "app" | "default" };
   pool_ready_poll_ms: { value: number; source: "app" | "default" };
+  /** A2：候选窗口排序策略（缺省 bucketed；main-first 是旧排序回退面）。 */
+  candidate_priority: { value: "bucketed" | "main-first"; source: "app" | "default" };
 }
 
 /**
@@ -952,6 +954,11 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
     pool_ready_poll_ms: {
       value: declaredPolicy.pool_ready_poll_ms ?? 100,
       source: declaredPolicy.pool_ready_poll_ms !== undefined ? "app" as const : "default" as const,
+    },
+    // A2：缺省 bucketed（行为变更面）；显式 main-first 才回退旧排序。
+    candidate_priority: {
+      value: declaredPolicy.candidate_priority ?? "bucketed",
+      source: declaredPolicy.candidate_priority !== undefined ? "app" as const : "default" as const,
     },
   };
   const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
@@ -1124,6 +1131,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     dataset,
     maxSteps: 8,
     confFloor: policy.conf_floor.value,
+    candidatePriority: policy.candidate_priority.value,
     riskyThreshold: 0.6,
     doneThreshold: 0.5,
     // P0-4（导航信封）：`hosts` 以前只在**加载期**校验类型、给防泄漏门禁当输入，
@@ -1992,6 +2000,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           hosts: (pack.hosts ?? null) as string[] | null,
           maxSteps: 8,
           confFloor: resolvedPolicy.policy.conf_floor.value,
+          candidatePriority: resolvedPolicy.policy.candidate_priority.value,
           riskyThreshold: 0.6,
           doneThreshold: 0.5,
           tieredHint: resolvedPolicy.policy.tiered_hint.value,

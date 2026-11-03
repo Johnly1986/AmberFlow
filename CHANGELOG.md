@@ -33,6 +33,12 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 
 ### 变更
 
+- **行为变更（A2）**：元素池缺省排序从「main 内容优先 + DOM 序截断」改为**分桶配额 + 当前视口感知**
+  （chrome/viewport/contentNear/mainOffscreen/other；默认 40 / 宽扫 120，配额常量单一出处
+  `extraction.ts`）；`hint` 匹配改用完整 label（`full_label` ≤200）并支持 `aria-label` 别名与裸词
+  词边界/前缀；命令目标按可行动优先尝试前 4 个候选（失败记 `skipped_actions` 并换下一个，全败不静默 done）。
+  逐应用回退：`meta.policy.candidate_priority: "main-first"`（缺省 `bucketed`）；窗口外元素可用
+  `amber inspect --json` 的 `window` 事实查看，引擎不自动滚动。
 - 线上套件 npm 入口由 `online` 更名为 `test`（`npm run test -- --tier smoke|core|deep|probe`）。
 - 配置收敛为单一 schema 声明（`configs/amberflowrc.example.json` 由 schema 生成并做一致性检查）；
   移除 provider 配置键与命令行模型旗标，`--provider` 只用于本次实验/消融。

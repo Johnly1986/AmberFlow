@@ -58,7 +58,9 @@ import * as browserEnv from "../browser/browser-env.ts";
 import type { BrowserLike, LaunchOptions } from "../browser/browser-env.ts";
 import {
   INTERACTIVE_ALL,
+  MAX_CHOICES,
   WIDE_POOL_ELEMENTS,
+  WIDE_QUOTAS,
   ariaInteractiveLines,
   criteriaView,
   esig,
@@ -75,6 +77,7 @@ import {
   orderElemsByFamily,
   stateText,
   urlOf,
+  viewportUnderload,
   type ActionCapability,
   type Elem,
   type ElemFamily,
@@ -199,6 +202,11 @@ export type StopCode =
    * 过闸的该族候选——结构化停因（绝不执行一个与提名矛盾的动作）。
    */
   | "nominated_family_mismatch"
+  /**
+   * A2：候选窗口超过决策服务上限（MAX_CHOICES=200，服务侧硬上限 255）。这不是"放大窗口"
+   * 能解决的——收窄 hint / 用分桶优先级；结构化停因，绝不把 200+ 选项硬塞给服务。
+   */
+  | "decision_service_choice_limit"
   /** P2: a declared command space with NOTHING resolvable on this page (space-empty). */
   | "space_empty"
   /**
@@ -297,6 +305,8 @@ export interface RunReport {
     frame_origins?: string[];
     target?: string | null;
     candidates?: string[];
+    /** A2：target_not_found 现场发现的滚动容器事实（内容远高于可视区 = 可能未渲染）。 */
+    viewport_underloaded?: Array<{ tag: string; id: string; scrollHeight: number; clientHeight: number; rendered: number }>;
   };
   /**
    * A1 动作执行证据（全部可选：缺字段 = 该事实不适用，不硬造）。
@@ -441,6 +451,13 @@ export interface RunOptions {
    */
   commands?: CommandDecl[] | null;
   /**
+   * A2 候选窗口排序策略（来自 `meta.policy.candidate_priority`，缺省 "bucketed"）：
+   *   "bucketed"   —— 分桶配额取池（chrome/viewport/contentNear/mainOffscreen/other），见
+   *                  `extraction.POOL_QUOTAS`；A2 的行为变更面。
+   *   "main-first" —— 回退 A2 之前的排序（main 内容优先 + 截断），不改任何其它逻辑。
+   */
+  candidatePriority?: "bucketed" | "main-first";
+  /**
    * A1 `forceAct`（opt-in，声明面；缺省不出现 = 今天的行为逐字节不变）：
    * 命令步即使 done 信号在动作前已成立，也**先把命令闭集执行完**，执行后再评估 done。
    *
@@ -573,6 +590,11 @@ export interface MiddlewareOptions {
   riskAsk?: "always" | "rules-only";
   /** Constructor-level default for `RunOptions.tieredHint` (P1 narrowed question, default OFF). */
   tieredHint?: boolean;
+  /**
+   * A2：constructor-level default for `RunOptions.candidatePriority`（来自
+   * `meta.policy.candidate_priority`；缺省 "bucketed" = A2 行为变更面）。
+   */
+  candidatePriority?: "bucketed" | "main-first";
 }
 
 /* ------------------------------------------------------------------ JS passes
@@ -1127,6 +1149,8 @@ export class BrowserMiddleware {
   dataset: DatasetReader | null = null;
   /** See `RunOptions.tieredHint` (P1 narrowed question; default OFF = today's behaviour). */
   tieredHint = false;
+  /** See `MiddlewareOptions.candidatePriority`（A2 分桶窗口；缺省 bucketed）。 */
+  candidatePriority: "bucketed" | "main-first" = "bucketed";
   /** See `MiddlewareOptions.maxEffectiveRepeats` (D3/R-4; default 3, 0 disables). */
   maxEffectiveRepeats = 3;
   /** 见 MiddlewareOptions.riskAsk。 */
@@ -1162,6 +1186,11 @@ export class BrowserMiddleware {
    * 否则「点错元素」只会表现为页面没反应，作者无从判断病因。
    */
   _refCollisions: string[] = [];
+  /**
+   * A2：决策服务候选上限命中原因（null = 没命中）。`pickInner` 只记录、不抛/不猜，
+   * 调用方在停因分支把它变成结构化 `decision_service_choice_limit`。
+   */
+  _choiceLimitReason: string | null = null;
   lastRouting: Record<string, unknown> | null = null;
   _routedModel: string | null = null;
   private _ready = false;
@@ -1190,6 +1219,7 @@ export class BrowserMiddleware {
     this.maxEffectiveRepeats = opts.maxEffectiveRepeats ?? this.maxEffectiveRepeats;
     this.riskAsk = opts.riskAsk ?? this.riskAsk;
     this.tieredHint = opts.tieredHint ?? this.tieredHint;
+    this.candidatePriority = opts.candidatePriority ?? this.candidatePriority;
   }
 
   /**
@@ -1425,6 +1455,15 @@ export class BrowserMiddleware {
     }
     const provider = this.decision;
     if (!provider) {
+      return { ref: null, conf: 0.0, probs: {}, passthrough: true };
+    }
+    // A2：决策服务把候选清单当选项列表，服务侧上限 255——超限不是"窗口开大一点"能解决的，
+    // 必须结构化停因（收窄 hint / 用分桶优先级），不能把 200+ 选项硬塞过去。
+    const candidateCount = Object.keys(elems).filter((r) => !forbidden.has(r)).length;
+    if (candidateCount > MAX_CHOICES) {
+      this._choiceLimitReason =
+        `candidate window ${candidateCount} > MAX_CHOICES (${MAX_CHOICES}) — the decision service takes at most `
+        + `255 choices; narrow the hint or rely on bucket priority (chrome/viewport first) instead of widening the pool`;
       return { ref: null, conf: 0.0, probs: {}, passthrough: true };
     }
     // 视图构造、state 渲染、短名单重问、两支各自的 conf 口径——**全部在适配器里**，
@@ -1909,7 +1948,10 @@ export class BrowserMiddleware {
    * never come from the model. Reuses the scan the caller already has:
    * re-extracting here cost a SECOND full extraction before every click.
    */
-  async _missingRequired(page: AnyPage, slots: Record<string, unknown>, elems: ElemPool | null = null): Promise<Elem[]> {
+  async _missingRequired(
+    page: AnyPage, slots: Record<string, unknown>, elems: ElemPool | null = null,
+    candidatePriority: "bucketed" | "main-first" = "bucketed",
+  ): Promise<Elem[]> {
     const empties: Array<{ tag: string; dt: string; name: string; id: string }> = [];
     for (const fr of framesOf(page)) {
       try {
@@ -1923,7 +1965,7 @@ export class BrowserMiddleware {
       // Match a slot to this field by attribute AND by the label text
       // `_slotValue` would see (placeholder/wrapper label): composer fields are
       // keyed by their placeholder, not by data-test.
-      const elemsNow = elems ?? (await extractElements(page));
+      const elemsNow = elems ?? (await extractElements(page, true, undefined, { candidatePriority }));
       let match: Elem | undefined;
       for (const e of Object.values(elemsNow)) {
         if ((em.dt && e["data_test"] === em.dt)
@@ -1950,6 +1992,60 @@ export class BrowserMiddleware {
       });
     }
     return out;
+  }
+
+  /* -- A2 command-target resolution ---------------------------------------- */
+
+  /**
+   * A2：命令目标的**可行动优先**候选解析（纯函数，不动作、不猜）。
+   *
+   * 为什么需要它：`hintMatch` 只给一个 ref，遇到同 label 的 `div[role=button]` + `button`
+   * 时会按 DOM 序选中 div——被覆盖层挡住就白烧一次动作，而真正可点的是后面的 button。
+   * 这里把"候选集"按可行动性排序后交给动作层**逐个尝试**（最多前 4 个）：
+   *   1. 动作族对得上当前 op 的优先（click 会剔除明确不可点击的族；若剔除后为空则保留原
+   *      顺序，让动作层照旧给 `action_unsupported` 的诚实停因）；
+   *   2. 原生可行动 tag/role（a/button/input/label/select/textarea；role button/link/menuitem/
+   *      tab/option…）优先于自绘 div/span；
+   *   3. 最后按 DOM 序（scan）——与旧行为同序，确定性。
+   * `forbidden` 里的 ref 会被过滤（动作阶段失败的候选由 forbid 记账，下一步自动看下一个）。
+   */
+  resolveCommandRef(
+    target: string, elems: ElemPool, op: string, forbidden?: ReadonlySet<string> | null,
+  ): string[] {
+    if (typeof target !== "string" || !target.trim()) return [];
+    const cand = hintCandidates(target, elems);
+    if (cand === null) return [];
+    const seen = new Set<string>();
+    const refs: string[] = [];
+    for (const r of (cand.decided === null ? cand.refs : [cand.decided, ...cand.refs])) {
+      if (elems[r] === undefined || seen.has(r)) continue;
+      seen.add(r);
+      refs.push(r);
+    }
+    const eligible = forbidden ? refs.filter((r) => !forbidden.has(r)) : refs;
+    const opCap = op as ActionCapability;
+    const fits = (r: string): boolean => actionCapabilities(elems[r]!).includes(opCap);
+    const nativeRank = (r: string): number => {
+      const e = elems[r]!;
+      const tag = String(e.tag ?? "").toLowerCase();
+      const role = String(e.role ?? "").toLowerCase();
+      const nativeTag = ["a", "button", "input", "label", "select", "textarea"].includes(tag);
+      const nativeRole = ["button", "link", "menuitem", "tab", "option", "checkbox", "radio",
+        "switch", "textbox", "searchbox", "combobox", "slider"].includes(role);
+      return nativeTag || nativeRole ? 0 : 1;
+    };
+    const posOf = new Map(refs.map((r, i) => [r, i]));
+    const ordered = [...eligible].sort((a, b) =>
+      (fits(a) ? 0 : 1) - (fits(b) ? 0 : 1)
+      || nativeRank(a) - nativeRank(b)
+      || ((elems[a]!.scan ?? posOf.get(a) ?? 0) - (elems[b]!.scan ?? posOf.get(b) ?? 0)));
+    // click：剔除明确不可点击的族；若全被剔除（目标确实不是按钮），保留原顺序交给动作层报
+    // action_unsupported，而不是把目标"变成不存在"。
+    if (op === "click") {
+      const clickable = ordered.filter(fits);
+      return clickable.length ? clickable : ordered;
+    }
+    return ordered;
   }
 
   /* -- the loop ------------------------------------------------------------ */
@@ -2005,6 +2101,7 @@ export class BrowserMiddleware {
       donePollMs = 120,
       doneTimeoutMs = 2000,
       forceAct = false,
+      candidatePriority = this.candidatePriority,
     } = opts;
 
     // The navigation envelope: run-level declaration wins, else the middleware's
@@ -2016,6 +2113,9 @@ export class BrowserMiddleware {
     const cmdSpace: CommandDecl[] = (commands ?? []).filter((c) => c && typeof c.id === "string");
     const cmdDone = new Set<string>();
     let cmdI = 0;
+    /** A2：每条命令已试过的候选数（最多 CMD_CANDIDATE_ATTEMPTS 个，全败不静默 done）。 */
+    const CMD_CANDIDATE_ATTEMPTS = 4;
+    const cmdAttempts: Record<string, number> = {};
     // A1（2026-11 真站实测）：act 是多动作命令闭集（N≥2）时，done 必须等**全部命令走完**才评估——
     // 以前每个动作后都判一次 done，第一击点开菜单的中间态就能让信号成立（trace 里 hows 记了
     // clicked、status 却是 done），第二个命令从未执行，整轮"排序成功"全为假绿。"走完"沿用既有
@@ -2039,6 +2139,8 @@ export class BrowserMiddleware {
     // A4：上一次子目标/上一次 run 没被 trace 取走的残留冲突诊断不跨步——本子目标从
     // 干净账本开始，避免"这一步行里出现上一步的冲突"这类错位证据。
     this._drainRefCollisions();
+    // A2：候选上限命中原因同样按子目标重置（本次 run 的账）。
+    this._choiceLimitReason = null;
     // A4：动作落 trace 时顺带取走引用冲突诊断。没有冲突 ⇒ 空对象 ⇒ 产物字段不变；
     // 有冲突 ⇒ 该步 trace 多一个 `ref_collision`（含选择器、匹配计数、回退结果），
     // 与既有 forbid/diagnostic 同一种"失败要能自解释"的口径。
@@ -2055,6 +2157,8 @@ export class BrowserMiddleware {
     const skippedActions: SkippedAction[] = [];
     const warnings: string[] = [];
     let donePreheld: boolean | null = null;
+    /** A2：target_not_found 现场发现的滚动容器事实（进 diagnostics 的结构化证据）。 */
+    let viewportUnderloaded: Array<{ tag: string; id: string; scrollHeight: number; clientHeight: number; rendered: number }> | null = null;
     /** 零执行摘要（A1 §2.2.2）：命令闭集走完而一个动作都没执行时，把跳过证据写进停因文案。 */
     const zeroExecSummary = (): string => {
       if (executedCount > 0) return "";
@@ -2240,14 +2344,14 @@ export class BrowserMiddleware {
         if (poolReady) {
           const readyStarted = Date.now();
           const readyDeadline = readyStarted + Math.max(0, poolReadyTimeoutMs);
-          elems = await extractElements(pg);
+          elems = await extractElements(pg, true, undefined, { candidatePriority });
           while (Object.keys(elems).length === 0 && Date.now() < readyDeadline) {
             await sleep(poolReadyPollMs);
-            elems = await extractElements(pg);
+            elems = await extractElements(pg, true, undefined, { candidatePriority });
           }
           poolWaitedMs = Date.now() - readyStarted;
         } else {
-          elems = await extractElements(pg);
+          elems = await extractElements(pg, true, undefined, { candidatePriority });
         }
         lastPoolSize = Object.keys(elems).length;
         lastPoolWaitedMs = poolWaitedMs;
@@ -2336,7 +2440,7 @@ export class BrowserMiddleware {
         // nothing left is a structured stop, NEVER a fallback to the full pool, NEVER a
         // model pick). Order is decided by the declaration and the page, not by scoring;
         // completion truth stays the subgoal signal (红线③ untouched).
-        let cmdPick: { cmd: CommandDecl; ref: string; index: number } | null = null;
+        let cmdPick: { cmd: CommandDecl; ref: string; index: number; cands: string[] } | null = null;
         if (cmdSpace.length) {
           const scans = new Set(Object.values(elems).map((x) => x.scan));
           let pendingUnresolved: string[] = [];
@@ -2349,25 +2453,41 @@ export class BrowserMiddleware {
               continue;
             }
             const target = c.target ?? "";
-            let r = hintMatch(target, elems);
-            if (r === null && target !== "") {
+            if ((cmdAttempts[c.id] ?? 0) >= CMD_CANDIDATE_ATTEMPTS) {
+              // A2：一条命令最多试前 4 个可行动候选；到顶仍没成 = 这条命令在本步 OUT
+              //（记 attempt_limit 证据；后续 done 成立/不成立都有零执行摘要，不静默 done）。
+              noteSkipped({
+                command_id: c.id, target: c.target ?? null, reason: "attempt_limit",
+                detail: `${CMD_CANDIDATE_ATTEMPTS} candidate(s) tried without success`,
+              });
+              cmdDone.add(c.id);
+              cmdI = i + 1;
+              continue;
+            }
+            // A2：可行动优先的候选列表（`null` 起 = 池里没有这个目标，先做一次 DOM 回捞）。
+            let candRefs = this.resolveCommandRef(target, elems, String(c.op), new Set(Object.keys(forbidden)));
+            if (candRefs.length === 0 && target !== "" && hintCandidates(target, elems) === null) {
               for (const [ref, e] of Object.entries(await hintLookup(pg, target))) {
                 if (!scans.has(e.scan)) elems[ref] = e;
               }
-              r = hintMatch(target, elems);
+              pruneForbids(elems);
+              candRefs = this.resolveCommandRef(target, elems, String(c.op), new Set(Object.keys(forbidden)));
             }
             pruneForbids(elems);
-            if (r !== null && !(r in forbidden)) { cmdPick = { cmd: c, ref: r, index: i }; break; }
-            if (r === null) {
+            if (candRefs.length > 0) {
+              cmdPick = { cmd: c, ref: candRefs[0]!, index: i, cands: candRefs.slice(0, CMD_CANDIDATE_ATTEMPTS) };
+              break;
+            }
+            if (hintCandidates(target, elems) === null) {
               pendingUnresolved.push(c.id);
               noteSkipped({ command_id: c.id, target: c.target ?? null, reason: "target_not_found" });
               continue;
             }
-            // resolved but forbidden: that command's action already ran or died — walk past it.
-            // A1：这也是"没有动作"的一条证据——为什么这条命令被跳过（此前只剩一条无主 trace 行）。
+            // 候选都在禁用面（动作阶段失败已由 forbid 记账）/ 不满足 op 能力：这条命令 OUT。
+            // A1：这也是"没有动作"的一条证据——为什么这条命令被跳过。
             noteSkipped({
-              command_id: c.id, target: c.target ?? null, ref: r, reason: "forbidden",
-              ...(forbidWhy[r] === undefined ? {} : { detail: forbidWhy[r] }),
+              command_id: c.id, target: c.target ?? null, reason: "forbidden",
+              detail: `${cmdAttempts[c.id] ?? 0} candidate(s) tried, remaining candidates are forbidden`,
             });
             cmdDone.add(c.id);
             cmdI = i + 1;
@@ -2376,6 +2496,8 @@ export class BrowserMiddleware {
             // 区分“目标不存在”和“目标存在但歧义”：歧义不是空间为空，而是候选集 > 1。
             const ambiguous = cmdSpace.find((c) => {
               if (c.op === "skip" || !c.target) return false;
+              // A2：已经试过候选的命令不再按"歧义"停——它的候选是被逐个尝试后禁用的。
+              if ((cmdAttempts[c.id] ?? 0) > 0) return false;
               const cand = hintCandidates(c.target, elems);
               return cand !== null && cand.decided === null && cand.refs.length > 1;
             });
@@ -2413,13 +2535,24 @@ export class BrowserMiddleware {
                 `commands exhausted (${cmdDone.size}/${cmdSpace.length} acted) but the done-signal never held on step ${stepNo}`
                 + zeroExecSummary(), stepNo);
             } else {
+              // A2：目标"找不到"到底是页面没有、还是滚动容器里的内容没渲染（虚拟列表/懒加载）？
+              // 失败路径上付一次廉价 DOM 探测，把 viewport_underloaded 事实写进停因（与 diagnostics）。
+              const under = await viewportUnderload(pg);
+              viewportUnderloaded = under.length ? under : null;
+              const underNote = under.length
+                ? ` — viewport_underloaded: `
+                  + under.map((h) => `${h.tag}${h.id ? `#${h.id}` : ""} scrollHeight=${h.scrollHeight} `
+                    + `> clientHeight=${h.clientHeight}, rendered children=${h.rendered}`).join("; ")
+                  + `（目标可能在未渲染/视口外的滚动内容里；不自动滚动，按六步法② 用滚动/展开原语或收窄窗口取证）`
+                : "";
               stop("target_not_found",
                 `command space matches nothing on this page — pending unresolved: `
                 + `${pendingUnresolved.join(", ") || "-"} (unresolvable candidates are OUT; the space never falls back to the full pool) on step ${stepNo}. `
                 + HINT_CLOSED_SET_TEXT
                 // A2 判别①：报错现场用内存里已有的池回答「目标不在页面上 vs 闭集没把它放进
                 // 命令空间」（12 轮真站实测：9/11 轮把产品 UI 本来就没有的排序项误读成引擎池缺陷）。
-                + cmdDiscrimination(cmdSpace, pendingUnresolved, elems), stepNo);
+                + cmdDiscrimination(cmdSpace, pendingUnresolved, elems)
+                + underNote, stepNo);
             }
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
@@ -2562,6 +2695,14 @@ export class BrowserMiddleware {
           layaMargin = topTwoMargin(pprobs);
         }
         if (ref === null) {
+          // A2：候选窗口超过决策服务上限——结构化停因，绝不把 200+ 选项硬塞过去。
+          if (this._choiceLimitReason !== null) {
+            const why = this._choiceLimitReason;
+            this._choiceLimitReason = null;
+            stop("decision_service_choice_limit", why, stepNo);
+            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            break;
+          }
           // In rules-only mode a null ref usually means "no runtime to ask", which is not
           // the same failure as "every element is forbidden" — say which one it is.
           if (this.rulesOnly) {
@@ -2670,7 +2811,7 @@ export class BrowserMiddleware {
             let widePick: { ref: string; conf: number } | null = null;
             if (reobserve && !reobserved && ref !== null) {
               reobserved = true;
-              const wide = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true });
+              const wide = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true, quotas: WIDE_QUOTAS, candidatePriority });
               if (Object.keys(wide).length > Object.keys(elems).length) {
                 // refs are positional: re-prune forbids whose ref now names a
                 // different element before re-asking (same rule as the step head).
@@ -2774,7 +2915,7 @@ export class BrowserMiddleware {
         if (ref !== null && !reobserved && method === mm && conf < 0.9
             && !lexicalOverlap(instruction, String(elems[ref]?.label ?? ""))) {
           reobserved = true;
-          const wideR2b = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true });
+          const wideR2b = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true, quotas: WIDE_QUOTAS, candidatePriority });
           if (Object.keys(wideR2b).length > Object.keys(elems).length) {
             pruneForbids(wideR2b);
             const wideAskR2b = orderedPool(wideR2b);
@@ -2847,6 +2988,18 @@ export class BrowserMiddleware {
           const caps = actionCapabilities(el);
           const op = String(cmdPick.cmd.op);
           if (op !== "skip" && !caps.includes(op as ActionCapability)) {
+            // A2：这个候选不满足 op 能力面，但命令还有其他候选 ⇒ 记跳过、禁用本候选、下一步
+            // 换下一个（可行动优先的意义）；全部候选都试完仍不支持 ⇒ 走下面的诚实停因。
+            const alt = cmdPick.cands.some((r) => r !== ref && !(r in forbidden)
+              && actionCapabilities(elems[r]!).includes(op as ActionCapability));
+            if (alt) {
+              forbid(ref, el, "action_unsupported");
+              noteSkipped({ command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null, ref, reason: "action_unsupported",
+                detail: `element declares [${caps.join(", ")}] but the command op is '${op}'; trying the next candidate` });
+              cmdAttempts[cmdPick.cmd.id] = (cmdAttempts[cmdPick.cmd.id] ?? 0) + 1;
+              if (verbose) console.log(`  step ${stepNo}: command ${cmdPick.cmd.id} candidate ${ref} lacks '${op}' -> next candidate`);
+              continue;
+            }
             // B1：fill（命令闭集里唯一的取值/打字 op）被拒时点名出路——只说"元素不声明这个 op"
             // 用户不知道怎么走（12 轮实测：Maps 搜索框 role=combobox 归 select 族，fill 被拒）。
             // click/scroll 被拒的出路不同（A2 停因判别已覆盖），不加这句。
@@ -2919,7 +3072,7 @@ export class BrowserMiddleware {
         // click and a wasted step. Values come from the plan, never the model.
         if (!this._isTyping(el)) {
           // Pre-fill before ANY click, including clicks on a submit-type input.
-          for (const pe of await this._missingRequired(pg, slots, elems)) {
+          for (const pe of await this._missingRequired(pg, slots, elems, candidatePriority)) {
             const [phow] = await this._executeElement(pg, pe, slots);
             if (verbose) console.log(`  step ${stepNo}.pre: fill required ${JSON.stringify(pe.label)} -> ${phow}`);
           }
@@ -2990,6 +3143,8 @@ export class BrowserMiddleware {
             }
             // A1：动作阶段没执行成 —— skipped_actions 记原因与命令身份（零执行步骤的证据）。
             noteSkipped({ ref, reason, ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
+            // A2：命令步的候选尝试计数（前 4 个为止；失败的候选已被 forbid，下一步换下一个）。
+            if (cmdPick) cmdAttempts[cmdPick.cmd.id] = (cmdAttempts[cmdPick.cmd.id] ?? 0) + 1;
             trace.push({
               step: stepNo, desc, how: reason, executed: false, method, conf: round3(conf),
               ref, skipped: true, skip_reason: reason, url: urlOf(pg),
@@ -3023,6 +3178,7 @@ export class BrowserMiddleware {
           // A1：动作阶段失败同样是"为什么没有动作"的证据（stale_ref/needs_value/
           // action_unsupported/action_failed 都走这里）。
           noteSkipped({ ref, reason: String(how), ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
+          if (cmdPick) cmdAttempts[cmdPick.cmd.id] = (cmdAttempts[cmdPick.cmd.id] ?? 0) + 1;
           trace.push({
             step: stepNo, desc, how,
             executed: false, method, conf: round3(conf),
@@ -3292,6 +3448,7 @@ export class BrowserMiddleware {
     ) ? {
       pool_size: lastPoolSize,
       ...(poolReady ? { waited_ms: lastPoolWaitedMs } : {}),
+      ...(viewportUnderloaded !== null ? { viewport_underloaded: viewportUnderloaded } : {}),
     } : undefined;
     // A1 动作执行证据汇总（只从 trace 汇总一次，不新增页面往返）：
     //   executed        —— 本子目标是否有动作真的执行（有动作面时必答；缺字段 = 没有动作面）；

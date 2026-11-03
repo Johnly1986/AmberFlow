@@ -57,10 +57,10 @@ const SIGNAL_SEMANTICS: Readonly<Record<string, string>> = {
 /** hint 语法闭集描述（与 grammar-prompt.ts 同一口径；白名单是池字段模型，不是 CSS）。 */
 const HINT_GRAMMAR = {
   shapes: ["#id", "tag[attr~substr]", "tag~token", "tag[attr=value]", "button|link|input|textarea|select", "裸词（按 label 匹配）"],
-  attr_whitelist: { test: "data_test", type: "input_type", href: "href", name: "name", id: "id", role: "role", near: "near" },
-  attr_never_matches: ["aria-label", "class", "title", "placeholder（及一切不在白名单的属性）"],
+  attr_whitelist: { test: "data_test", type: "input_type", "aria-label": "label（别名：DOM 的 aria-label 提取期并进 label）", href: "href", name: "name", id: "id", role: "role", near: "near" },
+  attr_never_matches: ["class", "title", "placeholder（及一切不在白名单的属性）"],
   note: "act hint 走「语法闭集 + 元素池投影」；judge.* 的 selector 走 DOM 查询面（任意 CSS）——两个观察面，别互相推断",
-  bare_token_tiers: ["整 label 全等", "label/data-test 词全等", "词前缀", "词包含"],
+  bare_token_tiers: ["整 label 全等", "label/data-test 词全等", "完整 label 的词边界/前缀（A2；大小写不敏感）", "词前缀", "词包含"],
   attr_substr_tiers: ["属性值全等", "末路径段全等", "子串"],
 };
 
@@ -142,6 +142,7 @@ export const STOPCODE_MEANING: Readonly<Record<string, string>> = {
   low_confidence: "决策层置信低于闸门；有稳定句柄就写 act hint 收窄",
   action_space_exhausted: "动作空间耗尽（候选被禁用到只剩边界）",
   hint_matched_nothing: "target_hint 在池内零命中",
+  decision_service_choice_limit: "候选窗口超过决策服务上限（200 安全帽/服务侧 255）：收窄 hint 或依赖分桶优先级，不要放大窗口",
   step_names_no_target: "步骤未点名目标且规则/模型都没有可用候选",
   needs_value: "声明了 slot 绑定但值不存在（绝不猜）",
   manual_signal_not_held: "人工步：人已确认但 DOM 信号复核未过——未完成，不会静默算绿",

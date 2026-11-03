@@ -24,6 +24,7 @@ export const PLAN_PLAYBOOK_TEXT = `高效规划六步法 v2.1（走查先行—�
    走查工具三选一：探针链（每步一个 1 步微型应用：arrive+read 验证页面可达 / 登录与验证可处理 / 无风控拦截 / 数据在 DOM——探针 30 秒判死刑，好过全流程应用跑 5 轮）或 plan 面草稿（plan new → plan add --signal … → plan check --probe 只读预检 → plan run 真执行）或 walk 模式（amber run <id> --walk 一个临时应用单会话按真实步序 act→read 串完整流程：步声明的 url 与当前页同页就不重导航、SPA 状态跨步保持，跨页显式 url 仍导航——适合复现「只在演进状态出现」的问题）；
 ③ 规划应用：提槽 + done 双向清单——done 四形态：正向锚（url_* / css_*）、否定配 exists（裸 not 在空池/重渲染瞬间空洞成立）、多动作后判（两连击的第一击是中间态，不算完成）、状态前进自检（信号跟着页面真前进，不是恒真）；
    值只认 slot：fill/select/drag 的值来自任务输入或数据源（缺值如实 needs_value，不猜）；采样与分块：虚拟列表按视口采样（池里只有已渲染的行，滚动/翻页分块取全）、长流程分块成多个短应用、多源双腿（meta.sources 数据腿 + 浏览器腿互核）；
+   候选窗口有界：每步只取 40（宽扫 120）个候选并按当前视口分桶（chrome/viewport 优先，内容优先级见 amber schema ctx），窗口外不等于页面上没有——要穷举列表用滚动/展开分块取证，引擎不自动滚动；hint 用完整 label（≤200）匹配、aria-label 是 label 别名；要回退 A2 前的主内容优先排序在 meta.policy 写 candidate_priority: "main-first"（缺省 bucketed）；
 ④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列——stderr 的两条信号 lint（裸 not / any 含 not(exists)）当场改掉再进 ⑤；
 ⑤ 真跑留证：amber run <id> --trace；失败先看 trace 的 stopCode/reason——reason 自带池快照判别（「目标不在页面」还是「候选在而闸门拒/闭集约束」）与决策源降级原因；被杀有 run-killed.json 部分证据；
 ⑥ 失败取证判别：最小取证探针先区分引擎缺陷 / 产品事实 / 任务口径再动手——A/B（单变量重跑）、对照（--provider 换决策源或 rules-only 消融）、双腿取数（数据腿核产品事实）；判别不了就上报，别靠反复重跑收敛。`;
@@ -74,6 +75,7 @@ export const STOP_NEXT: Readonly<Record<string, string>> = {
   arrive_signal_not_held: "导航完成但 done 信号未成立：确认「动作前不成立、动作后成立」；重 JS SPA 先 inspect --wide --pool 或运行时取证",
   done_not_held: "命令闭集已走完但 done 未成立：检查 done 信号是否真的会在动作后成立",
   low_confidence: "决策层低置信：看 trace 的 decisions 行与候选 label；有稳定句柄（id / data-test / 唯一 label）就写 act hint 收窄（六形状闭集见 docs/APP_SCRIPT_AUTHORING.md）",
+  decision_service_choice_limit: "候选窗口超过决策服务上限（MAX_CHOICES=200，服务侧 255）：不要放大窗口——用更窄的 act hint 收窄候选，或接受分桶优先级（chrome/viewport 先入池）",
   no_model_runtime: "rules-only 模式需要规则命中：加 target_hint，或配置决策源（docs/DECISION_SERVICE_CONFIG.md）",
   config_error: "停因 reason 自带具体声明错误；改 meta/声明后先 amber apps check <id>（离线）再重跑",
   unreachable: "站点此刻不可达（DNS/连接/导航超时）：先 curl/fetch 验证站点可达——可达则放宽 --timeout（秒，覆盖导航 goto 缺省 30s）或稍后重试；不是声明错误，改 meta 无效",

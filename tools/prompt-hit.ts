@@ -130,7 +130,7 @@ function bridgeGenerated(): string {
   const tokens = HINT_SHAPES.map((s) => s.en);
   const note =
     `A hint is a STABLE-HANDLE CLOSED SET of ${tokens.length} shapes (${tokens.join(" | ")}; `
-    + `only test=data-test and type attribute names take part in matching), NOT arbitrary CSS - `
+    + `only test=data-test, type and aria-label attribute names take part in matching), NOT arbitrary CSS - `
     + `container/descendant selectors (e.g. "#outer input") parse but can never match (target_not_found).`;
   const playbookShort = PLAN_PLAYBOOK_SHORT;
   return `/**

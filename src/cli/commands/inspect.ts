@@ -15,7 +15,9 @@ import { emitJson, say } from "../context.ts";
 import { usageError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { browserSession } from "../../engine/executor.ts";
-import { extractElements, INTERACTIVE_ALL, WIDE_POOL_ELEMENTS } from "../../engine/extraction.ts";
+import {
+  extractElements, INTERACTIVE_ALL, WIDE_POOL_ELEMENTS, windowAudit,
+} from "../../engine/extraction.ts";
 import { poolView } from "../../engine/pool-view.ts";
 import { poolNearEmpty, nextForInspect } from "../../engine/planning-playbook.ts";
 import { matchSelector } from "../../engine/signals.ts";
@@ -64,6 +66,28 @@ function num(v: string | boolean | string[] | undefined): number | undefined {
   if (raw === undefined) return undefined;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
+ * A2：`--pool` 调试视图——在原 PoolView 上补 bucket/prio/full_label（只读诊断字段；
+ * 主 elements 清单保持旧形状，避免把调试字段混进稳定契约）。
+ */
+function poolDebugView(
+  view: ReturnType<typeof poolView>,
+  pool: Record<string, { bucket?: string; prio?: number; full_label?: string; label?: string }>,
+): ReturnType<typeof poolView> {
+  const elements = view.elements.map((el) => {
+    const pe = pool[el.ref];
+    const extras = { ...el.extras } as Record<string, string>;
+    if (pe !== undefined) {
+      if (typeof pe.bucket === "string") extras["bucket"] = pe.bucket;
+      if (typeof pe.prio === "number") extras["prio"] = String(pe.prio);
+      const full = typeof pe.full_label === "string" ? pe.full_label : "";
+      if (full && full !== el.label) extras["full_label"] = full;
+    }
+    return { ...el, extras };
+  });
+  return { ...view, elements };
 }
 
 export async function runInspect(args: string[], ctx: CliContext): Promise<number> {
@@ -158,6 +182,9 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       page as never, true, poolMax, wide ? { widgets: true } : undefined);
     const heuristicCount = Object.values(pool).filter((e) => e.heuristic === true).length;
     const view = poolView(pool, page as never, poolMax);
+    // A2 窗口透明化：页面上**可见**的交互元素里，有多少没进本次池（被 40/120 窗口或分桶顺序
+    // 挤出）。它回答的是"窗口外还有什么"，不是"页面没有"——把信息差当场说给 Agent。
+    const windowInfo = await windowAudit(page as never, view.count, 10);
     const frameOrigins = view.frame_origins;
     // advisories（自描述运行时 · P0-B）：把「引擎已知、作者看不见」的信息差当场说出来。
     // 依据 2026-10-30 实测：3/5 次运行失败属此类（ogs.google.com 跨源 frame 1 次、
@@ -235,10 +262,13 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       elements,
       element_count: view.count,
       truncated: view.truncated,
+      // A2：窗口透明化（--json 恒有；文本模式在下面按需提示）。
+      window: windowInfo,
       ...(nearEmpty ? { pool_near_empty: true, interactive_on_page: interactiveOnPage } : {}),
       ...(wide ? { wide: true, heuristic_count: heuristicCount } : {}),
       ...(wantPool ? { frame_origins: view.frame_origins } : {}),
-      ...(wantPool ? { pool: view } : {}),
+      // --pool 是调试视图：候选补 A2 的分桶/优先级/完整 label（只在这里出现，不动 elements 清单）。
+      ...(wantPool ? { pool: poolDebugView(view, pool) } : {}),
       ...(text ? { text } : {}),
       ...(screenshotPath ? { screenshot_path: screenshotPath } : {}),
       ...(probes.length ? { probes } : {}),
@@ -253,6 +283,14 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     say(ctx, `${data.title} — ${data.url}`);
     say(ctx, `元素 ${data.element_count} 个${data.truncated ? `（只显示前 ${max}）` : ""}`);
     say(ctx, "（hints 可直接当 --hint / ctx.hint 用——不是 CSS；href 等字段是池投影，仅供识别）");
+    if (windowInfo.out_of_window_total > 0) {
+      const examples = windowInfo.out_of_window
+        .slice(0, 3)
+        .map((e) => `${e.label || e.tag} (${e.tag})`)
+        .join("、");
+      say(ctx, `ℹ ${windowInfo.out_of_window_total} 个可见交互在默认窗口外（池只展示 ${view.count}/${windowInfo.visible_interactive}）`
+        + `，例如 ${examples}——宽扫/收窄 hint 或直接观察目标；窗口不是页面事实，别把"不在池"读成"不存在"`);
+    }
     if (nearEmpty) {
       // 措辞按实测分开：页面上有交互元素而池没收进来 = 池投影问题；页面上一个都没有 =
       // SPA 未水合/渲染进 shadow DOM——前者试 --wide，后者宽扫也救不了，直接走探针/运行时取证。

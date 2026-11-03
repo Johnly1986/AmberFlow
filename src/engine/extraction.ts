@@ -36,6 +36,21 @@ export interface Elem {
   js_events?: unknown;
   js_ref?: string;
   dsh_ref?: string;
+  /**
+   * A2 分桶/可寻址（只读诊断字段；主池每个候选都有）：
+   *   full_label —— 完整可读标签（≤200 字符；`label` 仍是模型视图的前缀 40，别拿它做完整匹配）；
+   *   rect/inViewport/nearViewport —— 提取那一刻相对**当前视口**的几何（不滚动、不追视口）；
+   *   scrollDepth/inScrollContainer —— 到最近可滚动祖先的层数（0 = 不在滚动容器里）；
+   *   bucket/prio —— 分桶闭集（chrome/viewport/contentNear/mainOffscreen/other）与优先级（仅诊断）。
+   */
+  full_label?: string;
+  rect?: { top: number; left: number; width: number; height: number };
+  inViewport?: boolean;
+  nearViewport?: boolean;
+  scrollDepth?: number;
+  inScrollContainer?: boolean;
+  bucket?: PoolBucket;
+  prio?: number;
   [k: string]: unknown;
 }
 export type ElemPool = Record<string, Elem>;
@@ -356,6 +371,35 @@ export const MAX_ELEMENTS = 40;
  */
 export const WIDE_POOL_ELEMENTS = 120;
 
+/**
+ * A2 分桶闭集与配额。为什么要有配额：默认池是 40 个名额的**有界窗口**，旧排序是
+ * "main 优先"，一个长列表就能把页头 8 个按钮（排序/筛选）全部挤出窗口——Google Hotels
+ * 的「排序」菜单实测不可选。配额保证每一类页面区域都有最小可见性：
+ *   chrome       页面 chrome（nav/aside/footer/header），不受视口限制；
+ *   viewport     非 chrome 且在当前视口内（±15%）；
+ *   contentNear  非 chrome、视口外但在 ±150% 内（"快滚到"的内容）；
+ *   mainOffscreen 非 chrome、更远、且在该页 main/article 里；
+ *   other        其余（页脚外正文、侧栏外的离屏控件…）。
+ * 配额用不完时按 BUCKET_FILL_ORDER 顺延，绝不自动滚动页面（提取只观察当前视口）。
+ */
+export type PoolBucket = "chrome" | "viewport" | "contentNear" | "mainOffscreen" | "other";
+export type PoolQuotas = Record<PoolBucket, number>;
+/** 默认池（40）的分桶配额（合计 40）。 */
+export const POOL_QUOTAS: PoolQuotas = { chrome: 8, viewport: 16, contentNear: 8, mainOffscreen: 6, other: 2 };
+/** 宽扫池（120）的分桶配额（合计 120）。 */
+export const WIDE_QUOTAS: PoolQuotas = { chrome: 16, viewport: 48, contentNear: 32, mainOffscreen: 16, other: 8 };
+/** 拼接顺序（ref 编号 / 诊断展示顺序）：chrome 在前，其余按"离当前视口由近到远"。 */
+export const BUCKET_ORDER: readonly PoolBucket[] = ["chrome", "viewport", "contentNear", "mainOffscreen", "other"];
+/** 配额没填满时的顺延顺序（chrome 最后兜底：它通常量小且已配额内收全）。 */
+export const BUCKET_FILL_ORDER: readonly PoolBucket[] = ["viewport", "contentNear", "mainOffscreen", "other", "chrome"];
+
+/**
+ * A2：**决策服务单次候选上限**。评测/在线服务把候选清单当选项列表，服务侧硬上限 255；
+ * 200 是安全帽。超限不是"窗口开大一点"能解决的——那是结构化停因
+ * `decision_service_choice_limit`（收窄 hint / 用分桶优先级，而不是放大候选）。
+ */
+export const MAX_CHOICES = 200;
+
 /** Roles the accessibility snapshot renders as interactive leaves. */
 export const ARIA_INTERACTIVE_ROLES = [
   "button", "link", "textbox", "combobox", "checkbox", "radio", "searchbox",
@@ -378,6 +422,121 @@ export const COLLECT_JS = String.raw`
 `;
 
 /**
+ * A2 视口几何/分桶的唯一 JS 实现（EXTRACT_JS、WINDOW_AUDIT_JS、viewportUnderload 共用，
+ * 避免"三份口径漂移"）。
+ *
+ * 纪律：**只观察当前视口，绝不自动滚动**——桶是"这一刻的页面"的归属，不是"滚到底会看到什么"。
+ * 成本：每候选一次 getBoundingClientRect；滚动祖先用 parent→bool 缓存，单候选 O(depth)。
+ */
+export const BUCKET_HELPERS_JS = String.raw`
+  const __vw = window.innerWidth || document.documentElement.clientWidth || 0;
+  const __vh = window.innerHeight || document.documentElement.clientHeight || 0;
+  const __BUCKET_RANK = { chrome: 0, viewport: 1, contentNear: 2, mainOffscreen: 3, other: 4 };
+  const __rectOf = (e) => {
+    const r = e.getBoundingClientRect();
+    return { top: Math.round(r.top), left: Math.round(r.left), width: Math.round(r.width), height: Math.round(r.height),
+             bottom: r.bottom, right: r.right };
+  };
+  const __isChrome = (e) => { try { return !!e.closest('nav, aside, footer, header'); } catch (err) { return false; } };
+  const __inSpan = (r, mx, my) => r.bottom > -my && r.top < __vh + my && r.right > -mx && r.left < __vw + mx;
+  const __scrollCache = new Map();
+  const __isScrollable = (el) => {
+    if (!el || el === document.body || el === document.documentElement) return false;
+    let hit = __scrollCache.get(el);
+    if (hit === undefined) {
+      let cs = null;
+      try { cs = getComputedStyle(el); } catch (err) { cs = null; }
+      const oy = cs ? cs.overflowY : '', ox = cs ? cs.overflowX : '';
+      const canY = (oy === 'auto' || oy === 'scroll' || oy === 'overlay') && el.scrollHeight > el.clientHeight + 4;
+      const canX = (ox === 'auto' || ox === 'scroll' || ox === 'overlay') && el.scrollWidth > el.clientWidth + 4;
+      hit = canY || canX;
+      __scrollCache.set(el, hit);
+    }
+    return hit;
+  };
+  const __scrollDepth = (e) => {
+    let p = e.parentElement, depth = 0, guard = 0;
+    while (p && p !== document.body && p !== document.documentElement && guard < 64) {
+      if (__isScrollable(p)) return depth + 1;
+      depth += 1; guard += 1; p = p.parentElement;
+    }
+    return 0;
+  };
+  /** 候选的窗口归属（见 POOL_QUOTAS 的注释；chrome 不受视口限制）。 */
+  const __classify = (e, main) => {
+    const rect = __rectOf(e);
+    const inViewport = __inSpan(rect, __vw * 0.15, __vh * 0.15);
+    const nearViewport = __inSpan(rect, __vw * 1.5, __vh * 1.5);
+    let bucket;
+    if (__isChrome(e)) bucket = 'chrome';
+    else if (inViewport) bucket = 'viewport';
+    else if (nearViewport) bucket = 'contentNear';
+    else if (main) bucket = 'mainOffscreen';
+    else bucket = 'other';
+    const scrollDepth = __scrollDepth(e);
+    return { rect: rect, inViewport: inViewport, nearViewport: nearViewport,
+             scrollDepth: scrollDepth, inScrollContainer: scrollDepth > 0,
+             bucket: bucket, prio: __BUCKET_RANK[bucket] };
+  };
+`;
+
+/**
+ * A2 窗口透明化：页面上**可见**的交互元素里，有多少没进本次元素池（被窗口/排序挤掉），
+ * 以及它们的标签/桶。inspect 用它渲染 `window` 小节，避免 Agent 把"窗口外"误读成"页面没有"。
+ */
+export const WINDOW_AUDIT_JS = String.raw`(arg) => {
+  ${BUCKET_HELPERS_JS}
+  const WS = /[ \t\n\r\f\v]+/g;
+  const norm = (t) => (t || '').replace(/[\uE000-\uF8FF]/g, '').replace(WS, ' ').trim();
+  const all = [];
+  __collectAll(document, arg.sel, all);
+  const out = [];
+  let visible = 0;
+  for (const e of all) {
+    const hasBox = (() => { const r = e.getClientRects(); for (let k = 0; k < r.length; k++) if (r[k].width > 0 && r[k].height > 0) return true; return false; })();
+    let vis;
+    if (e.checkVisibility) vis = hasBox && e.checkVisibility({checkVisibilityCSS: true, checkOpacity: false});
+    else { const cs = getComputedStyle(e); vis = cs.display !== 'none' && cs.visibility !== 'hidden' && hasBox; }
+    if (!vis) continue;
+    visible += 1;
+    if (e.getAttribute('data-dshref')) continue;   // A4 章：该元素已在本次池里
+    const tag = e.tagName.toLowerCase();
+    const label = norm(e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText || e.getAttribute('placeholder') || e.getAttribute('value') || '').slice(0, 40);
+    if (!label && (tag === 'a' || tag === 'button')) continue;
+    const main = (!e.closest('nav, aside, footer, header') && !!e.closest('main, [role=main], article'));
+    const cls = __classify(e, main);
+    out.push({ tag: tag, label: label, prio: cls.prio, bucket: cls.bucket });
+  }
+  out.sort((a, b) => a.prio - b.prio);
+  const limit = arg.limit > 0 ? arg.limit : 10;
+  return { visible_interactive: visible, out_of_window_total: out.length, out_of_window: out.slice(0, limit) };
+}`;
+
+/**
+ * A2 `viewport_underloaded` 事实：失败路径上一次廉价探测——有可滚动容器而它的内容远高于
+ * 可视高度（虚拟列表/懒渲染的典型形态）。目标"找不到"到底是页面没有、还是**没渲染**，
+ * 这条事实让停因自己说清楚（不猜、不自动滚动）。
+ */
+export const VIEWPORT_UNDERLOAD_JS = String.raw`(arg) => {
+  const minOverflow = arg.minOverflow > 0 ? arg.minOverflow : 200;
+  const hits = [];
+  const all = document.querySelectorAll('*');
+  for (const el of all) {
+    if (el.scrollHeight > el.clientHeight + minOverflow && el.clientHeight > 40) {
+      const cs = getComputedStyle(el);
+      const oy = cs.overflowY;
+      const scrollable = oy === 'auto' || oy === 'scroll' || oy === 'overlay' || el === document.scrollingElement;
+      if (scrollable) {
+        hits.push({ tag: el.tagName.toLowerCase(), id: el.id || '',
+                    scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, rendered: el.children.length });
+      }
+    }
+    if (hits.length >= arg.limit) break;
+  }
+  return hits;
+}`;
+
+/**
  * ONE round trip for the whole page: tag, label (incl. <label>-wrapper text),
  * data-test, name, id, input type, href, visibility and the main-content flag,
  * ordered main-content-first, each winner stamped with `data-dshref` in the same
@@ -388,7 +547,10 @@ export const COLLECT_JS = String.raw`
  * `[data-dshref="e2"]` 命中两个节点——按章取元素的动作层没有别的唯一性判据。
  */
 export const EXTRACT_JS = String.raw`(arg) => {
+  ${BUCKET_HELPERS_JS}
   const sel = arg.sel, max = arg.max;
+  // A2：分桶配额（null = main-first 旧行为，policy.candidate_priority 的回退面）。
+  const quotas = arg.quotas || null;
   const WS = /[ \t\n\r\f\v]+/g;
   // Material/Google 的图标是 private-use 字形（\ue8ba 等），会出现在按钮文本里；
   // 它是装饰，不是人可读标签。先剥掉 PUA 再折叠空白，否则 Hotels 按钮的 label 会是
@@ -414,8 +576,11 @@ export const EXTRACT_JS = String.raw`(arg) => {
     } else if (!label) {
       label = norm(e.innerText || '');
     }
-    return norm(label).slice(0, 40);
+    // A2：返回**完整**标签（≤200）——模型视图仍用前 40，但 hint 匹配/诊断需要完整串
+    // （aria-label="Sort by, Not selected" 的前 40 往往截在逗号前，裸词 "Sort by" 就匹配不到）。
+    return norm(label).slice(0, 200);
   };
+  const short = (t) => String(t || '').slice(0, 40);
   const rows = [];
   const labelRows = [];   // R1a：label 延迟裁决（见下）
   const hiddenCtrls = []; // R1b：不可见表单控件的 scan 索引（见下）
@@ -464,16 +629,17 @@ export const EXTRACT_JS = String.raw`(arg) => {
         if (fid) { try { assoc = document.getElementById(fid); } catch (err2) { assoc = null; } }
       }
       if (!assoc) { try { assoc = e.querySelector('input, select, textarea, button'); } catch (err3) { assoc = null; } }
-      labelRows.push({ i: i, tag: tag, label: labelOf(e, tag),
+      const lrFull = labelOf(e, tag);
+      labelRows.push({ i: i, tag: tag, label: short(lrFull), full_label: lrFull,
         main: (!e.closest('nav, aside, footer, header') && !!e.closest('main, [role=main], article')),
         data_test: e.getAttribute('data-test') || '', name: '', id: e.id || '', input_type: '',
         role: '', content_editable: false, draggable: false, href: '', assoc: assoc });
       continue;
     }
-    const label = labelOf(e, tag);
-    if ((tag === 'a' || tag === 'button') && !label) continue;
+    const fullLabel = labelOf(e, tag);
+    if ((tag === 'a' || tag === 'button') && !fullLabel) continue;
     const href = e.getAttribute('href') || '';
-    rows.push({i: i, tag: tag, label: label,
+    rows.push({i: i, tag: tag, label: short(fullLabel), full_label: fullLabel,
                main: (!e.closest('nav, aside, footer, header') && !!e.closest('main, [role=main], article')),
                data_test: e.getAttribute('data-test') || '', name: e.getAttribute('name') || '',
                id: e.id || '', input_type: (e.getAttribute('type') || '').toLowerCase(),
@@ -519,14 +685,55 @@ export const EXTRACT_JS = String.raw`(arg) => {
     if (w.checkVisibility) wv = wb && w.checkVisibility({checkVisibilityCSS: true, checkOpacity: false});
     else { const cs = getComputedStyle(w); wv = cs.display !== 'none' && cs.visibility !== 'hidden' && wb; }
     if (!wv) continue;
-    const wl = labelOf(w, 'label') || labelOf(e, 'input');
-    rows.push({ i: wi, tag: w.tagName.toLowerCase(), label: norm(wl).slice(0, 40), main: false,
+    const wlFull = labelOf(w, 'label') || labelOf(e, 'input');
+    rows.push({ i: wi, tag: w.tagName.toLowerCase(), label: short(wlFull), full_label: norm(wlFull).slice(0, 200), main: false,
       data_test: w.getAttribute('data-test') || '', name: e.getAttribute('name') || '',
       id: w.id || e.id || '', input_type: (e.getAttribute('type') || '').toLowerCase(),
       role: (w.getAttribute('role') || '').toLowerCase(), content_editable: false, draggable: false, href: '' });
     stamped.add(wi);
   }
-  const ordered = rows.filter((r) => r.main).concat(rows.filter((r) => !r.main)).slice(0, max);
+  // A2：先给每个候选补窗口/几何字段（bucket/prio 由同一份 __classify 产出，不另写口径）。
+  for (const r of rows) {
+    const el = all[r.i];
+    if (!el) continue;
+    const cls = __classify(el, r.main === true);
+    r.rect = { top: cls.rect.top, left: cls.rect.left, width: cls.rect.width, height: cls.rect.height };
+    r.inViewport = cls.inViewport;
+    r.nearViewport = cls.nearViewport;
+    r.scrollDepth = cls.scrollDepth;
+    r.inScrollContainer = cls.inScrollContainer;
+    r.bucket = cls.bucket;
+    r.prio = cls.prio;
+  }
+  let ordered;
+  if (!quotas) {
+    // main-first 回退面（meta.policy.candidate_priority:"main-first"）：与 A2 之前逐字节同序。
+    ordered = rows.filter((r) => r.main).concat(rows.filter((r) => !r.main)).slice(0, max);
+  } else {
+    // 分桶配额：每桶按 DOM 序取至多 quota 个 → 不足部分按 BUCKET_FILL_ORDER 顺延 → 截断 max。
+    const byBucket = { chrome: [], viewport: [], contentNear: [], mainOffscreen: [], other: [] };
+    for (const r of rows) {
+      const b = r.bucket || 'other';
+      (byBucket[b] || byBucket.other).push(r);
+    }
+    const picked = [];
+    const taken = { chrome: 0, viewport: 0, contentNear: 0, mainOffscreen: 0, other: 0 };
+    for (const b of ['chrome', 'viewport', 'contentNear', 'mainOffscreen', 'other']) {
+      const q = typeof quotas[b] === 'number' ? quotas[b] : 0;
+      const arr = byBucket[b] || [];
+      const n = Math.min(q, arr.length);
+      for (let k = 0; k < n; k++) picked.push(arr[k]);
+      taken[b] = n;
+    }
+    if (picked.length < max) {
+      for (const b of ['viewport', 'contentNear', 'mainOffscreen', 'other', 'chrome']) {
+        if (picked.length >= max) break;
+        const arr = byBucket[b] || [];
+        for (let k = taken[b] || 0; k < arr.length && picked.length < max; k++) picked.push(arr[k]);
+      }
+    }
+    ordered = picked.slice(0, max);
+  }
   // A4：盖章前先清掉上一轮的旧章。ref 是**位置性**的（e0/e1…），而页面元素会换位
   //（列表插入/滚动重排/SPA 复用 DOM）：不清章时同一个元素身上还挂着旧 ref，本轮
   // 另一个元素又拿到同一个 ref，[data-dshref="e2"] 就会命中两个节点——按章取元素
@@ -543,7 +750,9 @@ export const EXTRACT_JS = String.raw`(arg) => {
     const ref = 'e' + pos;
     const stamp = nonce + '-' + ref;
     all[r.i].setAttribute('data-dshref', stamp);
-    return {ref: ref, dsh_ref: stamp, scan: r.i, tag: r.tag, label: r.label,
+    return {ref: ref, dsh_ref: stamp, scan: r.i, tag: r.tag, label: r.label, full_label: r.full_label,
+            rect: r.rect, inViewport: r.inViewport, nearViewport: r.nearViewport,
+            scrollDepth: r.scrollDepth, inScrollContainer: r.inScrollContainer, bucket: r.bucket, prio: r.prio,
             data_test: r.data_test, name: r.name, id: r.id, input_type: r.input_type, href: r.href,
             ...(r.role ? {role: r.role} : {}),
             ...(r.content_editable ? {content_editable: true} : {}),
@@ -567,6 +776,10 @@ function compile(params: string, body: string): (...args: any[]) => any {
 
 /** One-pass extractor: shadow-aware collector + the row/label/visibility pass. */
 const PASS_EXTRACT = compile("arg", `${COLLECT_JS}\nreturn (${EXTRACT_JS})(arg);`);
+/** A2：窗口透明化（inspect 用）：可见交互总数 + 被挤出窗口的候选（≤10）。 */
+const PASS_WINDOW = compile("arg", `${COLLECT_JS}\nreturn (${WINDOW_AUDIT_JS})(arg);`);
+/** A2：失败路径的 viewport_underloaded 事实（只读 DOM，一次扫描，提前退出）。 */
+const PASS_UNDERLOAD = compile("arg", `return (${VIEWPORT_UNDERLOAD_JS})(arg);`);
 /** Fallback metadata pass: {i, vis, main} for every INTERACTIVE_ALL match. */
 const META_JS = String.raw`(sel) => [...document.querySelectorAll(sel)].map((e, i) => {
             let vis;
@@ -631,6 +844,22 @@ const HINT_HEAD = String.raw`(arg) => {
                 return (e.getAttribute('aria-label') || e.getAttribute('title') || first ||
                         (e.innerText||'').trim() || e.placeholder || e.value || '').replace(/\s+/g,' ').trim();
             };
+            // A2：裸词按「大小写不敏感 + 词边界/前缀」匹配**完整**标签（不是 CSS，也不是整串全等）：
+            // aria-label="Sort by, Not selected" 必须能被 "Sort by" 命中（逗号/句点/冒号边界同样算词尾）。
+            const bareHit = (lab, dt, tok) => {
+                if (!tok) return false;
+                if (dt === tok || dt.indexOf('-' + tok) >= 0) return true;
+                if (lab === tok || lab.split(/\s+/).indexOf(tok) >= 0) return true;
+                if (lab.indexOf(tok) === 0) {
+                    const next = lab.charAt(tok.length);
+                    if (next === '' || next === ' ' || ',.:;!?'.indexOf(next) >= 0) return true;
+                }
+                if (lab.indexOf(' ' + tok + ' ') >= 0 || lab.slice(-(tok.length + 1)) === ' ' + tok) return true;
+                for (const sep of [',', '.', ':', ';', '!', '?']) {
+                    if (lab.indexOf(' ' + tok + sep) >= 0) return true;
+                }
+                return false;
+            };
             const hits = [];
             if (p.kind === 'id') {
                 all.forEach((e, i) => {
@@ -657,8 +886,7 @@ const HINT_HEAD = String.raw`(arg) => {
                 const tok = p.kind === 'nearToken' ? h : p.token;
                 all.forEach((e, i) => {
                     const lab = labelOf(e).toLowerCase(), dt = (e.getAttribute('data-test')||'').toLowerCase();
-                    if (dt === tok || dt.includes('-'+tok) || lab === tok || lab.split(/\s+/).includes(tok))
-                        hits.push(i);
+                    if (bareHit(lab, dt, tok)) hits.push(i);
                 });
             }
             return hits
@@ -672,7 +900,7 @@ const HINT_HEAD = String.raw`(arg) => {
                     const stamp = nonce + '-' + ref;
                     e.setAttribute('data-hintref', stamp);
                     return {hint_ref: stamp, scan: i, tag: e.tagName.toLowerCase(),
-                            label: labelOf(e).slice(0, 40),
+                            label: labelOf(e).slice(0, 40), full_label: labelOf(e).slice(0, 200),
                             data_test: e.getAttribute('data-test') || '',
                             name: e.getAttribute('name') || '', id: e.id || '',
                             input_type: (e.getAttribute('type') || '').toLowerCase(),
@@ -709,8 +937,23 @@ const FN_WRAPPER = compile("e", String.raw`const own = (e.value || '').trim();
  */
 export async function extractElements(
   page: PageLike, jsProbe = true, maxElements: number = MAX_ELEMENTS,
-  opts?: { widgets?: boolean },
+  opts?: {
+    widgets?: boolean;
+    /**
+     * A2 分桶配额（缺省按预算档自动选：≤40 用 POOL_QUOTAS，>40 用 WIDE_QUOTAS）。
+     * `null` = main-first 旧行为（policy.candidate_priority 的回退面）。
+     */
+    quotas?: PoolQuotas | null;
+    /** A2：`meta.policy.candidate_priority`（缺省 "bucketed"；"main-first" = 回退旧排序）。 */
+    candidatePriority?: "bucketed" | "main-first";
+  },
 ): Promise<ElemPool> {
+  // 缺省 bucketed；main-first 显式回退。quota 由预算档决定（40/120 两档常量单一出处）。
+  const quotas = opts?.candidatePriority === "main-first"
+    ? null
+    : (opts?.quotas !== undefined
+      ? opts.quotas
+      : (maxElements > MAX_ELEMENTS ? WIDE_QUOTAS : POOL_QUOTAS));
   if (jsProbe) {
     try {
       await jsInteractiveWidgets(page);
@@ -726,7 +969,7 @@ export async function extractElements(
     let rows: Elem[] | null = null;
     try {
       rows = (await frames[fi]!.evaluate(PASS_EXTRACT,
-        { sel: INTERACTIVE_ALL, max: remaining })) as Elem[] | null;
+        { sel: INTERACTIVE_ALL, max: remaining, quotas })) as Elem[] | null;
     } catch {
       rows = null;
     }
@@ -746,6 +989,62 @@ export async function extractElements(
     for (const row of extra) if (row.ref) elems[row.ref] = row;
   }
   return elems;
+}
+
+/**
+ * A2：`inspect --json` 的 `window` 小节数据——页面上可见的交互元素总数、以及**没进本次池**
+ * 的那些（被 40/120 窗口或分桶顺序挤出；≤limit 条，按桶优先级排序）。
+ * `shown` 由调用方给（池大小），这里只回答"页面有多少 / 窗口外还有哪些"。
+ */
+export async function windowAudit(
+  page: PageLike, shown: number, limit = 10,
+): Promise<{ visible_interactive: number; shown: number; out_of_window_total: number; out_of_window: Array<{ tag: string; label: string; prio: number; bucket: string }> }> {
+  type WindowRaw = { visible_interactive?: number; out_of_window_total?: number; out_of_window?: unknown };
+  let raw: WindowRaw | null = null;
+  try {
+    raw = (await page.evaluate!(PASS_WINDOW, { sel: INTERACTIVE_ALL, limit })) as WindowRaw | null;
+  } catch {
+    raw = null;
+  }
+  const rows = Array.isArray(raw?.out_of_window) ? (raw!.out_of_window as Array<Record<string, unknown>>) : [];
+  return {
+    visible_interactive: Number(raw?.visible_interactive ?? 0) || 0,
+    shown,
+    out_of_window_total: Number(raw?.out_of_window_total ?? 0) || 0,
+    out_of_window: rows.slice(0, limit).map((r) => ({
+      tag: String(r["tag"] ?? ""),
+      label: String(r["label"] ?? ""),
+      prio: Number(r["prio"] ?? 0) || 0,
+      bucket: String(r["bucket"] ?? ""),
+    })),
+  };
+}
+
+/**
+ * A2：`viewport_underloaded` 事实探测（只在 `target_not_found` 失败路径调用一次）：
+ * 页面上存在"内容远高于可视高度"的可滚动容器 ⇒ 目标可能只是**没渲染**，不是页面没有。
+ * 返回空数组 = 没有这类容器（事实不成立，停因不加这句）。
+ */
+export async function viewportUnderload(
+  page: PageLike, minOverflow = 200, limit = 5,
+): Promise<Array<{ tag: string; id: string; scrollHeight: number; clientHeight: number; rendered: number }>> {
+  let raw: unknown;
+  try {
+    raw = await page.evaluate!(PASS_UNDERLOAD, { minOverflow, limit });
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, limit).map((r) => {
+    const o = (r ?? {}) as Record<string, unknown>;
+    return {
+      tag: String(o["tag"] ?? ""),
+      id: String(o["id"] ?? ""),
+      scrollHeight: Number(o["scrollHeight"] ?? 0) || 0,
+      clientHeight: Number(o["clientHeight"] ?? 0) || 0,
+      rendered: Number(o["rendered"] ?? 0) || 0,
+    };
+  });
 }
 
 /** Batched visibility/main flags — the fallback path's ordering input. */
@@ -799,7 +1098,7 @@ export async function extractRowsPerElement(page: PageLike, maxElements: number 
       contentEditable = (await el.evaluate((n: { isContentEditable: boolean }) => n.isContentEditable)) === true;
     } catch { /* 拿不到就当 false（语义分类退回结构判据） */ }
     elems.push({
-      ref: `e${elems.length}`, scan: i, tag, label: label.slice(0, 40),
+      ref: `e${elems.length}`, scan: i, tag, label: label.slice(0, 40), full_label: label.slice(0, 200),
       data_test: (await el.getAttribute("data-test")) ?? "",
       name: (await el.getAttribute("name")) ?? "",
       id: (await el.getAttribute("id")) ?? "",
@@ -851,6 +1150,7 @@ export function lexicalOverlap(instruction: string, label: string): boolean {
  * 带 `heuristic: true` 标记，PoolView/审计可辨。
  */
 export const HEURISTIC_WIDGET_JS = String.raw`(arg) => {
+  ${BUCKET_HELPERS_JS}
   const WS = /[ \t\n\r\f\v]+/g;
   const norm = (t) => (t || '').replace(/[\uE000-\uF8FF]/g, '').replace(WS, ' ').trim();
   const all = [];
@@ -884,8 +1184,14 @@ export const HEURISTIC_WIDGET_JS = String.raw`(arg) => {
     const ref = 'e' + (arg.startRef + pos);
     e.setAttribute('data-dshref', ref);
     const tag = e.tagName.toLowerCase();
-    return { tag: tag, label: norm(e.innerText || '').slice(0, 40),
-      main: (!e.closest('nav, aside, footer, header') && !!e.closest('main, [role=main], article')),
+    const main = (!e.closest('nav, aside, footer, header') && !!e.closest('main, [role=main], article'));
+    const cls = __classify(e, main);
+    const full = norm(e.innerText || '').slice(0, 200);
+    return { tag: tag, label: full.slice(0, 40), full_label: full, main: main,
+      rect: { top: cls.rect.top, left: cls.rect.left, width: cls.rect.width, height: cls.rect.height },
+      inViewport: cls.inViewport, nearViewport: cls.nearViewport,
+      scrollDepth: cls.scrollDepth, inScrollContainer: cls.inScrollContainer,
+      bucket: cls.bucket, prio: cls.prio,
       data_test: e.getAttribute('data-test') || '', name: e.getAttribute('name') || '',
       id: e.id || '', input_type: (e.getAttribute('type') || '').toLowerCase(),
       role: (e.getAttribute('role') || '').toLowerCase() };
@@ -906,6 +1212,14 @@ export async function extractHeuristicWidgets(
       scan: -1,
       tag: String(r["tag"] ?? "div"),
       label: String(r["label"] ?? "").slice(0, 40),
+      full_label: String(r["full_label"] ?? r["label"] ?? "").slice(0, 200),
+      ...(typeof r["rect"] === "object" && r["rect"] !== null ? { rect: r["rect"] as Elem["rect"] } : {}),
+      ...(typeof r["inViewport"] === "boolean" ? { inViewport: r["inViewport"] } : {}),
+      ...(typeof r["nearViewport"] === "boolean" ? { nearViewport: r["nearViewport"] } : {}),
+      ...(typeof r["scrollDepth"] === "number" ? { scrollDepth: r["scrollDepth"] } : {}),
+      ...(typeof r["inScrollContainer"] === "boolean" ? { inScrollContainer: r["inScrollContainer"] } : {}),
+      ...(typeof r["bucket"] === "string" ? { bucket: r["bucket"] as Elem["bucket"] } : {}),
+      ...(typeof r["prio"] === "number" ? { prio: r["prio"] } : {}),
       data_test: String(r["data_test"] ?? ""),
       name: String(r["name"] ?? ""),
       id: String(r["id"] ?? ""),

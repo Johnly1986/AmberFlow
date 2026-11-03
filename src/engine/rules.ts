@@ -176,6 +176,33 @@ export interface HintCandidates {
   decided: string | null;
 }
 
+/**
+ * A2：`[aria-label~x]` / `[aria-label=y]` 的**池侧别名**。
+ *
+ * DOM 的 aria-label 在提取期已并进 label（labelOf 优先读 aria-label），池字段模型里没有
+ * 独立的 aria_label 字段——所以这类属性选择器按 `label` 匹配。提示词面的属性白名单
+ * （grammar-prompt.MATCHABLE_POOL_ATTRS）与本函数同一口径，改一处必须改另一处。
+ */
+const poolFieldFor = (attr: string): string => {
+  const k = poolAttr(attr);
+  return k === "aria-label" || k === "aria_label" || k === "ariaLabel" ? "label" : k;
+};
+
+/**
+ * A2：完整标签上的**词边界/前缀**命中（多词裸词的落点）。
+ * `Sort by` 必须能命中 `Sort by, Not selected`（逗号边界）；裸词整体仍是"宁缺勿错"的
+ * 档内歧义语义，只是新增了这一档边界证据（此前只有按空白切词的 全等/前缀/包含）。
+ */
+function boundaryHit(label: string, token: string): boolean {
+  if (!label || !token) return false;
+  if (label === token) return true;
+  if (label.startsWith(`${token} `)) return true;
+  if (label.includes(` ${token} `)) return true;
+  if (label.endsWith(` ${token}`)) return true;
+  for (const sep of [",", ".", ":", ";", "!", "?"]) if (label.includes(`${token}${sep}`)) return true;
+  return false;
+}
+
 /** The 6 hint grammars, single-parsed; `sink` (if given) records the candidate set. */
 function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | null): string | null {
   const parsed = parseHint(hint);
@@ -191,7 +218,7 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
   }
   if (parsed.kind === "attrSubstr") {
     const pre = parsed.tag;
-    const k = poolAttr(parsed.attr);
+    const k = poolFieldFor(parsed.attr);
     const v = parsed.value;
     const cf = (x: unknown): string => String(x ?? "").toLowerCase();
     const hitList = entries.filter(([, e]) => (!pre || e.tag === pre) && cf(e[k]).includes(v));
@@ -222,7 +249,7 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
     return emit(refs, 0);
   }
   if (parsed.kind === "attrEq") {
-    const k = poolAttr(parsed.attr);
+    const k = poolFieldFor(parsed.attr);
     // case-FOLDED comparison: the hint is lower-cased on entry but device ids
     // are routinely upper-case (data-test="net-CAM-1001"); a raw `==` silently
     // missed and the plan-named target fell back to laya (~0.03 conf).
@@ -261,16 +288,22 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
   // still returns null.
   const h = parsed.token;
   const whole = new Set<string>();
+  // A2：完整 label（≤200）优先——模型视图的 label 是前 40 字，遇到
+  // aria-label="Sort by, Not selected" 这类长标签会把判据截掉。
+  const boundary = new Set<string>();
   const tiers: Array<Set<string>> = [new Set(), new Set(), new Set()];
   for (const [r, e] of entries) {
-    const label = String(e.label ?? "").trim().toLowerCase();
+    const label = String(e.full_label ?? e.label ?? "").trim().toLowerCase();
     if (label === h) whole.add(r);
-    const ws = `${e.data_test ?? ""} ${e.label}`.toLowerCase().replace(/-/g, " ").split(/\s+/);
+    if (boundaryHit(label, h)) boundary.add(r);
+    const ws = `${e.data_test ?? ""} ${label}`.toLowerCase().replace(/-/g, " ").split(/\s+/);
     if (ws.some((w) => w === h)) tiers[0]!.add(r);
     else if (ws.some((w) => w.startsWith(h))) tiers[1]!.add(r);
     else if (ws.some((w) => w.includes(h))) tiers[2]!.add(r);
   }
-  const ladder = [whole, ...tiers];
+  // 档位顺序：整 label 全等 → 词全等 → **词边界/前缀**（A2 新增档，纯加档不挪旧档语义）
+  // → 词前缀 → 词包含。旧档位内仍"宁缺勿错"（真歧义 null）。
+  const ladder = [whole, tiers[0]!, boundary, tiers[1]!, tiers[2]!];
   for (let t = 0; t < ladder.length; t++) {
     const hits = ladder[t]!;
     if (hits.size) return emit([...hits], t);
