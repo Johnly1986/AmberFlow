@@ -99,6 +99,7 @@ AmberFlow 2.0.0 是**未发布**版本，正在从「可运行」走向「可交
 - [Agent / DSH 接入契约](docs/AGENT_INTERFACE.md)
 - [人工步骤与运行节奏](docs/MANUAL_STEPS_AND_PACE.md)
 - [决策服务配置](docs/DECISION_SERVICE_CONFIG.md)
+- [梯队A（v2）落地实施文档](docs/IMPLEMENTATION-PLAN-TIER-A-v2.md)
 - [安全策略](SECURITY.md)
 - [变更记录](CHANGELOG.md)
 
