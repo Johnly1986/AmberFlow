@@ -14,7 +14,8 @@
  */
 import path from "node:path";
 import {
-  disallowedHost, type BrowserMiddleware, type BrowserSession, type RunReport,
+  disallowedHost, type BrowserMiddleware, type BrowserSession, type ExecutedAction,
+  type RunReport, type SkippedAction,
 } from "../engine/executor.ts";
 import { firstOf, locatorAnyFrame, urlOf, type PageLike } from "../engine/extraction.ts";
 import { checkSignal } from "../engine/signals.ts";
@@ -53,6 +54,15 @@ export interface StepRequest {
   /** 稳定步骤标识（进 trace / step_traces / failure；缺省时按执行序号记录）。 */
   id?: string;
   timeoutMs?: number;
+  /**
+   * A1 `forceAct`（opt-in）：命令步即使 done 信号在**动作前**已成立，也先把命令闭集执行完，
+   * 执行后（全部命令走完时）再评估 done。缺省不出现 = 既有行为逐字节不变。
+   *
+   * 为什么需要显式声明：引擎当前本来就没有"done 已成立就跳过动作"的短路，默认就是先动作；
+   * 写成声明是为了给后续可能引入的 done 预判短路留 opt-out 出口，同时让脚本作者能明确
+   * 表达"这一步必须真的动一下"。dry/replay 只记录/回放声明，不重新决策。
+   */
+  forceAct?: boolean;
 }
 
 export interface StepEvidence {
@@ -71,6 +81,18 @@ export interface StepResult {
   /** 引擎给出的人可读原因（与 `stopCode` 配对；排障/分支用，**不是**模型自由文本）。 */
   reason?: string;
   evidence: StepEvidence;
+  /**
+   * A1 动作执行证据（全部可选：缺字段 = 该事实不适用，不硬造）。
+   * `executed=false` + `skipped_actions` 是"完成裁决为真、但一个动作都没执行"的显式证据，
+   * 让脚本/Agent 分得清"信号本来就成立"与"动作推进了页面"。
+   */
+  executed?: boolean;
+  executed_actions?: ExecutedAction[];
+  skipped_actions?: SkippedAction[];
+  /** 命令步在动作前对 done 的预评估结果（仅命令步出现；不改变执行顺序）。 */
+  done_preheld?: boolean;
+  /** 运行期诚实性警告（如 suspected_async）。只在产生时出现。 */
+  warnings?: string[];
 }
 
 export interface SourceObservationView {
@@ -404,6 +426,7 @@ export function createCtx(deps: CtxDeps): Ctx {
   const runOneStep = async (desc: string, req: {
     url?: string; done: DomSignal | Record<string, unknown>; act?: TargetDecl | CommandDecl[];
     slots?: Record<string, string>; when?: DomSignal | null; id?: string; timeoutMs?: number;
+    forceAct?: boolean;
   }): Promise<StepResult> => {
     assertOpen(`ctx.step(${JSON.stringify(desc)})`);
     checkBudget();
@@ -444,6 +467,8 @@ export function createCtx(deps: CtxDeps): Ctx {
       verbose: deps.verbose === true,
     };
     if (req.when !== undefined && req.when !== null) opts["precondition"] = req.when;
+    // A1 forceAct：只把声明透传给执行器（缺省不出现 = 既有行为不变；执行器只记录、不改变顺序）。
+    if (req.forceAct === true) opts["forceAct"] = true;
     Object.assign(opts, req.act === undefined ? {} : targetOptions(req.act));
     let rep: RunReport;
     try {
@@ -470,6 +495,12 @@ export function createCtx(deps: CtxDeps): Ctx {
       ...(rep.stop_code === undefined ? {} : { stopCode: rep.stop_code }),
       ...(reason === undefined ? {} : { reason }),
       evidence: { url: landed, attempts: 1, elapsedMs: Date.now() - started, pageState: landedState },
+      // A1 动作执行证据：执行器只在有事实时给字段，这里原样透出（缺省不硬造）。
+      ...(rep.executed === undefined ? {} : { executed: rep.executed }),
+      ...(rep.executed_actions === undefined ? {} : { executed_actions: rep.executed_actions }),
+      ...(rep.skipped_actions === undefined ? {} : { skipped_actions: rep.skipped_actions }),
+      ...(rep.done_preheld === undefined ? {} : { done_preheld: rep.done_preheld }),
+      ...(rep.warnings === undefined ? {} : { warnings: rep.warnings }),
     };
     record(result.ok, {
       desc, url: landed,
@@ -489,6 +520,13 @@ export function createCtx(deps: CtxDeps): Ctx {
           pool_version: landedState.poolVersion,
           frame_origins: landedState.frameOrigins,
         },
+        // A1：动作执行证据同样进 trace event 的 result——app-runner 的 step_traces 与
+        // report.md 的动作证据小节都从这一份投影（缺省不出现，旧产物形状不变）。
+        ...(result.executed === undefined ? {} : { executed: result.executed }),
+        ...(result.executed_actions === undefined ? {} : { executed_actions: result.executed_actions }),
+        ...(result.skipped_actions === undefined ? {} : { skipped_actions: result.skipped_actions }),
+        ...(result.done_preheld === undefined ? {} : { done_preheld: result.done_preheld }),
+        ...(result.warnings === undefined ? {} : { warnings: result.warnings }),
       },
     });
     return result;

@@ -243,6 +243,37 @@ export interface AuditVerdictLike {
   auditor: string;
 }
 
+/** A1：一次**实际执行**的动作（`RunReport.executed_actions`；StepResult 同名面透出）。 */
+export interface ExecutedAction {
+  /** 动作 op（命令闭集的 op；决策步从 how 归一成 click/fill/select/scroll/drag）。 */
+  op: string;
+  /** 命令声明里的目标；决策步/无命令声明时为 null。 */
+  target: string | null;
+  /** 元素 ref（位置性编号，进 trace 便于对账）。 */
+  ref: string;
+  how: "clicked" | "filled" | "scrolled" | "dragged";
+  desc: string;
+  /** pre/post 快照是否变化（scroll/drag 的 viewport 变化不在快照里，见 inert 口径）。 */
+  changed: boolean;
+}
+
+/**
+ * A1：一个**本该动作却没执行**的候选/命令 + 原因（零执行步骤的显式证据）。
+ *
+ * 为什么需要它：`done=true` + 零执行是合法的（信号本来就成立），但"零执行"不该等于
+ * "没有证据"——旧 trace 只留下一条 `executed:false` 的行，作者看不出是哪个命令、
+ * 因为什么被跳过。skipped_actions 把每一条"为什么没动作"落成结构化数据。
+ */
+export interface SkippedAction {
+  command_id?: string;
+  ref?: string;
+  target?: string | null;
+  /** 结构化原因：target_ambiguous / target_not_found / forbidden / not-actionable-or-covered /
+   *  action-timeout / stale_ref / needs_value / action_unsupported / action_failed … */
+  reason: string;
+  detail?: string;
+}
+
 export interface RunReport {
   goal: string;
   done: boolean;
@@ -267,6 +298,18 @@ export interface RunReport {
     target?: string | null;
     candidates?: string[];
   };
+  /**
+   * A1 动作执行证据（全部可选：缺字段 = 该事实不适用，不硬造）。
+   * `executed` 只在**有动作面**的步（命令步/发生过动作尝试）出现：false = 声明了动作但
+   * 一个都没执行（见 skipped_actions），true = 至少执行了一个（见 executed_actions）。
+   */
+  executed?: boolean;
+  executed_actions?: ExecutedAction[];
+  skipped_actions?: SkippedAction[];
+  /** 命令步在解析/动作前对 done 信号的预评估结果（仅命令步出现；不改变执行顺序）。 */
+  done_preheld?: boolean;
+  /** 运行期诚实性警告（如 suspected_async）；只在产生时出现。 */
+  warnings?: string[];
 }
 
 /**
@@ -397,6 +440,16 @@ export interface RunOptions {
    * Absent ⇒ today's behaviour, byte-identical.
    */
   commands?: CommandDecl[] | null;
+  /**
+   * A1 `forceAct`（opt-in，声明面；缺省不出现 = 今天的行为逐字节不变）：
+   * 命令步即使 done 信号在动作前已成立，也**先把命令闭集执行完**，执行后再评估 done。
+   *
+   * 为什么需要这个开关：A1 之前引擎没有任何"done 已成立就跳过动作"的短路，所以缺省
+   * 本来就是"先动作"；把这一点**显式声明出来**，是为了让后续可能引入的 done 预判短路
+   * 有 opt-out 出口，同时脚本作者能明确表达"这一步必须真的动一下"。A1 只记录声明，
+   * dry/replay 只传递声明、不重新决策（`dry` 仍 ok:true；`replay` 按录制序列）。
+   */
+  forceAct?: boolean;
   /**
    * NL Flow S1：`dataset` 绑定来源的读取面。
    * 命令参数可声明 `{"from":"dataset","key":"…"}` 引用**前序步骤的具名产出**；
@@ -1951,6 +2004,7 @@ export class BrowserMiddleware {
       poolReadyPollMs = 100,
       donePollMs = 120,
       doneTimeoutMs = 2000,
+      forceAct = false,
     } = opts;
 
     // The navigation envelope: run-level declaration wins, else the middleware's
@@ -1991,6 +2045,38 @@ export class BrowserMiddleware {
     const refCollision = (): Record<string, unknown> => {
       const c = this._drainRefCollisions();
       return c === null ? {} : { ref_collision: c };
+    };
+    // A1 动作执行证据（全部"有才出现"）：
+    //   executedCount  —— 本子目标真的执行了几个动作（零执行步骤的判据）；
+    //   skippedActions —— "为什么没有动作"的结构化原因（命令被禁/目标歧义/不可操作/缺值…）；
+    //   warnings       —— 运行期诚实警告（如 suspected_async）；
+    //   donePreheld    —— 命令步动作前对 done 的一次预评估（只记录，不改变执行顺序）。
+    let executedCount = 0;
+    const skippedActions: SkippedAction[] = [];
+    const warnings: string[] = [];
+    let donePreheld: boolean | null = null;
+    /** 零执行摘要（A1 §2.2.2）：命令闭集走完而一个动作都没执行时，把跳过证据写进停因文案。 */
+    const zeroExecSummary = (): string => {
+      if (executedCount > 0) return "";
+      const why = skippedActions.slice(0, 6)
+        .map((s) => `${s.command_id ?? s.ref ?? "?"}:${s.reason}`)
+        .join(", ");
+      return ` — executed 0 action(s); skipped: ${why || "-"}; see skipped_actions`;
+    };
+    /** 挂在动作/尝试 trace 行上的声明面证据（缺省不出现；每步开头重置 donePreheld）。 */
+    const actionDeclEvidence = (): Record<string, unknown> => ({
+      ...(donePreheld === true ? { done_preheld: true } : {}),
+      ...(forceAct ? { force_act: true } : {}),
+    });
+    /** A1：一条被跳过的命令/动作（原因单一出处，trace 行与 skipped_actions 共用）。
+     *  同一 (command_id, ref, reason) 只记一次——多步 walk 里同一命令被"已禁"而越过多轮时，
+     *  重复条目只会让产物变长，不增加信息。 */
+    const seenSkipped = new Set<string>();
+    const noteSkipped = (s: SkippedAction): void => {
+      const key = `${s.command_id ?? ""}\u0000${s.ref ?? ""}\u0000${s.reason}`;
+      if (seenSkipped.has(key)) return;
+      seenSkipped.add(key);
+      skippedActions.push(s);
     };
     // A1 子改动③：逐步动作后的轻量 after 签名 {url, pool_size, first_text}，挂在**已执行动作**
     // 的 trace 事件上。动作事件先落账，签名在下一次观察（下一动作步首的那次池提取——内存里
@@ -2144,6 +2230,9 @@ export class BrowserMiddleware {
       }
 
       for (let stepNo = 1; stepNo <= this.maxSteps; stepNo++) {
+        // A1：done_preheld 是**逐步**事实——每步开头重置，避免上一步的值被本步的 trace 行
+        // 或最终 RunReport 误带（只有命令步会在下面重新评估它）。
+        donePreheld = null;
         // P0 pool ready gate：SPA 的 domcontentloaded 可能先于交互元素渲染。
         // 这里只做“pool 非空”这一件事；目标是否存在、动作是否可执行仍由后面分支判断。
         let elems: ElemPool;
@@ -2183,6 +2272,20 @@ export class BrowserMiddleware {
             + `(poolReadyTimeoutMs=${poolReadyTimeoutMs}) on step ${stepNo}`, stepNo);
           if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
+        }
+        // A1 §2.2.3：命令步在解析/动作前评估一次 done 并记录 done_preheld（**决策步不付**这次
+        // 评估）。默认不改变执行：既有流程照旧动作，这个记录只回答"动作前信号是否已成立"——
+        // 否则一次 done=true 分不清是"动作推进了页面"还是"信号本来就成立、动作只是搭便车"。
+        // forceAct 的语义是"即使已成立也先把闭集执行完再评估"，与现状一致，故只记录声明。
+        if (cmdSpace.length > 0 && goalSignalFn && !dryRun) {
+          try {
+            donePreheld = (await goalSignalFn(pg)) === true;
+          } catch (e) {
+            // 预评估只是**证据**，不是完成裁决：信号本身有问题时不要把它变成比真正停因
+            // 更早的崩溃。动作后的既有评估点照常暴露错误（那才是会改变结论的评估）。
+            donePreheld = null;
+            warnings.push(`done_preheld_probe_failed: ${describeActionError(e)}`);
+          }
         }
         // OUTCOME MEMORY: skip elements a previous attempt already proved inert on
         // this page+subgoal — but only while something else remains to choose from
@@ -2255,8 +2358,17 @@ export class BrowserMiddleware {
             }
             pruneForbids(elems);
             if (r !== null && !(r in forbidden)) { cmdPick = { cmd: c, ref: r, index: i }; break; }
-            if (r === null) { pendingUnresolved.push(c.id); continue; }
+            if (r === null) {
+              pendingUnresolved.push(c.id);
+              noteSkipped({ command_id: c.id, target: c.target ?? null, reason: "target_not_found" });
+              continue;
+            }
             // resolved but forbidden: that command's action already ran or died — walk past it.
+            // A1：这也是"没有动作"的一条证据——为什么这条命令被跳过（此前只剩一条无主 trace 行）。
+            noteSkipped({
+              command_id: c.id, target: c.target ?? null, ref: r, reason: "forbidden",
+              ...(forbidWhy[r] === undefined ? {} : { detail: forbidWhy[r] }),
+            });
             cmdDone.add(c.id);
             cmdI = i + 1;
           }
@@ -2269,9 +2381,18 @@ export class BrowserMiddleware {
             });
             if (ambiguous?.target) {
               const cand = hintCandidates(ambiguous.target, elems)!;
+              // A1：歧义的每个候选都进 skipped_actions——零执行不能只剩一句停因文案。
+              for (const candRef of cand.refs) {
+                noteSkipped({
+                  command_id: ambiguous.id, target: ambiguous.target, ref: candRef,
+                  reason: "target_ambiguous",
+                  detail: `${cand.refs.length} distinct candidates for ${JSON.stringify(ambiguous.target)}; never guessed`,
+                });
+              }
               stop("target_ambiguous",
                 `command ${JSON.stringify(ambiguous.id)} matches ${cand.refs.length} distinct candidates `
-                + `(${cand.refs.join(", ")}) for target ${JSON.stringify(ambiguous.target)} on step ${stepNo}`, stepNo);
+                + `(${cand.refs.join(", ")}) for target ${JSON.stringify(ambiguous.target)} on step ${stepNo}`
+                + zeroExecSummary(), stepNo);
               if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
               break;
             }
@@ -2281,12 +2402,16 @@ export class BrowserMiddleware {
               // 这让"零动作验证步"（skip+done）从机制性必死变成合法可用。
               if (goalSignalFn && (await goalSignalFn(pg))) {
                 done = true;
-                stop("dom_goal_signal", "dom goal signal (commands resolved without action; signal held)", stepNo);
+                // A1 §2.2.2：done 成立但一个动作都没执行时，停因文案必须带上跳过摘要
+                //（done 来自"信号本来就成立"，不是伪造的执行证据）。
+                stop("dom_goal_signal",
+                  `dom goal signal (commands resolved without action; signal held)${zeroExecSummary()}`, stepNo);
                 if (verbose) console.log(`  step ${stepNo}: -> done (signal held after exhausted commands, 04-A)`);
                 break;
               }
               stop("done_not_held",
-                `commands exhausted (${cmdDone.size}/${cmdSpace.length} acted) but the done-signal never held on step ${stepNo}`, stepNo);
+                `commands exhausted (${cmdDone.size}/${cmdSpace.length} acted) but the done-signal never held on step ${stepNo}`
+                + zeroExecSummary(), stepNo);
             } else {
               stop("target_not_found",
                 `command space matches nothing on this page — pending unresolved: `
@@ -2765,7 +2890,7 @@ export class BrowserMiddleware {
             dry_run: true, actionable: probe.actionable,
             ...(probe.reason === null ? {} : { reason: probe.reason }),
             would: `${el.tag} "${el.label}"`, url: urlOf(pg),
-            ...refCollision(),
+            ...actionDeclEvidence(), ...refCollision(),
           });
           if (verbose) {
             console.log(`  step ${stepNo}: DRY-RUN `
@@ -2777,7 +2902,12 @@ export class BrowserMiddleware {
         // structurally, and never with a guessed value. (The substring-heuristic path
         // below is the old behaviour; a command space replaces guessing with binding.)
         if (commandMode && commandBindMissing !== null) {
-          trace.push({ step: stepNo, desc, how: "needs_value", executed: false, method, conf: 1.0, command: cmdPick!.cmd.id, url: urlOf(pg), ...refCollision() });
+          noteSkipped({ command_id: cmdPick!.cmd.id, target: cmdPick!.cmd.target ?? null, ref: cmdPick!.ref, reason: "needs_value", detail: commandBindMissing });
+          trace.push({
+            step: stepNo, desc, how: "needs_value", executed: false, method, conf: 1.0,
+            command: cmdPick!.cmd.id, ref: cmdPick!.ref, skipped: true, skip_reason: "needs_value",
+            url: urlOf(pg), ...actionDeclEvidence(), ...refCollision(),
+          });
           stop("needs_value",
             `command ${JSON.stringify(cmdPick!.cmd.id)}: ${commandBindMissing} `
             + `— a declared binding either has its value in the plan or the step stops (红线②: never guessed) on step ${stepNo}`, stepNo);
@@ -2800,7 +2930,12 @@ export class BrowserMiddleware {
           // never filled.
           if (this._slotValue(el, slots) === null && !this._isSubmit(el)) {
             forbid(ref, el, "needs_value");
-            trace.push({ step: stepNo, desc, how: "needs_value", executed: false, method, conf: round3(conf), url: urlOf(pg), ...refCollision() });
+            noteSkipped({ ref, reason: "needs_value", ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
+            trace.push({
+              step: stepNo, desc, how: "needs_value", executed: false, method, conf: round3(conf),
+              ref, skipped: true, skip_reason: "needs_value", url: urlOf(pg),
+              ...actionDeclEvidence(), ...refCollision(),
+            });
             if (verbose) console.log(`  step ${stepNo}: (needs_value, rule) -> skip ${ref}`);
             continue;
           }
@@ -2821,7 +2956,12 @@ export class BrowserMiddleware {
           confirmed = await this.confirmFn(desc);
           if (!confirmed) {
             forbid(ref, el, "risk-declined");
-            trace.push({ step: stepNo, desc, risky: true, executed: false, confirmed: false, url: urlOf(pg), ...refCollision() });
+            noteSkipped({ ref, reason: "risk-declined", ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
+            trace.push({
+              step: stepNo, desc, risky: true, executed: false, confirmed: false, url: urlOf(pg),
+              ref, skipped: true, skip_reason: "risk-declined",
+              ...actionDeclEvidence(), ...refCollision(),
+            });
             continue;
           }
         }
@@ -2848,7 +2988,13 @@ export class BrowserMiddleware {
             if (reason.startsWith("not-actionable-or-covered") && !reAdmitted.has(ref)) {
               blockedRetry[ref] = [stepNo, trace.length];
             }
-            trace.push({ step: stepNo, desc, how: reason, executed: false, method, conf: round3(conf), url: urlOf(pg), ...refCollision() });
+            // A1：动作阶段没执行成 —— skipped_actions 记原因与命令身份（零执行步骤的证据）。
+            noteSkipped({ ref, reason, ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
+            trace.push({
+              step: stepNo, desc, how: reason, executed: false, method, conf: round3(conf),
+              ref, skipped: true, skip_reason: reason, url: urlOf(pg),
+              ...actionDeclEvidence(), ...refCollision(),
+            });
             if (verbose) console.log(`  step ${stepNo}: (${reason}, ${method}) -> skip ${ref}`);
             continue;
           }
@@ -2874,19 +3020,27 @@ export class BrowserMiddleware {
           // needs_value / stale_ref: this element cannot advance the plan right
           // now; forbid and try another (no model call).
           forbid(ref, el, String(how));
+          // A1：动作阶段失败同样是"为什么没有动作"的证据（stale_ref/needs_value/
+          // action_unsupported/action_failed 都走这里）。
+          noteSkipped({ ref, reason: String(how), ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
           trace.push({
             step: stepNo, desc, how,
             executed: false, method, conf: round3(conf),
+            ref, skipped: true, skip_reason: String(how),
             ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
             url: urlOf(pg),
-            ...refCollision(),
+            ...actionDeclEvidence(), ...refCollision(),
           });
           if (verbose) console.log(`  step ${stepNo}: (${how}, ${method}) -> skip ${ref}`);
           continue;
         }
         const post = await this.snapshot(pg);
+        // A1：changed = pre/post 快照是否变化（诚实字段，供审查判"点击成功但页面没动"）。
+        const changed = JSON.stringify(pre) !== JSON.stringify(post);
         // scroll 改变的是 viewport，不是 url/text/input 快照；不能把“快照没变”误判成 inert。
-        const inert = (how === "scrolled" || how === "dragged") ? false : JSON.stringify(pre) === JSON.stringify(post);
+        const inert = (how === "scrolled" || how === "dragged") ? false : !changed;
+        // A1：本子目标真的执行了几个动作（零执行步骤的判据）。
+        executedCount += 1;
         // P2: an executed command is ACTED whether or not the page moved — the walk
         // must not re-drive the same command next step (its element is forbidden on
         // inert anyway, but the closed set advances by the command's identity, not the
@@ -2895,10 +3049,35 @@ export class BrowserMiddleware {
           cmdDone.add(cmdPick.cmd.id);
           cmdI = cmdPick.index + 1;
         }
+        // A1：动作身份（op/ref/target）落 trace —— executed_actions / skipped_actions 从这里对账。
+        const actionOp = commandMode && cmdPick ? String(cmdPick.cmd.op)
+          : how === "filled" ? (el.tag === "select" ? "select" : "fill")
+          : how === "scrolled" ? "scroll"
+          : how === "dragged" ? "drag"
+          : "click";
+        // A1 §2.2.5：click 执行了、但 pre/post 快照没变，随后 done 却成立 —— 这不是"死元素"，
+        // 而是效果异步到达（实测形态：点击后 1s 才长出新行）。此时必须记 suspected_async 警告，
+        // 而不是 forbid + 写 outcome memory inert（那会把一次有效动作记成死元素，跨运行继续误伤）。
+        const flagSuspectedAsync = (): void => {
+          if (how !== "clicked" || changed) return;
+          const idx = pendingAfterIdx;
+          const row = idx === null ? undefined : trace[idx];
+          if (row !== undefined) {
+            row.inert = false;            // 不是 inert：效果在快照之后到达
+            row.suspected_async = true;
+          }
+          const warning = `suspected_async: click on ${el.tag} "${el.label}" did not change the pre/post `
+            + `snapshot, but the done signal held afterwards (step ${stepNo})`;
+          warnings.push(warning);
+          if (verbose) console.log(`  step ${stepNo}: ${warning}`);
+        };
         trace.push({
           step: stepNo, desc, how, value: redactValue(el, arg), risky, executed, confirmed, method,
           decision_kind: decisionKind,
           conf: round3(conf), ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
+          ref, op: actionOp,
+          ...(cmdPick?.cmd.target !== undefined && cmdPick.cmd.target !== "" ? { target: cmdPick.cmd.target } : {}),
+          changed,
           ...(nominatedRepair ? { nominated_family_repair: true } : {}),
           ...(decisionKind === "model" && layaMargin !== null
             ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}),
@@ -2907,7 +3086,7 @@ export class BrowserMiddleware {
           ...(noted ? { noted: Object.keys(noted).length } : {}),
           ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question
           inert, url: urlOf(pg),
-          ...refCollision(),
+          ...actionDeclEvidence(), ...refCollision(),
         });
         // A1 子改动③：这个已执行动作的 after 签名等下一次观察落账（见循环头部的落账点）。
         pendingAfterIdx = trace.length - 1;
@@ -2955,6 +3134,7 @@ export class BrowserMiddleware {
             }
           }
           done = true;
+          flagSuspectedAsync();
           stop("dom_goal_signal", "dom goal signal", stepNo);
           break;
         }
@@ -2982,6 +3162,7 @@ export class BrowserMiddleware {
               poll++;
               if (await goalSignalFn(pg)) {
                 done = true;
+                flagSuspectedAsync();
                 stop("dom_goal_signal", "dom goal signal", stepNo);
                 if (verbose) {
                   console.log(`  step ${stepNo}: -> done (dom goal signal, `
@@ -3066,7 +3247,15 @@ export class BrowserMiddleware {
         }
         // Inert action on this element -> forbid it for the rest of the subgoal
         // regardless of method (this is what killed the Sign-in loops).
+        // A1 §2.2.5：**done 在动作前已成立**（done_preheld）时，click 快照没变不能判死元素——
+        // 动作可能是异步生效，或 done 本来就成立、这次动作只是搭便车。记 suspected_async 警告，
+        // 不 forbid、不写 outcome memory inert（否则会把一次有效动作记成死元素，跨运行继续误伤）。
+        // 动作后 done 成立的路径在这之前已 break，不会走到这里。
         if (inert) {
+          if (how === "clicked" && donePreheld === true) {
+            flagSuspectedAsync();
+            continue;
+          }
           forbid(ref, el, "inert");
           outcomeMemory?.record(outcomeMemory.key(urlOf(pg), instruction), JSON.stringify(esig(el)), "inert");
           continue;
@@ -3104,9 +3293,34 @@ export class BrowserMiddleware {
       pool_size: lastPoolSize,
       ...(poolReady ? { waited_ms: lastPoolWaitedMs } : {}),
     } : undefined;
+    // A1 动作执行证据汇总（只从 trace 汇总一次，不新增页面往返）：
+    //   executed        —— 本子目标是否有动作真的执行（有动作面时必答；缺字段 = 没有动作面）；
+    //   executed_actions—— 每个已执行动作的 op/ref/target/how/changed；
+    //   skipped_actions —— 每条"为什么没动作"的结构化原因（见 skippedActions）；
+    //   done_preheld    —— 命令步动作前的 done 预评估（缺字段 = 本步不是命令步/没信号）；
+    //   warnings        —— suspected_async 等运行期诚实话。
+    // 动作行 = 有 changed（执行过）或有 skipped（尝试过但没执行）的行；manual 等非动作行不混进来。
+    const actionRows = trace.filter((t) =>
+      Object.prototype.hasOwnProperty.call(t, "changed") || t["skipped"] === true);
+    const executedRows = actionRows.filter((t) => t["executed"] === true
+      && ["clicked", "filled", "scrolled", "dragged"].includes(String(t["how"] ?? "")));
+    const hasActionFace = cmdSpace.length > 0 || actionRows.length > 0;
+    const executedActions: ExecutedAction[] = executedRows.map((t) => ({
+      op: String(t["op"] ?? t["how"] ?? "click"),
+      target: typeof t["target"] === "string" ? t["target"] : null,
+      ref: String(t["ref"] ?? ""),
+      how: String(t["how"] ?? "clicked") as ExecutedAction["how"],
+      desc: String(t["desc"] ?? ""),
+      changed: t["changed"] === true,
+    }));
     return {
       goal: instruction, done, stop_reason: stopReason, steps: trace, audit: verdict,
       stop_code: stopCode,
+      ...(hasActionFace ? { executed: executedRows.length > 0 } : {}),
+      ...(executedActions.length ? { executed_actions: executedActions } : {}),
+      ...(skippedActions.length ? { skipped_actions: skippedActions.slice(0, 20) } : {}),
+      ...(donePreheld !== null ? { done_preheld: donePreheld } : {}),
+      ...(warnings.length ? { warnings } : {}),
       ...(diagnostics !== undefined ? { diagnostics } : {}),
       ...(stopStep !== undefined ? { stop_step: stopStep } : {}),
       ...(manualDone ? { manual: true } : {}),

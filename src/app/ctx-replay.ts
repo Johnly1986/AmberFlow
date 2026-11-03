@@ -47,15 +47,26 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
 
   const stepResult = (ev: TraceEvent): StepResult => {
     const ok = ev.ok === true;
-    const recorded = isObj(ev.result) && typeof ev.result["reason"] === "string"
-      ? ev.result["reason"] as string
-      : undefined;
+    const rec = isObj(ev.result) ? ev.result : {};
+    const recorded = typeof rec["reason"] === "string" ? rec["reason"] as string : undefined;
+    // A1：动作执行证据按**录制值**回放（不重新决策）——旧 trace 没有这些键时整组省略，
+    // 与记录那次运行的产物形状一致。
+    const recExecuted = rec["executed"];
+    const recActions = rec["executed_actions"];
+    const recSkipped = rec["skipped_actions"];
+    const recPreheld = rec["done_preheld"];
+    const recWarnings = rec["warnings"];
     return {
       ok,
       ...(ev.id === undefined ? {} : { id: ev.id }),
       ...(ev.stop_code === undefined ? {} : { stopCode: ev.stop_code }),
       ...(recorded === undefined ? {} : { reason: recorded }),
       evidence: { url: ev.url ?? currentUrl, attempts: 1, elapsedMs: 0 },
+      ...(typeof recExecuted === "boolean" ? { executed: recExecuted } : {}),
+      ...(Array.isArray(recActions) ? { executed_actions: recActions as StepResult["executed_actions"] } : {}),
+      ...(Array.isArray(recSkipped) ? { skipped_actions: recSkipped as StepResult["skipped_actions"] } : {}),
+      ...(typeof recPreheld === "boolean" ? { done_preheld: recPreheld } : {}),
+      ...(Array.isArray(recWarnings) ? { warnings: recWarnings as string[] } : {}),
     };
   };
 

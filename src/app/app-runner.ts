@@ -43,7 +43,10 @@ import { type CachedRuntime, type DecisionCacheStats } from "../model/decision-c
 import { checkArtifacts, missingPieces, modelConfigError } from "../model/model-artifacts.ts";
 import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
 import { activeProviderInfo, applySpecToRuntime, resolveProviderSpec, type ProviderInfo } from "../model/decision-provider.ts";
-import { BrowserMiddleware, browserSession, disallowedHost, type BrowserSession } from "../engine/executor.ts";
+import {
+  BrowserMiddleware, browserSession, disallowedHost,
+  type BrowserSession, type ExecutedAction, type SkippedAction,
+} from "../engine/executor.ts";
 import { urlOf } from "../engine/extraction.ts";
 import { REPO } from "../flow/flow.ts";
 import { installLayaRuntime } from "../model/model.ts";
@@ -695,6 +698,17 @@ export interface AppRunResult {
     recovered?: boolean;
     /** 恢复它的后续 step 标识/描述（仅 recovered=true 时出现）。 */
     recovered_by?: string | null;
+    /**
+     * A1 动作执行证据（全部缺省省略）：`executed=false` + `skipped_actions` 是"完成裁决为真、
+     * 但一个动作都没执行"的显式证据——让"信号本来就成立"与"动作推进了页面"分得开。
+     */
+    executed?: boolean;
+    executed_actions?: ExecutedAction[];
+    skipped_actions?: SkippedAction[];
+    /** 命令步动作前对 done 的预评估结果。 */
+    done_preheld?: boolean;
+    /** 运行期诚实性警告（如 suspected_async）。 */
+    warnings?: string[];
   }>;
   /** `ctx.log` 摘要（Agent 不必再读 emit-trace 就能看到业务事实）。 */
   logs?: Array<{ i: number; desc: string; result?: unknown }>;
@@ -1667,6 +1681,35 @@ export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): st
       L.push(`| ${t.index + 1} | ${t.id ?? "-"} | ${t.desc.slice(0, 80)} | ${t.status} | ${t.url ?? "-"} | ${t.stop_code ?? "-"} |`);
     }
   }
+  // A1：动作执行证据小节——"执行了什么"与"为什么没执行"各一张表；没有证据的旧运行整节省略。
+  const actionEvidence = (r.step_traces ?? []).filter((t) =>
+    t.executed !== undefined || (t.executed_actions ?? []).length > 0
+    || (t.skipped_actions ?? []).length > 0 || t.done_preheld !== undefined
+    || (t.warnings ?? []).length > 0);
+  if (actionEvidence.length) {
+    L.push("", "## 动作执行证据（A1：执行了什么 / 为什么没执行）", "",
+      "| # | id | executed | 执行动作（ref / how / changed） | 跳过（命令/候选 · 原因） | done_preheld | 警告 |",
+      "|---|---|---|---|---|---|---|");
+    for (const t of actionEvidence) {
+      const acts = (t.executed_actions ?? [])
+        .map((a) => `\`${a.op}\` ${a.ref} ${a.how}${a.changed ? "" : " · changed=false"}${a.target ? ` · ${a.target}` : ""}`)
+        .join("<br>") || "-";
+      const skips = (t.skipped_actions ?? [])
+        .map((x) => `${x.command_id ?? x.ref ?? "?"}: \`${x.reason}\`${x.detail ? ` — ${String(x.detail).slice(0, 80)}` : ""}`)
+        .join("<br>") || "-";
+      L.push(`| ${t.index + 1} | ${t.id ?? "-"} | ${t.executed === undefined ? "-" : String(t.executed)} `
+        + `| ${acts} | ${skips} | ${t.done_preheld === undefined ? "-" : String(t.done_preheld)} `
+        + `| ${(t.warnings ?? []).join("；") || "-"} |`);
+    }
+    if (actionEvidence.some((t) => t.done_preheld === true)) {
+      L.push("", "- ⚠ **done 预成立**：`done_preheld=true` = 完成信号在动作**之前**已成立——这一步的"
+        + "`done` 来自信号本身，不是这次动作推进出来的（声明 `forceAct` 时仍会执行动作）。");
+    }
+    if (actionEvidence.some((t) => t.executed === false && (t.skipped_actions ?? []).length > 0)) {
+      L.push("- 零执行步骤：`executed=false` 且有 `skipped_actions` —— 完成裁决为真但一个动作都没执行，"
+        + "跳过原因见上表（不是静默 done）。");
+    }
+  }
   if (r.tool_steps.length) {
     L.push("", "## 动作腿：工具步（命令行）", "",
       "| # | 步骤 | 数据源 | 退出码 | 结论 | 尝试 | 干跑 |", "|---|---|---|---|---|---|---|");
@@ -2183,6 +2226,15 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     const executed = group.filter((s) => s.executed === true);
     // A1 子改动③：after 签名与 hows 一一对齐；全 null 时整字段省略（产物最小纪律）。
     const afters = executed.map((s) => asAfterSignature(s.after));
+    // A1：动作执行证据来自该步的 trace event result（ctx 从 RunReport 原样透出；缺省不出现）。
+    const evResult = (typeof e.result === "object" && e.result !== null && !Array.isArray(e.result))
+      ? e.result as Record<string, unknown>
+      : {};
+    const evExecuted = evResult["executed"];
+    const evExecActions = evResult["executed_actions"];
+    const evSkipped = evResult["skipped_actions"];
+    const evPreheld = evResult["done_preheld"];
+    const evWarnings = evResult["warnings"];
     // when 守卫跳过的步（ok:false + precondition_skipped）不是失败：与声明式路径同一口径记成
     // "skipped"（见上方 rep.skipped 分支），审计者扫表即可分清“执行完成/不适用/失败”。
     const skippedStep = e.ok === false && e.stop_code === "precondition_skipped";
@@ -2200,6 +2252,14 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       ...(e.ok === false && e.stop_code !== undefined ? { stop_code: e.stop_code } : {}),
       ...(e.result === undefined ? {} : { result: e.result }),
       ...(recovered ? { recovered: true, recovered_by: laterOk!.id ?? laterOk!.desc ?? null } : {}),
+      ...(typeof evExecuted === "boolean" ? { executed: evExecuted } : {}),
+      ...(Array.isArray(evExecActions) && evExecActions.length
+        ? { executed_actions: evExecActions as ExecutedAction[] } : {}),
+      ...(Array.isArray(evSkipped) && evSkipped.length
+        ? { skipped_actions: evSkipped as SkippedAction[] } : {}),
+      ...(typeof evPreheld === "boolean" ? { done_preheld: evPreheld } : {}),
+      ...(Array.isArray(evWarnings) && evWarnings.length
+        ? { warnings: evWarnings.map(String) } : {}),
     };
   });
   const logs = trace.events.filter((e) => e.call === "log").map((e) => ({

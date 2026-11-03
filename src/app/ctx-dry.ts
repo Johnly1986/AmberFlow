@@ -121,7 +121,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     return p;
   };
 
-  const recordStep = (desc: string, done?: unknown, ok = true, stopCode?: string, id?: string): StepResult => {
+  const recordStep = (desc: string, done?: unknown, ok = true, stopCode?: string, id?: string,
+                      forceAct = false): StepResult => {
     checkBudget();
     budget.stepsUsed += 1;
     pushEvent(trace, {
@@ -130,7 +131,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       ...(stopCode === undefined ? {} : { stop_code: stopCode }),
       // dry 的审计额外记**声明的完成条件**（它是计划数据，不是模型产出）：
       // `apps explain` 与"脚本 vs 既有 journey"对照都靠它。
-      ...(done === undefined ? {} : { result: { done } }),
+      // A1：forceAct 是声明面——dry 只记录声明，不改变模拟（step 仍 ok:true，不重新决策）。
+      ...(done === undefined && !forceAct ? {} : { result: { ...(done === undefined ? {} : { done }), ...(forceAct ? { force_act: true } : {}) } }),
     });
     return { ok, ...(id === undefined ? {} : { id }), ...(stopCode === undefined ? {} : { stopCode }), evidence: { url: currentUrl, attempts: 1, elapsedMs: 0 } };
   };
@@ -198,7 +200,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       if (req.url !== undefined) assertNavigable(req.url, `ctx.step(${JSON.stringify(desc)})`);
       if (effectiveUrl !== undefined) assertHost(effectiveUrl, `ctx.step(${JSON.stringify(desc)})`);
       if (req.url !== undefined) currentUrl = resolveCtxUrl(req.url);
-      return recordStep(desc, req.done, true, undefined, req.id);
+      return recordStep(desc, req.done, true, undefined, req.id, req.forceAct === true);
     },
     manual: async (desc, req) => {
       assertNotDone(`ctx.manual(${JSON.stringify(desc)})`);

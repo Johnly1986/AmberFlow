@@ -16,6 +16,18 @@ export interface TraceStep {
   confirmed?: boolean;
   /** 粗分类（聚合口径）：rule=规则/闭集解析，model=provider 决策票，escalate=老师点名。 */
   decision_kind?: "rule" | "model" | "escalate";
+  /* ---- A1 动作执行证据（全部可选；由 executor 落账，app-runner 投影进 step_traces） ---- */
+  /** pre/post 快照是否变化（诚实字段：动作执行成功但页面没动时是 false）。 */
+  changed?: boolean;
+  /** 解析到/尝试过但未执行（与 executed:false 配套；原因见 skip_reason）。 */
+  skipped?: boolean;
+  skip_reason?: string;
+  /** 动作元素的 ref（位置性编号，对账用）。 */
+  ref?: string;
+  /** 归一后的动作 op（click/fill/select/scroll/drag）。 */
+  op?: string;
+  /** 命令声明的目标（决策步/无命令声明时不出现）。 */
+  target?: string | null;
   [k: string]: unknown;
 }
 
