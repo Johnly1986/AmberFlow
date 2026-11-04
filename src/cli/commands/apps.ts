@@ -133,6 +133,14 @@ ${playbook}
  *   judge.existsText(sel, "Traffic") = 存在文本含 Traffic 的元素；judge.exists(sel, {visible:true})
  *   = 存在且可见（池/离线面判不出可见性，诱导期不据此下结论）。
  *
+ * 执行韧性（S4，两项都是步级 opt-in，缺省不写 = 行为不变）：
+ *   force:true       动作走 Playwright force 语义（跳过 actionability，仍要求可定位）；
+ *                    只用于作者已确认的瞬态弹层/动画控件——可能点到被遮挡目标（坐标上的顶层元素收事件）。
+ *   staleRetry:true  动作失败且疑似 stale（stale_ref / action_failed / not-actionable 且节点已卸载）时，
+ *                    重抽池→重解析同一声明目标→重试，最多 2 次（trace 行记 stale_retry）。
+ *   hover：命令闭集的指针原语——ctx.command("hover", sel) 只把指针移上去（:hover 菜单/图层面板），
+ *     done 仍要写成动作后才成立的证据（例如 judge.exists("#panel-item", {visible:true})）。
+ *
  * 值绑定写法（fill/select/drag 的值只认 slot，绝不猜）：对象字面量
  *   ctx.command("fill", "#username", { from: "slot", key: "username" })
  *   ——key 必须在 meta.slots 声明；缺值 = 结构化 needs_value。没有 ctx.value.fromSlot 之类的函数面。
@@ -197,6 +205,22 @@ export async function flow(ctx) {
   //   done: ctx.judge.existsText("#traffic-panel", "Traffic"),   // 存在文本含 Traffic 的元素
   // });
   // if (!t.ok) ctx.fail(t.stopCode ?? "step_failed", t.reason);
+
+  // hover 原语（S4）：只把指针移到目标上，展开 :hover 菜单/图层面板（不点击、不导航）。
+  // const layer = await ctx.step("展开图层面板", {
+  //   act: [ctx.command("hover", "[data-test=layers]")],
+  //   done: ctx.judge.exists("#layer-panel", { visible: true }),   // 动作后才可见的证据
+  // });
+  // if (!layer.ok) ctx.fail(layer.stopCode ?? "step_failed", layer.reason);
+  //
+  // 瞬态弹层/SPA 重渲染（S4，opt-in）：staleRetry 在点前节点被替换时重抽池→重解析同一目标→重试（≤2 次）；
+  // force 跳过 actionability（只用于已确认的动画/瞬态遮挡，可能点到被遮挡目标）。
+  // const sort = await ctx.step("按价格排序", {
+  //   act: [ctx.command("click", "[data-test=sort-price]")],
+  //   staleRetry: true,
+  //   done: ctx.judge.url("sort=price"),   // ← 换成动作后真的会成立的证据
+  // });
+  // if (!sort.ok) ctx.fail(sort.stopCode ?? "step_failed", sort.reason);
 
   // 步级 slots：只覆盖这一步的槽位绑定值（不需要提前写进 meta.slots 的默认值）。
   // const search = await ctx.step("搜索酒店", {

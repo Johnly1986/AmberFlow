@@ -162,11 +162,13 @@ export interface StateView {
   url: string;
   elems: Record<string, { tag: string; label?: string; value?: unknown;
     data_test?: string; name?: string; id?: string; input_type?: string;
-    href?: string; near?: string; scan?: number; [k: string]: unknown }>;
+    href?: string; near?: string; aria_label?: string; scan?: number; [k: string]: unknown }>;
 }
 
 const ATTR_ALIAS: Record<string, string> = {
   test: "data_test", "data-test": "data_test", type: "input_type",
+  // S4：witness 池用 aria_label 存 `aria-label`（CSS 属性名不能带连字符做字段名）。
+  "aria-label": "aria_label", "aria_label": "aria_label",
 };
 
 /**

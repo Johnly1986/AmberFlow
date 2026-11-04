@@ -24,10 +24,18 @@ export interface TraceStep {
   skip_reason?: string;
   /** 动作元素的 ref（位置性编号，对账用）。 */
   ref?: string;
-  /** 归一后的动作 op（click/fill/select/scroll/drag）。 */
+  /** 归一后的动作 op（click/fill/select/scroll/drag/hover）。 */
   op?: string;
   /** 命令声明的目标（决策步/无命令声明时不出现）。 */
   target?: string | null;
+  /* ---- S4 执行韧性证据（全部可选；缺字段 = 该事实不适用） ---- */
+  /**
+   * stale 重解析重试记录：动作失败且疑似 stale 时，重抽池→重解析同一声明目标→重试。
+   * 每次重试一条 `{attempt, reason, ref}`；失败终态仍按既有 stopCode 诚实报告。
+   */
+  stale_retry?: Array<{ attempt: number; reason: string; ref: string }>;
+  /** 本次动作按步级 `force` 声明执行（Playwright force：跳过 actionability，仍要求可定位）。 */
+  forced?: boolean;
   [k: string]: unknown;
 }
 

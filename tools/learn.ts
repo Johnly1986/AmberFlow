@@ -168,6 +168,85 @@ export interface LearnIO {
   out(line: string): void;
 }
 
+/** S4：录制回放用的最小定位面（Playwright Locator 的 click/fill 子集）。 */
+interface PlaybackLocator {
+  click(opts?: Record<string, unknown>): Promise<void>;
+  fill(value: string, opts?: Record<string, unknown>): Promise<void>;
+}
+interface PlaybackFrame {
+  locator(selector: string): PlaybackLocator;
+}
+
+const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** CSS 属性选择器里的字符串：转义反斜杠与双引号即可（hint 句柄不会含控制字符）。 */
+function attrLiteral(v: string): string {
+  return String(v).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+}
+
+/**
+ * S4 hint 池投影：把录下来的 hint 用**引擎同一套语义**（`rules.hintMatch`）解析到当次池里的
+ * 那个元素，再用抽取期盖的稳定句柄（`data-dshref`）或稳定属性定位——而不是把 hint 当原生
+ * CSS selector 直接丢给 Playwright。两个观察面不可互推：`[data-test=x]` / `#id` / 裸词
+ * 在 hint 语法里是池投影，在 DOM 里未必是合法/唯一的选择器。
+ *
+ * 回退链（解析失败不猜，保留旧行为作为兜底）：
+ *   ① 抽池 → hintMatch → 元素句柄（data-dshref → data-test → id → name）；
+ *   ② 池里没有（或抽池本身失败）⇒ 原生 selector（旧行为：`page.click(hint)`）。
+ */
+async function resolvePlaybackTarget(
+  pg: unknown, hint: string,
+): Promise<{ click: () => Promise<void>; fill: (v: string) => Promise<void>; via: string }> {
+  const page = pg as unknown as PageLike & PlaybackFrame & {
+    click(sel: string, o?: unknown): Promise<void>;
+    fill(sel: string, value: string, o?: unknown): Promise<void>;
+  };
+  let elems: Awaited<ReturnType<typeof extractElements>> | null = null;
+  try {
+    elems = await extractElements(page as never, false);
+  } catch {
+    elems = null;   // 页面已导航/不可读：回退原生 selector，不因传感器失败改动作语义
+  }
+  if (elems !== null) {
+    const ref = hintMatch(hint, elems);
+    const el = ref === null ? undefined : elems[ref];
+    if (el !== undefined) {
+      // 与 executor._locatorFor 同一优先级：抽取期唯一句柄优先，其次稳定属性。
+      const dsh = typeof el["dsh_ref"] === "string" ? String(el["dsh_ref"]) : "";
+      const dt = typeof el["data_test"] === "string" ? String(el["data_test"]) : "";
+      const id = typeof el["id"] === "string" ? String(el["id"]) : "";
+      const nm = typeof el["name"] === "string" ? String(el["name"]) : "";
+      const selector = dsh ? `[data-dshref="${attrLiteral(dsh)}"]`
+        : dt ? `[data-test="${attrLiteral(dt)}"]`
+        : id ? `[id="${attrLiteral(id)}"]`
+        : nm ? `${String(el.tag ?? "").toLowerCase() || "*"}[name="${attrLiteral(nm)}"]`
+        : "";
+      if (selector) {
+        const frames = (page as unknown as { frames?: PlaybackFrame[] | (() => PlaybackFrame[]) }).frames;
+        const list = typeof frames === "function" ? frames.call(page) : frames;
+        const scope = (Array.isArray(list) && list[Number(el["frame"] ?? 0)]) || page;
+        const loc = scope.locator(selector);
+        return {
+          click: () => loc.click({ timeout: 10_000 }),
+          fill: (v) => loc.fill(v, { timeout: 10_000 }),
+          via: `pool:${selector}`,
+        };
+      }
+    }
+  }
+  return {
+    click: () => page.click(hint, { timeout: 10_000 }),
+    fill: (v) => page.fill(hint, v, { timeout: 10_000 }),
+    via: "native-selector",
+  };
+}
+
+/** 导航竞态的可重试错误：执行上下文被导航销毁 / 帧被卸载（learn 录导航型点击的已知失败面）。 */
+function isNavigationRace(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /Execution context was destroyed|Cannot find context|Target page, context or browser has been closed|frame was detached|Element is not attached|detached from DOM/i.test(msg);
+}
+
 /**
  * **核心**：把一串动作跑一遍并逐步归纳信号。
  * `page` 已经停在起点；每个动作前/后各抓一份状态视图，`induceSignals` 从中挑完成信号。
@@ -181,9 +260,40 @@ export async function learnFromActions(
     click(sel: string, o?: unknown): Promise<void>;
     fill(sel: string, value: string, o?: unknown): Promise<void>;
     waitForTimeout(ms: number): Promise<void>;
+    waitForLoadState?(state?: string, o?: unknown): Promise<void>;
   };
   const startUrl0 = pageUrl(pg);
-  const startState = await captureStateView(pg as never);
+  /**
+   * S4：动作后等的导航落地（`domcontentloaded`）。录导航型点击时，点击返回时新文档可能还在
+   * 加载，紧接着的 `captureStateView` 会撞上 "Execution context was destroyed"。
+   * 失败忽略：页面可能永不触发该事件，动作已经发生，不能让等待变成本地失败。
+   */
+  const waitLoad = async (): Promise<void> => {
+    if (typeof pg.waitForLoadState !== "function") return;
+    try {
+      await pg.waitForLoadState("domcontentloaded", { timeout: 10_000 });
+    } catch {
+      /* the page may never fire it; the action already happened */
+    }
+  };
+  /** S4：`captureStateView` 失败时等一拍重试一次（第二次仍失败才如实抛）。 */
+  const captureWithRetry = async (label: string): Promise<StateView> => {
+    try {
+      return await captureStateView(pg as never);
+    } catch (first) {
+      await sleepMs(300);
+      await waitLoad();
+      try {
+        return await captureStateView(pg as never);
+      } catch (second) {
+        const msg = second instanceof Error ? second.message : String(second);
+        const firstMsg = first instanceof Error ? first.message : String(first);
+        throw new Error(`${label}：抓取页面状态失败（重试一次仍失败）：${msg}`
+          + (firstMsg === msg ? "" : `（首次：${firstMsg}）`));
+      }
+    }
+  };
+  const startState = await captureWithRetry("起点");
   const steps: LearnedStep[] = [];
   /**
    * S2：捕获前等页面静默（复用 `settle`）。录制工具的页面早已加载完，这里通常是 0 等待；
@@ -199,17 +309,36 @@ export async function learnFromActions(
 
   for (const [i, action] of actions.entries()) {
     await settleBeforeCapture();
-    const before = await captureStateView(pg as never);
+    const before = await captureWithRetry(`第 ${i + 1} 步动作前`);
     const beforeUrl = pageUrl(pg);
+    // S4：动作经**池投影**定位（与引擎同一 hint 语义）；解析不到再回退原生 selector。
+    const target = await resolvePlaybackTarget(pg, action.hint);
+    const runAction = async (t: typeof target): Promise<void> => {
+      if (action.op === "click") await t.click();
+      else await t.fill(action.value ?? "");
+    };
     try {
-      if (action.op === "click") await pg.click(action.hint, { timeout: 10_000 });
-      else await pg.fill(action.hint, action.value ?? "", { timeout: 10_000 });
-    } catch (e) {
-      throw new Error(`第 ${i + 1} 步（${action.op} ${action.hint}）执行失败：${e instanceof Error ? e.message : String(e)}`);
+      await runAction(target);
+    } catch (first) {
+      // 导航竞态：点击已触发导航、执行上下文被销毁 ⇒ 等新文档落地后重定位并重试一次。
+      if (!isNavigationRace(first)) {
+        throw new Error(`第 ${i + 1} 步（${action.op} ${action.hint}）执行失败：${first instanceof Error ? first.message : String(first)}`);
+      }
+      await waitLoad();
+      await sleepMs(200);
+      const retry = await resolvePlaybackTarget(pg, action.hint);
+      try {
+        await runAction(retry);
+      } catch (second) {
+        throw new Error(`第 ${i + 1} 步（${action.op} ${action.hint}）执行失败（导航竞态重试一次仍失败）：`
+          + `${second instanceof Error ? second.message : String(second)}`);
+      }
     }
-    await pg.waitForTimeout(300);                      // 让页面把反应做完（菜单/局部刷新）
+    // S4：动作后等导航落地（失败忽略），再让页面把非导航反应做完（菜单/局部刷新）。
+    await waitLoad();
+    await pg.waitForTimeout(300);
     await settleBeforeCapture();                       // S2：再等页面静默（有界；不含 300ms 的兼容等待）
-    const after = await captureStateView(pg as never);
+    const after = await captureWithRetry(`第 ${i + 1} 步动作后`);
     const ind = induceSignals(before, after, { max: 3 });
     // 稳定句柄（data-test/id/name，stability ≥ 2）**或** URL 变化（`url_contains` 是我们五个算子里
     // 的一个；它的 stability 记 0 只表示"仅凭 URL"，不是"不可靠"）。
@@ -235,7 +364,7 @@ export async function learnFromActions(
   }
 
   // 结束态不变量：与"还没动手时"比，且必须落在稳定句柄上
-  const end = await captureStateView(pg as never);
+  const end = await captureWithRetry("结束态");
   const ind = induceSignals(startState, end, { max: 8 });
   const kept = ind.candidates
     .filter((c) => c.stability >= 2 || c.kind === "url")

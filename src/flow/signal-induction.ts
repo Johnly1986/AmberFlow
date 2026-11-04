@@ -104,6 +104,12 @@ export function selectorFor(e: El): { sel: string; stability: number } | null {
   if (id && !isVolatile(id)) return { sel: `#${id}`, stability: 3 };
   const nm = String(e.name ?? "").trim();
   if (nm && !isVolatile(nm)) return { sel: `${e.tag}[name=${nm}]`, stability: 2 };
+  // S4：无 data-test/id/name 的弹层节点（九宫格菜单项）常只有 aria-label——它是稳定属性，
+  // 也是 checkSignal 的合法 CSS 选择器面（matchSelector 用 aria_label 池字段判等价）。
+  const aria = String(e["aria_label"] ?? "").trim();
+  if (aria && !isVolatile(aria)) {
+    return { sel: `[aria-label="${aria.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"]`, stability: 2 };
+  }
   const near = String(e.near ?? "").trim();
   const tok = stableToken(near);
   if (tok) return { sel: `${e.tag}[near~${tok}]`, stability: 2 };
@@ -306,7 +312,7 @@ export { matchSelector };
  * the text-length cap so `[id]` on a big `<div>` cannot flood the pool.
  */
 export const WITNESS_SEL =
-  "[data-test], [id], [role=status], [role=alert], [aria-live], output, progress";
+  "[data-test], [id], [role=status], [role=alert], [aria-live], [aria-label], output, progress";
 
 const WITNESS_JS = String.raw`(arg) => {
   const out = [];
@@ -322,15 +328,19 @@ const WITNESS_JS = String.raw`(arg) => {
     // the typed value into a pack file. Mask secret-shaped fields by length so nothing
     // sensitive is ever proposed as a completion value.
     const value = (t === 'password' || t === 'file' || t === 'hidden') ? '*'.repeat(raw.length) : raw;
-    if (!text && !value) continue;
+    // S4：无稳定句柄的弹层节点（九宫格菜单项）常只有 aria-label——它是可见面，也是
+    // selectorFor 的稳定句柄之一（[aria-label="…"]，matchSelector 用 aria_label 判等价）。
+    const aria = e.getAttribute('aria-label') || '';
+    if (!text && !value && !aria) continue;
     out.push({
       tag: e.tagName.toLowerCase(),
-      label: text || value,
+      label: text || value || aria,
       value,
       data_test: e.getAttribute('data-test') || '',
       id: e.id || '',
       name: e.getAttribute('name') || '',
       href: e.getAttribute('href') || '',
+      aria_label: aria,
     });
   }
   return out;

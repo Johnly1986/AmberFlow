@@ -231,7 +231,7 @@ export async function flow(ctx) {
 |---|---|---|
 | 元信息 | `ctx.app` / `ctx.slots` / `ctx.runtime` / `ctx.budget` / `ctx.log(msg, data?)` | `slots` 只读；`runtime = {outDir, runId, today, epoch}`（`epoch` = 执行器状态游标只读投影，每次抽池/观察 +1，每个 `step` 重置；dry 恒 0）；`today` = CLI `--today YYYY-MM-DD` 钉住的"今天"，没钉 = 系统日期 |
 | 导航 | `ctx.open(url)` / `ctx.openPage(role)` / `ctx.arrive(url, {done, desc?, id?, timeoutMs?})` | `arrive` = 纯导航 + 等信号，不做元素选择、不花模型；`hosts` 信封在起点与落地都强制 |
-| 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, when?, timeoutMs? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}` |
+| 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, when?, timeoutMs?, force?, staleRetry? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}` |
 | 人工步 | `ctx.manual(desc, { done, instructions?, id? })` | 见 §7；非 TTY 返回 `needs_human`，不假装有人 |
 | 观察 | `ctx.url()` / `ctx.read.{text,value,count,attr}(sel[, attr])` / `ctx.holds(signal)` / `ctx.waitFor(signal, {timeoutMs?, pollMs?})` | 只读；读不到返回 `null` / `0`；`waitFor` 轮询到 bounded deadline，返回 boolean；`url()` 首次导航前是 `"about:blank"`，别拿它当入口页判断 |
 | 站点面 | `ctx.openPage(role)` / `ctx.extract(nameOrSpec)` / `ctx.rows(...)`（v1 关闭） | 具名抽取声明在 `meta.site.listExtract`；inline 抽取用 `{ rows, fields, maxItems? }`（例：`ctx.extract({ rows: "li.item", fields: { title: ".title" } })`，无需 meta 声明）；`rows` 调用给结构化错误 |
@@ -244,8 +244,9 @@ export async function flow(ctx) {
 - `when` 是适用性守卫：动作前判定，不成立时该步不执行（返回 `ok:false`、`stopCode:"precondition_skipped"`），脚本可以据此分支。跳过步**同样消耗一次执行预算**，trace 里状态记为 `skipped`（不是 `failed`）；不要把 `if (!r.ok) ctx.fail(...)` 的失败模板直接套在守卫步上，先判 `r.stopCode`。
 - `act` 缺省就是“决策语句”：只给目标语义和完成证据，让规则/模型选元素；硬编码 `ctx.hint(...)` 只作为稳定锚点或候选收窄，不应成为每条流程的默认。
 - 导航同样优先用 `meta.site.pages` + `ctx.openPage(role)`，而不是在流程里重复硬编码 URL；业务值优先用 `meta.slots` / `ctx.source`，不要写死在 `flow` 里。**运行期才知道的 URL**（如命中链接的相对 href）可在 flow 里 `new URL(href, ctx.url())` 绝对化——URL 全局构造器在脚本进程可用（06 轮实证），这是"角色覆盖不到的动态地址"的正规通道，不是硬编码豁免。
-- 命令闭集的 op 是引擎能力面：`click` / `check` / `fill` / `select` / `scroll` / `drag` / `skip`。
-  `scroll` 把目标滚入视口；`drag` 的 value 是落点 selector（可来自槽位），只在 `[draggable=true]` 或 slider 族元素上声明能力。
+- 命令闭集的 op 是引擎能力面：`click` / `check` / `fill` / `select` / `scroll` / `drag` / `hover` / `skip`。
+  `scroll` 把目标滚入视口；`drag` 的 value 是落点 selector（可来自槽位），只在 `[draggable=true]` 或 slider 族元素上声明能力；
+  `hover`（S4）只把指针移到目标上（`locator.hover()`），用于 `:hover` 展开的菜单/图层面板——不点击、不导航；完成仍只由 done 信号裁决。
   `skip` = 按定义解决的零动作命令：全部命令解决后引擎会**评估一次 done 信号**再判成败——"导航由 arrive 完成、本步只验证到达"的守卫步合法可用（04-A 修复；此前 skip 步的 done 从未被评估，必报 `done_not_held`）。守卫步写法：`act: [ctx.command("skip")]`（完整可跑示例见 `examples/apps/01-basic-step` 步骤②）。
   不在能力面内的 op 会得到 `action_unsupported`，目标歧义是 `target_ambiguous`，目标不存在是 `target_not_found`。
 - **act hint 是六形状语法闭集**（唯一解析器 `src/engine/hint.ts`，语法**描述**的唯一出处 `src/engine/grammar-prompt.ts`，`npm run prompt-hit` 校验示例可命中、报错/提示词/桥描述不漂移）：`#id` ｜ `tag[attr~substr]` ｜ `tag~token` ｜ `tag[attr=value]`（值去引号、全小写折叠）｜ 角色词 `button|link|input|textarea|select` ｜ 裸词（按 label 匹配）。属性名按池字段匹配：test→data-test、type→input_type、aria-label→label、href、name、id、role、near；aria-label 是 label 的别名（提取期已并进 label），class、title 等不在池字段模型里，永不命中（本句由 grammar-prompt 的 ATTR_MATCH_MODEL_TEXT 生成，prompt-hit 逐字校验，勿手改）。**容器/后代 CSS（如 `#outer input`）不是语法错误——会被解析成一个永不命中的形状**；命令空间的 `target_not_found` reason 附闭集提示，而 act hint 落空会**静默回退模型决策**、报 `low_confidence` 不附提示——写 hint 前先 `inspect` 拿验证过的 `hint_candidates`。
@@ -350,7 +351,25 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
   1s 才长出新行）。引擎记 warning，**不** forbid 该元素、**不**写 outcome memory inert——它不是死元素。
 - `changed=false` 且 done 不成立仍按既有 inert/anti-repeat 逻辑处理（死循环拦截不变）。
 - trace 行上还有 `changed`（仅执行步）、`skipped/skip_reason`（仅未执行步）、`done_preheld`/`force_act`
-  声明；`after` 仅在"动作后有下一次观察"时补（done 立即成立的收尾动作没有下一跳，故不补）。
+  声明；S4 起还有 `forced`（步级 force 实际生效）与 `stale_retry:[{attempt,reason,ref}]`（每次 stale 重解析重试一条）；
+  `after` 仅在"动作后有下一次观察"时补（done 立即成立的收尾动作没有下一跳，故不补）。
+
+**S4 执行韧性（步级 opt-in，缺省不出现 = 行为逐字节不变）**
+
+- `force?: boolean`：动作走 Playwright 的 **force 语义**（`click({force:true})` / `fill(v,{force:true})` /
+  `selectOption(...,{force:true})` / `hover({force:true})`）——跳过 actionability 检查（可见/稳定/可接收
+  事件/启用），**仍要求元素可定位**。风险：鼠标坐标上的顶层元素可能不是目标本身（可能点到被遮挡目标），
+  只用于作者已确认的瞬态弹层/动画控件；**风险确认（risky/confirmFn）闸门不受影响**。trace 行记 `forced:true`，
+  dry 面只记声明（`forced:true`），不改变模拟。
+- `staleRetry?: boolean`：动作失败且**疑似 stale** 时，重抽池 → 用**同一声明目标**（命令 target / act hint）
+  重新解析 → 重试动作，同一步内最多 2 次（不额外计入子目标动作预算）。触发判据只有三类：
+  `stale_ref`（盖章句柄与属性回退全落空）/ `action_failed`（Playwright 动作抛错）/
+  `not-actionable-or-covered` 且 actionability 现场 `requery==="detached"`（节点在探针后被卸载）。
+  `action-timeout`、有覆盖者且 `requery==="present"` 都**不**重试（那不是 stale）；纯模型挑元素的决策步
+  没有可复现的声明目标，也不重试。每次重试进 trace 行的 `stale_retry` 数组；最终失败仍按既有 stopCode
+  （`stale_ref` / `action_failed` / `not-actionable-or-covered` …）诚实报告。
+- `hover` 命令：见 §4.5 命令闭集——它只移动指针（`:hover` 菜单/图层面板），不点击、不导航、不触发预填；
+  快照没变不判 inert（与 scroll/drag 同口径），完成仍只认 done 信号。
 
 **S1 状态层与 pre-held 策略**
 - `meta.policy.done_preheld`：`"warn"`（缺省，只记 flag + `warnings[]`，不拦动作）/ `"fail"`（动作前结构化停止，

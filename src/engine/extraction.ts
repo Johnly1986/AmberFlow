@@ -94,13 +94,15 @@ export function elemFamily(e: Elem): ElemFamily {
  * 可以表达 role=slider / input[type=range] 这类特殊控件。注意：native range 目前
  * 可由引擎的 `fill` 动作驱动；div[role=slider] 仍是 click 族，当前动作集不能设 aria-valuenow。
  */
-export type ActionCapability = "click" | "fill" | "select" | "check" | "slider" | "scroll" | "drag";
+export type ActionCapability = "click" | "fill" | "select" | "check" | "slider" | "scroll" | "drag" | "hover";
 
 /** 执行动作所需的最小 locator 面；由执行器/PoolView 的调用方提供。 */
 export interface ActionLocatorLike {
   click(opts?: Record<string, unknown>): Promise<void>;
   fill(value: string, opts?: Record<string, unknown>): Promise<void>;
   selectOption(value: unknown, opts?: Record<string, unknown>): Promise<void>;
+  /** S4：指针悬停原语（可选——测试替身可能没有，缺了按 action_unsupported 报）。 */
+  hover?(opts?: Record<string, unknown>): Promise<void>;
   evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
 }
 
@@ -196,8 +198,24 @@ const SCROLL_ADAPTER: ActionAdapter = {
   },
 };
 
+/**
+ * S4：hover 原语（命令闭集的 `hover` op）。池里只有**可交互**元素（INTERACTIVE_ALL），
+ * 悬停是任何已定位元素都有的指针语义（与 scroll 的 viewport 语义同款），所以能力面恒真；
+ * 它只改变指针位置，不点击、不导航——展开 `:hover` 菜单/图层面板正是它的用途。
+ */
+const HOVER_ADAPTER: ActionAdapter = {
+  kind: "hover",
+  canApply: () => true,
+  async apply(loc, { timeoutMs = 5000 } = {}) {
+    if (typeof loc.hover !== "function") return ["action_unsupported", "locator has no hover"];
+    await loc.hover({ timeout: timeoutMs });
+    return ["hovered", null];
+  },
+};
+
 export const ACTION_ADAPTERS: readonly ActionAdapter[] = [
   DRAG_ADAPTER, SCROLL_ADAPTER, SLIDER_ADAPTER, CHECK_ADAPTER, SELECT_ADAPTER, FILL_ADAPTER, CLICK_ADAPTER,
+  HOVER_ADAPTER,
 ];
 
 export function actionCapabilities(e: Elem): ActionCapability[] {

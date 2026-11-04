@@ -165,7 +165,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     return { before: fp, after: fp, actions: { attempted: 0, executed: 0, changed: 0 }, flags: [] };
   };
   const recordStep = (desc: string, done?: unknown, ok = true, stopCode?: string, id?: string,
-                      forceAct = false): StepResult => {
+                      forceAct = false, force = false, staleRetry = false): StepResult => {
     checkBudget();
     budget.stepsUsed += 1;
     const state = dryState();
@@ -176,10 +176,14 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       // dry 的审计额外记**声明的完成条件**（它是计划数据，不是模型产出）：
       // `apps explain` 与"脚本 vs 既有 journey"对照都靠它。
       // A1：forceAct 是声明面——dry 只记录声明，不改变模拟（step 仍 ok:true，不重新决策）。
+      // S4：force / staleRetry 同样是声明面——dry 只记 `forced` / `stale_retry`（布尔标记），
+      //     不模拟重试、不改变 ok；真实面的重试证据是 trace 行上的数组，见 schema F22。
       // S1：state 是合成形状（见 dryState），保证 dry/真实消费者不分叉。
       result: {
         ...(done === undefined ? {} : { done }),
         ...(forceAct ? { force_act: true } : {}),
+        ...(force ? { forced: true } : {}),
+        ...(staleRetry ? { stale_retry: true } : {}),
         state,
       },
     });
@@ -253,7 +257,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       if (req.url !== undefined) assertNavigable(req.url, `ctx.step(${JSON.stringify(desc)})`);
       if (effectiveUrl !== undefined) assertHost(effectiveUrl, `ctx.step(${JSON.stringify(desc)})`);
       if (req.url !== undefined) currentUrl = resolveCtxUrl(req.url);
-      return recordStep(desc, req.done, true, undefined, req.id, req.forceAct === true);
+      return recordStep(desc, req.done, true, undefined, req.id,
+        req.forceAct === true, req.force === true, req.staleRetry === true);
     },
     // A3 dry 桩：**参数校验真做**（未知形状/非法值在 dry 期红），动作与结果按文档形状确定性模拟。
     // S3：校验抛错前先落 `validation_error`（见 validatePrimitive），吞错也逃不过 apps check。

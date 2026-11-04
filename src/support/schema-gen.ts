@@ -48,6 +48,8 @@ const CTX_FACTS: ReadonlyArray<{ id: string; statement: string; truth: string }>
   { id: "F19", statement: "settle 稳定门（S2）：每次抽池前（决策/act 解析、宽扫、收尾观察）若页面最近有 DOM 突变（now - 最近突变 < quiet_ms = “脏”）先等到静默；已静默立即返回（0 等待），超时返回 {timedOut:true} 不抛错、不阻断。等待毫秒数落 step_traces[i].state.settleMs（策略关闭时省略；0 = 跑过但无需等待）。meta.policy.settle 缺省 {quiet_ms:400, timeout_ms:5000}（默认开启），也可写 \"off\"；未知子键/越界值加载期拒绝。MutationObserver 只作传感器（不中断执行循环），导航后重装；安装时刻视为“刚脏”，所以每次导航后最多付一次 quiet_ms，静态页首个观察后零等待", truth: "src/engine/settle.ts + executor.ts _settleBeforeExtract + app-pack.ts PackPolicy.settle" },
   { id: "F20", statement: "existsText / 可见性（S3）：judge.existsText(sel,text) = { css_exists_text: [selector, text] }——存在任一匹配 selector 且（可见）文本含 text 的元素（live = Playwright locator(sel,{hasText})，跨主 frame 与同源子 frame；大小写不敏感子串、含后代文本）。judge.exists(sel,{visible:true}) = { css_visible_exists: selector }——首匹配 locator.isVisible()。池/离线近似：css_exists_text 用匹配元素的合成 label 包含 text（近似，不是 innerText）；css_visible_exists 在池评估恒返回 null（可见性是页面事实，诱导期按“需真实验证”处理）", truth: "signals.ts css_exists_text/css_visible_exists + extraction.ts locatorAnyFrame(hasText) + kit.ts judge" },
   { id: "F21", statement: "ctx.collect（S3）：ctx.collect({row, fields?, until?, dedupe?, maxRounds?}) 反复（滚动行容器→抽行→去重）直到在容器到底/滚不动之后连续 stableRounds 轮（缺省 2）无新增 / 达 maxRows（缺省 500）/ 内部轮数 maxRounds（缺省 30）用完；整体计 1 个 flow step（内部滚动/等待不占预算）。返回 {rows, coverage:{rounds,rowsSeen,addedLastRound}, stopReason}，stopReason ∈ stable | maxRows | budget | not_scrollable（dry 桩 = dry）——诚实口径，不假装穷尽。行容器 = 行元素的最近可滚动祖先（找不到/不可滚动 = not_scrollable，结果只覆盖当前可见部分）；fields 与 extract inline 同语法，缺省 {text:\".\"}", truth: "ctx.ts collect + ctx-dry.ts 桩 + ctx-replay.ts 回放 + trace.ts collect 事件" },
+  { id: "F22", statement: "执行韧性（S4，两项都是步级 opt-in，缺省 false = 行为不变）：① staleRetry:true —— 动作失败且疑似 stale 时重抽池→用同一声明目标（命令 target / act hint）重新解析→重试动作，同一步最多 2 次、不额外计入子目标动作预算；判据只有三类：stale_ref（_locatorFor 盖章句柄与属性回退全落空）、action_failed（Playwright 动作抛错）、not-actionable-or-covered 且 actionability.requery===\"detached\"（节点在探针后被卸载）；action-timeout / 有覆盖者且 requery=\"present\" 不重试；纯模型挑元素的决策步没有可复现的声明目标，不重试。每次重试进 trace 行的 stale_retry:[{attempt,reason,ref}]，最终失败仍按既有 stopCode（stale_ref / action_failed / not-actionable-or-covered 等）诚实报告。② force:true —— 动作走 Playwright force 语义（click/fill/selectOption/hover 的 {force:true}）：跳过 actionability 检查（可见/稳定/可接收事件/启用），仍要求元素可定位；trace 行记 forced:true。风险：鼠标坐标上的顶层元素可能不是目标本身（可能点到被遮挡目标），只用于作者已确认的瞬态弹层/动画控件；风险确认（risky/confirmFn）闸门不受 force 影响。dry 面只记录声明（forced:true / stale_retry:true），不改变模拟", truth: "executor.ts RunOptions.force/staleRetry + _clickOnly/_executeElement force + stale 重解析重试 + ctx.ts StepRequest/ctx-dry.ts" },
+  { id: "F23", statement: "hover 命令（S4）：ctx.command(\"hover\", sel) 只把指针移到目标上（locator.hover()）——用于 :hover 展开的菜单/图层面板；不点击、不导航、不触发预填。它是命令闭集的第 8 个 op（click|check|fill|select|scroll|drag|hover|skip），能力面对池内可交互元素恒真（池只收可交互元素），且接受步级 force。hover 是**指针状态**：快照没变不判 inert（与 scroll/drag 同口径），完成仍只由 done 信号裁决", truth: "actions.ts COMMAND_OPS + extraction.ts HOVER_ADAPTER/actionCapabilities + executor.ts _executeElement(hover) + ctx.ts validateCommands" },
 ];
 
 /** 信号算子语义注记（表从 SIGNAL_OPS 真源取；语义逐条标出处）。 */
@@ -83,6 +85,8 @@ const COMMAND_FACTS = {
   submit_inputs: "input[type=submit|button] 是点击目标，永远不填值",
   after_commands: "命令闭集走完后引擎评估一次 done 信号；全部命令解决而 done 不成立 = done_not_held",
   scroll: "默认把目标滚入视口；带 to（{to:\"bottom\"|\"top\"|\"page\"}，ctx.command(\"scroll\", sel, {to})）= 把容器滚到该方向（A3）；drag 的 value 是落点 selector，仅 [draggable=true]/slider 族声明了能力",
+  hover: "S4：只把指针移到目标上（locator.hover()）——用于 :hover 展开的菜单/图层面板；不点击、不导航、不触发预填；池内可交互元素恒有能力，可配步级 force。hover 是按指针状态，快照没变不判 inert（完成仍只认 done）",
+  step_resilience: "步级 opt-in（缺省 false）：force=true 走 Playwright force（click/fill/selectOption/hover 的 {force:true}，跳过 actionability 仍要求可定位，trace 记 forced）；staleRetry=true 在 stale_ref / action_failed / not-actionable-or-covered 且 requery=\"detached\" 时重抽池→重解析同一声明目标→重试 ≤2 次（trace 记 stale_retry:[{attempt,reason,ref}]），action-timeout 与「有覆盖者且节点仍在」不重试",
   /** extract 双形式（骨架/契约都可发现；inline 不需要 meta 声明）。 */
   extract_forms: {
     named: "ctx.extract(\"name\")：行选择器/字段选择器声明在 meta.site.listExtract[name]",
@@ -159,6 +163,7 @@ const DRY = {
   collect: "collect 桩：{rows:[], coverage:{rounds:0,rowsSeen:0,addedLastRound:0}, stopReason:\"dry\"}；参数校验真做（row/fields/until/maxRounds 非法在 dry 期红）",
   validation_errors: "S3 吞错留痕：ctx-dry 的 validateXxxRequest（scrollList/expand/setRange/collect）抛错前先落 validation_error 事件（含 call/desc/message）——脚本 try/catch 吞掉 config_error，apps check 仍判 FAIL 并输出「脚本吞掉了配置错误：<call> <message>」。源码调用点对账（ctx.expand/scrollList/setRange/collect 出现次数 vs dry 事件数）只在 check 报告警告，不改退出码",
   policy_settle: "settle 是引擎侧行为（无页面面无桩）；但 meta.policy.settle 的加载期校验在 dry 同样生效——非法 settle 在 apps check 就红",
+  step_resilience: "S4：步级 force / staleRetry 是**声明面**——dry 的 step event result 只记 forced:true / stale_retry:true（布尔声明标记），不模拟重试、不改变 ok；真实面的重试证据是 executor trace 行上的 stale_retry:[{attempt,reason,ref}] 数组。命令闭集的 op 校验在 dry 与真实 ctx 走同一份 validateCommands（含 hover）",
   state_layer: "state 是合成值：before=after={epoch:0,navEpoch:0,url,readyState:\"complete\",struct:\"dry\"}、actions 全 0、flags []；runtime.epoch=0。形状与真实面同构，但不代表发生过状态推进（dry 没有页面观察）",
   rule: "一切基于观察值的 ctx.fail/分支/断言必须用 ctx.runtime.runId === \"(dry)\" 守卫；check VALID ≠ 每条分支被走过",
 };
@@ -272,6 +277,7 @@ export function renderCheatSheet(): string[] {
     "- ctx.extract(\"name\") 走 meta.site.listExtract；inline 用 ctx.extract({rows, fields})（无需声明）",
     "- ctx.collect({row,fields,until}) 反复滚动取行（计 1 步）；stopReason=stable|maxRows|budget|not_scrollable，绝不假装穷尽",
     "- settle：抽池前只在页面有突变时等静默（meta.policy.settle 默认开；等待落 state.settleMs）",
+    "- 执行韧性（S4，步级 opt-in）：force:true 走 Playwright force（跳过 actionability，仍要求可定位）；staleRetry:true 在 stale_ref/action_failed/节点已卸载时重解析同一目标重试 ≤2 次（trace.stale_retry）；hover 命令只移指针展开 :hover 面板",
     "- step_traces[i].state 记状态指纹/flags/effect；ctx.runtime.epoch 只读；flags 只标注不改 done",
   ];
 }

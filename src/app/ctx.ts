@@ -17,6 +17,7 @@ import {
   disallowedHost, type BrowserMiddleware, type BrowserSession, type ExecutedAction,
   type RunReport, type SkippedAction, type StepStateRecord,
 } from "../engine/executor.ts";
+import { validateCommands } from "../engine/actions.ts";
 import { firstOf, framesOf, locatorAnyFrame, urlOf, type PageLike } from "../engine/extraction.ts";
 import { checkSignal } from "../engine/signals.ts";
 import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, runSource, ValueError } from "../data/datasource.ts";
@@ -63,6 +64,21 @@ export interface StepRequest {
    * 表达"这一步必须真的动一下"。dry/replay 只记录/回放声明，不重新决策。
    */
   forceAct?: boolean;
+  /**
+   * S4 `force`（opt-in，缺省 false = 既有行为逐字节不变）：动作走 Playwright 的 force 语义
+   * （跳过 actionability 检查，仍要求元素可定位），用于作者已确认的瞬态弹层/动画控件。
+   * 风险：鼠标坐标上的顶层元素可能不是目标本身（可能点到被遮挡目标）——只在必要时声明。
+   * dry 面只记录声明（`forced: true`），不改变模拟；trace 的执行/失败行同样记 `forced`。
+   */
+  force?: boolean;
+  /**
+   * S4 `staleRetry`（opt-in，缺省 false = 既有行为逐字节不变）：动作失败且疑似 stale 时，
+   * 重抽池 → 用**同一声明目标**（命令 target / act hint）重新解析 → 重试动作，最多 2 次。
+   * 判据只有三类：stale_ref（盖章句柄全落空）、action_failed、not-actionable-or-covered 且
+   * 现场 requery=detached（节点已被卸载）。action-timeout / 有覆盖者且节点仍在都不重试。
+   * 纯模型挑元素的决策步没有可复现的声明目标，不重试。每次重试进 trace 的 `stale_retry`。
+   */
+  staleRetry?: boolean;
 }
 
 export interface StepEvidence {
@@ -91,6 +107,10 @@ export interface StepResult {
   skipped_actions?: SkippedAction[];
   /** 命令步在动作前对 done 的预评估结果（仅命令步出现；不改变执行顺序）。 */
   done_preheld?: boolean;
+  /** S4：stale 重解析重试证据（每次一条；缺字段 = 没重试过）。与 trace 行 `stale_retry` 同源。 */
+  stale_retries?: Array<{ attempt: number; reason: string; ref: string }>;
+  /** S4：本步动作按 `force` 声明执行（Playwright force 语义）。 */
+  forced?: boolean;
   /** 运行期诚实性警告（如 suspected_async）。只在产生时出现。 */
   warnings?: string[];
   /**
@@ -639,7 +659,13 @@ function targetOptions(act: TargetDecl | CommandDecl[]): {
         throw new StopError("config_error", `ctx.step: act[${i}] is not a command (needs {op, ...}; build it with kit.command())`);
       }
     }
-    return { commands: normalizeCommandIds(act) };
+    const commands = normalizeCommandIds(act);
+    // 与 dry 面**同一份**命令声明校验（`engine/actions.validateCommands`）：未知 op（含 hover 这类
+    // 新原语的拼写错误）/ 重复 id / 缺 target / 给不支持 value 的 op 带 value，都在动作前红。
+    const problems: string[] = [];
+    validateCommands(commands, "ctx.step", problems);
+    if (problems.length) throw new StopError("config_error", problems.join("；"));
+    return { commands };
   }
   if (!isObj(act) || (act.kind !== "hint" && act.kind !== "hints")) {
     throw new StopError("config_error", "ctx.step: act must be kit.hint()/kit.hints() or an array of kit.command(...)");
@@ -736,7 +762,7 @@ export function createCtx(deps: CtxDeps): Ctx {
   const runOneStep = async (desc: string, req: {
     url?: string; done: DomSignal | Record<string, unknown>; act?: TargetDecl | CommandDecl[];
     slots?: Record<string, string>; when?: DomSignal | null; id?: string; timeoutMs?: number;
-    forceAct?: boolean;
+    forceAct?: boolean; force?: boolean; staleRetry?: boolean;
   }): Promise<StepResult> => {
     assertOpen(`ctx.step(${JSON.stringify(desc)})`);
     checkBudget();
@@ -779,6 +805,9 @@ export function createCtx(deps: CtxDeps): Ctx {
     if (req.when !== undefined && req.when !== null) opts["precondition"] = req.when;
     // A1 forceAct：只把声明透传给执行器（缺省不出现 = 既有行为不变；执行器只记录、不改变顺序）。
     if (req.forceAct === true) opts["forceAct"] = true;
+    // S4：步级 force / staleRetry 同样是显式声明（缺省不出现 = 既有行为逐字节不变）。
+    if (req.force === true) opts["force"] = true;
+    if (req.staleRetry === true) opts["staleRetry"] = true;
     Object.assign(opts, req.act === undefined ? {} : targetOptions(req.act));
     let rep: RunReport;
     try {
@@ -809,6 +838,8 @@ export function createCtx(deps: CtxDeps): Ctx {
       ...(rep.executed === undefined ? {} : { executed: rep.executed }),
       ...(rep.executed_actions === undefined ? {} : { executed_actions: rep.executed_actions }),
       ...(rep.skipped_actions === undefined ? {} : { skipped_actions: rep.skipped_actions }),
+      ...(rep.stale_retries === undefined ? {} : { stale_retries: rep.stale_retries }),
+      ...(rep.forced === undefined ? {} : { forced: rep.forced }),
       ...(rep.done_preheld === undefined ? {} : { done_preheld: rep.done_preheld }),
       ...(rep.warnings === undefined ? {} : { warnings: rep.warnings }),
       // S1 状态记录：执行器只在本 run 有观察时给；原样透出（dry 面另有合成值）。
@@ -837,6 +868,8 @@ export function createCtx(deps: CtxDeps): Ctx {
         ...(result.executed === undefined ? {} : { executed: result.executed }),
         ...(result.executed_actions === undefined ? {} : { executed_actions: result.executed_actions }),
         ...(result.skipped_actions === undefined ? {} : { skipped_actions: result.skipped_actions }),
+        ...(result.stale_retries === undefined ? {} : { stale_retries: result.stale_retries }),
+        ...(result.forced === undefined ? {} : { forced: result.forced }),
         ...(result.done_preheld === undefined ? {} : { done_preheld: result.done_preheld }),
         ...(result.warnings === undefined ? {} : { warnings: result.warnings }),
         ...(result.state === undefined ? {} : { state: result.state }),

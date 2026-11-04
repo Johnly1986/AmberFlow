@@ -234,6 +234,8 @@ interface AnyLoc {
   click(opts?: Record<string, unknown>): Promise<void>;
   fill(value: string, opts?: Record<string, unknown>): Promise<void>;
   selectOption(value: unknown, opts?: Record<string, unknown>): Promise<void>;
+  /** S4 hover 原语；可选（测试替身没有时按 action_unsupported 诚实报）。 */
+  hover?(opts?: Record<string, unknown>): Promise<void>;
   dragTo?(target: unknown, opts?: Record<string, unknown>): Promise<void>;
   count(): Promise<number> | number;
   all(): Promise<unknown[]>;
@@ -270,7 +272,7 @@ export interface ExecutedAction {
   target: string | null;
   /** 元素 ref（位置性编号，进 trace 便于对账）。 */
   ref: string;
-  how: "clicked" | "filled" | "scrolled" | "dragged";
+  how: "clicked" | "filled" | "scrolled" | "dragged" | "hovered";
   desc: string;
   /** pre/post 快照是否变化（scroll/drag 的 viewport 变化不在快照里，见 inert 口径）。 */
   changed: boolean;
@@ -340,6 +342,13 @@ export interface RunReport {
   executed?: boolean;
   executed_actions?: ExecutedAction[];
   skipped_actions?: SkippedAction[];
+  /**
+   * S4：本子目标发生过的 stale 重解析重试（每次一条；缺字段 = 没重试过）。
+   * 与 trace 行的 `stale_retry` 是同一份证据的汇总面。
+   */
+  stale_retries?: Array<{ attempt: number; reason: string; ref: string }>;
+  /** S4：本子目标至少一个动作按步级 `force` 声明执行（trace 行 `forced=true` 的汇总）。 */
+  forced?: boolean;
   /** 命令步在解析/动作前对 done 信号的预评估结果（仅命令步出现；不改变执行顺序）。 */
   done_preheld?: boolean;
   /** 运行期诚实性警告（如 suspected_async）；只在产生时出现。 */
@@ -549,6 +558,32 @@ export interface RunOptions {
    * dry/replay 只传递声明、不重新决策（`dry` 仍 ok:true；`replay` 按录制序列）。
    */
   forceAct?: boolean;
+  /**
+   * S4 `force`（opt-in，步级声明；缺省 false = 今天的行为逐字节不变）：
+   * 动作执行走 Playwright 的 **force 语义**（`locator.click({force:true})` /
+   * `fill(value,{force:true})` / `selectOption(...,{force:true})` / `hover({force:true})`）——
+   * 跳过 actionability 检查（可见/稳定/可接收事件/启用），**仍要求元素可定位**。
+   *
+   * 风险：可能点到被遮挡/动画中的目标（鼠标坐标上的顶层元素收事件），只应在作者已确认
+   * 目标会在瞬态弹层/动画后真正接收事件时使用。风险确认（risky/confirmFn）语义不变：
+   * force 只改动作可操作性，不改"危险动作必须确认"的闸门。
+   */
+  force?: boolean;
+  /**
+   * S4 `staleRetry`（opt-in，步级声明；缺省 false = 今天的行为逐字节不变）：
+   * 动作失败且**疑似 stale** 时，重抽池 → 重解析**同一声明目标**（命令 target / act hint）→
+   * 重试动作，同一步内最多 2 次（不额外计入子目标动作预算）。
+   *
+   * 触发判据（只有这三类，全部有界）：
+   *   - `stale_ref`：`_locatorFor` 的盖章句柄/属性回退全部落空（节点已不在文档里）；
+   *   - `action_failed`：Playwright 动作本身抛错（页面在动作中途重渲染/卸载）；
+   *   - `not-actionable-or-covered` 且现场 `requery === "detached"`（节点在探针后被卸载）。
+   * `action-timeout` / 有覆盖者且节点仍在（`requery === "present"`）**不重试**——那不是 stale。
+   * 没有声明目标的决策步（纯模型挑元素）不重试：重解析必须对着**可复现的声明**做，不能猜。
+   * 每次重试进 trace（行上的 `stale_retry: [{attempt, reason, ref}]`）；最终失败仍按既有
+   * stopCode 诚实报告（stale_ref / action_failed / not-actionable-or-covered）。
+   */
+  staleRetry?: boolean;
   /**
    * NL Flow S1：`dataset` 绑定来源的读取面。
    * 命令参数可声明 `{"from":"dataset","key":"…"}` 引用**前序步骤的具名产出**；
@@ -1994,9 +2029,11 @@ export class BrowserMiddleware {
    * acted. This asks Playwright the read-only questions only (`isVisible` /
    * `isEnabled`) plus the same centre hit-test, so the page state is untouched.
    */
-  async dryRunProbe(page: AnyPage, el: Elem): Promise<{ actionable: boolean; reason: string | null }> {
+  async dryRunProbe(page: AnyPage, el: Elem, force = false): Promise<{ actionable: boolean; reason: string | null }> {
     const loc = await this._locatorFor(page, el);
     if (loc === null) return { actionable: false, reason: "stale_ref" };
+    // S4 `force`：干跑只回答"能不能定位"——force 语义本就会跳过其余 actionability 检查。
+    if (force) return { actionable: true, reason: null };
     try {
       const first = firstLoc(loc);
       if (first.isVisible && !(await first.isVisible())) return { actionable: false, reason: "not-visible" };
@@ -2050,7 +2087,7 @@ export class BrowserMiddleware {
   }
 
   /** Click, then give the page a short window to reach domcontentloaded. */
-  async _clickOnly(page: AnyPage, el: Elem): Promise<[string, unknown]> {
+  async _clickOnly(page: AnyPage, el: Elem, force = false): Promise<[string, unknown]> {
     const loc = await this._locatorFor(page, el);
     if (loc === null) return ["stale_ref", null];
     // Same containment as `_executeElement`: an element that passes the
@@ -2058,8 +2095,9 @@ export class BrowserMiddleware {
     // language sidebar, a re-render, an animation). Playwright raises a 5 s
     // TimeoutError; letting it escape killed the whole plan (measured on the live
     // zh.wikipedia case: 0/0 subgoals). Report it and let the loop forbid the ref.
+    // S4 `force`：跳过 actionability 检查（仍要求可定位）。
     try {
-      await firstLoc(loc).click({ timeout: 5000 });
+      await firstLoc(loc).click({ timeout: 5000, ...(force ? { force: true } : {}) });
     } catch (e) {
       return ["action_failed", describeActionError(e)];
     }
@@ -2116,8 +2154,24 @@ export class BrowserMiddleware {
      */
     bound?: { value: unknown; byValue?: boolean } | null,
     op?: string,
+    /** S4：步级 `force`（Playwright force 语义；缺省 false = 逐字节今天）。 */
+    force = false,
   ): Promise<[string, unknown, StateEffect?]> {
     const tag = el.tag;
+    const forceOpt = force ? { force: true } : {};
+    if (op === "hover") {
+      // S4：hover 原语——只移动指针，不点击、不导航；`locator.hover()` 同样受 force 影响。
+      const loc = await this._locatorFor(page, el);
+      if (loc === null) return ["stale_ref", null];
+      const hover = (firstLoc(loc) as unknown as { hover?: (o?: unknown) => Promise<void> }).hover;
+      if (typeof hover !== "function") return ["action_unsupported", "locator has no hover"];
+      try {
+        await hover.call(firstLoc(loc), { timeout: 5000, ...forceOpt });
+      } catch (e) {
+        return ["action_failed", describeActionError(e)];
+      }
+      return ["hovered", null];
+    }
     if (op === "drag") {
       const loc = await this._locatorFor(page, el);
       if (loc === null) return ["stale_ref", null];
@@ -2126,7 +2180,7 @@ export class BrowserMiddleware {
       const dragTo = (firstLoc(loc) as unknown as { dragTo?: (t: unknown, o?: unknown) => Promise<void> }).dragTo;
       if (typeof dragTo !== "function") return ["action_unsupported", "locator has no dragTo"];
       try {
-        await dragTo.call(firstLoc(loc), page.locator(destSel), { timeout: 5000 });
+        await dragTo.call(firstLoc(loc), page.locator(destSel), { timeout: 5000, ...forceOpt });
       } catch (e) {
         return ["action_failed", describeActionError(e)];
       }
@@ -2151,7 +2205,7 @@ export class BrowserMiddleware {
       return ["scrolled", null];
     }
     if (tag === "input" || tag === "textarea" || tag === "select") {
-      if (this._isSubmit(el)) return this._clickOnly(page, el);
+      if (this._isSubmit(el)) return this._clickOnly(page, el, force);
       // P2: a command-space fill/select arrives with its value ALREADY BOUND BY NAME
       // (`{from:"slot", key}` from the plan) — it must not fall back to `_slotValue`'s
       // substring heuristic, which is how a value once got handed to a radio. When no
@@ -2171,12 +2225,12 @@ export class BrowserMiddleware {
           if (bound?.byValue) {
             // 声明式绑定已经**按值**命中过当次观察到的候选：直接按值选（不付 label 探测，
             // 也不会选中"标签恰好等于这个机器值"的另一个 option）。
-            await firstLoc(loc).selectOption({ value: String(val) }, { timeout: 5000 });
+            await firstLoc(loc).selectOption({ value: String(val) }, { timeout: 5000, ...forceOpt });
           } else {
             try {
-              await firstLoc(loc).selectOption({ label: String(val) }, { timeout: 1500 });
+              await firstLoc(loc).selectOption({ label: String(val) }, { timeout: 1500, ...forceOpt });
             } catch {
-              await firstLoc(loc).selectOption({ value: String(val) }, { timeout: 5000 });
+              await firstLoc(loc).selectOption({ value: String(val) }, { timeout: 5000, ...forceOpt });
             }
           }
         } else {
@@ -2189,7 +2243,7 @@ export class BrowserMiddleware {
               before = typeof b === "string" ? b : null;
             } catch { before = null; }
           }
-          await firstLoc(loc).fill(String(val));
+          await firstLoc(loc).fill(String(val), force ? { force: true } : undefined);
           if (this.fillReadback && before !== null) {
             let after: string | null = null;
             try {
@@ -2211,7 +2265,7 @@ export class BrowserMiddleware {
       }
       return effect === undefined ? ["filled", val] : ["filled", val, effect];
     }
-    return this._clickOnly(page, el);
+    return this._clickOnly(page, el, force);
   }
 
   /**
@@ -2648,6 +2702,8 @@ export class BrowserMiddleware {
       donePollMs = 120,
       doneTimeoutMs = 2000,
       forceAct = false,
+      force = false,
+      staleRetry = false,
       candidatePriority = this.candidatePriority,
     } = opts;
 
@@ -3596,7 +3652,8 @@ export class BrowserMiddleware {
             nominatedRepair = true;
           }
         }
-        const el = elems[ref]!;
+        // S4：stale 重解析重试会换成本步重新解析出的元素，故 el 可重新绑定（ref 本就是 let）。
+        let el = elems[ref]!;
         // ActionAdapter 能力面：命令闭集声明的 op 必须是当前元素已声明的能力。
         // 这不是新的动作生成路径，只是把"跑了才发现不支持"提前到执行前。
         if (commandMode && cmdPick) {
@@ -3636,6 +3693,7 @@ export class BrowserMiddleware {
         const verb = cmdOpName === "scroll" ? "scroll to"
           : cmdOpName === "drag" ? "drag"
           : cmdOpName === "check" ? "check"
+          : cmdOpName === "hover" ? "hover"
           : cmdOpName === "fill" ? (this._isTyping(el) ? "type text into" : "fill")
           : cmdOpName === "select" ? "select"
           : this._isTyping(el) ? "type text into" : "click";
@@ -3645,10 +3703,10 @@ export class BrowserMiddleware {
         // the pre-fill guard below and `occludedReason` (which clicks) are never
         // reached. The caller gets "what WOULD happen" as evidence.
         if (dryRun) {
-          const probe = await this.dryRunProbe(pg, el);
+          const probe = await this.dryRunProbe(pg, el, force);
           dryRan = true;
           if (probe.actionable) {
-            stop("dry_run", `dry-run: would ${desc} (${method}, conf=${conf.toFixed(2)})`, stepNo);
+            stop("dry_run", `dry-run: would ${desc}${force ? " (force)" : ""} (${method}, conf=${conf.toFixed(2)})`, stepNo);
           } else {
             stop("dry_run_not_actionable",
               `dry-run: target not actionable (${probe.reason ?? "unknown"})`, stepNo);
@@ -3657,12 +3715,13 @@ export class BrowserMiddleware {
             step: stepNo, desc, method, conf: round3(conf), executed: false,
             dry_run: true, actionable: probe.actionable,
             ...(probe.reason === null ? {} : { reason: probe.reason }),
+            ...(force ? { forced: true } : {}),
             would: `${el.tag} "${el.label}"`, url: urlOf(pg),
             ...actionDeclEvidence(), ...refCollision(),
           });
           if (verbose) {
             console.log(`  step ${stepNo}: DRY-RUN `
-              + (probe.actionable ? `would ${desc}` : `not actionable (${probe.reason ?? "unknown"})`));
+              + (probe.actionable ? `would ${desc}${force ? " (force)" : ""}` : `not actionable (${probe.reason ?? "unknown"})`));
           }
           break;
         }
@@ -3685,7 +3744,8 @@ export class BrowserMiddleware {
         // Pre-fill guard: a click whose form has empty fields that the plan's
         // slots can supply would die in HTML5 validation or JS checks — an inert
         // click and a wasted step. Values come from the plan, never the model.
-        if (!this._isTyping(el)) {
+        // S4：hover 只移动指针、不应顺手改表单，故不触发预填（既有 click/scroll/drag 行为不变）。
+        if (!this._isTyping(el) && cmdOpName !== "hover") {
           // Pre-fill before ANY click, including clicks on a submit-type input.
           for (const pe of await this._missingRequired(pg, slots, elems, candidatePriority)) {
             const [phow] = await this._executeElement(pg, pe, slots);
@@ -3733,7 +3793,22 @@ export class BrowserMiddleware {
             continue;
           }
         }
-        const pre = await this.snapshot(pg);
+        // S4：stale 重解析重试的账户（本步内最多 STALE_RETRY_MAX 次；trace 每次记录一条）。
+        const STALE_RETRY_MAX = 2;
+        const staleRetries: Array<{ attempt: number; reason: string; ref: string }> = [];
+        const staleEvidence = (): Record<string, unknown> =>
+          staleRetries.length ? { stale_retry: staleRetries.slice() } : {};
+        /** S4：步级 force 声明的执行证据（动作 trace 行上 forced=true）。 */
+        const forcedEvidence = (): Record<string, unknown> => (force ? { forced: true } : {});
+        /**
+         * 重试只能对着**可复现的声明**重新解析：命令 target 优先，其次 act hint（规则命中）。
+         * 纯模型挑元素的决策步没有声明目标 ⇒ 不重试（重解析必须复现，不能猜一个"看起来像"的）。
+         */
+        const declaredStaleTarget = commandMode && cmdPick
+          && typeof cmdPick.cmd.target === "string" && cmdPick.cmd.target.trim()
+          ? cmdPick.cmd.target
+          : (method === "rule:match" && curHint !== null ? curHint : null);
+        let pre = await this.snapshot(pg);
         // Click path goes through the actionability probe: a free element is
         // clicked inside it ("__clicked__"); a covered/slow one costs 0.8 s and
         // reports why, instead of burning 5 s + an inert step.
@@ -3741,98 +3816,128 @@ export class BrowserMiddleware {
         let arg: unknown = null;
         /** S1：本动作的 effect 读回（只有 fill 会产生；最后一次非空值进 StepStateRecord）。 */
         let fillEffect: StateEffect | undefined;
-        const isScrollCommand = commandMode && cmdPick && String(cmdPick.cmd.op) === "scroll";
-        const isDragCommand = commandMode && cmdPick && String(cmdPick.cmd.op) === "drag";
-        if (!this._isTyping(el) && !isScrollCommand && !isDragCommand) {
-          const reason = await this.occludedReason(pg, el);
-          // S1：actionability 失败现场（bbox/覆盖者/重查是否还在）；非该原因时保持 null。
-          const actionability = this._takeActionabilityDetail();
-          if (reason === "__clicked__") {
-            try {
-              await pg.waitForLoadState("domcontentloaded", { timeout: 3000 });
-            } catch {
-              /* nothing to wait for */
+        const isScrollCommand = cmdOpName === "scroll";
+        const isDragCommand = cmdOpName === "drag";
+        const isHoverCommand = cmdOpName === "hover";
+        let actionability: ActionabilityDetail | null = null;
+        /** 本条动作（含重试）最后一次 actionability 探针给出的失败原因。 */
+        let probeFailure: string | null = null;
+        for (let attempt = 0; ; attempt++) {
+          how = null; arg = null; fillEffect = undefined; actionability = null; probeFailure = null;
+          // force：跳过 actionability 探针，直接按 Playwright force 语义动作（仍要求可定位）。
+          // hover：探针的快路径本身就是一次真点击，悬停必须走 hover 分支、不能过探针。
+          if (!force && !this._isTyping(el) && !isScrollCommand && !isDragCommand && !isHoverCommand) {
+            probeFailure = await this.occludedReason(pg, el);
+            // S1：actionability 失败现场（bbox/覆盖者/重查是否还在）；非该原因时保持 null。
+            actionability = this._takeActionabilityDetail();
+            if (probeFailure === "__clicked__") {
+              try {
+                await pg.waitForLoadState("domcontentloaded", { timeout: 3000 });
+              } catch {
+                /* nothing to wait for */
+              }
+              how = "clicked";
+              arg = null;
             }
-            how = "clicked";
-            arg = null;
-          } else if (reason) {
-            forbid(ref, el, reason);
-            if (reason.startsWith("not-actionable-or-covered") && !reAdmitted.has(ref)) {
-              blockedRetry[ref] = [stepNo, trace.length];
-            }
-            // A1：动作阶段没执行成 —— skipped_actions 记原因与命令身份（零执行步骤的证据）。
-            // S1：not-actionable-or-covered 另附结构化现场（bbox/覆盖者/重查节点是否还在）。
-            noteSkipped({
-              ref, reason,
-              ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}),
-              ...(actionability === null ? {} : {
-                detail: `bbox=${actionability.bbox === null ? "?" : `${actionability.bbox.x},${actionability.bbox.y} ${actionability.bbox.width}x${actionability.bbox.height}`}`
-                  + `; blocker=${actionability.blocker ?? "none"}; requery=${actionability.requery}`,
-              }),
-            });
-            // A2：命令步的候选尝试计数（前 4 个为止；失败的候选已被 forbid，下一步换下一个）。
-            if (cmdPick) cmdAttempts[cmdPick.cmd.id] = (cmdAttempts[cmdPick.cmd.id] ?? 0) + 1;
-            trace.push({
-              step: stepNo, desc, how: reason, executed: false, method, conf: round3(conf),
-              ref, skipped: true, skip_reason: reason, url: urlOf(pg),
-              ...(actionability === null ? {} : { actionability }),
-              ...actionDeclEvidence(), ...refCollision(),
-            });
-            if (verbose) console.log(`  step ${stepNo}: (${reason}, ${method}) -> skip ${ref}`);
-            continue;
           }
-        }
-        if (how === null) {
-          // Submit-type inputs carry their label in `value` and must be clicked,
-          // never filled — `_executeElement`'s input branch would return
-          // needs_value otherwise. scroll 是 viewport 语义，必须走专用分支。
-          if (isScrollCommand || isDragCommand) {
-            // A3：`scroll` 命令可带方向原语 `to`（ctx.command("scroll", sel, {to:"bottom"})）——
-            // 语义是"滚动**容器**到方向"，与旧的"把目标滚入视口"不同；旧调用（无 to）逐字节不变。
-            const scrollTo = isScrollCommand ? cmdPick?.cmd.to : undefined;
-            if (scrollTo !== undefined) {
-              const sr = await this._scrollContainerForElement(pg, el, scrollTo);
-              how = sr.ok ? "scrolled" : "action_failed";
-              arg = sr.ok ? sr.scrollTop : (sr.stopCode ?? "not_scrollable");
+          if (probeFailure === null && how === null) {
+            // Submit-type inputs carry their label in `value` and must be clicked,
+            // never filled — `_executeElement`'s input branch would return
+            // needs_value otherwise. scroll 是 viewport 语义，必须走专用分支。
+            if (isHoverCommand) {
+              // S4：hover 原语——只移动指针（:hover 展开菜单/图层面板），不点击、不导航。
+              [how, arg, fillEffect] = await this._executeElement(pg, el, slots, null, "hover", force);
+            } else if (isScrollCommand || isDragCommand) {
+              // A3：`scroll` 命令可带方向原语 `to`（ctx.command("scroll", sel, {to:"bottom"})）——
+              // 语义是"滚动**容器**到方向"，与旧的"把目标滚入视口"不同；旧调用（无 to）逐字节不变。
+              const scrollTo = isScrollCommand ? cmdPick?.cmd.to : undefined;
+              if (scrollTo !== undefined) {
+                const sr = await this._scrollContainerForElement(pg, el, scrollTo);
+                how = sr.ok ? "scrolled" : "action_failed";
+                arg = sr.ok ? sr.scrollTop : (sr.stopCode ?? "not_scrollable");
+              } else {
+                [how, arg, fillEffect] = await this._executeElement(pg, el, slots,
+                  commandMode ? { value: commandValue, byValue: commandByValue } : null,
+                  isDragCommand ? "drag" : "scroll", force);
+              }
+            } else if (!this._isTyping(el)) {
+              [how, arg] = await this._clickOnly(pg, el, force);
             } else {
               [how, arg, fillEffect] = await this._executeElement(pg, el, slots,
                 commandMode ? { value: commandValue, byValue: commandByValue } : null,
-                isDragCommand ? "drag" : "scroll");
+                commandMode ? String(cmdPick!.cmd.op) : undefined, force);
             }
-          } else if (!this._isTyping(el)) {
-            [how, arg] = await this._clickOnly(pg, el);
-          } else {
-            [how, arg, fillEffect] = await this._executeElement(pg, el, slots,
-              commandMode ? { value: commandValue, byValue: commandByValue } : null,
-              commandMode ? String(cmdPick!.cmd.op) : undefined);
           }
+          // S4 stale 判据（只有这三类；action-timeout / 有覆盖者且节点仍在都不算 stale）。
+          const staleReason = probeFailure !== null && probeFailure !== "__clicked__"
+            ? (probeFailure === "stale_ref"
+              || (probeFailure.startsWith("not-actionable-or-covered") && actionability?.requery === "detached")
+              ? probeFailure : null)
+            : (how === "stale_ref" || how === "action_failed" ? how : null);
+          if (!staleRetry || staleReason === null || attempt >= STALE_RETRY_MAX || declaredStaleTarget === null) break;
+          // 重抽池：先给重渲染一个短拍（settle 在脏页上会再等静默），再用**同一声明目标**
+          // 在新池上重新解析——这就是 r7 弹层"点前节点被替换/重挂载"的确定性修法。
+          await sleep(120);
+          const fresh = await this._extractPoolSettled(pg, candidatePriority);
+          pruneForbids(fresh);
+          // 命令目标：按 op 的能力面重新排候选并剔除已禁；act hint：同一 hint 语义重解析。
+          let freshRef: string | null = null;
+          if (commandMode) {
+            freshRef = this.resolveCommandRef(declaredStaleTarget, fresh, cmdOpName || "click",
+              new Set(Object.keys(forbidden)))[0] ?? null;
+          } else {
+            const r = hintMatch(declaredStaleTarget, fresh);
+            if (r !== null && !(r in forbidden)) freshRef = r;
+          }
+          if (freshRef === null || fresh[freshRef] === undefined) break;   // 此刻仍解析不到：不猜、按原失败报
+          staleRetries.push({ attempt: attempt + 1, reason: staleReason, ref: freshRef });
+          if (verbose) console.log(`  step ${stepNo}: stale retry ${attempt + 1} (${staleReason}) -> ${freshRef}`);
+          elems = fresh;
+          ref = freshRef;
+          el = fresh[freshRef]!;
+          pre = await this.snapshot(pg);   // 重试动作的 pre 快照 = 此刻页面
         }
         if (fillEffect !== undefined) lastEffect = fillEffect;
-        const executed = how === "clicked" || how === "filled" || how === "scrolled" || how === "dragged";
+        const executed = how === "clicked" || how === "filled" || how === "scrolled"
+          || how === "dragged" || how === "hovered";
         if (!executed) {
+          // 末次失败原因：actionability 探针给出的，或动作本身返回的（stale_ref/needs_value/
+          // action_unsupported/action_failed）。
+          const reason = probeFailure !== null && probeFailure !== "__clicked__" ? probeFailure : String(how);
           // needs_value / stale_ref: this element cannot advance the plan right
           // now; forbid and try another (no model call).
-          forbid(ref, el, String(how));
-          // A1：动作阶段失败同样是"为什么没有动作"的证据（stale_ref/needs_value/
-          // action_unsupported/action_failed 都走这里）。
-          noteSkipped({ ref, reason: String(how), ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
+          forbid(ref, el, reason);
+          if (reason.startsWith("not-actionable-or-covered") && !reAdmitted.has(ref)) {
+            blockedRetry[ref] = [stepNo, trace.length];
+          }
+          // A1：动作阶段没执行成 —— skipped_actions 记原因与命令身份（零执行步骤的证据）。
+          // S1：not-actionable-or-covered 另附结构化现场（bbox/覆盖者/重查节点是否还在）。
+          noteSkipped({
+            ref, reason,
+            ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}),
+            ...(actionability === null ? {} : {
+              detail: `bbox=${actionability.bbox === null ? "?" : `${actionability.bbox.x},${actionability.bbox.y} ${actionability.bbox.width}x${actionability.bbox.height}`}`
+                + `; blocker=${actionability.blocker ?? "none"}; requery=${actionability.requery}`,
+            }),
+          });
+          // A2：命令步的候选尝试计数（前 4 个为止；失败的候选已被 forbid，下一步换下一个）。
           if (cmdPick) cmdAttempts[cmdPick.cmd.id] = (cmdAttempts[cmdPick.cmd.id] ?? 0) + 1;
           trace.push({
-            step: stepNo, desc, how,
-            executed: false, method, conf: round3(conf),
-            ref, skipped: true, skip_reason: String(how),
+            step: stepNo, desc, how: reason, executed: false, method, conf: round3(conf),
+            ref, skipped: true, skip_reason: reason, url: urlOf(pg),
             ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
-            url: urlOf(pg),
-            ...actionDeclEvidence(), ...refCollision(),
+            ...(actionability === null ? {} : { actionability }),
+            ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...refCollision(),
           });
-          if (verbose) console.log(`  step ${stepNo}: (${how}, ${method}) -> skip ${ref}`);
+          if (verbose) console.log(`  step ${stepNo}: (${reason}, ${method}) -> skip ${ref}`);
           continue;
         }
         const post = await this.snapshot(pg);
         // A1：changed = pre/post 快照是否变化（诚实字段，供审查判"点击成功但页面没动"）。
         const changed = JSON.stringify(pre) !== JSON.stringify(post);
         // scroll 改变的是 viewport，不是 url/text/input 快照；不能把“快照没变”误判成 inert。
-        const inert = (how === "scrolled" || how === "dragged") ? false : !changed;
+        // S4 hover 同理：它改变的是指针/`:hover` 状态，纯视觉展开未必改快照——不据此判死元素。
+        const inert = (how === "scrolled" || how === "dragged" || how === "hovered") ? false : !changed;
         // A1：本子目标真的执行了几个动作（零执行步骤的判据）。
         executedCount += 1;
         // P2: an executed command is ACTED whether or not the page moved — the walk
@@ -3848,6 +3953,7 @@ export class BrowserMiddleware {
           : how === "filled" ? (el.tag === "select" ? "select" : "fill")
           : how === "scrolled" ? "scroll"
           : how === "dragged" ? "drag"
+          : how === "hovered" ? "hover"
           : "click";
         // A1 §2.2.5：click 执行了、但 pre/post 快照没变，随后 done 却成立 —— 这不是"死元素"，
         // 而是效果异步到达（实测形态：点击后 1s 才长出新行）。此时必须记 suspected_async 警告，
@@ -3880,7 +3986,7 @@ export class BrowserMiddleware {
           ...(noted ? { noted: Object.keys(noted).length } : {}),
           ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question
           inert, url: urlOf(pg),
-          ...actionDeclEvidence(), ...refCollision(),
+          ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...refCollision(),
         });
         // A1 子改动③：这个已执行动作的 after 签名等下一次观察落账（见循环头部的落账点）。
         pendingAfterIdx = trace.length - 1;
@@ -4143,7 +4249,7 @@ export class BrowserMiddleware {
     const actionRows = trace.filter((t) =>
       Object.prototype.hasOwnProperty.call(t, "changed") || t["skipped"] === true);
     const executedRows = actionRows.filter((t) => t["executed"] === true
-      && ["clicked", "filled", "scrolled", "dragged"].includes(String(t["how"] ?? "")));
+      && ["clicked", "filled", "scrolled", "dragged", "hovered"].includes(String(t["how"] ?? "")));
     const hasActionFace = cmdSpace.length > 0 || actionRows.length > 0;
     const executedActions: ExecutedAction[] = executedRows.map((t) => ({
       op: String(t["op"] ?? t["how"] ?? "click"),
@@ -4153,12 +4259,22 @@ export class BrowserMiddleware {
       desc: String(t["desc"] ?? ""),
       changed: t["changed"] === true,
     }));
+    // S4 证据汇总：stale 重试每次一条（trace 行本来就一次只落一行），force 只在真正执行时出现。
+    const staleRetries: Array<{ attempt: number; reason: string; ref: string }> = [];
+    for (const t of trace) {
+      if (Array.isArray(t["stale_retry"])) {
+        staleRetries.push(...(t["stale_retry"] as Array<{ attempt: number; reason: string; ref: string }>));
+      }
+    }
+    const forcedExecuted = executedRows.some((t) => t["forced"] === true);
     return {
       goal: instruction, done, stop_reason: stopReason, steps: trace, audit: verdict,
       stop_code: stopCode,
       ...(hasActionFace ? { executed: executedRows.length > 0 } : {}),
       ...(executedActions.length ? { executed_actions: executedActions } : {}),
       ...(skippedActions.length ? { skipped_actions: skippedActions.slice(0, 20) } : {}),
+      ...(staleRetries.length ? { stale_retries: staleRetries } : {}),
+      ...(forcedExecuted ? { forced: true } : {}),
       ...(donePreheld !== null ? { done_preheld: donePreheld } : {}),
       ...(warnings.length ? { warnings } : {}),
       ...(stepState === undefined ? {} : { state: stepState }),
