@@ -121,6 +121,16 @@ amber config set AMBERFLOW_DECISION_API_KEY sk-...
 - `predicate` 概率的刻度与 `confidence` 同属标定概率（`score_kind=calibrated_prob`），
   但**不要**和 laya 的归一化熵跨源比较。
 
+**S5b 状态上文（`state_digest`，opt-in）**：应用在 `meta.policy.decision_state.context` 写 `"delta"` 时，
+决策请求会多带一个**结构化**观测摘要（SystemOne 的 `state` 包内可选键 `state.state_digest`，
+≤200B 的 JSON 对象：`{nav_epoch_delta, last_effect?, settled, pool_changed, flags?}`）。它只带观测事实、
+不含建议，模型仍只在一组 ref 里投票。provider 用 `capabilities.state_digest` 自报是否接受：
+- 统一决策服务（SystemOne 的 `state` 是不透明包）接受；协议**没有版本字段**，可选键对老服务
+  向后兼容（忽略未知键即可）。
+- 本地 `laya-onnx` 与 OpenAI Decisions（`input` 是字符串）**不接受**：执行器整段跳过、绝不把
+  JSON 塞进自然语言，并在产物 `decisions.context_skipped` 计数。
+- 默认关（不写 `decision_state.context` 就不带这个键，请求体逐字节不变）。
+
 ## 6. 决策入口唯一：escalation 与审计的边界（2026-11）
 
 - **步级决策只有这一个入口**：执行（apps / online / start / plan run）统一按三件套或本地

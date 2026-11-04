@@ -413,6 +413,61 @@ export interface StepStateRecord {
   effect?: StateEffect;
 }
 
+/* ------------------------------------------------------------------ S5 decision-state
+ *
+ * S5a（gate）与 S5b（context）都是**默认关闭**的实验开关（`meta.policy.decision_state`）：
+ * 不声明时执行器的决策路径逐字节不变。它们只改变"什么时候问模型、问的时候带什么观测事实"，
+ * 不改变「模型只投票 / 完成只认信号」契约——模型仍只在一组 ref 里选一个。
+ */
+
+/** S5a 状态闸门：`off`（缺省）= 今天的行为；`stable_only` = 先 settle，同池同题不重复问。 */
+export type DecisionStateGate = "off" | "stable_only";
+/** S5b 状态上文：`off`（缺省）；`delta` = 决策请求带 ≤200B 结构化 `state_digest`。 */
+export type DecisionStateContext = "off" | "delta";
+
+export interface DecisionStatePolicy {
+  gate: DecisionStateGate;
+  context: DecisionStateContext;
+}
+
+/** 缺省档：两项都关（`meta.policy.decision_state` 不声明就是这个）。 */
+export const DEFAULT_DECISION_STATE: Readonly<DecisionStatePolicy> = Object.freeze({ gate: "off", context: "off" });
+
+/**
+ * S5 指标（应用产物 `decisions` 的单一来源；默认档全 0，且**不写进产物**——缺省等价纪律）。
+ * 计数位置只有执行器的决策路径（`pickInner`），不在报告层重算。
+ */
+export interface DecisionStateMetrics {
+  /** 状态闸门省掉的 ask 数（同题一字不差，或同池结构 + 上次选择仍可行动 ⇒ 复用上一次答复）。 */
+  asks_saved: number;
+  /** 状态闸门的 settle **实际等待**次数（`waitedMs > 0`；已静默的 0ms 检查不计）。 */
+  gate_waits: number;
+  /** 带 `state_digest` 真正发出的决策请求数。 */
+  context_sent: number;
+  /** 策略要求带上文但 provider 不支持（`capabilities.state_digest !== true`）而跳过的请求数。 */
+  context_skipped: number;
+}
+
+/**
+ * S5b 的状态摘要（**只给观测事实，不塞建议**）。字段序即序列化序；≤200 字节是硬约束
+ * （`STATE_DIGEST_MAX_BYTES`）——超了先裁 `flags`、再裁 `last_effect`，绝不截断 JSON。
+ */
+export interface StateDigest {
+  /** 距上一次 ask 的导航代数差（本次 run 内；首次 ask = 自 run 起点）。 */
+  nav_epoch_delta: number;
+  /** 最近一次 effect 读回（只有 fill 产生；值本身不进摘要，只留 kind/applied）。 */
+  last_effect?: { kind: StateEffect["kind"]; applied: boolean };
+  /** ask 时刻页面是否已静默（settle 传感器的读数；gate 关闭时不等待，只探测）。 */
+  settled: boolean;
+  /** 当前 ask 的候选池是否与上一次 ask 不同（首次 ask = true）。 */
+  pool_changed: boolean;
+  /** 本次 run 到目前为止的 S1 flags（done_preheld / no_state_progress；无则省略）。 */
+  flags?: StateFlag[];
+}
+
+/** `state_digest` 的 JSON 字节上限（协议契约，见 schema F25）。 */
+export const STATE_DIGEST_MAX_BYTES = 200;
+
 /**
  * A stronger reasoner consulted when the LOCAL model is unsure — C3-R's
  * "deliberative path" adapted to this project's contract: the escalator is a
@@ -724,6 +779,12 @@ export interface MiddlewareOptions {
    * `null` = 显式关闭）。只影响"抽池前是否等页面静默"，不改变完成判定/动作语义。
    */
   settle?: { quietMs: number; timeoutMs: number } | null;
+  /**
+   * S5：状态接入决策（来自 `meta.policy.decision_state`；缺省两项都 "off" = 今天的行为）。
+   * 见 `DecisionStatePolicy`：gate 决定"stable_only 时先 settle + 同池同题不重复问"，
+   * context 决定"决策请求是否带 ≤200B 结构化 state_digest"。
+   */
+  decisionState?: Partial<DecisionStatePolicy>;
 }
 
 /* ------------------------------------------------------------------ JS passes
@@ -1358,6 +1419,125 @@ export class BrowserMiddleware {
   /** 上一条 `not-actionable-or-covered` 的结构化现场（只在同一次调用内消费）。 */
   private _lastActionabilityDetail: ActionabilityDetail | null = null;
 
+  /* -- S5 decision-state ---------------------------------------------------- */
+
+  /** S5：状态接入决策的开关（缺省两项 off；见 `MiddlewareOptions.decisionState`）。 */
+  decisionState: DecisionStatePolicy = { ...DEFAULT_DECISION_STATE };
+  /**
+   * S5 指标（**实例级累计**）：一个 flow 应用会对同一 mw 跑多个 `ctx.step`，应用产物的
+   * `decisions` 要的是整次旅程的数，所以计数**不随 run() 重置**。每个应用一次新 mw。
+   */
+  private _decisionMetrics: DecisionStateMetrics =
+    { asks_saved: 0, gate_waits: 0, context_sent: 0, context_skipped: 0 };
+  /**
+   * S5a：上一次真 ask 的题面指纹与导航代（每次 run() 重置——refs/导航代都是 run 内口径）。
+   * 只服务 S5b 的 `state_digest`（`nav_epoch_delta` / `pool_changed` 的基线）；"不重复问"的
+   * 复用账在 `_askedPools`（按池结构指纹）。
+   */
+  private _lastAsk: {
+    key: string;
+    poolSig: string;
+    navEpoch: number;
+    result: { ref: string | null; conf: number; probs: Record<string, number>; passthrough: boolean };
+  } | null = null;
+  /**
+   * S5a 第二档（池**结构**指纹）：同一个页面上同一个 goal 的重复咨询是噪声。
+   * 键 = `structDigest(ask 池)`（与 S1 的 `StateFingerprint.struct` 同一算法/零页面往返），
+   * 值 = 该结构下**最近一次真 ask** 的 goal 指纹与答复。命中时**不发请求**：
+   *   ① 题面一字不差（key 相同）⇒ 直接复用答复；
+   *   ② 结构相同、goal 相同、且上一次的选择**此刻仍可行动**（在池里且未 forbidden）⇒ 复用答复。
+   * 两者的答复都继续走既有的 floor/reobserve/escalate 裁决——这就是"既有降级路径"。
+   * 不能安全复用（上一次的选择已被禁/已不在池里）时**照常问**：拿一个过时答复去动作
+   * 比多问一次更糟，引擎不替模型编答案。
+   */
+  private _askedPools = new Map<string, {
+    key: string;
+    goalKey: string;
+    result: { ref: string | null; conf: number; probs: Record<string, number>; passthrough: boolean };
+  }>();
+  /** S5b：本次 run 到目前为止出现过的 S1 flags（摘要里只放已经发生的事实）。 */
+  private _runFlags: StateFlag[] = [];
+  /** S5b：最近一次 effect 读回（只留 kind/applied，值本身不进摘要）。 */
+  private _lastEffectSeen: { kind: StateEffect["kind"]; applied: boolean } | null = null;
+
+  /** S5：指标快照（应用产物 `decisions` 的唯一来源；默认档全 0）。 */
+  decisionStateMetrics(): DecisionStateMetrics {
+    return { ...this._decisionMetrics };
+  }
+
+  /**
+   * S5a：ask 前的稳定门。`policy.settle: "off"` 时闸门不等待（只做同池去重）；
+   * 页面已静默时 0ms 返回，不改变既有节奏。超时/传感器失败按 `null`（不阻断继续问）。
+   * 只有**真的等了**（waitedMs > 0）才计 `gate_waits`——0ms 检查不是"等待"。
+   */
+  private async _gateSettle(page: AnyPage): Promise<boolean | null> {
+    if (this.settlePolicy === null) return null;
+    try {
+      const r = await settle(page as unknown as SettlePage, this.settlePolicy);
+      if (r.waitedMs > 0) this._decisionMetrics.gate_waits += 1;
+      return r.settled;
+    } catch {
+      return null;      // 稳定门是观察增强：失败不阻断（与 S2 同一条纪律）
+    }
+  }
+
+  /**
+   * S5a 的题面指纹：**这一次 ask 实际会给出的候选集合**（ref + 元素签名，排序后 hash）
+   * + goal。它回答"是不是同一个问题"（一字不差 ⇒ 可直接复用答复）；候选集合变了但池
+   * 结构没变时，由 `_askedPools` 的第二条判据（上次选择仍可行动）决定能不能复用。
+   */
+  private _askSignature(goal: string, elems: ElemPool, forbidden: Set<string>):
+    { key: string; poolSig: string } {
+    const refs = Object.keys(elems).filter((r) => !forbidden.has(r) && elems[r] !== undefined).sort();
+    const parts = refs.map((r) => `${r}\u0001${esig(elems[r]!).join("\u0001")}`);
+    const poolSig = fnv1aText(parts.join("\u0002"));
+    return { key: `${fnv1aText(goal)}\u0000${poolSig}`, poolSig };
+  }
+
+  /**
+   * S5b：构造 ≤200B 的结构化 `state_digest`（只观测事实）。
+   * 裁剪顺序固定：`flags` → `last_effect`（字段全可丢，base 三键 ~60B 永不超）；
+   * 绝不截断 JSON（半个对象对模型是噪声，不是事实）。没有可说的就返回 null。
+   */
+  private _buildStateDigest(input: {
+    settled: boolean | null;
+    poolChanged: boolean;
+  }): StateDigest | null {
+    const base: StateDigest = {
+      nav_epoch_delta: Math.max(0, this._state.navEpoch - (this._lastAsk?.navEpoch ?? 0)),
+      settled: input.settled === true,
+      pool_changed: input.poolChanged,
+    };
+    const withLast: StateDigest = this._lastEffectSeen === null
+      ? { ...base }
+      : { nav_epoch_delta: base.nav_epoch_delta, last_effect: { ...this._lastEffectSeen },
+          settled: base.settled, pool_changed: base.pool_changed };
+    const withFlags: StateDigest = this._runFlags.length === 0
+      ? withLast
+      : { ...withLast, flags: [...this._runFlags] };
+    const bytes = (d: StateDigest): number => Buffer.byteLength(JSON.stringify(d), "utf8");
+    for (const candidate of [withFlags, withLast, base] as StateDigest[]) {
+      if (bytes(candidate) <= STATE_DIGEST_MAX_BYTES) return candidate;
+    }
+    return null;
+  }
+
+  /**
+   * S5b：不带等待地探测页面是否已静默（`timeoutMs: 0`：只读一次传感器，不睡）。
+   * gate 关闭而 context 开启时用；`policy.settle: "off"` 时用缺省 quietMs 口径。
+   */
+  private async _probeSettled(page: AnyPage): Promise<boolean | null> {
+    try {
+      const r = await settle(page as unknown as SettlePage, {
+        quietMs: this.settlePolicy?.quietMs ?? DEFAULT_SETTLE.quietMs,
+        timeoutMs: 0,
+      });
+      return r.settled;
+    } catch {
+      return null;
+    }
+  }
+
   /** `ctx.runtime.epoch` 的只读投影：还没有观察过就是 0（不硬造）。 */
   stateEpoch(): number {
     return this._state.current?.epoch ?? 0;
@@ -1454,6 +1634,13 @@ export class BrowserMiddleware {
     this.donePreheldPolicy = opts.donePreheldPolicy ?? this.donePreheldPolicy;
     this.fillReadback = opts.fillReadback ?? this.fillReadback;
     if (opts.settle !== undefined) this.settlePolicy = opts.settle;
+    if (opts.decisionState !== undefined) {
+      // 只认已声明的两个值（策略面已在加载期校验；这里再兜一层，避免嵌入方传入脏值）。
+      this.decisionState = {
+        gate: opts.decisionState.gate === "stable_only" ? "stable_only" : "off",
+        context: opts.decisionState.context === "delta" ? "delta" : "off",
+      };
+    }
   }
 
   /**
@@ -1702,6 +1889,49 @@ export class BrowserMiddleware {
     }
     // 视图构造、state 渲染、短名单重问、两支各自的 conf 口径——**全部在适配器里**，
     // 且与替换前的实现逐字段等价（历史回归 ①）。
+    //
+    // ── S5 状态接入（默认两项 off ⇒ 下面整段短路，决策路径逐字节不变）───────────────
+    // 判据「规则层仍歧义」不需要再问一遍：pickInner 是**规则层没解出 ref**（ruleRef 为
+    // null / 被 forbidden）之后唯一的模型入口（调用点见 pickElement 的三处），走到这里
+    // 就说明规则层给不出目标。
+    const askSig = this._askSignature(goal, elems, forbidden);
+    const goalKey = fnv1aText(goal);
+    const poolStruct = structDigest(elems);
+    let settledNow: boolean | null = null;
+    if (this.decisionState.gate === "stable_only") {
+      // ① 页面在动 ⇒ 先等到静默（走 policy.settle 参数；超时不阻断，照旧问）。
+      settledNow = await this._gateSettle(page);
+      // ② 池指纹未变 + 规则层仍歧义 ⇒ 不重复敲门，复用该池结构下的上一次答复：
+      //    题面一字不差（key 相同）直接复用；仅结构相同则要求上一次的选择此刻仍可行动
+      //    （在池里且未 forbidden），否则这次答复已经过时——照常问，不拿死答案去动作。
+      const prior = this._askedPools.get(poolStruct);
+      if (prior !== undefined && prior.goalKey === goalKey) {
+        const stillActionable = prior.result.ref !== null
+          && elems[prior.result.ref] !== undefined && !forbidden.has(prior.result.ref);
+        if (prior.key === askSig.key || stillActionable) {
+          this._decisionMetrics.asks_saved += 1;
+          // 复用的答复继续走既有 floor/reobserve/escalate 裁决（就是"既有降级路径"）。
+          return { ...prior.result, probs: { ...prior.result.probs } };
+        }
+      }
+    }
+    let digest: StateDigest | null = null;
+    if (this.decisionState.context === "delta" && this.decision !== null) {
+      if (settledNow === null) settledNow = await this._probeSettled(page);
+      digest = this._buildStateDigest({
+        settled: settledNow,
+        poolChanged: this._lastAsk === null ? true : this._lastAsk.poolSig !== askSig.poolSig,
+      });
+      if (digest !== null) {
+        if (this.decision.capabilities.state_digest === true) this._decisionMetrics.context_sent += 1;
+        else {
+          // provider 的输入 schema 固定（本地 laya-onnx / OpenAI Decisions 等）：**跳过整段上文**，
+          // 不塞进自然语言、不改协议；只记账（context_skipped），决策请求与默认档逐字节相同。
+          this._decisionMetrics.context_skipped += 1;
+          digest = null;
+        }
+      }
+    }
     // **在线 provider 掉线/没配好 ⇒ 优雅降级到 rules-only**（与"本地模型不在位"同一条路）：
     // 缺 key/缺端点/网络不可达时，不该把整条计划崩掉，也不该每步再敲一次坏服务——
     // 声明点名的步照跑，需要选目标的步按 rules-only 如实 block。这是"默认在线 provider"
@@ -1709,14 +1939,25 @@ export class BrowserMiddleware {
     // pick 这边补齐，两条兜底档对"服务不可用"的反应一致。
     let out;
     try {
-      out = await provider.pick({ goal, page, elems, forbidden, notes, narrow: null, k: 8 });
+      out = await provider.pick({
+        goal, page, elems, forbidden, notes, narrow: null, k: 8,
+        ...(digest === null ? {} : { state_digest: digest }),
+      });
     } catch (err) {
       this.rulesOnly = true;
       this.rulesOnlyReason = (err as Error).message;
       this.providerDegraded = (err as Error).message;
       return { ref: null, conf: 0.0, probs: {}, passthrough: true };
     }
-    return { ref: out.ref as string | null, conf: out.score, probs: out.probs, passthrough: out.passthrough };
+    const result = {
+      ref: out.ref as string | null, conf: out.score, probs: out.probs, passthrough: out.passthrough,
+    };
+    // S5a：只有真问过才更新"上一次 ask"（被闸门省掉的不覆盖题面/答复）。
+    this._lastAsk = { key: askSig.key, poolSig: askSig.poolSig, navEpoch: this._state.navEpoch, result };
+    // 池结构指纹 → 该结构下最近一次真 ask 的答复（同页同 goal 的重复咨询不再敲门）。
+    if (this._askedPools.size > 32) this._askedPools.clear();   // 有界：池形状种类远小于此
+    this._askedPools.set(poolStruct, { key: askSig.key, goalKey, result });
+    return result;
   }
 
   /** First rung of the pick ladder, then laya. Returns `[ref, conf, probabilities]`. */
@@ -2861,6 +3102,11 @@ export class BrowserMiddleware {
       this._state = { epoch: 0, navEpoch: 0, current: null };
       this._lastActionabilityDetail = null;
       this._settleWaitMs = 0;
+      // S5：上次 ask 的题面/答复与 run 内 flags 都是 run 内口径（refs 会重编号）；指标不重置。
+      this._lastAsk = null;
+      this._askedPools.clear();
+      this._runFlags = [];
+      this._lastEffectSeen = null;
       await this.ready();
       // A config error is not a transient failure: acting on rules-only anyway would
       // silently downgrade what the operator explicitly configured, and retrying it
@@ -3897,7 +4143,11 @@ export class BrowserMiddleware {
           el = fresh[freshRef]!;
           pre = await this.snapshot(pg);   // 重试动作的 pre 快照 = 此刻页面
         }
-        if (fillEffect !== undefined) lastEffect = fillEffect;
+        if (fillEffect !== undefined) {
+          lastEffect = fillEffect;
+          // S5b：摘要只留 kind/applied（值本身可能是凭据/隐私，进模型上文的面只要事实）。
+          this._lastEffectSeen = { kind: fillEffect.kind, applied: fillEffect.applied };
+        }
         const executed = how === "clicked" || how === "filled" || how === "scrolled"
           || how === "dragged" || how === "hovered";
         if (!executed) {
@@ -4212,6 +4462,8 @@ export class BrowserMiddleware {
       // W1 验收：原“attempted>0 && executed==0 && done && !progressed”的串扰 flag
       // 在控制流上不可达——全 skip 的步会先因 done 不成立而失败，done 成立则必有 executed>0。
       // 该 flag 类别已移除；r8 跨城串扰签名由 done_preheld（命令步动作前预评估）+ no_state_progress 覆盖。
+      // S5b：下一次 ask 的 state_digest 只带**已经发生过**的 flags（本步判定完才更新）。
+      this._runFlags = [...flags];
       if (beforeFp !== null) {
         stepState = {
           before: beforeFp,

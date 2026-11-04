@@ -197,6 +197,10 @@ export function systemOneServiceProfile(env: NodeJS.ProcessEnv = process.env): S
     extraBody: () => (model !== "" ? { model } : {}),
     minOptions: Number.isInteger(minOptions) && minOptions >= 1 ? minOptions : 1,
     validateChoiceInPool: true,
+    // S5b：SystemOne 的 state 是不透明包 ⇒ 统一决策服务接受结构化 state_digest
+    // （`meta.policy.decision_state.context: "delta"` 时执行器才会真的带上；缺省不带）。
+    // 协议没有版本字段：这是 state 内的**可选**键，老服务忽略未知键即向后兼容。
+    stateDigest: true,
     choiceInstructions: (goal) => `Goal: ${goal}. Which single element should be interacted with next `
       + "to make progress on this goal? Ignore branding, navigation and decoration unless the goal requires them.",
     ...(stateContext ? {

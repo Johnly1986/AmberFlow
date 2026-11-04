@@ -200,7 +200,7 @@ export const meta = (kit) => ({
 | `site` | 站点面：页面角色 `pages`、命名行抽取 `listExtract`（见 §5） |
 | `model` / `maxSubgoals` | 决策模型 checkpoint / 子目标上界（高级，缺省即可） |
 | `notes` | 给人看的备注（字符串列表），不参与运行 |
-| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` / `done_preheld` / `effect_readback` / `settle` |
+| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` / `done_preheld` / `effect_readback` / `settle` / `decision_state` |
 | `pace` | 运行节奏：`between_steps_ms` / `between_actions_ms` |
 | `invariants` | 结束态断言：`{ id, desc?, signal }` |
 | `recordedFrom` / `generatedFrom` | 血统：这段脚本从哪次演示/哪份生成物来 |
@@ -387,6 +387,47 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
   `suspected_async`；这些是**证据**，不改 done 语言、不影响完成真值。（W1 验收移除了一个
   控制流上不可达的串扰 flag——r8 跨城串扰签名由 `done_preheld` + `no_state_progress` 覆盖。）
 
+**S5 决策状态接入（实验档，两项缺省都 `off` = 行为不变）**
+
+`meta.policy.decision_state` 是 A/B 开关：它只改变「**什么时候**问模型、问的时候带什么观测事实」，不改
+「模型只投票 / 完成只认信号」，也不改变 dry 面模拟。未知子键与非法档位在 `apps check` 就红。
+
+```js
+// ① 状态闸门（gate）：稳定后才问、池未变不重复问。
+export const meta = (kit) => ({
+  // ...
+  policy: { decision_state: { gate: "stable_only" } },
+});
+// 真跑时：每次模型 ask 之前先按 policy.settle 等页面静默（已静默 0 等待；超时不阻塞）；
+// 池指纹（本次 ask 池的结构指纹 = 可动元素计数+角色/标签分布 hash，零新增页面往返）与该池结构下
+// 最近一次真 ask 相同、且规则层仍歧义时，不再重复问：
+//   · 题面一字不差（同 goal + 同候选 ref/签名集合）⇒ 直接复用上一次答复；
+//   · 仅结构相同 ⇒ 上一次的选择仍可行动（在池里且未 forbidden）才复用。
+// 复用后的答复照常走低置信/reobserve/escalate 裁决（既有降级路径）；不能安全复用或 goal 变了 ⇒ 照常问。
+// 产物：
+//   decisions 顶层平铺：asks_saved / gate_waits / context_sent / context_skipped
+//   decisions.line 末尾追加 `state asks_saved 3, gate_waits 1, digest 0`
+```
+
+```js
+// ② 状态进上文（context）：请求带 ≤200B 结构化 state_digest。
+export const meta = (kit) => ({
+  // ...
+  policy: { decision_state: { context: "delta" } },
+});
+// 决策请求里的 state_digest 形状（只给观测事实，不塞建议）：
+//   { nav_epoch_delta: 0,                       // 距上一次 ask 的导航代数差（首次 = 自 run 起点）
+//     last_effect: { kind: "fill", applied: true },   // 最近一次 effect 读回（不带值）
+//     settled: true,                            // ask 时刻页面是否已静默
+//     pool_changed: true,                       // 候选池是否与上次 ask 不同（首次 = true）
+//     flags: ["done_preheld"] }                 // 本次 run 到目前为止的 S1 flags（可省略）
+// provider 用 capabilities.state_digest 自报是否接受：统一决策服务（SystemOne 的 state 包）接受；
+// 本地 laya-onnx / OpenAI Decisions 的输入 schema 固定 ⇒ 整段跳过（不塞进自然语言），
+// 只记 decisions.context_skipped。超 200B 时按 flags → last_effect 裁字段，绝不截断 JSON。
+```
+
+两项可以同时开：闸门省掉的 ask 不会产生 digest 请求，所以 `context_skipped` 不会因此虚高。
+
 **完整示例**：`examples/apps/05-done-evidence`（零动作命令 + `forceAct:true` + 证据判读，dry 可校验）。
 
 ## 5. 站点面：`meta.site`
@@ -504,6 +545,7 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `done_preheld` | `warn` | pre-held done 的处置（`warn`/`fail`/`allow`）；只覆盖命令步 |
 | `effect_readback` | `{fill:true,set_range:true}` | fill/setRange 的 effect 读回 |
 | `settle` | `{quiet_ms:400,timeout_ms:5000}` | 抽池前的稳定门（S2）：只在页面有 DOM 突变时等到静默；`"off"` 关闭。等待进 `state.settleMs` |
+| `decision_state` | `{gate:"off",context:"off"}` | S5 决策状态接入（A/B）：`gate:"stable_only"` = ask 前 settle + 同池同题不重复问（`decisions.asks_saved/gate_waits`）；`context:"delta"` = 请求带 ≤200B 结构化 `state_digest`（provider 不支持则跳过，记 `context_skipped`） |
 
 产物里的 `effective_policy` 只在非缺省时出现，并写明来源（`cli` / `config` / `app` / `provider` / `default`）。
 

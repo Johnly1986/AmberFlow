@@ -167,6 +167,15 @@ ${playbook}
  *   只在页面有 DOM 突变时等到静默（已静默 0 等待），等待进 step_traces[i].state.settleMs；
  *   写 "off" 关闭。
  *
+ * 决策状态（S5，实验档，两项缺省都 off = 行为不变）：
+ *   meta.policy.decision_state: { gate: "stable_only", context: "delta" }
+ *   - gate="stable_only"：模型 ask 之前先等页面静默；池指纹（ask 池结构 hash）与该池结构下
+ *     上一次真 ask 相同时不再敲模型——题面一字不差直接复用答复；仅结构相同则上次选择仍可行动
+ *     （在池且未 forbidden）才复用；复用后低置信/reobserve 裁决照旧。指标进
+ *     decisions 的 asks_saved / gate_waits（顶层平铺），行尾 state asks_saved N, gate_waits M, digest K。
+ *   - context="delta"：决策请求带 ≤200B 结构化 state_digest（导航代数差/最近 effect/是否静默/
+ *     池是否变化/flags）。provider 不支持（本地 laya-onnx 等）时整段跳过并记 context_skipped。
+ *
  * act 省略 = 决策语句：引擎的规则/决策层按 goal 文本与 done 证据选目标。命中与否
  * 取决于 goal 与页面候选的可分辨度；歧义大时会升级模型裁决——规则命中和模型裁决
  * 都是正常路径，不必预设哪条一定稳。需要钉死某个目标、或页面有稳定句柄

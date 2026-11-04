@@ -181,7 +181,14 @@ export const POLICY_KEYS = [
   "done_preheld", "effect_readback",
   // S2：抽池前的稳定门（缺省开启；"off" 关闭）。
   "settle",
+  // S5：状态接入决策（gate/context 两项都缺省 off = 行为不变）。
+  "decision_state",
 ] as const;
+
+/** S5 状态闸门档位（`meta.policy.decision_state.gate`）。 */
+export const DECISION_STATE_GATES = ["off", "stable_only"] as const;
+/** S5 状态上文档位（`meta.policy.decision_state.context`）。 */
+export const DECISION_STATE_CONTEXTS = ["off", "delta"] as const;
 
 /**
  * `risk_ask`：值不值得为"要不要拦"花一次模型前向。
@@ -241,6 +248,23 @@ export interface PackPolicy {
    * 未知子键在加载期拒绝（写了就要生效）。
    */
   settle?: { quiet_ms?: number; timeout_ms?: number } | "off";
+  /**
+   * S5 状态接入决策（**两项缺省都 off = 行为不变**；A/B 开关，见方案 §2.5/§4 S5）。
+   *   - `gate: "stable_only"`：模型 ask 之前先检查状态游标——
+   *     ① 页面未静默 → 先 settle（走 `policy.settle` 参数；超时不阻塞继续问）；
+   *     ② **池指纹与上一次 ask 相同且规则层仍歧义 → 不重复 ask**，复用上一次答复，
+   *        后续 floor/reobserve/escalate 裁决全部照旧（就是"既有降级路径"）。
+   *     指标（应用产物 `decisions`）：`asks_saved`（省掉的 ask 数）、`gate_waits`（真正等待次数）。
+   *   - `context: "delta"`：决策请求带 ≤200B 的**结构化** `state_digest`
+   *     `{nav_epoch_delta, last_effect?{kind,applied}, settled, pool_changed, flags?[]}`——
+   *     只给观测事实，不塞建议；模型仍只投票。指标：`context_sent` / `context_skipped`
+   *     （后者 = provider 输入 schema 固定而被整段跳过，如本地 laya-onnx / OpenAI Decisions）。
+   * 未知子键、非法档位在加载期拒绝（写了就要生效）。
+   */
+  decision_state?: {
+    gate?: (typeof DECISION_STATE_GATES)[number];
+    context?: (typeof DECISION_STATE_CONTEXTS)[number];
+  };
 }
 
 /**
@@ -1189,6 +1213,28 @@ export function validatePack(pack: AppPack,
         const v = pol[k];
         if (v !== undefined && (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 60_000)) {
           p.push(`policy.${k}: must be an integer in [0, 60000]`);
+        }
+      }
+      // S5 状态接入决策：{ gate?: "off"|"stable_only", context?: "off"|"delta" }——未知子键/非法档位加载期红。
+      const ds = pol["decision_state"];
+      if (ds !== undefined) {
+        if (!isDict(ds)) {
+          p.push("policy.decision_state: must be an object { gate?: \"off\"|\"stable_only\", "
+            + "context?: \"off\"|\"delta\" }");
+        } else {
+          for (const k of Object.keys(ds)) {
+            if (k !== "gate" && k !== "context" && !k.startsWith("_")) {
+              p.push(`policy.decision_state.${k}: unknown key (known: gate, context)`);
+            }
+          }
+          const gate = ds["gate"];
+          if (gate !== undefined && !(DECISION_STATE_GATES as readonly string[]).includes(String(gate))) {
+            p.push(`policy.decision_state.gate: must be one of ${DECISION_STATE_GATES.join(" | ")}`);
+          }
+          const ctx = ds["context"];
+          if (ctx !== undefined && !(DECISION_STATE_CONTEXTS as readonly string[]).includes(String(ctx))) {
+            p.push(`policy.decision_state.context: must be one of ${DECISION_STATE_CONTEXTS.join(" | ")}`);
+          }
         }
       }
     }

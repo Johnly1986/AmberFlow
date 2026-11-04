@@ -50,6 +50,13 @@ export interface ProviderCapabilities {
    *   - `rank_only`：只有名次，没有概率 ⇒ `pTop1/pTop2/margin` 必须为 null。
    */
   score_kind: "calibrated_prob" | "entropy_conf" | "rank_only";
+  /**
+   * 支持在决策请求里带结构化 `state_digest`（S5b；缺省/不声明 = 不支持）。
+   * 只有观测面是**不透明包**的 provider（SystemOne 的 `state`）才能附加这个可选键；
+   * 输入 schema 固定或协议严格的 provider（本地 laya-onnx、OpenAI Decisions 的 `input`）
+   * 必须保持不声明——执行器会整段跳过并记 `context_skipped`，不把 JSON 硬塞进自然语言。
+   */
+  state_digest?: boolean;
 }
 
 export interface ProviderInfo {
@@ -68,7 +75,21 @@ export interface ProviderInfo {
 /** provider 需要读页面（渲染视图、取 URL/标题）；执行器传的是它自己那个 page。 */
 export type ProviderPage = PageLike & { title(): Promise<string> };
 
-/** 一次"选元素"的请求。`narrow` 是收窄后的候选（窄问），null = 全池。 */
+/**
+ * 一次"选元素"的请求。`narrow` 是收窄后的候选（窄问），null = 全池。
+ *
+ * S5b：`state_digest` 是**结构化**状态摘要（≤200B；只有 `capabilities.state_digest === true`
+ * 的 provider 会收到）。形状写在这里而不是从执行器 import，避免 model ← engine 的反向依赖；
+ * 结构是封闭的五键，字段语义见 execution 层 `StateDigest` 与 schema F25。
+ */
+export interface StateDigestPayload {
+  nav_epoch_delta: number;
+  last_effect?: { kind: string; applied: boolean };
+  settled: boolean;
+  pool_changed: boolean;
+  flags?: string[];
+}
+
 export interface ChoiceRequest {
   goal: string;
   page: ProviderPage;
@@ -79,6 +100,13 @@ export interface ChoiceRequest {
   narrow: string[] | null;
   /** 短名单粒度（laya 用 8）。provider 可以忽略它，但忽略时要说。 */
   k: number;
+  /**
+   * S5b：可选的 ≤200B **结构化**状态摘要（`meta.policy.decision_state.context: "delta"`；
+   * 只有 `capabilities.state_digest === true` 的 provider 会收到这个键）。缺省不出现
+   * ⇒ 默认档的请求体逐字节不变。它只带观测事实（导航代数差 / 最近 effect / 是否静默 /
+   * 池是否变化 / flags），**不是建议、更不是动作**——模型仍只在一组 ref 里投票。
+   */
+  state_digest?: StateDigestPayload;
 }
 
 /** 一次"选元素"的完整结果：选择 + 所有可用信号 + 这次问的是什么形状。 */

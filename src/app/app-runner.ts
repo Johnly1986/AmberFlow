@@ -45,7 +45,8 @@ import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
 import { activeProviderInfo, applySpecToRuntime, resolveProviderSpec, type ProviderInfo } from "../model/decision-provider.ts";
 import {
   BrowserMiddleware, browserSession, disallowedHost,
-  type BrowserSession, type ExecutedAction, type SkippedAction, type StepStateRecord,
+  type BrowserSession, type DecisionStateMetrics, type DecisionStatePolicy,
+  type ExecutedAction, type SkippedAction, type StepStateRecord,
 } from "../engine/executor.ts";
 import { urlOf } from "../engine/extraction.ts";
 import { REPO } from "../flow/flow.ts";
@@ -334,6 +335,17 @@ export interface AppDecisions {
    * 就是 `dead rung`，由套件在**聚合层**判定（单应用看不出全貌，见 tools/apps_suite.ts）。
    */
   ladder: { rule: number; model: number; reobserve: number; escalate: number; adjudicated: number; asked_not_passed: number };
+  /**
+   * S5 状态接入决策的指标（`meta.policy.decision_state` 声明了才出现——
+   * 两项都 off 时**这四个键全部缺席**，默认档产物逐字节不变）。计数在执行器决策路径
+   * （`DecisionStateMetrics`），这里只做投影，不重算：
+   *   asks_saved / gate_waits = 状态闸门省掉的 ask 数 / settle 实际等待次数；
+   *   context_sent / context_skipped = 带 state_digest 的请求数 / provider 不支持而跳过的请求数。
+   */
+  asks_saved?: number;
+  gate_waits?: number;
+  context_sent?: number;
+  context_skipped?: number;
   /** 一行汇总，人读与机器读同一份：`rule 19 · model 1 (decision-service, conf 0.31) · 咨询 5 · reobserve 1 · cache 6/12`。 */
   line: string;
 }
@@ -343,6 +355,7 @@ export interface AppDecisions {
  *  但**不算**「未过闸门」（没有意见可打分）。 */
 export function summarizeDecisions(
   steps: TraceStep[], cache: DecisionCacheStats | null, modelAsks = 0, failedAsks = 0,
+  decisionState: DecisionStateMetrics | null = null,
 ): AppDecisions {
   const byMethod: Record<string, number> = {};
   const modelConfs: number[] = [];
@@ -405,6 +418,16 @@ export function summarizeDecisions(
   if (cache !== null) {
     parts.push(`cache 命中 ${cache.hits}/${cache.hits + cache.misses} forwards`);
   }
+  // S5：状态接入决策的账（只在策略声明时打印——全 0 也打印，说明这一臂真的跑过）。
+  if (decisionState !== null) {
+    const bits = [
+      `asks_saved ${decisionState.asks_saved}`,
+      `gate_waits ${decisionState.gate_waits}`,
+      `digest ${decisionState.context_sent}`,
+    ];
+    if (decisionState.context_skipped > 0) bits.push(`digest_skipped ${decisionState.context_skipped}`);
+    parts.push(`state ${bits.join(", ")}`);
+  }
   return {
     total_steps: steps.length,
     by_method: byMethod,
@@ -430,6 +453,13 @@ export function summarizeDecisions(
       max: modelConfs.length ? Math.max(...modelConfs) : null,
     },
     cache: cache === null ? null : { hits: cache.hits, misses: cache.misses },
+    // S5：默认档（两项 off）这四个键全部缺席 = 产物逐字节不变（声明了才投影，全 0 也写）。
+    ...(decisionState === null ? {} : {
+      asks_saved: decisionState.asks_saved,
+      gate_waits: decisionState.gate_waits,
+      context_sent: decisionState.context_sent,
+      context_skipped: decisionState.context_skipped,
+    }),
     line: parts.join(" · "),
   };
 }
@@ -914,6 +944,11 @@ export interface EffectivePolicy {
     value: { quietMs: number; timeoutMs: number } | null;
     source: "app" | "default";
   };
+  /**
+   * S5：状态接入决策（缺省两项 off）。`source: "app"` 表示 meta 显式声明过——
+   * 应用产物的 `decisions.asks_saved/gate_waits/context_sent/context_skipped` 只在这一档出现（默认全缺席 = 逐字节不变）。
+   */
+  decision_state: { value: DecisionStatePolicy; source: "app" | "default" };
 }
 
 /**
@@ -998,6 +1033,15 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
             timeoutMs: declaredPolicy.settle?.timeout_ms ?? 5000,
           },
       source: declaredPolicy.settle !== undefined ? "app" as const : "default" as const,
+    },
+    // S5：状态接入决策（两项缺省 off = 今天的行为）。声明了任一档（即便是 "off"）就进
+    // effective_policy 的账——报告要说得出"这一跑是不是 A/B 臂"。
+    decision_state: {
+      value: {
+        gate: declaredPolicy.decision_state?.gate === "stable_only" ? "stable_only" : "off",
+        context: declaredPolicy.decision_state?.context === "delta" ? "delta" : "off",
+      },
+      source: declaredPolicy.decision_state !== undefined ? "app" as const : "default" as const,
     },
   };
   const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
@@ -1190,6 +1234,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     fillReadback: policy.effect_readback.value.fill,
     // S2：稳定门（缺省开；null = meta.policy.settle:"off"）。
     settle: policy.settle.value,
+    // S5：状态接入决策（两项缺省 off = 今天的行为；见 PackPolicy.decision_state）。
+    decisionState: policy.decision_state.value,
     // R2：学习环（不开 = null = 今天逐字节；authored hint 恒优先于学到的）。
     hintMemory: opts.hintMemory ?? null,
     // 动作间最小等待（应用配置表 `pace.between_actions_ms` / 环境变量；0 = 今天的行为）。
@@ -1592,7 +1638,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     // 消融跑要能被产物读出来（不声明 ⇒ 字段缺席，逐字节与今天相同）。
     ...(opts.forceHints === true ? { hint_ablation: true } : {}),
     decisions: summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0,
-      opts.pickFailedAsks ? opts.pickFailedAsks() : 0),
+      opts.pickFailedAsks ? opts.pickFailedAsks() : 0,
+      // S5：policy 声明了 decision_state 才投影指标（缺省 ⇒ null ⇒ 字段缺席，产物不变）。
+      policy.decision_state.source === "app" ? mw.decisionStateMetrics() : null),
     // R2：学习环的账——只在**开了**的时候写字段（缺省等价纪律，同 path_visits）。
     // `rejected` 要 cast：接口只承诺 entries/used，它是 HintMemory 实现多给的——
     // 跨实现注入（测试桩/别的记忆）时不能假设它在。
@@ -1984,6 +2032,11 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
    */
   let providerDegraded: string | null = null;
   /**
+   * S5：状态接入决策的指标（与 providerDegraded 同一个「收尾读一次」先例）。执行器是
+   * 惰性创建的，脚本可能一步都不跑 ⇒ 保持 null，报告按声明档补零（不硬造"跑过"）。
+   */
+  let decisionStateMetrics: DecisionStateMetrics | null = null;
+  /**
    * B2（P5）：会话收尾的环境/会话事实（final_url/viewport/user_agent）。与 providerDegraded
    * 同一个「收尾读一次」先例——区别是这三样必须读在**会话关闭之前**（关了就读不到 URL 了）；
    * 拿不到就保持 undefined，结果里键省略（缺省等价：不硬造）。
@@ -2065,6 +2118,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           fillReadback: resolvedPolicy.policy.effect_readback.value.fill,
           // S2：稳定门（缺省开；null = meta.policy.settle:"off"）。
           settle: resolvedPolicy.policy.settle.value,
+          // S5：状态接入决策（与声明式路径同一份策略解析；缺省两项 off）。
+          decisionState: resolvedPolicy.policy.decision_state.value,
           actionDelayMs: pace.between_actions_ms,
           hintMemory: opts.hintMemory ?? null,
           // 语义必须与 runApp 的 confirmFn 一致：默认按干跑证据拒绝破坏性动作；
@@ -2218,6 +2273,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       // A3：决策源降级的原因只活在执行器实例上——脚本抛 StopError 也不能把它弄丢
       //（拿不到场就记 null：重放分支没有执行器，字段缺席 = 没降级，与 runApp 同口径）。
       providerDegraded = mwHolder.current?.providerDegraded || null;
+      // S5：同一处读指标（一个 flow 应用会复用同一个执行器跑多个 ctx.step，计数在实例上累计）。
+      decisionStateMetrics = mwHolder.current?.decisionStateMetrics() ?? null;
     }
     invariants = invariantsFromTrace(trace, pack ?? {});
   }
@@ -2358,7 +2415,12 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   }));
   const stats = opts.runtimeStats ? opts.runtimeStats() : null;
   const decisions = summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0,
-    opts.pickFailedAsks ? opts.pickFailedAsks() : 0);
+    opts.pickFailedAsks ? opts.pickFailedAsks() : 0,
+    // S5：与声明式路径同一条范围判定——policy 声明了 decision_state 才投影指标；
+    // 声明了但脚本一步没跑 = 全 0（这一臂确实跑过，只是没发生决策）。
+    policy !== null && policy.decision_state.source === "app"
+      ? (decisionStateMetrics ?? { asks_saved: 0, gate_waits: 0, context_sent: 0, context_skipped: 0 })
+      : null);
   // B2（P5）：页面属性拿不到时退回 `meta.device` 的声明值（声明了才有；都没有就省略键，
   // 不硬造）。有设备声明时页面属性本来就是同一个值，这条兜底只服务无页面属性的替身会话。
   const envDevice = (pack.device ?? {}) as { viewport?: { width: number; height: number }; user_agent?: string };

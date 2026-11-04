@@ -68,6 +68,13 @@ export interface SystemOneProfile {
    * 服务端把 state 当不透明包（risk/done 题的 `{action, user_goal}` 已被同一网关接受）。
    */
   stateBuilder?(req: ChoiceRequest): Promise<Record<string, unknown>>;
+  /**
+   * S5b：是否接受结构化 `state_digest`（缺省 false = 执行器整段跳过并记 `context_skipped`）。
+   * SystemOne 的 `state` 本来就是不透明包（risk/done 的 `{action,user_goal}` 同一条通道），
+   * 所以支持的服务只是多一个可选键：`state.state_digest = {...}`，无协议版本字段可升，
+   * 老服务忽略未知键即向后兼容。
+   */
+  stateDigest?: boolean;
   riskInstructions(goal: string, actionDesc: string): string;
   doneInstructions(goal: string): string;
   /** 服务不可达时的指路串。 */
@@ -134,6 +141,11 @@ async function buildChoiceBody(p: SystemOneProfile, req: ChoiceRequest):
   if (refs.length < p.minOptions) return { empty: true, asked: refs.length };
   const criteria = Object.fromEntries(refs.map((r) => [r, String(req.elems[r]?.["label"] ?? r)]));
   const state = p.stateBuilder ? await p.stateBuilder(req) : { goal: req.goal };
+  // S5b：结构化状态摘要挂在 state 包内的可选键上（不并入正文、不改 questions、不发明协议字段）。
+  // 只有 profile 声明 stateDigest 才会走到这里；执行器端已按能力过滤，双保险。
+  if (req.state_digest !== undefined && p.stateDigest === true) {
+    state["state_digest"] = req.state_digest;
+  }
   return {
     asked: refs,
     body: {
@@ -190,7 +202,8 @@ export function systemOneClient(p: SystemOneProfile): DecisionProvider {
   return {
     name: p.name,
     version: p.version,
-    capabilities: p.capabilities,
+    // S5b：能力与 profile 的声明一致——profile 不收 digest 时，执行器看到的就是"不支持"。
+    capabilities: p.stateDigest === true ? { ...p.capabilities, state_digest: true } : p.capabilities,
     ...(p.configError ? { configError: () => p.configError!() } : {}),
 
     async pick(req: ChoiceRequest): Promise<ChoiceOutcome> {
