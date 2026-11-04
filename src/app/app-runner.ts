@@ -45,7 +45,7 @@ import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
 import { activeProviderInfo, applySpecToRuntime, resolveProviderSpec, type ProviderInfo } from "../model/decision-provider.ts";
 import {
   BrowserMiddleware, browserSession, disallowedHost,
-  type BrowserSession, type ExecutedAction, type SkippedAction,
+  type BrowserSession, type ExecutedAction, type SkippedAction, type StepStateRecord,
 } from "../engine/executor.ts";
 import { urlOf } from "../engine/extraction.ts";
 import { REPO } from "../flow/flow.ts";
@@ -635,13 +635,8 @@ export interface AppRunResult {
    */
   /** 本次实际用的决策提供者（名字/版本/能力）。换模型 A/B 的对照就靠它。 */
   decision_provider?: ProviderInfo;
-  effective_policy?: {
-    tiered_hint: { value: boolean; source: "cli" | "app" | "default" };
-    risk_ask: { value: "always" | "rules-only"; source: "app" | "default" };
-    reobserve: { value: boolean; source: "app" | "default" };
-    max_effective_repeats: { value: number; source: "app" | "default" };
-    conf_floor: { value: number; source: "cli" | "config" | "app" | "provider" | "default" };
-  };
+  /** §3 生效策略（单一出处 `EffectivePolicy`；缺省键不出现 = 与今天一致）。 */
+  effective_policy?: EffectivePolicy;
   /** 本次实际用的决策提供者身份（CLI 解析后传进来；未提供则缺字段）。 */
   providerInfo?: ProviderInfo;
   /** 模型层级（`on` / `off(missing)` / `off(ablation:…)`；未提供则缺字段）。 */
@@ -709,7 +704,17 @@ export interface AppRunResult {
     done_preheld?: boolean;
     /** 运行期诚实性警告（如 suspected_async）。 */
     warnings?: string[];
+    /**
+     * S1 状态记录：before/after 指纹、动作计数、前进性 flags、effect 读回。
+     * 缺字段 = 没有页面观察（replay/旧产物）；dry 面给合成值（epoch=0、flags=[]）。
+     */
+    state?: StepStateRecord;
   }>;
+  /**
+   * S1 run summary warnings：跨步汇总的执行期诚实警告（如 suspected_async、
+   * done_preheld/no_state_progress/stale_satisfaction）。缺字段 = 没有警告。
+   */
+  warnings?: string[];
   /** `ctx.log` 摘要（Agent 不必再读 emit-trace 就能看到业务事实）。 */
   logs?: Array<{ i: number; desc: string; result?: unknown }>;
   /**
@@ -897,6 +902,13 @@ export interface EffectivePolicy {
   pool_ready_poll_ms: { value: number; source: "app" | "default" };
   /** A2：候选窗口排序策略（缺省 bucketed；main-first 是旧排序回退面）。 */
   candidate_priority: { value: "bucketed" | "main-first"; source: "app" | "default" };
+  /** S1：pre-held done 处置（缺省 warn = 只记录，不拦）。 */
+  done_preheld: { value: "warn" | "fail" | "allow"; source: "app" | "default" };
+  /** S1：fill/setRange 的 effect 读回（缺省两项都开）。 */
+  effect_readback: {
+    value: { fill: boolean; set_range: boolean };
+    source: "app" | "default";
+  };
 }
 
 /**
@@ -959,6 +971,18 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
     candidate_priority: {
       value: declaredPolicy.candidate_priority ?? "bucketed",
       source: declaredPolicy.candidate_priority !== undefined ? "app" as const : "default" as const,
+    },
+    // S1 状态层：缺省 warn（行为不变）；显式声明才进 effective_policy 的“非缺省”账。
+    done_preheld: {
+      value: declaredPolicy.done_preheld ?? "warn",
+      source: declaredPolicy.done_preheld !== undefined ? "app" as const : "default" as const,
+    },
+    effect_readback: {
+      value: {
+        fill: declaredPolicy.effect_readback?.fill !== false,
+        set_range: declaredPolicy.effect_readback?.set_range !== false,
+      },
+      source: declaredPolicy.effect_readback !== undefined ? "app" as const : "default" as const,
     },
   };
   const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
@@ -1146,6 +1170,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     riskAsk: policy.risk_ask.value === "rules-only" ? "rules-only" : "always",
     reobserve: policy.reobserve.value,
     maxEffectiveRepeats: policy.max_effective_repeats.value,
+    // S1 状态层：pre-held done 默认 warn（行为不变），fill 读回默认开。
+    donePreheldPolicy: policy.done_preheld.value,
+    fillReadback: policy.effect_readback.value.fill,
     // R2：学习环（不开 = null = 今天逐字节；authored hint 恒优先于学到的）。
     hintMemory: opts.hintMemory ?? null,
     // 动作间最小等待（应用配置表 `pace.between_actions_ms` / 环境变量；0 = 今天的行为）。
@@ -1282,6 +1309,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
           methods: rep.steps.map((t) => String(t.method ?? "")).filter(Boolean),
           ...(afters.some((a) => a !== null) ? { afters } : {}),
           ...(stateView ? { state_view: stateView } : {}),
+          // S1：状态记录与 flow 路径同一字段（声明式路径 captureTraces 时才收集）。
+          ...(rep.state === undefined || rep.state === null
+            ? {} : { state: rep.state as StepStateRecord }),
         });
       }
       sg.status = rep.done ? (rep.skipped ? "skipped" : "done") : "blocked";
@@ -1610,8 +1640,14 @@ export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): st
         + `${r.decision_provider.floor !== undefined ? `，闸门刻度 ${r.decision_provider.floor}` : ""}）`] : []),
     ...(r.effective_policy
       ? [`- 生效策略：${Object.entries(r.effective_policy)
-          .filter(([, v]) => v.source !== "default")
-          .map(([k, v]) => `\`${k}=${String(v.value)}\`(${v.source})`).join(" ")}`
+          .filter(([, v]) => (v as { source: string }).source !== "default")
+          .map(([k, v]) => {
+            // S1：effect_readback 的 value 是对象——别让 String() 把它印成 [object Object]。
+            const entry = v as unknown as { value: unknown; source: string };
+            const shown = entry.value !== null && typeof entry.value === "object"
+              ? JSON.stringify(entry.value) : String(entry.value);
+            return `\`${k}=${shown}\`(${entry.source})`;
+          }).join(" ")}`
         + `｜优先级 cli=本次命令覆盖 > app=meta 声明 > default=今天的行为`] : []),
     `- 角色：${(r.roles_used ?? []).map((x) => `\`${x}\``).join(", ") || "（未用角色模板）"}`,
     ...(r.dataset_view !== undefined && r.dataset_view.length > 0
@@ -2007,6 +2043,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           riskAsk: resolvedPolicy.policy.risk_ask.value === "rules-only" ? "rules-only" : "always",
           reobserve: resolvedPolicy.policy.reobserve.value,
           maxEffectiveRepeats: resolvedPolicy.policy.max_effective_repeats.value,
+          // S1 状态层：pre-held done 处置 + fill effect 读回（与声明式路径同一份策略解析）。
+          donePreheldPolicy: resolvedPolicy.policy.done_preheld.value,
+          fillReadback: resolvedPolicy.policy.effect_readback.value.fill,
           actionDelayMs: pace.between_actions_ms,
           hintMemory: opts.hintMemory ?? null,
           // 语义必须与 runApp 的 confirmFn 一致：默认按干跑证据拒绝破坏性动作；
@@ -2105,6 +2144,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         : undefined,
       manualFailFast: opts.manualFailFast === true,
       stepDelayMs: pace.between_steps_ms,
+      // S1：ctx.setRange 的 applied/accurate 读回开关（fill 侧在执行器构造参数）。
+      effectReadback: policy.effect_readback.value,
       doneTimeoutMs: policy.done_timeout_ms.value,
       donePollMs: policy.done_poll_ms.value,
       poolReadyTimeoutMs: policy.pool_ready_timeout_ms.value,
@@ -2248,6 +2289,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     const evSkipped = evResult["skipped_actions"];
     const evPreheld = evResult["done_preheld"];
     const evWarnings = evResult["warnings"];
+    const evState = evResult["state"];
     // when 守卫跳过的步（ok:false + precondition_skipped）不是失败：与声明式路径同一口径记成
     // "skipped"（见上方 rep.skipped 分支），审计者扫表即可分清“执行完成/不适用/失败”。
     const skippedStep = e.ok === false && e.stop_code === "precondition_skipped";
@@ -2273,8 +2315,25 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       ...(typeof evPreheld === "boolean" ? { done_preheld: evPreheld } : {}),
       ...(Array.isArray(evWarnings) && evWarnings.length
         ? { warnings: evWarnings.map(String) } : {}),
+      ...(evState !== null && typeof evState === "object" && !Array.isArray(evState)
+        ? { state: evState as StepStateRecord } : {}),
     };
   });
+  /**
+   * S1 run summary warnings：执行器已把前进性 flags 写成 step warnings（单一出处），
+   * 这里只做**跨步去重/汇总**——不重新判 flags、不改完成真值。
+   */
+  const runWarnings: string[] = [];
+  {
+    const seen = new Set<string>();
+    for (const t of stepTraces) {
+      for (const w of t.warnings ?? []) {
+        if (seen.has(w)) continue;
+        seen.add(w);
+        runWarnings.push(w);
+      }
+    }
+  }
   const logs = trace.events.filter((e) => e.call === "log").map((e) => ({
     i: e.i, desc: e.desc ?? "", ...(e.result === undefined ? {} : { result: e.result }),
   }));
@@ -2333,6 +2392,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // A3：与 runApp（声明式路径）同账——降级发生过就必须出现在产物里。
     ...(providerDegraded ? { provider_degraded: providerDegraded } : {}),
     step_traces: stepTraces,
+    ...(runWarnings.length ? { warnings: runWarnings } : {}),
     ...(logs.length ? { logs } : {}),
     script: {
       mode: "flow",

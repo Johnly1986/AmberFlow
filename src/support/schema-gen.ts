@@ -43,6 +43,8 @@ const CTX_FACTS: ReadonlyArray<{ id: string; statement: string; truth: string }>
   { id: "F14", statement: "三原语失败是结构化结果不是异常：scrollList 找不到滚动容器=not_scrollable、expand 到顶未稳定=expand_not_stable（带完整指标）、setRange 三策略（fill→keyboard→pointer）全失败=slider_not_settable（含已试策略/bbox/当前值）——绝不假装成功", truth: "range.ts + ctx.ts（A3 §4）" },
   { id: "F15", statement: "脚本层读槽位值用 ctx.slots（冻结 Record）：ctx.slots[\"键\"]，键须在 meta.slots 声明；ctx.source 是数据腿注册表，不是读槽位的口——city/list 等任务参数要么走 ctx.slots，要么作为脚本常量", truth: "ctx.ts（slots: Object.freeze），实测自真实运行" },
   { id: "F16", statement: "pre-held done 陷阱：done 引用了动作前已存在的元素 → 完成判定瞬间成立、引擎跳过实际动作（trace 记 done_preheld/skipped_actions，executed=false），步骤「零执行通过」、后续步骤连锁失败——done 必须锚定动作后才出现的证据（弹出菜单项、跳转后 URL、面板内新元素）", truth: "executor.ts done 判定 + APP_SCRIPT_AUTHORING §5（实测自真实运行）" },
+  { id: "F17", statement: "状态层（S1）：每个 ctx.step 在 step_traces[i].state 落 StepStateRecord——before/after 指纹（epoch 每次抽池/观察 +1；navEpoch 本次 run 初始 goto 完成 +1；url；readyState=document.readyState；struct=可动元素计数+角色/标签分布 hash；content 仅诊断）、actions{attempted,executed,changed}、flags（done_preheld / no_state_progress / stale_satisfaction）与可选 effect；ctx.runtime.epoch 是执行器游标的只读投影（dry=0）。flags 只是证据：done 语言未变，done_preheld 缺省 warn 不拦（policy.done_preheld=\"fail\" 才在动作前结构化停止）", truth: "executor.ts StateFingerprint/StepStateRecord + app-runner.ts step_traces 投影 + ctx.ts runtime" },
+  { id: "F18", statement: "effect 读回（S1）：fill 动作后读回组件值并与写入值比对，结果进 step_traces[i].state.effect{kind,before,after,applied}；不可读组件自动降级跳过（不假装成功）。ctx.setRange 在 policy.effect_readback.set_range !== false 时结果附 applied / accurate / target（accurate = |achieved-target| <= tolerance）；两项开关缺省都开，关掉只少字段、不改变动作", truth: "executor.ts _executeElement + range.ts applyRange + app-pack.ts PackPolicy.effect_readback" },
 ];
 
 /** 信号算子语义注记（表从 SIGNAL_OPS 真源取；语义逐条标出处）。 */
@@ -76,10 +78,23 @@ const COMMAND_FACTS = {
   submit_inputs: "input[type=submit|button] 是点击目标，永远不填值",
   after_commands: "命令闭集走完后引擎评估一次 done 信号；全部命令解决而 done 不成立 = done_not_held",
   scroll: "默认把目标滚入视口；带 to（{to:\"bottom\"|\"top\"|\"page\"}，ctx.command(\"scroll\", sel, {to})）= 把容器滚到该方向（A3）；drag 的 value 是落点 selector，仅 [draggable=true]/slider 族声明了能力",
+  /** extract 双形式（骨架/契约都可发现；inline 不需要 meta 声明）。 */
+  extract_forms: {
+    named: "ctx.extract(\"name\")：行选择器/字段选择器声明在 meta.site.listExtract[name]",
+    inline: "ctx.extract({ rows, fields, maxItems? })：不需要 meta 声明，直接在脚本里给选择器——例：ctx.extract({ rows: \"li.item\", fields: { title: \".title\", price: \".price\" } })",
+    fields_dot: "字段值 \".\" = 行自身文本；超过 maxItems（缺省 500）在 trace 里标 truncated",
+  },
 };
 
 /** 预算（三层结构，08-A6 实测成文）。 */
 const BUDGET = {
+  /** 一图流（S0 可发现性）：四行回答“什么免费、什么计 1、什么不单计”。 */
+  summary: [
+    "只读免费（不占预算）：read.text/value/count/attr、extract、holds、waitFor、log、url",
+    "各计 1 个 flow step：ctx.step / ctx.arrive / ctx.run / 批准执行的人工步 / ctx.scrollList / ctx.expand / ctx.setRange",
+    "step 内的 command 闭集不单独计 flow 步：一个 step 的动作循环上限 8（子目标动作预算）",
+    "flow 预算用满 → budget_exceeded（status=partial、verified=false、exit 0）",
+  ],
   flow_call: { default: 100, cli_flag: "--max-steps", counts: ["ctx.step", "ctx.arrive", "ctx.run", "批准执行的人工步"], note: "when 跳过的步同样计 1；用满 → budget_exceeded（status=partial、verified=false）" },
   subgoal_actions: { default: 8, configurable: false, note: "执行器动作循环上限；reason 里的 \"on step N\" 是本层动作号，与流步号两口径" },
   signal_wait: { done_timeout_ms_default: 2000, step_level_override: "timeoutMs", note: "约束动作后等 done 的窗口，不约束整步挂钟（模型咨询/导航渲染不在其内）" },
@@ -108,9 +123,11 @@ const FLOW_CONTROL = {
   list_range_primitives: {
     scrollList: "滚目标自身或最近可滚动祖先（纯 DOM scrollTop，不做滚轮模拟、不自动滚页面）；找不到容器=not_scrollable",
     expand: "反复点 load-more/展开控件直到行数连续 stableRounds 轮不增长；到顶未稳定=expand_not_stable（仍返回 clicks/before/after/coverage）",
-    setRange: "三策略 fill→keyboard→pointer（0×0 手柄用最近有尺寸祖先 bbox）；全失败=slider_not_settable，绝不返回假 achieved",
+    setRange: "三策略 fill→keyboard→pointer（0×0 手柄用最近有尺寸祖先 bbox）；全失败=slider_not_settable，绝不返回假 achieved；读回给出 applied/accurate/target",
     billing: "三个原语各计 1 flow step；expand 内部点击不占预算（maxClicks/timeoutMs 兜底）",
   },
+  /** S1：状态层是**证据**，不是新的完成语言。 */
+  state_evidence: "ctx.step 的 step_traces[i].state 记录 before/after 指纹与前进性 flags（done_preheld / no_state_progress / stale_satisfaction）；flags 只标注、不改 done 语言：done_preheld 缺省 warn 不拦，policy 显式 fail 才在动作前停（stop_code=done_preheld）。ctx.runtime.epoch 是只读投影",
 };
 
 /**
@@ -132,7 +149,8 @@ const DRY = {
   read_extract: "extract 返 []、read.attr 返 null、read.count 返 0、waitFor 立即 true",
   url: "url() 是最近声明值",
   budget: "步预算照常计数",
-  list_range_primitives: "三原语确定性桩：expand {ok:true,clicks:0,before:0,after:0,grew:false,stable:true,coverage:{rows:0}}；scrollList/setRange {ok:true}——但参数校验真做（非法 count/to/value 在 dry 期红）",
+  list_range_primitives: "三原语确定性桩：expand {ok:true,clicks:0,before:0,after:0,grew:false,stable:true,coverage:{rows:0}}；scrollList {ok:true}；setRange {ok:true,applied:true,accurate:true}（effect_readback.set_range=false 时后两项不出现）——但参数校验真做（非法 count/to/value 在 dry 期红）",
+  state_layer: "state 是合成值：before=after={epoch:0,navEpoch:0,url,readyState:\"complete\",struct:\"dry\"}、actions 全 0、flags []；runtime.epoch=0。形状与真实面同构，但不代表发生过状态推进（dry 没有页面观察）",
   rule: "一切基于观察值的 ctx.fail/分支/断言必须用 ctx.runtime.runId === \"(dry)\" 守卫；check VALID ≠ 每条分支被走过",
 };
 
@@ -169,6 +187,7 @@ export const STOPCODE_MEANING: Readonly<Record<string, string>> = {
   max_steps: "子目标动作步数预算用完（每次调用缺省 8）：按六步法② 走查收窄流程",
   noul_unverified: "模型声称 done 但无 DOM 信号可验证——补可验证完成信号，完成只认信号",
   no_progress: "同一元素有效执行多次而信号从不成立——目标疑似死元素或信号永不成立",
+  done_preheld: "done 在动作前已成立（policy.done_preheld=\"fail\" 才停）：完成不是这一步动作的证据",
   space_empty: "声明的命令空间在页面无任何可解析元素",
   nominated_family_empty: "提名族软先验在该页无候选（S2③）",
   nominated_family_mismatch: "动作族与提名不符且有界修复未解出（S2③）",
@@ -237,8 +256,10 @@ export function renderCheatSheet(): string[] {
     "⚠ 语义速查（完整契约：amber schema ctx；违者运行期才红）",
     "- fill/select 值只认 slot：ctx.command(\"fill\", sel, {from:\"slot\",key})，key 须在 meta.slots 声明",
     "- judge.url(s)=URL 含子串；judge.exists 跨 iframe；judge.text(sel,s)=首匹配含 s",
-    "- hint 六形状；属性仅 test/type/href/name/id/role/near —— aria-label/class 永不命中",
+    "- hint 六形状；属性仅 test/type/href/name/id/role/near（aria-label 是 label 别名）—— class/title/placeholder 永不命中",
     "- ctx.step 失败返回 {ok:false}，只有 ctx.fail 中断；when 跳过同样计 1 步预算",
-    "- read/extract/holds/waitFor/log 免费；step/arrive/run/manual 各计 1",
+    "- read/extract/holds/waitFor/log/url 免费；step/arrive/run/manual 与三原语各计 1",
+    "- ctx.extract(\"name\") 走 meta.site.listExtract；inline 用 ctx.extract({rows, fields})（无需声明）",
+    "- step_traces[i].state 记状态指纹/flags/effect；ctx.runtime.epoch 只读；flags 只标注不改 done",
   ];
 }

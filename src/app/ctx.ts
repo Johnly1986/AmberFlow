@@ -15,7 +15,7 @@
 import path from "node:path";
 import {
   disallowedHost, type BrowserMiddleware, type BrowserSession, type ExecutedAction,
-  type RunReport, type SkippedAction,
+  type RunReport, type SkippedAction, type StepStateRecord,
 } from "../engine/executor.ts";
 import { firstOf, locatorAnyFrame, urlOf, type PageLike } from "../engine/extraction.ts";
 import { checkSignal } from "../engine/signals.ts";
@@ -93,6 +93,11 @@ export interface StepResult {
   done_preheld?: boolean;
   /** 运行期诚实性警告（如 suspected_async）。只在产生时出现。 */
   warnings?: string[];
+  /**
+   * S1 状态层：这一步的状态记录（before/after 指纹、动作计数、前进性 flags、effect）。
+   * 缺字段 = 没有页面观察（dry/replay：dry 给合成值，见 `ctx-dry.ts`）。
+   */
+  state?: StepStateRecord;
 }
 
 /** A3 `ctx.scrollList` 选项：方向（缺省 bottom）或像素增量，二选一优先 by。 */
@@ -162,6 +167,14 @@ export interface SetRangeResult {
   strategy?: "fill" | "keyboard" | "pointer";
   stopCode?: string;
   reason?: string;
+  /**
+   * S1 effect 读回（`meta.policy.effect_readback.set_range !== false` 时出现）：
+   * `applied` = 控件值事实已经是目标；`accurate` = 在容差内。失败路径也如实 false。
+   */
+  applied?: boolean;
+  accurate?: boolean;
+  /** 目标数值（percent 已折算；对账用）。 */
+  target?: number;
 }
 
 export interface SourceObservationView {
@@ -229,7 +242,11 @@ export interface ManualRequest {
 export interface Ctx {
   readonly app: Readonly<{ id: string; label?: string; goal: string }>;
   readonly slots: Readonly<Record<string, string>>;
-  readonly runtime: Readonly<{ outDir: string; runId: string; today: string }>;
+  /**
+   * 运行期只读投影。`epoch` = 执行器状态游标的当前 epoch（每次抽池/观察 +1；每个 `run()`
+   * 重置）。dry 面给合成值 0——dry 没有真实页面观察，不假装有。
+   */
+  readonly runtime: Readonly<{ outDir: string; runId: string; today: string; epoch: number }>;
   readonly budget: CtxBudget;
   log(msg: string, data?: unknown): void;
   open(url: string, opts?: { timeoutMs?: number }): Promise<void>;
@@ -327,6 +344,11 @@ export interface CtxDeps {
   maxSteps?: number;
   deadline?: number;
   verbose?: boolean;
+  /**
+   * S1 effect 读回开关（来自 `meta.policy.effect_readback`；缺省两项都开）。
+   * fill 的读回在执行器里（构造参数），这里只控制 `ctx.setRange` 结果的 applied/accurate。
+   */
+  effectReadback?: { fill?: boolean; set_range?: boolean };
   /** 数据腿：与 `runApp` 的同一实现（`runSource` + `defaultDates`）。 */
   sourceRunner?: (name: string, opts?: { dates?: string | string[] }) => Promise<SourceObservationView>;
   /** 工具步：由驱动接到 `runToolStep`（干跑/确认/幂等重试的既有实现）。 */
@@ -439,7 +461,10 @@ export function validateExpandRequest(target: unknown, opts: unknown): void {
   if (!isObj(opts)) throw new StopError("config_error", "ctx.expand: opts must be an object like { count: { rows, fields? } }");
   const count = opts["count"];
   if (!isObj(count)) {
-    throw new StopError("config_error", "ctx.expand: opts.count is required — { rows: selector, fields? } or { selector }");
+    // S0：首句点破**类型**（以前只说形状，number/string 这类错要读到句尾才反应过来）。
+    const got = count === null ? "null" : Array.isArray(count) ? "array" : typeof count;
+    throw new StopError("config_error",
+      `ctx.expand: opts.count must be an object { rows: selector } | { selector } — got ${got}`);
   }
   const hasRows = count["rows"] !== undefined;
   const hasSelector = count["selector"] !== undefined;
@@ -688,6 +713,8 @@ export function createCtx(deps: CtxDeps): Ctx {
       ...(rep.skipped_actions === undefined ? {} : { skipped_actions: rep.skipped_actions }),
       ...(rep.done_preheld === undefined ? {} : { done_preheld: rep.done_preheld }),
       ...(rep.warnings === undefined ? {} : { warnings: rep.warnings }),
+      // S1 状态记录：执行器只在本 run 有观察时给；原样透出（dry 面另有合成值）。
+      ...(rep.state === undefined ? {} : { state: rep.state }),
     };
     record(result.ok, {
       desc, url: landed,
@@ -714,6 +741,7 @@ export function createCtx(deps: CtxDeps): Ctx {
         ...(result.skipped_actions === undefined ? {} : { skipped_actions: result.skipped_actions }),
         ...(result.done_preheld === undefined ? {} : { done_preheld: result.done_preheld }),
         ...(result.warnings === undefined ? {} : { warnings: result.warnings }),
+        ...(result.state === undefined ? {} : { state: result.state }),
       },
     });
     return result;
@@ -839,6 +867,11 @@ export function createCtx(deps: CtxDeps): Ctx {
   };
 
   const kit = createKit();
+  // S1：`runtime.epoch` 是**执行器游标**的只读投影（不自建第二份状态来源）。
+  const runtimeView = Object.freeze({
+    outDir: runtime.outDir, runId: runtime.runId, today: runtime.today,
+    get epoch(): number { return deps.mw().stateEpoch(); },
+  });
   const ctx: Ctx = {
     judge: kit.judge,
     tool: kit.tool,
@@ -848,7 +881,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     value: kit.value,
     app: { id: pack.id, ...(pack.label === undefined ? {} : { label: pack.label }), goal: pack.goal },
     slots: Object.freeze({ ...slots }),
-    runtime: Object.freeze({ ...runtime }),
+    runtime: runtimeView,
     budget,
     log: (msg, data) => {
       pushEvent(trace, { call: "log", desc: msg, ...(data === undefined ? {} : { result: data }) });
@@ -1063,12 +1096,17 @@ export function createCtx(deps: CtxDeps): Ctx {
       const p = await page();
       budget.stepsUsed += 1;
       const r = await deps.mw().setRange(p as never, target, value, opts);
+      // S1 effect 读回：`applied`/`accurate` 只在开关开着时出现（缺省开）。
+      const readback = deps.effectReadback?.set_range !== false;
       const result: SetRangeResult = {
         ok: r.ok,
         ...(r.achieved === undefined ? {} : { achieved: r.achieved }),
         ...(r.strategy === undefined ? {} : { strategy: r.strategy }),
         ...(r.stopCode === undefined ? {} : { stopCode: r.stopCode }),
         ...(r.reason === undefined ? {} : { reason: r.reason }),
+        ...(!readback || r.applied === undefined ? {} : { applied: r.applied }),
+        ...(!readback || r.accurate === undefined ? {} : { accurate: r.accurate }),
+        ...(!readback || r.target === undefined ? {} : { target: r.target }),
       };
       pushEvent(trace, {
         call: "setRange", desc: target, ok: result.ok,

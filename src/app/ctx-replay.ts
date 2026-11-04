@@ -110,7 +110,8 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
     value: kitCtx.value,
     app: { id: pack.id, ...(pack.label === undefined ? {} : { label: pack.label }), goal: pack.goal },
     slots: Object.freeze({ ...slots }),
-    runtime: Object.freeze({ ...runtime }),
+    // S1：replay 没有活页面观察，epoch 给 0（同 dry 的合成口径——不伪造状态推进）。
+    runtime: Object.freeze({ ...runtime, epoch: 0 }),
     budget,
     log: (msg, data) => { nextEvent("log", { desc: msg }); void data; },
     open: async (u) => {

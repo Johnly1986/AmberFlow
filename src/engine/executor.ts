@@ -217,7 +217,12 @@ export type StopCode =
    */
   | "no_progress"
   /** P2: a `fill`/`select` command's declared slot binding has no value (never guessed). */
-  | "needs_value";
+  | "needs_value"
+  /**
+   * S1 状态层（policy.done_preheld=fail）：done 在动作**之前**已成立 ⇒ 这一步的完成证据
+   * 不是动作推进出来的。默认（warn）只记 flag/warning；显式 fail 才在动作前停住。
+   */
+  | "done_preheld";
 
 /** Minimal locator surface used by the executor (superset of `extraction.LocLike`). */
 interface AnyLoc {
@@ -283,6 +288,19 @@ export interface SkippedAction {
   detail?: string;
 }
 
+/**
+ * `not-actionable-or-covered` 的现场：当时 bbox / 覆盖者 / 重查时节点是否还在。
+ * 只作为**诊断证据**（不改动作/判定）；覆盖元素是快照，页面可能已经变了。
+ */
+export interface ActionabilityDetail {
+  reason: string;
+  bbox: { x: number; y: number; width: number; height: number } | null;
+  /** 中心点命中的顶层元素（如 `div#cookie-banner`）；zero-size/offscreen 也在这里说明。 */
+  blocker: string | null;
+  /** 重新查询时目标节点还在不在文档里。 */
+  requery: "present" | "detached" | "unknown";
+}
+
 export interface RunReport {
   goal: string;
   done: boolean;
@@ -321,6 +339,60 @@ export interface RunReport {
   done_preheld?: boolean;
   /** 运行期诚实性警告（如 suspected_async）；只在产生时出现。 */
   warnings?: string[];
+  /**
+   * S1 状态层：本次 `run()` 的状态记录（一次 ctx.step = 一个 flow 步 = 一条记录）。
+   * 向后兼容：旧消费者不认识这个字段就忽略；没有页面往返可观察时键省略。
+   */
+  state?: StepStateRecord;
+}
+
+/* ------------------------------------------------------------------ state layer (S1)
+ *
+ * 状态 = trace 的字段 + 执行器私产（S1 只做“记录”，不引入 settle/重试等行为变更）。
+ * 指纹只在**已有观察**（步首池提取）与运行收尾时各算一次；`struct` 只用结构分布，
+ * `content` 仅诊断——前进性判据不吃 content（时间戳/轮播会让它抖）。
+ */
+
+/** 页面在观察时刻的就绪态（`document.readyState`）。 */
+export type ReadyState = "loading" | "interactive" | "complete";
+
+/** 状态指纹：每次观察生成，engine 内部/产物可见（只读）。 */
+export interface StateFingerprint {
+  /** 全局单调递增：每次抽池/观察 +1（每个 run 从 1 开始）。 */
+  epoch: number;
+  /** 导航代：本次 run 的初始 goto 完成 +1（动作诱发的导航靠 url 变化体现）。 */
+  navEpoch: number;
+  url: string;
+  readyState: ReadyState;
+  /** 结构指纹：可动元素计数 + 角色/标签分布 hash（前进性只用它，不用 content）。 */
+  struct: string;
+  /** 内容指纹（诊断用）：首批可动元素 label hash；空池省略。 */
+  content?: string;
+}
+
+/** S1 前进性 flag（引擎判定，不是用户语法；done 语言不变）。 */
+export type StateFlag = "done_preheld" | "no_state_progress" | "stale_satisfaction";
+
+/** fill/setRange 的 effect 读回（不可读组件整条省略，不假装）。 */
+export interface StateEffect {
+  kind: "fill" | "set_range";
+  before: string;
+  after: string;
+  /** 页面值事实是否等于写入值/目标（读回成功才出现）。 */
+  applied: boolean;
+  /** setRange：是否在容差内（fill 不出现）。 */
+  accurate?: boolean;
+}
+
+/** 每个 flow 步落进 `step_traces[i].state` 的记录。 */
+export interface StepStateRecord {
+  before: StateFingerprint;
+  after?: StateFingerprint;
+  /** S1 恒省略（settle 属 S2）；有值 = 本步等待静默的毫秒数。 */
+  settleMs?: number;
+  actions: { attempted: number; executed: number; changed: number };
+  flags: StateFlag[];
+  effect?: StateEffect;
 }
 
 /**
@@ -596,6 +668,13 @@ export interface MiddlewareOptions {
    * `meta.policy.candidate_priority`；缺省 "bucketed" = A2 行为变更面）。
    */
   candidatePriority?: "bucketed" | "main-first";
+  /**
+   * S1：pre-held done 的处置（来自 `meta.policy.done_preheld`；缺省 "warn" = 只记录）。
+   * 见 `PackPolicy.done_preheld`（app-pack.ts）的语义说明。
+   */
+  donePreheldPolicy?: "warn" | "fail" | "allow";
+  /** S1：fill 后读回 value 并与写入值比对（缺省 true；不可读组件自动降级跳过）。 */
+  fillReadback?: boolean;
 }
 
 /* ------------------------------------------------------------------ JS passes
@@ -640,6 +719,26 @@ const HIT_JS = `(e) => {
 }`;
 const FN_HIT = asFunction(HIT_JS);
 
+/**
+ * S1 actionability 现场（只读）：bbox + 中心点覆盖者 + 重查时节点是否仍在文档里。
+ * 与 HIT_JS 分开是因为 HIT_JS 的返回值被两处当成“有无覆盖者”的布尔语义（不能改形状）。
+ */
+const HIT_DETAIL_JS = `(e) => {
+  const rr = e.getBoundingClientRect();
+  const bbox = {
+    x: Math.round(rr.x), y: Math.round(rr.y),
+    width: Math.round(rr.width), height: Math.round(rr.height),
+  };
+  const requery = (e && e.isConnected && document.contains(e)) ? 'present' : 'detached';
+  if (!rr.width || !rr.height) return { bbox, blocker: 'zero-size', requery };
+  const x = rr.x + rr.width / 2, y = rr.y + rr.height / 2;
+  if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) return { bbox, blocker: 'offscreen', requery };
+  const top = document.elementFromPoint(x, y);
+  if (!top || top === e || e.contains(top) || top.contains(e)) return { bbox, blocker: null, requery };
+  return { bbox, blocker: [top.tagName.toLowerCase(), top.id ? '#' + top.id : ''].join(''), requery };
+}`;
+const FN_HIT_DETAIL = asFunction(HIT_DETAIL_JS);
+
 /** Visible empty inputs/textareas the frozen plan's data bag can supply. */
 const EMPTIES_JS = `() => [...document.querySelectorAll('input:not([type=hidden]),textarea')]
   .filter(e => !e.value.trim() && e.offsetParent !== null
@@ -662,6 +761,44 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
+}
+
+/** FNV-1a 32-bit：状态指纹只要**确定且廉价**的 hash，不需要密码学强度。 */
+function fnv1aText(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * S1 结构指纹：可动元素计数 + 角色/标签分布 hash（前进性判据只用它）。
+ * 不读页面、只读已有池（零新增往返应）；分布排序后再 hash，抽池顺序变化不制造假前进。
+ */
+function structDigest(elems: ElemPool | null): string {
+  if (elems === null) return "none";
+  const tags: Record<string, number> = {};
+  const roles: Record<string, number> = {};
+  let n = 0;
+  for (const e of Object.values(elems)) {
+    n += 1;
+    tags[e.tag] = (tags[e.tag] ?? 0) + 1;
+    if (typeof e.role === "string" && e.role) roles[e.role] = (roles[e.role] ?? 0) + 1;
+  }
+  const norm = (o: Record<string, number>): string =>
+    Object.keys(o).sort().map((k) => `${k}:${o[k]}`).join(",");
+  return `${n}:${fnv1aText(`${norm(tags)}|${norm(roles)}`)}`;
+}
+
+/** S1 内容指纹（诊断用）：首批可动元素 label hash；空池/全空 label 时省略。 */
+function contentDigest(elems: ElemPool | null): string | undefined {
+  if (elems === null) return undefined;
+  const labels = Object.values(elems).slice(0, 10)
+    .map((e) => String(e.label ?? "").slice(0, 40))
+    .filter((s) => s !== "");
+  return labels.length === 0 ? undefined : fnv1aText(labels.join("\u0000"));
 }
 
 /**
@@ -1152,6 +1289,23 @@ export class BrowserMiddleware {
   tieredHint = false;
   /** See `MiddlewareOptions.candidatePriority`（A2 分桶窗口；缺省 bucketed）。 */
   candidatePriority: "bucketed" | "main-first" = "bucketed";
+  /** S1：pre-held done 处置（缺省 warn；fail 在动作前结构化停止）。 */
+  donePreheldPolicy: "warn" | "fail" | "allow" = "warn";
+  /** S1：fill 后读回（缺省 true）。 */
+  fillReadback = true;
+  /**
+   * S1 状态游标（运行期私产，每次 `run()` 重置）：epoch/navEpoch/当前指纹。
+   * 只读投影给 `ctx.runtime.epoch`；观察来源永远只有执行器（不自建第二份）。
+   */
+  private _state: { epoch: number; navEpoch: number; current: StateFingerprint | null } =
+    { epoch: 0, navEpoch: 0, current: null };
+  /** 上一条 `not-actionable-or-covered` 的结构化现场（只在同一次调用内消费）。 */
+  private _lastActionabilityDetail: ActionabilityDetail | null = null;
+
+  /** `ctx.runtime.epoch` 的只读投影：还没有观察过就是 0（不硬造）。 */
+  stateEpoch(): number {
+    return this._state.current?.epoch ?? 0;
+  }
   /** See `MiddlewareOptions.maxEffectiveRepeats` (D3/R-4; default 3, 0 disables). */
   maxEffectiveRepeats = 3;
   /** 见 MiddlewareOptions.riskAsk。 */
@@ -1221,6 +1375,8 @@ export class BrowserMiddleware {
     this.riskAsk = opts.riskAsk ?? this.riskAsk;
     this.tieredHint = opts.tieredHint ?? this.tieredHint;
     this.candidatePriority = opts.candidatePriority ?? this.candidatePriority;
+    this.donePreheldPolicy = opts.donePreheldPolicy ?? this.donePreheldPolicy;
+    this.fillReadback = opts.fillReadback ?? this.fillReadback;
   }
 
   /**
@@ -1705,6 +1861,7 @@ export class BrowserMiddleware {
    * `"__clicked__"` means the probe already performed the real click.
    */
   async occludedReason(page: AnyPage, el: Elem, probeMs = 800, slowMs = 2500): Promise<string | null> {
+    this._lastActionabilityDetail = null;
     const loc = await this._locatorFor(page, el);
     if (loc === null) return "stale_ref";
     try {
@@ -1721,7 +1878,11 @@ export class BrowserMiddleware {
         } catch {
           return null;
         }
-        if (hit) return `not-actionable-or-covered:${String(hit)}`;
+        if (hit) {
+          const reason = `not-actionable-or-covered:${String(hit)}`;
+          this._lastActionabilityDetail = await this._readActionabilityDetail(loc, reason);
+          return reason;
+        }
         // Slow but UNBLOCKED: nothing covers the element, so the short budget was
         // simply too short — a widget animating in. Give it ONE longer try before
         // reporting, because reporting is not free: the caller FORBIDS the ref for
@@ -1737,6 +1898,51 @@ export class BrowserMiddleware {
         }
       }
       return null;
+    }
+  }
+
+  /** S1：取走并清空上一条 actionability 现场（一次调用只消费一次，避免跨步串用）。 */
+  private _takeActionabilityDetail(): ActionabilityDetail | null {
+    const detail = this._lastActionabilityDetail;
+    this._lastActionabilityDetail = null;
+    return detail;
+  }
+
+  /**
+   * S1：读取一次 actionability 现场（bbox / 覆盖者 / 节点是否还在）。
+   * 读不到不造假：bbox=null、requery=unknown，reason 仍保留。
+   */
+  private async _readActionabilityDetail(loc: AnyLoc, reason: string): Promise<ActionabilityDetail> {
+    const unknown: ActionabilityDetail = { reason, bbox: null, blocker: null, requery: "unknown" };
+    try {
+      const raw = await firstLoc(loc).evaluate(FN_HIT_DETAIL);
+      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return unknown;
+      const r = raw as Record<string, unknown>;
+      const b = r["bbox"];
+      const bbox = (b !== null && typeof b === "object" && !Array.isArray(b))
+        ? {
+            x: Number((b as Record<string, unknown>)["x"]) || 0,
+            y: Number((b as Record<string, unknown>)["y"]) || 0,
+            width: Number((b as Record<string, unknown>)["width"]) || 0,
+            height: Number((b as Record<string, unknown>)["height"]) || 0,
+          }
+        : null;
+      const requery = r["requery"] === "present" || r["requery"] === "detached"
+        ? r["requery"] : "unknown";
+      return {
+        reason,
+        bbox,
+        blocker: typeof r["blocker"] === "string" ? r["blocker"] : null,
+        requery,
+      };
+    } catch {
+      // 元素在探针之后被卸载：重查 locator 一次，给“还在不在”一个诚实的答案。
+      try {
+        const n = await firstLoc(loc).count();
+        return { ...unknown, requery: Number(n) > 0 ? "present" : "detached" };
+      } catch {
+        return unknown;
+      }
     }
   }
 
@@ -1868,7 +2074,7 @@ export class BrowserMiddleware {
      */
     bound?: { value: unknown; byValue?: boolean } | null,
     op?: string,
-  ): Promise<[string, unknown]> {
+  ): Promise<[string, unknown, StateEffect?]> {
     const tag = el.tag;
     if (op === "drag") {
       const loc = await this._locatorFor(page, el);
@@ -1917,6 +2123,7 @@ export class BrowserMiddleware {
       // for any non-"filled"/"clicked" outcome) and keep the subgoal alive. The
       // Python reference let Playwright's TimeoutError escape `run()` and killed
       // the whole plan; found by the live zh.wikipedia case.
+      let effect: StateEffect | undefined;
       try {
         if (tag === "select") {
           if (bound?.byValue) {
@@ -1931,12 +2138,36 @@ export class BrowserMiddleware {
             }
           }
         } else {
+          // S1 effect 读回：动作只证明“调用了 fill”，读回值才证明“真的填进去了”。
+          // 读不到（组件不可读/被卸载）就整条省略——降级跳过，不假装。
+          let before: string | null = null;
+          if (this.fillReadback) {
+            try {
+              const b = await firstLoc(loc).inputValue();
+              before = typeof b === "string" ? b : null;
+            } catch { before = null; }
+          }
           await firstLoc(loc).fill(String(val));
+          if (this.fillReadback && before !== null) {
+            let after: string | null = null;
+            try {
+              const a = await firstLoc(loc).inputValue();
+              after = typeof a === "string" ? a : null;
+            } catch { after = null; }
+            if (after !== null) {
+              // 密码/文件/隐藏输入的值绝不进产物（redactValue 同一口径）。
+              const masked = (s: string): string => String(redactValue(el, s));
+              effect = {
+                kind: "fill", before: masked(before), after: masked(after),
+                applied: after === String(val),
+              };
+            }
+          }
         }
       } catch (e) {
         return ["action_failed", describeActionError(e)];
       }
-      return ["filled", val];
+      return effect === undefined ? ["filled", val] : ["filled", val, effect];
     }
     return this._clickOnly(page, el);
   }
@@ -2465,6 +2696,10 @@ export class BrowserMiddleware {
     let done = false;
     let manualDone = false;          // done because a HUMAN attested, not a DOM signal
     let dryRan = false;              // stopped at the dry-run probe (nothing executed)
+    // S1 状态层：本 run 的首个观察指纹 / 最后一次 effect / pre-held done 是否出现过。
+    let beforeFp: StateFingerprint | null = null;
+    let lastEffect: StateEffect | null = null;
+    let donePreheldSeen = false;
     let stopCode: StopCode = "max_steps";
     // 03-D5：这个默认值只在"动作循环自然用满、没有任何站点显式 stop"时存活——以前 reason
     // 就是裸三个字符（对比 no_progress 的详文），作者无从判断预算与进度。现在带数字。
@@ -2520,8 +2755,13 @@ export class BrowserMiddleware {
     let page: AnyPage | null = pageIn;
     const ownsBrowser = page === null;
     let browser: BrowserHandle | null = null;
+    /** S1：本 run 的 StepStateRecord（在收尾处组装；无观察时省略）。 */
+    let stepState: StepStateRecord | undefined;
 
     try {
+      // S1：每次 run 重置状态游标（epoch/navEpoch 都是**本次 run** 的口径）。
+      this._state = { epoch: 0, navEpoch: 0, current: null };
+      this._lastActionabilityDetail = null;
       await this.ready();
       // A config error is not a transient failure: acting on rules-only anyway would
       // silently downgrade what the operator explicitly configured, and retrying it
@@ -2563,8 +2803,38 @@ export class BrowserMiddleware {
         page = (await browser.newPage()) as AnyPage;
       }
       const pg = page as AnyPage;
+      /**
+       * S1：生成一次状态指纹并推进 cursor。`elems` 用**已有观察**（步首池）传进来；
+       * 收尾处才允许传 null（此时由调用方决定是否先重新抽池）。只读，不发动作。
+       */
+      const observeState = async (elems: ElemPool | null): Promise<StateFingerprint> => {
+        this._state.epoch += 1;
+        let url = "";
+        try { url = String(urlOf(pg as never) ?? ""); } catch { url = ""; }
+        let readyState: ReadyState = "complete";
+        try {
+          const rs = await pg.evaluate(() => {
+            const g = globalThis as unknown as { document?: { readyState?: unknown } };
+            return g.document?.readyState;
+          });
+          if (rs === "loading" || rs === "interactive" || rs === "complete") readyState = rs;
+        } catch { /* 页面已关闭：readyState 只是诊断，不阻塞收尾 */ }
+        const struct = structDigest(elems);
+        const content = contentDigest(elems);
+        const fp: StateFingerprint = {
+          epoch: this._state.epoch,
+          navEpoch: this._state.navEpoch,
+          url,
+          readyState,
+          struct,
+          ...(content === undefined ? {} : { content }),
+        };
+        this._state.current = fp;
+        return fp;
+      };
       if (opts.skipNavigation !== true) {
         await pg.goto(startUrl, { waitUntil: "domcontentloaded", timeout: this.gotoTimeout });
+        this._state.navEpoch += 1;
         if (typeof opts.settleMs === "number" && opts.settleMs > 0) {
           await new Promise((r) => setTimeout(r, opts.settleMs));
         }
@@ -2630,6 +2900,8 @@ export class BrowserMiddleware {
         }
         lastPoolSize = Object.keys(elems).length;
         lastPoolWaitedMs = poolWaitedMs;
+        // S1：本 run 的 before 指纹取**第一次已有观察**（步首池），零新增页面往返。
+        if (beforeFp === null) beforeFp = await observeState(elems);
         // A1 子改动③：上一次已执行动作的 after 签名在这里落账——本步步首的这次提取就是上一动作
         // 后的页面状态。放在 walk/hintLookup 之前（hint 注入的元素不算观察事实）、放在 poolReady
         // 空池停因之前（动作后页面真被清空也照实记 {pool_size:0}）。
@@ -2664,6 +2936,27 @@ export class BrowserMiddleware {
             // 更早的崩溃。动作后的既有评估点照常暴露错误（那才是会改变结论的评估）。
             donePreheld = null;
             warnings.push(`done_preheld_probe_failed: ${describeActionError(e)}`);
+          }
+        }
+        // S1 pre-held done 策略（动作**之前**判定；缺省 warn = 行为不变）：
+        //   fail  —— 在动作前停住：pre-held 的 done 不是这一步的动作证据，继续动作只会
+        //            制造“零执行通过/顺手通过”；步级 forceAct 显式要求先动作，优先于 fail。
+        //   warn  —— 只记 flag + run summary warning（默认）。
+        //   allow —— 显式接受，只留 flag。
+        if (donePreheld === true) {
+          donePreheldSeen = true;
+          if (this.donePreheldPolicy === "fail" && !forceAct) {
+            stop("done_preheld",
+              `done signal already held BEFORE this step's actions on step ${stepNo} `
+              + `(policy.done_preheld="fail") — the completion is not evidence of this step; `
+              + `anchor done to post-action evidence, or set forceAct:true / policy.done_preheld:"warn"`, stepNo);
+            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            break;
+          }
+          if (this.donePreheldPolicy === "warn") {
+            const warning = `done_preheld: the done signal already held before this step's actions `
+              + `(step ${stepNo}) — completion is not evidence of progress; anchor done to post-action evidence`;
+            if (!warnings.some((w) => w.startsWith("done_preheld:"))) warnings.push(warning);
           }
         }
         // OUTCOME MEMORY: skip elements a previous attempt already proved inert on
@@ -3399,10 +3692,14 @@ export class BrowserMiddleware {
         // reports why, instead of burning 5 s + an inert step.
         let how: string | null = null;
         let arg: unknown = null;
+        /** S1：本动作的 effect 读回（只有 fill 会产生；最后一次非空值进 StepStateRecord）。 */
+        let fillEffect: StateEffect | undefined;
         const isScrollCommand = commandMode && cmdPick && String(cmdPick.cmd.op) === "scroll";
         const isDragCommand = commandMode && cmdPick && String(cmdPick.cmd.op) === "drag";
         if (!this._isTyping(el) && !isScrollCommand && !isDragCommand) {
           const reason = await this.occludedReason(pg, el);
+          // S1：actionability 失败现场（bbox/覆盖者/重查是否还在）；非该原因时保持 null。
+          const actionability = this._takeActionabilityDetail();
           if (reason === "__clicked__") {
             try {
               await pg.waitForLoadState("domcontentloaded", { timeout: 3000 });
@@ -3417,12 +3714,21 @@ export class BrowserMiddleware {
               blockedRetry[ref] = [stepNo, trace.length];
             }
             // A1：动作阶段没执行成 —— skipped_actions 记原因与命令身份（零执行步骤的证据）。
-            noteSkipped({ ref, reason, ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
+            // S1：not-actionable-or-covered 另附结构化现场（bbox/覆盖者/重查节点是否还在）。
+            noteSkipped({
+              ref, reason,
+              ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}),
+              ...(actionability === null ? {} : {
+                detail: `bbox=${actionability.bbox === null ? "?" : `${actionability.bbox.x},${actionability.bbox.y} ${actionability.bbox.width}x${actionability.bbox.height}`}`
+                  + `; blocker=${actionability.blocker ?? "none"}; requery=${actionability.requery}`,
+              }),
+            });
             // A2：命令步的候选尝试计数（前 4 个为止；失败的候选已被 forbid，下一步换下一个）。
             if (cmdPick) cmdAttempts[cmdPick.cmd.id] = (cmdAttempts[cmdPick.cmd.id] ?? 0) + 1;
             trace.push({
               step: stepNo, desc, how: reason, executed: false, method, conf: round3(conf),
               ref, skipped: true, skip_reason: reason, url: urlOf(pg),
+              ...(actionability === null ? {} : { actionability }),
               ...actionDeclEvidence(), ...refCollision(),
             });
             if (verbose) console.log(`  step ${stepNo}: (${reason}, ${method}) -> skip ${ref}`);
@@ -3442,18 +3748,19 @@ export class BrowserMiddleware {
               how = sr.ok ? "scrolled" : "action_failed";
               arg = sr.ok ? sr.scrollTop : (sr.stopCode ?? "not_scrollable");
             } else {
-              [how, arg] = await this._executeElement(pg, el, slots,
+              [how, arg, fillEffect] = await this._executeElement(pg, el, slots,
                 commandMode ? { value: commandValue, byValue: commandByValue } : null,
                 isDragCommand ? "drag" : "scroll");
             }
           } else if (!this._isTyping(el)) {
             [how, arg] = await this._clickOnly(pg, el);
           } else {
-            [how, arg] = await this._executeElement(pg, el, slots,
+            [how, arg, fillEffect] = await this._executeElement(pg, el, slots,
               commandMode ? { value: commandValue, byValue: commandByValue } : null,
               commandMode ? String(cmdPick!.cmd.op) : undefined);
           }
         }
+        if (fillEffect !== undefined) lastEffect = fillEffect;
         const executed = how === "clicked" || how === "filled" || how === "scrolled" || how === "dragged";
         if (!executed) {
           // needs_value / stale_ref: this element cannot advance the plan right
@@ -3718,6 +4025,54 @@ export class BrowserMiddleware {
         // 放在所有"这步已经结束/这块元素被禁"的分支之后，done 的路径不会多等。
         if (executed && this.actionDelayMs > 0) await sleep(this.actionDelayMs);
       }
+      // S1 收尾观察：本 run 的 after 指纹。一次池提取，页面不可读时整条省略（不硬造）。
+      let afterFp: StateFingerprint | undefined;
+      try {
+        const elemsAfter = await extractElements(pg, true, undefined, { candidatePriority });
+        afterFp = await observeState(elemsAfter);
+      } catch { afterFp = undefined; }
+      // 前进性判定（§2.4）：只在本 run 的**实际事务**上算，done 语言不变。
+      const actionRows = trace.filter((t) => t.executed === true || t.skipped === true);
+      const attempted = actionRows.length;
+      const executedN = actionRows.filter((t) => t.executed === true).length;
+      const changedN = actionRows.filter((t) => t.executed === true && t.changed === true).length;
+      // 没有 after 观察就不判前进性（不能把“没看见”写成“没前进”）。
+      const observed = beforeFp !== null && afterFp !== undefined;
+      const progressed = beforeFp !== null && afterFp !== undefined
+        && (afterFp.struct !== beforeFp.struct
+          || afterFp.url !== beforeFp.url
+          || afterFp.navEpoch !== beforeFp.navEpoch);
+      const lastActionStep = actionRows.length
+        ? Number((actionRows[actionRows.length - 1] as Record<string, unknown>)["step"] ?? 0) || undefined
+        : undefined;
+      const flags: StateFlag[] = [];
+      if (donePreheldSeen) flags.push("done_preheld");
+      if (done && observed && attempted > 0 && executedN > 0 && changedN === 0 && !progressed) {
+        flags.push("no_state_progress");
+        warnings.push(
+          `no_state_progress: done held after ${executedN} executed action(s) but the page snapshot `
+          + `did not change and the state fingerprint did not advance`
+          + (lastActionStep === undefined ? "" : ` (step ${lastActionStep})`)
+          + ` — the signal may not be evidence of the action`,
+        );
+      }
+      if (done && observed && attempted > 0 && executedN === 0 && !progressed) {
+        flags.push("stale_satisfaction");
+        warnings.push(
+          `stale_satisfaction: done held with 0 executed action(s) (${attempted} attempt(s)) and no state `
+          + `progress` + (lastActionStep === undefined ? "" : ` (step ${lastActionStep})`)
+          + ` — the signal may be satisfied by stale/cross-run state`,
+        );
+      }
+      if (beforeFp !== null) {
+        stepState = {
+          before: beforeFp,
+          ...(afterFp === undefined ? {} : { after: afterFp }),
+          actions: { attempted, executed: executedN, changed: changedN },
+          flags,
+          ...(lastEffect === null ? {} : { effect: lastEffect }),
+        };
+      }
     } finally {
       // Only close the browser run() launched itself: an injected page/pw belongs
       // to the caller (PORT NOTE 5, Python's owns_browser/_stop_playwright_owned).
@@ -3762,6 +4117,7 @@ export class BrowserMiddleware {
       ...(skippedActions.length ? { skipped_actions: skippedActions.slice(0, 20) } : {}),
       ...(donePreheld !== null ? { done_preheld: donePreheld } : {}),
       ...(warnings.length ? { warnings } : {}),
+      ...(stepState === undefined ? {} : { state: stepState }),
       ...(diagnostics !== undefined ? { diagnostics } : {}),
       ...(stopStep !== undefined ? { stop_step: stopStep } : {}),
       ...(manualDone ? { manual: true } : {}),

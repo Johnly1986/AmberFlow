@@ -20,6 +20,7 @@ import { createKit, type CommandDecl } from "./kit.ts";
 import { pushEvent, type AppTrace } from "./trace.ts";
 import { getAppAdapter, listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
 import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, ValueError } from "../data/datasource.ts";
+import type { StateFingerprint, StepStateRecord } from "../engine/executor.ts";
 import {
   normalizeCommandIds, resolveCtxUrl, StopError,
   validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
@@ -43,6 +44,11 @@ export interface DryCtxDeps {
   maxSteps?: number;
   /** 声明过的槽位键（`validateCommands` 的 fill/select 绑定要对它查）。 */
   slotKeys: Set<string>;
+  /**
+   * S1：effect 读回开关（来自 `meta.policy.effect_readback`）。dry 用它决定 setRange 的
+   * applied/accurate 是否出现——与真实面同一份声明，避免 check 盲区。
+   */
+  effectReadback?: { fill?: boolean; set_range?: boolean };
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -125,10 +131,22 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     return p;
   };
 
+  /**
+   * S1 dry 合成状态：没有页面观察，epoch=0、struct 固定 "dry"、flags 恒空——
+   * 形状与真实面同构（消费者不会因缺字段分叉），但**不假装**发生过状态推进。
+   */
+  const dryFingerprint = (): StateFingerprint => ({
+    epoch: 0, navEpoch: 0, url: currentUrl, readyState: "complete", struct: "dry",
+  });
+  const dryState = (): StepStateRecord => {
+    const fp = dryFingerprint();
+    return { before: fp, after: fp, actions: { attempted: 0, executed: 0, changed: 0 }, flags: [] };
+  };
   const recordStep = (desc: string, done?: unknown, ok = true, stopCode?: string, id?: string,
                       forceAct = false): StepResult => {
     checkBudget();
     budget.stepsUsed += 1;
+    const state = dryState();
     pushEvent(trace, {
       call: "step", desc, url: currentUrl, ok,
       ...(id === undefined ? {} : { id }),
@@ -136,9 +154,17 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       // dry 的审计额外记**声明的完成条件**（它是计划数据，不是模型产出）：
       // `apps explain` 与"脚本 vs 既有 journey"对照都靠它。
       // A1：forceAct 是声明面——dry 只记录声明，不改变模拟（step 仍 ok:true，不重新决策）。
-      ...(done === undefined && !forceAct ? {} : { result: { ...(done === undefined ? {} : { done }), ...(forceAct ? { force_act: true } : {}) } }),
+      // S1：state 是合成形状（见 dryState），保证 dry/真实消费者不分叉。
+      result: {
+        ...(done === undefined ? {} : { done }),
+        ...(forceAct ? { force_act: true } : {}),
+        state,
+      },
     });
-    return { ok, ...(id === undefined ? {} : { id }), ...(stopCode === undefined ? {} : { stopCode }), evidence: { url: currentUrl, attempts: 1, elapsedMs: 0 } };
+    return {
+      ok, ...(id === undefined ? {} : { id }), ...(stopCode === undefined ? {} : { stopCode }),
+      evidence: { url: currentUrl, attempts: 1, elapsedMs: 0 }, state,
+    };
   };
 
   const kitCtx = createKit();
@@ -151,7 +177,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     value: kitCtx.value,
     app: { id: pack.id, ...(pack.label === undefined ? {} : { label: pack.label }), goal: pack.goal },
     slots: Object.freeze({ ...slots }),
-    runtime: Object.freeze({ ...runtime }),
+    // S1：dry 没有页面观察，epoch 是合成值 0（不假装有状态推进）。
+    runtime: Object.freeze({ ...runtime, epoch: 0 }),
     budget,
     log: (msg) => { pushEvent(trace, { call: "log", desc: msg }); },
     open: async (u) => {
@@ -229,7 +256,13 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       validateSetRangeRequest(target, value, opts);
       checkBudget();
       budget.stepsUsed += 1;
-      const result: SetRangeResult = { ok: true };
+      // S1：effect 读回的合成值（dry 不动作，但字段形状必须与真实面同构）。
+      // 策略关掉读回时同样不给字段——开关语义在 dry 面也成立。
+      const readback = deps.effectReadback?.set_range !== false;
+      const result: SetRangeResult = {
+        ok: true,
+        ...(readback ? { applied: true, accurate: true } : {}),
+      };
       pushEvent(trace, { call: "setRange", desc: target, ok: true, args: { target, value, opts }, result });
       return result;
     },

@@ -124,15 +124,26 @@ ${playbook}
  *   / manual(desc, {done}) / url() / read.text|value|count|attr / extract / holds / waitFor
  *   / source（数据腿注册表，不是读槽位的口）/ run / done() / fail(code, reason) / hint / hints / command
  *   / slots（冻结 Record：脚本层读槽位值写 ctx.slots["键"]，键须在 meta.slots 声明）
+ *   / runtime（只读投影：outDir/runId/today/epoch；epoch 是状态游标，dry 恒 0）
  *   / judge.url|exists|text|equals|value|all|any|not|manual
  *     ——all/any 是【变参】all(s1, s2, …)，不收数组；not 单参
  *   （when 守卫跳过的步返回 ok:false + stopCode=precondition_skipped，同样消耗预算。）
+ *   url() 首次导航前是 "about:blank"——别拿它当入口页判断；入口页写在 meta.site.pages。
  *
  * 值绑定写法（fill/select/drag 的值只认 slot，绝不猜）：对象字面量
  *   ctx.command("fill", "#username", { from: "slot", key: "username" })
  *   ——key 必须在 meta.slots 声明；缺值 = 结构化 needs_value。没有 ctx.value.fromSlot 之类的函数面。
+ *   extract 有两种写法（二选一，都返回行对象数组）：
+ *     ctx.extract("name")            // 具名：行/字段选择器声明在 meta.site.listExtract[name]
+ *     ctx.extract({ rows: "li.item", fields: { title: ".title", price: ".price" } })  // inline：无需声明
  *   extract 到的数据要落盘：app.mjs 是 Node ESM 脚本，直接 import node:fs 写
  *   $AMBERFLOW_HOME/apps/<id>/outputs/（详见 amber schema ctx --topic data_out）。
+ *
+ * 预算一图流（完整口径：amber schema ctx --topic budget）：
+ *   免费不占预算：read.* / extract / holds / waitFor / log / url
+ *   各计 1：ctx.step / ctx.arrive / ctx.run / 批准执行的人工步 / ctx.scrollList / ctx.expand / ctx.setRange
+ *   step 内的 command 闭集不单独计步：一个 step 的动作循环上限 8（子目标动作预算）
+ *   用满：budget_exceeded（status=partial、verified=false、exit 0）
  *
  * act 省略 = 决策语句：引擎的规则/决策层按 goal 文本与 done 证据选目标。命中与否
  * 取决于 goal 与页面候选的可分辨度；歧义大时会升级模型裁决——规则命中和模型裁决
@@ -165,6 +176,12 @@ export async function flow(ctx) {
   //   done: ctx.judge.url("cart"),               // ← 换成这一页动作后真的会成立的信号
   // });
   // if (!r.ok) ctx.fail(r.stopCode ?? "step_failed", r.reason);
+
+  // 步级 slots：只覆盖这一步的槽位绑定值（不需要提前写进 meta.slots 的默认值）。
+  // const search = await ctx.step("搜索酒店", {
+  //   slots: { query: "北京 酒店" },   // ← 值来自任务输入；slot 缺值 = needs_value，绝不猜
+  //   done: ctx.judge.url("search"),  // ← 换成动作后才会成立的信号
+  // });
 
   await ctx.done();   // 结束态不变量在这里验收；失败会抛 invariant_failed
 }

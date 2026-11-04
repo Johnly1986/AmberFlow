@@ -225,12 +225,12 @@ export async function flow(ctx) {
 
 | 类别 | 成员 | 说明 |
 |---|---|---|
-| 元信息 | `ctx.app` / `ctx.slots` / `ctx.runtime` / `ctx.budget` / `ctx.log(msg, data?)` | `slots` 只读；`runtime = {outDir, runId, today}`；`today` = CLI `--today YYYY-MM-DD` 钉住的"今天"，没钉 = 系统日期 |
+| 元信息 | `ctx.app` / `ctx.slots` / `ctx.runtime` / `ctx.budget` / `ctx.log(msg, data?)` | `slots` 只读；`runtime = {outDir, runId, today, epoch}`（`epoch` = 执行器状态游标只读投影，每次抽池/观察 +1，每个 `step` 重置；dry 恒 0）；`today` = CLI `--today YYYY-MM-DD` 钉住的"今天"，没钉 = 系统日期 |
 | 导航 | `ctx.open(url)` / `ctx.openPage(role)` / `ctx.arrive(url, {done, desc?, id?, timeoutMs?})` | `arrive` = 纯导航 + 等信号，不做元素选择、不花模型；`hosts` 信封在起点与落地都强制 |
 | 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, when?, timeoutMs? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}` |
 | 人工步 | `ctx.manual(desc, { done, instructions?, id? })` | 见 §7；非 TTY 返回 `needs_human`，不假装有人 |
-| 观察 | `ctx.url()` / `ctx.read.{text,value,count,attr}(sel[, attr])` / `ctx.holds(signal)` / `ctx.waitFor(signal, {timeoutMs?, pollMs?})` | 只读；读不到返回 `null` / `0`；`waitFor` 轮询到 bounded deadline，返回 boolean |
-| 站点面 | `ctx.openPage(role)` / `ctx.extract(nameOrSpec)` / `ctx.rows(...)`（v1 关闭） | 具名抽取声明在 `meta.site.listExtract`；inline 抽取用 `{ rows, fields, maxItems? }`；`rows` 调用给结构化错误 |
+| 观察 | `ctx.url()` / `ctx.read.{text,value,count,attr}(sel[, attr])` / `ctx.holds(signal)` / `ctx.waitFor(signal, {timeoutMs?, pollMs?})` | 只读；读不到返回 `null` / `0`；`waitFor` 轮询到 bounded deadline，返回 boolean；`url()` 首次导航前是 `"about:blank"`，别拿它当入口页判断 |
+| 站点面 | `ctx.openPage(role)` / `ctx.extract(nameOrSpec)` / `ctx.rows(...)`（v1 关闭） | 具名抽取声明在 `meta.site.listExtract`；inline 抽取用 `{ rows, fields, maxItems? }`（例：`ctx.extract({ rows: "li.item", fields: { title: ".title" } })`，无需 meta 声明）；`rows` 调用给结构化错误 |
 | 数据 | `ctx.source(name, {dates?})` / `ctx.data.{min,max}(rows, by)` | 数据腿按需拉取；`--skip-data` 时 `source` 报结构化错误。`dates` 显式给本次范围（单日 / `A..B` / `next_week`）；缺省按 source JSON 的 `default_dates`（支持 `"{slot}"` 占位符，从包默认 + `--slot` 解析；不许引用 `source_slots` 产物）。观察视图 `byDate` 按日期保留完整 counts/selects/rows |
 | 进程 | `ctx.run(...)` / `ctx.dangerous({...dryRunArgs})` | 见 §6；危险步默认拒绝 |
 | 构造器 | `ctx.judge.*` / `ctx.tool.*` / `ctx.hint()` / `ctx.hints()` / `ctx.command()` / `ctx.value.*` | 与 `kit` 同一份实现；命令 op 见下 |
@@ -259,7 +259,7 @@ export async function flow(ctx) {
 - `ctx.step` 的 `timeoutMs` 约束的是**本步动作后等待 done 信号成立的窗口**（映射该步的 `done_timeout_ms`），不约束整步挂钟时长——模型咨询、导航渲染不在其内（04-F）。
 - 导航：`ctx.open/openPage` 只做 goto（domcontentloaded），**不等 done/信号/settle**；要"导航 + 等落地证据"用 `ctx.arrive(url, { done })`（04-C 实测：open 后半路即返，arrive 带轮询等待）。
 - **预算是三层结构**（07-A/08-A6 实测成文，别按"一层"规划）：
-  **① flow 调用预算**——`ctx.budget.maxSteps` / `stepsUsed`（缺省 100，CLI `--max-steps` 覆盖）；`ctx.step`、`ctx.arrive`、`ctx.run` 与批准执行的人工步一律计 1——`when` 跳过的步也计（02-C2），`read/extract/holds/log` 免费；一次 `ctx.run` 恒 ≤1，其内部 attempts（重试）与 timeout 不放大本层。用满抛 `budget_exceeded`（CLI 给 `--max-steps` 时结果 `partial`、exit 0）。
+  **① flow 调用预算**——`ctx.budget.maxSteps` / `stepsUsed`（缺省 100，CLI `--max-steps` 覆盖）；`ctx.step`、`ctx.arrive`、`ctx.run`、三原语（`scrollList/expand/setRange`）与批准执行的人工步一律计 1——`when` 跳过的步也计（02-C2），`read/extract/holds/waitFor/log/url` 免费；一次 `ctx.run` 恒 ≤1，其内部 attempts（重试）与 timeout 不放大本层。用满抛 `budget_exceeded`（CLI 给 `--max-steps` 时结果 `partial`、exit 0）。
   **② 子目标动作预算**——执行器每次调用的动作循环上限，**缺省 8、当前不可配置**（`executor.ts:884`），只活在停因文案里（`max_steps=8`；reason 的 "on step N" 是本层动作号，与流步号两口径——04-B）。
   **③ 信号等待窗口**——浏览器腿 done 轮询 per-click 语义（`done_timeout_ms` 缺省 2000，步级 `timeoutMs` 覆盖，04-F/07-E："7 击各享窗口，非整步挂钟"）；进程腿 `stdio.timeout_ms` 是步内挂钟帽（缺省 20s）。
   **同为 `config_error`，抛出层决定计费**（08 实测）：cli 形式声明校验在①扣费**前** throw（免费）；适配器 toolRunner 内拒绝（如 stdio+retries）在扣费**后**返回（贵一步）。按"动作数"估①必翻车——守卫跳过、被拒声明都计费。
@@ -321,6 +321,7 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
 | `skipped_actions?: Array<{command_id?,ref?,target?,reason,detail?}>` | 每条"为什么没动作"的结构化原因（`target_ambiguous` / `target_not_found` / `forbidden` / `not-actionable-or-covered` / `stale_ref` / `needs_value` / `action_unsupported` / `attempt_limit` …） |
 | `done_preheld?: boolean` | 命令步在**动作前**对 done 的预评估结果（只命令步出现；不改变执行顺序） |
 | `warnings?: string[]` | 运行期诚实话，如 `suspected_async`（值只在产生时出现） |
+| `state?: StepStateRecord` | S1 状态记录：`before/after` 指纹（`epoch`/`navEpoch`/`url`/`readyState`/`struct`/`content`）、`actions{attempted,executed,changed}`、`flags`（`done_preheld`/`no_state_progress`/`stale_satisfaction`）、`effect`（fill 读回 `{kind,before,after,applied}`）；`step_traces[i].state` 与 `result.warnings[]` 是同一份证据 |
 
 **判读规则（写脚本/审查时按这个读）**
 - `done_preheld=true`：done 在动作**之前**已成立 ⇒ 这一步的 `done` 来自信号本身，不是这次动作推进的；
@@ -333,6 +334,15 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
 - `changed=false` 且 done 不成立仍按既有 inert/anti-repeat 逻辑处理（死循环拦截不变）。
 - trace 行上还有 `changed`（仅执行步）、`skipped/skip_reason`（仅未执行步）、`done_preheld`/`force_act`
   声明；`after` 仅在"动作后有下一次观察"时补（done 立即成立的收尾动作没有下一跳，故不补）。
+
+**S1 状态层与 pre-held 策略**
+- `meta.policy.done_preheld`：`"warn"`（缺省，只记 flag + `warnings[]`，不拦动作）/ `"fail"`（动作前结构化停止，
+  `stop_code=done_preheld`；步级 `forceAct:true` 优先）/ `"allow"`（显式接受，只留 flag）。
+- `meta.policy.effect_readback`：`{fill?, set_range?}`（缺省都开）。fill 后读回组件值比对，结果进
+  `state.effect.applied`；`ctx.setRange` 结果附 `applied`/`accurate`/`target`。不可读组件自动降级跳过（不假装）。
+- `ctx.runtime.epoch`：执行器状态游标只读投影（每次抽池/观察 +1，每个 `step` 重置；dry=0）。
+- `result.warnings[]` 汇总跨步 flags（`done_preheld`/`no_state_progress`/`stale_satisfaction`）与既有
+  `suspected_async`；这些是**证据**，不改 done 语言、不影响完成真值。
 
 **完整示例**：`examples/apps/05-done-evidence`（零动作命令 + `forceAct:true` + 证据判读，dry 可校验）。
 
@@ -353,13 +363,17 @@ export const meta = (kit) => ({
 
 export async function flow(ctx) {
   await ctx.openPage("home");                                  // 找不到角色 = config_error（点名已知角色）
-  const rows = await ctx.extract("entries");                   // Array<{ field: string }>
+  const rows = await ctx.extract("entries");                   // 具名：见 meta.site.listExtract
+  const inline = await ctx.extract({                          // inline：无需 meta 声明
+    rows: "li.entry", fields: { title: ".title", price: ".price" },
+  });
   const href = await ctx.read.attr("[data-test=entry]", "href"); // 不存在 → null
   const n = await ctx.read.count("nav.menu a");
   await ctx.done();
 }
 ```
 
+- 两种 extract 二选一：`ctx.extract("name")` 走 `meta.site.listExtract[name]`（可复用、可校验）；`ctx.extract({ rows, fields, maxItems? })` 是 inline 形式，选择器直接写在脚本里。
 - `ctx.extract(name)` 的字段选择器是**行内相对选择器**；`rows` 最多取 500 行（超出在 trace 里标 `truncated`）。
 - `fields` 只做**行内文本投影**：每个字段值取单元格元素的 `innerText`（表单控件回退 `inputValue`；
   实现：`src/app/ctx.ts` 的 extract 字段循环）。**不支持属性投影**——`fields: { al: "[aria-label]" }`

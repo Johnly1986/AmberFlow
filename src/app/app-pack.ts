@@ -177,6 +177,8 @@ export const POLICY_KEYS = [
   "tiered_hint", "risk_ask", "reobserve", "max_effective_repeats", "conf_floor",
   "done_timeout_ms", "done_poll_ms", "pool_ready_timeout_ms", "pool_ready_poll_ms",
   "candidate_priority",
+  // S1 状态层：pre-held done 的处置 + fill/setRange 的 effect 读回。
+  "done_preheld", "effect_readback",
 ] as const;
 
 /**
@@ -211,6 +213,23 @@ export interface PackPolicy {
    * `main-first`（回退 A2 之前的 main 内容优先排序）。显式声明才进 effective_policy。
    */
   candidate_priority?: "bucketed" | "main-first";
+  /**
+   * S1 状态层：动作**之前** done 信号就已成立时的处置（缺省 `warn` = 只记录、不拦）。
+   *   - `warn`：`step_traces[i].state.flags` 记 `done_preheld` + run summary warning，行为逐字节不变；
+   *   - `fail`：该步在动作**执行前**结构化停止（`stop_code=done_preheld`）——pre-held 的 done
+   *     不能算作这一步的完成证据，继续动作只会制造“零执行通过/顺手通过”的假证据；
+   *   - `allow`：显式接受（只留 flags，不出 warning）。
+   * 步级 `forceAct` 优先于 `fail`：作者已显式声明“即使已成立也先把命令闭集走完”。
+   */
+  done_preheld?: "warn" | "fail" | "allow";
+  /**
+   * S1 状态层：fill / setRange 的 effect 读回（缺省两项都开）。
+   *   - fill：动作后读回组件值并与写入值比对，结果进 `step_traces[i].state.effect`
+   *     （`applied` 才是“真的填进去了”，不再只看动作没抛错）；不可读组件自动降级跳过。
+   *   - set_range：`ctx.setRange` 结果附 `applied` / `accurate`（与目标容差内）。
+   * 声明 false 只关掉对应的读回字段，不改变动作本身。
+   */
+  effect_readback?: { fill?: boolean; set_range?: boolean };
 }
 
 /**
@@ -1111,6 +1130,28 @@ export function validatePack(pack: AppPack,
       const cp = pol["candidate_priority"];
       if (cp !== undefined && cp !== "bucketed" && cp !== "main-first") {
         p.push('policy.candidate_priority: must be one of "bucketed" | "main-first"');
+      }
+      // S1 状态层：两个新键同样在加载期响亮拒绝（未知键逻辑不变，已知面只增）。
+      const dp = pol["done_preheld"];
+      if (dp !== undefined && dp !== "warn" && dp !== "fail" && dp !== "allow") {
+        p.push('policy.done_preheld: must be one of "warn" | "fail" | "allow"');
+      }
+      const er = pol["effect_readback"];
+      if (er !== undefined) {
+        if (!isDict(er)) {
+          p.push("policy.effect_readback: must be an object { fill?: boolean, set_range?: boolean }");
+        } else {
+          for (const k of Object.keys(er)) {
+            if (k !== "fill" && k !== "set_range" && !k.startsWith("_")) {
+              p.push(`policy.effect_readback.${k}: unknown key (known: fill, set_range)`);
+            }
+          }
+          for (const k of ["fill", "set_range"]) {
+            if (er[k] !== undefined && typeof er[k] !== "boolean") {
+              p.push(`policy.effect_readback.${k}: must be a boolean`);
+            }
+          }
+        }
       }
       for (const k of ["done_timeout_ms", "done_poll_ms", "pool_ready_timeout_ms", "pool_ready_poll_ms"]) {
         const v = pol[k];

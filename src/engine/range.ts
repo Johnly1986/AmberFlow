@@ -31,6 +31,16 @@ export interface RangeOutcome {
   strategy?: RangeStrategy;
   stopCode?: string;
   reason?: string;
+  /**
+   * S1 effect 读回（页面值事实读回成功才出现）：
+   *   - `applied`：控件当前值已经是目标（含“本来就在目标上”的如实成功）；
+   *   - `accurate`：`|achieved - target| <= tolerance`（容差内）。
+   * 失败路径也如实给 false——不把“动作没抛错”当成“值设上了”。
+   */
+  applied?: boolean;
+  accurate?: boolean;
+  /** 本次的目标数值（percent 已按 min/max 折算；读回对账用）。 */
+  target?: number;
 }
 
 interface SliderState {
@@ -227,17 +237,29 @@ export async function applyRange(
   const deadline = Date.now() + timeoutMs;
   let state = await readState(loc);
   if (state === null) {
-    return { ok: false, stopCode: "slider_not_settable", reason: "cannot read the slider state (element detached or not a slider)" };
+    return {
+      ok: false, applied: false, accurate: false,
+      stopCode: "slider_not_settable",
+      reason: "cannot read the slider state (element detached or not a slider)",
+    };
   }
   const target = targetRangeValue(state, value);
   if (target === null) {
-    return { ok: false, stopCode: "slider_not_settable", reason: `invalid range value ${JSON.stringify(value)}` };
+    return {
+      ok: false, applied: false, accurate: false,
+      stopCode: "slider_not_settable",
+      reason: `invalid range value ${JSON.stringify(value)}`,
+    };
   }
   const strategies: string[] = [];
   const initial = currentOf(state);
+  const within = (v: number | null | undefined): boolean => v !== null && v !== undefined && Math.abs(v - target) <= tolerance;
   // 已经在目标上：如实成功（策略按控件类型标注，不虚构交互）。
   if (initial !== null && Math.abs(initial - target) <= tolerance) {
-    return { ok: true, achieved: initial, strategy: state.isRangeInput ? "fill" : "keyboard" };
+    return {
+      ok: true, achieved: initial, strategy: state.isRangeInput ? "fill" : "keyboard",
+      applied: true, accurate: true, target,
+    };
   }
 
   // ① 原生 range：DOM 值写入（fill 优先）
@@ -247,8 +269,8 @@ export async function applyRange(
     await sleep(10);
     state = await readState(loc);
     const got = currentOf(state);
-    if (got !== null && Math.abs(got - target) <= tolerance) {
-      return { ok: true, achieved: got, strategy: "fill" };
+    if (within(got)) {
+      return { ok: true, achieved: got!, strategy: "fill", applied: true, accurate: true, target };
     }
   }
 
@@ -256,8 +278,8 @@ export async function applyRange(
   strategies.push("keyboard");
   if (Date.now() < deadline) {
     const got = await keyboardSet(loc, target, deadline, tolerance);
-    if (got !== null && Math.abs(got - target) <= tolerance) {
-      return { ok: true, achieved: got, strategy: "keyboard" };
+    if (within(got)) {
+      return { ok: true, achieved: got!, strategy: "keyboard", applied: true, accurate: true, target };
     }
   }
 
@@ -265,12 +287,13 @@ export async function applyRange(
   strategies.push("pointer");
   if (Date.now() < deadline) {
     const { achieved, bbox } = await pointerSet(page, loc, target, deadline, tolerance);
-    if (achieved !== null && Math.abs(achieved - target) <= tolerance) {
-      return { ok: true, achieved, strategy: "pointer" };
+    if (within(achieved)) {
+      return { ok: true, achieved: achieved!, strategy: "pointer", applied: true, accurate: true, target };
     }
     const now = currentOf(await readState(loc));
     return {
       ok: false,
+      applied: false, accurate: false, target,
       stopCode: "slider_not_settable",
       reason: `target ${target} not reached after strategies [${strategies.join(" → ")}] `
         + `(current=${now ?? "unknown"}, bbox=${bbox === null ? "none" : `${Math.round(bbox.width)}×${Math.round(bbox.height)}`}, `
@@ -279,6 +302,7 @@ export async function applyRange(
   }
   return {
     ok: false,
+    applied: false, accurate: false, target,
     stopCode: "slider_not_settable",
     reason: `timeout after ${timeoutMs}ms with strategies [${strategies.join(" → ")}] — the range control did not accept any interaction`,
   };

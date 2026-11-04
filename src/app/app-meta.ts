@@ -59,6 +59,11 @@ export interface ScriptMeta {
   /** 站点面声明：页面角色（openPage）/ 命名行抽取（extract）。 */
   site?: PackSite;
   notes?: string[];
+  /**
+   * 运行策略（键的唯一出处 `app-pack.ts` 的 `POLICY_KEYS`；未知键在 `validateApp` 加载期拒绝）。
+   * S1 状态层新增：`done_preheld: "warn"|"fail"|"allow"`（缺省 warn）与
+   * `effect_readback: {fill?, set_range?}`（缺省都开）。
+   */
   policy?: PackPolicy;
   pace?: PackPace;
   invariants?: AppInvariant[];

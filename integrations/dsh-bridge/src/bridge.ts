@@ -688,6 +688,11 @@ export interface RunSummary {
   steps_truncated?: boolean
   /** 第一个失败步骤的结构化原因。 */
   failure?: { step: number; desc: string; stop_code?: string; obstacle?: string }
+  /**
+   * S1：运行期诚实警告（`done_preheld` / `no_state_progress` / `stale_satisfaction` 等），
+   * 由引擎 result 的 `warnings[]` 透出；缺字段 = 没有警告（旧产物同样缺字段）。
+   */
+  warnings?: string[]
   outDir: string
   /** The report to read, or '' when the run wrote none (a dry run, or one killed before it did). */
   reportPath: string
@@ -952,6 +957,10 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
   })
   const failed = steps.find(st => st.status === 'blocked' || st.status === 'failed' || st.status === 'refused')
   const partial = raw['partial'] === true
+  // S1：引擎已把前进性 flags 汇总进 result.warnings；这里只透出，不重新判定。
+  const warnings = Array.isArray(raw['warnings'])
+    ? (raw['warnings'] as unknown[]).map(w => String(w)).filter(w => w !== '')
+    : []
   // A flow script reports "a human must act here" as a structured stop on the script record
   // (`ctx.manual` on a non-TTY call), not as a per-step table entry; older artifacts used
   // `manual_steps`. Both must read as `needs_human`, never as a plain failure.
@@ -985,6 +994,7 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
     ...(rawSteps.length > MAX_STEPS ? { steps_total: rawSteps.length, steps_truncated: true }
       : raw['truncated'] === true ? { steps_truncated: true } : {}),
     ...(failed ? { failure: { step: failed.index, desc: failed.desc, ...(failed.stop_code ? { stop_code: failed.stop_code } : {}), ...(failed.obstacle ? { obstacle: failed.obstacle } : {}) } } : {}),
+    ...(warnings.length ? { warnings } : {}),
     // Only name a report that is really there: a killed run can leave the artifact without one, and
     // a path the caller cannot open is worse than saying so.
     reportPath: fs.existsSync(path.join(outDir, `${app}-report.md`))

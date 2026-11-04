@@ -97,6 +97,7 @@ export const STOP_NEXT: Readonly<Record<string, string>> = {
   step_names_no_target: "步骤未点名目标且无候选：写明目标或加 target_hint（先 inspect）；属声明层修复，apps check 离线可验",
   noul_unverified: "模型声称 done 但无 DOM 信号可验证：补一个可验证的完成信号（url/css_*）；不要依赖模型口头 done",
   no_progress: "同一元素有效执行多次而信号从不成立：目标疑似死元素或信号永不成立——换目标/修 done 信号（inspect 实证）",
+  done_preheld: "done 在动作前已成立（policy.done_preheld=\"fail\" 才停）：把 done 换成动作后才出现的证据（弹出菜单项/跳转 URL/面板内新元素）；确需先动作再判，用步级 forceAct:true 或把 policy.done_preheld 改回 warn",
   space_empty: "声明的命令空间在页面无任何可解析元素：先 inspect --wide --pool 实证页面；环境与声明严重不符时修声明",
   nominated_family_empty: "提名族在该页无候选：inspect 实证该族元素是否存在；修 roles/meta 提名或放宽提名",
   nominated_family_mismatch: "动作族与提名不符：按 inspect 实证改提名，或改用页面真实控件族",

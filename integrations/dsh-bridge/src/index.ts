@@ -539,6 +539,8 @@ export function apply(ctx: Context, config: Config): void {
               obstacle: { type: 'string' },
             },
           },
+          // S1：引擎 result 的 warnings[]（前进性 flags 等）；缺省不出现（旧产物同形状）。
+          warnings: { type: 'array', items: { type: 'string' } },
         },
       },
       render: (_args, value) => {
@@ -579,8 +581,15 @@ export function apply(ctx: Context, config: Config): void {
               + value.blocked.map(b => `${b.desc} (${b.obstacle})`).join(' | ') : '')
             + (value.failedTools.length ? `; tool steps failed: ${value.failedTools.join(' | ')}` : '')
             + (value.refused.length ? `; not executed: ${value.refused.join(', ')}` : '')
-            + (value.failure ? `; first failure: step ${String(value.failure.step)} ${value.failure.desc}`
-              + `${value.failure.stop_code ? ` (${value.failure.stop_code})` : ''}` : '')
+            // S0：first-failure 只在**非 passed** 时输出——passed 同屏出现 “first failure” 会把
+            // 一次成功的运行读成失败（脚本已处理/恢复的 transient 失败不是最终结论）。
+            + (status !== 'passed' && value.failure
+              ? `; first failure: step ${String(value.failure.step)} ${value.failure.desc}`
+                + `${value.failure.stop_code ? ` (${value.failure.stop_code})` : ''}`
+              : '')
+            + (value.warnings?.length
+              ? `\nwarnings: ${value.warnings.map(w => `- ${w}`).join(' | ')}`
+              : '')
             + stopped
             + (value.model ? `; model: ${value.model}` : '')
             + (value.decisions ? `\ndecisions: ${value.decisions}` : '')
@@ -646,6 +655,7 @@ export function apply(ctx: Context, config: Config): void {
         outDir: summary.outDir,
         ...(summary.steps === undefined ? {} : { steps: summary.steps }),
         ...(summary.failure === undefined ? {} : { failure: summary.failure }),
+        ...(summary.warnings === undefined ? {} : { warnings: summary.warnings }),
       }
     },
   }))
