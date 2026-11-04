@@ -31,7 +31,7 @@ const CTX_FACTS: ReadonlyArray<{ id: string; statement: string; truth: string }>
   { id: "F02", statement: "judge.url(s) = URL 子串包含（urlOf(page).includes(s)），不是全等", truth: "signals.ts url_contains" },
   { id: "F03", statement: "judge.exists(sel) 跨主 frame 与同源子 frame（locatorAnyFrame），任意 CSS 可用", truth: "signals.ts css_exists" },
   { id: "F04", statement: "judge.text(sel,s) = 首匹配 innerText 包含 s；精确全等在带徽标/编辑链接的标题上永不成立，优先 contains", truth: "signals.ts css_text_contains" },
-  { id: "F05", statement: "act hint 是六形状语法闭集（#id / tag[attr~substr] / tag~token / tag[attr=value] / 角色词 / 裸词）；属性白名单仅 test→data-test、type→input_type、href、name、id、role、near——aria-label/class 不在池字段模型，永不命中", truth: "hint.ts parseHint + rules.ts poolAttr + grammar-prompt.ts（prompt-hit 校验）" },
+  { id: "F05", statement: "act hint 是六形状语法闭集（#id / tag[attr~substr] / tag~token / tag[attr=value] / 角色词 / 裸词）；属性白名单仅 test→data-test、type→input_type、href、name、id、role、near——其中 aria-label 是 label 的别名（DOM 的 aria-label 提取期已并进 label，a[aria-label~x] 按 label 匹配、可正常命中）；class/title/placeholder 等不在白名单的属性永不命中", truth: "hint.ts parseHint + rules.ts poolAttr（aria-label→label 别名，rules.ts A2）+ grammar-prompt.ts（prompt-hit 校验）" },
   { id: "F06", statement: "裸词 hint 四档匹配（整 label 全等 → 词全等 → 前缀 → 包含），只取最强非空档；档内真歧义返回 null 交给决策层", truth: "rules.ts hintMatchImpl bare-token ladder" },
   { id: "F07", statement: "ctx.step 失败是【返回】{ok:false, stopCode, reason}，不抛异常不中断 flow；只有 ctx.fail(code, reason) 抛 StopError 终止运行", truth: "ctx.ts / app-runner.ts" },
   { id: "F08", statement: "when 守卫不成立 = 该步不执行，返回 ok:false + stopCode:precondition_skipped，trace 记 skipped——不是失败，但同样消耗 1 步执行预算", truth: "executor.ts / APP_SCRIPT_AUTHORING.md §4" },
@@ -41,6 +41,8 @@ const CTX_FACTS: ReadonlyArray<{ id: string; statement: string; truth: string }>
   { id: "F12", statement: "导航：open/openPage 只做 goto(domcontentloaded) 不等信号；arrive(url,{done}) = 导航 + 轮询等落地证据——「导航后还要等页面状态」一律用 arrive", truth: "ctx.ts / APP_SCRIPT_AUTHORING.md §4（04-C 实测）" },
   { id: "F13", statement: "列表/范围三原语：ctx.scrollList/ctx.expand/ctx.setRange 各计 1 个 flow step；expand 的内部点击不占预算（maxClicks 缺省 20、timeoutMs 缺省 60000 兜底，行数连续 stableRounds 轮不增长即稳定）", truth: "ctx.ts 三原语实现 + createDryCtx 桩（A3）" },
   { id: "F14", statement: "三原语失败是结构化结果不是异常：scrollList 找不到滚动容器=not_scrollable、expand 到顶未稳定=expand_not_stable（带完整指标）、setRange 三策略（fill→keyboard→pointer）全失败=slider_not_settable（含已试策略/bbox/当前值）——绝不假装成功", truth: "range.ts + ctx.ts（A3 §4）" },
+  { id: "F15", statement: "脚本层读槽位值用 ctx.slots（冻结 Record）：ctx.slots[\"键\"]，键须在 meta.slots 声明；ctx.source 是数据腿注册表，不是读槽位的口——city/list 等任务参数要么走 ctx.slots，要么作为脚本常量", truth: "ctx.ts（slots: Object.freeze），实测自真实运行" },
+  { id: "F16", statement: "pre-held done 陷阱：done 引用了动作前已存在的元素 → 完成判定瞬间成立、引擎跳过实际动作（trace 记 done_preheld/skipped_actions，executed=false），步骤「零执行通过」、后续步骤连锁失败——done 必须锚定动作后才出现的证据（弹出菜单项、跳转后 URL、面板内新元素）", truth: "executor.ts done 判定 + APP_SCRIPT_AUTHORING §5（实测自真实运行）" },
 ];
 
 /** 信号算子语义注记（表从 SIGNAL_OPS 真源取；语义逐条标出处）。 */

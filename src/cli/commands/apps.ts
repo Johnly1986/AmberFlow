@@ -107,12 +107,25 @@ ${playbook}
  * 能用的 done 必须「动作前不成立、动作后成立」。凭想象写的文案可能把一次真的成功
  * 判成 no_progress（曾有单次实测：连点四次同一按钮每次都算 inert，最后停在预算上
  * ——历史个例，非普适结论）。
+ * 反面陷阱同样致命（pre-held done）：done 引用了动作前就已存在的元素 → 引擎判定
+ * 完成已成立、跳过实际动作（trace 记 done_preheld / skipped_actions，executed=false），
+ * 步骤「零执行通过」，后续步骤连锁失败。exists 类 done 尤其容易踩——落笔前先自问：
+ * 这个信号在动作之前是不是已经成立了？是就换成动作后才出现的证据（菜单打开后的
+ * 菜单项、跳转后的 URL、弹出面板里才有的元素）。
+ *
+ * judge 与 act 的选择器语义不同（互不通用，别把一面的写法抄到另一面）：
+ *   judge.* 的 selector 是【任意 CSS】（css_exists/text/value，跨主 frame 与同源子 frame）；
+ *   裸词会当 CSS 标签解析（judge.exists("Maps") 是在找 <Maps> 元素，不是找 label 文本）；
+ *   act/ctx.hint 是【六形状闭集 + 池 label 匹配】（裸词按 label 四档匹配；
+ *   a[aria-label~x] 是 label 别名——DOM 的 aria-label 提取期已并进 label，可正常命中）。
  *
  * ctx 只有这些面（没有 pageUrl()：入口页角色写在 meta.site.pages，用 openPage 取）：
  *   openPage(role) / open(url) / arrive(url, {done}) / step(desc, {id, act, done, url, slots, when, timeoutMs})
  *   / manual(desc, {done}) / url() / read.text|value|count|attr / extract / holds / waitFor
- *   / source / run / done() / fail(code, reason) / hint / hints / command
+ *   / source（数据腿注册表，不是读槽位的口）/ run / done() / fail(code, reason) / hint / hints / command
+ *   / slots（冻结 Record：脚本层读槽位值写 ctx.slots["键"]，键须在 meta.slots 声明）
  *   / judge.url|exists|text|equals|value|all|any|not|manual
+ *     ——all/any 是【变参】all(s1, s2, …)，不收数组；not 单参
  *   （when 守卫跳过的步返回 ok:false + stopCode=precondition_skipped，同样消耗预算。）
  *
  * 值绑定写法（fill/select/drag 的值只认 slot，绝不猜）：对象字面量

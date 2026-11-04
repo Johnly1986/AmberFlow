@@ -2585,7 +2585,8 @@ export class BrowserMiddleware {
         const deniedFrame = deniedFrameUrl(pg, hostGate);
         if (deniedFrame !== null) {
           const why = `frame not allowed: ${deniedFrame} is outside the declared hosts envelope `
-            + `(${hostGate.join(", ")}) — frame origins are part of the same host gate`;
+            + `(${hostGate.join(", ")}) — frame origins are part of the same host gate`
+            + `；若该 widget/iframe 是流程必需（如 Google apps 抽屉在 ogs.google.com），把它的 origin 加进 meta.hosts 后重跑`;
           if (verbose) console.log(`  -> REFUSED before navigation: ${why}`);
           return {
             goal: instruction, done: false,
