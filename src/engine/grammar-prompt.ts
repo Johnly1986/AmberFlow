@@ -79,6 +79,8 @@ for (const s of HINT_SHAPES) {
 export const SIGNAL_OP_PROMPT: Readonly<Record<string, string>> = {
   url_contains: "substring of the final url  (op=value)",
   css_exists: "css selector that must exist  (op=value)",
+  css_exists_text: "selector|substring of the element's text (case-insensitive; any match counts)  (op=selector|text)",
+  css_visible_exists: "css selector that must exist AND be visible  (op=value)",
   css_text_equals: "selector|exact text",
   css_text_contains: "selector|substring of the element's text",
   css_value_equals: "selector|exact input value",

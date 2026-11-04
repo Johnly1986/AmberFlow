@@ -17,7 +17,7 @@ import {
   disallowedHost, type BrowserMiddleware, type BrowserSession, type ExecutedAction,
   type RunReport, type SkippedAction, type StepStateRecord,
 } from "../engine/executor.ts";
-import { firstOf, locatorAnyFrame, urlOf, type PageLike } from "../engine/extraction.ts";
+import { firstOf, framesOf, locatorAnyFrame, urlOf, type PageLike } from "../engine/extraction.ts";
 import { checkSignal } from "../engine/signals.ts";
 import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, runSource, ValueError } from "../data/datasource.ts";
 import { listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
@@ -177,6 +177,43 @@ export interface SetRangeResult {
   target?: number;
 }
 
+/**
+ * S3 `ctx.collect` 的停止理由——**诚实口径**：说清这次到底为什么停下，不假装穷尽。
+ *   - `stable`        滚到底/滚不动之后，连续 stableRounds 轮没有新增行（到 plateau 或没有更多可加载）
+ *   - `maxRows`       达到 maxRows 上限（还有没取到的行，结果不是全集）
+ *   - `budget`        内部轮数上限 maxRounds 用完仍未稳定（不是 flow 步预算）
+ *   - `not_scrollable` 行元素的容器不可滚动（没有可滚动祖先/页面本身不滚）——只拿到当前可见部分
+ *   - `dry`           dry 面桩值（没有页面；不代表任何真实覆盖）
+ */
+export type CollectStopReason = "stable" | "maxRows" | "budget" | "not_scrollable" | "dry";
+
+/** S3 `ctx.collect` 的请求：行选择器 + 可选字段投影 + 停止条件。 */
+export interface CollectRequest {
+  /** 行选择器（CSS；主 frame 或同源子 frame）。内部滚动取行元素的最近可滚动祖先。 */
+  row: string;
+  /** 行内相对字段（与 extract inline 同语法）；缺省 `{ text: "." }`（行自身文本）。 */
+  fields?: Record<string, string>;
+  /** 停止条件二选一；缺省 `{stableRounds:2}`。 */
+  until?: { stableRounds?: number } | { maxRows?: number };
+  /** 按整行内容去重（缺省 true）。 */
+  dedupe?: boolean;
+  /** 内部轮数上限（缺省 30）；用尽 = stopReason "budget"。 */
+  maxRounds?: number;
+}
+
+/** S3 `ctx.collect` 的覆盖证据：取了几轮、累计多少行、最后一轮新增几行。 */
+export interface CollectCoverage {
+  rounds: number;
+  rowsSeen: number;
+  addedLastRound: number;
+}
+
+export interface CollectResult {
+  rows: Array<Record<string, string>>;
+  coverage: CollectCoverage;
+  stopReason: CollectStopReason;
+}
+
 export interface SourceObservationView {
   counts: Record<string, number>;
   selects: Record<string, Record<string, string> | null>;
@@ -270,6 +307,14 @@ export interface Ctx {
    * 设不了 = `slider_not_settable`（带已试策略/bbox/当前值），计 1 个 flow step。
    */
   setRange(target: string, value: RangeValue, opts?: SetRangeOptions): Promise<SetRangeResult>;
+  /**
+   * S3：列表穷举原语——反复（滚动行容器 → 抽行 → 去重）直到**连续 stableRounds 轮**
+   * 没有新增行、或达到 maxRows / 内部轮数上限。**整体计 1 个 flow step**（内部滚动/等待
+   * 不占预算）。返回诚实 `stopReason`（stable / maxRows / budget / not_scrollable），
+   * 不假装穷尽；`coverage` 给出轮数、累计行数、最后一轮新增行数。`stable` 只在容器
+   * 到底/滚不动之后累计"无新增"轮数（没滚到底的轮次不算 plateau）。
+   */
+  collect(req: CollectRequest): Promise<CollectResult>;
   /**
    * 人工步：登录/验证码/人工确认。人完成并确认后，可选 DOM 信号由引擎再验一遍。
    * `{manual:true}` 信号 = 人自证；非 TTY 且开了 manualFailFast 时返回 needs_human，不拉有头浏览器。
@@ -528,6 +573,59 @@ export function validateSetRangeRequest(target: unknown, value: unknown, opts: u
   const timeout = opts["timeoutMs"];
   if (timeout !== undefined && (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout < 1 || timeout > 600_000)) {
     throw new StopError("config_error", "ctx.setRange: opts.timeoutMs must be a number in [1, 600000]");
+  }
+}
+
+/**
+ * S3 `ctx.collect` 的参数声明。真实/dry/replay 三面共用；非法值在**这里**红（dry 期也拦）。
+ * `until` 二选一：`stableRounds`（1..20）或 `maxRows`（1..5000）。
+ */
+export function validateCollectRequest(req: unknown): void {
+  const where = "ctx.collect";
+  if (!isObj(req)) {
+    throw new StopError("config_error", `${where}: request must be an object { row, fields?, until?, dedupe?, maxRounds? }`);
+  }
+  if (!isNonEmptyString(req["row"])) {
+    throw new StopError("config_error", `${where}: row must be a non-empty CSS row selector (e.g. "li.item")`);
+  }
+  const fields = req["fields"];
+  if (fields !== undefined) {
+    if (!isObj(fields)) throw new StopError("config_error", `${where}: fields must be an object of field -> selector`);
+    for (const [k, v] of Object.entries(fields)) {
+      if (!isNonEmptyString(k) || !isNonEmptyString(v)) {
+        throw new StopError("config_error", `${where}: fields[${JSON.stringify(k)}] must map a field name to a non-empty selector`);
+      }
+    }
+  }
+  const until = req["until"];
+  if (until !== undefined) {
+    if (!isObj(until)) {
+      throw new StopError("config_error", `${where}: until must be one of { stableRounds } | { maxRows }`);
+    }
+    const hasStable = until["stableRounds"] !== undefined;
+    const hasMax = until["maxRows"] !== undefined;
+    if (hasStable === hasMax) {
+      throw new StopError("config_error", `${where}: until must have EXACTLY one of stableRounds | maxRows (got both or neither)`);
+    }
+    if (hasStable) {
+      const v = until["stableRounds"];
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 20) {
+        throw new StopError("config_error", `${where}: until.stableRounds must be an integer in [1, 20] (got ${JSON.stringify(v)})`);
+      }
+    } else {
+      const v = until["maxRows"];
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 1 || v > 5000) {
+        throw new StopError("config_error", `${where}: until.maxRows must be an integer in [1, 5000] (got ${JSON.stringify(v)})`);
+      }
+    }
+  }
+  const dedupe = req["dedupe"];
+  if (dedupe !== undefined && typeof dedupe !== "boolean") {
+    throw new StopError("config_error", `${where}: dedupe must be a boolean`);
+  }
+  const maxRounds = req["maxRounds"];
+  if (maxRounds !== undefined && (typeof maxRounds !== "number" || !Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > 200)) {
+    throw new StopError("config_error", `${where}: maxRounds must be an integer in [1, 200] (got ${JSON.stringify(maxRounds)})`);
   }
 }
 
@@ -864,6 +962,114 @@ export function createCtx(deps: CtxDeps): Ctx {
       result: { adapter, attempts: r.attempts ?? 1, code: r.code, refused: r.refused ?? null },
     });
     return result;
+  };
+
+  /**
+   * 行抽取的**唯一实现**（`ctx.extract` 与 `ctx.collect` 共用）：对当前 DOM 取行对象。
+   * 字段值 = 行内相对选择器的文本投影（表单控件回退 inputValue；"." = 行自身文本）。
+   * 返回 `{ rows, total }`：`total` = 当前匹配行总数（截断对账用）。
+   */
+  const readRows = async (
+    rowSelector: string, fields: Record<string, string>, cap = 500,
+  ): Promise<{ rows: Array<Record<string, string>>; total: number }> => {
+    const p = await page();
+    const rowsLoc = await locatorAnyFrame(p, rowSelector);
+    const rows: Array<Record<string, string>> = [];
+    if (rowsLoc === null) return { rows, total: 0 };
+    const all = rowsLoc.all === undefined ? null : await rowsLoc.all();
+    if (all === null) {
+      throw new StopError("config_error", "ctx.extract needs a Playwright locator (locator.all() is not available here)");
+    }
+    for (const row of all.slice(0, cap)) {
+      const locators = row as {
+        locator?: (s: string) => { first(): { innerText(o?: { timeout?: number }): Promise<string>; inputValue(o?: { timeout?: number }): Promise<string> } };
+        innerText?: (o?: { timeout?: number }) => Promise<string>;
+      };
+      const rec: Record<string, string> = {};
+      for (const [field, cellSel] of Object.entries(fields)) {
+        let value = "";
+        try {
+          if (cellSel === "." || cellSel === ":scope") {
+            if (typeof locators.innerText === "function") value = await locators.innerText({ timeout: 1500 });
+          } else if (typeof locators.locator === "function") {
+            const cell = locators.locator(cellSel).first();
+            try { value = await cell.innerText({ timeout: 1500 }); }
+            catch { value = await cell.inputValue({ timeout: 1500 }); }
+          }
+        } catch { value = ""; }
+        rec[field] = String(value ?? "").trim();
+      }
+      rows.push(rec);
+    }
+    return { rows, total: all.length };
+  };
+
+  /**
+   * S3 collect：把行元素所在容器的滚动推进一屏（最近可滚动祖先；否则页面滚动元素）。
+   * 逐 frame 探测（行可能在同源子 frame 里）；找不到行 = found:false。
+   */
+  const scrollRowsContainer = async (
+    rowSelector: string,
+  ): Promise<{ found: boolean; scrollable: boolean; moved: boolean; atBottom: boolean }> => {
+    const p = await page();
+    for (const fr of framesOf(p)) {
+      try {
+        const raw = await fr.evaluate((sel: string) => {
+          // 只用结构类型：本仓库 tsconfig 不含 DOM lib（页面侧形状走 structural cast）。
+          type DomNode = {
+            scrollTop: number; scrollHeight: number; clientHeight: number;
+            parentElement: DomNode | null;
+          };
+          const g = globalThis as unknown as {
+            document?: {
+              querySelectorAll(s: string): { length: number; [index: number]: DomNode };
+              documentElement: DomNode;
+              scrollingElement?: DomNode | null;
+              body: unknown;
+            };
+            getComputedStyle(e: DomNode): { overflowY?: string | null } | null;
+          };
+          const doc = g.document;
+          if (!doc) return { found: false, scrollable: false, moved: false, atBottom: true };
+          const rows = doc.querySelectorAll(sel);
+          if (!rows.length) return { found: false, scrollable: false, moved: false, atBottom: true };
+          let node: DomNode | null = rows[rows.length - 1]!;
+          let container: DomNode | null = null;
+          while (node !== null) {
+            const cs = g.getComputedStyle(node);
+            const oy = cs === null || cs === undefined ? "" : String(cs.overflowY || "");
+            if ((oy === "auto" || oy === "scroll" || oy === "overlay")
+              && node.scrollHeight > node.clientHeight + 2) { container = node; break; }
+            node = node.parentElement;
+          }
+          if (container === null) {
+            const se = doc.scrollingElement || doc.documentElement;
+            if (se && se.scrollHeight > se.clientHeight + 2) container = se;
+          }
+          if (container === null) return { found: true, scrollable: false, moved: false, atBottom: true };
+          const before = Number(container.scrollTop) || 0;
+          const max = Math.max(0, Number(container.scrollHeight) - Number(container.clientHeight));
+          const stepPx = Math.max(200, Math.floor((Number(container.clientHeight) || 0) * 0.8));
+          container.scrollTop = Math.min(max, before + stepPx);
+          const after = Number(container.scrollTop) || 0;
+          return { found: true, scrollable: true, moved: after !== before, atBottom: after >= max - 2 };
+        }, rowSelector);
+        if (raw !== null && typeof raw === "object") {
+          const rec = raw as Record<string, unknown>;
+          if (rec["found"] === true) {
+            return {
+              found: true,
+              scrollable: rec["scrollable"] === true,
+              moved: rec["moved"] === true,
+              atBottom: rec["atBottom"] === true,
+            };
+          }
+        }
+      } catch {
+        continue;   // 跨源 frame：evaluate 抛错，跳过
+      }
+    }
+    return { found: false, scrollable: false, moved: false, atBottom: true };
   };
 
   const kit = createKit();
@@ -1376,41 +1582,81 @@ export function createCtx(deps: CtxDeps): Ctx {
           "ctx.extract needs a declared name or { rows, fields, maxItems? } structure");
       }
       const extractName = typeof nameOrSpec === "string" ? nameOrSpec : `inline:${spec.rows}`;
+      const cap = Math.max(1, Math.min(500, Math.floor(spec.maxItems ?? 500)));
+      const found = await readRows(spec.rows, spec.fields, cap);
+      pushEvent(trace, { call: "extract", desc: extractName, result: { rows: found.rows, truncated: found.total > cap } });
+      return found.rows;
+    },
+    collect: async (req) => {
+      validateCollectRequest(req);
+      assertOpen("ctx.collect");
+      checkBudget();
+      await paceBeforeStep();
       const p = await page();
-      const rowsLoc = await locatorAnyFrame(p, spec.rows);
-      const rows: Array<Record<string, string>> = [];
-      let truncated = false;
-      if (rowsLoc !== null) {
-        const all = rowsLoc.all === undefined ? null : await rowsLoc.all();
-        if (all === null) {
-          throw new StopError("config_error", "ctx.extract needs a Playwright locator (locator.all() is not available here)");
-        }
-        const cap = Math.max(1, Math.min(500, Math.floor(spec.maxItems ?? 500)));
-        truncated = all.length > cap;
-        for (const row of all.slice(0, cap)) {
-          const locators = row as {
-            locator?: (s: string) => { first(): { innerText(o?: { timeout?: number }): Promise<string>; inputValue(o?: { timeout?: number }): Promise<string> } };
-            innerText?: (o?: { timeout?: number }) => Promise<string>;
-          };
-          const rec: Record<string, string> = {};
-          for (const [field, cellSel] of Object.entries(spec.fields)) {
-            let value = "";
-            try {
-              if (cellSel === "." || cellSel === ":scope") {
-                if (typeof locators.innerText === "function") value = await locators.innerText({ timeout: 1500 });
-              } else if (typeof locators.locator === "function") {
-                const cell = locators.locator(cellSel).first();
-                try { value = await cell.innerText({ timeout: 1500 }); }
-                catch { value = await cell.inputValue({ timeout: 1500 }); }
-              }
-            } catch { value = ""; }
-            rec[field] = String(value ?? "").trim();
+      budget.stepsUsed += 1;
+      const fields = req.fields ?? { text: "." };
+      const until = req.until ?? { stableRounds: 2 };
+      const stableRounds = "stableRounds" in until ? (until.stableRounds ?? 2) : 2;
+      const maxRows = "maxRows" in until ? (until.maxRows ?? 500) : 500;
+      const dedupe = req.dedupe !== false;
+      const maxRounds = req.maxRounds ?? 30;
+      // 行选择器语法在真跑里也要响亮（dry 面已校验形状，但 CSS 非法只有浏览器知道）。
+      try {
+        const bad = await p.evaluate!((sel: string) => {
+          const g = globalThis as unknown as { document?: { querySelectorAll(s: string): unknown } };
+          try { g.document?.querySelectorAll(sel); return null; } catch (e) {
+            return e instanceof Error ? e.message : String(e);
           }
-          rows.push(rec);
+        }, req.row);
+        if (typeof bad === "string" && bad) {
+          throw new StopError("config_error", `ctx.collect: row selector ${JSON.stringify(req.row)} is invalid (${bad})`);
         }
+      } catch (e) {
+        if (e instanceof StopError) throw e;
+        // 页面不可读时让下面的抽取给出诚实结果（不把 record 面故障当选择器错误）。
       }
-      pushEvent(trace, { call: "extract", desc: extractName, result: { rows, truncated } });
-      return rows;
+      const rows: Array<Record<string, string>> = [];
+      const seen = new Set<string>();
+      let rounds = 0;
+      let addedLastRound = 0;
+      let stableCount = 0;
+      /**
+       * 是否已确认"滚到底/滚不动"。滚动没到底时"本轮没新增"是正常的（还没滚到新内容），
+       * 不能算进 plateau；只有到底后连续 stableRounds 轮无新增才是 stable。
+       */
+      let atBottomKnown = false;
+      let stopReason: CollectStopReason = "budget";
+      while (rounds < maxRounds) {
+        rounds += 1;
+        const found = await readRows(req.row, fields, maxRows);
+        addedLastRound = 0;
+        for (const row of found.rows) {
+          const key = JSON.stringify(row);
+          if (dedupe && seen.has(key)) continue;
+          seen.add(key);
+          rows.push(row);
+          addedLastRound += 1;
+          if (rows.length >= maxRows) break;
+        }
+        if (rows.length >= maxRows) { stopReason = "maxRows"; break; }
+        if (addedLastRound > 0) stableCount = 0;
+        else if (atBottomKnown) stableCount += 1;
+        if (stableCount >= stableRounds) { stopReason = "stable"; break; }
+        if (rounds >= maxRounds) break;                    // 内部轮数用尽 → budget
+        const scroll = await scrollRowsContainer(req.row);
+        if (!scroll.found || !scroll.scrollable) { stopReason = "not_scrollable"; break; }
+        atBottomKnown = scroll.atBottom || !scroll.moved;
+        // 给懒加载/无限滚动一点时间再读下一轮；这段等待**不占** flow 预算。
+        await sleepMs(300);
+      }
+      const coverage: CollectCoverage = { rounds, rowsSeen: rows.length, addedLastRound };
+      const result: CollectResult = { rows, coverage, stopReason };
+      pushEvent(trace, {
+        call: "collect", desc: req.row, ok: true,
+        args: req,
+        result,
+      });
+      return result;
     },
     run: (async (sourceOrStep: unknown, args?: string[], req?: unknown): Promise<StepResult> => {
       if (typeof sourceOrStep === "string") {

@@ -179,6 +179,8 @@ export const POLICY_KEYS = [
   "candidate_priority",
   // S1 状态层：pre-held done 的处置 + fill/setRange 的 effect 读回。
   "done_preheld", "effect_readback",
+  // S2：抽池前的稳定门（缺省开启；"off" 关闭）。
+  "settle",
 ] as const;
 
 /**
@@ -230,6 +232,15 @@ export interface PackPolicy {
    * 声明 false 只关掉对应的读回字段，不改变动作本身。
    */
   effect_readback?: { fill?: boolean; set_range?: boolean };
+  /**
+   * S2 稳定门：每次抽池前，若页面最近有 DOM 突变（"脏"）就先等到静默再抽。
+   * 缺省开启 `{quiet_ms:400, timeout_ms:5000}`（方案 §2.5）；`"off"` 完全关闭。
+   *   - 已静默立即返回（0 等待）；静态页稳态零开销；
+   *   - 导航后第一次抽池最多付一次 quiet_ms（安装 observer 的时刻视为刚脏）；
+   *   - 永不抛错：超时只返回 timedOut，不阻断执行；等待毫秒数落 `state.settleMs`。
+   * 未知子键在加载期拒绝（写了就要生效）。
+   */
+  settle?: { quiet_ms?: number; timeout_ms?: number } | "off";
 }
 
 /**
@@ -1149,6 +1160,27 @@ export function validatePack(pack: AppPack,
           for (const k of ["fill", "set_range"]) {
             if (er[k] !== undefined && typeof er[k] !== "boolean") {
               p.push(`policy.effect_readback.${k}: must be a boolean`);
+            }
+          }
+        }
+      }
+      // S2 稳定门：`"off"` 或 `{ quiet_ms?, timeout_ms? }`；未知子键/越界值加载期红。
+      const st = pol["settle"];
+      if (st !== undefined) {
+        if (st === "off") {
+          // 合法：显式关闭
+        } else if (!isDict(st)) {
+          p.push('policy.settle: must be "off" or an object { quiet_ms?: int(0-5000), timeout_ms?: int(0-30000) }');
+        } else {
+          for (const k of Object.keys(st)) {
+            if (k !== "quiet_ms" && k !== "timeout_ms" && !k.startsWith("_")) {
+              p.push(`policy.settle.${k}: unknown key (known: quiet_ms, timeout_ms)`);
+            }
+          }
+          for (const [k, max] of [["quiet_ms", 5000], ["timeout_ms", 30000]] as const) {
+            const value = st[k];
+            if (value !== undefined && (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > max)) {
+              p.push(`policy.settle.${k}: must be an integer in [0, ${max}]`);
             }
           }
         }

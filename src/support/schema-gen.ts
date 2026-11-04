@@ -43,14 +43,19 @@ const CTX_FACTS: ReadonlyArray<{ id: string; statement: string; truth: string }>
   { id: "F14", statement: "三原语失败是结构化结果不是异常：scrollList 找不到滚动容器=not_scrollable、expand 到顶未稳定=expand_not_stable（带完整指标）、setRange 三策略（fill→keyboard→pointer）全失败=slider_not_settable（含已试策略/bbox/当前值）——绝不假装成功", truth: "range.ts + ctx.ts（A3 §4）" },
   { id: "F15", statement: "脚本层读槽位值用 ctx.slots（冻结 Record）：ctx.slots[\"键\"]，键须在 meta.slots 声明；ctx.source 是数据腿注册表，不是读槽位的口——city/list 等任务参数要么走 ctx.slots，要么作为脚本常量", truth: "ctx.ts（slots: Object.freeze），实测自真实运行" },
   { id: "F16", statement: "pre-held done 陷阱：done 引用了动作前已存在的元素 → 完成判定瞬间成立、引擎跳过实际动作（trace 记 done_preheld/skipped_actions，executed=false），步骤「零执行通过」、后续步骤连锁失败——done 必须锚定动作后才出现的证据（弹出菜单项、跳转后 URL、面板内新元素）", truth: "executor.ts done 判定 + APP_SCRIPT_AUTHORING §5（实测自真实运行）" },
-  { id: "F17", statement: "状态层（S1）：每个 ctx.step 在 step_traces[i].state 落 StepStateRecord——before/after 指纹（epoch 每次抽池/观察 +1；navEpoch 本次 run 初始 goto 完成 +1；url；readyState=document.readyState；struct=可动元素计数+角色/标签分布 hash；content 仅诊断）、actions{attempted,executed,changed}、flags（done_preheld / no_state_progress / stale_satisfaction）与可选 effect；ctx.runtime.epoch 是执行器游标的只读投影（dry=0）。flags 只是证据：done 语言未变，done_preheld 缺省 warn 不拦（policy.done_preheld=\"fail\" 才在动作前结构化停止）", truth: "executor.ts StateFingerprint/StepStateRecord + app-runner.ts step_traces 投影 + ctx.ts runtime" },
+  { id: "F17", statement: "状态层（S1）：每个 ctx.step 在 step_traces[i].state 落 StepStateRecord——before/after 指纹（epoch 每次抽池/观察 +1；navEpoch 本次 run 初始 goto 完成 +1；url；readyState=document.readyState；struct=可动元素计数+角色/标签分布 hash；content 仅诊断）、actions{attempted,executed,changed}、flags（done_preheld / no_state_progress）与可选 effect；ctx.runtime.epoch 是执行器游标的只读投影（dry=0）。flags 只是证据：done 语言未变，done_preheld 缺省 warn 不拦（policy.done_preheld=\"fail\" 才在动作前结构化停止）。done_preheld 只覆盖**命令步**（声明了 act 命令闭集）的动作前预评估；决策步不付这次评估成本，不会标记。r8 式串扰签名（done 成立但动作零执行且页面无前进）由 done_preheld + no_state_progress 覆盖", truth: "executor.ts StateFingerprint/StepStateRecord + app-runner.ts step_traces 投影 + ctx.ts runtime" },
   { id: "F18", statement: "effect 读回（S1）：fill 动作后读回组件值并与写入值比对，结果进 step_traces[i].state.effect{kind,before,after,applied}；不可读组件自动降级跳过（不假装成功）。ctx.setRange 在 policy.effect_readback.set_range !== false 时结果附 applied / accurate / target（accurate = |achieved-target| <= tolerance）；两项开关缺省都开，关掉只少字段、不改变动作", truth: "executor.ts _executeElement + range.ts applyRange + app-pack.ts PackPolicy.effect_readback" },
+  { id: "F19", statement: "settle 稳定门（S2）：每次抽池前（决策/act 解析、宽扫、收尾观察）若页面最近有 DOM 突变（now - 最近突变 < quiet_ms = “脏”）先等到静默；已静默立即返回（0 等待），超时返回 {timedOut:true} 不抛错、不阻断。等待毫秒数落 step_traces[i].state.settleMs（策略关闭时省略；0 = 跑过但无需等待）。meta.policy.settle 缺省 {quiet_ms:400, timeout_ms:5000}（默认开启），也可写 \"off\"；未知子键/越界值加载期拒绝。MutationObserver 只作传感器（不中断执行循环），导航后重装；安装时刻视为“刚脏”，所以每次导航后最多付一次 quiet_ms，静态页首个观察后零等待", truth: "src/engine/settle.ts + executor.ts _settleBeforeExtract + app-pack.ts PackPolicy.settle" },
+  { id: "F20", statement: "existsText / 可见性（S3）：judge.existsText(sel,text) = { css_exists_text: [selector, text] }——存在任一匹配 selector 且（可见）文本含 text 的元素（live = Playwright locator(sel,{hasText})，跨主 frame 与同源子 frame；大小写不敏感子串、含后代文本）。judge.exists(sel,{visible:true}) = { css_visible_exists: selector }——首匹配 locator.isVisible()。池/离线近似：css_exists_text 用匹配元素的合成 label 包含 text（近似，不是 innerText）；css_visible_exists 在池评估恒返回 null（可见性是页面事实，诱导期按“需真实验证”处理）", truth: "signals.ts css_exists_text/css_visible_exists + extraction.ts locatorAnyFrame(hasText) + kit.ts judge" },
+  { id: "F21", statement: "ctx.collect（S3）：ctx.collect({row, fields?, until?, dedupe?, maxRounds?}) 反复（滚动行容器→抽行→去重）直到在容器到底/滚不动之后连续 stableRounds 轮（缺省 2）无新增 / 达 maxRows（缺省 500）/ 内部轮数 maxRounds（缺省 30）用完；整体计 1 个 flow step（内部滚动/等待不占预算）。返回 {rows, coverage:{rounds,rowsSeen,addedLastRound}, stopReason}，stopReason ∈ stable | maxRows | budget | not_scrollable（dry 桩 = dry）——诚实口径，不假装穷尽。行容器 = 行元素的最近可滚动祖先（找不到/不可滚动 = not_scrollable，结果只覆盖当前可见部分）；fields 与 extract inline 同语法，缺省 {text:\".\"}", truth: "ctx.ts collect + ctx-dry.ts 桩 + ctx-replay.ts 回放 + trace.ts collect 事件" },
 ];
 
 /** 信号算子语义注记（表从 SIGNAL_OPS 真源取；语义逐条标出处）。 */
 const SIGNAL_SEMANTICS: Readonly<Record<string, string>> = {
   url_contains: "URL 含子串（includes），非全等——写路径/参数片段即可",
   css_exists: "任意 CSS、跨主 frame 与同源子 frame（locatorAnyFrame）；存在即真",
+  css_exists_text: "[selector, text] 存在任一匹配 selector 且文本含 text 的元素（live=Playwright hasText，跨主/同源子 frame，大小写不敏感子串；池近似=匹配元素的合成 label 包含 text）",
+  css_visible_exists: "[selector] 首匹配元素存在且可见（locator.isVisible()）；池/离线面不可判定（null）",
   css_text_contains: "[selector, text] 首匹配 innerText 包含 text；带徽标标题用这个，别用 equals",
   css_text_equals: "[selector, text] 首匹配 innerText.trim() 全等",
   css_value_equals: "[selector, value] 首匹配 inputValue 全等",
@@ -91,18 +96,18 @@ const BUDGET = {
   /** 一图流（S0 可发现性）：四行回答“什么免费、什么计 1、什么不单计”。 */
   summary: [
     "只读免费（不占预算）：read.text/value/count/attr、extract、holds、waitFor、log、url",
-    "各计 1 个 flow step：ctx.step / ctx.arrive / ctx.run / 批准执行的人工步 / ctx.scrollList / ctx.expand / ctx.setRange",
+    "各计 1 个 flow step：ctx.step / ctx.arrive / ctx.run / 批准执行的人工步 / ctx.scrollList / ctx.expand / ctx.setRange / ctx.collect",
     "step 内的 command 闭集不单独计 flow 步：一个 step 的动作循环上限 8（子目标动作预算）",
     "flow 预算用满 → budget_exceeded（status=partial、verified=false、exit 0）",
   ],
-  flow_call: { default: 100, cli_flag: "--max-steps", counts: ["ctx.step", "ctx.arrive", "ctx.run", "批准执行的人工步"], note: "when 跳过的步同样计 1；用满 → budget_exceeded（status=partial、verified=false）" },
+  flow_call: { default: 100, cli_flag: "--max-steps", counts: ["ctx.step", "ctx.arrive", "ctx.run", "批准执行的人工步", "ctx.scrollList", "ctx.expand", "ctx.setRange", "ctx.collect"], note: "when 跳过的步同样计 1；用满 → budget_exceeded（status=partial、verified=false）" },
   subgoal_actions: { default: 8, configurable: false, note: "执行器动作循环上限；reason 里的 \"on step N\" 是本层动作号，与流步号两口径" },
   signal_wait: { done_timeout_ms_default: 2000, step_level_override: "timeoutMs", note: "约束动作后等 done 的窗口，不约束整步挂钟（模型咨询/导航渲染不在其内）" },
   free_calls: ["read.text/value/count/attr", "extract", "holds", "waitFor", "log", "url"],
   list_range_primitives: {
     each_counts_as: 1,
-    calls: ["ctx.scrollList", "ctx.expand", "ctx.setRange"],
-    note: "每个原语整体计 1 flow step（受 --max-steps 预算约束）；expand 内部点击/滚动**不占**预算，由 maxClicks/timeoutMs 兜底",
+    calls: ["ctx.scrollList", "ctx.expand", "ctx.setRange", "ctx.collect"],
+    note: "每个原语整体计 1 flow step（受 --max-steps 预算约束）；expand 内部点击 / collect 内部滚动与轮间等待**不占**预算，由 maxClicks/timeoutMs/maxRounds 兜底；collect 的 stopReason 诚实（stable|maxRows|budget|not_scrollable）",
   },
 };
 
@@ -124,10 +129,11 @@ const FLOW_CONTROL = {
     scrollList: "滚目标自身或最近可滚动祖先（纯 DOM scrollTop，不做滚轮模拟、不自动滚页面）；找不到容器=not_scrollable",
     expand: "反复点 load-more/展开控件直到行数连续 stableRounds 轮不增长；到顶未稳定=expand_not_stable（仍返回 clicks/before/after/coverage）",
     setRange: "三策略 fill→keyboard→pointer（0×0 手柄用最近有尺寸祖先 bbox）；全失败=slider_not_settable，绝不返回假 achieved；读回给出 applied/accurate/target",
-    billing: "三个原语各计 1 flow step；expand 内部点击不占预算（maxClicks/timeoutMs 兜底）",
+    collect: "反复（滚动行容器→抽行→去重）直到连续 stableRounds 轮无新增/达 maxRows/轮数用完；整体计 1 step；stopReason=stable|maxRows|budget|not_scrollable（诚实口径，不假装穷尽）",
+    billing: "四个原语各计 1 flow step；expand 内部点击、collect 内部滚动与轮间等待不占预算（maxClicks/timeoutMs/maxRounds 兜底）",
   },
   /** S1：状态层是**证据**，不是新的完成语言。 */
-  state_evidence: "ctx.step 的 step_traces[i].state 记录 before/after 指纹与前进性 flags（done_preheld / no_state_progress / stale_satisfaction）；flags 只标注、不改 done 语言：done_preheld 缺省 warn 不拦，policy 显式 fail 才在动作前停（stop_code=done_preheld）。ctx.runtime.epoch 是只读投影",
+  state_evidence: "ctx.step 的 step_traces[i].state 记录 before/after 指纹、前进性 flags（done_preheld / no_state_progress）与 settleMs（S2 稳定门等待；策略关闭时省略）；flags 只标注、不改 done 语言：done_preheld 缺省 warn 不拦，policy 显式 fail 才在动作前停（stop_code=done_preheld），且只覆盖命令步（决策步不做动作前预评估）。ctx.runtime.epoch 是只读投影",
 };
 
 /**
@@ -150,6 +156,9 @@ const DRY = {
   url: "url() 是最近声明值",
   budget: "步预算照常计数",
   list_range_primitives: "三原语确定性桩：expand {ok:true,clicks:0,before:0,after:0,grew:false,stable:true,coverage:{rows:0}}；scrollList {ok:true}；setRange {ok:true,applied:true,accurate:true}（effect_readback.set_range=false 时后两项不出现）——但参数校验真做（非法 count/to/value 在 dry 期红）",
+  collect: "collect 桩：{rows:[], coverage:{rounds:0,rowsSeen:0,addedLastRound:0}, stopReason:\"dry\"}；参数校验真做（row/fields/until/maxRounds 非法在 dry 期红）",
+  validation_errors: "S3 吞错留痕：ctx-dry 的 validateXxxRequest（scrollList/expand/setRange/collect）抛错前先落 validation_error 事件（含 call/desc/message）——脚本 try/catch 吞掉 config_error，apps check 仍判 FAIL 并输出「脚本吞掉了配置错误：<call> <message>」。源码调用点对账（ctx.expand/scrollList/setRange/collect 出现次数 vs dry 事件数）只在 check 报告警告，不改退出码",
+  policy_settle: "settle 是引擎侧行为（无页面面无桩）；但 meta.policy.settle 的加载期校验在 dry 同样生效——非法 settle 在 apps check 就红",
   state_layer: "state 是合成值：before=after={epoch:0,navEpoch:0,url,readyState:\"complete\",struct:\"dry\"}、actions 全 0、flags []；runtime.epoch=0。形状与真实面同构，但不代表发生过状态推进（dry 没有页面观察）",
   rule: "一切基于观察值的 ctx.fail/分支/断言必须用 ctx.runtime.runId === \"(dry)\" 守卫；check VALID ≠ 每条分支被走过",
 };
@@ -256,10 +265,13 @@ export function renderCheatSheet(): string[] {
     "⚠ 语义速查（完整契约：amber schema ctx；违者运行期才红）",
     "- fill/select 值只认 slot：ctx.command(\"fill\", sel, {from:\"slot\",key})，key 须在 meta.slots 声明",
     "- judge.url(s)=URL 含子串；judge.exists 跨 iframe；judge.text(sel,s)=首匹配含 s",
+    "- judge.existsText(sel,s)=存在文本含 s 的元素（live hasText；池评估是 label 近似）；judge.exists(sel,{visible:true})=存在且可见（池评估不可判定）",
     "- hint 六形状；属性仅 test/type/href/name/id/role/near（aria-label 是 label 别名）—— class/title/placeholder 永不命中",
     "- ctx.step 失败返回 {ok:false}，只有 ctx.fail 中断；when 跳过同样计 1 步预算",
-    "- read/extract/holds/waitFor/log/url 免费；step/arrive/run/manual 与三原语各计 1",
+    "- read/extract/holds/waitFor/log/url 免费；step/arrive/run/manual 与四原语各计 1",
     "- ctx.extract(\"name\") 走 meta.site.listExtract；inline 用 ctx.extract({rows, fields})（无需声明）",
+    "- ctx.collect({row,fields,until}) 反复滚动取行（计 1 步）；stopReason=stable|maxRows|budget|not_scrollable，绝不假装穷尽",
+    "- settle：抽池前只在页面有突变时等静默（meta.policy.settle 默认开；等待落 state.settleMs）",
     "- step_traces[i].state 记状态指纹/flags/effect；ctx.runtime.epoch 只读；flags 只标注不改 done",
   ];
 }

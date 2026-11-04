@@ -37,6 +37,20 @@ export async function checkSignal(page: PageLike, spec: SignalSpec): Promise<boo
     // CSS ops look in the main frame AND same-origin children: a done-signal
     // frequently lives inside an iframe (embedded form field, status banner).
     if ("css_exists" in spec) return (await locatorAnyFrame(page, String(arg(spec.css_exists)))) !== null;
+    // S3：存在**任一**匹配 selector 且文本含 want 的元素（跨主 frame 与同源子 frame）。
+    // live 用 Playwright 的 hasText 过滤器（大小写不敏感的子串；匹配元素自身或后代文本）。
+    if ("css_exists_text" in spec) {
+      const [sel, want] = (spec.css_exists_text as unknown[]).map(arg);
+      return (await locatorAnyFrame(page, String(sel), { hasText: String(want) })) !== null;
+    }
+    // S3：存在且**可见**（首匹配 locator.isVisible()）。池/离线面无法判定可见性（见 evalSignalOnState）。
+    if ("css_visible_exists" in spec) {
+      const loc = await locatorAnyFrame(page, String(arg(spec.css_visible_exists)));
+      if (loc === null) return false;
+      const first = firstOf(loc);
+      if (typeof first.isVisible !== "function") return false;   // 无法证伪为可见 ⇒ 不判真
+      return (await first.isVisible()) === true;
+    }
     if ("css_text_contains" in spec) {
       const [sel, want] = (spec.css_text_contains as unknown[]).map(arg);
       const loc = await locatorAnyFrame(page, String(sel));
@@ -98,9 +112,20 @@ export function evalSignalOnState(spec: SignalSpec, view: StateView): boolean | 
   }
   if ("manual" in spec) return null;                       // human attestation: not decidable here
   if ("url_contains" in spec) return view.url.includes(String(arg(spec.url_contains)));
+  // 可见性是**页面事实**，池里没有可见性字段：离线一律不可判定（诱导期按"需真实验证"处理）。
+  if ("css_visible_exists" in spec) return null;
   if ("css_exists" in spec) {
     const hits = matchSelector(view.elems, String(arg(spec.css_exists)));
     return hits === null ? null : hits.length > 0;
+  }
+  // **池近似**（文档已注明）：匹配 selector 的元素 label（池投影）包含 text。
+  // live 的 hasText 还会看后代文本、大小写不敏感；池里只有合成 label，判不出的选择器返回 null。
+  if ("css_exists_text" in spec) {
+    const pair = (Array.isArray(spec.css_exists_text) ? spec.css_exists_text as unknown[] : [spec.css_exists_text]).map(arg);
+    const hits = matchSelector(view.elems, String(pair[0]));
+    if (hits === null) return null;
+    const want = String(pair[1]).toLowerCase();
+    return hits.some((el) => String(el.label ?? "").toLowerCase().includes(want));
   }
   const textOps: Array<[string, (got: string, want: string) => boolean]> = [
     ["css_text_contains", (g, w) => g.includes(w)],

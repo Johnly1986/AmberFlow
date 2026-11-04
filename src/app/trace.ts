@@ -17,7 +17,14 @@ export type TraceCall =
   | "open" | "openPage" | "arrive" | "step" | "read" | "extract" | "holds" | "waitFor" | "source"
   | "run" | "dangerous" | "manual" | "done" | "log"
   // A3 列表/范围原语：各计 1 flow step；内部 click/滚动不产生独立事件。
-  | "scrollList" | "expand" | "setRange";
+  | "scrollList" | "expand" | "setRange"
+  // S3：列表穷举原语（整体计 1 flow step）。
+  | "collect"
+  /**
+   * S3 dry 面：参数校验失败留痕（先落事件再抛错）。脚本 try/catch 吞掉 config_error 时，
+   * `apps check` 仍能从 trace 判 FAIL 并指出调用点。
+   */
+  | "validation_error";
 
 export interface TraceEvent {
   /** 第几次 ctx 调用（1-based，贯穿一次运行）。 */

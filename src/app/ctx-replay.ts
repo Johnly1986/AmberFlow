@@ -6,7 +6,8 @@
  * （`trace_mismatch`），版本/输入不一致由 `replayCompatibility` 在进入前拒绝。
  */
 import {
-  StopError, validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
+  StopError, validateCollectRequest, validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
+  type CollectCoverage, type CollectRequest, type CollectResult, type CollectStopReason,
   type Ctx, type CtxBudget, type ExpandOptions, type ExpandResult,
   type RangeValue, type ScrollListOptions, type ScrollListResult,
   type SetRangeOptions, type SetRangeResult,
@@ -158,6 +159,25 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       assertPrimitiveArgs(ev, { target, value, opts });
       consume();
       return primitiveResult<SetRangeResult>(ev);
+    },
+    // S3：collect 也按录制值回放——参数（row/fields/until/dedupe/maxRounds）必须与录制一致，
+    // 行数据来自 trace（不重新抽页面）；旧 trace 缺字段时给诚实空覆盖，不硬造。
+    collect: async (req: CollectRequest) => {
+      validateCollectRequest(req);
+      const ev = nextEvent("collect", { desc: req.row });
+      assertPrimitiveArgs(ev, req);
+      consume();
+      const rec = isObj(ev.result) ? ev.result : {};
+      const rows = Array.isArray(rec["rows"]) ? (rec["rows"] as Array<Record<string, string>>) : [];
+      const cov = isObj(rec["coverage"]) ? rec["coverage"] : {};
+      const coverage: CollectCoverage = {
+        rounds: Number(cov["rounds"] ?? 0) || 0,
+        rowsSeen: Number(cov["rowsSeen"] ?? rows.length) || 0,
+        addedLastRound: Number(cov["addedLastRound"] ?? 0) || 0,
+      };
+      const stopReason = typeof rec["stopReason"] === "string"
+        ? rec["stopReason"] as CollectStopReason : "stable";
+      return { rows, coverage, stopReason } as CollectResult;
     },
     manual: async (desc, req) => {
       const ev = nextEvent("manual", { desc });

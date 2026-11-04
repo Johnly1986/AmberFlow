@@ -92,7 +92,16 @@ export interface Kit {
   // ---- ② 决策判断（纯谓词构造器）----
   judge: {
     url(part: string): DomSignal;
-    exists(selector: string): DomSignal;
+    /**
+     * 存在选择器（任意 CSS，跨主 frame 与同源子 frame）。
+     * `{ visible: true }` = 还要**可见**（`css_visible_exists`；首匹配 isVisible）。
+     */
+    exists(selector: string, opts?: { visible?: boolean }): DomSignal;
+    /**
+     * S3：存在任一匹配 selector 且文本含 text 的元素（`css_exists_text`）。
+     * live = Playwright hasText（大小写不敏感子串，含后代文本）；池/离线面是 label 近似。
+     */
+    existsText(selector: string, text: string): DomSignal;
     text(selector: string, want: string): DomSignal;
     equals(selector: string, want: string): DomSignal;
     value(selector: string, want: string): DomSignal;
@@ -158,7 +167,10 @@ function applyAct(step: StepDecl, act: TargetDecl | CommandDecl[]): void {
 export function createKit(): Kit {
   const judge: Kit["judge"] = {
     url: (part) => ({ url_contains: part }),
-    exists: (selector) => ({ css_exists: selector }),
+    exists: (selector, opts) => (opts?.visible === true
+      ? { css_visible_exists: selector }
+      : { css_exists: selector }),
+    existsText: (selector, text) => ({ css_exists_text: [selector, text] }),
     text: (selector, want) => ({ css_text_contains: [selector, want] }),
     equals: (selector, want) => ({ css_text_equals: [selector, want] }),
     value: (selector, want) => ({ css_value_equals: [selector, want] }),

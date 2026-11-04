@@ -32,6 +32,8 @@ import { hintMatch } from "../src/engine/rules.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
 import { captureStateView, induceSignals } from "../src/flow/signal-induction.ts";
 import { evalSignalOnState, type SignalSpec, type StateView } from "../src/engine/signals.ts";
+// S2：录制前后各等一次页面静默（复用引擎同一份 settle；页面不可读时回退现状）。
+import { settle, type SettlePage } from "../src/engine/settle.ts";
 import { packToFlowSource } from "../src/app/app-meta.ts";
 import { loadScriptApp } from "../src/app/app-script.ts";
 
@@ -183,8 +185,20 @@ export async function learnFromActions(
   const startUrl0 = pageUrl(pg);
   const startState = await captureStateView(pg as never);
   const steps: LearnedStep[] = [];
+  /**
+   * S2：捕获前等页面静默（复用 `settle`）。录制工具的页面早已加载完，这里通常是 0 等待；
+   * 动作后的异步渲染（菜单/局部刷新）则由它兜住。页面 evaluate 失败时静默回退现状。
+   */
+  const settleBeforeCapture = async (): Promise<void> => {
+    try {
+      await settle(pg as unknown as SettlePage);
+    } catch {
+      // 回退现状：录制不因传感器失败而中断
+    }
+  };
 
   for (const [i, action] of actions.entries()) {
+    await settleBeforeCapture();
     const before = await captureStateView(pg as never);
     const beforeUrl = pageUrl(pg);
     try {
@@ -194,6 +208,7 @@ export async function learnFromActions(
       throw new Error(`第 ${i + 1} 步（${action.op} ${action.hint}）执行失败：${e instanceof Error ? e.message : String(e)}`);
     }
     await pg.waitForTimeout(300);                      // 让页面把反应做完（菜单/局部刷新）
+    await settleBeforeCapture();                       // S2：再等页面静默（有界；不含 300ms 的兼容等待）
     const after = await captureStateView(pg as never);
     const ind = induceSignals(before, after, { max: 3 });
     // 稳定句柄（data-test/id/name，stability ≥ 2）**或** URL 变化（`url_contains` 是我们五个算子里

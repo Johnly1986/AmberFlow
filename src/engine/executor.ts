@@ -106,6 +106,8 @@ import {
   navRule,
 } from "./rules.ts";
 import { checkSignal, type SignalSpec } from "./signals.ts";
+// S2 稳定门：MutationObserver 传感器 + 有界静默等待（只作观察增强，不中断执行循环）。
+import { DEFAULT_SETTLE, installSettle, settle, type SettlePage } from "./settle.ts";
 // 语法报错文案的唯一出处：形状清单不再手抄（grammar-prompt import 时自证与 parseHint 对齐）。
 import { HINT_CLOSED_SET_TEXT } from "./grammar-prompt.ts";
 // A2 判别：命令 target 是 hint 语法字符串，词面要从同一份解析器里取（不新开第二种解析）。
@@ -221,6 +223,9 @@ export type StopCode =
   /**
    * S1 状态层（policy.done_preheld=fail）：done 在动作**之前**已成立 ⇒ 这一步的完成证据
    * 不是动作推进出来的。默认（warn）只记 flag/warning；显式 fail 才在动作前停住。
+   *
+   * 覆盖范围：只有**命令步**（声明了 act 命令闭集）会在动作前预评估 done 并可能标记；
+   * 决策步不付这次评估成本，因此不会出现 done_preheld。
    */
   | "done_preheld";
 
@@ -346,11 +351,12 @@ export interface RunReport {
   state?: StepStateRecord;
 }
 
-/* ------------------------------------------------------------------ state layer (S1)
+/* ------------------------------------------------------------------ state layer (S1/S2)
  *
- * 状态 = trace 的字段 + 执行器私产（S1 只做“记录”，不引入 settle/重试等行为变更）。
- * 指纹只在**已有观察**（步首池提取）与运行收尾时各算一次；`struct` 只用结构分布，
- * `content` 仅诊断——前进性判据不吃 content（时间戳/轮播会让它抖）。
+ * 状态 = trace 的字段 + 执行器私产。S1 做“记录”（指纹/flags/effect），S2 加稳定门
+ * （settle：只作传感器，不中断执行循环）。指纹只在**已有观察**（步首池提取）与运行
+ * 收尾时各算一次；`struct` 只用结构分布，`content` 仅诊断——前进性判据不吃 content
+ * （时间戳/轮播会让它抖）。
  */
 
 /** 页面在观察时刻的就绪态（`document.readyState`）。 */
@@ -371,7 +377,7 @@ export interface StateFingerprint {
 }
 
 /** S1 前进性 flag（引擎判定，不是用户语法；done 语言不变）。 */
-export type StateFlag = "done_preheld" | "no_state_progress" | "stale_satisfaction";
+export type StateFlag = "done_preheld" | "no_state_progress";
 
 /** fill/setRange 的 effect 读回（不可读组件整条省略，不假装）。 */
 export interface StateEffect {
@@ -388,7 +394,10 @@ export interface StateEffect {
 export interface StepStateRecord {
   before: StateFingerprint;
   after?: StateFingerprint;
-  /** S1 恒省略（settle 属 S2）；有值 = 本步等待静默的毫秒数。 */
+  /**
+   * S2：本步在抽池前等待页面静默的累计毫秒数（0 = 有 settle 但无需等待；策略关闭时键省略）。
+   * 见 `settle.ts` 与 `meta.policy.settle`。
+   */
   settleMs?: number;
   actions: { attempted: number; executed: number; changed: number };
   flags: StateFlag[];
@@ -675,6 +684,11 @@ export interface MiddlewareOptions {
   donePreheldPolicy?: "warn" | "fail" | "allow";
   /** S1：fill 后读回 value 并与写入值比对（缺省 true；不可读组件自动降级跳过）。 */
   fillReadback?: boolean;
+  /**
+   * S2：抽池前的稳定门策略（`meta.policy.settle`；缺省开启 `{quietMs:400,timeoutMs:5000}`，
+   * `null` = 显式关闭）。只影响"抽池前是否等页面静默"，不改变完成判定/动作语义。
+   */
+  settle?: { quietMs: number; timeoutMs: number } | null;
 }
 
 /* ------------------------------------------------------------------ JS passes
@@ -1294,6 +1308,13 @@ export class BrowserMiddleware {
   /** S1：fill 后读回（缺省 true）。 */
   fillReadback = true;
   /**
+   * S2：抽池前的稳定门（null = off）。缺省开启（方案 §2.5）；应用层按 meta.policy.settle 覆盖。
+   * 只在"页面在动"时等待——已静默立即返回 0ms。
+   */
+  settlePolicy: { quietMs: number; timeoutMs: number } | null = { ...DEFAULT_SETTLE };
+  /** 本次 run 累计的静默等待（毫秒）；写进 `StepStateRecord.settleMs`。 */
+  private _settleWaitMs = 0;
+  /**
    * S1 状态游标（运行期私产，每次 `run()` 重置）：epoch/navEpoch/当前指纹。
    * 只读投影给 `ctx.runtime.epoch`；观察来源永远只有执行器（不自建第二份）。
    */
@@ -1305,6 +1326,26 @@ export class BrowserMiddleware {
   /** `ctx.runtime.epoch` 的只读投影：还没有观察过就是 0（不硬造）。 */
   stateEpoch(): number {
     return this._state.current?.epoch ?? 0;
+  }
+  /**
+   * S2：抽池前等页面静默（按 `settlePolicy`）。已静默立即返回；超时不抛、不阻断抽取。
+   * 等待毫秒数累计到本 run 的 `StepStateRecord.settleMs`。
+   */
+  private async _settleBeforeExtract(page: AnyPage): Promise<void> {
+    if (this.settlePolicy === null) return;
+    try {
+      const r = await settle(page as unknown as SettlePage, this.settlePolicy);
+      this._settleWaitMs += r.waitedMs;
+    } catch {
+      // 稳定门是观察增强：传感器坏了也照常抽池（页面自会给出 target_not_found 等诚实停因）。
+    }
+  }
+  /** S2：settle + 默认池抽取（决策/act 解析、pool ready、收尾观察共用同一序）。 */
+  private async _extractPoolSettled(
+    page: AnyPage, candidatePriority: "bucketed" | "main-first",
+  ): Promise<ElemPool> {
+    await this._settleBeforeExtract(page);
+    return extractElements(page, true, undefined, { candidatePriority });
   }
   /** See `MiddlewareOptions.maxEffectiveRepeats` (D3/R-4; default 3, 0 disables). */
   maxEffectiveRepeats = 3;
@@ -1377,6 +1418,7 @@ export class BrowserMiddleware {
     this.candidatePriority = opts.candidatePriority ?? this.candidatePriority;
     this.donePreheldPolicy = opts.donePreheldPolicy ?? this.donePreheldPolicy;
     this.fillReadback = opts.fillReadback ?? this.fillReadback;
+    if (opts.settle !== undefined) this.settlePolicy = opts.settle;
   }
 
   /**
@@ -2197,7 +2239,7 @@ export class BrowserMiddleware {
       // Match a slot to this field by attribute AND by the label text
       // `_slotValue` would see (placeholder/wrapper label): composer fields are
       // keyed by their placeholder, not by data-test.
-      const elemsNow = elems ?? (await extractElements(page, true, undefined, { candidatePriority }));
+      const elemsNow = elems ?? (await this._extractPoolSettled(page, candidatePriority));
       let match: Elem | undefined;
       for (const e of Object.values(elemsNow)) {
         if ((em.dt && e["data_test"] === em.dt)
@@ -2289,7 +2331,7 @@ export class BrowserMiddleware {
     | { ref: string; el: Elem | null; loc: AnyLoc; poolSize: number; fallback: boolean; cleanup?: () => Promise<void> }
     | { error: string; poolSize: number }
   > {
-    const elems = await extractElements(page, true, undefined, { candidatePriority: this.candidatePriority });
+    const elems = await this._extractPoolSettled(page, this.candidatePriority);
     const poolSize = Object.keys(elems).length;
     if (typeof target !== "string" || !target.trim()) {
       return { error: "target must be a non-empty hint string (path_id / bare label / [data-test=…])", poolSize };
@@ -2762,6 +2804,7 @@ export class BrowserMiddleware {
       // S1：每次 run 重置状态游标（epoch/navEpoch 都是**本次 run** 的口径）。
       this._state = { epoch: 0, navEpoch: 0, current: null };
       this._lastActionabilityDetail = null;
+      this._settleWaitMs = 0;
       await this.ready();
       // A config error is not a transient failure: acting on rules-only anyway would
       // silently downgrade what the operator explicitly configured, and retrying it
@@ -2835,6 +2878,8 @@ export class BrowserMiddleware {
       if (opts.skipNavigation !== true) {
         await pg.goto(startUrl, { waitUntil: "domcontentloaded", timeout: this.gotoTimeout });
         this._state.navEpoch += 1;
+        // S2：导航会丢掉 window 上下文——observer 在 goto 后重装（幂等；只作传感器）。
+        if (this.settlePolicy !== null) await installSettle(pg as unknown as SettlePage);
         if (typeof opts.settleMs === "number" && opts.settleMs > 0) {
           await new Promise((r) => setTimeout(r, opts.settleMs));
         }
@@ -2889,14 +2934,14 @@ export class BrowserMiddleware {
         if (poolReady) {
           const readyStarted = Date.now();
           const readyDeadline = readyStarted + Math.max(0, poolReadyTimeoutMs);
-          elems = await extractElements(pg, true, undefined, { candidatePriority });
+          elems = await this._extractPoolSettled(pg, candidatePriority);
           while (Object.keys(elems).length === 0 && Date.now() < readyDeadline) {
             await sleep(poolReadyPollMs);
-            elems = await extractElements(pg, true, undefined, { candidatePriority });
+            elems = await this._extractPoolSettled(pg, candidatePriority);
           }
           poolWaitedMs = Date.now() - readyStarted;
         } else {
-          elems = await extractElements(pg, true, undefined, { candidatePriority });
+          elems = await this._extractPoolSettled(pg, candidatePriority);
         }
         lastPoolSize = Object.keys(elems).length;
         lastPoolWaitedMs = poolWaitedMs;
@@ -3379,6 +3424,7 @@ export class BrowserMiddleware {
             let widePick: { ref: string; conf: number } | null = null;
             if (reobserve && !reobserved && ref !== null) {
               reobserved = true;
+              await this._settleBeforeExtract(pg);
               const wide = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true, quotas: WIDE_QUOTAS, candidatePriority });
               if (Object.keys(wide).length > Object.keys(elems).length) {
                 // refs are positional: re-prune forbids whose ref now names a
@@ -3483,6 +3529,7 @@ export class BrowserMiddleware {
         if (ref !== null && !reobserved && method === mm && conf < 0.9
             && !lexicalOverlap(instruction, String(elems[ref]?.label ?? ""))) {
           reobserved = true;
+          await this._settleBeforeExtract(pg);
           const wideR2b = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true, quotas: WIDE_QUOTAS, candidatePriority });
           if (Object.keys(wideR2b).length > Object.keys(elems).length) {
             pruneForbids(wideR2b);
@@ -4028,7 +4075,7 @@ export class BrowserMiddleware {
       // S1 收尾观察：本 run 的 after 指纹。一次池提取，页面不可读时整条省略（不硬造）。
       let afterFp: StateFingerprint | undefined;
       try {
-        const elemsAfter = await extractElements(pg, true, undefined, { candidatePriority });
+        const elemsAfter = await this._extractPoolSettled(pg, candidatePriority);
         afterFp = await observeState(elemsAfter);
       } catch { afterFp = undefined; }
       // 前进性判定（§2.4）：只在本 run 的**实际事务**上算，done 语言不变。
@@ -4056,18 +4103,15 @@ export class BrowserMiddleware {
           + ` — the signal may not be evidence of the action`,
         );
       }
-      if (done && observed && attempted > 0 && executedN === 0 && !progressed) {
-        flags.push("stale_satisfaction");
-        warnings.push(
-          `stale_satisfaction: done held with 0 executed action(s) (${attempted} attempt(s)) and no state `
-          + `progress` + (lastActionStep === undefined ? "" : ` (step ${lastActionStep})`)
-          + ` — the signal may be satisfied by stale/cross-run state`,
-        );
-      }
+      // W1 验收：原“attempted>0 && executed==0 && done && !progressed”的串扰 flag
+      // 在控制流上不可达——全 skip 的步会先因 done 不成立而失败，done 成立则必有 executed>0。
+      // 该 flag 类别已移除；r8 跨城串扰签名由 done_preheld（命令步动作前预评估）+ no_state_progress 覆盖。
       if (beforeFp !== null) {
         stepState = {
           before: beforeFp,
           ...(afterFp === undefined ? {} : { after: afterFp }),
+          // S2：策略关闭时键省略（缺字段 = 该事实不适用）；开启时 0 也表示"settle 跑过但无需等待"。
+          ...(this.settlePolicy === null ? {} : { settleMs: this._settleWaitMs }),
           actions: { attempted, executed: executedN, changed: changedN },
           flags,
           ...(lastEffect === null ? {} : { effect: lastEffect }),

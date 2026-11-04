@@ -51,7 +51,7 @@ interface StepStateRecord {
   after?: StateFingerprint;
   settleMs?: number;                       // 本步等待静默耗时（0 = 无需等待）
   actions: { attempted: number; executed: number; changed: number };
-  flags: Array<"done_preheld" | "no_state_progress" | "stale_satisfaction">;
+  flags: Array<"done_preheld" | "no_state_progress">;   // W1 验收移除不可达的“串扰”flag
   effect?: { kind: "fill" | "set_range"; before: string; after: string; applied: boolean };
 }
 ```
@@ -73,12 +73,15 @@ interface StepStateRecord {
 
 ```
 progress := struct 变化 || url 变化 || navEpoch 变化
-done_preheld         : 动作前 done 已成立（检测已有，落字段+策略）
+done_preheld         : 动作前 done 已成立（检测已有，落字段+策略；只覆盖命令步）
 no_state_progress    : attempted>0 && executed>0 && changed==0 && !progress && done 成立
-stale_satisfaction   : attempted>0 && executed==0 && !progress && done 成立   // r8 串扰签名
 ```
 
-处置：`meta.policy.done_preheld: "warn"(默认) | "fail" | "allow"`；`no_state_progress`/`stale_satisfaction` 进 `flags` + run summary `warnings[]`（桥摘要透出）。
+处置：`meta.policy.done_preheld: "warn"(默认) | "fail" | "allow"`；`no_state_progress` 进 `flags` + run summary `warnings[]`（桥摘要透出）。
+
+> W1 验收（2026-11-05）：原「done 成立 + 动作零执行 + 无状态前进」的串扰 flag
+> 在控制流上不可达——全 skip 的步会先因 done 不成立而失败，done 成立则必有 executed>0。
+> 该 flag 类别已移除；r8 跨城串扰签名由 `done_preheld` + `no_state_progress` 覆盖（已实测）。
 
 ### 2.5 meta.policy 新增键
 
@@ -107,7 +110,7 @@ stale_satisfaction   : attempted>0 && executed==0 && !progress && done 成立   
 | `src/app/ctx.ts` · runtime 投影 | `ctx.runtime.epoch` 只读 | S1 | 低 |
 | `src/app/ctx.ts` · 新原语 | `ctx.collect({row, fields, until, dedupe})` | S3 | 中（新原语，需 dry 桩） |
 | `src/app/ctx-dry.ts` | 对应桩：settle 不等待、collect 合成、**校验错误留痕** | S1/S3 | 低 |
-| `src/app/app-script.ts` | 静态调用点计数（三原语）+ validation_error 扫描 | S3 | 低 |
+| `src/app/app-script.ts` | 静态调用点计数（四原语，含 collect）+ validation_error 扫描 | S3 | 低 |
 | `src/app/app-meta.ts` + 策略面 | 新 policy 键映射与默认值 | S1 | 低 |
 | `src/app/app-runner.ts` | `warnings[]` 汇总；step_traces 落 state 字段 | S1 | 低 |
 | `src/app/kit.ts` · judge | `existsText(sel,text)`、`exists(sel,{visible})` 构造器 | S3 | 低 |
@@ -132,7 +135,7 @@ stale_satisfaction   : attempted>0 && executed==0 && !progress && done 成立   
 
 ### S1 状态地基（约 300-400 行）
 - 内容：StateFingerprint/StateCursor、step_traces.state 落盘、done_preheld policy、fill/setRange effect 读回、actionability 失败细节、run summary warnings、ctx.runtime.epoch
-- 验收：`npm run check` 绿 + schema 快照漂移检查通过；online smoke/core 全绿；**回归探针 ①（r8 串扰）产出 `stale_satisfaction` 且 policy=fail 时中止**；②（r6 滑杆）返回 applied 与 accurate
+- 验收：`npm run check` 绿 + schema 快照漂移检查通过；online smoke/core 全绿；**回归探针 ①（r8 串扰）产出 `done_preheld` + `no_state_progress`（W1 验收：原串扰 flag 已移除）**；②（r6 滑杆）返回 applied 与 accurate
 - 风险：低（附加字段 + 默认 warn）；回滚：字段与策略全可关
 
 ### S2 稳定门（约 200-300 行）

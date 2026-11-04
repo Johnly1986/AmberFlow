@@ -38,6 +38,8 @@ export interface LoadedScriptApp {
   pack: AppPack;
   flow: (ctx: Ctx) => Promise<unknown>;
   scriptPath: string;
+  /** 脚本源文本（dry 的静态调用点对账用；与 scriptSha256 同一份字节）。 */
+  sourceText: string;
   /** 脚本源字节的 sha256（运行结果里记账用；与 `plan_sha256` 一起构成“跑了哪一版”）。 */
   scriptSha256: string;
   /** 生成的 IR 的 sha256（同一脚本两次加载必须相同 = 确定性）。 */
@@ -183,6 +185,7 @@ export async function loadScriptApp(idOrPath: string): Promise<LoadedScriptApp> 
     pack,
     flow: mod.flow,
     scriptPath,
+    sourceText: source.toString("utf8"),
     scriptSha256: sha256(source),
     planSha256: sha256(canonicalJson(pack)),
   };
@@ -291,6 +294,25 @@ export async function dryRunFlow(loaded: LoadedScriptApp, opts: {
     if (e instanceof StopError) problems.push(`${e.code}: ${e.message}${at}`);
     else problems.push(`flow threw: ${e instanceof Error ? e.message : String(e)}${at}`);
   }
+  // S3：**吞错留痕**。ctx-dry 的 validateXxxRequest 抛错前会落 `validation_error` 事件——
+  // 脚本 try/catch 吞掉 config_error 时这里仍然判 FAIL，并点名调用点（r7 式盲区）。
+  // 未吞掉时上面已把同一条消息记成 problem，按 message 去重，不重复报。
+  {
+    const seen = new Set<string>();
+    for (const ev of trace.events) {
+      if (ev.call !== "validation_error") continue;
+      const rec = isObj(ev.result) ? ev.result : {};
+      const call = typeof rec["call"] === "string" ? rec["call"] : "ctx";
+      const message = typeof rec["message"] === "string" ? rec["message"] : "";
+      const key = `${call}\u0000${message}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (message && problems.some((p) => p.includes(message))) continue;
+      // 消息自带 `ctx.expand:` 前缀时去掉，避免输出「…：ctx.expand ctx.expand: …」。
+      const detail = message.startsWith(`${call}:`) ? message.slice(call.length + 1).trim() : message;
+      problems.push(`脚本吞掉了配置错误：${call} ${detail}`.trim());
+    }
+  }
   // “声明了不变量但没验收”在 dry 路径上通常就能看出来（除非 done 只在不可达分支）：
   // 缺失时给一条 problem，避免 check 假绿后真跑才报 missing_done。
   if (problems.length === 0 && (loaded.pack.invariants ?? []).length > 0) {
@@ -312,6 +334,26 @@ export async function dryRunFlow(loaded: LoadedScriptApp, opts: {
     const done = isObj(ev.result) ? ev.result["done"] : undefined;
     for (const w of signalLintProblems(done, where, stepCommandCount.get(ev.i) ?? 0)) {
       console.error(w);
+    }
+  }
+  // S3：**静态调用点对账**。dry 只走得到被执行的分支：源码里出现了 N 处 `ctx.expand(`，
+  // dry trace 里却只有 M 条对应事件 ⇒ 有调用点没被 check 覆盖。只警告、不改退出码
+  // （它是"check 的覆盖面"提示，不是脚本错误）。
+  {
+    const primitives = ["expand", "scrollList", "setRange", "collect"] as const;
+    // 只数**代码**里的调用点：注释里提到的 `ctx.expand(` 不算（骨架的示例注释就含这些字样，
+    // 不剥掉的话每个新应用的 check 都会多一条假警告）。
+    const codeOnly = loaded.sourceText
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    for (const name of primitives) {
+      const pattern = new RegExp(`ctx\\.${name}\\s*\\(`, "g");
+      const declared = (codeOnly.match(pattern) ?? []).length;
+      const executed = trace.events.filter((e) => e.call === name).length;
+      if (declared > executed) {
+        console.error(`${declared - executed} 处 ctx.${name} 调用未在 dry 期执行到`
+          + `（check 不覆盖该分支；源码 ${declared} 处 / dry 执行 ${executed} 处）`);
+      }
     }
   }
   finishTrace(trace, { done: problems.length === 0 });

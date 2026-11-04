@@ -111,7 +111,8 @@ ${playbook}
  * 完成已成立、跳过实际动作（trace 记 done_preheld / skipped_actions，executed=false），
  * 步骤「零执行通过」，后续步骤连锁失败。exists 类 done 尤其容易踩——落笔前先自问：
  * 这个信号在动作之前是不是已经成立了？是就换成动作后才出现的证据（菜单打开后的
- * 菜单项、跳转后的 URL、弹出面板里才有的元素）。
+ * 菜单项、跳转后的 URL、弹出面板里才有的元素）。注意 done_preheld 只覆盖命令步
+ * （有 act 命令闭集才在动作前预评估 done）；决策步不付这项成本、不会标记。
  *
  * judge 与 act 的选择器语义不同（互不通用，别把一面的写法抄到另一面）：
  *   judge.* 的 selector 是【任意 CSS】（css_exists/text/value，跨主 frame 与同源子 frame）；
@@ -121,14 +122,16 @@ ${playbook}
  *
  * ctx 只有这些面（没有 pageUrl()：入口页角色写在 meta.site.pages，用 openPage 取）：
  *   openPage(role) / open(url) / arrive(url, {done}) / step(desc, {id, act, done, url, slots, when, timeoutMs})
- *   / manual(desc, {done}) / url() / read.text|value|count|attr / extract / holds / waitFor
+ *   / manual(desc, {done}) / url() / read.text|value|count|attr / extract / collect / holds / waitFor
  *   / source（数据腿注册表，不是读槽位的口）/ run / done() / fail(code, reason) / hint / hints / command
  *   / slots（冻结 Record：脚本层读槽位值写 ctx.slots["键"]，键须在 meta.slots 声明）
  *   / runtime（只读投影：outDir/runId/today/epoch；epoch 是状态游标，dry 恒 0）
- *   / judge.url|exists|text|equals|value|all|any|not|manual
+ *   / judge.url|exists|existsText|text|equals|value|all|any|not|manual
  *     ——all/any 是【变参】all(s1, s2, …)，不收数组；not 单参
  *   （when 守卫跳过的步返回 ok:false + stopCode=precondition_skipped，同样消耗预算。）
  *   url() 首次导航前是 "about:blank"——别拿它当入口页判断；入口页写在 meta.site.pages。
+ *   judge.existsText(sel, "Traffic") = 存在文本含 Traffic 的元素；judge.exists(sel, {visible:true})
+ *   = 存在且可见（池/离线面判不出可见性，诱导期不据此下结论）。
  *
  * 值绑定写法（fill/select/drag 的值只认 slot，绝不猜）：对象字面量
  *   ctx.command("fill", "#username", { from: "slot", key: "username" })
@@ -138,12 +141,23 @@ ${playbook}
  *     ctx.extract({ rows: "li.item", fields: { title: ".title", price: ".price" } })  // inline：无需声明
  *   extract 到的数据要落盘：app.mjs 是 Node ESM 脚本，直接 import node:fs 写
  *   $AMBERFLOW_HOME/apps/<id>/outputs/（详见 amber schema ctx --topic data_out）。
+ *   动态加载的长列表用 collect（整体计 1 步；内部滚动不占预算）：
+ *     const feed = await ctx.collect({
+ *       row: "#feed li.item", fields: { title: ".title", price: ".price" },
+ *       until: { stableRounds: 2 },       // 或 { maxRows: 200 }
+ *     });
+ *     // feed = { rows, coverage:{rounds,rowsSeen,addedLastRound}, stopReason }
+ *     // stopReason: stable | maxRows | budget | not_scrollable——诚实口径，不假装穷尽。
  *
  * 预算一图流（完整口径：amber schema ctx --topic budget）：
  *   免费不占预算：read.* / extract / holds / waitFor / log / url
- *   各计 1：ctx.step / ctx.arrive / ctx.run / 批准执行的人工步 / ctx.scrollList / ctx.expand / ctx.setRange
+ *   各计 1：ctx.step / ctx.arrive / ctx.run / 批准执行的人工步 / ctx.scrollList / ctx.expand / ctx.setRange / ctx.collect
  *   step 内的 command 闭集不单独计步：一个 step 的动作循环上限 8（子目标动作预算）
  *   用满：budget_exceeded（status=partial、verified=false、exit 0）
+ *
+ * 稳定门（S2）：meta.policy.settle 缺省开启（{quiet_ms:400, timeout_ms:5000}）——引擎每次抽池前
+ *   只在页面有 DOM 突变时等到静默（已静默 0 等待），等待进 step_traces[i].state.settleMs；
+ *   写 "off" 关闭。
  *
  * act 省略 = 决策语句：引擎的规则/决策层按 goal 文本与 done 证据选目标。命中与否
  * 取决于 goal 与页面候选的可分辨度；歧义大时会升级模型裁决——规则命中和模型裁决
@@ -176,6 +190,13 @@ export async function flow(ctx) {
   //   done: ctx.judge.url("cart"),               // ← 换成这一页动作后真的会成立的信号
   // });
   // if (!r.ok) ctx.fail(r.stopCode ?? "step_failed", r.reason);
+
+  // 完成信号按可见文本断言（innerText-only 的按钮/面板，r8 Traffic 场景）：
+  // const t = await ctx.step("打开 Traffic 视图", {
+  //   act: ctx.hint("Traffic"),
+  //   done: ctx.judge.existsText("#traffic-panel", "Traffic"),   // 存在文本含 Traffic 的元素
+  // });
+  // if (!t.ok) ctx.fail(t.stopCode ?? "step_failed", t.reason);
 
   // 步级 slots：只覆盖这一步的槽位绑定值（不需要提前写进 meta.slots 的默认值）。
   // const search = await ctx.step("搜索酒店", {
@@ -437,6 +458,11 @@ function renderSignal(spec: unknown): string {
       parts.push(`URL 含「${String(arg)}」`);
     } else if (op === "css_exists") {
       parts.push(`存在 ${String(arg)}`);
+    } else if (op === "css_exists_text") {
+      const [sel, want] = arg as unknown[];
+      parts.push(`存在 ${String(sel)} 且文本含「${String(want)}」`);
+    } else if (op === "css_visible_exists") {
+      parts.push(`存在且可见 ${String(arg)}`);
     } else if (op === "css_text_contains") {
       const [sel, want] = arg as unknown[];
       parts.push(`${String(sel)} 含「${String(want)}」`);

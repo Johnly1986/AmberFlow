@@ -278,12 +278,16 @@ export interface InnerLoc {
   inputValue(opts?: { timeout?: number }): Promise<string> | string;
   /** 读属性（Playwright Locator.getAttribute 的同一语义：不存在 → null）。可选：测试替身可能没有。 */
   getAttribute?(name: string, opts?: { timeout?: number }): Promise<string | null> | string | null;
+  /** 可见性（Playwright Locator.isVisible）。可选：测试替身可能没有——调用方按"不可判定"处理。 */
+  isVisible?(): Promise<boolean> | boolean;
 }
 export interface LocLike {
   count(): Promise<number> | number;
   /** Python exposes `.first` as a property; the Node API as a method. */
   first: InnerLoc | (() => InnerLoc);
   all?(): Promise<unknown[]>;
+  /** 可见性（Playwright Locator.isVisible）。可选：测试替身可能没有。 */
+  isVisible?(): Promise<boolean> | boolean;
 }
 
 /** `.first` across both Playwright runtimes (property vs method). */
@@ -291,7 +295,8 @@ export function firstOf(loc: LocLike): InnerLoc {
   return typeof loc.first === "function" ? loc.first() : loc.first;
 }
 export interface FrameLike {
-  locator(selector: string): LocLike & { all?(): Promise<unknown[]> };
+  /** `hasText` 过滤器（css_exists_text）走 Playwright locator(selector, { hasText })。 */
+  locator(selector: string, opts?: { hasText?: string }): LocLike & { all?(): Promise<unknown[]> };
   evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
   url?: string | (() => string);
 }
@@ -299,7 +304,7 @@ export interface PageLike {
   /** Python's Playwright exposes `page.url` as a property; the Node API as a method. */
   url: string | (() => string);
   frames?: FrameLike[] | (() => FrameLike[]);
-  locator?(selector: string): LocLike & { all?(): Promise<unknown[]> };
+  locator?(selector: string, opts?: { hasText?: string }): LocLike & { all?(): Promise<unknown[]> };
   evaluate?(fn: unknown, arg?: unknown): Promise<unknown>;
   context?: unknown;
   locatorAnyFrame?(selector: string): LocLike | null | Promise<LocLike | null>;
@@ -336,12 +341,17 @@ export function frameAt(page: PageLike, index: number): FrameLike | undefined {
  * First matching locator across the main frame and same-origin children.
  * Signals are frequently rendered inside an iframe (a success banner, an
  * embedded form's own field), where `page.locator` never looks.
+ *
+ * `opts.hasText` 透传给每一帧的 `locator(selector, { hasText })`（`css_exists_text`
+ * 用它跨 frame 找"文本含 text"的元素；Playwright 的 hasText 是大小写不敏感的子串匹配）。
  */
-export async function locatorAnyFrame(page: PageLike, selector: string): Promise<LocLike | null> {
+export async function locatorAnyFrame(
+  page: PageLike, selector: string, opts?: { hasText?: string },
+): Promise<LocLike | null> {
   if (page.frames !== undefined || page.locator !== undefined) {
     for (const fr of framesOf(page)) {
       try {
-        const loc = fr.locator(selector);
+        const loc = opts === undefined ? fr.locator(selector) : fr.locator(selector, opts);
         if (await loc.count()) return loc;
       } catch {
         continue;   // cross-origin frame: evaluate/locator throws, skip

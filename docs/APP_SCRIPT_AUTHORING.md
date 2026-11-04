@@ -21,6 +21,10 @@
 ⑥ 失败取证判别：最小取证探针先区分引擎缺陷 / 产品事实 / 任务口径再动手——A/B（单变量重跑）、对照（--provider 换决策源或 rules-only 消融）、双腿取数（数据腿核产品事实）；判别不了就上报，别靠反复重跑收敛。
 ```
 
+> S2/S3 补充（不在上面的六步法正文内）：动态加载的长列表可用 `ctx.collect` 自动「滚动→抽行→去重」
+> （整体计 1 flow step，`stopReason` 诚实：stable/maxRows/budget/not_scrollable）；`meta.policy.settle`
+> 缺省开启稳定门（抽池前只在页面有 DOM 突变时等静默，等待进 `state.settleMs`）。
+
 ```text
 失败特征速查（只判不绕反爬风控：命中反爬风控即 ctx.fail("blocked:…") 早停；验证环节可代过）：
 - body 极短（<200 字符）+「登录/注册」浮层 = 登录墙：换可匿名读价的来源，或用凭据 + 验证步骤处理；无凭据/无授权时如实标 blocked，别重试表单；
@@ -196,7 +200,7 @@ export const meta = (kit) => ({
 | `site` | 站点面：页面角色 `pages`、命名行抽取 `listExtract`（见 §5） |
 | `model` / `maxSubgoals` | 决策模型 checkpoint / 子目标上界（高级，缺省即可） |
 | `notes` | 给人看的备注（字符串列表），不参与运行 |
-| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` |
+| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` / `done_preheld` / `effect_readback` / `settle` |
 | `pace` | 运行节奏：`between_steps_ms` / `between_actions_ms` |
 | `invariants` | 结束态断言：`{ id, desc?, signal }` |
 | `recordedFrom` / `generatedFrom` | 血统：这段脚本从哪次演示/哪份生成物来 |
@@ -259,16 +263,16 @@ export async function flow(ctx) {
 - `ctx.step` 的 `timeoutMs` 约束的是**本步动作后等待 done 信号成立的窗口**（映射该步的 `done_timeout_ms`），不约束整步挂钟时长——模型咨询、导航渲染不在其内（04-F）。
 - 导航：`ctx.open/openPage` 只做 goto（domcontentloaded），**不等 done/信号/settle**；要"导航 + 等落地证据"用 `ctx.arrive(url, { done })`（04-C 实测：open 后半路即返，arrive 带轮询等待）。
 - **预算是三层结构**（07-A/08-A6 实测成文，别按"一层"规划）：
-  **① flow 调用预算**——`ctx.budget.maxSteps` / `stepsUsed`（缺省 100，CLI `--max-steps` 覆盖）；`ctx.step`、`ctx.arrive`、`ctx.run`、三原语（`scrollList/expand/setRange`）与批准执行的人工步一律计 1——`when` 跳过的步也计（02-C2），`read/extract/holds/waitFor/log/url` 免费；一次 `ctx.run` 恒 ≤1，其内部 attempts（重试）与 timeout 不放大本层。用满抛 `budget_exceeded`（CLI 给 `--max-steps` 时结果 `partial`、exit 0）。
+  **① flow 调用预算**——`ctx.budget.maxSteps` / `stepsUsed`（缺省 100，CLI `--max-steps` 覆盖）；`ctx.step`、`ctx.arrive`、`ctx.run`、四个列表原语（`scrollList/expand/setRange/collect`）与批准执行的人工步一律计 1——`when` 跳过的步也计（02-C2），`read/extract/holds/waitFor/log/url` 免费；一次 `ctx.run` 恒 ≤1，其内部 attempts（重试）与 timeout 不放大本层。用满抛 `budget_exceeded`（CLI 给 `--max-steps` 时结果 `partial`、exit 0）。
   **② 子目标动作预算**——执行器每次调用的动作循环上限，**缺省 8、当前不可配置**（`executor.ts:884`），只活在停因文案里（`max_steps=8`；reason 的 "on step N" 是本层动作号，与流步号两口径——04-B）。
   **③ 信号等待窗口**——浏览器腿 done 轮询 per-click 语义（`done_timeout_ms` 缺省 2000，步级 `timeoutMs` 覆盖，04-F/07-E："7 击各享窗口，非整步挂钟"）；进程腿 `stdio.timeout_ms` 是步内挂钟帽（缺省 20s）。
   **同为 `config_error`，抛出层决定计费**（08 实测）：cli 形式声明校验在①扣费**前** throw（免费）；适配器 toolRunner 内拒绝（如 stdio+retries）在扣费**后**返回（贵一步）。按"动作数"估①必翻车——守卫跳过、被拒声明都计费。
 - 脚本拿不到 `page` / locator、模型文本或分数，只能看 `{ok, stopCode, reason?, evidence}`。
 - 退出码与 Agent 视图（`amber run --json`）：`status` = `passed | partial | failed | blocked | needs_human | dry | invalid | infra_error`；`verified` 只在完整运行且所有不变量成立时为 true。
 
-### 4.6 列表展开与范围控件（A3 三原语）
+### 4.6 列表展开、穷举与范围控件（A3 三原语 + S3 `ctx.collect`）
 
-真实列表页与筛选面板需要三种"窗口外操作"，引擎把它们收敛成三个**结构化、可计费、失败不假装成功**的原语（内部 click/滚动不占 flow 预算；每个原语整体计 1 步，受 `--max-steps` 约束）：
+真实列表页与筛选面板需要三种"窗口外操作"，引擎把它们收敛成三个**结构化、可计费、失败不假装成功**的原语（内部 click/滚动不占 flow 预算；每个原语整体计 1 步，受 `--max-steps` 约束）；S3 再加一个**自动穷举**原语 `ctx.collect`（同样整体计 1 步）：
 
 ```js
 // 滚动列表：目标自身或最近可滚动祖先；纯 DOM scrollTop，不做滚轮模拟、不自动滚其它区域。
@@ -294,12 +298,25 @@ const r = await ctx.setRange("Volume", { value: 42 });                  // 或 {
 // 三道都设不了 = ok:false + "slider_not_settable"（reason 附已试策略/bbox/当前值）
 // 面板 re-render 会把 slider 节点换掉（探针属性随旧节点消失）：解析面瞬态重试一次（300ms），
 // 第二次仍读不到才按 slider_not_settable 报——瞬态不是"设不了"。
+
+// S3 穷举：反复（滚动行容器 → 抽行 → 去重）直到连续 stableRounds 轮无新增 / 达 maxRows。
+// 整体计 1 个 flow step；内部滚动与轮间等待不占预算。stopReason 诚实，不假装穷尽。
+const feed = await ctx.collect({
+  row: "#feed li.item",                                    // 行选择器（CSS；主 frame 或同源子 frame）
+  fields: { title: ".title", price: ".price" },            // 与 extract inline 同语法；缺省 { text: "." }
+  until: { stableRounds: 2 },                              // 或 { maxRows: 200 }
+  dedupe: true, maxRounds: 30,
+});
+// feed = { rows, coverage:{rounds,rowsSeen,addedLastRound},
+//          stopReason:"stable"|"maxRows"|"budget"|"not_scrollable" }
 ```
 
-- **计费**：三个原语各计 1 个 flow step；`expand` 内部的点击、`scrollList` 的滚动都**不**占预算，由 `maxClicks`/`timeoutMs` 兜底（`ctx.budget.stepsUsed` 每调用 +1）。
-- **参数校验在 dry 期就红**：`count` 必须恰好一个 `rows|selector`、`maxClicks/stableRounds` 必须正整数、`to` 必须 `bottom|top|page`、`value` 必须恰好一个 `value|percent`——写错在 `amber apps check` 就报 `config_error`，不会留到真跑。`count.fields` 只做**形状校验**：expand 只用 `rows/selector` 数行数（内部 DOM `querySelectorAll` 计数，不写独立 trace 事件、不产生 read/extract 事件，因此 replay 无需额外消费），字段投影不参与稳定判定。
+- **计费**：四个原语各计 1 个 flow step；`expand` 内部的点击、`collect`/`scrollList` 的滚动与 `collect` 的轮间等待都**不**占预算，由 `maxClicks`/`timeoutMs`/`maxRounds` 兜底（`ctx.budget.stepsUsed` 每调用 +1）。
+- **参数校验在 dry 期就红**：`count` 必须恰好一个 `rows|selector`、`maxClicks/stableRounds` 必须正整数、`to` 必须 `bottom|top|page`、`value` 必须恰好一个 `value|percent`、`collect` 的 `row` 必须非空、`until` 只能二选一（`stableRounds` 1..20 / `maxRows` 1..5000）——写错在 `amber apps check` 就报 `config_error`，不会留到真跑。`count.fields` 只做**形状校验**：expand 只用 `rows/selector` 数行数（内部 DOM `querySelectorAll` 计数，不写独立 trace 事件、不产生 read/extract 事件，因此 replay 无需额外消费），字段投影不参与稳定判定。
+- **吞错也会被 check 抓住**：dry 的 `validateXxxRequest` 抛错前先落一条 `validation_error` trace 事件；脚本 `try/catch` 吞掉 `config_error` 时 `apps check` 仍判 FAIL 并输出「脚本吞掉了配置错误：<call> <message>」。源码里的 `ctx.expand(`/`ctx.scrollList(`/`ctx.setRange(`/`ctx.collect(` 调用点还会与 dry trace 事件数对账，未覆盖的分支只打**警告**（不改退出码，`check VALID` 不代表分支都被走过）。
+- **`collect` 的滚动位置**：取行元素的**最近可滚动祖先**（逐 frame 探测；找不到就退到页面滚动元素）；容器不可滚动（或行元素不存在）时停 `not_scrollable`，结果只覆盖当前可见部分。`stopReason` 口径：`stable` = **滚到底/滚不动之后**连续 stableRounds 轮无新增（没到底的轮次不算 plateau）；`maxRows` = 达上限（不是全集）；`budget` = 内部 `maxRounds` 用完仍不稳定；`not_scrollable` = 没法继续滚。轮间固定等 300ms 给懒加载/无限滚动。
 - **命令面扩展**：`ctx.command("scroll", sel, { to: "bottom" })` 把"滚容器到方向"作为命令闭集的一项（旧 `ctx.command("scroll", sel)` 仍是"把目标滚入视口"，逐字节不变）；`setRange` 不新增 command op。
-- **trace/replay**：三原语的调用参数记入 trace `args`；重放按录制值回放结果，参数不一致直接 `trace_mismatch`（不重新决策）；dry 期是确定性桩（`expand` 返回全零指标、`scrollList/setRange` 返回 `{ok:true}`）。
+- **trace/replay**：四个原语的调用参数记入 trace `args`；重放按录制值回放结果，参数不一致直接 `trace_mismatch`（不重新决策）；`collect` 的行数据也来自 trace（不重新抽页面）。dry 期是确定性桩（`expand` 返回全零指标、`scrollList/setRange` 返回 `{ok:true}`、`collect` 返回 `{rows:[], coverage 全 0, stopReason:"dry"}`）。
 - **`expand` 的 plateau 与点击失败**：`ok:true` 只代表"行数已连续 `stableRounds` 轮不增长"，`grew/clicks` 说明长没长、点了几次；到顶后控件不可点不算失败（`reason` 会记 click 失败次数）。只有"点了 `maxClicks` 次/超时仍未稳定"才是 `expand_not_stable`。
 - **失败语义**：全部是**返回结构化结果**而不是抛裸栈；脚本可以据此分支或 `ctx.fail(...)`。真站上"展开了但行数不动/滑到了但值不变"这类现象必须按 `ok/stopCode` 处理，不要假设动作一定成功。
 
@@ -321,7 +338,7 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
 | `skipped_actions?: Array<{command_id?,ref?,target?,reason,detail?}>` | 每条"为什么没动作"的结构化原因（`target_ambiguous` / `target_not_found` / `forbidden` / `not-actionable-or-covered` / `stale_ref` / `needs_value` / `action_unsupported` / `attempt_limit` …） |
 | `done_preheld?: boolean` | 命令步在**动作前**对 done 的预评估结果（只命令步出现；不改变执行顺序） |
 | `warnings?: string[]` | 运行期诚实话，如 `suspected_async`（值只在产生时出现） |
-| `state?: StepStateRecord` | S1 状态记录：`before/after` 指纹（`epoch`/`navEpoch`/`url`/`readyState`/`struct`/`content`）、`actions{attempted,executed,changed}`、`flags`（`done_preheld`/`no_state_progress`/`stale_satisfaction`）、`effect`（fill 读回 `{kind,before,after,applied}`）；`step_traces[i].state` 与 `result.warnings[]` 是同一份证据 |
+| `state?: StepStateRecord` | S1 状态记录：`before/after` 指纹（`epoch`/`navEpoch`/`url`/`readyState`/`struct`/`content`）、`actions{attempted,executed,changed}`、`flags`（`done_preheld`/`no_state_progress`）、`settleMs`（S2 稳定门等待毫秒；策略关闭时省略）、`effect`（fill 读回 `{kind,before,after,applied}`）；`step_traces[i].state` 与 `result.warnings[]` 是同一份证据 |
 
 **判读规则（写脚本/审查时按这个读）**
 - `done_preheld=true`：done 在动作**之前**已成立 ⇒ 这一步的 `done` 来自信号本身，不是这次动作推进的；
@@ -338,11 +355,18 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
 **S1 状态层与 pre-held 策略**
 - `meta.policy.done_preheld`：`"warn"`（缺省，只记 flag + `warnings[]`，不拦动作）/ `"fail"`（动作前结构化停止，
   `stop_code=done_preheld`；步级 `forceAct:true` 优先）/ `"allow"`（显式接受，只留 flag）。
+  **覆盖范围**：只有命令步（声明了 act 命令闭集）会在动作前预评估 done；决策步不付这次评估成本，不会标记。
 - `meta.policy.effect_readback`：`{fill?, set_range?}`（缺省都开）。fill 后读回组件值比对，结果进
   `state.effect.applied`；`ctx.setRange` 结果附 `applied`/`accurate`/`target`。不可读组件自动降级跳过（不假装）。
+- `meta.policy.settle`（S2 稳定门）：`{quiet_ms?, timeout_ms?}`（缺省 `{quiet_ms:400, timeout_ms:5000}`，**默认开启**）
+  或 `"off"`。每次抽池前（决策/act 解析、宽扫、收尾观察）若页面最近有 DOM 突变就先等到静默；已静默立即
+  返回（0 等待），超时不抛错、不阻断。等待毫秒数进 `state.settleMs`（策略关闭时省略；0 = 跑过但无需等待）。
+  导航后第一次抽池最多付一次 `quiet_ms`（observer 安装时刻视为“刚脏”），同一页面稳态零等待。
+  未知子键/越界值（`quiet_ms` 0..5000、`timeout_ms` 0..30000）在 `apps check` 就红。
 - `ctx.runtime.epoch`：执行器状态游标只读投影（每次抽池/观察 +1，每个 `step` 重置；dry=0）。
-- `result.warnings[]` 汇总跨步 flags（`done_preheld`/`no_state_progress`/`stale_satisfaction`）与既有
-  `suspected_async`；这些是**证据**，不改 done 语言、不影响完成真值。
+- `result.warnings[]` 汇总跨步 flags（`done_preheld`/`no_state_progress`）与既有
+  `suspected_async`；这些是**证据**，不改 done 语言、不影响完成真值。（W1 验收移除了一个
+  控制流上不可达的串扰 flag——r8 跨城串扰签名由 `done_preheld` + `no_state_progress` 覆盖。）
 
 **完整示例**：`examples/apps/05-done-evidence`（零动作命令 + `forceAct:true` + 证据判读，dry 可校验）。
 
@@ -380,7 +404,7 @@ export async function flow(ctx) {
   这类属性选择器能定位到单元格，但读到的仍是它的文本：图标型元素（aria-label 有值、无可见文本）
   的字段恒为空（R11 实测）。属性值单独用 `ctx.read.attr(selector, attr)` 取（不存在 → null）。
 - `ctx.rows({row, fields})` 是 v1 明确**不开放**的新语法：调用给结构化 `config_error` 指向 `extract(name)`。
-- dry 模式下 `extract` 返回 `[]`、`read.attr` 返回 `null`、`waitFor` 立即返回 `true`（没有页面）——脚本在 dry 期不要依赖观察值；**一切基于观察值的 `ctx.fail`/分支/断言都必须用 `ctx.runtime.runId === "(dry)"` 守卫**：`apps check` 与 `--dry-run` 会真跑 flow，没有守卫的数据驱动停会把合法脚本判成 problems（03-D1 配方；需要严格断言数据时，只在真实运行里停）。**dry 模拟面全表**（06-B，`createDryCtx` 实证）：`step`/`arrive`/`run`/`manual` 恒返回 `ok:true` 且 **`when` 不评估**（stopCode 恒空 ⇒ `precondition_skipped`/末页 exhausted 这类分支在 dry 结构性不可预演）；`read.*` 返 null/0；`url()` 是最近声明值；步预算照常计数。结论：**dry 验调用序列与声明形状，不验分支覆盖**——check VALID ≠ 脚本每条分支都被走过，守卫分支的正确性只有真实运行能证明。**循环特别警告**（09-B，r09-retry-demo 实录）：`step` 模拟恒 `ok:true` ⇒ 以"步骤成功"为 break 条件的 `while/for` 会在 dry **假成功早退**，随后未守卫的终局 `ctx.fail` 把 dry 判红（报错自曝 `ok:true` yet exhausted 的矛盾即此坑）——dry 预演只到声明面为止，循环语义一律真实运行验；各分支的**声明校验**可用 `run --dry --slot <k>=<v>` 逐分支触达（08 实证，不占真实额度）。
+- dry 模式下 `extract` 返回 `[]`、`read.attr` 返回 `null`、`waitFor` 立即返回 `true`（没有页面）——脚本在 dry 期不要依赖观察值；**一切基于观察值的 `ctx.fail`/分支/断言都必须用 `ctx.runtime.runId === "(dry)"` 守卫**：`apps check` 与 `--dry-run` 会真跑 flow，没有守卫的数据驱动停会把合法脚本判成 problems（03-D1 配方；需要严格断言数据时，只在真实运行里停）。**dry 模拟面全表**（06-B，`createDryCtx` 实证）：`step`/`arrive`/`run`/`manual` 恒返回 `ok:true` 且 **`when` 不评估**（stopCode 恒空 ⇒ `precondition_skipped`/末页 exhausted 这类分支在 dry 结构性不可预演）；`read.*` 返 null/0；`collect` 返 `{rows:[], coverage:{rounds:0,rowsSeen:0,addedLastRound:0}, stopReason:"dry"}`；`url()` 是最近声明值；步预算照常计数。**吞错有留痕**（S3）：dry 的 `validateXxxRequest`（scrollList/expand/setRange/collect）抛错前先落 `validation_error` 事件——脚本 `try/catch` 吞掉 `config_error`，`apps check` 仍判 FAIL 并输出「脚本吞掉了配置错误：<call> <message>」；源码调用点与 dry 事件数的差额只打警告。结论：**dry 验调用序列与声明形状，不验分支覆盖**——check VALID ≠ 脚本每条分支都被走过，守卫分支的正确性只有真实运行能证明。**循环特别警告**（09-B，r09-retry-demo 实录）：`step` 模拟恒 `ok:true` ⇒ 以"步骤成功"为 break 条件的 `while/for` 会在 dry **假成功早退**，随后未守卫的终局 `ctx.fail` 把 dry 判红（报错自曝 `ok:true` yet exhausted 的矛盾即此坑）——dry 预演只到声明面为止，循环语义一律真实运行验；各分支的**声明校验**可用 `run --dry --slot <k>=<v>` 逐分支触达（08 实证，不占真实额度）。
 - 观察类调用（text/value/count/attr/extract）都进 trace，所以带读取的脚本可以 `--replay`。进程步（`run`/`dangerous`）自 08-C 修复起同样进 `step_traces`（成功步无 stop_code、attempts/exit code 在嵌套 result 里）。
 
 ### 池文本 ≠ 页面 innerText（R11/R12 实证）
@@ -405,7 +429,12 @@ export async function flow(ctx) {
 
 完成只认证据面，构造器都来自 `kit` / `ctx`：
 
-- DOM：`ctx.judge.url(...)`、`exists`、`text`、`equals`、`value`、`all(...)`、`any(...)`、`not(...)`；
+- DOM：`ctx.judge.url(...)`、`exists`、`existsText`、`text`、`equals`、`value`、`all(...)`、`any(...)`、`not(...)`；
+- `ctx.judge.existsText(sel, "Traffic")` = **存在任一**匹配 `sel` 且文本含 `"Traffic"` 的元素（`css_exists_text`）：
+  live 用 Playwright `hasText`（跨主/同源子 frame，大小写不敏感子串，含后代文本）；`amber apps` 的池/离线
+  评估是**近似**（匹配元素的合成 label 包含 text），诱导期不据此下结论。
+- `ctx.judge.exists(sel, { visible: true })` = 存在且**可见**（`css_visible_exists`，首匹配 `isVisible()`）；
+  池/离线评估不可判定（返回 null，诱导期按“需真实验证”处理）。旧写法 `exists(sel)` 语义不变（`css_exists`）。
 - 组合器是**变参**不是数组：`ctx.judge.all(ctx.judge.url("a"), ctx.judge.text("h1","x"))` ✔；
   `all([a, b])` 加载期 INVALID（2026-11-01 实测：初次使用者首个就在这里被 apps check 拦下，
   报错定位准确、一次修正）。
@@ -453,6 +482,9 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `reobserve` | `true` | 动作后重新观察 |
 | `max_effective_repeats` | `3` | 同一子目标里同一动作的最大有效重复 |
 | `risk_ask` | `always` | `rules-only` = 风险只走规则，不花每步前向 |
+| `done_preheld` | `warn` | pre-held done 的处置（`warn`/`fail`/`allow`）；只覆盖命令步 |
+| `effect_readback` | `{fill:true,set_range:true}` | fill/setRange 的 effect 读回 |
+| `settle` | `{quiet_ms:400,timeout_ms:5000}` | 抽池前的稳定门（S2）：只在页面有 DOM 突变时等到静默；`"off"` 关闭。等待进 `state.settleMs` |
 
 产物里的 `effective_policy` 只在非缺省时出现，并写明来源（`cli` / `config` / `app` / `provider` / `default`）。
 

@@ -712,7 +712,7 @@ export interface AppRunResult {
   }>;
   /**
    * S1 run summary warnings：跨步汇总的执行期诚实警告（如 suspected_async、
-   * done_preheld/no_state_progress/stale_satisfaction）。缺字段 = 没有警告。
+   * done_preheld/no_state_progress）。缺字段 = 没有警告。
    */
   warnings?: string[];
   /** `ctx.log` 摘要（Agent 不必再读 emit-trace 就能看到业务事实）。 */
@@ -909,6 +909,11 @@ export interface EffectivePolicy {
     value: { fill: boolean; set_range: boolean };
     source: "app" | "default";
   };
+  /** S2：抽池前的稳定门（缺省开启；`null` = meta.policy.settle:"off"）。 */
+  settle: {
+    value: { quietMs: number; timeoutMs: number } | null;
+    source: "app" | "default";
+  };
 }
 
 /**
@@ -983,6 +988,16 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
         set_range: declaredPolicy.effect_readback?.set_range !== false,
       },
       source: declaredPolicy.effect_readback !== undefined ? "app" as const : "default" as const,
+    },
+    // S2：稳定门缺省开（方案 §2.5）；"off" 是显式声明，仍进 effective_policy 的账。
+    settle: {
+      value: declaredPolicy.settle === "off"
+        ? null
+        : {
+            quietMs: declaredPolicy.settle?.quiet_ms ?? 400,
+            timeoutMs: declaredPolicy.settle?.timeout_ms ?? 5000,
+          },
+      source: declaredPolicy.settle !== undefined ? "app" as const : "default" as const,
     },
   };
   const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
@@ -1173,6 +1188,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     // S1 状态层：pre-held done 默认 warn（行为不变），fill 读回默认开。
     donePreheldPolicy: policy.done_preheld.value,
     fillReadback: policy.effect_readback.value.fill,
+    // S2：稳定门（缺省开；null = meta.policy.settle:"off"）。
+    settle: policy.settle.value,
     // R2：学习环（不开 = null = 今天逐字节；authored hint 恒优先于学到的）。
     hintMemory: opts.hintMemory ?? null,
     // 动作间最小等待（应用配置表 `pace.between_actions_ms` / 环境变量；0 = 今天的行为）。
@@ -2046,6 +2063,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           // S1 状态层：pre-held done 处置 + fill effect 读回（与声明式路径同一份策略解析）。
           donePreheldPolicy: resolvedPolicy.policy.done_preheld.value,
           fillReadback: resolvedPolicy.policy.effect_readback.value.fill,
+          // S2：稳定门（缺省开；null = meta.policy.settle:"off"）。
+          settle: resolvedPolicy.policy.settle.value,
           actionDelayMs: pace.between_actions_ms,
           hintMemory: opts.hintMemory ?? null,
           // 语义必须与 runApp 的 confirmFn 一致：默认按干跑证据拒绝破坏性动作；
@@ -2250,12 +2269,12 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   // 08-C：flow 路径的进程步（run/dangerous）同样进 step_traces——记录层一直有事件
   // （ctx.ts runTool/声明形式各有 pushEvent），缺的只是这里的投影准入；成功步嵌套
   // result 无 stop_code（B6 口径），失败行带 stop_code，作者不再只能靠脚本自 log。
-  // A3：三原语（scrollList/expand/setRange）各计 1 个 flow step——投影口径必须与
+  // A3/S3：四原语（scrollList/expand/setRange/collect）各计 1 个 flow step——投影口径必须与
   // `ctx.budget.stepsUsed` 一致，否则"用了预算的 flow"会在产物里显示成 0 step。
-  const FLOW_STEP_CALLS = new Set(["step", "arrive", "scrollList", "expand", "setRange"]);
+  const FLOW_STEP_CALLS = new Set(["step", "arrive", "scrollList", "expand", "setRange", "collect"]);
   const stepEvents = trace.events.filter((e) =>
     e.call === "step" || e.call === "arrive" || e.call === "manual" || e.call === "run" || e.call === "dangerous"
-    || e.call === "scrollList" || e.call === "expand" || e.call === "setRange");
+    || e.call === "scrollList" || e.call === "expand" || e.call === "setRange" || e.call === "collect");
   const stepCount = trace.events.filter((e) => FLOW_STEP_CALLS.has(e.call)).length;
   const manualSteps = trace.events.filter((e) => e.call === "manual").map((e, i) => ({
     index: i,

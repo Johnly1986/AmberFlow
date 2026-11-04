@@ -23,8 +23,8 @@ import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, Value
 import type { StateFingerprint, StepStateRecord } from "../engine/executor.ts";
 import {
   normalizeCommandIds, resolveCtxUrl, StopError,
-  validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
-  type Ctx, type CtxBudget, type ExpandOptions, type ExpandResult,
+  validateCollectRequest, validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
+  type CollectResult, type Ctx, type CtxBudget, type ExpandOptions, type ExpandResult,
   type RangeValue, type ScrollListOptions, type ScrollListResult,
   type SetRangeOptions, type SetRangeResult,
   type SourceObservationView, type StepRequest, type StepResult,
@@ -69,6 +69,28 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
 
   const problems = (p: string[]): string[] => p.map((x) => `flow: ${x}`);
   let doneCalled = false;
+
+  /**
+   * S3：**校验错误留痕**。dry 的校验器抛错前先落一条 `validation_error` 事件——脚本
+   * `try/catch` 吞掉 config_error 时，`apps check` 仍能凭 trace 判 FAIL 并指出调用点
+   * （r7 式盲区的修法）。未吞掉时 dryRunFlow 会去重，不产生重复 problem。
+   */
+  const validatePrimitive = (call: string, desc: string | undefined, check: () => void): void => {
+    try {
+      check();
+    } catch (err) {
+      pushEvent(trace, {
+        call: "validation_error",
+        ...(desc === undefined ? {} : { desc }),
+        result: {
+          call,
+          desc: desc ?? null,
+          message: err instanceof Error ? err.message : String(err),
+        },
+      });
+      throw err;
+    }
+  };
 
   /**
    * dry 也执行 **hosts 信封**（与真实 ctx 同一判定）：否则 `apps check` 会放过一个
@@ -234,8 +256,10 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       return recordStep(desc, req.done, true, undefined, req.id, req.forceAct === true);
     },
     // A3 dry 桩：**参数校验真做**（未知形状/非法值在 dry 期红），动作与结果按文档形状确定性模拟。
+    // S3：校验抛错前先落 `validation_error`（见 validatePrimitive），吞错也逃不过 apps check。
     scrollList: async (target, opts = {}) => {
-      validateScrollListRequest(target, opts);
+      validatePrimitive("ctx.scrollList", typeof target === "string" ? target : undefined,
+        () => validateScrollListRequest(target, opts));
       checkBudget();
       budget.stepsUsed += 1;
       const result: ScrollListResult = { ok: true };
@@ -243,7 +267,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       return result;
     },
     expand: async (target, opts) => {
-      validateExpandRequest(target, opts);
+      validatePrimitive("ctx.expand", typeof target === "string" ? target : undefined,
+        () => validateExpandRequest(target, opts));
       checkBudget();
       budget.stepsUsed += 1;
       const result: ExpandResult = {
@@ -253,7 +278,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       return result;
     },
     setRange: async (target, value, opts = {}) => {
-      validateSetRangeRequest(target, value, opts);
+      validatePrimitive("ctx.setRange", typeof target === "string" ? target : undefined,
+        () => validateSetRangeRequest(target, value, opts));
       checkBudget();
       budget.stepsUsed += 1;
       // S1：effect 读回的合成值（dry 不动作，但字段形状必须与真实面同构）。
@@ -264,6 +290,20 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
         ...(readback ? { applied: true, accurate: true } : {}),
       };
       pushEvent(trace, { call: "setRange", desc: target, ok: true, args: { target, value, opts }, result });
+      return result;
+    },
+    // S3 dry 桩：collect 计 1 flow step，参数校验真做，返回文档形状（stopReason 恒 "dry"）。
+    collect: async (req) => {
+      const desc = isObj(req) && typeof req["row"] === "string" ? req["row"] : undefined;
+      validatePrimitive("ctx.collect", desc, () => validateCollectRequest(req));
+      checkBudget();
+      budget.stepsUsed += 1;
+      const result: CollectResult = {
+        rows: [],
+        coverage: { rounds: 0, rowsSeen: 0, addedLastRound: 0 },
+        stopReason: "dry",
+      };
+      pushEvent(trace, { call: "collect", desc: desc ?? "collect", ok: true, args: req, result });
       return result;
     },
     manual: async (desc, req) => {

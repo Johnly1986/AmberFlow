@@ -16,6 +16,14 @@ export const SIGNAL_OPS: Readonly<Record<string, number>> = {
   manual: 0,
   url_contains: 1,
   css_exists: 1,
+  /**
+   * S3：存在任一匹配 selector 且（可见）文本含 text 的元素。live = Playwright
+   * `locator(selector, { hasText })`（跨主 frame 与同源子 frame，大小写不敏感子串）；
+   * 离线池评估是**近似**（匹配元素的合成 label 包含 text）。
+   */
+  css_exists_text: 2,
+  /** S3：存在且可见（首匹配 locator.isVisible）；池/离线面不可判定（null）。 */
+  css_visible_exists: 1,
   css_text_equals: 2,
   css_text_contains: 2,
   css_value_equals: 2,

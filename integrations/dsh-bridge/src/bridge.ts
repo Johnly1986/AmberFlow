@@ -689,8 +689,9 @@ export interface RunSummary {
   /** 第一个失败步骤的结构化原因。 */
   failure?: { step: number; desc: string; stop_code?: string; obstacle?: string }
   /**
-   * S1：运行期诚实警告（`done_preheld` / `no_state_progress` / `stale_satisfaction` 等），
-   * 由引擎 result 的 `warnings[]` 透出；缺字段 = 没有警告（旧产物同样缺字段）。
+   * S1：运行期诚实警告（`done_preheld` / `no_state_progress` 等，
+   * 见 `amber schema ctx --topic facts` 的 F17），由引擎 result 的 `warnings[]` 透出；
+   * 缺字段 = 没有警告（旧产物同样缺字段）。
    */
   warnings?: string[]
   outDir: string

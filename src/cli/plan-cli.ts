@@ -10,6 +10,7 @@
  *                                                            [--escalate] [--provider NAME]
  *
  * Signal syntax (`--signal`): url_contains=SUBSTR | css_exists=SEL |
+ *   css_exists_text=SEL|TEXT | css_visible_exists=SEL |
  *   css_text_equals=SEL|TEXT | css_text_contains=SEL|TEXT | css_value_equals=SEL|VALUE
  *
  * PORT FIX (Python audit M3): the reference decided success with
