@@ -12,6 +12,9 @@
  *   3. **不能推导的只让人确认**：每一步给一行"做了什么 → 归纳出的信号"，回一个 y/n，不用学信号语法；
  *   4. **落盘门槛是"零前向回放"**：写文件前用规则模式重跑一遍，要求**0 次模型调用**且通过——
  *      这样"方便"不会换来"不可复现"；回放不过 → 不写文件 + 报 exit 1。
+ *      回放走 **walk 单会话**语义（`runScriptApp` 的既有 walk 旗标，A6）：验证的是这段录制
+ *      在**一个连续会话**里能否走通——同 URL 后继步（弹层/SPA 型流程）不被 formal 的每步
+ *      重导航关掉状态；formal 语义分叉零改动，walk 只进回放、不写进生成的应用。
  *
  * 边界（诚实写在这里）：`when`/`retries` 目前**不录制**（跳过与重试是运行时策略，不是演示出来的东西）；
  * 只录"点一下"和"填一个值"两类动作（其余形状要等动作模型扩展）。
@@ -553,7 +556,13 @@ export async function replayCheck(pack: AppPack, outDir: string): Promise<Replay
   }
 }
 
-/** 生成的 flow 脚本的落盘门槛：零前向 replay 必须通过（与 pack 门同一口径）。 */
+/** 生成的 flow 脚本的落盘门槛：零前向 replay 必须通过。
+ * 回放走 **walk 单会话**语义（`ScriptRunOptions.walk`——`amber run --walk` 的同一条 plumbing，
+ * A6 已有）：它验证的是"这段录制在**一个连续会话**里能否走通"，属调试面——同 URL 后继步
+ * （弹层/SPA 型流程）不被 formal 的每步重导航关掉上一步打开的状态；跨页显式 url 照常导航
+ * （真导航流程不受影响）。pack 门（`replayCheck`，声明式路径）没有 walk 面、保持 formal——
+ * 两条门的口径差异是**显式的**，最终判据落在脚本门上（main 的"最后一道门"）。
+ * walk 只进回放：不写进生成的应用，也不改 formal/walk 的语义分叉（ctx.ts）。 */
 export async function replayScriptCheck(source: string, outDir: string): Promise<ReplayResult> {
   const dir = fs.mkdtempSync(path.join(outDir, "learn-script-"));
   const file = path.join(dir, "app.mjs");
@@ -564,6 +573,7 @@ export async function replayScriptCheck(source: string, outDir: string): Promise
     const loaded = await loadScriptApp(file);
     const res = await runScriptApp(loaded, {
       verbose: false, sources: false,
+      walk: true,   // 落盘回放 = walk 单会话（见上方函数注释）
       outDir: path.join(dir, "out"),
       planPath: path.join(dir, "plan.json"),
     });
@@ -602,6 +612,18 @@ const USAGE = `usage: learn [--url <页面>] [--goal "<一句话>"] [--id <应�
 /** id 的唯一出处（演示前后来回用，避免两处算法漂移）。 */
 function id0(l: Learning, goal: string, explicit?: string): string {
   return explicit ?? slugOf(l.url, goal);
+}
+
+/**
+ * 录制的**相邻两步共享同一起点 URL**（`start_url` 逐字相等；两值都过 `relUrl` 归一）
+ * = 弹层/SPA 型流程的信号。formal 运行（`ctx.step` 声明了 url 就重导航的既定语义，
+ * `src/app/ctx.ts`）会在每一步把上一步打开的页面状态关掉；这类流程要用 `--walk` 跑
+ * （运行期旗标，**不写进生成的应用**——落盘输出会点名这条限制，不是自动改语义）。
+ * 判定故意保持最简：相邻两条 `start_url` 字符串相等即算；query/hash 不同的两步不算
+ * （formal 会导航到各自声明的 URL，与录制一致，不属于"同 URL 多步"）。
+ */
+function adjacentStepsShareUrl(steps: LearnedStep[]): boolean {
+  return steps.some((s, i) => i > 0 && s.start_url === steps[i - 1]!.start_url);
 }
 
 async function connectPage(opts: {
@@ -859,7 +881,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     };
 
     if (!verified) {
-      console.error(`回放没通过（${scriptReplay.completed}，不变量 ${scriptReplay.invariants}`
+      console.error(`回放没通过（walk 单会话回放；${scriptReplay.completed}，不变量 ${scriptReplay.invariants}`
         + `${scriptReplay.failing.length ? `，不成立：${scriptReplay.failing.join(", ")}` : ""}`
         + `${scriptReplay.error ? `，错误：${scriptReplay.error}` : ""}，`
         + `模型调用 ${scriptReplay.forwards} 次）`
@@ -882,8 +904,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     } else {
       say("");
       say(`✓ 已写 ${result.saved}`);
-      say(`✓ 生成脚本的规则模式回放：**0 次模型调用**，${scriptReplay.completed} 完成，不变量 ${scriptReplay.invariants}`);
+      say(`✓ 生成脚本的规则模式回放（walk 单会话回放）：**0 次模型调用**，${scriptReplay.completed} 完成，不变量 ${scriptReplay.invariants}`);
       say(`  跑它：npm run apps -- --app ${id} --no-sources`);
+      // 相邻步同 URL（弹层/SPA 型流程）：formal 运行会重导航关掉会话状态——如实提示，
+      // 不替用户决定（walk 是运行期旗标；formal 的既定语义零改动）。
+      if (adjacentStepsShareUrl(learning.steps)) {
+        say("  （含同 URL 多步：formal 运行会重导航，SPA 状态流程请加 --walk）");
+      }
       say("  要加条件/重试就直接改 flow(ctx) 里的 JS；页面变了会报 recorded-flow drift，重新演示即可。");
     }
     return 0;
