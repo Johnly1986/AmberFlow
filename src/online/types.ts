@@ -124,6 +124,16 @@ export interface CaseOutcome {
   evidence_dir?: string;
 }
 
+/** B1 节奏标注：套件跟随 env 节奏时才出现（全 0 省略 = 默认档产物不变）。 */
+export interface SuitePace {
+  /** 生效的子目标/用例间最小步间距（毫秒）。 */
+  between_steps_ms: number;
+  /** 生效来源（套件无 pack/meta 声明面，只可能是 env 或 default）。 */
+  source: "env" | "default";
+  /** 套件全程为满足最小间距**实际等待**的累计毫秒（含重试间）。 */
+  total_waited_ms: number;
+}
+
 export interface SuiteOutcome {
   run_id: string;
   started_at: string;
@@ -133,4 +143,6 @@ export interface SuiteOutcome {
   failed: number;
   skipped: number;
   duration_ms: number;
+  /** B1 节奏标注（拍板：跟随 env + 标注）；全 0 时省略。 */
+  pace?: SuitePace;
 }

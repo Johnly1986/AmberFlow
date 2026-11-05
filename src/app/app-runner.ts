@@ -35,6 +35,9 @@ import { ensureDir, userAppsDir } from "./amberflow-home.ts";
 import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../support/cli-args.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";
+// B1 节奏统一：语义与 env 口径的唯一来源在 support/pace.ts（engine/app/online 三脸共用，无环）。
+import { PaceConfigError, paceNonDefault, paceRemainder, resolvePace as paceResolve } from "../support/pace.ts";
+import type { PaceSource, ResolvedPace } from "../support/pace.ts";
 import {
   cliRunDetailed, defaultDates, loadSource, previewTable, runSource, urlFor, ValueError,
   type CliObservation, type PreviewTable,
@@ -224,18 +227,12 @@ export interface AppRunOptions {
   pace?: PackPace;
 }
 
-/** 一次运行的节奏生效值（报告只写非零值；缺省字段不出现 = 与今天逐字节一致）。 */
-export type PaceSource = "explicit" | "meta" | "env" | "default";
-export interface ResolvedPace {
-  between_steps_ms: number;
-  between_actions_ms: number;
-  /**
-   * 每个字段的生效来源（与 `effective_policy` 同一标源纪律；01 轮 B5：作者看到 1000ms
-   * 却不知从哪来）。`env` 含入口引导时从 `configs/amberflowrc.json` / amber config 吸收进
-   * 环境变量的值——想区分到具体文件，用 `amber doctor` / `amber config show` 对照。
-   */
-  sources: { between_steps_ms: PaceSource; between_actions_ms: PaceSource };
-}
+/**
+ * B1 节奏统一：实现整体迁入 `src/support/pace.ts`（engine/app/online 三脸共用同一份
+ * 语义与 env 口径），这里保留**转口**——既有导出面与消费方零感知：`Pick<AppPack,…>`
+ * 签名不变，坏 env 值仍以 `AppRunConfigError` 报出（走 :runCmd 的「未开跑」配置类错误分支）。
+ */
+export type { PaceSource, ResolvedPace };
 
 /** 环境默认节奏（可被 pack/本次覆盖；坏值 = 配置类错误，响亮而不是静默当 0）。 */
 export function resolvePace(
@@ -243,31 +240,12 @@ export function resolvePace(
   opts: Pick<AppRunOptions, "pace"> = {},
   env: NodeJS.ProcessEnv = process.env,
 ): ResolvedPace {
-  const fromEnv = (key: string): number | undefined => {
-    const raw = env[key];
-    if (raw === undefined || raw === "") return undefined;
-    const n = Number(raw);
-    if (!Number.isInteger(n) || n < 0 || n > 60_000) {
-      throw new AppRunConfigError(`${key}=${JSON.stringify(raw)} 不合法：需要 0..60000 的整数毫秒`);
-    }
-    return n;
-  };
-  const pick = (key: keyof PackPace): { value: number; source: PaceSource } => {
-    const explicit = opts.pace?.[key];
-    if (explicit !== undefined) return { value: explicit, source: "explicit" };
-    const declared = pack.pace?.[key];
-    if (declared !== undefined) return { value: declared, source: "meta" };
-    const envKey = key === "between_steps_ms" ? "AMBERFLOW_STEP_DELAY_MS" : "AMBERFLOW_ACTION_DELAY_MS";
-    const fromE = fromEnv(envKey);
-    return fromE !== undefined ? { value: fromE, source: "env" } : { value: 0, source: "default" };
-  };
-  const steps = pick("between_steps_ms");
-  const actions = pick("between_actions_ms");
-  return {
-    between_steps_ms: steps.value,
-    between_actions_ms: actions.value,
-    sources: { between_steps_ms: steps.source, between_actions_ms: actions.source },
-  };
+  try {
+    return paceResolve(pack.pace, opts.pace, env);
+  } catch (e) {
+    if (e instanceof PaceConfigError) throw new AppRunConfigError(e.message);
+    throw e;
+  }
 }
 
 const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -618,7 +596,7 @@ export interface AppRunResult {
     attested?: boolean;
     reason?: string;
   }>;
-  /** 本次生效的节奏（缺字段 = 全 0 = 与今天逐字节一致）。 */
+  /** 本次生效的节奏（B1：任一键非 0 或来源非 default 才出现；默认档逐字节不变）。 */
   pace?: ResolvedPace;
   /**
    * 数据腿**真的写回槽位**的那部分（`source_slots` 的回写结果）。缺字段 = 没有回写
@@ -1436,6 +1414,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   }
   const executedIndices = new Set<number>();
   let executedCount = 0;
+  // B1 最小步间距：相邻两个 journey 步**开始时刻**至少隔 pace.between_steps_ms
+  // （start-to-start ≥ gap；上一步耗时长则不补等；undefined = 首个单元之前不等）。
+  let lastStepStartTs: number | undefined;
   try {
     let i = segmentStart;
     while (i < expanded.steps.length && i < segmentEnd && executedCount < segmentLimit) {
@@ -1470,6 +1451,15 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       const stepKey = step.id ?? `#${step.index}`;
       for (const by of returnsByStep.get(stepKey) ?? []) dataset.invalidateStep(by);
       returnsByStep.delete(stepKey);
+      // B1 最小步间距（应用配置表 `pace.between_steps_ms` / 环境变量；0 = 今天的行为）：
+      // 本步开始时刻与上一步开始时刻至少隔 gap——等待量 = paceRemainder(...)，不再是
+      // 「上一步 outcome 后无条件 sleep」（旧语义连最后一步之后也补等，已随 B1 移除）。
+      if (pace.between_steps_ms > 0) {
+        const now = Date.now();
+        const wait = paceRemainder(pace.between_steps_ms, lastStepStartTs, now);
+        if (wait > 0) await sleepMs(wait);
+        lastStepStartTs = now + wait;
+      }
       const outcome = await adapter.run(step.decl, step, adapterCtx);
       if (step.adapter === "manual") {
         manualSteps.push({
@@ -1483,8 +1473,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
             + `${outcome.attested === true ? " [human attestation]" : ""}`);
         }
       }
-      // 步间最小等待（应用配置表 `pace.between_steps_ms` / 环境变量；0 = 今天的行为）。
-      if (pace.between_steps_ms > 0) await sleepMs(pace.between_steps_ms);
+      // （B1：步间等待已移到本步开始前的最小间距点——见上面 paceRemainder 处。）
       if (outcome.tool) {
         if (outcome.done && outcome.returns !== undefined) {
           // 声明的抽取执行过了：哪怕一个都没抽到，也在证据面留 {}（"执行了，只是没抽到"）。
@@ -1618,7 +1607,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     completed: `${doneCount}/${segmentRequested ? executedIndices.size : expanded.steps.length}`,
     subgoals, tool_steps: toolSteps, invariants: invariantResults,
     ...(manualSteps.length ? { manual_steps: manualSteps } : {}),
-    ...(pace.between_steps_ms > 0 || pace.between_actions_ms > 0 ? { pace } : {}),
+    ...(paceNonDefault(pace) ? { pace } : {}),
     ...(stepTypes !== undefined ? { step_types: stepTypes } : {}),
     ...(opts.captureTraces ? { step_traces: stepTraces } : {}),
     // Slice 2：返回值传递的审计面（缺省不出现——没有 returns 的包产物逐字节不变）。
@@ -2453,7 +2442,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // A6：walk 调试跑显式自报——缺字段 = 正式语义；walk 产物不冒充正式 run。
     ...(opts.walk === true ? { walk: true as const } : {}),
     ...(manualSteps.length ? { manual_steps: manualSteps } : {}),
-    ...(pace.between_steps_ms > 0 || pace.between_actions_ms > 0 ? { pace } : {}),
+    ...(paceNonDefault(pace) ? { pace } : {}),
     secs: (Date.now() - t0) / 1000,
     // B2（P5 证据增强）：环境与会话——run_id/时间戳必有；final_url/viewport/user_agent
     // 只在真会话上收（收不到的键省略；replay 无会话自然缺键）。secret 值若出现在

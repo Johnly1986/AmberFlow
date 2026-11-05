@@ -167,6 +167,11 @@ ${playbook}
  *   只在页面有 DOM 突变时等到静默（已静默 0 等待），等待进 step_traces[i].state.settleMs；
  *   写 "off" 关闭。
  *
+ * 运行节奏（B1）：meta.pace.between_steps_ms 是**最小步间距**（start-to-start ≥ gap）——
+ *   相邻两次引擎单元开始时刻至少隔 gap 毫秒，上一步耗时长则本步不补等，首个单元之前不等；
+ *   between_actions_ms 是同一子目标内两次动作之间的等待。优先级 explicit > meta.pace > env
+ *   （AMBERFLOW_STEP_DELAY_MS / AMBERFLOW_ACTION_DELAY_MS）> 0；非默认时结果带 pace.sources。
+ *
  * 决策状态（S5，实验档，两项缺省都 off = 行为不变）：
  *   meta.policy.decision_state: { gate: "stable_only", context: "delta" }
  *   - gate="stable_only"：模型 ask 之前先等页面静默；池指纹（ask 池结构 hash）与该池结构下

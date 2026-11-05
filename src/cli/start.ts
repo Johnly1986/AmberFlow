@@ -34,6 +34,8 @@ import { cliBool, cliString, parseCliArgs } from "../support/cli-args.ts";
 import { rcStatusLines } from "../support/rcfile.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";
+// B1 节奏统一：动作间间距的 env 层口径与另外三脸同源（support/pace.ts）。
+import { envPace } from "../support/pace.ts";
 import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
 import {
   applySpecToRuntime, BUILTIN_LAYA_PROVIDERS, installDecisionProvider, listDecisionProviders, resolveProviderSpec,
@@ -325,10 +327,20 @@ async function commandJob(
     }
 
     io.out("");
+    // B1：动作间间距接线（env-only；缺省 0 = 行为不变）。子目标/重试间距在 runPlan 内生效。
+    // pace env 坏值与 plan-cli 同一口径：一行点名 + exit 2，不甩栈（架构师审查发现项）。
+    let actionDelayMs = 0;
+    try {
+      actionDelayMs = envPace(process.env).between_actions_ms ?? 0;
+    } catch (e) {
+      io.out(e instanceof Error ? e.message : String(e));
+      io.out(USAGE);
+      return 2;
+    }
     const mw = new BrowserMiddleware({ confirmFn: () => true, ...(modelId === undefined ? {} : { modelId }), manualConfirmFn: async () => {
       const a = await io.ask("这一步完成了么？(y/N) > ");
       return a === "y" || a === "Y";
-    } });
+    }, actionDelayMs });
     const rep = await runPlan(mw as never, plan, { startUrl: url, verbose: false });
     for (const t of rep.traces) {
       io.out(`  ${t.how} · ${t.method} · conf=${t.conf}${t.inert ? " · 无变化" : ""}`);

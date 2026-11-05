@@ -19,6 +19,9 @@ import { installLayaRuntime } from "../model/model.ts";
 import { checkOracle } from "./oracle.ts";
 import { expandEnvValue } from "./case.ts";
 import { createRun, writeCaseEvidence, writeSummary } from "./report.ts";
+// B1 节奏统一：套件跟随 env 节奏（不显式关闭）；子目标/用例间/重试间都是
+// 「最小步间距」（start-to-start ≥ gap）语义，与规划脸共用同一时钟实现。
+import { envPace, newPaceClock, paceBeforeUnit, type PaceClock } from "../support/pace.ts";
 import type {
   CaseOutcome, OnlineCase, OnlineSite, SuiteOutcome,
 } from "./types.ts";
@@ -95,17 +98,20 @@ async function classify(
   }
 }
 
-function newMiddleware(maxSteps = 8): BrowserMiddleware {
+function newMiddleware(maxSteps = 8, actionDelayMs = 0): BrowserMiddleware {
   return new BrowserMiddleware({
     maxSteps,
     confFloor: 0.25,
     confirmFn: () => true,
     manualConfirmFn: null,
+    // B1：动作间间距接线（env-only；缺省 0 = 行为不变）。
+    actionDelayMs,
   });
 }
 
 async function runOneCase(
   c: OnlineCase, site: OnlineSite, runDir: string, opts: RunOptions,
+  paceClock: PaceClock, actionDelayMs: number,
 ): Promise<{ outcome: CaseOutcome; page?: PageAny }> {
   const t0 = Date.now();
   c = expandEnvValue(c, process.env) as OnlineCase;
@@ -136,10 +142,15 @@ async function runOneCase(
 
     if ((c.subgoals ?? []).length > 0) {
       const plan = new TaskPlan(c.goal, c.subgoals ?? [], path.join(os.tmpdir(), `online-${c.id}.json`), c.slots ?? {});
-      const mw = newMiddleware(opts.maxSteps);
-      for (const sg of plan.subgoals) {
+      const mw = newMiddleware(opts.maxSteps, actionDelayMs);
+      for (let si = 0; si < plan.subgoals.length; si++) {
+        const sg = plan.subgoals[si]!;
+        // B1：同一用例内子目标之间的最小间距（start-to-start ≥ gap；首个子目标之前不等
+        // ——用例级的间距已由 runSuite 的用例间 paceBeforeUnit 覆盖，这里只记录开始时刻）。
+        if (si > 0) await paceBeforeUnit(paceClock);
+        else if (paceClock.gapMs > 0) paceClock.lastStart = Date.now();
         const { rep, attempt, steps } = await runSubgoalWithRetries(
-          mw as never, sg, plan, String(sg.start_url), page, session.pw, false,
+          mw as never, sg, plan, String(sg.start_url), page, session.pw, false, {}, paceClock,
         );
         const last = (steps.length ? steps[steps.length - 1] : rep.steps[rep.steps.length - 1]) as
           { method?: string; confidence?: number } | undefined;
@@ -213,6 +224,10 @@ export async function runSuite(
   const run = createRun(opts.out);
   const sel = opts.tier ?? "default";
   const provider = await prepareDecisionSource(opts.provider);
+  // B1：套件跟随 env 节奏（拍板：不显式关闭）；坏 env 值在任何用例之前响亮报错。
+  const paceEnv = envPace(process.env);
+  const paceActionsMs = paceEnv.between_actions_ms ?? 0;
+  const paceClock = newPaceClock(paceEnv.between_steps_ms ?? 0);
   const outcomes: CaseOutcome[] = [];
   for (const c of cases) {
     const site = sites.get(c.site);
@@ -224,7 +239,9 @@ export async function runSuite(
       continue;
     }
     if (opts.verbose !== false) console.error(`=== ${c.id} (${c.site}, ${c.tier}) ===`);
-    const base = (await runOneCase(c, site, run.dir, opts)).outcome;
+    // B1：用例之间的最小间距（start-to-start ≥ gap；首个用例之前不等）。
+    await paceBeforeUnit(paceClock);
+    const base = (await runOneCase(c, site, run.dir, opts, paceClock, paceActionsMs)).outcome;
     const outcome = c.tier === "probe" ? probeOutcome(c, base) : base;
     outcomes.push(outcome);
     if (opts.verbose !== false) console.error(`  -> ${outcome.status}${outcome.reason ? ` (${outcome.reason})` : ""}`);
@@ -240,6 +257,14 @@ export async function runSuite(
     cases: outcomes,
     passed, failed, skipped,
     duration_ms: Date.now() - started,
+    // B1 节奏标注（拍板：跟随 env + 标注）：全 0 时省略（默认档产物逐字节不变）。
+    ...(paceClock.gapMs > 0 || paceClock.waitedMs > 0 || paceActionsMs > 0 ? {
+      pace: {
+        between_steps_ms: paceClock.gapMs,
+        source: paceEnv.between_steps_ms === undefined ? "default" as const : "env" as const,
+        total_waited_ms: paceClock.waitedMs,
+      },
+    } : {}),
   };
   writeSummary(run, suite);
   const code = failed > 0 ? 1 : skipped > 0 ? (opts.requireAll ? 1 : 3) : 0;

@@ -31,6 +31,8 @@ import { installLayaRuntime } from "../model/model.ts";
 import { providerEscalator } from "../model/provider-escalator.ts";
 import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../support/cli-args.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
+// B1 节奏统一：规划脸动作间间距走 env 层（子目标/重试间距在 runPlan 里同样 env-only）。
+import { envPace } from "../support/pace.ts";
 import { defaultPlanPath } from "../app/amberflow-home.ts";
 
 /**
@@ -270,6 +272,8 @@ export interface RunDeps {
 }
 
 export async function cmdRun(a: RunArgs, io: CliIO = defaultIO, deps: RunDeps = {}): Promise<RunOutcome> {
+  // B1：坏 env 值在**任何**动作之前响亮报错（plan-cli main 把它归入「参数用法不对」exit 2）。
+  const paceEnv = envPace(process.env);
   const plan = loadPlan(a.file);
   if (a.reset) {
     for (const s of plan.subgoals) {
@@ -314,6 +318,8 @@ export async function cmdRun(a: RunArgs, io: CliIO = defaultIO, deps: RunDeps = 
   }
   const mw = (deps.middleware ?? new BrowserMiddleware({
     confirmFn,
+    // B1：规划脸动作间间距（env-only；缺省 0 = 行为不变）。
+    actionDelayMs: paceEnv.between_actions_ms ?? 0,
     hintMemory: hints,
     ...(escalateFn ? { escalateFn } : {}),
   })) as BrowserMiddleware;
@@ -330,6 +336,12 @@ export async function cmdRun(a: RunArgs, io: CliIO = defaultIO, deps: RunDeps = 
   const audit = (await auditor.audit(plan.goal, rep.traces, finished)) as AuditVerdict;
   io.out(`\n${rep.completed} subgoals; steps=${rep.traces.length}`);
   io.out(`final audit: ${JSON.stringify(audit)}`);
+  // B1：生效节奏行（非零才打；来源标注纪律与 effective_policy 一致）。
+  if ((paceEnv.between_steps_ms ?? 0) > 0 || (paceEnv.between_actions_ms ?? 0) > 0) {
+    const src = (v: number | undefined): string => (v === undefined ? "default" : "env");
+    io.out(`pace: between_steps=${paceEnv.between_steps_ms ?? 0}ms(${src(paceEnv.between_steps_ms)})`
+      + ` between_actions=${paceEnv.between_actions_ms ?? 0}ms(${src(paceEnv.between_actions_ms)})`);
+  }
   if (hints?.stats) {
     const s = hints.stats();
     io.out(`learned hints: ${s.entries} known, ${s.used} reused this run`
@@ -468,7 +480,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: CliIO = d
     // 三类**已知**的"你给错了"消息（信号语法 / 没有计划 / 决策源未配置）：一行点名，
     // 不甩堆栈；其余异常是真 bug，原样上抛（吞掉它比堆栈更糟——"崩了"必须看得见）。
     const m = (err as Error)?.message ?? "";
-    if (/unknown signal op|needs 'selector\|value'|^no plan at |^决策源解析失败/.test(m)) {
+    if (/unknown signal op|needs 'selector\|value'|^no plan at |^决策源解析失败|不合法：需要 0\.\.60000 的整数毫秒/.test(m)) {
       io.out(`参数用法不对：${m}`);
       return 2;
     }

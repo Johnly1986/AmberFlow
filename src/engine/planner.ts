@@ -21,6 +21,9 @@ import { PlanningRules, TaskPlan, type Subgoal } from "./plan.ts";
 import { checkSignal } from "./signals.ts";
 import { browserSession, type BrowserSession, type RunOptions } from "./executor.ts";
 import type { TraceStep } from "./audit.ts";
+// B1 节奏统一（engine → support，无环）：规划脸节奏 = env-only——规划脸没有 pack/meta，
+// `meta.pace` 是应用脸专属；间距语义（start-to-start ≥ gap）与 env 口径与另外两脸同源。
+import { envPace, newPaceClock, paceBeforeUnit, type PaceClock } from "../support/pace.ts";
 
 /* ------------------------------------------------------------------ planners */
 
@@ -117,6 +120,11 @@ export async function runSubgoalWithRetries(
   page: unknown, pw: unknown, verbose = true,
   /** 透传给 `mw.run` 的附加 RunOptions（S2 ③：收窄元素池等；缺省空 = 既有行为不变）。 */
   extra: Partial<RunOptions> = {},
+  /**
+   * B1 节奏时钟（env-only 规划脸）：调用方创建并**跨子目标共享**（单元 = attempt），
+   * 缺省 = 0 间距的 no-op 时钟——既有调用（声明式 runWebStep 等）零感知。
+   */
+  paceClock: PaceClock = newPaceClock(0),
 ): Promise<{ rep: MiddlewareReport; attempt: number; steps: TraceStep[] }> {
   const tries = Number(sg.retries ?? 0) + 1;
   let rep: MiddlewareReport = { done: false, steps: [], stop_reason: "no attempt" };
@@ -128,6 +136,18 @@ export async function runSubgoalWithRetries(
   // "retried" and breaks the report string.
   for (let i = 1; i <= tries; i++) {
     attempt = i;
+    // B1：重试之间的最小间距（与子目标间距同值同源 = envPace().between_steps_ms）；
+    // start-to-start ≥ gap——上一个 attempt 耗时长则不补等。首个 attempt 之前不等
+    // （子目标级的间距由调用方循环的 paceBeforeUnit 负责），这里只记录本 attempt 的开始时刻。
+    if (i > 1) {
+      await paceBeforeUnit(paceClock, verbose
+        ? (w) => console.log(
+            `    -> pace: ${w}ms before retry ${i - 1}/${tries - 1} `
+            + `(min start-to-start gap ${paceClock.gapMs}ms)`)
+        : undefined);
+    } else if (paceClock.gapMs > 0) {
+      paceClock.lastStart = Date.now();
+    }
     rep = await runOnce(mw, sg, plan, url, page, pw, extra);
     steps.push(...(rep.steps ?? []));
     if (rep.done) break;
@@ -207,16 +227,30 @@ export async function runPlan(
   // Resume semantics: an already-finished plan must not even open a browser.
   if (todo.length) {
     mw._planVerbose = verbose;
+    // B1 节奏（env-only）：子目标之间按 `AMBERFLOW_STEP_DELAY_MS` 的**最小步间距**等待
+    // （start-to-start ≥ gap；首个子目标之前不等）；重试之间同值同源（见
+    // runSubgoalWithRetries 的 paceClock）。坏 env 值在这里响亮报错（开浏览器之前）。
+    const paceEnv = envPace(process.env);
+    const paceClock = newPaceClock(paceEnv.between_steps_ms ?? 0);
+    const paceActionsMs = paceEnv.between_actions_ms ?? 0;
+    const paceSrc = (provided: boolean): string => (provided ? "env" : "default");
+    if (verbose && (paceClock.gapMs > 0 || paceActionsMs > 0)) {
+      console.log(`  [pace] between_steps=${paceClock.gapMs}ms(${paceSrc(paceEnv.between_steps_ms !== undefined)})`
+        + ` between_actions=${paceActionsMs}ms(${paceSrc(paceEnv.between_actions_ms !== undefined)})`);
+    }
     const session = await sessionFactory();
     try {
       while (todo.length) {
         const sg = todo.shift()!;
+        await paceBeforeUnit(paceClock, (w) =>
+          console.log(`  [pace] ${w}ms before subgoal ${JSON.stringify(String(sg.id ?? sg.desc))}`
+            + ` (min start-to-start gap ${paceClock.gapMs}ms)`));
         sg.status = "doing";
         plan.save();
         if (verbose) console.log(`  [subgoal] ${sg.desc}`);
         const url = sg.start_url ?? startUrl;
         const { rep, attempt, steps } = await runSubgoalWithRetries(
-          mw, sg, plan, url, session.page, session.pw, verbose);
+          mw, sg, plan, url, session.page, session.pw, verbose, {}, paceClock);
         traces.push(...steps);
         sg.attempts = attempt;
         if (rep.done) {

@@ -26,6 +26,8 @@ import { REPO } from "../flow/flow.ts";
 import { PageStateStore, type PageState } from "./page-state.ts";
 import { createKit, type CommandDecl, type DomSignal, type TargetDecl, type ValueBinding } from "./kit.ts";
 import { pushEvent, type AppTrace } from "./trace.ts";
+// B1 节奏统一：最小步间距（start-to-start）的核心计算在三脸共用的 support/pace.ts。
+import { paceRemainder } from "../support/pace.ts";
 
 /** 运行期**配置级**停因：脚本可以 `catch`，但默认直接结束运行（不是业务失败）。 */
 export class StopError extends Error {
@@ -433,7 +435,7 @@ export interface CtxDeps {
    * （显式意图优先）。`open`/`openPage`/`arrive` 与 done 判定/停因/after/决策账全部不变。
    */
   walk?: boolean;
-  /** 步间最小等待（`meta.pace.between_steps_ms`；0 = 不等待）。 */
+  /** 步间最小间距（`meta.pace.between_steps_ms`；start-to-start ≥ gap；0 = 不等待）。 */
   stepDelayMs?: number;
   /** action 后 done 信号总等待窗口（毫秒；缺省 2000）。 */
   doneTimeoutMs?: number;
@@ -715,11 +717,20 @@ export function createCtx(deps: CtxDeps): Ctx {
     pushEvent(trace, { call: "step", ok, ...extra });
   };
 
-  /** `meta.pace.between_steps_ms`：步与步之间（不是第一步之前）。 */
+  /**
+   * B1 最小步间距（`meta.pace.between_steps_ms` / env 层）：相邻两次引擎单元
+   * （step/arrive/manual/run/scrollList/expand/setRange/collect）**开始时刻**至少隔 gap
+   * ——上一步耗时长则本步不补等（start-to-start ≥ gap，不是无条件 sleep）；首个单元之前
+   * 不等（时钟未启动 = remainder 0）。等待量由 support/pace.ts 的 paceRemainder 计算。
+   */
+  let lastUnitStartTs: number | undefined;
   const paceBeforeStep = async (): Promise<void> => {
-    const delay = deps.stepDelayMs ?? 0;
-    if (delay <= 0 || budget.stepsUsed === 0) return;
-    await new Promise((r) => setTimeout(r, delay));
+    const gap = deps.stepDelayMs ?? 0;
+    if (gap <= 0) return;
+    const now = Date.now();
+    const wait = paceRemainder(gap, lastUnitStartTs, now);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastUnitStartTs = now + wait;
   };
 
   /** 所有导航的唯一实现（open / openPage 共用；hosts 信封在打开之前强制）。 */

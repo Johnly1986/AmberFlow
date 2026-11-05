@@ -10,7 +10,7 @@
 export const meta = (kit) => ({
   id: "my-app", label: "我的应用", goal: "…", hosts: ["example.com"], slots: {},
   pace: {
-    between_steps_ms: 800,     // 两次执行步之间（ctx.step / arrive / manual / run）
+    between_steps_ms: 800,     // 两次执行步之间的最小步间距（start-to-start ≥ gap；ctx.step / arrive / manual / run）
     between_actions_ms: 300,   // 同一浏览器子目标内，两次动作之间
   },
   invariants: [],
@@ -27,7 +27,7 @@ export const meta = (kit) => ({
 | `AMBERFLOW_ACTION_DELAY_MS` | 动作间默认等待（`between_actions_ms`） |
 
 - 坏的环境值 = 配置类错误（exit 2），不会静默当 0。
-- `between_steps_ms` 由 `ctx` 在每次 `step` / `arrive` / `manual` / `run` 之前等待（第一步之前不等待）；`between_actions_ms` 由执行器在子目标内的动作之间等待。
+- `between_steps_ms` 的语义是**最小步间距（B1）**：相邻两次引擎单元**开始时刻**至少隔 gap（start-to-start ≥ gap）——上一步耗时长则本步不补等，不再是「无条件 sleep」；首个单元之前不等待。`between_actions_ms` 由执行器在子目标内的动作之间等待。规划脸（`plan run`）与 online 套件没有 `meta.pace` 声明面，节奏 = env-only（`AMBERFLOW_STEP_DELAY_MS`），且套件结果带 `pace: {between_steps_ms, source, total_waited_ms}` 标注（全 0 省略）。
 - 非零 `pace` 会出现在运行结果的 `pace` 字段里（缺省等价于没有这个字段）。
 - `pace` 只做降载/礼貌节奏，不承诺“更像人”，也不绕过任何风控。
 
