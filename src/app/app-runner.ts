@@ -2105,6 +2105,11 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           // S1 状态层：pre-held done 处置 + fill effect 读回（与声明式路径同一份策略解析）。
           donePreheldPolicy: resolvedPolicy.policy.done_preheld.value,
           fillReadback: resolvedPolicy.policy.effect_readback.value.fill,
+          // W8：敏感槽位键名单交给执行器——fill effect 读回在**源头**掩码（执行器构造
+          // effect 一次，step_traces 与 result.state 两条投影同源同掩）。只传键不传值：
+          // 步级 slots 的真值只在执行器可见（R3 案例 S：runScriptApp 的 secretValues
+          // 从不包含步级值，收尾 scrubSecrets 对 effect 读回里的这类值天然失明）。
+          secretSlotKeys: secretKeys,
           // S2：稳定门（缺省开；null = meta.policy.settle:"off"）。
           settle: resolvedPolicy.policy.settle.value,
           // S5：状态接入决策（与声明式路径同一份策略解析；缺省两项 off）。

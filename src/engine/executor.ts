@@ -388,7 +388,17 @@ export interface StateFingerprint {
 /** S1 前进性 flag（引擎判定，不是用户语法；done 语言不变）。 */
 export type StateFlag = "done_preheld" | "no_state_progress";
 
-/** fill/setRange 的 effect 读回（不可读组件整条省略，不假装）。 */
+/**
+ * fill/setRange 的 effect 读回（不可读组件整条省略，不假装）。
+ *
+ * W8 掩码语义（安全级）：fill 的值来自敏感槽位（`meta.secretSlots` 声明；值绑定
+ * `from:slot` 且 key ∈ 名单）或读回内容命中敏感值时，`before`/`after` 恒为 `"***"`
+ * （`applied` 布尔保留——它是「真的填进去了」的核心证据，不泄漏值本身）；
+ * password/file/hidden 输入形态维持 `redactValue` 的既有 `***(N)` 口径；
+ * 非敏感槽位/字面值的 before/after 维持明文（读回证据行为不变）。
+ * 掩码在执行器构造 effect 时做（源头一次，两条产物投影同源同掩）。
+ * `set_range` 目前无生产者（W1 预留）：若实现真实读回，目标为敏感控件时同口径掩码。
+ */
 export interface StateEffect {
   kind: "fill" | "set_range";
   before: string;
@@ -775,6 +785,15 @@ export interface MiddlewareOptions {
   /** S1：fill 后读回 value 并与写入值比对（缺省 true；不可读组件自动降级跳过）。 */
   fillReadback?: boolean;
   /**
+   * W8：敏感槽位**键**名单（app-runner 从 `meta.secretSlots` + 名称启发算出后传入；
+   * 缺省空 = 无敏感槽位，行为逐字节不变）。fill 的 effect 读回在「值来自这些槽位 /
+   * 读回内容命中其值」时把 before/after 掩码为 `***`（applied 保留）。只传键不传值：
+   * 值本体由执行器从当次 run 的 slots 袋现读——**步级 slots 合并后的真值只在执行器
+   * 可见**（R3 案例 S 的泄漏根源：app-runner 的 secretValues 名单从不包含步级值，
+   * 收尾 scrubSecrets 对 effect 读回里的这类值天然失明）。
+   */
+  secretSlotKeys?: ReadonlySet<string>;
+  /**
    * S2：抽池前的稳定门策略（`meta.policy.settle`；缺省开启 `{quietMs:400,timeoutMs:5000}`，
    * `null` = 显式关闭）。只影响"抽池前是否等页面静默"，不改变完成判定/动作语义。
    */
@@ -1008,6 +1027,26 @@ function redactValue(el: Elem, val: unknown): unknown {
   if (!SECRET_INPUT_TYPES.has(t)) return val;
   const s = String(val);
   return `***(${s.length})`;
+}
+
+/**
+ * W8：敏感槽位 fill 的 effect 掩码值。与 `app/redaction.ts` 的 `MASKED_SLOT` 同值
+ * （顶层 slots 掩码、收尾 scrubSecrets 的替换值都用它）；engine 不反向依赖 app 层，
+ * 字面量就地同值——改掩码形状时两处同步。
+ */
+const EFFECT_MASK = "***";
+
+/**
+ * W8：s 是否携带敏感值——精确全等不限长度；子串沿用收尾 `scrubSecrets` 的 ≥4 纪律
+ * （`app/redaction.ts` 同口径，避免短串误伤普通内容）。这是**内容**判定：掩码只看
+ * 读回/写入内容里是否真的出现敏感值，不看绑定的声明形态。
+ */
+function carriesSecret(s: string, secrets: Iterable<string>): boolean {
+  if (s.length === 0) return false;
+  for (const x of secrets) {
+    if (s === x || (x.length >= 4 && s.includes(x))) return true;
+  }
+  return false;
 }
 
 function safeUrl(obj: unknown): string {
@@ -1403,6 +1442,16 @@ export class BrowserMiddleware {
   donePreheldPolicy: "warn" | "fail" | "allow" = "warn";
   /** S1：fill 后读回（缺省 true）。 */
   fillReadback = true;
+  /** W8：敏感槽位键名单（见 `MiddlewareOptions.secretSlotKeys`；缺省空 = 无敏感槽位）。 */
+  secretSlotKeys: ReadonlySet<string> = new Set<string>();
+  /**
+   * W8：本实例 fill 命中过的敏感槽位**值**（跨步/跨 run 累计，不随 `run()` 重置）。
+   * 为什么不随 run 重置：一次 `ctx.step` = 一次 `run()`，而残留泄漏恰恰**跨步**——
+   * 后续步在同一输入上 fill 别的值时，effect.before 的读回仍含早前填进去的秘密，
+   * 那时当次袋里可能已看不到该值（步级 slots 只对那一步可见）。实例寿命 ≈ 一次
+   * 应用运行（app-runner 每次运行新建执行器）；跨实例不共享。
+   */
+  private _secretValuesSeen = new Set<string>();
   /**
    * S2：抽池前的稳定门（null = off）。缺省开启（方案 §2.5）；应用层按 meta.policy.settle 覆盖。
    * 只在"页面在动"时等待——已静默立即返回 0ms。
@@ -1633,6 +1682,7 @@ export class BrowserMiddleware {
     this.candidatePriority = opts.candidatePriority ?? this.candidatePriority;
     this.donePreheldPolicy = opts.donePreheldPolicy ?? this.donePreheldPolicy;
     this.fillReadback = opts.fillReadback ?? this.fillReadback;
+    this.secretSlotKeys = opts.secretSlotKeys ?? this.secretSlotKeys;
     if (opts.settle !== undefined) this.settlePolicy = opts.settle;
     if (opts.decisionState !== undefined) {
       // 只认已声明的两个值（策略面已在加载期校验；这里再兜一层，避免嵌入方传入脏值）。
@@ -2304,6 +2354,23 @@ export class BrowserMiddleware {
   }
 
   /**
+   * W8：当次 slots 袋里敏感槽位的值（`secretSlotKeys` 名单 × 袋现读；空串不入——
+   * 无内容可泄）。名单来自 app-runner（`meta.secretSlots` + 名称启发，与顶层 slots
+   * 掩码同一份），**值本体不经构造参数传**：步级 slots 合并后的真值只在执行器可见。
+   * 口径与 `app/redaction.ts` 的 `secretValuesFromSlots` 一致（非字符串 String() 化）。
+   */
+  private _secretValuesIn(slots: Record<string, unknown>): string[] {
+    const out: string[] = [];
+    for (const k of this.secretSlotKeys) {
+      const v = slots[k];
+      if (v === undefined || v === null) continue;
+      const s = String(v);
+      if (s.length > 0) out.push(s);
+    }
+    return out;
+  }
+
+  /**
    * Radio/checkbox are CLICK targets that carry a fixed value nobody fills.
    * Filling one does not work either (Playwright rejects it), so the action
    * model needs this third case next to "type" and "click".
@@ -2453,6 +2520,20 @@ export class BrowserMiddleware {
       // binding was given (every pre-existing path), the heuristic stays exactly as today.
       const val = bound !== undefined && bound !== null ? bound.value : this._slotValue(el, slots);
       if (val === null || val === undefined) return ["needs_value", null];
+      // W8 secretSlots：本次 fill 的值若携带当次袋里的敏感槽位值 → (a) 整步 before/after
+      // 一律掩码（含 applied=false 的分支——「一律」口径；applied 布尔仍保留）；(b) 把命中
+      // 的**真值本身**（不是可能更长的合成串）记入实例级集合，供后续步在同一输入上的残留
+      // before 命中——那时当次袋里可能已看不到该值（R3 案例 S 的值就是步级 slots 提供的）。
+      // 对 select 同样生效（select 无读回、不影响本步 effect，但值可能残留在页面上）。
+      const secretsNow = this._secretValuesIn(slots);
+      const valStr = String(val);
+      let valSecret = false;
+      for (const x of secretsNow) {
+        if (valStr === x || (x.length >= 4 && valStr.includes(x))) {
+          valSecret = true;
+          this._secretValuesSeen.add(x);
+        }
+      }
       const loc = await this._locatorFor(page, el);
       if (loc === null) return ["stale_ref", null];
       // A failing action is a RESULT, not an exception: a disabled/hidden field
@@ -2492,8 +2573,17 @@ export class BrowserMiddleware {
               after = typeof a === "string" ? a : null;
             } catch { after = null; }
             if (after !== null) {
-              // 密码/文件/隐藏输入的值绝不进产物（redactValue 同一口径）。
-              const masked = (s: string): string => String(redactValue(el, s));
+              // W8 掩码在**源头**做（执行器构造 effect 一次，step_traces[i].result.state.effect
+              // 与 step_traces[i].state.effect 两条投影同源同掩，收尾不再处理）。判定链：
+              // ① 值来自敏感槽位（valSecret）→ before/after 整体 "***"（EFFECT_MASK，与顶层
+              //    slots 掩码同值、不保留长度——秘密值绝不进产物）；
+              // ② 读回内容命中敏感值（当次袋 ∪ 实例累计——跨步残留 before）→ 同样掩码；
+              // ③ 都不命中 → 维持既有行为：password/file/hidden 输入形态 redactValue 的
+              //    "***(N)"，其余明文（非敏感槽位/字面值的读回证据不变）。
+              // applied 用**原始读回**判定：保留布尔、不保留值——“真的填进去了”是核心证据。
+              const secretHit = (s: string): boolean =>
+                valSecret || carriesSecret(s, secretsNow) || carriesSecret(s, this._secretValuesSeen);
+              const masked = (s: string): string => (secretHit(s) ? EFFECT_MASK : String(redactValue(el, s)));
               effect = {
                 kind: "fill", before: masked(before), after: masked(after),
                 applied: after === String(val),

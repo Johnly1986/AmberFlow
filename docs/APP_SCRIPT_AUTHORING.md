@@ -345,7 +345,7 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
 | `skipped_actions?: Array<{command_id?,ref?,target?,reason,detail?}>` | 每条"为什么没动作"的结构化原因（`target_ambiguous` / `target_not_found` / `forbidden` / `not-actionable-or-covered` / `stale_ref` / `needs_value` / `action_unsupported` / `attempt_limit` …） |
 | `done_preheld?: boolean` | 命令步在**动作前**对 done 的预评估结果（只命令步出现；不改变执行顺序） |
 | `warnings?: string[]` | 运行期诚实话，如 `suspected_async`（值只在产生时出现） |
-| `state?: StepStateRecord` | S1 状态记录：`before/after` 指纹（`epoch`/`navEpoch`/`url`/`readyState`/`struct`/`content`）、`actions{attempted,executed,changed}`、`flags`（`done_preheld`/`no_state_progress`）、`settleMs`（S2 稳定门等待毫秒；策略关闭时省略）、`effect`（fill 读回 `{kind,before,after,applied}`）；`step_traces[i].state` 与 `result.warnings[]` 是同一份证据 |
+| `state?: StepStateRecord` | S1 状态记录：`before/after` 指纹（`epoch`/`navEpoch`/`url`/`readyState`/`struct`/`content`）、`actions{attempted,executed,changed}`、`flags`（`done_preheld`/`no_state_progress`）、`settleMs`（S2 稳定门等待毫秒；策略关闭时省略）、`effect`（fill 读回 `{kind,before,after,applied}`；敏感槽位来源的 before/after 恒 `***`、applied 保留——见「effect 读回的掩码」）；`step_traces[i].state` 与 `result.warnings[]` 是同一份证据 |
 
 **判读规则（写脚本/审查时按这个读）**
 - `done_preheld=true`：done 在动作**之前**已成立 ⇒ 这一步的 `done` 来自信号本身，不是这次动作推进的；
@@ -383,6 +383,12 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
   **覆盖范围**：只有命令步（声明了 act 命令闭集）会在动作前预评估 done；决策步不付这次评估成本，不会标记。
 - `meta.policy.effect_readback`：`{fill?, set_range?}`（缺省都开）。fill 后读回组件值比对，结果进
   `state.effect.applied`；`ctx.setRange` 结果附 `applied`/`accurate`/`target`。不可读组件自动降级跳过（不假装）。
+- **effect 读回的掩码**（W8，安全级）：fill 的值来自敏感槽位（`meta.secretSlots` 声明；值绑定
+  `from:slot` 且 key ∈ 名单）或读回内容命中敏感值时，`state.effect.before/after` 恒掩 `***`
+  （与顶层 slots 掩码同值、不保留长度）；`applied` 布尔保留——它是「真的填进去了」的核心证据，
+  不泄漏值本身。password/file/hidden 输入形态维持 `***(N)` 口径；非敏感槽位/字面值的
+  before/after 维持明文（读回证据行为不变）。掩码在执行器构造 effect 时做（源头一次，
+  `step_traces[i].result.state.effect` 与 `step_traces[i].state.effect` 两条投影同源同掩）。
 - `meta.policy.settle`（S2 稳定门）：`{quiet_ms?, timeout_ms?}`（缺省 `{quiet_ms:400, timeout_ms:5000}`，**默认开启**）
   或 `"off"`。每次抽池前（决策/act 解析、宽扫、收尾观察）若页面最近有 DOM 突变就先等到静默；已静默立即
   返回（0 等待），超时不抛错、不阻断。等待毫秒数进 `state.settleMs`（策略关闭时省略；0 = 跑过但无需等待）。
