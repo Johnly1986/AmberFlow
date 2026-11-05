@@ -103,6 +103,9 @@ ${playbook}
  * done 不许猜（这条最容易踩）：写信号之前先看这一页真的长什么样——
  *   amber inspect --url <入口页> --json
  * inspect 只列“可行动”元素；h1/文本类 done 信号另需实证（原始 HTML 或运行 trace）。
+ * 扫描面（B2）含 div[role=menuitem/menuitemradio/menuitemcheckbox/option/tab]（click 族）：
+ * 弹层菜单项/下拉选项/页签自绘控件可直接 act；候选构成因此可能变化、同名候选可能变多
+ * （如 tab 与按钮同 label），hint 按 label 匹配不受影响。
  * 任何选择器——包括文档与上游示例给的——落笔前都要对目标页核实一次。
  * 能用的 done 必须「动作前不成立、动作后成立」。凭想象写的文案可能把一次真的成功
  * 判成 no_progress（曾有单次实测：连点四次同一按钮每次都算 inert，最后停在预算上

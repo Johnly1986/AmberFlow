@@ -79,6 +79,9 @@ export function elemFamily(e: Elem): ElemFamily {
   if (role === "combobox" || role === "listbox" || role === "menulist") return "select";
   if (role === "checkbox" || role === "radio" || role === "switch") return "check";
   if (role === "textbox" || role === "searchbox" || role === "spinbutton") return "fill";
+  // B2 扩面的五个 role（menuitem / menuitemradio / menuitemcheckbox / option / tab）**有意不设
+  // 显式分支**：上面的 select/check/fill 清单都不收它们，落到底部默认 return "click"
+  // （menuitemradio/menuitemcheckbox 的选中语义也是 click 驱动，不放 check/slider 族）。
   if (e.content_editable === true) return "fill";       // contenteditable：可填，但不是 input/textarea
   // ---- 原生标签（没有显式角色时按结构与 input type 判）----
   if (e.tag === "input" && (type === "checkbox" || type === "radio")) return "check";
@@ -386,9 +389,16 @@ export async function locatorAnyFrame(
 // 没有"可交互"的证据；不扫进来，语义分类与提名都无从谈起。fixtures 无这些属性 ⇒ 对拍语料不变）。
 // R1 扩面：`label` 入扫描面，但延迟裁决——关联表单控件自身可见时跳过（点 label ≡ 点控件，
 // 避免同控件双份候选）；控件不可见或无关联时保留（此时 label 是唯一可点击面）。
+// B2 扩面：追加五个 ARIA 菜单/选择/页签 role（menuitem / menuitemradio / menuitemcheckbox /
+// option / tab）——弹层菜单项、下拉选项、页签这类 div 自绘控件此前永远进不了池（W3 记录项 1：
+// popup.html 的 div[role=menuitem][aria-label] 九宫格 learn 回放 pool=1 失败的根因之一）。
+// 这是**全局行为变更**：所有应用的候选池构成可能变化（决策层看到的池/排序不同；同名候选增多
+// 可能引入新歧义，如 tab 与按钮同 label）。对 hint 命中无影响（仍按 label 匹配）；
+// MAX_ELEMENTS/分桶配额不变，新 role 走既有分桶。
 export const INTERACTIVE = "a, button, input, select, textarea, label, [onclick], [role='button']"
   + ", [role='combobox'], [role='listbox'], [role='textbox'], [role='searchbox'], [role='spinbutton']"
   + ", [role='checkbox'], [role='radio'], [role='switch'], [role='slider'], [contenteditable='true'], [contenteditable='']"
+  + ", [role='menuitem'], [role='menuitemradio'], [role='menuitemcheckbox'], [role='option'], [role='tab']"
   + ", [draggable='true']";
 /** CDP-probed JS-only widgets join every later scan, keeping refs consistent. */
 export const INTERACTIVE_ALL = INTERACTIVE + ", [data-js-ref]";
