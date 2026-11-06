@@ -304,6 +304,15 @@ export interface AppDecisions {
   escalate: number;
   /** 过关模型步的 conf 分布（n/min/max；n=0 时 min/max 为 null）。 */
   conf: { n: number; min: number | null; max: number | null };
+  /**
+   * U8：被置信闸门拒绝的 ask 子集的 conf 分布（n=0 或无被拒时字段缺席）。口径与既有
+   * `conf`（过关模型步的 trace 分布）互补并存：这里记的是**模型意见在 floor 处被丢弃**
+   * 的 ask——主闸门拒绝后 reobserve/escalate 换意见或 low_confidence 停（R8 p3-broad
+   * 的 ask1 形状）；adjudicate/priorHit 复用的意见不算（它们的 conf 走 trace 进 `conf`）。
+   * R8 J3（幸存者偏差）：校准 floor 前必须补这个观测量。计数在执行器闸门分支
+   * （`rejectedAskConfMetrics`），这里只投影。
+   */
+  rejected_conf?: { n: number; min: number | null; max: number | null };
   /** 决策缓存（装了才有）：命中数与提问总数。 */
   cache: { hits: number, misses: number } | null;
   /**
@@ -334,6 +343,8 @@ export interface AppDecisions {
 export function summarizeDecisions(
   steps: TraceStep[], cache: DecisionCacheStats | null, modelAsks = 0, failedAsks = 0,
   decisionState: DecisionStateMetrics | null = null,
+  /** U8：执行器闸门分支记的被拒 ask conf 分布；n=0/缺省 ⇒ 字段缺席（dry 面同构）。 */
+  rejectedConf: { n: number; min: number | null; max: number | null } | null = null,
 ): AppDecisions {
   const byMethod: Record<string, number> = {};
   const modelConfs: number[] = [];
@@ -430,6 +441,8 @@ export function summarizeDecisions(
       min: modelConfs.length ? Math.min(...modelConfs) : null,
       max: modelConfs.length ? Math.max(...modelConfs) : null,
     },
+    // U8：被拒 ask 的 conf 分布（只在真发生过被拒时出现 = 产物缺省等价；dry 面无 ask ⇒ 缺席）。
+    ...(rejectedConf !== null && rejectedConf.n > 0 ? { rejected_conf: rejectedConf } : {}),
     cache: cache === null ? null : { hits: cache.hits, misses: cache.misses },
     // S5：默认档（两项 off）这四个键全部缺席 = 产物逐字节不变（声明了才投影，全 0 也写）。
     ...(decisionState === null ? {} : {
@@ -1629,7 +1642,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     decisions: summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0,
       opts.pickFailedAsks ? opts.pickFailedAsks() : 0,
       // S5：policy 声明了 decision_state 才投影指标（缺省 ⇒ null ⇒ 字段缺席，产物不变）。
-      policy.decision_state.source === "app" ? mw.decisionStateMetrics() : null),
+      policy.decision_state.source === "app" ? mw.decisionStateMetrics() : null,
+      // U8：被拒 ask 的 conf 分布（执行器闸门分支记账；n=0 ⇒ null ⇒ 字段缺席）。
+      mw.rejectedAskConfMetrics()),
     // R2：学习环的账——只在**开了**的时候写字段（缺省等价纪律，同 path_visits）。
     // `rejected` 要 cast：接口只承诺 entries/used，它是 HintMemory 实现多给的——
     // 跨实现注入（测试桩/别的记忆）时不能假设它在。
@@ -2025,6 +2040,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
    * 惰性创建的，脚本可能一步都不跑 ⇒ 保持 null，报告按声明档补零（不硬造"跑过"）。
    */
   let decisionStateMetrics: DecisionStateMetrics | null = null;
+  /** U8：被拒 ask 的 conf 分布（与 decisionStateMetrics 同一处收尾读；n=0 ⇒ null ⇒ 字段缺席）。 */
+  let rejectedConfMetrics: { n: number; min: number | null; max: number | null } | null = null;
   /**
    * B2（P5）：会话收尾的环境/会话事实（final_url/viewport/user_agent）。与 providerDegraded
    * 同一个「收尾读一次」先例——区别是这三样必须读在**会话关闭之前**（关了就读不到 URL 了）；
@@ -2269,6 +2286,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       providerDegraded = mwHolder.current?.providerDegraded || null;
       // S5：同一处读指标（一个 flow 应用会复用同一个执行器跑多个 ctx.step，计数在实例上累计）。
       decisionStateMetrics = mwHolder.current?.decisionStateMetrics() ?? null;
+      // U8：同源同处读（执行器闸门分支记账，实例累计跨 ctx.step）。
+      rejectedConfMetrics = mwHolder.current?.rejectedAskConfMetrics() ?? null;
     }
     invariants = invariantsFromTrace(trace, pack ?? {});
   }
@@ -2414,7 +2433,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // 声明了但脚本一步没跑 = 全 0（这一臂确实跑过，只是没发生决策）。
     policy !== null && policy.decision_state.source === "app"
       ? (decisionStateMetrics ?? { asks_saved: 0, gate_waits: 0, context_sent: 0, context_skipped: 0 })
-      : null);
+      : null,
+    // U8：被拒 ask 的 conf 分布（脚本跑过才有执行器可读；n=0 ⇒ null ⇒ 字段缺席）。
+    rejectedConfMetrics);
   // B2（P5）：页面属性拿不到时退回 `meta.device` 的声明值（声明了才有；都没有就省略键，
   // 不硬造）。有设备声明时页面属性本来就是同一个值，这条兜底只服务无页面属性的替身会话。
   const envDevice = (pack.device ?? {}) as { viewport?: { width: number; height: number }; user_agent?: string };

@@ -236,7 +236,7 @@ export async function flow(ctx) {
 |---|---|---|
 | 元信息 | `ctx.app` / `ctx.slots` / `ctx.runtime` / `ctx.budget` / `ctx.log(msg, data?)` | `slots` 只读；`runtime = {outDir, runId, today, epoch}`（`epoch` = 执行器状态游标只读投影，每次抽池/观察 +1，每个 `step` 重置；dry 恒 0）；`today` = CLI `--today YYYY-MM-DD` 钉住的"今天"，没钉 = 系统日期 |
 | 导航 | `ctx.open(url)` / `ctx.openPage(role)` / `ctx.arrive(url, {done, desc?, id?, timeoutMs?})` | `arrive` = 纯导航 + 等信号，不做元素选择、不花模型；`hosts` 信封在起点与落地都强制 |
-| 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, when?, timeoutMs?, force?, staleRetry? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}` |
+| 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, values?, when?, timeoutMs?, force?, staleRetry? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}`；`values` 是决策步的显式值袋，见 §4.5 |
 | 人工步 | `ctx.manual(desc, { done, instructions?, id? })` | 见 §7；非 TTY 返回 `needs_human`，不假装有人 |
 | 观察 | `ctx.url()` / `ctx.read.{text,value,count,attr}(sel[, attr])` / `ctx.holds(signal)` / `ctx.waitFor(signal, {timeoutMs?, pollMs?})` | 只读；读不到返回 `null` / `0`；`waitFor` 轮询到 bounded deadline，返回 boolean；`url()` 首次导航前是 `"about:blank"`，别拿它当入口页判断 |
 | 站点面 | `ctx.openPage(role)` / `ctx.extract(nameOrSpec)` / `ctx.rows(...)`（v1 关闭） | 具名抽取声明在 `meta.site.listExtract`；inline 抽取用 `{ rows, fields, maxItems? }`（例：`ctx.extract({ rows: "li.item", fields: { title: ".title" } })`，无需 meta 声明）；`rows` 调用给结构化错误 |
@@ -276,6 +276,29 @@ export async function flow(ctx) {
   **同为 `config_error`，抛出层决定计费**（08 实测）：cli 形式声明校验在①扣费**前** throw（免费）；适配器 toolRunner 内拒绝（如 stdio+retries）在扣费**后**返回（贵一步）。按"动作数"估①必翻车——守卫跳过、被拒声明都计费。
 - 脚本拿不到 `page` / locator、模型文本或分数，只能看 `{ok, stopCode, reason?, evidence}`。
 - 退出码与 Agent 视图（`amber run --json`）：`status` = `passed | partial | failed | blocked | needs_human | dry | invalid | infra_error`；`verified` 只在完整运行且所有不变量成立时为 true。
+
+### 4.5 决策步的显式值袋（U1：`ctx.step(..., { values })`）
+
+决策语句步（`act` 省略或 `act: ctx.hint(...)`）的 fill/select 此前**没有值通道**——值请求只走
+slots 袋与控件身份字段（name/id/data-test/label）的词面匹配，词面无关就 `needs_value`
+（R12 dropdown-C 实测缺口）。`values` 补上这条通道：
+
+```js
+await ctx.step("在 dropdown 里选 Option 2", {
+  values: { dropdown: "Option 2" },   // 作者自定义关联键 → 显式值
+  done: ctx.judge.value("#dropdown", "2"),
+});
+```
+
+- **解析顺序**（决策层选中 fill/select 目标后）：① `values` 袋（控件 name/id/data-test/label
+  与 key 的精确/互含匹配，两档与 slots 同一套）→ ② `slots` 袋（同两档）→ 都落空 = 结构化
+  `needs_value`。**作者显式值 > 隐式 slot 匹配**；两袋都无值时引擎绝不发明值（红线②不变）。
+- 命令步（`act: [ctx.command("fill"/"select", ...)]`）不受影响：其值面仍是 `{from:"slot", key}`
+  具名绑定，`values` 不参与。
+- 点击前的 required 空字段预填（引擎的确定性预填通道）同样读 `values`——与当步 fill/select
+  同一个解析顺序，两个通道不会错位。
+- W8 同口径：`values` 键命中 `meta.secretSlots` 名单的条目，其值同样进 effect 读回掩码。
+- meta 层不需要新键（步级声明即可）；缺省不写 `values` = 行为逐字节不变。
 
 ### 4.6 列表展开、穷举与范围控件（A3 三原语 + S3 `ctx.collect`）
 
@@ -579,6 +602,14 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 - 重放要求 app / `script_sha256` / `inputs_sha256` 三者一致；不一致直接拒跑（`trace_mismatch` 或加载期拒绝），不“尽量重放”。
 - 真实运行两次的**结构**应一致：调用序列 + 结果（`result` 里除耗时外的字段）；耗时证据不参与比较。
 - 步数有三个口径，别混用（02 轮 C4）：`completed` / `script.steps` = `ctx.step`+`ctx.arrive` 的**调用数**（含 when 跳过的步）；`decisions.total_steps` = 真正进入决策流水的步数（不含跳过、不含纯导航）；Agent 视图 `steps[]` = trace 投影视图。对照预算/效率时先认口径。
+- **`decisions.rejected_conf`（U8）**：被置信闸门拒绝的 ask 子集的 conf 分布 `{n, min, max}`
+  （n=0 或无被拒时字段缺席；dry 面无 ask 同样缺席）。口径与既有 `conf`（**过关**模型步的
+  trace 分布）互补并存：这里记的是模型意见在 floor 处被**丢弃**的 ask——主闸门拒绝后
+  reobserve/escalate 换意见或 `low_confidence` 停（R8 p3-broad 的 ask1 形状）；
+  adjudicate/priorHit 复用的意见不算（其 conf 走 trace 进 `conf`）。被拒 ask 不留 trace 行
+  （幸存者偏差，R8 J3）——校准 `conf_floor` 前先看这个分布，别只看过关票的 conf。
+  `needs_value` 等动作层闸门的拒绝不是 conf 闸门事件，不进本字段（它们在
+  `skipped_actions[].reason`）。
 
 ## 10. 错误码与排查
 

@@ -584,6 +584,15 @@ export interface RunOptions {
   /** action 后 done 信号的总等待窗口。 */
   doneTimeoutMs?: number;
   slots?: Record<string, unknown> | null;
+  /**
+   * U1 步级显式值袋（决策语句步的值通道）：作者在 `ctx.step(..., { values: {...} })` 声明的
+   * `{ 关联键: 值 }`。决策路径的 fill/select 值请求按「values 袋 → slots 袋」顺序解析
+   * （两袋同一套两档匹配：精确键 → 大小写不敏感互含，见 `_slotValue`）——作者显式值
+   * 优先于隐式 slot 匹配；两袋都落空仍是结构化 `needs_value`，绝不猜（红线②）。
+   * 只接决策路径（命令步的值面仍是 `{from:"slot", key}` 具名绑定，`bound` 恒优先）。
+   * 缺省不出现 = 既有行为逐字节不变。
+   */
+  values?: Record<string, unknown> | null;
   targetHint?: string | null;
   /** Reuse a live playwright object; run() then leaves it alone. */
   pw?: PwLike | null;
@@ -1508,10 +1517,29 @@ export class BrowserMiddleware {
   private _runFlags: StateFlag[] = [];
   /** S5b：最近一次 effect 读回（只留 kind/applied，值本身不进摘要）。 */
   private _lastEffectSeen: { kind: StateEffect["kind"]; applied: boolean } | null = null;
+  /**
+   * U8：被置信闸门拒绝的 ask conf 账（R8 J3 幸存者偏差的补观测）。记的是**模型意见在
+   * floor 处被丢弃**的 ask：主闸门 `conf < floor` 且未被 priorHit 复驾、意见最终也没被
+   * adjudicate 复用的那部分，含 reobserve 宽看重问仍不过闸的弃选（主闸门分支内记账；
+   * R2b 词面宽扫是词面触发的复核重问、非 conf 闸门事件，不在此账）。计数位置只有
+   * 执行器的闸门分支，不在报告层重算——与 `model_asks`（ask 发生数）同一口径来源。
+   */
+  private readonly _rejectedAskConfs: number[] = [];
 
   /** S5：指标快照（应用产物 `decisions` 的唯一来源；默认档全 0）。 */
   decisionStateMetrics(): DecisionStateMetrics {
     return { ...this._decisionMetrics };
+  }
+
+  /**
+   * U8：被拒 ask 的 conf 分布（应用产物 `decisions.rejected_conf` 的唯一来源）。
+   * n=0 ⇒ null——产物字段缺席（缺省等价纪律）；n>0 ⇒ {n, min, max}，与既有 `conf`
+   * 聚合（过关模型步的 trace 分布）并存、口径互补。
+   */
+  rejectedAskConfMetrics(): { n: number; min: number | null; max: number | null } | null {
+    const xs = this._rejectedAskConfs;
+    if (xs.length === 0) return null;
+    return { n: xs.length, min: Math.min(...xs), max: Math.max(...xs) };
   }
 
   /**
@@ -2337,15 +2365,32 @@ export class BrowserMiddleware {
     }
   }
 
-  /** Match a plan slot to this field: exact key first, then substring, any case. */
-  _slotValue(el: Elem, slots: Record<string, unknown>): unknown {
+  /**
+   * Match a plan slot to this field: exact key first, then substring, any case.
+   *
+   * U1：新增可选 `values` 袋（步级显式值，`ctx.step(..., { values })`）。解析顺序
+   * 「values → slots」——作者显式值优先于隐式 slot 匹配，两袋用同一套两档匹配
+   * （`_matchValueBag`：精确键命中 → 大小写不敏感互含）；都落空返回 null（红线②：
+   * 调用方据此返回结构化 `needs_value`，绝不发明值）。`values` 缺省/空袋 = 逐字节今天的
+   * 单袋行为。
+   */
+  _slotValue(el: Elem, slots: Record<string, unknown>, values?: Record<string, unknown>): unknown {
+    if (values !== undefined && Object.keys(values).length > 0) {
+      const v = this._matchValueBag(el, values);
+      if (v !== null) return v;
+    }
+    return this._matchValueBag(el, slots);
+  }
+
+  /** U1：`_slotValue` 的单袋两档匹配核心（精确键命中 → 互含词面），原 `_slotValue` 逐字节逻辑。 */
+  private _matchValueBag(el: Elem, bag: Record<string, unknown>): unknown {
     const keys = [el["data_test"], el["label"], el["name"], el["id"]].filter((k) => !!k) as string[];
     for (const k of keys) {
-      if (k in slots) return slots[k];                 // exact key hit first
+      if (k in bag) return bag[k];                 // exact key hit first
     }
     for (const k of keys) {
       const kl = String(k).toLowerCase();
-      for (const [sk, sv] of Object.entries(slots)) {
+      for (const [sk, sv] of Object.entries(bag)) {
         const skl = sk.toLowerCase();
         if (skl && (skl.includes(kl) || kl.includes(skl))) return sv;
       }
@@ -2464,6 +2509,11 @@ export class BrowserMiddleware {
     op?: string,
     /** S4：步级 `force`（Playwright force 语义；缺省 false = 逐字节今天）。 */
     force = false,
+    /**
+     * U1：步级显式值袋（决策路径传入；命令步不传——`bound` 具名绑定恒优先）。
+     * 只在无 `bound` 时参与 `_slotValue` 的值解析。
+     */
+    values?: Record<string, unknown> | null,
   ): Promise<[string, unknown, StateEffect?]> {
     const tag = el.tag;
     const forceOpt = force ? { force: true } : {};
@@ -2518,14 +2568,19 @@ export class BrowserMiddleware {
       // (`{from:"slot", key}` from the plan) — it must not fall back to `_slotValue`'s
       // substring heuristic, which is how a value once got handed to a radio. When no
       // binding was given (every pre-existing path), the heuristic stays exactly as today.
-      const val = bound !== undefined && bound !== null ? bound.value : this._slotValue(el, slots);
+      const val = bound !== undefined && bound !== null ? bound.value : this._slotValue(el, slots, values ?? undefined);
       if (val === null || val === undefined) return ["needs_value", null];
       // W8 secretSlots：本次 fill 的值若携带当次袋里的敏感槽位值 → (a) 整步 before/after
       // 一律掩码（含 applied=false 的分支——「一律」口径；applied 布尔仍保留）；(b) 把命中
       // 的**真值本身**（不是可能更长的合成串）记入实例级集合，供后续步在同一输入上的残留
       // before 命中——那时当次袋里可能已看不到该值（R3 案例 S 的值就是步级 slots 提供的）。
       // 对 select 同样生效（select 无读回、不影响本步 effect，但值可能残留在页面上）。
-      const secretsNow = this._secretValuesIn(slots);
+      const secretsNow = [
+        ...this._secretValuesIn(slots),
+        // U1/W8 同口径：values 袋里键命中敏感槽位名单的条目，其值同样算"敏感值"——
+        // 同一秘密经 values 声明与经 slots 声明在 effect 读回掩码上不应当有两样待遇。
+        ...this._secretValuesIn(values ?? {}),
+      ];
       const valStr = String(val);
       let valSecret = false;
       for (const x of secretsNow) {
@@ -2609,6 +2664,11 @@ export class BrowserMiddleware {
    */
   async _missingRequired(
     page: AnyPage, slots: Record<string, unknown>, elems: ElemPool | null = null,
+    /**
+     * U1：步级显式值袋（决策路径的预填通道——required 空字段的值请求与当步 fill/select
+     * 用同一个解析顺序「values → slots」，两通道不一致会出现"过滤放行、执行却 needs_value"的错位）。
+     */
+    values?: Record<string, unknown> | null,
     candidatePriority: "bucketed" | "main-first" = "bucketed",
   ): Promise<Elem[]> {
     const empties: Array<{ tag: string; dt: string; name: string; id: string }> = [];
@@ -2634,7 +2694,7 @@ export class BrowserMiddleware {
           break;
         }
       }
-      if (match === undefined || this._slotValue(match, slots) === null) continue;
+      if (match === undefined || this._slotValue(match, slots, values ?? undefined) === null) continue;
       // carry the handle fields so _locatorFor resolves inside the right frame
       // instead of degrading to a bare attribute lookup
       out.push({
@@ -3005,6 +3065,7 @@ export class BrowserMiddleware {
       goalSignalFn = null,
       page: pageIn = null,
       slots: slotsIn = null,
+      values: valuesIn = null,
       targetHint = null,
       pw: pwIn = null,
       verbose = true,
@@ -3063,6 +3124,8 @@ export class BrowserMiddleware {
     const effectiveRuns: Record<string, number> = {};
 
     const slots: Record<string, unknown> = { ...extractSlots(instruction), ...(slotsIn ?? {}) };
+    // U1：步级显式值袋（与 slots 平行的作者声明面；只在决策路径的值请求里参与匹配）。
+    const values: Record<string, unknown> = { ...(valuesIn ?? {}) };
     this.targetHints = (targetHints ?? []).filter((h) => !!h);
     this._hintI = 0;
     // A single hint keeps its old, whole-subgoal authority; a list hands
@@ -3774,6 +3837,10 @@ export class BrowserMiddleware {
         const floor = Math.max(0.10, this.confFloor - 0.05 * Object.keys(forbidden).length);
         if (conf < floor) {
           const pending = elems[ref]!;
+          // U8：本次 ask 的 conf（后续恢复路径会改写 conf 变量；记账用分支入口的值）。
+          const askConf = conf;
+          /** U8：本分支内被闸门丢掉的 ask conf（暂存；提交点见各出口——adjudicate 复用意见时撤回）。 */
+          const gateRejected: number[] = [];
           // A frozen plan may legitimately re-drive an element within one
           // subgoal. If this exact element already executed successfully
           // earlier in THIS subgoal, allow it once more at >= 0.10.
@@ -3800,10 +3867,14 @@ export class BrowserMiddleware {
             // A2′：`adjudicate` 开着且还有活着的候选时，不能用"动作空间耗尽"抢在裁决前面——
             // 那最后一个低置信候选正是该被信号裁决的那一个（"错了白跑"是作者声明过的）。
             // 没开裁决时这个提前停原样保留（逐字节今天）。
+            gateRejected.push(askConf);   // U8：意见在 floor 处被丢，动作空间也已耗尽——记一笔
             stop("action_space_exhausted",
               `action space exhausted (${Object.keys(forbidden).length} forbidden) on step ${stepNo}`, stepNo);
             break;
           } else {
+            // U8：走到恢复分支 = 原 ask 的意见已被闸门丢弃（reobserve/escalate 换别的意见、
+            // low_confidence 停；唯一例外是 adjudicate 复用原意见——下面 pop 撤回）。
+            gateRejected.push(askConf);
             // OBSERVATION-BOTTLENECK RECOVERY (browser-use's "the button is there, we
             // just failed to show it"): the pool is the model's entire world, so a
             // target that never entered it cannot be chosen no matter how good the
@@ -3842,7 +3913,10 @@ export class BrowserMiddleware {
                       + `(${Object.keys(wide).length} elements) -> ${ref} conf=${conf2.toFixed(2)}`);
                   }
                 } else {
-                  if (ref2 !== null) widePick = { ref: ref2, conf: conf2 };
+                  if (ref2 !== null) {
+                    widePick = { ref: ref2, conf: conf2 };
+                    gateRejected.push(conf2);   // U8：宽看重问的意见也未过 floor（adjudicate 复用时撤回）
+                  }
                   if (verbose) {
                     console.log(`  step ${stepNo}: re-observed wider `
                       + `(${Object.keys(wide).length} elements) -> still below floor`);
@@ -3889,6 +3963,8 @@ export class BrowserMiddleware {
               // 只是爆炸半径由作者声明限定。没声明 ⇒ 逐字节今天（低置信即阻塞）。
               const bestPick = widePick ?? (ref !== null ? { ref, conf } : null);
               if (adjudicate && bestPick !== null && !this.rulesOnly) {
+                // U8：被裁决执行的那份意见（原 ask 或宽看重问）不算被拒——撤回最后一笔暂存。
+                gateRejected.pop();
                 ref = bestPick.ref;
                 conf = bestPick.conf;
                 method = `${mm}:adjudicated`;
@@ -3897,6 +3973,8 @@ export class BrowserMiddleware {
                     + `conf=${conf.toFixed(2)} < floor ${floor.toFixed(2)}) — the step's own signal judges`);
                 }
               } else {
+                // U8：提交点①——low_confidence 停，暂存的意见确被丢弃。
+                this._rejectedAskConfs.push(...gateRejected);
                 stop("low_confidence",
                   `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`
                   // 规划引导：计划点了名、规则却没解出来——当场把闭集送给作者，省一次读源码确诊
@@ -3910,6 +3988,9 @@ export class BrowserMiddleware {
                 break;
               }
             }
+            // U8：提交点②——reobserve/escalate 挽回了这一步，但被丢弃的意见照记（它们
+            // 确实在 floor 处被拒过；挽回意见本身走 trace 进既有 `conf` 聚合）。
+            this._rejectedAskConfs.push(...gateRejected);
           }
         }
         // R2b：词面零重叠守卫（宽扫的第二个触发器）。模型提名（非规则命中、非满置信）
@@ -4083,8 +4164,8 @@ export class BrowserMiddleware {
         // S4：hover 只移动指针、不应顺手改表单，故不触发预填（既有 click/scroll/drag 行为不变）。
         if (!this._isTyping(el) && cmdOpName !== "hover") {
           // Pre-fill before ANY click, including clicks on a submit-type input.
-          for (const pe of await this._missingRequired(pg, slots, elems, candidatePriority)) {
-            const [phow] = await this._executeElement(pg, pe, slots);
+          for (const pe of await this._missingRequired(pg, slots, elems, values, candidatePriority)) {
+            const [phow] = await this._executeElement(pg, pe, slots, null, undefined, false, values);
             if (verbose) console.log(`  step ${stepNo}.pre: fill required ${JSON.stringify(pe.label)} -> ${phow}`);
           }
         } else if (method === "rule:match" && !commandMode) {
@@ -4092,7 +4173,7 @@ export class BrowserMiddleware {
           // the next step goes to laya instead of burning the subgoal on
           // needs_value. Submit-type inputs are the exception: they are CLICKED,
           // never filled.
-          if (this._slotValue(el, slots) === null && !this._isSubmit(el)) {
+          if (this._slotValue(el, slots, values) === null && !this._isSubmit(el)) {
             forbid(ref, el, "needs_value");
             noteSkipped({ ref, reason: "needs_value", ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
             trace.push({
@@ -4201,7 +4282,9 @@ export class BrowserMiddleware {
             } else {
               [how, arg, fillEffect] = await this._executeElement(pg, el, slots,
                 commandMode ? { value: commandValue, byValue: commandByValue } : null,
-                commandMode ? String(cmdPick!.cmd.op) : undefined, force);
+                commandMode ? String(cmdPick!.cmd.op) : undefined, force,
+                // U1：决策路径的显式值袋（命令步的具名绑定 `bound` 恒优先，values 不参与）。
+                commandMode ? undefined : values);
             }
           }
           // S4 stale 判据（只有这三类；action-timeout / 有覆盖者且节点仍在都不算 stale）。

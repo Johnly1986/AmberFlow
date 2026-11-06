@@ -52,6 +52,14 @@ export interface StepRequest {
   /** 这一步的起点 URL（缺省 = 当前页）；相对仓库路径按仓库根解析成 `file://`。 */
   url?: string;
   slots?: Record<string, string>;
+  /**
+   * U1 步级显式值袋（决策语句步的值通道）：`{ "<关联键>": "<值>" }`。决策层选中
+   * fill/select 目标后，值请求先按本袋解析（控件 name/id/data_test/label 与 key 的
+   * 精确/互含匹配，与 slots 同一套两档匹配），命中即用——**作者显式值 > 隐式 slot 匹配**；
+   * 两袋都落空仍返回结构化 `needs_value`，绝不猜（红线②）。命令步（act 命令闭集）不受
+   * 影响：其值面仍是 `{from:"slot", key}` 具名绑定。缺省不出现 = 既有行为逐字节不变。
+   */
+  values?: Record<string, string>;
   /** 适用性守卫（在动作前判定；不成立 = 这一步不执行，返回 ok=false + stopCode="precondition_skipped"）。 */
   when?: DomSignal;
   /** 稳定步骤标识（进 trace / step_traces / failure；缺省时按执行序号记录）。 */
@@ -772,7 +780,8 @@ export function createCtx(deps: CtxDeps): Ctx {
 
   const runOneStep = async (desc: string, req: {
     url?: string; done: DomSignal | Record<string, unknown>; act?: TargetDecl | CommandDecl[];
-    slots?: Record<string, string>; when?: DomSignal | null; id?: string; timeoutMs?: number;
+    slots?: Record<string, string>; values?: Record<string, string>;
+    when?: DomSignal | null; id?: string; timeoutMs?: number;
     forceAct?: boolean; force?: boolean; staleRetry?: boolean;
   }): Promise<StepResult> => {
     assertOpen(`ctx.step(${JSON.stringify(desc)})`);
@@ -811,6 +820,8 @@ export function createCtx(deps: CtxDeps): Ctx {
       ...(req.url === undefined || walkKeepPage ? {} : { settleMs: 700 }),
       pw: session.pw,
       slots: { ...slots, ...(req.slots ?? {}) },
+      // U1：步级显式值袋（缺省不出现 = 既有行为逐字节不变；执行器只在决策步值请求里用）。
+      ...(req.values === undefined ? {} : { values: req.values }),
       verbose: deps.verbose === true,
     };
     if (req.when !== undefined && req.when !== null) opts["precondition"] = req.when;
