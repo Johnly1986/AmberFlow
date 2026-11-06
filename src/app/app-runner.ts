@@ -944,6 +944,10 @@ export interface EffectivePolicy {
     value: { quietMs: number; timeoutMs: number } | null;
     source: "app" | "default";
   };
+  /** U3：池空判档（缺省 fact；strict = U3 之前的 page_not_ready 快败）。 */
+  pool_gate: { value: "fact" | "strict"; source: "app" | "default" };
+  /** U3：surface 类目策略（缺省 native_activation="window"；"off" = 池构成回到 U3 之前）。 */
+  surface: { value: { native_activation: "window" | "resolve" | "off" }; source: "app" | "default" };
   /**
    * S5：状态接入决策（缺省两项 off）。`source: "app"` 表示 meta 显式声明过——
    * 应用产物的 `decisions.asks_saved/gate_waits/context_sent/context_skipped` 只在这一档出现（默认全缺席 = 逐字节不变）。
@@ -1023,6 +1027,15 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
         set_range: declaredPolicy.effect_readback?.set_range !== false,
       },
       source: declaredPolicy.effect_readback !== undefined ? "app" as const : "default" as const,
+    },
+    // U3：池空判档缺省 fact（唯一有意改变默认的项）；strict 是逃生口。
+    pool_gate: {
+      value: declaredPolicy.pool_gate === "strict" ? "strict" : "fact",
+      source: declaredPolicy.pool_gate !== undefined ? "app" as const : "default" as const,
+    },
+    surface: {
+      value: { native_activation: declaredPolicy.surface?.native_activation ?? "window" },
+      source: declaredPolicy.surface?.native_activation !== undefined ? "app" as const : "default" as const,
     },
     // S2：稳定门缺省开（方案 §2.5）；"off" 是显式声明，仍进 effective_policy 的账。
     settle: {
@@ -2319,6 +2332,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       donePollMs: policy.done_poll_ms.value,
       poolReadyTimeoutMs: policy.pool_ready_timeout_ms.value,
       poolReadyPollMs: policy.pool_ready_poll_ms.value,
+      // U3：池空判档 + surface 类目策略（flow 面；executor 的 MiddlewareOptions 同类选项位）。
+      poolGate: policy.pool_gate.value,
+      surfacePolicy: policy.surface.value,
       onRunReport: (rep) => {
         const steps = rep.steps as TraceStep[];
         decisionSteps.push(...steps);

@@ -15,6 +15,10 @@
  */
 
 import { parseHint, type ParsedHint } from "./hint.ts";
+import {
+  ADMIT_SEL, POOL_SEL, SURFACE_SELECTORS, WINDOW_CAPS,
+  admitSelectorWithJsFor, poolSelectorWithJsFor, type SurfacePolicy,
+} from "./surface.ts";
 
 /* ------------------------------------------------------------------ element model */
 
@@ -33,6 +37,11 @@ export interface Elem {
   /** `contenteditable` 为真（语义上是"可填"，结构上不是 input/textarea）。 */
   content_editable?: boolean;
   near?: string;
+  /**
+   * U3 类目标记（native-control / native-label / aria-role / aria-widget / native-activation）。
+   * **只进 PoolView / inspect / 类目计数**，不进 `ChoiceRequest.elems` 的模型投影（F14）。
+   */
+  surface?: string;
   frame?: number;
   js_events?: unknown;
   js_ref?: string;
@@ -398,12 +407,13 @@ export async function locatorAnyFrame(
 // 这是**全局行为变更**：所有应用的候选池构成可能变化（决策层看到的池/排序不同；同名候选增多
 // 可能引入新歧义，如 tab 与按钮同 label）。对 hint 命中无影响（仍按 label 匹配）；
 // MAX_ELEMENTS/分桶配额不变，新 role 走既有分桶。
-export const INTERACTIVE = "a, button, input, select, textarea, label, [onclick], [role='button']"
-  + ", [role='combobox'], [role='listbox'], [role='textbox'], [role='searchbox'], [role='spinbutton']"
-  + ", [role='checkbox'], [role='radio'], [role='switch'], [role='slider'], [contenteditable='true'], [contenteditable='']"
-  + ", [role='menuitem'], [role='menuitemradio'], [role='menuitemcheckbox'], [role='option'], [role='tab']"
-  + ", [draggable='true']";
-/** CDP-probed JS-only widgets join every later scan, keeping refs consistent. */
+export const INTERACTIVE = POOL_SEL;
+/**
+ * **池/序号基准**（U3/FW5 语义收窄）：`POOL_SEL + ", [data-js-ref]"`。
+ * `scan` 是元素在**本选择器结果数组**里的下标（盖章 / `_locatorFor` 位置回退都依赖它）；
+ * 身份寻址/只读计数面一律用 `ADMIT_SEL`，绝不能拿它的下标当 `scan`。
+ * 既有成员顺序与 U3 之前逐字节一致，新类目只追加在尾部 ⇒ 不含新类目的页面结果集合不变。
+ */
 export const INTERACTIVE_ALL = INTERACTIVE + ", [data-js-ref]";
 export const MAX_ELEMENTS = 40;
 /**
@@ -532,6 +542,14 @@ export const WINDOW_AUDIT_JS = String.raw`(arg) => {
   const all = [];
   __collectAll(document, arg.sel, all);
   const out = [];
+  const counts = {};
+  const cats = arg.cats || [];
+  const surfaceOf = (e) => {
+    for (let k = 0; k < cats.length; k++) {
+      try { if (e.matches(cats[k][1])) return cats[k][0]; } catch (err) { /* 非法片段：跳过 */ }
+    }
+    return '';
+  };
   let visible = 0;
   for (const e of all) {
     const hasBox = (() => { const r = e.getClientRects(); for (let k = 0; k < r.length; k++) if (r[k].width > 0 && r[k].height > 0) return true; return false; })();
@@ -540,6 +558,8 @@ export const WINDOW_AUDIT_JS = String.raw`(arg) => {
     else { const cs = getComputedStyle(e); vis = cs.display !== 'none' && cs.visibility !== 'hidden' && hasBox; }
     if (!vis) continue;
     visible += 1;
+    const cat = surfaceOf(e);
+    if (cat) counts[cat] = (counts[cat] || 0) + 1;
     if (e.getAttribute('data-dshref')) continue;   // A4 章：该元素已在本次池里
     const tag = e.tagName.toLowerCase();
     const label = norm(e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText || e.getAttribute('placeholder') || e.getAttribute('value') || '').slice(0, 40);
@@ -550,7 +570,8 @@ export const WINDOW_AUDIT_JS = String.raw`(arg) => {
   }
   out.sort((a, b) => a.prio - b.prio);
   const limit = arg.limit > 0 ? arg.limit : 10;
-  return { visible_interactive: visible, out_of_window_total: out.length, out_of_window: out.slice(0, limit) };
+  return { visible_interactive: visible, out_of_window_total: out.length,
+           out_of_window: out.slice(0, limit), surface_counts: counts };
 }`;
 
 /**
@@ -622,7 +643,7 @@ export const EXTRACT_JS = String.raw`(arg) => {
     return norm(label).slice(0, 200);
   };
   const short = (t) => String(t || '').slice(0, 40);
-  const rows = [];
+  let rows = [];
   const labelRows = [];   // R1a：label 延迟裁决（见下）
   const hiddenCtrls = []; // R1b：不可见表单控件的 scan 索引（见下）
   for (let i = 0; i < all.length; i++) {
@@ -733,6 +754,31 @@ export const EXTRACT_JS = String.raw`(arg) => {
       role: (w.getAttribute('role') || '').toLowerCase(), content_editable: false, draggable: false, href: '' });
     stamped.add(wi);
   }
+  // U3：类目标记（只作旁路统计/cap，不进模型候选投影）。按 POOL_FRAGMENTS 顺序首匹配。
+  const cats = arg.cats || [];
+  const surfaceOf = (e) => {
+    for (let k = 0; k < cats.length; k++) {
+      try { if (e.matches(cats[k][1])) return cats[k][0]; } catch (err) { /* 非法片段：跳过 */ }
+    }
+    return '';
+  };
+  for (const r of rows) { const el = all[r.i]; if (el) r.surface = surfaceOf(el); }
+  // U3：类目窗口 cap —— **在 slice(max) 之前**裁（§5.3）。裁掉的元素不盖章，
+  // windowAudit 的 out_of_window_total 会自然把它们报成"窗口外剩余"（见 WINDOW_AUDIT_JS）。
+  const caps = arg.caps || {};
+  const capSeen = {};
+  const capped = [];
+  for (const r of rows) {
+    const cat = r.surface || '';
+    const cap = typeof caps[cat] === 'number' ? caps[cat] : -1;
+    if (cap >= 0) {
+      const n = capSeen[cat] || 0;
+      if (n >= cap) continue;
+      capSeen[cat] = n + 1;
+    }
+    capped.push(r);
+  }
+  rows = capped;
   // A2：先给每个候选补窗口/几何字段（bucket/prio 由同一份 __classify 产出，不另写口径）。
   for (const r of rows) {
     const el = all[r.i];
@@ -795,6 +841,7 @@ export const EXTRACT_JS = String.raw`(arg) => {
             rect: r.rect, inViewport: r.inViewport, nearViewport: r.nearViewport,
             scrollDepth: r.scrollDepth, inScrollContainer: r.inScrollContainer, bucket: r.bucket, prio: r.prio,
             data_test: r.data_test, name: r.name, id: r.id, input_type: r.input_type, href: r.href,
+            ...(r.surface ? {surface: r.surface} : {}),
             ...(r.role ? {role: r.role} : {}),
             ...(r.content_editable ? {content_editable: true} : {}),
             ...(r.draggable ? {draggable: true} : {})};
@@ -941,6 +988,7 @@ const HINT_HEAD = String.raw`(arg) => {
                     const stamp = nonce + '-' + ref;
                     e.setAttribute('data-hintref', stamp);
                     return {hint_ref: stamp, scan: i, tag: e.tagName.toLowerCase(),
+                            dsh_ref: e.getAttribute('data-dshref') || '',
                             label: labelOf(e).slice(0, 40), full_label: labelOf(e).slice(0, 200),
                             data_test: e.getAttribute('data-test') || '',
                             name: e.getAttribute('name') || '', id: e.id || '',
@@ -987,6 +1035,8 @@ export async function extractElements(
     quotas?: PoolQuotas | null;
     /** A2：`meta.policy.candidate_priority`（缺省 "bucketed"；"main-first" = 回退旧排序）。 */
     candidatePriority?: "bucketed" | "main-first";
+    /** U3：`meta.policy.surface.native_activation`（缺省 window；"off" = 池构成回到 U3 之前）。 */
+    surface?: SurfacePolicy;
   },
 ): Promise<ElemPool> {
   // 缺省 bucketed；main-first 显式回退。quota 由预算档决定（40/120 两档常量单一出处）。
@@ -1010,7 +1060,8 @@ export async function extractElements(
     let rows: Elem[] | null = null;
     try {
       rows = (await frames[fi]!.evaluate(PASS_EXTRACT,
-        { sel: INTERACTIVE_ALL, max: remaining, quotas })) as Elem[] | null;
+        { sel: poolSelectorWithJsFor(opts?.surface), max: remaining, quotas,
+          cats: SURFACE_SELECTORS, caps: WINDOW_CAPS })) as Elem[] | null;
     } catch {
       rows = null;
     }
@@ -1039,25 +1090,90 @@ export async function extractElements(
  */
 export async function windowAudit(
   page: PageLike, shown: number, limit = 10,
-): Promise<{ visible_interactive: number; shown: number; out_of_window_total: number; out_of_window: Array<{ tag: string; label: string; prio: number; bucket: string }> }> {
-  type WindowRaw = { visible_interactive?: number; out_of_window_total?: number; out_of_window?: unknown };
+): Promise<{ visible_interactive: number; shown: number; out_of_window_total: number; out_of_window: Array<{ tag: string; label: string; prio: number; bucket: string }>; surface_counts: Record<string, number> }> {
+  type WindowRaw = { visible_interactive?: number; out_of_window_total?: number; out_of_window?: unknown; surface_counts?: unknown };
   let raw: WindowRaw | null = null;
   try {
-    raw = (await page.evaluate!(PASS_WINDOW, { sel: INTERACTIVE_ALL, limit })) as WindowRaw | null;
+    // U3：只读计数面用 ADMIT_SEL（不是池基准）；绝不用它的下标当 scan。
+    raw = (await page.evaluate!(PASS_WINDOW, { sel: admitSelectorWithJsFor(), limit, cats: SURFACE_SELECTORS })) as WindowRaw | null;
   } catch {
     raw = null;
   }
   const rows = Array.isArray(raw?.out_of_window) ? (raw!.out_of_window as Array<Record<string, unknown>>) : [];
+  const counts: Record<string, number> = {};
+  if (raw?.surface_counts && typeof raw.surface_counts === "object") {
+    for (const [k, v] of Object.entries(raw.surface_counts as Record<string, unknown>)) {
+      const n = Number(v) || 0;
+      if (n > 0) counts[k] = n;
+    }
+  }
   return {
     visible_interactive: Number(raw?.visible_interactive ?? 0) || 0,
     shown,
     out_of_window_total: Number(raw?.out_of_window_total ?? 0) || 0,
+    surface_counts: counts,
     out_of_window: rows.slice(0, limit).map((r) => ({
       tag: String(r["tag"] ?? ""),
       label: String(r["label"] ?? ""),
       prio: Number(r["prio"] ?? 0) || 0,
       bucket: String(r["bucket"] ?? ""),
     })),
+  };
+}
+
+/**
+ * U3 readiness 证据：池空/失败路径上**一次**廉价只读探测（主 frame 一次 evaluate，零新增往返
+ * 于非空路径）。回答"页面已就绪但池空时，ADMIT_SEL 能数到几个 / 可聚焦几个 / ARIA 几个 / 正文多长"，
+ * 让 `ready_empty` 的 warning 与 `not_ready` 的证据能区分「页面没有交互事实」与「准入面未覆盖」。
+ * `frames` = 本次池抽取可见的 frame 数（sniff 本身只跑主 frame，如实标注）。
+ */
+export async function poolSniff(page: PageLike, sel: string = ADMIT_SEL): Promise<{
+  admitted: number; focusable: number; aria: number; frames: number; body_text: number; ready_state: string;
+}> {
+  type SniffRaw = { admitted?: number; focusable?: number; aria?: number; body_text?: number; ready_state?: string };
+  let raw: SniffRaw | null = null;
+  try {
+    raw = (await page.evaluate!((arg: { sel: string }) => {
+      const g = globalThis as unknown as { document: any };
+      const visibleCount = (sel: string): number => {
+        let n = 0;
+        try {
+          for (const e of Array.from(g.document.querySelectorAll(sel) as ArrayLike<any>)) {
+            const r = typeof e.getClientRects === "function" ? e.getClientRects() : [];
+            let box = false;
+            for (let k = 0; k < r.length; k++) if (r[k].width > 0 && r[k].height > 0) { box = true; break; }
+            if (!box) continue;
+            let cv = true;
+            try { if (typeof e.checkVisibility === "function") cv = e.checkVisibility({ checkVisibilityCSS: true, checkOpacity: false }); } catch { cv = true; }
+            if (cv) n += 1;
+          }
+        } catch { /* 非法选择器：0 */ }
+        return n;
+      };
+      const count = (sel: string): number => {
+        try { return g.document.querySelectorAll(sel).length; } catch { return 0; }
+      };
+      const body = g.document.body;
+      return {
+        admitted: visibleCount(arg.sel),
+        focusable: count("[tabindex]"),
+        aria: count("[role], [aria-expanded], [aria-haspopup], [aria-label]"),
+        body_text: String(body ? body.innerText || "" : "").trim().length,
+        ready_state: String(g.document.readyState || "unknown"),
+      };
+    }, { sel })) as SniffRaw | null;
+  } catch {
+    raw = null;
+  }
+  let frames = 1;
+  try { frames = Math.max(1, framesOf(page).length); } catch { frames = 1; }
+  return {
+    admitted: Number(raw?.admitted ?? 0) || 0,
+    focusable: Number(raw?.focusable ?? 0) || 0,
+    aria: Number(raw?.aria ?? 0) || 0,
+    frames,
+    body_text: Number(raw?.body_text ?? 0) || 0,
+    ready_state: String(raw?.ready_state ?? "unknown"),
   };
 }
 
@@ -1472,18 +1588,18 @@ export async function addNearContext(page: PageLike, elems: ElemPool): Promise<v
  * `hint_lookup` 的调用参数：**解析只做一次**，页面函数拿到的是 `parsed`（P0-B）。
  * 导出它是为了差分测试能核验"两面用的是同一个解析结果"，而不是各解析一遍。
  */
-export function hintLookupArgs(hint: string): { hint: string; parsed: ParsedHint; sel: string } {
-  return { hint: hint.trim().toLowerCase(), parsed: parseHint(hint), sel: INTERACTIVE_ALL };
+export function hintLookupArgs(hint: string, sel: string = admitSelectorWithJsFor()): { hint: string; parsed: ParsedHint; sel: string } {
+  return { hint: hint.trim().toLowerCase(), parsed: parseHint(hint), sel };
 }
 
-export async function hintLookup(page: PageLike, hint: string): Promise<ElemPool> {
+export async function hintLookup(page: PageLike, hint: string, sel: string = admitSelectorWithJsFor()): Promise<ElemPool> {
   const out: ElemPool = {};
   const frames = framesOf(page);
   for (let fi = 0; fi < frames.length; fi++) {
     let rows: Array<Record<string, unknown>> | null = null;
     try {
       rows = (await frames[fi]!.evaluate(PASS_HINT,
-        hintLookupArgs(hint))) as Array<Record<string, unknown>> | null;
+        hintLookupArgs(hint, sel))) as Array<Record<string, unknown>> | null;
     } catch {
       continue;
     }

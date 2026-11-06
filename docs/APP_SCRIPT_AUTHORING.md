@@ -205,7 +205,7 @@ export const meta = (kit) => ({
 | `site` | 站点面：页面角色 `pages`、命名行抽取 `listExtract`（见 §5） |
 | `model` / `maxSubgoals` | 决策模型 checkpoint / 子目标上界（高级，缺省即可） |
 | `notes` | 给人看的备注（字符串列表），不参与运行 |
-| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` / `done_preheld` / `effect_readback` / `settle` / `decision_state` |
+| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` / `done_preheld` / `effect_readback` / `settle` / `pool_gate` / `surface` / `decision_state` |
 | `pace` | 运行节奏：`between_steps_ms` / `between_actions_ms` |
 | `invariants` | 结束态断言：`{ id, desc?, signal }` |
 | `recordedFrom` / `generatedFrom` | 血统：这段脚本从哪次演示/哪份生成物来 |
@@ -305,6 +305,8 @@ await ctx.step("在 dropdown 里选 Option 2", {
 
 ### 4.6 列表展开、穷举与范围控件（A3 三原语 + S3 `ctx.collect`）
 
+> 原语路径的池外回退（A3）是 grandfathered 面：按身份寻址（`ADMIT_SEL` + 盖章），仅主 frame、无可见性过滤（见 §4.5「U3 就绪判档与扫描面」）。
+
 真实列表页与筛选面板需要三种"窗口外操作"，引擎把它们收敛成三个**结构化、可计费、失败不假装成功**的原语（内部 click/滚动不占 flow 预算；每个原语整体计 1 步，受 `--max-steps` 约束）；S3 再加一个**自动穷举**原语 `ctx.collect`（同样整体计 1 步）：
 
 ```js
@@ -371,7 +373,7 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
 | `skipped_actions?: Array<{command_id?,ref?,target?,reason,detail?}>` | 每条"为什么没动作"的结构化原因（`target_ambiguous` / `target_not_found` / `forbidden` / `not-actionable-or-covered` / `stale_ref` / `needs_value` / `action_unsupported` / `attempt_limit` …） |
 | `done_preheld?: boolean` | 命令步在**动作前**对 done 的预评估结果（只命令步出现；不改变执行顺序） |
 | `warnings?: string[]` | 运行期诚实话，如 `suspected_async`（值只在产生时出现） |
-| `state?: StepStateRecord` | S1 状态记录：`before/after` 指纹（`epoch`/`navEpoch`/`url`/`readyState`/`struct`/`content`）、`actions{attempted,executed,changed}`、`flags`（`done_preheld`/`no_state_progress`）、`settleMs`（S2 稳定门等待毫秒；策略关闭时省略）、`effect`（fill 读回 `{kind,before,after,applied}`；敏感槽位来源的 before/after 恒 `***`、applied 保留——见「effect 读回的掩码」）；`step_traces[i].state` 与 `result.warnings[]` 是同一份证据 |
+| `state?: StepStateRecord` | S1 状态记录：`before/after` 指纹（`epoch`/`navEpoch`/`url`/`readyState`/`struct`/`content`）、`actions{attempted,executed,changed}`、`flags`（`done_preheld`/`no_state_progress`/`pool_empty`）、`settleMs`（S2 稳定门等待毫秒；策略关闭时省略）、`effect`（fill 读回 `{kind,before,after,applied}`；敏感槽位来源的 before/after 恒 `***`、applied 保留——见「effect 读回的掩码」）；`step_traces[i].state` 与 `result.warnings[]` 是同一份证据 |
 
 **判读规则（写脚本/审查时按这个读）**
 - `done_preheld=true`：done 在动作**之前**已成立 ⇒ 这一步的 `done` 来自信号本身，不是这次动作推进的；
@@ -423,9 +425,20 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
   导航后第一次抽池最多付一次 `quiet_ms`（observer 安装时刻视为“刚脏”），同一页面稳态零等待。
   未知子键/越界值（`quiet_ms` 0..5000、`timeout_ms` 0..30000）在 `apps check` 就红。
 - `ctx.runtime.epoch`：执行器状态游标只读投影（每次抽池/观察 +1，每个 `step` 重置；dry=0）。
-- `result.warnings[]` 汇总跨步 flags（`done_preheld`/`no_state_progress`）与既有
+- `result.warnings[]` 汇总跨步 flags（`done_preheld`/`no_state_progress`/`pool_empty`）与既有
   `suspected_async`；这些是**证据**，不改 done 语言、不影响完成真值。（W1 验收移除了一个
   控制流上不可达的串扰 flag——r8 跨城串扰签名由 `done_preheld` + `no_state_progress` 覆盖。）
+
+**U3 就绪判档与扫描面（`pool_gate` / `surface`，2026-11）**
+
+池空不再等于 `page_not_ready`。执行器把**已有的** settle 结论（`settled`/`timedOut`）接回池空闸门，并加一次只读 sniff（`readyState` / 准入面可见计数 / `[tabindex]` / ARIA / 正文长度）判四档：
+`ready`（池非空）→ 正常；`not_ready`（预算耗尽且 settle 未静默或 `readyState≠complete`）→ 保留 run 级 `page_not_ready`，reason 点名 `budget_ms`/`waited_ms`/`settled`/`settle_timed_out`/`readyState`；`ready_empty`（预算耗尽但已静默且 `readyState=complete` 而池为 0）→ 该步 `state.flags` 记 `pool_empty` + 一条 run 级 warning（点名 sniff 计数）后**继续**，由后续命令/信号给出真正的失败证据；`navigating` 仅保留在类型里。
+
+- `meta.policy.pool_gate`：`"fact"`（缺省）走上面的 `ready_empty`；`"strict"` 把 `ready_empty` 改判 `not_ready`（U3 之前的快败行为，逃生口）。**闸门只在 flow 脚本面**：只有 `ctx.step` 打开 `poolReady`；声明式 journey 与 plan 面 `poolReady=false`，本键不产生作用（也不产生 `page_not_ready`）。
+- 闸门预算是**真上限**：每轮 settle 的 timeout 都被钳到剩余预算，总等待 ≤ `pool_ready_timeout_ms` + 一次抽池；`budget_ms` 与实测 `waited_ms` 同时进 reason 与 `diagnostics.readiness.evidence`。`diagnostics.readiness={verdict,evidence}` 在 verdict≠`ready` 时出现（`ready_empty` 也出现），`evidence` 含 `ready_state`/`settled`/`settle_timed_out`/`pool_size`/`waited_ms`/`budget_ms`/`sniff{admitted,focusable,aria,frames,body_text}`。
+- `meta.policy.surface.native_activation`：`"window"`（缺省）把 `<summary>` 收进元素池并按类目 cap=6 截断（30 条 FAQ 的 summary 不会挤掉页头按钮；被裁元素进 `inspect --json` 的 `window.out_of_window_total`）；`"off"` = 池构成回到 U3 之前（A/B 对照）；`"resolve"` = 进**准入面**但不入窗口（决策步看不到 summary，命令/声明 hint 仍可按身份回捞命中并执行）。`settle:"off"` 时没有 settle 证据 ⇒ 判档落 `not_ready`（`pool_gate:"fact"` 在 settle 关闭时不产生 `ready_empty`）。**全局行为变更**：所有 flow/声明式应用的候选池都可能多出 `summary`（以及 `contenteditable="plaintext-only"`）——同名候选增多可能引入新歧义，`inspect --json` 的 `window.surface_counts` 给出按类目可见计数。未知子键/非法值在 `apps check` 就红。
+- A3 池外回退（`ctx.expand`/`scrollList`/`setRange` 的原语路径）是 **grandfathered** 面：它按身份（hint 语义 + `data-af-probe` 盖章）寻址，用准入面 `ADMIT_SEL`，刻意保持**仅主 frame、无可见性过滤**的既有语义（0×0 自绘滑块手柄只能靠它点到）；step/命令面仍只认池 + hint 回捞，两条面不要互相推断。
+- 回捞去重按**节点身份**（已带 `data-dshref` 即跳过），不再比较 `scan` 序号——池面与准入面的序号空间本就不可比。
 
 **S5 决策状态接入（实验档，两项缺省都 `off` = 行为不变）**
 
@@ -631,6 +644,8 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `done_preheld` | `warn` | pre-held done 的处置（`warn`/`fail`/`allow`）；只覆盖命令步 |
 | `effect_readback` | `{fill:true,set_range:true}` | fill/setRange 的 effect 读回 |
 | `settle` | `{quiet_ms:400,timeout_ms:5000}` | 抽池前的稳定门（S2）：只在页面有 DOM 突变时等到静默；`"off"` 关闭。等待进 `state.settleMs` |
+| `pool_gate` | `fact` | U3 池空判档（仅 flow 面）：`fact` = 已就绪且池空记 `pool_empty` 后继续；`strict` = 旧 `page_not_ready` 快败 |
+| `surface` | `{native_activation:"window"}` | U3 准入面类目：`summary` 进池并受类目 cap=6；`native_activation:"off"` = 池构成回到 U3 之前（A/B） |
 | `decision_state` | `{gate:"off",context:"off"}` | S5 决策状态接入（A/B）：`gate:"stable_only"` = ask 前 settle + 同池同题不重复问（`decisions.asks_saved/gate_waits`）；`context:"delta"` = 请求带 ≤200B 结构化 `state_digest`（provider 不支持则跳过，记 `context_skipped`） |
 
 产物里的 `effective_policy` 只在非缺省时出现，并写明来源（`cli` / `config` / `app` / `provider` / `default`）。

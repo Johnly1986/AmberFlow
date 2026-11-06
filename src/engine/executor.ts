@@ -75,6 +75,7 @@ import {
   framesOf,
   hintLookup,
   orderElemsByFamily,
+  poolSniff,
   stateText,
   urlOf,
   viewportUnderload,
@@ -84,6 +85,7 @@ import {
   type ElemPool,
   type PageLike,
 } from "./extraction.ts";
+import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
 import {
   getLayaRuntime,
   type ChoiceAnswer,
@@ -107,7 +109,7 @@ import {
 } from "./rules.ts";
 import { checkSignal, type SignalSpec } from "./signals.ts";
 // S2 稳定门：MutationObserver 传感器 + 有界静默等待（只作观察增强，不中断执行循环）。
-import { DEFAULT_SETTLE, installSettle, settle, type SettlePage } from "./settle.ts";
+import { DEFAULT_SETTLE, installSettle, settle, type SettlePage, type SettleResult } from "./settle.ts";
 // 语法报错文案的唯一出处：形状清单不再手抄（grammar-prompt import 时自证与 parseHint 对齐）。
 import { HINT_CLOSED_SET_TEXT } from "./grammar-prompt.ts";
 // A2 判别：命令 target 是 hint 语法字符串，词面要从同一份解析器里取（不新开第二种解析）。
@@ -333,6 +335,11 @@ export interface RunReport {
     candidates?: string[];
     /** A2：target_not_found 现场发现的滚动容器事实（内容远高于可视区 = 可能未渲染）。 */
     viewport_underloaded?: Array<{ tag: string; id: string; scrollHeight: number; clientHeight: number; rendered: number }>;
+    /**
+     * U3：就绪判档证据（verdict==="ready" 时省略）。`ready_empty` 也带本对象
+     * （池空但页面已就绪是事实，不是 page_not_ready）。
+     */
+    readiness?: Readiness;
   };
   /**
    * A1 动作执行证据（全部可选：缺字段 = 该事实不适用，不硬造）。
@@ -386,8 +393,28 @@ export interface StateFingerprint {
   content?: string;
 }
 
-/** S1 前进性 flag（引擎判定，不是用户语法；done 语言不变）。 */
-export type StateFlag = "done_preheld" | "no_state_progress";
+/**
+ * S1 前进性 flag（引擎判定，不是用户语法；done 语言不变）。
+ * U3：`pool_empty` = 该步池空但页面已就绪（settle 静默 + readyState complete）——
+ * 池空是事实，不是"页面没准备好"；步级继续，只有 strict 档才把它改判 run 级停因。
+ */
+export type StateFlag = "done_preheld" | "no_state_progress" | "pool_empty";
+
+/** U3 readiness 四档（§5.3 判档表是唯一出处）。 */
+export type ReadinessVerdict = "navigating" | "not_ready" | "ready" | "ready_empty";
+export interface Readiness {
+  verdict: ReadinessVerdict;
+  /** 判定所依据的观测事实（全部来自已有往返；sniff 只在池空/失败路径付一次）。 */
+  evidence: {
+    ready_state: "loading" | "interactive" | "complete" | "unknown";
+    settled: boolean | null;
+    settle_timed_out: boolean;
+    pool_size: number;
+    waited_ms: number;
+    budget_ms: number;
+    sniff: { admitted: number; focusable: number; aria: number; frames: number; body_text: number } | null;
+  };
+}
 
 /**
  * fill/setRange 的 effect 读回（不可读组件整条省略，不假装）。
@@ -580,6 +607,15 @@ export interface RunOptions {
   poolReadyTimeoutMs?: number;
   /** pool ready gate 的轮询间隔。 */
   poolReadyPollMs?: number;
+  /**
+   * U3 池空判档（flow 面专属；plan/journey 面 `poolReady=false`，本键不适用）：
+   *   "fact"   （缺省）池空但 settle 静默 + readyState complete ⇒ `ready_empty`：步级 `pool_empty`
+   *            事实 + warning + **继续**（让后续命令给出真正的失败证据）；
+   *   "strict" （逃生口）池空 = `page_not_ready` **逐字节等于 U3 之前的行为**。
+   */
+  poolGate?: "fact" | "strict";
+  /** U3：`meta.policy.surface.native_activation`（缺省 window；"off" = 池构成回到 U3 之前）。 */
+  surfacePolicy?: SurfacePolicy;
   /** action 后 done 信号的轮询间隔；0 = 只看一次。 */
   donePollMs?: number;
   /** action 后 done 信号的总等待窗口。 */
@@ -808,6 +844,10 @@ export interface MiddlewareOptions {
    * `null` = 显式关闭）。只影响"抽池前是否等页面静默"，不改变完成判定/动作语义。
    */
   settle?: { quietMs: number; timeoutMs: number } | null;
+  /** U3：池空判档（缺省 "fact"；"strict" = U3 之前的 page_not_ready 快败）。 */
+  poolGate?: "fact" | "strict";
+  /** U3：surface 类目策略（缺省 native_activation="window"）。 */
+  surfacePolicy?: SurfacePolicy;
   /**
    * S5：状态接入决策（来自 `meta.policy.decision_state`；缺省两项都 "off" = 今天的行为）。
    * 见 `DecisionStatePolicy`：gate 决定"stable_only 时先 settle + 同池同题不重复问"，
@@ -1446,6 +1486,10 @@ export class BrowserMiddleware {
   dataset: DatasetReader | null = null;
   /** See `RunOptions.tieredHint` (P1 narrowed question; default OFF = today's behaviour). */
   tieredHint = false;
+  /** U3：池空判档（缺省 fact；strict = U3 之前的 page_not_ready 快败）。 */
+  poolGate: "fact" | "strict" = "fact";
+  /** U3：surface 类目策略（缺省 native_activation="window"）。 */
+  surfacePolicy: SurfacePolicy = { native_activation: "window" };
   /** See `MiddlewareOptions.candidatePriority`（A2 分桶窗口；缺省 bucketed）。 */
   candidatePriority: "bucketed" | "main-first" = "bucketed";
   /** S1：pre-held done 处置（缺省 warn；fail 在动作前结构化停止）。 */
@@ -1624,21 +1668,61 @@ export class BrowserMiddleware {
    * S2：抽池前等页面静默（按 `settlePolicy`）。已静默立即返回；超时不抛、不阻断抽取。
    * 等待毫秒数累计到本 run 的 `StepStateRecord.settleMs`。
    */
-  private async _settleBeforeExtract(page: AnyPage): Promise<void> {
-    if (this.settlePolicy === null) return;
+  private async _settleBeforeExtract(page: AnyPage, deadlineMs?: number): Promise<SettleResult | null> {
+    if (this.settlePolicy === null) return null;
+    // C8：闸门预算真上限——每轮 settle 的 timeout 钳到剩余预算（缺省无 deadline = 旧行为）。
+    const policy = deadlineMs === undefined
+      ? this.settlePolicy
+      : { ...this.settlePolicy, timeoutMs: Math.max(0, Math.min(this.settlePolicy.timeoutMs, deadlineMs - Date.now())) };
     try {
-      const r = await settle(page as unknown as SettlePage, this.settlePolicy);
+      const r = await settle(page as unknown as SettlePage, policy);
       this._settleWaitMs += r.waitedMs;
+      // C7：把 settled/timedOut 接回调用方（以前只累计 waitedMs，结论被丢掉）。
+      return r;
     } catch {
       // 稳定门是观察增强：传感器坏了也照常抽池（页面自会给出 target_not_found 等诚实停因）。
+      return null;
     }
   }
   /** S2：settle + 默认池抽取（决策/act 解析、pool ready、收尾观察共用同一序）。 */
   private async _extractPoolSettled(
-    page: AnyPage, candidatePriority: "bucketed" | "main-first",
-  ): Promise<ElemPool> {
-    await this._settleBeforeExtract(page);
-    return extractElements(page, true, undefined, { candidatePriority });
+    page: AnyPage, candidatePriority: "bucketed" | "main-first", deadlineMs?: number,
+  ): Promise<{ elems: ElemPool; settle: SettleResult | null }> {
+    const settleRes = await this._settleBeforeExtract(page, deadlineMs);
+    const elems = await extractElements(page, true, undefined, {
+      candidatePriority, surface: this.surfacePolicy,
+    });
+    return { elems, settle: settleRes };
+  }
+  /**
+   * U3 判档（唯一出处 = ARCH §5.3 判档表）：只在**池空**且预算耗尽时调用一次。
+   * 判据只用已有观测（settle 结论）+ 一次只读 sniff（readyState/准入面计数），
+   * 不新增"猜测式"往返；`not_ready` 才是 run 级判死，`ready_empty` 是步级事实。
+   */
+  private async _poolReadiness(
+    page: AnyPage, settleRes: SettleResult | null, waitedMs: number, budgetMs: number, poolSize: number,
+  ): Promise<Readiness> {
+    // sniff 用**本 run 生效的**准入面（off 臂不能拿默认 window 面的计数当证据）。
+    const sniff = await poolSniff(page, admitSelectorWithJsFor(this.surfacePolicy));
+    const rs = sniff.ready_state === "loading" || sniff.ready_state === "interactive" || sniff.ready_state === "complete"
+      ? sniff.ready_state : "unknown";
+    const verdict: ReadinessVerdict =
+      (settleRes === null || settleRes.settled !== true || rs !== "complete") ? "not_ready" : "ready_empty";
+    return {
+      verdict,
+      evidence: {
+        ready_state: rs,
+        settled: settleRes === null ? null : settleRes.settled,
+        settle_timed_out: settleRes?.timedOut === true,
+        pool_size: poolSize,
+        waited_ms: waitedMs,
+        budget_ms: budgetMs,
+        sniff: {
+          admitted: sniff.admitted, focusable: sniff.focusable, aria: sniff.aria,
+          frames: sniff.frames, body_text: sniff.body_text,
+        },
+      },
+    };
   }
   /** See `MiddlewareOptions.maxEffectiveRepeats` (D3/R-4; default 3, 0 disables). */
   maxEffectiveRepeats = 3;
@@ -1709,6 +1793,8 @@ export class BrowserMiddleware {
     this.riskAsk = opts.riskAsk ?? this.riskAsk;
     this.tieredHint = opts.tieredHint ?? this.tieredHint;
     this.candidatePriority = opts.candidatePriority ?? this.candidatePriority;
+    this.poolGate = opts.poolGate === "strict" ? "strict" : "fact";
+    if (opts.surfacePolicy !== undefined) this.surfacePolicy = { ...opts.surfacePolicy };
     this.donePreheldPolicy = opts.donePreheldPolicy ?? this.donePreheldPolicy;
     this.fillReadback = opts.fillReadback ?? this.fillReadback;
     this.secretSlotKeys = opts.secretSlotKeys ?? this.secretSlotKeys;
@@ -2016,10 +2102,18 @@ export class BrowserMiddleware {
     // 声明点名的步照跑，需要选目标的步按 rules-only 如实 block。这是"默认在线 provider"
     // 不破坏开箱（无 key 也能跑声明）的地基。风险头那边早就这么降级（isRisky 的 catch）；
     // pick 这边补齐，两条兜底档对"服务不可用"的反应一致。
+    // U3 硬约束：`Elem.surface` 是旁路标记（PoolView/inspect/类目计数用），**不进模型请求体**——
+    // provider 看到的元素形状与 U3 之前逐字段一致（第三方 provider 也不该继承引擎内部标记）。
+    const modelElems: ElemPool = {};
+    for (const [ref, e] of Object.entries(elems)) {
+      if (e.surface === undefined) { modelElems[ref] = e; continue; }
+      const { surface: _surface, ...rest } = e;
+      modelElems[ref] = rest as Elem;
+    }
     let out;
     try {
       out = await provider.pick({
-        goal, page, elems, forbidden, notes, narrow: null, k: 8,
+        goal, page, elems: modelElems, forbidden, notes, narrow: null, k: 8,
         ...(digest === null ? {} : { state_digest: digest }),
       });
     } catch (err) {
@@ -2685,7 +2779,7 @@ export class BrowserMiddleware {
       // Match a slot to this field by attribute AND by the label text
       // `_slotValue` would see (placeholder/wrapper label): composer fields are
       // keyed by their placeholder, not by data-test.
-      const elemsNow = elems ?? (await this._extractPoolSettled(page, candidatePriority));
+      const elemsNow = elems ?? (await this._extractPoolSettled(page, candidatePriority)).elems;
       let match: Elem | undefined;
       for (const e of Object.values(elemsNow)) {
         if ((em.dt && e["data_test"] === em.dt)
@@ -2777,7 +2871,7 @@ export class BrowserMiddleware {
     | { ref: string; el: Elem | null; loc: AnyLoc; poolSize: number; fallback: boolean; cleanup?: () => Promise<void> }
     | { error: string; poolSize: number }
   > {
-    const elems = await this._extractPoolSettled(page, this.candidatePriority);
+    const elems = (await this._extractPoolSettled(page, this.candidatePriority)).elems;
     const poolSize = Object.keys(elems).length;
     if (typeof target !== "string" || !target.trim()) {
       return { error: "target must be a non-empty hint string (path_id / bare label / [data-test=…])", poolSize };
@@ -2809,11 +2903,17 @@ export class BrowserMiddleware {
     page: AnyPage, target: string, op: string,
   ): Promise<{ ref: string; loc: AnyLoc; cleanup: () => Promise<void> } | null> {
     // A3 修正：scrollList 的目标常常是**非交互容器**（`div[role="feed"]`、`main`…），
-    // 它们不在 INTERACTIVE_ALL 扫描面里。滚动语义只需要"能定位到容器"，所以 scroll
-    // 操作把回退面扩到常见容器角色（仍只在池解析失败时走；正常路径零变化）。
+    // 它们不在扫描面里。滚动语义只需要"能定位到容器"，所以 scroll 操作把回退面扩到
+    // 常见容器角色（仍只在池解析失败时走；正常路径零变化）。
+    //
+    // U3/C11：本路径是 **grandfathered** 的——它按**身份**（hint 语义 + data-af-probe 盖章）
+    // 寻址，不是位置序号，所以这里用准入面 ADMIT_SEL（window ∪ resolve），不用池基准。
+    // 既有语义刻意保持不变：仅主 frame、**不做可见性过滤**（0×0 的自绘 slider 手柄只能靠
+    // 这条路径被点到）。任何收紧（可见性/子 frame/池基准）都会打断既有 flow 应用。
+    const admitAll = admitSelectorWithJsFor(this.surfacePolicy);
     const fallbackSel = op === "scroll"
-      ? `${INTERACTIVE_ALL}, [role='feed'], [role='list'], [role='main'], [role='region'], [role='article'], [role='listitem'], main`
-      : INTERACTIVE_ALL;
+      ? `${admitAll}, [role='feed'], [role='list'], [role='main'], [role='region'], [role='article'], [role='listitem'], main`
+      : admitAll;
     const token = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
     let rows: Array<Record<string, unknown>> = [];
     try {
@@ -3092,6 +3192,8 @@ export class BrowserMiddleware {
       poolReady = false,
       poolReadyTimeoutMs = 700,
       poolReadyPollMs = 100,
+      poolGate = this.poolGate,
+      surfacePolicy = this.surfacePolicy,
       donePollMs = 120,
       doneTimeoutMs = 2000,
       forceAct = false,
@@ -3099,6 +3201,8 @@ export class BrowserMiddleware {
       staleRetry = false,
       candidatePriority = this.candidatePriority,
     } = opts;
+    // U3：run 级 surface 策略必须进**每一次**抽池（_extractPoolSettled 读实例字段）。
+    this.surfacePolicy = surfacePolicy;
 
     // The navigation envelope: run-level declaration wins, else the middleware's
     // (set once for a whole journey by the app runner from `pack.hosts`).
@@ -3202,6 +3306,12 @@ export class BrowserMiddleware {
     let stopStep: number | undefined;
     let lastPoolSize = 0;
     let lastPoolWaitedMs = 0;
+    /** U3：最后一次池空判档（ready 由正常路径覆盖不落此变量；not_ready/ready_empty 进 diagnostics）。 */
+    let lastReadiness: Readiness | null = null;
+    /** U3：ready_empty 的 warning 同一 run 只出一条（步级 flag 每步照记）。 */
+    let readyEmptyWarned = false;
+    /** U3：本 run 是否出现过 ready_empty（池空但已就绪）——进 flags，不改变 done 语言。 */
+    let poolEmptyThisStep = false;
     /** ONE place where the loop decides to stop (D1/D4): sets code + step, and the
      *  human string when given. Every stop site goes through here. */
     const stop = (code: StopCode, detail?: string, at?: number): void => {
@@ -3387,17 +3497,27 @@ export class BrowserMiddleware {
         // 这里只做“pool 非空”这一件事；目标是否存在、动作是否可执行仍由后面分支判断。
         let elems: ElemPool;
         let poolWaitedMs = 0;
+        /** U3：闸门最后一次 settle 的结论与真实预算（判档证据；非池空路径不产生）。 */
+        let gateSettle: SettleResult | null = null;
+        let gateBudgetMs = 0;
         if (poolReady) {
           const readyStarted = Date.now();
-          const readyDeadline = readyStarted + Math.max(0, poolReadyTimeoutMs);
-          elems = await this._extractPoolSettled(pg, candidatePriority);
+          gateBudgetMs = Math.max(0, poolReadyTimeoutMs);
+          const readyDeadline = readyStarted + gateBudgetMs;
+          // C8：每轮 settle 的 timeout 都由 _extractPoolSettled 钳到剩余预算 ⇒ 总等待有真上限
+          // （以前每轮 settle 最长可阻塞到 5s，声明 700ms 的窗口实际可超冲到 ~5.1s）。
+          let ex = await this._extractPoolSettled(pg, candidatePriority, readyDeadline);
+          elems = ex.elems; gateSettle = ex.settle;
           while (Object.keys(elems).length === 0 && Date.now() < readyDeadline) {
-            await sleep(poolReadyPollMs);
-            elems = await this._extractPoolSettled(pg, candidatePriority);
+            const remaining = readyDeadline - Date.now();
+            await sleep(Math.max(0, Math.min(poolReadyPollMs, remaining)));
+            if (Date.now() >= readyDeadline) break;   // 预算耗尽：不再起一轮会越界的 settle
+            ex = await this._extractPoolSettled(pg, candidatePriority, readyDeadline);
+            elems = ex.elems; gateSettle = ex.settle;
           }
           poolWaitedMs = Date.now() - readyStarted;
         } else {
-          elems = await this._extractPoolSettled(pg, candidatePriority);
+          elems = (await this._extractPoolSettled(pg, candidatePriority)).elems;
         }
         lastPoolSize = Object.keys(elems).length;
         lastPoolWaitedMs = poolWaitedMs;
@@ -3419,11 +3539,37 @@ export class BrowserMiddleware {
           pendingAfterIdx = null;
         }
         if (poolReady && Object.keys(elems).length === 0) {
-          stop("page_not_ready",
-            `page not ready: element pool stayed empty after ${poolWaitedMs}ms `
-            + `(poolReadyTimeoutMs=${poolReadyTimeoutMs}) on step ${stepNo}`, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
-          break;
+          // U3 四档判档（§5.3，唯一出处）：池空 ≠ 页面未就绪。
+          //   not_ready    —— 预算耗尽且 settle 未静默 / readyState 未达（真未就绪，保留 run 级停因）；
+          //   ready_empty  —— 预算耗尽但页面已就绪且池为 0（步级事实 + warning，**继续**）；
+          //   strict       —— 逃生口：ready_empty 改判 not_ready（U3 之前的快败行为）。
+          const readiness = await this._poolReadiness(pg, gateSettle, poolWaitedMs, gateBudgetMs, 0);
+          lastReadiness = readiness;
+          const strict = poolGate === "strict";
+          if (readiness.verdict === "not_ready" || strict) {
+            if (strict && readiness.verdict === "ready_empty") readiness.verdict = "not_ready";
+            const ev = readiness.evidence;
+            stop("page_not_ready",
+              `page not ready: element pool stayed empty after ${ev.waited_ms}ms `
+              + `(budget_ms=${ev.budget_ms}, settled=${String(ev.settled)}, `
+              + `settle_timed_out=${String(ev.settle_timed_out)}, readyState=${ev.ready_state}`
+              + `${strict ? ", pool_gate=strict" : ""}) on step ${stepNo}`, stepNo);
+            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            break;
+          }
+          // ready_empty：池空但页面已就绪 = 页面事实，不是未就绪证据。记证据后继续，
+          // 让后续命令/信号给出真正的失败原因（不再整页判死）。
+          poolEmptyThisStep = true;
+          if (!readyEmptyWarned) {
+            readyEmptyWarned = true;
+            warnings.push(
+              `pool_empty: the pool stayed empty although the page is settled and readyState=complete `
+              + `(step ${stepNo}; sniff admitted=${readiness.evidence.sniff?.admitted ?? 0} visible ADMIT_SEL element(s), `
+              + `focusable=${readiness.evidence.sniff?.focusable ?? 0}, aria=${readiness.evidence.sniff?.aria ?? 0}, `
+              + `frames=${readiness.evidence.sniff?.frames ?? 0}, body_text=${readiness.evidence.sniff?.body_text ?? 0}) `
+              + `— continuing; pool_gate:"strict" would stop with page_not_ready`,
+            );
+          }
         }
         // A1 §2.2.3：命令步在解析/动作前评估一次 done 并记录 done_preheld（**决策步不付**这次
         // 评估）。默认不改变执行：既有流程照旧动作，这个记录只回答"动作前信号是否已成立"——
@@ -3536,8 +3682,10 @@ export class BrowserMiddleware {
             // A2：可行动优先的候选列表（`null` 起 = 池里没有这个目标，先做一次 DOM 回捞）。
             let candRefs = this.resolveCommandRef(target, elems, String(c.op), new Set(Object.keys(forbidden)));
             if (candRefs.length === 0 && target !== "" && hintCandidates(target, elems) === null) {
-              for (const [ref, e] of Object.entries(await hintLookup(pg, target))) {
-                if (!scans.has(e.scan)) elems[ref] = e;
+              for (const [ref, e] of Object.entries(await hintLookup(pg, target, admitSelectorWithJsFor(this.surfacePolicy)))) {
+                // U3/C10：回捞去重按**节点身份**（已带 data-dshref = 已在池），不再比 scan 序号——
+                // 回捞面(ADMIT_SEL)与池面(POOL_SEL)两套序号空间本就不可比。
+                if (!e.dsh_ref) elems[ref] = e;
               }
               pruneForbids(elems);
               candRefs = this.resolveCommandRef(target, elems, String(c.op), new Set(Object.keys(forbidden)));
@@ -3640,8 +3788,9 @@ export class BrowserMiddleware {
         let curHint = cmdSpace.length ? null : this.currentHint();
         for (let guard = 0; curHint !== null && guard < 8; guard++) {
           if (hintMatch(curHint, elems) === null) {
-            for (const [ref, e] of Object.entries(await hintLookup(pg, curHint))) {
-              if (!new Set(Object.values(elems).map((x) => x.scan)).has(e.scan)) elems[ref] = e;
+            for (const [ref, e] of Object.entries(await hintLookup(pg, curHint, admitSelectorWithJsFor(this.surfacePolicy)))) {
+              // U3/C10：节点身份去重（见命令路径同一处注释）。
+              if (!e.dsh_ref) elems[ref] = e;
             }
           }
           // drop forbids whose ref now points at a different element
@@ -4323,7 +4472,7 @@ export class BrowserMiddleware {
           // 重抽池：先给重渲染一个短拍（settle 在脏页上会再等静默），再用**同一声明目标**
           // 在新池上重新解析——这就是 r7 弹层"点前节点被替换/重挂载"的确定性修法。
           await sleep(120);
-          const fresh = await this._extractPoolSettled(pg, candidatePriority);
+          const fresh = (await this._extractPoolSettled(pg, candidatePriority)).elems;
           pruneForbids(fresh);
           // 命令目标：按 op 的能力面重新排候选并剔除已禁；act hint：同一 hint 语义重解析。
           let freshRef: string | null = null;
@@ -4630,7 +4779,7 @@ export class BrowserMiddleware {
       // S1 收尾观察：本 run 的 after 指纹。一次池提取，页面不可读时整条省略（不硬造）。
       let afterFp: StateFingerprint | undefined;
       try {
-        const elemsAfter = await this._extractPoolSettled(pg, candidatePriority);
+        const elemsAfter = (await this._extractPoolSettled(pg, candidatePriority)).elems;
         afterFp = await observeState(elemsAfter);
       } catch { afterFp = undefined; }
       // 前进性判定（§2.4）：只在本 run 的**实际事务**上算，done 语言不变。
@@ -4648,6 +4797,7 @@ export class BrowserMiddleware {
         ? Number((actionRows[actionRows.length - 1] as Record<string, unknown>)["step"] ?? 0) || undefined
         : undefined;
       const flags: StateFlag[] = [];
+      if (poolEmptyThisStep) flags.push("pool_empty");
       if (donePreheldSeen) flags.push("done_preheld");
       if (done && observed && attempted > 0 && executedN > 0 && changedN === 0 && !progressed) {
         flags.push("no_state_progress");
@@ -4685,10 +4835,13 @@ export class BrowserMiddleware {
     const diagnostics: RunReport["diagnostics"] | undefined = (
       stoppedCode === "page_not_ready" || stoppedCode === "target_not_found"
       || stoppedCode === "target_ambiguous" || stoppedCode === "action_space_exhausted"
+      // U3：ready_empty 没有停因（步级继续），但"池空且已就绪"是必须落盘的事实。
+      || (lastReadiness !== null && lastReadiness.verdict !== "ready")
     ) ? {
       pool_size: lastPoolSize,
       ...(poolReady ? { waited_ms: lastPoolWaitedMs } : {}),
       ...(viewportUnderloaded !== null ? { viewport_underloaded: viewportUnderloaded } : {}),
+      ...(lastReadiness !== null && lastReadiness.verdict !== "ready" ? { readiness: lastReadiness } : {}),
     } : undefined;
     // A1 动作执行证据汇总（只从 trace 汇总一次，不新增页面往返）：
     //   executed        —— 本子目标是否有动作真的执行（有动作面时必答；缺字段 = 没有动作面）；

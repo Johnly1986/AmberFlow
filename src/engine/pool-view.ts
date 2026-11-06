@@ -19,7 +19,7 @@ export interface PoolElemView {
   frame_origin: string;
   hint_candidates: string[];
   /** 有界附加属性：只有存在且非空时才输出，避免把空串当事实。 */
-  extras: Partial<Record<"name" | "id" | "data_test" | "href" | "input_type" | "role" | "near" | "heuristic", string>>;
+  extras: Partial<Record<"name" | "id" | "data_test" | "href" | "input_type" | "role" | "near" | "heuristic" | "surface", string>>;
 }
 
 export interface PoolView {
@@ -59,6 +59,8 @@ export function poolView(elems: ElemPool, page: PageLike, maxElements: number): 
     }
     // R2：启发式伪按钮标记（宽扫通道专属），审计可辨
     if (e.heuristic === true) extras.heuristic = "true";
+    // U3：类目标记只进 PoolView/inspect/类目计数（不进 ChoiceRequest.elems 的模型投影）。
+    if (typeof e.surface === "string" && e.surface !== "") extras.surface = e.surface;
     const fi = typeof e.frame === "number" ? e.frame : 0;
     return {
       ref: e.ref!,

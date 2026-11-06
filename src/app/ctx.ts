@@ -142,6 +142,12 @@ export interface StepResult {
   /** 运行期诚实性警告（如 suspected_async）。只在产生时出现。 */
   warnings?: string[];
   /**
+   * U3：执行器的结构化诊断（池空判档证据）。只在执行器给出时透出：
+   * `readiness={verdict,evidence}`（verdict==="ready" 时省略；`ready_empty` 也出现）。
+   * 缺字段 = 本步没有这类诊断（旧产物形状不变）。
+   */
+  diagnostics?: RunReport["diagnostics"];
+  /**
    * 工具步（`ctx.run`/`ctx.dangerous`）的**进程输出**：stdout/stderr 各截断到 8KB，
    * 超过上限时 `truncated: true`（全文在 outDir 的工具步工件里，见 `artifact`）。
    * 缺字段 = 这不是工具步、或该步没有任何进程输出（旧脚本行为逐字节不变）。
@@ -503,6 +509,10 @@ export interface CtxDeps {
   poolReadyTimeoutMs?: number;
   /** pool ready gate 轮询间隔（毫秒；缺省 100）。 */
   poolReadyPollMs?: number;
+  /** U3：池空判档（缺省 fact；strict = U3 之前的 page_not_ready 快败）。 */
+  poolGate?: "fact" | "strict";
+  /** U3：surface 类目策略（缺省 native_activation="window"）。 */
+  surfacePolicy?: { native_activation?: "window" | "resolve" | "off" };
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -858,6 +868,8 @@ export function createCtx(deps: CtxDeps): Ctx {
       poolReady: true,
       ...(deps.poolReadyTimeoutMs === undefined ? {} : { poolReadyTimeoutMs: deps.poolReadyTimeoutMs }),
       ...(deps.poolReadyPollMs === undefined ? {} : { poolReadyPollMs: deps.poolReadyPollMs }),
+      ...(deps.poolGate === undefined ? {} : { poolGate: deps.poolGate }),
+      ...(deps.surfacePolicy === undefined ? {} : { surfacePolicy: deps.surfacePolicy }),
       ...(req.timeoutMs === undefined
         // 04-F：步级 timeoutMs 以前声明了却从未接进执行器——现在映射到该步的 done 等待上限
         // （本次显式 > meta.policy.done_timeout_ms）。它约束的是"动作后等信号成立"的窗口，
@@ -914,6 +926,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       ...(rep.forced === undefined ? {} : { forced: rep.forced }),
       ...(rep.done_preheld === undefined ? {} : { done_preheld: rep.done_preheld }),
       ...(rep.warnings === undefined ? {} : { warnings: rep.warnings }),
+      ...(rep.diagnostics === undefined ? {} : { diagnostics: rep.diagnostics }),
       // S1 状态记录：执行器只在本 run 有观察时给；原样透出（dry 面另有合成值）。
       ...(rep.state === undefined ? {} : { state: rep.state }),
     };
@@ -944,6 +957,7 @@ export function createCtx(deps: CtxDeps): Ctx {
         ...(result.forced === undefined ? {} : { forced: result.forced }),
         ...(result.done_preheld === undefined ? {} : { done_preheld: result.done_preheld }),
         ...(result.warnings === undefined ? {} : { warnings: result.warnings }),
+        ...(result.diagnostics === undefined ? {} : { diagnostics: result.diagnostics }),
         ...(result.state === undefined ? {} : { state: result.state }),
       },
     });

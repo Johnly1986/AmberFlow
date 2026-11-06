@@ -283,6 +283,12 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     say(ctx, `${data.title} — ${data.url}`);
     say(ctx, `元素 ${data.element_count} 个${data.truncated ? `（只显示前 ${max}）` : ""}`);
     say(ctx, "（hints 可直接当 --hint / ctx.hint 用——不是 CSS；href 等字段是池投影，仅供识别）");
+    const surfaceLine = Object.entries(windowInfo.surface_counts)
+      .map(([k, v]) => `${k} ${v}`).join("、");
+    if (surfaceLine) {
+      // U3：按类目计数（ADMIT_SEL 可见口径）——区分"页面没有交互事实"与"准入面没覆盖"。
+      say(ctx, `ℹ 可见类目计数：${surfaceLine}（准入面；池只展示 ${view.count} 个）`);
+    }
     if (windowInfo.out_of_window_total > 0) {
       const examples = windowInfo.out_of_window
         .slice(0, 3)
@@ -292,11 +298,15 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
         + `，例如 ${examples}——宽扫/收窄 hint 或直接观察目标；窗口不是页面事实，别把"不在池"读成"不存在"`);
     }
     if (nearEmpty) {
-      // 措辞按实测分开：页面上有交互元素而池没收进来 = 池投影问题；页面上一个都没有 =
-      // SPA 未水合/渲染进 shadow DOM——前者试 --wide，后者宽扫也救不了，直接走探针/运行时取证。
-      say(ctx, interactiveOnPage > 0
-        ? `⚠ 主池近空而页面上有 ${interactiveOnPage} 个交互元素（池投影盲区）：试 --wide --pool，或 1 步探针应用先行（见 docs/APP_SCRIPT_AUTHORING.md 快速路径）`
-        : "⚠ 主池为空且页面未渲染出交互元素（重 JS SPA 未水合或渲染进 shadow DOM）：宽扫也难救，直接 1 步探针应用先行（arrive + read，见 docs/APP_SCRIPT_AUTHORING.md 快速路径）");
+      // U3：文案引用 sniff 证据（ADMIT_SEL 可见计数 / 窗口外 / 类目），区分两种事实：
+      //   ① 页面**有**准入面覆盖的交互元素而池没收进来 = 窗口/投影问题（池口径，不是不可点击）；
+      //   ② 页面没有可见的准入面候选 = 未水合/只落在准入面之外（[tabindex] 等）——宽扫也难救。
+      // 措辞红线沿用：只说「池无法指向」，不说「不可点击/不存在」。
+      const admittedVisible = windowInfo.visible_interactive;
+      const counts = Object.entries(windowInfo.surface_counts).map(([k, v]) => `${k}=${v}`).join(", ") || "none";
+      say(ctx, admittedVisible > 0
+        ? `⚠ 主池近空而准入面可见 ${admittedVisible} 个（surface: ${counts}；窗口外 ${windowInfo.out_of_window_total}）：池投影/窗口问题，不是页面没有——试 --wide --pool，或 1 步探针应用先行（见 docs/APP_SCRIPT_AUTHORING.md 快速路径）`
+        : `⚠ 主池为空且准入面 0 个可见候选（surface: ${counts}; interactive_on_page=${interactiveOnPage}）：页面未渲染出可动作事实或只落在准入面之外（如仅 [tabindex]）——宽扫也难救，直接 1 步探针应用先行（arrive + read，见 docs/APP_SCRIPT_AUTHORING.md 快速路径）`);
     }
     for (const e of elements) {
       say(ctx, `  ${e.ref.padEnd(6)} ${e.tag.padEnd(8)} ${e.label.slice(0, 60)}`

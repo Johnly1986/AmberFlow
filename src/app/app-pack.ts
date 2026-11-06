@@ -181,6 +181,8 @@ export const POLICY_KEYS = [
   "done_preheld", "effect_readback",
   // S2：抽池前的稳定门（缺省开启；"off" 关闭）。
   "settle",
+  // U3：池空判档（缺省 "fact"；"strict" = U3 之前的 page_not_ready 快败）+ surface 类目策略。
+  "pool_gate", "surface",
   // S5：状态接入决策（gate/context 两项都缺省 off = 行为不变）。
   "decision_state",
 ] as const;
@@ -248,6 +250,25 @@ export interface PackPolicy {
    * 未知子键在加载期拒绝（写了就要生效）。
    */
   settle?: { quiet_ms?: number; timeout_ms?: number } | "off";
+  /**
+   * U3 池空判档（**只在 flow 脚本面生效**：`ctx.step` 开 poolReady；journey/plan 面
+   * `poolReady=false`，本键不适用）：
+   *   - `"fact"`（缺省）：池空但 settle 静默且 readyState=complete ⇒ `ready_empty`：
+   *     step 记 `flags:["pool_empty"]` + 一条 warning 后**继续**（不再整页判死）；
+   *   - `"strict"`：池空 = `page_not_ready`（U3 之前的逐字节行为，逃生口）。
+   */
+  pool_gate?: "fact" | "strict";
+  /**
+   * U3 surface 类目策略（声明面）：
+   *   - `native_activation: "window"`（缺省）——`<summary>` 进元素池，受类目 cap=6 约束；
+   *   - `"resolve"`——进**准入面**但不入窗口：决策步看不到 summary（池=0），但命令 target / 声明
+   *     `target_hint` 仍可按身份经 DOM 回捞命中并执行（FW5 实测：`#sum` 可点、changed=true）；
+   *   - `"off"`——池构成回到 U3 之前（逃生口，A/B 对照臂）。
+   * 未知子键在加载期拒绝（写了就要生效）。
+   */
+  surface?: {
+    native_activation?: "window" | "resolve" | "off";
+  };
   /**
    * S5 状态接入决策（**两项缺省都 off = 行为不变**；A/B 开关，见方案 §2.5/§4 S5）。
    *   - `gate: "stable_only"`：模型 ask 之前先检查状态游标——
@@ -1168,6 +1189,27 @@ export function validatePack(pack: AppPack,
       const cp = pol["candidate_priority"];
       if (cp !== undefined && cp !== "bucketed" && cp !== "main-first") {
         p.push('policy.candidate_priority: must be one of "bucketed" | "main-first"');
+      }
+      // U3：两个新策略键与 settle 同待遇——dry/apps check 期就校验，写了就要生效。
+      const pg = pol["pool_gate"];
+      if (pg !== undefined && pg !== "fact" && pg !== "strict") {
+        p.push('policy.pool_gate: must be one of "fact" | "strict"');
+      }
+      const sf = pol["surface"];
+      if (sf !== undefined) {
+        if (!isDict(sf)) {
+          p.push("policy.surface: must be an object { native_activation?: \"window\" | \"resolve\" | \"off\" }");
+        } else {
+          for (const k of Object.keys(sf)) {
+            if (k !== "native_activation" && !k.startsWith("_")) {
+              p.push(`policy.surface.${k}: unknown key (known: native_activation)`);
+            }
+          }
+          const na = sf["native_activation"];
+          if (na !== undefined && na !== "window" && na !== "resolve" && na !== "off") {
+            p.push('policy.surface.native_activation: must be one of "window" | "resolve" | "off"');
+          }
+        }
       }
       // S1 状态层：两个新键同样在加载期响亮拒绝（未知键逻辑不变，已知面只增）。
       const dp = pol["done_preheld"];
