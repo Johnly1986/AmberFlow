@@ -1062,6 +1062,20 @@ export function createCtx(deps: CtxDeps): Ctx {
       throw new StopError("config_error", "ctx.run: the declaration form needs an object like { stdio: {...}, done: {...} }");
     }
     const done = step["done"];
+    // T7 同族：`signal` 是 **journey** 的词，flow 的声明形式用 `done`。以前写了
+    // `signal: {...}` 会被 `req.done` 静默忽略，报错退化成 "done signal is required"
+    // ——用户会去补一个已经"写了"的东西。显式命名冲突，点名改法。
+    const straySignal = step["signal"];
+    if (straySignal !== undefined && done === undefined) {
+      throw new StopError("config_error",
+        "ctx.run: flow 的声明形式用 done（journey 用 signal）；把 signal 改名为 done，"
+        + "例如 { stdio: {...}, done: { stdout_contains: \"ok\" } }");
+    }
+    if (straySignal !== undefined && done !== undefined) {
+      throw new StopError("config_error",
+        "ctx.run: 声明块同时写了 signal 和 done——flow 的声明形式只认 done（signal 是 journey 的词）；"
+        + "删掉 signal，或把它改名为 done");
+    }
     if (done === undefined || done === null || typeof done !== "object") {
       throw new StopError("config_error", "ctx.run: done signal is required (completion is the process observation)");
     }

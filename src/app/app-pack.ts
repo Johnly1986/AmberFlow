@@ -1127,7 +1127,10 @@ export function validatePack(pack: AppPack,
           ...pack.journey.flatMap((e) => (isDict(e) && isDict(e["slots"]) ? Object.keys(e["slots"]) : [])),
           ...Object.values(roles).flatMap((r) => (isDict(r) && isDict(r["slots"]) ? Object.keys(r["slots"]) : [])),
         ]);
-        p.push(...rules.problems(plan, { extraIds: journeyIds, slotKeys }).map((x) => `plan: ${x}`));
+        // 声明式 journey 里工具步的 returns/ctx.run 就是数据集产者——`{from:"dataset"}`
+        // 在这面合法；计划面（plan run 无注入入口）由 plan.problems 默认 fail closed。
+        p.push(...rules.problems(plan, { extraIds: journeyIds, slotKeys, allowDatasetBindings: true })
+          .map((x) => `plan: ${x}`));
       }
     } catch (e) {
       p.push(`plan: ${e instanceof Error ? e.message : String(e)}`);

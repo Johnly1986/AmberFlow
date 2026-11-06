@@ -292,9 +292,20 @@ export function validateSignalSpec(
       }
       const arity = grammar.ops[op]!;
       if (arity === 0) continue;
-      if (signalArgs(args).length !== arity) {
+      const operands = signalArgs(args);
+      if (operands.length !== arity) {
         problems.push(`${at}: ${op} needs ${arity} argument(s)`);
       }
+      // 真空操作数（U4）：空串/纯空白不是"某个值"，而是**没有值**——`url_contains:""`
+      // 对任何页面恒真，`css_exists_text:["#h1",""]` 只差 selector 存在，完成信号=门禁被掏空。
+      // 数字 `0` / 布尔 `false` 是合法值，不在此列；arity 0 的叶子（manual/exit_ok）不看值。
+      operands.forEach((v, i) => {
+        if (typeof v !== "string" || v.trim() !== "") return;
+        problems.push(`${at}: ${op} operand ${i} is an empty string`
+          + ` — 空操作数把信号退化成恒真/恒假（url_contains:"" 在任何页面都成立），`
+          + `完成信号=门禁被掏空；换成真实值，如 url_contains:"page2"、`
+          + `css_value_equals:["#i","0"]（0 / false 本身是合法值）`);
+      });
     }
   };
   walk(spec, where);

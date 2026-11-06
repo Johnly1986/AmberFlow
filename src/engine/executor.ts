@@ -3699,6 +3699,31 @@ export class BrowserMiddleware {
           ruleRef = curHint
             ? affordanceRule(instruction, elems, curHint)
             : (navRule(instruction, orderedPool()) ?? affordanceRule(instruction, orderedPool(), null));
+          // U5（W10）：rules-only 没有模型可回退，也就没有决策脸的"低置信宽扫重看"那一级。
+          // 声明的 target_hint 若落在常规 40 窗口之外（分页链接/长列表底部），规则直接未命中，
+          // 3 attempts 后 target_not_found —— 明明页面上就在那儿。
+          // 这里补**一次**宽扫重解析：120 元素、main-first（与决策脸的加宽恢复同预算档），
+          // hintMatch 是确定性的，命中即用、不猜；常规窗口内命中时这条路一步都不走（零多付），
+          // 决策脸路径不变（由 rulesOnly 门住）。不放大 attempts、不引入模型。
+          if (ruleRef === null && this.rulesOnly && curHint !== null && !reobserved) {
+            reobserved = true;
+            await this._settleBeforeExtract(pg);
+            const wide = await extractElements(pg, true, WIDER_ELEMENTS,
+              { widgets: true, candidatePriority: "main-first" });
+            if (Object.keys(wide).length > Object.keys(elems).length) {
+              // refs 是位置性的：先把"换位后已不是同一元素"的禁用记录清掉（与步头同规则）。
+              pruneForbids(wide);
+              const wideRef = affordanceRule(instruction, wide, curHint);
+              if (wideRef !== null && !(wideRef in forbidden)) {
+                elems = wide;
+                ruleRef = wideRef;
+                if (verbose) {
+                  console.log(`  step ${stepNo}: rules-only re-scanned wider `
+                    + `(${Object.keys(wide).length} elements) -> ${wideRef}`);
+                }
+              }
+            }
+          }
         }
         // re-admit refs whose only sin was being covered at an earlier step, but
         // ONLY after this subgoal actually executed something since the block

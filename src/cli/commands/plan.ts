@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { PlanningRules, TaskPlan, type Subgoal } from "../../engine/plan.ts";
 import type { SignalSpec } from "../../engine/signals.ts";
+import { validateSignalSpec } from "../../engine/signals.ts";
 import { cmdNew, parseSignal, probePlan, type CliIO } from "../plan-cli.ts";
 import type { CliContext } from "../context.ts";
 import { say, emitJson } from "../context.ts";
@@ -99,6 +100,16 @@ function signalFrom(v: Record<string, string | boolean | undefined>, required: b
     }
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       throw usageError("--signal-file 顶层必须是信号对象");
+    }
+    // U4（P3 同族：写路径也要校验）：JSON 文件是手编入口，坏信号必须在**写入前**拒绝，
+    // 不能先落盘、再等 `plan check`/运行期才发现。与 --signal 走同一份语法校验。
+    const problems = validateSignalSpec(parsed, "--signal-file");
+    if (problems.length) {
+      throw usageError(`--signal-file 的信号不合法：${problems.join("；")}`, {
+        hint: "空操作数会让信号恒真（门禁被掏空）；换成真实值，如 "
+          + '{"url_contains":["page2"]}、{"css_value_equals":["#i","0"]}、{"not":{"url_contains":"login"}}。',
+        next: ["amber plan add \"...\" --signal url_contains=page2"],
+      });
     }
     return parsed as SignalSpec;
   }

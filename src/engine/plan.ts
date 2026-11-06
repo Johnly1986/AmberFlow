@@ -206,8 +206,13 @@ export class PlanningRules {
    * @param opts.slotKeys - 已知的数据袋键。给了就顺带校"命令绑定的键必须声明过"——
    *   槽位名打错在运行期才变成 `needs_value` 已经太晚（D6：配置类错误要在加载期红）。
    *   不传（计划 CLI 那条路）时不做这项检查，旧行为不变。
+   * @param opts.allowDatasetBindings - 允许 `{from:"dataset"}` 绑定。**只有声明式应用 journey**
+   *   该传 true：它有产者（旅程里工具步的 `returns` / `ctx.run` 的 returns 写运行级数据集）。
+   *   计划面不传 = fail closed——plan run 没有数据集注入入口，放行就是纸面承诺。
    */
-  problems(plan: TaskPlan, opts: { extraIds?: ReadonlySet<string>; slotKeys?: ReadonlySet<string> } = {}): string[] {
+  problems(plan: TaskPlan, opts: {
+    extraIds?: ReadonlySet<string>; slotKeys?: ReadonlySet<string>; allowDatasetBindings?: boolean;
+  } = {}): string[] {
     const issues: string[] = [];
     if (plan.subgoals.length > this.maxSubgoals) {
       issues.push(`${plan.subgoals.length} subgoals exceed max ${this.maxSubgoals}`);
@@ -285,6 +290,21 @@ export class PlanningRules {
       // not mid-run. Absent `commands` adds nothing (default-equivalence).
       if (s.commands !== undefined) {
         validateCommands(s.commands, tag, issues, opts.slotKeys);
+        // T2 双面收口：`validateCommands`（也是 app 包共用的那个校验器）只认绑定**形状**，
+        // 而 `{from:"dataset"}` 在**计划面**没有任何产者——dataset 由应用 journey/`ctx.run`
+        // 的 `returns` 写入运行级 DatasetStore，plan run 没有注入入口 ⇒ 结构性不可满足。
+        // 放行它等于纸面承诺（R14 WrongCity 对照实证）。故在计划面 fail closed；
+        // 声明式 app journey 有产者，调用方传 allowDatasetBindings=true（同一函数语义不变）。
+        if (!opts.allowDatasetBindings && Array.isArray(s.commands)) {
+          for (const c of s.commands as unknown as Array<Record<string, unknown>>) {
+            const value = c?.["value"] as Record<string, unknown> | undefined;
+            if (value?.["from"] !== "dataset") continue;
+            const cid = typeof c["id"] === "string" ? JSON.stringify(c["id"]) : "?";
+            issues.push(`${tag}.commands[${cid}]: plan 面没有数据集产者——数据集值由应用 `
+              + `journey/ctx.run 的 returns 写入；plan 请改用 {from:"slot"}`
+              + `（或把该步放进 app 脚本）`);
+          }
+        }
       }
       // A2′：`adjudicate` 的资格是**声明**出来的，加载期就钉死（配置类错误不许拖到运行期）：
       // ① 必须显式 `effect.irreversible === false`——不可逆/没声明可逆性的步绝不能放开模型；

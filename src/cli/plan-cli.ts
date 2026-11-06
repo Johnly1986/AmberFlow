@@ -21,7 +21,7 @@
 import { parseArgs } from "node:util";
 import { PlanningRules, TaskPlan } from "../engine/plan.ts";
 import { runPlan, type PlannerLike } from "../engine/planner.ts";
-import { SIGNAL_OPS, checkSignal, type SignalSpec } from "../engine/signals.ts";
+import { SIGNAL_OPS, checkSignal, validateSignalSpec, type SignalSpec } from "../engine/signals.ts";
 import { browserSession, BrowserMiddleware, type EscalatorLike } from "../engine/executor.ts";
 import { extractElements } from "../engine/extraction.ts";
 import { getAuditor, type AuditVerdict } from "../engine/audit.ts";
@@ -50,10 +50,27 @@ export function parseSignal(s: string): SignalSpec {
   if (!(op in SIGNAL_OPS)) {
     throw new Error(`unknown signal op '${op}'; valid: ${Object.keys(SIGNAL_OPS).join(", ")}`);
   }
-  if (SIGNAL_OPS[op] === 1) return { [op]: [val] };
-  if (!val.includes("|")) throw new Error(`${op} needs 'selector|value'`);
-  const [sel, ...rest] = val.split("|");
-  return { [op]: [sel, rest.join("|")] };
+  const arity = SIGNAL_OPS[op]!;
+  // arity 0（`manual`）是无参叶子：不看值，也不能被下面的 `selector|value` 分支误杀。
+  // 写成 `{manual: true}` 与应用层文档同形（值是声明存在，不是可校验参数）。
+  if (arity === 0) return { [op]: true };
+  let spec: SignalSpec;
+  if (arity === 1) {
+    spec = { [op]: [val] };
+  } else {
+    if (!val.includes("|")) throw new Error(`${op} needs 'selector|value'`);
+    const [sel, ...rest] = val.split("|");
+    spec = { [op]: [sel, rest.join("|")] };
+  }
+  // U4：解析期就拒绝真空操作数——手写 `--signal url_contains=` / `text=#h1|` 曾经被
+  // 静默接受，运行期该信号恒真 ⇒ 零动作假过。语法只有一份（validateSignalSpec）。
+  const problems = validateSignalSpec(spec, "signal");
+  if (problems.length) {
+    throw new Error(`${problems[0]}；合法写法：`
+      + `--signal url_contains=page2 / --signal css_exists=#main / `
+      + `--signal css_exists_text=#h1|Saved / --signal css_value_equals=#i|0 / --signal manual`);
+  }
+  return spec;
 }
 
 function loadPlan(file: string): TaskPlan {

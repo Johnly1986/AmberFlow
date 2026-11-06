@@ -429,6 +429,19 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       if (step === null || typeof step !== "object" || Array.isArray(step)) {
         throw new StopError("config_error", "ctx.run: the declaration form needs an object");
       }
+      // T7 同族（与运行期 ctx.ts 同文案）：flow 的声明形式用 done，signal 是 journey 的词；
+      // 静默忽略会让报错退化成 "done signal is required"，误导用户去补一个已经"写了"的键。
+      const straySignal = step["signal"];
+      if (straySignal !== undefined && step["done"] === undefined) {
+        throw new StopError("config_error",
+          "ctx.run: flow 的声明形式用 done（journey 用 signal）；把 signal 改名为 done，"
+          + "例如 { stdio: {...}, done: { stdout_contains: \"ok\" } }");
+      }
+      if (straySignal !== undefined && step["done"] !== undefined) {
+        throw new StopError("config_error",
+          "ctx.run: 声明块同时写了 signal 和 done——flow 的声明形式只认 done（signal 是 journey 的词）；"
+          + "删掉 signal，或把它改名为 done");
+      }
       if (step["done"] === undefined || typeof step["done"] !== "object" || step["done"] === null) {
         throw new StopError("config_error", "ctx.run: done signal is required");
       }
