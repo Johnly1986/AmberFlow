@@ -128,8 +128,11 @@ export function agentRunStatus(result: AppRunResult, partial: boolean, dry: bool
   if (manual) return "needs_human";
   if (result.script?.stop_code === "needs_human") return "needs_human";
   const blocked = (result.subgoals ?? []).some((s) => (s as Record<string, unknown>)["status"] === "blocked");
-  const failedTools = (result.tool_steps ?? []).some((t) => !t.ok && !t.refused);
-  const refused = (result.tool_steps ?? []).some((t) => t.refused !== undefined);
+  // FW3：flow 脚本路径的工具步失败由**脚本**决定是否致命（`ctx.run` 返回 ok:false，不抛）。
+  // 脚本已经处理并跑绿时，不能仅凭"有过一个失败工具步"把整次运行报成 blocked——声明式
+  // 路径上 toolsOk 直接决定 ok，所以 `result.ok` 这个前置条件不改变它的语义。
+  const failedTools = !result.ok && (result.tool_steps ?? []).some((t) => !t.ok && !t.refused);
+  const refused = !result.ok && (result.tool_steps ?? []).some((t) => t.refused !== undefined);
   if (blocked || failedTools) return "blocked";
   if (refused) return "blocked";
   // 执行预算用满 = 主动停在半路：不变量没求值不是“失败”，是这次只跑了前 N 步。

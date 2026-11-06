@@ -241,7 +241,7 @@ export async function flow(ctx) {
 | 观察 | `ctx.url()` / `ctx.read.{text,value,count,attr}(sel[, attr])` / `ctx.holds(signal)` / `ctx.waitFor(signal, {timeoutMs?, pollMs?})` | 只读；读不到返回 `null` / `0`；`waitFor` 轮询到 bounded deadline，返回 boolean；`url()` 首次导航前是 `"about:blank"`，别拿它当入口页判断 |
 | 站点面 | `ctx.openPage(role)` / `ctx.extract(nameOrSpec)` / `ctx.rows(...)`（v1 关闭） | 具名抽取声明在 `meta.site.listExtract`；inline 抽取用 `{ rows, fields, maxItems? }`（例：`ctx.extract({ rows: "li.item", fields: { title: ".title" } })`，无需 meta 声明）；`rows` 调用给结构化错误 |
 | 数据 | `ctx.source(name, {dates?})` / `ctx.data.{min,max}(rows, by)` | 数据腿按需拉取；`--skip-data` 时 `source` 报结构化错误。`dates` 显式给本次范围（单日 / `A..B` / `next_week`）；缺省按 source JSON 的 `default_dates`（支持 `"{slot}"` 占位符，从包默认 + `--slot` 解析；不许引用 `source_slots` 产物）。观察视图 `byDate` 按日期保留完整 counts/selects/rows |
-| 进程 | `ctx.run(...)` / `ctx.dangerous({...dryRunArgs})` | 见 §6；危险步默认拒绝 |
+| 进程 | `ctx.run(...)` / `ctx.dangerous({...dryRunArgs})` | 见 §4.8（`returns` → 数据集、工件、失败诊断）；危险步默认拒绝 |
 | 构造器 | `ctx.judge.*` / `ctx.tool.*` / `ctx.hint()` / `ctx.hints()` / `ctx.command()` / `ctx.value.*` | 与 `kit` 同一份实现；命令 op 见下 |
 | 收尾 | `ctx.done()` | 结束态不变量验收；之后不允许再有动作 |
 | 终止 | `ctx.fail(code, reason?)` | 抛结构化 `StopError`，退出码/状态走引擎既有分类，不抛裸栈 |
@@ -466,6 +466,52 @@ export const meta = (kit) => ({
 两项可以同时开：闸门省掉的 ask 不会产生 digest 请求，所以 `context_skipped` 不会因此虚高。
 
 **完整示例**：`examples/apps/05-done-evidence`（零动作命令 + `forceAct:true` + 证据判读，dry 可校验）。
+
+### 4.8 进程步 `ctx.run`：`returns` → 数据集、工件与失败诊断（FW3）
+
+进程步（`cli` / `ssh` / `stdio`，声明形式 `adapter` 缺省 `cli`）的完成真值仍是进程观察
+（exit/stdout/stderr/产物）。FW3 起，**flow 脚本路径与声明式旅程共用同一份运行级数据集**，
+所以 `ctx.run` 的 `returns` 真的能被后续命令步消费：
+
+```js
+// ① 产出：声明式抽取（stdout / exit_code / stdout_regex / stderr_regex），只在信号成立后执行。
+const produced = await ctx.run({
+  id: "produce-name",                     // 可选：稳定步标识；缺省用 desc
+  desc: "produce NAME",
+  stdio: {
+    argv: ["/bin/sh", "-c", "printf 'NAME=from-tool\\n'"],
+    script: [{ when: "NAME=", send: "" }],
+  },
+  done: { exit_ok: true },                // flow 面的完成信号键是 done（journey 面叫 signal）
+  returns: { NAME: { from: "stdout_regex", pattern: "NAME=(\\S+)" } },
+});
+if (!produced.ok) ctx.fail(produced.stopCode ?? "tool_failed", produced.reason);
+// produced.output = { code, stdout, stderr, truncated? }（stdout/stderr 各截断到 8KB）
+// produced.artifact = "tool-steps/01-produce-NAME.json"（相对 <outDir>；已按 secretSlots 掩码）
+
+// ② 消费：命令步的值绑定直接读数据集（唯一来源仍是声明面，模型不参与选值）。
+const filled = await ctx.step("用数据集的值填 input", {
+  act: [ctx.command("fill", "#name", { from: "dataset", key: "NAME" })],
+  done: ctx.judge.value("#name", "from-tool"),
+});
+```
+
+- **`returns` 只认既有 `ReturnExtractor`**（`stdout` / `exit_code` / `stdout_regex` /
+  `stderr_regex`）；坏声明 = 结构化 `config_error`，抽取不到 = 该名字**不写入**（如实缺席，
+  下游得到 `needs_value`，不猜）。
+- **`writtenBy = <id|desc>#<attempts>`**（如 `produce-name#1`），与声明式路径同一形状；
+  只在 `ok === true` 时写。`result.dataset_view` 是审计视图（key/value/writtenBy/generation/stale）。
+- **工件**：每个工具步在 `<outDir>/tool-steps/<序号>-<safe-desc>.json` 落一份
+  `{desc, source, adapter?, args/argv, code, ok, stop_code?, attempts, elapsed_ms, stdout, stderr, truncated?}`；
+  文件名 slug 只允许 `[A-Za-z0-9._-]`（desc 是自由文本，防路径注入），写盘前用与
+  result/trace/report 同一个 `scrubSecrets` 掩码（`meta.secretSlots` 的值 → `***`）。
+  写盘失败不改变工具步结论（只是 `artifact` 键缺席）。
+- **result 投影**：`tool_steps`（脚本路径也非空）至少含 `desc/source/ok/code/attempts/
+  elapsed_ms/artifact`，失败时带 `stderr_tail`；`sources` 记录本次 `ctx.source()` 的名字与行数
+  （`counts`/`selects`）；没有工具步/数据腿时这两个键的形状与旧产物一致（`[]`；`dataset_view` 缺席）。
+- **失败诊断**：`StepResult.reason` 是 `<stop_code>: exit <code> — <stderr 尾行>`（无退出码时省略
+  exit 段），trace 事件的 `result` 带 `code / stderr_tail / artifact`——不再是空壳。脚本仍可用
+  `r.ok` 分支处理失败；直接结束就用 `ctx.fail(r.stopCode ?? "tool_failed", r.reason)`。
 
 ## 5. 站点面：`meta.site`
 

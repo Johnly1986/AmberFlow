@@ -66,7 +66,7 @@ import {
   type AppPack, type ExpandedStep, type PackPace, type PackPolicy, type SourceObservation,
 } from "./app-pack.ts";
 import {
-  getAppAdapter, substituteDatasetPlaceholders,
+  extractProcessReturns, getAppAdapter, substituteDatasetPlaceholders,
   type AdapterRunContext, type ManualStepDecl, type ManualStepRequest, type ManualStepRun,
 } from "./app-adapters.ts";
 import { validateApp } from "./cross-ref.ts";
@@ -78,6 +78,7 @@ import {
   finishTrace, inputsSha256, newTrace, readTrace, replayCompatibility, writeTrace, type AppTrace,
 } from "./trace.ts";
 import { DatasetStore, type DatasetEntry } from "../engine/dataset.ts";
+import { capToolText, writeToolStepArtifact } from "./tool-artifact.ts";
 import { createPathWalk, DEFAULT_MAX_STEP_VISITS } from "../engine/plan.ts";
 // 规划引导：run 失败时按停因给一行「下一步建议」（唯一出处 planning-playbook.ts，
 // 只进 report.md 与 stdout，不动 result JSON 契约——桥解析零风险）。
@@ -466,8 +467,10 @@ export interface ToolStepResult {
   index: number;
   desc: string;
   source: string;
-  signal: ToolSignal;
-  argv: string[];
+  /** 声明式 journey 的 cli/ssh/stdio 步有完整进程事实；flow 脚本路径的投影从 trace 事件
+   *  重建，只有声明面拿到的那部分（`signal`/`argv`/`dry_run` 不硬造，缺省缺席）。 */
+  signal?: ToolSignal;
+  argv?: string[];
   attempts: number;
   done: boolean;
   /** 显式拒绝的原因：`dangerous`（没允许）/ `declined`（确认函数说不）/ `dry-run-failed` */
@@ -480,13 +483,19 @@ export interface ToolStepResult {
    *                       这是**结果**不是崩溃——上层要能在结果 JSON 里读到它。
    */
   refused?: "dangerous" | "declined" | "dry-run-failed" | "tool-unavailable" | "needs_value" | "config_error";
-  dry_run: { code: number; ok: boolean; stdout: string; argv: string[] } | null;
+  dry_run?: { code: number; ok: boolean; stdout: string; argv: string[] } | null;
   code: number | null;
   ok: boolean;
-  stdout: string;
-  stderr: string;
+  stdout?: string;
+  stderr?: string;
   /** Slice 2：本步信号成立后抽取出的返回值（runner 同时写进运行级数据集）。 */
   returns?: Record<string, unknown>;
+  /** T1：工具步工件在 outDir 内的相对路径（`tool-steps/01-….json`；缺省 = 没有工件）。 */
+  artifact?: string;
+  /** T1/T6：本步耗时（毫秒；flow 脚本路径的投影必有，声明式路径缺省）。 */
+  elapsed_ms?: number;
+  /** T6：stderr 尾部摘要（有界；失败诊断与 trace 的 `stderr_tail` 同源）。 */
+  stderr_tail?: string;
 }
 
 export interface AppInvariantResult {
@@ -1835,10 +1844,15 @@ export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): st
     }
     L.push("", "<details><summary>工具步的原始观察（argv / stdout 摘要）</summary>", "");
     for (const t of r.tool_steps) {
-      L.push(`- \`${t.source}\` argv: \`${t.argv.join(" ")}\``);
+      // flow 脚本路径的投影没有 argv（声明面只有 desc/source/args），不硬造空字符串。
+      if (t.argv !== undefined) L.push(`- \`${t.source}\` argv: \`${t.argv.join(" ")}\``);
+      else L.push(`- \`${t.source}\`（flow 工具步；argv 未投影，原始观察见工件）`);
       if (t.dry_run) L.push(`  - dry-run argv: \`${t.dry_run.argv.join(" ")}\``);
       if (t.stdout) L.push(`  - stdout: ${JSON.stringify(t.stdout.slice(0, 200))}`);
+      else if (t.stderr_tail) L.push(`  - stderr（尾行）: ${JSON.stringify(t.stderr_tail)}`);
       if (t.stderr) L.push(`  - stderr: ${JSON.stringify(t.stderr.slice(0, 200))}`);
+      if (t.artifact !== undefined) L.push(`  - 工件: \`${t.artifact}\`（stdout/stderr 全文，已掩码）`);
+      if (t.elapsed_ms !== undefined) L.push(`  - 耗时: ${t.elapsed_ms} ms`);
     }
     L.push("", "</details>");
   }
@@ -2020,6 +2034,13 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   const verbose = opts.verbose !== false;
   // 节奏：CLI 显式 > meta.pace > 环境变量 > 0；与 runApp 共用同一个解析实现。
   const pace = resolvePace(pack, opts);
+  /**
+   * T2：运行级数据集**在脚本路径也有一份**（以前只有声明式旅程创建它）——
+   * `ctx.run` 的 `returns` 写这里、`ctx.step` 的命令值 `{from:"dataset"}` 从这里现读。
+   * 与 `runApp` 同一个 `DatasetStore` 实现、同一条 generation/失效纪律（不另造一套）。
+   */
+  const dataset = opts.dataset ?? new DatasetStore();
+
 
   let ok = false;
   let stopCode: string | undefined;
@@ -2109,6 +2130,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         mwHolder.current = new BrowserMiddleware({
           modelId: pack.model ?? "english",
           auditor: new MockAuditor(),
+          // T2：命令步的 `{from:"dataset",key:…}` 从这里现读（与声明式旅程同一份 store）。
+          dataset,
           hosts: (pack.hosts ?? null) as string[] | null,
           maxSteps: 8,
           confFloor: resolvedPolicy.policy.conf_floor.value,
@@ -2143,6 +2166,38 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       }
       return mwHolder.current;
     };
+    /**
+     * T1：工具步工件序号（每次 flow 运行从 1 起；只用于**文件名**，不是步骤 id）。
+     * T1：把一次工具步的进程观察落成工件（`scrubSecrets` 掩码 → `outDir/tool-steps/NN-slug.json`）。
+     * 返回相对 outDir 的 posix 路径；写不了就返回 undefined（工件失败不改变工具步结论）。
+     */
+    let toolStepSeq = 0;
+    const writeToolArtifact = (
+      started: number,
+      desc: string,
+      source: string,
+      adapter: string | undefined,
+      obs: {
+        code: number | null; stdout: string; stderr: string; attempts: number; ok: boolean;
+        stopCode?: string; argv?: string[]; args?: string[];
+      },
+    ): string | undefined => {
+      const seq = ++toolStepSeq;
+      const out = capToolText(obs.stdout);
+      const err = capToolText(obs.stderr);
+      const artifact = writeToolStepArtifact(outDir, seq, desc, {
+        index: seq, desc, source,
+        ...(adapter === undefined ? {} : { adapter }),
+        ...(obs.args === undefined ? {} : { args: obs.args }),
+        ...(obs.argv === undefined ? {} : { argv: obs.argv }),
+        code: obs.code, ok: obs.ok,
+        ...(obs.stopCode === undefined ? {} : { stop_code: obs.stopCode }),
+        attempts: obs.attempts, elapsed_ms: Date.now() - started,
+        stdout: out.text, stderr: err.text,
+        ...(out.truncated || err.truncated ? { truncated: true as const } : {}),
+      }, secretValues);
+      return artifact ?? undefined;
+    };
     /** 工具步：接到既有 `runToolStep`（干跑/确认/幂等重试的唯一实现，不复制）。 */
     const toolRunner = async (req: ToolRunRequest): Promise<ToolRunResult> => {
       // ① 非 cli 适配器：与声明式 journey 用**同一份**适配器实现（validate → expand → run）。
@@ -2168,8 +2223,10 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           index: 0, adapter: adapter.kind, kind: adapter.legacyKind,
           desc: req.desc, role: null, id: null, next: [], decl,
         } as unknown as ExpandedStep;
+        const started = Date.now();
         const adapterCtx = {
-          outDir, verbose, runId, dataset: null,
+          // T2：适配器的 `{dataset:NAME}` 占位符也从这份运行级数据集现读（stdio argv 等）。
+          outDir, verbose, runId, dataset,
           runWebStep: async (): Promise<{ done: boolean }> => { throw new Error("ctx.run: browser steps go through ctx.step()"); },
           runCliStep: async (): Promise<ToolStepResult> => { throw new Error("ctx.run: use the cli form for cli steps"); },
           runManualStep: async (): Promise<ManualStepRun> => ({
@@ -2179,14 +2236,23 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         const out = await adapter.run(decl, step, adapterCtx);
         const t = out.tool;
         const stopCode = out.done ? undefined : (t?.refused ?? "tool_failed");
+        // T1：非 cli 步同样落工件 + 把适配器抽出的 returns 交回 ctx（ctx 负责写数据集）。
+        const artifact = writeToolArtifact(started, req.desc, req.source, adapter.kind, {
+          code: t?.code ?? null, stdout: t?.stdout ?? "", stderr: t?.stderr ?? "",
+          attempts: t?.attempts ?? 1, ok: out.done,
+          ...(stopCode === undefined ? {} : { stopCode }),
+          ...(t?.argv === undefined ? {} : { argv: t.argv }),
+        });
         return {
           ok: out.done,
           ...(stopCode === undefined ? {} : { stopCode }),
           ...(t?.refused === undefined ? {} : { refused: t.refused }),
           ...(t?.stderr ? { reason: t.stderr.split("\n")[0]!.slice(0, 300) } : {}),
+          ...(out.returns === undefined ? {} : { returns: out.returns }),
           code: t?.code ?? null, stdout: t?.stdout ?? "", stderr: t?.stderr ?? "",
           attempts: t?.attempts ?? 1,
           ...(t?.dry_run ? { dryRun: t.dry_run } : {}),
+          ...(artifact === undefined ? {} : { artifact }),
         };
       }
       // ② cli（默认）：接到 runToolStep。
@@ -2198,28 +2264,46 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         retries: req.retries ?? 0,
         idempotent: req.idempotent === true,
         dangerous: req.dangerous === true,
-        returns: null,
+        // T2：`returns` 走既有 `ReturnExtractor` 声明面（校验在 ctx 侧，fail closed）。
+        returns: req.returns ?? null,
       };
       const step = {
         index: 0, adapter: "cli", kind: "tool",
         desc: req.desc, role: null, id: null, next: [], decl, tool: decl,
       } as unknown as ExpandedStep;
+      const started = Date.now();
       const r = await runToolStep(step, { ...opts, outDir, runId, verbose, slotBag: slots });
       const stopCode = r.done ? undefined : (r.refused ?? "tool_failed");
+      // T2：信号成立后按**同一份** `extractProcessReturns` 抽取（与声明式适配器同源）。
+      const returns = r.done && req.returns !== null && req.returns !== undefined
+        ? extractProcessReturns(req.returns, { stdout: r.stdout ?? "", stderr: r.stderr ?? "", code: r.code })
+        : undefined;
+      const artifact = writeToolArtifact(started, req.desc, req.source, undefined, {
+        code: r.code, stdout: r.stdout ?? "", stderr: r.stderr ?? "", attempts: r.attempts, ok: r.done,
+        ...(stopCode === undefined ? {} : { stopCode }),
+        args: req.args ?? [],
+        ...((r.argv ?? []).length > 0 ? { argv: r.argv } : {}),
+      });
       return {
         ok: r.done,
         ...(stopCode === undefined ? {} : { stopCode }),
-        ...(stopCode === undefined ? {} : { reason: refusalLine(stopCode) }),
+        // 有底层 stderr 时交给 ctx 组「exit + stderr 尾行」的诊断；没有才退到拒绝话术。
+        ...(stopCode !== undefined && (r.stderr ?? "").trim() === "" ? { reason: refusalLine(stopCode) } : {}),
         ...(r.refused === undefined ? {} : { refused: r.refused }),
-        code: r.code, stdout: r.stdout, stderr: r.stderr, attempts: r.attempts,
+        ...(returns === undefined ? {} : { returns }),
+        code: r.code, stdout: r.stdout ?? "", stderr: r.stderr ?? "", attempts: r.attempts,
         ...(r.dry_run === null ? {} : { dryRun: r.dry_run }),
+        ...(artifact === undefined ? {} : { artifact }),
       };
     };
+
     const ctx = createCtx({
       pack: pack as never,
       slots: slots as Record<string, string>,
       runtime: { outDir, runId, today: opts.today ?? "" },
       ensureSession, mw: getMw, trace, toolRunner,
+      // T2：脚本路径与声明式旅程共享同一份运行级数据集（ctx.run 的 returns 写这里）。
+      dataset,
       allowSources: opts.sources !== false,
       manualRunner: opts.manualHandler !== undefined || process.stdin.isTTY
         ? async (req) => {
@@ -2441,6 +2525,45 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   const envDevice = (pack.device ?? {}) as { viewport?: { width: number; height: number }; user_agent?: string };
   if (envViewport === undefined && envDevice.viewport !== undefined) envViewport = envDevice.viewport;
   if (envUserAgent === undefined && envDevice.user_agent !== undefined) envUserAgent = envDevice.user_agent;
+  // ---- T1/T6：工具步与数据腿的投影（只从既有 trace 事件重建，不另存一份状态） ----
+  // 以前脚本路径的 `tool_steps` 恒 []、`sources` 恒 []：工具跑过但产物读不到（T1），
+  // 工具失败也只留在脚本局部变量里（T6）。事件本来就是这两条腿的唯一记录面——投影它。
+  const toolStepProjection: ToolStepResult[] = trace.events
+    .filter((e) => e.call === "run" || e.call === "dangerous")
+    .map((e, i) => {
+      const r = (typeof e.result === "object" && e.result !== null && !Array.isArray(e.result))
+        ? e.result as Record<string, unknown>
+        : {};
+      const refused = typeof r["refused"] === "string" ? r["refused"] as ToolStepResult["refused"] : undefined;
+      return {
+        index: i,
+        desc: e.desc ?? "",
+        source: typeof r["source"] === "string" ? r["source"] : "",
+        attempts: typeof r["attempts"] === "number" ? r["attempts"] : 1,
+        done: e.ok === true,
+        ok: e.ok === true,
+        code: typeof r["code"] === "number" ? r["code"] : null,
+        ...(refused === undefined ? {} : { refused }),
+        ...(typeof r["artifact"] === "string" ? { artifact: r["artifact"] } : {}),
+        ...(typeof r["elapsed_ms"] === "number" ? { elapsed_ms: r["elapsed_ms"] } : {}),
+        ...(typeof r["stderr_tail"] === "string" ? { stderr_tail: r["stderr_tail"] } : {}),
+      };
+    });
+  const sourceProjection: AppSourceResult[] = trace.events
+    .filter((e) => e.call === "source")
+    .map((e) => {
+      const r = (typeof e.result === "object" && e.result !== null && !Array.isArray(e.result))
+        ? e.result as Record<string, unknown>
+        : {};
+      return {
+        name: e.desc ?? (typeof r["name"] === "string" ? r["name"] : "?"),
+        rows: typeof r["rows"] === "number" ? r["rows"] : 0,
+        counts: (typeof r["counts"] === "object" && r["counts"] !== null
+          ? r["counts"] as Record<string, number> : {}),
+        selects: (typeof r["selects"] === "object" && r["selects"] !== null
+          ? r["selects"] as Record<string, string> : {}),
+      };
+    });
   const finishedAtIso = new Date().toISOString();
   const result: AppRunResult = {
     app: pack.id,
@@ -2460,10 +2583,13 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         return free > 0 ? ` + ${free} 只读观察调用（waitFor/extract/read 等，免费不占预算）${navs > 0 ? ` + ${navs} 导航` : ""}` : "";
       })()}`,
     subgoals: [],
-    tool_steps: [],
+    tool_steps: toolStepProjection,
     invariants,
-    sources: [],
+    sources: sourceProjection,
     ok,
+    // T2：返回值写进数据集后的审计视图（含 writtenBy/generation；没有 returns ⇒ 键缺席，
+    // 与声明式路径同一字段名/形状，不另造一套）。
+    ...(dataset.entriesView().length > 0 ? { dataset_view: [...dataset.entriesView()] } : {}),
     ...(partial ? { partial: true as const } : {}),
     // A6：walk 调试跑显式自报——缺字段 = 正式语义；walk 产物不冒充正式 run。
     ...(opts.walk === true ? { walk: true as const } : {}),

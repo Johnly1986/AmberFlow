@@ -503,7 +503,9 @@ export const cliAdapter: AppAdapter = {
     return {
       done: tool.done,
       tool,
-      ...(tool.done ? { returns: extractProcessReturns(d?.returns, tool) } : {}),
+      ...(tool.done
+        ? { returns: extractProcessReturns(d?.returns, { stdout: tool.stdout ?? "", stderr: tool.stderr ?? "", code: tool.code }) }
+        : {}),
     };
   },
 };
@@ -662,7 +664,7 @@ export const sshAdapter: AppAdapter = {
       done: base.done,
       tool: base,
       ...(base.done
-        ? { returns: extractProcessReturns(d.returns, { stdout: base.stdout, stderr: base.stderr, code: base.code }) }
+        ? { returns: extractProcessReturns(d.returns, { stdout: base.stdout ?? "", stderr: base.stderr ?? "", code: base.code }) }
         : {}),
     };
   },

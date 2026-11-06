@@ -21,7 +21,11 @@ import { validateCommands } from "../engine/actions.ts";
 import { firstOf, framesOf, locatorAnyFrame, urlOf, type PageLike } from "../engine/extraction.ts";
 import { checkSignal } from "../engine/signals.ts";
 import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, runSource, ValueError } from "../data/datasource.ts";
-import { listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
+import {
+  listAppAdapters, requireAppAdapter, validateReturns, type ReturnExtractor,
+} from "./app-adapters.ts";
+import type { DatasetStore } from "../engine/dataset.ts";
+import { capToolText, stderrTail } from "./tool-artifact.ts";
 import { REPO } from "../flow/flow.ts";
 import { PageStateStore, type PageState } from "./page-state.ts";
 import { createKit, type CommandDecl, type DomSignal, type TargetDecl, type ValueBinding } from "./kit.ts";
@@ -101,6 +105,18 @@ export interface StepEvidence {
   pageState?: Readonly<PageState>;
 }
 
+/** 工具步的一次进程观察（有界；全文在工件里）。 */
+export interface ToolStepOutput {
+  /** 退出码（`null` = 进程没有退出码：起不来/被信号杀掉/被拒绝执行）。 */
+  code: number | null;
+  /** stdout 头部，最多 8KB。 */
+  stdout: string;
+  /** stderr 头部，最多 8KB。 */
+  stderr: string;
+  /** true = stdout 或 stderr 至少有一侧被截断（全文见 `artifact`）。 */
+  truncated?: boolean;
+}
+
 export interface StepResult {
   ok: boolean;
   /** 请求里声明的稳定步骤标识（透传；没给就没有）。 */
@@ -125,6 +141,17 @@ export interface StepResult {
   forced?: boolean;
   /** 运行期诚实性警告（如 suspected_async）。只在产生时出现。 */
   warnings?: string[];
+  /**
+   * 工具步（`ctx.run`/`ctx.dangerous`）的**进程输出**：stdout/stderr 各截断到 8KB，
+   * 超过上限时 `truncated: true`（全文在 outDir 的工具步工件里，见 `artifact`）。
+   * 缺字段 = 这不是工具步、或该步没有任何进程输出（旧脚本行为逐字节不变）。
+   */
+  output?: ToolStepOutput;
+  /**
+   * 工具步工件在**本次运行产物目录内的相对路径**（如 `tool-steps/01-query.json`）。
+   * 缺字段 = 没有工件（非工具步，或工件写盘失败——写盘失败不改变工具步结论）。
+   */
+  artifact?: string;
   /**
    * S1 状态层：这一步的状态记录（before/after 指纹、动作计数、前进性 flags、effect）。
    * 缺字段 = 没有页面观察（dry/replay：dry 给合成值，见 `ctx-dry.ts`）。
@@ -270,6 +297,16 @@ export interface ToolRunRequest {
   source: string;
   done: Record<string, unknown>;
   /**
+   * 可选的稳定步标识（`ctx.run(..., { id })`）：进 trace/失败面，并作为数据集
+   * `writtenBy` 的步名（缺省用 `desc`——两者都必须非空）。
+   */
+  id?: string;
+  /**
+   * 声明式的返回值抽取（`returns`，只在信号成立后执行，由驱动侧用
+   * `extractProcessReturns` 的**同一份实现**落到运行级数据集）。
+   */
+  returns?: Record<string, ReturnExtractor> | null;
+  /**
    * 应用支持器：`cli`（默认）/ `ssh` / `stdio`。非 cli 时用 `rawStep` 里的声明块
    * （`{ssh:{...}}` / `{stdio:{...}}`），由对应适配器校验、展开、执行——与声明式
    * 应用的支持器是**同一份实现**（不另写一套）。
@@ -293,6 +330,10 @@ export interface ToolRunResult {
   stderr: string;
   attempts: number;
   dryRun?: unknown;
+  /** 信号成立后抽出的返回值（驱动侧用 `extractProcessReturns`；ctx 写进运行级数据集）。 */
+  returns?: Record<string, unknown>;
+  /** 本步工件的相对路径（驱动侧落盘；缺省 = 没有工件）。 */
+  artifact?: string;
 }
 
 export interface CtxBudget {
@@ -389,8 +430,10 @@ export interface Ctx {
   readonly value: ReturnType<typeof createKit>["value"];
   /** ① 命令行形式：`ctx.run("my-tool", ["--flag"], { done })`。 */
   run(source: string, args: string[], req: {
-    done: Record<string, unknown>; desc?: string; adapter?: string;
+    done: Record<string, unknown>; desc?: string; id?: string; adapter?: string;
     idempotent?: boolean; retries?: number; dryRunArgs?: string[];
+    /** 声明式返回值抽取（`{NAME: {from:"stdout"}}` 等）；信号成立后写运行级数据集。 */
+    returns?: Record<string, unknown>;
   }): Promise<StepResult>;
   /**
    * ② 声明形式（任意应用支持器）：`ctx.run({ adapter?: "cli"|"ssh"|"stdio", ssh?: {...}, stdio?: {...}, done })`。
@@ -400,7 +443,7 @@ export interface Ctx {
   run(step: Record<string, unknown> & { done: Record<string, unknown> }): Promise<StepResult>;
   dangerous(req: {
     desc: string; source: string; args: string[]; dryRunArgs: string[];
-    done: Record<string, unknown>; idempotent?: boolean; retries?: number;
+    done: Record<string, unknown>; id?: string; idempotent?: boolean; retries?: number;
   }): Promise<StepResult>;
   done(): Promise<void>;
 }
@@ -428,6 +471,11 @@ export interface CtxDeps {
   effectReadback?: { fill?: boolean; set_range?: boolean };
   /** 数据腿：与 `runApp` 的同一实现（`runSource` + `defaultDates`）。 */
   sourceRunner?: (name: string, opts?: { dates?: string | string[] }) => Promise<SourceObservationView>;
+  /**
+   * 运行级数据集（与 `runApp` 的同一份 `DatasetStore`）：`ctx.run` 的 `returns` 在信号
+   * 成立后写这里，下游命令步 `{from:"dataset",key}` 现读。缺省 = 不写（dry/replay 没有数据集）。
+   */
+  dataset?: DatasetStore;
   /** 工具步：由驱动接到 `runToolStep`（干跑/确认/幂等重试的既有实现）。 */
   toolRunner?: (req: ToolRunRequest) => Promise<ToolRunResult>;
   /** `--skip-data`：数据腿被显式跳过时，`ctx.source()` 报结构化错误（不静默跑网络）。 */
@@ -902,6 +950,73 @@ export function createCtx(deps: CtxDeps): Ctx {
     return result;
   };
 
+  /**
+   * 工具步结果的**唯一收口**（命令行/声明两形式共用）：有界 output、失败诊断、数据集回写、
+   * trace 事件。三条纪律都在这里，脚本面无法绕过：
+   *   - 返回值只在**信号成立**后写（`ok !== true` 一个都不写）；
+   *   - `writtenBy = <id|desc>#<attempts>`（与声明式路径同一形状，审计能数到第几次尝试）；
+   *   - 失败原因带底层证据（exit code + stderr 尾行），不是 `refusalLine` 空壳。
+   */
+  const finishToolRun = (
+    r: ToolRunResult, started: number, call: "run" | "dangerous",
+    desc: string, req: { source: string; id?: string; adapter?: string },
+  ): StepResult => {
+    const ok = r.ok === true;
+    const stopCode = r.stopCode ?? (ok ? undefined : (r.refused ?? "tool_failed"));
+    const attempts = r.attempts ?? 1;
+    const elapsedMs = Date.now() - started;
+    const out = capToolText(r.stdout);
+    const err = capToolText(r.stderr);
+    const tail = stderrTail(r.stderr);
+    const reason = stopCode === undefined
+      ? r.reason
+      : toolFailureReason(stopCode, r.code, tail, r.reason);
+    // 数据集回写（T2）：步标识必须是**稳定非空**字符串；`desc` 在两条入口都有缺省，不会空。
+    const written: string[] = [];
+    const stepKey = (req.id !== undefined && req.id.trim() ? req.id.trim() : desc).trim();
+    if (ok && r.returns !== undefined && deps.dataset !== undefined && stepKey) {
+      const writtenBy = `${stepKey}#${attempts}`;
+      for (const [name, value] of Object.entries(r.returns)) {
+        deps.dataset.write(name, value, writtenBy);
+        written.push(name);
+      }
+    }
+    const hasOutput = out.text.length > 0 || err.text.length > 0
+      || (r.code !== null && r.code !== undefined);
+    const isCli = req.adapter === undefined || req.adapter === "cli";
+    const result: StepResult = {
+      ok,
+      ...(stepKey && req.id !== undefined ? { id: stepKey } : {}),
+      ...(stopCode === undefined ? {} : { stopCode }),
+      ...(reason === undefined ? {} : { reason }),
+      ...(hasOutput ? {
+        output: {
+          code: r.code ?? null, stdout: out.text, stderr: err.text,
+          ...(out.truncated || err.truncated ? { truncated: true as const } : {}),
+        },
+      } : {}),
+      ...(r.artifact === undefined ? {} : { artifact: r.artifact }),
+      evidence: { url: currentUrl, attempts, elapsedMs },
+    };
+    pushEvent(trace, {
+      call, desc, ok,
+      ...(stopCode === undefined ? {} : { stop_code: stopCode }),
+      // 08-C：attempts/code/refused 进事件 result（投影面从这里读，不再只有脚本侧 evidence）。
+      // T6：工具步至少带 code/ok（事件顶层 ok）/artifact/stderr_tail——失败不再是空壳。
+      result: {
+        source: req.source,
+        ...(isCli ? {} : { adapter: req.adapter }),
+        ...(stepKey && req.id !== undefined ? { id: stepKey } : {}),
+        attempts, code: r.code ?? null, refused: r.refused ?? null,
+        ...(isCli ? { dry_run: r.dryRun ?? null } : (r.dryRun === undefined ? {} : { dry_run: r.dryRun })),
+        elapsed_ms: elapsedMs,
+        ...(r.artifact === undefined ? {} : { artifact: r.artifact }),
+        ...(tail === undefined ? {} : { stderr_tail: tail }),
+        ...(written.length > 0 ? { dataset_written: written } : {}),
+      },
+    });
+    return result;
+  };
   const runTool = async (source: string, args: string[], req: ToolRunRequest, dangerous: boolean): Promise<StepResult> => {
     if (typeof source !== "string" || !source.trim()) throw new StopError("config_error", "ctx.run: source must be a non-empty string");
     if (!Array.isArray(args) || args.some((a) => typeof a !== "string")) throw new StopError("config_error", "ctx.run: args must be a list of strings");
@@ -919,6 +1034,8 @@ export function createCtx(deps: CtxDeps): Ctx {
       throw new StopError("config_error",
         `ctx.run: retries=${req.retries} needs idempotent: true (re-running a process can be irreversible)`);
     }
+    // `returns` 只认既有 `ReturnExtractor` 声明面（缺失/形状错 = fail closed，不给模型开口子）。
+    const returns = toolReturns(req.returns, `ctx.run(${JSON.stringify(req.desc ?? source)})`);
     assertOpen(`ctx.run` + (req.desc ? ` ${JSON.stringify(req.desc)}` : ""));
     checkBudget();
     await paceBeforeStep();
@@ -927,7 +1044,8 @@ export function createCtx(deps: CtxDeps): Ctx {
     try {
       r = await deps.toolRunner({
         ...req, desc: req.desc ?? (dangerous ? `dangerous ${source}` : `run ${source}`),
-        source, args, ...(dangerous ? { dangerous: true } : {}),
+        ...(req.id === undefined ? {} : { id: req.id.trim() || undefined }),
+        returns, source, args, ...(dangerous ? { dangerous: true } : {}),
       });
     } catch (e) {
       // 工具源名/配置错（如 loadSource 抛）不能变成裸栈：给结构化 config_error。
@@ -935,22 +1053,8 @@ export function createCtx(deps: CtxDeps): Ctx {
         `ctx.run: ${e instanceof Error ? e.message : String(e)}`);
     }
     budget.stepsUsed += 1;
-    const ok = r.ok === true;
-    const stopCode = r.stopCode ?? (ok ? undefined : (r.refused ?? "tool_failed"));
-    const result: StepResult = {
-      ok,
-      ...(stopCode === undefined ? {} : { stopCode }),
-      ...(r.reason === undefined ? {} : { reason: r.reason }),
-      evidence: { url: currentUrl, attempts: r.attempts ?? 1, elapsedMs: Date.now() - started },
-    };
-    pushEvent(trace, {
-      call: dangerous ? "dangerous" : "run",
-      desc: req.desc ?? source, ok,
-      ...(stopCode === undefined ? {} : { stop_code: stopCode }),
-      // 08-C：attempts 进事件 result（此前只在脚本侧 evidence 里，投影面读不到）。
-      result: { source, attempts: r.attempts ?? 1, code: r.code, refused: r.refused ?? null, dry_run: r.dryRun ?? null },
-    });
-    return result;
+    return finishToolRun(r, started, dangerous ? "dangerous" : "run",
+      req.desc ?? source, { source, ...(req.id === undefined ? {} : { id: req.id }) });
   };
   /** 声明形式：挑适配器 → 交给驱动（与声明式 journey 同一套适配器实现）。 */
   const runDeclaredTool = async (step: Record<string, unknown>, dangerous: boolean): Promise<StepResult> => {
@@ -974,51 +1078,51 @@ export function createCtx(deps: CtxDeps): Ctx {
     } catch {
       throw new StopError("config_error", `ctx.run: unknown app adapter ${JSON.stringify(adapter)} (known: ${listAppAdapters().join(", ")})`);
     }
+    // `returns`/`id` 在两条分支（cli 委托 / 其它适配器直跑）前统一规范化一次。
+    const declaredSource = typeof step["source"] === "string" ? step["source"] : "";
+    const declaredDesc = typeof step["desc"] === "string" && step["desc"]
+      ? step["desc"]
+      : adapter === "cli" ? `cli:${declaredSource || "declared"}` : `${adapter} step`;
+    const declaredReturns = toolReturns(step["returns"], `ctx.run(${JSON.stringify(declaredDesc)})`);
+    const declaredId = typeof step["id"] === "string" && step["id"].trim() ? step["id"].trim() : undefined;
     if (adapter === "cli") {
       // 声明形式的 cli 步与命令行形式完全等价（args/dryRunArgs/idempotent/retries 都认）。
-      const source = typeof step["source"] === "string" ? step["source"] : "";
       const cliArgs = Array.isArray(step["args"]) ? (step["args"] as unknown[]).map(String) : [];
       const cliReq: ToolRunRequest = {
-        desc: typeof step["desc"] === "string" && step["desc"] ? step["desc"] : `cli:${source || "declared"}`,
-        source, done: done as Record<string, unknown>, adapter: "cli", rawStep: step,
+        desc: declaredDesc,
+        source: declaredSource, done: done as Record<string, unknown>, adapter: "cli", rawStep: step,
+        ...(declaredId === undefined ? {} : { id: declaredId }),
+        ...(declaredReturns === null ? {} : { returns: declaredReturns }),
         ...(Array.isArray(step["dryRunArgs"]) ? { dryRunArgs: (step["dryRunArgs"] as unknown[]).map(String) } : {}),
         ...(step["idempotent"] === true ? { idempotent: true } : {}),
         ...(typeof step["retries"] === "number" ? { retries: step["retries"] } : {}),
         ...(dangerous ? { dangerous: true } : {}),
       };
-      return runTool(source, cliArgs, cliReq, dangerous);
+      return runTool(declaredSource, cliArgs, cliReq, dangerous);
     }
     if (deps.toolRunner === undefined) throw new StopError("config_error", "ctx.run: no tool runner wired in this build");
     checkBudget();
     await paceBeforeStep();
     const started = Date.now();
-    const desc = typeof step["desc"] === "string" && step["desc"] ? step["desc"] : `${adapter} step`;
+    const desc = declaredDesc;
     let r: ToolRunResult;
     try {
       r = await deps.toolRunner({
-        desc, source: typeof step["source"] === "string" ? step["source"] : `${adapter}:declared`,
+        desc, source: declaredSource || `${adapter}:declared`,
         done: done as Record<string, unknown>, adapter, rawStep: step,
+        ...(declaredId === undefined ? {} : { id: declaredId }),
+        ...(declaredReturns === null ? {} : { returns: declaredReturns }),
         ...(dangerous ? { dangerous: true } : {}),
       });
     } catch (e) {
       throw new StopError("config_error", `ctx.run: ${e instanceof Error ? e.message : String(e)}`);
     }
     budget.stepsUsed += 1;
-    const ok = r.ok === true;
-    const stopCode = r.stopCode ?? (ok ? undefined : (r.refused ?? "tool_failed"));
-    const result: StepResult = {
-      ok,
-      ...(stopCode === undefined ? {} : { stopCode }),
-      ...(r.reason === undefined ? {} : { reason: r.reason }),
-      evidence: { url: currentUrl, attempts: r.attempts ?? 1, elapsedMs: Date.now() - started },
-    };
-    pushEvent(trace, {
-      call: dangerous ? "dangerous" : "run", desc, ok,
-      ...(stopCode === undefined ? {} : { stop_code: stopCode }),
-      // 08-C：声明形式同 cli 面——attempts 进事件 result。
-      result: { adapter, attempts: r.attempts ?? 1, code: r.code, refused: r.refused ?? null },
+    return finishToolRun(r, started, dangerous ? "dangerous" : "run", desc, {
+      source: declaredSource || `${adapter}:declared`,
+      adapter,
+      ...(declaredId === undefined ? {} : { id: declaredId }),
     });
-    return result;
   };
 
   /**
@@ -1558,7 +1662,11 @@ export function createCtx(deps: CtxDeps): Ctx {
       }
       if (deps.sourceRunner) {
         const obs = await deps.sourceRunner(name, sourceOpts);
-        pushEvent(trace, { call: "source", desc: name, result: { counts: obs.counts, rows: obs.rows.length } });
+        // T6：sources 观测面不只记行数——名字 + counts + selects 都进事件（result 投影同源）。
+        pushEvent(trace, {
+          call: "source", desc: name,
+          result: { name, counts: obs.counts, selects: obs.selects, rows: obs.rows.length },
+        });
         return obs;
       }
       const src = loadSource(name);
@@ -1607,7 +1715,10 @@ export function createCtx(deps: CtxDeps): Ctx {
         ...(res.tool_version ? { version: res.tool_version } : {}),
         ...(Object.keys(byDate).length ? { byDate } : {}),
       };
-      pushEvent(trace, { call: "source", desc: name, result: { counts, rows: rows.length, dates: Object.keys(byDate) } });
+      pushEvent(trace, {
+        call: "source", desc: name,
+        result: { name, counts, selects, rows: rows.length, dates: Object.keys(byDate) },
+      });
       return obs;
     },
     data: {
@@ -1761,6 +1872,37 @@ export function createCtx(deps: CtxDeps): Ctx {
     },
   };
   return ctx;
+}
+
+/**
+ * `ctx.run` 的 `returns` 规范化：只认既有 `ReturnExtractor` 声明面（`validateReturns` 是
+ * 加载期与运行期**同一份**校验）。坏声明 = 结构化 `config_error`，绝不"猜一个抽取方式"。
+ */
+function toolReturns(raw: unknown, where: string): Record<string, ReturnExtractor> | null {
+  const problems: string[] = [];
+  const out = validateReturns(raw, where, problems);
+  if (problems.length > 0) throw new StopError("config_error", problems.join("；"));
+  return out;
+}
+
+/**
+ * 工具步失败的人读原因（T6）：`<stop_code>: exit N — <stderr 尾行>`。
+ * 没有退出码（起不来/被拒绝）时省略 `exit` 段；`given`（适配器/拒绝文案）只在
+ * stderr 摘要里没有时才补上——同一句话不重复两遍。
+ */
+function toolFailureReason(
+  stopCode: string, code: number | null | undefined, tail: string | undefined, given?: string,
+): string {
+  let out = stopCode;
+  if (code !== null && code !== undefined) out += `: exit ${code}`;
+  const g = given !== undefined && given.trim() ? given.trim() : undefined;
+  if (tail !== undefined && tail.length > 0) {
+    out += ` — ${tail}`;
+    if (g !== undefined && g !== tail && !tail.includes(g) && !out.includes(g)) out += ` (${g})`;
+  } else if (g !== undefined) {
+    out += ` — ${g}`;
+  }
+  return out;
 }
 
 /** 选一行：`min|max` 按字段的数值比较（非数值回落到字符串比较；空集合 → null）。 */
