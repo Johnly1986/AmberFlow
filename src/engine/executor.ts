@@ -344,7 +344,8 @@ export interface RunReport {
   skipped_actions?: SkippedAction[];
   /**
    * S4：本子目标发生过的 stale 重解析重试（每次一条；缺字段 = 没重试过）。
-   * 与 trace 行的 `stale_retry` 是同一份证据的汇总面。
+   * 与 trace 行事件字段 `stale_retry`（同一条目数组）是同一份证据的汇总面；
+   * 字段名两处不同（trace 行单数、这里复数），文案勿混写（R9 记录项 1）。
    */
   stale_retries?: Array<{ attempt: number; reason: string; ref: string }>;
   /** S4：本子目标至少一个动作按步级 `force` 声明执行（trace 行 `forced=true` 的汇总）。 */

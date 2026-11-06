@@ -3,8 +3,9 @@
  *
  * TS twin of `layaapp/extraction.py`. Owns everything between "a Playwright page
  * exists" and "here is the element pool, its labels, its handles and the JS passes
- * that keep them consistent": interactive discovery (one JS pass, over same-origin
- * frames and open shadow roots), the aria/criteria views, the CDP listener probe
+ * that keep them consistent": interactive discovery (one JS pass over main and
+ * child frames — same-origin and cross-origin both resolve, R11 B5 — plus open
+ * shadow roots), the aria/criteria views, the CDP listener probe
  * for JS-only widgets, target_hint recovery, element signatures and frame scope.
  * No decisions and no execution.
  *
@@ -359,9 +360,11 @@ export function frameAt(page: PageLike, index: number): FrameLike | undefined {
 }
 
 /**
- * First matching locator across the main frame and same-origin children.
- * Signals are frequently rendered inside an iframe (a success banner, an
- * embedded form's own field), where `page.locator` never looks.
+ * First matching locator across the main frame and reachable child frames
+ * (same-origin and cross-origin both resolve through Playwright locators;
+ * cross-origin stability is measured, R11 B5). Signals are frequently rendered
+ * inside an iframe (a success banner, an embedded form's own field), where
+ * `page.locator` never looks.
  *
  * `opts.hasText` 透传给每一帧的 `locator(selector, { hasText })`（`css_exists_text`
  * 用它跨 frame 找"文本含 text"的元素；Playwright 的 hasText 是大小写不敏感的子串匹配）。
@@ -375,7 +378,7 @@ export async function locatorAnyFrame(
         const loc = opts === undefined ? fr.locator(selector) : fr.locator(selector, opts);
         if (await loc.count()) return loc;
       } catch {
-        continue;   // cross-origin frame: evaluate/locator throws, skip
+        continue;   // frame detached mid-scan / no execution context: skip（跨源 frame 不在此抛——R11 B5 实测可跨源 locator 定位）
       }
     }
   }

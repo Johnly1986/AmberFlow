@@ -502,6 +502,24 @@ export async function appCheck(options: BridgeOptions, app: string, slots?: stri
 
 /** Read-only page observation. */
 export async function inspect(options: BridgeOptions, args: AmberFlowInspectArgs): Promise<AmberFlowInspect> {
+  // U10 (R11 观察 4): the engine CLI's USAGE rejects non-http(s) schemes explicitly, but this
+  // adapter used to map that failure to a structurally-valid EMPTY observation (ok:false,
+  // 0 elements) — silent degradation that reads like "the page has nothing". Refuse here,
+  // before spawning the engine, with the CLI's same stance.
+  let target: URL
+  try {
+    target = new URL(args.url.trim())
+  } catch {
+    throw new Error(
+      `amberflow-bridge: ${options.toolPrefix}_inspect url is not a valid URL: ${JSON.stringify(args.url)}`,
+    )
+  }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    throw new Error(
+      `amberflow-bridge: ${options.toolPrefix}_inspect only accepts http(s) URLs, refusing `
+      + `${JSON.stringify(args.url)} (file:// and other schemes are rejected by the engine CLI's USAGE too)`,
+    )
+  }
   const argv = ['inspect', '--url', args.url, '--json']
   if (args.maxElements !== undefined) argv.push('--max-elements', String(args.maxElements))
   if (args.includeText === true) argv.push('--text')

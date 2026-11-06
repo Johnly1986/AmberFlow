@@ -332,7 +332,7 @@ const r = await ctx.setRange("Volume", { value: 42 });                  // 或 {
 // S3 穷举：反复（滚动行容器 → 抽行 → 去重）直到连续 stableRounds 轮无新增 / 达 maxRows。
 // 整体计 1 个 flow step；内部滚动与轮间等待不占预算。stopReason 诚实，不假装穷尽。
 const feed = await ctx.collect({
-  row: "#feed li.item",                                    // 行选择器（CSS；主 frame 或同源子 frame）
+  row: "#feed li.item",                                    // 行选择器（CSS；主 frame 或可达子 frame，同源/跨源均可）
   fields: { title: ".title", price: ".price" },            // 与 extract inline 同语法；缺省 { text: "." }
   until: { stableRounds: 2 },                              // 或 { maxRows: 200 }
   dedupe: true, maxRounds: 30,
@@ -395,7 +395,9 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
   `stale_ref`（盖章句柄与属性回退全落空）/ `action_failed`（Playwright 动作抛错）/
   `not-actionable-or-covered` 且 actionability 现场 `requery==="detached"`（节点在探针后被卸载）。
   `action-timeout`、有覆盖者且 `requery==="present"` 都**不**重试（那不是 stale）；纯模型挑元素的决策步
-  没有可复现的声明目标，也不重试。每次重试进 trace 行的 `stale_retry` 数组；最终失败仍按既有 stopCode
+  没有可复现的声明目标，也不重试。每次重试进 trace 行的 `stale_retry` 数组（注意：trace 行事件字段
+  是单数 `stale_retry`，`step` 结果/RunReport 侧的汇总数组字段是复数 `stale_retries`——两个名字并存，
+  勿混写）；最终失败仍按既有 stopCode
   （`stale_ref` / `action_failed` / `not-actionable-or-covered` …）诚实报告。
 - `hover` 命令：见 §4.5 命令闭集——它只移动指针（`:hover` 菜单/图层面板），不点击、不导航、不触发预填；
   快照没变不判 inert（与 scroll/drag 同口径），完成仍只认 done 信号。
@@ -526,7 +528,7 @@ export async function flow(ctx) {
 
 - DOM：`ctx.judge.url(...)`、`exists`、`existsText`、`text`、`equals`、`value`、`all(...)`、`any(...)`、`not(...)`；
 - `ctx.judge.existsText(sel, "Traffic")` = **存在任一**匹配 `sel` 且文本含 `"Traffic"` 的元素（`css_exists_text`）：
-  live 用 Playwright `hasText`（跨主/同源子 frame，大小写不敏感子串，含后代文本）；`amber apps` 的池/离线
+  live 用 Playwright `hasText`（跨主 frame 与可达子 frame——同源/跨源均可，大小写不敏感子串，含后代文本）；`amber apps` 的池/离线
   评估是**近似**（匹配元素的合成 label 包含 text），诱导期不据此下结论。
 - `ctx.judge.exists(sel, { visible: true })` = 存在且**可见**（`css_visible_exists`，首匹配 `isVisible()`）；
   池/离线评估不可判定（返回 null，诱导期按“需真实验证”处理）。旧写法 `exists(sel)` 语义不变（`css_exists`）。

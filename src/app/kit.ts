@@ -93,7 +93,8 @@ export interface Kit {
   judge: {
     url(part: string): DomSignal;
     /**
-     * 存在选择器（任意 CSS，跨主 frame 与同源子 frame）。
+     * 存在选择器（任意 CSS，跨主 frame 与可达的子 frame——同源与跨源均可 locator 定位；
+     * 跨源页面行为的稳定性以实测为准，R11 B5）。
      * `{ visible: true }` = 还要**可见**（`css_visible_exists`；首匹配 isVisible）。
      */
     exists(selector: string, opts?: { visible?: boolean }): DomSignal;

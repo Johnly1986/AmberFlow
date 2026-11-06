@@ -118,7 +118,7 @@ ${playbook}
  * （有 act 命令闭集才在动作前预评估 done）；决策步不付这项成本、不会标记。
  *
  * judge 与 act 的选择器语义不同（互不通用，别把一面的写法抄到另一面）：
- *   judge.* 的 selector 是【任意 CSS】（css_exists/text/value，跨主 frame 与同源子 frame）；
+ *   judge.* 的 selector 是【任意 CSS】（css_exists/text/value，跨主 frame 与可达的子 frame——同源/跨源均可定位）；
  *   裸词会当 CSS 标签解析（judge.exists("Maps") 是在找 <Maps> 元素，不是找 label 文本）；
  *   act/ctx.hint 是【六形状闭集 + 池 label 匹配】（裸词按 label 四档匹配；
  *   a[aria-label~x] 是 label 别名——DOM 的 aria-label 提取期已并进 label，可正常命中）。
@@ -140,7 +140,7 @@ ${playbook}
  *   force:true       动作走 Playwright force 语义（跳过 actionability，仍要求可定位）；
  *                    只用于作者已确认的瞬态弹层/动画控件——可能点到被遮挡目标（坐标上的顶层元素收事件）。
  *   staleRetry:true  动作失败且疑似 stale（stale_ref / action_failed / not-actionable 且节点已卸载）时，
- *                    重抽池→重解析同一声明目标→重试，最多 2 次（trace 行记 stale_retry）。
+ *                    重抽池→重解析同一声明目标→重试，最多 2 次（每次进 trace 行事件 stale_retry:[{attempt,reason,ref}]；结果汇总字段 stale_retries）。
  *   hover：命令闭集的指针原语——ctx.command("hover", sel) 只把指针移上去（:hover 菜单/图层面板），
  *     done 仍要写成动作后才成立的证据（例如 judge.exists("#panel-item", {visible:true})）。
  *

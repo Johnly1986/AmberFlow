@@ -17,7 +17,7 @@ AmberFlow 是一个**冻结计划执行器**：流程由人（或规划器）给
 
 ```
 signals.ts       完成信号语言：url_contains / css_* / 组合器 / manual
-extraction.ts    单次 JS 扫描元素池（主 frame + 同源子 frame + shadow root）
+extraction.ts    单次 JS 扫描元素池（主 frame + 可达子 frame，同源/跨源均可 + shadow root）
 rules.ts         确定性规则：导航、affordance、hint 分档匹配
         ↓
 executor.ts      BrowserMiddleware：唯一执行循环

@@ -86,7 +86,9 @@ export interface StepRequest {
    * 重抽池 → 用**同一声明目标**（命令 target / act hint）重新解析 → 重试动作，最多 2 次。
    * 判据只有三类：stale_ref（盖章句柄全落空）、action_failed、not-actionable-or-covered 且
    * 现场 requery=detached（节点已被卸载）。action-timeout / 有覆盖者且节点仍在都不重试。
-   * 纯模型挑元素的决策步没有可复现的声明目标，不重试。每次重试进 trace 的 `stale_retry`。
+   * 纯模型挑元素的决策步没有可复现的声明目标，不重试。每次重试进 trace 行事件
+   * `stale_retry:[{attempt,reason,ref}]`（dry 面同名键是布尔声明标记）；StepResult 侧的
+   * 汇总字段名是复数的 `stale_retries`（两处字段名不同，文案勿混写——R9 记录项 1）。
    */
   staleRetry?: boolean;
 }
@@ -117,7 +119,7 @@ export interface StepResult {
   skipped_actions?: SkippedAction[];
   /** 命令步在动作前对 done 的预评估结果（仅命令步出现；不改变执行顺序）。 */
   done_preheld?: boolean;
-  /** S4：stale 重解析重试证据（每次一条；缺字段 = 没重试过）。与 trace 行 `stale_retry` 同源。 */
+  /** S4：stale 重解析重试证据（每次一条；缺字段 = 没重试过）。与 trace 行事件字段 `stale_retry`（同一条目数组）是同一份证据的汇总面；字段名两处不同（trace 行单数、这里复数），文案勿混写（R9 记录项 1）。 */
   stale_retries?: Array<{ attempt: number; reason: string; ref: string }>;
   /** S4：本步动作按 `force` 声明执行（Playwright force 语义）。 */
   forced?: boolean;
@@ -219,7 +221,7 @@ export type CollectStopReason = "stable" | "maxRows" | "budget" | "not_scrollabl
 
 /** S3 `ctx.collect` 的请求：行选择器 + 可选字段投影 + 停止条件。 */
 export interface CollectRequest {
-  /** 行选择器（CSS；主 frame 或同源子 frame）。内部滚动取行元素的最近可滚动祖先。 */
+  /** 行选择器（CSS；主 frame 或可达的子 frame，同源/跨源均可定位）。内部滚动取行元素的最近可滚动祖先。 */
   row: string;
   /** 行内相对字段（与 extract inline 同语法）；缺省 `{ text: "." }`（行自身文本）。 */
   fields?: Record<string, string>;
@@ -1061,7 +1063,7 @@ export function createCtx(deps: CtxDeps): Ctx {
 
   /**
    * S3 collect：把行元素所在容器的滚动推进一屏（最近可滚动祖先；否则页面滚动元素）。
-   * 逐 frame 探测（行可能在同源子 frame 里）；找不到行 = found:false。
+   * 逐 frame 探测（行可能在可达的子 frame 里，同源/跨源均可定位）；找不到行 = found:false。
    */
   const scrollRowsContainer = async (
     rowSelector: string,

@@ -34,10 +34,12 @@ function arg(v: unknown): unknown {
 export async function checkSignal(page: PageLike, spec: SignalSpec): Promise<boolean> {
   try {
     if ("url_contains" in spec) return urlOf(page).includes(String(arg(spec.url_contains)));
-    // CSS ops look in the main frame AND same-origin children: a done-signal
+    // CSS ops look in the main frame AND reachable child frames (same-origin and
+    // cross-origin both resolve through Playwright locators; cross-origin stability
+    // is measured, R11 B5): a done-signal
     // frequently lives inside an iframe (embedded form field, status banner).
     if ("css_exists" in spec) return (await locatorAnyFrame(page, String(arg(spec.css_exists)))) !== null;
-    // S3：存在**任一**匹配 selector 且文本含 want 的元素（跨主 frame 与同源子 frame）。
+    // S3：存在**任一**匹配 selector 且文本含 want 的元素（跨主 frame 与可达的子 frame，同源/跨源均可定位）。
     // live 用 Playwright 的 hasText 过滤器（大小写不敏感的子串；匹配元素自身或后代文本）。
     if ("css_exists_text" in spec) {
       const [sel, want] = (spec.css_exists_text as unknown[]).map(arg);
