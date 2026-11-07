@@ -263,8 +263,8 @@ export async function flow(ctx) {
 
 候选窗口是**有界快照**：每步只取 40（宽扫 120）个候选，按桶配额来自当前视口——chrome 8 / viewport 16 / contentNear 8 / mainOffscreen 6 / other 2，不足时按 viewport→contentNear→mainOffscreen→other 顺延；窗口外不等于页面上没有（`inspect --json` 的 `window` 会给出窗口外可见交互），引擎不自动滚动。真正需要读完整列表时用滚动/展开原语分块取证。hint 匹配用**完整标签**（≤200，`full_label`）而不是模型视图的 40 字前缀：裸词按大小写不敏感的词边界/前缀匹配，`[aria-label~x]` 是 label 的别名。要回退 A2 之前的主内容优先排序，在 `meta.policy` 写 `candidate_priority: "main-first"`（缺省 `bucketed`；dry/plan 面同一字段）。
 
-- **rules-only 的窗口恢复（W10）**：无模型面（规划脸/online 套件）里，声明的 `target_hint` 若被 40 窗口挤出，规则解析失败后会做**一次** 120 元素、main-first 的宽扫重解析（`hintMatch` 确定性，命中即用；常规窗口内命中零多付，不放大 attempts）。这覆盖"hint 在池投影里可匹配、但被配额挤出"的形状；宽扫仍是同一投影，投影层面就匹配不上的 hint 它也救不了。
-- **href 是池投影**：`href` 字段去 origin、去 query，只保留路径结尾（≤2 段）。所以 `a[href~page=2]` 这类**依赖 query 的匹配在池面与 DOM 回捞面都永不命中**——分页/筛选链接请用 label 裸词（如 `next`）、`[data-test=…]` 或 `#id` 这类稳定锚点，或显式声明可匹配的路径片段（先用 `inspect` 看该元素的 `href` 投影值）。
+- **rules-only 的窗口恢复（W10）**：无模型面（规划脸/online 套件）里，声明的 `target_hint` 若被 40 窗口挤出，规则解析失败后会做**一次** 120 元素、main-first 的宽扫重解析（`hintMatch` 确定性，命中即用；常规窗口内命中零多付，不放大 attempts）。这覆盖"hint 在池投影里可匹配、但被配额挤出"的形状；宽扫与常规窗口用**同一匹配底座**（T9 起 `href` 是 `href_full` + `href` 双字段），匹配底座层面就匹配不上的 hint 它也救不了。
+- **href 的匹配底座（T9）**：池字段 `href` 仍是**有损展示投影**（去 origin、去 query，只保留路径结尾 ≤2 段；模型视图/criteriaView 用的就是它，逐字节不变）；`[href~…]` / `[href=…]` 匹配时引擎**同时**看原始属性值（`getAttribute('href')` 原样，query/fragment/origin 都在），任一字段命中即算——`a[href~page=2]` 这类 query 型 hint 从此可命中，旧路径型 `a[href=many.html]`（依赖投影）照旧命中。`inspect --json` 的 `hint_candidates` 给的是**原始值**（已用同一个 `hintMatch` 自证可命中），元素的 `href_full` 同样可在 `inspect` 看到。分页/筛选链接仍优先用 label 裸词（如 `next`）、`[data-test=…]` 或 `#id` 这类稳定锚点。
 
 - 桶的闭集：`chrome`（nav/aside/footer/header，不受视口限制）、`viewport`（当前视口 ±15%）、`contentNear`（视口外 ±150%）、`mainOffscreen`（更远且在该页 main/article 里）、`other`。`prio` 只是诊断序，不参与选目标。
 - 查窗口事实：`amber inspect --url <页> --json` 的 `window.visible_interactive / shown / out_of_window[]`；`--wide` 把窗口放到 120，`--pool` 展示 `bucket/prio/full_label` 调试字段。

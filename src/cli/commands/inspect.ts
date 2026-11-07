@@ -258,7 +258,8 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       title: String(await page.title()),
       // P3（2026-11-01 产品评审）：hint 语法不是 CSS、href 等字段是池投影——实测有 Agent
       // 把 `a[href=…]` 投影误当 CSS 选择器用。把这两句话随每次观察一起给出去。
-      hint_syntax: "hint_candidates 可直接用作 --hint / ctx.hint（非 CSS 语法）；href 等字段是元素池投影，仅供识别",
+      // T9：href 匹配同时认原始属性（href_full，query 可命中），hint_candidates 优先给原始值。
+      hint_syntax: "hint_candidates 可直接用作 --hint / ctx.hint（非 CSS 语法）；href 字段是展示投影（匹配同时认原始属性 href_full，query 可命中），hint 建议优先给原始值",
       elements,
       element_count: view.count,
       truncated: view.truncated,

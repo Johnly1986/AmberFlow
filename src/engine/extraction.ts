@@ -33,6 +33,13 @@ export interface Elem {
   id?: string;
   input_type?: string;
   href?: string;
+  /**
+   * T9：**原始** `getAttribute('href')`（原样保留 query/fragment/origin，不切段）。
+   * `href` 仍是展示投影（模型视图/criteriaView 用的就是它），本字段只服务 hint 匹配
+   * （rules.ts 的 href 双字段底座）与 inspect 的观察面；不进 `ChoiceRequest.elems`
+   * （executor.pickInner 剥离，与 `surface` 同一处）。空 href 不出现（空即缺省）。
+   */
+  href_full?: string;
   /** 显式 ARIA 角色（`getAttribute('role')`；没有就不出现——对拍语料逐字节不变）。 */
   role?: string;
   /** `contenteditable` 为真（语义上是"可填"，结构上不是 input/textarea）。 */
@@ -760,7 +767,8 @@ export const EXTRACT_JS = String.raw`(arg) => {
                role: (e.getAttribute('role') || '').toLowerCase(),
                content_editable: e.isContentEditable ? true : false,
                draggable: (e.getAttribute('draggable') || '').toLowerCase() === 'true',
-               href: href ? href.split('?')[0].replace(/\/+$/, '').split('/').slice(-2).join('/') : ''});
+               href: href ? href.split('?')[0].replace(/\/+$/, '').split('/').slice(-2).join('/') : '',
+               href_full: href});
   }
   // ---- R1a/R1b 后置裁决（都在 slice 前，占 max 预算；代理一律 non-main 排尾）----
   const idxOf = new Map();
@@ -893,6 +901,7 @@ export const EXTRACT_JS = String.raw`(arg) => {
             rect: r.rect, inViewport: r.inViewport, nearViewport: r.nearViewport,
             scrollDepth: r.scrollDepth, inScrollContainer: r.inScrollContainer, bucket: r.bucket, prio: r.prio,
             data_test: r.data_test, name: r.name, id: r.id, input_type: r.input_type, href: r.href,
+            ...(r.href_full ? {href_full: r.href_full} : {}),
             ...(r.surface ? {surface: r.surface} : {}),
             ...(r.role ? {role: r.role} : {}),
             ...(r.content_editable ? {content_editable: true} : {}),
@@ -1045,7 +1054,8 @@ const HINT_HEAD = String.raw`(arg) => {
                             data_test: e.getAttribute('data-test') || '',
                             name: e.getAttribute('name') || '', id: e.id || '',
                             input_type: (e.getAttribute('type') || '').toLowerCase(),
-                            href: href ? href.split('?')[0].replace(/\/+$/,'').split('/').slice(-2).join('/') : ''};
+                            href: href ? href.split('?')[0].replace(/\/+$/,'').split('/').slice(-2).join('/') : '',
+                            ...(href ? {href_full: href} : {})};
                 }); }`;
 const PASS_HINT = compile("arg", COLLECT_JS + `\nreturn (${HINT_HEAD})(arg);`);
 /** tiny per-element fallback probes */
@@ -1313,6 +1323,7 @@ export async function extractRowsPerElement(page: PageLike, maxElements: number 
       id: (await el.getAttribute("id")) ?? "",
       input_type: ((await el.getAttribute("type")) ?? "").toLowerCase(),
       href: href ? href.split("?")[0]!.replace(/\/+$/, "").split("/").slice(-2).join("/") : "",
+      ...(href ? { href_full: href } : {}),
       ...(jsRef ? { js_ref: jsRef } : {}),
       ...(roleAttr ? { role: roleAttr } : {}),
       ...(contentEditable ? { content_editable: true } : {}),

@@ -19,7 +19,7 @@ export interface PoolElemView {
   frame_origin: string;
   hint_candidates: string[];
   /** 有界附加属性：只有存在且非空时才输出，避免把空串当事实。 */
-  extras: Partial<Record<"name" | "id" | "data_test" | "href" | "input_type" | "role" | "near" | "heuristic" | "surface", string>>;
+  extras: Partial<Record<"name" | "id" | "data_test" | "href" | "href_full" | "input_type" | "role" | "near" | "heuristic" | "surface", string>>;
 }
 
 export interface PoolView {
@@ -53,7 +53,7 @@ export function poolView(elems: ElemPool, page: PageLike, maxElements: number): 
   const truncated = rows.length > maxElements;
   const elements = rows.slice(0, maxElements).map((e): PoolElemView => {
     const extras: PoolElemView["extras"] = {};
-    for (const k of ["name", "id", "data_test", "href", "input_type", "role", "near"] as const) {
+    for (const k of ["name", "id", "data_test", "href", "href_full", "input_type", "role", "near"] as const) {
       const val = e[k];
       if (typeof val === "string" && val !== "") extras[k] = val;
     }

@@ -189,6 +189,26 @@ const poolFieldFor = (attr: string): string => {
 };
 
 /**
+ * T9：一个属性 hint 的匹配底座（已大小写折叠的候选值列表）。
+ *
+ * `href` 是唯一的**双底座**属性：展示投影 `href`（旧路径型 hint 依赖它，今天逐字节不变）
+ * + 原始属性 `href_full`（query/fragment/origin 都在，T9 新增）。两个值都非空才算候选、
+ * 同值去重；空 href 返回 `[""]`，与 T9 之前「空串照旧参与比较」的语义一致。
+ * 其它属性仍是单字段底座，行为与 T9 之前逐字节一致。
+ */
+function attrMatchValues(e: Elem, k: string): string[] {
+  const cf = (x: unknown): string => String(x ?? "").toLowerCase();
+  if (k !== "href") return [cf(e[k])];
+  const vals: string[] = [];
+  for (const v of [e.href_full, e.href]) {
+    if (typeof v !== "string" || v === "") continue;
+    const s = cf(v);
+    if (!vals.includes(s)) vals.push(s);
+  }
+  return vals.length ? vals : [""];
+}
+
+/**
  * A2：完整标签上的**词边界/前缀**命中（多词裸词的落点）。
  * `Sort by` 必须能命中 `Sort by, Not selected`（逗号边界）；裸词整体仍是"宁缺勿错"的
  * 档内歧义语义，只是新增了这一档边界证据（此前只有按空白切词的 全等/前缀/包含）。
@@ -220,8 +240,8 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
     const pre = parsed.tag;
     const k = poolFieldFor(parsed.attr);
     const v = parsed.value;
-    const cf = (x: unknown): string => String(x ?? "").toLowerCase();
-    const hitList = entries.filter(([, e]) => (!pre || e.tag === pre) && cf(e[k]).includes(v));
+    // T9：href 走 [href_full, href] 双底座（任一字段命中即算），其它属性单字段。
+    const hitList = entries.filter(([, e]) => (!pre || e.tag === pre) && attrMatchValues(e, k).some((x) => x.includes(v)));
     // TIERED resolution, measured on live pages. A substring hint that names a
     // page slug also matches every RELATED page: on today's en.wikipedia search
     // results `a[href~Alan_Turing]` hits 17 links (Alan_Turing, Alan_Turing_law,
@@ -233,9 +253,9 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
     //   3. the old behaviour over all substring hits (still None when the
     //      candidates are genuinely different — the bbc.com two-identical-links
     //      rule is unchanged).
-    const exact = hitList.filter(([, e]) => cf(e[k]) === v);
+    const exact = hitList.filter(([, e]) => attrMatchValues(e, k).some((x) => x === v));
     if (exact.length) return emit(exact.map(([r]) => r), 1);
-    const slug = hitList.filter(([, e]) => cf(e[k]).split("/").pop() === v);
+    const slug = hitList.filter(([, e]) => attrMatchValues(e, k).some((x) => x.split("/").pop() === v));
     if (slug.length) return emit(slug.map(([r]) => r), 2);
     return emit(hitList.map(([r]) => r), 3);
   }
@@ -254,7 +274,7 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
     // are routinely upper-case (data-test="net-CAM-1001"); a raw `==` silently
     // missed and the plan-named target fell back to laya (~0.03 conf).
     const refs = entries
-      .filter(([, e]) => (!parsed.tag || e.tag === parsed.tag) && String(e[k] ?? "").toLowerCase() === parsed.value)
+      .filter(([, e]) => (!parsed.tag || e.tag === parsed.tag) && attrMatchValues(e, k).some((x) => x === parsed.value))
       .map(([r]) => r);
     return emit(refs, 0);
   }
@@ -364,8 +384,11 @@ export function suggestHints(
     push(`[name=${elem.name}]`);
     push(`${elem.tag}[name=${elem.name}]`);
   }
-  if (elem.href) {
-    push(`${elem.tag}[href=${elem.href}]`);
+  // T9：href 建议用**原始属性值**（空则退回投影）——投影值可能被 hintMatch 命中但 DOM
+  // 回捞面（活页面原始属性）永远比不到；仍经同一个 push→hintMatch 自证，中不了就不建议。
+  const hrefHint = elem.href_full || elem.href;
+  if (hrefHint) {
+    push(`${elem.tag}[href=${hrefHint}]`);
   }
   const label = String(elem.label ?? "").trim();
   if (label.length >= 2 && label.length <= 80) push(label);

@@ -2115,10 +2115,12 @@ export class BrowserMiddleware {
     // pick 这边补齐，两条兜底档对"服务不可用"的反应一致。
     // U3 硬约束：`Elem.surface` 是旁路标记（PoolView/inspect/类目计数用），**不进模型请求体**——
     // provider 看到的元素形状与 U3 之前逐字段一致（第三方 provider 也不该继承引擎内部标记）。
+    // T9：`Elem.href_full` 同理（原始 href 只服务 hint 匹配/inspect），与 surface 同一处剥离；
+    // 模型面仍只看展示投影 `href`。
     const modelElems: ElemPool = {};
     for (const [ref, e] of Object.entries(elems)) {
-      if (e.surface === undefined) { modelElems[ref] = e; continue; }
-      const { surface: _surface, ...rest } = e;
+      if (e.surface === undefined && e.href_full === undefined) { modelElems[ref] = e; continue; }
+      const { surface: _surface, href_full: _hrefFull, ...rest } = e;
       modelElems[ref] = rest as Elem;
     }
     let out;
