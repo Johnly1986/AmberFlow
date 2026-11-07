@@ -15,6 +15,9 @@ import { emitJson, say } from "../context.ts";
 import { usageError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { browserSession } from "../../engine/executor.ts";
+// AX 证据源（只读观察面）：浏览器自己算的 accessibility 语义。只在 inspect 跑一次，
+// 不进池构成/hint 匹配/模型视图/动作路径（见 src/engine/ax.ts 文件头纪律）。
+import { AX_NOT_IN_POOL_BASIS, countAxNotInPool, snapshotAx } from "../../engine/ax.ts";
 import {
   extractElements, INTERACTIVE_ALL, WIDE_POOL_ELEMENTS, windowAudit,
 } from "../../engine/extraction.ts";
@@ -252,6 +255,31 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     // 形态（2026-10-29 实测：两个 Agent 都是"跑了才发现池是空的"，才转入宽扫/SSR 深挖）。
     // 判定与建议来自唯一出处；建议写进 envelope 的 next（Agent 调用即得）。
     const nearEmpty = poolNearEmpty(view.count, Math.max(0, interactiveOnPage));
+    // AX 证据源（只读 additive，第 5 项）：浏览器自己算的可访问性语义作为第二条观察证据，
+    // 回答“浏览器认为可交互/有名字的节点有哪些、哪些没进池”。取树失败 = available:false，
+    // 其余输出照常；调用放在抽池之后，池 ref/排序不受影响（A/B 可证）。
+    const axSnap = await snapshotAx(page as never);
+    const axNotInPool = axSnap
+      ? countAxNotInPool(axSnap, Object.values(pool).map((e) => e.full_label || e.label || ""))
+      : null;
+    const ax = axSnap
+      ? {
+          available: true as const,
+          source: axSnap.source,
+          interactive_count: axSnap.interactive_count,
+          counts_by_role: axSnap.counts_by_role,
+          interactive_counts_by_role: axSnap.interactive_counts_by_role,
+          nodes: axSnap.nodes.slice(0, 50),
+          nodes_truncated: axSnap.nodes.length > 50 || axSnap.truncated,
+          total_nodes: axSnap.total_nodes,
+          pool_size: view.count,
+          not_in_pool: axNotInPool,
+          not_in_pool_basis: AX_NOT_IN_POOL_BASIS,
+        }
+      : {
+          available: false as const,
+          reason: "AX 树不可用（该运行时无 accessibility API / 无 CDP 会话 / 取树失败或超时 ≤3s）；其余观察面照常",
+        };
     const data = {
       url: page.url(),
       requested_url: url,
@@ -265,6 +293,8 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       truncated: view.truncated,
       // A2：窗口透明化（--json 恒有；文本模式在下面按需提示）。
       window: windowInfo,
+      // AX 证据源：浏览器语义参照（只读，不进决策）。不可用时 available:false + reason。
+      ax,
       ...(nearEmpty ? { pool_near_empty: true, interactive_on_page: interactiveOnPage } : {}),
       ...(wide ? { wide: true, heuristic_count: heuristicCount } : {}),
       ...(wantPool ? { frame_origins: view.frame_origins } : {}),
@@ -297,6 +327,16 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
         .join("、");
       say(ctx, `ℹ ${windowInfo.out_of_window_total} 个可见交互在默认窗口外（池只展示 ${view.count}/${windowInfo.visible_interactive}）`
         + `，例如 ${examples}——宽扫/收窄 hint 或直接观察目标；窗口不是页面事实，别把"不在池"读成"不存在"`);
+    }
+    if (axSnap) {
+      // 措辞红线：只说“池未指向/未进池”，不说“不可点击/不存在”。AX 是浏览器语义参照，
+      // 不是池的一部分；不可用时不打印（空白 > 误导）。
+      const roleLine = Object.entries(axSnap.interactive_counts_by_role)
+        .slice(0, 4)
+        .map(([role, n]) => `${role} ${n}`)
+        .join("、");
+      say(ctx, `ℹ AX 树：可交互 ${axSnap.interactive_count}（池 ${view.count}；其中 ${axNotInPool ?? 0} 个未进池）`
+        + `${roleLine ? `，可交互 role：${roleLine}` : ""}——浏览器语义参照；池仍是选择器闭集，AX 不进决策`);
     }
     if (nearEmpty) {
       // U3：文案引用 sniff 证据（ADMIT_SEL 可见计数 / 窗口外 / 类目），区分两种事实：
