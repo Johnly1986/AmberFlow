@@ -266,6 +266,12 @@ export async function flow(ctx) {
 
 - **rules-only 的窗口恢复（W10）**：无模型面（规划脸/online 套件）里，声明的 `target_hint` 若被 40 窗口挤出，规则解析失败后会做**一次** 120 元素、main-first 的宽扫重解析（`hintMatch` 确定性，命中即用；常规窗口内命中零多付，不放大 attempts）。这覆盖"hint 在池投影里可匹配、但被配额挤出"的形状；宽扫与常规窗口用**同一匹配底座**（T9 起 `href` 是 `href_full` + `href` 双字段），匹配底座层面就匹配不上的 hint 它也救不了。
 - **href 的匹配底座（T9）**：池字段 `href` 仍是**有损展示投影**（去 origin、去 query，只保留路径结尾 ≤2 段；模型视图/criteriaView 用的就是它，逐字节不变）；`[href~…]` / `[href=…]` 匹配时引擎**同时**看原始属性值（`getAttribute('href')` 原样，query/fragment/origin 都在），任一字段命中即算——`a[href~page=2]` 这类 query 型 hint 从此可命中，旧路径型 `a[href=many.html]`（依赖投影）照旧命中。`inspect --json` 的 `hint_candidates` 给的是**原始值**（已用同一个 `hintMatch` 自证可命中），元素的 `href_full` 同样可在 `inspect` 看到。分页/筛选链接仍优先用 label 裸词（如 `next`）、`[data-test=…]` 或 `#id` 这类稳定锚点。
+- **声明驱动的身份回捞（FW8，identity recovery）**：反应型框架（React/Vue）把 click 监听挂在根容器，叶子自绘控件自身没有可枚举属性——它既不在选择器闭集（池）里，也不在 ADMIT 准入面里，`act: ctx.hint("#leaf")` / 命令 target `#leaf` 这类**稳定身份声明**曾经永远解析不到。现在：**当且仅当**这一步作者声明的目标（命令 `target` / act hint / plan `target_hint`，同一执行器路径）在池 + hint 回捞后仍解析不到，且声明是**身份形状**时，引擎按身份到 DOM 里找**恰好一个可见元素**并执行。五条约束（实现/审查口径一致）：
+  1. **只服务声明面**：决策步（无 act）与模型选出的元素**永不**回捞，回捞元素也不进 `ChoiceRequest.elems`、不参与 done 判定——它只是这一步声明目标的解析结果。
+  2. **形状白名单**：只认 `#id`、`tag[attr=value]`、`[attr=value]` 且 attr ∈ {test→data-test, name, id}（精确值，大小写折叠与池侧一致）；`tag[attr~substr]` / `tag~token` / 角色词 / 裸词 / `near` 都不是身份声明，行为与以前逐字节一致（不触发回捞）。
+  3. **恰好一个可见匹配**：跨 frame（与 hint 回捞同口径）查询全部匹配；0 个 → 保持原来的失败路径（命令走后续候选/`target_not_found`，act hint 走模型回退）；**>1 个可见** → 结构化 `target_ambiguous`，reason 逐个列出候选的 tag/label/id/frame/是否可见，绝不随便选；匹配但**全不可见**（checkVisibility CSS + 非零盒）→ 视为 0，绝不操作隐藏元素，诊断带 hidden 匹配计数。
+  4. **动作能力守门**：合成元素与池同构，用既有 `elemFamily`/`actionCapabilities` 判定——对普通 `div` 声明 `fill` 得到 `action_unsupported`；`click` 族对没有显式语义的 `div` 是允许的（身份声明就是作者的证据，完成仍只由 done 信号裁决）。
+  5. **证据与不污染**：trace 行记 `resolved_by: "dom_identity"` + `identity:{target,shape,attr,value,matches,total_matches,hidden_matches,frame}`；`executed_actions` 的 ref 是合成标识（`dom:0` / `dom:f<n>:0`，不伪装成池 ref `eN`）并带 `resolved_by`；临时 `data-hintref` 章在动作尝试结束后清理（成功/失败同纪律）。普通页面池构成、`inspect` 输出与模型候选**逐字节不变**。
 
 - 桶的闭集：`chrome`（nav/aside/footer/header，不受视口限制）、`viewport`（当前视口 ±15%）、`contentNear`（视口外 ±150%）、`mainOffscreen`（更远且在该页 main/article 里）、`other`。`prio` 只是诊断序，不参与选目标。
 - 查窗口事实：`amber inspect --url <页> --json` 的 `window.visible_interactive / shown / out_of_window[]`；`--wide` 把窗口放到 120，`--pool` 展示 `bucket/prio/full_label` 调试字段。

@@ -76,6 +76,8 @@ import {
   frameAt,
   framesOf,
   hintLookup,
+  identityLookup,
+  formatIdentityCandidates,
   orderElemsByFamily,
   poolSniff,
   stateText,
@@ -288,6 +290,11 @@ export interface ExecutedAction {
   files?: string[];
   /** U7：clickAt 实际点击的**元素相对**坐标（与声明绑定同值）；其它 op 缺席。 */
   position?: { x: number; y: number };
+  /**
+   * FW8：本动作的**声明目标**由身份回捞解析（合成 ref，如 `dom:0`；不是池 ref）。
+   * 缺字段 = 普通池解析。trace 行的同一事实还带 `identity:{shape,attr,value,…}`。
+   */
+  resolved_by?: "dom_identity";
 }
 
 /**
@@ -2117,10 +2124,14 @@ export class BrowserMiddleware {
     // provider 看到的元素形状与 U3 之前逐字段一致（第三方 provider 也不该继承引擎内部标记）。
     // T9：`Elem.href_full` 同理（原始 href 只服务 hint 匹配/inspect），与 surface 同一处剥离；
     // 模型面仍只看展示投影 `href`。
+    // FW8：`Elem.identity`（身份回捞合成的旁路标记）同理剥离——回捞元素按设计不会走到模型面，
+    // 这里仍做一层防御：第三方 provider 永远看不到引擎内部标记。
     const modelElems: ElemPool = {};
     for (const [ref, e] of Object.entries(elems)) {
-      if (e.surface === undefined && e.href_full === undefined) { modelElems[ref] = e; continue; }
-      const { surface: _surface, href_full: _hrefFull, ...rest } = e;
+      if (e.surface === undefined && e.href_full === undefined && e.identity === undefined) {
+        modelElems[ref] = e; continue;
+      }
+      const { surface: _surface, href_full: _hrefFull, identity: _identity, ...rest } = e;
       modelElems[ref] = rest as Elem;
     }
     let out;
@@ -3743,6 +3754,40 @@ export class BrowserMiddleware {
         let reobserved = false;          // at most ONE wider look per step
         let escalated = false;           // at most ONE escalation per step
         let escalatedPick: string | null = null;
+        // FW8 声明驱动的身份回捞（identity recovery）：只服务**这一步作者声明的目标**
+        // （命令 target / act hint / plan target_hint 走同一执行器路径）——决策步与模型
+        // 选出的元素永不走这里。形状白名单与跨 frame 可见性匹配在 extraction.identityLookup；
+        // `identityTried` 保证同一步里同一条 hint 只尝试一次。
+        const identityTried = new Set<string>();
+        let identity: {
+          ref: string; target: string; shape: string; attr: string; value: string;
+          matches: number; total_matches: number; hidden_matches: number; frame: number;
+        } | null = null;
+        let identityCleanup: (() => Promise<void>) | null = null;
+        /** 身份面已在**外部循环**里给出的结构化停因（能力/歧义）；命令循环结束后统一执行。 */
+        let identityStop: { code: StopCode; reason: string } | null = null;
+        /** 身份回捞命中但全不可见：按 0 处理（绝不操作隐藏元素），只留诊断证据。 */
+        let identityHidden: { target: string; hidden: number; total: number } | null = null;
+        /** 与 A3 同纪律：章只服务本次动作定位，动作尝试一结束就清。 */
+        const cleanupIdentity = async (): Promise<void> => {
+          if (identityCleanup === null) return;
+          const fn = identityCleanup;
+          identityCleanup = null;
+          try { await fn(); } catch { /* 清理失败不阻断：章值唯一，残留不会误指 */ }
+        };
+        const identityEvidence = (): Record<string, unknown> => (identity === null ? {} : {
+          resolved_by: "dom_identity",
+          identity: {
+            target: identity.target, shape: identity.shape, attr: identity.attr, value: identity.value,
+            matches: identity.matches, total_matches: identity.total_matches,
+            hidden_matches: identity.hidden_matches, frame: identity.frame,
+          },
+        });
+        /** FW8：命中但全不可见时的停因补充（诊断必须带隐藏匹配计数）。 */
+        const identityHiddenSuffix = (): string => identityHidden === null ? ""
+          : ` — identity recovery: ${JSON.stringify(identityHidden.target)} matched `
+            + `${identityHidden.total} element(s) in the DOM but ${identityHidden.hidden} are hidden `
+            + `(checkVisibility CSS / zero box); hidden elements are never acted on`;
         // P2 COMMAND SPACE — the step's action is chosen ON THE CLOSED SET, not on the pool:
         // `instantiateSpace` semantics implemented as the walk below (declaration × this
         // step's observation; a command resolving to nothing is OUT — with the same
@@ -3785,6 +3830,59 @@ export class BrowserMiddleware {
               pruneForbids(elems);
               candRefs = this.resolveCommandRef(target, elems, String(c.op), new Set(Object.keys(forbidden)));
             }
+            // FW8：池 + hint 回捞都空之后，做**一次**声明驱动的身份回捞（形状白名单见
+            // extraction.identityHintInfo）。只在这一步作者声明的 target 上发生——模型面永不参与。
+            if (candRefs.length === 0 && target !== "" && hintCandidates(target, elems) === null
+                && !identityTried.has(target)) {
+              identityTried.add(target);
+              const idr = await identityLookup(pg, target);
+              if (idr.eligible) {
+                // 约束 3：可见匹配 > 1 = 歧义（rows 只在恰好 1 个可见匹配时非空）。
+                const visibleMatches = idr.total_matches - idr.hidden_matches;
+                if (visibleMatches > 1) {
+                  for (const cand of idr.candidates.filter((x) => x.visible)) {
+                    noteSkipped({
+                      command_id: c.id, target, ref: `identity:${cand.tag}${cand.id ? `#${cand.id}` : ""}`,
+                      reason: "target_ambiguous",
+                      detail: `${visibleMatches} visible identity match(es) for ${JSON.stringify(target)}; never guessed`,
+                    });
+                  }
+                  const reason = `command ${JSON.stringify(c.id)} identity target ${JSON.stringify(target)} `
+                    + `(${idr.shape}, ${idr.attr}=${JSON.stringify(idr.value)}) matches ${visibleMatches} `
+                    + `visible element(s) across frames (total=${idr.total_matches}, hidden=${idr.hidden_matches}) `
+                    + `— candidates: ${formatIdentityCandidates(idr.candidates)}. Identity recovery never guesses `
+                    + `among several matches; narrow the declaration to a unique id/data-test/name on step ${stepNo}`;
+                  await idr.cleanup();
+                  identityStop = { code: "target_ambiguous", reason };
+                  break;
+                }
+                if (idr.rows.length === 1) {
+                  const el = idr.rows[0]!;
+                  const ref = String(el.ref ?? "dom:0");
+                  identity = {
+                    ref, target, shape: idr.shape, attr: idr.attr, value: idr.value,
+                    matches: 1, total_matches: idr.total_matches,
+                    hidden_matches: idr.hidden_matches, frame: Number(el.frame ?? 0),
+                  };
+                  identityCleanup = idr.cleanup;
+                  // 只进**本步解析用的局部池**：命令面不再询问模型（cmdPick 直接解析出 ref），
+                  // 所以它不会进入 ChoiceRequest.elems；下一步重新抽池即消失。
+                  elems[ref] = el;
+                  pruneForbids(elems);
+                  const pickedRefs = this.resolveCommandRef(target, elems, String(c.op),
+                    new Set(Object.keys(forbidden)));
+                  cmdPick = {
+                    cmd: c, ref: pickedRefs[0] ?? ref, index: i,
+                    cands: (pickedRefs.length ? pickedRefs : [ref]).slice(0, CMD_CANDIDATE_ATTEMPTS),
+                  };
+                  break;
+                }
+                // 0 可见：保持今天的失败路径（后续候选 / 最终 target_not_found）；隐藏匹配只作证据。
+                if (idr.hidden_matches > 0) {
+                  identityHidden = { target, hidden: idr.hidden_matches, total: idr.total_matches };
+                }
+              }
+            }
             pruneForbids(elems);
             if (candRefs.length > 0) {
               cmdPick = { cmd: c, ref: candRefs[0]!, index: i, cands: candRefs.slice(0, CMD_CANDIDATE_ATTEMPTS) };
@@ -3803,6 +3901,12 @@ export class BrowserMiddleware {
             });
             cmdDone.add(c.id);
             cmdI = i + 1;
+          }
+          // FW8：身份回捞给出的结构化停因（歧义）优先于后续命令选择——绝不"随便选一个"。
+          if (identityStop !== null) {
+            stop(identityStop.code, identityStop.reason, stepNo);
+            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            break;
           }
           if (cmdPick === null) {
             // 区分“目标不存在”和“目标存在但歧义”：歧义不是空间为空，而是候选集 > 1。
@@ -3864,6 +3968,11 @@ export class BrowserMiddleware {
                 // A2 判别①：报错现场用内存里已有的池回答「目标不在页面上 vs 闭集没把它放进
                 // 命令空间」（12 轮真站实测：9/11 轮把产品 UI 本来就没有的排序项误读成引擎池缺陷）。
                 + cmdDiscrimination(cmdSpace, pendingUnresolved, elems)
+                // FW8：身份回捞匹配到了、但**全不可见**——按 0 处理，把隐藏匹配数作为诊断证据。
+                + (identityHidden === null ? ""
+                  : ` — identity recovery: ${JSON.stringify(identityHidden.target)} matched `
+                    + `${identityHidden.total} element(s) in the DOM but ${identityHidden.hidden} are hidden `
+                    + `(checkVisibility CSS / zero box); hidden elements are never acted on`)
                 + underNote, stepNo);
             }
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
@@ -3887,6 +3996,48 @@ export class BrowserMiddleware {
               // U3/C10：节点身份去重（见命令路径同一处注释）。
               if (!e.dsh_ref) elems[ref] = e;
             }
+            // FW8：act hint 的**声明面**身份回捞——池 + hint 回捞都落空后才尝试，同一步同一
+            // hint 只试一次。决策步（无 act）不会来到这里；命中结果只进本步局部池，模型面
+            // 永远不会看到它（下面 rule 命中直接给出 ref，不构造 ChoiceRequest）。
+            if (hintMatch(curHint, elems) === null && !identityTried.has(curHint)) {
+              identityTried.add(curHint);
+              const idr = await identityLookup(pg, curHint);
+              if (idr.eligible) {
+                // 约束 3：可见匹配 > 1 = 歧义（rows 只在恰好 1 个可见匹配时非空）。
+                const visibleMatches = idr.total_matches - idr.hidden_matches;
+                if (visibleMatches > 1) {
+                  for (const cand of idr.candidates.filter((x) => x.visible)) {
+                    noteSkipped({
+                      ref: `identity:${cand.tag}${cand.id ? `#${cand.id}` : ""}`, reason: "target_ambiguous",
+                      detail: `${visibleMatches} visible identity match(es) for ${JSON.stringify(curHint)}; never guessed`,
+                    });
+                  }
+                  await idr.cleanup();
+                  identityStop = {
+                    code: "target_ambiguous",
+                    reason: `target_hint ${JSON.stringify(curHint)} identity declaration (${idr.shape}, `
+                      + `${idr.attr}=${JSON.stringify(idr.value)}) matches ${visibleMatches} visible element(s) `
+                      + `across frames (total=${idr.total_matches}, hidden=${idr.hidden_matches}) — candidates: `
+                      + `${formatIdentityCandidates(idr.candidates)}. Identity recovery never guesses among `
+                      + `several matches; narrow the hint to a unique id/data-test/name on step ${stepNo}`,
+                  };
+                } else if (idr.rows.length === 1) {
+                  const el = idr.rows[0]!;
+                  const ref = String(el.ref ?? "dom:0");
+                  identity = {
+                    ref, target: curHint, shape: idr.shape, attr: idr.attr, value: idr.value,
+                    matches: 1, total_matches: idr.total_matches,
+                    hidden_matches: idr.hidden_matches, frame: Number(el.frame ?? 0),
+                  };
+                  identityCleanup = idr.cleanup;
+                  elems[ref] = el;
+                } else if (idr.hidden_matches > 0) {
+                  // 全不可见：视为 0，保持今天的失败路径（act hint → 模型回退）；
+                  // 隐藏匹配只作诊断证据，绝不操作隐藏元素。
+                  identityHidden = { target: curHint, hidden: idr.hidden_matches, total: idr.total_matches };
+                }
+              }
+            }
           }
           // drop forbids whose ref now points at a different element
           pruneForbids(elems);
@@ -3899,6 +4050,17 @@ export class BrowserMiddleware {
             continue;
           }
           break;
+        }
+        // FW8：身份歧义是结构化停因，绝不回退"随便选一个"或交给模型猜。
+        if (identityStop !== null) {
+          stop(identityStop.code, identityStop.reason, stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          break;
+        }
+        if (identityHidden !== null) {
+          warnings.push(`identity_hidden: target ${JSON.stringify(identityHidden.target)} matched `
+            + `${identityHidden.total} element(s) in the DOM but ${identityHidden.hidden} are hidden `
+            + `(checkVisibility CSS / zero box) — not acted on; the step continues on the declared failure path`);
         }
         const commandMode = cmdSpace.length > 0;
         // resolve the picked command's parameter binding NOW (fill/select). A missing
@@ -4079,13 +4241,13 @@ export class BrowserMiddleware {
                   ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
                   : "")
               // A3：provider 是抛错降级（而非本来就没装）时，把 HTTP 事实带上——排查不必再猜。
-              + this.degradedReasonSuffix(), stepNo);
+              + this.degradedReasonSuffix() + identityHiddenSuffix(), stepNo);
           } else {
             stop("action_space_exhausted",
               `action space exhausted on step ${stepNo}`
               + (curHint !== null && ruleRef === null
                   ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
-                  : ""), stepNo);
+                  : "") + identityHiddenSuffix(), stepNo);
           }
           if (verbose && this.rulesOnly) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
@@ -4383,6 +4545,7 @@ export class BrowserMiddleware {
                 : op === "clickAt"
                   ? "。clickAt 只对 click 族元素成立（如 canvas）——检查目标 hint 是否指到了非点击控件"
                   : "";
+            await cleanupIdentity();   // FW8：能力守门在动作前停——章到此已无用途
             stop("action_unsupported",
               `command ${JSON.stringify(cmdPick.cmd.id)} declares op '${op}', but element ${ref} `
               + `(${el.tag} "${el.label}") only declares [${caps.join(", ")}] on step ${stepNo}`
@@ -4412,6 +4575,7 @@ export class BrowserMiddleware {
         if (dryRun) {
           const probe = await this.dryRunProbe(pg, el, force);
           dryRan = true;
+          await cleanupIdentity();   // FW8：干跑探测结束，章不再需要
           if (probe.actionable) {
             stop("dry_run", `dry-run: would ${desc}${force ? " (force)" : ""} (${method}, conf=${conf.toFixed(2)})`, stepNo);
           } else {
@@ -4424,7 +4588,7 @@ export class BrowserMiddleware {
             ...(probe.reason === null ? {} : { reason: probe.reason }),
             ...(force ? { forced: true } : {}),
             would: `${el.tag} "${el.label}"`, url: urlOf(pg),
-            ...actionDeclEvidence(), ...refCollision(),
+            ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(),
           });
           if (verbose) {
             console.log(`  step ${stepNo}: DRY-RUN `
@@ -4440,8 +4604,9 @@ export class BrowserMiddleware {
           trace.push({
             step: stepNo, desc, how: "needs_value", executed: false, method, conf: 1.0,
             command: cmdPick!.cmd.id, ref: cmdPick!.ref, skipped: true, skip_reason: "needs_value",
-            url: urlOf(pg), ...actionDeclEvidence(), ...refCollision(),
+            url: urlOf(pg), ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(),
           });
+          await cleanupIdentity();   // FW8：缺值在动作前停——章到此已无用途
           stop("needs_value",
             `command ${JSON.stringify(cmdPick!.cmd.id)}: ${commandBindMissing} `
             + `— a declared binding either has its value in the plan or the step stops (红线②: never guessed) on step ${stepNo}`, stepNo);
@@ -4469,8 +4634,9 @@ export class BrowserMiddleware {
             trace.push({
               step: stepNo, desc, how: "needs_value", executed: false, method, conf: round3(conf),
               ref, skipped: true, skip_reason: "needs_value", url: urlOf(pg),
-              ...actionDeclEvidence(), ...refCollision(),
+              ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(),
             });
+            await cleanupIdentity();   // FW8：本步不再动作（needs_value）——章清零
             if (verbose) console.log(`  step ${stepNo}: (needs_value, rule) -> skip ${ref}`);
             continue;
           }
@@ -4500,8 +4666,9 @@ export class BrowserMiddleware {
             trace.push({
               step: stepNo, desc, risky: true, executed: false, confirmed: false, url: urlOf(pg),
               ref, skipped: true, skip_reason: "risk-declined",
-              ...actionDeclEvidence(), ...refCollision(),
+              ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(),
             });
+            await cleanupIdentity();   // FW8：风险闸门拒绝 = 本步不动作——章清零
             continue;
           }
         }
@@ -4619,6 +4786,9 @@ export class BrowserMiddleware {
           el = fresh[freshRef]!;
           pre = await this.snapshot(pg);   // 重试动作的 pre 快照 = 此刻页面
         }
+        // FW8：身份回捞的章只服务本次动作定位——动作尝试（含 stale 重试）一结束就清，
+        // 成功/失败同纪律（与 A3 data-af-probe cleanup 同一做法）。
+        await cleanupIdentity();
         // U6/U7：upload 的文件/声明值非法、clickAt 的坐标坏格式/越界都是**配置错误**，
         // 不是页面问题——结构化停在这里，不落成"跳过这个候选继续猜下一个"
         // （那会把配置错误伪装成目标缺失）。
@@ -4633,6 +4803,7 @@ export class BrowserMiddleware {
             ref, skipped: true, skip_reason: "config_error", url: urlOf(pg),
             ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
             ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...refCollision(),
+            ...identityEvidence(),
           });
           stop("config_error", detail, stepNo);
           if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
@@ -4673,6 +4844,7 @@ export class BrowserMiddleware {
             ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
             ...(actionability === null ? {} : { actionability }),
             ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...refCollision(),
+            ...identityEvidence(),
           });
           if (verbose) console.log(`  step ${stepNo}: (${reason}, ${method}) -> skip ${ref}`);
           continue;
@@ -4755,6 +4927,7 @@ export class BrowserMiddleware {
           ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question
           inert, url: urlOf(pg),
           ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...refCollision(),
+          ...identityEvidence(),
         });
         // A1 子改动③：这个已执行动作的 after 签名等下一次观察落账（见循环头部的落账点）。
         pendingAfterIdx = trace.length - 1;
@@ -5045,6 +5218,7 @@ export class BrowserMiddleware {
         changed: t["changed"] === true,
         ...(files !== null ? { files } : {}),
         ...(position !== null ? { position } : {}),
+        ...(t["resolved_by"] === "dom_identity" ? { resolved_by: "dom_identity" as const } : {}),
       };
     });
     // S4 证据汇总：stale 重试每次一条（trace 行本来就一次只落一行），force 只在真正执行时出现。
