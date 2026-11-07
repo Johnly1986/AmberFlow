@@ -1,0 +1,172 @@
+{
+  "id": "saucedemo-cart-eval",
+  "site": "saucedemo",
+  "tier": "deep",
+  "goal": "在 Swag Labs 完成一次状态化选货流程：登录 → 按价格降序排序 → 把最贵的两件加入购物车 → 核对购物车徽标 → 移除较贵的一件 → 核对徽标（登出见评估文档 P7 稳健性探针）",
+  "start_url": "https://www.saucedemo.com/",
+  "timeout_ms": 90000,
+  "slots": {
+    "username": "{{env:ONLINE_SAUCEDEMO_USER|standard_user}}",
+    "password": "{{env:ONLINE_SAUCEDEMO_PASSWORD|secret_sauce}}",
+    "sort": "hilo"
+  },
+  "subgoals": [
+    {
+      "desc": "用演示账号登录（命令闭集，值全部来自槽位）",
+      "start_url": "https://www.saucedemo.com/",
+      "commands": [
+        {
+          "id": "fill-user",
+          "op": "fill",
+          "target": "#user-name",
+          "value": {
+            "from": "slot",
+            "key": "username"
+          }
+        },
+        {
+          "id": "fill-pass",
+          "op": "fill",
+          "target": "#password",
+          "value": {
+            "from": "slot",
+            "key": "password"
+          }
+        },
+        {
+          "id": "click-login",
+          "op": "click",
+          "target": "#login-button"
+        }
+      ],
+      "signal": {
+        "css_exists": "#inventory_container"
+      },
+      "retries": 2
+    },
+    {
+      "desc": "按价格从高到低排序（select 的值来自槽位）",
+      "start_url": "https://www.saucedemo.com/inventory.html",
+      "commands": [
+        {
+          "id": "sort-hilo",
+          "op": "select",
+          "target": "select[data-test=product-sort-container]",
+          "value": {
+            "from": "slot",
+            "key": "sort"
+          }
+        }
+      ],
+      "signal": {
+        "css_value_equals": [
+          "select[data-test=product-sort-container]",
+          "hilo"
+        ]
+      },
+      "retries": 2
+    },
+    {
+      "desc": "把排序后最贵的一件加入购物车（徽标 0→1）",
+      "start_url": "https://www.saucedemo.com/inventory.html",
+      "commands": [
+        {
+          "id": "add-fleece",
+          "op": "click",
+          "target": "button[data-test=add-to-cart-sauce-labs-fleece-jacket]"
+        }
+      ],
+      "signal": {
+        "css_text_equals": [
+          "[data-test=shopping-cart-badge]",
+          "1"
+        ]
+      },
+      "retries": 2
+    },
+    {
+      "desc": "把第二贵的一件加入购物车（徽标 1→2）",
+      "start_url": "https://www.saucedemo.com/inventory.html",
+      "commands": [
+        {
+          "id": "add-backpack",
+          "op": "click",
+          "target": "button[data-test=add-to-cart-sauce-labs-backpack]"
+        }
+      ],
+      "signal": {
+        "css_text_equals": [
+          "[data-test=shopping-cart-badge]",
+          "2"
+        ]
+      },
+      "retries": 2
+    },
+    {
+      "desc": "打开购物车",
+      "start_url": "https://www.saucedemo.com/inventory.html",
+      "commands": [
+        {
+          "id": "open-cart",
+          "op": "click",
+          "target": "a[data-test=shopping-cart-link]"
+        }
+      ],
+      "signal": {
+        "url_contains": "cart.html"
+      },
+      "retries": 2
+    },
+    {
+      "desc": "从购物车移除较贵的一件（徽标 2→1）",
+      "start_url": "https://www.saucedemo.com/cart.html",
+      "commands": [
+        {
+          "id": "remove-fleece",
+          "op": "click",
+          "target": "button[data-test=remove-sauce-labs-fleece-jacket]"
+        }
+      ],
+      "signal": {
+        "css_text_equals": [
+          "[data-test=shopping-cart-badge]",
+          "1"
+        ]
+      },
+      "retries": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "cart-state",
+      "desc": "最终停在购物车页，恰好剩 1 件商品且徽标为 1",
+      "signal": {
+        "all_of": [
+          {
+            "url_contains": "cart.html"
+          },
+          {
+            "css_exists": ".cart_item"
+          },
+          {
+            "css_text_equals": [
+              "[data-test=shopping-cart-badge]",
+              "1"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "oracle": {
+    "kind": "css_count",
+    "selector": ".cart_item",
+    "min": 1
+  },
+  "tags": [
+    "planning",
+    "cart",
+    "stateful",
+    "public"
+  ]
+}
