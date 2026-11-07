@@ -70,7 +70,7 @@ import {
   type AdapterRunContext, type ManualStepDecl, type ManualStepRequest, type ManualStepRun,
 } from "./app-adapters.ts";
 import { validateApp } from "./cross-ref.ts";
-import { SECRET_SLOT_NAME, maskSecretSlots, scrubSecrets, secretSlotKeys, secretValuesFromSlots } from "./redaction.ts";
+import { MASKED_SLOT, SECRET_SLOT_NAME, maskSecretSlots, scrubSecrets, secretSlotKeys, secretValuesFromSlots } from "./redaction.ts";
 import { dryRunFlow, loadScriptApp, type LoadedScriptApp } from "./app-script.ts";
 import { StopError, createCtx, type ToolRunRequest, type ToolRunResult } from "./ctx.ts";
 import { createReplayCtx } from "./ctx-replay.ts";
@@ -1191,6 +1191,23 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const sourceSlots = resolveSourceSlots(pack, observed);
   const expanded = expandPack(pack, { ...sourceSlots, ...slots }, planPath);
   const plan = expanded.plan;
+  // R3/U2b：**计划文件也是产物**——敏感槽位的明文只留在内存里的运行袋，落盘的 plan 一律
+  // 掩码。plan.save() 在每一步状态变化时都会被调，这里包一层：只在写盘那一刻换成掩码副本，
+  // 写完立刻还原（执行器解析 `{from:"slot"}` 绑定时读的仍是真值）。
+  if (secretKeys.size > 0) {
+    const originalSave = plan.save.bind(plan);
+    plan.save = (): void => {
+      const live = plan.slots;
+      const masked: Record<string, unknown> = { ...live };
+      for (const key of secretKeys) if (key in masked) masked[key] = MASKED_SLOT;
+      try {
+        plan.slots = masked;
+        originalSave();
+      } finally {
+        plan.slots = live;
+      }
+    };
+  }
   // 人工步默认开可见窗口：人在里面登录/过验证码；未选中的段内人工步不影响本次 headless 选择。
   // 相对 start_url 按仓库根解析成 file://：应用包写仓库内路径，
   // 不写死绝对路径，换机器/换 checkout 目录仍然可跑。

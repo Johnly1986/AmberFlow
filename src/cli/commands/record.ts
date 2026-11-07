@@ -45,6 +45,9 @@ export async function runRecord(args: string[], ctx: CliContext): Promise<number
         out: { type: "string" }, "apps-dir": { type: "string" }, script: { type: "string" },
         yes: { type: "boolean" }, json: { type: "boolean" },
         headless: { type: "boolean" }, headful: { type: "boolean" },
+        // U2b 值管道：--slot/--slot-file 直接透传给 tools/learn.ts（录制演示值 + 生成应用的
+        // meta.slots 默认值；敏感值走文件，不进 argv）。
+        slot: { type: "string", multiple: true }, "slot-file": { type: "string" },
         quiet: { type: "boolean" }, help: { type: "boolean" },
       },
     });
@@ -88,6 +91,8 @@ export async function runRecord(args: string[], ctx: CliContext): Promise<number
   if (v.out) oldArgs.push("--out", v.out);
   if (v["apps-dir"]) oldArgs.push("--apps-dir", v["apps-dir"]);
   if (v.script) oldArgs.push("--script", v.script);
+  if (v["slot-file"]) oldArgs.push("--slot-file", v["slot-file"]);
+  for (const item of v.slot ?? []) oldArgs.push("--slot", item);
   if (v.yes || ctx.globals.yes) oldArgs.push("--yes");
   if (v.json || ctx.globals.json) oldArgs.push("--json");
   if (v.quiet || ctx.globals.quiet) oldArgs.push("--quiet");

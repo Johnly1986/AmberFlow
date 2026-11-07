@@ -655,7 +655,7 @@ export async function flow(ctx) {
   **输入值优先**——`#name` 的值才是动作写下的证据，label 往往只是字段名（aria-label/初始文本在动作前后
   不变）；值必须非空、非波动量，password/file/hidden 在捕获期已按长度掩码（掩码值不会生成值信号）。
   **存在性变化**仍走 `css_exists`/`gone`；只有“两态都存在、可见性翻转”才走 `css_visible_exists` /
-  `not(...)`。录下来的字面值回放进生成应用仍不在本项（值管道 U2b）。
+  `not(...)`。录下来的字面值回放进生成应用见 §6.1（U2b 值管道）。
 - 组合器是**变参**不是数组：`ctx.judge.all(ctx.judge.url("a"), ctx.judge.text("h1","x"))` ✔；
   `all([a, b])` 加载期 INVALID（2026-11-01 实测：初次使用者首个就在这里被 apps check 拦下，
   报错定位准确、一次修正）。
@@ -665,12 +665,62 @@ export async function flow(ctx) {
 - 组合器可嵌套。**不要用“看起来完成了”代替证据**：`ctx.step` 返回的 `ok` 就是 done 信号是否成立。
 - **可用的 done = 「动作前不成立、动作后成立」**（判据，05/06 轮案例实证）：动作前已成立的信号（如任何页都真的 `exists("h1")`）在验证面**零贡献**——这一步的绿完全外包给 goal 语义与模型恰好点对，落点再意外也判绿（r06 `wide-done-sample` 实录）。守卫/到达/翻页步尤其警惕；用位置类选择器（`nth-child`/`nth-of-type`）前先实证**动作前命中数为 0**——站点数据可能自带"第 11 条"（r05 实证 `div.quote:nth-of-type(11)` 未滚动已真）。翻页类 done 优先用 URL 参数片段或**下一页独有内容锚**，别用两页共有的 h1/容器。
 
+
 结束态不变量写在 `meta.invariants`，由 `ctx.done()` 在**同一页面**上验收：
 
 - 声明了不变量却从未调用 `ctx.done()` → 运行判 `missing_done`（验收没发生，不能报绿）；
 - `ctx.done()` 时不变量不成立 → `invariant_failed`；
 - 中间要求写进每一步的 `done`；不变量看不到中间状态；
 - 纯工具应用不要写 web 不变量（没有浏览器结束态可验）。
+
+### 6.1 录制值管道：演示值 → `meta.slots` + 值绑定（U2b）
+
+`record` / `learn` 录到 `type` 动作时，值不再"录完就丢"，而是写成**声明绑定**：
+
+- 槽位键取自控件身份（`name` > `id` > `data-test` > `label`，ASCII 归一化）；
+  同名重复且值不同才加 `_2` 后缀。
+- 非敏感值：journey 步带 `value_binding: {from:"slot", key}`，`meta.slots[key]` 的默认值就是演示值；
+  生成的 `flow` 用 `ctx.command("fill", hint, ctx.value.slot("key"))`（不是硬编码字面值）。
+  `value_binding` **只认 slot**：option/list/dataset 请直接写 `commands`，`literal` 显式拒绝
+  （命令/计划面的绑定来源没有 literal，见 F33 遗留；不新增该语义）。
+- 信号里的演示值被参数化成 `{key}`（pack 展开期替换），生成 `flow` 时写成运行期表达式
+  `ctx.slots["key"]`——例如 `css_text_equals ["#result","hello:Alice"]` 生成
+  `ctx.judge.equals("#result", "hello:" + ctx.slots["name"])`；`type` 的值信号生成
+  `ctx.judge.value("#name", ctx.slots["name"])` 的等价构造。所以 `--slot name=Bob` 回放时
+  动作与完成判据一起按 Bob 判定，不是拿演示值蒙混。
+- `meta.invariants` **不做槽位替换**（`ctx.done` 直接拿声明值判）：依赖演示值的结束态断言
+  生成时**省略**并在 `notes` 点名（每步的动态 done 仍是判据）；不要手写 `{name}` 指望它生效。
+
+**`--slot` / `--slot-file`（record/learn 与 run 同格式）**：
+
+```bash
+amber record http://127.0.0.1:8104/form.html --script actions.json --name form --slot name=Bob --yes
+amber record https://site/login --script login.json --name login --slot-file ./slots.json --yes
+```
+
+- 命中某个 `type` 动作的键 ⇒ 用它回放演示，并成为生成应用的 `meta.slots` 默认值；
+- 未命中任何 `type` 动作的键 ⇒ 用法错误（写了没用，不静默忽略）；
+- 敏感字段（`password` / `file` / `hidden`，或录制器标记）**值绝不复用 `--script` 明文**：
+  只认 `--slot`/`--slot-file`；没有值 = 录制回放门如实失败并提示 `--slot-file`；
+- learn 自己的 pack 回放与生成脚本回放都按同一个槽位袋运行。
+
+**敏感纪律（安全级）**：`meta.secretSlots` 声明的槽位在生成物里**恒空串占位**（codegen 强制），
+值不进入 `app.mjs` / `notes` / `recordedFrom` / 信号 / 诊断文本（信号里只以 `{key}` 出现，
+人读文本 `***`）。空串对 `fill` 是合法的"清空"，所以生成的 `flow` 带显式守卫：
+
+```js
+if (!ctx.slots["pw"]) {
+  ctx.fail("needs_value", 'secret slot "pw" has no value — pass --slot-file <json> (or --slot pw=…)');
+}
+```
+
+运行时有值（`--slot-file slots.json`）才执行；没有 = 结构化 `needs_value`，绝不拿空串填进去。
+`apps check` 是 dry 执行 flow、会走到这条守卫，所以检查 secret 应用时给一个占位值即可
+（`apps check <id> --slot pw=dummy`）。注意：**值派生的页面输出**（如显示 `pw-len:9`）不会被
+参数化——换一个长度不同的秘密值时，那条 done/不变量会如实不成立；这不是值管道能猜的，
+需要手写该步判据。
+
+无值的流程（纯导航、可见性面板）生成物与 U2b 之前**逐字节一致**——值管道只在有 `type` 演示值时启用。
 
 ## 7. 人工步骤 `ctx.manual`
 
@@ -798,7 +848,7 @@ amber apps check [<id|路径>] / explain <id|路径>
 amber run <id|路径> [--dry-run] [--max-steps N] [--trace] [--headful]
                     [--slot k=v] [--today YYYY-MM-DD] [--out DIR] [--allow-dangerous]
                     [--emit-trace F] [--replay F] [--json]
-amber record <页面> [--name ID] [--goal G] [--apps-dir DIR] [--yes]
+amber record <页面> [--name ID] [--goal G] [--apps-dir DIR] [--slot k=v] [--slot-file F] [--yes]
 amber inspect --url <URL> [--json]
 npm run test           # 真实站点测试（smoke + core）
 npm run check           # typecheck + 配置示例一致性 + 线上用例离线校验

@@ -21,6 +21,7 @@
  */
 import crypto from "node:crypto";
 import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../src/support/cli-args.ts";
+import { parseSlots } from "../src/cli/args.ts";
 import { applyConfiguredEnv } from "../src/support/apply-config-env.ts";
 import fs from "node:fs";
 import os from "node:os";
@@ -131,6 +132,98 @@ export function executableActions(bag: Array<Record<string, unknown>>): {
   return { actions, skipped };
 }
 
+/* ------------------------------------------------------- 值管道小工具（U2b） */
+
+const SECRET_INPUT_TYPES = new Set(["password", "file", "hidden"]);
+
+/** 录制/抽池时看到的元素身份（只用于推导槽位键与敏感形态，不落包）。 */
+interface ObservedTarget {
+  tag: string;
+  input_type: string;
+  name: string;
+  id: string;
+  data_test: string;
+  label: string;
+}
+
+/** 槽位键：name > id > data-test > label；都要 ASCII 安全（JS 标识符风格，最长 40）。 */
+function slotKeyOf(raw: string): string {
+  const k = String(raw ?? "").trim().toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+  if (!k) return "";
+  return /^[0-9]/.test(k) ? `v_${k}` : k;
+}
+
+/**
+ * 从演示动作推导槽位键。优先**观察到的控件身份**（name 是表单语义上最稳的键），
+ * 池里没解析到时退到 hint 的稳定形状；都不行返回空串（调用方给 `field_N` 兜底）。
+ */
+function slotKeyFor(hint: string, observed: ObservedTarget | null): string {
+  const candidates: string[] = [];
+  if (observed !== null) candidates.push(observed.name, observed.id, observed.data_test, observed.label);
+  const id = /^#([^#.\s]+)$/.exec(hint.trim());
+  if (id) candidates.push(id[1]!);
+  const attr = /\[(?:name|id|data-test)=["']?([^"'\]]+)["']?\]/.exec(hint);
+  if (attr) candidates.push(attr[1]!);
+  for (const c of candidates) {
+    const k = slotKeyOf(c);
+    if (k) return k;
+  }
+  return "";
+}
+
+function isPlainObj(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * 只改信号里的**值/文本操作数**，绝不碰选择器：`css_text_equals`/`css_value_equals`/
+ * `css_text_contains`/`css_exists_text` 的第 2 元是值，第 1 元是选择器（选择器里出现
+ * 演示值也不能替换，否则 `#name` 会被写坏）；`url_contains` 是整段 URL。
+ */
+function mapSignalText(signal: unknown, fn: (text: string) => string): unknown {
+  if (!isPlainObj(signal)) return signal;
+  const out: Record<string, unknown> = {};
+  for (const [op, payload] of Object.entries(signal)) {
+    if (op === "all_of" || op === "any_of") {
+      out[op] = Array.isArray(payload) ? payload.map((s) => mapSignalText(s, fn)) : payload;
+    } else if (op === "not") {
+      out[op] = mapSignalText(payload, fn);
+    } else if (op === "url_contains") {
+      out[op] = typeof payload === "string" ? fn(payload) : payload;
+    } else if (Array.isArray(payload) && payload.length === 2
+      && typeof payload[0] === "string" && typeof payload[1] === "string") {
+      out[op] = [payload[0], fn(payload[1])];
+    } else {
+      out[op] = payload;
+    }
+  }
+  return out;
+}
+
+/** 把信号值操作数里的演示值换成 `{slot}` 占位符（长值优先，避免子串互吃）。 */
+function parameterizeSignal(
+  signal: unknown, entries: Array<{ key: string; value: string }>,
+): unknown {
+  const usable = entries.filter((e) => e.value.length > 0)
+    .sort((a, b) => b.value.length - a.value.length);
+  if (!usable.length) return signal;
+  return mapSignalText(signal, (text) => {
+    let out = text;
+    for (const e of usable) out = out.split(e.value).join(`{${e.key}}`);
+    return out;
+  });
+}
+
+/** 人读文本里的敏感值 → `***`（effect/why/desc 这类诊断面；信号值面用占位符）。 */
+function redactText(text: string, secrets: string[]): string {
+  let out = text;
+  for (const v of secrets.filter((x) => x.length > 0).sort((a, b) => b.length - a.length)) {
+    out = out.split(v).join("***");
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ 学习 */
 
 export interface LearnedStep {
@@ -141,6 +234,18 @@ export interface LearnedStep {
   effect: string[];
   /** 归纳出的前 3 个候选（给"确认"界面用；`signal` 就是第一个）。 */
   alternatives: SignalSpec[];
+  /**
+   * `type` 步写入的槽位键：`packFromLearning` 把它写成
+   * `value_binding: {from:"slot",key}`，演示值进 `meta.slots` 当默认值。
+   */
+  value_key?: string;
+  /**
+   * `type` 步的**非敏感**演示值（敏感值不落任何结构——见 `secret`）。
+   * 信号里出现这个值时会被参数化成 `{key}`，运行时由槽位值替换。
+   */
+  value?: string;
+  /** 敏感字段（password/file/hidden）：值不录制、不落盘，回放需要 `--slot`/`--slot-file`。 */
+  secret?: boolean;
 }
 
 export interface Learning {
@@ -199,7 +304,10 @@ function attrLiteral(v: string): string {
  */
 async function resolvePlaybackTarget(
   pg: unknown, hint: string,
-): Promise<{ click: () => Promise<void>; fill: (v: string) => Promise<void>; via: string }> {
+): Promise<{
+  click: () => Promise<void>; fill: (v: string) => Promise<void>; via: string;
+  observed: ObservedTarget | null;
+}> {
   const page = pg as unknown as PageLike & PlaybackFrame & {
     click(sel: string, o?: unknown): Promise<void>;
     fill(sel: string, value: string, o?: unknown): Promise<void>;
@@ -229,10 +337,19 @@ async function resolvePlaybackTarget(
         const list = typeof frames === "function" ? frames.call(page) : frames;
         const scope = (Array.isArray(list) && list[Number(el["frame"] ?? 0)]) || page;
         const loc = scope.locator(selector);
+        const observed: ObservedTarget = {
+          tag: String(el["tag"] ?? "").toLowerCase(),
+          input_type: typeof el["input_type"] === "string" ? String(el["input_type"]) : "",
+          name: typeof el["name"] === "string" ? String(el["name"]) : "",
+          id: typeof el["id"] === "string" ? String(el["id"]) : "",
+          data_test: typeof el["data_test"] === "string" ? String(el["data_test"]) : "",
+          label: typeof el["label"] === "string" ? String(el["label"]) : "",
+        };
         return {
           click: () => loc.click({ timeout: 10_000 }),
           fill: (v) => loc.fill(v, { timeout: 10_000 }),
           via: `pool:${selector}`,
+          observed,
         };
       }
     }
@@ -241,7 +358,50 @@ async function resolvePlaybackTarget(
     click: () => page.click(hint, { timeout: 10_000 }),
     fill: (v) => page.fill(hint, v, { timeout: 10_000 }),
     via: "native-selector",
+    observed: null,
   };
+}
+
+/**
+ * 池解析失败（回退原生 selector）时的**兜底观测**：至少把 input type 读出来——敏感字段
+ * 的判定不能依赖抽池成功，否则一个抽不到的 password 输入框会被当成普通文本把明文录下来。
+ * hint 不是合法 selector 时返回 null（宁可后续按非敏感处理，也不猜）。
+ */
+async function observeInputFallback(pg: unknown, hint: string): Promise<ObservedTarget | null> {
+  try {
+    const raw = await (pg as { evaluate(fn: unknown, arg?: unknown): Promise<unknown> }).evaluate(
+      (sel: string) => {
+        // 这段函数在浏览器里执行（repo 的 tsconfig 不含 DOM lib，故用 globalThis 取 document）。
+        const doc = (globalThis as unknown as {
+          document?: { querySelector(s: string): unknown };
+        }).document;
+        if (!doc) return null;
+        let el: unknown = null;
+        try { el = doc.querySelector(sel); } catch { return null; }
+        if (!el) return null;
+        const node = el as { tagName: string; getAttribute(n: string): string | null };
+        const attr = (name: string): string => node.getAttribute(name) || "";
+        return {
+          tag: node.tagName.toLowerCase(),
+          input_type: attr("type"),
+          name: attr("name"),
+          id: attr("id"),
+          data_test: attr("data-test"),
+          label: attr("aria-label") || "",
+        };
+      },
+      hint,
+    );
+    if (typeof raw !== "object" || raw === null) return null;
+    const r = raw as Record<string, unknown>;
+    return {
+      tag: String(r["tag"] ?? ""), input_type: String(r["input_type"] ?? "").toLowerCase(),
+      name: String(r["name"] ?? ""), id: String(r["id"] ?? ""),
+      data_test: String(r["data_test"] ?? ""), label: String(r["label"] ?? ""),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** 导航竞态的可重试错误：执行上下文被导航销毁 / 帧被卸载（learn 录导航型点击的已知失败面）。 */
@@ -258,7 +418,11 @@ export async function learnFromActions(
   page: unknown,
   actions: RecordedAction[],
   io: LearnIO,
+  opts: { slots?: Record<string, string> } = {},
 ): Promise<Learning> {
+  /** U2b：`--slot`/`--slot-file` 的袋——**演示动作按它回放**（key 命中 type 步时覆盖脚本值），
+   * 生成应用的 `meta.slots` 默认值也用它。敏感字段的值只从这里来，绝不从 `--script` 的明文来。 */
+  const providedSlots = opts.slots ?? {};
   const pg = page as unknown as PageLike & {
     click(sel: string, o?: unknown): Promise<void>;
     fill(sel: string, value: string, o?: unknown): Promise<void>;
@@ -305,6 +469,10 @@ export async function learnFromActions(
   };
   const startState = await captureWithRetry("起点");
   const steps: LearnedStep[] = [];
+  /** 已用槽位键 → 演示值（同名字段重复出现且值相同就复用，不同则加后缀）。 */
+  const usedKeys = new Map<string, string>();
+  /** 本次录制里出现过的敏感值（后续步骤的信号/诊断也要按它清洗，不能只管自己那一步）。 */
+  const secretEntries: Array<{ key: string; value: string }> = [];
   /**
    * S2：捕获前等页面静默（复用 `settle`）。录制工具的页面早已加载完，这里通常是 0 等待；
    * 动作后的异步渲染（菜单/局部刷新）则由它兜住。页面 evaluate 失败时静默回退现状。
@@ -323,9 +491,39 @@ export async function learnFromActions(
     const beforeUrl = pageUrl(pg);
     // S4：动作经**池投影**定位（与引擎同一 hint 语义）；解析不到再回退原生 selector。
     const target = await resolvePlaybackTarget(pg, action.hint);
+    // U2b：`type` 动作的值 + 槽位键（值只来自声明：--slot/--slot-file 覆盖，其次 --script 的
+    // 非敏感值；敏感字段的值**只**认 --slot/--slot-file，脚本里的明文不参与回放）。
+    let valueKey = "";
+    let typeValue = "";
+    let secret = false;
+    if (action.op === "type") {
+      const observed = target.observed ?? await observeInputFallback(pg, action.hint);
+      const baseKey = slotKeyFor(action.hint, observed) || `field_${i + 1}`;
+      secret = action.secret === true
+        || (observed !== null && SECRET_INPUT_TYPES.has(observed.input_type));
+      const provided = Object.prototype.hasOwnProperty.call(providedSlots, baseKey)
+        ? providedSlots[baseKey]! : undefined;
+      if (secret && (provided === undefined || provided === "")) {
+        throw new Error(`第 ${i + 1} 步（type ${action.hint}）是敏感字段`
+          + `（${observed?.input_type || "password/file/hidden"}）：值按纪律不录制、不落盘，`
+          + `回放需要你提供值——用 --slot-file <json>（推荐，值不进 argv）或 --slot ${baseKey}=…。`);
+      }
+      typeValue = secret ? provided! : (provided ?? action.value ?? "");
+      if (secret && typeValue.length > 0) {
+        secretEntries.push({ key: baseKey, value: typeValue });
+      }
+      valueKey = baseKey;
+      const previous = usedKeys.get(valueKey);
+      if (previous !== undefined && previous !== typeValue) {
+        let n = 2;
+        while (usedKeys.has(`${baseKey}_${n}`)) n++;
+        valueKey = `${baseKey}_${n}`;
+      }
+      usedKeys.set(valueKey, typeValue);
+    }
     const runAction = async (t: typeof target): Promise<void> => {
       if (action.op === "click") await t.click();
-      else await t.fill(action.value ?? "");
+      else await t.fill(typeValue);
     };
     try {
       await runAction(target);
@@ -362,15 +560,22 @@ export async function learnFromActions(
     const desc = action.op === "click"
       ? `点击${action.label ? `「${action.label}」` : ""}`
       : `在${action.label ? `「${action.label}」` : "输入框"}填入一个值`;
+    // 敏感值即使被页面回显也不进信号/诊断：信号值操作数写成 `{key}` 占位符（运行时由
+    // 槽位值替换），人读文本一律 `***`。非敏感值的参数化在 packFromLearning 里统一做
+    //（那时已知道全部演示值，跨步信号/不变量能一起替换）。
+    const secretValues = secretEntries.map((e) => e.value);
+    const signal = parameterizeSignal(good[0]!.signal, secretEntries) as SignalSpec;
+    const alternatives = good.map((c) => parameterizeSignal(c.signal, secretEntries) as SignalSpec);
+    const effect = ind.effect.map((e) => redactText(e, secretValues));
     const step: LearnedStep = {
       desc, start_url: relUrl(beforeUrl), target_hint: action.hint,
-      signal: good[0]!.signal as SignalSpec,
-      alternatives: good.map((c) => c.signal as SignalSpec),
-      effect: ind.effect,
+      signal, alternatives, effect,
+      ...(action.op === "type" ? { value_key: valueKey } : {}),
+      ...(secret ? { secret: true as const } : action.op === "type" ? { value: typeValue } : {}),
     };
     steps.push(step);
     io.out(`  ${i + 1}. ${desc} → ${JSON.stringify(step.signal)}`);
-    io.out(`     （${ind.effect.join("；") || "无变化"}）`);
+    io.out(`     （${effect.join("；") || "无变化"}）`);
   }
 
   // 结束态不变量：与"还没动手时"比，且必须落在稳定句柄上
@@ -396,11 +601,18 @@ export async function learnFromActions(
     })
     .slice(0, 3)
     .map((c) => {
-      const key = JSON.stringify(c.signal).replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).toLowerCase();
-      return { id: `learned-${key}`, desc: `（录制：跑完这条流程后必须成立）${c.why}`, signal: c.signal as SignalSpec };
+      const secretValues = secretEntries.map((e) => e.value);
+      const signal = parameterizeSignal(c.signal, secretEntries) as SignalSpec;
+      const key = JSON.stringify(signal).replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).toLowerCase();
+      return {
+        id: `learned-${key}`, desc: `（录制：跑完这条流程后必须成立）${redactText(c.why, secretValues)}`, signal,
+      };
     });
 
-  return { url: relUrl(startUrl0), goal: "", steps, invariants, effect: ind.effect };
+  return {
+    url: relUrl(startUrl0), goal: "", steps, invariants,
+    effect: ind.effect.map((e) => redactText(e, secretEntries.map((x) => x.value))),
+  };
 }
 
 /* ------------------------------------------------------------ 写成应用包 */
@@ -436,11 +648,47 @@ export function learningSha(l: Learning): string {
   return crypto.createHash("sha256").update(JSON.stringify(semantic)).digest("hex");
 }
 
-/** 学习结果 → 应用包（`journey` 是录下来的，`invariants` 是归纳出来的候选）。 */
+/** 学习结果 → 应用包（`journey` 是录下来的，`invariants` 是归纳出来的候选）。
+ *
+ * **U2b 值管道**：`type` 步的演示值不再丢——写成
+ *   `value_binding: {from:"slot", key}` + `slots[key] = 演示值`（默认值），
+ * 并把所有信号/不变量里出现的演示值参数化成 `{key}`（pack 面的槽位占位符；展开期按运行槽位
+ * 替换，所以 `--slot name=Bob` 的 pack 回放也按 Bob 判）。敏感字段只写绑定与空串占位，
+ * 值不进 `slots`/信号/notes/recorded_from（`LearnStep.secret`，见上）。
+ */
 export function packFromLearning(l: Learning, id: string): AppPack {
   const hosts = [...new Set(l.steps.map((s) => {
     try { return new URL(startUrl(s.start_url)).hostname; } catch { return ""; }
   }).filter((h) => h && h !== ""))];
+  const slots: Record<string, unknown> = {};
+  const secretSlots: string[] = [];
+  const valueEntries: Array<{ key: string; value: string }> = [];
+  for (const step of l.steps) {
+    if (!step.value_key) continue;
+    if (step.secret === true) {
+      slots[step.value_key] = "";
+      secretSlots.push(step.value_key);
+    } else {
+      const value = step.value ?? "";
+      slots[step.value_key] = value;
+      if (value.length > 0) valueEntries.push({ key: step.value_key, value });
+    }
+  }
+  const parameterize = (signal: unknown): unknown => parameterizeSignal(signal, valueEntries);
+  const notes = [
+    "本文件由 `npm run learn` 从**一次真实演示**录制：`journey` 是录下来的，`invariants` 是结束态归纳出来的候选。",
+    "`when` / `retries` 不录制（它们是运行时策略，不是演示出来的东西）；要加就手写这两项。",
+    "回放不成立时会报 `recorded-flow drift`——那时重新演示一次，而不是改信号让它变绿。",
+    ...l.steps.flatMap((s, i) => s.effect.length ? [`第 ${i + 1} 步观察到的变化：${s.effect.join("；")}`] : []),
+  ];
+  if (valueEntries.length > 0) {
+    notes.push(`演示值已写成槽位绑定：${valueEntries.map((e) => JSON.stringify(e.key)).join(", ")}`
+      + "（`meta.slots` 里的默认值就是演示值；运行时用 `--slot key=…` 覆盖，信号的 `{key}` 占位符会跟着替换）");
+  }
+  if (secretSlots.length > 0) {
+    notes.push(`敏感槽位的值**不录制、不落盘**：${[...new Set(secretSlots)].map((k) => JSON.stringify(k)).join(", ")}`
+      + " 在 `meta.slots` 里是空串占位，运行时用 `--slot-file <json>` 提供（`--slot` 会进进程参数/argv）。");
+  }
   return {
     spec_version: 1,
     id,
@@ -449,19 +697,17 @@ export function packFromLearning(l: Learning, id: string): AppPack {
     model: "english",
     max_subgoals: Math.max(4, l.steps.length + 2),
     hosts,
-    slots: {},
-    required_slots: [],
+    slots,
+    required_slots: [...new Set(secretSlots)],
+    ...(secretSlots.length ? { secret_slots: [...new Set(secretSlots)] } : {}),
     sources: [],
     journey: l.steps.map((s) => ({
-      desc: s.desc, start_url: s.start_url, target_hint: s.target_hint, signal: s.signal,
+      desc: s.desc, start_url: s.start_url, target_hint: s.target_hint,
+      signal: parameterize(s.signal),
+      ...(s.value_key ? { value_binding: { from: "slot", key: s.value_key } } : {}),
     })),
-    invariants: l.invariants,
-    notes: [
-      "本文件由 `npm run learn` 从**一次真实演示**录制：`journey` 是录下来的，`invariants` 是结束态归纳出来的候选。",
-      "`when` / `retries` 不录制（它们是运行时策略，不是演示出来的东西）；要加就手写这两项。",
-      "回放不成立时会报 `recorded-flow drift`——那时重新演示一次，而不是改信号让它变绿。",
-      ...l.steps.flatMap((s, i) => s.effect.length ? [`第 ${i + 1} 步观察到的变化：${s.effect.join("；")}`] : []),
-    ],
+    invariants: l.invariants.map((inv) => ({ ...inv, signal: parameterize(inv.signal) })),
+    notes,
     recorded_from: { url: l.url, steps: l.steps.length, sha256: learningSha(l) },
   } as unknown as AppPack;
 }
@@ -491,7 +737,7 @@ async function captureFirstStep(pack: AppPack): Promise<StateView> {
 
 /** 归纳结束态不变量：起点 = 只打开第一步，终点 = **回放形状运行**留下的状态。 */
 export async function induceInvariantsFromRunner(
-  pack: AppPack, outDir: string,
+  pack: AppPack, outDir: string, slots: Record<string, string> = {},
 ): Promise<{ invariants: Array<{ id: string; desc: string; signal: SignalSpec }>; run: ReplayResult }> {
   const asked: string[] = [];
   installLayaRuntime(scriptedRuntime(scriptedAgent((key) => { asked.push(key); return { noul: 0.05 }; })));
@@ -501,6 +747,8 @@ export async function induceInvariantsFromRunner(
     const res = await runApp(pack, {
       verbose: false, sources: false, outDir, captureState: true,
       planPath: path.join(outDir, `${pack.id}-plan.json`),
+      // U2b：槽位袋 = 包默认 + --slot/--slot-file（敏感值只在这里出现，绝不进包）。
+      slots,
     });
     ok = res.ok; completed = res.completed; end = res.end_state;
     held = `${res.invariants.filter((i) => i.held).length}/${res.invariants.length}`;
@@ -525,8 +773,12 @@ export async function induceInvariantsFromRunner(
     seen.add(sig);
     return true;
   }).slice(0, 3).map((c) => {
-    const key = JSON.stringify(c.signal).replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).toLowerCase();
-    return { id: `learned-${key}`, desc: `（录制：跑完这条流程后必须成立）${c.why}`, signal: c.signal as SignalSpec };
+    // 不变量同样参数化：演示值 → `{slot}`（pack 展开期按运行槽位替换）；敏感值若被页面
+    // 回显，也只以 `{slot}` 出现，人读 desc 里一律 `***`。
+    const signal = parameterizeSignal(c.signal, bindingEntries(pack, slots)) as SignalSpec;
+    const secretValues = secretValuesOf(pack, slots);
+    const key = JSON.stringify(signal).replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40).toLowerCase();
+    return { id: `learned-${key}`, desc: `（录制：跑完这条流程后必须成立）${redactText(c.why, secretValues)}`, signal };
   });
   return {
     invariants,
@@ -544,13 +796,40 @@ export interface ReplayResult {
   error?: string;
 }
 
+/** 槽位键 → 演示值（只取**已声明且非敏感**的槽位；敏感值不在包里，只能从本次 --slot 袋取）。 */
+function bindingEntries(pack: AppPack, slots: Record<string, string> = {}): Array<{ key: string; value: string }> {
+  const secret = new Set((pack.secret_slots ?? []).map(String));
+  const entries: Array<{ key: string; value: string }> = [];
+  for (const step of pack.journey ?? []) {
+    const vb = step["value_binding"];
+    if (!isPlainObj(vb) || vb["from"] !== "slot" || typeof vb["key"] !== "string") continue;
+    if (secret.has(vb["key"])) continue;
+    const value = String((pack.slots ?? {})[vb["key"]] ?? "");
+    if (value.length > 0) entries.push({ key: vb["key"], value });
+  }
+  for (const key of secret) {
+    const value = String(slots[key] ?? "");
+    if (value.length > 0) entries.push({ key, value });
+  }
+  return entries;
+}
+
+/** 本次运行里出现过的敏感值（只用于把诊断文本里的明文换成 `***`）。 */
+function secretValuesOf(pack: AppPack, slots: Record<string, string> = {}): string[] {
+  return (pack.secret_slots ?? []).map(String)
+    .map((k) => String(slots[k] ?? "")).filter((v) => v.length > 0);
+}
+
 /** 用规则模式重跑一遍：**0 次模型调用**且通过，才算这份录制的流程可复现。 */
-export async function replayCheck(pack: AppPack, outDir: string): Promise<ReplayResult> {
+export async function replayCheck(
+  pack: AppPack, outDir: string, slots: Record<string, string> = {},
+): Promise<ReplayResult> {
   const asked: string[] = [];
   installLayaRuntime(scriptedRuntime(scriptedAgent((key) => { asked.push(key); return { noul: 0.05 }; })));
   try {
     const res = await runApp(pack, {
       verbose: false, sources: false, outDir, planPath: path.join(outDir, `${pack.id}-plan.json`),
+      slots,
     });
     return {
       ok: res.ok, forwards: asked.filter((k) => k === "act").length, asked,
@@ -570,7 +849,9 @@ export async function replayCheck(pack: AppPack, outDir: string): Promise<Replay
  * （真导航流程不受影响）。pack 门（`replayCheck`，声明式路径）没有 walk 面、保持 formal——
  * 两条门的口径差异是**显式的**，最终判据落在脚本门上（main 的"最后一道门"）。
  * walk 只进回放：不写进生成的应用，也不改 formal/walk 的语义分叉（ctx.ts）。 */
-export async function replayScriptCheck(source: string, outDir: string): Promise<ReplayResult> {
+export async function replayScriptCheck(
+  source: string, outDir: string, slots: Record<string, string> = {},
+): Promise<ReplayResult> {
   const dir = fs.mkdtempSync(path.join(outDir, "learn-script-"));
   const file = path.join(dir, "app.mjs");
   fs.writeFileSync(file, source, "utf-8");
@@ -583,6 +864,8 @@ export async function replayScriptCheck(source: string, outDir: string): Promise
       walk: true,   // 落盘回放 = walk 单会话（见上方函数注释）
       outDir: path.join(dir, "out"),
       planPath: path.join(dir, "plan.json"),
+      // U2b：生成的脚本按值绑定读槽位；非敏感默认值在 meta.slots，敏感值只从 --slot 袋来。
+      slots,
     });
     return {
       ok: res.ok,
@@ -607,13 +890,17 @@ export async function replayScriptCheck(source: string, outDir: string): Promise
 /* ------------------------------------------------------------------ CLI */
 
 const USAGE = `usage: learn [--url <页面>] [--goal "<一句话>"] [--id <应用名>] [--cdp <ws://…>]
-             [--script <录好的动作.json>] [--yes] [--json] [--apps-dir DIR] [--out DIR] [--headful]
+             [--script <录好的动作.json>] [--slot k=v]… [--slot-file <json>]
+             [--yes] [--json] [--apps-dir DIR] [--out DIR] [--headful]
 
   不做任何参数也能用：连上你正在用的浏览器，用当前页；目标回车即用页面标题。
-  --script   用一串录好的动作代替人现场演示（CI/测试用；格式见 README）
-  --yes      不再逐条确认（外层 Agent 用；等价于 npm run agent）
-  --json     输出结构化结果（一次调用的形状）
-  --apps-dir 应用落点；默认 $AMBERFLOW_HOME/apps（用户作用域，不写进 checkout）
+  --script    用一串录好的动作代替人现场演示（CI/测试用；格式见 README）
+  --slot      k=v，可重复；key 命中某个 type 动作时用它回放演示，并作为生成应用的
+              meta.slots 默认值（非敏感）。敏感值请用 --slot-file（值不进 argv）。
+  --slot-file 从 JSON 对象读槽位（敏感值的推荐入口；与 run 的 --slot-file 同格式）
+  --yes       不再逐条确认（外层 Agent 用；等价于 npm run agent）
+  --json      输出结构化结果（一次调用的形状）
+  --apps-dir  应用落点；默认 $AMBERFLOW_HOME/apps（用户作用域，不写进 checkout）
 退出码：0=已录制且零前向回放通过 ｜ 1=录了但回放不过（**不落盘**）｜ 2=用法/环境问题`;
 
 /** id 的唯一出处（演示前后来回用，避免两处算法漂移）。 */
@@ -690,6 +977,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       cdp: { type: "string" }, script: { type: "string" }, yes: { type: "boolean" },
       json: { type: "boolean" }, "apps-dir": { type: "string" }, "pack-dir": { type: "string" }, out: { type: "string" },
       headful: { type: "boolean" }, quiet: { type: "boolean" }, help: { type: "boolean" },
+      // U2b：演示值入口。`--slot` 会进 argv（敏感值用 --slot-file）。
+      slot: { type: "string", multiple: true }, "slot-file": { type: "string" },
     },
   }));
   } catch (err) {
@@ -723,6 +1012,38 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   const outDir = path.resolve(values.out ?? fs.mkdtempSync(path.join(os.tmpdir(), "learn-")));
   fs.mkdirSync(outDir, { recursive: true });
+
+  // U2b：演示值入口。与 `run --slot/--slot-file` 同格式；`--slot-file` 覆盖同名 `--slot`
+  // 时 warn（与 run 同一口径），敏感值只该走文件（不进 argv/进程列表）。
+  let providedSlots: Record<string, string> = {};
+  try {
+    providedSlots = parseSlots(values.slot as string[] | undefined);
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    console.error(USAGE);
+    return 2;
+  }
+  if (values["slot-file"] !== undefined) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(fs.readFileSync(path.resolve(values["slot-file"]), "utf-8"));
+    } catch (e) {
+      console.error(`--slot-file 读不了或不是 JSON：${e instanceof Error ? e.message : String(e)}`);
+      return 2;
+    }
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      console.error("--slot-file 顶层必须是对象（槽位名 → 值）");
+      return 2;
+    }
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+        console.error(`--slot-file 的 ${JSON.stringify(key)} 必须是字符串/数字/布尔`);
+        return 2;
+      }
+      if (key in providedSlots) console.error(`[warn] --slot-file 的 ${JSON.stringify(key)} 被 --slot 覆盖`);
+      providedSlots[key] = String(value);
+    }
+  }
 
   let conn;
   try {
@@ -795,16 +1116,35 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     say(`按 ${recorded.length} 个动作跑一遍（本地决策模型只在需要时兜底）：`);
     let learning: Learning;
     try {
-      learning = await learnFromActions(conn.page, recorded, io);
+      learning = await learnFromActions(conn.page, recorded, io, { slots: providedSlots });
     } catch (e) {
       console.error(e instanceof Error ? e.message : String(e));
       return 1;
     }
     learning.goal = finalGoal;
 
+    // U2b：--slot/--slot-file 的键必须真的命中某个 type 动作的槽位（写了没用 = 用法错误，
+    // 与 run 的未知槽位同一纪律；否则用户以为覆盖了值，实际演示/生成都没用它）。
+    const valueKeys = new Set(learning.steps.map((s) => s.value_key).filter((k): k is string => Boolean(k)));
+    const unusedSlots = Object.keys(providedSlots).filter((k) => !valueKeys.has(k));
+    if (unusedSlots.length > 0) {
+      console.error(`--slot/--slot-file 的 ${unusedSlots.map((k) => JSON.stringify(k)).join(", ")} `
+        + `没有匹配任何 type 动作的槽位（本次录到的槽位键：${[...valueKeys].join(", ") || "无"}）`);
+      return 2;
+    }
+    // 敏感槽位必须真有值才可能回放：空串占位不是值（生成的 flow 会结构化 needs_value）。
+    const missingSecrets = learning.steps
+      .filter((s) => s.secret === true && s.value_key !== undefined && !providedSlots[s.value_key])
+      .map((s) => s.value_key!);
+    if (missingSecrets.length > 0) {
+      console.error(`敏感槽位 ${missingSecrets.map((k) => JSON.stringify(k)).join(", ")} 没有值：`
+        + `录制回放需要它——用 --slot-file <json>（推荐）或 --slot ${missingSecrets[0]}=…，再录一次。`);
+      return 1;
+    }
+
     // 不变量改从"回放形状的运行"归纳（演示只学动作）——见文件上方那段注释的实测理由
     const provisional = packFromLearning({ ...learning, invariants: [] }, id0(learning, finalGoal, values.id));
-    const induced = await induceInvariantsFromRunner(provisional, outDir);
+    const induced = await induceInvariantsFromRunner(provisional, outDir, providedSlots);
     learning.invariants = induced.invariants;
 
     // 人只做确认，不写信号语法
@@ -830,7 +1170,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     // **落盘门槛**：规则模式零前向回放必须通过。
     // 若某条不变量在**第二次运行**里不成立，说明它不可复现（第一次是归纳用的那次）——
     // 按"区分性 / 稳定句柄 / 复跑一致"三关，把它剔除并写进 notes，而不是留着或改信号。
-    let replay = await replayCheck(pack, outDir);
+    let replay = await replayCheck(pack, outDir, providedSlots);
     const dropped: string[] = [];
     const dropFailing = (failing: string[]): string[] => {
       const out: string[] = [];
@@ -852,13 +1192,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         for (const d of removed) say(`  - ${d}`);
         (pack.notes as string[]).push(
           `演示/归纳时出现过、但复跑不成立的候选（**故意不写进 invariants**，因为复现不了）：${removed.join("；")}`);
-        replay = await replayCheck(pack, outDir);
+        replay = await replayCheck(pack, outDir, providedSlots);
       }
     }
 
     // 最后一道门必须落在**生成出来的 flow 脚本**上：pack 回放通过不等于脚本语义等价。
     let source = packToFlowSource(pack);
-    let scriptReplay = await replayScriptCheck(source, outDir);
+    let scriptReplay = await replayScriptCheck(source, outDir, providedSlots);
     if (!scriptReplay.ok && scriptReplay.failing.length) {
       const removed = dropFailing(scriptReplay.failing);
       dropped.push(...removed);
@@ -869,13 +1209,21 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         (pack.notes as string[]).push(
           `生成脚本复跑时出现过、但不成立的候选（故意不写进 invariants）：${removed.join("；")}`);
         source = packToFlowSource(pack);
-        scriptReplay = await replayScriptCheck(source, outDir);
+        scriptReplay = await replayScriptCheck(source, outDir, providedSlots);
       }
     }
     const verified = scriptReplay.ok && scriptReplay.forwards === 0;
+    // 结果里的槽位面：非敏感给默认值，敏感一律掩码（明文绝不进 stdout/证据目录）。
+    const secretSlotNames = new Set((pack.secret_slots ?? []).map(String));
+    const resultSlots: Record<string, string> = {};
+    for (const [key, value] of Object.entries(pack.slots ?? {})) {
+      resultSlots[key] = secretSlotNames.has(key) ? "***" : String(value);
+    }
     const result = {
       app: id, url: learning.url, goal: finalGoal, steps: learning.steps.length,
       signals: learning.steps.map((s) => s.signal),
+      slots: resultSlots,
+      secret_slots: [...secretSlotNames],
       invariants: learning.invariants.map((i) => ({ id: i.id, signal: i.signal })),
       replay: {
         ok: scriptReplay.ok, forwards: scriptReplay.forwards,

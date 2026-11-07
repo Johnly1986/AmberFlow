@@ -35,7 +35,7 @@ export const SHARED_STEP_KEYS = [
 
 /** `web` 类型专属键（浏览器步声明面）。 */
 export const WEB_STEP_KEYS = [
-  "start_url", "target_hint", "target_hints", "when", "commands", "effect",
+  "start_url", "target_hint", "target_hints", "when", "commands", "value_binding", "effect",
 ] as const;
 
 /** `cli` 类型专属键（命令行动作腿声明面；ssh/stdio 会复用同一族进程键，见设计文档 §4）。 */
@@ -319,6 +319,28 @@ export function requireAppAdapter(kind: string): AppAdapter {
 /* -------------------------------------------------------------- 内建：web / cli */
 
 /**
+ * web 步的声明面 → 计划面的**同一份视图**（加载期校验与 `expand` 共用，绝不各写一遍）。
+ *
+ * `value_binding` 是「用声明的值绑定填 `target_hint` 这个控件」的简写：转成命令闭集的一项
+ * `fill`。只认 `{from:"slot",key}`（learn 生成的就是这个——演示值在 `meta.slots` 里当默认值，
+ * 运行时 `--slot` 覆盖）。`option`/`list`/`dataset` 直接写 `commands`；`literal` 不是命令/
+ * 计划面的值来源（F33 遗留），加载期显式拒绝，不在这里新增语义。
+ *
+ * 这份转换放在适配器里，保证「加载期看到的计划」与「运行期展开的计划」逐字段相同。
+ */
+export function webStepForPlan(merged: Record<string, unknown>): Record<string, unknown> {
+  const binding = merged["value_binding"];
+  if (binding === undefined) return merged;
+  const step = { ...merged };
+  delete step["value_binding"];
+  const target = typeof step["target_hint"] === "string" ? step["target_hint"] : "";
+  const command: Record<string, unknown> = { id: "fill", op: "fill", target, value: binding };
+  const existing = Array.isArray(step["commands"]) ? step["commands"] as unknown[] : [];
+  step["commands"] = [...existing, command];
+  return step;
+}
+
+/**
  * `web`：浏览器应用。执行走唯一执行器（`BrowserMiddleware`），信号是 DOM 语言。
  *
  * **迁移桥**：`run` 委托 `ctx.runWebStep`——执行循环留在 runner（仓库最承重的函数，搬动风险
@@ -359,6 +381,44 @@ export const webAdapter: AppAdapter = {
     if (step["returns"] !== undefined) {
       p.push(`${where}.returns: web 步的返回值抽取尚未实现（Slice 4：DOM 抽取）——先别声明`);
     }
+    // U2b 值管道：`value_binding` = 用声明绑定填 target_hint（fill 的简写）。
+    // 只认 slot / literal 两来源；绑定键是否已声明由 app-pack 的计划面校验（同一份
+    // validateCommands + slotKeys）判定——这里只校形状与动作面（填一个、不是有序多目标）。
+    const binding = step["value_binding"];
+    if (binding !== undefined) {
+      if (!isDict(binding)) {
+        p.push(`${where}.value_binding: must be an object {from:"slot",key} or {literal:"…"}`);
+      } else {
+        const keys = Object.keys(binding);
+        const from = binding["from"];
+        if (from === "slot") {
+          const key = binding["key"];
+          if (typeof key !== "string" || !key.trim()) {
+            p.push(`${where}.value_binding.key: must be a non-empty slot name`);
+          }
+          for (const k of keys) {
+            if (k !== "from" && k !== "key") p.push(`${where}.value_binding.${k}: unknown key (known: from, key)`);
+          }
+        } else if ("literal" in binding) {
+          // 值来源的红线：命令/计划面的绑定只认 slot/option/list/dataset（literal 不可用，
+          // 见 F33 遗留）。这里显式拒绝而不是让它漏到运行期变成 unsupported value source。
+          p.push(`${where}.value_binding.literal: literal 不是命令/计划面的值来源（F33 遗留）——`
+            + `这一简写只支持 {from:"slot",key}；常量值请等绑定面支持后写 commands，不要新增 literal 语义`);
+        } else {
+          p.push(`${where}.value_binding: must be {from:"slot",key} `
+            + `(option/list/dataset 请直接写 commands；literal 不可用，见 F33)`);
+        }
+        if (!step["target_hint"]) {
+          p.push(`${where}.value_binding: needs target_hint (exactly one control to fill)`);
+        }
+        if (step["target_hints"] !== undefined) {
+          p.push(`${where}.value_binding: fill takes one target; target_hints is an ordered click sequence`);
+        }
+        if (step["commands"] !== undefined) {
+          p.push(`${where}.value_binding: cannot be combined with commands (two action declarations for one step)`);
+        }
+      }
+    }
     if (!step["signal"]) p.push(`${where}: needs a done-signal`);
     if (!step["desc"]) p.push(`${where}: needs desc`);
     // G-G：执行器**每个子目标都会重新 goto start_url**（计划里状态不跨子目标保留），
@@ -366,7 +426,7 @@ export const webAdapter: AppAdapter = {
     if (!step["start_url"]) p.push(`${where}: a browser step needs start_url (each subgoal re-navigates)`);
   },
   expand(merged) {
-    const subgoal = { ...merged };
+    const subgoal = webStepForPlan(merged);
     return { decl: subgoal, subgoal };
   },
   async run(_decl, _step, ctx) {

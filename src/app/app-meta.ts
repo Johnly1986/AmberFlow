@@ -172,6 +172,66 @@ export function lowerMeta(meta: ScriptMeta): AppPack {
   return pack as unknown as AppPack;
 }
 
+/* ------------------------------------------- 值管道 codegen（U2b）
+
+   一条纪律：**没有槽位占位符的流程，生成物与 U2b 之前逐字节一致**。所以下面的渲染器只在
+   信号里真的出现已声明的 `{slot}` 时才启用；否则原样走 `JSON.stringify(..., null, 2)`。
+   占位符换成运行期表达式 `ctx.slots["k"]`——flow 应用没有声明式展开，`meta.invariants`
+   也不会做槽位替换，所以参数化只能落在生成的 JS 里（这是「动态 done」的唯一实现面）。 */
+
+const SLOT_PLACEHOLDER = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+
+/** 信号/不变量里是否引用了**已声明**的槽位占位符（未声明的花括号是普通文本）。 */
+function hasSlotPlaceholder(value: unknown, keys: ReadonlySet<string>): boolean {
+  if (typeof value === "string") {
+    for (const m of value.matchAll(SLOT_PLACEHOLDER)) if (keys.has(m[1]!)) return true;
+    return false;
+  }
+  if (Array.isArray(value)) return value.some((v) => hasSlotPlaceholder(v, keys));
+  if (isObj(value)) return Object.values(value).some((v) => hasSlotPlaceholder(v, keys));
+  return false;
+}
+
+/** 一个字符串 → JS 表达式：已声明占位符变 `ctx.slots["k"]`，其余部分是 JSON 字符串字面量。 */
+function renderStringExpr(text: string, keys: ReadonlySet<string>): string {
+  const parts: string[] = [];
+  let last = 0;
+  for (const m of text.matchAll(SLOT_PLACEHOLDER)) {
+    if (!keys.has(m[1]!)) continue;
+    const at = m.index ?? 0;
+    if (at > last) parts.push(JSON.stringify(text.slice(last, at)));
+    parts.push(`ctx.slots[${JSON.stringify(m[1]!)}]`);
+    last = at + m[0].length;
+  }
+  if (last < text.length) parts.push(JSON.stringify(text.slice(last)));
+  if (parts.length === 0) return JSON.stringify(text);
+  return parts.length === 1 ? parts[0]! : parts.join(" + ");
+}
+
+function renderSignalJs(value: unknown, keys: ReadonlySet<string>, indent: string): string {
+  if (typeof value === "string") return renderStringExpr(value, keys);
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]";
+    const inner = indent + "  ";
+    return "[\n" + value.map((v) => inner + renderSignalJs(v, keys, inner)).join(",\n") + "\n" + indent + "]";
+  }
+  if (isObj(value)) {
+    const entries = Object.entries(value);
+    if (entries.length === 0) return "{}";
+    const inner = indent + "  ";
+    return "{\n" + entries
+      .map(([k, v]) => inner + JSON.stringify(k) + ": " + renderSignalJs(v, keys, inner))
+      .join(",\n") + "\n" + indent + "}";
+  }
+  return JSON.stringify(value);
+}
+
+/** 信号 → flow 源码。无占位符时与旧 codegen 逐字节相同（回归锚点）。 */
+function signalSource(signal: unknown, keys: ReadonlySet<string>): string {
+  if (!hasSlotPlaceholder(signal, keys)) return JSON.stringify(signal, null, 2);
+  return renderSignalJs(signal, keys, "");
+}
+
 /** 内部 IR → flow 脚本源码（只给录制/生成器用；生成后必须过 check + 回放门）。 */
 export function packToFlowSource(pack: AppPack): string {
   const raw = pack as unknown as Record<string, unknown>;
@@ -182,6 +242,47 @@ export function packToFlowSource(pack: AppPack): string {
   }
   if (meta["label"] === undefined) meta["label"] = raw["id"];
   const steps = Array.isArray(pack.journey) ? pack.journey : [];
+  const rawSlots = isObj(raw["slots"]) ? raw["slots"] : {};
+  const slotKeys = new Set<string>(Object.keys(rawSlots));
+  for (const k of Array.isArray(raw["required_slots"]) ? (raw["required_slots"] as unknown[]).map(String) : []) slotKeys.add(k);
+  const secretKeys = new Set<string>(
+    Array.isArray(raw["secret_slots"]) ? (raw["secret_slots"] as unknown[]).map(String) : [],
+  );
+  for (const k of secretKeys) slotKeys.add(k);
+  // 敏感槽位纪律（U2b）：值绝不落盘——不管上游 pack 带了什么，生成物里敏感槽位一律空串占位。
+  if (secretKeys.size > 0) {
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(rawSlots)) cleaned[k] = secretKeys.has(k) ? "" : v;
+    for (const k of secretKeys) if (!(k in cleaned)) cleaned[k] = "";
+    meta["slots"] = cleaned;
+  }
+  // notes 用副本：生成器可能追加"依赖演示值的不变量已省略"这类事实，不能改到 pack 本身。
+  const rawNotes = Array.isArray(raw["notes"]) ? [...(raw["notes"] as unknown[])] : [];
+  const notes = [...rawNotes];
+  // flow 面的 `meta.invariants` **不做槽位替换**（ctx.done 直接拿声明值判定），所以依赖
+  // 演示值的断言只能省略——留着就是一条永远不成立的假红；每步的 done 已按槽位值动态生成。
+  const rawInvariants = Array.isArray(raw["invariants"]) ? raw["invariants"] : [];
+  const dependsOnSlot = (inv: unknown): boolean => isObj(inv) && hasSlotPlaceholder(inv["signal"], slotKeys);
+  const omittedInvariants = rawInvariants.filter(dependsOnSlot);
+  if (omittedInvariants.length) {
+    meta["invariants"] = rawInvariants.filter((inv) => !dependsOnSlot(inv));
+    const ids = omittedInvariants.map((inv) => (isObj(inv) ? String(inv["id"] ?? "?") : "?")).join(", ");
+    notes.push(`以下结束态不变量依赖演示值（槽位占位符）：flow 面的 meta.invariants 不做槽位替换，`
+      + `**故意省略**，参数化判据由每步的动态 done 承担：${ids}`);
+  }
+  // 敏感槽位的运行期守卫：空串占位不是值。不给 --slot-file 时必须结构化 needs_value，
+  // 而不是拿空串填进去（空串对 fill 合法，会静默做成一次"填了空"）。
+  const boundSlotKeys = new Set<string>();
+  for (const step of steps) {
+    if (!isObj(step)) continue;
+    const binding = step["value_binding"];
+    if (isObj(binding) && binding["from"] === "slot" && typeof binding["key"] === "string") {
+      boundSlotKeys.add(binding["key"]);
+    }
+  }
+  const guardedSecrets = [...secretKeys].filter((k) => boundSlotKeys.has(k));
+  if (notes.length !== rawNotes.length) meta["notes"] = notes;
+
   const lines: string[] = [];
   lines.push("/**");
   lines.push(` * ${String(pack.id)} — flow 应用（由录制/生成器产出）。`);
@@ -192,6 +293,13 @@ export function packToFlowSource(pack: AppPack): string {
   lines.push(`export const meta = () => (${JSON.stringify(meta, null, 2)});`);
   lines.push("");
   lines.push("export async function flow(ctx) {");
+  for (const key of guardedSecrets) {
+    lines.push(`  if (!ctx.slots[${JSON.stringify(key)}]) {`);
+    lines.push(`    ctx.fail("needs_value", ${JSON.stringify(
+      `secret slot "${key}" has no value — pass --slot-file <json> (or --slot ${key}=…)`,
+    )});`);
+    lines.push("  }");
+  }
   if (steps.length === 0) {
     lines.push("  await ctx.done();");
     lines.push("}");
@@ -220,13 +328,27 @@ export function packToFlowSource(pack: AppPack): string {
     const hints = Array.isArray(rawStep["target_hints"])
       ? (rawStep["target_hints"] as unknown[]).filter((h): h is string => typeof h === "string" && h.length > 0)
       : [];
-    if (hint !== null && hint.length > 0) {
+    // U2b 值绑定：fill 的简写 → 命令闭集的一项；值来自 `ctx.value.slot/literal`（绝不硬编码
+    // 演示字面值——`--slot` 覆盖后 done 与动作必须一起走槽位值）。
+    const binding = rawStep["value_binding"];
+    if (binding !== undefined) {
+      if (!isObj(binding)) throw new Error(`flow codegen: journey[${i}].value_binding must be an object`);
+      if (hint === null || hint.length === 0) {
+        throw new Error(`flow codegen: journey[${i}].value_binding needs target_hint (one control to fill)`);
+      }
+      if (!(binding["from"] === "slot" && typeof binding["key"] === "string" && binding["key"].trim() !== "")) {
+        throw new Error(`flow codegen: journey[${i}].value_binding must be {from:"slot",key} `
+          + `(literal 不是命令/计划面的值来源，见 F33；option/list/dataset 请手写 commands)`);
+      }
+      const valueExpr = `ctx.value.slot(${JSON.stringify(binding["key"])})`;
+      opts.push(`act: [ctx.command("fill", ${JSON.stringify(hint)}, ${valueExpr})]`);
+    } else if (hint !== null && hint.length > 0) {
       opts.push(`act: ctx.hint(${JSON.stringify(hint)})`);
     } else if (hints.length > 0) {
       opts.push(`act: ctx.hints(${hints.map((h) => JSON.stringify(h)).join(", ")})`);
     } else if (typeof rawStep["start_url"] === "string" && rawStep["start_url"]) {
       // 纯导航步：与声明式 journey 的“到达即完成”语义一致。
-      lines.push(`  const r${i + 1} = await ctx.arrive(${JSON.stringify(rawStep["start_url"])}, { done: ${JSON.stringify(signal, null, 2)}, desc: ${JSON.stringify(desc)} });`);
+      lines.push(`  const r${i + 1} = await ctx.arrive(${JSON.stringify(rawStep["start_url"])}, { done: ${signalSource(signal, slotKeys)}, desc: ${JSON.stringify(desc)} });`);
       lines.push(`  if (!r${i + 1}.ok) ctx.fail(r${i + 1}.stopCode ?? "arrive_signal_not_held", r${i + 1}.reason);`);
       return;
     } else {
@@ -234,7 +356,7 @@ export function packToFlowSource(pack: AppPack): string {
     }
     if (rawStep["when"] !== undefined) opts.push(`when: ${JSON.stringify(rawStep["when"], null, 2)}`);
     if (rawStep["slots"] !== undefined) opts.push(`slots: ${JSON.stringify(rawStep["slots"], null, 2)}`);
-    opts.push(`done: ${JSON.stringify(signal, null, 2)}`);
+    opts.push(`done: ${signalSource(signal, slotKeys)}`);
     opts.push(`id: ${JSON.stringify(typeof rawStep["id"] === "string" && rawStep["id"] ? rawStep["id"] : `step-${i + 1}`)}`);
     if (typeof rawStep["timeoutMs"] === "number") opts.push(`timeoutMs: ${rawStep["timeoutMs"]}`);
     lines.push(`  const r${i + 1} = await ctx.step(${JSON.stringify(desc)}, {`);

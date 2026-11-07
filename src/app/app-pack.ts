@@ -24,7 +24,7 @@ import { PlanningRules, TaskPlan, type Subgoal } from "../engine/plan.ts";
 import { validateSignalSpec, type SignalSpec } from "../engine/signals.ts";
 import {
   CLI_STEP_KEYS, SHARED_STEP_KEYS, WEB_STEP_KEYS,
-  getAppAdapter, listAppAdapterObjects, type AppAdapter, type ProcessStepDecl,
+  getAppAdapter, listAppAdapterObjects, webStepForPlan, type AppAdapter, type ProcessStepDecl,
 } from "./app-adapters.ts";
 import { loadSource } from "../data/datasource.ts";
 import { extractSlots } from "../engine/extraction.ts";
@@ -1125,7 +1125,10 @@ export function validatePack(pack: AppPack,
       const browserSteps = pack.journey.map((e, i) => {
         const merged = e["role"] ? { ...(roles[String(e["role"])] ?? {}), ...e } : { ...e };
         delete merged["role"];
-        return substitute(merged, { ...RUNTIME_PLACEHOLDERS, ...slots }, []) as Record<string, unknown>;
+        const substituted = substitute(merged, { ...RUNTIME_PLACEHOLDERS, ...slots }, []) as Record<string, unknown>;
+        // U2b：`value_binding` 在计划面的视图 = 一项 fill 命令（与 webAdapter.expand 同一份转换）。
+        // 这一步不能省：否则计划面看不到值绑定，槽位名写错要等运行期才变成 needs_value。
+        return adapterKind(substituted) === "web" ? webStepForPlan(substituted) : substituted;
       }).filter((step) => stepKind(step) === "browser");
       if (browserSteps.length) {
         const plan = new TaskPlan(pack.goal, browserSteps as unknown as Array<Partial<Subgoal>>,
