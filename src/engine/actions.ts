@@ -26,7 +26,7 @@
  */
 import { hintMatch } from "./rules.ts";
 import {
-  isValueBinding, resolveBinding, validateBinding,
+  isValueBinding, resolveBinding, validateBinding, type BindingDiagnostics,
   type OptionCandidate, type ValueBinding,
 } from "./bindings.ts";
 import type { DatasetReader } from "./dataset.ts";
@@ -187,12 +187,12 @@ export function instantiateSpace(
  */
 export function resolveCommandValue(
   decl: CommandDecl, slots: Record<string, unknown>,
-  ctx: { options?: readonly OptionCandidate[]; dataset?: DatasetReader } = {},
+  ctx: { options?: readonly OptionCandidate[]; dataset?: DatasetReader; diag?: BindingDiagnostics } = {},
 ): { ok: true; value: unknown } | { ok: false; reason: string } {
   if (!decl.value) return { ok: false, reason: "no declared binding" };
   if (!isValueBinding(decl.value)) {
     return { ok: false, reason: `unsupported value source ${JSON.stringify((decl.value as { from?: unknown }).from)}` };
   }
-  const r = resolveBinding(decl.value, { slots, options: ctx.options, dataset: ctx.dataset });
+  const r = resolveBinding(decl.value, { slots, options: ctx.options, dataset: ctx.dataset, diag: ctx.diag });
   return r.ok ? { ok: true, value: r.value } : { ok: false, reason: r.reason };
 }

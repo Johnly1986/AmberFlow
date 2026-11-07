@@ -30,6 +30,7 @@ import { REPO } from "../flow/flow.ts";
 import { PageStateStore, type PageState } from "./page-state.ts";
 import { createKit, type CommandDecl, type DomSignal, type TargetDecl, type ValueBinding } from "./kit.ts";
 import { pushEvent, type AppTrace } from "./trace.ts";
+import { validateToolSignal, type ToolSignal } from "../browser/tool-signals.ts";
 // B1 节奏统一：最小步间距（start-to-start）的核心计算在三脸共用的 support/pace.ts。
 import { paceRemainder } from "../support/pace.ts";
 
@@ -607,6 +608,52 @@ export function normalizeCommandIds(commands: CommandDecl[]): CommandDecl[] {
   });
 }
 
+/**
+ * `ctx.run` **声明形式**允许的顶层键（唯一出处；dry/`apps check` 与运行期共用）。
+ * 以实现实际消费者为准：
+ *   - `adapter`/`source`/`args`/`dryRunArgs`（cli 形式，`source`/`args` 也供 ssh/stdio 的
+ *     适配器校验读取）；
+ *   - `stdio`/`ssh`（声明块；块内未知键由各自 adapter 校验）；
+ *   - `desc`/`id`/`idempotent`/`retries`/`returns`/`done`；
+ *   - `signal` 只为给出「journey 词写进了 flow」的显式改法（不是合法字段）；
+ *   - `dangerous`：ssh/stdio 的 adapter.validateStep 会读它并给出「尚未实现」的结构化拒绝。
+ * 没有 `cli`：cli 形式就是 `source`+`args`+`dryRunArgs`，没有 `cli: {...}` 块消费者——
+ * 写了它等于写了没用，按未知键拒绝（不静默忽略）。
+ */
+export const DECLARED_RUN_KEYS = [
+  "adapter", "source", "args", "dryRunArgs", "desc", "id", "idempotent", "retries",
+  "returns", "done", "stdio", "ssh", "signal", "dangerous",
+] as const;
+
+/**
+ * `ctx.run` 声明形式的**共享校验**（T7）：未知顶层键、`signal`/`done` 冲突、done 必需。
+ * dry/`apps check` 与运行期念同一段文案；未知键点名 unknown + known，绝不静默忽略。
+ */
+export function declaredRunProblems(step: Record<string, unknown>): string[] {
+  const problems: string[] = [];
+  const known = DECLARED_RUN_KEYS as readonly string[];
+  const unknown = Object.keys(step).filter((k) => !known.includes(k));
+  if (unknown.length) {
+    problems.push(`ctx.run: unknown declaration key(s) ${unknown.map((k) => JSON.stringify(k)).join(", ")}`
+      + ` (known: ${DECLARED_RUN_KEYS.join(", ")})`);
+  }
+  const straySignal = step["signal"];
+  if (straySignal !== undefined && step["done"] === undefined) {
+    problems.push("ctx.run: flow 的声明形式用 done（journey 用 signal）；把 signal 改名为 done，"
+      + "例如 { stdio: {...}, done: { stdout_contains: \"ok\" } }");
+  }
+  if (straySignal !== undefined && step["done"] !== undefined) {
+    problems.push("ctx.run: 声明块同时写了 signal 和 done——flow 的声明形式只认 done（signal 是 journey 的词）；"
+      + "删掉 signal，或把它改名为 done");
+  }
+  if (step["done"] === undefined || step["done"] === null) {
+    problems.push("ctx.run: done signal is required (completion is the process observation)");
+  } else if (typeof step["done"] !== "object" || Array.isArray(step["done"])) {
+    problems.push("ctx.run: done signal must be an object");
+  }
+  return problems;
+}
+
 /* ---- A3 原语参数校验（真实/dry/replay 共用同一份声明面；校验失败 = config_error） ---- */
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
@@ -1173,6 +1220,9 @@ export function createCtx(deps: CtxDeps): Ctx {
         elapsed_ms: elapsedMs,
         ...(r.artifact === undefined ? {} : { artifact: r.artifact }),
         ...(tail === undefined ? {} : { stderr_tail: tail }),
+        // T4：信号不成立的结构化诊断（path/类型/值摘要）也进 trace——投影面/报告从
+        // 同一份事件重建，不再只剩「signal not held」。
+        ...(stopCode !== undefined && r.reason !== undefined ? { reason: r.reason } : {}),
         ...(written.length > 0 ? { dataset_written: written } : {}),
       },
     });
@@ -1183,6 +1233,12 @@ export function createCtx(deps: CtxDeps): Ctx {
     if (!Array.isArray(args) || args.some((a) => typeof a !== "string")) throw new StopError("config_error", "ctx.run: args must be a list of strings");
     if (req === null || typeof req !== "object" || req.done === undefined || req.done === null) {
       throw new StopError("config_error", "ctx.run: done signal is required (completion is the process observation)");
+    }
+    // T7：工具信号载荷的运行期兜底（与 dry 同一份校验器）。坏载荷是配置错误，
+    // 不能落到 `checkToolSignal` 里静默 false。
+    const signalProblems = validateToolSignal(req.done as ToolSignal, `ctx.run(${JSON.stringify(req.desc ?? source)}).done`);
+    if (signalProblems.length) {
+      throw new StopError("config_error", signalProblems.join("；"));
     }
     if (dangerous && (!Array.isArray(req.dryRunArgs) || req.dryRunArgs.length === 0)) {
       throw new StopError("config_error", "ctx.dangerous requires dryRunArgs (a failed dry run must never apply)");
@@ -1223,22 +1279,11 @@ export function createCtx(deps: CtxDeps): Ctx {
       throw new StopError("config_error", "ctx.run: the declaration form needs an object like { stdio: {...}, done: {...} }");
     }
     const done = step["done"];
-    // T7 同族：`signal` 是 **journey** 的词，flow 的声明形式用 `done`。以前写了
-    // `signal: {...}` 会被 `req.done` 静默忽略，报错退化成 "done signal is required"
-    // ——用户会去补一个已经"写了"的东西。显式命名冲突，点名改法。
-    const straySignal = step["signal"];
-    if (straySignal !== undefined && done === undefined) {
-      throw new StopError("config_error",
-        "ctx.run: flow 的声明形式用 done（journey 用 signal）；把 signal 改名为 done，"
-        + "例如 { stdio: {...}, done: { stdout_contains: \"ok\" } }");
-    }
-    if (straySignal !== undefined && done !== undefined) {
-      throw new StopError("config_error",
-        "ctx.run: 声明块同时写了 signal 和 done——flow 的声明形式只认 done（signal 是 journey 的词）；"
-        + "删掉 signal，或把它改名为 done");
-    }
-    if (done === undefined || done === null || typeof done !== "object") {
-      throw new StopError("config_error", "ctx.run: done signal is required (completion is the process observation)");
+    // T7：未知顶层键/`signal` 冲突/done 必需在真实与 dry 两面念同一段文案
+    // （`declaredRunProblems` 是唯一出处）。
+    const declaredProblems = declaredRunProblems(step);
+    if (declaredProblems.length) {
+      throw new StopError("config_error", declaredProblems.join("；"));
     }
     const adapter = typeof step["adapter"] === "string" && step["adapter"]
       ? step["adapter"]

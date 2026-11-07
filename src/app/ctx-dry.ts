@@ -22,6 +22,7 @@ import { getAppAdapter, listAppAdapters, requireAppAdapter } from "./app-adapter
 import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, ValueError } from "../data/datasource.ts";
 import type { StateFingerprint, StepStateRecord } from "../engine/executor.ts";
 import {
+  declaredRunProblems,
   normalizeCommandIds, resolveCtxUrl, StopError,
   validateCollectRequest, validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
   validateSwitchTabMatch,
@@ -460,21 +461,11 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       if (step === null || typeof step !== "object" || Array.isArray(step)) {
         throw new StopError("config_error", "ctx.run: the declaration form needs an object");
       }
-      // T7 同族（与运行期 ctx.ts 同文案）：flow 的声明形式用 done，signal 是 journey 的词；
-      // 静默忽略会让报错退化成 "done signal is required"，误导用户去补一个已经"写了"的键。
-      const straySignal = step["signal"];
-      if (straySignal !== undefined && step["done"] === undefined) {
-        throw new StopError("config_error",
-          "ctx.run: flow 的声明形式用 done（journey 用 signal）；把 signal 改名为 done，"
-          + "例如 { stdio: {...}, done: { stdout_contains: \"ok\" } }");
-      }
-      if (straySignal !== undefined && step["done"] !== undefined) {
-        throw new StopError("config_error",
-          "ctx.run: 声明块同时写了 signal 和 done——flow 的声明形式只认 done（signal 是 journey 的词）；"
-          + "删掉 signal，或把它改名为 done");
-      }
-      if (step["done"] === undefined || typeof step["done"] !== "object" || step["done"] === null) {
-        throw new StopError("config_error", "ctx.run: done signal is required");
+      // T7：未知顶层键/`signal` 冲突/done 必需——与运行期 ctx.ts 共用唯一一份校验器
+      // （dry 与真跑同文案；未知键点名 unknown + known，不静默忽略）。
+      const declaredProblems = declaredRunProblems(step);
+      if (declaredProblems.length) {
+        throw new StopError("config_error", declaredProblems.join("；"));
       }
       const adapter = typeof step["adapter"] === "string" && step["adapter"]
         ? step["adapter"]
@@ -494,6 +485,10 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       } else {
         const src = typeof step["source"] === "string" ? step["source"] : "";
         if (!src.trim()) throw new StopError("config_error", "ctx.run: the cli form needs a non-empty source");
+        // T7：工具信号载荷（path/want 类型、exit code 整数、正则可编译、文件路径类型）
+        // 在 dry 期校验；坏载荷 = config_error，不是运行期静默 false。
+        const sigProblems = validateToolSignal(step["done"] as never, "ctx.run.done");
+        if (sigProblems.length) throw new StopError("config_error", sigProblems.join("；"));
         try { loadSource(src); } catch (e) {
           throw new StopError("config_error", `ctx.run: ${e instanceof Error ? e.message : String(e)}`);
         }

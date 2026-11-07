@@ -73,6 +73,18 @@ export interface OptionCandidate {
   label: string;
 }
 
+/** 绑定诊断上下文（T3）——**只影响失败 reason 的文案**，不参与解析/成功判定。 */
+export interface BindingDiagnostics {
+  /** 绑定所属命令（命令层提供）：id + 声明 target。 */
+  command?: { id: string; target?: string | null };
+  /** 已声明的槽位键（`[]` 要明示；缺省 = 不附该段）。 */
+  slotKeys?: readonly string[];
+  /** 当步目标控件的身份字段（name/id/data-test/label；用于"控件与绑定 key 不匹配"判定）。 */
+  control?: { tag?: string; label?: string; name?: string; id?: string; data_test?: string };
+  /** 当步可行动候选的人工摘要（≤3 条；命令层从元素池/选项观察提供）。 */
+  candidates?: readonly string[];
+}
+
 /** 解析一条绑定所需的**当次观察**（缺哪一样，用那种来源就在运行期结构化失败）。 */
 export interface BindingContext {
   slots?: Record<string, unknown>;
@@ -80,6 +92,8 @@ export interface BindingContext {
   rows?: readonly Record<string, unknown>[];
   /** NL Flow S1：数据集读取面（`dataset` 来源；运行方没给 ⇒ 该来源结构化失败，不猜）。 */
   dataset?: DatasetReader;
+  /** T3：失败文案的诊断上下文（成功路径与解析语义完全不变）。 */
+  diag?: BindingDiagnostics;
 }
 
 export type BindingOutcome =
@@ -183,6 +197,88 @@ export function validateBinding(
   }
 }
 
+/* ------------------------------------------------- T3：needs_value 诊断文案 */
+
+const normToken = (v: string): string => v.trim().toLowerCase();
+
+/** 控件身份是否与绑定 key 有词面关系（精确/互含，与 §4.5 的控件身份匹配同一口径）。 */
+function controlMatchesKey(control: BindingDiagnostics["control"], key: string): boolean | undefined {
+  if (control === undefined) return undefined;
+  const hay = [control.label, control.name, control.id, control.data_test]
+    .filter((v): v is string => typeof v === "string" && v.trim() !== "")
+    .map(normToken);
+  if (hay.length === 0) return undefined;
+  const k = normToken(key);
+  return hay.some((h) => h === k || h.includes(k) || k.includes(h));
+}
+
+/** 一行控件身份摘要（诊断用；空字段不占位）。 */
+function describeControl(control: BindingDiagnostics["control"]): string | null {
+  if (control === undefined) return null;
+  const bits: string[] = [];
+  if (control.tag) bits.push(control.tag + (control.id ? `#${control.id}` : ""));
+  else if (control.id) bits.push(`#${control.id}`);
+  if (control.name) bits.push(`name=${JSON.stringify(control.name)}`);
+  if (control.data_test) bits.push(`data-test=${JSON.stringify(control.data_test)}`);
+  if (control.label) bits.push(`label=${JSON.stringify(control.label)}`);
+  return bits.length ? bits.join(" ") : null;
+}
+
+/**
+ * 失败 reason 的诊断尾巴（T3）：已声明 slots 键（`[]` 明示）→ 命令 id/target →
+ * 控件身份 → 该步可行动候选（≤3）。只拼文本，不改 `ok`/值。
+ */
+export function describeBindingDiagnostics(
+  ctx: BindingContext,
+  opts: { key?: string; controlMatch?: boolean; candidates?: readonly string[] } = {},
+): string {
+  const diag = ctx.diag;
+  if (diag === undefined) return "";
+  const parts: string[] = [];
+  if (diag.slotKeys !== undefined) {
+    parts.push(`declared slots: ${diag.slotKeys.length === 0 ? "[] (none declared)" : diag.slotKeys.map((k) => JSON.stringify(k)).join(", ")}`);
+  }
+  if (diag.command !== undefined) {
+    parts.push(`command ${JSON.stringify(diag.command.id)}`
+      + (diag.command.target ? ` (target ${JSON.stringify(diag.command.target)})` : ""));
+  }
+  const control = describeControl(diag.control);
+  if (control !== null) parts.push(`control ${control}`);
+  if (opts.controlMatch === false && opts.key !== undefined) {
+    // 只有调用方明确说"不匹配"时才写（undefined = 无法判定，不猜）。
+    parts.push(`control/label does not match the binding key ${JSON.stringify(opts.key)}`);
+  }
+  const cands = (opts.candidates ?? diag.candidates ?? []).slice(0, 3);
+  if (cands.length) parts.push(`actionable candidates: ${cands.join("; ")}`);
+  return parts.length ? ` — ${parts.join(" — ")}` : "";
+}
+
+/** 选项候选摘要（T3）：label（value 不同才附机器值），最多 3 条。 */
+function optionCandidateSummary(options: readonly OptionCandidate[]): string[] {
+  const out: string[] = [];
+  for (const o of options) {
+    const label = o.label ? JSON.stringify(o.label) : "";
+    const value = o.value !== o.label ? ` (value ${JSON.stringify(o.value)})` : "";
+    out.push(`${label}${value}` || `${JSON.stringify(o.value)} (value)`);
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
+/**
+ * ② slot 键在袋里但值为空（null/undefined）：命令层用它生成与 `resolveBinding` 同款的
+ * needs_value 文案（解析本身仍返回 ok——空串对 fill 是合法的"清空"，不算缺值）。
+ */
+export function emptySlotBindingReason(
+  key: string, value: null | undefined, ctx: BindingContext,
+): string {
+  const match = controlMatchesKey(ctx.diag?.control, key);
+  const kind = value === null ? "null" : "undefined";
+  return `slot ${JSON.stringify(key)} is present in the plan's data bag but its value is empty (${kind})`
+    + ` [missing: empty-value${match === false ? ", control-mismatch" : ""}]`
+    + describeBindingDiagnostics(ctx, { key, controlMatch: match });
+}
+
 /**
  * 运行期解析（纯函数）：声明 × 当次观察 → 值，或**结构化缺值原因**。
  *
@@ -198,10 +294,13 @@ export function resolveBinding(binding: ValueBinding, ctx: BindingContext = {}):
   const slots = ctx.slots ?? {};
   if (binding.from === "slot") {
     if (!(binding.key in slots)) {
+      const match = controlMatchesKey(ctx.diag?.control, binding.key);
       return {
         ok: false,
         reason: `slot ${JSON.stringify(binding.key)} is not in the plan's data bag`
-          + ` (values come from the plan, never invented)`,
+          + ` (values come from the plan, never invented)`
+          + ` [missing: key-not-in-bag${match === false ? ", control-mismatch" : ""}]`
+          + describeBindingDiagnostics(ctx, { key: binding.key, controlMatch: match }),
       };
     }
     return { ok: true, value: slots[binding.key], index: null, via: `slot:${binding.key}` };
@@ -213,14 +312,20 @@ export function resolveBinding(binding: ValueBinding, ctx: BindingContext = {}):
       return {
         ok: false,
         reason: `no option candidates were observed for the 'option' source`
-          + ` (the element exposes no candidate list)`,
+          + ` (the element exposes no candidate list) [missing: no-candidates]`
+          + describeBindingDiagnostics(ctx, { key: binding.key }),
       };
     }
     if (!(binding.key in slots)) {
+      const match = controlMatchesKey(ctx.diag?.control, binding.key);
       return {
         ok: false,
         reason: `slot ${JSON.stringify(binding.key)} is not in the plan's data bag`
-          + ` (values come from the plan, never invented)`,
+          + ` (values come from the plan, never invented)`
+          + ` [missing: key-not-in-bag${match === false ? ", control-mismatch" : ""}]`
+          + describeBindingDiagnostics(ctx, {
+            key: binding.key, controlMatch: match, candidates: optionCandidateSummary(options),
+          }),
       };
     }
     const want = String(slots[binding.key] ?? "");
@@ -261,7 +366,8 @@ export function resolveBinding(binding: ValueBinding, ctx: BindingContext = {}):
     return {
       ok: false,
       reason: `none of the observed candidates matched ${JSON.stringify(want)} for ${JSON.stringify(binding.key)}`
-        + ` (rule '${binding.match}'; ${options.length} candidate(s) observed)`,
+        + ` (rule '${binding.match}'; ${options.length} candidate(s) observed) [missing: control-mismatch]`
+        + describeBindingDiagnostics(ctx, { key: binding.key, candidates: optionCandidateSummary(options) }),
     };
   }
 

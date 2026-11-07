@@ -22,7 +22,7 @@ import path from "node:path";
 import { loadSource, type CliObservation } from "../data/datasource.ts";
 import { REPO } from "../flow/flow.ts";
 import type { DatasetReader } from "../engine/dataset.ts";
-import { checkToolSignal, validateToolSignal, type ToolSignal } from "../browser/tool-signals.ts";
+import { checkToolSignal, explainToolSignal, validateToolSignal, type ToolSignal } from "../browser/tool-signals.ts";
 import type { ToolStepResult } from "./app-runner.ts";
 import type { ExpandedStep } from "./app-pack.ts";
 import type { Subgoal } from "../engine/plan.ts";
@@ -654,6 +654,9 @@ export const sshAdapter: AppAdapter = {
         code: code ?? 1, ok: code === 0, stdout, stderr, argv: sshArgv, cwd: ctx.outDir, exit_ok: [0],
       };
       const held = checkToolSignal(obs, d.signal);
+      // T4：不成立时附观察事实（与 cli 面同一份 explainToolSignal；重试成立则清掉旧诊断）。
+      if (held) delete base.reason;
+      else base.reason = explainToolSignal(obs, d.signal).join("; ");
       if (ctx.verbose) {
         console.log(`  [${step.index}] ssh ${d.host}: exit ${code ?? "-"}, signal ${held ? "held" : "not yet"}`
           + (i > 1 ? ` (attempt ${i})` : ""));
@@ -861,6 +864,8 @@ export const stdioAdapter: AppAdapter = {
             + `the interactive session did not reach the step signal (killed)`;
         }
         base.done = done;
+        // T4：进程已退出仍未成立时，把最终观察的失败诊断写进 reason（不静默 false）。
+        if (!done) base.reason = explainToolSignal(finalObs(), d.signal).join("; ");
         const returns = done ? extractProcessReturns(d.returns, { stdout, stderr, code: base.code }) : undefined;
         resolve({ done, tool: base, ...(returns !== undefined ? { returns } : {}) });
       };

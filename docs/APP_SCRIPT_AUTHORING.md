@@ -522,6 +522,11 @@ const filled = await ctx.step("用数据集的值填 input", {
 });
 ```
 
+- **声明形式的顶层键是闭集**（T7）：`adapter`/`source`/`args`/`dryRunArgs`/`desc`/`id`/
+  `idempotent`/`retries`/`returns`/`done`/`stdio`/`ssh`（`signal` 只为给出 journey 词改法；
+  `dangerous` 由 ssh/stdio 适配器校验）。未知键 = 结构化 `config_error`，reason 同时列
+  unknown 与 known，dry/`apps check` 与运行期同一份文案（`declaredRunProblems`）——写了没用
+  的键不再静默忽略。没有 `cli: {...}` 块：cli 形式就是 `source`+`args`+`dryRunArgs`。
 - **`returns` 只认既有 `ReturnExtractor`**（`stdout` / `exit_code` / `stdout_regex` /
   `stderr_regex`）；坏声明 = 结构化 `config_error`，抽取不到 = 该名字**不写入**（如实缺席，
   下游得到 `needs_value`，不猜）。
@@ -645,6 +650,8 @@ export async function flow(ctx) {
   `all([a, b])` 加载期 INVALID（2026-11-01 实测：初次使用者首个就在这里被 apps check 拦下，
   报错定位准确、一次修正）。
 - 进程：`ctx.tool.exitOk()`、`exitCode(n)`、`stdoutContains`、`stdoutMatches`、`stderrContains`、`jsonPath`、`fileExists`、`fileAbsent`；
+- `jsonPath` 支持 **RFC 9535 子集**：点路径 + 方括号下标，`$` 前缀可选（`$.a.b` ≡ `a.b`、`$[0]` ≡ `[0]`、`$` = 根）。不新增表达式语法（无递归下降/过滤/通配）；旧的无 `$` 路径行为逐字节不变。载荷在 dry/`apps check` 期校验：path/want 必须是非空字符串，`exitCode` 必须是整数、`stdoutMatches` 必须是可编译正则、`fileExists/fileAbsent` 必须是非空路径——坏载荷 = 结构化 `config_error`，不留到运行期静默 false。
+- 工具信号不成立时，工具步的 `reason`/trace/报告带**结构化诊断**：`json_path_equals` 给出 path（含归一结果）、实际类型（object/array/string/number/boolean/null/undefined）与 ≤120 字符值摘要；退出码/stdout/stderr 类叶子给期望与实测。大对象只截摘要，敏感值沿用产物面既有 `scrubSecrets` 掩码。
 - 组合器可嵌套。**不要用“看起来完成了”代替证据**：`ctx.step` 返回的 `ok` 就是 done 信号是否成立。
 - **可用的 done = 「动作前不成立、动作后成立」**（判据，05/06 轮案例实证）：动作前已成立的信号（如任何页都真的 `exists("h1")`）在验证面**零贡献**——这一步的绿完全外包给 goal 语义与模型恰好点对，落点再意外也判绿（r06 `wide-done-sample` 实录）。守卫/到达/翻页步尤其警惕；用位置类选择器（`nth-child`/`nth-of-type`）前先实证**动作前命中数为 0**——站点数据可能自带"第 11 条"（r05 实证 `div.quote:nth-of-type(11)` 未滚动已真）。翻页类 done 优先用 URL 参数片段或**下一页独有内容锚**，别用两页共有的 h1/容器。
 

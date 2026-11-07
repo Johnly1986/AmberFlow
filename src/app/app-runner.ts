@@ -57,7 +57,7 @@ import { installLayaRuntime } from "../model/model.ts";
 import { runSubgoalWithRetries } from "../engine/planner.ts";
 import { DESTRUCTIVE_PATTERNS } from "../engine/rules.ts";
 import { checkSignal } from "../engine/signals.ts";
-import { checkToolSignal, type ToolSignal } from "../browser/tool-signals.ts";
+import { checkToolSignal, explainToolSignal, type ToolSignal } from "../browser/tool-signals.ts";
 import { captureStateView } from "../flow/signal-induction.ts";
 import { captureStepStateView, type StepStateView } from "../model/page-context.ts";
 import type { StateView } from "../engine/signals.ts";
@@ -497,6 +497,9 @@ export interface ToolStepResult {
   elapsed_ms?: number;
   /** T6：stderr 尾部摘要（有界；失败诊断与 trace 的 `stderr_tail` 同源）。 */
   stderr_tail?: string;
+  /** T4：信号不成立时的结构化诊断（path/类型/值摘要、exit/stdout 期望与实测），
+   *  由 `explainToolSignal` 生成；信号成立或缺省时不出该字段。 */
+  reason?: string;
 }
 
 export interface AppInvariantResult {
@@ -886,6 +889,10 @@ export async function runToolStep(
     base.stdout = o.stdout;
     base.stderr = o.stderr;
     const held = checkToolSignal(o, t.signal);
+    // T4：信号不成立时把**观察事实**写进 reason（path/类型/值摘要、exit/stdout 期望），
+    // 不再只剩 `tool_failed: exit 0`。重试后成立则删掉上一次的诊断（成功步不带失败话术）。
+    if (held) delete base.reason;
+    else base.reason = explainToolSignal(o, t.signal).join("; ");
     if (opts.verbose) {
       console.log(`  [${step.index}] tool ${t.source}: exit ${o.code}, signal ${held ? "held" : "not yet"}`
         + (i > 1 ? ` (attempt ${i})` : ""));
@@ -1862,6 +1869,7 @@ export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): st
       if (t.argv !== undefined) L.push(`- \`${t.source}\` argv: \`${t.argv.join(" ")}\``);
       else L.push(`- \`${t.source}\`（flow 工具步；argv 未投影，原始观察见工件）`);
       if (t.dry_run) L.push(`  - dry-run argv: \`${t.dry_run.argv.join(" ")}\``);
+      if (t.reason) L.push(`  - 信号诊断: ${t.reason}`);
       if (t.stdout) L.push(`  - stdout: ${JSON.stringify(t.stdout.slice(0, 200))}`);
       else if (t.stderr_tail) L.push(`  - stderr（尾行）: ${JSON.stringify(t.stderr_tail)}`);
       if (t.stderr) L.push(`  - stderr: ${JSON.stringify(t.stderr.slice(0, 200))}`);
@@ -2193,7 +2201,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       adapter: string | undefined,
       obs: {
         code: number | null; stdout: string; stderr: string; attempts: number; ok: boolean;
-        stopCode?: string; argv?: string[]; args?: string[];
+        stopCode?: string; argv?: string[]; args?: string[]; reason?: string;
       },
     ): string | undefined => {
       const seq = ++toolStepSeq;
@@ -2206,6 +2214,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         ...(obs.argv === undefined ? {} : { argv: obs.argv }),
         code: obs.code, ok: obs.ok,
         ...(obs.stopCode === undefined ? {} : { stop_code: obs.stopCode }),
+        ...(obs.reason === undefined ? {} : { reason: obs.reason }),
         attempts: obs.attempts, elapsed_ms: Date.now() - started,
         stdout: out.text, stderr: err.text,
         ...(out.truncated || err.truncated ? { truncated: true as const } : {}),
@@ -2255,13 +2264,16 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           code: t?.code ?? null, stdout: t?.stdout ?? "", stderr: t?.stderr ?? "",
           attempts: t?.attempts ?? 1, ok: out.done,
           ...(stopCode === undefined ? {} : { stopCode }),
+          ...(t?.reason === undefined ? {} : { reason: t.reason }),
           ...(t?.argv === undefined ? {} : { argv: t.argv }),
         });
         return {
           ok: out.done,
           ...(stopCode === undefined ? {} : { stopCode }),
           ...(t?.refused === undefined ? {} : { refused: t.refused }),
-          ...(t?.stderr ? { reason: t.stderr.split("\n")[0]!.slice(0, 300) } : {}),
+          // T4：优先信号诊断（path/类型/值摘要）；没有才退回 stderr 首行。
+          ...(t?.reason ? { reason: t.reason }
+            : t?.stderr ? { reason: t.stderr.split("\n")[0]!.slice(0, 300) } : {}),
           ...(out.returns === undefined ? {} : { returns: out.returns }),
           code: t?.code ?? null, stdout: t?.stdout ?? "", stderr: t?.stderr ?? "",
           attempts: t?.attempts ?? 1,
@@ -2295,14 +2307,18 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       const artifact = writeToolArtifact(started, req.desc, req.source, undefined, {
         code: r.code, stdout: r.stdout ?? "", stderr: r.stderr ?? "", attempts: r.attempts, ok: r.done,
         ...(stopCode === undefined ? {} : { stopCode }),
+        ...(r.reason === undefined ? {} : { reason: r.reason }),
         args: req.args ?? [],
         ...((r.argv ?? []).length > 0 ? { argv: r.argv } : {}),
       });
       return {
         ok: r.done,
         ...(stopCode === undefined ? {} : { stopCode }),
-        // 有底层 stderr 时交给 ctx 组「exit + stderr 尾行」的诊断；没有才退到拒绝话术。
-        ...(stopCode !== undefined && (r.stderr ?? "").trim() === "" ? { reason: refusalLine(stopCode) } : {}),
+        // T4：信号诊断（path/类型/值摘要）优先；有底层 stderr 时由 ctx 组
+        // 「exit + stderr 尾行」的诊断；两者都没有才退到拒绝话术。
+        ...(stopCode === undefined ? {}
+          : r.reason !== undefined ? { reason: r.reason }
+            : (r.stderr ?? "").trim() === "" ? { reason: refusalLine(stopCode) } : {}),
         ...(r.refused === undefined ? {} : { refused: r.refused }),
         ...(returns === undefined ? {} : { returns }),
         code: r.code, stdout: r.stdout ?? "", stderr: r.stderr ?? "", attempts: r.attempts,
@@ -2567,6 +2583,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         ...(typeof r["artifact"] === "string" ? { artifact: r["artifact"] } : {}),
         ...(typeof r["elapsed_ms"] === "number" ? { elapsed_ms: r["elapsed_ms"] } : {}),
         ...(typeof r["stderr_tail"] === "string" ? { stderr_tail: r["stderr_tail"] } : {}),
+        ...(typeof r["reason"] === "string" ? { reason: r["reason"] } : {}),
       };
     });
   const sourceProjection: AppSourceResult[] = trace.events

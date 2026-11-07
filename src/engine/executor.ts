@@ -121,6 +121,7 @@ import { parseHint } from "./hint.ts";
 import { LayaNotConfiguredError, type LayaRuntime } from "../model/model.ts";
 import { induceHint } from "../model/hint-memory.ts";
 import { instantiateSpace, resolveCommandValue, type CommandDecl } from "./actions.ts";
+import { emptySlotBindingReason, type BindingDiagnostics } from "./bindings.ts";
 import { parseClickAtValue } from "./click-at.ts";
 import type { DatasetReader } from "./dataset.ts";
 import { optionCandidatesFrom, type OptionCandidate } from "./bindings.ts";
@@ -1183,6 +1184,35 @@ function candidateName(e: Elem, cap = 30): string {
   if (label) return label;
   const alt = String(e["data_test"] ?? e.id ?? "").trim().slice(0, cap);
   return alt || e.tag;
+}
+
+/**
+ * T3：绑定失败时"该步可行动候选"的摘要（目标元素优先，其余按 op 能力面收，最多 3 条）。
+ * 只拼诊断文本；不参与选择、不改变任何动作。
+ */
+function bindingCandidateSummaries(elems: ElemPool, targetRef: string, op: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (e: Elem | undefined): void => {
+    if (e === undefined || out.length >= 3) return;
+    const bits = [`${e.tag}${e.id ? `#${e.id}` : ""}`];
+    if (e.name) bits.push(`name=${JSON.stringify(String(e.name).slice(0, 40))}`);
+    if (e["data_test"]) bits.push(`data-test=${JSON.stringify(String(e["data_test"]).slice(0, 40))}`);
+    if (e.label) bits.push(`label=${JSON.stringify(String(e.label).slice(0, 60))}`);
+    const line = bits.join(" ");
+    if (seen.has(line)) return;
+    seen.add(line);
+    out.push(line);
+  };
+  add(elems[targetRef]);
+  const cap = op as ActionCapability;
+  for (const [r, e] of Object.entries(elems)) {
+    if (out.length >= 3) break;
+    if (r === targetRef) continue;
+    if (!actionCapabilities(e).includes(cap)) continue;
+    add(e);
+  }
+  return out;
 }
 
 /**
@@ -4075,12 +4105,33 @@ export class BrowserMiddleware {
               || cmdPick.cmd.op === "clickAt")) {
           // P3: an `option` source is an OBSERVATION at bind time — read this page's
           // candidate list now (never assumed, never remembered from another run).
+          const boundEl = elems[cmdPick.ref];
           let boundOptions: OptionCandidate[] | undefined;
           if (cmdPick.cmd.value?.from === "option") {
-            const boundEl = elems[cmdPick.ref];
             boundOptions = boundEl ? await this._optionCandidates(pg, boundEl) : [];
           }
-          const rv = resolveCommandValue(cmdPick.cmd, slots, { options: boundOptions, dataset: dataset ?? undefined });
+          // T3：失败文案的诊断上下文（命令 id/target、已声明 slots 键、目标控件身份、
+          // 该步可行动候选）。只影响 reason；解析语义与成功路径不变。
+          const bindingDiag: BindingDiagnostics = {
+            command: { id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null },
+            slotKeys: Object.keys(slots),
+            ...(boundEl === undefined ? {} : {
+              control: {
+                tag: boundEl.tag,
+                ...(boundEl.label ? { label: boundEl.label } : {}),
+                ...(boundEl.name ? { name: boundEl.name } : {}),
+                ...(boundEl.id ? { id: boundEl.id } : {}),
+                ...(boundEl["data_test"] ? { data_test: String(boundEl["data_test"]) } : {}),
+              },
+            }),
+            ...(() => {
+              const cands = bindingCandidateSummaries(elems, cmdPick!.ref, String(cmdPick!.cmd.op));
+              return cands.length ? { candidates: cands } : {};
+            })(),
+          };
+          const rv = resolveCommandValue(cmdPick.cmd, slots, {
+            options: boundOptions, dataset: dataset ?? undefined, diag: bindingDiag,
+          });
           if (!rv.ok) commandBindMissing = rv.reason;
           else {
             commandValue = rv.value;
@@ -4088,6 +4139,14 @@ export class BrowserMiddleware {
             // 又可能选中"标签恰好等于我们要的机器值"的另一个 option。今天的启发式路径
             // （没有绑定）一字不动，仍走 label→value 两候选回退。
             commandByValue = cmdPick.cmd.value?.from === "option";
+            // T3 ②：slot 键在袋里但值为 null/undefined = 缺值（不是"有值"。空串对 fill
+            // 是合法的清空值，不算缺值）。文案与 resolveBinding 的失败同款（带诊断上下文）。
+            if (cmdPick.cmd.value?.from === "slot"
+                && (commandValue === null || commandValue === undefined)) {
+              commandBindMissing = emptySlotBindingReason(
+                cmdPick.cmd.value.key, commandValue, { diag: bindingDiag },
+              );
+            }
           }
           // U6：upload 的绑定解析出 undefined/null 同样是**缺值**（如槽位键存在但值为空）——
           // 提前落成与 fill/select 同款的 needs_value 停因，而不是让动作层跳到下一个候选。
