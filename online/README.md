@@ -89,11 +89,11 @@ npm run test -- --tier smoke --json
 
 ## 典型规划评估任务
 
-`online/PLANNING_EVAL.md` 定义了两个可重复的**规划效率 + 引擎健壮性**评估任务：
-**复杂站点多跳研究**（`online/cases/deep/wiki-multihop-research.json`，真实维基百科，单页 2000+
-可交互元素，作为主任务）与**简单状态化电商基线**（`online/cases/deep/saucedemo-cart-eval.json`）。
-含评估臂（声明基线/规划/降级）、指标口径、健壮性扰动矩阵（P1–P8）与 pilot 基线。
-引擎变更后用同一命令复测，比较指标而非只看绿。
+`online/PLANNING_EVAL.md` 定义了**规划效率 + 引擎健壮性**评估任务族：
+**典型案例 T · 携程移动端出行规划**（2026-11-07 更新，主任务：上海→昆明最近三天最低价机票 + 呈贡区
+最低价 4 星酒店，记录行程与开销；按 agent 任务简报评估，probe 只记录可用性）；以及两个确定性辅助
+基线（维基百科多跳 `wiki-multihop-research`、Swag Labs 状态流 `saucedemo-cart-eval`）。
+含评估臂、指标口径、健壮性扰动矩阵（P1–P8）与 pilot 基线。
 
 ## 新增一个 case
 
