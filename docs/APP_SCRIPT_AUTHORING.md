@@ -645,7 +645,17 @@ export async function flow(ctx) {
   live 用 Playwright `hasText`（跨主 frame 与可达子 frame——同源/跨源均可，大小写不敏感子串，含后代文本）；`amber apps` 的池/离线
   评估是**近似**（匹配元素的合成 label 包含 text），诱导期不据此下结论。
 - `ctx.judge.exists(sel, { visible: true })` = 存在且**可见**（`css_visible_exists`，首匹配 `isVisible()`）；
-  池/离线评估不可判定（返回 null，诱导期按“需真实验证”处理）。旧写法 `exists(sel)` 语义不变（`css_exists`）。
+  live 直接判；learn 归纳面捕获了每个节点的 `visible`（`checkVisibility` CSS + 非零盒，与 extraction 同口径）
+  后可按首匹配离线判定——**缺该字段的旧视图一律不可判定（null，不采纳），绝不当作成立**。
+  旧写法 `exists(sel)` 语义不变（`css_exists`）。
+- **录制/归纳（learn）观测面（U2a）**：每个动作前后各抓一份 StateView，witness 节点带 `visible` 与可选
+  `disabled`；隐藏节点照抓（它两态都存在、只翻转 `display` 的面板/弹层正是“出现/收起”的证据）。候选按
+  证据强度排序：`url_contains > css_value_equals > css_visible_exists / not(css_visible_exists) >
+  css_text_equals > all_of > css_text_contains > css_exists > not(css_exists)`。`type`/`fill` 之后
+  **输入值优先**——`#name` 的值才是动作写下的证据，label 往往只是字段名（aria-label/初始文本在动作前后
+  不变）；值必须非空、非波动量，password/file/hidden 在捕获期已按长度掩码（掩码值不会生成值信号）。
+  **存在性变化**仍走 `css_exists`/`gone`；只有“两态都存在、可见性翻转”才走 `css_visible_exists` /
+  `not(...)`。录下来的字面值回放进生成应用仍不在本项（值管道 U2b）。
 - 组合器是**变参**不是数组：`ctx.judge.all(ctx.judge.url("a"), ctx.judge.text("h1","x"))` ✔；
   `all([a, b])` 加载期 INVALID（2026-11-01 实测：初次使用者首个就在这里被 apps check 拦下，
   报错定位准确、一次修正）。

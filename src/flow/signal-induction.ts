@@ -32,10 +32,16 @@ export type { SignalSpec, StateView };
 
 export interface InducedCandidate {
   signal: SignalSpec;
-  kind: "url" | "text_equals" | "value_equals" | "all_of" | "text_contains" | "exists" | "gone";
+  /**
+   * 证据类别。`visible`/`hidden` 是 U2a 新增的**可见性变化**（节点两态都存在，
+   * 但 `display:none`/隐藏 ↔ 可见）：`css_visible_exists` / `not(css_visible_exists)`。
+   */
+  kind: "url" | "text_equals" | "value_equals" | "all_of" | "text_contains" | "exists" | "gone" | "visible" | "hidden";
   /** 3 = data-test/id handle, 2 = name/near, 1 = text-derived, 0 = url-only. */
   stability: number;
   why: string;
+  /** 捕获顺序（文档序）。只用于把祖先的可见性翻转排在后代之前，绝不进选择器。 */
+  scan?: number;
 }
 
 export interface InductionResult {
@@ -50,8 +56,13 @@ export interface InductionResult {
 type Pool = StateView["elems"];
 type El = Pool[string];
 
+/**
+ * 推荐顺序（U2a）：`url` 与 `value_equals` 是**动作写下的证据**，先于其它；可见性紧随
+ * （面板/弹层出现是比"存在"更强的谓词——隐藏节点也满足 css_exists）；文本/组合/存在/消失
+ * 排在后面。新增 kind 参与排序，但绝不抢 url/输入值的位置。
+ */
 const KINDS: InducedCandidate["kind"][] = [
-  "url", "text_equals", "value_equals", "all_of", "text_contains", "exists", "gone",
+  "url", "value_equals", "visible", "hidden", "text_equals", "all_of", "text_contains", "exists", "gone",
 ];
 const KIND_RANK: Record<InducedCandidate["kind"], number> =
   Object.fromEntries(KINDS.map((k, i) => [k, i])) as Record<InducedCandidate["kind"], number>;
@@ -120,6 +131,11 @@ export interface StateDiff {
   urlChanged: boolean;
   appeared: El[];
   changed: Array<{ before: El; after: El }>;
+  /**
+   * 两态**都存在**、但捕获到的可见性不同（false↔true）的节点。缺 `visible` 字段
+   * （未捕获的旧视图）不算变化——"缺字段 = 未知"，不发明结论。
+   */
+  visibility: Array<{ before: El; after: El }>;
   gone: El[];
 }
 
@@ -133,6 +149,7 @@ export function diffStates(before: StateView, after: StateView): StateDiff {
   const a = index(after);
   const appeared: El[] = [];
   const changed: Array<{ before: El; after: El }> = [];
+  const visibility: Array<{ before: El; after: El }> = [];
   const gone: El[] = [];
   for (const [k, e] of a) {
     const prev = b.get(k);
@@ -141,15 +158,24 @@ export function diffStates(before: StateView, after: StateView): StateDiff {
       || String(prev.value ?? "") !== String(e.value ?? "")
       || String(prev.href ?? "") !== String(e.href ?? "");
     if (moved) changed.push({ before: prev, after: e });
+    // 可见性变化是**独立证据**：两态都存在（appeared/gone 看不到它），只有两态都捕获了
+    // 布尔值才算（缺字段 = 未捕获，按"未知"处理，不生成候选）。
+    if (typeof prev.visible === "boolean" && typeof e.visible === "boolean" && prev.visible !== e.visible) {
+      visibility.push({ before: prev, after: e });
+    }
   }
   for (const [k, e] of b) if (!a.has(k)) gone.push(e);
-  return { urlChanged: before.url !== after.url, appeared, changed, gone };
+  return { urlChanged: before.url !== after.url, appeared, changed, visibility, gone };
 }
 
 function kindOf(signal: SignalSpec): InducedCandidate["kind"] {
   if ("url_contains" in signal) return "url";
   if ("all_of" in signal) return "all_of";
-  if ("not" in signal) return "gone";
+  if ("css_visible_exists" in signal) return "visible";
+  if ("not" in signal) {
+    const inner = signal.not;
+    return typeof inner === "object" && inner !== null && "css_visible_exists" in inner ? "hidden" : "gone";
+  }
   if ("css_text_equals" in signal) return "text_equals";
   if ("css_value_equals" in signal) return "value_equals";
   if ("css_text_contains" in signal) return "text_contains";
@@ -157,33 +183,47 @@ function kindOf(signal: SignalSpec): InducedCandidate["kind"] {
 }
 
 /** Candidates a stable-handle element can carry, strongest literal first. */
-function candidatesForEl(e: El, selector: { sel: string; stability: number }, effect: string): InducedCandidate[] {
+function candidatesForEl(
+  e: El, selector: { sel: string; stability: number }, effect: string, scan?: number,
+): InducedCandidate[] {
   const out: InducedCandidate[] = [];
   const label = String(e.label ?? "").trim();
   const value = e.value === undefined || e.value === null ? "" : String(e.value).trim();
-  if (value && !isVolatile(value)) {
+  // 输入框/文本域的 live 文本谓词（innerText）**不是**输入值：`type`/`fill` 之后，`#name` 的
+  // 值才是动作写下的证据，而 label 往往只是字段名或（capture 回退成）当前值本身。对这两类
+  // 控件只给值信号 + 存在性信号，绝不把 label 投影成 css_text_equals（那是诱导期离线真、
+  // live 恒假的信号）。select 的文本面仍按既有逻辑处理。
+  const tag = String(e.tag ?? "").toLowerCase();
+  const valueField = tag === "input" || tag === "textarea";
+  // 敏感字段的 value 已在捕获期按长度掩码成 `*`×N（password/file/hidden），掩码值不是"值"；
+  // volatile 值照旧不进信号——两条纪律都不放松：宁可不给值信号，也绝不把掩码/波动值写进包。
+  const masked = /^\*+$/.test(value);
+  if (value && !masked && !isVolatile(value)) {
     out.push({
       signal: { css_value_equals: [selector.sel, value] }, kind: "value_equals",
-      stability: selector.stability, why: `${effect}: value → "${value}"`,
+      stability: selector.stability, ...(scan === undefined ? {} : { scan }),
+      why: `${effect}: value → "${value}"`,
     });
   }
-  if (label && label.length <= 60 && !isVolatile(label)) {
+  if (!valueField && label && label.length <= 60 && !isVolatile(label)) {
     out.push({
       signal: { css_text_equals: [selector.sel, label] }, kind: "text_equals",
-      stability: selector.stability, why: `${effect}: text → "${label}"`,
+      stability: selector.stability, ...(scan === undefined ? {} : { scan }),
+      why: `${effect}: text → "${label}"`,
     });
   }
-  const tok = stableToken(label);
+  const tok = valueField ? null : stableToken(label);
   if (tok && tok !== label) {
     out.push({
       signal: { css_text_contains: [selector.sel, tok] }, kind: "text_contains",
-      stability: Math.max(1, selector.stability - 1),
+      stability: Math.max(1, selector.stability - 1), ...(scan === undefined ? {} : { scan }),
       why: `${effect}: text contains "${tok}" (full text volatile)`,
     });
   }
   out.push({
     signal: { css_exists: [selector.sel] }, kind: "exists",
-    stability: selector.stability, why: `${effect}: ${selector.sel} present`,
+    stability: selector.stability, ...(scan === undefined ? {} : { scan }),
+    why: `${effect}: ${selector.sel} present`,
   });
   return out;
 }
@@ -224,17 +264,38 @@ export function induceSignals(
     effect.push(`changed: ${selectorFor(c.after)?.sel ?? identity(c.after)} `
       + `"${String(c.before.label ?? c.before.value ?? "")}" -> "${String(c.after.label ?? c.after.value ?? "")}"`);
   }
+  for (const c of diff.visibility) {
+    effect.push(`${c.after.visible === true ? "visible" : "hidden"}: ${selectorFor(c.after)?.sel ?? identity(c.after)}`);
+  }
   for (const e of diff.gone) effect.push(`gone: ${selectorFor(e)?.sel ?? identity(e)}`);
 
   const raw: InducedCandidate[] = [];
   if (diff.urlChanged) raw.push(...urlCandidates(before, after));
   for (const e of diff.appeared) {
     const sel = selectorFor(e);
-    if (sel) raw.push(...candidatesForEl(e, sel, "appeared"));
+    if (sel) raw.push(...candidatesForEl(e, sel, "appeared", Number(e.scan ?? 0)));
   }
   for (const c of diff.changed) {
     const sel = selectorFor(c.after);
-    if (sel) raw.push(...candidatesForEl(c.after, sel, "changed"));
+    if (sel) raw.push(...candidatesForEl(c.after, sel, "changed", Number(c.after.scan ?? 0)));
+  }
+  // 存在性变化走 css_exists/gone；**可见性变化**单独走可见性谓词（节点两态都在，
+  // 只有 visible 翻转）：false→true = 面板/弹层出现；true→false = 面板收起。
+  for (const c of diff.visibility) {
+    const sel = selectorFor(c.after);
+    if (!sel) continue;
+    const scan = Number(c.after.scan ?? 0);
+    if (c.after.visible === true) {
+      raw.push({
+        signal: { css_visible_exists: [sel.sel] }, kind: "visible", stability: sel.stability, scan,
+        why: `visible: ${sel.sel} hidden -> visible`,
+      });
+    } else {
+      raw.push({
+        signal: { not: { css_visible_exists: [sel.sel] } }, kind: "hidden", stability: sel.stability, scan,
+        why: `hidden: ${sel.sel} visible -> hidden`,
+      });
+    }
   }
   for (const e of diff.gone) {
     const sel = selectorFor(e);
@@ -277,9 +338,19 @@ export function induceSignals(
     }
   }
 
-  discriminating.sort((x, y) =>
-    (KIND_RANK[x.kind] - KIND_RANK[y.kind]) || (y.stability - x.stability)
-    || JSON.stringify(x.signal).length - JSON.stringify(y.signal).length);
+  discriminating.sort((x, y) => {
+    const byKind = KIND_RANK[x.kind] - KIND_RANK[y.kind];
+    if (byKind) return byKind;
+    const byStability = y.stability - x.stability;
+    if (byStability) return byStability;
+    // 一次动作可能让祖先与后代**同时**翻转（#panel 与它里面的 #item）：两者都是真候选，
+    // 但推荐"容器出现"——文档序里祖先在前（捕获序 = 文档序），只作排序，不进选择器。
+    if ((x.kind === "visible" || x.kind === "hidden")
+      && x.scan !== undefined && y.scan !== undefined && x.scan !== y.scan) {
+      return x.scan - y.scan;
+    }
+    return JSON.stringify(x.signal).length - JSON.stringify(y.signal).length;
+  });
   return {
     verdict: discriminating.length ? "discriminating" : "no-signal",
     candidates: discriminating.slice(0, max),
@@ -332,6 +403,20 @@ const WITNESS_JS = String.raw`(arg) => {
     // selectorFor 的稳定句柄之一（[aria-label="…"]，matchSelector 用 aria_label 判等价）。
     const aria = e.getAttribute('aria-label') || '';
     if (!text && !value && !aria) continue;
+    // U2a：捕获可见性（与 extraction 同一口径：checkVisibility CSS + 非零盒）。隐藏节点
+    // **不剔除**——两态都在、只翻转 display 的面板/弹层正是可见性归纳要看的证据；
+    // 缺字段（旧调用方/旧产物）按"未捕获"处理，评估面绝不把它当作成立。
+    const hasBox = (() => {
+      const r = e.getClientRects();
+      for (let k = 0; k < r.length; k++) if (r[k].width > 0 && r[k].height > 0) return true;
+      return false;
+    })();
+    let visible;
+    if (e.checkVisibility) visible = hasBox && e.checkVisibility({checkVisibilityCSS: true, checkOpacity: false});
+    else {
+      const cs = getComputedStyle(e);
+      visible = cs.display !== 'none' && cs.visibility !== 'hidden' && hasBox;
+    }
     out.push({
       tag: e.tagName.toLowerCase(),
       label: text || value || aria,
@@ -341,6 +426,9 @@ const WITNESS_JS = String.raw`(arg) => {
       name: e.getAttribute('name') || '',
       href: e.getAttribute('href') || '',
       aria_label: aria,
+      visible: !!visible,
+      // disabled 是观测字段（只记 true，不参与信号语义）——留作后续值管道/输入步判定。
+      ...(e.disabled === true ? { disabled: true } : {}),
     });
   }
   return out;

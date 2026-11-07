@@ -279,7 +279,14 @@ export async function learnFromActions(
       /* the page may never fire it; the action already happened */
     }
   };
-  /** S4：`captureStateView` 失败时等一拍重试一次（第二次仍失败才如实抛）。 */
+  /**
+   * S4：`captureStateView` 失败时等一拍重试一次（第二次仍失败才如实抛）。
+   *
+   * U2a：**单步现场与 `--script` 回放两条路径的 before/after 都走这一个调用**——witness
+   * 节点带 `visible`（两态都存在、只翻转 display 的面板/弹层因此能归纳出 `css_visible_exists`）
+   * 与输入值（`type`/`fill` 之后优先 `css_value_equals`）。只加观测字段：learn 的落盘格式与
+   * 成功判定不变，录下来的字面值回放进生成应用仍由值管道（U2b）负责。
+   */
   const captureWithRetry = async (label: string): Promise<StateView> => {
     try {
       return await captureStateView(pg as never);

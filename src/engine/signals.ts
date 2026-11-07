@@ -114,8 +114,17 @@ export function evalSignalOnState(spec: SignalSpec, view: StateView): boolean | 
   }
   if ("manual" in spec) return null;                       // human attestation: not decidable here
   if ("url_contains" in spec) return view.url.includes(String(arg(spec.url_contains)));
-  // 可见性是**页面事实**，池里没有可见性字段：离线一律不可判定（诱导期按"需真实验证"处理）。
-  if ("css_visible_exists" in spec) return null;
+  // 可见性（U2a）：learn 的 StateView 在捕获期记了每个节点的 `visible`，因此可判——按
+  // live 的同一口径取**首匹配**（matchSelector 已按捕获序=文档序），有匹配但无 visible
+  // 字段（旧视图/未捕获）= **未知**（null，诱导期不采纳），绝不当作成立。
+  // 无匹配时 live 的 locator.isVisible() 也是 false，离线同样返回 false。
+  if ("css_visible_exists" in spec) {
+    const hits = matchSelector(view.elems, String(arg(spec.css_visible_exists)));
+    if (hits === null) return null;
+    if (!hits.length) return false;
+    const first = hits[0]!;
+    return typeof first.visible === "boolean" ? first.visible : null;
+  }
   if ("css_exists" in spec) {
     const hits = matchSelector(view.elems, String(arg(spec.css_exists)));
     return hits === null ? null : hits.length > 0;
@@ -164,7 +173,15 @@ export interface StateView {
   url: string;
   elems: Record<string, { tag: string; label?: string; value?: unknown;
     data_test?: string; name?: string; id?: string; input_type?: string;
-    href?: string; near?: string; aria_label?: string; scan?: number; [k: string]: unknown }>;
+    href?: string; near?: string; aria_label?: string; scan?: number;
+    /**
+     * 捕获时的可见性（checkVisibility CSS + 非零盒，与 extraction 同口径）。
+     * 缺字段 = **未捕获**（旧视图）⇒ css_visible_exists 离线不可判定，绝不当作成立。
+     */
+    visible?: boolean;
+    /** 表单控件 disabled（只在 true 时捕获；观测字段，不参与信号语义）。 */
+    disabled?: boolean;
+    [k: string]: unknown }>;
 }
 
 const ATTR_ALIAS: Record<string, string> = {
