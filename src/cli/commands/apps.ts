@@ -146,8 +146,12 @@ ${playbook}
  *   upload：命令闭集的上传原语——ctx.command("upload", "#file", ctx.value.slot("path")) 只对
  *     input[type=file] 成立；单文件 string / 多文件 string[]；路径必须存在（缺失=config_error），
  *     证据只记 basename。非 file 目标=action_unsupported；dry 不检查本机文件。
+ *   clickAt：命令闭集的坐标点击原语——ctx.command("clickAt", "#cv", ctx.value.slot("coords"))
+ *     在元素相对坐标上点击（canvas 这类只能点中心的自绘控件）；值是声明绑定的字符串 "x,y"
+ *     （非负整数/有限小数，元素 padding box 左上角为原点）；只对 click 族成立，坏格式/越界=config_error。
+ *     证据 executed_actions 记 {op:"clickAt", position:{x,y}}；dry 只校声明形状，不解析坐标。
  *
- * 值绑定写法（fill/select/drag/upload 的值只认声明绑定，绝不猜）：对象字面量
+ * 值绑定写法（fill/select/drag/upload/clickAt 的值只认声明绑定，绝不猜）：对象字面量
  *   ctx.command("fill", "#username", { from: "slot", key: "username" })
  *   ——key 必须在 meta.slots 声明；缺值 = 结构化 needs_value。没有 ctx.value.fromSlot 之类的函数面。
  *   extract 有两种写法（二选一，都返回行对象数组）：

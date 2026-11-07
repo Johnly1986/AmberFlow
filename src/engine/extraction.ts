@@ -15,6 +15,7 @@
  */
 
 import { parseHint, type ParsedHint } from "./hint.ts";
+import { parseClickAtValue } from "./click-at.ts";
 import {
   ADMIT_SEL, POOL_SEL, SURFACE_SELECTORS, WINDOW_CAPS,
   admitSelectorWithJsFor, poolSelectorWithJsFor, type SurfacePolicy,
@@ -110,7 +111,7 @@ export function elemFamily(e: Elem): ElemFamily {
  * 可以表达 role=slider / input[type=range] 这类特殊控件。注意：native range 目前
  * 可由引擎的 `fill` 动作驱动；div[role=slider] 仍是 click 族，当前动作集不能设 aria-valuenow。
  */
-export type ActionCapability = "click" | "fill" | "select" | "check" | "slider" | "scroll" | "drag" | "hover" | "upload";
+export type ActionCapability = "click" | "clickAt" | "fill" | "select" | "check" | "slider" | "scroll" | "drag" | "hover" | "upload";
 
 /** 执行动作所需的最小 locator 面；由执行器/PoolView 的调用方提供。 */
 export interface ActionLocatorLike {
@@ -121,6 +122,8 @@ export interface ActionLocatorLike {
   hover?(opts?: Record<string, unknown>): Promise<void>;
   /** U6：文件上传原语（Playwright locator.setInputFiles；可选，缺了按 action_unsupported 报）。 */
   setInputFiles?(files: unknown, opts?: Record<string, unknown>): Promise<void>;
+  /** U7：clickAt 越界校验要的实测盒（Playwright locator.boundingBox；可选，缺了按测不到报）。 */
+  boundingBox?(): Promise<{ x: number; y: number; width: number; height: number } | null>;
   evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
 }
 
@@ -143,6 +146,31 @@ const CLICK_ADAPTER: ActionAdapter = {
   async apply(loc, { timeoutMs = 5000 } = {}) {
     await loc.click({ timeout: timeoutMs });
     return ["clicked", null];
+  },
+};
+
+/**
+ * U7：坐标点击原语（命令闭集的 `clickAt` op）。能力面与 click 族**同一集合**
+ * （canvas 这类元素在池里归 click 族）；坐标是**元素相对**坐标，只来自声明绑定。
+ * 真正执行入口是 executor `_executeElement(clickAt)`（含 bbox 越界校验）；本 adapter
+ * 保留同一能力面声明与一份等价的 apply 供未来接入，不另开动作生成路径。
+ */
+const CLICK_AT_ADAPTER: ActionAdapter = {
+  kind: "clickAt",
+  canApply: (e) => elemFamily(e) === "click",
+  async apply(loc, { value, timeoutMs = 5000 } = {}) {
+    const parsed = parseClickAtValue(value);
+    if (!parsed.ok) return ["config_error", parsed.reason];
+    const box = typeof loc.boundingBox === "function" ? await loc.boundingBox() : null;
+    if (box === null) return ["action_failed", "clickAt: element has no bounding box (detached or zero-size)"];
+    const { x, y } = parsed.position;
+    if (x < 0 || x >= box.width || y < 0 || y >= box.height) {
+      return ["config_error",
+        `clickAt position ${x},${y} is outside the element: measured ${box.width}x${box.height} `
+        + `(need 0 <= x < ${box.width}, 0 <= y < ${box.height})`];
+    }
+    await loc.click({ position: { x, y }, timeout: timeoutMs });
+    return ["clicked", { x, y }];
   },
 };
 
@@ -252,7 +280,7 @@ const UPLOAD_ADAPTER: ActionAdapter = {
 
 export const ACTION_ADAPTERS: readonly ActionAdapter[] = [
   DRAG_ADAPTER, SCROLL_ADAPTER, SLIDER_ADAPTER, CHECK_ADAPTER, SELECT_ADAPTER, FILL_ADAPTER, CLICK_ADAPTER,
-  HOVER_ADAPTER, UPLOAD_ADAPTER,
+  CLICK_AT_ADAPTER, HOVER_ADAPTER, UPLOAD_ADAPTER,
 ];
 
 export function actionCapabilities(e: Elem): ActionCapability[] {

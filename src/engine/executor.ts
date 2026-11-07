@@ -119,6 +119,7 @@ import { parseHint } from "./hint.ts";
 import { LayaNotConfiguredError, type LayaRuntime } from "../model/model.ts";
 import { induceHint } from "../model/hint-memory.ts";
 import { instantiateSpace, resolveCommandValue, type CommandDecl } from "./actions.ts";
+import { parseClickAtValue } from "./click-at.ts";
 import type { DatasetReader } from "./dataset.ts";
 import { optionCandidatesFrom, type OptionCandidate } from "./bindings.ts";
 
@@ -272,7 +273,7 @@ export interface AuditVerdictLike {
 
 /** A1：一次**实际执行**的动作（`RunReport.executed_actions`；StepResult 同名面透出）。 */
 export interface ExecutedAction {
-  /** 动作 op（命令闭集的 op；决策步从 how 归一成 click/fill/select/scroll/drag/hover；upload 只走命令面）。 */
+  /** 动作 op（命令闭集的 op；决策步从 how 归一成 click/fill/select/scroll/drag/hover；upload/clickAt 只走命令面）。 */
   op: string;
   /** 命令声明里的目标；决策步/无命令声明时为 null。 */
   target: string | null;
@@ -285,6 +286,8 @@ export interface ExecutedAction {
   changed: boolean;
   /** U6：upload 实际写进 input 的文件 **basename**（绝不散绝对路径）；其它 op 缺席。 */
   files?: string[];
+  /** U7：clickAt 实际点击的**元素相对**坐标（与声明绑定同值）；其它 op 缺席。 */
+  position?: { x: number; y: number };
 }
 
 /**
@@ -2620,6 +2623,38 @@ export class BrowserMiddleware {
   ): Promise<[string, unknown, StateEffect?]> {
     const tag = el.tag;
     const forceOpt = force ? { force: true } : {};
+    if (op === "clickAt") {
+      // U7：坐标点击原语。坐标值只来自声明绑定（slot/dataset），是**元素相对**坐标
+      // （Playwright locator.click({position}) 语义：相对元素 padding box 左上角）。
+      // 坏格式/越界都是结构化 config_error（reason 点名合法格式/实测尺寸），不是页面问题。
+      if (elemFamily(el) !== "click") {
+        return ["action_unsupported", "clickAt requires a click-family element"];
+      }
+      const parsed = parseClickAtValue(bound?.value);
+      if (!parsed.ok) return ["config_error", parsed.reason];
+      const loc = await this._locatorFor(page, el);
+      if (loc === null) return ["stale_ref", null];
+      const target = firstLoc(loc);
+      const measure = (target as unknown as {
+        boundingBox?: () => Promise<{ x: number; y: number; width: number; height: number } | null>;
+      }).boundingBox;
+      const box = typeof measure === "function" ? await measure.call(target) : null;
+      if (box === null) {
+        return ["action_failed", "clickAt: element has no bounding box (detached or zero-size)"];
+      }
+      const { x, y } = parsed.position;
+      if (x < 0 || x >= box.width || y < 0 || y >= box.height) {
+        return ["config_error",
+          `clickAt position ${x},${y} is outside the element ${el.tag} "${el.label}" — measured `
+          + `width=${box.width}, height=${box.height} (need 0 <= x < width, 0 <= y < height)`];
+      }
+      try {
+        await target.click({ position: { x, y }, timeout: 5000, ...forceOpt });
+      } catch (e) {
+        return ["action_failed", describeActionError(e)];
+      }
+      return ["clicked", { position: { x, y } }];
+    }
     if (op === "hover") {
       // S4：hover 原语——只移动指针，不点击、不导航；`locator.hover()` 同样受 force 影响。
       const loc = await this._locatorFor(page, el);
@@ -2913,7 +2948,7 @@ export class BrowserMiddleware {
       || ((elems[a]!.scan ?? posOf.get(a) ?? 0) - (elems[b]!.scan ?? posOf.get(b) ?? 0)));
     // click：剔除明确不可点击的族；若全被剔除（目标确实不是按钮），保留原顺序交给动作层报
     // action_unsupported，而不是把目标"变成不存在"。
-    if (op === "click") {
+    if (op === "click" || op === "clickAt") {
       const clickable = ordered.filter(fits);
       return clickable.length ? clickable : ordered;
     }
@@ -3872,7 +3907,8 @@ export class BrowserMiddleware {
         let commandBindMissing: string | null = null;
         if (commandMode && cmdPick
             && (cmdPick.cmd.op === "fill" || cmdPick.cmd.op === "select"
-              || cmdPick.cmd.op === "drag" || cmdPick.cmd.op === "upload")) {
+              || cmdPick.cmd.op === "drag" || cmdPick.cmd.op === "upload"
+              || cmdPick.cmd.op === "clickAt")) {
           // P3: an `option` source is an OBSERVATION at bind time — read this page's
           // candidate list now (never assumed, never remembered from another run).
           let boundOptions: OptionCandidate[] | undefined;
@@ -3891,9 +3927,12 @@ export class BrowserMiddleware {
           }
           // U6：upload 的绑定解析出 undefined/null 同样是**缺值**（如槽位键存在但值为空）——
           // 提前落成与 fill/select 同款的 needs_value 停因，而不是让动作层跳到下一个候选。
-          if (cmdPick.cmd.op === "upload" && commandBindMissing === null
+          if ((cmdPick.cmd.op === "upload" || cmdPick.cmd.op === "clickAt")
+              && commandBindMissing === null
               && (commandValue === undefined || commandValue === null)) {
-            commandBindMissing = "the declared upload binding has no value (files come from the plan, never guessed)";
+            commandBindMissing = cmdPick.cmd.op === "upload"
+              ? "the declared upload binding has no value (files come from the plan, never guessed)"
+              : "the declared clickAt binding has no value (coordinates come from the plan, never guessed)";
           }
         }
         let ruleRef: string | null = null;
@@ -4339,7 +4378,9 @@ export class BrowserMiddleware {
                 : `。该输入族不支持命令 ${op}——改用决策语句（省略 act，值经 slots 绑定）或深链直达目标 URL`)
               : op === "upload"
                 ? "。upload 只对 input[type=file] 成立——检查目标 hint 是否指到了文件输入"
-                : "";
+                : op === "clickAt"
+                  ? "。clickAt 只对 click 族元素成立（如 canvas）——检查目标 hint 是否指到了非点击控件"
+                  : "";
             stop("action_unsupported",
               `command ${JSON.stringify(cmdPick.cmd.id)} declares op '${op}', but element ${ref} `
               + `(${el.tag} "${el.label}") only declares [${caps.join(", ")}] on step ${stepNo}`
@@ -4356,6 +4397,7 @@ export class BrowserMiddleware {
           : cmdOpName === "drag" ? "drag"
           : cmdOpName === "check" ? "check"
           : cmdOpName === "hover" ? "hover"
+          : cmdOpName === "clickAt" ? "click at"
           : cmdOpName === "upload" ? "upload"
           : cmdOpName === "fill" ? (this._isTyping(el) ? "type text into" : "fill")
           : cmdOpName === "select" ? "select"
@@ -4487,6 +4529,7 @@ export class BrowserMiddleware {
         const isScrollCommand = cmdOpName === "scroll";
         const isDragCommand = cmdOpName === "drag";
         const isHoverCommand = cmdOpName === "hover";
+        const isClickAtCommand = cmdOpName === "clickAt";
         let actionability: ActionabilityDetail | null = null;
         /** 本条动作（含重试）最后一次 actionability 探针给出的失败原因。 */
         let probeFailure: string | null = null;
@@ -4494,7 +4537,8 @@ export class BrowserMiddleware {
           how = null; arg = null; fillEffect = undefined; actionability = null; probeFailure = null;
           // force：跳过 actionability 探针，直接按 Playwright force 语义动作（仍要求可定位）。
           // hover：探针的快路径本身就是一次真点击，悬停必须走 hover 分支、不能过探针。
-          if (!force && !this._isTyping(el) && !isScrollCommand && !isDragCommand && !isHoverCommand) {
+          if (!force && !this._isTyping(el) && !isScrollCommand && !isDragCommand && !isHoverCommand
+              && !isClickAtCommand) {
             probeFailure = await this.occludedReason(pg, el);
             // S1：actionability 失败现场（bbox/覆盖者/重查是否还在）；非该原因时保持 null。
             actionability = this._takeActionabilityDetail();
@@ -4515,6 +4559,12 @@ export class BrowserMiddleware {
             if (isHoverCommand) {
               // S4：hover 原语——只移动指针（:hover 展开菜单/图层面板），不点击、不导航。
               [how, arg, fillEffect] = await this._executeElement(pg, el, slots, null, "hover", force);
+            } else if (isClickAtCommand) {
+              // U7：坐标点击原语——走 _executeElement 的 clickAt 分支（含坐标解析与 bbox 越界校验），
+              // 不能落入下面的中心点击路径，否则坐标原语就退化成"点元素中心"。
+              [how, arg, fillEffect] = await this._executeElement(pg, el, slots,
+                commandMode ? { value: commandValue, byValue: commandByValue } : null,
+                "clickAt", force);
             } else if (isScrollCommand || isDragCommand) {
               // A3：`scroll` 命令可带方向原语 `to`（ctx.command("scroll", sel, {to:"bottom"})）——
               // 语义是"滚动**容器**到方向"，与旧的"把目标滚入视口"不同；旧调用（无 to）逐字节不变。
@@ -4567,10 +4617,11 @@ export class BrowserMiddleware {
           el = fresh[freshRef]!;
           pre = await this.snapshot(pg);   // 重试动作的 pre 快照 = 此刻页面
         }
-        // U6：upload 的声明值非法/文件不存在是**配置错误**，不是页面问题——结构化停在这里，
-        // 不落成"跳过这个候选继续猜下一个"（那会把配置错误伪装成目标缺失）。
+        // U6/U7：upload 的文件/声明值非法、clickAt 的坐标坏格式/越界都是**配置错误**，
+        // 不是页面问题——结构化停在这里，不落成"跳过这个候选继续猜下一个"
+        // （那会把配置错误伪装成目标缺失）。
         if (how === "config_error") {
-          const detail = String(arg ?? "upload configuration error");
+          const detail = String(arg ?? `${cmdOpName || "command"} configuration error`);
           forbid(ref, el, "config_error");
           noteSkipped({ ref, reason: "config_error",
             ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}),
@@ -4625,6 +4676,16 @@ export class BrowserMiddleware {
           continue;
         }
         const post = await this.snapshot(pg);
+        // U7：clickAt 的实际点击坐标进证据（trace 行 position + executed_actions.position）；
+        // changed/inert 沿用 click 的口径（pre/post 快照 diff），不为坐标原语新造判据。
+        const clickRaw = cmdOpName === "clickAt" && typeof arg === "object" && arg !== null
+          ? (arg as { position?: unknown }).position
+          : undefined;
+        const clickPosition = typeof clickRaw === "object" && clickRaw !== null
+          && typeof (clickRaw as { x?: unknown }).x === "number"
+          && typeof (clickRaw as { y?: unknown }).y === "number"
+          ? { x: (clickRaw as { x: number }).x, y: (clickRaw as { y: number }).y }
+          : null;
         // U6：upload 的 changed 是**动作结果**而不是快照 diff——文件写进 input 不一定改
         // url/text/input value 快照。口径：调用后 input.files.length >= 期望数。
         const upload = how === "uploaded" && typeof arg === "object" && arg !== null
@@ -4674,13 +4735,15 @@ export class BrowserMiddleware {
           if (verbose) console.log(`  step ${stepNo}: ${warning}`);
         };
         trace.push({
-          step: stepNo, desc, how, value: redactValue(el, uploadFiles ?? arg), risky, executed, confirmed, method,
+          step: stepNo, desc, how, value: redactValue(el, uploadFiles ?? (clickPosition !== null ? null : arg)),
+          risky, executed, confirmed, method,
           decision_kind: decisionKind,
           conf: round3(conf), ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
           ref, op: actionOp,
           ...(cmdPick?.cmd.target !== undefined && cmdPick.cmd.target !== "" ? { target: cmdPick.cmd.target } : {}),
           changed,
           ...(uploadFiles !== null ? { files: uploadFiles } : {}),
+          ...(clickPosition !== null ? { position: clickPosition } : {}),
           ...(nominatedRepair ? { nominated_family_repair: true } : {}),
           ...(decisionKind === "model" && layaMargin !== null
             ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}),
@@ -4965,6 +5028,11 @@ export class BrowserMiddleware {
       const files = Array.isArray(t["files"])
         ? (t["files"] as unknown[]).filter((f): f is string => typeof f === "string")
         : null;
+      // U7：clickAt 的元素相对坐标从 trace 行原样汇总（声明值与实测点击同源）。
+      const p = t["position"] as { x?: unknown; y?: unknown } | undefined;
+      const position = p !== undefined && typeof p.x === "number" && typeof p.y === "number"
+        ? { x: p.x, y: p.y }
+        : null;
       return {
         op: String(t["op"] ?? rawHow ?? "click"),
         target: typeof t["target"] === "string" ? t["target"] : null,
@@ -4974,6 +5042,7 @@ export class BrowserMiddleware {
         desc: String(t["desc"] ?? ""),
         changed: t["changed"] === true,
         ...(files !== null ? { files } : {}),
+        ...(position !== null ? { position } : {}),
       };
     });
     // S4 证据汇总：stale 重试每次一条（trace 行本来就一次只落一行），force 只在真正执行时出现。

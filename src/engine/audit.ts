@@ -24,7 +24,7 @@ export interface TraceStep {
   skip_reason?: string;
   /** 动作元素的 ref（位置性编号，对账用）。 */
   ref?: string;
-  /** 归一后的动作 op（click/fill/select/scroll/drag/hover/upload）。 */
+  /** 归一后的动作 op（click/clickAt/fill/select/scroll/drag/hover/upload）。 */
   op?: string;
   /** 命令声明的目标（决策步/无命令声明时不出现）。 */
   target?: string | null;
