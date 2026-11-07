@@ -1,0 +1,121 @@
+{
+  "id": "wiki-multihop-research",
+  "site": "wikipedia",
+  "tier": "deep",
+  "goal": "在英文维基百科（真实生产站点，单页 2000+ 可交互元素）完成一次多跳事实核对：站内搜索 Alan Turing 并核对信息框 → 打开 Turing machine 条目 → 跳到 History 章节 → 打开 Church–Turing thesis 条目并核对标题与目录",
+  "start_url": "https://en.wikipedia.org/wiki/Main_Page",
+  "timeout_ms": 90000,
+  "slots": {
+    "query": "Alan Turing"
+  },
+  "subgoals": [
+    {
+      "desc": "站内搜索 Alan Turing（直达搜索 URL：表单的 Search 按钮在建议下拉里不唯一，命令面用深链；核对标题与信息框）",
+      "start_url": "https://en.wikipedia.org/w/index.php?search=Alan+Turing",
+      "commands": [
+        {
+          "id": "noop",
+          "op": "skip"
+        }
+      ],
+      "signal": {
+        "all_of": [
+          {
+            "css_text_contains": [
+              "#firstHeading",
+              "Alan Turing"
+            ]
+          },
+          {
+            "css_exists": "table.infobox"
+          }
+        ]
+      },
+      "retries": 2
+    },
+    {
+      "desc": "从条目正文打开 Turing machine（原始绝对 href：T9 双底座匹配）",
+      "start_url": "https://en.wikipedia.org/wiki/Alan_Turing",
+      "commands": [
+        {
+          "id": "open-turing-machine",
+          "op": "click",
+          "target": "a[href=https://en.wikipedia.org/wiki/Turing_machine]"
+        }
+      ],
+      "signal": {
+        "css_text_contains": [
+          "#firstHeading",
+          "Turing machine"
+        ]
+      },
+      "retries": 2
+    },
+    {
+      "desc": "通过侧边目录跳到 History 章节（页内锚点导航）",
+      "start_url": "https://en.wikipedia.org/wiki/Turing_machine",
+      "commands": [
+        {
+          "id": "jump-history",
+          "op": "click",
+          "target": "a[href=#History]"
+        }
+      ],
+      "signal": {
+        "url_contains": "#History"
+      },
+      "retries": 2
+    },
+    {
+      "desc": "打开 Church–Turing thesis 条目（含 en dash 的原始绝对 href）",
+      "start_url": "https://en.wikipedia.org/wiki/Turing_machine",
+      "commands": [
+        {
+          "id": "open-church-turing",
+          "op": "click",
+          "target": "a[href=https://en.wikipedia.org/wiki/Church–Turing_thesis]"
+        }
+      ],
+      "signal": {
+        "css_text_contains": [
+          "#firstHeading",
+          "Church"
+        ]
+      },
+      "retries": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "church-turing-article",
+      "desc": "最终停在 Church–Turing thesis 条目且目录存在",
+      "signal": {
+        "all_of": [
+          {
+            "url_contains": "Church"
+          },
+          {
+            "css_text_contains": [
+              "#firstHeading",
+              "Church–Turing"
+            ]
+          },
+          {
+            "css_exists": "#vector-toc"
+          }
+        ]
+      }
+    }
+  ],
+  "oracle": {
+    "kind": "css_count",
+    "selector": "#vector-toc",
+    "min": 1
+  },
+  "tags": [
+    "planning",
+    "multihop",
+    "research",
+    "production"
+  ]
+}

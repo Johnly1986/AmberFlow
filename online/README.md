@@ -89,9 +89,11 @@ npm run test -- --tier smoke --json
 
 ## 典型规划评估任务
 
-`online/PLANNING_EVAL.md` 定义了一个可重复的**规划效率 + 引擎健壮性**评估任务
-（`online/cases/deep/saucedemo-cart-eval.json`）：典型电商选货流程 + 评估臂（声明基线/规划/降级）
-+ 指标口径 + 健壮性扰动矩阵 + pilot 基线。引擎变更后用同一命令复测，比较指标而非只看绿。
+`online/PLANNING_EVAL.md` 定义了两个可重复的**规划效率 + 引擎健壮性**评估任务：
+**复杂站点多跳研究**（`online/cases/deep/wiki-multihop-research.json`，真实维基百科，单页 2000+
+可交互元素，作为主任务）与**简单状态化电商基线**（`online/cases/deep/saucedemo-cart-eval.json`）。
+含评估臂（声明基线/规划/降级）、指标口径、健壮性扰动矩阵（P1–P8）与 pilot 基线。
+引擎变更后用同一命令复测，比较指标而非只看绿。
 
 ## 新增一个 case
 
