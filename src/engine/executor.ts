@@ -51,7 +51,9 @@
  *      DEFAULT_CONFIRM). Safer than blocking on a stdin that has no tty.
  */
 
+import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 
 import { getAuditor, type AuditVerdict, type Auditor, type TraceStep } from "./audit.ts";
 import * as browserEnv from "../browser/browser-env.ts";
@@ -239,6 +241,8 @@ interface AnyLoc {
   /** S4 hover 原语；可选（测试替身没有时按 action_unsupported 诚实报）。 */
   hover?(opts?: Record<string, unknown>): Promise<void>;
   dragTo?(target: unknown, opts?: Record<string, unknown>): Promise<void>;
+  /** U6 上传原语；可选（测试替身没有时按 action_unsupported 诚实报）。 */
+  setInputFiles?(files: unknown, opts?: Record<string, unknown>): Promise<void>;
   count(): Promise<number> | number;
   all(): Promise<unknown[]>;
   evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
@@ -268,16 +272,19 @@ export interface AuditVerdictLike {
 
 /** A1：一次**实际执行**的动作（`RunReport.executed_actions`；StepResult 同名面透出）。 */
 export interface ExecutedAction {
-  /** 动作 op（命令闭集的 op；决策步从 how 归一成 click/fill/select/scroll/drag）。 */
+  /** 动作 op（命令闭集的 op；决策步从 how 归一成 click/fill/select/scroll/drag/hover；upload 只走命令面）。 */
   op: string;
   /** 命令声明里的目标；决策步/无命令声明时为 null。 */
   target: string | null;
   /** 元素 ref（位置性编号，进 trace 便于对账）。 */
   ref: string;
-  how: "clicked" | "filled" | "scrolled" | "dragged" | "hovered";
+  /** U6：upload 的 how 如实记为 setInputFiles（Playwright 原语），其余沿用动作结果词。 */
+  how: "clicked" | "filled" | "scrolled" | "dragged" | "hovered" | "setInputFiles";
   desc: string;
   /** pre/post 快照是否变化（scroll/drag 的 viewport 变化不在快照里，见 inert 口径）。 */
   changed: boolean;
+  /** U6：upload 实际写进 input 的文件 **basename**（绝不散绝对路径）；其它 op 缺席。 */
+  files?: string[];
 }
 
 /**
@@ -1184,7 +1191,7 @@ function targetMatcher(target: string): ((e: Elem) => boolean) | null {
 }
 
 /** 全部动作族：判别拿不到目标族（决策步没有声明 op）时池摘要的兜底范围。 */
-const ALL_FAMILIES: ReadonlySet<string> = new Set(["click", "fill", "select", "check"]);
+const ALL_FAMILIES: ReadonlySet<string> = new Set(["click", "fill", "select", "check", "upload"]);
 
 /** 命令 op 的"同族 + 相邻族"动作面（相邻：click↔check 按压语义、fill↔select 选值语义）。 */
 function cmdFamilies(op: string): ReadonlySet<string> {
@@ -1193,6 +1200,7 @@ function cmdFamilies(op: string): ReadonlySet<string> {
     case "check": return new Set(["check", "click"]);
     case "fill": return new Set(["fill", "select"]);
     case "select": return new Set(["select", "fill"]);
+    case "upload": return new Set(["upload"]);
     case "scroll":
     case "drag": return new Set(["click"]);
     default: return ALL_FAMILIES;
@@ -2657,6 +2665,56 @@ export class BrowserMiddleware {
       }
       return ["scrolled", null];
     }
+    if (op === "upload") {
+      // U6：上传原语。能力面由调用方（actionCapabilities/命令预检）先判一次；这里再守一道，
+      // 保证非 file 目标得到结构化 action_unsupported，而不是 Playwright 的裸错。
+      const isFileInput = tag === "input" && String(el["input_type"] ?? "").toLowerCase() === "file";
+      if (!isFileInput) return ["action_unsupported", "upload requires input[type=file]"];
+      const raw = bound?.value;
+      let files: string[];
+      if (typeof raw === "string") files = [raw];
+      else if (Array.isArray(raw) && raw.every((x) => typeof x === "string")) files = raw.slice() as string[];
+      else if (raw === null || raw === undefined) return ["needs_value", null];
+      else {
+        return ["config_error",
+          `upload value must be a path string or a string[] of paths (got ${Array.isArray(raw) ? "array" : typeof raw})`];
+      }
+      if (files.length === 0 || files.some((f) => f.trim() === "")) {
+        return ["config_error",
+          "upload value is empty — a declared path is required (empty string / empty list is not a file)"];
+      }
+      // 值只来自声明绑定：不做通配/目录遍历/环境变量展开；执行前逐条校验存在性。
+      const missing = files.filter((f) => {
+        try { return !fs.existsSync(f); } catch { return true; }
+      });
+      if (missing.length) {
+        return ["config_error",
+          `upload file(s) not found: ${missing.map((f) => path.basename(f)).join(", ")}`];
+      }
+      const loc = await this._locatorFor(page, el);
+      if (loc === null) return ["stale_ref", null];
+      const target = firstLoc(loc);
+      const setInputFiles = (target as unknown as {
+        setInputFiles?: (f: unknown, o?: unknown) => Promise<void>;
+      }).setInputFiles;
+      if (typeof setInputFiles !== "function") return ["action_unsupported", "locator has no setInputFiles"];
+      try {
+        // Playwright 1.58 的 setInputFiles 只认 noWaitAfter/timeout（没有 force）；步级 force 不作用于上传。
+        await setInputFiles.call(target, files, { timeout: 5000 });
+      } catch (e) {
+        return ["action_failed", describeActionError(e)];
+      }
+      // 证据只记 basename；changed 由调用方按 count >= expected 判（读不到就如实记 null）。
+      let count: number | null = null;
+      try {
+        const n = await target.evaluate((node: unknown) => {
+          const f = (node as { files?: { length?: number } | null }).files;
+          return f && typeof f.length === "number" ? f.length : 0;
+        });
+        count = typeof n === "number" && Number.isFinite(n) ? n : null;
+      } catch { count = null; }
+      return ["uploaded", { files: files.map((f) => path.basename(f)), count, expected: files.length }];
+    }
     if (tag === "input" || tag === "textarea" || tag === "select") {
       if (this._isSubmit(el)) return this._clickOnly(page, el, force);
       // P2: a command-space fill/select arrives with its value ALREADY BOUND BY NAME
@@ -3813,7 +3871,8 @@ export class BrowserMiddleware {
         let commandByValue = false;
         let commandBindMissing: string | null = null;
         if (commandMode && cmdPick
-            && (cmdPick.cmd.op === "fill" || cmdPick.cmd.op === "select" || cmdPick.cmd.op === "drag")) {
+            && (cmdPick.cmd.op === "fill" || cmdPick.cmd.op === "select"
+              || cmdPick.cmd.op === "drag" || cmdPick.cmd.op === "upload")) {
           // P3: an `option` source is an OBSERVATION at bind time — read this page's
           // candidate list now (never assumed, never remembered from another run).
           let boundOptions: OptionCandidate[] | undefined;
@@ -3829,6 +3888,12 @@ export class BrowserMiddleware {
             // 又可能选中"标签恰好等于我们要的机器值"的另一个 option。今天的启发式路径
             // （没有绑定）一字不动，仍走 label→value 两候选回退。
             commandByValue = cmdPick.cmd.value?.from === "option";
+          }
+          // U6：upload 的绑定解析出 undefined/null 同样是**缺值**（如槽位键存在但值为空）——
+          // 提前落成与 fill/select 同款的 needs_value 停因，而不是让动作层跳到下一个候选。
+          if (cmdPick.cmd.op === "upload" && commandBindMissing === null
+              && (commandValue === undefined || commandValue === null)) {
+            commandBindMissing = "the declared upload binding has no value (files come from the plan, never guessed)";
           }
         }
         let ruleRef: string | null = null;
@@ -4268,8 +4333,13 @@ export class BrowserMiddleware {
             // 用户不知道怎么走（12 轮实测：Maps 搜索框 role=combobox 归 select 族，fill 被拒）。
             // click/scroll 被拒的出路不同（A2 停因判别已覆盖），不加这句。
             const remedy = op === "fill"
-              ? `。该输入族不支持命令 ${op}——改用决策语句（省略 act，值经 slots 绑定）或深链直达目标 URL`
-              : "";
+              ? (caps.includes("upload")
+                // U6：file input 归 upload 族——fill 被拒时直接点名正确的 op，别把作者引向决策语句。
+                ? `。该目标是文件输入（input[type=file]）——上传用命令 op 'upload'（值走声明绑定），不是 fill`
+                : `。该输入族不支持命令 ${op}——改用决策语句（省略 act，值经 slots 绑定）或深链直达目标 URL`)
+              : op === "upload"
+                ? "。upload 只对 input[type=file] 成立——检查目标 hint 是否指到了文件输入"
+                : "";
             stop("action_unsupported",
               `command ${JSON.stringify(cmdPick.cmd.id)} declares op '${op}', but element ${ref} `
               + `(${el.tag} "${el.label}") only declares [${caps.join(", ")}] on step ${stepNo}`
@@ -4286,6 +4356,7 @@ export class BrowserMiddleware {
           : cmdOpName === "drag" ? "drag"
           : cmdOpName === "check" ? "check"
           : cmdOpName === "hover" ? "hover"
+          : cmdOpName === "upload" ? "upload"
           : cmdOpName === "fill" ? (this._isTyping(el) ? "type text into" : "fill")
           : cmdOpName === "select" ? "select"
           : this._isTyping(el) ? "type text into" : "click";
@@ -4364,7 +4435,12 @@ export class BrowserMiddleware {
         // （true ⇒ 一定问人；false ⇒ 这一步非破坏性，跳过一次模型前向，省下 W1 要省的那笔钱）。
         // 没写就完全走今天的路径：关键词 + 模型票。
         let risky: boolean, riskP: number;
-        if (effect?.irreversible !== undefined) {
+        // U6：上传的可逆性弱（只写 input.files，不提交表单），不新增 risky 语义——
+        // 也不让目标 label 的关键词把它误判成破坏性动作。其它 op 的既有判定逐字节不变。
+        if (cmdOpName === "upload") {
+          risky = false;
+          riskP = 0;
+        } else if (effect?.irreversible !== undefined) {
           risky = effect.irreversible;
           riskP = effect.irreversible ? 1.0 : 0.0;
         } else {
@@ -4491,13 +4567,31 @@ export class BrowserMiddleware {
           el = fresh[freshRef]!;
           pre = await this.snapshot(pg);   // 重试动作的 pre 快照 = 此刻页面
         }
+        // U6：upload 的声明值非法/文件不存在是**配置错误**，不是页面问题——结构化停在这里，
+        // 不落成"跳过这个候选继续猜下一个"（那会把配置错误伪装成目标缺失）。
+        if (how === "config_error") {
+          const detail = String(arg ?? "upload configuration error");
+          forbid(ref, el, "config_error");
+          noteSkipped({ ref, reason: "config_error",
+            ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}),
+            detail });
+          trace.push({
+            step: stepNo, desc, how: "config_error", executed: false, method, conf: round3(conf),
+            ref, skipped: true, skip_reason: "config_error", url: urlOf(pg),
+            ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
+            ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...refCollision(),
+          });
+          stop("config_error", detail, stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          break;
+        }
         if (fillEffect !== undefined) {
           lastEffect = fillEffect;
           // S5b：摘要只留 kind/applied（值本身可能是凭据/隐私，进模型上文的面只要事实）。
           this._lastEffectSeen = { kind: fillEffect.kind, applied: fillEffect.applied };
         }
         const executed = how === "clicked" || how === "filled" || how === "scrolled"
-          || how === "dragged" || how === "hovered";
+          || how === "dragged" || how === "hovered" || how === "uploaded";
         if (!executed) {
           // 末次失败原因：actionability 探针给出的，或动作本身返回的（stale_ref/needs_value/
           // action_unsupported/action_failed）。
@@ -4531,8 +4625,18 @@ export class BrowserMiddleware {
           continue;
         }
         const post = await this.snapshot(pg);
+        // U6：upload 的 changed 是**动作结果**而不是快照 diff——文件写进 input 不一定改
+        // url/text/input value 快照。口径：调用后 input.files.length >= 期望数。
+        const upload = how === "uploaded" && typeof arg === "object" && arg !== null
+          ? arg as { files?: unknown; count?: unknown; expected?: unknown }
+          : null;
+        const uploadFiles = upload !== null && Array.isArray(upload.files)
+          ? upload.files.filter((f): f is string => typeof f === "string")
+          : null;
         // A1：changed = pre/post 快照是否变化（诚实字段，供审查判"点击成功但页面没动"）。
-        const changed = JSON.stringify(pre) !== JSON.stringify(post);
+        const changed = upload !== null
+          ? Number(upload.count) >= Number(upload.expected)
+          : JSON.stringify(pre) !== JSON.stringify(post);
         // scroll 改变的是 viewport，不是 url/text/input 快照；不能把“快照没变”误判成 inert。
         // S4 hover 同理：它改变的是指针/`:hover` 状态，纯视觉展开未必改快照——不据此判死元素。
         const inert = (how === "scrolled" || how === "dragged" || how === "hovered") ? false : !changed;
@@ -4570,12 +4674,13 @@ export class BrowserMiddleware {
           if (verbose) console.log(`  step ${stepNo}: ${warning}`);
         };
         trace.push({
-          step: stepNo, desc, how, value: redactValue(el, arg), risky, executed, confirmed, method,
+          step: stepNo, desc, how, value: redactValue(el, uploadFiles ?? arg), risky, executed, confirmed, method,
           decision_kind: decisionKind,
           conf: round3(conf), ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
           ref, op: actionOp,
           ...(cmdPick?.cmd.target !== undefined && cmdPick.cmd.target !== "" ? { target: cmdPick.cmd.target } : {}),
           changed,
+          ...(uploadFiles !== null ? { files: uploadFiles } : {}),
           ...(nominatedRepair ? { nominated_family_repair: true } : {}),
           ...(decisionKind === "model" && layaMargin !== null
             ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}),
@@ -4853,16 +4958,24 @@ export class BrowserMiddleware {
     const actionRows = trace.filter((t) =>
       Object.prototype.hasOwnProperty.call(t, "changed") || t["skipped"] === true);
     const executedRows = actionRows.filter((t) => t["executed"] === true
-      && ["clicked", "filled", "scrolled", "dragged", "hovered"].includes(String(t["how"] ?? "")));
+      && ["clicked", "filled", "scrolled", "dragged", "hovered", "uploaded"].includes(String(t["how"] ?? "")));
     const hasActionFace = cmdSpace.length > 0 || actionRows.length > 0;
-    const executedActions: ExecutedAction[] = executedRows.map((t) => ({
-      op: String(t["op"] ?? t["how"] ?? "click"),
-      target: typeof t["target"] === "string" ? t["target"] : null,
-      ref: String(t["ref"] ?? ""),
-      how: String(t["how"] ?? "clicked") as ExecutedAction["how"],
-      desc: String(t["desc"] ?? ""),
-      changed: t["changed"] === true,
-    }));
+    const executedActions: ExecutedAction[] = executedRows.map((t) => {
+      const rawHow = String(t["how"] ?? "clicked");
+      const files = Array.isArray(t["files"])
+        ? (t["files"] as unknown[]).filter((f): f is string => typeof f === "string")
+        : null;
+      return {
+        op: String(t["op"] ?? rawHow ?? "click"),
+        target: typeof t["target"] === "string" ? t["target"] : null,
+        ref: String(t["ref"] ?? ""),
+        // U6：upload 的动作结果词是 uploaded，证据面按 Playwright 原语名记 setInputFiles。
+        how: (rawHow === "uploaded" ? "setInputFiles" : rawHow) as ExecutedAction["how"],
+        desc: String(t["desc"] ?? ""),
+        changed: t["changed"] === true,
+        ...(files !== null ? { files } : {}),
+      };
+    });
     // S4 证据汇总：stale 重试每次一条（trace 行本来就一次只落一行），force 只在真正执行时出现。
     const staleRetries: Array<{ attempt: number; reason: string; ref: string }> = [];
     for (const t of trace) {

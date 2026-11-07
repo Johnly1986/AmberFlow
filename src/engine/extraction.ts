@@ -71,12 +71,13 @@ export type ElemPool = Record<string, Elem>;
  * 判据与执行器自己的分类**同一份**（`_isCheckable` / `_isTyping` / `_isSubmit`）：
  *   - check：input[type=checkbox|radio]
  *   - select：`<select>`
- *   - fill：input/textarea（不含 submit/button/checkbox/radio）
+ *   - fill：input/textarea（不含 submit/button/checkbox/radio/file）
+ *   - upload：input[type=file]（file 不是文本输入；上传是独立原语，见 U6）
  *   - click：其余（a / button / input[type=submit|button] / 其它可点元素）
  * 为什么必须单一出处：提名指令收窄元素池时，窄出的池子必须正好是"这条指令能作用的那一族"；
  * 两处各判一次就会漂移（本仓 hint 语法漂移过两次，同一条教训）。
  */
-export type ElemFamily = "click" | "fill" | "select" | "check";
+export type ElemFamily = "click" | "fill" | "select" | "check" | "upload";
 
 export function elemFamily(e: Elem): ElemFamily {
   const type = String(e.input_type ?? "").toLowerCase();
@@ -95,6 +96,8 @@ export function elemFamily(e: Elem): ElemFamily {
   if (e.content_editable === true) return "fill";       // contenteditable：可填，但不是 input/textarea
   // ---- 原生标签（没有显式角色时按结构与 input type 判）----
   if (e.tag === "input" && (type === "checkbox" || type === "radio")) return "check";
+  // U6：文件输入不是文本输入，单独一族——upload 能力面只对它成立。
+  if (e.tag === "input" && type === "file") return "upload";
   if (e.tag === "select") return "select";
   if (role === "button" || role === "link") return "click";
   if ((e.tag === "input" || e.tag === "textarea") && type !== "submit" && type !== "button") return "fill";
@@ -107,7 +110,7 @@ export function elemFamily(e: Elem): ElemFamily {
  * 可以表达 role=slider / input[type=range] 这类特殊控件。注意：native range 目前
  * 可由引擎的 `fill` 动作驱动；div[role=slider] 仍是 click 族，当前动作集不能设 aria-valuenow。
  */
-export type ActionCapability = "click" | "fill" | "select" | "check" | "slider" | "scroll" | "drag" | "hover";
+export type ActionCapability = "click" | "fill" | "select" | "check" | "slider" | "scroll" | "drag" | "hover" | "upload";
 
 /** 执行动作所需的最小 locator 面；由执行器/PoolView 的调用方提供。 */
 export interface ActionLocatorLike {
@@ -116,6 +119,8 @@ export interface ActionLocatorLike {
   selectOption(value: unknown, opts?: Record<string, unknown>): Promise<void>;
   /** S4：指针悬停原语（可选——测试替身可能没有，缺了按 action_unsupported 报）。 */
   hover?(opts?: Record<string, unknown>): Promise<void>;
+  /** U6：文件上传原语（Playwright locator.setInputFiles；可选，缺了按 action_unsupported 报）。 */
+  setInputFiles?(files: unknown, opts?: Record<string, unknown>): Promise<void>;
   evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
 }
 
@@ -226,9 +231,28 @@ const HOVER_ADAPTER: ActionAdapter = {
   },
 };
 
+/**
+ * U6：上传原语（命令闭集的 `upload` op）。能力面**只**对 `input[type=file]` 成立；
+ * 值只来自声明绑定（slot/dataset；option/list 不适用），由执行器 `_executeElement` 归一成路径列表后
+ * 调 `locator.setInputFiles`。这里保留 adapter 形状供 `actionCapabilities`/PoolView 使用。
+ */
+const UPLOAD_ADAPTER: ActionAdapter = {
+  kind: "upload",
+  canApply: (e) => e.tag === "input" && String(e.input_type ?? "").toLowerCase() === "file",
+  async apply(loc, { value, timeoutMs = 5000 } = {}) {
+    if (value === undefined || value === null || String(value).trim() === "") return ["needs_value", null];
+    const setInputFiles = (loc as unknown as {
+      setInputFiles?: (files: unknown, o?: unknown) => Promise<void>;
+    }).setInputFiles;
+    if (typeof setInputFiles !== "function") return ["action_unsupported", "locator has no setInputFiles"];
+    await setInputFiles.call(loc, String(value), { timeout: timeoutMs });
+    return ["uploaded", value];
+  },
+};
+
 export const ACTION_ADAPTERS: readonly ActionAdapter[] = [
   DRAG_ADAPTER, SCROLL_ADAPTER, SLIDER_ADAPTER, CHECK_ADAPTER, SELECT_ADAPTER, FILL_ADAPTER, CLICK_ADAPTER,
-  HOVER_ADAPTER,
+  HOVER_ADAPTER, UPLOAD_ADAPTER,
 ];
 
 export function actionCapabilities(e: Elem): ActionCapability[] {

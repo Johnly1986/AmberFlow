@@ -42,7 +42,7 @@ export interface DryCtxDeps {
   runtime: { outDir: string; runId: string; today: string };
   trace: AppTrace;
   maxSteps?: number;
-  /** 声明过的槽位键（`validateCommands` 的 fill/select 绑定要对它查）。 */
+  /** 声明过的槽位键（`validateCommands` 的 fill/select/upload 绑定要对它查）。 */
   slotKeys: Set<string>;
   /**
    * S1：effect 读回开关（来自 `meta.policy.effect_readback`）。dry 用它决定 setRange 的

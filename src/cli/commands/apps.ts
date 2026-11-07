@@ -143,8 +143,11 @@ ${playbook}
  *                    重抽池→重解析同一声明目标→重试，最多 2 次（每次进 trace 行事件 stale_retry:[{attempt,reason,ref}]；结果汇总字段 stale_retries）。
  *   hover：命令闭集的指针原语——ctx.command("hover", sel) 只把指针移上去（:hover 菜单/图层面板），
  *     done 仍要写成动作后才成立的证据（例如 judge.exists("#panel-item", {visible:true})）。
+ *   upload：命令闭集的上传原语——ctx.command("upload", "#file", ctx.value.slot("path")) 只对
+ *     input[type=file] 成立；单文件 string / 多文件 string[]；路径必须存在（缺失=config_error），
+ *     证据只记 basename。非 file 目标=action_unsupported；dry 不检查本机文件。
  *
- * 值绑定写法（fill/select/drag 的值只认 slot，绝不猜）：对象字面量
+ * 值绑定写法（fill/select/drag/upload 的值只认声明绑定，绝不猜）：对象字面量
  *   ctx.command("fill", "#username", { from: "slot", key: "username" })
  *   ——key 必须在 meta.slots 声明；缺值 = 结构化 needs_value。没有 ctx.value.fromSlot 之类的函数面。
  *   extract 有两种写法（二选一，都返回行对象数组）：

@@ -14,7 +14,7 @@
 ② 全流程走查：按真实步序用引擎走通一遍，五样产出物全带出来——能力墙清单（哪步走不通、卡在什么停因）/ 产品事实清单（真实文案、控件、URL 规律——done 与 hint 只能从这里来）/ 提槽清单（哪些值随任务变化、进 meta.slots）/ done 素材（每步动作前后页面各长什么样）/ 绕行决策（走不通的步骤就地找等价路径：换入口页、换来源、换控件族；反爬风控不绕，早停）；
    走查工具三选一：探针链（每步一个 1 步微型应用：arrive+read 验证页面可达 / 登录与验证可处理 / 无风控拦截 / 数据在 DOM——探针 30 秒判死刑，好过全流程应用跑 5 轮）或 plan 面草稿（plan new → plan add --signal … → plan check --probe 只读预检 → plan run 真执行）或 walk 模式（amber run <id> --walk 一个临时应用单会话按真实步序 act→read 串完整流程：步声明的 url 与当前页同页就不重导航、SPA 状态跨步保持，跨页显式 url 仍导航——适合复现「只在演进状态出现」的问题）；
 ③ 规划应用：提槽 + done 双向清单——done 四形态：正向锚（url_* / css_*）、否定配 exists（裸 not 在空池/重渲染瞬间空洞成立）、多动作后判（两连击的第一击是中间态，不算完成）、状态前进自检（信号跟着页面真前进，不是恒真）；
-   值只认 slot：fill/select/drag 的值来自任务输入或数据源（缺值如实 needs_value，不猜）；采样与分块：虚拟列表按视口采样（池里只有已渲染的行，滚动/翻页分块取全）、长流程分块成多个短应用、多源双腿（meta.sources 数据腿 + 浏览器腿互核）；
+   值只认 slot：fill/select/drag/upload 的值来自任务输入或数据源（缺值如实 needs_value，不猜）；采样与分块：虚拟列表按视口采样（池里只有已渲染的行，滚动/翻页分块取全）、长流程分块成多个短应用、多源双腿（meta.sources 数据腿 + 浏览器腿互核）；
    候选窗口有界：每步只取 40（宽扫 120）个候选并按当前视口分桶（chrome/viewport 优先，内容优先级见 amber schema ctx），窗口外不等于页面上没有——要穷举列表用 ctx.scrollList/ctx.expand 分块取证（各计 1 flow step，expand 内部点击不占预算；范围控件用 ctx.setRange），引擎不自动滚动；hint 用完整 label（≤200）匹配、aria-label 是 label 别名；要回退 A2 前的主内容优先排序在 meta.policy 写 candidate_priority: "main-first"（缺省 bucketed）；扫描面（B2）含 div[role=menuitem/menuitemradio/menuitemcheckbox/option/tab]（click 族）——弹层菜单项/下拉选项/页签可直接 act；这是全局行为变更：候选构成与排序可能变化、同名候选增多可能引入新歧义（如 tab 与按钮同 label），hint 按 label 匹配不受影响；
 ④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列——stderr 的两条信号 lint（裸 not / any 含 not(exists)）当场改掉再进 ⑤；
 ⑤ 真跑留证：amber run <id> --trace；失败先看 trace 的 stopCode/reason——reason 自带池快照判别（「目标不在页面」还是「候选在而闸门拒/闭集约束」）与决策源降级原因；动作步再看 executed/changed 与 skipped_actions/done_preheld——done=true 但零执行时先看跳过原因，别把「信号本来就成立」当成动作推进；被杀有 run-killed.json 部分证据；
@@ -43,7 +43,7 @@
 | --- | --- | --- |
 | 能力墙清单 | 哪几步走不通、卡在什么停因（目标不可分辨 / 需登录 / 风控 / 数据不在 DOM） | 早停守卫 `ctx.fail("blocked:…")` 与长流程分块切分点 |
 | 产品事实清单 | 真实文案、控件族、URL 规律、数据形状 | `done` 信号与 `act` 锚点（只认这里，不许猜） |
-| 提槽清单 | 哪些值随任务输入 / 数据源变化 | `meta.slots`（fill/select/drag 只认 slot） |
+| 提槽清单 | 哪些值随任务输入 / 数据源变化 | `meta.slots`（fill/select/drag/upload 只认声明绑定） |
 | done 素材 | 每步「动作前不成立、动作后成立」的具体信号 | 各步 `done`（拿不准先 `amber inspect --probe "<selector>"` 实证） |
 | 绕行决策 | 走不通的步骤选哪条等价路径 | 换入口页（`meta.site.pages` + `openPage`）/ 换来源（多源双腿）/ 换控件族；**反爬风控不绕，早停** |
 
@@ -249,9 +249,10 @@ export async function flow(ctx) {
 - `when` 是适用性守卫：动作前判定，不成立时该步不执行（返回 `ok:false`、`stopCode:"precondition_skipped"`），脚本可以据此分支。跳过步**同样消耗一次执行预算**，trace 里状态记为 `skipped`（不是 `failed`）；不要把 `if (!r.ok) ctx.fail(...)` 的失败模板直接套在守卫步上，先判 `r.stopCode`。
 - `act` 缺省就是“决策语句”：只给目标语义和完成证据，让规则/模型选元素；硬编码 `ctx.hint(...)` 只作为稳定锚点或候选收窄，不应成为每条流程的默认。
 - 导航同样优先用 `meta.site.pages` + `ctx.openPage(role)`，而不是在流程里重复硬编码 URL；业务值优先用 `meta.slots` / `ctx.source`，不要写死在 `flow` 里。**运行期才知道的 URL**（如命中链接的相对 href）可在 flow 里 `new URL(href, ctx.url())` 绝对化——URL 全局构造器在脚本进程可用（06 轮实证），这是"角色覆盖不到的动态地址"的正规通道，不是硬编码豁免。
-- 命令闭集的 op 是引擎能力面：`click` / `check` / `fill` / `select` / `scroll` / `drag` / `hover` / `skip`。
+- 命令闭集的 op 是引擎能力面：`click` / `check` / `fill` / `select` / `scroll` / `drag` / `hover` / `skip` / `upload`。
   `scroll` 把目标滚入视口；`drag` 的 value 是落点 selector（可来自槽位），只在 `[draggable=true]` 或 slider 族元素上声明能力；
   `hover`（S4）只把指针移到目标上（`locator.hover()`），用于 `:hover` 展开的菜单/图层面板——不点击、不导航；完成仍只由 done 信号裁决。
+  `upload`（U6）只对 `<input type="file">` 成立：值走既有声明绑定（`ctx.value.slot(...)` / `{from:"slot"}`；`dataset` 亦可，`option` 不适用），string = 单文件、string[] = 多文件；缺值 = `needs_value`，空串/空数组/非字符串 = `config_error`，路径执行前 `fs.existsSync` 校验、缺失 = 结构化 `config_error`（reason 点名 basename）。**不做**环境变量/通配/目录遍历解析，不猜路径。证据只记 basename（`executed_actions` 的 `{op:"upload", how:"setInputFiles", files:[…]}`），`changed` 按调用后 `input.files.length ≥ 期望数` 如实记；非 file 目标 = `action_unsupported`。dry/`apps check` 只校声明形状，不读本机文件；上传不新增 risky 语义。隐藏 file input 在池的可见性过滤下仍不可见（后续项），本原语只要求可见 file input。
   `skip` = 按定义解决的零动作命令：全部命令解决后引擎会**评估一次 done 信号**再判成败——"导航由 arrive 完成、本步只验证到达"的守卫步合法可用（04-A 修复；此前 skip 步的 done 从未被评估，必报 `done_not_held`）。守卫步写法：`act: [ctx.command("skip")]`（完整可跑示例见 `examples/apps/01-basic-step` 步骤②）。
   不在能力面内的 op 会得到 `action_unsupported`，目标歧义是 `target_ambiguous`，目标不存在是 `target_not_found`。
 - **act hint 是六形状语法闭集**（唯一解析器 `src/engine/hint.ts`，语法**描述**的唯一出处 `src/engine/grammar-prompt.ts`，`npm run prompt-hit` 校验示例可命中、报错/提示词/桥描述不漂移）：`#id` ｜ `tag[attr~substr]` ｜ `tag~token` ｜ `tag[attr=value]`（值去引号、全小写折叠）｜ 角色词 `button|link|input|textarea|select` ｜ 裸词（按 label 匹配）。属性名按池字段匹配：test→data-test、type→input_type、aria-label→label、href、name、id、role、near；aria-label 是 label 的别名（提取期已并进 label），class、title 等不在池字段模型里，永不命中（本句由 grammar-prompt 的 ATTR_MATCH_MODEL_TEXT 生成，prompt-hit 逐字校验，勿手改）。**容器/后代 CSS（如 `#outer input`）不是语法错误——会被解析成一个永不命中的形状**；命令空间的 `target_not_found` reason 附闭集提示，而 act hint 落空会**静默回退模型决策**、报 `low_confidence` 不附提示——写 hint 前先 `inspect` 拿验证过的 `hint_candidates`。
@@ -296,7 +297,7 @@ await ctx.step("在 dropdown 里选 Option 2", {
 - **解析顺序**（决策层选中 fill/select 目标后）：① `values` 袋（控件 name/id/data-test/label
   与 key 的精确/互含匹配，两档与 slots 同一套）→ ② `slots` 袋（同两档）→ 都落空 = 结构化
   `needs_value`。**作者显式值 > 隐式 slot 匹配**；两袋都无值时引擎绝不发明值（红线②不变）。
-- 命令步（`act: [ctx.command("fill"/"select", ...)]`）不受影响：其值面仍是 `{from:"slot", key}`
+- 命令步（`act: [ctx.command("fill"/"select"/"upload", ...)]`）不受影响：其值面仍是声明绑定 `{from:"slot", key}`
   具名绑定，`values` 不参与。
 - 点击前的 required 空字段预填（引擎的确定性预填通道）同样读 `values`——与当步 fill/select
   同一个解析顺序，两个通道不会错位。
@@ -369,7 +370,7 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
 | 字段 | 含义 |
 |---|---|
 | `executed?: boolean` | 本步是否有动作**真的执行**（命令步/发生过动作尝试时出现；false 必须配 `skipped_actions`） |
-| `executed_actions?: Array<{op,target,ref,how,desc,changed}>` | 每个已执行动作的身份与结果；`changed` = pre/post 快照是否变化 |
+| `executed_actions?: Array<{op,target,ref,how,desc,changed,files?}>` | 每个已执行动作的身份与结果；`changed` = pre/post 快照是否变化（upload 例外：按调用后 `input.files.length ≥ 期望数`）；upload 的 `how` = `setInputFiles`、`files` = 实际写入文件的 basename |
 | `skipped_actions?: Array<{command_id?,ref?,target?,reason,detail?}>` | 每条"为什么没动作"的结构化原因（`target_ambiguous` / `target_not_found` / `forbidden` / `not-actionable-or-covered` / `stale_ref` / `needs_value` / `action_unsupported` / `attempt_limit` …） |
 | `done_preheld?: boolean` | 命令步在**动作前**对 done 的预评估结果（只命令步出现；不改变执行顺序） |
 | `warnings?: string[]` | 运行期诚实话，如 `suspected_async`（值只在产生时出现） |

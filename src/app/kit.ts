@@ -206,7 +206,7 @@ export function createKit(): Kit {
       if (prop in t) return (t as Record<string, unknown>)[prop];
       throw new Error(
         `kit.value.${String(prop)} 不存在。值绑定的可用面：kit.value.slot(key) / literal(v) / option(key, match) / list(by, order)，`
-        + `或直接写对象字面量 { from: "slot", key: "…" }（fill/select/drag 的值只认 slot，绝不猜）`,
+        + `或直接写对象字面量 { from: "slot", key: "…" }（fill/select/drag/upload 的值只认声明绑定，绝不猜）`,
       );
     },
   });

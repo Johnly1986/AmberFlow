@@ -15,7 +15,7 @@
  *     结构化的 `space-empty` 事实，**绝不退回"全量观察"**（同 hint 纪律：未命中不赌）。
  *
  * 红线落点：
- *   - 红线②（不发明取值）：`fill`/`select` 的参数只有**声明绑定**——
+ *   - 红线②（不发明取值）：`fill`/`select`/`drag`/`upload` 的参数只有**声明绑定**——
  *     `{"from": "slot", "key": "…"}`（计划数据袋）、`{"from": "option", "key": "…", "match": "…"}`
  *     （当次观察到的页面候选 + **声明的**匹配规则）、`{"from": "list", …}`（行集 + 声明的排序规则，
  *     只接数据腿）。缺值/未命中/档内歧义一律 `needs_value`（如实，不猜），模型永不参与选值；
@@ -33,11 +33,11 @@ import type { DatasetReader } from "./dataset.ts";
 import type { ElemPool } from "./extraction.ts";
 
 /** 引擎能力面的动词表（代码）。新增一个面/原语是新 provider，不是在配置里造词。 */
-export const COMMAND_OPS = ["click", "check", "fill", "select", "scroll", "drag", "hover", "skip"] as const;
+export const COMMAND_OPS = ["click", "check", "fill", "select", "scroll", "drag", "hover", "skip", "upload"] as const;
 export type CommandOp = (typeof COMMAND_OPS)[number];
 
 /** 需要参数绑定的 op；`skip` 无 target；其余必须点名一个 target。 */
-const VALUE_OPS: ReadonlySet<string> = new Set(["fill", "select", "drag"]);
+const VALUE_OPS: ReadonlySet<string> = new Set(["fill", "select", "drag", "upload"]);
 const NO_TARGET_OPS: ReadonlySet<string> = new Set(["skip"]);
 
 /**
@@ -141,7 +141,7 @@ export function validateCommands(
         validateBinding(value, `${at}.value`, problems, { slotKeys, op });
       }
     } else if (value !== undefined && !NO_TARGET_OPS.has(op)) {
-      problems.push(`${at}: op '${op}' takes no value (only fill/select bind parameters)`);
+      problems.push(`${at}: op '${op}' takes no value (only fill/select/drag/upload bind parameters)`);
     }
   });
 }
