@@ -324,7 +324,7 @@ export function requireAppAdapter(kind: string): AppAdapter {
  * `value_binding` 是「用声明的值绑定填 `target_hint` 这个控件」的简写：转成命令闭集的一项
  * `fill`。只认 `{from:"slot",key}`（learn 生成的就是这个——演示值在 `meta.slots` 里当默认值，
  * 运行时 `--slot` 覆盖）。`option`/`list`/`dataset` 直接写 `commands`；`literal` 不是命令/
- * 计划面的值来源（F33 遗留），加载期显式拒绝，不在这里新增语义。
+ * 计划面的合法值来源，加载期显式拒绝，不在这里新增语义。
  *
  * 这份转换放在适配器里，保证「加载期看到的计划」与「运行期展开的计划」逐字段相同。
  */
@@ -400,13 +400,13 @@ export const webAdapter: AppAdapter = {
             if (k !== "from" && k !== "key") p.push(`${where}.value_binding.${k}: unknown key (known: from, key)`);
           }
         } else if ("literal" in binding) {
-          // 值来源的红线：命令/计划面的绑定只认 slot/option/list/dataset（literal 不可用，
-          // 见 F33 遗留）。这里显式拒绝而不是让它漏到运行期变成 unsupported value source。
-          p.push(`${where}.value_binding.literal: literal 不是命令/计划面的值来源（F33 遗留）——`
+          // 值来源的红线：命令/计划面的绑定只认 slot/option/list/dataset（literal 不可用）。
+          // 这里显式拒绝而不是让它漏到运行期变成 unsupported value source。
+          p.push(`${where}.value_binding.literal: literal 不是命令/计划面的合法值来源——`
             + `这一简写只支持 {from:"slot",key}；常量值请等绑定面支持后写 commands，不要新增 literal 语义`);
         } else {
           p.push(`${where}.value_binding: must be {from:"slot",key} `
-            + `(option/list/dataset 请直接写 commands；literal 不可用，见 F33)`);
+            + `(option/list/dataset 请直接写 commands；literal 不可用)`);
         }
         if (!step["target_hint"]) {
           p.push(`${where}.value_binding: needs target_hint (exactly one control to fill)`);

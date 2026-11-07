@@ -45,7 +45,7 @@ apps list → app_show（路径 + 当前源码）→ 编辑 app.mjs
 
 - `app_check` 不打开浏览器：它证明的是“脚本能加载、调用序列合法、信号/命令/槽位可校验”，
   不证明页面状态会成立。
-- `inspect` 只读：标题、URL、有界元素、候选 hint；不点击、不输入、不调模型。
+- `inspect` 只读：标题、URL、有界元素、候选 hint；`--json` 另带只读的可访问性树证据块 `ax`（浏览器 AX role/name/focusable/disabled + `not_in_pool` 近似口径，不进池/匹配/模型/运行路径）；不点击、不输入、不调模型。
 - `run --max-steps N` 是**执行预算**，不是“从第 N 步开始”：脚本按自己的控制流执行，
   用满预算时以 `budget_exceeded` 停下，结果带已执行步骤与 trace。
 - `run --trace` 把每个 `ctx.step` / `ctx.arrive` 的 `id`、`desc`、URL、结果带进 JSON。
@@ -217,7 +217,7 @@ amber apps remove <id> [--yes] [--force]
 | `amberflow_apps` | `amber apps list --json` | 列出可运行应用 |
 | `amberflow_app_show` | `amber apps show --json --code` | 路径、元数据、当前源码、版本锚点 |
 | `amberflow_app_check` | `amber apps check --json` | 加载 + dry 调用序列校验 |
-| `amberflow_inspect` | `amber inspect --json` | 只读页面观察与候选 hint |
+| `amberflow_inspect` | `amber inspect --json` | 只读页面观察（含 `ax` 可访问性证据块）与候选 hint |
 | `amberflow_app_create` | `amber apps new … --json` | 生成 flow 骨架 |
 | `amberflow_run` | `app-runner`（与 `amber run` 同一运行器） | 运行；**桥用部署配置**决策三件套；`max_steps` 是执行预算，`timeout_sec` 是本次墙钟上限；决策通道故障时结果带恢复指引 |
 | `amberflow_learn` | `learn --json` | 一次录制 → 归纳信号 → 生成 `app.mjs` flow（回放门通过才落盘） |

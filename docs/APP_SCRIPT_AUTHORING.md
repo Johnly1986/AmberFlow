@@ -206,7 +206,7 @@ export const meta = (kit) => ({
 | `site` | 站点面：页面角色 `pages`、命名行抽取 `listExtract`（见 §5） |
 | `model` / `maxSubgoals` | 决策模型 checkpoint / 子目标上界（高级，缺省即可） |
 | `notes` | 给人看的备注（字符串列表），不参与运行 |
-| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` / `done_preheld` / `effect_readback` / `settle` / `pool_gate` / `surface` / `decision_state` |
+| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` / `candidate_priority` / `done_preheld` / `effect_readback` / `settle` / `pool_gate` / `surface` / `decision_state` |
 | `pace` | 运行节奏：`between_steps_ms` / `between_actions_ms` |
 | `invariants` | 结束态断言：`{ id, desc?, signal }` |
 | `recordedFrom` / `generatedFrom` | 血统：这段脚本从哪次演示/哪份生成物来 |
@@ -238,7 +238,7 @@ export async function flow(ctx) {
 | 元信息 | `ctx.app` / `ctx.slots` / `ctx.runtime` / `ctx.budget` / `ctx.log(msg, data?)` | `slots` 只读；`runtime = {outDir, runId, today, epoch}`（`epoch` = 执行器状态游标只读投影，每次抽池/观察 +1，每个 `step` 重置；dry 恒 0）；`today` = CLI `--today YYYY-MM-DD` 钉住的"今天"，没钉 = 系统日期 |
 | 导航 | `ctx.open(url)` / `ctx.openPage(role)` / `ctx.arrive(url, {done, desc?, id?, timeoutMs?})` | `arrive` = 纯导航 + 等信号，不做元素选择、不花模型；`hosts` 信封在起点与落地都强制 |
 | 标签页 | `ctx.tabs()` / `ctx.switchTab({index?, urlContains?, titleContains?})` | `tabs()` 免费只读列出未关闭页（`{index,url,title,active}`）；`switchTab` 显式切到**恰好一个**匹配页（计 1 个 flow step），0/多匹配 = `config_error`、信封外 = `host_not_allowed`。新标签页**不会自动跟随**，见 §4.9 |
-| 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, values?, when?, timeoutMs?, force?, staleRetry? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}`；`values` 是决策步的显式值袋，见 §4.5 |
+| 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, values?, when?, timeoutMs?, force?, forceAct?, staleRetry? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}`；`values` 是决策步的显式值袋，见 §4.5 |
 | 人工步 | `ctx.manual(desc, { done, instructions?, id? })` | 见 §7；非 TTY 返回 `needs_human`，不假装有人 |
 | 观察 | `ctx.url()` / `ctx.read.{text,value,count,attr}(sel[, attr])` / `ctx.holds(signal)` / `ctx.waitFor(signal, {timeoutMs?, pollMs?})` | 只读；读不到返回 `null` / `0`；`waitFor` 轮询到 bounded deadline，返回 boolean；`url()` 首次导航前是 `"about:blank"`，别拿它当入口页判断 |
 | 站点面 | `ctx.openPage(role)` / `ctx.extract(nameOrSpec)` / `ctx.rows(...)`（v1 关闭） | 具名抽取声明在 `meta.site.listExtract`；inline 抽取用 `{ rows, fields, maxItems? }`（例：`ctx.extract({ rows: "li.item", fields: { title: ".title" } })`，无需 meta 声明）；`rows` 调用给结构化错误 |
@@ -315,7 +315,7 @@ await ctx.step("在 dropdown 里选 Option 2", {
 
 ### 4.6 列表展开、穷举与范围控件（A3 三原语 + S3 `ctx.collect`）
 
-> 原语路径的池外回退（A3）是 grandfathered 面：按身份寻址（`ADMIT_SEL` + 盖章），仅主 frame、无可见性过滤（见 §4.5「U3 就绪判档与扫描面」）。
+> 原语路径的池外回退（A3）是 grandfathered 面：按身份寻址（`ADMIT_SEL` + 盖章），仅主 frame、无可见性过滤（见 §4.7「U3 就绪判档与扫描面」）。
 
 真实列表页与筛选面板需要三种"窗口外操作"，引擎把它们收敛成三个**结构化、可计费、失败不假装成功**的原语（内部 click/滚动不占 flow 预算；每个原语整体计 1 步，受 `--max-steps` 约束）；S3 再加一个**自动穷举**原语 `ctx.collect`（同样整体计 1 步）：
 
@@ -414,7 +414,7 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
   是单数 `stale_retry`，`step` 结果/RunReport 侧的汇总数组字段是复数 `stale_retries`——两个名字并存，
   勿混写）；最终失败仍按既有 stopCode
   （`stale_ref` / `action_failed` / `not-actionable-or-covered` …）诚实报告。
-- `hover` 命令：见 §4.5 命令闭集——它只移动指针（`:hover` 菜单/图层面板），不点击、不导航、不触发预填；
+- `hover` 命令：见 §4 命令闭集——它只移动指针（`:hover` 菜单/图层面板），不点击、不导航、不触发预填；
   快照没变不判 inert（与 scroll/drag 同口径），完成仍只认 done 信号。
 
 **S1 状态层与 pre-held 策略**
@@ -682,7 +682,7 @@ export async function flow(ctx) {
 - 非敏感值：journey 步带 `value_binding: {from:"slot", key}`，`meta.slots[key]` 的默认值就是演示值；
   生成的 `flow` 用 `ctx.command("fill", hint, ctx.value.slot("key"))`（不是硬编码字面值）。
   `value_binding` **只认 slot**：option/list/dataset 请直接写 `commands`，`literal` 显式拒绝
-  （命令/计划面的绑定来源没有 literal，见 F33 遗留；不新增该语义）。
+  （命令/计划面的绑定来源没有 literal；不新增该语义）。
 - 信号里的演示值被参数化成 `{key}`（pack 展开期替换），生成 `flow` 时写成运行期表达式
   `ctx.slots["key"]`——例如 `css_text_equals ["#result","hello:Alice"]` 生成
   `ctx.judge.equals("#result", "hello:" + ctx.slots["name"])`；`type` 的值信号生成

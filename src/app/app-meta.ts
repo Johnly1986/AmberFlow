@@ -338,7 +338,7 @@ export function packToFlowSource(pack: AppPack): string {
       }
       if (!(binding["from"] === "slot" && typeof binding["key"] === "string" && binding["key"].trim() !== "")) {
         throw new Error(`flow codegen: journey[${i}].value_binding must be {from:"slot",key} `
-          + `(literal 不是命令/计划面的值来源，见 F33；option/list/dataset 请手写 commands)`);
+          + `(literal 不是命令/计划面的合法值来源；option/list/dataset 请手写 commands)`);
       }
       const valueExpr = `ctx.value.slot(${JSON.stringify(binding["key"])})`;
       opts.push(`act: [ctx.command("fill", ${JSON.stringify(hint)}, ${valueExpr})]`);
