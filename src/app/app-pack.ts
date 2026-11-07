@@ -185,7 +185,12 @@ export const POLICY_KEYS = [
   "pool_gate", "surface",
   // S5：状态接入决策（gate/context 两项都缺省 off = 行为不变）。
   "decision_state",
+  // 导航纪律（缺省 "free" = 现行为逐字节不变；"entry-only" = 入口外直接 URL 跳转被拦）。
+  "navigation",
 ] as const;
+
+/** 导航纪律档位（`meta.policy.navigation`）。 */
+export const NAVIGATION_MODES = ["entry-only", "free"] as const;
 
 /** S5 状态闸门档位（`meta.policy.decision_state.gate`）。 */
 export const DECISION_STATE_GATES = ["off", "stable_only"] as const;
@@ -204,6 +209,19 @@ export interface PackPolicy {
   risk_ask?: (typeof RISK_ASK_MODES)[number];
   reobserve?: boolean;
   max_effective_repeats?: number;
+  /**
+   * 导航纪律（缺省 `"free"` = 现行为逐字节不变；**只在 flow 脚本面生效**——plan/journey
+   * 面的 subgoal start_url 不受此 policy 约束）：
+   *   - `"entry-only"`：强制"人类式导航"。引擎发起的直接 URL 导航（`ctx.open` /
+   *     `ctx.openPage` / `ctx.arrive` / step 级 `url` 重锚）只有（a）本次运行的第一次
+   *     直接导航（= 入口，仍走 hosts 信封检查）或（b）目标与当前页 **origin+path+query
+   *     全等**（忽略 hash，重试语义）时放行；其余结构化停因 `navigation_forbidden`
+   *     （reason 同时给出当前 URL 与试图跳转的 URL；`diagnostics.navigation` 留
+   *     {policy, attempted, current} 证据）。**页面驱动的导航永不拦截**：点击链接/按钮
+   *     导致的跳转、锚点 hash 变化、新标签页/tab 切换都是浏览器行为，不是引擎直接导航。
+   *   - `"free"`：显式声明"不约束"（与缺省同义；声明了才进 effective_policy 的账）。
+   */
+  navigation?: (typeof NAVIGATION_MODES)[number];
   /**
    * 置信度闸门（缺省 0.25）。**为什么要能声明**：闸门比的是 provider 的 `score`，而
    * `score_kind` 不同的两支不可比（laya 的归一化熵 vs 在线服务的标定概率）——
@@ -1197,6 +1215,10 @@ export function validatePack(pack: AppPack,
       const pg = pol["pool_gate"];
       if (pg !== undefined && pg !== "fact" && pg !== "strict") {
         p.push('policy.pool_gate: must be one of "fact" | "strict"');
+      }
+      const nav = pol["navigation"];
+      if (nav !== undefined && !(NAVIGATION_MODES as readonly string[]).includes(String(nav))) {
+        p.push(`policy.navigation: unknown value ${JSON.stringify(String(nav))} (config_error; must be one of ${NAVIGATION_MODES.map((x) => JSON.stringify(x)).join(" | ")})`);
       }
       const sf = pol["surface"];
       if (sf !== undefined) {

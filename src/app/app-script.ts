@@ -269,6 +269,10 @@ export async function dryRunFlow(loaded: LoadedScriptApp, opts: {
     // S1：dry 与真实面念同一份 effect_readback 策略（开关语义在 check 里也能验证）。
     ...(loaded.pack.policy?.effect_readback === undefined
       ? {} : { effectReadback: loaded.pack.policy.effect_readback }),
+    // 导航纪律：dry 与真实面同一闸门（真实运行必然 navigation_forbidden 的脚本，
+    // check 就该红——hosts 信封的同一条"不做 dry 假绿"理由）。
+    ...(loaded.pack.policy?.navigation === undefined
+      ? {} : { navPolicy: loaded.pack.policy.navigation }),
   });
   // A1 子改动②：dry 的 step 事件只记 done 声明（result.done），不记 act 命令数——lint (ii) 需要
   // "该步声明了几个命令"。ctx-dry 是既有契约面不在本任务改动范围，调用侧把 step 包一层：

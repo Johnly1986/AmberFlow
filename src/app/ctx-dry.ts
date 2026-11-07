@@ -23,7 +23,7 @@ import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, Value
 import type { StateFingerprint, StepStateRecord } from "../engine/executor.ts";
 import {
   declaredRunProblems,
-  normalizeCommandIds, resolveCtxUrl, StopError,
+  normalizeCommandIds, resolveCtxUrl, sameNavTarget, StopError,
   validateCollectRequest, validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
   validateSwitchTabMatch,
   type CollectResult, type Ctx, type CtxBudget, type ExpandOptions, type ExpandResult,
@@ -31,6 +31,7 @@ import {
   type SetRangeOptions, type SetRangeResult, type SwitchTabResult, type TabInfo,
   type SourceObservationView, type StepRequest, type StepResult,
 } from "./ctx.ts";
+import type { TraceCall } from "./trace.ts";
 
 export interface DryCtxDeps {
   pack: {
@@ -51,6 +52,11 @@ export interface DryCtxDeps {
    * applied/accurate 是否出现——与真实面同一份声明，避免 check 盲区。
    */
   effectReadback?: { fill?: boolean; set_range?: boolean };
+  /**
+   * 导航纪律（`meta.policy.navigation`）：dry 与真实面同一判定——否则 `apps check`
+   * 会放过一个真实运行必然 `navigation_forbidden` 的脚本（hosts 信封的同一条理由）。
+   */
+  navPolicy?: "entry-only" | "free";
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -128,6 +134,27 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       throw new StopError("host_not_allowed",
         `${label}: ${JSON.stringify(url)} is outside the declared hosts envelope (${hosts.join(", ")})`);
     }
+  };
+
+  /**
+   * dry 的导航纪律闸门（与真实 ctx 的 navGate 同一判定）：第一次直接导航 = 入口；
+   * 之后目标须与当前 URL origin+path+query 全等（忽略 hash）。dry 没有真实 goto，
+   * 每次过闸的调用即"成功落地"——过闸即计数。
+   */
+  const navOnly = deps.navPolicy === "entry-only";
+  let dryDirectNavs = 0;
+  const dryNavGate = (call: TraceCall, label: string, target: string): void => {
+    if (!navOnly) return;
+    if (dryDirectNavs === 0 || sameNavTarget(target, currentUrl)) {
+      dryDirectNavs += 1;
+      return;
+    }
+    const diag = { policy: "entry-only", attempted: target, current: currentUrl };
+    pushEvent(trace, { call, url: target, ok: false, stop_code: "navigation_forbidden", result: diag });
+    throw new StopError("navigation_forbidden",
+      `${label}: direct navigation to ${JSON.stringify(target)} is forbidden by meta.policy.navigation="entry-only"`
+      + ` (current page ${JSON.stringify(currentUrl)}; only the first direct navigation of a run is the entry)`
+      + ` ——导航必须经由页面元素（链接/按钮）完成；如确需直达请移除该 policy`);
   };
 
   const validateStep = (where: string, req: StepRequest): string[] => {
@@ -214,6 +241,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       assertNavigable(u, "ctx.open");
       const url = resolveCtxUrl(u);
       assertHost(u, "ctx.open");
+      dryNavGate("open", "ctx.open", url);
       currentUrl = url;
       pushEvent(trace, { call: "open", url });
     },
@@ -233,6 +261,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       assertNavigable(url, `ctx.openPage(${JSON.stringify(role)})`);
       assertHost(url, `ctx.openPage(${JSON.stringify(role)})`);
       const resolved = resolveCtxUrl(url);
+      dryNavGate("openPage", `ctx.openPage(${JSON.stringify(role)})`, resolved);
       currentUrl = resolved;
       pushEvent(trace, { call: "openPage", desc: role, url: resolved });
     },
@@ -246,6 +275,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       assertNavigable(u, "ctx.arrive");
       assertHost(u, "ctx.arrive");
       const resolved = resolveCtxUrl(u);
+      dryNavGate("arrive", "ctx.arrive", resolved);
       currentUrl = resolved;
       checkBudget();
       budget.stepsUsed += 1;
@@ -288,7 +318,11 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       const effectiveUrl = req.url ?? (currentUrl === "about:blank" ? undefined : currentUrl);
       if (req.url !== undefined) assertNavigable(req.url, `ctx.step(${JSON.stringify(desc)})`);
       if (effectiveUrl !== undefined) assertHost(effectiveUrl, `ctx.step(${JSON.stringify(desc)})`);
-      if (req.url !== undefined) currentUrl = resolveCtxUrl(req.url);
+      if (req.url !== undefined) {
+        const resolved = resolveCtxUrl(req.url);
+        dryNavGate("step", `ctx.step(${JSON.stringify(desc)})`, resolved);
+        currentUrl = resolved;
+      }
       return recordStep(desc, req.done, true, undefined, req.id,
         req.forceAct === true, req.force === true, req.staleRetry === true);
     },

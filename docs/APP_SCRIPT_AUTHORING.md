@@ -581,6 +581,32 @@ const sw = await ctx.switchTab({ urlContains: "help" });  // 恰好一个匹配�
 - **未做**：动作后自动跟随新标签页（auto-follow）不在本版范围内，留作后续 policy 提案；
   popup 闸门语义不变（外域新页仍按 `popup_not_allowed` 拦截）。
 
+### 4.10 导航纪律：`meta.policy.navigation`（entry-only）
+
+背景（评估实测）：agent 会用"直接构造 URL 跳转/拼参数直达结果页"绕过页面操作——这类行为
+**适得其反**（触发携程 whaleguard 风控、拿到拦截页）。默认经声明纪律约束即可；需要引擎
+**强制**时声明：
+
+```js
+export const meta = (kit) => ({
+  // ...
+  policy: { navigation: "entry-only" },
+});
+```
+
+语义（**只在 flow 脚本面生效**；plan/journey 面的 subgoal `start_url` 不受此 policy 约束）：
+
+- **放行**：本次运行的**第一次**直接导航（= 入口；仍走 hosts 信封检查）；之后的直接导航
+  目标与当前页 **origin+path+query 全等**（忽略 hash）——同 URL 重试语义保留。
+- **拒绝**：其余引擎发起的直接导航（`ctx.open` / `ctx.openPage` / `ctx.arrive` / step 级
+  `url` 重锚）→ 结构化停因 **`navigation_forbidden`**，reason 同时给当前 URL 与试图跳转的
+  URL 与指引；`result.diagnostics.navigation = {policy:"entry-only", attempted, current}`
+  留证据，trace 也落一条 `ok:false` 事件。
+- **永不拦截**：页面驱动的导航——点击链接/按钮导致的跳转、锚点 hash 变化、新标签页/tab
+  切换都是浏览器行为，不是引擎直接导航。`ctx.command`/`read`/`extract`/`done` 不受影响。
+- 缺省/`"free"` = 现行为逐字节不变；未知值在加载期 `config_error`（`apps check` 即红）；
+  dry/`apps check` 与真实面同一闸门。声明了才进 `effective_policy.navigation`。
+
 ## 5. 站点面：`meta.site`
 
 站点相关的数据声明在应用自己的 `meta` 里（与 hint 同一条纪律：不进共享代码）：
@@ -761,6 +787,7 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `pool_gate` | `fact` | U3 池空判档（仅 flow 面）：`fact` = 已就绪且池空记 `pool_empty` 后继续；`strict` = 旧 `page_not_ready` 快败 |
 | `surface` | `{native_activation:"window"}` | U3 准入面类目：`summary` 进池并受类目 cap=6；`native_activation:"off"` = 池构成回到 U3 之前（A/B） |
 | `decision_state` | `{gate:"off",context:"off"}` | S5 决策状态接入（A/B）：`gate:"stable_only"` = ask 前 settle + 同池同题不重复问（`decisions.asks_saved/gate_waits`）；`context:"delta"` = 请求带 ≤200B 结构化 `state_digest`（provider 不支持则跳过，记 `context_skipped`） |
+| `navigation` | `free` | 导航纪律（仅 flow 面）：`"entry-only"` = 入口之外的引擎直接 URL 导航被 `navigation_forbidden` 拒绝（见 §4.10）；缺省/"`free`" = 不约束，产物逐字节不变 |
 
 产物里的 `effective_policy` 只在非缺省时出现，并写明来源（`cli` / `config` / `app` / `provider` / `default`）。
 
@@ -811,6 +838,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |
 | `frame_not_allowed` | frame origin 不在 `meta.hosts` 内；声明 frame host 或避免跨 frame 动作 |
 | `popup_not_allowed` | action 打开的新 tab / popup 不在 `meta.hosts` 内；声明 popup host 或避免打开外域 |
+| `navigation_forbidden` | `meta.policy.navigation:"entry-only"` 下入口之外的引擎直接 URL 导航被闸门拒绝；导航须经由页面元素完成（确需直达就移除该 policy）。见 §4.10 |
 | `manual_signal_not_held` / `manual_declined` / `needs_human` | 人工步：DOM 信号没验过 / 人放弃 / 非 TTY 需要人 |
 | `dangerous` / `declined` / `dry-run-failed` / `tool-unavailable` / `needs_value` | 工具步的显式拒绝类别（`REFUSAL_LABELS` 有一句话解释 + 怎么补救） |
 | `trace_mismatch` | 重放时脚本与轨迹的调用序列/版本/输入不一致——重新跑，不要重放 |

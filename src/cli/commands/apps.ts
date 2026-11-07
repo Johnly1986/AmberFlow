@@ -98,6 +98,8 @@ function flowScriptTemplate(id: string, goal: string, hosts: string[], startUrl:
  * 分工：脚本只写“要达成什么 + 怎么算完成”；点哪里由引擎的规则/决策层决定。
  * 控制流（if/for/while）只用于真实分支/循环；脚本拿不到模型文本或分数，完成只认 done 信号。
  *
+ * 导航纪律：默认经由页面入口/控件跳转；直接构造 URL 易触发站点风控。需要引擎强制时声明 meta.policy.navigation:"entry-only"。
+ *
 ${playbook}
  *
  * done 不许猜（这条最容易踩）：写信号之前先看这一页真的长什么样——
@@ -453,14 +455,22 @@ async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
     }
     return 0;
   }
-  const results: Array<{ app: string; path: string; problems: string[] }> = [];
+  const results: Array<{ app: string; path: string; problems: string[]; policy_navigation?: string }> = [];
   for (const t of targets) {
     try {
       const loaded = await loadScriptApp(t.script);
       const problems = validateApp(loaded.pack, { allowEmptyJourney: true });
       const dry = await dryRunFlow(loaded, { slots });
       problems.push(...dry.problems);
-      results.push({ app: loaded.pack.id, path: loaded.scriptPath, problems });
+      // 导航纪律声明面（仅声明时出现 = 缺省产物逐字节不变）：check 的 JSON 与人读输出
+      // 都要点出"这一跑受 entry-only 约束"，不然闸门拦了也看不出是哪条声明在起作用。
+      const navigation = (loaded.pack as unknown as Record<string, unknown>)["policy"] !== undefined
+        ? ((loaded.pack as unknown as Record<string, unknown>)["policy"] as Record<string, unknown>)["navigation"]
+        : undefined;
+      results.push({
+        app: loaded.pack.id, path: loaded.scriptPath, problems,
+        ...(navigation === undefined ? {} : { policy_navigation: String(navigation) }),
+      });
     } catch (err) {
       results.push({ app: t.id, path: t.script, problems: [err instanceof Error ? err.message : String(err)] });
     }
@@ -485,7 +495,7 @@ async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
   }
   for (const r of results) {
     if (!r.problems.length) {
-      say(ctx, `✓ ${r.app}  ${r.path}`);
+      say(ctx, `✓ ${r.app}  ${r.path}${r.policy_navigation ? `  [policy.navigation=${r.policy_navigation}]` : ""}`);
     } else {
       say(ctx, `✗ ${r.app}  ${r.path}`);
       for (const p of r.problems) say(ctx, `    - ${p}`);

@@ -29,7 +29,7 @@ import { capToolText, stderrTail } from "./tool-artifact.ts";
 import { REPO } from "../flow/flow.ts";
 import { PageStateStore, type PageState } from "./page-state.ts";
 import { createKit, type CommandDecl, type DomSignal, type TargetDecl, type ValueBinding } from "./kit.ts";
-import { pushEvent, type AppTrace } from "./trace.ts";
+import { pushEvent, type AppTrace, type TraceCall } from "./trace.ts";
 import { validateToolSignal, type ToolSignal } from "../browser/tool-signals.ts";
 // B1 节奏统一：最小步间距（start-to-start）的核心计算在三脸共用的 support/pace.ts。
 import { paceRemainder } from "../support/pace.ts";
@@ -37,10 +37,13 @@ import { paceRemainder } from "../support/pace.ts";
 /** 运行期**配置级**停因：脚本可以 `catch`，但默认直接结束运行（不是业务失败）。 */
 export class StopError extends Error {
   readonly code: string;
-  constructor(code: string, message: string) {
+  /** 结构化证据（如 navigation_forbidden 的 {policy, attempted, current}）；缺省不出现。 */
+  readonly diagnostics?: Record<string, unknown>;
+  constructor(code: string, message: string, diagnostics?: Record<string, unknown>) {
     super(message);
     this.name = "StopError";
     this.code = code;
+    this.diagnostics = diagnostics;
   }
 }
 
@@ -558,6 +561,12 @@ export interface CtxDeps {
   poolGate?: "fact" | "strict";
   /** U3：surface 类目策略（缺省 native_activation="window"）。 */
   surfacePolicy?: { native_activation?: "window" | "resolve" | "off" };
+  /**
+   * 导航纪律（`meta.policy.navigation`；缺省/`"free"` = undefined = 现行为逐字节不变）。
+   * `"entry-only"` = 入口之外的直接 URL 导航（open/openPage/arrive/step 级 url）结构化
+   * 停因 `navigation_forbidden`。只在 flow 脚本面生效。
+   */
+  navPolicy?: "entry-only" | "free";
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -593,6 +602,24 @@ function samePage(a: string, b: string): boolean {
     return ua.protocol === ub.protocol && ua.host === ub.host && ua.pathname === ub.pathname;
   } catch {
     return a === b;
+  }
+}
+
+/**
+ * 导航纪律（`meta.policy.navigation:"entry-only"`）的**同 URL 重试**判定：
+ * origin+path+query 全等（hash 忽略——锚点滚动不是换页）。解析不了的原始串按
+ * 去 hash 字面相等兜底。与 walk 的 `samePage`（只比 origin+path）口径不同：
+ * gate 管"重试同址"，query 变了就是新地址（拼参数直达正是要拦的行为）。
+ */
+export function sameNavTarget(a: string, b: string): boolean {
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+    return ua.protocol === ub.protocol && ua.host === ub.host
+      && ua.pathname === ub.pathname && ua.search === ub.search;
+  } catch {
+    const bare = (s: string) => { const i = s.indexOf("#"); return i < 0 ? s : s.slice(0, i); };
+    return bare(a) === bare(b);
   }
 }
 
@@ -910,6 +937,32 @@ export function createCtx(deps: CtxDeps): Ctx {
   const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
   let currentUrl = "about:blank";
   let closed = false;
+  /**
+   * 导航纪律（`meta.policy.navigation:"entry-only"`；缺省/`"free"` 关 = 逐字节不变）。
+   * 计数在**成功落地**时建立入口（`directNavs === 0` ⇒ 下一次直接导航按入口放行）：
+   * 失败的直接导航不烧掉入口槽——同目标的下一次尝试仍按入口放行（重试语义保留）。
+   * 页面驱动的跳转（点击/锚点/新标签页）不经过这里，永不拦截。
+   */
+  const navOnly = deps.navPolicy === "entry-only";
+  let directNavs = 0;
+  const markDirectNavLanded = (): void => { if (navOnly && directNavs === 0) directNavs = 1; };
+  /**
+   * 入口之外的直接导航闸门：目标与当前页 origin+path+query 全等（忽略 hash）= 重试放行；
+   * 其余 `navigation_forbidden`。先落 trace 证据事件，再抛带 `diagnostics` 的 StopError。
+   * hosts 信封检查在其之前执行（既有优先级不变）。
+   */
+  const navGate = (call: TraceCall, label: string, target: string): void => {
+    if (!navOnly) return;
+    if (directNavs === 0 || sameNavTarget(target, currentUrl)) return;
+    const diag = { policy: "entry-only", attempted: target, current: currentUrl };
+    pushEvent(trace, { call, url: target, ok: false, stop_code: "navigation_forbidden", result: diag });
+    throw new StopError("navigation_forbidden",
+      `${label}: direct navigation to ${JSON.stringify(target)} is forbidden by meta.policy.navigation="entry-only"`
+      + ` (current page ${JSON.stringify(currentUrl)}; only the first direct navigation of a run is the entry,`
+      + ` and later direct navigations must equal the current page's origin+path+query)`
+      + ` ——导航必须经由页面元素（链接/按钮）完成；如确需直达请移除该 policy`,
+      diag);
+  };
   /** flow 运行期的单一 PageState 事实源（不是 Playwright page 对象的替代）。 */
   const pageState = new PageStateStore();
   /** `ctx.done()` 已验收：之后不许再有动作（结束态不变量必须在"结束"之后求值）。 */
@@ -995,7 +1048,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     lastUnitStartTs = now + wait;
   };
 
-  /** 所有导航的唯一实现（open / openPage 共用；hosts 信封在打开之前强制）。 */
+  /** 所有导航的唯一实现（open / openPage / arrive 共用；hosts 信封与导航纪律闸门在打开之前强制）。 */
   const navigate = async (
     rawUrl: string, call: "open" | "openPage" | "arrive", label: string,
     timeoutMs?: number, desc?: string, traceIt = true,
@@ -1005,6 +1058,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     if (hosts && hosts.length && disallowedHost(url, hosts)) {
       throw new StopError("host_not_allowed", `${label}: ${JSON.stringify(url)} is outside the declared hosts envelope (${hosts.join(", ")})`);
     }
+    navGate(call, label, url);
     const p = await page();
     try {
       await (p as unknown as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
@@ -1028,6 +1082,7 @@ export function createCtx(deps: CtxDeps): Ctx {
         `${label}: landed on ${JSON.stringify(landed)} outside the declared hosts envelope (${hosts.join(", ")})`);
     }
     currentUrl = landed || url;
+    markDirectNavLanded();
     pageState.update(p, "settled");
     if (traceIt) pushEvent(trace, { call, url: currentUrl, ...(desc === undefined ? {} : { desc }) });
   };
@@ -1052,6 +1107,9 @@ export function createCtx(deps: CtxDeps): Ctx {
     // 显式 url 仍然导航。默认（walk 关）逐字节不变：带 url 就导航。
     const walkKeepPage = deps.walk === true && req.url !== undefined
       && samePage(startUrl, urlOf(session.page) || currentUrl);
+    // 导航纪律闸门（entry-only）：step 级 url 重锚是引擎发起的直接导航（执行器在
+    // skipNavigation 关闭时 `pg.goto(startUrl)`）；walk 的同页重锚没有 goto，不进闸门。
+    if (req.url !== undefined && !walkKeepPage) navGate("step", `ctx.step(${JSON.stringify(desc)})`, startUrl);
     if (req.url !== undefined && !walkKeepPage) currentUrl = startUrl;
     const opts: Record<string, unknown> = {
       goalSignalFn: (p: unknown) => checkSignal(p as never, req.done as never),
@@ -1100,6 +1158,8 @@ export function createCtx(deps: CtxDeps): Ctx {
     // 否则 `ctx.step({url?})` 会把上一页当成当前页（实测：Maps 已打开，下一步却又回到 google.com）。
     const landed = urlOf(session.page) || startUrl;
     currentUrl = landed;
+    // 入口只在**真的发生直接导航**时建立（无 url 的步没有 goto，不烧入口槽）。
+    if (req.url !== undefined && !walkKeepPage) markDirectNavLanded();
     const landedState = pageState.update(session.page as unknown as PageLike, "settled");
     const reason = typeof rep.stop_reason === "string" && rep.stop_reason ? rep.stop_reason : undefined;
     // when 守卫不成立的步（rep.skipped）= “不适用”，不是“完成”：执行器在计划层把它记成

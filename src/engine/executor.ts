@@ -203,6 +203,12 @@ export type StopCode =
   | "host_not_allowed"
   | "frame_not_allowed"
   | "popup_not_allowed"
+  /**
+   * 导航纪律（`meta.policy.navigation:"entry-only"`，flow 脚本面）：入口之外的直接 URL
+   * 导航（ctx.open/openPage/arrive/step 级 url）被闸门拒绝。页面驱动的跳转（点击/锚点/
+   * 新标签页）永不产生此停因。reason 带当前 URL 与试图跳转的 URL。
+   */
+  | "navigation_forbidden"
   | "config_error"
   /**
    * S2 ③ 运行期接线（改版）：提名族是软先验；**有界修复**时本页一个该族候选都没有。

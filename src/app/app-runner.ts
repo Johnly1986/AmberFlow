@@ -622,8 +622,7 @@ export interface AppRunResult {
     attested?: boolean;
     reason?: string;
   }>;
-  /** 本次生效的节奏（B1：任一键非 0 或来源非 default 才出现；默认档逐字节不变）。 */
-  pace?: ResolvedPace;
+  /** 本次生效的节奏（B1：任一键非 0 或来源非 default 才出现；默认档逐字节不变）。 */  pace?: ResolvedPace;
   /**
    * 数据腿**真的写回槽位**的那部分（`source_slots` 的回写结果）。缺字段 = 没有回写
    * （缺省等价纪律）。有了它，报告才说得出"这个值是查出来的，还是人写死的"。
@@ -669,6 +668,12 @@ export interface AppRunResult {
    */
   /** 本次实际用的决策提供者（名字/版本/能力）。换模型 A/B 的对照就靠它。 */
   decision_provider?: ProviderInfo;
+  /**
+   * 运行期结构化证据（缺字段 = 没有需要留证的事件，产物逐字节不变）。
+   * 目前只有 `navigation`：`meta.policy.navigation:"entry-only"` 拦下的直接导航
+   * `{policy:"entry-only", attempted, current}`（stop_code=navigation_forbidden 的配套证据）。
+   */
+  diagnostics?: { navigation?: { policy: string; attempted: string; current: string } };
   /** §3 生效策略（单一出处 `EffectivePolicy`；缺省键不出现 = 与今天一致）。 */
   effective_policy?: EffectivePolicy;
   /** 本次实际用的决策提供者身份（CLI 解析后传进来；未提供则缺字段）。 */
@@ -961,6 +966,11 @@ export interface EffectivePolicy {
    * 应用产物的 `decisions.asks_saved/gate_waits/context_sent/context_skipped` 只在这一档出现（默认全缺席 = 逐字节不变）。
    */
   decision_state: { value: DecisionStatePolicy; source: "app" | "default" };
+  /**
+   * 导航纪律（**仅声明时出现** = 缺省产物逐字节不变；`"free"` 是显式不约束，也进账）。
+   * 执行面只在 flow 脚本面：入口之外的直接 URL 导航 → `navigation_forbidden`。
+   */
+  navigation?: { value: "entry-only" | "free"; source: "app" };
 }
 
 /**
@@ -1065,6 +1075,11 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
       source: declaredPolicy.decision_state !== undefined ? "app" as const : "default" as const,
     },
   };
+  // 导航纪律：**仅声明时出现**（缺省键不写进 policy 对象 = 产物逐字节不变）。
+  // 必须在 anyDeclared 之前挂上——只声明 navigation 的包也要能进 effective_policy 的账。
+  if (declaredPolicy.navigation !== undefined) {
+    policy.navigation = { value: declaredPolicy.navigation, source: "app" as const };
+  }
   const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
   return { policy, anyDeclared };
 }
@@ -2084,6 +2099,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   let ok = false;
   let stopCode: string | undefined;
   let stopReason: string | undefined;
+  /** navigation_forbidden 的结构化证据（StopError.diagnostics 原样透出；缺省 undefined）。 */
+  let stopDiagnostics: Record<string, unknown> | undefined;
   let invariants: AppInvariantResult[] = [];
   // §3：策略在两条分支外声明（重放分支不构造执行器，但产物字段的形状要一致）。
   let policy: EffectivePolicy | null = null;
@@ -2369,6 +2386,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       // U3：池空判档 + surface 类目策略（flow 面；executor 的 MiddlewareOptions 同类选项位）。
       poolGate: policy.pool_gate.value,
       surfacePolicy: policy.surface.value,
+      // 导航纪律（缺省 undefined = 现行为逐字节不变；"entry-only" 才有闸门）。
+      navPolicy: policy.navigation?.value,
       onRunReport: (rep) => {
         const steps = rep.steps as TraceStep[];
         decisionSteps.push(...steps);
@@ -2383,7 +2402,11 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       await loaded.flow(ctx);
       ok = true;
     } catch (e) {
-      if (e instanceof StopError) { stopCode = e.code; stopReason = e.message; }
+      if (e instanceof StopError) {
+        stopCode = e.code; stopReason = e.message;
+        // navigation_forbidden 的 {policy, attempted, current} 原样透出（缺省 undefined）。
+        if (e.diagnostics !== undefined) stopDiagnostics = e.diagnostics;
+      }
       else throw e;
     } finally {
       // B2（P5）：先读会话事实再关会话（关了就读不到 final_url 了）；读失败按缺键处理，
@@ -2664,6 +2687,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     },
     // §3：生效策略只在非缺省时进产物（与 runApp 同一纪律）；模型层级照写（脚本应用同样要能说清）。
     ...(anyDeclared && policy !== null ? { effective_policy: policy } : {}),
+    // 导航纪律拦下的直接导航证据（缺省不出现 = 产物逐字节不变）。
+    ...(stopDiagnostics !== undefined ? { diagnostics: stopDiagnostics } : {}),
     ...(opts.modelStatus === undefined ? {} : { model_status: opts.modelStatus }),
     decisions,
     // A3：与 runApp（声明式路径）同账——降级发生过就必须出现在产物里。

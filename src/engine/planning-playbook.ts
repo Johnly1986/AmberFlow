@@ -80,6 +80,7 @@ export const STOP_NEXT: Readonly<Record<string, string>> = {
   config_error: "停因 reason 自带具体声明错误；改 meta/声明后先 amber apps check <id>（离线）再重跑",
   unreachable: "站点此刻不可达（DNS/连接/导航超时）：先 curl/fetch 验证站点可达——可达则放宽 --timeout（秒，覆盖导航 goto 缺省 30s）或稍后重试；不是声明错误，改 meta 无效",
   host_not_allowed: "目标主机加进 meta.hosts，或改用 meta.site.pages + ctx.openPage；amber apps check 离线可验",
+  navigation_forbidden: "meta.policy.navigation:\"entry-only\" 拦下入口外的直接 URL 跳转：改经页面元素导航（ctx.step 点链接/按钮），确需直达就移除该 policy；amber apps check 离线可验",
   invariant_failed: "看 steps[] 最后一步是否真的到达结束页；amber inspect --probe 实证不变量选择器后再改",
   missing_done: "flow 末尾补 ctx.done()；声明了结束态不变量就必须验收，不能跳过",
   needs_value: "slot 缺值：值必须来自任务输入或数据源（--slot k=v 传入）；没有真实值就如实返回 needs_value 给上游，不要造默认值",

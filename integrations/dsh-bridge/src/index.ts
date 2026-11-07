@@ -402,6 +402,7 @@ export function apply(ctx: Context, config: Config): void {
       + 'evidence. It runs with THIS deployment\'s decision config (the bridge injects '
       + '`AMBERFLOW_DECISION_*`), which may differ from the CLI\'s user-scope config: prefer this '
       + 'tool over a local `amber run` when the CLI decision plane is stale or returns 401/403. '
+      + '导航应经由页面入口/控件；直接构造 URL 跳转易触发站点风控，需要引擎强制时在 meta.policy 声明 navigation:"entry-only"（违规跳转会得到 navigation_forbidden）。 '
       + 'Escalation rule: '
       + STOP_ESCALATION_TEXT,
     parameters: {
@@ -945,6 +946,7 @@ export function apply(ctx: Context, config: Config): void {
       + 'with `meta` + an empty `flow(ctx)` to fill in. Returns the new app, its writable path and its '
       + 'current source. Only the skeleton is generated — the Agent edits the script itself; there is '
       + 'no step/format/kind parameter and no JSON app format. '
+      + '导航应经由页面入口/控件；直接构造 URL 跳转易触发站点风控，需要引擎强制时在 meta.policy 声明 navigation:"entry-only"（违规跳转会得到 navigation_forbidden）。 '
       + PLAN_PLAYBOOK_SHORT,
     parameters: {
       id: { type: 'string', required: true, description: 'Lowercase id; also the directory name.' },

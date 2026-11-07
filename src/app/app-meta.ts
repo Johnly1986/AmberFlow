@@ -288,6 +288,7 @@ export function packToFlowSource(pack: AppPack): string {
   lines.push(` * ${String(pack.id)} — flow 应用（由录制/生成器产出）。`);
   lines.push(" *");
   lines.push(" * 流程在 flow(ctx) 里；引擎负责一步之内的元素选择、闸门、动作与完成信号。");
+  lines.push(" * 导航纪律：默认经由页面入口/控件跳转；直接构造 URL 易触发站点风控。需要引擎强制时声明 meta.policy.navigation:\"entry-only\"。");
   lines.push(" * 回放门通过后才会写盘：改这里等于改流程版本，重新跑一次 check/run。");
   lines.push(" */");
   lines.push(`export const meta = () => (${JSON.stringify(meta, null, 2)});`);
