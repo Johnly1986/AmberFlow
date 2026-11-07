@@ -1,0 +1,19 @@
+{
+  "id": "ctrip-web-travel-plan",
+  "site": "ctrip-probe",
+  "tier": "probe",
+  "goal": "携程官网出行规划可用性观测：从 www.ctrip.com 进入机票，搜索最近三天上海→昆明最低价机票；再进入酒店搜索呈贡区最低价 4 星酒店，记录行程与开销（本 case 只记录环境/可达性事实，不绕过风控）",
+  "start_url": "https://www.ctrip.com/",
+  "expect": [
+    "blocked",
+    "unreachable",
+    "login_required",
+    "captured"
+  ],
+  "tags": [
+    "probe",
+    "ota",
+    "web",
+    "travel-planning"
+  ]
+}

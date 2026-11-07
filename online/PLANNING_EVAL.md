@@ -3,13 +3,13 @@
 **可重复、可比较**的线上任务，量两项能力：**任务规划效率**（达成目标要花多少步/决策/重试/时间）
 与**引擎健壮性**（动态/巨大 DOM、跨页导航、风控降级、失败是否结构化）。
 
-## 0. 典型案例 T（2026-11-07 更新，主任务）：携程移动端出行规划
+## 0. 典型案例 T（2026-11-07 更新，主任务）：携程官网出行规划
 
 > 这是当前**默认的典型线上规划任务**，按"给 agent 的任务简报"执行与评估（不是 `npm run test` 的
-> pass/fail case——OTA 搜索接口动态、价格随时变化且有风控，`online/cases/probe/ctrip-h5-travel-plan.json`
+> pass/fail case——OTA 搜索接口动态、价格随时变化且有风控，`online/cases/probe/ctrip-web-travel-plan.json`
 > 只记录环境可用性事实）。评估实体：agent（子代理/人工）按本简报完成并交付结构化结果 + 证据。
 
-**入口**：<https://m.ctrip.com/html5/>（移动端 H5，站点声明 `online/sites/ctrip-m.json`）
+**入口**：<https://www.ctrip.com/>（携程官网；站点声明 `online/sites/ctrip-probe.json`）
 
 ### 阶段一 · 机票
 
@@ -55,10 +55,13 @@
 
 ### 基线（pilot 2026-11-07）
 
-- 入口链路：桥 run `eval-ctrip-travel` **PASSED**（2 步：首页 `#c_flight` 点击 → 机票页；rule:match 1、model 0、
-  invariant 成立）；机票页 body 观测到价格日历（默认航线）文本。
-- 机票/酒店搜索控件为**自绘组件**（页内无标准 input；池里是聚合 div），搜索可能触发风控 → 任务按 agent 简报评估，
-  不纳入 pass/fail 套件；可用性观测走 probe case（skipped ≠ pass）。
+- **当前入口 www.ctrip.com 可达**（浏览器内 362 个可交互元素；顶部「酒店/机票」为带菜单的 button 导航，
+  另有 `flights.ctrip.com` 促销链接），入口深链与导航均可用；probe `ctrip-web-travel-plan` 实测 observed=passed
+  （probe 口径记 skipped，skipped ≠ pass，只表示环境可达）。
+- 历史 pilot（入口 m.ctrip.com/html5，2026-11-07 上旬）：桥 run `eval-ctrip-travel` **PASSED**（首页 `#c_flight`
+  → 机票页，rule:match 1、model 0）；机票结果页被 `whaleguard` 风控（HTTP 432）、酒店价格被登录墙拦截，
+  搜索/筛选为自绘控件不在池——这些站点侧限制与入口无关，换 www 入口后仍需按简报评估。
+- 任务按 agent 简报评估，不纳入 pass/fail 套件；可用性观测走 probe case（skipped ≠ pass）。
 
 ---
 
