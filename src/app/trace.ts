@@ -21,6 +21,11 @@ export type TraceCall =
   // S3：列表穷举原语（整体计 1 flow step）。
   | "collect"
   /**
+   * A5：标签页原语。`ctx.tabs()`（action="list"，免费只读）与 `ctx.switchTab()`
+   * （action="switch"，计 1 flow step）共用同一个 call——按 `action` 区分/对账。
+   */
+  | "tab"
+  /**
    * S3 dry 面：参数校验失败留痕（先落事件再抛错）。脚本 try/catch 吞掉 config_error 时，
    * `apps check` 仍能从 trace 判 FAIL 并指出调用点。
    */
@@ -44,6 +49,17 @@ export interface TraceEvent {
    * （`trace_mismatch`），保证"录了什么就回放什么"，不重新决策。
    */
   args?: unknown;
+  /**
+   * A5：标签页事件的动作。`list` = `ctx.tabs()`（免费只读），`switch` = `ctx.switchTab()`
+   * （计 1 flow step）。
+   */
+  action?: "list" | "switch";
+  /** A5：`action="list"` 时的标签页快照（`[{index,url,title,active}]`）。 */
+  pages?: unknown;
+  /** A5：`action="switch"` 时的切页前当前页 URL。 */
+  from?: unknown;
+  /** A5：`action="switch"` 时命中的目标页 `{index,url,title}`。 */
+  to?: unknown;
 }
 
 export interface AppTrace {

@@ -36,7 +36,7 @@ const CTX_FACTS: ReadonlyArray<{ id: string; statement: string; truth: string }>
   { id: "F07", statement: "ctx.step 失败是【返回】{ok:false, stopCode, reason}，不抛异常不中断 flow；只有 ctx.fail(code, reason) 抛 StopError 终止运行", truth: "ctx.ts / app-runner.ts" },
   { id: "F08", statement: "when 守卫不成立 = 该步不执行，返回 ok:false + stopCode:precondition_skipped，trace 记 skipped——不是失败，但同样消耗 1 步执行预算", truth: "executor.ts / APP_SCRIPT_AUTHORING.md §4" },
   { id: "F09", statement: "预算三层：① flow 调用预算（缺省 100，--max-steps 覆盖；step/arrive/run/人工步各计 1）② 子目标动作预算（缺省 8，当前不可配）③ 信号等待窗口（done_timeout_ms 缺省 2000，步级 timeoutMs 覆盖）", truth: "executor.ts maxSteps=8 + ctx.ts budget" },
-  { id: "F10", statement: "只读调用免费不占预算：read.text/value/count/attr、extract、holds、waitFor、log、url", truth: "app-runner.ts 计费口径" },
+  { id: "F10", statement: "只读调用免费不占预算：read.text/value/count/attr、extract、holds、waitFor、log、url、tabs", truth: "app-runner.ts 计费口径" },
   { id: "F11", statement: "dry 模拟面：step/arrive/run/manual 恒 ok:true 且 when 不评估；read.* 返 null/0；url() 是最近声明值；预算照计——数据驱动的分支/断言必须用 ctx.runtime.runId===(dry) 守卫", truth: "ctx-dry.ts createDryCtx（06-B 实证全表）" },
   { id: "F12", statement: "导航：open/openPage 只做 goto(domcontentloaded) 不等信号；arrive(url,{done}) = 导航 + 轮询等落地证据——「导航后还要等页面状态」一律用 arrive", truth: "ctx.ts / APP_SCRIPT_AUTHORING.md §4（04-C 实测）" },
   { id: "F13", statement: "列表/范围三原语：ctx.scrollList/ctx.expand/ctx.setRange 各计 1 个 flow step；expand 的内部点击不占预算（maxClicks 缺省 20、timeoutMs 缺省 60000 兜底，行数连续 stableRounds 轮不增长即稳定）", truth: "ctx.ts 三原语实现 + createDryCtx 桩（A3）" },
@@ -59,6 +59,7 @@ const CTX_FACTS: ReadonlyArray<{ id: string; statement: string; truth: string }>
   { id: "F30", statement: "就绪四档（U3，唯一出处 §5.3 判档表）：池空不再等于 page_not_ready。判据接回既有观测——每次抽池前的 settle 结论（settled/timedOut，以前只累计 waitedMs）+ readyState + pool_size + waited_ms/budget_ms（budget_ms 是池空闸门的真实上限：每轮 settle 的 timeout 都被钳到剩余预算，总等待 ≤ pool_ready_timeout_ms + 一次抽池）+ 一次只读 sniff（admitted/focusable/aria/frames/body_text，只在池空/失败路径跑）。四档：navigating / not_ready（预算耗尽且 settle 未静默或 readyState≠complete ⇒ 保留 run 级 page_not_ready，reason 点名 settled/settle_timed_out/readyState/budget_ms/waited_ms）/ ready（池非空）/ ready_empty（预算耗尽但 settle 静默且 readyState=complete 且池 0 ⇒ 步级 flags:pool_empty + 一条去重 warning 后**继续**，不再整页判死）。diagnostics.readiness={verdict,evidence} 在 verdict≠ready 时出现（ready_empty 也出现）；policy.pool_gate=\"strict\" 时 ready_empty 改判 not_ready（U3 之前的逐字节行为）。闸门只在 flow 面（ctx.step 开 poolReady）；journey/plan 面 poolReady=false，本键不适用", truth: "executor.ts _poolReadiness/_settleBeforeExtract(deadline)/池空判档 + extraction.ts poolSniff + app-pack.ts PackPolicy.pool_gate" },
   { id: "F31", statement: "文件上传（U6）：命令闭集第 9 个 op `upload`——ctx.command(\"upload\", \"#file\", ctx.value.slot(\"path\")) 把**声明绑定**的路径交给 Playwright locator.setInputFiles（string = 单文件，string[] = 多文件）；值只来自既有绑定来源（slot/dataset；option 不适用），缺失 = 结构化 needs_value，空串/空数组/非字符串 = 结构化 config_error。执行前逐条 fs.existsSync 校验，缺失 = 结构化 config_error（reason 点名 basename，不抛裸栈）；不做环境变量/通配/目录遍历解析。证据 executed_actions 记 {op:\"upload\", how:\"setInputFiles\", files:[basename…]}——只记 basename，绝对路径不进产物；changed 依据调用后 input.files.length >= 期望数如实记（读不到记 false，不假装）。能力面只对 input[type=file] 成立（池的可见性过滤不变，隐藏 file input 支持为后续项），非 file 目标 = action_unsupported。dry/apps check 只校声明形状（值绑定与 fill/select 同一校验器），不做文件存在性检查。上传不新增 risky 语义（不触发危险动作确认面）", truth: "actions.ts COMMAND_OPS/VALUE_OPS + extraction.ts UPLOAD_ADAPTER/actionCapabilities/elemFamily + executor.ts _executeElement(upload)/executed_actions + ctx.ts/ctx-dry.ts validateCommands" },
   { id: "F32", statement: "坐标点击（U7）：命令闭集第 10 个 op `clickAt`——ctx.command(\"clickAt\", \"#cv\", ctx.value.slot(\"coords\")) 在目标元素的**元素相对**坐标上点击（Playwright locator.click({position:{x,y}}) 语义，相对元素 padding box 左上角，单位 CSS 像素），用于 canvas/自绘画布这类“进了池但只能点中心”的元素。坐标值只来自声明绑定（slot/dataset），规范形是字符串 \"x,y\"（非负整数或有限小数，允许空白如 \"50, 25\"）；严格解析，坏格式（非字符串、center、百分比、负偏移、指数、x;y、多余段）一律结构化 config_error 并点名合法格式，不做隐式猜测。能力面只对 click 族元素成立（ActionCapability \"clickAt\" 由 click 族 adapter 声明），非 click 族目标 = action_unsupported。执行前用元素 boundingBox 校验 0 <= x < width、0 <= y < height，越界 = 结构化 config_error（reason 给出实测 width/height 与声明值）；bbox 测不到（detached/零尺寸）= action_failed。force 语义与 click 一致（click 的 {force:true}），风险面沿用 click 关键词/模型风险票，不新增确认语义。证据 executed_actions 记 {op:\"clickAt\", position:{x,y}, changed}（how=\"clicked\"），trace 行同步带 position；changed/inert 沿用 click 的快照 diff 口径。dry/apps check 只校声明形状（值绑定存在且来源合法），不解析坐标、不开浏览器", truth: "actions.ts COMMAND_OPS/VALUE_OPS + click-at.ts parseClickAtValue + extraction.ts ActionCapability \"clickAt\"/CLICK_AT_ADAPTER + executor.ts _executeElement(clickAt)/executed_actions.position + ctx.ts/ctx-dry.ts validateCommands" },
+  { id: "F33", statement: "标签页切换（A5）：ctx.tabs() 免费只读——枚举当前 browser context 里未关闭的页面（Playwright page.context().pages()；closed 页跳过），返回 [{index,url,title,active}]，index=0 基于枚举序，active=引擎当前页；不切页、不计 flow step，trace 记 {call:\"tab\", action:\"list\", pages:[…]}。ctx.switchTab(match) 显式切页：match 至少给 index（0-based 整数）| urlContains | titleContains（后两者大小写不敏感子串），多条件 AND；必须恰好 1 个匹配——0 个或 >1 个都是结构化 config_error，reason 列出当前 tabs（index/url/title/active），绝不回退\"随便选一个\"。目标页 URL 在 meta.hosts 信封外 = 结构化 host_not_allowed（与 open/openPage 同一判定）且不切换；tabs() 的只读列表可以包含信封外页面，但切过去会被拒绝。成功后 session.page=目标页、currentUrl 更新、best-effort bringToFront（失败不致命）、有界等 waitForLoadState(\"domcontentloaded\")（≤5s，超时/失败忽略），计 1 个 flow step 且走 pace；trace 记 {call:\"tab\", action:\"switch\", from:{url}, to:{index,url,title}, pages:n}。新标签页不会自动跟随：window.open/target=_blank 动作后引擎仍停在原 page，必须显式 tabs/switchTab（自动跟随未实现，列为后续 policy 提案）。dry：不访问浏览器，tabs 返回合成 [{index:0,url:\"(dry)\",title:\"(dry)\",active:true}]；switchTab 按 dry 纪律只验声明形状（未知键/空 match/非法值 = 结构化 config_error），对合法 match 恒返回合成成功 {ok:true,index:0,url:\"(dry)\",title:\"(dry)\"}（match 是否命中真实标签是观察事实，dry 不据此判红——与 step 恒 ok、done 不评估同一纪律），因此不需要 dry 守卫", truth: "ctx.ts tabs/switchTab + createDryCtx 桩 + ctx-replay.ts tab 事件回放 + trace.ts TraceCall tab + app-runner.ts isFlowStepEvent" },
 ];
 
 /** 信号算子语义注记（表从 SIGNAL_OPS 真源取；语义逐条标出处）。 */
@@ -110,15 +111,15 @@ const COMMAND_FACTS = {
 const BUDGET = {
   /** 一图流（S0 可发现性）：四行回答“什么免费、什么计 1、什么不单计”。 */
   summary: [
-    "只读免费（不占预算）：read.text/value/count/attr、extract、holds、waitFor、log、url",
-    "各计 1 个 flow step：ctx.step / ctx.arrive / ctx.run / 批准执行的人工步 / ctx.scrollList / ctx.expand / ctx.setRange / ctx.collect",
+    "只读免费（不占预算）：read.text/value/count/attr、extract、holds、waitFor、log、url、tabs",
+    "各计 1 个 flow step：ctx.step / ctx.arrive / ctx.run / 批准执行的人工步 / ctx.scrollList / ctx.expand / ctx.setRange / ctx.collect / ctx.switchTab",
     "step 内的 command 闭集不单独计 flow 步：一个 step 的动作循环上限 8（子目标动作预算）",
     "flow 预算用满 → budget_exceeded（status=partial、verified=false、exit 0）",
   ],
-  flow_call: { default: 100, cli_flag: "--max-steps", counts: ["ctx.step", "ctx.arrive", "ctx.run", "批准执行的人工步", "ctx.scrollList", "ctx.expand", "ctx.setRange", "ctx.collect"], note: "when 跳过的步同样计 1；用满 → budget_exceeded（status=partial、verified=false）" },
+  flow_call: { default: 100, cli_flag: "--max-steps", counts: ["ctx.step", "ctx.arrive", "ctx.run", "批准执行的人工步", "ctx.scrollList", "ctx.expand", "ctx.setRange", "ctx.collect", "ctx.switchTab"], note: "when 跳过的步同样计 1；用满 → budget_exceeded（status=partial、verified=false）" },
   subgoal_actions: { default: 8, configurable: false, note: "执行器动作循环上限；reason 里的 \"on step N\" 是本层动作号，与流步号两口径" },
   signal_wait: { done_timeout_ms_default: 2000, step_level_override: "timeoutMs", note: "约束动作后等 done 的窗口，不约束整步挂钟（模型咨询/导航渲染不在其内）" },
-  free_calls: ["read.text/value/count/attr", "extract", "holds", "waitFor", "log", "url"],
+  free_calls: ["read.text/value/count/attr", "extract", "holds", "waitFor", "log", "url", "tabs"],
   list_range_primitives: {
     each_counts_as: 1,
     calls: ["ctx.scrollList", "ctx.expand", "ctx.setRange", "ctx.collect"],
@@ -132,6 +133,7 @@ const NAVIGATION = {
   arrive: "导航 + 轮询等 done 信号；「导航后要等页面状态」一律用它",
   dynamic_urls: "运行期才知道的 URL 可 new URL(href, ctx.url()) 绝对化（正规通道，不是硬编码豁免）",
   hosts_envelope: "导航信封在起点与落地都强制；子 frame / popup 的 origin 不在 meta.hosts = frame_not_allowed / popup_not_allowed",
+  tabs_switch: "新标签页不会自动跟随：window.open/target=_blank 后先 ctx.tabs()（免费只读；列表可含信封外页面）再 ctx.switchTab({index|urlContains|titleContains})（计 1 步；恰好一个匹配，0/多 = config_error 并列出当前 tabs；信封外 = host_not_allowed 且不切换）",
 };
 
 /** flow 控制语义（作者最容易赌错的三条）。 */
@@ -172,6 +174,7 @@ const DRY = {
   budget: "步预算照常计数",
   list_range_primitives: "三原语确定性桩：expand {ok:true,clicks:0,before:0,after:0,grew:false,stable:true,coverage:{rows:0}}；scrollList {ok:true}；setRange {ok:true,applied:true,accurate:true}（effect_readback.set_range=false 时后两项不出现）——但参数校验真做（非法 count/to/value 在 dry 期红）",
   collect: "collect 桩：{rows:[], coverage:{rounds:0,rowsSeen:0,addedLastRound:0}, stopReason:\"dry\"}；参数校验真做（row/fields/until/maxRounds 非法在 dry 期红）",
+  tabs_switch: "标签页桩：tabs() 返回合成 [{index:0,url:\"(dry)\",title:\"(dry)\",active:true}]；switchTab 只验声明形状（未知键/空 match/非法值 = config_error），对合法 match 恒返回合成成功（match 是观察事实，dry 不验——与 step 恒 ok 同一纪律），不需要 dry 守卫；dry 不访问浏览器，switchTab 仍计 1 步预算",
   validation_errors: "S3 吞错留痕：ctx-dry 的 validateXxxRequest（scrollList/expand/setRange/collect）抛错前先落 validation_error 事件（含 call/desc/message）——脚本 try/catch 吞掉 config_error，apps check 仍判 FAIL 并输出「脚本吞掉了配置错误：<call> <message>」。源码调用点对账（ctx.expand/scrollList/setRange/collect 出现次数 vs dry 事件数）只在 check 报告警告，不改退出码",
   policy_settle: "settle 是引擎侧行为（无页面面无桩）；但 meta.policy.settle 的加载期校验在 dry 同样生效——非法 settle 在 apps check 就红",
   policy_decision_state: "S5：meta.policy.decision_state 是**声明面**——{gate?:\"off\"|\"stable_only\", context?:\"off\"|\"delta\"}，未知子键/非法档位在 dry（apps check）就红；dry 不跑执行器决策路径 ⇒ 没有 ask/settle，产物 decisions 的 S5 指标只在真实运行出现（dry 流程也不伪造计数）",
@@ -290,6 +293,7 @@ export function renderCheatSheet(): string[] {
     "- read/extract/holds/waitFor/log/url 免费；step/arrive/run/manual 与四原语各计 1",
     "- ctx.extract(\"name\") 走 meta.site.listExtract；inline 用 ctx.extract({rows, fields})（无需声明）",
     "- ctx.collect({row,fields,until}) 反复滚动取行（计 1 步）；stopReason=stable|maxRows|budget|not_scrollable，绝不假装穷尽",
+    "- 新标签页不会自动跟随：window.open/target=_blank 后先 ctx.tabs()（免费列未关闭页）再 ctx.switchTab({index|urlContains|titleContains})（恰好一个匹配、计 1 步；0/多 = config_error 列出当前 tabs；信封外 = host_not_allowed 且不切换）",
     "- settle：抽池前只在页面有突变时等静默（meta.policy.settle 默认开；等待落 state.settleMs）",
     "- 就绪（U3）：池空 ≠ 未就绪。meta.policy.pool_gate 缺省 fact = 池空但 settle 静默且 readyState=complete 记 flags:pool_empty 后继续（diagnostics.readiness 带证据）；strict = 旧 page_not_ready 快败。闸门只在 flow 面（ctx.step）",
     "- surface（U3）：meta.policy.surface.native_activation 缺省 window（summary 进池、类目 cap=6）；off = 池构成回到 U3 之前（A/B 逃生口）",

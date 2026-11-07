@@ -24,9 +24,10 @@ import type { StateFingerprint, StepStateRecord } from "../engine/executor.ts";
 import {
   normalizeCommandIds, resolveCtxUrl, StopError,
   validateCollectRequest, validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
+  validateSwitchTabMatch,
   type CollectResult, type Ctx, type CtxBudget, type ExpandOptions, type ExpandResult,
   type RangeValue, type ScrollListOptions, type ScrollListResult,
-  type SetRangeOptions, type SetRangeResult,
+  type SetRangeOptions, type SetRangeResult, type SwitchTabResult, type TabInfo,
   type SourceObservationView, type StepRequest, type StepResult,
 } from "./ctx.ts";
 
@@ -249,6 +250,36 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       budget.stepsUsed += 1;
       pushEvent(trace, { call: "arrive", desc: req?.desc, url: resolved, ok: true, ...(req?.id === undefined ? {} : { id: req.id }) });
       return { ok: true, ...(req?.id === undefined ? {} : { id: req.id }), evidence: { url: resolved, attempts: 1, elapsedMs: 0 } };
+    },
+    // A5 dry 桩：不访问浏览器，只有一个合成标签页；匹配语义与真实面同一份
+    // （validateSwitchTabMatch/switchTabMatches），只是"当前 context"被钉成这一页。
+    tabs: async () => {
+      const pages: TabInfo[] = [{ index: 0, url: "(dry)", title: "(dry)", active: true }];
+      pushEvent(trace, { call: "tab", desc: "tabs()", action: "list", pages, ok: true });
+      return pages;
+    },
+    switchTab: async (match) => {
+      assertNotDone("ctx.switchTab");
+      const desc = isObj(match) && typeof match["urlContains"] === "string" ? match["urlContains"] : undefined;
+      // dry 纪律：只验**声明形状**（与 step 的恒 ok：不验观察值同源）——match 是否命中真实标签
+      // 是观察事实，dry 没有标签列表，绝不据此把合法脚本判红。形状错（未知键/空 match/非法值）
+      // 仍在这里结构化 config_error。
+      validatePrimitive("ctx.switchTab", desc, () => {
+        validateSwitchTabMatch(match);
+      });
+      checkBudget();
+      budget.stepsUsed += 1;
+      const target = { index: 0, url: "(dry)", title: "(dry)" };
+      const from = currentUrl;
+      currentUrl = target.url;
+      const result: SwitchTabResult = { ok: true, ...target };
+      pushEvent(trace, {
+        call: "tab", desc: `switchTab(${JSON.stringify(match)})`, action: "switch",
+        from: { url: from },
+        to: target, pages: 1, args: match, ok: true,
+        result: { dry: true, ...target },
+      });
+      return result;
     },
     step: async (desc, req) => {
       const p = validateStep(`ctx.step(${JSON.stringify(desc)})`, req);

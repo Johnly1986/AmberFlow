@@ -355,6 +355,36 @@ export interface ManualRequest {
   url: string | null;
 }
 
+/**
+ * A5：同一个 browser context 里一个**未关闭**的标签页。枚举序 = `context.pages()` 序，
+ * `index` 是这个序里的 0-based 位置（`ctx.switchTab({index})` 认同一个序）。
+ * `active` = 引擎当前页（`session.page`）；列表只读，不改变当前页。
+ */
+export interface TabInfo {
+  index: number;
+  url: string;
+  title: string;
+  active: boolean;
+}
+
+/**
+ * A5：`ctx.switchTab` 的匹配条件。至少给一个；同时给多个时按 AND 收窄。
+ * `index` 是 0-based 枚举序；`urlContains`/`titleContains` 是大小写不敏感子串。
+ */
+export interface SwitchTabMatch {
+  index?: number;
+  urlContains?: string;
+  titleContains?: string;
+}
+
+/** A5：切页成功的结果（命中恰好一个标签页）。 */
+export interface SwitchTabResult {
+  ok: true;
+  index: number;
+  url: string;
+  title: string;
+}
+
 export interface Ctx {
   readonly app: Readonly<{ id: string; label?: string; goal: string }>;
   readonly slots: Readonly<Record<string, string>>;
@@ -368,6 +398,20 @@ export interface Ctx {
   open(url: string, opts?: { timeoutMs?: number }): Promise<void>;
   openPage(role: string): Promise<void>;
   arrive(url: string, req: { done: DomSignal; desc?: string; id?: string; timeoutMs?: number }): Promise<StepResult>;
+  /**
+   * A5：只读枚举当前 browser context 里**未关闭**的标签页（含当前页；`index` 0-based，
+   * `active` = 引擎当前页）。不切页、不计 flow step（与 read/extract 同属免费观察类）。
+   * 列表可以包含 `meta.hosts` 信封外的页面——只读观察不受限，但切过去会被信封拒绝。
+   */
+  tabs(): Promise<TabInfo[]>;
+  /**
+   * A5：显式切到**恰好一个**匹配的标签页（`{index}` / `{urlContains}` / `{titleContains}`，
+   * 多条件 AND；子串大小写不敏感）。0 个或 >1 个匹配 = 结构化 `config_error`（reason 列出
+   * 当前 tabs，不回退随便选一个）；目标 URL 不在 `meta.hosts` 信封内 = `host_not_allowed`
+   * 且不切换。成功后引擎当前页改为目标页；**计 1 个 flow step** 且走 pace。
+   * 注意：动作打开的新标签页**不会自动跟随**——先 `ctx.tabs()` 确认，再 `switchTab`。
+   */
+  switchTab(match: SwitchTabMatch): Promise<SwitchTabResult>;
   step(desc: string, req: StepRequest): Promise<StepResult>;
   /**
    * A3：把目标（hint）自身或其最近可滚动祖先滚到方向 `to`（缺省 bottom）或相对 `by` 像素。
@@ -566,6 +610,63 @@ export function normalizeCommandIds(commands: CommandDecl[]): CommandDecl[] {
 /* ---- A3 原语参数校验（真实/dry/replay 共用同一份声明面；校验失败 = config_error） ---- */
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
+
+const SWITCH_TAB_MATCH_KEYS = new Set(["index", "urlContains", "titleContains"]);
+
+/**
+ * A5：`ctx.switchTab` 的声明面校验（真实/dry/replay 共用同一份；坏 match 在 dry 期也红）。
+ * 三条纪律：只认三个键（拼错的 `url`/`title` 不静默忽略）、至少给一个条件（否则等于
+ * "随便挑一个"，与显式原语的初衷相反）、index 是 0-based 非负整数。
+ */
+export function validateSwitchTabMatch(match: unknown): void {
+  if (!isObj(match)) {
+    throw new StopError("config_error",
+      "ctx.switchTab: match must be an object like { index } | { urlContains } | { titleContains }");
+  }
+  const unknownKeys = Object.keys(match).filter((k) => !SWITCH_TAB_MATCH_KEYS.has(k));
+  if (unknownKeys.length) {
+    throw new StopError("config_error",
+      `ctx.switchTab: unknown match key(s) ${unknownKeys.map((k) => JSON.stringify(k)).join(", ")} `
+      + "(allowed: index, urlContains, titleContains)");
+  }
+  const { index, urlContains, titleContains } = match as Record<string, unknown>;
+  if (index !== undefined && (typeof index !== "number" || !Number.isInteger(index) || index < 0)) {
+    throw new StopError("config_error",
+      `ctx.switchTab: match.index must be a 0-based integer (got ${JSON.stringify(index)})`);
+  }
+  if (urlContains !== undefined && !isNonEmptyString(urlContains)) {
+    throw new StopError("config_error",
+      `ctx.switchTab: match.urlContains must be a non-empty string (got ${JSON.stringify(urlContains)})`);
+  }
+  if (titleContains !== undefined && !isNonEmptyString(titleContains)) {
+    throw new StopError("config_error",
+      `ctx.switchTab: match.titleContains must be a non-empty string (got ${JSON.stringify(titleContains)})`);
+  }
+  if (index === undefined && urlContains === undefined && titleContains === undefined) {
+    throw new StopError("config_error",
+      "ctx.switchTab: match needs at least one of index | urlContains | titleContains "
+      + "(refusing to pick a tab implicitly)");
+  }
+}
+
+/** A5 匹配语义（真实/dry 共用）：多条件 AND；url/title 子串大小写不敏感。 */
+export function switchTabMatches(
+  tab: { index: number; url: string; title: string }, match: SwitchTabMatch,
+): boolean {
+  if (match.index !== undefined && tab.index !== match.index) return false;
+  if (match.urlContains !== undefined && !tab.url.toLowerCase().includes(match.urlContains.toLowerCase())) return false;
+  if (match.titleContains !== undefined && !tab.title.toLowerCase().includes(match.titleContains.toLowerCase())) return false;
+  return true;
+}
+
+/** A5：错误面里列出当前 tabs（index/url/title/active）——作者不用再猜为什么没匹配上。 */
+export function describeTabs(
+  tabs: ReadonlyArray<{ index: number; url: string; title: string; active?: boolean }>,
+): string {
+  if (tabs.length === 0) return "(none)";
+  return tabs.map((t) => `#${t.index} url=${JSON.stringify(t.url)} title=${JSON.stringify(t.title)}`
+    + (t.active === true ? " [active]" : "")).join("; ");
+}
 
 /** `ctx.scrollList` 的参数声明。非法值**在这里**红（dry 期也能拦住，不留到真跑）。 */
 export function validateScrollListRequest(target: unknown, opts: unknown): void {
@@ -772,6 +873,52 @@ export function createCtx(deps: CtxDeps): Ctx {
   const page = async (): Promise<PageLike> => {
     const s = await deps.ensureSession();
     return s.page as unknown as PageLike;
+  };
+
+  /**
+   * A5：标签页枚举。Playwright 的 Page 在两条会话构造路径（`browser.newPage()` 的隐式
+   * context / 设备声明的 `newContext`）上都能 `page.context().pages()` 枚举；替身可能
+   * 把 context/pages 给成属性，两种形状都认。`isClosed()` 不可用或抛错的页面按关闭处理
+   * （绝不对关掉的页做 title 读取/切换）。
+   */
+  type TabPage = PageLike & {
+    title?(): Promise<string>;
+    isClosed?(): boolean;
+    bringToFront?(): Promise<void>;
+    waitForLoadState?(state?: string, opts?: { timeout?: number }): Promise<void>;
+  };
+  const contextPages = async (session: BrowserSession): Promise<TabPage[]> => {
+    const active = session.page as unknown as TabPage;
+    const contextValue = (active as unknown as { context?: unknown }).context;
+    const context = (typeof contextValue === "function"
+      ? contextValue.call(active)
+      : contextValue) as { pages?: ArrayLike<TabPage> | (() => ArrayLike<TabPage>) } | undefined;
+    const raw = typeof context?.pages === "function" ? context.pages() : context?.pages;
+    return Array.from(raw ?? []).filter((p) => {
+      try { return p.isClosed?.() !== true; } catch { return false; }
+    });
+  };
+  /** 标题读取有界（2s）：一个卡死的标签页不能拖住 tabs()/switchTab 的错误面。 */
+  const titleOf = async (p: TabPage): Promise<string> => {
+    if (typeof p.title !== "function") return "";
+    const title = Promise.resolve().then(() => p.title!()).then((t) => String(t ?? "")).catch(() => "");
+    return await Promise.race([title, sleepMs(2000).then(() => "")]);
+  };
+  const listTabs = async (session: BrowserSession): Promise<Array<TabInfo & { page: TabPage }>> => {
+    const pages = await contextPages(session);
+    const active = session.page as unknown as TabPage;
+    const out: Array<TabInfo & { page: TabPage }> = [];
+    for (const [index, p] of pages.entries()) {
+      let url = "";
+      try { url = urlOf(p) || ""; } catch { url = ""; }
+      out.push({ index, url, title: await titleOf(p), active: p === active, page: p });
+    }
+    return out;
+  };
+
+  /** best-effort 的有界等待：超时/失败都不致命（切页事实已经发生）。 */
+  const bounded = async (fn: () => Promise<unknown> | undefined, ms: number): Promise<void> => {
+    try { await Promise.race([Promise.resolve().then(fn), sleepMs(ms)]); } catch { /* best effort */ }
   };
 
   const checkBudget = (): void => {
@@ -1367,6 +1514,60 @@ export function createCtx(deps: CtxDeps): Ctx {
           }) },
       });
       return result;
+    },
+    // ---- A5 标签页：tabs() 免费只读；switchTab 计 1 flow step 且走 pace（与 step/arrive 同单元语义）----
+    tabs: async () => {
+      const session = await deps.ensureSession();
+      const listed = await listTabs(session);
+      const view: TabInfo[] = listed.map(({ index, url, title, active }) => ({ index, url, title, active }));
+      pushEvent(trace, { call: "tab", desc: "tabs()", action: "list", pages: view, ok: true });
+      return view;
+    },
+    switchTab: async (match) => {
+      assertOpen("ctx.switchTab");
+      validateSwitchTabMatch(match);
+      checkBudget();
+      await paceBeforeStep();
+      const started = Date.now();
+      const session = await deps.ensureSession();
+      const before = urlOf(session.page as unknown as PageLike) || currentUrl;
+      const listed = await listTabs(session);
+      const matched = listed.filter((t) => switchTabMatches(t, match));
+      if (matched.length !== 1) {
+        const why = matched.length === 0
+          ? "no tab matches"
+          : `${matched.length} tabs match`;
+        throw new StopError("config_error",
+          `ctx.switchTab: ${why} ${JSON.stringify(match)} — expected exactly 1; current tabs: ${describeTabs(listed)}`
+          + " (use ctx.tabs() to inspect; no implicit fallback to an arbitrary tab)");
+      }
+      const target = matched[0]!;
+      // 导航信封：列表可以只读看到信封外页面，切过去不行（与 open/openPage 同一判定）。
+      if (hosts && hosts.length && disallowedHost(target.url, hosts) !== null) {
+        throw new StopError("host_not_allowed",
+          `ctx.switchTab: ${JSON.stringify(target.url)} is outside the declared hosts envelope (${hosts.join(", ")})`
+          + " — the tab was not activated");
+      }
+      session.page = target.page as unknown as typeof session.page;
+      currentUrl = target.url;
+      // Playwright 成熟做法：置前 + 有界等 domcontentloaded；两者失败都不致命（切页已是事实）。
+      await bounded(() => target.page.bringToFront?.(), 2000);
+      await bounded(() => target.page.waitForLoadState?.("domcontentloaded", { timeout: 5000 }), 5000);
+      budget.stepsUsed += 1;
+      try { pageState.update(target.page, "settled"); } catch { /* 记录面让位事实 */ }
+      pushEvent(trace, {
+        call: "tab", desc: `switchTab(${JSON.stringify(match)})`, action: "switch",
+        from: { url: before },
+        to: { index: target.index, url: target.url, title: target.title },
+        pages: listed.length,
+        args: match,
+        ok: true,
+        result: {
+          index: target.index, url: target.url, title: target.title,
+          elapsed_ms: Date.now() - started,
+        },
+      });
+      return { ok: true as const, index: target.index, url: target.url, title: target.title };
     },
     step: async (desc, req) => {
       assertAct(req);

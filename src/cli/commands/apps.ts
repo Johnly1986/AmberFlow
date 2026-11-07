@@ -125,6 +125,7 @@ ${playbook}
  *
  * ctx 只有这些面（没有 pageUrl()：入口页角色写在 meta.site.pages，用 openPage 取）：
  *   openPage(role) / open(url) / arrive(url, {done}) / step(desc, {id, act, done, url, slots, when, timeoutMs})
+ *   / tabs() / switchTab({index|urlContains|titleContains})
  *   / manual(desc, {done}) / url() / read.text|value|count|attr / extract / collect / holds / waitFor
  *   / source（数据腿注册表，不是读槽位的口）/ run / done() / fail(code, reason) / hint / hints / command
  *   / slots（冻结 Record：脚本层读槽位值写 ctx.slots["键"]，键须在 meta.slots 声明）
@@ -150,6 +151,13 @@ ${playbook}
  *     在元素相对坐标上点击（canvas 这类只能点中心的自绘控件）；值是声明绑定的字符串 "x,y"
  *     （非负整数/有限小数，元素 padding box 左上角为原点）；只对 click 族成立，坏格式/越界=config_error。
  *     证据 executed_actions 记 {op:"clickAt", position:{x,y}}；dry 只校声明形状，不解析坐标。
+ *   新标签页（A5，不会自动跟随）：window.open/target=_blank 动作后引擎仍停在原页——先 ctx.tabs()
+ *     （免费只读：列出当前 context 未关闭的页，返回 [{index,url,title,active}]，index 0-based）
+ *     再 ctx.switchTab({index|urlContains|titleContains})（子串大小写不敏感、多条件 AND）。
+ *     必须恰好匹配 1 个：0/多 = 结构化 config_error（reason 列出当前 tabs，不回退随便选）；
+ *     目标 URL 在 meta.hosts 信封外 = host_not_allowed 且不切换。切换计 1 个 flow step；
+ *     dry 面：switchTab 只验声明形状（未知键/空 match/非法值仍红），对合法 match 恒返回合成
+ *     成功 {ok:true,index:0,url:"(dry)",...}——match 是观察事实，dry 不据此判红，故不需要 dry 守卫。
  *
  * 值绑定写法（fill/select/drag/upload/clickAt 的值只认声明绑定，绝不猜）：对象字面量
  *   ctx.command("fill", "#username", { from: "slot", key: "username" })
@@ -168,8 +176,8 @@ ${playbook}
  *     // stopReason: stable | maxRows | budget | not_scrollable——诚实口径，不假装穷尽。
  *
  * 预算一图流（完整口径：amber schema ctx --topic budget）：
- *   免费不占预算：read.* / extract / holds / waitFor / log / url
- *   各计 1：ctx.step / ctx.arrive / ctx.run / 批准执行的人工步 / ctx.scrollList / ctx.expand / ctx.setRange / ctx.collect
+ *   免费不占预算：read.* / extract / holds / waitFor / log / url / tabs
+ *   各计 1：ctx.step / ctx.arrive / ctx.run / 批准执行的人工步 / ctx.scrollList / ctx.expand / ctx.setRange / ctx.collect / ctx.switchTab
  *   step 内的 command 闭集不单独计步：一个 step 的动作循环上限 8（子目标动作预算）
  *   用满：budget_exceeded（status=partial、verified=false、exit 0）
  *

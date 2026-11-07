@@ -7,10 +7,11 @@
  */
 import {
   StopError, validateCollectRequest, validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
+  validateSwitchTabMatch,
   type CollectCoverage, type CollectRequest, type CollectResult, type CollectStopReason,
   type Ctx, type CtxBudget, type ExpandOptions, type ExpandResult,
   type RangeValue, type ScrollListOptions, type ScrollListResult,
-  type SetRangeOptions, type SetRangeResult,
+  type SetRangeOptions, type SetRangeResult, type SwitchTabResult, type TabInfo,
   type SourceObservationView, type StepResult,
 } from "./ctx.ts";
 import { createKit } from "./kit.ts";
@@ -130,6 +131,44 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       currentUrl = typeof ev.url === "string" && ev.url ? ev.url : u;
       consume();
       return stepResult(ev);
+    },
+    // A5：标签页事件按录制值回放——`tabs()`（action=list）免费；`switchTab`（action=switch）
+    // 计 1 步并核对调用参数（录了什么就回放什么，不重新匹配页面）。
+    tabs: async () => {
+      const ev = nextEvent("tab");
+      if (ev.action !== "list") {
+        throw new StopError("trace_mismatch",
+          `replay: event #${ev.i} is a tab ${JSON.stringify(ev.action ?? "?")} event, script now calls ctx.tabs()`);
+      }
+      const raw = Array.isArray(ev.pages) ? ev.pages : [];
+      return raw.map((item, index): TabInfo => {
+        const rec = isObj(item) ? item : {};
+        return {
+          index: typeof rec["index"] === "number" ? rec["index"] : index,
+          url: typeof rec["url"] === "string" ? rec["url"] : "",
+          title: typeof rec["title"] === "string" ? rec["title"] : "",
+          active: rec["active"] === true,
+        };
+      });
+    },
+    switchTab: async (match) => {
+      validateSwitchTabMatch(match);
+      const ev = nextEvent("tab");
+      if (ev.action !== "switch") {
+        throw new StopError("trace_mismatch",
+          `replay: event #${ev.i} is a tab ${JSON.stringify(ev.action ?? "?")} event, script now calls ctx.switchTab()`);
+      }
+      if (ev.args !== undefined) assertPrimitiveArgs(ev, match);
+      consume();
+      const to = isObj(ev.to) ? ev.to : {};
+      const result: SwitchTabResult = {
+        ok: true,
+        index: typeof to["index"] === "number" ? to["index"] : -1,
+        url: typeof to["url"] === "string" ? to["url"] : currentUrl,
+        title: typeof to["title"] === "string" ? to["title"] : "",
+      };
+      currentUrl = result.url;
+      return result;
     },
     step: async (desc, req) => {
       void req;
