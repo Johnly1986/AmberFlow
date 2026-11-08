@@ -987,6 +987,12 @@ export interface EffectivePolicy {
    * "strict" = 声明目标解析链全落空时禁止模型回退，结构化 target_not_found。
    */
   act_hint?: { value: "widen" | "strict"; source: "app" };
+  /**
+   * P0-C 声明目标解析链（**仅声明时出现** = 缺省产物逐字节不变；显式 "off" 也进账）。
+   * "declared" = 命令 target / act hint 在池/ADMIT/FW8 之后走 DRF（attr/text 两模式、
+   * 恰好一个可见、click 前 hit-test；首版 click/scroll/hover）。
+   */
+  target_resolution?: { value: "off" | "declared"; source: "app" };
 }
 
 /**
@@ -1099,6 +1105,10 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
   // P0-B：act_hint 同样**仅声明时出现**（缺省 widen = 今天；"widen" 显式声明也进账）。
   if (declaredPolicy.act_hint !== undefined) {
     policy.act_hint = { value: declaredPolicy.act_hint, source: "app" as const };
+  }
+  // P0-C：target_resolution 同样**仅声明时出现**（缺省 off = 今天；"off" 显式声明也进账）。
+  if (declaredPolicy.target_resolution !== undefined) {
+    policy.target_resolution = { value: declaredPolicy.target_resolution, source: "app" as const };
   }
   const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
   return { policy, anyDeclared };
@@ -2217,6 +2227,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           tieredHint: resolvedPolicy.policy.tiered_hint.value,
           // P0-B：act hint 档位（缺省 widen；strict = 声明目标解析链全落空时禁模型回退）。
           actHint: resolvedPolicy.policy.act_hint?.value,
+          // P0-C：DRF（缺省 off = 今天；declared = 声明目标解析链启用 DOM 兜底）。
+          targetResolution: resolvedPolicy.policy.target_resolution?.value,
           riskAsk: resolvedPolicy.policy.risk_ask.value === "rules-only" ? "rules-only" : "always",
           reobserve: resolvedPolicy.policy.reobserve.value,
           maxEffectiveRepeats: resolvedPolicy.policy.max_effective_repeats.value,

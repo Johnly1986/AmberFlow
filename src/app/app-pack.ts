@@ -189,6 +189,8 @@ export const POLICY_KEYS = [
   "navigation",
   // P0-B：act hint 未命中时是否允许模型自由选（缺省 widen = 现行为逐字节不变）。
   "act_hint",
+  // P0-C：声明目标解析链是否启用 DRF（缺省 "off" = 现行为逐字节不变）。
+  "target_resolution",
 ] as const;
 
 /** 导航纪律档位（`meta.policy.navigation`）。 */
@@ -196,6 +198,9 @@ export const NAVIGATION_MODES = ["entry-only", "free"] as const;
 
 /** act hint 解析失败时的档位（`meta.policy.act_hint`）。 */
 export const ACT_HINT_MODES = ["widen", "strict"] as const;
+
+/** 声明目标解析链档位（`meta.policy.target_resolution`；缺省 off = 现行为逐字节不变）。 */
+export const TARGET_RESOLUTION_MODES = ["off", "declared"] as const;
 
 /** S5 状态闸门档位（`meta.policy.decision_state.gate`）。 */
 export const DECISION_STATE_GATES = ["off", "stable_only"] as const;
@@ -237,6 +242,18 @@ export interface PackPolicy {
    * 显式声明才进 effective_policy.act_hint（widen 也进账）。
    */
   act_hint?: (typeof ACT_HINT_MODES)[number];
+  /**
+   * P0-C 声明目标解析链（DRF，declared target resolution）：
+   *   - `"off"`（缺省）= 现行为逐字节不变；
+   *   - `"declared"` = 命令 `target` / act hint 在池 hintMatch → ADMIT 回捞 → FW8 身份回捞
+   *     全部落空后，再由 DOM 侧兜底：属性型 hint 走 ADMIT_SEL + 同一套 hint 语义，裸词 hint
+   *     走可见文本精确匹配；跨 frame 恰好一个可见才动作（>1 → target_ambiguous，全隐藏 =
+   *     未命中 + hidden 诊断）。click 族动作前必须 hit-test（被覆盖不点击）。首版只允许
+   *     click/scroll/hover，fill/select/drag/upload/clickAt → 结构化 action_unsupported。
+   *     回捞元素只进本步局部池，**模型不参与**（不进 ChoiceRequest.elems）。
+   *     dry/apps check 只校验 policy 值（DOM 事实无法离线验证，不新增绿）。
+   */
+  target_resolution?: (typeof TARGET_RESOLUTION_MODES)[number];
   /**
    * 置信度闸门（缺省 0.25）。**为什么要能声明**：闸门比的是 provider 的 `score`，而
    * `score_kind` 不同的两支不可比（laya 的归一化熵 vs 在线服务的标定概率）——
@@ -1238,6 +1255,10 @@ export function validatePack(pack: AppPack,
       const ah = pol["act_hint"];
       if (ah !== undefined && !(ACT_HINT_MODES as readonly string[]).includes(String(ah))) {
         p.push(`policy.act_hint: unknown value ${JSON.stringify(String(ah))} (config_error; must be one of ${ACT_HINT_MODES.map((x) => JSON.stringify(x)).join(" | ")})`);
+      }
+      const tr = pol["target_resolution"];
+      if (tr !== undefined && !(TARGET_RESOLUTION_MODES as readonly string[]).includes(String(tr))) {
+        p.push(`policy.target_resolution: unknown value ${JSON.stringify(String(tr))} (config_error; must be one of ${TARGET_RESOLUTION_MODES.map((x) => JSON.stringify(x)).join(" | ")})`);
       }
       const sf = pol["surface"];
       if (sf !== undefined) {

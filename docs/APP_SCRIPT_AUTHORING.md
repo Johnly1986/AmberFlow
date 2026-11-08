@@ -615,6 +615,53 @@ export const meta = (kit) => ({
 - 缺省/`"free"` = 现行为逐字节不变；未知值在加载期 `config_error`（`apps check` 即红）；
   dry/`apps check` 与真实面同一闸门。声明了才进 `effective_policy.navigation`。
 
+### 4.11 声明目标解析链：`meta.policy.target_resolution`（DRF）
+
+自绘控件（无 role/onclick/id，甚至不在准入选择器 ADMIT_SEL 里）让**作者声明的目标**解析不到：
+池 hintMatch → ADMIT 回捞 → FW8 身份回捞全落空，命令步 `target_not_found`、act hint 在
+`widen` 档回退模型自由选。声明式逃生口（**opt-in，缺省逐字节不变**）：
+
+```js
+export const meta = (kit) => ({
+  // ...
+  policy: { target_resolution: "declared" },
+});
+```
+
+只服务**声明目标**（命令 `target` / act hint = `ctx.hint(...)`），决策步与模型选出的元素
+永不走这条链。解析顺序（前者命中即停）：
+
+1. 池 `hintMatch`
+2. ADMIT 回捞（`hintLookup`）
+3. FW8 身份回捞（`#id` / `[data-test]` / `[name]`）
+4. **DRF**：两种模式，同一「恰好一个可见匹配」纪律
+   - **attr 模式**（`#id` / `tag[attr=value]` / `tag[attr~substr]` / `tag~token` / 角色词）：
+     在 ADMIT_SEL 投影上做 DOM 收集（不扩 surface 类目、不改投影），再套同一套
+     `hintMatch` 语义；
+   - **text 模式**（裸词）：收集归一化（大小写不敏感、折叠空白）后 `innerText` **全等于**
+     token 的元素，优先最深的匹配元素；到父容器这一档仍以动作前 hit-test 兜底。
+5. 仍落空：命令步 `target_not_found`；act hint 按 `act_hint` 档位（`widen` 回退模型 /
+   `strict` 直接 `target_not_found`）。
+
+纪律与证据：
+
+- **恰好一个可见匹配**：跨 frame（≤6）统计；**>1 可见 → `target_ambiguous`**（reason /
+  `skipped_actions` 列出候选 tag/文本/frame/visible，绝不点）；**全部隐藏 → 视为未命中**
+  （只留 hidden 计数警告，绝不操作隐藏元素）。
+- **click 前 hit-test**：click 族动作前 `elementFromPoint(中心点)`，命中元素必须是目标自身
+  或其后代。否则**不点击**：`skipped_actions` 记 `hit_test:covered` / `hit_test:ancestor`，
+  result 的 `declared_resolve.hit_test` 带现场（blocker），done 不成立。
+- **首版能力面**：只允许 `click` / `scroll` / `hover`；对 DRF 目标声明 `fill`/`select`/
+  `drag`/`upload`/`clickAt` → 结构化 `action_unsupported`（reason 明说首版限制）。
+- **证据**：trace 行 `resolved_by:"declared_dom"` + `declared_resolve:{mode:"attr"|"text",
+  target, matches, hidden_matches, total_matches, frame, hit_test?}`；`executed_actions` 的
+  `ref` 用合成标识 `drf:N`（不伪装池 ref）并带 `resolved_by`/`declared_resolve`；命中行临时
+  盖 `data-hintref`，动作尝试一结束即清理（与 FW8/A3 同纪律）。
+- **模型面零污染**：DRF 命中直接给出 ref，不构造 `ChoiceRequest`；回捞元素即使留在局部池，
+  进 provider 前也剥离 `declared` 旁路标记。
+- **dry / replay**：只校验 policy 值；DOM 事实无法离线验证，**不新增绿**（语义上
+  `resolution:"unverified(dry)"`，结果里不造字段）。未知值加载期 `config_error`。
+
 ## 5. 站点面：`meta.site`
 
 站点相关的数据声明在应用自己的 `meta` 里（与 hint 同一条纪律：不进共享代码）：
@@ -797,6 +844,7 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `decision_state` | `{gate:"off",context:"off"}` | S5 决策状态接入（A/B）：`gate:"stable_only"` = ask 前 settle + 同池同题不重复问（`decisions.asks_saved/gate_waits`）；`context:"delta"` = 请求带 ≤200B 结构化 `state_digest`（provider 不支持则跳过，记 `context_skipped`） |
 | `navigation` | `free` | 导航纪律（仅 flow 面）：`"entry-only"` = 入口之外的引擎直接 URL 导航默认被 `navigation_forbidden` 拒绝，但 **`meta.site.pages` 里声明的页面 URL 可再次直接导航**（`URL.href` 归一后全等才放行，见 §4.10）；缺省/"`free`" = 不约束，产物逐字节不变 |
 | `act_hint` | `widen` | 声明目标（`act: ctx.hint(...)` / `target_hints`）解析链（池 hintMatch → ADMIT 回捞 → FW8 身份回捞）全落空时的档位：`widen` = 交给模型自由选（**缺省 = 现行为逐字节不变**）；`strict` = **禁止模型回退**，直接结构化 `target_not_found`（reason 写明 `act_hint="strict"` + 原 hint + 池快照）。命令步不受影响；FW8 的 `#id`/`[data-test]`/`[name]` 声明回捞先执行。显式声明才进 `effective_policy.act_hint` |
+| `target_resolution` | `off` | **声明目标解析链（DRF，P0-C）**：`off` = 现行为逐字节不变；`declared` = 命令 `target` / act hint 在池 hintMatch → ADMIT 回捞 → FW8 身份回捞全部落空后，再由 DOM 侧兜底解析（属性型 hint 走 ADMIT_SEL + 同一套 hint 语义；裸词 hint 走可见文本精确匹配；跨 frame **恰好一个可见**才动作，>1 → `target_ambiguous`，全隐藏 = 未命中 + hidden 诊断）。click 族动作前必须 hit-test（中心被覆盖则不点击、记 `hit_test` 证据）。首版只允许 `click`/`scroll`/`hover`，对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` → 结构化 `action_unsupported`。回捞元素只进本步局部池，**模型不参与**。显式声明才进 `effective_policy.target_resolution`；dry 只校验 policy 值（DOM 事实无法离线验证，不新增绿，见 §4.11） |
 
 产物里的 `effective_policy` 只在非缺省时出现，并写明来源（`cli` / `config` / `app` / `provider` / `default`）。
 
@@ -842,8 +890,8 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `precondition_skipped` | `when` 不成立，这一步没有执行（`ok:false`，trace 状态 `skipped`；同样计一次执行预算）——脚本按 stopCode 分支继续，不是失败 |
 | `page_not_ready` | 元素池为空，页面还没稳定；等页面 ready，或修 done 信号 |
 | `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标。`meta.policy.act_hint:"strict"` 下 act hint 解析链全落空也用它（reason 显式写 `act_hint="strict"`，**不再回退模型自由选**；缺省 `widen` 才回退） |
-| `target_ambiguous` | 目标命中多个不同候选；收窄 hint |
-| `action_unsupported` | 目标存在但声明的动作 op 不在元素能力面内；换动作或换目标 |
+| `target_ambiguous` | 目标命中多个不同候选；收窄 hint。`target_resolution:"declared"` 下 DRF 的两个可见文本/属性匹配同样报它（候选 tag/文本/frame/visible 在 reason 与 `skipped_actions`） |
+| `action_unsupported` | 目标存在但声明的动作 op 不在元素能力面内；换动作或换目标。DRF 首版只允许 `click`/`scroll`/`hover`——对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` 也报它（reason 明说首版限制） |
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |
 | `frame_not_allowed` | frame origin 不在 `meta.hosts` 内；声明 frame host 或避免跨 frame 动作 |
 | `popup_not_allowed` | action 打开的新 tab / popup 不在 `meta.hosts` 内；声明 popup host 或避免打开外域 |

@@ -48,6 +48,10 @@
 - **引擎可强制**：应用在 `meta.policy` 声明 `navigation:"entry-only"` 后，入口之外的直接
   URL 跳转会被引擎以 `navigation_forbidden` 拒绝（评估要求 agent 这样声明，把纪律交给引擎
   执行，而不只靠自觉）；缺省不声明时行为不变。
+- **自绘控件可达（P0-C）**：页面上的筛选 chip / 自绘按钮没有 role/onclick/id、池与准入面都
+  收不进时，应用可声明 `target_resolution:"declared"`，让**作者声明的目标**（`ctx.hint(...)`
+  / 命令 `target`）在池/ADMIT/FW8 之后走 DRF（attr 或可见文本精确匹配、恰好一个可见、
+  click 前 hit-test）。引擎仍只解析声明目标，**模型不参与**；缺省不声明时行为不变。
 
 ### 成功判据
 

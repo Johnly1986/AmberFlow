@@ -89,6 +89,7 @@ import {
   type ElemPool,
   type PageLike,
 } from "./extraction.ts";
+import { declaredLookup, formatDeclaredCandidates, type DeclaredCandidate } from "./declared.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
 import {
   getLayaRuntime,
@@ -301,7 +302,16 @@ export interface ExecutedAction {
    * FW8：本动作的**声明目标**由身份回捞解析（合成 ref，如 `dom:0`；不是池 ref）。
    * 缺字段 = 普通池解析。trace 行的同一事实还带 `identity:{shape,attr,value,…}`。
    */
-  resolved_by?: "dom_identity";
+  resolved_by?: "dom_identity" | "declared_dom";
+  /**
+   * P0-C：DRF 命中证据（与 trace 行 `declared_resolve` 同源同值；仅 declared 解析时出现）。
+   * `hit_test` 只在 click 族动作前跑过 hit-test 时出现（covered/ancestor 表示未点击）。
+   */
+  declared_resolve?: {
+    mode: "attr" | "text"; target: string; matches: number;
+    hidden_matches: number; total_matches: number; frame: number;
+    hit_test?: "covered" | "ancestor"; blocker?: string;
+  };
 }
 
 /**
@@ -877,6 +887,13 @@ export interface MiddlewareOptions {
    * FW8 身份回捞先执行，命令步不受影响。缺省不出现 = 行为逐字节不变。
    */
   actHint?: "widen" | "strict";
+  /**
+   * P0-C：`meta.policy.target_resolution`（缺省/`"off"` = 今天逐字节不变；`"declared"` =
+   * 启用 DRF）。只在**声明目标**（命令 target / act hint）的解析链上生效：池 hintMatch →
+   * ADMIT 回捞 → FW8 身份回捞 → **DRF**（attr/text 两模式、恰好一个可见、click 前 hit-test）。
+   * 回捞元素只进本步局部池，绝不进模型候选（pickInner 剥离 `declared` 标记）。
+   */
+  targetResolution?: "off" | "declared";
   /** U3：surface 类目策略（缺省 native_activation="window"）。 */
   surfacePolicy?: SurfacePolicy;
   /**
@@ -1557,6 +1574,8 @@ export class BrowserMiddleware {
    * 不再交给模型自由选，直接结构化 target_not_found。
    */
   actHintStrict = false;
+  /** P0-C：DRF（声明目标解析面）开关；缺省 false = 今天逐字节不变。 */
+  targetResolutionDeclared = false;
   /** See `MiddlewareOptions.candidatePriority`（A2 分桶窗口；缺省 bucketed）。 */
   candidatePriority: "bucketed" | "main-first" = "bucketed";
   /** S1：pre-held done 处置（缺省 warn；fail 在动作前结构化停止）。 */
@@ -1862,6 +1881,7 @@ export class BrowserMiddleware {
     this.candidatePriority = opts.candidatePriority ?? this.candidatePriority;
     this.poolGate = opts.poolGate === "strict" ? "strict" : "fact";
     this.actHintStrict = opts.actHint === "strict";
+    this.targetResolutionDeclared = opts.targetResolution === "declared";
     if (opts.surfacePolicy !== undefined) this.surfacePolicy = { ...opts.surfacePolicy };
     this.donePreheldPolicy = opts.donePreheldPolicy ?? this.donePreheldPolicy;
     this.fillReadback = opts.fillReadback ?? this.fillReadback;
@@ -2178,10 +2198,12 @@ export class BrowserMiddleware {
     // 这里仍做一层防御：第三方 provider 永远看不到引擎内部标记。
     const modelElems: ElemPool = {};
     for (const [ref, e] of Object.entries(elems)) {
-      if (e.surface === undefined && e.href_full === undefined && e.identity === undefined) {
+      if (e.surface === undefined && e.href_full === undefined && e.identity === undefined
+          && e.declared === undefined) {
         modelElems[ref] = e; continue;
       }
-      const { surface: _surface, href_full: _hrefFull, identity: _identity, ...rest } = e;
+      const { surface: _surface, href_full: _hrefFull, identity: _identity,
+        declared: _declared, ...rest } = e;
       modelElems[ref] = rest as Elem;
     }
     let out;
@@ -2463,6 +2485,48 @@ export class BrowserMiddleware {
         }
       }
       return null;
+    }
+  }
+
+  /**
+   * P0-C：DRF 目标的**动作前** hit-test（click 族必须）。
+   *
+   * 中心点 `document.elementFromPoint` 命中的最顶层元素必须是目标本身或其后代，否则
+   * **不点击**——返回 covered（无关元素盖住 / 中心点无元素）或 ancestor（命中目标是
+   * 目标的祖先，典型是目标 `pointer-events:none` 或布局在父容器上）。命中非目标时
+   * 记录覆盖者摘要（tag#id.class），让失败证据能直接指认现场。
+   */
+  private async _declaredHitTest(page: AnyPage, el: Elem):
+    Promise<{ ok: true } | { ok: false; kind: "covered" | "ancestor"; blocker: string }> {
+    const loc = await this._locatorFor(page, el);
+    if (loc === null) return { ok: false, kind: "covered", blocker: "stale_ref" };
+    try {
+      const raw = await firstLoc(loc).evaluate((node: any) => {
+        const g = globalThis as unknown as {
+          document: { elementFromPoint(x: number, y: number): any };
+        };
+        try { node.scrollIntoView({ block: "center", inline: "center" }); } catch { /* ignore */ }
+        const r = node.getBoundingClientRect();
+        const x = r.left + r.width / 2;
+        const y = r.top + r.height / 2;
+        const hit = g.document.elementFromPoint(x, y);
+        const desc = (h: any): string => {
+          if (!h) return "none";
+          const id = h.id ? `#${h.id}` : "";
+          const cls = typeof h.className === "string" && h.className.trim()
+            ? `.${h.className.trim().split(/\s+/).slice(0, 2).join(".")}` : "";
+          return `${String(h.tagName || "").toLowerCase()}${id}${cls}`;
+        };
+        if (hit === null || hit === undefined) return { kind: "none", blocker: "none" };
+        if (hit === node || node.contains(hit)) return { kind: "ok", blocker: "" };
+        return { kind: hit.contains(node) ? "ancestor" : "covered", blocker: desc(hit) };
+      });
+      const r = raw as { kind?: string; blocker?: string } | null;
+      if (r?.kind === "ok") return { ok: true };
+      const kind = r?.kind === "ancestor" ? "ancestor" as const : "covered" as const;
+      return { ok: false, kind, blocker: String(r?.blocker ?? "none") };
+    } catch {
+      return { ok: false, kind: "covered", blocker: "probe-failed" };
     }
   }
 
@@ -3820,10 +3884,14 @@ export class BrowserMiddleware {
         let identityHidden: { target: string; hidden: number; total: number } | null = null;
         /** 与 A3 同纪律：章只服务本次动作定位，动作尝试一结束就清。 */
         const cleanupIdentity = async (): Promise<void> => {
-          if (identityCleanup === null) return;
-          const fn = identityCleanup;
-          identityCleanup = null;
-          try { await fn(); } catch { /* 清理失败不阻断：章值唯一，残留不会误指 */ }
+          if (identityCleanup !== null) {
+            const fn = identityCleanup;
+            identityCleanup = null;
+            try { await fn(); } catch { /* 清理失败不阻断：章值唯一，残留不会误指 */ }
+          }
+          // P0-C：DRF 章与 FW8 同一纪律——动作尝试一结束（成功/失败/提前停）就清。
+          // 定义在后（闭包在此调用时已初始化）。
+          await cleanupDeclared();
         };
         const identityEvidence = (): Record<string, unknown> => (identity === null ? {} : {
           resolved_by: "dom_identity",
@@ -3838,6 +3906,102 @@ export class BrowserMiddleware {
           : ` — identity recovery: ${JSON.stringify(identityHidden.target)} matched `
             + `${identityHidden.total} element(s) in the DOM but ${identityHidden.hidden} are hidden `
             + `(checkVisibility CSS / zero box); hidden elements are never acted on`;
+
+        // P0-C DRF 声明目标解析（declared target resolution，meta.policy.target_resolution:
+        // "declared" 才启用）：只服务**这一步作者声明的目标**（命令 target / act hint）——
+        // 池 hintMatch → ADMIT 回捞 → FW8 身份回捞都落空后的最后由 DOM 兜底。attr 模式
+        // （ADMIT_SEL + 同一套 hint 语义）或 text 模式（归一化 innerText 全等）。恰好一个
+        // 可见才动作；命中行只进本步局部池，模型面剥离 `declared` 旁路标记。
+        const declaredTried = new Set<string>();
+        type DeclaredState = {
+          ref: string; target: string; mode: "attr" | "text";
+          matches: number; total_matches: number; hidden_matches: number; frame: number;
+          hit_test?: "covered" | "ancestor"; blocker?: string;
+        };
+        let declared: DeclaredState | null = null;
+        // 闭包（tryDeclared）里的赋值 TS 控制流看不见，直接读会被收窄成 null/never——用
+        // getter 返回声明类型（与 runScriptApp 的 mwHolder 同一个坑）。
+        const getDeclared = (): DeclaredState | null => declared;
+        const setDeclared = (v: DeclaredState | null): void => { declared = v; };
+        let declaredCleanup: (() => Promise<void>) | null = null;
+        /** DRF 已在**外部循环**里给出的结构化停因（歧义/首版能力面）；命令循环结束后统一执行。 */
+        let declaredStop: { code: StopCode; reason: string } | null = null;
+        /** DRF 匹配到但全不可见：按 0 处理（绝不操作隐藏元素），只留诊断证据。 */
+        let declaredHidden: { target: string; hidden: number; total: number } | null = null;
+        const getDeclaredHidden = (): { target: string; hidden: number; total: number } | null => declaredHidden;
+        /** 与 A3/FW8 同纪律：章只服务本次动作定位，动作尝试一结束就清。 */
+        const cleanupDeclared = async (): Promise<void> => {
+          if (declaredCleanup === null) return;
+          const fn = declaredCleanup;
+          declaredCleanup = null;
+          try { await fn(); } catch { /* 清理失败不阻断：章值唯一，残留不会误指 */ }
+        };
+        const declaredEvidence = (): Record<string, unknown> => {
+          const d = getDeclared();
+          return d === null ? {} : {
+            resolved_by: "declared_dom",
+            declared_resolve: {
+              mode: d.mode, target: d.target, matches: d.matches,
+              hidden_matches: d.hidden_matches, total_matches: d.total_matches,
+              frame: d.frame,
+              ...(d.hit_test === undefined ? {} : { hit_test: d.hit_test }),
+              ...(d.blocker === undefined ? {} : { blocker: d.blocker }),
+            },
+          };
+        };
+        const declaredHiddenSuffix = (): string => {
+          const dh = getDeclaredHidden();
+          return dh === null ? ""
+            : ` — declared-DOM resolution: ${JSON.stringify(dh.target)} matched `
+              + `${dh.total} element(s) in the DOM but ${dh.hidden} are hidden `
+              + `(checkVisibility CSS / zero box); hidden elements are never acted on`;
+        };
+        /**
+         * 对一条声明目标跑一次 DRF（同一步同一条 hint 只跑一次）。返回命中行；未命中返回
+         * null（全隐藏只留诊断）。歧义/首版能力面通过 `declaredStop` 交给外层统一停。
+         */
+        const tryDeclared = async (target: string, op: string):
+          Promise<{ ref: string; el: Elem } | null> => {
+          if (!this.targetResolutionDeclared || target === "" || declaredTried.has(target)) return null;
+          declaredTried.add(target);
+          const dr = await declaredLookup(pg, target, op, this.surfacePolicy);
+          if (!dr.eligible) return null;
+          if (dr.visible_matches > 1) {
+            for (const cand of dr.candidates.filter((c) => c.visible)) {
+              noteSkipped({
+                target, ref: `declared:${cand.tag}`,
+                reason: "target_ambiguous",
+                detail: `${dr.visible_matches} visible declared-DOM match(es) in ${dr.mode} mode for `
+                  + `${JSON.stringify(target)}; never guessed`,
+              });
+            }
+            declaredStop = {
+              code: "target_ambiguous",
+              reason: `declared target ${JSON.stringify(target)} (${dr.mode} mode) matches `
+                + `${dr.visible_matches} visible element(s) across frames (total=${dr.total_matches}, `
+                + `hidden=${dr.hidden_matches}) — candidates: ${formatDeclaredCandidates(dr.candidates)}. `
+                + `Declared-target resolution never guesses among several matches; narrow the declaration `
+                + `to a unique #id / [data-test=…] / exact visible text on step ${stepNo}`,
+            };
+            return null;
+          }
+          if (dr.rows.length !== 1) {
+            if (dr.hidden_matches > 0) {
+              declaredHidden = { target, hidden: dr.hidden_matches, total: dr.total_matches };
+            }
+            return null;
+          }
+          const el = dr.rows[0]!;
+          declaredCleanup = dr.cleanup;
+          setDeclared({
+            ref: String(el.ref ?? "drf:0"), target, mode: dr.mode, matches: 1,
+            total_matches: dr.total_matches, hidden_matches: dr.hidden_matches,
+            frame: Number(el.frame ?? 0),
+          });
+          return { ref: String(el.ref ?? "drf:0"), el };
+        };
+        /** P0-C 首版能力面：DRF 目标只允许 click/scroll/hover（写值/拖拽/上传/坐标点击拒绝）。 */
+        const DECLARED_OPS = new Set(["click", "scroll", "hover"]);
         // P2 COMMAND SPACE — the step's action is chosen ON THE CLOSED SET, not on the pool:
         // `instantiateSpace` semantics implemented as the walk below (declaration × this
         // step's observation; a command resolving to nothing is OUT — with the same
@@ -3933,6 +4097,31 @@ export class BrowserMiddleware {
                 }
               }
             }
+            // P0-C：池 + hint 回捞 + FW8 身份回捞都空之后，policy=declared 才走 DRF
+            // （声明目标解析面）。命中即解析出 ref，不再询问模型；首版能力面 click/scroll/hover。
+            if (candRefs.length === 0 && target !== "" && this.targetResolutionDeclared
+                && hintCandidates(target, elems) === null) {
+              const got = await tryDeclared(target, String(c.op));
+              if (declaredStop !== null) break;
+              if (got !== null) {
+                if (!DECLARED_OPS.has(String(c.op))) {
+                  await cleanupDeclared();
+                  declaredStop = {
+                    code: "action_unsupported",
+                    reason: `command ${JSON.stringify(c.id)} declares op '${String(c.op)}', but its target `
+                      + `${JSON.stringify(target)} was resolved by the declared-DOM fallback (DRF) on step ${stepNo}`
+                      + ` — the first version allows only click/scroll/hover for DRF targets; use a pool/`
+                      + `identity target for '${String(c.op)}' or pick a supported op`,
+                  };
+                  break;
+                }
+                // 只进本步局部池：cmdPick 直接给出 ref，命令面不再询问模型（模型面剥离 declared 标记）。
+                elems[got.ref] = got.el;
+                pruneForbids(elems);
+                cmdPick = { cmd: c, ref: got.ref, index: i, cands: [got.ref] };
+                break;
+              }
+            }
             pruneForbids(elems);
             if (candRefs.length > 0) {
               cmdPick = { cmd: c, ref: candRefs[0]!, index: i, cands: candRefs.slice(0, CMD_CANDIDATE_ATTEMPTS) };
@@ -3955,6 +4144,12 @@ export class BrowserMiddleware {
           // FW8：身份回捞给出的结构化停因（歧义）优先于后续命令选择——绝不"随便选一个"。
           if (identityStop !== null) {
             stop(identityStop.code, identityStop.reason, stepNo);
+            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            break;
+          }
+          // P0-C：DRF 的歧义/首版能力面同样是结构化停因（绝不回退模型或"随便选一个"）。
+          if (declaredStop !== null) {
+            stop(declaredStop.code, declaredStop.reason, stepNo);
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
           }
@@ -4023,6 +4218,7 @@ export class BrowserMiddleware {
                   : ` — identity recovery: ${JSON.stringify(identityHidden.target)} matched `
                     + `${identityHidden.total} element(s) in the DOM but ${identityHidden.hidden} are hidden `
                     + `(checkVisibility CSS / zero box); hidden elements are never acted on`)
+                + declaredHiddenSuffix()
                 + underNote, stepNo);
             }
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
@@ -4088,6 +4284,27 @@ export class BrowserMiddleware {
                 }
               }
             }
+            // P0-C：act hint 的声明目标解析链最后一段——池 + ADMIT 回捞 + FW8 都落空后，
+            // policy=declared 才走 DRF。命中即注入本步局部池，规则层直接给出 ref（不问模型）；
+            // 首版只允许 click/scroll/hover，落到 fill 族目标 = 结构化 action_unsupported。
+            if (hintMatch(curHint, elems) === null && this.targetResolutionDeclared) {
+              const got = await tryDeclared(curHint, "click");
+              if (declaredStop !== null) break;
+              if (got !== null) {
+                if (this._isTyping(got.el)) {
+                  await cleanupDeclared();
+                  declaredStop = {
+                    code: "action_unsupported",
+                    reason: `act hint ${JSON.stringify(curHint)} was resolved by the declared-DOM fallback `
+                      + `(DRF) but the target ${got.el.tag} "${got.el.label}" needs a typing action on `
+                      + `step ${stepNo} — the first version allows only click/scroll/hover for DRF targets; `
+                      + `use a pool/identity target or declare the target on a click element`,
+                  };
+                  break;
+                }
+                elems[got.ref] = got.el;
+              }
+            }
           }
           // drop forbids whose ref now points at a different element
           pruneForbids(elems);
@@ -4107,9 +4324,21 @@ export class BrowserMiddleware {
           if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
         }
+        // P0-C：DRF 歧义/首版能力面同样是结构化停因。
+        if (declaredStop !== null) {
+          stop(declaredStop.code, declaredStop.reason, stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          break;
+        }
         if (identityHidden !== null) {
           warnings.push(`identity_hidden: target ${JSON.stringify(identityHidden.target)} matched `
             + `${identityHidden.total} element(s) in the DOM but ${identityHidden.hidden} are hidden `
+            + `(checkVisibility CSS / zero box) — not acted on; the step continues on the declared failure path`);
+        }
+        const declaredHiddenNow = getDeclaredHidden();
+        if (declaredHiddenNow !== null) {
+          warnings.push(`declared_hidden: target ${JSON.stringify(declaredHiddenNow.target)} matched `
+            + `${declaredHiddenNow.total} element(s) in the DOM but ${declaredHiddenNow.hidden} are hidden `
             + `(checkVisibility CSS / zero box) — not acted on; the step continues on the declared failure path`);
         }
         const commandMode = cmdSpace.length > 0;
@@ -4236,7 +4465,7 @@ export class BrowserMiddleware {
             + `${summary ? `: ${summary}` : ""}) after hintMatch / ADMIT recovery / FW8 identity recovery. `
             + `Fix the hint (closed set: #id | tag[attr=value] | tag[attr~substr] | tag~token | tag | bare-token) `
             + `or remove meta.policy.act_hint:"strict" to let the decision model pick instead`
-            + identityHiddenSuffix(), stepNo);
+            + identityHiddenSuffix() + declaredHiddenSuffix(), stepNo);
           if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
         }
@@ -4686,7 +4915,7 @@ export class BrowserMiddleware {
             ...(probe.reason === null ? {} : { reason: probe.reason }),
             ...(force ? { forced: true } : {}),
             would: `${el.tag} "${el.label}"`, url: urlOf(pg),
-            ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(),
+            ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(), ...declaredEvidence(),
           });
           if (verbose) {
             console.log(`  step ${stepNo}: DRY-RUN `
@@ -4702,7 +4931,7 @@ export class BrowserMiddleware {
           trace.push({
             step: stepNo, desc, how: "needs_value", executed: false, method, conf: 1.0,
             command: cmdPick!.cmd.id, ref: cmdPick!.ref, skipped: true, skip_reason: "needs_value",
-            url: urlOf(pg), ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(),
+            url: urlOf(pg), ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(), ...declaredEvidence(),
           });
           await cleanupIdentity();   // FW8：缺值在动作前停——章到此已无用途
           stop("needs_value",
@@ -4732,7 +4961,7 @@ export class BrowserMiddleware {
             trace.push({
               step: stepNo, desc, how: "needs_value", executed: false, method, conf: round3(conf),
               ref, skipped: true, skip_reason: "needs_value", url: urlOf(pg),
-              ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(),
+              ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(), ...declaredEvidence(),
             });
             await cleanupIdentity();   // FW8：本步不再动作（needs_value）——章清零
             if (verbose) console.log(`  step ${stepNo}: (needs_value, rule) -> skip ${ref}`);
@@ -4764,7 +4993,7 @@ export class BrowserMiddleware {
             trace.push({
               step: stepNo, desc, risky: true, executed: false, confirmed: false, url: urlOf(pg),
               ref, skipped: true, skip_reason: "risk-declined",
-              ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(),
+              ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(), ...declaredEvidence(),
             });
             await cleanupIdentity();   // FW8：风险闸门拒绝 = 本步不动作——章清零
             continue;
@@ -4804,8 +5033,23 @@ export class BrowserMiddleware {
           how = null; arg = null; fillEffect = undefined; actionability = null; probeFailure = null;
           // force：跳过 actionability 探针，直接按 Playwright force 语义动作（仍要求可定位）。
           // hover：探针的快路径本身就是一次真点击，悬停必须走 hover 分支、不能过探针。
-          if (!force && !this._isTyping(el) && !isScrollCommand && !isDragCommand && !isHoverCommand
-              && !isClickAtCommand) {
+          // P0-C：DRF 目标的 click 族动作前必须 hit-test——中心点被覆盖/命中的是祖先时
+          // 不点击，如实记 hit_test 证据（绝不静默成功）。命中通过后仍走既有 actionability 探针。
+          const declaredNow = getDeclared();
+          if (!force && declaredNow !== null && declaredNow.ref === ref && !this._isTyping(el)
+              && !isScrollCommand && !isDragCommand && !isHoverCommand && !isClickAtCommand) {
+            const ht = await this._declaredHitTest(pg, el);
+            if (!ht.ok) {
+              probeFailure = `hit_test:${ht.kind}`;
+              declaredNow.hit_test = ht.kind;
+              declaredNow.blocker = ht.blocker;
+              actionability = {
+                reason: probeFailure, bbox: null, blocker: ht.blocker, requery: "present",
+              };
+            }
+          }
+          if (probeFailure === null && !force && !this._isTyping(el) && !isScrollCommand
+              && !isDragCommand && !isHoverCommand && !isClickAtCommand) {
             probeFailure = await this.occludedReason(pg, el);
             // S1：actionability 失败现场（bbox/覆盖者/重查是否还在）；非该原因时保持 null。
             actionability = this._takeActionabilityDetail();
@@ -4877,6 +5121,8 @@ export class BrowserMiddleware {
             if (r !== null && !(r in forbidden)) freshRef = r;
           }
           if (freshRef === null || fresh[freshRef] === undefined) break;   // 此刻仍解析不到：不猜、按原失败报
+          const prevDeclared = getDeclared();
+          if (prevDeclared !== null && prevDeclared.ref !== freshRef) setDeclared(null);   // 证据只跟同一元素
           staleRetries.push({ attempt: attempt + 1, reason: staleReason, ref: freshRef });
           if (verbose) console.log(`  step ${stepNo}: stale retry ${attempt + 1} (${staleReason}) -> ${freshRef}`);
           elems = fresh;
@@ -4901,7 +5147,7 @@ export class BrowserMiddleware {
             ref, skipped: true, skip_reason: "config_error", url: urlOf(pg),
             ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
             ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...refCollision(),
-            ...identityEvidence(),
+            ...identityEvidence(), ...declaredEvidence(),
           });
           stop("config_error", detail, stepNo);
           if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
@@ -4942,7 +5188,7 @@ export class BrowserMiddleware {
             ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
             ...(actionability === null ? {} : { actionability }),
             ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...refCollision(),
-            ...identityEvidence(),
+            ...identityEvidence(), ...declaredEvidence(),
           });
           if (verbose) console.log(`  step ${stepNo}: (${reason}, ${method}) -> skip ${ref}`);
           continue;
@@ -5025,7 +5271,7 @@ export class BrowserMiddleware {
           ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question
           inert, url: urlOf(pg),
           ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...refCollision(),
-          ...identityEvidence(),
+          ...identityEvidence(), ...declaredEvidence(),
         });
         // A1 子改动③：这个已执行动作的 after 签名等下一次观察落账（见循环头部的落账点）。
         pendingAfterIdx = trace.length - 1;
@@ -5317,6 +5563,9 @@ export class BrowserMiddleware {
         ...(files !== null ? { files } : {}),
         ...(position !== null ? { position } : {}),
         ...(t["resolved_by"] === "dom_identity" ? { resolved_by: "dom_identity" as const } : {}),
+        ...(t["resolved_by"] === "declared_dom" ? { resolved_by: "declared_dom" as const } : {}),
+        ...(typeof t["declared_resolve"] === "object" && t["declared_resolve"] !== null
+          ? { declared_resolve: t["declared_resolve"] as NonNullable<ExecutedAction["declared_resolve"]> } : {}),
       };
     });
     // S4 证据汇总：stale 重试每次一条（trace 行本来就一次只落一行），force 只在真正执行时出现。
