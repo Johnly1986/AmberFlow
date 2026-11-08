@@ -243,6 +243,75 @@ export function signalArgs(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [v];
 }
 
+/* ------------------------------------------------------------------ 登录墙特征（P0-E 完成语义诚实） */
+
+/**
+ * P0-E：登录墙的 **URL 特征**（单一出处，`ctx.judge.loginWall()` 预设与执行器步级 guard 共用）。
+ * 词边界匹配（两侧必须是非字母数字）：`login` 命中 `/login.html?next=/`、`passport.ctrip.com`，
+ * 但**不**命中 `author.html`（auth→author）、`verified.html`（verify→verified）这类同缀误报。
+ */
+export const LOGIN_WALL_URL_RE =
+  /(^|[^a-z0-9])(login|signin|sign-in|sign_in|logon|passport|sso|auth|oauth|verify)([^a-z0-9]|$)/i;
+
+/** 登录墙的 **标题/正文特征**词（大小写不敏感子串；正文只在短页（非内容页）上计）。 */
+export const LOGIN_WALL_TEXTS = ["登录", "登入", "登陆", "login", "sign in", "登录墙"] as const;
+
+/**
+ * P0-E：`ctx.judge.loginWall()` 预设的信号形状（`any_of`，只由既有算子组成——
+ * dry 可构造、checkSignal 可求值、加载期校验零改动）。语义：**当前页像一堵登录墙**
+ * （URL 登录特征，或 title/h1/h2 登录文案）。用途是给否定式 done 配正向锚
+ * （`all_of(judge.not(...), judge.loginWall 的否定)`）或做步级 guard 的事实底座——
+ * 它是**诚实检测**信号，不是绕过登录的工具。
+ */
+export function loginWallSignal(): SignalSpec {
+  return {
+    any_of: [
+      { url_contains: "/login" }, { url_contains: "/signin" }, { url_contains: "/sign-in" },
+      { url_contains: "/sign_in" }, { url_contains: "/logon" }, { url_contains: "/passport" },
+      { url_contains: "/sso/" }, { url_contains: "/auth" }, { url_contains: "/verify" },
+      { url_contains: "passport." }, { url_contains: "sso." },
+      { css_exists_text: ["title", "登录"] }, { css_exists_text: ["title", "登入"] },
+      { css_exists_text: ["title", "login"] }, { css_exists_text: ["title", "sign in"] },
+      { css_exists_text: ["h1", "登录"] }, { css_exists_text: ["h2", "登录"] },
+      { css_exists_text: ["h1", "login"] }, { css_exists_text: ["h2", "login"] },
+      { css_exists_text: ["h1", "sign in"] }, { css_exists_text: ["h2", "sign in"] },
+    ],
+  };
+}
+
+/**
+ * P0-E：**弱信号判定**（lint 与步级 guard 共用的唯一口径）——顶层（或 all_of/any_of 的
+ * 直接分支里）出现 `not(...)`，而整棵信号树在**否定之外**没有任何正向锚
+ * （url_contains / css_* / manual 事实型谓词）。`not(...)` 内部的事实**不算**锚：
+ * 它成立时断言的是"缺席"，不是"在场"——R11 的
+ * `not(existsText(body,"8240家昆明酒店"))` 误入登录页照样成立，就是这一形状。
+ * `all_of(not(…), url_contains(…))`（否定+正向锚）不算弱。
+ */
+export function isWeakNegativeSignal(spec: SignalSpec): boolean {
+  let anchor = false;
+  let directNot = false;
+  const walk = (node: unknown, underNot: boolean): void => {
+    if (anchor && directNot) return;
+    if (typeof node !== "object" || node === null || Array.isArray(node)) return;
+    for (const [op, v] of Object.entries(node as Record<string, unknown>)) {
+      if (op === "not") {
+        if (!underNot) directNot = true;
+        walk(v, true);
+        continue;
+      }
+      if (op === "all_of" || op === "any_of") {
+        if (Array.isArray(v)) for (const c of v) walk(c, underNot);
+        continue;
+      }
+      // 正向锚 = 必须成立的 DOM/URL 事实；否定之下的事实不在此列（见上）。
+      if (!underNot && (op === "url_contains" || op === "manual"
+        || op.startsWith("css_"))) anchor = true;
+    }
+  };
+  walk(spec, false);
+  return directNot && !anchor;
+}
+
 /* ------------------------------------------------------------------ 语法校验 */
 
 /**

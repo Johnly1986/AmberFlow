@@ -441,6 +441,10 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
 - `result.warnings[]` 汇总跨步 flags（`done_preheld`/`no_state_progress`/`pool_empty`）与既有
   `suspected_async`；这些是**证据**，不改 done 语言、不影响完成真值。（W1 验收移除了一个
   控制流上不可达的串扰 flag——r8 跨城串扰签名由 `done_preheld` + `no_state_progress` 覆盖。）
+- **失败步计账（P0-E）**：result JSON 的 `steps_failed` = `step_traces` 里 `status:"failed"` 的步数
+  （仅 **>0 时出现**；`skipped`/`recovered` 不算失败），report.md 摘要行同加「失败步 n」。
+  `ok`/`verified` 语义**不变**——脚本容忍的步失败是数据不是判死：**受阻交付**（run 绿但交付数据
+  null）必须用交付 JSON + notes 表达，并用 `steps_failed`/报告摘要核对「这轮有步失败」这件事。
 
 **U3 就绪判档与扫描面（`pool_gate` / `surface`，2026-11）**
 
@@ -758,6 +762,8 @@ export async function flow(ctx) {
 - `jsonPath` 支持 **RFC 9535 子集**：点路径 + 方括号下标，`$` 前缀可选（`$.a.b` ≡ `a.b`、`$[0]` ≡ `[0]`、`$` = 根）。不新增表达式语法（无递归下降/过滤/通配）；旧的无 `$` 路径行为逐字节不变。载荷在 dry/`apps check` 期校验：path/want 必须是非空字符串，`exitCode` 必须是整数、`stdoutMatches` 必须是可编译正则、`fileExists/fileAbsent` 必须是非空路径——坏载荷 = 结构化 `config_error`，不留到运行期静默 false。
 - 工具信号不成立时，工具步的 `reason`/trace/报告带**结构化诊断**：`json_path_equals` 给出 path（含归一结果）、实际类型（object/array/string/number/boolean/null/undefined）与 ≤120 字符值摘要；退出码/stdout/stderr 类叶子给期望与实测。大对象只截摘要，敏感值沿用产物面既有 `scrubSecrets` 掩码。
 - 组合器可嵌套。**不要用“看起来完成了”代替证据**：`ctx.step` 返回的 `ok` 就是 done 信号是否成立。
+- **弱 done（P0-E）**：`done`/`when` 顶层是否定式（`not(...)`）且否定之外**没有正向锚**（`exists`/`url`/`text` 等事实型谓词；`not(...)` 内部的事实不算锚）→ `apps check`/dry 打一行 `weak_done` warning（仍 VALID、exit 0）。否定式 done 会被**无关导航蹭成立**（R11 实录：`not(existsText(body,"8240家昆明酒店"))` 误入 passport 登录页照样成立）。修法：`all_of(judge.not(...), 正向锚)`，或配 `ctx.judge.loginWall()` 做检测底座。
+- **`ctx.judge.loginWall()` 预设（P0-E）**：登录墙事实信号（`any_of`：URL 登录特征 `/login`|`/signin`|`/passport`|`/sso/`|`/auth`|`/verify`… 词边界不误报 `author`/`verified`，或 title/h1/h2 登录文案）。**诚实检测用**：给否定式 done 配正向锚、做步级 guard 的事实底座——不是绕过登录的工具。
 - **可用的 done = 「动作前不成立、动作后成立」**（判据，05/06 轮案例实证）：动作前已成立的信号（如任何页都真的 `exists("h1")`）在验证面**零贡献**——这一步的绿完全外包给 goal 语义与模型恰好点对，落点再意外也判绿（r06 `wide-done-sample` 实录）。守卫/到达/翻页步尤其警惕；用位置类选择器（`nth-child`/`nth-of-type`）前先实证**动作前命中数为 0**——站点数据可能自带"第 11 条"（r05 实证 `div.quote:nth-of-type(11)` 未滚动已真）。翻页类 done 优先用 URL 参数片段或**下一页独有内容锚**，别用两页共有的 h1/容器。
 
 
@@ -851,6 +857,7 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `max_effective_repeats` | `3` | 同一子目标里同一动作的最大有效重复 |
 | `risk_ask` | `always` | `rules-only` = 风险只走规则，不花每步前向 |
 | `done_preheld` | `warn` | pre-held done 的处置（`warn`/`fail`/`allow`）；只覆盖命令步 |
+| `done_guard` | `warn` | **P0-E**：done 成立后**只读**复核 guard（`false_done`）的处置。`warn` = 命中假绿特征只记 step warning（步骤仍 ok）；`fail` = 结构化停因 `false_done`（reason 含证据）。触发面：主 frame URL 词边界命中登录特征 / title 或 h1-h3 登录文案（短页正文剥掉链接文案后才计，页脚登录入口不误报）/ 跨出 `meta.hosts` 信封 / 「有动作但 changed=false 且 done 是否定式」。guard 是 tripwire 不是完成判定——完成仍只认 done 信号；正常登录类应用（会落在 `/passport` 这类 URL）建议保持缺省 `warn` |
 | `effect_readback` | `{fill:true,set_range:true}` | fill/setRange 的 effect 读回 |
 | `settle` | `{quiet_ms:400,timeout_ms:5000}` | 抽池前的稳定门（S2）：只在页面有 DOM 突变时等到静默；`"off"` 关闭。等待进 `state.settleMs` |
 | `pool_gate` | `fact` | U3 池空判档（仅 flow 面）：`fact` = 已就绪且池空记 `pool_empty` 后继续；`strict` = 旧 `page_not_ready` 快败 |
@@ -907,6 +914,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `target_ambiguous` | 目标命中多个不同候选；收窄 hint。`target_resolution:"declared"` 下 DRF 的两个可见文本/属性匹配同样报它（候选 tag/文本/frame/visible 在 reason 与 `skipped_actions`） |
 | `action_unsupported` | 目标存在但声明的动作 op 不在元素能力面内；换动作或换目标。DRF 首版只允许 `click`/`scroll`/`hover`——对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` 也报它（reason 明说首版限制） |
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |
+| `false_done` | **P0-E**（`done_guard:"fail"` 档）：done 成立但只读复核 guard 命中假绿特征——登录墙特征（URL/标题登录文案/跨出 hosts 信封）或「有动作但 changed=false 且 done 是否定式」的零前进蹭成立（R11：误点进登录页被算成功）。给 done 配正向锚（`all_of(not(...), 正向锚)`，必要时配 `ctx.judge.loginWall()`）；确属误报把 policy 改回 `warn`。缺省 `warn` 档只记 `false_done:` step warning，不改判定 |
 | `frame_not_allowed` | **仅当声明 target 或 done/when 只存在于 `meta.hosts` 之外的 frame**：第三方非交互 frame 默认排除（`frames_excluded` warning），**不需要**为此加 hosts；只有声明目标/完成信号确需该 frame 时才评估把它的 origin 加进 `meta.hosts`，否则把目标/done 改到允许 frame 内的事实。导航信封外的 goto 仍报 `host_not_allowed` |
 | `popup_not_allowed` | action 打开的新 tab / popup 不在 `meta.hosts` 内；声明 popup host 或避免打开外域 |
 | `navigation_forbidden` | `meta.policy.navigation:"entry-only"` 下入口之外的引擎直接 URL 导航被闸门拒绝；导航须经由页面元素完成（确需直达就移除该 policy）。见 §4.10 |

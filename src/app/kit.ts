@@ -14,6 +14,7 @@
  * 三段骨架：`data`（数据槽）｜`judge`（决策判断，落在每步的 `done`/`when` 与 `invariants`）｜
  * `exec`（决策执行）。kit 只提供构造器，**不提供**模型、时钟、网络、文件系统。
  */
+import { loginWallSignal, type SignalSpec } from "../engine/signals.ts";
 import type { ToolSignal } from "../browser/tool-signals.ts";
 
 /** 浏览器面完成/适用信号（与 `plan.ts` 的 signal 同形）。 */
@@ -110,6 +111,11 @@ export interface Kit {
     any(...s: DomSignal[]): DomSignal;
     not(s: DomSignal): DomSignal;
     manual(question: string): DomSignal;
+    /**
+     * P0-E：登录墙事实预设（`any_of`，见 signals.ts loginWallSignal）——URL 登录特征或
+     * title/h1/h2 登录文案。诚实检测信号：给否定式 done 配正向锚 / 步级 guard 用，非绕过工具。
+     */
+    loginWall(): DomSignal;
   };
   tool: {
     /** `exit_ok` 的值本身不参与判定；保留 `0` 是为了与既有冻结包逐字段对齐。 */
@@ -179,6 +185,7 @@ export function createKit(): Kit {
     any: (...s) => ({ any_of: s }),
     not: (s) => ({ not: s }),
     manual: (question) => ({ manual: question }),
+    loginWall: () => loginWallSignal() as DomSignal,
   };
   const tool: Kit["tool"] = {
     exitOk: (value = true) => ({ exit_ok: value }),

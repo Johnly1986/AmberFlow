@@ -8,6 +8,9 @@
 > 这是当前**默认的典型线上规划任务**，按"给 agent 的任务简报"执行与评估（不是 `npm run test` 的
 > pass/fail case——OTA 搜索接口动态、价格随时变化且有风控，`online/cases/probe/ctrip-web-travel-plan.json`
 > 只记录环境可用性事实）。评估实体：agent（子代理/人工）按本简报完成并交付结构化结果 + 证据。
+> **P0-E 完成语义诚实**：受阻交付（run 状态可能 PASSED/ok=true）必须用交付 JSON + notes 表达，
+> 并核对 result 的 `steps_failed`（>0 才出现）与报告「失败步」摘要；否定式弱 done 会被
+> `apps check` 的 `weak_done` lint 与步级 `false_done` guard 警告（`done_guard:"fail"` 档会结构化停）。
 
 **入口**：<https://www.ctrip.com/>（携程官网；站点声明 `online/sites/ctrip-probe.json`）
 

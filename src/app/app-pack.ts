@@ -179,6 +179,8 @@ export const POLICY_KEYS = [
   "candidate_priority",
   // S1 状态层：pre-held done 的处置 + fill/setRange 的 effect 读回。
   "done_preheld", "effect_readback",
+  // P0-E 完成语义诚实：done 成立后的只读复核 guard（false_done；缺省 warn = 只记录）。
+  "done_guard",
   // S2：抽池前的稳定门（缺省开启；"off" 关闭）。
   "settle",
   // U3：池空判档（缺省 "fact"；"strict" = U3 之前的 page_not_ready 快败）+ surface 类目策略。
@@ -283,6 +285,17 @@ export interface PackPolicy {
    * 步级 `forceAct` 优先于 `fail`：作者已显式声明“即使已成立也先把命令闭集走完”。
    */
   done_preheld?: "warn" | "fail" | "allow";
+  /**
+   * P0-E 完成语义诚实：done 成立后的**只读**复核 guard（`false_done`）的处置
+   * （缺省 `"warn"` = 只把证据记进 step warning，成功判定不变）：
+   *   - `warn`：guard 命中（登录墙特征：主 frame URL 词边界命中 / title 或 h1-h3 登录文案 /
+   *     跨出 meta.hosts 信封；或「有动作但 changed=false 且 done 是否定式」的零前进蹭成立）
+   *     ⇒ step warning `false_done: …`（含 URL/证据），步骤仍 ok；
+   *   - `fail`：命中 ⇒ 结构化停因 `false_done`（reason 含证据与修法）。
+   * guard 是诚实 tripwire，不是启发式完成判定：完成仍只认 done 信号；登录类应用
+   * （正常登录会落在 /passport 这类 URL）建议保持缺省 warn。
+   */
+  done_guard?: "warn" | "fail";
   /**
    * S1 状态层：fill / setRange 的 effect 读回（缺省两项都开）。
    *   - fill：动作后读回组件值并与写入值比对，结果进 `step_traces[i].state.effect`
@@ -1280,6 +1293,11 @@ export function validatePack(pack: AppPack,
       const dp = pol["done_preheld"];
       if (dp !== undefined && dp !== "warn" && dp !== "fail" && dp !== "allow") {
         p.push('policy.done_preheld: must be one of "warn" | "fail" | "allow"');
+      }
+      // P0-E：done_guard 档位（缺省 warn = 只记录；fail 才把 false_done 变成结构化停因）。
+      const dg = pol["done_guard"];
+      if (dg !== undefined && dg !== "warn" && dg !== "fail") {
+        p.push('policy.done_guard: must be one of "warn" | "fail"');
       }
       const er = pol["effect_readback"];
       if (er !== undefined) {

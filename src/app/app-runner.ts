@@ -629,6 +629,13 @@ export interface AppRunResult {
    */
   source_slots?: Record<string, string>;
   ok: boolean;
+  /**
+   * P0-E 完成语义诚实：**失败步计账**——`step_traces` 里 `status:"failed"` 的步数
+   * （仅 **>0 时出现**；`skipped`（when 不适用）/`recovered`（瞬断后挽回）不算失败）。
+   * `ok`/`verified` 语义**不变**：脚本容忍的步失败是数据不是判死——受阻交付
+   * （run 绿但数据 null）必须用交付 JSON + notes 表达，报告摘要点名「失败步 n」。
+   */
+  steps_failed?: number;
   /** 本次是分段运行：`ok` 只代表段内步骤成功，不代表整条旅程验收。 */
   partial?: true;
   /**
@@ -958,6 +965,8 @@ export interface EffectivePolicy {
   candidate_priority: { value: "bucketed" | "main-first"; source: "app" | "default" };
   /** S1：pre-held done 处置（缺省 warn = 只记录，不拦）。 */
   done_preheld: { value: "warn" | "fail" | "allow"; source: "app" | "default" };
+  /** P0-E：done 成立后的只读复核 guard（false_done）处置（缺省 warn = 只记录）。 */
+  done_guard: { value: "warn" | "fail"; source: "app" | "default" };
   /** S1：fill/setRange 的 effect 读回（缺省两项都开）。 */
   effect_readback: {
     value: { fill: boolean; set_range: boolean };
@@ -1060,6 +1069,11 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
     done_preheld: {
       value: declaredPolicy.done_preheld ?? "warn",
       source: declaredPolicy.done_preheld !== undefined ? "app" as const : "default" as const,
+    },
+    // P0-E：false_done guard（缺省 warn = 行为不变；显式声明才进 effective_policy 的账）。
+    done_guard: {
+      value: declaredPolicy.done_guard ?? "warn",
+      source: declaredPolicy.done_guard !== undefined ? "app" as const : "default" as const,
     },
     effect_readback: {
       value: {
@@ -1314,6 +1328,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     maxEffectiveRepeats: policy.max_effective_repeats.value,
     // S1 状态层：pre-held done 默认 warn（行为不变），fill 读回默认开。
     donePreheldPolicy: policy.done_preheld.value,
+    // P0-E：done 成立后的只读复核 guard（缺省 warn = 只记录，行为不变）。
+    doneGuardPolicy: policy.done_guard.value,
     fillReadback: policy.effect_readback.value.fill,
     // S2：稳定门（缺省开；null = meta.policy.settle:"off"）。
     settle: policy.settle.value,
@@ -1789,7 +1805,9 @@ export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): st
     "",
     `- 应用脚本：\`${r.pack_path}\``,
     `- 目标：${r.goal}`,
-    `- 结果：**${r.ok ? "通过" : r.partial === true ? "部分执行（预算用满）" : "未通过"}** ｜ 步骤 ${r.completed} ｜ 用时 ${r.secs}s`,
+    `- 结果：**${r.ok ? "通过" : r.partial === true ? "部分执行（预算用满）" : "未通过"}** ｜ 步骤 ${r.completed} ｜ 用时 ${r.secs}s`
+      // P0-E：失败步摘要（仅 >0 才出现；受阻交付——run 绿但交付 null——从这里一眼可见）。
+      + (r.steps_failed !== undefined && r.steps_failed > 0 ? ` ｜ **失败步 ${r.steps_failed}**` : ""),
     ...(r.script?.stop_code !== undefined
       ? [`- **结构化停因**：\`${r.script.stop_code}\`：${String(r.script.stop_reason ?? "").split("\n")[0].slice(0, 160)}`]
       : []),
@@ -2234,6 +2252,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           maxEffectiveRepeats: resolvedPolicy.policy.max_effective_repeats.value,
           // S1 状态层：pre-held done 处置 + fill effect 读回（与声明式路径同一份策略解析）。
           donePreheldPolicy: resolvedPolicy.policy.done_preheld.value,
+          doneGuardPolicy: resolvedPolicy.policy.done_guard.value,
           fillReadback: resolvedPolicy.policy.effect_readback.value.fill,
           // W8：敏感槽位键名单交给执行器——fill effect 读回在**源头**掩码（执行器构造
           // effect 一次，step_traces 与 result.state 两条投影同源同掩）。只传键不传值：
@@ -2622,6 +2641,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   const logs = trace.events.filter((e) => e.call === "log").map((e) => ({
     i: e.i, desc: e.desc ?? "", ...(e.result === undefined ? {} : { result: e.result }),
   }));
+  // P0-E：失败步计账（口径 = step_traces 中 status:"failed"；skipped/recovered 不算失败）。
+  // 仅 >0 才进 result——clean run 的键集与基线逐字节一致。
+  const stepsFailed = stepTraces.filter((t) => t.status === "failed").length;
   const stats = opts.runtimeStats ? opts.runtimeStats() : null;
   const decisions = summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0,
     opts.pickFailedAsks ? opts.pickFailedAsks() : 0,
@@ -2702,6 +2724,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     invariants,
     sources: sourceProjection,
     ok,
+    // P0-E：失败步计账（仅 >0 时出现；n=0 键集与基线逐字节一致）。
+    ...(stepsFailed > 0 ? { steps_failed: stepsFailed } : {}),
     // T2：返回值写进数据集后的审计视图（含 writtenBy/generation；没有 returns ⇒ 键缺席，
     // 与声明式路径同一字段名/形状，不另造一套）。
     ...(dataset.entriesView().length > 0 ? { dataset_view: [...dataset.entriesView()] } : {}),

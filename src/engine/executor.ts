@@ -84,6 +84,7 @@ import {
   poolSniff,
   probeExcludedHint,
   stateText,
+  urlInHostsEnvelope,
   urlOf,
   viewportUnderload,
   type ActionCapability,
@@ -116,7 +117,7 @@ import {
   hintMatch,
   navRule,
 } from "./rules.ts";
-import { checkSignal, type SignalSpec } from "./signals.ts";
+import { checkSignal, isWeakNegativeSignal, LOGIN_WALL_TEXTS, LOGIN_WALL_URL_RE, type SignalSpec } from "./signals.ts";
 // S2 稳定门：MutationObserver 传感器 + 有界静默等待（只作观察增强，不中断执行循环）。
 import { DEFAULT_SETTLE, installSettle, settle, type SettlePage, type SettleResult } from "./settle.ts";
 // 语法报错文案的唯一出处：形状清单不再手抄（grammar-prompt import 时自证与 parseHint 对齐）。
@@ -246,7 +247,14 @@ export type StopCode =
    * 覆盖范围：只有**命令步**（声明了 act 命令闭集）会在动作前预评估 done 并可能标记；
    * 决策步不付这次评估成本，因此不会出现 done_preheld。
    */
-  | "done_preheld";
+  | "done_preheld"
+  /**
+   * P0-E 完成语义诚实（policy.done_guard=fail 档）：done 成立后的只读复核 guard 判定
+   * 这一步的完成疑似假绿——登录墙特征（URL/标题文案/跨出 hosts 信封）或
+   * 「有动作但 changed=false 且 done 是否定式」的零前进蹭成立。默认 warn 档只记
+   * step warning，不改判定；fail 档才结构化停止（reason 带证据）。
+   */
+  | "false_done";
 
 /** Minimal locator surface used by the executor (superset of `extraction.LocLike`). */
 interface AnyLoc {
@@ -676,6 +684,11 @@ export interface RunOptions {
   /** `when` guard: evaluated after navigation, before any action. */
   precondition?: SignalSpec | null;
   /**
+   * P0-E：本步的原始 done 信号声明（弱否定判定与 guard 证据用；只读，不参与求值——
+   * 求值仍走 goalSignalFn。缺省 null = guard 的「弱 done 零前进」分支不启用）。
+   */
+  doneSpec?: SignalSpec | null;
+  /**
    * P2 COMMAND SPACE (the "check + submit in ONE
    * subgoal" use case): an ORDERED CLOSED SET of commands this step may execute,
    * declared by the app config and validated at load (`actions.validateCommands`).
@@ -866,6 +879,11 @@ export interface MiddlewareOptions {
    * 见 `PackPolicy.done_preheld`（app-pack.ts）的语义说明。
    */
   donePreheldPolicy?: "warn" | "fail" | "allow";
+  /**
+   * P0-E：步级 false_done guard 的处置（来自 `meta.policy.done_guard`；缺省 "warn" =
+   * 只记 step warning、不改判定；"fail" = done 成立但 guard 命中时结构化停 false_done）。
+   */
+  doneGuardPolicy?: "warn" | "fail";
   /** S1：fill 后读回 value 并与写入值比对（缺省 true；不可读组件自动降级跳过）。 */
   fillReadback?: boolean;
   /**
@@ -977,6 +995,36 @@ const EMPTIES_JS = `() => [...document.querySelectorAll('input:not([type=hidden]
   .map(e => ({tag: e.tagName.toLowerCase(), dt: e.getAttribute('data-test') || '',
               name: e.name || '', id: e.id || ''}))`;
 const FN_EMPTIES = asFunction(EMPTIES_JS);
+
+/**
+ * P0-E false_done guard 的只读复核（主 frame 一次 evaluate；不点击、不导航、不写值）。
+ * 收集登录墙特征证据：title / h1-h3 文案（内容页的登录**链接**不算——正文只在
+ * 短页（≤400 字符 ≈ 非内容页）上计，避免"页脚有登录入口"的误报）、正文头部。
+ */
+const GUARD_JS = `() => {
+  const kw = ['登录', '登入', '登陆', 'login', 'sign in'];
+  const hit = (s) => { const t = String(s || '').toLowerCase(); return kw.find(k => t.includes(k.toLowerCase())) || null; };
+  const m = hit(document.title);
+  if (m) return { title: document.title, hit: m, where: 'title' };
+  for (const sel of ['h1', 'h2', 'h3']) {
+    const el = document.querySelector(sel);
+    if (el) { const h = hit(el.textContent); if (h) return { title: document.title, hit: h, where: sel }; }
+  }
+  const body = document.body ? String(document.body.innerText || '') : '';
+  const head = body.slice(0, 400);
+  if (body.length <= 400 && body.trim()) {
+    // 页内的登录**链接**（如页脚"前往登录"）是导航入口不是墙：剥掉 <a> 文案后再匹配。
+    let hay = head;
+    for (const a of Array.from(document.querySelectorAll('a'))) {
+      const t = String(a.textContent || '').trim();
+      if (t) hay = hay.split(t).join('');
+    }
+    const b = hit(hay);
+    if (b) return { title: document.title, hit: b, where: 'body(short page)' };
+  }
+  return { title: document.title, hit: null, where: null };
+}`;
+const FN_GUARD = asFunction(GUARD_JS);
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -1589,6 +1637,8 @@ export class BrowserMiddleware {
   candidatePriority: "bucketed" | "main-first" = "bucketed";
   /** S1：pre-held done 处置（缺省 warn；fail 在动作前结构化停止）。 */
   donePreheldPolicy: "warn" | "fail" | "allow" = "warn";
+  /** P0-E：false_done guard 处置（缺省 warn；fail 在 done 成立后结构化停止）。 */
+  doneGuardPolicy: "warn" | "fail" = "warn";
   /** S1：fill 后读回（缺省 true）。 */
   fillReadback = true;
   /** W8：敏感槽位键名单（见 `MiddlewareOptions.secretSlotKeys`；缺省空 = 无敏感槽位）。 */
@@ -1894,6 +1944,7 @@ export class BrowserMiddleware {
     this.targetResolutionDeclared = opts.targetResolution === "declared";
     if (opts.surfacePolicy !== undefined) this.surfacePolicy = { ...opts.surfacePolicy };
     this.donePreheldPolicy = opts.donePreheldPolicy ?? this.donePreheldPolicy;
+    this.doneGuardPolicy = opts.doneGuardPolicy ?? this.doneGuardPolicy;
     this.fillReadback = opts.fillReadback ?? this.fillReadback;
     this.secretSlotKeys = opts.secretSlotKeys ?? this.secretSlotKeys;
     if (opts.settle !== undefined) this.settlePolicy = opts.settle;
@@ -3402,6 +3453,7 @@ export class BrowserMiddleware {
       verbose = true,
       targetHints = null,
       precondition = null,
+      doneSpec = null,
       expectedFamily = null,
       manualGoal = false,
       manualConfirmFn = this.manualConfirmFn,
@@ -5625,6 +5677,46 @@ export class BrowserMiddleware {
         + `frames_excluded 只是默认排除第三方非交互 frame，不需要为此加 hosts；`
         + `仅当声明 done 确需该 frame 时才评估把它的 origin 加进 meta.hosts，`
         + `否则把 done 锚到允许 frame 内的事实`;
+    }
+    // P0-E 完成语义诚实：done 成立后的**只读**复核 guard（false_done）。不改完成判定——
+    // 除非 policy.done_guard:"fail"；缺省 warn 档只把证据记进 warnings（步骤仍 ok）。
+    // 触发面：① 登录墙特征（主 frame URL 词边界命中 / title 或 h1-h3 登录文案 /
+    // 跨出 meta.hosts 信封）；② 有动作但全部 changed=false 且 done 是否定式（零前进蹭成立）。
+    if (done && !manualDone && !dryRan && goalSignalFn !== null && page !== null) {
+      const liveUrl = (() => { try { return String(urlOf(page) ?? ""); } catch { return ""; } })();
+      const ev = await (async (): Promise<Record<string, string> | null> => {
+        const out: Record<string, string> = {};
+        if (LOGIN_WALL_URL_RE.test(liveUrl)) out.url_hit = liveUrl;
+        if (hostGate !== null && hostGate.length > 0 && liveUrl
+          && !urlInHostsEnvelope(liveUrl, hostGate)) out.host_outside = liveUrl;
+        try {
+          const r = await (page as AnyPage).evaluate(FN_GUARD) as { hit?: string | null; where?: string | null };
+          if (r && r.hit) out.text_hit = `${r.where}: "${r.hit}"`;
+        } catch { /* 只读复核拿不到就跳过这一项，不影响判定 */ }
+        return Object.keys(out).length ? out : null;
+      })();
+      const zeroProgress = doneSpec !== null && isWeakNegativeSignal(doneSpec)
+        && executedCount > 0 && !trace.some((t) => t["executed"] === true && t["changed"] === true);
+      if (ev !== null || zeroProgress) {
+        const parts: string[] = [];
+        if (ev?.url_hit) parts.push(`main-frame URL matches a login-wall feature`);
+        if (ev?.text_hit) parts.push(`page text matches a login-wall feature (${ev.text_hit})`);
+        if (ev?.host_outside) parts.push(`main frame is outside the declared hosts envelope`);
+        if (zeroProgress) parts.push("done is negative-only and executed action(s) changed nothing (changed=false)");
+        const why = `false_done guard: the done signal held but ${parts.join("; ")} `
+          + `— completion may have been borrowed by unrelated navigation `
+          + `(R11: a mis-click to a login page counted as success); current URL: ${liveUrl || "(unknown)"}; `
+          + `evidence: ${JSON.stringify(ev ?? {})} `
+          + `；修法：给 done 配正向锚（exists/holds/url），如 all_of(not(...), 正向锚)，必要时配 ctx.judge.loginWall()`;
+        if (this.doneGuardPolicy === "fail") {
+          done = false;
+          stop("false_done", why);
+          if (verbose) console.log(`  step: ${stopReason}`);
+        } else {
+          if (!warnings.some((w) => w.startsWith("false_done:"))) warnings.push(`false_done: ${why}`);
+          if (verbose) console.log(`  step: warning false_done (done stays ok; policy.done_guard="warn")`);
+        }
+      }
     }
     const verdict = (await this.auditor.audit(instruction, trace, done)) as AuditVerdict;
     const stoppedCode = stopCode as StopCode;

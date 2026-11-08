@@ -1184,6 +1184,8 @@ export function createCtx(deps: CtxDeps): Ctx {
       verbose: deps.verbose === true,
     };
     if (req.when !== undefined && req.when !== null) opts["precondition"] = req.when;
+    // P0-E：原始 done 声明进执行器（只读；false_done guard 的「弱 done 零前进」判定用）。
+    opts["doneSpec"] = req.done as never;
     // A1 forceAct：只把声明透传给执行器（缺省不出现 = 既有行为不变；执行器只记录、不改变顺序）。
     if (req.forceAct === true) opts["forceAct"] = true;
     // S4：步级 force / staleRetry 同样是显式声明（缺省不出现 = 既有行为逐字节不变）。

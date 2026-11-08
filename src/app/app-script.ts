@@ -20,6 +20,7 @@ import { validateApp } from "./cross-ref.ts";
 import { createKit, type Kit } from "./kit.ts";
 import { lowerMeta, type ScriptMeta } from "./app-meta.ts";
 import { StopError, type Ctx } from "./ctx.ts";
+import { isWeakNegativeSignal } from "../engine/signals.ts";
 import { createDryCtx } from "./ctx-dry.ts";
 import { finishTrace, inputsSha256, newTrace, type AppTrace } from "./trace.ts";
 
@@ -204,9 +205,13 @@ export function scriptDisplayPath(scriptPath: string): string {
 }
 
 /**
- * 信号 lint（A1 子改动②）：两种**已知假绿形态**的静态检查——只警告、不判 FAIL，dry run 仍 VALID。
+ * 信号 lint（A1 子改动② + P0-E 完成语义诚实）：**已知假绿形态**的静态检查——只警告、
+ * 不判 FAIL，dry run 仍 VALID（exit 0）。
  * 只读 `SignalSpec` 的数据形状，不改 `checkSignal` 的运行时语义（11 轮真站实测的行为依据）：
- *   (i)  done 顶层是裸 not(...)：池被清空/重渲染的瞬间，否定式空洞成立（假绿 + 0 卡）；
+ *   (i)  done/when 顶层是**否定式且无正向锚**（`isWeakNegativeSignal`，signals.ts 单一口径）：
+ *        否定之下的事实不是锚（成立时断言的是缺席）——R11 的
+ *        `not(existsText(body,"8240家昆明酒店"))` 误入 passport 登录页照样成立（假绿 + 0 卡）。
+ *        `all_of(not(...), 正向锚)`（否定+锚）不算弱，不告警；
  *   (ii) done 是 any(...) 且分支里有 not(exists(...))、同时该步声明了 ≥2 个命令：多动作闭集的
  *        中间态（第一击点开菜单）即可让 not(exists) 分支成立（菜单类两连击假绿）。
  * exists 取 `css_exists`（信号语言里唯一的纯存在算子）；只查顶层与 any 的直接分支，不递归，
@@ -215,9 +220,10 @@ export function scriptDisplayPath(scriptPath: string): string {
 function signalLintProblems(done: unknown, where: string, commandCount: number): string[] {
   if (!isObj(done)) return [];
   const out: string[] = [];
-  if (Object.keys(done).length === 1 && "not" in done) {
-    out.push(`信号 lint: ${where}: done 顶层是裸 not(...) — `
-      + "否定式 done 建议配正向 exists 约束（空池/重渲染瞬间会空洞成立）");
+  if (isWeakNegativeSignal(done as Record<string, unknown>)) {
+    out.push(`weak_done: ${where}: top-level negative-only signal (not(...) without a positive anchor) `
+      + "may be satisfied by unrelated navigation (e.g. mis-click to a login page counted as success); "
+      + "add a positive anchor (exists/holds/url) or pair with ctx.judge.loginWall()");
   }
   if ("any_of" in done && Array.isArray(done.any_of) && commandCount >= 2) {
     const notExistsBranch = (done.any_of as unknown[]).some((b) => {
@@ -341,9 +347,20 @@ export async function dryRunFlow(loaded: LoadedScriptApp, opts: {
   for (const ev of trace.events) {
     if (ev.call !== "step") continue;
     const where = `ctx.step(${JSON.stringify(ev.desc ?? "")})`;
-    const done = isObj(ev.result) ? ev.result["done"] : undefined;
+    const res = isObj(ev.result) ? ev.result : {};
+    // P0-E：done / when / precondition 三个声明位都过弱否定 lint（同一口径、同一消息）。
+    const done = res["done"];
     for (const w of signalLintProblems(done, where, stepCommandCount.get(ev.i) ?? 0)) {
       console.error(w);
+    }
+    for (const key of ["when", "precondition"] as const) {
+      const sig = res[key];
+      if (sig === undefined || !isObj(sig)) continue;
+      if (isWeakNegativeSignal(sig as Record<string, unknown>)) {
+        console.error(`weak_done: ${where}: ${key} top-level negative-only signal `
+          + "may be satisfied by unrelated navigation (e.g. mis-click to a login page counted as success); "
+          + "add a positive anchor (exists/holds/url) or pair with ctx.judge.loginWall()");
+      }
     }
   }
   // S3：**静态调用点对账**。dry 只走得到被执行的分支：源码里出现了 N 处 `ctx.expand(`，

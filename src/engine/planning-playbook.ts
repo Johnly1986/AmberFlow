@@ -99,6 +99,7 @@ export const STOP_NEXT: Readonly<Record<string, string>> = {
   noul_unverified: "模型声称 done 但无 DOM 信号可验证：补一个可验证的完成信号（url/css_*）；不要依赖模型口头 done",
   no_progress: "同一元素有效执行多次而信号从不成立：目标疑似死元素或信号永不成立——换目标/修 done 信号（inspect 实证）",
   done_preheld: "done 在动作前已成立（policy.done_preheld=\"fail\" 才停）：把 done 换成动作后才出现的证据（弹出菜单项/跳转 URL/面板内新元素）；确需先动作再判，用步级 forceAct:true 或把 policy.done_preheld 改回 warn",
+  false_done: "done 成立但只读复核 guard 命中假绿特征（policy.done_guard=\"fail\" 才停）：登录墙特征/跨出 hosts 信封/否定式 done 零前进——给 done 配正向锚（exists/holds/url），如 all_of(not(...), 正向锚)，必要时配 ctx.judge.loginWall()；确属误报就把 policy.done_guard 改回 warn",
   space_empty: "声明的命令空间在页面无任何可解析元素：先 inspect --wide --pool 实证页面；环境与声明严重不符时修声明",
   nominated_family_empty: "提名族在该页无候选：inspect 实证该族元素是否存在；修 roles/meta 提名或放宽提名",
   nominated_family_mismatch: "动作族与提名不符：按 inspect 实证改提名，或改用页面真实控件族",

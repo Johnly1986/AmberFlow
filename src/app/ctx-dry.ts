@@ -203,7 +203,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     return { before: fp, after: fp, actions: { attempted: 0, executed: 0, changed: 0 }, flags: [] };
   };
   const recordStep = (desc: string, done?: unknown, ok = true, stopCode?: string, id?: string,
-                      forceAct = false, force = false, staleRetry = false): StepResult => {
+                      forceAct = false, force = false, staleRetry = false,
+                      when?: unknown): StepResult => {
     checkBudget();
     budget.stepsUsed += 1;
     const state = dryState();
@@ -219,6 +220,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       // S1：state 是合成形状（见 dryState），保证 dry/真实消费者不分叉。
       result: {
         ...(done === undefined ? {} : { done }),
+        // P0-E：when 声明进 dry 事件（weak_done lint 的对象面；运行期 when 求值不变）。
+        ...(when === undefined || when === null ? {} : { when }),
         ...(forceAct ? { force_act: true } : {}),
         ...(force ? { forced: true } : {}),
         ...(staleRetry ? { stale_retry: true } : {}),
@@ -352,7 +355,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
         currentUrl = resolved;
       }
       return recordStep(desc, req.done, true, undefined, req.id,
-        req.forceAct === true, req.force === true, req.staleRetry === true);
+        req.forceAct === true, req.force === true, req.staleRetry === true, req.when);
     },
     // A3 dry 桩：**参数校验真做**（未知形状/非法值在 dry 期红），动作与结果按文档形状确定性模拟。
     // S3：校验抛错前先落 `validation_error`（见 validatePrimitive），吞错也逃不过 apps check。
