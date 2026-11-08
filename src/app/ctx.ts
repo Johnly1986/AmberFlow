@@ -1985,7 +1985,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       text: async (sel) => {
         let value: string | null = null;
         try {
-          const loc = await locatorAnyFrame(await page(), sel);
+          const loc = await locatorAnyFrame(await page(), sel, { hosts });
           if (loc !== null) value = String(await firstOf(loc).innerText({ timeout: 1500 }));
         } catch { value = null; }
         pushEvent(trace, { call: "read", desc: `text(${sel})`, result: value });
@@ -1994,7 +1994,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       value: async (sel) => {
         let value: string | null = null;
         try {
-          const loc = await locatorAnyFrame(await page(), sel);
+          const loc = await locatorAnyFrame(await page(), sel, { hosts });
           if (loc !== null) value = String(await firstOf(loc).inputValue({ timeout: 1500 }));
         } catch { value = null; }
         pushEvent(trace, { call: "read", desc: `value(${sel})`, result: value });
@@ -2003,7 +2003,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       count: async (sel) => {
         let value = 0;
         try {
-          const loc = await locatorAnyFrame(await page(), sel);
+          const loc = await locatorAnyFrame(await page(), sel, { hosts });
           value = loc === null ? 0 : Number(await loc.count());
         } catch { value = 0; }
         pushEvent(trace, { call: "read", desc: `count(${sel})`, result: value });
@@ -2014,7 +2014,7 @@ export function createCtx(deps: CtxDeps): Ctx {
         if (typeof attr !== "string" || !attr.trim()) throw new StopError("config_error", "ctx.read.attr: attribute name must be a non-empty string");
         let value: string | null = null;
         try {
-          const loc = await locatorAnyFrame(await page(), sel);
+          const loc = await locatorAnyFrame(await page(), sel, { hosts });
           if (loc !== null) {
             const inner = firstOf(loc) as { getAttribute?(n: string, o?: { timeout?: number }): Promise<string | null> };
             if (typeof inner.getAttribute === "function") value = await inner.getAttribute(attr, { timeout: 1500 });
@@ -2026,7 +2026,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     },
     holds: async (sig) => {
       if (!isObj(sig) || !Object.keys(sig).length) throw new StopError("config_error", "ctx.holds needs a non-empty signal");
-      const ok = await checkSignal(await page(), sig as never);
+      const ok = await checkSignal(await page(), sig as never, { hosts });
       pushEvent(trace, { call: "holds", ok });
       return ok;
     },
@@ -2041,7 +2041,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       // 轮询语义：至少检查一次；最后一次 sleep 裁到 deadline，不让“下一次会越界”提前退出。
       while (true) {
         try {
-          if (await checkSignal(p as never, sig as never)) { held = true; break; }
+          if (await checkSignal(p as never, sig as never, { hosts })) { held = true; break; }
         } catch (e) {
           throw new StopError("config_error", `ctx.waitFor: ${e instanceof Error ? e.message : String(e)}`);
         }

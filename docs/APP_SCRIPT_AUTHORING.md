@@ -199,7 +199,7 @@ export const meta = (kit) => ({
 | 字段 | 说明 |
 |---|---|
 | `id` / `label` / `goal` | 应用标识与一句话目标；`id`、`goal` 必填，`label` 缺省 = `id` |
-| `hosts` | 允许的主机列表；导航信封在 dry 与真实运行都执行。**要预判重定向落点**：链接 href 的主机变体（apex ↔ `www.`）与 301 后的真实落点都要进信封——实测 href 指 `iana.org`、实际落 `www.iana.org`，只声明 href 侧会在落地撞 `host_not_allowed`（2026-11-01） |
+| `hosts` | 允许的主机列表；导航信封在 dry 与真实运行都执行。**要预判重定向落点**：链接 href 的主机变体（apex ↔ `www.`）与 301 后的真实落点都要进信封——实测 href 指 `iana.org`、实际落 `www.iana.org`，只声明 href 侧会在落地撞 `host_not_allowed`（2026-11-01）。**子 frame 不是导航信封**：信封外的第三方 iframe 默认只排除出解析面（`frames_excluded` warning），不因广告/统计 iframe 废掉正常步骤；只有声明 target / done 只存在于该 frame 时才 `frame_not_allowed`（见 §4.9 末「frame 门禁」） |
 | `slots` / `requiredSlots` | 数据槽与必填槽；缺值返回 `needs_value`，不猜 |
 | `secretSlots` | 敏感槽位名单（如 `password`、`otp`）：result/report/stdout/dry 输出时掩码为 `***`；值仍建议走 env/本机配置，别写进 app.mjs |
 | `sources` | 数据腿名（`ctx.source(name)` 按名字按需加载） |
@@ -584,6 +584,20 @@ const sw = await ctx.switchTab({ urlContains: "help" });  // 恰好一个匹配�
 - **未做**：动作后自动跟随新标签页（auto-follow）不在本版范围内，留作后续 policy 提案；
   popup 闸门语义不变（外域新页仍按 `popup_not_allowed` 拦截）。
 
+**frame 门禁（P0-D，精确化）**。声明 `meta.hosts` 之外的子 frame（广告像素 / 统计 / 第三方
+widget）**默认只排除出解析面**，不再是整步 REJECT：池抽取、`hintLookup`、FW8 身份回捞、DRF、
+`locatorAnyFrame`、done/when 求值都只在**允许帧**（frame origin 在 `hosts` 内；主 frame 恒允许）
+上进行；被排除 frame 记一条 step warning `frames_excluded: [origin…]`（含"已排除、不影响页面
+其余操作"）。被排除帧里的元素不进池、不会被动作，但池中其余元素的真实 `frame` 下标与 `f<fi>:`
+ref 不变（只排除解析面，不重编号）。**只有声明面命中被排除 frame 才拒绝**：①声明 target
+（`ctx.hint(...)` / 命令 `target`）在池 → ADMIT → FW8 → DRF 全落空后，引擎**只读探测**（不盖章、
+不动作）该目标是否只存在于被排除 frame——是则结构化 `frame_not_allowed`，reason 点名 frame
+origin + 目标 + 只读匹配证据 + 修法：第三方非交互 frame 默认排除，**不需要**为此加 hosts；
+**仅当声明目标确需该 frame 时才评估把它的 origin 加进 `meta.hosts`**；②声明 done/when 在允许帧
+上不成立、只读地在被排除帧上再判一次——只在那里成立 = `frame_not_allowed`（done 依赖被排除
+frame），允许帧已成立 = 正常成功。其余情况步骤照常，只在 warnings 里留记；无被排除帧时零新
+字段/零新行为（逐字节）。导航信封（goto 起点/落地）与 popup 门禁不变。
+
 ### 4.10 导航纪律：`meta.policy.navigation`（entry-only）
 
 背景（评估实测）：agent 会用"直接构造 URL 跳转/拼参数直达结果页"绕过页面操作——这类行为
@@ -893,7 +907,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `target_ambiguous` | 目标命中多个不同候选；收窄 hint。`target_resolution:"declared"` 下 DRF 的两个可见文本/属性匹配同样报它（候选 tag/文本/frame/visible 在 reason 与 `skipped_actions`） |
 | `action_unsupported` | 目标存在但声明的动作 op 不在元素能力面内；换动作或换目标。DRF 首版只允许 `click`/`scroll`/`hover`——对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` 也报它（reason 明说首版限制） |
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |
-| `frame_not_allowed` | frame origin 不在 `meta.hosts` 内；声明 frame host 或避免跨 frame 动作 |
+| `frame_not_allowed` | **仅当声明 target 或 done/when 只存在于 `meta.hosts` 之外的 frame**：第三方非交互 frame 默认排除（`frames_excluded` warning），**不需要**为此加 hosts；只有声明目标/完成信号确需该 frame 时才评估把它的 origin 加进 `meta.hosts`，否则把目标/done 改到允许 frame 内的事实。导航信封外的 goto 仍报 `host_not_allowed` |
 | `popup_not_allowed` | action 打开的新 tab / popup 不在 `meta.hosts` 内；声明 popup host 或避免打开外域 |
 | `navigation_forbidden` | `meta.policy.navigation:"entry-only"` 下入口之外的引擎直接 URL 导航被闸门拒绝；导航须经由页面元素完成（确需直达就移除该 policy）。见 §4.10 |
 | `manual_signal_not_held` / `manual_declined` / `needs_human` | 人工步：DOM 信号没验过 / 人放弃 / 非 TTY 需要人 |

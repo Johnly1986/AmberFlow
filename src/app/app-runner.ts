@@ -1392,7 +1392,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     if (page === null) {
       return { done: false, reason: "manual DOM signal needs a page (declare start_url or run after a browser step)" };
     }
-    const held = await checkSignal(page as never, decl.signal);
+    const held = await checkSignal(page as never, decl.signal, { hosts: pack.hosts ?? null });
     return held ? { done: true, attested: false } : { done: false, reason: "manual_signal_not_held" };
   };
 
@@ -1609,7 +1609,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
           if (verbose) console.log(`  [journey] next candidate ${JSON.stringify(cand.id ?? j)} not evaluated (no page yet)`);
           return false;
         }
-        return await checkSignal(holder.session.page as never, when);
+        return await checkSignal(holder.session.page as never, when, { hosts: pack.hosts ?? null });
       });
       // 被声明式边**跨过去**的步：这条边就是作者对"这条路径上它不适用"的声明，
       // 所以记成 `skipped`（不是留在 pending——那会让任何前向分支都红）。
@@ -1637,7 +1637,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       let held = false;
       if (kind === "web") {
         // web 不变量：在浏览器会话的结束状态上求值（既有语义，逐字节不变）。
-        held = live === null ? false : await checkSignal(live.page as never, inv.signal as never);
+        held = live === null ? false : await checkSignal(live.page as never, inv.signal as never, { hosts: pack.hosts ?? null });
       } else {
         // 进程族不变量：用该类型的**只读观察探针**在旅程结束后再验一次（如 ssh 看远端文件还在）。
         const adapter = getAppAdapter(kind);

@@ -22,7 +22,7 @@
  *   - 本模块不认识"模型"：不调用 provider，回捞元素不会进入 `ChoiceRequest.elems` 的
  *     模型投影（调用方在 pickInner 剥离 `declared` 旁路标记）。
  */
-import { framesOf, type Elem, type ElemPool, type PageLike } from "./extraction.ts";
+import { frameInHostsEnvelope, framesOf, type Elem, type ElemPool, type PageLike } from "./extraction.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
 import { hintCandidates } from "./rules.ts";
 import { parseHint } from "./hint.ts";
@@ -234,6 +234,7 @@ export async function declaredLookup(
   hint: string,
   op = "click",
   surfacePolicy: SurfacePolicy = { native_activation: "window" },
+  hosts?: string[] | null,
 ): Promise<DeclaredResolveResult> {
   const parsed = typeof hint === "string" && hint.trim() ? parseHint(hint) : null;
   const mode: "attr" | "text" = parsed?.kind === "bare" ? "text" : "attr";
@@ -253,6 +254,8 @@ export async function declaredLookup(
   const frames = framesOf(page);
   const collected: Array<{ fi: number; row: RawRow }> = [];
   for (let fi = 0; fi < frames.length; fi++) {
+    // P0-D：DRF 只在 host 信封内的 frame 上解析（排除帧不参与声明目标解析）。
+    if (fi > 0 && !frameInHostsEnvelope(frames[fi]!, hosts)) continue;
     let raw: unknown;
     try {
       raw = mode === "text"

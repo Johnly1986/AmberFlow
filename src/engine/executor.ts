@@ -74,12 +74,15 @@ import {
   actionCapabilities,
   firstOf,
   frameAt,
+  frameGateOf,
   framesOf,
+  framesScopedPage,
   hintLookup,
   identityLookup,
   formatIdentityCandidates,
   orderElemsByFamily,
   poolSniff,
+  probeExcludedHint,
   stateText,
   urlOf,
   viewportUnderload,
@@ -87,6 +90,7 @@ import {
   type Elem,
   type ElemFamily,
   type ElemPool,
+  type FrameGate,
   type PageLike,
 } from "./extraction.ts";
 import { declaredLookup, formatDeclaredCandidates, type DeclaredCandidate } from "./declared.ts";
@@ -1569,6 +1573,11 @@ export class BrowserMiddleware {
   /** U3：surface 类目策略（缺省 native_activation="window"）。 */
   surfacePolicy: SurfacePolicy = { native_activation: "window" };
   /**
+   * P0-D：本次 run 生效的 host 信封（`hosts ?? this.hosts`）。池/hint/identity/DRF 的抽帧面
+   * 用它排除第三方 iframe；null = 无声明 = 与今天逐字节相同。
+   */
+  private _frameHosts: string[] | null = null;
+  /**
    * P0-B：act_hint:"strict"（缺省 false = 今天）。为 true 时，声明目标解析链
    * （池 hintMatch → ADMIT 回捞 → FW8 身份回捞 → rules-only 宽扫）全部未命中后
    * 不再交给模型自由选，直接结构化 target_not_found。
@@ -1777,6 +1786,7 @@ export class BrowserMiddleware {
     const settleRes = await this._settleBeforeExtract(page, deadlineMs);
     const elems = await extractElements(page, true, undefined, {
       candidatePriority, surface: this.surfacePolicy,
+      hosts: this._frameHosts,                       // P0-D：被排除 frame 不进池
     });
     return { elems, settle: settleRes };
   }
@@ -3427,6 +3437,7 @@ export class BrowserMiddleware {
     // The navigation envelope: run-level declaration wins, else the middleware's
     // (set once for a whole journey by the app runner from `pack.hosts`).
     const hostGate = hosts ?? this.hosts;
+    this._frameHosts = hostGate ?? null;
     // P2 command space: the ordered closed set for THIS subgoal. Progress is per-run
     // local state (a retry re-runs the whole subgoal, so the space restarts walking
     // from the top — exactly the `retries` contract).
@@ -3532,6 +3543,9 @@ export class BrowserMiddleware {
     let readyEmptyWarned = false;
     /** U3：本 run 是否出现过 ready_empty（池空但已就绪）——进 flags，不改变 done 语言。 */
     let poolEmptyThisStep = false;
+    /** P0-D：帧门禁（null = 无声明/无排除帧 = 旧行为）与 "done 只在被排除帧成立" 事实。 */
+    let frameGate: FrameGate | null = null;
+    let doneInExcluded = false;
     /** ONE place where the loop decides to stop (D1/D4): sets code + step, and the
      *  human string when given. Every stop site goes through here. */
     const stop = (code: StopCode, detail?: string, at?: number): void => {
@@ -3683,24 +3697,84 @@ export class BrowserMiddleware {
             audit: { verdict: "REJECT", reasons: [why], auditor: "navigation-envelope" },
           };
         }
-        const deniedFrame = deniedFrameUrl(pg, hostGate);
-        if (deniedFrame !== null) {
-          const why = `frame not allowed: ${deniedFrame} is outside the declared hosts envelope `
-            + `(${hostGate.join(", ")}) — frame origins are part of the same host gate`
-            + `；若该 widget/iframe 是流程必需（如 Google apps 抽屉在 ogs.google.com），把它的 origin 加进 meta.hosts 后重跑`;
-          if (verbose) console.log(`  -> REFUSED before navigation: ${why}`);
-          return {
-            goal: instruction, done: false,
-            stop_reason: why, stop_code: "frame_not_allowed",
-            steps: [],
-            audit: { verdict: "REJECT", reasons: [why], auditor: "navigation-envelope" },
-          };
-        }
       }
+      /**
+       * P0-D：**frame 门禁精确化**。声明 host 信封之外的第三方 iframe 默认**只排除出解析面**
+       * （池/hint/FW8/DRF/locatorAnyFrame/done/when 都不读它），不再是"整步 REJECT"。
+       * 只有"声明 target / done 仅存在于被排除 frame"才结构化 frame_not_allowed（见下方
+       * 声明目标解析失败点与收尾 done 复核）。无排除帧 = 逐字节旧行为。
+       */
+      frameGate = hostGate && hostGate.length ? frameGateOf(pg, hostGate) : null;
+      const excludedView = frameGate === null
+        ? null : framesScopedPage(pg, frameGate.excluded.map((e) => e.frame));
+      /** 允许帧视图：所有读面（done/when/池…）都只看它；无排除帧时就是真 page（零行为差）。 */
+      const readPage: AnyPage = frameGate === null
+        ? pg : (framesScopedPage(pg, frameGate.allowed) as unknown as AnyPage);
+      if (frameGate !== null) {
+        warnings.push(
+          `frames_excluded: [${frameGate.origins.join(", ")}] — ${frameGate.excluded.length} third-party `
+          + `frame(s) outside the declared hosts envelope (${hostGate!.join(", ")}) are EXCLUDED from the `
+          + `read surface (pool / hint / identity / declared-DOM / done / when / locatorAnyFrame); `
+          + `已排除、不影响页面其余操作。Only if a declared target or done signal truly needs one of these `
+          + `frames is frame_not_allowed raised — at that point decide whether to add its origin to meta.hosts`,
+        );
+      }
+      /**
+       * P0-D：done/when 求值的唯一入口。先在 allowed frames 上判；不成立时**只读**在被排除
+       * frame 上再判一次——只在那里成立 = done 依赖被排除帧，收尾升级为 frame_not_allowed
+       * （绝不留假成功，也不当普通 done_not_held 糊过去）。
+       */
+      const goalHeld = async (): Promise<boolean> => {
+        if (goalSignalFn === null) return false;
+        if ((await goalSignalFn(readPage)) === true) return true;
+        if (excludedView !== null) {
+          try {
+            if ((await goalSignalFn(excludedView as unknown as AnyPage)) === true) doneInExcluded = true;
+          } catch { /* 排除帧求值失败不改变判定：仍按未成立 */ }
+        }
+        return false;
+      };
+      /**
+       * P0-D：声明目标（act hint / 命令 target）解析失败后的**只读**复核：目标是否只存在于
+       * 被排除 frame。命中 → 结构化 `frame_not_allowed`（reason 点名 frame origin + 目标 +
+       * 修法），绝不把声明目标宽化成别的元素、也绝不操作排除帧。
+       */
+      const frameTargetStop = async (
+        target: string,
+      ): Promise<{ code: StopCode; reason: string } | null> => {
+        if (target === "" || hostGate === null || hostGate.length === 0) return null;
+        const probe = await probeExcludedHint(pg, hostGate, target, admitSelectorWithJsFor(this.surfacePolicy));
+        if (probe === null) return null;
+        const hits = probe.matches
+          .map((m) => `${m.tag}${m.id ? `#${m.id}` : ""} ${JSON.stringify(m.label)} (frame=${m.frame})`)
+          .join("; ");
+        return {
+          code: "frame_not_allowed",
+          reason: `declared target ${JSON.stringify(target)} matched nothing in the allowed frames, but it exists `
+            + `in frame ${probe.origins.join(", ")}, which is outside the declared hosts envelope `
+            + `(${hostGate.join(", ")}) — read-only matches: ${hits}. `
+            + `第三方非交互 frame 默认排除（frames_excluded），不需要为此加 hosts；仅当声明目标确需该 frame 时才会 `
+            + `frame_not_allowed —— 此时再评估是否把它的 origin 加进 meta.hosts 后重跑；`
+            + `否则把该目标改到允许 frame 内的锚点`,
+        };
+      };
       // "Does this step apply?" — asked on the page the step will act on, before
       // spending a single step. A skipped subgoal reports done, so the plan
       // moves on exactly as if the step had succeeded.
-      if (precondition !== null && precondition !== undefined && !(await checkSignal(pg, precondition))) {
+      if (precondition !== null && precondition !== undefined && !(await checkSignal(readPage, precondition))) {
+        // P0-D：when/precondition 只在被排除 frame 上成立 ⇒ 声明依赖被排除帧，结构化停因。
+        if (excludedView !== null && (await checkSignal(excludedView as never, precondition))) {
+          const why = `when/precondition signal ${JSON.stringify(precondition)} holds only inside frame(s) `
+            + `${frameGate === null ? "-" : frameGate.origins.join(", ")} excluded by the declared hosts envelope `
+            + `(${hostGate!.join(", ")}) — the step does not apply on the allowed frames; `
+            + `frames_excluded 只是默认排除第三方非交互 frame，不需要为此加 hosts；仅当该 when 确需此 frame 时才评估把它加进 meta.hosts`;
+          if (verbose) console.log(`  -> REFUSED: ${why}`);
+          return {
+            goal: instruction, done: false,
+            stop_reason: why, stop_code: "frame_not_allowed", steps: [],
+            audit: { verdict: "REJECT", reasons: [why], auditor: "frame-gate" },
+          };
+        }
         if (verbose) console.log(`    -> SKIPPED (precondition not met: ${JSON.stringify(precondition)})`);
         return {
           goal: instruction, done: true, skipped: true,
@@ -3797,7 +3871,7 @@ export class BrowserMiddleware {
         // forceAct 的语义是"即使已成立也先把闭集执行完再评估"，与现状一致，故只记录声明。
         if (cmdSpace.length > 0 && goalSignalFn && !dryRun) {
           try {
-            donePreheld = (await goalSignalFn(pg)) === true;
+            donePreheld = (await goalHeld()) === true;
           } catch (e) {
             // 预评估只是**证据**，不是完成裁决：信号本身有问题时不要把它变成比真正停因
             // 更早的崩溃。动作后的既有评估点照常暴露错误（那才是会改变结论的评估）。
@@ -3964,7 +4038,7 @@ export class BrowserMiddleware {
           Promise<{ ref: string; el: Elem } | null> => {
           if (!this.targetResolutionDeclared || target === "" || declaredTried.has(target)) return null;
           declaredTried.add(target);
-          const dr = await declaredLookup(pg, target, op, this.surfacePolicy);
+          const dr = await declaredLookup(pg, target, op, this.surfacePolicy, this._frameHosts);
           if (!dr.eligible) return null;
           if (dr.visible_matches > 1) {
             for (const cand of dr.candidates.filter((c) => c.visible)) {
@@ -4036,7 +4110,7 @@ export class BrowserMiddleware {
             // A2：可行动优先的候选列表（`null` 起 = 池里没有这个目标，先做一次 DOM 回捞）。
             let candRefs = this.resolveCommandRef(target, elems, String(c.op), new Set(Object.keys(forbidden)));
             if (candRefs.length === 0 && target !== "" && hintCandidates(target, elems) === null) {
-              for (const [ref, e] of Object.entries(await hintLookup(pg, target, admitSelectorWithJsFor(this.surfacePolicy)))) {
+              for (const [ref, e] of Object.entries(await hintLookup(pg, target, admitSelectorWithJsFor(this.surfacePolicy), { hosts: this._frameHosts }))) {
                 // U3/C10：回捞去重按**节点身份**（已带 data-dshref = 已在池），不再比 scan 序号——
                 // 回捞面(ADMIT_SEL)与池面(POOL_SEL)两套序号空间本就不可比。
                 if (!e.dsh_ref) elems[ref] = e;
@@ -4049,7 +4123,7 @@ export class BrowserMiddleware {
             if (candRefs.length === 0 && target !== "" && hintCandidates(target, elems) === null
                 && !identityTried.has(target)) {
               identityTried.add(target);
-              const idr = await identityLookup(pg, target);
+              const idr = await identityLookup(pg, target, { hosts: this._frameHosts });
               if (idr.eligible) {
                 // 约束 3：可见匹配 > 1 = 歧义（rows 只在恰好 1 个可见匹配时非空）。
                 const visibleMatches = idr.total_matches - idr.hidden_matches;
@@ -4154,6 +4228,20 @@ export class BrowserMiddleware {
             break;
           }
           if (cmdPick === null) {
+            // P0-D：待解析命令目标只存在于被排除 frame → frame_not_allowed（只读探测；
+            // 不是普通 target_not_found，也不能拿模型自由选来"绕过"声明）。
+            let cmdFrameStop: { code: StopCode; reason: string } | null = null;
+            for (const cid of pendingUnresolved) {
+              const c = cmdSpace.find((x) => x.id === cid);
+              if (c === undefined || !c.target) continue;
+              cmdFrameStop = await frameTargetStop(c.target);
+              if (cmdFrameStop !== null) break;
+            }
+            if (cmdFrameStop !== null) {
+              stop(cmdFrameStop.code, cmdFrameStop.reason, stepNo);
+              if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+              break;
+            }
             // 区分“目标不存在”和“目标存在但歧义”：歧义不是空间为空，而是候选集 > 1。
             const ambiguous = cmdSpace.find((c) => {
               if (c.op === "skip" || !c.target) return false;
@@ -4183,7 +4271,7 @@ export class BrowserMiddleware {
               // 04-A：skip 命令"按定义解决"后从未评估过 done——宣布 "never held" 之前必须先查
               // 一遍信号（与 :2499 正常评估同形；不改评估顺序，只补这条死路的评估缺失）。
               // 这让"零动作验证步"（skip+done）从机制性必死变成合法可用。
-              if (goalSignalFn && (await goalSignalFn(pg))) {
+              if (goalSignalFn && (await goalHeld())) {
                 done = true;
                 // A1 §2.2.2：done 成立但一个动作都没执行时，停因文案必须带上跳过摘要
                 //（done 来自"信号本来就成立"，不是伪造的执行证据）。
@@ -4238,7 +4326,7 @@ export class BrowserMiddleware {
         let curHint = cmdSpace.length ? null : this.currentHint();
         for (let guard = 0; curHint !== null && guard < 8; guard++) {
           if (hintMatch(curHint, elems) === null) {
-            for (const [ref, e] of Object.entries(await hintLookup(pg, curHint, admitSelectorWithJsFor(this.surfacePolicy)))) {
+            for (const [ref, e] of Object.entries(await hintLookup(pg, curHint, admitSelectorWithJsFor(this.surfacePolicy), { hosts: this._frameHosts }))) {
               // U3/C10：节点身份去重（见命令路径同一处注释）。
               if (!e.dsh_ref) elems[ref] = e;
             }
@@ -4247,7 +4335,7 @@ export class BrowserMiddleware {
             // 永远不会看到它（下面 rule 命中直接给出 ref，不构造 ChoiceRequest）。
             if (hintMatch(curHint, elems) === null && !identityTried.has(curHint)) {
               identityTried.add(curHint);
-              const idr = await identityLookup(pg, curHint);
+              const idr = await identityLookup(pg, curHint, { hosts: this._frameHosts });
               if (idr.eligible) {
                 // 约束 3：可见匹配 > 1 = 歧义（rows 只在恰好 1 个可见匹配时非空）。
                 const visibleMatches = idr.total_matches - idr.hidden_matches;
@@ -4340,6 +4428,16 @@ export class BrowserMiddleware {
           warnings.push(`declared_hidden: target ${JSON.stringify(declaredHiddenNow.target)} matched `
             + `${declaredHiddenNow.total} element(s) in the DOM but ${declaredHiddenNow.hidden} are hidden `
             + `(checkVisibility CSS / zero box) — not acted on; the step continues on the declared failure path`);
+        }
+        // P0-D：声明 act hint 只在被排除 frame 里存在 → frame_not_allowed（只读探测，绝不
+        // 回退模型去猜一个"页面上别处长得像"的元素，也绝不操作排除帧）。
+        if (cmdSpace.length === 0 && curHint !== null && hintMatch(curHint, elems) === null) {
+          const hintFrameStop = await frameTargetStop(curHint);
+          if (hintFrameStop !== null) {
+            stop(hintFrameStop.code, hintFrameStop.reason, stepNo);
+            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            break;
+          }
         }
         const commandMode = cmdSpace.length > 0;
         // resolve the picked command's parameter binding NOW (fill/select). A missing
@@ -4434,7 +4532,7 @@ export class BrowserMiddleware {
             reobserved = true;
             await this._settleBeforeExtract(pg);
             const wide = await extractElements(pg, true, WIDER_ELEMENTS,
-              { widgets: true, candidatePriority: "main-first" });
+              { widgets: true, candidatePriority: "main-first", hosts: this._frameHosts });
             if (Object.keys(wide).length > Object.keys(elems).length) {
               // refs 是位置性的：先把"换位后已不是同一元素"的禁用记录清掉（与步头同规则）。
               pruneForbids(wide);
@@ -4549,7 +4647,7 @@ export class BrowserMiddleware {
             // 零动作命令，引擎不肯替作者宣布完成"，要么是"信号根本不成立"。当场评估一次
             // 信号（只在走向停止时付这一次），把实况和出路说出口，而不是把用户引去装模型。
             if (curHint === null && cmdSpace.length === 0) {
-              const held = goalSignalFn ? (await goalSignalFn(pg)) : false;
+              const held = goalSignalFn ? (await goalHeld()) : false;
               stop("no_model_runtime",
                 `step ${stepNo} declares no action (no target_hint, no commands) and rules-only has no model `
                 + `to pick one — its done-signal ${held ? "ALREADY holds on this page: declare a zero-action "
@@ -4658,7 +4756,7 @@ export class BrowserMiddleware {
             if (reobserve && !reobserved && ref !== null) {
               reobserved = true;
               await this._settleBeforeExtract(pg);
-              const wide = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true, quotas: WIDE_QUOTAS, candidatePriority });
+              const wide = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true, quotas: WIDE_QUOTAS, candidatePriority, hosts: this._frameHosts });
               if (Object.keys(wide).length > Object.keys(elems).length) {
                 // refs are positional: re-prune forbids whose ref now names a
                 // different element before re-asking (same rule as the step head).
@@ -4773,7 +4871,7 @@ export class BrowserMiddleware {
             && !lexicalOverlap(instruction, String(elems[ref]?.label ?? ""))) {
           reobserved = true;
           await this._settleBeforeExtract(pg);
-          const wideR2b = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true, quotas: WIDE_QUOTAS, candidatePriority });
+          const wideR2b = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true, quotas: WIDE_QUOTAS, candidatePriority, hosts: this._frameHosts });
           if (Object.keys(wideR2b).length > Object.keys(elems).length) {
             pruneForbids(wideR2b);
             const wideAskR2b = orderedPool(wideR2b);
@@ -5307,7 +5405,7 @@ export class BrowserMiddleware {
         if (executed && !inert) this._advanceHint();
         // A1：多动作闭集（N≥2）未走完时，中间动作不评估 done（goalSignalFn 不付这次页面往返）；
         // 同时上面"信号成立才学的 hint"也自然不会学到中间态。单命令/无命令步恒真，逐字节原行为。
-        if (goalSignalFn && cmdWalkComplete() && (await goalSignalFn(pg))) {
+        if (goalSignalFn && cmdWalkComplete() && (await goalHeld())) {
           // A MODEL pick that actually advanced the subgoal is a hint we EARNED: record
           // it (stable handles only, via induceHint) so the next run of this exact url +
           // subgoal resolves by rule at zero model cost. Rule hits need no help.
@@ -5345,7 +5443,7 @@ export class BrowserMiddleware {
             while (Date.now() < settleDeadline) {
               await sleep(Math.max(1, donePollMs));
               poll++;
-              if (await goalSignalFn(pg)) {
+              if (await goalHeld()) {
                 done = true;
                 flagSuspectedAsync();
                 stop("dom_goal_signal", "dom goal signal", stepNo);
@@ -5517,6 +5615,17 @@ export class BrowserMiddleware {
       if (browser !== null) await browser.close();
     }
 
+    // P0-D：done 只在被排除 frame 上成立 = 完成依赖被排除帧，结构化停因（不留假成功，
+    // 也不混成普通 done_not_held）。
+    if (!done && doneInExcluded) {
+      stopCode = "frame_not_allowed";
+      stopReason = `done signal holds only inside frame(s) `
+        + `${frameGate === null ? "-" : frameGate.origins.join(", ")} excluded by the declared hosts envelope `
+        + `(${(hostGate ?? []).join(", ")}) — `
+        + `frames_excluded 只是默认排除第三方非交互 frame，不需要为此加 hosts；`
+        + `仅当声明 done 确需该 frame 时才评估把它的 origin 加进 meta.hosts，`
+        + `否则把 done 锚到允许 frame 内的事实`;
+    }
     const verdict = (await this.auditor.audit(instruction, trace, done)) as AuditVerdict;
     const stoppedCode = stopCode as StopCode;
     const diagnostics: RunReport["diagnostics"] | undefined = (

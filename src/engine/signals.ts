@@ -31,23 +31,25 @@ function arg(v: unknown): unknown {
  * survives cosmetic chrome. It reads the first match rather than insisting on a
  * single one: css selectors on production pages legitimately match many nodes.
  */
-export async function checkSignal(page: PageLike, spec: SignalSpec): Promise<boolean> {
+export async function checkSignal(
+  page: PageLike, spec: SignalSpec, opts?: { hosts?: string[] | null },
+): Promise<boolean> {
   try {
     if ("url_contains" in spec) return urlOf(page).includes(String(arg(spec.url_contains)));
     // CSS ops look in the main frame AND reachable child frames (same-origin and
     // cross-origin both resolve through Playwright locators; cross-origin stability
     // is measured, R11 B5): a done-signal
     // frequently lives inside an iframe (embedded form field, status banner).
-    if ("css_exists" in spec) return (await locatorAnyFrame(page, String(arg(spec.css_exists)))) !== null;
+    if ("css_exists" in spec) return (await locatorAnyFrame(page, String(arg(spec.css_exists)), opts)) !== null;
     // S3：存在**任一**匹配 selector 且文本含 want 的元素（跨主 frame 与可达的子 frame，同源/跨源均可定位）。
     // live 用 Playwright 的 hasText 过滤器（大小写不敏感的子串；匹配元素自身或后代文本）。
     if ("css_exists_text" in spec) {
       const [sel, want] = (spec.css_exists_text as unknown[]).map(arg);
-      return (await locatorAnyFrame(page, String(sel), { hasText: String(want) })) !== null;
+      return (await locatorAnyFrame(page, String(sel), { hasText: String(want), ...opts })) !== null;
     }
     // S3：存在且**可见**（首匹配 locator.isVisible()）。池/离线面无法判定可见性（见 evalSignalOnState）。
     if ("css_visible_exists" in spec) {
-      const loc = await locatorAnyFrame(page, String(arg(spec.css_visible_exists)));
+      const loc = await locatorAnyFrame(page, String(arg(spec.css_visible_exists)), opts);
       if (loc === null) return false;
       const first = firstOf(loc);
       if (typeof first.isVisible !== "function") return false;   // 无法证伪为可见 ⇒ 不判真
@@ -55,17 +57,17 @@ export async function checkSignal(page: PageLike, spec: SignalSpec): Promise<boo
     }
     if ("css_text_contains" in spec) {
       const [sel, want] = (spec.css_text_contains as unknown[]).map(arg);
-      const loc = await locatorAnyFrame(page, String(sel));
+      const loc = await locatorAnyFrame(page, String(sel), opts);
       return loc !== null && String(await firstOf(loc).innerText({ timeout: 2000 })).includes(String(want));
     }
     if ("css_text_equals" in spec) {
       const [sel, want] = (spec.css_text_equals as unknown[]).map(arg);
-      const loc = await locatorAnyFrame(page, String(sel));
+      const loc = await locatorAnyFrame(page, String(sel), opts);
       return loc !== null && String(await firstOf(loc).innerText({ timeout: 2000 })).trim() === String(want);
     }
     if ("css_value_equals" in spec) {
       const [sel, want] = (spec.css_value_equals as unknown[]).map(arg);
-      const loc = await locatorAnyFrame(page, String(sel));
+      const loc = await locatorAnyFrame(page, String(sel), opts);
       return loc !== null && String(await firstOf(loc).inputValue({ timeout: 2000 })) === String(want);
     }
     // Composition. Each leaf is still a DOM fact, so a composed signal cannot be
@@ -74,17 +76,17 @@ export async function checkSignal(page: PageLike, spec: SignalSpec): Promise<boo
     // spinner is gone" without inventing a positive claim.
     if ("all_of" in spec) {
       for (const part of spec.all_of as SignalSpec[]) {
-        if (!(await checkSignal(page, part))) return false;
+        if (!(await checkSignal(page, part, opts))) return false;
       }
       return true;
     }
     if ("any_of" in spec) {
       for (const part of spec.any_of as SignalSpec[]) {
-        if (await checkSignal(page, part)) return true;
+        if (await checkSignal(page, part, opts)) return true;
       }
       return false;
     }
-    if ("not" in spec) return !(await checkSignal(page, spec.not as SignalSpec));
+    if ("not" in spec) return !(await checkSignal(page, spec.not as SignalSpec, opts));
     // A human attestation is not a DOM fact: it can never be verified here, so a
     // `manual` signal is false for the automated loop and the executor asks the
     // human explicitly (see RunOptions.manualGoal). With no human, the step blocks.

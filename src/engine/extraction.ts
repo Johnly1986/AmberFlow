@@ -423,6 +423,86 @@ export function framesOf(page: PageLike, limit = 6): FrameLike[] {
   }
 }
 
+/**
+ * P0-D：host 信封的**只读**判定（与执行器 `disallowedHost` 同一语义：hostname 精确或后缀）。
+ * 帧 URL 无法解析 / about:blank / file: 等：返回 true（不可判 origin 时绝不擅自排除）。
+ */
+export function urlInHostsEnvelope(url: string, hosts: string[] | null | undefined): boolean {
+  if (!hosts || hosts.length === 0) return true;
+  let u: URL;
+  try { u = new URL(url); } catch { return true; }
+  if (["file:", "about:", "data:"].includes(u.protocol)) return true;
+  const host = u.hostname.toLowerCase();
+  if (!host) return true;
+  return hosts.some((h) => {
+    const e = String(h).toLowerCase().replace(/^\.+/, "");
+    return e !== "" && (host === e || host.endsWith(`.${e}`));
+  });
+}
+
+/** P0-D：一个 frame 的 URL 是否在信封内（空 URL / about:blank = 允许，口径同上面）。 */
+export function frameInHostsEnvelope(frame: FrameLike, hosts: string[] | null | undefined): boolean {
+  let url = "";
+  try { url = typeof frame.url === "function" ? frame.url() : (frame.url ?? ""); } catch { url = ""; }
+  return urlInHostsEnvelope(String(url), hosts);
+}
+
+/** P0-D：frame 的 origin 证据文案（解析失败时退化为空串）。 */
+export function frameOriginOf(frame: FrameLike): string {
+  let url = "";
+  try { url = typeof frame.url === "function" ? frame.url() : (frame.url ?? ""); } catch { url = ""; }
+  if (!url) return "";
+  try { return new URL(url).origin; } catch { return ""; }
+}
+
+/**
+ * P0-D：**帧门禁**。主 frame 恒允许（导航信封已经强制过它）；子 frame 的 origin 不在
+ * `meta.hosts` 内 → 进 `excluded`（不参与池/hint/identity/DRF/done/when 的解析面）。
+ * 无 hosts 声明或没有任何被排除帧时 `null`（缺省路径零新行为）。
+ *
+ * 索引纪律：`frames` / `allowedIndexes` 保留**真实**下标，池行的 `frame`/`f<fi>:` ref
+ * 因此逐字节不变——被排除的只是解析面，不是编号。
+ */
+export interface FrameGate {
+  hosts: string[];
+  frames: FrameLike[];
+  allowed: FrameLike[];
+  allowedIndexes: number[];
+  excluded: Array<{ index: number; frame: FrameLike; origin: string }>;
+  origins: string[];
+}
+
+export function frameGateOf(page: PageLike, hosts: string[] | null | undefined): FrameGate | null {
+  if (!hosts || hosts.length === 0) return null;
+  const frames = framesOf(page, 64);
+  if (frames.length <= 1) return null;
+  const allowed: FrameLike[] = [frames[0]!];
+  const allowedIndexes: number[] = [0];
+  const excluded: Array<{ index: number; frame: FrameLike; origin: string }> = [];
+  for (let i = 1; i < frames.length; i++) {
+    const fr = frames[i]!;
+    if (frameInHostsEnvelope(fr, hosts)) { allowed.push(fr); allowedIndexes.push(i); }
+    else excluded.push({ index: i, frame: fr, origin: frameOriginOf(fr) });
+  }
+  if (excluded.length === 0) return null;
+  const origins = [...new Set(excluded.map((e) => e.origin || "about:blank"))];
+  return { hosts, frames, allowed, allowedIndexes, excluded, origins };
+}
+
+/**
+ * P0-D：一个只暴露指定 frame 的**页面视图**（读面用）。只转发信号/池解析真正用到的
+ * 成员（url / frames / locator / evaluate）；动作路径永远拿真实 page。
+ */
+export function framesScopedPage(page: PageLike, frames: FrameLike[]): PageLike {
+  const view: PageLike = {
+    url: () => urlOf(page),
+    frames: () => frames,
+    ...(page.locator === undefined ? {} : { locator: (sel, opts) => page.locator!(sel, opts) }),
+    ...(page.evaluate === undefined ? {} : { evaluate: (fn, arg) => page.evaluate!(fn, arg) }),
+  };
+  return view;
+}
+
 /** The frame an element came from (0 = main); undefined once it has detached. */
 export function frameAt(page: PageLike, index: number): FrameLike | undefined {
   try {
@@ -445,10 +525,14 @@ export function frameAt(page: PageLike, index: number): FrameLike | undefined {
  * 用它跨 frame 找"文本含 text"的元素；Playwright 的 hasText 是大小写不敏感的子串匹配）。
  */
 export async function locatorAnyFrame(
-  page: PageLike, selector: string, opts?: { hasText?: string },
+  page: PageLike, selector: string, opts?: { hasText?: string; hosts?: string[] | null },
 ): Promise<LocLike | null> {
   if (page.frames !== undefined || page.locator !== undefined) {
-    for (const fr of framesOf(page)) {
+    const frames = framesOf(page);
+    for (let fi = 0; fi < frames.length; fi++) {
+      const fr = frames[fi]!;
+      // P0-D：被排除的 frame 不参与信号求值（主 frame 恒在面内；无 hosts = 旧行为）。
+      if (fi > 0 && !frameInHostsEnvelope(fr, opts?.hosts)) continue;
       try {
         const loc = opts === undefined ? fr.locator(selector) : fr.locator(selector, opts);
         if (await loc.count()) return loc;
@@ -1154,6 +1238,12 @@ const HINT_HEAD = String.raw`(arg) => {
                             ...(href ? {href_full: href} : {})};
                 }); }`;
 const PASS_HINT = compile("arg", COLLECT_JS + `\nreturn (${HINT_HEAD})(arg);`);
+/**
+ * P0-D：**只读**探测用的 hint 收集（同一套 hint 语义，但**不盖** `data-hintref` 章）。
+ * 只用于"声明目标是否仅存在于被排除 frame"的复核——绝不动作、绝不进池。
+ */
+const PASS_HINT_PROBE = compile("arg",
+  COLLECT_JS + `\nreturn (${HINT_HEAD.replace("e.setAttribute('data-hintref', stamp);", "")})(arg);`);
 /** tiny per-element fallback probes */
 const FN_TAG = compile("e", "return e.tagName.toLowerCase();");
 const FN_FIRST = compile("e", "return (e.childNodes.length ? e.childNodes[0].textContent : '');");
@@ -1201,6 +1291,11 @@ export async function extractElements(
      */
     classNames?: boolean;
     fullLabel?: boolean;
+    /**
+     * P0-D：host 信封。给了就**只从信封内的 frame** 抽池（主 frame 恒在面内），被排除
+     * frame 的真实下标仍保留（`frame`/`f<fi>:` ref 不变）；缺省 = 今天的全帧面。
+     */
+    hosts?: string[] | null;
   },
 ): Promise<ElemPool> {
   // 缺省 bucketed；main-first 显式回退。quota 由预算档决定（40/120 两档常量单一出处）。
@@ -1221,6 +1316,7 @@ export async function extractElements(
   for (let fi = 0; fi < frames.length; fi++) {
     const remaining = maxElements - Object.keys(elems).length;
     if (remaining <= 0) break;
+    if (fi > 0 && !frameInHostsEnvelope(frames[fi]!, opts?.hosts)) continue;   // P0-D：排除帧不进池
     let rows: Elem[] | null = null;
     try {
       rows = (await frames[fi]!.evaluate(PASS_EXTRACT,
@@ -1843,10 +1939,14 @@ export function hintLookupArgs(hint: string, sel: string = admitSelectorWithJsFo
   return { hint: hint.trim().toLowerCase(), parsed: parseHint(hint), sel };
 }
 
-export async function hintLookup(page: PageLike, hint: string, sel: string = admitSelectorWithJsFor()): Promise<ElemPool> {
+export async function hintLookup(
+  page: PageLike, hint: string, sel: string = admitSelectorWithJsFor(),
+  opts?: { hosts?: string[] | null },
+): Promise<ElemPool> {
   const out: ElemPool = {};
   const frames = framesOf(page);
   for (let fi = 0; fi < frames.length; fi++) {
+    if (fi > 0 && !frameInHostsEnvelope(frames[fi]!, opts?.hosts)) continue;   // P0-D：排除帧不参与回捞
     let rows: Array<Record<string, unknown>> | null = null;
     try {
       rows = (await frames[fi]!.evaluate(PASS_HINT,
@@ -1860,6 +1960,50 @@ export async function hintLookup(page: PageLike, hint: string, sel: string = adm
     }
   }
   return out;
+}
+
+/** P0-D：声明目标"只存在于被排除 frame"的只读探测结果（证据面）。 */
+export interface ExcludedHintProbe {
+  /** 被排除 frame 的 origin（去重；证据/reason 用）。 */
+  origins: string[];
+  /** 排除帧内的命中行（ref 是证据编号，不参与动作）。 */
+  matches: Array<{
+    ref: string; frame: number; tag: string; label: string;
+    id?: string; data_test?: string;
+  }>;
+}
+
+/**
+ * P0-D：**只读探测**——在 host 信封排除的 frame 里找一条 hint 的匹配（不盖章、不动作）。
+ * 返回 null = 没有排除帧 / 排除帧里也没有这条 hint（保持既有失败路径）。
+ */
+export async function probeExcludedHint(
+  page: PageLike, hosts: string[] | null | undefined, hint: string,
+  sel: string = admitSelectorWithJsFor(),
+): Promise<ExcludedHintProbe | null> {
+  const gate = frameGateOf(page, hosts);
+  if (gate === null) return null;
+  const matches: ExcludedHintProbe["matches"] = [];
+  for (const { index, frame } of gate.excluded) {
+    let got: unknown;
+    try {
+      got = await frame.evaluate(PASS_HINT_PROBE, hintLookupArgs(hint, sel));
+    } catch {
+      continue;                     // frame detached / 无执行上下文：跳过
+    }
+    for (const row of (Array.isArray(got) ? got : []) as Array<Record<string, unknown>>) {
+      matches.push({
+        ref: `xf${index}:${String(row["scan"] ?? matches.length)}`,
+        frame: index,
+        tag: String(row["tag"] ?? ""),
+        label: String(row["label"] ?? ""),
+        ...(String(row["id"] ?? "") ? { id: String(row["id"]) } : {}),
+        ...(String(row["data_test"] ?? "") ? { data_test: String(row["data_test"]) } : {}),
+      });
+    }
+  }
+  if (matches.length === 0) return null;
+  return { origins: gate.origins, matches };
 }
 
 /* ------------------------------------------- declared identity recovery (FW8) */
@@ -2034,7 +2178,9 @@ let identityBatch = 0;
  * 行是**与池同构**的合成 `Elem`（含 ref/frame/hint_ref/role/content_editable/draggable…），
  * 已盖 `data-hintref` 供 `_locatorFor` 既有身份链解析；调用方用完必须 `cleanup()`。
  */
-export async function identityLookup(page: PageLike, hint: string): Promise<IdentityLookupResult> {
+export async function identityLookup(
+  page: PageLike, hint: string, opts?: { hosts?: string[] | null },
+): Promise<IdentityLookupResult> {
   const info = identityHintInfo(hint);
   const noop = async (): Promise<void> => { /* 没有章可清 */ };
   const out: IdentityLookupResult = {
@@ -2046,6 +2192,7 @@ export async function identityLookup(page: PageLike, hint: string): Promise<Iden
   const visible: Array<{ fi: number; row: Record<string, unknown> }> = [];
   const candidates: IdentityCandidate[] = [];
   for (let fi = 0; fi < frames.length; fi++) {
+    if (fi > 0 && !frameInHostsEnvelope(frames[fi]!, opts?.hosts)) continue;   // P0-D：排除帧不参与身份回捞
     let got: unknown;
     try {
       got = await frames[fi]!.evaluate(PASS_IDENTITY,
