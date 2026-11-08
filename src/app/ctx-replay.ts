@@ -17,6 +17,7 @@ import {
 import { createKit } from "./kit.ts";
 import type { TraceCall, TraceEvent, AppTrace } from "./trace.ts";
 import { canonicalJson } from "./trace.ts";
+import { validateObserveOptions, type ObserveResult } from "../engine/observe.ts";
 
 export interface ReplayCtxDeps {
   pack: { id: string; label?: string; goal: string; hosts?: string[] | null; invariants?: Array<Record<string, unknown>> };
@@ -168,6 +169,37 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
         title: typeof to["title"] === "string" ? to["title"] : "",
       };
       currentUrl = result.url;
+      return result;
+    },
+    // P0-A：observe 是免费只读事件——按录制值还原 `counts`/`truncated`（元素明细没进
+    // trace，故 `elements: []`，不伪造观察值也不中断回放）。声明形状仍校验（坏脚本在
+    // 重放期同样红）。
+    observe: async (opts = {}) => {
+      const problems = validateObserveOptions(opts);
+      if (problems.length) throw new StopError("config_error", problems.join("；"));
+      const ev = nextEvent("observe");
+      if (typeof ev.url === "string" && ev.url) currentUrl = ev.url;
+      const c: Record<string, unknown> = isObj(ev.counts) ? ev.counts : {};
+      const counts = {
+        elements: Number(c["elements"] ?? 0) || 0,
+        admitted: Number(c["admitted"] ?? 0) || 0,
+        omitted: Number(c["omitted"] ?? 0) || 0,
+      };
+      // 录制时是结构化错误（非法 selector）就照实回放：重放不猜、不把失败洗成成功。
+      const recorded = isObj(ev.result) ? ev.result : {};
+      if (ev.ok === false) {
+        return {
+          ok: false, replay: true, url: currentUrl, counts,
+          truncated: ev.truncated === true, elements: [],
+          ...(recorded["error"] === "bad_selector" ? { error: "bad_selector" as const } : {}),
+          ...(typeof recorded["reason"] === "string" ? { reason: recorded["reason"] } : {}),
+        };
+      }
+      const result: ObserveResult = {
+        ok: true, replay: true, url: currentUrl, counts,
+        truncated: ev.truncated === true || counts.omitted > 0,
+        elements: [],
+      };
       return result;
     },
     step: async (desc, req) => {

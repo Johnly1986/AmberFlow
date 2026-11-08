@@ -26,6 +26,12 @@ export type TraceCall =
    */
   | "tab"
   /**
+   * P0-A：`ctx.observe()` 只读观察（免费；不计 flow step）。事件只记
+   * `{url, counts, truncated}`——**不记元素明细/class**（超出审计需要，且避免 trace 膨胀）。
+   * 重放按 `counts`/`truncated` 还原；元素明细不可重建（replay 返回 `elements: []`）。
+   */
+  | "observe"
+  /**
    * S3 dry 面：参数校验失败留痕（先落事件再抛错）。脚本 try/catch 吞掉 config_error 时，
    * `apps check` 仍能从 trace 判 FAIL 并指出调用点。
    */
@@ -60,6 +66,13 @@ export interface TraceEvent {
   from?: unknown;
   /** A5：`action="switch"` 时命中的目标页 `{index,url,title}`。 */
   to?: unknown;
+  /**
+   * P0-A：`call="observe"` 的观察计数（`{elements, admitted, omitted}`）——只有计数，
+   * 没有元素/class 明细；replay 用它还原 `counts`。
+   */
+  counts?: { elements: number; admitted: number; omitted: number };
+  /** P0-A：`call="observe"` 是否被 `max` 截断（omitted > 0）。 */
+  truncated?: boolean;
 }
 
 export interface AppTrace {

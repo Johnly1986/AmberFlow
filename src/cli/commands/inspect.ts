@@ -108,6 +108,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
         probe: { type: "string", multiple: true },
         screenshot: { type: "string" },
         timeout: { type: "string" },
+        "wait-ms": { type: "string" },
         headed: { type: "boolean" },
         json: { type: "boolean" },
         help: { type: "boolean" },
@@ -128,6 +129,20 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
   }
   const max = Math.min(200, Math.max(1, Math.floor(num(v["max-elements"]) ?? 60)));
   const timeout = Math.min(120_000, Math.max(1_000, Math.floor(num(v.timeout) ?? 30_000)));
+  // P0-A：`--wait-ms` = 抽取前额外等待（默认 0，上限 5000）——给迟渲染/异步水合的页面。
+  // `load` 完成 + 3s 交互计数稳定轮询仍在它之前（两者叠加：先等页面自身稳定，再按需等待）。
+  // 非法值 = usageError（不静默当 0，否则"等了却没用"又无法归因）。
+  let waitMs = 0;
+  if (typeof v["wait-ms"] === "string") {
+    const rawWait = v["wait-ms"].trim();
+    const parsedWait = Number(rawWait);
+    if (!Number.isFinite(parsedWait) || parsedWait < 0) {
+      throw usageError(`--wait-ms 需要非负毫秒数（收到 ${JSON.stringify(v["wait-ms"])}）`, {
+        next: ["amber inspect --url <URL> --wait-ms 800 --json"],
+      });
+    }
+    waitMs = Math.min(5000, Math.floor(parsedWait));
+  }
   const wantJson = ctx.globals.json || v.json === true;
   const wantPool = v.pool === true;
 
@@ -171,6 +186,10 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       interactiveOnPage = last;
     }
     await new Promise((r) => setTimeout(r, 500));
+    // P0-A `--wait-ms`：页面自身稳定后的额外等待（给 setTimeout/异步接口补渲染的元素）。
+    if (waitMs > 0) await new Promise((r) => setTimeout(r, waitMs));
+    // "saw" 时刻：本次观察真正读取 DOM 的时刻（JSON 与人类输出都标注，便于判断水合时机）。
+    const sawAt = new Date().toISOString();
     // --probe：只读探测，放在元素池抽取**之前**——结论不受 --max-elements 截断影响
     // （01 轮 B2：exists/text 类 done 信号此前没有验证面）。
     const probeList = (parsed.values.probe ?? []).filter((s): s is string => typeof s === "string" && s.trim() !== "");
@@ -181,8 +200,11 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     // 主池语义不变（不带 --wide 时逐字节今天）；heuristic 候选带标记，审计可辨。
     const wide = v.wide === true;
     const poolMax = wide ? Math.max(max, WIDE_POOL_ELEMENTS) : max;
+    // P0-A：inspect 观察面显式要完整标签 + 有界 class_names（池行/模型面缺省逐字节不变——
+    // 这两个字段只在 classNames/fullLabel 显式打开时才出现）。
     const pool = await extractElements(
-      page as never, true, poolMax, wide ? { widgets: true } : undefined);
+      page as never, true, poolMax,
+      { ...(wide ? { widgets: true } : {}), classNames: true, fullLabel: true });
     const heuristicCount = Object.values(pool).filter((e) => e.heuristic === true).length;
     const view = poolView(pool, page as never, poolMax);
     // A2 窗口透明化：页面上**可见**的交互元素里，有多少没进本次池（被 40/120 窗口或分桶顺序
@@ -232,16 +254,27 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       }
     }
     const shownAdvisories = advisories.slice(0, 8);
-    const elements: InspectElement[] = view.elements.map((e) => ({
-      ref: e.ref,
-      tag: e.tag,
-      label: e.label,
-      hint_candidates: e.hint_candidates,
-      action_family: e.action_family,
-      action_capabilities: e.action_capabilities,
-      frame_origin: e.frame_origin,
-      ...e.extras,
-    }));
+    // P0-A：JSON 的 `label` 给**完整**值（旧行为是池模型视图的 40 字前缀；长 label 因此
+    // 被截断，hint 照抄静默降级——R10 实证）。`label_truncated:true` 只表示"原始标签超过
+    // 200 字符，引擎的**匹配口径** full_label 只取前 200"（不是本次输出被截断）。
+    const elements: InspectElement[] = view.elements.map((e) => {
+      const pe = pool[e.ref];
+      const full = typeof pe?.label_full === "string" && pe.label_full !== "" ? pe.label_full : e.label;
+      const classNames = Array.isArray(pe?.class_names) && pe.class_names.length > 0
+        ? pe.class_names.slice(0, 8) : undefined;
+      return {
+        ref: e.ref,
+        tag: e.tag,
+        label: full,
+        ...(full.length > 200 ? { label_truncated: true } : {}),
+        ...(classNames === undefined ? {} : { class_names: classNames }),
+        hint_candidates: e.hint_candidates,
+        action_family: e.action_family,
+        action_capabilities: e.action_capabilities,
+        frame_origin: e.frame_origin,
+        ...e.extras,
+      };
+    });
     const text = v.text === true
       ? String(await page.evaluate("document.body ? document.body.innerText : ''")).slice(0, 800)
       : "";
@@ -284,6 +317,10 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       url: page.url(),
       requested_url: url,
       title: String(await page.title()),
+      // P0-A：观察时刻（`--wait-ms` 之后的真实读取时刻）+ 声明的额外等待。新增字段，
+      // 既有字段语义不变；人类输出同样标注这一行（水合时机是排障的一等事实）。
+      saw_at: sawAt,
+      wait_ms: waitMs,
       // P3（2026-11-01 产品评审）：hint 语法不是 CSS、href 等字段是池投影——实测有 Agent
       // 把 `a[href=…]` 投影误当 CSS 选择器用。把这两句话随每次观察一起给出去。
       // T9：href 匹配同时认原始属性（href_full，query 可命中），hint_candidates 优先给原始值。
@@ -312,6 +349,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       return 0;
     }
     say(ctx, `${data.title} — ${data.url}`);
+    say(ctx, `观察时刻 ${sawAt}${waitMs > 0 ? `（--wait-ms ${waitMs}）` : ""}`);
     say(ctx, `元素 ${data.element_count} 个${data.truncated ? `（只显示前 ${max}）` : ""}`);
     say(ctx, "（hints 可直接当 --hint / ctx.hint 用——不是 CSS；href 等字段是池投影，仅供识别）");
     const surfaceLine = Object.entries(windowInfo.surface_counts)

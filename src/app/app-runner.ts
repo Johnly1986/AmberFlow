@@ -2656,9 +2656,10 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       + `${(() => {
         const free = trace.events.filter((e) =>
           e.call === "read" || e.call === "extract" || e.call === "holds" || e.call === "waitFor"
+          || e.call === "observe"
           || (e.call === "tab" && e.action === "list")).length;
         const navs = trace.events.filter((e) => e.call === "open" || e.call === "openPage").length;
-        return free > 0 ? ` + ${free} 只读观察调用（waitFor/extract/read 等，免费不占预算）${navs > 0 ? ` + ${navs} 导航` : ""}` : "";
+        return free > 0 ? ` + ${free} 只读观察调用（waitFor/extract/read/observe 等，免费不占预算）${navs > 0 ? ` + ${navs} 导航` : ""}` : "";
       })()}`,
     subgoals: [],
     tool_steps: toolStepProjection,

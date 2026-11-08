@@ -62,6 +62,13 @@ export interface Elem {
    *   bucket/prio —— 分桶闭集（chrome/viewport/contentNear/mainOffscreen/other）与优先级（仅诊断）。
    */
   full_label?: string;
+  /**
+   * P0-A（inspect 观察面 opt-in）：`label_full` 是**不截断**的完整标签（`full_label` 仍是
+   * ≤200 的匹配口径）；`class_names` 有界（≤8 个、每项 ≤40 字符）。缺省不出现 ⇒ 池/模型面
+   * 与既有产物逐字节不变。
+   */
+  label_full?: string;
+  class_names?: string[];
   rect?: { top: number; left: number; width: number; height: number };
   inViewport?: boolean;
   nearViewport?: boolean;
@@ -658,28 +665,20 @@ export const VIEWPORT_UNDERLOAD_JS = String.raw`(arg) => {
 }`;
 
 /**
- * ONE round trip for the whole page: tag, label (incl. <label>-wrapper text),
- * data-test, name, id, input type, href, visibility and the main-content flag,
- * ordered main-content-first, each winner stamped with `data-dshref` in the same
- * pass so the element list, scan index and locator handle are single-sourced.
+ * 可读标签的**唯一 JS 实现**（EXTRACT_JS 的池行与 OBSERVE_JS 的只读观察共用）。
  *
- * A4：章值是**批次型**的（`af<批>-e<位>`），本趟提取开头先清掉上一轮的旧章
- * （一次全页 querySelectorAll，只为不残留位置性 ref）。旧章残留会让同一个
- * `[data-dshref="e2"]` 命中两个节点——按章取元素的动作层没有别的唯一性判据。
+ * `labelOfRaw` 返回**不截断**的完整标签：池行在调用点自己 `.slice(0, 200)`（`full_label`
+ * 的 200 上限是 A2 的匹配口径，不是标签本身的长度），observe/inspect 才能真正看到
+ * 超过 200 字符的标签。两处若各写一份，长标签会在一面被悄悄截断——P0-A 之前的
+ * inspect「label ~200 字截断」正是这种漂移。
  */
-export const EXTRACT_JS = String.raw`(arg) => {
-  ${BUCKET_HELPERS_JS}
-  const sel = arg.sel, max = arg.max;
-  // A2：分桶配额（null = main-first 旧行为，policy.candidate_priority 的回退面）。
-  const quotas = arg.quotas || null;
+export const LABEL_HELPERS_JS = String.raw`
   const WS = /[ \t\n\r\f\v]+/g;
   // Material/Google 的图标是 private-use 字形（\ue8ba 等），会出现在按钮文本里；
   // 它是装饰，不是人可读标签。先剥掉 PUA 再折叠空白，否则 Hotels 按钮的 label 会是
   // \ue8baHotels，ctx.hints("Hotels") 匹配不到（Google Maps 实测）。
   const norm = (t) => (t || '').replace(/[\uE000-\uF8FF]/g, '').replace(WS, ' ').trim();
-  const all = [];
-  __collectAll(document, sel, all);
-  const labelOf = (e, tag) => {
+  const labelOfRaw = (e, tag) => {
     const first = e.childNodes.length ? String(e.childNodes[0].textContent || '') : '';
     let label = norm(e.getAttribute('aria-label') || e.getAttribute('title') || first || '');
     const text = (!label || tag === 'select') ? norm(e.innerText || '') : '';
@@ -697,10 +696,33 @@ export const EXTRACT_JS = String.raw`(arg) => {
     } else if (!label) {
       label = norm(e.innerText || '');
     }
-    // A2：返回**完整**标签（≤200）——模型视图仍用前 40，但 hint 匹配/诊断需要完整串
-    // （aria-label="Sort by, Not selected" 的前 40 往往截在逗号前，裸词 "Sort by" 就匹配不到）。
-    return norm(label).slice(0, 200);
+    return norm(label);
   };
+`;
+
+/**
+ * ONE round trip for the whole page: tag, label (incl. <label>-wrapper text),
+ * data-test, name, id, input type, href, visibility and the main-content flag,
+ * ordered main-content-first, each winner stamped with `data-dshref` in the same
+ * pass so the element list, scan index and locator handle are single-sourced.
+ *
+ * A4：章值是**批次型**的（`af<批>-e<位>`），本趟提取开头先清掉上一轮的旧章
+ * （一次全页 querySelectorAll，只为不残留位置性 ref）。旧章残留会让同一个
+ * `[data-dshref="e2"]` 命中两个节点——按章取元素的动作层没有别的唯一性判据。
+ */
+export const EXTRACT_JS = String.raw`(arg) => {
+  ${BUCKET_HELPERS_JS}
+  ${LABEL_HELPERS_JS}
+  const sel = arg.sel, max = arg.max;
+  // A2：分桶配额（null = main-first 旧行为，policy.candidate_priority 的回退面）。
+  const quotas = arg.quotas || null;
+  const all = [];
+  __collectAll(document, sel, all);
+  // A2：池行的 full_label 是**匹配口径**（≤200）——模型视图仍用前 40，但 hint 匹配/诊断
+  // 需要完整串（aria-label="Sort by, Not selected" 的前 40 往往截在逗号前，裸词 "Sort by"
+  // 就匹配不到）。完整标签见 labelOfRaw：只有 observe/inspect 的观察面才需要它
+  // （inspect 传 arg.fullLabel=true）。
+  const labelOf = (e, tag) => labelOfRaw(e, tag).slice(0, 200);
   const short = (t) => String(t || '').slice(0, 40);
   let rows = [];
   const labelRows = [];   // R1a：label 延迟裁决（见下）
@@ -896,8 +918,18 @@ export const EXTRACT_JS = String.raw`(arg) => {
   return ordered.map((r, pos) => {
     const ref = 'e' + pos;
     const stamp = nonce + '-' + ref;
-    all[r.i].setAttribute('data-dshref', stamp);
+    const el = all[r.i];
+    el.setAttribute('data-dshref', stamp);
+    // P0-A inspect 观察面（显式 opt-in，缺省不出字段 ⇒ 池/模型面/既有产物逐字节不变）：
+    //   classNames=true → class_names（有界：≤8 个、每项 ≤40 字符，与 ctx.observe 同口径）；
+    //   fullLabel=true  → label_full（**不截断**的完整标签；full_label 仍是 ≤200 的匹配口径）。
+    const classNames = arg.classNames && el && el.classList
+      ? Array.from(el.classList).slice(0, 8).map((c) => String(c).slice(0, 40))
+      : null;
+    const labelFull = arg.fullLabel && el ? labelOfRaw(el, r.tag) : null;
     return {ref: ref, dsh_ref: stamp, scan: r.i, tag: r.tag, label: r.label, full_label: r.full_label,
+            ...(classNames && classNames.length ? {class_names: classNames} : {}),
+            ...(labelFull ? {label_full: labelFull} : {}),
             rect: r.rect, inViewport: r.inViewport, nearViewport: r.nearViewport,
             scrollDepth: r.scrollDepth, inScrollContainer: r.inScrollContainer, bucket: r.bucket, prio: r.prio,
             data_test: r.data_test, name: r.name, id: r.id, input_type: r.input_type, href: r.href,
@@ -907,6 +939,68 @@ export const EXTRACT_JS = String.raw`(arg) => {
             ...(r.content_editable ? {content_editable: true} : {}),
             ...(r.draggable ? {draggable: true} : {})};
   });
+}`;
+
+/**
+ * P0-A `ctx.observe()` 的**只读 DOM 观察**（每帧一次 evaluate；不盖章、不点击、不滚动、
+ * 不写任何属性）。
+ *
+ * 与 EXTRACT_JS 的分工：EXTRACT_JS 产**池**（窗口/分桶/盖章/排序，是动作目标的世界）；
+ * 本 pass 产**观察**（DOM 侧真实存在，不要求入池）——准入面元素 + `arg.includeHidden`
+ * 时的隐藏元素。两者共用 `LABEL_HELPERS_JS`（同口径完整标签）与同一份可见性判据
+ * （checkVisibility CSS + 非零盒），避免"观察面说可见、池子说不入池"的漂移。
+ *
+ * 返回 `{rows, total, returned}`；`total` 是**通过可见性过滤的候选总数**（截断前）——
+ * 调用方用它算 `counts.omitted`（被 max 上限截掉的数，不是"页面没有"）。
+ * 非法 CSS 返回 `{bad_selector: message}`（结构化，不抛裸栈）。
+ * `in_surface` 用当前生效的准入选择器（ADMIT_SEL 投影 + JS 探针后缀）现场匹配。
+ */
+export const OBSERVE_JS = String.raw`(arg) => {
+  ${LABEL_HELPERS_JS}
+  const sel = arg.sel, max = arg.max, includeHidden = arg.includeHidden === true;
+  const all = [];
+  try { __collectAll(document, sel, all); }
+  catch (err) { return { bad_selector: String(err && err.message ? err.message : err) }; }
+  const rows = [];
+  let candidates = 0;
+  for (let i = 0; i < all.length; i++) {
+    const e = all[i];
+    const hasBox = (() => {
+      const r = e.getClientRects();
+      for (let k = 0; k < r.length; k++) if (r[k].width > 0 && r[k].height > 0) return true;
+      return false;
+    })();
+    let vis;
+    if (e.checkVisibility) vis = hasBox && e.checkVisibility({checkVisibilityCSS: true, checkOpacity: false});
+    else { const cs = getComputedStyle(e); vis = cs.display !== 'none' && cs.visibility !== 'hidden' && hasBox; }
+    if (!vis && !includeHidden) continue;
+    candidates += 1;
+    if (rows.length >= max) continue;
+    const tag = e.tagName.toLowerCase();
+    let classes = [];
+    try { classes = e.classList ? Array.from(e.classList) : String(e.getAttribute('class') || '').split(/\s+/); }
+    catch (err) { classes = []; }
+    classes = classes.filter(function (c) { return !!c; }).slice(0, 8).map(function (c) { return String(c).slice(0, 40); });
+    let inSurface = false;
+    try { inSurface = !!arg.admitSel && e.matches(arg.admitSel); } catch (err) { inSurface = false; }
+    const r = e.getBoundingClientRect();
+    const href = e.getAttribute('href') || '';
+    rows.push({
+      tag: tag,
+      role: (e.getAttribute('role') || '').toLowerCase(),
+      label: labelOfRaw(e, tag),
+      id: e.id || '',
+      name: e.getAttribute('name') || '',
+      data_test: e.getAttribute('data-test') || '',
+      type: (e.getAttribute('type') || '').toLowerCase(),
+      href: href,
+      class_names: classes,
+      visible: vis,
+      bbox: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
+      in_surface: inSurface,
+    });
+  }
+  return { rows: rows, total: candidates, returned: rows.length };
 }`;
 
 /**
@@ -925,6 +1019,8 @@ function compile(params: string, body: string): (...args: any[]) => any {
 
 /** One-pass extractor: shadow-aware collector + the row/label/visibility pass. */
 const PASS_EXTRACT = compile("arg", `${COLLECT_JS}\nreturn (${EXTRACT_JS})(arg);`);
+/** P0-A：只有读的观察 pass（每帧一次往返；不盖章/不写 DOM）。 */
+const PASS_OBSERVE = compile("arg", `${COLLECT_JS}\nreturn (${OBSERVE_JS})(arg);`);
 /** A2：窗口透明化（inspect 用）：可见交互总数 + 被挤出窗口的候选（≤10）。 */
 const PASS_WINDOW = compile("arg", `${COLLECT_JS}\nreturn (${WINDOW_AUDIT_JS})(arg);`);
 /** A2：失败路径的 viewport_underloaded 事实（只读 DOM，一次扫描，提前退出）。 */
@@ -1099,6 +1195,12 @@ export async function extractElements(
     candidatePriority?: "bucketed" | "main-first";
     /** U3：`meta.policy.surface.native_activation`（缺省 window；"off" = 池构成回到 U3 之前）。 */
     surface?: SurfacePolicy;
+    /**
+     * P0-A（inspect 观察面 opt-in，缺省 false = 池行逐字节不变）：给每行补
+     * `class_names`（≤8 个、每项 ≤40 字符）与 `label_full`（不截断的完整标签）。
+     */
+    classNames?: boolean;
+    fullLabel?: boolean;
   },
 ): Promise<ElemPool> {
   // 缺省 bucketed；main-first 显式回退。quota 由预算档决定（40/120 两档常量单一出处）。
@@ -1123,7 +1225,10 @@ export async function extractElements(
     try {
       rows = (await frames[fi]!.evaluate(PASS_EXTRACT,
         { sel: poolSelectorWithJsFor(opts?.surface), max: remaining, quotas,
-          cats: SURFACE_SELECTORS, caps: WINDOW_CAPS })) as Elem[] | null;
+          cats: SURFACE_SELECTORS, caps: WINDOW_CAPS,
+          // P0-A：只有 inspect 传这两个开关；不传 ⇒ 参数对象与今天逐字节同形。
+          ...(opts?.classNames === true ? { classNames: true } : {}),
+          ...(opts?.fullLabel === true ? { fullLabel: true } : {}) })) as Elem[] | null;
     } catch {
       rows = null;
     }
@@ -1143,6 +1248,89 @@ export async function extractElements(
     for (const row of extra) if (row.ref) elems[row.ref] = row;
   }
   return elems;
+}
+
+/** P0-A：一帧的原始观察行（JS 侧字段；`frame`/序号由 host 补）。 */
+export interface ObserveRawRow {
+  tag: string;
+  role?: string;
+  label?: string;
+  id?: string;
+  name?: string;
+  data_test?: string;
+  type?: string;
+  href?: string;
+  class_names?: string[];
+  visible?: boolean;
+  bbox?: { x: number; y: number; w: number; h: number };
+  in_surface?: boolean;
+  frame?: number;
+}
+
+/** frame.url 可能是属性或方法（Playwright 两种形状都见过）；读不到就是空串。 */
+function frameUrlOf(f: FrameLike): string {
+  try {
+    const u = typeof f.url === "function" ? f.url() : f.url;
+    return typeof u === "string" ? u : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * P0-A `ctx.observe()` 的 read-only 采集层：每帧一次 `page.evaluate`（`PASS_OBSERVE`），
+ * 不发动作、不盖章、不滚动、不等待。返回原始行 + 帧 URL 摘要。
+ *
+ * 纪律：
+ *   - **不调用 extractElements / jsInteractiveWidgets**（CDP 探针会盖章 `data-js-ref`，
+ *     那是对页面的写；observe 只读）。默认选择器 = 当前生效的准入面（ADMIT_SEL 投影 +
+ *     已有的 `[data-js-ref]` 后缀——引擎上一趟抽池盖过章的元素会自然出现在这里）；
+ *   - `selector` 给定时用它（任意 CSS，只读）；非法 CSS 由页面函数结构化返回，不抛栈；
+ *   - 最多 `framesOf(page, 6)` 帧（主 frame 在前）；`max` 是**所有帧合计**的上限，
+ *     主 frame 先用，子 frame 用剩余额度；
+ *   - `total` 是可见性过滤后的候选总数（截断前），调用方用它算 `counts.omitted`。
+ */
+export async function observeElements(
+  page: PageLike,
+  opts: {
+    selector?: string; max: number; includeHidden?: boolean; includeFrames?: boolean;
+    surface?: SurfacePolicy;
+  },
+): Promise<{ rows: ObserveRawRow[]; total: number; frames: string[]; badSelector?: string }> {
+  const sel = opts.selector ?? admitSelectorWithJsFor(opts.surface);
+  const admitSel = admitSelectorWithJsFor(opts.surface);
+  const allFrames = framesOf(page);
+  const frames = opts.includeFrames === false ? allFrames.slice(0, 1) : allFrames;
+  // 只列**实际评估过**的帧（includeFrames:false 或 max 提前用尽时，列表不虚报子 frame）；
+  // `row.frame` 就是这里的下标。
+  const frameUrls: string[] = [];
+  const rows: ObserveRawRow[] = [];
+  let total = 0;
+  let remaining = opts.max;
+  type ObserveRawResult = { rows?: ObserveRawRow[]; total?: number; bad_selector?: string };
+  for (let fi = 0; fi < frames.length; fi++) {
+    if (remaining <= 0) break;
+    frameUrls.push(frameUrlOf(frames[fi]!));
+    let raw: ObserveRawResult | null = null;
+    try {
+      raw = (await frames[fi]!.evaluate(PASS_OBSERVE, {
+        sel, max: remaining, includeHidden: opts.includeHidden === true, admitSel,
+      })) as ObserveRawResult | null;
+    } catch {
+      raw = null;   // frame detached / 无执行上下文：跳过（与 extractElements 同口径）
+    }
+    if (raw === null) continue;
+    if (typeof raw.bad_selector === "string") {
+      return { rows: [], total: 0, frames: frameUrls, badSelector: raw.bad_selector };
+    }
+    for (const row of raw.rows ?? []) {
+      row.frame = fi;
+      rows.push(row);
+    }
+    total += Number(raw.total ?? 0) || 0;
+    remaining = opts.max - rows.length;
+  }
+  return { rows, total, frames: frameUrls };
 }
 
 /**

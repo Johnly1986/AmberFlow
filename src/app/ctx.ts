@@ -19,6 +19,7 @@ import {
 } from "../engine/executor.ts";
 import { validateCommands } from "../engine/actions.ts";
 import { firstOf, framesOf, locatorAnyFrame, urlOf, type PageLike } from "../engine/extraction.ts";
+import { observePage, validateObserveOptions, type ObserveOptions, type ObserveResult } from "../engine/observe.ts";
 import { checkSignal } from "../engine/signals.ts";
 import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, runSource, ValueError } from "../data/datasource.ts";
 import {
@@ -416,6 +417,25 @@ export interface Ctx {
    * 注意：动作打开的新标签页**不会自动跟随**——先 `ctx.tabs()` 确认，再 `switchTab`。
    */
   switchTab(match: SwitchTabMatch): Promise<SwitchTabResult>;
+  /**
+   * P0-A：**只读观察当前会话页**，返回 DOM 侧真实存在、但**不要求入池**的元素清单
+   * （准入面元素；`selector` 给定时以它为准），带 class/bbox/可见性/`admitted` +
+   * `why_not_admitted` + 经同一个 `hintMatch` 自证的 `hint_candidates`。用于脚本内侦察/
+   * 取证（替代"故意失败步捞池快照"或反复建 app）。
+   *
+   * 纪律：**免费**（不计 flow step/预算、不触发 pace）、**不写 outDir**、**不进模型请求面**
+   * （不调用任何 provider、不抽决策池）、**不改页面状态**（只读 DOM，无点击/滚动/导航）。
+   * 每次观察 ≤6 次 `page.evaluate`（主 frame + 可达子 frame），最多 200 行；不做水合等待
+   * （要等页面先 `ctx.waitFor`/`arrive`）。`selector` 非法 CSS 返回
+   * `{ok:false, error:"bad_selector", reason}`，不抛栈、不中断 flow。
+   *
+   * 产物：trace 只记 `{call:"observe", url, counts, truncated}`（**不记元素/class 明细**），
+   * result JSON 里没有 observe 结果（需要证据就在 flow 里自己用 `ctx.log`/写文件）。
+   * dry 返回 `{ok:true, dry:true, counts 全 0, elements:[]}`；replay 只还原 counts/truncated
+   * （元素明细未录制）——`if (obs.elements.length)` 这类分支在 dry/replay 走不到，
+   * 依赖观察值的分支/断言请用 `ctx.runtime.runId === "(dry)"` 或 counts 守卫。
+   */
+  observe(opts?: ObserveOptions): Promise<ObserveResult>;
   step(desc: string, req: StepRequest): Promise<StepResult>;
   /**
    * A3：把目标（hint）自身或其最近可滚动祖先滚到方向 `to`（缺省 bottom）或相对 `by` 像素。
@@ -1618,6 +1638,27 @@ export function createCtx(deps: CtxDeps): Ctx {
             },
           }) },
       });
+      return result;
+    },
+    // ---- P0-A observe：免费只读（不占预算/不 pace/不写盘/不进模型面/不改页面）----
+    observe: async (opts = {}) => {
+      // 声明面先校验（形状错误 = config_error；非法 CSS 不在这里判——那要浏览器才知道，
+      // 且 observe 用结构化 {ok:false,error:"bad_selector"} 回报，不中断 flow）。
+      const problems = validateObserveOptions(opts);
+      if (problems.length) throw new StopError("config_error", problems.join("；"));
+      const started = Date.now();
+      const session = await deps.ensureSession();
+      const result = await observePage(session.page as unknown as PageLike, opts, deps.surfacePolicy);
+      // 只记摘要：counts + truncated（**不记元素明细/class**，避免 trace 膨胀与脱敏问题）。
+      pushEvent(trace, {
+        call: "observe", url: result.url, ok: result.ok,
+        counts: result.counts, truncated: result.truncated,
+        ...(result.ok ? {} : { result: { error: result.error, reason: result.reason } }),
+      });
+      if (deps.verbose === true) {
+        // verbose 只打计数（不打印元素），与 trace 同一口径。
+        console.log(`  [observe] ${result.url} elements=${result.counts.elements} admitted=${result.counts.admitted} omitted=${result.counts.omitted} (${Date.now() - started}ms)`);
+      }
       return result;
     },
     // ---- A5 标签页：tabs() 免费只读；switchTab 计 1 flow step 且走 pace（与 step/arrive 同单元语义）----

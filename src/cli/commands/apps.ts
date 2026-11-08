@@ -128,6 +128,9 @@ ${playbook}
  * ctx 只有这些面（没有 pageUrl()：入口页角色写在 meta.site.pages，用 openPage 取）：
  *   openPage(role) / open(url) / arrive(url, {done}) / step(desc, {id, act, done, url, slots, when, timeoutMs})
  *   / tabs() / switchTab({index|urlContains|titleContains})
+ *   / observe({max?, selector?, includeHidden?, includeFrames?})
+ *     —— 免费只读看当前页元素（label/class/bbox/visible + admitted/why_not_admitted + 自证 hint_candidates），
+ *       不改页面、不占预算、不进模型面；dry/replay 的 elements 恒 []（只有 counts），别据此做分支。
  *   / manual(desc, {done}) / url() / read.text|value|count|attr / extract / collect / holds / waitFor
  *   / source（数据腿注册表，不是读槽位的口）/ run / done() / fail(code, reason) / hint / hints / command
  *   / slots（冻结 Record：脚本层读槽位值写 ctx.slots["键"]，键须在 meta.slots 声明）
@@ -178,7 +181,7 @@ ${playbook}
  *     // stopReason: stable | maxRows | budget | not_scrollable——诚实口径，不假装穷尽。
  *
  * 预算一图流（完整口径：amber schema ctx --topic budget）：
- *   免费不占预算：read.* / extract / holds / waitFor / log / url / tabs
+ *   免费不占预算：read.* / extract / holds / waitFor / log / url / tabs / observe
  *   各计 1：ctx.step / ctx.arrive / ctx.run / 批准执行的人工步 / ctx.scrollList / ctx.expand / ctx.setRange / ctx.collect / ctx.switchTab
  *   step 内的 command 闭集不单独计步：一个 step 的动作循环上限 8（子目标动作预算）
  *   用满：budget_exceeded（status=partial、verified=false、exit 0）

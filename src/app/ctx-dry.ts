@@ -21,6 +21,7 @@ import { pushEvent, type AppTrace } from "./trace.ts";
 import { getAppAdapter, listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
 import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, ValueError } from "../data/datasource.ts";
 import type { StateFingerprint, StepStateRecord } from "../engine/executor.ts";
+import { validateObserveOptions, type ObserveResult } from "../engine/observe.ts";
 import {
   declaredRunProblems,
   normalizeCommandIds, resolveCtxUrl, sameNavTarget, StopError,
@@ -309,6 +310,25 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
         from: { url: from },
         to: target, pages: 1, args: match, ok: true,
         result: { dry: true, ...target },
+      });
+      return result;
+    },
+    // P0-A dry 桩：不访问浏览器；**参数形状真校验**（未知键/非法 max/空 selector 在 dry 期红），
+    // 结果按文档合成形状返回（counts 全 0、elements []、dry:true）。非法 CSS 只有浏览器知道，
+    // dry 不假装能判（与"dry 不验观察值"同一条纪律）。
+    observe: async (opts = {}) => {
+      validatePrimitive("ctx.observe", isObj(opts) && typeof opts["selector"] === "string" ? opts["selector"] : undefined,
+        () => {
+          const p = validateObserveOptions(opts);
+          if (p.length) throw new StopError("config_error", p.join("；"));
+        });
+      const result: ObserveResult = {
+        ok: true, dry: true, url: currentUrl,
+        counts: { elements: 0, admitted: 0, omitted: 0 }, truncated: false, elements: [],
+      };
+      pushEvent(trace, {
+        call: "observe", url: currentUrl, ok: true, counts: result.counts, truncated: false,
+        result: { dry: true },
       });
       return result;
     },
