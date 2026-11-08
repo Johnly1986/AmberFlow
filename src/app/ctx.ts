@@ -587,6 +587,13 @@ export interface CtxDeps {
    * 停因 `navigation_forbidden`。只在 flow 脚本面生效。
    */
   navPolicy?: "entry-only" | "free";
+  /**
+   * P0-B：`meta.site.pages` 声明的页面 URL 清单。仅 `navPolicy:"entry-only"` 使用：
+   * 再次直接导航到**声明页**（URL 经 `new URL().href` 归一后全等）放行——例如
+   * `ctx.openPage("home")` 回入口页；未声明的 URL 仍 `navigation_forbidden`。
+   * 缺省 undefined = 不放开（行为逐字节不变）。
+   */
+  declaredPages?: string[];
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -641,6 +648,21 @@ export function sameNavTarget(a: string, b: string): boolean {
     const bare = (s: string) => { const i = s.indexOf("#"); return i < 0 ? s : s.slice(0, i); };
     return bare(a) === bare(b);
   }
+}
+
+/**
+ * P0-B：entry-only 的**声明页放行**判定。两边 URL 各经 `new URL(...).href` 归一后
+ * **全等**（含 query；不做尾斜杠/case/协议升级等特判）⇒ 目标是一个已声明入口页。
+ * 解析不了的原始串按字面相等兜底（与 `sameNavTarget` 同一条纪律）。
+ */
+export function sameDeclaredPageHref(target: string, declared: readonly string[]): boolean {
+  if (!declared.length) return false;
+  const hrefOf = (u: string): string => {
+    try { return new URL(u).href; } catch { return u; }
+  };
+  const h = hrefOf(target);
+  for (const d of declared) if (hrefOf(d) === h) return true;
+  return false;
 }
 
 /**
@@ -964,6 +986,8 @@ export function createCtx(deps: CtxDeps): Ctx {
    * 页面驱动的跳转（点击/锚点/新标签页）不经过这里，永不拦截。
    */
   const navOnly = deps.navPolicy === "entry-only";
+  /** P0-B：声明页清单（相对路径按 ctx URL 口径解析；仅 entry-only 参与判定）。 */
+  const declaredPageHrefs = (deps.declaredPages ?? []).map(resolveCtxUrl);
   let directNavs = 0;
   const markDirectNavLanded = (): void => { if (navOnly && directNavs === 0) directNavs = 1; };
   /**
@@ -973,7 +997,8 @@ export function createCtx(deps: CtxDeps): Ctx {
    */
   const navGate = (call: TraceCall, label: string, target: string): void => {
     if (!navOnly) return;
-    if (directNavs === 0 || sameNavTarget(target, currentUrl)) return;
+    if (directNavs === 0 || sameNavTarget(target, currentUrl)
+      || sameDeclaredPageHref(target, declaredPageHrefs)) return;
     const diag = { policy: "entry-only", attempted: target, current: currentUrl };
     pushEvent(trace, { call, url: target, ok: false, stop_code: "navigation_forbidden", result: diag });
     throw new StopError("navigation_forbidden",

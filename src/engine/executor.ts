@@ -870,6 +870,13 @@ export interface MiddlewareOptions {
   settle?: { quietMs: number; timeoutMs: number } | null;
   /** U3：池空判档（缺省 "fact"；"strict" = U3 之前的 page_not_ready 快败）。 */
   poolGate?: "fact" | "strict";
+  /**
+   * P0-B：声明目标（act hint）解析链全落空时是否允许模型自由选。
+   * 缺省/`"widen"` = 今天（回退模型）；`"strict"` = **不回退**，结构化
+   * `target_not_found`（reason 显式写明 act_hint="strict"）。只砍模型回退：
+   * FW8 身份回捞先执行，命令步不受影响。缺省不出现 = 行为逐字节不变。
+   */
+  actHint?: "widen" | "strict";
   /** U3：surface 类目策略（缺省 native_activation="window"）。 */
   surfacePolicy?: SurfacePolicy;
   /**
@@ -1544,6 +1551,12 @@ export class BrowserMiddleware {
   poolGate: "fact" | "strict" = "fact";
   /** U3：surface 类目策略（缺省 native_activation="window"）。 */
   surfacePolicy: SurfacePolicy = { native_activation: "window" };
+  /**
+   * P0-B：act_hint:"strict"（缺省 false = 今天）。为 true 时，声明目标解析链
+   * （池 hintMatch → ADMIT 回捞 → FW8 身份回捞 → rules-only 宽扫）全部未命中后
+   * 不再交给模型自由选，直接结构化 target_not_found。
+   */
+  actHintStrict = false;
   /** See `MiddlewareOptions.candidatePriority`（A2 分桶窗口；缺省 bucketed）。 */
   candidatePriority: "bucketed" | "main-first" = "bucketed";
   /** S1：pre-held done 处置（缺省 warn；fail 在动作前结构化停止）。 */
@@ -1848,6 +1861,7 @@ export class BrowserMiddleware {
     this.tieredHint = opts.tieredHint ?? this.tieredHint;
     this.candidatePriority = opts.candidatePriority ?? this.candidatePriority;
     this.poolGate = opts.poolGate === "strict" ? "strict" : "fact";
+    this.actHintStrict = opts.actHint === "strict";
     if (opts.surfacePolicy !== undefined) this.surfacePolicy = { ...opts.surfacePolicy };
     this.donePreheldPolicy = opts.donePreheldPolicy ?? this.donePreheldPolicy;
     this.fillReadback = opts.fillReadback ?? this.fillReadback;
@@ -4206,6 +4220,25 @@ export class BrowserMiddleware {
               }
             }
           }
+        }
+        // P0-B `meta.policy.act_hint:"strict"`：声明目标解析链（池 hintMatch → ADMIT 回捞
+        // → FW8 身份回捞 → rules-only 宽扫）全部未命中时，**不再静默回退到模型自由选**
+        // （R08 实测：未命中的 act hint 被模型换成"酒店"登录入口 → host_not_allowed 中止）。
+        // 命令步不受影响（cmdSpace 非空时 curHint 恒 null，命令面自带解析/报错）；
+        // widen（缺省）一个字节都不走这里。identityHidden 的隐藏元素仍算未命中（绝不操作）。
+        if (this.actHintStrict && !this._learnedHintApplied && !commandMode
+            && curHint !== null && hintMatch(curHint, elems) === null) {
+          const poolSize = Object.keys(elems).length;
+          const summary = poolRoleSummary(elems, ALL_FAMILIES);
+          stop("target_not_found",
+            `step ${stepNo}: act_hint="strict" forbids the model fallback — declared target_hint `
+            + `${JSON.stringify(curHint)} matched nothing in the pool (${poolSize} element(s)`
+            + `${summary ? `: ${summary}` : ""}) after hintMatch / ADMIT recovery / FW8 identity recovery. `
+            + `Fix the hint (closed set: #id | tag[attr=value] | tag[attr~substr] | tag~token | tag | bare-token) `
+            + `or remove meta.policy.act_hint:"strict" to let the decision model pick instead`
+            + identityHiddenSuffix(), stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          break;
         }
         // re-admit refs whose only sin was being covered at an earlier step, but
         // ONLY after this subgoal actually executed something since the block

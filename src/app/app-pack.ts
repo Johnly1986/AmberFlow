@@ -187,10 +187,15 @@ export const POLICY_KEYS = [
   "decision_state",
   // 导航纪律（缺省 "free" = 现行为逐字节不变；"entry-only" = 入口外直接 URL 跳转被拦）。
   "navigation",
+  // P0-B：act hint 未命中时是否允许模型自由选（缺省 widen = 现行为逐字节不变）。
+  "act_hint",
 ] as const;
 
 /** 导航纪律档位（`meta.policy.navigation`）。 */
 export const NAVIGATION_MODES = ["entry-only", "free"] as const;
+
+/** act hint 解析失败时的档位（`meta.policy.act_hint`）。 */
+export const ACT_HINT_MODES = ["widen", "strict"] as const;
 
 /** S5 状态闸门档位（`meta.policy.decision_state.gate`）。 */
 export const DECISION_STATE_GATES = ["off", "stable_only"] as const;
@@ -222,6 +227,16 @@ export interface PackPolicy {
    *   - `"free"`：显式声明"不约束"（与缺省同义；声明了才进 effective_policy 的账）。
    */
   navigation?: (typeof NAVIGATION_MODES)[number];
+  /**
+   * P0-B：声明目标（`act: ctx.hint(...)` / `target_hints` 多声明）的解析链
+   * （池 hintMatch → ADMIT 回捞 → FW8 声明身份回捞）全部未命中时怎么办：
+   *   - `"widen"`（缺省，= 现行为逐字节不变）：不拦，交给模型自由选（决策步的既有阶梯）；
+   *   - `"strict"`：**禁止模型回退**，结构化停因 `target_not_found`（reason 显式写明
+   *     `act_hint="strict"` + 原 hint + 池快照）。只砍模型回退：FW8 身份回捞（`#id` /
+   *     `[data-test]` / `[name]` 声明）仍先执行；命令步（自带解析/报错）不受影响。
+   * 显式声明才进 effective_policy.act_hint（widen 也进账）。
+   */
+  act_hint?: (typeof ACT_HINT_MODES)[number];
   /**
    * 置信度闸门（缺省 0.25）。**为什么要能声明**：闸门比的是 provider 的 `score`，而
    * `score_kind` 不同的两支不可比（laya 的归一化熵 vs 在线服务的标定概率）——
@@ -1219,6 +1234,10 @@ export function validatePack(pack: AppPack,
       const nav = pol["navigation"];
       if (nav !== undefined && !(NAVIGATION_MODES as readonly string[]).includes(String(nav))) {
         p.push(`policy.navigation: unknown value ${JSON.stringify(String(nav))} (config_error; must be one of ${NAVIGATION_MODES.map((x) => JSON.stringify(x)).join(" | ")})`);
+      }
+      const ah = pol["act_hint"];
+      if (ah !== undefined && !(ACT_HINT_MODES as readonly string[]).includes(String(ah))) {
+        p.push(`policy.act_hint: unknown value ${JSON.stringify(String(ah))} (config_error; must be one of ${ACT_HINT_MODES.map((x) => JSON.stringify(x)).join(" | ")})`);
       }
       const sf = pol["surface"];
       if (sf !== undefined) {

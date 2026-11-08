@@ -932,6 +932,17 @@ export function preflightConfig(opts: AppRunOptions = {}): void {
   }
 }
 
+/**
+ * P0-B：`meta.site.pages` 声明页的 URL 清单（entry-only 的「声明页可再导航」放行清单）。
+ * 缺省/空 = undefined（不产生任何行为差异）。
+ */
+function declaredPageUrls(pack: unknown): string[] | undefined {
+  const pages = (pack as { site?: { pages?: Record<string, string> } } | null)?.site?.pages;
+  if (pages === undefined || pages === null) return undefined;
+  const urls = Object.values(pages).filter((u): u is string => typeof u === "string" && u.trim() !== "");
+  return urls.length ? urls : undefined;
+}
+
 /** §3 生效策略的形状（`effective_policy` 产物字段的单一出处）。 */
 export interface EffectivePolicy {
   tiered_hint: { value: boolean; source: "cli" | "app" | "default" };
@@ -971,6 +982,11 @@ export interface EffectivePolicy {
    * 执行面只在 flow 脚本面：入口之外的直接 URL 导航 → `navigation_forbidden`。
    */
   navigation?: { value: "entry-only" | "free"; source: "app" };
+  /**
+   * P0-B act hint 档位（**仅声明时出现** = 缺省产物逐字节不变；显式 "widen" 也进账）。
+   * "strict" = 声明目标解析链全落空时禁止模型回退，结构化 target_not_found。
+   */
+  act_hint?: { value: "widen" | "strict"; source: "app" };
 }
 
 /**
@@ -1079,6 +1095,10 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
   // 必须在 anyDeclared 之前挂上——只声明 navigation 的包也要能进 effective_policy 的账。
   if (declaredPolicy.navigation !== undefined) {
     policy.navigation = { value: declaredPolicy.navigation, source: "app" as const };
+  }
+  // P0-B：act_hint 同样**仅声明时出现**（缺省 widen = 今天；"widen" 显式声明也进账）。
+  if (declaredPolicy.act_hint !== undefined) {
+    policy.act_hint = { value: declaredPolicy.act_hint, source: "app" as const };
   }
   const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
   return { policy, anyDeclared };
@@ -2195,6 +2215,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           riskyThreshold: 0.6,
           doneThreshold: 0.5,
           tieredHint: resolvedPolicy.policy.tiered_hint.value,
+          // P0-B：act hint 档位（缺省 widen；strict = 声明目标解析链全落空时禁模型回退）。
+          actHint: resolvedPolicy.policy.act_hint?.value,
           riskAsk: resolvedPolicy.policy.risk_ask.value === "rules-only" ? "rules-only" : "always",
           reobserve: resolvedPolicy.policy.reobserve.value,
           maxEffectiveRepeats: resolvedPolicy.policy.max_effective_repeats.value,
@@ -2388,6 +2410,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       surfacePolicy: policy.surface.value,
       // 导航纪律（缺省 undefined = 现行为逐字节不变；"entry-only" 才有闸门）。
       navPolicy: policy.navigation?.value,
+      // P0-B：声明页放行清单（仅 entry-only 用它；缺省 undefined = 逐字节不变）。
+      declaredPages: declaredPageUrls(pack),
       onRunReport: (rep) => {
         const steps = rep.steps as TraceStep[];
         decisionSteps.push(...steps);

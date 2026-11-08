@@ -207,7 +207,7 @@ export const meta = (kit) => ({
 | `site` | 站点面：页面角色 `pages`、命名行抽取 `listExtract`（见 §5） |
 | `model` / `maxSubgoals` | 决策模型 checkpoint / 子目标上界（高级，缺省即可） |
 | `notes` | 给人看的备注（字符串列表），不参与运行 |
-| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` / `candidate_priority` / `done_preheld` / `effect_readback` / `settle` / `pool_gate` / `surface` / `decision_state` |
+| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` / `candidate_priority` / `done_preheld` / `effect_readback` / `settle` / `pool_gate` / `surface` / `decision_state` / `navigation` / `act_hint` |
 | `pace` | 运行节奏：`between_steps_ms` / `between_actions_ms` |
 | `invariants` | 结束态断言：`{ id, desc?, signal }` |
 | `recordedFrom` / `generatedFrom` | 血统：这段脚本从哪次演示/哪份生成物来 |
@@ -601,7 +601,12 @@ export const meta = (kit) => ({
 
 - **放行**：本次运行的**第一次**直接导航（= 入口；仍走 hosts 信封检查）；之后的直接导航
   目标与当前页 **origin+path+query 全等**（忽略 hash）——同 URL 重试语义保留。
-- **拒绝**：其余引擎发起的直接导航（`ctx.open` / `ctx.openPage` / `ctx.arrive` / step 级
+- **声明页放行（P0-B）**：再次直接导航到 `meta.site.pages` 里**声明过**的页面 URL 也放行——
+  例如 `ctx.openPage("home")` 回到入口页（多阶段任务「机票 → 回首页 → 酒店」因此可执行）。
+  比较口径：两边 URL 各经 `new URL(...).href` 归一后**全等**（含 query；不做尾斜杠/case/
+  协议升级等特判）。**未声明**的 URL 仍 `navigation_forbidden`；同 URL 重试照旧放行。
+  dry/`apps check` 与真实面同一口径。
+- **拒绝**：其余（既非同 URL 重试、也非声明页）引擎发起的直接导航（`ctx.open` / `ctx.openPage` / `ctx.arrive` / step 级
   `url` 重锚）→ 结构化停因 **`navigation_forbidden`**，reason 同时给当前 URL 与试图跳转的
   URL 与指引；`result.diagnostics.navigation = {policy:"entry-only", attempted, current}`
   留证据，trace 也落一条 `ok:false` 事件。
@@ -790,7 +795,8 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `pool_gate` | `fact` | U3 池空判档（仅 flow 面）：`fact` = 已就绪且池空记 `pool_empty` 后继续；`strict` = 旧 `page_not_ready` 快败 |
 | `surface` | `{native_activation:"window"}` | U3 准入面类目：`summary` 进池并受类目 cap=6；`native_activation:"off"` = 池构成回到 U3 之前（A/B） |
 | `decision_state` | `{gate:"off",context:"off"}` | S5 决策状态接入（A/B）：`gate:"stable_only"` = ask 前 settle + 同池同题不重复问（`decisions.asks_saved/gate_waits`）；`context:"delta"` = 请求带 ≤200B 结构化 `state_digest`（provider 不支持则跳过，记 `context_skipped`） |
-| `navigation` | `free` | 导航纪律（仅 flow 面）：`"entry-only"` = 入口之外的引擎直接 URL 导航被 `navigation_forbidden` 拒绝（见 §4.10）；缺省/"`free`" = 不约束，产物逐字节不变 |
+| `navigation` | `free` | 导航纪律（仅 flow 面）：`"entry-only"` = 入口之外的引擎直接 URL 导航默认被 `navigation_forbidden` 拒绝，但 **`meta.site.pages` 里声明的页面 URL 可再次直接导航**（`URL.href` 归一后全等才放行，见 §4.10）；缺省/"`free`" = 不约束，产物逐字节不变 |
+| `act_hint` | `widen` | 声明目标（`act: ctx.hint(...)` / `target_hints`）解析链（池 hintMatch → ADMIT 回捞 → FW8 身份回捞）全落空时的档位：`widen` = 交给模型自由选（**缺省 = 现行为逐字节不变**）；`strict` = **禁止模型回退**，直接结构化 `target_not_found`（reason 写明 `act_hint="strict"` + 原 hint + 池快照）。命令步不受影响；FW8 的 `#id`/`[data-test]`/`[name]` 声明回捞先执行。显式声明才进 `effective_policy.act_hint` |
 
 产物里的 `effective_policy` 只在非缺省时出现，并写明来源（`cli` / `config` / `app` / `provider` / `default`）。
 
@@ -835,7 +841,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `arrive_signal_not_held` | `ctx.arrive` 导航完成但 done 信号在超时内未成立 |
 | `precondition_skipped` | `when` 不成立，这一步没有执行（`ok:false`，trace 状态 `skipped`；同样计一次执行预算）——脚本按 stopCode 分支继续，不是失败 |
 | `page_not_ready` | 元素池为空，页面还没稳定；等页面 ready，或修 done 信号 |
-| `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标 |
+| `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标。`meta.policy.act_hint:"strict"` 下 act hint 解析链全落空也用它（reason 显式写 `act_hint="strict"`，**不再回退模型自由选**；缺省 `widen` 才回退） |
 | `target_ambiguous` | 目标命中多个不同候选；收窄 hint |
 | `action_unsupported` | 目标存在但声明的动作 op 不在元素能力面内；换动作或换目标 |
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |

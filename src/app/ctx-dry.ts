@@ -24,7 +24,7 @@ import type { StateFingerprint, StepStateRecord } from "../engine/executor.ts";
 import { validateObserveOptions, type ObserveResult } from "../engine/observe.ts";
 import {
   declaredRunProblems,
-  normalizeCommandIds, resolveCtxUrl, sameNavTarget, StopError,
+  normalizeCommandIds, resolveCtxUrl, sameDeclaredPageHref, sameNavTarget, StopError,
   validateCollectRequest, validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
   validateSwitchTabMatch,
   type CollectResult, type Ctx, type CtxBudget, type ExpandOptions, type ExpandResult,
@@ -58,6 +58,11 @@ export interface DryCtxDeps {
    * 会放过一个真实运行必然 `navigation_forbidden` 的脚本（hosts 信封的同一条理由）。
    */
   navPolicy?: "entry-only" | "free";
+  /**
+   * P0-B：`meta.site.pages` 声明的页面 URL 清单（entry-only 的声明页再导航放行）。
+   * dry 与真实面同一判定——否则 `ctx.openPage("home")` 回入口页的脚本在 check 期被假红。
+   */
+  declaredPages?: string[];
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -143,10 +148,13 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
    * 每次过闸的调用即"成功落地"——过闸即计数。
    */
   const navOnly = deps.navPolicy === "entry-only";
+  /** P0-B：声明页清单（与真实 ctx 同一口径：resolveCtxUrl + URL.href 全等）。 */
+  const declaredPageHrefs = (deps.declaredPages ?? []).map(resolveCtxUrl);
   let dryDirectNavs = 0;
   const dryNavGate = (call: TraceCall, label: string, target: string): void => {
     if (!navOnly) return;
-    if (dryDirectNavs === 0 || sameNavTarget(target, currentUrl)) {
+    if (dryDirectNavs === 0 || sameNavTarget(target, currentUrl)
+      || sameDeclaredPageHref(target, declaredPageHrefs)) {
       dryDirectNavs += 1;
       return;
     }
