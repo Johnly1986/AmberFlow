@@ -73,6 +73,7 @@ const CTX_FACTS: ReadonlyArray<{ id: string; statement: string; truth: string }>
   { id: "F45", statement: "frame 门禁精确化（P0-D，缺省行为不变）：**声明 host 信封之外的 iframe 默认只排除出解析面**，不再是导航/执行前的整步 REJECT。被排除 frame 记一条 step warning `frames_excluded: [origin…]`（稳定文案：已排除、不影响页面其余操作）；池抽取 / hintLookup / FW8 身份回捞 / DRF / locatorAnyFrame / done / when 求值都只在**允许帧**（frame origin 在 meta.hosts 内，主 frame 恒允许）上进行，被排除帧里的元素不进池、不可被动作，但在池中的真实 frame 下标与 `f<fi>:` ref 保持不变（只排除解析面，不重编号）。**精确拒绝**只在声明面命中被排除帧时发生：①声明 target（act hint / 命令 target）在池→ADMIT→FW8→DRF 全落空后，只读探测（不盖章、不动作）该目标是否仅存在于被排除 frame——是则结构化 frame_not_allowed，reason 点名 frame origin + 目标 + 只读匹配证据 + 修法（第三方非交互 frame 默认排除不需要加 hosts；仅当声明目标确需该 frame 时才评估把 origin 加进 meta.hosts）；②声明 done/when 在允许帧上不成立、只读地在被排除帧上再判一次——只在排除帧成立 → frame_not_allowed（done 依赖被排除帧），允许帧已成立 → 正常成功。其余情况步骤照常（广告 iframe 不再废掉正常步骤），只有 warning/diagnostics。导航信封（goto/落地）与 popup 门禁不变；无被排除帧时零新字段/零新行为（逐字节）", truth: "src/engine/extraction.ts（urlInHostsEnvelope/frameInHostsEnvelope/frameGateOf/framesScopedPage/probeExcludedHint + extractElements/hintLookup/identityLookup/locatorAnyFrame 的 hosts 面 + PASS_HINT_PROBE 只读收集）+ src/engine/executor.ts（删除 deniedFrameUrl 整步 REJECT、_frameHosts、goalHeld done/when 双面求值、frameTargetStop、frame_not_allowed 收尾升级、frames_excluded warning）+ src/engine/declared.ts（declaredLookup hosts 面）+ docs/APP_SCRIPT_AUTHORING.md §frame/§10" },
   { id: "F46", statement: "完成语义诚实·计账与弱 done lint（P0-E）：① result JSON 新增 `steps_failed: n`——`step_traces` 里 status:\"failed\" 的步数，**仅 n>0 时出现**（n=0 键集与基线逐字节一致）；`ok`/`verified` 语义不变（脚本容忍的步失败是数据不是判死），report.md 摘要行加「失败步 n」（仅 n>0）——受阻交付（run 绿但交付 null）从这里一眼可见；skipped（when 不适用）/recovered（瞬断挽回）不算失败。② `apps check`/dry 的 weak_done lint：done/when 顶层信号为否定式且**否定之外没有正向锚**（url_contains/css_*/manual 事实型谓词；not(...) 内部的事实不算锚）→ 输出一行 warning（仍 VALID、exit 0）：`weak_done: top-level negative-only signal may be satisfied by unrelated navigation (e.g. mis-click to a login page counted as success); add a positive anchor (exists/holds/url) or pair with ctx.judge.loginWall()`——R11 的 not(existsText(body,\"8240家昆明酒店\")) 误入登录页照样成立，就是这一形状；`all_of(not(...), 正向锚)`（否定+锚）不告警。lint 只读信号形状，不改 checkSignal 运行时语义", truth: "src/app/app-runner.ts（AppRunResult.steps_failed 仅 >0 出现 + appReportMarkdown 失败步摘要行）+ src/app/app-script.ts（signalLintProblems weak_done + when/precondition 声明位过同一 lint）+ src/app/ctx-dry.ts（dry step 事件记 when 声明）+ src/engine/signals.ts isWeakNegativeSignal（弱信号唯一口径）+ docs/APP_SCRIPT_AUTHORING.md §弱 done" },
   { id: "F47", statement: "完成语义诚实·步级 guard 与 loginWall 预设（P0-E）：① `ctx.judge.loginWall()`——登录墙事实预设（any_of：URL 登录特征 /login|/signin|/sign-in|/passport|/sso/|/auth|/verify|passport.|sso. 或 title/h1/h2 登录文案；词边界不误报 author/verified）。**诚实检测信号**：给否定式 done 配正向锚、做 guard 事实底座用，不是绕过登录的工具。② 步级 false_done guard（meta.policy.done_guard，缺省 \"warn\"）：每步 done 成立后做**只读**复核（一次主 frame evaluate，不点击不导航不改判定）——主 frame URL 词边界命中登录特征（login|signin|sign-in|sign_in|logon|passport|sso|auth|oauth|verify，两侧非字母数字，author/verified 不误报）或 title/h1-h3 登录文案（正文只在 ≤400 字符的短页上计，避免\"页脚登录入口\"误报）或主 frame 跨出 meta.hosts 信封，或「有动作但全部 changed=false 且 done 是否定式」（零前进蹭成立）→ warn 档记 step warning `false_done: …`（含 URL/证据，步骤仍 ok）；\"fail\" 档结构化停因 `false_done`（reason 含证据+修法，STOPCODE_MEANING 已收）。guard 是 tripwire 不是完成判定：完成仍只认 done 信号；正常登录类应用（会落在 /passport）建议保持缺省 warn；dry 只校验 policy 值与信号形状", truth: "src/engine/signals.ts（LOGIN_WALL_URL_RE/LOGIN_WALL_TEXTS/loginWallSignal）+ src/app/kit.ts（judge.loginWall 构造器）+ src/engine/executor.ts（StopCode false_done + MiddlewareOptions.doneGuardPolicy + done 成立后只读复核 GUARD_JS + false_done warn/fail 分支）+ src/app/ctx.ts（doneSpec 透传）+ src/app/app-pack.ts（POLICY_KEYS.done_guard + validateApp 档位校验）+ src/app/app-runner.ts（EffectivePolicy.done_guard + 两处 mw 构造）+ docs/APP_SCRIPT_AUTHORING.md §done_guard" },
+  { id: "F48", statement: "P1 三项（F 组）：① ctx.scrollList **合成滚动目标**——target 接受 \"document\"|\"body\"|\"html\"|\"window\"（大小写不敏感；不进元素池、不占池位、不做 hint 匹配）：统一解析主滚动器 document.scrollingElement（兜底 body→documentElement）执行既有滚动语义（to bottom/top/page 或 by 像素 + settle），如实返回 moved——短页不可滚 = {ok:false, moved:false, stopCode:\"not_scrollable\"}，绝不假成功；容器目标（其他 hint）既有行为逐字节不变。② ctx.step **newTab:{urlContains?}**（opt-in；未声明逐字节不变）——target=_blank/window.open 新标签升为一等 done 面：动作前已存在 URL 命中 urlContains（大小写不敏感子串）的标签 → 直接采用（读面+动作面切过去）、**不再点击**（消重复标签）；动作后出现新标签 → 自动切 session.page 到它（优先 URL 命中者）、done 在新标签上判定；单条 act hint 收敛为**恰好一次点击**（单命令闭集，done 不成立 = done_not_held）；声明但无新标签出现 = 正常 done 判定（如实失败）；新标签在 meta.hosts 信封外仍按 popup 门禁拒绝。结果/trace 记 newTab/{new_tab:{index,url,title,adopted:\"existing\"|\"opened\"}}。③ 步级 **timeoutMs** 显式声明时同时是整步挂钟帽——reobserve/升级循环的每轮与总时长受它约束（循环头逐轮检查、过期不再起新的宽扫/升级，已在途决策调用不可抢占、超额 ≤ 一次在途调用），超时 = 结构化 step_timeout；未声明 timeoutMs 的步骤无帽（缺省逐字节不变）。dry 只验声明形状（newTab 对象/urlContains 非空串；scrollList 合成名合法），dry 无浏览器不验标签行为", truth: "src/engine/executor.ts（scrollDocument + RunOptions.stepTimeoutMs + StopCode step_timeout + reobserve/escalate 挂钟守卫）+ src/app/ctx.ts（SCROLL_SYNTHETIC_TARGETS/isSyntheticScrollTarget/validateScrollListRequest + scrollList 路由 + StepRequest.newTab + runOneStep 去重/采用/单命令收敛 + stepTimeoutMs 透传 + StepResult.newTab）+ src/app/ctx-dry.ts（validateStep newTab 形状 + new_tab 声明标记）+ docs/APP_SCRIPT_AUTHORING.md（§4.9/§4.6/§超时/§A5/§10）" },
 ];
 
 /** 信号算子语义注记（表从 SIGNAL_OPS 真源取；语义逐条标出处）。 */
@@ -131,7 +132,7 @@ const BUDGET = {
   ],
   flow_call: { default: 100, cli_flag: "--max-steps", counts: ["ctx.step", "ctx.arrive", "ctx.run", "批准执行的人工步", "ctx.scrollList", "ctx.expand", "ctx.setRange", "ctx.collect", "ctx.switchTab"], note: "when 跳过的步同样计 1；用满 → budget_exceeded（status=partial、verified=false）" },
   subgoal_actions: { default: 8, configurable: false, note: "执行器动作循环上限；reason 里的 \"on step N\" 是本层动作号，与流步号两口径" },
-  signal_wait: { done_timeout_ms_default: 2000, step_level_override: "timeoutMs", note: "约束动作后等 done 的窗口，不约束整步挂钟（模型咨询/导航渲染不在其内）" },
+  signal_wait: { done_timeout_ms_default: 2000, step_level_override: "timeoutMs", note: "约束动作后等 done 的窗口，不约束整步挂钟（模型咨询/导航渲染不在其内）；F3：步级 timeoutMs 显式声明时**同时**是整步挂钟帽——reobserve/升级循环的每轮与总时长受它约束，超时 = step_timeout（未声明 = 无帽，行为不变）" },
   free_calls: ["read.text/value/count/attr", "extract", "holds", "waitFor", "log", "url", "tabs", "observe"],
   list_range_primitives: {
     each_counts_as: 1,
@@ -147,7 +148,7 @@ const NAVIGATION = {
   dynamic_urls: "运行期才知道的 URL 可 new URL(href, ctx.url()) 绝对化（正规通道，不是硬编码豁免）",
   hosts_envelope: "导航信封在起点与落地都强制；popup 的 origin 不在 meta.hosts = popup_not_allowed；子 frame 默认**只排除出解析面**（frames_excluded warning），仅当声明 target/done 只存在于该 frame 时才 frame_not_allowed（P0-D，见 F45）",
   entry_only: "meta.policy.navigation:\"entry-only\"：首跳（入口）放行、同 URL（origin+path+query 全等）重试放行、**meta.site.pages 声明页再导航放行**（URL.href 归一后全等，含 query）；其余引擎直接导航 → navigation_forbidden。页面驱动跳转永不拦；dry/apps check 同一闸门",
-  tabs_switch: "新标签页不会自动跟随：window.open/target=_blank 后先 ctx.tabs()（免费只读；列表可含信封外页面）再 ctx.switchTab({index|urlContains|titleContains})（计 1 步；恰好一个匹配，0/多 = config_error 并列出当前 tabs；信封外 = host_not_allowed 且不切换）",
+  tabs_switch: "新标签页不会自动跟随：window.open/target=_blank 后先 ctx.tabs()（免费只读；列表可含信封外页面）再 ctx.switchTab({index|urlContains|titleContains})（计 1 步；恰好一个匹配，0/多 = config_error 并列出当前 tabs；信封外 = host_not_allowed 且不切换）。F2：脆弱的 _blank 步可声明 ctx.step(..., { newTab:{urlContains} })——引擎自动采用新标签（读面+动作面跟随）、done 在新标签判定、已存命中标签直接采用不点击（消重复标签）；switchTab 切换后读面与动作面**都**跟随新标签（2026-11-08 夹具实证）",
 };
 
 /** flow 控制语义（作者最容易赌错的三条）。 */
@@ -157,7 +158,7 @@ const FLOW_CONTROL = {
   when_guard: "动作前判定；不成立 = 跳过（precondition_skipped、计 1 预算、trace 记 skipped）",
   done_rule: "能用的 done 必须「动作前不成立、动作后成立」；动作前已成立的信号对验证零贡献",
   list_range_primitives: {
-    scrollList: "滚目标自身或最近可滚动祖先（纯 DOM scrollTop，不做滚轮模拟、不自动滚页面）；找不到容器=not_scrollable",
+    scrollList: "滚目标自身或最近可滚动祖先（纯 DOM scrollTop，不做滚轮模拟、不自动滚页面）；找不到容器=not_scrollable；F1 合成滚动目标 \"document\"|\"body\"|\"html\"|\"window\"（大小写不敏感）解析主滚动器 document.scrollingElement（R11 实测主内容常在 scrollingElement 上），不进池/不占池位，短页如实 not_scrollable/moved:false",
     expand: "反复点 load-more/展开控件直到行数连续 stableRounds 轮不增长；到顶未稳定=expand_not_stable（仍返回 clicks/before/after/coverage）",
     setRange: "三策略 fill→keyboard→pointer（0×0 手柄用最近有尺寸祖先 bbox）；全失败=slider_not_settable，绝不返回假 achieved；读回给出 applied/accurate/target",
     collect: "反复（滚动行容器→抽行→去重）直到连续 stableRounds 轮无新增/达 maxRows/轮数用完；整体计 1 step；stopReason=stable|maxRows|budget|not_scrollable（诚实口径，不假装穷尽）",
@@ -233,6 +234,7 @@ export const STOPCODE_MEANING: Readonly<Record<string, string>> = {
   no_progress: "同一元素有效执行多次而信号从不成立——目标疑似死元素或信号永不成立",
   done_preheld: "done 在动作前已成立（policy.done_preheld=\"fail\" 才停）：完成不是这一步动作的证据",
   false_done: "done 成立但只读复核 guard 命中假绿特征（policy.done_guard=\"fail\" 才停）：登录墙特征（URL/标题登录文案/跨出 hosts 信封）或「有动作但 changed=false 且 done 是否定式」的零前进蹭成立——配正向锚或 ctx.judge.loginWall()",
+  step_timeout: "步级 timeoutMs 显式声明时的整步挂钟帽用完（F3：reobserve/升级循环的每轮与总时长受它约束；未声明 timeoutMs 的步骤无此帽）——放宽 timeoutMs、收窄该步 done/target 或拆分流程",
   space_empty: "声明的命令空间在页面无任何可解析元素",
   nominated_family_empty: "提名族软先验在该页无候选（S2③）",
   nominated_family_mismatch: "动作族与提名不符且有界修复未解出（S2③）",
@@ -309,7 +311,8 @@ export function renderCheatSheet(): string[] {
     "- read/extract/holds/waitFor/log/url/observe 免费；step/arrive/run/manual 与四原语各计 1",
     "- ctx.extract(\"name\") 走 meta.site.listExtract；inline 用 ctx.extract({rows, fields})（无需声明）",
     "- ctx.collect({row,fields,until}) 反复滚动取行（计 1 步）；stopReason=stable|maxRows|budget|not_scrollable，绝不假装穷尽",
-    "- 新标签页不会自动跟随：window.open/target=_blank 后先 ctx.tabs()（免费列未关闭页）再 ctx.switchTab({index|urlContains|titleContains})（恰好一个匹配、计 1 步；0/多 = config_error 列出当前 tabs；信封外 = host_not_allowed 且不切换）",
+    "- 新标签页不会自动跟随：window.open/target=_blank 后先 ctx.tabs()（免费列未关闭页）再 ctx.switchTab({index|urlContains|titleContains})（恰好一个匹配、计 1 步；0/多 = config_error 列出当前 tabs；信封外 = host_not_allowed 且不切换）；switchTab 后读面与动作面**都**跟随新标签（2026-11-08 夹具实证）；F2：脆弱的 _blank 步声明 ctx.step(..., { newTab:{urlContains:\"p2\"} }) 自动采用新标签并消重复（已存命中标签直接采用不点击；单条 act hint 恰好一次点击；dry 只验声明形状）",
+    "- F1 scrollList 合成滚动目标：ctx.scrollList(\"document\",{to:\"bottom\"}) 等名字（\"document\"|\"body\"|\"html\"|\"window\"，大小写不敏感）直接滚主滚动器 document.scrollingElement（不进池/不占池位；短页如实 {ok:false,moved:false,stopCode:\"not_scrollable\"}）；容器 hint 走既有路径不变",
     "- settle：抽池前只在页面有突变时等静默（meta.policy.settle 默认开；等待落 state.settleMs）",
     "- 就绪（U3）：池空 ≠ 未就绪。meta.policy.pool_gate 缺省 fact = 池空但 settle 静默且 readyState=complete 记 flags:pool_empty 后继续（diagnostics.readiness 带证据）；strict = 旧 page_not_ready 快败。闸门只在 flow 面（ctx.step）",
     "- surface（U3）：meta.policy.surface.native_activation 缺省 window（summary 进池、类目 cap=6）；off = 池构成回到 U3 之前（A/B 逃生口）",

@@ -100,6 +100,26 @@ export interface StepRequest {
    * 汇总字段名是复数的 `stale_retries`（两处字段名不同，文案勿混写——R9 记录项 1）。
    */
   staleRetry?: boolean;
+  /**
+   * F2 `newTab`（opt-in，缺省不出现 = 既有行为逐字节不变）：把 `target=_blank` /
+   * `window.open` 的**新标签页**升为这一步的一等完成面。
+   *
+   * 声明 `{ urlContains?: string }` 后：
+   *   1. **去重采用**——动作前若已存在 URL 含 `urlContains`（大小写不敏感）的标签
+   *      （此前尝试开的），直接切到它、**不再点击**（不执行 act/决策动作，done 在该
+   *      标签上判定）——消除 R05–R08/R11 实测的「步骤重试连点开 2–4 个重复标签」；
+   *   2. 动作执行后短暂等待，若出现**新标签** → 引擎自动把读面与动作面（session.page）
+   *      切到它，done 在新标签上判定；优先采用 URL 命中 `urlContains` 的新标签；
+   *   3. 声明了 `newTab` 且 act 是单条 `ctx.hint(...)` 时，动作收敛为**恰好一次点击**
+   *      （单命令闭集语义：点完即判 done，不重试）——决策步（无 act）保持引擎决策，
+   *      建议脆弱的 `_blank` 步显式给 act hint；
+   *   4. 未声明 `newTab` 的步骤逐字节不变；声明了但**没有新标签出现** → 正常 done
+   *      判定（如实失败，不假装成功）。
+   *
+   * 新标签 URL 在 meta.hosts 信封外仍按既有 popup 门禁拒绝（popup_not_allowed）。
+   * dry 只验声明形状（urlContains 非空字符串）；dry 无法验标签行为（没有浏览器）。
+   */
+  newTab?: { urlContains?: string };
 }
 
 export interface StepEvidence {
@@ -144,6 +164,12 @@ export interface StepResult {
   stale_retries?: Array<{ attempt: number; reason: string; ref: string }>;
   /** S4：本步动作按 `force` 声明执行（Playwright force 语义）。 */
   forced?: boolean;
+  /**
+   * F2 `newTab` 采用事实（仅声明了 `newTab` 且有标签被采用时出现）：
+   * `adopted:"existing"` = 命中已存标签直接采用、未点击（去重）；`adopted:"opened"` =
+   * 动作开出的新标签被自动采用（读面与动作面已切过去，done 在该标签上判定）。
+   */
+  newTab?: { index: number; url: string; title: string; adopted: "existing" | "opened" };
   /** 运行期诚实性警告（如 suspected_async）。只在产生时出现。 */
   warnings?: string[];
   /**
@@ -613,6 +639,16 @@ function assertAct(req: StepRequest): void {
     throw new StopError("config_error", "ctx.step: done signal is required (completion only comes from the evidence surface)");
   }
   // act 省略 = 让引擎决策目标；只有显式给了 act 才校验它的形状（真正形状由 targetOptions/执行器校验）。
+  // F2：newTab 声明形状（对象；urlContains 若给必须是非空字符串）——dry 与真实面同文案。
+  if (req.newTab !== undefined && req.newTab !== null) {
+    if (typeof req.newTab !== "object" || Array.isArray(req.newTab)) {
+      throw new StopError("config_error", "ctx.step: newTab must be an object like { urlContains: \"p2\" }");
+    }
+    const uc = (req.newTab as Record<string, unknown>)["urlContains"];
+    if (uc !== undefined && (typeof uc !== "string" || !uc.trim())) {
+      throw new StopError("config_error", "ctx.step: newTab.urlContains must be a non-empty string (case-insensitive URL substring used for tab adoption/dedup)");
+    }
+  }
 }
 
 /**
@@ -784,10 +820,22 @@ export function describeTabs(
     + (t.active === true ? " [active]" : "")).join("; ");
 }
 
+/**
+ * F1：`ctx.scrollList` 的**合成滚动目标**闭集（大小写不敏感）。这些名字不进元素池、
+ * 不占池位，也不做 hint 匹配：统一解析为主滚动器 `document.scrollingElement`
+ * （兜底 body → documentElement）。容器目标（任何其他 hint）走既有池外回退解析，
+ * 行为逐字节不变。
+ */
+export const SCROLL_SYNTHETIC_TARGETS = ["document", "body", "html", "window"] as const;
+
+export function isSyntheticScrollTarget(target: string): boolean {
+  return (SCROLL_SYNTHETIC_TARGETS as readonly string[]).includes(target.trim().toLowerCase());
+}
+
 /** `ctx.scrollList` 的参数声明。非法值**在这里**红（dry 期也能拦住，不留到真跑）。 */
 export function validateScrollListRequest(target: unknown, opts: unknown): void {
   if (!isNonEmptyString(target)) {
-    throw new StopError("config_error", "ctx.scrollList: target must be a non-empty hint string (e.g. \"Feed list\" or \"#feed\")");
+    throw new StopError("config_error", "ctx.scrollList: target must be a non-empty hint string (e.g. \"Feed list\" or \"#feed\", or a synthetic \"document\"|\"body\"|\"html\"|\"window\")");
   }
   if (opts === undefined) return;
   if (!isObj(opts)) throw new StopError("config_error", "ctx.scrollList: opts must be an object");
@@ -1137,6 +1185,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     slots?: Record<string, string>; values?: Record<string, string>;
     when?: DomSignal | null; id?: string; timeoutMs?: number;
     forceAct?: boolean; force?: boolean; staleRetry?: boolean;
+    newTab?: { urlContains?: string };
   }): Promise<StepResult> => {
     assertOpen(`ctx.step(${JSON.stringify(desc)})`);
     checkBudget();
@@ -1156,6 +1205,72 @@ export function createCtx(deps: CtxDeps): Ctx {
     // skipNavigation 关闭时 `pg.goto(startUrl)`）；walk 的同页重锚没有 goto，不进闸门。
     if (req.url !== undefined && !walkKeepPage) navGate("step", `ctx.step(${JSON.stringify(desc)})`, startUrl);
     if (req.url !== undefined && !walkKeepPage) currentUrl = startUrl;
+    // ---- F2 newTab（缺省不声明 = 本块整体不存在，行为逐字节不变）----
+    // ① 去重采用：动作前已存在 URL 命中 urlContains 的标签（此前尝试开的）→ 直接切过去、
+    //    不再点击（act/决策动作整体跳过），done 在该标签上判定——消重复标签。
+    //    信封外的命中标签不采用（与 switchTab/popup 同一判定），照常走动作路径。
+    const nt = req.newTab;
+    const ntActive = nt !== undefined && nt !== null;
+    const ntContains = ntActive && typeof (nt as { urlContains?: unknown })["urlContains"] === "string"
+      ? String((nt as { urlContains: string })["urlContains"]) : undefined;
+    type NtTab = { index: number; url: string; title: string; adopted: "existing" | "opened" };
+    let ntAdopted: NtTab | null = null;
+    let ntAdoptedPage: TabPage | null = null;
+    let ntSkipAction = false;
+    let ntBeforePages: Set<unknown> | null = null;
+    if (ntActive) {
+      const listed = await listTabs(session);
+      if (ntContains !== undefined && ntContains.trim()) {
+        const hit = listed.find((t) => t.url.toLowerCase().includes(ntContains.toLowerCase()));
+        if (hit && !(hosts && hosts.length && disallowedHost(hit.url, hosts))) {
+          ntAdopted = { index: hit.index, url: hit.url, title: hit.title, adopted: "existing" };
+          ntAdoptedPage = hit.page;
+          ntSkipAction = true;
+        }
+      }
+      if (!ntSkipAction) ntBeforePages = new Set<unknown>(await contextPages(session));
+    }
+    if (ntSkipAction && ntAdopted !== null && ntAdoptedPage !== null) {
+      // 去重采用路径：不进执行器（零动作），done 只在采用的标签上求值（如实，不假装成功）。
+      const before = urlOf(session.page as unknown as PageLike) || currentUrl;
+      session.page = ntAdoptedPage as unknown as typeof session.page;
+      currentUrl = ntAdopted.url;
+      await bounded(() => (ntAdoptedPage as { bringToFront?: () => Promise<void> }).bringToFront?.(), 2000);
+      await bounded(() => (ntAdoptedPage as { waitForLoadState?: (s?: string, o?: { timeout?: number }) => Promise<void> })
+        .waitForLoadState?.("domcontentloaded", { timeout: 5000 }), 5000);
+      let held = false;
+      try {
+        held = (await checkSignal(ntAdoptedPage as never, req.done as never)) === true;
+      } catch (e) {
+        throw new StopError("config_error",
+          `ctx.step newTab dedup: done signal evaluation failed on the adopted tab: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      budget.stepsUsed += 1;
+      try { pageState.update(ntAdoptedPage, "settled"); } catch { /* 记录面让位事实 */ }
+      const result: StepResult = {
+        ok: held,
+        ...(req.id === undefined ? {} : { id: req.id }),
+        ...(held ? {} : { stopCode: "done_not_held" }),
+        ...(held
+          ? { reason: `newTab dedup: adopted existing tab ${JSON.stringify(ntAdopted.url)} (was ${JSON.stringify(before)}); done-signal held on it, no click performed` }
+          : { reason: `newTab dedup: adopted existing tab ${JSON.stringify(ntAdopted.url)} (no click performed — a tab matching urlContains already existed) but the done-signal never held on it` }),
+        newTab: ntAdopted,
+        evidence: { url: ntAdopted.url, attempts: 1, elapsedMs: Date.now() - started },
+      };
+      record(held, {
+        desc, url: ntAdopted.url,
+        ...(req.id === undefined ? {} : { id: req.id }),
+        ...(result.stopCode === undefined ? {} : { stop_code: result.stopCode }),
+        result: {
+          ok: held,
+          ...(result.stopCode === undefined ? {} : { stop_code: result.stopCode }),
+          ...(result.reason === undefined ? {} : { reason: result.reason }),
+          elapsed_ms: result.evidence.elapsedMs,
+          new_tab: ntAdopted,
+        },
+      });
+      return result;
+    }
     const opts: Record<string, unknown> = {
       goalSignalFn: (p: unknown) => checkSignal(p as never, req.done as never),
       page: session.page,
@@ -1171,8 +1286,10 @@ export function createCtx(deps: CtxDeps): Ctx {
         // 04-F：步级 timeoutMs 以前声明了却从未接进执行器——现在映射到该步的 done 等待上限
         // （本次显式 > meta.policy.done_timeout_ms）。它约束的是"动作后等信号成立"的窗口，
         // 不约束整步挂钟时长（模型咨询/导航耗时不在其内）。
+        // F3：显式 timeoutMs 同时是该步的**整步挂钟帽**（stepTimeoutMs）——reobserve/升级
+        // 循环的每轮与总时长受它约束，超时 = 结构化 stop_timeout。未声明 = 无帽，不变。
         ? (deps.doneTimeoutMs === undefined ? {} : { doneTimeoutMs: deps.doneTimeoutMs })
-        : { doneTimeoutMs: req.timeoutMs }),
+        : { doneTimeoutMs: req.timeoutMs, stepTimeoutMs: req.timeoutMs }),
       ...(deps.donePollMs === undefined ? {} : { donePollMs: deps.donePollMs }),
       // 带 url 的步：domcontentloaded 对 SPA 太早，给面板一个短稳定窗口再抽取。
       // walk 同页重锚没有 goto（页面早已就位），与不带 url 的步同待遇。
@@ -1191,7 +1308,20 @@ export function createCtx(deps: CtxDeps): Ctx {
     // S4：步级 force / staleRetry 同样是显式声明（缺省不出现 = 既有行为逐字节不变）。
     if (req.force === true) opts["force"] = true;
     if (req.staleRetry === true) opts["staleRetry"] = true;
-    Object.assign(opts, req.act === undefined ? {} : targetOptions(req.act));
+    if (ntActive && !ntSkipAction && req.act !== undefined && !Array.isArray(req.act)
+        && (req.act as { kind?: string }).kind === "hint") {
+      // F2：newTab + 单条 act hint → 收敛为**恰好一次点击**的单命令闭集：点完即判 done，
+      // done 不成立 = done_not_held（不再重试连点，避免同一动作开出一串重复标签）。
+      // 命令 target 走既有声明解析链（池/ADMIT/FW8/DRF），hint 语义不变。
+      const hint = String((req.act as { hint: string }).hint);
+      const one: CommandDecl[] = normalizeCommandIds([{ id: "newtab_open", op: "click", target: hint }]);
+      const problems: string[] = [];
+      validateCommands(one, "ctx.step", problems);
+      if (problems.length) throw new StopError("config_error", problems.join("；"));
+      opts["commands"] = one;
+    } else {
+      Object.assign(opts, req.act === undefined ? {} : targetOptions(req.act));
+    }
     let rep: RunReport;
     try {
       rep = await deps.mw().run(desc, startUrl, opts as never);
@@ -1201,6 +1331,45 @@ export function createCtx(deps: CtxDeps): Ctx {
     }
     deps.onRunReport?.(rep);
     budget.stepsUsed += 1;
+    // ---- F2 newTab ②：动作后短暂等待新标签并自动采用（读面 + 动作面），done 在新标签上判定 ----
+    // 声明了 newTab 且没有命中已存标签时执行；没有新标签出现 = rep 原样（正常 done 判定，
+    // 如实失败）。已在途的 executor 轮询即"短暂等待"（动作后 done 窗口内新 tab 已 commit）。
+    if (ntActive && !ntSkipAction) {
+      try {
+        const listed = await listTabs(session);
+        const fresh = ntBeforePages === null ? [] : listed.filter((t) => !ntBeforePages!.has(t.page));
+        if (fresh.length > 0) {
+          const pick = (ntContains !== undefined && ntContains.trim()
+            ? fresh.find((t) => t.url.toLowerCase().includes(ntContains.toLowerCase()))
+            : undefined) ?? fresh[fresh.length - 1]!;
+          // 信封外的新标签不采用（既有 popup 门禁已在执行器侧拒绝；这里只是不再重复处理）。
+          if (!(hosts && hosts.length && disallowedHost(pick.url, hosts))) {
+            session.page = pick.page as unknown as typeof session.page;
+            await bounded(() => pick.page.bringToFront?.(), 2000);
+            await bounded(() => pick.page.waitForLoadState?.("domcontentloaded", { timeout: 5000 }), 5000);
+            ntAdopted = { index: pick.index, url: pick.url, title: pick.title, adopted: "opened" };
+            ntAdoptedPage = pick.page;
+            try {
+              if ((await checkSignal(pick.page as never, req.done as never)) === true) {
+                rep = { ...rep, done: true, stop_code: "dom_goal_signal",
+                  stop_reason: "dom goal signal (new tab adopted; done judged on the adopted tab)" };
+              } else {
+                rep = { ...rep, done: false, stop_code: "done_not_held",
+                  stop_reason: `new tab ${JSON.stringify(pick.url)} was opened and adopted (read+action face follow it), `
+                    + `but the done-signal never held on the adopted tab — judged honestly there` };
+              }
+            } catch (e) {
+              throw new StopError("config_error",
+                `ctx.step newTab: done signal evaluation failed on the adopted tab: ${e instanceof Error ? e.message : String(e)}`);
+            }
+            try { pageState.update(pick.page, "settled"); } catch { /* 记录面让位事实 */ }
+          }
+        }
+      } catch (e) {
+        if (e instanceof StopError) throw e;
+        // 标签枚举失败不吞掉执行器的既有结论（如实按 rep 判定）。
+      }
+    }
     // 动作可能导航到另一个页面；`ctx.step` 之后的下一条语句必须从**落地页**开始，
     // 否则 `ctx.step({url?})` 会把上一页当成当前页（实测：Maps 已打开，下一步却又回到 google.com）。
     const landed = urlOf(session.page) || startUrl;
@@ -1230,6 +1399,8 @@ export function createCtx(deps: CtxDeps): Ctx {
       ...(rep.diagnostics === undefined ? {} : { diagnostics: rep.diagnostics }),
       // S1 状态记录：执行器只在本 run 有观察时给；原样透出（dry 面另有合成值）。
       ...(rep.state === undefined ? {} : { state: rep.state }),
+      // F2 newTab：本步采用的新标签事实（缺字段 = 没声明 newTab 或没有标签被采用）。
+      ...(ntAdopted === null ? {} : { newTab: ntAdopted }),
     };
     record(result.ok, {
       desc, url: landed,
@@ -1260,6 +1431,7 @@ export function createCtx(deps: CtxDeps): Ctx {
         ...(result.warnings === undefined ? {} : { warnings: result.warnings }),
         ...(result.diagnostics === undefined ? {} : { diagnostics: result.diagnostics }),
         ...(result.state === undefined ? {} : { state: result.state }),
+        ...(ntAdopted === null ? {} : { new_tab: ntAdopted }),
       },
     });
     return result;
@@ -1754,10 +1926,18 @@ export function createCtx(deps: CtxDeps): Ctx {
       await paceBeforeStep();
       const p = await page();
       budget.stepsUsed += 1;
-      const r = await deps.mw().scrollContainer(
-        p as never, target, opts.to ?? "bottom",
-        { ...(opts.by === undefined ? {} : { by: opts.by }), ...(opts.settleMs === undefined ? {} : { settleMs: opts.settleMs }) },
-      );
+      // F1：合成滚动目标（"document"/"body"/"html"/"window"，大小写不敏感）不进池、
+      // 不做 hint 匹配——直接解析主滚动器执行同一套滚动语义；其余目标走既有容器路径
+      // （池外回退 + 最近可滚动祖先），行为逐字节不变。
+      const r = isSyntheticScrollTarget(target)
+        ? await deps.mw().scrollDocument(
+          p as never, opts.to ?? "bottom",
+          { ...(opts.by === undefined ? {} : { by: opts.by }), ...(opts.settleMs === undefined ? {} : { settleMs: opts.settleMs }) },
+        )
+        : await deps.mw().scrollContainer(
+          p as never, target, opts.to ?? "bottom",
+          { ...(opts.by === undefined ? {} : { by: opts.by }), ...(opts.settleMs === undefined ? {} : { settleMs: opts.settleMs }) },
+        );
       const result: ScrollListResult = {
         ok: r.ok,
         ...(r.scrollTop === undefined ? {} : { scrollTop: r.scrollTop }),

@@ -206,3 +206,9 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 
 **共同验收口径**：三项都不改绑定解析/完成信号语义；新校验只在声明面（dry/`apps check`
 与运行期同文案）；新增诊断只写 `reason`/trace/报告，不改变成功路径产物形状。
+
+## P0/P1 落地后遗留（2026-11-09，来自 10 轮评估 + 架构评审 + 实施 A–F）
+
+- P2：`ctx.hints` 改名/文档化（现为多 hint 构造器，文档已注明）；observe 附带"全准入面 verify 列表"（更强 hint 自证）；`ignore_frame_origins` 配置化（广告 frame 默认排除已做，显式配置仍可加）；候选池自动滚动采集（pool_scroll 实验，带成本上限）；`scroll` 命令接像素 `by`。
+- P2：steps_failed 是否计入 recovered；false_done guard 的短页正文阈值（400 字符）与登录词表可配化；`deniedFrameUrl` 死代码移除；report.html 摘要补失败步行。
+- P2：A5 文档已澄清（switchTab 双面跟随，R10 判误诊）；若再现"动作面在原页"症状，按 trace 归因（done 锚点）排查。

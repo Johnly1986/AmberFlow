@@ -188,6 +188,18 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       }
     }
     if (req.when !== undefined && req.when !== null) p.push(...validateSignalSpec(req.when, `${where}.when`));
+    // F2：newTab 声明形状 dry 期就红（与真实面 assertAct 同文案）；dry 无浏览器，
+    // 标签行为（新标签出现/采用/去重）只能在真实运行验证。
+    if (req.newTab !== undefined && req.newTab !== null) {
+      if (typeof req.newTab !== "object" || Array.isArray(req.newTab)) {
+        p.push(`${where}: newTab must be an object like { urlContains: "p2" }`);
+      } else {
+        const uc = (req.newTab as Record<string, unknown>)["urlContains"];
+        if (uc !== undefined && (typeof uc !== "string" || !uc.trim())) {
+          p.push(`${where}: newTab.urlContains must be a non-empty string (case-insensitive URL substring used for tab adoption/dedup)`);
+        }
+      }
+    }
     return p;
   };
 
@@ -204,7 +216,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
   };
   const recordStep = (desc: string, done?: unknown, ok = true, stopCode?: string, id?: string,
                       forceAct = false, force = false, staleRetry = false,
-                      when?: unknown): StepResult => {
+                      when?: unknown, newTab = false): StepResult => {
     checkBudget();
     budget.stepsUsed += 1;
     const state = dryState();
@@ -225,6 +237,9 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
         ...(forceAct ? { force_act: true } : {}),
         ...(force ? { forced: true } : {}),
         ...(staleRetry ? { stale_retry: true } : {}),
+        // F2：newTab 是声明面——dry 只记 `new_tab: true`（不模拟标签行为：无浏览器，
+        // 新标签出现/采用/去重只能真实运行验证）。
+        ...(newTab ? { new_tab: true } : {}),
         state,
       },
     });
@@ -355,7 +370,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
         currentUrl = resolved;
       }
       return recordStep(desc, req.done, true, undefined, req.id,
-        req.forceAct === true, req.force === true, req.staleRetry === true, req.when);
+        req.forceAct === true, req.force === true, req.staleRetry === true, req.when,
+        req.newTab !== undefined && req.newTab !== null);
     },
     // A3 dry 桩：**参数校验真做**（未知形状/非法值在 dry 期红），动作与结果按文档形状确定性模拟。
     // S3：校验抛错前先落 `validation_error`（见 validatePrimitive），吞错也逃不过 apps check。

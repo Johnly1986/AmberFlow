@@ -254,7 +254,15 @@ export type StopCode =
    * 「有动作但 changed=false 且 done 是否定式」的零前进蹭成立。默认 warn 档只记
    * step warning，不改判定；fail 档才结构化停止（reason 带证据）。
    */
-  | "false_done";
+  | "false_done"
+  /**
+   * F3：步级 `timeoutMs` 显式声明时的**整步挂钟帽**——约束 reobserve/升级循环的每轮
+   * 与总时长（循环头逐轮检查；过期后不再起新的宽扫/升级；已在途的决策调用不可抢占，
+   * 超额 ≤ 一次在途调用）。R06 实测：done 永不成立的循环在「宽扫+模型改点」上单步内
+   * 耗 3–4 分钟且不受任何约束，4 次运行被外层墙钟击杀。未声明 `timeoutMs` 的步骤
+   * 没有这个帽（缺省行为逐字节不变）。与 `max_steps` 的分工：那是动作步数预算，这是挂钟。
+   */
+  | "step_timeout";
 
 /** Minimal locator surface used by the executor (superset of `extraction.LocLike`). */
 interface AnyLoc {
@@ -666,6 +674,13 @@ export interface RunOptions {
   donePollMs?: number;
   /** action 后 done 信号的总等待窗口。 */
   doneTimeoutMs?: number;
+  /**
+   * F3：步级 `timeoutMs` 显式声明时的**整步挂钟帽**（毫秒）。ctx.ts 只在作者显式声明
+   * `ctx.step(..., { timeoutMs })` 时传入（它与 doneTimeoutMs 同值，但语义是整步的
+   * 挂钟约束，不是动作后的信号窗口）；缺省不出现 = 本步没有任何挂钟帽（既有行为
+   * 逐字节不变）。约束面：reobserve/升级循环的每轮与总时长。
+   */
+  stepTimeoutMs?: number;
   slots?: Record<string, unknown> | null;
   /**
    * U1 步级显式值袋（决策语句步的值通道）：作者在 `ctx.step(..., { values: {...} })` 声明的
@@ -3389,6 +3404,80 @@ export class BrowserMiddleware {
   }
 
   /**
+   * F1：`ctx.scrollList` 的**合成滚动目标**（`"document" | "body" | "html" | "window"`，
+   * 大小写不敏感）。这些名字不进元素池、不占池位：统一解析为 `document.scrollingElement`
+   * （兜底 body → documentElement），执行与容器目标同一套滚动语义（to top/bottom/page
+   * 或 by 像素 + settle 等待），如实返回 moved——不可滚（scrollHeight <= clientHeight，
+   * 如短页）= `{ok:false, moved:false, stopCode:"not_scrollable"}`，绝不假成功。
+   * 容器目标的既有路径（`scrollContainer` → `_scrollWithLoc`）逐字节不变。
+   */
+  async scrollDocument(
+    page: AnyPage, to: "bottom" | "top" | "page" = "bottom",
+    opts?: { by?: number; settleMs?: number },
+  ): Promise<{ ok: boolean; scrollTop?: number; scrollHeight?: number; clientHeight?: number; moved?: boolean; stopCode?: string; reason?: string }> {
+    let box: Record<string, unknown> | null = null;
+    try {
+      box = await page.evaluate((arg: { to: string; by?: number }) => {
+        // 浏览器侧执行（Node strip-types 下类型注释被擦除，源码原样进页面）。
+        const g = globalThis as unknown as {
+          document?: {
+            scrollingElement?: { scrollTop: number; scrollHeight: number; clientHeight: number; scrollWidth: number; clientWidth: number } | null;
+            documentElement?: { scrollTop: number; scrollHeight: number; clientHeight: number; scrollWidth: number; clientWidth: number } | null;
+            body?: { scrollTop: number; scrollHeight: number; clientHeight: number; scrollWidth: number; clientWidth: number } | null;
+          } | null;
+        };
+        const doc = g.document;
+        if (!doc) return { ok: false, reason: "no document" };
+        // document.scrollingElement 即主滚动器（标准模式下 = documentElement，
+        // quirks 模式下 = body）——"window"/"html"/"body"/"document" 四个合成名都落到它。
+        const se = doc.scrollingElement ?? doc.documentElement ?? doc.body;
+        if (!se) return { ok: false, reason: "no scrolling element found (document.scrollingElement/documentElement/body all null)" };
+        const scrollHeight = Number(se.scrollHeight) || 0;
+        const clientHeight = Number(se.clientHeight) || 0;
+        const scrollWidth = Number(se.scrollWidth) || 0;
+        const clientWidth = Number(se.clientWidth) || 0;
+        const before = Number(se.scrollTop) || 0;
+        const maxY = Math.max(0, scrollHeight - clientHeight);
+        const maxX = Math.max(0, scrollWidth - clientWidth);
+        if (maxY <= 2 && maxX <= 2) {
+          return { ok: false, moved: false, scrollTop: before, scrollHeight, clientHeight,
+            reason: `document is not scrollable (scrollHeight=${scrollHeight} <= clientHeight=${clientHeight})` };
+        }
+        let next = before;
+        if (typeof arg.by === "number") next = before + arg.by;
+        else if (arg.to === "bottom") next = maxY;
+        else if (arg.to === "top") next = 0;
+        else if (arg.to === "page") next = Math.min(maxY, before + Math.max(1, Math.round(clientHeight * 0.9)));
+        next = Math.max(0, Math.min(maxY, next));
+        se.scrollTop = next;
+        return { ok: true, before, scrollTop: Number(se.scrollTop) || 0, scrollHeight, clientHeight };
+      }, { to, ...(opts?.by === undefined ? {} : { by: opts.by }) }) as Record<string, unknown> | null;
+    } catch (e) {
+      return { ok: false, moved: false, stopCode: "not_scrollable", reason: describeActionError(e) };
+    }
+    if (box === null || box["ok"] !== true) {
+      return {
+        ok: false, moved: false,
+        ...(box !== null && box["scrollTop"] !== undefined ? { scrollTop: Number(box["scrollTop"]) } : {}),
+        ...(box !== null && box["scrollHeight"] !== undefined ? { scrollHeight: Number(box["scrollHeight"]) } : {}),
+        ...(box !== null && box["clientHeight"] !== undefined ? { clientHeight: Number(box["clientHeight"]) } : {}),
+        stopCode: "not_scrollable",
+        reason: String(box?.["reason"] ?? "document scroll failed"),
+      };
+    }
+    const settleMs = opts?.settleMs ?? 150;
+    if (settleMs > 0) await sleep(settleMs);
+    const scrollTop = Number(box["scrollTop"] ?? 0);
+    const before = Number(box["before"] ?? 0);
+    return {
+      ok: true, scrollTop,
+      scrollHeight: Number(box["scrollHeight"] ?? 0),
+      clientHeight: Number(box["clientHeight"] ?? 0),
+      moved: scrollTop !== before,
+    };
+  }
+
+  /**
    * A3 `mw.setRange`：解析目标 hint → 定位 → `range.ts` 三策略（fill/keyboard/pointer）。
    * 目标不存在 = `target_not_found`；存在但设不了 = `slider_not_settable`（绝不假装成功）。
    */
@@ -3478,6 +3567,8 @@ export class BrowserMiddleware {
       surfacePolicy = this.surfacePolicy,
       donePollMs = 120,
       doneTimeoutMs = 2000,
+      // F3：步级显式 timeoutMs 的整步挂钟帽（缺省 undefined = 无帽，行为逐字节不变）。
+      stepTimeoutMs,
       forceAct = false,
       force = false,
       staleRetry = false,
@@ -3512,6 +3603,15 @@ export class BrowserMiddleware {
     const effectiveRuns: Record<string, number> = {};
 
     const slots: Record<string, unknown> = { ...extractSlots(instruction), ...(slotsIn ?? {}) };
+    // F3：步级挂钟帽的判定时刻 = run() 开始（导航/抽池/决策/升级全在内）。仅在作者显式
+    // 声明 timeoutMs 时存在；循环头逐轮检查，过期后不再起新的宽扫/升级（已在途的
+    // 决策调用不可抢占，超额 ≤ 一次在途调用——如实写进停因 reason）。
+    const stepStartedAt = Date.now();
+    const stepDeadline = stepTimeoutMs !== undefined && stepTimeoutMs > 0
+      ? stepStartedAt + stepTimeoutMs
+      : null;
+    const stepTimeoutLeft = (): number =>
+      stepDeadline === null ? Number.POSITIVE_INFINITY : stepDeadline - Date.now();
     // U1：步级显式值袋（与 slots 平行的作者声明面；只在决策路径的值请求里参与匹配）。
     const values: Record<string, unknown> = { ...(valuesIn ?? {}) };
     this.targetHints = (targetHints ?? []).filter((h) => !!h);
@@ -3836,6 +3936,18 @@ export class BrowserMiddleware {
       }
 
       for (let stepNo = 1; stepNo <= this.maxSteps; stepNo++) {
+        // F3：步级 timeoutMs 显式声明时，reobserve/升级循环的**每轮**受它约束——
+        // 超时即结构化停（step_timeout），不再进入下一轮宽扫/模型改点。
+        if (stepTimeoutLeft() <= 0) {
+          stop("step_timeout",
+            `step-level timeoutMs=${stepTimeoutMs} exhausted (step wall clock ~${Math.round(Date.now() - stepStartedAt)} ms) `
+            + `while the reobserve/escalation loop was still searching on step ${stepNo} — `
+            + `the loop no longer starts another round past the declared step deadline; `
+            + `raise timeoutMs, narrow the step's done/target, or split the flow`,
+            stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          break;
+        }
         // A1：done_preheld 是**逐步**事实——每步开头重置，避免上一步的值被本步的 trace 行
         // 或最终 RunReport 误带（只有命令步会在下面重新评估它）。
         donePreheld = null;
@@ -4580,7 +4692,9 @@ export class BrowserMiddleware {
           // 这里补**一次**宽扫重解析：120 元素、main-first（与决策脸的加宽恢复同预算档），
           // hintMatch 是确定性的，命中即用、不猜；常规窗口内命中时这条路一步都不走（零多付），
           // 决策脸路径不变（由 rulesOnly 门住）。不放大 attempts、不引入模型。
-          if (ruleRef === null && this.rulesOnly && curHint !== null && !reobserved) {
+          if (ruleRef === null && this.rulesOnly && curHint !== null && !reobserved
+              && stepTimeoutLeft() > 0) {
+            // F3：步级 timeoutMs 过期后不再起新的宽扫重解析。
             reobserved = true;
             await this._settleBeforeExtract(pg);
             const wide = await extractElements(pg, true, WIDER_ELEMENTS,
@@ -4805,7 +4919,8 @@ export class BrowserMiddleware {
             // A2′：加宽重看即便没过闸门，它看到的候选也可能比窄池那一个更好——
             // 记下来，若这一步声明了裁决资格，就用**最后一次观察到的**低置信选择（elems 已是宽视图）。
             let widePick: { ref: string; conf: number } | null = null;
-            if (reobserve && !reobserved && ref !== null) {
+            if (reobserve && !reobserved && ref !== null && stepTimeoutLeft() > 0) {
+              // F3：步级 timeoutMs 过期后不再起新的宽扫重问（每轮受整步挂钟帽约束）。
               reobserved = true;
               await this._settleBeforeExtract(pg);
               const wide = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true, quotas: WIDE_QUOTAS, candidatePriority, hosts: this._frameHosts });
@@ -4848,7 +4963,8 @@ export class BrowserMiddleware {
             // name one of the elements the harness showed. It is a picker, not a
             // planner — an answer that is not a ref from THIS view is rejected, so
             // nothing it says can invent an element, a value or an action.
-            if (!recovered && escalateFn && !escalated) {
+            if (!recovered && escalateFn && !escalated && stepTimeoutLeft() > 0) {
+              // F3：步级 timeoutMs 过期后不再发起新的升级点名。
               escalated = true;
               const crit = criteriaView(orderedPool(), new Set(Object.keys(forbidden)),
                 await ariaInteractiveLines(pg));
@@ -4920,6 +5036,7 @@ export class BrowserMiddleware {
         // R2c 启发式候选），重问结果照常过闸；无更优则保留原提名。规则命中与 conf=1.00
         // 的模型提名不触发（books/quotes/hn 全量 rule:match conf=1.00 实证零回归面）。
         if (ref !== null && !reobserved && method === mm && conf < 0.9
+            && stepTimeoutLeft() > 0
             && !lexicalOverlap(instruction, String(elems[ref]?.label ?? ""))) {
           reobserved = true;
           await this._settleBeforeExtract(pg);

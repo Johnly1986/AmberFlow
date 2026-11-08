@@ -239,7 +239,7 @@ export async function flow(ctx) {
 | 元信息 | `ctx.app` / `ctx.slots` / `ctx.runtime` / `ctx.budget` / `ctx.log(msg, data?)` | `slots` 只读；`runtime = {outDir, runId, today, epoch}`（`epoch` = 执行器状态游标只读投影，每次抽池/观察 +1，每个 `step` 重置；dry 恒 0）；`today` = CLI `--today YYYY-MM-DD` 钉住的"今天"，没钉 = 系统日期 |
 | 导航 | `ctx.open(url)` / `ctx.openPage(role)` / `ctx.arrive(url, {done, desc?, id?, timeoutMs?})` | `arrive` = 纯导航 + 等信号，不做元素选择、不花模型；`hosts` 信封在起点与落地都强制 |
 | 标签页 | `ctx.tabs()` / `ctx.switchTab({index?, urlContains?, titleContains?})` | `tabs()` 免费只读列出未关闭页（`{index,url,title,active}`）；`switchTab` 显式切到**恰好一个**匹配页（计 1 个 flow step），0/多匹配 = `config_error`、信封外 = `host_not_allowed`。新标签页**不会自动跟随**，见 §4.9 |
-| 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, values?, when?, timeoutMs?, force?, forceAct?, staleRetry? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}`；`values` 是决策步的显式值袋，见 §4.5 |
+| 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, values?, when?, timeoutMs?, force?, forceAct?, staleRetry?, newTab? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}`；`values` 是决策步的显式值袋，见 §4.5；`newTab` 把 `target=_blank` 的新标签升为一等完成面（见 §4.9）；`timeoutMs` 是动作后信号窗口 + 整步挂钟帽（见下） |
 | 人工步 | `ctx.manual(desc, { done, instructions?, id? })` | 见 §7；非 TTY 返回 `needs_human`，不假装有人 |
 | 观察 | `ctx.url()` / `ctx.read.{text,value,count,attr}(sel[, attr])` / `ctx.holds(signal)` / `ctx.waitFor(signal, {timeoutMs?, pollMs?})` | 只读；读不到返回 `null` / `0`；`waitFor` 轮询到 bounded deadline，返回 boolean；`url()` 首次导航前是 `"about:blank"`，别拿它当入口页判断 |
 | 只读侦察 | `ctx.observe({ max?, selector?, includeHidden?, includeFrames? })` | **免费只读**：返回当前页 DOM 侧真实存在的元素清单（`ref o0/o1…`；字段 `tag/label/role/id/name/data-test/type/href/class_names/visible/bbox/frame` + `admitted`/`why_not_admitted`/`hint_candidates`）。不计 flow step/预算、不写 outDir、**不进模型请求面**、不改页面状态（无点击/滚动/导航）。默认走当前准入面（ADMIT_SEL 投影 + `[data-js-ref]` 后缀，不新增类目）；`selector` 可用任意只读 CSS 看池外目标。`hint_candidates` 用同一个 `hintMatch` 在本次观察到的准入面元素集合上**自证**（唯一命中才给），可直接照抄进 `ctx.hint(...)`/命令 `target`——但自证范围就是本次观察集合：默认观察（未截断）时等于整个准入面；`selector` 或 `truncated:true` 时只在所选子集/前 max 行内自证，照抄前应再做一次默认观察复核；`admitted` = 匹配准入面 + 可见 + 至少一条自证 hint（**不等于**"一定在本次 120 窗口内"，窗口见 `inspect --json` 的 `window`）。最多 200 行、≤6 帧；`max` 超出/未知选项 = `config_error`；非法 CSS 返回 `{ok:false, error:"bad_selector", reason}`（不抛栈、不中断 flow）。dry = `{ok:true, dry:true, counts 全 0, elements:[]}`；replay = `{ok:true, replay:true, …}`（只还原 counts/truncated，元素明细未进 trace），trace 只记 `{call:"observe", url, counts, truncated}` |
@@ -283,12 +283,12 @@ export async function flow(ctx) {
 - 行为变更（B2 扫描面）：INTERACTIVE 扫描面追加 `[role='menuitem']` / `[role='menuitemradio']` / `[role='menuitemcheckbox']` / `[role='option']` / `[role='tab']` 五个 ARIA 角色（全部 click 族，选中语义也是 click 驱动）——弹层菜单项、下拉选项、页签这类 div 自绘控件从此进池，弹层路径不再依赖原生 `<button>` 兜底。对所有应用是**全局行为变更**：决策层看到的候选构成与排序可能变化；同名候选增多可能引入新歧义（例如 tab 与按钮同 label——按 hint 收窄或换 data-test 锚点消歧）。对 hint 命中无影响（仍按 label 匹配，六形状闭集不变）；窗口大小（40/120）与分桶配额不变，新 role 走既有分桶。
 - **hint 与 done 信号是两个观察面**：`ctx.judge.*` 的 selector 走 DOM 查询面（任意 CSS 可用）；act hint 走上述语法闭集 + 元素池投影。`inspect --probe` 数的是 DOM——probe 命中数 ≠ hint 可命中，别互相推断（03-D2/D3；闭集提示只出现在命令空间 `target_not_found` 的 reason 里）。
 - 停因 reason 里的 "on step N" 是**子目标内动作步号**，与 CLI/`step_traces` 的流步号不是一个口径（04-B）。
-- `ctx.step` 的 `timeoutMs` 约束的是**本步动作后等待 done 信号成立的窗口**（映射该步的 `done_timeout_ms`），不约束整步挂钟时长——模型咨询、导航渲染不在其内（04-F）。
+- `ctx.step` 的 `timeoutMs` 约束的是**本步动作后等待 done 信号成立的窗口**（映射该步的 `done_timeout_ms`）——模型咨询、导航渲染不在其内（04-F）。**F3**：显式声明 `timeoutMs` 时它**同时是该步的整步挂钟帽**——reobserve/升级循环（宽扫重看 + 模型改点）的每轮与总时长受它约束：循环头逐轮检查，过期不再起新的宽扫/升级（已在途的决策调用不可抢占，超额 ≤ 一次在途调用），超时 = 结构化停因 `step_timeout`。R06 实测：done 永不成立的循环在"宽扫+模型改点"上单步内耗 3–4 分钟且不受任何约束——**脆弱步（信号可能永不成立的页）显式声明 `timeoutMs`**；未声明 `timeoutMs` 的步骤没有这个帽（行为不变）。
 - 导航：`ctx.open/openPage` 只做 goto（domcontentloaded），**不等 done/信号/settle**；要"导航 + 等落地证据"用 `ctx.arrive(url, { done })`（04-C 实测：open 后半路即返，arrive 带轮询等待）。
 - **预算是三层结构**（07-A/08-A6 实测成文，别按"一层"规划）：
   **① flow 调用预算**——`ctx.budget.maxSteps` / `stepsUsed`（缺省 100，CLI `--max-steps` 覆盖）；`ctx.step`、`ctx.arrive`、`ctx.run`、四个列表原语（`scrollList/expand/setRange/collect`）、`ctx.switchTab` 与批准执行的人工步一律计 1——`when` 跳过的步也计（02-C2），`read/extract/holds/waitFor/log/url/tabs` 免费；一次 `ctx.run` 恒 ≤1，其内部 attempts（重试）与 timeout 不放大本层。用满抛 `budget_exceeded`（CLI 给 `--max-steps` 时结果 `partial`、exit 0）。
   **② 子目标动作预算**——执行器每次调用的动作循环上限，**缺省 8、当前不可配置**（`executor.ts:884`），只活在停因文案里（`max_steps=8`；reason 的 "on step N" 是本层动作号，与流步号两口径——04-B）。
-  **③ 信号等待窗口**——浏览器腿 done 轮询 per-click 语义（`done_timeout_ms` 缺省 2000，步级 `timeoutMs` 覆盖，04-F/07-E："7 击各享窗口，非整步挂钟"）；进程腿 `stdio.timeout_ms` 是步内挂钟帽（缺省 20s）。
+  **③ 信号等待窗口**——浏览器腿 done 轮询 per-click 语义（`done_timeout_ms` 缺省 2000，步级 `timeoutMs` 覆盖，04-F/07-E："7 击各享窗口，非整步挂钟"）；F3：步级 `timeoutMs` 显式声明时同时是整步挂钟帽（reobserve/升级循环的每轮与总时长受它约束，超时 = `step_timeout`；未声明 = 无帽）；进程腿 `stdio.timeout_ms` 是步内挂钟帽（缺省 20s）。
   **同为 `config_error`，抛出层决定计费**（08 实测）：cli 形式声明校验在①扣费**前** throw（免费）；适配器 toolRunner 内拒绝（如 stdio+retries）在扣费**后**返回（贵一步）。按"动作数"估①必翻车——守卫跳过、被拒声明都计费。
 - 脚本拿不到 `page` / locator、模型文本或分数，只能看 `{ok, stopCode, reason?, evidence}`。
 - 退出码与 Agent 视图（`amber run --json`）：`status` = `passed | partial | failed | blocked | needs_human | dry | invalid | infra_error`；`verified` 只在完整运行且所有不变量成立时为 true。
@@ -328,6 +328,14 @@ await ctx.step("在 dropdown 里选 Option 2", {
 const s = await ctx.scrollList("Feed list", { to: "bottom" });          // 或 { to:"top"|"page" } / { by: 800 }
 // s = { ok, scrollTop, scrollHeight, clientHeight, moved, stopCode?, reason? }
 // 找不到可滚动容器 = ok:false + stopCode:"not_scrollable"；目标解析不到 = "target_not_found"
+//
+// F1 合成滚动目标：target 还接受 "document" | "body" | "html" | "window"（大小写不敏感）——
+// 不进元素池、不占池位、不做 hint 匹配，统一解析主滚动器 document.scrollingElement
+// （兜底 body → documentElement）。主内容滚动条常挂在 scrollingElement 上（R11 实测：
+// scrollList("body") 曾 target_not_found），主页面滚动写这个：
+const s2 = await ctx.scrollList("document", { to: "bottom" });          // "body"/"html"/"window" 同义
+// 不可滚（短页 scrollHeight <= clientHeight）= { ok:false, moved:false, stopCode:"not_scrollable" }
+// ——如实返回，绝不假装成功；容器目标（其他 hint）走既有解析路径，行为不变。
 
 // 列表展开：反复点"加载更多/展开"，直到行数连续 stableRounds 轮不增长
 const e = await ctx.expand("Load more", {
@@ -572,6 +580,11 @@ const sw = await ctx.switchTab({ urlContains: "help" });  // 恰好一个匹配�
   `config_error`，reason 列出当前所有 tabs（index/url/title/active）——引擎**绝不**回退“随便挑
   一个”；先 `ctx.tabs()` 收窄条件再切。目标 URL 不在 `meta.hosts` 信封内 = 结构化
   `host_not_allowed`，**不会切换**（与 open/openPage 同一个 host 判定）。
+- **switchTab 切换的是「读面 + 动作面」两个面（2026-11-08 夹具实证，双标签 A/B）**：切过去之后
+  `ctx.url()` 返回新页 URL、`ctx.read/judge` 读新页 DOM，**下一步 `ctx.step` 的动作也在新页上执行**
+  （此前 R10 记录的「动作面仍在原页」不复现，判误诊——其 done/URL 判据可能锚在原页）。因此：
+  步骤 done 若用 `judge.url(...)` 注意它判的是**当前页**；跨标签流程建议用 `newTab` opts（见下，
+  F2：引擎自动跟随 + 去重），或 `switchTab` 后用**当前页锚点**（`ctx.judge.exists(...)` 等）写 done。
 - 成功后 `session.page` 改为目标页、`ctx.url()` 更新；`bringToFront()` 失败不致命，
   `waitForLoadState("domcontentloaded")` 有界等待（≤5s，超时/失败忽略）。切换**计 1 个 flow
   step** 且走 `paceBeforeStep`（与 step/arrive 同单元语义）；预算用满是 `budget_exceeded`。
@@ -585,8 +598,30 @@ const sw = await ctx.switchTab({ urlContains: "help" });  // 恰好一个匹配�
   命中真实标签是观察事实，dry 不据此判红（与 `step` 恒 ok、done 信号不评估同一条纪律），因此**不需要**
   `if (ctx.runtime.runId !== "(dry)")` 守卫；只有依赖真实标签列表的**数据驱动断言/分支**才需要 dry 守卫
   （与数据驱动断言同一纪律）。
-- **未做**：动作后自动跟随新标签页（auto-follow）不在本版范围内，留作后续 policy 提案；
-  popup 闸门语义不变（外域新页仍按 `popup_not_allowed` 拦截）。
+- **F2 `newTab` opts：`_blank` 新标签的一等完成面**（取代"故意失败 → ctx.tabs → switchTab"绕法）。
+  `target="_blank"` 链接点击后**主页 URL 不变**，URL 型 done 永不成立 → 引擎在原页重试，实测连点
+  开 2–4 个重复标签（R05–R08/R11）。给这一步声明 `newTab: { urlContains: "p2" }` 后引擎接管：
+
+  ```js
+  // 新标签上的 done 在本步内直接判定；读面+动作面自动跟到新标签（后续 step 落在新页）。
+  const r = await ctx.step("打开详情", {
+    act: ctx.hint("#opener"),                      // 建议显式 act hint：单条 hint 收敛为恰好一次点击
+    done: ctx.judge.existsText("#p2out", "clicked"),
+    newTab: { urlContains: "p2" },
+  });
+  // r.newTab = { index, url, title, adopted: "opened" | "existing" }
+  ```
+
+  语义：① **去重**——动作前已存在 URL 含 `urlContains`（大小写不敏感）的标签（此前尝试开的）→
+  直接采用它、**不再点击**（`adopted:"existing"`；done 在该标签上判定，不再开新标签）；② 动作后
+  出现**新标签** → 自动切 `session.page`（读面+动作面）到它（优先 URL 命中者；`adopted:"opened"`），
+  done 在新标签上判定；③ 单条 `act: ctx.hint(...)` 收敛为**恰好一次点击**（单命令闭集：点完即判
+  done，不重试连点）；④ 未声明 `newTab` 的步骤逐字节不变；声明了但**没有新标签出现** → 正常 done
+  判定（如实失败）。新标签在 `meta.hosts` 信封外仍按既有 popup 门禁拒绝（`popup_not_allowed`）。
+  dry/`apps check` 只验声明形状（对象/`urlContains` 非空串）并记 `new_tab: true`——**dry 无浏览器，
+  标签行为（新标签出现/采用/去重）只能在真实运行验证**。
+- **未做**：无 `newTab` 声明时的自动跟随（auto-follow）不在本版范围内（有 `newTab` 声明的步按上
+  述语义自动跟随）；popup 闸门语义不变（外域新页仍按 `popup_not_allowed` 拦截）。
 
 **frame 门禁（P0-D，精确化）**。声明 `meta.hosts` 之外的子 frame（广告像素 / 统计 / 第三方
 widget）**默认只排除出解析面**，不再是整步 REJECT：池抽取、`hintLookup`、FW8 身份回捞、DRF、
@@ -915,6 +950,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `action_unsupported` | 目标存在但声明的动作 op 不在元素能力面内；换动作或换目标。DRF 首版只允许 `click`/`scroll`/`hover`——对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` 也报它（reason 明说首版限制） |
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |
 | `false_done` | **P0-E**（`done_guard:"fail"` 档）：done 成立但只读复核 guard 命中假绿特征——登录墙特征（URL/标题登录文案/跨出 hosts 信封）或「有动作但 changed=false 且 done 是否定式」的零前进蹭成立（R11：误点进登录页被算成功）。给 done 配正向锚（`all_of(not(...), 正向锚)`，必要时配 `ctx.judge.loginWall()`）；确属误报把 policy 改回 `warn`。缺省 `warn` 档只记 `false_done:` step warning，不改判定 |
+| `step_timeout` | **F3**：该步显式声明了 `timeoutMs`，整步挂钟（含 reobserve/升级循环的每轮与总时长）超了声明值——循环不再进入下一轮（已在途的决策调用不可抢占，超额 ≤ 一次在途调用）。放宽 `timeoutMs`、收窄该步 done/target，或拆分流程；未声明 `timeoutMs` 的步骤没有这个帽 |
 | `frame_not_allowed` | **仅当声明 target 或 done/when 只存在于 `meta.hosts` 之外的 frame**：第三方非交互 frame 默认排除（`frames_excluded` warning），**不需要**为此加 hosts；只有声明目标/完成信号确需该 frame 时才评估把它的 origin 加进 `meta.hosts`，否则把目标/done 改到允许 frame 内的事实。导航信封外的 goto 仍报 `host_not_allowed` |
 | `popup_not_allowed` | action 打开的新 tab / popup 不在 `meta.hosts` 内；声明 popup host 或避免打开外域 |
 | `navigation_forbidden` | `meta.policy.navigation:"entry-only"` 下入口之外的引擎直接 URL 导航被闸门拒绝；导航须经由页面元素完成（确需直达就移除该 policy）。见 §4.10 |
@@ -934,7 +970,9 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 - `ctx` 是**运行期面**：不要指望 `ctx.page` / locator / 模型分数——那是执行器内部。
 - flow 应用没有静态 IR 可展开/导出；审计能力用 `--emit-trace` 的轨迹。
 - `ctx.rows({row, fields})` 在 v1 关闭；行抽取走 `meta.site.listExtract` + `ctx.extract(name)`，或 inline `ctx.extract({ rows, fields, maxItems? })`。
-- **新标签页不自动跟随**：A5 只提供显式 `ctx.tabs()` / `ctx.switchTab(...)`；动作打开的新 tab 不会自动成为引擎当前页（自动跟随是后续 policy 提案，不在本版）。
+- **新标签页不自动跟随**（未声明 `newTab` 时）：A5 只提供显式 `ctx.tabs()` / `ctx.switchTab(...)`；
+  动作打开的新 tab 不会自动成为引擎当前页。**F2 起声明 `ctx.step(..., { newTab: { urlContains } })`
+  的步由引擎自动跟随 + 去重**（见 §4.9）。
 
 ## 12. 扩展配方（改引擎的人看）
 
