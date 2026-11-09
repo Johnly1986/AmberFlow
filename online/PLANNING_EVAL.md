@@ -3,44 +3,51 @@
 **可重复、可比较**的线上任务，量两项能力：**任务规划效率**（达成目标要花多少步/决策/重试/时间）
 与**引擎健壮性**（动态/巨大 DOM、跨页导航、风控降级、失败是否结构化）。
 
-## 0. 典型案例 T（2026-11-07 更新，主任务）：携程官网出行规划
+## 0. 典型案例 T（2026-11-09 更新，主任务）：Google Maps 餐厅筛选与评论采集
 
 > 这是当前**默认的典型线上规划任务**，按"给 agent 的任务简报"执行与评估（不是 `npm run test` 的
-> pass/fail case——OTA 搜索接口动态、价格随时变化且有风控，`online/cases/probe/ctrip-web-travel-plan.json`
+> pass/fail case——地图结果/评论动态变化且有风控，`online/cases/probe/google-maps-restaurants.json`
 > 只记录环境可用性事实）。评估实体：agent（子代理/人工）按本简报完成并交付结构化结果 + 证据。
 > **P0-E 完成语义诚实**：受阻交付（run 状态可能 PASSED/ok=true）必须用交付 JSON + notes 表达，
 > 并核对 result 的 `steps_failed`（>0 才出现）与报告「失败步」摘要；否定式弱 done 会被
 > `apps check` 的 `weak_done` lint 与步级 `false_done` guard 警告（`done_guard:"fail"` 档会结构化停）。
 
-**入口**：<https://www.ctrip.com/>（携程官网；站点声明 `online/sites/ctrip-probe.json`）
+**入口**：<https://www.google.com/>（站点声明 `online/sites/google-maps.json`）
 
-### 阶段一 · 机票
+### 阶段一 · 应用菜单进入地图
 
-1. 从首页进入「机票」。
-2. 出发城市 **上海**、到达城市 **昆明**，单程。
-3. 搜索**最近三天**（相对运行日 today 的下一个 3 天；如 2026-11-07 运行时 = 11-08/11-09/11-10）
-   上海→昆明的最低价机票（可用价格日历/逐日查价；税费口径按页面显示）。
-4. 记录：日期、航班号、航司、起飞/到达时间、票价（CNY）、来源 URL。
+1. 从 www.google.com 首页经**页面提供的应用菜单**（"Google 应用"九宫格）进入**地图**应用。
+2. 记录：入口路径（菜单项文案）、落点 URL。
 
-### 阶段二 · 酒店
+### 阶段二 · 餐厅筛选
 
-1. 返回首页，进入「酒店」。
-2. 城市 **昆明**；区域/位置 **呈贡区**；星级 **4 星**；按价格从低到高取**最低价**的 1 晚房费。
-3. 记录：酒店名、星级、区域、1 晚价格（CNY）、来源 URL。
+1. 在地图内切换到**餐厅/餐馆**结果（搜索或类别入口，按页面提供者）。
+2. 应用筛选：**价格 200 以内**（Google 价格为档位 ¥/¥¥/¥¥¥/¥¥¥¥——档位映射口径在 notes 如实说明）、
+   **评分 4.6 以上**（若筛选档位不含 4.6，选最接近档位并**逐家核对评分**，不足 4.6 的跳过并记录）、
+   **营业中**。
+3. 记录：每个筛选控件的实际操作方式与落选口径。
+
+### 阶段三 · 前五家与第一条评论
+
+1. 按筛选后的列表顺序**依次选择前五家**餐厅，逐家打开详情页。
+2. 每家记录**第一条评论**：作者、星级、日期（按页面显示口径）、文本；详情无评论/需登录/懒加载未出 → 如实记录。
+3. 记录：餐厅名、评分、价格档位、地址、来源 URL。
 
 ### 交付物（agent 输出）
 
 ```jsonc
 {
-  "flight": { "date": "2026-11-09", "flightNo": "MU...", "airline": "...",
-              "depTime": "08:00", "arrTime": "12:30", "priceCny": 499, "url": "..." },
-  "hotel":  { "name": "...", "stars": 4, "district": "呈贡区", "priceCny": 328, "url": "..." },
-  "totalCny": 827,
-  "fetchedAt": "2026-11-07T21:30:00+08:00",
-  "notes": "取证方式/风控观察/人工授权等"
+  "filters": { "category": "restaurant", "priceMaxCny": 200, "ratingMin": 4.6, "openNow": true,
+               "appliedPriceLevels": ["¥", "¥¥"], "ratingFilterChoice": "4.5+（逐家核对 ≥4.6）" },
+  "restaurants": [
+    { "rank": 1, "name": "...", "rating": 4.7, "priceLevel": "¥¥", "address": "...",
+      "firstReview": { "author": "...", "rating": 5, "date": "3 周前", "text": "..." }, "url": "..." }
+  ],
+  "fetchedAt": "2026-11-09T12:00:00+08:00",
+  "notes": "筛选档位口径/评论懒加载与登录观察/人工授权等"
 }
 ```
-另附证据：关键页面 URL、截图或 DOM 观测、时间戳（可复核；不含明文凭据）。
+另附证据：关键页面 URL、截图或 DOM 观测、时间戳（可复核；不含明文凭据）。取不到的字段写 null 并在 notes 说明。
 
 ### 操作纪律（人类式操作）
 
@@ -51,33 +58,29 @@
 - **引擎可强制**：应用在 `meta.policy` 声明 `navigation:"entry-only"` 后，入口之外的直接
   URL 跳转会被引擎以 `navigation_forbidden` 拒绝（评估要求 agent 这样声明，把纪律交给引擎
   执行，而不只靠自觉）；缺省不声明时行为不变。
-- **自绘控件可达（P0-C）**：页面上的筛选 chip / 自绘按钮没有 role/onclick/id、池与准入面都
-  收不进时，应用可声明 `target_resolution:"declared"`，让**作者声明的目标**（`ctx.hint(...)`
-  / 命令 `target`）在池/ADMIT/FW8 之后走 DRF（attr 或可见文本精确匹配、恰好一个可见、
-  click 前 hit-test）。引擎仍只解析声明目标，**模型不参与**；缺省不声明时行为不变。
 
 ### 成功判据
 
-- 机票记录：日期在最近三天内、出发上海/到达昆明、航班号/时间/价格齐全；酒店记录：呈贡区 + 4 星 + 价格；
-- 价格均为数字且币种一致，`totalCny` = 机票 + 酒店（口径在 notes 说明）；
-- 证据可复核（URL/截图/观测），且**环境事实如实**：遇验证码/风控/登录墙 → 记 `blocked`/`verification_required`，
-  **不得绕过**；用户授权下可人工代过验证，需在 notes 记录授权与步骤。
+- 五家餐厅按筛选后列表顺序、`rank` 连续；每家 `firstReview` 字段按页面可得性齐全（缺项在 notes 说明）；
+- 筛选口径如实（价格档位映射、评分档位选择与逐家核对在 `filters`/notes 记录）；
+- 证据可复核（URL/截图/观测），且**环境事实如实**：遇 unusual traffic/recaptcha/验证码 → 记 `blocked`，
+  需登录 → 记 `login_required`，**不得绕过**；用户授权下可人工代过验证，需在 notes 记录授权与步骤。
 
 ### 评估维度
 
 | 维度 | 指标（agent 自报 + 证据核对） |
 |---|---|
-| **规划效率** | 总 wall time；页面/步骤数；决策/工具调用次数；重试与返工次数；从入口到首个有效搜索结果的路径长度；重复输入次数 |
-| **健壮性** | 自绘控件/异步渲染/弹层/日历交互；价格或库存变化时的判断；城市/日期选错后的纠正；验证码/风控降级是否如实；证据完整性（URL/截图/时间戳） |
+| **规划效率** | 总 wall time；页面/步骤数；决策/工具调用次数；重试与返工次数；从入口到首个筛选后列表的路径长度；面板/弹层交互成本 |
+| **健壮性** | 自绘控件/异步渲染/弹层/面板交互；评论懒加载与滚动加载；筛选组合后的列表变化；unusual traffic/登录降级是否如实；证据完整性（URL/截图/时间戳） |
 
-### 基线（pilot 2026-11-07）
+### 基线（pilot 2026-11-09）
 
-- **当前入口 www.ctrip.com 可达**（浏览器内 362 个可交互元素；顶部「酒店/机票」为带菜单的 button 导航，
-  另有 `flights.ctrip.com` 促销链接），入口深链与导航均可用；probe `ctrip-web-travel-plan` 实测 observed=passed
-  （probe 口径记 skipped，skipped ≠ pass，只表示环境可达）。
-- 历史 pilot（入口 m.ctrip.com/html5，2026-11-07 上旬）：桥 run `eval-ctrip-travel` **PASSED**（首页 `#c_flight`
-  → 机票页，rule:match 1、model 0）；机票结果页被 `whaleguard` 风控（HTTP 432）、酒店价格被登录墙拦截，
-  搜索/筛选为自绘控件不在池——这些站点侧限制与入口无关，换 www 入口后仍需按简报评估。
+- probe `google-maps-restaurants` 为本案例的可用性观测（observed 事实以 probe 运行为准；skipped ≠ pass）。
+- 历史：本项目首轮评估（Google Maps 酒店 8 城市，报告 `gmap-hotels-8cities`）在该域 **8/8 PASSED**——
+  Google Maps 的搜索/筛选/详情流程对引擎可完成；本案例把口径升级为"筛选组合 + 逐家评论采集"，
+  评估重点从"可达"转向"规划效率与证据完整性"。
+- 对照保留：携程 probe（`ctrip-web-travel-plan`/`ctrip-flights`）继续记录 whaleguard/登录墙环境事实，
+  作为"风控分域"对照样本。
 - 任务按 agent 简报评估，不纳入 pass/fail 套件；可用性观测走 probe case（skipped ≠ pass）。
 
 ---

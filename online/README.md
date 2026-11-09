@@ -90,9 +90,10 @@ npm run test -- --tier smoke --json
 ## 典型规划评估任务
 
 `online/PLANNING_EVAL.md` 定义了**规划效率 + 引擎健壮性**评估任务族：
-**典型案例 T · 携程官网出行规划**（2026-11-07 更新，入口 https://www.ctrip.com/；主任务：上海→昆明最近三天最低价机票 + 呈贡区
-最低价 4 星酒店，记录行程与开销；按 agent 任务简报评估，probe 只记录可用性）；以及两个确定性辅助
-基线（维基百科多跳 `wiki-multihop-research`、Swag Labs 状态流 `saucedemo-cart-eval`）。
+**典型案例 T · Google Maps 餐厅筛选与评论采集**（2026-11-09 更新，入口 https://www.google.com/；主任务：应用菜单进地图 →
+餐厅筛选（价格≤¥200、评分≥4.6、营业中）→ 依次查看前五家并各记第一条评论；按 agent 任务简报评估，probe `google-maps-restaurants`
+只记录可用性；携程 probe 保留作风控分域对照）；以及两个确定性辅助基线（维基百科多跳 `wiki-multihop-research`、Swag Labs 状态流
+`saucedemo-cart-eval`）。
 含评估臂、指标口径、健壮性扰动矩阵（P1–P8）与 pilot 基线。
 
 ## 新增一个 case

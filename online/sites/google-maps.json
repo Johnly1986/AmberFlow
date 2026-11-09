@@ -1,0 +1,9 @@
+{
+  "id": "google-maps",
+  "hosts": ["www.google.com", "google.com", "maps.google.com", "consent.google.com"],
+  "home": "https://www.google.com/",
+  "locale": "zh-CN",
+  "timeout_ms": 45000,
+  "blocked_markers": ["unusual traffic", "recaptcha", "Access Denied", "403 Forbidden", "验证码", "安全验证"],
+  "login_markers": ["accounts.google.com", "ServiceLogin", "/SignIn"]
+}

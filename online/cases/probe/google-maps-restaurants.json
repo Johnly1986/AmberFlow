@@ -1,0 +1,20 @@
+{
+  "id": "google-maps-restaurants",
+  "site": "google-maps",
+  "tier": "probe",
+  "goal": "Google Maps 餐厅规划可用性观测：从 www.google.com 经应用菜单进入地图，切换餐厅并筛选（价格≤¥200、评分≥4.6、营业中），依次查看前五家餐厅并记录第一条评论（本 case 只记录环境/可达性事实，不绕过风控/登录）",
+  "start_url": "https://www.google.com/",
+  "expect": [
+    "blocked",
+    "unreachable",
+    "login_required",
+    "captured"
+  ],
+  "tags": [
+    "probe",
+    "google",
+    "maps",
+    "restaurants",
+    "planning"
+  ]
+}
