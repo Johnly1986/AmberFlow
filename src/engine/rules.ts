@@ -223,6 +223,55 @@ function boundaryHit(label: string, token: string): boolean {
   return false;
 }
 
+/* ---- task-9（评审 #2）：弱档命中的**旁路**诊断（不改任何公开签名与选择语义） ----
+ * bare 与 attrSubstr 的弱档胜出（词前缀/词包含/loose 子串）是"误点容器/同缀元素"的高发
+ * 形状——实测现场：裸词"价格"前缀命中 label="价格评分时间所有过滤条件…" 的整块结果容器
+ * （class Vo5ZAe），reason 只有 step_timeout，靠人工比对 URL 才定位。这里在解析时把
+ * 全部撞词候选记进模块态，执行器在自己的解析调用后 take 走、写成 step warning
+ * matched_others。返回值/sink/选择语义逐字节不变；hintMatchImpl 是纯同步函数，
+ * "最后写入者 = 最后一次解析"，执行器配 hint 相等性校验消费，无陈旧风险。 */
+
+export interface HintMatchCandidate {
+  ref: string;
+  tag: string;
+  /** class 首段（仅当池元素带 class_names——inspect 面/显式开启时；缺省 null）。 */
+  class: string | null;
+  /** label 截断 ≤40 字符（full_label 优先）。 */
+  label: string;
+}
+
+export interface HintMatchOthersDiag {
+  hint: string;
+  kind: "bare" | "attrSubstr";
+  /** 命中档：bare ladder 0..4（0=整 label 全等，3=词前缀，4=词包含）；attrSubstr 1..3。 */
+  tier: number;
+  /** 弱档胜出（bare t≥3 / attrSubstr t=3）= 误命中高发形状，执行器据此决定是否告警。 */
+  suspicious: boolean;
+  /** 实际裁决的 ref（firstIfSame 结果；全落空为 null）。 */
+  decided: string | null;
+  /** 全部撞词候选（池序 ≤8；decided 在其中）。 */
+  candidates: HintMatchCandidate[];
+}
+
+let lastHintOthersDiag: HintMatchOthersDiag | null = null;
+
+/** 执行器在解析调用后取走（take 一次即清；非 bare/attrSubstr 的解析不写、不清）。 */
+export function takeHintMatchOthers(): HintMatchOthersDiag | null {
+  const d = lastHintOthersDiag;
+  lastHintOthersDiag = null;
+  return d;
+}
+
+function diagCandidate(ref: string, e: Elem): HintMatchCandidate {
+  const cn = Array.isArray(e.class_names) && e.class_names.length > 0 ? e.class_names[0] : undefined;
+  return {
+    ref,
+    tag: String(e.tag ?? ""),
+    class: typeof cn === "string" && cn !== "" ? cn : null,
+    label: String(e.full_label ?? e.label ?? "").trim().slice(0, 40),
+  };
+}
+
 /** The 6 hint grammars, single-parsed; `sink` (if given) records the candidate set. */
 function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | null): string | null {
   const parsed = parseHint(hint);
@@ -253,11 +302,22 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
     //   3. the old behaviour over all substring hits (still None when the
     //      candidates are genuinely different — the bbc.com two-identical-links
     //      rule is unchanged).
+    // task-9：每次 attrSubstr 解析都旁路记录撞词候选（含 loose 档的 suspicious 标记）——
+    // 返回值与 sink 语义逐字节不变；记录被执行器 take 走（见 takeHintMatchOthers）。
+    const finishSubstr = (refs: string[], tier: number): string | null => {
+      const decided = firstIfSame(new Set(refs), elems);
+      lastHintOthersDiag = {
+        hint, kind: "attrSubstr", tier, suspicious: tier >= 3, decided,
+        candidates: hitList.slice(0, 8).map(([r, e]) => diagCandidate(r, e)),
+      };
+      if (sink) { sink.refs = refs; sink.tier = tier; sink.decided = null; }
+      return decided;
+    };
     const exact = hitList.filter(([, e]) => attrMatchValues(e, k).some((x) => x === v));
-    if (exact.length) return emit(exact.map(([r]) => r), 1);
+    if (exact.length) return finishSubstr(exact.map(([r]) => r), 1);
     const slug = hitList.filter(([, e]) => attrMatchValues(e, k).some((x) => x.split("/").pop() === v));
-    if (slug.length) return emit(slug.map(([r]) => r), 2);
-    return emit(hitList.map(([r]) => r), 3);
+    if (slug.length) return finishSubstr(slug.map(([r]) => r), 2);
+    return finishSubstr(hitList.map(([r]) => r), 3);
   }
   if (parsed.kind === "nearToken") {
     // near~token: the container identity line (add_near_context) disambiguates
@@ -324,11 +384,30 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
   // 档位顺序：整 label 全等 → 词全等 → **词边界/前缀**（A2 新增档，纯加档不挪旧档语义）
   // → 词前缀 → 词包含。旧档位内仍"宁缺勿错"（真歧义 null）。
   const ladder = [whole, tiers[0]!, boundary, tiers[1]!, tiers[2]!];
+  // task-9：全部撞词候选 = 五档并集（含最终选中者），供 matched_others 旁路诊断。
+  const allBareHits = new Set<string>();
+  for (const s of ladder) for (const r of s) allBareHits.add(r);
   for (let t = 0; t < ladder.length; t++) {
     const hits = ladder[t]!;
-    if (hits.size) return emit([...hits], t);
+    if (hits.size) {
+      const refs = [...hits];
+      const decided = firstIfSame(new Set(refs), elems);
+      // 弱档（词前缀 t=3 / 词包含 t=4）胜出 = 容器撞车/同缀误中的高发形状（实测：
+      // 裸词"价格"前缀命中整块结果容器 div.Vo5ZAe）。记录不改返回值/选择语义。
+      lastHintOthersDiag = {
+        hint, kind: "bare", tier: t, suspicious: t >= 3, decided,
+        candidates: entries
+          .filter(([r]) => allBareHits.has(r))
+          .slice(0, 8)
+          .map(([r, e]) => diagCandidate(r, e)),
+      };
+      if (sink) { sink.refs = refs; sink.tier = t; sink.decided = null; }
+      return decided;
+    }
   }
+  // 全落空也记录（suspicious:false、空候选）——消掉"上一次弱档诊断滞留"的陈旧风险。
   if (sink) { sink.refs = []; sink.tier = -1; sink.decided = null; }
+  lastHintOthersDiag = { hint, kind: "bare", tier: -1, suspicious: false, decided: null, candidates: [] };
   return null;
 }
 

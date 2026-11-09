@@ -116,6 +116,9 @@ import {
   hintCandidates,
   hintMatch,
   navRule,
+  takeHintMatchOthers,
+  type HintMatchCandidate,
+  type HintMatchOthersDiag,
 } from "./rules.ts";
 import { checkSignal, isWeakNegativeSignal, LOGIN_WALL_TEXTS, LOGIN_WALL_URL_RE, type SignalSpec } from "./signals.ts";
 // S2 稳定门：MutationObserver 传感器 + 有界静默等待（只作观察增强，不中断执行循环）。
@@ -1358,6 +1361,25 @@ function cmdFamilies(op: string): ReadonlySet<string> {
     case "drag": return new Set(["click"]);
     default: return ALL_FAMILIES;
   }
+}
+
+/**
+ * task-9（评审 #2）：弱档命中诊断的 step warning 文案（`matched_others`）。
+ * 现场语义：裸词"价格"前缀命中整块结果容器（label="价格评分时间所有过滤条件…"）——
+ * 动作"成功"点了个容器，done 永不成立只剩 step_timeout。这里点名选中者与其余撞词候选
+ * （≤3 条，每条 tag + class 首段（池带 class_names 时）+ label ≤40 字符，总长有界），
+ * 并给收窄建议。措辞与 B2 的 check 静态 hint 提示分层：这里是运行期**当场事实**，
+ * 那边是声明形状的静态提醒——不复制同一段话。
+ */
+function matchedOthersWarning(d: HintMatchOthersDiag, hint: string, stepNo: number): string {
+  const shape = d.kind === "bare" ? "裸词的词前缀/词包含档" : "属性子串的 loose 档";
+  const fmt = (c: HintMatchCandidate): string =>
+    `${c.tag}${c.class ? `.${c.class}` : ""} "${c.label.slice(0, 40)}"${c.ref === d.decided ? "（选中）" : ""}`;
+  const shown = d.candidates.slice(0, 3).map(fmt).join(" | ");
+  const more = d.candidates.length > 3 ? `（共 ${d.candidates.length} 个撞词候选，只列前 3）` : "";
+  return `matched_others: step ${stepNo} target_hint ${JSON.stringify(hint)} 经${shape}命中，`
+    + `命中对象可能是容器/同缀元素而非预期目标 — ${shown}${more}；`
+    + `建议收窄：tag[attr=…] 精确值、更长独词或 #id（对照 inspect --json 的 hint_candidates）`;
 }
 
 /**
@@ -4716,6 +4738,16 @@ export class BrowserMiddleware {
           ruleRef = curHint
             ? affordanceRule(instruction, elems, curHint)
             : (navRule(instruction, orderedPool()) ?? affordanceRule(instruction, orderedPool(), null));
+          // task-9（评审 #2）：弱档命中的旁路诊断 → step warning `matched_others`。
+          // 只在弱档胜出（bare 词前缀/词包含、attrSubstr loose 子串）时告警——精确命中
+          // （整 label 全等/词全等/attr 精确值/slug）不响，clean 应用零新增警告。
+          // take 一次即清；hint 相等性校验挡住非 bare/attrSubstr 解析留下的陈旧诊断。
+          if (curHint !== null) {
+            const othersDiag = takeHintMatchOthers();
+            if (othersDiag !== null && othersDiag.hint === curHint && othersDiag.suspicious) {
+              warnings.push(matchedOthersWarning(othersDiag, curHint, stepNo));
+            }
+          }
           // U5（W10）：rules-only 没有模型可回退，也就没有决策脸的"低置信宽扫重看"那一级。
           // 声明的 target_hint 若落在常规 40 窗口之外（分页链接/长列表底部），规则直接未命中，
           // 3 attempts 后 target_not_found —— 明明页面上就在那儿。
