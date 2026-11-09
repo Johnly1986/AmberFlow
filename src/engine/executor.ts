@@ -1136,8 +1136,7 @@ function sigEq(a: Sig, b: Sig): boolean {
  * Popup / new tab 的 host gate：只看当前 page.url 会漏掉 `window.open()` 开出的新页。
  * 这里扫描同一 browser context 的所有 page；`pages` 在 Playwright 里是数组属性，替身可能给函数。
  */
-export function deniedContextUrl(page: PageLike, hosts: string[] | null | undefined): string | null {
-  if (!hosts || hosts.length === 0) return null;
+export function deniedContextUrl(page: PageLike, hosts: string[] | null | undefined): string | null {  if (!hosts || hosts.length === 0) return null;
   // Playwright 的 page.context 是方法；替身可能直接给对象。
   const contextValue = (page as unknown as { context?: unknown }).context;
   const context = (typeof contextValue === "function" ? contextValue.call(page) : contextValue) as
@@ -1151,6 +1150,23 @@ export function deniedContextUrl(page: PageLike, hosts: string[] | null | undefi
     if (disallowedHost(u, hosts) !== null) return u;
   }
   return null;
+}
+
+/**
+ * eval3 曝光面：context 页数（含当前页）。与 deniedContextUrl 同一套替身兼容读法；
+ * 拿不到（替身/异常）返回 -1——调用方据此放弃"标签数增加"的提示判据，绝不误报。
+ */
+export function contextPageCount(page: PageLike): number {
+  try {
+    const contextValue = (page as unknown as { context?: unknown }).context;
+    const context = (typeof contextValue === "function" ? contextValue.call(page) : contextValue) as
+      | { pages?: ArrayLike<PageLike> | (() => ArrayLike<PageLike>) }
+      | undefined;
+    const rawPages = typeof context?.pages === "function" ? context.pages() : context?.pages;
+    return Array.from(rawPages ?? []).length;
+  } catch {
+    return -1;
+  }
 }
 
 export function deniedFrameUrl(page: PageLike, hosts: string[] | null | undefined): string | null {
@@ -3943,6 +3959,8 @@ export class BrowserMiddleware {
             `step-level timeoutMs=${stepTimeoutMs} exhausted (step wall clock ~${Math.round(Date.now() - stepStartedAt)} ms) `
             + `while the reobserve/escalation loop was still searching on step ${stepNo} — `
             + `the loop no longer starts another round past the declared step deadline; `
+            + `timeoutMs is the WHOLE-STEP wall-clock cap (settle/reobserve/escalation/actions inside this step all share it), `
+            + `not a per-action timeout; `
             + `raise timeoutMs, narrow the step's done/target, or split the flow`,
             stepNo);
           if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
@@ -3951,6 +3969,10 @@ export class BrowserMiddleware {
         // A1：done_preheld 是**逐步**事实——每步开头重置，避免上一步的值被本步的 trace 行
         // 或最终 RunReport 误带（只有命令步会在下面重新评估它）。
         donePreheld = null;
+        // eval3 曝光面：no_progress 的 newTab 提示基线——步首 URL 与 context 页数。
+        // 只读读面，零动作；比较发生在本步的 no_progress 停因处。
+        const stepStartUrl = urlOf(pg);
+        const stepStartTabs = contextPageCount(pg);
         // P0 pool ready gate：SPA 的 domcontentloaded 可能先于交互元素渲染。
         // 这里只做“pool 非空”这一件事；目标是否存在、动作是否可执行仍由后面分支判断。
         let elems: ElemPool;
@@ -4025,7 +4047,8 @@ export class BrowserMiddleware {
               + `(step ${stepNo}; sniff admitted=${readiness.evidence.sniff?.admitted ?? 0} visible ADMIT_SEL element(s), `
               + `focusable=${readiness.evidence.sniff?.focusable ?? 0}, aria=${readiness.evidence.sniff?.aria ?? 0}, `
               + `frames=${readiness.evidence.sniff?.frames ?? 0}, body_text=${readiness.evidence.sniff?.body_text ?? 0}) `
-              + `— continuing; pool_gate:"strict" would stop with page_not_ready`,
+              + `— continuing; pool_gate:"strict" would stop with page_not_ready`
+              + `；用 ctx.observe() 在会话内看准入面与 why_not_admitted`,
             );
           }
         }
@@ -4194,6 +4217,12 @@ export class BrowserMiddleware {
               + `${dh.total} element(s) in the DOM but ${dh.hidden} are hidden `
               + `(checkVisibility CSS / zero box); hidden elements are never acted on`;
         };
+        // eval3 曝光面（能力发现率 0→2→0）：target_not_found 是"自绘控件不在池"的高频落点，
+        // 停因当场指向 DRF。仅**未声明** target_resolution 时追加——声明了 "declared" 的场景
+        // 已经走 DRF，再提示就是噪音。
+        const drfHintSuffix = (): string => this.targetResolutionDeclared
+          ? ""
+          : ` — 自绘控件可声明 meta.policy.target_resolution:"declared" 让声明目标走 DRF（attr/文本精确匹配）`;
         /**
          * 对一条声明目标跑一次 DRF（同一步同一条 hint 只跑一次）。返回命中行；未命中返回
          * null（全隐藏只留诊断）。歧义/首版能力面通过 `declaredStop` 交给外层统一停。
@@ -4471,6 +4500,7 @@ export class BrowserMiddleware {
                     + `${identityHidden.total} element(s) in the DOM but ${identityHidden.hidden} are hidden `
                     + `(checkVisibility CSS / zero box); hidden elements are never acted on`)
                 + declaredHiddenSuffix()
+                + drfHintSuffix()
                 + underNote, stepNo);
             }
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
@@ -4729,7 +4759,7 @@ export class BrowserMiddleware {
             + `${summary ? `: ${summary}` : ""}) after hintMatch / ADMIT recovery / FW8 identity recovery. `
             + `Fix the hint (closed set: #id | tag[attr=value] | tag[attr~substr] | tag~token | tag | bare-token) `
             + `or remove meta.policy.act_hint:"strict" to let the decision model pick instead`
-            + identityHiddenSuffix() + declaredHiddenSuffix(), stepNo);
+            + identityHiddenSuffix() + declaredHiddenSuffix() + drfHintSuffix(), stepNo);
           if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
         }
@@ -5018,6 +5048,9 @@ export class BrowserMiddleware {
                   + (curHint !== null && ruleRef === null
                       ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
                       : "")
+                  // eval3 曝光面：observe 是会话内的免费侦察通道（R02 自发使用并获赞），
+                  // 低置信/池判别落空时当场点名它，省一次"故意失败步捞池"的绕行。
+                  + `；用 ctx.observe() 在会话内看准入面与 why_not_admitted`
                   // A2 判别②：分数不过闸门 ≠ 目标不存在——用内存里的池把两种问题分开说
                   // （候选在而置信度低 = 闸门问题；池里没有词面相关候选 = 目标可能不在本页面）。
                   + lowConfDiscrimination(instruction, elems, ref), stepNo);
@@ -5688,10 +5721,20 @@ export class BrowserMiddleware {
           const ran = (effectiveRuns[repeatKey] ?? 0) + 1;
           effectiveRuns[repeatKey] = ran;
           if (this.maxEffectiveRepeats > 0 && ran > this.maxEffectiveRepeats) {
+            // eval3 曝光面（_blank 连点 4 次重复标签 3/3 轮）：URL 没动 + context 里多出了
+            // 标签 = 动作八成开进了新标签而引擎还留在原页——当场把 newTab opts 指给作者。
+            // 替身拿不到页数（-1）或拿不到 URL 时不提示，绝不误报。
+            const nowUrl = urlOf(pg);
+            const nowTabs = contextPageCount(pg);
+            const newTabHint = nowTabs > stepStartTabs && stepStartTabs >= 0
+              && typeof nowUrl === "string" && nowUrl !== "" && nowUrl === stepStartUrl
+              ? ` — 动作疑似打开新标签：用 step opts newTab:{urlContains} 自动采用并去重`
+              : "";
             stop("no_progress",
               `${el.tag} "${el.label}" was executed ${ran} time(s) in this subgoal `
               + `and the done-signal never held — the target looks dead (or the signal can never fire); `
-              + `stopping here instead of blaming the step budget (max_steps=${this.maxSteps}) on step ${stepNo}`,
+              + `stopping here instead of blaming the step budget (max_steps=${this.maxSteps}) on step ${stepNo}`
+              + newTabHint,
               stepNo);
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
@@ -5824,7 +5867,9 @@ export class BrowserMiddleware {
           + `— completion may have been borrowed by unrelated navigation `
           + `(R11: a mis-click to a login page counted as success); current URL: ${liveUrl || "(unknown)"}; `
           + `evidence: ${JSON.stringify(ev ?? {})} `
-          + `；修法：给 done 配正向锚（exists/holds/url），如 all_of(not(...), 正向锚)，必要时配 ctx.judge.loginWall()`;
+          + `；修法：给 done 配正向锚（exists/holds/url），如 all_of(not(...), 正向锚)，必要时配 ctx.judge.loginWall()`
+          + `；可直接抄的构造器：done: ctx.judge.all(not(ctx.judge.loginWall()), <正向锚>)`
+          + `（信号语言的 all_of；loginWall 是 kit 一等构造器；<正向锚> 换成动作后才成立的 exists/holds/url 事实）`;
         if (this.doneGuardPolicy === "fail") {
           done = false;
           stop("false_done", why);

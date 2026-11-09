@@ -102,8 +102,24 @@ function flowScriptTemplate(id: string, goal: string, hosts: string[], startUrl:
  *
 ${playbook}
  *
+ * 常见卡点 → 引擎能力（速查；细节见下方 ctx/policy 说明与 amber schema ctx 契约）：
+ * · 自绘 div 筛选/按钮不在池      → meta.policy.target_resolution:"declared"（DRF：attr/文本精确匹配+唯一可见+hit-test）
+ * · 看不到当前页元素/池           → ctx.observe()（免费只读；admitted/why_not_admitted/hint_candidates；dry 下 elements=[] 只验形状）
+ * · target=_blank 会开新标签      → step opts newTab:{urlContains}（自动采用+去重，别重复点击）
+ * · 慢 SPA/步内挂死               → step timeoutMs（=整步挂钟帽，超时 stop step_timeout）
+ * · 首屏外内容/滚到页底           → ctx.scrollList("document"|"body",{to:"bottom"})（合成滚动目标）
+ * · 弱否定 done/误入登录          → weak_done lint + false_done guard；正向锚配 ctx.judge.loginWall()
+ * · act hint 未命中不想让模型乱选 → meta.policy.act_hint:"strict"
+ * · 需要回入口页                  → entry-only 放行 meta.site.pages 声明页（URL 归一全等）
+ * · React 受控输入 judge.value 不成立 → 改用 text/exists/JS 可见事实（value readback 对受控输入不可靠）
+ *
+ * dry 语义（apps check / run --dry-run）：dry 会**真实执行 flow 脚本体**——浏览器调用被
+ * 合成、不访问网络，但脚本自身的文件/进程副作用会真的发生；两面区分用 ctx.runtime.dry。
+ *
  * done 不许猜（这条最容易踩）：写信号之前先看这一页真的长什么样——
  *   amber inspect --url <入口页> --json
+ * inspect 是**独立一次性会话**（新开浏览器、不 attach 运行会话），适合入口页/任意 URL
+ * 的离线侦察；**会话内实时看当前页**用 ctx.observe()（见上面速查）。
  * inspect 只列“可行动”元素；h1/文本类 done 信号另需实证（原始 HTML 或运行 trace）。
  * 扫描面（B2）含 div[role=menuitem/menuitemradio/menuitemcheckbox/option/tab]（click 族）：
  * 弹层菜单项/下拉选项/页签自绘控件可直接 act；候选构成因此可能变化、同名候选可能变多
@@ -134,7 +150,7 @@ ${playbook}
  *   / manual(desc, {done}) / url() / read.text|value|count|attr / extract / collect / holds / waitFor
  *   / source（数据腿注册表，不是读槽位的口）/ run / done() / fail(code, reason) / hint / hints / command
  *   / slots（冻结 Record：脚本层读槽位值写 ctx.slots["键"]，键须在 meta.slots 声明）
- *   / runtime（只读投影：outDir/runId/today/epoch；epoch 是状态游标，dry 恒 0）
+ *   / runtime（只读投影：outDir/runId/today/epoch/dry；epoch 是状态游标，dry 恒 0；dry 是两面判据——dry/replay true、真跑 false。epoch 不再作 dry 判据）
  *   / judge.url|exists|existsText|text|equals|value|all|any|not|manual
  *     ——all/any 是【变参】all(s1, s2, …)，不收数组；not 单参
  *   （when 守卫跳过的步返回 ok:false + stopCode=precondition_skipped，同样消耗预算。）
@@ -259,7 +275,8 @@ export async function flow(ctx) {
   // });
   // if (!sort.ok) ctx.fail(sort.stopCode ?? "step_failed", sort.reason);
 
-  // 步级 slots：只覆盖这一步的槽位绑定值（不需要提前写进 meta.slots 的默认值）。
+  // 步级 slots：只覆盖这一步的槽位**值**（缺省值仍写在 meta.slots；键本身必须在 meta.slots
+  // 声明——dry 校验按 meta.slots 口径查键，步级提供的是值不是新键）。
   // const search = await ctx.step("搜索酒店", {
   //   slots: { query: "北京 酒店" },   // ← 值来自任务输入；slot 缺值 = needs_value，绝不猜
   //   done: ctx.judge.url("search"),  // ← 换成动作后才会成立的信号
@@ -480,9 +497,13 @@ async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
   }
   const bad = results.filter((r) => r.problems.length);
   const exitCode = bad.length ? 2 : 0;
+  // dry 语义消歧义（C 消歧义验证①）：dry 会**真实执行 flow 脚本体**——浏览器调用被合成、
+  // 不访问网络，但脚本自身的文件/进程副作用会真的发生。一行提示，不改变执行语义。
+  const DRY_SEMANTICS = "dry: flow 已真实执行（浏览器调用合成；脚本副作用为真）";
   if (jsonWanted(ctx, parsed.values)) {
     const envelope = successEnvelope("apps check", {
       checked: results.length, ok: bad.length === 0, results,
+      dry_semantics: DRY_SEMANTICS,
     }, { exitCode, next: bad.length ? ["amber apps show <id>"] : ["amber run <id>"] });
     if (bad.length) {
       envelope.ok = false;
@@ -505,6 +526,7 @@ async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
     }
   }
   say(ctx, "");
+  say(ctx, `  ${DRY_SEMANTICS}`);
   say(ctx, bad.length
     ? `${bad.length}/${results.length} 个应用未通过校验。`
     : `${results.length} 个应用全部通过校验。`);

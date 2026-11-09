@@ -114,7 +114,8 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
     app: { id: pack.id, ...(pack.label === undefined ? {} : { label: pack.label }), goal: pack.goal },
     slots: Object.freeze({ ...slots }),
     // S1：replay 没有活页面观察，epoch 给 0（同 dry 的合成口径——不伪造状态推进）。
-    runtime: Object.freeze({ ...runtime, epoch: 0 }),
+    // dry:true（eval3 消歧义）：replay 与 dry 同属非真跑面，两面判据看 runtime.dry。
+    runtime: Object.freeze({ ...runtime, epoch: 0, dry: true }),
     budget,
     log: (msg, data) => { nextEvent("log", { desc: msg }); void data; },
     open: async (u) => {

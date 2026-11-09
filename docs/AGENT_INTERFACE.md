@@ -44,8 +44,12 @@ apps list → app_show（路径 + 当前源码）→ 编辑 app.mjs
 ```
 
 - `app_check` 不打开浏览器：它证明的是“脚本能加载、调用序列合法、信号/命令/槽位可校验”，
-  不证明页面状态会成立。
-- `inspect` 只读：标题、URL、有界元素、候选 hint；`--json` 另带只读的可访问性树证据块 `ax`（浏览器 AX role/name/focusable/disabled + `not_in_pool` 近似口径，不进池/匹配/模型/运行路径）；不点击、不输入、不调模型。
+  不证明页面状态会成立。**dry 会真实执行 flow 脚本体**：浏览器调用被合成、不访问网络，
+  但脚本自身的文件/进程副作用会真的发生（check 输出带一行提示；JSON 面 `data.dry_semantics`）。
+  脚本两面判据用 `ctx.runtime.dry`（dry/replay `true`、真跑 `false`）；`epoch === 0` 不作 dry 判据。
+  `app_create` 的骨架含「卡点→能力」cookbook 速查段；会话内实时观察用 `ctx.observe()`。
+- `inspect` 只读：标题、URL、有界元素、候选 hint；`--json` 另带只读的可访问性树证据块 `ax`（浏览器 AX role/name/focusable/disabled + `not_in_pool` 近似口径，不进池/匹配/模型/运行路径）；不点击、不输入、不调模型。**inspect 是独立一次性会话**（新开浏览器、不 attach 运行会话）——会话内实时看当前页用应用内 `ctx.observe()`。
+- **learn 录制 hint vs inspect 候选**：learn 的 `hint` 是六形状闭集、属性白名单只认 `test`（→data-test）/`type`/`aria-label`；inspect 的 `hint_candidates` 是引擎经同一个 `hintMatch` 自证过的可照抄结果（输出的就是六形状之一）。inspect 候选可直接抄进 act/learn；自己挑的属性先过白名单。
 - `run --max-steps N` 是**执行预算**，不是“从第 N 步开始”：脚本按自己的控制流执行，
   用满预算时以 `budget_exceeded` 停下，结果带已执行步骤与 trace。
 - `run --trace` 把每个 `ctx.step` / `ctx.arrive` 的 `id`、`desc`、URL、结果带进 JSON。

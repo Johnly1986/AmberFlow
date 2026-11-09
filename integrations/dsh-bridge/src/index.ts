@@ -402,6 +402,7 @@ export function apply(ctx: Context, config: Config): void {
       + 'evidence. It runs with THIS deployment\'s decision config (the bridge injects '
       + '`AMBERFLOW_DECISION_*`), which may differ from the CLI\'s user-scope config: prefer this '
       + 'tool over a local `amber run` when the CLI decision plane is stale or returns 401/403. '
+      + '结构化停因自带能力提示（DRF/newTab/observe）；result 顶层 steps_failed/warnings_count 仅 >0 出现。 '
       + '导航应经由页面入口/控件；直接构造 URL 跳转易触发站点风控，需要引擎强制时在 meta.policy 声明 navigation:"entry-only"（违规跳转会得到 navigation_forbidden）。 '
       + 'Escalation rule: '
       + STOP_ESCALATION_TEXT,
@@ -817,8 +818,9 @@ export function apply(ctx: Context, config: Config): void {
     name: `${toolPrefix}_inspect`,
     description:
       'Observe a live page without acting: title, URL, a bounded list of interactive elements, and '
-      + 'verified hint candidates for each. Use this before writing a step target hint. No clicks, no '
-      + 'typing, no model call; only http(s) URLs.',
+      + 'verified hint candidates for each. Use this before writing a step target hint. inspect 是'
+      + '独立一次性会话（新开浏览器，不 attach 运行会话）；会话内实时观察用应用内 ctx.observe()。 '
+      + 'No clicks, no typing, no model call; only http(s) URLs.',
     parameters: {
       url: { type: 'string', required: true, description: 'The http(s) page to observe.' },
       max_elements: { type: 'integer', description: 'Default 60, max 200.' },
@@ -946,6 +948,7 @@ export function apply(ctx: Context, config: Config): void {
       + 'with `meta` + an empty `flow(ctx)` to fill in. Returns the new app, its writable path and its '
       + 'current source. Only the skeleton is generated — the Agent edits the script itself; there is '
       + 'no step/format/kind parameter and no JSON app format. '
+      + '骨架含「卡点→能力」cookbook；新能力：ctx.observe / newTab / scrollList 合成目标 / timeoutMs 步帽 / policy target_resolution|act_hint|done_guard|navigation。 '
       + '导航应经由页面入口/控件；直接构造 URL 跳转易触发站点风控，需要引擎强制时在 meta.policy 声明 navigation:"entry-only"（违规跳转会得到 navigation_forbidden）。 '
       + PLAN_PLAYBOOK_SHORT,
     parameters: {

@@ -260,7 +260,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     app: { id: pack.id, ...(pack.label === undefined ? {} : { label: pack.label }), goal: pack.goal },
     slots: Object.freeze({ ...slots }),
     // S1：dry 没有页面观察，epoch 是合成值 0（不假装有状态推进）。
-    runtime: Object.freeze({ ...runtime, epoch: 0 }),
+    // dry:true（eval3 消歧义）：两面判据的契约值——真跑面（ctx.ts）恒 false，epoch 不作判据。
+    runtime: Object.freeze({ ...runtime, epoch: 0, dry: true }),
     budget,
     log: (msg) => { pushEvent(trace, { call: "log", desc: msg }); },
     open: async (u) => {

@@ -636,6 +636,13 @@ export interface AppRunResult {
    * （run 绿但数据 null）必须用交付 JSON + notes 表达，报告摘要点名「失败步 n」。
    */
   steps_failed?: number;
+  /**
+   * eval3 曝光面：run summary 警告计数（`warnings` 数组的长度）——**仅 n>0 时出现**
+   * （与 steps_failed 同口径：clean run 键集与基线逐字节一致）。警告是执行期诚实性
+   * 证据（false_done guard / frames_excluded / pool_empty / suspected_async…），
+   * 不是完成判死；report.md 摘要行同步带「警告 n」（仅 n>0）。
+   */
+  warnings_count?: number;
   /** 本次是分段运行：`ok` 只代表段内步骤成功，不代表整条旅程验收。 */
   partial?: true;
   /**
@@ -1807,7 +1814,9 @@ export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): st
     `- 目标：${r.goal}`,
     `- 结果：**${r.ok ? "通过" : r.partial === true ? "部分执行（预算用满）" : "未通过"}** ｜ 步骤 ${r.completed} ｜ 用时 ${r.secs}s`
       // P0-E：失败步摘要（仅 >0 才出现；受阻交付——run 绿但交付 null——从这里一眼可见）。
-      + (r.steps_failed !== undefined && r.steps_failed > 0 ? ` ｜ **失败步 ${r.steps_failed}**` : ""),
+      + (r.steps_failed !== undefined && r.steps_failed > 0 ? ` ｜ **失败步 ${r.steps_failed}**` : "")
+      // eval3 曝光面：警告一等公民（仅 >0 才出现；执行期诚实性证据，不是完成判死）。
+      + ((r.warnings_count ?? (r.warnings?.length ?? 0)) > 0 ? ` ｜ **警告 ${r.warnings_count ?? r.warnings?.length}**` : ""),
     ...(r.script?.stop_code !== undefined
       ? [`- **结构化停因**：\`${r.script.stop_code}\`：${String(r.script.stop_reason ?? "").split("\n")[0].slice(0, 160)}`]
       : []),
@@ -2726,6 +2735,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     ok,
     // P0-E：失败步计账（仅 >0 时出现；n=0 键集与基线逐字节一致）。
     ...(stepsFailed > 0 ? { steps_failed: stepsFailed } : {}),
+    // eval3 曝光面：警告一等公民（与 steps_failed 同口径，仅 >0 出现）。
+    ...(runWarnings.length > 0 ? { warnings_count: runWarnings.length } : {}),
     // T2：返回值写进数据集后的审计视图（含 writtenBy/generation；没有 returns ⇒ 键缺席，
     // 与声明式路径同一字段名/形状，不另造一套）。
     ...(dataset.entriesView().length > 0 ? { dataset_view: [...dataset.entriesView()] } : {}),

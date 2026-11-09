@@ -422,8 +422,13 @@ export interface Ctx {
   /**
    * 运行期只读投影。`epoch` = 执行器状态游标的当前 epoch（每次抽池/观察 +1；每个 `run()`
    * 重置）。dry 面给合成值 0——dry 没有真实页面观察，不假装有。
+   *
+   * `dry`（eval3 消歧义）= 本会话是否 dry/replay 面：dry 与 replay 恒 `true`，真跑恒 `false`。
+   * **两面判据就用它**——`epoch === 0` 不再是 dry 判据（真跑首个观察前 epoch 同样是 0）；
+   * 数据驱动分支/断言请用 `ctx.runtime.dry`（此前文档建议的 `runId === "(dry)"` 仍可用，
+   * 但那只是 CLI 惯例值不是契约）。
    */
-  readonly runtime: Readonly<{ outDir: string; runId: string; today: string; epoch: number }>;
+  readonly runtime: Readonly<{ outDir: string; runId: string; today: string; epoch: number; dry: boolean }>;
   readonly budget: CtxBudget;
   log(msg: string, data?: unknown): void;
   open(url: string, opts?: { timeoutMs?: number }): Promise<void>;
@@ -459,7 +464,7 @@ export interface Ctx {
    * result JSON 里没有 observe 结果（需要证据就在 flow 里自己用 `ctx.log`/写文件）。
    * dry 返回 `{ok:true, dry:true, counts 全 0, elements:[]}`；replay 只还原 counts/truncated
    * （元素明细未录制）——`if (obs.elements.length)` 这类分支在 dry/replay 走不到，
-   * 依赖观察值的分支/断言请用 `ctx.runtime.runId === "(dry)"` 或 counts 守卫。
+   * 依赖观察值的分支/断言请用 `ctx.runtime.dry`（dry/replay 恒 true）或 counts 守卫。
    */
   observe(opts?: ObserveOptions): Promise<ObserveResult>;
   step(desc: string, req: StepRequest): Promise<StepResult>;
@@ -1734,9 +1739,11 @@ export function createCtx(deps: CtxDeps): Ctx {
 
   const kit = createKit();
   // S1：`runtime.epoch` 是**执行器游标**的只读投影（不自建第二份状态来源）。
+  // `dry:false`（eval3 消歧义）：这是真跑面——dry/replay 的 ctx（ctx-dry/ctx-replay）自己给 true。
   const runtimeView = Object.freeze({
     outDir: runtime.outDir, runId: runtime.runId, today: runtime.today,
     get epoch(): number { return deps.mw().stateEpoch(); },
+    dry: false,
   });
   const ctx: Ctx = {
     judge: kit.judge,

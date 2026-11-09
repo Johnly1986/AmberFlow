@@ -100,6 +100,22 @@ export async function flow(ctx) {
 走查走通后按六步法 ③④⑤⑥ 规划、落地、验证；写 `done` 之前回看 §0 的失败特征速查与 §6
 的信号语言，别凭走查时的印象凭空写信号。
 
+### 0.6 卡点 → 能力速查（eval3 曝光面；骨架同款 cookbook）
+
+每行一个反复踩的卡点和它的既有能力——停因 reason 也会当场点名（见 §10）：
+
+| 卡点 | 能力 |
+|---|---|
+| 自绘 div 筛选/按钮不在池 | `meta.policy.target_resolution:"declared"`（DRF：attr/文本精确匹配+唯一可见+hit-test，§4.11） |
+| 看不到当前页元素/池 | `ctx.observe()`（免费只读；admitted/why_not_admitted/hint_candidates；dry 下 `elements=[]` 只验形状） |
+| `target=_blank` 会开新标签 | step opts `newTab:{urlContains}`（自动采用+去重，别重复点击；§4.9） |
+| 慢 SPA/步内挂死 | step `timeoutMs`（=整步挂钟帽，超时 stop `step_timeout`） |
+| 首屏外内容/滚到页底 | `ctx.scrollList("document"|"body",{to:"bottom"})`（合成滚动目标） |
+| 弱否定 done/误入登录 | `weak_done` lint + `false_done` guard；正向锚配 `ctx.judge.loginWall()`（§6） |
+| act hint 未命中不想让模型乱选 | `meta.policy.act_hint:"strict"`（§10） |
+| 需要回入口页 | entry-only 放行 `meta.site.pages` 声明页（URL 归一全等；§4.10） |
+| React 受控输入 `judge.value` 不成立 | 改用 text/exists/JS 可见事实（value readback 对受控输入不可靠，§6） |
+
 ## 1. 只有一种格式
 
 **应用只有一种编写方式：JS 形式的 `app.mjs`（`meta` + `flow(ctx)`）。没有、也不接受
@@ -156,6 +172,9 @@ npx amber run my-app --trace               # 完整运行
 
 - 敏感槽位：值建议走环境变量/本机配置；CLI 用 `--slot-file FILE`（JSON 对象）而不是 `--slot`，并在 `meta.secretSlots` 声明槽位名——result/report/stdout/dry 会掩码为 `***`。
 - `apps check` 不打开浏览器：它证明“脚本能加载、调用序列合法、信号/命令/槽位可校验”，**不证明页面状态会成立**。
+- **dry 真执行语义（消歧义）**：`apps check` / `run --dry-run` 会**真实执行 flow 脚本体**——浏览器调用被合成、不访问网络（step/arrive 恒 ok、done 不评估），但脚本自身的**文件/进程副作用会真的发生**（写文件、Node IO 都是真的）。`apps check` 输出一行提示（JSON 面 `data.dry_semantics`）。两面判据用 **`ctx.runtime.dry`**（dry/replay 恒 `true`、真跑恒 `false`）；**`epoch === 0` 不再是 dry 判据**——真跑首个观察前 epoch 同样是 0。
+- **inspect vs ctx.observe（消歧义）**：`inspect` 是**独立一次性会话**（新开浏览器、不 attach 运行会话），适合入口页/任意 URL 的离线侦察；**会话内实时看当前页**用应用内的 `ctx.observe()`（免费只读、不改页面；dry 下 `elements=[]` 只有 counts——形状校验用）。
+- **learn 录制 hint vs inspect 候选（口径差异）**：learn 接受的 `hint` 是六形状闭集且**属性白名单只认 `test`（→data-test）、`type`、`aria-label`（label 别名）**参与匹配（完整池面白名单另含 href/name/id/role/near，见 `amber schema ctx` 的 hints 节）；class/title/placeholder 永不命中。`inspect` 展示的 `hint_candidates` 是引擎经**同一个** `hintMatch` 在当页自证过的结果——它输出的就是六形状之一，可直接照抄进 `act: ctx.hint(...)` 或 learn 的 `hint`；自己从页面 HTML 里挑的属性则必须先过白名单再落笔。
 - `inspect` 只读：标题、URL、有界元素、候选 hint；不点击、不输入、不调模型。元素池视图**只含可行动元素**——写 `exists` / `text` 类完成信号前先 `inspect --probe "<selector>"`（可重复，最多 10 个；只读返回存在数与前 5 条文本，`--json` 落 `probes[]`），别用 raw HTTP 之外的口子。**任何选择器——包括本文档与上游示例给的——落笔前都要对目标页实证一次**（02 轮 C6 的教训）。
 - **P0-A inspect 观察面修复**：`--json` 的 `elements[].label` 现在是**完整**标签（不再截断成 40 字前缀；超过 200 字符时 `label_truncated:true` 只表示引擎**匹配口径** `full_label` 只取前 200，输出本身是完整的），并新增 `class_names`（有界：≤8 个、每项 ≤40 字符）与顶层 `saw_at`/`wait_ms`。`--wait-ms <n>`（默认 0，上限 5000）在 `load` 完成 + 3s 交互计数稳定轮询**之后**再等 n 毫秒，给 `setTimeout`/异步接口补渲染的元素；`saw_at` 是真正读取 DOM 的时刻（人类输出同样打印「观察时刻 …」）。既有字段语义不变，只增字段。
 - **AX 证据源（只读参照面，不进决策）**：`inspect --json` 新增 `ax` 块——浏览器自己算的可访问性树。`nodes[]` 每条 `{role,name,focusable,disabled}`（展示前 50；内部上限 200，按“可交互→有名→其余”+ 文档树序），另有 `interactive_count`、`counts_by_role`（全树 role 计数）、`interactive_counts_by_role`、`total_nodes` 与 `pool_size`/`not_in_pool`。**可交互口径**：原生可聚焦/可激活的 AX role（button/link/textbox/checkbox/radio/combobox/listbox/menuitem/tab/slider/switch/searchbox/spinbutton/summary 等；Chromium 对 `<summary>` 报 `DisclosureTriangle`）；**`option` 有意不计入（即使浏览器报 focusable=true）**——select 内部的 option 由引擎 `select` 动作承载（不是池里的独立动作目标），计入只会让 `not_in_pool` 被每个 select 的 N 个 option 灌成噪声；原始 role 仍在 `nodes`/`counts_by_role` 可见，或浏览器报告 `focusable=true`（例如 `div[tabindex=0]` 的 generic）；文档根（RootWebArea）即使 focusable 也不算，`generic/none/group` 只有 focusable 才算；静态文本叶子不进证据。`not_in_pool` 是**近似**口径：AX 可交互且有名字的节点中，name 与池元素 label 归一化后全等/互相包含算已进池，否则计未进池（空名节点不参与，看 `interactive_count`）。**边界**：AX 是“浏览器认为页面有什么语义”，不是“引擎能指向/可点击”的断言——池仍是选择器闭集，AX 不进池构成、hint 匹配、模型视图或任何动作/运行路径；取树只发生在 `inspect`（每页一次，超时 ≤3s），失败降级为 `ax.available=false`（人类输出不打印该行），其余 inspect 输出照常。
@@ -236,10 +255,10 @@ export async function flow(ctx) {
 
 | 类别 | 成员 | 说明 |
 |---|---|---|
-| 元信息 | `ctx.app` / `ctx.slots` / `ctx.runtime` / `ctx.budget` / `ctx.log(msg, data?)` | `slots` 只读；`runtime = {outDir, runId, today, epoch}`（`epoch` = 执行器状态游标只读投影，每次抽池/观察 +1，每个 `step` 重置；dry 恒 0）；`today` = CLI `--today YYYY-MM-DD` 钉住的"今天"，没钉 = 系统日期 |
+| 元信息 | `ctx.app` / `ctx.slots` / `ctx.runtime` / `ctx.budget` / `ctx.log(msg, data?)` | `slots` 只读；`runtime = {outDir, runId, today, epoch, dry}`（`epoch` = 执行器状态游标只读投影，每次抽池/观察 +1，每个 `step` 重置；dry 恒 0；`dry` = 两面判据——dry/replay `true`、真跑 `false`，见 §2 消歧义）；`today` = CLI `--today YYYY-MM-DD` 钉住的"今天"，没钉 = 系统日期 |
 | 导航 | `ctx.open(url)` / `ctx.openPage(role)` / `ctx.arrive(url, {done, desc?, id?, timeoutMs?})` | `arrive` = 纯导航 + 等信号，不做元素选择、不花模型；`hosts` 信封在起点与落地都强制 |
 | 标签页 | `ctx.tabs()` / `ctx.switchTab({index?, urlContains?, titleContains?})` | `tabs()` 免费只读列出未关闭页（`{index,url,title,active}`）；`switchTab` 显式切到**恰好一个**匹配页（计 1 个 flow step），0/多匹配 = `config_error`、信封外 = `host_not_allowed`。新标签页**不会自动跟随**，见 §4.9 |
-| 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, values?, when?, timeoutMs?, force?, forceAct?, staleRetry?, newTab? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}`；`values` 是决策步的显式值袋，见 §4.5；`newTab` 把 `target=_blank` 的新标签升为一等完成面（见 §4.9）；`timeoutMs` 是动作后信号窗口 + 整步挂钟帽（见下） |
+| 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, values?, when?, timeoutMs?, force?, forceAct?, staleRetry?, newTab? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}`；`values` 是决策步的显式值袋，见 §4.5；`newTab` 把 `target=_blank` 的新标签升为一等完成面（见 §4.9）；`timeoutMs` 是动作后信号窗口 + 整步挂钟帽（见下）。**步级 `slots` 的键仍须在 `meta.slots` 声明**（dry 校验按 `meta.slots` 口径查键，步级提供的是**值**不是新键——键没声明时 check 直接红 `value.key … is not a declared slot`） |
 | 人工步 | `ctx.manual(desc, { done, instructions?, id? })` | 见 §7；非 TTY 返回 `needs_human`，不假装有人 |
 | 观察 | `ctx.url()` / `ctx.read.{text,value,count,attr}(sel[, attr])` / `ctx.holds(signal)` / `ctx.waitFor(signal, {timeoutMs?, pollMs?})` | 只读；读不到返回 `null` / `0`；`waitFor` 轮询到 bounded deadline，返回 boolean；`url()` 首次导航前是 `"about:blank"`，别拿它当入口页判断 |
 | 只读侦察 | `ctx.observe({ max?, selector?, includeHidden?, includeFrames? })` | **免费只读**：返回当前页 DOM 侧真实存在的元素清单（`ref o0/o1…`；字段 `tag/label/role/id/name/data-test/type/href/class_names/visible/bbox/frame` + `admitted`/`why_not_admitted`/`hint_candidates`）。不计 flow step/预算、不写 outDir、**不进模型请求面**、不改页面状态（无点击/滚动/导航）。默认走当前准入面（ADMIT_SEL 投影 + `[data-js-ref]` 后缀，不新增类目）；`selector` 可用任意只读 CSS 看池外目标。`hint_candidates` 用同一个 `hintMatch` 在本次观察到的准入面元素集合上**自证**（唯一命中才给），可直接照抄进 `ctx.hint(...)`/命令 `target`——但自证范围就是本次观察集合：默认观察（未截断）时等于整个准入面；`selector` 或 `truncated:true` 时只在所选子集/前 max 行内自证，照抄前应再做一次默认观察复核；`admitted` = 匹配准入面 + 可见 + 至少一条自证 hint（**不等于**"一定在本次 120 窗口内"，窗口见 `inspect --json` 的 `window`）。最多 200 行、≤6 帧；`max` 超出/未知选项 = `config_error`；非法 CSS 返回 `{ok:false, error:"bad_selector", reason}`（不抛栈、不中断 flow）。dry = `{ok:true, dry:true, counts 全 0, elements:[]}`；replay = `{ok:true, replay:true, …}`（只还原 counts/truncated，元素明细未进 trace），trace 只记 `{call:"observe", url, counts, truncated}` |
@@ -445,7 +464,8 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
   返回（0 等待），超时不抛错、不阻断。等待毫秒数进 `state.settleMs`（策略关闭时省略；0 = 跑过但无需等待）。
   导航后第一次抽池最多付一次 `quiet_ms`（observer 安装时刻视为“刚脏”），同一页面稳态零等待。
   未知子键/越界值（`quiet_ms` 0..5000、`timeout_ms` 0..30000）在 `apps check` 就红。
-- `ctx.runtime.epoch`：执行器状态游标只读投影（每次抽池/观察 +1，每个 `step` 重置；dry=0）。
+- `ctx.runtime.epoch`：执行器状态游标只读投影（每次抽池/观察 +1，每个 `step` 重置；dry=0）。**两面判据是 `ctx.runtime.dry`**（dry/replay `true`、真跑 `false`）：`epoch===0` 不再作 dry 判据（真跑首个观察前同样是 0）。
+- **警告一等公民（eval3）**：result 顶层 `warnings_count: n`（= `warnings` 数组长度，**仅 n>0 时出现**——与 `steps_failed` 同口径：clean run 键集不变）；report.md 摘要行同步带「**警告 n**」（仅 n>0）。警告（`false_done` guard / `frames_excluded` / `pool_empty` / `suspected_async`…）是执行期诚实性证据，**不是完成判死**——有警告时先读 `warnings[]` 里的修法再决定要不要改脚本。
 - `result.warnings[]` 汇总跨步 flags（`done_preheld`/`no_state_progress`/`pool_empty`）与既有
   `suspected_async`；这些是**证据**，不改 done 语言、不影响完成真值。（W1 验收移除了一个
   控制流上不可达的串扰 flag——r8 跨城串扰签名由 `done_preheld` + `no_state_progress` 覆盖。）
@@ -596,7 +616,7 @@ const sw = await ctx.switchTab({ urlContains: "help" });  // 恰好一个匹配�
   且不访问浏览器；按 dry 纪律**只验声明形状**（未知键 / 空 match / 非法值仍结构化 `config_error`），
   `switchTab` 对合法声明**恒返回合成成功**（`{ok:true,index:0,url:"(dry)",title:"(dry)"}`）——match 是否
   命中真实标签是观察事实，dry 不据此判红（与 `step` 恒 ok、done 信号不评估同一条纪律），因此**不需要**
-  `if (ctx.runtime.runId !== "(dry)")` 守卫；只有依赖真实标签列表的**数据驱动断言/分支**才需要 dry 守卫
+  `if (ctx.runtime.dry)` 守卫（dry/replay 恒 true；旧写法 `runId !== "(dry)"` 仍可用，但那只是 CLI 惯例值不是契约）；只有依赖真实标签列表的**数据驱动断言/分支**才需要 dry 守卫
   （与数据驱动断言同一纪律）。
 - **F2 `newTab` opts：`_blank` 新标签的一等完成面**（取代"故意失败 → ctx.tabs → switchTab"绕法）。
   `target="_blank"` 链接点击后**主页 URL 不变**，URL 型 done 永不成立 → 引擎在原页重试，实测连点
@@ -749,7 +769,7 @@ export async function flow(ctx) {
   这类属性选择器能定位到单元格，但读到的仍是它的文本：图标型元素（aria-label 有值、无可见文本）
   的字段恒为空（R11 实测）。属性值单独用 `ctx.read.attr(selector, attr)` 取（不存在 → null）。
 - `ctx.rows({row, fields})` 是 v1 明确**不开放**的新语法：调用给结构化 `config_error` 指向 `extract(name)`。
-- dry 模式下 `extract` 返回 `[]`、`read.attr` 返回 `null`、`waitFor` 立即返回 `true`（没有页面）——脚本在 dry 期不要依赖观察值；**一切基于观察值的 `ctx.fail`/分支/断言都必须用 `ctx.runtime.runId === "(dry)"` 守卫**：`apps check` 与 `--dry-run` 会真跑 flow，没有守卫的数据驱动停会把合法脚本判成 problems（03-D1 配方；需要严格断言数据时，只在真实运行里停）。**dry 模拟面全表**（06-B，`createDryCtx` 实证）：`step`/`arrive`/`run`/`manual` 恒返回 `ok:true` 且 **`when` 不评估**（stopCode 恒空 ⇒ `precondition_skipped`/末页 exhausted 这类分支在 dry 结构性不可预演）；`read.*` 返 null/0；`collect` 返 `{rows:[], coverage:{rounds:0,rowsSeen:0,addedLastRound:0}, stopReason:"dry"}`；`url()` 是最近声明值；步预算照常计数。**吞错有留痕**（S3）：dry 的 `validateXxxRequest`（scrollList/expand/setRange/collect）抛错前先落 `validation_error` 事件——脚本 `try/catch` 吞掉 `config_error`，`apps check` 仍判 FAIL 并输出「脚本吞掉了配置错误：<call> <message>」；源码调用点与 dry 事件数的差额只打警告。结论：**dry 验调用序列与声明形状，不验分支覆盖**——check VALID ≠ 脚本每条分支都被走过，守卫分支的正确性只有真实运行能证明。**循环特别警告**（09-B，r09-retry-demo 实录）：`step` 模拟恒 `ok:true` ⇒ 以"步骤成功"为 break 条件的 `while/for` 会在 dry **假成功早退**，随后未守卫的终局 `ctx.fail` 把 dry 判红（报错自曝 `ok:true` yet exhausted 的矛盾即此坑）——dry 预演只到声明面为止，循环语义一律真实运行验；各分支的**声明校验**可用 `run --dry --slot <k>=<v>` 逐分支触达（08 实证，不占真实额度）。
+- dry 模式下 `extract` 返回 `[]`、`read.attr` 返回 `null`、`waitFor` 立即返回 `true`（没有页面）——脚本在 dry 期不要依赖观察值；**一切基于观察值的 `ctx.fail`/分支/断言都必须用 `ctx.runtime.dry` 守卫**（dry/replay 恒 `true`、真跑恒 `false`；`epoch===0` 不作判据——见 §2 消歧义）：`apps check` 与 `--dry-run` 会真跑 flow，没有守卫的数据驱动停会把合法脚本判成 problems（03-D1 配方；需要严格断言数据时，只在真实运行里停）。**dry 模拟面全表**（06-B，`createDryCtx` 实证）：`step`/`arrive`/`run`/`manual` 恒返回 `ok:true` 且 **`when` 不评估**（stopCode 恒空 ⇒ `precondition_skipped`/末页 exhausted 这类分支在 dry 结构性不可预演）；`read.*` 返 null/0；`collect` 返 `{rows:[], coverage:{rounds:0,rowsSeen:0,addedLastRound:0}, stopReason:"dry"}`；`url()` 是最近声明值；步预算照常计数。**吞错有留痕**（S3）：dry 的 `validateXxxRequest`（scrollList/expand/setRange/collect）抛错前先落 `validation_error` 事件——脚本 `try/catch` 吞掉 `config_error`，`apps check` 仍判 FAIL 并输出「脚本吞掉了配置错误：<call> <message>」；源码调用点与 dry 事件数的差额只打警告。结论：**dry 验调用序列与声明形状，不验分支覆盖**——check VALID ≠ 脚本每条分支都被走过，守卫分支的正确性只有真实运行能证明。**循环特别警告**（09-B，r09-retry-demo 实录）：`step` 模拟恒 `ok:true` ⇒ 以"步骤成功"为 break 条件的 `while/for` 会在 dry **假成功早退**，随后未守卫的终局 `ctx.fail` 把 dry 判红（报错自曝 `ok:true` yet exhausted 的矛盾即此坑）——dry 预演只到声明面为止，循环语义一律真实运行验；各分支的**声明校验**可用 `run --dry --slot <k>=<v>` 逐分支触达（08 实证，不占真实额度）。
 - 观察类调用（text/value/count/attr/extract）都进 trace，所以带读取的脚本可以 `--replay`。进程步（`run`/`dangerous`）自 08-C 修复起同样进 `step_traces`（成功步无 stop_code、attempts/exit code 在嵌套 result 里）。
 
 ### 池文本 ≠ 页面 innerText（R11/R12 实证）
@@ -798,7 +818,13 @@ export async function flow(ctx) {
 - 工具信号不成立时，工具步的 `reason`/trace/报告带**结构化诊断**：`json_path_equals` 给出 path（含归一结果）、实际类型（object/array/string/number/boolean/null/undefined）与 ≤120 字符值摘要；退出码/stdout/stderr 类叶子给期望与实测。大对象只截摘要，敏感值沿用产物面既有 `scrubSecrets` 掩码。
 - 组合器可嵌套。**不要用“看起来完成了”代替证据**：`ctx.step` 返回的 `ok` 就是 done 信号是否成立。
 - **弱 done（P0-E）**：`done`/`when` 顶层是否定式（`not(...)`）且否定之外**没有正向锚**（`exists`/`url`/`text` 等事实型谓词；`not(...)` 内部的事实不算锚）→ `apps check`/dry 打一行 `weak_done` warning（仍 VALID、exit 0）。否定式 done 会被**无关导航蹭成立**（R11 实录：`not(existsText(body,"8240家昆明酒店"))` 误入 passport 登录页照样成立）。修法：`all_of(judge.not(...), 正向锚)`，或配 `ctx.judge.loginWall()` 做检测底座。
-- **`ctx.judge.loginWall()` 预设（P0-E）**：登录墙事实信号（`any_of`：URL 登录特征 `/login`|`/signin`|`/passport`|`/sso/`|`/auth`|`/verify`… 词边界不误报 `author`/`verified`，或 title/h1/h2 登录文案）。**诚实检测用**：给否定式 done 配正向锚、做步级 guard 的事实底座——不是绕过登录的工具。
+- **`ctx.judge.value(sel, v)` 的 React 警示（消歧义）**：`css_value_equals` 读的是 `inputValue()`——**React 受控输入**上它的 readback 不可靠（组件状态由 React 管理，DOM value 不回写/回写时机不定，done 可能永不成立）。受控输入的完成事实改用 `judge.text` / `judge.exists(..., {visible:true})` / JS 可见事实（如面板出现、列表更新）；`value` 只用于**原生不受控**的 input（§6.1 的录制值回放是原生 input 场景）。
+- **`ctx.judge.loginWall()` 预设（P0-E）**：登录墙事实信号（`any_of`：URL 登录特征 `/login`|`/signin`|`/passport`|`/sso/`|`/auth`|`/verify`… 词边界不误报 `author`/`verified`，或 title/h1/h2 登录文案）。**诚实检测用**：给否定式 done 配正向锚、做步级 guard 的事实底座——不是绕过登录的工具。签名 `loginWall(): DomSignal`（无参）；与否定式 done 组合的可直接抄写法：
+  ```js
+  done: ctx.judge.all(not(ctx.judge.loginWall()), ctx.judge.exists("#orders", { visible: true }))
+  // all/any 是变参不收数组；not 单参；<正向锚> 必须是动作后才成立的事实
+  ```
+  步级 `false_done` guard（`meta.policy.done_guard`，缺省 `"warn"`）的 warning 会原样给这个构造器（eval3 曝光面）。
 - **可用的 done = 「动作前不成立、动作后成立」**（判据，05/06 轮案例实证）：动作前已成立的信号（如任何页都真的 `exists("h1")`）在验证面**零贡献**——这一步的绿完全外包给 goal 语义与模型恰好点对，落点再意外也判绿（r06 `wide-done-sample` 实录）。守卫/到达/翻页步尤其警惕；用位置类选择器（`nth-child`/`nth-of-type`）前先实证**动作前命中数为 0**——站点数据可能自带"第 11 条"（r05 实证 `div.quote:nth-of-type(11)` 未滚动已真）。翻页类 done 优先用 URL 参数片段或**下一页独有内容锚**，别用两页共有的 h1/容器。
 
 
@@ -945,7 +971,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `arrive_signal_not_held` | `ctx.arrive` 导航完成但 done 信号在超时内未成立 |
 | `precondition_skipped` | `when` 不成立，这一步没有执行（`ok:false`，trace 状态 `skipped`；同样计一次执行预算）——脚本按 stopCode 分支继续，不是失败 |
 | `page_not_ready` | 元素池为空，页面还没稳定；等页面 ready，或修 done 信号 |
-| `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标。`meta.policy.act_hint:"strict"` 下 act hint 解析链全落空也用它（reason 显式写 `act_hint="strict"`，**不再回退模型自由选**；缺省 `widen` 才回退） |
+| `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标。`meta.policy.act_hint:"strict"` 下 act hint 解析链全落空也用它（reason 显式写 `act_hint="strict"`，**不再回退模型自由选**；缺省 `widen` 才回退）。声明目标（act hint/命令）在池+ADMIT+FW8 全落空且**未声明** `target_resolution` 时，reason 追加一行 DRF 提示（自绘控件可声明 `meta.policy.target_resolution:"declared"` 走 attr/文本精确匹配）；**已声明** `"declared"` 的同场景走 DRF、不再提示（避免噪音） |
 | `target_ambiguous` | 目标命中多个不同候选；收窄 hint。`target_resolution:"declared"` 下 DRF 的两个可见文本/属性匹配同样报它（候选 tag/文本/frame/visible 在 reason 与 `skipped_actions`） |
 | `action_unsupported` | 目标存在但声明的动作 op 不在元素能力面内；换动作或换目标。DRF 首版只允许 `click`/`scroll`/`hover`——对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` 也报它（reason 明说首版限制） |
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |
@@ -958,6 +984,14 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `dangerous` / `declined` / `dry-run-failed` / `tool-unavailable` / `needs_value` | 工具步的显式拒绝类别（`REFUSAL_LABELS` 有一句话解释 + 怎么补救） |
 | `trace_mismatch` | 重放时脚本与轨迹的调用序列/版本/输入不一致——重新跑，不要重放 |
 | 其它（如 `low_confidence`、`max_steps`、`blocked`） | 执行器结构化停因，原样透出 |
+
+**停因自带能力提示（eval3 曝光面改造；仅追加一行 reason、成功路径零改动）**——对应能力已经存在，停因当场点名修法，不用再去翻文档：
+
+- `target_not_found`（声明目标池+ADMIT+FW8 全落空且未声明 `target_resolution`）→ 提示声明 `meta.policy.target_resolution:"declared"`（DRF：attr/文本精确匹配+唯一可见+hit-test）；
+- `no_progress`（本步动作没改当前页 URL 但 **context 标签数增加了**）→ 提示用 step opts `newTab:{urlContains}` 自动采用并去重（消 `_blank` 重复点击）；
+- `false_done` 警告（warn/fail 两档同文案）→ 给出可直接抄的构造器 `done: ctx.judge.all(not(ctx.judge.loginWall()), <正向锚>)`；
+- `step_timeout` reason → 点明 `timeoutMs` 是**整步挂钟帽**（settle/reobserve/升级/动作共享），不是逐动作超时；
+- `pool_empty` 警告与 `low_confidence` 停因 → 提示用 `ctx.observe()` 在会话内看准入面与 `why_not_admitted`。
 
 **停手规则**（层 3 出口；唯一出处 `src/engine/planning-playbook.ts`，失败即随 `next` 输出）：同一停因按 next 修正后重跑仍出现 2 次以上 → 停手：如实上报 stopCode / reason / 已试过的修正，等待人或上游决策；不要再自行迭代脚本或重试。
 
