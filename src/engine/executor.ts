@@ -370,28 +370,37 @@ export interface ActionabilityDetail {
 }
 
 /**
- * task-11（B3，评审 #8）：限速/降频判读证据（probe3 现场标定：单会话观察调用 202→15、
- * 8 秒跑完全程、芯片 declared_hidden）。全部是**已有观测的记账**（池大小/失败嗅探/会话时钟），
- * 不新增页面往返（唯一新增往返 = 失败路径的一次只读 sniff，U3 同款底座）。
+ * task-11（B3）/ task-16（B3+）：限速/降频判读证据——**两个面的并集，缺字段省略纪律**
+ * （每个面只落自己观测到的字段）。全部是已有观测的记账；唯一新增页面往返 = 失败路径的
+ * 一次只读 sniff（U3 同款底座）。
+ *   - step 侧（B3；probe3 现场标定：单会话观察调用 202→15、8 秒跑完、芯片 declared_hidden）：
+ *     池面字段 pool_size / pool_size_session_high / admitted / session_elapsed_ms / declared_hidden。
+ *   - arrive 侧（B3+；纯导航不走执行器、无池面）：到达面字段 url / in_arrive_first / in_arrive_last，
+ *     峰值基线 body_text_peak 来自 step 侧失败嗅探的记账（经 sessionBodyTextPeak() 读出）。
  */
 export interface ThrottleSuspect {
   evidence: {
-    /** 本步池大小。 */
-    pool_size: number;
-    /** 本会话（middleware 实例）的池高峰基线。 */
-    pool_size_session_high: number;
-    /** 失败嗅探：正文长度（chars）。 */
+    /** 失败嗅探：正文长度（chars）——两面共有。 */
     body_text: number;
-    /** 上一次失败嗅探的正文长度（首次失败没有前值，缺省省略）。 */
+    /** B3：上一次失败嗅探的正文长度（首次失败没有前值，缺省省略）。 */
     body_text_prev?: number;
-    /** 失败嗅探：可见 ADMIT_SEL 交互计数。 */
-    admitted: number;
+    /** B3：本步池大小 / 会话池高峰基线（arrive 侧无池面，缺省省略）。 */
+    pool_size?: number;
+    pool_size_session_high?: number;
+    /** B3：可见 ADMIT_SEL 交互计数及其前值（arrive 侧缺省省略）。 */
+    admitted?: number;
     admitted_prev?: number;
+    /** 失败嗅探时的 readyState——两面共有。 */
     ready_state: string;
-    /** 本会话首次抽池以来的毫秒数（「8 秒跑完全程」特征的记账）。 */
-    session_elapsed_ms: number;
-    /** 失败现场的 declared_hidden 事实（芯片/目标全隐藏——限速降频的典型并发特征）。 */
+    /** B3：本会话首次抽池以来的毫秒数（「8 秒跑完全程」特征的记账；arrive 侧缺省省略）。 */
+    session_elapsed_ms?: number;
+    /** B3：失败现场的 declared_hidden 事实（芯片/目标全隐藏——限速降频的典型并发特征）。 */
     declared_hidden?: { target: string; hidden: number; total: number };
+    /** B3+ 到达面：arrive 落地 URL（step 侧的 URL 在行字段上，缺省省略）。 */
+    url?: string;
+    /** B3+ 到达面：done 轮询等待期正文读数的首/末（捕捉等待期间塌缩；缺省省略）。 */
+    in_arrive_first?: number;
+    in_arrive_last?: number;
   };
 }
 
@@ -413,7 +422,11 @@ export interface RunReport {
   audit: AuditVerdictLike;
   /** 结构化诊断：失败时不要求 Agent 再读源码/自己探页面。 */
   diagnostics?: {
-    pool_size: number;
+    /**
+     * task-16（B3+）起改为可选：step 侧诊断恒带池大小；arrive 侧诊断（到达面子集）没有池，
+     * 只带 throttle_suspect（限速判读证据）。
+     */
+    pool_size?: number;
     waited_ms?: number;
     frame_origins?: string[];
     target?: string | null;
@@ -1738,6 +1751,13 @@ export class BrowserMiddleware {
   private _sessionFirstPoolTs = 0;
   /** task-11（B3）：上一次失败路径嗅探（正文/可交互基线；只在失败路径更新）。 */
   private _lastFailSniff: { body_text: number; admitted: number } | null = null;
+  /** task-16（B3+）：会话正文峰值（每次失败嗅探记账；arrive 侧限速判据的基线来源）。 */
+  private _bodyTextPeak = 0;
+
+  /** task-16（B3+）：arrive 侧限速判据读的会话正文峰值（零参数只读）。 */
+  sessionBodyTextPeak(): number {
+    return this._bodyTextPeak;
+  }
   /**
    * P0-B：act_hint:"strict"（缺省 false = 今天）。为 true 时，声明目标解析链
    * （池 hintMatch → ADMIT 回捞 → FW8 身份回捞 → rules-only 宽扫）全部未命中后
@@ -6059,7 +6079,11 @@ export class BrowserMiddleware {
           + "——疑似站点限速/降频/风控分批。已知处置：冷却后重试、降频（拉大 meta.pace）、分批跑，不绕过反爬；"
           + "证据见 step_traces[].result.diagnostics.throttle_suspect");
       }
-      // 失败嗅探即基线（无论是否触发）：下一次失败对比用它。
+      // 失败嗅探即基线（无论是否触发）：下一次失败对比用它。正文峰值同步记账
+      // （task-16/B3+：arrive 侧限速判据的基线来源——仍只在失败路径更新，成功路径零成本）。
+      if (failSniff !== null && failSniff.body_text > this._bodyTextPeak) {
+        this._bodyTextPeak = failSniff.body_text;
+      }
       this._lastFailSniff = failSniff === null
         ? null : { body_text: failSniff.body_text, admitted: failSniff.admitted };
     }

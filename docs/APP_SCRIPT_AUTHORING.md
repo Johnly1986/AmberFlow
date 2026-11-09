@@ -1013,6 +1013,13 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 （拉大 `meta.pace`）、分批跑**，**不绕过**反爬（不伪造指纹、不轮换代理、不规避风控/速率限制）。字段缺失
 = 该失败没有骤降特征，按常规停因排查。
 
+**到达面口径（B3+ `throttle_suspect` on arrive）**：`ctx.arrive` 失败（`arrive_signal_not_held`）且观测到
+正文塌缩时，该 arrive 的 warning/diagnostics 带同款 `throttle_suspect`（到达面子集：`body_text` vs
+`body_text_peak`——峰值来自本会话 step 侧失败嗅探的记账、`ready_state`、`in_arrive_first/last` 等待期
+首末读数）。**诚实沉默边界**：本会话首个失败就是 arrive（无 step 失败垫峰值基线）时运行时不判——该形态
+（arrive 面长时间不渲染）的签名已由知识层 `site-facts/google-maps.json`（rate-limit-signature）承载，
+两层分工：运行时判"有基线可比的骤降"，知识层记"历史形态签名"；成功路径零改动（held=true 不嗅探无字段）。
+
 ## 11. 边界（当前版本明确不做）
 
 - **脚本是进程内任意代码**：信任边界 = “用户作用域 + 不放仓库”；结果里带 `script_sha256`。沙箱未做。

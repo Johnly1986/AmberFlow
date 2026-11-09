@@ -18,7 +18,9 @@ import {
   type RunReport, type SkippedAction, type StepStateRecord,
 } from "../engine/executor.ts";
 import { validateCommands } from "../engine/actions.ts";
-import { firstOf, framesOf, locatorAnyFrame, urlOf, extractElements, type PageLike } from "../engine/extraction.ts";
+import { firstOf, framesOf, locatorAnyFrame, urlOf, extractElements, poolSniff, type PageLike } from "../engine/extraction.ts";
+// task-16（B3+）：arrive 侧限速判据的嗅探面选择器（与执行器同口径的准入面）。
+import { admitSelectorWithJsFor } from "../engine/surface.ts";
 // C2 waitForTarget：hint 语义核对与规则面同一份语法（hintCandidates → hintMatch 单一出处）。
 import { hintCandidates } from "../engine/rules.ts";
 import { observePage, validateObserveOptions, type ObserveOptions, type ObserveResult } from "../engine/observe.ts";
@@ -1804,9 +1806,14 @@ export function createCtx(deps: CtxDeps): Ctx {
       let held = false;
       let waitErr: unknown;
       let hostViolation: string | null = null;
+      // task-16（B3+）：in-arrive 塌缩读数——从首个非 held 轮次**之后**才开始（首个轮次即
+      // held = 零新增读取），只留首/末两个读数（有界内存）。成功路径零新增。
+      let seenNonHeld = false;
+      let inArriveFirst: number | null = null;
+      let inArriveLast: number | null = null;
       try {
         const p = await page();
-        const pAny = p as unknown as { waitForTimeout?(ms: number): Promise<void> };
+        const pAny = p as unknown as { waitForTimeout?(ms: number): Promise<void>; evaluate(script: string): Promise<unknown> };
         do {
           const landed = urlOf(p);
           if (landed) {
@@ -1817,6 +1824,16 @@ export function createCtx(deps: CtxDeps): Ctx {
           try {
             if (await checkSignal(p as never, req.done as never)) { held = true; break; }
           } catch (e) { waitErr = e; break; }        // 坏信号 = 配置错误，别轮询到超时
+          if (!seenNonHeld) seenNonHeld = true;
+          else {
+            try {
+              const bl = Number(await pAny.evaluate("document.body ? document.body.innerText.length : 0"));
+              if (Number.isFinite(bl)) {
+                if (inArriveFirst === null) inArriveFirst = bl;
+                inArriveLast = bl;
+              }
+            } catch { /* 观察让位事实 */ }
+          }
           if (typeof pAny.waitForTimeout === "function") await pAny.waitForTimeout(200);
           else await new Promise((r) => setTimeout(r, 200));
         } while (Date.now() < deadline);
@@ -1830,6 +1847,39 @@ export function createCtx(deps: CtxDeps): Ctx {
             + (waitErr instanceof Error ? ` (${waitErr.message})` : "");
       // 06-D：与 ctx.step 记录面同形——成功也留"到达依据"文案，嵌套 result 带 page_state；
       // 不为 arrive 伪造 method/hows（它没有决策流水，差异是语义不是缺陷）。
+      // task-16（B3+）：arrive 失败路径的限速判据（与 B3 step 侧同构：峰值基线 + 骤降比例；
+      // 成功路径零改动——held=true 不嗅探/无字段/无 warning）。基线 = executor 会话正文峰值
+      // （B3 失败嗅探记账，零成功路径成本）。无峰值基线（本会话首个失败即 arrive）→ 如实
+      // 不判：字段缺席，判读走 docs §10；该签名由知识层 site-facts 承载（两层分工）。
+      let throttle: {
+        evidence: {
+          body_text: number; body_text_peak: number; ready_state: string;
+          elapsed_ms: number; url: string; in_arrive_first?: number; in_arrive_last?: number;
+        };
+      } | null = null;
+      if (!held && hostViolation === null && waitErr === undefined) {
+        try {
+          const p = await page();
+          const s = await poolSniff(p as never, admitSelectorWithJsFor(deps.surfacePolicy));
+          const peak = deps.mw().sessionBodyTextPeak();
+          const crossCollapse = peak >= 2000 && s.body_text * 4 <= peak;
+          const inArriveCollapse = inArriveFirst !== null && inArriveFirst >= 2000
+            && inArriveLast !== null && inArriveLast * 4 <= inArriveFirst;
+          if (crossCollapse || inArriveCollapse) {
+            throttle = {
+              evidence: {
+                body_text: s.body_text,
+                body_text_peak: peak,
+                ready_state: String(s.ready_state ?? "unknown"),
+                elapsed_ms: Date.now() - started,
+                url: currentUrl,
+                ...(inArriveFirst !== null ? { in_arrive_first: inArriveFirst } : {}),
+                ...(inArriveLast !== null ? { in_arrive_last: inArriveLast } : {}),
+              },
+            };
+          }
+        } catch { /* 观察让位事实 */ }
+      }
       const reason = held ? "arrive signal held" : failReason;
       let arrivedState: ReturnType<typeof pageState.update> | null = null;
       if (held) {
@@ -1840,6 +1890,14 @@ export function createCtx(deps: CtxDeps): Ctx {
         ...(req.id === undefined ? {} : { id: req.id }),
         ...(stopCode === undefined ? {} : { stopCode }),
         ...(reason === undefined ? {} : { reason }),
+        // task-16（B3+）：限速判据留痕（仅组合判据命中时出现；不新增 stopCode）。
+        ...(throttle !== null ? { diagnostics: { throttle_suspect: throttle } } : {}),
+        ...(throttle !== null ? {
+          warnings: [`throttle_suspect: arrive 信号不成立且观测到正文塌缩`
+            + `（峰值 ${throttle.evidence.body_text_peak} → 当前 ${throttle.evidence.body_text}）`
+            + "——疑似站点限速/降频/风控分批。已知处置：冷却后重试、降频（拉大 meta.pace）、分批跑，"
+            + "不绕过反爬；证据见 diagnostics.throttle_suspect"],
+        } : {}),
         evidence: { url: currentUrl, attempts: 1, elapsedMs: Date.now() - started },
       };
       pushEvent(trace, {
@@ -1848,6 +1906,7 @@ export function createCtx(deps: CtxDeps): Ctx {
         ...(stopCode === undefined ? {} : { stop_code: stopCode }),
         result: { ok: held, ...(stopCode === undefined ? {} : { stop_code: stopCode }),
           ...(reason === undefined ? {} : { reason }), elapsed_ms: result.evidence.elapsedMs,
+          ...(throttle !== null ? { diagnostics: { throttle_suspect: throttle } } : {}),
           ...(arrivedState === null ? {} : {
             page_state: {
               page_id: arrivedState.pageId,
