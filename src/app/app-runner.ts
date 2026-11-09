@@ -2733,6 +2733,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       + `${(() => {
         const free = trace.events.filter((e) =>
           e.call === "read" || e.call === "extract" || e.call === "holds" || e.call === "waitFor"
+          || e.call === "waitForTarget"
           || e.call === "observe"
           || (e.call === "tab" && e.action === "list")).length;
         const navs = trace.events.filter((e) => e.call === "open" || e.call === "openPage").length;

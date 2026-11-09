@@ -286,6 +286,13 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       const ev = nextEvent("waitFor");
       return ev.ok === true;
     },
+    // C2：重放按 (call, desc=hint) 对齐事件；found/count 从录制的事件原样还原。
+    waitForTarget: async (hint, opts) => {
+      void opts;
+      const ev = nextEvent("waitForTarget", { desc: hint });
+      const res = isObj(ev.result) ? ev.result : {};
+      return { found: ev.ok === true, count: Number(res["count"] ?? 0) };
+    },
     source: async (name, opts) => {
       void opts;
       const ev = nextEvent("source", { desc: name });

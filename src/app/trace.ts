@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 export type TraceCall =
-  | "open" | "openPage" | "arrive" | "step" | "read" | "extract" | "holds" | "waitFor" | "source"
+  | "open" | "openPage" | "arrive" | "step" | "read" | "extract" | "holds" | "waitFor" | "waitForTarget" | "source"
   | "run" | "dangerous" | "manual" | "done" | "log"
   // A3 列表/范围原语：各计 1 flow step；内部 click/滚动不产生独立事件。
   | "scrollList" | "expand" | "setRange"

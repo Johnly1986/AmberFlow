@@ -18,7 +18,9 @@ import {
   type RunReport, type SkippedAction, type StepStateRecord,
 } from "../engine/executor.ts";
 import { validateCommands } from "../engine/actions.ts";
-import { firstOf, framesOf, locatorAnyFrame, urlOf, type PageLike } from "../engine/extraction.ts";
+import { firstOf, framesOf, locatorAnyFrame, urlOf, extractElements, type PageLike } from "../engine/extraction.ts";
+// C2 waitForTarget：hint 语义核对与规则面同一份语法（hintCandidates → hintMatch 单一出处）。
+import { hintCandidates } from "../engine/rules.ts";
 import { observePage, validateObserveOptions, type ObserveOptions, type ObserveResult } from "../engine/observe.ts";
 import { checkSignal } from "../engine/signals.ts";
 import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, runSource, ValueError } from "../data/datasource.ts";
@@ -519,6 +521,17 @@ export interface Ctx {
     Promise<Array<Record<string, string>>>;
   holds(sig: DomSignal): Promise<boolean>;
   waitFor(sig: DomSignal, opts?: { timeoutMs?: number; pollMs?: number }): Promise<boolean>;
+  /**
+   * C2（评审 #9 合并形态）：等一个 hint 语义目标**可命中**——observe + hintMatch 轮询。
+   * 免费只读（与 `waitFor` 同类：不计预算、不进模型请求面、不改页面状态）。覆盖两类现场：
+   * 水合期芯片「声明了但还没进池」（hidden 元素不进可见准入池 → count 0，可见后才命中）与
+   * 跨源 iframe 帧就绪（帧出现后元素才进池）。返回 `{found, count}`——**不假装**：超时如实
+   * `found:false`，脚本据此分支。dry 面合成 `{found:false, count:0, dry:true}`（不真评）——
+   * 与 `waitFor` 的 dry「立即 true」口径不同：那是"信号已成立"的模拟，这里没有可模拟的
+   * 命中事实，如实 not found（差异写进 docs §4）。
+   */
+  waitForTarget(hint: string, opts?: { visible?: boolean; timeoutMs?: number; pollMs?: number }):
+    Promise<{ found: boolean; count: number; dry?: boolean }>;
   source(name: string, opts?: { dates?: string | string[] }): Promise<SourceObservationView>;
   readonly data: {
     min<T extends Record<string, unknown>>(rows: T[], by: string): T | null;
@@ -2244,6 +2257,42 @@ export function createCtx(deps: CtxDeps): Ctx {
         result: { timeout_ms: timeoutMs, poll_ms: pollMs, elapsed_ms: Date.now() - started },
       });
       return held;
+    },
+    // C2：observe + hintMatch 轮询（免费只读；池 = 可见准入面，hidden 期元素不进池 →
+    // count 0 → 可见后才命中，visible 语义由此成立）。返回 {found, count}，超时如实 false。
+    waitForTarget: async (hint, opts = {}) => {
+      if (typeof hint !== "string" || !hint.trim()) {
+        throw new StopError("config_error", "ctx.waitForTarget: hint must be a non-empty string");
+      }
+      if (opts.visible !== undefined && typeof opts.visible !== "boolean") {
+        throw new StopError("config_error", "ctx.waitForTarget: visible must be a boolean");
+      }
+      const timeoutMs = Math.max(0, Number(opts.timeoutMs ?? 15_000));
+      const pollMs = Math.max(1, Number(opts.pollMs ?? 200));
+      const started = Date.now();
+      const deadline = started + timeoutMs;
+      let count = 0;
+      let found = false;
+      // 轮询语义与 ctx.waitFor 同款：至少查一次；最后一次 sleep 裁到 deadline。
+      while (true) {
+        const p = await page();
+        const elems = await extractElements(p as never, true, 120, { ...(hosts ? { hosts } : {}) });
+        const cand = hintCandidates(hint, elems);
+        count = cand === null ? 0 : cand.refs.length;
+        if (count > 0) { found = true; break; }
+        const now = Date.now();
+        if (now >= deadline) break;
+        await new Promise((r) => setTimeout(r, Math.max(1, Math.min(pollMs, deadline - now))));
+      }
+      if (found) pageState.update(await page() as PageLike, "settled");
+      pushEvent(trace, {
+        call: "waitForTarget", desc: hint, ok: found,
+        result: {
+          hint, visible: opts.visible === true, timeout_ms: timeoutMs, poll_ms: pollMs,
+          count, elapsed_ms: Date.now() - started,
+        },
+      });
+      return { found, count };
     },
     source: async (name, sourceOpts = {}) => {
       if (deps.allowSources === false) {

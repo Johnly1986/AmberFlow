@@ -467,6 +467,24 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       pushEvent(trace, { call: "waitFor", ok: true, result: { dry: true, timeout_ms: timeoutMs, poll_ms: pollMs } });
       return true;
     },
+    // C2：dry 合成 {found:false, dry:true}——dry 没有页面，不假装命中。与 waitFor 的 dry
+    // 「立即 true」口径不同：那是"信号已成立"的模拟，这里没有可模拟的命中事实，如实 not found
+    // （差异写进 docs §4）。声明形状（hint 非空/visible 布尔）仍在这里红——dry 与真实面同文案。
+    waitForTarget: async (hint, opts = {}) => {
+      if (typeof hint !== "string" || !hint.trim()) {
+        throw new StopError("config_error", "ctx.waitForTarget: hint must be a non-empty string");
+      }
+      if (opts.visible !== undefined && typeof opts.visible !== "boolean") {
+        throw new StopError("config_error", "ctx.waitForTarget: visible must be a boolean");
+      }
+      const timeoutMs = Math.max(0, Number(opts.timeoutMs ?? 15_000));
+      const pollMs = Math.max(1, Number(opts.pollMs ?? 200));
+      pushEvent(trace, {
+        call: "waitForTarget", desc: hint, ok: false,
+        result: { dry: true, hint, visible: opts.visible === true, timeout_ms: timeoutMs, poll_ms: pollMs, count: 0 },
+      });
+      return { found: false, count: 0, dry: true };
+    },
     source: async (name, sourceOpts = {}) => {
       if (typeof name !== "string" || !name.trim()) throw new StopError("config_error", "ctx.source: name must be a non-empty string");
       try {
