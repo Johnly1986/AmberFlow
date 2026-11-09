@@ -76,5 +76,7 @@ export function writeSummary(run: RunPaths, suite: SuiteOutcome): void {
     if (c.reason) lines.push(`|  |  |  | ${c.reason.replace(/\|/g, "\\|")} |  |  |  |`);
   }
   lines.push("", "证据是本轮原始观察；不要把它提交回仓库，也不要把它当成下一次运行的期望值。", "");
-  fs.writeFileSync(path.join(run.dir, "report.md"), lines.join("\n"), "utf-8");
+  // 人读的 md 带 UTF-8 BOM（task-6-rider，与 app-runner 的 report.md 同口径）：PS5.1 的
+  // Get-Content 对无 BOM 文件按 ANSI 读 → 中文花屏。JSON（上一行 result.json）保持无 BOM。
+  fs.writeFileSync(path.join(run.dir, "report.md"), "\uFEFF" + lines.join("\n"), "utf-8");
 }
