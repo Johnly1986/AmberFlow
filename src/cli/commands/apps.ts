@@ -4,6 +4,10 @@ import { parseArgs } from "node:util";
 import { APPS_DIR, listAppDirs, type AppDirEntry } from "../../app/app-pack.ts";
 import { validateApp } from "../../app/cross-ref.ts";
 import { dryRunFlow, loadScriptApp, scriptDisplayPath } from "../../app/app-script.ts";
+// task-10（B2）：hint 语义 lint——声明层的静态提醒（stderr warnings 通道；不进 problems、
+// 不改 VALID/exit；clean 应用零输出）。只消费 hint 形状位（见 hint-lint.ts 范围护栏）。
+import { lintHintSemantics, renderHintLintLines } from "../../app/hint-lint.ts";
+import { scanDeclarations } from "../../app/declaration-scan.ts";
 import { PLAN_PLAYBOOK_TEXT } from "../../engine/planning-playbook.ts";
 import { userAppsDir } from "../../app/amberflow-home.ts";
 import type { CliContext } from "../context.ts";
@@ -482,6 +486,13 @@ async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
       const problems = validateApp(loaded.pack, { allowEmptyJourney: true });
       const dry = await dryRunFlow(loaded, { slots });
       problems.push(...dry.problems);
+      // task-10（B2）：hint 语义 lint（stderr warnings 通道，与 weak_done 同款——JSON/人读
+      // 两个面都可见、都不改 stdout/exit）。无三类形状的应用零输出（clean 逐字节不变）。
+      for (const line of renderHintLintLines(
+        lintHintSemantics(scanDeclarations(loaded.sourceText), path.basename(loaded.scriptPath)),
+      )) {
+        console.error(line);
+      }
       // 导航纪律声明面（仅声明时出现 = 缺省产物逐字节不变）：check 的 JSON 与人读输出
       // 都要点出"这一跑受 entry-only 约束"，不然闸门拦了也看不出是哪条声明在起作用。
       const navigation = (loaded.pack as unknown as Record<string, unknown>)["policy"] !== undefined

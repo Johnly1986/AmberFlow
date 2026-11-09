@@ -182,8 +182,10 @@ export interface HintCandidates {
  * DOM 的 aria-label 在提取期已并进 label（labelOf 优先读 aria-label），池字段模型里没有
  * 独立的 aria_label 字段——所以这类属性选择器按 `label` 匹配。提示词面的属性白名单
  * （grammar-prompt.MATCHABLE_POOL_ATTRS）与本函数同一口径，改一处必须改另一处。
+ * task-10 起导出：check 面的 hint 语义 lint（declaration-scan）用它判定
+ * 「attrSubstr 是否落在 label 上」——别名口径只有这一份实现，不复制第二份。
  */
-const poolFieldFor = (attr: string): string => {
+export function poolFieldFor(attr: string): string {
   const k = poolAttr(attr);
   return k === "aria-label" || k === "aria_label" || k === "ariaLabel" ? "label" : k;
 };
