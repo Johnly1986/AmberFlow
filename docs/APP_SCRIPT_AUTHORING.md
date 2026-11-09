@@ -1000,6 +1000,16 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 排查顺序：`apps check`（声明）→ `inspect`（页面）→ `apps explain`（序列）→ `run --dry-run`（预演）→
 `run --max-steps N --trace`（有预算的真跑）→ 看 trace 里第一次 `ok:false` 的 `stop_code/reason`。
 
+**限速判读（B3 `throttle_suspect`）**：步骤信号不成立且观测到**会话级骤降**时，该步 warning 通道出现
+`throttle_suspect:` 一行，`step_traces[].result.diagnostics.throttle_suspect.evidence` 带判读证据
+（`pool_size` vs `pool_size_session_high`、`body_text` vs `body_text_prev`、`admitted`、`ready_state`、
+`session_elapsed_ms`、失败现场的 `declared_hidden`）。触发是**保守组合判据**——本会话池高峰 ≥20 且当前池
+≤ 高峰/4（probe3 实测现场：单会话观察调用 202→15、8 秒跑完全程、筛选芯片 declared_hidden），或两次失败
+嗅探之间正文塌缩（前值 ≥2000 且当前 ≤ 前值/4）——正常小页面（本来元素就少）不会触发。**判读与处置**：
+这是"疑似站点限速/降频/风控分批"的信号，不是完成判定（不新增 stopCode）；已知处置是**冷却后重试、降频
+（拉大 `meta.pace`）、分批跑**，**不绕过**反爬（不伪造指纹、不轮换代理、不规避风控/速率限制）。字段缺失
+= 该失败没有骤降特征，按常规停因排查。
+
 ## 11. 边界（当前版本明确不做）
 
 - **脚本是进程内任意代码**：信任边界 = “用户作用域 + 不放仓库”；结果里带 `script_sha256`。沙箱未做。

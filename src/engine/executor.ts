@@ -367,6 +367,32 @@ export interface ActionabilityDetail {
   requery: "present" | "detached" | "unknown";
 }
 
+/**
+ * task-11（B3，评审 #8）：限速/降频判读证据（probe3 现场标定：单会话观察调用 202→15、
+ * 8 秒跑完全程、芯片 declared_hidden）。全部是**已有观测的记账**（池大小/失败嗅探/会话时钟），
+ * 不新增页面往返（唯一新增往返 = 失败路径的一次只读 sniff，U3 同款底座）。
+ */
+export interface ThrottleSuspect {
+  evidence: {
+    /** 本步池大小。 */
+    pool_size: number;
+    /** 本会话（middleware 实例）的池高峰基线。 */
+    pool_size_session_high: number;
+    /** 失败嗅探：正文长度（chars）。 */
+    body_text: number;
+    /** 上一次失败嗅探的正文长度（首次失败没有前值，缺省省略）。 */
+    body_text_prev?: number;
+    /** 失败嗅探：可见 ADMIT_SEL 交互计数。 */
+    admitted: number;
+    admitted_prev?: number;
+    ready_state: string;
+    /** 本会话首次抽池以来的毫秒数（「8 秒跑完全程」特征的记账）。 */
+    session_elapsed_ms: number;
+    /** 失败现场的 declared_hidden 事实（芯片/目标全隐藏——限速降频的典型并发特征）。 */
+    declared_hidden?: { target: string; hidden: number; total: number };
+  };
+}
+
 export interface RunReport {
   goal: string;
   done: boolean;
@@ -397,6 +423,14 @@ export interface RunReport {
      * （池空但页面已就绪是事实，不是 page_not_ready）。
      */
     readiness?: Readiness;
+    /**
+     * task-11（B3，评审 #8）：信号不成立且观测到**会话级骤降**时的限速/降频判读证据
+     * （probe3 现场：单会话观察调用 202→15、8 秒跑完全程、芯片 declared_hidden）。
+     * 组合判据防误报：池高峰 ≥20 且当前 ≤ 高峰/4，或两次失败嗅探间正文塌缩——
+     * 正常小页面（本来元素就少）不触发。**不新增 stopCode**（stopCode 表是脚本分支
+     * 契约）：warning + 证据字段，判读指引见 docs/APP_SCRIPT_AUTHORING.md §10。
+     */
+    throttle_suspect?: ThrottleSuspect;
   };
   /**
    * A1 动作执行证据（全部可选：缺字段 = 该事实不适用，不硬造）。
@@ -1678,6 +1712,11 @@ export class BrowserMiddleware {
    * 用它排除第三方 iframe；null = 无声明 = 与今天逐字节相同。
    */
   private _frameHosts: string[] | null = null;
+  /** task-11（B3）：会话级池高峰（每次抽池记账，零成本）——限速骤降判据的基线。 */
+  private _sessionPoolHigh = 0;
+  private _sessionFirstPoolTs = 0;
+  /** task-11（B3）：上一次失败路径嗅探（正文/可交互基线；只在失败路径更新）。 */
+  private _lastFailSniff: { body_text: number; admitted: number } | null = null;
   /**
    * P0-B：act_hint:"strict"（缺省 false = 今天）。为 true 时，声明目标解析链
    * （池 hintMatch → ADMIT 回捞 → FW8 身份回捞 → rules-only 宽扫）全部未命中后
@@ -3726,6 +3765,12 @@ export class BrowserMiddleware {
       + `raise the budget, narrow the target, or check what the page did after each action`;
     let stopStep: number | undefined;
     let lastPoolSize = 0;
+    // task-11（B3）：报告期限速嗅探要用的跨循环事实（步循环内的块作用域变量够不着报告点）。
+    let lastPageRef: AnyPage | null = null;
+    let lastDeclaredHiddenBox: { target: string; hidden: number; total: number } | null = null;
+    // 闭包内的赋值 TS 控制流看不见（与 L4247 getDeclared 同一个坑）——getter 返回注解类型。
+    const getLastDeclaredHidden = (): { target: string; hidden: number; total: number } | null =>
+      lastDeclaredHiddenBox;
     let lastPoolWaitedMs = 0;
     /** U3：最后一次池空判档（ready 由正常路径覆盖不落此变量；not_ready/ready_empty 进 diagnostics）。 */
     let lastReadiness: Readiness | null = null;
@@ -3836,6 +3881,8 @@ export class BrowserMiddleware {
         page = (await browser.newPage()) as AnyPage;
       }
       const pg = page as AnyPage;
+      // task-11（B3）：报告期（循环外）限速嗅探要用的最后页面引用——每步刷新。
+      lastPageRef = pg;
       /**
        * S1：生成一次状态指纹并推进 cursor。`elems` 用**已有观察**（步首池）传进来；
        * 收尾处才允许传 null（此时由调用方决定是否先重新抽池）。只读，不发动作。
@@ -4022,6 +4069,9 @@ export class BrowserMiddleware {
           elems = (await this._extractPoolSettled(pg, candidatePriority)).elems;
         }
         lastPoolSize = Object.keys(elems).length;
+        // task-11（B3）：会话池高峰基线——池大小本来就算好了，记账零成本。
+        if (this._sessionFirstPoolTs === 0) this._sessionFirstPoolTs = Date.now();
+        if (lastPoolSize > this._sessionPoolHigh) this._sessionPoolHigh = lastPoolSize;
         lastPoolWaitedMs = poolWaitedMs;
         // S1：本 run 的 before 指纹取**第一次已有观察**（步首池），零新增页面往返。
         if (beforeFp === null) beforeFp = await observeState(elems);
@@ -4277,6 +4327,7 @@ export class BrowserMiddleware {
           if (dr.rows.length !== 1) {
             if (dr.hidden_matches > 0) {
               declaredHidden = { target, hidden: dr.hidden_matches, total: dr.total_matches };
+              lastDeclaredHiddenBox = declaredHidden;
             }
             return null;
           }
@@ -5914,16 +5965,65 @@ export class BrowserMiddleware {
     }
     const verdict = (await this.auditor.audit(instruction, trace, done)) as AuditVerdict;
     const stoppedCode = stopCode as StopCode;
+    // task-11（B3，评审 #8）：信号不成立时的会话级骤降嗅探——限速/降频判读证据。
+    // 组合判据防误报（正常小页面本来元素就少，不触发）：本会话池高峰 ≥20 且当前池 ≤ 高峰/4
+    // （probe3 现场 202→15），或两次失败嗅探之间正文塌缩（prev ≥2000 且 cur ≤ prev/4）。
+    // 成本：只有失败路径付一次只读 sniff（U3 同款底座 poolSniff）；成功路径零改动。
+    // 不新增 stopCode（stopCode 表是脚本分支契约）——warning + diagnostics 证据，判读
+    // 指引见 docs/APP_SCRIPT_AUTHORING.md §10（已知处置：冷却/降频/分批，不绕过）。
+    let throttleSuspect: ThrottleSuspect | null = null;
+    if (done !== true && lastPageRef !== null) {
+      let failSniff: Awaited<ReturnType<typeof poolSniff>> | null = null;
+      try {
+        failSniff = await poolSniff(lastPageRef as never, admitSelectorWithJsFor(this.surfacePolicy));
+      } catch { /* 观察让位事实：页面已不可读时不硬来 */ }
+      const bodyPrev = this._lastFailSniff?.body_text ?? null;
+      const admittedPrev = this._lastFailSniff?.admitted ?? null;
+      const poolDrop = this._sessionPoolHigh >= 20
+        && lastPoolSize > 0 && lastPoolSize * 4 <= this._sessionPoolHigh;
+      const bodyDrop = bodyPrev !== null && bodyPrev >= 2000
+        && failSniff !== null && failSniff.body_text * 4 <= bodyPrev;
+      if (failSniff !== null && (poolDrop || bodyDrop)) {
+        const dh = getLastDeclaredHidden();
+        throttleSuspect = {
+          evidence: {
+            pool_size: lastPoolSize,
+            pool_size_session_high: this._sessionPoolHigh,
+            body_text: failSniff.body_text,
+            ...(bodyPrev !== null ? { body_text_prev: bodyPrev } : {}),
+            admitted: failSniff.admitted,
+            ...(admittedPrev !== null ? { admitted_prev: admittedPrev } : {}),
+            ready_state: String(failSniff.ready_state ?? "unknown"),
+            session_elapsed_ms: this._sessionFirstPoolTs === 0
+              ? 0 : Date.now() - this._sessionFirstPoolTs,
+            ...(dh !== null
+              ? { declared_hidden: { target: dh.target, hidden: dh.hidden, total: dh.total } }
+              : {}),
+          },
+        };
+        warnings.push(`throttle_suspect: 信号不成立且观测到会话级骤降`
+          + `（池 ${this._sessionPoolHigh}→${lastPoolSize}${bodyDrop ? `；正文 ${bodyPrev}→${failSniff.body_text}` : ""}`
+          + `；本会话已运行 ${throttleSuspect.evidence.session_elapsed_ms}ms）`
+          + "——疑似站点限速/降频/风控分批。已知处置：冷却后重试、降频（拉大 meta.pace）、分批跑，不绕过反爬；"
+          + "证据见 step_traces[].result.diagnostics.throttle_suspect");
+      }
+      // 失败嗅探即基线（无论是否触发）：下一次失败对比用它。
+      this._lastFailSniff = failSniff === null
+        ? null : { body_text: failSniff.body_text, admitted: failSniff.admitted };
+    }
     const diagnostics: RunReport["diagnostics"] | undefined = (
       stoppedCode === "page_not_ready" || stoppedCode === "target_not_found"
       || stoppedCode === "target_ambiguous" || stoppedCode === "action_space_exhausted"
       // U3：ready_empty 没有停因（步级继续），但"池空且已就绪"是必须落盘的事实。
       || (lastReadiness !== null && lastReadiness.verdict !== "ready")
+      // B3：限速判读证据落盘（该步信号不成立 + 会话级骤降）。
+      || throttleSuspect !== null
     ) ? {
       pool_size: lastPoolSize,
       ...(poolReady ? { waited_ms: lastPoolWaitedMs } : {}),
       ...(viewportUnderloaded !== null ? { viewport_underloaded: viewportUnderloaded } : {}),
       ...(lastReadiness !== null && lastReadiness.verdict !== "ready" ? { readiness: lastReadiness } : {}),
+      ...(throttleSuspect !== null ? { throttle_suspect: throttleSuspect } : {}),
     } : undefined;
     // A1 动作执行证据汇总（只从 trace 汇总一次，不新增页面往返）：
     //   executed        —— 本子目标是否有动作真的执行（有动作面时必答；缺字段 = 没有动作面）；
