@@ -945,6 +945,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 ```
 
 - trace 的 `events[]` 记录每次 ctx 调用（`call` / `desc` / `id` / `url` / `ok` / `stop_code` / 只读结果摘要），`done` + `stop_code` 是审计事实。
+- report.md 执行轨迹表的 URL 列口径是**步起**（`state.before.url`，该步开始时刻的页面 URL，步内导航/动作之前的页面）；没有步起记录的行（`ctx.arrive` 不走执行器观察、或旧产物无 `state`）显示步后落地 URL（`step_traces[i].url`）并在单元格内标「（落地）」——两种口径不同格，读表别混。
 - `script_sha256` = 脚本源字节指纹；`plan_sha256` = 由 `meta` 投影出的 IR 指纹。`inputs_sha256` 只含槽位与 hosts（**不含** outDir/runId），所以重放可跨机器。
 - 重放要求 app / `script_sha256` / `inputs_sha256` 三者一致；不一致直接拒跑（`trace_mismatch` 或加载期拒绝），不“尽量重放”。
 - 真实运行两次的**结构**应一致：调用序列 + 结果（`result` 里除耗时外的字段）；耗时证据不参与比较。

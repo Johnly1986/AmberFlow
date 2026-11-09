@@ -1907,11 +1907,21 @@ export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): st
     }
   }
   if (r.step_traces !== undefined && r.step_traces.length) {
+    // task-8（评审 #12）：URL 列口径显式化——列头注明「步起」；数据取 `state.before.url`
+    // （该步**开始**时刻的页面 URL）。缺步起记录的行（ctx.arrive / 无 state 的旧产物）显示
+    // 步后落地 URL（`url` 字段）并在单元格内标注「（落地）」——两种口径不同格，不混读。
     L.push("", "## 执行轨迹（flow 的 ctx.step / ctx.arrive）", "",
-      "| # | id | 说明 | 状态 | URL | 停因 |", "|---|---|---|---|---|---|");
+      "| # | id | 说明 | 状态 | URL(步起) | 停因 |", "|---|---|---|---|---|---|");
     for (const t of r.step_traces) {
-      L.push(`| ${t.index + 1} | ${t.id ?? "-"} | ${t.desc.slice(0, 80)} | ${t.status} | ${t.url ?? "-"} | ${t.stop_code ?? "-"} |`);
+      const beforeUrl = typeof t.state?.before?.url === "string" && t.state.before.url !== ""
+        ? t.state.before.url : null;
+      const urlCell = beforeUrl !== null ? beforeUrl
+        : (t.url !== undefined ? `${t.url}（落地）` : "-");
+      L.push(`| ${t.index + 1} | ${t.id ?? "-"} | ${t.desc.slice(0, 80)} | ${t.status} | ${urlCell} | ${t.stop_code ?? "-"} |`);
     }
+    L.push("", "- URL 列口径：**步起** = 该步开始时刻的页面 URL（`state.before.url`，S1 状态记录；"
+      + "步内导航/动作前的页面）。标「（落地）」的行没有步起记录（`ctx.arrive` 不走执行器观察、"
+      + "或旧产物无 state），显示的是步后落地 URL（`step_traces[i].url`）。");
   }
   // A1：动作执行证据小节——"执行了什么"与"为什么没执行"各一张表；没有证据的旧运行整节省略。
   const actionEvidence = (r.step_traces ?? []).filter((t) =>
