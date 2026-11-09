@@ -104,7 +104,9 @@ import {
   type NoulAnswer,
   type RouterLike,
 } from "../model/model.ts";
-import { decisionProviderOrNull, layaProvider, type DecisionProvider } from "../model/decision-provider.ts";
+import { decisionFailureFact, decisionProviderOrNull, layaProvider, type DecisionProvider } from "../model/decision-provider.ts";
+// task-14（D1）：探测失败分类与建议文案的单一出处。
+import { classifyDecisionFailure, decisionDegradedAdvice } from "../model/decision-probe.ts";
 import { applyRange, type RangeOptions, type RangeOutcome, type RangeValue } from "./range.ts";
 import {
   DESTRUCTIVE_PATTERNS,
@@ -1680,6 +1682,25 @@ export class BrowserMiddleware {
   actionDelayMs = 0;
   reobserve = true;
   escalateFn: EscalatorLike | null = null;
+  // task-14（D1·兼容性三件）：决策面起跑探测失败/中途死亡的**诚实留痕**。
+  // decisionCompat = 本次 run 在兼容范围（默认配置面 AMBERFLOW_DECISION_BASE_URL 已配置且未
+  // 显式指定 provider——app-runner 起跑时置位）；markDecisionDegraded 置降级态：规则面继续、
+  // 升级链规则兜底、死服务不重试（pickInner 捕获一次即 rulesOnly 永久翻转 + escalate 守卫）。
+  decisionCompat = false;
+  decisionDegraded: {
+    reason_class: "unreachable" | "auth" | "protocol" | "midrun_death" | "unknown";
+    message: string;
+    config_source: string;
+  } | null = null;
+  markDecisionDegraded(d: NonNullable<BrowserMiddleware["decisionDegraded"]>): void {
+    this.decisionDegraded = d;
+    // 与"本地模型不在位"同一条规则面：声明点名的步照跑，需要选点的步按规则面如实 block。
+    this.rulesOnly = true;
+    this.rulesOnlyReason = d.message;
+    this.providerDegraded = d.message;
+    // 决策面已知死亡：done 票/风险问询不再碰它（decision=null 的既有守卫天然生效）。
+    this.decision = null;
+  }
   /** No runtime installed: rules/hints only. Set by `ready()` (see RULES-ONLY MODE). */
   rulesOnly = false;
   rulesOnlyReason = "";
@@ -2055,6 +2076,16 @@ export class BrowserMiddleware {
    */
   private async ready(): Promise<void> {
     if (this._ready) return;
+    // task-14（D1）：起跑探测已判死决策面（probe 失败 → markDecisionDegraded）——
+    // 与"本地模型不在位"同一条规则面：不建 decision（done 票/风险问询自然跳过），
+    // 声明点名的步照跑、需要选点的步按规则面如实 block。probe 经 applySpecToRuntime
+    // 安装过 provider，这里必须挡在 ① 之前，否则会把已判死的面重新装回来。
+    if (this.decisionDegraded !== null) {
+      this.rulesOnly = true;
+      this.rulesOnlyReason = this.decisionDegraded.message;
+      this._ready = true;
+      return;
+    }
     // **决策提供者层的入口**：
     //   ① 显式装了 provider（换模型测试走这条）⇒ 直接用它，不要求 laya runtime 存在；
     //   ② 否则走旧门：装了 `LayaRuntime` 就就地包一层适配器 ⇒ 行为与今天逐字段相同
@@ -2369,6 +2400,17 @@ export class BrowserMiddleware {
       this.rulesOnly = true;
       this.rulesOnlyReason = (err as Error).message;
       this.providerDegraded = (err as Error).message;
+      // task-14（D1）：运行中途死亡同样降级一次（死服务不重试——rulesOnly 永久翻转 +
+      // escalate 守卫；分类 midrun_death）。只在兼容范围（默认配置面）记账；显式 provider
+      // 维持今天的 provider_degraded 面貌（显式意图优先）。
+      if (this.decisionCompat && this.decisionDegraded === null) {
+        const fact = decisionFailureFact(err);
+        this.markDecisionDegraded({
+          reason_class: "midrun_death",
+          message: fact.slice(0, 300),
+          config_source: "AMBERFLOW_DECISION_BASE_URL",
+        });
+      }
       return { ref: null, conf: 0.0, probs: {}, passthrough: true };
     }
     const result = {
@@ -4921,6 +4963,13 @@ export class BrowserMiddleware {
           // In rules-only mode a null ref usually means "no runtime to ask", which is not
           // the same failure as "every element is forbidden" — say which one it is.
           if (this.rulesOnly) {
+            // task-14（D1）：被降级吞掉的步（本需要模型选点）在 step warning 记 decision_degraded
+            // ——停因保留（诚实机制不变），留痕说明这是配置面问题而非模型缺席，并给分类建议。
+            if (this.decisionDegraded !== null) {
+              warnings.push(`decision_degraded: 决策面已降级（${this.decisionDegraded.reason_class}）——`
+                + `本步需要模型选点，规则面无法替代；${decisionDegradedAdvice(
+                  this.decisionDegraded.reason_class === "midrun_death" ? "unknown" : this.decisionDegraded.reason_class)}`);
+            }
             // 诚实停因（2026-11-01 产品评审 P1）：这一步**什么动作都没声明**（无 target_hint、
             // 无命令空间）时，"缺模型"是个谎言——真正的问题要么是"信号已成立但这步没声明
             // 零动作命令，引擎不肯替作者宣布完成"，要么是"信号根本不成立"。当场评估一次
@@ -5076,7 +5125,10 @@ export class BrowserMiddleware {
             // name one of the elements the harness showed. It is a picker, not a
             // planner — an answer that is not a ref from THIS view is rejected, so
             // nothing it says can invent an element, a value or an action.
-            if (!recovered && escalateFn && !escalated && stepTimeoutLeft() > 0) {
+            // task-14（D1）：决策面已降级（起跑探判死/中途死亡）→ 升级链规则兜底，
+            // 不再咨询死服务（死服务不重试超过 1 次：probe 1 次 / pickInner 捕获 1 次）。
+            if (!recovered && escalateFn && !escalated && this.decisionDegraded === null
+                && stepTimeoutLeft() > 0) {
               // F3：步级 timeoutMs 过期后不再发起新的升级点名。
               escalated = true;
               const crit = criteriaView(orderedPool(), new Set(Object.keys(forbidden)),

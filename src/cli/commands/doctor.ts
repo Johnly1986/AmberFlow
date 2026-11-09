@@ -11,6 +11,8 @@ import { listAppInfos } from "./apps.ts";
 import { userConfigPath, projectConfigPath, resolveConfig } from "../config-store.ts";
 import { cliInvocationLine, detectCliInvocation, INVOKE_FALLBACKS, LINK_HINT } from "../invocation.ts";
 import { missingPieces } from "../../model/model-artifacts.ts";
+// task-14：探针底座共享（run 起跑探测与 doctor 单一出处）。
+import { probeDecisionPlane } from "../../model/decision-probe.ts";
 
 export async function runDoctor(args: string[], ctx: CliContext): Promise<number> {
   let parsed;
@@ -238,40 +240,16 @@ interface AskProbeResult {
  * 三层配置齐全、doctor 全绿，三件套凭据在网关上是 403 AccessDenied.Unpurchased，而引擎把这次
  * 失败吞成「模型被咨询 1 次（1 次未过闸门）」静默降级。这个探针就是那类故障的直达检查：
  * HTTP 成败给 ref/conf，失败给状态码+错误关键句（不含也不回显任何凭据）。
+ * task-14：探针底座抽到 `model/decision-probe.ts` 共享（run 起跑探测与 doctor 单一出处）。
  */
 async function runAskProbe(
   provider: typeof import("../../model/decision-provider.ts"),
 ): Promise<AskProbeResult> {
-  let name = "unknown";
-  try {
-    const spec = await provider.resolveProviderSpec(undefined);
-    name = spec.name;
-    if (spec.kind !== "provider") {
-      return { provider: name, ok: false,
-        error: `当前默认决策源是 ${spec.name}（tier=${spec.tier}）——没有在线 HTTP 决策源可探测`
-          + "（探针只测三件套；本地模型请用真实运行验证）" };
-    }
-    // 与运行时同一安装序列（含计数包装）：probe 看到的就是跑应用时看到的那个 provider。
-    await provider.applySpecToRuntime(spec);
-    const p = provider.getDecisionProvider();
-    // 最小考卷：假页面（stateText 取不到正文就走「fake page 少正文」的既有容错路径）
-    // + 3 个假候选。只考 HTTP 层能不能过、服务答不答——不考模型的题感。
-    const page = { url: "https://amberflow.ask-probe.invalid/", title: async () => "amberflow doctor ask probe" };
-    const out = await p.pick({
-      goal: "doctor ask probe", page,
-      elems: {
-        e1: { tag: "button", label: "搜索" },
-        e2: { tag: "textbox", label: "出发地" },
-        e3: { tag: "link", label: "下一页" },
-      },
-      forbidden: new Set(), notes: null, narrow: null, k: 8,
-    });
-    return { provider: p.name, ok: true, ref: out.ref ?? null, conf: out.score };
-  } catch (e) {
-    // 单行化 + 截断：错误关键句进一行诊断（服务错误体/网络 cause；凭据不在此列）。
-    // A5：剥掉统一追加的通道指引（文本/stderr 会单独给），JSON 字段只留事实。
-    return { provider: name, ok: false, error: provider.decisionFailureFact(e).slice(0, 300) };
-  }
+  const r = await probeDecisionPlane();
+  const out: AskProbeResult = { provider: r.provider, ok: r.ok };
+  if (r.ok) { out.ref = r.ref ?? null; out.conf = r.conf; }
+  else out.error = r.error ?? "未知失败";
+  return out;
 }
 
 /**

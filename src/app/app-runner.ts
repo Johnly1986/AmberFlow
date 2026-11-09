@@ -31,6 +31,8 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { MockAuditor, type TraceStep } from "../engine/audit.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
+// task-14（D1）：起跑探测（与 doctor 共享单一出处）。
+import { probeDecisionPlane } from "../model/decision-probe.ts";
 import { ensureDir, userAppsDir } from "./amberflow-home.ts";
 import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../support/cli-args.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
@@ -1353,6 +1355,24 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       : () => true,
   });
 
+  // task-14（D1·兼容性三件）：声明式路径与 flow 路径同账——起跑探测一次（只探默认配置面，
+  // 未显式指定 provider 时）。探测失败 = 兼容降级（规则面继续），mw 上留痕（收尾进 result）。
+  if (typeof process.env.AMBERFLOW_DECISION_BASE_URL === "string"
+      && process.env.AMBERFLOW_DECISION_BASE_URL !== ""
+      && process.env.AMBERFLOW_DECISION_PROVIDER === undefined) {
+    mw.decisionCompat = true;
+    const probe = await probeDecisionPlane();
+    if (!probe.ok && probe.reasonClass !== undefined) {
+      mw.markDecisionDegraded({
+        reason_class: probe.reasonClass,
+        message: probe.error ?? "",
+        config_source: "AMBERFLOW_DECISION_BASE_URL",
+      });
+      console.error(`decision_degraded: 决策面探测失败（${probe.reasonClass}）——本次 run 停发模型调用，`
+        + `规则面继续；${probe.advice ?? ""}`);
+    }
+  }
+
   const own = opts.sessionFactory === undefined;
   // 用 holder 而不是裸的 `let`：会话是在闭包里惰性创建的，裸变量的控制流收窄会把后续读取
   // 变成 never（TS 看不到闭包里的赋值）。
@@ -1776,6 +1796,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     ...(mw.riskDegraded ? { risk_degraded: mw.riskDegraded } : {}),
     // 在线 provider 掉线/没配好 ⇒ 本次跑降级到 rules-only——同样必须出现在产物里（同 risk_degraded）。
     ...(mw.providerDegraded ? { provider_degraded: mw.providerDegraded } : {}),
+    // task-14（D1）：决策面兼容降级留痕（仅 degraded 时出现，只增字段——两条路径同账）。
+    ...(mw.decisionDegraded !== null ? { decision: { degraded: mw.decisionDegraded } } : {}),
     sources: sourceResults,
     // 数据腿**真的写回**了哪些槽位（缺省等价：没回写就不出现这个字段）。
     ...(Object.keys(sourceSlots).length > 0
@@ -2179,6 +2201,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
    * R3/R8 实测 result 的 provider_degraded 一直是空。收尾时读一次，两条路径同账。
    */
   let providerDegraded: string | null = null;
+  // task-14（D1）：降级留痕（起跑探测失败/中途死亡；仅 degraded 时进 result.decision）。
+  let decisionDegraded: NonNullable<BrowserMiddleware["decisionDegraded"]> | null = null;
   /**
    * S5：状态接入决策的指标（与 providerDegraded 同一个「收尾读一次」先例）。执行器是
    * 惰性创建的，脚本可能一步都不跑 ⇒ 保持 null，报告按声明档补零（不硬造"跑过"）。
@@ -2294,6 +2318,25 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       }
       return mwHolder.current;
     };
+    // task-14（D1·兼容性三件）：起跑探测一次——只探默认配置面（AMBERFLOW_DECISION_BASE_URL
+    // 已配置且未显式指定 provider；显式意图优先，探测不适用）。探测通过 = 一切照旧（result
+    // 逐字节不变，唯一差异是起跑多付一次最小 ask）；失败 = 兼容降级：本次 run 停发模型调用
+    // （规则面继续、升级链规则兜底、死服务不重试），result 顶层 decision.degraded 留痕。
+    if (typeof process.env.AMBERFLOW_DECISION_BASE_URL === "string"
+        && process.env.AMBERFLOW_DECISION_BASE_URL !== ""
+        && process.env.AMBERFLOW_DECISION_PROVIDER === undefined) {
+      getMw().decisionCompat = true;
+      const probe = await probeDecisionPlane();
+      if (!probe.ok && probe.reasonClass !== undefined) {
+        getMw().markDecisionDegraded({
+          reason_class: probe.reasonClass,
+          message: probe.error ?? "",
+          config_source: "AMBERFLOW_DECISION_BASE_URL",
+        });
+        console.error(`decision_degraded: 决策面探测失败（${probe.reasonClass}）——本次 run 停发模型调用，`
+          + `规则面继续；${probe.advice ?? ""}`);
+      }
+    }
     /**
      * T1：工具步工件序号（每次 flow 运行从 1 起；只用于**文件名**，不是步骤 id）。
      * T1：把一次工具步的进程观察落成工件（`scrubSecrets` 掩码 → `outDir/tool-steps/NN-slug.json`）。
@@ -2515,6 +2558,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       // A3：决策源降级的原因只活在执行器实例上——脚本抛 StopError 也不能把它弄丢
       //（拿不到场就记 null：重放分支没有执行器，字段缺席 = 没降级，与 runApp 同口径）。
       providerDegraded = mwHolder.current?.providerDegraded || null;
+      // task-14（D1）：起跑探测失败/中途死亡的降级留痕（同一场读一次；缺字段 = 未降级）。
+      decisionDegraded = mwHolder.current?.decisionDegraded ?? null;
       // S5：同一处读指标（一个 flow 应用会复用同一个执行器跑多个 ctx.step，计数在实例上累计）。
       decisionStateMetrics = mwHolder.current?.decisionStateMetrics() ?? null;
       // U8：同源同处读（执行器闸门分支记账，实例累计跨 ctx.step）。
@@ -2656,6 +2701,12 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         runWarnings.push(w);
       }
     }
+    // task-14（D1）：决策面兼容降级时保底一条 run warning（即使没有步被吞掉——
+    // probe 失败本身就该在 result.warnings 里可见）。
+    if (decisionDegraded !== null) {
+      runWarnings.push(`decision_degraded: 决策面已降级（${decisionDegraded.reason_class}）`
+        + `——本次 run 停发模型调用，规则面继续（${decisionDegraded.message.slice(0, 200)}）`);
+    }
   }
   const logs = trace.events.filter((e) => e.call === "log").map((e) => ({
     i: e.i, desc: e.desc ?? "", ...(e.result === undefined ? {} : { result: e.result }),
@@ -2776,6 +2827,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     decisions,
     // A3：与 runApp（声明式路径）同账——降级发生过就必须出现在产物里。
     ...(providerDegraded ? { provider_degraded: providerDegraded } : {}),
+    // task-14（D1）：决策面兼容降级留痕（仅 degraded 时出现，只增字段——healthy/无决策面
+    // 的 run 键集与基线逐字节一致）。
+    ...(decisionDegraded !== null ? { decision: { degraded: decisionDegraded } } : {}),
     step_traces: stepTraces,
     ...(runWarnings.length ? { warnings: runWarnings } : {}),
     ...(logs.length ? { logs } : {}),
