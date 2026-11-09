@@ -10,6 +10,8 @@ import { appsRehearsal } from "./apps-rehearsal.ts";
 // 不改 VALID/exit；clean 应用零输出）。只消费 hint 形状位（见 hint-lint.ts 范围护栏）。
 import { lintHintSemantics, renderHintLintLines } from "../../app/hint-lint.ts";
 import { scanDeclarations } from "../../app/declaration-scan.ts";
+// task-15（D2）：SITE_FACTS 按 meta.hosts 匹配 → stderr 提示（仅命中；辅助数据不进 problems）。
+import { loadSiteFacts, matchSiteFacts, renderSiteFactLines } from "../../app/site-facts.ts";
 import { PLAN_PLAYBOOK_TEXT } from "../../engine/planning-playbook.ts";
 import { userAppsDir } from "../../app/amberflow-home.ts";
 import type { CliContext } from "../context.ts";
@@ -488,6 +490,9 @@ async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
       const problems = validateApp(loaded.pack, { allowEmptyJourney: true });
       const dry = await dryRunFlow(loaded, { slots });
       problems.push(...dry.problems);
+      // task-15（D2）：SITE_FACTS 提示（stderr，仅命中；不进 problems/exit）+ JSON 只增字段。
+      const siteFacts = matchSiteFacts(loadSiteFacts(console.error), (loaded.pack.hosts ?? []) as string[]);
+      for (const line of renderSiteFactLines(siteFacts)) console.error(line);
       // task-10（B2）：hint 语义 lint（stderr warnings 通道，与 weak_done 同款——JSON/人读
       // 两个面都可见、都不改 stdout/exit）。无三类形状的应用零输出（clean 逐字节不变）。
       for (const line of renderHintLintLines(
@@ -503,6 +508,10 @@ async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
       results.push({
         app: loaded.pack.id, path: loaded.scriptPath, problems,
         ...(navigation === undefined ? {} : { policy_navigation: String(navigation) }),
+        // task-15（D2）：site_facts 仅命中时出现（只增字段；无命中 = 键集与基线逐字节一致）。
+        ...(siteFacts.length > 0 ? {
+          site_facts: siteFacts.map((f) => ({ site: f.site, id: f.id, as_of: f.as_of, evidence: f.evidence, statement: f.statement })),
+        } : {}),
       });
     } catch (err) {
       results.push({ app: t.id, path: t.script, problems: [err instanceof Error ? err.message : String(err)] });

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "site": "google-maps",
+  "hosts": ["google.com"],
+  "facts": [
+    {
+      "id": "apps-grid-cross-origin-iframe",
+      "as_of": "2026-11-04",
+      "evidence": ["round3 报告 §c1/c2", "round4 报告 §c3"],
+      "statement": "应用九宫格抽屉是 ogs.google.com 跨源 iframe（偶发主 frame 渲染、状态依赖）；meta.hosts 未声明 ogs.google.com 时，点击其中瓦片会被引擎以 frame_not_allowed 拒绝。"
+    },
+    {
+      "id": "web-search-vs-maps-deeplink",
+      "as_of": "2026-11-04",
+      "evidence": ["round2 报告 §c1（final_url 证据）"],
+      "statement": "www.google.com 网页搜索提交可能触发 /sorry 人机验证墙；站内 Maps 交互（40+ 次加载）零触发。"
+    },
+    {
+      "id": "feed-virtual-list-fluctuation",
+      "as_of": "2026-11-04",
+      "evidence": ["round4 报告 §1 跨轮对照", "R2 报告四臂实测"],
+      "statement": "结果 feed 是虚拟列表（池/extract 只见已渲染行，需 scrollList 分块）；未登录 limited view 的可滚动行数在会话间波动（实测 20~122），跨会话结果组成不可直接比，口径须随会话声明覆盖行数。"
+    },
+    {
+      "id": "rate-limit-signature",
+      "as_of": "2026-11-09",
+      "evidence": ["round4 报告 §c9（outputs JSON + timeline）", "B3 探针 throttle_suspect 现场标定"],
+      "statement": "IP 限速特征：arrive 结果面板 >60~150s 不渲染（arrive_signal_not_held）、元素池骤降、筛选芯片 declared_hidden；观察记录：冷却 7 分钟 + 分批（多 run × 少城）后恢复。"
+    }
+  ]
+}

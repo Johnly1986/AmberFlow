@@ -33,6 +33,8 @@ import { MockAuditor, type TraceStep } from "../engine/audit.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 // task-14（D1）：起跑探测（与 doctor 共享单一出处）。
 import { probeDecisionPlane } from "../model/decision-probe.ts";
+// task-15（D2）：SITE_FACTS 边缘注入（run 起跑提示 + result.site_facts；仅命中出现）。
+import { loadSiteFacts, matchSiteFacts, renderSiteFactLines } from "./site-facts.ts";
 import { ensureDir, userAppsDir } from "./amberflow-home.ts";
 import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../support/cli-args.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
@@ -1372,6 +1374,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
         + `规则面继续；${probe.advice ?? ""}`);
     }
   }
+  // task-15（D2）：声明式路径同账——SITE_FACTS 按 meta.hosts 匹配（stderr 提示 + result.site_facts）。
+  const siteFacts = matchSiteFacts(loadSiteFacts((m) => console.error(m)), (pack.hosts ?? []) as string[]);
+  for (const line of renderSiteFactLines(siteFacts)) console.error(line);
 
   const own = opts.sessionFactory === undefined;
   // 用 holder 而不是裸的 `let`：会话是在闭包里惰性创建的，裸变量的控制流收窄会把后续读取
@@ -1798,6 +1803,10 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     ...(mw.providerDegraded ? { provider_degraded: mw.providerDegraded } : {}),
     // task-14（D1）：决策面兼容降级留痕（仅 degraded 时出现，只增字段——两条路径同账）。
     ...(mw.decisionDegraded !== null ? { decision: { degraded: mw.decisionDegraded } } : {}),
+    // task-15（D2）：site_facts 仅命中时出现（只增字段——两条路径同账）。
+    ...(siteFacts.length > 0 ? {
+      site_facts: siteFacts.map((f) => ({ site: f.site, id: f.id, as_of: f.as_of, evidence: f.evidence, statement: f.statement })),
+    } : {}),
     sources: sourceResults,
     // 数据腿**真的写回**了哪些槽位（缺省等价：没回写就不出现这个字段）。
     ...(Object.keys(sourceSlots).length > 0
@@ -2203,6 +2212,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   let providerDegraded: string | null = null;
   // task-14（D1）：降级留痕（起跑探测失败/中途死亡；仅 degraded 时进 result.decision）。
   let decisionDegraded: NonNullable<BrowserMiddleware["decisionDegraded"]> | null = null;
+  // task-15（D2）：site_facts 命中集（步循环外的报告点要读——存活到结果装配）。
+  let siteFacts: import("./site-facts.ts").MatchedSiteFact[] = [];
   /**
    * S5：状态接入决策的指标（与 providerDegraded 同一个「收尾读一次」先例）。执行器是
    * 惰性创建的，脚本可能一步都不跑 ⇒ 保持 null，报告按声明档补零（不硬造"跑过"）。
@@ -2337,6 +2348,10 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           + `规则面继续；${probe.advice ?? ""}`);
       }
     }
+    // task-15（D2）：SITE_FACTS 按 meta.hosts 匹配 → stderr 提示（运行前一次；仅命中出现；
+    // 事实不进模型请求面）。无命中 = 零输出（默认等价）。命中集提到函数层（结果装配在分支外）。
+    siteFacts = matchSiteFacts(loadSiteFacts((m) => console.error(m)), (pack.hosts ?? []) as string[]);
+    for (const line of renderSiteFactLines(siteFacts)) console.error(line);
     /**
      * T1：工具步工件序号（每次 flow 运行从 1 起；只用于**文件名**，不是步骤 id）。
      * T1：把一次工具步的进程观察落成工件（`scrubSecrets` 掩码 → `outDir/tool-steps/NN-slug.json`）。
@@ -2830,6 +2845,10 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // task-14（D1）：决策面兼容降级留痕（仅 degraded 时出现，只增字段——healthy/无决策面
     // 的 run 键集与基线逐字节一致）。
     ...(decisionDegraded !== null ? { decision: { degraded: decisionDegraded } } : {}),
+    // task-15（D2）：site_facts 仅命中时出现（只增字段；无命中 = 键集与基线逐字节一致）。
+    ...(siteFacts.length > 0 ? {
+      site_facts: siteFacts.map((f) => ({ site: f.site, id: f.id, as_of: f.as_of, evidence: f.evidence, statement: f.statement })),
+    } : {}),
     step_traces: stepTraces,
     ...(runWarnings.length ? { warnings: runWarnings } : {}),
     ...(logs.length ? { logs } : {}),

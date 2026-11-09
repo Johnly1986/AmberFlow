@@ -173,6 +173,7 @@ npx amber run my-app --trace               # 完整运行
 
 - 敏感槽位：值建议走环境变量/本机配置；CLI 用 `--slot-file FILE`（JSON 对象）而不是 `--slot`，并在 `meta.secretSlots` 声明槽位名——result/report/stdout/dry 会掩码为 `***`。
 - `apps check` 不打开浏览器：它证明“脚本能加载、调用序列合法、信号/命令/槽位可校验”，**不证明页面状态会成立**。
+- **SITE_FACTS（D2）**：`site-facts/*.json`（仓库层）与 `$AMBERFLOW_HOME/site-facts/*.json`（用户层）按 `meta.hosts` 后缀匹配，apps check / run 起跑注入 stderr 提示与 `result.site_facts[]`（仅命中出现）——**描述性事实**（是什么/会发生什么，含证据出处与 as_of），不是处方式指令；不进模型请求面。meta.hosts 不命中任何事实文件时输出与今天逐字节一致。
 - **`apps rehearsal`（只读预检，C1）**：真导航 `meta.site.pages` 与各步静态声明的 url，对每条静态 act hint / 命令 target 在每个可达页面上跑同一个 `hintMatch` 核对命中数与歧义——已验证（n=1）/ 歧义（n>1）/ 未命中·不可达 / dynamic 四类结论，`--remember` 把 n=1 的写进 hint-memory sidecar（authored hint 恒优先）。**覆盖边界**：只证明「hint 在可达页面上的命中数/歧义」，不证明页面状态成立；交互后步骤不可达是常态（筛选弹层类声明标"未命中/不可达"是如实，不是判 hint 错）。与 check 的关系：check = 声明形状，rehearsal = 可达页面的 hint 实况，**两者都不证明完成**。rehearsal 是侦察工具：直接导航不受 `entry-only` 约束（它不是 run）。
 - **dry 真执行语义（消歧义）**：`apps check` / `run --dry-run` 会**真实执行 flow 脚本体**——浏览器调用被合成、不访问网络（step/arrive 恒 ok、done 不评估），但脚本自身的**文件/进程副作用会真的发生**（写文件、Node IO 都是真的）。`apps check` 输出一行提示（JSON 面 `data.dry_semantics`）。两面判据用 **`ctx.runtime.dry`**（dry/replay 恒 `true`、真跑恒 `false`）；**`epoch === 0` 不再是 dry 判据**——真跑首个观察前 epoch 同样是 0。
 - **inspect vs ctx.observe（消歧义）**：`inspect` 是**独立一次性会话**（新开浏览器、不 attach 运行会话），适合入口页/任意 URL 的离线侦察；**会话内实时看当前页**用应用内的 `ctx.observe()`（免费只读、不改页面；dry 下 `elements=[]` 只有 counts——形状校验用）。
