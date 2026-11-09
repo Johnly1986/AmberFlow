@@ -192,12 +192,14 @@ amber plan run [--plan <文件>] [--reset] [--confirm allow|ask|deny] [--escalat
     flow: [
       "apps new <id> 生成骨架 → 编辑 app.mjs",
       "apps check [--slot k=v] 离线校验各分支调用序列（逐分支给 --slot）",
+      "apps rehearsal 真导航核对可达页面上的 hint 实况（只读；不执行动作/不调模型）",
       "apps explain 看 dry 调用序列，再进 run 的调试回路",
     ],
     usage: `amber apps list [--json]
 amber apps show <应用|脚本> [--code] [--json]
 amber apps new <id> [--goal <目标>] [--host HOST] [--url <入口页>] [--dir <目录>] [--force] [--print] [--json]
 amber apps check [<应用|脚本>] [--slot k=v]... [--json]
+amber apps rehearsal <应用|脚本> [--max-elements N] [--remember] [--hint-memory FILE] [--headed] [--timeout MS] [--json]
 amber apps explain <应用|脚本> [--slot k=v]... [--json]
 amber apps path <应用> [--json]
 amber apps remove <应用> [--yes] [--force]`,
@@ -211,6 +213,10 @@ amber apps remove <应用> [--yes] [--force]`,
       "--dir <目录>               apps new 的落点（默认 $AMBERFLOW_HOME/apps/<id>）",
       "--code                     apps show 返回完整源码（供 Agent 直接看/编辑）",
       "--slot k=v                apps check/explain 的 dry 槽位（可重复）；分支校验不启浏览器。加载期必填槽仍需 meta 声明默认（可空串）",
+      "--max-elements N          apps rehearsal 的每页抽池上限（默认 120，最多 200）",
+      "--remember                apps rehearsal 把「验证 n=1」的 hint 写进 hint-memory sidecar（$AMBERFLOW_HOME/hint-memory/<app>.json；authored hint 恒优先）",
+      "--hint-memory FILE        apps rehearsal 的 sidecar 落点覆盖",
+      "--headed                  apps rehearsal 显示浏览器窗口",
       "--force                    apps new 覆盖已存在文件 / apps remove 允许删内置应用",
       "--print                    apps new 只打印源码、不落盘",
       "--json                    机器可读输出",

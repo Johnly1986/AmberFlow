@@ -164,6 +164,7 @@ npx amber apps list
 npx amber apps show my-app --code          # 路径 + meta + 当前源码 + 两个版本 sha
 npx amber inspect --url https://shop.example.com/ --json   # 只读：元素与候选 hint
 npx amber apps check my-app                # 加载 + dry 调用序列校验（exit 2 = 有问题）
+npx amber apps rehearsal my-app            # 只读预检：真导航可达页，逐条核对静态 hint 命中数/歧义
 npx amber apps explain my-app              # dry 跑一遍，展示调用序列
 npx amber run my-app --dry-run             # 不打开浏览器
 npx amber run my-app --max-steps 3 --trace # 执行预算 + 每步证据（加 --json 拿结构化结果）
@@ -172,6 +173,7 @@ npx amber run my-app --trace               # 完整运行
 
 - 敏感槽位：值建议走环境变量/本机配置；CLI 用 `--slot-file FILE`（JSON 对象）而不是 `--slot`，并在 `meta.secretSlots` 声明槽位名——result/report/stdout/dry 会掩码为 `***`。
 - `apps check` 不打开浏览器：它证明“脚本能加载、调用序列合法、信号/命令/槽位可校验”，**不证明页面状态会成立**。
+- **`apps rehearsal`（只读预检，C1）**：真导航 `meta.site.pages` 与各步静态声明的 url，对每条静态 act hint / 命令 target 在每个可达页面上跑同一个 `hintMatch` 核对命中数与歧义——已验证（n=1）/ 歧义（n>1）/ 未命中·不可达 / dynamic 四类结论，`--remember` 把 n=1 的写进 hint-memory sidecar（authored hint 恒优先）。**覆盖边界**：只证明「hint 在可达页面上的命中数/歧义」，不证明页面状态成立；交互后步骤不可达是常态（筛选弹层类声明标"未命中/不可达"是如实，不是判 hint 错）。与 check 的关系：check = 声明形状，rehearsal = 可达页面的 hint 实况，**两者都不证明完成**。rehearsal 是侦察工具：直接导航不受 `entry-only` 约束（它不是 run）。
 - **dry 真执行语义（消歧义）**：`apps check` / `run --dry-run` 会**真实执行 flow 脚本体**——浏览器调用被合成、不访问网络（step/arrive 恒 ok、done 不评估），但脚本自身的**文件/进程副作用会真的发生**（写文件、Node IO 都是真的）。`apps check` 输出一行提示（JSON 面 `data.dry_semantics`）。两面判据用 **`ctx.runtime.dry`**（dry/replay 恒 `true`、真跑恒 `false`）；**`epoch === 0` 不再是 dry 判据**——真跑首个观察前 epoch 同样是 0。
 - **inspect vs ctx.observe（消歧义）**：`inspect` 是**独立一次性会话**（新开浏览器、不 attach 运行会话），适合入口页/任意 URL 的离线侦察；**会话内实时看当前页**用应用内的 `ctx.observe()`（免费只读、不改页面；dry 下 `elements=[]` 只有 counts——形状校验用）。
 - **learn 录制 hint vs inspect 候选（口径差异）**：learn 接受的 `hint` 是六形状闭集且**属性白名单只认 `test`（→data-test）、`type`、`aria-label`（label 别名）**参与匹配（完整池面白名单另含 href/name/id/role/near，见 `amber schema ctx` 的 hints 节）；class/title/placeholder 永不命中。`inspect` 展示的 `hint_candidates` 是引擎经**同一个** `hintMatch` 在当页自证过的结果——它输出的就是六形状之一，可直接照抄进 `act: ctx.hint(...)` 或 learn 的 `hint`；自己从页面 HTML 里挑的属性则必须先过白名单再落笔。

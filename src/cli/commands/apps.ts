@@ -4,6 +4,8 @@ import { parseArgs } from "node:util";
 import { APPS_DIR, listAppDirs, type AppDirEntry } from "../../app/app-pack.ts";
 import { validateApp } from "../../app/cross-ref.ts";
 import { dryRunFlow, loadScriptApp, scriptDisplayPath } from "../../app/app-script.ts";
+// task-12（C1）：apps rehearsal——只读预检（真导航 + hintMatch 实况核对；独立命令，不动 check 契约）。
+import { appsRehearsal } from "./apps-rehearsal.ts";
 // task-10（B2）：hint 语义 lint——声明层的静态提醒（stderr warnings 通道；不进 problems、
 // 不改 VALID/exit；clean 应用零输出）。只消费 hint 形状位（见 hint-lint.ts 范围护栏）。
 import { lintHintSemantics, renderHintLintLines } from "../../app/hint-lint.ts";
@@ -783,6 +785,8 @@ export async function runApps(args: string[], ctx: CliContext): Promise<number> 
       return appsCheck(rest, ctx);
     case "explain":
       return appsExplain(rest, ctx);
+    case "rehearsal":
+      return appsRehearsal(rest, ctx);
     case "path":
       return appsPath(rest, ctx);
     case "remove":
@@ -790,7 +794,7 @@ export async function runApps(args: string[], ctx: CliContext): Promise<number> 
       return appsRemove(rest, ctx);
     default:
       throw usageError(`未知的 apps 子命令 '${sub}'`, {
-        hint: "可用：list / new / show / check / explain / path / remove",
+        hint: "可用：list / new / show / check / explain / rehearsal / path / remove",
         next: ["amber apps --help"],
       });
   }
