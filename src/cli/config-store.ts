@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { REPO } from "../support/paths.ts";
 import { amberflowHome } from "../app/amberflow-home.ts";
-import { applyRcToEnv } from "../support/rcfile.ts";
+import { applyRcToEnv, jsonErrorLine, keyLineIn } from "../support/rcfile.ts";
 import { CONFIG_KEYS, isSecretKey, maskValue } from "../support/config-schema.ts";
 
 export { CONFIG_KEYS, isSecretKey };
@@ -43,28 +43,38 @@ export function legacyConfigPath(): string {
 
 export function readConfigFile(file: string, name: string): ConfigLayer {
   if (!fs.existsSync(file)) return { name, path: file, exists: false, values: {}, errors: [] };
+  const text = fs.readFileSync(file, "utf-8");
   let raw: unknown;
   try {
-    raw = JSON.parse(fs.readFileSync(file, "utf-8"));
+    raw = JSON.parse(text);
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // task-7-rider：错误面与 rcfile 同口径——绝对路径 + 行号 + 建议（行号助手共享，不复制第二份）。
+    const line = jsonErrorLine(text, msg);
     return {
       name, path: file, exists: true, values: {},
-      errors: [`${file} 不是合法 JSON：${err instanceof Error ? err.message : String(err)}`],
+      errors: [`${line === null ? file : `${file}:${line}`} 不是合法 JSON：${msg}`
+        + "——建议：修正 JSON 语法（常见：尾逗号/缺引号）；或删除该文件恢复全缺省行为。"],
     };
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return { name, path: file, exists: true, values: {}, errors: [`${file} 顶层必须是对象（键 → 字符串值）`] };
+    return { name, path: file, exists: true, values: {}, errors: [`${file} 顶层必须是对象（键 → 字符串值）`
+      + "——建议：删除该文件恢复全缺省行为，或改回 { \"键\": \"值\" } 形状。"] };
   }
   const values: Record<string, string> = {};
   const errors: string[] = [];
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (key === "_doc") continue;
     if (!KNOWN.has(key)) {
-      errors.push(`${file} 有未知键 ${JSON.stringify(key)}——可用键见 amber config show / configs/amberflowrc.example.json`);
+      const line = keyLineIn(text, key);
+      errors.push(`${line === null ? file : `${file}:${line}`} 有未知键 ${JSON.stringify(key)}——建议：删除该行；`
+        + `可用键见 amber config show / configs/amberflowrc.example.json`);
       continue;
     }
     if (typeof value !== "string") {
-      errors.push(`${file} 的 ${key} 必须是字符串（收到 ${JSON.stringify(value)}）`);
+      const line = keyLineIn(text, key);
+      errors.push(`${line === null ? file : `${file}:${line}`} 的 ${key} 必须是字符串（收到 ${JSON.stringify(value)}）`
+        + "——建议：删除该行，或把值改成带引号的字符串。");
       continue;
     }
     values[key] = value;

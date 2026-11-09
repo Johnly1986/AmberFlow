@@ -42,8 +42,9 @@ export interface RcLoad {
  * 背景：错误只给相对路径 `configs\amberflowrc.json`，真实文件在仓库根（经 npm 全局 junction
  * 隔了好几层），排障要翻目录。现在错误带**绝对路径 + 行号 + 建议动作**。 */
 
-/** 未知键/坏值所在行（1-based；按 `"key":` 词形定位，找不到 = null，不硬猜）。 */
-function keyLineIn(raw: string, key: string): number | null {
+/** 未知键/坏值所在行（1-based；按 `"key":` 词形定位，找不到 = null，不硬猜）。
+ * 导出给 config-store（用户/项目统一配置层）共用——行号定位只有这一份实现（task-7-rider）。 */
+export function keyLineIn(raw: string, key: string): number | null {
   const lines = raw.split(/\r?\n/);
   const pattern = new RegExp(`"${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*:`);
   for (let i = 0; i < lines.length; i++) {
@@ -53,7 +54,7 @@ function keyLineIn(raw: string, key: string): number | null {
 }
 
 /** JSON 解析错误的行号：V8 message 带 `position N` 时按换行折算；取不到 = null。 */
-function jsonErrorLine(raw: string, message: string): number | null {
+export function jsonErrorLine(raw: string, message: string): number | null {
   const m = message.match(/position (\d+)/);
   if (m === null) return null;
   const pos = Number(m[1]);
