@@ -3087,7 +3087,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // 规划引导：失败时按停因给一行「下一步建议」（flow 级 stop_code 优先，步级兜底）。
   const nextHint = runNextHint(result);
   fs.writeFileSync(jsonPath, JSON.stringify(result, null, 2), "utf-8");
-  fs.writeFileSync(mdPath, appReportMarkdown(result, nextHint), "utf-8");
+  // 人读的 md 带 UTF-8 BOM：Windows PowerShell 5.1 的 Get-Content 对无 BOM 文件按 ANSI
+  // 读 → 中文全花屏（2026-11-09 取证：无 BOM 读出「杩愯鎶ュ憡」，带 BOM 正确）。
+  // JSON 产物保持无 BOM——Node 的 JSON.parse 不容 BOM（读取必须显式 UTF-8，见
+  // docs/APP_SCRIPT_AUTHORING.md「运行产物」）。BOM 只在写盘面加；stdout 打印不加。
+  fs.writeFileSync(mdPath, "\uFEFF" + appReportMarkdown(result, nextHint), "utf-8");
   fs.writeFileSync(htmlPath, appReportHtml(result, nextHint), "utf-8");
   if (!quiet) {
     console.log();

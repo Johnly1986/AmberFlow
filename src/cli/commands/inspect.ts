@@ -29,6 +29,17 @@ import { commandHelp } from "../registry.ts";
 
 type ProbeOutcome = { selector: string; count?: number; texts?: string[]; error?: string };
 
+/** task-6 `--summary`：人话紧凑输出的有界常量（总行数 ≈ 头 3 + 元素 12 + 尾注 ≤ 15 + probe ≤ 10）。 */
+const SUMMARY_ELEMENTS = 12;
+const SUMMARY_HINTS_PER_ELEMENT = 2;
+const SUMMARY_LABEL_CHARS = 36;
+const SUMMARY_HREF_CHARS = 40;
+
+/** 有界截断：≤max 字符，超出以 … 收尾。 */
+function clipChars(s: string, max: number): string {
+  return s.length <= max ? s : `${s.slice(0, Math.max(0, max - 1))}…`;
+}
+
 /** 只读探测一个 selector：存在数 + 前 5 条文本摘录。坏 selector 如实报错，不崩。 */
 async function probeSelector(
   page: { evaluate(script: string): Promise<unknown> },
@@ -105,6 +116,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
         text: { type: "boolean" },
         pool: { type: "boolean" },
         wide: { type: "boolean" },
+        summary: { type: "boolean" },
         probe: { type: "string", multiple: true },
         screenshot: { type: "string" },
         timeout: { type: "string" },
@@ -348,12 +360,46 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       }));
       return 0;
     }
+    const surfaceLine = Object.entries(windowInfo.surface_counts)
+      .map(([k, v]) => `${k} ${v}`).join("、");
+    // task-6 `--summary`：人话紧凑输出（行数有界）。只改人话面——`--json` 面逐字节不变
+    // （summary 旗标不进 JSON；--pool/--wide/--probe 的 JSON 语义照旧）。
+    if (v.summary === true) {
+      say(ctx, `${data.title} — ${data.url}`);
+      say(ctx, `观察时刻 ${sawAt}${waitMs > 0 ? `（--wait-ms ${waitMs}）` : ""}；元素 ${data.element_count} 个${data.truncated ? `（截断，只显示前 ${max}）` : ""}`);
+      const shown = elements.slice(0, SUMMARY_ELEMENTS);
+      for (const e of shown) {
+        const rec = e as Record<string, unknown>;
+        const href = typeof rec["href"] === "string" ? String(rec["href"])
+          : typeof rec["href_full"] === "string" ? String(rec["href_full"]) : "";
+        const hints = e.hint_candidates.slice(0, SUMMARY_HINTS_PER_ELEMENT)
+          .map((h) => clipChars(h, SUMMARY_HREF_CHARS));
+        say(ctx, `  ${e.ref} ${e.tag} ${clipChars(e.label, SUMMARY_LABEL_CHARS)}`
+          + `${href ? `  ${clipChars(href, SUMMARY_HREF_CHARS)}` : ""}`
+          + `${hints.length ? `  hints: ${hints.join(" | ")}` : ""}`);
+      }
+      if (elements.length > shown.length) {
+        say(ctx, `  …另有 ${elements.length - shown.length} 个元素未展示（完整清单用默认输出或 --json）`);
+      }
+      if (surfaceLine) say(ctx, `ℹ 可见类目计数：${surfaceLine}（准入面）`);
+      if (nearEmpty) {
+        say(ctx, `⚠ 主池近空（interactive_on_page=${interactiveOnPage}）——宽扫/池投影诊断见默认输出或 --json 的 pool_near_empty`);
+      }
+      for (const a of shownAdvisories.slice(0, 3)) say(ctx, `  ⚠ ${String(a.message)}`);
+      for (const p of probes) {
+        const verdict = p.error !== undefined ? p.error
+          : p.count === 0 ? "无命中"
+          : `${p.count} 命中${p.texts?.length ? `：${p.texts.join(" / ")}` : ""}`;
+        say(ctx, `  probe  ${p.selector} → ${verdict}`);
+      }
+      if (text) say(ctx, `文本摘要：${clipChars(text, 200)}`);
+      say(ctx, `（--summary：元素仅前 ${SUMMARY_ELEMENTS} 条、hints 前 ${SUMMARY_HINTS_PER_ELEMENT} 条、href ≤${SUMMARY_HREF_CHARS} 字符——完整清单去掉 --summary，机器消费用 --json）`);
+      return 0;
+    }
     say(ctx, `${data.title} — ${data.url}`);
     say(ctx, `观察时刻 ${sawAt}${waitMs > 0 ? `（--wait-ms ${waitMs}）` : ""}`);
     say(ctx, `元素 ${data.element_count} 个${data.truncated ? `（只显示前 ${max}）` : ""}`);
     say(ctx, "（hints 可直接当 --hint / ctx.hint 用——不是 CSS；href 等字段是池投影，仅供识别）");
-    const surfaceLine = Object.entries(windowInfo.surface_counts)
-      .map(([k, v]) => `${k} ${v}`).join("、");
     if (surfaceLine) {
       // U3：按类目计数（ADMIT_SEL 可见口径）——区分"页面没有交互事实"与"准入面没覆盖"。
       say(ctx, `ℹ 可见类目计数：${surfaceLine}（准入面；池只展示 ${view.count} 个）`);
