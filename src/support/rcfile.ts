@@ -38,30 +38,66 @@ export interface RcLoad {
   errors: string[];
 }
 
+/* ---- task-7：错误文案面增强（只改消息，不改校验语义与键集合） ----
+ * 背景：错误只给相对路径 `configs\amberflowrc.json`，真实文件在仓库根（经 npm 全局 junction
+ * 隔了好几层），排障要翻目录。现在错误带**绝对路径 + 行号 + 建议动作**。 */
+
+/** 未知键/坏值所在行（1-based；按 `"key":` 词形定位，找不到 = null，不硬猜）。 */
+function keyLineIn(raw: string, key: string): number | null {
+  const lines = raw.split(/\r?\n/);
+  const pattern = new RegExp(`"${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*:`);
+  for (let i = 0; i < lines.length; i++) {
+    if (pattern.test(lines[i]!)) return i + 1;
+  }
+  return null;
+}
+
+/** JSON 解析错误的行号：V8 message 带 `position N` 时按换行折算；取不到 = null。 */
+function jsonErrorLine(raw: string, message: string): number | null {
+  const m = message.match(/position (\d+)/);
+  if (m === null) return null;
+  const pos = Number(m[1]);
+  if (!Number.isFinite(pos) || pos < 0 || pos >= raw.length) return null;
+  let line = 1;
+  for (let i = 0; i < pos; i++) {
+    if (raw[i] === "\n") line++;
+  }
+  return line;
+}
+
+const atLine = (p: string, line: number | null): string => (line === null ? p : `${p}:${line}`);
+
 /** 读并校验 rc 文件。文件不存在 ⇒ 合法的空配置（默认等价）。 */
 export function loadRc(root: string = REPO_ROOT): RcLoad {
   const p = path.join(root, RC_REL);
   if (!fs.existsSync(p)) return { path: null, values: {}, errors: [] };
+  const text = fs.readFileSync(p, "utf-8");
   let raw: unknown;
   try {
-    raw = JSON.parse(fs.readFileSync(p, "utf-8"));
+    raw = JSON.parse(text);
   } catch (e) {
-    return { path: p, values: {}, errors: [`${RC_REL} 不是合法 JSON：${e instanceof Error ? e.message : String(e)}`] };
+    const msg = e instanceof Error ? e.message : String(e);
+    const line = jsonErrorLine(text, msg);
+    return { path: p, values: {}, errors: [`${atLine(p, line)} 不是合法 JSON：${msg}`
+      + "——建议：修正 JSON 语法（常见：尾逗号/缺引号）；或删除该文件恢复全缺省行为。"] };
   }
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return { path: p, values: {}, errors: [`${RC_REL} 顶层必须是对象（键 → 字符串值）`] };
+    return { path: p, values: {}, errors: [`${p} 顶层必须是对象（键 → 字符串值）`
+      + "——建议：删除该文件恢复全缺省行为，或改回 { \"键\": \"值\" } 形状。"] };
   }
   const values: Record<string, string> = {};
   const errors: string[] = [];
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
     if (k === "_doc") continue;                     // example 文件的自述键，允许存在
     if (!KNOWN_KEYS.has(k)) {
-      errors.push(`${RC_REL} 有未知键 ${JSON.stringify(k)}——已知键见 configs/amberflowrc.example.json；`
-        + "若是刻意想钉的东西（如展开日期），它属于仓库常量，不属于机器配置。");
+      errors.push(`${atLine(p, keyLineIn(text, k))} 有未知键 ${JSON.stringify(k)}——建议：删除该行；`
+        + `已知键见 configs/amberflowrc.example.json；若是刻意想钉的东西（如展开日期），`
+        + "它属于仓库常量，不属于机器配置。");
       continue;
     }
     if (typeof v !== "string") {
-      errors.push(`${RC_REL} 的 ${k} 必须是字符串（收到 ${JSON.stringify(v)}）`);
+      errors.push(`${atLine(p, keyLineIn(text, k))} 的 ${k} 必须是字符串（收到 ${JSON.stringify(v)}）`
+        + "——建议：删除该行，或把值改成带引号的字符串。");
       continue;
     }
     values[k] = v;

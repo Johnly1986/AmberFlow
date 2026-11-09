@@ -20,7 +20,16 @@ const check = process.argv.includes("--check");
 if (check) {
   const actual = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "";
   if (actual !== expected) {
-    console.error(`configs/amberflowrc.example.json 与 src/support/config-schema.ts 不一致；运行 npm run config:example 重新生成。`);
+    // task-7：错误面给绝对路径 + 首个差异行号 + 建议动作（只改文案，门禁语义不变）。
+    const expLines = expected.split("\n");
+    const actLines = actual.split("\n");
+    let diffLine: number | null = null;
+    for (let i = 0; i < Math.max(expLines.length, actLines.length); i++) {
+      if (expLines[i] !== actLines[i]) { diffLine = i + 1; break; }
+    }
+    console.error(`${file}${diffLine === null ? "" : `（首个差异在第 ${diffLine} 行）`}`
+      + " 与 src/support/config-schema.ts 不一致——"
+      + "建议：该文件是生成物，不要手改；运行 npm run config:example 重新生成。");
     process.exit(1);
   }
   console.log(`configs/amberflowrc.example.json 与 schema 一致（${Object.keys(out).length - 1} keys）`);
