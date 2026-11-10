@@ -37,6 +37,7 @@ import { probeDecisionPlane } from "../model/decision-probe.ts";
 import { loadSiteFacts, matchSiteFacts, renderModelFence, renderSiteFactLines } from "./site-facts.ts";
 import { ensureDir, userAppsDir } from "../support/amberflow-home.ts";
 import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../support/cli-args.ts";
+import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";
 // B1 节奏统一：语义与 env 口径的唯一来源在 support/pace.ts（engine/app/online 三脸共用，无环）。
@@ -1064,7 +1065,7 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
         ? { value: declaredPolicy.conf_floor, source: "app" as const }
         : opts.providerFloor !== undefined
           ? { value: opts.providerFloor, source: "provider" as const }
-          : { value: 0.25, source: "default" as const },
+          : { value: DEFAULT_CONF_FLOOR, source: "default" as const },
     done_timeout_ms: {
       value: declaredPolicy.done_timeout_ms ?? 2000,
       source: declaredPolicy.done_timeout_ms !== undefined ? "app" as const : "default" as const,
@@ -1171,7 +1172,7 @@ async function promptManualOnTty(req: ManualStepRequest): Promise<boolean> {
 export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<AppRunResult> {
   const {
     slots = {}, sources = true, confirmSafe = true, verbose = true,
-    planPath = path.join(os.tmpdir(), "amberflow-apps", `${pack.id}-plan.json`),
+    planPath = path.join(appsOutDir(), `${pack.id}-plan.json`),
     modelId = pack.model ?? "english",
   } = opts;
   const t0 = Date.now();
@@ -1370,8 +1371,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   // task-14（D1·兼容性三件）：声明式路径与 flow 路径同账——起跑探测一次（只探默认配置面，
   // 未显式指定 provider 时）。探测失败 = 兼容降级（规则面继续），mw 上留痕（收尾进 result）。
   if (typeof process.env.AMBERFLOW_DECISION_BASE_URL === "string"
-      && process.env.AMBERFLOW_DECISION_BASE_URL !== ""
-      && process.env.AMBERFLOW_DECISION_PROVIDER === undefined) {
+      && process.env.AMBERFLOW_DECISION_BASE_URL !== "") {
     mw.decisionCompat = true;
     const probe = await probeDecisionPlane();
     if (!probe.ok && probe.reasonClass !== undefined) {
@@ -2153,10 +2153,10 @@ const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [-
 
 /**
  * app-runner 默认产物目录（**调用时**读 env，测试可隔离）。
+ * 单源在 support/amberflow-home.ts（cli/run 同用这一个出处）。
  */
-export function appsOutDir(env: NodeJS.ProcessEnv = process.env): string {
-  return env.AMBERFLOW_APPS_OUT ?? path.join(os.tmpdir(), "amberflow-apps");
-}
+import { appsOutDir } from "../support/amberflow-home.ts";
+export { appsOutDir };
 
 /**
  * 跑一个 `flow(ctx)` 应用。运行时仍然只认数据与证据面：
@@ -2188,7 +2188,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     pack.secret_slots,
   );
   const secretValues = secretValuesFromSlots(slots, secretKeys);
-  const planPath = opts.planPath ?? path.join(os.tmpdir(), "amberflow-apps", `${pack.id}-plan.json`);
+  const planPath = opts.planPath ?? path.join(appsOutDir(), `${pack.id}-plan.json`);
   const outDir = opts.outDir ?? path.dirname(planPath);
   const runId = opts.runId ?? `${Date.now().toString(36)}-${process.pid}`;
   const inputs = inputsSha256(slots, (pack.hosts ?? []) as string[]);
@@ -2352,8 +2352,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // 逐字节不变，唯一差异是起跑多付一次最小 ask）；失败 = 兼容降级：本次 run 停发模型调用
     // （规则面继续、升级链规则兜底、死服务不重试），result 顶层 decision.degraded 留痕。
     if (typeof process.env.AMBERFLOW_DECISION_BASE_URL === "string"
-        && process.env.AMBERFLOW_DECISION_BASE_URL !== ""
-        && process.env.AMBERFLOW_DECISION_PROVIDER === undefined) {
+        && process.env.AMBERFLOW_DECISION_BASE_URL !== "") {
       getMw().decisionCompat = true;
       const probe = await probeDecisionPlane();
       if (!probe.ok && probe.reasonClass !== undefined) {

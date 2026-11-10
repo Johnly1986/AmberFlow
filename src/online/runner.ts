@@ -12,6 +12,7 @@ import {
 import { TaskPlan } from "../engine/plan.ts";
 import { runSubgoalWithRetries } from "../engine/planner.ts";
 import { checkSignal } from "../engine/signals.ts";
+import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts";
 import {
   applySpecToRuntime, installDecisionProvider, resolveProviderSpec,
 } from "../model/decision-provider.ts";
@@ -101,7 +102,7 @@ async function classify(
 function newMiddleware(maxSteps = 8, actionDelayMs = 0): BrowserMiddleware {
   return new BrowserMiddleware({
     maxSteps,
-    confFloor: 0.25,
+    confFloor: DEFAULT_CONF_FLOOR,
     confirmFn: () => true,
     manualConfirmFn: null,
     // B1：动作间间距接线（env-only；缺省 0 = 行为不变）。

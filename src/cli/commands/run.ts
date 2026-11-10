@@ -10,6 +10,7 @@ import { emitPlanStatus } from "../plan-result.ts";
 import { flatList, injectOptionalValue, normalizeAliases, parseSlots } from "../args.ts";
 import { toAgentRunView } from "../../app/agent-view.ts";
 import type { AppRunResult } from "../../app/app-runner.ts";
+import { appsOutDir } from "../../support/amberflow-home.ts";
 import { maskSecretSlots, secretSlotKeys } from "../../app/redaction.ts";
 
 export const DEFAULT_PLAN = "./.amberflow/plan.json";
@@ -69,12 +70,9 @@ function decisionServiceConfigured(ctx: CliContext): boolean {
   return (ctx.env.AMBERFLOW_DECISION_BASE_URL ?? "").trim() !== "";
 }
 
-/** 结果落盘目录（与 `src/app/app-runner.ts` 的 appsOutDir 同一规则；这里只用于读回结果）。 */
+/** 结果落盘目录（默认路径单源在 `support/amberflow-home.ts` 的 appsOutDir）。 */
 function appsResultDir(ctx: CliContext, userOut: string | undefined): string {
-  return path.resolve(
-    ctx.cwd,
-    userOut ?? ctx.env.AMBERFLOW_APPS_OUT ?? path.join(os.tmpdir(), "amberflow-apps"),
-  );
+  return path.resolve(ctx.cwd, userOut ?? appsOutDir(ctx.env));
 }
 
 /**

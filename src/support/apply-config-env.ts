@@ -18,6 +18,7 @@
  */
 import { resolveConfig } from "./config-store.ts";
 import { applyRcToEnv } from "./rcfile.ts";
+import { applyEnvNoOverwrite } from "./merge-env.ts";
 
 export interface AppliedConfigEnv {
   /** 本调用实际补进 env 的键（环境变量已设置的键不会被覆盖，不会出现在这里）。 */
@@ -47,12 +48,11 @@ export function applyConfiguredEnv(
     return { applied: [], errors };
   }
   errors.push(...resolved.errors);
-  const applied: string[] = [];
+  // 「已设键不覆盖」合并语义单源在 merge-env.ts（与 CLI 入口共用）。
+  const effective: NodeJS.ProcessEnv = {};
   for (const [key, entry] of Object.entries(resolved.values)) {
-    if (baseEnv[key] === undefined || baseEnv[key] === "") {
-      baseEnv[key] = entry.value;
-      applied.push(key);
-    }
+    effective[key] = entry.value;
   }
-  return { applied, errors };
+  const { touched } = applyEnvNoOverwrite(baseEnv, effective);
+  return { applied: touched, errors };
 }

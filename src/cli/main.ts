@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { REPO } from "../support/paths.ts";
-import { CONFIG_KEYS, resolveConfig } from "../support/config-store.ts";
+import { resolveConfig } from "../support/config-store.ts";
+import { applyEnvNoOverwrite, restoreEnv } from "../support/merge-env.ts";
 import { commandHelp, commandSpec, COMMANDS, globalHelp, helpCommandsPayload, suggestion } from "./registry.ts";
 import { HOME_NEXT, OVERVIEW_TEXT } from "../support/help-map.ts";
 import { makeContext, say, emitJson, type CliContext, type GlobalOptions } from "./context.ts";
@@ -146,24 +147,12 @@ function commandPath(command: string | null, rest: string[]): string {
 }
 
 function syncConfigEnv(baseEnv: NodeJS.ProcessEnv, effective: NodeJS.ProcessEnv): { touched: string[] } {
-  const touched: string[] = [];
-  for (const key of CONFIG_KEYS) {
-    const before = process.env[key];
-    const next = effective[key];
-    if ((before === undefined || before === "") && next !== undefined && next !== "") {
-      process.env[key] = next;
-      touched.push(key);
-    }
-  }
-  return { touched };
+  // 「已设键不覆盖」合并语义单源在 support/merge-env.ts（CLI 与原始工具入口共用）。
+  return applyEnvNoOverwrite(baseEnv, effective);
 }
 
 function restoreConfigEnv(baseEnv: NodeJS.ProcessEnv, touched: string[]): void {
-  for (const key of touched) {
-    const before = baseEnv[key];
-    if (before === undefined) delete process.env[key];
-    else process.env[key] = before;
-  }
+  restoreEnv(baseEnv, touched);
 }
 
 function reportError(ctx: CliContext, command: string, err: unknown, json: boolean): number {
@@ -479,7 +468,7 @@ export async function main(argv: string[] = process.argv.slice(2), options: Main
     ctx.env.NO_COLOR = "1";
     process.env.NO_COLOR = "1";
   }
-  const { touched } = syncConfigEnv(baseEnv, resolved.env);
+  const { touched } = syncConfigEnv(process.env, resolved.env);
 
   try {
     if (!command) {

@@ -93,6 +93,12 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
       { key: "AMBERFLOW_QUIET", default: "0", description: "1 = 只输出结论" },
     ],
   },
+  {
+    group: "实验开关（opt-in）",
+    keys: [
+      { key: "AMBERFLOW_SITE_FACTS_INTO_MODEL", default: "0", description: "1 = 站点事实注入模型请求面（fenced 块；缺省 OFF = notes 原样）" },
+    ],
+  },
 ];
 
 export const RC_GROUPS: Array<{ group: string; keys: string[] }> = CONFIG_GROUPS.map((g) => ({
@@ -112,6 +118,37 @@ export const DECISION_SERVICE_KEYS: readonly string[] = keysOfGroup("决策服�
 
 /** 运行参数默认值键：从唯一 schema 派生，`run-defaults.ts` 只负责类型解析。 */
 export const RUN_DEFAULT_KEYS: readonly string[] = keysOfGroup("运行参数（CLI 旗标的配置默认值）");
+
+/** 决策闸门刻度的全局兜底（provider 自报 / 包策略 / CLI 覆盖都没有时的缺省值）。单源。 */
+export const DEFAULT_CONF_FLOOR = 0.25;
+
+/** 统一决策服务的缺省单请求超时（毫秒）。`AMBERFLOW_DECISION_TIMEOUT_MS` 未设时生效。单源。 */
+export const DEFAULT_DECISION_TIMEOUT_MS = 30_000;
+
+/**
+ * Provider 专属实验键（**仅文档性分组，不进配置面**）：
+ * `amber config set` 对它们会按未知键拒绝，写进 amberflowrc.json 也会在加载期拒绝。
+ * 它们只由各家 provider 消费点按环境变量直接读（决策模型 provider 的 `--provider` 消融实验面）。
+ * 这些键是"引擎不认识站点/具体提供商"纪律的例外：provider 是引擎的插件面，各带自己的配置词汇。
+ */
+export const PROVIDER_ONLY_KEYS: readonly ConfigGroupSpec[] = [
+  {
+    group: "Provider 专属（仅文档性，不进配置面）",
+    keys: [
+      { key: "BAILIAN_API_KEY", secret: true, description: "百炼 API key（回退 DASHSCOPE_API_KEY）；只按名读，绝不内联" },
+      { key: "BAILIAN_MODEL", description: "百炼模型名（空 = 默认）" },
+      { key: "BAILIAN_ENDPOINT", description: "百炼端点全 URL" },
+      { key: "BAILIAN_WORKSPACE_ID", description: "百炼 workspace 作用域 ID" },
+      { key: "BAILIAN_REGION", description: "百炼区域（有默认值）" },
+      { key: "TOKEN_PLAN_ENDPOINT", description: "Token Plan 端点（完整 URL，含 /…/v1/systemone）" },
+      { key: "TOKEN_PLAN_API_KEY", secret: true, description: "Token Plan API key（回退 DASHSCOPE_API_KEY）" },
+      { key: "TOKEN_PLAN_MODEL", description: "Token Plan 模型名（空 = 默认）" },
+      { key: "TOKEN_PLAN_STATE_CONTEXT", description: "旧名兼容；0 = 不带 state 上下文（等价 AMBERFLOW_DECISION_STATE_CONTEXT）" },
+      { key: "DASHSCOPE_API_KEY", secret: true, description: "DashScope API key（多家 provider 共用回退）" },
+      { key: "JEVK5_ENDPOINT", description: "JevK5 端点（指向 /v1/systemone）" },
+    ],
+  },
+];
 
 const SECRETISH = /API_KEY|SECRET|PASSWORD|ACCESS_TOKEN/;
 

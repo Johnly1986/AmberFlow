@@ -59,3 +59,12 @@ export function ensureDir(dir: string): string {
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
+
+/**
+ * 应用跑批的默认产物目录（**调用时**读 env，测试可隔离）：
+ * `$AMBERFLOW_APPS_OUT`，未设时 `os.tmpdir()/amberflow-apps`。
+ * app-runner 与 cli/run 共用这一个出处（消两处手写字面量）。
+ */
+export function appsOutDir(env: NodeJS.ProcessEnv = process.env): string {
+  return env.AMBERFLOW_APPS_OUT ?? path.join(os.tmpdir(), "amberflow-apps");
+}

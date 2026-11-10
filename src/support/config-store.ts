@@ -3,6 +3,7 @@ import path from "node:path";
 import { REPO } from "../support/paths.ts";
 import { amberflowHome } from "./amberflow-home.ts";
 import { applyRcToEnv, jsonErrorLine, keyLineIn } from "../support/rcfile.ts";
+import { applyEnvNoOverwrite } from "./merge-env.ts";
 import { CONFIG_KEYS, isSecretKey, maskValue } from "../support/config-schema.ts";
 
 export { CONFIG_KEYS, isSecretKey };
@@ -107,10 +108,15 @@ export function resolveConfig(
     ? [readConfigFile(path.resolve(cwd, explicitConfig), "显式配置")]
     : [readConfigFile(userConfigPath(baseEnv), "用户配置"), readConfigFile(projectConfigPath(cwd), "项目配置")];
   for (const layer of fileLayers) {
+    // 「已设键不覆盖」合并语义单源在 merge-env.ts（与 CLI 入口 / apply-config-env / rc 共用）。
+    const effective: NodeJS.ProcessEnv = {};
     for (const [key, v] of Object.entries(layer.values)) {
-      if (v === "" || filled(key)) continue;
-      env[key] = v;
-      values[key] = { value: v, source: layer.name, secret: isSecretKey(key) };
+      if (v === "") continue;   // 空串 = 没设（example 留空占位）
+      effective[key] = v;
+    }
+    const { touched } = applyEnvNoOverwrite(env, effective);
+    for (const key of touched) {
+      values[key] = { value: env[key]!, source: layer.name, secret: isSecretKey(key) };
     }
   }
 

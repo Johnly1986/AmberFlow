@@ -108,6 +108,7 @@ import {
 import { decisionFailureFact, decisionProviderOrNull, layaProvider, type DecisionProvider } from "../model/decision-provider.ts";
 // task-24/6a：限速判据阈值单一出处（step 侧与 arrive 侧共用）。
 import { THROTTLE_BODY_FLOOR, THROTTLE_COLLAPSE_RATIO, THROTTLE_POOL_HIGH_MIN } from "./throttle-signature.ts";
+import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts";
 // task-14（D1）：探测失败分类与建议文案的单一出处。
 import { classifyDecisionFailure, decisionDegradedAdvice } from "../model/decision-probe.ts";
 import { applyRange, type RangeOptions, type RangeOutcome, type RangeValue } from "./range.ts";
@@ -2074,7 +2075,7 @@ export class BrowserMiddleware {
     this.router = opts.router ?? null;
     this.auditor = opts.auditor ?? getAuditor();
     this.maxSteps = opts.maxSteps ?? 8;
-    this.confFloor = opts.confFloor ?? 0.25;
+    this.confFloor = opts.confFloor ?? DEFAULT_CONF_FLOOR;
     this.riskyThreshold = opts.riskyThreshold ?? 0.6;
     this.doneThreshold = opts.doneThreshold ?? 0.5;
     this.confirmFn = opts.confirmFn ?? DEFAULT_CONFIRM;

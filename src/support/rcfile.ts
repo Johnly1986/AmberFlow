@@ -17,6 +17,7 @@
  */
 import fs from "node:fs";
 import { REPO as REPO_ROOT } from "./paths.ts";
+import { applyEnvNoOverwrite } from "./merge-env.ts";
 
 export { REPO_ROOT };
 import path from "node:path";
@@ -124,13 +125,16 @@ export function applyRcToEnv(env: NodeJS.ProcessEnv = process.env, root: string 
     return lastApply;
   }
   const load = loadRc(root);
-  const applied: string[] = [];
+  let applied: string[] = [];
   if (load.errors.length === 0) {
+    // 「已设键不覆盖」合并语义单源在 merge-env.ts（CLI 入口 / apply-config-env / rc 最低层共用）。
+    const effective: NodeJS.ProcessEnv = {};
     for (const [k, v] of Object.entries(load.values)) {
       // 空串 = 没设（example 里留空占位用的）：写进 env 会击穿消费点的 `?? 缺省` 链。
       if (v === "") continue;
-      if (env[k] === undefined || env[k] === "") { env[k] = v; applied.push(k); }
+      effective[k] = v;
     }
+    applied = applyEnvNoOverwrite(env, effective).touched;
   }
   const result = { ...load, applied };
   if (env === process.env) lastApply = result;
