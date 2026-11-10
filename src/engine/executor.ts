@@ -195,6 +195,47 @@ import {
   asFunction, FN_VALS, FN_HIT, FN_HIT_DETAIL, FN_EMPTIES, FN_GUARD,
 } from "./eval-snippets.ts";
 
+/* ------------------------------------------------------------------ run ctx */
+
+/**
+ * F3：run() 报告尾（runReportTail）的只读上下文。它是 run() 执行循环结束后
+ * 的状态快照——false_done 复核 / 审计 / 限速嗅探 / diagnostics / 最终 RunReport
+ * 都只**读**这些事实，不再修改执行循环。字段名与 run() 局部变量一一对应，
+ * 保证调用点零改写；`stop` 闭包以函数形式传入（runReportTail 在 false_done
+ * 档会写 stopCode/stopReason，复用同一闭包保持记账单一来源）。
+ */
+interface RunReportTailCtx {
+  instruction: string;
+  done: boolean;
+  manualDone: boolean;
+  dryRan: boolean;
+  donePreheld: boolean | null;
+  stopCode: StopCode;
+  stopReason: string;
+  stopStep: number | undefined;
+  trace: TraceStep[];
+  goalSignalFn: ((page: AnyPage) => Promise<boolean> | boolean) | null;
+  page: AnyPage | null;
+  hostGate: string[] | null;
+  doneSpec: SignalSpec | null;
+  executedCount: number;
+  frameGate: FrameGate | null;
+  doneInExcluded: boolean;
+  warnings: string[];
+  lastPageRef: AnyPage | null;
+  lastPoolSize: number;
+  lastPoolWaitedMs: number;
+  lastReadiness: Readiness | null;
+  viewportUnderloaded: Array<{ tag: string; id: string; scrollHeight: number; clientHeight: number; rendered: number }> | null;
+  getLastDeclaredHidden: () => { target: string; hidden: number; total: number } | null;
+  skippedActions: SkippedAction[];
+  stepState: StepStateRecord | undefined;
+  cmdSpace: CommandDecl[];
+  verbose: boolean;
+  poolReady: boolean;
+  stop: (code: StopCode, detail?: string, at?: number) => void;
+}
+
 /* ------------------------------------------------------------------ helpers */
 
 /** `.first` across both Playwright runtimes (property vs method). */
@@ -283,10 +324,10 @@ function sigEq(a: Sig, b: Sig): boolean {
  * envelope: offline fixture packs declare no hosts and must keep working unchanged.
 /** 纯函数区（helpers/池判定/风险刻画/缺省确认）—— 拆到 executor-pure.ts（F2）。 */
 export * from "./executor-pure.ts";
+import type { DeviceSpec } from "./executor-pure.ts";
 import {
   ALL_FAMILIES,
   DEFAULT_CONFIRM,
-  DeviceSpec,
   EFFECT_MASK,
   SECRET_INPUT_TYPES,
   bindingCandidateSummaries,
@@ -4638,13 +4679,62 @@ export class BrowserMiddleware {
       if (browser !== null) await browser.close();
     }
 
+    // F3：run() 报告尾收归 runReportTail（纯只读状态快照 → RunReport）。
+    const rttCtx: RunReportTailCtx = {
+      instruction,
+      done,
+      manualDone,
+      dryRan,
+      donePreheld,
+      stopCode,
+      stopReason,
+      stopStep,
+      trace,
+      goalSignalFn,
+      page,
+      hostGate,
+      doneSpec,
+      executedCount,
+      frameGate,
+      doneInExcluded,
+      warnings,
+      lastPageRef,
+      lastPoolSize,
+      lastPoolWaitedMs,
+      lastReadiness,
+      viewportUnderloaded,
+      getLastDeclaredHidden,
+      skippedActions,
+      stepState,
+      cmdSpace,
+      verbose,
+      poolReady,
+      stop: () => {},
+    };
+    // ctx.stop 包装原 stop 闭包，并把新停因同步回 ctx（false_done 档需要读到新值）。
+    rttCtx.stop = (code: StopCode, detail?: string, at?: number) => {
+      stop(code, detail, at);
+      rttCtx.stopCode = code;
+      if (detail !== undefined) rttCtx.stopReason = detail;
+      if (at !== undefined) rttCtx.stopStep = at;
+    };
+    return await this.runReportTail(rttCtx);
+  }
+
+  /**
+   * F3：run() 报告尾（原 run 内 finally 之后的收尾块）。只读执行循环留下的
+   * 状态快照（RunReportTailCtx），产出最终 RunReport。零行为差异——逻辑逐行
+   * 平移，仅把 run() 局部变量改为 ctx.xxx；`ctx.stop` 由 run() 包装原 stop
+   * 闭包并同步 ctx.stopCode/stopReason/stopStep（false_done 档需要）。
+   */
+  private async runReportTail(ctx: RunReportTailCtx): Promise<RunReport> {
     // P0-D：done 只在被排除 frame 上成立 = 完成依赖被排除帧，结构化停因（不留假成功，
     // 也不混成普通 done_not_held）。
-    if (!done && doneInExcluded) {
-      stopCode = "frame_not_allowed";
-      stopReason = `done signal holds only inside frame(s) `
-        + `${frameGate === null ? "-" : frameGate.origins.join(", ")} excluded by the declared hosts envelope `
-        + `(${(hostGate ?? []).join(", ")}) — `
+    if (!ctx.done && ctx.doneInExcluded) {
+      ctx.stopCode = "frame_not_allowed";
+      ctx.stopReason = `done signal holds only inside frame(s) `
+        + `${ctx.frameGate === null ? "-" : ctx.frameGate.origins.join(", ")} excluded by the declared hosts envelope `
+        + `(${(ctx.hostGate ?? []).join(", ")}) — `
         + `frames_excluded 只是默认排除第三方非交互 frame，不需要为此加 hosts；`
         + `仅当声明 done 确需该 frame 时才评估把它的 origin 加进 meta.hosts，`
         + `否则把 done 锚到允许 frame 内的事实`;
@@ -4653,21 +4743,21 @@ export class BrowserMiddleware {
     // 除非 policy.done_guard:"fail"；缺省 warn 档只把证据记进 warnings（步骤仍 ok）。
     // 触发面：① 登录墙特征（主 frame URL 词边界命中 / title 或 h1-h3 登录文案 /
     // 跨出 meta.hosts 信封）；② 有动作但全部 changed=false 且 done 是否定式（零前进蹭成立）。
-    if (done && !manualDone && !dryRan && goalSignalFn !== null && page !== null) {
-      const liveUrl = (() => { try { return String(urlOf(page) ?? ""); } catch { return ""; } })();
+    if (ctx.done && !ctx.manualDone && !ctx.dryRan && ctx.goalSignalFn !== null && ctx.page !== null) {
+      const liveUrl = (() => { try { return String(urlOf(ctx.page) ?? ""); } catch { return ""; } })();
       const ev = await (async (): Promise<Record<string, string> | null> => {
         const out: Record<string, string> = {};
         if (LOGIN_WALL_URL_RE.test(liveUrl)) out.url_hit = liveUrl;
-        if (hostGate !== null && hostGate.length > 0 && liveUrl
-          && !urlInHostsEnvelope(liveUrl, hostGate)) out.host_outside = liveUrl;
+        if (ctx.hostGate !== null && ctx.hostGate.length > 0 && liveUrl
+          && !urlInHostsEnvelope(liveUrl, ctx.hostGate)) out.host_outside = liveUrl;
         try {
-          const r = await (page as AnyPage).evaluate(FN_GUARD) as { hit?: string | null; where?: string | null };
+          const r = await (ctx.page as AnyPage).evaluate(FN_GUARD) as { hit?: string | null; where?: string | null };
           if (r && r.hit) out.text_hit = `${r.where}: "${r.hit}"`;
         } catch { /* 只读复核拿不到就跳过这一项，不影响判定 */ }
         return Object.keys(out).length ? out : null;
       })();
-      const zeroProgress = doneSpec !== null && isWeakNegativeSignal(doneSpec)
-        && executedCount > 0 && !trace.some((t) => t["executed"] === true && t["changed"] === true);
+      const zeroProgress = ctx.doneSpec !== null && isWeakNegativeSignal(ctx.doneSpec)
+        && ctx.executedCount > 0 && !ctx.trace.some((t) => t["executed"] === true && t["changed"] === true);
       if (ev !== null || zeroProgress) {
         const parts: string[] = [];
         if (ev?.url_hit) parts.push(`main-frame URL matches a login-wall feature`);
@@ -4682,17 +4772,17 @@ export class BrowserMiddleware {
           + `；可直接抄的构造器：done: ctx.judge.all(not(ctx.judge.loginWall()), <正向锚>)`
           + `（信号语言的 all_of；loginWall 是 kit 一等构造器；<正向锚> 换成动作后才成立的 exists/holds/url 事实）`;
         if (this.doneGuardPolicy === "fail") {
-          done = false;
-          stop("false_done", why);
-          if (verbose) console.log(`  step: ${stopReason}`);
+          ctx.done = false;
+          ctx.stop("false_done", why);
+          if (ctx.verbose) console.log(`  step: ${ctx.stopReason}`);
         } else {
-          if (!warnings.some((w) => w.startsWith("false_done:"))) warnings.push(`false_done: ${why}`);
-          if (verbose) console.log(`  step: warning false_done (done stays ok; policy.done_guard="warn")`);
+          if (!ctx.warnings.some((w) => w.startsWith("false_done:"))) ctx.warnings.push(`false_done: ${why}`);
+          if (ctx.verbose) console.log(`  step: warning false_done (done stays ok; policy.done_guard="warn")`);
         }
       }
     }
-    const verdict = (await this.auditor.audit(instruction, trace, done)) as AuditVerdict;
-    const stoppedCode = stopCode as StopCode;
+    const verdict = (await this.auditor.audit(ctx.instruction, ctx.trace, ctx.done)) as AuditVerdict;
+    const stoppedCode = ctx.stopCode as StopCode;
     // task-11（B3，评审 #8）：信号不成立时的会话级骤降嗅探——限速/降频判读证据。
     // 组合判据防误报（正常小页面本来元素就少，不触发）：本会话池高峰 ≥20 且当前池 ≤ 高峰/4
     // （probe3 现场 202→15），或两次失败嗅探之间正文塌缩（prev ≥2000 且 cur ≤ prev/4）。
@@ -4700,24 +4790,24 @@ export class BrowserMiddleware {
     // 不新增 stopCode（stopCode 表是脚本分支契约）——warning + diagnostics 证据，判读
     // 指引见 docs/APP_SCRIPT_AUTHORING.md §10（已知处置：冷却/降频/分批，不绕过）。
     let throttleSuspect: ThrottleSuspect | null = null;
-    if (done !== true && lastPageRef !== null) {
+    if (ctx.done !== true && ctx.lastPageRef !== null) {
       let failSniff: Awaited<ReturnType<typeof poolSniff>> | null = null;
       try {
-        failSniff = await poolSniff(lastPageRef as never, admitSelectorWithJsFor(this.surfacePolicy));
+        failSniff = await poolSniff(ctx.lastPageRef as never, admitSelectorWithJsFor(this.surfacePolicy));
       } catch { /* 观察让位事实：页面已不可读时不硬来 */ }
       const bodyPrev = this._lastFailSniff?.body_text ?? null;
       const admittedPrev = this._lastFailSniff?.admitted ?? null;
       // task-24/6a：阈值单源化（throttle-signature.ts——step 侧与 arrive 侧共用，标定改一处）。
       const poolDrop = this._sessionPoolHigh >= THROTTLE_POOL_HIGH_MIN
-        && lastPoolSize > 0
-        && lastPoolSize * THROTTLE_COLLAPSE_RATIO <= this._sessionPoolHigh;
+        && ctx.lastPoolSize > 0
+        && ctx.lastPoolSize * THROTTLE_COLLAPSE_RATIO <= this._sessionPoolHigh;
       const bodyDrop = bodyPrev !== null && bodyPrev >= THROTTLE_BODY_FLOOR
         && failSniff !== null && failSniff.body_text * THROTTLE_COLLAPSE_RATIO <= bodyPrev;
       if (failSniff !== null && (poolDrop || bodyDrop)) {
-        const dh = getLastDeclaredHidden();
+        const dh = ctx.getLastDeclaredHidden();
         throttleSuspect = {
           evidence: {
-            pool_size: lastPoolSize,
+            pool_size: ctx.lastPoolSize,
             pool_size_session_high: this._sessionPoolHigh,
             body_text: failSniff.body_text,
             ...(bodyPrev !== null ? { body_text_prev: bodyPrev } : {}),
@@ -4731,8 +4821,8 @@ export class BrowserMiddleware {
               : {}),
           },
         };
-        warnings.push(`throttle_suspect: 信号不成立且观测到会话级骤降`
-          + `（池 ${this._sessionPoolHigh}→${lastPoolSize}${bodyDrop ? `；正文 ${bodyPrev}→${failSniff.body_text}` : ""}`
+        ctx.warnings.push(`throttle_suspect: 信号不成立且观测到会话级骤降`
+          + `（池 ${this._sessionPoolHigh}→${ctx.lastPoolSize}${bodyDrop ? `；正文 ${bodyPrev}→${failSniff.body_text}` : ""}`
           + `；本会话已运行 ${throttleSuspect.evidence.session_elapsed_ms}ms）`
           + "——疑似站点限速/降频/风控分批。已知处置：冷却后重试、降频（拉大 meta.pace）、分批跑，不绕过反爬；"
           + "证据见 step_traces[].result.diagnostics.throttle_suspect");
@@ -4749,14 +4839,14 @@ export class BrowserMiddleware {
       stoppedCode === "page_not_ready" || stoppedCode === "target_not_found"
       || stoppedCode === "target_ambiguous" || stoppedCode === "action_space_exhausted"
       // U3：ready_empty 没有停因（步级继续），但"池空且已就绪"是必须落盘的事实。
-      || (lastReadiness !== null && lastReadiness.verdict !== "ready")
+      || (ctx.lastReadiness !== null && ctx.lastReadiness.verdict !== "ready")
       // B3：限速判读证据落盘（该步信号不成立 + 会话级骤降）。
       || throttleSuspect !== null
     ) ? {
-      pool_size: lastPoolSize,
-      ...(poolReady ? { waited_ms: lastPoolWaitedMs } : {}),
-      ...(viewportUnderloaded !== null ? { viewport_underloaded: viewportUnderloaded } : {}),
-      ...(lastReadiness !== null && lastReadiness.verdict !== "ready" ? { readiness: lastReadiness } : {}),
+      pool_size: ctx.lastPoolSize,
+      ...(ctx.poolReady ? { waited_ms: ctx.lastPoolWaitedMs } : {}),
+      ...(ctx.viewportUnderloaded !== null ? { viewport_underloaded: ctx.viewportUnderloaded } : {}),
+      ...(ctx.lastReadiness !== null && ctx.lastReadiness.verdict !== "ready" ? { readiness: ctx.lastReadiness } : {}),
       ...(throttleSuspect !== null ? { throttle_suspect: throttleSuspect } : {}),
     } : undefined;
     // A1 动作执行证据汇总（只从 trace 汇总一次，不新增页面往返）：
@@ -4766,11 +4856,11 @@ export class BrowserMiddleware {
     //   done_preheld    —— 命令步动作前的 done 预评估（缺字段 = 本步不是命令步/没信号）；
     //   warnings        —— suspected_async 等运行期诚实话。
     // 动作行 = 有 changed（执行过）或有 skipped（尝试过但没执行）的行；manual 等非动作行不混进来。
-    const actionRows = trace.filter((t) =>
+    const actionRows = ctx.trace.filter((t) =>
       Object.prototype.hasOwnProperty.call(t, "changed") || t["skipped"] === true);
     const executedRows = actionRows.filter((t) => t["executed"] === true
       && ["clicked", "filled", "scrolled", "dragged", "hovered", "uploaded"].includes(String(t["how"] ?? "")));
-    const hasActionFace = cmdSpace.length > 0 || actionRows.length > 0;
+    const hasActionFace = ctx.cmdSpace.length > 0 || actionRows.length > 0;
     const executedActions: ExecutedAction[] = executedRows.map((t) => {
       const rawHow = String(t["how"] ?? "clicked");
       const files = Array.isArray(t["files"])
@@ -4799,27 +4889,27 @@ export class BrowserMiddleware {
     });
     // S4 证据汇总：stale 重试每次一条（trace 行本来就一次只落一行），force 只在真正执行时出现。
     const staleRetries: Array<{ attempt: number; reason: string; ref: string }> = [];
-    for (const t of trace) {
+    for (const t of ctx.trace) {
       if (Array.isArray(t["stale_retry"])) {
         staleRetries.push(...(t["stale_retry"] as Array<{ attempt: number; reason: string; ref: string }>));
       }
     }
     const forcedExecuted = executedRows.some((t) => t["forced"] === true);
     return {
-      goal: instruction, done, stop_reason: stopReason, steps: trace, audit: verdict,
-      stop_code: stopCode,
+      goal: ctx.instruction, done: ctx.done, stop_reason: ctx.stopReason, steps: ctx.trace, audit: verdict,
+      stop_code: ctx.stopCode,
       ...(hasActionFace ? { executed: executedRows.length > 0 } : {}),
       ...(executedActions.length ? { executed_actions: executedActions } : {}),
-      ...(skippedActions.length ? { skipped_actions: skippedActions.slice(0, 20) } : {}),
+      ...(ctx.skippedActions.length ? { skipped_actions: ctx.skippedActions.slice(0, 20) } : {}),
       ...(staleRetries.length ? { stale_retries: staleRetries } : {}),
       ...(forcedExecuted ? { forced: true } : {}),
-      ...(donePreheld !== null ? { done_preheld: donePreheld } : {}),
-      ...(warnings.length ? { warnings } : {}),
-      ...(stepState === undefined ? {} : { state: stepState }),
+      ...(ctx.donePreheld !== null ? { done_preheld: ctx.donePreheld } : {}),
+      ...(ctx.warnings.length ? { warnings: ctx.warnings } : {}),
+      ...(ctx.stepState === undefined ? {} : { state: ctx.stepState }),
       ...(diagnostics !== undefined ? { diagnostics } : {}),
-      ...(stopStep !== undefined ? { stop_step: stopStep } : {}),
-      ...(manualDone ? { manual: true } : {}),
-      ...(dryRan ? { dry_run: true } : {}),
+      ...(ctx.stopStep !== undefined ? { stop_step: ctx.stopStep } : {}),
+      ...(ctx.manualDone ? { manual: true } : {}),
+      ...(ctx.dryRan ? { dry_run: true } : {}),
     };
   }
 }
