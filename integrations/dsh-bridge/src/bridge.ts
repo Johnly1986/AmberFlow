@@ -76,6 +76,13 @@ export interface BridgeOptions {
    */
   stepGapMs?: number
   /**
+   * headless 开关（插件配置页）：`true` = 每个引擎子进程注入 `AMBERFLOW_HEADFUL=0`（无窗口运行），
+   * 压过机器配置层的 `runDefaults.headful=true`（engine 侧层叠：CLI 旗标 > env > 配置文件）；
+   * `false`/undefined = 不注入任何东西（引擎按自己的配置层叠走，行为逐字节现状）。工具调用
+   * 显式给的 `--headful` 仍最优先（CLI 旗标层）。
+   */
+  headless?: boolean
+  /**
    * Extra environment entries merged into the child process that lists apps — a deployment-level
    * `AMBERFLOW_HOME` override (`Config.appsHome`), so the listing resolves the same user scope every
    * other bridge call would. Undefined means "use the deployment's own environment".
@@ -551,6 +558,12 @@ export function buildEnv(options: BridgeOptions): NodeJS.ProcessEnv {
   // precedence is explicit > meta > env > 0). 0/undefined forwards nothing.
   if (options.stepGapMs !== undefined && options.stepGapMs > 0) {
     out.AMBERFLOW_STEP_DELAY_MS = String(Math.round(options.stepGapMs))
+  }
+  // headless 开关（配置页显式意图，同 decisionEnv 的"配置页赢过转发策略"规则）：注入
+  // AMBERFLOW_HEADFUL=0 压过机器 rc 的 runDefaults.headful=true（engine env 层 > 配置文件层）。
+  // 工具调用显式给的 --headful 是 CLI 旗标层，仍比 env 优先。
+  if (options.headless === true) {
+    out.AMBERFLOW_HEADFUL = '0'
   }
   return out
 }

@@ -4,6 +4,20 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — run --headless 透传修复 + 插件 headless 配置
+
+- **【缺陷修复·run --headless 透传】`amber run --headless` 此前被解析但从不转发给
+  app-runner 子进程**（spawn args 只 push `--headful`）：机器配置层配了
+  `runDefaults.headful=true` 时，用户给 `--headless` 也退不出有头（浏览器窗口照样弹）。
+  修复：run.ts 的 app/goal 两模式透传 `--headless`；app-runner 与 start.ts 解析该旗标并按
+  「CLI 旗标 > env > 配置文件」层叠压过 runDefaults.headful；`--headful` 与 `--headless`
+  同给 = 互斥用法错误（exit 2）。**行为变更面**：此前 `--headless` 静默无效 → 现在生效
+  （不传任何旗标的默认路径不变）。
+- **【新增·桥接配置页 headless 开关】`amberflow-bridge` 插件配置页新增 headless 布尔项
+  （volatile）：勾选后桥拉起的每个引擎子进程注入 `AMBERFLOW_HEADFUL=0`（无窗口），压过
+  机器 rc 的 `runDefaults.headful=true`；不勾选 = 不注入（引擎配置层叠决定，逐字节现状）。
+  工具调用显式给的 `--headful` 是 CLI 旗标层，仍最优先。需要插件重载后生效。
+
 ## [Unreleased] — feat/opt-scale（task-21/1a 行为变更）
 
 - **【行为变更·1a 滑杆假成功修复】`ctx.setRange` 越界请求不再静默钳制后报成功**：
