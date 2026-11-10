@@ -416,10 +416,16 @@ export interface DeviceSpec {
   device_scale_factor?: number;
 }
 
-export async function browserSession(headless = true, device?: DeviceSpec | null): Promise<BrowserSession> {
+export async function browserSession(
+  headless = true,
+  device?: DeviceSpec | null,
+  // task-43：meta.policy.browser 的通道（run 面解析后传入；session/辅助路径不传 = env>default）。
+  // env(AMBERFLOW_BROWSER_CHANNEL) > 此参数 > 缺省解析，优先级在 browser-env.launchKwargs 单源实现。
+  metaChannel: import("../browser/browser-env.ts").BrowserChannel | null = null,
+): Promise<BrowserSession> {
   const mod = await import("playwright");
   const pw: PwLike = { chromium: mod.chromium as unknown as PwLike["chromium"] };
-  const browser = (await browserEnv.launch(pw, headless)) as unknown as BrowserHandle;
+  const browser = (await browserEnv.launch(pw, headless, null, metaChannel)) as unknown as BrowserHandle;
   // task-21/D-1：启动事实挂到会话上（env.browser 一等证据；app-runner 收尾读进 result.env）。
   const envBrowser = lastBrowserLaunchFacts() ?? undefined;
   let page: AnyPage;

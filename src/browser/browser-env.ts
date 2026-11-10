@@ -106,20 +106,36 @@ export function lastBrowserLaunchFacts(): BrowserLaunchFacts | null {
   return lastLaunchFacts;
 }
 
+/* ---- task-43：浏览器通道选择面（env > meta > default 三层的解析出处） ----
+ * env 层（AMBERFLOW_BROWSER_CHANNEL，部署/CI 的机器级覆盖）在这里读一次、所有调用路径共用；
+ * meta 层（meta.policy.browser，应用作者的站点知识）由 run 面解析后经参数传入 launchKwargs。
+ * 优先级 env > meta：env 设了就盖掉 meta（部署级覆盖机器差异）。default = 现行二进制解析
+ * （headless 缺省即 headless-shell）。channel 与 executablePath 在 Playwright 里互斥；
+ * channel 与 extensionDir 互斥（MV3 持久化路径保持自己的"必须完整 chromium"解析）。 */
+
+export type BrowserChannel = "chrome" | "headless-shell";
+
+/** env 层通道（未设/未知值 = null——未知值不炸，走缺省链；apps check 面的闭集只管 meta）。 */
+export function channelFromEnv(): BrowserChannel | null {
+  const v = process.env.AMBERFLOW_BROWSER_CHANNEL;
+  return v === "chrome" || v === "headless-shell" ? v : null;
+}
+
 /** kwargs for `chromium.launch()` (playwright's own option names). */
-export function launchKwargs(headless = true, extensionDir: string | null = null): LaunchOptions {
+export function launchKwargs(
+  headless = true,
+  extensionDir: string | null = null,
+  metaChannel: BrowserChannel | null = null,
+): LaunchOptions {
   const kw: LaunchOptions = { headless };
   if (typeof process.getuid === "function" && process.getuid() === 0) {
     kw.args = ["--no-sandbox", "--disable-dev-shm-usage"];   // containers
   }
   const cands = chromiumCandidates();
-  // ---- task-39 A/B 评估旁路（临时，eval 结束去留由 lead 裁决）----
-  // AMBERFLOW_BROWSER_CHANNEL=chrome → Playwright channel:"chrome"（本机系统 Chrome，
-  // new headless）；=headless-shell → 强制 headless-shell 二进制。缺省（未设/其它值）
-  // 走原解析，行为逐字节不变。注意 channel 与 executablePath 在 Playwright 里互斥。
-  const channel = process.env.AMBERFLOW_BROWSER_CHANNEL === "chrome"
-    ? "chrome"
-    : process.env.AMBERFLOW_BROWSER_CHANNEL === "headless-shell" ? "headless-shell" : null;
+  // ---- task-39/43：通道选择面。env(AMBERFLOW_BROWSER_CHANNEL) > metaChannel > 缺省解析。
+  // 缺省（都未设）原路径逐字节不变。channel 路径不解析本地二进制；无系统 Chrome 由
+  // launch 抛错并在上层如实报（不静默回退——要回退请删 env/meta）。
+  const channel = channelFromEnv() ?? metaChannel;
   if (channel !== null && !extensionDir) {
     if (channel === "chrome") {
       kw.channel = "chrome";
@@ -170,8 +186,9 @@ export async function launch(
   pw: { chromium: { launch(opts: LaunchOptions): Promise<unknown>; executablePath?(opts?: Record<string, unknown>): string } },
   headless = true,
   extensionDir: string | null = null,
+  metaChannel: BrowserChannel | null = null,
 ): Promise<BrowserLike> {
-  const kw = launchKwargs(headless, extensionDir);
+  const kw = launchKwargs(headless, extensionDir, metaChannel);
   if (!("executablePath" in kw) && !("channel" in kw)) {
     throw new Error("no chromium binary found. Run `playwright install chromium`, or set "
       + "PLAYWRIGHT_BROWSERS_PATH to a directory containing chromium-*/.");
