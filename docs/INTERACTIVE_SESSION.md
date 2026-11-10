@@ -176,11 +176,14 @@ headless 实现选择面（换完整 Chrome new headless）另见 task-39 的受
 
 - `act` 的 `value` 只来自请求本身（作者给的决定），缺值 = `needs_value`，绝不猜；`fill/select` 的值
   在 `--record` 轨迹里只落 `value_hash`（不落明文，轨迹可能被复制进仓库/`app.mjs`）。
-- 浏览器通道：环境变量 `AMBERFLOW_BROWSER_CHANNEL=chrome|headless-shell` 可选启动通道
-  （task-39 A/B：缺省 headless-shell 逐字节不变；`chrome`=系统 Chrome new headless——对
-  zh.wikipedia 文章页这类"客户端 URL flap"页面天然免疫，代价冷启动 +~13%；`run` 同样生效）。
-  无系统 Chrome 时 `channel:"chrome"` 由 launch 如实报错，不静默回退。详见
-  `iterations/interactive-session/task39/DESIGN.md`（meta.policy.browser 选择面另任务评估）。
+- 浏览器通道（task-43 三层选择面）：优先级 **env(`AMBERFLOW_BROWSER_CHANNEL=chrome|headless-shell`)
+  > `meta.policy.browser` > 缺省（headless-shell，逐字节不变）**。session 面无 meta 层
+  （env > 缺省）；`run` 面 meta 声明的应用通道随 pack 生效、env 优先覆盖。
+  `chrome`=系统 Chrome new headless——对 zh.wikipedia 文章页这类"客户端 URL flap"页面天然
+  免疫（task-39 A/B：功能双臂等价，代价冷启动 +~13%）。无系统 Chrome 时 `channel:"chrome"`
+  由 launch **如实报错，不静默回退**（要回退请删 env/meta）。生效值见 run 的
+  `effective_policy.browser`（仅声明时出现）；真实二进制以 `env.browser.binary_basename` 为准。
+  详见 `docs/APP_SCRIPT_AUTHORING.md` §8 policy 表与 `iterations/interactive-session/task39/DESIGN.md`。
 - `snapshot` 的截图/DOM 文本落 `--out`；不做 cookie/存储注入、不多标签页（`ctx.tabs` 面留待后续）。
 - 会话结束（含 SIGINT）一定关闭浏览器；`close` 之前没碰过页面就不会启动浏览器。
 - 不新增 npm 依赖；不影响任何既有命令的默认行为。

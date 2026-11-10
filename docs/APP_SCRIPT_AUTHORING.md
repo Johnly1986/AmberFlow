@@ -929,8 +929,9 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `navigation` | `free` | 导航纪律（仅 flow 面）：`"entry-only"` = 入口之外的引擎直接 URL 导航默认被 `navigation_forbidden` 拒绝，但 **`meta.site.pages` 里声明的页面 URL 可再次直接导航**（`URL.href` 归一后全等才放行，见 §4.10）；缺省/"`free`" = 不约束，产物逐字节不变 |
 | `act_hint` | `widen` | 声明目标（`act: ctx.hint(...)` / `target_hints`）解析链（池 hintMatch → ADMIT 回捞 → FW8 身份回捞）全落空时的档位：`widen` = 交给模型自由选（**缺省 = 现行为逐字节不变**）；`strict` = **禁止模型回退**，直接结构化 `target_not_found`（reason 写明 `act_hint="strict"` + 原 hint + 池快照）。命令步不受影响；FW8 的 `#id`/`[data-test]`/`[name]` 声明回捞先执行。显式声明才进 `effective_policy.act_hint` |
 | `target_resolution` | `off` | **声明目标解析链（DRF，P0-C）**：`off` = 现行为逐字节不变；`declared` = 命令 `target` / act hint 在池 hintMatch → ADMIT 回捞 → FW8 身份回捞全部落空后，再由 DOM 侧兜底解析（属性型 hint 走 ADMIT_SEL + 同一套 hint 语义；裸词 hint 走可见文本精确匹配；跨 frame **恰好一个可见**才动作，>1 → `target_ambiguous`，全隐藏 = 未命中 + hidden 诊断）。click 族动作前必须 hit-test（中心被覆盖则不点击、记 `hit_test` 证据）。首版只允许 `click`/`scroll`/`hover`，对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` → 结构化 `action_unsupported`。回捞元素只进本步局部池，**模型不参与**。显式声明才进 `effective_policy.target_resolution`；dry 只校验 policy 值（DOM 事实无法离线验证，不新增绿，见 §4.11） |
+| `browser` | （不写 = 现状链） | **task-43 浏览器通道**：`"chrome"`（系统 Chrome，Playwright `channel:"chrome"`，new headless）\| `"headless-shell"`（ms-playwright 的 headless-shell，= 缺省现状）。优先级 **env(`AMBERFLOW_BROWSER_CHANNEL`) > meta > 缺省**——env 是部署/CI 的机器级覆盖，meta 是应用作者的站点知识（已知 headless-shell 下坏的站点在此点名 chrome，如 zh.wikipedia 文章页的客户端 URL flap）。主机没有系统 Chrome 时 launch **如实报错不静默回退**（要回退请删 meta 或改 env）；与 `--headful` 正交组合（headful 语义独立：人工步等仍强制可见窗口）。生效值与来源进 `effective_policy.browser`（仅 env/meta 任一存在时出现）；真实二进制以 `env.browser.binary_basename`（D-1 启动事实）为准。已知代价（task-39 实测）：chrome 通道冷启动 +~13%，zh.wiki 类页面 open 快 ~3.5s 且免 flap |
 
-产物里的 `effective_policy` 只在非缺省时出现，并写明来源（`cli` / `config` / `app` / `provider` / `default`）。
+产物里的 `effective_policy` 只在非缺省时出现，并写明来源（`cli` / `config` / `app` / `provider` / `env` / `default`）。
 
 **何时该写 `act_hint:"strict"` / 决策面 rules-only（task-24/4，评审 A.4 因果纠正）**：这两个档位
 **不改变模型的参与度**——模型只在「规则面没解出目标」时才被咨询（唯一入口 = `pickElement`，且只在
