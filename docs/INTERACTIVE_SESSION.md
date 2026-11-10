@@ -109,6 +109,42 @@ amber session --url https://books.toscrape.com/ --input requests.jsonl \
 - `--input` 文件允许 UTF-8 BOM（Windows PowerShell 的 `Set-Content -Encoding UTF8` 会带 BOM）：
   首行行首的 BOM 会被剥掉，不当作坏 JSON。
 
+### 导航 flap：诊断与有界自愈（task-38）
+
+**现象**：个别站点（已知：zh.wikipedia 文章页，chrome-headless-shell 下）在 open 之后陷入
+客户端 URL 翻页循环——主 frame 每 ~200ms 在同一页面的两种 URL 形态间反复导航（如 ASCII 标题
+路径 ↔ 百分比编码路径），期间 DOM 操作持续撞 "Execution context was destroyed"：`read` 全
+null、`signal` 恒 false，而 observe/截图看起来正常。根因与浏览器 headless 实现相关，详见
+`iterations/interactive-session/task38/ROOT-CAUSE.md`。
+
+**检测**：每次 `open`（启动自动 open 与显式 open 同一路径）都挂主 frame `framenavigated`
+监听，在 open 返回后的 1.5s 窗口内观察。触发签名**严格**：≥4 次主 frame 导航 **且** URL 在
+同一 origin、同一 path 前缀下的 ≥2 种形态间反复交替。正常重定向 1-2 次、单向跳转链、刷新
+同一 URL 都不触发。窗口内零导航的稳定页在 600ms 静默早退后放行响应（`FLAP_QUIET_EXIT_MS`，
+正常页因此比改动前多等 ~600ms；这是检测窗口的固有代价，常数可调）。
+
+**判定后的一次有界自愈**：导航到观察到的「编码形态」URL（判不出编码形态就用最后一次
+framenavigated 的 URL），等 DCL + 0.5s，再观察 1.5s 复察窗口。仍 flap → `healed:false`
+如实报（`ok:false`），**不再重试**；自愈后稳定 → `healed:true`（`ok:true`）。自愈只在
+open 判定 flap 时发生；read/signal/observe 语义**零改动**（flap 期间读不到仍是 null/false），
+不新增 stopCode。
+
+**open 响应仅在判定 flap 时增字段**（正常页响应逐字节不变）：
+
+| 字段 | 含义 |
+|---|---|
+| `code: "navigation_flapping"` | 恒带；`healed:true` 时 `ok` 仍为 true |
+| `navigations` / `window_ms` | 窗口内主 frame 导航次数 / 观察窗口时长 |
+| `urls_sample` | 去重后的 URL 形态样例（≤5） |
+| `healed` | 一次有界自愈是否成功 |
+| `heal_url?` | 自愈导航的目标 URL |
+| `reason` / `suggestion` | 人话诊断；建议改用编码标题 URL 直开或稍后重试 |
+
+**已知边界**：flap 若在静默早退（600ms）之后才起跳，本次 open 检测不到——建议改用编码
+URL 直开（实测编码形态直开稳定）。`amber run` 路径**未**做此检测，遇同类页面可能静默空读；
+headless 实现选择面（换完整 Chrome new headless）另见 task-39 的受控评估，默认行为不在
+本项内变更。
+
 ## 与 `run` 的差异（明确划界）
 
 | | `amber run` / `run --walk` | `amber session` |

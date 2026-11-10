@@ -263,6 +263,7 @@ amber apps remove <应用> [--yes] [--force]`,
     flow: [
       "amber session --url <入口页> 起会话；stdin 逐行发 JSON 请求（Windows 用 --input 文件）",
       "先 observe 拿 hint_candidates，再 act；act 后用 read/extract/signal 回读事实",
+      "open 响应若带 code:\"navigation_flapping\" = 客户端 URL flap（healed 标自愈结果；建议改用编码标题 URL 直开，见 docs「导航 flap」节）",
       "试通后 --record 存动作轨迹；export 生成 app.mjs 骨架后再进 apps check → run",
     ],
     usage: `amber session [--url <入口页>] [--host HOST]... [--hosts h1,h2]
