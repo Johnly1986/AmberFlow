@@ -63,6 +63,7 @@ import { runSubgoalWithRetries } from "../engine/planner.ts";
 import { DESTRUCTIVE_PATTERNS } from "../engine/rules.ts";
 import { checkSignal } from "../engine/signals.ts";
 import { checkToolSignal, explainToolSignal, type ToolSignal } from "../browser/tool-signals.ts";
+import { channelFromEnv } from "../browser/browser-env.ts";
 import { captureStateView } from "../flow/signal-induction.ts";
 import { captureStepStateView, type StepStateView } from "../model/page-context.ts";
 import type { StateView } from "../engine/signals.ts";
@@ -1024,6 +1025,12 @@ export interface EffectivePolicy {
    * 恰好一个可见、click 前 hit-test；首版 click/scroll/hover）。
    */
   target_resolution?: { value: "off" | "declared"; source: "app" };
+  /**
+   * task-43 浏览器通道（**仅 env/meta 任一存在时出现** = 缺省产物逐字节不变）。
+   * 生效值按 env(AMBERFLOW_BROWSER_CHANNEL) > meta.policy.browser 记账；真实二进制以
+   * `env.browser.binary_basename`（D-1 启动事实）为准——那是 channel 解析后的地面真相。
+   */
+  browser?: { value: "chrome" | "headless-shell"; source: "env" | "app" };
 }
 
 /**
@@ -1145,6 +1152,16 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
   // P0-C：target_resolution 同样**仅声明时出现**（缺省 off = 今天；"off" 显式声明也进账）。
   if (declaredPolicy.target_resolution !== undefined) {
     policy.target_resolution = { value: declaredPolicy.target_resolution, source: "app" as const };
+  }
+  // task-43：浏览器通道——env(AMBERFLOW_BROWSER_CHANNEL) > meta.policy.browser，任一存在才
+  // 进账（缺省产物逐字节不变）。最终二进制由 launchKwargs 同一优先级解析，env.browser
+  // .binary_basename（D-1）记录地面真相；meta 指定 chrome 但主机没有时 launch 如实报错
+  // （不静默回退——要回退请删 meta 或改 env）。
+  const envChannel = channelFromEnv();
+  if (envChannel !== null) {
+    policy.browser = { value: envChannel, source: "env" as const };
+  } else if (declaredPolicy.browser !== undefined) {
+    policy.browser = { value: declaredPolicy.browser, source: "app" as const };
   }
   const anyDeclared = Object.values(policy).some((p2) => p2.source !== "default");
   return { policy, anyDeclared };
@@ -1398,7 +1415,11 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
       // 人工步默认开可见窗口：人要在里面登录/过验证码；`--headful` 只是显式同义。
       const headless = opts.headful !== true && !manualInSegment;
-      holder.session = own ? await browserSession(headless, device) : await opts.sessionFactory!();
+      // task-43：meta.policy.browser 通道随 pack 下传（env 优先级在 launchKwargs 单源实现，
+      // 这里只传 meta 值——env 盖 meta 的语义与 effective_policy.browser 同一出处）。
+      holder.session = own
+        ? await browserSession(headless, device, pack.policy?.browser ?? null)
+        : await opts.sessionFactory!();
     }
     const s = holder.session;
     // 会话的生命周期由本函数掌握：执行器关掉的是这个壳，真正的 page 留到不变量之后。
@@ -2285,7 +2306,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
         holder.session = opts.sessionFactory !== undefined
           ? await opts.sessionFactory()
-          : await browserSession(opts.headful !== true, device);
+          : await browserSession(opts.headful !== true, device, pack.policy?.browser ?? null);
       }
       const session = holder.session;
       if (session === null) throw new Error("browser session was not created");
