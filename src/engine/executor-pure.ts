@@ -60,23 +60,7 @@ export function contextPageCount(page: PageLike): number {
   }
 }
 
-export function disallowedHost(url: string, hosts: string[] | null | undefined): string | null {
-  if (!hosts || hosts.length === 0) return null;
-  let u: URL;
-  try {
-    u = new URL(url);
-  } catch {
-    return null;                                      // unparseable: whatever the page does next, it is checked again post-action
-  }
-  if (["file:", "about:", "data:"].includes(u.protocol)) return null;
-  const host = u.hostname.toLowerCase();
-  if (!host) return null;
-  const ok = hosts.some((h) => {
-    const e = String(h).toLowerCase().replace(/^\.+/, "");
-    return e !== "" && (host === e || host.endsWith(`.${e}`));
-  });
-  return ok ? null : host;
-}
+export { disallowedHost } from "./host-envelope.ts";
 
 /** Element types whose current value is a SECRET: never written into a trace or report (P0-3, D5①). */
 export const SECRET_INPUT_TYPES = new Set(["password", "file", "hidden"]);

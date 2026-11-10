@@ -427,18 +427,8 @@ export function framesOf(page: PageLike, limit = 6): FrameLike[] {
  * P0-D：host 信封的**只读**判定（与执行器 `disallowedHost` 同一语义：hostname 精确或后缀）。
  * 帧 URL 无法解析 / about:blank / file: 等：返回 true（不可判 origin 时绝不擅自排除）。
  */
-export function urlInHostsEnvelope(url: string, hosts: string[] | null | undefined): boolean {
-  if (!hosts || hosts.length === 0) return true;
-  let u: URL;
-  try { u = new URL(url); } catch { return true; }
-  if (["file:", "about:", "data:"].includes(u.protocol)) return true;
-  const host = u.hostname.toLowerCase();
-  if (!host) return true;
-  return hosts.some((h) => {
-    const e = String(h).toLowerCase().replace(/^\.+/, "");
-    return e !== "" && (host === e || host.endsWith(`.${e}`));
-  });
-}
+/** 信封布尔视图：true = 在声明的 hosts 信封内。单源实现见 host-envelope.ts（L2 合并）。 */
+export { urlInHostsEnvelope } from "./host-envelope.ts";
 
 /** P0-D：一个 frame 的 URL 是否在信封内（空 URL / about:blank = 允许，口径同上面）。 */
 export function frameInHostsEnvelope(frame: FrameLike, hosts: string[] | null | undefined): boolean {
