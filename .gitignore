@@ -20,6 +20,9 @@ configs/amberflowrc.json
 /online-runs/
 /online-out/
 
+# 本地临时工作区（会话/实验脚本与日志，不入库）
+/.session_tmps/
+
 # 编辑器 / 系统
 .DS_Store
 .idea/

@@ -267,10 +267,13 @@ amber apps remove <应用> [--yes] [--force]`,
     ],
     usage: `amber session [--url <入口页>] [--host HOST]... [--hosts h1,h2]
               [--headful] [--input <请求文件>] [--out <目录>]
-              [--record <轨迹文件>] [--idle-timeout-ms N] [--max-request-bytes N]`,
+              [--record <轨迹文件>] [--idle-timeout-ms N] [--max-request-bytes N]
+amber session export --record <轨迹文件> [--out <app.mjs|目录>] [--id <appId>]
+                     [--goal "<一句话>"] [--host HOST]... [--force] [--json]`,
     examples: [
       'amber session --url https://books.toscrape.com/ --input requests.jsonl',
       'amber session --url https://books.toscrape.com/ --record ./.amberflow/session/books.jsonl',
+      "amber session export --record ./.amberflow/session/books.jsonl --id books-skeleton",
       "amber session --url https://books.toscrape.com/ --headful",
     ],
     flags: [
@@ -280,9 +283,13 @@ amber apps remove <应用> [--yes] [--force]`,
       "--headful                 显示浏览器窗口（缺省 headless，与 run 一致）",
       "--input <文件>            从文件逐行读请求，而不是 stdin（Windows 管道不可靠时用）",
       "--out <目录>              证据落点（缺省 $AMBERFLOW_HOME/session/<runId>）；snapshot 写这里",
-      "--record <文件>           动作轨迹 JSONL（fill/select 只记 value_hash，不记明文）",
+      "--record <文件>           动作轨迹 JSONL（fill/select 只记 value_hash，不记明文）；export 的输入",
       "--idle-timeout-ms N       两次请求之间的静默上限（缺省 300000；0 = 不限）；超时干净关会话并 exit 3",
       "--max-request-bytes N     单行请求上限（缺省 1048576）",
+      "session export：--record 轨迹 → app.mjs 骨架（meta 占位 + steps + observe_hints；done 未归纳，写成占位符+注释候选）",
+      "--id <appId>              export 的应用 id（缺省 session-<轨迹文件名>）；--out 缺省 $AMBERFLOW_HOME/apps/<id>/app.mjs",
+      "--goal \"<一句话>\"          export 的 meta.goal 占位文案（本命令只记录动作、不记录意图）",
+      "--force                    export 覆盖已存在的 app.mjs",
       "协议：stdin 每行 {\"type\":\"open|observe|act|read|extract|waitFor|signal|snapshot|mark|close\",...}；stdout 每行一个 JSON 响应",
     ],
     related: ["inspect", "apps", "run"],

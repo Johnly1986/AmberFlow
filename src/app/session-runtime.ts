@@ -220,30 +220,69 @@ export class SessionRuntime {
     this.sink.respond(obj);
   }
 
+  /** 轨迹文件句柄（懒创建；`--record` 没给 = no-op）。Phase 2：一条轨迹要能被 export 还原成骨架。 */
+  private recordStreamFor(): fs.WriteStream | null {
+    if (this.opts.record === null || this.opts.record === undefined) return null;
+    if (this.recordStream !== null) return this.recordStream;
+    try {
+      ensureDir(path.dirname(path.resolve(this.opts.record)));
+      this.recordStream = fs.createWriteStream(path.resolve(this.opts.record), { flags: "a", encoding: "utf8" });
+      return this.recordStream;
+    } catch (e) {
+      this.log(`record open failed: ${errMsg(e)}`);
+      return null;
+    }
+  }
+
+  /** 轨迹里的非动作事件（open / mark）：`export` 需要入口页与人工标记。 */
+  private recordEvent(entry: Record<string, unknown>): void {
+    const stream = this.recordStreamFor();
+    if (stream === null) return;
+    try {
+      stream.write(`${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`);
+    } catch (e) {
+      this.log(`record write failed: ${errMsg(e)}`);
+    }
+  }
+
   /** 动作轨迹（`--record`）：只记**已发生的事实**；fill/select 的值只落 hash（design §5/Q5）。 */
   private recordAction(entry: Record<string, unknown>): void {
-    if (this.opts.record === null || this.opts.record === undefined) return;
+    const stream = this.recordStreamFor();
+    if (stream === null) return;
     try {
-      if (this.recordStream === null) {
-        ensureDir(path.dirname(path.resolve(this.opts.record)));
-        this.recordStream = fs.createWriteStream(path.resolve(this.opts.record), { flags: "a", encoding: "utf8" });
-      }
-      this.recordStream.write(`${JSON.stringify({ i: this.actionCount, ts: new Date().toISOString(), ...entry })}\n`);
+      stream.write(`${JSON.stringify({ i: this.actionCount, ts: new Date().toISOString(), ...entry })}\n`);
     } catch (e) {
       this.log(`record write failed: ${errMsg(e)}`);
     }
   }
 
   private recordMark(note: string): void {
-    if (this.opts.record === null || this.opts.record === undefined) return;
+    this.recordEvent({ type: "mark", note: note.slice(0, 300) });
+  }
+
+  /**
+   * `--record` 时的**观察侧 hint 候选**（Phase 2 export 的每步 `observe_hints`）：
+   * 动作用的是 hint 闭集，而 `ctx.observe` 的 `hint_candidates` 已被同一个 `hintMatch`
+   * 在本次观察集合上自证过——比作者手抄的字符串更可交付。只读、只在开记录时付一次观察。
+   */
+  private async hintsForRecord(target: string | undefined): Promise<string[]> {
+    if (this.opts.record === null || this.opts.record === undefined) return [];
+    if (target === undefined || target.trim() === "") return [];
     try {
-      if (this.recordStream === null) {
-        ensureDir(path.dirname(path.resolve(this.opts.record)));
-        this.recordStream = fs.createWriteStream(path.resolve(this.opts.record), { flags: "a", encoding: "utf8" });
+      const obs = await this.ctx().observe({ max: 120 });
+      const want = target.trim().toLowerCase();
+      const out: string[] = [];
+      for (const el of obs.elements) {
+        const hs = Array.isArray(el.hint_candidates) ? el.hint_candidates : [];
+        const label = String(el.label ?? "").trim().toLowerCase();
+        const hit = label === want || label.includes(want) || hs.some((h) => h.toLowerCase() === want);
+        if (!hit) continue;
+        for (const h of hs) if (!out.includes(h)) out.push(h);
+        if (out.length >= 6) break;
       }
-      this.recordStream.write(`${JSON.stringify({ type: "mark", ts: new Date().toISOString(), note: note.slice(0, 300) })}\n`);
-    } catch (e) {
-      this.log(`record write failed: ${errMsg(e)}`);
+      return out.slice(0, 6);
+    } catch {
+      return []; // 观察失败不阻断动作；轨迹里如实缺这条字段
     }
   }
 
@@ -352,6 +391,8 @@ export class SessionRuntime {
     if (landed) this.urls.push(landed);
     const title = await this.titleOf();
     this.log(`open ${landed}${title === undefined ? "" : ` — ${title}`}`);
+    // Phase 2：入口页是导出骨架的 `meta.site.pages.entry` 来源（open 也是轨迹的一部分）。
+    this.recordEvent({ type: "open", url: landed, ...(title === undefined ? {} : { title }) });
     return { ok: true, url: landed, ...(title === undefined ? {} : { title }), hosts: this.hosts ?? [] };
   }
 
@@ -382,6 +423,9 @@ export class SessionRuntime {
     const hosts = this.hosts ?? undefined;
     this.actionCount += 1;
     const started = Date.now();
+    // Phase 2：开记录时先做一次**只读**观察，取"同一个 hintMatch 自证"的候选（export 的每步
+    // observe_hints 来源）。没开记录 = 一次也不多付；观察失败/未命中就如实缺字段。
+    const recordHints = await this.hintsForRecord(nonEmpty(targetRaw) ? String(targetRaw) : undefined);
 
     // ---- scroll：合成目标（document/body/html/window）走 mw.scrollDocument，元素目标走 actOnce ----
     if (actOp === "scroll") {
@@ -397,17 +441,28 @@ export class SessionRuntime {
           { ...(by === undefined ? {} : { by }) },
         )
         : await this.mw().actOnce(page, String(targetRaw), "scroll", null);
+      const scrollTarget = nonEmpty(targetRaw) ? String(targetRaw) : "document";
+      this.recordAction({
+        op: "scroll", target: scrollTarget, to: (to as string | undefined) ?? "bottom",
+        ...(by === undefined ? {} : { by }),
+        ok: out.ok === true,
+        ...(out.ok === true ? {} : { code: String(out.stopCode ?? "not_scrollable") }),
+        ref: null, how: out.ok === true ? "scrolled" : null,
+        changed: "moved" in out ? out.moved === true : out.ok === true,
+        url: urlOf(page),
+        ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
+      });
       if (out.ok !== true) {
         return {
           ok: false, code: String(out.stopCode ?? "not_scrollable"), reason: String(out.reason ?? "scroll failed"),
-          op: actOp, target: nonEmpty(targetRaw) ? String(targetRaw) : "document", executed: false,
+          op: actOp, target: scrollTarget, executed: false,
         };
       }
       const scroll = "scrollTop" in out
         ? { scrollTop: out.scrollTop, scrollHeight: out.scrollHeight, clientHeight: out.clientHeight }
         : undefined;
       return {
-        ok: true, op: actOp, target: nonEmpty(targetRaw) ? String(targetRaw) : "document",
+        ok: true, op: actOp, target: scrollTarget,
         executed: true, ref: null, how: "scrolled",
         changed: "moved" in out ? out.moved === true : true,
         ...(scroll === undefined ? {} : { scroll }),
@@ -446,6 +501,7 @@ export class SessionRuntime {
       how: out.how ?? null,
       changed: out.changed === true,
       url: urlOf(page),
+      ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
     });
     if (out.ok !== true) {
       return {

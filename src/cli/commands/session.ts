@@ -14,15 +14,16 @@
 import path from "node:path";
 import { parseArgs } from "node:util";
 import type { CliContext } from "../context.ts";
-import { diag, say } from "../context.ts";
+import { diag, emitJson, say } from "../context.ts";
 import { EXIT, usageError, usageFromParseError } from "../errors.ts";
+import { successEnvelope } from "../json.ts";
 import { amberflowHome } from "../../app/amberflow-home.ts";
 import { runSession, SESSION_DEFAULT_IDLE_TIMEOUT_MS, type SessionSink } from "../../app/session-runtime.ts";
+import { exportSessionRecord } from "../../app/session-export.ts";
 import { commandHelp } from "../registry.ts";
 
-const USAGE = `amber session [--url <入口页>] [--host HOST]... [--hosts h1,h2]
-              [--headful] [--input <请求文件>] [--out <目录>]
-              [--record <轨迹文件>] [--idle-timeout-ms N] [--max-request-bytes N]`;
+const EXPORT_USAGE = `amber session export --record <轨迹文件> [--out <app.mjs|目录>] [--id <appId>]
+                     [--goal "<一句话>"] [--host HOST]... [--force] [--json]`;
 
 /** 从 `--url` 推 hosts（与 apps new 的推断同口径：只取主机名）。 */
 function inferHosts(url: string | undefined): string[] | null {
@@ -35,7 +36,85 @@ function inferHosts(url: string | undefined): string[] | null {
   }
 }
 
+/**
+ * `amber session export`：把 `--record` 轨迹还原成 app.mjs 骨架（Phase 2）。
+ * 只出骨架、不归纳 done（占位符 + 注释候选），生成物必须能过 `amber apps check`。
+ */
+export async function runSessionExport(args: string[], ctx: CliContext): Promise<number> {
+  if (args.includes("--help") || args.includes("-h")) {
+    say(ctx, `session export —— 把 --record 动作轨迹导出成 app.mjs 骨架（done 未归纳，占位符待补）\n\n语法：\n  ${EXPORT_USAGE}`);
+    return EXIT.OK;
+  }
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args,
+      allowPositionals: false,
+      options: {
+        record: { type: "string" },
+        out: { type: "string" },
+        id: { type: "string" },
+        goal: { type: "string" },
+        host: { type: "string", multiple: true },
+        hosts: { type: "string" },
+        force: { type: "boolean" },
+      },
+    });
+  } catch (err) {
+    throw usageFromParseError(err);
+  }
+  const v = parsed.values;
+  if (typeof v.record !== "string" || v.record.trim() === "") {
+    throw usageError("session export 需要 --record <轨迹文件>（就是 `amber session --record` 写出的 JSONL）", {
+      hint: "先跑一次 amber session --record <file>，再 export。",
+      next: ["amber session --help", "amber help session"],
+    });
+  }
+  const hosts: string[] = [];
+  for (const h of v.host ?? []) for (const part of h.split(",")) if (part.trim()) hosts.push(part.trim());
+  if (typeof v.hosts === "string") for (const part of v.hosts.split(",")) if (part.trim()) hosts.push(part.trim());
+  const result = exportSessionRecord({
+    record: v.record,
+    out: typeof v.out === "string" ? v.out : null,
+    id: typeof v.id === "string" ? v.id : null,
+    goal: typeof v.goal === "string" ? v.goal : null,
+    hosts: hosts.length > 0 ? hosts : null,
+    force: v.force === true,
+    cwd: ctx.cwd,
+    env: ctx.env,
+  });
+  if (!result.ok) {
+    throw usageError(`session export 失败：\n  - ${result.problems.join("\n  - ")}`, {
+      next: ["amber session --help"],
+    });
+  }
+  if (ctx.globals.json) {
+    emitJson(ctx, successEnvelope("session export", {
+      app_id: result.app_id,
+      path: result.path,
+      steps: result.steps,
+      failed_actions: result.failed_actions,
+      unresolved_actions: result.unresolved_actions,
+      done_placeholder: result.done_placeholder,
+      warnings: result.warnings,
+      next: [`amber apps check ${result.app_id}`, `amber run ${result.app_id}`],
+    }));
+    return EXIT.OK;
+  }
+  say(ctx, `导出 app.mjs 骨架：${result.path}`);
+  say(ctx, `  app id: ${result.app_id}`);
+  say(ctx, `  steps: ${result.steps}（失败动作 ${result.failed_actions} 条以注释保留，待补值/待手写 ${result.unresolved_actions} 条）`);
+  say(ctx, `  done: 占位符 ${JSON.stringify(result.done_placeholder)} —— 真跑前必须替换（export 不归纳 done）`);
+  for (const w of result.warnings) say(ctx, `  ⚠ ${w}`);
+  say(ctx, `下一步：amber apps check ${result.app_id} → 补 done/slot → amber run ${result.app_id}`);
+  diag(ctx, `[session export] 轨迹 ${path.resolve(ctx.cwd, v.record)} → ${result.path}`);
+  return EXIT.OK;
+}
+
+
 export async function runSessionCommand(args: string[], ctx: CliContext): Promise<number> {
+  // Phase 2：`session export` 是同一命令下的子动词（聚合在 session 面，见 docs）。
+  if (args[0] === "export") return runSessionExport(args.slice(1), ctx);
   if (args.includes("--help") || args.includes("-h")) {
     say(ctx, commandHelp("session"));
     return EXIT.OK;

@@ -104,7 +104,39 @@ amber session --url https://books.toscrape.com/ --headful
 
 ## 与 record / export 的关系
 
-`session --record` 只记**已发生的事实**（动作、目标、结果、URL、值 hash），不做信号归纳。
-把轨迹变成冻结计划是后续 `session export`（Phase 2）的事：它只出 `flow(ctx)` 的步骤骨架 +
-每步观察到的 hint 候选，`done` 信号仍要人写，然后照旧走 `apps check → run`。
+`session --record` 只记**已发生的事实**（动作、目标、结果、URL、值 hash、观察到的 hint 候选），不做信号归纳。
+把轨迹变成冻结计划是 `session export` 的事：它只出 `flow(ctx)` 的步骤骨架 + 每步观察到的 hint 候选，
+`done` 信号仍要人写，然后照旧走 `apps check → run`。
 归纳信号、可直接落盘 app 的通道仍是 `amber record`（learn 路径），两者不互相冒充。
+
+## session export（Phase 2）
+
+```bash
+# 1) 起一次会话并留轨迹（--record 同时采 observe_hints）
+amber session --url https://books.toscrape.com/ --input requests.jsonl \
+  --record .amberflow/session/books.jsonl
+
+# 2) 轨迹 → app.mjs 骨架（缺省落 $AMBERFLOW_HOME/apps/<id>/app.mjs）
+amber session export --record .amberflow/session/books.jsonl --id books-skeleton \
+  --goal "在 books.toscrape.com 打开 Travel 分类"
+
+# 3) 离线自检（dry，无浏览器）→ 补 done/slot → 真跑
+amber apps check books-skeleton
+amber run books-skeleton
+```
+
+**生成物纪律**（与 design Q6 一致）：
+
+- 只出 `meta` 占位 + `flow(ctx)` 的 `steps[]`；每个 step 带 `observe_hints` 注释
+  （来自 `--record` 时的只读观察，已由同一个 `hintMatch` 在观察集合上自证，可直接照抄）。
+- **不归纳 done**：每步 `done` 是占位符 `ctx.judge.url("TODO-REPLACE-ME")`，轨迹里观察到的落点 URL
+  只作为**注释候选**（未验证）。归纳/验证信号是 `record`/`learn` 的职责。
+  占位符故意在真跑里不可能成立——不补 done 就真跑，会如实在 done 等待上失败，而不是假装通过。
+- **不发明值**：`fill/select` 在轨迹里只有 `value_hash`/`value_len`，导出为注释块（提示用
+  `ctx.value.slot(...)` 绑定），不生成空值/假值。
+- **不发明动作**：`ok:false` 的动作以注释块保留（带 `code`/`reason`），骨架不生成假动作。
+- `scroll` 导出为同一族滚动原语 `ctx.scrollList(<target|document>, { to })`（各计 1 flow step）。
+- 生成物必须能过 `amber apps check`（dry）：这是 export 的自检门，也是"骨架不是死代码"的底线。
+- 会话 trace（`<record>.trace.json`）是**会话日志**，不是 run trace：`app:"session:<runId>"`、
+  `done:false`，`--replay` 会因 app/版本不匹配拒收。
+
