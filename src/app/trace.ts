@@ -26,9 +26,9 @@ export type TraceCall =
    */
   | "tab"
   /**
-   * P0-A：`ctx.observe()` 只读观察（免费；不计 flow step）。事件只记
-   * `{url, counts, truncated}`——**不记元素明细/class**（超出审计需要，且避免 trace 膨胀）。
-   * 重放按 `counts`/`truncated` 还原；元素明细不可重建（replay 返回 `elements: []`）。
+   * P0-A：`ctx.observe()` 只读观察（免费；不计 flow step）。事件记
+   * `{url, counts, truncated}` + 判分样例（task-21/D-1：前 5 元素 tag/label≤40/hints≤3 的
+   * 有界投影——0/5 判分字段流式可见；全量明细不可重建，replay 返回 `elements: []`）。
    */
   | "observe"
   /**
@@ -73,6 +73,12 @@ export interface TraceEvent {
   counts?: { elements: number; admitted: number; omitted: number };
   /** P0-A：`call="observe"` 是否被 `max` 截断（omitted > 0）。 */
   truncated?: boolean;
+  /**
+   * task-21/D-1：`call="observe"` 的**判分样例**（前 5 个元素：tag/label≤40/hints≤3——
+   * 0/5 判分所需字段的流式投影；有界，不破坏 trace 膨胀纪律；全量明细仍在 observe
+   * 返回值里，result 装配经 scrubSecrets 掩码）。缺省不出现（observe 失败/空结果）。
+   */
+  elements_sample?: Array<{ tag: string; label: string; hints?: string[] }>;
 }
 
 export interface AppTrace {

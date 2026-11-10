@@ -25,6 +25,9 @@ export interface RangeOptions {
 
 export type RangeStrategy = "fill" | "keyboard" | "pointer";
 
+/** task-21/1a：键盘策略收敛失败的可判别原因（probe——进 RangeOutcome 与停因 reason）。 */
+export type RangeProbe = "value_unreadable" | "home_ignored" | "lattice_unreachable";
+
 export interface RangeOutcome {
   ok: boolean;
   achieved?: number;
@@ -32,9 +35,22 @@ export interface RangeOutcome {
   stopCode?: string;
   reason?: string;
   /**
+   * task-21/1a：调用方**请求的原始值**（`{value}` 未折算/未钳制；`{percent}` 为折算后目标）。
+   * accurate 恒按 requested 判——修复「越界请求被钳到值域后按钳制值报 accurate:true」的
+   * 假成功（违反红线③）。
+   */
+  requested?: number;
+  /** task-21/1a：越界请求被拒绝时，记录引擎**拒绝采用**的钳制值（零动作证据链）。 */
+  clamped_from?: number;
+  /** task-21/1a：键盘策略收敛失败的可判别原因（value_unreadable|home_ignored|lattice_unreachable）。 */
+  probe?: RangeProbe;
+  /**
    * S1 effect 读回（页面值事实读回成功才出现）：
    *   - `applied`：控件当前值已经是目标（含“本来就在目标上”的如实成功）；
-   *   - `accurate`：`|achieved - target| <= tolerance`（容差内）。
+   *   - `accurate`：**精确语义（task-21/1a 收紧）——achieved === requested**（requested 值
+   *     真实在控件上）。容差（缺省 max(0.5, step/2)）只用于交互过程的收敛判定，不再用于
+   *     accurate 判定——「容差内但非请求值」如实报 accurate:false（achieved 如实带出）。
+   *   - 旧行为（accurate 按钳制值/容差判）已废除——1a 行为变更，CHANGELOG 记录。
    * 失败路径也如实给 false——不把“动作没抛错”当成“值设上了”。
    */
   applied?: boolean;
@@ -129,19 +145,27 @@ function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
 
-/** 把目标值按页面的 min/max 折算成数值（`{value}` 直取，`{percent}` 按区间比例）。 */
+/**
+ * 把目标值按页面的 min/max 折算成数值（`{value}` 直取，`{percent}` 按区间比例）。
+ * task-21/1a：返回 requested（调用方原话）与 target（折算/钳制后）——**越界不再静默钳制**
+ * （钳制后按钳制值报 accurate:true 是假成功，违反红线③）；越界由 applyRange 结构化拒绝
+ * （value_out_of_range，零动作）。percent 语义本就是区间比例，恒在值域内，无越界概念。
+ */
 function targetRangeValue(
   state: SliderState | null, value: RangeValue,
-): number | null {
+): { requested: number; target: number; clamped: boolean } | null {
   const min = state?.min ?? 0;
   const max = state?.max ?? 100;
   if ("value" in value) {
     const v = num((value as { value: unknown }).value);
-    return v === null ? null : clamp(v, min, max);
+    if (v === null) return null;
+    const clampedV = clamp(v, min, max);
+    return { requested: v, target: clampedV, clamped: clampedV !== v };
   }
   const pct = num((value as { percent: unknown }).percent);
   if (pct === null) return null;
-  return clamp(min + (max - min) * (pct / 100), min, max);
+  const t = clamp(min + (max - min) * (pct / 100), min, max);
+  return { requested: t, target: t, clamped: false };
 }
 
 /** 设置原生 input[type=range] 的值（fill 失败时的 DOM 补发通道）。 */
@@ -163,37 +187,57 @@ async function fillNative(loc: any, target: number): Promise<void> {
   }
 }
 
-/** 键盘策略：Home + ArrowRight/ArrowLeft（先探测页面是否真的响应键盘）。 */
+/**
+ * 键盘策略（task-21/1a 格点感知）：Home 归零 → 步长探测 → **最近格点精确步进**。
+ * 格点 = atHome + k*step（Home 归 min 后从 min 起算）；最近格点 = Math.round((target-atHome)/step)。
+ * accurate 语义：键盘路径**精确**（achieved === target 才算成功）——目标不在格点上
+ * （|gap|<step，多按只会越过）→ probe lattice_unreachable，achieved 如实带出最近格点，
+ * 不用容差把“最近的格点”说成“目标已达成”。
+ * 探针三态：value_unreadable（页面值读不出）/ home_ignored（控件不理 Home）/ 
+ * lattice_unreachable（目标不在格点上、步数超界或中途越界）。
+ */
 async function keyboardSet(
-  loc: any, target: number, deadline: number, tolerance: number,
-): Promise<number | null> {
+  loc: any, target: number, deadline: number, state0: SliderState,
+): Promise<{ achieved: number | null; probe: RangeProbe | null }> {
   try {
+    const preNow = currentOf(state0);
     await loc.press("Home");
     await sleep(10);
     const atHome = currentOf(await readState(loc));
-    if (atHome === null) return null;
+    if (atHome === null) return { achieved: null, probe: "value_unreadable" };
+    // home_ignored：按 Home 前值不在 min、按了之后仍不在 min → 控件忽略 Home
+    //（按 Home 前已在 min 附近 = Home 无需移动，不算 ignored）。
+    const nearMin = (v: number): boolean => Math.abs(v - state0.min) <= state0.step / 2;
+    if (!nearMin(atHome) && (preNow === null || !nearMin(preNow))) {
+      return { achieved: atHome, probe: "home_ignored" };
+    }
     await loc.press("ArrowRight");
     await sleep(10);
     const plusOne = currentOf(await readState(loc));
-    if (plusOne === null || plusOne === atHome) return null;   // 页面不响应键盘
+    if (plusOne === null) return { achieved: null, probe: "value_unreadable" };
+    if (plusOne === atHome) return { achieved: null, probe: null };   // 页面不响应键盘：键盘策略不可用（落 pointer）
     const step = Math.abs(plusOne - atHome) || 1;
-    const need = Math.round((target - plusOne) / step);
-    if (!Number.isFinite(need) || Math.abs(need) > 500) return null;
-    const key = need >= 0 ? "ArrowRight" : "ArrowLeft";
-    for (let i = 0; i < Math.abs(need); i++) {
-      if (Date.now() > deadline) return null;
+    // 格点感知：格点 = atHome + k*step（Home 归 min 后从 min 起算）；按压数从**已探测的
+    // plusOne 位置**起算（步进探测本身消费了一步）；最近格点 = Math.round。
+    // |gap|<step 不做微调（多按只会越过目标——±3 微调旧设计已废）。
+    const kp = Math.round((target - plusOne) / step);
+    if (!Number.isFinite(kp) || Math.abs(kp) > 500) {
+      return { achieved: currentOf(await readState(loc)), probe: "lattice_unreachable" };
+    }
+    const key = kp >= 0 ? "ArrowRight" : "ArrowLeft";
+    for (let i = 0; i < Math.abs(kp); i++) {
+      if (Date.now() > deadline) {
+        return { achieved: currentOf(await readState(loc)), probe: "lattice_unreachable" };
+      }
       await loc.press(key);
     }
-    // 少量步进误差：最多再 ±3 次微调
-    for (let k = 0; k < 3; k++) {
-      const now = currentOf(await readState(loc));
-      if (now === null) return null;
-      if (Math.abs(now - target) <= tolerance) return now;
-      await loc.press(now < target ? "ArrowRight" : "ArrowLeft");
-    }
-    return currentOf(await readState(loc));
+    const achieved = currentOf(await readState(loc));
+    if (achieved === null) return { achieved: null, probe: "value_unreadable" };
+    // 收敛判定：键盘路径精确（achieved === target）；最近格点 ≠ 目标 → lattice_unreachable。
+    if (achieved !== target) return { achieved, probe: "lattice_unreachable" };
+    return { achieved, probe: null };
   } catch {
-    return null;
+    return { achieved: null, probe: null };
   }
 }
 
@@ -232,77 +276,98 @@ async function pointerSet(
 export async function applyRange(
   page: any, loc: any, value: RangeValue, opts: RangeOptions = {},
 ): Promise<RangeOutcome> {
-  const tolerance = Math.abs(opts.tolerance ?? 0.5);
-  const timeoutMs = Math.max(1, opts.timeoutMs ?? 10_000);
-  const deadline = Date.now() + timeoutMs;
-  let state = await readState(loc);
-  if (state === null) {
+  const state0Ref = await readState(loc);
+  if (state0Ref === null) {
     return {
       ok: false, applied: false, accurate: false,
       stopCode: "slider_not_settable",
       reason: "cannot read the slider state (element detached or not a slider)",
     };
   }
-  const target = targetRangeValue(state, value);
-  if (target === null) {
+  const state0 = state0Ref;
+  // task-21/1a：tolerance 缺省 **max(0.5, step/2)**（步长感知——步长 50 的滑杆 0.5 容差没有
+  // 判定意义）；显式声明仍优先。
+  const tolerance = Math.abs(opts.tolerance ?? Math.max(0.5, state0.step / 2));
+  const timeoutMs = Math.max(1, opts.timeoutMs ?? 10_000);
+  const deadline = Date.now() + timeoutMs;
+  const tv = targetRangeValue(state0, value);
+  if (tv === null) {
     return {
       ok: false, applied: false, accurate: false,
       stopCode: "slider_not_settable",
       reason: `invalid range value ${JSON.stringify(value)}`,
     };
   }
-  const strategies: string[] = [];
-  const initial = currentOf(state);
-  const within = (v: number | null | undefined): boolean => v !== null && v !== undefined && Math.abs(v - target) <= tolerance;
-  // 已经在目标上：如实成功（策略按控件类型标注，不虚构交互）。
-  if (initial !== null && Math.abs(initial - target) <= tolerance) {
+  const requested = tv.requested;
+  const target = tv.target;
+  // task-21/1a：越界请求**结构化拒绝，零动作**（不 clamp、不策略、不假装）——旧行为把
+  // 越界目标钳进值域后按钳制值报 accurate:true，违反红线③（完成只认证据/不假装成功）。
+  if (tv.clamped) {
     return {
-      ok: true, achieved: initial, strategy: state.isRangeInput ? "fill" : "keyboard",
-      applied: true, accurate: true, target,
+      ok: false, applied: false, accurate: false,
+      requested, clamped_from: target, target,
+      stopCode: "value_out_of_range",
+      reason: `requested value ${requested} is outside the slider range [${state0.min}, ${state0.max}] `
+        + `(would clamp to ${target}) — refused without any interaction (never pretend success; `
+        + "narrow the request or pick a control whose range covers the target)",
     };
   }
-
-  // ① 原生 range：DOM 值写入（fill 优先）
-  if (state.isRangeInput) {
+  const strategies: string[] = [];
+  let state: SliderState | null = state0;
+  const initial = currentOf(state);
+  // 已经在目标上：如实成功（accurate 精确语义——initial 恰为 requested 才 accurate:true；
+  // 容差邻域但非精确值 → ok:true + accurate:false + achieved 如实带出）。
+  if (initial !== null && Math.abs(initial - requested) <= tolerance) {
+    return {
+      ok: true, achieved: initial, strategy: state0.isRangeInput ? "fill" : "keyboard",
+      applied: true, accurate: initial === requested, target, requested,
+    };
+  }
+  let lastProbe: RangeProbe | null = null;
+  // ① 原生 range：DOM 值写入（fill 优先）。accurate 语义：精确（achieved === requested）。
+  if (state0.isRangeInput) {
     strategies.push("fill");
     await fillNative(loc, target);
     await sleep(10);
     state = await readState(loc);
     const got = currentOf(state);
-    if (within(got)) {
-      return { ok: true, achieved: got!, strategy: "fill", applied: true, accurate: true, target };
+    if (got !== null && got === requested) {
+      return { ok: true, achieved: got, strategy: "fill", applied: true, accurate: true, target, requested };
     }
-  }
-
-  // ② 键盘（ARIA 手柄的主力；input range 若 fill 失败也试一次）
+  }  // ② 键盘（ARIA 手柄的主力；input range 若 fill 失败也试一次）。
+  // accurate 语义：精确（achieved === requested——格点感知下目标可精确到达才算）。
   strategies.push("keyboard");
   if (Date.now() < deadline) {
-    const got = await keyboardSet(loc, target, deadline, tolerance);
-    if (within(got)) {
-      return { ok: true, achieved: got!, strategy: "keyboard", applied: true, accurate: true, target };
+    const kb = await keyboardSet(loc, target, deadline, state0);
+    if (kb.achieved !== null && kb.achieved === requested) {
+      return { ok: true, achieved: kb.achieved, strategy: "keyboard", applied: true, accurate: true, target, requested };
     }
+    lastProbe = kb.probe;
   }
-
-  // ③ 指针（自绘手柄；0×0 手柄用最近有尺寸祖先）
+  // ③ 指针（自绘手柄；0×0 手柄用最近有尺寸祖先）。accurate 精确语义：achieved === requested
+  //（容差只用于 pointer 内部的收敛判定——非精确落点如实 ok:false + achieved 带出）。
   strategies.push("pointer");
   if (Date.now() < deadline) {
     const { achieved, bbox } = await pointerSet(page, loc, target, deadline, tolerance);
-    if (within(achieved)) {
-      return { ok: true, achieved: achieved!, strategy: "pointer", applied: true, accurate: true, target };
+    if (achieved !== null && achieved === requested) {
+      return { ok: true, achieved, strategy: "pointer", applied: true, accurate: true, target, requested };
     }
     const now = currentOf(await readState(loc));
     return {
       ok: false,
-      applied: false, accurate: false, target,
+      applied: false, accurate: false, target, requested,
+      ...(lastProbe !== null ? { probe: lastProbe } : {}),
       stopCode: "slider_not_settable",
-      reason: `target ${target} not reached after strategies [${strategies.join(" → ")}] `
+      reason: `target ${requested} not reached after strategies [${strategies.join(" → ")}] `
         + `(current=${now ?? "unknown"}, bbox=${bbox === null ? "none" : `${Math.round(bbox.width)}×${Math.round(bbox.height)}`}, `
-        + `timeoutMs=${timeoutMs}) — the page does not expose a settable slider surface (never pretend success)`,
+        + `timeoutMs=${timeoutMs}${lastProbe !== null ? `, probe=${lastProbe}` : ""}) `
+        + "— the page does not expose a settable slider surface (never pretend success)",
     };
   }
   return {
     ok: false,
-    applied: false, accurate: false, target,
+    applied: false, accurate: false, target, requested,
+    ...(lastProbe !== null ? { probe: lastProbe } : {}),
     stopCode: "slider_not_settable",
     reason: `timeout after ${timeoutMs}ms with strategies [${strategies.join(" → ")}] — the range control did not accept any interaction`,
   };

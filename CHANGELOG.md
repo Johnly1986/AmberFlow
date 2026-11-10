@@ -4,6 +4,26 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — feat/opt-scale（task-21/1a 行为变更）
+
+- **【行为变更·1a 滑杆假成功修复】`ctx.setRange` 越界请求不再静默钳制后报成功**：
+  `{value}` 超出滑杆 [min,max] 时返回结构化失败 `value_out_of_range`（stopCode），零动作
+  （不走任何交互策略），结果带 `requested`（请求原话）/`clamped_from`（被拒的钳制值）。
+  旧行为：越界目标被钳进值域后按钳制值报 `ok:true + accurate:true`（违反「完成只认证据/
+  不假装成功」红线——实测：请求 200、滑杆 [1,11]、返回 achieved 11 且 accurate:true）。
+- **【行为变更·1a accurate 语义收紧】`accurate` 改为精确语义（achieved === requested）**：
+  容差（缺省 max(0.5, step/2)，步长感知）只用于交互过程的收敛判定，不再用于 accurate 判定；
+  「容差内但非请求值」如实报 `accurate:false` 并把 achieved 带出。keyboard 策略格点感知
+  （从 Home 归位值 + k*step 格点起算、最近格点 Math.round、|gap|<step 不做 ±3 微调），
+  收敛失败带 `probe`（value_unreadable | home_ignored | lattice_unreachable）。
+  依赖容差语义的旧脚本请改按 `achieved`/`requested` 自行判定。
+- **【新增·D-1 观测面】`result.env.browser`（binary_basename/headless/persistent_profile）、
+  `result.observations[]`（read/extract/observe 的行样例+计数+hint 投影，只增）、observe
+  trace 事件增 `elements_sample`（前 5 元素有界样例）、run warnings 注入 `[step N:id]` 前缀
+  （flow 面执行器 stepNo 恒 1 的步号修正）。
+- **【新增·D-2 产出守卫】`amber apps new` 骨架内置「产出行数 ≥N 否则 ctx.fail(output_underflow)」
+  模板；docs 把数据类任务的产出下限写成硬要求。
+
 ## [2.0.0] - 未发布
 
 2.0.0 是一次结构性重构：仓库从「决策任务流引擎 + 声明式应用 + 离线夹具/复刻站」收敛为

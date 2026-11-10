@@ -290,6 +290,16 @@ export async function flow(ctx) {
   //   done: ctx.judge.url("search"),  // ← 换成动作后才会成立的信号
   // });
 
+  // 产出守卫（task-21/D-2·硬要求）：数据类任务**必须**声明产出下限——产出不足 =
+  // 结构化失败（ctx.fail），绝不以「ok:true 但 0 条数据」交差（审核报告 D-2：PASSED+0
+  // 数据是最危险的假绿形态）。dry 面 extract 恒 []，守卫只在真跑生效——apps check 不受影响。
+  // const dry = ctx.runtime.dry;
+  // const MIN_ROWS = 1;                       // ← 产出下限按任务实际调整（0 = 不设守卫）
+  // const rows = ...（你的 extract/collect 产物）
+  // if (!dry && MIN_ROWS > 0 && rows.length < MIN_ROWS) {
+  //   ctx.fail("output_underflow", \`产出 \${rows.length} 行 < 下限 \${MIN_ROWS}——按产出守卫如实失败\`);
+  // }
+
   await ctx.done();   // 结束态不变量在这里验收；失败会抛 invariant_failed
 }
 `;

@@ -2229,6 +2229,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   let finalUrl: string | undefined;
   let envViewport: { width: number; height: number } | undefined;
   let envUserAgent: string | undefined;
+  // task-21/D-1：浏览器启动事实（env.browser 一等证据；会话收尾时从 liveSession 读）。
+  let envBrowser: NonNullable<BrowserSession["envBrowser"]> | undefined;
   /** 每次 ctx.step/arrive 的执行报告 → 决策账（与 runApp 同一份 `summarizeDecisions`）。 */
   const decisionSteps: TraceStep[] = [];
   /** 每个 `ctx.step` 一次 mw.run；这里按调用顺序保留它的动作 trace，供 step_traces 补 hows/descs/methods。 */
@@ -2545,6 +2547,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       // 不让证据采集影响运行结果本身。字段语义见 `AppRunEnv`。
       const liveSession = holder.session;
       if (liveSession !== null) {
+        // task-21/D-1：浏览器启动事实（binary_basename/headless/persistent_profile）——
+        // 会话关闭前读一次（与 final_url/viewport 同一先例；sessionFactory 注入的会话缺字段省略）。
+        if (liveSession.envBrowser !== undefined) envBrowser = liveSession.envBrowser;
         try {
           const u = urlOf(liveSession.page);
           if (u) finalUrl = String(u);
@@ -2713,7 +2718,10 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       for (const w of t.warnings ?? []) {
         if (seen.has(w)) continue;
         seen.add(w);
-        runWarnings.push(w);
+        // task-21/D-1：警告步号修正——flow 面每个 ctx.step 是独立 mw.run，执行器 stepNo
+        // 每步从 1 重数（审核报告 D-3：7 条警告全写 "step 1" 无法定位）。汇总面把
+        // step_traces 的步位/稳定 id 注入前缀，报告与 JSON 的警告从此可定位。
+        runWarnings.push(`[step ${t.index + 1}${t.id ? `:${t.id}` : ""}] ${w}`);
       }
     }
     // task-14（D1）：决策面兼容降级时保底一条 run warning（即使没有步被吞掉——
@@ -2726,6 +2734,46 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   const logs = trace.events.filter((e) => e.call === "log").map((e) => ({
     i: e.i, desc: e.desc ?? "", ...(e.result === undefined ? {} : { result: e.result }),
   }));
+  // task-21/D-1：流式 observation 投影（判分面）——read/extract/observe 的**行样例+计数+
+  // 选中 hint**（每行值截断 ≤40 字符、样例 ≤3 行、observe 元素样例 ≤5），从既有 trace 事件
+  // 重建（不另存状态）。0/5 判分所需字段从此可见（此前 extract 行数据不进 step_traces、
+  // observe 不落 result、无 trace_path 时永久丢失）。只增字段：无此类调用 = 键缺席。
+  const isClip = (v: unknown): string => {
+    const s = String(v ?? "").replace(/\s+/g, " ").trim();
+    return s.length <= 40 ? s : `${s.slice(0, 39)}…`;
+  };
+  const clipRow = (row: unknown): Record<string, string> => {
+    const out: Record<string, string> = {};
+    if (typeof row === "object" && row !== null) {
+      for (const [k, v] of Object.entries(row as Record<string, unknown>)) out[k] = isClip(v);
+    }
+    return out;
+  };
+  const observations = trace.events
+    .filter((e) => e.call === "read" || e.call === "extract" || e.call === "observe")
+    .map((e) => {
+      const res = (typeof e.result === "object" && e.result !== null && !Array.isArray(e.result))
+        ? e.result as Record<string, unknown> : {};
+      if (e.call === "extract") {
+        const rows = Array.isArray(res["rows"]) ? res["rows"] as unknown[] : [];
+        return {
+          i: e.i, call: "extract", desc: e.desc ?? "",
+          rows_count: rows.length,
+          ...(rows.length > 0 ? { rows_sample: rows.slice(0, 3).map(clipRow) } : {}),
+          ...(res["truncated"] === true ? { truncated: true } : {}),
+        };
+      }
+      if (e.call === "observe") {
+        return {
+          i: e.i, call: "observe", desc: e.desc ?? "", url: e.url ?? "",
+          ...(e.counts !== undefined ? { counts: e.counts } : {}),
+          ...(e.elements_sample !== undefined ? { elements_sample: e.elements_sample } : {}),
+          ...(e.truncated === true ? { truncated: true } : {}),
+        };
+      }
+      // read：值投影（result 即读到的值——text/value 截断 ≤40；count/attr 为标量原样）。
+      return { i: e.i, call: "read", desc: e.desc ?? "", result: isClip(e.result) };
+    });
   // P0-E：失败步计账（口径 = step_traces 中 status:"failed"；skipped/recovered 不算失败）。
   // 仅 >0 才进 result——clean run 的键集与基线逐字节一致。
   const stepsFailed = stepTraces.filter((t) => t.status === "failed").length;
@@ -2833,6 +2881,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       ...(finalUrl === undefined ? {} : { final_url: finalUrl }),
       ...(envViewport === undefined ? {} : { viewport: envViewport }),
       ...(envUserAgent === undefined ? {} : { user_agent: envUserAgent }),
+      // task-21/D-1：浏览器启动事实（env.browser 一等证据——渲染退化判定第一块事实；
+      // sessionFactory 注入的会话缺字段省略）。
+      ...(envBrowser === undefined ? {} : { browser: envBrowser }),
     },
     // §3：生效策略只在非缺省时进产物（与 runApp 同一纪律）；模型层级照写（脚本应用同样要能说清）。
     ...(anyDeclared && policy !== null ? { effective_policy: policy } : {}),
@@ -2852,6 +2903,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     step_traces: stepTraces,
     ...(runWarnings.length ? { warnings: runWarnings } : {}),
     ...(logs.length ? { logs } : {}),
+    // task-21/D-1：流式 observation 投影（判分面；只增字段——无 read/extract/observe 调用
+    // 时键缺席，clean 键集与基线逐字节一致）。result 装配后经 scrubSecrets 统一掩码。
+    ...(observations.length > 0 ? { observations } : {}),
     script: {
       mode: "flow",
       script_path: loaded.scriptPath,

@@ -57,6 +57,7 @@ import path from "node:path";
 
 import { getAuditor, type AuditVerdict, type Auditor, type TraceStep } from "./audit.ts";
 import * as browserEnv from "../browser/browser-env.ts";
+import { lastBrowserLaunchFacts } from "../browser/browser-env.ts";
 import type { BrowserLike, LaunchOptions } from "../browser/browser-env.ts";
 import {
   INTERACTIVE_ALL,
@@ -876,6 +877,13 @@ export interface BrowserSession {
   browser: BrowserHandle;
   page: AnyPage;
   close(): Promise<void>;
+  /**
+   * task-21/D-1：本次会话的浏览器事实（env.browser 一等证据；只增字段）。
+   * binary_basename = 实际启动的 chromium 变体（chrome vs chrome-headless-shell——渲染退化
+   * 判定的第一块事实）；headless = 是否无头；persistent_profile = 是否持久化 profile。
+   * 缺省不出现 = 会话不是本进程 browserSession() 创建的（sessionFactory 注入等）。
+   */
+  envBrowser?: { binary_basename: string; headless: boolean; persistent_profile: boolean };
 }
 
 export interface MiddlewareOptions {
@@ -1607,6 +1615,8 @@ export async function browserSession(headless = true, device?: DeviceSpec | null
   const mod = await import("playwright");
   const pw: PwLike = { chromium: mod.chromium as unknown as PwLike["chromium"] };
   const browser = (await browserEnv.launch(pw, headless)) as unknown as BrowserHandle;
+  // task-21/D-1：启动事实挂到会话上（env.browser 一等证据；app-runner 收尾读进 result.env）。
+  const envBrowser = lastBrowserLaunchFacts() ?? undefined;
   let page: AnyPage;
   let context: AnyPage | null = null;
   try {
@@ -1640,6 +1650,7 @@ export async function browserSession(headless = true, device?: DeviceSpec | null
     pw,
     browser,
     page,
+    ...(envBrowser !== undefined ? { envBrowser } : {}),
     async close(): Promise<void> {
       if (closed) return;
       closed = true;

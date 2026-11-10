@@ -269,12 +269,20 @@ export interface SetRangeResult {
   reason?: string;
   /**
    * S1 effect 读回（`meta.policy.effect_readback.set_range !== false` 时出现）：
-   * `applied` = 控件值事实已经是目标；`accurate` = 在容差内。失败路径也如实 false。
+   * `applied` = 控件值事实已经是目标；`accurate` = **requested 值真实在控件上**
+   * （task-21/1a 收紧为精确语义——achieved === requested；容差只用于交互收敛判定）。
+   * 失败路径也如实 false。
    */
   applied?: boolean;
   accurate?: boolean;
   /** 目标数值（percent 已折算；对账用）。 */
   target?: number;
+  /** task-21/1a：调用方请求的原始值（越界拒绝时 = 被拒的请求；正常时 === target）。 */
+  requested?: number;
+  /** task-21/1a：越界请求被拒绝时记录的钳制值（零动作证据链；仅 value_out_of_range 出现）。 */
+  clamped_from?: number;
+  /** task-21/1a：键盘策略收敛失败的可判别原因（仅键盘路径失败时出现）。 */
+  probe?: "value_unreadable" | "home_ignored" | "lattice_unreachable";
 }
 
 /**
@@ -1927,10 +1935,19 @@ export function createCtx(deps: CtxDeps): Ctx {
       const started = Date.now();
       const session = await deps.ensureSession();
       const result = await observePage(session.page as unknown as PageLike, opts, deps.surfacePolicy);
-      // 只记摘要：counts + truncated（**不记元素明细/class**，避免 trace 膨胀与脱敏问题）。
+      // 只记摘要：counts + truncated + 判分样例（task-21/D-1：前 5 个元素 tag/label≤40/
+      // hints≤3 的有界投影——0/5 判分所需字段的流式可见；全量明细仍只在 observe 返回值里，
+      // result 装配时经 scrubSecrets 掩码）。
+      const obsSample = (result.elements ?? []).slice(0, 5).map((e) => ({
+        tag: String(e.tag ?? ""),
+        label: String(e.label ?? "").slice(0, 40),
+        ...(Array.isArray(e.hint_candidates) && e.hint_candidates.length > 0
+          ? { hints: e.hint_candidates.slice(0, 3) } : {}),
+      }));
       pushEvent(trace, {
         call: "observe", url: result.url, ok: result.ok,
         counts: result.counts, truncated: result.truncated,
+        ...(result.ok && obsSample.length > 0 ? { elements_sample: obsSample } : {}),
         ...(result.ok ? {} : { result: { error: result.error, reason: result.reason } }),
       });
       if (deps.verbose === true) {
@@ -2135,6 +2152,11 @@ export function createCtx(deps: CtxDeps): Ctx {
         ...(!readback || r.applied === undefined ? {} : { applied: r.applied }),
         ...(!readback || r.accurate === undefined ? {} : { accurate: r.accurate }),
         ...(!readback || r.target === undefined ? {} : { target: r.target }),
+        // task-21/1a：requested/clamped_from/probe 透传（越界拒绝与键盘 probe 的证据链；
+        // SetRangeResult 类型同步扩展）。
+        ...(!readback || r.requested === undefined ? {} : { requested: r.requested }),
+        ...(!readback || r.clamped_from === undefined ? {} : { clamped_from: r.clamped_from }),
+        ...(!readback || r.probe === undefined ? {} : { probe: r.probe }),
       };
       pushEvent(trace, {
         call: "setRange", desc: target, ok: result.ok,

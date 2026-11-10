@@ -81,6 +81,31 @@ export interface LaunchOptions {
   [k: string]: unknown;
 }
 
+/* ---- task-21/D-1：启动事实记账（env.browser 一等证据的来源） ----
+ * 记录**最后一次**启动的 {binary_basename, headless, persistent_profile}——browserSession()
+ * 创建会话后读取挂到 session.envBrowser 上（只增字段；sessionFactory 注入的会话没有）。 */
+
+export interface BrowserLaunchFacts {
+  binary_basename: string;
+  headless: boolean;
+  persistent_profile: boolean;
+}
+
+let lastLaunchFacts: BrowserLaunchFacts | null = null;
+
+function recordLaunchFacts(executablePath: string, headless: boolean, persistent: boolean): void {
+  lastLaunchFacts = {
+    binary_basename: path.basename(executablePath),
+    headless,
+    persistent_profile: persistent,
+  };
+}
+
+/** 读最后一次启动事实（没启动过 = null——调用方缺省省略）。 */
+export function lastBrowserLaunchFacts(): BrowserLaunchFacts | null {
+  return lastLaunchFacts;
+}
+
 /** kwargs for `chromium.launch()` (playwright's own option names). */
 export function launchKwargs(headless = true, extensionDir: string | null = null): LaunchOptions {
   const kw: LaunchOptions = { headless };
@@ -135,6 +160,8 @@ export async function launch(
     throw new Error("no chromium binary found. Run `playwright install chromium`, or set "
       + "PLAYWRIGHT_BROWSERS_PATH to a directory containing chromium-*/.");
   }
+  // task-21/D-1：启动事实记账（env.browser 一等证据——渲染退化判定的第一块事实）。
+  recordLaunchFacts(String(kw.executablePath), headless, false);
   return (await pw.chromium.launch(kw)) as BrowserLike;
 }
 
@@ -171,5 +198,7 @@ export async function launchPersistentContext(
     throw new Error("no chromium binary found. Run `playwright install chromium`, or set "
       + "PLAYWRIGHT_BROWSERS_PATH to a directory containing chromium-*/.");
   }
+  // task-21/D-1：持久化 profile 的启动事实（persistent_profile:true）。
+  recordLaunchFacts(String(kw.executablePath), headless, true);
   return pw.chromium.launchPersistentContext(userDataDir, { ...kw, args, ...extra });
 }
