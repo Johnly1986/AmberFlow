@@ -113,6 +113,22 @@ export function launchKwargs(headless = true, extensionDir: string | null = null
     kw.args = ["--no-sandbox", "--disable-dev-shm-usage"];   // containers
   }
   const cands = chromiumCandidates();
+  // ---- task-39 A/B 评估旁路（临时，eval 结束去留由 lead 裁决）----
+  // AMBERFLOW_BROWSER_CHANNEL=chrome → Playwright channel:"chrome"（本机系统 Chrome，
+  // new headless）；=headless-shell → 强制 headless-shell 二进制。缺省（未设/其它值）
+  // 走原解析，行为逐字节不变。注意 channel 与 executablePath 在 Playwright 里互斥。
+  const channel = process.env.AMBERFLOW_BROWSER_CHANNEL === "chrome"
+    ? "chrome"
+    : process.env.AMBERFLOW_BROWSER_CHANNEL === "headless-shell" ? "headless-shell" : null;
+  if (channel !== null && !extensionDir) {
+    if (channel === "chrome") {
+      kw.channel = "chrome";
+      return kw; // channel 路径不解析本地二进制；无系统 Chrome 由 launch 抛错并在上层如实报
+    }
+    const shell = cands.filter((c) => path.basename(c).includes("headless"));
+    if (shell.length) kw.executablePath = shell[shell.length - 1];
+    return kw;
+  }
   if (extensionDir) {
     // MV3 extensions only load in the full chromium (new headless or headed).
     const full = cands.filter((c) => !path.basename(c).includes("headless"));
@@ -151,17 +167,24 @@ export interface BrowserLike {
 
 /** Launch a browser through the same resolution order as the Python layer. */
 export async function launch(
-  pw: { chromium: { launch(opts: LaunchOptions): Promise<unknown> } },
+  pw: { chromium: { launch(opts: LaunchOptions): Promise<unknown>; executablePath?(opts?: Record<string, unknown>): string } },
   headless = true,
   extensionDir: string | null = null,
 ): Promise<BrowserLike> {
   const kw = launchKwargs(headless, extensionDir);
-  if (!("executablePath" in kw)) {
+  if (!("executablePath" in kw) && !("channel" in kw)) {
     throw new Error("no chromium binary found. Run `playwright install chromium`, or set "
       + "PLAYWRIGHT_BROWSERS_PATH to a directory containing chromium-*/.");
   }
   // task-21/D-1：启动事实记账（env.browser 一等证据——渲染退化判定的第一块事实）。
-  recordLaunchFacts(String(kw.executablePath), headless, false);
+  // task-39 A/B 旁路：channel 路径没有本地 executablePath，用 Playwright 自己的
+  // executablePath() 解析出真实二进制（解析失败如实记 channel 名，不编路径）。
+  let binaryForFacts = String((kw as { executablePath?: string }).executablePath ?? "");
+  if (binaryForFacts === "" && typeof pw.chromium.executablePath === "function") {
+    try { binaryForFacts = pw.chromium.executablePath(kw as Record<string, unknown>); }
+    catch { binaryForFacts = `channel:${String((kw as { channel?: string }).channel ?? "?")}`; }
+  }
+  recordLaunchFacts(binaryForFacts, headless, false);
   return (await pw.chromium.launch(kw)) as BrowserLike;
 }
 
