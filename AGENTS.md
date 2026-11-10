@@ -118,4 +118,4 @@ online/cases/probe/*.json
 
 ## 文档
 
-`README.md`、`ARCHITECTURE.md`、`docs/AGENT_INTERFACE.md`、`docs/APP_SCRIPT_AUTHORING.md`、`docs/MANUAL_STEPS_AND_PACE.md`、`docs/DECISION_SERVICE_CONFIG.md`、`docs/PROMPT_SYSTEM.md`（三层提示词系统设计与审查记录）、`docs/BACKLOG.md`（工程优化待办：决策入口统一/候选列表应用层化/候选窗口指数递增）。不要引用已删除的旧报告/基准/应用清单。
+`README.md`、`ARCHITECTURE.md`、`docs/AGENT_INTERFACE.md`、`docs/APP_SCRIPT_AUTHORING.md`、`docs/MANUAL_STEPS_AND_PACE.md`、`docs/DECISION_SERVICE_CONFIG.md`、`docs/PROMPT_SYSTEM.md`（三层提示词系统设计与审查记录）、`docs/BACKLOG.md`（工程优化待办：决策入口统一/候选列表应用层化/候选窗口指数递增）、`docs/IMPROVEMENT_PLAN.md`（2026-11-10 三项问题改进方案：配置收敛/分层治理/臃肿文件拆解，proposal 待排期）。不要引用已删除的旧报告/基准/应用清单。
