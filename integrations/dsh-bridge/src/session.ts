@@ -610,7 +610,13 @@ export class SessionManager {
     if (args.by !== undefined) body['by'] = args.by
     const response = await this.request(state, body)
     const base = { op: 'act', session_id: state.id, act_op: actOp, target: args.target ?? null }
-    if (response['ok'] !== true) return { ...this.engineFailure(response, 'act'), ...base }
+    // task-36：歧义诊断**原样透传**（引擎有这些键才出现）——交互试错第一诉求是"为什么点错/
+    // 是不是多个候选"，而 CLI 会话面已经用 B1 旁路算好了；bridge 只做有界映射，不重算、不猜。
+    // 语义纪律：ambiguous 是**诊断事实**不是错误（ok:true 也回显）；缺键 = 精确形状，响应不变。
+    const ambiguity = this.ambiguityDiagnostics(response)
+    if (response['ok'] !== true) {
+      return { ...this.engineFailure(response, 'act'), ...ambiguity, ...base }
+    }
     return {
       ok: true,
       ...base,
@@ -620,7 +626,37 @@ export class SessionManager {
       changed: response['changed'] === true,
       url: response['url'] ?? state.url,
       ...(isObj(response['after']) ? { after: response['after'] } : {}),
+      ...ambiguity,
     }
+  }
+
+  /**
+   * task-36：act 歧义诊断的有界透传（引擎响应里有才有；精确形状的响应键集不变）。
+   *
+   * 来源：CLI 会话面用 B1 旁路（与 run 的 matched_others 同一份）算出的当场事实——
+   * `ambiguous:boolean`、`matched_others[]`（≤3；ref/tag/class/label≤40）、弱档标记
+   * `hint_kind`/`hint_tier`/`hint_suspicious`。bridge 只做形状裁剪，不改语义、不补字段。
+   */
+  private ambiguityDiagnostics(response: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = {}
+    if (typeof response['ambiguous'] === 'boolean') out['ambiguous'] = response['ambiguous']
+    const rawOthers = response['matched_others']
+    if (Array.isArray(rawOthers)) {
+      const rows = rawOthers.slice(0, 3).map((raw) => {
+        const o: Record<string, unknown> = isObj(raw) ? raw : {}
+        return {
+          ...(typeof o['ref'] === 'string' ? { ref: o['ref'] } : {}),
+          ...(typeof o['tag'] === 'string' ? { tag: o['tag'] } : {}),
+          ...(typeof o['class'] === 'string' ? { class: o['class'] } : {}),
+          ...(typeof o['label'] === 'string' ? { label: clip(o['label'], 40) } : {}),
+        }
+      })
+      if (rows.length > 0) out['matched_others'] = rows
+    }
+    if (typeof response['hint_kind'] === 'string') out['hint_kind'] = response['hint_kind']
+    if (typeof response['hint_tier'] === 'number') out['hint_tier'] = response['hint_tier']
+    if (response['hint_suspicious'] === true) out['hint_suspicious'] = true
+    return out
   }
 
   private async read(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {

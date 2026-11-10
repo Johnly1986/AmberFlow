@@ -1102,7 +1102,9 @@ export function apply(ctx: Context, config: Config): void {
       + '`op:"open"` once (returns session_id), then `observe` to see admitted elements with '
       + 'hint candidates, `act` to perform one action (click/check/fill/select/hover/scroll — a value '
       + 'must be supplied explicitly; the tool never invents values), then read/extract/signal to read '
-      + 'the immediate facts back. Raw records land under `$AMBERFLOW_HOME/session/<id>/` and can later '
+      + 'the immediate facts back. `act` echoes ambiguity diagnostics (`ambiguous` / '
+      + '`matched_others`) when the hint matched several candidates — re-observe and retry with a '
+      + 'narrower hint instead of guessing. Raw records land under `$AMBERFLOW_HOME/session/<id>/` and can later '
       + 'become an app.mjs skeleton via `amber session export --record <file>` — that skeleton is an '
       + 'authoring hint, not a verified plan. '
       + 'USE `' + toolPrefix + '_run` to execute/verify a frozen plan or app — completion truth '
@@ -1203,6 +1205,17 @@ function renderSessionResult(value: Record<string, unknown>): string {
       return `${tag}: ${String(value.act_op ?? '')} ${String(value.target ?? '')} → ${String(value.how ?? '?')}`
         + ` ref=${String(value.ref ?? '-')} changed=${String(value.changed === true)}`
         + `\nurl: ${String(value.url ?? '')}`
+        + (value.ambiguous === true
+          ? `\nambiguous: yes${Array.isArray(value.matched_others) && value.matched_others.length > 0
+            ? ` — other candidates: ${value.matched_others.map((raw) => {
+              const c = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {}
+              return `${String(c.tag ?? '')}${typeof c.class === 'string' && c.class !== '' ? `.${c.class}` : ''} "${String(c.label ?? '')}"`
+            }).join(' | ')}`
+            : ''}; re-observe and retry with a narrower hint`
+          : '')
+        + (value.hint_suspicious === true
+          ? `\nweak-tier hit (${String(value.hint_kind ?? '?')} tier ${String(value.hint_tier ?? '?')}) — the element may be a container/same-prefix node, not the intended target`
+          : '')
     case 'read':
       return `${tag}: ${String(value.what ?? '')}(${String(value.selector ?? '')}) = ${JSON.stringify(value.value ?? null)}`
         + (value.value_truncated === true ? ' (truncated)' : '')
