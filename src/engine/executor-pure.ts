@@ -60,6 +60,7 @@ export function contextPageCount(page: PageLike): number {
   }
 }
 
+import { disallowedHost } from "./host-envelope.ts";
 export { disallowedHost } from "./host-envelope.ts";
 
 /** Element types whose current value is a SECRET: never written into a trace or report (P0-3, D5①). */

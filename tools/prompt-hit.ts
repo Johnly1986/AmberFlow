@@ -297,7 +297,11 @@ for (const code of Object.keys(EXEMPT_NEXT)) {
     }
   }
   // executor StopCode union 闭环：union ⊆ 契约 ∪ 内部码边界（双向）。
-  const executorSrc = fs.readFileSync(path.join(REPO, "src", "engine", "executor.ts"), "utf-8");
+  // F2a 起 StopCode 拆到 executor-types.ts（executor.ts 仅 re-import），两处都找。
+  const executorSrc = [
+    fs.readFileSync(path.join(REPO, "src", "engine", "executor.ts"), "utf-8"),
+    fs.readFileSync(path.join(REPO, "src", "engine", "executor-types.ts"), "utf-8"),
+  ].join("\n");
   const unionMatch = executorSrc.match(/export type StopCode =([\s\S]*?);/);
   if (!unionMatch) {
     problems.push("coverage: 无法从 executor.ts 解析 StopCode union");

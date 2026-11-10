@@ -428,6 +428,7 @@ export function framesOf(page: PageLike, limit = 6): FrameLike[] {
  * 帧 URL 无法解析 / about:blank / file: 等：返回 true（不可判 origin 时绝不擅自排除）。
  */
 /** 信封布尔视图：true = 在声明的 hosts 信封内。单源实现见 host-envelope.ts（L2 合并）。 */
+import { urlInHostsEnvelope } from "./host-envelope.ts";
 export { urlInHostsEnvelope } from "./host-envelope.ts";
 
 /** P0-D：一个 frame 的 URL 是否在信封内（空 URL / about:blank = 允许，口径同上面）。 */
