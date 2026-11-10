@@ -146,6 +146,12 @@ async function buildChoiceBody(p: SystemOneProfile, req: ChoiceRequest):
   if (req.state_digest !== undefined && p.stateDigest === true) {
     state["state_digest"] = req.state_digest;
   }
+  // task-26（D2 A/B）：站点事实 fenced block 经 notes 上 wire——**仅当 D2 注入活跃**
+  //（notes 里有 site_facts 键 = 执行器端 opt-in）才把 notes 包挂进不透明 state；老服务
+  // 忽略未知键即向后兼容，与 state_digest 同一条先例。缺省（未注入）请求体逐字节不变。
+  if (req.notes !== null && req.notes !== undefined && "site_facts" in req.notes) {
+    state["notes"] = req.notes;
+  }
   return {
     asked: refs,
     body: {

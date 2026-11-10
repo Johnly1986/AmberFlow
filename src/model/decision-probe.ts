@@ -8,13 +8,13 @@
  *   ② 探测失败 → 本次 run 停发模型调用（规则面继续、升级链规则兜底、死服务不重试超过 1 次）；
  *   ③ 诚实留痕（result.decision.degraded + run/step warning）——由 app-runner/executor 落。
  *
- * 复用 doctor 的探针底座（同一装配路径 resolveProviderSpec → applySpecToRuntime →
- * provider.pick 最小考卷）——从 doctor.ts 抽出成共享模块（单一出处，doctor 与 run 共用）。
+ * 复用 doctor 的探针底座（同一协议端点 resolveProviderSpec → spec.provider 的最小 pick——
+ * task-26 实证修正：不 applySpecToRuntime，重装会以未计数 provider 覆盖 run.ts 的计数安装）。
  * 探测通过 = 一切照旧（调用方不落任何字段，online 时行为与今天逐字节一致，唯一差异是
  * 起跑多付一次最小 ask——已写进 F52 与 docs）。
  */
 import {
-  decisionFailureFact, resolveProviderSpec, applySpecToRuntime, getDecisionProvider,
+  decisionFailureFact, resolveProviderSpec,
 } from "./decision-provider.ts";
 
 export type DecisionDegradedClass = "unreachable" | "auth" | "protocol" | "unknown";
@@ -79,9 +79,12 @@ export function decisionDegradedAdvice(cls: DecisionDegradedClass): string {
 }
 
 /**
- * 起跑探测一次：与运行时**完全相同**的装配路径，真实发一次最小 pick（doctor 的考卷）。
+ * 起跑探测一次：解析决策源并对**同一协议端点**真实发一次最小 pick（doctor 的考卷）。
  * 只测 HTTP 层能不能过、服务答不答协议——不考模型的题感。超时沿用运行时超时配置
  * （AMBERFLOW_DECISION_TIMEOUT_MS）：localhost 停服是连接拒绝（即时），黑洞地址付一次超时。
+ * task-26 实证修正：**不再 applySpecToRuntime**——重装会以未计数 provider 覆盖 run.ts 已
+ * 安装的计数包装（model_asks 恒 0，A/B 前提误判）。探测改用 spec.provider（同一端点/协议的
+ * 原话实例，未包装未安装）——wire 请求与运行时逐字节相同，计数包装与安装序列零扰动。
  */
 export async function probeDecisionPlane(): Promise<DecisionProbeResult> {
   let name = "unknown";
@@ -93,8 +96,7 @@ export async function probeDecisionPlane(): Promise<DecisionProbeResult> {
       return { provider: name, ok: false,
         error: `当前默认决策源是 ${spec.name}（tier=${spec.tier}）——没有在线 HTTP 决策源可探测` };
     }
-    await applySpecToRuntime(spec);
-    const p = getDecisionProvider();
+    const p = spec.provider;
     const page = { url: "https://amberflow.ask-probe.invalid/", title: async () => "amberflow ask probe" };
     const out = await p.pick({
       goal: "decision plane probe", page,
