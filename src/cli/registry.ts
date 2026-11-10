@@ -40,6 +40,7 @@ ${OVERVIEW_TEXT}
   plan      创建 / 编辑 / 校验计划${whenFor("plan")}
   apps      列出 / 查看 / 校验应用${whenFor("apps")}
   inspect   只读观察页面元素与候选 hint${whenFor("inspect")}
+  session   交互式试错会话：操作一步→立即回读${whenFor("session")}
   doctor    环境、配置、决策源体检${whenFor("doctor")}
   config    查看 / 修改机器配置${whenFor("config")}
   model     本地决策模型状态与安装${whenFor("model")}
@@ -254,6 +255,37 @@ amber apps remove <应用> [--yes] [--force]`,
       "--json                    输出 JSON envelope",
     ],
     related: ["run", "apps", "doctor"],
+  },
+  {
+    name: "session",
+    summary: "交互式试错会话：操作一步→立即回读（authoring 面，不判完成）",
+    when: whenOf("session"),
+    flow: [
+      "amber session --url <入口页> 起会话；stdin 逐行发 JSON 请求（Windows 用 --input 文件）",
+      "先 observe 拿 hint_candidates，再 act；act 后用 read/extract/signal 回读事实",
+      "试通后 --record 存动作轨迹；export 生成 app.mjs 骨架后再进 apps check → run",
+    ],
+    usage: `amber session [--url <入口页>] [--host HOST]... [--hosts h1,h2]
+              [--headful] [--input <请求文件>] [--out <目录>]
+              [--record <轨迹文件>] [--idle-timeout-ms N] [--max-request-bytes N]`,
+    examples: [
+      'amber session --url https://books.toscrape.com/ --input requests.jsonl',
+      'amber session --url https://books.toscrape.com/ --record ./.amberflow/session/books.jsonl',
+      "amber session --url https://books.toscrape.com/ --headful",
+    ],
+    flags: [
+      "--url <入口页>            会话启动后自动打开这一页（仍接受 http(s)；hosts 缺省由它推断）",
+      "--host HOST               允许的主机信封；可重复（缺省从 --url 推断）。同 meta.hosts 语义",
+      "--hosts h1,h2             同上，逗号表形式",
+      "--headful                 显示浏览器窗口（缺省 headless，与 run 一致）",
+      "--input <文件>            从文件逐行读请求，而不是 stdin（Windows 管道不可靠时用）",
+      "--out <目录>              证据落点（缺省 $AMBERFLOW_HOME/session/<runId>）；snapshot 写这里",
+      "--record <文件>           动作轨迹 JSONL（fill/select 只记 value_hash，不记明文）",
+      "--idle-timeout-ms N       两次请求之间的静默上限（缺省 300000；0 = 不限）；超时干净关会话并 exit 3",
+      "--max-request-bytes N     单行请求上限（缺省 1048576）",
+      "协议：stdin 每行 {\"type\":\"open|observe|act|read|extract|waitFor|signal|snapshot|mark|close\",...}；stdout 每行一个 JSON 响应",
+    ],
+    related: ["inspect", "apps", "run"],
   },
   {
     name: "schema",

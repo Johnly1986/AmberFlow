@@ -3444,7 +3444,10 @@ export class BrowserMiddleware {
    * 证据口径与 A1 的动作 trace 一致（stale_ref/needs_value/action_failed… 都是结构化结果）。
    */
   async actOnce(
-    page: AnyPage, target: string, op: "click" | "check" | "fill" | "select" | "scroll" | "drag" = "click",
+    // task-33（`amber session` authoring 面）：op 类型**加宽** `"hover"`——`_executeElement`
+    // 的 hover 分支早已存在（hover 原语只移动指针、不点击），这里只是让单动作面能透传它。
+    // 纯类型加宽、零行为变化：所有既有调用点只传原有字面量，hover 在加宽前不可达。
+    page: AnyPage, target: string, op: "click" | "check" | "fill" | "select" | "scroll" | "drag" | "hover" = "click",
     bind?: { value: unknown; byValue?: boolean } | null,
   ): Promise<{ ok: boolean; how?: string; ref?: string; changed?: boolean; stopCode?: string; reason?: string }> {
     const resolved = await this._resolveOne(page, target, op);
