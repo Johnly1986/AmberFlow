@@ -33,6 +33,9 @@ import {
   extractElements, urlOf, type ElemPool, type PageLike,
 } from "../engine/extraction.ts";
 import { validateSignalSpec } from "../engine/signals.ts";
+// task-34（B1 旁路复用）：与 run 面**同一个**弱档命中诊断（`rules.hintMatchImpl` 的模块态），
+// 会话只 take 出来回显，不改选择语义、不改 run 面任何代码。
+import { takeHintMatchOthers } from "../engine/rules.ts";
 import { DEFAULT_SETTLE } from "../engine/settle.ts";
 
 /** `act` 的 MVP 能力面（执行器里 drag/upload/clickAt 也有，但 authoring MVP 不暴露）。 */
@@ -59,6 +62,11 @@ export interface SessionOptions {
   outDir?: string | null;
   /** 动作轨迹 JSONL 落点（`--record`；给了才写）。 */
   record?: string | null;
+  /**
+   * `--record-values`（缺省 false）：轨迹里 fill/select 除 `value_hash` 外**再记明文 `value`**。
+   * 安全取舍：轨迹可能被复制进仓库/`app.mjs`，所以明文只由作者显式 opt-in；缺省恒 hash。
+   */
+  recordValues?: boolean;
   /** 从文件读请求而不是 stdin（`--input`；Windows 管道不可靠时用）。 */
   inputFile?: string | null;
   idleTimeoutMs?: number;
@@ -405,7 +413,16 @@ export class SessionRuntime {
     };
     // 形状校验与 $ 上下文同一份实现（非法值 = config_error，不做静默截断）。
     const result = await this.ctx().observe(opts as never);
-    return { ...result };
+    // task-34：elements 本来就包含可达子 frame 的行（每行带 `frame` 下标）；这里在多 frame
+    // 时补一条**只增**的 per-frame 计数摘要（单 frame 页面不出现 → 缺省产物逐字节不变）。
+    const extra: Record<string, unknown> = {};
+    if (result.ok && Array.isArray(result.frames) && result.frames.length > 1) {
+      const rows = Array.isArray(result.elements) ? result.elements : [];
+      extra["frame_counts"] = result.frames.map((url, index) => ({
+        index, url, elements: rows.filter((e) => (e as { frame?: number }).frame === index).length,
+      }));
+    }
+    return { ...result, ...extra };
   }
 
   private async doAct(req: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -435,12 +452,16 @@ export class SessionRuntime {
       }
       const by = req["by"] === undefined ? undefined : intIn(req["by"], -1_000_000, 1_000_000);
       const synthetic = !nonEmpty(targetRaw) || isSyntheticScrollTarget(String(targetRaw));
+      // task-34：B1 旁路是**模块态**（最后一次解析者写）——先清场，避免把 record 观察或上一次
+      // 动作的诊断算到本次头上。元素 scroll 仍走 hint 解析，故同样回显歧义。
+      takeHintMatchOthers();
       const out = synthetic
         ? await this.mw().scrollDocument(
           (await this.ensureSession()).page, (to as "bottom" | "top" | "page" | undefined) ?? "bottom",
           { ...(by === undefined ? {} : { by }) },
         )
         : await this.mw().actOnce(page, String(targetRaw), "scroll", null);
+      const scrollAmb = synthetic ? {} : this.actAmbiguity(String(targetRaw), "ref" in out ? out.ref ?? null : null);
       const scrollTarget = nonEmpty(targetRaw) ? String(targetRaw) : "document";
       this.recordAction({
         op: "scroll", target: scrollTarget, to: (to as string | undefined) ?? "bottom",
@@ -456,6 +477,7 @@ export class SessionRuntime {
         return {
           ok: false, code: String(out.stopCode ?? "not_scrollable"), reason: String(out.reason ?? "scroll failed"),
           op: actOp, target: scrollTarget, executed: false,
+          ...scrollAmb,
         };
       }
       const scroll = "scrollTop" in out
@@ -467,6 +489,7 @@ export class SessionRuntime {
         changed: "moved" in out ? out.moved === true : true,
         ...(scroll === undefined ? {} : { scroll }),
         url: urlOf(page), elapsed_ms: Date.now() - started,
+        ...scrollAmb,
         ...(await this.observeAfter(req)),
       };
     }
@@ -487,13 +510,21 @@ export class SessionRuntime {
     }
 
     const mw = this.mw();
+    // task-34：清场后执行（B1 旁路只在本次解析写；见 scroll 分支同一注释）。
+    takeHintMatchOthers();
     const out = actOp === "hover"
       ? await mw.actOnce(page, target, "hover", null)
       : await mw.actOnce(page, target, actOp, bind);
+    // 解析证据在 take 后立刻读取（observeAfter 会再次触发 hintMatch，不能放在它之后）。
+    const amb = this.actAmbiguity(target, out.ref);
     this.recordAction({
       op: actOp, target,
       ...(actOp === "fill" || actOp === "select"
-        ? { value_hash: sha256(String(req["value"])).slice(0, 12), value_len: String(req["value"]).length }
+        ? {
+          value_hash: sha256(String(req["value"])).slice(0, 12),
+          value_len: String(req["value"]).length,
+          ...(this.opts.recordValues === true ? { value: String(req["value"]) } : {}),
+        }
         : {}),
       ok: out.ok === true,
       ...(out.ok === true ? {} : { code: String(out.stopCode ?? "action_failed") }),
@@ -509,15 +540,59 @@ export class SessionRuntime {
         reason: String(out.reason ?? ""), op: actOp, target, executed: false,
         ...(out.ref === undefined ? {} : { ref: out.ref }),
         url: urlOf(page), elapsed_ms: Date.now() - started,
+        ...amb,
       };
     }
     this.log(`act ${actOp} ${JSON.stringify(target)} → ${String(out.how)} changed=${out.changed === true}`);
     return {
       ok: true, op: actOp, target, executed: true,
-      ref: out.ref ?? null, how: out.how ?? null, changed: out.changed === true,
+      ref: out.ref ?? null, how: this.displayHow(actOp, out.how), changed: out.changed === true,
       url: urlOf(page), elapsed_ms: Date.now() - started,
+      ...amb,
       ...(await this.observeAfter(req)),
     };
+  }
+
+  /**
+   * task-34：把 B1 的弱档命中旁路（`rules.takeHintMatchOthers`，与 run 面 matched_others 警告
+   * **同一份**收集逻辑）摊到 act 响应上——歧义与否 / 其余撞词候选（≤3，池 ref + tag + class 首段
+   * + label≤40）/ 弱档形状标记。只读诊断：不改解析结果、不改选择语义。
+   *
+   * 纪律：模块态由"最后一次解析者"写，所以调用方必须**先清场、再执行、立刻 take**，并用
+   * `diag.hint === target` 做同一条 hint 的相等性校验（与执行器消费 B1 时同款防陈旧）。
+   * `chosenRef` = 会话实际执行的那个元素：从 matched_others 里排除（别人 = "除选中者外的撞词
+   * 候选"）；池外回退时 diag/ref 都是合成 ref（`pN`），仍如实回显并在文档写明。
+   */
+  private actAmbiguity(target: string, chosenRef: string | null | undefined): Record<string, unknown> {
+    const diag = takeHintMatchOthers();
+    if (diag === null || diag.hint !== target) return {};
+    const others = diag.candidates
+      .filter((c) => c.ref !== diag.decided && c.ref !== chosenRef)
+      .slice(0, 3);
+    return {
+      ambiguous: diag.candidates.length > 1,
+      ...(others.length === 0
+        ? {}
+        : {
+          matched_others: others.map((c) => ({
+            ref: c.ref, tag: c.tag, class: c.class, label: c.label,
+          })),
+        }),
+      // 只有弱档（词前缀/词包含、loose 子串）才值得提示"可能是容器/同缀元素"。
+      ...(diag.suspicious ? { hint_kind: diag.kind, hint_tier: diag.tier, hint_suspicious: true } : {}),
+    };
+  }
+
+  /**
+   * task-34：会话面的执行证据词按动作语义回显（`select` → `selected`）。
+   *
+   * 为什么只在会话面映射、不改执行器：`how` 是 run 的 `executed_actions`/trace 共享产物，
+   * 改引擎词会让既有应用的产物变化（task-34 红线：缺省参数下产物逐字节不变）。所以引擎词
+   * 保持 `filled`（选择/填写同一个动作结果词），会话这一层按 op 精确化——文档已写明。
+   */
+  private displayHow(op: SessionActOp, how: unknown): unknown {
+    if (op === "select" && how === "filled") return "selected";
+    return how ?? null;
   }
 
   /** 动作后的有界回读（缺省开）：只给 counts/url/title，不返回元素明细（明细请显式 observe）。 */
@@ -742,9 +817,13 @@ export async function runSession(opts: SessionOptions, sink: SessionSink): Promi
     };
     arm();
     for await (const line of rl) {
-      if (line.trim() === "") { arm(); continue; }
+      // Windows/PowerShell 的 UTF-8 **带 BOM** 文件会让第一行的 JSON 解析失败（实测：
+      // `Set-Content -Encoding UTF8` 的 --input 文件）。BOM 不是请求内容，剥掉它；
+      // 只有行首这一个字符可能受影响，其余行逐字节不变。
+      const raw = line.charCodeAt(0) === 0xfeff ? line.slice(1) : line;
+      if (raw.trim() === "") { arm(); continue; }
       if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
-      const stop = await rt.handleLine(line);
+      const stop = await rt.handleLine(raw);
       if (stop) { exit = "closed"; break; }
       arm();
     }

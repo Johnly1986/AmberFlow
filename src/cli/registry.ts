@@ -267,7 +267,7 @@ amber apps remove <应用> [--yes] [--force]`,
     ],
     usage: `amber session [--url <入口页>] [--host HOST]... [--hosts h1,h2]
               [--headful] [--input <请求文件>] [--out <目录>]
-              [--record <轨迹文件>] [--idle-timeout-ms N] [--max-request-bytes N]
+              [--record <轨迹文件>] [--record-values] [--idle-timeout-ms N] [--max-request-bytes N]
 amber session export --record <轨迹文件> [--out <app.mjs|目录>] [--id <appId>]
                      [--goal "<一句话>"] [--host HOST]... [--force] [--json]`,
     examples: [
@@ -284,6 +284,7 @@ amber session export --record <轨迹文件> [--out <app.mjs|目录>] [--id <app
       "--input <文件>            从文件逐行读请求，而不是 stdin（Windows 管道不可靠时用）",
       "--out <目录>              证据落点（缺省 $AMBERFLOW_HOME/session/<runId>）；snapshot 写这里",
       "--record <文件>           动作轨迹 JSONL（fill/select 只记 value_hash，不记明文）；export 的输入",
+      "--record-values           安全 opt-in：轨迹里 fill/select 除 hash 外再记明文 value（默认关；轨迹可能被复制进仓库）",
       "--idle-timeout-ms N       两次请求之间的静默上限（缺省 300000；0 = 不限）；超时干净关会话并 exit 3",
       "--max-request-bytes N     单行请求上限（缺省 1048576）",
       "session export：--record 轨迹 → app.mjs 骨架（meta 占位 + steps + observe_hints；done 未归纳，写成占位符+注释候选）",

@@ -132,6 +132,7 @@ export async function runSessionCommand(args: string[], ctx: CliContext): Promis
         input: { type: "string" },
         out: { type: "string" },
         record: { type: "string" },
+        "record-values": { type: "boolean" },
         "idle-timeout-ms": { type: "string" },
         "max-request-bytes": { type: "string" },
       },
@@ -177,6 +178,8 @@ export async function runSessionCommand(args: string[], ctx: CliContext): Promis
     headful: v.headful === true,
     outDir,
     record: typeof v.record === "string" ? path.resolve(ctx.cwd, v.record) : null,
+    // task-34：明文值只在作者显式 opt-in 时进轨迹（缺省仍只记 value_hash）。
+    recordValues: v["record-values"] === true,
     inputFile: typeof v.input === "string" ? path.resolve(ctx.cwd, v.input) : null,
     ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }),
     ...(maxRequestBytes === undefined ? {} : { maxRequestBytes }),

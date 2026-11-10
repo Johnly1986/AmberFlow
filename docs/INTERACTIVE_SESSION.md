@@ -22,6 +22,10 @@ amber session --url https://books.toscrape.com/ --input requests.jsonl --record 
 
 # 交互终端：stdin 每行一条 JSON 请求
 amber session --url https://books.toscrape.com/ --headful
+
+# 需要轨迹里保留 fill/select 的明文值（默认只记 hash；会进仓库/导出物，慎用）
+amber session --url https://books.toscrape.com/ --input requests.jsonl \
+  --record session-actions.jsonl --record-values
 ```
 
 - **stdout 只有 JSONL 协议行**（一行一个响应对象）；人话日志走 stderr（`[session] …`）。
@@ -37,8 +41,8 @@ amber session --url https://books.toscrape.com/ --headful
 | type | 请求（额外字段） | 成功响应（额外字段） | 失败 code |
 |---|---|---|---|
 | `open` | `url`, `timeoutMs?` | `url, title?, hosts` | `host_not_allowed` / `unreachable` / `config_error` |
-| `observe` | `max?`, `selector?`, `includeHidden?`, `includeFrames?` | `ObserveResult`（`url,title?,frames?,counts,elements`；每元素带 `hint_candidates`） | `bad_selector` |
-| `act` | `op`(`click/check/fill/select/hover/scroll`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll), `observeAfter?` | `op,target,executed,ref,how,changed,url,after?` | `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `config_error` |
+| `observe` | `max?`, `selector?`, `includeHidden?`, `includeFrames?` | `ObserveResult`（`url,title?,frames?,counts,elements`；每元素带 `frame` 下标与 `hint_candidates`；多 frame 时另有 `frame_counts`） | `bad_selector` |
+| `act` | `op`(`click/check/fill/select/hover/scroll`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll), `observeAfter?` | `op,target,executed,ref,how,changed,url,after?`；歧义时另有 `ambiguous`/`matched_others?`/`hint_kind?`/`hint_tier?`/`hint_suspicious?` | `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `config_error` |
 | `read` | `what`(`text/value/count/attr`), `selector`, `attr?` | `what,selector,value`（读不到 = `null`） | `config_error` |
 | `extract` | `rows`, `fields`（`"."` = 行文本；`"@attr"` = 行属性；或子 CSS）, `maxItems?` | `rows,count,capped` | `config_error` |
 | `waitFor` | `signal`, `timeoutMs?`(缺省 15000), `pollMs?`(200) | `held,timeout_ms,elapsed_ms` | `config_error`（坏信号形状） |
@@ -66,6 +70,44 @@ amber session --url https://books.toscrape.com/ --headful
 `target` 用的是**同一套 hint 语法**（`#id`、`tag[attr=value]`、`tag[attr~substr]`、`tag~token`、
 角色词、裸词——6 形状闭集）。第一次观察最容易照抄的写法：取 `observe` 返回元素的
 `hint_candidates`，而不是自己发明 CSS（容器/后代 CSS 解析得出但永不命中）。
+
+### act 的歧义回显（task-34）
+
+试错时最常问的是"为什么点错/是不是有多个候选"。`act` 响应在**解析发生在裸词/属性子串**这两类
+弱档形状上时，额外回显（与 `run` 的 `matched_others` 警告**同一份**旁路收集，只读诊断、
+不改解析结果与选择语义）：
+
+| 字段 | 含义 |
+|---|---|
+| `ambiguous: boolean` | 这一条 hint 命中**多个**候选（`true` = 选择是在多个里挑的，动手前建议再 observe 一下） |
+| `matched_others?: [{ref,tag,class,label}]` | 除实际选中者外的撞词候选（≤3；label ≤40 字符） |
+| `hint_kind?: "bare" \| "attrSubstr"` / `hint_tier?: number` / `hint_suspicious?: true` | 只在**弱档**胜出（词前缀/词包含、loose 子串）时出现——这形状最容易命中容器/同缀元素 |
+
+- 成功与失败（`target_not_found`）都回显：失败但 `ambiguous:true` 说明"目标存在多个、引擎不猜"。
+- 精确形状（`#id`/`tag[attr=value]`/角色词/`tag~token`）不产生这些字段（没有旁路诊断 = 无需回显）。
+- 池外回退（0×0 手柄这类）时 `ref` 可能是合成 ref（`pN`），`matched_others[].ref` 同源，如实不映射。
+- 例：三个 `Edit` 链接的页面上 `act click "Edit"` → `{"ok":true,"ref":"e0","ambiguous":true,
+  "matched_others":[{"ref":"e1",…},{"ref":"e2",…}]}`；想精确点第二个就先 `observe` 抄 `a[href=#b1]`。
+
+### observe 与 iframe（task-34 口径）
+
+- `elements[]` **默认就包含可达子 frame 的行**（主 frame + ≤5 子 frame；跨源可达帧由 Playwright
+  locator 解析），每行带 `frame` 下标，`frames[]` 是它的 URL 表。`includeFrames:false` 只看主 frame。
+- 多 frame（`frames.length > 1`）时响应额外带 `frame_counts:[{index,url,elements}]`（每帧元素计数）；
+  单 frame 页面**不出现**该字段（缺省产物逐字节不变）。
+- frame 内元素的 `hint_candidates` 仍由同一个 `hintMatch` 自证；`act` 解析后池 ref 形如 `f1:e0`。
+- 不可达帧（detached/无执行上下文）被跳过，不在 `frames` 里虚报。
+
+### 执行证据词与值的记录（task-34）
+
+- `select` 的 `how` 在**会话响应**里回显为 `"selected"`（`fill` 仍是 `"filled"`）。引擎共享产物
+  （`run` 的 `executed_actions`/trace）里该动作词仍是 `"filled"`——不改 run 产物是硬红线，
+  所以这层语义精确化只在会话面做。
+- `--record-values`（缺省关）：开启后 `--record` 轨迹里 `fill/select` 除 `value_hash` 外**再记明文
+  `value`**。安全取舍：轨迹可能被复制进仓库/`app.mjs`，明文只由作者显式 opt-in；`session export`
+  会把明文作注释里的"slot 默认值候选"，仍不写死进 flow。
+- `--input` 文件允许 UTF-8 BOM（Windows PowerShell 的 `Set-Content -Encoding UTF8` 会带 BOM）：
+  首行行首的 BOM 会被剥掉，不当作坏 JSON。
 
 ## 与 `run` 的差异（明确划界）
 

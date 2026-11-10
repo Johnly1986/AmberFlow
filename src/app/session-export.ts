@@ -38,6 +38,8 @@ export interface RecordedAction {
   observe_hints?: string[];
   value_hash?: string;
   value_len?: number;
+  /** 明文值：仅当 `--record-values` 显式 opt-in 时存在（缺省只有 hash）。 */
+  value?: string;
 }
 
 export interface ExportOptions {
@@ -158,6 +160,7 @@ export function readRecord(file: string): {
         : {}),
       ...(typeof parsed["value_hash"] === "string" ? { value_hash: parsed["value_hash"] } : {}),
       ...(typeof parsed["value_len"] === "number" ? { value_len: parsed["value_len"] } : {}),
+      ...(typeof parsed["value"] === "string" ? { value: parsed["value"] } : {}),
     });
   });
   return { problems, entry, marks, actions };
@@ -214,9 +217,13 @@ export function buildAppSource(input: {
     if (a.op === "fill" || a.op === "select") {
       unresolved += 1;
       const key = a.op === "fill" ? "TODO_VALUE" : "TODO_OPTION";
+      const plaintext = typeof a.value === "string"
+        ? [`  // 轨迹记录了明文值（作者显式 --record-values 开启）：${js(a.value)}`,
+          `  //   可作 meta.slots 默认值候选，但仍建议走槽位声明（值不写死进 flow）。`]
+        : [`  // 轨迹事实: value_len=${a.value_len ?? "?"} value_hash=${a.value_hash ?? "?"}`];
       body.push(
-        `  // ── ⚠ ${where} —— 值未落明文（--record 只记 value_hash），骨架不生成假值 ──────`,
-        `  // 轨迹事实: value_len=${a.value_len ?? "?"} value_hash=${a.value_hash ?? "?"}`,
+        `  // ── ⚠ ${where} —— 值未落明文，骨架不生成假值 ──────────────────────────────`,
+        ...plaintext,
         `  // 作者补值：meta.slots 声明槽位后写成`,
         `  //   act: [ctx.command(${js(a.op)}, ${js(a.target ?? "")}, ctx.value.slot(${js(key)}))]`,
         `  // 然后把它包进同样的 ctx.step(desc, { act, done: … }) 结构。`,
