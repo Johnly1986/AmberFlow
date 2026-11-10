@@ -193,6 +193,8 @@ export const POLICY_KEYS = [
   "act_hint",
   // P0-C：声明目标解析链是否启用 DRF（缺省 "off" = 现行为逐字节不变）。
   "target_resolution",
+  // task-43：浏览器通道选择面（缺省不写 = 现状链逐字节不变；优先级 env > meta > default）。
+  "browser",
 ] as const;
 
 /** 导航纪律档位（`meta.policy.navigation`）。 */
@@ -203,6 +205,14 @@ export const ACT_HINT_MODES = ["widen", "strict"] as const;
 
 /** 声明目标解析链档位（`meta.policy.target_resolution`；缺省 off = 现行为逐字节不变）。 */
 export const TARGET_RESOLUTION_MODES = ["off", "declared"] as const;
+
+/**
+ * 浏览器通道档位（`meta.policy.browser`；task-43）。
+ * `chrome` = Playwright channel:"chrome"（系统 Chrome，new headless）；`headless-shell` =
+ * ms-playwright 的 headless-shell 二进制（= 缺省现状）。不写 = `launchKwargs` 现行解析
+ * （headless 缺省即 headless-shell）；优先级 env(AMBERFLOW_BROWSER_CHANNEL) > meta > default。
+ */
+export const BROWSER_CHANNELS = ["chrome", "headless-shell"] as const;
 
 /** S5 状态闸门档位（`meta.policy.decision_state.gate`）。 */
 export const DECISION_STATE_GATES = ["off", "stable_only"] as const;
@@ -256,6 +266,15 @@ export interface PackPolicy {
    *     dry/apps check 只校验 policy 值（DOM 事实无法离线验证，不新增绿）。
    */
   target_resolution?: (typeof TARGET_RESOLUTION_MODES)[number];
+  /**
+   * task-43：浏览器通道（`"chrome" | "headless-shell"`；**缺省不写 = 现状链逐字节不变**）。
+   * 优先级 env(AMBERFLOW_BROWSER_CHANNEL) > meta > default——env 是部署/CI 的机器级覆盖，
+   * meta 是应用作者的站点知识（已知 headless-shell 下坏的站点在此点名 chrome）。
+   * 主机没有系统 Chrome 时 launch 如实报错（**不静默回退**；要回退请删 meta 或改 env）。
+   * 生效值与来源进 `effective_policy.browser`（仅 env/meta 任一存在时出现）；
+   * 真实二进制以 `env.browser.binary_basename` 记账（D-1）为准。
+   */
+  browser?: (typeof BROWSER_CHANNELS)[number];
   /**
    * 置信度闸门（缺省 0.25）。**为什么要能声明**：闸门比的是 provider 的 `score`，而
    * `score_kind` 不同的两支不可比（laya 的归一化熵 vs 在线服务的标定概率）——
@@ -1272,6 +1291,11 @@ export function validatePack(pack: AppPack,
       const tr = pol["target_resolution"];
       if (tr !== undefined && !(TARGET_RESOLUTION_MODES as readonly string[]).includes(String(tr))) {
         p.push(`policy.target_resolution: unknown value ${JSON.stringify(String(tr))} (config_error; must be one of ${TARGET_RESOLUTION_MODES.map((x) => JSON.stringify(x)).join(" | ")})`);
+      }
+      // task-43：浏览器通道——合法值闭集在加载期响亮拒绝（同 navigation/act_hint 先例）。
+      const bc = pol["browser"];
+      if (bc !== undefined && !(BROWSER_CHANNELS as readonly string[]).includes(String(bc))) {
+        p.push(`policy.browser: unknown value ${JSON.stringify(String(bc))} (config_error; must be one of ${BROWSER_CHANNELS.map((x) => JSON.stringify(x)).join(" | ")})`);
       }
       const sf = pol["surface"];
       if (sf !== undefined) {
