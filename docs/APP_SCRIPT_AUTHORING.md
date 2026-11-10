@@ -769,10 +769,7 @@ export async function flow(ctx) {
 
 - 两种 extract 二选一：`ctx.extract("name")` 走 `meta.site.listExtract[name]`（可复用、可校验）；`ctx.extract({ rows, fields, maxItems? })` 是 inline 形式，选择器直接写在脚本里。
 - `ctx.extract(name)` 的字段选择器是**行内相对选择器**；`rows` 最多取 500 行（超出在 trace 里标 `truncated`）。
-- `fields` 只做**行内文本投影**：每个字段值取单元格元素的 `innerText`（表单控件回退 `inputValue`；
-  实现：`src/app/ctx.ts` 的 extract 字段循环）。**不支持属性投影**——`fields: { al: "[aria-label]" }`
-  这类属性选择器能定位到单元格，但读到的仍是它的文本：图标型元素（aria-label 有值、无可见文本）
-  的字段恒为空（R11 实测）。属性值单独用 `ctx.read.attr(selector, attr)` 取（不存在 → null）。
+- `fields` 做两类投影（task-24/3c 起）：**①行内文本投影**（旧语义，无 @ 前缀逐字节不变）：每个字段值取单元格元素的 `innerText`（表单控件回退 `inputValue`；实现：`src/app/ctx.ts` 的 extract 字段循环）——`fields: { al: "[aria-label]" }` 这类属性选择器能定位到单元格，但读到的仍是它的文本：图标型元素（aria-label 有值、无可见文本）的字段恒为空（R11 实测）；**②属性投影（opt-in，"@" 前缀）**：`fields: { rating: "@aria-label" }` 读**行元素自身**的 `aria-label` attribute（无子选择器、无行内回退；读不到 → `""` 与现行为一致）——评分/评数这类"结构化信号在行元素属性上"的站点从此可按行读取（`ctx.read.attr` 是全页首匹配、无行作用域，3c 是唯一能落到行的结构化通道）。dry 仍 `[]`、replay 按录制回放（行为不变）。
 - `ctx.rows({row, fields})` 是 v1 明确**不开放**的新语法：调用给结构化 `config_error` 指向 `extract(name)`。
 - dry 模式下 `extract` 返回 `[]`、`read.attr` 返回 `null`、`waitFor` 立即返回 `true`（没有页面）——脚本在 dry 期不要依赖观察值；**一切基于观察值的 `ctx.fail`/分支/断言都必须用 `ctx.runtime.dry` 守卫**（dry/replay 恒 `true`、真跑恒 `false`；`epoch===0` 不作判据——见 §2 消歧义）：`apps check` 与 `--dry-run` 会真跑 flow，没有守卫的数据驱动停会把合法脚本判成 problems（03-D1 配方；需要严格断言数据时，只在真实运行里停）。**dry 模拟面全表**（06-B，`createDryCtx` 实证）：`step`/`arrive`/`run`/`manual` 恒返回 `ok:true` 且 **`when` 不评估**（stopCode 恒空 ⇒ `precondition_skipped`/末页 exhausted 这类分支在 dry 结构性不可预演）；`read.*` 返 null/0；`collect` 返 `{rows:[], coverage:{rounds:0,rowsSeen:0,addedLastRound:0}, stopReason:"dry"}`；`url()` 是最近声明值；步预算照常计数。**吞错有留痕**（S3）：dry 的 `validateXxxRequest`（scrollList/expand/setRange/collect）抛错前先落 `validation_error` 事件——脚本 `try/catch` 吞掉 `config_error`，`apps check` 仍判 FAIL 并输出「脚本吞掉了配置错误：<call> <message>」；源码调用点与 dry 事件数的差额只打警告。结论：**dry 验调用序列与声明形状，不验分支覆盖**——check VALID ≠ 脚本每条分支都被走过，守卫分支的正确性只有真实运行能证明。**循环特别警告**（09-B，r09-retry-demo 实录）：`step` 模拟恒 `ok:true` ⇒ 以"步骤成功"为 break 条件的 `while/for` 会在 dry **假成功早退**，随后未守卫的终局 `ctx.fail` 把 dry 判红（报错自曝 `ok:true` yet exhausted 的矛盾即此坑）——dry 预演只到声明面为止，循环语义一律真实运行验；各分支的**声明校验**可用 `run --dry --slot <k>=<v>` 逐分支触达（08 实证，不占真实额度）。
 - 观察类调用（text/value/count/attr/extract）都进 trace，所以带读取的脚本可以 `--replay`。进程步（`run`/`dangerous`）自 08-C 修复起同样进 `step_traces`（成功步无 stop_code、attempts/exit code 在嵌套 result 里）。
@@ -934,6 +931,17 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `target_resolution` | `off` | **声明目标解析链（DRF，P0-C）**：`off` = 现行为逐字节不变；`declared` = 命令 `target` / act hint 在池 hintMatch → ADMIT 回捞 → FW8 身份回捞全部落空后，再由 DOM 侧兜底解析（属性型 hint 走 ADMIT_SEL + 同一套 hint 语义；裸词 hint 走可见文本精确匹配；跨 frame **恰好一个可见**才动作，>1 → `target_ambiguous`，全隐藏 = 未命中 + hidden 诊断）。click 族动作前必须 hit-test（中心被覆盖则不点击、记 `hit_test` 证据）。首版只允许 `click`/`scroll`/`hover`，对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` → 结构化 `action_unsupported`。回捞元素只进本步局部池，**模型不参与**。显式声明才进 `effective_policy.target_resolution`；dry 只校验 policy 值（DOM 事实无法离线验证，不新增绿，见 §4.11） |
 
 产物里的 `effective_policy` 只在非缺省时出现，并写明来源（`cli` / `config` / `app` / `provider` / `default`）。
+
+**何时该写 `act_hint:"strict"` / 决策面 rules-only（task-24/4，评审 A.4 因果纠正）**：这两个档位
+**不改变模型的参与度**——模型只在「规则面没解出目标」时才被咨询（唯一入口 = `pickElement`，且只在
+`ruleRef === null` 的决策步）；strict 只砍掉「声明目标解析链全落空后的模型兜底」，rules-only（本地模型
+不在位/`--provider none`）只决定「没有模型可用」这一事实。什么时候写：①声明目标在池+回捞链**稳定可命中**
+（全流程 hint 驱动、不依赖现场选点）→ `strict` 换来「模型永不被咨询、停因诚实可判别」——本轮实测 12/12
+步 `rule:match` 即此形态；②目标解析依赖现场自适应/页面形态漂移 → 保持缺省 `widen`（strict 会把这类步
+杀成 `target_not_found`）。`decisions.model_face`（`idle`｜`engaged`）记录本次 run 的模型面参与度：
+`idle` = 0 咨询 + 0 模型梯级（规则面全命中或全未命中都算 idle——它只描述参与度，**不是异常**）；
+决策面已配置 + `strict` + 零咨询时 run warnings 会给一条 `model_face_idle`（一句话点明"这是策略预期
+行为不是故障"，免得把模型面误诊成坏了）。
 
 `meta.pace` 声明运行节奏（毫秒，`0..60000`，加载期校验）：`between_steps_ms` 是两次执行步（`ctx.step` / `ctx.arrive` / `ctx.manual` / `ctx.run`）之间的**最小步间距（B1）**——相邻两次引擎单元**开始时刻**至少隔 gap（start-to-start ≥ gap）；上一步耗时长则本步不补等，不再是「无条件 sleep」，且首个单元之前不等。`between_actions_ms` 是同一浏览器子目标内两次动作之间的等待。优先级：**本次显式（嵌入方 opts） > `meta.pace` > 环境变量 > 0**；环境默认是 `AMBERFLOW_STEP_DELAY_MS` / `AMBERFLOW_ACTION_DELAY_MS`。缺省全 0——注意“环境变量”一层含入口引导从 `configs/amberflowrc.json` / `amber config` 吸收进来的机器配置值，机器上非零节奏多半来自这里；凡结果出现 `pace`，同处的 `pace.sources` 逐字段点名来源（`explicit` / `meta` / `env` / `default`）。规划脸（`plan run`）与 online 套件是 env-only（没有 `meta.pace` 声明面），同样遵守最小步间距语义。详见 [MANUAL_STEPS_AND_PACE.md](MANUAL_STEPS_AND_PACE.md)。
 

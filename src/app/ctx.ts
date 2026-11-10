@@ -21,6 +21,8 @@ import { validateCommands } from "../engine/actions.ts";
 import { firstOf, framesOf, locatorAnyFrame, urlOf, extractElements, poolSniff, type PageLike } from "../engine/extraction.ts";
 // task-16（B3+）：arrive 侧限速判据的嗅探面选择器（与执行器同口径的准入面）。
 import { admitSelectorWithJsFor } from "../engine/surface.ts";
+// task-24/6a：限速判据阈值单一出处（step 侧与 arrive 侧共用）。
+import { THROTTLE_BODY_FLOOR, THROTTLE_COLLAPSE_RATIO } from "../engine/throttle-signature.ts";
 // C2 waitForTarget：hint 语义核对与规则面同一份语法（hintCandidates → hintMatch 单一出处）。
 import { hintCandidates } from "../engine/rules.ts";
 import { observePage, validateObserveOptions, type ObserveOptions, type ObserveResult } from "../engine/observe.ts";
@@ -1672,6 +1674,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       const locators = row as {
         locator?: (s: string) => { first(): { innerText(o?: { timeout?: number }): Promise<string>; inputValue(o?: { timeout?: number }): Promise<string> } };
         innerText?: (o?: { timeout?: number }) => Promise<string>;
+        getAttribute?: (name: string) => Promise<string | null>;
       };
       const rec: Record<string, string> = {};
       for (const [field, cellSel] of Object.entries(fields)) {
@@ -1679,6 +1682,13 @@ export function createCtx(deps: CtxDeps): Ctx {
         try {
           if (cellSel === "." || cellSel === ":scope") {
             if (typeof locators.innerText === "function") value = await locators.innerText({ timeout: 1500 });
+          } else if (cellSel.startsWith("@") && cellSel.length > 1) {
+            // task-24/3c：属性投影（opt-in——"@" 前缀）——读**行元素自身**的 attribute
+            //（如 fields:{rating:"@aria-label"}；无子选择器、无行内回退；读不到 → "" 与现行为一致）。
+            // 旧 fields（无 @ 前缀）逐字节不变。
+            if (typeof locators.getAttribute === "function") {
+              value = (await locators.getAttribute(cellSel.slice(1))) ?? "";
+            }
           } else if (typeof locators.locator === "function") {
             const cell = locators.locator(cellSel).first();
             try { value = await cell.innerText({ timeout: 1500 }); }
@@ -1870,9 +1880,11 @@ export function createCtx(deps: CtxDeps): Ctx {
           const p = await page();
           const s = await poolSniff(p as never, admitSelectorWithJsFor(deps.surfacePolicy));
           const peak = deps.mw().sessionBodyTextPeak();
-          const crossCollapse = peak >= 2000 && s.body_text * 4 <= peak;
-          const inArriveCollapse = inArriveFirst !== null && inArriveFirst >= 2000
-            && inArriveLast !== null && inArriveLast * 4 <= inArriveFirst;
+          // task-24/6a：阈值单源化（throttle-signature.ts——step 侧与 arrive 侧共用）。
+          const crossCollapse = peak >= THROTTLE_BODY_FLOOR
+            && s.body_text * THROTTLE_COLLAPSE_RATIO <= peak;
+          const inArriveCollapse = inArriveFirst !== null && inArriveFirst >= THROTTLE_BODY_FLOOR
+            && inArriveLast !== null && inArriveLast * THROTTLE_COLLAPSE_RATIO <= inArriveFirst;
           if (crossCollapse || inArriveCollapse) {
             throttle = {
               evidence: {

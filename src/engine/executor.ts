@@ -106,6 +106,8 @@ import {
   type RouterLike,
 } from "../model/model.ts";
 import { decisionFailureFact, decisionProviderOrNull, layaProvider, type DecisionProvider } from "../model/decision-provider.ts";
+// task-24/6a：限速判据阈值单一出处（step 侧与 arrive 侧共用）。
+import { THROTTLE_BODY_FLOOR, THROTTLE_COLLAPSE_RATIO, THROTTLE_POOL_HIGH_MIN } from "./throttle-signature.ts";
 // task-14（D1）：探测失败分类与建议文案的单一出处。
 import { classifyDecisionFailure, decisionDegradedAdvice } from "../model/decision-probe.ts";
 import { applyRange, type RangeOptions, type RangeOutcome, type RangeValue } from "./range.ts";
@@ -6062,10 +6064,12 @@ export class BrowserMiddleware {
       } catch { /* 观察让位事实：页面已不可读时不硬来 */ }
       const bodyPrev = this._lastFailSniff?.body_text ?? null;
       const admittedPrev = this._lastFailSniff?.admitted ?? null;
-      const poolDrop = this._sessionPoolHigh >= 20
-        && lastPoolSize > 0 && lastPoolSize * 4 <= this._sessionPoolHigh;
-      const bodyDrop = bodyPrev !== null && bodyPrev >= 2000
-        && failSniff !== null && failSniff.body_text * 4 <= bodyPrev;
+      // task-24/6a：阈值单源化（throttle-signature.ts——step 侧与 arrive 侧共用，标定改一处）。
+      const poolDrop = this._sessionPoolHigh >= THROTTLE_POOL_HIGH_MIN
+        && lastPoolSize > 0
+        && lastPoolSize * THROTTLE_COLLAPSE_RATIO <= this._sessionPoolHigh;
+      const bodyDrop = bodyPrev !== null && bodyPrev >= THROTTLE_BODY_FLOOR
+        && failSniff !== null && failSniff.body_text * THROTTLE_COLLAPSE_RATIO <= bodyPrev;
       if (failSniff !== null && (poolDrop || bodyDrop)) {
         const dh = getLastDeclaredHidden();
         throttleSuspect = {

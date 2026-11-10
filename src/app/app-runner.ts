@@ -297,6 +297,12 @@ export interface AppDecisions {
    */
   model_asks: number;
   /**
+   * task-24/4：模型面参与度（评审 A.4 因果纠正——strict/rules-only 不改变模型参与度，只改
+   * 未命中兜底与风险票来源）。`idle` = 本次 run 0 模型咨询 + 0 模型梯级（规则面全命中或全
+   * 未命中都算 idle——它只描述参与度，不是异常）；`engaged` = 模型面真被咨询过。
+   */
+  model_face: "idle" | "engaged";
+  /**
    * A3：ask **抛错**的次数（HTTP 403/超时/DNS 等基础设施失败）。它与"未过闸门"是两回事：
    * 闸门是对模型意见打分，抛错说明根本没拿到意见——混在一起会把一次 403 伪装成
    * 「模型很没把握」。只统计在线 provider 档（countedProvider 的失败账；laya 档恒 0）。
@@ -450,6 +456,10 @@ export function summarizeDecisions(
     // U8：被拒 ask 的 conf 分布（只在真发生过被拒时出现 = 产物缺省等价；dry 面无 ask ⇒ 缺席）。
     ...(rejectedConf !== null && rejectedConf.n > 0 ? { rejected_conf: rejectedConf } : {}),
     cache: cache === null ? null : { hits: cache.hits, misses: cache.misses },
+    // task-24/4：模型面参与度（评审 A.4——"strict×rules-only 空转"的因果纠正：模型唯一入口
+    // 是 ruleRef===null 的 pickElement，与 strict 无关）。idle = 0 咨询 + 0 模型梯级
+    // （规则面全命中或全未命中都算 idle——它只描述参与度，不是异常）。
+    model_face: modelAsks === 0 && model === 0 ? "idle" : "engaged",
     // S5：默认档（两项 off）这四个键全部缺席 = 产物逐字节不变（声明了才投影，全 0 也写）。
     ...(decisionState === null ? {} : {
       asks_saved: decisionState.asks_saved,
@@ -2212,6 +2222,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   let providerDegraded: string | null = null;
   // task-14（D1）：降级留痕（起跑探测失败/中途死亡；仅 degraded 时进 result.decision）。
   let decisionDegraded: NonNullable<BrowserMiddleware["decisionDegraded"]> | null = null;
+  // task-24/4：strict 旗标存活到报告点（resolvedPolicy 在步循环分支里声明，报告点够不着）。
+  let actHintStrictForWarn = false;
   // task-15（D2）：site_facts 命中集（步循环外的报告点要读——存活到结果装配）。
   let siteFacts: import("./site-facts.ts").MatchedSiteFact[] = [];
   /**
@@ -2282,6 +2294,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     const resolvedPolicy = resolveRunPolicy(pack, opts);
     policy = resolvedPolicy.policy;
     anyDeclared = resolvedPolicy.anyDeclared;
+    // task-24/4：strict 旗标存活到报告点（runWarnings 的 model_face_idle 判定用）。
+    actHintStrictForWarn = resolvedPolicy.policy.act_hint?.value === "strict";
     // 裸 `let` 会被 TS 的控制流收窄成 never（闭包里的赋值它看不见）——与上面的 session
     // 同一个坑，用 holder：收尾要把 `providerDegraded` 从执行器实例上读出来（A3）。
     const mwHolder: { current: BrowserMiddleware | null } = { current: null };
@@ -2729,6 +2743,21 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     if (decisionDegraded !== null) {
       runWarnings.push(`decision_degraded: 决策面已降级（${decisionDegraded.reason_class}）`
         + `——本次 run 停发模型调用，规则面继续（${decisionDegraded.message.slice(0, 200)}）`);
+    }
+    // task-24/4：模型面参与度提示（评审 A.4 因果纠正——strict/rules-only 不改变模型参与度，
+    // 只改未命中兜底与风险票来源；0 咨询的因是规则面全命中）。决策面已配置 + strict + 0 咨询
+    // = idle：不是故障，一句话点明（免得"模型面坏了？"的误诊）；D1 降级场景已有
+    // decision_degraded 覆盖，不重复。
+    {
+      const planeConfigured = typeof process.env.AMBERFLOW_DECISION_BASE_URL === "string"
+        && process.env.AMBERFLOW_DECISION_BASE_URL !== "";
+      const strictOn = actHintStrictForWarn;
+      const asksSoFar = opts.pickAsks ? opts.pickAsks() : 0;
+      if (planeConfigured && strictOn && asksSoFar === 0 && decisionDegraded === null) {
+        runWarnings.push("model_face_idle: 决策面已配置且 act_hint=\"strict\"，但本次 run 零模型咨询"
+          + "（规则面全命中或全未命中）——这是策略预期行为不是故障；strict/rules-only 不改变模型参与度，"
+          + "只改未命中兜底与风险票来源");
+      }
     }
   }
   const logs = trace.events.filter((e) => e.call === "log").map((e) => ({
