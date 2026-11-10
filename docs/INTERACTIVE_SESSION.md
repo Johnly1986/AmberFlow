@@ -176,6 +176,11 @@ headless 实现选择面（换完整 Chrome new headless）另见 task-39 的受
 
 - `act` 的 `value` 只来自请求本身（作者给的决定），缺值 = `needs_value`，绝不猜；`fill/select` 的值
   在 `--record` 轨迹里只落 `value_hash`（不落明文，轨迹可能被复制进仓库/`app.mjs`）。
+- 浏览器通道：环境变量 `AMBERFLOW_BROWSER_CHANNEL=chrome|headless-shell` 可选启动通道
+  （task-39 A/B：缺省 headless-shell 逐字节不变；`chrome`=系统 Chrome new headless——对
+  zh.wikipedia 文章页这类"客户端 URL flap"页面天然免疫，代价冷启动 +~13%；`run` 同样生效）。
+  无系统 Chrome 时 `channel:"chrome"` 由 launch 如实报错，不静默回退。详见
+  `iterations/interactive-session/task39/DESIGN.md`（meta.policy.browser 选择面另任务评估）。
 - `snapshot` 的截图/DOM 文本落 `--out`；不做 cookie/存储注入、不多标签页（`ctx.tabs` 面留待后续）。
 - 会话结束（含 SIGINT）一定关闭浏览器；`close` 之前没碰过页面就不会启动浏览器。
 - 不新增 npm 依赖；不影响任何既有命令的默认行为。
