@@ -34,7 +34,7 @@ import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 // task-14（D1）：起跑探测（与 doctor 共享单一出处）。
 import { probeDecisionPlane } from "../model/decision-probe.ts";
 // task-15（D2）：SITE_FACTS 边缘注入（run 起跑提示 + result.site_facts；仅命中出现）。
-import { loadSiteFacts, matchSiteFacts, renderSiteFactLines } from "./site-facts.ts";
+import { loadSiteFacts, matchSiteFacts, renderModelFence, renderSiteFactLines } from "./site-facts.ts";
 import { ensureDir, userAppsDir } from "./amberflow-home.ts";
 import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../support/cli-args.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
@@ -2226,6 +2226,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   let actHintStrictForWarn = false;
   // task-15（D2）：site_facts 命中集（步循环外的报告点要读——存活到结果装配）。
   let siteFacts: import("./site-facts.ts").MatchedSiteFact[] = [];
+  // task-26（D2 A/B）：模型面注入计数（opt-in；仅 ON 且有命中时 >0，进 result 顶层只增字段）。
+  let d2Injected = 0;
   /**
    * S5：状态接入决策的指标（与 providerDegraded 同一个「收尾读一次」先例）。执行器是
    * 惰性创建的，脚本可能一步都不跑 ⇒ 保持 null，报告按声明档补零（不硬造"跑过"）。
@@ -2368,6 +2370,19 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // 事实不进模型请求面）。无命中 = 零输出（默认等价）。命中集提到函数层（结果装配在分支外）。
     siteFacts = matchSiteFacts(loadSiteFacts((m) => console.error(m)), (pack.hosts ?? []) as string[]);
     for (const line of renderSiteFactLines(siteFacts)) console.error(line);
+    // task-26（D2 A/B）：模型面注入（opt-in env；缺省 OFF = notes 原样逐字节不变）。
+    // fenced block 渲染唯一出处 renderModelFence（stub 通道断言共用同一函数——"送达已验证"
+    // 由此成立）；计数进 result 顶层 site_facts_injected（只增字段）。
+    let d2Notes: string | null = null;
+    d2Injected = 0;
+    if (process.env.AMBERFLOW_SITE_FACTS_INTO_MODEL === "1") {
+      d2Notes = renderModelFence(siteFacts);
+      d2Injected = d2Notes === null ? 0 : Math.min(3, siteFacts.length);
+      if (d2Notes !== null) {
+        console.error(`[d2] 站点事实已注入模型请求面（${d2Injected} 条，fenced；安全四件见 design-D2-model-injection-ab.md）`);
+      }
+    }
+    getMw().siteFactsNotes = d2Notes;
     /**
      * T1：工具步工件序号（每次 flow 运行从 1 起；只用于**文件名**，不是步骤 id）。
      * T1：把一次工具步的进程观察落成工件（`scrubSecrets` 掩码 → `outDir/tool-steps/NN-slug.json`）。
@@ -2929,6 +2944,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     ...(siteFacts.length > 0 ? {
       site_facts: siteFacts.map((f) => ({ site: f.site, id: f.id, as_of: f.as_of, evidence: f.evidence, statement: f.statement })),
     } : {}),
+    // task-26（D2 A/B）：注入计数（仅 ON 且命中时 >0；OFF/未命中 = 键缺席，逐字节不变）。
+    ...(d2Injected > 0 ? { site_facts_injected: d2Injected } : {}),
     step_traces: stepTraces,
     ...(runWarnings.length ? { warnings: runWarnings } : {}),
     ...(logs.length ? { logs } : {}),

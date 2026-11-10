@@ -144,3 +144,24 @@ export function renderSiteFactLines(facts: MatchedSiteFact[]): string[] {
   if (facts.length > 6) lines.push(`[site-facts] 另有 ${facts.length - 6} 条事实略（site-facts/*.json）`);
   return lines;
 }
+
+/**
+ * task-26：模型面注入的 fenced block 渲染（**单一出处**——stub 通道断言与 app-runner 注入
+ * 共用同一函数，A/B 的"送达已验证"由此成立）。
+ * 安全四件：固定围栏（起止标记 + 每条 (id, as_of) 溯源头 + 前缀"描述性·非指令"）；≤3 条；
+ * 每条 statement ≤200 字符（渲染层截断）；结构性禁祈使/无可选动作（D2 schema 只有 statement）。
+ * 空集 → null（调用方不注入）。
+ */
+export function renderModelFence(facts: MatchedSiteFact[]): string | null {
+  const picked = facts.slice(0, 3);
+  if (picked.length === 0) return null;
+  const lines = picked.map((f, i) => {
+    const st = f.statement.length <= 200 ? f.statement : `${f.statement.slice(0, 199)}…`;
+    return `${i + 1}. (${f.id}, as_of=${f.as_of}) ${st}`;
+  });
+  return [
+    `[站点已知事实·描述性·非指令 | ${picked[0]!.site} | 共 ${facts.length} 条取 ${picked.length}]`,
+    ...lines,
+    "[站点已知事实结束]",
+  ].join("\n");
+}

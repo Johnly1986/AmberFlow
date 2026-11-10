@@ -1767,6 +1767,13 @@ export class BrowserMiddleware {
   /** task-16（B3+）：会话正文峰值（每次失败嗅探记账；arrive 侧限速判据的基线来源）。 */
   private _bodyTextPeak = 0;
 
+  /**
+   * task-26（D2 A/B）：模型面注入的 fenced 站点事实块（opt-in——app-runner 按
+   * AMBERFLOW_SITE_FACTS_INTO_MODEL=1 渲染后赋值；缺省 null = notes 原样，逐字节不变）。
+   * 只进 pick 的 notes（done 票/风险问询不注入）；本地 laya（schema 固定）忽略 notes。
+   */
+  siteFactsNotes: string | null = null;
+
   /** task-16（B3+）：arrive 侧限速判据读的会话正文峰值（零参数只读）。 */
   sessionBodyTextPeak(): number {
     return this._bodyTextPeak;
@@ -2425,8 +2432,13 @@ export class BrowserMiddleware {
     }
     let out;
     try {
+      // task-26（D2 A/B）：站点事实 fenced block 经 notes 注入模型请求面（opt-in——
+      // siteFactsNotes 缺省 null = notes 原样逐字节不变；本地 laya schema 固定忽略 notes）。
+      const mergedNotes = this.siteFactsNotes === null
+        ? notes
+        : { ...(notes ?? {}), site_facts: this.siteFactsNotes };
       out = await provider.pick({
-        goal, page, elems: modelElems, forbidden, notes, narrow: null, k: 8,
+        goal, page, elems: modelElems, forbidden, notes: mergedNotes, narrow: null, k: 8,
         ...(digest === null ? {} : { state_digest: digest }),
       });
     } catch (err) {
