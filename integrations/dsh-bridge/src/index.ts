@@ -33,7 +33,7 @@ import type { Volatile } from '@deepseek-ai/cordis'
 // Erased at runtime — the running host provides both services.
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-settings'
-import { listApps, normalizeDecisionEndpoint, type BridgeOptions } from './bridge.ts'
+import { listApps, normalizeDecisionEndpoint, type BridgeOptions, type JsonValue } from './bridge.ts'
 import {
   appCheck, appShow, createApp, inspect, learn, runApp, status, test,
   createService, type AmberFlowService,
@@ -42,6 +42,9 @@ import {
 // planning-playbook.ts 与 help-map.ts，这里只收字符串（桥不 import 引擎代码）；
 // 漂移由 `npm run prompt-hit` 校验。
 import { HINT_LEARN_NOTE, OVERVIEW_TEXT, PLAN_PLAYBOOK_SHORT, STOP_ESCALATION_TEXT } from './grammar.generated.ts'
+import {
+  DEFAULT_MAX_SESSIONS, DEFAULT_SESSION_IDLE_MS, handleSessionTool, SessionManager, type SessionToolArgs,
+} from './session.ts'
 
 // The package root is the consumer surface: another plugin imports these without reaching into `src/`
 // (a published package ships only `lib/`).
@@ -123,6 +126,14 @@ export interface Config {
    * `meta.pace` keeps winning over this machine-level default. `0` (default) adds nothing.
    */
   stepGapMs?: Volatile<number>
+  /**
+   * Idle TTL for `amberflow_session` sessions, ms (default 300_000). The BRIDGE owns this
+   * semantic: the engine child is started with `--idle-timeout-ms 600000` as an orphan backstop
+   * only (double-layer idle, Q3). `0`/absent = use the default; never creates a child by itself.
+   */
+  sessionIdleMs?: number
+  /** Max concurrent `amberflow_session` sessions in this process (default 2). Q1: no identity binding. */
+  maxSessions?: number
 }
 
 /** Schemastery schema for {@link Config}. */
@@ -151,6 +162,11 @@ export const Config = z.object({
   // AMBERFLOW_STEP_DELAY_MS — the engine's `env` pace layer, which an app's own meta.pace still
   // overrides. 0..60000 ms like meta.pace; 0 (default) forwards nothing.
   stepGapMs: z.natural().max(60_000).default(0).volatile(),
+  // `amberflow_session` limits. Plain (non-volatile) fields on purpose: changing them means the
+  // deployment restarts the session manager, while the tools themselves stay stateless per call.
+  // Defaults never spawn anything: a session exists only after an explicit `open` op.
+  sessionIdleMs: z.natural().min(1_000).max(3_600_000).default(DEFAULT_SESSION_IDLE_MS),
+  maxSessions: z.natural().min(1).max(8).default(DEFAULT_MAX_SESSIONS),
 })
 
 /**
@@ -1060,4 +1076,164 @@ export function apply(ctx: Context, config: Config): void {
       }
     },
   }))
+
+  // ---------- `amberflow_session`（task-35 / Phase 3）：交互式试错 authoring 面 ----------
+  // 纯增量：不改任何既有工具的参数/返回/描述；缺省不创建子进程（只有 open 才 spawn 一个
+  // 常驻引擎子进程）。工具失败语义：引擎结构化失败原样透传且会话继续；只有会话不可用/桥故障
+  // 才是 {ok:false, code} 的工具级错误（见 iterations/interactive-session/phase3-design.md §5）。
+  const sessions = new SessionManager({
+    bridge: options,
+    ...(config.sessionIdleMs === undefined ? {} : { idleMs: config.sessionIdleMs }),
+    ...(config.maxSessions === undefined ? {} : { maxSessions: config.maxSessions }),
+  })
+  // 插件卸载 / 宿主退出：关掉所有会话（close → 等退出 → 杀进程树），不留孤儿浏览器。
+  ctx.effect(() => () => { void sessions.dispose() }, 'amberflow-bridge: session manager (kill children)')
+  ctx.tools.register(defineTool({
+    name: `${toolPrefix}_session`,
+    description:
+      'One STATE-PRESERVING authoring session against a live page: open → observe → act → '
+      + 'read/extract/signal/wait_for → snapshot → close. Each call reads back immediately, and the '
+      + 'page is NOT re-navigated between calls, so SPA state (open menus, scroll position, typed '
+      + 'values) survives across tool calls. Element resolution, action execution and signal '
+      + 'evaluation use the SAME engine implementation as a real run (hint-matched element pool, same '
+      + 'action executors, same signal checker) — but this tool NEVER judges completion, never writes '
+      + 'a run result and never emits a pass/fail verdict. '
+      + 'USE IT before authoring an app.mjs (trial and error) or to reproduce/debug ONE failing step: '
+      + '`op:"open"` once (returns session_id), then `observe` to see admitted elements with '
+      + 'hint candidates, `act` to perform one action (click/check/fill/select/hover/scroll — a value '
+      + 'must be supplied explicitly; the tool never invents values), then read/extract/signal to read '
+      + 'the immediate facts back. Raw records land under `$AMBERFLOW_HOME/session/<id>/` and can later '
+      + 'become an app.mjs skeleton via `amber session export --record <file>` — that skeleton is an '
+      + 'authoring hint, not a verified plan. '
+      + 'USE `' + toolPrefix + '_run` to execute/verify a frozen plan or app — completion truth '
+      + '(status/verified/invariants) lives ONLY there. USE `' + toolPrefix + '_inspect` for a one-shot '
+      + 'read-only look at a URL with no session and no actions. '
+      + 'Errors: an engine-level failure comes back as {ok:false, code, reason} and the session stays '
+      + 'alive (e.g. target_not_found / needs_value / action_failed); session_unavailable codes are '
+      + 'session_not_found / session_limit / child_exited / bridge_timeout / engine_feature_missing. '
+      + 'held:false / changed:false are FACTS, not errors. Sessions expire after an idle TTL and are '
+      + 'hard-killed with their browser; `op:"close"` ends one explicitly; `op:"list"` shows live ids.',
+    parameters: {
+      op: {
+        type: 'string', required: true,
+        enum: ['open', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'close', 'list'],
+        description: 'The session operation. `open` creates a session and returns session_id (all other ops except list need it).',
+      },
+      session_id: { type: 'string', description: 'Session id returned by `open`. Required for every op except open/list.' },
+      url: { type: 'string', description: 'open: entry page. http(s) only — the bridge refuses checkout-relative paths.' },
+      hosts: {
+        type: 'array', items: { type: 'string' },
+        description: 'open: navigation envelope (hosts). Defaults to the URL host inside the engine; same semantics as meta.hosts.',
+      },
+      headful: { type: 'boolean', description: 'open: show a browser window (default false; deploy hosts usually have no display).' },
+      record: {
+        type: 'boolean',
+        description: 'open: record the action trajectory JSONL under the session evidence dir (default TRUE — `close` returns the record path for `amber session export`). `false` disables it.',
+      },
+      act_op: {
+        type: 'string', enum: ['click', 'check', 'fill', 'select', 'hover', 'scroll'],
+        description: 'act: which single action to perform.',
+      },
+      target: { type: 'string', description: 'act: target hint string (the engine hint grammar: #id, tag[attr=value], tag[attr~substr], tag~token, role word, bare word).' },
+      value: { type: 'string', description: 'act fill/select: the value to type/select. Explicit only — the tool never invents values.' },
+      to: { type: 'string', enum: ['bottom', 'top', 'page'], description: 'act scroll: direction for document/container scrolls.' },
+      by: { type: 'integer', description: 'act scroll: pixel delta (alternative to `to`).' },
+      selector: { type: 'string', description: 'read: CSS selector.' },
+      what: {
+        type: 'string', enum: ['text', 'value', 'count', 'attr'],
+        description: 'read: text (innerText), value (inputValue), count (match count), attr (attribute value).',
+      },
+      attr: { type: 'string', description: 'read what=attr: attribute name.' },
+      rows: { type: 'string', description: 'extract: row CSS selector.' },
+      fields: {
+        type: 'object', additionalProperties: true,
+        description: 'extract: field map {name: css | "." (row text) | "@attr"}. Same semantics as ctx.extract inline.',
+      },
+      max_items: { type: 'integer', description: 'extract: row cap (default 20, max 20).' },
+      signal: {
+        type: 'object', additionalProperties: true,
+        description: 'signal/wait_for: a verifiable-signal object using the SAME operator set as run done/when signals (url_contains, css_exists, css_exists_text, css_visible_exists, css_text_contains, css_text_equals, css_value_equals, all_of, any_of, not, manual).',
+      },
+      timeout_ms: { type: 'integer', description: 'wait_for: poll window in ms (default 15000, max 120000).' },
+      max: { type: 'integer', description: 'observe: max rows (default 40, max 40).' },
+      include_hidden: { type: 'boolean', description: 'observe: include invisible elements (default false).' },
+      screenshot: { type: 'boolean', description: 'snapshot: also write a viewport screenshot (default false; only paths are returned, never inline).' },
+    },
+    output: {
+      // 结果形态按 op 不同（设计师 §2/§3）：只声明公共 ok/op/session_id 与额外的宽松键。
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => [{ type: 'text', text: renderSessionResult(value as Record<string, unknown>) }],
+    },
+    async execute(args) {
+      // 结果是按 op 不同的紧凑 JSON（schema 面宽松，见上）；这里只是把 unknown 收窄回 JsonValue。
+      return await handleSessionTool(args as SessionToolArgs, sessions) as unknown as Record<string, JsonValue>
+    },
+  }))
+}
+
+/** One context-cheap textual line (or block) for one `amberflow_session` result. */
+function renderSessionResult(value: Record<string, unknown>): string {
+  const ok = value.ok === true
+  const op = typeof value.op === 'string' ? value.op : '?'
+  const sid = typeof value.session_id === 'string' ? value.session_id : ''
+  const tag = `${ok ? 'ok' : 'FAIL'} ${op}${sid === '' ? '' : ` [${sid}]`}`
+  if (!ok) {
+    return `${tag}: ${String(value.code ?? 'error')}${value.reason === undefined ? '' : ` — ${String(value.reason)}`}`
+      + (value.session_alive === true ? ' (session still alive)' : '')
+  }
+  switch (op) {
+    case 'open':
+      return `${tag}: ${String(value.url ?? '')}${value.title === undefined ? '' : ` — ${String(value.title)}`}`
+        + `\nevidence: ${String(value.evidence_dir ?? '')}`
+        + (value.record === undefined || value.record === null ? '\nrecord: off' : `\nrecord: ${String(value.record)}`)
+        + `\nidle TTL: ${String(value.idle_ttl_ms ?? '?')}ms`
+    case 'observe': {
+      const el = Array.isArray(value.elements) ? value.elements : []
+      const lines = el.slice(0, 12).map((raw) => {
+        const e = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {}
+        const hints = Array.isArray(e.hints) ? e.hints.filter((h): h is string => typeof h === 'string') : []
+        return `  ${String(e.tag ?? '')} ${String(e.label ?? '')}${hints.length ? ` → ${hints.join(' | ')}` : ' (no hint)'}`
+      })
+      return `${tag}: ${String(value.url ?? '')} elements ${String(el.length)}`
+        + (value.counts === undefined ? '' : ` counts ${JSON.stringify(value.counts)}`)
+        + (value.truncated === true ? ' (truncated)' : '')
+        + (lines.length ? `\n${lines.join('\n')}` : '')
+    }
+    case 'act':
+      return `${tag}: ${String(value.act_op ?? '')} ${String(value.target ?? '')} → ${String(value.how ?? '?')}`
+        + ` ref=${String(value.ref ?? '-')} changed=${String(value.changed === true)}`
+        + `\nurl: ${String(value.url ?? '')}`
+    case 'read':
+      return `${tag}: ${String(value.what ?? '')}(${String(value.selector ?? '')}) = ${JSON.stringify(value.value ?? null)}`
+        + (value.value_truncated === true ? ' (truncated)' : '')
+    case 'extract': {
+      const rows = Array.isArray(value.rows) ? value.rows : []
+      return `${tag}: ${String(value.count ?? rows.length)} row(s)${value.capped === true ? ' (capped)' : ''}`
+        + (rows.length ? `\n${rows.slice(0, 5).map(r => `  ${JSON.stringify(r)}`).join('\n')}` : '')
+    }
+    case 'signal':
+      return `${tag}: held=${String(value.held === true)}`
+    case 'wait_for':
+      return `${tag}: held=${String(value.held === true)} after ${String(value.elapsed_ms ?? '?')}ms`
+    case 'snapshot':
+      return `${tag}: ${String(value.url ?? '')}`
+        + `\nsnapshot: ${String(value.snapshot_file ?? '')}`
+        + `\npool: ${String(value.pool_file ?? '')}`
+        + (value.screenshot_file === undefined ? '' : `\nscreenshot: ${String(value.screenshot_file)}`)
+    case 'close':
+      return `${tag}: closed after ${String(value.requests ?? 0)} request(s), ${String(value.actions ?? 0)} action(s);`
+        + ` evidence: ${String(value.evidence_dir ?? '')}`
+        + (value.record === undefined ? '' : `\nnext: amber session export --record ${String(value.record)} --id <appId>`)
+    case 'list': {
+      const rows = Array.isArray(value.sessions) ? value.sessions : []
+      return rows.length === 0
+        ? `${tag}: no live sessions`
+        : `${tag}:\n${rows.map((r) => {
+          const s = typeof r === 'object' && r !== null ? r as Record<string, unknown> : {}
+          return `  ${String(s.session_id ?? '')} ${String(s.url ?? '')} idle=${String(s.idle_ms ?? 0)}ms actions=${String(s.actions ?? 0)}`
+        }).join('\n')}`
+    }
+    default:
+      return `${tag}: ${JSON.stringify(value).slice(0, 500)}`
+  }
 }
