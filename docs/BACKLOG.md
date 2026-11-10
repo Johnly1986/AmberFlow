@@ -212,3 +212,10 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 - P2：`ctx.hints` 改名/文档化（现为多 hint 构造器，文档已注明）；observe 附带"全准入面 verify 列表"（更强 hint 自证）；`ignore_frame_origins` 配置化（广告 frame 默认排除已做，显式配置仍可加）；候选池自动滚动采集（pool_scroll 实验，带成本上限）；`scroll` 命令接像素 `by`。
 - P2：steps_failed 是否计入 recovered；false_done guard 的短页正文阈值（400 字符）与登录词表可配化；`deniedFrameUrl` 死代码移除；report.html 摘要补失败步行。
 - P2：A5 文档已澄清（switchTab 双面跟随，R10 判误诊）；若再现"动作面在原页"症状，按 trace 归因（done 锚点）排查。
+
+## 挂起分支 `feat/dry-branch-lint` 归档决定（2026-11-10）
+
+- **结论**：该分支无主线未吸收的工作；已打归档 tag（`archive/feat-dry-branch-lint` → `8168834`）后删除分支。
+- **证据**：`git rev-list --left-right --count main...feat/dry-branch-lint` = `14 1`；唯一独有提交 `8168834` 只新增 `src/app/declaration-scan.ts`（796 行、纯函数零接线）；主线上该文件内容 sha256 与分支一致（`27ecca5a…`），且主线已接线 4 处（`hint-lint.ts` / `apps-rehearsal.ts` / `apps.ts` / `rules.ts`）。
+- **未采纳范围（显式记录，非遗漏）**：收集器的消费面在 task-10 阶段收窄到 **hint 形状位**（`hint-lint.ts`：nearToken/裸词/attrSubstr-on-label 三类静态提醒）；挂起工作流的**族声明校验 / `declarationLint` 契约字段 / dynamic 计数外显**未接出——这是新的范围决策，等真实需求。
+- **恢复条件**：需要 `apps check` 对"分支内声明形状"做 problem 级校验（而不仅是 hint 语义 warning）时，从 tag `archive/feat-dry-branch-lint` 起（对应设计/验收标准见任务沉淀记录）。
