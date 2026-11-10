@@ -21,7 +21,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { CliObservation } from "../data/datasource.ts";
-import { REPO } from "../flow/flow.ts";
+import { REPO } from "../support/paths.ts";
 import { resolve } from "../data/datasource.ts";
 import { validateSignalSpec, type SignalGrammar } from "../engine/signals.ts";
 

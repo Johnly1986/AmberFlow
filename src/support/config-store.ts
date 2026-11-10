@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { REPO } from "../support/paths.ts";
-import { amberflowHome } from "../app/amberflow-home.ts";
+import { amberflowHome } from "./amberflow-home.ts";
 import { applyRcToEnv, jsonErrorLine, keyLineIn } from "../support/rcfile.ts";
 import { CONFIG_KEYS, isSecretKey, maskValue } from "../support/config-schema.ts";
 

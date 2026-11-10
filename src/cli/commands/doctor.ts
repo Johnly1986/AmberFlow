@@ -6,9 +6,9 @@ import { usageFromParseError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { runExecutable } from "../process.ts";
 import { REPO } from "../../support/paths.ts";
-import { ensureDir, userAppsDir } from "../../app/amberflow-home.ts";
+import { ensureDir, userAppsDir } from "../../support/amberflow-home.ts";
 import { listAppInfos } from "./apps.ts";
-import { userConfigPath, projectConfigPath, resolveConfig } from "../config-store.ts";
+import { userConfigPath, projectConfigPath, resolveConfig } from "../../support/config-store.ts";
 import { cliInvocationLine, detectCliInvocation, INVOKE_FALLBACKS, LINK_HINT } from "../invocation.ts";
 import { missingPieces } from "../../model/model-artifacts.ts";
 // task-14：探针底座共享（run 起跑探测与 doctor 单一出处）。

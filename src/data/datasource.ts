@@ -48,7 +48,7 @@ import { REPO } from "../support/paths.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { pyJsonDumps } from "../model/laya-format.ts";
+import { pyJsonDumps } from "../support/pystr.ts";
 
 
 /* ---------------------------------------------------------------- 类型 */

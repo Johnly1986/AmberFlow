@@ -13,7 +13,7 @@ import { scanDeclarations } from "../../app/declaration-scan.ts";
 // task-15（D2）：SITE_FACTS 按 meta.hosts 匹配 → stderr 提示（仅命中；辅助数据不进 problems）。
 import { loadSiteFacts, matchSiteFacts, renderSiteFactLines } from "../../app/site-facts.ts";
 import { PLAN_PLAYBOOK_TEXT } from "../../engine/planning-playbook.ts";
-import { userAppsDir } from "../../app/amberflow-home.ts";
+import { userAppsDir } from "../../support/amberflow-home.ts";
 import type { CliContext } from "../context.ts";
 import { say, emitJson } from "../context.ts";
 import { blockedError, usageError, usageFromParseError } from "../errors.ts";

@@ -26,7 +26,7 @@ import { parseArgs } from "node:util";
 import { loadScriptApp, scriptDisplayPath } from "../../app/app-script.ts";
 import { scanDeclarations } from "../../app/declaration-scan.ts";
 import { resolveCtxUrl } from "../../app/ctx.ts";
-import { userAppsDir } from "../../app/amberflow-home.ts";
+import { userAppsDir } from "../../support/amberflow-home.ts";
 import { browserSession } from "../../engine/executor.ts";
 import { extractElements } from "../../engine/extraction.ts";
 import { hintCandidates, hintMatch } from "../../engine/rules.ts";

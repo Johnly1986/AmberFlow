@@ -23,7 +23,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { createCtx, isSyntheticScrollTarget, StopError, type Ctx } from "./ctx.ts";
-import { amberflowHome, ensureDir } from "./amberflow-home.ts";
+import { amberflowHome, ensureDir } from "../support/amberflow-home.ts";
 import { inputsSha256, newTrace, sha256, writeTrace, type AppTrace } from "./trace.ts";
 import { MockAuditor } from "../engine/audit.ts";
 import {

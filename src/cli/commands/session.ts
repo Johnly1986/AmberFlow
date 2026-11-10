@@ -17,7 +17,7 @@ import type { CliContext } from "../context.ts";
 import { diag, emitJson, say } from "../context.ts";
 import { EXIT, usageError, usageFromParseError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
-import { amberflowHome } from "../../app/amberflow-home.ts";
+import { amberflowHome } from "../../support/amberflow-home.ts";
 import { runSession, SESSION_DEFAULT_IDLE_TIMEOUT_MS, type SessionSink } from "../../app/session-runtime.ts";
 import { exportSessionRecord } from "../../app/session-export.ts";
 import { commandHelp } from "../registry.ts";

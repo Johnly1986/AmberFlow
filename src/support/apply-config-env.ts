@@ -16,7 +16,7 @@
  *
  * 注意：它**只写 process.env**，不缓存；入口各自在 `main()` 第一行调用一次即可（与旧 rc 相同）。
  */
-import { resolveConfig } from "../cli/config-store.ts";
+import { resolveConfig } from "./config-store.ts";
 import { applyRcToEnv } from "./rcfile.ts";
 
 export interface AppliedConfigEnv {

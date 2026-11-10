@@ -33,7 +33,7 @@ import { isParseUsageError, stripArgSeparators, usageErrorLine } from "../suppor
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 // B1 节奏统一：规划脸动作间间距走 env 层（子目标/重试间距在 runPlan 里同样 env-only）。
 import { envPace } from "../support/pace.ts";
-import { defaultPlanPath } from "../app/amberflow-home.ts";
+import { defaultPlanPath } from "../support/amberflow-home.ts";
 
 /**
  * 计划文件的默认落点：与 `npm start` 同一处——**用户作用域** `$AMBERFLOW_HOME/task_plan.json`

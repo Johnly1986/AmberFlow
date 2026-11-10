@@ -37,7 +37,7 @@ import { PLAN_PLAYBOOK_TEXT, FAILURE_SIGNS_TEXT, PLAN_PLAYBOOK_SHORT, STOP_ESCAL
 import { hintMatch } from "../src/engine/rules.ts";
 import { validateSignalSpec } from "../src/engine/signals.ts";
 import { HOME_NEXT, OVERVIEW_TEXT, WHEN_TO_USE } from "../src/support/help-map.ts";
-import { STOPCODE_MEANING, EXECUTOR_ONLY_STOPCODES } from "../src/support/schema-gen.ts";
+import { STOPCODE_MEANING, EXECUTOR_ONLY_STOPCODES } from "../src/cli/schema-gen.ts";
 import { COMMANDS, commandSpec, helpCommandsPayload } from "../src/cli/registry.ts";
 
 const fix = process.argv.includes("--fix");

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { REPO } from "../support/paths.ts";
-import { CONFIG_KEYS, resolveConfig } from "./config-store.ts";
+import { CONFIG_KEYS, resolveConfig } from "../support/config-store.ts";
 import { commandHelp, commandSpec, COMMANDS, globalHelp, helpCommandsPayload, suggestion } from "./registry.ts";
 import { HOME_NEXT, OVERVIEW_TEXT } from "../support/help-map.ts";
 import { makeContext, say, emitJson, type CliContext, type GlobalOptions } from "./context.ts";

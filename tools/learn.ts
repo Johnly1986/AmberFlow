@@ -28,7 +28,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { validatePack, type AppPack } from "../src/app/app-pack.ts";
-import { ensureDir, userAppsDir } from "../src/app/amberflow-home.ts";
+import { ensureDir, userAppsDir } from "../src/support/amberflow-home.ts";
 import { runApp, runScriptApp, startUrl } from "../src/app/app-runner.ts";
 import { browserSession } from "../src/engine/executor.ts";
 import { extractElements } from "../src/engine/extraction.ts";

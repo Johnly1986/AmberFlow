@@ -20,18 +20,8 @@ export type StateLike = string | Record<string, unknown> | unknown[];
  * count) and the rendered option text, and a divergence silently shifts every
  * downstream token position.
  */
-export function pyJsonDumps(value: unknown): string {
-  if (value === null || value === undefined) return "null";
-  if (typeof value === "string") return JSON.stringify(value);
-  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NaN";
-  if (typeof value === "boolean") return value ? "true" : "false";
-  if (Array.isArray(value)) return "[" + value.map(pyJsonDumps).join(", ") + "]";
-  if (typeof value === "object") {
-    return "{" + Object.entries(value as Record<string, unknown>)
-      .map(([k, v]) => `${JSON.stringify(k)}: ${pyJsonDumps(v)}`).join(", ") + "}";
-  }
-  return JSON.stringify(String(value));
-}
+import { pyJsonDumps } from "../support/pystr.ts";
+export { pyJsonDumps };
 
 export function serializeState(state: StateLike): string {
   return typeof state === "string" ? state : pyJsonDumps(state);

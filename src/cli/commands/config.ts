@@ -9,7 +9,7 @@ import {
   CONFIG_KEYS, displayValue, initConfigFile, isKnownConfigKey, isSecretKey,
   legacyConfigPath, projectConfigPath, removeConfigValue, resolveConfig,
   selectedConfigPath, userConfigPath, writeConfigValue,
-} from "../config-store.ts";
+} from "../../support/config-store.ts";
 
 const KEY_HINT = `可用键：${CONFIG_KEYS.join(", ")}`;
 

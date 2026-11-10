@@ -18,7 +18,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { appsSearchPath } from "./amberflow-home.ts";
+import { appsSearchPath } from "../support/amberflow-home.ts";
 import { REPO } from "../flow/flow.ts";
 import { PlanningRules, TaskPlan, type Subgoal } from "../engine/plan.ts";
 import { validateSignalSpec, type SignalSpec } from "../engine/signals.ts";

@@ -17,7 +17,7 @@
 import { SIGNAL_OPS } from "../engine/signal-ops.ts";
 import { COMMAND_OPS } from "../engine/actions.ts";
 import { nextForStop, EXEMPT_NEXT, STOP_ESCALATION_TEXT } from "../engine/planning-playbook.ts";
-import { OVERVIEW_TEXT, WHEN_TO_USE } from "./help-map.ts";
+import { OVERVIEW_TEXT, WHEN_TO_USE } from "../support/help-map.ts";
 
 /** 可查询的节名（`--topic`）。 */
 export const SCHEMA_TOPICS = [

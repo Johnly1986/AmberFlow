@@ -19,7 +19,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { amberflowHome } from "./amberflow-home.ts";
+import { amberflowHome } from "../support/amberflow-home.ts";
 
 /** 轨迹里动作事件的最小形状（缺字段按"未知"处理，不猜）。 */
 export interface RecordedAction {

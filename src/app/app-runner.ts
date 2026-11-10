@@ -35,7 +35,7 @@ import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 import { probeDecisionPlane } from "../model/decision-probe.ts";
 // task-15（D2）：SITE_FACTS 边缘注入（run 起跑提示 + result.site_facts；仅命中出现）。
 import { loadSiteFacts, matchSiteFacts, renderModelFence, renderSiteFactLines } from "./site-facts.ts";
-import { ensureDir, userAppsDir } from "./amberflow-home.ts";
+import { ensureDir, userAppsDir } from "../support/amberflow-home.ts";
 import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../support/cli-args.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";

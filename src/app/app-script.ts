@@ -15,7 +15,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { REPO } from "../flow/flow.ts";
 import { appDirs, APPS_DIR, type AppPack } from "./app-pack.ts";
-import { appsSearchPath } from "./amberflow-home.ts";
+import { appsSearchPath } from "../support/amberflow-home.ts";
 import { validateApp } from "./cross-ref.ts";
 import { createKit, type Kit } from "./kit.ts";
 import { lowerMeta, type ScriptMeta } from "./app-meta.ts";

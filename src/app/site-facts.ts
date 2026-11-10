@@ -17,7 +17,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { REPO } from "../support/paths.ts";
-import { amberflowHome } from "./amberflow-home.ts";
+import { amberflowHome } from "../support/amberflow-home.ts";
 
 export interface SiteFact {
   id: string;

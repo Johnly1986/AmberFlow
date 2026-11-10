@@ -1,7 +1,7 @@
 /**
  * `amber schema ctx` —— 引擎语义契约的命令面（自描述运行时 · P0-A）。
  *
- * 无源码世界（打包发布）里 Agent 的语义知识来源。数据由 `support/schema-gen.ts`
+ * 无源码世界（打包发布）里 Agent 的语义知识来源。数据由 `schema-gen.ts`
  * 从引擎真源渲染；本命令只做三件事：
  *   输出（缺省/`--topic`）、写快照（`--out`）、快照比对（`--check`，漂移 exit 2）。
  */
@@ -14,7 +14,7 @@ import { emitJson, say } from "../context.ts";
 import { CliError, usageError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { REPO } from "../../support/paths.ts";
-import { renderSchemaCtx, SCHEMA_TOPICS } from "../../support/schema-gen.ts";
+import { renderSchemaCtx, SCHEMA_TOPICS } from "../schema-gen.ts";
 
 const USAGE = `usage: schema ctx [--topic <节>] [--out <文件>] [--check] [--json]
 
