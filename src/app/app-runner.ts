@@ -3029,7 +3029,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 2;
   }
   const quiet = cliBool(v, "quiet") || runDefaults.quiet === true;
-  const headful = cliBool(v, "headful") || runDefaults.headful === true;
+  // headless/headful 都解析：CLI 显式 --headless 压过配置层的 runDefaults.headful（此前
+  // --headless 被解析但不透传，rc 配了 headful=true 的机器上用户无法退出有头——透传修复）。
+  // 两个旗标同时给 = 用法错误（与 run.ts 的互斥检查同一条纪律）。
+  if (cliBool(v, "headless") && cliBool(v, "headful")) {
+    console.error("--headful 与 --headless 只能选一个");
+    return 2;
+  }
+  const headful = !cliBool(v, "headless") && (cliBool(v, "headful") || runDefaults.headful === true);
   const confirmUnsafe = cliBool(v, "confirm-unsafe");
   const confirmSafe = !confirmUnsafe && (cliBool(v, "confirm-safe") || runDefaults.confirmSafe !== false);
   const noSources = cliBool(v, "no-sources") || runDefaults.noSources === true;

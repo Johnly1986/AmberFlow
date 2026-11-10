@@ -385,7 +385,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     options: {
       goal: { type: "string" }, url: { type: "string" },
       doctor: { type: "boolean" },
-      "dry-run": { type: "boolean" }, headful: { type: "boolean" },
+      "dry-run": { type: "boolean" }, headful: { type: "boolean" }, headless: { type: "boolean" },
       target: { type: "string" }, provider: { type: "string" },
       plan: { type: "string", default: DEFAULT_PLAN_PATH },
       help: { type: "boolean" },
@@ -399,7 +399,13 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     for (const e of runDefaultErrors) io.out(e);
     return 2;
   }
-  const headless = !(cliBool(v, "headful") || runDefaults.headful === true);
+  // 显式 --headless 压过配置层 runDefaults.headful（CLI 旗标 > env > 配置文件）；
+  // 两旗标同给 = 互斥用法错误（与 run.ts / app-runner 同一条纪律）。
+  if (cliBool(v, "headful") && cliBool(v, "headless")) {
+    io.out("--headful 与 --headless 只能选一个");
+    return 2;
+  }
+  const headless = cliBool(v, "headless") || !(cliBool(v, "headful") || runDefaults.headful === true);
 
   if (cliBool(v, "help")) {
     io.out(USAGE);

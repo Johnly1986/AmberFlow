@@ -94,6 +94,8 @@ export const SHARED_RUN_OPTIONS: CliOptions = {
   out: { type: "string" },
   provider: { type: "string" },
   headful: { type: "boolean" },
+  /** 显式无窗口：压过配置层的 runDefaults.headful（CLI 旗标 > env > 配置文件；run.ts 透传）。 */
+  headless: { type: "boolean" },
   /** 消融臂：`stub` = 脚本桩，`rules-only` = 规则档（两个入口同一个取值集合）。 */
   ablate: { type: "string" },
   /** 置信度闸门刻度（0<N≤1）。 */

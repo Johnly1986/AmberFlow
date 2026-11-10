@@ -364,6 +364,9 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   }
   const args = ["--app", app];
   if (bool(v["dry-run"])) args.push("--dry");
+  // 透传修复：此前 --headless 被解析但从未转发（只透传 --headful），rc 配了
+  // runDefaults.headful=true 的机器上用户给了 --headless 也退不出有头。
+  if (bool(v.headless)) args.push("--headless");
   if (headful) args.push("--headful");
   if (bool(v["skip-data"])) args.push("--no-sources");
   if (bool(v["allow-dangerous"])) args.push("--allow-dangerous");
@@ -614,6 +617,8 @@ async function runGoal(
   const dryRun = bool(v["dry-run"]);
   const args = ["--goal", goal, "--url", url, "--plan", savePlan];
   if (dryRun) args.push("--dry-run");
+  // 透传修复：--headless 此前同样被丢弃（start.ts 也只认 --headful）。
+  if (bool(v.headless)) args.push("--headless");
   if (headful) args.push("--headful");
   if (str(v.target)) args.push("--target", str(v.target)!);
   if (str(v.provider)) args.push("--provider", str(v.provider)!);
