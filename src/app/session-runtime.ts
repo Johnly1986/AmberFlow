@@ -27,7 +27,7 @@ import { amberflowHome, ensureDir } from "../support/amberflow-home.ts";
 import { inputsSha256, newTrace, sha256, writeTrace, type AppTrace } from "./trace.ts";
 import { MockAuditor } from "../engine/audit.ts";
 import {
-  BrowserMiddleware, browserSession, type AnyPage, type BrowserSession,
+  BrowserMiddleware, browserSession, disallowedHost, type AnyPage, type BrowserSession,
 } from "../engine/executor.ts";
 import {
   extractElements, urlOf, type ElemPool, type PageLike,
@@ -51,6 +51,106 @@ export const SESSION_REQUEST_TYPES = [
 export const SESSION_DEFAULT_IDLE_TIMEOUT_MS = 300_000;
 /** 单行请求上限。 */
 export const SESSION_DEFAULT_MAX_REQUEST_BYTES = 1_048_576;
+
+/* ---------------------- task-38：导航 flap 检测与有界自愈 ---------------------- */
+
+/** flap 观察窗口（open 返回后 / 自愈落地后各观察一次的时长）。 */
+export const FLAP_WINDOW_MS = 1_500;
+/**
+ * 静默早退：open 返回后这么久仍**没有**主 frame 导航 → 稳定页，立刻放行响应（零新字段）。
+ * 阈值必须大于「flap 页首次客户端导航的延迟」——zh.wikipedia 文章页实测 ~0.37–0.9s
+ * （task38/ROOT-CAUSE.md probe-nav）、本地 fixture 250ms——取 600ms 可盖住两者实测下界；
+ * 代价是稳定页 open 多等 ~600ms（任务书原文写 ≤100ms，实测对照见 task38/assert-results，
+ * 常数是单点可调项，由 lead 裁决）。稳定页一旦在窗口内出现任何 post-open 导航，
+ * 就放弃早退、观察满整个窗口再判严格签名。
+ */
+export const FLAP_QUIET_EXIT_MS = 600;
+/** 自愈导航落地（DCL）后的 settle 等待，之后开复察窗口。 */
+export const FLAP_HEAL_SETTLE_MS = 500;
+
+/** 一条主 frame 导航事件（flap 检测的原始观察）。 */
+export interface NavEvent { ts: number; url: string }
+
+/** flap 判定结果（严格签名，见 `judgeFlapNavs`）。 */
+export interface FlapJudgement {
+  navigations: number;
+  window_ms: number;
+  /** 去重后的导航形态样例（≤5，保持首次出现顺序）。 */
+  urls_sample: string[];
+  /** 窗口内最后一次主 frame 导航的 URL（自愈兜底目标）。 */
+  last_url: string;
+}
+
+/** 一次有界自愈的结果。 */
+export interface FlapHealResult {
+  healed: boolean;
+  heal_url: string;
+  reason?: string;
+}
+
+const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, Math.max(0, ms)));
+
+const urlOriginOf = (u: string): string => { try { return new URL(u).origin; } catch { return ""; } };
+const urlPathOf = (u: string): string => { try { return new URL(u).pathname; } catch { return ""; } };
+const stripFragment = (u: string): string => { const i = u.indexOf("#"); return i >= 0 ? u.slice(0, i) : u; };
+
+/**
+ * 共同 path 前缀：逐字符 LCP，完全相同则原样返回，否则回退到最后一个 "/"。
+ * 返回 null = 没有非平凡前缀（如 "/a" 与 "/b" 只共出 "/"——那不是同一页面在翻形态）。
+ */
+function commonPathPrefix(paths: string[]): string | null {
+  if (paths.length === 0) return null;
+  let lcp = paths[0]!;
+  for (const p of paths.slice(1)) {
+    let i = 0;
+    while (i < lcp.length && i < p.length && lcp[i] === p[i]) i += 1;
+    lcp = lcp.slice(0, i);
+    if (lcp === "") return null;
+  }
+  if (paths.every((p) => p === lcp)) return lcp;
+  const cut = lcp.lastIndexOf("/");
+  return cut > 0 ? lcp.slice(0, cut + 1) : null;
+}
+
+/**
+ * task-38：主 frame 导航序列是否构成「URL flap」（**严格**触发签名）：
+ *   1.5s 窗口内 ≥4 次主 frame 导航，且 URL 在 ≥2 种形态间反复交替——
+ *   同一 origin、同一 path 前缀、去重后 ≥2 个 URL、至少一个形态出现 ≥2 次
+ *   （A↔B 交替满足；正常重定向 1-2 次不满足次数；单向重定向链每个 URL 只出现一次，
+ *   不满足「反复」；刷新同一 URL 不满足「≥2 形态」）。
+ * 返回 null = 不是 flap。
+ */
+export function judgeFlapNavs(seq: NavEvent[], windowMs: number): FlapJudgement | null {
+  if (seq.length < 4) return null;
+  const urls = seq.map((n) => stripFragment(n.url));
+  const distinct = [...new Set(urls)];
+  if (distinct.length < 2) return null;
+  if (new Set(distinct.map(urlOriginOf)).size !== 1) return null;
+  const prefix = commonPathPrefix(distinct.map(urlPathOf));
+  if (prefix === null || prefix.length <= 1) return null;
+  if (!distinct.some((u) => urls.filter((x) => x === u).length >= 2)) return null;
+  return {
+    navigations: seq.length,
+    window_ms: windowMs,
+    urls_sample: distinct.slice(0, 5),
+    last_url: urls[urls.length - 1]!,
+  };
+}
+
+/**
+ * task-38：自愈目标 URL——优先「编码形态」（path 含百分比编码，如 zh.wikipedia 的
+ * /wiki/%E8…；实测编码标题 URL 直开是稳定的），判不出编码形态就用最后一次
+ * framenavigated 的 URL。
+ */
+function encodedFormUrl(urls: string[]): string | null {
+  for (const u of urls) {
+    try {
+      const p = new URL(u).pathname;
+      if (p.includes("%") && decodeURIComponent(p) !== p) return u;
+    } catch { /* 坏 URL 不候选 */ }
+  }
+  return null;
+}
 
 export interface SessionOptions {
   /** 启动后自动 open 的入口页（`--url`）。 */
@@ -394,14 +494,112 @@ export class SessionRuntime {
     }
     const timeoutMs = intIn(req["timeoutMs"], 1, 120_000);
     const ctx = this.ctx();
-    await ctx.open(url, timeoutMs === undefined ? {} : { timeoutMs });
-    const landed = ctx.url();
-    if (landed) this.urls.push(landed);
-    const title = await this.titleOf();
-    this.log(`open ${landed}${title === undefined ? "" : ` — ${title}`}`);
-    // Phase 2：入口页是导出骨架的 `meta.site.pages.entry` 来源（open 也是轨迹的一部分）。
-    this.recordEvent({ type: "open", url: landed, ...(title === undefined ? {} : { title }) });
-    return { ok: true, url: landed, ...(title === undefined ? {} : { title }), hosts: this.hosts ?? [] };
+    const page = await this.page();
+    // task-38：主 frame 导航监听。挂在 ctx.open **之前**——flap 若在 goto 返回与挂监听
+    // 之间的几毫秒里启动，挂晚了就看不见第一批事件；判定按 ts>=openEnd 过窗，goto 期间的
+    // 正常重定向天然不计入（「正常重定向 1-2 次绝不触发」）。没有 .on 的假页面（测试桩）
+    // 直接跳过检测，响应形状不变。启动自动 open 与每次显式 open 走同一条路径。
+    const navs: NavEvent[] = [];
+    const pw = page as unknown as {
+      on?: (ev: string, fn: (frame: unknown) => void) => unknown;
+      off?: (ev: string, fn: (frame: unknown) => void) => unknown;
+      mainFrame?: () => unknown;
+    };
+    const onNav = (frame: unknown): void => {
+      try {
+        if (typeof pw.mainFrame !== "function" || frame !== pw.mainFrame()) return;
+        const f = frame as { url?: () => string } | null;
+        if (f === null || typeof f.url !== "function") return;
+        navs.push({ ts: Date.now(), url: f.url() });
+      } catch { /* 事件回调里绝不抛 */ }
+    };
+    if (typeof pw.on === "function") pw.on("framenavigated", onNav);
+    try {
+      await ctx.open(url, timeoutMs === undefined ? {} : { timeoutMs });
+      const openEnd = Date.now();
+      const flap = await this.watchFlap(navs, openEnd);
+      let heal: FlapHealResult | null = null;
+      if (flap !== null) heal = await this.healFlap(page, flap, navs);
+      const landed = urlOf(page) || ctx.url() || String(url);
+      this.urls.push(landed);
+      const title = await this.titleOf();
+      this.log(`open ${landed}${title === undefined ? "" : ` — ${title}`}`);
+      // Phase 2：入口页是导出骨架的 `meta.site.pages.entry` 来源（open 也是轨迹的一部分）。
+      this.recordEvent({
+        type: "open", url: landed, ...(title === undefined ? {} : { title }),
+        ...(flap === null ? {} : { flap: { navigations: flap.navigations, healed: heal?.healed === true } }),
+      });
+      // 正常页（未判定 flap）：响应与改动前**逐字节一致**——零新字段、除静默早退窗口外零额外等待。
+      if (flap === null) {
+        return { ok: true, url: landed, ...(title === undefined ? {} : { title }), hosts: this.hosts ?? [] };
+      }
+      // 判定 flap → 只增诊断字段（healed:false → ok:false 如实报；有界自愈只试一次，不再重试）。
+      const healed = heal?.healed === true;
+      this.log(`open flap detected: ${flap.navigations} main-frame navigations in ${flap.window_ms}ms, healed=${healed}`);
+      return {
+        ok: healed,
+        url: landed,
+        ...(title === undefined ? {} : { title }),
+        hosts: this.hosts ?? [],
+        code: "navigation_flapping",
+        navigations: flap.navigations,
+        window_ms: flap.window_ms,
+        urls_sample: flap.urls_sample,
+        healed,
+        ...(heal === null ? {} : { heal_url: heal.heal_url }),
+        reason: healed
+          ? `主 frame 在 ${flap.window_ms}ms 内导航 ${flap.navigations} 次、URL 在 ${flap.urls_sample.length} 种形态间反复（客户端 URL flap，期间 DOM 读取不可靠）；已自愈：重新导航到 ${heal?.heal_url} 后复察窗口无 flap`
+          : `主 frame 在 ${flap.window_ms}ms 内导航 ${flap.navigations} 次、URL 在 ${flap.urls_sample.length} 种形态间反复（客户端 URL flap，期间 DOM 读取不可靠）${heal?.reason === undefined ? "" : `；${heal.reason}`}`,
+        suggestion: "改用编码标题 URL 直开（把标题百分比编码进路径）或稍后重试；flap 期间 read/signal 可能读到空 DOM",
+      };
+    } finally {
+      if (typeof pw.off === "function") { try { pw.off("framenavigated", onNav); } catch { /* 收尾失败不影响结论 */ } }
+    }
+  }
+
+  /**
+   * task-38：flap 观察窗口。open 返回后观察 `FLAP_WINDOW_MS`：
+   * - 窗口内一条主 frame 导航都没有 → 静默早退（稳定页：零新字段，只付静默等待）；
+   * - 一旦出现 post-open 导航（可疑）→ 观察满整个窗口，再判 `judgeFlapNavs` 严格签名。
+   * 返回 null = 不是 flap（open 响应零新字段）。
+   */
+  private async watchFlap(navs: NavEvent[], openEnd: number): Promise<FlapJudgement | null> {
+    const deadline = openEnd + FLAP_WINDOW_MS;
+    for (;;) {
+      const now = Date.now();
+      if (now >= deadline) break;
+      if (navs.some((n) => n.ts >= openEnd)) { await sleepMs(deadline - now); break; }
+      if (now >= openEnd + FLAP_QUIET_EXIT_MS) return null;
+      await sleepMs(Math.min(50, deadline - now));
+    }
+    const postOpen = navs.filter((n) => n.ts >= openEnd);
+    return judgeFlapNavs(postOpen, FLAP_WINDOW_MS);
+  }
+
+  /**
+   * task-38：一次**有界**自愈——导航到编码形态 URL（判不出就用最后一次 framenavigated
+   * 的 URL），等 DCL + settle，再观察一个完整复察窗口；仍 flap → healed:false 如实报
+   * （**不再重试**）。自愈走裸 `page.goto`（不经 ctx.navigate）：目标 URL 来自本页刚观察
+   * 到的导航形态并过 hosts 信封检查；它是有界诊断动作，不改写 ctx 的导航账。
+   */
+  private async healFlap(page: AnyPage, flap: FlapJudgement, navs: NavEvent[]): Promise<FlapHealResult> {
+    const healUrl = encodedFormUrl(flap.urls_sample) ?? flap.last_url;
+    const deny = disallowedHost(healUrl, this.hosts);
+    if (deny !== null) {
+      return { healed: false, heal_url: healUrl, reason: `自愈目标 ${healUrl} 在 hosts 信封外（${deny}），不尝试` };
+    }
+    try {
+      await page.goto(healUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    } catch (e) {
+      return { healed: false, heal_url: healUrl, reason: `自愈导航失败: ${errMsg(e)}` };
+    }
+    await sleepMs(FLAP_HEAL_SETTLE_MS);
+    const rewatchStart = Date.now();
+    await sleepMs(FLAP_WINDOW_MS);
+    const still = judgeFlapNavs(navs.filter((n) => n.ts >= rewatchStart), FLAP_WINDOW_MS);
+    return still === null
+      ? { healed: true, heal_url: healUrl }
+      : { healed: false, heal_url: healUrl, reason: `自愈后仍 flap（复察窗口再次命中签名，navigations=${still.navigations}）——有界自愈只试一次，不再重试` };
   }
 
   private async doObserve(req: Record<string, unknown>): Promise<Record<string, unknown>> {
