@@ -1186,6 +1186,11 @@ function renderSessionResult(value: Record<string, unknown>): string {
   switch (op) {
     case 'open':
       return `${tag}: ${String(value.url ?? '')}${value.title === undefined ? '' : ` — ${String(value.title)}`}`
+        + (value.code === 'navigation_flapping'
+          ? `\nnavigation flap: ${value.healed === true
+            ? `healed — re-nav to ${String(value.heal_url ?? '')}`
+            : 'NOT healed'} (${String(value.navigations ?? '?')} navs in ${String(value.window_ms ?? '?')}ms)`
+          : '')
         + `\nevidence: ${String(value.evidence_dir ?? '')}`
         + (value.record === undefined || value.record === null ? '\nrecord: off' : `\nrecord: ${String(value.record)}`)
         + `\nidle TTL: ${String(value.idle_ttl_ms ?? '?')}ms`

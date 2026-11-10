@@ -355,14 +355,37 @@ export class SessionManager {
     try {
       const ready = await this.waitReady(state)
       if (ready['ok'] !== true) {
+        // 导航 flap 且自愈失败：CLI open 以 ok:false + 完整诊断组关闭——把诊断带进工具错误，
+        // 不只留 code/reason（task-41：与 task-36 歧义透传同模式）。
+        const failExtra: Record<string, unknown> = {}
+        if (ready['code'] === 'navigation_flapping') {
+          if (Array.isArray(ready['urls_sample'])) failExtra['urls_sample'] = (ready['urls_sample'] as unknown[]).slice(0, 5).map(String)
+          if (typeof ready['navigations'] === 'number') failExtra['navigations'] = ready['navigations']
+          if (typeof ready['healed'] === 'boolean') failExtra['healed'] = ready['healed']
+        }
         await this.closeSession(id, 'open_failed').catch(() => undefined)
         throw new SessionToolError(
           typeof ready['code'] === 'string' ? ready['code'] : 'unreachable',
           typeof ready['reason'] === 'string' ? ready['reason'] : 'session open failed',
+          failExtra,
         )
       }
       state.url = typeof ready['url'] === 'string' && ready['url'] !== '' ? ready['url'] : url
       if (typeof ready['title'] === 'string') state.title = ready['title']
+      // task-41：CLI open 判定导航 flap（自愈成功）时透传诊断字段组；
+      // 未判定 flap 时这些键不存在 → 响应键集与此前逐字节一致。
+      const flapFields: Record<string, unknown> = ready['code'] === 'navigation_flapping'
+        ? {
+            code: 'navigation_flapping',
+            ...(typeof ready['navigations'] === 'number' ? { navigations: ready['navigations'] } : {}),
+            ...(typeof ready['window_ms'] === 'number' ? { window_ms: ready['window_ms'] } : {}),
+            ...(Array.isArray(ready['urls_sample']) ? { urls_sample: (ready['urls_sample'] as unknown[]).slice(0, 5).map(String) } : {}),
+            ...(typeof ready['healed'] === 'boolean' ? { healed: ready['healed'] } : {}),
+            ...(typeof ready['heal_url'] === 'string' ? { heal_url: ready['heal_url'] } : {}),
+            ...(typeof ready['reason'] === 'string' ? { reason: String(ready['reason']).slice(0, 200) } : {}),
+            ...(typeof ready['suggestion'] === 'string' ? { suggestion: String(ready['suggestion']).slice(0, 200) } : {}),
+          }
+        : {}
       return {
         ok: true,
         op: 'open',
@@ -373,6 +396,7 @@ export class SessionManager {
         evidence_dir: outDir,
         record: recordPath,
         idle_ttl_ms: this.options.idleMs,
+        ...flapFields,
       }
     } catch (error) {
       this.sessions.delete(id)
