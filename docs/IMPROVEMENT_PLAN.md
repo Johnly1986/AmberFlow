@@ -1,8 +1,18 @@
 # 改进方案：配置收敛 · 分层治理 · 臃肿文件拆解
 
-> **状态**：proposal（待项目方确认后排期；确认后各条目应转入 [BACKLOG.md](BACKLOG.md) 登记）
-> **日期**：2026-11-10 ｜ **基线**：`main @ eec0b72`
+> **状态**：partially implemented（2026-11-11 批量审查实施后更新；未实施条目仍待项目方确认排期）
+> **日期**：2026-11-10 提出 ｜ 2026-11-11 更新 ｜ **基线**：`main @ eec0b72`
 > **来源**：架构师子代理与开发子代理两份只读分析报告的综合（src 下 100 个 .ts 全量扫描 + 函数级清单 + import 矩阵 DFS 找环）；
+>
+> **实施进度（2026-11-11，行为等价重构批次，基线 tag `review/baseline-pre-refactor`）**：
+> - ✅ 第 0 批 ①②③④ 全部完成（L1 归位、C1 隐藏键堵漏、F1 ctx 校验面、F2 executor 外围、死代码 `deniedFrameUrl` 已删）
+> - ✅ F6 extraction 拆分完成（pool-js.ts 707 行 / identity.ts 255 行搬出，extraction 2215→1289）
+> - ✅ F7 datasource 拆分完成（report-view.ts / pystr 收敛，datasource 1703→1318）
+> - ✅ F7 app-runner 拆分完成（app-report-view.ts / app-runner-cli.ts，app-runner 3356→2702）
+> - ✅ C5 配置总表落地为 [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md) + `.env.example`
+> - ⬜ F3 run() 提函数 / F4 decision-setup 消重 / F5 validatePack 拆段 / C4 typed getter：未实施
+> - ⬜ BACKLOG #2/#3：open
+> - 本文的**行号锚点已随重构漂移失效**，实施时以符号名（函数/常量名）定位为准。
 > 关键重复性论断已由 Lead 独立抽验（`pickRow` 逐字重复、决策面判断三处同构均属实）。
 > **行号警示**：文中所有 `file:line` 以 eec0b72 快照为准，会随实施漂移（先例：BACKLOG #2 现状锚点 `browserSession:737` 实际已漂移到 executor.ts:1616）。实施时以 grep 重定位为准。
 > **总纪律**：每步一个独立提交、`npm run check` 必过、行为等价以「dry/inspect 输出逐字节一致」为准（BACKLOG #2 硬门先例）。

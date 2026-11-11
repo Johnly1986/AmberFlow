@@ -18,15 +18,21 @@ AmberFlow 是一个**冻结计划执行器**：流程由人（或规划器）给
 ```
 signals.ts       完成信号语言：url_contains / css_* / 组合器 / manual
 extraction.ts    单次 JS 扫描元素池（主 frame + 可达子 frame，同源/跨源均可 + shadow root）
+                 ├ pool-js.ts     内嵌 JS 探针与宿主编译产物（浏览器执行的字符串区）
+                 └ identity.ts    FW8 声明驱动的身份回捞（#id / [attr=value] 白名单）
 rules.ts         确定性规则：导航、affordance、hint 分档匹配
         ↓
 executor.ts      BrowserMiddleware：唯一执行循环
                  发现元素 → 规则/计划点名 hint → 模型选择 → 闸门 → 风险 → 动作 → inert 检查 → 信号验证
+                 （executor-pure.ts：不依赖类闭包的纯函数区；executor-types.ts：鸭子类型替身面）
         ↓
 planner.ts       runPlan / runSubgoalWithRetries：计划级执行
 plan.ts          TaskPlan / PlanningRules：计划 JSON、加载期校验、槽位、when/retries
         ↓
 app/             应用层：flow 脚本加载（meta → IR）、运行期 ctx、轨迹、适配器、运行器
+                 （app-runner.ts 运行本体；app-runner-cli.ts CLI 入口；app-report-view.ts 报告渲染）
+        ↓
+data/            数据腿（datasource.ts 引擎 + report-view.ts 报告视图）
         ↓
 cli/             amber 命令入口 + 线上套件入口
 ```

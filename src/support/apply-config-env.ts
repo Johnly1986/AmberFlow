@@ -11,7 +11,7 @@
  *   2. 把解析出的值补进 env，真环境变量已设置的键不覆盖。
  * 注意不要先单独调 `applyRcToEnv(process.env)`：旧 rc 的值一旦先落进 env，
  * `resolveConfig` 会把它当"环境变量"（最高层），项目/用户配置就永远盖不住它
- * （2026-10-28 实测：旧 rc 的 AMBERFLOW_DECISION_PROVIDER 压住项目配置）。
+ * （2026-10-28 实测：旧 rc 的隐藏键压住项目配置——该死开关已删，层叠顺序教训保留）。
  * 返回 errors 供入口决定 exit 2；`applied` 供测试/doctor 断言。
  *
  * 注意：它**只写 process.env**，不缓存；入口各自在 `main()` 第一行调用一次即可（与旧 rc 相同）。
