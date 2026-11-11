@@ -49,6 +49,21 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pyJsonDumps } from "../support/pystr.ts";
+// py 语义小工具（pyStr/pyTruthy/getOr/pyCompareTuple/pyJsonDumpsIndent 等）已收敛到
+// support/pystr.ts（F7）；这里 re-export 维持既有导出面不变（`export * as datasource` 的
+// 外部消费方零改动）。datasource 本体继续 import 同一份实现。
+export {
+  pyJsonDumps, pyJsonDumpsIndent, pyTruthy, pyStr, pyRepr, strOrEmpty, pyInt, pyLen,
+  pyStrCmp, pyCompareTuple, hasOwn, getOr,
+} from "../support/pystr.ts";
+import {
+  pyJsonDumpsIndent, pyTruthy, pyStr, pyRepr, strOrEmpty, pyInt, pyLen,
+  pyStrCmp, pyCompareTuple, hasOwn, getOr, pyIterate, pyTuple, isDict, pyTypeName,
+} from "../support/pystr.ts";
+import { reportMarkdown } from "./report-view.ts";
+// 报告视图区（PreviewTable/previewTable/reportMarkdown）拆到 report-view.ts（F7）；
+// 这里 re-export 维持既有导出面不变（index.ts `export * as datasource` 与既有调用方零改动）。
+export { previewTable, reportMarkdown, type PreviewTable } from "./report-view.ts";
 
 
 /* ---------------------------------------------------------------- 类型 */
@@ -128,147 +143,6 @@ export class KeyError extends Error {
     super(message);
     this.name = "KeyError";
   }
-}
-
-/* ---------------------------------------------------------------- Python 语义小工具 */
-
-function hasOwn(o: unknown, k: string): boolean {
-  return o !== null && o !== undefined && Object.prototype.hasOwnProperty.call(o, k);
-}
-
-/** Python `dict.get(k, d)`：键存在（哪怕是 null）就取它。 */
-function getOr<T>(o: unknown, k: string, dflt: T): unknown {
-  return hasOwn(o, k) ? (o as Record<string, unknown>)[k] : dflt;
-}
-
-function isDict(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === "object" && !Array.isArray(v);
-}
-
-/** Python 真值判断：NaN 是**真**，0/-0/""/[]/{} 是假。 */
-export function pyTruthy(v: unknown): boolean {
-  if (v === null || v === undefined || v === false) return false;
-  if (typeof v === "number") return v !== 0;
-  if (typeof v === "string") return v.length > 0;
-  if (Array.isArray(v)) return v.length > 0;
-  if (isDict(v)) return Object.keys(v).length > 0;
-  return true;
-}
-
-/** Python `str()`。 */
-export function pyStr(v: unknown): string {
-  if (v === null || v === undefined) return "None";
-  if (typeof v === "string") return v;
-  if (typeof v === "boolean") return v ? "True" : "False";
-  if (typeof v === "number") {
-    if (Number.isNaN(v)) return "nan";
-    if (v === Infinity) return "inf";
-    if (v === -Infinity) return "-inf";
-    return String(v);
-  }
-  if (Array.isArray(v)) return "[" + v.map(pyRepr).join(", ") + "]";
-  if (isDict(v)) {
-    return "{" + Object.entries(v).map(([k, x]) => `${pyRepr(k)}: ${pyRepr(x)}`).join(", ") + "}";
-  }
-  return String(v);
-}
-
-/** Python `repr()`（字符串的引号选择与 Python 一致：含单引号且不含双引号时用双引号）。 */
-export function pyRepr(v: unknown): string {
-  if (typeof v === "string") {
-    if (v.includes("'") && !v.includes('"')) {
-      return '"' + v.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
-    }
-    return "'" + v.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
-  }
-  return pyStr(v);
-}
-
-/** Python 元组 repr：`('curl', 'httpx')`。 */
-function pyTuple(items: readonly unknown[]): string {
-  const body = items.map(pyRepr).join(", ");
-  return "(" + body + (items.length === 1 ? "," : "") + ")";
-}
-
-/** Python `str(value or "")`：先真值判断（假值 -> ""），再 `str`。 */
-export function strOrEmpty(v: unknown): string {
-  return pyTruthy(v) ? pyStr(v) : "";
-}
-
-/** Python `int(value)`：失败返回 null（对应 Python 抛 TypeError/ValueError 被吞）。 */
-export function pyInt(v: unknown): number | null {
-  if (typeof v === "boolean") return v ? 1 : 0;
-  if (typeof v === "number") {
-    if (!Number.isFinite(v)) return null;
-    return Math.trunc(v);
-  }
-  if (typeof v === "string") {
-    const s = v.trim();
-    if (!/^[+-]?\d(?:_?\d)*$/.test(s)) return null;
-    const parsed = Number(s.replace(/_/g, ""));
-    return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
-  }
-  return null;
-}
-
-/** Python `len()`：只对 list/str 有值（str 按码点计数）。 */
-export function pyLen(v: unknown): number | null {
-  if (typeof v === "string") return Array.from(v).length;
-  if (Array.isArray(v)) return v.length;
-  return null;
-}
-
-/** Python 迭代：list -> 项，str -> 字符，dict -> 键，None -> 空。 */
-function pyIterate(v: unknown): unknown[] {
-  if (v === null || v === undefined) return [];
-  if (Array.isArray(v)) return v;
-  if (typeof v === "string") return Array.from(v);
-  if (isDict(v)) return Object.keys(v);
-  return []; // 数字/布尔在 Python 会抛 TypeError；这里退化为空序列（配置不会走到）
-}
-
-function pyTypeName(v: unknown): string {
-  if (v === null || v === undefined) return "NoneType";
-  if (typeof v === "boolean") return "bool";
-  if (typeof v === "number") return Number.isInteger(v) ? "int" : "float";
-  if (typeof v === "string") return "str";
-  if (Array.isArray(v)) return "list";
-  if (isDict(v)) return "dict";
-  return typeof v;
-}
-
-/** Python 字符串比较：按 Unicode 码点。 */
-export function pyStrCmp(a: string, b: string): number {
-  const A = Array.from(a);
-  const B = Array.from(b);
-  const n = Math.min(A.length, B.length);
-  for (let i = 0; i < n; i++) {
-    const ca = A[i]!.codePointAt(0)!;
-    const cb = B[i]!.codePointAt(0)!;
-    if (ca !== cb) return ca < cb ? -1 : 1;
-  }
-  return A.length === B.length ? 0 : A.length < B.length ? -1 : 1;
-}
-
-/** Python `<` 的比较语义（数值含 bool；字符串按码点；其余抛 TypeError）。 */
-function pyCompare(a: unknown, b: unknown): number {
-  const num = (v: unknown): number | null =>
-    typeof v === "boolean" ? (v ? 1 : 0) : typeof v === "number" ? v : null;
-  const na = num(a);
-  const nb = num(b);
-  if (na !== null && nb !== null) return na < nb ? -1 : na > nb ? 1 : 0;
-  if (typeof a === "string" && typeof b === "string") return pyStrCmp(a, b);
-  throw new TypeError(`'<' not supported between instances of '${pyTypeName(a)}' and '${pyTypeName(b)}'`);
-}
-
-/** Python 元组比较（逐项，先到先判）。 */
-function pyCompareTuple(a: readonly unknown[], b: readonly unknown[]): number {
-  const n = Math.min(a.length, b.length);
-  for (let i = 0; i < n; i++) {
-    const c = pyCompare(a[i], b[i]);
-    if (c !== 0) return c;
-  }
-  return a.length === b.length ? 0 : a.length < b.length ? -1 : 1;
 }
 
 /* ---------------------------------------------------------------- 源目录发现 */
@@ -968,7 +842,7 @@ export function urlFor(source: Source, date: string, today?: DateLike | null): s
 }
 
 /** Python `transport.client` 的默认值语义（键存在时即使为 null 也不算默认）。 */
-function transportClient(source: Source): unknown {
+export function transportClient(source: Source): unknown {
   const tr = (source["transport"] as Record<string, unknown> | undefined) || {};
   return hasOwn(tr, "client") ? tr["client"] : "curl";
 }
@@ -1111,154 +985,6 @@ export async function renderAndSnapshot(html: string): Promise<Rendered> {
   } finally {
     await b.close();
   }
-}
-
-/* ---------------------------------------------------------------- 报告 */
-
-/**
- * 报告里的"前 N 条原始行"（数据源的 `report.preview`）的**单一实现**。
- *
- * 为什么要单独拎出来：这段"取最早一天、按 `columns` 投影、截 `limit` 行"以前只写在
- * `reportMarkdown` 里，于是应用运行器的数据腿**没有** preview 可展示——同一份声明在两个
- * 出口长出两个形状（一个看得到原始行、一个只看得到 counts/selects）。现在报告（`reportMarkdown`）
- * 与应用报告（`app-runner.appReportMarkdown`）都读这一个函数。
- */
-export interface PreviewTable {
-  /** 展示哪一天（取最早的一天：与报告表格同一口径）。 */
-  date: string;
-  columns: string[];
-  /** 已按 `columns` 投影成字符串（报告只负责排版，不再各扫一遍行）。 */
-  rows: Array<Record<string, string>>;
-}
-
-export function previewTable(source: Source, perDate: Record<string, DateEntry>): PreviewTable | null {
-  const rep = (source["report"] || {}) as Record<string, any>;
-  if (!pyTruthy(rep["preview"]) || !pyTruthy(perDate)) return null;
-  const pv = rep["preview"] as Record<string, any>;
-  const columns = (getOr(pv, "columns", []) as unknown[]).map(pyStr);
-  const limit = Number(pyStr(getOr(pv, "limit", 8)));
-  const date = Object.keys(perDate).sort()[0]!;
-  const take = Number.isFinite(limit) && limit >= 0 ? limit : 0;
-  const rows = ((getOr(perDate[date]!, "rows", []) as Row[]) || []).slice(0, take)
-    .map((r) => Object.fromEntries(columns.map((c) => [c, pyStr(getOr(r, c, ""))])));
-  return { date, columns, rows };
-}
-
-export function reportMarkdown(
-  source: Source,
-  perDate: Record<string, DateEntry>,
-  rendered?: Rendered | Record<string, unknown> | null,
-): string {
-  const rep = (source["report"] || {}) as Record<string, any>;
-  const title = pyTruthy(rep["title"]) ? rep["title"] : source["name"];
-  const cur = getOr(rep, "currency", "");
-  const tr = source["transport"] as Record<string, any>;
-  const client = transportClient(source);
-  const L: string[] = [
-    `# ${pyStr(title)}`,
-    "",
-    `- 数据源配置：\`${pyStr(getOr(source, "_path", source["name"]))}\``,
-    `- 抓取通道：\`${pyStr(client)}\``
-      + (pyStr(client) === "cli"
-        ? `（\`${cliBinOf(source)}\``
-          + (pyTruthy(tr["version_pin"]) ? `，版本 pin \`${pyStr(tr["version_pin"])}\`` : "")
-          + "）"
-        : "")
-      + (pyTruthy(tr["note"]) ? ` —— ${pyStr(tr["note"])}` : ""),
-  ];
-  const f = (source["filters"] || {}) as Record<string, any>;
-  if (pyTruthy(f["window"])) {
-    L.push(`- 出发时段口径：[${pyStr(f["window"][0])}, ${pyStr(f["window"][1])}] 闭区间（字段 \`${pyStr(f["time_field"])}\`）`);
-  }
-  if (pyTruthy(rep["source_note"])) L.push(`- 数据来源：${pyStr(rep["source_note"])}`);
-
-  const selects = (source["selects"] || []) as Array<Record<string, any>>;
-  const counts = (source["counts"] || []) as Array<Record<string, any>>;
-  const audits = (source["audits"] || []) as Array<Record<string, any>>;
-  if (pyTruthy(perDate)) {
-    const label = (x: Record<string, any>): string => pyStr(getOr(x, "label", x["key"]));
-    const head = "| 日期 | " + [...counts.map(label), ...selects.map(label), ...audits.map(label)].join(" | ") + " |";
-    L.push("", head, "|" + "---|".repeat(1 + counts.length + selects.length + audits.length));
-    const timeFieldRaw = hasOwn(f, "time_field") ? f["time_field"] : "dep";
-    const timeField = timeFieldRaw === null || timeFieldRaw === undefined ? null : pyStr(timeFieldRaw);
-    for (const date of Object.keys(perDate).sort()) {
-      const d = perDate[date]!;
-      const cells: string[] = counts.map((c) => pyStr(getOr(d["counts"] || {}, pyStr(c["key"]), "")));
-      for (const s of selects) {
-        const b = ((d["selects"] || {}) as Record<string, Row | null>)[pyStr(s["key"])];
-        if (b) {
-          // 出行类数据源的标识列是 `flight_no` / `name`；别的数据源（CLI 工具输出这类）
-          // 用 `id`，再没有就留空。价格同理：有 `price` 就按配置的货币前缀渲染（机票报告
-          // 逐字节不变），没有就渲染 `sort_by` 的第一个键——报告格式不该要求每份数据源
-          // 都长成机票表。
-          const no = pyTruthy(b["flight_no"]) ? b["flight_no"]
-            : pyTruthy(b["name"]) ? b["name"]
-              : pyTruthy(b["id"]) ? b["id"] : "";
-          const dep = timeField === null ? "" : pyStr(getOr(b, timeField, ""));
-          const key0 = pyStr(((s["sort_by"] as string[] | undefined) ?? ["price"])[0] ?? "price");
-          const priceVal = b["price"] === undefined || b["price"] === null
-            ? pyStr(getOr(b, key0, ""))
-            : `${pyStr(cur)}${pyStr(b["price"])}`;
-          cells.push(`${pyStr(no)} ${dep} **${priceVal}**`.trim());
-        } else {
-          cells.push("-");
-        }
-      }
-      const rowsVal = d.rows;
-      const total = pyTruthy(rowsVal) ? pyLen(rowsVal)! : 0;
-      for (const a of audits) {
-        cells.push(`${pyStr(getOr(d["audits"] || {}, pyStr(a["key"]), ""))}/${total}`);
-      }
-      L.push(`| ${date} | ` + cells.join(" | ") + " |");
-    }
-    for (const s of selects) {                       // 跨日期结论
-      let best: [string, Row] | null = null;
-      for (const date of Object.keys(perDate)) {
-        const b = ((perDate[date]!["selects"] || {}) as Record<string, Row | null>)[pyStr(s["key"])];
-        if (!pyTruthy(b)) continue;
-        // 比较键：有 price 用 price（机票口径，逐字节不变），否则用 sort_by 的第一个键。
-        const key0 = pyStr(((s["sort_by"] as string[] | undefined) ?? ["price"])[0] ?? "price");
-        const val = pyTruthy(b![key0]) ? b![key0] : 1 << 30;
-        if (best === null) {
-          best = [date, b!];
-          continue;
-        }
-        const bestVal = pyTruthy(best[1][key0]) ? best[1][key0] : 1 << 30;
-        if (pyCompareTuple([val, date], [bestVal, best[0]]) < 0) best = [date, b!];
-      }
-      if (best) {
-        const [date, b] = best;
-        const key0 = pyStr(((s["sort_by"] as string[] | undefined) ?? ["price"])[0] ?? "price");
-        const desc = ["flight_no", "airline", "dep", "arr", "dep_port", "arr_port", "cabin", "discount"]
-          .filter((k) => pyTruthy(b[k]))
-          .map((k) => pyStr(b[k]))
-          .join(" ");
-        // 非"价格型"数据源：渲染标识列 + 排序键的值，而不是把 None 打出来。
-        const hasPrice = b["price"] !== undefined && b["price"] !== null;
-        const shown = hasPrice ? `${pyStr(cur)}${pyStr(b["price"])}` : pyStr(getOr(b, key0, ""));
-        const ident = hasPrice || pyTruthy(desc) ? desc
-          : ["id", "name", "label"].map((k) => (pyTruthy(b[k]) ? pyStr(b[k]) : "")).filter(Boolean).join(" ");
-        L.push("", `**${pyStr(getOr(s, "label", s["key"]))}（真实数据）**：${date} ${ident} **${shown}**`);
-      }
-    }
-  }
-  const pv = previewTable(source, perDate);
-  if (pv) {
-    L.push("", `## ${pv.date} 前 ${pv.rows.length} 条（原始行）`, "",
-      "| " + pv.columns.join(" | ") + " |", "|" + "---|".repeat(pv.columns.length));
-    for (const r of pv.rows) L.push("| " + pv.columns.map((c) => pyStr(getOr(r, c, ""))).join(" | ") + " |");
-  }
-  if (pyTruthy(rendered)) {
-    const r = rendered as Record<string, any>;
-    L.push("", "## 渲染验证：执行器看得到真实 DOM", "",
-      `- 抓到的 HTML 交给真浏览器渲染后，抽取层得到 **${pyStr(r["elements"])}** 个可交互元素，`
-      + `页面标题：${pyStr(r["title"]).slice(0, 60)}`, "", "```", pyStr(r["snapshot"]).slice(0, 700), "```");
-  }
-  if (pyTruthy(rep["notes"])) {
-    L.push("", "## 说明", "");
-    for (const n of rep["notes"] as unknown[]) L.push(`- ${pyStr(n)}`);
-  }
-  return L.join("\n") + "\n";
 }
 
 /* ---------------------------------------------------------------- 配置加载与校验 */
@@ -1522,24 +1248,6 @@ function isoNowSeconds(): string {
   const p = (n: number): string => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
     + `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
-
-/** Python `json.dumps(v, ensure_ascii=False, indent=2)`。 */
-export function pyJsonDumpsIndent(value: unknown, indent = 2, level = 0): string {
-  const pad = " ".repeat(indent * level);
-  const padIn = " ".repeat(indent * (level + 1));
-  if (Array.isArray(value)) {
-    if (value.length === 0) return "[]";
-    return "[\n" + value.map((v) => padIn + pyJsonDumpsIndent(v, indent, level + 1)).join(",\n") + "\n" + pad + "]";
-  }
-  if (isDict(value)) {
-    const entries = Object.entries(value);
-    if (entries.length === 0) return "{}";
-    return "{\n" + entries
-      .map(([k, v]) => padIn + JSON.stringify(k) + ": " + pyJsonDumpsIndent(v, indent, level + 1))
-      .join(",\n") + "\n" + pad + "}";
-  }
-  return pyJsonDumps(value);
 }
 
 export interface RunOptions {
