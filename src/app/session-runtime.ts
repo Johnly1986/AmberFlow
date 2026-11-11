@@ -24,6 +24,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { createCtx, isSyntheticScrollTarget, StopError, type Ctx } from "./ctx.ts";
 import { amberflowHome, ensureDir } from "../support/amberflow-home.ts";
+import { sleepMs } from "../support/sleep.ts";
 import { inputsSha256, newTrace, sha256, writeTrace, type AppTrace } from "./trace.ts";
 import { MockAuditor } from "../engine/audit.ts";
 import {
@@ -109,8 +110,6 @@ export interface FlapHealResult {
   heal_url: string;
   reason?: string;
 }
-
-const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 
 const urlOriginOf = (u: string): string => { try { return new URL(u).origin; } catch { return ""; } };
 const urlPathOf = (u: string): string => { try { return new URL(u).pathname; } catch { return ""; } };

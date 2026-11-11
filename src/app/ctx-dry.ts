@@ -18,7 +18,7 @@ import { validateCommands } from "../engine/actions.ts";
 import { validateToolSignal } from "../browser/tool-signals.ts";
 import { createKit, type CommandDecl } from "./kit.ts";
 import { pushEvent, type AppTrace } from "./trace.ts";
-import { getAppAdapter, listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
+import { getAppAdapter } from "./app-adapters.ts";
 import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, ValueError } from "../data/datasource.ts";
 import type { StateFingerprint, StepStateRecord } from "../engine/executor.ts";
 import { validateObserveOptions, type ObserveResult } from "../engine/observe.ts";
@@ -26,13 +26,14 @@ import {
   declaredRunProblems,
   normalizeCommandIds, resolveCtxUrl, sameDeclaredPageHref, sameNavTarget, StopError,
   validateCollectRequest, validateExpandRequest, validateExtractOptions, validateScrollListRequest, validateSetRangeRequest,
-  validateSwitchTabMatch,
+  validateSwitchTabMatch, validateWaitForTargetArgs, waitTiming, resolveRunAdapter,
   type CollectResult, type Ctx, type CtxBudget, type ExpandOptions, type ExpandResult,
   type RangeValue, type ScrollListOptions, type ScrollListResult,
   type SetRangeOptions, type SetRangeResult, type SwitchTabResult, type TabInfo,
   type SourceObservationView, type StepRequest, type StepResult,
 } from "./ctx.ts";
 import type { TraceCall } from "./trace.ts";
+import { pickRow } from "./ctx-tool.ts";
 
 export interface DryCtxDeps {
   pack: {
@@ -462,8 +463,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
         ? validateSignalSpec(sig, "ctx.waitFor")
         : ["ctx.waitFor needs a non-empty signal"];
       if (p.length) throw new StopError("config_error", problems(p).join("；"));
-      const timeoutMs = Math.max(0, Number(opts.timeoutMs ?? 15_000));
-      const pollMs = Math.max(1, Number(opts.pollMs ?? 200));
+      const { timeoutMs, pollMs } = waitTiming(opts);
       pushEvent(trace, { call: "waitFor", ok: true, result: { dry: true, timeout_ms: timeoutMs, poll_ms: pollMs } });
       return true;
     },
@@ -471,14 +471,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     // 「立即 true」口径不同：那是"信号已成立"的模拟，这里没有可模拟的命中事实，如实 not found
     // （差异写进 docs §4）。声明形状（hint 非空/visible 布尔）仍在这里红——dry 与真实面同文案。
     waitForTarget: async (hint, opts = {}) => {
-      if (typeof hint !== "string" || !hint.trim()) {
-        throw new StopError("config_error", "ctx.waitForTarget: hint must be a non-empty string");
-      }
-      if (opts.visible !== undefined && typeof opts.visible !== "boolean") {
-        throw new StopError("config_error", "ctx.waitForTarget: visible must be a boolean");
-      }
-      const timeoutMs = Math.max(0, Number(opts.timeoutMs ?? 15_000));
-      const pollMs = Math.max(1, Number(opts.pollMs ?? 200));
+      validateWaitForTargetArgs(hint, opts);
+      const { timeoutMs, pollMs } = waitTiming(opts);
       pushEvent(trace, {
         call: "waitForTarget", desc: hint, ok: false,
         result: { dry: true, hint, visible: opts.visible === true, timeout_ms: timeoutMs, poll_ms: pollMs, count: 0 },
@@ -573,15 +567,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       if (declaredProblems.length) {
         throw new StopError("config_error", declaredProblems.join("；"));
       }
-      const adapter = typeof step["adapter"] === "string" && step["adapter"]
-        ? step["adapter"]
-        : step["ssh"] !== undefined ? "ssh" : step["stdio"] !== undefined ? "stdio" : "cli";
-      if (adapter === "web") {
-        throw new StopError("config_error", "ctx.run: the web adapter is not a process step; use ctx.step() for browser steps");
-      }
-      try { requireAppAdapter(adapter); } catch {
-        throw new StopError("config_error", `ctx.run: unknown app adapter ${JSON.stringify(adapter)} (known: ${listAppAdapters().join(", ")})`);
-      }
+      const adapter = resolveRunAdapter(step);
       // 让适配器自己的声明面校验跑一遍（ssh 缺 host / stdio 坏 script / 未知键都在 check 期红）。
       const adapterObj = getAppAdapter(adapter)!;
       if (adapter !== "cli") {
@@ -652,21 +638,4 @@ function validateToolRun(
     p.push(`ctx.run: retries=${retries} needs idempotent: true (re-running a process can be irreversible)`);
   }
   return p;
-}
-
-function pickRow<T extends Record<string, unknown>>(rows: T[], by: string, order: "min" | "max"): T | null {
-  if (!Array.isArray(rows) || rows.length === 0) return null;
-  const num = (v: unknown): number | null => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
-  let best: T | null = null;
-  for (const row of rows) {
-    if (best === null) { best = row; continue; }
-    const a = num(row[by]);
-    const b = num(best[by]);
-    const cmp = a !== null && b !== null ? a - b : String(row[by] ?? "").localeCompare(String(best[by] ?? ""));
-    if (order === "min" ? cmp < 0 : cmp > 0) best = row;
-  }
-  return best;
 }

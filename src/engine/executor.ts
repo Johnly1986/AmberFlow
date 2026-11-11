@@ -110,6 +110,7 @@ import { decisionFailureFact, decisionProviderOrNull, layaProvider, type Decisio
 // task-24/6a：限速判据阈值单一出处（step 侧与 arrive 侧共用）。
 import { THROTTLE_BODY_FLOOR, THROTTLE_COLLAPSE_RATIO, THROTTLE_POOL_HIGH_MIN } from "./throttle-signature.ts";
 import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts";
+import { sleep } from "../support/sleep.ts";
 // task-14（D1）：探测失败分类与建议文案的单一出处。
 import { classifyDecisionFailure, decisionDegradedAdvice } from "../model/decision-probe.ts";
 import { applyRange, type RangeOptions, type RangeOutcome, type RangeValue } from "./range.ts";
@@ -247,8 +248,6 @@ function firstLoc(loc: any): AnyLoc {
 
 /** Budget for the ONE wider look a low-confidence decision is allowed to take. */
 const WIDER_ELEMENTS = WIDE_POOL_ELEMENTS;
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000;

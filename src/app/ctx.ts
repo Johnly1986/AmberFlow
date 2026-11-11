@@ -29,7 +29,7 @@ import { observePage, validateObserveOptions, type ObserveOptions, type ObserveR
 import { checkSignal } from "../engine/signals.ts";
 import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, runSource, ValueError } from "../data/datasource.ts";
 import {
-  listAppAdapters, requireAppAdapter, validateReturns, type ReturnExtractor,
+  validateReturns, type ReturnExtractor,
 } from "./app-adapters.ts";
 import type { DatasetStore } from "../engine/dataset.ts";
 import { capToolText, stderrTail } from "./tool-artifact.ts";
@@ -40,6 +40,7 @@ import { pushEvent, type AppTrace, type TraceCall } from "./trace.ts";
 import { validateToolSignal, type ToolSignal } from "../browser/tool-signals.ts";
 // B1 节奏统一：最小步间距（start-to-start）的核心计算在三脸共用的 support/pace.ts。
 import { paceRemainder } from "../support/pace.ts";
+import { sleepMs } from "../support/sleep.ts";
 /** L2 运行期 ctx 的类型面与 StopError —— 拆到 ctx-types.ts（F1）。 */
 import {
   StopError,
@@ -68,14 +69,14 @@ import {
   normalizeCommandIds, DECLARED_RUN_KEYS, declaredRunProblems, validateSwitchTabMatch,
   switchTabMatches, describeTabs, isSyntheticScrollTarget, validateScrollListRequest,
   validateExpandRequest, validateSetRangeRequest, validateCollectRequest, validateExtractOptions,
-  targetOptions,
+  validateWaitForTargetArgs, waitTiming, resolveRunAdapter, targetOptions,
 } from "./ctx-validate.ts";
 export {
   isObj, resolveCtxUrl, assertAct, samePage, sameNavTarget, sameDeclaredPageHref,
   normalizeCommandIds, DECLARED_RUN_KEYS, declaredRunProblems, validateSwitchTabMatch,
   switchTabMatches, describeTabs, isSyntheticScrollTarget, validateScrollListRequest,
   validateExpandRequest, validateSetRangeRequest, validateCollectRequest, validateExtractOptions,
-  targetOptions,
+  validateWaitForTargetArgs, waitTiming, resolveRunAdapter, targetOptions,
 };
 
 /** 构造真实 ctx（一个运行一个实例；会话惰性创建、由驱动关闭）。 */
@@ -87,7 +88,6 @@ export function createCtx(deps: CtxDeps): Ctx {
     deadline: deps.deadline ?? Number.POSITIVE_INFINITY,
   };
   const hosts = (pack.hosts ?? null) as string[] | null;
-  const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
   let currentUrl = "about:blank";
   let closed = false;
   /**
@@ -627,19 +627,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     if (declaredProblems.length) {
       throw new StopError("config_error", declaredProblems.join("；"));
     }
-    const adapter = typeof step["adapter"] === "string" && step["adapter"]
-      ? step["adapter"]
-      : step["ssh"] !== undefined ? "ssh"
-        : step["stdio"] !== undefined ? "stdio"
-          : "cli";
-    if (adapter === "web") {
-      throw new StopError("config_error", "ctx.run: the web adapter is not a process step; use ctx.step() for browser steps");
-    }
-    try {
-      requireAppAdapter(adapter);
-    } catch {
-      throw new StopError("config_error", `ctx.run: unknown app adapter ${JSON.stringify(adapter)} (known: ${listAppAdapters().join(", ")})`);
-    }
+    const adapter = resolveRunAdapter(step);
     // `returns`/`id` 在两条分支（cli 委托 / 其它适配器直跑）前统一规范化一次。
     const declaredSource = typeof step["source"] === "string" ? step["source"] : "";
     const declaredDesc = typeof step["desc"] === "string" && step["desc"]
@@ -1414,8 +1402,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     },
     waitFor: async (sig, opts = {}) => {
       if (!isObj(sig) || !Object.keys(sig).length) throw new StopError("config_error", "ctx.waitFor needs a non-empty signal");
-      const timeoutMs = Math.max(0, Number(opts.timeoutMs ?? 15_000));
-      const pollMs = Math.max(1, Number(opts.pollMs ?? 200));
+      const { timeoutMs, pollMs } = waitTiming(opts);
       const started = Date.now();
       const deadline = started + timeoutMs;
       const p = await page();
@@ -1441,14 +1428,8 @@ export function createCtx(deps: CtxDeps): Ctx {
     // C2：observe + hintMatch 轮询（免费只读；池 = 可见准入面，hidden 期元素不进池 →
     // count 0 → 可见后才命中，visible 语义由此成立）。返回 {found, count}，超时如实 false。
     waitForTarget: async (hint, opts = {}) => {
-      if (typeof hint !== "string" || !hint.trim()) {
-        throw new StopError("config_error", "ctx.waitForTarget: hint must be a non-empty string");
-      }
-      if (opts.visible !== undefined && typeof opts.visible !== "boolean") {
-        throw new StopError("config_error", "ctx.waitForTarget: visible must be a boolean");
-      }
-      const timeoutMs = Math.max(0, Number(opts.timeoutMs ?? 15_000));
-      const pollMs = Math.max(1, Number(opts.pollMs ?? 200));
+      validateWaitForTargetArgs(hint, opts);
+      const { timeoutMs, pollMs } = waitTiming(opts);
       const started = Date.now();
       const deadline = started + timeoutMs;
       let count = 0;

@@ -13,6 +13,7 @@
  * 本模块不解析目标 hint（执行器负责），只接收已定位的 locator + page，因此可被
  * `mw.setRange` 与将来的其它调用方共用；也不新增 command op。
  */
+import { sleep } from "../support/sleep.ts";
 
 export type RangeValue = { value: number } | { percent: number };
 
@@ -73,8 +74,6 @@ interface SliderState {
   /** 最近有尺寸祖先的 bbox（手柄 0×0 时的指针落点）。 */
   ancestorBox: { x: number; y: number; width: number; height: number } | null;
 }
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 const num = (v: unknown): number | null => {
   const n = typeof v === "number" ? v : Number(String(v ?? ""));

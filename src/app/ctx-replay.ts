@@ -19,6 +19,7 @@ import { createKit } from "./kit.ts";
 import type { TraceCall, TraceEvent, AppTrace } from "./trace.ts";
 import { canonicalJson } from "./trace.ts";
 import { validateObserveOptions, type ObserveResult } from "../engine/observe.ts";
+import { pickRow } from "./ctx-tool.ts";
 
 export interface ReplayCtxDeps {
   pack: { id: string; label?: string; goal: string; hosts?: string[] | null; invariants?: Array<Record<string, unknown>> };
@@ -350,21 +351,4 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
     done: async () => { nextEvent("done"); },
   };
   return { ctx, remaining: () => trace.events.length - cursor };
-}
-
-function pickRow<T extends Record<string, unknown>>(rows: T[], by: string, order: "min" | "max"): T | null {
-  if (!Array.isArray(rows) || rows.length === 0) return null;
-  const num = (v: unknown): number | null => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
-  let best: T | null = null;
-  for (const row of rows) {
-    if (best === null) { best = row; continue; }
-    const a = num(row[by]);
-    const b = num(best[by]);
-    const cmp = a !== null && b !== null ? a - b : String(row[by] ?? "").localeCompare(String(best[by] ?? ""));
-    if (order === "min" ? cmp < 0 : cmp > 0) best = row;
-  }
-  return best;
 }

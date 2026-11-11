@@ -16,6 +16,7 @@
 
 import { parseHint, type ParsedHint } from "./hint.ts";
 import { parseClickAtValue } from "./click-at.ts";
+import { sleepMs } from "../support/sleep.ts";
 import {
   ADMIT_SEL, POOL_SEL, SURFACE_SELECTORS, WINDOW_CAPS,
   admitSelectorWithJsFor, poolSelectorWithJsFor, type SurfacePolicy,
@@ -151,8 +152,6 @@ export interface ActionAdapter {
   canApply(e: Elem): boolean;
   apply(loc: ActionLocatorLike, opts?: { value?: string; timeoutMs?: number }): Promise<[string, unknown]>;
 }
-
-const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 const CLICK_ADAPTER: ActionAdapter = {
   kind: "click",

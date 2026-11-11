@@ -22,6 +22,7 @@
  * 时刻失效。代价是每个导航后的第一次抽池最多付一次 quietMs；同一页面后续若不再突变
  * 就是 0 等待（静态页稳态零开销）。导航会丢弃 window 上下文，执行器在 goto 后重装。
  */
+import { sleep } from "../support/sleep.ts";
 
 /** settle 可观察的最小页面面（Playwright page / frame 的 evaluate）。 */
 export interface SettlePage {
@@ -50,8 +51,6 @@ export const DEFAULT_SETTLE: Readonly<{ quietMs: number; timeoutMs: number }> =
 
 /** 轮询间隔：~50ms（与方案 §2.3 一致）。 */
 const POLL_MS = 50;
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 
 /**
  * 注入/读取 `window.__afQuiet` 的**唯一**页面脚本：幂等安装 + 返回当前传感器读数。

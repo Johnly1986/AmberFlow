@@ -42,6 +42,7 @@ import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";
 // B1 节奏统一：语义与 env 口径的唯一来源在 support/pace.ts（engine/app/online 三脸共用，无环）。
 import { PaceConfigError, paceNonDefault, paceRemainder, resolvePace as paceResolve } from "../support/pace.ts";
+import { sleepMs } from "../support/sleep.ts";
 import type { PaceSource, ResolvedPace } from "../support/pace.ts";
 import {
   cliRunDetailed, defaultDates, loadSource, previewTable, runSource, urlFor, ValueError,
@@ -255,8 +256,6 @@ export function resolvePace(
     throw e;
   }
 }
-
-const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
  * A4：运行收尾清理提取期写在页面上的两类盖章属性。

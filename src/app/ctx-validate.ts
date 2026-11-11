@@ -9,7 +9,10 @@ import path from "node:path";
 import { REPO } from "../support/paths.ts";
 import { validateCommands } from "../engine/actions.ts";
 import type { CommandDecl, TargetDecl } from "./kit.ts";
-import { StopError, type StepRequest, type SwitchTabMatch } from "./ctx-types.ts";export const isObj = (v: unknown): v is Record<string, unknown> =>
+import { StopError, type StepRequest, type SwitchTabMatch } from "./ctx-types.ts";
+import { listAppAdapters, requireAppAdapter } from "./app-adapters.ts";
+
+export const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** 相对仓库路径 → `file://`（dry/replay 也用这一份，host/URL 语义才同口径）。 */
@@ -436,4 +439,47 @@ export function targetOptions(act: TargetDecl | CommandDecl[]): {
     throw new StopError("config_error", "ctx.step: hints must be a non-empty list of strings");
   }
   return { targetHints: act.hints };
+}
+
+/**
+ * `ctx.waitForTarget` 的声明形状校验（C2）：hint 非空字符串、visible 只认布尔。
+ * 真实面（ctx.ts）与 dry 面（ctx-dry.ts）同一份——否则 `apps check` 会放过一个
+ * 真实运行必然 `config_error` 的脚本。
+ */
+export function validateWaitForTargetArgs(hint: unknown, opts: { visible?: unknown }): void {
+  if (typeof hint !== "string" || !hint.trim()) {
+    throw new StopError("config_error", "ctx.waitForTarget: hint must be a non-empty string");
+  }
+  if (opts.visible !== undefined && typeof opts.visible !== "boolean") {
+    throw new StopError("config_error", "ctx.waitForTarget: visible must be a boolean");
+  }
+}
+
+/** `ctx.waitFor` / `ctx.waitForTarget` 共用的轮询参数缺省（至少查一次；最后一次 sleep 裁到 deadline）。 */
+export function waitTiming(opts: { timeoutMs?: unknown; pollMs?: unknown }): { timeoutMs: number; pollMs: number } {
+  return {
+    timeoutMs: Math.max(0, Number(opts.timeoutMs ?? 15_000)),
+    pollMs: Math.max(1, Number(opts.pollMs ?? 200)),
+  };
+}
+
+/**
+ * `ctx.run` 声明形式的适配器解析与可用性校验（T7）：声明面声明过 `declaredRunProblems`
+ * 之后，这里统一解析 adapter（显式 > ssh 键 > stdio 键 > cli 缺省）、拒绝 web、点名未知
+ * 适配器。真实面（ctx.ts）与 dry 面（ctx-dry.ts）同一份——文案逐字一致，check 期与
+ * 运行期红同一句话。
+ *
+ * @returns 解析出的适配器名。
+ */
+export function resolveRunAdapter(step: Record<string, unknown>): string {
+  const adapter = typeof step["adapter"] === "string" && step["adapter"]
+    ? step["adapter"]
+    : step["ssh"] !== undefined ? "ssh" : step["stdio"] !== undefined ? "stdio" : "cli";
+  if (adapter === "web") {
+    throw new StopError("config_error", "ctx.run: the web adapter is not a process step; use ctx.step() for browser steps");
+  }
+  try { requireAppAdapter(adapter); } catch {
+    throw new StopError("config_error", `ctx.run: unknown app adapter ${JSON.stringify(adapter)} (known: ${listAppAdapters().join(", ")})`);
+  }
+  return adapter;
 }
