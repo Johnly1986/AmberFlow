@@ -14,6 +14,7 @@ import {
   type OptionCandidate,
 } from "./bindings.ts";
 import { actionCapabilities, elemFamily, urlOf, type ActionCapability, type Elem, type ElemFamily, type ElemPool, type FrameGate, type PageLike } from "./extraction.ts";
+import { WIDE_POOL_ELEMENTS } from "./extraction.ts";
 import type { CommandDecl } from "./actions.ts";
 import { parseHint } from "./hint.ts";
 import { hintCandidates, hintMatch, type HintMatchCandidate, type HintMatchOptions, type HintMatchOthersDiag } from "./rules.ts";
@@ -711,3 +712,77 @@ export function routerMaxLoaded(): number {
 
 /* ------------------------------------------------------------------ middleware */
 
+
+/* ---------------------------------------------------------------- helpers (from executor.ts, F2) */
+/** `.first` across both Playwright runtimes (property vs method). */
+export function firstLoc(loc: any): AnyLoc {
+  return typeof loc.first === "function" ? loc.first() : loc.first;
+}
+
+/** Budget for the ONE wider look a low-confidence decision is allowed to take. */
+export const WIDER_ELEMENTS = WIDE_POOL_ELEMENTS;
+
+export function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
+
+/** FNV-1a 32-bit：状态指纹只要**确定且廉价**的 hash，不需要密码学强度。 */
+export function fnv1aText(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * S1 结构指纹：可动元素计数 + 角色/标签分布 hash（前进性判据只用它）。
+ * 不读页面、只读已有池（零新增往返应）；分布排序后再 hash，抽池顺序变化不制造假前进。
+ */
+export function structDigest(elems: ElemPool | null): string {
+  if (elems === null) return "none";
+  const tags: Record<string, number> = {};
+  const roles: Record<string, number> = {};
+  let n = 0;
+  for (const e of Object.values(elems)) {
+    n += 1;
+    tags[e.tag] = (tags[e.tag] ?? 0) + 1;
+    if (typeof e.role === "string" && e.role) roles[e.role] = (roles[e.role] ?? 0) + 1;
+  }
+  const norm = (o: Record<string, number>): string =>
+    Object.keys(o).sort().map((k) => `${k}:${o[k]}`).join(",");
+  return `${n}:${fnv1aText(`${norm(tags)}|${norm(roles)}`)}`;
+}
+
+/** S1 内容指纹（诊断用）：首批可动元素 label hash；空池/全空 label 时省略。 */
+export function contentDigest(elems: ElemPool | null): string | undefined {
+  if (elems === null) return undefined;
+  const labels = Object.values(elems).slice(0, 10)
+    .map((e) => String(e.label ?? "").slice(0, 40))
+    .filter((s) => s !== "");
+  return labels.length === 0 ? undefined : fnv1aText(labels.join("\u0000"));
+}
+
+/**
+ * Top-two margin of a decision distribution — C3-R's second abstention signal
+ * (its decision model abstains when the top two options are too close, even if the
+ * top probability is high). Recorded here as a DIAGNOSTIC only: the gate itself is
+ * adopted only if measured to separate good picks from bad ones.
+ */
+export function topTwoMargin(probs: Record<string, unknown> | undefined): number | null {
+  const vs = Object.values(probs ?? {}).map(Number).filter((v) => Number.isFinite(v))
+    .sort((a, b) => b - a);
+  if (!vs.length) return null;
+  return vs.length === 1 ? vs[0]! : vs[0]! - vs[1]!;
+}
+
+/** One line for a failed Playwright action, safe to put in a trace/report. */
+export function describeActionError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  return msg.split("\n")[0]!.trim().slice(0, 160);
+}
+
+export function sigEq(a: readonly string[], b: readonly string[]): boolean {
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
