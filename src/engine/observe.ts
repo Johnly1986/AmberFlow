@@ -143,6 +143,7 @@ function syntheticElem(row: ObserveRawRow, ref: string): Elem {
   return {
     ref,
     tag: row.tag,
+    // A1 不变量：label === full_label 的前 40 字（同一 labelFull 截断）。
     label: labelFull.slice(0, 40),
     full_label: labelFull.slice(0, 200),
     ...(row.data_test ? { data_test: row.data_test } : {}),

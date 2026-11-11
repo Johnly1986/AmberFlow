@@ -32,6 +32,38 @@ const VALS_JS = `() => [...document.querySelectorAll('input,textarea,select')]
   .join('&')`;
 const FN_VALS = asFunction(VALS_JS);
 
+/**
+ * B3：可勾选控件状态——独立于 `vals` 的**签名**字段，不拼进 vals 串（分隔符碰撞、
+ * 且 P0-3 的敏感值掩码面零改动）。只记确定性状态：原生 checkbox/radio 的 `0/1`、
+ * 带 `aria-checked` 元素的属性值、`aria-selected="true"`（只记 true）、
+ * `select[multiple]` 的选中 index 列表。无此类控件时返回空串（快照字段省略 ⇒ 产物不变）。
+ */
+const CHECKS_JS = `() => {
+  const out = [];
+  for (const e of document.querySelectorAll('input,select,[aria-checked],[aria-selected]')) {
+    const tag = e.tagName.toLowerCase();
+    const t = (e.getAttribute('type') || '').toLowerCase();
+    const key = e.name || e.id || e.getAttribute('data-test') || tag;
+    if (tag === 'input' && (t === 'checkbox' || t === 'radio')) {
+      out.push(key + '=' + (e.checked ? '1' : '0'));
+    }
+    if (tag === 'select' && e.multiple) {
+      const picked = [...e.selectedOptions].map(o => o.index);
+      // 无选中项不产生条目：仅含「未选中的多选 select」的页面 checks 仍为空 ⇒ 产物不变。
+      if (picked.length) out.push(key + '=m[' + picked.join(',') + ']');
+    }
+    const ac = e.getAttribute('aria-checked');
+    if (ac !== null) out.push(key + ':ac=' + ac);
+    if (e.getAttribute('aria-selected') === 'true') out.push(key + ':as=1');
+  }
+  return out.join('&');
+}`;
+const FN_CHECKS = asFunction(CHECKS_JS);
+
+/** B3：`{vals, checks}` **一次** evaluate 取回（页面往返不增加）；两段脚本各自单一出处。 */
+const STATE_JS = `() => ({ vals: (${VALS_JS})(), checks: (${CHECKS_JS})() })`;
+const FN_STATE = asFunction(STATE_JS);
+
 /** Centre hit-test: distinguishes "covered" from "slow but unblocked". */
 const HIT_JS = `(e) => {
   const r = e.getBoundingClientRect();
@@ -102,4 +134,7 @@ const GUARD_JS = `() => {
 }`;
 const FN_GUARD = asFunction(GUARD_JS);
 
-export { VALS_JS, HIT_JS, HIT_DETAIL_JS, FN_VALS, FN_HIT, FN_HIT_DETAIL, FN_EMPTIES, FN_GUARD };
+export {
+  VALS_JS, CHECKS_JS, STATE_JS, HIT_JS, HIT_DETAIL_JS,
+  FN_VALS, FN_CHECKS, FN_STATE, FN_HIT, FN_HIT_DETAIL, FN_EMPTIES, FN_GUARD,
+};

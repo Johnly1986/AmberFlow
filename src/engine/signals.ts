@@ -312,6 +312,50 @@ export function isWeakNegativeSignal(spec: SignalSpec): boolean {
   return directNot && !anchor;
 }
 
+/* ------------------------------------------------------ 报错形态（C3 唯一出处） */
+
+/**
+ * C3：信号**合法形态**的唯一文案出处。所有面向人/Agent 的信号报错都经
+ * `signalProblemText` 取提示，不再各面手拼一份（plan-cli / session / apps check /
+ * plan check / test --validate 的加载期校验都从这一处继承）。
+ *
+ * 规则只有两条（对应 `validateSignalSpec` 的组合分支与 arity 分支）：
+ *   - 叶算子：操作数**按位置放数组**——`{op: [arg1(, arg2)]}`；对象形
+ *     `{selector, text}` 不是合法形状（它会被折成长度 1 的参数列表 → arity 不匹配）。
+ *   - 组合算子：`all_of`/`any_of` 收**非空数组**，`not` 收**单个对象**。
+ */
+export const SIGNAL_SHAPE_HINT = {
+  /** 一个叶算子的合法写法（arity 决定操作数个数）。 */
+  leaf: (op: string, arity: number): string =>
+    `{ ${op}: ${arity <= 1 ? "[value]" : "[selector, text]"} }`,
+  /** 组合算子的合法写法。 */
+  compose: "{ all_of: [ {…}, … ] } / { any_of: [ {…}, … ] } / { not: {…} }（not 收单个对象）",
+  /** 对象形操作数为什么非法（最常见的写错形态）。 */
+  object_form: "对象形 {selector, text} 不是合法形状——操作数按位置放进数组",
+} as const;
+
+/** `--signal` 旗标面的示例串（plan-cli 的既有文案**逐字保留**）。 */
+const SIGNAL_CLI_EXAMPLES = "--signal url_contains=page2 / --signal css_exists=#main / "
+  + "--signal css_exists_text=#h1|Saved / --signal css_value_equals=#i|0 / --signal manual";
+
+/** JSON 面（应用脚本 / plan 文件 / 会话请求）的示例串。 */
+const SIGNAL_JSON_EXAMPLES = `{ url_contains: "page2" } / { css_exists: "#main" } / `
+  + `{ css_exists_text: ["#h1", "Saved"] } / { css_value_equals: ["#i", "0"] } / { manual: true }`;
+
+/**
+ * 把 `validateSignalSpec` 的 problems 渲染成给作者的一行报错。`mode` 只决定示例串的形状
+ * （`"cli"` = `--signal` 旗标写法；`"json"` = 对象/数组写法），合法形态提示两面共用。
+ * cli 面只带第一条 problem（plan-cli 每次只有一个算子，既有文案逐字不变）。
+ */
+export function signalProblemText(problems: string[], mode: "json" | "cli"): string {
+  if (mode === "cli") {
+    const head = problems[0] ?? "signal is not valid";
+    return `${head}；合法写法：${SIGNAL_CLI_EXAMPLES}`;
+  }
+  const head = problems.length ? problems.join("；") : "signal is not valid";
+  return `${head}；合法写法：${SIGNAL_JSON_EXAMPLES}；组合算子：${SIGNAL_SHAPE_HINT.compose}`;
+}
+
 /* ------------------------------------------------------------------ 语法校验 */
 
 /**
@@ -332,6 +376,16 @@ export interface SignalGrammar {
 
 /** 浏览器/DOM 观察面的语法（`signal` 与 `when` 共用）。 */
 export const DOM_SIGNAL_GRAMMAR: SignalGrammar = { ops: SIGNAL_OPS, label: "signal", listKnown: true };
+
+/** 报错里对「收到什么形状」的最小描述（只列键名，不打印值：信号里可能有字面量/敏感串）。 */
+function describeSignalOperand(v: unknown): string {
+  if (Array.isArray(v)) return `${v.length} 项数组`;
+  if (typeof v === "object" && v !== null) {
+    const keys = Object.keys(v as Record<string, unknown>).slice(0, 3);
+    return `object {${keys.join(", ")}}`;
+  }
+  return typeof v === "string" ? "标量字符串" : `标量 ${typeof v}`;
+}
 
 /**
  * **唯一**的信号语法走查器。返回 problem 字符串（与 `PlanningRules.problems` 同款口径：
@@ -364,7 +418,8 @@ export function validateSignalSpec(
       }
       if (op === "all_of" || op === "any_of") {
         if (!Array.isArray(args) || args.length === 0) {
-          problems.push(`${at}: ${op} needs a non-empty list of signals`);
+          problems.push(`${at}: ${op} needs a non-empty list of signals`
+            + ` —— 合法形态 ${SIGNAL_SHAPE_HINT.compose}`);
           continue;
         }
         args.forEach((child, i) => walk(child, `${at}.${op}[${i}]`));
@@ -372,7 +427,7 @@ export function validateSignalSpec(
       }
       if (op === "not") {
         if (typeof args !== "object" || args === null || Array.isArray(args)) {
-          problems.push(`${at}: not needs one signal`);
+          problems.push(`${at}: not needs one signal —— 合法形态 ${SIGNAL_SHAPE_HINT.compose}`);
           continue;
         }
         walk(args, `${at}.not`);
@@ -382,7 +437,11 @@ export function validateSignalSpec(
       if (arity === 0) continue;
       const operands = signalArgs(args);
       if (operands.length !== arity) {
-        problems.push(`${at}: ${op} needs ${arity} argument(s)`);
+        // C3：报错自带**合法形态**（此前只给 "needs 2 argument(s)"，对象形
+        // `{selector,text}` 的作者无从知道要按位置放数组）。
+        problems.push(`${at}: ${op} needs ${arity} argument(s)`
+          + ` —— 合法形态 ${SIGNAL_SHAPE_HINT.leaf(op, arity)}（操作数按位置放数组；`
+          + `${SIGNAL_SHAPE_HINT.object_form}），收到 ${describeSignalOperand(args)}`);
       }
       // 真空操作数（U4）：空串/纯空白不是"某个值"，而是**没有值**——`url_contains:""`
       // 对任何页面恒真，`css_exists_text:["#h1",""]` 只差 selector 存在，完成信号=门禁被掏空。

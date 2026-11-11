@@ -371,6 +371,42 @@ export function validateCollectRequest(req: unknown): void {
   }
 }
 
+/**
+ * C1：`ctx.extract` 的第二参（仅 `{ offset? }`）——真实/dry/replay 共用同一份文案。
+ *
+ * 三条纪律（与 `ctx.observe` 的选项面同风格）：
+ *   - `offset` **只认第二参**：写成 inline spec 键（`{ rows, fields, offset }`）= 结构化
+ *     `config_error` 并指路（spec 是声明，offset 是这一次调用的读取位置，两者不混）；
+ *   - 未知第二参键不静默忽略（allowed: offset）；
+ *   - 整数 0..10000；负数/小数/字符串/越界都是 `config_error`（绝不自己 clamp —— 分页起点
+ *     被悄悄改掉会让「续页不重不漏」变成假话）。
+ *
+ * @returns 规范化后的 offset（缺省 0）。
+ */
+export function validateExtractOptions(nameOrSpec: unknown, opts: unknown): number {
+  if (isObj(nameOrSpec) && nameOrSpec["offset"] !== undefined) {
+    throw new StopError("config_error",
+      "ctx.extract: offset is the SECOND argument, not a spec key — call ctx.extract(spec, { offset }) "
+      + "(inline spec keys are rows/fields/maxItems)");
+  }
+  if (opts === undefined) return 0;
+  if (!isObj(opts)) {
+    throw new StopError("config_error", "ctx.extract: opts must be an object like { offset }");
+  }
+  const unknown = Object.keys(opts).filter((k) => k !== "offset");
+  if (unknown.length) {
+    throw new StopError("config_error",
+      `ctx.extract: unknown opts key(s) ${unknown.map((k) => JSON.stringify(k)).join(", ")} (allowed: offset)`);
+  }
+  const offset = opts["offset"];
+  if (offset === undefined) return 0;
+  if (typeof offset !== "number" || !Number.isInteger(offset) || offset < 0 || offset > 10_000) {
+    throw new StopError("config_error",
+      `ctx.extract: opts.offset must be an integer in [0, 10000] (got ${JSON.stringify(offset)})`);
+  }
+  return offset;
+}
+
 /** 把 `StepRequest` 的目标声明摊成 `RunOptions` 的字段。 */
 export function targetOptions(act: TargetDecl | CommandDecl[]): {
   targetHint?: string | null; targetHints?: string[] | null; commands?: CommandDecl[] | null;

@@ -191,8 +191,13 @@ export const POLICY_KEYS = [
   "navigation",
   // P0-B：act hint 未命中时是否允许模型自由选（缺省 widen = 现行为逐字节不变）。
   "act_hint",
+  // A3：弱档命中（bare 词前缀/词包含、attrSubstr loose 子串）算不算命中
+  // （缺省 any = 现行为逐字节不变；strong = 改判未命中）。
+  "act_hint_tier",
   // P0-C：声明目标解析链是否启用 DRF（缺省 "off" = 现行为逐字节不变）。
   "target_resolution",
+  // A1：aria-label 属性 hint 的池侧匹配底座（缺省 "full_label" = 修复后；"display" = A1 之前）。
+  "attr_value_match",
   // task-43：浏览器通道选择面（缺省不写 = 现状链逐字节不变；优先级 env > meta > default）。
   "browser",
 ] as const;
@@ -203,8 +208,24 @@ export const NAVIGATION_MODES = ["entry-only", "free"] as const;
 /** act hint 解析失败时的档位（`meta.policy.act_hint`）。 */
 export const ACT_HINT_MODES = ["widen", "strict"] as const;
 
+/**
+ * A3：弱档胜出算不算命中（`meta.policy.act_hint_tier`；与 `act_hint` **正交**）。
+ * `any`（缺省）= 今天逐字节不变（弱档胜出 conf=1.0 直接执行 + `matched_others` 警告）；
+ * `strong` = 弱档（bare tier≥3 词前缀/词包含、attrSubstr tier=3 loose 子串）改判**未命中**，
+ * 随后按 `act_hint` 既有语义继续（widen 交模型 / rules-only 落既有 no_model_runtime /
+ * strict 结构化 target_not_found）。判据复用 rules 的 `suspicious`，不另造档位表。
+ */
+export const ACT_HINT_TIER_MODES = ["any", "strong"] as const;
+
 /** 声明目标解析链档位（`meta.policy.target_resolution`；缺省 off = 现行为逐字节不变）。 */
 export const TARGET_RESOLUTION_MODES = ["off", "declared"] as const;
+
+/**
+ * A1：`aria-label` 属性 hint 的池侧匹配底座（`meta.policy.attr_value_match`）。
+ * `full_label`（缺省）= `[full_label, label]` 双底座（>40 字的值命中）；
+ * `display` = A1 之前只看模型视图前 40 字 label（逃生口/对照臂）。
+ */
+export const ATTR_VALUE_MATCH_MODES = ["full_label", "display"] as const;
 
 /**
  * 浏览器通道档位（`meta.policy.browser`；task-43）。
@@ -255,6 +276,21 @@ export interface PackPolicy {
    */
   act_hint?: (typeof ACT_HINT_MODES)[number];
   /**
+   * A3：**弱档命中算不算命中**（与 `act_hint` 正交；缺省 `"any"` = 现行为逐字节不变）。
+   *   - `"any"`：今天——裸词的词前缀/词包含档（bare t=3/t=4）或属性子串的 loose 档
+   *     （attrSubstr t=3）胜出即 conf=1.0 `rule:match` 直接执行，只留一条 step warning
+   *     `matched_others`（"命中对象可能是容器/同缀元素"）；
+   *   - `"strong"`：同一判据（复用 rules 的 `suspicious`）下该命中**不算命中**——ref 清空、
+   *     step warning 换成 `weak_hint_rejected`，随后按 `act_hint` 既有语义继续：
+   *     `widen`（缺省）交模型自由选（rules-only 落既有 `no_model_runtime`）；`strict`
+   *     结构化 `target_not_found`（reason 写明"弱档被判未命中"+候选+两条修法）。
+   * 两键**互不替代**（一个管"没命中怎么办"、一个管"弱档算不算命中"）；widen+strong 与
+   * strict+strong 都合法。命令 target、`--remember` 学到的 hint（非作者声明）、决策步不受影响；
+   * 只作用于声明目标的规则解析与 rules-only 宽扫两处（同一 `declaredAllow`）。
+   * 显式声明才进 effective_policy.act_hint_tier（显式 "any" 也进账）。
+   */
+  act_hint_tier?: (typeof ACT_HINT_TIER_MODES)[number];
+  /**
    * P0-C 声明目标解析链（DRF，declared target resolution）：
    *   - `"off"`（缺省）= 现行为逐字节不变；
    *   - `"declared"` = 命令 `target` / act hint 在池 hintMatch → ADMIT 回捞 → FW8 身份回捞
@@ -266,6 +302,16 @@ export interface PackPolicy {
    *     dry/apps check 只校验 policy 值（DOM 事实无法离线验证，不新增绿）。
    */
   target_resolution?: (typeof TARGET_RESOLUTION_MODES)[number];
+  /**
+   * A1：`tag[aria-label=…]` / `tag[aria-label~…]` 的**池侧**属性值匹配底座。
+   *   - `"full_label"`（缺省）：`[full_label, label]` 双底座——池字段 `full_label` 是
+   *     ≤200 的完整匹配串，`label` 只是模型视图的前 40 字；只比 label 时 >40 字的
+   *     aria-label 值永远等不上（`attrEq` 与 `attrSubstr` 同一函数，一处修两形状）。
+   *   - `"display"`：A1 之前的行为（只比 `label` 前 40 字，>40 的值永不命中）——逃生口/对照臂。
+   * 只作用于 hint 匹配；≤40 的值**等值**命中集合逐字节不变（同值重复仍取 DOM 首个）。
+   * inspect/observe/session 无 policy，恒 `full_label`。显式声明才进 effective_policy。
+   */
+  attr_value_match?: (typeof ATTR_VALUE_MATCH_MODES)[number];
   /**
    * task-43：浏览器通道（`"chrome" | "headless-shell"`；**缺省不写 = 现状链逐字节不变**）。
    * 优先级 env(AMBERFLOW_BROWSER_CHANNEL) > meta > default——env 是部署/CI 的机器级覆盖，
@@ -1288,9 +1334,19 @@ export function validatePack(pack: AppPack,
       if (ah !== undefined && !(ACT_HINT_MODES as readonly string[]).includes(String(ah))) {
         p.push(`policy.act_hint: unknown value ${JSON.stringify(String(ah))} (config_error; must be one of ${ACT_HINT_MODES.map((x) => JSON.stringify(x)).join(" | ")})`);
       }
+      // A3：弱档算不算命中——合法值闭集在加载期响亮拒绝（同 act_hint 先例）。
+      const aht = pol["act_hint_tier"];
+      if (aht !== undefined && !(ACT_HINT_TIER_MODES as readonly string[]).includes(String(aht))) {
+        p.push(`policy.act_hint_tier: unknown value ${JSON.stringify(String(aht))} (config_error; must be one of ${ACT_HINT_TIER_MODES.map((x) => JSON.stringify(x)).join(" | ")})`);
+      }
       const tr = pol["target_resolution"];
       if (tr !== undefined && !(TARGET_RESOLUTION_MODES as readonly string[]).includes(String(tr))) {
         p.push(`policy.target_resolution: unknown value ${JSON.stringify(String(tr))} (config_error; must be one of ${TARGET_RESOLUTION_MODES.map((x) => JSON.stringify(x)).join(" | ")})`);
+      }
+      // A1：属性值匹配底座——合法值闭集在加载期响亮拒绝（同 navigation/act_hint 先例）。
+      const avm = pol["attr_value_match"];
+      if (avm !== undefined && !(ATTR_VALUE_MATCH_MODES as readonly string[]).includes(String(avm))) {
+        p.push(`policy.attr_value_match: unknown value ${JSON.stringify(String(avm))} (config_error; must be one of ${ATTR_VALUE_MATCH_MODES.map((x) => JSON.stringify(x)).join(" | ")})`);
       }
       // task-43：浏览器通道——合法值闭集在加载期响亮拒绝（同 navigation/act_hint 先例）。
       const bc = pol["browser"];

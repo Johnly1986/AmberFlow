@@ -4,6 +4,194 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — C2 抽取选择器预检（非法选择器 → 结构化 config_error）
+
+- **【缺陷修复·静默空数据】** `ctx.extract` 的行/字段选择器非法（如 `rows:"div["`、`fields:{x:"div["}`）
+  此前被 `locatorAnyFrame`/字段循环的 `try/catch` 吞成 `[]`/`""`——假数据与"合法但零命中"
+  无法区分（最危险的静默形态）。现在 `readRows`（extract 与 collect 的唯一实现）在**入口**做一次
+  选择器解析预检：行选择器 + 每个字段选择器（除 `"."`/`":scope"`/`"@attr"` 形态）各一次
+  Playwright `locator(sel).count()`（每次抽取 ≤ 1+字段数 次往返；collect 只在入口一次、循环内不重复）。
+  `locator(sel)` 本身不解析选择器（解析在 driver 侧），所以必须真付一次 `count()`。
+- **【结构化错误·不新增 stopCode】** 仅当异常文本是**解析错误**（Unexpected token / parsing css
+  selector / Unknown engine / invalid selector）才抛 `config_error`：reason
+  `ctx.extract: field "x" selector "…" is not valid: …`，`diagnostics.bad_selector={selector, field?}`。
+  掉帧/超时/页面已关闭仍按旧行为（不误报成选择器错）。**合法但零命中仍是 `[]`/`""`**。
+  会话 `extract` 复用 observe 口径：引擎 `amber session` 响应带 `error:"bad_selector"`
+  （`code` 仍 `config_error`）；桥的失败投影在引擎给该标记时原样透出 `error`（不补键）。
+- **【有意行为变更】** ①非法选择器从"静默空"变"响亮配置错"；②`ctx.collect` 旧的 DOM
+  `querySelectorAll` 预检已删除、改走同一入口——Playwright 伪类（`:has-text(...)` 等）不再被误拒。
+  **dry/replay 不访问浏览器、不做预检**（`apps check` 不因此红，只有真跑/会话才红）——文档写明。
+  合法选择器下 extract/collect 的返回值与产物逐字节不变（夹具按"改前 readRows 复刻"对照全字段全等）。
+
+## [Unreleased] — C3 信号报错形态统一（合法写法单点给出）
+
+- **【缺陷修复·报错不可行动】** 对象形信号 `{css_text_contains:{selector:"div",text:"x"}}` 被
+  `signalArgs` 折成长度 1 的参数列表 → 只报 `needs 2 argument(s)`，不说合法形态；会话/加载期
+  各自拼提示。现在 `signals.ts` 新增 `SIGNAL_SHAPE_HINT`（叶 `{op:[arg…]}` 按位置放数组；组合
+  `all_of`/`any_of` 非空数组、`not` 单个对象；对象形 `{selector,text}` 非法）+ `signalProblemText(problems,
+  "json"|"cli")`，是合法形态提示的**唯一出处**。
+- **【problems 自带提示】** `validateSignalSpec` 的 arity 分支在 `signalArgs(args).length !== arity` 时
+  把合法形态与"收到什么形状"写进 problem（`all_of`/`any_of`/`not` 的形状错同样指路）——因此
+  `apps check`/`plan check`/`test --validate` 的加载期校验自动继承。`plan-cli` 走 cli 版（`--signal`
+  示例串与改动前**逐字一致**）；会话 `signal`/`waitFor` 失败 reason 走 json 版（`problems` 数组原样）。
+- **【不变】** 合法信号的校验结果、`checkSignal` 运行时语义与产物逐字节不变；未新增 stopCode。
+
+## [Unreleased] — B3 快照 changed 签名含可勾选控件状态（checks）
+
+- **【缺陷修复·changed/inert】** `changed = pre/post 快照 JSON diff` 原有签名只有
+  `{url,title,text,vals}`，而 `vals` 只序列化 input/textarea/select 的 `.value`——原生
+  checkbox/radio 的 `checked`、`aria-checked`、`aria-selected`、`select[multiple]` 的选中
+  index 都不在里面。于是 `check` 一个单选/复选控件可能拿到 `changed=false`，进而被记为
+  inert（并写入 outcome memory 误伤该元素）、吞掉 `suspected_async` 的诚实提示。
+- **【独立 `checks` 字段】** `PageSnapshot`（主 frame 与子 frame 项）新增可选
+  `checks?: string`：只读 `CHECKS_JS` 记录上述确定性状态（`0/1` / 属性值 / 只记 true 的
+  `aria-selected` / 多选 select 的选中 index 列表），空串则不出现该字段。**不改 `VALS_JS`**
+  （P0-3 的 password/file/hidden 掩码零改动），也不把状态拼进 `vals` 串（避免分隔符碰撞）。
+- **【一次 evaluate】** `vals` 与 `checks` 合并为组合脚本 `FN_STATE` 一次取回（主/子 frame
+  各一次），页面往返不增加；`changed` 仍是同一份 pre/post JSON diff 机制（inert /
+  anti-repeat / `suspected_async` 随之如实修正），`executed_actions.changed` 口径不变。
+- **【落盘与默认产物】** session `snapshot-<n>.json` 一并写 `checks`（主 4000 / 帧 1200 字符
+  有界）；无 checkbox/radio/aria 选中/多选 select 的页面**产物逐字节不变**。不新增
+  stopCode / effect kind；dry 与 replay 不访问浏览器。schema 快照在 F17 truth 末尾补注
+  （不新增 F id），`docs/APP_SCRIPT_AUTHORING.md` 判读规则补一句口径。
+
+## [Unreleased] — A4 会话 act 落空判别（池内同档候选 / 词面近似 / 池外不可见行）
+
+- **【缺陷修复·session act】** `target_not_found` 此前只有一句 `target "…" matched nothing in a
+  pool of N element(s)`，分不清「目标不在页面」与「用词/形状不对，或元素不可见」。现在会话 `act`
+  的落空响应多带 `diagnostics:{target, pool_size, hint_shape, hint_len, candidates[≤5],
+  near[≤5], rejected[≤3]}`，`reason` 末尾追加一行 `判别: …`（仿 run 命令步的
+  `cmdDiscrimination`：纯内存判别，主 reason 前缀与停因码不变）。
+- **【同档候选不污染回显】** `HintMatchOptions.diag`（缺省 `true`）新增 quiet 读法：`false` 时
+  `hintMatchImpl` **不写** B1 弱档旁路模块态；`candidates` 用它取候选，task-34 的
+  `ambiguous`/`matched_others` 回显仍是本条 target 真实解析的结果（A2 行为不变）。
+- **【词面近似】** 新纯函数 `nearCandidates(target, pool, cap=5)`（`executor-pure.ts`）：token 仍由
+  唯一解析器 `parseHint` 给出，对 `label`/`full_label`/`data_test`/`id`/`name`/`href` 做**前缀/
+  包含**比较，返回 ≤5 条 `{ref,tag,label≤40,why?}`——纯内存、零页面往返，**不扩 hint 语法**。
+- **【池外不可见行】** `_domFallbackResolve` 把扫描行一并回传（既有解析行为不变）：只对词面近似
+  的 ≤5 行做**一次**可见性判定 → `rejected`（≤3，`why:"not visible"`，措辞与 `observe` 的
+  `why_not_admitted` 同源）；不扫面外元素、不新造 `why` 分支。
+- **【透传】** 会话 `act` 失败分支带出 `diagnostics`（引擎已按上限构造）；桥 `engineFailure`
+  有界透传（candidates ≤3 / near ≤3 / rejected ≤2 / label ≤40，不重算、不补键），`index.ts`
+  失败 render 在 `diagnostics` 存在时追加一行 `no match: hint <shape>/<len> pool <n> — near: …`；
+  桥参数/结果 schema 不动。
+- **【不变】** 成功路径与非落空失败**键集逐字节不变**（新字段只在 `target_not_found` 时出现）；
+  `ctx.expand`/`ctx.scrollList`/命令步（run 面）不传该开关，返回值与 `reason` 逐字节不变；
+  不新增 stopCode、不新增 schema F 语句（会话契约不进 `CTX_FACTS`）；A1/A2/A3/B1/B2/C1 不受影响。
+
+## [Unreleased] — B1 会话 act 的被遮挡证据（探针即点击 / 结构化失败 / opt-in 失败截图）
+
+- **【缺陷修复·session act】** 会话 `act` 的 `click`/`check` 此前走 `_clickOnly` 的 5s 超时，被覆盖时
+  只回 Playwright 首行（≤160 字），没有 bbox/覆盖者证据。现在这两类动作复用 run 的
+  `occludedReason`——**探针本身就是那次点击**（返回 `__clicked__` 即已点，不再调 `_clickOnly`，
+  无双点），预算 `(800, 5000)`：被遮挡约 0.8s 报，未遮挡的慢元素仍留 5s 重试。
+- **【结构化失败】** 失败串 `not-actionable-or-covered:<blocker>` / `action-timeout` → `code` 取冒号前
+  token、`reason` 保留原文，**不新增 stopCode**（既有 skip_reason 词面，F50 同例）；失败响应带
+  `actionability:{reason,bbox,blocker,requery}`（`action-timeout` 也走同一现场读取：证明无覆盖者、
+  节点仍在）。非 timeout 异常不补点：URL 已变记 `probe_navigated:true` 按已点击返回，否则
+  `action_failed` + Playwright 首行。
+- **【新增·失败截图 opt-in】** 会话 `act` 请求 `screenshot`（缺省 `false`）：失败时写
+  `<evidence_dir>/act-<n>-failure.png`，响应只回 `screenshot_file` 路径（不内联图片）。桥透传
+  `actionability`（reason≤200、blocker/requery≤60、bbox 数值）与 `screenshot_file`，`act` 参数
+  `screenshot` 同义；模型可见的失败行在 `actionability` 存在时追加
+  `blocked by <blocker> (requery=…)`。
+- **【不变】** run 面/命令步/`ctx.expand`/`ctx.scrollList` 内部点击不传探针参数，行为与产物逐字节
+  不变；session 的 A2 歧义两档、B2 滚动、A1/A3/C1 均不受影响。
+
+## [Unreleased] — A3 弱档命中门槛（`meta.policy.act_hint_tier:"strong"`）
+
+- **【新增 policy】** `meta.policy.act_hint_tier: "any"（缺省）| "strong"`，与 `act_hint` **正交**：
+  `strong` = 裸词/属性子串的**弱档**胜出（词前缀/词包含、loose 子串）判为**未命中**，不再以
+  conf=1.0 直接执行——弱档命中最容易点到容器/同缀元素。
+- **【判据复用】** 门槛不另造档位表，直接用 `rules.takeHintMatchOthers()` 的既有 `suspicious`
+  （bare t≥3、attrSubstr t=3）；step warning 从 `matched_others` 换成 `weak_hint_rejected`
+  （含档位/候选≤3/开关）。池解析与 rules-only 宽扫重解析共用同一判定（`declaredAllow`）。
+- **【后续语义】** 拒后按 `act_hint` 既有语义继续：`widen` 交模型（rules-only 落既有
+  `no_model_runtime`）；`strict` 结构化 `target_not_found`（reason 写明弱档被拒 + 候选 + 两条改法：
+  收窄成强形状 / 回 `act_hint_tier:"any"`）。
+- **【不变】** 缺省 `any` 下行为与产物**逐字节不变**；命令 target、learned hint、决策步（无 act）
+  不受影响；**不新增 stopCode**（strict 复用 target_not_found）；hint 六形状闭集不变；
+  显式声明才进 `effective_policy.act_hint_tier`（声明 `"any"` 也进账）。契约注记见
+  `amber schema ctx` 的 F59。
+
+## [Unreleased] — A1 属性值匹配按完整值（aria-label：full_label + label 双底座）
+
+- **【缺陷修复·hint 属性匹配】>40 字的 aria-label 值此前永远等不上**：`tag[aria-label=…]` /
+  `tag[aria-label~…]` 的匹配底座只取池字段 `label`，而 `label` 是**模型视图的前 40 字**
+  （`full_label` 才是 ≤200 的匹配口径）。现在与 T9 的 href `[href_full, href]` 同形状：
+  aria-label 别名（`poolFieldFor` → `label`）的底座改为 `[full_label, label]`（非空、同值去重、
+  大小写折叠），**attrEq 与 attrSubstr 共用同一函数**——`[aria-label~长值尾串]` 同修，不只修等值。
+- **【行为变更·严格只增】** ≤40 的值**等值**命中集合逐字节不变（`full_label` 全等 ⇒ `label` 全等）；
+  >40 的值从"必落空"变为按 `full_label` 等值/子串命中；子串面在超长 label 上可能新增命中（同一
+  "按完整值匹配"语义的直接结果）。同值重复仍取 DOM 首个，不新增"假唯一"；hint 六形状闭集、
+  敏感值纪律不变。
+- **【新增·`meta.policy.attr_value_match`】** `"full_label"`（缺省，= 修复后）| `"display"`
+  （= A1 之前只看前 40 字 label；逃生口/对照臂）。接线：`app-pack` 的
+  `POLICY_KEYS`/`ATTR_VALUE_MATCH_MODES`/`PackPolicy`/`validateApp`（未知值加载期 `config_error`，
+  `apps check` 即红）→ `app-runner` `resolveRunPolicy`（`effective_policy.attr_value_match`
+  仅声明时出现）→ `MiddlewareOptions.attrValueMatch` → `rules` 的 `HintMatchOptions`
+  （`hintMatch`/`hintCandidates`/`affordanceRule`/`hintMatchImpl`；DRF 的 `declaredLookup` 与
+  `ctx.waitForTarget` 同口径）。run 面按 policy 传；**inspect/observe/session 无 policy，恒
+  `full_label`**。默认产物不变（policy 缺省时只有 >40 命中这一处新行为，生效于 run 面）。
+- **【不变量注释】** `label === full_label 前 40 字` 已在 extraction/declared/observe/executor 的
+  各构造点用注释固化。契约注记见 `amber schema ctx` 的 F58。
+
+## [Unreleased] — C1 行抽取分页（ctx.extract offset / 会话 offset·total·has_more / 桥 save 落盘）
+
+- **【新增·`ctx.extract` 第二参】** `ctx.extract(nameOrSpec, { offset? })`：`offset` 只做分页起点
+  （0-based 整数 0..10000，非法/写进 inline spec = 结构化 `config_error` 并指路第二参），
+  `maxItems` 仍是每页上限。`readRows` 唯一实现改为 `all.slice(offset, offset+cap)`，
+  `total = all.length`、`truncated = offset+rows.length < total`——**offset=0 与之前逐字节一致**。
+  返回类型不变（仍是行数组，`count` 语义不变）；`total` 只经 `CtxDeps.extractStats` 观测口回写，
+  **只有 session 面注入**，run/dry/replay 不注入、行为与产物不变（dry 恒 `[]`、replay 按 desc 回放）。
+- **【新增·会话协议分页】** `amber session` 的 `extract` 请求新增 `offset?`（非整数/越界 = `config_error`）；
+  响应在 **capped 或 offset>0** 时追加 `offset`/`total`/`has_more`（`has_more = offset+count < total`），
+  `count` 恒为本页返回行数、`capped` 语义不变；无 cap 且 offset=0 时键集与之前逐字节一致。
+  `observe` **不提供 offset**（元素序随水合/动画变化，无稳定锚）：收窄用 `selector`/`max`，全量用
+  `snapshot`（`pool-<n>.json`）。
+- **【新增·桥 `amberflow_session`】** extract 参数补 `offset`（透传）与 `save`：`save:true` 时桥内
+  翻页取全（每页 ≤500，硬顶 **2000 行 / 4MB**）写 `<evidence_dir>/extract-<n>.json`，返回
+  `file`/`saved`/`bytes`（被硬顶截断如实标 `truncated`+`save_limit`），`rows` 仍给首页 ≤20。
+  模型可见 render 的 observe/extract 显示行数 12→20 / 5→20，且**只有溢出时**追加两行
+  （observe：`… +N more (M total, K omitted)` + 收窄/max/snapshot 指引；extract：`… +N more` +
+  `total=T · offset=… 续页 · save:true → extract-<n>.json`）——无溢出/无 offset/无 save 时输出不变。
+- **不变量**：run 的 result/report 不变（extractStats 仅会话注入；trace 的 `offset` 仅 offset>0 出现）；
+  A2/B2 的会话行为不破；桥不新增引擎语义；`element-view.ts` 合同不动。契约注记见 `amber schema ctx` 的 F57。
+
+## [Unreleased] — B2 会话 act 滚动语义诚实化
+
+- **【缺陷修复·会话 act scroll】元素目标的 `to`/`by` 此前被静默丢弃**：`act scroll "列表" {to:"bottom"}`
+  只做 `scrollIntoViewIfNeeded`（滚入视口），`changed` 还硬编码 `true`——请求的方向没生效，响应却说
+  "页面变了"。现在：**带 `to`/`by` = 容器滚动**（目标元素自身或最近可滚动祖先，走
+  `_scrollContainerForElement`→`_scrollWithLoc`，与 `ctx.scrollList`、run 的 `scroll` 命令同一条实现；
+  `by` 优先；找不到可滚动容器 = 结构化 `not_scrollable`，不再是静默无操作）；**不带 `to`/`by` = 滚入
+  视口**（旧语义不变），但 `changed` 改为**实测** `moved`（滚动容器 `scrollTop` 前后差）。
+- **【新增·滚动证据】`act scroll` 响应带 `moved`/`delta`/`scroll:{scrollTop,scrollHeight,clientHeight}`
+  （有则附，没有就不附）**，`_scrollWithLoc`/`scrollDocument` 成功时也新增 `delta`（after-before）。
+  桥（`amberflow_session` 的 `act_op:"scroll"`）只透传这三个键（有界、不重算），act 渲染行显示
+  `moved/delta`；工具参数说明改写为"to/by = 容器滚动，无 = 滚入视口"。
+- **【缺陷修复·`--record` 记录诚实性】只记实际发生的事实**：滚动没走通不再记 `to`/`by`；没请求方向
+  的元素滚动不再伪记 `to:"bottom"`；另记 `scroll_mode`(`container`|`into_view`)/`moved`/`delta`/
+  `scrollTop`。`session export` 按 `scroll_mode` 还原：container → `ctx.scrollList(target,{to|by})`，
+  into_view → `ctx.command("scroll", target)`（无 to）；旧轨迹（无 `scroll_mode`）导出与之前逐字节一致。
+- **不变量**：run 面/命令步/`ctx.scrollList`/`scrollDocument` 的既有语义与产物**逐字节不变**
+  （`_executeElement` 的 scroll 分支原样保留）；dry/replay 不受影响；A2 歧义透传不破（`actOnce`
+  第 5 参 `onAmbiguous` 语义不变，歧义失败面仍 `target_ambiguous`+`ambiguity`）；不新增 stopCode、
+  不扩 hint 六形状闭集。契约注记见 `amber schema ctx` 的 F56。
+
+## [Unreleased] — A2 会话 act 歧义缺省不执行
+
+- **【行为变更·会话 act 歧义】`amber session` 的 `act` 目标命中多个**不同**候选时，缺省不再执行**：
+  返回结构化 `{ok:false, code:"target_ambiguous", executed:false, ambiguity}`（与 `amber run` 命令步
+  `target_ambiguous` **同一个谓词**：`hintCandidates` 非空 && `decided === null` && `refs.length > 1`）。
+  `ambiguity` 有界：候选 ≤5（`candidates_total`/`truncated`）、label/class/near ≤40、ref/tag ≤16、
+  `suggested_hint` ≤80、`would_act_ref`；`source:"dom_fallback"`（A3 池外回退）不给 near/suggested_hint。
+  事故形状：`div "搜索关闭"` | `button "关闭"` 上点 "关闭" 会命中搜索框清除按钮，整条搜索链路退出。
+  恢复旧行为：会话级 `--on-ambiguous act`，或单行请求 `onAmbiguous:"act"`（桥参数 `on_ambiguous`）；
+  该失败进 `--record` 轨迹的 `code` + `candidate_refs`（≤5）+ `candidates_total`。
+  **不变量**：run 面/命令步/决策步行为与产物逐字节不变（dry/replay 不调 `actOnce`）；
+  `ctx.scrollList` 内部点击与 run 原语不传该策略，行为不变；不新增 stopCode、不扩 hint 六形状闭集。
+
 ## [Unreleased] — run --headless 透传修复 + 插件 headless 配置
 
 - **【缺陷修复·run --headless 透传】`amber run --headless` 此前被解析但从不转发给

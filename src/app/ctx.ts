@@ -18,7 +18,7 @@ import {
   type RunReport, type SkippedAction, type StepStateRecord,
 } from "../engine/executor.ts";
 import { validateCommands } from "../engine/actions.ts";
-import { firstOf, framesOf, locatorAnyFrame, urlOf, extractElements, poolSniff, type PageLike } from "../engine/extraction.ts";
+import { firstOf, framesOf, locatorAnyFrame, urlOf, extractElements, poolSniff, type FrameLike, type PageLike } from "../engine/extraction.ts";
 // task-16（B3+）：arrive 侧限速判据的嗅探面选择器（与执行器同口径的准入面）。
 import { admitSelectorWithJsFor } from "../engine/surface.ts";
 // task-24/6a：限速判据阈值单一出处（step 侧与 arrive 侧共用）。
@@ -49,7 +49,7 @@ import {
   type CollectStopReason, type CollectRequest, type CollectCoverage, type CollectResult,
   type SourceObservationView, type ManualRequest, type TabInfo, type SwitchTabMatch,
   type SwitchTabResult, type CtxBudget, type ToolRunRequest, type ToolRunResult,
-  type Ctx, type CtxDeps,
+  type Ctx, type CtxDeps, type ExtractOptions,
 } from "./ctx-types.ts";
 export {
   StopError,
@@ -59,7 +59,7 @@ export {
   type CollectStopReason, type CollectRequest, type CollectCoverage, type CollectResult,
   type SourceObservationView, type ManualRequest, type TabInfo, type SwitchTabMatch,
   type SwitchTabResult, type CtxBudget, type ToolRunRequest, type ToolRunResult,
-  type Ctx, type CtxDeps,
+  type Ctx, type CtxDeps, type ExtractOptions,
 };
 
 /** L2 ctx 的原语参数校验面 —— 拆到 ctx-validate.ts（F1；真实/dry/replay 共用）。 */
@@ -67,13 +67,15 @@ import {
   isObj, resolveCtxUrl, assertAct, samePage, sameNavTarget, sameDeclaredPageHref,
   normalizeCommandIds, DECLARED_RUN_KEYS, declaredRunProblems, validateSwitchTabMatch,
   switchTabMatches, describeTabs, isSyntheticScrollTarget, validateScrollListRequest,
-  validateExpandRequest, validateSetRangeRequest, validateCollectRequest, targetOptions,
+  validateExpandRequest, validateSetRangeRequest, validateCollectRequest, validateExtractOptions,
+  targetOptions,
 } from "./ctx-validate.ts";
 export {
   isObj, resolveCtxUrl, assertAct, samePage, sameNavTarget, sameDeclaredPageHref,
   normalizeCommandIds, DECLARED_RUN_KEYS, declaredRunProblems, validateSwitchTabMatch,
   switchTabMatches, describeTabs, isSyntheticScrollTarget, validateScrollListRequest,
-  validateExpandRequest, validateSetRangeRequest, validateCollectRequest, targetOptions,
+  validateExpandRequest, validateSetRangeRequest, validateCollectRequest, validateExtractOptions,
+  targetOptions,
 };
 
 /** 构造真实 ctx（一个运行一个实例；会话惰性创建、由驱动关闭）。 */
@@ -686,22 +688,76 @@ export function createCtx(deps: CtxDeps): Ctx {
   };
 
   /**
+   * C2：抽取选择器的**唯一预检**（`ctx.extract` / `ctx.collect` 共用；每个调用入口一次，
+   * 不逐字段逐行）。判定放在 `readRows` 入口（collect 先校验一次再在循环里跳过）。
+   *
+   * 为什么必须真付一次往返：CSS 由 Playwright 原生执行，`locator(sel)` 本身**不解析**
+   * 选择器（解析在 driver 侧），所以只有一次 `count()` 才能把「非法选择器」与「合法但
+   * 零命中」分开——前者此前被吞成 `""`/`[]`（假数据，最危险的静默形态），后者必须继续
+   * 是 `""`/`[]`。代价：每次抽取 ≤ 1 + 字段数 次往返。
+   *
+   * 只把**解析错误**当配置错：掉帧/超时/页面已关闭等异常维持旧行为（绝不把执行面故障
+   * 误报成选择器错）。`"."`（行自身）/`:scope`/`@attr` 不是子选择器，跳过。
+   */
+  const SELECTOR_PARSE_ERROR_RE =
+    /(parsing (?:css )?selector|unexpected token|unknown engine|invalid (?:css )?selector|not a valid (?:css )?selector)/i;
+
+  const selectorParseProblem = async (frame: FrameLike, selector: string): Promise<string | null> => {
+    if (typeof frame.locator !== "function") return null;   // 替身页没有 locator：维持旧行为
+    try {
+      await frame.locator(selector).count();
+      return null;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return SELECTOR_PARSE_ERROR_RE.test(msg) ? msg : null;
+    }
+  };
+
+  const checkExtractSelectors = async (
+    p: PageLike, rowSelector: string, fields: Record<string, string>, call: string,
+  ): Promise<void> => {
+    const frame = framesOf(p)[0]!;
+    const rowBad = await selectorParseProblem(frame, rowSelector);
+    if (rowBad !== null) {
+      throw new StopError("config_error",
+        `${call}: row selector ${JSON.stringify(rowSelector)} is not valid: ${rowBad}`,
+        { bad_selector: { selector: rowSelector } });
+    }
+    for (const [field, cellSel] of Object.entries(fields)) {
+      if (cellSel === "." || cellSel === ":scope" || (cellSel.startsWith("@") && cellSel.length > 1)) continue;
+      const bad = await selectorParseProblem(frame, cellSel);
+      if (bad !== null) {
+        throw new StopError("config_error",
+          `${call}: field ${JSON.stringify(field)} selector ${JSON.stringify(cellSel)} is not valid: ${bad}`,
+          { bad_selector: { selector: cellSel, field } });
+      }
+    }
+  };
+
+  /**
    * 行抽取的**唯一实现**（`ctx.extract` 与 `ctx.collect` 共用）：对当前 DOM 取行对象。
    * 字段值 = 行内相对选择器的文本投影（表单控件回退 inputValue；"." = 行自身文本）。
-   * 返回 `{ rows, total }`：`total` = 当前匹配行总数（截断对账用）。
+   * 返回 `{ rows, total, truncated }`：`rows` = `all.slice(offset, offset + cap)`，
+   * `total` = 当前匹配行总数，`truncated` = 本页之后还有行（`offset + rows.length < total`）。
+   * C1：`offset` 只改读取起点；`offset = 0` 与引入分页之前逐字节一致（同一段 slice）。
+   * C2：入口先做一次选择器解析预检（`opts.prevalidated` = 调用方已在入口校验过，如 collect
+   * 的循环）；非法选择器 = 结构化 `config_error` + `diagnostics.bad_selector`。
    */
   const readRows = async (
-    rowSelector: string, fields: Record<string, string>, cap = 500,
-  ): Promise<{ rows: Array<Record<string, string>>; total: number }> => {
+    rowSelector: string, fields: Record<string, string>, cap = 500, offset = 0,
+    opts: { call?: string; prevalidated?: boolean } = {},
+  ): Promise<{ rows: Array<Record<string, string>>; total: number; truncated: boolean }> => {
+    const call = opts.call ?? "ctx.extract";
     const p = await page();
+    if (opts.prevalidated !== true) await checkExtractSelectors(p, rowSelector, fields, call);
     const rowsLoc = await locatorAnyFrame(p, rowSelector);
     const rows: Array<Record<string, string>> = [];
-    if (rowsLoc === null) return { rows, total: 0 };
+    if (rowsLoc === null) return { rows, total: 0, truncated: false };
     const all = rowsLoc.all === undefined ? null : await rowsLoc.all();
     if (all === null) {
       throw new StopError("config_error", "ctx.extract needs a Playwright locator (locator.all() is not available here)");
     }
-    for (const row of all.slice(0, cap)) {
+    for (const row of all.slice(offset, offset + cap)) {
       const locators = row as {
         locator?: (s: string) => { first(): { innerText(o?: { timeout?: number }): Promise<string>; inputValue(o?: { timeout?: number }): Promise<string> } };
         innerText?: (o?: { timeout?: number }) => Promise<string>;
@@ -730,7 +786,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       }
       rows.push(rec);
     }
-    return { rows, total: all.length };
+    return { rows, total: all.length, truncated: offset + rows.length < all.length };
   };
 
   /**
@@ -1401,7 +1457,9 @@ export function createCtx(deps: CtxDeps): Ctx {
       while (true) {
         const p = await page();
         const elems = await extractElements(p as never, true, 120, { ...(hosts ? { hosts } : {}) });
-        const cand = hintCandidates(hint, elems);
+        const cand = hintCandidates(hint, elems, {
+          ...(deps.attrValueMatch === undefined ? {} : { attrValueMatch: deps.attrValueMatch }),
+        });
         count = cand === null ? 0 : cand.refs.length;
         if (count > 0) { found = true; break; }
         const now = Date.now();
@@ -1491,7 +1549,9 @@ export function createCtx(deps: CtxDeps): Ctx {
       throw new StopError("config_error", "ctx.rows is closed in v1 (Q5: no new extraction grammar); "
         + "declare named row extraction in meta.site.listExtract and call ctx.extract(name)");
     },
-    extract: async (nameOrSpec) => {
+    extract: async (nameOrSpec, extractOpts) => {
+      // C1：offset 只认第二参（写进 spec 在 validateExtractOptions 里结构化指路）。
+      const offset = validateExtractOptions(nameOrSpec, extractOpts);
       let spec: { rows: string; fields: Record<string, string>; maxItems?: number };
       if (typeof nameOrSpec === "string") {
         if (!nameOrSpec.trim()) throw new StopError("config_error", "ctx.extract: name must be a non-empty string");
@@ -1513,8 +1573,18 @@ export function createCtx(deps: CtxDeps): Ctx {
       }
       const extractName = typeof nameOrSpec === "string" ? nameOrSpec : `inline:${spec.rows}`;
       const cap = Math.max(1, Math.min(500, Math.floor(spec.maxItems ?? 500)));
-      const found = await readRows(spec.rows, spec.fields, cap);
-      pushEvent(trace, { call: "extract", desc: extractName, result: { rows: found.rows, truncated: found.total > cap } });
+      const found = await readRows(spec.rows, spec.fields, cap, offset);
+      // C1：total 经注入的观测口回写（返回类型不变）；未注入 = 不写（run/dry/replay 零影响）。
+      if (deps.extractStats !== undefined) deps.extractStats.total = found.total;
+      pushEvent(trace, {
+        call: "extract", desc: extractName,
+        result: {
+          rows: found.rows,
+          // offset=0 时与分页之前逐字节一致（`rows.length < total` ⇔ 旧的 `total > cap`）。
+          truncated: found.truncated,
+          ...(offset > 0 ? { offset } : {}),
+        },
+      });
       return found.rows;
     },
     collect: async (req) => {
@@ -1530,21 +1600,11 @@ export function createCtx(deps: CtxDeps): Ctx {
       const maxRows = "maxRows" in until ? (until.maxRows ?? 500) : 500;
       const dedupe = req.dedupe !== false;
       const maxRounds = req.maxRounds ?? 30;
-      // 行选择器语法在真跑里也要响亮（dry 面已校验形状，但 CSS 非法只有浏览器知道）。
-      try {
-        const bad = await p.evaluate!((sel: string) => {
-          const g = globalThis as unknown as { document?: { querySelectorAll(s: string): unknown } };
-          try { g.document?.querySelectorAll(sel); return null; } catch (e) {
-            return e instanceof Error ? e.message : String(e);
-          }
-        }, req.row);
-        if (typeof bad === "string" && bad) {
-          throw new StopError("config_error", `ctx.collect: row selector ${JSON.stringify(req.row)} is invalid (${bad})`);
-        }
-      } catch (e) {
-        if (e instanceof StopError) throw e;
-        // 页面不可读时让下面的抽取给出诚实结果（不把 record 面故障当选择器错误）。
-      }
+      // C2：行/字段选择器的唯一预检就在**入口这一处**（循环内不重复、每次轮询零额外往返）。
+      // 旧实现在这里用 DOM `querySelectorAll` 预检，会把 Playwright 自己的选择器扩展
+      //（`:has-text(...)` 等）误判成非法——现在与 extract 走同一个 Playwright 解析面
+      //（`locator(sel).count()`），顺带修掉那个旧行为。
+      await checkExtractSelectors(p, req.row, fields, "ctx.collect");
       const rows: Array<Record<string, string>> = [];
       const seen = new Set<string>();
       let rounds = 0;
@@ -1558,7 +1618,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       let stopReason: CollectStopReason = "budget";
       while (rounds < maxRounds) {
         rounds += 1;
-        const found = await readRows(req.row, fields, maxRows);
+        const found = await readRows(req.row, fields, maxRows, 0, { call: "ctx.collect", prevalidated: true });
         addedLastRound = 0;
         for (const row of found.rows) {
           const key = JSON.stringify(row);

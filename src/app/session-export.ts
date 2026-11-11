@@ -15,7 +15,11 @@
  *   {"type":"open","url":…,"title":…}                     入口页（meta.site.pages.entry 来源）
  *   {"type":"mark","note":…}                              人工标记（转成 flow 注释）
  *   {"i":N,"op":"click|check|fill|select|hover|scroll", "target":…, "to"?,"by"?,
+ *    "scroll_mode"?:"container"|"into_view", "moved"?, "delta"?, "scrollTop"?,
  *    "ok":bool, "code"?, "ref", "how", "changed", "url", "observe_hints"?}
+ *   `scroll_mode` 是 B2 起的滚动语义标记：旧轨迹没有它（导出与今天逐字节一致）；
+ *   "container" = to/by 容器滚动（`ctx.scrollList`），"into_view" = 滚入视口（命令闭集的
+ *   `ctx.command("scroll", …)`，无 to）。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -28,6 +32,12 @@ export interface RecordedAction {
   target?: string | null;
   to?: string;
   by?: number;
+  /** B2：滚动语义（新轨迹才有）。缺 = 旧轨迹（导出走既有映射）。 */
+  scroll_mode?: "container" | "into_view";
+  /** B2：引擎实测的滚动事实（只回显进注释，不参与生成动作）。 */
+  moved?: boolean;
+  delta?: number;
+  scrollTop?: number;
   ok: boolean;
   code?: string;
   reason?: string;
@@ -148,6 +158,12 @@ export function readRecord(file: string): {
       ...(typeof parsed["target"] === "string" ? { target: parsed["target"] } : {}),
       ...(typeof parsed["to"] === "string" ? { to: parsed["to"] } : {}),
       ...(typeof parsed["by"] === "number" ? { by: parsed["by"] } : {}),
+      ...(parsed["scroll_mode"] === "container" || parsed["scroll_mode"] === "into_view"
+        ? { scroll_mode: parsed["scroll_mode"] as "container" | "into_view" }
+        : {}),
+      ...(typeof parsed["moved"] === "boolean" ? { moved: parsed["moved"] } : {}),
+      ...(typeof parsed["delta"] === "number" ? { delta: parsed["delta"] } : {}),
+      ...(typeof parsed["scrollTop"] === "number" ? { scrollTop: parsed["scrollTop"] } : {}),
       ok: parsed["ok"] === true,
       ...(typeof parsed["code"] === "string" ? { code: parsed["code"] } : {}),
       ...(typeof parsed["reason"] === "string" ? { reason: parsed["reason"] } : {}),
@@ -253,8 +269,45 @@ export function buildAppSource(input: {
     }
     body.push(`  //   替换下面的占位符 ${js(EXPORT_DONE_PLACEHOLDER)} 后，真跑才会认完成。`);
     if (a.op === "scroll") {
-      // scroll 在 session 里是纯 DOM 滚动原语（元素 scrollIntoView / document scrollTop），
-      // 导出用同一族原语 scrollList（各计 1 flow step），不伪装成点击。
+      if (a.scroll_mode === "into_view" || a.scroll_mode === "container") {
+        // B2：新轨迹带 scroll_mode，按**实际发生的那一种**滚动导出。旧轨迹（无 mode）走下面
+        // 既有映射，逐字节不变。
+        const scrollTarget = a.target !== undefined && a.target !== "" ? a.target : "document";
+        const fact = `moved=${a.moved === true}${a.delta === undefined ? "" : ` delta=${a.delta}`}`
+          + `${a.scrollTop === undefined ? "" : ` scrollTop=${a.scrollTop}`}`;
+        if (a.scroll_mode === "into_view") {
+          // 滚入视口 = 命令闭集里**不带 to** 的 scroll（与 run 命令步同一条执行路径：
+          // `_executeElement` 的 scroll 分支 → scrollIntoViewIfNeeded），不是容器滚动。
+          body.push(
+            `  // scroll 导出为命令闭集的 scroll（无 to = 滚入视口；轨迹事实 ${fact}）：`,
+            `  const s${stepNo} = await ctx.step(${js(desc)}, {`,
+            `    id: ${js(id)},`,
+            `    act: [ctx.command("scroll", ${js(scrollTarget)})],`,
+            `    done: ctx.judge.url(${js(EXPORT_DONE_PLACEHOLDER)}),`,
+            `  });`,
+            `  if (!s${stepNo}.ok) ctx.fail(s${stepNo}.stopCode ?? "step_failed", s${stepNo}.reason);`,
+            "",
+          );
+          continue;
+        }
+        // 容器滚动 = `ctx.scrollList`（to/by 语义与 `_scrollWithLoc` 同一实现，by 优先于 to）。
+        const parts: string[] = [];
+        if (typeof a.by === "number" && Number.isFinite(a.by) && a.by !== 0) parts.push(`by: ${a.by}`);
+        if (a.to === "top" || a.to === "page" || a.to === "bottom") parts.push(`to: ${js(a.to)}`);
+        if (parts.length === 0) {
+          // by=0 / 非法方向：轨迹里那次滚动不可能移动任何像素，不生成假动作。
+          body.push(`  // 轨迹里的容器滚动没有可导出的方向（${fact}），未生成动作——按现场手写。`, "");
+          continue;
+        }
+        body.push(
+          `  // scroll 导出为容器滚动原语（轨迹 scroll_mode=container；事实 ${fact}）：`,
+          `  await ctx.scrollList(${js(scrollTarget)}, { ${parts.join(", ")} });`,
+          "",
+        );
+        continue;
+      }
+      // 旧轨迹（无 scroll_mode）：scroll 是纯 DOM 滚动原语（元素 scrollIntoView / document
+      // scrollTop），导出用同一族原语 scrollList（各计 1 flow step），不伪装成点击。
       const target = a.target !== undefined && a.target !== "" && a.target !== "document" ? a.target : "document";
       const to = a.to === "top" || a.to === "page" ? a.to : "bottom";
       body.push(

@@ -21,7 +21,7 @@
 import { parseArgs } from "node:util";
 import { PlanningRules, TaskPlan } from "../engine/plan.ts";
 import { runPlan, type PlannerLike } from "../engine/planner.ts";
-import { SIGNAL_OPS, checkSignal, validateSignalSpec, type SignalSpec } from "../engine/signals.ts";
+import { SIGNAL_OPS, checkSignal, signalProblemText, validateSignalSpec, type SignalSpec } from "../engine/signals.ts";
 import { browserSession, BrowserMiddleware, type EscalatorLike } from "../engine/executor.ts";
 import { extractElements } from "../engine/extraction.ts";
 import { getAuditor, type AuditVerdict } from "../engine/audit.ts";
@@ -63,13 +63,10 @@ export function parseSignal(s: string): SignalSpec {
     spec = { [op]: [sel, rest.join("|")] };
   }
   // U4：解析期就拒绝真空操作数——手写 `--signal url_contains=` / `text=#h1|` 曾经被
-  // 静默接受，运行期该信号恒真 ⇒ 零动作假过。语法只有一份（validateSignalSpec）。
+  // 静默接受，运行期该信号恒真 ⇒ 零动作假过。语法只有一份（validateSignalSpec）；
+  // C3：合法写法提示也只有一份（signals.ts 的 SIGNAL_SHAPE_HINT），示例串与改动前逐字一致。
   const problems = validateSignalSpec(spec, "signal");
-  if (problems.length) {
-    throw new Error(`${problems[0]}；合法写法：`
-      + `--signal url_contains=page2 / --signal css_exists=#main / `
-      + `--signal css_exists_text=#h1|Saved / --signal css_value_equals=#i|0 / --signal manual`);
-  }
+  if (problems.length) throw new Error(signalProblemText(problems, "cli"));
   return spec;
 }
 

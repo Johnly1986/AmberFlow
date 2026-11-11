@@ -22,6 +22,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { buildEnv, cliArgs, type BridgeOptions } from './bridge.ts'
+import { clampElementMax, ELEMENT_DEFAULT_MAX, projectElementViews } from './element-view.ts'
 
 /** 缺省 idle TTL（Lead 裁决 Q3：桥独占 300s，CLI 兜底 600s）。 */
 export const DEFAULT_SESSION_IDLE_MS = 300_000
@@ -33,10 +34,15 @@ export const CLI_ORPHAN_IDLE_MS = 600_000
 export const DEFAULT_OP_TIMEOUT_MS = 60_000
 /** `open` 的读超时（首次启动浏览器 + 导航）。 */
 export const DEFAULT_OPEN_TIMEOUT_MS = 120_000
-/** 返回体有界裁剪（与设计 §6 一致）。 */
-export const OBSERVE_MAX_ELEMENTS = 40
-export const OBSERVE_MAX_HINTS = 3
+/** 返回体有界裁剪（与设计 §6 一致）。observe 的元素行 cap/截断合同在 `./element-view.ts`。 */
 export const EXTRACT_MAX_ROWS = 20
+/**
+ * C1：`save:true` 时桥内翻页的**每页行数**（引擎 extract 的 maxItems 上限同为 500）
+ * 与硬顶（2000 行 / 4MB）——超过硬顶如实标 `truncated`，不假装取全。
+ */
+export const SAVE_PAGE = 500
+export const SAVE_MAX = 2000
+export const SAVE_MAX_BYTES = 4 * 1024 * 1024
 export const READ_MAX_CHARS = 2000
 export const STDERR_TAIL_BYTES = 2048
 
@@ -97,6 +103,8 @@ interface SessionState {
   title?: string | undefined
   actions: number
   requests: number
+  /** C1：本会话已落盘的 extract 文件数（`extract-<n>.json` 的 n，从 1 起）。 */
+  extractSaves: number
   dead: boolean
   deadReason?: string | undefined
   /** 已解析的第一条响应（auto-open 的 `{id:null,type:"open"}`）；ready 前到达的行进这里。 */
@@ -124,6 +132,8 @@ export interface SessionToolArgs {
   record?: boolean
   act_op?: string
   target?: string
+  /** A2：不传 = 引擎缺省 fail（歧义不执行）；`"act"` 恢复旧行为。只在有值时透传。 */
+  on_ambiguous?: 'fail' | 'act'
   value?: unknown
   to?: 'bottom' | 'top' | 'page'
   by?: number
@@ -133,6 +143,10 @@ export interface SessionToolArgs {
   rows?: string
   fields?: Record<string, string>
   max_items?: number
+  /** C1：extract 续页起点（0-based 整数 0..10000；与 max_items 一起分页）。 */
+  offset?: number
+  /** C1：extract save:true = 桥内翻页取全并落盘（每页 ≤500，硬顶 2000 行/4MB）。 */
+  save?: boolean
   signal?: Record<string, unknown>
   timeout_ms?: number
   max?: number
@@ -346,6 +360,7 @@ export class SessionManager {
       url,
       actions: 0,
       requests: 0,
+      extractSaves: 0,
       dead: false,
       exitPromise: Promise.resolve(),
       closing: false,
@@ -585,7 +600,9 @@ export class SessionManager {
   /* ------------------------------------------------------------ 各 op */
 
   private async observe(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
-    const max = Math.max(1, Math.min(OBSERVE_MAX_ELEMENTS, Math.floor(args.max ?? OBSERVE_MAX_ELEMENTS)))
+    // 元素行投影走共享合同（element-view.ts）：与 …_inspect 同形同义（hint_candidates /
+    // why_not_admitted / 同一 cap 表）。这里只决定行数钳制与信封字段，不手写字段裁剪。
+    const max = clampElementMax(args.max, ELEMENT_DEFAULT_MAX)
     const response = await this.request(state, {
       type: 'observe',
       max,
@@ -593,28 +610,19 @@ export class SessionManager {
       ...(args.include_hidden === undefined ? {} : { includeHidden: args.include_hidden }),
     })
     if (response['ok'] !== true) return this.engineFailure(response, 'observe')
-    const elements = Array.isArray(response['elements']) ? response['elements'] : []
-    const rows = elements.slice(0, OBSERVE_MAX_ELEMENTS).map((raw) => {
-      const el = isObj(raw) ? raw : {}
-      const hints = Array.isArray(el['hint_candidates']) ? el['hint_candidates'].filter((h): h is string => typeof h === 'string') : []
-      return {
-        ref: typeof el['ref'] === 'string' ? el['ref'] : undefined,
-        tag: typeof el['tag'] === 'string' ? el['tag'] : '',
-        ...(typeof el['label'] === 'string' && el['label'] !== '' ? { label: clip(el['label'], 80) } : {}),
-        ...(typeof el['role'] === 'string' && el['role'] !== '' ? { role: el['role'] } : {}),
-        ...(typeof el['href'] === 'string' && el['href'] !== '' ? { href: clip(el['href'], 160) } : {}),
-        admitted: el['admitted'] === true,
-        hints: hints.slice(0, OBSERVE_MAX_HINTS),
-      }
-    })
+    const { elements, truncated } = projectElementViews(response['elements'], max)
+    const counts = isObj(response['counts']) ? response['counts'] : undefined
     return {
       ok: true,
       op: 'observe',
       session_id: state.id,
       url: response['url'],
-      counts: response['counts'],
-      truncated: response['truncated'],
-      elements: rows,
+      ...(typeof response['title'] === 'string' ? { title: response['title'] } : {}),
+      ...(Array.isArray(response['frames']) ? { frames: response['frames'] } : {}),
+      ...(counts !== undefined ? { counts } : {}),
+      truncated,
+      elements,
+      ...(Array.isArray(response['frame_counts']) ? { frame_counts: response['frame_counts'] } : {}),
     }
   }
 
@@ -632,17 +640,42 @@ export class SessionManager {
       throw new SessionToolError('config_error', `act op '${actOp}' needs a value parameter (the tool never invents values)`)
     }
     const body: Record<string, unknown> = { type: 'act', op: actOp, target: args.target ?? '' }
+    // A2：歧义策略只在显式给值时进请求体（缺省由引擎给 fail）；引擎/CLI 仍是唯一的语义面，
+    // 桥只做形状校验 + 透传。
+    if (args.on_ambiguous !== undefined) {
+      const mode: unknown = args.on_ambiguous
+      if (mode !== 'fail' && mode !== 'act') {
+        throw new SessionToolError('config_error', `on_ambiguous must be one of fail | act (got ${JSON.stringify(args.on_ambiguous)})`, {
+          allowed_modes: ['fail', 'act'],
+        })
+      }
+      body['onAmbiguous'] = mode
+    }
     if (args.value !== undefined) body['value'] = args.value
     if (args.to !== undefined) body['to'] = args.to
     if (args.by !== undefined) body['by'] = args.by
+    // B1：失败截图 opt-in（缺省不传 = 会话不碰截图；只在动作失败时落盘）。
+    if (args.screenshot === true) body['screenshot'] = true
     const response = await this.request(state, body)
     const base = { op: 'act', session_id: state.id, act_op: actOp, target: args.target ?? null }
     // task-36：歧义诊断**原样透传**（引擎有这些键才出现）——交互试错第一诉求是"为什么点错/
     // 是不是多个候选"，而 CLI 会话面已经用 B1 旁路算好了；bridge 只做有界映射，不重算、不猜。
     // 语义纪律：ambiguous 是**诊断事实**不是错误（ok:true 也回显）；缺键 = 精确形状，响应不变。
     const ambiguity = this.ambiguityDiagnostics(response)
+    // B2：滚动证据（moved/delta/scroll）同样只透传、不重算——引擎给什么就回什么（成功/失败
+    // 同一口径：not_scrollable 也带 moved:false 与当时的容器几何）。
+    const scroll = this.scrollDiagnostics(response)
     if (response['ok'] !== true) {
-      return { ...this.engineFailure(response, 'act'), ...ambiguity, ...base }
+      // B1：被遮挡/超时失败现场 + opt-in 失败截图路径（只在引擎给了才出现；不内联图片）。
+      const actionability = this.actionabilityEvidence(response['actionability'])
+      return {
+        ...this.engineFailure(response, 'act'),
+        ...ambiguity,
+        ...scroll,
+        ...(actionability === undefined ? {} : { actionability }),
+        ...(typeof response['screenshot_file'] === 'string' ? { screenshot_file: response['screenshot_file'] } : {}),
+        ...base,
+      }
     }
     return {
       ok: true,
@@ -652,9 +685,39 @@ export class SessionManager {
       how: response['how'] ?? null,
       changed: response['changed'] === true,
       url: response['url'] ?? state.url,
+      ...scroll,
       ...(isObj(response['after']) ? { after: response['after'] } : {}),
       ...ambiguity,
     }
+  }
+
+  /**
+   * B2：act 滚动证据的有界透传（引擎响应里有才有；不重算 moved/delta、不补字段）。
+   *
+   * 来源：`mw.scrollIntoView` / `mw.scrollContainer` / `mw.scrollDocument` 的**实测**读数——
+   * `moved` 是容器 scrollTop 前后差非零，`delta` 是差值，`scroll` 是容器三件套（三个都在
+   * 才算数）。像素值取整并夹到非负（DOM scrollTop/scrollHeight/clientHeight 的取值面），
+   * 只是有界化，不改变事实。
+   */
+  private scrollDiagnostics(response: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = {}
+    if (typeof response['moved'] === 'boolean') out['moved'] = response['moved']
+    if (typeof response['delta'] === 'number' && Number.isFinite(response['delta'])) {
+      out['delta'] = Math.round(response['delta'])
+    }
+    const raw = response['scroll']
+    if (isObj(raw)) {
+      const geo: Record<string, number> = {}
+      for (const key of ['scrollTop', 'scrollHeight', 'clientHeight'] as const) {
+        const v = raw[key]
+        if (typeof v === 'number' && Number.isFinite(v)) geo[key] = Math.max(0, Math.round(v))
+      }
+      if (typeof geo['scrollTop'] === 'number' && typeof geo['scrollHeight'] === 'number'
+        && typeof geo['clientHeight'] === 'number') {
+        out['scroll'] = geo
+      }
+    }
+    return out
   }
 
   /**
@@ -684,6 +747,35 @@ export class SessionManager {
     if (typeof response['hint_tier'] === 'number') out['hint_tier'] = response['hint_tier']
     if (response['hint_suspicious'] === true) out['hint_suspicious'] = true
     return out
+  }
+
+  /**
+   * B1：act 失败现场（`actionability`）的**有界透传**（引擎有才有；不重算、不补键）。
+   *
+   * 来源：引擎 `occludedReason` / `_readActionabilityDetail` 的 `ActionabilityDetail`——
+   * `reason`（≤200）、`bbox`（四个有限数才收，否则 `null` 照实保留）、`blocker`（≤60）、
+   * `requery`（present|detached|unknown，≤60）。bridge 只裁剪形状，不改事实。
+   */
+  private actionabilityEvidence(raw: unknown): Record<string, unknown> | undefined {
+    if (!isObj(raw)) return undefined
+    const out: Record<string, unknown> = {}
+    if (typeof raw['reason'] === 'string') out['reason'] = clip(raw['reason'], 200)
+    const bbox = raw['bbox']
+    if (isObj(bbox)) {
+      const b: Record<string, number> = {}
+      for (const key of ['x', 'y', 'width', 'height'] as const) {
+        const v = bbox[key]
+        if (typeof v === 'number' && Number.isFinite(v)) b[key] = v
+      }
+      if (Object.keys(b).length === 4) out['bbox'] = b
+    } else if (bbox === null) {
+      out['bbox'] = null
+    }
+    if (typeof raw['blocker'] === 'string') out['blocker'] = clip(raw['blocker'], 60)
+    if (raw['requery'] === 'present' || raw['requery'] === 'detached' || raw['requery'] === 'unknown') {
+      out['requery'] = raw['requery']
+    }
+    return Object.keys(out).length > 0 ? out : undefined
   }
 
   private async read(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
@@ -716,19 +808,114 @@ export class SessionManager {
     if (!isObj(args.fields) || Object.keys(args.fields).length === 0) {
       throw new SessionToolError('config_error', 'extract needs fields ({name: css | "." | "@attr"})')
     }
+    // C1：offset 只做续页起点（0-based 整数 0..10000）；非整数/越界 = config_error，不 clamp。
+    const offset = args.offset === undefined ? 0 : args.offset
+    if (typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0 || offset > 10_000) {
+      throw new SessionToolError('config_error', `extract offset must be an integer in [0, 10000] (got ${JSON.stringify(args.offset)})`, {
+        hint: 'count is the rows returned on THIS page, not the total; advance offset by count to page through.',
+      })
+    }
     const maxItems = Math.max(1, Math.min(EXTRACT_MAX_ROWS, Math.floor(args.max_items ?? EXTRACT_MAX_ROWS)))
+    const rows = args.rows
+    const fields = args.fields
     const response = await this.request(state, {
-      type: 'extract', rows: args.rows, fields: args.fields, maxItems,
+      type: 'extract', rows, fields, maxItems,
+      ...(offset > 0 ? { offset } : {}),
     })
     if (response['ok'] !== true) return this.engineFailure(response, 'extract')
-    const rows = Array.isArray(response['rows']) ? response['rows'] : []
-    return {
+    const page = Array.isArray(response['rows']) ? response['rows'] as Array<Record<string, unknown>> : []
+    const result: SessionToolResult = {
       ok: true,
       op: 'extract',
       session_id: state.id,
-      rows: rows.slice(0, EXTRACT_MAX_ROWS),
-      count: typeof response['count'] === 'number' ? response['count'] : rows.length,
+      rows: page.slice(0, EXTRACT_MAX_ROWS),
+      count: typeof response['count'] === 'number' ? response['count'] : page.length,
       capped: response['capped'] === true,
+      // C1：分页事实只在引擎给的时候透传（capped 或 offset>0 才出现）——旧响应键集逐字节不变。
+      ...(typeof response['offset'] === 'number' ? { offset: response['offset'] } : {}),
+      ...(typeof response['total'] === 'number' ? { total: response['total'] } : {}),
+      ...(typeof response['has_more'] === 'boolean' ? { has_more: response['has_more'] } : {}),
+    }
+    if (args.save === true) {
+      const saved = await this.saveExtract(state, { rows, fields, offset })
+      if (saved.ok !== true) return saved.response
+      Object.assign(result, saved.fields)
+    }
+    return result
+  }
+
+  /**
+   * C1：`save:true` 的桥内翻页（**只组合，不新增引擎语义**）——每页一个 `extract` 请求
+   * （maxItems = SAVE_PAGE、offset 递增），终止判据来自引擎的 `has_more`；引擎没给
+   * （本页未被 cap 且 offset=0）就按「本页行数 < 页大小 = 末页」。硬顶 2000 行 / 4MB，
+   * 超过就少写并如实标 `truncated` + `save_limit`——绝不假装取全。
+   *
+   * 文件名 `<evidenceRoot>/<session_id>/extract-<n>.json`，n 是本会话的落盘序号（从 1 起）。
+   * 文件是合法 JSON：`{session_id, rows_selector, fields, offset, saved, truncated?, save_limit?, rows:[…]}`，
+   * 一行一个行对象（便于直接看/数行，也不把 2000 行压成一行）。
+   */
+  private async saveExtract(
+    state: SessionState,
+    req: { rows: string; fields: Record<string, string>; offset: number },
+  ): Promise<{ ok: true; fields: Record<string, unknown> } | { ok: false; response: SessionToolResult }> {
+    /** 每行格式 = `<compact JSON>,\n`；元数据/括号预留（字段名很长的极端场景由收尾字节校验兜底）。 */
+    const OVERHEAD = 4096
+    const serialized: string[] = []
+    let offset = req.offset
+    let bytes = 0
+    let stop: 'end' | 'max_rows' | 'max_bytes' = 'end'
+    for (;;) {
+      const page = await this.request(state, {
+        type: 'extract', rows: req.rows, fields: req.fields, maxItems: SAVE_PAGE,
+        ...(offset > 0 ? { offset } : {}),
+      })
+      if (page['ok'] !== true) return { ok: false, response: this.engineFailure(page, 'extract') }
+      const pageRows = Array.isArray(page['rows']) ? (page['rows'] as unknown[]) : []
+      for (const row of pageRows) {
+        if (serialized.length >= SAVE_MAX) { stop = 'max_rows'; break }
+        const json = JSON.stringify(row)
+        const rowBytes = Buffer.byteLength(json, 'utf8') + 2
+        if (bytes + rowBytes + OVERHEAD > SAVE_MAX_BYTES) { stop = 'max_bytes'; break }
+        serialized.push(json)
+        bytes += rowBytes
+      }
+      if (stop !== 'end') break
+      const hasMore = typeof page['has_more'] === 'boolean' ? page['has_more'] : pageRows.length >= SAVE_PAGE
+      if (!hasMore || pageRows.length === 0) break
+      offset += pageRows.length
+    }
+    /** 合法 JSON（`rows` 一行一个对象）：`header` + `"rows":[\n` + rows + `\n]}\n`。 */
+    const render = (rows: string[]): string => {
+      const meta = JSON.stringify({
+        session_id: state.id,
+        rows_selector: req.rows,
+        fields: req.fields,
+        offset: req.offset,
+        saved: rows.length,
+        truncated: stop !== 'end',
+        ...(stop === 'end' ? {} : { save_limit: stop }),
+      })
+      return `${meta.slice(0, -1)},"rows":[\n${rows.join(',\n')}\n]}\n`
+    }
+    let text = render(serialized)
+    while (Buffer.byteLength(text, 'utf8') > SAVE_MAX_BYTES && serialized.length > 0) {
+      serialized.pop()
+      stop = 'max_bytes'
+      text = render(serialized)
+    }
+    const n = state.extractSaves + 1
+    state.extractSaves = n
+    const file = path.join(this.evidenceRoot, state.id, `extract-${n}.json`)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, text, 'utf8')
+    return {
+      ok: true,
+      fields: {
+        file,
+        saved: serialized.length,
+        bytes: Buffer.byteLength(text, 'utf8'),
+        ...(stop === 'end' ? {} : { truncated: true, save_limit: stop }),
+      },
     }
   }
 
@@ -797,13 +984,90 @@ export class SessionManager {
   }
 
   private engineFailure(response: Record<string, unknown>, op: string): SessionToolResult {
+    const ambiguity = this.ambiguityEvidence(response['ambiguity'])
+    // A4：落空判别证据（引擎有才有；act 的 target_not_found 路径）。其它 op 的失败不带它。
+    const diagnostics = this.missDiagnosticsEvidence(response['diagnostics'])
     return {
       ok: false,
       op,
       code: typeof response['code'] === 'string' ? response['code'] : 'engine_error',
       reason: typeof response['reason'] === 'string' ? clip(response['reason'], 1000) : '',
+      // C2：引擎的机器可读错误标记原样透传（extract/observe 的 `error:"bad_selector"`；
+      // 其它失败面不设置 ⇒ 键集与之前逐字节一致）。桥不重算/不补键。
+      ...(response['error'] === 'bad_selector' ? { error: 'bad_selector' as const } : {}),
       session_alive: true,
+      ...(ambiguity === undefined ? {} : { ambiguity }),
+      ...(diagnostics === undefined ? {} : { diagnostics }),
     }
+  }
+
+  /**
+   * A4：落空判别证据的**有界透传**（引擎有才有；不重算、不补键、不改语义）。
+   *
+   * 上限：`candidates` ≤3、`near` ≤3、`rejected` ≤2 行；每行 `ref`/`tag` ≤16、`label`/`why`
+   * ≤40；`hint_shape` ≤32。缺键 = 引擎没提供，桥不发明（与 `ambiguityEvidence` 同一纪律）。
+   */
+  private missDiagnosticsEvidence(raw: unknown): Record<string, unknown> | undefined {
+    if (!isObj(raw)) return undefined
+    const out: Record<string, unknown> = {}
+    if (typeof raw['target'] === 'string') out['target'] = raw['target']
+    if (typeof raw['pool_size'] === 'number') out['pool_size'] = raw['pool_size']
+    if (typeof raw['hint_shape'] === 'string') out['hint_shape'] = clip(raw['hint_shape'], 32)
+    if (typeof raw['hint_len'] === 'number') out['hint_len'] = raw['hint_len']
+    const rows = (key: string, cap: number): Array<Record<string, unknown>> | undefined => {
+      const list = raw[key]
+      if (!Array.isArray(list)) return undefined
+      return list.slice(0, cap).map((entry) => {
+        const row = isObj(entry) ? entry : {}
+        const projected: Record<string, unknown> = {}
+        if (typeof row['ref'] === 'string') projected['ref'] = clip(row['ref'], 16)
+        if (typeof row['tag'] === 'string') projected['tag'] = clip(row['tag'], 16)
+        if (typeof row['label'] === 'string') projected['label'] = clip(row['label'], 40)
+        if (typeof row['why'] === 'string') projected['why'] = clip(row['why'], 40)
+        return projected
+      })
+    }
+    const candidates = rows('candidates', 3)
+    if (candidates !== undefined) out['candidates'] = candidates
+    const near = rows('near', 3)
+    if (near !== undefined) out['near'] = near
+    const rejected = rows('rejected', 2)
+    if (rejected !== undefined) out['rejected'] = rejected
+    return Object.keys(out).length > 0 ? out : undefined
+  }
+
+  /**
+   * A2：`ambiguity` 证据的**有界透传**（引擎有才有；不重算、不补键、不改语义）。
+   *
+   * 上限与引擎侧同一张表：候选 ≤5 行、ref/tag/role ≤16、label/class/near ≤40、
+   * suggested_hint ≤80、target ≤120。缺键 = 引擎没提供，桥不发明。
+   */
+  private ambiguityEvidence(raw: unknown): Record<string, unknown> | undefined {
+    if (!isObj(raw)) return undefined
+    const out: Record<string, unknown> = {}
+    if (typeof raw['target'] === 'string') out['target'] = clip(raw['target'], 120)
+    if (raw['source'] === 'pool' || raw['source'] === 'dom_fallback') out['source'] = raw['source']
+    if (typeof raw['tier'] === 'number') out['tier'] = raw['tier']
+    if (typeof raw['would_act_ref'] === 'string') out['would_act_ref'] = clip(raw['would_act_ref'], 16)
+    if (typeof raw['candidates_total'] === 'number') out['candidates_total'] = raw['candidates_total']
+    if (typeof raw['truncated'] === 'boolean') out['truncated'] = raw['truncated']
+    if (Array.isArray(raw['candidates'])) {
+      out['candidates'] = raw['candidates'].slice(0, 5).map((rawRow) => {
+        const row = isObj(rawRow) ? rawRow : {}
+        const projected: Record<string, unknown> = {}
+        if (typeof row['ref'] === 'string') projected['ref'] = clip(row['ref'], 16)
+        if (typeof row['tag'] === 'string') projected['tag'] = clip(row['tag'], 16)
+        if (typeof row['role'] === 'string') projected['role'] = clip(row['role'], 16)
+        if (typeof row['label'] === 'string') projected['label'] = clip(row['label'], 40)
+        if (typeof row['class'] === 'string') projected['class'] = clip(row['class'], 40)
+        if (typeof row['near'] === 'string') projected['near'] = clip(row['near'], 40)
+        if (typeof row['frame'] === 'number') projected['frame'] = row['frame']
+        if (typeof row['same_label'] === 'boolean') projected['same_label'] = row['same_label']
+        if (typeof row['suggested_hint'] === 'string') projected['suggested_hint'] = clip(row['suggested_hint'], 80)
+        return projected
+      })
+    }
+    return Object.keys(out).length > 0 ? out : undefined
   }
 
   /* ------------------------------------------------------------ 关闭 / 杀进程树 */

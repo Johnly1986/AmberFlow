@@ -24,7 +24,7 @@
  */
 import { frameInHostsEnvelope, framesOf, type Elem, type ElemPool, type PageLike } from "./extraction.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
-import { hintCandidates } from "./rules.ts";
+import { hintCandidates, type HintMatchOptions } from "./rules.ts";
 import { parseHint } from "./hint.ts";
 
 /** P0-C：一个 DOM 侧候选（歧义/隐藏诊断用；只放人读字段，不放 locator）。 */
@@ -103,6 +103,7 @@ const ATTR_COLLECT_JS = (arg: { sel: string; tok: string; frame: number }) => {
     const stamp = `${arg.tok}-${arg.frame}-${i}`;
     try { e.setAttribute("data-hintref", stamp); } catch { /* 只读节点：按未盖章处理 */ }
     out.push({
+      // A1 不变量：label === full_label 的前 40 字（同一 full 截断）。
       i, stamp, tag, full_label: full, label: full.slice(0, 40),
       role: String(e.getAttribute("role") || "").toLowerCase(),
       id: String(e.id || ""),
@@ -177,6 +178,7 @@ const TEXT_COLLECT_JS = (arg: { token: string; tok: string; frame: number }) => 
     const stamp = `${arg.tok}-${arg.frame}-${i}`;
     try { e.setAttribute("data-hintref", stamp); } catch { /* 只读节点：按未盖章处理 */ }
     out.push({
+      // A1 不变量：label === full_label 的前 40 字（同一 full 截断）。
       i, stamp, tag: String(e.tagName || "").toLowerCase(), full_label: full, label: full.slice(0, 40),
       role: String(e.getAttribute("role") || "").toLowerCase(),
       id: String(e.id || ""),
@@ -235,6 +237,8 @@ export async function declaredLookup(
   op = "click",
   surfacePolicy: SurfacePolicy = { native_activation: "window" },
   hosts?: string[] | null,
+  /** A1：与池侧同一口径的属性值匹配底座（run 面按 `meta.policy.attr_value_match` 传）。 */
+  hintOpts?: HintMatchOptions,
 ): Promise<DeclaredResolveResult> {
   const parsed = typeof hint === "string" && hint.trim() ? parseHint(hint) : null;
   const mode: "attr" | "text" = parsed?.kind === "bare" ? "text" : "attr";
@@ -294,7 +298,7 @@ export async function declaredLookup(
       const ref = `p${fi}:${String(row["i"])}`;
       pool[ref] = rowToElem(ref, fi, row);
     }
-    const cand = hintCandidates(hint, pool);
+    const cand = hintCandidates(hint, pool, hintOpts);
     if (cand === null) { await cleanup(); return out; }
     const want = new Set(cand.refs);
     matched = collected.filter(({ fi, row }) => want.has(`p${fi}:${String(row["i"])}`));

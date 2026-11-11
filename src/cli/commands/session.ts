@@ -135,6 +135,8 @@ export async function runSessionCommand(args: string[], ctx: CliContext): Promis
         "record-values": { type: "boolean" },
         "idle-timeout-ms": { type: "string" },
         "max-request-bytes": { type: "string" },
+        // A2：act 缺省歧义策略（fail = 歧义不执行；act = 恢复旧行为）。
+        "on-ambiguous": { type: "string" },
       },
     });
   } catch (err) {
@@ -165,6 +167,14 @@ export async function runSessionCommand(args: string[], ctx: CliContext): Promis
   };
   const idleTimeoutMs = num(v["idle-timeout-ms"], "--idle-timeout-ms", 0, 24 * 60 * 60 * 1000, true);
   const maxRequestBytes = num(v["max-request-bytes"], "--max-request-bytes", 1024, 16 * 1024 * 1024, false);
+  // A2：--on-ambiguous 闭集 fail|act；非法值 = 用法错误（exit 2 系），不静默取缺省。
+  const onAmbiguousRaw = v["on-ambiguous"];
+  if (onAmbiguousRaw !== undefined && onAmbiguousRaw !== "fail" && onAmbiguousRaw !== "act") {
+    throw usageError(`--on-ambiguous 需要 fail 或 act（拿到 ${JSON.stringify(onAmbiguousRaw)}）`, {
+      hint: "缺省 fail（歧义不执行，回结构化 target_ambiguous + 候选证据）；act 恢复旧行为（直接执行可行动优先的第一个候选）。",
+      next: ["amber session --help"],
+    });
+  }
 
   const sink: SessionSink = {
     // stdout 只能是协议行：一行一个 JSON 对象（不缩进，绝不混人话）。
@@ -181,6 +191,8 @@ export async function runSessionCommand(args: string[], ctx: CliContext): Promis
     // task-34：明文值只在作者显式 opt-in 时进轨迹（缺省仍只记 value_hash）。
     recordValues: v["record-values"] === true,
     inputFile: typeof v.input === "string" ? path.resolve(ctx.cwd, v.input) : null,
+    // A2：缺省 fail（会话不再在歧义上"随便点第一个"）；--on-ambiguous act 恢复旧行为。
+    onAmbiguous: onAmbiguousRaw === "act" ? "act" : "fail",
     ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }),
     ...(maxRequestBytes === undefined ? {} : { maxRequestBytes }),
     verbose: ctx.globals.verbose,

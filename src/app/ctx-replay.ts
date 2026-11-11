@@ -6,7 +6,8 @@
  * （`trace_mismatch`），版本/输入不一致由 `replayCompatibility` 在进入前拒绝。
  */
 import {
-  StopError, validateCollectRequest, validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
+  StopError, validateCollectRequest, validateExpandRequest, validateExtractOptions,
+  validateScrollListRequest, validateSetRangeRequest,
   validateSwitchTabMatch,
   type CollectCoverage, type CollectRequest, type CollectResult, type CollectStopReason,
   type Ctx, type CtxBudget, type ExpandOptions, type ExpandResult,
@@ -313,7 +314,10 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       throw new StopError("config_error", "ctx.rows is closed in v1 (Q5: no new extraction grammar); "
         + "declare named row extraction in meta.site.listExtract and call ctx.extract(name)");
     },
-    extract: async (nameOrSpec) => {
+    extract: async (nameOrSpec, extractOpts) => {
+      // C1：第二参只做声明校验（与真实/dry 同一份文案）；重放仍按 (call, desc) 对齐，
+      // 不因 offset 改变事件匹配（录制的行数据原样回放，不重新抽页面）。
+      validateExtractOptions(nameOrSpec, extractOpts);
       const desc = typeof nameOrSpec === "string"
         ? nameOrSpec
         : isObj(nameOrSpec) && typeof nameOrSpec["rows"] === "string"

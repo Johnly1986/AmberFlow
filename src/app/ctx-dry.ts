@@ -25,7 +25,7 @@ import { validateObserveOptions, type ObserveResult } from "../engine/observe.ts
 import {
   declaredRunProblems,
   normalizeCommandIds, resolveCtxUrl, sameDeclaredPageHref, sameNavTarget, StopError,
-  validateCollectRequest, validateExpandRequest, validateScrollListRequest, validateSetRangeRequest,
+  validateCollectRequest, validateExpandRequest, validateExtractOptions, validateScrollListRequest, validateSetRangeRequest,
   validateSwitchTabMatch,
   type CollectResult, type Ctx, type CtxBudget, type ExpandOptions, type ExpandResult,
   type RangeValue, type ScrollListOptions, type ScrollListResult,
@@ -523,7 +523,9 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       throw new StopError("config_error", "ctx.rows is closed in v1 (Q5: no new extraction grammar); "
         + "declare named row extraction in meta.site.listExtract and call ctx.extract(name)");
     },
-    extract: async (nameOrSpec) => {
+    extract: async (nameOrSpec, extractOpts) => {
+      // C1：dry 与真实面同一份 offset 校验（spec 里写 offset / 未知键 / 非法值都在 check 期红）。
+      const offset = validateExtractOptions(nameOrSpec, extractOpts);
       let extractName: string;
       if (typeof nameOrSpec === "string") {
         if (!nameOrSpec.trim()) throw new StopError("config_error", "ctx.extract: name must be a non-empty string");
@@ -542,7 +544,11 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
         throw new StopError("config_error",
           "ctx.extract needs a declared name or { rows, fields, maxItems? } structure");
       }
-      pushEvent(trace, { call: "extract", desc: extractName, result: { rows: [], truncated: false } });
+      // C1：dry 恒 []（没有页面）；offset 只影响真跑的读取起点，但非法声明在这里就红。
+      pushEvent(trace, {
+        call: "extract", desc: extractName,
+        result: { rows: [], truncated: false, ...(offset > 0 ? { offset } : {}) },
+      });
       return [];
     },
     run: (async (sourceOrStep: unknown, args?: string[], req?: unknown): Promise<StepResult> => {

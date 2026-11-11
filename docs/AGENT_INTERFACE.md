@@ -222,6 +222,7 @@ amber apps remove <id> [--yes] [--force]
 | `amberflow_app_show` | `amber apps show --json --code` | 路径、元数据、当前源码、版本锚点 |
 | `amberflow_app_check` | `amber apps check --json` | 加载 + dry 调用序列校验 |
 | `amberflow_inspect` | `amber inspect --json` | 只读页面观察（含 `ax` 可访问性证据块）与候选 hint |
+| `amberflow_session` | `amber session` | 跨工具调用保持页面状态的交互式试错会话（`open/observe/act/read/extract/signal/wait_for/snapshot/close/list`）；不判完成、不写 run 结果；`act` 缺省歧义零动作（见下） |
 | `amberflow_app_create` | `amber apps new … --json` | 生成 flow 骨架 |
 | `amberflow_run` | `app-runner`（与 `amber run` 同一运行器） | 运行；**桥用部署配置**决策三件套；`max_steps` 是执行预算，`timeout_sec` 是本次墙钟上限；决策通道故障时结果带恢复指引 |
 | `amberflow_learn` | `learn --json` | 一次录制 → 归纳信号 → 生成 `app.mjs` flow（回放门通过才落盘） |
@@ -278,6 +279,97 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 `--headful` / `--headless`、`--out`、`--provider`、`--max-steps`、`--timeout` 与
 `amber run` 同名同义；`--validate` / `--list` / `--dry-run` / `--tier` / `--case` /
 `--site` / `--require-all` 是测试套件专属。
+
+`amberflow_session` 的 `act` 参数（A2 歧义策略）：
+
+```json
+{ "op": "act", "session_id": "s-…", "act_op": "click", "target": "关闭",
+  "on_ambiguous": "fail" }
+```
+
+`on_ambiguous`（`fail` | `act`，缺省 `fail`）：目标 hint 命中多个**不同**候选时——`fail` = **零动作**，
+返回 `{ok:false, code:"target_ambiguous", executed:false, ambiguity}`；`ambiguity` 是有界证据
+（候选 ≤5；label/class/near ≤40、ref/tag ≤16、`suggested_hint` ≤80；另有 `would_act_ref`/
+`candidates_total`/`truncated`；`source:"dom_fallback"` 时不给 near/suggested_hint）。判据与
+`amber run` 命令步的 `target_ambiguous` **同一份**（`hintCandidates` 非空 && `decided === null` &&
+`refs.length > 1`），**run 面不受影响**。`act` = 恢复旧行为（直接执行可行动优先的第一个候选），
+仅在复现旧流程/候选确知等价时用。歧义**只停不选**：用 `observe` 的 `hint_candidates` 收窄 `target`，
+或显式 `on_ambiguous:"act"` 重放——都是人的决定；桥不据此猜测，也不自动重试。
+
+`amberflow_session` 的 `act` 失败现场（B1）：
+
+- `click`/`check` 的被遮挡证据由动作本身给出（探针即点击，无双点）：被覆盖约 0.8s 返回
+  `{ok:false, code:"not-actionable-or-covered", actionability:{reason,bbox,blocker,requery}}`；
+  探针超时且中心点无覆盖者、5s 重试仍失败 → `code:"action-timeout"` + 同一份 `actionability`。
+  非 timeout 异常**不补点**：URL 已变则按已点击返回 `how:"clicked", probe_navigated:true`，否则
+  `action_failed`。两个 code 都是既有 skip_reason 词面，不新增 stopCode。
+- `screenshot:true`（缺省 `false`）：只在失败时写 `<evidence_dir>/act-<n>-failure.png`，结果只回
+  `screenshot_file`。桥对 `actionability` 做有界透传（reason≤200、blocker/requery≤60、bbox 数值），
+  模型可见的失败行在 `actionability` 存在时追加 `blocked by <blocker> (requery=…)`。
+
+`amberflow_session` 的 `act` 落空判别（A4）：
+
+- `target_not_found` 现在带 `diagnostics`（有界事实，不猜）：`target`/`pool_size`/`hint_shape`/
+  `hint_len` + `candidates[]`（池内同档候选，≤5）/ `near[]`（池内词面近似，≤5，带 `why`）/
+  `rejected[]`（池外回退扫描到但不可见，≤3，`why:"not visible"`）；`reason` 末尾另有一行
+  `判别: …`（主 reason 前缀与停因码不变）。桥只做有界透传（candidates ≤3、near ≤3、
+  rejected ≤2、label ≤40），模型可见的失败行追加一行
+  `no match: hint <shape>/<len> pool <n> — near: tag "label" …`。
+- `candidates` 用 `hintCandidates` 的 quiet 读法（`diag:false`）——**不污染** `ambiguous`/
+  `matched_others` 回显；`near` 是纯内存前缀/包含（token 来自同一个 `parseHint`，不扩语法）；
+  `rejected` 只对既有池外回退扫描的 ≤5 行做一次可见性判定。成功路径与非落空失败键集不变，
+  run 面/命令步不传该开关，行为与产物逐字节不变。
+
+`amberflow_session` 的 `act_op:"scroll"` 语义（B2）：
+
+- 带 `to`（`bottom`|`top`|`page`）或 `by`（像素） = **容器滚动**：目标元素自身或**最近可滚动祖先**
+  滚到方向/像素（`by` 优先于 `to`；与 `ctx.scrollList`、run 的 `scroll` 命令**同一条实现**）。元素与
+  祖先都没有可滚动容器 → `{ok:false, code:"not_scrollable"}`（不是静默无操作）。
+- 不带 `to`/`by` = **滚入视口**（旧语义，`scrollIntoViewIfNeeded`）。
+- 两种都带引擎**实测**的 `moved`（滚动容器 `scrollTop` 前后差非零）、`delta`、`scroll`
+  （`{scrollTop,scrollHeight,clientHeight}`，三个都在才出现），且 `changed === moved`——
+  桥只透传、不重算。`--record` 轨迹只记实际发生的事实（滚动没走通不记 `to`/`by`；另记
+  `scroll_mode`/`moved`/`delta`/`scrollTop`，`session export` 按 `scroll_mode` 还原）。
+- **run 面不受影响**：命令步 `ctx.command("scroll", sel, {to})`、`ctx.scrollList`、`scrollDocument`
+  的语义与产物逐字节不变。
+
+`amberflow_session` 的 `extract` 分页与落盘（C1）：
+
+- **`count` 是本页返回行数，不是总数**（旧语义不变）；分页用 `offset`（0-based 整数 0..10000，
+  非法 = `config_error`）。引擎在 `capped` 或 `offset>0` 时给 `offset`/`total`/`has_more`
+  （`has_more = offset+count < total`）——把 `offset` 加上本页 `count` 续页，`has_more:false` 即到底。
+  `offset=0` 且未 cap 时响应键集与之前逐字节一致。
+- **`save:true`** = 桥内翻页取全并落盘：每页 ≤500 行、硬顶 **2000 行 / 4MB**，文件
+  `<evidence_dir>/extract-<n>.json`（n = 本会话落盘序号），结果带 `file`/`saved`/`bytes`；
+  被硬顶截断时如实给 `truncated:true` + `save_limit`（`max_rows`|`max_bytes`）。`rows` 仍只给
+  首页 ≤20 行。
+- **`observe` 没有 offset**：元素序随水合/动画变化，无稳定锚——收窄用 `selector`、放宽用
+  `max`（≤200），全量元素用 `snapshot`（`pool-<n>.json`）。模型可见渲染只在溢出时多两行
+  （observe：`… +N more (M total, K omitted)` + selector/max/snapshot 指引；extract：
+  `… +N more` + `total=T · offset=… 续页 · save:true → extract-<n>.json`），无溢出时输出不变。
+
+`amberflow_session` 的 `extract` 选择器错误（C2）：
+
+- 非法行/字段选择器不再被静默吞成 `[]`/`""`：引擎 `amber session` 的 extract 响应为
+  `{ok:false, code:"config_error", error:"bad_selector", reason, diagnostics:{bad_selector:{selector, field?}}}`
+  （与 `observe` 的 `error:"bad_selector"` 同一口径；停因码仍是 `config_error`，**不新增**）。
+  桥按既有失败投影透出 `code` + `reason`（≤1000，点名行选择器还是哪个字段）+ `error:"bad_selector"`
+  （引擎给才有）；`diagnostics.bad_selector` 留在 CLI 会话协议与 run 结果里。**合法但零命中仍是
+  `rows:[]` / 字段 `""`**。
+- 引擎在 `readRows`（`extract` 与 `collect` 的唯一实现）入口做一次 Playwright
+  `locator(sel).count()` 预检（行 + 每个字段，除 `.`/`:scope`/`@attr`），真跑/会话多
+  ≤1+字段数 次往返；只有**解析错误**才报（掉帧/超时维持旧行为）。dry 与 replay 不访问浏览器、
+  不预检（`apps check` 不受影响）。
+- 同一入口替换掉 `ctx.collect` 旧的 `document.querySelectorAll` 预检——Playwright 伪类
+  （`:has-text(...)` 等）不再被误拒。
+
+`amberflow_session` 的信号校验报错（C3）：
+
+- 引擎 `amber session` 的形状失败仍是 `{ok:false, code:"config_error", problems:[…]}`，但 `reason`
+  现在带**合法形态**提示（叶 `{op:[arg…]}` 按位置放数组；组合 `all_of`/`any_of`/`not`；对象形
+  `{selector,text}` 非法），与 CLI/加载期同一出处（`src/engine/signals.ts` 的 `SIGNAL_SHAPE_HINT`）。
+  `problems` 数组原样保留，调用方不用再拼提示；桥的失败投影给 `code` + `reason`（含同一份提示），
+  `problems` 留在引擎会话响应里。
 
 ### 3.1 决策通道：桥 vs CLI（A5）
 

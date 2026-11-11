@@ -65,12 +65,13 @@ export function affordanceRule(
   instruction: string,
   elems: ElemPool,
   targetHint?: string | null,
+  opts?: HintMatchOptions,
 ): string | null {
   // A frozen plan that NAMES its target wins over label matching: the planner
   // saw the DOM snapshot and the hint costs zero model calls. When a hint
   // exists it is authoritative even if it matches nothing: the caller falls
   // through to laya rather than gambling on a token.
-  if (targetHint) return hintMatch(targetHint, elems);
+  if (targetHint) return hintMatch(targetHint, elems, opts);
 
   const toks = new Set(words(instruction.toLowerCase(), ASCII2));
   for (const t of [...toks]) if (STOP_TOKENS.has(t) || ROLE_TOKENS.has(t) || FILLER_TOKENS.has(t)) toks.delete(t);
@@ -191,18 +192,55 @@ export function poolFieldFor(attr: string): string {
 };
 
 /**
- * T9：一个属性 hint 的匹配底座（已大小写折叠的候选值列表）。
+ * A1：属性值匹配底座的口径（`meta.policy.attr_value_match`）。
  *
- * `href` 是唯一的**双底座**属性：展示投影 `href`（旧路径型 hint 依赖它，今天逐字节不变）
+ * - `full_label`（缺省）：`aria-label` 的池字段 `label` 用 `[full_label, label]` 双底座——
+ *   模型视图的 label 只有前 40 字，>40 字的属性值要靠 `full_label`（≤200）才等得上；
+ * - `display`：A1 之前的行为（只比 label 前 40 字，>40 的值永不命中）。
+ *
+ * 只作用于池侧 hint 匹配：run 面按 policy 传，inspect/observe/session 无 policy，恒 `full_label`。
+ */
+export type AttrValueMatch = "full_label" | "display";
+
+/** hint 匹配的可选口径（缺省 = A1 修复后的行为；见 `AttrValueMatch`）。 */
+export interface HintMatchOptions {
+  attrValueMatch?: AttrValueMatch;
+  /**
+   * A4：是否写 B1 弱档命中旁路（`lastHintOthersDiag`），缺省 `true`。
+   *
+   * `false` = `hintMatchImpl` **完全不碰**该模块态（不写、不清）——会话 `act` 落空诊断要用
+   * `hintCandidates` 取候选，但那次调用**不得**污染 task-34 的 `matched_others` 回显
+   * （模块态是"最后一次解析者写"，一次诊断查询就会把真正的解析记录顶掉）。
+   * 缺省 true = 既有调用点逐字节不变。
+   */
+  diag?: boolean;
+}
+
+/**
+ * T9/A1：一个属性 hint 的匹配底座（已大小写折叠的候选值列表）。
+ *
+ * `href` 是**双底座**属性：展示投影 `href`（旧路径型 hint 依赖它，今天逐字节不变）
  * + 原始属性 `href_full`（query/fragment/origin 都在，T9 新增）。两个值都非空才算候选、
  * 同值去重；空 href 返回 `[""]`，与 T9 之前「空串照旧参与比较」的语义一致。
+ *
+ * A1：`label` 同样是双底座 `[full_label, label]`——`poolFieldFor` 把 aria-label 别名成
+ * `label`，而 label 是**模型视图**的前 40 字（不变量：label === full_label 前 40 字，构造点见
+ * extraction/declared/observe/executor 的同名注释）；只比 label 时 >40 字的属性值永远等不上。
+ * `attr_value_match:"display"` 回到 A1 之前的单字段 label。attrEq 与 attrSubstr 共用本函数，
+ * 一处改两形状（只改 attrEq 会让 `[aria-label~尾串]` 仍落空）。
  * 其它属性仍是单字段底座，行为与 T9 之前逐字节一致。
  */
-function attrMatchValues(e: Elem, k: string): string[] {
+function attrMatchValues(e: Elem, k: string, opts?: HintMatchOptions): string[] {
   const cf = (x: unknown): string => String(x ?? "").toLowerCase();
-  if (k !== "href") return [cf(e[k])];
+  const keys = k === "href"
+    ? ["href_full", "href"]
+    : k === "label" && opts?.attrValueMatch !== "display"
+      ? ["full_label", "label"]
+      : [k];
+  if (keys.length === 1) return [cf(e[keys[0]!])];
   const vals: string[] = [];
-  for (const v of [e.href_full, e.href]) {
+  for (const kk of keys) {
+    const v = e[kk];
     if (typeof v !== "string" || v === "") continue;
     const s = cf(v);
     if (!vals.includes(s)) vals.push(s);
@@ -275,9 +313,13 @@ function diagCandidate(ref: string, e: Elem): HintMatchCandidate {
 }
 
 /** The 6 hint grammars, single-parsed; `sink` (if given) records the candidate set. */
-function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | null): string | null {
+function hintMatchImpl(
+  hint: string, elems: ElemPool, sink?: HintCandidates | null, opts?: HintMatchOptions,
+): string | null {
   const parsed = parseHint(hint);
   const entries = Object.entries(elems);
+  /** A4：`diag:false` = 只读解析，不写 B1 旁路模块态（不写不清，见 HintMatchOptions.diag）。 */
+  const recordDiag = opts?.diag !== false;
   /** Record the strongest tier's refs, then resolve exactly as before. */
   const emit = (refs: string[], tier: number): string | null => {
     if (sink) { sink.refs = refs; sink.tier = tier; sink.decided = null; }
@@ -291,8 +333,9 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
     const pre = parsed.tag;
     const k = poolFieldFor(parsed.attr);
     const v = parsed.value;
-    // T9：href 走 [href_full, href] 双底座（任一字段命中即算），其它属性单字段。
-    const hitList = entries.filter(([, e]) => (!pre || e.tag === pre) && attrMatchValues(e, k).some((x) => x.includes(v)));
+    // T9：href 走 [href_full, href] 双底座（任一字段命中即算）；A1：aria-label 别名的
+    // label 走 [full_label, label] 双底座；其它属性单字段。底座口径见 attrMatchValues。
+    const hitList = entries.filter(([, e]) => (!pre || e.tag === pre) && attrMatchValues(e, k, opts).some((x) => x.includes(v)));
     // TIERED resolution, measured on live pages. A substring hint that names a
     // page slug also matches every RELATED page: on today's en.wikipedia search
     // results `a[href~Alan_Turing]` hits 17 links (Alan_Turing, Alan_Turing_law,
@@ -308,16 +351,18 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
     // 返回值与 sink 语义逐字节不变；记录被执行器 take 走（见 takeHintMatchOthers）。
     const finishSubstr = (refs: string[], tier: number): string | null => {
       const decided = firstIfSame(new Set(refs), elems);
-      lastHintOthersDiag = {
-        hint, kind: "attrSubstr", tier, suspicious: tier >= 3, decided,
-        candidates: hitList.slice(0, 8).map(([r, e]) => diagCandidate(r, e)),
-      };
+      if (recordDiag) {
+        lastHintOthersDiag = {
+          hint, kind: "attrSubstr", tier, suspicious: tier >= 3, decided,
+          candidates: hitList.slice(0, 8).map(([r, e]) => diagCandidate(r, e)),
+        };
+      }
       if (sink) { sink.refs = refs; sink.tier = tier; sink.decided = null; }
       return decided;
     };
-    const exact = hitList.filter(([, e]) => attrMatchValues(e, k).some((x) => x === v));
+    const exact = hitList.filter(([, e]) => attrMatchValues(e, k, opts).some((x) => x === v));
     if (exact.length) return finishSubstr(exact.map(([r]) => r), 1);
-    const slug = hitList.filter(([, e]) => attrMatchValues(e, k).some((x) => x.split("/").pop() === v));
+    const slug = hitList.filter(([, e]) => attrMatchValues(e, k, opts).some((x) => x.split("/").pop() === v));
     if (slug.length) return finishSubstr(slug.map(([r]) => r), 2);
     return finishSubstr(hitList.map(([r]) => r), 3);
   }
@@ -336,7 +381,7 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
     // are routinely upper-case (data-test="net-CAM-1001"); a raw `==` silently
     // missed and the plan-named target fell back to laya (~0.03 conf).
     const refs = entries
-      .filter(([, e]) => (!parsed.tag || e.tag === parsed.tag) && attrMatchValues(e, k).some((x) => x === parsed.value))
+      .filter(([, e]) => (!parsed.tag || e.tag === parsed.tag) && attrMatchValues(e, k, opts).some((x) => x === parsed.value))
       .map(([r]) => r);
     return emit(refs, 0);
   }
@@ -396,20 +441,24 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
       const decided = firstIfSame(new Set(refs), elems);
       // 弱档（词前缀 t=3 / 词包含 t=4）胜出 = 容器撞车/同缀误中的高发形状（实测：
       // 裸词"价格"前缀命中整块结果容器 div.Vo5ZAe）。记录不改返回值/选择语义。
-      lastHintOthersDiag = {
-        hint, kind: "bare", tier: t, suspicious: t >= 3, decided,
-        candidates: entries
-          .filter(([r]) => allBareHits.has(r))
-          .slice(0, 8)
-          .map(([r, e]) => diagCandidate(r, e)),
-      };
+      if (recordDiag) {
+        lastHintOthersDiag = {
+          hint, kind: "bare", tier: t, suspicious: t >= 3, decided,
+          candidates: entries
+            .filter(([r]) => allBareHits.has(r))
+            .slice(0, 8)
+            .map(([r, e]) => diagCandidate(r, e)),
+        };
+      }
       if (sink) { sink.refs = refs; sink.tier = t; sink.decided = null; }
       return decided;
     }
   }
   // 全落空也记录（suspicious:false、空候选）——消掉"上一次弱档诊断滞留"的陈旧风险。
   if (sink) { sink.refs = []; sink.tier = -1; sink.decided = null; }
-  lastHintOthersDiag = { hint, kind: "bare", tier: -1, suspicious: false, decided: null, candidates: [] };
+  if (recordDiag) {
+    lastHintOthersDiag = { hint, kind: "bare", tier: -1, suspicious: false, decided: null, candidates: [] };
+  }
   return null;
 }
 
@@ -419,8 +468,10 @@ function hintMatchImpl(hint: string, elems: ElemPool, sink?: HintCandidates | nu
  * DOM-side half and re-queries live elements the budget evicted. Both are driven
  * by the same tier semantics documented on `hintMatchImpl`.
  */
-export function hintMatch(hint: string, elems: ElemPool): string | null {
-  return hintMatchImpl(hint, elems, null);
+export function hintMatch(
+  hint: string, elems: ElemPool, opts?: HintMatchOptions,
+): string | null {
+  return hintMatchImpl(hint, elems, null, opts);
 }
 
 /**
@@ -429,9 +480,11 @@ export function hintMatch(hint: string, elems: ElemPool): string | null {
  * tier always yields that tier's refs — including an ambiguous tier, which is the
  * whole point: the decider gets "these k elements" instead of "null → the full pool".
  */
-export function hintCandidates(hint: string, elems: ElemPool): HintCandidates | null {
+export function hintCandidates(
+  hint: string, elems: ElemPool, opts?: HintMatchOptions,
+): HintCandidates | null {
   const sink: HintCandidates = { refs: [], tier: -1, decided: null };
-  hintMatchImpl(hint, elems, sink);
+  hintMatchImpl(hint, elems, sink, opts);
   return sink.refs.length ? sink : null;
 }
 

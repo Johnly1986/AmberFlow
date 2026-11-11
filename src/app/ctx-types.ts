@@ -404,6 +404,18 @@ export interface SwitchTabResult {
   title: string;
 }
 
+/**
+ * C1：`ctx.extract` 的第二个参数（分页起点）。
+ *
+ * 为什么是第二参而不是 spec 键：inline spec 是**行抽取声明**（rows/fields/maxItems），
+ * offset 是**这一次调用**的读取位置——两者混在一张对象里会让声明在 `meta.site.listExtract`
+ * 与 inline 之间无法复用。写进 spec = 结构化 `config_error` 并指路到这里。
+ */
+export interface ExtractOptions {
+  /** 0-based 行偏移；整数 0..10000，非法 = `config_error`。 */
+  offset?: number;
+}
+
 export interface Ctx {
   readonly app: Readonly<{ id: string; label?: string; goal: string }>;
   readonly slots: Readonly<Record<string, string>>;
@@ -502,9 +514,15 @@ export interface Ctx {
   /**
    * 具名结构化抽取：`meta.site.listExtract[name]`，或 inline `{ rows, fields, maxItems? }`。
    * 行选择器 + 字段选择器；字段值 `"."` = 行自身文本。引擎负责观察与证据，不做业务解释。
+   *
+   * C1：第二个参数 `{ offset? }` 只做**分页起点**（整数 0..10000；`maxItems` 仍是每页上限）。
+   * 返回值形状不变（仍是行数组，`count` 语义不变）——`offset` 只认第二参，写进 spec =
+   * 结构化 `config_error`（指路到这里）。
    */
-  extract(name: string | { rows: string; fields: Record<string, string>; maxItems?: number }):
-    Promise<Array<Record<string, string>>>;
+  extract(
+    name: string | { rows: string; fields: Record<string, string>; maxItems?: number },
+    opts?: ExtractOptions,
+  ): Promise<Array<Record<string, string>>>;
   holds(sig: DomSignal): Promise<boolean>;
   waitFor(sig: DomSignal, opts?: { timeoutMs?: number; pollMs?: number }): Promise<boolean>;
   /**
@@ -618,10 +636,24 @@ export interface CtxDeps {
    */
   navPolicy?: "entry-only" | "free";
   /**
+   * A1：`aria-label` 属性 hint 的池侧匹配底座（来自 `meta.policy.attr_value_match`；
+   * 缺省 undefined = `full_label` = 修复后行为；`"display"` = A1 之前只看前 40 字）。
+   * 只服务 `ctx.waitForTarget` 的命中轮询——动作路径的口径在执行器实例上（同一 policy）。
+   */
+  attrValueMatch?: "full_label" | "display";
+  /**
    * P0-B：`meta.site.pages` 声明的页面 URL 清单。仅 `navPolicy:"entry-only"` 使用：
    * 再次直接导航到**声明页**（URL 经 `new URL().href` 归一后全等）放行——例如
    * `ctx.openPage("home")` 回入口页；未声明的 URL 仍 `navigation_forbidden`。
    * 缺省 undefined = 不放开（行为逐字节不变）。
    */
   declaredPages?: string[];
+  /**
+   * C1：extract 的**总量观测口**（只有 session 面注入；其它调用面不注入、不新增字段）。
+   *
+   * `ctx.extract` 的返回类型仍是行数组（`count` 语义不变），分页需要的 `total` 不能塞进
+   * 返回值——引擎在写完本次结果后就地回写 `total`（= 当前匹配行总数），由注入方读取。
+   * 不注入 = 不写（run/dry/replay 的行为与产物逐字节不变）。
+   */
+  extractStats?: { total: number };
 }

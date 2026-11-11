@@ -48,7 +48,9 @@ function hintArgsOf(site: DeclSite): number[] {
 
 const LABEL_MATCH_NOTE: Record<HintLintKind, string> = {
   bare: "裸词按前缀/词边界匹配 label（长 CJK 词整串成词，尤其如此），注意撞上以同词开头的容器 div"
-    + "——运行面若真弱档命中，matched_others 警告会当场点名；收窄：tag[attr=…] 精确值 / #id / 更长独词",
+    + "——运行面若真弱档命中，缺省（`act_hint_tier:\"any\"`）下 matched_others 警告会当场点名，"
+    + "声明 `act_hint_tier:\"strong\"` 则改报 weak_hint_rejected 并不执行弱档；"
+    + "收窄：tag[attr=…] 精确值 / #id / 更长独词",
   nearToken: "这是近邻语义（元素位于 label=token 的元素附近），不是『标签+文本』；若想要后者用 tag[attr~…]",
   labelSubstr: "子串语义：aria-label 提取期已并入 label，按子串匹配会撞更长相邻标签；精确用 [aria-label=x]",
 };

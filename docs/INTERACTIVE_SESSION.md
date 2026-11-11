@@ -26,6 +26,9 @@ amber session --url https://books.toscrape.com/ --headful
 # 需要轨迹里保留 fill/select 的明文值（默认只记 hash；会进仓库/导出物，慎用）
 amber session --url https://books.toscrape.com/ --input requests.jsonl \
   --record session-actions.jsonl --record-values
+
+# 歧义目标恢复旧行为（直接执行可行动优先的第一个候选；缺省 fail = 零动作 + 候选证据）
+amber session --url https://books.toscrape.com/ --on-ambiguous act
 ```
 
 - **stdout 只有 JSONL 协议行**（一行一个响应对象）；人话日志走 stderr（`[session] …`）。
@@ -42,9 +45,9 @@ amber session --url https://books.toscrape.com/ --input requests.jsonl \
 |---|---|---|---|
 | `open` | `url`, `timeoutMs?` | `url, title?, hosts` | `host_not_allowed` / `unreachable` / `config_error` |
 | `observe` | `max?`, `selector?`, `includeHidden?`, `includeFrames?` | `ObserveResult`（`url,title?,frames?,counts,elements`；每元素带 `frame` 下标与 `hint_candidates`；多 frame 时另有 `frame_counts`） | `bad_selector` |
-| `act` | `op`(`click/check/fill/select/hover/scroll`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll), `observeAfter?` | `op,target,executed,ref,how,changed,url,after?`；歧义时另有 `ambiguous`/`matched_others?`/`hint_kind?`/`hint_tier?`/`hint_suspicious?` | `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `config_error` |
+| `act` | `op`(`click/check/fill/select/hover/scroll`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll；给 = 容器滚动，不给 = 滚入视口), `onAmbiguous?`(`fail`\|`act`，缺省 `fail`), `screenshot?`(缺省 `false`；失败时落 `act-<n>-failure.png`), `observeAfter?` | `op,target,executed,ref,how,changed,url,after?`；scroll 另有实测 `moved`/`delta?`/`scroll?`（`changed === moved`）；歧义时另有 `ambiguous`/`matched_others?`/`hint_kind?`/`hint_tier?`/`hint_suspicious?`；非 timeout 异常且 URL 已变时另有 `probe_navigated:true`；**歧义停**时 `ok:false, code:"target_ambiguous", executed:false, ambiguity`；**动作失败**时 `ok:false, code, reason` 并（被遮挡/超时时）带 `actionability`、`screenshot_file?`、落空（`target_not_found`）时带 `diagnostics` | `target_ambiguous` / `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `not-actionable-or-covered` / `action-timeout` / `config_error` |
 | `read` | `what`(`text/value/count/attr`), `selector`, `attr?` | `what,selector,value`（读不到 = `null`） | `config_error` |
-| `extract` | `rows`, `fields`（`"."` = 行文本；`"@attr"` = 行属性；或子 CSS）, `maxItems?` | `rows,count,capped` | `config_error` |
+| `extract` | `rows`, `fields`（`"."` = 行文本；`"@attr"` = 行属性；或子 CSS）, `maxItems?`, `offset?`（续页起点，0-based 整数 0..10000） | `rows,count,capped`；**`capped` 或 `offset>0` 时**另有 `offset,total,has_more`——`count` 是**本页返回行数**不是总数，`total` 才是匹配总数，`has_more = offset+count < total` | `config_error` |
 | `waitFor` | `signal`, `timeoutMs?`(缺省 15000), `pollMs?`(200) | `held,timeout_ms,elapsed_ms` | `config_error`（坏信号形状） |
 | `signal` | `signal` | `held,elapsed_ms` | `config_error` |
 | `snapshot` | `screenshot?`(缺省 true), `poolMax?`(120) | `snapshot_file,pool_file,screenshot_file?,counts` | `io_error` |
@@ -53,6 +56,20 @@ amber session --url https://books.toscrape.com/ --input requests.jsonl \
 
 会话级异常会补发一行 `{"type":"session_end","unsolicited":true,"ok":false,"code":…}`（`idle_timeout` /
 `browser_dead` / `interrupted`），它不是任何请求的响应。
+
+### 分页：extract 有 offset，observe 没有
+
+- `extract` 的 `count` 是**本页返回行数**，不是匹配总数；`maxItems` 是每页上限（1..500，缺省 500）。
+  分页用 `offset`：从 0 开始，每次把 `offset` 加上本页 `count` 续页；`has_more` 为 false 即到底。
+  `offset` 只认**顶层字段**（写进 inline spec 不是分页起点），必须是 0..10000 的整数——负数、小数、
+  字符串、越界都是 `config_error`（引擎不 clamp，悄悄改起点会让"续页不重不漏"变成假话）。
+- `offset=0` 且本页没被 cap 挡住时，响应与分页之前逐字节一致（不多出 `offset/total/has_more`）。
+- `total` 是**当前 DOM 匹配行总数**（这一刻的事实）；懒加载/无限滚动页面在滚动后 `total` 会变，
+  续页之间页面若发生插入/删除，offset 分页可能重/漏——需要"翻到底"的穷举请用 `ctx.collect`
+  （应用脚本面）或接受逐页快照的语义。
+- `observe` **不提供 offset**：元素序随水合/动画变化，没有稳定锚（用 offset 续页会悄悄错位）。
+  行数太多时用 `selector` 收窄、`max` 放宽（硬上限 200），要全量元素快照就用 `snapshot`
+  （`pool-<n>.json`）。
 
 ### 示例（books.toscrape.com 全链）
 
@@ -88,6 +105,121 @@ amber session --url https://books.toscrape.com/ --input requests.jsonl \
 - 池外回退（0×0 手柄这类）时 `ref` 可能是合成 ref（`pN`），`matched_others[].ref` 同源，如实不映射。
 - 例：三个 `Edit` 链接的页面上 `act click "Edit"` → `{"ok":true,"ref":"e0","ambiguous":true,
   "matched_others":[{"ref":"e1",…},{"ref":"e2",…}]}`；想精确点第二个就先 `observe` 抄 `a[href=#b1]`。
+- A2 起：**真正的多候选歧义默认先停**（见下节）；本节字段是与 `run` 同一份的弱档旁路 advisory，
+  只在动作实际发生或非歧义失败时有意义，**不作判定**。
+
+### act 的歧义停因（A2，缺省零动作）
+
+task-34 的回显是弱档旁路诊断（照旧执行 `refs[0]`）；A2 起，同一个形状默认**不再动手**。判据与
+`amber run` 命令步的 `target_ambiguous` **逐条同源**（`rules.hintCandidates` 非空 &&
+`decided === null` && `refs.length > 1`）——事故现场（`div "搜索关闭"` | `button "关闭"` 上点
+"关闭" 命中搜索框清除按钮）从此是结构化失败，而不是一次误点：
+
+```json
+{"ok":false,"code":"target_ambiguous","executed":false,"reason":"target \"关闭\" matches several candidates in a pool of 42 element(s) (2 distinct candidate(s)) — …","ambiguity":{…}}
+```
+
+| `ambiguity` 字段 | 含义 |
+|---|---|
+| `target` | 原 hint（≤120 字符） |
+| `source` | `pool`（可见准入池）/ `dom_fallback`（A3 池外回退的合成候选集） |
+| `tier` | `hintCandidates` 胜出档（与命令步同一判据） |
+| `would_act_ref` | 旧行为会执行的那个 ref（可行动优先排序后的 `refs[0]`）——事实，不是建议 |
+| `candidates_total` / `truncated` | 歧义档总候选数 / 是否超过列出的 5 行 |
+| `candidates[]` | ≤5 行：`ref≤16, tag≤16, role?≤16, label≤40, class?≤40, near?≤40, frame, same_label, suggested_hint?≤80` |
+
+- `same_label` = 该归一 label（`full_label` 优先、折叠空白/大小写）在**本次池内**出现 >1 次 ⇒ label
+  本身不足以区分（收窄要换 `#id` / `[data-test=…]` / 属性或 `near`）。
+- `near` 只**复制**池里既有 `elem.near`（不重算）；`suggested_hint` 来自既有 `suggestHints`（内部同一个
+  `hintMatch` 自证「恰好唯一命中」，为空就省略该键）——可直接照抄进下一条 `target`。
+- `source:"dom_fallback"` 只给合成候选身份（`pN`）：合成池自证 ≠ 真池，所以**不提供** `near` /
+  `suggested_hint`。
+- **不是猜测**：证据只陈述"有几个候选、各自是谁、旧行为会点谁"；选哪个由人/上游决定。收窄 hint 或显式
+  用 `act` 重放，都是显式选择，桥不据此自动挑。
+- 恢复旧行为：会话级 `--on-ambiguous act`，或单行请求 `{"type":"act","op":"click","target":"关闭","onAmbiguous":"act"}`
+  （桥工具参数 `on_ambiguous`）；`fail`/缺省 = 本节的停因。
+- `--record` 轨迹对这条失败记 `code` + `candidate_refs`（≤5）+ `candidates_total`（只记事实）。
+- `run` 面**不变**：命令步在**没有可执行候选**时才用 `target_ambiguous` 停因（候选进 `skipped_actions`），
+  本次行为与产物逐字节不变；dry/replay 不调 `actOnce`，没有新影响；`ctx.scrollList` 内部点击与 run
+  原语不传该策略，行为不变。
+
+### act 的失败现场与失败截图（B1）
+
+会话 `act` 的 `click`/`check` 不再"先探针再点击"：run 面同一个 `occludedReason` 的探针**就是那次
+点击**（快路径 800ms；未遮挡的慢元素再给一次 5s 重试，预算 `(800, 5000)`），所以不存在"预检通过
+后又点一次"的双点窗口：
+
+| 失败 code | 何时 | 证据 |
+|---|---|---|
+| `not-actionable-or-covered` | 中心点被别的元素盖住（cookie 横幅/modal 背板/透明 overlay），约 0.8s 即返回 | `actionability:{reason,bbox,blocker,requery}`；`reason` 原文形如 `not-actionable-or-covered:<tag#id.class>` |
+| `action-timeout` | 探针超时、中心点**无覆盖者**，且 5s 重试仍不成功（不是"只是慢"） | 同一份 `actionability`（证明无覆盖者、重查时节点仍在/已脱离） |
+| `action_failed` | 探针抛非 timeout 异常（click 可能已派发） | 无 `actionability`；`reason` 是 Playwright 首行 |
+
+- `actionability` 原样复用引擎的 `ActionabilityDetail`：`reason`、`bbox`（目标当时的盒子，读不到 =
+  `null`）、`blocker`（中心点命中的最顶层元素摘要，如 `div#cookie-banner`；无覆盖者 = `null`）、
+  `requery`（重查时节点 `present`/`detached`/`unknown`）。会话层只回显，不重算。
+- 非 timeout 异常**不补点**：若 `urlOf(page)` 已与动作前不同，说明点击已触发导航 → 响应
+  `how:"clicked"` 并记 `probe_navigated:true`；否则结构化 `action_failed`，不二次点击。
+- `screenshot:true`（缺省 `false`）：**只在失败时**写 `<evidence_dir>/act-<n>-failure.png`
+  （n = 本会话动作序号，从 1 起），响应只回 `screenshot_file` 路径，不内联图片、成功不写。
+- 成功响应键集不变（唯一新增是上述异常路径的 `probe_navigated:true`）。
+- `not-actionable-or-covered` / `action-timeout` 是**既有 skip_reason 词面**，不是新 stopCode；
+  run 面（探针后仍走 `_clickOnly`）、命令步、`ctx.expand`/`ctx.scrollList` 内部点击不传探针参数，
+  行为与产物逐字节不变。
+
+### act 找不到目标时的判别证据（A4）
+
+`target_not_found` 过去只有一句 `target "…" matched nothing in a pool of N element(s)`，分不清
+「目标不在页面」和「用词/形状不对、或元素不可见」。现在这类失败多带两块**只读事实**（成功路径
+与非落空失败**键集逐字节不变**，不新增 stopCode）：
+
+- `reason` 末尾追加一行 `判别: …`（仿 run 命令步的 `cmdDiscrimination`：纯内存判别，主 reason
+  前缀与停因码不变）。
+- `diagnostics`（有界；只陈述池/扫描面已有的行）：
+
+| 字段 | 含义 |
+|---|---|
+| `target` / `pool_size` | 原 hint / 本次准入池元素数 |
+| `hint_shape` / `hint_len` | `parseHint` 的形状（`id`/`attrSubstr`/`nearToken`/`attrEq`/`tag`/`bare`）/ hint 字符数 |
+| `candidates[]` | 池内**同档**候选（`hintCandidates` 的 quiet 读法，≤5；`ref,tag,label≤40`） |
+| `near[]` | 池内**词面近似**候选（token 对 `label`/`full_label`/`data_test`/`id`/`name`/`href` 做前缀/包含，≤5；另有 `why` 如 `label 前缀`） |
+| `rejected[]` | 池外回退扫描到、但被可见性过滤的近似行（≤3；`why:"not visible"`，措辞与 `observe` 的 `why_not_admitted` 同源） |
+
+- **不污染歧义回显**：`candidates` 用 `hintCandidates(..., { diag:false })` 的 quiet 读法——那次
+  查询**不写** B1 弱档旁路模块态，task-34 的 `ambiguous`/`matched_others` 回显仍是本条 target
+  真实解析的结果。
+- **`near` 不猜**：token 仍由唯一解析器 `parseHint` 给出（不扩 hint 语法、不做模糊编辑距离、
+  不按相似度排序，池序即序；单字符词面直接不给）；纯内存，零页面往返。
+- **`rejected` 只来自既有回退扫描**：A3 池外回退本来就扫含隐藏元素的准入面；这里只对词面近似的
+  ≤5 行做**一次**可见性判定（`display:none` / `visibility:hidden` / 零尺寸盒子）→ 不可见者进
+  `rejected`（≤3）。不扫面外元素、不新造 `why_not_admitted` 分支。
+- `run` 面/命令步/`ctx.expand`/`ctx.scrollList` 内部点击**不传** `diagnostics` 开关，返回值与
+  reason 逐字节不变；只有会话 `act` 失败带这两块证据。
+
+### act 的滚动语义（B2，`changed` 只认实测）
+
+`act scroll` 有**两种**语义，由请求带不带 `to`/`by` 决定（没有第三种）：
+
+| 请求 | 语义 | 执行面 | 证据 |
+|---|---|---|---|
+| `target` + `to`（或 `by`） | **容器滚动**：目标元素自身或**最近可滚动祖先**滚到方向/像素（`by` 优先于 `to`，settle 150ms；纯 `scrollTop`，不模拟滚轮） | `_scrollContainerForElement` → `_scrollWithLoc`（与 `ctx.scrollList`、run 的 `scroll` 命令**同一条实现**） | `moved`、`delta`、`scroll:{scrollTop,scrollHeight,clientHeight}` |
+| `target`，无 `to`/`by` | **滚入视口**：把元素滚到视口中央（旧语义，`scrollIntoViewIfNeeded`） | `mw.scrollIntoView` → 同一次 evaluate 里量 scrollTop 前后差 | `moved`、`delta`、`scroll`（同上） |
+| 合成目标（`document/body/html/window`，或省略 target） | **文档滚动**：滚主滚动器 | `mw.scrollDocument` | `moved`、`delta`、`scroll` |
+
+- **`changed === moved`（实测）**：B2 之前元素目标的 `changed` 硬编码 `true`——`scrollIntoView`
+  在元素已在视口时不移动任何像素，响应仍说"变了"。现在 `moved` 是滚动容器 `scrollTop` 的
+  前后差非零，没有 `moved` 证据就是 `false`，不假装滚过。
+- **找不到可滚动容器 = 结构化失败**：带 `to/by` 但元素自身与祖先都没有可滚动容器 →
+  `{ok:false, code:"not_scrollable"}`（旧行为是静默无操作还报成功）。**无 `to/by` 不适用**——
+  元素本来就在视口里是 `moved:false` 的成功事实，不是错误。
+- **错误码沿用既有闭集**：`config_error`（`to` 非法值）/ `target_not_found` / `not_scrollable` /
+  `stale_ref` / `action_failed`；A2 歧义仍先停（`target_ambiguous` + `ambiguity`），**不新增 stopCode**。
+- **`--record` 只记事实**：滚动没走通不记 `to`/`by`；没请求 `to/by` 的元素滚动不再伪记
+  `to:"bottom"`；另记 `scroll_mode`（`container`|`into_view`）、`moved`、`delta`、`scrollTop`
+  ——`session export` 按 `scroll_mode` 还原成 `ctx.scrollList(target,{to|by})`（容器）或
+  `ctx.command("scroll", target)`（滚入视口），两种都能过 `apps check`。
+- **边界**：run 面/命令步（`ctx.command("scroll", sel, {to})`）/`ctx.scrollList`/`scrollDocument`
+  的既有语义与产物**逐字节不变**——本项只改会话单动作面（`actOnce` 的 scroll 分支与会话层）。
 
 ### observe 与 iframe（task-34 口径）
 
@@ -156,14 +288,22 @@ headless 实现选择面（换完整 Chrome new headless）另见 task-39 的受
 | 导航纪律 | `meta.policy.navigation`（含 `entry-only`） | 恒 free（**不接** `entry-only`），只保留 `hosts` 信封 |
 | 产物 | `result.json` + trace（`--emit-trace`），可 replay | 动作轨迹 JSONL（`--record`）+ snapshot；trace 只是会话日志，**不是** run trace（app id 不同，`--replay` 会拒） |
 | 页面状态 | 每步按声明 URL/重锚语义导航 | 同一页面实例贯穿会话，**不重导航**（命令本身不 goto；跳转只由页面动作引起） |
+| 歧义目标 | 命令步在无可执行候选时 `target_ambiguous`（候选进 `skipped_actions`）；run 面本次不变 | `act` 缺省在动手前用**同一个谓词**判定：歧义即零动作 + `ambiguity` 证据；`--on-ambiguous act` 恢复旧的"直接执行第一个可行动候选" |
+| 滚动语义 | 命令闭集 `scroll`：无 `to` = 滚入视口、带 `to` = 容器滚动（对 `{to}` 的产物逐字节不变） | `act scroll`：`to/by` = 容器滚动（同 `ctx.scrollList`），无 `to/by` = 滚入视口；两种都实测 `moved/delta`，`changed === moved` |
 
 ## 同源复用点（实现层，改一处两面一起变）
 
 - hint 语法：`src/engine/hint.ts` 的 `parseHint`（唯一解析器）；
 - 解析/执行单动作：`BrowserMiddleware.actOnce` → 内部 `_extractPoolSettled`（与 run 同一抽池 + settle 门）
   → `resolveCommandRef`（`hintMatch`）→ `_domFallbackResolve`（池外回退）→ `_executeElement`（同一动作执行器）；
-- 动作后是否变化：`mw.snapshot` 前后比对（与 run 的 inert 判定同口径）；
-- 滚动合成目标：`mw.scrollDocument` + `ctx.ts` 的 `SCROLL_SYNTHETIC_TARGETS`；
+- 歧义判据：`src/engine/ambiguity.ts` 的 `describeAmbiguity` → `rules.hintCandidates`（与 run 命令步
+  `target_ambiguous` 同一个谓词；证据只读、零页面 I/O）；
+- 动作后是否变化：`mw.snapshot` 前后比对（与 run 的 inert 判定同口径）。**scroll 例外（B2）**：
+  `changed` 只认引擎实测的 `moved`（容器 `scrollTop` 前后差），不做快照 diff；
+- 滚动容器目标：`mw.scrollDocument`（合成目标）+ `ctx.ts` 的 `SCROLL_SYNTHETIC_TARGETS`；
+  元素/容器目标：`mw.scrollContainer` → `_scrollWithLoc`（`act` 带 `to/by` 时同一实现）；
+  滚入视口：`mw.scrollIntoView` → `_scrollIntoViewWithEvidence`（同一个 `scrollIntoViewIfNeeded`
+  调用 + 前后 scrollTop 实测）；
 - 只读观察：`observePage`；读 DOM：`ctx.read.*`；结构化抽取：`ctx.extract`（inline → `readRows`）；
 - 信号：`checkSignal`、`validateSignalSpec`（与加载期同一个校验器）、等待：`ctx.waitFor`；
 - 池快照：`extractElements`（正式池）；正文：`mw.snapshot`；
@@ -221,7 +361,10 @@ amber run books-skeleton
 - **不发明值**：`fill/select` 在轨迹里只有 `value_hash`/`value_len`，导出为注释块（提示用
   `ctx.value.slot(...)` 绑定），不生成空值/假值。
 - **不发明动作**：`ok:false` 的动作以注释块保留（带 `code`/`reason`），骨架不生成假动作。
-- `scroll` 导出为同一族滚动原语 `ctx.scrollList(<target|document>, { to })`（各计 1 flow step）。
+- `scroll` 导出按轨迹里的 `scroll_mode` 还原（B2）：`container` → `ctx.scrollList(<target|document>, { to | by })`
+  （by 优先；`by=0` 这种不可能移动的滚动不生成假动作）；`into_view`（无 `to/by` 的元素滚动）→
+  命令闭集的 `ctx.command("scroll", <target>)`（与 run 命令步同一条执行路径：滚入视口）。旧轨迹
+  （无 `scroll_mode`）仍按原映射导出 `ctx.scrollList(..., { to })`，与之前逐字节一致。
 - 生成物必须能过 `amber apps check`（dry）：这是 export 的自检门，也是"骨架不是死代码"的底线。
 - 会话 trace（`<record>.trace.json`）是**会话日志**，不是 run trace：`app:"session:<runId>"`、
   `done:false`，`--replay` 会因 app/版本不匹配拒收。

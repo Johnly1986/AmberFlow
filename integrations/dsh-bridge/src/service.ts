@@ -21,6 +21,7 @@ import {
   type AppSummary, type BridgeOptions, type JsonObject, type LearnSummary,
   type RunSummary,
 } from './bridge.ts'
+import { clampElementMax, ELEMENT_DEFAULT_MAX, projectElementViews } from './element-view.ts'
 
 /** One `run` call, mirroring the `…_run` tool parameters with camelCase names. */
 export interface AmberFlowRunArgs {
@@ -187,10 +188,25 @@ export interface AmberFlowAppCheck {
 export interface AmberFlowInspect {
   ok: boolean
   url: string
+  /** CLI 实际落地的 URL（requested_url 是本次请求的原始值；重定向现场两者可能不同）。 */
+  requested_url?: string
   title: string
+  /** 观察时刻（CLI `--wait-ms` 与水合稳定等待之后的真实读取时刻，ISO 字符串）。 */
+  saw_at?: string
+  /** 本次声明的额外等待毫秒（P0-A `--wait-ms`）。 */
+  wait_ms?: number
+  /** CLI 随每次观察带出的 hint 语法说明（hint_candidates 可照抄、href 是展示投影）。 */
+  hint_syntax?: string
+  /** 统一 ElementView 合同（element-view.ts）；与 `…_session op:"observe"` 的元素行同形。 */
   elements: JsonObject[]
   element_count: number
   truncated: boolean
+  /** 窗口透明化（A2）：页面上可见交互元素有多少没进本次池窗口。 */
+  window?: JsonObject
+  /** AX 证据块（F35）：浏览器自算可访问性树 + not_in_pool 近似口径；available:false 时带 reason。 */
+  ax?: JsonObject
+  /** 引擎当场说出的信息差（A2/P0-B：frame_host / pool_inexpressible / not_in_pool / pool_only）。 */
+  advisories?: JsonObject[]
   /** 空池诊断（planning-playbook）：主池近空而页面上交互元素多——重 JS SPA 的典型形态。 */
   pool_near_empty?: boolean
   /** 页面上 INTERACTIVE_ALL 的水合后读数（仅 pool_near_empty 时出现）。 */
@@ -528,13 +544,27 @@ export async function inspect(options: BridgeOptions, args: AmberFlowInspectArgs
   for (const sel of args.probes ?? []) argv.push('--probe', sel)
   const doc = await cliJson(options, argv)
   const d = dataOf(doc)
+  // 元素行走共享 ElementView 合同（element-view.ts）——与 …_session op:"observe" 同形同义；
+  // 之前是 records() 原样透传（引擎加键自动流入、无界可证），现在未列入合同的键有界丢弃。
+  const maxElements = clampElementMax(args.maxElements, ELEMENT_DEFAULT_MAX)
+  const projected = projectElementViews(d['elements'], maxElements)
+  const ax = record(d['ax'])
   return {
     ok: doc['ok'] === true,
     url: String(d['url'] ?? args.url),
+    ...(typeof d['requested_url'] === 'string' ? { requested_url: d['requested_url'] } : {}),
     title: String(d['title'] ?? ''),
-    elements: records(d['elements']),
+    ...(typeof d['saw_at'] === 'string' ? { saw_at: d['saw_at'] } : {}),
+    ...(typeof d['wait_ms'] === 'number' ? { wait_ms: d['wait_ms'] } : {}),
+    ...(typeof d['hint_syntax'] === 'string' ? { hint_syntax: d['hint_syntax'] } : {}),
+    // ElementView 的字段集是封闭合同（无索引签名）；这里只是在 JsonObject 边界上收窄类型，
+    // 运行时形状就是 projectElementViews 的输出，不增不减。
+    elements: projected.elements as unknown as JsonObject[],
     element_count: Number(d['element_count'] ?? 0),
-    truncated: d['truncated'] === true,
+    truncated: d['truncated'] === true || projected.truncated,
+    ...(isRecord(d['window']) ? { window: d['window'] } : {}),
+    ...(isRecord(ax) ? { ax } : {}),
+    ...(Array.isArray(d['advisories']) && d['advisories'].length ? { advisories: records(d['advisories']) } : {}),
     ...(d['pool_near_empty'] === true
       ? { pool_near_empty: true, interactive_on_page: Number(d['interactive_on_page'] ?? 0) }
       : {}),

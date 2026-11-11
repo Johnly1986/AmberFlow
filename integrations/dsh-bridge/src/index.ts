@@ -46,6 +46,15 @@ import {
   DEFAULT_MAX_SESSIONS, DEFAULT_SESSION_IDLE_MS, handleSessionTool, SessionManager, type SessionToolArgs,
 } from './session.ts'
 
+/**
+ * C1：会话结果的模型可见渲染只给有界行数（完整形状在结构化 value 里，模型看不到）。
+ * observe / extract 各显示 20 行；只有**溢出**时才追加两行（无溢出零新增文本）。
+ * observe **没有 offset**（元素序随水合/动画变化，无稳定锚）：收窄用 selector/max，
+ * 全量用 snapshot（pool-<n>.json）。
+ */
+const OBSERVE_DISPLAY = 20
+const EXTRACT_DISPLAY = 20
+
 // The package root is the consumer surface: another plugin imports these without reaching into `src/`
 // (a published package ships only `lib/`).
 export {
@@ -846,10 +855,14 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_inspect`,
     description:
-      'Observe a live page without acting: title, URL, a bounded list of interactive elements, and '
-      + 'verified hint candidates for each. Use this before writing a step target hint. inspect 是'
-      + '独立一次性会话（新开浏览器，不 attach 运行会话）；会话内实时观察用应用内 ctx.observe()。 '
-      + 'No clicks, no typing, no model call; only http(s) URLs.',
+      'Observe a live page without acting: title, URL, a bounded list of elements with verified hint '
+      + 'candidates (copy a candidate into the target hint — never invent CSS), browser AX-tree evidence '
+      + '(`ax`, incl. how many named interactive nodes are NOT reachable by the pool) and engine '
+      + 'advisories (why a probe hit cannot become an act target). Element rows follow the SAME '
+      + 'ElementView contract as `' + toolPrefix + '_session op:"observe"`; `ref` is a display/audit '
+      + 'anchor, NOT an act address — act targets are hint strings. Use this before writing a step '
+      + 'target hint. inspect 是独立一次性会话（新开浏览器，不 attach 运行会话）；会话内实时观察用'
+      + '应用内 ctx.observe()。 No clicks, no typing, no model call; only http(s) URLs.',
     parameters: {
       url: { type: 'string', required: true, description: 'The http(s) page to observe.' },
       max_elements: { type: 'integer', description: 'Default 60, max 200.' },
@@ -870,10 +883,17 @@ export function apply(ctx: Context, config: Config): void {
         properties: {
           ok: { type: 'boolean', required: true },
           url: { type: 'string', required: true },
+          requested_url: { type: 'string' },
           title: { type: 'string', required: true },
+          saw_at: { type: 'string' },
+          wait_ms: { type: 'integer' },
+          hint_syntax: { type: 'string' },
           elements: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
           element_count: { type: 'integer', required: true },
           truncated: { type: 'boolean', required: true },
+          window: { type: 'object', additionalProperties: true },
+          ax: { type: 'object', additionalProperties: true },
+          advisories: { type: 'array', items: { type: 'object', additionalProperties: true } },
           pool_near_empty: { type: 'boolean' },
           interactive_on_page: { type: 'integer' },
           probes: { type: 'array', items: { type: 'object', additionalProperties: true } },
@@ -897,6 +917,13 @@ export function apply(ctx: Context, config: Config): void {
             ? `\nprobes:\n${value.probes.map(p => `  ${String(field(p, 'selector') ?? '')} → `
               + (field(p, 'error') !== undefined ? String(field(p, 'error'))
                 : `${String(field(p, 'count') ?? '')} hit ${JSON.stringify((field(p, 'texts') as unknown[] ?? []).slice(0, 1))}`)).join('\n')}`
+            : '')
+          + (Array.isArray(value.advisories) && value.advisories.length
+            ? `\nadvisories:\n${value.advisories.map(a => `  [${String(field(a, 'kind') ?? '?')}] `
+              + `${String(field(a, 'message') ?? '').slice(0, 200)}`).join('\n')}`
+            : '')
+          + (field(value, 'ax') !== undefined && field(value, 'ax') !== null
+            ? `\nax: ${renderAxSummary(field(value, 'ax') as Record<string, unknown>)}`
             : ''),
       }],
     },
@@ -1112,12 +1139,30 @@ export function apply(ctx: Context, config: Config): void {
       + 'action executors, same signal checker) — but this tool NEVER judges completion, never writes '
       + 'a run result and never emits a pass/fail verdict. '
       + 'USE IT before authoring an app.mjs (trial and error) or to reproduce/debug ONE failing step: '
-      + '`op:"open"` once (returns session_id), then `observe` to see admitted elements with '
-      + 'hint candidates, `act` to perform one action (click/check/fill/select/hover/scroll — a value '
-      + 'must be supplied explicitly; the tool never invents values), then read/extract/signal to read '
-      + 'the immediate facts back. `act` echoes ambiguity diagnostics (`ambiguous` / '
+      + '`op:"open"` once (returns session_id), then `observe` to see elements with self-verified hint '
+      + 'candidates (copy them into target hints — never invent CSS) and pool-admission diagnostics '
+      + '(admitted / why_not_admitted explain why an element cannot be addressed yet), `act` to perform '
+      + 'one action (click/check/fill/select/hover/scroll — a value '
+      + 'must be supplied explicitly; the tool never invents values). '
+      + '`act_op:"scroll"`: with `to`/`by` the target element\'s scrollable container (the element '
+      + 'itself or its nearest scrollable ancestor) is scrolled and the result carries the measured '
+      + '`moved`/`delta`/`scroll`; without `to`/`by` the element is scrolled INTO the viewport and '
+      + '`changed` is that same measured `moved` — a target with no scrollable container is '
+      + 'code:"not_scrollable", never a silent no-op. '
+      + 'Then read/extract/signal to read '
+      + 'the immediate facts back. `extract` pages with `offset` (`count` = rows returned on this '
+      + 'page, not the total; advance by `count`, stop when `has_more` is false) and can persist the '
+      + 'full result with `save:true` (<=2000 rows / 4MB, returns the file path + saved/bytes). '
+      + '`observe` has NO offset (element order moves as the page hydrates) — narrow with selector or '
+      + 'max, or take a snapshot for the full element pool. Element rows follow the SAME ElementView contract as '
+      + '`' + toolPrefix + '_inspect` (one shared projection: hint_candidates, bounded clipping, same caps); '
+      + '`ref` is a display/audit anchor, NOT an act address — act targets are hint strings. '
+      + '`act` echoes ambiguity diagnostics (`ambiguous` / '
       + '`matched_others`) when the hint matched several candidates — re-observe and retry with a '
-      + 'narrower hint instead of guessing. Raw records land under `$AMBERFLOW_HOME/session/<id>/` and can later '
+      + 'narrower hint instead of guessing. When several DISTINCT candidates match, `act` does not '
+      + 'execute by default: it returns code:"target_ambiguous" plus a bounded `ambiguity` evidence '
+      + 'block (same predicate as a run command step); set on_ambiguous:"act" only to restore the old '
+      + 'first-candidate click. Raw records land under `$AMBERFLOW_HOME/session/<id>/` and can later '
       + 'become an app.mjs skeleton via `amber session export --record <file>` — that skeleton is an '
       + 'authoring hint, not a verified plan. '
       + 'USE `' + toolPrefix + '_run` to execute/verify a frozen plan or app — completion truth '
@@ -1150,9 +1195,19 @@ export function apply(ctx: Context, config: Config): void {
         description: 'act: which single action to perform.',
       },
       target: { type: 'string', description: 'act: target hint string (the engine hint grammar: #id, tag[attr=value], tag[attr~substr], tag~token, role word, bare word).' },
+      on_ambiguous: {
+        type: 'string', enum: ['fail', 'act'],
+        description: 'act: what to do when the target hint matches several distinct candidates. Default "fail" — NOTHING is executed; the result carries code:"target_ambiguous" and a bounded `ambiguity` evidence block (candidate refs/tags/labels, which candidate would have been acted on, whether labels can discriminate), using the SAME predicate as a run command step. Set "act" to restore the pre-A2 behaviour (act on the first actionable candidate) — only to reproduce/debug an old flow or when the candidates are known-equivalent. Prefer narrowing the hint (unique #id / [data-test=…] / role word) over guessing.',
+      },
       value: { type: 'string', description: 'act fill/select: the value to type/select. Explicit only — the tool never invents values.' },
-      to: { type: 'string', enum: ['bottom', 'top', 'page'], description: 'act scroll: direction for document/container scrolls.' },
-      by: { type: 'integer', description: 'act scroll: pixel delta (alternative to `to`).' },
+      to: {
+        type: 'string', enum: ['bottom', 'top', 'page'],
+        description: 'act scroll: container direction. With to/by the target element\'s scrollable container (itself or nearest scrollable ancestor; the document for a synthetic target) is scrolled — NOT the element into view. Omit to/by to scroll the element INTO the viewport instead.',
+      },
+      by: {
+        type: 'integer',
+        description: 'act scroll: container pixel delta (alternative to `to`, and preferred when both are given); finite, non-zero. Omit to/by to scroll the element into the viewport.',
+      },
       selector: { type: 'string', description: 'read: CSS selector.' },
       what: {
         type: 'string', enum: ['text', 'value', 'count', 'attr'],
@@ -1164,15 +1219,23 @@ export function apply(ctx: Context, config: Config): void {
         type: 'object', additionalProperties: true,
         description: 'extract: field map {name: css | "." (row text) | "@attr"}. Same semantics as ctx.extract inline.',
       },
-      max_items: { type: 'integer', description: 'extract: row cap (default 20, max 20).' },
+      max_items: { type: 'integer', description: 'extract: rows per page (default 20, max 20 through the bridge; the engine accepts up to 500). count is the rows returned on THIS page, not the total.' },
+      offset: {
+        type: 'integer',
+        description: 'extract: 0-based row offset for the next page (integer 0..10000; invalid = config_error). Advance by the returned `count` and stop when `has_more` is false. The response carries `offset`/`total`/`has_more` only when the page was capped or offset > 0.',
+      },
+      save: {
+        type: 'boolean',
+        description: 'extract: page through the result in the bridge (500 rows per page, hard cap 2000 rows / 4MB) and write it to <evidence_dir>/extract-<n>.json; the result then carries file/saved/bytes and, when a cap stopped it, truncated/save_limit. rows still shows the first page (<=20).',
+      },
       signal: {
         type: 'object', additionalProperties: true,
         description: 'signal/wait_for: a verifiable-signal object using the SAME operator set as run done/when signals (url_contains, css_exists, css_exists_text, css_visible_exists, css_text_contains, css_text_equals, css_value_equals, all_of, any_of, not, manual).',
       },
       timeout_ms: { type: 'integer', description: 'wait_for: poll window in ms (default 15000, max 120000).' },
-      max: { type: 'integer', description: 'observe: max rows (default 40, max 40).' },
+      max: { type: 'integer', description: 'observe: max rows (default 60, max 200 — the same ElementView cap as ' + toolPrefix + '_inspect max_elements).' },
       include_hidden: { type: 'boolean', description: 'observe: include invisible elements (default false).' },
-      screenshot: { type: 'boolean', description: 'snapshot: also write a viewport screenshot (default false; only paths are returned, never inline).' },
+      screenshot: { type: 'boolean', description: 'snapshot: also write a viewport screenshot; act: write act-<n>-failure.png ONLY when the action fails (default false; only paths are returned, never inline).' },
     },
     output: {
       // 结果形态按 op 不同（设计师 §2/§3）：只声明公共 ok/op/session_id 与额外的宽松键。
@@ -1186,6 +1249,18 @@ export function apply(ctx: Context, config: Config): void {
   }))
 }
 
+/** One context-cheap line for the inspect `ax` block: counts + not_in_pool gap, or the reason it is unavailable. */
+function renderAxSummary(ax: Record<string, unknown>): string {
+  if (ax['available'] !== true) {
+    return `unavailable — ${String(ax['reason'] ?? 'accessibility tree not readable; other observation unchanged')}`
+  }
+  const notInPool = typeof ax['not_in_pool'] === 'number' ? ax['not_in_pool'] : undefined
+  const interactive = typeof ax['interactive_count'] === 'number' ? ax['interactive_count'] : undefined
+  const poolSize = typeof ax['pool_size'] === 'number' ? ax['pool_size'] : undefined
+  return `interactive=${String(interactive ?? '?')} pool=${String(poolSize ?? '?')}`
+    + (notInPool === undefined ? '' : ` named-interactive-not-in-pool=${String(notInPool)} (approximate; see ax.nodes)`)
+}
+
 /** One context-cheap textual line (or block) for one `amberflow_session` result. */
 function renderSessionResult(value: Record<string, unknown>): string {
   const ok = value.ok === true
@@ -1193,8 +1268,59 @@ function renderSessionResult(value: Record<string, unknown>): string {
   const sid = typeof value.session_id === 'string' ? value.session_id : ''
   const tag = `${ok ? 'ok' : 'FAIL'} ${op}${sid === '' ? '' : ` [${sid}]`}`
   if (!ok) {
+    const amb = typeof value.ambiguity === 'object' && value.ambiguity !== null
+      ? value.ambiguity as Record<string, unknown>
+      : undefined
+    const rows = amb !== undefined && Array.isArray(amb.candidates)
+      ? amb.candidates.filter((raw): raw is Record<string, unknown> => typeof raw === 'object' && raw !== null).slice(0, 5)
+      : []
+    const header = amb === undefined
+      ? ''
+      : `\nambiguous: ${String(amb.candidates_total ?? rows.length)} candidate(s) for ${JSON.stringify(amb.target ?? '')}`
+        + ` — would have acted on ${String(amb.would_act_ref ?? '-')}; nothing was executed`
+        + (amb.source === 'dom_fallback' ? ' (DOM fallback candidates, outside the visible pool)' : '')
+        + ' — narrow the hint or set on_ambiguous:"act" to reproduce the old click'
+    const detail = rows.map((c) => {
+      const ref = String(c.ref ?? '?')
+      const tag = String(c.tag ?? '')
+      const role = typeof c.role === 'string' && c.role !== '' ? `[role=${c.role}]` : ''
+      const label = String(c.label ?? '')
+      const near = typeof c.near === 'string' && c.near !== '' ? ` near="${c.near}"` : ''
+      const hint = typeof c.suggested_hint === 'string' ? `  hint=${c.suggested_hint}` : ''
+      return `\n  ${ref} ${tag}${role} "${label}"${c.same_label === true ? ' (same label as others)' : ''}${near}${hint}`
+    }).join('')
+    // B1：动作失败现场（引擎给了 actionability 才有这一行）——直接被谁挡住、节点是否还在。
+    const actionability = typeof value.actionability === 'object' && value.actionability !== null
+      ? value.actionability as Record<string, unknown>
+      : undefined
+    const blocked = actionability === undefined
+      ? ''
+      : `\nblocked by ${String(actionability.blocker ?? 'unknown')} (requery=${String(actionability.requery ?? 'unknown')})`
+    // A4：落空判别（引擎 `diagnostics` 存在才有这一行）——池里有什么/近似什么/为何没解析成目标。
+    const miss = typeof value.diagnostics === 'object' && value.diagnostics !== null
+      ? value.diagnostics as Record<string, unknown>
+      : undefined
+    const missRows = (key: string): string => {
+      const list = miss?.[key]
+      if (!Array.isArray(list)) return ''
+      return list.map((raw) => {
+        const row = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {}
+        const why = typeof row.why === 'string' && row.why !== '' ? ` (${row.why})` : ''
+        return `${String(row.tag ?? '')} "${String(row.label ?? '')}"${why}`
+      }).join(' | ')
+    }
+    const missLine = miss === undefined
+      ? ''
+      : `\nno match: hint ${String(miss.hint_shape ?? '?')}/${String(miss.hint_len ?? '?')} pool ${String(miss.pool_size ?? '?')}`
+        + (missRows('candidates') === '' ? '' : ` — candidates: ${missRows('candidates')}`)
+        + (missRows('near') === '' ? '' : ` — near: ${missRows('near')}`)
+        + (missRows('rejected') === '' ? '' : ` — rejected: ${missRows('rejected')}`)
     return `${tag}: ${String(value.code ?? 'error')}${value.reason === undefined ? '' : ` — ${String(value.reason)}`}`
       + (value.session_alive === true ? ' (session still alive)' : '')
+      + header
+      + detail
+      + blocked
+      + missLine
   }
   switch (op) {
     case 'open':
@@ -1209,19 +1335,41 @@ function renderSessionResult(value: Record<string, unknown>): string {
         + `\nidle TTL: ${String(value.idle_ttl_ms ?? '?')}ms`
     case 'observe': {
       const el = Array.isArray(value.elements) ? value.elements : []
-      const lines = el.slice(0, 12).map((raw) => {
+      const lines = el.slice(0, OBSERVE_DISPLAY).map((raw) => {
         const e = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {}
-        const hints = Array.isArray(e.hints) ? e.hints.filter((h): h is string => typeof h === 'string') : []
-        return `  ${String(e.tag ?? '')} ${String(e.label ?? '')}${hints.length ? ` → ${hints.join(' | ')}` : ' (no hint)'}`
+        const hints = Array.isArray(e.hint_candidates) ? e.hint_candidates.filter((h): h is string => typeof h === 'string') : []
+        const notAdmitted = e.admitted === false && typeof e.why_not_admitted === 'string' && e.why_not_admitted !== ''
+        return `  ${String(e.ref ?? '')} ${String(e.tag ?? '')} ${String(e.label ?? '')}`
+          + (hints.length ? ` → ${hints.join(' | ')}` : ' (no hint)')
+          + (notAdmitted ? `  [not admitted: ${String(e.why_not_admitted).slice(0, 80)}]` : '')
       })
+      const counts = typeof value.counts === 'object' && value.counts !== null
+        ? value.counts as Record<string, unknown>
+        : undefined
+      const total = counts !== undefined && typeof counts['elements'] === 'number' ? counts['elements'] : el.length
+      const omitted = counts !== undefined && typeof counts['omitted'] === 'number' ? counts['omitted'] : undefined
+      const more = el.length - OBSERVE_DISPLAY
       return `${tag}: ${String(value.url ?? '')} elements ${String(el.length)}`
         + (value.counts === undefined ? '' : ` counts ${JSON.stringify(value.counts)}`)
         + (value.truncated === true ? ' (truncated)' : '')
         + (lines.length ? `\n${lines.join('\n')}` : '')
+        // C1：只有溢出才追加两行（≤20 行时输出与此前逐字节一致；observe 没有 offset——
+        // 元素序随水合/动画变化，收窄用 selector，全量用 snapshot）。
+        + (more > 0
+          ? `\n… +${more} more (${String(total)} total${omitted === undefined ? '' : `, ${String(omitted)} omitted`})`
+            + '\nnext: selector="<css>" 收窄 · max=<n≤200> 放宽 · snapshot → pool-<n>.json（全量元素）'
+          : '')
     }
     case 'act':
       return `${tag}: ${String(value.act_op ?? '')} ${String(value.target ?? '')} → ${String(value.how ?? '?')}`
         + ` ref=${String(value.ref ?? '-')} changed=${String(value.changed === true)}`
+        + (value.act_op === 'scroll'
+          ? ` moved=${String(value.moved === true)}`
+            + (typeof value.delta === 'number' ? ` delta=${String(value.delta)}px` : '')
+            + (typeof value.scroll === 'object' && value.scroll !== null
+              ? ` scrollTop=${String((value.scroll as Record<string, unknown>).scrollTop ?? '?')}`
+              : '')
+          : '')
         + `\nurl: ${String(value.url ?? '')}`
         + (value.ambiguous === true
           ? `\nambiguous: yes${Array.isArray(value.matched_others) && value.matched_others.length > 0
@@ -1239,8 +1387,23 @@ function renderSessionResult(value: Record<string, unknown>): string {
         + (value.value_truncated === true ? ' (truncated)' : '')
     case 'extract': {
       const rows = Array.isArray(value.rows) ? value.rows : []
+      const total = typeof value.total === 'number' ? value.total : undefined
+      const offset = typeof value.offset === 'number' ? value.offset : 0
+      const more = total === undefined ? 0 : total - offset - rows.length
+      const savedLine = typeof value.file === 'string'
+        ? `\nsaved: ${String(value.file)} (${String(value.saved ?? rows.length)} row(s), ${String(value.bytes ?? 0)} bytes)`
+          + (value.truncated === true
+            ? ` — truncated${typeof value.save_limit === 'string' ? ` at ${value.save_limit}` : ''}`
+            : '')
+        : ''
       return `${tag}: ${String(value.count ?? rows.length)} row(s)${value.capped === true ? ' (capped)' : ''}`
-        + (rows.length ? `\n${rows.slice(0, 5).map(r => `  ${JSON.stringify(r)}`).join('\n')}` : '')
+        + (rows.length ? `\n${rows.slice(0, EXTRACT_DISPLAY).map(r => `  ${JSON.stringify(r)}`).join('\n')}` : '')
+        // C1：只有还有行没显示时才追加两行（≤20 行且无续页时输出与此前逐字节一致）。
+        + (more > 0
+          ? `\n… +${more} more`
+            + `\ntotal=${String(total)} · offset=${String(offset + rows.length)} 续页 · save:true → extract-<n>.json`
+          : '')
+        + savedLine
     }
     case 'signal':
       return `${tag}: held=${String(value.held === true)}`

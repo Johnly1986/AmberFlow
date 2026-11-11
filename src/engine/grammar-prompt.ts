@@ -136,10 +136,11 @@ export const MATCHABLE_POOL_ATTRS: readonly string[] = [
  * 属性匹配模型的权威表述（docs/APP_SCRIPT_AUTHORING.md 必须逐字包含，prompt-hit 校验）。
  * A2：DOM 的 aria-label 在提取期已并进 label（labelOf 优先读它），所以
  * `[aria-label~x]`/`[aria-label=y]` 按 **label** 匹配——不是第二个字段模型。
+ * A1：label 的匹配底座是 [full_label, label]（≤200 完整值），href 同理是 [href_full, href]。
  */
 export const ATTR_MATCH_MODEL_TEXT =
   `属性名按池字段匹配：${MATCHABLE_POOL_ATTRS.join("、")}`
-  + `；aria-label 是 label 的别名（提取期已并进 label），class、title 等不在池字段模型里，永不命中`;
+  + `；aria-label 是 label 的别名（提取期已并进 label），label/href 按完整值（≤200）匹配（label = full_label + label、href = href_full + href 双底座），class、title 等不在池字段模型里，永不命中`;
 
 /**
  * target_not_found 报错里的闭集提示（executor.ts 消费）。

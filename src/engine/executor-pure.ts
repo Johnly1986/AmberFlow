@@ -16,7 +16,7 @@ import {
 import { actionCapabilities, elemFamily, urlOf, type ActionCapability, type Elem, type ElemFamily, type ElemPool, type FrameGate, type PageLike } from "./extraction.ts";
 import type { CommandDecl } from "./actions.ts";
 import { parseHint } from "./hint.ts";
-import { hintMatch, type HintMatchCandidate, type HintMatchOthersDiag } from "./rules.ts";
+import { hintCandidates, hintMatch, type HintMatchCandidate, type HintMatchOptions, type HintMatchOthersDiag } from "./rules.ts";
 import { checkSignal, isWeakNegativeSignal, LOGIN_WALL_TEXTS, LOGIN_WALL_URL_RE, type SignalSpec } from "./signals.ts";
 import { FILLER_TOKENS, ROLE_TOKENS, STOP_TOKENS } from "./rules.ts";
 import type { DecisionProvider } from "../model/decision-provider.ts";
@@ -211,6 +211,154 @@ export function targetMatcher(target: string): ((e: Elem) => boolean) | null {
 /** 全部动作族：判别拿不到目标族（决策步没有声明 op）时池摘要的兜底范围。 */
 export const ALL_FAMILIES: ReadonlySet<string> = new Set(["click", "fill", "select", "check", "upload"]);
 
+/* ------------------------------------------------------------------ A4 落空判别的词面近似 */
+
+/**
+ * A4：落空判别里的一行候选（只陈述池/扫描面已有的事实）。
+ *
+ * `ref` 在池面是 `eN`/`f<fi>:eN`、池外回退面是合成 `pN`；`why` 只在有原因时出现
+ * （近似命中字段 + 形状，或池外回退的可见性结论）。
+ */
+export interface ActMissRow {
+  ref?: string;
+  tag: string;
+  /** 归一 label（`full_label` 优先、折叠空白）≤40 字符。 */
+  label: string;
+  why?: string;
+}
+
+/**
+ * A4：会话 `act` 落空（`target_not_found`）的**结构化判别面**。
+ *
+ * 只陈述"池里有什么、池外扫描到什么、为什么没解析成目标"——纯内存、零页面往返（唯一的
+ * 页面读取是池外回退既有扫描行的可见性判定）、不猜、不新造停因。
+ */
+export interface ActMissDiagnostics {
+  /** 原 hint（不做长度截断——这是调用方给的输入事实）。 */
+  target: string;
+  pool_size: number;
+  /** `parseHint` 的形状：`id` / `attrSubstr` / `nearToken` / `attrEq` / `tag` / `bare`。 */
+  hint_shape: string;
+  hint_len: number;
+  /** 池内**同档**候选（quiet 读取的 `hintCandidates`；≤5）。 */
+  candidates: ActMissRow[];
+  /** 池内**词面近似**候选（前缀/包含；≤5）。 */
+  near: ActMissRow[];
+  /** 池外回退扫描到、但被可见性过滤的近似行（≤3，`why:"not visible"`）。 */
+  rejected: ActMissRow[];
+}
+
+/** 词面近似比较的池字段（`label` 是前 40 字视图，`full_label` 是 ≤200 的匹配口径）。 */
+const NEAR_FIELDS = ["label", "full_label", "data_test", "id", "name", "href"] as const;
+
+const NEAR_DEFAULT_CAP = 5;
+
+/** A4：归一显示 label（`full_label` 优先、折叠空白、≤40 字符）。 */
+function missLabel(e: Elem): string {
+  return String(e.full_label ?? e.label ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+}
+
+/**
+ * A4：**词面近似候选**（池内、纯内存、零页面往返）。
+ *
+ * 落空时只回 "matched nothing in a pool of N" 回答不了"是目标不在页面，还是用词/形状不对"。
+ * 这里不改 hint 语法（token 仍由唯一解析器 `parseHint` 给出），只在池里做**前缀/包含**的
+ * 宽松比对：命中 `label`/`full_label`/`data_test`/`id`/`name`/`href` 任一即收，池序输出、
+ * 行数有界（缺省 ≤5）。
+ *
+ * 纪律：不猜（无模糊编辑距离、不按相似度排序、不换 token）、不新增页面往返、同 ref 只出现
+ * 一次；单字符词面直接返回空（"a" 的包含会收进整页，与 `targetMatcher` 的稳健词面门槛同源）。
+ */
+export function nearCandidates(target: string, pool: ElemPool, cap = NEAR_DEFAULT_CAP): ActMissRow[] {
+  const max = Number.isFinite(cap) ? Math.max(0, Math.min(20, Math.floor(cap))) : NEAR_DEFAULT_CAP;
+  if (max === 0) return [];
+  const hint = String(target ?? "");
+  const parsed = parseHint(hint);
+  const token = (parsed.kind === "id" || parsed.kind === "attrSubstr" || parsed.kind === "attrEq"
+    ? parsed.value
+    : parsed.kind === "tag" ? parsed.tag : parsed.token).trim().toLowerCase();
+  if (token.length < 2) return [];
+  const out: ActMissRow[] = [];
+  const seen = new Set<string>();
+  for (const [ref, e] of Object.entries(pool)) {
+    if (seen.has(ref)) continue;
+    let why: string | undefined;
+    for (const field of NEAR_FIELDS) {
+      const v = String(e[field] ?? "").trim().toLowerCase();
+      if (v === "" || !v.includes(token)) continue;
+      why = `${field} ${v.startsWith(token) ? "前缀" : "包含"}`;
+      break;
+    }
+    if (why === undefined) continue;
+    seen.add(ref);
+    out.push({ ref, tag: String(e.tag ?? ""), label: missLabel(e), why });
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/**
+ * A4：构造落空判别面（`actOnce` 的 `target_not_found` 路径）。
+ *
+ * `candidates` 用 `hintCandidates` 的 **quiet 读法**（`diag:false`）取——那次查询**不写**
+ * `rules.ts` 的 B1 旁路模块态，会话 task-34 的 `matched_others` 回显因此不被污染。
+ * `rejected` 由调用方从池外回退的扫描行带来（这里只做上限裁剪，不重算可见性）。
+ */
+export function actMissDiagnostics(input: {
+  target: string;
+  pool: ElemPool;
+  op: string;
+  hintOpts?: HintMatchOptions;
+  rejected?: readonly ActMissRow[];
+}): ActMissDiagnostics {
+  const hint = String(input.target ?? "");
+  const parsed = parseHint(hint);
+  const cand = hintCandidates(hint, input.pool, { ...(input.hintOpts ?? {}), diag: false });
+  const candidates: ActMissRow[] = [];
+  if (cand !== null) {
+    for (const ref of cand.refs.slice(0, 5)) {
+      const e = input.pool[ref];
+      if (e === undefined) continue;
+      candidates.push({ ref, tag: String(e.tag ?? ""), label: missLabel(e) });
+    }
+  }
+  return {
+    target: hint,
+    pool_size: Object.keys(input.pool).length,
+    hint_shape: parsed.kind,
+    hint_len: hint.length,
+    candidates,
+    near: nearCandidates(hint, input.pool, NEAR_DEFAULT_CAP),
+    rejected: (input.rejected ?? []).slice(0, 3).map((r) => ({ ...r })),
+  };
+}
+
+/**
+ * A4：落空的**纯内存判别**（仿 `cmdDiscrimination`：只往既有 reason 末尾追加一段，
+ * 停因码与前置文本不变）。顺序按证据强度：同档候选在而定位不了 → 池内词面近似 →
+ * 池外近似但不可见 → 池内完全没有相关词面。
+ */
+export function actMissDiscrimination(d: ActMissDiagnostics, pool: ElemPool, op: string): string {
+  const summary = poolRoleSummary(pool, cmdFamilies(op));
+  const names = (rows: readonly ActMissRow[]): string =>
+    rows.map((r) => `"${r.label || r.tag}"`).join("、");
+  if (d.candidates.length > 0) {
+    return `hint 在池内仍有 ${d.candidates.length} 个同档候选（如 ${names(d.candidates)}）却无法定位`
+      + `——属定位/可达性问题，非目标缺失`;
+  }
+  if (d.near.length > 0) {
+    return `池中不存在精确命中，但有词面近似候选（如 ${names(d.near)}）——目标可能在页面上，`
+      + `换个更精确的形状/更完整的词（或先 observe 抄 hint_candidates）`
+      + (d.rejected.length > 0 ? `；池外另有 ${d.rejected.length} 行近似但不可见` : "");
+  }
+  if (d.rejected.length > 0) {
+    return `池内无词面近似；池外扫描到 ${d.rejected.length} 行近似但被可见性过滤`
+      + `（如 ${names(d.rejected)}，not visible）——目标可能存在但当前不可见`;
+  }
+  return `池中不存在与词面「${d.target}」相关的候选（池 ${d.pool_size} 项`
+    + `${summary ? `：${summary}` : ""}）——目标很可能不在本页面（或未进元素池）`;
+}
+
 /** 命令 op 的"同族 + 相邻族"动作面（相邻：click↔check 按压语义、fill↔select 选值语义）。 */
 export function cmdFamilies(op: string): ReadonlySet<string> {
   switch (String(op)) {
@@ -242,6 +390,77 @@ export function matchedOthersWarning(d: HintMatchOthersDiag, hint: string, stepN
   return `matched_others: step ${stepNo} target_hint ${JSON.stringify(hint)} 经${shape}命中，`
     + `命中对象可能是容器/同缀元素而非预期目标 — ${shown}${more}；`
     + `建议收窄：tag[attr=…] 精确值、更长独词或 #id（对照 inspect --json 的 hint_candidates）`;
+}
+
+/**
+ * A3：`meta.policy.act_hint_tier:"strong"` 的弱档门（与 `act_hint` 正交）。
+ *
+ * 判据**只有** `rules.takeHintMatchOthers()` 的 `suspicious`（bare tier≥3 词前缀/词包含、
+ * attrSubstr tier=3 loose 子串）——不在这里另造第二套档位表；今天弱档胜出就 conf=1.0
+ * `rule:match` 直接执行，只留一条 `matched_others` 警告。`strong` 把"弱档胜出"改判为
+ * **不算命中**，随后按 `act_hint` 既有语义继续（widen → 交模型，rules-only 落既有
+ * `no_model_runtime`；strict → 结构化 `target_not_found`）。
+ *
+ * 返回 `{ref, rejected}`：`any`（缺省）恒 `{ref, rejected:null}` = 逐字节今天；`strong` 且
+ * 该 ref 确由**本条 hint** 的弱档胜出 ⇒ `{ref:null, rejected:诊断}`。
+ * **null ref 不被改写**（弱档内部的真歧义本来就是"没解出目标"，交给 `act_hint` 既有阶梯），
+ * 诊断的 hint 相等性校验与 `matched_others` 同一口径（挡住陈旧旁路记录）。
+ * 两处共用：act hint 规则解析（池 hintMatch）与 rules-only 宽扫重解析。
+ */
+export function declaredAllow(
+  ref: string | null,
+  diag: HintMatchOthersDiag | null,
+  hint: string | null,
+  strong: boolean,
+): { ref: string | null; rejected: HintMatchOthersDiag | null } {
+  if (!strong || ref === null || diag === null || hint === null) return { ref, rejected: null };
+  if (diag.hint !== hint || !diag.suspicious) return { ref, rejected: null };
+  return { ref: null, rejected: diag };
+}
+
+/** 弱档的档位名（警告/停因文案共用；档位值本身来自 rules 的诊断，不在这里重算）。 */
+function weakTierLabel(d: HintMatchOthersDiag): string {
+  if (d.kind === "attrSubstr") return `attrSubstr loose 子串档 t=${d.tier}`;
+  return `bare ${d.tier === 4 ? "词包含" : "词前缀"}档 t=${d.tier}`;
+}
+
+/** 弱档候选（≤3 条，tag + class 首段 + label ≤40，总长有界）。 */
+function weakCandidatesText(d: HintMatchOthersDiag): string {
+  const fmt = (c: HintMatchCandidate): string =>
+    `${c.tag}${c.class ? `.${c.class}` : ""} "${c.label.slice(0, 40)}"`;
+  const shown = d.candidates.slice(0, 3).map(fmt).join(" | ") || "（无候选记录）";
+  return `${shown}${d.candidates.length > 3 ? `（共 ${d.candidates.length} 个撞词候选，只列前 3）` : ""}`;
+}
+
+/**
+ * A3：strong 档拒掉一次弱档胜出时的 step warning（替代 `matched_others`）。
+ * 形状：`weak_hint_rejected: step N target_hint "…" 经<档>胜出，被 meta.policy.act_hint_tier:
+ * "strong" 判为未命中 — 候选（≤3）…；按 act_hint 语义继续`。运行期**当场事实**，
+ * 与 matched_others 同一分层（B2 的静态 hint lint 是声明形状提醒，不复制这段话）。
+ */
+export function weakHintRejectedWarning(d: HintMatchOthersDiag, hint: string, stepNo: number): string {
+  return `weak_hint_rejected: step ${stepNo} target_hint ${JSON.stringify(hint)} 经弱档胜出`
+    + `（${weakTierLabel(d)}），被 meta.policy.act_hint_tier:"strong" 判为**未命中**（弱档不算命中）— 候选（≤3）：`
+    + `${weakCandidatesText(d)}；本步按 act_hint 语义继续`
+    + `（widen=交模型自由选 / strict=结构化 target_not_found）`;
+}
+
+/**
+ * A3：strong + `act_hint:"strict"` 的停因 reason（复用的 stopCode 仍是既有
+ * `target_not_found`，不新增停因）。必须写明：弱档被判未命中 + 候选 + 两条改法
+ * （`act_hint_tier` 回 "any" / 移除 `act_hint:"strict"`）——否则作者只会看到"页面上明明有"。
+ */
+export function weakRejectedReason(
+  d: HintMatchOthersDiag, hint: string, stepNo: number, poolSize: number, summary: string,
+): string {
+  return `step ${stepNo}: act_hint="strict" + meta.policy.act_hint_tier="strong" — declared target_hint `
+    + `${JSON.stringify(hint)} 只在弱档胜出（${weakTierLabel(d)}），strong 判为**未命中**（弱档不算命中），`
+    + `因此禁止模型回退 — 候选（≤3）：${weakCandidatesText(d)}；`
+    + `池 ${poolSize} element(s)${summary ? `: ${summary}` : ""}。`
+    + `Fix (a) narrow the hint to a strong shape (#id | tag[attr=value] | tag[attr~substr] exact value | `
+    + `a longer single token), (b) set meta.policy.act_hint_tier:"any" to accept weak tiers again `
+    + `(today's behaviour: execute + matched_others warning on that step), or (c) remove `
+    + `meta.policy.act_hint:"strict" to let the decision model pick instead`;
 }
 
 /**

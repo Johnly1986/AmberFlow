@@ -1020,11 +1020,22 @@ export interface EffectivePolicy {
    */
   act_hint?: { value: "widen" | "strict"; source: "app" };
   /**
+   * A3 弱档命中算不算命中（**仅声明时出现** = 缺省产物逐字节不变；显式 "any" 也进账）。
+   * "strong" = bare 词前缀/词包含档（t≥3）与 attrSubstr loose 子串档（t=3）改判未命中，
+   * 随后按 `act_hint` 既有语义继续。与 `act_hint` 正交。
+   */
+  act_hint_tier?: { value: "any" | "strong"; source: "app" };
+  /**
    * P0-C 声明目标解析链（**仅声明时出现** = 缺省产物逐字节不变；显式 "off" 也进账）。
    * "declared" = 命令 target / act hint 在池/ADMIT/FW8 之后走 DRF（attr/text 两模式、
    * 恰好一个可见、click 前 hit-test；首版 click/scroll/hover）。
    */
   target_resolution?: { value: "off" | "declared"; source: "app" };
+  /**
+   * A1 属性值匹配底座（**仅声明时出现** = 缺省产物逐字节不变；缺省 `full_label` 是修复后行为）。
+   * `"display"` = A1 之前只看模型视图前 40 字 label（>40 的 aria-label 值永不命中）。
+   */
+  attr_value_match?: { value: "full_label" | "display"; source: "app" };
   /**
    * task-43 浏览器通道（**仅 env/meta 任一存在时出现** = 缺省产物逐字节不变）。
    * 生效值按 env(AMBERFLOW_BROWSER_CHANNEL) > meta.policy.browser 记账；真实二进制以
@@ -1149,9 +1160,17 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
   if (declaredPolicy.act_hint !== undefined) {
     policy.act_hint = { value: declaredPolicy.act_hint, source: "app" as const };
   }
+  // A3：act_hint_tier 同样**仅声明时出现**（缺省 any = 今天；"any" 显式声明也进账）。
+  if (declaredPolicy.act_hint_tier !== undefined) {
+    policy.act_hint_tier = { value: declaredPolicy.act_hint_tier, source: "app" as const };
+  }
   // P0-C：target_resolution 同样**仅声明时出现**（缺省 off = 今天；"off" 显式声明也进账）。
   if (declaredPolicy.target_resolution !== undefined) {
     policy.target_resolution = { value: declaredPolicy.target_resolution, source: "app" as const };
+  }
+  // A1：属性值匹配底座**仅声明时出现**（缺省 full_label = 修复后；"display" 显式声明才进账）。
+  if (declaredPolicy.attr_value_match !== undefined) {
+    policy.attr_value_match = { value: declaredPolicy.attr_value_match, source: "app" as const };
   }
   // task-43：浏览器通道——env(AMBERFLOW_BROWSER_CHANNEL) > meta.policy.browser，任一存在才
   // 进账（缺省产物逐字节不变）。最终二进制由 launchKwargs 同一优先级解析，env.browser
@@ -1361,6 +1380,11 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     // P1 窄问开关（默认关；开了也只影响"档内歧义的 hint 步"问模型的范围，阶梯与 method 不动）。
     // §3：优先级 CLI(本次) > pack.policy(声明) > 缺省(false)。不写 policy 的包逐字节不变。
     tieredHint: policy.tiered_hint.value,
+    // A3：弱档算不算命中（缺省 any；strong = 弱档改判未命中，再按 actHint 语义走——声明式
+    // 路径本就不传 actHint，故 strong 在此等于"交模型"，与 flow 面 widen+strong 同语义）。
+    actHintTier: policy.act_hint_tier?.value,
+    // A1：aria-label 属性 hint 的池侧匹配底座（缺省 full_label = 修复后；display = A1 之前）。
+    attrValueMatch: policy.attr_value_match?.value,
     // §W1：`risk_ask: rules-only` 让"要不要拦"不再花一次每步的前向（批模式下它的答案本来就被丢掉）。
     riskAsk: policy.risk_ask.value === "rules-only" ? "rules-only" : "always",
     reobserve: policy.reobserve.value,
@@ -2338,8 +2362,12 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           tieredHint: resolvedPolicy.policy.tiered_hint.value,
           // P0-B：act hint 档位（缺省 widen；strict = 声明目标解析链全落空时禁模型回退）。
           actHint: resolvedPolicy.policy.act_hint?.value,
+          // A3：弱档算不算命中（缺省 any；strong = 弱档改判未命中，再按 actHint 语义走）。
+          actHintTier: resolvedPolicy.policy.act_hint_tier?.value,
           // P0-C：DRF（缺省 off = 今天；declared = 声明目标解析链启用 DOM 兜底）。
           targetResolution: resolvedPolicy.policy.target_resolution?.value,
+          // A1：aria-label 属性 hint 的池侧匹配底座（缺省 full_label；display = A1 之前）。
+          attrValueMatch: resolvedPolicy.policy.attr_value_match?.value,
           riskAsk: resolvedPolicy.policy.risk_ask.value === "rules-only" ? "rules-only" : "always",
           reobserve: resolvedPolicy.policy.reobserve.value,
           maxEffectiveRepeats: resolvedPolicy.policy.max_effective_repeats.value,
@@ -2569,6 +2597,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       surfacePolicy: policy.surface.value,
       // 导航纪律（缺省 undefined = 现行为逐字节不变；"entry-only" 才有闸门）。
       navPolicy: policy.navigation?.value,
+      // A1：ctx.waitForTarget 的命中口径（缺省 undefined = full_label；与执行器同一 policy）。
+      attrValueMatch: policy.attr_value_match?.value,
       // P0-B：声明页放行清单（仅 entry-only 用它；缺省 undefined = 逐字节不变）。
       declaredPages: declaredPageUrls(pack),
       onRunReport: (rep) => {

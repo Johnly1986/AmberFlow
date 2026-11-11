@@ -113,6 +113,7 @@ export async function flow(ctx) {
 | 首屏外内容/滚到页底 | `ctx.scrollList("document"|"body",{to:"bottom"})`（合成滚动目标） |
 | 弱否定 done/误入登录 | `weak_done` lint + `false_done` guard；正向锚配 `ctx.judge.loginWall()`（§6） |
 | act hint 未命中不想让模型乱选 | `meta.policy.act_hint:"strict"`（§10） |
+| 弱档命中（`matched_others`）点到了容器/同缀元素 | `meta.policy.act_hint_tier:"strong"`（弱档不算命中；配合 `act_hint` 决定交模型还是停因，§8） |
 | 需要回入口页 | entry-only 放行 `meta.site.pages` 声明页（URL 归一全等；§4.10） |
 | React 受控输入 `judge.value` 不成立 | 改用 text/exists/JS 可见事实（value readback 对受控输入不可靠，§6） |
 
@@ -231,7 +232,7 @@ export const meta = (kit) => ({
 | `site` | 站点面：页面角色 `pages`、命名行抽取 `listExtract`（见 §5） |
 | `model` / `maxSubgoals` | 决策模型 checkpoint / 子目标上界（高级，缺省即可） |
 | `notes` | 给人看的备注（字符串列表），不参与运行 |
-| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` / `candidate_priority` / `done_preheld` / `effect_readback` / `settle` / `pool_gate` / `surface` / `decision_state` / `navigation` / `act_hint` |
+| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` / `candidate_priority` / `done_preheld` / `effect_readback` / `settle` / `pool_gate` / `surface` / `decision_state` / `navigation` / `act_hint` / `act_hint_tier` / `attr_value_match` |
 | `pace` | 运行节奏：`between_steps_ms` / `between_actions_ms` |
 | `invariants` | 结束态断言：`{ id, desc?, signal }` |
 | `recordedFrom` / `generatedFrom` | 血统：这段脚本从哪次演示/哪份生成物来 |
@@ -285,7 +286,7 @@ export async function flow(ctx) {
   `clickAt`（U7）在**元素相对**坐标上点击：`ctx.command("clickAt", "#cv", ctx.value.slot("coords"))`，值的规范形是声明绑定的字符串 `"x,y"`（非负整数或有限小数，允许空白；原点 = 元素 padding box 左上角，Playwright `locator.click({position})` 语义）——用于 canvas 这类"进了池但只能点中心"的自绘控件。严格解析，坏格式（`center` / 百分比 / 负偏移 / `x;y` / 多余段等）= 结构化 `config_error` 并点名合法格式，不猜；只对 click 族元素成立（非 click 族 = `action_unsupported`）；执行前用元素 bbox 校验 `0 <= x < width`、`0 <= y < height`，越界 = 结构化 `config_error`（reason 带实测 width/height）。证据 `executed_actions` 记 `{op:"clickAt", position:{x,y}, changed}`（`how:"clicked"`），`changed`/inert 沿用 click 的快照 diff 口径；`force` 语义同 click，风险面沿用 click 的关键词/模型风险票。dry/`apps check` 只校声明形状，不解析坐标。
   `skip` = 按定义解决的零动作命令：全部命令解决后引擎会**评估一次 done 信号**再判成败——"导航由 arrive 完成、本步只验证到达"的守卫步合法可用（04-A 修复；此前 skip 步的 done 从未被评估，必报 `done_not_held`）。守卫步写法：`act: [ctx.command("skip")]`（完整可跑示例见 `examples/apps/01-basic-step` 步骤②）。
   不在能力面内的 op 会得到 `action_unsupported`，目标歧义是 `target_ambiguous`，目标不存在是 `target_not_found`。
-- **act hint 是六形状语法闭集**（唯一解析器 `src/engine/hint.ts`，语法**描述**的唯一出处 `src/engine/grammar-prompt.ts`，`npm run prompt-hit` 校验示例可命中、报错/提示词/桥描述不漂移）：`#id` ｜ `tag[attr~substr]` ｜ `tag~token` ｜ `tag[attr=value]`（值去引号、全小写折叠）｜ 角色词 `button|link|input|textarea|select` ｜ 裸词（按 label 匹配）。属性名按池字段匹配：test→data-test、type→input_type、aria-label→label、href、name、id、role、near；aria-label 是 label 的别名（提取期已并进 label），class、title 等不在池字段模型里，永不命中（本句由 grammar-prompt 的 ATTR_MATCH_MODEL_TEXT 生成，prompt-hit 逐字校验，勿手改）。**容器/后代 CSS（如 `#outer input`）不是语法错误——会被解析成一个永不命中的形状**；命令空间的 `target_not_found` reason 附闭集提示，而 act hint 落空会**静默回退模型决策**、报 `low_confidence` 不附提示——写 hint 前先 `inspect` 拿验证过的 `hint_candidates`。
+- **act hint 是六形状语法闭集**（唯一解析器 `src/engine/hint.ts`，语法**描述**的唯一出处 `src/engine/grammar-prompt.ts`，`npm run prompt-hit` 校验示例可命中、报错/提示词/桥描述不漂移）：`#id` ｜ `tag[attr~substr]` ｜ `tag~token` ｜ `tag[attr=value]`（值去引号、全小写折叠）｜ 角色词 `button|link|input|textarea|select` ｜ 裸词（按 label 匹配）。属性名按池字段匹配：test→data-test、type→input_type、aria-label→label、href、name、id、role、near；aria-label 是 label 的别名（提取期已并进 label），label/href 按完整值（≤200）匹配（label = full_label + label、href = href_full + href 双底座），class、title 等不在池字段模型里，永不命中（本句由 grammar-prompt 的 ATTR_MATCH_MODEL_TEXT 生成，prompt-hit 逐字校验，勿手改）。**容器/后代 CSS（如 `#outer input`）不是语法错误——会被解析成一个永不命中的形状**；命令空间的 `target_not_found` reason 附闭集提示，而 act hint 落空会**静默回退模型决策**、报 `low_confidence` 不附提示——写 hint 前先 `inspect` 拿验证过的 `hint_candidates`。
 
 #### 候选窗口与分桶（A2：窗口是**有界快照**，不是"页面没有"）
 
@@ -293,6 +294,8 @@ export async function flow(ctx) {
 
 - **rules-only 的窗口恢复（W10）**：无模型面（规划脸/online 套件）里，声明的 `target_hint` 若被 40 窗口挤出，规则解析失败后会做**一次** 120 元素、main-first 的宽扫重解析（`hintMatch` 确定性，命中即用；常规窗口内命中零多付，不放大 attempts）。这覆盖"hint 在池投影里可匹配、但被配额挤出"的形状；宽扫与常规窗口用**同一匹配底座**（T9 起 `href` 是 `href_full` + `href` 双字段），匹配底座层面就匹配不上的 hint 它也救不了。
 - **href 的匹配底座（T9）**：池字段 `href` 仍是**有损展示投影**（去 origin、去 query，只保留路径结尾 ≤2 段；模型视图/criteriaView 用的就是它，逐字节不变）；`[href~…]` / `[href=…]` 匹配时引擎**同时**看原始属性值（`getAttribute('href')` 原样，query/fragment/origin 都在），任一字段命中即算——`a[href~page=2]` 这类 query 型 hint 从此可命中，旧路径型 `a[href=many.html]`（依赖投影）照旧命中。`inspect --json` 的 `hint_candidates` 给的是**原始值**（已用同一个 `hintMatch` 自证可命中），元素的 `href_full` 同样可在 `inspect` 看到。分页/筛选链接仍优先用 label 裸词（如 `next`）、`[data-test=…]` 或 `#id` 这类稳定锚点。
+- **label 的匹配底座（A1）**：池字段 `label` 是**模型视图的前 40 字**（`full_label` 才是 ≤200 的匹配口径；不变量 `label === full_label 前 40 字`）。`[aria-label=…]` / `[aria-label~…]` 匹配时引擎同时看 `full_label` 与 `label`（非空、同值去重、大小写折叠），任一命中即算——**>40 字的 aria-label 值从此可等值/尾串命中**，≤40 的值等值命中集合不变。`meta.policy.attr_value_match: "display"` 回退 A1 之前（只比前 40 字 label，>40 的值永不命中）；缺省 `"full_label"`。inspect/observe/session 无 policy，恒 `full_label`。
+- **弱档命中与 `meta.policy.act_hint_tier`（A3）**：裸词按五档（整 label 全等 → 词全等 → 词边界/前缀 → **词前缀** → **词包含**）、属性子串按三档（属性值全等 → 末路径段全等 → **子串**）解析；**弱档 = 裸词的前缀/包含档与属性子串的 loose 子串档**，它一经胜出就是 conf=1.0 的 `rule:match` 直接执行——只留一条 step warning `matched_others`（点名选中者与其余撞词候选，提示"可能是容器/同缀元素"）。`act_hint_tier: "any"`（缺省）就是这条今天的行为；`"strong"` 把弱档胜出判为**未命中**：不执行该 ref，warning 换成 `weak_hint_rejected`（档位 + 候选≤3 + 开关），随后按 `act_hint` 档位继续（`widen` 交模型自由选 / `strict` 结构化 `target_not_found`）。判据复用引擎同一份 `suspicious`（`takeHintMatchOthers()`），不另立档位；rules-only 的宽扫重解析同受约束。命令 `target`、learned hint、决策步（无 act）不受影响。
 - **声明驱动的身份回捞（FW8，identity recovery）**：反应型框架（React/Vue）把 click 监听挂在根容器，叶子自绘控件自身没有可枚举属性——它既不在选择器闭集（池）里，也不在 ADMIT 准入面里，`act: ctx.hint("#leaf")` / 命令 target `#leaf` 这类**稳定身份声明**曾经永远解析不到。现在：**当且仅当**这一步作者声明的目标（命令 `target` / act hint / plan `target_hint`，同一执行器路径）在池 + hint 回捞后仍解析不到，且声明是**身份形状**时，引擎按身份到 DOM 里找**恰好一个可见元素**并执行。五条约束（实现/审查口径一致）：
   1. **只服务声明面**：决策步（无 act）与模型选出的元素**永不**回捞，回捞元素也不进 `ChoiceRequest.elems`、不参与 done 判定——它只是这一步声明目标的解析结果。
   2. **形状白名单**：只认 `#id`、`tag[attr=value]`、`[attr=value]` 且 attr ∈ {test→data-test, name, id}（精确值，大小写折叠与池侧一致）；`tag[attr~substr]` / `tag~token` / 角色词 / 裸词 / `near` 都不是身份声明，行为与以前逐字节一致（不触发回捞）。
@@ -395,6 +398,7 @@ const feed = await ctx.collect({
 - **参数校验在 dry 期就红**：`count` 必须恰好一个 `rows|selector`、`maxClicks/stableRounds` 必须正整数、`to` 必须 `bottom|top|page`、`value` 必须恰好一个 `value|percent`、`collect` 的 `row` 必须非空、`until` 只能二选一（`stableRounds` 1..20 / `maxRows` 1..5000）——写错在 `amber apps check` 就报 `config_error`，不会留到真跑。`count.fields` 只做**形状校验**：expand 只用 `rows/selector` 数行数（内部 DOM `querySelectorAll` 计数，不写独立 trace 事件、不产生 read/extract 事件，因此 replay 无需额外消费），字段投影不参与稳定判定。
 - **吞错也会被 check 抓住**：dry 的 `validateXxxRequest` 抛错前先落一条 `validation_error` trace 事件；脚本 `try/catch` 吞掉 `config_error` 时 `apps check` 仍判 FAIL 并输出「脚本吞掉了配置错误：<call> <message>」。源码里的 `ctx.expand(`/`ctx.scrollList(`/`ctx.setRange(`/`ctx.collect(` 调用点还会与 dry trace 事件数对账，未覆盖的分支只打**警告**（不改退出码，`check VALID` 不代表分支都被走过）。
 - **`collect` 的滚动位置**：取行元素的**最近可滚动祖先**（逐 frame 探测；找不到就退到页面滚动元素）；容器不可滚动（或行元素不存在）时停 `not_scrollable`，结果只覆盖当前可见部分。`stopReason` 口径：`stable` = **滚到底/滚不动之后**连续 stableRounds 轮无新增（没到底的轮次不算 plateau）；`maxRows` = 达上限（不是全集）；`budget` = 内部 `maxRounds` 用完仍不稳定；`not_scrollable` = 没法继续滚。轮间固定等 300ms 给懒加载/无限滚动。
+- **选择器语法只有真跑才验（C2）**：`collect` 与 `extract` 共用同一份 Playwright 选择器预检（入口一次；非法 = 结构化 `config_error` + `diagnostics.bad_selector`，replay/dry 不做）。旧的 DOM `querySelectorAll` 预检会拒绝 Playwright 自己的伪类（`:has-text(...)` 等），已删除——`row`/`fields` 走 Playwright 选择器引擎。
 - **命令面扩展**：`ctx.command("scroll", sel, { to: "bottom" })` 把"滚容器到方向"作为命令闭集的一项（旧 `ctx.command("scroll", sel)` 仍是"把目标滚入视口"，逐字节不变）；`setRange` 不新增 command op。
 - **trace/replay**：四个原语的调用参数记入 trace `args`；重放按录制值回放结果，参数不一致直接 `trace_mismatch`（不重新决策）；`collect` 的行数据也来自 trace（不重新抽页面）。dry 期是确定性桩（`expand` 返回全零指标、`scrollList/setRange` 返回 `{ok:true}`、`collect` 返回 `{rows:[], coverage 全 0, stopReason:"dry"}`）。
 - **`expand` 的 plateau 与点击失败**：`ok:true` 只代表"行数已连续 `stableRounds` 轮不增长"，`grew/clicks` 说明长没长、点了几次；到顶后控件不可点不算失败（`reason` 会记 click 失败次数）。只有"点了 `maxClicks` 次/超时仍未稳定"才是 `expand_not_stable`。
@@ -429,6 +433,11 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
 - `suspected_async`：click 执行了、但 pre/post 快照没变、随后 done 却成立 ⇒ 效果异步到达（如点击后
   1s 才长出新行）。引擎记 warning，**不** forbid 该元素、**不**写 outcome memory inert——它不是死元素。
 - `changed=false` 且 done 不成立仍按既有 inert/anti-repeat 逻辑处理（死循环拦截不变）。
+- **changed 的签名面（B3）**：pre/post 快照是 `{url,title,text,vals,checks}`——`checks` 记
+  **可勾选控件状态**（原生 checkbox/radio 的 checked、`aria-checked` 值、`aria-selected="true"`、
+  `select[multiple]` 的选中 index），空则不出现该字段。于是勾选/取消勾选本身就能让
+  `changed=true`（修前 check 常因签名里没有 checked 而被判 inert）；无此类控件的页面产物
+  逐字节不变，`vals` 的敏感值掩码（password/file/hidden）纪律不变。
 - trace 行上还有 `changed`（仅执行步）、`skipped/skip_reason`（仅未执行步）、`done_preheld`/`force_act`
   声明；S4 起还有 `forced`（步级 force 实际生效）与 `stale_retry:[{attempt,reason,ref}]`（每次 stale 重解析重试一条）；
   `after` 仅在"动作后有下一次观察"时补（done 立即成立的收尾动作没有下一跳，故不补）。
@@ -768,9 +777,10 @@ export async function flow(ctx) {
 ```
 
 - 两种 extract 二选一：`ctx.extract("name")` 走 `meta.site.listExtract[name]`（可复用、可校验）；`ctx.extract({ rows, fields, maxItems? })` 是 inline 形式，选择器直接写在脚本里。
-- `ctx.extract(name)` 的字段选择器是**行内相对选择器**；`rows` 最多取 500 行（超出在 trace 里标 `truncated`）。
+- `ctx.extract(name)` 的字段选择器是**行内相对选择器**；`rows` 最多取 500 行（超出在 trace 里标 `truncated`）。分页用第二参 `ctx.extract(nameOrSpec, { offset })`（0-based 整数 0..10000；`maxItems` 仍是每页上限，返回值形状与 `count` 语义不变——`offset` 写进 inline spec = `config_error`）。
 - `fields` 做两类投影（task-24/3c 起）：**①行内文本投影**（旧语义，无 @ 前缀逐字节不变）：每个字段值取单元格元素的 `innerText`（表单控件回退 `inputValue`；实现：`src/app/ctx.ts` 的 extract 字段循环）——`fields: { al: "[aria-label]" }` 这类属性选择器能定位到单元格，但读到的仍是它的文本：图标型元素（aria-label 有值、无可见文本）的字段恒为空（R11 实测）；**②属性投影（opt-in，"@" 前缀）**：`fields: { rating: "@aria-label" }` 读**行元素自身**的 `aria-label` attribute（无子选择器、无行内回退；读不到 → `""` 与现行为一致）——评分/评数这类"结构化信号在行元素属性上"的站点从此可按行读取（`ctx.read.attr` 是全页首匹配、无行作用域，3c 是唯一能落到行的结构化通道）。dry 仍 `[]`、replay 按录制回放（行为不变）。
 - `ctx.rows({row, fields})` 是 v1 明确**不开放**的新语法：调用给结构化 `config_error` 指向 `extract(name)`。
+- **选择器非法 = `config_error`，合法但零命中仍是 `[]`/`""`（C2）**：`readRows` 在**入口**做一次选择器解析预检——行选择器 + 每个字段选择器（除 `"."`/`":scope"`/`"@attr"` 形态）各一次 Playwright `locator(sel).count()`（每次 `ctx.extract` 最多 1+字段数 次往返；`ctx.collect` 只在入口一次、循环内不重复）。非法选择器抛结构化 `config_error`（reason `ctx.extract: field "x" selector "…" is not valid: …`，`diagnostics.bad_selector={selector, field?}`；停因码复用 `config_error`，不新增 stopCode）；掉帧/超时等执行面异常仍按旧行为（不会被误报成选择器错）。会话 `extract` 复用 observe 口径：响应带 `error:"bad_selector"`。**有意的行为变更**：此前非法选择器被静默吞成 `""`/`[]`（假数据），现在响亮报错；`ctx.collect` 旧的 DOM `querySelectorAll` 预检已删除，改走同一入口，因此 Playwright 伪类选择器（如 `div.row:has-text("Saved")`）不再被误拒。**dry/replay 不访问浏览器、不做预检**（`apps check` 不因此红，只有真跑/会话才红）——所以 `check VALID` 不代表选择器真的合法。
 - dry 模式下 `extract` 返回 `[]`、`read.attr` 返回 `null`、`waitFor` 立即返回 `true`（没有页面）——脚本在 dry 期不要依赖观察值；**一切基于观察值的 `ctx.fail`/分支/断言都必须用 `ctx.runtime.dry` 守卫**（dry/replay 恒 `true`、真跑恒 `false`；`epoch===0` 不作判据——见 §2 消歧义）：`apps check` 与 `--dry-run` 会真跑 flow，没有守卫的数据驱动停会把合法脚本判成 problems（03-D1 配方；需要严格断言数据时，只在真实运行里停）。**dry 模拟面全表**（06-B，`createDryCtx` 实证）：`step`/`arrive`/`run`/`manual` 恒返回 `ok:true` 且 **`when` 不评估**（stopCode 恒空 ⇒ `precondition_skipped`/末页 exhausted 这类分支在 dry 结构性不可预演）；`read.*` 返 null/0；`collect` 返 `{rows:[], coverage:{rounds:0,rowsSeen:0,addedLastRound:0}, stopReason:"dry"}`；`url()` 是最近声明值；步预算照常计数。**吞错有留痕**（S3）：dry 的 `validateXxxRequest`（scrollList/expand/setRange/collect）抛错前先落 `validation_error` 事件——脚本 `try/catch` 吞掉 `config_error`，`apps check` 仍判 FAIL 并输出「脚本吞掉了配置错误：<call> <message>」；源码调用点与 dry 事件数的差额只打警告。结论：**dry 验调用序列与声明形状，不验分支覆盖**——check VALID ≠ 脚本每条分支都被走过，守卫分支的正确性只有真实运行能证明。**循环特别警告**（09-B，r09-retry-demo 实录）：`step` 模拟恒 `ok:true` ⇒ 以"步骤成功"为 break 条件的 `while/for` 会在 dry **假成功早退**，随后未守卫的终局 `ctx.fail` 把 dry 判红（报错自曝 `ok:true` yet exhausted 的矛盾即此坑）——dry 预演只到声明面为止，循环语义一律真实运行验；各分支的**声明校验**可用 `run --dry --slot <k>=<v>` 逐分支触达（08 实证，不占真实额度）。
 - 观察类调用（text/value/count/attr/extract）都进 trace，所以带读取的脚本可以 `--replay`。进程步（`run`/`dangerous`）自 08-C 修复起同样进 `step_traces`（成功步无 stop_code、attempts/exit code 在嵌套 result 里）。
 
@@ -930,6 +940,8 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `act_hint` | `widen` | 声明目标（`act: ctx.hint(...)` / `target_hints`）解析链（池 hintMatch → ADMIT 回捞 → FW8 身份回捞）全落空时的档位：`widen` = 交给模型自由选（**缺省 = 现行为逐字节不变**）；`strict` = **禁止模型回退**，直接结构化 `target_not_found`（reason 写明 `act_hint="strict"` + 原 hint + 池快照）。命令步不受影响；FW8 的 `#id`/`[data-test]`/`[name]` 声明回捞先执行。显式声明才进 `effective_policy.act_hint` |
 | `target_resolution` | `off` | **声明目标解析链（DRF，P0-C）**：`off` = 现行为逐字节不变；`declared` = 命令 `target` / act hint 在池 hintMatch → ADMIT 回捞 → FW8 身份回捞全部落空后，再由 DOM 侧兜底解析（属性型 hint 走 ADMIT_SEL + 同一套 hint 语义；裸词 hint 走可见文本精确匹配；跨 frame **恰好一个可见**才动作，>1 → `target_ambiguous`，全隐藏 = 未命中 + hidden 诊断）。click 族动作前必须 hit-test（中心被覆盖则不点击、记 `hit_test` 证据）。首版只允许 `click`/`scroll`/`hover`，对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` → 结构化 `action_unsupported`。回捞元素只进本步局部池，**模型不参与**。显式声明才进 `effective_policy.target_resolution`；dry 只校验 policy 值（DOM 事实无法离线验证，不新增绿，见 §4.11） |
 | `browser` | （不写 = 现状链） | **task-43 浏览器通道**：`"chrome"`（系统 Chrome，Playwright `channel:"chrome"`，new headless）\| `"headless-shell"`（ms-playwright 的 headless-shell，= 缺省现状）。优先级 **env(`AMBERFLOW_BROWSER_CHANNEL`) > meta > 缺省**——env 是部署/CI 的机器级覆盖，meta 是应用作者的站点知识（已知 headless-shell 下坏的站点在此点名 chrome，如 zh.wikipedia 文章页的客户端 URL flap）。主机没有系统 Chrome 时 launch **如实报错不静默回退**（要回退请删 meta 或改 env）；与 `--headful` 正交组合（headful 语义独立：人工步等仍强制可见窗口）。生效值与来源进 `effective_policy.browser`（仅 env/meta 任一存在时出现）；真实二进制以 `env.browser.binary_basename`（D-1 启动事实）为准。已知代价（task-39 实测）：chrome 通道冷启动 +~13%，zh.wiki 类页面 open 快 ~3.5s 且免 flap |
+| `attr_value_match` | `full_label` | **A1 属性值匹配底座**：`full_label`（缺省）= `[aria-label=…]` / `[aria-label~…]` 同时比 ≤200 的 `full_label` 与模型视图 `label`（前 40 字）——>40 字的 aria-label 值可命中；`display` = A1 之前（只比前 40 字 label，>40 的值永不命中；逃生口/对照臂）。attrEq 与 attrSubstr 同一函数、一处修两形状；≤40 的值等值命中集合不变。显式声明才进 `effective_policy.attr_value_match`；inspect/observe/session 无 policy 恒 `full_label` |
+| `act_hint_tier` | `any` | **A3 弱档门槛**：`any`（缺省 = 现行为逐字节不变）= 弱档（bare 词前缀/词包含、attrSubstr loose 子串）胜出照旧执行 + `matched_others` 警告；`strong` = 弱档胜出判为**未命中**（step warning 换 `weak_hint_rejected`），随后按 `act_hint`：`widen` 交模型 / `strict` 结构化 `target_not_found`（reason 写弱档被拒 + 候选≤3 + 两条改法）。与 `act_hint` **正交**（`widen`+`strong` 合法）；判据复用 `takeHintMatchOthers()` 的既有 `suspicious`，不另造档位表；池解析与 rules-only 宽扫重解析共用同一判定；命令 target / learned hint / 决策步不受影响；显式声明才进 `effective_policy.act_hint_tier`（声明 `"any"` 也进账） |
 
 产物里的 `effective_policy` 只在非缺省时出现，并写明来源（`cli` / `config` / `app` / `provider` / `env` / `default`）。
 
@@ -978,7 +990,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 
 | stopCode | 含义 / 下一步 |
 |---|---|
-| `config_error` | 脚本声明/运行配置错（缺 done、未知 op、未知适配器、`ctx.open` 打不开…）——改声明，不要重试 |
+| `config_error` | 脚本声明/运行配置错（缺 done、未知 op、未知适配器、`ctx.open` 打不开、**`extract`/`collect` 的 CSS 选择器非法**…）——改声明，不要重试。C2 起非法选择器不再静默吞成 `""`/`[]`，reason 点名是行选择器还是哪个字段，`diagnostics.bad_selector={selector, field?}` 留结构证据（合法但零命中仍 `[]`/`""`） |
 | `host_not_allowed` | 目标主机不在 `meta.hosts` 信封内——要么加 hosts，要么别导航过去 |
 | `budget_exceeded` | 步预算/截止时间用完——检查死循环，或调大预算 |
 | `invariant_failed` | `ctx.done()` 时结束态不变量不成立——看是流程没走完还是页面变了 |
@@ -986,7 +998,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `arrive_signal_not_held` | `ctx.arrive` 导航完成但 done 信号在超时内未成立 |
 | `precondition_skipped` | `when` 不成立，这一步没有执行（`ok:false`，trace 状态 `skipped`；同样计一次执行预算）——脚本按 stopCode 分支继续，不是失败 |
 | `page_not_ready` | 元素池为空，页面还没稳定；等页面 ready，或修 done 信号 |
-| `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标。`meta.policy.act_hint:"strict"` 下 act hint 解析链全落空也用它（reason 显式写 `act_hint="strict"`，**不再回退模型自由选**；缺省 `widen` 才回退）。声明目标（act hint/命令）在池+ADMIT+FW8 全落空且**未声明** `target_resolution` 时，reason 追加一行 DRF 提示（自绘控件可声明 `meta.policy.target_resolution:"declared"` 走 attr/文本精确匹配）；**已声明** `"declared"` 的同场景走 DRF、不再提示（避免噪音） |
+| `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标。`meta.policy.act_hint:"strict"` 下 act hint 解析链全落空也用它（reason 显式写 `act_hint="strict"`，**不再回退模型自由选**；缺省 `widen` 才回退）。`meta.policy.act_hint_tier:"strong"` 下**弱档胜出被判未命中**（bare 词前缀/词包含、attrSubstr loose 子串）同样报它：strict 时 reason 写明弱档被拒 + 候选≤3 + 两条改法（收窄成强形状 / 回 `act_hint_tier:"any"`）；缺省 `any` 才有 `matched_others` 警告。声明目标（act hint/命令）在池+ADMIT+FW8 全落空且**未声明** `target_resolution` 时，reason 追加一行 DRF 提示（自绘控件可声明 `meta.policy.target_resolution:"declared"` 走 attr/文本精确匹配）；**已声明** `"declared"` 的同场景走 DRF、不再提示（避免噪音） |
 | `target_ambiguous` | 目标命中多个不同候选；收窄 hint。`target_resolution:"declared"` 下 DRF 的两个可见文本/属性匹配同样报它（候选 tag/文本/frame/visible 在 reason 与 `skipped_actions`） |
 | `action_unsupported` | 目标存在但声明的动作 op 不在元素能力面内；换动作或换目标。DRF 首版只允许 `click`/`scroll`/`hover`——对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` 也报它（reason 明说首版限制） |
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |
@@ -1007,6 +1019,16 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 - `false_done` 警告（warn/fail 两档同文案）→ 给出可直接抄的构造器 `done: ctx.judge.all(not(ctx.judge.loginWall()), <正向锚>)`；
 - `step_timeout` reason → 点明 `timeoutMs` 是**整步挂钟帽**（settle/reobserve/升级/动作共享），不是逐动作超时；
 - `pool_empty` 警告与 `low_confidence` 停因 → 提示用 `ctx.observe()` 在会话内看准入面与 `why_not_admitted`。
+
+**信号形状报错自带合法形态（C3）**：`validateSignalSpec` 的 arity 不匹配（以及 `all_of`/`any_of`/`not` 的形状错）现在把**合法形态**写进 problem —— 叶算子的操作数**按位置放数组** `{op: [arg…]}`（对象形 `{selector, text}` 不是合法形状），组合算子 `all_of`/`any_of` 收非空数组、`not` 收单个对象。提示的唯一出处是 `src/engine/signals.ts` 的 `SIGNAL_SHAPE_HINT` / `signalProblemText`：`apps check` / `plan check` / `test --validate` 的加载期 problems 直接继承；`amber plan-cli … --signal` 走 cli 版（`--signal` 示例串与改动前逐字一致），`amber session` 的 `signal`/`waitFor` 失败 reason 走 json 版（`problems` 数组原样）。合法信号的校验结果与产物逐字节不变。
+
+**会话面 `target_ambiguous`（A2，缺省零动作）**：`amber session` 的 `act` 用与命令步**同一个**歧义谓词
+（`hintCandidates` 非空 && `decided === null` && `refs.length > 1`）——歧义即**不执行**，返回
+`{ok:false, code:"target_ambiguous", executed:false, ambiguity}`；`ambiguity` 有界（候选 ≤5；label/class/near
+≤40、ref/tag ≤16、`suggested_hint` ≤80；`would_act_ref`/`candidates_total`/`truncated`；`source:"dom_fallback"`
+时不给 near/suggested_hint）。`--on-ambiguous act` 恢复旧的"直接执行可行动优先第一个候选"。**run 面 /
+命令步 / 决策步的行为与产物逐字节不变**（dry/replay 不调 `actOnce`）；证据只陈述事实，**不得据此猜测**
+——收窄 hint 或显式 `act` 重放是人的决定。详见 `docs/INTERACTIVE_SESSION.md` §act 的歧义停因。
 
 **停手规则**（层 3 出口；唯一出处 `src/engine/planning-playbook.ts`，失败即随 `next` 输出）：同一停因按 next 修正后重跑仍出现 2 次以上 → 停手：如实上报 stopCode / reason / 已试过的修正，等待人或上游决策；不要再自行迭代脚本或重试。
 

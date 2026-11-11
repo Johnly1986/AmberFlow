@@ -27,20 +27,42 @@ import { amberflowHome, ensureDir } from "../support/amberflow-home.ts";
 import { inputsSha256, newTrace, sha256, writeTrace, type AppTrace } from "./trace.ts";
 import { MockAuditor } from "../engine/audit.ts";
 import {
-  BrowserMiddleware, browserSession, disallowedHost, type AnyPage, type BrowserSession,
+  BrowserMiddleware, browserSession, disallowedHost,
+  type ActionabilityDetail, type ActMissDiagnostics, type AnyPage, type BrowserSession,
 } from "../engine/executor.ts";
 import {
   extractElements, urlOf, type ElemPool, type PageLike,
 } from "../engine/extraction.ts";
-import { validateSignalSpec } from "../engine/signals.ts";
+import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
 // task-34（B1 旁路复用）：与 run 面**同一个**弱档命中诊断（`rules.hintMatchImpl` 的模块态），
 // 会话只 take 出来回显，不改选择语义、不改 run 面任何代码。
 import { takeHintMatchOthers } from "../engine/rules.ts";
 import { DEFAULT_SETTLE } from "../engine/settle.ts";
+import type { AmbiguityView } from "../engine/ambiguity.ts";
 
 /** `act` 的 MVP 能力面（执行器里 drag/upload/clickAt 也有，但 authoring MVP 不暴露）。 */
 export const SESSION_ACT_OPS = ["click", "check", "fill", "select", "hover", "scroll"] as const;
 export type SessionActOp = (typeof SESSION_ACT_OPS)[number];
+
+/**
+ * `act scroll` 两条路径（合成目标 = `mw.scrollDocument`，元素目标 = `mw.actOnce`）的共同
+ * 返回形状（B2 起含实测滚动证据）。两边都是"引擎给什么就有什么"，所以全部可选——会话层
+ * 只**回显**，不补算 moved/delta。
+ */
+interface SessionScrollOut {
+  ok: boolean;
+  stopCode?: string;
+  reason?: string;
+  ref?: string;
+  moved?: boolean;
+  delta?: number;
+  scrollTop?: number;
+  scrollHeight?: number;
+  clientHeight?: number;
+  ambiguity?: AmbiguityView;
+  /** A4：落空（`target_not_found`）判别证据；引擎给才有。 */
+  diagnostics?: ActMissDiagnostics;
+}
 
 /** 请求类型闭集（未知 type = 结构化 config_error + 这张表）。 */
 export const SESSION_REQUEST_TYPES = [
@@ -169,6 +191,14 @@ export interface SessionOptions {
   recordValues?: boolean;
   /** 从文件读请求而不是 stdin（`--input`；Windows 管道不可靠时用）。 */
   inputFile?: string | null;
+  /**
+   * A2：`act` 的缺省歧义策略（`--on-ambiguous`）。
+   *   - `"fail"`（缺省）：命令步同一个歧义谓词成立时**零动作** → 结构化 `target_ambiguous`
+   *     + 有界 `ambiguity` 证据（会话不再"随便点第一个候选"）；
+   *   - `"act"`：恢复旧行为（`resolveCommandRef` 可行动优先取 refs[0] 直接执行）。
+   * 单行请求可用 `onAmbiguous` 覆盖本次（见 `doAct`）。
+   */
+  onAmbiguous?: "fail" | "act";
   idleTimeoutMs?: number;
   maxRequestBytes?: number;
   verbose?: boolean;
@@ -229,6 +259,11 @@ export class SessionRuntime {
   private readonly holder: { session: BrowserSession | null } = { session: null };
   private readonly mwHolder: { current: BrowserMiddleware | null } = { current: null };
   private readonly ctxHolder: { current: Ctx | null } = { current: null };
+  /**
+   * C1：extract 的总量观测口（**只有会话面注入**；run/dry/replay 不注入、产物不变）。
+   * `ctx.extract` 的返回类型仍是行数组，分页所需的 `total` 经这个对象回写。
+   */
+  private readonly extractStats: { total: number } = { total: 0 };
   private traceRef: AppTrace | null = null;
   private recordStream: fs.WriteStream | null = null;
 
@@ -299,6 +334,8 @@ export class SessionRuntime {
       mw: () => this.mw(),
       trace,
       verbose: this.opts.verbose === true,
+      // C1：总量观测口只在这里注入（Flow 运行面/ dry / replay 都没有这条线）。
+      extractStats: this.extractStats,
     });
     return this.ctxHolder.current;
   }
@@ -633,6 +670,16 @@ export class SessionRuntime {
       };
     }
     const actOp = op as SessionActOp;
+    // A2：本行歧义策略 = 请求字段 onAmbiguous（桥逐调用透传）> 会话旗标/缺省 fail。
+    // 非法值 = 结构化 config_error（与其它请求字段同一形状校验纪律，不静默取缺省）。
+    const ambiguousMode = this.ambiguityMode(req);
+    if (ambiguousMode === null) {
+      return {
+        ok: false, code: "config_error",
+        reason: `act.onAmbiguous must be one of fail | act (got ${JSON.stringify(req["onAmbiguous"])})`,
+        allowed_modes: ["fail", "act"],
+      };
+    }
     const targetRaw = req["target"];
     const page = await this.page();
     const hosts = this.hosts ?? undefined;
@@ -642,33 +689,58 @@ export class SessionRuntime {
     // observe_hints 来源）。没开记录 = 一次也不多付；观察失败/未命中就如实缺字段。
     const recordHints = await this.hintsForRecord(nonEmpty(targetRaw) ? String(targetRaw) : undefined);
 
-    // ---- scroll：合成目标（document/body/html/window）走 mw.scrollDocument，元素目标走 actOnce ----
+    // ---- scroll：合成目标（document/body/html/window）走 mw.scrollDocument；元素目标走 actOnce
+    //      （B2：带 to/by = 容器滚动，不带 = 滚入视口且 changed 实测 moved）----
     if (actOp === "scroll") {
       const to = req["to"];
       if (to !== undefined && to !== "bottom" && to !== "top" && to !== "page") {
         return { ok: false, code: "config_error", reason: `scroll.to must be one of bottom | top | page (got ${JSON.stringify(to)})` };
       }
+      const toDir = to as "bottom" | "top" | "page" | undefined;
       const by = req["by"] === undefined ? undefined : intIn(req["by"], -1_000_000, 1_000_000);
       const synthetic = !nonEmpty(targetRaw) || isSyntheticScrollTarget(String(targetRaw));
+      // B2：to/by 是**容器滚动**语义（元素自身或最近可滚动祖先，与 ctx.scrollList 同一条实现
+      // `_scrollWithLoc`；找不到可滚动容器 = not_scrollable，不静默无操作）。不给 to/by =
+      // 旧语义「把元素滚入视口」，但 moved/delta 由引擎实测（不再硬编码 changed:true）。
+      const wantsContainer = toDir !== undefined || by !== undefined;
       // task-34：B1 旁路是**模块态**（最后一次解析者写）——先清场，避免把 record 观察或上一次
       // 动作的诊断算到本次头上。元素 scroll 仍走 hint 解析，故同样回显歧义。
       takeHintMatchOthers();
-      const out = synthetic
+      const out: SessionScrollOut = synthetic
         ? await this.mw().scrollDocument(
-          (await this.ensureSession()).page, (to as "bottom" | "top" | "page" | undefined) ?? "bottom",
+          (await this.ensureSession()).page, toDir ?? "bottom",
           { ...(by === undefined ? {} : { by }) },
         )
-        : await this.mw().actOnce(page, String(targetRaw), "scroll", null);
-      const scrollAmb = synthetic ? {} : this.actAmbiguity(String(targetRaw), "ref" in out ? out.ref ?? null : null);
+        : await this.mw().actOnce(page, String(targetRaw), "scroll", null, ambiguousMode,
+          wantsContainer ? { ...(toDir === undefined ? {} : { to: toDir }), ...(by === undefined ? {} : { by }) } : undefined,
+          { diagnostics: true });
+      const scrollAmb = synthetic ? {} : this.actAmbiguity(String(targetRaw), out.ref ?? null);
+      // A2：只有元素 scroll（actOnce 分支）可能带歧义证据；合成目标走 scrollDocument，没有该键。
+      const scrollAmbiguity: AmbiguityView | undefined = out.ambiguity;
       const scrollTarget = nonEmpty(targetRaw) ? String(targetRaw) : "document";
+      // B2：滚动语义进轨迹（export 需要它才知道该还原成哪种原语；旧轨迹没有这个键）。
+      const scrollMode: "container" | "into_view" = synthetic || wantsContainer ? "container" : "into_view";
+      // B2：changed = **实测** moved（没有 moved 证据 = false，不假装滚过）。
+      const moved = typeof out.moved === "boolean" ? out.moved : undefined;
+      const delta = typeof out.delta === "number" ? out.delta : undefined;
+      const scrollTop = typeof out.scrollTop === "number" ? out.scrollTop : undefined;
       this.recordAction({
-        op: "scroll", target: scrollTarget, to: (to as string | undefined) ?? "bottom",
-        ...(by === undefined ? {} : { by }),
+        op: "scroll", target: scrollTarget,
+        // B2：只记**实际发生的事实**——没走通的滚动不记方向/语义；没请求 to/by 的元素滚动
+        // 不再伪记 to:"bottom"（旧实现把"滚入视口"记成一次方向滚动）。
+        ...(out.ok === true ? { scroll_mode: scrollMode } : {}),
+        ...(out.ok === true && wantsContainer
+          ? { ...(toDir === undefined ? {} : { to: toDir }), ...(by === undefined ? {} : { by }) }
+          : {}),
         ok: out.ok === true,
         ...(out.ok === true ? {} : { code: String(out.stopCode ?? "not_scrollable") }),
         ref: null, how: out.ok === true ? "scrolled" : null,
-        changed: "moved" in out ? out.moved === true : out.ok === true,
+        changed: moved === true,
+        ...(moved === undefined ? {} : { moved }),
+        ...(delta === undefined ? {} : { delta }),
+        ...(scrollTop === undefined ? {} : { scrollTop }),
         url: urlOf(page),
+        ...this.ambiguityRecord(scrollAmbiguity),
         ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
       });
       if (out.ok !== true) {
@@ -676,15 +748,21 @@ export class SessionRuntime {
           ok: false, code: String(out.stopCode ?? "not_scrollable"), reason: String(out.reason ?? "scroll failed"),
           op: actOp, target: scrollTarget, executed: false,
           ...scrollAmb,
+          ...this.ambiguityResponse(scrollAmbiguity),
+          ...this.missDiagnosticsResponse(out.diagnostics),
+          ...(await this.failureScreenshot(page, this.actionCount, req)),
         };
       }
-      const scroll = "scrollTop" in out
-        ? { scrollTop: out.scrollTop, scrollHeight: out.scrollHeight, clientHeight: out.clientHeight }
+      const scroll = typeof scrollTop === "number"
+        && typeof out.scrollHeight === "number" && typeof out.clientHeight === "number"
+        ? { scrollTop, scrollHeight: out.scrollHeight, clientHeight: out.clientHeight }
         : undefined;
       return {
         ok: true, op: actOp, target: scrollTarget,
         executed: true, ref: null, how: "scrolled",
-        changed: "moved" in out ? out.moved === true : true,
+        changed: moved === true,
+        ...(moved === undefined ? {} : { moved }),
+        ...(delta === undefined ? {} : { delta }),
         ...(scroll === undefined ? {} : { scroll }),
         url: urlOf(page), elapsed_ms: Date.now() - started,
         ...scrollAmb,
@@ -710,9 +788,13 @@ export class SessionRuntime {
     const mw = this.mw();
     // task-34：清场后执行（B1 旁路只在本次解析写；见 scroll 分支同一注释）。
     takeHintMatchOthers();
+    // B1：click/check 的缺失证据由动作本身给出（`occludedReason` 探针即点击，无双点窗口）。
+    // fill/select/hover 与 run 面走同一条既有路径（不传第 7 参）。
+    const wantOcclusion = actOp === "click" || actOp === "check";
     const out = actOp === "hover"
-      ? await mw.actOnce(page, target, "hover", null)
-      : await mw.actOnce(page, target, actOp, bind);
+      ? await mw.actOnce(page, target, "hover", null, ambiguousMode, undefined, { diagnostics: true })
+      : await mw.actOnce(page, target, actOp, bind, ambiguousMode, undefined,
+        wantOcclusion ? { occlusionProbe: true, diagnostics: true } : { diagnostics: true });
     // 解析证据在 take 后立刻读取（observeAfter 会再次触发 hintMatch，不能放在它之后）。
     const amb = this.actAmbiguity(target, out.ref);
     this.recordAction({
@@ -730,6 +812,7 @@ export class SessionRuntime {
       how: out.how ?? null,
       changed: out.changed === true,
       url: urlOf(page),
+      ...this.ambiguityRecord(out.ambiguity),
       ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
     });
     if (out.ok !== true) {
@@ -738,7 +821,11 @@ export class SessionRuntime {
         reason: String(out.reason ?? ""), op: actOp, target, executed: false,
         ...(out.ref === undefined ? {} : { ref: out.ref }),
         url: urlOf(page), elapsed_ms: Date.now() - started,
+        ...this.actionabilityResponse(out.actionability),
+        ...(await this.failureScreenshot(page, this.actionCount, req)),
         ...amb,
+        ...this.ambiguityResponse(out.ambiguity),
+        ...this.missDiagnosticsResponse(out.diagnostics),
       };
     }
     this.log(`act ${actOp} ${JSON.stringify(target)} → ${String(out.how)} changed=${out.changed === true}`);
@@ -746,6 +833,7 @@ export class SessionRuntime {
       ok: true, op: actOp, target, executed: true,
       ref: out.ref ?? null, how: this.displayHow(actOp, out.how), changed: out.changed === true,
       url: urlOf(page), elapsed_ms: Date.now() - started,
+      ...(out.probe_navigated === true ? { probe_navigated: true } : {}),
       ...amb,
       ...(await this.observeAfter(req)),
     };
@@ -782,6 +870,34 @@ export class SessionRuntime {
   }
 
   /**
+   * A2：本行 `act` 的歧义策略（`"fail"` = 缺省，歧义即零动作；`"act"` = 旧行为）。
+   * 优先级：请求字段 `onAmbiguous`（桥逐调用透传）> 会话旗标 `--on-ambiguous` > 缺省 fail。
+   * 返回 null = 请求字段是非法值（调用方报结构化 config_error，不静默取缺省）。
+   */
+  private ambiguityMode(req: Record<string, unknown>): "fail" | "act" | null {
+    const raw = req["onAmbiguous"];
+    if (raw === undefined || raw === null) return this.opts.onAmbiguous === "act" ? "act" : "fail";
+    return raw === "fail" || raw === "act" ? raw : null;
+  }
+
+  /**
+   * A2：歧义停因进 `--record` 轨迹的最小记账（`code` 已由调用方记录）：
+   * 候选 ref（≤5）+ 总集大小。没开记录时 `recordAction` 本身是 no-op。
+   */
+  private ambiguityRecord(amb: AmbiguityView | undefined): Record<string, unknown> {
+    if (amb === undefined) return {};
+    return {
+      candidate_refs: amb.candidates.map((c) => c.ref).slice(0, 5),
+      candidates_total: amb.candidates_total,
+    };
+  }
+
+  /** A2：失败响应上的 `ambiguity` 证据（只有引擎真的给了才出现；成功响应键集不变）。 */
+  private ambiguityResponse(amb: AmbiguityView | undefined): Record<string, unknown> {
+    return amb === undefined ? {} : { ambiguity: amb };
+  }
+
+  /**
    * task-34：会话面的执行证据词按动作语义回显（`select` → `selected`）。
    *
    * 为什么只在会话面映射、不改执行器：`how` 是 run 的 `executed_actions`/trace 共享产物，
@@ -791,6 +907,48 @@ export class SessionRuntime {
   private displayHow(op: SessionActOp, how: unknown): unknown {
     if (op === "select" && how === "filled") return "selected";
     return how ?? null;
+  }
+
+  /**
+   * B1：act 失败响应上的 `actionability` 证据（引擎给才有；成功响应键集不变）。
+   * 原样复用引擎的 `ActionabilityDetail`（reason/bbox/blocker/requery），会话层不重算、不补键。
+   */
+  private actionabilityResponse(detail: ActionabilityDetail | undefined): Record<string, unknown> {
+    return detail === undefined ? {} : { actionability: detail };
+  }
+
+  /**
+   * A4：act 落空（`target_not_found`）的判别证据在会话面的回显。
+   *
+   * 引擎已按上限构造（`candidates` ≤5 / `near` ≤5 / `rejected` ≤3、label ≤40、why 只在有原因
+   * 时出现），会话层**原样**回显——与 `actionabilityResponse` 同一纪律：不重算、不补键。
+   * 没有该字段（成功路径 / 非落空失败）= 响应键集与之前逐字节一致。
+   */
+  private missDiagnosticsResponse(diag: ActMissDiagnostics | undefined): Record<string, unknown> {
+    return diag === undefined ? {} : { diagnostics: diag };
+  }
+
+  /**
+   * B1：act 失败时的**opt-in**截图（请求 `screenshot:true` 才写；缺省不碰页面）。
+   * 文件落会话证据目录 `act-<n>-failure.png`（n = 本次会话的动作序号），响应只回
+   * `screenshot_file` 路径，不内联图片。截图失败只记日志，不改变动作失败事实。
+   */
+  private async failureScreenshot(page: AnyPage, n: number, req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (req["screenshot"] !== true) return {};
+    const file = path.join(this.outDir, `act-${n}-failure.png`);
+    try {
+      const shot = (page as unknown as {
+        screenshot?: (o: Record<string, unknown>) => Promise<unknown>;
+      }).screenshot;
+      if (typeof shot !== "function") return {};
+      ensureDir(this.outDir);
+      await shot.call(page, { path: file, fullPage: false });
+      this.log(`act failure screenshot #${n} → ${file}`);
+      return { screenshot_file: file };
+    } catch (e) {
+      this.log(`act failure screenshot failed: ${errMsg(e)}`);
+      return {};
+    }
   }
 
   /** 动作后的有界回读（缺省开）：只给 counts/url/title，不返回元素明细（明细请显式 observe）。 */
@@ -851,19 +1009,54 @@ export class SessionRuntime {
     }
     const maxItems = intIn(req["maxItems"], 1, 500);
     const cap = maxItems ?? 500;
+    // C1：offset = 续页起点（0-based 整数 0..10000）。非整数/越界 = config_error，
+    // 绝不 clamp——悄悄改分页起点会让「续页不重不漏」变成假话。
+    const rawOffset = req["offset"];
+    if (rawOffset !== undefined
+      && (typeof rawOffset !== "number" || !Number.isInteger(rawOffset) || rawOffset < 0 || rawOffset > 10_000)) {
+      return {
+        ok: false, code: "config_error",
+        reason: `extract.offset must be an integer in [0, 10000] (got ${JSON.stringify(rawOffset)})`,
+      };
+    }
+    const offset = typeof rawOffset === "number" ? rawOffset : 0;
+    this.extractStats.total = 0;
     // inline 形态：与 meta.site.listExtract 的声明走同一个 `ctx.extract` → `readRows` 实现
     //（MVP 只接 inline；named 需要 app pack，见 design §7）。
-    const out = await this.ctx().extract({
-      rows, fields: fields as Record<string, string>, maxItems: cap,
-    });
-    return { ok: true, rows: out, count: out.length, capped: out.length >= cap, max_items: cap };
+    let out: Array<Record<string, string>>;
+    try {
+      out = await this.ctx().extract({
+        rows, fields: fields as Record<string, string>, maxItems: cap,
+      }, { offset });
+    } catch (e) {
+      // C2：非法选择器在 readRows 入口以 config_error + diagnostics.bad_selector 抛出。
+      // 会话面**复用 observe 的口径**：响应带 error:"bad_selector"（不新增 stopCode；
+      // 合法但零命中仍走下面的 [] 成功响应）。
+      const diag = e instanceof StopError && isObj(e.diagnostics) ? e.diagnostics["bad_selector"] : undefined;
+      if (diag === undefined) throw e;
+      return {
+        ok: false, code: (e as StopError).code, error: "bad_selector", reason: (e as StopError).message,
+        diagnostics: { bad_selector: diag },
+      };
+    }
+    const count = out.length;
+    const capped = count >= cap;
+    const total = this.extractStats.total;
+    return {
+      ok: true, rows: out, count, capped, max_items: cap,
+      // C1：分页事实只在「本页被 cap 挡住」或「offset>0」时出现——旧响应键集不变。
+      ...(capped || offset > 0
+        ? { offset, total, has_more: offset + count < total }
+        : {}),
+    };
   }
 
   private signalSpec(req: Record<string, unknown>): { ok: true; spec: Record<string, unknown> } | { ok: false; resp: Record<string, unknown> } {
     const spec = req["signal"];
     const problems = validateSignalSpec(spec, "signal");
     if (problems.length > 0) {
-      return { ok: false, resp: { ok: false, code: "config_error", reason: problems.join("；"), problems } };
+      // C3：reason 与 CLI/加载期**同一份**合法形态提示（json 版示例串）；problems 数组原样。
+      return { ok: false, resp: { ok: false, code: "config_error", reason: signalProblemText(problems, "json"), problems } };
     }
     return { ok: true, spec: spec as Record<string, unknown> };
   }
@@ -902,8 +1095,14 @@ export class SessionRuntime {
       this.log(`snapshot pool extraction failed: ${errMsg(e)}`);
     }
     const snapshotFile = path.join(this.outDir, `snapshot-${n}.json`);
+    // B3：可勾选控件状态签名一并落盘（有界；无此类控件时字段缺席 ⇒ 旧产物逐字节不变）。
+    const checks = snap.checks === undefined ? "" : snap.checks.slice(0, 4000);
+    const snapFrames = snap.frames.map((f) => (
+      f.checks === undefined ? f : { ...f, checks: f.checks.slice(0, 1200) }
+    ));
     fs.writeFileSync(snapshotFile, `${JSON.stringify({
-      url: snap.url, title: snap.title, text: snap.text, vals: snap.vals, frames: snap.frames,
+      url: snap.url, title: snap.title, text: snap.text, vals: snap.vals,
+      ...(checks ? { checks } : {}), frames: snapFrames,
     }, null, 2)}\n`, "utf-8");
     const poolFile = path.join(this.outDir, `pool-${n}.json`);
     fs.writeFileSync(poolFile, `${JSON.stringify(pool, null, 2)}\n`, "utf-8");

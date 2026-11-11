@@ -16,7 +16,7 @@ import type {
 } from "../model/model.ts";
 import type { DecisionProvider } from "../model/decision-provider.ts";
 import type { RangeOptions, RangeOutcome, RangeValue } from "./range.ts";
-import type { HintMatchCandidate } from "./rules.ts";
+import type { AttrValueMatch, HintMatchCandidate } from "./rules.ts";
 import type { SignalSpec } from "./signals.ts";
 import type { SettlePage, SettleResult } from "./settle.ts";
 import type { CommandDecl } from "./actions.ts";
@@ -173,7 +173,13 @@ export interface PageSnapshot {
   title: string;
   text: string;
   vals: string;
-  frames: Array<{ url: string; text: string; vals: string }>;
+  /**
+   * B3：可勾选控件状态签名（原生 checkbox/radio 的 0/1、aria-checked 值、
+   * aria-selected=true、select[multiple] 选中 index）。空串时字段省略 ⇒ 无此类控件的
+   * 页面快照逐字节不变；敏感值掩码仍在 `vals` 的 VALS_JS 面，本字段不碰它。
+   */
+  checks?: string;
+  frames: Array<{ url: string; text: string; vals: string; checks?: string }>;
 }
 
 /** The audit block of a report, wide enough for the SKIPPED literal. */
@@ -861,6 +867,16 @@ export interface MiddlewareOptions {
    */
   actHint?: "widen" | "strict";
   /**
+   * A3：`meta.policy.act_hint_tier`（与 `actHint` **正交**；缺省/"any" = 今天逐字节不变）。
+   * "strong" = 声明目标的**弱档胜出**（bare tier≥3 词前缀/词包含、attrSubstr tier=3 loose
+   * 子串；判据复用 rules 的 `suspicious`，不另造档位表）改判**未命中**：ref 被清空、step
+   * warning 换成 `weak_hint_rejected`，随后照 `actHint` 既有语义继续（widen → 交模型；
+   * rules-only → 既有 `no_model_runtime`；strict → 结构化 `target_not_found`，reason 写明
+   * 弱档被判未命中 + 候选 + 两条修法）。命令 target / learned hint（非作者声明）/ 决策步
+   * 不受影响；只作用于声明目标的规则解析与 rules-only 宽扫两处（同一 `declaredAllow`）。
+   */
+  actHintTier?: "any" | "strong";
+  /**
    * P0-C：`meta.policy.target_resolution`（缺省/`"off"` = 今天逐字节不变；`"declared"` =
    * 启用 DRF）。只在**声明目标**（命令 target / act hint）的解析链上生效：池 hintMatch →
    * ADMIT 回捞 → FW8 身份回捞 → **DRF**（attr/text 两模式、恰好一个可见、click 前 hit-test）。
@@ -869,6 +885,13 @@ export interface MiddlewareOptions {
   targetResolution?: "off" | "declared";
   /** U3：surface 类目策略（缺省 native_activation="window"）。 */
   surfacePolicy?: SurfacePolicy;
+  /**
+   * A1：`tag[aria-label=…]` / `tag[aria-label~…]` 的池侧属性值底座
+   * （来自 `meta.policy.attr_value_match`；缺省 `full_label` = 用 ≤200 的 full_label 与
+   * 模型视图 label 双底座，>40 字的 aria-label 才能命中；`display` = A1 之前只看前 40 字）。
+   * 只作用于 hint 匹配；inspect/observe/session 不传 = 恒 `full_label`。
+   */
+  attrValueMatch?: AttrValueMatch;
   /**
    * S5：状态接入决策（来自 `meta.policy.decision_state`；缺省两项都 "off" = 今天的行为）。
    * 见 `DecisionStatePolicy`：gate 决定"stable_only 时先 settle + 同池同题不重复问"，

@@ -797,6 +797,8 @@ export const EXTRACT_JS = String.raw`(arg) => {
   // 需要完整串（aria-label="Sort by, Not selected" 的前 40 往往截在逗号前，裸词 "Sort by"
   // 就匹配不到）。完整标签见 labelOfRaw：只有 observe/inspect 的观察面才需要它
   // （inspect 传 arg.fullLabel=true）。
+  // A1 不变量：label === full_label 的前 40 字（同源同值；label 是模型视图，full_label 是
+  // ≤200 的匹配口径）。hint 属性匹配据此可以用 [full_label, label] 双底座而不改短值行为。
   const labelOf = (e, tag) => labelOfRaw(e, tag).slice(0, 200);
   const short = (t) => String(t || '').slice(0, 40);
   let rows = [];
@@ -848,6 +850,7 @@ export const EXTRACT_JS = String.raw`(arg) => {
       }
       if (!assoc) { try { assoc = e.querySelector('input, select, textarea, button'); } catch (err3) { assoc = null; } }
       const lrFull = labelOf(e, tag);
+      // A1 不变量：label === full_label 的前 40 字（同一 lrFull 截断）。
       labelRows.push({ i: i, tag: tag, label: short(lrFull), full_label: lrFull,
         main: (!e.closest('nav, aside, footer, header') && !!e.closest('main, [role=main], article')),
         data_test: e.getAttribute('data-test') || '', name: '', id: e.id || '', input_type: '',
@@ -857,6 +860,7 @@ export const EXTRACT_JS = String.raw`(arg) => {
     const fullLabel = labelOf(e, tag);
     if ((tag === 'a' || tag === 'button') && !fullLabel) continue;
     const href = e.getAttribute('href') || '';
+    // A1 不变量：label === full_label 的前 40 字（同一 fullLabel 截断）。
     rows.push({i: i, tag: tag, label: short(fullLabel), full_label: fullLabel,
                main: (!e.closest('nav, aside, footer, header') && !!e.closest('main, [role=main], article')),
                data_test: e.getAttribute('data-test') || '', name: e.getAttribute('name') || '',
@@ -905,6 +909,7 @@ export const EXTRACT_JS = String.raw`(arg) => {
     else { const cs = getComputedStyle(w); wv = cs.display !== 'none' && cs.visibility !== 'hidden' && wb; }
     if (!wv) continue;
     const wlFull = labelOf(w, 'label') || labelOf(e, 'input');
+    // A1 不变量：label === full_label 的前 40 字（此处 full 先按 norm 折叠空白，故按"归一后同源"成立）。
     rows.push({ i: wi, tag: w.tagName.toLowerCase(), label: short(wlFull), full_label: norm(wlFull).slice(0, 200), main: false,
       data_test: w.getAttribute('data-test') || '', name: e.getAttribute('name') || '',
       id: w.id || e.id || '', input_type: (e.getAttribute('type') || '').toLowerCase(),
@@ -1221,6 +1226,7 @@ const HINT_HEAD = String.raw`(arg) => {
                     e.setAttribute('data-hintref', stamp);
                     return {hint_ref: stamp, scan: i, tag: e.tagName.toLowerCase(),
                             dsh_ref: e.getAttribute('data-dshref') || '',
+                            // A1 不变量：label === full_label 的前 40 字（同一 labelOf 截断）。
                             label: labelOf(e).slice(0, 40), full_label: labelOf(e).slice(0, 200),
                             data_test: e.getAttribute('data-test') || '',
                             name: e.getAttribute('name') || '', id: e.id || '',
@@ -1592,6 +1598,7 @@ export async function extractRowsPerElement(page: PageLike, maxElements: number 
       contentEditable = (await el.evaluate((n: { isContentEditable: boolean }) => n.isContentEditable)) === true;
     } catch { /* 拿不到就当 false（语义分类退回结构判据） */ }
     elems.push({
+      // A1 不变量：label === full_label 的前 40 字（同一 label 截断）。
       ref: `e${elems.length}`, scan: i, tag, label: label.slice(0, 40), full_label: label.slice(0, 200),
       data_test: (await el.getAttribute("data-test")) ?? "",
       name: (await el.getAttribute("name")) ?? "",
@@ -1682,6 +1689,7 @@ export const HEURISTIC_WIDGET_JS = String.raw`(arg) => {
     const main = (!e.closest('nav, aside, footer, header') && !!e.closest('main, [role=main], article'));
     const cls = __classify(e, main);
     const full = norm(e.innerText || '').slice(0, 200);
+    // A1 不变量：label === full_label 的前 40 字（同一 full 截断）。
     return { tag: tag, label: full.slice(0, 40), full_label: full, main: main,
       rect: { top: cls.rect.top, left: cls.rect.left, width: cls.rect.width, height: cls.rect.height },
       inViewport: cls.inViewport, nearViewport: cls.nearViewport,
@@ -1706,6 +1714,7 @@ export async function extractHeuristicWidgets(
       ref: `e${startRef + k}`,
       scan: -1,
       tag: String(r["tag"] ?? "div"),
+      // A1 不变量：label === full_label 的前 40 字（行由 HEURISTIC_WIDGET_JS 按同一 full 构造）。
       label: String(r["label"] ?? "").slice(0, 40),
       full_label: String(r["full_label"] ?? r["label"] ?? "").slice(0, 200),
       ...(typeof r["rect"] === "object" && r["rect"] !== null ? { rect: r["rect"] as Elem["rect"] } : {}),
@@ -2117,6 +2126,7 @@ const IDENTITY_PROBE_JS = String.raw`(arg) => {
     const href = e.getAttribute('href') || '';
     rows.push({
       index: i, visible: visible,
+      // A1 不变量：label === full_label 的前 40 字（同一 labelOf 截断）。
       tag: e.tagName.toLowerCase(), label: labelOf(e).slice(0, 40), full_label: labelOf(e).slice(0, 200),
       id: e.id || '', name: e.getAttribute('name') || '', data_test: e.getAttribute('data-test') || '',
       input_type: (e.getAttribute('type') || '').toLowerCase(),
