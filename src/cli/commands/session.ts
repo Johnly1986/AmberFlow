@@ -138,6 +138,8 @@ export async function runSessionCommand(args: string[], ctx: CliContext): Promis
         "max-request-bytes": { type: "string" },
         // A2：act 缺省歧义策略（fail = 歧义不执行；act = 恢复旧行为）。
         "on-ambiguous": { type: "string" },
+        // 有头窗口尺寸：maximized（最大化，保留浏览器 chrome）| fullscreen（全屏，F11 语义）。
+        window: { type: "string" },
       },
     });
   } catch (err) {
@@ -189,12 +191,31 @@ export async function runSessionCommand(args: string[], ctx: CliContext): Promis
     for (const e of runDefaultErrors) console.error(e);
     return 2;
   }
+  const headful = v.headful === true || runDefaults.headful === true;
+  // 窗口尺寸模式（--window）：值闭集校验；只有有头能生效——headless 下静默忽略就是「配了没
+  // 反应」，按仓库纪律响亮报用法错误（exit 2）。
+  const windowRaw = typeof v.window === "string" ? v.window.trim() : "";
+  let windowMode: "maximized" | "fullscreen" | undefined;
+  if (windowRaw !== "") {
+    if (windowRaw !== "maximized" && windowRaw !== "fullscreen") {
+      throw usageError(`--window 只接受 maximized 或 fullscreen（拿到 ${JSON.stringify(windowRaw)}）`, {
+        next: ["amber session --url <页面> --headful --window maximized"],
+      });
+    }
+    if (!headful) {
+      throw usageError("--window 只在有头模式生效：与 --headful 一起用（或配置层 AMBERFLOW_HEADFUL=1）", {
+        next: ["amber session --url <页面> --headful --window maximized"],
+      });
+    }
+    windowMode = windowRaw;
+  }
   const code = await runSession({
     url: v.url ?? null,
     hosts,
     // --headful（CLI 旗标）> AMBERFLOW_HEADFUL（env 层，桥配置页勾选 HEADFUL 时注入）
     // > 缺省 headless：与 run 的层叠同一条纪律。
-    headful: v.headful === true || runDefaults.headful === true,
+    headful,
+    ...(windowMode === undefined ? {} : { window: windowMode }),
     outDir,
     record: typeof v.record === "string" ? path.resolve(ctx.cwd, v.record) : null,
     // task-34：明文值只在作者显式 opt-in 时进轨迹（缺省仍只记 value_hash）。

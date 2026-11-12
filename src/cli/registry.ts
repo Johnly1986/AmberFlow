@@ -267,7 +267,7 @@ amber apps remove <应用> [--yes] [--force]`,
       "试通后 --record 存动作轨迹；export 生成 app.mjs 骨架后再进 apps check → run",
     ],
     usage: `amber session [--url <入口页>] [--host HOST]... [--hosts h1,h2]
-              [--headful] [--input <请求文件>] [--out <目录>]
+              [--headful] [--window maximized|fullscreen] [--input <请求文件>] [--out <目录>]
               [--record <轨迹文件>] [--record-values] [--on-ambiguous fail|act]
               [--idle-timeout-ms N] [--max-request-bytes N]
 amber session export --record <轨迹文件> [--out <app.mjs|目录>] [--id <appId>]
@@ -277,12 +277,14 @@ amber session export --record <轨迹文件> [--out <app.mjs|目录>] [--id <app
       'amber session --url https://books.toscrape.com/ --record ./.amberflow/session/books.jsonl',
       "amber session export --record ./.amberflow/session/books.jsonl --id books-skeleton",
       "amber session --url https://books.toscrape.com/ --headful",
+      "amber session --url https://books.toscrape.com/ --headful --window maximized",
     ],
     flags: [
       "--url <入口页>            会话启动后自动打开这一页（仍接受 http(s)；hosts 缺省由它推断）",
       "--host HOST               允许的主机信封；可重复（缺省从 --url 推断）。同 meta.hosts 语义",
       "--hosts h1,h2             同上，逗号表形式",
       "--headful                 显示浏览器窗口（缺省 headless，与 run 一致）",
+      "--window maximized|fullscreen  有头窗口尺寸：maximized = 最大化（保留浏览器 chrome）；fullscreen = 全屏（F11 语义）。需有头（--headful 或配置层 AMBERFLOW_HEADFUL=1）；缺省 = Playwright 默认窗口",
       "--input <文件>            从文件逐行读请求，而不是 stdin（Windows 管道不可靠时用）",
       "--out <目录>              证据落点（缺省 $AMBERFLOW_HOME/session/<runId>）；snapshot 写这里",
       "--record <文件>           动作轨迹 JSONL（fill/select 只记 value_hash，不记明文）；export 的输入",

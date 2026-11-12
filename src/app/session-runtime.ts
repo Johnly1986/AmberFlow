@@ -39,6 +39,7 @@ import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
 // 会话只 take 出来回显，不改选择语义、不改 run 面任何代码。
 import { takeHintMatchOthers } from "../engine/rules.ts";
 import { DEFAULT_SETTLE } from "../engine/settle.ts";
+import type { LaunchWindowMode } from "../browser/browser-env.ts";
 import type { AmbiguityView } from "../engine/ambiguity.ts";
 
 /** `act` 的 MVP 能力面（执行器里 drag/upload/clickAt 也有，但 authoring MVP 不暴露）。 */
@@ -179,6 +180,8 @@ export interface SessionOptions {
   /** 导航信封（`--host`/`--hosts`；缺省从 `--url` 推断）。 */
   hosts?: string[] | null;
   headful?: boolean;
+  /** 有头窗口尺寸模式（`--window`）：maximized | fullscreen；仅 headful 生效。 */
+  window?: LaunchWindowMode | null;
   /** 证据落点（缺省 `$AMBERFLOW_HOME/session/<runId>`）。 */
   outDir?: string | null;
   /** 动作轨迹 JSONL 落点（`--record`；给了才写）。 */
@@ -294,8 +297,10 @@ export class SessionRuntime {
   /** 浏览器惰性创建：`close` 之前没碰过页面，就不启动浏览器（0 进程）。 */
   private async ensureSession(): Promise<BrowserSession> {
     if (this.holder.session === null) {
-      this.log(`starting ${this.opts.headful === true ? "headful" : "headless"} browser`);
-      this.holder.session = await browserSession(this.opts.headful !== true, null);
+      this.log(`starting ${this.opts.headful === true ? "headful" : "headless"} browser${this.opts.window !== undefined && this.opts.window !== null ? ` (${this.opts.window})` : ""}`);
+      this.holder.session = await browserSession(
+        this.opts.headful !== true, null, null, this.opts.window ?? null,
+      );
     }
     return this.holder.session;
   }

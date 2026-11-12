@@ -75,7 +75,7 @@ export interface SessionManagerOptions {
    * 测试缝：子进程 argv 构造器。缺省 = `cliArgs(bridge, ['session', …])`。
    * 真引擎与 fake engine 共用同一条 spawn 路径（fake 用它把 node 指向假引擎脚本）。
    */
-  spawnArgv?: (spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean }) => string[]
+  spawnArgv?: (spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean; window: 'maximized' | 'fullscreen' | null }) => string[]
   /** 测试缝：额外环境变量（在 buildEnv + appsEnv 之后合并）。 */
   env?: NodeJS.ProcessEnv
   /** reaper 扫描间隔（缺省 5s；测试可调小）。 */
@@ -129,6 +129,8 @@ export interface SessionToolArgs {
   url?: string
   hosts?: string[]
   headful?: boolean
+  /** 有头窗口尺寸（open）：`maximized` | `fullscreen`；需有头（headful:true 或部署 Config.headful）。 */
+  window?: 'maximized' | 'fullscreen'
   record?: boolean
   act_op?: string
   target?: string
@@ -327,10 +329,26 @@ export class SessionManager {
         sessions: this.list(),
       })
     }
+    // 窗口尺寸（window）：值闭集 + 必须真有头。无头下静默忽略就是「配了没反应」——
+    // 与引擎侧 session CLI 的校验同一条纪律，桥先拒（结构化 config_error），不靠子进程报错。
+    if (args.window !== undefined && args.window !== 'maximized' && args.window !== 'fullscreen') {
+      throw new SessionToolError('config_error', `window must be one of maximized | fullscreen (got ${JSON.stringify(args.window)})`)
+    }
+    const headed = args.headful === true || this.options.bridge.headful === true
+    if (args.window !== undefined && !headed) {
+      throw new SessionToolError('config_error',
+        'window only applies to a headed session: pass headful:true (or enable Config.headful on this deployment)', {
+          hint: 'without a visible window window would be a silent no-op, so it is rejected instead.',
+        })
+    }
     const id = newSessionId()
     const outDir = path.join(this.evidenceRoot, id)
     const recordPath = args.record === false ? null : path.join(outDir, 'actions.jsonl')
-    const argv = this.argvFor({ url, outDir, recordPath, hosts, headful: args.headful === true })
+    const argv = this.argvFor({
+      url, outDir, recordPath, hosts,
+      headful: args.headful === true,
+      window: args.window ?? null,
+    })
     const env = {
       ...buildEnv(this.options.bridge),
       ...(this.options.bridge.appsEnv ?? {}),
@@ -423,13 +441,15 @@ export class SessionManager {
     }
   }
 
-  private argvFor(spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean }): string[] {
+  private argvFor(spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean; window: 'maximized' | 'fullscreen' | null }): string[] {
     if (this.options.spawnArgv !== undefined) return this.options.spawnArgv(spec)
     const args = ['session', '--url', spec.url, '--out', spec.outDir, '--idle-timeout-ms', String(CLI_ORPHAN_IDLE_MS)]
     for (const h of spec.hosts) args.push('--host', h)
     // headful 透传（task-37 后续修复）：工具参数 headful:true 时让引擎起可见窗口；
     // 缺省 false 不加旗标（产物/行为与此前逐字节一致）。
     if (spec.headful) args.push('--headful')
+    // 有头窗口尺寸（--window）：bridge 已在 openSession 拒绝无头组合，这里只透传。
+    if (spec.window !== null) args.push('--window', spec.window)
     if (spec.recordPath !== null) {
       fs.mkdirSync(path.dirname(spec.recordPath), { recursive: true })
       args.push('--record', spec.recordPath)

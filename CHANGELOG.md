@@ -4,6 +4,22 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — amber session 有头窗口尺寸（--window maximized|fullscreen）
+
+- **【新增·session 窗口尺寸】** `amber session --window maximized|fullscreen`：
+  `maximized` = 最大化（保留浏览器 chrome，注入 `--start-maximized`）、`fullscreen` = 全屏
+  （F11 语义，注入 `--start-fullscreen`）。仅 headful 生效（`--headful` 或配置层
+  `AMBERFLOW_HEADFUL=1`）；无头会话下给 `--window` = 用法错误（exit 2，**不静默忽略**）；
+  闭集外的值同样 exit 2。实现 = 启动旗标 + 上下文 `viewport:null`（页面铺满真实窗口；
+  否则 Playwright 缺省 1280×720 视口会把窗口约束回默认尺寸）。缺省不传 = 现状逐字节不变
+  （`launchKwargs` 的窗口旗标只在显式 windowMode 且非 headless 时追加）。
+- **【桥接·需重载】** `amberflow_session` open 增 `window` 参数（枚举 `maximized|fullscreen`）：
+  需有头（`headful:true` 或部署 `Config.headful`），无头组合由桥先拒为结构化
+  `config_error`（不靠子进程报错）；argv 透传 `--window`。桥模块重载/重启后工具参数才可见。
+- **【范围】** 只接 session 面（authoring 试错最需要看真实窗口）；`run` / `inspect` 的同类
+  窗口尺寸可作为后续扩展——`browserSession(headless, device, metaChannel, windowMode)` 与
+  `launchKwargs` 已是单点实现，接入只需把参数从各自 CLI 透传下去。
+
 ## [Unreleased] — AMBERFLOW_HEADFUL env 层接线到 inspect/session/test（插件 HEADFUL 全链路生效）
 
 - **【缺陷修复·env 层只覆盖 run 一条腿】** 桥配置页勾选 HEADFUL 后子进程注入

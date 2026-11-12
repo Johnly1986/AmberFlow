@@ -23,6 +23,9 @@ amber session --url https://books.toscrape.com/ --input requests.jsonl --record 
 # 交互终端：stdin 每行一条 JSON 请求
 amber session --url https://books.toscrape.com/ --headful
 
+# 有头窗口尺寸：maximized（最大化，保留浏览器 chrome）/ fullscreen（全屏，F11 语义）
+amber session --url https://books.toscrape.com/ --headful --window maximized
+
 # 需要轨迹里保留 fill/select 的明文值（默认只记 hash；会进仓库/导出物，慎用）
 amber session --url https://books.toscrape.com/ --input requests.jsonl \
   --record session-actions.jsonl --record-values
@@ -35,6 +38,10 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
 - 退出码：`0` 干净关闭（`close` 或 stdin EOF）；`2` 用法/启动错误；`3` idle 超时（被挡住，不是失败）；
   `1` 不可恢复（浏览器进程死亡等）。
 - 证据目录：`--out`，缺省 `$AMBERFLOW_HOME/session/<runId>`（用户作用域，不写仓库工作区）。
+- **有头窗口尺寸 `--window maximized|fullscreen`**：需要可见窗口（`--headful` 或配置层
+  `AMBERFLOW_HEADFUL=1`）；缺省不传 = Playwright 默认窗口。无头会话下给 `--window` 是用法错误
+  （exit 2）而不是静默忽略。实现：`--start-maximized` / `--start-fullscreen` + 上下文
+  `viewport:null`（页面铺满真实窗口，而不是被缺省 1280×720 视口约束）。
 
 ## 请求 / 响应
 

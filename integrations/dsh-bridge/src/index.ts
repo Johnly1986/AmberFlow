@@ -1188,6 +1188,12 @@ export function apply(ctx: Context, config: Config): void {
         description: 'open: navigation envelope (hosts). Defaults to the URL host inside the engine; same semantics as meta.hosts.',
       },
       headful: { type: 'boolean', description: 'open: show a browser window (default false; deploy hosts usually have no display).' },
+      window: {
+        type: 'string', enum: ['maximized', 'fullscreen'],
+        description: 'open: window size for a HEADED session — `maximized` (maximized, browser chrome kept) or '
+          + '`fullscreen` (F11 semantics, page covers the screen). Needs a visible window (headful:true or the '
+          + 'deployment Config.headful); a headless session rejects it instead of silently ignoring it.',
+      },
       record: {
         type: 'boolean',
         description: 'open: record the action trajectory JSONL under the session evidence dir (default TRUE — `close` returns the record path for `amber session export`). `false` disables it.',

@@ -642,10 +642,13 @@ export async function browserSession(
   // task-43：meta.policy.browser 的通道（run 面解析后传入；session/辅助路径不传 = env>default）。
   // env(AMBERFLOW_BROWSER_CHANNEL) > 此参数 > 缺省解析，优先级在 browser-env.launchKwargs 单源实现。
   metaChannel: import("../browser/browser-env.ts").BrowserChannel | null = null,
+  // 有头窗口尺寸模式（`amber session --window`）：仅 headless:false 生效；页面走 viewport:null
+  // 才能铺满真实窗口（--start-maximized/--start-fullscreen 才有意义）。缺省 null = 现状逐字节不变。
+  windowMode: import("../browser/browser-env.ts").LaunchWindowMode | null = null,
 ): Promise<BrowserSession> {
   const mod = await import("playwright");
   const pw: PwLike = { chromium: mod.chromium as unknown as PwLike["chromium"] };
-  const browser = (await browserEnv.launch(pw, headless, null, metaChannel)) as unknown as BrowserHandle;
+  const browser = (await browserEnv.launch(pw, headless, null, metaChannel, windowMode)) as unknown as BrowserHandle;
   // task-21/D-1：启动事实挂到会话上（env.browser 一等证据；app-runner 收尾读进 result.env）。
   const envBrowser = lastBrowserLaunchFacts() ?? undefined;
   let page: AnyPage;
@@ -667,6 +670,16 @@ export async function browserSession(
         ...(device.timezone === undefined ? {} : { timezoneId: device.timezone }),
         ...(device.device_scale_factor === undefined ? {} : { deviceScaleFactor: device.device_scale_factor }),
       });
+      context = ctx as unknown as AnyPage;
+      page = await ctx.newPage();
+    } else if (!headless && windowMode !== null) {
+      // 窗口尺寸模式：viewport:null 让页面铺满真实窗口，--start-maximized / --start-fullscreen
+      // 才真正生效（否则 Playwright 仍按缺省 1280×720 视口约束窗口）。
+      const ctx = await (browser as unknown as {
+        newContext(o?: Record<string, unknown>): Promise<{
+          newPage(): Promise<AnyPage>; close(): Promise<void>;
+        }>;
+      }).newContext({ viewport: null });
       context = ctx as unknown as AnyPage;
       page = await ctx.newPage();
     } else {

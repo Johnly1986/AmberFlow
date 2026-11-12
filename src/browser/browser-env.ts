@@ -121,16 +121,30 @@ export function channelFromEnv(): BrowserChannel | null {
   return v === "chrome" || v === "headless-shell" ? v : null;
 }
 
+/** 有头窗口尺寸模式（`amber session --window`）：maximized = 最大化；fullscreen = 全屏（F11 语义）。 */
+export type LaunchWindowMode = "maximized" | "fullscreen";
+
 /** kwargs for `chromium.launch()` (playwright's own option names). */
 export function launchKwargs(
   headless = true,
   extensionDir: string | null = null,
   metaChannel: BrowserChannel | null = null,
+  // 有头窗口尺寸模式（仅 headless:false 生效）：--start-maximized / --start-fullscreen。
+  // 页面侧还要 viewport:null 才能铺满真实窗口（见 browserSession 的同名参数）。
+  windowMode: LaunchWindowMode | null = null,
 ): LaunchOptions {
   const kw: LaunchOptions = { headless };
   if (typeof process.getuid === "function" && process.getuid() === 0) {
     kw.args = ["--no-sandbox", "--disable-dev-shm-usage"];   // containers
   }
+  const windowArgs: string[] = !headless && windowMode !== null
+    ? [windowMode === "fullscreen" ? "--start-fullscreen" : "--start-maximized"]
+    : [];
+  /** 窗口尺寸旗标挂到 args；三条返回路径（chrome 通道 / headless-shell / 本地二进制）共用。 */
+  const withWindowArgs = (k: LaunchOptions): LaunchOptions => {
+    if (windowArgs.length) k.args = [...(k.args as string[] ?? []), ...windowArgs];
+    return k;
+  };
   const cands = chromiumCandidates();
   // ---- task-39/43：通道选择面。env(AMBERFLOW_BROWSER_CHANNEL) > metaChannel > 缺省解析。
   // 缺省（都未设）原路径逐字节不变。channel 路径不解析本地二进制；无系统 Chrome 由
@@ -139,11 +153,11 @@ export function launchKwargs(
   if (channel !== null && !extensionDir) {
     if (channel === "chrome") {
       kw.channel = "chrome";
-      return kw; // channel 路径不解析本地二进制；无系统 Chrome 由 launch 抛错并在上层如实报
+      return withWindowArgs(kw); // channel 路径不解析本地二进制；无系统 Chrome 由 launch 抛错并在上层如实报
     }
     const shell = cands.filter((c) => path.basename(c).includes("headless"));
     if (shell.length) kw.executablePath = shell[shell.length - 1];
-    return kw;
+    return withWindowArgs(kw);
   }
   if (extensionDir) {
     // MV3 extensions only load in the full chromium (new headless or headed).
@@ -173,7 +187,7 @@ export function launchKwargs(
       kw.executablePath = cands[cands.length - 1];
     }
   }
-  return kw;
+  return withWindowArgs(kw);
 }
 
 export interface BrowserLike {
@@ -187,8 +201,9 @@ export async function launch(
   headless = true,
   extensionDir: string | null = null,
   metaChannel: BrowserChannel | null = null,
+  windowMode: LaunchWindowMode | null = null,
 ): Promise<BrowserLike> {
-  const kw = launchKwargs(headless, extensionDir, metaChannel);
+  const kw = launchKwargs(headless, extensionDir, metaChannel, windowMode);
   if (!("executablePath" in kw) && !("channel" in kw)) {
     throw new Error("no chromium binary found. Run `playwright install chromium`, or set "
       + "PLAYWRIGHT_BROWSERS_PATH to a directory containing chromium-*/.");
