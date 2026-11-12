@@ -13,6 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { cliBool, cliString, parseCliArgs } from "../support/cli-args.ts";
+import { parseRunDefaults } from "../support/run-defaults.ts";
 import {
   loadBundle, selectCases, tierOf, validateBundle,
 } from "../online/case.ts";
@@ -138,10 +139,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const json = cliBool(v, "json");
   const quiet = cliBool(v, "quiet");
   const verbose = !quiet;
+  // 运行参数的配置默认值（AMBERFLOW_HEADFUL 等 env 层）：--headful/--headless 旗标仍最优先。
+  const { defaults: runDefaults, errors: runDefaultErrors } = parseRunDefaults();
+  if (runDefaultErrors.length) {
+    for (const e of runDefaultErrors) console.error(e);
+    return 2;
+  }
   let suite, code, dir;
   try {
     ({ suite, code, dir } = await runSuite(cases, bundle.sites, {
-    headless: !(cliBool(v, "headful") || cliBool(v, "headless")),
+    // --headless 显式无窗口；--headful 或配置层 runDefaults.headful=true 才有头
+    // （CLI 旗标 > env > 配置文件）。此前写成 !(headful || headless)：--headless 也算出 false →
+    // 套件起了有头浏览器，与 USAGE "--headless 显式无窗口" 直接矛盾（接线错误）。
+    headless: !(cliBool(v, "headful") || runDefaults.headful === true),
     ...(cliString(v, "max-steps") === undefined ? {} : { maxSteps: numberArg(cliString(v, "max-steps"), "--max-steps") }),
     ...(cliString(v, "timeout") === undefined ? {} : { timeoutSec: numberArg(cliString(v, "timeout"), "--timeout") }),
     ...(cliString(v, "provider") === undefined ? {} : { provider: cliString(v, "provider") }),

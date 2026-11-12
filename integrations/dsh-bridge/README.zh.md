@@ -11,7 +11,7 @@ kind: "package-bundle"
 
 `dsh-amberflow-bridge` 把一个外部浏览器引擎暴露成面向模型的工具。AmberFlow 只有**一种**应用格式：`$AMBERFLOW_HOME/apps/<id>/app.mjs`（或 checkout 里的夹具）里的 **flow 脚本**，导出 `meta` 与 `flow(ctx)`。控制流由脚本拥有——`if`、`for`、`while`、子函数——而每一步的目标、闸门、动作与完成信号由引擎决定，DOM 信号是唯一的完成真相。本桥不添加任何自己的浏览器或应用逻辑，只调用那个 checkout 的命令行并归纳其产物。
 
-插件提供**九个**工具：`amberflow_status`（环境/模型事实）、`amberflow_apps`（经 `amber apps list --json` 列出 flow 应用）、`amberflow_app_show`（元数据 + 当前 `app.mjs` 源码 + 版本锚点）、`amberflow_app_check`（加载 + dry 跑调用序列，不开浏览器）、`amberflow_inspect`（只读页面观察与 hint 候选）、`amberflow_session`（跨调用保持页面状态的 authoring 会话：open → observe → act → read/extract/signal → snapshot → close；**不判完成**——完成真相只在 `amberflow_run`）、`amberflow_app_create`（用 `amber apps new` 生成 flow 骨架）、`amberflow_run`（运行一个应用；`max_steps` 是执行预算）、`amberflow_learn`（把一次录制写成 flow 应用，落盘门槛是生成脚本的零模型调用回放）、以及 `amberflow_test`（真实站点回归套件）。`amberflow_inspect` 与 `amberflow_session op:"observe"` 共用**同一份元素行合同**（`src/element-view.ts`：同字段名——`hint_candidates` 不是 `hints`——同截断策略、同一 60/200 行数 cap、准入诊断原样透传；`ref` 只是展示锚，act 地址是 hint 字符串）。插件的**配置页**（设置 → 插件 → 本 bundle 的行 → 配置）只设置三个字段，用来配置**统一决策服务**（System One）：服务 URL、Token Key、ModelName——与引擎 CLI `amber config set` 写的是同一组 `AMBERFLOW_DECISION_*` 键。
+插件提供**九个**工具：`amberflow_status`（环境/模型事实）、`amberflow_apps`（经 `amber apps list --json` 列出 flow 应用）、`amberflow_app_show`（元数据 + 当前 `app.mjs` 源码 + 版本锚点）、`amberflow_app_check`（加载 + dry 跑调用序列，不开浏览器）、`amberflow_inspect`（只读页面观察与 hint 候选）、`amberflow_session`（跨调用保持页面状态的 authoring 会话：open → observe → act → read/extract/signal → snapshot → close；**不判完成**——完成真相只在 `amberflow_run`）、`amberflow_app_create`（用 `amber apps new` 生成 flow 骨架）、`amberflow_run`（运行一个应用；`max_steps` 是执行预算）、`amberflow_learn`（把一次录制写成 flow 应用，落盘门槛是生成脚本的零模型调用回放）、以及 `amberflow_test`（真实站点回归套件）。`amberflow_inspect` 与 `amberflow_session op:"observe"` 共用**同一份元素行合同**（`src/element-view.ts`：同字段名——`hint_candidates` 不是 `hints`——同截断策略、同一 60/200 行数 cap、准入诊断原样透传；`ref` 只是展示锚，act 地址是 hint 字符串）。插件的**配置页**（设置 → 插件 → 本 bundle 的行 → 配置）设置统一决策服务三项（服务 URL、Token Key、ModelName——与引擎 CLI `amber config set` 写的是同一组 `AMBERFLOW_DECISION_*` 键）与执行参数两项（步间距、HEADFUL 开关）。
 
 Agent 的作者回路是 `amberflow_status` → `amberflow_apps` → `amberflow_app_show`（读 `path` 与当前源码）→ **用文件工具编辑 `app.mjs`** → `amberflow_app_check` → `amberflow_inspect`（写 hint 前先看真实页面）→ 带 `max_steps`/`trace` 的 `amberflow_run` 取结构化反馈 → 完整 `amberflow_run` → `amberflow_test`。没有“按步骤序号编辑”的接口：脚本没有静态步骤表，步骤是运行期事实，脚本版本就是唯一的流程版本。
 
@@ -142,14 +142,22 @@ LLM 门是命令行层的可选项，需要运行 checkout 的机器上有 `OPEN
 ### 配置页：统一决策服务（System One）
 
 bundle 自带一个浏览器半，在 `plugins.row.config` 注册自己的行配置页：设置 → 插件 → 本 bundle →
-`amberflow-bridge` 那一行会出现**配置**入口。页面只显示三个字段（它们是插件 Config 里**全部**的
-`.volatile()` 字段），用于配置引擎执行步骤时的**决策模型**：
+`amberflow-bridge` 那一行会出现**配置**入口。页面显示的字段正是插件 Config 里**全部**的
+`.volatile()` 字段——统一决策服务三项（配置引擎执行步骤时的**决策模型**）加上执行参数两项
+（步间距与 HEADFUL）：
 
 | 字段 | 转发到引擎 CLI 的环境变量 | 含义 |
 |---|---|---|
 | **决策模型 URL** | `AMBERFLOW_DECISION_BASE_URL` | 决策服务基址（如 `https://…/compatible-mode/v1` 或 `http://localhost:8008`）；桥自动归一成 `/systemone`（已带后缀则原样） |
 | **决策模型 Token Key** | `AMBERFLOW_DECISION_API_KEY` | bearer token；只写不读——Host 不回传，页面只显示“已配置/未设置” |
 | **决策模型名 ModelName** | `AMBERFLOW_DECISION_MODEL` | 决策模型 id（如 `decision-model-preview`）；留空用 provider 默认 |
+| **步间距（毫秒）** | `AMBERFLOW_STEP_DELAY_MS` | 两次执行步之间的最小等待（0–60000）；应用自声明的 `meta.pace` 仍优先 |
+| **HEADFUL（有头窗口）** | `AMBERFLOW_HEADFUL=1` | 勾选后每个引擎子进程一律显示浏览器窗口，压过引擎配置文件的 `runDefaults.headful=false` |
+
+HEADFUL 是**唯一**的窗口开关：浏览器窗口只有"要不要显示"一个维度，不设 headless 反义布尔
+（同一事实两处配置会互相覆盖）。不勾选 = 不注入任何 env，引擎按自己的层叠（CLI 旗标 > env >
+配置文件）决定——想常驻无窗口在引擎 rc 配 `AMBERFLOW_HEADFUL=0` 即可。工具调用显式给的
+`headful` 参数是 CLI 旗标层，永远比这里注入的 env 优先。
 
 行为：
 
@@ -166,7 +174,7 @@ bundle 自带一个浏览器半，在 `plugins.row.config` 注册自己的行配
   为假，Harness 把 settings 切成 memory 模式：远程页面既不读也不写 Host 配置。因此远程打开时行页面会
   显示一段说明而不是表单——请在 Host 本机、或通过 SSH 隧道（`ssh -L 8080:127.0.0.1:3080 <host>`）编辑。
   在 loopback 页面保存的值对所有运行生效，也包括从远程页面发起的运行。
-- **只能改这三个字段**：`repoPath`/`nodeBin`/`timeoutMs`/`allowDangerous`/`toolPrefix`/`envMode`/
+- **只能改这些 `.volatile()` 字段**：`repoPath`/`nodeBin`/`timeoutMs`/`allowDangerous`/`toolPrefix`/`envMode`/
   `forwardEnv`/`keepRuns` 仍写在 `cordis.patch.yml`（普通字段的变更会重挂插件；`toolPrefix` 甚至
   会改工具名，不能做成热更新）。
 - **两种安装门都提供本页面**：bundle 带两个逐字一致的 client bundle——`client.js` 供 nested 的

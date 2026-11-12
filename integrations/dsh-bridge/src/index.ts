@@ -117,7 +117,7 @@ export interface Config {
   /**
    * Unified **decision service** endpoint (System One protocol).
    *
-   * These three fields plus {@link Config.stepGapMs} and {@link Config.headless} are the ONLY
+   * These three fields plus {@link Config.stepGapMs} and {@link Config.headful} are the ONLY
    * `.volatile()` fields in this Config, so the plugin's configuration page (`plugins.row.config`)
    * shows exactly them. They are
    * forwarded to the engine child process as `AMBERFLOW_DECISION_BASE_URL` / `_API_KEY` / `_MODEL`,
@@ -137,12 +137,13 @@ export interface Config {
    */
   stepGapMs?: Volatile<number>
   /**
-   * headless 开关（配置页）：勾选后引擎子进程一律注入 `AMBERFLOW_HEADFUL=0`（无窗口运行）——
-   * 压过机器配置层的 `runDefaults.headful=true`（env 层 > 配置文件层）；不勾选（默认）=
-   * 不注入任何东西，引擎按它自己的配置层叠走（逐字节现状）。工具调用显式给的 `--headful`
-   * 永远赢（CLI 旗标 > env，app-runner/start 同一条优先级纪律）。
+   * headful 开关（配置页）：浏览器窗口只有一个开关维度，所以只有一个 HEADFUL 布尔——勾选后
+   * 引擎子进程一律注入 `AMBERFLOW_HEADFUL=1`（显示浏览器窗口），压过引擎配置层的
+   * `runDefaults.headful=false`（env 层 > 配置文件层）；不勾选（默认）= 不注入任何东西，引擎按
+   * 它自己的层叠走（CLI 旗标 > env > 配置文件，逐字节现状；想常驻无窗口在引擎 rc 里配
+   * `AMBERFLOW_HEADFUL=0` 即可，工具调用显式给的 headful 参数是 CLI 旗标层，永远最优先）。
    */
-  headless?: Volatile<boolean>
+  headful?: Volatile<boolean>
   /**
    * Idle TTL for `amberflow_session` sessions, ms (default 300_000). The BRIDGE owns this
    * semantic: the engine child is started with `--idle-timeout-ms 600000` as an orphan backstop
@@ -179,9 +180,10 @@ export const Config = z.object({
   // AMBERFLOW_STEP_DELAY_MS — the engine's `env` pace layer, which an app's own meta.pace still
   // overrides. 0..60000 ms like meta.pace; 0 (default) forwards nothing.
   stepGapMs: z.natural().max(60_000).default(0).volatile(),
-  // headless 开关：勾选 → 子进程注入 AMBERFLOW_HEADFUL=0（无窗口）；不勾选 → 不注入
-  // （引擎配置层叠决定）。CLI 显式 --headful 仍最优先（engine 侧旗标 > env）。
-  headless: z.boolean().default(false).volatile(),
+  // headful 开关（取代本版本线里未发布的 headless 布尔与 windowMode 三态实验项）：勾选 → 子进程
+  // 注入 AMBERFLOW_HEADFUL=1（显示窗口）；不勾选 → 不注入（引擎配置层叠决定）。工具显式 headful
+  // 参数是 CLI 旗标层，仍最优先。
+  headful: z.boolean().default(false).volatile(),
   // `amberflow_session` limits. Plain (non-volatile) fields on purpose: changing them means the
   // deployment restarts the session manager, while the tools themselves stay stateless per call.
   // Defaults never spawn anything: a session exists only after an explicit `open` op.
@@ -306,8 +308,8 @@ function resolveOptions(config: Config): BridgeOptions {
     stepGapMs: Number.isFinite(rawStepGapMs)
       ? Math.min(60_000, Math.max(0, Math.floor(rawStepGapMs)))
       : 0,
-    // headless 开关：volatile 布尔，只有显式 true 才生效（默认 false = 不注入，逐字节现状）。
-    headless: volatileValue(config.headless) === true,
+    // headful 开关：volatile 布尔，只有显式 true 才生效（默认 false = 不注入，逐字节现状）。
+    headful: volatileValue(config.headful) === true,
     // Auto-select the online decision provider only when the endpoint AND token are both present:
     // a half-configured page must not break runs that otherwise work on the local model.
     ...(normalizeDecisionEndpoint(volatileValue(config.modelBaseUrl) ?? '').trim() !== ''

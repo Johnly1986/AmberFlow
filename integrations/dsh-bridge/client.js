@@ -42,6 +42,8 @@ window.__ModuleLoader__.load({
       stepGapMsHint: 'Minimum wait between two engine steps, 0–60000 ms (forwarded as AMBERFLOW_STEP_DELAY_MS). An app that declares its own meta.pace keeps winning. 0 = no wait.',
       stepGapInvalid: 'Step gap must be an integer between 0 and 60000.',
       stepGapSummary: 'step gap',
+      headful: 'HEADFUL (visible browser window)',
+      headfulHint: 'Force every engine child process to show a browser window (injects AMBERFLOW_HEADFUL=1, overriding the engine config files). Unticked = inject nothing, the engine decides from its own layering (CLI flags > env > config files — configure AMBERFLOW_HEADFUL=0 there for a permanently windowless host). An explicit headful argument on a tool call is the CLI-flag layer and still wins.',
       save: 'Save',
       saving: 'Saving…',
       saved: 'Saved. App runs started from now on use this online decision model (token-plan).',
@@ -54,8 +56,9 @@ window.__ModuleLoader__.load({
       hint: 'The model fields configure AmberFlow\'s ONLINE DECISION MODEL (token-plan SystemOne). '
         + 'With URL and token set, app runs use the token-plan decision provider; empty keeps the local ONNX '
         + 'model (or rules-only). The step gap slows the pace between engine steps (politeness / rate-limit '
-        + 'headroom). LLM doors (planner/auditor/escalation) are separate and still read OPENAI_* '
-        + 'from the environment.',
+        + 'headroom). The HEADFUL switch forces a visible browser window for every engine child process — '
+        + 'unticked, the engine decides from its own layering. LLM doors (planner/auditor/escalation) are '
+        + 'separate and still read OPENAI_* from the environment.',
       summaryUnset: 'Online decision model not configured',
       summaryConfigured: 'Decision model: ',
       remoteSummary: 'Configuration is editable on the Host machine only (loopback).',
@@ -83,6 +86,11 @@ window.__ModuleLoader__.load({
         + '（作为 AMBERFLOW_STEP_DELAY_MS 传给引擎；应用自己声明的 meta.pace 仍优先）。0 = 不等待。',
       stepGapInvalid: '步间距必须是 0–60000 之间的整数。',
       stepGapSummary: '步间距',
+      headful: 'HEADFUL（有头浏览器窗口）',
+      headfulHint: '勾选后桥拉起的每个引擎子进程一律显示浏览器窗口（注入 AMBERFLOW_HEADFUL=1，压过'
+        + '引擎配置文件层）。不勾选 = 不注入，引擎按自己的层叠决定（CLI 旗标 > env > 配置文件；'
+        + '想常驻无窗口在引擎 rc 配 AMBERFLOW_HEADFUL=0 即可）。工具调用显式给的 headful 参数是 '
+        + 'CLI 旗标层，仍最优先。',
       save: '保存',
       saving: '保存中…',
       saved: '已保存。此后启动的引擎运行默认使用该线上决策模型（token-plan）。',
@@ -95,6 +103,7 @@ window.__ModuleLoader__.load({
       hint: '模型三项配置 AmberFlow 的**线上决策模型**（token-plan SystemOne）：URL 与 Token 都设置后，'
         + '应用运行默认走 token-plan 决策 provider；留空则继续用本地 ONNX 模型（或 rules-only）。'
         + '步间距用于放慢引擎步与步之间的节奏（降载/限频余量）。'
+        + 'HEADFUL 强制引擎子进程显示浏览器窗口；不勾选 = 引擎按自己的层叠决定。'
         + 'LLM 门（规划器/审计/语义升级）是另一条路径，仍从环境变量读 OPENAI_*。',
       summaryUnset: '未配置线上决策模型',
       summaryConfigured: '决策模型：',
@@ -149,6 +158,29 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * A checkbox row (the HEADFUL switch): the tick box on the left, label + hint on the right.
+     * `checked` is the host-derived draft value; `onChange` receives the new boolean.
+     */
+    function CheckField(props) {
+      return h('label', { style: { display: 'flex', alignItems: 'flex-start', gap: '10px', cursor: 'pointer' } },
+        h('input', {
+          type: 'checkbox',
+          checked: props.checked === true,
+          onChange: (event) => props.onChange(event.target.checked === true),
+          style: {
+            margin: '2px 0 0',
+            width: '16px',
+            height: '16px',
+            flexShrink: 0,
+            accentColor: 'var(--dsw-alias-brand-primary)',
+          },
+        }),
+        h('span', { style: { display: 'grid', gap: '4px' } },
+          h('span', { style: LABEL_STYLE }, props.label),
+          h('span', { style: HINT_STYLE }, props.hint)))
+    }
+
+    /**
      * One row's configuration page. `view: 'summary'` is the row's one-liner fallback;
      * `view: 'page'` is the form opened by the row's Configure control.
      */
@@ -157,7 +189,7 @@ window.__ModuleLoader__.load({
       const snapshot = useSnapshot(form)
       const described = useSnapshot(mirror)
       const current = snapshot.value ?? {}
-      const [draft, setDraft] = React.useState({ baseUrl: '', name: '', token: '', stepGap: '' })
+      const [draft, setDraft] = React.useState({ baseUrl: '', name: '', token: '', stepGap: '', headful: false })
       const [busy, setBusy] = React.useState(false)
       const [message, setMessage] = React.useState(null)
 
@@ -172,6 +204,9 @@ window.__ModuleLoader__.load({
         ? Math.round(current.stepGapMs)
         : 0
       const hostStepGap = String(hostStepGapNum)
+      // HEADFUL: one volatile boolean (schema default false). False = no injection; the engine
+      // decides from its own config layering (CLI flags > env > config files).
+      const hostHeadful = current.headful === true
       const namespaceView = (described.view?.namespaces ?? []).find((view) => view.ns === ENTRY)
       const tokenSet = (namespaceView?.secrets ?? []).some((secret) =>
         Array.isArray(secret.path) && secret.path[0] === 'modelApiKey' && secret.set === true)
@@ -182,18 +217,19 @@ window.__ModuleLoader__.load({
         // A new revision (initial load, save, external edit) rebases the visible fields; the
         // write-only token field is always emptied. The status message is not cleared here so a
         // just-saved confirmation survives the revision bump it caused.
-        setDraft({ baseUrl: hostBaseUrl, name: hostName, token: '', stepGap: hostStepGap })
+        setDraft({ baseUrl: hostBaseUrl, name: hostName, token: '', stepGap: hostStepGap, headful: hostHeadful })
       }, [snapshot.revision, snapshot.status])
 
       const suffix = hostBaseUrl === '' ? '' : ' @ ' + hostBaseUrl.replace(/^https?:\/\//, '')
+      const windowText = hostHeadful ? ' · HEADFUL' : ''
       if (props.view === 'summary') {
         if (remoteReadOnly) return h('span', null, t('remoteSummary'))
         const gapText = hostStepGapNum > 0
           ? ' · ' + t('stepGapSummary') + ' ' + String(hostStepGapNum) + 'ms'
           : ''
         const text = hostName === '' && hostBaseUrl === ''
-          ? t('summaryUnset') + gapText
-          : t('summaryConfigured') + (hostName === '' ? '—' : hostName) + suffix + gapText
+          ? t('summaryUnset') + gapText + windowText
+          : t('summaryConfigured') + (hostName === '' ? '—' : hostName) + suffix + gapText + windowText
         return h('span', null, text)
       }
       if (remoteReadOnly) {
@@ -212,6 +248,9 @@ window.__ModuleLoader__.load({
           setMessage({ kind: 'error', text: t('stepGapInvalid') })
           return
         }
+        // HEADFUL: one boolean. The checkbox can only emit booleans, so this is a defensive net —
+        // the Host schema re-validates (z.boolean) and resolveOptions normalizes with `=== true`.
+        const nextHeadful = draft.headful === true
         const ops = []
         const nextBaseUrl = draft.baseUrl.trim()
         const nextName = draft.name.trim()
@@ -219,6 +258,7 @@ window.__ModuleLoader__.load({
         if (nextName !== hostName) ops.push({ op: 'set', path: ['modelName'], value: nextName })
         if (draft.token !== '') ops.push({ op: 'set', path: ['modelApiKey'], value: draft.token })
         if (nextGap !== hostStepGapNum) ops.push({ op: 'set', path: ['stepGapMs'], value: nextGap })
+        if (nextHeadful !== hostHeadful) ops.push({ op: 'set', path: ['headful'], value: nextHeadful })
         if (ops.length === 0) {
           setMessage({ kind: 'warn', text: t('nothingChanged') })
           return
@@ -306,6 +346,14 @@ window.__ModuleLoader__.load({
             style: INPUT_STYLE,
             onChange: (event) => setDraft((previous) => ({ ...previous, stepGap: event.target.value })),
           }),
+        }),
+        // HEADFUL：一个布尔开关——浏览器窗口只有一个开关维度，不设 headless 反义项。勾选 =
+        // 注入 AMBERFLOW_HEADFUL=1；不勾 = 不注入 env，引擎按自己的配置层叠决定。
+        h(CheckField, {
+          label: t('headful'),
+          hint: t('headfulHint'),
+          checked: draft.headful === true,
+          onChange: (value) => setDraft((previous) => ({ ...previous, headful: value === true })),
         }),
         h('p', { style: HINT_STYLE }, t('hint')),
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },

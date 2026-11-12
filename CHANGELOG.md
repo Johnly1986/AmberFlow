@@ -4,6 +4,50 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — AMBERFLOW_HEADFUL env 层接线到 inspect/session/test（插件 HEADFUL 全链路生效）
+
+- **【缺陷修复·env 层只覆盖 run 一条腿】** 桥配置页勾选 HEADFUL 后子进程注入
+  `AMBERFLOW_HEADFUL=1`，但引擎只有 app-runner（`amber run/apps`）读 runDefaults——
+  `amber inspect`（只读观察）与 `amber session`（authoring 会话）的 CLI 从不消费该 env，
+  Agent 最常走的两条"打开浏览器"路径依旧无头（配置页勾选形同虚设）。修复：inspect 的
+  `--headed` 与 session 的 `--headful` 都接入「CLI 旗标 > env（AMBERFLOW_HEADFUL）> 缺省
+  headless」同一层叠；test 的 `--headful/--headless` 也接 env 层（配置默认值语义，旗标仍赢）。
+  runDefaults 解析错误响亮报错（exit 2，与 app-runner-cli 同纪律）。plan-cli 旧面维持文档化
+  的"缺省 headless"（`a.headful` 只来自新 CLI 透传）。
+- **【缺陷修复·test --headless 起有头】** `amber test --headless` 此前被解析但接线算错：
+  `runSuite` 的 headless 写成 `!(--headful || --headless)`，给 `--headless` 也算出 `false`
+  → 套件起了**有头**浏览器，与 USAGE "--headless 显式无窗口（缺省 headless）"直接矛盾。
+  修复后：`--headful` 或配置层 headful=true 才有头；`--headless` 显式无窗口；两者同给仍
+  exit 2。`--headless` 从"不生效"变"生效"（有意变更面）。
+- **【引擎侧同义参数排查结论】** 配置面（`config-schema.ts`）已是「一个概念一个键」纪律：
+  旧别名（`LAYAA_*`、`HUGGINGFACE_HUB_CACHE`、`LAYAWEBUSE_REPO`、`TOKEN_PLAN_STATE_CONTEXT`）
+  只作兼容回退留在消费点（canonical 优先读），不进配置面——写进 rc 加载期按未知键拒绝。
+  疑似同义对均为**作用域分层**而非同层重复：`--conf-floor`/`AMBERFLOW_CONF_FLOOR`（run 层）
+  > `meta.policy.conf_floor`（应用层）> provider 自报 floor（`AMBERFLOW_DECISION_FLOOR`，
+  随 provider 走——score_kind 跨 provider 不可比，这是 provider floor 存在的理由）> 全局
+  0.25；`AMBERFLOW_STEP_DELAY_MS`（步间）/`AMBERFLOW_ACTION_DELAY_MS`（动作间）粒度不同，
+  共用 `src/support/pace.ts` 同一语义。CLI 的 `--headful`/`--headless` 是一维两向旗标
+  （同给 exit 2；配置面只有 `AMBERFLOW_HEADFUL` 一键），与插件配置页只留 HEADFUL 同构。
+
+## [Unreleased] — 插件配置页 HEADFUL 开关（单一有头选项）
+
+- **【新增·桥接配置页 HEADFUL 布尔项】** `amberflow-bridge` 的 Config 新增 `headful`（volatile
+  boolean，默认 false）：勾选后桥拉起的每个引擎子进程注入 `AMBERFLOW_HEADFUL=1`（显示浏览器
+  窗口），压过引擎配置文件的 `runDefaults.headful=false`（env 层 > 配置文件层）；不勾选 = 不注入
+  （引擎配置层叠决定，逐字节现状）。工具调用显式给的 `headful` 参数是 CLI 旗标层，仍最优先。
+- **【形态说明·一个开关维度一个选项】** 浏览器窗口只有"要不要显示"一个维度，配置面只保留
+  HEADFUL 一个布尔：headful 与 headless 是同一事实的两面，同置两个反义布尔 = 同一配置写两处
+  （会互相覆盖、还得引入互斥校验），故不设 headless 反义项——想常驻无窗口在引擎 rc 配
+  `AMBERFLOW_HEADFUL=0`（页面不勾选时不注入任何 env，rc 照常生效）。本版本线里此前实验性的
+  `headless` 布尔项（未发布，本 profile 也未写入过）随之移除，无迁移面。配置页勾选时行摘要
+  显示 `· HEADFUL`；`client-root.js` 由生成器重新生成，README/README.zh/DEVELOPING 同步。
+- **【同义配置排查】** 桥 Config 面逐项核对后无其余同层同义项：`timeoutMs`↔工具参 `timeout_sec`、
+  页面三项决策模型/步间距/HEADFUL↔引擎 rc 同名键（`AMBERFLOW_DECISION_*`/`AMBERFLOW_STEP_DELAY_MS`/
+  `AMBERFLOW_HEADFUL`）均为「部署默认 ↔ 逐次覆盖」「页面 env 层 ↔ 引擎配置文件层」的分层关系
+  （CLI 旗标 > env > 项目配置 > 全局配置，且"未设置 = 不注入"不遮蔽 rc），与引擎配置面
+  「一个概念一个键」纪律同构；`sessionIdleMs`（桥会话 TTL）与引擎子进程 `--idle-timeout-ms`
+  孤儿兜底是刻意的双层空闲（桥层权威，子进程层只是保险），非用户可见同义配置。
+
 ## [Unreleased] — C2 抽取选择器预检（非法选择器 → 结构化 config_error）
 
 - **【缺陷修复·静默空数据】** `ctx.extract` 的行/字段选择器非法（如 `rows:"div["`、`fields:{x:"div["}`）
@@ -205,6 +249,8 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   （volatile）：勾选后桥拉起的每个引擎子进程注入 `AMBERFLOW_HEADFUL=0`（无窗口），压过
   机器 rc 的 `runDefaults.headful=true`；不勾选 = 不注入（引擎配置层叠决定，逐字节现状）。
   工具调用显式给的 `--headful` 是 CLI 旗标层，仍最优先。需要插件重载后生效。
+  （该布尔项在本版本线内随后由单一的 `headful` 开关取代——headless 是同一维度的反义面，
+  不再单设，见下方「插件配置页 HEADFUL 开关」。）
 
 ## [Unreleased] — feat/opt-scale（task-21/1a 行为变更）
 

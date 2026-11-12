@@ -18,6 +18,7 @@ import { diag, emitJson, say } from "../context.ts";
 import { EXIT, usageError, usageFromParseError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { amberflowHome } from "../../support/amberflow-home.ts";
+import { parseRunDefaults } from "../../support/run-defaults.ts";
 import { runSession, SESSION_DEFAULT_IDLE_TIMEOUT_MS, type SessionSink } from "../../app/session-runtime.ts";
 import { exportSessionRecord } from "../../app/session-export.ts";
 import { commandHelp } from "../registry.ts";
@@ -182,10 +183,18 @@ export async function runSessionCommand(args: string[], ctx: CliContext): Promis
     log: (line) => diag(ctx, `[session] ${line}`),
   };
   diag(ctx, `[session] ${runId}  idle=${idleTimeoutMs ?? SESSION_DEFAULT_IDLE_TIMEOUT_MS}ms  out=${outDir}`);
+  // 运行参数的配置默认值（AMBERFLOW_HEADFUL 等 env 层）：--headful 旗标仍最优先。坏配置响亮报错。
+  const { defaults: runDefaults, errors: runDefaultErrors } = parseRunDefaults();
+  if (runDefaultErrors.length) {
+    for (const e of runDefaultErrors) console.error(e);
+    return 2;
+  }
   const code = await runSession({
     url: v.url ?? null,
     hosts,
-    headful: v.headful === true,
+    // --headful（CLI 旗标）> AMBERFLOW_HEADFUL（env 层，桥配置页勾选 HEADFUL 时注入）
+    // > 缺省 headless：与 run 的层叠同一条纪律。
+    headful: v.headful === true || runDefaults.headful === true,
     outDir,
     record: typeof v.record === "string" ? path.resolve(ctx.cwd, v.record) : null,
     // task-34：明文值只在作者显式 opt-in 时进轨迹（缺省仍只记 value_hash）。

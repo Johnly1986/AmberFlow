@@ -13,7 +13,7 @@
 | 路径 | 作用 |
 |---|---|
 | `src/` | 工具与其背后的服务缝（`ctx.amberflow`，供别的插件调用） |
-| `client.js` | 浏览器半：在 `plugins.row.config` 注册配置页（只有决策模型 URL / Token Key / ModelName 三个字段） |
+| `client.js` | 浏览器半：在 `plugins.row.config` 注册配置页（决策模型 URL / Token Key / ModelName + 步间距 + HEADFUL 开关——即 Config 全部 `.volatile()` 字段） |
 | `client-root.js` | **生成文件**：仓库根安装门的 client bundle（`node scripts/client-root-sync.mjs` 重新生成） |
 | `scripts/client-root-sync.mjs` | `client.js` → `client-root.js` 的唯一生成器（改 id/行 key 后重新生成） |
 | `locale/` `icon.svg` | 插件卡片的显示文案与图标（`locale/en.json` / `locale/zh.json` 提供 meta 标题/描述） |

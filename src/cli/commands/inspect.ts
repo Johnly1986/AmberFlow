@@ -25,6 +25,7 @@ import { poolView } from "../../engine/pool-view.ts";
 import { poolNearEmpty, nextForInspect } from "../../engine/planning-playbook.ts";
 import { matchSelector } from "../../engine/signals.ts";
 import { parseCliArgs } from "../../support/cli-args.ts";
+import { parseRunDefaults } from "../../support/run-defaults.ts";
 import { commandHelp } from "../registry.ts";
 
 type ProbeOutcome = { selector: string; count?: number; texts?: string[]; error?: string };
@@ -157,10 +158,19 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
   }
   const wantJson = ctx.globals.json || v.json === true;
   const wantPool = v.pool === true;
+  // 运行参数的配置默认值（AMBERFLOW_HEADFUL 等 env 层）：--headed 旗标仍最优先。坏配置响亮报错
+  // （与 app-runner-cli 同一条纪律），不静默忽略。
+  const { defaults: runDefaults, errors: runDefaultErrors } = parseRunDefaults();
+  if (runDefaultErrors.length) {
+    for (const e of runDefaultErrors) console.error(e);
+    return 2;
+  }
 
   let session;
   try {
-    session = await browserSession(v.headed !== true);
+    // --headed（CLI 旗标）> AMBERFLOW_HEADFUL（env 层，桥配置页勾选 HEADFUL 时注入）
+    // > 缺省 headless：与 run 的层叠同一条纪律。
+    session = await browserSession(!(v.headed === true || runDefaults.headful === true));
   } catch (err) {
     throw usageError(`浏览器启动失败：${err instanceof Error ? err.message : String(err)}`, {
       next: ["npm run doctor"],

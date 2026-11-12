@@ -11,7 +11,10 @@ English | [中文](README.zh.md)
 
 `dsh-amberflow-bridge` exposes an external browser engine as model-facing tools. AmberFlow has exactly ONE app format: a **flow script** at `$AMBERFLOW_HOME/apps/<id>/app.mjs` (or in the checkout's fixtures) exporting `meta` and `flow(ctx)`. The script owns the control flow — `if`, `for`, `while`, sub-functions — while the engine owns each step's target, gate, action and completion signal, and DOM signals are the only completion truth. The bridge adds no browser or app logic of its own and instead spawns that checkout's CLIs and summarizes their artifacts.
 
-The plugin ships **nine** tools: `amberflow_status` (environment/model facts), `amberflow_apps` (list flow apps through `amber apps list --json`), `amberflow_app_show` (metadata + current `app.mjs` source + version anchors), `amberflow_app_check` (load + dry-run the call sequence, no browser), `amberflow_inspect` (read-only page observation and hint candidates), `amberflow_session` (one state-preserving authoring session: open → observe → act → read/extract/signal → snapshot → close; never judges completion — that truth lives only in `amberflow_run`), `amberflow_app_create` (generate a flow skeleton with `amber apps new`), `amberflow_run` (run one app; `max_steps` is an execution budget), `amberflow_learn` (record a flow into a flow app, gated by a rules-only replay of the generated script), and `amberflow_test` (real-site regression suite). `amberflow_inspect` and `amberflow_session` `op:"observe"` share ONE element-row contract (`src/element-view.ts`: same field names — `hint_candidates`, not `hints` — same clipping, same 60/200 row cap, admission diagnostics passed through untouched; `ref` is a display anchor, act targets are hint strings). The plugin's **configuration page** (Settings → Plugins → this bundle's row → Configure) sets exactly three fields for the **online decision model** — Model URL, Token Key, ModelName — so runs can use the unified `decision-service` provider (System One) instead of the local ONNX model — the same three keys `amber config set` writes for the engine CLI.
+The plugin ships **nine** tools: `amberflow_status` (environment/model facts), `amberflow_apps` (list flow apps through `amber apps list --json`), `amberflow_app_show` (metadata + current `app.mjs` source + version anchors), `amberflow_app_check` (load + dry-run the call sequence, no browser), `amberflow_inspect` (read-only page observation and hint candidates), `amberflow_session` (one state-preserving authoring session: open → observe → act → read/extract/signal → snapshot → close; never judges completion — that truth lives only in `amberflow_run`), `amberflow_app_create` (generate a flow skeleton with `amber apps new`), `amberflow_run` (run one app; `max_steps` is an execution budget), `amberflow_learn` (record a flow into a flow app, gated by a rules-only replay of the generated script), and `amberflow_test` (real-site regression suite). `amberflow_inspect` and `amberflow_session` `op:"observe"` share ONE element-row contract (`src/element-view.ts`: same field names — `hint_candidates`, not `hints` — same clipping, same 60/200 row cap, admission diagnostics passed through untouched; `ref` is a display anchor, act targets are hint strings). The plugin's **configuration page** (Settings → Plugins → this bundle's row → Configure) sets the three
+**online decision model** fields — Model URL, Token Key, ModelName (the same `AMBERFLOW_DECISION_*` keys
+`amber config set` writes for the engine CLI) — plus the execution parameters: the step gap and the
+HEADFUL switch.
 
 The authoring loop for an Agent is `amberflow_status` → `amberflow_apps` → `amberflow_app_show` (read `path` and the current source) → **edit `app.mjs` with the file tools** → `amberflow_app_check` → `amberflow_inspect` (look at the real page before writing a hint) → `amberflow_run` with `max_steps`/`trace` for structured feedback → `amberflow_run` full → `amberflow_test`. There is no step-number editing interface: a script has no static step table, steps are runtime facts, and the script version is the only flow version.
 
@@ -156,14 +159,22 @@ Two things to know:
 
 The bundle ships a browser half that registers its own row page at `plugins.row.config`, so
 Settings → Plugins → this bundle → the `amberflow-bridge` row gains a **Configure** control. The page
-shows exactly three fields (they are the only `.volatile()` fields in the plugin's Config), and they
-configure the **decision model** the engine executes steps with:
+shows exactly the `.volatile()` fields of the plugin's Config — the three **decision model** fields
+(the model the engine executes steps with) plus the execution parameters (the step gap and HEADFUL):
 
 | Field | Forwarded to the engine CLI as | Meaning |
 |---|---|---|
 | **Decision model URL** | `AMBERFLOW_DECISION_BASE_URL` | service base URL (e.g. `https://…/compatible-mode/v1` or `http://localhost:8008`); the bridge normalizes it to the `/systemone` endpoint (an already-suffixed value is kept as-is) |
 | **Decision Token Key** | `AMBERFLOW_DECISION_API_KEY` | bearer token; write-only — the Host never returns it, the UI shows only "configured / not set" |
 | **Decision ModelName** | `AMBERFLOW_DECISION_MODEL` | decision model id (e.g. `decision-model-preview`); empty uses the provider default |
+| **Step gap (ms)** | `AMBERFLOW_STEP_DELAY_MS` | minimum wait between two engine steps (0–60000); an app's own `meta.pace` still wins |
+| **HEADFUL (visible window)** | `AMBERFLOW_HEADFUL=1` | when ticked, every engine child process shows a browser window, overriding the engine config files' `runDefaults.headful=false` |
+
+HEADFUL is the **only** window switch: a browser window has one dimension ("visible or not"), so there
+is deliberately no headless counterpart boolean (two configs for one fact would overwrite each other).
+Unticked injects nothing: the engine decides from its own layering (CLI flags > env > config files) —
+for a permanently windowless host, set `AMBERFLOW_HEADFUL=0` in the engine rc instead. An explicit
+`headful` argument on a tool call is the CLI-flag layer and always wins over the injected env.
 
 How it behaves:
 
@@ -183,7 +194,7 @@ How it behaves:
   short explanation instead of the form when opened remotely — edit on the Host machine itself, or
   through an SSH tunnel (`ssh -L 8080:127.0.0.1:3080 <host>`). What you save on a loopback page
   applies to every run, including runs started from the remote page.
-- **Only these three fields are editable here.** `repoPath`, `nodeBin`, `timeoutMs`,
+- **Only these `.volatile()` fields are editable here.** `repoPath`, `nodeBin`, `timeoutMs`,
   `allowDangerous`, `toolPrefix`, `envMode`, `envMode`-forwarding and `keepRuns` stay in
   `cordis.patch.yml` (changing an ordinary field remounts the plugin; `toolPrefix` even renames the
   tools, so it must not be live-edited).
