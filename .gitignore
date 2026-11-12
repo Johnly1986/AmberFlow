@@ -20,6 +20,13 @@ configs/amberflowrc.json
 /online-runs/
 /online-out/
 
+# 输出目录（会话级产出，不入库）
+/output/
+
+# 文档缩略图缓存（编辑器生成）
+/.thumbs/
+docs/.thumbs/
+
 # 本地临时工作区（会话/实验脚本与日志，不入库）
 /.session_tmps/
 
