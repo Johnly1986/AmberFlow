@@ -21,6 +21,9 @@ extraction.ts    单次 JS 扫描元素池（主 frame + 可达子 frame，同�
                  ├ pool-js.ts     内嵌 JS 探针与宿主编译产物（浏览器执行的字符串区）
                  └ identity.ts    FW8 声明驱动的身份回捞（#id / [attr=value] 白名单）
 rules.ts         确定性规则：导航、affordance、hint 分档匹配
+intervention/    介入/救援中断模块（L1.5）：结构化求援的编排、通道、幂等
+                 依赖白名单：node:* + support/intervention-contract.ts + support/intervention-texts.ts
+                 （设计见 docs/INTERVENTION_RESCUE_MODULE.md；模块不感知浏览器/meta/flow/DSH）
         ↓
 executor.ts      BrowserMiddleware：唯一执行循环
                  发现元素 → 规则/计划点名 hint → 模型选择 → 闸门 → 风险 → 动作 → inert 检查 → 信号验证
@@ -131,6 +134,7 @@ cli/             amber 命令入口 + 线上套件入口
 
 ```
 src/engine/       执行器、计划、信号、提取、规则、审计、动作
+src/intervention/ 介入/救援中断模块（L1.5；依赖白名单 node:* + support 两叶子）
 src/model/        决策提供者、服务协议、缓存、学习、ONNX
 src/app/          flow 应用：加载器、meta 投影、运行期 ctx、轨迹、适配器、运行器
 src/flow/         信号归纳与共享基础

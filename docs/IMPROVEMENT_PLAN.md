@@ -127,11 +127,14 @@ L0 support      （含下移后的 config-store、amberflow-home；只依赖 nod
 L1 共享语言/纯函数  signals+signal-ops、hint、click-at、surface、plan(类型)、pace、
                  pystr(原 datasource py* 与 laya-format 纯函数)、resolve/selectIndex 路径语言、
                  host-envelope
+L1.5 intervention 介入/救援中断模块（src/intervention/；依赖白名单 node:* + support 两叶子
+                 intervention-contract/intervention-texts——合同与文本零 import，runtime 只依赖
+                 叶子；设计见 docs/INTERVENTION_RESCUE_MODULE.md）
 L2 机制          browser-env、tool-signals、extraction(页面扫描/JS探针)、actions、rules、
                  settle、dataset、datasource(传输/来源)
 L3 决策          model/*（provider 端口 + 协议适配 + 缓存/记忆 + prompt-views 迁入）
 L4 执行          executor、planner、bindings、observe、pool-view、picker、audit
-L5 应用          app/*
+L5 应用          app/*（含 app/intervention-adapter.ts——唯一 app↔模块适配）
 L6 入口          cli、online、flow(归纳)、tools、schema-gen(并入 cli 面)
 ```
 
