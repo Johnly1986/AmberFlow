@@ -433,6 +433,12 @@ export function runArgs(
     maxSteps?: number
     trace?: boolean
     manualFailFast?: boolean
+    /**
+     * Rescue passthrough switch (engine `--rescue`, design §8 step 5): when true the engine may
+     * surface a structured `result.rescue` request on a real human-needed stop. Default off =
+     * byte-identical artifacts; the bridge NEVER suspends (stop mode only).
+     */
+    rescue?: boolean
     slots?: Record<string, string>
   },
 ): string[] {
@@ -454,6 +460,7 @@ export function runArgs(
   if (args.maxSteps !== undefined) argv.push('--max-steps', String(args.maxSteps))
   if (args.trace) argv.push('--trace')
   if (args.manualFailFast) argv.push('--manual-fail-fast')
+  if (args.rescue) argv.push('--rescue')
   for (const [key, value] of Object.entries(args.slots ?? {})) argv.push('--slot', `${key}=${value}`)
   return argv
 }
@@ -708,6 +715,18 @@ export interface RunSummary {
    * 缺字段 = 没有警告（旧产物同样缺字段）。
    */
   warnings?: string[]
+  /**
+   * Bounded passthrough of the engine's `result.rescue` (design §8 step 5): appears ONLY when a
+   * real rescue request was raised (stop mode) — `{ kind, mode, why_stuck: { summary, stop_code?,
+   * step_id? }, what_would_unblock }` — so the Agent can see WHY a human is needed. Absent on
+   * older artifacts and on runs without a rescue (byte-identical summary).
+   */
+  rescue?: {
+    kind: string
+    mode: string
+    why_stuck: { summary: string; stop_code?: string; step_id?: string }
+    what_would_unblock: string[]
+  }
   outDir: string
   /** The report to read, or '' when the run wrote none (a dry run, or one killed before it did). */
   reportPath: string
@@ -976,6 +995,29 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
   const warnings = Array.isArray(raw['warnings'])
     ? (raw['warnings'] as unknown[]).map(w => String(w)).filter(w => w !== '')
     : []
+  // §8 步 5：result.rescue 的有界透传——只在真实求援出现时透出结构化请求（stop 模式），
+  // 让 Agent 看到「为什么需要人」。旧产物无此键 = 摘要逐字节不变；桥永不挂起（无 suspend）。
+  const rescue = (() => {
+    const r = asRecord(raw['rescue'])
+    if (r === null) return undefined
+    const why = asRecord(r['why_stuck'])
+    const kind = asText(r['kind'])
+    const summary = why === null ? '' : asText(why['summary'])
+    if (kind === '' || summary === '') return undefined
+    const unblock = Array.isArray(r['what_would_unblock'])
+      ? (r['what_would_unblock'] as unknown[]).map(String).filter(Boolean).slice(0, 3)
+      : []
+    return {
+      kind,
+      mode: asText(r['mode']),
+      why_stuck: {
+        summary,
+        ...(why !== null && asText(why['stop_code']) !== '' ? { stop_code: asText(why['stop_code']) } : {}),
+        ...(why !== null && asText(why['step_id']) !== '' ? { step_id: asText(why['step_id']) } : {}),
+      },
+      ...(unblock.length ? { what_would_unblock: unblock } : {}),
+    }
+  })()
   // A flow script reports "a human must act here" as a structured stop on the script record
   // (`ctx.manual` on a non-TTY call), not as a per-step table entry; older artifacts used
   // `manual_steps`. Both must read as `needs_human`, never as a plain failure.
@@ -1010,6 +1052,7 @@ export function summarizeRun(outDir: string, app: string, outcome: ProcessOutcom
       : raw['truncated'] === true ? { steps_truncated: true } : {}),
     ...(failed ? { failure: { step: failed.index, desc: failed.desc, ...(failed.stop_code ? { stop_code: failed.stop_code } : {}), ...(failed.obstacle ? { obstacle: failed.obstacle } : {}) } } : {}),
     ...(warnings.length ? { warnings } : {}),
+    ...(rescue === undefined ? {} : { rescue }),
     // Only name a report that is really there: a killed run can leave the artifact without one, and
     // a path the caller cannot open is worse than saying so.
     reportPath: fs.existsSync(path.join(outDir, `${app}-report.md`))

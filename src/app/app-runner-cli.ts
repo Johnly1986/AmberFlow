@@ -289,6 +289,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       sources: !noSources, confirmSafe, captureTraces: cliBool(v, "trace"),
       maxSteps,
       manualFailFast: cliBool(v, "manual-fail-fast"),
+      // §8 步 5：rescue 透传开关（v1 声明面；默认关 = 不进 opts，产物逐字节不变）。
+      ...(cliBool(v, "rescue") ? { rescue: true } : {}),
       headful, allowDangerous: cliBool(v, "allow-dangerous"),
       tieredHint: tieredHint ? true : undefined,
       hintMemory, hintMemoryPath,

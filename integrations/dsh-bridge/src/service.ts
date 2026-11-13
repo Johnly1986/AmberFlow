@@ -79,6 +79,12 @@ export interface AmberFlowRunArgs {
   timeoutSec?: number
   /** Include per-step execution evidence in the result. Defaults to true for the bridge. */
   trace?: boolean
+  /**
+   * Rescue passthrough (engine `--rescue`, design §8 step 5): allow a structured
+   * `result.rescue` request to appear on a real human-needed stop. Default off = artifacts
+   * byte-identical; the bridge never suspends (stop mode only).
+   */
+  rescue?: boolean
   /** Values for declared slots. */
   slots?: Record<string, string>
 }
@@ -344,6 +350,7 @@ export async function runApp(
     ...(args.maxSteps === undefined ? {} : { maxSteps: args.maxSteps }),
     trace: args.trace ?? true,
     manualFailFast: true,
+    ...(args.rescue === undefined ? {} : { rescue: args.rescue }),
     ...(args.slots === undefined ? {} : { slots: args.slots }),
   }))
   return { summary: summarizeRun(outDir, args.app, outcome, `${options.toolPrefix}_run`), outDir }

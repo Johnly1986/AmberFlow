@@ -503,6 +503,15 @@ export function apply(ctx: Context, config: Config): void {
           + 'cap leaves `run-killed.json` in its outDir with the partial evidence.',
       },
       trace: { type: 'boolean', description: 'Include per-step execution evidence in the result. Defaults to true.' },
+      rescue: {
+        type: 'boolean',
+        description: 'Rescue passthrough (engine `--rescue`), default OFF — artifacts stay byte-identical. '
+          + 'When true, a real human-needed stop may carry a structured `rescue` request '
+          + '(`{kind, mode:\'stop\', why_stuck:{summary, stop_code?, step_id?}, what_would_unblock[]}`) so '
+          + 'the Agent can see WHY a human is needed. The bridge never suspends waiting for a person '
+          + '— the request is serialized into the result; answer it asynchronously (re-run after the '
+          + 'human acted, or supply the missing value).',
+      },
     },
     output: {
       schema: {
@@ -583,6 +592,26 @@ export function apply(ctx: Context, config: Config): void {
           },
           // S1：引擎 result 的 warnings[]（前进性 flags 等）；缺省不出现（旧产物同形状）。
           warnings: { type: 'array', items: { type: 'string' } },
+          // §8 步 5：真实求援的结构化请求（stop 模式）；只在引擎写了 result.rescue 时出现。
+          rescue: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              kind: { type: 'string', required: true },
+              mode: { type: 'string', required: true },
+              why_stuck: {
+                type: 'object',
+                additionalProperties: false,
+                required: true,
+                properties: {
+                  summary: { type: 'string', required: true },
+                  stop_code: { type: 'string' },
+                  step_id: { type: 'string' },
+                },
+              },
+              what_would_unblock: { type: 'array', items: { type: 'string' } },
+            },
+          },
         },
       },
       render: (_args, value) => {
@@ -632,6 +661,14 @@ export function apply(ctx: Context, config: Config): void {
             + (value.warnings?.length
               ? `\nwarnings: ${value.warnings.map(w => `- ${w}`).join(' | ')}`
               : '')
+            // §8 步 5：真实求援透传——Agent 第一眼看到「为什么需要人」与解锁路径。
+            + (value.rescue
+              ? `\nrescue: ${value.rescue.kind} (${value.rescue.mode}) — ${value.rescue.why_stuck.summary}`
+                + `${value.rescue.why_stuck.stop_code ? ` [${value.rescue.why_stuck.stop_code}]` : ''}`
+                + (value.rescue.what_would_unblock?.length
+                  ? `\nunblock: ${value.rescue.what_would_unblock.map(u => `- ${u}`).join(' | ')}`
+                  : '')
+              : '')
             + stopped
             + (value.model ? `; model: ${value.model}` : '')
             + (value.decisions ? `\ndecisions: ${value.decisions}` : '')
@@ -672,6 +709,7 @@ export function apply(ctx: Context, config: Config): void {
         ...(args.max_steps === undefined ? {} : { maxSteps: args.max_steps }),
         ...(args.timeout_sec === undefined ? {} : { timeoutSec: args.timeout_sec }),
         ...(args.trace === undefined ? {} : { trace: args.trace }),
+        ...(args.rescue === undefined ? {} : { rescue: args.rescue }),
         // `Object.fromEntries` defines own properties, so even a `__proto__` slot reaches the CLI.
         ...(args.slots === undefined ? {} : { slots: Object.fromEntries(slots) }),
       })
@@ -698,6 +736,7 @@ export function apply(ctx: Context, config: Config): void {
         ...(summary.steps === undefined ? {} : { steps: summary.steps }),
         ...(summary.failure === undefined ? {} : { failure: summary.failure }),
         ...(summary.warnings === undefined ? {} : { warnings: summary.warnings }),
+        ...(summary.rescue === undefined ? {} : { rescue: summary.rescue }),
       }
     },
   }))

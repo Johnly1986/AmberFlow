@@ -121,6 +121,11 @@ export const APP_ONLY_OPTIONS: CliOptions = {
   "max-steps": { type: "string" },
   /** 非交互：遇到 manual 步直接返回 needs_human，不拉 headed 浏览器。 */
   "manual-fail-fast": { type: "boolean" },
+  /**
+   * 介入/救援透传开关（设计 §8 步 5）：`--rescue` = 本次运行允许 result.rescue 键出现
+   * （真实求援的结构化请求）；`--no-rescue` = 显式关闭（默认关 = 产物逐字节不变）。
+   */
+  rescue: { type: "boolean" },
   slot: { type: "string", multiple: true },
   /** 从 JSON 文件读槽位（避免敏感值进 argv）。 */
   "slot-file": { type: "string" },
