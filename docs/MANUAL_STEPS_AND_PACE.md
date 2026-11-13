@@ -90,3 +90,24 @@ amber run my-app --json           # 非 TTY：确认 status=needs_human、exit 1
 ```
 
 确认产物里的 `manual_steps`、`step_traces` 与 `pace` 字段正确；跑 `amber apps check my-app` 确认 `meta.pace` 声明合法。
+
+## 6. 救援中断（result.rescue）
+
+人工步背后的介入/救援模块（v1）把「引擎卡住、需要人」变成**结构化求援**，而不是一句停因：
+
+- `result.rescue` **只在真实求援出现**——正常运行产物逐字节不变。权威形状句（逐字来自
+  `schema-gen.ts` 的 `RESCUE_RESULT_SHAPE_TEXT`，prompt-hit doc 组闸门，勿手抄改写）：
+
+  > result.rescue 只在真实求援出现：{kind, mode:'stop'|'suspend', why_stuck:{summary(≤400字zh), stop_code?, step_id?}, what_would_unblock[≤3]}；stop = 序列化进结果，suspend = 调用栈内等待（必须显式）；其余运行产物逐字节不变
+
+- v1 三 kind：`action`（人操作一步，如短信验证码）、`value`（缺声明槽位值——引擎绝不编）、
+  `authorization`（不可逆动作需显式授权——引擎默认拒绝危险动作）。
+- 零新增停因：只复用 `needs_human` / `needs_value` / `manual_declined` 等既有停因；
+  人确认但页面证据不成立 = `manual_signal_not_held` 类结构化停，绝不静默算绿。
+- 影子开关权威句（逐字来自 `schema-gen.ts` 的 `RESCUE_SHADOW_SWITCH_TEXT`，prompt-hit doc 组闸门）：
+
+  > 影子开关 AMBERFLOW_RESCUE_SHADOW=1：影子期只构造求援请求 + 计算结局写 sidecar（rescue-shadow.json），不调任何交互通道、旧路径权威、默认产物零字节不变；其余值一律视为关
+
+- 文案四层（summary / human_question / next_actions / agent_hint）的唯一出处是
+  `src/support/intervention-texts.ts`，`tools/prompt-hit.ts` 的 intervention 组做离线闸门；
+  设计详见 `docs/INTERVENTION_RESCUE_MODULE.md`。

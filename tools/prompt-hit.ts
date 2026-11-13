@@ -22,6 +22,12 @@
  *            WHEN_TO_USE 双向一致；概述进桥生成物。
  *   coverage 提示层（层 3）完整性：STOPCODE_MEANING 键集 ⊆ STOP_NEXT ∪ EXEMPT_NEXT；
  *            CLI `next:` 无死链；同一事实（--max-steps=执行预算）三处抽查一致。
+ *   intervention 介入/救援文案六条清单（intervention-texts.ts §6，实施照抄）：
+ *            ① texts 每条 zh 非空；② en 可空但渲染器不得拼 zh；③ summary ≤400 字；
+ *            ④ human_question ≤120 字；⑤ 人话层（summary/human_question）禁
+ *            stopCode 键名/JSON/英文栈；⑥ agent_hint 不含面向人的祈使句。
+ *            agent_hint（en 面）经 bridgeGenerated() 以 RESCUE_AGENT_HINTS 导出
+ *            进桥生成物（called, not embedded 纪律不变）。
  *
  * 三层提示词系统的设计出处：docs/PROMPT_SYSTEM.md。
  * 退出码：0 全绿 / 1 有不一致。
@@ -37,8 +43,9 @@ import { PLAN_PLAYBOOK_TEXT, FAILURE_SIGNS_TEXT, PLAN_PLAYBOOK_SHORT, STOP_ESCAL
 import { hintMatch } from "../src/engine/rules.ts";
 import { validateSignalSpec } from "../src/engine/signals.ts";
 import { HOME_NEXT, OVERVIEW_TEXT, WHEN_TO_USE } from "../src/support/help-map.ts";
-import { STOPCODE_MEANING, EXECUTOR_ONLY_STOPCODES } from "../src/cli/schema-gen.ts";
+import { STOPCODE_MEANING, EXECUTOR_ONLY_STOPCODES, RESCUE_RESULT_SHAPE_TEXT, RESCUE_SHADOW_SWITCH_TEXT } from "../src/cli/schema-gen.ts";
 import { COMMANDS, commandSpec, helpCommandsPayload } from "../src/cli/registry.ts";
+import { RESCUE_TEXTS, SIGNAL_NOT_HELD_TEXT, OUTCOME_TEXTS, FULFILLED_NOT_HELD_TEXT } from "../src/support/intervention-texts.ts";
 
 const fix = process.argv.includes("--fix");
 if (process.argv.filter((a) => a !== "--fix").length > 2) {
@@ -133,12 +140,18 @@ function bridgeGenerated(): string {
     + `only test=data-test, type and aria-label attribute names take part in matching), NOT arbitrary CSS - `
     + `container/descendant selectors (e.g. "#outer input") parse but can never match (target_not_found).`;
   const playbookShort = PLAN_PLAYBOOK_SHORT;
+  // 求援 agent_hint（en 面）的生成投影：三键 fact/recommended_action/stop_condition
+  // 按既有条目同款形状导出（RESCUE_AGENT_HINTS）。渲染面（zh）留在引擎侧，
+  // 桥只分发机器层——called, not embedded 纪律。
+  const rescueAgentHints = Object.fromEntries(
+    Object.entries(RESCUE_TEXTS).map(([kind, t]) => [kind, t.agent_hint]),
+  );
   return `/**
- * 生成物（勿手改）：由 \`src/engine/grammar-prompt.ts\`、\`src/engine/planning-playbook.ts\`
- * 与 \`src/support/help-map.ts\` 经 \`npm run prompt-hit\` 生成与校验。桥纪律
- * "called, not embedded"：不 import 引擎代码，语法、规划引导与概述层以**字符串**
- * 分发到这里。先改引擎模块，再跑 \`npm run prompt-hit\`（本文件漂移会让
- * \`npm run check\` 红）。
+ * 生成物（勿手改）：由 \`src/engine/grammar-prompt.ts\`、\`src/engine/planning-playbook.ts\`、
+ * \`src/support/help-map.ts\` 与 \`src/support/intervention-texts.ts\` 经 \`npm run prompt-hit\`
+ * 生成与校验。桥纪律 "called, not embedded"：不 import 引擎代码，语法、规划引导、概述层
+ * 与求援 agent_hint 以**字符串**分发到这里。先改引擎模块，再跑 \`npm run prompt-hit\`
+ * （本文件漂移会让 \`npm run check\` 红）。
  */
 
 export const HINT_SHAPE_TOKENS: readonly string[] = ${JSON.stringify(tokens, null, 2)};
@@ -150,6 +163,8 @@ export const PLAN_PLAYBOOK_SHORT = ${JSON.stringify(playbookShort)};
 export const STOP_ESCALATION_TEXT = ${JSON.stringify(STOP_ESCALATION_TEXT)};
 
 export const OVERVIEW_TEXT = ${JSON.stringify(OVERVIEW_TEXT)};
+
+export const RESCUE_AGENT_HINTS: Readonly<Record<string, { fact: string; recommended_action: string; stop_condition: string }>> = ${JSON.stringify(rescueAgentHints, null, 2)};
 `;
 }
 
@@ -189,6 +204,22 @@ if (!docText.includes(FAILURE_SIGNS_TEXT)) {
 }
 if (!docText.includes(STOP_ESCALATION_TEXT)) {
   problems.push("doc: docs/APP_SCRIPT_AUTHORING.md 未包含停手规则（STOP_ESCALATION_TEXT）——从 planning-playbook.ts 逐字复制");
+}
+
+/* ---- 6b. doc：rescue 章节 ↔ schema-gen 权威事实句 --------------------------- */
+// 求援两份文档（人工步手册 / Agent 接口）的关键句同样逐字来自模块导出——
+// 同一事实多面分发，手抄改写即红（权威出处 schema-gen.ts，勿在文档里改写）。
+
+for (const [docRel, docBody] of [
+  ["docs/MANUAL_STEPS_AND_PACE.md", fs.readFileSync(path.join(REPO, "docs", "MANUAL_STEPS_AND_PACE.md"), "utf-8")],
+  ["docs/AGENT_INTERFACE.md", fs.readFileSync(path.join(REPO, "docs", "AGENT_INTERFACE.md"), "utf-8")],
+] as const) {
+  if (!docBody.includes(RESCUE_RESULT_SHAPE_TEXT)) {
+    problems.push(`doc: ${docRel} 未逐字包含 result.rescue 形状权威句（RESCUE_RESULT_SHAPE_TEXT）——从 schema-gen.ts 逐字复制，勿手抄改写`);
+  }
+  if (!docBody.includes(RESCUE_SHADOW_SWITCH_TEXT)) {
+    problems.push(`doc: ${docRel} 未逐字包含影子开关权威句（RESCUE_SHADOW_SWITCH_TEXT）——从 schema-gen.ts 逐字复制，勿手抄改写`);
+  }
 }
 
 /* ---- 7. overview：概述层多面一致 ------------------------------------------- */
@@ -342,6 +373,82 @@ for (const code of Object.keys(EXEMPT_NEXT)) {
   }
 }
 
+/* ---- 9. intervention：求援文案六条清单（§6，实施照抄） ---------------------- */
+// 出处：src/support/intervention-texts.ts（零 import 叶子，本组是它唯一的离线闸门）。
+// 六条清单对 RESCUE_TEXTS 三 kind + SIGNAL_NOT_HELD_TEXT + OUTCOME_TEXTS +
+// FULFILLED_NOT_HELD_TEXT 全量生效（人话层一律 zh 权威）。
+
+const HUMAN_LAYER_MAX_SUMMARY = 400;
+const HUMAN_LAYER_MAX_QUESTION = 120;
+// ⑤ 人话层禁令：stopCode 键名（snake_case 停因词）、JSON 花括号/方括号、英文栈帧。
+const STOPCODE_KEY_RE = /\b[a-z]+(_[a-z]+)+\b/;
+const JSON_SHAPE_RE = /[{}\[\]]|^\s*"/;
+const ENGLISH_STACK_RE = /\b(at|Error|throw|stack|Trace)\b.*:\d+|at .+ \(.+:\d+:\d+\)/;
+// ⑥ agent_hint 不含面向人的祈使句：中文祈使开头或第二人称请求句（面向模型的事实/
+// 建议/停手条件是陈述句，不得出现「请/请勿/请回/请在/按 Enter」等人话指令）。
+const HUMAN_IMPERATIVE_RE = /[请该]|按 Enter|回到终端|输入 n/;
+
+for (const [kind, t] of Object.entries(RESCUE_TEXTS)) {
+  // ① zh 非空（summary / human_question / next_actions 每条）。
+  if (t.summary.trim() === "") problems.push(`intervention: '${kind}' 的 summary 为空`);
+  if (t.human_question.trim() === "") problems.push(`intervention: '${kind}' 的 human_question 为空`);
+  if (t.next_actions.length === 0 || t.next_actions.some((a) => a.trim() === "")) {
+    problems.push(`intervention: '${kind}' 的 next_actions 有空条目`);
+  }
+  // ② en 可空但渲染器不得拼 zh：agent_hint 三键必须纯 en（含中文字符即红——
+  //    en 面不得夹带 zh 词面，zh 人话只能由渲染层从 zh 权威字段取）。
+  for (const [key, val] of Object.entries(t.agent_hint)) {
+    if (/[\u4e00-\u9fff]/.test(val)) {
+      problems.push(`intervention: '${kind}' 的 agent_hint.${key} 混入中文——机器层跟桥合同语言（en），渲染器不得拼 zh`);
+    }
+  }
+  // ③ summary ≤400 字。
+  if (t.summary.length > HUMAN_LAYER_MAX_SUMMARY) {
+    problems.push(`intervention: '${kind}' 的 summary ${t.summary.length} 字超预算（≤${HUMAN_LAYER_MAX_SUMMARY}）`);
+  }
+  // ④ human_question ≤120 字。
+  if (t.human_question.length > HUMAN_LAYER_MAX_QUESTION) {
+    problems.push(`intervention: '${kind}' 的 human_question ${t.human_question.length} 字超预算（≤${HUMAN_LAYER_MAX_QUESTION}）`);
+  }
+  // ⑤ 人话层禁 stopCode 键名 / JSON / 英文栈。
+  for (const [field, text] of [["summary", t.summary], ["human_question", t.human_question]] as const) {
+    if (STOPCODE_KEY_RE.test(text) && Object.keys(STOPCODE_MEANING).some((c) => text.includes(c))) {
+      problems.push(`intervention: '${kind}' 的 ${field} 含 stopCode 键名——人话层不写给工程师看的停因词`);
+    }
+    if (JSON_SHAPE_RE.test(text)) {
+      problems.push(`intervention: '${kind}' 的 ${field} 含 JSON 形状（{}[]/"）——人话层禁结构化词面`);
+    }
+    if (ENGLISH_STACK_RE.test(text)) {
+      problems.push(`intervention: '${kind}' 的 ${field} 含英文栈帧——人话层禁调试词面`);
+    }
+  }
+  // ⑥ agent_hint 不含面向人的祈使句（禁令只查中文祈使/终端指令词——en 陈述句合法）。
+  for (const [key, val] of Object.entries(t.agent_hint)) {
+    if (HUMAN_IMPERATIVE_RE.test(val)) {
+      problems.push(`intervention: '${kind}' 的 agent_hint.${key} 含面向人的祈使句——机器层只写事实/建议/停手条件`);
+    }
+  }
+}
+// 其余三面文案（SIGNAL_NOT_HELD / OUTCOME_TEXTS / FULFILLED_NOT_HELD）：同为 zh 人话层，
+// ① 非空、③ ≤400、⑤ 禁 stopCode 键名/JSON/英文栈（没有 human_question 面）。
+const otherHumanTexts: Array<[string, string]> = [
+  ["SIGNAL_NOT_HELD_TEXT", SIGNAL_NOT_HELD_TEXT],
+  ...Object.entries(OUTCOME_TEXTS).map(([k, v]) => [`OUTCOME_TEXTS.${k}`, v] as [string, string]),
+  ["FULFILLED_NOT_HELD_TEXT", FULFILLED_NOT_HELD_TEXT],
+];
+for (const [label, text] of otherHumanTexts) {
+  if (text.trim() === "") problems.push(`intervention: ${label} 为空`);
+  if (text.length > HUMAN_LAYER_MAX_SUMMARY) {
+    problems.push(`intervention: ${label} ${text.length} 字超预算（≤${HUMAN_LAYER_MAX_SUMMARY}）`);
+  }
+  if (JSON_SHAPE_RE.test(text)) {
+    problems.push(`intervention: ${label} 含 JSON 形状——人话层禁结构化词面`);
+  }
+  if (ENGLISH_STACK_RE.test(text)) {
+    problems.push(`intervention: ${label} 含英文栈帧——人话层禁调试词面`);
+  }
+}
+
 /* ---- 汇总 ------------------------------------------------------------------ */
 
 if (problems.length) {
@@ -350,9 +457,10 @@ if (problems.length) {
 }
 // 分组清单式输出：文档引用组名，不引用编号（插组不会让既有引用失准）。
 console.log(
-  `prompt-hit: OK — grammar/pool/plan/bridge/doc/overview/coverage 七组全绿：`
+  `prompt-hit: OK — grammar/pool/plan/bridge/doc/overview/coverage/intervention 八组全绿：`
     + `hint ${HINT_SHAPES.length} 形状全部可解析且示例可命中，`
     + `信号 ${Object.keys(SIGNAL_OPS).length} 算子提示词↔校验器一致，`
     + `停因 ${Object.keys(STOPCODE_MEANING).length} 个 next/豁免全覆盖，`
-    + `概述层多面一致（AGENTS.md/桥/长度预算），CLI next 无死链`,
+    + `概述层多面一致（AGENTS.md/桥/长度预算），CLI next 无死链，`
+    + `求援文案 ${Object.keys(RESCUE_TEXTS).length} kind 六条清单全过`,
 );

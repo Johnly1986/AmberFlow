@@ -404,6 +404,26 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 Agent 不能自己确认危险动作；确认必须来自部署配置或人类。`meta.pace` 只降低请求频率，
 不是反爬对抗。
 
+### 4.1 救援中断（result.rescue，v1）
+
+- `result.rescue` **只在真实求援出现**；权威形状句（逐字来自 `schema-gen.ts` 的
+  `RESCUE_RESULT_SHAPE_TEXT`，prompt-hit doc 组闸门，勿手抄改写）：
+
+  > result.rescue 只在真实求援出现：{kind, mode:'stop'|'suspend', why_stuck:{summary(≤400字zh), stop_code?, step_id?}, what_would_unblock[≤3]}；stop = 序列化进结果，suspend = 调用栈内等待（必须显式）；其余运行产物逐字节不变
+
+  Agent 读到它时应把 `why_stuck.summary`（zh 权威）与 `what_would_unblock` 如实转述给人，
+  不要自己编下一步。
+- v1 三 kind：`action` / `value` / `authorization`（谁能修分别为人操作 / 人供值 / 人授权）；
+  零新增停因——只复用 `needs_human` / `needs_value` 等既有停因，schema 见
+  `amber schema ctx --topic intervention`。
+- 机器层 `agent_hint`（en，`{fact, recommended_action, stop_condition}`）经桥生成物
+  `RESCUE_AGENT_HINTS` 分发——面向模型的事实/建议/停手条件，不是给人看的翻译。
+- 影子开关权威句（逐字来自 `schema-gen.ts` 的 `RESCUE_SHADOW_SWITCH_TEXT`，prompt-hit doc 组闸门）：
+
+  > 影子开关 AMBERFLOW_RESCUE_SHADOW=1：影子期只构造求援请求 + 计算结局写 sidecar（rescue-shadow.json），不调任何交互通道、旧路径权威、默认产物零字节不变；其余值一律视为关
+
+  设计出处 `docs/INTERVENTION_RESCUE_MODULE.md`。
+
 ---
 
 ## 5. 验证

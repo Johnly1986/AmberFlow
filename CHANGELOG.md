@@ -4,6 +4,32 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 介入/救援中断模块 texts 生成接线（设计 §8 步 4）
+
+- **【新增·intervention 断言组】** `tools/prompt-hit.ts` 新增第八个断言组
+  `intervention`：对 `src/support/intervention-texts.ts` 的
+  `RESCUE_TEXTS`（action/value/authorization 三 kind）+ `SIGNAL_NOT_HELD_TEXT` +
+  `OUTCOME_TEXTS` + `FULFILLED_NOT_HELD_TEXT` 全量执行六条清单——① 每条 zh 非空；
+  ② agent_hint 为 en 面（混入中文即红，渲染器不得拼 zh）；③ summary ≤400 字；
+  ④ human_question ≤120 字；⑤ 人话层禁 stopCode 键名/JSON 形状/英文栈帧；
+  ⑥ agent_hint 不含面向人的祈使句。总输出行同步更新为「八组全绿」并列出
+  intervention（组名引用制，插组不失准）。
+- **【桥接·RESCUE_AGENT_HINTS】** `bridgeGenerated()` 把三 kind 的 agent_hint
+  （`{fact, recommended_action, stop_condition}`）以 `RESCUE_AGENT_HINTS` 导出进
+  `integrations/dsh-bridge/src/grammar.generated.ts`（生成物，经
+  `npm run prompt-hit -- --fix` 刷新，不手编辑）；zh 人话层不进桥——渲染留在引擎侧，
+  called, not embedded 纪律不变。
+- **【schema·intervention 节 + F62】** `src/cli/schema-gen.ts` 的 `SCHEMA_TOPICS`
+  追加 `intervention`；新节从真源 import（`RESCUE_KINDS` / `RESCUE_TEXTS`）渲染
+  kind 三条（who_can_fix / stop_code / zh summary 摘要）、`result.rescue` 形状、
+  agent_hint 三键形状、五态结局与影子开关说明；F 条目续编 F62（既有编号零重排）。
+  `dist/schema/ctx.json` 同提交重生成；`amber schema ctx --topic intervention` 可查。
+- **【文档】** `docs/MANUAL_STEPS_AND_PACE.md` 增第 6 节、`docs/AGENT_INTERFACE.md`
+  增 §4.1：v1 语义、`result.rescue` 只在真实求援出现、影子开关
+  `AMBERFLOW_RESCUE_SHADOW=1`（其余值视为关）。
+- **【不改运行时】** `intervention-texts.ts` / `intervention-contract.ts` /
+  `src/intervention/` 模块本体冻结；除 `schema-gen.ts` 外 `src` 运行时文件零改动。
+
 ## [Unreleased] — amber session 有头窗口尺寸（--window maximized|fullscreen）
 
 - **【新增·session 窗口尺寸】** `amber session --window maximized|fullscreen`：

@@ -18,10 +18,12 @@ import { SIGNAL_OPS } from "../engine/signal-ops.ts";
 import { COMMAND_OPS } from "../engine/actions.ts";
 import { nextForStop, EXEMPT_NEXT, STOP_ESCALATION_TEXT } from "../engine/planning-playbook.ts";
 import { OVERVIEW_TEXT, WHEN_TO_USE } from "../support/help-map.ts";
+import { RESCUE_KINDS } from "../intervention/index.ts";
+import { RESCUE_TEXTS } from "../support/intervention-texts.ts";
 
 /** 可查询的节名（`--topic`）。 */
 export const SCHEMA_TOPICS = [
-  "overview", "facts", "signals", "hints", "commands", "budget", "navigation", "flow_control", "dry", "data_out", "stopcodes",
+  "overview", "facts", "signals", "hints", "commands", "budget", "navigation", "flow_control", "dry", "data_out", "stopcodes", "intervention",
 ] as const;
 export type SchemaTopic = (typeof SCHEMA_TOPICS)[number];
 
@@ -87,6 +89,7 @@ const CTX_FACTS: ReadonlyArray<{ id: string; statement: string; truth: string }>
   { id: "F59", statement: "弱档命中门槛（A3）：`meta.policy.act_hint_tier: \"any\"（缺省）| \"strong\"`，与 `act_hint` **正交**（一个管\"没命中怎么办\"，一个管\"弱档算不算命中\"；widen+strong / strict+strong 都合法）。判据复用 `rules.takeHintMatchOthers()` 的既有 `suspicious`（bare tier≥3 词前缀/词包含、attrSubstr tier=3 loose 子串），**不另造档位表**；`strong` = 弱档胜出判为**未命中**（ref 清空 + step warning 换成 `weak_hint_rejected`），随后按 `act_hint` 既有语义继续（widen → 交模型选，rules-only 落既有 `no_model_runtime`；strict → 结构化 `target_not_found`，reason 写明 weak-rejected + 候选≤3 + 两条改法）。两处共用同一判定：act hint 池解析与 rules-only 宽扫重解析。命令 target / learned hint / 决策步（无 act）不受影响。缺省 any = 逐字节今天；显式声明才进 `effective_policy.act_hint_tier`（声明 \"any\" 也进账）。dry/replay 只校验 policy 值（不解析 hint）", truth: "src/app/app-pack.ts（POLICY_KEYS/ACT_HINT_TIER_MODES/PackPolicy/validateApp）+ src/app/app-runner.ts（EffectivePolicy.act_hint_tier 仅声明出现 + 两处 MiddlewareOptions 透传）+ src/engine/executor-types.ts（MiddlewareOptions.actHintTier）+ src/engine/executor.ts（declaredAllow 两处接线 + weakRejected 记账 + strict 收口 + warning 换 weak_hint_rejected）+ src/engine/executor-pure.ts（declaredAllow/weakHintRejectedWarning/weakRejectedReason）+ docs/APP_SCRIPT_AUTHORING.md §8 policy 表 + CHANGELOG" },
   { id: "F60", statement: "抽取选择器预检（C2）：`readRows`（`ctx.extract` 与 `ctx.collect` 的唯一实现）在**入口**做一次选择器解析预检——行选择器 + 每个字段选择器（除 \".\" / \":scope\" / \"@attr\" 形态）各一次 Playwright `locator(sel).count()`（每次抽取 ≤ 1+字段数 次往返；`collect` 只在入口一次、循环内不重复）。仅当异常文本是**解析错误**（Unexpected token / parsing css selector / Unknown engine / invalid selector）才抛结构化 `config_error`（reason `ctx.extract: field \"x\" selector \"…\" is not valid: …`，`diagnostics.bad_selector={selector, field?}`）；掉帧/超时/页面已关闭维持旧行为，绝不误报成选择器错。**合法但零命中仍是 `[]`/`\"\"`**。`locator(sel)` 本身不解析选择器（解析在 driver 侧），所以预检必须付一次 `count()`，不能假设零往返。会话 extract 复用 observe 口径：响应带 `error:\"bad_selector\"`（停因码仍 `config_error`，不新增 stopCode）。**有意的行为变更**：非法选择器从静默空数据变为 config_error；`ctx.collect` 的旧 DOM `querySelectorAll` 预检删除、改走同一入口——Playwright 伪类（`:has-text(...)` 等）不再被误拒。dry/replay 不访问浏览器、不做预检（`apps check` 不因此红，只有真跑/会话才红），文档写明这一差异", truth: "src/app/ctx.ts（SELECTOR_PARSE_ERROR_RE/selectorParseProblem/checkExtractSelectors + readRows 入口预检 + extract 单一调用 + collect 入口一次/循环 prevalidated + 删除 querySelectorAll 预检）+ src/app/session-runtime.ts（doExtract 透传 error:\"bad_selector\"）+ integrations/dsh-bridge/src/session.ts（engineFailure 透传 error:\"bad_selector\"，引擎给才有）+ docs/APP_SCRIPT_AUTHORING.md §5/§4.6/§10 + docs/AGENT_INTERFACE.md §3 + CHANGELOG" },
   { id: "F61", statement: "信号报错形态统一（C3）：合法形态提示的唯一出处是 `signals.ts` 的 `SIGNAL_SHAPE_HINT`（叶算子 `{op: [arg…]}` = 操作数按位置放数组；组合 `all_of`/`any_of` 收非空数组、`not` 收单个对象；对象形 `{selector, text}` 不是合法形状）+ `signalProblemText(problems, \"json\"|\"cli\")`。`validateSignalSpec` 的 arity 分支在 `signalArgs(args).length !== arity` 时把合法形态与「收到什么形状」写进 problem（`all_of`/`any_of`/`not` 的形状错同样指路）——problems 自带提示，调用方不用拼。`amber plan-cli … --signal` 走 cli 版（`--signal` 示例串与改动前**逐字一致**）；会话 `signal`/`waitFor` 的校验失败 reason 走 json 版（`problems` 数组原样）；apps check / plan check / test --validate 的加载期校验自动继承 problems。合法信号的校验结果与运行产物逐字节不变", truth: "src/engine/signals.ts（SIGNAL_SHAPE_HINT/signalProblemText/describeSignalOperand + validateSignalSpec 的 arity 与组合分支）+ src/cli/plan-cli.ts（parseSignal 改调 cli 版）+ src/app/session-runtime.ts（signalSpec 改调 json 版）+ src/cli/schema-gen.ts + docs/APP_SCRIPT_AUTHORING.md §10 + docs/AGENT_INTERFACE.md §3 + CHANGELOG" },
+  { id: "F62", statement: "介入/救援（v1 三 kind）：真实求援发生时 result.rescue 才出现（结构化 {kind, mode, why_stuck:{summary, stop_code?, step_id?}, what_would_unblock[≤3]}；stop 模式序列化进结果、suspend 模式调用栈内等待且必须显式）——否则产物逐字节不变。三 kind = action（人操作一步：短信验证码等）/ value（缺声明槽位值：引擎绝不编）/ authorization（不可逆动作需显式授权：引擎默认拒绝危险动作）；零新增 stop code（只复用 needs_human / needs_value / manual_declined 等既有停因）。通道顺序链 = 显式 handler > TTY > FailFast/StructuredStop > none；无可应答通道 = unavailable（批处理/非 TTY 不假装有人、不拉有头浏览器）。五态结局可区分（fulfilled/declined/timeout/cancelled/unavailable ≠ 失败的同义词）；fulfilled 后复核 done_criteria，不成立 = manual_signal_not_held 类结构化停（绝不静默算绿）。影子开关 AMBERFLOW_RESCUE_SHADOW=1：影子期只构造请求 + 计算结局写 sidecar（rescue-shadow.json），不调任何交互通道、旧路径权威、默认产物零字节不变；其余值一律视为关。文案四层（summary/human_question/next_actions/agent_hint）唯一出处 intervention-texts.ts，prompt-hit intervention 组六条清单在线闸门；agent_hint（en）经桥生成物 RESCUE_AGENT_HINTS 分发（called, not embedded）", truth: "src/intervention/index.ts（RESCUE_KINDS/resolveRescue/shadowRescue）+ src/support/intervention-contract.ts（合同类型）+ src/support/intervention-texts.ts（文案）+ src/app/intervention-adapter.ts（outcome→停因映射）+ src/app/intervention-shadow.ts（影子开关）+ docs/INTERVENTION_RESCUE_MODULE.md + tools/prompt-hit.ts intervention 组" },
 ];
 
 /** 信号算子语义注记（表从 SIGNAL_OPS 真源取；语义逐条标出处）。 */
@@ -266,6 +269,44 @@ export const EXECUTOR_ONLY_STOPCODES: Readonly<Record<string, string>> = {
   manual_confirmation: "人工确认（human oracle）通过——成功路径结束码，不是失败停因",
 };
 
+/**
+ * 求援文档关键事实句（prompt-hit doc 组逐字闸门的权威出处；文档不许手抄改写）。
+ * `docs/MANUAL_STEPS_AND_PACE.md` 与 `docs/AGENT_INTERFACE.md` 的 rescue 章节
+ * 必须逐字包含这两句——同一事实多面分发，手抄漂移即红。
+ */
+export const RESCUE_RESULT_SHAPE_TEXT =
+  "result.rescue 只在真实求援出现：{kind, mode:'stop'|'suspend', why_stuck:{summary(≤400字zh), stop_code?, step_id?}, what_would_unblock[≤3]}；"
+  + "stop = 序列化进结果，suspend = 调用栈内等待（必须显式）；其余运行产物逐字节不变";
+export const RESCUE_SHADOW_SWITCH_TEXT =
+  "影子开关 AMBERFLOW_RESCUE_SHADOW=1：影子期只构造求援请求 + 计算结局写 sidecar（rescue-shadow.json），"
+  + "不调任何交互通道、旧路径权威、默认产物零字节不变；其余值一律视为关";
+
+/**
+ * 介入/救援节（v1）：求援 kind 注册表 + 文案 zh 摘要 + agent_hint 形状 + 影子开关。
+ * 表从真源 import（RESCUE_KINDS / RESCUE_TEXTS）；zh summary 摘要取前 80 字（人话层
+ * 权威在 intervention-texts.ts，这里只做契约投影，不复制全文）。
+ */
+const INTERVENTION = {
+  kinds: Object.fromEntries(
+    Object.entries(RESCUE_KINDS).map(([kind, spec]) => [
+      kind,
+      {
+        who_can_fix: spec.who_can_fix,
+        stop_code: spec.stop_code,
+        summary_zh: RESCUE_TEXTS[kind] !== undefined
+          ? (RESCUE_TEXTS[kind]!.summary.length > 80
+            ? RESCUE_TEXTS[kind]!.summary.slice(0, 80) + "…"
+            : RESCUE_TEXTS[kind]!.summary)
+          : null,
+      },
+    ]),
+  ),
+  result_rescue_shape: RESCUE_RESULT_SHAPE_TEXT,
+  agent_hint_shape: "每 kind 另有机器层 agent_hint（en，跟桥合同语言）：{fact, recommended_action, stop_condition}——面向模型的事实/建议/停手条件，不是人话翻译；经桥生成物 RESCUE_AGENT_HINTS 分发（called, not embedded）",
+  outcome_five_states: "fulfilled | declined | timeout | cancelled | unavailable 五态可区分（≠ 失败的同义词）；fulfilled 后复核 done_criteria，不成立 = manual_signal_not_held 类结构化停，绝不静默算绿",
+  shadow_switch: RESCUE_SHADOW_SWITCH_TEXT,
+};
+
 /** 停因 → 下一步（从 planning-playbook 真源取，未收录的如实标 null）。 */
 function stopcodesSection(): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -305,6 +346,7 @@ export function renderSchemaCtx(): Record<string, unknown> {
       data_out: DATA_OUT,
       stopcodes: stopcodesSection(),
       next_exempt: EXEMPT_NEXT,
+      intervention: INTERVENTION,
     },
   };
 }
