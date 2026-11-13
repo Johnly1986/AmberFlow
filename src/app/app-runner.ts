@@ -43,6 +43,9 @@ import { parseRunDefaults } from "../support/run-defaults.ts";
 // B1 节奏统一：语义与 env 口径的唯一来源在 support/pace.ts（engine/app/online 三脸共用，无环）。
 import { PaceConfigError, paceNonDefault, paceRemainder, resolvePace as paceResolve } from "../support/pace.ts";
 import { sleepMs } from "../support/sleep.ts";
+// §8 步 2 影子模式接线：记录器 + 开关（仅 AMBERFLOW_RESCUE_SHADOW=1 创建；缺省零行为变化）。
+import { createShadowRecorder, isRescueShadowEnabled, type ShadowRecorder } from "./intervention-shadow.ts";
+import { pickManualApprover, shadowManualOutcome } from "./intervention-adapter.ts";
 import type { PaceSource, ResolvedPace } from "../support/pace.ts";
 import {
   cliRunDetailed, defaultDates, loadSource, previewTable, runSource, urlFor, ValueError,
@@ -80,6 +83,7 @@ import { validateApp } from "./cross-ref.ts";
 import { MASKED_SLOT, SECRET_SLOT_NAME, maskSecretSlots, scrubSecrets, secretSlotKeys, secretValuesFromSlots } from "./redaction.ts";
 import { dryRunFlow, loadScriptApp, type LoadedScriptApp } from "./app-script.ts";
 import { StopError, createCtx, type ToolRunRequest, type ToolRunResult } from "./ctx.ts";
+import type { CtxDeps } from "./ctx-types.ts";
 import { createReplayCtx } from "./ctx-replay.ts";
 import {
   finishTrace, inputsSha256, newTrace, readTrace, replayCompatibility, writeTrace,
@@ -220,6 +224,12 @@ export interface AppRunOptions {
   providerFloor?: number;
   /** 非交互调用遇到 manual 步时：不启动浏览器，直接返回 needs_human 结果。 */
   manualFailFast?: boolean;
+  /**
+   * 介入/救援透传开关（设计 §8 步 5，v1 声明面）：`--rescue` = 本次运行允许 result.rescue
+   * 键出现（真实求援的结构化请求）；默认关 = 产物逐字节不变。v1 无真实求援写入路径，
+   * 本字段只完成 CLI→runScriptApp 的接线与类型面。
+   */
+  rescue?: boolean;
   /** 分段运行：只跑第 N 步（1-based，`expanded.steps` 的声明序号）。不能与 fromStep 同用。 */
   onlyStep?: number;
   /** 分段运行：从第 N 步开始（1-based）。 */
@@ -1485,20 +1495,42 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       index: st.index, desc: decl.desc,
       instructions: decl.instructions ?? "", url,
     };
+    // §8 步 3「只换确认提供者，不改判定」：选路收敛进 intervention-adapter（handler > TTY >
+    // none）；判定（approved→done / declined 原文 / handler 抛错原文前缀）原样留在下面。
+    const approver = pickManualApprover(opts.manualHandler !== undefined, process.stdin.isTTY);
     try {
       approved = opts.manualHandler !== undefined
         ? await opts.manualHandler(req)
         : await promptManualOnTty(req);
     } catch (e) {
+      // 影子旁路（默认关）：handler 抛错 = unavailable/by=approver 通道（§3 通道抛错闭环）。
+      shadowManualOutcome(rescueShadowRecorder, {
+        desc: decl.desc, stepId: String(st.id ?? st.index), instructions: decl.instructions ?? "", pageUrl: url,
+      }, { status: "unavailable", by: approver.channel, legacyStopCode: "manual_handler_error" });
       return { done: false, reason: `manual_handler_error: ${e instanceof Error ? e.message : String(e)}` };
     }
-    if (!approved) return { done: false, reason: "declined" };
+    if (!approved) {
+      shadowManualOutcome(rescueShadowRecorder, {
+        desc: decl.desc, stepId: String(st.id ?? st.index), instructions: decl.instructions ?? "", pageUrl: url,
+      }, { status: "declined", by: approver.channel, legacyStopCode: "manual_declined" });
+      return { done: false, reason: "declined" };
+    }
     // `{manual:true}` = 人自证（报告记 attested）；任何 DOM 信号都要引擎再验一遍。
-    if ("manual" in decl.signal) return { done: true, attested: true };
+    if ("manual" in decl.signal) {
+      shadowManualOutcome(rescueShadowRecorder, {
+        desc: decl.desc, stepId: String(st.id ?? st.index), instructions: decl.instructions ?? "", pageUrl: url,
+      }, { status: "fulfilled", by: approver.channel });
+      return { done: true, attested: true };
+    }
     if (page === null) {
       return { done: false, reason: "manual DOM signal needs a page (declare start_url or run after a browser step)" };
     }
     const held = await checkSignal(page as never, decl.signal, { hosts: pack.hosts ?? null });
+    if (!held) {
+      shadowManualOutcome(rescueShadowRecorder, {
+        desc: decl.desc, stepId: String(st.id ?? st.index), instructions: decl.instructions ?? "", pageUrl: url,
+      }, { status: "fulfilled", by: approver.channel, legacyStopCode: "manual_signal_not_held" });
+    }
     return held ? { done: true, attested: false } : { done: false, reason: "manual_signal_not_held" };
   };
 
@@ -1526,6 +1558,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   // 应用支持器运行上下文：web/cli 两个内建适配器
   // **迁移桥**——执行委托回下面两个服务（执行循环本身不搬进适配器）；新类型自己实现 run。
   const appRunId = `${Date.now().toString(36)}-${process.pid}`;
+  // §8 步 3 影子旁路（journey 声明式人工步）：仅 AMBERFLOW_RESCUE_SHADOW=1 创建；判定逻辑
+  // 零变化，收尾 flush 到 outDir/rescue-shadow.json（sidecar 不进 result/trace/report）。
+  const rescueShadowRecorder = isRescueShadowEnabled() ? createShadowRecorder(appRunId) : null;
   const adapterCtx: AdapterRunContext = {
     outDir: path.dirname(planPath),
     verbose,
@@ -1810,6 +1845,10 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     + new Set(toolSteps.filter((t) => t.done).map((t) => t.index)).size
     + new Set(manualSteps.filter((m) => m.done).map((m) => m.index)).size;
   const stats = opts.runtimeStats ? opts.runtimeStats() : null;
+  // §8 步 3 影子旁路收尾：journey 面的 sidecar（开关默认关 = 零产物；失败静默不影响结果）。
+  if (rescueShadowRecorder !== null) {
+    rescueShadowRecorder.flush(path.dirname(planPath));
+  }
   return {
     app: pack.id, label: pack.label, goal: pack.goal,
     pack_path: pack._path ?? "", plan_path: planPath,
@@ -1881,7 +1920,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
 export const USAGE = `usage: app-runner [--list] [--app ID] [--dry] [--slot k=v ...] [--slot-file FILE] [--out DIR]
                   [--provider NAME] [--ablate stub|rules-only]
                   [--conf-floor N] [--no-sources] [--confirm-safe | --confirm-unsafe] [--headful] [--allow-dangerous]
-                  [--tiered-hint] [--trace] [--max-steps N] [--manual-fail-fast]
+                  [--tiered-hint] [--trace] [--max-steps N] [--manual-fail-fast] [--rescue | --no-rescue]
                   [--learn-hints | --hint-memory FILE] [--emit-trace FILE] [--replay FILE] [--quiet]
 
 按 apps/<app>/app.mjs 的 flow(ctx) 跑一条应用：数据腿 → 脚本产生的浏览器/工具步 → 结束状态不变量
@@ -2007,6 +2046,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   const decisionSteps: TraceStep[] = [];
   /** 每个 `ctx.step` 一次 mw.run；这里按调用顺序保留它的动作 trace，供 step_traces 补 hows/descs/methods。 */
   const decisionStepGroups: TraceStep[][] = [];
+  // §8 步 2 影子模式记录器：仅 AMBERFLOW_RESCUE_SHADOW=1 创建；收尾 flush 到
+  // outDir/rescue-shadow.json（sidecar 不进 result/trace/report；失败静默）。
+  const rescueShadow = isRescueShadowEnabled() ? createShadowRecorder(runId) : null;
 
   if (opts.replayTrace !== undefined) {
     const recorded = readTrace(opts.replayTrace);
@@ -2322,6 +2364,16 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       ...(opts.maxSteps === undefined ? {} : { maxSteps: opts.maxSteps }),
       // A6 walk：旗标只进 flow 应用路径；缺省关 = ctx 与产物逐字节不变。
       ...(opts.walk === true ? { walk: true } : {}),
+      // §8 步 2/3 影子模式：开关开启才注入 noteShadow 旁路（缺省不传 = ctx 行为零变化）。
+      // 步 3 起统一走 intervention-adapter 的 shadowManualOutcome（与 journey 面同一份构造）。
+      ...(rescueShadow !== null ? {
+        rescueShadow: {
+          noteShadow: (f: Parameters<NonNullable<NonNullable<CtxDeps["rescueShadow"]>["noteShadow"]>>[0]) =>
+            shadowManualOutcome(rescueShadow, {
+              desc: f.desc, stepId: f.id ?? "", instructions: f.instructions, pageUrl: f.pageUrl,
+            }, { status: f.computed.status, by: f.computed.by, ...(f.legacyStopCode !== undefined ? { legacyStopCode: f.legacyStopCode } : {}) }),
+        },
+      } : {}),
       verbose,
     });
     try {
@@ -2640,6 +2692,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       };
     });
   const finishedAtIso = new Date().toISOString();
+  // §8 步 2 影子模式收尾：sidecar 落盘放在写 result 的收尾路径（正常/异常都到得了这里）；
+  // 开关关时 recorder 为 null（零字节不变）。失败静默——影子不掩盖运行结果。
+  if (rescueShadow !== null) rescueShadow.flush(outDir);
   const result: AppRunResult = {
     app: pack.id,
     label: pack.label ?? pack.id,

@@ -1,0 +1,26 @@
+{
+  "note": "六条人工路径话术基线（介入/救援模块设计 §8 步 2）：归一锚点文本 = 锚点行 + 其后 ≤2 行，CRLF→LF、连续空白折叠单空格、去首尾空白。比对为逐字节（归一后）；话术改动 = 演进，须 --fix 显式刷新。",
+  "generated_at": "2026-11-13T04:33:44.204Z",
+  "runtime": "deferred",
+  "anchors": {
+    "src/cli/start.ts": [
+      "const a = await io.ask(\"这一步完成了么？(y/N) > \"); return a === \"y\" || a === \"Y\"; }, actionDelayMs });"
+    ],
+    "src/app/app-runner.ts": [
+      "console.log(`\\n[manual] ${req.desc}`); if (req.instructions) console.log(` ${req.instructions}`); if (req.url) console.log(` 页面：${req.url}`);",
+      "return { done: false, reason: `manual_handler_error: ${e instanceof Error ? e.message : String(e)}` }; } if (!approved) {"
+    ],
+    "src/app/ctx-dry.ts": [
+      "call: \"manual\", desc, url: currentUrl, ok: true, ...(req.id === undefined ? {} : { id: req.id }), result: { dry: true, instructions: req.instructions ?? \"\" },"
+    ],
+    "src/app/ctx-replay.ts": [
+      "const ev = nextEvent(\"manual\", { desc }); if (typeof ev.url === \"string\" && ev.url) currentUrl = ev.url; consume();"
+    ],
+    "src/app/agent-view.ts": [
+      "const manual = (result.manual_steps ?? []).some((m) => !m.done); if (manual) return \"needs_human\"; if (result.script?.stop_code === \"needs_human\") return \"needs_human\";"
+    ],
+    "src/app/app-report-view.ts": [
+      "L.push(\"\", \"## 人工步骤（登录/验证码/人工确认）\", \"\", \"| # | 步骤 | 结论 | 证据 |\", \"|---|---|---|---|\"); for (const m of r.manual_steps) {"
+    ]
+  }
+}

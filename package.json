@@ -57,6 +57,7 @@
     "config:example:check": "node --experimental-strip-types tools/config-example.ts --check",
     "schema:check": "node --experimental-strip-types src/cli/main.ts schema ctx --check",
     "prompt-hit": "node --experimental-strip-types tools/prompt-hit.ts",
+    "golden-manual": "node --experimental-strip-types tools/golden-manual.ts",
     "secret-scan": "node --experimental-strip-types tools/secret-scan.ts",
     "examples-check": "node --experimental-strip-types tools/examples-check.ts",
     "check:ci": "node --experimental-strip-types src/cli/main.ts schema ctx --out dist/schema/ctx.json && npm run check",

@@ -656,4 +656,21 @@ export interface CtxDeps {
    * 不注入 = 不写（run/dry/replay 的行为与产物逐字节不变）。
    */
   extractStats?: { total: number };
+  /**
+   * 影子模式旁路（§8 步 2）：人工步旁路记录的最小鸭子接口——ctx 只调 `noteShadow`，
+   * 不依赖 intervention-shadow.ts 的实现（由 app-runner 装配时适配注入）。
+   * 影子只旁路构造救援请求 + 计算 outcome，不改任何返回值/trace/预算；
+   * 缺省 undefined = 零行为变化（产物逐字节不变）。
+   */
+  rescueShadow?: {
+    noteShadow(facts: {
+      desc: string;
+      id?: string;
+      instructions: string;
+      pageUrl: string;
+      computed: { status: "fulfilled" | "declined" | "unavailable"; by: string };
+      /** 旧路径实际停因；fulfilled 成功路径省略。 */
+      legacyStopCode?: string;
+    }): void;
+  };
 }

@@ -1262,6 +1262,11 @@ export function createCtx(deps: CtxDeps): Ctx {
       if (deps.manualFailFast === true) {
         const stopCode = "needs_human";
         const reason = "manual step needs a human; --manual-fail-fast is set";
+        // 影子旁路（§8 步 2）：旧路径权威——只记录，不改下方任何语句。
+        deps.rescueShadow?.noteShadow({
+          desc, id: req.id, instructions: typeof req.instructions === "string" ? req.instructions : "",
+          pageUrl: currentUrl, computed: { status: "unavailable", by: "fail-fast" }, legacyStopCode: stopCode,
+        });
         pushEvent(trace, {
           call: "manual", desc, ...(req.id === undefined ? {} : { id: req.id }),
           url: currentUrl, ok: false, stop_code: stopCode,
@@ -1276,6 +1281,11 @@ export function createCtx(deps: CtxDeps): Ctx {
         if (!process.stdin.isTTY) {
           const stopCode = "needs_human";
           const reason = "manual step needs an interactive terminal (non-TTY)";
+          // 影子旁路（§8 步 2）：旧路径权威——只记录，不改下方任何语句。
+          deps.rescueShadow?.noteShadow({
+            desc, id: req.id, instructions: typeof req.instructions === "string" ? req.instructions : "",
+            pageUrl: currentUrl, computed: { status: "unavailable", by: "none" }, legacyStopCode: stopCode,
+          });
           pushEvent(trace, {
             call: "manual", desc, ...(req.id === undefined ? {} : { id: req.id }),
             url: currentUrl, ok: false, stop_code: stopCode,
@@ -1304,6 +1314,11 @@ export function createCtx(deps: CtxDeps): Ctx {
         });
       } catch (e) {
         const reason = `manual handler failed: ${e instanceof Error ? e.message : String(e)}`;
+        // 影子旁路（§8 步 2）：旧路径权威——只记录，不改下方任何语句。
+        deps.rescueShadow?.noteShadow({
+          desc, id: req.id, instructions: typeof req.instructions === "string" ? req.instructions : "",
+          pageUrl, computed: { status: "unavailable", by: "handler" }, legacyStopCode: "manual_handler_error",
+        });
         pushEvent(trace, {
           call: "manual", desc, ...(req.id === undefined ? {} : { id: req.id }),
           url: pageUrl, ok: false, stop_code: "manual_handler_error", result: { reason },
@@ -1339,6 +1354,29 @@ export function createCtx(deps: CtxDeps): Ctx {
         ...(reason === undefined ? {} : { reason }),
         evidence: { url: pageUrl, attempts: 1, elapsedMs: Date.now() - started },
       };
+      // 影子旁路（§8 步 2）：approved 判定后按三种结局各记一次（declined/fulfilled/signal_not_held）；
+      // 旧路径权威——只记录，不改下方任何语句。by 与顺序链同口径：显式 handler > TTY。
+      {
+        const shadowBy = deps.manualRunner !== undefined ? "handler" : "tty";
+        if (!approved) {
+          deps.rescueShadow?.noteShadow({
+            desc, id: req.id, instructions: typeof req.instructions === "string" ? req.instructions : "",
+            pageUrl, computed: { status: "declined", by: shadowBy }, legacyStopCode: "manual_declined",
+          });
+        } else if (stopCode === "manual_signal_not_held") {
+          // 信号复核不过：计算值仍是 fulfilled，legacy_stop_code 表达「旧路径停 manual_signal_not_held」。
+          deps.rescueShadow?.noteShadow({
+            desc, id: req.id, instructions: typeof req.instructions === "string" ? req.instructions : "",
+            pageUrl, computed: { status: "fulfilled", by: shadowBy }, legacyStopCode: "manual_signal_not_held",
+          });
+        } else {
+          // approved 且信号成立/manualLeaf：计算值 fulfilled，无 legacy 停因（省略不硬造）。
+          deps.rescueShadow?.noteShadow({
+            desc, id: req.id, instructions: typeof req.instructions === "string" ? req.instructions : "",
+            pageUrl, computed: { status: "fulfilled", by: shadowBy },
+          });
+        }
+      }
       pushEvent(trace, {
         call: "manual", desc, ...(req.id === undefined ? {} : { id: req.id }),
         url: pageUrl, ok,
