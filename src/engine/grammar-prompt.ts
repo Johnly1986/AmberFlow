@@ -60,6 +60,17 @@ export const HINT_SHAPES: readonly HintShape[] = [
   },
 ];
 
+/**
+ * E3：`within:#id` 尾缀（可选；**单层，不链式**）——任意形状后缀它，命中集即被限定在
+ * 锚元素子树内（池侧 = anchor_ids 判定；DOM 侧回捞 = contains 判定）。锚只能是
+ * `#id` 形态（封闭集边界与 E1-c 同源；任意 CSS 锚拒绝）。多个 within = 解析期拒绝。
+ */
+export const HINT_WITHIN_SUFFIX: { token: string; en: string; example: string; anchor: string; note: string } = {
+  token: "within:#id", en: "within:#id", example: "添加到购物车 within:#product-panel",
+  anchor: "within:#login-button",
+  note: "锚定限定：把命中集限定在 #id 元素子树内（单层不链式；多 within 即拒绝）",
+};
+
 /* ---- import 时自证 1：示例 ↔ 唯一解析器 ---------------------------------- */
 
 for (const s of HINT_SHAPES) {
@@ -68,6 +79,23 @@ for (const s of HINT_SHAPES) {
     throw new Error(
       `grammar-prompt: HINT_SHAPES 示例 '${s.example}' 被解析为 kind='${got}'，声明为 '${s.kind}'`
         + `——示例或 parseHint 漂移了，先对齐 hint.ts 再改这里`,
+    );
+  }
+}
+
+/* E3 自证：within 尾缀被解析层剥离并落进 within 字段；非法锚（多 within）拒绝。 */
+{
+  const ok = parseHint(HINT_WITHIN_SUFFIX.example);
+  if (ok.within !== "product-panel" || ok.kind !== "bare") {
+    throw new Error(
+      `grammar-prompt: HINT_WITHIN_SUFFIX 示例 '${HINT_WITHIN_SUFFIX.example}' 解析为 `
+        + `kind='${ok.kind}', within='${String(ok.within)}'——期望 bare + within='product-panel'`,
+    );
+  }
+  const chained = parseHint(`${HINT_WITHIN_SUFFIX.anchor} within:#a within:#b`);
+  if (chained.within !== undefined) {
+    throw new Error(
+      `grammar-prompt: 链式 within 示例被静默接受（within='${String(chained.within)}'）——解析器必须拒绝多 within`,
     );
   }
 }
@@ -84,6 +112,8 @@ export const SIGNAL_OP_PROMPT: Readonly<Record<string, string>> = {
   css_text_equals: "selector|exact text",
   css_text_contains: "selector|substring of the element's text",
   css_value_equals: "selector|exact input value",
+  css_count_equals: "selector|N: total matching elements across frames must equal exactly N  (op=selector|N)",
+  css_count_min: "selector|N: total matching elements across frames must be at least N  (op=selector|N)",
   all_of: "AND-composition: a non-empty list of signals, each leaf still a DOM fact",
   any_of: "OR-composition: a non-empty list of signal alternatives",
   not: "negation of one signal (e.g. the spinner is gone)",

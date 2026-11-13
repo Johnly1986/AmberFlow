@@ -9,7 +9,7 @@
  * Port note: the Python implementation is synchronous because Playwright's sync
  * API is; the port is ASYNC (browser I/O in Node). Callers await it either way.
  */
-import { firstOf, locatorAnyFrame, urlOf, type PageLike } from "./extraction.ts";
+import { countAnyFrame, firstOf, locatorAnyFrame, urlOf, type PageLike } from "./extraction.ts";
 // 算子表本体在叶子模块 `signal-ops.ts`（零 import）：`grammar-prompt.ts` 要引用它生成
 // 提示词/报错文案，不应为此拖入本模块背后的 extraction 链。此处 re-export 保持 API。
 import { SIGNAL_OPS } from "./signal-ops.ts";
@@ -69,6 +69,18 @@ export async function checkSignal(
       const [sel, want] = (spec.css_value_equals as unknown[]).map(arg);
       const loc = await locatorAnyFrame(page, String(sel), opts);
       return loc !== null && String(await firstOf(loc).inputValue({ timeout: 2000 })) === String(want);
+    }
+    // E5：计数面（跨可达子 frame 合计；帧序 = framesOf 的主 frame 在前）。选择器为空串
+    // 视为不成立（与 css_exists 的"无匹配 = false"同向，不抛错）。
+    if ("css_count_equals" in spec) {
+      const [sel, want] = (spec.css_count_equals as unknown[]).map(arg);
+      const n = await countAnyFrame(page, String(sel), opts);
+      return n !== null && n === Number(want);
+    }
+    if ("css_count_min" in spec) {
+      const [sel, want] = (spec.css_count_min as unknown[]).map(arg);
+      const n = await countAnyFrame(page, String(sel), opts);
+      return n !== null && n >= Number(want);
     }
     // Composition. Each leaf is still a DOM fact, so a composed signal cannot be
     // more permissive than its parts: `all_of` adds discrimination, `any_of` only
@@ -156,6 +168,19 @@ export function evalSignalOnState(spec: SignalSpec, view: StateView): boolean | 
       ? String(el.value ?? el.label ?? "")
       : String(el.label ?? "");
     return cmp(got, String(pair[1]));
+  }
+  // E5：计数面的池近似（live 是全 DOM 命中数；池只有被收编的行——诱导期把"池计数"
+  // 当 live 的下界证据用，池表达不了的选择器返回 null = 待 live 验证，绝不猜）。
+  const countOps: Array<[string, (n: number, want: number) => boolean]> = [
+    ["css_count_equals", (n, w) => n === w],
+    ["css_count_min", (n, w) => n >= w],
+  ];
+  for (const [op, cmp] of countOps) {
+    if (!(op in spec)) continue;
+    const pair = (Array.isArray(spec[op]) ? (spec[op] as unknown[]) : [spec[op]]).map(arg);
+    const hits = matchSelector(view.elems, String(pair[0]));
+    if (hits === null) return null;
+    return cmp(hits.length, Number(pair[1]));
   }
   return null;                                             // unknown op: undecidable offline
 }

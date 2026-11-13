@@ -238,6 +238,12 @@ export interface ActMissDiagnostics {
   /** 原 hint（不做长度截断——这是调用方给的输入事实）。 */
   target: string;
   pool_size: number;
+  /**
+   * E1-a：本池的预算帽（`decision.act_pool_cap`；缺省 40 = `MAX_ELEMENTS`）。
+   * 只观测：池构成不因它变化，它是"落空时池帽是多少"的回显，供归因
+   * "目标是否可能被帽挤出"。
+   */
+  pool_cap?: number;
   /** `parseHint` 的形状：`id` / `attrSubstr` / `nearToken` / `attrEq` / `tag` / `bare`。 */
   hint_shape: string;
   hint_len: number;
@@ -311,6 +317,8 @@ export function actMissDiagnostics(input: {
   op: string;
   hintOpts?: HintMatchOptions;
   rejected?: readonly ActMissRow[];
+  /** E1-a：池预算帽回显（缺省 40 = MAX_ELEMENTS；只观测不改行为）。 */
+  poolCap?: number;
 }): ActMissDiagnostics {
   const hint = String(input.target ?? "");
   const parsed = parseHint(hint);
@@ -326,6 +334,7 @@ export function actMissDiagnostics(input: {
   return {
     target: hint,
     pool_size: Object.keys(input.pool).length,
+    ...(input.poolCap === undefined ? {} : { pool_cap: input.poolCap }),
     hint_shape: parsed.kind,
     hint_len: hint.length,
     candidates,

@@ -27,4 +27,12 @@ export const SIGNAL_OPS: Readonly<Record<string, number>> = {
   css_text_equals: 2,
   css_text_contains: 2,
   css_value_equals: 2,
+  /**
+   * E5：匹配 selector 的元素总数（主 frame + 可达子 frame 合计）恰等于 / 至少为 N。
+   * live = 各帧 locator.count() 求和；离线池评估 = matchSelector 命中数（池近似，
+   * 池表达不了的选择器返回 null = 待 live 验证）。列表页"恰好 25 行商品"、懒加载
+   * "至少 10 行"是它的主场——旧行只能数 `css_exists` 的 0/1 面。
+   */
+  css_count_equals: 2,
+  css_count_min: 2,
 };

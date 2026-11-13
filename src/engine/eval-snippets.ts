@@ -134,7 +134,41 @@ const GUARD_JS = `() => {
 }`;
 const FN_GUARD = asFunction(GUARD_JS);
 
+/**
+ * E4：overlay 只读探测（一次 evaluate；不点击、不消散、不猜可关性）。
+ * 判据是**几何 + 层级**的客观面：视口大小的 fixed/absolute 元素、或面积 ≥30% 视口的
+ * 遮挡块（cookie banner / modal backdrop / 引导遮罩都在这个形状里）。返回有界证据行
+ * （≤3 个）：tag#id.class、z-index、面积占比、文本首 40 字。无 overlay = 空数组。
+ */
+const OVERLAY_JS = `() => {
+  const vw = innerWidth, vh = innerHeight;
+  const desc = (e) => {
+    const id = e.id ? '#' + e.id : '';
+    const cls = typeof e.className === 'string' && e.className.trim()
+      ? '.' + e.className.trim().split(/\\s+/).slice(0, 2).join('.') : '';
+    return e.tagName.toLowerCase() + id + cls;
+  };
+  const out = [];
+  for (const e of document.querySelectorAll('body *')) {
+    const cs = getComputedStyle(e);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') continue;
+    if (cs.position !== 'fixed' && cs.position !== 'absolute') continue;
+    const r = e.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    const area = (r.width * r.height) / (vw * vh);
+    const covers = r.left <= 0 && r.top <= 0 && r.right >= vw && r.bottom >= vh;
+    const z = parseInt(cs.zIndex, 10);
+    if (!covers && area < 0.3) continue;
+    if (cs.position === 'absolute' && !(z > 0)) continue;
+    const txt = String(e.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 40);
+    out.push({ desc: desc(e), z: Number.isFinite(z) ? z : 0, area: Math.round(area * 100) / 100, covers, txt });
+    if (out.length >= 3) break;
+  }
+  return out;
+}`;
+const FN_OVERLAY = asFunction(OVERLAY_JS);
+
 export {
-  VALS_JS, CHECKS_JS, STATE_JS, HIT_JS, HIT_DETAIL_JS,
-  FN_VALS, FN_CHECKS, FN_STATE, FN_HIT, FN_HIT_DETAIL, FN_EMPTIES, FN_GUARD,
+  VALS_JS, CHECKS_JS, STATE_JS, HIT_JS, HIT_DETAIL_JS, OVERLAY_JS,
+  FN_VALS, FN_CHECKS, FN_STATE, FN_HIT, FN_HIT_DETAIL, FN_EMPTIES, FN_GUARD, FN_OVERLAY,
 };

@@ -116,6 +116,11 @@ export interface AppRunOptions {
   /** 覆盖包的槽位（`--slot k=v`）。值仍然只来自计划。 */
   slots?: Record<string, unknown>;
   /**
+   * 决策开关（decision.*）等配置层默认值的解析环境（缺省 process.env）。
+   * CLI 入口已用 parseRunDefaults 报过非法值；这里只是让解析环境可注入（测试缝）。
+   */
+  env?: NodeJS.ProcessEnv;
+  /**
    * 时钟缝：把"今天"钉成 `YYYY-MM-DD`（CLI `--today`）。影响数据腿的相对日期表达式
    * （`day_offset` / `next_week` / `weekday_cn`）与 flow 脚本的 `ctx.runtime.today`。
    * 空缺 = 系统日期。（2026-10-28 起不再是环境变量 `LAYA_TODAY`——时钟不是机器配置，
@@ -1225,6 +1230,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     modelId = pack.model ?? "english",
   } = opts;
   const t0 = Date.now();
+  // E2/E1-c/E1-a/E1-b：决策开关（decision.*）的配置层默认值（非法值已在 CLI 入口报错；
+  // 这里只取已解析的强类型值）。run/dry/replay 共用这一份解析。
+  const decisionDefaults = parseRunDefaults(opts.env ?? process.env).defaults;
   const secretKeys = secretSlotKeys(
     [...Object.keys(pack.slots ?? {}), ...((pack.required_slots ?? []) as string[]), ...Object.keys(slots)],
     pack.secret_slots,
@@ -1420,6 +1428,11 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     confirmFn: confirmSafe
       ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
       : () => true,
+    // E2/E1-c/E1-a/E1-b：决策开关（decision.*）从配置层默认值解析（非法值已在 CLI 入口报错）。
+    ...(decisionDefaults.ambiguousOrdering === undefined ? {} : { ambiguousOrdering: decisionDefaults.ambiguousOrdering }),
+    ...(decisionDefaults.idFallback === undefined ? {} : { idFallback: decisionDefaults.idFallback }),
+    ...(decisionDefaults.actPoolCap === undefined ? {} : { actPoolCap: decisionDefaults.actPoolCap }),
+    ...(decisionDefaults.poolQuotaMode === undefined ? {} : { poolQuotaMode: decisionDefaults.poolQuotaMode }),
   });
 
   // task-14（D1·兼容性三件）：声明式路径与 flow 路径同账——起跑探测一次（只探默认配置面，
@@ -2094,6 +2107,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // §3：与 `runApp` 共用同一份策略解析——否则脚本应用会静默忽略 meta.policy
     // （同一个 `policy.conf_floor` 在数据脚本上生效、在 flow 脚本上不生效）。
     const resolvedPolicy = resolveRunPolicy(pack, opts);
+    // E2/E1-c/E1-a/E1-b：决策开关与声明式路径同一份解析（decision.* 配置层默认值）。
+    const decisionDefaults = parseRunDefaults(opts.env ?? process.env).defaults;
     policy = resolvedPolicy.policy;
     anyDeclared = resolvedPolicy.anyDeclared;
     // task-24/4：strict 旗标存活到报告点（runWarnings 的 model_face_idle 判定用）。
@@ -2147,6 +2162,11 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           confirmFn: opts.confirmSafe === false
             ? () => true
             : (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x)),
+          // E2/E1-c/E1-a/E1-b：决策开关与声明式路径同一份解析（decisionDefaults 在 runScriptApp 顶部解析）。
+          ...(decisionDefaults.ambiguousOrdering === undefined ? {} : { ambiguousOrdering: decisionDefaults.ambiguousOrdering }),
+          ...(decisionDefaults.idFallback === undefined ? {} : { idFallback: decisionDefaults.idFallback }),
+          ...(decisionDefaults.actPoolCap === undefined ? {} : { actPoolCap: decisionDefaults.actPoolCap }),
+          ...(decisionDefaults.poolQuotaMode === undefined ? {} : { poolQuotaMode: decisionDefaults.poolQuotaMode }),
         });
       }
       return mwHolder.current;

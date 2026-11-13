@@ -19,6 +19,14 @@ export interface RunDefaults {
   confirmSafe?: boolean;
   noSources?: boolean;
   quiet?: boolean;
+  /** E2：歧义命中顺序（decision.ambiguous_ordering；缺省 dom-preorder）。 */
+  ambiguousOrdering?: "dom-preorder" | "pool-order";
+  /** E1-c：act #id 直查兜底（decision.id_fallback；缺省 true）。 */
+  idFallback?: boolean;
+  /** E1-a：act 池上限（decision.act_pool_cap；空 = 引擎默认 40，仅观测面可配）。 */
+  actPoolCap?: number;
+  /** E1-b：池配额模型（decision.pool_quota_mode；缺省 legacy）。 */
+  poolQuotaMode?: "legacy" | "quota";
 }
 
 export interface ParsedRunDefaults {
@@ -57,6 +65,38 @@ export function parseRunDefaults(env: NodeJS.ProcessEnv = process.env): ParsedRu
       errors.push(`AMBERFLOW_CONF_FLOOR=${JSON.stringify(floorRaw)} 不合法：需要 (0, 1] 之间的数`);
     } else {
       defaults.confFloor = n;
+    }
+  }
+
+  // ---- 决策开关（decision.*，行为变更面；非法值 = 配置错误，绝不静默取缺省）----
+
+  const orderingRaw = raw("AMBERFLOW_AMBIGUOUS_ORDERING");
+  if (orderingRaw !== undefined) {
+    if (orderingRaw === "dom-preorder" || orderingRaw === "pool-order") {
+      defaults.ambiguousOrdering = orderingRaw;
+    } else {
+      errors.push(`AMBERFLOW_AMBIGUOUS_ORDERING=${JSON.stringify(orderingRaw)} 不合法：只接受 dom-preorder | pool-order`);
+    }
+  }
+
+  bool("AMBERFLOW_ID_FALLBACK", (v) => { defaults.idFallback = v; });
+
+  const capRaw = raw("AMBERFLOW_ACT_POOL_CAP");
+  if (capRaw !== undefined) {
+    const n = Number(capRaw);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n > 500) {
+      errors.push(`AMBERFLOW_ACT_POOL_CAP=${JSON.stringify(capRaw)} 不合法：需要 1..500 的整数`);
+    } else {
+      defaults.actPoolCap = n;
+    }
+  }
+
+  const quotaRaw = raw("AMBERFLOW_POOL_QUOTA_MODE");
+  if (quotaRaw !== undefined) {
+    if (quotaRaw === "legacy" || quotaRaw === "quota") {
+      defaults.poolQuotaMode = quotaRaw;
+    } else {
+      errors.push(`AMBERFLOW_POOL_QUOTA_MODE=${JSON.stringify(quotaRaw)} 不合法：只接受 legacy | quota`);
     }
   }
   return { defaults, errors };

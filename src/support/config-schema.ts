@@ -94,6 +94,27 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
     ],
   },
   {
+    group: "决策开关（decision.*，行为变更面）",
+    keys: [
+      {
+        key: "AMBERFLOW_AMBIGUOUS_ORDERING", default: "dom-preorder",
+        description: "on_ambiguous:act 的歧义命中顺序：dom-preorder（缺省，命中 act 时刻 DOM 序首个 actionable 候选）| pool-order（旧池序，回退开关）",
+      },
+      {
+        key: "AMBERFLOW_ID_FALLBACK", default: "1",
+        description: "act 的 #id hint 池内未命中时是否做 live-DOM getElementById 单点直查兜底：1（缺省）= 兜底；0 = 维持旧 target_not_found（回退开关）",
+      },
+      {
+        key: "AMBERFLOW_ACT_POOL_CAP",
+        description: "act 池上限（decision.act_pool_cap；空 = 引擎默认 40）。仅观测面可配；默认值调整需另行变更",
+      },
+      {
+        key: "AMBERFLOW_POOL_QUOTA_MODE", default: "legacy",
+        description: "池构建配额模型：legacy（缺省，优先级逐出）| quota（双配额：viewport 保底 + id-backed 保留 + 壳元素限额；灰度站点显式开启）",
+      },
+    ],
+  },
+  {
     group: "实验开关（opt-in）",
     keys: [
       { key: "AMBERFLOW_SITE_FACTS_INTO_MODEL", default: "0", description: "1 = 站点事实注入模型请求面（fenced 块；缺省 OFF = notes 原样）" },

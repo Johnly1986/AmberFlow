@@ -39,6 +39,42 @@ export const AMBIGUITY_NEAR_MAX = 40;
 export const AMBIGUITY_HINT_MAX = 80;
 export const AMBIGUITY_TARGET_MAX = 120;
 
+/**
+ * E2：歧义命中顺序的闭集（`decision.ambiguous_ordering`）。
+ *   - `"dom-preorder"`（缺省）：候选按 live-DOM 前序遍历位置排序——同一帧内按文档序
+ *     （提取扫描序 `scan` 即前序遍历位置），跨帧按帧序 → 帧内文档序；
+ *   - `"pool-order"`：旧行为（可行动优先排序后的池序首个），仅作回退开关。
+ */
+export type AmbiguousOrdering = "dom-preorder" | "pool-order";
+
+/**
+ * E2：候选的**文档序排序键**（同一帧内按 `scan`（前序遍历位置），跨帧按 frame 下标优先）。
+ * 平局（同位置，如同一元素重复收集）取池内首个——稳定排序保证不漂。
+ */
+export function domPreorderKey(e: Elem): number {
+  const frame = Number.isFinite(Number(e.frame)) ? Number(e.frame) : 0;
+  const scan = Number.isFinite(Number(e.scan)) ? Number(e.scan) : Number.MAX_SAFE_INTEGER;
+  return frame * 1e9 + scan;
+}
+
+/**
+ * E2：歧义候选按 DOM 前序重排（纯函数；不改谓词、不改可行动性判定）。
+ *
+ * 输入是 `resolveCommandRef` 已按"可行动优先"排好的 refs；这里只把**命中档内的顺序**
+ * 改为文档序：跨帧先按 frame 下标、帧内按 `scan`（提取扫描序 = 前序遍历位置）。
+ * `scan` 缺失（合成池 `pN` / 旧视图）时退回池内相对位置——仍确定性，绝不随机。
+ */
+export function orderCandidatesByDomPreorder(refs: readonly string[], elems: ElemPool): string[] {
+  const posOf = new Map(refs.map((r, i) => [r, i]));
+  return [...refs].sort((a, b) => {
+    const ea = elems[a];
+    const eb = elems[b];
+    if (ea === undefined || eb === undefined) return (posOf.get(a) ?? 0) - (posOf.get(b) ?? 0);
+    return domPreorderKey(ea) - domPreorderKey(eb)
+      || (posOf.get(a) ?? 0) - (posOf.get(b) ?? 0);
+  });
+}
+
 /** 一条歧义候选（只陈述池里的事实；缺的键就不出现）。 */
 export interface AmbiguityCandidate {
   /** 池 ref（`eN` / `f<fi>:eN`；DOM 回退面是合成 `pN`）。 */
@@ -69,6 +105,17 @@ export interface AmbiguityView {
   tier: number;
   /** 旧行为会执行的那个 ref（`resolveCommandRef` 可行动优先排序后的 refs[0]）。 */
   would_act_ref: string;
+  /**
+   * E2：歧义命中顺序（additive；旧消费方缺字段即旧行为）。`"dom-preorder"`（缺省）=
+   * 命中 act 时刻 DOM 序首个 actionable 候选；`"pool-order"` = 旧池序（回退开关）。
+   */
+  ordering?: AmbiguousOrdering;
+  /** E2：按 ordering 排序后实际选中的 ref（additive；便于诊断与断言）。 */
+  selected_ref?: string;
+  /** E2：选中候选的 `dsh_ref`（池元素才有；additive）。 */
+  selected_dsh_ref?: string;
+  /** E2：选中候选的排序键（文档序键；additive）。 */
+  sort_key?: number;
   /** 歧义档的总候选数（可能 > `candidates.length`）。 */
   candidates_total: number;
   /** `candidates_total > candidates.length`。 */
@@ -84,6 +131,11 @@ export interface AmbiguityInput {
   elems: ElemPool;
   /** `resolveCommandRef` 的返回（可行动优先排序；空数组 = 池内零命中）。 */
   orderedRefs: readonly string[];
+  /**
+   * E2：歧义命中顺序（`decision.ambiguous_ordering`；缺省 `"dom-preorder"`）。
+   * 决定 `would_act_ref` 之外的 additive 证据字段与 `_resolveOne` 的实际命中顺序。
+   */
+  ordering?: AmbiguousOrdering;
 }
 
 function clip(s: string, max: number): string {
@@ -128,12 +180,21 @@ function candidateView(
  *
  * 谓词与命令步 `target_ambiguous` 逐条同源（`hintCandidates` + `decided === null` +
  * `refs.length > 1`）；`orderedRefs` 只用来取 `would_act_ref`（旧行为的执行目标），不参与判定。
+ *
+ * E2：`ordering:"dom-preorder"`（缺省）时按文档序重排命中档并输出 additive 证据
+ * （ordering/selected_ref/selected_dsh_ref/sort_key）；`"pool-order"` = 旧行为，
+ * additive 字段照给（`ordering:"pool-order"` + `selected_ref` = `would_act_ref`）。
  */
 export function describeAmbiguity(input: AmbiguityInput): AmbiguityView | null {
   const cand = hintCandidates(input.target, input.elems);
   if (cand === null || cand.decided !== null || cand.refs.length <= 1) return null;
+  const ordering: AmbiguousOrdering = input.ordering ?? "dom-preorder";
   const total = cand.refs.length;
-  const rows = cand.refs.slice(0, AMBIGUITY_MAX_CANDIDATES);
+  // E2：排序后的命中档（文档序或池序）；candidates 行按同序展示。
+  const orderedRefs = ordering === "pool-order"
+    ? [...input.orderedRefs]
+    : orderCandidatesByDomPreorder(input.orderedRefs.length ? input.orderedRefs : cand.refs, input.elems);
+  const rows = orderedRefs.slice(0, AMBIGUITY_MAX_CANDIDATES);
   // 池内归一 label 计数：same_label = 该 label 在本池出现 >1 次（label 不足以区分）。
   const labelCounts = new Map<string, number>();
   for (const e of Object.values(input.elems)) {
@@ -153,11 +214,22 @@ export function describeAmbiguity(input: AmbiguityInput): AmbiguityView | null {
   // resolveCommandRef 刚写下的那份；其它形状本来不写旁路（残留诊断会被 hint 相等性校验挡住）。
   if (withSuggestions) void hintCandidates(input.target, input.elems);
   const would = input.orderedRefs[0];
+  // E2：排序依据与实际选中者（首个候选；无候选时退回 would_act_ref 词面）。
+  const selectedRef = orderedRefs[0] ?? would;
+  const selectedElem = selectedRef === undefined ? undefined : input.elems[selectedRef];
+  const dshRef = selectedElem === undefined || typeof selectedElem.dsh_ref !== "string" || selectedElem.dsh_ref === ""
+    ? undefined
+    : clip(selectedElem.dsh_ref, AMBIGUITY_REF_MAX);
+  const sortKey = selectedElem === undefined ? undefined : domPreorderKey(selectedElem);
   return {
     target: clip(input.target, AMBIGUITY_TARGET_MAX),
     source: input.source,
     tier: cand.tier,
     would_act_ref: clip(would === undefined ? String(cand.refs[0] ?? "") : String(would), AMBIGUITY_REF_MAX),
+    ordering,
+    ...(selectedRef === undefined ? {} : { selected_ref: clip(String(selectedRef), AMBIGUITY_REF_MAX) }),
+    ...(dshRef === undefined ? {} : { selected_dsh_ref: dshRef }),
+    ...(sortKey === undefined ? {} : { sort_key: sortKey }),
     candidates_total: total,
     truncated: total > candidates.length,
     candidates,

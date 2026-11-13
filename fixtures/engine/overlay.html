@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>F4 overlay — E4 遮罩证据 fixture</title>
+<!--
+  E4 验收 fixture（批次二）。
+  - 打开 2.5s 后弹出全屏遮罩 modal（role=dialog，label「温馨提示」，含关闭按钮），
+    遮罩覆盖一个待点击按钮。
+  - ?overlay=0 关闭遮罩（成功路径对照）。
+  断言锚点:
+  - 点击被遮按钮 → act 失败且错误证据含 overlay_detected/overlay_label/overlay_dismiss_hint；
+  - 成功路径（无遮罩时）错误证据结构不变（无 overlay 字段）。
+-->
+<style>
+  body { font-family: system-ui, sans-serif; margin: 40px; }
+  .cta {
+    padding: 12px 32px; border: 1px solid #2b6cb0; border-radius: 8px;
+    background: #ebf8ff; color: #2b6cb0; font-size: 16px; cursor: pointer;
+  }
+  #modal-overlay {
+    position: fixed; inset: 0; z-index: 9999;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #modal-overlay[hidden] { display: none; }
+  #modal-box {
+    width: 320px; background: #fff; border-radius: 10px; padding: 20px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  }
+</style>
+</head>
+<body>
+<h1>遮罩拦截演示</h1>
+<p><button id="under-btn" class="cta">确认提交</button></p>
+<div id="modal-overlay" hidden>
+  <div id="modal-box" role="dialog" aria-label="温馨提示">
+    <h2 style="margin-top:0;">温馨提示</h2>
+    <p>会话已过期，请重新登录后继续操作。</p>
+    <button id="modal-close">我知道了</button>
+  </div>
+</div>
+<div id="hit-log" style="margin-top:16px;font-size:13px;color:#4a5568;"></div>
+<script>
+  var params = new URLSearchParams(location.search);
+  var overlayOn = params.get("overlay") !== "0";
+  var hits = 0;
+  document.getElementById("under-btn").addEventListener("click", function () {
+    hits += 1;
+    document.getElementById("hit-log").textContent = "under-btn clicked ×" + hits;
+  });
+  document.getElementById("modal-close").addEventListener("click", function () {
+    document.getElementById("modal-overlay").hidden = true;
+  });
+  if (overlayOn) {
+    setTimeout(function () {
+      document.getElementById("modal-overlay").hidden = false;
+    }, 2500);
+  }
+</script>
+</body>
+</html>

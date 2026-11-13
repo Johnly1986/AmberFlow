@@ -49,6 +49,12 @@ export interface Elem {
   data_test?: string;
   name?: string;
   id?: string;
+  /**
+   * E3：祖先链上的 id 集合（小写；≤8 个，最近祖先在前）——`within:#id` 尾缀的
+   * 池侧判定底座（纯内存：锚 id ∈ anchor_ids ⇔ 元素在锚子树内）。提取期一次
+   * 算好；无 id 祖先的普通页面 = 空数组（池行多一个空字段，匹配面零开销）。
+   */
+  anchor_ids?: string[];
   input_type?: string;
   href?: string;
   /**
@@ -552,6 +558,34 @@ export async function locatorAnyFrame(
   return (await page.locatorAnyFrame?.(selector)) ?? null;
 }
 
+/**
+ * E5：selector 在主 frame + 可达子 frame 的**命中总数**（`css_count_equals` /
+ * `css_count_min` 的求值底座）。帧序与 `locatorAnyFrame` 相同（framesOf；被排除
+ * frame 不计数，P0-D 信封同口径）；单帧抛错（中途分离等）跳过该帧继续数——
+ * 计数是观察面，不因一帧失联把整个信号打成 false。空 selector 返回 null
+ * （语法错不猜：调用方按"不成立"处理，与 css_exists 空串的抛错-捕获路径同向）。
+ */
+export async function countAnyFrame(
+  page: PageLike, selector: string, opts?: { hosts?: string[] | null },
+): Promise<number | null> {
+  if (selector.trim() === "") return null;
+  if (page.frames !== undefined || page.locator !== undefined) {
+    const frames = framesOf(page);
+    let total = 0;
+    for (let fi = 0; fi < frames.length; fi++) {
+      const fr = frames[fi]!;
+      if (fi > 0 && !frameInHostsEnvelope(fr, opts?.hosts)) continue;
+      try {
+        total += await fr.locator(selector).count();
+      } catch {
+        continue;   // frame detached mid-scan / invalid selector piece in this frame
+      }
+    }
+    return total;
+  }
+  return null;
+}
+
 /* ------------------------------------------------------------------ constants */
 
 // 扫描面：原生可交互标签 + ARIA 语义角色/可编辑容器（自定义控件由 div/span 实现时，标签结构里
@@ -596,6 +630,13 @@ export type PoolQuotas = Record<PoolBucket, number>;
 export const POOL_QUOTAS: PoolQuotas = { chrome: 8, viewport: 16, contentNear: 8, mainOffscreen: 6, other: 2 };
 /** 宽扫池（120）的分桶配额（合计 120）。 */
 export const WIDE_QUOTAS: PoolQuotas = { chrome: 16, viewport: 48, contentNear: 32, mainOffscreen: 16, other: 8 };
+/**
+ * E1-b：`decision.pool_quota_mode:"quota"` 灰度档的换档配额——viewport 保底加大、
+ * 壳限额收紧（chrome 8→6）。总数不变（40/120 两档预算不动）；只改"谁被逐出"。
+ * id-backed 保留不在配额表里（PIN_CAP 在探针侧，跨桶合计）。
+ */
+export const QUOTA_MODE_QUOTAS: PoolQuotas = { chrome: 6, viewport: 24, contentNear: 8, mainOffscreen: 6, other: 2 };
+export const QUOTA_MODE_WIDE_QUOTAS: PoolQuotas = { chrome: 12, viewport: 72, contentNear: 32, mainOffscreen: 16, other: 8 };
 /** 拼接顺序（ref 编号 / 诊断展示顺序）：chrome 在前，其余按"离当前视口由近到远"。 */
 export const BUCKET_ORDER: readonly PoolBucket[] = ["chrome", "viewport", "contentNear", "mainOffscreen", "other"];
 /** 配额没填满时的顺延顺序（chrome 最后兜底：它通常量小且已配额内收全）。 */
@@ -660,14 +701,23 @@ export async function extractElements(
      * frame 的真实下标仍保留（`frame`/`f<fi>:` ref 不变）；缺省 = 今天的全帧面。
      */
     hosts?: string[] | null;
+    /**
+     * E1-b：池配额模型（`decision.pool_quota_mode`；缺省 "legacy" = 既有优先级逐出，
+     * 行为逐字节不变）。"quota" = 双配额灰度档：viewport 保底换档配额 + id-backed
+     * 保留（PIN_CAP）+ 壳元素限额。配额常量单一出处（QUOTA_MODE_QUOTAS）。
+     */
+    poolQuotaMode?: "legacy" | "quota";
   },
 ): Promise<ElemPool> {
   // 缺省 bucketed；main-first 显式回退。quota 由预算档决定（40/120 两档常量单一出处）。
+  const quotaMode = opts?.poolQuotaMode === "quota" ? "quota" : "legacy";
   const quotas = opts?.candidatePriority === "main-first"
     ? null
     : (opts?.quotas !== undefined
       ? opts.quotas
-      : (maxElements > MAX_ELEMENTS ? WIDE_QUOTAS : POOL_QUOTAS));
+      : (maxElements > MAX_ELEMENTS
+        ? (quotaMode === "quota" ? QUOTA_MODE_WIDE_QUOTAS : WIDE_QUOTAS)
+        : (quotaMode === "quota" ? QUOTA_MODE_QUOTAS : POOL_QUOTAS)));
   if (jsProbe) {
     try {
       await jsInteractiveWidgets(page);
@@ -685,6 +735,7 @@ export async function extractElements(
     try {
       rows = (await frames[fi]!.evaluate(PASS_EXTRACT,
         { sel: poolSelectorWithJsFor(opts?.surface), max: remaining, quotas,
+          ...(quotaMode === "quota" ? { quotaMode: "quota" } : {}),
           cats: SURFACE_SELECTORS, caps: WINDOW_CAPS,
           // P0-A：只有 inspect 传这两个开关；不传 ⇒ 参数对象与今天逐字节同形。
           ...(opts?.classNames === true ? { classNames: true } : {}),

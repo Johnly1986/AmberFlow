@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>F1 ambiguity-order — E2 歧义命中顺序 fixture</title>
+<!--
+  E2 验收 fixture（批次一）。
+  - 12 个视觉/文案/类名完全相同的按钮「订票」，无 id/aria，DOM 顺序 1..12。
+  - data-marker="slot-N" 不参与 hint 匹配，仅供断言取值。
+  - 无滚动、无懒加载、hydration 零漂移 —— 保证"同一页面状态"可复现。
+  断言锚点: 同 hint 连续 N 次 act（on_ambiguous:"act"）命中 slot-1（DOM 序首个）。
+-->
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; }
+  .btn {
+    display: block; width: 220px; margin: 8px 0;
+    padding: 10px 16px; border: 1px solid #2b6cb0; border-radius: 6px;
+    background: #fff; color: #2b6cb0; font-size: 15px; cursor: pointer;
+  }
+  .btn:hover { background: #ebf8ff; }
+</style>
+</head>
+<body>
+<h1>订票列表（歧义顺序）</h1>
+<main>
+  <button class="btn btn-book" data-marker="slot-1">订票</button>
+  <button class="btn btn-book" data-marker="slot-2">订票</button>
+  <button class="btn btn-book" data-marker="slot-3">订票</button>
+  <button class="btn btn-book" data-marker="slot-4">订票</button>
+  <button class="btn btn-book" data-marker="slot-5">订票</button>
+  <button class="btn btn-book" data-marker="slot-6">订票</button>
+  <button class="btn btn-book" data-marker="slot-7">订票</button>
+  <button class="btn btn-book" data-marker="slot-8">订票</button>
+  <button class="btn btn-book" data-marker="slot-9">订票</button>
+  <button class="btn btn-book" data-marker="slot-10">订票</button>
+  <button class="btn btn-book" data-marker="slot-11">订票</button>
+  <button class="btn btn-book" data-marker="slot-12">订票</button>
+</main>
+<script>
+  // 点击后在标题侧记录命中（断言可用 data-hit 序列或读取 __hits）。
+  window.__hits = [];
+  document.querySelectorAll(".btn-book").forEach(function (b) {
+    b.addEventListener("click", function () {
+      window.__hits.push(b.getAttribute("data-marker"));
+      var out = document.getElementById("hit-log");
+      if (out) out.textContent = window.__hits.join(",");
+    });
+  });
+</script>
+</body>
+</html>

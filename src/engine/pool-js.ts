@@ -360,6 +360,48 @@ export const EXTRACT_JS = String.raw`(arg) => {
   if (!quotas) {
     // main-first 回退面（meta.policy.candidate_priority:"main-first"）：与 A2 之前逐字节同序。
     ordered = rows.filter((r) => r.main).concat(rows.filter((r) => !r.main)).slice(0, max);
+  } else if (arg.quotaMode === 'quota') {
+    // E1-b 双配额模型（decision.pool_quota_mode:"quota" 灰度档；legacy = 上面既有分支）。
+    // 三件事，全部只动"谁被逐出"：
+    //   1) id-backed 保留：非空 id 的行是 stable handle 锚（#id hint 的解析底座），不受
+    //      所在桶配额逐出——**只在它本来会被逐出时**才占用 PIN_CAP（配额内的 id 行照常
+    //      走配额，不额外挤占）；跨桶合计 PIN_CAP 上限防"全页都有 id"的病态面把池挤爆；
+    //   2) viewport 保底：配额表由 host 侧换档（viewport 桶加大），host 常量单一出处；
+    //   3) 壳元素限额：chrome 桶配额即限额（收紧；pinned 壳元素仍保留——全站导航的
+    //      稳定锚不该被逐出）。
+    // 桶内次序：配额行（DOM 序）在前、被逐出救回的 pinned 行在后；跨桶次序与 legacy
+    // 相同（BUCKET_ORDER）。总预算 max 不变（slice(0, max)）。
+    const PIN_CAP = 12;
+    const byBucket = { chrome: [], viewport: [], contentNear: [], mainOffscreen: [], other: [] };
+    for (const r of rows) {
+      const b = r.bucket || 'other';
+      (byBucket[b] || byBucket.other).push(r);
+    }
+    const picked = [];
+    const pickedIdx = {};   // row.i -> true（已入池标记；fill 阶段跳过）
+    let pinnedTaken = 0;
+    for (const b of ['chrome', 'viewport', 'contentNear', 'mainOffscreen', 'other']) {
+      const q = typeof quotas[b] === 'number' ? quotas[b] : 0;
+      const arr = byBucket[b] || [];
+      let n = 0;
+      for (let k = 0; k < arr.length; k++) {
+        const r = arr[k];
+        if (n < q) { n++; picked.push(r); pickedIdx[r.i] = true; continue; }
+        if (r.id && pinnedTaken < PIN_CAP) { pinnedTaken++; picked.push(r); pickedIdx[r.i] = true; }
+      }
+    }
+    if (picked.length < max) {
+      for (const b of ['viewport', 'contentNear', 'mainOffscreen', 'other', 'chrome']) {
+        if (picked.length >= max) break;
+        const arr = byBucket[b] || [];
+        for (let k = 0; k < arr.length && picked.length < max; k++) {
+          const r = arr[k];
+          if (pickedIdx[r.i]) continue;
+          picked.push(r); pickedIdx[r.i] = true;
+        }
+      }
+    }
+    ordered = picked.slice(0, max);
   } else {
     // 分桶配额：每桶按 DOM 序取至多 quota 个 → 不足部分按 BUCKET_FILL_ORDER 顺延 → 截断 max。
     const byBucket = { chrome: [], viewport: [], contentNear: [], mainOffscreen: [], other: [] };
@@ -397,11 +439,23 @@ export const EXTRACT_JS = String.raw`(arg) => {
   // 不残留，跨两次提取也不会共用同一个选择器；同一页多次提取共享计数，所以挂
   // globalThis（跨导航自动重置——旧 DOM 已经不在了，重号无害）。
   const nonce = 'af' + ((globalThis.__afStamp = (globalThis.__afStamp | 0) + 1));
+  // E3：祖先链 id（≤8、小写、最近祖先在前）——within:#id 尾缀的池侧判定底座。
+  // 一次 parentElement 链行走；无 id 祖先 = 空数组（行里省略，池面零开销）。
+  const anchorIdsOf = (el) => {
+    const out = [];
+    let p = el ? el.parentElement : null;
+    while (p && out.length < 8) {
+      if (p.id) out.push(String(p.id).toLowerCase());
+      p = p.parentElement;
+    }
+    return out;
+  };
   return ordered.map((r, pos) => {
     const ref = 'e' + pos;
     const stamp = nonce + '-' + ref;
     const el = all[r.i];
     el.setAttribute('data-dshref', stamp);
+    const anchors = anchorIdsOf(el);
     // P0-A inspect 观察面（显式 opt-in，缺省不出字段 ⇒ 池/模型面/既有产物逐字节不变）：
     //   classNames=true → class_names（有界：≤8 个、每项 ≤40 字符，与 ctx.observe 同口径）；
     //   fullLabel=true  → label_full（**不截断**的完整标签；full_label 仍是 ≤200 的匹配口径）。
@@ -412,6 +466,7 @@ export const EXTRACT_JS = String.raw`(arg) => {
     return {ref: ref, dsh_ref: stamp, scan: r.i, tag: r.tag, label: r.label, full_label: r.full_label,
             ...(classNames && classNames.length ? {class_names: classNames} : {}),
             ...(labelFull ? {label_full: labelFull} : {}),
+            ...(anchors.length ? {anchor_ids: anchors} : {}),
             rect: r.rect, inViewport: r.inViewport, nearViewport: r.nearViewport,
             scrollDepth: r.scrollDepth, inScrollContainer: r.inScrollContainer, bucket: r.bucket, prio: r.prio,
             data_test: r.data_test, name: r.name, id: r.id, input_type: r.input_type, href: r.href,
@@ -587,14 +642,19 @@ const HINT_HEAD = String.raw`(arg) => {
                 }
                 return false;
             };
+            // E3：within:#id 的 DOM 侧限定——锚存在且命中元素在锚子树内（contains 判定；
+            // 锚不在本页 = 本帧无命中，下一帧继续找）。单层（解析层已保证）。
+            const anchorEl = p.within ? document.getElementById(p.within) : null;
+            const inAnchor = (e) => p.within === undefined || (anchorEl && anchorEl.contains(e));
             const hits = [];
             if (p.kind === 'id') {
                 all.forEach((e, i) => {
-                    if ((e.id || '').toLowerCase() === p.value) hits.push(i);
+                    if ((e.id || '').toLowerCase() === p.value && inAnchor(e)) hits.push(i);
                 });
             } else if (p.kind === 'attrSubstr') {
                 all.forEach((e, i) => {
                     if (p.tag && e.tagName.toLowerCase() !== p.tag) return;
+                    if (!inAnchor(e)) return;
                     const hay = (e.getAttribute('href')||'') + ' ' + (e.getAttribute('data-test')||'') + ' ' +
                                 (e.id||'') + ' ' + (e.name||'') + ' ' + labelOf(e);
                     if (hay.toLowerCase().includes(p.value)) hits.push(i);
@@ -602,16 +662,18 @@ const HINT_HEAD = String.raw`(arg) => {
             } else if (p.kind === 'attrEq') {
                 all.forEach((e, i) => {
                     if (p.tag && e.tagName.toLowerCase() !== p.tag) return;
+                    if (!inAnchor(e)) return;
                     if ((e.getAttribute(p.attr)||'').toLowerCase() === p.value) hits.push(i);
                 });
             } else if (p.kind === 'tag') {
                 const want = p.tag === 'link' ? 'a' : p.tag;
-                all.forEach((e, i) => { if (e.tagName.toLowerCase() === want) hits.push(i); });
+                all.forEach((e, i) => { if (e.tagName.toLowerCase() === want && inAnchor(e)) hits.push(i); });
             } else {
                 // 裸词；nearToken（无括号的 tag~token）在池侧有近邻上下文、DOM 侧没有，
                 // 维持回捞路径的旧行为：按整串做裸词匹配（几乎不命中，等于"回捞不到"）。
                 const tok = p.kind === 'nearToken' ? h : p.token;
                 all.forEach((e, i) => {
+                    if (!inAnchor(e)) return;
                     const lab = labelOf(e).toLowerCase(), dt = (e.getAttribute('data-test')||'').toLowerCase();
                     if (bareHit(lab, dt, tok)) hits.push(i);
                 });

@@ -25,6 +25,7 @@ import readline from "node:readline";
 import { createCtx, isSyntheticScrollTarget, StopError, type Ctx } from "./ctx.ts";
 import { amberflowHome, ensureDir } from "../support/amberflow-home.ts";
 import { sleepMs } from "../support/sleep.ts";
+import { parseRunDefaults } from "../support/run-defaults.ts";
 import { inputsSha256, newTrace, sha256, writeTrace, type AppTrace } from "./trace.ts";
 import { MockAuditor } from "../engine/audit.ts";
 import {
@@ -32,7 +33,7 @@ import {
   type ActionabilityDetail, type ActMissDiagnostics, type AnyPage, type BrowserSession,
 } from "../engine/executor.ts";
 import {
-  extractElements, urlOf, type ElemPool, type PageLike,
+  countAnyFrame, extractElements, urlOf, type ElemPool, type PageLike,
 } from "../engine/extraction.ts";
 import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
 // task-34（B1 旁路复用）：与 run 面**同一个**弱档命中诊断（`rules.hintMatchImpl` 的模块态），
@@ -201,6 +202,11 @@ export interface SessionOptions {
    * 单行请求可用 `onAmbiguous` 覆盖本次（见 `doAct`）。
    */
   onAmbiguous?: "fail" | "act";
+  /**
+   * S2/E5：稳定门（`--settle off` = 关）。关 = extract 不做滚动稳定判定
+   * （响应不带 `scroll_settled`）、执行器抽池不等静默——与既有 settle 语义同源。
+   */
+  settle?: "off" | null;
   idleTimeoutMs?: number;
   maxRequestBytes?: number;
   verbose?: boolean;
@@ -308,6 +314,8 @@ export class SessionRuntime {
   /** 执行器：与 `runScriptApp` 同一个构造模板；不注入任何决策 provider（auditor 是 Mock）。 */
   private mw(): BrowserMiddleware {
     if (this.mwHolder.current === null) {
+      // E2/E1-c/E1-a/E1-b：决策开关（decision.*）从配置层默认值解析（非法值已在 CLI 入口报错）。
+      const { defaults } = parseRunDefaults(this.opts.env ?? process.env);
       this.mwHolder.current = new BrowserMiddleware({
         modelId: "english",
         auditor: new MockAuditor(),
@@ -316,6 +324,10 @@ export class SessionRuntime {
         reobserve: true,
         // S2 稳定门：与 run 的缺省档一致（抽池前等页面静默）。
         settle: DEFAULT_SETTLE,
+        ...(defaults.ambiguousOrdering === undefined ? {} : { ambiguousOrdering: defaults.ambiguousOrdering }),
+        ...(defaults.idFallback === undefined ? {} : { idFallback: defaults.idFallback }),
+        ...(defaults.actPoolCap === undefined ? {} : { actPoolCap: defaults.actPoolCap }),
+        ...(defaults.poolQuotaMode === undefined ? {} : { poolQuotaMode: defaults.poolQuotaMode }),
       });
     }
     return this.mwHolder.current;
@@ -820,6 +832,12 @@ export class SessionRuntime {
       ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
     });
     if (out.ok !== true) {
+      // E4：落空/被遮挡失败时的 overlay 证据（只读一次；不消散——是否关遮罩由作者决定）。
+      // 仅这两个停因做归因探测：target_not_found（目标可能被遮罩挡在池外/视口外）、
+      // not-actionable-or-covered（中心点已被盖住）。其余停因（stale_ref、action_failed…）
+      // 与遮罩无归因关系，不多付这次页面往返。
+      const wantOverlay = out.stopCode === "target_not_found" || out.stopCode === "not-actionable-or-covered";
+      const overlay = wantOverlay ? await this.mw().overlayEvidence(page) : null;
       return {
         ok: false, code: String(out.stopCode ?? "action_failed"),
         reason: String(out.reason ?? ""), op: actOp, target, executed: false,
@@ -827,6 +845,7 @@ export class SessionRuntime {
         url: urlOf(page), elapsed_ms: Date.now() - started,
         ...this.actionabilityResponse(out.actionability),
         ...(await this.failureScreenshot(page, this.actionCount, req)),
+        ...(overlay !== null && overlay.length > 0 ? { overlay } : {}),
         ...amb,
         ...this.ambiguityResponse(out.ambiguity),
         ...this.missDiagnosticsResponse(out.diagnostics),
@@ -838,6 +857,8 @@ export class SessionRuntime {
       ref: out.ref ?? null, how: this.displayHow(actOp, out.how), changed: out.changed === true,
       url: urlOf(page), elapsed_ms: Date.now() - started,
       ...(out.probe_navigated === true ? { probe_navigated: true } : {}),
+      // E1-c：`#id` 直查兜底命中的解析通道证据（additive；其余路径键集不变）。
+      ...(out.resolved_via === undefined ? {} : { resolved_via: out.resolved_via }),
       ...amb,
       ...(await this.observeAfter(req)),
     };
@@ -1025,6 +1046,15 @@ export class SessionRuntime {
     }
     const offset = typeof rawOffset === "number" ? rawOffset : 0;
     this.extractStats.total = 0;
+    // E5：**滚动稳定判定**（缺省开；`settle:"off"` 跳过）。懒加载列表在抽行前可能还在
+    // 增长——直接抽会把"截断"错报成"就这么多"。两次连读 rows 命中数相等 = 稳定；最多
+    // 等一个有界窗口（600ms 间隔 × 5 轮），超窗如实回 `scroll_settled:false`（不静默放行，
+    // 也不无界等）。观察面 additive：判定不动抽取语义，只多回一个证据字段。
+    const settleOff = this.settleDisabled();
+    let scrollSettled = true;
+    if (!settleOff) {
+      scrollSettled = await this.rowsSettled(String(rows));
+    }
     // inline 形态：与 meta.site.listExtract 的声明走同一个 `ctx.extract` → `readRows` 实现
     //（MVP 只接 inline；named 需要 app pack，见 design §7）。
     let out: Array<Record<string, string>>;
@@ -1048,11 +1078,44 @@ export class SessionRuntime {
     const total = this.extractStats.total;
     return {
       ok: true, rows: out, count, capped, max_items: cap,
+      // E5：滚动稳定证据（additive；settle:"off" 时不出现，键集与旧行为一致）。
+      ...(settleOff ? {} : { scroll_settled: scrollSettled }),
       // C1：分页事实只在「本页被 cap 挡住」或「offset>0」时出现——旧响应键集不变。
       ...(capped || offset > 0
         ? { offset, total, has_more: offset + count < total }
         : {}),
     };
+  }
+
+  /** E5：`meta.policy.settle === "off"`（会话构造时已知）= 跳过滚动稳定判定。 */
+  private settleDisabled(): boolean {
+    return this.opts.settle === "off";
+  }
+
+  /**
+   * E5：rows 选择器的**滚动稳定判定**——两次连读命中数相等即稳定。间隔 600ms、
+   * 最多 5 轮（首读 + 至多 4 次复读 = 有界窗口 ~2.4s）。选择器非法/不可定位时
+   * 返回 true（让 extract 本体去报结构化错误，这里不抢答）。
+   */
+  private async rowsSettled(rowsSel: string): Promise<boolean> {
+    const read = async (): Promise<number | null> => {
+      try {
+        const n = await countAnyFrame(await this.page(), rowsSel);
+        return n;
+      } catch {
+        return null;
+      }
+    };
+    let prev = await read();
+    if (prev === null) return true;
+    for (let round = 0; round < 4; round++) {
+      await sleepMs(600);
+      const now = await read();
+      if (now === null) return true;
+      if (now === prev) return true;
+      prev = now;
+    }
+    return false;
   }
 
   private signalSpec(req: Record<string, unknown>): { ok: true; spec: Record<string, unknown> } | { ok: false; resp: Record<string, unknown> } {

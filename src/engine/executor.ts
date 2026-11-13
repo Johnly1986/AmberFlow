@@ -96,7 +96,7 @@ import {
   type PageLike,
 } from "./extraction.ts";
 import { declaredLookup, formatDeclaredCandidates, type DeclaredCandidate } from "./declared.ts";
-import { describeAmbiguity, type AmbiguityView } from "./ambiguity.ts";
+import { describeAmbiguity, orderCandidatesByDomPreorder, type AmbiguityView, type AmbiguousOrdering } from "./ambiguity.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
 import {
   getLayaRuntime,
@@ -174,6 +174,7 @@ import type {
   HintMemoryLike,
   MiddlewareOptions,
   OutcomeMemoryLike,
+  OverlayEvidenceRow,
   PageSnapshot,
   PickProposal,
   PwLike,
@@ -195,7 +196,7 @@ import type {
 /** `new Function("return (<expr>);")()` -> a real function object for evaluate(). */
 /** Host-side JS passes —— 拆到 eval-snippets.ts（F2）。 */
 import {
-  asFunction, FN_STATE, FN_HIT, FN_HIT_DETAIL, FN_EMPTIES, FN_GUARD,
+  asFunction, FN_STATE, FN_HIT, FN_HIT_DETAIL, FN_EMPTIES, FN_GUARD, FN_OVERLAY,
 } from "./eval-snippets.ts";
 
 /* ------------------------------------------------------------------ run ctx */
@@ -453,6 +454,31 @@ export class BrowserMiddleware {
   attrValueMatch: "full_label" | "display" = "full_label";
   /** See `MiddlewareOptions.candidatePriority`（A2 分桶窗口；缺省 bucketed）。 */
   candidatePriority: "bucketed" | "main-first" = "bucketed";
+  /**
+   * E2：`on_ambiguous:"act"` 的歧义命中顺序（`decision.ambiguous_ordering`）。
+   *   - `"dom-preorder"`（缺省）：命中 act 时刻 live-DOM 文档序首个 actionable 候选
+   *     （跨帧按帧序 → 帧内文档序；平局取池内首个）；歧义证据块输出
+   *     `ordering/selected_ref/selected_dsh_ref/sort_key`；
+   *   - `"pool-order"`：旧池序（可行动优先排序后的首个）——回退开关，线上异常时切回。
+   * 只作用于歧义模式（≥2 个 distinct 候选且 `onAmbiguous:"act"`）；单候选与
+   * `on_ambiguous:"fail"` 行为不变。资金敏感步骤（下单/支付）禁用 act 模式，默认 fail。
+   */
+  ambiguousOrdering: AmbiguousOrdering = "dom-preorder";
+  /**
+   * E1-c：act 的 `#id` hint live-DOM 直查兜底（`decision.id_fallback`，缺省 true）。
+   * false = 池内未命中即维持旧 `target_not_found`（回退开关）。仅限形态 1（`#id`）。
+   */
+  idFallback = true;
+  /**
+   * E1-b：池配额模型（`decision.pool_quota_mode`，缺省 "legacy" = 既有优先级逐出）。
+   * "quota" = 双配额灰度档：viewport 保底 + id-backed 保留 + 壳元素限额。
+   */
+  poolQuotaMode: "legacy" | "quota" = "legacy";
+  /**
+   * E1-a：池预算帽的观测面回显（`decision.act_pool_cap`；缺省 40 = MAX_ELEMENTS）。
+   * **只观测**：池构成不因它变化；落空诊断把它带进 `pool_cap` 供归因。
+   */
+  actPoolCap = 40;
   /** S1：pre-held done 处置（缺省 warn；fail 在动作前结构化停止）。 */
   donePreheldPolicy: "warn" | "fail" | "allow" = "warn";
   /** P0-E：false_done guard 处置（缺省 warn；fail 在 done 成立后结构化停止）。 */
@@ -660,6 +686,7 @@ export class BrowserMiddleware {
     const elems = await extractElements(page, true, undefined, {
       candidatePriority, surface: this.surfacePolicy,
       hosts: this._frameHosts,                       // P0-D：被排除 frame 不进池
+      ...(this.poolQuotaMode === "quota" ? { poolQuotaMode: "quota" } : {}),   // E1-b
     });
     return { elems, settle: settleRes };
   }
@@ -762,6 +789,16 @@ export class BrowserMiddleware {
     this.riskAsk = opts.riskAsk ?? this.riskAsk;
     this.tieredHint = opts.tieredHint ?? this.tieredHint;
     this.candidatePriority = opts.candidatePriority ?? this.candidatePriority;
+    // E2：歧义命中顺序（decision.ambiguous_ordering）；非法值按缺省 dom-preorder（schema 层已拦）。
+    this.ambiguousOrdering = opts.ambiguousOrdering ?? this.ambiguousOrdering;
+    // E1-c：#id 直查兜底（decision.id_fallback；缺省 true = 修复行为，false = 回退开关）。
+    this.idFallback = opts.idFallback ?? this.idFallback;
+    // E1-b：池配额模型（decision.pool_quota_mode；缺省 legacy = 旧行为逐字节）。
+    this.poolQuotaMode = opts.poolQuotaMode === "quota" ? "quota" : "legacy";
+    // E1-a：池帽观测面（decision.act_pool_cap；缺省 40；只回显不改行为）。
+    if (opts.actPoolCap !== undefined && Number.isFinite(opts.actPoolCap)) {
+      this.actPoolCap = Math.max(1, Math.min(500, Math.floor(opts.actPoolCap)));
+    }
     this.poolGate = opts.poolGate === "strict" ? "strict" : "fact";
     this.actHintStrict = opts.actHint === "strict";
     this.actHintTier = opts.actHintTier === "strong" ? "strong" : "any";
@@ -1470,6 +1507,36 @@ export class BrowserMiddleware {
   }
 
   /**
+   * E4：页面的 overlay 证据（只读；一次主 frame evaluate；**不消散**）。
+   *
+   * 用在失败路径的归因：`target_not_found`（目标被遮罩挡在池外？）/ 被遮挡
+   * （`not-actionable-or-covered`）。返回 ≤3 行几何证据；探测失败返回 null
+   * （证据缺省不造假）。子 frame 不扫——遮罩按定义铺在主 frame 的视口上。
+   */
+  async overlayEvidence(page: AnyPage): Promise<OverlayEvidenceRow[] | null> {
+    try {
+      const raw = await page.evaluate(FN_OVERLAY as () => unknown) as unknown;
+      if (!Array.isArray(raw)) return null;
+      const out: OverlayEvidenceRow[] = [];
+      for (const r of raw.slice(0, 3)) {
+        if (typeof r !== "object" || r === null) continue;
+        const row = r as Record<string, unknown>;
+        if (typeof row["desc"] !== "string") continue;
+        out.push({
+          desc: String(row["desc"]),
+          z: Number(row["z"]) || 0,
+          area: Number(row["area"]) || 0,
+          covers: row["covers"] === true,
+          txt: typeof row["txt"] === "string" ? String(row["txt"]).slice(0, 40) : "",
+        });
+      }
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * S1：读取一次 actionability 现场（bbox / 覆盖者 / 节点是否还在）。
    * 读不到不造假：bbox=null、requery=unknown，reason 仍保留。
    */
@@ -2045,7 +2112,11 @@ export class BrowserMiddleware {
     page: AnyPage, target: string, op: string,
     onAmbiguous?: "fail" | "act", wantDiagnostics?: boolean,
   ): Promise<
-    | { ref: string; el: Elem | null; loc: AnyLoc; poolSize: number; fallback: boolean; cleanup?: () => Promise<void> }
+    | {
+      ref: string; el: Elem | null; loc: AnyLoc; poolSize: number; fallback: boolean; cleanup?: () => Promise<void>;
+      /** E1-c：`#id` 直查兜底命中时出现（additive；其余路径不出现 = 键集与之前一致）。 */
+      resolvedVia?: "live-dom-id-fallback";
+    }
     | {
       error: string; poolSize: number; stopCode?: "target_ambiguous"; ambiguity?: AmbiguityView;
       /** A4：仅 `wantDiagnostics` 且落空（target_not_found）时出现。 */
@@ -2059,7 +2130,9 @@ export class BrowserMiddleware {
     }
     const refs = this.resolveCommandRef(target, elems, op, null);
     if (onAmbiguous === "fail") {
-      const ambiguity = describeAmbiguity({ target, source: "pool", elems, orderedRefs: refs });
+      const ambiguity = describeAmbiguity({
+        target, source: "pool", elems, orderedRefs: refs, ordering: this.ambiguousOrdering,
+      });
       if (ambiguity !== null) {
         return {
           error: ambiguityStopReason(target, poolSize, ambiguity), poolSize,
@@ -2067,11 +2140,34 @@ export class BrowserMiddleware {
         };
       }
     }
-    if (refs.length) {
-      const ref = refs[0]!;
+    // E2：歧义模式（onAmbiguous:"act"）的命中顺序确定性化——命中档按 act 时刻 live-DOM
+    // 文档序重排（跨帧按帧序 → 帧内文档序；scan 缺失退回池内相对位置），取首个 actionable。
+    // 谓词与"actionable"判定不变（仍是 resolveCommandRef 的可行动优先排序结果）；
+    // `"pool-order"`（回退开关）= 旧行为，跳过重排。单候选（refs.length <= 1）不进本路径。
+    let ordered = refs;
+    if (onAmbiguous === "act" && this.ambiguousOrdering === "dom-preorder" && refs.length > 1) {
+      ordered = orderCandidatesByDomPreorder(refs, elems);
+    }
+    if (ordered.length) {
+      const ref = ordered[0]!;
       const el = elems[ref]!;
       const loc = await this._locatorFor(page, el);
       if (loc !== null) return { ref, el, loc, poolSize, fallback: false };
+    }
+    // E1-c：`#id` hint 的 **live-DOM 单点直查兜底**（decision.id_fallback，缺省开）。
+    // 背景：诊断-收编一致性 defect——扫描器能报出 stable handle（id 在页面上），act 却因
+    // 元素未收编进池（配额逐出/准入面不含它）而 target_not_found。兜底只限形态 1（`#id`）：
+    //   - 命中 → 打探针属性、复用同一可交互性检查（可见盒 + actionCapabilities），证据块
+    //     `resolved_via:"live-dom-id-fallback"`（additive；调用方回显）；
+    //   - 未命中/不可交互 → 维持既有 target_not_found 语义（继续走 A3 池外回退面）；
+    //   - 其余 5 种 hint 形态**不做**直查（封闭集边界不变，任意 CSS 仍拒绝）。
+    const idFallback = await this._liveDomIdFallback(page, target, op);
+    if (idFallback !== null) {
+      return {
+        ref: idFallback.ref, el: null, loc: idFallback.loc, poolSize,
+        fallback: true, cleanup: idFallback.cleanup,
+        resolvedVia: "live-dom-id-fallback",
+      };
     }
     // A3 回退面：目标可能是**池外元素**——典型是 0×0 的自绘 slider 手柄（提取按可见盒过滤，
     // 它永远进不了池），或滚轮容器内的不可见控件。这里做一次 DOM 侧候选收集（含 0×0），
@@ -2084,6 +2180,7 @@ export class BrowserMiddleware {
       // A4：落空诊断（纯内存；唯一的页面读取是池外回退扫描行里 ≤5 行的可见性，已在上一步完成）。
       const diagnostics = actMissDiagnostics({
         target, pool: elems, op, hintOpts: this._hintOpts(), rejected: fallback.scan.rejected,
+        poolCap: this.actPoolCap,   // E1-a：观测面回显（不改池构成）
       });
       return {
         error: `${base}\n判别: ${actMissDiscrimination(diagnostics, elems, op)}`,
@@ -2097,6 +2194,91 @@ export class BrowserMiddleware {
       };
     }
     return { ref: fallback.ref, el: null, loc: fallback.loc, poolSize, fallback: true, cleanup: fallback.cleanup };
+  }
+
+  /**
+   * E1-c：`#id` hint 的 live-DOM 单点直查兜底（`decision.id_fallback`，缺省开）。
+   *
+   * 只在池内解析（含可行动优先排序）**零命中**且 hint 形状是 `#id` 时尝试：
+   *   1. `document.getElementById(id)` 单点直查（跨可达子 frame 逐帧尝试，主 frame 优先）；
+   *   2. 命中后做**同一套可交互性检查**（可见盒 + `actionCapabilities` 含当前 op）——
+   *      不可交互 = 返回 null（维持既有 target_not_found，交给后续 A3 回退面统一诊断）；
+   *   3. 可交互 = 打带批次的临时探针属性 `data-af-probe="<批次>-id"`，返回可重复求值的
+   *      locator（调用方 cleanup）。
+   *
+   * 纪律：**兜底仅限形态 1（`#id`）**；其余 5 种 hint 形态不做直查（封闭集边界不变，
+   * 任意 CSS 仍拒绝）。`idFallback === false`（回退开关）= 本方法恒 null，逐字节旧行为。
+   */
+  private async _liveDomIdFallback(
+    page: AnyPage, target: string, op: string,
+  ): Promise<{ ref: string; loc: AnyLoc; cleanup: () => Promise<void> } | null> {
+    if (this.idFallback !== true) return null;
+    const parsed = parseHint(target);
+    if (parsed.kind !== "id" || !parsed.value) return null;
+    const frames = framesOf(page as never);
+    const token = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const probeAttr = `data-af-probe="${token}-id"`;
+    for (const fr of frames) {
+      try {
+        const hit = (await (fr as unknown as {
+          evaluate(fn: (arg: { id: string; attr: string }) => Record<string, unknown> | null, arg: { id: string; attr: string }): Promise<Record<string, unknown> | null>;
+        }).evaluate((arg: { id: string; attr: string }) => {
+          const g = globalThis as unknown as {
+            document: { getElementById(s: string): any | null };
+            getComputedStyle(x: any): { display: string; visibility: string } | null;
+          };
+          const el = g.document.getElementById(arg.id);
+          if (el === null || el === undefined) return null;
+          const rect = (el as { getBoundingClientRect(): { width: number; height: number } }).getBoundingClientRect();
+          const cs = g.getComputedStyle(el);
+          const visible = rect.width > 0 && rect.height > 0
+            && cs !== null && cs.display !== "none" && cs.visibility !== "hidden";
+          el.setAttribute("data-af-probe", arg.attr.slice("data-af-probe=\"".length, -1));
+          return {
+            tag: String((el as { tagName: string }).tagName || "").toLowerCase(),
+            visible,
+            label: String((el as any).innerText || (el as any).getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().slice(0, 40),
+          };
+        }, { id: parsed.value, attr: probeAttr })) as Record<string, unknown> | null;
+        if (hit === null) continue;
+        // 可交互性：可见 + 动作能力面含当前 op（与池内 actionable 同一判据的 DOM 侧投影）。
+        if (hit["visible"] !== true) {
+          await this._probeCleanup(page, token);
+          return null;
+        }
+        const cap = actionCapabilities({
+          tag: String(hit["tag"] ?? ""),
+          role: "",
+          label: String(hit["label"] ?? ""),
+          input_type: "",
+        } as Elem);
+        if (!(cap as readonly string[]).includes(op)) {
+          await this._probeCleanup(page, token);
+          return null;
+        }
+        return {
+          ref: `id:${parsed.value}`,
+          loc: (fr as unknown as { locator(s: string): AnyLoc }).locator(`[${probeAttr}]`),
+          cleanup: async () => { await this._probeCleanup(page, token); },
+        };
+      } catch {
+        continue;   // 跨源 frame：evaluate 抛错，尝试下一帧
+      }
+    }
+    return null;
+  }
+
+  /** E1-c：探针属性清理（`_liveDomIdFallback` 与后续复用共用；失败静默）。 */
+  private async _probeCleanup(page: AnyPage, token: string): Promise<void> {
+    for (const fr of framesOf(page as never)) {
+      try {
+        await (fr as unknown as { evaluate(fn: (tok: string) => void, tok: string): Promise<void> }).evaluate((tok: string) => {
+          const g = globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<any> } };
+          const all = g.document.querySelectorAll(`[data-af-probe^="${tok}-"]`);
+          for (let i = 0; i < all.length; i++) all[i].removeAttribute("data-af-probe");
+        }, token);
+      } catch { /* 跨源 frame 清理失败不影响结论 */ }
+    }
   }
 
   /**
@@ -2231,10 +2413,19 @@ export class BrowserMiddleware {
     }
     if (onAmbiguous === "fail") {
       // A2：合成池自证 ≠ 真池——只停动作、如实给合成候选身份，不提供 near/suggested_hint。
-      const ambiguity = describeAmbiguity({ target, source: "dom_fallback", elems: synthetic, orderedRefs: refs });
+      const ambiguity = describeAmbiguity({
+        target, source: "dom_fallback", elems: synthetic, orderedRefs: refs,
+        ordering: this.ambiguousOrdering,
+      });
       if (ambiguity !== null) { await cleanup(); return { ambiguity }; }
     }
-    const ref = refs[0]!;
+    // E2：池外回退面的歧义模式同样按 DOM 序重排（合成池的 `pN` ref 序即 DOM 收集序，
+    // 本已确定；重排只在 scan 缺失时退回池序——即与旧行为一致）。缺省路径与旧行为同序。
+    let fallbackOrdered = refs;
+    if (onAmbiguous === "act" && this.ambiguousOrdering === "dom-preorder" && refs.length > 1) {
+      fallbackOrdered = orderCandidatesByDomPreorder(refs, synthetic);
+    }
+    const ref = fallbackOrdered[0]!;
     const idx = ref.slice(1);
     return {
       ref,
@@ -2288,6 +2479,8 @@ export class BrowserMiddleware {
     actionability?: ActionabilityDetail;
     /** B1：非 timeout 异常后 URL 已变 = 点击已发生（不补点，如实记）。 */
     probe_navigated?: boolean;
+    /** E1-c：`#id` 直查兜底命中时出现（additive；其余路径键集不变）。 */
+    resolved_via?: "live-dom-id-fallback";
   }> {
     const resolved = await this._resolveOne(page, target, op, onAmbiguous, opts?.diagnostics === true);
     if ("error" in resolved) {
@@ -2300,6 +2493,8 @@ export class BrowserMiddleware {
       };
     }
     const { ref, el, loc, cleanup } = resolved;
+    // E1-c：解析通道证据（additive）——只有 `#id` 直查兜底命中的那次动作才带。
+    const resolvedVia = "resolvedVia" in resolved ? resolved.resolvedVia : undefined;
     // B2：滚动请求是否走容器语义（to/by 任一给值）。其余 op 不认 scroll 参数。
     const wantContainer = op === "scroll" && scroll !== undefined
       && (scroll.to !== undefined || scroll.by !== undefined);
@@ -2407,7 +2602,8 @@ export class BrowserMiddleware {
     }
     const ok = how !== "stale_ref" && how !== "needs_value" && how !== "action_failed"
       && how !== "action_unsupported" && how !== null;
-    if (!ok) return { ok: false, ref, how: String(how), stopCode: String(how ?? "action_failed"), reason: describeActionError(arg) };
+    const viaField = resolvedVia === undefined ? {} : { resolved_via: resolvedVia };
+    if (!ok) return { ok: false, ref, how: String(how), stopCode: String(how ?? "action_failed"), reason: describeActionError(arg), ...viaField };
     if (op === "scroll") {
       const moved = scrollFact?.moved === true;
       const delta = scrollFact?.delta ?? 0;
@@ -2415,6 +2611,7 @@ export class BrowserMiddleware {
       return {
         ok: true, how: String(how), ref, changed: moved, moved, delta,
         ...scrollGeoOf(scrollFact ?? {}),
+        ...viaField,
       };
     }
     const post = await this.snapshot(page);
@@ -2422,6 +2619,7 @@ export class BrowserMiddleware {
     return {
       ok: true, how: String(how), ref, changed: JSON.stringify(pre) !== JSON.stringify(post),
       ...(probeNavigated ? { probe_navigated: true } : {}),
+      ...viaField,
     };
   }
 
@@ -2786,9 +2984,13 @@ export class BrowserMiddleware {
       force = false,
       staleRetry = false,
       candidatePriority = this.candidatePriority,
+      // E2：run 级歧义命中顺序（缺省继承实例字段——constructor 已从配置层解析）。
+      ambiguousOrdering = this.ambiguousOrdering,
     } = opts;
     // U3：run 级 surface 策略必须进**每一次**抽池（_extractPoolSettled 读实例字段）。
     this.surfacePolicy = surfacePolicy;
+    // E2：歧义命中顺序同理——实例字段是后续 actOnce/命令步读取的唯一口径。
+    this.ambiguousOrdering = ambiguousOrdering;
 
     // The navigation envelope: run-level declaration wins, else the middleware's
     // (set once for a whole journey by the app runner from `pack.hosts`).

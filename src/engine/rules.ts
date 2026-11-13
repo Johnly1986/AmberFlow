@@ -320,10 +320,19 @@ function hintMatchImpl(
   const entries = Object.entries(elems);
   /** A4：`diag:false` = 只读解析，不写 B1 旁路模块态（不写不清，见 HintMatchOptions.diag）。 */
   const recordDiag = opts?.diag !== false;
+  /**
+   * E3：`within:#id` 尾缀的池侧限定（纯内存）——命中集 ⊆ 锚子树（anchor_ids 含锚 id）。
+   * 解析层已保证 within 只能是单个 `#id`（链式/多 within = 解析期拒绝，不进这里）。
+   * 包一层让所有形状共用：限定发生在各形状的命中集上，不改变档位语义本身。
+   */
+  const inAnchor = (refs: string[]): string[] =>
+    parsed.within === undefined ? refs
+      : refs.filter((r) => (elems[r]!.anchor_ids ?? []).includes(parsed.within!));
   /** Record the strongest tier's refs, then resolve exactly as before. */
   const emit = (refs: string[], tier: number): string | null => {
-    if (sink) { sink.refs = refs; sink.tier = tier; sink.decided = null; }
-    return firstIfSame(new Set(refs), elems);
+    const limited = inAnchor(refs);
+    if (sink) { sink.refs = limited; sink.tier = tier; sink.decided = null; }
+    return firstIfSame(new Set(limited), elems);
   };
 
   if (parsed.kind === "id") {
@@ -361,10 +370,10 @@ function hintMatchImpl(
       return decided;
     };
     const exact = hitList.filter(([, e]) => attrMatchValues(e, k, opts).some((x) => x === v));
-    if (exact.length) return finishSubstr(exact.map(([r]) => r), 1);
+    if (exact.length) return finishSubstr(inAnchor(exact.map(([r]) => r)), 1);
     const slug = hitList.filter(([, e]) => attrMatchValues(e, k, opts).some((x) => x.split("/").pop() === v));
-    if (slug.length) return finishSubstr(slug.map(([r]) => r), 2);
-    return finishSubstr(hitList.map(([r]) => r), 3);
+    if (slug.length) return finishSubstr(inAnchor(slug.map(([r]) => r)), 2);
+    return finishSubstr(inAnchor(hitList.map(([r]) => r)), 3);
   }
   if (parsed.kind === "nearToken") {
     // near~token: the container identity line (add_near_context) disambiguates
@@ -437,7 +446,12 @@ function hintMatchImpl(
   for (let t = 0; t < ladder.length; t++) {
     const hits = ladder[t]!;
     if (hits.size) {
-      const refs = [...hits];
+      const refs = inAnchor([...hits]);
+      // 锚限定后本档可能清空（全部命中在锚外）——继续落下一档？不：档位语义是
+      // "最强非空档"，限定是命中集的后置过滤；限定后为空 = 本档无锚内候选，
+      // 视为落空继续下一档会让"锚内更弱档"越级顶上（跨档混选）。正确语义：
+      // 限定后空 → 直接跳到全落空记录（锚内没有任何档命中）。
+      if (refs.length === 0) break;
       const decided = firstIfSame(new Set(refs), elems);
       // 弱档（词前缀 t=3 / 词包含 t=4）胜出 = 容器撞车/同缀误中的高发形状（实测：
       // 裸词"价格"前缀命中整块结果容器 div.Vo5ZAe）。记录不改返回值/选择语义。

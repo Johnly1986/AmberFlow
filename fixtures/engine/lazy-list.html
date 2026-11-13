@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>F3 lazy-list — E5 列表收敛 fixture</title>
+<!--
+  E5 验收 fixture（批次二）。
+  - 初始渲染 7 行；每次滚动到底追加一行，共追加至 12 行后停止。
+  - ?infinite=1 开启无限滚动模式（恒可追加，scroll_settled 恒 false）。
+  断言锚点:
+  - 初始态 css_count_equals(.lazy-row, 7) held=true；scroll_settled=false；
+  - 滚动循环至收敛: 断 12、scroll_settled=true；
+  - 停止追加后的末态 scroll_settled=true（模拟有限列表）；
+  - infinite 模式下 scroll_settled 恒 false。
+  实现说明: 追加用 IntersectionObserver 的底部哨兵触发（滚动到底 = 哨兵进入视口），
+  并做 150ms 的追加节流，保证滚动循环每圈能看到稳定的行数。
+-->
+<style>
+  body { font-family: system-ui, sans-serif; margin: 20px; }
+  #scroller { height: 420px; overflow-y: auto; border: 1px solid #cbd5e0; border-radius: 6px; }
+  .lazy-row { padding: 14px 16px; border-bottom: 1px solid #edf2f7; font-size: 14px; }
+  #sentinel { height: 2px; }
+</style>
+</head>
+<body>
+<h1>懒加载列表</h1>
+<div id="status" style="font-size:13px;color:#4a5568;margin-bottom:8px;"></div>
+<div id="scroller">
+  <div id="rows"></div>
+  <div id="sentinel"></div>
+</div>
+<script>
+  var params = new URLSearchParams(location.search);
+  var infinite = params.get("infinite") === "1";
+  var TOTAL = 12;
+  var count = 0;
+  var appending = false;
+
+  function addRow() {
+    count += 1;
+    var row = document.createElement("div");
+    row.className = "lazy-row";
+    row.setAttribute("data-row", String(count));
+    row.textContent = "第 " + count + " 行（lazy item " + count + "）";
+    document.getElementById("rows").appendChild(row);
+    document.getElementById("status").textContent =
+      "rows=" + count + (infinite ? " (infinite)" : " / " + TOTAL);
+  }
+
+  for (var i = 0; i < 7; i++) addRow();   // 初始 7 行
+
+  var scroller = document.getElementById("scroller");
+  function maybeAppend() {
+    if (appending) return;
+    var canAppend = infinite || count < TOTAL;
+    // 到底判定：滚动位置距底 < 40px。
+    var atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 40;
+    if (!atBottom || !canAppend) return;
+    appending = true;
+    setTimeout(function () {
+      addRow();
+      appending = false;
+    }, 150);
+  }
+  scroller.addEventListener("scroll", maybeAppend);
+  // 观察哨兵：进入视口同样视为"滚动到底"（与 scroll 事件互补，覆盖程序化滚动）。
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver(function (entries) {
+      for (var k = 0; k < entries.length; k++) {
+        if (entries[k].isIntersecting) maybeAppend();
+      }
+    }, { root: scroller }).observe(document.getElementById("sentinel"));
+  }
+</script>
+</body>
+</html>

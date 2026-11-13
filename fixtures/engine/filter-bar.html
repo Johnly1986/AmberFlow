@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>F2 filter-bar — E1-c / E1-b fixture</title>
+<!--
+  E1-c / E1-b 验收 fixture（批次二/三）。
+  复刻携程结构:
+  - 顶部导航壳 ≈30 个无 id 按钮；
+  - class-only 筛选栏 li#filter_item_airline / #filter_item_time / ...（无 role，有 id）；
+  - 列表区 12 个 class-only 订票按钮。
+  断言锚点:
+  - #filter_item_airline 作为 act hint 可命中（收编路径或 live-DOM id fallback 路径）；
+  - 壳元素不因配额调整被逐出池；
+  - class-only div（无任何封闭集形态）仍 target_not_found；任意 CSS 仍 config_error。
+-->
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; }
+  nav { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px; background: #f7fafc; border-bottom: 1px solid #e2e8f0; }
+  nav button { padding: 4px 10px; border: 1px solid #cbd5e0; border-radius: 4px; background: #fff; cursor: pointer; font-size: 13px; }
+  .filters { display: flex; gap: 8px; padding: 10px 16px; background: #fff; }
+  .filters li { list-style: none; padding: 6px 14px; border: 1px solid #a0aec0; border-radius: 999px; cursor: pointer; font-size: 13px; }
+  .filters li.active { background: #ebf8ff; border-color: #2b6cb0; }
+  .results { padding: 8px 16px; }
+  .flight-item { display: flex; align-items: center; justify-content: space-between; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; margin: 6px 0; }
+  .book-btn { padding: 6px 18px; border: 1px solid #c05621; border-radius: 6px; background: #fff; color: #c05621; cursor: pointer; }
+  #c_flight { min-height: 20px; }
+</style>
+</head>
+<body>
+<nav aria-label="主导航">
+  <button>首页</button><button>机票</button><button>酒店</button><button>火车票</button>
+  <button>汽车票</button><button>旅游</button><button>门票</button><button>攻略</button>
+  <button>租车</button><button>邮轮</button><button>团购</button><button>美食</button>
+  <button>购物</button><button>周边游</button><button>国内游</button><button>出境游</button>
+  <button>签证</button><button>保险</button><button>金融</button><button>积分</button>
+  <button>礼品卡</button><button>客服</button><button>帮助</button><button>关于</button>
+  <button>App</button><button>电脑版</button><button>繁体</button><button>English</button>
+  <button>无障碍</button>
+</nav>
+<div id="c_flight">
+  <ul class="filters">
+    <li id="filter_item_airline" class="filter-item">航空公司</li>
+    <li id="filter_item_time" class="filter-item">起飞时间</li>
+    <li id="filter_item_price" class="filter-item">价格</li>
+    <li id="filter_item_direct" class="filter-item">仅直飞</li>
+    <li id="filter_item_cabin" class="filter-item">舱等</li>
+  </ul>
+  <div class="results">
+    <div class="flight-item"><span class="flt-info">CA1448 08:30-11:05</span><button class="book-btn">订票</button></div>
+    <div class="flight-item"><span class="flt-info">MU5101 09:00-11:20</span><button class="book-btn">订票</button></div>
+    <div class="flight-item"><span class="flt-info">CZ3907 10:15-12:40</span><button class="book-btn">订票</button></div>
+    <div class="flight-item"><span class="flt-info">HU7607 11:30-13:55</span><button class="book-btn">订票</button></div>
+    <div class="flight-item"><span class="flt-info">ZH9101 12:45-15:10</span><button class="book-btn">订票</button></div>
+    <div class="flight-item"><span class="flt-info">3U8882 13:55-16:20</span><button class="book-btn">订票</button></div>
+    <div class="flight-item"><span class="flt-info">MF8103 15:10-17:30</span><button class="book-btn">订票</button></div>
+    <div class="flight-item"><span class="flt-info">SC4607 16:25-18:50</span><button class="book-btn">订票</button></div>
+    <div class="flight-item"><span class="flt-info">GJ8882 17:40-20:05</span><button class="book-btn">订票</button></div>
+    <div class="flight-item"><span class="flt-info">EU2293 18:50-21:15</span><button class="book-btn">订票</button></div>
+    <div class="flight-item"><span class="flt-info">PN6235 20:05-22:30</span><button class="book-btn">订票</button></div>
+    <div class="flight-item"><span class="flt-info">KN5957 21:20-23:45</span><button class="book-btn">订票</button></div>
+  </div>
+</div>
+<div id="hit-log" aria-live="polite" style="padding:4px 16px;color:#4a5568;font-size:13px;"></div>
+<script>
+  // 点击记账（断言用）：筛选项点击切换 active；订票点击记录 marker。
+  window.__hits = [];
+  document.querySelectorAll(".filters li").forEach(function (li) {
+    li.addEventListener("click", function () { li.classList.toggle("active"); window.__hits.push(li.id); log(); });
+  });
+  document.querySelectorAll(".book-btn").forEach(function (b, i) {
+    b.setAttribute("data-marker", "book-" + (i + 1));
+    b.addEventListener("click", function () { window.__hits.push(b.getAttribute("data-marker")); log(); });
+  });
+  function log() {
+    var out = document.getElementById("hit-log");
+    if (out) out.textContent = window.__hits.join(",");
+  }
+</script>
+</body>
+</html>

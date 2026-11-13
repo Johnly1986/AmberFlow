@@ -17,6 +17,7 @@ import type {
 import type { DecisionProvider } from "../model/decision-provider.ts";
 import type { RangeOptions, RangeOutcome, RangeValue } from "./range.ts";
 import type { AttrValueMatch, HintMatchCandidate } from "./rules.ts";
+import type { AmbiguousOrdering } from "./ambiguity.ts";
 import type { SignalSpec } from "./signals.ts";
 import type { SettlePage, SettleResult } from "./settle.ts";
 import type { CommandDecl } from "./actions.ts";
@@ -250,6 +251,23 @@ export interface ActionabilityDetail {
   blocker: string | null;
   /** 重新查询时目标节点还在不在文档里。 */
   requery: "present" | "detached" | "unknown";
+}
+
+/**
+ * E4：overlay 证据行（只读探测；**不自动消散**——是否关闭由作者/策略决定，
+ * 引擎只把"页面上有遮罩"变成结构化事实）。行数有界（≤3）。
+ */
+export interface OverlayEvidenceRow {
+  /** `tag#id.class`（id/首两 class，与 blocker 描述同口径）。 */
+  desc: string;
+  /** 计算样式 z-index（解析不出数字 = 0）。 */
+  z: number;
+  /** 遮挡块面积 / 视口面积（四舍五入到百分位）。 */
+  area: number;
+  /** 是否整块盖住视口（cookie banner 背板的典型形状）。 */
+  covers: boolean;
+  /** 元素文本首 40 字（折叠空白；空文本省略由构造方决定）。 */
+  txt: string;
 }
 
 /**
@@ -661,6 +679,29 @@ export interface RunOptions {
    */
   candidatePriority?: "bucketed" | "main-first";
   /**
+   * E2：`on_ambiguous:"act"` 的歧义命中顺序（`decision.ambiguous_ordering` 配置键）。
+   * `"dom-preorder"`（缺省）= act 时刻 live-DOM 文档序首个 actionable 候选（行为变更，
+   * 见发版说明；证据块输出 ordering/selected_ref/selected_dsh_ref/sort_key）；
+   * `"pool-order"` = 旧池序（回退开关）。仅歧义模式（≥2 distinct 候选且 on_ambiguous:"act"）生效。
+   */
+  ambiguousOrdering?: AmbiguousOrdering;
+  /**
+   * E1-c：act 的 `#id` hint live-DOM 直查兜底（`decision.id_fallback`；缺省 true = 修复
+   * "扫描器报得出、act 却 target_not_found"的一致性 defect；false = 回退开关）。
+   * 仅限形态 1（`#id`），其余 hint 形态不做直查。
+   */
+  idFallback?: boolean;
+  /**
+   * E1-b：池配额模型（`decision.pool_quota_mode`；缺省 "legacy" = 既有优先级逐出，
+   * 行为不变）。"quota" = 双配额灰度档：viewport 保底 + id-backed 保留 + 壳元素限额。
+   */
+  poolQuotaMode?: "legacy" | "quota";
+  /**
+   * E1-a：池预算帽的观测面（`decision.act_pool_cap`；缺省 40 = MAX_ELEMENTS）。
+   * **只观测**：落空诊断回显 `pool_cap`；池构成不因它变化（默认值调整需另行变更）。
+   */
+  actPoolCap?: number;
+  /**
    * A1 `forceAct`（opt-in，声明面；缺省不出现 = 今天的行为逐字节不变）：
    * 命令步即使 done 信号在动作前已成立，也**先把命令闭集执行完**，执行后再评估 done。
    *
@@ -831,6 +872,26 @@ export interface MiddlewareOptions {
    * `meta.policy.candidate_priority`；缺省 "bucketed" = A2 行为变更面）。
    */
   candidatePriority?: "bucketed" | "main-first";
+  /**
+   * E2：constructor-level default for 歧义命中顺序（`decision.ambiguous_ordering`
+   * 配置键；缺省 "dom-preorder" = 行为变更面，"pool-order" = 旧序回退开关）。
+   */
+  ambiguousOrdering?: AmbiguousOrdering;
+  /**
+   * E1-c：constructor-level default for `#id` 直查兜底（`decision.id_fallback`
+   * 配置键；缺省 true）。
+   */
+  idFallback?: boolean;
+  /**
+   * E1-b：constructor-level default for 池配额模型（`decision.pool_quota_mode`
+   * 配置键；缺省 "legacy"）。
+   */
+  poolQuotaMode?: "legacy" | "quota";
+  /**
+   * E1-a：constructor-level default for 池帽观测面（`decision.act_pool_cap`
+   * 配置键；缺省 40；只观测）。
+   */
+  actPoolCap?: number;
   /**
    * S1：pre-held done 的处置（来自 `meta.policy.done_preheld`；缺省 "warn" = 只记录）。
    * 见 `PackPolicy.done_preheld`（app-pack.ts）的语义说明。

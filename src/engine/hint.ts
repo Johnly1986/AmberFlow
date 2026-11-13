@@ -17,12 +17,12 @@
  * 折叠）。现在"这串 hint 是什么形状"只在一个函数里回答；两面只回答"在这个底座上它命中谁"。
  */
 export type ParsedHint =
-  | { kind: "id"; value: string }
-  | { kind: "attrSubstr"; tag: string; attr: string; value: string }
-  | { kind: "nearToken"; tag: string; token: string }
-  | { kind: "attrEq"; tag: string; attr: string; value: string }
-  | { kind: "tag"; tag: string }
-  | { kind: "bare"; token: string };
+  | { kind: "id"; value: string; within?: string }
+  | { kind: "attrSubstr"; tag: string; attr: string; value: string; within?: string }
+  | { kind: "nearToken"; tag: string; token: string; within?: string }
+  | { kind: "attrEq"; tag: string; attr: string; value: string; within?: string }
+  | { kind: "tag"; tag: string; within?: string }
+  | { kind: "bare"; token: string; within?: string };
 
 /** DOM 属性名的规范形（`test`→`data-test`、`type`→`type`）；池侧用 `poolAttr` 映射回字段名。 */
 const DOM_ATTR: Record<string, string> = { test: "data-test", "data-test": "data-test", type: "type" };
@@ -34,23 +34,41 @@ export function poolAttr(attr: string): string {
 }
 
 /**
- * **唯一**的 hint 语法解析器（6 种形状 + 大小写折叠在这里发生一次）。
+ * **唯一**的 hint 语法解析器（6 种形状 + `within:#id` 尾缀 + 大小写折叠在这里发生一次）。
  *
  * 规则（与冻结计划的写法一一对应）：
  *   `#id` ｜ `tag[attr~substr]`（含 `[near~token]`）｜ 无括号的 `tag~token`（近邻）｜
  *   `tag[attr=value]`（值去引号）｜ `button|link|input|textarea|select`（角色词）｜ 裸词。
  *
+ * E3：尾缀 `within:#id`（可选；**单层，不链式**）——把命中集限定在锚元素子树内。
+ * 剥离发生在一切形状判定之前；锚只能是 `#id` 形态（与 E1-c 的封闭集边界同源，
+ * 任意 CSS 锚仍拒绝）。出现多个 `within:` = 解析期拒绝（链式锚 = 不支持，返回
+ * 未剥尾缀的原串按裸词处理 → 落空，绝不静默取第一个）。
+ *
  * 注意：解析只管**形状**。属性名是否在池子的字段模型里、值怎么比（精确/包含/按路径段分档）
  * 是各观察面自己的事——那部分差异是设计（池子是投影，DOM 是活页面），不是漂移。
  */
 export function parseHint(hint: string): ParsedHint {
-  const h = hint.trim().toLowerCase();
-  if (h.startsWith("#")) return { kind: "id", value: h.slice(1) };
+  let h = hint.trim().toLowerCase();
+  // E3：剥离 `within:#id` 尾缀（单层）。匹配段数 = 尾缀出现次数；>1 次不剥
+  //（原串按既有形状解析 → 大概率裸词落空 = 显式失败，不给"链式锚"开暗门）。
+  let within: string | undefined;
+  const m = /(.*?)(?:\s+within:)(#[a-z0-9_\-.:]+)\s*$/.exec(h);
+  if (m !== null) {
+    const count = (h.match(/within:/g) ?? []).length;
+    if (count === 1 && m[1]!.trim() !== "") {
+      within = m[2]!.slice(1);
+      h = m[1]!.trim();
+    }
+  }
+  const withWithin = <T extends ParsedHint>(p: T): T =>
+    within === undefined ? p : ({ ...p, within } as T);
+  if (h.startsWith("#")) return withWithin({ kind: "id", value: h.slice(1) });
   if (h.includes("[") && h.split("[", 2)[1]!.includes("~")) {
     const tag = h.slice(0, h.indexOf("["));
     const rest = h.slice(h.indexOf("[") + 1).replace(/\]$/, "");
     const tilde = rest.indexOf("~");
-    return { kind: "attrSubstr", tag, attr: DOM_ATTR[rest.slice(0, tilde)] ?? rest.slice(0, tilde), value: rest.slice(tilde + 1) };
+    return withWithin({ kind: "attrSubstr", tag, attr: DOM_ATTR[rest.slice(0, tilde)] ?? rest.slice(0, tilde), value: rest.slice(tilde + 1) });
   }
   if (h.split("[").pop()!.includes("~")) {
     // 04-E：无括号的 `tag~token` 是文档声明的合法形状（:40），但旧实现无括号时走
@@ -59,7 +77,7 @@ export function parseHint(hint: string): ParsedHint {
     const tilde = h.indexOf("~");
     const tag = bracket >= 0 ? h.slice(0, bracket) : h.slice(0, tilde);
     const after = bracket >= 0 ? h.slice(bracket + 1) : h.slice(tilde + 1);
-    return { kind: "nearToken", tag, token: after.replace(/\]$/, "").split("~").slice(-1)[0]! };
+    return withWithin({ kind: "nearToken", tag, token: after.replace(/\]$/, "").split("~").slice(-1)[0]! });
   }
   if (h.includes("[")) {
     const tag = h.slice(0, h.indexOf("["));
@@ -67,9 +85,9 @@ export function parseHint(hint: string): ParsedHint {
     const eq = rest.indexOf("=");
     const attr = DOM_ATTR[eq >= 0 ? rest.slice(0, eq) : rest] ?? (eq >= 0 ? rest.slice(0, eq) : rest);
     const value = (eq >= 0 ? rest.slice(eq + 1) : "").replace(/\]$/, "").replace(/^['"]|['"]$/g, "");
-    return { kind: "attrEq", tag, attr, value };
+    return withWithin({ kind: "attrEq", tag, attr, value });
   }
-  if (["button", "link", "input", "textarea", "select"].includes(h)) return { kind: "tag", tag: h };
-  return { kind: "bare", token: h };
+  if (["button", "link", "input", "textarea", "select"].includes(h)) return withWithin({ kind: "tag", tag: h });
+  return withWithin({ kind: "bare", token: h });
 }
 
