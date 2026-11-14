@@ -91,49 +91,64 @@ function parseFrameChainValue(raw: string): string[] | null {
   return raw.split(">");
 }
 
-const WITHIN_TAIL_RE = /(?:\s+within:)(#[a-z0-9_\-.:]+)\s*$/;
-const FRAME_TAIL_RE = /(?:\s+frame:)(\S+)\s*$/;
-/** 诊断面的尾缀预扫：与 FRAME_TAIL_RE 同形但允许**空值**（空值 parseHint 同样回退旧形状，
+/** 诊断面的尾缀预扫：与 frame 尾缀同形但允许**空值**（空值 parseHint 同样回退旧形状，
  *  `describeFrameSuffixRejection` 要能点名"frame: 后没有值"）。 */
 const FRAME_TAIL_VALUE_RE = /(?:\s+frame:)(\S*)\s*$/;
+/** 诊断面用：within 尾缀词法（与 splitTailSuffixes 内部同形；describe 在小写串上逐段剥离）。 */
+const WITHIN_TAIL_RE = /(?:\s+within:)(#[a-z0-9_\-.:]+)\s*$/;
 
-export function parseHint(hint: string): ParsedHint {
-  const h = hint.trim().toLowerCase();
-  // 串尾词法预扫：从串尾反复剥离两类后缀（同一串尾位置字面前缀不同，不可能同时匹配）。
-  let rest = h;
+/**
+ * 串尾词法预扫 + 循环剥离（A 批 R2-5；C 批 B-1 起导出为**唯一剥离出处**，供 parseHint 与
+ * `findByHint` 等旧匹配器共用——N6：防 hint 语法两处漂移）。在**原始大小写**串上做（正则 /i）；
+ * 返回 base 保留原串大小写，`within`/frameChain 值小写规范化。
+ * 两类后缀各 ≤1、只认「前置空白 + 串尾」；任一类超限/值非法/空段 ⇒ **整组回退**
+ * （base = trim 后原串、无后缀字段，绝不半剥）——与 parseHint 逐字节同口径。
+ */
+export function splitTailSuffixes(hint: string): { base: string; within?: string; frameChain?: string[] } {
+  const WITHIN_TAIL_RE = /(?:\s+within:)(#[a-z0-9_\-.:]+)\s*$/i;
+  const FRAME_TAIL_RE = /(?:\s+frame:)(\S+)\s*$/i;
+  let rest = hint.trim();
   let within: string | undefined;
   let frameChain: string[] | undefined;
   let withinSeen = 0;
   let frameSeen = 0;
-  let suffixRejected = false;
+  let rejected = false;
   for (;;) {
     const wm = WITHIN_TAIL_RE.exec(rest);
     const fm = wm === null ? FRAME_TAIL_RE.exec(rest) : null;
     if (wm === null && fm === null) break;
     if (wm !== null) {
       const base = rest.slice(0, wm.index).trim();
-      if (base === "") { suffixRejected = true; break; }
+      if (base === "") { rejected = true; break; }
       withinSeen += 1;
-      if (withinSeen > 1) { suffixRejected = true; break; }
-      within = wm[1]!.slice(1);
+      if (withinSeen > 1) { rejected = true; break; }
+      within = wm[1]!.slice(1).toLowerCase();
       rest = base;
       continue;
     }
     const base = rest.slice(0, fm!.index).trim();
-    if (base === "") { suffixRejected = true; break; }
+    if (base === "") { rejected = true; break; }
     frameSeen += 1;
-    if (frameSeen > 1) { suffixRejected = true; break; }
-    const chain = parseFrameChainValue(fm![1]!);
-    if (chain === null) { suffixRejected = true; break; }   // 值非法/空段/超限 ⇒ 整组拒绝
+    if (frameSeen > 1) { rejected = true; break; }
+    const chain = parseFrameChainValue(fm![1]!.toLowerCase());
+    if (chain === null) { rejected = true; break; }
     frameChain = chain;
     rest = base;
   }
-  if (suffixRejected) {
-    // 整组回退：两类后缀都不应用，按原始串解析（绝不半剥）。
-    within = undefined;
-    frameChain = undefined;
-    rest = h;
-  }
+  if (rejected) return { base: hint.trim() };   // 整组回退：绝不半剥
+  return {
+    base: rest,
+    ...(within !== undefined ? { within } : {}),
+    ...(frameChain !== undefined ? { frameChain } : {}),
+  };
+}
+
+export function parseHint(hint: string): ParsedHint {
+  // 串尾剥离收口在 splitTailSuffixes（唯一出处）；先小写再剥离，与旧实现逐字节同口径。
+  const s = splitTailSuffixes(hint.toLowerCase());
+  const rest = s.base;
+  const within = s.within;
+  const frameChain = s.frameChain;
   const withSuffix = <T extends ParsedHint>(p: T): T => {
     let q = p;
     if (within !== undefined) q = { ...q, within } as T;

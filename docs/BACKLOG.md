@@ -219,3 +219,21 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 - **证据**：`git rev-list --left-right --count main...feat/dry-branch-lint` = `14 1`；唯一独有提交 `8168834` 只新增 `src/app/declaration-scan.ts`（796 行、纯函数零接线）；主线上该文件内容 sha256 与分支一致（`27ecca5a…`），且主线已接线 4 处（`hint-lint.ts` / `apps-rehearsal.ts` / `apps.ts` / `rules.ts`）。
 - **未采纳范围（显式记录，非遗漏）**：收集器的消费面在 task-10 阶段收窄到 **hint 形状位**（`hint-lint.ts`：nearToken/裸词/attrSubstr-on-label 三类静态提醒）；挂起工作流的**族声明校验 / `declarationLint` 契约字段 / dynamic 计数外显**未接出——这是新的范围决策，等真实需求。
 - **恢复条件**：需要 `apps check` 对"分支内声明形状"做 problem 级校验（而不仅是 hint 语义 warning）时，从 tag `archive/feat-dry-branch-lint` 起（对应设计/验收标准见任务沉淀记录）。
+
+---
+
+## frame:<origin> 后续立项（2026-11-15 实施复审）
+
+**状态**：open ｜ 来源：`frame:<origin>` 帧限定 hint 落地（`bc400ca..8358c92`，规格 `docs/FRAME_SCOPE_HINT_PLAN.md` §13）+ 实现复审（CONDITIONAL APPROVE）
+
+| # | 项 | 说明 | 关联 |
+|---|---|---|---|
+| 1 | **within 权威对等** | FW8/F64 不看 within、DRF-text 忽略 within、四处合成池无 `anchor_ids` → 回捞面 `#x within:#p` 可能操作锚外 #x | E 批（within 语义链）前置修复 |
+| 2 | `findByHint` 支持 `within:` | 组合后缀的帧链过滤已修（B-1）；但 within 作用域在该面不校验 | 同 #1 |
+| 3 | 跨帧同签名不合并 | `firstIfSame` 仍按 tag/label/href/data_test 合并（run 命令步直接执行一个）；需独立立项 + 开关 | D2 边界 |
+| 4 | `read/extract/collect/judge` 帧限定对称化 | `locatorAnyFrame` 逐帧 OR，无法指定帧——act 可按帧而读不能 | 独立立项 |
+| 5 | hintMemory / `induceHint` 帧限定 | 记忆产物不带 `frame:`——跨帧同名回放歧义→回退模型（无误动作） | 小项 |
+| 6 | >6 帧 / 每帧池配额 | `framesOf ≤6`、窗口 40/120 跨帧共享主帧优先 | 需先测量 |
+| 7 | `matchedChains` 截断标记 | 证据链 >4 条去重截断时无 truncated 标记 | 小项 |
+| 8 | 整串 `frame:` 诊断 | `frame:<origin>` 无 hint 主体时不点名"缺少主体"（显式失败仍在） | 小项 |
+| 9 | 文档：大写 origin 示例 | hint 先 lowercase——`FRAME:HTTPS://A.COM` 会被识别为合法尾缀（符合 `i` 旗标），文档补一句示例 | 文档 |

@@ -27,7 +27,7 @@ import { defaultPlanPath } from "../support/amberflow-home.ts";
 import * as browserEnv from "../browser/browser-env.ts";
 import { browserSession, BrowserMiddleware, type BrowserSession } from "../engine/executor.ts";
 import { extractElements, type Elem, type ElemPool } from "../engine/extraction.ts";
-import { parseHint } from "../engine/hint.ts";
+import { parseHint, splitTailSuffixes } from "../engine/hint.ts";
 import { frameScopeMatches } from "../engine/frame-scope.ts";
 import { induceHint } from "../model/hint-memory.ts";
 import { installLayaRuntime, LayaNotConfiguredError } from "../model/model.ts";
@@ -179,12 +179,16 @@ export function selectorForHint(hint: string): string | null {
 /** Resolve a user-given hint (`[data-test=x]`, `#id`, `[name=x]`, …) against the pool. */
 export function findByHint(elems: ElemPool, hint: string): { ref: string; el: Elem } | null {
   // C 批（B9/R2-4）：`frame:<origin链>` 尾缀必须先 parseHint 再**按帧链过滤池**，否则
-  // `plan check --probe`（本函数的另一消费面）会把帧内目标误报未命中。无后缀 = 逐字节旧路径
-  // （pool 就是原池、base 就是原串）；后缀的合法性仍只由 parseHint 判定，这里不另立语法。
-  const { base, frameChain } = splitFrameSuffix(hint);
+  // `plan check --probe`（本函数的另一消费面）会把帧内目标误报未命中。
+  // B-1 修复：base/帧链都由**同一剥离器**（hint.ts splitTailSuffixes，唯一出处）产出——
+  // 两种后缀顺序都剥净（旧实现只认字面串尾 frame:，`frame:o within:#p` 会把尾缀留在
+  // base 里而假阴性）。无后缀 = base 就是原串（旧路径逐字节不变）。
+  const s = splitTailSuffixes(hint);
+  const frameChain = s.frameChain;
   const pool: ElemPool = frameChain === undefined
     ? elems
     : Object.fromEntries(Object.entries(elems).filter(([, el]) => frameScopeMatches(frameChain, el)));
+  const base = frameChain === undefined ? hint : s.base;
   const m = /^\[?(data-test|id|name)=(.+?)\]?$/.exec(base);
   const fold = (s: string): string => s.toLowerCase();
   if (m) {
@@ -205,19 +209,6 @@ export function findByHint(elems: ElemPool, hint: string): { ref: string; el: El
   }
   for (const [ref, el] of Object.entries(pool)) if (induceHint(el) === base) return { ref, el };
   return null;
-}
-
-/**
- * C 批：把 hint 拆成「旧形状主体 + 合法帧链」。只有 parseHint 接受的 `frame:` 尾缀才拆
- * （值非法/多尾缀 = parseHint 不接受 ⇒ frameChain undefined，整串按旧行为匹配 = 显式落空）。
- * 无后缀时 `base === hint`（不去 trim/不改大小写）＝ 旧路径逐字节不变。
- */
-function splitFrameSuffix(hint: string): { base: string; frameChain?: string[] } {
-  const frameChain = parseHint(hint).frameChain;
-  if (frameChain === undefined) return { base: hint };
-  const trimmed = hint.trim();
-  const m = /\s+frame:\S+\s*$/i.exec(trimmed);
-  return { base: m === null ? trimmed : trimmed.slice(0, m.index).trimEnd(), frameChain };
 }
 
 /**

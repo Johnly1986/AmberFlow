@@ -163,6 +163,17 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - **【验证】** `npm run typecheck` / `npm run prompt-hit` / `npm run schema:check`；D 批只改文档与
   契约文本，**无运行时代码行为改动**。
 
+### 实施复审修复（2026-11-15，架构复审 CONDITIONAL APPROVE 的条件项 B-1）
+
+- **【修复·findByHint 组合后缀假阴性】** `splitFrameSuffix` 只认**字面串尾**的 `frame:`——
+  `#id frame:o within:#p` / `#id within:#p frame:o`（两种顺序的合法组合）会把尾缀留在 base
+  里而假阴性，`plan check --probe` 错报"机制性必挡项 ✗"。修法：串尾剥离收口为 `hint.ts`
+  导出的 **`splitTailSuffixes` 唯一出处**（parseHint 与 findByHint 共用，复审 N6 同步解决），
+  两种顺序的身份形状 / induceHint 产物均正确命中；无后缀路径逐字节不变。
+- **【记账】** 复审 N1（HINT_HEAD nearToken 维持整串——防无上下文误命中的既定纪律，规格
+  该句过承诺已回收）、N7（`matchedChains` 截断无标记）、hintMemory/induceHint 不带 `frame:`
+  等边界，已入规格 §13.3/§13.4 与 `docs/BACKLOG.md`「frame:<origin> 后续立项」。
+
 ### 已知边界 / 未做（A–D 批后的诚实清单）
 
 - **`within` 语义链（E 批）**：未做，独立回退单元。合成池（hintLookup/A3/DRF/FW8）没有

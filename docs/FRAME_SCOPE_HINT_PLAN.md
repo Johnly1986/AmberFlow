@@ -475,6 +475,7 @@ frame:<o1>><o2>         # 链：外→内；末段 = 元素所在帧自身 origi
 - 引擎歧义证据 `frame_origin` 上限是 `AMBIGUITY_ORIGIN_MAX=120`；桥投影再 clip 到 60（更严，不改变引擎契约）。
 - `structure_path` 只进 inspect 恒开面与 `ctx.observe({includeStructure:true})` / 桥 `include_structure` opt-in 面；不进模型面、不进歧义证据。
 - `HINT_FRAME_SUFFIX` 的 grammar-prompt 自证随 A 批落地（不是 D 批）；D 批只核对文档/契约文字。
+- **实施复审（2026-11-15，CONDITIONAL APPROVE）后续**：① **B-1 已修**——`findByHint` 对 `frame:`+`within:` 组合（两种顺序）此前假阴性（base 只认字面串尾 `frame:`），串尾剥离已收口为 `hint.ts` 导出的 **`splitTailSuffixes` 唯一出处**（parseHint 与 findByHint 共用，复审 N6 同步解决），组合顺序身份/induceHint 形状均正确命中；② R2-7 的 **nearToken 半项未做**（HINT_HEAD 维持整串——DOM 回捞按整串"几乎不命中"是防无上下文误命中的既定纪律），规格该句过承诺已回收；③ N2（整串 `frame:<origin>` 无主体的诊断）未做，显式失败仍在；④ N7（`matchedChains` 截断无标记）未做；⑤ hintMemory/induceHint 不产出 `frame:` 尾缀（跨帧同名记忆回放会歧义→回退模型，无误动作）——均入 §13.4 与 `docs/BACKLOG.md`。
 
 ### 13.4 未做 / 延后
 
@@ -487,6 +488,9 @@ frame:<o1>><o2>         # 链：外→内；末段 = 元素所在帧自身 origi
 | `about:blank` / srcdoc 帧寻址 | 不做（本期） | 未知 origin 帧不可被任何 `frame:` 命中（D5）；origin 只用于匹配，不是安全判定（门禁是 hosts） |
 | 帧下标链 / nth-child / XPath / iframe 选择器锚 | 不做 | 漂移/破坏 hint 封闭集（§12.1/§12.6） |
 | `findByHint` 六形状全语义 | 未做（C 批边界） | 见 §13.2-4；`plan check --probe` 仅身份形状 + induceHint 产物 |
+| `findByHint` 支持 `within:` | 未做（复审 B-1 附注） | 组合后缀的 **frame 链过滤**已由 B-1 修复；但 within 作用域在该面不生效（与 R2-8 同属回捞面权威不对等，E 批前置） |
+| hintMemory / `induceHint` 帧限定 | 未做（复审边界） | `hint-memory.ts` 只产出 `[data-test=x]`/`tag[near~token]` 形状——跨帧同名记忆回放会歧义→回退模型（无误动作，记忆价值打折） |
+| `frameChainOf` 深度帽 8 × `framesOf ≤6` 口径差 | 记录 | 帽只防病态环；更深帧本就不可达；病理帧树（环）由 `parent===cur`+帽兜底 |
 | 结构证据进 ambiguity / 模型面 | 不做 | `structure_path` 仅诊断，不进 hint/模型/歧义（§12.5） |
 
 ### 13.5 验证与证据
