@@ -354,7 +354,9 @@ await ctx.step("在 dropdown 里选 Option 2", {
 // 目标可以是列表里的交互元素（最近可滚动祖先即容器），也可以直接是容器本身（如 div[role="feed"]）。
 const s = await ctx.scrollList("Feed list", { to: "bottom" });          // 或 { to:"top"|"page" } / { by: 800 }
 // s = { ok, scrollTop, scrollHeight, clientHeight, moved, stopCode?, reason? }
-// 找不到可滚动容器 = ok:false + stopCode:"not_scrollable"；目标解析不到 = "target_not_found"
+// 找不到可滚动容器 = ok:false + stopCode:"not_scrollable"（reason 带祖先诊断：最近非 visible
+// overflow 祖先的 overflow/scrollHeight/clientHeight；若疑似 overflow:hidden 程序化滚动面板会
+// 明确提示——标准判据只认 overflow:auto/scroll/overlay + 内容溢出）；目标解析不到 = "target_not_found"
 //
 // F1 合成滚动目标：target 还接受 "document" | "body" | "html" | "window"（大小写不敏感）——
 // 不进元素池、不占池位、不做 hint 匹配，统一解析主滚动器 document.scrollingElement

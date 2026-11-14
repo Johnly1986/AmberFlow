@@ -2762,7 +2762,41 @@ export class BrowserMiddleware {
             if (p === doc.body) break;
           }
         }
-        if (!t || !scrollable(t)) return { ok: false, reason: "no scrollable container found on the element or its ancestors" };
+        if (!t || !scrollable(t)) {
+          // F49 风格的能力提示：not_scrollable 不是沉默失败——把祖先的 overflow 事实带出来，
+          // 让 Agent 能区分「没有可滚动祖先」/「最近 overflow 祖先内容不溢出」/「页面用
+          // overflow:hidden 程序化 scrollTop 的自定义滚动面板」。判据与 stopCode 语义不变
+          // （标准滚动器只认 overflow:auto/scroll/overlay + 内容溢出）。
+          const diag: Array<{ tag: string; cls: string; oy: string; sh: number; ch: number; prog: boolean }> = [];
+          let p2: any = node.parentElement;
+          for (let k = 0; k < 32 && p2 && diag.length < 3; k++, p2 = p2.parentElement) {
+            if (p2 === doc.body || p2 === doc.documentElement) break;
+            const cs2 = g.getComputedStyle(p2);
+            if (cs2.overflowY === "visible") continue;
+            const sh2 = Number(p2.scrollHeight) || 0;
+            const ch2 = Number(p2.clientHeight) || 0;
+            diag.push({
+              tag: String(p2.tagName || "").toLowerCase(),
+              cls: String(p2.className || "").split(/\s+/)[0] || "",
+              oy: cs2.overflowY, sh: sh2, ch: ch2,
+              prog: sh2 > ch2 + 2 && cs2.overflowY !== "clip",
+            });
+          }
+          const fmt = diag.map((d) =>
+            `${d.tag}${d.cls ? "." + d.cls : ""} overflow:${d.oy} ${d.sh}/${d.ch}`
+            + (d.prog ? " (programmatically scrollable, not a standard scroller)" : "")).join("; ");
+          const prog = diag.some((d) => d.prog);
+          const why = diag.length === 0
+            ? "no overflow ancestor (every ancestor is overflow:visible)"
+            : `ancestors: ${fmt}`;
+          const hint = prog
+            ? " — the page likely uses a custom overflow:hidden scroll panel; the engine scrolls standard overflow:auto/scroll containers only (scroll a target inside one, or use ctx.scrollList(\"document\"))"
+            : "";
+          return {
+            ok: false,
+            reason: `no standard scrollable container found on the element or its ancestors — ${why}${hint}`,
+          };
+        }
         const before = t.scrollTop;
         const max = Math.max(0, t.scrollHeight - t.clientHeight);
         let next = before;

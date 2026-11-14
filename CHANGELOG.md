@@ -4,6 +4,20 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — not_scrollable 停因诊断增强（祖先 overflow 证据）
+
+- **【优化·滚动停因】** `_scrollWithLoc`（run scroll 命令 / `ctx.scrollList` / 会话 act 容器滚动
+  的同一条实现）在找不到标准滚动容器时，`reason` 不再只有一句泛化文案，而是带上祖先诊断：
+  最近 ≤3 个非 `overflow:visible` 祖先的 `tag.class`/overflow 值/`scrollHeight/clientHeight`；
+  若存在「内容溢出但 `overflow:hidden`」的程序化滚动候选，明确标注
+  `(programmatically scrollable, not a standard scroller)` 并提示引擎只滚标准
+  `overflow:auto/scroll/overlay` 容器（可改滚其内部目标或 `ctx.scrollList("document")`）。
+  判据与 stopCode 语义**不变**（仍 `not_scrollable`、零行为变更），仅提升 Agent 自解释能力。
+- **【背景】** 2026-11-14 实测：Google Maps「All filters」面板用 `overflow:hidden` +
+  程序化 `scrollTop` 自定义滚动（面板内 `overflow:auto` 祖先 638/638 不溢出、全页标准
+  滚动器 0 个）→ 旧文案无法区分三种成因，本条补足证据。
+- **【文档/契约】** `docs/APP_SCRIPT_AUTHORING.md` 的 scrollList 注释与 schema-gen F56 同步补记。
+
 ## [Unreleased] — schema 契约文字同步：观察面 within 闭环（F41/F55/F69）
 
 - **【schema·F41】** `ctx.observe` 的 `hint_candidates` 候选形状补记「同名组 within 候选」：
