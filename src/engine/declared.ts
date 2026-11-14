@@ -23,6 +23,7 @@
  *     模型投影（调用方在 pickInner 剥离 `declared` 旁路标记）。
  */
 import { frameInHostsEnvelope, framesOf, type Elem, type ElemPool, type PageLike } from "./extraction.ts";
+import { elemFrameStamp, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
 import { hintCandidates, type HintMatchOptions } from "./rules.ts";
 import { parseHint } from "./hint.ts";
@@ -195,7 +196,10 @@ const TEXT_COLLECT_JS = (arg: { token: string; tok: string; frame: number }) => 
   return out;
 };
 
-const rowToElem = (ref: string, frame: number, row: RawRow): Elem => {
+/** 帧打点形状（A 批 frame:<origin>：rowToElem 透传 frame-scope.elemFrameStamp 的产物）。 */
+type FrameStamp = { frame_origin?: string; frame_path?: string[] };
+
+const rowToElem = (ref: string, frame: number, row: RawRow, fstamp: FrameStamp): Elem => {
   const str = (k: string): string => String(row[k] ?? "");
   return {
     ref, frame,
@@ -212,6 +216,10 @@ const rowToElem = (ref: string, frame: number, row: RawRow): Elem => {
     ...(row["draggable"] === true ? { draggable: true } : {}),
     ...(str("href") ? { href: str("href") } : {}),
     ...(str("href_full") ? { href_full: str("href_full") } : {}),
+    // A 批（frame:<origin>）：合成池与真池同构——帧链两字段（只写 origin 会让 ≥2 段链
+    // 永不命中，B3/R2-3）；不写 = 未知 origin 帧（两字段都省略的口径）。
+    ...(fstamp.frame_origin !== undefined ? { frame_origin: fstamp.frame_origin } : {}),
+    ...(fstamp.frame_path !== undefined ? { frame_path: fstamp.frame_path } : {}),
     // 旁路标记：模型投影剥离（executor.pickInner），绝不进 ChoiceRequest.elems。
     declared: true,
   };
@@ -255,15 +263,23 @@ export async function declaredLookup(
     // A3 的 scroll 回退面：目标常常是非交互容器（feed/main/region…），仍只在池解析失败时走。
     ? `${admitAll}, [role='feed'], [role='list'], [role='main'], [role='region'], [role='article'], [role='listitem'], main`
     : admitAll;
+  // A 批（frame:<origin>）：声明链过滤帧循环（hosts 之外的第二道帧限定；未声明 = 逐字节旧路径）。
+  // R2-7：text 模式用 `parsed.token`（解析器剥掉尾缀后的裸词）——不能 `hint.trim()`，
+  // 否则尾缀会被塞进文本匹配、带后缀的裸词回捞恒落空（mode==="text" ⇔ parsed.kind==="bare"）。
+  const frameChain = parsed.frameChain;
+  const bareToken = parsed.kind === "bare" ? parsed.token : "";
   const frames = framesOf(page);
+  const frameStamps = frames.map((fr) => elemFrameStamp(fr));
   const collected: Array<{ fi: number; row: RawRow }> = [];
   for (let fi = 0; fi < frames.length; fi++) {
     // P0-D：DRF 只在 host 信封内的 frame 上解析（排除帧不参与声明目标解析）。
     if (fi > 0 && !frameInHostsEnvelope(frames[fi]!, hosts)) continue;
+    // A 批：声明链不匹配的帧不参与 DRF（frame:<origin> 声明的帧之外绝不动作）。
+    if (frameChain !== undefined && !frameScopeMatchesFrame(frameChain, frames[fi]!)) continue;
     let raw: unknown;
     try {
       raw = mode === "text"
-        ? await frames[fi]!.evaluate(TEXT_COLLECT_JS, { token: hint.trim(), tok: stampPrefix, frame: fi })
+        ? await frames[fi]!.evaluate(TEXT_COLLECT_JS, { token: bareToken, tok: stampPrefix, frame: fi })
         : await frames[fi]!.evaluate(ATTR_COLLECT_JS, { sel: attrSel, tok: stampPrefix, frame: fi });
     } catch {
       continue;                       // frame detached / 无执行上下文：跳过（与 hintLookup 同口径）
@@ -296,7 +312,7 @@ export async function declaredLookup(
     const pool: ElemPool = {};
     for (const { fi, row } of collected) {
       const ref = `p${fi}:${String(row["i"])}`;
-      pool[ref] = rowToElem(ref, fi, row);
+      pool[ref] = rowToElem(ref, fi, row, frameStamps[fi]!);
     }
     const cand = hintCandidates(hint, pool, hintOpts);
     if (cand === null) { await cleanup(); return out; }
@@ -316,7 +332,7 @@ export async function declaredLookup(
   out.visible_matches = visible.length;
   if (visible.length !== 1) { await cleanup(); return out; }
   const only = visible[0]!;
-  const el = rowToElem("drf:0", only.fi, only.row);
+  const el = rowToElem("drf:0", only.fi, only.row, frameStamps[only.fi]!);
   out.rows = [el];
   return out;
 }

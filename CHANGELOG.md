@@ -4,6 +4,60 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — frame:<origin> 帧限定 hint（A 批：解析 / 匹配 / 数据面 / 回捞 / 契约）
+
+- **【背景】** 多 iframe 页面里同名元素跨帧无法用现有 hint 表达：`within:#id` 只能同帧内
+  锚定（iframe 内容的祖先链不含宿主页 iframe 元素）、池 ref `f<fi>:eN` 不是动作地址。
+  `frame:` 与 E3 的 `within:` 同构（后缀限定是已验证可行且低风险的模式），本批落地
+  解析/匹配核心 + 帧链数据面 + 回捞/门禁适配（A 批不可拆：单独落地任一半会让 frame: 在
+  合成池/回捞面静默失效）。规格与评审记录：`docs/FRAME_SCOPE_HINT_PLAN.md`（§11/§12）。
+- **【新语法】** 任意 hint 形状可后缀 ` frame:<origin链>`，命中集限定在 origin 链声明的
+  frame 内：`>` 分隔外→内、≤4 段、每段 `v === new URL(v).origin` 的 http/https 规范形
+  （带 path/query/显式默认端口拒绝，`https://a:443` 要写成 `https://a`）；唯一公式
+  （R2-1）= 声明链是帧完整链 `[rootOrigin..ownOrigin]` 的**后缀**且末段 = 元素所在帧自身
+  origin——同源父子靠链长区分（`frame:o` 命中父、`frame:o>o` 仅命中子）；与 `within:#id`
+  可组合（两种顺序，取交集）。`about:blank`/srcdoc 等未知 origin 帧不可被任何 `frame:` 命中。
+  无后缀 hint 走原路径逐字节不变。规格：`docs/FRAME_SCOPE_HINT_PLAN.md`（F70）。
+- **【解析】** `parseHint` 改为**串尾词法预扫 + 循环剥离**：两类后缀（within/frame）各至多
+  一次、只认「前置空白 + 串尾」，任一类超限 / 值非法 / 空段 ⇒ **整组后缀都不应用**
+  （按原始串回退，绝不半剥）。修复旧实现全局子串计数（`h.match(/within:/g)`）对值内伪后缀
+  的误伤——`host within:8080 within:#panel` 此前被整串拒绝，现在正确剥离真后缀。
+- **【匹配】** `hintMatchImpl` 改为**入口过滤 entries**（B1 修订）：六形状 / 档位 /
+  tag-submit / sink / 歧义诊断自动一致，**档位在帧内计算**（帧限定后本档清空 = 落空，
+  不让帧外更弱档越级顶上）；tag 形状的 submit 偏好分支在偏好前先 `inAnchor`（修复 tag
+  绕过 within 的旧缺陷；within/frame 未声明时恒等）；`hintCandidates`/`suggestHints`/
+  歧义谓词经同一实现自动继承。
+- **【数据面】** `Elem` 新增 `frame_origin` / `frame_path`（祖先 origin 链，外→内；主帧
+  path 省略），帧链判定唯一出处新模块 `src/engine/frame-scope.ts`（`frameChainOf` 沿
+  `parentFrame()` 上溯、`parentFrame()===null` 判根、`isDetached()` 判活——detach 后
+  `parentFrame()` 返回陈旧父帧不能靠它）。打点全链覆盖：`extractElements` 帧合并、
+  heuristic 宽扫（显式 `frame=0` + 主帧 origin）、`observeElements`/`ObserveRawRow`/
+  `syntheticElem`（observe 自证池同构）、四处合成池（hintLookup / DRF `rowToElem` /
+  A3 `_domFallbackResolve` / FW8 `identityLookup` 合成 Elem）。模型面：`pickInner` 剥离
+  两字段（guard+解构收口在 `executor-pure.modelProjectionOf`，模型请求体字节不变）；
+  **`esig`/`firstIfSame` 签名不含新字段**。
+- **【回捞/门禁】** `hintLookup` / FW8 `identityLookup` / DRF `declaredLookup` /
+  F64 `_liveDomIdFallback` 按 `parsed.frameChain` 过滤帧循环（声明链之外绝不动作）；
+  `probeExcludedHint` 只对链匹配的排除帧探测/报证据；DRF text 模式改用 `parsed.token`
+  （R2-7：尾缀不再被塞进文本匹配）。
+- **【行为变更（有意修正）】** ① F64 `#id` live-DOM 直查此前**不查 hosts 信封**——排除帧里的
+  `#id` 会被跨帧直查动作；现在与池/hintLookup/FW8 同口径（主帧恒允许、子帧不在信封内跳过），
+  声明目标确需该 frame 时走既有 `frame_not_allowed` 路径。② poolView 元素行 `frame_origin`
+  改用 `Elem.frame_origin` 单一出处——旧实现 `[pageUrl, ...frames()].map(origin).sort()` 的
+  下标映射会重复/排序打乱 fi↔origin，跨源页 inspect 行的 frame_origin 值**会变对**；
+  行上没有 frame_origin（未知 origin 帧）如实报 `"opaque"`，顶层 `frame_origins` 仍按帧枚举。
+  ③ **会话面 frame 门禁补漏**：`_frameHosts` 此前只在 run 面方法里赋值，session 面从未设置——
+  声明 `hosts` 的会话仍会对信封外 iframe 的池/FW8/DRF/F64 不设防（专项测试实测：
+  `hosts=[127.0.0.1]` 时 `localhost` 子帧仍可被 `frame:`/`#id` 命中）。现在构造时以 middleware
+  默认 hosts 兜底（run 面仍按 run 覆盖），与工具合同"same semantics as meta.hosts"一致。
+- **【契约】** `HINT_GRAMMAR.frame_suffix` + F70 条目（schema-gen.ts）；grammar-prompt 新增
+  `HINT_FRAME_SUFFIX`（与 HINT_WITHIN_SUFFIX 同构）+ import 时自证（单段/2 段链剥离、
+  双 frame/非法 origin 整组拒绝、within+frame 两种顺序）；prompt-hit grammar 组新增两条断言。
+- **【验证】** 离线断言全绿（parse 全矩阵 34 条 / 匹配层 18 条 / 数据面+回捞 14 条，
+  含 fake parentFrame 帧链）；`npm run typecheck`、`npm run prompt-hit` 通过。浏览器级
+  验证（双端口跨源 fixture、无后缀 run/trace/result/dry 逐字节对照、observe 候选照抄）
+  留待专项测试轮。
+
 ## [Unreleased] — inspect --probe 跨 frame 探测（iframe 元素不再静默漏检）
 
 - **【修复·inspect 探测面】** `inspect --probe` 此前只在**主 frame** `page.evaluate`，

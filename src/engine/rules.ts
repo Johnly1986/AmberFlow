@@ -11,6 +11,7 @@
  * Ported 1:1 from `layaapp/rules.py`; the Python unit tests are the spec.
  */
 import { firstIfSame, type Elem, type ElemPool } from "./extraction.ts";
+import { frameScopeMatches } from "./frame-scope.ts";
 import { parseHint, poolAttr } from "./hint.ts";
 
 export const STOP_TOKENS = new Set([
@@ -317,7 +318,19 @@ function hintMatchImpl(
   hint: string, elems: ElemPool, sink?: HintCandidates | null, opts?: HintMatchOptions,
 ): string | null {
   const parsed = parseHint(hint);
-  const entries = Object.entries(elems);
+  let entries = Object.entries(elems);
+  /**
+   * A 批（frame:<origin> 帧限定，B1 修订）：**入口过滤 entries**——命中集在一切形状判定
+   * 之前就限定在声明帧链内（frameScopeMatches：声明链 = 元素完整帧链 [...frame_path,
+   * frame_origin] 的后缀且末段=自身帧 origin）。六形状/档位/tag-submit/sink/diag 自动一致，
+   * **档位因此在帧内计算**（帧限定后本档清空 = 落空，不让锚外/帧外更弱档越级顶上）；
+   * `hintCandidates`/`suggestHints`/歧义谓词经同一实现自动继承。未知 origin 帧
+   * （frame_origin 缺失/非 http(s)）的元素不可被任何 `frame:` 命中。
+   */
+  const frameChain = parsed.frameChain;
+  if (frameChain !== undefined) {
+    entries = entries.filter(([, e]) => frameScopeMatches(frameChain, e));
+  }
   /** A4：`diag:false` = 只读解析，不写 B1 旁路模块态（不写不清，见 HintMatchOptions.diag）。 */
   const recordDiag = opts?.diag !== false;
   /**
@@ -401,8 +414,11 @@ function hintMatchImpl(
     };
     const hits = new Set(entries.filter(([, e]) => want[h]!.includes(e.tag)).map(([r]) => r));
     // "input"/"button" as target for a *click*: prefer submit-type widgets
+    // A 批（R2-10）：偏好前先过锚限定——tag 形状的 submit 偏好此前绕过 inAnchor
+    // （锚外 submit 会赢；frame 已由入口 entries 过滤覆盖）。within/frame 未声明时
+    // inAnchor 恒等，旧行为逐字节不变。
     if ((h === "input" || h === "button") && hits.size > 1) {
-      const submits = [...hits].filter((r) =>
+      const submits = inAnchor([...hits]).filter((r) =>
         ["submit", "button"].includes(String(elems[r]!.input_type ?? "")) || elems[r]!.tag === "button");
       if (submits.length === 1) {
         if (sink) { sink.refs = submits; sink.tier = 0; sink.decided = submits[0]!; }

@@ -680,8 +680,9 @@ frame），允许帧已成立 = 正常成功。其余情况步骤照常，只在
    结果里的 `frames[]` 是本次评估过的帧 URL 列表，元素行的 `frame` 字段是它的下标（0 = 主 frame）。
    `frames_excluded` warning / `frame_host` advisory 会点名被排除或跨源的 origin。
 2. **定位元素**：池 ref 是 `f<fi>:eN`（`<fi>` = 真实帧下标；P0-D 排除帧不重编号）；hint 六形状在
-   **允许帧**上统一匹配（唯一性跨全部允许帧计算——同名跨帧 = `target_ambiguous`，证据
-   `ambiguity.candidates[].frame` 给帧下标）；`#id` 形态在池内零命中时有一次跨可达子 frame 的
+   **允许帧**上统一匹配（唯一性跨全部允许帧计算——同名跨帧不一定报 `target_ambiguous`：同签名会被
+   `firstIfSame` 合并、run 命令步直接执行一个，只有会话 act 会停；用 `frame:` 尾缀显式区分最稳），
+   证据 `ambiguity.candidates[].frame` 给帧下标；`#id` 形态在池内零命中时有一次跨可达子 frame 的
    live-DOM 直查兜底（F64）；声明目标/完成信号只存在于被排除帧时才 `frame_not_allowed`（见上段）。
 3. **跨源帧要能动作**：该 frame origin 必须进 `meta.hosts`（app）/ 会话 `hosts`，否则解析面排除该帧
    （`frames_excluded`）；`inspect --probe` 的子 frame 命中证据与 `frame_host` advisory 会点名 origin。

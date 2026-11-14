@@ -17,6 +17,10 @@
 import { parseHint, type ParsedHint } from "./hint.ts";
 import { parseClickAtValue } from "./click-at.ts";
 import { sleepMs } from "../support/sleep.ts";
+// frame:<origin> 帧链 helper（A 批，唯一出处 frame-scope.ts）：extraction 只做打点/帧过滤，
+// 判定与 frameOriginOf 的实现都在 frame-scope（这里 re-export 保持既有导出面不变）。
+import { elemFrameStamp, frameOriginOf, frameScopeMatchesFrame } from "./frame-scope.ts";
+export { elemFrameStamp, frameChainOf, frameScopeMatches, frameScopeMatchesFrame, frameOriginOf } from "./frame-scope.ts";
 // 内嵌 JS 探针区（COLLECT_JS/PASS_*…）拆到 pool-js.ts（F6）；导出面不变，这里读回同一份。
 import {
   COLLECT_JS, PASS_EXTRACT, PASS_OBSERVE, PASS_WINDOW, PASS_UNDERLOAD,
@@ -75,6 +79,16 @@ export interface Elem {
    */
   surface?: string;
   frame?: number;
+  /**
+   * A 批（frame:<origin> 帧限定）：元素所在帧的 origin（小写 http(s) 规范形）与祖先 origin
+   * 链（外→内）。`frame_path` 省略 = 主帧（帧链 = [frame_origin]）；两字段都缺 = 未知
+   * origin 帧（about:blank/srcdoc/空串等）——该帧内元素**不可被任何 `frame:` 命中**。
+   * 打点唯一出处 = frame-scope.elemFrameStamp；消费点：rules.hintMatchImpl 入口过滤
+   * （档位在帧内计算）与 PoolView 展示。不进 `ChoiceRequest.elems`（pickInner 剥离，
+   * 与 surface 同一处）；**不进 esig/firstIfSame 签名**。
+   */
+  frame_origin?: string;
+  frame_path?: string[];
   js_events?: unknown;
   js_ref?: string;
   dsh_ref?: string;
@@ -418,6 +432,18 @@ export interface FrameLike {
   locator(selector: string, opts?: { hasText?: string }): LocLike & { all?(): Promise<unknown[]> };
   evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
   url?: string | (() => string);
+  /**
+   * A 批（frame:<origin> 帧链）：父帧（Playwright Frame.parentFrame）。可选——测试替身与
+   * `framesOf` 的 `[page as FrameLike]` 兜底没有它 = 主帧（帧链 = [ownOrigin]）。
+   * 判根用 `parentFrame()===null`，**不**假设 `frames()[0]` 是主帧。
+   */
+  parentFrame?(): FrameLike | null;
+  /**
+   * A 批（frame:<origin> 帧链）：帧存活判定（Playwright 1.58 Frame.isDetached）。
+   * detach 后 `parentFrame()` 不抛错也不返回 null（返回陈旧父帧）——判活只能靠它；
+   * detached 帧 = 未知 origin（frame-scope.frameChainOf 返回 undefined）。
+   */
+  isDetached?(): boolean;
 }
 export interface PageLike {
   /** Python's Playwright exposes `page.url` as a property; the Node API as a method. */
@@ -460,13 +486,7 @@ export function frameInHostsEnvelope(frame: FrameLike, hosts: string[] | null | 
   return urlInHostsEnvelope(String(url), hosts);
 }
 
-/** P0-D：frame 的 origin 证据文案（解析失败时退化为空串）。 */
-export function frameOriginOf(frame: FrameLike): string {
-  let url = "";
-  try { url = typeof frame.url === "function" ? frame.url() : (frame.url ?? ""); } catch { url = ""; }
-  if (!url) return "";
-  try { return new URL(url).origin; } catch { return ""; }
-}
+/** P0-D：frame 的 origin 证据文案已移入 frame-scope.ts（唯一出处；文件头 re-export 保持导出面）。 */
 
 /**
  * P0-D：**帧门禁**。主 frame 恒允许（导航信封已经强制过它）；子 frame 的 origin 不在
@@ -727,6 +747,8 @@ export async function extractElements(
   }
   const elems: ElemPool = {};
   const frames = framesOf(page);
+  // A 批（frame:<origin>）：每帧算一次链打点（parentFrame 上溯；未知 origin 帧 = 不打点）。
+  const frameStamps = frames.map((fr) => elemFrameStamp(fr));
   for (let fi = 0; fi < frames.length; fi++) {
     const remaining = maxElements - Object.keys(elems).length;
     if (remaining <= 0) break;
@@ -748,6 +770,10 @@ export async function extractElements(
       // child-frame refs are namespaced so one pool holds every frame
       row.ref = fi === 0 ? row.ref : `f${fi}:${row.ref}`;
       row.frame = fi;
+      // A 批（frame:<origin>）：帧链两字段（frame-scope.elemFrameStamp；未知 origin = 省略）。
+      const st = frameStamps[fi]!;
+      if (st.frame_origin !== undefined) row.frame_origin = st.frame_origin;
+      if (st.frame_path !== undefined) row.frame_path = st.frame_path;
       elems[row.ref!] = row;
     }
   }
@@ -778,6 +804,9 @@ export interface ObserveRawRow {
   bbox?: { x: number; y: number; w: number; h: number };
   in_surface?: boolean;
   frame?: number;
+  /** A 批（frame:<origin>）：帧链两字段（observeElements 宿主侧按帧打点；主帧 path 省略）。 */
+  frame_origin?: string;
+  frame_path?: string[];
 }
 
 /** frame.url 可能是属性或方法（Playwright 两种形状都见过）；读不到就是空串。 */
@@ -838,6 +867,11 @@ export async function observeElements(
     }
     for (const row of raw.rows ?? []) {
       row.frame = fi;
+      // A 批（frame:<origin>）：观察行带帧链两字段——syntheticElem 透传后，observe 自证池
+      // 才能验证（并给出）帧限定候选（R2-9：observe 自证池无链 = 永远给不出链候选）。
+      const st = elemFrameStamp(frames[fi]!);
+      if (st.frame_origin !== undefined) row.frame_origin = st.frame_origin;
+      if (st.frame_path !== undefined) row.frame_path = st.frame_path;
       rows.push(row);
     }
     total += Number(raw.total ?? 0) || 0;
@@ -1069,9 +1103,14 @@ export async function extractHeuristicWidgets(
   try {
     const rows = (await page.evaluate!(PASS_HEURISTIC, { startRef: startRef, max: max })) as
       Array<Record<string, unknown>> | null;
+    // A 批（frame:<origin>）：heuristic 宽扫是 page.evaluate（**仅主帧**，JS pass 连 frame
+    // 都不设）——宿主侧显式补 `frame=0` + 主帧 origin（frame_path 省略 = 主帧链 [origin]）。
+    const mainStamp = elemFrameStamp(page as unknown as FrameLike);
     return (rows ?? []).map((r, k): Elem => ({
       ref: `e${startRef + k}`,
       scan: -1,
+      frame: 0,
+      ...(mainStamp.frame_origin !== undefined ? { frame_origin: mainStamp.frame_origin } : {}),
       tag: String(r["tag"] ?? "div"),
       // A1 不变量：label === full_label 的前 40 字（行由 HEURISTIC_WIDGET_JS 按同一 full 构造）。
       label: String(r["label"] ?? "").slice(0, 40),
@@ -1303,9 +1342,13 @@ export async function hintLookup(
   opts?: { hosts?: string[] | null },
 ): Promise<ElemPool> {
   const out: ElemPool = {};
+  // A 批（frame:<origin>）：解析一次——帧循环按声明链过滤（R2-5 帮助调用点；未声明 = 逐字节旧路径）。
+  const parsed = parseHint(hint);
   const frames = framesOf(page);
   for (let fi = 0; fi < frames.length; fi++) {
     if (fi > 0 && !frameInHostsEnvelope(frames[fi]!, opts?.hosts)) continue;   // P0-D：排除帧不参与回捞
+    // A 批：声明链不匹配的帧不参与回捞（frame:<origin> 落在其它帧 = 该帧没有这条声明）。
+    if (parsed.frameChain !== undefined && !frameScopeMatchesFrame(parsed.frameChain, frames[fi]!)) continue;
     let rows: Array<Record<string, unknown>> | null = null;
     try {
       rows = (await frames[fi]!.evaluate(PASS_HINT,
@@ -1313,9 +1356,16 @@ export async function hintLookup(
     } catch {
       continue;
     }
+    // A 批：回捞合成行带帧链两字段（并入主池后 hintMatch 的入口 entries 过滤才能按帧限定）。
+    const st = elemFrameStamp(frames[fi]!);
     for (const row of rows ?? []) {
       const ref = fi === 0 ? `x${row.scan}` : `xf${fi}:${row.scan}`;
-      out[ref] = { ref, frame: fi, ...(row as Elem) };
+      out[ref] = {
+        ref, frame: fi,
+        ...(st.frame_origin !== undefined ? { frame_origin: st.frame_origin } : {}),
+        ...(st.frame_path !== undefined ? { frame_path: st.frame_path } : {}),
+        ...(row as Elem),
+      };
     }
   }
   return out;
@@ -1342,8 +1392,12 @@ export async function probeExcludedHint(
 ): Promise<ExcludedHintProbe | null> {
   const gate = frameGateOf(page, hosts);
   if (gate === null) return null;
+  // A 批（frame:<origin>）：只探测/上报与**声明链匹配**的排除帧（不把无关 origin 当证据；
+  // 命中的那条链与声明链并排的证据文案在 C 批补）。hintLookupArgs 已带 parsed——这里只读复用。
+  const parsed = parseHint(hint);
   const matches: ExcludedHintProbe["matches"] = [];
   for (const { index, frame } of gate.excluded) {
+    if (parsed.frameChain !== undefined && !frameScopeMatchesFrame(parsed.frameChain, frame)) continue;
     let got: unknown;
     try {
       got = await frame.evaluate(PASS_HINT_PROBE, hintLookupArgs(hint, sel));

@@ -9,6 +9,7 @@ import { parseHint, type ParsedHint } from "./hint.ts";
 import {
   firstOf, framesOf, urlOf, frameInHostsEnvelope, type Elem, type FrameLike, type PageLike,
 } from "./extraction.ts";
+import { elemFrameStamp, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { compile } from "./pool-js.ts";
 
 /* ------------------------------------------- declared identity recovery (FW8) */
@@ -48,16 +49,20 @@ export interface IdentityHintInfo {
   value: string;
   /** `tag[attr=value]` 的 tag；`#id` / 裸属性形状为空串。 */
   tag: string;
+  /** A 批（frame:<origin>）：声明的帧链（外→内；未声明 = undefined）——帧循环过滤用。 */
+  frameChain?: string[];
 }
 
 /** FW8：判断一条 hint 是不是**身份声明**（白名单五条里的形状/属性两条）。纯函数。 */
 export function identityHintInfo(hint: string): IdentityHintInfo {
   const parsed = parseHint(hint);
+  const frameChain = parsed.frameChain;
   const miss = (shape: string): IdentityHintInfo =>
     ({ eligible: false, shape, attr: "", value: "", tag: "" });
   if (parsed.kind === "id") {
     if (parsed.value === "") return miss("id");
-    return { eligible: true, shape: "#id", attr: "id", value: parsed.value, tag: "" };
+    return { eligible: true, shape: "#id", attr: "id", value: parsed.value, tag: "",
+      ...(frameChain !== undefined ? { frameChain } : {}) };
   }
   if (parsed.kind === "attrEq") {
     // `tag[attr=value]` 的 tag 必须是可表达的简单标签名；否则不是身份声明（不拿它去赌 CSS）。
@@ -69,6 +74,7 @@ export function identityHintInfo(hint: string): IdentityHintInfo {
       attr: parsed.attr,
       value: parsed.value,
       tag: parsed.tag,
+      ...(frameChain !== undefined ? { frameChain } : {}),
     };
   }
   return miss(parsed.kind);
@@ -194,11 +200,15 @@ export async function identityLookup(
     rows: [], hidden_matches: 0, total_matches: 0, candidates: [], cleanup: noop,
   };
   if (!info.eligible) return out;
+  // A 批（frame:<origin>）：声明链过滤帧循环（hosts 之外的第二道帧限定；未声明 = 逐字节旧路径）。
+  const frameChain = info.frameChain;
   const frames = framesOf(page);
   const visible: Array<{ fi: number; row: Record<string, unknown> }> = [];
   const candidates: IdentityCandidate[] = [];
   for (let fi = 0; fi < frames.length; fi++) {
     if (fi > 0 && !frameInHostsEnvelope(frames[fi]!, opts?.hosts)) continue;   // P0-D：排除帧不参与身份回捞
+    // A 批：声明链不匹配的帧不参与身份回捞（frame:<origin> 声明的帧之外绝不动作）。
+    if (frameChain !== undefined && !frameScopeMatchesFrame(frameChain, frames[fi]!)) continue;
     let got: unknown;
     try {
       got = await frames[fi]!.evaluate(PASS_IDENTITY,
@@ -236,6 +246,9 @@ export async function identityLookup(
   if (!stamped) return out;         // 两次往返之间节点变了：按 0 处理，绝不猜
   const ref = fi === 0 ? "dom:0" : `dom:f${fi}:0`;
   const str = (k: string): string => String(row[k] ?? "");
+  // A 批（frame:<origin>）：合成 Elem 与池同构——帧链两字段一并打点（frames[fi] 已通过
+  // 链过滤；只写 origin 会让 ≥2 段链的回捞永不命中，B3/R2-3）。
+  const fstamp = elemFrameStamp(frames[fi]!);
   const el: Elem = {
     ref, frame: fi, hint_ref: stamp,
     tag: str("tag"),
@@ -250,6 +263,8 @@ export async function identityLookup(
     ...(row["draggable"] === true ? { draggable: true } : {}),
     ...(str("href") ? { href: str("href") } : {}),
     ...(str("href_full") ? { href_full: str("href_full") } : {}),
+    ...(fstamp.frame_origin !== undefined ? { frame_origin: fstamp.frame_origin } : {}),
+    ...(fstamp.frame_path !== undefined ? { frame_path: fstamp.frame_path } : {}),
     identity: true,
   };
   out.rows = [el];

@@ -155,6 +155,10 @@ function syntheticElem(row: ObserveRawRow, ref: string): Elem {
     // E3：OBSERVE_JS 采集的祖先 id 链（≤8、小写、最近祖先在前）——within:#id 的
     // observe 侧底座；无 id 祖先时字段不出现（观察集合形状与池行一致）。
     ...(Array.isArray(row.anchor_ids) && row.anchor_ids.length > 0 ? { anchor_ids: row.anchor_ids } : {}),
+    // A 批（frame:<origin>）：observeElements 宿主侧按帧打点的帧链两字段透传——observe
+    // 自证池与池行同构，帧限定候选（frame:<origin>）因此可被自证/给出（R2-9）。
+    ...(row.frame_origin !== undefined ? { frame_origin: row.frame_origin } : {}),
+    ...(row.frame_path !== undefined ? { frame_path: row.frame_path } : {}),
   };
 }
 

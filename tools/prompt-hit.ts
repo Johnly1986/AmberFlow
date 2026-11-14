@@ -38,7 +38,7 @@ import path from "node:path";
 import { REPO } from "../src/support/paths.ts";
 import { parseHint } from "../src/engine/hint.ts";
 import { SIGNAL_OPS } from "../src/engine/signal-ops.ts";
-import { HINT_SHAPES, SIGNAL_OP_PROMPT, ATTR_MATCH_MODEL_TEXT } from "../src/engine/grammar-prompt.ts";
+import { HINT_SHAPES, HINT_FRAME_SUFFIX, SIGNAL_OP_PROMPT, ATTR_MATCH_MODEL_TEXT } from "../src/engine/grammar-prompt.ts";
 import { PLAN_PLAYBOOK_TEXT, FAILURE_SIGNS_TEXT, PLAN_PLAYBOOK_SHORT, STOP_ESCALATION_TEXT, STOP_NEXT, EXEMPT_NEXT, nextForStop } from "../src/engine/planning-playbook.ts";
 import { hintMatch } from "../src/engine/rules.ts";
 import { validateSignalSpec } from "../src/engine/signals.ts";
@@ -67,6 +67,24 @@ if (JSON.stringify(opKeys) !== JSON.stringify(descKeys)) {
   const missing = opKeys.filter((k) => !descKeys.includes(k));
   const extra = descKeys.filter((k) => !opKeys.includes(k));
   problems.push(`grammar: 算子描述与 SIGNAL_OPS 不一致（缺描述: ${missing.join(", ") || "-"}；死描述: ${extra.join(", ") || "-"}）`);
+}
+// A 批（frame:<origin> 帧限定尾缀）断言 1：合法剥离——2 段 origin 链（外→内）落进 frameChain，
+// 基形状不受影响；导出示例（单段）同样可解析。
+const frameChainOk = parseHint(`button frame:https://a.example>https://b.example`);
+if (frameChainOk.kind !== "tag"
+    || JSON.stringify(frameChainOk.frameChain) !== JSON.stringify(["https://a.example", "https://b.example"])) {
+  problems.push(`grammar: 2 段 frame 链示例解析为 kind=${frameChainOk.kind}, frameChain=${JSON.stringify(frameChainOk.frameChain)}——期望 tag + ['https://a.example','https://b.example']`);
+}
+const frameExampleOk = parseHint(HINT_FRAME_SUFFIX.example);
+if (frameExampleOk.kind !== "bare"
+    || JSON.stringify(frameExampleOk.frameChain) !== JSON.stringify(["https://checkout.example.com"])) {
+  problems.push(`grammar: HINT_FRAME_SUFFIX 示例 '${HINT_FRAME_SUFFIX.example}' 解析为 kind=${frameExampleOk.kind}, frameChain=${JSON.stringify(frameExampleOk.frameChain)}`);
+}
+// A 批断言 2：双 frame 后缀 = 超限 ⇒ **整组拒绝**（原始串回退成裸词落空，绝不半剥/取第一个）。
+const frameDouble = parseHint("button frame:https://a.example frame:https://b.example");
+if (frameDouble.frameChain !== undefined || frameDouble.kind !== "bare"
+    || frameDouble.token !== "button frame:https://a.example frame:https://b.example") {
+  problems.push(`grammar: 双 frame 后缀解析为 kind=${frameDouble.kind}, frameChain=${JSON.stringify(frameDouble.frameChain)}——必须整组拒绝（原始串按裸词落空）`);
 }
 void fix; // --fix 只在 bridge 组的写入分支里生效；此处引用防止未用告警。
 

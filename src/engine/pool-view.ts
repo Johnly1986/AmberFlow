@@ -17,6 +17,8 @@ export interface PoolElemView {
   action_family: ReturnType<typeof elemFamily>;
   action_capabilities: PoolActionCapability[];
   frame_origin: string;
+  /** A 批（frame:<origin>）：祖先 origin 链（外→内；仅子帧行出现，主帧 path 省略）。 */
+  frame_path?: string[];
   hint_candidates: string[];
   /** 有界附加属性：只有存在且非空时才输出，避免把空串当事实。 */
   extras: Partial<Record<"name" | "id" | "data_test" | "href" | "href_full" | "input_type" | "role" | "near" | "heuristic" | "surface", string>>;
@@ -61,14 +63,20 @@ export function poolView(elems: ElemPool, page: PageLike, maxElements: number): 
     if (e.heuristic === true) extras.heuristic = "true";
     // U3：类目标记只进 PoolView/inspect/类目计数（不进 ChoiceRequest.elems 的模型投影）。
     if (typeof e.surface === "string" && e.surface !== "") extras.surface = e.surface;
-    const fi = typeof e.frame === "number" ? e.frame : 0;
+    // A 批（B6 修复）：元素行 frame_origin 改用 `Elem.frame_origin` **单一出处**——
+    // 旧实现 `[pageUrl, ...frames()].map(origin).sort()` 的下标映射会重复/排序打乱 fi↔origin，
+    // 跨源页会全反（有意的行为修复：cross-origin 页 inspect 行的 frame_origin 值变对，
+    // CHANGELOG 记录）。行上没有 frame_origin = 未知 origin 帧（about:blank/srcdoc）→
+    // 如实报 "opaque"，不再用错误的映射编一个 origin。顶层 frame_origins 仍按帧枚举口径。
+    const framePath = Array.isArray(e.frame_path) && e.frame_path.length > 0 ? e.frame_path : undefined;
     return {
       ref: e.ref!,
       tag: e.tag,
       label: e.label ?? "",
       action_family: elemFamily(e),
       action_capabilities: actionCapabilities(e),
-      frame_origin: frameOrigins[fi] ?? frameOrigins[0] ?? "opaque",
+      frame_origin: typeof e.frame_origin === "string" && e.frame_origin !== "" ? e.frame_origin : "opaque",
+      ...(framePath !== undefined ? { frame_path: framePath } : {}),
       hint_candidates: suggestHints(e, elems),
       extras,
     };

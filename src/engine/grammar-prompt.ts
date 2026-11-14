@@ -71,6 +71,20 @@ export const HINT_WITHIN_SUFFIX: { token: string; en: string; example: string; a
   note: "锚定限定：把命中集限定在 #id 元素子树内（单层不链式；多 within 即拒绝）",
 };
 
+/**
+ * A 批：`frame:<origin>` 帧限定尾缀（与 HINT_WITHIN_SUFFIX 同构）——任意形状后缀它，命中集
+ * 即被限定在 origin 链声明的 frame 内。值是 `>` 分隔的 origin 链（外→内，≤4 段，每段
+ * `v === new URL(v).origin` 的 http/https 规范形，默认端口要写成规范形如 `https://a`）；
+ * 末段 = 元素所在帧自身 origin，声明链 = 帧完整链 [rootOrigin..ownOrigin] 的后缀；
+ * about:blank/srcdoc 等未知 origin 帧不可被任何 `frame:` 命中；串尾词法预扫 + 循环剥离，
+ * 与 within 可组合（两种顺序）；任一后缀超限/值非法/空段 = 整组后缀拒绝（原始串回退，绝不半剥）。
+ */
+export const HINT_FRAME_SUFFIX: { token: string; en: string; example: string; anchor: string; note: string } = {
+  token: "frame:<origin>", en: "frame:<origin>", example: "关闭 frame:https://checkout.example.com",
+  anchor: "frame:https://ogs.google.com",
+  note: "帧限定：把命中集限定在 origin 链声明的 frame 内（`>` 分隔外→内、≤4 段、末段=元素所在帧；未知 origin 帧不可寻址；非法值/超限 = 整组后缀拒绝）",
+};
+
 /* ---- import 时自证 1：示例 ↔ 唯一解析器 ---------------------------------- */
 
 for (const s of HINT_SHAPES) {
@@ -97,6 +111,53 @@ for (const s of HINT_SHAPES) {
     throw new Error(
       `grammar-prompt: 链式 within 示例被静默接受（within='${String(chained.within)}'）——解析器必须拒绝多 within`,
     );
+  }
+}
+
+/* A 批自证：frame:<origin> 尾缀被解析层剥离并落进 frameChain（单段与 2 段链）；双 frame/
+   多后缀超限/非法 origin 被**整组**拒绝（原始串回退，绝不半剥）；与 within 组合两种顺序都成立。 */
+{
+  const ok = parseHint(HINT_FRAME_SUFFIX.example);
+  if (ok.frameChain === undefined || ok.frameChain.length !== 1
+      || ok.frameChain[0] !== "https://checkout.example.com" || ok.kind !== "bare") {
+    throw new Error(
+      `grammar-prompt: HINT_FRAME_SUFFIX 示例 '${HINT_FRAME_SUFFIX.example}' 解析为 `
+        + `kind='${ok.kind}', frameChain=${JSON.stringify(ok.frameChain)}——期望 bare + ['https://checkout.example.com']`,
+    );
+  }
+  const chain = parseHint("button frame:https://a.example>https://b.example");
+  if (chain.frameChain === undefined
+      || chain.frameChain.join(">") !== "https://a.example>https://b.example"
+      || chain.kind !== "tag") {
+    throw new Error(
+      `grammar-prompt: 2 段 frame 链示例解析为 frameChain=${JSON.stringify(chain.frameChain)}`
+        + `——期望 tag + ['https://a.example','https://b.example']`,
+    );
+  }
+  const double = parseHint("button frame:https://a.example frame:https://b.example");
+  if (double.frameChain !== undefined || double.kind !== "bare"
+      || double.token !== "button frame:https://a.example frame:https://b.example") {
+    throw new Error(
+      `grammar-prompt: 双 frame 示例被静默接受（frameChain=${JSON.stringify(double.frameChain)}）`
+        + `——解析器必须整组拒绝（按原始串回退 = 裸词落空）`,
+    );
+  }
+  const illegal = parseHint("button frame:https://a.example/path");
+  if (illegal.frameChain !== undefined) {
+    throw new Error("grammar-prompt: 带 path 的 frame 值被静默接受——每段必须是 v === new URL(v).origin 的规范形");
+  }
+  const bothOrders = [
+    parseHint("保存 within:#dialog frame:https://checkout.example.com"),
+    parseHint("保存 frame:https://checkout.example.com within:#dialog"),
+  ];
+  for (const p of bothOrders) {
+    if (p.within !== "dialog" || p.frameChain === undefined
+        || p.frameChain.join(">") !== "https://checkout.example.com") {
+      throw new Error(
+        `grammar-prompt: within+frame 组合解析漂移（within='${String(p.within)}', `
+          + `frameChain=${JSON.stringify(p.frameChain)}）——两种顺序都必须剥出两字段`,
+      );
+    }
   }
 }
 

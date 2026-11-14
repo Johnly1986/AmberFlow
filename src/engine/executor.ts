@@ -76,6 +76,7 @@ import {
   firstOf,
   frameAt,
   frameGateOf,
+  frameInHostsEnvelope,
   framesOf,
   framesScopedPage,
   hintLookup,
@@ -93,8 +94,10 @@ import {
   type ElemFamily,
   type ElemPool,
   type FrameGate,
+  type FrameLike,
   type PageLike,
 } from "./extraction.ts";
+import { elemFrameStamp, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { declaredLookup, formatDeclaredCandidates, type DeclaredCandidate } from "./declared.ts";
 import { describeAmbiguity, orderCandidatesByDomPreorder, type AmbiguityView, type AmbiguousOrdering } from "./ambiguity.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
@@ -280,6 +283,7 @@ import {
   lexWords,
   lowConfDiscrimination,
   matchedOthersWarning,
+  modelProjectionOf,
   nearCandidates,
   poolRoleSummary,
   redactValue,
@@ -784,6 +788,11 @@ export class BrowserMiddleware {
     this.hintMemory = opts.hintMemory ?? null;
     this.gotoTimeout = opts.gotoTimeout ?? 30000;
     this.hosts = opts.hosts ?? null;
+    // P0-D（A 批补漏）：会话面的 frame 门禁必须与 `meta.hosts` 同语义——此前 `_frameHosts`
+    // 只在 run 面方法里由 `hosts ?? this.hosts` 赋值，session 面从未设置 ⇒ 池/FW8/DRF/F64
+    // 对声明 hosts 外的 iframe 完全不设防（专项测试实测：hosts=[127.0.0.1] 时 localhost 子帧
+    // 仍可被 frame:/#id 命中）。构造时以 middleware 默认 hosts 兜底；run 面仍会按 run 覆盖。
+    this._frameHosts = this.hosts;
     this.dataset = opts.dataset ?? null;
     this.maxEffectiveRepeats = opts.maxEffectiveRepeats ?? this.maxEffectiveRepeats;
     this.riskAsk = opts.riskAsk ?? this.riskAsk;
@@ -1129,16 +1138,9 @@ export class BrowserMiddleware {
     // 模型面仍只看展示投影 `href`。
     // FW8：`Elem.identity`（身份回捞合成的旁路标记）同理剥离——回捞元素按设计不会走到模型面，
     // 这里仍做一层防御：第三方 provider 永远看不到引擎内部标记。
-    const modelElems: ElemPool = {};
-    for (const [ref, e] of Object.entries(elems)) {
-      if (e.surface === undefined && e.href_full === undefined && e.identity === undefined
-          && e.declared === undefined) {
-        modelElems[ref] = e; continue;
-      }
-      const { surface: _surface, href_full: _hrefFull, identity: _identity,
-        declared: _declared, ...rest } = e;
-      modelElems[ref] = rest as Elem;
-    }
+    // A 批（frame:<origin>，B5）：frame_origin / frame_path（帧限定打点）同样剥离——
+    // guard 与解构两处都收口在 executor-pure.modelProjectionOf（模块级纯函数，离线可断言）。
+    const modelElems: ElemPool = modelProjectionOf(elems);
     let out;
     try {
       // task-26（D2 A/B）：站点事实 fenced block 经 notes 注入模型请求面（opt-in——
@@ -2215,10 +2217,17 @@ export class BrowserMiddleware {
     if (this.idFallback !== true) return null;
     const parsed = parseHint(target);
     if (parsed.kind !== "id" || !parsed.value) return null;
+    // A 批（frame:<origin>）：声明链过滤帧循环；并补 `frameInHostsEnvelope` hosts 检查
+    // （既有缺陷修正——F64 的跨帧直查此前不查 hosts 信封，`#id` 可能落在排除帧里被动作；
+    // 现在与池/hintLookup/FW8 同口径：主帧恒允许，子帧不在信封内跳过。CHANGELOG 记录行为变更）。
+    const frameChain = parsed.frameChain;
     const frames = framesOf(page as never);
     const token = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
     const probeAttr = `data-af-probe="${token}-id"`;
-    for (const fr of frames) {
+    for (let fi = 0; fi < frames.length; fi++) {
+      const fr = frames[fi]!;
+      if (fi > 0 && !frameInHostsEnvelope(fr, this._frameHosts)) continue;
+      if (frameChain !== undefined && !frameScopeMatchesFrame(frameChain, fr)) continue;
       try {
         const hit = (await (fr as unknown as {
           evaluate(fn: (arg: { id: string; attr: string }) => Record<string, unknown> | null, arg: { id: string; attr: string }): Promise<Record<string, unknown> | null>;
@@ -2354,6 +2363,11 @@ export class BrowserMiddleware {
       } catch { /* 清理失败不影响结论 */ }
     };
     if (!rows.length) { await cleanup(); return { scan: { rows: [], rejected: [] } }; }
+    // A 批（frame:<origin>，B3）：A3 回退面是**仅主帧**（page.evaluate）——合成行按主帧
+    // 链打点（elemFrameStamp 对 page-as-FrameLike = 主帧，frame_path 省略）。声明链指向
+    // 子帧时这些行不会命中链过滤 ⇒ 如实落空（绝不越帧动作）；frame_origin/frame_path 不进
+    // 模型面（pickInner.modelProjectionOf 剥离）。
+    const mainStamp = elemFrameStamp(page as unknown as FrameLike);
     const synthetic: ElemPool = {};
     for (const r of rows) {
       const idx = Number(r["i"]);
@@ -2364,6 +2378,8 @@ export class BrowserMiddleware {
         role: String(r["role"] ?? ""), id: String(r["id"] ?? ""), data_test: String(r["dt"] ?? ""),
         input_type: String(r["type"] ?? ""),
         ...(r["draggable"] === true ? { draggable: true } : {}),
+        ...(mainStamp.frame_origin !== undefined ? { frame_origin: mainStamp.frame_origin } : {}),
+        ...(mainStamp.frame_path !== undefined ? { frame_path: mainStamp.frame_path } : {}),
       } as Elem;
     }
     const refs = this.resolveCommandRef(target, synthetic, op, null);
