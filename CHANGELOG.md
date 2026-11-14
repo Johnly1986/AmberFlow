@@ -105,7 +105,7 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - **【`amber start --target` 帧限定结构化拒绝】** 该 CLI 的演示点击是**主帧** `page.click(...)`
   （`selectorForHint` 也只产出主帧 CSS），带 `frame:` 的目标会点错/超时。纯函数
   `frameTargetRejection(hint)` 在**开浏览器之前**拒绝：文案点名"不支持帧限定目标 + 主帧
-  page.click + 改用 app/run 或 plan 面（`plan check --probe` 支持 frame:）"；exit 沿用该 CLI
+  page.click + 改用 app/run 或 plan 面（`plan check --probe` 支持身份形状 + `frame:` 链核对）"；exit 沿用该 CLI
   既有失败口径（2），**不新增 exit code**。非法/多尾缀仍走旧路径（parseHint 不接受 ⇒ 显式落空）。
 - **【被排除帧链证据（F45 C 批）】** `probeExcludedHint` 的 `ExcludedHintProbe` 增
   `declaredChain?`（hint 的 `frame:` 尾缀）与 `matchedChains`（命中帧完整链 `frameChainOf`，
@@ -130,8 +130,8 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   透传 `meta.hosts`；拿不到 hosts 时只做值形状检查（`hosts=[]` 同）。
 - **【契约/文档】** F45 statement/truth 补"reason 带声明链 + 命中帧完整链"；F70 statement/truth
   补 C 批（findByHint/start 拒绝/诊断/链证据/lint，明确**无新增 stopCode**）；
-  `docs/APP_SCRIPT_AUTHORING.md` 多 frame 速查补 `plan check --probe` 支持 `frame:` 与
-  `amber start --target` 结构化拒绝，stopCode 表 `frame_not_allowed` 行补链证据。
+  `docs/APP_SCRIPT_AUTHORING.md` 多 frame 速查补 `plan check --probe` 对 `frame:` 的身份形状
+  支持边界与 `amber start --target` 结构化拒绝，stopCode 表 `frame_not_allowed` 行补链证据。
 - **【验证】** 离线断言 184 条全绿（findByHint 链过滤 18 / start-target 拒绝 12 / describe 全矩阵
   + parseHint 差分 102 / probe 链证据 + reason 文案 31 / hint-lint 21），
   `npm run typecheck`、`npm run prompt-hit` 通过。浏览器级：`plan check --probe` 正确链命中 +

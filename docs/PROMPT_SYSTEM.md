@@ -15,7 +15,7 @@ Agent 在三个时机拿到同一出处的提示词——**索引命中时知道
 | 出处 | 内容 | 已投放面 |
 |---|---|---|
 | `src/cli/registry.ts` | 命令表（name/summary/usage/flags） | `amber --help` / `amber help <cmd>` |
-| `src/engine/grammar-prompt.ts` | hint 六形状、信号算子、属性匹配模型 | executor 停因、plan promptText、桥生成物、文档 |
+| `src/engine/grammar-prompt.ts` | hint 六形状（+ `within:` / `frame:` 尾缀）、信号算子、属性匹配模型 | executor 停因、plan promptText、桥生成物、文档 |
 | `src/engine/planning-playbook.ts` | 五步法、失败特征速查、STOP_NEXT 停因→下一步 | apps new 骨架、inspect next、run 失败 next、桥、文档 |
 | `src/support/schema-gen.ts` | 引擎语义契约（facts/signals/…/stopcodes 九节） | `amber schema ctx`（快照 + `--check` 防漂移） |
 | `tools/prompt-hit.ts` | 六层离线闸门 | `npm run check` |
