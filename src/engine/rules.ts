@@ -532,6 +532,12 @@ export function hintCandidates(
  * 「最近祖先优先」尝试 `<label> within:#<ancestor-id>`——仍走同一个 push → hintMatch
  * 自证（恰好唯一命中该元素才保留），命中一条即停（更外层锚更宽、更难唯一）。
  * 无 anchor_ids 或文本候选本就唯一时不产生 within（既有建议内容/顺序不变）。
+ *
+ * B 批（frame:<origin> 闭环，spec §12.3/R2-6）：文本候选不唯一且元素带帧链时，
+ * 先在 label 之后、within 之前给帧限定候选——单段 `<label> frame:<自身 origin>`；
+ * 单段仍不唯一且 `frame_path` 非空时再给完整链 `<label> frame:<祖先…>自身>`（≤4 段，
+ * 与 parseHint 声明上限同口径；>4 段不生成）。仍走同一个 push 自证。无 frame 字段
+ * 或无可用 label 时不产生任何新候选（旧输出逐字节不变）。
  */
 export function suggestHints(
   elem: Elem,
@@ -564,6 +570,16 @@ export function suggestHints(
   const label = String(elem.label ?? "").trim();
   const labelUsable = label.length >= 2 && label.length <= 80;
   const labelPushed = labelUsable && push(label);
+  if (!labelPushed && labelUsable && typeof elem.frame_origin === "string" && elem.frame_origin !== "") {
+    const frameOrigin = elem.frame_origin;
+    const originPushed = push(`${label} frame:${frameOrigin}`);
+    // 单段没自证成功（同 origin 多帧/同签名）才尝试完整链；链长含自身帧 >4 段时
+    // parseHint 会整组拒绝，因此不生成（单段候选仍可作后缀命中）。
+    if (!originPushed && Array.isArray(elem.frame_path) && elem.frame_path.length > 0) {
+      const chain = [...elem.frame_path, frameOrigin];
+      if (chain.length <= 4) push(`${label} frame:${chain.join(">")}`);
+    }
+  }
   // 唯一文本候选没进 out（同名组/闭集重复）才退到 within 尾缀；锚字符集与
   // parseHint 的 `#[a-z0-9_\-.:]+` 一致，页面上的奇怪 id（空格/引号）直接跳过。
   if (!labelPushed && labelUsable) {

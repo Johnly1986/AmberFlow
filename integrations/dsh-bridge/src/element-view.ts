@@ -34,8 +34,9 @@ export const ELEMENT_DEFAULT_MAX = 60
 export const ELEMENT_MAX = 200
 /** 每元素 hint_candidates 条数上限。 */
 export const HINTS_PER_ELEMENT = 6
-/** 单条 hint 字符串上限。 */
-export const HINT_MAX_CHARS = 160
+/** 单条 hint 字符串上限（B 批 R2-6：160 → 200，与引擎 AMBIGUITY_HINT_MAX 同口径；
+ *  `suggestHints` 的 `<label> frame:<origin链>` 候选最长可达 4 段 origin 链）。 */
+export const HINT_MAX_CHARS = 200
 /** label 上限（与引擎匹配口径 full_label 的 200 字一致；超出置 label_truncated）。 */
 export const LABEL_MAX_CHARS = 200
 /** href 展示投影上限。 */
@@ -48,6 +49,12 @@ export const CLASS_NAMES_PER_ELEMENT = 8
 export const CLASS_NAME_MAX_CHARS = 40
 /** role 等短标识字段上限。 */
 export const IDENTITY_MAX_CHARS = 60
+/** frame_path（帧 origin 祖先链）条数上限（B 批：与 parseHint 的 ≤4 段声明上限同口径）。 */
+export const FRAME_PATH_MAX_ITEMS = 4
+/** 单段 frame origin 上限（B 批；仅作有界化，规范 origin 通常远小于此）。 */
+export const FRAME_PATH_SEGMENT_MAX_CHARS = 64
+/** structure_path 上限（B 批独立诊断上限；与 hint 的 200 分开——它不是 hint）。 */
+export const STRUCTURE_PATH_MAX_CHARS = 160
 
 /* ------------------------------------------------------------ 合同形状 */
 
@@ -89,8 +96,18 @@ export interface ElementView {
   bbox?: { x: number; y: number; w: number; h: number }
   /** observe 面：0 = 主 frame，frames[] 下标。 */
   frame?: number
-  /** inspect 面：元素所属 frame origin。 */
+  /** inspect/observe 面：元素所属 frame origin（B 批 observe 面开始透传；未知 origin 帧缺省）。 */
   frame_origin?: string
+  /** inspect/observe 面：祖先 origin 链（外→内；主帧省略；B 批透传，≤4 段 × 64 字符）。 */
+  frame_path?: string[]
+  /**
+   * B 批：**结构证据**（仅引擎 inspect/observe 的 structure opt-in 面提供；≤160 字符）。
+   * 祖先 tag/`#id` + 同 tag 兄弟序号 + 帧下标前缀。**不是 hint**：动态页面可能失效、
+   * 不可照抄进 act target；与 `structure_unstable:true` 同出现。
+   */
+  structure_path?: string
+  /** 结构证据的不稳定标记（引擎给才有；桥不补字段）。 */
+  structure_unstable?: boolean
   /** inspect 面：动作族/能力面（池投影）。 */
   action_family?: string
   action_capabilities?: string[]
@@ -146,6 +163,7 @@ export function projectElementView(raw: unknown): ElementView | null {
   const clippedLabel = label === '' ? '' : clip(label, LABEL_MAX_CHARS)
   const hints = strArray(raw['hint_candidates'], HINTS_PER_ELEMENT, HINT_MAX_CHARS)
   const classNames = strArray(raw['class_names'], CLASS_NAMES_PER_ELEMENT, CLASS_NAME_MAX_CHARS)
+  const framePath = strArray(raw['frame_path'], FRAME_PATH_MAX_ITEMS, FRAME_PATH_SEGMENT_MAX_CHARS)
   const capabilities = strArray(raw['action_capabilities'], 8, IDENTITY_MAX_CHARS)
   const bboxRaw = isObj(raw['bbox']) ? raw['bbox'] : undefined
   const bbox = bboxRaw
@@ -175,6 +193,13 @@ export function projectElementView(raw: unknown): ElementView | null {
     ...(bbox === undefined ? {} : { bbox }),
     ...(num(raw['frame']) === undefined ? {} : { frame: num(raw['frame']) as number }),
     ...(str(raw['frame_origin'], IDENTITY_MAX_CHARS) === undefined ? {} : { frame_origin: str(raw['frame_origin'], IDENTITY_MAX_CHARS) as string }),
+    ...(framePath.items.length ? { frame_path: framePath.items } : {}),
+    ...(str(raw['structure_path'], STRUCTURE_PATH_MAX_CHARS) === undefined
+      ? {}
+      : {
+          structure_path: str(raw['structure_path'], STRUCTURE_PATH_MAX_CHARS) as string,
+          ...(raw['structure_unstable'] === true ? { structure_unstable: true } : {}),
+        }),
     ...(str(raw['action_family'], IDENTITY_MAX_CHARS) === undefined ? {} : { action_family: str(raw['action_family'], IDENTITY_MAX_CHARS) as string }),
     ...(capabilities.items.length ? { action_capabilities: capabilities.items } : {}),
     ...(str(raw['id'], IDENTITY_MAX_CHARS) === undefined ? {} : { id: str(raw['id'], IDENTITY_MAX_CHARS) as string }),

@@ -661,6 +661,8 @@ export class SessionRuntime {
       ...(req["selector"] === undefined || req["selector"] === null ? {} : { selector: req["selector"] as string }),
       ...(req["includeHidden"] === undefined ? {} : { includeHidden: req["includeHidden"] as boolean }),
       ...(req["includeFrames"] === undefined ? {} : { includeFrames: req["includeFrames"] as boolean }),
+      // B 批：结构证据 opt-in（桥 `include_structure` → 请求字段 includeStructure）。
+      ...(req["includeStructure"] === undefined ? {} : { includeStructure: req["includeStructure"] as boolean }),
     };
     // 形状校验与 $ 上下文同一份实现（非法值 = config_error，不做静默截断）。
     const result = await this.ctx().observe(opts as never);

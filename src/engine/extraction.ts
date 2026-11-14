@@ -89,6 +89,15 @@ export interface Elem {
    */
   frame_origin?: string;
   frame_path?: string[];
+  /**
+   * B 批：结构证据（仅 inspect 的 `structurePath` opt-in 时出现；≤160 字符）。祖先 tag/`#id`
+   * + 同 tag 兄弟序号 + 帧下标前缀（如 `f2>div#panel>button[2]`）。**只作诊断**：动态页面
+   * （重排/虚拟列表/插入广告）随时失效，**不可照抄进 hint/target**；不进模型面
+   * （`modelProjectionOf` 剥离）、不进歧义证据（`describeAmbiguity` 是零页面 I/O 纯函数）。
+   */
+  structure_path?: string;
+  /** 结构证据的不稳定标记（与 `structure_path` 同出现：一眼看出"不是 hint"）。 */
+  structure_unstable?: true;
   js_events?: unknown;
   js_ref?: string;
   dsh_ref?: string;
@@ -717,6 +726,13 @@ export async function extractElements(
     classNames?: boolean;
     fullLabel?: boolean;
     /**
+     * B 批（inspect 观察面 opt-in，缺省 false = 池行逐字节不变）：给每行补**结构证据**
+     * `structure_path`（祖先 tag/`#id` + 同 tag 兄弟序号 + 帧下标前缀，≤160 字符）与
+     * `structure_unstable: true`。只作诊断（动态页面可能失效、不可照抄进 hint），
+     * 不进模型面（`executor-pure.modelProjectionOf` 仍会剥离，防误传）。
+     */
+    structurePath?: boolean;
+    /**
      * P0-D：host 信封。给了就**只从信封内的 frame** 抽池（主 frame 恒在面内），被排除
      * frame 的真实下标仍保留（`frame`/`f<fi>:` ref 不变）；缺省 = 今天的全帧面。
      */
@@ -761,7 +777,9 @@ export async function extractElements(
           cats: SURFACE_SELECTORS, caps: WINDOW_CAPS,
           // P0-A：只有 inspect 传这两个开关；不传 ⇒ 参数对象与今天逐字节同形。
           ...(opts?.classNames === true ? { classNames: true } : {}),
-          ...(opts?.fullLabel === true ? { fullLabel: true } : {}) })) as Elem[] | null;
+          ...(opts?.fullLabel === true ? { fullLabel: true } : {}),
+          // B 批：结构证据 opt-in；帧下标前缀在 JS 内拼进 structure_path（截断也含前缀）。
+          ...(opts?.structurePath === true ? { structurePath: true, framePrefix: `f${fi}` } : {}) })) as Elem[] | null;
     } catch {
       rows = null;
     }
@@ -807,6 +825,9 @@ export interface ObserveRawRow {
   /** A 批（frame:<origin>）：帧链两字段（observeElements 宿主侧按帧打点；主帧 path 省略）。 */
   frame_origin?: string;
   frame_path?: string[];
+  /** B 批：结构证据（仅 `includeStructure:true` 时由 OBSERVE_JS 产出；≤160、unstable）。 */
+  structure_path?: string;
+  structure_unstable?: true;
 }
 
 /** frame.url 可能是属性或方法（Playwright 两种形状都见过）；读不到就是空串。 */
@@ -836,6 +857,8 @@ export async function observeElements(
   page: PageLike,
   opts: {
     selector?: string; max: number; includeHidden?: boolean; includeFrames?: boolean;
+    /** B 批：opt-in 结构证据（OBSERVE_JS 只读计算，额外一次祖先前缀行走/行）。 */
+    includeStructure?: boolean;
     surface?: SurfacePolicy;
   },
 ): Promise<{ rows: ObserveRawRow[]; total: number; frames: string[]; badSelector?: string }> {
@@ -857,6 +880,8 @@ export async function observeElements(
     try {
       raw = (await frames[fi]!.evaluate(PASS_OBSERVE, {
         sel, max: remaining, includeHidden: opts.includeHidden === true, admitSel,
+        // B 批：结构证据 opt-in；帧下标前缀在 JS 内拼进 structure_path（截断也含前缀）。
+        ...(opts.includeStructure === true ? { includeStructure: true, framePrefix: `f${fi}` } : {}),
       })) as ObserveRawResult | null;
     } catch {
       raw = null;   // frame detached / 无执行上下文：跳过（与 extractElements 同口径）

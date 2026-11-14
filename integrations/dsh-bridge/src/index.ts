@@ -901,7 +901,10 @@ export function apply(ctx: Context, config: Config): void {
       + '(`ax`, incl. how many named interactive nodes are NOT reachable by the pool) and engine '
       + 'advisories (why a probe hit cannot become an act target). Element rows follow the SAME '
       + 'ElementView contract as `' + toolPrefix + '_session op:"observe"`; `ref` is a display/audit '
-      + 'anchor, NOT an act address — act targets are hint strings. Use this before writing a step '
+      + 'anchor, NOT an act address — act targets are hint strings. `hint_candidates` may carry a '
+      + '`frame:<origin>` suffix (single segment or <=4-segment origin chain) when a shared label is '
+      + 'disambiguated by frame; `structure_path` is diagnostic-only (unstable, NEVER copy it into a '
+      + 'target). Use this before writing a step '
       + 'target hint. inspect 是独立一次性会话（新开浏览器，不 attach 运行会话）；会话内实时观察用'
       + '应用内 ctx.observe()。 No clicks, no typing, no model call; only http(s) URLs.',
     parameters: {
@@ -1197,6 +1200,9 @@ export function apply(ctx: Context, config: Config): void {
       + '`observe` has NO offset (element order moves as the page hydrates) — narrow with selector or '
       + 'max, or take a snapshot for the full element pool. Element rows follow the SAME ElementView contract as '
       + '`' + toolPrefix + '_inspect` (one shared projection: hint_candidates, bounded clipping, same caps); '
+      + 'hint_candidates may carry a `frame:<origin>` suffix (single segment, or a <=4-segment origin chain for '
+      + 'nested frames) when a shared label is disambiguated by frame. `include_structure:true` adds a '
+      + 'diagnostic-only `structure_path` (unstable, NEVER copy it into a target — it is not a hint). '
       + '`ref` is a display/audit anchor, NOT an act address — act targets are hint strings. '
       + '`act` echoes ambiguity diagnostics (`ambiguous` / '
       + '`matched_others`) when the hint matched several candidates — re-observe and retry with a '
@@ -1282,6 +1288,12 @@ export function apply(ctx: Context, config: Config): void {
       timeout_ms: { type: 'integer', description: 'wait_for: poll window in ms (default 15000, max 120000).' },
       max: { type: 'integer', description: 'observe: max rows (default 60, max 200 — the same ElementView cap as ' + toolPrefix + '_inspect max_elements).' },
       include_hidden: { type: 'boolean', description: 'observe: include invisible elements (default false).' },
+      include_structure: {
+        type: 'boolean',
+        description: 'observe: include diagnostic-only structure evidence (default false). Each row then carries '
+          + '`structure_path` (<=160 chars, ancestor tag/#id + same-tag sibling index + frame index) and '
+          + '`structure_unstable:true`. It is NOT a hint — dynamic pages may invalidate it; never copy it into a target.',
+      },
       screenshot: { type: 'boolean', description: 'snapshot: also write a viewport screenshot; act: write act-<n>-failure.png ONLY when the action fails (default false; only paths are returned, never inline).' },
     },
     output: {
@@ -1333,8 +1345,10 @@ function renderSessionResult(value: Record<string, unknown>): string {
       const role = typeof c.role === 'string' && c.role !== '' ? `[role=${c.role}]` : ''
       const label = String(c.label ?? '')
       const near = typeof c.near === 'string' && c.near !== '' ? ` near="${c.near}"` : ''
+      // B 批：候选帧 origin（引擎给了才有）——跨帧同名时先看这一项，再用 hint 的 frame: 尾缀收窄。
+      const origin = typeof c.frame_origin === 'string' && c.frame_origin !== '' ? ` frame=${c.frame_origin}` : ''
       const hint = typeof c.suggested_hint === 'string' ? `  hint=${c.suggested_hint}` : ''
-      return `\n  ${ref} ${tag}${role} "${label}"${c.same_label === true ? ' (same label as others)' : ''}${near}${hint}`
+      return `\n  ${ref} ${tag}${role} "${label}"${c.same_label === true ? ' (same label as others)' : ''}${near}${origin}${hint}`
     }).join('')
     // B1：动作失败现场（引擎给了 actionability 才有这一行）——直接被谁挡住、节点是否还在。
     const actionability = typeof value.actionability === 'object' && value.actionability !== null

@@ -58,6 +58,34 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   验证（双端口跨源 fixture、无后缀 run/trace/result/dry 逐字节对照、observe 候选照抄）
   留待专项测试轮。
 
+### B 批（候选生成 / 观察面 / 结构证据 / bridge 透传 / 契约文字）
+
+- **【候选生成】** `suggestHints` 在唯一文本候选没自证成功、且元素有 `frame_origin` 时补帧限定
+  候选：先 `<label> frame:<自身 origin>`；单段仍不唯一且 `frame_path` 非空时再给完整链
+  `<label> frame:<祖先…>自身>`（含自身 ≤4 段，>4 段不生成）。仍在 label 之后、`within:` 之前，
+  仍走同一个 `push`（`hintMatch`+`hintCandidates` 自证），总数仍 `slice(0,4)`；无 frame 字段/
+  无可用 label 时输出逐字节不变。
+- **【观察面字段】** `ObserveElement` 增加 `frame_origin` / `frame_path`（来自 A 批已打点的
+  `ObserveRawRow`；非空才出现，与既有可选字段同口径），`ctx.observe` 的结果与 `ctx-types`
+  文档同步——observe 自证池因此能给出/验证 `frame:` 候选。
+- **【结构证据（仅诊断）】** `structure_path`：`extractElements({structurePath:true})`（inspect 面）
+  与 `ctx.observe({includeStructure:true})` / 桥 `include_structure` opt-in 时，元素行带
+  `structure_path`（祖先 tag/`#id` + 同 tag 兄弟序号 + 帧下标前缀，如 `f2>div#panel>button[2]`，
+  ≤160 字符、超长从外侧截断）与 `structure_unstable:true`。**不是 hint**：动态页面可能失效、
+  不可照抄；不进 hint 自证、`describeAmbiguity`（零页面 I/O 纯函数）或 `ChoiceRequest.elems`
+  （`modelProjectionOf` 同步剥离 `structure_path`/`structure_unstable` 兜底）。
+- **【证据上限（R2-6）】** `AMBIGUITY_HINT_MAX` 80 → **200**（`suggested_hint` 可容 4 段
+  `frame:` 链）；桥 `suggested_hint` clip 80 → 200；`element-view.HINT_MAX_CHARS` 160 → 200；
+  新增 `FRAME_PATH_MAX_ITEMS=4` / `FRAME_PATH_SEGMENT_MAX_CHARS=64` / `STRUCTURE_PATH_MAX_CHARS=160`
+  独立上限。**合同变更记账**：歧义候选 additive `frame_origin`（引擎 `candidateView` 来自
+  `Elem.frame_origin`，undefined 不出现；桥白名单与 render 摘要同步——跨帧同名时先看 origin）。
+- **【bridge】** ElementView 透传 `frame_path`（≤4×64）、`structure_path`（≤160）/
+  `structure_unstable`；`amberflow_session` 新增 `include_structure`（缺省 false，只透传）；
+  `inspect` 元素行补 `frame_path`/`structure_path`（inspect 始终 opt-in，模型面不经过）。
+  契约文字 F41（observe 字段 + `includeStructure`）、F54（ElementView 字段/上限）、F55
+  （候选 `frame_origin`、`suggested_hint≤200`）、F70 truth 同步；`docs/APP_SCRIPT_AUTHORING.md`
+  多 frame 速查与 `docs/AGENT_INTERFACE.md` 同步。
+
 ## [Unreleased] — inspect --probe 跨 frame 探测（iframe 元素不再静默漏检）
 
 - **【修复·inspect 探测面】** `inspect --probe` 此前只在**主 frame** `page.evaluate`，

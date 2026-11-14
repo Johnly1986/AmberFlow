@@ -269,9 +269,11 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     const poolMax = wide ? Math.max(max, WIDE_POOL_ELEMENTS) : max;
     // P0-A：inspect 观察面显式要完整标签 + 有界 class_names（池行/模型面缺省逐字节不变——
     // 这两个字段只在 classNames/fullLabel 显式打开时才出现）。
+    // B 批：结构证据同样只在 inspect（诊断面）opt-in——`structure_path` + `structure_unstable`
+    // 只作诊断（不可照抄），模型面由 modelProjectionOf 兜底剥离。
     const pool = await extractElements(
       page as never, true, poolMax,
-      { ...(wide ? { widgets: true } : {}), classNames: true, fullLabel: true });
+      { ...(wide ? { widgets: true } : {}), classNames: true, fullLabel: true, structurePath: true });
     const heuristicCount = Object.values(pool).filter((e) => e.heuristic === true).length;
     const view = poolView(pool, page as never, poolMax);
     // A2 窗口透明化：页面上**可见**的交互元素里，有多少没进本次池（被 40/120 窗口或分桶顺序
@@ -348,6 +350,9 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
         action_family: e.action_family,
         action_capabilities: e.action_capabilities,
         frame_origin: e.frame_origin,
+        ...(e.frame_path === undefined ? {} : { frame_path: e.frame_path }),
+        // B 批：结构证据仅为诊断（unstable 标记与字段同出现；不进 hint/模型面）。
+        ...(e.structure_path === undefined ? {} : { structure_path: e.structure_path, structure_unstable: true }),
         ...e.extras,
       };
     });

@@ -48,7 +48,7 @@ apps list → app_show（路径 + 当前源码）→ 编辑 app.mjs
   但脚本自身的文件/进程副作用会真的发生（check 输出带一行提示；JSON 面 `data.dry_semantics`）。
   脚本两面判据用 `ctx.runtime.dry`（dry/replay `true`、真跑 `false`）；`epoch === 0` 不作 dry 判据。
   `app_create` 的骨架含「卡点→能力」cookbook 速查段；会话内实时观察用 `ctx.observe()`。
-- `inspect` 只读：标题、URL、有界元素、候选 hint；`--json` 另带只读的可访问性树证据块 `ax`（浏览器 AX role/name/focusable/disabled + `not_in_pool` 近似口径，不进池/匹配/模型/运行路径）；不点击、不输入、不调模型。**inspect 是独立一次性会话**（新开浏览器、不 attach 运行会话）——会话内实时看当前页用应用内 `ctx.observe()`。
+- `inspect` 只读：标题、URL、有界元素、候选 hint；`--json` 另带只读的可访问性树证据块 `ax`（浏览器 AX role/name/focusable/disabled + `not_in_pool` 近似口径，不进池/匹配/模型/运行路径）；不点击、不输入、不调模型。**inspect 是独立一次性会话**（新开浏览器、不 attach 运行会话）——会话内实时看当前页用应用内 `ctx.observe()`。元素行带 `frame_origin`/`frame_path`（帧链）；`hint_candidates` 在多 frame 同名场景会给 `<label> frame:<origin>` 或 ≤4 段完整链候选；`structure_path`（若出现）只是诊断证据（`structure_unstable:true`，动态页面可能失效）——**不是 hint，不可照抄**。
 - **learn 录制 hint vs inspect 候选**：learn 的 `hint` 是六形状闭集、属性白名单只认 `test`（→data-test）/`type`/`aria-label`；inspect 的 `hint_candidates` 是引擎经同一个 `hintMatch` 自证过的可照抄结果（输出的就是六形状之一）。inspect 候选可直接抄进 act/learn；自己挑的属性先过白名单。
 - `run --max-steps N` 是**执行预算**，不是“从第 N 步开始”：脚本按自己的控制流执行，
   用满预算时以 `budget_exceeded` 停下，结果带已执行步骤与 trace。
@@ -289,12 +289,14 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 
 `on_ambiguous`（`fail` | `act`，缺省 `fail`）：目标 hint 命中多个**不同**候选时——`fail` = **零动作**，
 返回 `{ok:false, code:"target_ambiguous", executed:false, ambiguity}`；`ambiguity` 是有界证据
-（候选 ≤5；label/class/near ≤40、ref/tag ≤16、`suggested_hint` ≤80；另有 `would_act_ref`/
+（候选 ≤5；label/class/near ≤40、ref/tag ≤16、`suggested_hint` ≤200（B 批：可容 4 段
+`frame:` 链）、候选另有 `frame_origin`（≤60，引擎给才有）；另有 `would_act_ref`/
 `candidates_total`/`truncated`；`source:"dom_fallback"` 时不给 near/suggested_hint）。判据与
 `amber run` 命令步的 `target_ambiguous` **同一份**（`hintCandidates` 非空 && `decided === null` &&
 `refs.length > 1`），**run 面不受影响**。`act` = 恢复旧行为（直接执行可行动优先的第一个候选），
-仅在复现旧流程/候选确知等价时用。歧义**只停不选**：用 `observe` 的 `hint_candidates` 收窄 `target`，
-或显式 `on_ambiguous:"act"` 重放——都是人的决定；桥不据此猜测，也不自动重试。
+仅在复现旧流程/候选确知等价时用。歧义**只停不选**：用 `observe` 的 `hint_candidates` 收窄 `target`
+（多 frame 同名时优先用 `<label> frame:<origin>` / 完整链候选），或显式 `on_ambiguous:"act"`
+重放——都是人的决定；桥不据此猜测，也不自动重试。
 
 `amberflow_session` 的 `act` 失败现场（B1）：
 

@@ -153,6 +153,8 @@ export interface SessionToolArgs {
   timeout_ms?: number
   max?: number
   include_hidden?: boolean
+  /** B 批：observe 的结构证据 opt-in（透传 `includeStructure`；缺省不传 = 引擎 false）。 */
+  include_structure?: boolean
   screenshot?: boolean
 }
 
@@ -628,6 +630,8 @@ export class SessionManager {
       max,
       ...(args.selector === undefined ? {} : { selector: args.selector }),
       ...(args.include_hidden === undefined ? {} : { includeHidden: args.include_hidden }),
+      // B 批：结构证据 opt-in 只在显式给值时才进请求体（缺省由引擎给 false）。
+      ...(args.include_structure === undefined ? {} : { includeStructure: args.include_structure }),
     })
     if (response['ok'] !== true) return this.engineFailure(response, 'observe')
     const { elements, truncated } = projectElementViews(response['elements'], max)
@@ -1060,7 +1064,9 @@ export class SessionManager {
    * A2：`ambiguity` 证据的**有界透传**（引擎有才有；不重算、不补键、不改语义）。
    *
    * 上限与引擎侧同一张表：候选 ≤5 行、ref/tag/role ≤16、label/class/near ≤40、
-   * suggested_hint ≤80、target ≤120。缺键 = 引擎没提供，桥不发明。
+   * suggested_hint ≤200（B 批：可容 4 段 `frame:` 链；与引擎 AMBIGUITY_HINT_MAX /
+   * ElementView HINT_MAX_CHARS 同口径）、target ≤120；候选 additive `frame_origin`
+   * 与 ElementView 的短标识同口径（≤60）。缺键 = 引擎没提供，桥不发明。
    */
   private ambiguityEvidence(raw: unknown): Record<string, unknown> | undefined {
     if (!isObj(raw)) return undefined
@@ -1082,8 +1088,10 @@ export class SessionManager {
         if (typeof row['class'] === 'string') projected['class'] = clip(row['class'], 40)
         if (typeof row['near'] === 'string') projected['near'] = clip(row['near'], 40)
         if (typeof row['frame'] === 'number') projected['frame'] = row['frame']
+        // B 批：候选帧 origin（引擎有才出现；跨帧同名时区分是哪一帧）。
+        if (typeof row['frame_origin'] === 'string') projected['frame_origin'] = clip(row['frame_origin'], 60)
         if (typeof row['same_label'] === 'boolean') projected['same_label'] = row['same_label']
-        if (typeof row['suggested_hint'] === 'string') projected['suggested_hint'] = clip(row['suggested_hint'], 80)
+        if (typeof row['suggested_hint'] === 'string') projected['suggested_hint'] = clip(row['suggested_hint'], 200)
         return projected
       })
     }

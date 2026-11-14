@@ -51,7 +51,7 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
 | type | 请求（额外字段） | 成功响应（额外字段） | 失败 code |
 |---|---|---|---|
 | `open` | `url`, `timeoutMs?` | `url, title?, hosts` | `host_not_allowed` / `unreachable` / `config_error` |
-| `observe` | `max?`, `selector?`, `includeHidden?`, `includeFrames?` | `ObserveResult`（`url,title?,frames?,counts,elements`；每元素带 `frame` 下标与 `hint_candidates`；多 frame 时另有 `frame_counts`） | `bad_selector` |
+| `observe` | `max?`, `selector?`, `includeHidden?`, `includeFrames?`, `includeStructure?`（B 批，缺省 false；结构证据仅诊断，不可照抄） | `ObserveResult`（`url,title?,frames?,counts,elements`；每元素带 `frame` 下标、`frame_origin?`/`frame_path?`（帧链）与 `hint_candidates`（含 `frame:` 候选）；`includeStructure:true` 时另有 `structure_path`（≤160）+ `structure_unstable:true`；多 frame 时另有 `frame_counts`） | `bad_selector` |
 | `act` | `op`(`click/check/fill/select/hover/scroll`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll；给 = 容器滚动，不给 = 滚入视口), `onAmbiguous?`(`fail`\|`act`，缺省 `fail`), `screenshot?`(缺省 `false`；失败时落 `act-<n>-failure.png`), `observeAfter?` | `op,target,executed,ref,how,changed,url,after?`；scroll 另有实测 `moved`/`delta?`/`scroll?`（`changed === moved`）；歧义时另有 `ambiguous`/`matched_others?`/`hint_kind?`/`hint_tier?`/`hint_suspicious?`；非 timeout 异常且 URL 已变时另有 `probe_navigated:true`；**歧义停**时 `ok:false, code:"target_ambiguous", executed:false, ambiguity`；**动作失败**时 `ok:false, code, reason` 并（被遮挡/超时时）带 `actionability`、`screenshot_file?`、落空（`target_not_found`）时带 `diagnostics` | `target_ambiguous` / `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `not-actionable-or-covered` / `action-timeout` / `config_error` |
 | `read` | `what`(`text/value/count/attr`), `selector`, `attr?` | `what,selector,value`（读不到 = `null`） | `config_error` |
 | `extract` | `rows`, `fields`（`"."` = 行文本；`"@attr"` = 行属性；或子 CSS）, `maxItems?`, `offset?`（续页起点，0-based 整数 0..10000） | `rows,count,capped`；**`capped` 或 `offset>0` 时**另有 `offset,total,has_more`——`count` 是**本页返回行数**不是总数，`total` 才是匹配总数，`has_more = offset+count < total` | `config_error` |
@@ -133,12 +133,13 @@ task-34 的回显是弱档旁路诊断（照旧执行 `refs[0]`）；A2 起，�
 | `tier` | `hintCandidates` 胜出档（与命令步同一判据） |
 | `would_act_ref` | 旧行为会执行的那个 ref（可行动优先排序后的 `refs[0]`）——事实，不是建议 |
 | `candidates_total` / `truncated` | 歧义档总候选数 / 是否超过列出的 5 行 |
-| `candidates[]` | ≤5 行：`ref≤16, tag≤16, role?≤16, label≤40, class?≤40, near?≤40, frame, same_label, suggested_hint?≤80` |
+| `candidates[]` | ≤5 行：`ref≤16, tag≤16, role?≤16, label≤40, class?≤40, near?≤40, frame, frame_origin?（B 批：候选所在帧 origin，引擎给才有）, same_label, suggested_hint?≤200` |
 
 - `same_label` = 该归一 label（`full_label` 优先、折叠空白/大小写）在**本次池内**出现 >1 次 ⇒ label
   本身不足以区分（收窄要换 `#id` / `[data-test=…]` / 属性或 `near`）。
 - `near` 只**复制**池里既有 `elem.near`（不重算）；`suggested_hint` 来自既有 `suggestHints`（内部同一个
-  `hintMatch` 自证「恰好唯一命中」，为空就省略该键）——可直接照抄进下一条 `target`。
+  `hintMatch` 自证「恰好唯一命中」，为空就省略该键）——可直接照抄进下一条 `target`；B 批后也可能是
+  `<label> frame:<origin>` / ≤4 段 origin 链形态（跨帧同名时），候选的 `frame_origin` 可先用来判断是哪一帧。
 - `source:"dom_fallback"` 只给合成候选身份（`pN`）：合成池自证 ≠ 真池，所以**不提供** `near` /
   `suggested_hint`。
 - **不是猜测**：证据只陈述"有几个候选、各自是谁、旧行为会点谁"；选哪个由人/上游决定。收窄 hint 或显式

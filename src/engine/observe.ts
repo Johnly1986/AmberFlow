@@ -42,6 +42,13 @@ export interface ObserveOptions {
   includeHidden?: boolean;
   /** 是否观察可达子 frame（缺省 true；主 frame + ≤5 子 frame）。 */
   includeFrames?: boolean;
+  /**
+   * B 批：是否附带**结构证据** `structure_path`（缺省 false）。true 时元素行多
+   * `structure_path`（祖先 tag/`#id` + 同 tag 兄弟序号 + 帧下标前缀，≤160 字符）与
+   * `structure_unstable:true`。只作诊断：动态页面（重排/虚拟列表/插入广告）随时失效，
+   * **不可照抄进 hint/target**，也不进 hint 自证、歧义证据或模型请求面。
+   */
+  includeStructure?: boolean;
 }
 
 export interface ObserveBBox { x: number; y: number; w: number; h: number }
@@ -70,6 +77,21 @@ export interface ObserveElement {
   hint_candidates?: string[];
   /** 0 = 主 frame；与 `frames[]` 的下标一致。 */
   frame?: number;
+  /**
+   * A 批数据面 / B 批观察面透传：元素所在帧的 origin 与祖先 origin 链（外→内；主帧
+   * `frame_path` 省略；两字段都缺 = 未知 origin 帧，如 about:blank/srcdoc）。`frame:`
+   * 候选与匹配判定的底座；非空才出现（与既有可选字段同口径）。
+   */
+  frame_origin?: string;
+  frame_path?: string[];
+  /**
+   * B 批：**结构证据**（仅 `includeStructure:true` 时出现；≤160 字符）。祖先 tag/`#id` +
+   * 同 tag 兄弟序号 + 帧下标前缀（如 `f2>div#panel>button[2]`）——只回答"在哪个子树"，
+   * **不是 hint**：动态页面可能失效、不可照抄。
+   */
+  structure_path?: string;
+  /** 结构证据的不稳定标记（与 `structure_path` 同出现：一眼看出"不是 hint"）。 */
+  structure_unstable?: true;
 }
 
 export interface ObserveResult {
@@ -96,13 +118,13 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
 /** 声明面形状校验（真实/dry/replay 共用；非法值 = 结构化 config_error，不做静默截断）。 */
 export function validateObserveOptions(opts: unknown): string[] {
   if (opts === undefined) return [];
-  if (!isObj(opts)) return ["ctx.observe: options must be an object like { max, selector, includeHidden, includeFrames }"];
+  if (!isObj(opts)) return ["ctx.observe: options must be an object like { max, selector, includeHidden, includeFrames, includeStructure }"];
   const p: string[] = [];
-  const allowed = new Set(["max", "selector", "includeHidden", "includeFrames"]);
+  const allowed = new Set(["max", "selector", "includeHidden", "includeFrames", "includeStructure"]);
   for (const k of Object.keys(opts)) {
-    if (!allowed.has(k)) p.push(`ctx.observe: unknown option ${JSON.stringify(k)} (allowed: max, selector, includeHidden, includeFrames)`);
+    if (!allowed.has(k)) p.push(`ctx.observe: unknown option ${JSON.stringify(k)} (allowed: max, selector, includeHidden, includeFrames, includeStructure)`);
   }
-  const { max, selector, includeHidden, includeFrames } = opts;
+  const { max, selector, includeHidden, includeFrames, includeStructure } = opts;
   if (max !== undefined && (typeof max !== "number" || !Number.isInteger(max) || max < 1 || max > OBSERVE_HARD_MAX)) {
     p.push(`ctx.observe: opts.max must be an integer 1..${OBSERVE_HARD_MAX} (got ${JSON.stringify(max)})`);
   }
@@ -115,16 +137,20 @@ export function validateObserveOptions(opts: unknown): string[] {
   if (includeFrames !== undefined && typeof includeFrames !== "boolean") {
     p.push(`ctx.observe: opts.includeFrames must be a boolean (got ${JSON.stringify(includeFrames)})`);
   }
+  if (includeStructure !== undefined && typeof includeStructure !== "boolean") {
+    p.push(`ctx.observe: opts.includeStructure must be a boolean (got ${JSON.stringify(includeStructure)})`);
+  }
   return p;
 }
 
 /** 规范化（调用前必须已过 validateObserveOptions）。 */
-export function normalizeObserveOptions(opts: ObserveOptions = {}): Required<Pick<ObserveOptions, "max" | "includeHidden" | "includeFrames">> & Pick<ObserveOptions, "selector"> {
+export function normalizeObserveOptions(opts: ObserveOptions = {}): Required<Pick<ObserveOptions, "max" | "includeHidden" | "includeFrames" | "includeStructure">> & Pick<ObserveOptions, "selector"> {
   return {
     max: opts.max ?? OBSERVE_DEFAULT_MAX,
     ...(opts.selector === undefined ? {} : { selector: opts.selector }),
     includeHidden: opts.includeHidden === true,
     includeFrames: opts.includeFrames !== false,
+    includeStructure: opts.includeStructure === true,
   };
 }
 
@@ -203,6 +229,7 @@ export async function observePage(
     max: normalized.max,
     includeHidden: normalized.includeHidden,
     includeFrames: normalized.includeFrames,
+    includeStructure: normalized.includeStructure,
     ...(surface === undefined ? {} : { surface }),
   });
   const url = urlOf(page);
@@ -217,6 +244,12 @@ export async function observePage(
   }
   const elements: ObserveElement[] = collected.rows.map((row, i) => {
     const classNames = Array.isArray(row.class_names) && row.class_names.length > 0 ? row.class_names.slice(0, 8) : undefined;
+    // A 批数据面 / B 批观察面：帧链两字段非空才出现（与既有可选字段同口径）；未知 origin
+    // 帧两字段都缺（与池行一致，不编造 "null"/空串）。
+    const frameOrigin = orUndef(row.frame_origin);
+    const framePath = Array.isArray(row.frame_path) && row.frame_path.length > 0 ? row.frame_path : undefined;
+    // B 批结构证据只由 opt-in 的 OBSERVE_JS 产出；空串不出现（诊断字段不冒充事实）。
+    const structurePath = orUndef(row.structure_path);
     return {
       ref: `o${i}`,
       tag: row.tag,
@@ -232,6 +265,9 @@ export async function observePage(
       ...(row.bbox === undefined ? {} : { bbox: row.bbox }),
       admitted: false,
       ...(row.frame === undefined ? {} : { frame: row.frame }),
+      ...(frameOrigin === undefined ? {} : { frame_origin: frameOrigin }),
+      ...(framePath === undefined ? {} : { frame_path: framePath }),
+      ...(structurePath === undefined ? {} : { structure_path: structurePath, structure_unstable: true as const }),
     };
   });
   // 自证池 = 本次观察到的**准入面 + 可见**元素（真实池的上界；隐藏/池外元素不在其中，

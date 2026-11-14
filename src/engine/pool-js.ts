@@ -178,6 +178,61 @@ export const LABEL_HELPERS_JS = String.raw`
 `;
 
 /**
+ * B 批：**结构证据** `structure_path` 的唯一 JS 实现（EXTRACT_JS / OBSERVE_JS 共用）。
+ *
+ * 形状：帧下标前缀（`f<fi>`，与池 ref/观察 `frame` 同一下标）+ 祖先链（外→内，到 `body`
+ * 为止——`html`/`body` 不增加诊断价值，示例从 body 的子节点起）。每段 = `tag#id`（该节点
+ * 有 id 时；id 是稳定锚）或 `tag[n]`（同 tag 兄弟序号 = `:nth-of-type` 语义，1-based）。
+ * 总长 ≤160 字符；超长从**外侧**截断（保留帧前缀与元素端），中段以 `…>` 标记——链尾才是
+ * "这个元素"。
+ *
+ * 纪律：仅诊断，**不是 hint**（动态页面重排/虚拟列表/插入广告随时失效、不可照抄）；
+ * 只在 inspect（`extractElements({structurePath:true})`）或
+ * `ctx.observe({includeStructure:true})` 的 opt-in 面出现，不进 hint 自证/歧义证据/
+ * 模型请求面（`modelProjectionOf` 仍会剥离，防误传）。
+ */
+export const STRUCTURE_HELPERS_JS = String.raw`
+  const __STRUCTURE_PATH_MAX = 160;
+  const __structurePathOf = (el, framePrefix) => {
+    if (!el) return '';
+    const parts = [];
+    let cur = el, guard = 0;
+    while (cur && cur.nodeType === 1 && guard < 64) {
+      const tag = String(cur.tagName || '').toLowerCase();
+      if (!tag) break;
+      // html/body 是所有页共有的根容器：不进结构证据（示例从 body 的子节点起）。
+      if (tag === 'html' || tag === 'body') break;
+      if (cur.id) {
+        parts.unshift(tag + '#' + String(cur.id));
+      } else {
+        let nth = 1;
+        const parent = cur.parentElement;
+        if (parent) {
+          for (let k = 0; k < parent.children.length; k++) {
+            const sib = parent.children[k];
+            if (sib.tagName === cur.tagName) {
+              if (sib === cur) break;
+              nth += 1;
+            }
+          }
+        }
+        parts.unshift(tag + '[' + nth + ']');
+      }
+      cur = cur.parentElement; guard += 1;
+    }
+    const prefix = framePrefix ? String(framePrefix) + '>' : '';
+    const body = parts.join('>');
+    let out = prefix + body;
+    if (out.length > __STRUCTURE_PATH_MAX) {
+      // 从外侧（祖先端）截断，保留元素端与帧前缀：f2>…>div#panel>button[2]。
+      const room = Math.max(1, __STRUCTURE_PATH_MAX - prefix.length - 2);
+      out = prefix + '…>' + body.slice(body.length - room);
+    }
+    return out;
+  };
+`;
+
+/**
  * ONE round trip for the whole page: tag, label (incl. <label>-wrapper text),
  * data-test, name, id, input type, href, visibility and the main-content flag,
  * ordered main-content-first, each winner stamped with `data-dshref` in the same
@@ -190,6 +245,7 @@ export const LABEL_HELPERS_JS = String.raw`
 export const EXTRACT_JS = String.raw`(arg) => {
   ${BUCKET_HELPERS_JS}
   ${LABEL_HELPERS_JS}
+  ${STRUCTURE_HELPERS_JS}
   const sel = arg.sel, max = arg.max;
   // A2：分桶配额（null = main-first 旧行为，policy.candidate_priority 的回退面）。
   const quotas = arg.quotas || null;
@@ -463,10 +519,16 @@ export const EXTRACT_JS = String.raw`(arg) => {
       ? Array.from(el.classList).slice(0, 8).map((c) => String(c).slice(0, 40))
       : null;
     const labelFull = arg.fullLabel && el ? labelOfRaw(el, r.tag) : null;
+    // B 批：结构证据 opt-in（缺省不出字段 ⇒ 池/模型面逐字节不变）；帧下标前缀进了
+    // structure_path（截断在 JS 内完成，前缀也受同一 160 上限约束）。
+    const structurePath = arg.structurePath === true && el
+      ? __structurePathOf(el, arg.framePrefix)
+      : null;
     return {ref: ref, dsh_ref: stamp, scan: r.i, tag: r.tag, label: r.label, full_label: r.full_label,
             ...(classNames && classNames.length ? {class_names: classNames} : {}),
             ...(labelFull ? {label_full: labelFull} : {}),
             ...(anchors.length ? {anchor_ids: anchors} : {}),
+            ...(structurePath ? {structure_path: structurePath, structure_unstable: true} : {}),
             rect: r.rect, inViewport: r.inViewport, nearViewport: r.nearViewport,
             scrollDepth: r.scrollDepth, inScrollContainer: r.inScrollContainer, bucket: r.bucket, prio: r.prio,
             data_test: r.data_test, name: r.name, id: r.id, input_type: r.input_type, href: r.href,
@@ -494,6 +556,7 @@ export const EXTRACT_JS = String.raw`(arg) => {
  */
 export const OBSERVE_JS = String.raw`(arg) => {
   ${LABEL_HELPERS_JS}
+  ${STRUCTURE_HELPERS_JS}
   const sel = arg.sel, max = arg.max, includeHidden = arg.includeHidden === true;
   // E3：祖先链 id（≤8、小写、最近祖先在前）——与 EXTRACT_JS 的 anchorIdsOf 同口径，
   // 是 within:#id 尾缀在 observe 侧的自证底座。一次 parentElement 链行走；无 id 祖先
@@ -535,6 +598,10 @@ export const OBSERVE_JS = String.raw`(arg) => {
     const r = e.getBoundingClientRect();
     const href = e.getAttribute('href') || '';
     const anchors = anchorIdsOf(e);
+    // B 批：结构证据 opt-in（只读祖先前缀行走；缺省不出字段 ⇒ 观察 JSON 逐字节不变）。
+    const structurePath = arg.includeStructure === true
+      ? __structurePathOf(e, arg.framePrefix)
+      : null;
     rows.push({
       tag: tag,
       role: (e.getAttribute('role') || '').toLowerCase(),
@@ -549,6 +616,7 @@ export const OBSERVE_JS = String.raw`(arg) => {
       bbox: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
       in_surface: inSurface,
       ...(anchors.length ? {anchor_ids: anchors} : {}),
+      ...(structurePath ? {structure_path: structurePath, structure_unstable: true} : {}),
     });
   }
   return { rows: rows, total: candidates, returned: rows.length };

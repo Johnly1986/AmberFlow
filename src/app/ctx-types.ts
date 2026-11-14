@@ -460,6 +460,13 @@ export interface Ctx {
    * （要等页面先 `ctx.waitFor`/`arrive`）。`selector` 非法 CSS 返回
    * `{ok:false, error:"bad_selector", reason}`，不抛栈、不中断 flow。
    *
+   * B 批（frame:<origin> 闭环）：元素行透传 `frame_origin` / `frame_path`（元素所在帧 origin
+   * 与祖先 origin 链，外→内；主帧 `frame_path` 省略；非空才出现）——`hint_candidates` 因此能
+   * 直接给出 `frame:` 候选（文本候选跨帧不唯一时）。`includeStructure:true` 时元素行另多
+   * `structure_path`（≤160 字符）与 `structure_unstable:true`——**仅诊断**：祖先 tag/`#id` +
+   * 同 tag 兄弟序号 + 帧下标前缀，动态页面可能失效、**不可照抄进 hint/target**；不进 hint
+   * 自证、歧义证据或模型面。
+   *
    * 产物：trace 只记 `{call:"observe", url, counts, truncated}`（**不记元素/class 明细**），
    * result JSON 里没有 observe 结果（需要证据就在 flow 里自己用 `ctx.log`/写文件）。
    * dry 返回 `{ok:true, dry:true, counts 全 0, elements:[]}`；replay 只还原 counts/truncated

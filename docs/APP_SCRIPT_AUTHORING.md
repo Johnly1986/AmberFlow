@@ -267,7 +267,7 @@ export async function flow(ctx) {
 | 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, values?, when?, timeoutMs?, force?, forceAct?, staleRetry?, newTab? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}`；`values` 是决策步的显式值袋，见 §4.5；`newTab` 把 `target=_blank` 的新标签升为一等完成面（见 §4.9）；`timeoutMs` 是动作后信号窗口 + 整步挂钟帽（见下）。**步级 `slots` 的键仍须在 `meta.slots` 声明**（dry 校验按 `meta.slots` 口径查键，步级提供的是**值**不是新键——键没声明时 check 直接红 `value.key … is not a declared slot`） |
 | 人工步 | `ctx.manual(desc, { done, instructions?, id? })` | 见 §7；非 TTY 返回 `needs_human`，不假装有人 |
 | 观察 | `ctx.url()` / `ctx.read.{text,value,count,attr}(sel[, attr])` / `ctx.holds(signal)` / `ctx.waitFor(signal, {timeoutMs?, pollMs?})` / `ctx.waitForTarget(hint, {visible?, timeoutMs?, pollMs?})` | 只读；读不到返回 `null` / `0`；`waitFor` 轮询到 bounded deadline，返回 boolean；`waitForTarget`（C2）等一个 hint 语义目标进可见准入池——返回 `{found, count}`，超时如实 `found:false`（**不假装**）；免费只读、不计预算、不进模型请求面。dry 合成 `{found:false, count:0, dry:true}`（与 `waitFor` 的 dry「立即 true」口径不同：那是"信号已成立"的模拟，这里没有可模拟的命中事实）；`url()` 首次导航前是 `"about:blank"`，别拿它当入口页判断 |
-| 只读侦察 | `ctx.observe({ max?, selector?, includeHidden?, includeFrames? })` | **免费只读**：返回当前页 DOM 侧真实存在的元素清单（`ref o0/o1…`；字段 `tag/label/role/id/name/data-test/type/href/class_names/visible/bbox/frame` + `admitted`/`why_not_admitted`/`hint_candidates`）。不计 flow step/预算、不写 outDir、**不进模型请求面**、不改页面状态（无点击/滚动/导航）。默认走当前准入面（ADMIT_SEL 投影 + `[data-js-ref]` 后缀，不新增类目）；`selector` 可用任意只读 CSS 看池外目标。`hint_candidates` 用同一个 `hintMatch` 在本次观察到的准入面元素集合上**自证**（唯一命中才给），可直接照抄进 `ctx.hint(...)`/命令 `target`——但自证范围就是本次观察集合：默认观察（未截断）时等于整个准入面；`selector` 或 `truncated:true` 时只在所选子集/前 max 行内自证，照抄前应再做一次默认观察复核；`admitted` = 匹配准入面 + 可见 + 至少一条自证 hint（**不等于**"一定在本次 120 窗口内"，窗口见 `inspect --json` 的 `window`）。最多 200 行、≤6 帧；`max` 超出/未知选项 = `config_error`；非法 CSS 返回 `{ok:false, error:"bad_selector", reason}`（不抛栈、不中断 flow）。dry = `{ok:true, dry:true, counts 全 0, elements:[]}`；replay = `{ok:true, replay:true, …}`（只还原 counts/truncated，元素明细未进 trace），trace 只记 `{call:"observe", url, counts, truncated}` |
+| 只读侦察 | `ctx.observe({ max?, selector?, includeHidden?, includeFrames?, includeStructure? })` | **免费只读**：返回当前页 DOM 侧真实存在的元素清单（`ref o0/o1…`；字段 `tag/label/role/id/name/data-test/type/href/class_names/visible/bbox/frame/frame_origin?/frame_path?` + `admitted`/`why_not_admitted`/`hint_candidates`；`includeStructure:true` 时另有 `structure_path`（≤160）+ `structure_unstable:true`）。不计 flow step/预算、不写 outDir、**不进模型请求面**、不改页面状态（无点击/滚动/导航）。默认走当前准入面（ADMIT_SEL 投影 + `[data-js-ref]` 后缀，不新增类目）；`selector` 可用任意只读 CSS 看池外目标。`hint_candidates` 用同一个 `hintMatch` 在本次观察到的准入面元素集合上**自证**（唯一命中才给），可直接照抄进 `ctx.hint(...)`/命令 `target`——但自证范围就是本次观察集合：默认观察（未截断）时等于整个准入面；`selector` 或 `truncated:true` 时只在所选子集/前 max 行内自证，照抄前应再做一次默认观察复核；`admitted` = 匹配准入面 + 可见 + 至少一条自证 hint（**不等于**"一定在本次 120 窗口内"，窗口见 `inspect --json` 的 `window`）。`frame_origin`/`frame_path` 是帧链底座（`frame:` 候选由此自证）；`structure_path` 只是诊断证据（动态页面可能失效、不可照抄、不进 hint/模型面）。最多 200 行、≤6 帧；`max` 超出/未知选项 = `config_error`；非法 CSS 返回 `{ok:false, error:"bad_selector", reason}`（不抛栈、不中断 flow）。dry = `{ok:true, dry:true, counts 全 0, elements:[]}`；replay = `{ok:true, replay:true, …}`（只还原 counts/truncated，元素明细未进 trace），trace 只记 `{call:"observe", url, counts, truncated}` |
 | 站点面 | `ctx.openPage(role)` / `ctx.extract(nameOrSpec)` / `ctx.rows(...)`（v1 关闭） | 具名抽取声明在 `meta.site.listExtract`；inline 抽取用 `{ rows, fields, maxItems? }`（例：`ctx.extract({ rows: "li.item", fields: { title: ".title" } })`，无需 meta 声明）；`rows` 调用给结构化错误 |
 | 数据 | `ctx.source(name, {dates?})` / `ctx.data.{min,max}(rows, by)` | 数据腿按需拉取；`--skip-data` 时 `source` 报结构化错误。`dates` 显式给本次范围（单日 / `A..B` / `next_week`）；缺省按 source JSON 的 `default_dates`（支持 `"{slot}"` 占位符，从包默认 + `--slot` 解析；不许引用 `source_slots` 产物）。观察视图 `byDate` 按日期保留完整 counts/selects/rows |
 | 进程 | `ctx.run(...)` / `ctx.dangerous({...dryRunArgs})` | 见 §4.8（`returns` → 数据集、工件、失败诊断）；危险步默认拒绝 |
@@ -678,18 +678,32 @@ frame），允许帧已成立 = 正常成功。其余情况步骤照常，只在
 1. **枚举帧**：`amber inspect --json --pool` 给 `frame_origins`；`--probe` 覆盖主 frame + 可达子
    frame（≤6），子 frame 命中落 `probes[].frames[]`（帧下标 + origin + 命中数与文本）；`ctx.observe()`
    结果里的 `frames[]` 是本次评估过的帧 URL 列表，元素行的 `frame` 字段是它的下标（0 = 主 frame）。
-   `frames_excluded` warning / `frame_host` advisory 会点名被排除或跨源的 origin。
+   `frames_excluded` warning / `frame_host` advisory 会点名被排除或跨源的 origin。元素行上的
+   `frame_origin` / `frame_path`（祖先 origin 链，外→内；主帧 `frame_path` 省略）就是 `frame:` hint
+   的帧链底座——`frame_path` 省略 = 主帧，两字段都缺 = 未知 origin 帧（about:blank/srcdoc，
+   不可被 `frame:` 命中）。
 2. **定位元素**：池 ref 是 `f<fi>:eN`（`<fi>` = 真实帧下标；P0-D 排除帧不重编号）；hint 六形状在
    **允许帧**上统一匹配（唯一性跨全部允许帧计算——同名跨帧不一定报 `target_ambiguous`：同签名会被
    `firstIfSame` 合并、run 命令步直接执行一个，只有会话 act 会停；用 `frame:` 尾缀显式区分最稳），
-   证据 `ambiguity.candidates[].frame` 给帧下标；`#id` 形态在池内零命中时有一次跨可达子 frame 的
-   live-DOM 直查兜底（F64）；声明目标/完成信号只存在于被排除帧时才 `frame_not_allowed`（见上段）。
+   证据 `ambiguity.candidates[].frame` 给帧下标、`frame_origin` 给候选所在帧 origin；
+   `#id` 形态在池内零命中时有一次跨可达子 frame 的 live-DOM 直查兜底（F64）；声明目标/完成信号
+   只存在于被排除帧时才 `frame_not_allowed`（见上段）。**`inspect`/`ctx.observe` 的
+   `hint_candidates` 现在会直接给帧限定候选**：文本候选跨帧不唯一且元素有 `frame_origin` 时给
+   `<label> frame:<自身 origin>`；单段仍不唯一且 `frame_path` 非空时给完整链
+   `<label> frame:<祖先…>自身>`（含自身 ≤4 段，与 `parseHint` 同口径；更长不生成）。每条候选都由
+   同一个 `hintMatch` 自证，可照抄。
 3. **跨源帧要能动作**：该 frame origin 必须进 `meta.hosts`（app）/ 会话 `hosts`，否则解析面排除该帧
    （`frames_excluded`）；`inspect --probe` 的子 frame 命中证据与 `frame_host` advisory 会点名 origin。
 4. **已知边界**：`framesOf` 只取主 frame + ≤5 子 frame（更深的 frame 不参与池/探测，`inspect` 的
    `probes[].frames` 也只到第 6 个）；元素池窗口（40/120）跨帧共享、主 frame 优先——frame 多时
    目标可能被窗口挤掉，先用 `ctx.observe()`（免费只读、逐帧）确认再收窄 hint；`f<fi>` 下标来自
    当次 `framesOf` 顺序，动态 iframe 增删会让下标漂移——**动作地址始终用 hint，不要用 ref**。
+5. **结构证据（只诊断，不可照抄）**：`inspect --json` 元素行与 `ctx.observe({includeStructure:true})`
+   的元素行会带 `structure_path`（祖先 tag/`#id` + 同 tag 兄弟序号 + 帧下标前缀，≤160 字符）并标
+   `structure_unstable:true`。它只回答"这个元素在哪个子树里"（排查同名/同 label 的近似元素），
+   **不是 hint**：动态页面的重排、虚拟列表复用、插入广告都会让它失效——不要写进 `target`/`ctx.hint`，
+   也不进模型面与歧义证据。定位仍优先语义身份（id/data-test/name/href/唯一文本）→ 作用域
+   （`within:#id` / `frame:`）。
 
 ### 4.10 导航纪律：`meta.policy.navigation`（entry-only）
 
@@ -1045,7 +1059,8 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 **会话面 `target_ambiguous`（A2，缺省零动作）**：`amber session` 的 `act` 用与命令步**同一个**歧义谓词
 （`hintCandidates` 非空 && `decided === null` && `refs.length > 1`）——歧义即**不执行**，返回
 `{ok:false, code:"target_ambiguous", executed:false, ambiguity}`；`ambiguity` 有界（候选 ≤5；label/class/near
-≤40、ref/tag ≤16、`suggested_hint` ≤80；`would_act_ref`/`candidates_total`/`truncated`；`source:"dom_fallback"`
+≤40、ref/tag ≤16、`suggested_hint` ≤200（B 批：可容 4 段 `frame:` 链）、候选另有 `frame_origin`（引擎给才有）；
+`would_act_ref`/`candidates_total`/`truncated`；`source:"dom_fallback"`
 时不给 near/suggested_hint）。`--on-ambiguous act` 恢复旧的"直接执行可行动优先第一个候选"。**run 面 /
 命令步 / 决策步的行为与产物逐字节不变**（dry/replay 不调 `actOnce`）；证据只陈述事实，**不得据此猜测**
 ——收窄 hint 或显式 `act` 重放是人的决定。详见 `docs/INTERACTIVE_SESSION.md` §act 的歧义停因。

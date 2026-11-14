@@ -13,7 +13,8 @@
  * 纪律：
  *   - **零页面 I/O**：只读传入的池对象，不抽池、不定位、不动作、不猜；
  *   - 证据有界：候选 ≤5 行（`candidates_total` 记总集、`truncated` 标截断），label/class/near
- *     ≤40、ref/tag/role ≤16、suggested_hint ≤80、target ≤120 字符；
+ *     ≤40、ref/tag/role ≤16、suggested_hint ≤200（B 批：可容 4 段 `frame:` 链）、target
+ *     ≤120 字符；候选另有 additive `frame_origin`（≤120；引擎有 `Elem.frame_origin` 才出现）；
  *   - `near` 只**复制** `elem.near`（不重算、不格式化）；`suggested_hint` 调既有
  *     `suggestHints(elem, elems)[0]`——它内部已用同一个 `hintMatch` 自证「恰好唯一命中」，
  *     为空（没有可自证的形状）时**省略该键**，绝不发明；
@@ -36,8 +37,15 @@ export const AMBIGUITY_ROLE_MAX = 16;
 export const AMBIGUITY_LABEL_MAX = 40;
 export const AMBIGUITY_CLASS_MAX = 40;
 export const AMBIGUITY_NEAR_MAX = 40;
-export const AMBIGUITY_HINT_MAX = 80;
+/**
+ * `suggested_hint` 上限（B 批 R2-6：80 → 200）。`suggestHints` 现在可能给出带
+ * `frame:<origin>` / ≤4 段 origin 链的候选（identity 形状 + label + 尾缀），
+ * 4 段链会超过旧的 80；与桥 `suggested_hint` / ElementView `HINT_MAX_CHARS` 同口径。
+ */
+export const AMBIGUITY_HINT_MAX = 200;
 export const AMBIGUITY_TARGET_MAX = 120;
+/** B 批：候选的 `frame_origin` 上限（origin 规范化后通常远小于此；仅作有界化）。 */
+export const AMBIGUITY_ORIGIN_MAX = 120;
 
 /**
  * E2：歧义命中顺序的闭集（`decision.ambiguous_ordering`）。
@@ -89,9 +97,15 @@ export interface AmbiguityCandidate {
   near?: string;
   /** frame 下标（0 = 主 frame / 合成池）。 */
   frame: number;
+  /**
+   * B 批 additive：元素所在帧的 origin（`Elem.frame_origin`；未知 origin 帧/合成池没有
+   * `frame_origin` 就不出现）。同名候选跨帧时用来区分是哪一帧——不是动作地址，
+   * 动作仍用 hint（含 `frame:` 尾缀）。
+   */
+  frame_origin?: string;
   /** 该候选的归一 label 在**本次池内**出现 >1 次（label 本身不足以区分）。 */
   same_label: boolean;
-  /** 既有 `suggestHints` 自证唯一的第一条（池面才有；自证不唯一就省略）。 */
+  /** 既有 `suggestHints` 自证唯一的第一条（池面才有；自证不唯一就省略；≤200）。 */
   suggested_hint?: string;
 }
 
@@ -160,6 +174,10 @@ function candidateView(
     ? clip(e.near, AMBIGUITY_NEAR_MAX)
     : undefined;
   const role = typeof e.role === "string" && e.role !== "" ? clip(e.role, AMBIGUITY_ROLE_MAX) : undefined;
+  // B 批 additive：帧 origin（未知 origin 帧/合成池没有该字段 ⇒ 键不出现；不编造）。
+  const frameOrigin = typeof e.frame_origin === "string" && e.frame_origin !== ""
+    ? clip(e.frame_origin, AMBIGUITY_ORIGIN_MAX)
+    : undefined;
   const hint = opts.suggestions ? suggestHints(e, elems)[0] : undefined;
   const norm = normalizedLabel(e);
   return {
@@ -170,6 +188,7 @@ function candidateView(
     ...(cls === undefined ? {} : { class: cls }),
     ...(near === undefined ? {} : { near }),
     frame: Number.isFinite(Number(e.frame)) ? Number(e.frame) : 0,
+    ...(frameOrigin === undefined ? {} : { frame_origin: frameOrigin }),
     same_label: norm !== "" && (labelCounts.get(norm) ?? 0) > 1,
     ...(hint === undefined || hint === "" ? {} : { suggested_hint: clip(hint, AMBIGUITY_HINT_MAX) }),
   };
