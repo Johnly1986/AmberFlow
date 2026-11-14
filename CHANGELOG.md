@@ -4,6 +4,19 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — schema 契约文字同步：观察面 within 闭环（F41/F55/F69）
+
+- **【schema·F41】** `ctx.observe` 的 `hint_candidates` 候选形状补记「同名组 within 候选」：
+  文本候选不唯一但祖先链有 #id 时给 `<label> within:#<ancestor-id>`（同一 hintMatch 自证），
+  同名元素组从「无候选 → admitted:false」变为「带 within 候选的 admitted:true」；truth 补
+  `OBSERVE_JS anchorIdsOf` 采集 / `syntheticElem` 透传 / `why_not_admitted` within 指引。
+- **【schema·F55】** 歧义证据的 `suggested_hint` 补记可为 `<label> within:#<ancestor-id>` 形态
+  （同名组且元素有 anchor_ids 时由 suggestHints 生成，仍经同一 hintMatch 自证，可直接照抄）。
+- **【schema·F69】** within 条目补记观察面闭环：OBSERVE_JS 同口径采集祖先 id 并经
+  syntheticElem 透传；suggestHints 对同名组按最近祖先优先建议 within；inspect/observe 的
+  hint_candidates 与歧义 evidence 的 suggested_hint 直接给出可照抄形态。
+- **【验证】** `npm run check` 全绿（`dist/schema/ctx.json` 按提示重生成，gitignored）。
+
 ## [Unreleased] — 引擎观察面修复：aria-label 探测假阴性 + 同名组 within hint 候选
 
 - **【修复·inspect 探测面】** `matchSelector` 的 `aria-label` 别名键映射到 `aria_label`
