@@ -19,7 +19,7 @@ import { browserSession } from "../../engine/executor.ts";
 // 不进池构成/hint 匹配/模型视图/动作路径（见 src/engine/ax.ts 文件头纪律）。
 import { AX_NOT_IN_POOL_BASIS, countAxNotInPool, snapshotAx } from "../../engine/ax.ts";
 import {
-  extractElements, INTERACTIVE_ALL, WIDE_POOL_ELEMENTS, windowAudit,
+  extractElements, frameOriginOf, framesOf, INTERACTIVE_ALL, WIDE_POOL_ELEMENTS, windowAudit,
 } from "../../engine/extraction.ts";
 import { poolView } from "../../engine/pool-view.ts";
 import { poolNearEmpty, nextForInspect } from "../../engine/planning-playbook.ts";
@@ -28,7 +28,21 @@ import { parseCliArgs } from "../../support/cli-args.ts";
 import { parseRunDefaults } from "../../support/run-defaults.ts";
 import { commandHelp } from "../registry.ts";
 
-type ProbeOutcome = { selector: string; count?: number; texts?: string[]; error?: string };
+type ProbeFrameHit = { frame: number; origin: string; count: number; texts?: string[] };
+type ProbeOutcome = { selector: string; count?: number; texts?: string[]; error?: string; frames?: ProbeFrameHit[] };
+
+/** 人类面 probe 判读：主 frame 命中 + 子 frame 命中（有则列出 origin/count）。
+ *  无子 frame 命中时文案与旧行为逐字节一致（"无命中" / "N 命中：…"）。 */
+function probeVerdict(p: ProbeOutcome): string {
+  if (p.error !== undefined) return p.error;
+  const frameHits = p.frames ?? [];
+  if ((p.count ?? 0) === 0 && frameHits.length === 0) return "无命中";
+  const frameNote = frameHits.length
+    ? `（子 frame 命中：${frameHits.map((f) => `frame ${f.frame}${f.origin ? ` ${f.origin}` : ""} ${f.count}`).join("，")}；仅探测前 6 个可达 frame）`
+    : "";
+  const texts = p.texts?.length ? `：${p.texts.join(" / ")}` : "";
+  return `${p.count ?? 0} 命中${frameNote}${texts}`;
+}
 
 /** task-6 `--summary`：人话紧凑输出的有界常量（总行数 ≈ 头 3 + 元素 12 + 尾注 ≤ 15 + probe ≤ 10）。 */
 const SUMMARY_ELEMENTS = 12;
@@ -41,32 +55,63 @@ function clipChars(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, Math.max(0, max - 1))}…`;
 }
 
-/** 只读探测一个 selector：存在数 + 前 5 条文本摘录。坏 selector 如实报错，不崩。 */
+/** 只读探测一个 selector：**主 frame + 可达子 frame（framesOf ≤6）** 逐帧计数。
+ *  主 frame 命中数留在 `count/texts`（旧 JSON 形状逐字节不变）；子 frame 命中进
+ *  `frames`（additive；只在有子 frame 命中时出现）——跨 iframe 元素不再被探测面静默漏掉。
+ *  帧级 evaluate 失败（detach/无执行上下文）跳过该帧；主 frame 失败 = invalid selector。 */
 async function probeSelector(
-  page: { evaluate(script: string): Promise<unknown> },
+  page: { evaluate(script: string): Promise<unknown>; url?: unknown },
   selector: string,
 ): Promise<ProbeOutcome> {
   if (!selector.trim()) return { selector, error: "empty selector" };
   const sel = JSON.stringify(selector.trim());
-  let count: unknown;
-  try {
-    count = await page.evaluate(`document.querySelectorAll(${sel}).length`);
-  } catch (e) {
-    const first = (e instanceof Error ? e.message : String(e)).split("\n")[0];
-    return { selector, error: `invalid selector: ${first}` };
+  const countSel = `document.querySelectorAll(${sel}).length`;
+  const textSel = `Array.from(document.querySelectorAll(${sel})).slice(0, 5).map((el) => (el.textContent || "").trim())`;
+  const frames = framesOf(page as never, 6);
+  const readTexts = async (fr: (typeof frames)[number]): Promise<string[]> => {
+    try {
+      const raw = await fr.evaluate(textSel);
+      if (!Array.isArray(raw)) return [];
+      return raw.map(String).map((t) => (t.length > 120 ? `${t.slice(0, 120)}…` : t));
+    } catch {
+      return [];   // 文本取失败不影响存在性结论（例如元素被 detach）
+    }
+  };
+  let mainCount: number | undefined;
+  let mainTexts: string[] = [];
+  const frameHits: ProbeFrameHit[] = [];
+  for (let i = 0; i < frames.length; i += 1) {
+    const fr = frames[i]!;
+    let n: unknown;
+    try {
+      n = await fr.evaluate(countSel);
+    } catch (e) {
+      if (i === 0) {
+        const first = (e instanceof Error ? e.message : String(e)).split("\n")[0];
+        return { selector, error: `invalid selector: ${first}` };
+      }
+      continue;   // 子 frame detach/不可评估：跳过该帧，不污染主判定
+    }
+    if (typeof n !== "number") {
+      if (i === 0) return { selector, error: "evaluate returned no count" };
+      continue;
+    }
+    if (i === 0) {
+      mainCount = n;
+      if (n > 0) mainTexts = await readTexts(fr);
+      continue;
+    }
+    if (n > 0) {
+      const texts = await readTexts(fr);
+      frameHits.push({ frame: i, origin: frameOriginOf(fr), count: n, ...(texts.length ? { texts } : {}) });
+    }
   }
-  if (typeof count !== "number") return { selector, error: "evaluate returned no count" };
-  if (count === 0) return { selector, count: 0 };
-  let texts: string[] = [];
-  try {
-    const raw = await page.evaluate(
-      `Array.from(document.querySelectorAll(${sel})).slice(0, 5).map((el) => (el.textContent || "").trim())`,
-    );
-    if (Array.isArray(raw)) texts = raw.map(String).map((t) => (t.length > 120 ? `${t.slice(0, 120)}…` : t));
-  } catch {
-    // 文本取失败不影响存在性结论（例如元素被 detach）；如实只留 count。
-  }
-  return { selector, count, ...(texts.length ? { texts } : {}) };
+  if (mainCount === undefined) return { selector, error: "evaluate returned no count" };
+  return {
+    selector, count: mainCount,
+    ...(mainTexts.length ? { texts: mainTexts } : {}),
+    ...(frameHits.length ? { frames: frameHits } : {}),
+  };
 }
 
 type InspectElement = {
@@ -250,28 +295,37 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     for (const p of probes) {
       if (p.error !== undefined || typeof p.count !== "number") continue;
       // 池命中用 matchSelector（池可表达子集：#id / tag / [attr=v] / [attr~v] / 逗号表）——
-      // 与 act hint 的可指向性同口径；DOM probe 是主 frame 任意 CSS。
+      // 与 act hint 的可指向性同口径；DOM probe 覆盖主 frame + 可达子 frame（≤6），帧级命中
+      // 进结构化证据，避免"目标在 iframe 里 → 探测 0 命中"被误读成"页面没有"。
       const poolHits = matchSelector(pool, p.selector);
-      if (p.count > 0 && poolHits === null) {
+      const frameHits = p.frames ?? [];
+      const totalHits = p.count + frameHits.reduce((n, f) => n + f.count, 0);
+      const frameBrief = frameHits
+        .map((f) => `frame ${f.frame}${f.origin ? ` (${f.origin})` : ""}: ${f.count}`)
+        .join("，");
+      const where = frameHits.length ? `（主 frame ${p.count}；子 frame ${frameBrief}）` : "";
+      if (totalHits > 0 && poolHits === null) {
         advisories.push({
           kind: "pool_inexpressible",
           probe: p.selector,
-          dom_hits: p.count,
-          message: `probe「${p.selector}」DOM 命中 ${p.count} 但选择器超出元素池可表达子集（类/伪类/后代组合器）：act hint 不可命中；judge.exists（任意 CSS、跨 frame）仍可用。`,
+          dom_hits: totalHits,
+          ...(frameHits.length ? { frame_hits: frameHits } : {}),
+          message: `probe「${p.selector}」DOM 命中 ${totalHits}${where} 但选择器超出元素池可表达子集（类/伪类/后代组合器）：act hint 不可命中；judge.exists（任意 CSS、跨 frame）仍可用。`,
         });
-      } else if (p.count > 0 && poolHits !== null && poolHits.length === 0) {
+      } else if (totalHits > 0 && poolHits !== null && poolHits.length === 0) {
         advisories.push({
           kind: "not_in_pool",
           probe: p.selector,
-          dom_hits: p.count,
-          message: `probe「${p.selector}」主 frame DOM 命中 ${p.count} 但引擎元素池 0 命中：元素可能不在准入面（无交互角色/class-only 容器等）或不可见；注意 aria-label 是 label 别名（交互标签可命中），可改用池内句柄（data-test/id/name/href/可见文本）或 inspect 输出的 hint_candidates。`,
+          dom_hits: totalHits,
+          ...(frameHits.length ? { frame_hits: frameHits } : {}),
+          message: `probe「${p.selector}」DOM 命中 ${totalHits}${where} 但引擎元素池 0 命中：元素可能不在准入面（无交互角色/class-only 容器等）或不可见；若命中仅在子 frame，动作目标需该 frame origin 在 hosts 信封（app 的 meta.hosts / 会话 hosts），否则解析面排除该帧（frames_excluded），池内以 fN: 前缀 ref 出现；注意 aria-label 是 label 别名（交互标签可命中、按完整值匹配），可改用池内句柄（data-test/id/name/href/可见文本）或 inspect 输出的 hint_candidates。`,
         });
-      } else if (p.count === 0 && poolHits !== null && poolHits.length > 0) {
+      } else if (totalHits === 0 && poolHits !== null && poolHits.length > 0) {
         advisories.push({
           kind: "pool_only",
           probe: p.selector,
           pool_hits: poolHits.length,
-          message: `probe「${p.selector}」主 frame DOM 未命中但池内有 ${poolHits.length} 个（子 frame）：judge.exists 可跨 frame 命中；对其动作需 meta.hosts 声明该 frame origin，否则 frame_not_allowed。`,
+          message: `probe「${p.selector}」主 frame 与可达子 frame 均无 DOM 命中但池内有 ${poolHits.length} 个：judge.exists 可跨 frame 命中；对其动作需 meta.hosts 声明该 frame origin，否则 frame_not_allowed。`,
         });
       }
     }
@@ -397,9 +451,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       }
       for (const a of shownAdvisories.slice(0, 3)) say(ctx, `  ⚠ ${String(a.message)}`);
       for (const p of probes) {
-        const verdict = p.error !== undefined ? p.error
-          : p.count === 0 ? "无命中"
-          : `${p.count} 命中${p.texts?.length ? `：${p.texts.join(" / ")}` : ""}`;
+        const verdict = probeVerdict(p);
         say(ctx, `  probe  ${p.selector} → ${verdict}`);
       }
       if (text) say(ctx, `文本摘要：${clipChars(text, 200)}`);
@@ -448,9 +500,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
         + `${e.hint_candidates.length ? `  hints: ${e.hint_candidates.join(" | ")}` : ""}`);
     }
     for (const p of probes) {
-      const verdict = p.error !== undefined ? p.error
-        : p.count === 0 ? "无命中"
-        : `${p.count} 命中${p.texts?.length ? `：${p.texts.join(" / ")}` : ""}`;
+      const verdict = probeVerdict(p);
       say(ctx, `  probe  ${p.selector} → ${verdict}`);
     }
     for (const a of shownAdvisories) say(ctx, `  ⚠ ${String(a.message)}`);

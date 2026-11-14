@@ -4,6 +4,26 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — inspect --probe 跨 frame 探测（iframe 元素不再静默漏检）
+
+- **【修复·inspect 探测面】** `inspect --probe` 此前只在**主 frame** `page.evaluate`，
+  跨 iframe 元素恒 0 命中，被误读为"页面没有/不可自动化"（2026-11-14 实测：Google 应用菜单
+  面板在跨源 iframe 里，探针 `a[aria-label="Maps"]` 报 0，但池内 `f1:e3` 可点）。现探测
+  覆盖主 frame + 可达子 frame（`framesOf` ≤6）：主 frame 命中仍落 `count/texts`（**旧 JSON
+  形状逐字节不变**），子 frame 命中落 `probes[].frames[]`（`frame` 下标 + `origin` + 命中数/文本，
+  additive；仅在有子 frame 命中时出现）。
+- **【advisory 增强】** `not_in_pool` / `pool_inexpressible` 的 `dom_hits` 改为全帧总命中并带
+  `frame_hits` 证据；命中仅在子 frame 时明确提示「动作目标需该 frame origin 在 hosts 信封
+  （app `meta.hosts` / 会话 hosts），否则解析面排除该帧（frames_excluded），池内以 `fN:`
+  前缀 ref 出现」；`pool_only` 文案与全帧探测口径对齐。`frame_host` advisory 保留。
+- **【文档】** `docs/APP_SCRIPT_AUTHORING.md` 增「多 frame 定位速查」：枚举帧（`frame_origins` /
+  `probes[].frames` / observe `frames[]`+`frame` 下标）→ 定位元素（`f<fi>:eN`、跨帧 hint 唯一性、
+  ambiguity frame 证据、F64 #id 直查）→ 跨源帧须进 hosts → 已知边界（≤6 帧、池窗口跨帧共享、
+  下标漂移用 hint 不用 ref）；inspect 帮助文本同步。
+- **【验证】** 双端口跨源 fixture：`a[aria-label="Maps"]` 主 frame 0 / 子 frame 1
+  （http://127.0.0.1:8932）1 命中；`div[aria-label="Maps"]` 触发带 frame_hits 的 not_in_pool
+  advisory；主 frame 命中与无命中路径形状不变；`npm run check` 全绿。
+
 ## [Unreleased] — not_scrollable 停因诊断增强（祖先 overflow 证据）
 
 - **【优化·滚动停因】** `_scrollWithLoc`（run scroll 命令 / `ctx.scrollList` / 会话 act 容器滚动

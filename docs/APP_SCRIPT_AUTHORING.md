@@ -180,7 +180,7 @@ npx amber run my-app --trace               # 完整运行
 - **dry 真执行语义（消歧义）**：`apps check` / `run --dry-run` 会**真实执行 flow 脚本体**——浏览器调用被合成、不访问网络（step/arrive 恒 ok、done 不评估），但脚本自身的**文件/进程副作用会真的发生**（写文件、Node IO 都是真的）。`apps check` 输出一行提示（JSON 面 `data.dry_semantics`）。两面判据用 **`ctx.runtime.dry`**（dry/replay 恒 `true`、真跑恒 `false`）；**`epoch === 0` 不再是 dry 判据**——真跑首个观察前 epoch 同样是 0。
 - **inspect vs ctx.observe（消歧义）**：`inspect` 是**独立一次性会话**（新开浏览器、不 attach 运行会话），适合入口页/任意 URL 的离线侦察；**会话内实时看当前页**用应用内的 `ctx.observe()`（免费只读、不改页面；dry 下 `elements=[]` 只有 counts——形状校验用）。
 - **learn 录制 hint vs inspect 候选（口径差异）**：learn 接受的 `hint` 是六形状闭集且**属性白名单只认 `test`（→data-test）、`type`、`aria-label`（label 别名）**参与匹配（完整池面白名单另含 href/name/id/role/near，见 `amber schema ctx` 的 hints 节）；class/title/placeholder 永不命中。`inspect` 展示的 `hint_candidates` 是引擎经**同一个** `hintMatch` 在当页自证过的结果——它输出的就是六形状之一，可直接照抄进 `act: ctx.hint(...)` 或 learn 的 `hint`；自己从页面 HTML 里挑的属性则必须先过白名单再落笔。
-- `inspect` 只读：标题、URL、有界元素、候选 hint；不点击、不输入、不调模型。元素池视图**只含可行动元素**——写 `exists` / `text` 类完成信号前先 `inspect --probe "<selector>"`（可重复，最多 10 个；只读返回存在数与前 5 条文本，`--json` 落 `probes[]`），别用 raw HTTP 之外的口子。**任何选择器——包括本文档与上游示例给的——落笔前都要对目标页实证一次**（02 轮 C6 的教训）。快览用 `--summary`（人话紧凑：元素仅前 12 条、hints 前 2 条、href ≤40 字符、总行数有界；`--json` 面不变）。
+- `inspect` 只读：标题、URL、有界元素、候选 hint；不点击、不输入、不调模型。元素池视图**只含可行动元素**——写 `exists` / `text` 类完成信号前先 `inspect --probe "<selector>"`（可重复，最多 10 个；只读返回存在数与文本摘录——**覆盖主 frame + 可达子 frame（≤6）**：主 frame 命中在 `count/texts`，子 frame 命中在 `frames[]`（`frame` 下标 + `origin` + 命中数与文本），跨 iframe 元素不再被探测面静默漏掉；`--json` 落 `probes[]`），别用 raw HTTP 之外的口子。**任何选择器——包括本文档与上游示例给的——落笔前都要对目标页实证一次**（02 轮 C6 的教训）。快览用 `--summary`（人话紧凑：元素仅前 12 条、hints 前 2 条、href ≤40 字符、总行数有界；`--json` 面不变）。
 - **P0-A inspect 观察面修复**：`--json` 的 `elements[].label` 现在是**完整**标签（不再截断成 40 字前缀；超过 200 字符时 `label_truncated:true` 只表示引擎**匹配口径** `full_label` 只取前 200，输出本身是完整的），并新增 `class_names`（有界：≤8 个、每项 ≤40 字符）与顶层 `saw_at`/`wait_ms`。`--wait-ms <n>`（默认 0，上限 5000）在 `load` 完成 + 3s 交互计数稳定轮询**之后**再等 n 毫秒，给 `setTimeout`/异步接口补渲染的元素；`saw_at` 是真正读取 DOM 的时刻（人类输出同样打印「观察时刻 …」）。既有字段语义不变，只增字段。
 - **AX 证据源（只读参照面，不进决策）**：`inspect --json` 新增 `ax` 块——浏览器自己算的可访问性树。`nodes[]` 每条 `{role,name,focusable,disabled}`（展示前 50；内部上限 200，按“可交互→有名→其余”+ 文档树序），另有 `interactive_count`、`counts_by_role`（全树 role 计数）、`interactive_counts_by_role`、`total_nodes` 与 `pool_size`/`not_in_pool`。**可交互口径**：原生可聚焦/可激活的 AX role（button/link/textbox/checkbox/radio/combobox/listbox/menuitem/tab/slider/switch/searchbox/spinbutton/summary 等；Chromium 对 `<summary>` 报 `DisclosureTriangle`）；**`option` 有意不计入（即使浏览器报 focusable=true）**——select 内部的 option 由引擎 `select` 动作承载（不是池里的独立动作目标），计入只会让 `not_in_pool` 被每个 select 的 N 个 option 灌成噪声；原始 role 仍在 `nodes`/`counts_by_role` 可见，或浏览器报告 `focusable=true`（例如 `div[tabindex=0]` 的 generic）；文档根（RootWebArea）即使 focusable 也不算，`generic/none/group` 只有 focusable 才算；静态文本叶子不进证据。`not_in_pool` 是**近似**口径：AX 可交互且有名字的节点中，name 与池元素 label 归一化后全等/互相包含算已进池，否则计未进池（空名节点不参与，看 `interactive_count`）。**边界**：AX 是“浏览器认为页面有什么语义”，不是“引擎能指向/可点击”的断言——池仍是选择器闭集，AX 不进池构成、hint 匹配、模型视图或任何动作/运行路径；取树只发生在 `inspect`（每页一次，超时 ≤3s），失败降级为 `ax.available=false`（人类输出不打印该行），其余 inspect 输出照常。
 - `run --max-steps N` 是 `ctx.step` / `ctx.arrive` 的**执行预算**，不是“从第 N 步开始”。用满预算时 `status=partial`、exit 0、`verified=false`，已执行步骤与 trace 保留。
@@ -672,6 +672,23 @@ origin + 目标 + 只读匹配证据 + 修法：第三方非交互 frame 默认�
 上不成立、只读地在被排除帧上再判一次——只在那里成立 = `frame_not_allowed`（done 依赖被排除
 frame），允许帧已成立 = 正常成功。其余情况步骤照常，只在 warnings 里留记；无被排除帧时零新
 字段/零新行为（逐字节）。导航信封（goto 起点/落地）与 popup 门禁不变。
+
+**多 frame 定位速查（多 iframe 页面怎么查、怎么走）**。元素定位按「先枚举帧 → 再定位元素」两步：
+
+1. **枚举帧**：`amber inspect --json --pool` 给 `frame_origins`；`--probe` 覆盖主 frame + 可达子
+   frame（≤6），子 frame 命中落 `probes[].frames[]`（帧下标 + origin + 命中数与文本）；`ctx.observe()`
+   结果里的 `frames[]` 是本次评估过的帧 URL 列表，元素行的 `frame` 字段是它的下标（0 = 主 frame）。
+   `frames_excluded` warning / `frame_host` advisory 会点名被排除或跨源的 origin。
+2. **定位元素**：池 ref 是 `f<fi>:eN`（`<fi>` = 真实帧下标；P0-D 排除帧不重编号）；hint 六形状在
+   **允许帧**上统一匹配（唯一性跨全部允许帧计算——同名跨帧 = `target_ambiguous`，证据
+   `ambiguity.candidates[].frame` 给帧下标）；`#id` 形态在池内零命中时有一次跨可达子 frame 的
+   live-DOM 直查兜底（F64）；声明目标/完成信号只存在于被排除帧时才 `frame_not_allowed`（见上段）。
+3. **跨源帧要能动作**：该 frame origin 必须进 `meta.hosts`（app）/ 会话 `hosts`，否则解析面排除该帧
+   （`frames_excluded`）；`inspect --probe` 的子 frame 命中证据与 `frame_host` advisory 会点名 origin。
+4. **已知边界**：`framesOf` 只取主 frame + ≤5 子 frame（更深的 frame 不参与池/探测，`inspect` 的
+   `probes[].frames` 也只到第 6 个）；元素池窗口（40/120）跨帧共享、主 frame 优先——frame 多时
+   目标可能被窗口挤掉，先用 `ctx.observe()`（免费只读、逐帧）确认再收窄 hint；`f<fi>` 下标来自
+   当次 `framesOf` 顺序，动态 iframe 增删会让下标漂移——**动作地址始终用 hint，不要用 ref**。
 
 ### 4.10 导航纪律：`meta.policy.navigation`（entry-only）
 
