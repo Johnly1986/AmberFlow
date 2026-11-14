@@ -264,7 +264,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
           kind: "not_in_pool",
           probe: p.selector,
           dom_hits: p.count,
-          message: `probe「${p.selector}」主 frame DOM 命中 ${p.count} 但引擎元素池 0 命中：元素可能仅带池外属性（aria-label/class 等永不入池），act hint 永不命中——改用池内句柄（data-test/id/name/href/可见文本）或深链/直达 URL。`,
+          message: `probe「${p.selector}」主 frame DOM 命中 ${p.count} 但引擎元素池 0 命中：元素可能不在准入面（无交互角色/class-only 容器等）或不可见；注意 aria-label 是 label 别名（交互标签可命中），可改用池内句柄（data-test/id/name/href/可见文本）或 inspect 输出的 hint_candidates。`,
         });
       } else if (p.count === 0 && poolHits !== null && poolHits.length > 0) {
         advisories.push({

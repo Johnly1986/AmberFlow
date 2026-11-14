@@ -243,7 +243,14 @@ export function matchSelector(elems: StateView["elems"], selector: string): Stat
       if (tag && String(e.tag).toLowerCase() !== tag.toLowerCase()) continue;
       if (id && String(e.id ?? "") !== id) continue;
       if (key) {
-        const got = String((e as Record<string, unknown>)[key] ?? "").toLowerCase();
+        const row = e as Record<string, unknown>;
+        // `aria-label` 的别名值是 `aria_label`（witness StateView 的字段名），但引擎元素池行
+        // （Elem）只有 `label`/`full_label`，没有 `aria_label` 字段——直接查字段会恒空，把
+        // aria-label 探测误判成 0 命中（inspect 的 not_in_pool 假阴性）。故该别名键按池行底座
+        // 取值：有 `aria_label` 就用它（StateView 形状的匹配结果逐字节不变），缺了才依次回退
+        // `full_label` → `label`（与 rules.ts 把 aria-label 归一到 label 的 act 口径一致）。
+        const raw = key === "aria_label" ? (row.aria_label ?? row.full_label ?? row.label) : row[key];
+        const got = String(raw ?? "").toLowerCase();
         if (op === "=" && got !== val) continue;
         if (op === "~" && !got.includes(val)) continue;
       }

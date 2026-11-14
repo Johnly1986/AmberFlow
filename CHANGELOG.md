@@ -4,6 +4,31 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 引擎观察面修复：aria-label 探测假阴性 + 同名组 within hint 候选
+
+- **【修复·inspect 探测面】** `matchSelector` 的 `aria-label` 别名键映射到 `aria_label`
+  （signals witness 池字段），而引擎元素池行（`Elem`）只有 `label`/`full_label` →
+  字段恒空 → `not_in_pool` advisory 把可被 act 命中的元素误报“池内 0 命中”。
+  改为别名键按池行底座回退 `aria_label ?? full_label ?? label`（显式空串不回退，
+  带 `aria_label` 的 StateView 匹配逐字节不变）；其它属性键与
+  class/组合器“不可表达”语义不变。
+- **【修复·advisory 文案】** `inspect` 的 `not_in_pool` 文案改为准确表述（元素可能不在
+  准入面或无交互角色/不可见；aria-label 是 label 别名、交互标签可命中），删除
+  “aria-label/class 永不入池、act hint 永不命中”的误导；其它 advisory 分支不动。
+- **【新增·同名组 within 候选闭环】** `suggestHints` 在文本候选不唯一且有 `anchor_ids`
+  时按最近祖先优先追加 `<label> within:#<id>`（锚字符集与 `parseHint` 一致、仍走同一
+  `hintMatch` 自证、4 条上限与身份形状顺序不变）；`why_not_admitted` 补 within 指引；
+  `OBSERVE_JS` 采集祖先 id（≤8、小写、最近祖先在前；无 id 祖先时字段不出现，旧观察
+  JSON 形状不变），`ObserveRawRow.anchor_ids` + `syntheticElem` 透传 →
+  `ctx.observe` 的自证池可生成/验证 within 候选：同名元素组从 `admitted:false` 变为
+  带 `Close within:#panel` 等可照抄候选。
+- **【文档】** `docs/APP_SCRIPT_AUTHORING.md` 停因表 `host_not_allowed` 行补：页面驱动
+  导航若 301/302 落到信封外 host 同样报此停因——重定向落地 host 也要声明在 `meta.hosts`。
+- **【验证】** Lead 离线断言 11/11（别名回退 / StateView 不变 / within 自证 / 唯一 label
+  顺序不变 / 无锚与非法锚不变）；本地 fixture 浏览器级：inspect 探测不再误报、
+  `ctx.observe` 同名组 admitted 且带 within 候选、`close within:#panel` 与
+  `#searchbox` 分别命中正确元素、裸词歧义仍零动作；`npm run check` 全绿。
+
 ## [Unreleased] — 介入/救援中断模块 texts 生成接线（设计 §8 步 4）
 
 - **【新增·intervention 断言组】** `tools/prompt-hit.ts` 新增第八个断言组

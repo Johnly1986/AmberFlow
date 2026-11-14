@@ -991,7 +991,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | stopCode | 含义 / 下一步 |
 |---|---|
 | `config_error` | 脚本声明/运行配置错（缺 done、未知 op、未知适配器、`ctx.open` 打不开、**`extract`/`collect` 的 CSS 选择器非法**…）——改声明，不要重试。C2 起非法选择器不再静默吞成 `""`/`[]`，reason 点名是行选择器还是哪个字段，`diagnostics.bad_selector={selector, field?}` 留结构证据（合法但零命中仍 `[]`/`""`） |
-| `host_not_allowed` | 目标主机不在 `meta.hosts` 信封内——要么加 hosts，要么别导航过去 |
+| `host_not_allowed` | 目标主机不在 `meta.hosts` 信封内——要么加 hosts，要么别导航过去。页面驱动导航若 301/302 落到信封外 host 同样报此停因——重定向落地 host 也要声明在 `meta.hosts` |
 | `budget_exceeded` | 步预算/截止时间用完——检查死循环，或调大预算 |
 | `invariant_failed` | `ctx.done()` 时结束态不变量不成立——看是流程没走完还是页面变了 |
 | `missing_done` | 声明了结束态不变量却从未调用 `ctx.done()`——验收没发生，不能报绿 |

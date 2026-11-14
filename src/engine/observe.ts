@@ -152,6 +152,9 @@ function syntheticElem(row: ObserveRawRow, ref: string): Elem {
     ...(row.type ? { input_type: row.type } : {}),
     ...(row.href ? { href: projectHref(row.href), href_full: row.href } : {}),
     ...(row.role ? { role: row.role } : {}),
+    // E3：OBSERVE_JS 采集的祖先 id 链（≤8、小写、最近祖先在前）——within:#id 的
+    // observe 侧底座；无 id 祖先时字段不出现（观察集合形状与池行一致）。
+    ...(Array.isArray(row.anchor_ids) && row.anchor_ids.length > 0 ? { anchor_ids: row.anchor_ids } : {}),
   };
 }
 
@@ -177,7 +180,8 @@ function whyNotAdmitted(row: ObserveRawRow, classNames: string[] | undefined): s
       + `a stable handle alone is only usable by declared-target identity recovery (FW8), not by the pool`;
   }
   return `${tag}${cls}: in the admission surface but no uniquely-resolvable hint shape `
-    + `(label empty or shared with another candidate) — add id/name/data-test or make the visible label unique`;
+    + `(label empty or shared with another candidate) — add id/name/data-test, make the visible label unique, `
+    + "or scope a shared label with `<label> within:#<ancestor-id>`";
 }
 
 /**

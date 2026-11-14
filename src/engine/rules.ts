@@ -510,18 +510,25 @@ export function hintCandidates(
  * 因此拿到的是可直接写进 `target_hint` 的安全候选，而不是猜出来的选择器。
  *
  * 顺序：data-test / id / name / href 精确值，最后是唯一可见文本。最多 4 条。
+ *
+ * E3 闭环：同名元素组（两个 `aria-label="Close"`）没有任何身份形状、文本候选也不唯一时，
+ * 若该元素有 `anchor_ids`（EXTRACT_JS / OBSERVE_JS 提取期算好的祖先 id 链），再按
+ * 「最近祖先优先」尝试 `<label> within:#<ancestor-id>`——仍走同一个 push → hintMatch
+ * 自证（恰好唯一命中该元素才保留），命中一条即停（更外层锚更宽、更难唯一）。
+ * 无 anchor_ids 或文本候选本就唯一时不产生 within（既有建议内容/顺序不变）。
  */
 export function suggestHints(
   elem: Elem,
   elems: ElemPool,
 ): string[] {
   const out: string[] = [];
-  const push = (hint: string): void => {
-    if (!hint || out.includes(hint)) return;
-    if (hintMatch(hint, elems) !== elem.ref) return;
+  const push = (hint: string): boolean => {
+    if (!hint || out.includes(hint)) return false;
+    if (hintMatch(hint, elems) !== elem.ref) return false;
     const cand = hintCandidates(hint, elems);
-    if (cand === null || cand.refs.length !== 1) return;
+    if (cand === null || cand.refs.length !== 1) return false;
     out.push(hint);
+    return true;
   };
   if (elem.data_test) {
     push(`[data-test=${elem.data_test}]`);
@@ -539,6 +546,16 @@ export function suggestHints(
     push(`${elem.tag}[href=${hrefHint}]`);
   }
   const label = String(elem.label ?? "").trim();
-  if (label.length >= 2 && label.length <= 80) push(label);
+  const labelUsable = label.length >= 2 && label.length <= 80;
+  const labelPushed = labelUsable && push(label);
+  // 唯一文本候选没进 out（同名组/闭集重复）才退到 within 尾缀；锚字符集与
+  // parseHint 的 `#[a-z0-9_\-.:]+` 一致，页面上的奇怪 id（空格/引号）直接跳过。
+  if (!labelPushed && labelUsable) {
+    for (const aid of elem.anchor_ids ?? []) {
+      const a = String(aid);
+      if (!/^[a-z0-9_\-.:]+$/.test(a)) continue;
+      if (push(`${label} within:#${a}`)) break;
+    }
+  }
   return out.slice(0, 4);
 }

@@ -495,6 +495,18 @@ export const EXTRACT_JS = String.raw`(arg) => {
 export const OBSERVE_JS = String.raw`(arg) => {
   ${LABEL_HELPERS_JS}
   const sel = arg.sel, max = arg.max, includeHidden = arg.includeHidden === true;
+  // E3：祖先链 id（≤8、小写、最近祖先在前）——与 EXTRACT_JS 的 anchorIdsOf 同口径，
+  // 是 within:#id 尾缀在 observe 侧的自证底座。一次 parentElement 链行走；无 id 祖先
+  // = 空数组（行里省略该字段 ⇒ 这类页面的观察 JSON 形状逐字节不变）。
+  const anchorIdsOf = (el) => {
+    const ids = [];
+    let p = el ? el.parentElement : null;
+    while (p && ids.length < 8) {
+      if (p.id) ids.push(String(p.id).toLowerCase());
+      p = p.parentElement;
+    }
+    return ids;
+  };
   const all = [];
   try { __collectAll(document, sel, all); }
   catch (err) { return { bad_selector: String(err && err.message ? err.message : err) }; }
@@ -522,6 +534,7 @@ export const OBSERVE_JS = String.raw`(arg) => {
     try { inSurface = !!arg.admitSel && e.matches(arg.admitSel); } catch (err) { inSurface = false; }
     const r = e.getBoundingClientRect();
     const href = e.getAttribute('href') || '';
+    const anchors = anchorIdsOf(e);
     rows.push({
       tag: tag,
       role: (e.getAttribute('role') || '').toLowerCase(),
@@ -535,6 +548,7 @@ export const OBSERVE_JS = String.raw`(arg) => {
       visible: vis,
       bbox: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
       in_surface: inSurface,
+      ...(anchors.length ? {anchor_ids: anchors} : {}),
     });
   }
   return { rows: rows, total: candidates, returned: rows.length };

@@ -772,6 +772,8 @@ export interface ObserveRawRow {
   type?: string;
   href?: string;
   class_names?: string[];
+  /** E3：祖先链 id（小写、≤8、最近祖先在前）；无 id 祖先时 JS 侧不返回该字段。 */
+  anchor_ids?: string[];
   visible?: boolean;
   bbox?: { x: number; y: number; w: number; h: number };
   in_surface?: boolean;
