@@ -76,6 +76,7 @@ import {
   firstOf,
   frameAt,
   frameGateOf,
+  frameHintFailureEvidence,
   frameInHostsEnvelope,
   framesOf,
   framesScopedPage,
@@ -278,6 +279,7 @@ import {
   deniedContextUrl,
   disallowedHost,
   firstPoolText,
+  frameTargetStopReason,
   goalLexemes,
   lexMatchOne,
   lexWords,
@@ -2184,8 +2186,13 @@ export class BrowserMiddleware {
         target, pool: elems, op, hintOpts: this._hintOpts(), rejected: fallback.scan.rejected,
         poolCap: this.actPoolCap,   // E1-a：观测面回显（不改池构成）
       });
+      // C 批（B8）：会话 act 的失败 reason 同样追加 frame: 尾缀诊断 + 页面可用 origin
+      // （只有 `opts.diagnostics:true` 的会话 act 面走这里；scrollContainer/setRange 等既有
+      // 调用面不传 ⇒ reason 逐字节不变）。diagnostics 结构体本身不改形状。
+      const frameNote = frameHintFailureEvidence(page, this._frameHosts, [target]);
       return {
-        error: `${base}\n判别: ${actMissDiscrimination(diagnostics, elems, op)}`,
+        error: `${base}\n判别: ${actMissDiscrimination(diagnostics, elems, op)}`
+          + (frameNote ? ` — ${frameNote}` : ""),
         poolSize, diagnostics,
       };
     }
@@ -3361,8 +3368,9 @@ export class BrowserMiddleware {
       };
       /**
        * P0-D：声明目标（act hint / 命令 target）解析失败后的**只读**复核：目标是否只存在于
-       * 被排除 frame。命中 → 结构化 `frame_not_allowed`（reason 点名 frame origin + 目标 +
-       * 修法），绝不把声明目标宽化成别的元素、也绝不操作排除帧。
+       * 被排除 frame。命中 → 结构化 `frame_not_allowed`（reason 点名声明链 + 命中帧完整链 +
+       * 目标 + 只读匹配证据 + 修法；文案唯一出处 executor-pure.frameTargetStopReason），
+       * 绝不把声明目标宽化成别的元素、也绝不操作排除帧。
        */
       const frameTargetStop = async (
         target: string,
@@ -3370,18 +3378,7 @@ export class BrowserMiddleware {
         if (target === "" || hostGate === null || hostGate.length === 0) return null;
         const probe = await probeExcludedHint(pg, hostGate, target, admitSelectorWithJsFor(this.surfacePolicy));
         if (probe === null) return null;
-        const hits = probe.matches
-          .map((m) => `${m.tag}${m.id ? `#${m.id}` : ""} ${JSON.stringify(m.label)} (frame=${m.frame})`)
-          .join("; ");
-        return {
-          code: "frame_not_allowed",
-          reason: `declared target ${JSON.stringify(target)} matched nothing in the allowed frames, but it exists `
-            + `in frame ${probe.origins.join(", ")}, which is outside the declared hosts envelope `
-            + `(${hostGate.join(", ")}) — read-only matches: ${hits}. `
-            + `第三方非交互 frame 默认排除（frames_excluded），不需要为此加 hosts；仅当声明目标确需该 frame 时才会 `
-            + `frame_not_allowed —— 此时再评估是否把它的 origin 加进 meta.hosts 后重跑；`
-            + `否则把该目标改到允许 frame 内的锚点`,
-        };
+        return { code: "frame_not_allowed", reason: frameTargetStopReason(target, hostGate, probe) };
       };
       // "Does this step apply?" — asked on the page the step will act on, before
       // spending a single step. A skipped subgoal reports done, so the plan
@@ -3948,6 +3945,12 @@ export class BrowserMiddleware {
                     + `> clientHeight=${h.clientHeight}, rendered children=${h.rendered}`).join("; ")
                   + `（目标可能在未渲染/视口外的滚动内容里；不自动滚动，按六步法② 用滚动/展开原语或收窄窗口取证）`
                 : "";
+              // C 批（B8）：被拒的 frame: 尾缀 / 合法但写错的链要在此点名 + 列页面可用 origin
+              // （无 frame: 参与 = 空串，旧 reason 逐字节不变）。
+              const frameTargets = pendingUnresolved
+                .map((id) => cmdSpace.find((c) => c.id === id)?.target)
+                .filter((t): t is string => typeof t === "string" && t !== "");
+              const frameNote = frameHintFailureEvidence(pg, this._frameHosts, frameTargets);
               stop("target_not_found",
                 `command space matches nothing on this page — pending unresolved: `
                 + `${pendingUnresolved.join(", ") || "-"} (unresolvable candidates are OUT; the space never falls back to the full pool) on step ${stepNo}. `
@@ -3962,7 +3965,8 @@ export class BrowserMiddleware {
                     + `(checkVisibility CSS / zero box); hidden elements are never acted on`)
                 + declaredHiddenSuffix()
                 + drfHintSuffix()
-                + underNote, stepNo);
+                + underNote
+                + (frameNote ? ` — ${frameNote}` : ""), stepNo);
             }
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
@@ -4256,10 +4260,14 @@ export class BrowserMiddleware {
             && (weakRejected !== null || hintMatch(curHint, elems, this._hintOpts()) === null)) {
           const poolSize = Object.keys(elems).length;
           const summary = poolRoleSummary(elems, ALL_FAMILIES);
+          // C 批（B8）：strict 的两条 reason 也追加 frame: 尾缀诊断 + 页面可用 origin（无 frame:
+          // 参与 = 空串，旧文案逐字节不变）。
+          const frameNote = frameHintFailureEvidence(pg, this._frameHosts, [curHint]);
           if (weakRejected !== null) {
             stop("target_not_found",
               weakRejectedReason(weakRejected, curHint, stepNo, poolSize, summary)
-              + identityHiddenSuffix() + declaredHiddenSuffix() + drfHintSuffix(), stepNo);
+              + identityHiddenSuffix() + declaredHiddenSuffix() + drfHintSuffix()
+              + (frameNote ? ` — ${frameNote}` : ""), stepNo);
           } else {
             stop("target_not_found",
               `step ${stepNo}: act_hint="strict" forbids the model fallback — declared target_hint `
@@ -4267,7 +4275,8 @@ export class BrowserMiddleware {
               + `${summary ? `: ${summary}` : ""}) after hintMatch / ADMIT recovery / FW8 identity recovery. `
               + `Fix the hint (closed set: #id | tag[attr=value] | tag[attr~substr] | tag~token | tag | bare-token) `
               + `or remove meta.policy.act_hint:"strict" to let the decision model pick instead`
-              + identityHiddenSuffix() + declaredHiddenSuffix() + drfHintSuffix(), stepNo);
+              + identityHiddenSuffix() + declaredHiddenSuffix() + drfHintSuffix()
+              + (frameNote ? ` — ${frameNote}` : ""), stepNo);
           }
           if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
           break;

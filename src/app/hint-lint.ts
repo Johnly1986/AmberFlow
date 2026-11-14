@@ -13,8 +13,14 @@
  * target 的静态字符串实参，经 `parseHint`（唯一解析器，只读复用）判三类形状。挂起工作流的
  * 其他族校验面（judge/命令操作数真空、dynamic 计数外显、declarationLint 字段）一律不接出；
  * 未求值的 hint 实参静默跳过（不在检视范围，也不计数外显）。
+ *
+ * C 批（N10）：`frame:` 尾缀的**独立提醒通道**（`frameFindings`，同一批 hint 形状位）——
+ * 值必被解析拒绝 / origin 不在 `meta.hosts`（拿不到 hosts 时只做值形状检查）。它沿用本文件的
+ * 通道纪律：只产 stderr 人话行、不进 problems、不改 VALID/exit；三类形状的判定与计数口径
+ * （`findings`/`scanned`）不受影响。
  */
-import { parseHint } from "../engine/hint.ts";
+import { describeFrameSuffixRejection, parseHint } from "../engine/hint.ts";
+import { urlInHostsEnvelope } from "../engine/host-envelope.ts";
 import { poolFieldFor } from "../engine/rules.ts";
 import { type DeclarationScan, type DeclSite } from "./declaration-scan.ts";
 
@@ -27,10 +33,36 @@ export interface HintLintFinding {
   locations: Array<{ file: string; line: number }>;
 }
 
+/**
+ * C 批（N10）：`frame:` 尾缀的**独立**静态提醒通道（不是第四类 lint——三类形状的判定与
+ * 计数口径保持不变，也不进 problems/VALID/exit）。
+ *   - `rejected`：值不是 parseHint 接受的形状（缺 `://`、带 path、多尾缀、空段、>4 段…）——
+ *     运行期整串按旧形状解析，**必不命中**；
+ *   - `host`：值合法但 origin 的 hostname 不在 `meta.hosts` 信封内——若该帧是被排除的子 frame，
+ *     运行期会 `frame_not_allowed`（主 frame 恒允许，故文案点明这一边界）。
+ */
+export type HintFrameLintKind = "rejected" | "host";
+
+export interface HintFrameLintFinding {
+  kind: HintFrameLintKind;
+  /** 触发提醒的 hint 原文（去重键）。 */
+  hint: string;
+  /** 为什么（可行动：值形状 / 不在 hosts）。 */
+  reason: string;
+  locations: Array<{ file: string; line: number }>;
+}
+
+export interface HintLintOptions {
+  /** 应用 `meta.hosts`（拿不到 = undefined/null ⇒ 只做值形状检查，不报 host 提醒）。 */
+  hosts?: readonly string[] | null;
+}
+
 export interface HintLintResult {
   findings: HintLintFinding[];
   /** 检视的静态字符串 hint 实参总数（含三类之外的健康形状——口径计数）。 */
   scanned: number;
+  /** C 批：frame: 尾缀提醒（独立 stderr 通道；不参与上面的 findings/scanned 口径）。 */
+  frameFindings: HintFrameLintFinding[];
 }
 
 /** 一个调用点的哪个实参位是 hint 语义字符串（唯一出处：ctx 的参数签名）。 */
@@ -62,15 +94,39 @@ const KIND_LABEL: Record<HintLintKind, string> = {
 };
 
 /** 扫描声明收集结果，产出三类 hint 形状的静态提醒（纯函数，不打印）。 */
-export function lintHintSemantics(scan: DeclarationScan, file: string): HintLintResult {
+export function lintHintSemantics(
+  scan: DeclarationScan, file: string, opts: HintLintOptions = {},
+): HintLintResult {
   const findings = new Map<string, HintLintFinding>();
+  const frameFindings = new Map<string, HintFrameLintFinding>();
   let scanned = 0;
+  const addFrameFinding = (kind: HintFrameLintKind, hint: string, reason: string, line: number): void => {
+    const key = `${kind}\u0000${hint}`;
+    const f = frameFindings.get(key) ?? { kind, hint, reason, locations: [] };
+    f.locations.push({ file, line });
+    frameFindings.set(key, f);
+  };
   for (const site of scan.sites) {
     for (const idx of hintArgsOf(site)) {
       const arg = site.args[idx];
       if (arg === undefined || !arg.static || typeof arg.value !== "string") continue;
       scanned++;
       const parsed = parseHint(arg.value);
+      // C 批（N10）：frame: 尾缀提醒——值形状必被拒绝 / origin hostname 不在 meta.hosts。
+      // 放在三类形状判定之前（不影响它们：下面只读同一个 parsed，不改 findings/scanned 口径）。
+      const rejection = describeFrameSuffixRejection(arg.value);
+      if (rejection !== null) {
+        addFrameFinding("rejected", arg.value, rejection, site.line);
+      } else if (parsed.frameChain !== undefined
+          && opts.hosts !== undefined && opts.hosts !== null && opts.hosts.length > 0) {
+        const outside = parsed.frameChain.filter((seg) => !urlInHostsEnvelope(seg, opts.hosts as string[]));
+        if (outside.length > 0) {
+          addFrameFinding("host", arg.value,
+            `frame: 链里的 ${outside.map((s) => JSON.stringify(s)).join("、")} 不在 meta.hosts `
+            + `(${opts.hosts.join(", ")}) 内——若该 origin 是被排除的子 frame，运行期会 frame_not_allowed`
+            + `（先把它加进 meta.hosts；主 frame 恒允许）`, site.line);
+        }
+      }
       let kind: HintLintKind | null = null;
       if (parsed.kind === "bare") kind = "bare";
       else if (parsed.kind === "nearToken") kind = "nearToken";
@@ -83,7 +139,7 @@ export function lintHintSemantics(scan: DeclarationScan, file: string): HintLint
       findings.set(key, f);
     }
   }
-  return { findings: [...findings.values()], scanned };
+  return { findings: [...findings.values()], scanned, frameFindings: [...frameFindings.values()] };
 }
 
 /** 渲染 stderr 行（weak_done 风格；每类一行、位置列前 3 个，其余计数带过）。 */
@@ -111,6 +167,18 @@ export function renderHintLintLines(result: HintLintResult): string[] {
   if (result.findings.length > 0) {
     lines.push(`hintLint: 检视 ${result.scanned} 个静态 hint 声明 — ${counts}`
       + "（仅静态提醒，不影响 VALID/exit）");
+  }
+  // C 批（N10）：frame: 尾缀提醒（独立 stderr 行；clean 应用零输出，三类 lint 的判定/计数不变）。
+  for (const f of result.frameFindings.slice(0, 3)) {
+    const locs = f.locations.slice(0, 3).map((l) => `${l.file}:${l.line}`).join("、");
+    const rest = f.locations.length > 3 ? `（另 ${f.locations.length - 3} 处略）` : "";
+    const label = f.kind === "rejected" ? "frame: 尾缀必被解析拒绝" : "frame: origin 不在 meta.hosts";
+    lines.push(`hintLint: ${label} — ${locs}${rest} ${JSON.stringify(f.hint)} —— ${f.reason}`
+      + "（仅静态提醒，不影响 VALID/exit）");
+  }
+  if (result.frameFindings.length > 3) {
+    lines.push(`hintLint: frame: 尾缀另有 ${result.frameFindings.length - 3} 处提醒（只列前 3；`
+      + "仅静态提醒，不影响 VALID/exit）");
   }
   return lines;
 }

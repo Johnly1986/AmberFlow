@@ -691,7 +691,12 @@ frame），允许帧已成立 = 正常成功。其余情况步骤照常，只在
    `hint_candidates` 现在会直接给帧限定候选**：文本候选跨帧不唯一且元素有 `frame_origin` 时给
    `<label> frame:<自身 origin>`；单段仍不唯一且 `frame_path` 非空时给完整链
    `<label> frame:<祖先…>自身>`（含自身 ≤4 段，与 `parseHint` 同口径；更长不生成）。每条候选都由
-   同一个 `hintMatch` 自证，可照抄。
+   同一个 `hintMatch` 自证，可照抄。**CLI 两个消费面**：`plan check --probe` 的 target_hint 核对
+   走同一套解析（`findByHint` 先 `parseHint` 再按声明链过滤池），带 `frame:` 的目标能正确命中；
+   `amber start --target` 则对**帧限定目标结构化拒绝**——该面的演示点击是主帧 `page.click(...)`，
+   帧内目标会点错/超时，退出码沿用该 CLI 既有失败口径（2），请改用 app/run 或 plan 面。
+   `apps check` 另对非法 `frame:` 值与不在 `meta.hosts` 的 origin 出 stderr 静态提醒
+   （`apps check` 的 lint 通道：不进 problems、不改 VALID/exit；拿不到 `meta.hosts` 时只做值形状检查）。
 3. **跨源帧要能动作**：该 frame origin 必须进 `meta.hosts`（app）/ 会话 `hosts`，否则解析面排除该帧
    （`frames_excluded`）；`inspect --probe` 的子 frame 命中证据与 `frame_host` advisory 会点名 origin。
 4. **已知边界**：`framesOf` 只取主 frame + ≤5 子 frame（更深的 frame 不参与池/探测，`inspect` 的
@@ -1038,7 +1043,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |
 | `false_done` | **P0-E**（`done_guard:"fail"` 档）：done 成立但只读复核 guard 命中假绿特征——登录墙特征（URL/标题登录文案/跨出 hosts 信封）或「有动作但 changed=false 且 done 是否定式」的零前进蹭成立（R11：误点进登录页被算成功）。给 done 配正向锚（`all_of(not(...), 正向锚)`，必要时配 `ctx.judge.loginWall()`）；确属误报把 policy 改回 `warn`。缺省 `warn` 档只记 `false_done:` step warning，不改判定 |
 | `step_timeout` | **F3**：该步显式声明了 `timeoutMs`，整步挂钟（含 reobserve/升级循环的每轮与总时长）超了声明值——循环不再进入下一轮（已在途的决策调用不可抢占，超额 ≤ 一次在途调用）。放宽 `timeoutMs`、收窄该步 done/target，或拆分流程；未声明 `timeoutMs` 的步骤没有这个帽 |
-| `frame_not_allowed` | **仅当声明 target 或 done/when 只存在于 `meta.hosts` 之外的 frame**：第三方非交互 frame 默认排除（`frames_excluded` warning），**不需要**为此加 hosts；只有声明目标/完成信号确需该 frame 时才评估把它的 origin 加进 `meta.hosts`，否则把目标/done 改到允许 frame 内的事实。导航信封外的 goto 仍报 `host_not_allowed` |
+| `frame_not_allowed` | **仅当声明 target 或 done/when 只存在于 `meta.hosts` 之外的 frame**：第三方非交互 frame 默认排除（`frames_excluded` warning），**不需要**为此加 hosts；只有声明目标/完成信号确需该 frame 时才评估把它的 origin 加进 `meta.hosts`，否则把目标/done 改到允许 frame 内的事实。C 批起 reason 同时带**声明的帧链**（hint 的 `frame:` 尾缀；无尾缀明说未声明）与**命中帧的完整链**（`frameChainOf`，按链去重 ≤4，含该帧 origin/帧下标）+ 只读命中证据；修法二选一明写（加 host / 改目标或链）。CLI 面：`plan check --probe` 支持 `frame:` 目标核对；`amber start --target` 对帧限定目标结构化拒绝（见多 frame 速查）。导航信封外的 goto 仍报 `host_not_allowed` |
 | `popup_not_allowed` | action 打开的新 tab / popup 不在 `meta.hosts` 内；声明 popup host 或避免打开外域 |
 | `navigation_forbidden` | `meta.policy.navigation:"entry-only"` 下入口之外的引擎直接 URL 导航被闸门拒绝；导航须经由页面元素完成（确需直达就移除该 policy）。见 §4.10 |
 | `manual_signal_not_held` / `manual_declined` / `needs_human` | 人工步：DOM 信号没验过 / 人放弃 / 非 TTY 需要人 |

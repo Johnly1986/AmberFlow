@@ -505,8 +505,12 @@ async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
       for (const line of renderSiteFactLines(siteFacts)) console.error(line);
       // task-10（B2）：hint 语义 lint（stderr warnings 通道，与 weak_done 同款——JSON/人读
       // 两个面都可见、都不改 stdout/exit）。无三类形状的应用零输出（clean 逐字节不变）。
+      // C 批（N10）：把 meta.hosts 一并交给 lint——frame: origin 不在信封内的静态提醒
+      // 需要它（取不到 hosts 时 lint 只做值形状检查，行为见 hint-lint.ts）。
       for (const line of renderHintLintLines(
-        lintHintSemantics(scanDeclarations(loaded.sourceText), path.basename(loaded.scriptPath)),
+        lintHintSemantics(scanDeclarations(loaded.sourceText), path.basename(loaded.scriptPath), {
+          hosts: loaded.pack.hosts ?? null,
+        }),
       )) {
         console.error(line);
       }

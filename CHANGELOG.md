@@ -86,6 +86,49 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   （候选 `frame_origin`、`suggested_hint≤200`）、F70 truth 同步；`docs/APP_SCRIPT_AUTHORING.md`
   多 frame 速查与 `docs/AGENT_INTERFACE.md` 同步。
 
+### C 批（findByHint / `amber start --target` / 链证据 / 拒绝诊断 / apps check lint）
+
+- **【回捞/CLI 适配（R2-4/B9）】** `findByHint`（`plan check --probe` 与 `amber start --target`
+  共用的旧匹配器）改为**先 `parseHint` 再按声明链过滤池**：`#id` / `[attr=v]` / `induceHint`
+  既有匹配路径不变，只是池先按 `frameScopeMatches` 过滤；`frame:` 目标不再被 `plan check --probe`
+  误报未命中。**无后缀路径逐字节不变**（`frameChain` 未定义时池就是原池、base 就是原串；
+  与 git HEAD 旧实现 85 例差分一致）。
+- **【`amber start --target` 帧限定结构化拒绝】** 该 CLI 的演示点击是**主帧** `page.click(...)`
+  （`selectorForHint` 也只产出主帧 CSS），带 `frame:` 的目标会点错/超时。纯函数
+  `frameTargetRejection(hint)` 在**开浏览器之前**拒绝：文案点名"不支持帧限定目标 + 主帧
+  page.click + 改用 app/run 或 plan 面（`plan check --probe` 支持 frame:）"；exit 沿用该 CLI
+  既有失败口径（2），**不新增 exit code**。非法/多尾缀仍走旧路径（parseHint 不接受 ⇒ 显式落空）。
+- **【被排除帧链证据（F45 C 批）】** `probeExcludedHint` 的 `ExcludedHintProbe` 增
+  `declaredChain?`（hint 的 `frame:` 尾缀）与 `matchedChains`（命中帧完整链 `frameChainOf`，
+  按链去重、≤4 条、含 origin/帧下标）；`frame_not_allowed` reason 改由纯函数
+  `executor-pure.frameTargetStopReason` 拼装——声明链与命中链并排 + 只读命中证据（≤5 行）+
+  两条修法（把命中 origin 加进 `meta.hosts` / 改目标或声明链到允许帧）。只探测**链匹配**的
+  排除帧（A 批过滤保留），不匹配帧零 evaluate。
+- **【拒绝/错链诊断（B8）】** `hint.ts` 新增纯函数 `describeFrameSuffixRejection(hint)`（零页面
+  I/O、不改 `parseHint` 返回值语义）：串尾 ` frame:` 尝试未被接受时返回一行可行动原因并区分
+  类别——多尾缀 / 非法 origin（缺 `://`、非 http(s)、about:blank）/ 空段 / >4 段 / 非规范 origin
+  （path·query·fragment·显式默认端口）/ 空值 / 无 hint 主体 / frame 合法但同串 within 问题导致
+  整组回退；合法尾缀、值内伪 `frame:`、中段 `frame:`、纯 within 问题 = null（不误报）。解析面与
+  诊断面共用同一份值判定（`frameChainValueProblem`），parseHint 与 HEAD 46 例差分一致。
+  接入点集中在 `extraction.frameHintFailureEvidence`（命令步 target_not_found / act_hint:"strict"
+  两条 reason / 会话 act 落空 reason / `plan check --probe` 未命中行统一追加）：原因 +
+  **页面实际可用 origin**（允许帧去重 ≤6、主帧也列）；无 frame: 参与时返回空串（旧 reason 逐字节
+  不变）。`target_not_found` / `frame_not_allowed` 均**无新增 stopCode**。
+- **【apps check 静态 lint（N10）】** `hint-lint.ts` 新增独立 stderr 提醒通道（不改三类形状判定与
+  计数口径、不进 problems、不改 VALID/exit）：① `frame:` 值不是合法 origin（缺 `://`、带 path、
+  多尾缀…）→ "必被解析拒绝"；② 值合法但 origin 的 hostname 不在 `meta.hosts` 信封内 →
+  "若该 origin 是被排除的子 frame，运行期会 frame_not_allowed（主帧恒允许）"。`apps check`
+  透传 `meta.hosts`；拿不到 hosts 时只做值形状检查（`hosts=[]` 同）。
+- **【契约/文档】** F45 statement/truth 补"reason 带声明链 + 命中帧完整链"；F70 statement/truth
+  补 C 批（findByHint/start 拒绝/诊断/链证据/lint，明确**无新增 stopCode**）；
+  `docs/APP_SCRIPT_AUTHORING.md` 多 frame 速查补 `plan check --probe` 支持 `frame:` 与
+  `amber start --target` 结构化拒绝，stopCode 表 `frame_not_allowed` 行补链证据。
+- **【验证】** 离线断言 184 条全绿（findByHint 链过滤 18 / start-target 拒绝 12 / describe 全矩阵
+  + parseHint 差分 102 / probe 链证据 + reason 文案 31 / hint-lint 21），
+  `npm run typecheck`、`npm run prompt-hit` 通过。浏览器级（真实页/双端口 fixture 的
+  `plan check --probe` frame: 目标、`amber start --target` 拒绝、被排除帧的 frame_not_allowed
+  链证据）留待 lead 浏览器级验证。
+
 ## [Unreleased] — inspect --probe 跨 frame 探测（iframe 元素不再静默漏检）
 
 - **【修复·inspect 探测面】** `inspect --probe` 此前只在**主 frame** `page.evaluate`，

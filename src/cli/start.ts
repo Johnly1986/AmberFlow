@@ -27,6 +27,8 @@ import { defaultPlanPath } from "../support/amberflow-home.ts";
 import * as browserEnv from "../browser/browser-env.ts";
 import { browserSession, BrowserMiddleware, type BrowserSession } from "../engine/executor.ts";
 import { extractElements, type Elem, type ElemPool } from "../engine/extraction.ts";
+import { parseHint } from "../engine/hint.ts";
+import { frameScopeMatches } from "../engine/frame-scope.ts";
 import { induceHint } from "../model/hint-memory.ts";
 import { installLayaRuntime, LayaNotConfiguredError } from "../model/model.ts";
 import { checkArtifacts, missingPieces, onnxModelPath, type ModelArtifacts } from "../model/model-artifacts.ts";
@@ -176,26 +178,64 @@ export function selectorForHint(hint: string): string | null {
 
 /** Resolve a user-given hint (`[data-test=x]`, `#id`, `[name=x]`, …) against the pool. */
 export function findByHint(elems: ElemPool, hint: string): { ref: string; el: Elem } | null {
-  const m = /^\[?(data-test|id|name)=(.+?)\]?$/.exec(hint);
+  // C 批（B9/R2-4）：`frame:<origin链>` 尾缀必须先 parseHint 再**按帧链过滤池**，否则
+  // `plan check --probe`（本函数的另一消费面）会把帧内目标误报未命中。无后缀 = 逐字节旧路径
+  // （pool 就是原池、base 就是原串）；后缀的合法性仍只由 parseHint 判定，这里不另立语法。
+  const { base, frameChain } = splitFrameSuffix(hint);
+  const pool: ElemPool = frameChain === undefined
+    ? elems
+    : Object.fromEntries(Object.entries(elems).filter(([, el]) => frameScopeMatches(frameChain, el)));
+  const m = /^\[?(data-test|id|name)=(.+?)\]?$/.exec(base);
   const fold = (s: string): string => s.toLowerCase();
   if (m) {
     const [, attr, raw] = m;
     const want = fold(raw!.replace(/^["']|["']$/g, ""));
-    for (const [ref, el] of Object.entries(elems)) {
+    for (const [ref, el] of Object.entries(pool)) {
       const val = attr === "data-test" ? el.data_test : attr === "id" ? el.id : el.name;
       if (typeof val === "string" && fold(val) === want) return { ref, el };
     }
     return null;
   }
-  const idm = /^#(.+)$/.exec(hint);
+  const idm = /^#(.+)$/.exec(base);
   if (idm) {
-    for (const [ref, el] of Object.entries(elems)) {
+    for (const [ref, el] of Object.entries(pool)) {
       if (typeof el.id === "string" && fold(el.id) === fold(idm[1]!)) return { ref, el };
     }
     return null;
   }
-  for (const [ref, el] of Object.entries(elems)) if (induceHint(el) === hint) return { ref, el };
+  for (const [ref, el] of Object.entries(pool)) if (induceHint(el) === base) return { ref, el };
   return null;
+}
+
+/**
+ * C 批：把 hint 拆成「旧形状主体 + 合法帧链」。只有 parseHint 接受的 `frame:` 尾缀才拆
+ * （值非法/多尾缀 = parseHint 不接受 ⇒ frameChain undefined，整串按旧行为匹配 = 显式落空）。
+ * 无后缀时 `base === hint`（不去 trim/不改大小写）＝ 旧路径逐字节不变。
+ */
+function splitFrameSuffix(hint: string): { base: string; frameChain?: string[] } {
+  const frameChain = parseHint(hint).frameChain;
+  if (frameChain === undefined) return { base: hint };
+  const trimmed = hint.trim();
+  const m = /\s+frame:\S+\s*$/i.exec(trimmed);
+  return { base: m === null ? trimmed : trimmed.slice(0, m.index).trimEnd(), frameChain };
+}
+
+/**
+ * C 批（B9/R2-4）：`amber start --target` 对**帧限定目标**的结构化拒绝（纯函数，离线可断言）。
+ *
+ * 为什么拒绝而不是改 locator：该 CLI 的演示点击是**主帧** `page.click(sel)`（`selectorForHint`
+ * 也只产出主帧 CSS）——带 `frame:` 的目标要么点错、要么超时；改 locator 会引入"解析帧 vs 演示
+ * 点击帧不一致"的错帧风险，而这条面只是 onboarding demo。返回 null = 非帧限定（放行，沿用旧
+ * 行为）；否则返回可行动的多行原因（exit 口径沿用该 CLI 既有失败语义 = 2，不新增 exit code）。
+ */
+export function frameTargetRejection(hint: string): string | null {
+  const chain = parseHint(hint).frameChain;
+  if (chain === undefined) return null;
+  return `amber start --target 不支持帧限定目标（${JSON.stringify(hint)} → frame:${chain.join(">")}）：`
+    + `这条 CLI 的演示点击是主帧 page.click(...)，帧内目标会点错或超时。`
+    + `请改用应用/计划面：app.mjs 里 ctx.step({ act: ctx.hint(...) }) 后 amber run；`
+    + `或写成计划 target_hint 后用 plan check --probe（支持 frame:）核对、plan run 执行。`
+    + `目标确实在主帧时去掉 frame: 尾缀。`;
 }
 
 /** Ask which candidate to act on; returns a ref. Refuses to guess when nobody can answer. */
@@ -235,6 +275,15 @@ async function commandJob(
   goal: string, url: string, opts: { plan: string; target: string | null; dryRun: boolean; headless: boolean },
   io: Io, deps: StartDeps, modelId?: string,
 ): Promise<number> {
+  // C 批（B9/R2-4）：帧限定目标在**开浏览器之前**结构化拒绝——演示点击是主帧 page.click，
+  // 帧内目标会点错/超时；exit 沿用本 CLI 既有失败口径（2），不新增 exit code。
+  if (opts.target !== null) {
+    const rejection = frameTargetRejection(opts.target);
+    if (rejection !== null) {
+      io.out(rejection);
+      return 2;
+    }
+  }
   const own = deps.session ? null : await browserSession(opts.headless);
   const session = (deps.session ?? own)!;
   try {

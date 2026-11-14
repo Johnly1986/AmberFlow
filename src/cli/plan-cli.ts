@@ -23,7 +23,7 @@ import { PlanningRules, TaskPlan } from "../engine/plan.ts";
 import { runPlan, type PlannerLike } from "../engine/planner.ts";
 import { SIGNAL_OPS, checkSignal, signalProblemText, validateSignalSpec, type SignalSpec } from "../engine/signals.ts";
 import { browserSession, BrowserMiddleware, type EscalatorLike } from "../engine/executor.ts";
-import { extractElements } from "../engine/extraction.ts";
+import { extractElements, frameHintFailureEvidence } from "../engine/extraction.ts";
 import { getAuditor, type AuditVerdict } from "../engine/audit.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 import { applySpecToRuntime, installDecisionProvider, resolveProviderSpec } from "../model/decision-provider.ts";
@@ -220,9 +220,12 @@ export async function probePlan(file: string, io: CliIO = defaultIO): Promise<bo
         const head = `    [${i}] ${sg.desc}`;
         if (sg.target_hint) {
           const found = findByHint(elems, sg.target_hint);
+          // C 批（B8/B9）：`findByHint` 现在先 parseHint+链过滤；未命中时把 frame: 尾缀被拒的
+          // 原因与页面实际可用 origin 一起点名（无 frame: 参与 = 空串，旧输出逐字节不变）。
+          const frameNote = found ? "" : frameHintFailureEvidence(session.page as never, null, [sg.target_hint]);
           io.out(`${head}\n      target_hint ${JSON.stringify(sg.target_hint)}：${found
             ? "在实况元素池命中 ✓"
-            : "未命中 ✗（inspect --url 复核 hint；动态页注意水合时机）"}`);
+            : "未命中 ✗（inspect --url 复核 hint；动态页注意水合时机）"}${frameNote ? `\n      ${frameNote}` : ""}`);
           if (!found) failed = true;
         } else if (!hasCmds) {
           const holds = await checkSignal(session.page as never, sg.signal);

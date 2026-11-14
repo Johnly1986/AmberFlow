@@ -14,12 +14,12 @@
  * hint_lookup's multi-word labels in the Python version.
  */
 
-import { parseHint, type ParsedHint } from "./hint.ts";
+import { describeFrameSuffixRejection, parseHint, type ParsedHint } from "./hint.ts";
 import { parseClickAtValue } from "./click-at.ts";
 import { sleepMs } from "../support/sleep.ts";
 // frame:<origin> 帧链 helper（A 批，唯一出处 frame-scope.ts）：extraction 只做打点/帧过滤，
 // 判定与 frameOriginOf 的实现都在 frame-scope（这里 re-export 保持既有导出面不变）。
-import { elemFrameStamp, frameOriginOf, frameScopeMatchesFrame } from "./frame-scope.ts";
+import { elemFrameStamp, frameChainOf, frameOriginOf, frameScopeMatchesFrame } from "./frame-scope.ts";
 export { elemFrameStamp, frameChainOf, frameScopeMatches, frameScopeMatchesFrame, frameOriginOf } from "./frame-scope.ts";
 // 内嵌 JS 探针区（COLLECT_JS/PASS_*…）拆到 pool-js.ts（F6）；导出面不变，这里读回同一份。
 import {
@@ -1400,6 +1400,16 @@ export async function hintLookup(
 export interface ExcludedHintProbe {
   /** 被排除 frame 的 origin（去重；证据/reason 用）。 */
   origins: string[];
+  /**
+   * C 批（§12.3 回捞/门禁适配 / F45）：hint 里**声明的帧链**（`frame:` 尾缀；无尾缀省略）。
+   * 与 `matchedChains` 并排进 reason，回答"作者声明的链 vs 实际命中的链"。
+   */
+  declaredChain?: string[];
+  /**
+   * C 批：**命中帧的完整链**（`frameChainOf`，外→内、末段=该帧自身 origin；未知 origin 帧为
+   * 空数组）——按链去重、≤4 条，只含真正产出匹配的排除帧（不把无关 origin 当证据）。
+   */
+  matchedChains: Array<{ frame: number; origin: string; chain: string[] }>;
   /** 排除帧内的命中行（ref 是证据编号，不参与动作）。 */
   matches: Array<{
     ref: string; frame: number; tag: string; label: string;
@@ -1410,6 +1420,9 @@ export interface ExcludedHintProbe {
 /**
  * P0-D：**只读探测**——在 host 信封排除的 frame 里找一条 hint 的匹配（不盖章、不动作）。
  * 返回 null = 没有排除帧 / 排除帧里也没有这条 hint（保持既有失败路径）。
+ *
+ * C 批：只探测与声明链匹配的排除帧（A 批已过滤）；证据同时带**声明的链**与**命中帧完整链**
+ * （按链去重、≤4 条，有界）——reason 的措辞由 executor-pure.frameTargetStopReason 统一拼装。
  */
 export async function probeExcludedHint(
   page: PageLike, hosts: string[] | null | undefined, hint: string,
@@ -1417,12 +1430,13 @@ export async function probeExcludedHint(
 ): Promise<ExcludedHintProbe | null> {
   const gate = frameGateOf(page, hosts);
   if (gate === null) return null;
-  // A 批（frame:<origin>）：只探测/上报与**声明链匹配**的排除帧（不把无关 origin 当证据；
-  // 命中的那条链与声明链并排的证据文案在 C 批补）。hintLookupArgs 已带 parsed——这里只读复用。
   const parsed = parseHint(hint);
   const matches: ExcludedHintProbe["matches"] = [];
-  for (const { index, frame } of gate.excluded) {
+  const matchedChains: ExcludedHintProbe["matchedChains"] = [];
+  const seenChains = new Set<string>();
+  for (const { index, frame, origin } of gate.excluded) {
     if (parsed.frameChain !== undefined && !frameScopeMatchesFrame(parsed.frameChain, frame)) continue;
+    const before = matches.length;
     let got: unknown;
     try {
       got = await frame.evaluate(PASS_HINT_PROBE, hintLookupArgs(hint, sel));
@@ -1439,9 +1453,77 @@ export async function probeExcludedHint(
         ...(String(row["data_test"] ?? "") ? { data_test: String(row["data_test"]) } : {}),
       });
     }
+    if (matches.length === before) continue;        // 该帧没有命中：不进链证据
+    const chain = frameChainOf(frame) ?? [];
+    const key = chain.length ? chain.join(">") : `opaque:${origin}`;
+    if (!seenChains.has(key) && matchedChains.length < 4) {
+      seenChains.add(key);
+      matchedChains.push({ frame: index, origin: origin || "about:blank", chain });
+    }
   }
   if (matches.length === 0) return null;
-  return { origins: gate.origins, matches };
+  return {
+    origins: gate.origins,
+    ...(parsed.frameChain === undefined ? {} : { declaredChain: parsed.frameChain }),
+    matchedChains,
+    matches,
+  };
+}
+
+/**
+ * C 批（B8/D7）：页面**允许帧**的 origin 列表（去重、≤6，主帧在前）。
+ * 口径与门禁一致：主帧恒允许；子帧 origin 不在 hosts 信封内 = 排除（不列）。
+ */
+export function allowedFrameOrigins(page: PageLike, hosts: string[] | null | undefined): string[] {
+  const out: string[] = [];
+  const frames = framesOf(page);
+  for (let i = 0; i < frames.length; i++) {
+    if (i > 0 && !frameInHostsEnvelope(frames[i]!, hosts)) continue;
+    const origin = frameOriginOf(frames[i]!).toLowerCase();
+    if (!origin || origin === "null") continue;
+    if (!origin.startsWith("http://") && !origin.startsWith("https://")) continue;
+    if (!out.includes(origin)) out.push(origin);
+  }
+  return out.slice(0, 6);
+}
+
+/**
+ * C 批（B8）：`target_not_found` 类 reason 末尾的 **frame: 尾缀诊断 + 页面可用 origin 证据**。
+ *
+ * 唯一追加面（命令步 / act_hint strict / 会话 act 都调它，避免多处文案漂移）：
+ *   - 目标串里的 `frame:` 尾缀未被 parseHint 接受 → 点名原因（describeFrameSuffixRejection）；
+ *   - 目标串里有**合法**声明链却没命中 → 列出声明链（"合法但写错 origin"要看到页面实际有什么）；
+ *   - 两者都出现/出现任一 → 附页面允许帧的 origin 列表（去重 ≤6、有界，主帧 origin 也列）。
+ * 没有 frame: 参与（无尾缀、也无被拒尝试）= 返回空串 ⇒ 旧 reason 逐字节不变。
+ */
+export function frameHintFailureEvidence(
+  page: PageLike, hosts: string[] | null | undefined, targets: readonly (string | null | undefined)[],
+): string {
+  const rejections: string[] = [];
+  const declared: string[] = [];
+  for (const target of targets) {
+    if (typeof target !== "string" || target.trim() === "") continue;
+    const rejection = describeFrameSuffixRejection(target);
+    if (rejection !== null) {
+      if (!rejections.includes(rejection)) rejections.push(rejection);
+      continue;
+    }
+    const chain = parseHint(target).frameChain;
+    if (chain !== undefined) {
+      const text = chain.join(">");
+      if (!declared.includes(text)) declared.push(text);
+    }
+  }
+  if (rejections.length === 0 && declared.length === 0) return "";
+  const parts: string[] = [];
+  if (rejections.length > 0) parts.push(rejections.slice(0, 2).join("；"));
+  if (declared.length > 0) {
+    parts.push(`声明链 ${declared.slice(0, 2).map((c) => JSON.stringify(c)).join(" / ")} `
+      + `在允许帧里没有命中（检查 origin 是否写错/该帧是否被 hosts 排除）`);
+  }
+  const origins = allowedFrameOrigins(page, hosts);
+  parts.push(`页面实际可用 origin（允许帧，去重 ≤6）: [${origins.length ? origins.join(", ") : "-"}]`);
+  return parts.join(" — ");
 }
 
 /* ------------------------------------------------------------------ text views */

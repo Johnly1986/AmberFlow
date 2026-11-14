@@ -54,26 +54,48 @@ export function poolAttr(attr: string): string {
  * 注意：解析只管**形状**。属性名是否在池子的字段模型里、值怎么比（精确/包含/按路径段分档）
  * 是各观察面自己的事——那部分差异是设计（池子是投影，DOM 是活页面），不是漂移。
  */
-/** `frame:` 值校验（§12.3 R2-1）：`>` 分隔 origin 链、≤4 段、每段 `v === new URL(v).origin`
- *  且是 http/https 规范形（带 path/query/显式默认端口/about:blank/ftp 都拒绝）。非法 = null。 */
-function parseFrameChainValue(raw: string): string[] | null {
+/**
+ * C 批（B8）：`frame:` 值被拒的**原因类别**（与 parseFrameChainValue 共用同一判定，只是保留
+ * 拒绝理由——诊断面要区分"多段/非法 scheme/带 path"）。非法 = 返回 problem；合法 = null。
+ */
+export type FrameChainValueProblem =
+  | { kind: "empty" }
+  | { kind: "too-long"; segments: number }
+  | { kind: "empty-segment"; segments: number }
+  | { kind: "not-http-origin"; segment: string }
+  | { kind: "not-canonical"; segment: string };
+
+/** frame 链值的唯一校验（§12.3 R2-1）：`>` 分隔 origin 链、≤4 段、每段
+ *  `v === new URL(v).origin` 且是 http/https 规范形（带 path/query/显式默认端口/about:blank/ftp
+ *  都拒绝）。解析面只看"是否合法"，诊断面要原因类别——同一份判定，不另写第二套。 */
+export function frameChainValueProblem(raw: string): FrameChainValueProblem | null {
+  if (raw === "") return { kind: "empty" };
   const segs = raw.split(">");
-  if (segs.length === 0 || segs.length > 4) return null;
-  const out: string[] = [];
+  if (segs.length > 4) return { kind: "too-long", segments: segs.length };
   for (const seg of segs) {
-    if (seg === "") return null;                    // 空段
+    if (seg === "") return { kind: "empty-segment", segments: segs.length };
     let origin: string;
-    try { origin = new URL(seg).origin; } catch { return null; }
-    if (origin === "null") return null;             // about:blank / file 等非 http(s)
-    if (!origin.startsWith("http://") && !origin.startsWith("https://")) return null;
-    if (seg !== origin) return null;                // 带 path/query/显式默认端口等非规范形
-    out.push(origin);
+    try { origin = new URL(seg).origin; } catch { return { kind: "not-http-origin", segment: seg }; }
+    if (origin === "null") return { kind: "not-http-origin", segment: seg };   // about:blank / file 等
+    if (!origin.startsWith("http://") && !origin.startsWith("https://")) {
+      return { kind: "not-http-origin", segment: seg };
+    }
+    if (seg !== origin) return { kind: "not-canonical", segment: seg };       // path/query/显式默认端口
   }
-  return out;
+  return null;
+}
+
+/** `frame:` 值校验：合法 = 段数组（小写规范 origin），非法 = null。 */
+function parseFrameChainValue(raw: string): string[] | null {
+  if (frameChainValueProblem(raw) !== null) return null;
+  return raw.split(">");
 }
 
 const WITHIN_TAIL_RE = /(?:\s+within:)(#[a-z0-9_\-.:]+)\s*$/;
 const FRAME_TAIL_RE = /(?:\s+frame:)(\S+)\s*$/;
+/** 诊断面的尾缀预扫：与 FRAME_TAIL_RE 同形但允许**空值**（空值 parseHint 同样回退旧形状，
+ *  `describeFrameSuffixRejection` 要能点名"frame: 后没有值"）。 */
+const FRAME_TAIL_VALUE_RE = /(?:\s+frame:)(\S*)\s*$/;
 
 export function parseHint(hint: string): ParsedHint {
   const h = hint.trim().toLowerCase();
@@ -144,5 +166,100 @@ export function parseHint(hint: string): ParsedHint {
   }
   if (["button", "link", "input", "textarea", "select"].includes(rest)) return withSuffix({ kind: "tag", tag: rest });
   return withSuffix({ kind: "bare", token: rest });
+}
+
+/* ------------------------------------------------ 后缀被拒绝的只读诊断（C 批 B8） */
+
+/**
+ * C 批（B8）：**串尾 ` frame:` 形状的尝试未被 parseHint 接受**时，给一行可行动原因；没有尝试 /
+ * 已合法接受 = null。纯字符串、零页面 I/O、不改 parseHint 的返回值语义。
+ *
+ * 为什么需要它：非法 origin / 多尾缀 / 带 path 的值按 R2-5「整组回退」被当成旧形状裸词，运行期
+ * 只会得到 target_not_found 或会话 act 零命中——不点名后缀等于让作者猜。这里把"哪个尾缀、因为
+ * 什么类别没生效"说清楚（消费面：executor 的 target_not_found reason + 会话 act reason；
+ * 页面可用 origin 列表由调用方另行追加）。
+ *
+ * 判定与 parseHint **同一条词法预扫**（`\s+` + 串尾；within 只认 `#...`、frame 值可为空串——
+ * 空值 parseHint 会按旧形状回退，这里也要能点名）。**只报 frame 相关**：只重复 within 的问题
+ * 不归本函数（它没有 frame: 可说），但"frame: 合法却因同串 within 问题被整组回退"要报——
+ * 那正是 frame: 静默失效的一条。
+ */
+export function describeFrameSuffixRejection(hint: string): string | null {
+  // 合法（含与 within 组合）＝ parseHint 已接受，没有"被拒绝"可报。
+  if (parseHint(hint).frameChain !== undefined) return null;
+  const h = hint.trim().toLowerCase();
+  let rest = h;
+  let frameSeen = 0;
+  let withinSeen = 0;
+  let frameProblem: string | null = null;
+  let blockedByWithin = false;
+  for (;;) {
+    const wm = WITHIN_TAIL_RE.exec(rest);
+    const fm = wm === null ? FRAME_TAIL_VALUE_RE.exec(rest) : null;
+    if (wm === null && fm === null) break;
+    const base = rest.slice(0, (wm ?? fm)!.index).trim();
+    if (wm !== null) {
+      withinSeen += 1;
+      // within 自己出问题：parseHint 在这里就整组回退，但我们继续剥（只诊断）——为的是回答
+      // "这一串里到底有没有 frame: 尝试"（`frame:… within:#a within:#b` 的 frame 同样没生效）。
+      if (base === "" || withinSeen > 1) blockedByWithin = true;
+      if (base === "") break;
+      rest = base;
+      continue;
+    }
+    // 值内伪尾缀：`tag[attr=value frame:…]` 里的 ` frame:` 属于**属性值**（base 里有未闭合的
+    // `[`），不是语法后缀——不误报（parseHint 也从不把形状值里的 frame: 当尾缀）。
+    if (hasUnclosedBracket(base)) break;
+    frameSeen += 1;
+    const raw = fm![1]!;
+    if (base === "") {
+      frameProblem = "尾缀前没有 hint 主体（必须写成 `<hint> frame:<origin>`）";
+      break;
+    }
+    if (frameSeen > 1) {
+      frameProblem = "同一串出现多个 frame: 尾缀（至多一次；整组后缀都不应用）";
+      break;
+    }
+    const problem = frameChainValueProblem(raw);
+    if (problem !== null) { frameProblem = frameChainProblemText(problem); break; }
+    rest = base;
+  }
+  if (frameProblem !== null) {
+    return `frame: 尾缀未被应用（${frameProblem}）——整串按旧形状解析，目标大概率落空`
+      + `（命令步 target_not_found / 会话 act 零命中）。修法：写成 \`<hint> frame:<http(s)://host[:port]>\`，`
+      + `\`>\` 链 ≤4 段、每段用规范 origin（不带 path/query/显式默认端口），且一条 hint 只能有一个 frame: 尾缀`;
+  }
+  if (frameSeen > 0 && blockedByWithin) {
+    return "frame: 尾缀未被应用（同一串的 within: 尾缀重复或缺少 hint 主体——R2-5 整组回退："
+      + "任一类后缀超限/非法则所有后缀都不应用）——修法：去掉重复/孤立的 within: 后 frame: 才会生效";
+  }
+  return null;
+}
+
+/** 值问题的人话（有界：值的展示 ≤80 字符）。 */
+function frameChainProblemText(p: FrameChainValueProblem): string {
+  switch (p.kind) {
+    case "empty": return "frame: 后没有值";
+    case "too-long": return `声明 ${p.segments} 段超过上限 4 段`;
+    case "empty-segment": return "链里有空段（\">\" 两侧都必须有 origin）";
+    case "not-http-origin": return `值 ${JSON.stringify(clipForDiagnosis(p.segment))} 不是 http(s) origin`
+      + "（需要 scheme://host[:port]；about:blank/相对值/其它 scheme 都不支持）";
+    case "not-canonical": return `值 ${JSON.stringify(clipForDiagnosis(p.segment))} 不是规范 origin`
+      + "（带 path/query 或显式默认端口等；每段必须 v === new URL(v).origin，如 https://a:443 要写 https://a）";
+  }
+}
+
+function clipForDiagnosis(s: string): string {
+  return s.length <= 80 ? s : `${s.slice(0, 77)}...`;
+}
+
+/** base 里有未闭合的 `[`：后面的 ` frame:` 落在属性值内部，不是语法后缀（值内伪尾缀）。 */
+function hasUnclosedBracket(s: string): boolean {
+  let depth = 0;
+  for (const ch of s) {
+    if (ch === "[") depth += 1;
+    else if (ch === "]") depth = Math.max(0, depth - 1);
+  }
+  return depth > 0;
 }
 

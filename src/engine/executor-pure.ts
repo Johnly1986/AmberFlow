@@ -13,7 +13,7 @@ import {
   type BindingDiagnostics,
   type OptionCandidate,
 } from "./bindings.ts";
-import { actionCapabilities, elemFamily, urlOf, type ActionCapability, type Elem, type ElemFamily, type ElemPool, type FrameGate, type PageLike } from "./extraction.ts";
+import { actionCapabilities, elemFamily, urlOf, type ActionCapability, type Elem, type ElemFamily, type ElemPool, type ExcludedHintProbe, type FrameGate, type PageLike } from "./extraction.ts";
 import { WIDE_POOL_ELEMENTS } from "./extraction.ts";
 import type { CommandDecl } from "./actions.ts";
 import { parseHint } from "./hint.ts";
@@ -498,6 +498,40 @@ export function weakRejectedReason(
     + `a longer single token), (b) set meta.policy.act_hint_tier:"any" to accept weak tiers again `
     + `(today's behaviour: execute + matched_others warning on that step), or (c) remove `
     + `meta.policy.act_hint:"strict" to let the decision model pick instead`;
+}
+
+/**
+ * C 批（§12.3 回捞/门禁适配 / F45）：被排除帧的 `frame_not_allowed` reason（纯函数，离线可断言）。
+ *
+ * 证据三件套必须同时在场，否则作者只会看到"目标不存在"：
+ *   ① 声明目标在**允许帧**里零命中、却存在于被排除帧（只读探测，绝不动作）；
+ *   ② **声明的链**（hint 里的 `frame:` 尾缀；无尾缀明说"未声明"）与**命中帧完整链**
+ *      （`probeExcludedHint.matchedChains`，按链去重、≤4 条，带 origin/frame 下标）并排；
+ *   ③ 两条修法：把命中 origin 加进 `meta.hosts`（该帧进解析面、`frame:` 链才可寻址），
+ *      或把目标/链改到允许帧内的事实。
+ * `probe` 由 `extraction.probeExcludedHint` 产出（I/O 在那一侧）；本函数零 I/O。
+ */
+export function frameTargetStopReason(
+  target: string, hosts: readonly string[], probe: ExcludedHintProbe,
+): string {
+  const declared = probe.declaredChain === undefined
+    ? "declared frame: chain = (none — the target itself declares no frame scope)"
+    : `declared frame: chain = ${probe.declaredChain.join(">")}`;
+  const hitChains = probe.matchedChains.length
+    ? probe.matchedChains.map((m) =>
+      `${m.chain.length ? m.chain.join(">") : "(unknown/originless chain)"} `
+      + `[frame=${m.frame}, origin=${m.origin}]`).join("; ")
+    : `excluded frame(s) ${probe.origins.join(", ")} (full chain unavailable)`;
+  const hits = probe.matches.slice(0, 5)
+    .map((m) => `${m.tag}${m.id ? `#${m.id}` : ""} ${JSON.stringify(m.label)} (frame=${m.frame})`)
+    .join("; ");
+  return `declared target ${JSON.stringify(target)} matched nothing in the allowed frames, but it exists `
+    + `only inside frame(s) outside the declared hosts envelope (${hosts.join(", ")}) — `
+    + `${declared}; hit chain(s): ${hitChains}; read-only matches: ${hits}. `
+    + `Fix: (a) put the matched origin into meta.hosts so that frame joins the parse surface and the `
+    + `declared frame: chain becomes addressable, or (b) change the target / frame: chain to an element `
+    + `inside an allowed frame. 第三方非交互 frame 默认排除（frames_excluded），不需要为此加 hosts；`
+    + `只有声明目标确需该 frame 时才加`;
 }
 
 /**
