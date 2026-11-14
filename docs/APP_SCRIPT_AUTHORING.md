@@ -179,7 +179,7 @@ npx amber run my-app --trace               # 完整运行
 - **产出守卫（D-2·硬要求）**：数据类任务（extract/collect 产出到 records/dataset/交付文件）**必须**声明产出下限并在流程收口断言——产出 < 下限时 `ctx.fail("output_underflow", …)`，**绝不以「ok:true + 0 条数据」交差**（审核报告 D-2：PASSED+0 数据是最危险的假绿形态）。`amber apps new` 骨架已内置模板；dry 面 extract 恒 `[]`，守卫只在真跑生效（apps check 不受影响）。注意事项：生效判定必须与产出动作不同源（审核报告 D-8——不许拿被测动作自己的 accurate 自证生效）。
 - **dry 真执行语义（消歧义）**：`apps check` / `run --dry-run` 会**真实执行 flow 脚本体**——浏览器调用被合成、不访问网络（step/arrive 恒 ok、done 不评估），但脚本自身的**文件/进程副作用会真的发生**（写文件、Node IO 都是真的）。`apps check` 输出一行提示（JSON 面 `data.dry_semantics`）。两面判据用 **`ctx.runtime.dry`**（dry/replay 恒 `true`、真跑恒 `false`）；**`epoch === 0` 不再是 dry 判据**——真跑首个观察前 epoch 同样是 0。
 - **inspect vs ctx.observe（消歧义）**：`inspect` 是**独立一次性会话**（新开浏览器、不 attach 运行会话），适合入口页/任意 URL 的离线侦察；**会话内实时看当前页**用应用内的 `ctx.observe()`（免费只读、不改页面；dry 下 `elements=[]` 只有 counts——形状校验用）。
-- **learn 录制 hint vs inspect 候选（口径差异）**：learn 接受的 `hint` 是六形状闭集且**属性白名单只认 `test`（→data-test）、`type`、`aria-label`（label 别名）**参与匹配（完整池面白名单另含 href/name/id/role/near，见 `amber schema ctx` 的 hints 节）；class/title/placeholder 永不命中。`inspect` 展示的 `hint_candidates` 是引擎经**同一个** `hintMatch` 在当页自证过的结果——它输出的就是六形状之一，可直接照抄进 `act: ctx.hint(...)` 或 learn 的 `hint`；自己从页面 HTML 里挑的属性则必须先过白名单再落笔。
+- **learn 录制 hint vs inspect 候选（口径差异）**：learn 接受的 `hint` 是六形状闭集（可带 `within:#id` / `frame:<origin>` 尾缀，同一 `parseHint`）且**属性白名单只认 `test`（→data-test）、`type`、`aria-label`（label 别名）**参与匹配（完整池面白名单另含 href/name/id/role/near，见 `amber schema ctx` 的 hints 节）；class/title/placeholder 永不命中。`inspect` 展示的 `hint_candidates` 是引擎经**同一个** `hintMatch` 在当页自证过的结果——它输出的就是六形状之一（跨帧同名时可能是 `<label> frame:<origin>` / ≤4 段链，同名组可能是 `<label> within:#id`），可直接照抄进 `act: ctx.hint(...)` 或 learn 的 `hint`；自己从页面 HTML 里挑的属性则必须先过白名单再落笔。
 - `inspect` 只读：标题、URL、有界元素、候选 hint；不点击、不输入、不调模型。元素池视图**只含可行动元素**——写 `exists` / `text` 类完成信号前先 `inspect --probe "<selector>"`（可重复，最多 10 个；只读返回存在数与文本摘录——**覆盖主 frame + 可达子 frame（≤6）**：主 frame 命中在 `count/texts`，子 frame 命中在 `frames[]`（`frame` 下标 + `origin` + 命中数与文本），跨 iframe 元素不再被探测面静默漏掉；`--json` 落 `probes[]`），别用 raw HTTP 之外的口子。**任何选择器——包括本文档与上游示例给的——落笔前都要对目标页实证一次**（02 轮 C6 的教训）。快览用 `--summary`（人话紧凑：元素仅前 12 条、hints 前 2 条、href ≤40 字符、总行数有界；`--json` 面不变）。
 - **P0-A inspect 观察面修复**：`--json` 的 `elements[].label` 现在是**完整**标签（不再截断成 40 字前缀；超过 200 字符时 `label_truncated:true` 只表示引擎**匹配口径** `full_label` 只取前 200，输出本身是完整的），并新增 `class_names`（有界：≤8 个、每项 ≤40 字符）与顶层 `saw_at`/`wait_ms`。`--wait-ms <n>`（默认 0，上限 5000）在 `load` 完成 + 3s 交互计数稳定轮询**之后**再等 n 毫秒，给 `setTimeout`/异步接口补渲染的元素；`saw_at` 是真正读取 DOM 的时刻（人类输出同样打印「观察时刻 …」）。既有字段语义不变，只增字段。
 - **AX 证据源（只读参照面，不进决策）**：`inspect --json` 新增 `ax` 块——浏览器自己算的可访问性树。`nodes[]` 每条 `{role,name,focusable,disabled}`（展示前 50；内部上限 200，按“可交互→有名→其余”+ 文档树序），另有 `interactive_count`、`counts_by_role`（全树 role 计数）、`interactive_counts_by_role`、`total_nodes` 与 `pool_size`/`not_in_pool`。**可交互口径**：原生可聚焦/可激活的 AX role（button/link/textbox/checkbox/radio/combobox/listbox/menuitem/tab/slider/switch/searchbox/spinbutton/summary 等；Chromium 对 `<summary>` 报 `DisclosureTriangle`）；**`option` 有意不计入（即使浏览器报 focusable=true）**——select 内部的 option 由引擎 `select` 动作承载（不是池里的独立动作目标），计入只会让 `not_in_pool` 被每个 select 的 N 个 option 灌成噪声；原始 role 仍在 `nodes`/`counts_by_role` 可见，或浏览器报告 `focusable=true`（例如 `div[tabindex=0]` 的 generic）；文档根（RootWebArea）即使 focusable 也不算，`generic/none/group` 只有 focusable 才算；静态文本叶子不进证据。`not_in_pool` 是**近似**口径：AX 可交互且有名字的节点中，name 与池元素 label 归一化后全等/互相包含算已进池，否则计未进池（空名节点不参与，看 `interactive_count`）。**边界**：AX 是“浏览器认为页面有什么语义”，不是“引擎能指向/可点击”的断言——池仍是选择器闭集，AX 不进池构成、hint 匹配、模型视图或任何动作/运行路径；取树只发生在 `inspect`（每页一次，超时 ≤3s），失败降级为 `ax.available=false`（人类输出不打印该行），其余 inspect 输出照常。
@@ -286,7 +286,8 @@ export async function flow(ctx) {
   `clickAt`（U7）在**元素相对**坐标上点击：`ctx.command("clickAt", "#cv", ctx.value.slot("coords"))`，值的规范形是声明绑定的字符串 `"x,y"`（非负整数或有限小数，允许空白；原点 = 元素 padding box 左上角，Playwright `locator.click({position})` 语义）——用于 canvas 这类"进了池但只能点中心"的自绘控件。严格解析，坏格式（`center` / 百分比 / 负偏移 / `x;y` / 多余段等）= 结构化 `config_error` 并点名合法格式，不猜；只对 click 族元素成立（非 click 族 = `action_unsupported`）；执行前用元素 bbox 校验 `0 <= x < width`、`0 <= y < height`，越界 = 结构化 `config_error`（reason 带实测 width/height）。证据 `executed_actions` 记 `{op:"clickAt", position:{x,y}, changed}`（`how:"clicked"`），`changed`/inert 沿用 click 的快照 diff 口径；`force` 语义同 click，风险面沿用 click 的关键词/模型风险票。dry/`apps check` 只校声明形状，不解析坐标。
   `skip` = 按定义解决的零动作命令：全部命令解决后引擎会**评估一次 done 信号**再判成败——"导航由 arrive 完成、本步只验证到达"的守卫步合法可用（04-A 修复；此前 skip 步的 done 从未被评估，必报 `done_not_held`）。守卫步写法：`act: [ctx.command("skip")]`（完整可跑示例见 `examples/apps/01-basic-step` 步骤②）。
   不在能力面内的 op 会得到 `action_unsupported`，目标歧义是 `target_ambiguous`，目标不存在是 `target_not_found`。
-- **act hint 是六形状语法闭集**（唯一解析器 `src/engine/hint.ts`，语法**描述**的唯一出处 `src/engine/grammar-prompt.ts`，`npm run prompt-hit` 校验示例可命中、报错/提示词/桥描述不漂移）：`#id` ｜ `tag[attr~substr]` ｜ `tag~token` ｜ `tag[attr=value]`（值去引号、全小写折叠）｜ 角色词 `button|link|input|textarea|select` ｜ 裸词（按 label 匹配）。属性名按池字段匹配：test→data-test、type→input_type、aria-label→label、href、name、id、role、near；aria-label 是 label 的别名（提取期已并进 label），label/href 按完整值（≤200）匹配（label = full_label + label、href = href_full + href 双底座），class、title 等不在池字段模型里，永不命中（本句由 grammar-prompt 的 ATTR_MATCH_MODEL_TEXT 生成，prompt-hit 逐字校验，勿手改）。**容器/后代 CSS（如 `#outer input`）不是语法错误——会被解析成一个永不命中的形状**；命令空间的 `target_not_found` reason 附闭集提示，而 act hint 落空会**静默回退模型决策**、报 `low_confidence` 不附提示——写 hint 前先 `inspect` 拿验证过的 `hint_candidates`。
+- **act hint 是六形状语法闭集**（唯一解析器 `src/engine/hint.ts`，语法**描述**的唯一出处 `src/engine/grammar-prompt.ts`，`npm run prompt-hit` 校验示例可命中、报错/提示词/桥描述不漂移）：`#id` ｜ `tag[attr~substr]` ｜ `tag~token` ｜ `tag[attr=value]`（值去引号、全小写折叠）｜ 角色词 `button|link|input|textarea|select` ｜ 裸词（按 label 匹配）。属性名按池字段匹配：test→data-test、type→input_type、aria-label→label、href、name、id、role、near；aria-label 是 label 的别名（提取期已并进 label），label/href 按完整值（≤200）匹配（label = full_label + label、href = href_full + href 双底座），class、title 等不在池字段模型里，永不命中（本句由 grammar-prompt 的 ATTR_MATCH_MODEL_TEXT 生成，prompt-hit 逐字校验，勿手改）。**容器/后代 CSS（如 `#outer input`）不是语法错误——会被解析成一个永不命中的形状**；命令空间的 `target_not_found` reason 附闭集提示，而 act hint 落空会**静默回退模型决策**、报 `low_confidence` 不附提示——写 hint 前先 `inspect` 拿验证过的 `hint_candidates`。六形状均可再带 `within:#id` 与/或 `frame:<origin链>` 尾缀（见下条）。
+- **尾缀限定（`within:#id` / `frame:<origin链>`）**：两种后缀可组合、顺序无关、各至多一次。`frame:` 值是 `>` 分隔的 origin 链（外→内、≤4 段），每段必须是 `scheme://host[:port]` 的 http(s) **规范 origin**（`v === new URL(v).origin`；带 path/query/fragment/显式默认端口即非法，`https://a:443` 要写成 `https://a`）；末段 = 元素所在帧自身 origin，声明链 = 帧完整链（含主帧 origin）的后缀——同源父子靠链长区分（`frame:o` 命中父、`frame:o>o` 仅子）。**未知 origin 帧**（`about:blank`/srcdoc 的 `null`、空串）不可被任何 `frame:` 命中。解析是**串尾词法预扫 + 循环剥离**：只认「前置空白 + 串尾」，任一类超限/值非法/空段 ⇒ **整组后缀都不应用**（按原始串解析 → 落空 = 显式失败，绝不半剥；值内的伪后缀不受影响）。示例：`Close frame:https://ogs.google.com`、`保存 within:#dialog frame:https://checkout.example.com`；跨帧仍歧义时先用 `inspect`/`ctx.observe` 的 `frame:` 候选，别猜 origin。
 
 #### 候选窗口与分桶（A2：窗口是**有界快照**，不是"页面没有"）
 
@@ -682,7 +683,7 @@ frame），允许帧已成立 = 正常成功。其余情况步骤照常，只在
    `frame_origin` / `frame_path`（祖先 origin 链，外→内；主帧 `frame_path` 省略）就是 `frame:` hint
    的帧链底座——`frame_path` 省略 = 主帧，两字段都缺 = 未知 origin 帧（about:blank/srcdoc，
    不可被 `frame:` 命中）。
-2. **定位元素**：池 ref 是 `f<fi>:eN`（`<fi>` = 真实帧下标；P0-D 排除帧不重编号）；hint 六形状在
+2. **定位元素**：池 ref 是 `f<fi>:eN`（`<fi>` = 真实帧下标；P0-D 排除帧不重编号）；hint 六形状（可带 `frame:` 尾缀）在
    **允许帧**上统一匹配（唯一性跨全部允许帧计算——同名跨帧不一定报 `target_ambiguous`：同签名会被
    `firstIfSame` 合并、run 命令步直接执行一个，只有会话 act 会停；用 `frame:` 尾缀显式区分最稳），
    证据 `ambiguity.candidates[].frame` 给帧下标、`frame_origin` 给候选所在帧 origin；
@@ -692,8 +693,10 @@ frame），允许帧已成立 = 正常成功。其余情况步骤照常，只在
    `<label> frame:<自身 origin>`；单段仍不唯一且 `frame_path` 非空时给完整链
    `<label> frame:<祖先…>自身>`（含自身 ≤4 段，与 `parseHint` 同口径；更长不生成）。每条候选都由
    同一个 `hintMatch` 自证，可照抄。**CLI 两个消费面**：`plan check --probe` 的 target_hint 核对
-   走同一套解析（`findByHint` 先 `parseHint` 再按声明链过滤池），带 `frame:` 的目标能正确命中；
-   `amber start --target` 则对**帧限定目标结构化拒绝**——该面的演示点击是主帧 `page.click(...)`，
+   先 `parseHint` 再按声明链过滤池（`findByHint`）——**身份形状**（`#id` / `[data-test=…]` / `[id=…]` /
+   `[name=…]`）与 `induceHint` 产物的 `frame:` 目标能正确命中；该 CLI 的匹配器**不是** `hintMatch`
+   六形状分档语义（裸词 / `attrSubstr` / `nearToken` 等仍按旧匹配器，可能误报未命中——既有边界，
+   见 §11）。`amber start --target` 则对**帧限定目标结构化拒绝**——该面的演示点击是主帧 `page.click(...)`，
    帧内目标会点错/超时，退出码沿用该 CLI 既有失败口径（2），请改用 app/run 或 plan 面。
    `apps check` 另对非法 `frame:` 值与不在 `meta.hosts` 的 origin 出 stderr 静态提醒
    （`apps check` 的 lint 通道：不进 problems、不改 VALID/exit；拿不到 `meta.hosts` 时只做值形状检查）。
@@ -1037,7 +1040,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `arrive_signal_not_held` | `ctx.arrive` 导航完成但 done 信号在超时内未成立 |
 | `precondition_skipped` | `when` 不成立，这一步没有执行（`ok:false`，trace 状态 `skipped`；同样计一次执行预算）——脚本按 stopCode 分支继续，不是失败 |
 | `page_not_ready` | 元素池为空，页面还没稳定；等页面 ready，或修 done 信号 |
-| `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标。`meta.policy.act_hint:"strict"` 下 act hint 解析链全落空也用它（reason 显式写 `act_hint="strict"`，**不再回退模型自由选**；缺省 `widen` 才回退）。`meta.policy.act_hint_tier:"strong"` 下**弱档胜出被判未命中**（bare 词前缀/词包含、attrSubstr loose 子串）同样报它：strict 时 reason 写明弱档被拒 + 候选≤3 + 两条改法（收窄成强形状 / 回 `act_hint_tier:"any"`）；缺省 `any` 才有 `matched_others` 警告。声明目标（act hint/命令）在池+ADMIT+FW8 全落空且**未声明** `target_resolution` 时，reason 追加一行 DRF 提示（自绘控件可声明 `meta.policy.target_resolution:"declared"` 走 attr/文本精确匹配）；**已声明** `"declared"` 的同场景走 DRF、不再提示（避免噪音） |
+| `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标。`meta.policy.act_hint:"strict"` 下 act hint 解析链全落空也用它（reason 显式写 `act_hint="strict"`，**不再回退模型自由选**；缺省 `widen` 才回退）。`meta.policy.act_hint_tier:"strong"` 下**弱档胜出被判未命中**（bare 词前缀/词包含、attrSubstr loose 子串）同样报它：strict 时 reason 写明弱档被拒 + 候选≤3 + 两条改法（收窄成强形状 / 回 `act_hint_tier:"any"`）；缺省 `any` 才有 `matched_others` 警告。声明目标（act hint/命令）在池+ADMIT+FW8 全落空且**未声明** `target_resolution` 时，reason 追加一行 DRF 提示（自绘控件可声明 `meta.policy.target_resolution:"declared"` 走 attr/文本精确匹配）；**已声明** `"declared"` 的同场景走 DRF、不再提示（避免噪音）。**C 批起**：若 hint 带 `frame:` 尾缀，reason 末尾追加该尾缀的拒绝原因（多尾缀 / 非法 origin / 空段 / >4 段 / 带 path·query·显式默认端口）或合法但未命中时**页面实际可用 origin**（允许帧去重 ≤6、主帧也列）；无 `frame:` 参与时旧 reason 逐字节不变 |
 | `target_ambiguous` | 目标命中多个不同候选；收窄 hint。`target_resolution:"declared"` 下 DRF 的两个可见文本/属性匹配同样报它（候选 tag/文本/frame/visible 在 reason 与 `skipped_actions`） |
 | `action_unsupported` | 目标存在但声明的动作 op 不在元素能力面内；换动作或换目标。DRF 首版只允许 `click`/`scroll`/`hover`——对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` 也报它（reason 明说首版限制） |
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |
@@ -1064,7 +1067,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 **会话面 `target_ambiguous`（A2，缺省零动作）**：`amber session` 的 `act` 用与命令步**同一个**歧义谓词
 （`hintCandidates` 非空 && `decided === null` && `refs.length > 1`）——歧义即**不执行**，返回
 `{ok:false, code:"target_ambiguous", executed:false, ambiguity}`；`ambiguity` 有界（候选 ≤5；label/class/near
-≤40、ref/tag ≤16、`suggested_hint` ≤200（B 批：可容 4 段 `frame:` 链）、候选另有 `frame_origin`（引擎给才有）；
+≤40、ref/tag ≤16、`suggested_hint` ≤200（B 批：可容 4 段 `frame:` 链）、候选另有 `frame_origin`（引擎 ≤120，桥 clip ≤60；引擎给才有）；
 `would_act_ref`/`candidates_total`/`truncated`；`source:"dom_fallback"`
 时不给 near/suggested_hint）。`--on-ambiguous act` 恢复旧的"直接执行可行动优先第一个候选"。**run 面 /
 命令步 / 决策步的行为与产物逐字节不变**（dry/replay 不调 `actOnce`）；证据只陈述事实，**不得据此猜测**
@@ -1101,6 +1104,11 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 - **新标签页不自动跟随**（未声明 `newTab` 时）：A5 只提供显式 `ctx.tabs()` / `ctx.switchTab(...)`；
   动作打开的新 tab 不会自动成为引擎当前页。**F2 起声明 `ctx.step(..., { newTab: { urlContains } })`
   的步由引擎自动跟随 + 去重**（见 §4.9）。
+- **`frame:` 帧限定的已知边界**：`framesOf` ≤6（主 frame + ≤5 子 frame）；池窗口 40/120 跨帧共享、
+  主 frame 优先；同签名跨帧仍由 `firstIfSame` 合并（run 命令步 / act hint 直接执行一个，会话 act 停）；
+  `read`/`extract`/`collect`/`judge` 无帧限定（`locatorAnyFrame` 逐帧 OR）；`about:blank`/srcdoc
+  等未知 origin 帧不可寻址；`within` 语义链未做（E 批）；`plan check --probe` 只覆盖 `findByHint`
+  旧形状集（身份形状 + `induceHint` 产物），`amber start --target` 拒绝帧限定目标。
 
 ## 12. 扩展配方（改引擎的人看）
 

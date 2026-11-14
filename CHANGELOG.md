@@ -4,7 +4,9 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased] — frame:<origin> 帧限定 hint（A 批：解析 / 匹配 / 数据面 / 回捞 / 契约）
+## [Unreleased] — frame:<origin> 帧限定 hint（解析/匹配/数据面/候选/诊断/契约）
+
+### A 批（解析 / 匹配 / 数据面 / 回捞 / 契约）
 
 - **【背景】** 多 iframe 页面里同名元素跨帧无法用现有 hint 表达：`within:#id` 只能同帧内
   锚定（iframe 内容的祖先链不含宿主页 iframe 元素）、池 ref `f<fi>:eN` 不是动作地址。
@@ -54,9 +56,9 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   `HINT_FRAME_SUFFIX`（与 HINT_WITHIN_SUFFIX 同构）+ import 时自证（单段/2 段链剥离、
   双 frame/非法 origin 整组拒绝、within+frame 两种顺序）；prompt-hit grammar 组新增两条断言。
 - **【验证】** 离线断言全绿（parse 全矩阵 34 条 / 匹配层 18 条 / 数据面+回捞 14 条，
-  含 fake parentFrame 帧链）；`npm run typecheck`、`npm run prompt-hit` 通过。浏览器级
-  验证（双端口跨源 fixture、无后缀 run/trace/result/dry 逐字节对照、observe 候选照抄）
-  留待专项测试轮。
+  含 fake parentFrame 帧链）；`npm run typecheck`、`npm run prompt-hit` 通过。浏览器级：
+  双端口跨源 fixture（跨源单段/2 段链命中、srcdoc 未知 origin 不可寻址、无后缀跨帧唯一透明、
+  跨帧同名同签名会话 act 停机、hosts 信封外子帧不动作）。
 
 ### B 批（候选生成 / 观察面 / 结构证据 / bridge 透传 / 契约文字）
 
@@ -85,13 +87,20 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   契约文字 F41（observe 字段 + `includeStructure`）、F54（ElementView 字段/上限）、F55
   （候选 `frame_origin`、`suggested_hint≤200`）、F70 truth 同步；`docs/APP_SCRIPT_AUTHORING.md`
   多 frame 速查与 `docs/AGENT_INTERFACE.md` 同步。
+- **【验证】** 离线断言 98 条（候选自证/链升级/无 iframe 逐字节/证据上限 round-trip/
+  `structure_path` 截断/模型面剥离/bridge 常量）；`npm run typecheck`、`npm run prompt-hit`、
+  `npm run schema:check`、`npm run check` 全绿。浏览器级：inspect/observe 给出单段与 3 段链候选、
+  链候选照抄 session act 命中孙帧（`f3:e0`）、srcdoc 未知 origin 报 opaque 且不给 frame 候选、
+  无 iframe 页面对照无 frame 候选。
 
 ### C 批（findByHint / `amber start --target` / 链证据 / 拒绝诊断 / apps check lint）
 
 - **【回捞/CLI 适配（R2-4/B9）】** `findByHint`（`plan check --probe` 与 `amber start --target`
   共用的旧匹配器）改为**先 `parseHint` 再按声明链过滤池**：`#id` / `[attr=v]` / `induceHint`
-  既有匹配路径不变，只是池先按 `frameScopeMatches` 过滤；`frame:` 目标不再被 `plan check --probe`
-  误报未命中。**无后缀路径逐字节不变**（`frameChain` 未定义时池就是原池、base 就是原串；
+  既有匹配路径不变，只是池先按 `frameScopeMatches` 过滤；**身份形状（`#id` / `[data-test=|id=|name=]`）
+  与 `induceHint` 产物**的帧内目标不再被 `plan check --probe` 误报未命中（该 CLI 的匹配器不是
+  `hintMatch` 六形状分档语义，裸词/`attrSubstr`/`nearToken` 仍是既有边界——本次未换匹配器）。
+  **无后缀路径逐字节不变**（`frameChain` 未定义时池就是原池、base 就是原串；
   与 git HEAD 旧实现 85 例差分一致）。
 - **【`amber start --target` 帧限定结构化拒绝】** 该 CLI 的演示点击是**主帧** `page.click(...)`
   （`selectorForHint` 也只产出主帧 CSS），带 `frame:` 的目标会点错/超时。纯函数
@@ -125,9 +134,58 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   `amber start --target` 结构化拒绝，stopCode 表 `frame_not_allowed` 行补链证据。
 - **【验证】** 离线断言 184 条全绿（findByHint 链过滤 18 / start-target 拒绝 12 / describe 全矩阵
   + parseHint 差分 102 / probe 链证据 + reason 文案 31 / hint-lint 21），
-  `npm run typecheck`、`npm run prompt-hit` 通过。浏览器级（真实页/双端口 fixture 的
-  `plan check --probe` frame: 目标、`amber start --target` 拒绝、被排除帧的 frame_not_allowed
-  链证据）留待 lead 浏览器级验证。
+  `npm run typecheck`、`npm run prompt-hit` 通过。浏览器级：`plan check --probe` 正确链命中 +
+  错链诊断、`amber start` 拒绝、被排除帧的 `frame_not_allowed` 链证据与零动作、会话 act 错 origin
+  reason 带可用 origin。
+
+### D 批（文档与契约收尾）
+
+- **【规格】** `docs/FRAME_SCOPE_HINT_PLAN.md` 标题/状态改为「v1.2 · 已实施」，新增 **§13 实施记录**：
+  A=`bc400ca` / B=`3ce26fa` / C=`5c25ef5` / D=本批；每批实际改动面、实施中额外修复的缺陷
+  （会话 `_frameHosts` 门禁补漏、F64 hosts 补漏、poolView 映射修复、`findByHint` 旧匹配器边界）、
+  「未做/延后」清单与验证证据；§3.2/§4/§5/§7/§8/§9 的 v1 旧口径按 D2 与已实施状态回写。
+- **【作者文档】** `docs/APP_SCRIPT_AUTHORING.md`：hint 语法主段补 `within:#id` / `frame:<origin链>`
+  两种尾缀（≤4 段、每段规范 origin、未知 origin 不可寻址、串尾预扫+整组回退）；learn/inspect 候选
+  口径补尾缀；多 frame 速查明确 `plan check --probe` 只覆盖 `findByHint` 旧形状集（身份形状 +
+  `induceHint` 产物，非 `hintMatch` 全语义）；stopCode 表 `target_not_found` 补 frame 拒绝证据、
+  `frame_not_allowed` 核对；§11 增加 `frame:` 已知边界。
+- **【Agent 接口】** `docs/AGENT_INTERFACE.md` 新增 **§3.2 观察面元素投影合同**（ElementView 字段/
+  上限：`hint_candidates` ≤6×≤200、`frame_origin`/`frame_path`、`structure_path` ≤160 仅诊断、
+  `includeStructure`、行数 cap 60/200、`ambiguity` 候选字段与 `suggested_hint` ≤200/`frame_origin`
+  ≤120（桥 ≤60））；inspect/observe 的元素行字段与差异同处对齐。
+- **【会话文档】** `docs/INTERACTIVE_SESSION.md` 核对无 ≤80 旧口径；ambiguity 候选行补
+  `frame_origin` 引擎 ≤120 / 桥 clip ≤60 的上限口径。
+- **【CLI 帮助】** `src/cli/registry.ts` 的 `inspect`/`session` flow 与 `plan --probe` 旗标补
+  `frame:<origin>` 提示（只改帮助字符串，无行为变更）。
+- **【契约文字】** `schema-gen.ts` 的 `HINT_GRAMMAR.within_suffix` 补「可与 `frame:` 组合（两种顺序、
+  取交集）」；F70 的 `findByHint` 表述改为如实的身份形状/`induceHint` 边界；骨架 cheat sheet 的
+  hint 行补尾缀。`dist/schema/ctx.json` 重生成（gitignored），`npm run schema:check` 绿。
+- **【验证】** `npm run typecheck` / `npm run prompt-hit` / `npm run schema:check`；D 批只改文档与
+  契约文本，**无运行时代码行为改动**。
+
+### 已知边界 / 未做（A–D 批后的诚实清单）
+
+- **`within` 语义链（E 批）**：未做，独立回退单元。合成池（hintLookup/A3/DRF/FW8）没有
+  `anchor_ids`，FW8/F64 不看 within、DRF text 忽略 within；E 批前置修复见规格 §12.4。
+- **跨帧同签名不合并**：未做（需独立立项 + 开关）。`esig`/`firstIfSame` 的签名不含 frame 字段，
+  同 tag/label/href/data-test 的跨帧元素仍可能被 `firstIfSame` 合并；run 命令步 / act hint 直接
+  执行一个，会话 act 因 `hintCandidates.decided` 不暴露该裁决而停。
+- **`read`/`extract`/`collect`/`judge` 帧限定对称化**：未做。`locatorAnyFrame` 逐帧 OR，无法指定帧；
+  本方案只服务 act hint / 命令 target。
+- **>6 帧 / 每帧池配额**：未做。`framesOf ≤6`；池窗口 40/120 跨帧共享、主 frame 优先；
+  `frame:` 落空时 reason 列允许帧 origin（去重 ≤6）。
+- **`about:blank`/srcdoc**：本期不可寻址（未知 origin → 不可被任何 `frame:` 命中）；`frame:` 只做
+  匹配，不是安全判定（门禁是 hosts）。
+- **帧下标链 / nth-child / XPath / iframe 选择器锚**：不做（漂移 + 破坏 hint 封闭集）。
+- **`plan check --probe` 的匹配边界**：`findByHint` 只支持 `#id` / `[data-test=|id=|name=]` /
+  `induceHint` 产物；C 批只补 parseHint + 帧链过滤，**不是** `hintMatch` 六形状分档。`amber start
+  --target` 对帧限定目标结构化拒绝（主帧 `page.click`）。
+- **证据上限合同变更（已记账）**：`AMBIGUITY_HINT_MAX` 80→200、桥 `suggested_hint` 80→200、
+  `HINT_MAX_CHARS` 160→200；新增 `FRAME_PATH_MAX_ITEMS=4` / `FRAME_PATH_SEGMENT_MAX_CHARS=64` /
+  `STRUCTURE_PATH_MAX_CHARS=160`。引擎歧义 `frame_origin` ≤120，桥 clip ≤60。
+- **`structure_path`**：仅诊断（inspect 恒开 / observe `includeStructure` opt-in），不进模型面、
+  歧义证据或 hint 自证。
+- **`within` 在回捞面**：DRF text 完全忽略、FW8/F64 不看 within（R2-8），本期如实保留，E 批前置修复。
 
 ## [Unreleased] — inspect --probe 跨 frame 探测（iframe 元素不再静默漏检）
 

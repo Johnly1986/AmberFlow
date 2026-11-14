@@ -49,7 +49,7 @@ apps list → app_show（路径 + 当前源码）→ 编辑 app.mjs
   脚本两面判据用 `ctx.runtime.dry`（dry/replay `true`、真跑 `false`）；`epoch === 0` 不作 dry 判据。
   `app_create` 的骨架含「卡点→能力」cookbook 速查段；会话内实时观察用 `ctx.observe()`。
 - `inspect` 只读：标题、URL、有界元素、候选 hint；`--json` 另带只读的可访问性树证据块 `ax`（浏览器 AX role/name/focusable/disabled + `not_in_pool` 近似口径，不进池/匹配/模型/运行路径）；不点击、不输入、不调模型。**inspect 是独立一次性会话**（新开浏览器、不 attach 运行会话）——会话内实时看当前页用应用内 `ctx.observe()`。元素行带 `frame_origin`/`frame_path`（帧链）；`hint_candidates` 在多 frame 同名场景会给 `<label> frame:<origin>` 或 ≤4 段完整链候选；`structure_path`（若出现）只是诊断证据（`structure_unstable:true`，动态页面可能失效）——**不是 hint，不可照抄**。
-- **learn 录制 hint vs inspect 候选**：learn 的 `hint` 是六形状闭集、属性白名单只认 `test`（→data-test）/`type`/`aria-label`；inspect 的 `hint_candidates` 是引擎经同一个 `hintMatch` 自证过的可照抄结果（输出的就是六形状之一）。inspect 候选可直接抄进 act/learn；自己挑的属性先过白名单。
+- **learn 录制 hint vs inspect 候选**：learn 的 `hint` 是六形状闭集（可带 `within:#id` / `frame:<origin>` 尾缀，同一 `parseHint`）、属性白名单只认 `test`（→data-test）/`type`/`aria-label`；inspect 的 `hint_candidates` 是引擎经同一个 `hintMatch` 自证过的可照抄结果（输出的就是六形状之一；跨帧同名时可能是 `<label> frame:<origin>` / ≤4 段链，同名组可能是 `<label> within:#id`）。inspect 候选可直接抄进 act/learn；自己挑的属性先过白名单。
 - `run --max-steps N` 是**执行预算**，不是“从第 N 步开始”：脚本按自己的控制流执行，
   用满预算时以 `budget_exceeded` 停下，结果带已执行步骤与 trace。
 - `run --trace` 把每个 `ctx.step` / `ctx.arrive` 的 `id`、`desc`、URL、结果带进 JSON。
@@ -391,6 +391,31 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 
 - 指引**只提示、不自动切换**，也不含任何密钥。走桥的场景请优先用 `amberflow_run`：桥注入的是
   部署配置，CLI 直跑读的是另一份用户配置。
+
+### 3.2 观察面元素投影合同（ElementView）与证据上限
+
+`amberflow_inspect` 与 `amberflow_session op:"observe"` 的元素行共用
+`integrations/dsh-bridge/src/element-view.ts` 的**同一份投影合同**（单一出处，schema F54）：同形同义，
+只有信封不同——inspect 是一次性无状态面（`url` 入参、顶层 `element_count`/`ax`/`advisories`/`window`），
+observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,omitted}`，多帧另有 `frame_counts`）。
+
+| 字段 | 上限 / 口径 | 说明 |
+|---|---|---|
+| `ref` | — | 展示/对账锚：inspect=`eN`（池 ref），observe=`oN`（观察序号）。**不是动作地址**；act/read 只认 hint 字符串 / CSS。 |
+| `hint_candidates` | ≤6 条 × ≤200 字符 | 每条经同一个 `hintMatch` 自证「恰好唯一命中」，可照抄；跨帧同名时可能是 `<label> frame:<origin>` 或 ≤4 段链候选，同名组可能是 `<label> within:#id`。 |
+| `label` / `label_truncated` | ≤200（匹配口径 `full_label`） | `href`/`href_full` ≤160；`class_names` ≤8×40；`why_not_admitted` ≤120；role/id 等短标识 ≤60。 |
+| `frame` | 0 = 主 frame | 对应 `frames[]` 下标；observe 多帧另有 `frame_counts:[{index,url,elements}]`（单帧不出现）。 |
+| `frame_origin` / `frame_path` | origin 桥 ≤60（引擎歧义证据 ≤120）；path ≤4 段×64 | 帧链底座：`frame_path` 省略 = 主帧；两字段都缺 = 未知 origin 帧（about:blank/srcdoc，不可被 `frame:` 命中）。 |
+| `structure_path` / `structure_unstable` | ≤160 | **仅诊断**：inspect 面默认输出（本来就是诊断面）；`ctx.observe({includeStructure:true})` / 桥 `include_structure:true` 时出现。动态页面会失效，**不是 hint、不可照抄**，不进模型面/歧义证据。 |
+| `admitted` / `why_not_admitted` | — | observe 面的准入诊断；inspect 面不出现（元素本来就来自池）。 |
+
+- 行数 cap：缺省 60、硬上限 200（inspect 参数 `max_elements`，observe 参数 `max`）；observe 元素硬上限
+  200、帧上限 ≤6。缺键 = 该面引擎未提供，桥**透传不补算**。
+- `ambiguity`（会话 `act` 歧义停，A2/F55）：`target ≤120`、`source`、`tier`、`would_act_ref`、
+  `candidates_total`/`truncated`，候选 ≤5 行（`ref`/`tag`/`role` ≤16、`label`/`class`/`near` ≤40、
+  `frame`、`frame_origin`（引擎 ≤120，桥 clip ≤60）、`same_label`、`suggested_hint` ≤200——B 批后
+  可容 4 段 `frame:` 链）。`source:"dom_fallback"` 不给 `near`/`suggested_hint`。判据与 run 命令步
+  同一份 `hintCandidates` 谓词，**run 面不受影响**。
 
 ---
 

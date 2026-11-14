@@ -1,7 +1,8 @@
-# 帧限定 hint：`frame:<origin>` 落地方案（v1，待架构评审）
+# 帧限定 hint：`frame:<origin>` 落地方案（v1.2 · 已实施）
 
-> 状态：草案 · 评审对象 · 目标版本：下一引擎批次
-> 关联：F45（frame 门禁）、F41（observe 合同）、F64（#id 直查）、F69（within:#id）、E3 同构
+> 状态：**已实施**（A/B/C/D 四批，2026-11-15；提交号与每批范围见 §13）
+> 规格版本：v1.2（2026-11-14 两轮架构评审；§11/§12 为修订记录，§13 为实施记录）
+> 关联：F45（frame 门禁）、F41（observe 合同）、F54/F55（桥/歧义证据）、F64（#id 直查）、F69（within:#id）、F70（帧限定尾缀）、E3 同构
 > 前置已落地：inspect `--probe` 跨 frame 探测（e2071bc）、suggestHints within 候选（3636cb1）
 
 ## 1. 背景与问题
@@ -24,7 +25,7 @@
 4. 默认行为**逐字节不变**（无后缀 hint 走原路径）。
 
 **非目标（本期不做，明确 out of scope）**
-- 嵌套帧链限定（`frame:parent/origin` 或链式 `frame:`）——需要帧链设计，单独立项；
+- 多个 `frame:` 尾缀 / 帧下标链（`frame:0>2`）——链式后缀需要帧链设计，单独立项；**单段与 origin 链 `frame:o1>o2` 已由 §12.3 纳入本期实施**（v1.2 修订）；
 - 帧下标形式（`frame:1`）——下标会漂移，不做；
 - iframe 元素 CSS selector 形式（`frame:iframe#x`）——违反 hint 封闭集（任意 CSS 锚拒绝，与 within 同纪律）；
 - per-frame 池窗口配额、帧数上限提升（`framesOf` ≤6）——独立测量后另议；
@@ -33,35 +34,48 @@
 
 ## 3. 设计
 
-### 3.1 语法（与 E3 `within:#id` 同构，单层）
+### 3.1 语法（与 E3 `within:#id` 同构，单层后缀）
 
 ```
-<hint 六形状之一>[ within:#id][ frame:<origin>]
+<hint 六形状之一>[ within:#id][ frame:<origin链>]
 ```
 
 - 后缀可**同时出现**，顺序无关；每个后缀**至多一次**；出现多次/链式 = 解析期拒绝
   （整串按旧形状解析 → 大概率裸词落空 = 显式失败，绝不静默取第一个——沿用 E3 纪律）。
-- `frame:` 值必须是合法 **origin** 字符串：`scheme://host[:port]`，scheme ∈ {http, https}；
-  大小写不敏感比较（origin 规范化小写）。不接受通配符/正则/相对值/`about:blank`（本期）。
+- `frame:` 值必须是合法 **origin 链**（v1.2 §12.3）：`>` 分隔外→内、≤4 段，每段
+  `scheme://host[:port]`、scheme ∈ {http, https}、`v === new URL(v).origin` 的规范形；
+  大小写不敏感（origin 规范化小写），不接受通配符/正则/相对值/`about:blank`/带 path·query。
+- 解析口径（v1.2 R2-5）：**串尾词法预扫 + 循环剥离**；任一后缀超限/值非法/空段 ⇒
+  **整组后缀都不应用**（按原始串回退，绝不半剥）。
 - 示例：
   ```
   Close frame:https://ogs.google.com
   保存 within:#dialog frame:https://checkout.example.com
   a[href=https://maps.google.com/] frame:https://www.google.com
+  button frame:https://a.example>https://b.example     # 嵌套帧：外→内
   ```
 
 ### 3.2 语义
 
-> ⚠️ v1.2 修订（§11.1 B1 / §11.2 D2）：档位语义改为**帧内计算**；"同 origin 多帧仍报 `target_ambiguous`"的旧说法以 D2 为准——同签名会被 `firstIfSame` 合并（run/act 直接执行一个，仅会话 act 停），故唯一性承诺需按该边界读。
+> ✅ v1.2 修订已实施（§11.1 B1 / §11.2 D2）：档位语义为**帧内计算**；同签名跨帧终裁由
+> `firstIfSame` 合并（run 命令步 / act hint 直接执行一个；会话 act 因 `hintCandidates.decided`
+> 不暴露该裁决而停），**不是** `target_ambiguous`——唯一性承诺按该边界读。
 
-- `frame:<origin>` = 命中集 ⊆ 该 origin 的帧；与 `within` 同时出现 = 两个过滤**交集**；
-- 过滤发生在**各形状的命中集上**（与 inAnchor 同位置），不改变档位语义（bare ladder / attrSubstr
-  分档仍按原形状计算，只是最后全集再过滤）；
+- `frame:<origin链>` = 命中集 ⊆ 声明链匹配的帧；与 `within` 同时出现 = 两个过滤**交集**；
+- 过滤发生在**各形状的命中集上**（v1.2 B1：`hintMatchImpl` 入口过滤 entries），不改变档位语义
+  （bare ladder / attrSubstr 分档仍按原形状计算，且**档位在帧内计算**）；
 - 过滤后本档清空 = 落空（不让更弱档越级顶上）——与 E3 现有行为一致；
 - 唯一性/歧义判定在**过滤后的集合**上计算（跨帧同名 + frame 限定后唯一 = 正常命中；
-  同 origin 多帧仍同名 = 仍报 `target_ambiguous`，诚实失败）。
+  同 origin 序列的兄弟/不同分支链逐段相同 = 不可分，同签名按 `firstIfSame` 边界处理——§11.2 D2）。
 
-### 3.3 数据面：`Elem.frame_origin`
+### 3.3 数据面：`Elem.frame_origin`（v1 初版；v1.2 扩为两字段）
+
+> ⚠️ §3.3–§3.6 保留 v1 初版设计，**已被 §11.1（B1–B9）与 §12.3（origin 链 / 两字段数据面 /
+> 四合成池）修订**：实际字段是 `frame_origin` + `frame_path` 两字段；过滤在 `hintMatchImpl`
+> 入口（不是 `inFrame(refs)` emit 级）；解析结果是 `ParsedHint.frameChain`（不是 `frame`）；
+> heuristic 宽扫是**主帧常量**（`frame=0` + 主帧 origin，不是"同一 JS 产物"）；`pickInner`
+> 收口到 `executor-pure.modelProjectionOf`。代码现状以 §13 与 `src/engine/frame-scope.ts` /
+> `hint.ts` / `rules.ts` 为准。
 
 | 位置 | 改动 |
 |---|---|
@@ -115,50 +129,57 @@
 | 面 | 改动 |
 |---|---|
 | `src/engine/grammar-prompt.ts` | 新增 `HINT_FRAME_SUFFIX`（token/example/anchor/note）+ import 时自证（示例被解析为 `frame:'<origin>'`；链式/非法 origin 被拒绝），与 `HINT_WITHIN_SUFFIX` 同构 |
-| `docs/APP_SCRIPT_AUTHORING.md` | §hint 语法补后缀说明与示例；「多 frame 定位速查」补 `frame:` 用法与边界（同 origin 多帧仍歧义、嵌套帧 out of scope） |
+| `docs/APP_SCRIPT_AUTHORING.md` | §hint 语法补后缀说明与示例；「多 frame 定位速查」补 `frame:` 用法与边界（同签名跨帧由 `firstIfSame` 合并、origin 链单层 ≤4 段、未知 origin 不可寻址；`plan check --probe` 的旧匹配器边界） |
 | `src/cli/registry.ts` | 若有 hint 语法帮助行，同步后缀说明 |
 | `src/cli/schema-gen.ts` | 新增 **F70**（编号接 F69）：`frame:<origin>` 帧限定尾缀——语法/解析/池侧过滤/建议候选/回捞适配/契约纪律 |
 | `CHANGELOG.md` | 新增 `## [Unreleased] — frame:<origin> 帧限定 hint` 条目（含背景、兼容性、验证） |
-| `hint-lint.ts` | 不新增类别；确认 `frame:` 后缀不改变三类 lint 判定（parseHint 只读复用）；可选增强：`apps check` 静态提示"frame origin 不在 meta.hosts"（列入可选） |
+| `hint-lint.ts` | 不新增类别；确认 `frame:` 后缀不改变三类 lint 判定（parseHint 只读复用）；C 批实现为独立 stderr 通道：非法值 + origin 不在 `meta.hosts` 两条静态提醒（不进 problems/exit） |
 
-## 4. 关键决策点（请评审拍板）
+## 4. 关键决策点（v1 评审建议；D2/D3 已按 §11.2 修订）
+
+> 下表保留 v1 拍板时的建议；**D2/D3 的实际口径以 §11.2 修订行为准**（D1/D4 维持原决定）。
+> §4 原草案的“同 origin 多帧仍报 target_ambiguous”与“嵌套帧独立立项”均已被 §12.3 取代。
 
 | # | 决策 | 建议 | 备选 |
 |---|---|---|---|
-| D1 | 限定值形态 | **完整 origin**（`scheme://host[:port]`） | hostname 简写（需补默认端口/协议推断，语义模糊，不推荐） |
-| D2 | 同 origin 多帧 | 保持 `target_ambiguous`（诚实） | 加帧下标（漂移风险，拒绝） |
-| D3 | 嵌套帧 | 单层 origin 限定；嵌套用最终元素唯一 hint | 帧链（独立立项） |
+| D1 | 限定值形态 | **完整 origin**（`scheme://host[:port]`；每段 `v === new URL(v).origin`） | hostname 简写（需补默认端口/协议推断，语义模糊，不推荐） |
+| D2 | 同来源多帧同名 | 同签名跨帧由 `firstIfSame` 合并（run/act hint 直接执行一个，会话 act 停）；同 origin 兄弟不可分；**不承诺** `target_ambiguous` | 加帧下标（漂移风险，拒绝） |
+| D3 | 嵌套帧 | origin 链 `frame:o1>o2`（≤4 段、外→内、末段=自身）；同源父子靠链长区分 | 帧下标链（漂移，拒绝）；within 语义链（§12.4 延后） |
 | D4 | 与 within 组合 | 允许，顺序无关，交集 | 禁止组合（能力损失） |
 | D5 | about:blank 帧 | 本期不支持 | 后续按需 |
 | D6 | 非法 origin 处理 | 解析期不剥离（显式失败） | 抛 config_error（破坏旧串兼容） |
 | D7 | 池窗口共享 | 不在本期解决，文档提示 `ctx.observe()` | per-frame 配额（独立测量） |
 
-## 5. 实施拆解（4 个提交）
+## 5. 实施拆解（v1 四提交 → 实际 A–D 四批，全部完成）
 
-**C1 解析 + 匹配核心**
-- [ ] `hint.ts`：`ParsedHint.frame` + 剥离/校验；离线断言（合法/非法/链式/多后缀/与 within 组合）
-- [ ] `rules.ts`：`inFrame` 过滤（emit 处交集）
-- [ ] `extraction.ts`：`Elem.frame_origin` + `extractElements` 宿主侧补字段
-- [ ] `executor.ts`：`pickInner` 剥离 frame_origin（模型字节不变）
-- 验收：无后缀 hint 行为逐字节；`frame:` 唯一命中/落空/歧义语义正确；`npx tsc --noEmit` 绿
+> v1 的 C1–C4 在 §11.3 重排为 A–D 四批（A=C1+C3a+契约、B=C2、C=C3b、D=C4）。
+> 实际字段/过滤位置以 §12.3 与 §13 为准（`frameChain` 两字段、`hintMatchImpl` 入口过滤）。
 
-**C2 观察/建议/证据闭环**
-- [ ] `observe.ts`：`ObserveRawRow.frame_origin` + `syntheticElem` 透传
-- [ ] `extraction.ts`：`observeElements` 帧循环补字段
-- [ ] `rules.ts`：`suggestHints` 追加 frame 候选（自证唯一）
-- [ ] `ambiguity.ts`：`AmbiguityCandidate.frame_origin`（additive）
-- 验收：双端口跨源 fixture——同名跨帧 → observe 给出 `Close frame:<origin>` 候选；
-  ambiguity 证据带 frame_origin；`ctx.observe` 可照抄命中
+**A 批（原 C1 + C3a + 契约）**
+- [x] `hint.ts`：`ParsedHint.frameChain` + 串尾预扫/循环剥离（合法/非法/链式/多后缀/与 within 组合）
+- [x] `rules.ts`：`hintMatchImpl` 入口 entries 过滤 + tag-submit 先 `inAnchor`
+- [x] `extraction.ts`：`Elem.frame_origin` + `frame_path` 全链打点（extract/heuristic 主帧/observe/四合成池）
+- [x] `executor.ts`：pickInner 两字段剥离（收口 `executor-pure.modelProjectionOf`）
+- [x] FW8 / F64 / DRF / hintLookup 帧链 + hosts 过滤
+- 验收：无后缀 hint 行为逐字节；`frame:` 唯一命中/落空语义正确；typecheck 绿
 
-**C3 回捞/门禁适配**
-- [ ] `identity.ts` / `declared.ts`：按 `parsed.frame` 过滤帧
-- [ ] `extraction.ts` `probeExcludedHint`：按 `parsed.frame` 过滤 excluded 帧
-- 验收：`frame:` 指向被排除帧 → `frame_not_allowed`（reason 含该 origin）；FW8/DRF 不越帧
+**B 批（原 C2）**
+- [x] `observe.ts`：`ObserveElement.frame_origin` / `frame_path` + `includeStructure`
+- [x] `rules.ts`：`suggestHints` 追加 frame 单段/链候选（自证唯一）
+- [x] `ambiguity.ts`：`AmbiguityCandidate.frame_origin` + `AMBIGUITY_HINT_MAX=200`
+- [x] bridge：ElementView 字段/上限（`HINT_MAX_CHARS=200`、`frame_path`、`structure_path`）
+- 验收：双端口跨源 fixture——同名跨帧 → observe 给出 `Close frame:<origin>` 候选；歧义证据带 frame_origin
 
-**C4 契约/文档/门禁**
-- [ ] `grammar-prompt.ts`：`HINT_FRAME_SUFFIX` + 自证
-- [ ] `schema-gen.ts`：F70
-- [ ] `docs/APP_SCRIPT_AUTHORING.md` / `registry.ts` / `CHANGELOG.md`
+**C 批（原 C3b）**
+- [x] `findByHint` parseHint + 链过滤；`amber start --target` 结构化拒绝
+- [x] `probeExcludedHint` 链证据（声明链 + 命中帧完整链）
+- [x] `describeFrameSuffixRejection` / `frameTargetStopReason` / apps check 静态 lint
+- 验收：`frame:` 指向被排除帧 → `frame_not_allowed`（reason 含声明链与命中链）；FW8/DRF/F64 不越帧
+
+**D 批（原 C4）**
+- [x] `grammar-prompt.ts`：`HINT_FRAME_SUFFIX` + 自证（随 A 批落地）
+- [x] `schema-gen.ts`：F70（A/B/C 文字已随批同步，D 批核对并重生成快照）
+- [x] 文档 / `registry.ts` / `CHANGELOG.md` / schema 快照
 - 验收：`npm run check` 全绿（含 prompt-hit / schema / secret-scan / examples / test:validate）
 
 ## 6. 测试计划
@@ -190,13 +211,13 @@
 |---|---|---|
 | 后缀解析误伤旧 hint（值里含 `frame:` 文本） | 低 | 仅结尾 + 前置空格 + 合法 origin 才剥离；与 within 同款测试面；不剥离时按旧串落空（显式失败） |
 | 池行新增字段泄漏到模型面 | 中 | `pickInner` 剥离 + 离线断言模型投影字节不变 |
-| 同 origin 多帧仍歧义被误认为 bug | 低 | 文档明示；后续帧链立项 |
+| 同签名跨帧被 `firstIfSame` 合并 / 同 origin 兄弟不可分被误认为 bug | 低 | 文档明示（§11.2 D2）；「跨帧同签名不合并」独立立项（行为变更需开关） |
 | F45/FW8/DRF 忽略 frame 限定导致越帧动作 | **中高** | C3 显式适配 + 浏览器级断言（错误 origin 不动作） |
 | `frame:` 与 `within:` 剥离顺序冲突 | 低 | 固定顺序（within 先、frame 后）+ 单测覆盖两种顺序 |
 | 动态帧 origin 变化（导航） | 低 | origin 稳定；导航后帧 URL 变 → 按新 origin 匹配，文档提示用 observe 复核 |
 | hint-lint/grammar 断言漏改 | 低 | C4 自证 + prompt-hit 门禁 |
 
-**回退**：新语法纯 additive。若需整体回退，删除 `parseHint` 的 frame 剥离分支即恢复旧行为（其余适配代码成为惰性代码，可一并 revert 单个批次）。
+**回退**：新语法纯 additive。回退以 **A 批为最小单位**（A 批单独 revert 会破坏 frame 语义一致性，见 §11.5）；只删 `parseHint` 的 frame 剥离分支仅恢复语法层，不能单独上线。
 
 ## 8. 备选方案对比（为何选 origin）
 
@@ -205,16 +226,16 @@
 | 帧下标 `frame:1` | 实现最简单 | 下标随动态 iframe 漂移；跨会话不稳定 | ❌ |
 | iframe 元素 selector `frame:iframe#x` | 直观、可定位嵌套链 | 引入任意 CSS（违反封闭集）；iframe 元素本身可能不可寻址 | ❌ |
 | policy 级帧白名单 `meta.policy.frames` | 集中控制 | 粒度太粗（不能区分同帧元素）；与 hosts 重复 | ❌ |
-| **origin 尾缀 `frame:<origin>`** | 稳定、跨源一致、与 within 同构、可自证唯一 | 同 origin 多帧仍歧义；嵌套需帧链 | ✅ 本期 |
+| **origin 尾缀 `frame:<origin链>`** | 稳定、跨源一致、与 within 同构、可自证唯一、origin 链可区分同源父子 | 同签名跨帧仍由 `firstIfSame` 合并；同 origin 兄弟不可分；链长 ≤4 段 | ✅ 本期 |
 | 池外 DOM 回捞（FW8 式） | 无语法改动 | 只能回捞身份形状；无法表达"哪个帧" | ❌ |
 
 ## 9. 验收标准（DoD）
 
-1. 功能：六形状 × `frame:<origin>` 均可唯一命中；与 within 交集；错 origin 不动作；
+1. 功能：六形状 × `frame:<origin链>`（含 ≤4 段）均可唯一命中；与 within 交集；错 origin 不动作；
 2. 兼容：无后缀 hint 的 run/trace/result/dry 产物逐字节不变（对照运行）；
 3. 观察面：`ctx.observe` / `inspect` 的 hint_candidates 给出可照抄 `frame:` 候选；
 4. 门禁：`npm run check` 全绿；grammar-prompt 自证不抛；F70/文档/CHANGELOG 同步；
-5. 证据：错误 origin / 被排除帧 / 同 origin 多帧三类失败都有可行动 reason；
+5. 证据：错误 origin / 被排除帧 / 同签名跨帧（firstIfSame 边界）三类失败都有可行动 reason；
 6. 范围纪律：不引入任意 CSS、不扩 hint 六形状、不动 done/judge 语义。
 
 ## 10. 工作量预估
@@ -228,6 +249,9 @@
 | 测试 | 离线 + 双端口 fixture + 回归 | 1 轮专项测试 + `npm run check` |
 
 **建议节奏**：C1 → 专项测试（离线+fixture）→ C2 → C3 → C4 → 全量门禁 → 推送。每个批次独立可回退。
+
+> 实际执行按 §11.3 的 A–D 执行（A 不可拆，B/C 依赖 A，D 收尾）；实际规模大于上表预估
+> （A 批 16 文件 +963/−73 行，B 批 18 文件 +330/−36，C 批 11 文件 +466/−52）。
 
 ---
 
@@ -383,7 +407,7 @@ frame:<o1>><o2>         # 链：外→内；末段 = 元素所在帧自身 origi
 4. **模型面**：pickInner 后"只带 frame_path 行""只带 frame_origin 行""两者都有行"字节对照；
 5. **`button/input × within × frame`**：tag-submit 分支不得选锚外元素；
 6. **回捞形状**：bare+frame 走 DRF text、nearToken+frame 走 hintLookup、`#id within:#panel` 在 FW8/F64 上不得越锚；
-7. **证据**：每条 hint_candidate 长度 ≤ 消费面上限且 parse+自证可命中（round-trip）；ambiguity `suggested_hint` 80 / `target` 120 的 clip 行为；bridge ElementView/ambiguity 投影白名单与截断；`structure_path` 有界/unstable/不进模型面；
+7. **证据**：每条 hint_candidate 长度 ≤ 消费面上限且 parse+自证可命中（round-trip）；ambiguity `suggested_hint` 200 / `target` 120 的 clip 行为（B 批已把 `AMBIGUITY_HINT_MAX` 80→200、桥 `suggested_hint`→200、`HINT_MAX_CHARS` 160→200）；bridge ElementView/ambiguity 投影白名单与截断；`structure_path` 有界/unstable/不进模型面；
 8. **门禁**：被排除帧的 reason 带链；仅"存在排除帧"时 `target_not_found`；F64 的 hosts × 链双错；
 9. **CLI**：`plan check --probe` 与 `amber start --target` 的 frame: 行为（正确点帧内或明确拒绝）；
 10. **逐字节**：无后缀场景 run/trace/result/dry 逐字节 + inspect/observe 的"允许 additive 清单"核对。
@@ -418,6 +442,58 @@ frame:<o1>><o2>         # 链：外→内；末段 = 元素所在帧自身 origi
 | B7 HINT_GRAMMAR+F70 同批 | §12.7 A | ✓ |
 | B8 拒绝/错链诊断 | §12.3 数据面/回捞 + §12.9 | ✓（诊断需列链） |
 | B9 findByHint | §12.7 C | **原 ✗ → 已补** |
+
+---
+
+## 13. 实施记录（v1.2 落地，2026-11-15）
+
+> 口径：本节记录**实际落地**的范围与偏差；正文与实现不一致处**以代码为准**（偏差见 §13.3）。
+> A/B/C 已推送（HEAD=`5c25ef5`），D 为文档/契约收尾批（只改文档与契约文本，不改运行时行为）。
+
+### 13.1 批次与提交
+
+| 批次 | 提交 | 内容 | 实际改动（主要文件） |
+|---|---|---|---|
+| **A** | `bc400ca` | 解析/匹配/数据面/回捞/契约（C1 + C3a，不可拆） | `hint.ts` 串尾预扫+循环剥离（within/frame 各 ≤1、整组回退、`frameChainValueProblem`）；`frame-scope.ts`（`frameChainOf` / `frameScopeMatches` / `elemFrameStamp` / `frameOriginOf`）；`rules.hintMatchImpl` 入口 entries 过滤 + tag-submit 先 `inAnchor`；`Elem.frame_origin/frame_path` 全链打点（extract / heuristic 主帧 / observe 自证池 / hintLookup / DRF / A3 / FW8 四合成池）；`pickInner`→`modelProjectionOf` 两字段剥离；`hintLookup/FW8/DRF/F64` 链 + hosts 过滤；`poolView` 单一出处修复；`HINT_GRAMMAR.frame_suffix`+F70；`grammar-prompt.HINT_FRAME_SUFFIX`+自证；prompt-hit 断言 |
+| **B** | `3ce26fa` | 候选/观察/结构/bridge（C2） | `suggestHints` frame 单段/链候选（自证唯一、4 条上限、顺序=身份→label→frame→within）；`ObserveElement.frame_origin/frame_path`；`structure_path`（inspect / observe `includeStructure` opt-in，≤160 + `structure_unstable`）；`AMBIGUITY_HINT_MAX` 80→200、`AmbiguityCandidate.frame_origin`；bridge ElementView `HINT_MAX_CHARS` 160→200 + `frame_path`(≤4×64)/`structure_path`(≤160) 常量与投影、session `include_structure`、ambiguity `frame_origin`≤60/`suggested_hint`≤200；F41/F54/F55 文字 |
+| **C** | `5c25ef5` | 校验面/诊断闭环（C3b） | `findByHint` parseHint+链过滤；`amber start --target` 结构化拒绝（开浏览器前、exit 2）；`probeExcludedHint.declaredChain/matchedChains`（按链去重 ≤4）；`executor-pure.frameTargetStopReason`（声明链 + 命中链 + ≤5 只读命中 + 两条修法）；`describeFrameSuffixRejection` + target_not_found / act_hint strict / 会话 act 落空统一追加「拒绝原因 + 页面可用 origin（≤6）」；`hint-lint.frameFindings` stderr 通道（非法值 / origin 不在 hosts，不进 problems/exit）；F45/F70 文字 |
+| **D** | 本批（未提交，待 lead 统一提交） | 文档/CHANGELOG/schema 快照收尾（C4） | 本规格标题/状态改「已实施」+ §13 实施记录；`docs/APP_SCRIPT_AUTHORING.md` hint 语法主段补两种尾缀、多 frame 速查补 `findByHint` 能力边界、stopCode `target_not_found` 补 frame 证据；`docs/AGENT_INTERFACE.md` 增 §3.2 ElementView/ambiguity 合同；`docs/INTERACTIVE_SESSION.md` 核对并补上限；`src/cli/registry.ts` 帮助补 `frame:`；`schema-gen.ts` 的 `HINT_GRAMMAR.within_suffix`/F70 边界/cheat sheet 文字一致化并重生成快照；CHANGELOG 全量标题 + D 批 + 已知边界；**无运行时代码行为改动** |
+
+### 13.2 实施中发现并修复的额外缺陷
+
+1. **会话面 `_frame_hosts` 门禁补漏（A，行为变更·修正）**：`_frameHosts` 此前只在 run 面方法里赋值，session 面从未设置——声明 `hosts` 的会话仍会对信封外 iframe 的池 / FW8 / DRF / F64 不设防（专项测试实测：`hosts=[127.0.0.1]` 时 `localhost` 子帧仍可被 `frame:`/`#id` 命中）。现在构造时以 middleware 默认 hosts 兜底（run 面仍按 run 覆盖），与工具合同「same semantics as meta.hosts」一致。
+2. **F64 `#id` live-DOM 直查 hosts 补漏（A，行为变更·修正）**：该回捞此前连 hosts 都不查，排除帧里的 `#id` 会被跨帧直查动作；现与池 / hintLookup / FW8 同口径（主帧恒允许、子帧不在信封内跳过）。声明目标确需该帧时仍走既有 `frame_not_allowed`。
+3. **poolView 的 `frame_origin` 映射修复（A，行为变更·修正）**：旧实现 `[pageUrl, ...frames()].map(origin).sort()` 的下标映射在跨源页重复/排序打乱 `fi↔origin`，`frame_origin` 值会全反；现元素行用 `Elem.frame_origin` 单一出处，顶层 `frame_origins` 仍按帧枚举。**跨源页 inspect 的 `frame_origin` 值会变对**（有意修复，CHANGELOG 已记账）。
+4. **`findByHint` 裸词/旧形状语义边界（C，记录不改）**：`findByHint` 是 `plan check --probe` / `amber start --target` 的旧匹配器，只认 `#id`、`[data-test=|id=|name=]` 与 `induceHint()` 产物（精确串）；C 批只加了 parseHint + 帧链过滤，**没有**把它换成 `hintMatch` 的六形状分档语义。因此 `plan check --probe` 对 `frame:` 的支持边界 = 身份形状与 induceHint 原样串；裸词 / `attrSubstr` / `nearToken` 等仍可能误报未命中（该 CLI 的既有边界，非本方案新增）。`amber start --target` 对帧限定目标在开浏览器前结构化拒绝。
+5. **within 权威不对等（R2-8，记录）**：回捞面 DRF text 完全忽略 within、FW8/F64 不看 within（F64 在 A 批只补了 hosts）；本期如实保留，E 批前置修复。
+
+### 13.3 与规格的偏差 / 口径修正
+
+- §3.2 原「同 origin 多帧仍报 `target_ambiguous`」已被 §11.2 D2 取代：同签名跨帧由 `firstIfSame` 合并（run 命令步 / act hint 直接执行一个；会话 act 因 `hintCandidates.decided` 不暴露该裁决而停）。正文已按 D2 回写。
+- §12.3 R2-5 预扫口径按 A 批实现：**两类后缀各 ≤1、任一超限/非法 = 整组不应用**（不是只回退超限的那一类）。
+- F64 hosts 检查、会话 `_frameHosts` 兜底、poolView 修复是**行为变更**，已在 CHANGELOG 行为变更条记账。
+- 引擎歧义证据 `frame_origin` 上限是 `AMBIGUITY_ORIGIN_MAX=120`；桥投影再 clip 到 60（更严，不改变引擎契约）。
+- `structure_path` 只进 inspect 恒开面与 `ctx.observe({includeStructure:true})` / 桥 `include_structure` opt-in 面；不进模型面、不进歧义证据。
+- `HINT_FRAME_SUFFIX` 的 grammar-prompt 自证随 A 批落地（不是 D 批）；D 批只核对文档/契约文字。
+
+### 13.4 未做 / 延后
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| `within` 语义链（E 批） | 延后（独立回退单元） | §12.4 原因：合成池无 `anchor_ids`、FW8/F64/DRF-text 不遵守 within；前置条件见 §12.4 |
+| 跨帧同签名不合并 | 未做（独立立项 + 开关） | D2 边界：`esig`/`firstIfSame` 签名不含新字段，同 tag/label/href/data-test 的跨帧元素仍合并 |
+| `read/extract/collect/judge` 帧限定对称化 | 未做 | 当前 `locatorAnyFrame` 逐帧 OR，无法指定帧（§12.6）；本方案只服务 act hint / 命令 target |
+| >6 帧 / 每帧池配额 | 未做 | `framesOf ≤6`；池窗口 40/120 跨帧共享、主帧优先；`frame:` 落空时 reason 列允许帧 origin（≤6） |
+| `about:blank` / srcdoc 帧寻址 | 不做（本期） | 未知 origin 帧不可被任何 `frame:` 命中（D5）；origin 只用于匹配，不是安全判定（门禁是 hosts） |
+| 帧下标链 / nth-child / XPath / iframe 选择器锚 | 不做 | 漂移/破坏 hint 封闭集（§12.1/§12.6） |
+| `findByHint` 六形状全语义 | 未做（C 批边界） | 见 §13.2-4；`plan check --probe` 仅身份形状 + induceHint 产物 |
+| 结构证据进 ambiguity / 模型面 | 不做 | `structure_path` 仅诊断，不进 hint/模型/歧义（§12.5） |
+
+### 13.5 验证与证据
+
+- **A/B/C**：离线断言 66 / 98 / 184 条（parse 全矩阵、match 档位×frame、数据面与四合成池、回捞/门禁、findByHint/start 拒绝、诊断全矩阵、hint-lint、bridge 常量）；各批 `npm run typecheck`、`npm run prompt-hit`、`npm run schema:check`、`npm run check` 全绿（详见 CHANGELOG 各批「验证」）。
+- **浏览器级（随批）**：A 批——跨源单段/2 段链命中、srcdoc 未知 origin 不可寻址、无后缀跨帧唯一透明、跨帧同名同签名会话 act 停机、hosts 信封外子帧不动作；B 批——inspect/observe 给出单段与 3 段链候选、链候选照抄 session act 命中孙帧（`f3:e0`）、srcdoc 报 opaque 且不给 frame 候选、无 iframe 页面对照无候选；C 批——`plan check --probe` 链命中/错链诊断、`amber start` 拒绝、被排除帧 `frame_not_allowed` 链证据与零动作、会话 act 错 origin reason 带可用 origin。
+- **D**：只改文档/契约文本，无运行时行为；`npm run typecheck`、`npm run prompt-hit`（registry/grammar 文本改动后）、`npm run schema:check`（schema-gen 文字改动后重生成 gitignored `dist/schema/ctx.json`）。
 
 
 

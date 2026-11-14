@@ -133,7 +133,7 @@ task-34 的回显是弱档旁路诊断（照旧执行 `refs[0]`）；A2 起，�
 | `tier` | `hintCandidates` 胜出档（与命令步同一判据） |
 | `would_act_ref` | 旧行为会执行的那个 ref（可行动优先排序后的 `refs[0]`）——事实，不是建议 |
 | `candidates_total` / `truncated` | 歧义档总候选数 / 是否超过列出的 5 行 |
-| `candidates[]` | ≤5 行：`ref≤16, tag≤16, role?≤16, label≤40, class?≤40, near?≤40, frame, frame_origin?（B 批：候选所在帧 origin，引擎给才有）, same_label, suggested_hint?≤200` |
+| `candidates[]` | ≤5 行：`ref≤16, tag≤16, role?≤16, label≤40, class?≤40, near?≤40, frame, frame_origin?（B 批：候选所在帧 origin，引擎 ≤120；桥投影 clip ≤60，引擎给才有）, same_label, suggested_hint?≤200` |
 
 - `same_label` = 该归一 label（`full_label` 优先、折叠空白/大小写）在**本次池内**出现 >1 次 ⇒ label
   本身不足以区分（收窄要换 `#id` / `[data-test=…]` / 属性或 `near`）。
