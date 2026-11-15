@@ -61,14 +61,16 @@ export const HINT_SHAPES: readonly HintShape[] = [
 ];
 
 /**
- * E3：`within:#id` 尾缀（可选；**单层，不链式**）——任意形状后缀它，命中集即被限定在
- * 锚元素子树内（池侧 = anchor_ids 判定；DOM 侧回捞 = contains 判定）。锚只能是
- * `#id` 形态（封闭集边界与 E1-c 同源；任意 CSS 锚拒绝）。多个 within = 解析期拒绝。
+ * E3：`within:#id` 尾缀（可选；E2 起为**语义链** `within:#a1>#a2`）——任意形状后缀它，命中集
+ * 即被限定在锚链子树内（池侧 = anchorChainMatch 嵌套序包含；DOM 侧回捞 = 逐段 getElementById
+ * + 嵌套 contains）。链：`>` 分隔、**外→内**、≤4 段、每段 `#id` 形态（任意 CSS 锚拒绝）；
+ * 单层 `within:#id` = 长度 1 链（逐字节兼容）。多 within / 空段 / 超 4 段 / 非法段 = 解析期
+ * 整组拒绝（原始串回退，绝不半剥）。
  */
 export const HINT_WITHIN_SUFFIX: { token: string; en: string; example: string; anchor: string; note: string } = {
-  token: "within:#id", en: "within:#id", example: "添加到购物车 within:#product-panel",
+  token: "within:#id[>#id…]", en: "within:#id[>#id…]", example: "添加到购物车 within:#product-panel",
   anchor: "within:#login-button",
-  note: "锚定限定：把命中集限定在 #id 元素子树内（单层不链式；多 within 即拒绝）",
+  note: "锚定限定：把命中集限定在锚链子树内（within:#a1>#a2 链：`>` 分隔外→内、≤4 段、嵌套序包含；单层 within:#id 兼容；多 within / 空段 / 超限 = 解析期整组拒绝）",
 };
 
 /**
@@ -97,20 +99,45 @@ for (const s of HINT_SHAPES) {
   }
 }
 
-/* E3 自证：within 尾缀被解析层剥离并落进 within 字段；非法锚（多 within）拒绝。 */
+/* E3/E2 自证：within 尾缀被解析层剥离并落进 within 字段（E2 = **链**，外→内 string[]、
+   单层 = 长度 1）；非法锚拒绝：多 within 拒、单串链受、空段/超 4 段/非法段拒。 */
 {
   const ok = parseHint(HINT_WITHIN_SUFFIX.example);
-  if (ok.within !== "product-panel" || ok.kind !== "bare") {
+  if (ok.within === undefined || ok.within.join(">") !== "product-panel" || ok.kind !== "bare") {
     throw new Error(
       `grammar-prompt: HINT_WITHIN_SUFFIX 示例 '${HINT_WITHIN_SUFFIX.example}' 解析为 `
-        + `kind='${ok.kind}', within='${String(ok.within)}'——期望 bare + within='product-panel'`,
+        + `kind='${ok.kind}', within=${JSON.stringify(ok.within)}——期望 bare + within=['product-panel']`,
     );
   }
-  const chained = parseHint(`${HINT_WITHIN_SUFFIX.anchor} within:#a within:#b`);
-  if (chained.within !== undefined) {
+  // 单串链（E2）：`>` 分隔外→内，归一为小写段数组；`#a>#b` 与 `#a>b` 两种写法同归一。
+  const chained = parseHint("保存 within:#modal>#dialog");
+  if (chained.within === undefined || chained.within.join(">") !== "modal>dialog" || chained.kind !== "bare") {
     throw new Error(
-      `grammar-prompt: 链式 within 示例被静默接受（within='${String(chained.within)}'）——解析器必须拒绝多 within`,
+      `grammar-prompt: 单串 within 链示例解析为 within=${JSON.stringify(chained.within)}`
+        + `——期望 bare + ['modal','dialog']（E2 链形必须被解析层接受）`,
     );
+  }
+  const chainedBare = parseHint("保存 within:#a>b");
+  if (chainedBare.within === undefined || chainedBare.within.join(">") !== "a>b") {
+    throw new Error("grammar-prompt: within:#a>b（后续段无 #）应与 #a>#b 同归一为 ['a','b']");
+  }
+  // 多 within = 解析期整组拒绝（原始串回退，绝不半剥）。
+  const multi = parseHint(`${HINT_WITHIN_SUFFIX.anchor} within:#a within:#b`);
+  if (multi.within !== undefined || multi.kind !== "bare"
+      || multi.token !== `${HINT_WITHIN_SUFFIX.anchor} within:#a within:#b`) {
+    throw new Error(
+      `grammar-prompt: 多 within 示例被静默接受（within=${JSON.stringify(multi.within)}）——解析器必须整组拒绝`,
+    );
+  }
+  // 空段 / 超 4 段 = 解析期整组拒绝（E2 链形校验；与 parseWithinChainValue 同一判定）。
+  for (const bad of ["保存 within:#a>", "保存 within:#a>b>c>d>e"]) {
+    const rejected = parseHint(bad);
+    if (rejected.within !== undefined) {
+      throw new Error(
+        `grammar-prompt: 非法 within 链 '${bad}' 被静默接受（within=${JSON.stringify(rejected.within)}）`
+          + `——空段/超 4 段必须整组拒绝（按原始串回退）`,
+      );
+    }
   }
 }
 
@@ -151,10 +178,10 @@ for (const s of HINT_SHAPES) {
     parseHint("保存 frame:https://checkout.example.com within:#dialog"),
   ];
   for (const p of bothOrders) {
-    if (p.within !== "dialog" || p.frameChain === undefined
+    if (p.within === undefined || p.within.join(">") !== "dialog" || p.frameChain === undefined
         || p.frameChain.join(">") !== "https://checkout.example.com") {
       throw new Error(
-        `grammar-prompt: within+frame 组合解析漂移（within='${String(p.within)}', `
+        `grammar-prompt: within+frame 组合解析漂移（within=${JSON.stringify(p.within)}, `
           + `frameChain=${JSON.stringify(p.frameChain)}）——两种顺序都必须剥出两字段`,
       );
     }

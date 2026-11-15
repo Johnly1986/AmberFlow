@@ -313,6 +313,35 @@ function diagCandidate(ref: string, e: Elem): HintMatchCandidate {
   };
 }
 
+/**
+ * E2（within 语义链）：锚链匹配的**唯一出处**（池侧 inAnchor / FW8 / F64 / DRF-text 共用，
+ * 全部消费点经这一个函数继承链语义）。
+ *
+ * 嵌套序包含：声明链 `chain = [a₁…aₙ]`（**外→内**，parseHint 已归一小写）匹配 ⇔
+ *   ① presence 前置显式化：每段都在 `anchor_ids` 里（任一段 indexOf === -1 ⇒ 不匹配）；
+ *   ② 嵌套序正确：anchor_ids 是**内→外**存储 ⇒ `indexOf(aₙ) < … < indexOf(a₁)`
+ *     （沿 chain 逐段要求位置严格递减）。
+ * n=1：只剩一个 presence 判定 = 单层 membership 逐字节不变（自然推广）。
+ *
+ * 已写文档的边界（M6②/R-3/R-8，勿当 bug 修）：
+ *   - 重复 id `within:#x>#x`：id 投影丢失实例身份，两段 indexOf 同处 ⇒ 序关系不成立 ⇒ 不匹配
+ *     （嵌套序包含的确定性裁决；DOM 侧 getElementById 文档序首个同样 fail-closed）；
+ *   - anchor_ids ≤8 截断：被截掉的外层段 indexOf === -1 ⇒ 长链落空（显式失败，不静默降级）；
+ *   - 间隙容忍：只要求"每段都在且序对"，中间有无其它 id 祖先不影响（anchor_ids 稀疏，
+ *     后缀对齐会毁单层兼容——两套对齐规则见 docs/WITHIN_PARITY_PLAN.md §4）。
+ */
+export function anchorChainMatch(anchorIds: readonly string[], chain: readonly string[]): boolean {
+  if (chain.length === 0) return false;   // within 恒 ≥1 段（parseHint 保证）；防御面 fail-closed
+  let prev = -1;
+  for (let i = 0; i < chain.length; i++) {
+    const idx = anchorIds.indexOf(chain[i]!.toLowerCase());
+    if (idx === -1) return false;         // ① presence
+    if (i > 0 && idx >= prev) return false; // ② 嵌套序：下一段（更内）位置必须严格更小
+    prev = idx;
+  }
+  return true;
+}
+
 /** The 6 hint grammars, single-parsed; `sink` (if given) records the candidate set. */
 function hintMatchImpl(
   hint: string, elems: ElemPool, sink?: HintCandidates | null, opts?: HintMatchOptions,
@@ -335,12 +364,13 @@ function hintMatchImpl(
   const recordDiag = opts?.diag !== false;
   /**
    * E3：`within:#id` 尾缀的池侧限定（纯内存）——命中集 ⊆ 锚子树（anchor_ids 含锚 id）。
-   * 解析层已保证 within 只能是单个 `#id`（链式/多 within = 解析期拒绝，不进这里）。
+   * E2：within 归一为**链**（外→内 string[]，单层 = 长度 1）；限定 = `anchorChainMatch`
+   * 嵌套序包含（唯一出处，本文件上方）——单层 membership 逐字节不变，链 = 超集语义。
    * 包一层让所有形状共用：限定发生在各形状的命中集上，不改变档位语义本身。
    */
   const inAnchor = (refs: string[]): string[] =>
     parsed.within === undefined ? refs
-      : refs.filter((r) => (elems[r]!.anchor_ids ?? []).includes(parsed.within!));
+      : refs.filter((r) => anchorChainMatch(elems[r]!.anchor_ids ?? [], parsed.within!));
   /** Record the strongest tier's refs, then resolve exactly as before. */
   const emit = (refs: string[], tier: number): string | null => {
     const limited = inAnchor(refs);
@@ -530,8 +560,11 @@ export function hintCandidates(
  * E3 闭环：同名元素组（两个 `aria-label="Close"`）没有任何身份形状、文本候选也不唯一时，
  * 若该元素有 `anchor_ids`（EXTRACT_JS / OBSERVE_JS 提取期算好的祖先 id 链），再按
  * 「最近祖先优先」尝试 `<label> within:#<ancestor-id>`——仍走同一个 push → hintMatch
- * 自证（恰好唯一命中该元素才保留），命中一条即停（更外层锚更宽、更难唯一）。
- * 无 anchor_ids 或文本候选本就唯一时不产生 within（既有建议内容/顺序不变）。
+ * 自证（恰好唯一命中该元素才保留），命中一条即停。
+ * E2（M6⑤）：单层不自证唯一时**从最近祖先向外生长**链候选 `within:#a2>#a1` →
+ * `within:#a3>#a2>#a1`…（≤4 段、每步同一 push 自证；判别力来自 anchor_ids ≤8 截断的
+ * 深度不对称——链每加一段多一个必经锚点）。无 anchor_ids 或文本候选本就唯一时不产生
+ * within（既有建议内容/顺序不变；首候选 = 单层最近祖先，与 E3 逐字节一致）。
  *
  * B 批（frame:<origin> 闭环，spec §12.3/R2-6）：文本候选不唯一且元素带帧链时，
  * 先在 label 之后、within 之前给帧限定候选——单段 `<label> frame:<自身 origin>`；
@@ -580,13 +613,26 @@ export function suggestHints(
       if (chain.length <= 4) push(`${label} frame:${chain.join(">")}`);
     }
   }
-  // 唯一文本候选没进 out（同名组/闭集重复）才退到 within 尾缀；锚字符集与
-  // parseHint 的 `#[a-z0-9_\-.:]+` 一致，页面上的奇怪 id（空格/引号）直接跳过。
+  // 唯一文本候选没进 out（同名组/闭集重复）才退到 within 尾缀。
+  // E3 闭环（单层）：最近祖先优先 = anchor_ids[0]。
+  // E2（M6⑤，within 语义链）：单层 `within:#a1` push 失败（不自证唯一）且 anchor_ids ≥2 时，
+  // **从最近祖先向外生长**链候选：`within:#a2>#a1` → `within:#a3>#a2>#a1`…——声明链外→内 =
+  // anchor_ids（内→外）前 k 段反转；≤4 段（parseHint 声明上限，>4 不生成）。每步走同一个
+  // push → hintMatch/hintCandidates 自证（恰好唯一命中才保留），命中一条即停。
+  // 为什么向外生长是有判别力的（不是死代码）：anchor_ids ≤8 截断按元素深度不同——同 label
+  // 的浅元素留得住外层段、深元素被截掉，链每加一段 = 多一个必经锚点，匹配集严格变窄。
+  // 顺序仍 身份→label→frame→within、上限 4（R-10：链候选与 frame 候选互不挤占——顺序不变）。
   if (!labelPushed && labelUsable) {
+    // 段 charset 与 parseHint 归一口径一致；遇第一个非法 id 段停（更深链必含它 = 必非法）。
+    const segs: string[] = [];
     for (const aid of elem.anchor_ids ?? []) {
       const a = String(aid);
-      if (!/^[a-z0-9_\-.:]+$/.test(a)) continue;
-      if (push(`${label} within:#${a}`)) break;
+      if (!/^[a-z0-9_\-.:]+$/.test(a)) break;
+      segs.push(a);
+    }
+    for (let k = 1; k <= Math.min(segs.length, 4); k++) {
+      const chain = segs.slice(0, k).reverse();   // 外→内（anchor_ids 内→外 → 反转）
+      if (push(`${label} within:${chain.map((a) => `#${a}`).join(">")}`)) break;
     }
   }
   return out.slice(0, 4);

@@ -25,7 +25,7 @@
 import { frameInHostsEnvelope, framesOf, type Elem, type ElemPool, type PageLike } from "./extraction.ts";
 import { elemFrameStamp, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
-import { hintCandidates, type HintMatchOptions } from "./rules.ts";
+import { anchorChainMatch, hintCandidates, type HintMatchOptions } from "./rules.ts";
 import { ANCHOR_JS, compile } from "./pool-js.ts";
 import { parseHint } from "./hint.ts";
 
@@ -319,16 +319,18 @@ export async function declaredLookup(
   //  - text：收集阶段已经做了"innerText 全等 + 最深优先"，全部行就是匹配集；
   //    E1（within 权威对等）：**显式过滤**——收集面不做 within 判定，宿主侧按 row.anchors
   //    过滤（anchors 不含 within 的行不进匹配集，与池侧 inAnchor 同口径；过滤后
-  //    total/hidden/candidates 变锚内口径，M2 记账）。
+  //    total/hidden/candidates 变锚内口径，M2 记账）。E2：within = 链（外→内），过滤走
+  //    anchorChainMatch 嵌套序包含（唯一出处 rules.ts）——单层 membership 逐字节不变。
   //  - attr：用与池侧同一个 `hintCandidates` 在合成池上取**最强档**，再按可见性判唯一。
   //    E1/F-2：rowToElem 已透传 anchor_ids ⇒ hintMatch.inAnchor 自动消费 within——
-  //    本分支**零额外代码**（此前合成行无 anchors ⇒ within 恒 fail-closed）。
+  //    本分支**零额外代码**（此前合成行无 anchors ⇒ within 恒 fail-closed）；E2 链语义
+  //    经同一个 inAnchor→anchorChainMatch 自动继承（仍零额外代码）。
   let matched: Array<{ fi: number; row: RawRow }>;
   if (mode === "text") {
     matched = parsed.within === undefined ? collected
       : collected.filter(({ row }) => {
           const anchors = Array.isArray(row["anchors"]) ? (row["anchors"] as string[]) : [];
-          return anchors.includes(parsed.within!);
+          return anchorChainMatch(anchors, parsed.within!);
         });
   } else {
     const pool: ElemPool = {};

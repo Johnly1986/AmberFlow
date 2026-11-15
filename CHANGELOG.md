@@ -224,11 +224,54 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   anchor_ids 断言；`npm run typecheck` / `npm run prompt-hit` 通过。浏览器级（同帧 within
   回捞真页动作落点）留待专项。
 
+### E2 批（within 语义链）
+
+- **【语法（§4.1 + M1④）】** `within:` 尾缀值从单层 `#id` 升级为 **#id 链**：`>` 分隔、
+  **外→内**、≤4 段、每段 `#id` 形态（段首 `#` 可选——方案 §4.3/M6⑤ 的链写法
+  `within:#a2>#a1` 每段带 `#`，词法 charset 同批加 `#`；段校验保证旧单层/值内伪尾缀行为
+  不变）。**单层 `within:#p` = 长度 1 链（逐字节兼容）**；多 within / 空段（`within:#a>`）/
+  超 4 段 / 非法段 ⇒ 解析期**整组回退**（绝不半剥，沿用 R2-5 循环语义）。
+  `ParsedHint.within` 归一 **string[]（外→内）**，消费面全部同批迁移：splitTailSuffixes /
+  parseHint / identityHintInfo / frameHintFailureEvidence / F64 / DRF-text。
+- **【语义（§4.2 + M6①②③，唯一出处）】** 新增 `rules.anchorChainMatch(anchorIds, chain)`——
+  **嵌套序包含**：每段都在 `anchor_ids`（presence 前置显式化：任一段 indexOf === -1 即不匹配）
+  且嵌套序正确（anchor_ids 内→外存储 ⇒ `indexOf(aₙ) < … < indexOf(a₁)`）；**n=1 = membership
+  逐字节不变**。写文档边界（M6）：重复 id `within:#x>#x` 不匹配（id 投影无实例身份，序关系
+  不成立；DOM 侧 getElementById 文档序首个同样 fail-closed）；`anchor_ids` ≤8 截断下长链
+  落空（显式失败）；间隙容忍（中间有无 id 祖先不影响）。两套对齐规则的文档义务（M6④）：
+  `frame:` = 后缀对齐（frame_path 稠密可分同源父子）；`within:` = 嵌套序包含（anchor_ids
+  稀疏 ≤8、仅带 id 祖先——后缀对齐会毁单层兼容）。
+- **【消费面（M1①②③）】** ① 池侧 `inAnchor` 链化——emit 三档/attrSubstr 三档/tag-submit/
+  bare 梯级全部消费点经同一个入口自动继承；② DOM 侧 HINT_HEAD 链化——逐段 `getElementById`
+  + 嵌套 contains 校验（声明链 a₁ contains a₂ contains … 元素；任一段 null/不含 = 该帧 0 行，
+  下一帧继续找），PASS_HINT_PROBE 的 `data-hintref` 字面耦合保活（replace 前后断言）；
+  ③ FW8 `identityLookup` / F64 `_liveDomIdFallback` / DRF-text 收集后过滤改
+  `anchorChainMatch`；**DRF-attr 经 hintCandidates→inAnchor 自动继承（F-2 零额外代码保持）**。
+- **【候选生成（M6⑤）】** `suggestHints` within 候选链形：先单层 `label within:#a1`
+  （最近祖先 = anchor_ids[0]，首候选与 E3 逐字节一致）；push 失败（不自证唯一）且
+  anchor_ids ≥2 时**从最近祖先向外生长** `within:#a2>#a1` → `within:#a3>#a2>#a1`…（≤4 段、
+  每步走同一 push→hintMatch 自证）；顺序仍 身份→label→frame→within、上限 4 不变
+  （R-10：链候选不挤掉 frame 候选——顺序不变 + 离线断言钉死）。
+- **【诊断（§4.4）】** `describeFrameSuffixRejection` 的 within 侧值校验同步链形
+  （空段/超限/非法段点名——`withinChainValueProblem` 与解析共用同一判定，只在 frame 参与
+  时报告的既有口径不变）；`frameHintFailureEvidence` 的 within 注记按链形渲染
+  （单层 `join(">")` = 单 id，旧文案逐字节不变）。
+- **【契约（M1⑤）】** `grammar-prompt.HINT_WITHIN_SUFFIX` 链形文案 + 自证改写：多 within 拒、
+  单串链受（`#a>#b` 与 `#a>b` 同归一）、空段/超 4 段拒；`schema-gen` 的
+  `HINT_GRAMMAR.within_suffix` / F69 如实更新（F70 truth 补 E2 文件）；
+  gitignored `dist/schema/ctx.json` 重生成；`npm run prompt-hit` 八组全绿。
+- **【验证】** 离线断言全绿（/tmp/af-e2）：parse 矩阵（单层等价、链两序、`within:#a>` /
+  超 4 段 / 双 within / 值内伪尾缀整组回退、大写 WITHIN）、链语义矩阵（全序命中、缺段/序错/
+  重复 id 不匹配、间隙容忍、>8 截断长链落空）、五消费面 fake-DOM 真跑矩阵（池/DOM 回捞/FW8/
+  F64/DRF attr+text）、候选单层→链生长序列 + R-10、诊断链形矩阵、契约自证；E1 回归复跑
+  （within 形状同步后）全绿；`npm run typecheck` / `npm run prompt-hit` 通过。
+  浏览器级（真页链锚命中/落点、frame+within 链组合、observe 链候选照抄）留待专项。
+
 ### 已知边界 / 未做（A–D 批后的诚实清单）
 
-- **`within` 语义链（E 批 E2）**：未做，独立回退单元。**单层** within 的回捞面权威对等已由
-  E1 收口（五池 anchors + FW8/F64/DRF-text 消费）；链式 `within:#a>#b`（池侧 inAnchor 链化、
-  DOM 侧逐段锚定、消费面链迁移、契约文本）仍待 E2。
+- **`within` 语义链（E 批 E2）**：已收口（E2——链语法/嵌套序包含语义/池+DOM+FW8+F64+DRF
+  消费面/候选生长/诊断/契约同批，见上方 E2 小节）。**单层** within 的回捞面权威对等已由
+  E1 收口；**跨帧** within（锚在另一文档）维持文档边界。
 - **跨帧同签名不合并**：未做（需独立立项 + 开关）。`esig`/`firstIfSame` 的签名不含 frame 字段，
   同 tag/label/href/data-test 的跨帧元素仍可能被 `firstIfSame` 合并；run 命令步 / act hint 直接
   执行一个，会话 act 因 `hintCandidates.decided` 不暴露该裁决而停。
@@ -247,8 +290,9 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   `STRUCTURE_PATH_MAX_CHARS=160`。引擎歧义 `frame_origin` ≤120，桥 clip ≤60。
 - **`structure_path`**：仅诊断（inspect 恒开 / observe `includeStructure` opt-in），不进模型面、
   歧义证据或 hint 自证。
-- **`within` 在回捞面**：E1 已收口**同帧** within（五池 anchors + 消费面遵守）；**跨帧**
-  within（锚在另一文档，如宿主页的 iframe 元素）维持文档边界——anchor_ids 是帧内文档祖先链。
+- **`within` 在回捞面**：E1 已收口**同帧** within（五池 anchors + 消费面遵守，E2 起链形
+  同语义）；**跨帧** within（锚在另一文档，如宿主页的 iframe 元素）维持文档边界——anchor_ids
+  是帧内文档祖先链。
 
 ## [Unreleased] — inspect --probe 跨 frame 探测（iframe 元素不再静默漏检）
 

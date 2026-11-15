@@ -1505,7 +1505,9 @@ export function frameHintFailureEvidence(
 ): string {
   const rejections: string[] = [];
   const declared: string[] = [];
-  let withinAnchor: string | undefined;
+  // E2：within 归一为链（外→内 string[]，单层 = 长度 1）——证据文案按 `#a>#b` 链形渲染
+  // （单层 join(">") = 单 id，逐字节等于旧文案）。
+  let withinAnchor: string[] | undefined;
   for (const target of targets) {
     if (typeof target !== "string" || target.trim() === "") continue;
     const rejection = describeFrameSuffixRejection(target);
@@ -1534,7 +1536,7 @@ export function frameHintFailureEvidence(
   // 祖先链，宿主页 iframe 元素不会出现在子帧内容的祖先链里（§13.4 文档边界，不静默）。
   // declared 分支语义不变：只在"声明链合法但没命中 + 同时声明了 within"时追加本条。
   if (declared.length > 0 && withinAnchor !== undefined) {
-    parts.push(`注意该目标同时声明了 within:#${withinAnchor}——同帧 within 已在回捞面生效（E1）；`
+    parts.push(`注意该目标同时声明了 within:${withinAnchor!.map((a) => `#${a}`).join(">")}——同帧 within 已在回捞面生效（E1）；`
       + `跨帧 within（锚在另一文档）不受支持：anchor_ids 是帧内文档祖先链，锚不在该帧文档 = 该帧无命中；`
       + `先排除"锚不在当前文档/帧"再归因 origin（heuristic 伪按钮行现已带 anchors）`);
   }

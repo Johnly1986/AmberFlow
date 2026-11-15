@@ -48,6 +48,14 @@
 
 ## 4. E2：within 语义链
 
+> **状态：已实施（E2 批，提交号由 lead 落定）**。实施记录见 CHANGELOG「E2 批（within 语义链）」；
+> 与本节 + §12.2 M1/M6 的对齐情况：①语法（含 M6④ 两套对齐规则文档义务、M6② 重复 id、M6③ ≤8 截断）
+> ②语义（`rules.anchorChainMatch` 唯一出处，presence 前置显式化）③候选（M6⑤ 从最近祖先向外生长）
+> ④诊断（`withinChainValueProblem` 与解析共用判定）。**实施偏差一处**：词法 charset 除 `>` 外
+> 同批加 `#`（段首标记）——§4.3/M6⑤ 链候选写法 `within:#a1>#a2` 每段带 `#`，词法必须收下才能
+> 解析；段校验（`withinChainValueProblem`）保证旧单层值/值内伪尾缀的解析结果逐字节不变
+> （伪 `#`/空段/超限都在段校验整组回退，回退 base 与旧"不剥"路径相同）。
+
 1. **语法**：`within:#a>#b`——`>` 分隔、**≤4 段**、每段 id charset、空段/超限/非法 ⇒ 整组回退（复用 `splitTailSuffixes` 循环：`WITHIN_TAIL_RE` 值 charset 加 `>`，段校验新增）。单层 `within:#p` 行为逐字节不变。
 2. **语义（向后兼容的超集）**：声明链 [a₁…aₙ]（外→内）匹配 ⇔ 每段都在 `anchor_ids` 且**嵌套序正确**（anchor_ids 是内→外存储 ⇒ `indexOf(aₙ) < … < indexOf(a₁)`）；单层 = membership（不变）。
 3. **候选生成**：`suggestHints` 的 within 候选升级——label 歧义且锚信息可用时：单层 `label within:#a` → 仍歧义且 `anchor_ids` ≥2 时链候选 `label within:#a>#b`（取该元素 anchor_ids 的外→内重组、≤4 段）；顺序仍 身份→label→frame→within、上限 4。

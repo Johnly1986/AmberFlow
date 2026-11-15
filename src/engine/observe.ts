@@ -211,7 +211,8 @@ function whyNotAdmitted(row: ObserveRawRow, classNames: string[] | undefined): s
   }
   return `${tag}${cls}: in the admission surface but no uniquely-resolvable hint shape `
     + `(label empty or shared with another candidate) — add id/name/data-test, make the visible label unique, `
-    + "or scope a shared label with `<label> within:#<ancestor-id>`";
+    + "or scope a shared label with `<label> within:#<ancestor-id>`"
+    + " (E2 chains also supported: `<label> within:#outer>#inner`, outer-to-inner, <=4 segments)";
 }
 
 /**

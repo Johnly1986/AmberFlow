@@ -126,6 +126,7 @@ import {
   ROLE_TOKENS,
   STOP_TOKENS,
   affordanceRule,
+  anchorChainMatch,
   hintCandidates,
   hintMatch,
   navRule,
@@ -2310,9 +2311,11 @@ export class BrowserMiddleware {
         // 该帧不命中——「找到但在锚外」与「找不到」在 evaluate 结果里可区分（hit 非 null
         // 且 anchors 不含 within vs hit 为 null）；清探针章后尝试下一帧（锚内命中可能在
         // 另一帧）。两帧都不命中 → 返回 null → 维持既有 target_not_found 语义走 A3。
+        // E2：within = 链（外→内），校验走 anchorChainMatch 嵌套序包含（唯一出处 rules.ts）
+        // ——单层 membership 逐字节不变；链任一段缺失/序错 = 该帧不命中（尝试下一帧）。
         if (parsed.within !== undefined) {
           const anchors = Array.isArray(hit["anchors"]) ? (hit["anchors"] as string[]) : [];
-          if (!anchors.includes(parsed.within)) {
+          if (!anchorChainMatch(anchors, parsed.within)) {
             await this._probeCleanup(page, token);
             continue;
           }

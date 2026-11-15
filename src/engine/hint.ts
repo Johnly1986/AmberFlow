@@ -17,12 +17,12 @@
  * 折叠）。现在"这串 hint 是什么形状"只在一个函数里回答；两面只回答"在这个底座上它命中谁"。
  */
 export type ParsedHint =
-  | { kind: "id"; value: string; within?: string; frameChain?: string[] }
-  | { kind: "attrSubstr"; tag: string; attr: string; value: string; within?: string; frameChain?: string[] }
-  | { kind: "nearToken"; tag: string; token: string; within?: string; frameChain?: string[] }
-  | { kind: "attrEq"; tag: string; attr: string; value: string; within?: string; frameChain?: string[] }
-  | { kind: "tag"; tag: string; within?: string; frameChain?: string[] }
-  | { kind: "bare"; token: string; within?: string; frameChain?: string[] };
+  | { kind: "id"; value: string; within?: string[]; frameChain?: string[] }
+  | { kind: "attrSubstr"; tag: string; attr: string; value: string; within?: string[]; frameChain?: string[] }
+  | { kind: "nearToken"; tag: string; token: string; within?: string[]; frameChain?: string[] }
+  | { kind: "attrEq"; tag: string; attr: string; value: string; within?: string[]; frameChain?: string[] }
+  | { kind: "tag"; tag: string; within?: string[]; frameChain?: string[] }
+  | { kind: "bare"; token: string; within?: string[]; frameChain?: string[] };
 
 /** DOM 属性名的规范形（`test`→`data-test`、`type`→`type`）；池侧用 `poolAttr` 映射回字段名。 */
 const DOM_ATTR: Record<string, string> = { test: "data-test", "data-test": "data-test", type: "type" };
@@ -40,10 +40,11 @@ export function poolAttr(attr: string): string {
  *   `#id` ｜ `tag[attr~substr]`（含 `[near~token]`）｜ 无括号的 `tag~token`（近邻）｜
  *   `tag[attr=value]`（值去引号）｜ `button|link|input|textarea|select`（角色词）｜ 裸词。
  *
- * E3：尾缀 `within:#id`（可选；**单层，不链式**）——把命中集限定在锚元素子树内。
+ * E3：尾缀 `within:#id`（可选；E2 起为**语义链** `within:#a1>#a2`——`>` 分隔外→内、≤4 段、
+ * 每段 id charset；单层 = 长度 1 链，逐字节兼容）——把命中集限定在锚链子树内。
  * A 批：尾缀 `frame:<origin链>`（可选；`>` 分隔外→内、≤4 段、每段 `v === new URL(v).origin`
  * 的 http(s) 规范形；末段 = 元素所在帧自身 origin，声明链 = 帧完整链的后缀）。
- * 剥离发生在一切形状判定之前；锚只能是 `#id` 形态（任意 CSS 锚拒绝）。
+ * 剥离发生在一切形状判定之前；锚只能是 `#id` 链形态（任意 CSS 锚拒绝）。
  *
  * **串尾词法预扫 + 循环剥离**（R2-5）：两类后缀各**至多一次**，只认「前置空白 + 串尾」；
  * 任一类超限 / 值非法 / 空段 ⇒ **整组后缀都不应用**——按原始串回退（禁止半剥），
@@ -91,11 +92,45 @@ function parseFrameChainValue(raw: string): string[] | null {
   return raw.split(">");
 }
 
+/**
+ * E2（within 语义链）：`within:` 尾缀值 = `#id` 链（`>` 分隔、**外→内**、≤4 段）。
+ * 段归一：每段可带可选 `#` 前缀（首段由值形状要求 `#`；后续段 `#a>#b` 与 `#a>b` 两种
+ * 写法都归一为 `["a","b"]`——同一链、同一语义，不做第二套形状）。
+ * 校验 = 段 charset（`[a-z0-9_\-.:]+`、非空）+ ≤4 段；空段/超限/非法段 ⇒ 非法（调用方
+ * **整组回退**：绝不半剥，原始串按旧形状解析 → 落空 = 显式失败）。
+ * 单层 `within:#p` = 长度 1 的链（n=1 是自然推广，行为与 E3 单层 membership 逐字节一致）。
+ */
+export type WithinChainValueProblem =
+  | { kind: "too-long"; segments: number }
+  | { kind: "empty-segment"; segments: number }
+  | { kind: "bad-segment"; segment: string };
+
+/** within 链值的唯一校验（与 frameChainValueProblem 同位：解析面只看"是否合法"，诊断面要原因类别）。 */
+export function withinChainValueProblem(raw: string): WithinChainValueProblem | null {
+  const segs = raw.toLowerCase().split(">");
+  if (segs.length > 4) return { kind: "too-long", segments: segs.length };
+  for (const seg of segs) {
+    const id = seg.startsWith("#") ? seg.slice(1) : seg;
+    if (id === "") return { kind: "empty-segment", segments: segs.length };
+    if (!/^[a-z0-9_\-.:]+$/.test(id)) return { kind: "bad-segment", segment: seg };
+  }
+  return null;
+}
+
+/** within 链值解析：合法 = 段数组（**外→内**、小写、`#` 前缀归一剥离），非法 = null。 */
+function parseWithinChainValue(raw: string): string[] | null {
+  if (withinChainValueProblem(raw) !== null) return null;
+  return raw.toLowerCase().split(">").map((seg) => (seg.startsWith("#") ? seg.slice(1) : seg));
+}
+
 /** 诊断面的尾缀预扫：与 frame 尾缀同形但允许**空值**（空值 parseHint 同样回退旧形状，
- *  `describeFrameSuffixRejection` 要能点名"frame: 后没有值"）。 */
+ *  `describeFrameSuffixRejection` 要能点名"frame: 后没有值"）。E2：值 charset 加 `>`
+ *  （链分隔符）与 `#`（段首标记——方案 §4.3/M6⑤ 的链写法 `within:#a2>#a1` 每段带 `#`；
+ *  词法只管"到串尾"，段的合法性由 withinChainValueProblem 单独判：段内伪 `#`/空段/超限
+ *  都在段校验被拒 ⇒ 整组回退——单层无 `>`/无伪 `#` 的旧值逐字节同路径）。 */
 const FRAME_TAIL_VALUE_RE = /(?:\s+frame:)(\S*)\s*$/;
 /** 诊断面用：within 尾缀词法（与 splitTailSuffixes 内部同形；describe 在小写串上逐段剥离）。 */
-const WITHIN_TAIL_RE = /(?:\s+within:)(#[a-z0-9_\-.:]+)\s*$/;
+const WITHIN_TAIL_RE = /(?:\s+within:)(#[a-z0-9_\-.:#>]+)\s*$/;
 
 /**
  * 串尾词法预扫 + 循环剥离（A 批 R2-5；C 批 B-1 起导出为**唯一剥离出处**，供 parseHint 与
@@ -104,11 +139,11 @@ const WITHIN_TAIL_RE = /(?:\s+within:)(#[a-z0-9_\-.:]+)\s*$/;
  * 两类后缀各 ≤1、只认「前置空白 + 串尾」；任一类超限/值非法/空段 ⇒ **整组回退**
  * （base = trim 后原串、无后缀字段，绝不半剥）——与 parseHint 逐字节同口径。
  */
-export function splitTailSuffixes(hint: string): { base: string; within?: string; frameChain?: string[] } {
-  const WITHIN_TAIL_RE = /(?:\s+within:)(#[a-z0-9_\-.:]+)\s*$/i;
+export function splitTailSuffixes(hint: string): { base: string; within?: string[]; frameChain?: string[] } {
+  const WITHIN_TAIL_RE = /(?:\s+within:)(#[a-z0-9_\-.:#>]+)\s*$/i;
   const FRAME_TAIL_RE = /(?:\s+frame:)(\S+)\s*$/i;
   let rest = hint.trim();
-  let within: string | undefined;
+  let within: string[] | undefined;
   let frameChain: string[] | undefined;
   let withinSeen = 0;
   let frameSeen = 0;
@@ -122,7 +157,10 @@ export function splitTailSuffixes(hint: string): { base: string; within?: string
       if (base === "") { rejected = true; break; }
       withinSeen += 1;
       if (withinSeen > 1) { rejected = true; break; }
-      within = wm[1]!.slice(1).toLowerCase();
+      // E2：链值段校验（空段/超限/非法段 ⇒ 整组回退，绝不半剥）——单层 = 长度 1 链。
+      const chain = parseWithinChainValue(wm[1]!);
+      if (chain === null) { rejected = true; break; }
+      within = chain;
       rest = base;
       continue;
     }
@@ -194,8 +232,9 @@ export function parseHint(hint: string): ParsedHint {
  * 什么类别没生效"说清楚（消费面：executor 的 target_not_found reason + 会话 act reason；
  * 页面可用 origin 列表由调用方另行追加）。
  *
- * 判定与 parseHint **同一条词法预扫**（`\s+` + 串尾；within 只认 `#...`、frame 值可为空串——
- * 空值 parseHint 会按旧形状回退，这里也要能点名）。**只报 frame 相关**：只重复 within 的问题
+ * 判定与 parseHint **同一条词法预扫**（`\s+` + 串尾；within 只认 `#...` 链、frame 值可为空串——
+ * 空值 parseHint 会按旧形状回退，这里也要能点名；E2：within 链值段校验（空段/超限/非法段）
+ * 与 parseWithinChainValue 共用同一判定）。**只报 frame 相关**：只重复 within 的问题
  * 不归本函数（它没有 frame: 可说），但"frame: 合法却因同串 within 问题被整组回退"要报——
  * 那正是 frame: 静默失效的一条。
  */
@@ -207,6 +246,8 @@ export function describeFrameSuffixRejection(hint: string): string | null {
   let frameSeen = 0;
   let withinSeen = 0;
   let frameProblem: string | null = null;
+  /** E2：within 侧被拒原因（链形：空段/超限/非法段；重复/缺主体沿用 blockedByWithin 布尔）。 */
+  let withinProblem: string | null = null;
   let blockedByWithin = false;
   for (;;) {
     const wm = WITHIN_TAIL_RE.exec(rest);
@@ -218,6 +259,11 @@ export function describeFrameSuffixRejection(hint: string): string | null {
       // within 自己出问题：parseHint 在这里就整组回退，但我们继续剥（只诊断）——为的是回答
       // "这一串里到底有没有 frame: 尝试"（`frame:… within:#a within:#b` 的 frame 同样没生效）。
       if (base === "" || withinSeen > 1) blockedByWithin = true;
+      else {
+        // E2：链值段校验同批（词法收下但段非法 = 整组回退——诊断点名链形原因）。
+        const problem = withinChainValueProblem(wm[1]!);
+        if (problem !== null) { withinProblem = withinChainProblemText(problem); blockedByWithin = true; }
+      }
       if (base === "") break;
       rest = base;
       continue;
@@ -245,10 +291,25 @@ export function describeFrameSuffixRejection(hint: string): string | null {
       + `\`>\` 链 ≤4 段、每段用规范 origin（不带 path/query/显式默认端口），且一条 hint 只能有一个 frame: 尾缀`;
   }
   if (frameSeen > 0 && blockedByWithin) {
+    if (withinProblem !== null) {
+      return `frame: 尾缀未被应用（同一串的 within: 尾缀值非法：${withinProblem}——R2-5 整组回退：`
+        + "任一类后缀超限/非法则所有后缀都不应用）——修法：把 within: 链写合法（每段 #id、"
+        + "`>` 分隔外→内、≤4 段、无空段）后 frame: 才会生效";
+    }
     return "frame: 尾缀未被应用（同一串的 within: 尾缀重复或缺少 hint 主体——R2-5 整组回退："
       + "任一类后缀超限/非法则所有后缀都不应用）——修法：去掉重复/孤立的 within: 后 frame: 才会生效";
   }
   return null;
+}
+
+/** within 链值问题的人话（有界：段的展示 ≤80 字符）。 */
+function withinChainProblemText(p: WithinChainValueProblem): string {
+  switch (p.kind) {
+    case "too-long": return `声明 ${p.segments} 段超过上限 4 段`;
+    case "empty-segment": return "链里有空段（\">\" 两侧都必须有 #id）";
+    case "bad-segment": return `段 ${JSON.stringify(clipForDiagnosis(p.segment))} 不是 #id 形态`
+      + "（每段只能是 id 字符 [a-z0-9_.:-]，段首 # 可选；任意 CSS 锚拒绝）";
+  }
 }
 
 /** 值问题的人话（有界：值的展示 ≤80 字符）。 */

@@ -10,6 +10,7 @@ import {
   firstOf, framesOf, urlOf, frameInHostsEnvelope, type Elem, type FrameLike, type PageLike,
 } from "./extraction.ts";
 import { elemFrameStamp, frameScopeMatchesFrame } from "./frame-scope.ts";
+import { anchorChainMatch } from "./rules.ts";
 import { ANCHOR_JS, compile } from "./pool-js.ts";
 
 /* ------------------------------------------- declared identity recovery (FW8) */
@@ -53,10 +54,11 @@ export interface IdentityHintInfo {
   frameChain?: string[];
   /**
    * E1（within 权威对等）：声明的 within 锚 id（小写；未声明 = undefined）。
-   * `identityLookup` 在候选收集处按 `anchors.includes(within)` 过滤（M5：在"恰好一个
-   * 可见匹配"判定之前）——executor 两调用点（命令步/act hint）不做任何额外判定，行为自动继承。
+   * E2（within 语义链）：归一为**链**（外→内，单层 = 长度 1）。`identityLookup` 在候选
+   * 收集处按 `anchorChainMatch(anchors, within)` 过滤（M5：在"恰好一个可见匹配"判定之前）
+   * ——executor 两调用点（命令步/act hint）不做任何额外判定，行为自动继承。
    */
-  within?: string;
+  within?: string[];
 }
 
 /** FW8：判断一条 hint 是不是**身份声明**（白名单五条里的形状/属性两条）。纯函数。 */
@@ -239,9 +241,11 @@ export async function identityLookup(
       // E1（within 权威对等，M5）：候选收集处按 within 过滤——在"恰好一个可见匹配"判定
       // 之前（本循环收集完毕后 visible.length !== 1 才判）。锚不在该帧文档（anchor_ids 不含
       // within）的行绝不进 candidates/visible：FW8 不再无视 within 在任意帧动作锚外 #x。
-      // M2 记账：过滤后 total_matches/hidden_matches/candidates 变**锚内**口径。
+      // E2：within = 链（外→内），过滤走 anchorChainMatch 嵌套序包含（唯一出处 rules.ts）——
+      // 单层 membership 逐字节不变。M2 记账：过滤后 total_matches/hidden_matches/candidates
+      // 变**锚内**口径。
       const anchors = Array.isArray(row["anchors"]) ? (row["anchors"] as string[]) : [];
-      if (within !== undefined && !anchors.includes(within)) continue;
+      if (within !== undefined && !anchorChainMatch(anchors, within)) continue;
       candidates.push({
         tag: String(row["tag"] ?? ""), label: String(row["label"] ?? ""),
         id: String(row["id"] ?? ""), frame: fi, visible: vis,

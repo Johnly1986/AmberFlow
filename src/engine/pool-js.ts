@@ -732,8 +732,16 @@ const HINT_HEAD = String.raw`(arg) => {
             };
             // E3：within:#id 的 DOM 侧限定——锚存在且命中元素在锚子树内（contains 判定；
             // 锚不在本页 = 本帧无命中，下一帧继续找）。单层（解析层已保证）。
-            const anchorEl = p.within ? document.getElementById(p.within) : null;
-            const inAnchor = (e) => p.within === undefined || (anchorEl && anchorEl.contains(e));
+            // E2（within 语义链）：p.within 归一为链（外→内数组，单层 = 长度 1）——逐段
+            // getElementById + 嵌套 contains 校验：声明链 a1 contains a2 contains … contains
+            // 元素；任一段 null / 前段不含后段 ⇒ 本帧 0 行（fail-closed，下一帧继续找）。
+            // 重复 id 边界（M6②，勿当 bug 修）：getElementById 取文档序首个——首个实例
+            // 不构成嵌套链时本帧 0 行（与池侧 anchorChainMatch 的确定性裁决同向）。
+            const chainEls = p.within ? p.within.map((id) => document.getElementById(id)) : [];
+            const chainOk = p.within !== undefined && chainEls.every((el, i) =>
+                el !== null && (i === 0 || chainEls[i - 1].contains(el)));
+            const innermost = chainEls.length ? chainEls[chainEls.length - 1] : null;
+            const inAnchor = (e) => p.within === undefined || (chainOk && innermost !== null && innermost.contains(e));
             // E1（within 权威对等，F-1 闭合）：回捞行补 anchor_ids（与真池行同构）——回捞行
             // 并入主池后 executor 重新 hintMatch，池侧 inAnchor 按 anchor_ids 过滤；此前回捞行
             // 缺该字段被二次清零 → 落到 FW8（无视 within）在任意帧动作锚外 #x。共享 ANCHOR_JS。
