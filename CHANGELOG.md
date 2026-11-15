@@ -356,6 +356,72 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   `npm run typecheck` / `npm run prompt-hit` 通过。浏览器级留待 lead 专项
   （真页 read/extract 带 ` frame:` 取子帧文本、信封外 null、done 信号 frame 尾缀升级）。
 
+### E5 批（induceHint 帧限定）
+
+- **【背景/规格】** `docs/WITHIN_PARITY_PLAN.md` §7（+ §12.4「E5 不依赖 E2」）。旧 `induceHint`
+  只产 `[attr=v]` / `tag[near~token]`——记忆 hint 只在同一 `(url, subgoal)` 生效，但同 url 下
+  同签名父子/兄弟帧回放会歧义 → 回退模型（无误动作，记忆价值打折）。
+- **【产物】`src/model/hint-memory.ts`**：`induceHint` 在稳定句柄后追加帧限定尾缀——
+  `frame_path` 非空（= 非主帧）且 `frame_origin` 非空时产 `<hint> frame:<own origin>`（单段；
+  与 `frame:` 语法同形）；主帧（`frame_path` 省略/空数组）**逐字节不变**；未知 origin 帧
+  （`frame_origin`/`frame_path` 两字段皆缺，如 about:blank/srcdoc）**不追加**——任何 `frame:`
+  都命中不了那种帧，加了只会得到一条死 hint，保持既有"歧义/未命中→回模型"行为。
+- **【回放链路（零新增代码，核对项）】** `currentHint`（`executor.ts`）→ `hintMatch` →
+  `parseHint`：尾缀在解析层被 `splitTailSuffixes` 剥离、`frameChain` 进 `hintMatchImpl` 入口
+  entries 过滤——子帧记忆精确落帧，同签名跨帧不再歧义（D2：**同 origin 父子帧仍可能歧义**，
+  own origin 单段区分不了同源父子；跨帧同签名不合并仍是独立立项）。`hintMemory.record/
+  lookup`、落盘 sidecar 重载同链路可用；`hint-lint` 的三类形状判定只读 `parseHint` 的 base，
+  合法尾缀不产生 `rejected`/`host` 提醒（三类 finding 种类/条数与无尾缀一致）。
+- **【amber start 护栏（E5 产物进入主帧点击面的必要适配）】** 该 CLI 的演示点击是主帧
+  `page.click(...)`：`extractElements` 会扫子帧，`induceHint` 产出的帧限定串此前会以非法 CSS
+  点击失败。现在对**生成后的 hint** 复用 `frameTargetRejection`（与 `--target` 同一条结构化拒绝，
+  exit 沿用 2，指路 app/run 或 plan 面）；主帧产物 rejection = null，行为逐字节不变。
+- **【文档/契约】** `docs/APP_SCRIPT_AUTHORING.md` 学习环补「记忆产物的帧限定（E5）」段
+  （子帧带尾缀、主帧不变、未知 origin 不加、D2 边界）；BACKLOG「后续立项」#5 收口；
+  `schema-gen` F70 statement 末尾补 E5 批（induceHint 子帧尾缀）+ truth 补
+  `src/model/hint-memory.ts` / `src/cli/start.ts`；`HINT_GRAMMAR.frame_suffix` 注记同步；
+  schema 快照重生成。
+- **【验证】** 离线断言全绿（/tmp/af-e56，E5 组 89 条）：主帧元素新旧实现逐字节矩阵
+  （旧实现 = `git show fb86b7c` 提取的 `HANDLE_ATTRS+induceHint`，data-test/id/name/near/
+  无句柄/长 label/volatile/主帧两字段形状/null/undefined）；子帧产物 = 旧产物 + ` frame:<origin>`
+  且 `splitTailSuffixes`/`parseHint` 自证 base/kind/frameChain；未知 origin/部分缺失/主帧空 path
+  不追加；池内 `hintMatch` 自证（同签名三帧中精确命中 f1/f2/n2、候选集 1 vs 未限定 3）；
+  `record→lookup→currentHint→hintMatch→parseHint` 回放与 sidecar 落盘重载；hint-lint
+  三类 finding 不误报 + 合法 origin 零 frame 提醒 + 大写 origin 合法；`amber start` 子帧产物
+  结构化拒绝 / 主帧放行。
+
+### E6 批（小项收尾）
+
+- **【matchedChains 截断标记（BACKLOG #7 / 方案编号 #12）】** `extraction.probeExcludedHint`
+  此前"去重"与"截断到 ≤4"共用一个条件（`!seen && length<4`）——>4 条时证据里连总数都看不到。
+  改为**全量 distinct 链计数**（`seenChains` 恒累加）+ 列表仍列前 4 条；`ExcludedHintProbe`
+  additive 增 `matched_chains_total`（恒有，去重口径）与 `matched_chains_truncated?: true`
+  （仅 `total > listed` 时出现，≤4 条时字段省略）。`executor-pure.frameTargetStopReason`
+  仅在截断时于 `hit chain(s):` 段末补 ` (共 N 条 distinct 链，还有 M 条未列出)`；**≤4 条 /
+  空链证据时 reason 逐字节不变**（离线用 `git show fb86b7c` 的旧函数对照）。
+- **【整串 `frame:` 诊断（BACKLOG #8 / 方案编号 #13）】** `hint.describeFrameSuffixRejection`
+  对**首词即 `frame:`、无 hint 主体**的形状（`frame:https://a.com`、前导空白后同形、大写
+  `FRAME:...`、带 within 的同类串）补「尾缀前没有 hint 主体（必须写成 `<hint> frame:<origin>`）」
+  诊断（复用同一条失败修饰文案，只走失败路径附注）；带**未闭合 `[` 守卫**——`[data-x=frame:o]`
+  一类值内伪后缀不误报（与循环内同一条 `hasUnclosedBracket`）。`parseHint` 的解析结果不变
+  （整串仍按旧形状=裸词落空）；**带主体时新旧逐字节相同**（22 条矩阵）。
+- **【文档（BACKLOG #9）】** `docs/APP_SCRIPT_AUTHORING.md` 尾缀段补「大小写与整串形状」：
+  hint 先整串 lowercase（`i` 语义）——`FRAME:HTTPS://A.COM` 与 `frame:https://a.com` 等价、
+  被识别为合法尾缀；`findByHint`（`plan check --probe`）的属性词正则大小写敏感——
+  `[DATA-TEST=x]` 不命中、`[data-test=x]` 才命中（新旧一致、既有边界；act hint 侧先折叠不受影响）；
+  整串无主体的显式失败与修法。BACKLOG #5/#7/#8/#9 状态更新（#7/#8 标注方案编号 #12/#13）。
+- **【契约】** `schema-gen` F70 statement 补 E6（整串 `frame:` 缺主体诊断 + `[data-x=frame:o]`
+  不误报）+ truth 补 E6 文件；F45 statement/truth 补 `matched_chains_total/truncated`（列表仍
+  ≤4、reason 截断带总数）；`HINT_GRAMMAR.frame_suffix` 同批注记；schema 快照重生成
+  （`npm run schema:check` 绿）。
+- **【验证】** 离线断言全绿（/tmp/af-e56，E6 组 61 条）：6 条 distinct 链 → total=6、列表 4、
+  truncated=true、reason 除截断附注外与旧文案逐字节相同；1/3/4 链 → total 真实、无 truncated、
+  reason 逐字节旧；同链两帧 distinct 去重 total=1；未知 origin（detached）opaque 键去重；
+  声明链只评估匹配帧；无被排除帧 → null；空 matchedChains 的 reason 逐字节旧；整串
+  `frame:` 诊断矩阵（`frame:o` / 前导空白 / 大写 / 链形 / 带 within）+ 属性值伪后缀/未闭合 `[`
+  不误报；带主体 22 条新旧逐字节；`parseHint` 解析不变、大写 origin 合法、`[DATA-TEST=x]`
+  既有边界、子帧 induceHint 身份产物 findByHint 命中。
+
 ### 已知边界 / 未做（A–D 批后的诚实清单）
 
 - **`within` 语义链（E 批 E2）**：已收口（E2——链语法/嵌套序包含语义/池+DOM+FW8+F64+DRF
@@ -364,6 +430,9 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - **跨帧同签名不合并**：未做（需独立立项 + 开关）。`esig`/`firstIfSame` 的签名不含 frame 字段，
   同 tag/label/href/data-test 的跨帧元素仍可能被 `firstIfSame` 合并；run 命令步 / act hint 直接
   执行一个，会话 act 因 `hintCandidates.decided` 不暴露该裁决而停。
+- **同 origin 父子帧的记忆产物（E5/D2 边界）**：`induceHint` 只追加自身 origin 单段（记忆侧
+  没有帧完整链）——同源父/子同签名元素的记忆回放仍可能歧义 → 回退模型（无误动作）；
+  需要精确区分时用 authored `frame:<parent>><child>` 链或 `inspect`/`ctx.observe` 的候选。
 - **`read`/`extract`/`collect`/`judge` 帧限定对称化**：未做。`locatorAnyFrame` 逐帧 OR，无法指定帧；
   本方案只服务 act hint / 命令 target。
 - **>6 帧 / 每帧池配额**：未做。`framesOf ≤6`；池窗口 40/120 跨帧共享、主 frame 优先；

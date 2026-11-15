@@ -90,10 +90,23 @@
 
 ## 7. E5：induceHint 帧限定（记忆产物）
 
+> **状态：已实施（E5 批，提交号由 lead 落定）**。实施记录见 CHANGELOG「E5 批（induceHint 帧限定）」；
+> 离线套件 `/tmp/af-e56/`（主帧逐字节矩阵 / 子帧尾缀与 parseHint 自证 / 未知 origin 不追加 /
+> currentHint→hintMatch 回放 / hint-lint 三类 finding 不误报）。与本节对齐：`frame_path` 非空 +
+> `frame_origin` 非空才追加 own origin 单段；**边界（R-9/D2）**：同 origin 父子帧仍可能歧义，
+> 记忆侧不带帧完整链、不猜更长链。`amber start` 主帧点击面对子帧产物走既有结构化拒绝
+> （`frameTargetRejection`，exit 2）——E5 产物进入该消费面的必要护栏。浏览器级：记忆面无需专项。
+
 - `induceHint(elem)`：`elem.frame_path` 非空（**非主帧**）时在产物尾追加 ` frame:<own origin>`——主帧元素逐字节不变（绝大多数记忆不受影响）；子帧元素记忆回放可精确落帧。
 - 兼容核对：`hint-lint` 对带尾缀记忆 hint 的三类 finding 不误报；`learn` 录制→回放链路实测。
 
 ## 8. E6：小项收尾
+
+> **状态：已实施（E6 批，提交号由 lead 落定）**。实施记录见 CHANGELOG「E6 批（小项收尾）」；
+> 离线套件 `/tmp/af-e56/`（>4 distinct 链 total/truncated + reason 总数、≤4 链 reason 逐字节旧、
+> 整串 `frame:` 诊断矩阵、带主体新旧逐字节、无 frame 参与 reason 逐字节）。与本节对齐：
+> `matched_chains_total` 恒有、`matched_chains_truncated?` 只在截断时出现（列表仍 ≤4）；
+> 整串诊断带未闭合 `[` 守卫（`[data-x=frame:o]` 不误报）。
 
 - `probeExcludedHint.matchedChains` 增 `truncated` 标记 + reason 带总数；
 - `describeFrameSuffixRejection` 对整串 `frame:<origin>`（首词即 frame:、无前导空白主体）补"缺少 hint 主体"诊断；

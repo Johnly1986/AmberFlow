@@ -1532,9 +1532,18 @@ export interface ExcludedHintProbe {
   declaredChain?: string[];
   /**
    * C 批：**命中帧的完整链**（`frameChainOf`，外→内、末段=该帧自身 origin；未知 origin 帧为
-   * 空数组）——按链去重、≤4 条，只含真正产出匹配的排除帧（不把无关 origin 当证据）。
+   * 空数组）——按链去重、**前 4 条**（有界列表），只含真正产出匹配的排除帧（不把无关 origin
+   * 当证据）。E6：列表截断时**不丢总数**——全量 distinct 链数见 `matched_chains_total`。
    */
   matchedChains: Array<{ frame: number; origin: string; chain: string[] }>;
+  /**
+   * E6（BACKLOG #7 / WITHIN_PARITY_PLAN §8）：命中帧的**全量 distinct 链数**（去重口径，
+   * ≥ `matchedChains.length`）。旧实现把"去重"与"截断到 ≤4"共用一个条件，>4 条时证据里
+   * 连总数都看不到；现在总数恒有、列表仍 ≤4。
+   */
+  matched_chains_total: number;
+  /** E6：列表被截断（`matched_chains_total > matchedChains.length`）时为 `true`；≤4 条时省略。 */
+  matched_chains_truncated?: true;
   /** 排除帧内的命中行（ref 是证据编号，不参与动作）。 */
   matches: Array<{
     ref: string; frame: number; tag: string; label: string;
@@ -1548,6 +1557,8 @@ export interface ExcludedHintProbe {
  *
  * C 批：只探测与声明链匹配的排除帧（A 批已过滤）；证据同时带**声明的链**与**命中帧完整链**
  * （按链去重、≤4 条，有界）——reason 的措辞由 executor-pure.frameTargetStopReason 统一拼装。
+ * E6：去重与截断解耦——全量 distinct 链数进 `matched_chains_total`，列表仍只列前 4 条，
+ * 超出时 `matched_chains_truncated:true`（reason 带总数）；≤4 条时结构与文案逐字节不变。
  */
 export async function probeExcludedHint(
   page: PageLike, hosts: string[] | null | undefined, hint: string,
@@ -1581,16 +1592,18 @@ export async function probeExcludedHint(
     if (matches.length === before) continue;        // 该帧没有命中：不进链证据
     const chain = frameChainOf(frame) ?? [];
     const key = chain.length ? chain.join(">") : `opaque:${origin}`;
-    if (!seenChains.has(key) && matchedChains.length < 4) {
-      seenChains.add(key);
-      matchedChains.push({ frame: index, origin: origin || "about:blank", chain });
-    }
+    if (seenChains.has(key)) continue;              // 同一链只算一次（全量 distinct 计数）
+    seenChains.add(key);
+    if (matchedChains.length < 4) matchedChains.push({ frame: index, origin: origin || "about:blank", chain });
   }
   if (matches.length === 0) return null;
+  const total = seenChains.size;
   return {
     origins: gate.origins,
     ...(parsed.frameChain === undefined ? {} : { declaredChain: parsed.frameChain }),
     matchedChains,
+    matched_chains_total: total,
+    ...(total > matchedChains.length ? { matched_chains_truncated: true as const } : {}),
     matches,
   };
 }

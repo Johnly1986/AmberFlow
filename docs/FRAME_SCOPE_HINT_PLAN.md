@@ -481,15 +481,15 @@ frame:<o1>><o2>         # 链：外→内；末段 = 元素所在帧自身 origi
 
 | 项 | 状态 | 说明 |
 |---|---|---|
-| `within` 语义链（E 批） | 延后（独立回退单元） | §12.4 原因：合成池无 `anchor_ids`、FW8/F64/DRF-text 不遵守 within；前置条件见 §12.4 |
+| `within` 语义链（E 批） | ✅ **E2 已收口** | 见 `docs/WITHIN_PARITY_PLAN.md`（E 批方案 §4/§13）；嵌套序包含语义（单层兼容） |
 | 跨帧同签名不合并 | 未做（独立立项 + 开关） | D2 边界：`esig`/`firstIfSame` 签名不含新字段，同 tag/label/href/data-test 的跨帧元素仍合并 |
-| `read/extract/collect/judge` 帧限定对称化 | 未做 | 当前 `locatorAnyFrame` 逐帧 OR，无法指定帧（§12.6）；本方案只服务 act hint / 命令 target |
+| `read/extract/collect/judge` 帧限定对称化 | ✅ **E4 已收口** | 见 `docs/WITHIN_PARITY_PLAN.md` §6（选择器尾缀 ` frame:<origin链>`、F71） |
 | >6 帧 / 每帧池配额 | 未做 | `framesOf ≤6`；池窗口 40/120 跨帧共享、主帧优先；`frame:` 落空时 reason 列允许帧 origin（≤6） |
 | `about:blank` / srcdoc 帧寻址 | 不做（本期） | 未知 origin 帧不可被任何 `frame:` 命中（D5）；origin 只用于匹配，不是安全判定（门禁是 hosts） |
 | 帧下标链 / nth-child / XPath / iframe 选择器锚 | 不做 | 漂移/破坏 hint 封闭集（§12.1/§12.6） |
 | `findByHint` 六形状全语义 | 未做（C 批边界） | 见 §13.2-4；`plan check --probe` 仅身份形状 + induceHint 产物 |
-| `findByHint` 支持 `within:` | 未做（复审 B-1 附注） | 组合后缀的 **frame 链过滤**已由 B-1 修复；但 within 作用域在该面不生效（与 R2-8 同属回捞面权威不对等，E 批前置） |
-| hintMemory / `induceHint` 帧限定 | 未做（复审边界） | `hint-memory.ts` 只产出 `[data-test=x]`/`tag[near~token]` 形状——跨帧同名记忆回放会歧义→回退模型（无误动作，记忆价值打折） |
+| `findByHint` 支持 `within:` | ✅ **E3 已收口** | 单层+链作用域过滤（`docs/WITHIN_PARITY_PLAN.md` §5）；nearToken 精确串边界仍为既有口径 |
+| hintMemory / `induceHint` 帧限定 | ✅ **E5 已收口** | 子帧元素产物带 ` frame:<own origin>`、主帧逐字节不变（`docs/WITHIN_PARITY_PLAN.md` §7） |
 | `frameChainOf` 深度帽 8 × `framesOf ≤6` 口径差 | 记录 | 帽只防病态环；更深帧本就不可达；病理帧树（环）由 `parent===cur`+帽兜底 |
 | 结构证据进 ambiguity / 模型面 | 不做 | `structure_path` 仅诊断，不进 hint/模型/歧义（§12.5） |
 

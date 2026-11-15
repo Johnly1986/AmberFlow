@@ -242,6 +242,15 @@ export function describeFrameSuffixRejection(hint: string): string | null {
   // 合法（含与 within 组合）＝ parseHint 已接受，没有"被拒绝"可报。
   if (parseHint(hint).frameChain !== undefined) return null;
   const h = hint.trim().toLowerCase();
+  // E6（BACKLOG #8 / WITHIN_PARITY_PLAN §8）：**整串 `frame:<origin>`、首词即 frame:**
+  // （无前导空白主体，如 `frame:https://a.com`）——词法预扫只认「前置空白 + 串尾」，
+  // 这种串根本进不了下面的循环（`frame:` 在串首），旧实现于是不点名"缺少主体"。
+  // 这里显式补同一条措辞的诊断（仍是失败路径附注，不改 parseHint 的解析结果）。
+  // 守卫：带未闭合 `[` 时 `frame:` 可能落在属性值内部（`[data-x=frame:o]` 一类形状），
+  // 与循环里同一条守卫——不把它当后缀尝试，防误报。
+  if (h.startsWith("frame:") && !hasUnclosedBracket(h)) {
+    return frameRejectionText("尾缀前没有 hint 主体（必须写成 `<hint> frame:<origin>`）");
+  }
   let rest = h;
   let frameSeen = 0;
   let withinSeen = 0;
@@ -285,11 +294,7 @@ export function describeFrameSuffixRejection(hint: string): string | null {
     if (problem !== null) { frameProblem = frameChainProblemText(problem); break; }
     rest = base;
   }
-  if (frameProblem !== null) {
-    return `frame: 尾缀未被应用（${frameProblem}）——整串按旧形状解析，目标大概率落空`
-      + `（命令步 target_not_found / 会话 act 零命中）。修法：写成 \`<hint> frame:<http(s)://host[:port]>\`，`
-      + `\`>\` 链 ≤4 段、每段用规范 origin（不带 path/query/显式默认端口），且一条 hint 只能有一个 frame: 尾缀`;
-  }
+  if (frameProblem !== null) return frameRejectionText(frameProblem);
   if (frameSeen > 0 && blockedByWithin) {
     if (withinProblem !== null) {
       return `frame: 尾缀未被应用（同一串的 within: 尾缀值非法：${withinProblem}——R2-5 整组回退：`
@@ -300,6 +305,13 @@ export function describeFrameSuffixRejection(hint: string): string | null {
       + "任一类后缀超限/非法则所有后缀都不应用）——修法：去掉重复/孤立的 within: 后 frame: 才会生效";
   }
   return null;
+}
+
+/** 单一措辞出处：frame 尾缀为何未被应用 + 修法（无 frameProblem 的路径不经过这里）。 */
+function frameRejectionText(problem: string): string {
+  return `frame: 尾缀未被应用（${problem}）——整串按旧形状解析，目标大概率落空`
+    + `（命令步 target_not_found / 会话 act 零命中）。修法：写成 \`<hint> frame:<http(s)://host[:port]>\`，`
+    + `\`>\` 链 ≤4 段、每段用规范 origin（不带 path/query/显式默认端口），且一条 hint 只能有一个 frame: 尾缀`;
 }
 
 /** within 链值问题的人话（有界：段的展示 ≤80 字符）。 */

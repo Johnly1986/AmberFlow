@@ -287,7 +287,7 @@ export async function flow(ctx) {
   `skip` = 按定义解决的零动作命令：全部命令解决后引擎会**评估一次 done 信号**再判成败——"导航由 arrive 完成、本步只验证到达"的守卫步合法可用（04-A 修复；此前 skip 步的 done 从未被评估，必报 `done_not_held`）。守卫步写法：`act: [ctx.command("skip")]`（完整可跑示例见 `examples/apps/01-basic-step` 步骤②）。
   不在能力面内的 op 会得到 `action_unsupported`，目标歧义是 `target_ambiguous`，目标不存在是 `target_not_found`。
 - **act hint 是六形状语法闭集**（唯一解析器 `src/engine/hint.ts`，语法**描述**的唯一出处 `src/engine/grammar-prompt.ts`，`npm run prompt-hit` 校验示例可命中、报错/提示词/桥描述不漂移）：`#id` ｜ `tag[attr~substr]` ｜ `tag~token` ｜ `tag[attr=value]`（值去引号、全小写折叠）｜ 角色词 `button|link|input|textarea|select` ｜ 裸词（按 label 匹配）。属性名按池字段匹配：test→data-test、type→input_type、aria-label→label、href、name、id、role、near；aria-label 是 label 的别名（提取期已并进 label），label/href 按完整值（≤200）匹配（label = full_label + label、href = href_full + href 双底座），class、title 等不在池字段模型里，永不命中（本句由 grammar-prompt 的 ATTR_MATCH_MODEL_TEXT 生成，prompt-hit 逐字校验，勿手改）。**容器/后代 CSS（如 `#outer input`）不是语法错误——会被解析成一个永不命中的形状**；命令空间的 `target_not_found` reason 附闭集提示，而 act hint 落空会**静默回退模型决策**、报 `low_confidence` 不附提示——写 hint 前先 `inspect` 拿验证过的 `hint_candidates`。六形状均可再带 `within:#id[>#id…]`（E2 语义链，单层兼容）与/或 `frame:<origin链>` 尾缀（见下条）。
-- **尾缀限定（`within:#id[>#id…]` / `frame:<origin链>`）**：两种后缀可组合、顺序无关、各至多一次。`within:` 值是 `>` 分隔的 **#id 链（外→内、≤4 段；E2 语义链，单层 `within:#id` = 长度 1 逐字节兼容）**，匹配 = **嵌套序包含**：每段都在元素的 `anchor_ids`（提取期算好的祖先 id 链，内→外存储、≤8 个）里且嵌套序正确（`indexOf(aₙ) < … < indexOf(a₁)`）——中间隔几层无 id 祖先不影响（间隙容忍）；任一段缺失/序错即不命中。`frame:` 值是 `>` 分隔的 origin 链（外→内、≤4 段），每段必须是 `scheme://host[:port]` 的 http(s) **规范 origin**（`v === new URL(v).origin`；带 path/query/fragment/显式默认端口即非法，`https://a:443` 要写成 `https://a`）；末段 = 元素所在帧自身 origin，声明链 = 帧完整链（含主帧 origin）的后缀——同源父子靠链长区分（`frame:o` 命中父、`frame:o>o` 仅子）。**两套对齐规则不同（写文档义务）**：`frame:` = 帧完整链的**后缀对齐**（frame_path 稠密可分同源父子）；`within:` = **嵌套序包含**（`anchor_ids` 稀疏 ≤8、仅带 id 祖先——对 within 做后缀对齐会毁单层兼容）。**已知边界**：重复 id `within:#x>#x` 不匹配（id 投影无实例身份，序关系不成立；DOM 侧 getElementById 取文档序首个，同样 fail-closed）；`anchor_ids` ≤8 截断下长链会落空（显式失败）。**未知 origin 帧**（`about:blank`/srcdoc 的 `null`、空串）不可被任何 `frame:` 命中。解析是**串尾词法预扫 + 循环剥离**：只认「前置空白 + 串尾」，任一类超限/值非法/空段 ⇒ **整组后缀都不应用**（按原始串解析 → 落空 = 显式失败，绝不半剥；值内的伪后缀不受影响）。示例：`Close frame:https://ogs.google.com`、`保存 within:#dialog frame:https://checkout.example.com`、`按钮 within:#list>#row-3`；跨帧仍歧义时先用 `inspect`/`ctx.observe` 的 `frame:`/`within:` 候选（inspect 会把验证过的单层→链候选直接给出），别猜 origin。
+- **尾缀限定（`within:#id[>#id…]` / `frame:<origin链>`）**：两种后缀可组合、顺序无关、各至多一次。`within:` 值是 `>` 分隔的 **#id 链（外→内、≤4 段；E2 语义链，单层 `within:#id` = 长度 1 逐字节兼容）**，匹配 = **嵌套序包含**：每段都在元素的 `anchor_ids`（提取期算好的祖先 id 链，内→外存储、≤8 个）里且嵌套序正确（`indexOf(aₙ) < … < indexOf(a₁)`）——中间隔几层无 id 祖先不影响（间隙容忍）；任一段缺失/序错即不命中。`frame:` 值是 `>` 分隔的 origin 链（外→内、≤4 段），每段必须是 `scheme://host[:port]` 的 http(s) **规范 origin**（`v === new URL(v).origin`；带 path/query/fragment/显式默认端口即非法，`https://a:443` 要写成 `https://a`）；末段 = 元素所在帧自身 origin，声明链 = 帧完整链（含主帧 origin）的后缀——同源父子靠链长区分（`frame:o` 命中父、`frame:o>o` 仅子）。**两套对齐规则不同（写文档义务）**：`frame:` = 帧完整链的**后缀对齐**（frame_path 稠密可分同源父子）；`within:` = **嵌套序包含**（`anchor_ids` 稀疏 ≤8、仅带 id 祖先——对 within 做后缀对齐会毁单层兼容）。**已知边界**：重复 id `within:#x>#x` 不匹配（id 投影无实例身份，序关系不成立；DOM 侧 getElementById 取文档序首个，同样 fail-closed）；`anchor_ids` ≤8 截断下长链会落空（显式失败）。**未知 origin 帧**（`about:blank`/srcdoc 的 `null`、空串）不可被任何 `frame:` 命中。解析是**串尾词法预扫 + 循环剥离**：只认「前置空白 + 串尾」，任一类超限/值非法/空段 ⇒ **整组后缀都不应用**（按原始串解析 → 落空 = 显式失败，绝不半剥；值内的伪后缀不受影响）。示例：`Close frame:https://ogs.google.com`、`保存 within:#dialog frame:https://checkout.example.com`、`按钮 within:#list>#row-3`；跨帧仍歧义时先用 `inspect`/`ctx.observe` 的 `frame:`/`within:` 候选（inspect 会把验证过的单层→链候选直接给出），别猜 origin。**大小写与整串形状（E6）**：hint 会先整串 lowercase（`i` 语义）——`FRAME:HTTPS://A.COM` 与 `frame:https://a.com` 等价、都会被识别为合法尾缀；但 `findByHint`（`plan check --probe` 的旧匹配器）的属性词正则大小写敏感——`[DATA-TEST=x]` 不命中、`[data-test=x]` 才命中（新旧一致、既有边界；act hint 侧不受影响，`parseHint` 先折叠）。**整串只写 `frame:<origin>`（首词即 `frame:`、没有任何 hint 主体）不是合法 hint**：按旧形状解析后落空，失败 reason 会点名「缺少 hint 主体（必须写成 `<hint> frame:<origin>`）」——补上主体即可（`Close frame:https://a.com`）。
 
 #### 候选窗口与分桶（A2：窗口是**有界快照**，不是"页面没有"）
 
@@ -694,7 +694,9 @@ frame），允许帧已成立 = 正常成功。其余情况步骤照常，只在
    `<label> frame:<祖先…>自身>`（含自身 ≤4 段，与 `parseHint` 同口径；更长不生成）。每条候选都由
    同一个 `hintMatch` 自证，可照抄。**CLI 两个消费面**：`plan check --probe` 的 target_hint 核对
    先 `parseHint` 再按声明链过滤池（`findByHint`）——**身份形状**（`#id` / `[data-test=…]` / `[id=…]` /
-   `[name=…]`）与 `induceHint` 产物的 `frame:` 目标能正确命中；**within 作用域已校验（单层+链）**——
+   `[name=…]`）与 `induceHint` 的**身份形状**产物（E5 起子帧元素带 ` frame:<own origin>` 尾缀）能正确
+   命中；`tag[near~…]` 产物仍走旧精确串比较（既有边界，记忆回放走 `hintMatch` 不受影响）；**within
+   作用域已校验（单层+链）**——
    帧链过滤后按元素 `anchor_ids` 过滤（与 act hint 的 `within:` 同一 `anchorChainMatch` 语义），
    `frame:`+`within:` 组合两面同时生效，锚外/帧外目标如实报未命中；该 CLI 的匹配器**不是** `hintMatch`
    六形状分档语义（裸词 / `attrSubstr` / `nearToken` 等仍按旧匹配器，可能误报未命中——既有边界，
@@ -1010,6 +1012,8 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 
 学习环：`amber run <app> --remember` 开启 sidecar（默认 `$AMBERFLOW_HOME/hint-memory/<app>.json`），`--memory FILE` 指定落点。学到的 hint 只进 sidecar，**永不写回被审计的 `app.mjs`**；脚本里 authored hint 恒优先。`amber help --all` 里还有 `--ablate stub|rules-only`、`--tiered-hint`、`--min-confidence` 等实验/消融旗标，日常不需要。
 
+**记忆产物的帧限定（E5）**：学到的 hint 与 authored hint 同一语法（`[data-test=…]`/`[id=…]`/`[name=…]` 或 `tag[near~…]`），**子帧元素的产物会在末尾带 ` frame:<自身 origin>`**（`frame_path` 非空 = 非主帧；主帧元素逐字节不变）。回放走 `currentHint → hintMatch → parseHint`——尾缀在解析层剥离后按帧链限定，同一页跨帧同签名因此能精确落回学到的那一帧，零额外配置。`about:blank`/srcdoc 等**未知 origin 帧不追加**尾缀（那种帧不可被任何 `frame:` 命中，加了只会得到一条死 hint）。`apps check` 的 hint-lint 对带尾缀记忆 hint 的三类形状判定不变（合法 origin 不产生 `frame:` 提醒）。**已知边界（D2）**：同 origin 的父子/兄弟帧仍可能歧义——记忆只带自身 origin 单段，区分不了同源父子；跨帧同签名不合并仍是独立立项（run 命令步/act hint 直接执行一个、会话 act 才停）。
+
 ## 9. 执行轨迹与重放
 
 ```bash
@@ -1120,7 +1124,9 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
   `findByHint`（plan check --probe）的 within 作用域校验已做（E3——帧链过滤后按 `anchor_ids` 过滤，
   单层+链与 act hint 同一 `anchorChainMatch` 语义，`frame:`+`within:` 组合两面同时生效）；
   `plan check --probe` 只覆盖 `findByHint`
-  旧形状集（身份形状 + `induceHint` 产物），`amber start --target` 拒绝帧限定目标。
+  旧形状集（身份形状 + `induceHint` 身份产物），`amber start --target` 拒绝帧限定目标。
+  **E5 起**子帧元素的 `induceHint` 记忆产物带 ` frame:<own origin>` 尾缀（主帧不变、未知 origin
+  帧不加），记忆回放走 `hintMatch`；同 origin 父子帧仍可能歧义（D2 边界——记忆只带自身 origin 单段）。
 
 ## 12. 扩展配方（改引擎的人看）
 

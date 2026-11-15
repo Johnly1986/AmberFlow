@@ -333,6 +333,14 @@ async function commandJob(
       io.out(`点名的目标不在这个页面上：${ref}`);
       return 2;
     }
+    // E5：induceHint 现在会给**子帧元素**产 ` frame:<own origin>` 尾缀；本 CLI 的演示点击
+    // 是主帧 `page.click(sel)`，帧限定目标要么点错、要么超时（选择器本身也不是合法 CSS）。
+    // 与 `--target` 同一条结构化拒绝（同一函数，exit 沿用本 CLI 既有失败口径 2）；
+    // 主帧元素无尾缀 → rejection = null，行为逐字节不变。
+    if (hint !== null) {
+      const hintRejection = frameTargetRejection(hint);
+      if (hintRejection !== null) { io.out(hintRejection); return 2; }
+    }
     const sel = hint ? selectorForHint(hint) : null;
     if (!sel) {
       io.out(`这个元素没有稳定句柄（data-test / id / name），不按位置盲点。请用 --target 指名别的元素。`);

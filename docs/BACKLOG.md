@@ -224,7 +224,7 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 
 ## frame:<origin> 后续立项（2026-11-15 实施复审）
 
-**状态**：open ｜ 来源：`frame:<origin>` 帧限定 hint 落地（`bc400ca..8358c92`，规格 `docs/FRAME_SCOPE_HINT_PLAN.md` §13）+ 实现复审（CONDITIONAL APPROVE）
+**状态**：open（E1–E6 批已收口 #1/#2/#4/#5/#7/#8/#9；剩余 #3 跨帧同签名不合并、#6 >6 帧/每帧池配额）｜ 来源：`frame:<origin>` 帧限定 hint 落地（`bc400ca..8358c92`，规格 `docs/FRAME_SCOPE_HINT_PLAN.md` §13）+ 实现复审（CONDITIONAL APPROVE）
 
 | # | 项 | 说明 | 关联 |
 |---|---|---|---|
@@ -232,8 +232,14 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 | 2 | `findByHint` 支持 `within:` | 组合后缀的帧链过滤已修（B-1）；但 within 作用域在该面不校验 | **E3 已收口**：`findByHint` 帧链过滤后按 `anchor_ids` 过滤（`rules.anchorChainMatch`，单层 membership/链嵌套序同一语义）；必修点同批修复——任一后缀存在即用剥离后 base（旧实现「无 frame 有 within」保留整串 → attr 正则/induceHint 精确串匹配全落空），无后缀 = 原串逐字节；`frame:`+`within:` 组合成全语义（见 CHANGELOG E3） |
 | 3 | 跨帧同签名不合并 | `firstIfSame` 仍按 tag/label/href/data_test 合并（run 命令步直接执行一个）；需独立立项 + 开关 | D2 边界 |
 | 4 | `read/extract/collect/judge` 帧限定对称化 | `locatorAnyFrame` 逐帧 OR，无法指定帧——act 可按帧而读不能 | **E4 已收口**：读/判面 CSS 选择器支持 ` frame:<origin链>` 尾缀（`splitFrameSuffixFromSelector` 唯一剥离 + `locatorAnyFrame`/`countAnyFrame` 帧过滤；值不合法=整串按原 CSS 处理；ctx.read/extract 不抛 frame_not_allowed——null/0/[] + trace `frame_evidence`；done/when 走 F45② 升级且 probe suffix-aware；无尾缀路径逐字节不变；见 CHANGELOG E4 批 + WITHIN_PARITY_PLAN §6） |
-| 5 | hintMemory / `induceHint` 帧限定 | 记忆产物不带 `frame:`——跨帧同名回放歧义→回退模型（无误动作） | 小项 |
+| 5 | hintMemory / `induceHint` 帧限定 | 记忆产物不带 `frame:`——跨帧同名回放歧义→回退模型（无误动作） | **E5 已收口**：`induceHint` 对子帧元素（`frame_path` 非空）产 ` frame:<own origin>` 尾缀，主帧产物逐字节不变；未知 origin 帧不加（不产死 hint）；回放 `currentHint → hintMatch → parseHint` 零新增代码；`amber start` 的主帧 `page.click` 面对子帧产物走既有结构化拒绝。**边界（D2）**：同 origin 父子/兄弟帧仍可能歧义（只带 own origin 单段）；见 CHANGELOG E5 批 + WITHIN_PARITY_PLAN §7 |
 | 6 | >6 帧 / 每帧池配额 | `framesOf ≤6`、窗口 40/120 跨帧共享主帧优先 | 需先测量 |
-| 7 | `matchedChains` 截断标记 | 证据链 >4 条去重截断时无 truncated 标记 | 小项 |
-| 8 | 整串 `frame:` 诊断 | `frame:<origin>` 无 hint 主体时不点名"缺少主体"（显式失败仍在） | 小项 |
-| 9 | 文档：大写 origin / 属性词示例 | hint 先 lowercase——`FRAME:HTTPS://A.COM` 会被识别为合法尾缀（符合 `i` 旗标）；`findByHint` 的 `[DATA-TEST=x]` 属性名/值正则大小写敏感（新旧一致、既有边界）——文档各补一句示例 | 文档 |
+| 7 | `matchedChains` 截断标记 | 证据链 >4 条去重截断时无 truncated 标记 | **E6 已收口（方案编号 #12）**：`probeExcludedHint` 去重与截断解耦——`matched_chains_total` = 全量 distinct 链数、列表仍 ≤4、超出时 `matched_chains_truncated:true`；`frameTargetStopReason` 截断时在 `hit chain(s):` 段末带总数/未列出数，≤4 条时文案逐字节不变 |
+| 8 | 整串 `frame:` 诊断 | `frame:<origin>` 无 hint 主体时不点名"缺少主体"（显式失败仍在） | **E6 已收口（方案编号 #13）**：`describeFrameSuffixRejection` 对首词即 `frame:` 的整串形状补「缺少 hint 主体（必须写成 `<hint> frame:<origin>`）」诊断；带未闭合 `[` 守卫（`[data-x=frame:o]` 值内伪后缀不误报）；带主体时新旧逐字节相同 |
+| 9 | 文档：大写 origin / 属性词示例 | hint 先 lowercase——`FRAME:HTTPS://A.COM` 会被识别为合法尾缀（符合 `i` 旗标）；`findByHint` 的 `[DATA-TEST=x]` 属性名/值正则大小写敏感（新旧一致、既有边界）——文档各补一句示例 | **E6 已收口**：`docs/APP_SCRIPT_AUTHORING.md` 的 hint 尾缀段补「大小写与整串形状」（大写 origin 合法 + `[DATA-TEST=x]` 不命中而 `[data-test=x]` 命中 + 整串 frame: 缺主体诊断） |
+
+**示例（#9，E6 收口）**：`Close FRAME:HTTPS://A.COM` 与 `Close frame:https://a.com` 等价——hint 先整串
+lowercase（`i` 旗标），`parseHint` 的 `frameChain` 归一为小写规范 origin；但 `findByHint`
+（`plan check --probe`）的属性词正则大小写敏感——`[DATA-TEST=x]` 不命中、`[data-test=x]` 才命中
+（act hint 侧不受影响，`parseHint` 先折叠；新旧一致、既有边界）。整串 `frame:https://a.com`
+（无 hint 主体）按旧形状落空，失败 reason 点名「缺少 hint 主体」——写成 `Close frame:https://a.com`。

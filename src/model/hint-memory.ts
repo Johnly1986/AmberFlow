@@ -30,8 +30,31 @@ const HANDLE_ATTRS: Array<[keyof Elem, string]> = [
 ];
 
 /**
+ * E5（WITHIN_PARITY_PLAN §7）：子帧元素的记忆产物带 ` frame:<own origin>` 尾缀。
+ *
+ * 为什么：一条记忆 hint 只在**同一个 (url, subgoal)** 上生效，而同一个 url 下可能有
+ * 同签名的父子/兄弟 frame；不带帧限定的记忆回放会歧义 → 回退模型（无误动作，但记忆
+ * 价值打折）。`frame_path` 非空 ⇔ 非主帧（frame_path 省略 = 主帧，见 extraction.Elem）
+ * ——主帧元素**逐字节不变**（绝大多数记忆不受影响）。未知 origin 帧（frame_origin /
+ * frame_path 两字段皆缺，如 about:blank/srcdoc）**不追加**：任何 `frame:` 都命中不了
+ * 这种帧，加了只会得到一条死 hint——保持既有"歧义/未命中 → 回模型"的行为。
+ *
+ * 同一 origin 的父子帧仍可能歧义（D2 边界：own origin 单段区分不了同源父子）——
+ * 这属于既有 firstIfSame 合并语义，不在这里猜更长链（记忆侧没有帧完整链）。
+ */
+function frameSuffixOf(elem: Elem): string {
+  const path = elem.frame_path;
+  const origin = typeof elem.frame_origin === "string" ? elem.frame_origin.trim() : "";
+  if (!Array.isArray(path) || path.length === 0 || origin === "") return "";
+  return ` frame:${origin}`;
+}
+
+/**
  * One hint in the executor's grammar, or null when the element has no stable handle.
  * Never invents a selector from position — that is what makes locators rot.
+ *
+ * E5：子帧元素在稳定句柄后追加 ` frame:<own origin>`（主帧 / 未知 origin 帧不加）——
+ * 回放面 `currentHint → hintMatch → parseHint` 已支持尾缀，消费链路无需新增代码。
  */
 export function induceHint(elem: Elem | undefined | null): string | null {
   if (!elem) return null;
@@ -40,12 +63,12 @@ export function induceHint(elem: Elem | undefined | null): string | null {
     const value = typeof raw === "string" ? raw.trim() : "";
     if (!value || isVolatile(value)) continue;
     // the grammar's `=` branch case-folds, so store the raw value as-is
-    return `[${attr}=${value}]`;
+    return `[${attr}=${value}]${frameSuffixOf(elem)}`;
   }
   const token = String(elem.label ?? "").trim();
   const tag = String(elem.tag ?? "").trim();
   if (token && tag && !isVolatile(token) && token.length <= 48) {
-    return `${tag}[near~${token}]`;
+    return `${tag}[near~${token}]${frameSuffixOf(elem)}`;
   }
   return null;
 }

@@ -507,6 +507,8 @@ export function weakRejectedReason(
  *   ① 声明目标在**允许帧**里零命中、却存在于被排除帧（只读探测，绝不动作）；
  *   ② **声明的链**（hint 里的 `frame:` 尾缀；无尾缀明说"未声明"）与**命中帧完整链**
  *      （`probeExcludedHint.matchedChains`，按链去重、≤4 条，带 origin/frame 下标）并排；
+ *      E6：列表被截断时在 `hit chain(s):` 段末补全量 distinct 链数（"还有 N 条未列出"）——
+ *      ≤4 条时文案**逐字节不变**；
  *   ③ 两条修法：把命中 origin 加进 `meta.hosts`（该帧进解析面、`frame:` 链才可寻址），
  *      或把目标/链改到允许帧内的事实。
  * `probe` 由 `extraction.probeExcludedHint` 产出（I/O 在那一侧）；本函数零 I/O。
@@ -521,6 +523,10 @@ export function frameTargetStopReason(
     ? probe.matchedChains.map((m) =>
       `${m.chain.length ? m.chain.join(">") : "(unknown/originless chain)"} `
       + `[frame=${m.frame}, origin=${m.origin}]`).join("; ")
+      + (probe.matched_chains_truncated === true
+        ? ` (共 ${probe.matched_chains_total} 条 distinct 链，还有 `
+          + `${probe.matched_chains_total - probe.matchedChains.length} 条未列出)`
+        : "")
     : `excluded frame(s) ${probe.origins.join(", ")} (full chain unavailable)`;
   const hits = probe.matches.slice(0, 5)
     .map((m) => `${m.tag}${m.id ? `#${m.id}` : ""} ${JSON.stringify(m.label)} (frame=${m.frame})`)
