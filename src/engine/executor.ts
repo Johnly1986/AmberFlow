@@ -99,6 +99,7 @@ import {
   type PageLike,
 } from "./extraction.ts";
 import { elemFrameStamp, frameScopeMatchesFrame } from "./frame-scope.ts";
+import { ANCHOR_JS, compile } from "./pool-js.ts";
 import { declaredLookup, formatDeclaredCandidates, type DeclaredCandidate } from "./declared.ts";
 import { describeAmbiguity, orderCandidatesByDomPreorder, type AmbiguityView, type AmbiguousOrdering } from "./ambiguity.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
@@ -341,6 +342,68 @@ function ambiguityStopReason(target: string, poolSize: number, amb: AmbiguityVie
     + `re-observe and narrow the hint (unique #id / [data-test=…] / role word), `
     + `or use on_ambiguous:"act" (--on-ambiguous act) to act on the first actionable candidate (the old behaviour)`;
 }
+
+/* ------------------------------------------ E1（within 权威对等）：A3/F64 的 PASS 常量 */
+// （导出仅为离线断言可访问——差分对照脚本真跑 pass；运行时调用面只用本文件内的
+//  PASS_DOM_FALLBACK / PASS_ID_FALLBACK。）
+
+/**
+ * A3 池外回退的 DOM 收集 pass。原为 inline TS arrow evaluate——**闭包不跨**（Playwright
+ * 序列化函数源码，宿主变量进不去），共享 ANCHOR_JS 必须 `${}` 内插进 pass 源码 ⇒ 转
+ * `compile()` PASS 常量（identity PASS_IDENTITY 先例）。行补 `anchors` → 合成主帧行
+ * 透传 anchor_ids（与真池行同构；`#x within:#p` 在 A3 面与池侧 inAnchor 同语义）。
+ * JS 体与原 TS arrow 的序列化源码逐行对应（仅去掉类型标注 + 行补 anchors）。
+ */
+export const DOM_FALLBACK_COLLECT_JS = String.raw`(arg) => {
+  const g = globalThis;
+${ANCHOR_JS}
+  const sel = arg.sel, tok = arg.tok;
+  const out = [];
+  const all = g.document.querySelectorAll(sel);
+  for (let i = 0; i < all.length; i++) {
+    const e = all[i];
+    const tag = String(e.tagName || "").toLowerCase();
+    const label = String(e.getAttribute("aria-label") || e.getAttribute("title") || e.innerText
+      || e.getAttribute("placeholder") || e.getAttribute("value") || "").replace(/\s+/g, " ").trim().slice(0, 200);
+    e.setAttribute("data-af-probe", tok + "-" + i);
+    out.push({
+      i, tag, label,
+      role: String(e.getAttribute("role") || "").toLowerCase(),
+      id: String(e.id || ""),
+      dt: String(e.getAttribute("data-test") || ""),
+      type: String(e.getAttribute("type") || "").toLowerCase(),
+      draggable: String(e.getAttribute("draggable") || "").toLowerCase() === "true",
+      anchors: anchorIdsOf(e),
+    });
+  }
+  return out;
+}`;
+export const PASS_DOM_FALLBACK = compile("arg", `return (${DOM_FALLBACK_COLLECT_JS})(arg);`);
+
+/**
+ * F64 `#id` live-DOM 单点直查 pass。E1：一次 `evaluate` 返回 anchors + TS 判定——
+ * 二次求值多一次跨源往返且原子性差；anchors 还能区分「找到但在锚外」（evaluate 结果
+ * hit 非 null 且 anchors 不含 within）与「找不到」（hit 为 null）。原为 inline TS arrow
+ * evaluate，同 A3 转 `compile()` PASS 常量再内插 ANCHOR_JS。
+ */
+export const ID_FALLBACK_PROBE_JS = String.raw`(arg) => {
+  const g = globalThis;
+${ANCHOR_JS}
+  const el = g.document.getElementById(arg.id);
+  if (el === null || el === undefined) return null;
+  const rect = el.getBoundingClientRect();
+  const cs = g.getComputedStyle(el);
+  const visible = rect.width > 0 && rect.height > 0
+    && cs !== null && cs.display !== "none" && cs.visibility !== "hidden";
+  el.setAttribute("data-af-probe", arg.attr.slice("data-af-probe=\"".length, -1));
+  return {
+    tag: String(el.tagName || "").toLowerCase(),
+    visible,
+    label: String(el.innerText || el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().slice(0, 40),
+    anchors: anchorIdsOf(el),
+  };
+}`;
+export const PASS_ID_FALLBACK = compile("arg", `return (${ID_FALLBACK_PROBE_JS})(arg);`);
 
 export class BrowserMiddleware {
   /** Vocabulary of the rule layer, aliased for callers/tests (`rules.ts`). */
@@ -2236,27 +2299,24 @@ export class BrowserMiddleware {
       if (fi > 0 && !frameInHostsEnvelope(fr, this._frameHosts)) continue;
       if (frameChain !== undefined && !frameScopeMatchesFrame(frameChain, fr)) continue;
       try {
+        // E1（within 权威对等）：一次 evaluate 返回 anchors + TS 判定（inline TS arrow →
+        // PASS_ID_FALLBACK，compile() 常量 + ANCHOR_JS 内插）——二次求值多一次跨源往返且
+        // 原子性差；anchors 还能区分「找到但在锚外」与「找不到」。
         const hit = (await (fr as unknown as {
-          evaluate(fn: (arg: { id: string; attr: string }) => Record<string, unknown> | null, arg: { id: string; attr: string }): Promise<Record<string, unknown> | null>;
-        }).evaluate((arg: { id: string; attr: string }) => {
-          const g = globalThis as unknown as {
-            document: { getElementById(s: string): any | null };
-            getComputedStyle(x: any): { display: string; visibility: string } | null;
-          };
-          const el = g.document.getElementById(arg.id);
-          if (el === null || el === undefined) return null;
-          const rect = (el as { getBoundingClientRect(): { width: number; height: number } }).getBoundingClientRect();
-          const cs = g.getComputedStyle(el);
-          const visible = rect.width > 0 && rect.height > 0
-            && cs !== null && cs.display !== "none" && cs.visibility !== "hidden";
-          el.setAttribute("data-af-probe", arg.attr.slice("data-af-probe=\"".length, -1));
-          return {
-            tag: String((el as { tagName: string }).tagName || "").toLowerCase(),
-            visible,
-            label: String((el as any).innerText || (el as any).getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().slice(0, 40),
-          };
-        }, { id: parsed.value, attr: probeAttr })) as Record<string, unknown> | null;
+          evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
+        }).evaluate(PASS_ID_FALLBACK, { id: parsed.value, attr: probeAttr })) as Record<string, unknown> | null;
         if (hit === null) continue;
+        // E1：within 存在时命中后校验 anchors（与池侧 inAnchor 同口径）。不在锚内 =
+        // 该帧不命中——「找到但在锚外」与「找不到」在 evaluate 结果里可区分（hit 非 null
+        // 且 anchors 不含 within vs hit 为 null）；清探针章后尝试下一帧（锚内命中可能在
+        // 另一帧）。两帧都不命中 → 返回 null → 维持既有 target_not_found 语义走 A3。
+        if (parsed.within !== undefined) {
+          const anchors = Array.isArray(hit["anchors"]) ? (hit["anchors"] as string[]) : [];
+          if (!anchors.includes(parsed.within)) {
+            await this._probeCleanup(page, token);
+            continue;
+          }
+        }
         // 可交互性：可见 + 动作能力面含当前 op（与池内 actionable 同一判据的 DOM 侧投影）。
         if (hit["visible"] !== true) {
           await this._probeCleanup(page, token);
@@ -2333,30 +2393,10 @@ export class BrowserMiddleware {
     const token = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
     let rows: Array<Record<string, unknown>> = [];
     try {
-      rows = (await page.evaluate((arg: { sel: string; tok: string }) => {
-        const g = globalThis as unknown as {
-          document: { querySelectorAll(s: string): ArrayLike<any> };
-        };
-        const sel = arg.sel, tok = arg.tok;
-        const out: Array<Record<string, unknown>> = [];
-        const all = g.document.querySelectorAll(sel);
-        for (let i = 0; i < all.length; i++) {
-          const e = all[i];
-          const tag = String(e.tagName || "").toLowerCase();
-          const label = String(e.getAttribute("aria-label") || e.getAttribute("title") || e.innerText
-            || e.getAttribute("placeholder") || e.getAttribute("value") || "").replace(/\s+/g, " ").trim().slice(0, 200);
-          e.setAttribute("data-af-probe", tok + "-" + i);
-          out.push({
-            i, tag, label,
-            role: String(e.getAttribute("role") || "").toLowerCase(),
-            id: String(e.id || ""),
-            dt: String(e.getAttribute("data-test") || ""),
-            type: String(e.getAttribute("type") || "").toLowerCase(),
-            draggable: String(e.getAttribute("draggable") || "").toLowerCase() === "true",
-          });
-        }
-        return out;
-      }, { sel: fallbackSel, tok: token })) as Array<Record<string, unknown>>;
+      // E1（within 权威对等）：inline TS arrow → PASS_DOM_FALLBACK（compile() 常量，行补 anchors；
+      // 闭包不跨——共享 ANCHOR_JS 必须 ${} 内插进 pass 源码）。
+      rows = (await page.evaluate(PASS_DOM_FALLBACK,
+        { sel: fallbackSel, tok: token })) as Array<Record<string, unknown>>;
     } catch {
       rows = [];
     }
@@ -2385,6 +2425,10 @@ export class BrowserMiddleware {
         role: String(r["role"] ?? ""), id: String(r["id"] ?? ""), data_test: String(r["dt"] ?? ""),
         input_type: String(r["type"] ?? ""),
         ...(r["draggable"] === true ? { draggable: true } : {}),
+        // E1（within 权威对等）：合成主帧行补 anchor_ids（与真池行同构，additive）——
+        // resolveCommandRef → hintMatch.inAnchor 据此消费 within（与池/回捞面同语义）。
+        ...(Array.isArray(r["anchors"]) && (r["anchors"] as string[]).length > 0
+          ? { anchor_ids: (r["anchors"] as string[]).map((x) => String(x).toLowerCase()) } : {}),
         ...(mainStamp.frame_origin !== undefined ? { frame_origin: mainStamp.frame_origin } : {}),
         ...(mainStamp.frame_path !== undefined ? { frame_path: mainStamp.frame_path } : {}),
       } as Elem;
@@ -3771,6 +3815,9 @@ export class BrowserMiddleware {
             }
             // FW8：池 + hint 回捞都空之后，做**一次**声明驱动的身份回捞（形状白名单见
             // extraction.identityHintInfo）。只在这一步作者声明的 target 上发生——模型面永不参与。
+            // E1（within 权威对等）：identityLookup 在候选收集处按 identityHintInfo 暴露的
+            // within 过滤（"恰好一个可见匹配"判定之前）——本调用点零额外判定，行为自动继承
+            // （过滤后 idr.total_matches/hidden_matches/candidates 变锚内口径，M2 记账）。
             if (candRefs.length === 0 && target !== "" && hintCandidates(target, elems, this._hintOpts()) === null
                 && !identityTried.has(target)) {
               identityTried.add(target);
@@ -3992,6 +4039,8 @@ export class BrowserMiddleware {
             // FW8：act hint 的**声明面**身份回捞——池 + hint 回捞都落空后才尝试，同一步同一
             // hint 只试一次。决策步（无 act）不会来到这里；命中结果只进本步局部池，模型面
             // 永远不会看到它（下面 rule 命中直接给出 ref，不构造 ChoiceRequest）。
+            // E1（within 权威对等）：identityLookup 内部按 within 过滤候选（identityHintInfo
+            // 暴露 within）——本调用点零额外判定，行为自动继承（锚内口径证据，M2 记账）。
             if (hintMatch(curHint, elems, this._hintOpts()) === null && !identityTried.has(curHint)) {
               identityTried.add(curHint);
               const idr = await identityLookup(pg, curHint, { hosts: this._frameHosts });

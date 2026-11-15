@@ -26,6 +26,7 @@ import { frameInHostsEnvelope, framesOf, type Elem, type ElemPool, type PageLike
 import { elemFrameStamp, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
 import { hintCandidates, type HintMatchOptions } from "./rules.ts";
+import { ANCHOR_JS, compile } from "./pool-js.ts";
 import { parseHint } from "./hint.ts";
 
 /** P0-C：一个 DOM 侧候选（歧义/隐藏诊断用；只放人读字段，不放 locator）。 */
@@ -73,16 +74,17 @@ type RawRow = Record<string, unknown>;
 /**
  * attr 模式：在 ADMIT_SEL 投影上收集（含隐藏，可见性另记），一次 evaluate 每帧。
  * 返回行含 `i`（该帧 querySelectorAll 下标，盖章/回查用）与全部池同构字段。
+ *
+ * E1（within 权威对等）：原为 inline TS arrow evaluate——**闭包不跨**（Playwright 序列化
+ * 函数源码，宿主变量进不去），共享 ANCHOR_JS 必须 `${}` 内插进 pass 源码 ⇒ 转 `compile()`
+ * PASS 常量（identity PASS_IDENTITY 先例）。行补 `anchors`（共享 ANCHOR_JS）。
  */
-const ATTR_COLLECT_JS = (arg: { sel: string; tok: string; frame: number }) => {
-  const g = globalThis as unknown as {
-    document: {
-      querySelectorAll(s: string): ArrayLike<any>;
-    };
-  };
-  const out: Array<Record<string, unknown>> = [];
-  let all: ArrayLike<any>;
-  try { all = g.document.querySelectorAll(arg.sel); } catch { return out; }
+const ATTR_COLLECT_BODY = String.raw`(arg) => {
+  const g = globalThis;
+${ANCHOR_JS}
+  const out = [];
+  let all;
+  try { all = g.document.querySelectorAll(arg.sel); } catch (err) { return out; }
   for (let i = 0; i < all.length; i++) {
     const e = all[i];
     const tag = String(e.tagName || "").toLowerCase();
@@ -98,11 +100,11 @@ const ATTR_COLLECT_JS = (arg: { sel: string; tok: string; frame: number }) => {
         const r = e.getBoundingClientRect();
         visible = r.width > 0 && r.height > 0;
       }
-    } catch {
+    } catch (err) {
       visible = false;
     }
-    const stamp = `${arg.tok}-${arg.frame}-${i}`;
-    try { e.setAttribute("data-hintref", stamp); } catch { /* 只读节点：按未盖章处理 */ }
+    const stamp = arg.tok + "-" + arg.frame + "-" + i;
+    try { e.setAttribute("data-hintref", stamp); } catch (err) { /* 只读节点：按未盖章处理 */ }
     out.push({
       // A1 不变量：label === full_label 的前 40 字（同一 full 截断）。
       i, stamp, tag, full_label: full, label: full.slice(0, 40),
@@ -114,34 +116,37 @@ const ATTR_COLLECT_JS = (arg: { sel: string; tok: string; frame: number }) => {
       content_editable: e.isContentEditable === true,
       draggable: String(e.getAttribute("draggable") || "").toLowerCase() === "true",
       href: href ? href.split("?")[0].replace(/\/+$/, "").split("/").slice(-2).join("/") : "",
+      // E1：祖先链 id（≤8、小写、内→外）——rowToElem 透传 anchor_ids（F-2：attr 模式经
+      // hintCandidates→inAnchor 自动消费 within）。
+      anchors: anchorIdsOf(e),
       ...(href ? { href_full: href } : {}),
       visible,
     });
   }
   return out;
-};
+}`;
+const PASS_ATTR_COLLECT = compile("arg", `return (${ATTR_COLLECT_BODY})(arg);`);
 
 /**
  * text 模式：按**文本节点**找候选（避免对全树每个元素求 innerText），向上爬到
  * `normalized innerText === token` 的元素；同一批候选里祖先（严格包含另一个候选）
  * 被剪掉 = "优先最深的匹配元素"。
+ *
+ * E1：同 ATTR_COLLECT_BODY——inline TS arrow → `compile()` PASS 常量（闭包不跨，
+ * ANCHOR_JS `${}` 内插），行补 `anchors`（text 模式收集后显式按 within 过滤）。
  */
-const TEXT_COLLECT_JS = (arg: { token: string; tok: string; frame: number }) => {
-  const g = globalThis as unknown as {
-    document: {
-      body: any; documentElement: any;
-      createTreeWalker(root: any, what: number): { nextNode(): any };
-    };
-  };
-  const norm = (s: unknown): string => String(s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+const TEXT_COLLECT_BODY = String.raw`(arg) => {
+  const g = globalThis;
+${ANCHOR_JS}
+  const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
   const want = norm(arg.token);
   const doc = g.document;
-  const seen = new Set<any>();
-  const found: any[] = [];
-  let walker: { nextNode(): any } | null = null;
+  const seen = new Set();
+  const found = [];
+  let walker = null;
   try {
     walker = doc.createTreeWalker(doc.body || doc.documentElement, 4 /* NodeFilter.SHOW_TEXT */);
-  } catch { return []; }
+  } catch (err) { return []; }
   if (walker === null) return [];
   let guard = 0;
   for (;;) {
@@ -161,7 +166,7 @@ const TEXT_COLLECT_JS = (arg: { token: string; tok: string; frame: number }) => 
   }
   // 优先最深：祖先候选（严格包含另一个候选）剪掉；同一元素只留一次。
   const deepest = found.filter((e) => !found.some((o) => o !== e && e.contains(o)));
-  const out: Array<Record<string, unknown>> = [];
+  const out = [];
   for (let i = 0; i < deepest.length; i++) {
     const e = deepest[i];
     const href = String(e.getAttribute("href") || "");
@@ -173,11 +178,11 @@ const TEXT_COLLECT_JS = (arg: { token: string; tok: string; frame: number }) => 
         const r = e.getBoundingClientRect();
         visible = r.width > 0 && r.height > 0;
       }
-    } catch {
+    } catch (err) {
       visible = false;
     }
-    const stamp = `${arg.tok}-${arg.frame}-${i}`;
-    try { e.setAttribute("data-hintref", stamp); } catch { /* 只读节点：按未盖章处理 */ }
+    const stamp = arg.tok + "-" + arg.frame + "-" + i;
+    try { e.setAttribute("data-hintref", stamp); } catch (err) { /* 只读节点：按未盖章处理 */ }
     out.push({
       // A1 不变量：label === full_label 的前 40 字（同一 full 截断）。
       i, stamp, tag: String(e.tagName || "").toLowerCase(), full_label: full, label: full.slice(0, 40),
@@ -189,12 +194,15 @@ const TEXT_COLLECT_JS = (arg: { token: string; tok: string; frame: number }) => 
       content_editable: e.isContentEditable === true,
       draggable: String(e.getAttribute("draggable") || "").toLowerCase() === "true",
       href: href ? href.split("?")[0].replace(/\/+$/, "").split("/").slice(-2).join("/") : "",
+      // E1：祖先链 id——text 模式在宿主侧按 row.anchors 显式过滤 within（收集面不做判定）。
+      anchors: anchorIdsOf(e),
       ...(href ? { href_full: href } : {}),
       visible,
     });
   }
   return out;
-};
+}`;
+const PASS_TEXT_COLLECT = compile("arg", `return (${TEXT_COLLECT_BODY})(arg);`);
 
 /** 帧打点形状（A 批 frame:<origin>：rowToElem 透传 frame-scope.elemFrameStamp 的产物）。 */
 type FrameStamp = { frame_origin?: string; frame_path?: string[] };
@@ -212,6 +220,11 @@ const rowToElem = (ref: string, frame: number, row: RawRow, fstamp: FrameStamp):
     ...(str("dt") ? { data_test: str("dt") } : {}),
     ...(str("type") ? { input_type: str("type") } : {}),
     ...(str("role") ? { role: str("role") } : {}),
+    // E1（within 权威对等）：祖先链 id 透传——合成行与真池行同构（additive；无 id 祖先 =
+    // 字段省略的既有口径）。attr 模式由此经 hintCandidates→hintMatch.inAnchor **自动**消费
+    // within（F-2：零额外代码）；text 模式在收集后按 row.anchors 显式过滤。
+    ...(Array.isArray(row["anchors"]) && (row["anchors"] as string[]).length > 0
+      ? { anchor_ids: (row["anchors"] as string[]).map((x) => String(x).toLowerCase()) } : {}),
     ...(row["content_editable"] === true ? { content_editable: true } : {}),
     ...(row["draggable"] === true ? { draggable: true } : {}),
     ...(str("href") ? { href: str("href") } : {}),
@@ -279,8 +292,8 @@ export async function declaredLookup(
     let raw: unknown;
     try {
       raw = mode === "text"
-        ? await frames[fi]!.evaluate(TEXT_COLLECT_JS, { token: bareToken, tok: stampPrefix, frame: fi })
-        : await frames[fi]!.evaluate(ATTR_COLLECT_JS, { sel: attrSel, tok: stampPrefix, frame: fi });
+        ? await frames[fi]!.evaluate(PASS_TEXT_COLLECT, { token: bareToken, tok: stampPrefix, frame: fi })
+        : await frames[fi]!.evaluate(PASS_ATTR_COLLECT, { sel: attrSel, tok: stampPrefix, frame: fi });
     } catch {
       continue;                       // frame detached / 无执行上下文：跳过（与 hintLookup 同口径）
     }
@@ -304,10 +317,19 @@ export async function declaredLookup(
 
   // 两种模式的匹配集：
   //  - text：收集阶段已经做了"innerText 全等 + 最深优先"，全部行就是匹配集；
+  //    E1（within 权威对等）：**显式过滤**——收集面不做 within 判定，宿主侧按 row.anchors
+  //    过滤（anchors 不含 within 的行不进匹配集，与池侧 inAnchor 同口径；过滤后
+  //    total/hidden/candidates 变锚内口径，M2 记账）。
   //  - attr：用与池侧同一个 `hintCandidates` 在合成池上取**最强档**，再按可见性判唯一。
+  //    E1/F-2：rowToElem 已透传 anchor_ids ⇒ hintMatch.inAnchor 自动消费 within——
+  //    本分支**零额外代码**（此前合成行无 anchors ⇒ within 恒 fail-closed）。
   let matched: Array<{ fi: number; row: RawRow }>;
   if (mode === "text") {
-    matched = collected;
+    matched = parsed.within === undefined ? collected
+      : collected.filter(({ row }) => {
+          const anchors = Array.isArray(row["anchors"]) ? (row["anchors"] as string[]) : [];
+          return anchors.includes(parsed.within!);
+        });
   } else {
     const pool: ElemPool = {};
     for (const { fi, row } of collected) {

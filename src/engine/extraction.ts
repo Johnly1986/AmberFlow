@@ -1140,6 +1140,10 @@ export async function extractHeuristicWidgets(
       // A1 不变量：label === full_label 的前 40 字（行由 HEURISTIC_WIDGET_JS 按同一 full 构造）。
       label: String(r["label"] ?? "").slice(0, 40),
       full_label: String(r["full_label"] ?? r["label"] ?? "").slice(0, 200),
+      // E1（M3 第五池）：heuristic 伪按钮行透传 anchor_ids（行由 HEURISTIC_WIDGET_JS 经共享
+      // ANCHOR_JS 算好；无 id 祖先 = 行字段省略 ⇒ Elem 也不写，与真池口径一致）。
+      ...(Array.isArray(r["anchor_ids"]) && (r["anchor_ids"] as string[]).length > 0
+        ? { anchor_ids: (r["anchor_ids"] as string[]).map((x) => String(x).toLowerCase()) } : {}),
       ...(typeof r["rect"] === "object" && r["rect"] !== null ? { rect: r["rect"] as Elem["rect"] } : {}),
       ...(typeof r["inViewport"] === "boolean" ? { inViewport: r["inViewport"] } : {}),
       ...(typeof r["nearViewport"] === "boolean" ? { nearViewport: r["nearViewport"] } : {}),
@@ -1524,13 +1528,15 @@ export function frameHintFailureEvidence(
     parts.push(`声明链 ${declared.slice(0, 2).map((c) => JSON.stringify(c)).join(" / ")} `
       + `在允许帧里没有命中（检查 origin 是否写错/该帧是否被 hosts 排除）`);
   }
-  // 实施复审 N-R2a：`frame:` 与跨帧 `within:` 组合时，失败可能是 within 锚清空了候选
-  // （合成/回捞行不携带 anchor_ids——BACKLOG「frame:<origin> 后续立项」#1），不是链写错。
-  // 在同一条证据里点名，避免作者按错方向改 origin。
+  // 实施复审 N-R2a（E1 后更新）：同帧 within 已在回捞面生效（E1——五池补 anchor_ids +
+  // FW8/F64/DRF-text 按 within 过滤/DRF-attr 经 hintCandidates→inAnchor 自动消费），不再是
+  // "回捞面不生效"的旧事实。跨帧 within（锚在另一文档）不受支持——anchor_ids 是帧内文档
+  // 祖先链，宿主页 iframe 元素不会出现在子帧内容的祖先链里（§13.4 文档边界，不静默）。
+  // declared 分支语义不变：只在"声明链合法但没命中 + 同时声明了 within"时追加本条。
   if (declared.length > 0 && withinAnchor !== undefined) {
-    parts.push(`注意该目标同时声明了 within:#${withinAnchor}——回捞面（FW8/F64/DRF-text/合成池）`
-      + `不携带 anchor_ids，within 作用域在回捞面不生效；先排除"锚不在当前文档/帧合成清空候选"再归因 origin`
-      + `（见 docs/BACKLOG.md「frame:<origin> 后续立项」#1）`);
+    parts.push(`注意该目标同时声明了 within:#${withinAnchor}——同帧 within 已在回捞面生效（E1）；`
+      + `跨帧 within（锚在另一文档）不受支持：anchor_ids 是帧内文档祖先链，锚不在该帧文档 = 该帧无命中；`
+      + `先排除"锚不在当前文档/帧"再归因 origin（heuristic 伪按钮行现已带 anchors）`);
   }
   const origins = allowedFrameOrigins(page, hosts);
   parts.push(`页面实际可用 origin（允许帧，去重 ≤6）: [${origins.length ? origins.join(", ") : "-"}]`);

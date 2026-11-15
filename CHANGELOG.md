@@ -174,10 +174,61 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   该句过承诺已回收）、N7（`matchedChains` 截断无标记）、hintMemory/induceHint 不带 `frame:`
   等边界，已入规格 §13.3/§13.4 与 `docs/BACKLOG.md`「frame:<origin> 后续立项」。
 
+### E1 批（within 权威对等）
+
+- **【背景·F-1 因果链】** hintLookup 的 DOM pass **已执行 within**（HINT_HEAD
+  `getElementById + contains`），回捞行 within 洁净；但回捞行并入主池后 executor 重新
+  `hintMatch`，池侧 `inAnchor`（rules.ts）按**缺失的 anchor_ids** 把回捞行**二次清零** →
+  落到 FW8 `identityLookup`（彼时无视 within）在任意帧动作锚外 `#x`。本批给回捞/合成行补
+  anchors 并让消费面遵守 within，闭合此链。规格：`docs/WITHIN_PARITY_PLAN.md` §3 + §12
+  （M1–M6 已吸收；本批只做**单层** within 语义，链化留给 E2）。
+- **【单一出处】** 新增 `pool-js.ANCHOR_JS`——`anchorIdsOf`（parentElement 上溯、内→外、
+  ≤8、小写、自身不入）的唯一 JS 实现，先例 LABEL_HELPERS_JS 的 `${}` 内插。收敛五处：
+  EXTRACT_JS / OBSERVE_JS 两份本地副本（EXTRACT pass 串**字节不变**；OBSERVE 本地副本原用词
+  `ids` 统一为 `out`——纯变量名差异，行为不变）、HINT_HEAD（回捞行补 anchor_ids）、
+  heuristic 宽扫（M3 第五池）、A3 `_domFallbackResolve` / F64 `_liveDomIdFallback` 的
+  inline TS arrow evaluate **转 `compile()` PASS 常量再内插**（闭包不跨——Playwright 序列化
+  函数源码；identity PASS_IDENTITY 先例）。PASS_HINT_PROBE 的 `data-hintref` 字面耦合保活
+  （replace 前后断言）。
+- **【五池 anchors】** hintLookup 回捞行 / A3 合成主帧行 / FW8 IDENTITY_PROBE 行 /
+  DRF ATTR+TEXT 收集行（`RawRow.anchors` → `rowToElem` 透传）/ heuristic 伪按钮行全部补
+  `anchor_ids`（与真池行同构；无 id 祖先 = 字段省略的既有口径）。
+- **【消费面遵守 within（单层）】** ① **FW8**：`identityHintInfo` 暴露 `within`；
+  `identityLookup` 在候选收集处（"恰好一个可见匹配"判定之前，M5）按 `anchors.includes(within)`
+  过滤——两调用点（命令步/act hint）零额外判定自动继承；② **DRF-text**：收集后按
+  `row.anchors` 显式过滤；**DRF-attr 零额外代码**（F-2：rowToElem 透传后经
+  `hintCandidates→hintMatch.inAnchor` 自动获得语义）；③ **F64**：一次 evaluate 返回
+  anchors + TS 判定，`within` 存在时命中后校验 `anchors.includes(within)`，不在锚内 =
+  该帧不命中（「找到但在锚外」vs「找不到」在 evaluate 结果里可区分），清探针章后尝试下一帧；
+  ④ **A3**：合成行带 anchors 后 `resolveCommandRef → hintMatch.inAnchor` 同语义。
+- **【行为变更（有意修正）】** ① 含 within 的回捞命中行为变更 = 本批本意：hintLookup 回捞行
+  不再被池侧 `inAnchor` 二次清零（F-1 闭合）；FW8/DRF-text/F64/A3 不再动作（或落空于）
+  within 锚外元素——`#x within:#p` 在五个回捞/合成面与主匹配面同语义。② FW8/DRF 歧义证据
+  口径变化（M2）：过滤后 `total_matches` / `hidden_matches` / `candidates` 变**锚内**口径
+  （此前锚外候选也计入）。
+- **【模型面（M2 记账）】** 回捞/合成行 additive 增 `anchor_ids`（与真池行同构——真池行的
+  `anchor_ids` 本就在模型投影面）；在线 provider 的 ChoiceRequest 请求体在**回捞行出现时**
+  随之多该字段。`esig` / `firstIfSame` / `askSig` / `structDigest` / laya 缓存键（= state
+  {goal,url,title,main_text}+criteria 文本指纹）**均不读 anchor_ids**——离线断言钉死。
+  无 within 路径：FW8/DRF/F64 输出与改前一致（回捞行多 anchors 字段 = additive，trace/池
+  快照允许清单内）；EXTRACT_JS pass 串字节不变。
+- **【证据文案（N-R2a 更新）】** `frameHintFailureEvidence` 的 within 注记改为如实状态：
+  同帧 within 已在回捞面生效（E1）；**跨帧 within（锚在另一文档）不受支持**——anchor_ids
+  是帧内文档祖先链（§13.4 文档边界维持）；heuristic 伪按钮行现已带 anchors。declared 分支
+  触发条件与结构不变。
+- **【验证】** 离线断言全绿（/tmp/af-e1）：ANCHOR_JS 收敛（EXTRACT 字节不变 + OBSERVE 仅
+  ids→out + PASS_HINT_PROBE 字面保活）、五池 anchors 与手算 anchorIdsOf 一致（含无 id 祖先
+  字段省略）、within 回捞矩阵（FW8 锚内命中/锚外拒绝/锚内口径歧义、DRF attr 自动/text 显式、
+  F64 锚内命中/锚外拒绝、hintLookup 回捞行并入主池后 hintMatch 不再清零 = F-1 闭合断言）、
+  无 within 逐字节（FW8/DRF 与 56456fa 旧实现对照）、esig/firstIfSame/structDigest 不含
+  anchor_ids 断言；`npm run typecheck` / `npm run prompt-hit` 通过。浏览器级（同帧 within
+  回捞真页动作落点）留待专项。
+
 ### 已知边界 / 未做（A–D 批后的诚实清单）
 
-- **`within` 语义链（E 批）**：未做，独立回退单元。合成池（hintLookup/A3/DRF/FW8）没有
-  `anchor_ids`，FW8/F64 不看 within、DRF text 忽略 within；E 批前置修复见规格 §12.4。
+- **`within` 语义链（E 批 E2）**：未做，独立回退单元。**单层** within 的回捞面权威对等已由
+  E1 收口（五池 anchors + FW8/F64/DRF-text 消费）；链式 `within:#a>#b`（池侧 inAnchor 链化、
+  DOM 侧逐段锚定、消费面链迁移、契约文本）仍待 E2。
 - **跨帧同签名不合并**：未做（需独立立项 + 开关）。`esig`/`firstIfSame` 的签名不含 frame 字段，
   同 tag/label/href/data-test 的跨帧元素仍可能被 `firstIfSame` 合并；run 命令步 / act hint 直接
   执行一个，会话 act 因 `hintCandidates.decided` 不暴露该裁决而停。
@@ -196,7 +247,8 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   `STRUCTURE_PATH_MAX_CHARS=160`。引擎歧义 `frame_origin` ≤120，桥 clip ≤60。
 - **`structure_path`**：仅诊断（inspect 恒开 / observe `includeStructure` opt-in），不进模型面、
   歧义证据或 hint 自证。
-- **`within` 在回捞面**：DRF text 完全忽略、FW8/F64 不看 within（R2-8），本期如实保留，E 批前置修复。
+- **`within` 在回捞面**：E1 已收口**同帧** within（五池 anchors + 消费面遵守）；**跨帧**
+  within（锚在另一文档，如宿主页的 iframe 元素）维持文档边界——anchor_ids 是帧内文档祖先链。
 
 ## [Unreleased] — inspect --probe 跨 frame 探测（iframe 元素不再静默漏检）
 

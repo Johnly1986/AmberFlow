@@ -233,6 +233,28 @@ export const STRUCTURE_HELPERS_JS = String.raw`
 `;
 
 /**
+ * E1（within 权威对等）：`anchorIdsOf` 的**唯一 JS 实现**——祖先链 id（parentElement 上溯、
+ * 内→外序、≤8 个、小写、元素自身不入；注意小写化在 push 处），`within:#id` 尾缀的池侧
+ * 判定底座（pool-js EXTRACT/OBSERVE/HINT_HEAD/HEURISTIC 四 pass 与 A3/F64 的 PASS 常量
+ * 经 `${}` 内插同一份，先例 LABEL_HELPERS_JS——改这里 = 改所有采集面，防五池口径漂移）。
+ *
+ * 字节纪律：文本与 56456fa 的 EXTRACT_JS 本地实现逐字符一致 ⇒ EXTRACT_JS pass 串字节不变
+ * （OBSERVE_JS 的本地副本用词是 "ids"，收敛后统一为 "out"——变量名差异，行为逐字节一致；
+ * 离线断言核对两处 diff：EXTRACT 仅允许零字节、OBSERVE 仅允许该注释外的 ids→out 重命名）。
+ * 内插点注释只写在模板外（本 docblock）——模板内加注释行会破坏 pass 串字节不变。
+ * 无换行首尾（首行直接跟内容、末行 `};` 收尾），调用点以 `${ANCHOR_JS}` 独占一行内插。
+ */
+export const ANCHOR_JS = String.raw`  const anchorIdsOf = (el) => {
+    const out = [];
+    let p = el ? el.parentElement : null;
+    while (p && out.length < 8) {
+      if (p.id) out.push(String(p.id).toLowerCase());
+      p = p.parentElement;
+    }
+    return out;
+  };`;
+
+/**
  * ONE round trip for the whole page: tag, label (incl. <label>-wrapper text),
  * data-test, name, id, input type, href, visibility and the main-content flag,
  * ordered main-content-first, each winner stamped with `data-dshref` in the same
@@ -497,15 +519,7 @@ export const EXTRACT_JS = String.raw`(arg) => {
   const nonce = 'af' + ((globalThis.__afStamp = (globalThis.__afStamp | 0) + 1));
   // E3：祖先链 id（≤8、小写、最近祖先在前）——within:#id 尾缀的池侧判定底座。
   // 一次 parentElement 链行走；无 id 祖先 = 空数组（行里省略，池面零开销）。
-  const anchorIdsOf = (el) => {
-    const out = [];
-    let p = el ? el.parentElement : null;
-    while (p && out.length < 8) {
-      if (p.id) out.push(String(p.id).toLowerCase());
-      p = p.parentElement;
-    }
-    return out;
-  };
+${ANCHOR_JS}
   return ordered.map((r, pos) => {
     const ref = 'e' + pos;
     const stamp = nonce + '-' + ref;
@@ -561,15 +575,7 @@ export const OBSERVE_JS = String.raw`(arg) => {
   // E3：祖先链 id（≤8、小写、最近祖先在前）——与 EXTRACT_JS 的 anchorIdsOf 同口径，
   // 是 within:#id 尾缀在 observe 侧的自证底座。一次 parentElement 链行走；无 id 祖先
   // = 空数组（行里省略该字段 ⇒ 这类页面的观察 JSON 形状逐字节不变）。
-  const anchorIdsOf = (el) => {
-    const ids = [];
-    let p = el ? el.parentElement : null;
-    while (p && ids.length < 8) {
-      if (p.id) ids.push(String(p.id).toLowerCase());
-      p = p.parentElement;
-    }
-    return ids;
-  };
+${ANCHOR_JS}
   const all = [];
   try { __collectAll(document, sel, all); }
   catch (err) { return { bad_selector: String(err && err.message ? err.message : err) }; }
@@ -728,6 +734,10 @@ const HINT_HEAD = String.raw`(arg) => {
             // 锚不在本页 = 本帧无命中，下一帧继续找）。单层（解析层已保证）。
             const anchorEl = p.within ? document.getElementById(p.within) : null;
             const inAnchor = (e) => p.within === undefined || (anchorEl && anchorEl.contains(e));
+            // E1（within 权威对等，F-1 闭合）：回捞行补 anchor_ids（与真池行同构）——回捞行
+            // 并入主池后 executor 重新 hintMatch，池侧 inAnchor 按 anchor_ids 过滤；此前回捞行
+            // 缺该字段被二次清零 → 落到 FW8（无视 within）在任意帧动作锚外 #x。共享 ANCHOR_JS。
+${ANCHOR_JS}
             const hits = [];
             if (p.kind === 'id') {
                 all.forEach((e, i) => {
@@ -766,6 +776,7 @@ const HINT_HEAD = String.raw`(arg) => {
                 .slice(0, 5)
                 .map((i, n) => {
                     const e = all[i];
+                    const anchors = anchorIdsOf(e);
                     const href = e.getAttribute('href') || '';
                     const ref = 'h' + n;
                     const stamp = nonce + '-' + ref;
@@ -776,6 +787,8 @@ const HINT_HEAD = String.raw`(arg) => {
                             label: labelOf(e).slice(0, 40), full_label: labelOf(e).slice(0, 200),
                             data_test: e.getAttribute('data-test') || '',
                             name: e.getAttribute('name') || '', id: e.id || '',
+                            // E1（F-1 闭合）：回捞行 anchor_ids 与真池行同构（additive）。
+                            ...(anchors.length ? {anchor_ids: anchors} : {}),
                             input_type: (e.getAttribute('type') || '').toLowerCase(),
                             href: href ? href.split('?')[0].replace(/\/+$/,'').split('/').slice(-2).join('/') : '',
                             ...(href ? {href_full: href} : {})};
@@ -811,6 +824,7 @@ export const FN_WRAPPER = compile("e", String.raw`const own = (e.value || '').tr
  */
 export const HEURISTIC_WIDGET_JS = String.raw`(arg) => {
   ${BUCKET_HELPERS_JS}
+  ${ANCHOR_JS}
   const WS = /[ \t\n\r\f\v]+/g;
   const norm = (t) => (t || '').replace(/[\uE000-\uF8FF]/g, '').replace(WS, ' ').trim();
   const all = [];
@@ -844,11 +858,14 @@ export const HEURISTIC_WIDGET_JS = String.raw`(arg) => {
     const ref = 'e' + (arg.startRef + pos);
     e.setAttribute('data-dshref', ref);
     const tag = e.tagName.toLowerCase();
+    // E1（M3 第五池）：heuristic 伪按钮行补 anchor_ids（与真池/其余合成池同构，additive）。
+    const anchors = anchorIdsOf(e);
     const main = (!e.closest('nav, aside, footer, header') && !!e.closest('main, [role=main], article'));
     const cls = __classify(e, main);
     const full = norm(e.innerText || '').slice(0, 200);
     // A1 不变量：label === full_label 的前 40 字（同一 full 截断）。
     return { tag: tag, label: full.slice(0, 40), full_label: full, main: main,
+      ...(anchors.length ? {anchor_ids: anchors} : {}),
       rect: { top: cls.rect.top, left: cls.rect.left, width: cls.rect.width, height: cls.rect.height },
       inViewport: cls.inViewport, nearViewport: cls.nearViewport,
       scrollDepth: cls.scrollDepth, inScrollContainer: cls.inScrollContainer,

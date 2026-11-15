@@ -10,7 +10,7 @@ import {
   firstOf, framesOf, urlOf, frameInHostsEnvelope, type Elem, type FrameLike, type PageLike,
 } from "./extraction.ts";
 import { elemFrameStamp, frameScopeMatchesFrame } from "./frame-scope.ts";
-import { compile } from "./pool-js.ts";
+import { ANCHOR_JS, compile } from "./pool-js.ts";
 
 /* ------------------------------------------- declared identity recovery (FW8) */
 
@@ -51,6 +51,12 @@ export interface IdentityHintInfo {
   tag: string;
   /** A 批（frame:<origin>）：声明的帧链（外→内；未声明 = undefined）——帧循环过滤用。 */
   frameChain?: string[];
+  /**
+   * E1（within 权威对等）：声明的 within 锚 id（小写；未声明 = undefined）。
+   * `identityLookup` 在候选收集处按 `anchors.includes(within)` 过滤（M5：在"恰好一个
+   * 可见匹配"判定之前）——executor 两调用点（命令步/act hint）不做任何额外判定，行为自动继承。
+   */
+  within?: string;
 }
 
 /** FW8：判断一条 hint 是不是**身份声明**（白名单五条里的形状/属性两条）。纯函数。 */
@@ -62,7 +68,8 @@ export function identityHintInfo(hint: string): IdentityHintInfo {
   if (parsed.kind === "id") {
     if (parsed.value === "") return miss("id");
     return { eligible: true, shape: "#id", attr: "id", value: parsed.value, tag: "",
-      ...(frameChain !== undefined ? { frameChain } : {}) };
+      ...(frameChain !== undefined ? { frameChain } : {}),
+      ...(parsed.within !== undefined ? { within: parsed.within } : {}) };
   }
   if (parsed.kind === "attrEq") {
     // `tag[attr=value]` 的 tag 必须是可表达的简单标签名；否则不是身份声明（不拿它去赌 CSS）。
@@ -75,6 +82,7 @@ export function identityHintInfo(hint: string): IdentityHintInfo {
       value: parsed.value,
       tag: parsed.tag,
       ...(frameChain !== undefined ? { frameChain } : {}),
+      ...(parsed.within !== undefined ? { within: parsed.within } : {}),
     };
   }
   return miss(parsed.kind);
@@ -112,7 +120,9 @@ export function formatIdentityCandidates(c: IdentityCandidate[]): string {
     `${x.tag}${x.id ? `#${x.id}` : ""} "${x.label}" (frame=${x.frame}, visible=${x.visible})`).join("; ");
 }
 
-/** FW8：跨 frame 的身份精确查询（形状/可见性/标签一次算完；不盖章）。 */
+/** FW8：跨 frame 的身份精确查询（形状/可见性/标签一次算完；不盖章）。
+ *  E1（within 权威对等）：行补 anchors（共享 ANCHOR_JS 内插）——候选收集处按 within
+ *  过滤 + 合成 Elem 透传 anchor_ids（与真池行同构）都吃同一份。 */
 const IDENTITY_PROBE_JS = String.raw`(arg) => {
   const attr = arg.attr, want = String(arg.value).toLowerCase(), tag = arg.tag || '';
   const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -120,6 +130,7 @@ const IDENTITY_PROBE_JS = String.raw`(arg) => {
   let all = [];
   try { all = Array.prototype.slice.call(document.querySelectorAll(sel)); }
   catch (e) { return {rows: []}; }
+${ANCHOR_JS}
   const labelOf = (e) => {
     const first = e.childNodes.length ? String(e.childNodes[0].textContent || '').trim() : '';
     return (e.getAttribute('aria-label') || e.getAttribute('title') || first ||
@@ -145,6 +156,8 @@ const IDENTITY_PROBE_JS = String.raw`(arg) => {
       content_editable: e.isContentEditable ? true : false,
       draggable: (e.getAttribute('draggable') || '').toLowerCase() === 'true',
       href: href ? href.split('?')[0].replace(/\/+$/, '').split('/').slice(-2).join('/') : '',
+      // E1：祖先链 id（≤8、小写、内→外）——within 候选过滤 + Elem 透传 anchor_ids 共用。
+      anchors: anchorIdsOf(e),
       ...(href ? {href_full: href} : {}),
     });
   }
@@ -202,6 +215,8 @@ export async function identityLookup(
   if (!info.eligible) return out;
   // A 批（frame:<origin>）：声明链过滤帧循环（hosts 之外的第二道帧限定；未声明 = 逐字节旧路径）。
   const frameChain = info.frameChain;
+  // E1（within 权威对等）：声明的 within 锚（identityHintInfo 已暴露）——候选收集处过滤。
+  const within = info.within;
   const frames = framesOf(page);
   const visible: Array<{ fi: number; row: Record<string, unknown> }> = [];
   const candidates: IdentityCandidate[] = [];
@@ -221,6 +236,12 @@ export async function identityLookup(
     for (const raw of rows) {
       const row = raw as Record<string, unknown>;
       const vis = row["visible"] === true;
+      // E1（within 权威对等，M5）：候选收集处按 within 过滤——在"恰好一个可见匹配"判定
+      // 之前（本循环收集完毕后 visible.length !== 1 才判）。锚不在该帧文档（anchor_ids 不含
+      // within）的行绝不进 candidates/visible：FW8 不再无视 within 在任意帧动作锚外 #x。
+      // M2 记账：过滤后 total_matches/hidden_matches/candidates 变**锚内**口径。
+      const anchors = Array.isArray(row["anchors"]) ? (row["anchors"] as string[]) : [];
+      if (within !== undefined && !anchors.includes(within)) continue;
       candidates.push({
         tag: String(row["tag"] ?? ""), label: String(row["label"] ?? ""),
         id: String(row["id"] ?? ""), frame: fi, visible: vis,
@@ -259,6 +280,10 @@ export async function identityLookup(
     ...(str("data_test") ? { data_test: str("data_test") } : {}),
     ...(str("input_type") ? { input_type: str("input_type") } : {}),
     ...(str("role") ? { role: str("role") } : {}),
+    // E1（within 权威对等）：祖先链 id 透传——合成 Elem 与真池行同构（anchor_ids 与真池
+    // 行同字段；无 id 祖先 = 字段省略的既有口径）。within 过滤在候选收集处已完成。
+    ...(Array.isArray(row["anchors"]) && (row["anchors"] as string[]).length > 0
+      ? { anchor_ids: (row["anchors"] as string[]).map((x) => String(x).toLowerCase()) } : {}),
     ...(row["content_editable"] === true ? { content_editable: true } : {}),
     ...(row["draggable"] === true ? { draggable: true } : {}),
     ...(str("href") ? { href: str("href") } : {}),

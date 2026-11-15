@@ -228,7 +228,7 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 
 | # | 项 | 说明 | 关联 |
 |---|---|---|---|
-| 1 | **within 权威对等** | FW8/F64 不看 within、DRF-text 忽略 within、四处合成池无 `anchor_ids` → 回捞面 `#x within:#p` 可能操作锚外 #x | E 批（within 语义链）前置修复 |
+| 1 | **within 权威对等** | FW8/F64 不看 within、DRF-text 忽略 within、四处合成池无 `anchor_ids` → 回捞面 `#x within:#p` 可能操作锚外 #x | **E1 已收口（同帧）**：五池 anchors（`ANCHOR_JS` 单一出处）+ FW8/F64/DRF-text/A3 消费 within；跨帧 within 维持文档边界（`anchor_ids` 是帧内文档祖先链，E 批规格 §3/§12） |
 | 2 | `findByHint` 支持 `within:` | 组合后缀的帧链过滤已修（B-1）；但 within 作用域在该面不校验 | 同 #1 |
 | 3 | 跨帧同签名不合并 | `firstIfSame` 仍按 tag/label/href/data_test 合并（run 命令步直接执行一个）；需独立立项 + 开关 | D2 边界 |
 | 4 | `read/extract/collect/judge` 帧限定对称化 | `locatorAnyFrame` 逐帧 OR，无法指定帧——act 可按帧而读不能 | 独立立项 |
