@@ -231,7 +231,7 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 | 1 | **within 权威对等** | FW8/F64 不看 within、DRF-text 忽略 within、四处合成池无 `anchor_ids` → 回捞面 `#x within:#p` 可能操作锚外 #x | **E1 已收口（同帧）**：五池 anchors（`ANCHOR_JS` 单一出处）+ FW8/F64/DRF-text/A3 消费 within；跨帧 within 维持文档边界（`anchor_ids` 是帧内文档祖先链，E 批规格 §3/§12） |
 | 2 | `findByHint` 支持 `within:` | 组合后缀的帧链过滤已修（B-1）；但 within 作用域在该面不校验 | **E3 已收口**：`findByHint` 帧链过滤后按 `anchor_ids` 过滤（`rules.anchorChainMatch`，单层 membership/链嵌套序同一语义）；必修点同批修复——任一后缀存在即用剥离后 base（旧实现「无 frame 有 within」保留整串 → attr 正则/induceHint 精确串匹配全落空），无后缀 = 原串逐字节；`frame:`+`within:` 组合成全语义（见 CHANGELOG E3） |
 | 3 | 跨帧同签名不合并 | `firstIfSame` 仍按 tag/label/href/data_test 合并（run 命令步直接执行一个）；需独立立项 + 开关 | D2 边界 |
-| 4 | `read/extract/collect/judge` 帧限定对称化 | `locatorAnyFrame` 逐帧 OR，无法指定帧——act 可按帧而读不能 | 独立立项 |
+| 4 | `read/extract/collect/judge` 帧限定对称化 | `locatorAnyFrame` 逐帧 OR，无法指定帧——act 可按帧而读不能 | **E4 已收口**：读/判面 CSS 选择器支持 ` frame:<origin链>` 尾缀（`splitFrameSuffixFromSelector` 唯一剥离 + `locatorAnyFrame`/`countAnyFrame` 帧过滤；值不合法=整串按原 CSS 处理；ctx.read/extract 不抛 frame_not_allowed——null/0/[] + trace `frame_evidence`；done/when 走 F45② 升级且 probe suffix-aware；无尾缀路径逐字节不变；见 CHANGELOG E4 批 + WITHIN_PARITY_PLAN §6） |
 | 5 | hintMemory / `induceHint` 帧限定 | 记忆产物不带 `frame:`——跨帧同名回放歧义→回退模型（无误动作） | 小项 |
 | 6 | >6 帧 / 每帧池配额 | `framesOf ≤6`、窗口 40/120 跨帧共享主帧优先 | 需先测量 |
 | 7 | `matchedChains` 截断标记 | 证据链 >4 条去重截断时无 truncated 标记 | 小项 |

@@ -72,6 +72,17 @@
 
 ## 6. E4：读侧帧限定对称化
 
+> **状态：已实施（E4 批，提交号由 lead 落定）**。实施记录见 CHANGELOG「E4 批（读侧帧限定）」；
+> 离线套件 `/tmp/af-e4/`（split 矩阵 / 帧过滤矩阵 / signals 等价 / F45② suffix-aware 升级触发 /
+> ctx.read 不抛口径 / 尾缀被拒诊断 / test-double fallback 排序）。M4 四项全部落实：
+> ①尾缀被拒诊断（读面 trace `frame_suffix_rejected` + 抽取预检 reason 附注，只在失败路径）；
+> ②逐面失败语义钉死（ctx.read/extract 不抛 frame_not_allowed——null/0/[] + `frame_evidence`；
+> done/when 走 F45②；会话面零合同变化）；③F45② done/when 探针 suffix-aware（底座继承 +
+> 执行器注记 + 升级触发断言）；④test-double fallback 在 split 之后。**实施偏差两处（如实记账）**：
+> `frameScopeEvidenceOf` 作为独立导出（证据与帧循环同谓词同帧序，由 ctx 面调用，不是 opts 回调）；
+> 无尾缀抽取维持既有信封不设防口径（对称化只经尾缀激活——改动会破坏「无尾缀逐字节不变」不变量）。
+> 浏览器级实测（真页 read/extract 尾缀、信封外 null、done 升级）留专项。
+
 1. **语法**：`read/extract/collect/judge` 与 done/when 的 CSS 选择器可尾缀 ` frame:<origin链>`（与 hint 同一 `parseFrameChainValue` 校验；**值不合法 ⇒ 整串按原 CSS 处理**（显式落空），绝不半剥——防选择器属性值以 ` frame:` 结尾的伪尾缀误伤）。
 2. **底座**：`extraction.ts` 新增 `splitFrameSuffixFromSelector(sel)` + `locatorAnyFrame`/`cssCount` 帧循环按 `frameScopeMatchesFrame` 过滤（hosts 信封同口径：主帧恒允许、子帧按信封）；`signals.ts` 的 css_* 求值走同一 helper。
 3. **结构化失败**：声明帧不在信封 → `frame_not_allowed` 同证据面（复用 probeExcludedHint 思路，只读探测）；帧不存在 → 结构化 miss。

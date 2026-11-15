@@ -704,6 +704,9 @@ frame），允许帧已成立 = 正常成功。其余情况步骤照常，只在
    （`apps check` 的 lint 通道：不进 problems、不改 VALID/exit；拿不到 `meta.hosts` 时只做值形状检查）。
 3. **跨源帧要能动作**：该 frame origin 必须进 `meta.hosts`（app）/ 会话 `hosts`，否则解析面排除该帧
    （`frames_excluded`）；`inspect --probe` 的子 frame 命中证据与 `frame_host` advisory 会点名 origin。
+   **读面同样可按帧限定**（E4）：`ctx.read.*` / `ctx.extract` 的 rows / done/when 的 CSS selector
+   支持 ` frame:<origin链>` 尾缀——读/抽取的声明帧 miss 口径与 done 的 `frame_not_allowed` 升级
+   见 §5 的「读侧帧限定」。
 4. **已知边界**：`framesOf` 只取主 frame + ≤5 子 frame（更深的 frame 不参与池/探测，`inspect` 的
    `probes[].frames` 也只到第 6 个）；元素池窗口（40/120）跨帧共享、主 frame 优先——frame 多时
    目标可能被窗口挤掉，先用 `ctx.observe()`（免费只读、逐帧）确认再收窄 hint；`f<fi>` 下标来自
@@ -824,6 +827,7 @@ export async function flow(ctx) {
 - `ctx.extract(name)` 的字段选择器是**行内相对选择器**；`rows` 最多取 500 行（超出在 trace 里标 `truncated`）。分页用第二参 `ctx.extract(nameOrSpec, { offset })`（0-based 整数 0..10000；`maxItems` 仍是每页上限，返回值形状与 `count` 语义不变——`offset` 写进 inline spec = `config_error`）。
 - `fields` 做两类投影（task-24/3c 起）：**①行内文本投影**（旧语义，无 @ 前缀逐字节不变）：每个字段值取单元格元素的 `innerText`（表单控件回退 `inputValue`；实现：`src/app/ctx.ts` 的 extract 字段循环）——`fields: { al: "[aria-label]" }` 这类属性选择器能定位到单元格，但读到的仍是它的文本：图标型元素（aria-label 有值、无可见文本）的字段恒为空（R11 实测）；**②属性投影（opt-in，"@" 前缀）**：`fields: { rating: "@aria-label" }` 读**行元素自身**的 `aria-label` attribute（无子选择器、无行内回退；读不到 → `""` 与现行为一致）——评分/评数这类"结构化信号在行元素属性上"的站点从此可按行读取（`ctx.read.attr` 是全页首匹配、无行作用域，3c 是唯一能落到行的结构化通道）。dry 仍 `[]`、replay 按录制回放（行为不变）。
 - `ctx.rows({row, fields})` 是 v1 明确**不开放**的新语法：调用给结构化 `config_error` 指向 `extract(name)`。
+- **读侧帧限定（E4，` frame:<origin链>` 尾缀）**：`ctx.read.{text,value,count,attr}`、`ctx.extract`/`ctx.collect` 的 **rows 行选择器**、`ctx.arrive`/`ctx.manual` 的 done、以及 done/when/judge 的 CSS selector 都可尾缀 ` frame:<origin链>`（与 act hint 的尾缀同一校验：`>` 分隔外→内、≤4 段、每段 http(s) 规范 origin；例 `ctx.read.text("#status frame:https://app.example.com")`）。三条口径：**①值不合法 ⇒ 整串按原 CSS 处理**（显式落空，绝不半剥——该形态在 E4 前必然是非法 CSS，所以尾缀只会激活原本就保证失败的串，既有选择器零影响；拒绝原因见读面 trace 的 `frame_suffix_rejected` / 抽取预检报错附注）；**②声明帧不在 `meta.hosts` 信封或不存在 ⇒ miss**（read 返回 `null`/`0`、extract 返回 `[]`——**不抛** frame_not_allowed，trace 事件附 `frame_evidence`：`excluded` 非空 = 声明帧被信封排除（评估是否把 origin 加进 meta.hosts）、`scanned` 空 = 帧不存在/链写错、`scanned` 非空 = 帧已扫但选择器零命中）；**③done/when 不走 miss 而走升级**：声明帧指向被排除帧且只在那里成立 → 结构化 `frame_not_allowed`（见 §10 stopCode 表）。行选择器带合法尾缀时与 `ctx.read` 同信封口径（被排除帧不读）；无尾缀的抽取维持既有跨帧口径。`fields` 字段选择器是**行内相对寻址**、不支持尾缀；`collect` 的内部滚动只滚声明帧。`within:` 不是读侧语法（带它按原 CSS 显式落空）。
 - **选择器非法 = `config_error`，合法但零命中仍是 `[]`/`""`（C2）**：`readRows` 在**入口**做一次选择器解析预检——行选择器 + 每个字段选择器（除 `"."`/`":scope"`/`"@attr"` 形态）各一次 Playwright `locator(sel).count()`（每次 `ctx.extract` 最多 1+字段数 次往返；`ctx.collect` 只在入口一次、循环内不重复）。非法选择器抛结构化 `config_error`（reason `ctx.extract: field "x" selector "…" is not valid: …`，`diagnostics.bad_selector={selector, field?}`；停因码复用 `config_error`，不新增 stopCode）；掉帧/超时等执行面异常仍按旧行为（不会被误报成选择器错）。会话 `extract` 复用 observe 口径：响应带 `error:"bad_selector"`。**有意的行为变更**：此前非法选择器被静默吞成 `""`/`[]`（假数据），现在响亮报错；`ctx.collect` 旧的 DOM `querySelectorAll` 预检已删除，改走同一入口，因此 Playwright 伪类选择器（如 `div.row:has-text("Saved")`）不再被误拒。**dry/replay 不访问浏览器、不做预检**（`apps check` 不因此红，只有真跑/会话才红）——所以 `check VALID` 不代表选择器真的合法。
 - dry 模式下 `extract` 返回 `[]`、`read.attr` 返回 `null`、`waitFor` 立即返回 `true`（没有页面）——脚本在 dry 期不要依赖观察值；**一切基于观察值的 `ctx.fail`/分支/断言都必须用 `ctx.runtime.dry` 守卫**（dry/replay 恒 `true`、真跑恒 `false`；`epoch===0` 不作判据——见 §2 消歧义）：`apps check` 与 `--dry-run` 会真跑 flow，没有守卫的数据驱动停会把合法脚本判成 problems（03-D1 配方；需要严格断言数据时，只在真实运行里停）。**dry 模拟面全表**（06-B，`createDryCtx` 实证）：`step`/`arrive`/`run`/`manual` 恒返回 `ok:true` 且 **`when` 不评估**（stopCode 恒空 ⇒ `precondition_skipped`/末页 exhausted 这类分支在 dry 结构性不可预演）；`read.*` 返 null/0；`collect` 返 `{rows:[], coverage:{rounds:0,rowsSeen:0,addedLastRound:0}, stopReason:"dry"}`；`url()` 是最近声明值；步预算照常计数。**吞错有留痕**（S3）：dry 的 `validateXxxRequest`（scrollList/expand/setRange/collect）抛错前先落 `validation_error` 事件——脚本 `try/catch` 吞掉 `config_error`，`apps check` 仍判 FAIL 并输出「脚本吞掉了配置错误：<call> <message>」；源码调用点与 dry 事件数的差额只打警告。结论：**dry 验调用序列与声明形状，不验分支覆盖**——check VALID ≠ 脚本每条分支都被走过，守卫分支的正确性只有真实运行能证明。**循环特别警告**（09-B，r09-retry-demo 实录）：`step` 模拟恒 `ok:true` ⇒ 以"步骤成功"为 break 条件的 `while/for` 会在 dry **假成功早退**，随后未守卫的终局 `ctx.fail` 把 dry 判红（报错自曝 `ok:true` yet exhausted 的矛盾即此坑）——dry 预演只到声明面为止，循环语义一律真实运行验；各分支的**声明校验**可用 `run --dry --slot <k>=<v>` 逐分支触达（08 实证，不占真实额度）。
 - 观察类调用（text/value/count/attr/extract）都进 trace，所以带读取的脚本可以 `--replay`。进程步（`run`/`dangerous`）自 08-C 修复起同样进 `step_traces`（成功步无 stop_code、attempts/exit code 在嵌套 result 里）。
@@ -1048,7 +1052,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |
 | `false_done` | **P0-E**（`done_guard:"fail"` 档）：done 成立但只读复核 guard 命中假绿特征——登录墙特征（URL/标题登录文案/跨出 hosts 信封）或「有动作但 changed=false 且 done 是否定式」的零前进蹭成立（R11：误点进登录页被算成功）。给 done 配正向锚（`all_of(not(...), 正向锚)`，必要时配 `ctx.judge.loginWall()`）；确属误报把 policy 改回 `warn`。缺省 `warn` 档只记 `false_done:` step warning，不改判定 |
 | `step_timeout` | **F3**：该步显式声明了 `timeoutMs`，整步挂钟（含 reobserve/升级循环的每轮与总时长）超了声明值——循环不再进入下一轮（已在途的决策调用不可抢占，超额 ≤ 一次在途调用）。放宽 `timeoutMs`、收窄该步 done/target，或拆分流程；未声明 `timeoutMs` 的步骤没有这个帽 |
-| `frame_not_allowed` | **仅当声明 target 或 done/when 只存在于 `meta.hosts` 之外的 frame**：第三方非交互 frame 默认排除（`frames_excluded` warning），**不需要**为此加 hosts；只有声明目标/完成信号确需该 frame 时才评估把它的 origin 加进 `meta.hosts`，否则把目标/done 改到允许 frame 内的事实。C 批起 reason 同时带**声明的帧链**（hint 的 `frame:` 尾缀；无尾缀明说未声明）与**命中帧的完整链**（`frameChainOf`，按链去重 ≤4，含该帧 origin/帧下标）+ 只读命中证据；修法二选一明写（加 host / 改目标或链）。CLI 面：`plan check --probe` 支持 `frame:` 目标核对（`findByHint` 旧匹配器：身份形状与 `induceHint` 产物；见多 frame 速查）；`amber start --target` 对帧限定目标结构化拒绝（见多 frame 速查）。导航信封外的 goto 仍报 `host_not_allowed` |
+| `frame_not_allowed` | **仅当声明 target 或 done/when 只存在于 `meta.hosts` 之外的 frame**：第三方非交互 frame 默认排除（`frames_excluded` warning），**不需要**为此加 hosts；只有声明目标/完成信号确需该 frame 时才评估把它的 origin 加进 `meta.hosts`，否则把目标/done 改到允许 frame 内的事实。C 批起 reason 同时带**声明的帧链**（hint 的 `frame:` 尾缀；无尾缀明说未声明）与**命中帧的完整链**（`frameChainOf`，按链去重 ≤4，含该帧 origin/帧下标）+ 只读命中证据；修法二选一明写（加 host / 改目标或链）。**E4 起 done/when 的 CSS selector 也可带 ` frame:<origin链>` 尾缀**：声明帧指向被排除帧且只在那里成立 → 本停因升级（此前该写法是非法 CSS、退化为纯 `done_not_held`）；声明帧在允许帧内 = 正常完成面。CLI 面：`plan check --probe` 支持 `frame:` 目标核对（`findByHint` 旧匹配器：身份形状与 `induceHint` 产物；见多 frame 速查）；`amber start --target` 对帧限定目标结构化拒绝（见多 frame 速查）。导航信封外的 goto 仍报 `host_not_allowed` |
 | `popup_not_allowed` | action 打开的新 tab / popup 不在 `meta.hosts` 内；声明 popup host 或避免打开外域 |
 | `navigation_forbidden` | `meta.policy.navigation:"entry-only"` 下入口之外的引擎直接 URL 导航被闸门拒绝；导航须经由页面元素完成（确需直达就移除该 policy）。见 §4.10 |
 | `manual_signal_not_held` / `manual_declined` / `needs_human` | 人工步：DOM 信号没验过 / 人放弃 / 非 TTY 需要人 |
@@ -1108,7 +1112,10 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
   的步由引擎自动跟随 + 去重**（见 §4.9）。
 - **`frame:` 帧限定的已知边界**：`framesOf` ≤6（主 frame + ≤5 子 frame）；池窗口 40/120 跨帧共享、
   主 frame 优先；同签名跨帧仍由 `firstIfSame` 合并（run 命令步 / act hint 直接执行一个，会话 act 停）；
-  `read`/`extract`/`collect`/`judge` 无帧限定（`locatorAnyFrame` 逐帧 OR）；`about:blank`/srcdoc
+  **读侧帧限定已做（E4）**：`ctx.read.*` / `ctx.extract`/`ctx.collect` 的 rows / done/when/judge 的
+  CSS selector 支持 ` frame:<origin链>` 尾缀（值不合法 = 整串按原 CSS 处理；声明帧不在信封 →
+  读面 miss + trace 证据、done/when 走 `frame_not_allowed` 升级；见 §5「读侧帧限定」）；
+  `about:blank`/srcdoc
   等未知 origin 帧不可寻址；`within` 语义链已做（E2——主池/回捞/FW8/F64/DRF 全消费面；E 批 §4）；
   `findByHint`（plan check --probe）的 within 作用域校验已做（E3——帧链过滤后按 `anchor_ids` 过滤，
   单层+链与 act hint 同一 `anchorChainMatch` 语义，`frame:`+`within:` 组合两面同时生效）；

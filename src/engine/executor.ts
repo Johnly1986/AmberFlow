@@ -3402,6 +3402,13 @@ export class BrowserMiddleware {
        * P0-D：done/when 求值的唯一入口。先在 allowed frames 上判；不成立时**只读**在被排除
        * frame 上再判一次——只在那里成立 = done 依赖被排除帧，收尾升级为 frame_not_allowed
        * （绝不留假成功，也不当普通 done_not_held 糊过去）。
+       *
+       * E4（M4③，suffix-aware）：done/when 的 css_* 选择器可尾缀 ` frame:<origin链>`——
+       * 求值底座 locatorAnyFrame/countAnyFrame 已按声明链过滤帧循环，因此**双面探测自动
+       * suffix-aware**：allowed 视图上声明帧（指向被排除帧的链）恒零命中 → 探针落到
+       * excluded 视图（帧循环链匹配被排除帧、本面不传 hosts 无信封跳过）→ 命中即
+       * doneInExcluded → 收尾升级 frame_not_allowed。声明链指向允许帧 = 正常完成面；
+       * 非法尾缀值 = 整串按原 CSS 处理（非法 CSS 双面都 false → 普通 done_not_held，不升级）。
        */
       const goalHeld = async (): Promise<boolean> => {
         if (goalSignalFn === null) return false;
@@ -3432,6 +3439,9 @@ export class BrowserMiddleware {
       // moves on exactly as if the step had succeeded.
       if (precondition !== null && precondition !== undefined && !(await checkSignal(readPage, precondition))) {
         // P0-D：when/precondition 只在被排除 frame 上成立 ⇒ 声明依赖被排除帧，结构化停因。
+        // E4（M4③）：css_* 选择器带合法 ` frame:` 尾缀时本双面探测同样 suffix-aware
+        // （底座 locatorAnyFrame/countAnyFrame 已按声明链过滤——allowed 视图零命中、
+        // excluded 视图命中 = 升级；声明帧在允许帧内 = 正常适用面）。
         if (excludedView !== null && (await checkSignal(excludedView as never, precondition))) {
           const why = `when/precondition signal ${JSON.stringify(precondition)} holds only inside frame(s) `
             + `${frameGate === null ? "-" : frameGate.origins.join(", ")} excluded by the declared hosts envelope `

@@ -9,7 +9,7 @@
  * Port note: the Python implementation is synchronous because Playwright's sync
  * API is; the port is ASYNC (browser I/O in Node). Callers await it either way.
  */
-import { countAnyFrame, firstOf, locatorAnyFrame, urlOf, type PageLike } from "./extraction.ts";
+import { countAnyFrame, firstOf, locatorAnyFrame, urlOf, splitFrameSuffixFromSelector, type PageLike } from "./extraction.ts";
 // 算子表本体在叶子模块 `signal-ops.ts`（零 import）：`grammar-prompt.ts` 要引用它生成
 // 提示词/报错文案，不应为此拖入本模块背后的 extraction 链。此处 re-export 保持 API。
 import { SIGNAL_OPS } from "./signal-ops.ts";
@@ -261,6 +261,34 @@ export function matchSelector(elems: StateView["elems"], selector: string): Stat
 }
 
 // SIGNAL_OPS 已移至 `./signal-ops.ts`（见文件头 re-export）；值 = 算子参数个数，0 = 无参叶子。
+
+/**
+ * E4（读侧帧限定的 arrive/manual 对齐）：信号树里的 css_* 叶子 selector 是否带**合法**
+ * ` frame:<origin链>` 尾缀。消费面：`ctx.arrive` / `ctx.manual` 的 done 求值此前不传
+ * hosts（既有无尾缀口径逐字节保留）——仅当声明了帧尾缀时才按信封求值（声明帧不在
+ * 信封 = miss，与执行器 done/when 的 F45② 读面同口径；否则尾缀会让一个 E4 前必然
+ * 失败的串在无信封面上命中被排除帧）。
+ */
+export function signalHasFrameSuffix(spec: SignalSpec): boolean {
+  const walk = (node: unknown): boolean => {
+    if (typeof node !== "object" || node === null || Array.isArray(node)) return false;
+    for (const [op, v] of Object.entries(node as Record<string, unknown>)) {
+      if (op === "not") {
+        if (walk(v)) return true;
+        continue;
+      }
+      if (op === "all_of" || op === "any_of") {
+        if (Array.isArray(v) && v.some((c) => walk(c))) return true;
+        continue;
+      }
+      if (!op.startsWith("css_")) continue;
+      const sel = signalArgs(v)[0];
+      if (typeof sel === "string" && splitFrameSuffixFromSelector(sel).frameChain !== undefined) return true;
+    }
+    return false;
+  };
+  return walk(spec);
+}
 
 /**
  * Normalise a signal value to its argument list.

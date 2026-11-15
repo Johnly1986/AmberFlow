@@ -365,6 +365,18 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 - 同一入口替换掉 `ctx.collect` 旧的 `document.querySelectorAll` 预检——Playwright 伪类
   （`:has-text(...)` 等）不再被误拒。
 
+`amberflow_session` 的读侧帧限定（E4）：
+
+- `read` 的 `selector` 与 `extract` 的 `rows` 可尾缀 `` ` frame:<origin链>` ``（与 hint 尾缀同一
+  校验：`>` 分隔外→内、≤4 段、http(s) 规范 origin）；**值不合法 ⇒ 整串按原 CSS 处理**（显式
+  落空，绝不半剥——该形态此前必然是非法 CSS，尾缀只激活原本就保证失败的串）。声明帧不在
+  hosts 信封/不存在 → `read` 返回 `value:null`、`extract` 返回 `rows:[]`（**不抛** frame_not_allowed；
+  引擎 trace 事件附 `frame_evidence`={declared,excluded,scanned} 证据）。带尾缀的 rows 与信封同
+  口径（被排除帧不读）；`fields` 字段选择器是行内相对寻址、不支持尾缀。会话合同零变化：响应
+  形状与无尾缀时一致（只回 null/miss）。
+- 信号（`signal`/`wait_for`）的 css_* selector 同样支持尾缀（E4/F71）；done/when 的升级语义
+  （声明帧指向被排除帧 → `frame_not_allowed`）只在 run 面生效，会话信号仍只回布尔。
+
 `amberflow_session` 的信号校验报错（C3）：
 
 - 引擎 `amber session` 的形状失败仍是 `{ok:false, code:"config_error", problems:[…]}`，但 `reason`

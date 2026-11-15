@@ -299,6 +299,63 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   E1（33）/E2（34）套件回归复跑全绿；`npm run typecheck` / `npm run prompt-hit` 通过。
   浏览器级（真页 `plan check --probe` 的 within/链 within/组合命中与未命中+诊断）留待专项。
 
+### E4 批（读侧帧限定）
+
+- **【新语法（读/判面）】** 读/判面的 CSS 选择器可尾缀 ` frame:<origin链>`：`ctx.read.{text,value,count,attr}`、
+  `ctx.extract`/`ctx.collect` 的 **rows 行选择器**、done/when/judge 的 css_* 算子（css_exists /
+  css_exists_text / css_visible_exists / css_text_contains / css_text_equals / css_value_equals /
+  css_count_equals / css_count_min）。校验与 hint 尾缀同一 `frameChainValueProblem`（`>` 分隔外→内、
+  ≤4 段、http(s) 规范 origin）。**为什么零风险**：选择器尾的 `frame:<origin>` 在 E4 前必然是非法 CSS
+  （伪类语法永不成立）——尾缀**只能激活原本就保证失败的串**，既有选择器零影响；无尾缀路径逐字节不变。
+- **【值不合法 = 原样 CSS（显式落空）】** 值非法/缺主体/双尾缀 ⇒ 整串按原 CSS 处理，绝不半剥——
+  防选择器属性值以 ` frame:` 结尾的伪尾缀误伤（属性值捕获必带 CSS 收尾字符、过不了 origin 校验）。
+  与 hint 的 splitTailSuffixes 同一整组回退口径；`within:` 不是读侧语法（带它按原 CSS 显式落空）。
+- **【底座单一收口（M4④）】** `extraction.ts` 新增 `splitFrameSuffixFromSelector`（唯一剥离出处，
+  尾预扫、值合法才剥）+ `locatorAnyFrame`/`countAnyFrame` 帧循环按 `frameScopeMatchesFrame` 过滤
+  （信封同口径：主帧恒允许、子帧按 hosts；声明帧一个都没扫到 = 结构化 miss，不回捞替身）；
+  **test-double fallback 在 split 之后**（替身拿到剥离后 base，无尾缀 = 原串逐字节）。
+  `frameScopeEvidenceOf` 导出帧级扫描证据（与帧循环同一谓词/帧序）。
+- **【signals 覆盖】** live css_* 全部经 locatorAnyFrame/countAnyFrame **自动继承**（signals.ts 零改动；
+  核对无直用 page.locator 的信号路径）。out of scope：离线池近似 `evalSignalOnState`/`matchSelector`
+  （StateView 无帧字段；带尾缀选择器对池 PART 正则不可表达 → 返回 null = 待 live 验证，诱导面不猜）。
+- **【逐面失败语义钉死（M4②）】** `ctx.read`/`ctx.extract` **不抛** frame_not_allowed（保 op 面）：
+  声明帧不在信封/不存在 → 返回 null/0/[] + trace 事件 additive 证据
+  `frame_evidence`={declared,excluded,scanned}（excluded 非空=声明帧被信封排除；scanned 空=帧不存在/
+  链写错；scanned 非空=帧已扫、选择器本身零命中）。done/when 走既有 F45② 升级；会话面经同一 ctx
+  实现（零合同变化，只回 null/miss）。
+- **【F45② done/when 探针 suffix-aware（M4③）】** done/when 的 css_* 带合法 ` frame:` 尾缀时，
+  allowed 视图上声明帧（指向被排除帧的链）恒零命中 → excluded 视图只读探测（帧循环链匹配被排除帧、
+  该面无 hosts 无信封跳过）→ 命中即 doneInExcluded → 收尾升级 `frame_not_allowed`——此前该写法是
+  非法 CSS、双面都 false，升级永不触发、退化为纯 done_not_held。声明链指向允许帧 = 正常完成面；
+  非法尾缀 = 整串原 CSS（双面 false → 普通 done_not_held，不升级）。
+- **【arrive/manual 的 done 求值对齐（新发现缺口的封口）】** `ctx.arrive` / `ctx.manual` 的 done
+  求值此前不传 hosts（既有无尾缀口径=信封不设防，逐字节保留）——仅当 done 信号树带**合法**帧尾缀
+  时按信封求值（`signals.signalHasFrameSuffix`；声明帧不在信封 = miss）。不加这个条件，尾缀会让一个
+  E4 前必然失败的串在这两个无信封面上命中被排除帧（读面越权）。`plan check --probe` 的信号探测
+  （plan-cli，无 hosts 的既有探测面）维持原样——探测非完成真值，既有口径不变。
+- **【尾缀被拒诊断（M4①）】** 选择器串含 ` frame:` 形状但值非法、且原样 CSS 解析失败时点名
+  「尾缀被拒+原因」（B8 同款，只在失败路径附注）：读面 trace 附 `frame_suffix_rejected`；
+  抽取预检（checkExtractSelectors）的 config_error reason 附注拒因（预检本体先剥合法尾缀再验
+  base 形状）。成功路径/无尾缀零改动。
+- **【抽取面口径】** 行选择器带合法尾缀时与 ctx.read 同信封口径（hosts 传入，被排除帧不读）；
+  **无尾缀抽取维持既有信封不设防口径**（对称化只经尾缀激活，既有 op 面零行为变更——
+  无尾缀 locatorAnyFrame 调用的 opts/帧序/回捞全部原样）。字段选择器是行内相对寻址、不支持尾缀
+  （带 ` frame:` 形状的字段选择器按原 CSS 预检 → 非法即 config_error）；collect 的内部滚动
+  （scrollRowsContainer）只滚声明帧。`checkExtractSelectors` 对合法尾缀行选择器先剥后验。
+- **【契约】** schema-gen F71 条目 + css_exists/css_count_* 语义注记与 HINT_GRAMMAR note 补尾缀；
+  dist/schema/ctx.json 快照已重生成（schema:check 绿）；APP_SCRIPT_AUTHORING §5「读侧帧限定」+
+  多 frame 速查 + §10 stopCode 表 + §11 已知边界更新；AGENT_INTERFACE 会话读侧帧限定节新增；
+  BACKLOG「后续立项」#4 收口；WITHIN_PARITY_PLAN §6 实施注记。
+- **【验证】** 离线断言全绿（/tmp/af-e4，54 组）：split 矩阵（合法单段/链/大写、非法 path/默认端口/
+  伪尾缀属性值/双尾缀/缺主体、无尾缀逐字节恒等）、locatorAnyFrame/countAnyFrame 帧过滤矩阵
+  （声明帧命中且只扫声明帧、信封外跳过、帧不存在 miss、无尾缀跨帧 OR 原样）、signals css_*
+  经底座等价性（无尾缀全帧口径不变；带尾缀新语义）、F45② suffix-aware（frameGateOf 双视图 +
+  runReportTail 升级触发断言）、ctx.read 不抛口径（null/0 + trace 证据）、尾缀被拒诊断、
+  test-double fallback 排序、signalHasFrameSuffix + arrive 尾缀条件信封（含无尾缀逐字节对照）；
+  E1（33）/E2（34）/E3（97）套件回归复跑全绿；
+  `npm run typecheck` / `npm run prompt-hit` 通过。浏览器级留待 lead 专项
+  （真页 read/extract 带 ` frame:` 取子帧文本、信封外 null、done 信号 frame 尾缀升级）。
+
 ### 已知边界 / 未做（A–D 批后的诚实清单）
 
 - **`within` 语义链（E 批 E2）**：已收口（E2——链语法/嵌套序包含语义/池+DOM+FW8+F64+DRF

@@ -18,7 +18,12 @@ import {
   type RunReport, type SkippedAction, type StepStateRecord,
 } from "../engine/executor.ts";
 import { validateCommands } from "../engine/actions.ts";
-import { firstOf, framesOf, locatorAnyFrame, urlOf, extractElements, poolSniff, type FrameLike, type PageLike } from "../engine/extraction.ts";
+import {
+  firstOf, framesOf, locatorAnyFrame, urlOf, extractElements, poolSniff,
+  splitFrameSuffixFromSelector, frameScopeEvidenceOf, frameScopeMatchesFrame, frameInHostsEnvelope,
+  type FrameScopeEvidence,
+  type FrameLike, type PageLike,
+} from "../engine/extraction.ts";
 // task-16（B3+）：arrive 侧限速判据的嗅探面选择器（与执行器同口径的准入面）。
 import { admitSelectorWithJsFor } from "../engine/surface.ts";
 // task-24/6a：限速判据阈值单一出处（step 侧与 arrive 侧共用）。
@@ -26,7 +31,7 @@ import { THROTTLE_BODY_FLOOR, THROTTLE_COLLAPSE_RATIO } from "../engine/throttle
 // C2 waitForTarget：hint 语义核对与规则面同一份语法（hintCandidates → hintMatch 单一出处）。
 import { hintCandidates } from "../engine/rules.ts";
 import { observePage, validateObserveOptions, type ObserveOptions, type ObserveResult } from "../engine/observe.ts";
-import { checkSignal } from "../engine/signals.ts";
+import { checkSignal, signalHasFrameSuffix } from "../engine/signals.ts";
 import { defaultDates, defaultDatesSlotNames, loadSource, parseDatesValue, runSource, ValueError } from "../data/datasource.ts";
 import {
   validateReturns, type ReturnExtractor,
@@ -705,18 +710,27 @@ export function createCtx(deps: CtxDeps): Ctx {
     p: PageLike, rowSelector: string, fields: Record<string, string>, call: string,
   ): Promise<void> => {
     const frame = framesOf(p)[0]!;
-    const rowBad = await selectorParseProblem(frame, rowSelector);
+    // E4：行选择器先剥合法 ` frame:` 尾缀再做解析预检（预检只验 CSS 形状，帧归属在
+    // readRows 的帧过滤里；值非法 = 整串按原 CSS 处理 → 预检按原串判，拒因附注进报错——
+    // M4① 的"原样 CSS 解析失败"诊断面）。无尾缀 = 原串逐字节。
+    const rowSplit = splitFrameSuffixFromSelector(rowSelector);
+    const rowBad = await selectorParseProblem(frame, rowSplit.selector);
     if (rowBad !== null) {
       throw new StopError("config_error",
-        `${call}: row selector ${JSON.stringify(rowSelector)} is not valid: ${rowBad}`,
+        `${call}: row selector ${JSON.stringify(rowSelector)} is not valid: ${rowBad}`
+        + (rowSplit.rejected !== undefined ? `（${rowSplit.rejected}）` : ""),
         { bad_selector: { selector: rowSelector } });
     }
     for (const [field, cellSel] of Object.entries(fields)) {
       if (cellSel === "." || cellSel === ":scope" || (cellSel.startsWith("@") && cellSel.length > 1)) continue;
       const bad = await selectorParseProblem(frame, cellSel);
       if (bad !== null) {
+        // E4（M4①）：字段选择器是行内相对寻址（不支持 frame: 尾缀）；串里带被拒尾缀形状时
+        // 同样附注拒因（原样 CSS 解析失败路径——成功路径零改动）。
+        const cellRejected = splitFrameSuffixFromSelector(cellSel).rejected;
         throw new StopError("config_error",
-          `${call}: field ${JSON.stringify(field)} selector ${JSON.stringify(cellSel)} is not valid: ${bad}`,
+          `${call}: field ${JSON.stringify(field)} selector ${JSON.stringify(cellSel)} is not valid: ${bad}`
+          + (cellRejected !== undefined ? `（${cellRejected}）` : ""),
           { bad_selector: { selector: cellSel, field } });
       }
     }
@@ -738,7 +752,11 @@ export function createCtx(deps: CtxDeps): Ctx {
     const call = opts.call ?? "ctx.extract";
     const p = await page();
     if (opts.prevalidated !== true) await checkExtractSelectors(p, rowSelector, fields, call);
-    const rowsLoc = await locatorAnyFrame(p, rowSelector);
+    // E4：声明了合法 ` frame:` 尾缀的行选择器与 ctx.read 同信封口径（hosts 传入 → 链匹配
+    // 且信封内才读；声明帧全在信封外/不存在 = 空 + miss 证据）。无尾缀 = 原样（hosts 不传，
+    // 既有跨帧抽取口径逐字节不变——对称化只经尾缀激活，既有 op 面零行为变更）。
+    const rowSplit = splitFrameSuffixFromSelector(rowSelector);
+    const rowsLoc = await locatorAnyFrame(p, rowSelector, rowSplit.frameChain !== undefined ? { hosts } : undefined);
     const rows: Array<Record<string, string>> = [];
     if (rowsLoc === null) return { rows, total: 0, truncated: false };
     const all = rowsLoc.all === undefined ? null : await rowsLoc.all();
@@ -785,7 +803,12 @@ export function createCtx(deps: CtxDeps): Ctx {
     rowSelector: string,
   ): Promise<{ found: boolean; scrollable: boolean; moved: boolean; atBottom: boolean }> => {
     const p = await page();
-    for (const fr of framesOf(p)) {
+    // E4：声明了合法 ` frame:` 尾缀的行选择器只滚声明帧（链匹配 + 信封过滤；查询用剥离后
+    // base——原始串对 querySelectorAll 是非法 CSS，一帧都找不到）。无尾缀 = 原样逐帧探测。
+    const scrollSplit = splitFrameSuffixFromSelector(rowSelector);
+    for (const [fi, fr] of framesOf(p).entries()) {
+      if (scrollSplit.frameChain !== undefined && !frameScopeMatchesFrame(scrollSplit.frameChain, fr)) continue;
+      if (scrollSplit.frameChain !== undefined && fi > 0 && !frameInHostsEnvelope(fr, hosts)) continue;
       try {
         const raw = await fr.evaluate((sel: string) => {
           // 只用结构类型：本仓库 tsconfig 不含 DOM lib（页面侧形状走 structural cast）。
@@ -843,6 +866,31 @@ export function createCtx(deps: CtxDeps): Ctx {
       }
     }
     return { found: false, scrollable: false, moved: false, atBottom: true };
+  };
+
+  /**
+   * E4（M4②/M4①）：读/抽取 **miss** 的帧尾缀证据（trace 事件 additive 字段；只在读空
+   * 且选择器串带 ` frame:` 尾缀参与时出现，二者互斥）：
+   *   - 合法尾缀 → `frame_evidence` = 声明帧扫描证据（`excluded` 非空 = 声明帧存在但被
+   *     hosts 信封排除；`scanned` 空 = 声明帧不存在/链写错；`scanned` 非空 = 帧已扫、
+   *     是选择器本身零命中）；
+   *   - 非法尾缀 → `frame_suffix_rejected` = B8 同款拒因（整串按原 CSS 处理）。
+   * 成功读取/无尾缀 = 空对象 ⇒ trace 事件键集与旧行为逐字节一致。**不抛**：读/抽取是
+   * op 面，声明帧问题落成 null/空 + 证据，绝不升级 frame_not_allowed（那是 done/when
+   * 的 F45② 面）。
+   */
+  const frameSuffixTrace = async (sel: string, missed: boolean): Promise<Record<string, unknown>> => {
+    if (!missed) return {};
+    const split = splitFrameSuffixFromSelector(sel);
+    if (split.frameChain === undefined) {
+      return split.rejected !== undefined ? { frame_suffix_rejected: split.rejected } : {};
+    }
+    try {
+      const ev: FrameScopeEvidence = frameScopeEvidenceOf(await page(), hosts, split.frameChain);
+      return { frame_evidence: ev };
+    } catch {
+      return {};   // 证据只是附注：页面取不到时静默省略，绝不影响读面返回值
+    }
   };
 
   const kit = createKit();
@@ -915,7 +963,11 @@ export function createCtx(deps: CtxDeps): Ctx {
             pageState.update(p as PageLike, "settled");
           }
           try {
-            if (await checkSignal(p as never, req.done as never)) { held = true; break; }
+            // E4：done 信号带合法 ` frame:` 尾缀时按信封求值（声明帧不在信封 = miss，与执行器
+            // done/when 的 F45② 读面同口径；否则尾缀会让 E4 前必失败的串在无信封面上命中被排除帧）。
+            // 无尾缀 = 既有无 hosts 口径逐字节不变。
+            const arriveHosts = signalHasFrameSuffix(req.done) ? { hosts } : undefined;
+            if (await checkSignal(p as never, req.done as never, arriveHosts as never)) { held = true; break; }
           } catch (e) { waitErr = e; break; }        // 坏信号 = 配置错误，别轮询到超时
           if (!seenNonHeld) seenNonHeld = true;
           else {
@@ -1337,7 +1389,10 @@ export function createCtx(deps: CtxDeps): Ctx {
       if (approved) {
         if (!manualLeaf) {
           try {
-            ok = await checkSignal(session.page as never, req.done as never);
+            // E4：人工复核信号带合法 ` frame:` 尾缀时按信封求值（同 arrive 口径——声明帧不在
+            // 信封 = 不成立；无尾缀 = 既有无 hosts 口径逐字节不变）。
+            ok = await checkSignal(session.page as never, req.done as never,
+              signalHasFrameSuffix(req.done) ? ({ hosts } as never) : undefined);
           } catch (e) {
             throw new StopError("config_error", `ctx.manual(${JSON.stringify(desc)}) signal: ${e instanceof Error ? e.message : String(e)}`);
           }
@@ -1396,7 +1451,7 @@ export function createCtx(deps: CtxDeps): Ctx {
           const loc = await locatorAnyFrame(await page(), sel, { hosts });
           if (loc !== null) value = String(await firstOf(loc).innerText({ timeout: 1500 }));
         } catch { value = null; }
-        pushEvent(trace, { call: "read", desc: `text(${sel})`, result: value });
+        pushEvent(trace, { call: "read", desc: `text(${sel})`, result: value, ...await frameSuffixTrace(sel, value === null) });
         return value;
       },
       value: async (sel) => {
@@ -1405,7 +1460,7 @@ export function createCtx(deps: CtxDeps): Ctx {
           const loc = await locatorAnyFrame(await page(), sel, { hosts });
           if (loc !== null) value = String(await firstOf(loc).inputValue({ timeout: 1500 }));
         } catch { value = null; }
-        pushEvent(trace, { call: "read", desc: `value(${sel})`, result: value });
+        pushEvent(trace, { call: "read", desc: `value(${sel})`, result: value, ...await frameSuffixTrace(sel, value === null) });
         return value;
       },
       count: async (sel) => {
@@ -1414,7 +1469,7 @@ export function createCtx(deps: CtxDeps): Ctx {
           const loc = await locatorAnyFrame(await page(), sel, { hosts });
           value = loc === null ? 0 : Number(await loc.count());
         } catch { value = 0; }
-        pushEvent(trace, { call: "read", desc: `count(${sel})`, result: value });
+        pushEvent(trace, { call: "read", desc: `count(${sel})`, result: value, ...await frameSuffixTrace(sel, value === 0) });
         return value;
       },
       attr: async (sel, attr) => {
@@ -1428,7 +1483,7 @@ export function createCtx(deps: CtxDeps): Ctx {
             if (typeof inner.getAttribute === "function") value = await inner.getAttribute(attr, { timeout: 1500 });
           }
         } catch { value = null; }
-        pushEvent(trace, { call: "read", desc: `attr(${sel}, ${attr})`, result: value });
+        pushEvent(trace, { call: "read", desc: `attr(${sel}, ${attr})`, result: value, ...await frameSuffixTrace(sel, value === null) });
         return value;
       },
     },
@@ -1603,6 +1658,9 @@ export function createCtx(deps: CtxDeps): Ctx {
           truncated: found.truncated,
           ...(offset > 0 ? { offset } : {}),
         },
+        // E4：行选择器带合法 ` frame:` 尾缀且本页零行 → miss 证据（additive；有行/无尾缀
+        // = 键集与旧事件逐字节一致）。M4②：抽取不抛 frame_not_allowed，空行 + 证据。
+        ...await frameSuffixTrace(spec.rows, found.rows.length === 0),
       });
       return found.rows;
     },
