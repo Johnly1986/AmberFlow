@@ -735,11 +735,30 @@ const HINT_HEAD = String.raw`(arg) => {
             // E2（within 语义链）：p.within 归一为链（外→内数组，单层 = 长度 1）——逐段
             // getElementById + 嵌套 contains 校验：声明链 a1 contains a2 contains … contains
             // 元素；任一段 null / 前段不含后段 ⇒ 本帧 0 行（fail-closed，下一帧继续找）。
-            // 重复 id 边界（M6②，勿当 bug 修）：getElementById 取文档序首个——首个实例
-            // 不构成嵌套链时本帧 0 行（与池侧 anchorChainMatch 的确定性裁决同向）。
-            const chainEls = p.within ? p.within.map((id) => document.getElementById(id)) : [];
+            // E7（N1）：id → 文档序首个元素的小写映射，**每趟懒建一次**（memoized）——
+            // getElementById 大小写敏感，而 p.within 已按 parseHint 归一为小写（池侧
+            // anchor_ids 同样小写）；页面上的 <div id="Wrap"> 此前查 "wrap" 恒 null =
+            // DOM 回捞与池侧判定分裂。映射口径与 getElementById 一致：文档序**首个**实例
+            // （重复 id 的确定性裁决，M6②）。memo 在 handle 之后、仅 within 参与时建立。
+            let idMap = null;
+            const elByIdLower = (id) => {
+                if (idMap === null) {
+                    idMap = new Map();
+                    const nodes = document.querySelectorAll('[id]');
+                    for (let i = 0; i < nodes.length; i++) {
+                        const el = nodes[i];
+                        const key = String(el.id || '').toLowerCase();
+                        if (key !== '' && !idMap.has(key)) idMap.set(key, el);
+                    }
+                }
+                const hit = idMap.get(id);
+                return hit === undefined ? null : hit;
+            };
+            // E7（N2）：链校验要求**两段锚是不同元素且严格包含**——contains 对自身为
+            // true（within:#x>#x 同元素退化会命中），契约是"池侧不匹配、DOM 侧同元素退化也不命中"。
+            const chainEls = p.within ? p.within.map(elByIdLower) : [];
             const chainOk = p.within !== undefined && chainEls.every((el, i) =>
-                el !== null && (i === 0 || chainEls[i - 1].contains(el)));
+                el !== null && (i === 0 || (chainEls[i - 1] !== el && chainEls[i - 1].contains(el))));
             const innermost = chainEls.length ? chainEls[chainEls.length - 1] : null;
             const inAnchor = (e) => p.within === undefined || (chainOk && innermost !== null && innermost.contains(e));
             // E1（within 权威对等，F-1 闭合）：回捞行补 anchor_ids（与真池行同构）——回捞行

@@ -221,7 +221,13 @@ export function findByHint(elems: ElemPool, hint: string): { ref: string; el: El
     }
     return null;
   }
-  for (const [ref, el] of Object.entries(pool)) if (induceHint(el) === base) return { ref, el };
+  // E7（B2 修复）：induceHint 产物可能自带 ` frame:<origin>` 尾缀（E5：子帧元素）——精确串比较
+  // 必须比较**剥离后**的 base，否则子帧产物的 `tag[near~label] frame:o` 与 base
+  // `tag[near~label]` 恒不等 = 记忆产物在 probe 面回归性落空。无尾缀产物 split 后 base
+  // 逐字节等于原串（splitTailSuffixes 唯一剥离出处，禁止两处语法）。
+  for (const [ref, el] of Object.entries(pool)) {
+    if (splitTailSuffixes(induceHint(el) ?? "").base === base) return { ref, el };
+  }
   return null;
 }
 

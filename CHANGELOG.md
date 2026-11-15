@@ -227,7 +227,7 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 ### E2 批（within 语义链）
 
 - **【语法（§4.1 + M1④）】** `within:` 尾缀值从单层 `#id` 升级为 **#id 链**：`>` 分隔、
-  **外→内**、≤4 段、每段 `#id` 形态（段首 `#` 可选——方案 §4.3/M6⑤ 的链写法
+  **外→内**、≤4 段、每段 `#id` 形态（**首段必须 `#`、后续段可选 `#`**——方案 §4.3/M6⑤ 的链写法
   `within:#a2>#a1` 每段带 `#`，词法 charset 同批加 `#`；段校验保证旧单层/值内伪尾缀行为
   不变）。**单层 `within:#p` = 长度 1 链（逐字节兼容）**；多 within / 空段（`within:#a>`）/
   超 4 段 / 非法段 ⇒ 解析期**整组回退**（绝不半剥，沿用 R2-5 循环语义）。
@@ -236,8 +236,8 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - **【语义（§4.2 + M6①②③，唯一出处）】** 新增 `rules.anchorChainMatch(anchorIds, chain)`——
   **嵌套序包含**：每段都在 `anchor_ids`（presence 前置显式化：任一段 indexOf === -1 即不匹配）
   且嵌套序正确（anchor_ids 内→外存储 ⇒ `indexOf(aₙ) < … < indexOf(a₁)`）；**n=1 = membership
-  逐字节不变**。写文档边界（M6）：重复 id `within:#x>#x` 不匹配（id 投影无实例身份，序关系
-  不成立；DOM 侧 getElementById 文档序首个同样 fail-closed）；`anchor_ids` ≤8 截断下长链
+  逐字节不变**。写文档边界（M6）：重复 id `within:#x>#x` 池侧不匹配（id 投影无实例身份，序关系
+  不成立）；DOM 侧 getElementById 文档序首个且同元素退化（a === b）不命中（N2 起链校验要求两段锚为不同元素且严格包含）；`anchor_ids` ≤8 截断下长链
   落空（显式失败）；间隙容忍（中间有无 id 祖先不影响）。两套对齐规则的文档义务（M6④）：
   `frame:` = 后缀对齐（frame_path 稠密可分同源父子）；`within:` = 嵌套序包含（anchor_ids
   稀疏 ≤8、仅带 id 祖先——后缀对齐会毁单层兼容）。
@@ -305,8 +305,10 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   `ctx.extract`/`ctx.collect` 的 **rows 行选择器**、done/when/judge 的 css_* 算子（css_exists /
   css_exists_text / css_visible_exists / css_text_contains / css_text_equals / css_value_equals /
   css_count_equals / css_count_min）。校验与 hint 尾缀同一 `frameChainValueProblem`（`>` 分隔外→内、
-  ≤4 段、http(s) 规范 origin）。**为什么零风险**：选择器尾的 `frame:<origin>` 在 E4 前必然是非法 CSS
-  （伪类语法永不成立）——尾缀**只能激活原本就保证失败的串**，既有选择器零影响；无尾缀路径逐字节不变。
+  ≤4 段、http(s) 规范 origin）。**为什么对 CSS 零风险**：选择器尾的 `frame:<origin>` 对纯 CSS 在 E4 前必然是非法
+  （伪类语法永不成立）——尾缀**只能激活原本就保证失败的纯 CSS 串**，既有选择器零影响；无尾缀路径逐字节不变。
+  **非 CSS 引擎（Playwright `text=` 等）不保证**：裸 `text=hello frame:o` 仍会被当尾缀剥离（文档注明），
+  作者需把文本显式引用；E7/N4 的引号/括号平衡守卫会拒绝引号内的尾缀（`div:has-text("x frame:o")` 整串原样）。
 - **【值不合法 = 原样 CSS（显式落空）】** 值非法/缺主体/双尾缀 ⇒ 整串按原 CSS 处理，绝不半剥——
   防选择器属性值以 ` frame:` 结尾的伪尾缀误伤（属性值捕获必带 CSS 收尾字符、过不了 origin 校验）。
   与 hint 的 splitTailSuffixes 同一整组回退口径；`within:` 不是读侧语法（带它按原 CSS 显式落空）。
@@ -341,7 +343,8 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   **无尾缀抽取维持既有信封不设防口径**（对称化只经尾缀激活，既有 op 面零行为变更——
   无尾缀 locatorAnyFrame 调用的 opts/帧序/回捞全部原样）。字段选择器是行内相对寻址、不支持尾缀
   （带 ` frame:` 形状的字段选择器按原 CSS 预检 → 非法即 config_error）；collect 的内部滚动
-  （scrollRowsContainer）只滚声明帧。`checkExtractSelectors` 对合法尾缀行选择器先剥后验。
+  （scrollRowsContainer）只滚声明帧——**E7/B1 修复**：滚动 evaluate 实参此前误传原串（带尾缀 =
+  非法 CSS），每帧 catch continue ⇒ 恒 `not_scrollable` 且 scrollTop 不动；现在传剥离后 base。`checkExtractSelectors` 对合法尾缀行选择器先剥后验。
 - **【契约】** schema-gen F71 条目 + css_exists/css_count_* 语义注记与 HINT_GRAMMAR note 补尾缀；
   dist/schema/ctx.json 快照已重生成（schema:check 绿）；APP_SCRIPT_AUTHORING §5「读侧帧限定」+
   多 frame 速查 + §10 stopCode 表 + §11 已知边界更新；AGENT_INTERFACE 会话读侧帧限定节新增；
@@ -422,6 +425,57 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   不误报；带主体 22 条新旧逐字节；`parseHint` 解析不变、大写 origin 合法、`[DATA-TEST=x]`
   既有边界、子帧 induceHint 身份产物 findByHint 命中。
 
+### E7 批（E 批实现复审修复：2 Blocking + 非阻断项）
+
+- **【B1（中）ctx.collect 声明帧滚动失效】** `scrollRowsContainer` 已算 `scrollSplit`，但 evaluate
+  实参仍是**原始 rowSelector**——带 ` frame:` 尾缀时每帧 `querySelectorAll` 非法 CSS → catch continue
+  → 恒 `not_scrollable`、scrollTop 不动。改为传 `scrollSplit.selector`（无尾缀/被拒尾缀时与原串逐字节
+  相同）。浏览器复跑：`li.row frame:<主帧 origin>` 前后从 `not_scrollable/scrollTop=0/rounds=1` 变为
+  `stable/scrollTop=640/rounds=6/rows=20`，无尾缀对照不变。
+- **【B2（中低）findByHint 无法解析子帧 nearToken 记忆产物】** E5 起 `induceHint` 子帧产物尾带
+  ` frame:<own origin>`；`findByHint` 的 `induceHint(el) === base` 精确串比较在「有尾缀产物 vs 剥离后
+  base」时恒不等 → null（E5 前可用 = 行为回归）。改为比较 `splitTailSuffixes(induceHint(el) ?? "").base`
+  ——无尾缀产物 split 后 base 逐字节原串。浏览器复跑：子帧 near 产物 `button[near~…] frame:o` 从
+  `null` 变为命中 `f1:e0`；无 frame 字段元素命中不变。
+- **【N1（中）HINT_HEAD within 锚查找大小写】** DOM 侧 `getElementById(id)` 用 parseHint 归一后的
+  小写值，`<div id="Wrap">` 查 `wrap` 恒 null（池侧 anchor_ids 已小写）→ 池/DOM 判定分裂。改为
+  pass 内**懒建一次**小写 id → 文档序首元素映射（memoized；口径与 `getElementById` 一致：重复 id 取
+  文档序首个），每行复用。离线 fake DOM + 真页（`browser-case.mjs`：#Wrap/#Inner 大小写混写）复跑：
+  DOM 回捞与池侧同时命中，`#Inner>#Wrap` 错序仍 fail-closed。
+- **【N2（低）`within:#x>#x` DOM 侧非 fail-closed】** `contains(self) === true` 使同元素退化命中。
+  DOM 侧链校验改为**两段锚必须是不同元素且严格包含**（`a !== b && a.contains(b)`）；契约同步
+  （F69 / `HINT_GRAMMAR.within_suffix` / 文档 / E2 断言）：**池侧不匹配、DOM 侧同元素退化也不命中**。
+  复跑 `within-parity-edges` / `probe-dup3`：`#target within:#a0>#a0` 与 `#bx within:#x>#x` 的 DOM/PROBE
+  行从 1 → 0（`#x>#y` 这类真实嵌套仍命中）。
+- **【N4（低）读侧尾缀对非 CSS 选择器误剥】** `new URL()` 接受 `)`/`'`/`"` 作为 host 字符，
+  `div:has-text("x frame:https://a.com")` 的尾缀落在引号内仍被剥（base 变成 `div:has-text("x`）。
+  `splitFrameSuffixFromSelector` 剥离后加**引号/括号平衡守卫**（`"`/`'`/`(`/`)`/`[`/`]` 不配对 ⇒
+  整串原样 + rejected「选择器含未闭合引号/括号，尾缀未应用」；字符串内对比字符不参与、反斜杠转义
+  跳过）。F71/CHANGELOG 的「E4 前必然非法 CSS」措辞改为「纯 CSS 必失败；非 CSS 引擎（text= 等）作者需
+  显式引用 / 本守卫拒绝」。复跑 `browser-pseudotail`：`div:has-text("x frame:o")` 从误剥 → 整串原样 + 拒因；
+  `[title="x frame:o"]` 等值内伪尾缀仍原样拒绝；纯 CSS 合法尾缀不受影响。
+- **【N5（低）读侧 `frame:` 空值不诊断】** `SELECTOR_FRAME_TAIL_RE` 值部 `(\S+)` → `(\S*)`，空值
+  走 rejected（selector 原样）——`selectorFrameChainProblemText` 的 `case "empty"` 变可达。复跑
+  `browser-read-invalid`：`#bg4 frame:` 的读面事件从无 `frame_suffix_rejected` → 带拒因（null 不变）。
+- **【N6（低）suggestHints 非法段 break 丢失外层合法祖先单层候选】** E2 生长链在首个非法段停下
+  （正确：更深链必含它），但非法段**之后**的外层合法祖先单层候选被一并吞掉（E3 旧行为会跳过非法段
+  继续逐个试）。补回「链候选未命中时，对其后每个合法祖先 id 单独试单层 `within:#id`」——push 仍
+  自证唯一、顺序（身份→label→frame→within）与上限 4 不变，首次成功即停。复跑 `suggest-invalid`：
+  `["Close within:#good"]` 与旧实现逐字节一致，正常生长序 `#a3>#a2>#a1` 不变。
+- **【N7（低）E4 尾缀激活的信封面两条未封口】** `ctx.step newTab` 的采用标签 done（ctx.ts:311）与
+  新开标签 done（:421）、`ctx.done` 的 invariants 求值（:1759）此前不传 hosts。现在与 arrive 同口径：
+  **仅 `signalHasFrameSuffix(...)` 时传 `{hosts}`**；无尾缀逐字节不变（新 helper `signalHosts`）。
+- **【N8（低）契约/文档漂移】** ① F64 statement 补 E1/E2 的 F64 within 消费（`anchorChainMatch`；
+  truth 补 `executor.ts:2316-2322`）；② 本文件旧「read/extract/collect/judge 帧限定未做」边界改为已收口；
+  ③ E4 的 collect 滚动描述与 B1 修复一致；④ F69 `#x>#x` 文案按 N2；⑤ F69「段首 # 可选」改
+  「首段必须 #、后续段可选 #」；⑥ 会话 `rowsSettled` 的 `countAnyFrame` 不传 hosts 在 F71/文档注明为
+  证据面边界（只影响 `scroll_settled` 提示，不影响抽取行）。
+- **【验证】** `browser-collect`（B1）、`browser-findby-near`（B2）、`within-parity-edges`+`probe-dup3`
+  （N1/N2）、`browser-pseudotail`（N4/N5）、`browser-read-invalid`（N5）、`suggest-invalid`（N6）复跑
+  关键行见上；`browser-case` 真页大写 id（N1）。离线：E1 33 / E2 34（N2/N6 断言按新契约更新）/
+  E3 97 / E4 54→56 组（补 2 组：collect 滚动 maxRounds≥2 含尾缀 + N4/N5 split 守卫）/ E5+E6 150→153
+  （补 3 条：near 产物带尾缀 + 子帧 near 产物命中 + 无 frame 字段命中不变）全绿；`npm run typecheck` / `npm run prompt-hit` / `npm run schema:check`（快照重生成）通过。
+
 ### 已知边界 / 未做（A–D 批后的诚实清单）
 
 - **`within` 语义链（E 批 E2）**：已收口（E2——链语法/嵌套序包含语义/池+DOM+FW8+F64+DRF
@@ -433,8 +487,11 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - **同 origin 父子帧的记忆产物（E5/D2 边界）**：`induceHint` 只追加自身 origin 单段（记忆侧
   没有帧完整链）——同源父/子同签名元素的记忆回放仍可能歧义 → 回退模型（无误动作）；
   需要精确区分时用 authored `frame:<parent>><child>` 链或 `inspect`/`ctx.observe` 的候选。
-- **`read`/`extract`/`collect`/`judge` 帧限定对称化**：未做。`locatorAnyFrame` 逐帧 OR，无法指定帧；
-  本方案只服务 act hint / 命令 target。
+- **`read`/`extract`/`collect`/`judge` 帧限定对称化**：**已收口（E4；E7 修复 B1 滚动与 N4/N5 拒因）**——
+  读/判面 CSS 选择器支持 ` frame:<origin链>` 尾缀；ctx.read/extract/collect 按信封过滤（不抛，
+  miss + `frame_evidence`），done/when 走 F45② 升级，collect 内部滚动只滚声明帧（evaluate 用剥离后
+  base）。**证据面边界**：会话 `extract` 的 `rowsSettled` 滚动稳定计数走 `countAnyFrame` 未传 hosts
+  ——带尾缀 rows 的 `scroll_settled` 可能含信封外帧（只影响该提示，抽取本体按信封过滤）。
 - **>6 帧 / 每帧池配额**：未做。`framesOf ≤6`；池窗口 40/120 跨帧共享、主 frame 优先；
   `frame:` 落空时 reason 列允许帧 origin（去重 ≤6）。
 - **`about:blank`/srcdoc**：本期不可寻址（未知 origin → 不可被任何 `frame:` 命中）；`frame:` 只做

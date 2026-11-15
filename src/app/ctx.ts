@@ -102,6 +102,13 @@ export function createCtx(deps: CtxDeps): Ctx {
    * 页面驱动的跳转（点击/锚点/新标签页）不经过这里，永不拦截。
    */
   const navOnly = deps.navPolicy === "entry-only";
+  /**
+   * E7（N7）：done/invariant 信号树的**尾缀条件信封**——仅当树里含合法 ` frame:` 尾缀时
+   * 传 `{hosts}`（与 arrive/manual 同口径：声明帧不在信封 = miss，避免尾缀把 E4 前必失败
+   * 的串在无信封面上命中被排除帧）；无尾缀 = undefined ⇒ 既有不设防口径逐字节不变。
+   */
+  const signalHosts = (sig: unknown): { hosts: string[] | null } | undefined =>
+    signalHasFrameSuffix(sig as never) ? { hosts } : undefined;
   /** P0-B：声明页清单（相对路径按 ctx URL 口径解析；仅 entry-only 参与判定）。 */
   const declaredPageHrefs = (deps.declaredPages ?? []).map(resolveCtxUrl);
   let directNavs = 0;
@@ -308,7 +315,7 @@ export function createCtx(deps: CtxDeps): Ctx {
         .waitForLoadState?.("domcontentloaded", { timeout: 5000 }), 5000);
       let held = false;
       try {
-        held = (await checkSignal(ntAdoptedPage as never, req.done as never)) === true;
+        held = (await checkSignal(ntAdoptedPage as never, req.done as never, signalHosts(req.done))) === true;
       } catch (e) {
         throw new StopError("config_error",
           `ctx.step newTab dedup: done signal evaluation failed on the adopted tab: ${e instanceof Error ? e.message : String(e)}`);
@@ -418,7 +425,7 @@ export function createCtx(deps: CtxDeps): Ctx {
             ntAdopted = { index: pick.index, url: pick.url, title: pick.title, adopted: "opened" };
             ntAdoptedPage = pick.page;
             try {
-              if ((await checkSignal(pick.page as never, req.done as never)) === true) {
+              if ((await checkSignal(pick.page as never, req.done as never, signalHosts(req.done))) === true) {
                 rep = { ...rep, done: true, stop_code: "dom_goal_signal",
                   stop_reason: "dom goal signal (new tab adopted; done judged on the adopted tab)" };
               } else {
@@ -849,7 +856,10 @@ export function createCtx(deps: CtxDeps): Ctx {
           container.scrollTop = Math.min(max, before + stepPx);
           const after = Number(container.scrollTop) || 0;
           return { found: true, scrollable: true, moved: after !== before, atBottom: after >= max - 2 };
-        }, rowSelector);
+        // E7（B1 修复）：evaluate 实参必须是**剥离后**的 base——原始串带 ` frame:` 尾缀时对
+        // querySelectorAll 是非法 CSS，逐帧 catch continue 会让声明帧滚动恒 not_scrollable。
+        // 无尾缀/被拒尾缀时 split.selector 与原串逐字节相同（split 是唯一出口）。
+        }, scrollSplit.selector);
         if (raw !== null && typeof raw === "object") {
           const rec = raw as Record<string, unknown>;
           if (rec["found"] === true) {
@@ -1756,7 +1766,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       const details: Array<{ id: string; held: boolean }> = [];
       for (const inv of invs) {
         const sig = inv["signal"];
-        const held = isObj(sig) ? await checkSignal(p, sig as never) : false;
+        const held = isObj(sig) ? await checkSignal(p, sig as never, signalHosts(sig)) : false;
         details.push({ id: String(inv["id"] ?? "?"), held });
         if (!held) failed.push(String(inv["id"] ?? "?"));
       }

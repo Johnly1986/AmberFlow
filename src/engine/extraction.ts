@@ -566,9 +566,16 @@ export function frameAt(page: PageLike, index: number): FrameLike | undefined {
  *   - **值不合法 ⇒ 整串按原 CSS 处理**（显式落空），绝不半剥——防选择器属性值以
  *     ` frame:` 结尾的伪尾缀误伤。`rejected` 带 B8 同款拒因，调用方只在原样 CSS
  *     解析失败时附注（M4①），成功路径零影响。
- *   - **值合法 ⇒ 帧限定查询**。该形态在 E4 前必然是非法 CSS（`frame:<origin>` 落在
- *     选择器尾只能是伪类语法、永不成立），故尾缀**只能激活原本就保证失败的串**——
- *     既有选择器零影响（无尾缀 = `selector` 逐字节原样返回）。
+ *   - **值合法 ⇒ 帧限定查询**。纯 CSS 形态在 E4 前必然是非法 CSS（`frame:<origin>` 落在
+ *     选择器尾只能是伪类语法、永不成立），故尾缀**只能激活原本就保证失败的纯 CSS 串**——
+ *     既有 CSS 选择器零影响（无尾缀 = `selector` 逐字节原样返回）。**非 CSS 引擎不保证**
+ *     （Playwright `text=` 等把整串当文本）：作者需把文本显式引用（或依赖下列守卫拒绝），
+ *     详见 N4 守卫与文档。
+ *   - **N4 守卫**：剥离后的 base 必须引号/括号配对（`"`/`'`/`(`/`)`/`[`/`]`；CSS 字符串内
+ *     的对比字符不算、反斜杠转义跳过）——`new URL()` 会接受 `)`/`'`/`"` 作为 host 字符，
+ *     让 `div:has-text("x frame:https://a.com")` 这类**引号内**的尾缀被误剥；不配对 ⇒
+ *     整串原样 + rejected（"选择器含未闭合引号/括号，尾缀未应用"）。
+ *   - **N5 空值**：词法收 ` frame:` 后无值（`(\S*)`）——整串原样 + rejected（"frame: 后没有值"）。
  *   - 校验与 hint 的 `frame:` 尾缀同一份 `frameChainValueProblem`（`>` 分隔外→内、
  *     ≤4 段、每段 `v === new URL(v).origin` 的 http(s) 规范形）；同一串至多一个尾缀——
  *     剥离后 base 仍以「规范 origin 值的 frame: 尾缀」结尾 = 第二个真尾缀 ⇒ 整组拒绝
@@ -580,24 +587,61 @@ export interface SplitSelectorFrameSuffix {
   selector: string;
   /** 合法声明链（小写规范 origin，外→内）；无合法尾缀时省略。 */
   frameChain?: string[];
-  /** M4①：串含 ` frame:` 尾缀形状但未生效（值非法/缺主体/双尾缀）时的拒因；其余省略。 */
+  /** M4①：串含 ` frame:` 尾缀形状但未生效（值非法/缺主体/空值/双尾缀/引号括号不配对）时的拒因；其余省略。 */
   rejected?: string;
 }
 
-const SELECTOR_FRAME_TAIL_RE = /(?:\s+frame:)(\S+)\s*$/i;
+const SELECTOR_FRAME_TAIL_RE = /(?:\s+frame:)(\S*)\s*$/i;
+
+/**
+ * E7（N4）：剥离后 base 的引号/括号配对守卫。只做词法配对（不认识 CSS 语义）：
+ * 反斜杠转义跳过、字符串内的 `(`/`[` 等不参与配对；出现**先闭后开**或收尾未闭合即视为
+ * 不配对。用于拦截"尾缀原本落在引号/括号内部"的误剥（`new URL()` 会把 `)`/`'`/`"` 当
+ * host 字符收下，单看值校验发现不了）。
+ */
+function selectorDelimiterProblem(base: string): string | null {
+  let quote: '"' | "'" | null = null;
+  let round = 0;
+  let square = 0;
+  for (let i = 0; i < base.length; i++) {
+    const ch = base[i]!;
+    if (ch === "\\") { i += 1; continue; }
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === "(") round += 1;
+    else if (ch === ")") round -= 1;
+    else if (ch === "[") square += 1;
+    else if (ch === "]") square -= 1;
+    if (round < 0 || square < 0) return "选择器含未闭合引号/括号，尾缀未应用";
+  }
+  if (quote !== null || round !== 0 || square !== 0) return "选择器含未闭合引号/括号，尾缀未应用";
+  return null;
+}
 
 export function splitFrameSuffixFromSelector(sel: string): SplitSelectorFrameSuffix {
   const m = SELECTOR_FRAME_TAIL_RE.exec(sel);
   if (m === null) return { selector: sel };
   const base = sel.slice(0, m.index).trim();
   const value = m[1]!.toLowerCase();
-  if (base === "" || frameChainValueProblem(value) !== null) {
+  if (base === "" || value === "" || frameChainValueProblem(value) !== null) {
     return {
       selector: sel,
       rejected: base === ""
         ? "frame: 尾缀前没有选择器主体（必须写成 `<css> frame:<origin>`）——整串按原 CSS 处理"
         : `frame: 尾缀未被应用（${selectorFrameChainProblemText(value)}）——整串按原 CSS 处理`
           + "（显式落空，绝不半剥）",
+    };
+  }
+  // N4：尾缀可能落在引号/括号内部（值侧 `new URL()` 收得下 `)`/`'`/`"`）——base 不配对 =
+  // 这不是一个真正的串尾语法后缀，整串原样（诊断照旧只在失败路径附注）。
+  const delimiter = selectorDelimiterProblem(base);
+  if (delimiter !== null) {
+    return {
+      selector: sel,
+      rejected: `${delimiter}（尾缀前的主体引号/括号不配对）——整串按原 CSS 处理（显式落空，绝不半剥）`,
     };
   }
   const residual = SELECTOR_FRAME_TAIL_RE.exec(base);

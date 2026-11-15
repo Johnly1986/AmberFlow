@@ -623,16 +623,31 @@ export function suggestHints(
   // 的浅元素留得住外层段、深元素被截掉，链每加一段 = 多一个必经锚点，匹配集严格变窄。
   // 顺序仍 身份→label→frame→within、上限 4（R-10：链候选与 frame 候选互不挤占——顺序不变）。
   if (!labelPushed && labelUsable) {
+    const anchors: string[] = (elem.anchor_ids ?? []).map((aid) => String(aid));
+    const validSeg = (a: string): boolean => /^[a-z0-9_\-.:]+$/.test(a);
     // 段 charset 与 parseHint 归一口径一致；遇第一个非法 id 段停（更深链必含它 = 必非法）。
     const segs: string[] = [];
-    for (const aid of elem.anchor_ids ?? []) {
-      const a = String(aid);
-      if (!/^[a-z0-9_\-.:]+$/.test(a)) break;
-      segs.push(a);
+    let firstBad = -1;
+    for (let i = 0; i < anchors.length; i++) {
+      if (!validSeg(anchors[i]!)) { firstBad = i; break; }
+      segs.push(anchors[i]!);
     }
+    let chained = false;
     for (let k = 1; k <= Math.min(segs.length, 4); k++) {
       const chain = segs.slice(0, k).reverse();   // 外→内（anchor_ids 内→外 → 反转）
-      if (push(`${label} within:${chain.map((a) => `#${a}`).join(">")}`)) break;
+      if (push(`${label} within:${chain.map((a) => `#${a}`).join(">")}`)) { chained = true; break; }
+    }
+    // E7（N6）：生长链在**首个非法段**停下是正确的（更深链必含它 = 整组拒绝），但非法段
+    // **之后**的外层合法祖先仍是可用单层锚——E3 旧行为会跳过非法段继续逐个尝试，E2 生长
+    // 循环把它吃掉了（非法段靠后时外层单层候选凭空消失）。链候选未命中时补回这一段：
+    // 只对"其后"的合法段单独试单层，push 仍自证唯一，顺序（身份→label→frame→within）与
+    // 上限 4 不变；链候选一旦自证成功即停（与旧行为"首次成功即停"一致）。
+    if (!chained && firstBad >= 0) {
+      for (let i = firstBad + 1; i < anchors.length; i++) {
+        const a = anchors[i]!;
+        if (!validSeg(a)) continue;
+        if (push(`${label} within:#${a}`)) break;
+      }
     }
   }
   return out.slice(0, 4);
