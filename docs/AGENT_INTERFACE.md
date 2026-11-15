@@ -369,7 +369,8 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 
 - `read` 的 `selector` 与 `extract` 的 `rows` 可尾缀 `` ` frame:<origin链>` ``（与 hint 尾缀同一
   校验：`>` 分隔外→内、≤4 段、http(s) 规范 origin）；**值不合法 ⇒ 整串按原 CSS 处理**（显式
-  落空，绝不半剥——该形态此前必然是非法 CSS，尾缀只激活原本就保证失败的串）。声明帧不在
+  落空，绝不半剥；E7 起另带引号/括号平衡守卫与空值拒因——纯 CSS 的该形态此前必然非法，
+  `text=` 等非 CSS 引擎的作者需显式引用，含未闭合引号/括号的串会被守卫拒绝）。声明帧不在
   hosts 信封/不存在 → `read` 返回 `value:null`、`extract` 返回 `rows:[]`（**不抛** frame_not_allowed；
   引擎 trace 事件附 `frame_evidence`={declared,excluded,scanned} 证据）。带尾缀的 rows 与信封同
   口径（被排除帧不读）；`fields` 字段选择器是行内相对寻址、不支持尾缀。会话合同零变化：响应
