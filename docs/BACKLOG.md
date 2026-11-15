@@ -243,3 +243,8 @@ lowercase（`i` 旗标），`parseHint` 的 `frameChain` 归一为小写规范 o
 （`plan check --probe`）的属性词正则大小写敏感——`[DATA-TEST=x]` 不命中、`[data-test=x]` 才命中
 （act hint 侧不受影响，`parseHint` 先折叠；新旧一致、既有边界）。整串 `frame:https://a.com`
 （无 hint 主体）按旧形状落空，失败 reason 点名「缺少 hint 主体」——写成 `Close frame:https://a.com`。
+
+**E 批复审遗留微项（2026-11-15 架构师 APPROVE 后记录，均为低优先级）**：
+① hint.ts:323 运行时文案「段首 # 可选」与 F69 新口径（首段必须 #）不一致——待 E56-G10 基线重置时一并改；
+② HINT_HEAD 小写 id Map 可加 `document.getElementById` 快路径（miss 才建映射，within 低频面非紧迫）；
+③ N7 组合信号树（all_of 内叶子）经新接入点的直测断言（现由 G8a+G3e 传递覆盖）。
