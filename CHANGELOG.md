@@ -267,6 +267,38 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   （within 形状同步后）全绿；`npm run typecheck` / `npm run prompt-hit` 通过。
   浏览器级（真页链锚命中/落点、frame+within 链组合、observe 链候选照抄）留待专项。
 
+### E3 批（findByHint within）
+
+- **【必修点（base 口径）】** `findByHint`（`src/cli/start.ts`）旧实现
+  `const base = frameChain === undefined ? hint : s.base` 在「**无 frame 后缀但有 within**」时
+  base 保留整串（含 within 尾缀）→ attr 正则与 `induceHint` 精确串匹配全落空。改为
+  **任一后缀存在即用 `s.base`**；无后缀（within/frameChain 都 undefined）= base 就是
+  **原串 hint 逐字节**——`s.base` 是 trim 后形状，`induceHint` 精确串比较依赖原样大小写/空白
+  （离线断言钉死：原样大小写 near 产物命中、带空白原串不命中）。
+- **【within 作用域过滤（§5）】** 帧链过滤后（无帧链时直接）按真池行 `anchor_ids` 过滤——
+  `rules.anchorChainMatch(el.anchor_ids ?? [], s.within)`（单层 membership/链嵌套序包含同一
+  语义，与 E1 权威面唯一出处共用）；帧链过滤与锚过滤合并为一次 `Object.entries` 过滤
+  （正确性优先）；全滤掉/空池 = 显式 null。无锚行（`anchor_ids` 缺省/空）对任何 within
+  fail-closed。`frame:`+`within:` 组合成为**全语义**（两面同时生效，此前 probe 面只做帧过滤）；
+  `plan check --probe` 因此可校验 within 作用域。
+- **【回退口径】** 非法 within 值 = `splitTailSuffixes` 整组回退（无 within/frameChain 字段）
+  ⇒ 走原串 = 尾缀留在 base 里 = 既有旧形状集显式落空（与 frame 批 C 同口径）；
+  值内伪后缀仍按 R2-5（真尾缀剥离、伪尾缀留 base → 落空）。
+- **【消费面不变】** `frameTargetRejection` 不变（`parseHint` 的 frameChain 判定——within 不触发
+  帧限定拒绝）；`plan-cli.ts` probePlan 的未命中证据 helper 不变（within 归因文案已在 E1 更新）；
+  `selectorForHint` 不变。
+- **【文档/记账】** BACKLOG「后续立项」#2 收口（E2 标注的"剩余=待 E3"闭合）；
+  WITHIN_PARITY_PLAN §5 标注已实施；APP_SCRIPT_AUTHORING 多 frame 速查/已知边界两处更新
+  （within 作用域已校验 单层+链）；schema-gen F70 statement findByHint 表述同步全语义 +
+  truth 补 start.ts（E3 项）。
+- **【验证】** 离线断言全绿（/tmp/af-e3，97 断言）：必修点旧新对照（`git show ca74fc0` 旧实现
+  机械转换对照——9 条 within 修复行旧=显式 null/新=命中）、无后缀逐字节回归（19 行 old==new，
+  含原样大小写/空白/attr 折叠边界）、单层/链矩阵（错序/缺段/词法边界/锚自身/无锚行）、
+  组合矩阵（frame+within 两序严格等价、帧决定双胞胎、未知 origin）、整组回退、E1 权威面
+  parity（hintMatch 与 findByHint 同 ref）、anchorChainMatch 直证、frameTargetRejection 不变；
+  E1（33）/E2（34）套件回归复跑全绿；`npm run typecheck` / `npm run prompt-hit` 通过。
+  浏览器级（真页 `plan check --probe` 的 within/链 within/组合命中与未命中+诊断）留待专项。
+
 ### 已知边界 / 未做（A–D 批后的诚实清单）
 
 - **`within` 语义链（E 批 E2）**：已收口（E2——链语法/嵌套序包含语义/池+DOM+FW8+F64+DRF
@@ -283,7 +315,8 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
   匹配，不是安全判定（门禁是 hosts）。
 - **帧下标链 / nth-child / XPath / iframe 选择器锚**：不做（漂移 + 破坏 hint 封闭集）。
 - **`plan check --probe` 的匹配边界**：`findByHint` 只支持 `#id` / `[data-test=|id=|name=]` /
-  `induceHint` 产物；C 批只补 parseHint + 帧链过滤，**不是** `hintMatch` 六形状分档。`amber start
+  `induceHint` 产物；C 批只补 parseHint + 帧链过滤、E3 同面补 within 作用域（单层+链），
+  **不是** `hintMatch` 六形状分档。`amber start
   --target` 对帧限定目标结构化拒绝（主帧 `page.click`）。
 - **证据上限合同变更（已记账）**：`AMBIGUITY_HINT_MAX` 80→200、桥 `suggested_hint` 80→200、
   `HINT_MAX_CHARS` 160→200；新增 `FRAME_PATH_MAX_ITEMS=4` / `FRAME_PATH_SEGMENT_MAX_CHARS=64` /

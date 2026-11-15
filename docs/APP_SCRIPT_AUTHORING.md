@@ -694,7 +694,9 @@ frame），允许帧已成立 = 正常成功。其余情况步骤照常，只在
    `<label> frame:<祖先…>自身>`（含自身 ≤4 段，与 `parseHint` 同口径；更长不生成）。每条候选都由
    同一个 `hintMatch` 自证，可照抄。**CLI 两个消费面**：`plan check --probe` 的 target_hint 核对
    先 `parseHint` 再按声明链过滤池（`findByHint`）——**身份形状**（`#id` / `[data-test=…]` / `[id=…]` /
-   `[name=…]`）与 `induceHint` 产物的 `frame:` 目标能正确命中；该 CLI 的匹配器**不是** `hintMatch`
+   `[name=…]`）与 `induceHint` 产物的 `frame:` 目标能正确命中；**within 作用域已校验（单层+链）**——
+   帧链过滤后按元素 `anchor_ids` 过滤（与 act hint 的 `within:` 同一 `anchorChainMatch` 语义），
+   `frame:`+`within:` 组合两面同时生效，锚外/帧外目标如实报未命中；该 CLI 的匹配器**不是** `hintMatch`
    六形状分档语义（裸词 / `attrSubstr` / `nearToken` 等仍按旧匹配器，可能误报未命中——既有边界，
    见 §11）。`amber start --target` 则对**帧限定目标结构化拒绝**——该面的演示点击是主帧 `page.click(...)`，
    帧内目标会点错/超时，退出码沿用该 CLI 既有失败口径（2），请改用 app/run 或 plan 面。
@@ -1108,7 +1110,9 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
   主 frame 优先；同签名跨帧仍由 `firstIfSame` 合并（run 命令步 / act hint 直接执行一个，会话 act 停）；
   `read`/`extract`/`collect`/`judge` 无帧限定（`locatorAnyFrame` 逐帧 OR）；`about:blank`/srcdoc
   等未知 origin 帧不可寻址；`within` 语义链已做（E2——主池/回捞/FW8/F64/DRF 全消费面；E 批 §4）；
-  `findByHint`（plan check --probe）的 within 作用域校验未做（E3 待批）；`plan check --probe` 只覆盖 `findByHint`
+  `findByHint`（plan check --probe）的 within 作用域校验已做（E3——帧链过滤后按 `anchor_ids` 过滤，
+  单层+链与 act hint 同一 `anchorChainMatch` 语义，`frame:`+`within:` 组合两面同时生效）；
+  `plan check --probe` 只覆盖 `findByHint`
   旧形状集（身份形状 + `induceHint` 产物），`amber start --target` 拒绝帧限定目标。
 
 ## 12. 扩展配方（改引擎的人看）

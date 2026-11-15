@@ -63,6 +63,10 @@
 
 ## 5. E3：findByHint within（含 frame+within 组合）
 
+> **状态：已实施（E3 批，提交号由 lead 落定）**。实施记录见 CHANGELOG「E3 批（findByHint within）」；
+> 离线套件 `/tmp/af-e3/`（findByHint 矩阵 97 断言：必修点旧新对照 / 无后缀逐字节 / 单层·链 / 组合两序 /
+> 整组回退 / E1 权威面 parity / frameTargetRejection 不变）。浏览器级 `plan check --probe` 实测留专项。
+
 - `splitTailSuffixes` 已返回 `within`——`findByHint` 在帧链过滤后按 `anchor_ids` 过滤（单层/链同 §4.2 语义；真池行天然带 anchors）；`frame:`+`within:` 组合成为**全语义**（此前 probe 面只做帧过滤）。
 - `plan check --probe` 因此可校验 within 作用域；N-R2a 证据保留（跨帧 within 仍 fail-closed 且文案准确）。
 

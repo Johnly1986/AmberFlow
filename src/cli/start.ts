@@ -55,7 +55,7 @@ import { PlanningRules, TaskPlan } from "../engine/plan.ts";
 export const DEFAULT_PLAN_PATH = defaultPlanPath();
 import type { SignalSpec } from "../engine/signals.ts";
 import { runPlan } from "../engine/planner.ts";
-import { affordanceRule } from "../engine/rules.ts";
+import { affordanceRule, anchorChainMatch } from "../engine/rules.ts";
 import { captureStateView, induceSignals } from "../flow/signal-induction.ts";
 
 export interface Io {
@@ -182,13 +182,27 @@ export function findByHint(elems: ElemPool, hint: string): { ref: string; el: El
   // `plan check --probe`（本函数的另一消费面）会把帧内目标误报未命中。
   // B-1 修复：base/帧链都由**同一剥离器**（hint.ts splitTailSuffixes，唯一出处）产出——
   // 两种后缀顺序都剥净（旧实现只认字面串尾 frame:，`frame:o within:#p` 会把尾缀留在
-  // base 里而假阴性）。无后缀 = base 就是原串（旧路径逐字节不变）。
+  // base 里而假阴性）。
+  // E3（§5）：`within:` 尾缀参与本面——base 同样取剥离后形状 + 池按 anchor_ids 过滤
+  // （rules.anchorChainMatch，单层 membership/链嵌套序同一语义；真池行天然带 anchor_ids，
+  // 无锚行的行字段缺省 ⇒ 空链必不匹配 = fail-closed）。帧链过滤与锚过滤合并为一次
+  // Object.entries 过滤（正确性优先）；全滤掉 = 空池 → 显式 null（不静默放宽）。
+  // base 口径（必修点）：**任一后缀存在**即用 s.base——旧实现 `frameChain === undefined
+  // ? hint : s.base` 在"无 frame 但有 within"时保留整串（含 within 尾缀），attr 正则与
+  // induceHint 精确串匹配全落空。无后缀（两者都 undefined）= base 就是**原串 hint 逐字节**
+  // ——s.base 是 trim 后的形状，induceHint 精确串比较依赖原样大小写/空白，不能替代。
+  // 非法 within 值 = 整组回退（splitTailSuffixes 只返回 base，无 within/frameChain 字段）
+  // ⇒ 走原串 = 尾缀留在 base 里 = 既有旧形状集显式落空（与 frame 批 C 同口径）。
   const s = splitTailSuffixes(hint);
   const frameChain = s.frameChain;
-  const pool: ElemPool = frameChain === undefined
+  const within = s.within;
+  const scoped = frameChain !== undefined || within !== undefined;
+  const pool: ElemPool = !scoped
     ? elems
-    : Object.fromEntries(Object.entries(elems).filter(([, el]) => frameScopeMatches(frameChain, el)));
-  const base = frameChain === undefined ? hint : s.base;
+    : Object.fromEntries(Object.entries(elems).filter(([, el]) =>
+        (frameChain === undefined || frameScopeMatches(frameChain, el))
+        && (within === undefined || anchorChainMatch(el.anchor_ids ?? [], within))));
+  const base = scoped ? s.base : hint;
   const m = /^\[?(data-test|id|name)=(.+?)\]?$/.exec(base);
   const fold = (s: string): string => s.toLowerCase();
   if (m) {
