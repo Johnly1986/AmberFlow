@@ -236,4 +236,4 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 | 6 | >6 帧 / 每帧池配额 | `framesOf ≤6`、窗口 40/120 跨帧共享主帧优先 | 需先测量 |
 | 7 | `matchedChains` 截断标记 | 证据链 >4 条去重截断时无 truncated 标记 | 小项 |
 | 8 | 整串 `frame:` 诊断 | `frame:<origin>` 无 hint 主体时不点名"缺少主体"（显式失败仍在） | 小项 |
-| 9 | 文档：大写 origin 示例 | hint 先 lowercase——`FRAME:HTTPS://A.COM` 会被识别为合法尾缀（符合 `i` 旗标），文档补一句示例 | 文档 |
+| 9 | 文档：大写 origin / 属性词示例 | hint 先 lowercase——`FRAME:HTTPS://A.COM` 会被识别为合法尾缀（符合 `i` 旗标）；`findByHint` 的 `[DATA-TEST=x]` 属性名/值正则大小写敏感（新旧一致、既有边界）——文档各补一句示例 | 文档 |

@@ -361,7 +361,7 @@ frame:<o1>><o2>         # 链：外→内；末段 = 元素所在帧自身 origi
 **回捞/门禁适配（链同批）**：统一 helper `frameChainOf(frame)` + `frameScopeMatches(declared, chain)`（放 `extraction.ts` 或新 `frame-scope.ts`），调用点：extractElements / observeElements / hintLookup / FW8 / DRF / F64 / probeExcludedHint / A3 / heuristic / **findByHint**。
 - `findByHint`（start.ts:178）必须 parseHint+链过滤，否则 `plan check --probe` 与 `amber start --target` 对 frame: 误报（R2-4）；
 - `amber start --target` 的演示点击是主帧 `page.click(sel)`（start.ts:290）：**结构化拒绝**带帧限定的 target，或改用解析帧的 `frame.locator(sel).click()`（二选一写死）；
-- DRF text 用 `parsed.token`（不能 `hint.trim()`）；HINT_HEAD 的 nearToken 用 `parsed.token`（R2-7）；
+- DRF text 用 `parsed.token`（不能 `hint.trim()`）；HINT_HEAD 的 nearToken **维持整串**（R2-7 半项未做——回捞按整串"几乎不命中"是既定纪律，见 §13.3②）；
 - 链匹配的排除帧 `frame_not_allowed` 报**命中的那条链**并与声明链并排；probe 只对"链匹配"的排除帧报（不把无关 origin 当证据）。
 
 **唯一性/歧义补充（R2-10）**：`tag` 形状的 submit 偏好分支（rules.ts:404-412 `return submits[0]`）绕过 `inAnchor` → 先 `inAnchor([...hits])` 再偏好（within 未声明时恒等，旧行为逐字节不变）；补 `button/input × within × frame` 测试。
@@ -406,7 +406,7 @@ frame:<o1>><o2>         # 链：外→内；末段 = 元素所在帧自身 origi
 3. **四条合成池**（FW8/DRF/A3/hintLookup）各一条 `frame:`（含 2 段）+ "只 origin / origin+path"两态对照；
 4. **模型面**：pickInner 后"只带 frame_path 行""只带 frame_origin 行""两者都有行"字节对照；
 5. **`button/input × within × frame`**：tag-submit 分支不得选锚外元素；
-6. **回捞形状**：bare+frame 走 DRF text、nearToken+frame 走 hintLookup、`#id within:#panel` 在 FW8/F64 上不得越锚；
+6. **回捞形状**：bare+frame 走 DRF text、nearToken+frame 走 hintLookup（nearToken 在回捞面维持整串，见 §13.3②）、`#id within:#panel` 在 FW8/F64 上不得越锚；
 7. **证据**：每条 hint_candidate 长度 ≤ 消费面上限且 parse+自证可命中（round-trip）；ambiguity `suggested_hint` 200 / `target` 120 的 clip 行为（B 批已把 `AMBIGUITY_HINT_MAX` 80→200、桥 `suggested_hint`→200、`HINT_MAX_CHARS` 160→200）；bridge ElementView/ambiguity 投影白名单与截断；`structure_path` 有界/unstable/不进模型面；
 8. **门禁**：被排除帧的 reason 带链；仅"存在排除帧"时 `target_not_found`；F64 的 hosts × 链双错；
 9. **CLI**：`plan check --probe` 与 `amber start --target` 的 frame: 行为（正确点帧内或明确拒绝）；
@@ -422,7 +422,7 @@ frame:<o1>><o2>         # 链：外→内；末段 = 元素所在帧自身 origi
 | `parentFrame()` 在 detach 时**不抛错也不返回 null**（返回陈旧父帧） | 中 | 用 `isDetached()`（types:7142）或帧 evaluate 失败即整帧丢弃；不能靠 try/catch |
 | 结构证据被误当寻址 | 低 | 命名 `unstable_structure_path` + `unstable:true` + 文档红字 + 不进模型面 |
 | 证据上限截断链候选（R2-6） | 中 | 提高 `AMBIGUITY_HINT_MAX`/桥 suggested_hint/ElementView HINT_MAX_CHARS（合同记账）或长度门+advisory |
-| 回捞 DOM pass 用带后缀原串（R2-7） | 中 | DRF text 用 `parsed.token`；HINT_HEAD nearToken 用 `parsed.token` |
+| 回捞 DOM pass 用带后缀原串（R2-7） | 中 | DRF text 用 `parsed.token`；HINT_HEAD nearToken **维持整串**（R2-7 半项未做，见 §13.3②） |
 | within 权威不对等（R2-8：回捞面不遵守 within，FW8/F64 完全不看） | 中 | 本期如实写边界 + 测试；E 批前置修复 |
 | firstIfSame 跨帧合并 / esig 连坐（N7） | 中 | 风险表记录；帧限定后仍可能静默合并 → 文档提示 + 后续"跨帧同签名不合并"立项 |
 | bridge 工具描述无 frame:（可发现性） / ambiguity 白名单缺 frame_origin（N8） | 中 | 契约批同步 bridge 描述、ElementView、ambiguity 投影；`docs/AGENT_INTERFACE.md` 同步 |

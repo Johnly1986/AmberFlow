@@ -1501,6 +1501,7 @@ export function frameHintFailureEvidence(
 ): string {
   const rejections: string[] = [];
   const declared: string[] = [];
+  let withinAnchor: string | undefined;
   for (const target of targets) {
     if (typeof target !== "string" || target.trim() === "") continue;
     const rejection = describeFrameSuffixRejection(target);
@@ -1508,10 +1509,12 @@ export function frameHintFailureEvidence(
       if (!rejections.includes(rejection)) rejections.push(rejection);
       continue;
     }
-    const chain = parseHint(target).frameChain;
+    const parsed = parseHint(target);
+    const chain = parsed.frameChain;
     if (chain !== undefined) {
       const text = chain.join(">");
       if (!declared.includes(text)) declared.push(text);
+      if (parsed.within !== undefined && withinAnchor === undefined) withinAnchor = parsed.within;
     }
   }
   if (rejections.length === 0 && declared.length === 0) return "";
@@ -1520,6 +1523,14 @@ export function frameHintFailureEvidence(
   if (declared.length > 0) {
     parts.push(`声明链 ${declared.slice(0, 2).map((c) => JSON.stringify(c)).join(" / ")} `
       + `在允许帧里没有命中（检查 origin 是否写错/该帧是否被 hosts 排除）`);
+  }
+  // 实施复审 N-R2a：`frame:` 与跨帧 `within:` 组合时，失败可能是 within 锚清空了候选
+  // （合成/回捞行不携带 anchor_ids——BACKLOG「frame:<origin> 后续立项」#1），不是链写错。
+  // 在同一条证据里点名，避免作者按错方向改 origin。
+  if (declared.length > 0 && withinAnchor !== undefined) {
+    parts.push(`注意该目标同时声明了 within:#${withinAnchor}——回捞面（FW8/F64/DRF-text/合成池）`
+      + `不携带 anchor_ids，within 作用域在回捞面不生效；先排除"锚不在当前文档/帧合成清空候选"再归因 origin`
+      + `（见 docs/BACKLOG.md「frame:<origin> 后续立项」#1）`);
   }
   const origins = allowedFrameOrigins(page, hosts);
   parts.push(`页面实际可用 origin（允许帧，去重 ≤6）: [${origins.length ? origins.join(", ") : "-"}]`);
