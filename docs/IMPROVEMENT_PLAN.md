@@ -1,6 +1,6 @@
 # 可维护性与可扩展性治理方案 v2.1（架构评审修订版）
 
-> **状态**：proposal（待确认排期，2026-11-17 架构评审后修订）
+> **状态**：**实施中 — P0 已完成**（2026-11-17；9/9 批落地，出口验收通过，记录见 §6.1）；P1 待启动（依赖本版 0.8 证据 lane，已就绪）
 > **基线**：`main @ 91bf379`；`npm run check` 全绿（本轮实测：预检/类型/配置/schema/prompt/泄露/示例/行锚/用例校验 9 项通过）
 > **评审**：3 个独立只读评审（目标架构 / 迁移治理 / 红队）+ Lead 裁决，记录见 [IMPROVEMENT_PLAN_REVIEW.md](IMPROVEMENT_PLAN_REVIEW.md)。本版已按裁决修订：砍 `sdk.ts`/伪端口/单一编排，新增 0.8 等价证据 lane 与 0.9 seam 冻结，门禁降档，P2 条件化。
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
@@ -472,6 +472,28 @@ interface PromptSpec {
 | **0.9（新增）** | seam/符号归属冻结表：`buildMiddleware` 签名、`execStep` 落点、DecisionProvider 契约位置、Ctx 行为矩阵归属、`RunOutcome` 包络、文件预留（INTERVENTION） | `docs/MAINLINE.md` | 表评审通过；W1-b 只能搬表内稳定区 |
 
 **P0 出口**：§3.4 的 fail 项（注释硬失败类、配置漂移、prompt 重复、新文件上限、doc breakpoints）达标；0.8/0.9 产物存在且被 W1-b 引用；T1/T2 无触发；总投入 ≤14 人日。未达标 → 启动 MVG fallback。
+
+### 6.1 P0 落地记录（2026-11-17）
+
+| 批 | 交付 | 提交 | 出口证据 |
+|---|---|---|---|
+| 方案/评审/决策 | v2.1 + 评审记录 + 4 项决策 | `2dc7a50` | 评审记录 §5 决策表 |
+| 0.2 + 0.5 | 配置文档真值（33 键三向生成/校验）+ 6 处文档断点纠真 | `cdeb63e` | `config:example:check` 三份一致；docs 组断点=0 |
+| 0.4 | 模型 prompt 25→11 单源 + prompt-hit model 组 | `688ef2e` | 改前/改后 sha256 差异 0；prompt-hit 九组 |
+| 0.1a + 0.6 + 0.9 | maintain size/docs/mainline 门禁 + MAINLINE + seam 冻结 | `606754d` | `maintain:check` 绿；19 条负向自测 |
+| 0.7 | 决策面判空 trim 单源 + 掩码契约单源（声明 bugfix） | `2116514` | `npm run check` 绿；两入口判空口径一致 |
+| 0.3 | 注释 B1/B2/B5 清理 + 注释规约 + comments 门禁 | `303b801` + `04d65c3` | 幽灵引用/行号锚点/裸 TODO=0；ratchet 基线入库 |
+| 0.8 | examples canonical golden + split-check + verify-offline | `b72ed74` | `npm run check` 含 golden/split；`verify:offline` 4 夹具绿（无外部请求） |
+
+**P0 出口判据核对**：
+
+- 注释硬失败类（幽灵引用/行号锚点/裸 TODO）= 0；日期戳/批次 token/历史措辞进入 ratchet（B4/P1 迁移后转 0）。
+- 配置漂移 = 0；`.env.example`/CONFIG_REFERENCE/示例 JSON 由 schema 生成并三向校验（33 键）。
+- 模型 prompt 重复 = 0（25 消费点 → 11 唯一文本，快照 hash 钉住）。
+- 新文件 ≤800 行、新函数 ≤150 行硬上限生效；mainline 断言（目录映射/index importer=0/mw≤6/runEntry≤12）绿。
+- 文档断点 = 0（README 5 示例/文档清单/kit 注释/journey legacy/ARCHITECTURE 模块/AGENTS 夹具表述）。
+- 0.8/0.9 产物存在且被引用：0.9 的 seam 表在 MAINLINE §4；0.8 的 split-check 已进 check、golden 已进 examples-check、verify-offline 非门禁可用。
+- T1/T2/T3 未触发。P0 未逐日计时，但范围未扩张、未引入 fallback。
 
 ### P1 收口（3–5 周，12–18 人日；低 churn 优先）
 
