@@ -6,7 +6,7 @@
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17，P0 进行中）**：0.1a（maintain 门禁：size/docs/mainline + 负向自测）、0.2（配置文档真值/三向门禁）、0.4（模型 prompt 25→11 单源 + prompt-hit model 组）、0.5（6 处文档断点纠真）、0.3（注释低风险清理 + 注释规约 + comments 门禁）、0.6/0.9（`docs/MAINLINE.md` + seam 冻结表 + mainline 断言）、0.7（决策面判空 trim 单源 + 掩码契约单源，含一条声明式 bugfix）已落地；0.8（等价证据 lane）进行中。
+> **实施进度（2026-11-17）**：P0 全部 9 批完成（出口证据见 §6.1）；P1 进行中：1.1 tuning / 1.2 env typed getter + constants 门禁 / 1.3 CHANGELOG Decisions + comments 更新协议 / 1.4 app-pack+datasource 稳定纯区拆分 已落地（§6.2）；1.5 `buildMiddleware` 工厂 + W1-a 剩余、1.6 Agent prompt/证据 spec 待做。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -494,6 +494,18 @@ interface PromptSpec {
 - 文档断点 = 0（README 5 示例/文档清单/kit 注释/journey legacy/ARCHITECTURE 模块/AGENTS 夹具表述）。
 - 0.8/0.9 产物存在且被引用：0.9 的 seam 表在 MAINLINE §4；0.8 的 split-check 已进 check、golden 已进 examples-check、verify-offline 非门禁可用。
 - T1/T2/T3 未触发。P0 未逐日计时，但范围未扩张、未引入 fallback。
+
+### 6.2 P1 落地记录（进行中，2026-11-17）
+
+| 批 | 交付 | 提交 | 证据 |
+|---|---|---|---|
+| 1.1 + 1.2 | `tuning.ts` 11 常量（26 处同值替换）+ `env.ts` typed getter（裸读 21 行/18 变量 → 8 处/4 平台变量）+ maintain `constants` 组 | `3e5da4f` + `70e698d` | `maintain --self-test` 23 条；constants 0 fail/0 warn；examples golden 一致 |
+| 1.4 | app-pack 1512→296 facade（3 新模块）；datasource 1417→74 facade（4 新模块） | `18e16cd` | split manifest 40+83 符号 hash 全一致；examples golden/verify:offline/check 绿 |
+| 1.3 | `CHANGELOG.md` `## Decisions` 索引（D1–D12）+ comments `--update` ratchet 协议 | `1fbb9c1` | comments 组 + 2 条更新协议负向自测绿 |
+| 1.5 | `buildMiddleware` 工厂 + W1-a 剩余同构（会话创建/决策探测/pickRow/帧谓词） | 待做 | — |
+| 1.6 | Agent prompt wrapper 收口 + 证据 spec（条件） | 待做 | — |
+
+> P1 出口指标（§3.4）尚未全部达标：>1000 行文件从 9 降到 7（ctx/app-runner/executor/extraction 等仍在），≥300 行函数仍 8 个；属 1.5/后续 W1-b 批次范围。
 
 ### P1 收口（3–5 周，12–18 人日；低 churn 优先）
 

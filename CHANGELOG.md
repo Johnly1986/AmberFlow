@@ -4,6 +4,59 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## Decisions（设计决策索引）
+
+> 本节不是发布条目，而是**约束未来代码的设计决策索引**（为什么这样做、以后别再改回去）。
+> 只收「会约束后续实现」的决策；完整变更史仍以各版本条目为准。新决策追加在末尾。
+
+### D1 包身份 = CLI + DSH 插件，不承诺引擎库 API（2026-11-17）
+
+消费面是 CLI（子进程 + JSON 契约）与 DSH 桥；`package.json` 的 `exports["."]` 指向 DSH 插件入口，是插件安装门，不得替换成引擎库。`src/index.ts` 不是稳定公共面（内部导出，仓内 0 消费者）。要把 AmberFlow 嵌进别的系统，走 CLI 或桥，不要 `import` 引擎内部模块。见 `README.md`「消费面与包身份」、`docs/MAINLINE.md` §3。
+
+### D2 完成只认信号，模型票只是 advisory
+
+`checkSignal` 是完成与 `when` 的唯一裁决；模型 done 票、报告渲染、提示词、配置都不得参与判定。任何重构不得让"看起来完成了"替代信号成立。见 `AGENTS.md` 硬规则、`src/engine/signals.ts`。
+
+### D3 唯一执行器
+
+`BrowserMiddleware.run` 是唯一执行循环；flow 应用、计划 CLI、线上套件都复用它，不另写执行器。拆分只允许同门面机械拆分：类名与 `run()` 签名逐字节不变。见 `AGENTS.md` 架构、`docs/MAINLINE.md` §4（seam 冻结）。
+
+### D4 `verify_after` 被禁：动作后额外校验不是键，是新原语
+
+TaskPlan 不再接受 `verify_after`（`signal` | `none`）——它的两个取值里一个空转、一个正是执行循环默认行为。将来若要"动作后额外校验"，那是一个新原语，不是把这个键加回来。见 `src/engine/plan.ts` 顶部注释。
+
+### D5 配置层叠顺序固定，旧 rc 永远是最低层
+
+优先级：CLI 旗标 > 环境变量 > 项目配置 > 用户配置 > 旧 rc > 内建缺省。旧 rc 不得压住项目配置（历史事故已复现过）；`support/merge-env.ts` 的 `applyEnvNoOverwrite` 是唯一实现，入口不得各写一份。
+
+### D6 掩码 sentinel 单源
+
+敏感值掩码（顶层 slots / effect 读回 / trace / report / stdout）的 sentinel 唯一出处是 `src/support/mask.ts` 的 `MASK`；任何输出面不得手写 `"***"`。明文凭据绝不进入用例/计划/报告/trace/仓库产物。见 `AGENTS.md` 硬规则、`src/app/redaction.ts`。
+
+### D7 模型 prompt 单源，改动 = 行为变更
+
+模型决策提示词唯一出处是 `src/prompts/`（L1 叶子）；协议差异（systemone/openai/laya 的证据能力）走能力矩阵，不在消费点回抄。任何措辞变更必须 `version+1` + 快照 hash 更新 + 一条真站 A/B 证据；`tools/prompt-hit.ts` 的 `model` 组是门禁。见 `docs/PROMPT_SYSTEM.md`、`tools/golden/prompts/snapshot.json`。
+
+### D8 配置文档是生成物
+
+`configs/amberflowrc.example.json`、`.env.example`、`docs/CONFIG_REFERENCE.md` 都由 `src/support/config-schema.ts` 派生（`npm run config:example`），`config:example:check` 三向逐字节校验；不要手改。新增配置键只改 schema。见 `docs/CONFIG_REFERENCE.md` 头部。
+
+### D9 离线夹具只用于非门禁等价验证
+
+`fixtures/engine/` 不是测试套件，只服务 `npm run verify:offline`（本地静态服务 + 无头 chromium + 确定性观测）与纯搬移等价验证；**不进 `npm run check`**。仓库仍不包含单元测试/复刻站，真实站点套件（`online/`）是唯一测试层。见 `fixtures/engine/README.md`、`AGENTS.md`。
+
+### D10 注释规约：历史归 CHANGELOG
+
+注释只写契约/不变量/安全语义/非显然 why/符号指针；不写日期戳、方案批次号、行号锚点、变更叙事。历史进本文件的版本条目（不新建 `docs/DECISIONS.md`）。见 `AGENTS.md`「注释规约」、`npm run maintain:check` 的 comments 组。
+
+### D11 主线与分层唯一出处
+
+依赖分层 L0–L6(+L1.5)、执行阶段 S0–S5、入口/进程边界、seam 与文件归属的唯一出处是 `docs/MAINLINE.md`；新增顶层目录/入口/seam 必须先改 MAINLINE 再改代码。`npm run maintain:check` 的 mainline 组做静态断言。
+
+### D12 纯搬移必须有可重复等价证据
+
+拆分/搬移 PR 必须用 `tools/split-check.ts` 记录搬迁符号源码 hash（纯搬移 hash 不变）；应用级行为由 `examples-check` 的 canonical golden 与 `npm run check` 兜底；运行期拆分还要过 `verify:offline`（非门禁）与 freeze window。见 `docs/IMPROVEMENT_PLAN.md` §7。
+
 ## [Unreleased] — 2026-11-16 架构评审收口（F85）：行锚 fail-closed + 恢复面/记忆面/编号口径 + F80 + lint + 在线校验 + 仓内断言
 
 ### 编号口径（一次写清，全文以此为准）
