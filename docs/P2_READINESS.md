@@ -1,6 +1,7 @@
 # P2 决策请求包（Readiness / 待项目方拍板）
 
-> **状态**：等待决策（2026-11-17）。P0/P1 已完成；P2 按方案 §6.3 的五项前置核对中 **②已满足、①③④⑤未满足**，因此 P2 未启动。
+> **状态**：**等待决策（阻断）**。P0/P1 已完成；P2 按方案 §6.3 的五项前置核对中 **②已满足、①③④⑤未满足**，因此 P2 未启动。
+> **复核记录**：2026-11-17 连续 3 轮复核（goal round 4/5/6），①③④⑤ 事实均未变化；仓库保持 P0/P1 已交付 + 证据 lane 夜间运行，未启动任何 `run()`/编排改造。
 > **目的**：把「缺什么」变成可勾选的决定，避免 P2 在缺少发布/改造窗口授权时动最高 churn 文件（`executor.ts` 6139 行、`app-runner.ts` 2854 行、`ctx.ts` 1799 行）。
 > **依据**：`docs/IMPROVEMENT_PLAN.md` §0/§6.3、`docs/IMPROVEMENT_PLAN_REVIEW.md`（架构评审 B1/B5、红队 C2）、`docs/MAINLINE.md` §4 seam 冻结表、`docs/INTERVENTION_RESCUE_MODULE.md` §8。
 
