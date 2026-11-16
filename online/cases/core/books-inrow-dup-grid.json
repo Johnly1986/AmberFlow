@@ -1,0 +1,22 @@
+{
+  "id": "books-inrow-dup-grid",
+  "site": "books",
+  "tier": "core",
+  "goal": "在 Travel 分类页用行锚 in-row 定位 It's Only the Himalayas 那一行的订票按钮并提交（11 个同名 Add to basket 按钮、无 id/data-test/aria-label——唯一可区分身份是行内容）",
+  "subgoals": [
+    {
+      "desc": "点击 It's Only the Himalayas 行的 Add to basket：声明 hint `<label> in-row:<token>`，token 取行内容词元（书名）；表单 GET 提交后 URL 带查询串",
+      "start_url": "https://books.toscrape.com/catalogue/category/books/travel_2/index.html",
+      "target_hint": "add to basket in-row:himalayas",
+      "signal": { "url_contains": "index.html?" },
+      "retries": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "category-reloaded",
+      "desc": "提交后回到同一分类页（11 张商品卡齐全，页面状态未被破坏）",
+      "signal": { "css_count_equals": ["article.product_pod", 11] }
+    }
+  ]
+}

@@ -124,7 +124,10 @@ export function firstPoolText(pool: ElemPool): string | null {
  * 剥离清单 = 引擎内部标记/非模型面字段，与历史逐字段等价：
  *   surface（U3）、href_full（T9）、identity（FW8）、declared（P0-C DRF）——
  *   frame_origin / frame_path（A 批帧限定打点，只服务 hint 匹配与 PoolView）、
- *   structure_path / structure_unstable（B 批结构证据，只服务 inspect/observe opt-in 诊断面）。
+ *   structure_path / structure_unstable（B 批结构证据，只服务 inspect/observe opt-in 诊断面）、
+ *   row_texts（F82 in-row 匹配底座，≤6 行 × ≤40 字符——只服务匹配/回捞/建议，再灌 6 行 × 15 卡
+ *   是请求体爆炸且改变模型世界；near 以"每重复元素一行"进 criteriaView 是模型视图装饰，
+ *   row_texts 不是）。
  * **快路径 guard 与解构两处同步**（B5 教训：只改解构会把「只带 frame_origin」的行泄漏进
  * 模型面）。esig / firstIfSame 签名**不含**这些字段（副作用边界不变）。
  */
@@ -133,12 +136,14 @@ export function modelProjectionOf(elems: ElemPool): ElemPool {
   for (const [ref, e] of Object.entries(elems)) {
     if (e.surface === undefined && e.href_full === undefined && e.identity === undefined
         && e.declared === undefined && e.frame_origin === undefined && e.frame_path === undefined
-        && e.structure_path === undefined && e.structure_unstable === undefined) {
+        && e.structure_path === undefined && e.structure_unstable === undefined
+        && e.row_texts === undefined) {
       modelElems[ref] = e; continue;
     }
     const { surface: _surface, href_full: _hrefFull, identity: _identity,
       declared: _declared, frame_origin: _frameOrigin, frame_path: _framePath,
-      structure_path: _structurePath, structure_unstable: _structureUnstable, ...rest } = e;
+      structure_path: _structurePath, structure_unstable: _structureUnstable,
+      row_texts: _rowTexts, ...rest } = e;
     modelElems[ref] = rest as Elem;
   }
   return modelElems;

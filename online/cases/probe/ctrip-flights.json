@@ -2,8 +2,17 @@
   "id": "ctrip-flights",
   "site": "ctrip-probe",
   "tier": "probe",
-  "goal": "观察携程机票列表在本环境能否被匿名访问（只记录 blocked/unreachable，不作为通过标准）",
+  "goal": "观察携程机票列表在本环境能否被匿名访问（只记录 blocked/unreachable，不作为通过标准）；可达时顺带观察 in-row 行锚在真实订票按钮网格上的行为（命中→DOM 证据可断言航班号；token 撞多行→target_ambiguous 零动作；token 失效→target_not_found 列真实行词元——三态都只记录，不绕风控）",
   "start_url": "https://flights.ctrip.com/online/list/oneway-kmg-bjs?depdate={{today+7d}}",
-  "expect": ["blocked", "unreachable", "login_required", "captured"],
-  "tags": ["probe", "anti-bot"]
+  "subgoals": [
+    {
+      "desc": "in-row 行锚观察：声明订票行锚 hint（token=sc7960 为 2026-11-16 走查样本航班号，非当日必现——token 失效即 target_not_found，属诚实落空；命中时 stop_code 缺省且 method=rule:match 即 DOM 命中证据）",
+      "start_url": "https://flights.ctrip.com/online/list/oneway-kmg-bjs?depdate={{today+7d}}",
+      "target_hint": "订票 in-row:sc7960",
+      "signal": { "css_exists": "body" },
+      "retries": 0
+    }
+  ],
+  "expect": ["blocked", "unreachable", "login_required", "captured", "failed"],
+  "tags": ["probe", "anti-bot", "in-row"]
 }

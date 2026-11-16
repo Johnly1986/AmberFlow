@@ -85,6 +85,13 @@ export interface ObserveElement {
   frame_origin?: string;
   frame_path?: string[];
   /**
+   * F82（in-row 观察面闭环）：行上下文文本（≤6 行 × ≤40 字符）——**仅同文案重复组元素
+   * 携带**（OBSERVE_JS dup 门控；无 dup 页不出字段 ⇒ 观察 JSON 逐字节不变）。in-row 匹配
+   * 底座与 suggestHints 第 5 档的词元来源；不进模型面。边界：dup 判定只对观察集合内可见
+   * 同文案计数执行（max 截断边界见 APP_SCRIPT_AUTHORING §4.12）。
+   */
+  row_texts?: string[];
+  /**
    * B 批：**结构证据**（仅 `includeStructure:true` 时出现；≤160 字符）。祖先 tag/`#id` +
    * 同 tag 兄弟序号 + 帧下标前缀（如 `f2>div#panel>button[2]`）——只回答"在哪个子树"，
    * **不是 hint**：动态页面可能失效、不可照抄。
@@ -181,6 +188,10 @@ function syntheticElem(row: ObserveRawRow, ref: string): Elem {
     // E3：OBSERVE_JS 采集的祖先 id 链（≤8、小写、最近祖先在前）——within:#id 的
     // observe 侧底座；无 id 祖先时字段不出现（观察集合形状与池行一致）。
     ...(Array.isArray(row.anchor_ids) && row.anchor_ids.length > 0 ? { anchor_ids: row.anchor_ids } : {}),
+    // F82（in-row 观察面闭环）：OBSERVE_JS dup 门控采集的行上下文透传——observe 自证池
+    // 与池行同构，suggestHints 第 5 档据此给出 in-row 候选（anchor_ids 先例：无 dup 组时
+    // 字段不出现，观察集合形状不变）。
+    ...(Array.isArray(row.row_texts) && row.row_texts.length > 0 ? { row_texts: row.row_texts } : {}),
     // A 批（frame:<origin>）：observeElements 宿主侧按帧打点的帧链两字段透传——observe
     // 自证池与池行同构，帧限定候选（frame:<origin>）因此可被自证/给出（R2-9）。
     ...(row.frame_origin !== undefined ? { frame_origin: row.frame_origin } : {}),
@@ -212,7 +223,12 @@ function whyNotAdmitted(row: ObserveRawRow, classNames: string[] | undefined): s
   return `${tag}${cls}: in the admission surface but no uniquely-resolvable hint shape `
     + `(label empty or shared with another candidate) — add id/name/data-test, make the visible label unique, `
     + "or scope a shared label with `<label> within:#<ancestor-id>`"
-    + " (E2 chains also supported: `<label> within:#outer>#inner`, outer-to-inner, <=4 segments)";
+    + " (E2 chains also supported: `<label> within:#outer>#inner`, outer-to-inner, <=4 segments)"
+    + " — for identical-text row grids (same-label buttons/cards), anchor by row content instead:"
+    + " copy a self-verified `<label> in-row:<token>` from hint_candidates (`row_texts` rows carry"
+    + " the tokens; row context is collected for same-text duplicate groups ONLY — a non-duplicate"
+    + " element can never match `in-row:`, by design). Boundary: hint_candidates self-verify against"
+    + " THIS observation set, not the run pool window (admitted ≠ in the 40/120 pool)";
 }
 
 /**
@@ -251,6 +267,8 @@ export async function observePage(
     const framePath = Array.isArray(row.frame_path) && row.frame_path.length > 0 ? row.frame_path : undefined;
     // B 批结构证据只由 opt-in 的 OBSERVE_JS 产出；空串不出现（诊断字段不冒充事实）。
     const structurePath = orUndef(row.structure_path);
+    // F82：dup 门控采集的行上下文（仅重复组携带；无 dup 页不出字段 ⇒ 观察 JSON 逐字节不变）。
+    const rowTexts = Array.isArray(row.row_texts) && row.row_texts.length > 0 ? row.row_texts : undefined;
     return {
       ref: `o${i}`,
       tag: row.tag,
@@ -269,6 +287,7 @@ export async function observePage(
       ...(frameOrigin === undefined ? {} : { frame_origin: frameOrigin }),
       ...(framePath === undefined ? {} : { frame_path: framePath }),
       ...(structurePath === undefined ? {} : { structure_path: structurePath, structure_unstable: true as const }),
+      ...(rowTexts === undefined ? {} : { row_texts: rowTexts }),
     };
   });
   // 自证池 = 本次观察到的**准入面 + 可见**元素（真实池的上界；隐藏/池外元素不在其中，

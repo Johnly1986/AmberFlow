@@ -342,6 +342,25 @@ export function anchorChainMatch(anchorIds: readonly string[], chain: readonly s
   return true;
 }
 
+/**
+ * F82（in-row 行锚）：行上下文匹配的**唯一出处**（池侧 hintMatchImpl / suggestHints 第 5 档
+ * 自证共用；extraction 的失败证据面同口径内联——它不能 import rules（rules → extraction 既有
+ * 依赖方向），一行口径改动须两处同步）。
+ *
+ * 口径（§3.3 仲裁）：单档 `row_texts 任一行 includes(token)`，逐行匹配不做跨行拼接；归一 =
+ * **仅小写折叠**（与 nearToken 池侧语义 parity——同为 includes；within/frame 值同入口小写）。
+ * **不做 NFKC**（R5：两面新增归一层 = 纯漂移面，作者从 hint_candidates 照抄真实行词元构造上
+ * 必中；全角场景 fail-closed 显式落空，等实站案例再议）。**fail-closed 对称**：元素无 row_texts
+ * （非重复组）⇔ in-row 恒不命中 ≙ frame 对未知 origin 帧不可命中（F70 语义）——行锚只服务
+ * "同文案网格"这一它要解决的问题，不制造新歧义。
+ */
+export function rowMatch(e: Elem, token: string): boolean {
+  const rows = e.row_texts;
+  if (!Array.isArray(rows)) return false;
+  const tok = token.toLowerCase();
+  return rows.some((line) => String(line).toLowerCase().includes(tok));
+}
+
 /** The 6 hint grammars, single-parsed; `sink` (if given) records the candidate set. */
 function hintMatchImpl(
   hint: string, elems: ElemPool, sink?: HintCandidates | null, opts?: HintMatchOptions,
@@ -371,9 +390,20 @@ function hintMatchImpl(
   const inAnchor = (refs: string[]): string[] =>
     parsed.within === undefined ? refs
       : refs.filter((r) => anchorChainMatch(elems[r]!.anchor_ids ?? [], parsed.within!));
+  /**
+   * F82（in-row 行锚）：与 inAnchor 同构的后置过滤——parsed.inRow 已声明时，命中集限定到
+   * `row_texts 任一行 includes(token)` 的元素（rowMatch，本文件上方；仅小写折叠、fail-closed
+   * 对称：无 row_texts = 恒不命中）。**三尾缀组合 = 三个独立 AND 过滤**：frame 是入口
+   * entries 过滤（上方），within/inRow 是后置过滤——实现为 `limit = inRow(inAnchor(refs))`
+   * （集合过滤可交换，次序无关）。**限定后本档清空 = 落空，不跨档降级**（跨档混选防线不变）。
+   */
+  const inRow = (refs: string[]): string[] =>
+    parsed.inRow === undefined ? refs
+      : refs.filter((r) => rowMatch(elems[r]!, parsed.inRow!));
+  const limit = (refs: string[]): string[] => inRow(inAnchor(refs));
   /** Record the strongest tier's refs, then resolve exactly as before. */
   const emit = (refs: string[], tier: number): string | null => {
-    const limited = inAnchor(refs);
+    const limited = limit(refs);
     if (sink) { sink.refs = limited; sink.tier = tier; sink.decided = null; }
     return firstIfSame(new Set(limited), elems);
   };
@@ -413,10 +443,10 @@ function hintMatchImpl(
       return decided;
     };
     const exact = hitList.filter(([, e]) => attrMatchValues(e, k, opts).some((x) => x === v));
-    if (exact.length) return finishSubstr(inAnchor(exact.map(([r]) => r)), 1);
+    if (exact.length) return finishSubstr(limit(exact.map(([r]) => r)), 1);
     const slug = hitList.filter(([, e]) => attrMatchValues(e, k, opts).some((x) => x.split("/").pop() === v));
-    if (slug.length) return finishSubstr(inAnchor(slug.map(([r]) => r)), 2);
-    return finishSubstr(inAnchor(hitList.map(([r]) => r)), 3);
+    if (slug.length) return finishSubstr(limit(slug.map(([r]) => r)), 2);
+    return finishSubstr(limit(hitList.map(([r]) => r)), 3);
   }
   if (parsed.kind === "nearToken") {
     // near~token: the container identity line (add_near_context) disambiguates
@@ -447,8 +477,10 @@ function hintMatchImpl(
     // A 批（R2-10）：偏好前先过锚限定——tag 形状的 submit 偏好此前绕过 inAnchor
     // （锚外 submit 会赢；frame 已由入口 entries 过滤覆盖）。within/frame 未声明时
     // inAnchor 恒等，旧行为逐字节不变。
+    // F82：偏好前过**组合限定** limit（inRow(inAnchor())）——in-row 声明下锚外/行外的
+    // submit 同样不许赢（漏这处 = 复刻"tag 绕过 within"类 bug）。
     if ((h === "input" || h === "button") && hits.size > 1) {
-      const submits = inAnchor([...hits]).filter((r) =>
+      const submits = limit([...hits]).filter((r) =>
         ["submit", "button"].includes(String(elems[r]!.input_type ?? "")) || elems[r]!.tag === "button");
       if (submits.length === 1) {
         if (sink) { sink.refs = submits; sink.tier = 0; sink.decided = submits[0]!; }
@@ -492,11 +524,12 @@ function hintMatchImpl(
   for (let t = 0; t < ladder.length; t++) {
     const hits = ladder[t]!;
     if (hits.size) {
-      const refs = inAnchor([...hits]);
-      // 锚限定后本档可能清空（全部命中在锚外）——继续落下一档？不：档位语义是
-      // "最强非空档"，限定是命中集的后置过滤；限定后为空 = 本档无锚内候选，
-      // 视为落空继续下一档会让"锚内更弱档"越级顶上（跨档混选）。正确语义：
-      // 限定后空 → 直接跳到全落空记录（锚内没有任何档命中）。
+      // F82：组合限定 limit = inRow(inAnchor(refs))——within/inRow 未声明时两层恒等，
+      // 旧行为逐字节不变。锚/行限定后本档可能清空（全部命中在锚外/行外）——继续落下一档？
+      // 不：档位语义是"最强非空档"，限定是命中集的后置过滤；限定后为空 = 本档无锚内/行内
+      // 候选，视为落空继续下一档会让"限定内更弱档"越级顶上（跨档混选）。正确语义：
+      // 限定后空 → 直接跳到全落空记录（限定内没有任何档命中）。
+      const refs = limit([...hits]);
       if (refs.length === 0) break;
       const decided = firstIfSame(new Set(refs), elems);
       // 弱档（词前缀 t=3 / 词包含 t=4）胜出 = 容器撞车/同缀误中的高发形状（实测：
@@ -571,6 +604,13 @@ export function hintCandidates(
  * 单段仍不唯一且 `frame_path` 非空时再给完整链 `<label> frame:<祖先…>自身>`（≤4 段，
  * 与 parseHint 声明上限同口径；>4 段不生成）。仍走同一个 push 自证。无 frame 字段
  * 或无可用 label 时不产生任何新候选（旧输出逐字节不变）。
+ *
+ * F82 第 5 档（in-row 行锚闭环）：within 全部落空后，从 `row_texts`（同文案重复组的行
+ * 上下文，extraction.addNearContext 采集）逐行取词元生成 `<label> in-row:<token>`——同一
+ * push 自证、命中即停；词元启发式跳价格/时段词元（生成期护栏，R4）。observe/inspect 的
+ * hint_candidates 与歧义证据的 suggested_hint（ambiguity.suggestHints[0]）自动受益。
+ * `out.slice(0, 4)` cap 不动（R-10：链候选与 frame 候选互不挤占的顺序纪律不变；within
+ * 恒空的页面 in-row 拿得到槽位）。
  */
 export function suggestHints(
   elem: Elem,
@@ -633,9 +673,10 @@ export function suggestHints(
       segs.push(anchors[i]!);
     }
     let chained = false;
+    let withinPushed = false;   // F82：within 档是否已产出候选（第 5 档只在 within 全部落空后跑）
     for (let k = 1; k <= Math.min(segs.length, 4); k++) {
       const chain = segs.slice(0, k).reverse();   // 外→内（anchor_ids 内→外 → 反转）
-      if (push(`${label} within:${chain.map((a) => `#${a}`).join(">")}`)) { chained = true; break; }
+      if (push(`${label} within:${chain.map((a) => `#${a}`).join(">")}`)) { chained = true; withinPushed = true; break; }
     }
     // E7（N6）：生长链在**首个非法段**停下是正确的（更深链必含它 = 整组拒绝），但非法段
     // **之后**的外层合法祖先仍是可用单层锚——E3 旧行为会跳过非法段继续逐个尝试，E2 生长
@@ -646,7 +687,32 @@ export function suggestHints(
       for (let i = firstBad + 1; i < anchors.length; i++) {
         const a = anchors[i]!;
         if (!validSeg(a)) continue;
-        if (push(`${label} within:#${a}`)) break;
+        if (push(`${label} within:#${a}`)) { withinPushed = true; break; }
+      }
+    }
+    // F82 第 5 档（in-row 建议闭环）：within 全部落空后，从 `row_texts` 逐行取词元生成
+    // `<label> in-row:<token>`——同一个 push → hintMatch 自证（恰好唯一命中才保留），命中
+    // 即停。词元启发式是**生成期护栏**（R4）：优先"类标识符"词元（字母+数字混合，如
+    // `sc7960`、`order-1042`），跳过纯价格/货币/百分比词元与时段词元——带 unstable 警告的
+    // 候选是半成品承诺，作者会照抄且警告没人读，宁可不产出交回人（不产 unstable 标记机制）。
+    // 无 row_texts（非重复组）时此档天然不产出（fail-closed 与匹配面同一对称）。
+    if (!withinPushed && Array.isArray(elem.row_texts) && elem.row_texts.length > 0) {
+      const tokenOk = (t: string): boolean =>
+        t !== "" && !t.includes(">") && t.length <= 40
+        && !/^[¥$€£\d.,%*\s]+$/.test(t)
+        && !/^\d{1,2}:\d{2}$/.test(t);
+      const identifierLike = (t: string): boolean => /[a-z]/i.test(t) && /\d/.test(t);
+      const tokens: string[] = [];
+      for (const line of elem.row_texts) {
+        for (const w of String(line).trim().split(/\s+/)) {
+          const tok = w.toLowerCase();
+          if (!tokenOk(tok) || tokens.includes(tok)) continue;
+          tokens.push(tok);
+        }
+      }
+      const ordered = [...tokens.filter(identifierLike), ...tokens.filter((t) => !identifierLike(t))];
+      for (const tok of ordered) {
+        if (push(`${label} in-row:${tok}`)) break;
       }
     }
   }

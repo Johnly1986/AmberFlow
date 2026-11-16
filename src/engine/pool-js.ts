@@ -255,6 +255,56 @@ export const ANCHOR_JS = String.raw`  const anchorIdsOf = (el) => {
   };`;
 
 /**
+ * F82（in-row 行锚）：行上下文爬升的**唯一 JS 实现**——dup 键（tag+\u0000+label，与宿主
+ * addNearContext 的 `${tag}\u0000${label}` 同口径单一出处，防页内计数与宿主 map 漂移）+
+ * 爬升采集（≤8 层祖先、容器持有 >1 个同文案交互控件即停 = 网格级 break；行过滤、窗口 6 行）。
+ * NEAR_JS（EXTRACT 面）/ OBSERVE_JS（observe 面）/ HINT_HEAD（回捞面）/ DOM_FALLBACK_COLLECT_JS
+ * （A3 回退面，executor.ts）经 `${ROW_CLIMB_JS}` 内插同一份（仿 ANCHOR_JS 模式——改这里 =
+ * 改所有采集面，防两面漂移）。
+ *
+ * 字节纪律：`out` 累加器（near）的行过滤链、去重与推进序**逐字符**保持 NEAR_JS 原实现；
+ * break 条件取**并集** `(out.length>=3 && rows.length>=6)` ⇒ 新爬升 ⊇ 旧爬升、out 前缀稳定
+ * ⇒ near = out.slice(0,3) 逐字节相等（结构性证明，R1）。rows（row_texts）独立行过滤 =
+ * 现行过滤 **OR 连续数字 ≥5 位**（救援纯数字订单号 20240101；时刻 "20:20"、短价格段维持
+ * 剔除）；泄漏的长数字/价格行无害——价格词元由 suggestHints 生成期硬拒兜底，匹配面不挑词。
+ * 无换行首尾（首行直接跟内容、末行 `};` 收尾），调用点以 `${ROW_CLIMB_JS}` 独占一行内插。
+ */
+export const ROW_CLIMB_JS = String.raw`  const __dupKeyOf = (tag, label) => String(tag || '') + '\u0000' + String(label || '');
+  const __dupLabelsOf = (pairs) => {
+    const cnt = {};
+    for (let i = 0; i < pairs.length; i++) {
+      const k = __dupKeyOf(pairs[i][0], pairs[i][1]);
+      cnt[k] = (cnt[k] || 0) + 1;
+    }
+    const out = new Set();
+    for (let i = 0; i < pairs.length; i++) {
+      if (cnt[__dupKeyOf(pairs[i][0], pairs[i][1])] > 1) out.add(String(pairs[i][1] || ''));
+    }
+    return out;
+  };
+  const __rowClimb = (el, labels) => {
+    const own = (el.innerText || el.value || '').trim();
+    const isDup = (n) => labels.has((n.innerText || n.value || '').trim());
+    let p = el ? el.parentElement : null, out = [], rows = [];
+    for (let k = 0; k < 8 && p && p.tagName !== 'BODY'; k++, p = p.parentElement) {
+      if ([...p.querySelectorAll('button, input[type=submit]')].filter(isDup).length > 1)
+          break;                      // whole grid inside: too big
+      const raw = (p.innerText || '').trim().split('\n').map(s => s.trim());
+      const lines = raw.filter(t => t && t !== own && !labels.has(t)
+               && !/^[\u00a3\u20ac$\d.,x%*\s]+$/.test(t)
+               && /[a-z\u4e00-\u9fff]/i.test(t) && t.length <= 40);
+      for (const t of lines) if (!out.includes(t)) out.push(t);
+      for (const t of lines) if (rows.length < 6 && !rows.includes(t)) rows.push(t);
+      for (const t of raw) {
+        if (!t || t === own || labels.has(t) || rows.includes(t) || t.length > 40) continue;
+        if (rows.length < 6 && /\d{5,}/.test(t)) rows.push(t);
+      }
+      if (out.length >= 3 && rows.length >= 6) break;
+    }
+    return {out: out, rows: rows};
+  };`;
+
+/**
  * ONE round trip for the whole page: tag, label (incl. <label>-wrapper text),
  * data-test, name, id, input type, href, visibility and the main-content flag,
  * ordered main-content-first, each winner stamped with `data-dshref` in the same
@@ -567,10 +617,18 @@ ${ANCHOR_JS}
  * 调用方用它算 `counts.omitted`（被 max 上限截掉的数，不是"页面没有"）。
  * 非法 CSS 返回 `{bad_selector: message}`（结构化，不抛裸栈）。
  * `in_surface` 用当前生效的准入选择器（ADMIT_SEL 投影 + JS 探针后缀）现场匹配。
+ *
+ * F82（in-row 观察面闭环）：dup 门控采集 row_texts（additive 字段，共享 ROW_CLIMB_JS 内插）——
+ * **dup 判定只对"观察集合内可见同文案计数"执行**（键 = __dupKeyOf(tag, label)，与宿主
+ * addNearContext 同口径单一出处；label 用观察面的完整 labelOfRaw），计数 ≤1 的行不出字段
+ * ⇒ **无 dup 页观察 JSON 逐字节不变**；max 截断边界 = 只对观察集合计数（被 max 截掉的行不
+ * 参与，如实按"这一刻的观察"归属）。爬升仅对已判定重复组的元素执行（与 near 同触发），
+ * observe 面已有 max ≤200 硬上限。syntheticElem 透传后 observe 自证池与池行同构。
  */
 export const OBSERVE_JS = String.raw`(arg) => {
   ${LABEL_HELPERS_JS}
   ${STRUCTURE_HELPERS_JS}
+${ROW_CLIMB_JS}
   const sel = arg.sel, max = arg.max, includeHidden = arg.includeHidden === true;
   // E3：祖先链 id（≤8、小写、最近祖先在前）——与 EXTRACT_JS 的 anchorIdsOf 同口径，
   // 是 within:#id 尾缀在 observe 侧的自证底座。一次 parentElement 链行走；无 id 祖先
@@ -580,6 +638,7 @@ ${ANCHOR_JS}
   try { __collectAll(document, sel, all); }
   catch (err) { return { bad_selector: String(err && err.message ? err.message : err) }; }
   const rows = [];
+  const rowEls = [];
   let candidates = 0;
   for (let i = 0; i < all.length; i++) {
     const e = all[i];
@@ -608,6 +667,7 @@ ${ANCHOR_JS}
     const structurePath = arg.includeStructure === true
       ? __structurePathOf(e, arg.framePrefix)
       : null;
+    rowEls.push(e);
     rows.push({
       tag: tag,
       role: (e.getAttribute('role') || '').toLowerCase(),
@@ -624,6 +684,23 @@ ${ANCHOR_JS}
       ...(anchors.length ? {anchor_ids: anchors} : {}),
       ...(structurePath ? {structure_path: structurePath, structure_unstable: true} : {}),
     });
+  }
+  const dupCnt = {};
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].visible !== true) continue;
+    const k = __dupKeyOf(rows[i].tag, rows[i].label);
+    dupCnt[k] = (dupCnt[k] || 0) + 1;
+  }
+  const dupLabels = new Set();
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].visible !== true) continue;
+    if ((dupCnt[__dupKeyOf(rows[i].tag, rows[i].label)] || 0) > 1) dupLabels.add(rows[i].label);
+  }
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].visible !== true) continue;
+    if ((dupCnt[__dupKeyOf(rows[i].tag, rows[i].label)] || 0) <= 1) continue;
+    const c = __rowClimb(rowEls[i], dupLabels);
+    if (c.rows.length) rows[i].row_texts = c.rows;
   }
   return { rows: rows, total: candidates, returned: rows.length };
 }`;
@@ -671,27 +748,23 @@ const META_JS = String.raw`(sel) => [...document.querySelectorAll(sel)].map((e, 
                 m = !!e.closest('main, [role=main], article');
             return {i, vis, main: m}; })`;
 export const PASS_META = compile("sel", `return (${META_JS})(sel);`);
-/** Container identity lines for duplicate-label elements. */
-const NEAR_JS = String.raw`(arg) => {` + COLLECT_JS + String.raw`
+/**
+ * Container identity lines for duplicate-label elements.
+ *
+ * F82 双累加器：爬升采集收口进共享 ROW_CLIMB_JS（本 pass 内插同一份）——`out`（near）累加序/
+ * 行过滤/3 行窗口逐字符不动（near = out.slice(0,3) 逐字节相等，R1 结构性证明）；`rows`
+ * （row_texts）独立行过滤（现行过滤 OR 连续数字 ≥5 位）、窗口 6 行；break 取并集
+ * `(out.length>=3 && rows.length>=6)` ⇒ 新爬升 ⊇ 旧爬升。返回 `{near, rows}` 形态
+ * （宿主 addNearContext：near 走既有唯一性 pick、rows 全量作 row_texts——仅重复组携带）。
+ */
+const NEAR_JS = String.raw`(arg) => {` + COLLECT_JS + ROW_CLIMB_JS + String.raw`
             const all = [];
             __collectAll(document, arg.sel, all);
             const labels = new Set(arg.labels);
             return arg.pairs.map(([ref, i]) => {
-              const e = all[i]; if (!e) return [];
-              const own = (e.innerText || e.value || '').trim();
-              const isDup = (n) => labels.has((n.innerText || n.value || '').trim());
-              let p = e.parentElement, out = [];
-              for (let k = 0; k < 8 && p && p.tagName !== 'BODY'; k++, p = p.parentElement) {
-                if ([...p.querySelectorAll('button, input[type=submit]')].filter(isDup).length > 1)
-                    break;                      // whole grid inside: too big
-                const lines = (p.innerText || '').trim().split('\n').map(s => s.trim())
-                  .filter(t => t && t !== own && !labels.has(t)
-                           && !/^[\u00a3\u20ac$\d.,x%*\s]+$/.test(t)
-                           && /[a-z\u4e00-\u9fff]/i.test(t) && t.length <= 40);
-                for (const t of lines) if (!out.includes(t)) out.push(t);
-                if (out.length >= 3) break;
-              }
-              return out.slice(0, 3); }); }`;
+              const e = all[i]; if (!e) return {near: [], rows: []};
+              const c = __rowClimb(e, labels);
+              return {near: c.out.slice(0, 3), rows: c.rows}; }); }`;
 export const PASS_NEAR = compile("arg", `return (${NEAR_JS})(arg);`);
 /**
  * target_hint recovery pass (stamps data-hintref in the same pass). A4：章值同样是
@@ -765,6 +838,7 @@ const HINT_HEAD = String.raw`(arg) => {
             // 并入主池后 executor 重新 hintMatch，池侧 inAnchor 按 anchor_ids 过滤；此前回捞行
             // 缺该字段被二次清零 → 落到 FW8（无视 within）在任意帧动作锚外 #x。共享 ANCHOR_JS。
 ${ANCHOR_JS}
+${ROW_CLIMB_JS}
             const hits = [];
             if (p.kind === 'id') {
                 all.forEach((e, i) => {
@@ -797,9 +871,37 @@ ${ANCHOR_JS}
                     if (bareHit(lab, dt, tok)) hits.push(i);
                 });
             }
-            return hits
+            const visHits = hits
                 .filter((i) => { const e = all[i];
-                    return e.checkVisibility ? e.checkVisibility({checkVisibilityCSS: true}) : true; })
+                    return e.checkVisibility ? e.checkVisibility({checkVisibilityCSS: true}) : true; });
+            let picked = visHits;
+            const rowMemo = new Map();
+            if (p.inRow !== undefined) {
+                // F82 in-row 门（惰性 + memoized + 凑满 5 早退 + 总计算封顶 120，超标 fail-closed）：
+                // 先收集形状命中（不含 in-row 过滤——上面各分支），按 DOM 序逐候选算 row_texts
+                // （memo 每候选一次），行词面命中才收集。只补字段不进门的话 slice(0,5) 可能全被
+                // 非命中占满 ⇒ 回捞路径整体死路（F-1 同构缺口）。封顶：至多 120 次爬升计算
+                // （回捞上限本就 5 行；凑满即退——超标停算，已收集者如实返回 = 显式落空不猜）。
+                const pairs = [];
+                for (let i = 0; i < all.length; i++) pairs.push([all[i].tagName.toLowerCase(), labelOf(all[i])]);
+                const dupLabels = __dupLabelsOf(pairs);
+                picked = [];
+                let computed = 0;
+                for (let k = 0; k < visHits.length; k++) {
+                    if (picked.length >= 5 || computed >= 120) break;
+                    const e = all[visHits[k]];
+                    let rows = rowMemo.get(e);
+                    if (rows === undefined) {
+                        computed += 1;
+                        rows = __rowClimb(e, dupLabels).rows;
+                        rowMemo.set(e, rows);
+                    }
+                    for (let m = 0; m < rows.length; m++) {
+                        if (String(rows[m]).toLowerCase().includes(String(p.inRow))) { picked.push(visHits[k]); break; }
+                    }
+                }
+            }
+            return picked
                 .slice(0, 5)
                 .map((i, n) => {
                     const e = all[i];
@@ -808,6 +910,7 @@ ${ANCHOR_JS}
                     const ref = 'h' + n;
                     const stamp = nonce + '-' + ref;
                     e.setAttribute('data-hintref', stamp);
+                    const climbRows = rowMemo.get(e);
                     return {hint_ref: stamp, scan: i, tag: e.tagName.toLowerCase(),
                             dsh_ref: e.getAttribute('data-dshref') || '',
                             // A1 不变量：label === full_label 的前 40 字（同一 labelOf 截断）。
@@ -816,6 +919,11 @@ ${ANCHOR_JS}
                             name: e.getAttribute('name') || '', id: e.id || '',
                             // E1（F-1 闭合）：回捞行 anchor_ids 与真池行同构（additive）。
                             ...(anchors.length ? {anchor_ids: anchors} : {}),
+                            // F82（in-row 权威对等，F-1 同构闭合）：回捞行补 row_texts（additive，
+                            // 与 anchor_ids 同形）——回捞行并入主池后二次 hintMatch 的 inRow 过滤
+                            // 才有底座；缺字段 = 过滤清零 = 回捞死路。in-row 未声明时 rowMemo 恒空
+                            // ⇒ 键不出现（回捞行形状与今天逐字节一致）。
+                            ...(climbRows !== undefined && climbRows.length ? {row_texts: climbRows} : {}),
                             input_type: (e.getAttribute('type') || '').toLowerCase(),
                             href: href ? href.split('?')[0].replace(/\/+$/,'').split('/').slice(-2).join('/') : '',
                             ...(href ? {href_full: href} : {})};

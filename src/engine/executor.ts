@@ -99,7 +99,7 @@ import {
   type PageLike,
 } from "./extraction.ts";
 import { elemFrameStamp, frameScopeMatchesFrame } from "./frame-scope.ts";
-import { ANCHOR_JS, compile } from "./pool-js.ts";
+import { ANCHOR_JS, ROW_CLIMB_JS, compile } from "./pool-js.ts";
 import { declaredLookup, formatDeclaredCandidates, type DeclaredCandidate } from "./declared.ts";
 import { describeAmbiguity, orderCandidatesByDomPreorder, type AmbiguityView, type AmbiguousOrdering } from "./ambiguity.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
@@ -354,19 +354,41 @@ function ambiguityStopReason(target: string, poolSize: number, amb: AmbiguityVie
  * `compile()` PASS 常量（identity PASS_IDENTITY 先例）。行补 `anchors` → 合成主帧行
  * 透传 anchor_ids（与真池行同构；`#x within:#p` 在 A3 面与池侧 inAnchor 同语义）。
  * JS 体与原 TS arrow 的序列化源码逐行对应（仅去掉类型标注 + 行补 anchors）。
+ *
+ * F82（A3 第二评审补漏项）：共享 ROW_CLIMB_JS 内插（与池/回捞/observe 同一爬升实现）；
+ * `arg.inRow` 声明时（仅 in-row hint 走到这里）每行补 `row_texts`（additive，≤6 行 ×
+ * ≤40 字符）——fallback 行并入主池后同样走二次 hintMatch 的 inRow 过滤，缺字段 =
+ * 重演 F-1 半链缺口（回捞死路）。in-row 未声明时 dupLabels 为 null、零爬升、行形状与
+ * 今天逐字节一致。
  */
 export const DOM_FALLBACK_COLLECT_JS = String.raw`(arg) => {
   const g = globalThis;
 ${ANCHOR_JS}
+${ROW_CLIMB_JS}
   const sel = arg.sel, tok = arg.tok;
   const out = [];
   const all = g.document.querySelectorAll(sel);
+  const dupLabels = arg.inRow === undefined ? null : (() => {
+    const pairs = [];
+    for (let i = 0; i < all.length; i++) {
+      const e = all[i];
+      const lb = String(e.getAttribute("aria-label") || e.getAttribute("title") || e.innerText
+        || e.getAttribute("placeholder") || e.getAttribute("value") || "").replace(/\s+/g, " ").trim().slice(0, 40);
+      pairs.push([String(e.tagName || "").toLowerCase(), lb]);
+    }
+    return __dupLabelsOf(pairs);
+  })();
   for (let i = 0; i < all.length; i++) {
     const e = all[i];
     const tag = String(e.tagName || "").toLowerCase();
     const label = String(e.getAttribute("aria-label") || e.getAttribute("title") || e.innerText
       || e.getAttribute("placeholder") || e.getAttribute("value") || "").replace(/\s+/g, " ").trim().slice(0, 200);
     e.setAttribute("data-af-probe", tok + "-" + i);
+    let rowTexts = null;
+    if (dupLabels !== null) {
+      const c = __rowClimb(e, dupLabels);
+      if (c.rows.length) rowTexts = c.rows;
+    }
     out.push({
       i, tag, label,
       role: String(e.getAttribute("role") || "").toLowerCase(),
@@ -375,6 +397,7 @@ ${ANCHOR_JS}
       type: String(e.getAttribute("type") || "").toLowerCase(),
       draggable: String(e.getAttribute("draggable") || "").toLowerCase() === "true",
       anchors: anchorIdsOf(e),
+      ...(rowTexts !== null ? { row_texts: rowTexts } : {}),
     });
   }
   return out;
@@ -2297,7 +2320,8 @@ export class BrowserMiddleware {
       // C 批（B8）：会话 act 的失败 reason 同样追加 frame: 尾缀诊断 + 页面可用 origin
       // （只有 `opts.diagnostics:true` 的会话 act 面走这里；scrollContainer/setRange 等既有
       // 调用面不传 ⇒ reason 逐字节不变）。diagnostics 结构体本身不改形状。
-      const frameNote = frameHintFailureEvidence(page, this._frameHosts, [target]);
+      // F82：池在手 = 追加 in-row 三案证据（token 无匹配列真实行词元 / 行已定位改 base）。
+      const frameNote = frameHintFailureEvidence(page, this._frameHosts, [target], elems);
       // F72-①：页面未静默时把"渲染可能未完成"写进 reason（让调用方第一时间知道"该等"而不是
       // 绕路换目标）；F72-②：显式重扫跑过且仍未命中时如实记重扫事实。两者都只在诊断面出现。
       const renderNote = settleRes !== null && settleRes.timedOut === true
@@ -2504,8 +2528,11 @@ export class BrowserMiddleware {
     try {
       // E1（within 权威对等）：inline TS arrow → PASS_DOM_FALLBACK（compile() 常量，行补 anchors；
       // 闭包不跨——共享 ANCHOR_JS 必须 ${} 内插进 pass 源码）。
+      // F82：in-row 声明随 arg 下发（inRow）——回退面每行补 row_texts（A3 半链缺口闭合）；
+      // 未声明时 arg 不带键，pass 内零爬升、行形状逐字节不变。
+      const inRowTok = parseHint(target).inRow;
       rows = (await page.evaluate(PASS_DOM_FALLBACK,
-        { sel: fallbackSel, tok: token })) as Array<Record<string, unknown>>;
+        { sel: fallbackSel, tok: token, ...(inRowTok !== undefined ? { inRow: inRowTok } : {}) })) as Array<Record<string, unknown>>;
     } catch {
       rows = [];
     }
@@ -2538,6 +2565,10 @@ export class BrowserMiddleware {
         // resolveCommandRef → hintMatch.inAnchor 据此消费 within（与池/回捞面同语义）。
         ...(Array.isArray(r["anchors"]) && (r["anchors"] as string[]).length > 0
           ? { anchor_ids: (r["anchors"] as string[]).map((x) => String(x).toLowerCase()) } : {}),
+        // F82（A3 半链缺口闭合）：fallback 行补 row_texts（additive，与真池行同构）——
+        // 合成行并入主池后二次 hintMatch 的 inRow 过滤才有底座；缺字段 = 过滤清零 = 死路。
+        ...(Array.isArray(r["row_texts"]) && (r["row_texts"] as string[]).length > 0
+          ? { row_texts: (r["row_texts"] as string[]).map((x) => String(x)) } : {}),
         ...(mainStamp.frame_origin !== undefined ? { frame_origin: mainStamp.frame_origin } : {}),
         ...(mainStamp.frame_path !== undefined ? { frame_path: mainStamp.frame_path } : {}),
       } as Elem;
@@ -4144,10 +4175,11 @@ export class BrowserMiddleware {
                 : "";
               // C 批（B8）：被拒的 frame: 尾缀 / 合法但写错的链要在此点名 + 列页面可用 origin
               // （无 frame: 参与 = 空串，旧 reason 逐字节不变）。
+              // F82：池在手 = in-row 尾缀被拒点名 / 三案证据同批（stopCode 不加新码）。
               const frameTargets = pendingUnresolved
                 .map((id) => cmdSpace.find((c) => c.id === id)?.target)
                 .filter((t): t is string => typeof t === "string" && t !== "");
-              const frameNote = frameHintFailureEvidence(pg, this._frameHosts, frameTargets);
+              const frameNote = frameHintFailureEvidence(pg, this._frameHosts, frameTargets, elems);
               stop("target_not_found",
                 `command space matches nothing on this page — pending unresolved: `
                 + `${pendingUnresolved.join(", ") || "-"} (unresolvable candidates are OUT; the space never falls back to the full pool) on step ${stepNo}. `
@@ -4558,7 +4590,9 @@ export class BrowserMiddleware {
           const summary = poolRoleSummary(elems, ALL_FAMILIES);
           // C 批（B8）：strict 的两条 reason 也追加 frame: 尾缀诊断 + 页面可用 origin（无 frame:
           // 参与 = 空串，旧文案逐字节不变）。
-          const frameNote = frameHintFailureEvidence(pg, this._frameHosts, [curHint]);
+          // F82：池在手 = 追加 in-row 尾缀被拒点名 / 三案证据（声明 in-row 的 strict 落空
+          // 要能回答"token 在行词元里吗"）。
+          const frameNote = frameHintFailureEvidence(pg, this._frameHosts, [curHint], elems);
           if (weakRejected !== null) {
             stop("target_not_found",
               weakRejectedReason(weakRejected, curHint, stepNo, poolSize, summary)

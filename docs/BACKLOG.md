@@ -192,6 +192,31 @@ executor.ts 头部注释区、类型区、纯函数区、报告尾（`runReportT
 
 ---
 
+## in-row:<token> 行锚后续立项（2026-11-16 批 1 落地后）
+
+**状态**：open（批 1 已收口：解析/匹配/数据面/回捞/回退/建议/observe 闭环/三案诊断；见
+`docs/ROW_ANCHOR_HINT_PLAN.md` §5 批 1 + CHANGELOG F82 批）｜ 来源：行锚 hint 方案（评审
+通过 v1.0）批 1 实施复审记录
+
+| # | 项 | 说明 | 关联 |
+|---|---|---|---|
+| 1 | `findByHint` 支持 `in-row:` | `plan check --probe` 的旧匹配器（身份形状 + `induceHint` 产物）未适配 in-row 尾缀——组合后缀的 `splitTailSuffixes` 剥离已继承（N6 唯一出处），行锚判定需接 `row_texts` 底座或如实声明不支持 | 方案批 2 |
+| 2 | apps check hint-lint in-row 语义提醒 | hint-lint（declaration-scan 消费面）经 parseHint 自动继承形状位；"in-row 写在非重复组元素上 = 恒落空"可做静态提醒（需要声明面重复组事实，先例：nearToken 提醒） | 方案批 2 |
+| 3 | 歧义证据反向提示"改用 in-row" | on_ambiguous 兜底命中的场景里，候选带同文案重复组事实时建议"改用 `<label> in-row:<token>`"——逐步挤出运气兜底；触发条件设计见方案 §8.7 | 方案批 2 |
+| 4 | 桥 ElementView 透传 row_texts | 引擎 observe 面已产 `row_texts`（dup 门控）；桥投影合同 `element-view.ts` 未列入该键（批 1 范围外，照抄入口走 hint_candidates 的 in-row 候选）——透传需把键加进 ElementView 白名单并定上限 | F54 合同 |
+| 5 | 词边界档位 / 多 token 组合（`in-row:a>b`） | row_texts 是已切分原子行、碰撞面小一个量级——有实测碰撞证据再议；`>` 词法已保留 | 方案批 3 / §8 |
+| 6 | NFKC 归一（全角 fail-closed 放行） | 两面新增归一层 = 纯漂移面（两轮架构评审仲裁否决）；等实站全角案例再议 | 方案 §8.8 |
+| 7 | OBSERVE_JS 大重复网格时延实测 | 100+ 同文按钮的 observe 爬升成本需 ctrip 实测一次；超标则 observe 侧爬升帽降 4 层（与 run 面 8 层不同帽需写入契约）或拆批 1b（同条目两步、不可跨迭代） | 方案 §8.10 / R9 |
+| 8 | deny-list 可配化 | SKU 恰似数字的误杀调优（连续数字 ≥5 位行过滤的误放面）——词元启发式的 deny-list 配置化 | 方案批 3 |
+| 9 | 批 2/批 3 主链 | findByHint / plan check --probe / apps check / 歧义反向提示 + probe `expect` 的 `"failed"` 类型联合收编（src/online/types.ts:86 联合未含，runtime runner.ts:213 以 as never 显式放行、validateCase 不查成员——批 1 仲裁随批 2 收编）（批 2）；induceHint 记忆产物带 in-row、criteriaView [near] 演进（批 3） | 方案 §5 |
+
+**示例（批 1 已收口的闭环）**：`订票 in-row:sc7960` 在 15 个同名订票按钮的列表页唯一命中
+SC7960 那一卡的按钮——token 来自 `inspect`/`ctx.observe` 的 `hint_candidates`（同一 hintMatch
+自证「恰好唯一命中」），row_texts 由 dup 门控采集（≤6 行 × ≤40 字符、连续数字 ≥5 位行救援
+纯数字订单号）；token 无匹配时 reason 列真实行词元 ≤8，撞多行走 `target_ambiguous` 零动作。
+
+---
+
 ## 实施顺序建议
 
 #3 依赖 #2 的候选契约；#1 独立可先行。建议顺序：**#1 → #2 → #3**；

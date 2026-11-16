@@ -17,12 +17,12 @@
  * 折叠）。现在"这串 hint 是什么形状"只在一个函数里回答；两面只回答"在这个底座上它命中谁"。
  */
 export type ParsedHint =
-  | { kind: "id"; value: string; within?: string[]; frameChain?: string[] }
-  | { kind: "attrSubstr"; tag: string; attr: string; value: string; within?: string[]; frameChain?: string[] }
-  | { kind: "nearToken"; tag: string; token: string; within?: string[]; frameChain?: string[] }
-  | { kind: "attrEq"; tag: string; attr: string; value: string; within?: string[]; frameChain?: string[] }
-  | { kind: "tag"; tag: string; within?: string[]; frameChain?: string[] }
-  | { kind: "bare"; token: string; within?: string[]; frameChain?: string[] };
+  | { kind: "id"; value: string; within?: string[]; frameChain?: string[]; inRow?: string }
+  | { kind: "attrSubstr"; tag: string; attr: string; value: string; within?: string[]; frameChain?: string[]; inRow?: string }
+  | { kind: "nearToken"; tag: string; token: string; within?: string[]; frameChain?: string[]; inRow?: string }
+  | { kind: "attrEq"; tag: string; attr: string; value: string; within?: string[]; frameChain?: string[]; inRow?: string }
+  | { kind: "tag"; tag: string; within?: string[]; frameChain?: string[]; inRow?: string }
+  | { kind: "bare"; token: string; within?: string[]; frameChain?: string[]; inRow?: string };
 
 /** DOM 属性名的规范形（`test`→`data-test`、`type`→`type`）；池侧用 `poolAttr` 映射回字段名。 */
 const DOM_ATTR: Record<string, string> = { test: "data-test", "data-test": "data-test", type: "type" };
@@ -34,7 +34,8 @@ export function poolAttr(attr: string): string {
 }
 
 /**
- * **唯一**的 hint 语法解析器（6 种形状 + `within:#id` / `frame:<origin链>` 尾缀 + 大小写折叠在这里发生一次）。
+ * **唯一**的 hint 语法解析器（6 种形状 + `within:#id` / `frame:<origin链>` / `in-row:<token>`
+ * 三类尾缀 + 大小写折叠在这里发生一次）。
  *
  * 规则（与冻结计划的写法一一对应）：
  *   `#id` ｜ `tag[attr~substr]`（含 `[near~token]`）｜ 无括号的 `tag~token`（近邻）｜
@@ -44,9 +45,11 @@ export function poolAttr(attr: string): string {
  * 每段 id charset；单层 = 长度 1 链，逐字节兼容）——把命中集限定在锚链子树内。
  * A 批：尾缀 `frame:<origin链>`（可选；`>` 分隔外→内、≤4 段、每段 `v === new URL(v).origin`
  * 的 http(s) 规范形；末段 = 元素所在帧自身 origin，声明链 = 帧完整链的后缀）。
+ * F82：尾缀 `in-row:<token>`（可选；行锚——命中集限定到"行上下文文本包含 token"的元素；
+ * token 非空/无空白/禁 `>`/≤40 字符；解析只管形状，匹配 = 各观察面的 row_texts 底座）。
  * 剥离发生在一切形状判定之前；锚只能是 `#id` 链形态（任意 CSS 锚拒绝）。
  *
- * **串尾词法预扫 + 循环剥离**（R2-5）：两类后缀各**至多一次**，只认「前置空白 + 串尾」；
+ * **串尾词法预扫 + 循环剥离**（R2-5）：三类后缀各**至多一次**，只认「前置空白 + 串尾」；
  * 任一类超限 / 值非法 / 空段 ⇒ **整组后缀都不应用**——按原始串回退（禁止半剥），
  * 原串按既有形状解析 → 大概率落空 = 显式失败，绝不静默取第一个。计数只数**串尾预扫**
  * 发现的后缀，不做全局子串计数（旧实现 `(h.match(/within:/g)).length` 会把值内的伪后缀
@@ -93,6 +96,30 @@ function parseFrameChainValue(raw: string): string[] | null {
 }
 
 /**
+ * F82（in-row 行锚，第三类尾缀）：`in-row:` 值被拒的**原因类别**（与 frameChainValueProblem
+ * 同位——解析面判合法、诊断面要原因类别）。token 闭集：非空、无空白（`\S+` 词法天然）、
+ * 禁 `>`（为未来链语法保留词法余量）、≤40 字符。空格进不了 `\S+` 词法（整组回退的另一路），
+ * 这里只判闭集约束本身。
+ */
+export type InRowValueProblem =
+  | { kind: "empty" }
+  | { kind: "too-long"; length: number }
+  | { kind: "has-gt" };
+
+export function inRowValueProblem(raw: string): InRowValueProblem | null {
+  if (raw === "") return { kind: "empty" };
+  if (raw.length > 40) return { kind: "too-long", length: raw.length };
+  if (raw.includes(">")) return { kind: "has-gt" };
+  return null;
+}
+
+/** `in-row:` 值解析：合法 = token（小写折叠在调用方做，与 within/frame 值同口径），非法 = null。 */
+function parseInRowValue(raw: string): string | null {
+  if (inRowValueProblem(raw) !== null) return null;
+  return raw;
+}
+
+/**
  * E2（within 语义链）：`within:` 尾缀值 = `#id` 链（`>` 分隔、**外→内**、≤4 段）。
  * 段归一：每段可带可选 `#` 前缀（首段由值形状要求 `#`；后续段 `#a>#b` 与 `#a>b` 两种
  * 写法都归一为 `["a","b"]`——同一链、同一语义，不做第二套形状）。
@@ -131,27 +158,36 @@ function parseWithinChainValue(raw: string): string[] | null {
 const FRAME_TAIL_VALUE_RE = /(?:\s+frame:)(\S*)\s*$/;
 /** 诊断面用：within 尾缀词法（与 splitTailSuffixes 内部同形；describe 在小写串上逐段剥离）。 */
 const WITHIN_TAIL_RE = /(?:\s+within:)(#[a-z0-9_\-.:#>]+)\s*$/;
+/** F82 诊断面用：in-row 尾缀词法（允许**空值**——空值 parseHint 同样回退旧形状，
+ *  `describeRowSuffixRejection` 要能点名"in-row: 后没有值"；与 FRAME_TAIL_VALUE_RE 同模式）。 */
+const INROW_TAIL_VALUE_RE = /(?:\s+in-row:)(\S*)\s*$/;
 
 /**
  * 串尾词法预扫 + 循环剥离（A 批 R2-5；C 批 B-1 起导出为**唯一剥离出处**，供 parseHint 与
  * `findByHint` 等旧匹配器共用——N6：防 hint 语法两处漂移）。在**原始大小写**串上做（正则 /i）；
- * 返回 base 保留原串大小写，`within`/frameChain 值小写规范化。
- * 两类后缀各 ≤1、只认「前置空白 + 串尾」；任一类超限/值非法/空段 ⇒ **整组回退**
- * （base = trim 后原串、无后缀字段，绝不半剥）——与 parseHint 逐字节同口径。
+ * 返回 base 保留原串大小写，`within`/frameChain/inRow 值小写规范化。
+ * F82 起为**三类**后缀（within / frame / in-row）各 ≤1、只认「前置空白 + 串尾」；任一类
+ * 超限/值非法/空段 ⇒ **整组回退**（base = trim 后原串、无后缀字段，绝不半剥）——与 parseHint
+ * 逐字节同口径。in-row 的 base 含未闭合 `[` 时同判非法（伪尾缀落在属性值里，不是语法后缀——
+ * frame/within 靠值校验天然拒绝，in-row 词法宽须经此守卫同口径）。
  */
-export function splitTailSuffixes(hint: string): { base: string; within?: string[]; frameChain?: string[] } {
+export function splitTailSuffixes(hint: string): { base: string; within?: string[]; frameChain?: string[]; inRow?: string } {
   const WITHIN_TAIL_RE = /(?:\s+within:)(#[a-z0-9_\-.:#>]+)\s*$/i;
   const FRAME_TAIL_RE = /(?:\s+frame:)(\S+)\s*$/i;
+  const INROW_TAIL_RE = /(?:\s+in-row:)(\S+)\s*$/i;
   let rest = hint.trim();
   let within: string[] | undefined;
   let frameChain: string[] | undefined;
+  let inRow: string | undefined;
   let withinSeen = 0;
   let frameSeen = 0;
+  let inRowSeen = 0;
   let rejected = false;
   for (;;) {
     const wm = WITHIN_TAIL_RE.exec(rest);
     const fm = wm === null ? FRAME_TAIL_RE.exec(rest) : null;
-    if (wm === null && fm === null) break;
+    const im = wm === null && fm === null ? INROW_TAIL_RE.exec(rest) : null;
+    if (wm === null && fm === null && im === null) break;
     if (wm !== null) {
       const base = rest.slice(0, wm.index).trim();
       if (base === "") { rejected = true; break; }
@@ -164,13 +200,25 @@ export function splitTailSuffixes(hint: string): { base: string; within?: string
       rest = base;
       continue;
     }
-    const base = rest.slice(0, fm!.index).trim();
+    if (fm !== null) {
+      const base = rest.slice(0, fm.index).trim();
+      if (base === "") { rejected = true; break; }
+      frameSeen += 1;
+      if (frameSeen > 1) { rejected = true; break; }
+      const chain = parseFrameChainValue(fm[1]!.toLowerCase());
+      if (chain === null) { rejected = true; break; }
+      frameChain = chain;
+      rest = base;
+      continue;
+    }
+    const base = rest.slice(0, im!.index).trim();
     if (base === "") { rejected = true; break; }
-    frameSeen += 1;
-    if (frameSeen > 1) { rejected = true; break; }
-    const chain = parseFrameChainValue(fm![1]!.toLowerCase());
-    if (chain === null) { rejected = true; break; }
-    frameChain = chain;
+    if (hasUnclosedBracket(base)) { rejected = true; break; }   // 值内伪尾缀（属性值里的 in-row:）
+    inRowSeen += 1;
+    if (inRowSeen > 1) { rejected = true; break; }
+    const token = parseInRowValue(im![1]!.toLowerCase());
+    if (token === null) { rejected = true; break; }
+    inRow = token;
     rest = base;
   }
   if (rejected) return { base: hint.trim() };   // 整组回退：绝不半剥
@@ -178,6 +226,7 @@ export function splitTailSuffixes(hint: string): { base: string; within?: string
     base: rest,
     ...(within !== undefined ? { within } : {}),
     ...(frameChain !== undefined ? { frameChain } : {}),
+    ...(inRow !== undefined ? { inRow } : {}),
   };
 }
 
@@ -187,10 +236,12 @@ export function parseHint(hint: string): ParsedHint {
   const rest = s.base;
   const within = s.within;
   const frameChain = s.frameChain;
+  const inRow = s.inRow;
   const withSuffix = <T extends ParsedHint>(p: T): T => {
     let q = p;
     if (within !== undefined) q = { ...q, within } as T;
     if (frameChain !== undefined) q = { ...q, frameChain } as T;
+    if (inRow !== undefined) q = { ...q, inRow } as T;
     return q;
   };
   if (rest.startsWith("#")) return withSuffix({ kind: "id", value: rest.slice(1) });
@@ -312,6 +363,102 @@ function frameRejectionText(problem: string): string {
   return `frame: 尾缀未被应用（${problem}）——整串按旧形状解析，目标大概率落空`
     + `（命令步 target_not_found / 会话 act 零命中）。修法：写成 \`<hint> frame:<http(s)://host[:port]>\`，`
     + `\`>\` 链 ≤4 段、每段用规范 origin（不带 path/query/显式默认端口），且一条 hint 只能有一个 frame: 尾缀`;
+}
+
+/**
+ * F82（in-row 行锚）：**串尾 ` in-row:<token>` 形状的尝试未被 parseHint 接受**时，给一行
+ * 可行动原因；没有尝试 / 已合法接受 = null。与 `describeFrameSuffixRejection` 同构（同一
+ * 消费面：executor 的 target_not_found reason + 会话 act reason——经 extraction 的
+ * rowHintFailureEvidence 单点接线）。
+ *
+ * 判定与 parseHint **同一条词法预扫**：in-row 值可为空串（空值 parseHint 按旧形状回退，
+ * 这里要能点名"in-row: 后没有值"）；值闭集校验（空/超 40/含 `>`）与 `inRowValueProblem`
+ * 共用同一判定。**只报 in-row 相关**：只重复 within/frame 的问题不归本函数，但"in-row: 合法
+ * 却因同串 within/frame 问题被整组回退"要报——那正是 in-row: 静默失效的一条。值内伪尾缀
+ * （base 含未闭合 `[`，如 `tag[attr=x in-row:o]`）不报——那是属性值，不是后缀尝试
+ * （与 frame 版同一条守卫；parseHint 侧同样按伪尾缀整组回退，见 splitTailSuffixes）。
+ */
+export function describeRowSuffixRejection(hint: string): string | null {
+  // 合法（含与 within/frame 组合）＝ parseHint 已接受，没有"被拒绝"可报。
+  if (parseHint(hint).inRow !== undefined) return null;
+  const h = hint.trim().toLowerCase();
+  // 整串 `in-row:<token>`、首词即 in-row:（无前导空白主体）——词法预扫只认「前置空白 + 串尾」，
+  // 这种串进不了下面的循环；显式补同一条措辞的诊断（不改 parseHint 的解析结果）。
+  // 守卫：带未闭合 `[` 时 in-row: 可能落在属性值内部——不把它当后缀尝试，防误报。
+  if (h.startsWith("in-row:") && !hasUnclosedBracket(h)) {
+    return rowRejectionText("尾缀前没有 hint 主体（必须写成 `<hint> in-row:<token>`）");
+  }
+  let rest = h;
+  let inRowSeen = 0;
+  let withinSeen = 0;
+  let frameSeen = 0;
+  let inRowProblem: string | null = null;
+  /** 同串 within/frame 侧被拒原因（导致整组回退——in-row: 合法也被连坐，必须点名）。 */
+  let otherProblem: string | null = null;
+  for (;;) {
+    const wm = WITHIN_TAIL_RE.exec(rest);
+    const fm = wm === null ? FRAME_TAIL_VALUE_RE.exec(rest) : null;
+    const im = wm === null && fm === null ? INROW_TAIL_VALUE_RE.exec(rest) : null;
+    if (wm === null && fm === null && im === null) break;
+    const base = rest.slice(0, (wm ?? fm ?? im)!.index).trim();
+    if (wm !== null) {
+      withinSeen += 1;
+      if (base === "" || withinSeen > 1) otherProblem = "within: 尾缀重复或缺少 hint 主体";
+      else {
+        const problem = withinChainValueProblem(wm[1]!);
+        if (problem !== null) otherProblem = `within: 尾缀值非法（${withinChainProblemText(problem)}）`;
+      }
+      if (base === "") break;
+      rest = base;
+      continue;
+    }
+    if (fm !== null) {
+      if (hasUnclosedBracket(base)) break;   // 值内伪尾缀：不误报
+      frameSeen += 1;
+      if (base === "") { otherProblem = "frame: 尾缀前没有 hint 主体"; break; }
+      if (frameSeen > 1) { otherProblem = "frame: 尾缀重复（至多一次）"; break; }
+      const problem = frameChainValueProblem(fm![1]!);
+      if (problem !== null) { otherProblem = `frame: 尾缀值非法（${frameChainProblemText(problem)}）`; break; }
+      rest = base;
+      continue;
+    }
+    if (hasUnclosedBracket(base)) break;   // 值内伪尾缀：不误报（与 parseHint 同口径整组回退，非后缀尝试）
+    inRowSeen += 1;
+    const raw = im![1]!;
+    if (base === "") {
+      inRowProblem = "尾缀前没有 hint 主体（必须写成 `<hint> in-row:<token>`）";
+      break;
+    }
+    if (inRowSeen > 1) {
+      inRowProblem = "同一串出现多个 in-row: 尾缀（至多一次；整组后缀都不应用）";
+      break;
+    }
+    const problem = inRowValueProblem(raw);
+    if (problem !== null) { inRowProblem = inRowProblemText(problem); break; }
+    rest = base;
+  }
+  if (inRowProblem !== null) return rowRejectionText(inRowProblem);
+  if (inRowSeen > 0 && otherProblem !== null) {
+    return `in-row: 尾缀未被应用（同一串的 ${otherProblem}——R2-5 整组回退：`
+      + "任一类后缀超限/非法则所有后缀都不应用）——修法：把该尾缀写合法后 in-row: 才会生效";
+  }
+  return null;
+}
+
+/** 单一措辞出处：in-row 尾缀为何未被应用 + 修法（无 inRowProblem 的路径不经过这里）。 */
+function rowRejectionText(problem: string): string {
+  return `in-row: 尾缀未被应用（${problem}）——整串按旧形状解析，目标大概率落空`
+    + `（命令步 target_not_found / 会话 act 零命中）。修法：写成 \`<hint> in-row:<token>\`，`
+    + `token 非空、无空白、禁 ">"、≤40 字符，且一条 hint 只能有一个 in-row: 尾缀`;
+}
+
+/** in-row 值问题的人话（有界：值的展示 ≤80 字符）。 */
+function inRowProblemText(p: InRowValueProblem): string {
+  switch (p.kind) {
+    case "empty": return "in-row: 后没有值";
+    case "too-long": return `token ${p.length} 字符超过上限 40`;
+    case "has-gt": return "token 含 \">\"（链语法保留字符；行锚 token 不允许）";
+  }
 }
 
 /** within 链值问题的人话（有界：段的展示 ≤80 字符）。 */

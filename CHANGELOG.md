@@ -4,6 +4,113 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 行锚 hint `in-row:<token>`（F82 批 1：解析/匹配/数据面/回捞/回退/建议/observe 闭环）
+
+### 背景
+
+列表/表格场景里，行的唯一可靠身份是**内容**（航班号、订单号、商品名），不是结构 id。
+现有两类关系锚全部押在结构身份上（`within:`=祖先 id、`frame:`=帧 origin），内容身份没有
+通路：携程机票列表 15 个"订票"按钮 class-only、无 id/data-test/aria-label、label 全同——
+六形状无法唯一解析、`within:` 空转（祖先链无行级 id）、`near` 采集错行（价格行挤占 3 行
+窗口且"跨池唯一"挑选让价格永远赢过身份行）、纯数字订单号行被行过滤剔除。`in-row:` 与
+`within:`/`frame:` 同构（尾缀限定是已验证可行且低风险的模式）。规格与评审记录：
+`docs/ROW_ANCHOR_HINT_PLAN.md`（v1.0，2026-11-16 架构/产品双子代理评审合成；本批 = §5 批 1，
+一次 PR 不可拆）。
+
+### 语法与解析（hint.ts）
+
+- 任意形状可后缀 ` in-row:<token>`：token 非空、无空白、禁 `>`（为未来链语法保留）、≤40
+  字符；解析期仅小写折叠（**NFKC 不进 parseHint**）。三类尾缀（within/frame/in-row）各至多
+  一次、任意书写次序；任一类超限/值非法 ⇒ **整组后缀都不应用**（按原始串回退，绝不半剥）；
+  属性值内伪尾缀（base 含未闭合 `[`）同拒。`ParsedHint` 六形状各加可选 `inRow` 字段；
+  `splitTailSuffixes` 仍是唯一剥离出处。诊断面 `inRowValueProblem`（empty/too-long/has-gt）+
+  `describeRowSuffixRejection`（与 frame 版同构，接 executor target_not_found reason 与会话
+  act reason）。
+
+### 匹配（rules.ts）
+
+- `limit = inRow(inAnchor(refs))` 组合过滤覆盖 inAnchor **全部 5 处调用点**（emit / attrSubstr
+  三分档 / tag-submit 偏好 / bare 五档）——漏任何一处 = 复刻"tag 绕过 within"类 bug；
+  限定后本档清空 = 落空，不让行锚内更弱档越级顶上（跨档混选防线不变）。
+- 匹配口径 = `row_texts` 任一行 `includes(token)` 单档（与 nearToken 同 includes parity），
+  归一**仅小写折叠**——两轮架构评审仲裁否决 NFKC（两面新增归一层 = 纯漂移面，作者从
+  hint_candidates 照抄真实行词元构造上必中；全角场景 fail-closed 显式落空）。
+- **fail-closed 对称**：元素无 `row_texts`（非重复组）⇔ in-row 恒不命中 ≙ frame 对未知
+  origin 帧不可命中——行锚只服务"同文案网格"，不制造新歧义。
+
+### 数据面（Elem.row_texts：双累加器 + 行过滤放宽）
+
+- `Elem.row_texts`：≤6 行 × 每行 ≤40 字符，**仅同文案重复组元素携带**（与 near 同触发）；
+  **不进模型面**（`modelProjectionOf` guard+解构两处同步剥离，B5 教训）、不进
+  esig/firstIfSame 签名；注释注明只服务匹配/回捞/建议。
+- `ROW_CLIMB_JS` 共享片段（仿 `${ANCHOR_JS}` 内插模式，唯一 JS 实现防两面漂移）：dup 键
+  函数（tag+NUL+label，与宿主 addNearContext 同口径）收进单一出处；NEAR_JS（EXTRACT 面）/
+  OBSERVE_JS（observe 面）/ HINT_HEAD（回捞面）/ DOM_FALLBACK_COLLECT_JS（A3 回退面）四
+  pass 内插同一份。
+- **NEAR_JS 双累加器**：`out`（near）累加序/行过滤/3 行窗口**逐字符不动**；`rows`
+  （row_texts）独立行过滤 = 现行过滤 **OR 连续数字 ≥5 位**（救援纯数字订单号 20240101；
+  时刻 "20:20"、短价格段维持剔除）、窗口 6 行；break 取**并集** `(out.length>=3 &&
+  rows.length>=6)` ⇒ 新爬升 ⊇ 旧爬升、out 前缀稳定 ⇒ `near = out.slice(0,3)` **逐字节相等**
+  （结构性证明 + 固定 DOM 语料对拍断言兜底）；near pick 消费面不动。
+
+### 回捞/回退对等（F-1 半链缺口闭合）
+
+- **HINT_HEAD in-row 门**（惰性 + memoized + 凑满 5 早退 + 总计算封顶 120，超标 fail-closed）：
+  先收集形状命中（不含 in-row 过滤），按 DOM 序逐候选算 row_texts，行词面命中才收集——只补
+  字段不进门的话 `slice(0,5)` 可能全被非命中占满，回捞整体死路；回捞行补 `row_texts`
+  （additive，与 anchor_ids 同形）。PASS_HINT_PROBE 经 `HINT_HEAD.replace(...)` 派生自动继承。
+- **A3 DOM fallback 行同批补 row_texts**（第二评审补漏项）：`arg.inRow` 声明时每行爬升补
+  字段——fallback 行并入主池后同样走二次 hintMatch 的 inRow 过滤，缺字段 = 重演 F-1 半链
+  缺口；in-row 未声明时零爬升、行形状逐字节不变。
+
+### 建议闭环（suggestHints 第 5 档）
+
+- within 链生长全落空后，从 `row_texts` 逐行取词元生成 `<label> in-row:<token>`——同一
+  push → hintMatch 自证（恰好唯一命中才保留），命中即停；`out.slice(0,4)` cap 不动（R-10
+  顺序纪律不变）。**词元启发式（生成期护栏）**：优先"类标识符"词元（字母+数字混合），跳过
+  纯价格/货币/百分比词元与时段词元——带 unstable 警告的候选是半成品承诺，宁可不产出交回人。
+  observe/inspect 的 hint_candidates 与歧义证据 suggested_hint 自动受益。
+
+### observe/inspect 面闭环（产品裁决：必须同批）
+
+- `OBSERVE_JS` dup 门控采集 row_texts（共享 ROW_CLIMB_JS 内插；**dup 判定只对"观察集合内
+  可见同文案计数"执行**并文档声明边界；**无 dup 页观察 JSON 逐字节不变**）；observe.ts
+  `syntheticElem` 透传 → suggestHints 在 observe 自证池自动闭环；`ObserveElement` 增可选
+  `row_texts`（引擎 observe 面；桥 ElementView 投影未列入该键——照抄入口是 hint_candidates
+  的 in-row 候选，见 BACKLOG 立项 #4）。
+- `whyNotAdmitted` 同批改写：追加指向 in-row 的可行动指引 + observe 面边界声明——旧文案
+  "add id/name/data-test" 在无 id 页面是主动误导（架构硬条件）。
+
+### 失败诊断三案（stopCode 不加新码）
+
+- ① token 在任何行词元中无匹配 → reason 列池面真实行词元 ≤8（镜像 frame: "页面实际可用
+  origin" 先例）；② 行已定位但行内无 `<base>` 命中 → 报"行已定位 + 行内词面"（作者改 base
+  不改 token）；③ token 撞多行 → `target_ambiguous` 零动作（永不选第一行）；④ 尾缀形状非法
+  → 整组回退显式落空 + describe 点名。三案 reason 可区分。
+
+### 文档与契约
+
+- `docs/APP_SCRIPT_AUTHORING.md`：§4 尾缀三并列、新 §4.12「列表/表格行：内容身份定位」
+  （工作示例/词元启发式/语义边界）、§10 in-row 三案口径、§11 已知边界。
+- `docs/AGENT_INTERFACE.md`：ElementView 表加 `row_texts` 行 + `hint_candidates` 形态说明
+  （in-row 候选）；`docs/README.md` 能力 bullet；`docs/RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md`
+  §2.2 注记（行身份类由 in-row 收口、D2 限缩为容器结构消歧）；`docs/BACKLOG.md` 立项条目
+  （批 2/3 + 桥透传 + 时延实测）。
+- schema F82 声明（statement/truth 对齐 F69/F70 行内风格；dist/schema/ctx.json 快照随
+  precheck 重生成）；grammar-prompt `HINT_ROW_SUFFIX` 示例 + import 时 parseHint 自证断言
+  （六形状 × in-row、双 in-row/含 >/空/>40/伪尾缀整组拒绝、三尾缀组合任意次序）。
+- online 用例声明：core 增「重复按钮网格 + `<label> in-row:<token>` 声明 hint + 结束态
+  不变量」（books.toscrape 同文案订票按钮网格）；probe 增「token 页面缺失 ⇒ target_not_found」
+  （fail-closed 正向证明）；probe/ctrip-flights 扩 in-row 用例。test:validate 过即入批；
+  真站执行属批后验证。
+
+### 显式缺口（批 1 不做，留档）
+
+- `identity.ts`/`declared.ts` 的 FW8 声明目标恢复路径白名单只认身份形状（#id / [attr=value]），
+  **不含 in-row 底座**——池外行锚恢复属 Phase 2 诉求，批 1 行为与今日逐字节一致；
+- `findByHint` / `plan check --probe` / apps check hint-lint / 歧义反向提示属批 2；
+  induceHint 记忆产物带 in-row 属批 3。
+
 ## [Unreleased] — 架构师裁决补丁批次二：会话面 tab op（F76/F77）+ 桥 idle_timeout_ms（F80）
 
 ### P3 会话面 tab op（F76 协议 + F77 桥）

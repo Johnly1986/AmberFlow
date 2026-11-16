@@ -14,7 +14,10 @@
  * hint_lookup's multi-word labels in the Python version.
  */
 
-import { describeFrameSuffixRejection, frameChainValueProblem, parseHint, type ParsedHint } from "./hint.ts";
+import {
+  describeFrameSuffixRejection, describeRowSuffixRejection, frameChainValueProblem,
+  parseHint, splitTailSuffixes, type ParsedHint,
+} from "./hint.ts";
 import { parseClickAtValue } from "./click-at.ts";
 import { sleepMs } from "../support/sleep.ts";
 // frame:<origin> 帧链 helper（A 批，唯一出处 frame-scope.ts）：extraction 只做打点/帧过滤，
@@ -79,6 +82,17 @@ export interface Elem {
   /** `contenteditable` 为真（语义上是"可填"，结构上不是 input/textarea）。 */
   content_editable?: boolean;
   near?: string;
+  /**
+   * F82（in-row 行锚）：行上下文文本（≤6 行、每行 ≤40 字符）——`in-row:<token>` 尾缀的池侧
+   * 匹配底座（rules.rowMatch 单档 includes，仅小写折叠）与 suggestHints 第 5 档的词元来源。
+   * **仅同文案重复组元素携带**（与 near 同触发：addNearContext / OBSERVE_JS dup 门控 /
+   * HINT_HEAD in-row 门 / A3 DOM fallback 行）——行锚只服务"同文案网格"这一它要解决的问题，
+   * 非重复组写 in-row = 恒落空（fail-closed 对称，R6）。**不进模型面**
+   * （`modelProjectionOf` guard+解构两处剥离，F14/T9 同纪律）；**不进 esig/firstIfSame 签名**；
+   * 只服务匹配/回捞/建议。与 near 的一句话分工：near = 模型视图单行（宿主挑选后的展示装饰），
+   * row_texts = in-row 匹配底座（自证候选的词元来源）。
+   */
+  row_texts?: string[];
   /**
    * U3 类目标记（native-control / native-label / aria-role / aria-widget / native-activation）。
    * **只进 PoolView / inspect / 类目计数**，不进 `ChoiceRequest.elems` 的模型投影（F14）。
@@ -989,6 +1003,12 @@ export interface ObserveRawRow {
   class_names?: string[];
   /** E3：祖先链 id（小写、≤8、最近祖先在前）；无 id 祖先时 JS 侧不返回该字段。 */
   anchor_ids?: string[];
+  /**
+   * F82：行上下文文本（≤6 行 × ≤40 字符）——OBSERVE_JS **dup 门控**采集（观察集合内可见
+   * 同文案计数 >1 才采集；无 dup 页不出字段 ⇒ 观察 JSON 逐字节不变）。syntheticElem 透传后
+   * observe 自证池与池行同构，suggestHints 第 5 档可给出 in-row 候选。不进模型面。
+   */
+  row_texts?: string[];
   visible?: boolean;
   bbox?: { x: number; y: number; w: number; h: number };
   in_surface?: boolean;
@@ -1485,6 +1505,11 @@ export function criteriaView(
  * grid-of-identical-buttons problem: laya measured a coin flip, 0.26 vs 0.25).
  * Count how many elements of THIS colliding label sit inside the container:
  * a card holds exactly one -> climb; the whole grid holds them all -> stop.
+ *
+ * F82 双累加器（ROW_ANCHOR_HINT_PLAN §3.4）：与 near 共享同一次爬升（PASS_NEAR →
+ * pool-js ROW_CLIMB_JS），两个累加器独立——`out`（near）累加序/行过滤/3 行窗口逐字符不动
+ * ⇒ near 逐字节相等；`rows`（row_texts）独立行过滤（现行过滤 OR 连续数字 ≥5 位）、窗口 6 行。
+ * row_texts **仅重复组携带**（本函数只碰 dup 元素）、不进模型面（modelProjectionOf 剥离）。
  */
 export async function addNearContext(page: PageLike, elems: ElemPool): Promise<void> {
   const cnt = new Map<string, number>();
@@ -1503,13 +1528,19 @@ export async function addNearContext(page: PageLike, elems: ElemPool): Promise<v
     byFrame.get(fi)!.push([r, i]);
   }
   const candsAll: Record<string, string[]> = {};
+  const rowTextsAll: Record<string, string[]> = {};
   for (const [fi, pairs] of byFrame) {
     const fr = frameAt(page, fi) ?? (page as unknown as FrameLike);
     try {
+      // F82：NEAR_JS 返回 {near, rows}——near 仍是 out 前 3 行切片（宿主 pick 消费面不动），
+      // rows 是独立行过滤的全量行上下文（row_texts 底座，≤6 行）。
       const res = (await fr.evaluate(PASS_NEAR,
-      { sel: INTERACTIVE_ALL, pairs, labels })) as string[][];
+      { sel: INTERACTIVE_ALL, pairs, labels })) as Array<{ near?: string[]; rows?: string[] }>;
       pairs.forEach(([r], j) => {
-        candsAll[r] = (j < (res?.length ?? 0) ? res[j] : []) as string[];
+        const got = j < (res?.length ?? 0) ? res[j] : undefined;
+        candsAll[r] = (Array.isArray(got?.near) ? got!.near! : []) as string[];
+        const rows = (Array.isArray(got?.rows) ? got!.rows! : []) as string[];
+        if (rows.length > 0) rowTextsAll[r] = rows;   // additive：空行集不出字段（anchor_ids 同形）
       });
     } catch {
       continue;
@@ -1519,6 +1550,9 @@ export async function addNearContext(page: PageLike, elems: ElemPool): Promise<v
     if (!lines.length) continue;
     const pick = lines.find((t) => Object.values(candsAll).filter((o) => o.includes(t)).length === 1) ?? lines[0];
     elems[r]!.near = pick!;
+  }
+  for (const [r, rows] of Object.entries(rowTextsAll)) {
+    elems[r]!.row_texts = rows;   // 仅重复组携带（near 同触发）；不进模型面/签名
   }
 }
 
@@ -1676,22 +1710,34 @@ export function allowedFrameOrigins(page: PageLike, hosts: string[] | null | und
 }
 
 /**
- * C 批（B8）：`target_not_found` 类 reason 末尾的 **frame: 尾缀诊断 + 页面可用 origin 证据**。
+ * C 批（B8）：`target_not_found` 类 reason 末尾的 **hint 尾缀失败证据**（frame: + in-row:）。
  *
  * 唯一追加面（命令步 / act_hint strict / 会话 act 都调它，避免多处文案漂移）：
  *   - 目标串里的 `frame:` 尾缀未被 parseHint 接受 → 点名原因（describeFrameSuffixRejection）；
+ *   - F82：目标串里的 `in-row:` 尾缀未被接受 → 点名原因（describeRowSuffixRejection）；声明了
+ *     合法 in-row 却整链落空时按 §3.9 三案口径给**可区分**证据——① token 在池面任何行词元中
+ *     无匹配 → 列池面真实行词元 ≤8（镜像 frame: "页面实际可用 origin" 先例）；② token 已定位
+ *     行但行内无 base 命中 → 报"行已定位 + 行内词面"（作者改 base 不改 token）；③ token 撞多行
+ *     走 target_ambiguous 歧义谓词（不进本函数）。三案 reason 可区分，stopCode 不加新码；
  *   - 目标串里有**合法**声明链却没命中 → 列出声明链（"合法但写错 origin"要看到页面实际有什么）；
  *   - 两者都出现/出现任一 → 附页面允许帧的 origin 列表（去重 ≤6、有界，主帧 origin 也列）。
- * 没有 frame: 参与（无尾缀、也无被拒尝试）= 返回空串 ⇒ 旧 reason 逐字节不变。
+ * 没有 frame:/in-row: 参与（无尾缀、也无被拒尝试）= 返回空串 ⇒ 旧 reason 逐字节不变。
+ *
+ * `elems`（F82 可选）：给定时启用 in-row 三案证据（当前池在手才能回答"token 在行词元里吗"）；
+ * 不传 = 纯 frame 行为逐字节不变。
  */
 export function frameHintFailureEvidence(
   page: PageLike, hosts: string[] | null | undefined, targets: readonly (string | null | undefined)[],
+  elems?: ElemPool,
 ): string {
   const rejections: string[] = [];
   const declared: string[] = [];
   // E2：within 归一为链（外→内 string[]，单层 = 长度 1）——证据文案按 `#a>#b` 链形渲染
   // （单层 join(">") = 单 id，逐字节等于旧文案）。
   let withinAnchor: string[] | undefined;
+  // F82：in-row 侧证据状态（被拒文案 / 第一个合法声明的 token）。
+  const rowRejections: string[] = [];
+  let declaredToken: string | undefined;
   for (const target of targets) {
     if (typeof target !== "string" || target.trim() === "") continue;
     const rejection = describeFrameSuffixRejection(target);
@@ -1706,10 +1752,56 @@ export function frameHintFailureEvidence(
       if (!declared.includes(text)) declared.push(text);
       if (parsed.within !== undefined && withinAnchor === undefined) withinAnchor = parsed.within;
     }
+    // F82：in-row 侧（同目标串）——被拒点名；合法声明记 token（只记第一个，证据有界）。
+    const rowRejection = describeRowSuffixRejection(target);
+    if (rowRejection !== null) {
+      if (!rowRejections.includes(rowRejection)) rowRejections.push(rowRejection);
+    } else if (parsed.inRow !== undefined && declaredToken === undefined) {
+      declaredToken = parsed.inRow;
+    }
   }
-  if (rejections.length === 0 && declared.length === 0) return "";
+  // 无尾缀参与 = 空串（旧 reason 逐字节不变）。F82：in-row 参与（被拒尝试或合法声明 +
+  // 池在手）也要给证据，故提前返回条件在旧条件上 additive。
+  if (rejections.length === 0 && declared.length === 0 && rowRejections.length === 0
+      && !(elems !== undefined && declaredToken !== undefined)) return "";
+  // F82：in-row 三案证据（纯内存；elems 未传 = 跳过，调用面行为逐字节不变）。
+  // 匹配口径与 rules.rowMatch 同一行 includes（extraction 不能 import rules——rules → extraction
+  // 既有依赖方向；一行口径改动须两处同步，勿另写第二套）。
+  let rowEvidence: string | null = null;
+  if (elems !== undefined && declaredToken !== undefined) {
+    const tok = declaredToken;
+    const hitRefs = Object.entries(elems)
+      .filter(([, e]) => Array.isArray(e.row_texts)
+        && (e.row_texts as string[]).some((line) => String(line).toLowerCase().includes(tok)))
+      .map(([r]) => r);
+    if (hitRefs.length === 0) {
+      // 案①：token 无匹配 → 列池面真实行词元 ≤8（去重、跳声明 token 本身，每词 ≤20 字符）。
+      const toks: string[] = [];
+      for (const e of Object.values(elems)) {
+        for (const line of Array.isArray(e.row_texts) ? e.row_texts : []) {
+          for (const w of String(line).toLowerCase().split(/\s+/)) {
+            if (w === "" || w === tok || w.length > 20 || toks.includes(w)) continue;
+            toks.push(w);
+          }
+          if (toks.length >= 8) break;
+        }
+        if (toks.length >= 8) break;
+      }
+      rowEvidence = `in-row:${JSON.stringify(tok)} 在池面任何行词元中无匹配（row_texts 只在同文案重复组元素上`
+        + `采集，非重复组恒落空）——池面真实行词元 ≤8: [${toks.join(", ") || "-"}]`;
+    } else {
+      // 案②：行已定位但行内无 base 命中 → 作者改 base 不改 token。
+      const withRow = targets.find((t) => typeof t === "string" && parseHint(t as string).inRow !== undefined) as string;
+      const base = splitTailSuffixes(withRow).base;
+      rowEvidence = `in-row:${JSON.stringify(tok)} 已定位 ${hitRefs.length} 个带该行词面的元素`
+        + `（${hitRefs.slice(0, 3).join(", ")}）但行内没有命中 base ${JSON.stringify(base)}——`
+        + `行已定位：改 base 不改 token`;
+    }
+  }
   const parts: string[] = [];
   if (rejections.length > 0) parts.push(rejections.slice(0, 2).join("；"));
+  if (rowRejections.length > 0) parts.push(rowRejections.slice(0, 2).join("；"));
+  if (rowEvidence !== null) parts.push(rowEvidence);
   if (declared.length > 0) {
     parts.push(`声明链 ${declared.slice(0, 2).map((c) => JSON.stringify(c)).join(" / ")} `
       + `在允许帧里没有命中（检查 origin 是否写错/该帧是否被 hosts 排除）`);
