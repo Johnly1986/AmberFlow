@@ -30,6 +30,27 @@ jobs:
       - name: Check
         run: npm run check
 
+  offline:
+    name: offline equivalence lane (non-gating; schedule/manual)
+    # 非门禁：只在 schedule / 手动 dispatch 跑，不进 PR 门禁。目的是让
+    # fixtures/engine 的确定性观测与 examples/split golden 在夜间有可重复证据；
+    # 失败代表浏览器夹具/观测漂移，不是 PR 阻塞项。
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install chromium
+        run: npx playwright install --with-deps chromium
+      - name: Verify offline equivalence (fixtures/engine; non-gating)
+        run: npm run verify:offline
+
   online:
     name: live online suite
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'

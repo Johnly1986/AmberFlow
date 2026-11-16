@@ -530,7 +530,9 @@ interface PromptSpec {
 | ④ | BACKLOG #2/#3/#4 顺序决策已定 | 三条均 open（#4 部分批收口）；无排序/拆窗决策记录 | ❌ 未满足（需项目方） |
 | ⑤ | 声明 freeze window | 未声明 | ❌ 未满足（需项目方） |
 
-> 结论：**P2 暂不启动**。方案保持 active；待 ①②③④⑤ 中 ①③④⑤ 外部输入满足后，按 §6 P2 批次执行（先 2.0 RunCtx+evidence collector，再 run() 九阶段，均以 0.8 运行时 lane 与 freeze window 为门）。
+> 结论：**P2 暂不启动**。方案保持 active；待 ①③④⑤ 外部输入满足后，按 §6 P2 批次执行（先 2.0 RunCtx+evidence collector，再 run() 九阶段，均以 0.8 运行时 lane 与 freeze window 为门）。
+> **决策请求包**：[P2_READINESS.md](P2_READINESS.md)（D1 发布/冻结、D2 INTERVENTION 收尾、D3 BACKLOG #2/#3/#4 顺序、D4 freeze window 参数；含推荐选项与回执表）。
+> 0.8 证据 lane 已接夜间 CI：`.github/workflows/checks.yml` 新增 `offline` job（schedule/manual，非门禁）。
 
 ### P2 主线（条件启动；3–5 周，12–20 人日）
 
