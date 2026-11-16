@@ -1,0 +1,51 @@
+{
+  "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
+  "id": "executor-middleware-pure",
+  "note": "executor-types 纯类型拆分：BrowserSession + MiddlewareOptions 逐字节搬到 executor-middleware-types.ts（executor-types 保 facade re-export）。",
+  "files": {
+    "src/engine/executor-middleware-types.ts": {
+      "symbols": {
+        "BrowserSession": "f3d502db180780ed9307b142f88392547bd7a464affead70527f8c5c43f34e6b",
+        "MiddlewareOptions": "c11f3a1abb57162c3c945ca86cbc03319045690bf598e4d7b6643c6f103e30e7"
+      }
+    },
+    "src/engine/executor-types.ts": {
+      "symbols": {
+        "ActionabilityDetail": "4965f482dc3a483c7da00b0cbd53a17edcca5a2a56c8ba209a47b6b3a8df3d62",
+        "AnyLoc": "a5d46f2889fb22d9c26bf38b60a91e1f5d407e250b8cc3f0d725064022800426",
+        "AnyPage": "20ce036be9da034c31a15ca40dad6ff1a36b5e29364174c70c26a90077a7e518",
+        "AuditVerdictLike": "09fe26e619b756e8a7a89ebfa79c5557e435dc5ef21c6cb421866ea86fb7379a",
+        "BrowserHandle": "955675862d4ab90e8a2400fd4ece90edd4750a0df139fc9e38b6572a57240be1",
+        "DEFAULT_DECISION_STATE": "8e88ac059bb9c72e69c35e59c7f93782c5e70d0367d86074118c28a13d22e60a",
+        "DecisionStateContext": "93c298f345eedc6a05cb623bc3b49c17863bddf5965324915f3229f95f805aee",
+        "DecisionStateGate": "7e4bebab496ad0426fac1f2d3ec9bcd7340387c6d453d412514a888582525289",
+        "DecisionStateMetrics": "17d2c1b0ae9d8a45e78ec9727f14a54dbb491f667b745ae5cf9b460286570da9",
+        "DecisionStatePolicy": "ebf059a5c4c446c3fd1a9bd5eb81c38dee1b36c81cfec75fbe9e4caf97eb9ca2",
+        "EscalationRequest": "79d822a7c884bf825e9747acc4de943e2e5104d513b3ff35e6e2b0123df20cfd",
+        "EscalatorLike": "546e23f529e7aac62ffbd104de2611fe5039f6b34cc68e8234bf5f72bea95373",
+        "ExecutedAction": "e4e85a988624eef8b3ef2bef9ebd8be57045170734c25ea790a6e84f6ab86f3f",
+        "HintMemoryLike": "d75afdab1d3b66a15a3ad04bcf7932f68d4bf96c9222f25a359f48d3f48f127c",
+        "OutcomeMemoryLike": "fd10c5ef78663218b3adf99791b35a04e25baa0ff05ba3c74558a07e5e4c6691",
+        "OverlayEvidenceRow": "b97f86e4503c4423b2755d5b49e934d86492262b335ee65fbc6906bc394444a8",
+        "PageSnapshot": "a18e76e93181ed8189a4e4f1f97de415cecf3bae577ca48f6928294eb59528dc",
+        "PickProposal": "a6c4addc6591a745176fb5f09ce3cb8c5a147ba509dbab3f897135c249353b51",
+        "PwLike": "4965f3bd07c4ca21d333f68305bbe22d05cff959f123da438d385a38421d9100",
+        "Readiness": "c172055df68720a48b855af1888071b1005b55851484a9cdede0d57ca30d794f",
+        "ReadinessVerdict": "bf1687c8c7c78b17326acd7adcc324c5eefdf7f3acb6ffd7709b5cc8c429efdd",
+        "ReadyState": "2a993d0085f681f72bd72eccdc8cd3dc3e87734dbfc5ace4d6d00a107441ccfd",
+        "RunOptions": "178e77e4b8db135f42d3cc338758e107526133aad1baf4bdd7ba74d801a9cb3e",
+        "RunReport": "f9f8bf8b2f0aed79c3e8b819a550145e424803514cd5c2186c56bffea3992f94",
+        "STATE_DIGEST_MAX_BYTES": "2b20a8c5dbfd446451d3b22a19341eb4c42b38dc6accd45eb011bdd58b91b77c",
+        "Sig": "431f45a524a00ab142e7c02b17ca27ca883489efd332633871f9fa9d41ae9198",
+        "SkippedAction": "fd484a102ed6e432a5c5f71c44cd54d277d418b102a8cad24c2c2c0037e00807",
+        "StateDigest": "c434aa3d055ccb04af708401a0b00d077ea8cd3ea5722c921012256580be2bd6",
+        "StateEffect": "718dd571b74a949e3a199db90cce2cdd098348099007247631940e455572f884",
+        "StateFingerprint": "ab626c7cf22505a5b3b24802f1b31168fc8dfe52a35682743edfc25521e09e64",
+        "StateFlag": "5c5e5345f30c2c732b30c096d925953e829c8e838b849c186aaff35cc7236cf0",
+        "StepStateRecord": "de4de130a630bbdd9b64eaa9c9e7059140ecd61ce2a5e259dca99b3ade39e499",
+        "StopCode": "2fb5a6eaeed92422c4dc02d2c64d49dcbd33208ca7ae8ba20df14f1850f95921",
+        "ThrottleSuspect": "dd9032a23f10b92543859bb6f67de08c757d22150e1462526cc862b326304f6a"
+      }
+    }
+  }
+}
