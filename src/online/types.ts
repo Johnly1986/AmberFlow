@@ -83,9 +83,22 @@ export interface OnlineCase {
   invariants?: OnlineInvariant[];
   oracle?: OnlineOracle;
   /** 只允许 probe 用例：这些结果不是失败，而是“本次线上环境观测到的事实”。 */
-  expect?: Array<"blocked" | "unreachable" | "login_required" | "captured">;
+  expect?: ProbeExpectMember[];
   tags?: string[];
 }
+
+/**
+ * probe `expect` 的观测值闭集（批 2 遗留收编 D 项：`"failed"` 入联合——fail-closed 正向证明
+ * 的 probe 用例（声明行锚落空 = 零动作 + 诚实落空）在规划面停因可落 `low_confidence`/`failed`
+ * （ROW_INDEX_HINT_PLAN §3.9 可达面矩阵；runner.probeOutcome 的运行时比较本就以 as never
+ * 放行任意观测值，本联合收编让类型面与运行时一致）。加载期成员校验在 case.ts（非法成员
+ * config_error，与 F61 信号形态纪律一致）。
+ */
+export type ProbeExpectMember = "blocked" | "unreachable" | "login_required" | "captured" | "failed";
+
+/** probe `expect` 的成员闭集（case.ts 加载期校验的唯一出处引用）。 */
+export const PROBE_EXPECT_MEMBERS: readonly ProbeExpectMember[] =
+  ["blocked", "unreachable", "login_required", "captured", "failed"];
 
 export interface OnlineBundle {
   sites: Map<string, OnlineSite>;

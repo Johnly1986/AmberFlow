@@ -100,6 +100,38 @@ R2-5 整组回退纪律），是第四类尾缀。规格与评审记录：`docs/
 - FW8 白名单不含 row-index 底座；findByHint / plan check --probe / apps check hint-lint /
   桥 ElementView 透传 / 规划面三案接线属后续项（BACKLOG #9）；词边界档位不做。
 
+### 批 2 遗留收编（同批后续项，一次 PR）
+
+- **findByHint 行锚适配**：`start.findByHint`（plan check --probe / amber start --target 的
+  旧匹配器）支持 `in-row:`/`row-index:` 尾缀——`splitTailSuffixes` 剥离本就自动继承（N6 唯一
+  出处），补行锚判定底座：in-row = `rules.rowMatch` 同口径（row_texts 任一行 includes、仅小写
+  折叠）、row-index = `row_index` 整数全等；四类尾缀组合 = 独立 AND。**底座消费面核实**：两个
+  消费面（plan-cli.probePlan / amber start）的池都经 `extractElements` ⇒ `addNearContext`
+  已采集行文本/编号——不是硬造底座。probe 面落空证据同步传 elems（案①报组大小 K + 行词元；
+  无行锚参与 = 输出逐字节不变）。
+- **apps check hint-lint 行锚提醒**：`hint-lint.ts` 新增独立 stderr 通道 `rowAnchorFindings`
+  （同 frame 通道纪律——不进 problems、不改 VALID/exit）：`rejected` = 值必被解析拒绝
+  （describeRow/RowIndexSuffixRejection 点名）；`dupOnly` = 值合法但行锚只服务同文案重复网格
+  ——声明扫描面拿不到重复组事实，提醒降级为静态文案（不假装验证）：目标元素须带
+  row_texts/row_index（inspect/observe 面在场 = 重复组成员），非重复组恒落空。
+- **歧义证据反向提示"改用行锚"**：`AmbiguityCandidate` 增 additive `row_index`（同文案重复组
+  事实，重复组成员才出现）；`suggested_hint` 已复用 `suggestHints` 第 5/6 档纪律（内容候选
+  优先、row-index 仅内容不可分时给——不发明第二套生成逻辑）；候选行 row_index 让 Agent 在
+  suggested_hint 缺位（跨网格歧义自证不唯一）时仍能手写 `row-index:N in-row:<token>` 组合
+  守卫。零页面 I/O（纯池读）；桥白名单边界沿批 1 先例（未列入前桥面不出现）。
+- **probe expect "failed" 类型联合收编**：`types.ts` 新 `ProbeExpectMember`（blocked /
+  unreachable / login_required / captured / **failed**）；`validateCase` 成员校验口径定案
+  （非法观测值加载期 config_error——与 F61 信号形态纪律一致；现网两批 probe 用例成员都在
+  闭集内，收紧零回归）；`runner.probeOutcome` 的 `as never` 放行简化为文档化窄断言。
+- **规划面诊断三案接线（§8 遗留 #8 收口，additive GO）**：调查结论 = 规划链四个停因点
+  （`low_confidence` / `no_model_runtime` / `hint_matched_nothing` / `action_space_exhausted`）
+  **池在手（elems）+ curHint 可达** ⇒ 干净接线成立：停因点复用 `frameHintFailureEvidence`
+  单点（不另立函数）追加行锚证据——**stopCode 不变**（规划面语义不变）、无行锚声明 =
+  reason 逐字节不变、零新增页面 I/O（allowedFrameOrigins 是 host 侧帧 URL 读）。批 1 probe
+  实测的 `low_confidence` 停因从此自诊断（案①报组大小 K + 行词元）。
+
+### 显式缺口（批 2 不做，留档）
+
 ## [Unreleased] — 行锚 hint `in-row:<token>`（F82 批 1：解析/匹配/数据面/回捞/回退/建议/observe 闭环）
 
 ### 背景

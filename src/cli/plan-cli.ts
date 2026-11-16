@@ -222,7 +222,10 @@ export async function probePlan(file: string, io: CliIO = defaultIO): Promise<bo
           const found = findByHint(elems, sg.target_hint);
           // C 批（B8/B9）：`findByHint` 现在先 parseHint+链过滤；未命中时把 frame: 尾缀被拒的
           // 原因与页面实际可用 origin 一起点名（无 frame: 参与 = 空串，旧输出逐字节不变）。
-          const frameNote = found ? "" : frameHintFailureEvidence(session.page as never, null, [sg.target_hint]);
+          // F82/F83 批 2 遗留收编：probe 面池在手（extractElements ⇒ addNearContext 已编号/
+          // 采集行文本）——传 elems 启用行锚证据（案①报组大小 K + 行词元；无行锚参与 = 仍空串）。
+          const frameNote = found ? ""
+            : frameHintFailureEvidence(session.page as never, null, [sg.target_hint], elems);
           io.out(`${head}\n      target_hint ${JSON.stringify(sg.target_hint)}：${found
             ? "在实况元素池命中 ✓"
             : "未命中 ✗（inspect --url 复核 hint；动态页注意水合时机）"}${frameNote ? `\n      ${frameNote}` : ""}`);

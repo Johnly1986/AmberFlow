@@ -18,8 +18,17 @@
  * 值必被解析拒绝 / origin 不在 `meta.hosts`（拿不到 hosts 时只做值形状检查）。它沿用本文件的
  * 通道纪律：只产 stderr 人话行、不进 problems、不改 VALID/exit；三类形状的判定与计数口径
  * （`findings`/`scanned`）不受影响。
+ *
+ * F82/F83 批 2 遗留收编：行锚尾缀（`in-row:` / `row-index:`）的**独立提醒通道**
+ * （`rowAnchorFindings`，同一批 hint 形状位、同一通道纪律——stderr 人话行、不进 problems、
+ * 不改 VALID/exit）：
+ *   - `rejected`：值必被解析拒绝（`describeRowSuffixRejection` / `describeRowIndexSuffixRejection`
+ *     点名）——运行期整组回退，**必不命中**；
+ *   - `dupOnly`：值合法但**行锚只服务同文案重复网格**——声明扫描面拿不到重复组事实（静态
+ *     字符串位），提醒降级为静态文案（不假装验证）：目标元素必须带 `row_texts`/`row_index`
+ *     （inspect/observe 面该字段在场 = 重复组成员），非重复组元素恒落空（fail-closed）。
  */
-import { describeFrameSuffixRejection, parseHint } from "../engine/hint.ts";
+import { describeFrameSuffixRejection, describeRowIndexSuffixRejection, describeRowSuffixRejection, parseHint } from "../engine/hint.ts";
 import { urlInHostsEnvelope } from "../engine/host-envelope.ts";
 import { poolFieldFor } from "../engine/rules.ts";
 import { type DeclarationScan, type DeclSite } from "./declaration-scan.ts";
@@ -52,6 +61,26 @@ export interface HintFrameLintFinding {
   locations: Array<{ file: string; line: number }>;
 }
 
+/**
+ * F82/F83 批 2 遗留收编：行锚尾缀的**独立**静态提醒通道（同 frame 通道纪律——stderr 人话行、
+ * 不进 problems/VALID/exit）。
+ *   - `rejected`：值不是 parseHint 接受的形状（空值/含 `>`/超限/重复/缺主体…）——运行期
+ *     整组回退，**必不命中**；
+ *   - `dupOnly`：值合法但行锚只服务同文案重复网格——声明扫描面拿不到重复组事实（静态
+ *     字符串位），提醒降级为静态文案（不假装验证）：目标元素无 `row_texts`/`row_index`
+ *     （inspect/observe 面缺该字段）= 恒落空（fail-closed）；row-index 另带序漂移责任声明。
+ */
+export type HintRowAnchorLintKind = "rejected" | "dupOnly";
+
+export interface HintRowAnchorLintFinding {
+  kind: HintRowAnchorLintKind;
+  /** 触发提醒的 hint 原文（去重键）。 */
+  hint: string;
+  /** 为什么（可行动：值形状 / 重复组归属）。 */
+  reason: string;
+  locations: Array<{ file: string; line: number }>;
+}
+
 export interface HintLintOptions {
   /** 应用 `meta.hosts`（拿不到 = undefined/null ⇒ 只做值形状检查，不报 host 提醒）。 */
   hosts?: readonly string[] | null;
@@ -63,6 +92,8 @@ export interface HintLintResult {
   scanned: number;
   /** C 批：frame: 尾缀提醒（独立 stderr 通道；不参与上面的 findings/scanned 口径）。 */
   frameFindings: HintFrameLintFinding[];
+  /** F82/F83 批 2 遗留收编：行锚尾缀提醒（独立 stderr 通道；不参与 findings/scanned 口径）。 */
+  rowAnchorFindings: HintRowAnchorLintFinding[];
 }
 
 /** 一个调用点的哪个实参位是 hint 语义字符串（唯一出处：ctx 的参数签名）。 */
@@ -93,18 +124,32 @@ const KIND_LABEL: Record<HintLintKind, string> = {
   labelSubstr: "attrSubstr-on-label",
 };
 
+/** 行锚静态提醒的单一文案出处（dupOnly；声明面拿不到重复组事实 = 不假装验证）。 */
+const ROW_ANCHOR_DUP_ONLY_NOTE = "行锚（in-row/row-index）只服务同文案重复网格：目标元素必须带 "
+  + "row_texts/row_index（inspect/observe 面该字段在场 = 重复组成员），非重复组元素恒落空"
+  + "（fail-closed）——请确认目标在同文案重复网格内（inspect 复核），否则改用 id/data-test/"
+  + "唯一 label；row-index 另见序漂移责任（作者指南 §4.13：单用 = 序号即语义，作者显式承担；"
+  + "组合 in-row 守卫把序漂移变成显式落空）";
+
 /** 扫描声明收集结果，产出三类 hint 形状的静态提醒（纯函数，不打印）。 */
 export function lintHintSemantics(
   scan: DeclarationScan, file: string, opts: HintLintOptions = {},
 ): HintLintResult {
   const findings = new Map<string, HintLintFinding>();
   const frameFindings = new Map<string, HintFrameLintFinding>();
+  const rowAnchorFindings = new Map<string, HintRowAnchorLintFinding>();
   let scanned = 0;
   const addFrameFinding = (kind: HintFrameLintKind, hint: string, reason: string, line: number): void => {
     const key = `${kind}\u0000${hint}`;
     const f = frameFindings.get(key) ?? { kind, hint, reason, locations: [] };
     f.locations.push({ file, line });
     frameFindings.set(key, f);
+  };
+  const addRowAnchorFinding = (kind: HintRowAnchorLintKind, hint: string, reason: string, line: number): void => {
+    const key = `${kind}\u0000${hint}`;
+    const f = rowAnchorFindings.get(key) ?? { kind, hint, reason, locations: [] };
+    f.locations.push({ file, line });
+    rowAnchorFindings.set(key, f);
   };
   for (const site of scan.sites) {
     for (const idx of hintArgsOf(site)) {
@@ -127,6 +172,16 @@ export function lintHintSemantics(
             + `（先把它加进 meta.hosts；主 frame 恒允许）`, site.line);
         }
       }
+      // F82/F83 批 2 遗留收编：行锚尾缀提醒（独立通道；三类形状判定不受影响）。
+      //   rejected：值必被解析拒绝（describeRow/RowIndexSuffixRejection 点名）；
+      //   dupOnly：值合法但行锚只服务同文案重复网格（静态文案，不假装验证）。
+      const rowAnchorRejection = describeRowSuffixRejection(arg.value)
+        ?? describeRowIndexSuffixRejection(arg.value);
+      if (rowAnchorRejection !== null) {
+        addRowAnchorFinding("rejected", arg.value, rowAnchorRejection, site.line);
+      } else if (parsed.inRow !== undefined || parsed.rowIndex !== undefined) {
+        addRowAnchorFinding("dupOnly", arg.value, ROW_ANCHOR_DUP_ONLY_NOTE, site.line);
+      }
       let kind: HintLintKind | null = null;
       if (parsed.kind === "bare") kind = "bare";
       else if (parsed.kind === "nearToken") kind = "nearToken";
@@ -139,7 +194,12 @@ export function lintHintSemantics(
       findings.set(key, f);
     }
   }
-  return { findings: [...findings.values()], scanned, frameFindings: [...frameFindings.values()] };
+  return {
+    findings: [...findings.values()],
+    scanned,
+    frameFindings: [...frameFindings.values()],
+    rowAnchorFindings: [...rowAnchorFindings.values()],
+  };
 }
 
 /** 渲染 stderr 行（weak_done 风格；每类一行、位置列前 3 个，其余计数带过）。 */
@@ -178,6 +238,19 @@ export function renderHintLintLines(result: HintLintResult): string[] {
   }
   if (result.frameFindings.length > 3) {
     lines.push(`hintLint: frame: 尾缀另有 ${result.frameFindings.length - 3} 处提醒（只列前 3；`
+      + "仅静态提醒，不影响 VALID/exit）");
+  }
+  // F82/F83 批 2 遗留收编：行锚尾缀提醒（独立 stderr 行；clean 应用零输出，三类 lint 的
+  // 判定/计数不变）。
+  for (const f of result.rowAnchorFindings.slice(0, 3)) {
+    const locs = f.locations.slice(0, 3).map((l) => `${l.file}:${l.line}`).join("、");
+    const rest = f.locations.length > 3 ? `（另 ${f.locations.length - 3} 处略）` : "";
+    const label = f.kind === "rejected" ? "行锚尾缀必被解析拒绝" : "行锚只服务同文案重复网格";
+    lines.push(`hintLint: ${label} — ${locs}${rest} ${JSON.stringify(f.hint)} —— ${f.reason}`
+      + "（仅静态提醒，不影响 VALID/exit）");
+  }
+  if (result.rowAnchorFindings.length > 3) {
+    lines.push(`hintLint: 行锚尾缀另有 ${result.rowAnchorFindings.length - 3} 处提醒（只列前 3；`
       + "仅静态提醒，不影响 VALID/exit）");
   }
   return lines;

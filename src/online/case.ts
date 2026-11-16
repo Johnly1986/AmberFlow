@@ -9,6 +9,7 @@ import path from "node:path";
 import { REPO } from "../support/paths.ts";
 import { validateSignalSpec } from "../engine/signals.ts";
 import { isSecretKey } from "../support/config-schema.ts";
+import { PROBE_EXPECT_MEMBERS, type ProbeExpectMember } from "./types.ts";
 import type {
   OnlineBundle, OnlineCase, OnlineOracle, OnlineSite, OnlineSubgoal, OnlineTier,
 } from "./types.ts";
@@ -244,6 +245,16 @@ export function validateCase(c: OnlineCase, sites: Map<string, OnlineSite>, wher
   if (c.expect !== undefined) {
     if (c.tier !== "probe") p.push(`${where}: expect 只允许在 probe 用例`);
     if (!Array.isArray(c.expect) || c.expect.length === 0) p.push(`${where}: expect 必须是非空列表`);
+    // 批 2 遗留收编（D 项）：成员校验口径定案——非法观测值加载期 config_error（与 F61 信号
+    // 形态纪律一致；runtime probeOutcome 的比较本就按成员闭集放行，类型联合收编后此处收紧
+    // 不会让既有合法用例变红：现网两批 probe 用例的成员都在闭集内）。
+    if (Array.isArray(c.expect)) {
+      for (const [i, m] of c.expect.entries()) {
+        if (!(PROBE_EXPECT_MEMBERS as readonly string[]).includes(String(m))) {
+          p.push(`${where}.expect[${i}]: 未知观测值 ${JSON.stringify(m)}（允许: ${PROBE_EXPECT_MEMBERS.join(", ")}）`);
+        }
+      }
+    }
   }
   if (c.tier !== "probe") {
     if (!subgoals.length && !c.start_url) p.push(`${where}: 非 probe 用例至少要有 subgoals 或 start_url`);

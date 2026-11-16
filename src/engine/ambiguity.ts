@@ -13,8 +13,10 @@
  * 纪律：
  *   - **零页面 I/O**：只读传入的池对象，不抽池、不定位、不动作、不猜；
  *   - 证据有界：候选 ≤5 行（`candidates_total` 记总集、`truncated` 标截断），label/class/near
- *     ≤40、ref/tag/role ≤16、suggested_hint ≤200（B 批：可容 4 段 `frame:` 链）、target
- *     ≤120 字符；候选另有 additive `frame_origin`（≤120；引擎有 `Elem.frame_origin` 才出现）；
+ *     ≤40、ref/tag/role ≤16、suggested_hint ≤200（B 批：可容 4 段 `frame:` 链；F83 起
+ *     suggestHints 第 5/6 档纪律自动适用——内容候选优先、row-index 仅内容不可分）、target
+ *     ≤120 字符；候选另有 additive `frame_origin`（≤120；引擎有 `Elem.frame_origin` 才出现）
+ *     与 `row_index`（F83 批 2 遗留收编：同文案重复组事实，重复组成员才出现）；
  *   - `near` 只**复制** `elem.near`（不重算、不格式化）；`suggested_hint` 调既有
  *     `suggestHints(elem, elems)[0]`——它内部已用同一个 `hintMatch` 自证「恰好唯一命中」，
  *     为空（没有可自证的形状）时**省略该键**，绝不发明；
@@ -105,6 +107,14 @@ export interface AmbiguityCandidate {
   frame_origin?: string;
   /** 该候选的归一 label 在**本次池内**出现 >1 次（label 本身不足以区分）。 */
   same_label: boolean;
+  /**
+   * F83 批 2 遗留收编（additive）：候选行的同文案重复组事实——`row_index` 在场 = 重复组成员
+   * 且值为网格内 DOM 先序位次。`suggested_hint` 已复用 `suggestHints` 第 5/6 档纪律（内容
+   * 候选优先，row-index 仅内容不可分时给——不发明第二套生成逻辑）；本字段让 Agent 在
+   * suggested_hint 缺位（跨网格歧义自证不唯一）时仍能**手写** `<label> row-index:N in-row:
+   * <token>` 组合守卫。零页面 I/O（纯池读）；缺字段 = 非重复组/合成池。
+   */
+  row_index?: number;
   /** 既有 `suggestHints` 自证唯一的第一条（池面才有；自证不唯一就省略；≤200）。 */
   suggested_hint?: string;
 }
@@ -190,6 +200,8 @@ function candidateView(
     frame: Number.isFinite(Number(e.frame)) ? Number(e.frame) : 0,
     ...(frameOrigin === undefined ? {} : { frame_origin: frameOrigin }),
     same_label: norm !== "" && (labelCounts.get(norm) ?? 0) > 1,
+    // F83 批 2 遗留收编（additive）：同文案重复组事实（重复组成员才携带；合成池无编号）。
+    ...(typeof e.row_index === "number" ? { row_index: e.row_index } : {}),
     ...(hint === undefined || hint === "" ? {} : { suggested_hint: clip(hint, AMBIGUITY_HINT_MAX) }),
   };
 }

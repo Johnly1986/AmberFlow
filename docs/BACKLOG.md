@@ -208,7 +208,7 @@ executor.ts 头部注释区、类型区、纯函数区、报告尾（`runReportT
 | 6 | NFKC 归一（全角 fail-closed 放行） | 两面新增归一层 = 纯漂移面（两轮架构评审仲裁否决）；等实站全角案例再议 | 方案 §8.8 |
 | 7 | OBSERVE_JS 大重复网格时延实测 | 100+ 同文按钮的 observe 爬升成本需 ctrip 实测一次；超标则 observe 侧爬升帽降 4 层（与 run 面 8 层不同帽需写入契约）或拆批 1b（同条目两步、不可跨迭代） | 方案 §8.10 / R9 |
 | 8 | deny-list 可配化 | SKU 恰似数字的误杀调优（连续数字 ≥5 位行过滤的误放面）——词元启发式的 deny-list 配置化 | 方案批 3 |
-| 9 | 批 2/批 3 主链 | **row-index 顺序行锚（批 2 首项）——已实施**（`docs/ROW_INDEX_HINT_PLAN.md` v1.0 契约 c2ee024；工作区评审中，提交号待 lead）；findByHint / plan check --probe / apps check / 歧义反向提示 + probe `expect` 的 `"failed"` 类型联合收编（src/online/types.ts:86 联合未含，runtime runner.ts:213 以 as never 显式放行、validateCase 不查成员——批 1 仲裁随批 2 收编）+ 规划面诊断三案接线（ROW_INDEX_HINT_PLAN §8 遗留 #8，随批 2 后续评估）+ 桥 ElementView 透传 row_index/row_texts（#4）（批 2 后续）；induceHint 记忆产物带 in-row/row-index、criteriaView [near] 演进（批 3） | 方案 §5 |
+| 9 | 批 2/批 3 主链 | **row-index 顺序行锚（批 2 首项）——已实施**（`docs/ROW_INDEX_HINT_PLAN.md` v1.0 契约 c2ee024；a38e674）；**批 2 遗留收编（本批）——findByHint 行锚适配（start.findByHint 四类尾缀过滤 + plan probe 面传 elems）/ apps check hint-lint 行锚提醒（rejected+dupOnly 通道）/ 歧义证据 row_index 事实（反向提示复用 suggestHints 第 5/6 档，不发明第二套生成逻辑）/ probe expect "failed" 类型联合收编（types.ts ProbeExpectMember + case.ts 成员校验 + runner 去 as never）/ 规划面诊断三案 additive 接线（§8 遗留 #8 收口——四个停因点池在手 + curHint 可达，stopCode 不变、reason 附证据）**；桥 ElementView 透传 row_index/row_texts（#4，合同变更另立）；induceHint 记忆产物带 in-row/row-index、criteriaView [near] 演进（批 3） | 方案 §5 |
 
 **示例（批 1 已收口的闭环）**：`订票 in-row:sc7960` 在 15 个同名订票按钮的列表页唯一命中
 SC7960 那一卡的按钮——token 来自 `inspect`/`ctx.observe` 的 `hint_candidates`（同一 hintMatch

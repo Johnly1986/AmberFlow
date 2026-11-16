@@ -55,7 +55,7 @@ import { PlanningRules, TaskPlan } from "../engine/plan.ts";
 export const DEFAULT_PLAN_PATH = defaultPlanPath();
 import type { SignalSpec } from "../engine/signals.ts";
 import { runPlan } from "../engine/planner.ts";
-import { affordanceRule, anchorChainMatch } from "../engine/rules.ts";
+import { affordanceRule, anchorChainMatch, rowMatch } from "../engine/rules.ts";
 import { captureStateView, induceSignals } from "../flow/signal-induction.ts";
 
 export interface Io {
@@ -189,19 +189,30 @@ export function findByHint(elems: ElemPool, hint: string): { ref: string; el: El
   // Object.entries 过滤（正确性优先）；全滤掉 = 空池 → 显式 null（不静默放宽）。
   // base 口径（必修点）：**任一后缀存在**即用 s.base——旧实现 `frameChain === undefined
   // ? hint : s.base` 在"无 frame 但有 within"时保留整串（含 within 尾缀），attr 正则与
-  // induceHint 精确串匹配全落空。无后缀（两者都 undefined）= base 就是**原串 hint 逐字节**
+  // induceHint 精确串匹配全落空。无后缀（全部 undefined）= base 就是**原串 hint 逐字节**
   // ——s.base 是 trim 后的形状，induceHint 精确串比较依赖原样大小写/空白，不能替代。
   // 非法 within 值 = 整组回退（splitTailSuffixes 只返回 base，无 within/frameChain 字段）
   // ⇒ 走原串 = 尾缀留在 base 里 = 既有旧形状集显式落空（与 frame 批 C 同口径）。
+  // F82/F83 批 2 遗留收编：行锚尾缀 `in-row:<token>` / `row-index:N` 参与本面——in-row =
+  // row_texts 任一行 includes（rules.rowMatch 同口径，仅小写折叠）、row-index = row_index
+  // 整数全等。底座在两个消费面都真实在场：plan check --probe（plan-cli.probePlan）与
+  // amber start 都走 extractElements ⇒ addNearContext 已采集行文本/编号（dup 组成员）。
+  // fail-closed 对称：无 row_texts/row_index 的行（非重复组）恒不匹配；四类尾缀组合 =
+  // 独立 AND（集合可交换）；尾缀存在即用剥离后 base（旧形状集显式落空，绝不半剥）。
   const s = splitTailSuffixes(hint);
   const frameChain = s.frameChain;
   const within = s.within;
-  const scoped = frameChain !== undefined || within !== undefined;
+  const inRow = s.inRow;
+  const rowIndex = s.rowIndex;
+  const scoped = frameChain !== undefined || within !== undefined
+    || inRow !== undefined || rowIndex !== undefined;
   const pool: ElemPool = !scoped
     ? elems
     : Object.fromEntries(Object.entries(elems).filter(([, el]) =>
         (frameChain === undefined || frameScopeMatches(frameChain, el))
-        && (within === undefined || anchorChainMatch(el.anchor_ids ?? [], within))));
+        && (within === undefined || anchorChainMatch(el.anchor_ids ?? [], within))
+        && (inRow === undefined || rowMatch(el, inRow))
+        && (rowIndex === undefined || el.row_index === rowIndex)));
   const base = scoped ? s.base : hint;
   const m = /^\[?(data-test|id|name)=(.+?)\]?$/.exec(base);
   const fold = (s: string): string => s.toLowerCase();

@@ -24,7 +24,7 @@ import { createRun, writeCaseEvidence, writeSummary } from "./report.ts";
 // 「最小步间距」（start-to-start ≥ gap）语义，与规划脸共用同一时钟实现。
 import { envPace, newPaceClock, paceBeforeUnit, type PaceClock } from "../support/pace.ts";
 import type {
-  CaseOutcome, OnlineCase, OnlineSite, SuiteOutcome,
+  CaseOutcome, CaseStatus, OnlineCase, OnlineSite, SuiteOutcome,
 } from "./types.ts";
 
 export interface RunOptions {
@@ -208,9 +208,14 @@ async function runOneCase(
 function probeOutcome(c: OnlineCase, base: CaseOutcome): CaseOutcome {
   // 探针的“结果”是环境观测，不是产品通过/失败；预期集合内记 skipped，集合外也记 skipped
   // 但 reason 点明“未在预期集合内”，并让套件退出码 3，避免把跳过伪装成绿。
+  // 批 2 遗留收编（D 项）：`"failed"` 已入 ProbeExpectMember 联合（fail-closed 正向证明的
+  // probe 用例口径）——as never 放行简化为类型安全比较（observed 非 passed 时 ∈
+  // "failed"|"blocked"|"unreachable"|"login_required"，全部是联合成员）。
   const expected = c.expect ?? [];
   const observed = base.status;
-  const inExpected = observed === "passed" ? expected.includes("captured") : expected.includes(observed as never);
+  const inExpected = observed === "passed"
+    ? expected.includes("captured")
+    : expected.includes(observed as Exclude<CaseStatus, "passed" | "skipped">);
   return {
     ...base,
     status: "skipped",

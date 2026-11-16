@@ -916,8 +916,10 @@ ctx.hint("add to basket row-index:3 in-row:america");
 - **诊断四案**（stopCode 不加新码）：① 越界（N > K）→ reason 报网格组大小 K + 真实行词元；
   ② 序号已定位但行内无 base/守卫不符 → 核对 token 或改 base；③ 组合后仍多候选 →
   `target_ambiguous` 零动作；④ 尾缀形状非法（0/负数/非数字/重复）→ 整组回退 + 点名
-  "row-index 从 1 开始"。**三案证据保证面 = app flow 命令空间/`act_hint:"strict"`/会话 act；
-  规划面（plan/probe）不保证**（停因可落 `low_confidence`，批 1 probe 实测留档）。
+  "row-index 从 1 开始"。**三案证据可达面（批 2 遗留收编后）= app flow 命令空间/
+  `act_hint:"strict"` / 会话 act / 规划面**——规划面四个停因点（`low_confidence` 等）已在
+  停因点 additive 接入（stopCode 不变，reason 附证据；批 1 实测的 `low_confidence` 停因
+  从此自诊断）。
 - **已知边界**：编号底座 = 本面收集到的成员（池窗口截断/观察 max/虚拟列表会让 K 小于页面
   真实组大小——单用形态的错点面由组合守卫与 done 纪律缓解）；FW8 白名单不含 row-index
   底座；`findByHint`（plan check --probe）未适配 row-index；跨帧同名网格各自编号（跨帧
@@ -1229,9 +1231,14 @@ hint 落空时，`target_not_found` reason 末尾按现场给出其一（尾缀�
 4. **尾缀形状非法**（0 / 负数 / 非数字 / 超 9 位 / 双 row-index / 空值 / 伪尾缀）→ 整组
    回退显式落空 + reason 点名（`0`/负数文案点名"row-index 从 1 开始"）。
 
-**可达面边界（批 1 probe 实测留档）**：三案证据**保证面** = app flow 命令空间 /
-`act_hint:"strict"` / 会话 act；**规划面（plan/probe 子目标）不保证**——声明行锚落空在
-规划链可停 `low_confidence`（词面诊断），不产三案 reason；规划面接线属后续项。
+**可达面边界（批 1 probe 实测留档；批 2 遗留收编后更新）**：三案证据的接线点覆盖 **app flow
+命令空间 / `act_hint:"strict"` / 会话 act / 规划面（plan/probe）**——批 1 probe 实测暴露规划面
+停于 `low_confidence`（非三案 reason）后，批 2 遗留收编已在规划面四个停因点（`low_confidence` /
+`no_model_runtime` / `hint_matched_nothing` / `action_space_exhausted`，池在手 + curHint 可达）
+additive 接入同一证据面（`frameHintFailureEvidence` 单点复用）：**stopCode 不变**（规划面语义
+不变），reason 在声明行锚落空时附三案证据；无行锚声明 = reason 逐字节不变。`findByHint`
+（`plan check --probe` / `amber start --target` 的旧匹配器）已适配行锚（in-row = rowMatch 同
+口径、row-index = 整数全等；两消费面池都经 addNearContext 编号/采集）。
 
 **信号形状报错自带合法形态（C3）**：`validateSignalSpec` 的 arity 不匹配（以及 `all_of`/`any_of`/`not` 的形状错）现在把**合法形态**写进 problem —— 叶算子的操作数**按位置放数组** `{op: [arg…]}`（对象形 `{selector, text}` 不是合法形状），组合算子 `all_of`/`any_of` 收非空数组、`not` 收单个对象。提示的唯一出处是 `src/engine/signals.ts` 的 `SIGNAL_SHAPE_HINT` / `signalProblemText`：`apps check` / `plan check` / `test --validate` 的加载期 problems 直接继承；`amber plan-cli … --signal` 走 cli 版（`--signal` 示例串与改动前逐字一致），`amber session` 的 `signal`/`waitFor` 失败 reason 走 json 版（`problems` 数组原样）。合法信号的校验结果与产物逐字节不变。
 
@@ -1297,7 +1304,8 @@ hint 落空时，`target_not_found` reason 末尾按现场给出其一（尾缀�
   整网格；错误命中面被歧义门与自证兜住，见 §4.12）；观察面 dup 判定只对"观察集合内可见同文案
   计数"执行（max 截断边界），虚拟列表 `row_texts` 与池窗口同界（先滚动/分块取证）；回捞 in-row
   门有总计算封顶 120（超标 fail-closed = 显式落空，不猜）；FW8 身份回捞白名单不含 in-row 底座、
-  `findByHint`（`plan check --probe`）未适配 in-row（批 2）；词边界档位不做（row_texts 是已切分
+  `findByHint`（`plan check --probe`）**已适配** in-row（批 2 遗留收编：rowMatch 同口径过滤，
+  两消费面池经 addNearContext 采集）；词边界档位不做（row_texts 是已切分
   原子行，有实测碰撞证据再议）。
 - **`row-index:` 顺序行锚的已知边界（F83）**：`row_index` 只在同文案重复组元素上编号（帧内
   (tag+label) 子组 DOM 先序 1..K；非重复组写 row-index 恒落空）；**`row-index:N ≠ 页面第 N
@@ -1305,7 +1313,8 @@ hint 落空时，`target_not_found` reason 末尾按现场给出其一（尾缀�
   （单用形态作者显式承担——组合守卫与 done 断言纪律把静默错点降级为显式落空，见 §4.13）；
   编号底座 = 本面收集到的成员（池窗口截断/观察 max 让 K 小于页面真实组大小——案①如实报
   本面 K）；跨帧同名网格各自编号、firstIfSame 同签名合并沿 D2 既有口径；FW8 白名单不含
-  row-index 底座、`findByHint` 未适配；三案证据规划面不保证（可达面矩阵见 §10）。
+  row-index 底座；`findByHint`（plan check --probe）**已适配** row-index（整数全等）；三案
+  证据已覆盖规划面（批 2 遗留收编——stopCode 不变、reason additive）。
 
 ## 12. 扩展配方（改引擎的人看）
 

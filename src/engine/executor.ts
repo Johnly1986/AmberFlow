@@ -3862,6 +3862,18 @@ export class BrowserMiddleware {
           : ` — identity recovery: ${JSON.stringify(identityHidden.target)} matched `
             + `${identityHidden.total} element(s) in the DOM but ${identityHidden.hidden} are hidden `
             + `(checkVisibility CSS / zero box); hidden elements are never acted on`;
+        // F82/F83 批 2 遗留收编（E 项，ROW_INDEX_HINT_PLAN §8 遗留 #8 的 additive 接线）：
+        // 规划面停因（low_confidence / no_model_runtime / hint_matched_nothing /
+        // action_space_exhausted）的停因点**池在手（elems）+ curHint 可达** ⇒ 单点复用
+        // frameHintFailureEvidence（与命令空间/strict/会话 act 同一证据面，不另立函数）。
+        // 无行锚声明 = 空串（reason 逐字节不变）；stopCode 不变（规划面语义不变——只是
+        // reason 自诊断，probe 的 fail-closed 观测口径不变）。零新增页面 I/O
+        // （allowedFrameOrigins 是 host 侧帧 URL 读；证据本体纯内存）。
+        const rowAnchorNote = (hint: string | null): string => {
+          if (hint === null) return "";
+          const note = frameHintFailureEvidence(pg, this._frameHosts, [hint], elems);
+          return note ? ` — ${note}` : "";
+        };
 
         // P0-C DRF 声明目标解析（declared target resolution，meta.policy.target_resolution:
         // "declared" 才启用）：只服务**这一步作者声明的目标**（命令 target / act hint）——
@@ -4752,13 +4764,17 @@ export class BrowserMiddleware {
                   ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
                   : "")
               // A3：provider 是抛错降级（而非本来就没装）时，把 HTTP 事实带上——排查不必再猜。
-              + this.degradedReasonSuffix() + identityHiddenSuffix(), stepNo);
+              + this.degradedReasonSuffix() + identityHiddenSuffix()
+              // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
+              + rowAnchorNote(curHint), stepNo);
           } else {
             stop("action_space_exhausted",
               `action space exhausted on step ${stepNo}`
               + (curHint !== null && ruleRef === null
                   ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
-                  : "") + identityHiddenSuffix(), stepNo);
+                  : "") + identityHiddenSuffix()
+              // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
+              + rowAnchorNote(curHint), stepNo);
           }
           if (verbose && this.rulesOnly) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
@@ -4778,7 +4794,9 @@ export class BrowserMiddleware {
               `target_hint ${JSON.stringify(curHint)} matched nothing in a pool of ${poolSize} `
               + `element(s) on step ${stepNo}`
               // F73：DRF 计数事实（实跑且零命中才非空；缺省 declared 关 = 恒空串，逐字节不变）。
-              + declaredHiddenSuffix() + declaredMissSuffix(), stepNo);
+              + declaredHiddenSuffix() + declaredMissSuffix()
+              // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
+              + rowAnchorNote(curHint), stepNo);
           } else {
             stop("step_names_no_target",
               `step ${stepNo} names no target: no target_hint(s), no rule matched any of the `
@@ -4948,7 +4966,10 @@ export class BrowserMiddleware {
                   + `；用 ctx.observe() 在会话内看准入面与 why_not_admitted`
                   // A2 判别②：分数不过闸门 ≠ 目标不存在——用内存里的池把两种问题分开说
                   // （候选在而置信度低 = 闸门问题；池里没有词面相关候选 = 目标可能不在本页面）。
-                  + lowConfDiscrimination(instruction, elems, ref), stepNo);
+                  + lowConfDiscrimination(instruction, elems, ref)
+                  // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串，
+                  // reason 逐字节不变）。
+                  + rowAnchorNote(curHint), stepNo);
                 break;
               }
             }
