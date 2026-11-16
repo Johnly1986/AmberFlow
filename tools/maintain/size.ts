@@ -47,7 +47,7 @@ export interface SizeBaseline extends SizeLimits {
 export type Severity = "fail" | "warn";
 
 export interface Problem {
-  group: "size" | "docs" | "mainline";
+  group: "size" | "docs" | "mainline" | "comments";
   severity: Severity;
   message: string;
 }

@@ -6,7 +6,7 @@
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17，P0 进行中）**：0.1a（maintain 门禁：size/docs/mainline + 负向自测）、0.2（配置文档真值/三向门禁）、0.4（模型 prompt 25→11 单源 + prompt-hit model 组）、0.5（6 处文档断点纠真）、0.6/0.9（`docs/MAINLINE.md` + seam 冻结表 + mainline 断言）、0.7（决策面判空 trim 单源 + 掩码契约单源，含一条声明式 bugfix）已落地；0.3（注释低风险清理）、0.8（等价证据 lane）进行中。
+> **实施进度（2026-11-17，P0 进行中）**：0.1a（maintain 门禁：size/docs/mainline + 负向自测）、0.2（配置文档真值/三向门禁）、0.4（模型 prompt 25→11 单源 + prompt-hit model 组）、0.5（6 处文档断点纠真）、0.3（注释低风险清理 + 注释规约 + comments 门禁）、0.6/0.9（`docs/MAINLINE.md` + seam 冻结表 + mainline 断言）、0.7（决策面判空 trim 单源 + 掩码契约单源，含一条声明式 bugfix）已落地；0.8（等价证据 lane）进行中。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -272,7 +272,8 @@ S5 唯一循环   BrowserMiddleware.run（不变，不重写）+ buildMiddleware
 | 维度 | 指标 | 基线 | P1 | P2 | 性质 |
 |---|---|---|---|---|---|
 | 语义 | **同一语义实现份数**（§2 的 7 组同构 + 8 组重复路径） | 仍多份 | 主要同构收口（0.7 + W1-a） | ≤3（其余为契约实现/适配器） | **主指标** |
-| 注释 | 禁止类：日期戳/行号锚点/幽灵引用/方案台账 token | 46/3/23/597 | 0/0/0/0（B 类仅在 CHANGELOG Decisions） | 0 | fail |
+| 注释 | 硬失败：幽灵引用/行号锚点/裸 TODO | 23/3/0 | 0/0/0（P0 comments 组已启用） | 0 | fail |
+| 注释 | ratchet：日期戳/方案台账 token/历史措辞 | 46/597/236 | 只减不增（B4/P1 迁移后转 0） | 0 | warn→fail（P1） |
 | 注释 | 注释占比 | 22.2% | report（只减不增） | report | report |
 | 配置 | 出处漂移 | 9 | 0 | 0 | fail |
 | 配置 | 白名单外裸读 env | 33 处/10 文件（须先列全例外） | 0 | 0 | fail |
@@ -470,7 +471,7 @@ interface PromptSpec {
 | **0.8（新增）** | 等价证据 lane：examples-check canonical golden（normalize 临时路径/时间戳）+ `tools/split-check.ts`（搬迁符号源码 hash）+ inspect 归一化子集 + `verify:offline` fixtures lane 骨架（非门禁） | `tools/`、`fixtures/` | 0.8 lane 可在 CI 跑；纯搬移 hash 一致；fixtures 二选一已决 |
 | **0.9（新增）** | seam/符号归属冻结表：`buildMiddleware` 签名、`execStep` 落点、DecisionProvider 契约位置、Ctx 行为矩阵归属、`RunOutcome` 包络、文件预留（INTERVENTION） | `docs/MAINLINE.md` | 表评审通过；W1-b 只能搬表内稳定区 |
 
-**P0 出口**：§3.4 的 fail 项（注释禁止类、配置漂移、prompt 重复、新文件上限、doc breakpoints）达标；0.8/0.9 产物存在且被 W1-b 引用；T1/T2 无触发；总投入 ≤14 人日。未达标 → 启动 MVG fallback。
+**P0 出口**：§3.4 的 fail 项（注释硬失败类、配置漂移、prompt 重复、新文件上限、doc breakpoints）达标；0.8/0.9 产物存在且被 W1-b 引用；T1/T2 无触发；总投入 ≤14 人日。未达标 → 启动 MVG fallback。
 
 ### P1 收口（3–5 周，12–18 人日；低 churn 优先）
 

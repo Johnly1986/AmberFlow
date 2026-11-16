@@ -154,5 +154,13 @@
   "mainline": {
     "mwConstructions": 6,
     "runEntryCalls": 12
+  },
+  "comments": {
+    "dateStamps": 34,
+    "planTokens": 416,
+    "historyWording": 67,
+    "lineAnchors": 0,
+    "ghostRefs": 0,
+    "todo": 0
   }
 }

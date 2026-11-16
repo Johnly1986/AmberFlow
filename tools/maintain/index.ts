@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { collectSize, evaluateSize, mergeBaselineForUpdate, type Problem, type SizeBaseline } from "./size.ts";
 import { collectDocs, evaluateDocs, type DocsBaseline, type DocsSnapshot } from "./docs.ts";
 import { collectMainline, evaluateMainline, type MainlineBaseline, type MainlineSnapshot } from "./mainline.ts";
+import { collectComments, counts as commentCounts, evaluateComments, type CommentLine, type CommentsBaseline, type CommentsSnapshot } from "./comments.ts";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const BASELINE_PATH = path.join(REPO, "tools", "maintain", "baseline.json");
@@ -32,6 +33,7 @@ interface Baseline {
   size: SizeBaseline;
   docs: DocsBaseline;
   mainline: MainlineBaseline;
+  comments: CommentsBaseline;
 }
 
 function readBaseline(): Baseline {
@@ -48,7 +50,7 @@ function report(problems: Problem[], json: boolean): number {
     for (const p of fails) console.error(`[${p.group}] FAIL ${p.message}`);
     for (const p of warns) console.error(`[${p.group}] WARN ${p.message}`);
     if (fails.length === 0) {
-      console.log(`maintain: OK — size/docs/mainline 三组通过（warn ${warns.length}）`);
+      console.log(`maintain: OK — size/docs/mainline/comments 四组通过（warn ${warns.length}）`);
     } else {
       console.error(`maintain: FAIL — ${fails.length} 个问题（warn ${warns.length}）；基线文件 ${path.relative(REPO, BASELINE_PATH)}`);
     }
@@ -63,6 +65,7 @@ function check(json: boolean): number {
   problems.push(...evaluateSize(files, functions, baseline.size, baseline.size));
   problems.push(...evaluateDocs(collectDocs(REPO), baseline.docs));
   problems.push(...evaluateMainline(collectMainline(REPO), baseline.mainline));
+  problems.push(...evaluateComments(collectComments(REPO), baseline.comments));
   return report(problems, json);
 }
 
@@ -83,6 +86,7 @@ function update(): number {
     size: next,
     docs: previous.docs,
     mainline: previous.mainline,
+    comments: previous.comments,
   };
   fs.writeFileSync(BASELINE_PATH, `${JSON.stringify(out, null, 2)}\n`);
   console.log(`maintain --update: 已写入 ${path.relative(REPO, BASELINE_PATH)}（files ${Object.keys(next.files).length} / functions ${next.functions.length}）`);
@@ -192,7 +196,19 @@ function selfTest(): number {
   failures.push();
   const mainlineFailures = failures.filter((f) => f.startsWith("mainline"));
   if (mainlineFailures.length > 0) failures.length = failures.length; // keep all
-  console.log("maintain --self-test: OK — 负向断言 15 条（size 4 / docs 5 / mainline 4 / 正例 2）全部符合预期");
+
+  // comments：正例 + 4 条负向（日期 ratchet / 行号锚点 / 幽灵引用 / 裸 TODO）
+  const commentsBaseline: CommentsBaseline = { dateStamps: 0, planTokens: 0, historyWording: 0, lineAnchors: 0, ghostRefs: 0, todo: 0 };
+  const commentLine = (text: string): CommentLine => ({ file: "src/x.ts", line: 1, text });
+  const commentsOk: CommentsSnapshot = { lines: [commentLine("契约：完成只认信号（唯一出处 checkSignal）。")] };
+  const commentsPositive = evaluateComments(commentsOk, commentsBaseline);
+  if (commentsPositive.length > 0) failures.push(`comments 正例被误报：${commentsPositive.map((p) => p.message).join("; ")}`);
+  expectProblem("comments 行号锚点", evaluateComments({ lines: [commentLine("见 executor.ts:1234 的说明。")] }, commentsBaseline), /行号锚点/);
+  expectProblem("comments 幽灵引用", evaluateComments({ lines: [commentLine("等价由 历史回归 钉住。")] }, commentsBaseline), /失效引用/);
+  expectProblem("comments 裸 TODO", evaluateComments({ lines: [commentLine("TODO 以后再说。")] }, commentsBaseline), /TODO/);
+  const commentsDateBaseline: CommentsBaseline = { ...commentsBaseline, dateStamps: 1 };
+  expectProblem("comments 日期 ratchet", evaluateComments({ lines: [commentLine("实测（2026-10-29）结论。"), commentLine("另一处（2026-11-01）。")] }, commentsDateBaseline), /日期戳/);
+  console.log("maintain --self-test: OK — 负向断言 19 条（size 4 / docs 5 / mainline 4 / comments 4 / 正例 2）全部符合预期");
   return 0;
 }
 
@@ -212,7 +228,8 @@ if (has("--report")) {
   const { files, functions } = collectSize(REPO);
   const overFiles = files.filter((f) => f.lines > baseline.size.newFileMaxLines);
   const overFns = functions.filter((f) => f.lines > baseline.size.newFunctionMaxLines);
-  console.log(`maintain report: 文件 ${files.length}；>${baseline.size.newFileMaxLines} 行 ${overFiles.length}（基线 ${Object.keys(baseline.size.files).length}）；>${baseline.size.newFunctionMaxLines} 行函数 ${overFns.length}（基线 ${baseline.size.functions.length}）`);
+  const cc = commentCounts(collectComments(REPO));
+  console.log(`maintain report: 文件 ${files.length}；>${baseline.size.newFileMaxLines} 行 ${overFiles.length}（基线 ${Object.keys(baseline.size.files).length}）；>${baseline.size.newFunctionMaxLines} 行函数 ${overFns.length}（基线 ${baseline.size.functions.length}）；注释：日期 ${cc.dateStamps}/基线 ${baseline.comments.dateStamps}、批次 token ${cc.planTokens}/${baseline.comments.planTokens}、历史措辞 ${cc.historyWording}/${baseline.comments.historyWording}、行号 ${cc.lineAnchors}、幽灵 ${cc.ghostRefs}、TODO ${cc.todo}`);
   process.exit(0);
 }
 process.exit(check(has("--json")));
