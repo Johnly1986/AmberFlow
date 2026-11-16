@@ -56,3 +56,12 @@ export function pickRow<T extends Record<string, unknown>>(rows: T[], by: string
   }
   return best;
 }
+/**
+ * `ctx.data.min` / `ctx.data.max` 的**闭包单源**：三面（真跑/dry/replay）只引用这两个函数，
+ * 语义仍是唯一实现 `pickRow`。调用点不再各写一遍 `(rows, by) => pickRow(rows, by, "...")`。
+ */
+export const pickRowMin = <T extends Record<string, unknown>>(rows: T[], by: string): T | null =>
+  pickRow(rows, by, "min");
+
+export const pickRowMax = <T extends Record<string, unknown>>(rows: T[], by: string): T | null =>
+  pickRow(rows, by, "max");

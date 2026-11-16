@@ -22,8 +22,8 @@
  *   - 本模块不认识"模型"：不调用 provider，回捞元素不会进入 `ChoiceRequest.elems` 的
  *     模型投影（调用方在 pickInner 剥离 `declared` 旁路标记）。
  */
-import { frameInHostsEnvelope, framesOf, type Elem, type ElemPool, type PageLike } from "./extraction.ts";
-import { elemFrameStamp, frameScopeMatchesFrame } from "./frame-scope.ts";
+import { framesOf, type Elem, type ElemPool, type PageLike } from "./extraction.ts";
+import { elemFrameStamp, frameGateExcludes, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
 import { anchorChainMatch, hintCandidates, type HintMatchOptions } from "./rules.ts";
 import { ANCHOR_JS, compile } from "./pool-js.ts";
@@ -291,7 +291,7 @@ export async function declaredLookup(
   const collected: Array<{ fi: number; row: RawRow }> = [];
   for (let fi = 0; fi < frames.length; fi++) {
     // P0-D：DRF 只在 host 信封内的 frame 上解析（排除帧不参与声明目标解析）。
-    if (fi > 0 && !frameInHostsEnvelope(frames[fi]!, hosts)) continue;
+    if (frameGateExcludes(fi, frames[fi]!, hosts)) continue;
     // A 批：声明链不匹配的帧不参与 DRF（frame:<origin> 声明的帧之外绝不动作）。
     if (frameChain !== undefined && !frameScopeMatchesFrame(frameChain, frames[fi]!)) continue;
     let raw: unknown;

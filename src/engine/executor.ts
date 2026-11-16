@@ -77,7 +77,6 @@ import {
   frameAt,
   frameGateOf,
   frameHintFailureEvidence,
-  frameInHostsEnvelope,
   framesOf,
   framesScopedPage,
   hintLookup,
@@ -98,7 +97,7 @@ import {
   type FrameLike,
   type PageLike,
 } from "./extraction.ts";
-import { elemFrameStamp, frameScopeMatchesFrame } from "./frame-scope.ts";
+import { elemFrameStamp, frameGateExcludes, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { ANCHOR_JS, ROW_CLIMB_JS, compile } from "./pool-js.ts";
 import { declaredLookup, formatDeclaredCandidates, type DeclaredCandidate } from "./declared.ts";
 import { describeAmbiguity, orderCandidatesByDomPreorder, type AmbiguityView, type AmbiguousOrdering } from "./ambiguity.ts";
@@ -2478,7 +2477,7 @@ export class BrowserMiddleware {
     const probeAttr = `data-af-probe="${token}-id"`;
     for (let fi = 0; fi < frames.length; fi++) {
       const fr = frames[fi]!;
-      if (fi > 0 && !frameInHostsEnvelope(fr, this._frameHosts)) continue;
+      if (frameGateExcludes(fi, fr, this._frameHosts)) continue;
       if (frameChain !== undefined && !frameScopeMatchesFrame(frameChain, fr)) continue;
       try {
         // E1（within 权威对等）：一次 evaluate 返回 anchors + TS 判定（inline TS arrow →

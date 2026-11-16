@@ -33,7 +33,7 @@ import {
   type SourceObservationView, type StepRequest, type StepResult,
 } from "./ctx.ts";
 import type { TraceCall } from "./trace.ts";
-import { pickRow } from "./ctx-tool.ts";
+import { pickRowMin, pickRowMax } from "./ctx-tool.ts";
 
 export interface DryCtxDeps {
   pack: {
@@ -513,8 +513,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       return obs;
     },
     data: {
-      min: (rows, by) => pickRow(rows, by, "min"),
-      max: (rows, by) => pickRow(rows, by, "max"),
+      min: pickRowMin,
+      max: pickRowMax,
     },
     rows: async () => {
       throw new StopError("config_error", "ctx.rows is closed in v1 (Q5: no new extraction grammar); "

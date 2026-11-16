@@ -22,8 +22,8 @@ import { parseClickAtValue } from "./click-at.ts";
 import { sleepMs } from "../support/sleep.ts"; import { POOL_CAP_ELEMENTS, STATE_TEXT_BUDGET_CHARS, WIDE_SCAN_POOL_ELEMENTS } from "../support/tuning.ts";
 // frame:<origin> 帧链 helper（A 批，唯一出处 frame-scope.ts）：extraction 只做打点/帧过滤，
 // 判定与 frameOriginOf 的实现都在 frame-scope（这里 re-export 保持既有导出面不变）。
-import { elemFrameStamp, frameChainOf, frameOriginOf, frameScopeMatchesFrame } from "./frame-scope.ts";
-export { elemFrameStamp, frameChainOf, frameScopeMatches, frameScopeMatchesFrame, frameOriginOf } from "./frame-scope.ts";
+import { elemFrameStamp, frameChainOf, frameGateExcludes, frameInHostsEnvelope, frameOriginOf, frameScopeMatchesFrame } from "./frame-scope.ts";
+export { elemFrameStamp, frameChainOf, frameInHostsEnvelope, frameScopeMatches, frameScopeMatchesFrame, frameOriginOf } from "./frame-scope.ts";
 // 内嵌 JS 探针区（COLLECT_JS/PASS_*…）拆到 pool-js.ts（F6）；导出面不变，这里读回同一份。
 import {
   COLLECT_JS, PASS_EXTRACT, PASS_OBSERVE, PASS_WINDOW, PASS_UNDERLOAD,
@@ -517,13 +517,6 @@ export function framesOf(page: PageLike, limit = 6): FrameLike[] {
 import { urlInHostsEnvelope } from "./host-envelope.ts";
 export { urlInHostsEnvelope } from "./host-envelope.ts";
 
-/** P0-D：一个 frame 的 URL 是否在信封内（空 URL / about:blank = 允许，口径同上面）。 */
-export function frameInHostsEnvelope(frame: FrameLike, hosts: string[] | null | undefined): boolean {
-  let url = "";
-  try { url = typeof frame.url === "function" ? frame.url() : (frame.url ?? ""); } catch { url = ""; }
-  return urlInHostsEnvelope(String(url), hosts);
-}
-
 /** P0-D：frame 的 origin 证据文案已移入 frame-scope.ts（唯一出处；文件头 re-export 保持导出面）。 */
 
 /**
@@ -718,7 +711,7 @@ export function frameScopeEvidenceOf(
     const fr = frames[fi]!;
     if (!frameScopeMatchesFrame(declared, fr)) continue;
     const origin = frameOriginOf(fr).toLowerCase();
-    if (fi > 0 && !frameInHostsEnvelope(fr, hosts)) {
+    if (frameGateExcludes(fi, fr, hosts)) {
       if (!excluded.includes(origin) && excluded.length < 6) excluded.push(origin);
     } else if (!scanned.includes(origin) && scanned.length < 6) {
       scanned.push(origin);
@@ -757,7 +750,7 @@ export async function locatorAnyFrame(
       // E4：声明了合法尾缀 = 只查链匹配的帧（frameScopeMatchesFrame 尾部对齐，与 hint 同一口径）。
       if (declared !== undefined && !frameScopeMatchesFrame(declared, fr)) continue;
       // P0-D：被排除的 frame 不参与信号求值（主 frame 恒在面内；无 hosts = 旧行为）。
-      if (fi > 0 && !frameInHostsEnvelope(fr, opts?.hosts)) continue;
+      if (frameGateExcludes(fi, fr, opts?.hosts)) continue;
       chainScanned += 1;
       try {
         const loc = opts === undefined ? fr.locator(split.selector) : fr.locator(split.selector, opts);
@@ -797,7 +790,7 @@ export async function countAnyFrame(
     for (let fi = 0; fi < frames.length; fi++) {
       const fr = frames[fi]!;
       if (declared !== undefined && !frameScopeMatchesFrame(declared, fr)) continue;
-      if (fi > 0 && !frameInHostsEnvelope(fr, opts?.hosts)) continue;
+      if (frameGateExcludes(fi, fr, opts?.hosts)) continue;
       try {
         total += await fr.locator(split.selector).count();
       } catch {
@@ -962,7 +955,7 @@ export async function extractElements(
   for (let fi = 0; fi < frames.length; fi++) {
     const remaining = maxElements - Object.keys(elems).length;
     if (remaining <= 0) break;
-    if (fi > 0 && !frameInHostsEnvelope(frames[fi]!, opts?.hosts)) continue;   // P0-D：排除帧不进池
+    if (frameGateExcludes(fi, frames[fi]!, opts?.hosts)) continue;   // P0-D：排除帧不进池
     let rows: Elem[] | null = null;
     try {
       rows = (await frames[fi]!.evaluate(PASS_EXTRACT,
@@ -1612,7 +1605,7 @@ export async function hintLookup(
   const parsed = parseHint(hint);
   const frames = framesOf(page);
   for (let fi = 0; fi < frames.length; fi++) {
-    if (fi > 0 && !frameInHostsEnvelope(frames[fi]!, opts?.hosts)) continue;   // P0-D：排除帧不参与回捞
+    if (frameGateExcludes(fi, frames[fi]!, opts?.hosts)) continue;   // P0-D：排除帧不参与回捞
     // A 批：声明链不匹配的帧不参与回捞（frame:<origin> 落在其它帧 = 该帧没有这条声明）。
     if (parsed.frameChain !== undefined && !frameScopeMatchesFrame(parsed.frameChain, frames[fi]!)) continue;
     let rows: Array<Record<string, unknown>> | null = null;
@@ -1732,7 +1725,7 @@ export function allowedFrameOrigins(page: PageLike, hosts: string[] | null | und
   const out: string[] = [];
   const frames = framesOf(page);
   for (let i = 0; i < frames.length; i++) {
-    if (i > 0 && !frameInHostsEnvelope(frames[i]!, hosts)) continue;
+    if (frameGateExcludes(i, frames[i]!, hosts)) continue;
     const origin = frameOriginOf(frames[i]!).toLowerCase();
     if (!origin || origin === "null") continue;
     if (!origin.startsWith("http://") && !origin.startsWith("https://")) continue;

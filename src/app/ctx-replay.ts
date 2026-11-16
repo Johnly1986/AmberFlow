@@ -19,7 +19,7 @@ import { createKit } from "./kit.ts";
 import type { TraceCall, TraceEvent, AppTrace } from "./trace.ts";
 import { canonicalJson } from "./trace.ts";
 import { validateObserveOptions, type ObserveResult } from "../engine/observe.ts";
-import { pickRow } from "./ctx-tool.ts";
+import { pickRowMin, pickRowMax } from "./ctx-tool.ts";
 
 export interface ReplayCtxDeps {
   pack: { id: string; label?: string; goal: string; hosts?: string[] | null; invariants?: Array<Record<string, unknown>> };
@@ -308,8 +308,8 @@ export function createReplayCtx(deps: ReplayCtxDeps): { ctx: Ctx; remaining: () 
       return obs;
     },
     data: {
-      min: (rows, by) => pickRow(rows, by, "min"),
-      max: (rows, by) => pickRow(rows, by, "max"),
+      min: pickRowMin,
+      max: pickRowMax,
     },
     rows: async () => {
       throw new StopError("config_error", "ctx.rows is closed in v1 (Q5: no new extraction grammar); "

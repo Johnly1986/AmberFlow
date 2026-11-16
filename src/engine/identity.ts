@@ -7,9 +7,9 @@
  */
 import { parseHint, type ParsedHint } from "./hint.ts";
 import {
-  firstOf, framesOf, urlOf, frameInHostsEnvelope, type Elem, type FrameLike, type PageLike,
+  firstOf, framesOf, urlOf, type Elem, type FrameLike, type PageLike,
 } from "./extraction.ts";
-import { elemFrameStamp, frameScopeMatchesFrame } from "./frame-scope.ts";
+import { elemFrameStamp, frameGateExcludes, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { anchorChainMatch } from "./rules.ts";
 import { ANCHOR_JS, compile } from "./pool-js.ts";
 
@@ -228,7 +228,7 @@ export async function identityLookup(
   const visible: Array<{ fi: number; row: Record<string, unknown> }> = [];
   const candidates: IdentityCandidate[] = [];
   for (let fi = 0; fi < frames.length; fi++) {
-    if (fi > 0 && !frameInHostsEnvelope(frames[fi]!, opts?.hosts)) continue;   // P0-D：排除帧不参与身份回捞
+    if (frameGateExcludes(fi, frames[fi]!, opts?.hosts)) continue;   // P0-D：排除帧不参与身份回捞
     // A 批：声明链不匹配的帧不参与身份回捞（frame:<origin> 声明的帧之外绝不动作）。
     if (frameChain !== undefined && !frameScopeMatchesFrame(frameChain, frames[fi]!)) continue;
     let got: unknown;

@@ -17,10 +17,10 @@ import {
   disallowedHost, type BrowserMiddleware, type BrowserSession, type ExecutedAction,
   type RunReport, type SkippedAction, type StepStateRecord,
 } from "../engine/executor.ts";
-import { NAVIGATION_GOTO_TIMEOUT_MS } from "../support/tuning.ts"; import { validateCommands } from "../engine/actions.ts";
+import { NAVIGATION_GOTO_TIMEOUT_MS } from "../support/tuning.ts"; import { validateCommands } from "../engine/actions.ts"; import { frameGateExcludes } from "../engine/frame-scope.ts";
 import {
   firstOf, framesOf, locatorAnyFrame, urlOf, extractElements, poolSniff,
-  splitFrameSuffixFromSelector, frameScopeEvidenceOf, frameScopeMatchesFrame, frameInHostsEnvelope,
+  splitFrameSuffixFromSelector, frameScopeEvidenceOf, frameScopeMatchesFrame,
   type FrameScopeEvidence,
   type FrameLike, type PageLike,
 } from "../engine/extraction.ts";
@@ -819,7 +819,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     const scrollSplit = splitFrameSuffixFromSelector(rowSelector);
     for (const [fi, fr] of framesOf(p).entries()) {
       if (scrollSplit.frameChain !== undefined && !frameScopeMatchesFrame(scrollSplit.frameChain, fr)) continue;
-      if (scrollSplit.frameChain !== undefined && fi > 0 && !frameInHostsEnvelope(fr, hosts)) continue;
+      if (scrollSplit.frameChain !== undefined && frameGateExcludes(fi, fr, hosts)) continue;
       try {
         const raw = await fr.evaluate((sel: string) => {
           // 只用结构类型：本仓库 tsconfig 不含 DOM lib（页面侧形状走 structural cast）。
@@ -1633,8 +1633,8 @@ export function createCtx(deps: CtxDeps): Ctx {
       return obs;
     },
     data: {
-      min: (rows, by) => pickRow(rows, by, "min"),
-      max: (rows, by) => pickRow(rows, by, "max"),
+      min: pickRowMin,
+      max: pickRowMax,
     },
     rows: async () => {
       throw new StopError("config_error", "ctx.rows is closed in v1 (Q5: no new extraction grammar); "
@@ -1795,5 +1795,5 @@ export function createCtx(deps: CtxDeps): Ctx {
  * 加载期与运行期**同一份**校验）。坏声明 = 结构化 `config_error`，绝不"猜一个抽取方式"。
  */
 /** L2 ctx 的纯工具函数 —— 拆到 ctx-tool.ts（F1；toolReturns/toolFailureReason/pickRow）。 */
-import { toolReturns, toolFailureReason, pickRow } from "./ctx-tool.ts";
+import { toolReturns, toolFailureReason, pickRow, pickRowMin, pickRowMax } from "./ctx-tool.ts";
 export { toolReturns, toolFailureReason, pickRow };

@@ -13,6 +13,7 @@
  * 让本模块对 extraction 只有**类型**依赖、不引入运行期环。
  */
 import type { Elem, FrameLike } from "./extraction.ts";
+import { urlInHostsEnvelope } from "./host-envelope.ts";
 
 /** 一个 frame 的 origin（http/https 规范形）；不可解析/非 http(s)/空 = undefined。 */
 function httpOriginOf(frame: FrameLike): string | undefined {
@@ -120,4 +121,29 @@ export function frameOriginOf(frame: FrameLike): string {
   try { url = typeof frame.url === "function" ? frame.url() : (frame.url ?? ""); } catch { url = ""; }
   if (!url) return "";
   try { return new URL(url).origin; } catch { return ""; }
+}
+
+/**
+ * P0-D：一个 frame 的 URL 是否在**声明的 hosts 信封**内（空 URL / about:blank = 允许；
+ * 口径与 `host-envelope.urlInHostsEnvelope` 同一实现）。extraction re-export 保持导出面。
+ */
+export function frameInHostsEnvelope(frame: FrameLike, hosts: readonly string[] | null | undefined): boolean {
+  let url = "";
+  try { url = typeof frame.url === "function" ? frame.url() : (frame.url ?? ""); } catch { url = ""; }
+  return urlInHostsEnvelope(String(url), hosts as string[] | null | undefined);
+}
+
+/**
+ * P0-D **帧门禁谓词**（唯一出处）：主 frame 恒允许（导航信封已经强制过它）；只有子 frame
+ * （`fi > 0`）才查 hosts 信封。短路顺序与旧手写一致——`fi === 0` 不解析 URL，不付信封开销。
+ *
+ * 消费点：extraction 池抽取/信号求值/回捞/probe、declared DRF、identity FW8、
+ * executor 的 id 直查回退、ctx scrollList。改门禁口径只改这一个函数。
+ */
+export function frameGateExcludes(
+  fi: number,
+  frame: FrameLike,
+  hosts: readonly string[] | null | undefined,
+): boolean {
+  return fi > 0 && !frameInHostsEnvelope(frame, hosts);
 }
