@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
-import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../support/cli-args.ts";
+import { appOptions, cliBool, cliString, cliStrings, parseCliArgs, type CliValues } from "../support/cli-args.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";
 import { appsOutDir, ensureDir, userAppsDir } from "../support/amberflow-home.ts";
 import { dryRunFlow, loadScriptApp, type LoadedScriptApp } from "./app-script.ts";
@@ -23,7 +23,7 @@ import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
 import { installLayaRuntime } from "../model/model.ts";
 import { nextForStop, STOP_ESCALATION_TEXT } from "../engine/planning-playbook.ts";
 import { appReportMarkdown, appReportHtml } from "./app-report-view.ts";
-import type { AppRunResult } from "./app-runner.ts";
+import type { AppRunResult, ScriptRunOptions } from "./app-runner.ts";
 import { USAGE } from "./app-runner.ts";
 import {
   runScriptApp, AppRunConfigError,
@@ -283,30 +283,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   let result: AppRunResult;
   try {
-    result = await runScriptApp(loaded, {
-      slots, outDir, verbose: !quiet,
-      ...(today === undefined ? {} : { today }),
-      sources: !noSources, confirmSafe, captureTraces: cliBool(v, "trace"),
-      maxSteps,
-      manualFailFast: cliBool(v, "manual-fail-fast"),
-      // §8 步 5：rescue 透传开关（v1 声明面；默认关 = 不进 opts，产物逐字节不变）。
-      ...(cliBool(v, "rescue") ? { rescue: true } : {}),
-      headful, allowDangerous: cliBool(v, "allow-dangerous"),
-      tieredHint: tieredHint ? true : undefined,
-      hintMemory, hintMemoryPath,
-      confFloor: cliConfFloor,
-      ...(cliConfFloor === undefined ? {} : { confFloorSource: confFloorFromCli ? "cli" as const : "config" as const }),
-      providerFloor: activeProviderInfo()?.floor,
-      modelStatus,
-      ...(localModelId === undefined ? {} : { modelId: localModelId }),
-      ...(cliString(v, "emit-trace") === undefined ? {} : { emitTrace: cliString(v, "emit-trace") }),
-      ...(cliString(v, "replay") === undefined ? {} : { replayTrace: cliString(v, "replay") }),
-      // A6：walk 调试旗标（默认关 = 不进 opts，产物逐字节不变）。
-      ...(cliBool(v, "walk") ? { walk: true } : {}),
-      runtimeStats: applied.stats ?? undefined,
-      pickAsks: applied.asks ?? undefined,
-      pickFailedAsks: applied.failedAsks ?? undefined,
-    });
+    result = await runScriptApp(loaded, buildScriptRunOptions(
+      slots, outDir, quiet, today, noSources, confirmSafe, v, maxSteps, headful, tieredHint,
+      hintMemory, hintMemoryPath, cliConfFloor, confFloorFromCli, modelStatus, localModelId, applied,
+    ));
   } catch (e) {
     if (e instanceof AppRunConfigError) {
       console.log(e.message);
@@ -319,9 +299,67 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     installLayaRuntime(null);
   }
 
-  const jsonPath = path.join(outDir, `${pack.id}-result.json`);
-  const mdPath = path.join(outDir, `${pack.id}-report.md`);
-  const htmlPath = path.join(outDir, `${pack.id}-report.html`);
+  return writeRunArtifacts(result, outDir, quiet);
+}
+
+/**
+ * `runScriptApp` 的 options 装配（入口侧只做解析与编排，options 形状集中在这里）。
+ * 形参与原局部名同名，options 字面量逐字节保留——本函数不读外层闭包状态。
+ */
+function buildScriptRunOptions(
+  slots: Record<string, unknown>,
+  outDir: string,
+  quiet: boolean,
+  today: string | undefined,
+  noSources: boolean,
+  confirmSafe: boolean,
+  v: CliValues,
+  maxSteps: number | undefined,
+  headful: boolean,
+  tieredHint: boolean,
+  hintMemory: HintMemoryLike | null,
+  hintMemoryPath: string | null,
+  cliConfFloor: number | undefined,
+  confFloorFromCli: boolean,
+  modelStatus: string,
+  localModelId: string | undefined,
+  applied: Awaited<ReturnType<typeof applySpecToRuntime>>,
+): ScriptRunOptions {
+  return {
+    slots, outDir, verbose: !quiet,
+    ...(today === undefined ? {} : { today }),
+    sources: !noSources, confirmSafe, captureTraces: cliBool(v, "trace"),
+    maxSteps,
+    manualFailFast: cliBool(v, "manual-fail-fast"),
+    // §8 步 5：rescue 透传开关（v1 声明面；默认关 = 不进 opts，产物逐字节不变）。
+    ...(cliBool(v, "rescue") ? { rescue: true } : {}),
+    headful, allowDangerous: cliBool(v, "allow-dangerous"),
+    tieredHint: tieredHint ? true : undefined,
+    hintMemory, hintMemoryPath,
+    confFloor: cliConfFloor,
+    ...(cliConfFloor === undefined ? {} : { confFloorSource: confFloorFromCli ? "cli" as const : "config" as const }),
+    providerFloor: activeProviderInfo()?.floor,
+    modelStatus,
+    ...(localModelId === undefined ? {} : { modelId: localModelId }),
+    ...(cliString(v, "emit-trace") === undefined ? {} : { emitTrace: cliString(v, "emit-trace") }),
+    ...(cliString(v, "replay") === undefined ? {} : { replayTrace: cliString(v, "replay") }),
+    // A6：walk 调试旗标（默认关 = 不进 opts，产物逐字节不变）。
+    ...(cliBool(v, "walk") ? { walk: true } : {}),
+    runtimeStats: applied.stats ?? undefined,
+    pickAsks: applied.asks ?? undefined,
+    pickFailedAsks: applied.failedAsks ?? undefined,
+  };
+}
+
+/**
+ * 写运行产物（`<id>-result.json` / `-report.md` / `-report.html`）并按 `--quiet` 打印 stdout 报告段。
+ * 路径 id 取 `result.app`（运行器构造 result 时写入的就是 `pack.id`）。
+ * 返回退出码：`ok` 或 `partial`（预算用满）为 0，其余 1。
+ */
+function writeRunArtifacts(result: AppRunResult, outDir: string, quiet: boolean): number {
+  const jsonPath = path.join(outDir, `${result.app}-result.json`);
+  const mdPath = path.join(outDir, `${result.app}-report.md`);
+  const htmlPath = path.join(outDir, `${result.app}-report.html`);
   // 规划引导：失败时按停因给一行「下一步建议」（flow 级 stop_code 优先，步级兜底）。
   const nextHint = runNextHint(result);
   fs.writeFileSync(jsonPath, JSON.stringify(result, null, 2), "utf-8");

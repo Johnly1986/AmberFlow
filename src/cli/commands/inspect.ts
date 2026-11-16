@@ -151,7 +151,33 @@ function poolDebugView(
   return { ...view, elements };
 }
 
-export async function runInspect(args: string[], ctx: CliContext): Promise<number> {
+
+type InspectRunArgs =
+  | {
+      ok: true;
+      spec: {
+        url: string;
+        origin: string;
+        max: number;
+        timeout: number;
+        waitMs: number;
+        wantJson: boolean;
+        wantPool: boolean;
+        wide: boolean;
+        summary: boolean;
+        text: boolean;
+        screenshot: string | undefined;
+        headful: boolean;
+        probeList: string[];
+      };
+    }
+  | { ok: false; code: number };
+
+/**
+ * `inspect` 的参数解析/校验（throw 仍是 usageError；help 与 run-defaults 错误按原口径返回退出码）。
+ * 返回的 spec 字段显式列出，runInspect 之后不再读 CLI 值袋。
+ */
+function parseInspectArgs(args: string[], ctx: CliContext): InspectRunArgs {
   let parsed;
   try {
     parsed = parseArgs({
@@ -178,7 +204,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     throw usageError(`inspect 参数不对：${msg}`, { next: ["amber inspect --url https://example.com --json"] });
   }
   const v = parsed.values;
-  if (v.help) { say(ctx, commandHelp("inspect")); return 0; }
+  if (v.help) { say(ctx, commandHelp("inspect")); return { ok: false, code: 0 }; }
   const url = typeof v.url === "string" ? v.url.trim() : "";
   if (!url) throw usageError("inspect 需要 --url <http(s) URL>", { next: ['amber inspect --url https://example.com --json'] });
   let u: URL;
@@ -209,14 +235,136 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
   const { defaults: runDefaults, errors: runDefaultErrors } = parseRunDefaults();
   if (runDefaultErrors.length) {
     for (const e of runDefaultErrors) console.error(e);
-    return 2;
+    return { ok: false, code: 2 };
   }
+  return {
+    ok: true,
+    spec: {
+      url, origin: u.origin, max, timeout, waitMs, wantJson, wantPool,
+      wide: v.wide === true, summary: v.summary === true, text: v.text === true,
+      screenshot: typeof v.screenshot === "string" ? v.screenshot : undefined,
+      headful: v.headed === true || runDefaults.headful === true,
+      probeList: (parsed.values.probe ?? []).filter((x): x is string => typeof x === "string" && x.trim() !== ""),
+    },
+  };
+}
 
+type InspectRenderInput = {
+  title: string;
+  url: string;
+  elementCount: number;
+  truncated: boolean;
+  elements: InspectElement[];
+  sawAt: string;
+  waitMs: number;
+  max: number;
+  windowInfo: Awaited<ReturnType<typeof windowAudit>>;
+  view: ReturnType<typeof poolView>;
+  axSnap: Awaited<ReturnType<typeof snapshotAx>>;
+  axNotInPool: number | null;
+  nearEmpty: boolean;
+  interactiveOnPage: number;
+  probes: ProbeOutcome[];
+  shownAdvisories: Array<Record<string, unknown>>;
+  text: string;
+  summary: boolean;
+};
+
+/** `inspect` 的人读输出渲染（--summary / 默认两种形态；`--json` 由 runInspect 直接发 envelope）。 */
+function renderInspectOutcome(ctx: CliContext, t: InspectRenderInput): void {
+  const surfaceLine = Object.entries(t.windowInfo.surface_counts)
+    .map(([k, v]) => `${k} ${v}`).join("、");
+  // task-6 `--summary`：人话紧凑输出（行数有界）。只改人话面——`--json` 面逐字节不变
+  // （summary 旗标不进 JSON；--pool/--wide/--probe 的 JSON 语义照旧）。
+  if (t.summary) {
+    say(ctx, `${t.title} — ${t.url}`);
+    say(ctx, `观察时刻 ${t.sawAt}${t.waitMs > 0 ? `（--wait-ms ${t.waitMs}）` : ""}；元素 ${t.elementCount} 个${t.truncated ? `（截断，只显示前 ${t.max}）` : ""}`);
+    const shown = t.elements.slice(0, SUMMARY_ELEMENTS);
+    for (const e of shown) {
+      const rec = e as Record<string, unknown>;
+      const href = typeof rec["href"] === "string" ? String(rec["href"])
+        : typeof rec["href_full"] === "string" ? String(rec["href_full"]) : "";
+      const hints = e.hint_candidates.slice(0, SUMMARY_HINTS_PER_ELEMENT)
+        .map((h) => clipChars(h, SUMMARY_HREF_CHARS));
+      say(ctx, `  ${e.ref} ${e.tag} ${clipChars(e.label, SUMMARY_LABEL_CHARS)}`
+        + `${href ? `  ${clipChars(href, SUMMARY_HREF_CHARS)}` : ""}`
+        + `${hints.length ? `  hints: ${hints.join(" | ")}` : ""}`);
+    }
+    if (t.elements.length > shown.length) {
+      say(ctx, `  …另有 ${t.elements.length - shown.length} 个元素未展示（完整清单用默认输出或 --json）`);
+    }
+    if (surfaceLine) say(ctx, `ℹ 可见类目计数：${surfaceLine}（准入面）`);
+    if (t.nearEmpty) {
+      say(ctx, `⚠ 主池近空（interactive_on_page=${t.interactiveOnPage}）——宽扫/池投影诊断见默认输出或 --json 的 pool_near_empty`);
+    }
+    for (const a of t.shownAdvisories.slice(0, 3)) say(ctx, `  ⚠ ${String(a.message)}`);
+    for (const p of t.probes) {
+      const verdict = probeVerdict(p);
+      say(ctx, `  probe  ${p.selector} → ${verdict}`);
+    }
+    if (t.text) say(ctx, `文本摘要：${clipChars(t.text, 200)}`);
+    say(ctx, `（--summary：元素仅前 ${SUMMARY_ELEMENTS} 条、hints 前 ${SUMMARY_HINTS_PER_ELEMENT} 条、href ≤${SUMMARY_HREF_CHARS} 字符——完整清单去掉 --summary，机器消费用 --json）`);
+    return;
+  }
+  say(ctx, `${t.title} — ${t.url}`);
+  say(ctx, `观察时刻 ${t.sawAt}${t.waitMs > 0 ? `（--wait-ms ${t.waitMs}）` : ""}`);
+  say(ctx, `元素 ${t.elementCount} 个${t.truncated ? `（只显示前 ${t.max}）` : ""}`);
+  say(ctx, "（hints 可直接当 --hint / ctx.hint 用——不是 CSS；href 等字段是池投影，仅供识别）");
+  if (surfaceLine) {
+    // U3：按类目计数（ADMIT_SEL 可见口径）——区分"页面没有交互事实"与"准入面没覆盖"。
+    say(ctx, `ℹ 可见类目计数：${surfaceLine}（准入面；池只展示 ${t.view.count} 个）`);
+  }
+  if (t.windowInfo.out_of_window_total > 0) {
+    const examples = t.windowInfo.out_of_window
+      .slice(0, 3)
+      .map((e) => `${e.label || e.tag} (${e.tag})`)
+      .join("、");
+    say(ctx, `ℹ ${t.windowInfo.out_of_window_total} 个可见交互在默认窗口外（池只展示 ${t.view.count}/${t.windowInfo.visible_interactive}）`
+      + `，例如 ${examples}——宽扫/收窄 hint 或直接观察目标；窗口不是页面事实，别把"不在池"读成"不存在"`);
+  }
+  if (t.axSnap) {
+    // 措辞红线：只说“池未指向/未进池”，不说“不可点击/不存在”。AX 是浏览器语义参照，
+    // 不是池的一部分；不可用时不打印（空白 > 误导）。
+    const roleLine = Object.entries(t.axSnap.interactive_counts_by_role)
+      .slice(0, 4)
+      .map(([role, n]) => `${role} ${n}`)
+      .join("、");
+    say(ctx, `ℹ AX 树：可交互 ${t.axSnap.interactive_count}（池 ${t.view.count}；其中 ${t.axNotInPool ?? 0} 个未进池）`
+      + `${roleLine ? `，可交互 role：${roleLine}` : ""}——浏览器语义参照；池仍是选择器闭集，AX 不进决策`);
+  }
+  if (t.nearEmpty) {
+    // U3：文案引用 sniff 证据（ADMIT_SEL 可见计数 / 窗口外 / 类目），区分两种事实：
+    //   ① 页面**有**准入面覆盖的交互元素而池没收进来 = 窗口/投影问题（池口径，不是不可点击）；
+    //   ② 页面没有可见的准入面候选 = 未水合/只落在准入面之外（[tabindex] 等）——宽扫也难救。
+    // 措辞红线沿用：只说「池无法指向」，不说「不可点击/不存在」。
+    const admittedVisible = t.windowInfo.visible_interactive;
+    const counts = Object.entries(t.windowInfo.surface_counts).map(([k, v]) => `${k}=${v}`).join(", ") || "none";
+    say(ctx, admittedVisible > 0
+      ? `⚠ 主池近空而准入面可见 ${admittedVisible} 个（surface: ${counts}；窗口外 ${t.windowInfo.out_of_window_total}）：池投影/窗口问题，不是页面没有——试 --wide --pool，或 1 步探针应用先行（见 docs/APP_SCRIPT_AUTHORING.md 快速路径）`
+      : `⚠ 主池为空且准入面 0 个可见候选（surface: ${counts}; interactive_on_page=${t.interactiveOnPage}）：页面未渲染出可动作事实或只落在准入面之外（如仅 [tabindex]）——宽扫也难救，直接 1 步探针应用先行（arrive + read，见 docs/APP_SCRIPT_AUTHORING.md 快速路径）`);
+  }
+  for (const e of t.elements) {
+    say(ctx, `  ${e.ref.padEnd(6)} ${e.tag.padEnd(8)} ${e.label.slice(0, 60)}`
+      + `${e.hint_candidates.length ? `  hints: ${e.hint_candidates.join(" | ")}` : ""}`);
+  }
+  for (const p of t.probes) {
+    const verdict = probeVerdict(p);
+    say(ctx, `  probe  ${p.selector} → ${verdict}`);
+  }
+  for (const a of t.shownAdvisories) say(ctx, `  ⚠ ${String(a.message)}`);
+  if (t.text) say(ctx, `\n文本摘要：${t.text}`);
+  return;
+}
+
+export async function runInspect(args: string[], ctx: CliContext): Promise<number> {
+  const parsedArgs = parseInspectArgs(args, ctx);
+  if (!parsedArgs.ok) return parsedArgs.code;
+  const { url, origin, max, timeout, waitMs, wantJson, wantPool, wide, summary, text: wantText, screenshot, headful, probeList } = parsedArgs.spec;
   let session;
   try {
     // --headed（CLI 旗标）> AMBERFLOW_HEADFUL（env 层，桥配置页勾选 HEADFUL 时注入）
     // > 缺省 headless：与 run 的层叠同一条纪律。
-    session = await browserSession(!(v.headed === true || runDefaults.headful === true));
+    session = await browserSession(!headful);
   } catch (err) {
     throw usageError(`浏览器启动失败：${err instanceof Error ? err.message : String(err)}`, {
       next: ["npm run doctor"],
@@ -260,13 +408,11 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     const sawAt = new Date().toISOString();
     // --probe：只读探测，放在元素池抽取**之前**——结论不受 --max-elements 截断影响
     // （01 轮 B2：exists/text 类 done 信号此前没有验证面）。
-    const probeList = (parsed.values.probe ?? []).filter((s): s is string => typeof s === "string" && s.trim() !== "");
     const probes: ProbeOutcome[] = [];
     for (const s of probeList.slice(0, 10)) probes.push(await probeSelector(page, s));
     if (probeList.length > 10) probes.push({ selector: `…另有 ${probeList.length - 10} 个`, error: "超出 10 个探测上限，未探测" });
     // --wide：执行器低置信恢复路径的宽扫参数（120 上限 + R2 启发式伪按钮）。
     // 主池语义不变（不带 --wide 时逐字节今天）；heuristic 候选带标记，审计可辨。
-    const wide = v.wide === true;
     const poolMax = wide ? Math.max(max, WIDE_POOL_ELEMENTS) : max;
     // P0-A：inspect 观察面显式要完整标签 + 有界 class_names（池行/模型面缺省逐字节不变——
     // 这两个字段只在 classNames/fullLabel 显式打开时才出现）。
@@ -285,7 +431,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     // 依据 2026-10-30 实测：3/5 次运行失败属此类（ogs.google.com 跨源 frame 1 次、
     // 仅 aria-label 的出行模式 radio 2 次）——inspect 当时就有能力预警。
     // 措辞红线：只说「引擎元素池无法指向」，不说「不可点击/不存在」。
-    const mainOrigin = u.origin;
+    const mainOrigin = origin;
     const advisories: Array<Record<string, unknown>> = [];
     const foreign = frameOrigins.filter((o) => o && o !== mainOrigin);
     if (foreign.length) {
@@ -357,12 +503,12 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
         ...e.extras,
       };
     });
-    const text = v.text === true
+    const text = wantText
       ? String(await page.evaluate("document.body ? document.body.innerText : ''")).slice(0, 800)
       : "";
     let screenshotPath: string | undefined;
-    if (typeof v.screenshot === "string" && v.screenshot !== "") {
-      screenshotPath = v.screenshot;
+    if (screenshot !== undefined && screenshot !== "") {
+      screenshotPath = screenshot;
       fs.mkdirSync(path.dirname(path.resolve(screenshotPath)), { recursive: true });
       await page.screenshot({ path: screenshotPath, fullPage: false });
     }
@@ -430,87 +576,11 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       }));
       return 0;
     }
-    const surfaceLine = Object.entries(windowInfo.surface_counts)
-      .map(([k, v]) => `${k} ${v}`).join("、");
-    // task-6 `--summary`：人话紧凑输出（行数有界）。只改人话面——`--json` 面逐字节不变
-    // （summary 旗标不进 JSON；--pool/--wide/--probe 的 JSON 语义照旧）。
-    if (v.summary === true) {
-      say(ctx, `${data.title} — ${data.url}`);
-      say(ctx, `观察时刻 ${sawAt}${waitMs > 0 ? `（--wait-ms ${waitMs}）` : ""}；元素 ${data.element_count} 个${data.truncated ? `（截断，只显示前 ${max}）` : ""}`);
-      const shown = elements.slice(0, SUMMARY_ELEMENTS);
-      for (const e of shown) {
-        const rec = e as Record<string, unknown>;
-        const href = typeof rec["href"] === "string" ? String(rec["href"])
-          : typeof rec["href_full"] === "string" ? String(rec["href_full"]) : "";
-        const hints = e.hint_candidates.slice(0, SUMMARY_HINTS_PER_ELEMENT)
-          .map((h) => clipChars(h, SUMMARY_HREF_CHARS));
-        say(ctx, `  ${e.ref} ${e.tag} ${clipChars(e.label, SUMMARY_LABEL_CHARS)}`
-          + `${href ? `  ${clipChars(href, SUMMARY_HREF_CHARS)}` : ""}`
-          + `${hints.length ? `  hints: ${hints.join(" | ")}` : ""}`);
-      }
-      if (elements.length > shown.length) {
-        say(ctx, `  …另有 ${elements.length - shown.length} 个元素未展示（完整清单用默认输出或 --json）`);
-      }
-      if (surfaceLine) say(ctx, `ℹ 可见类目计数：${surfaceLine}（准入面）`);
-      if (nearEmpty) {
-        say(ctx, `⚠ 主池近空（interactive_on_page=${interactiveOnPage}）——宽扫/池投影诊断见默认输出或 --json 的 pool_near_empty`);
-      }
-      for (const a of shownAdvisories.slice(0, 3)) say(ctx, `  ⚠ ${String(a.message)}`);
-      for (const p of probes) {
-        const verdict = probeVerdict(p);
-        say(ctx, `  probe  ${p.selector} → ${verdict}`);
-      }
-      if (text) say(ctx, `文本摘要：${clipChars(text, 200)}`);
-      say(ctx, `（--summary：元素仅前 ${SUMMARY_ELEMENTS} 条、hints 前 ${SUMMARY_HINTS_PER_ELEMENT} 条、href ≤${SUMMARY_HREF_CHARS} 字符——完整清单去掉 --summary，机器消费用 --json）`);
-      return 0;
-    }
-    say(ctx, `${data.title} — ${data.url}`);
-    say(ctx, `观察时刻 ${sawAt}${waitMs > 0 ? `（--wait-ms ${waitMs}）` : ""}`);
-    say(ctx, `元素 ${data.element_count} 个${data.truncated ? `（只显示前 ${max}）` : ""}`);
-    say(ctx, "（hints 可直接当 --hint / ctx.hint 用——不是 CSS；href 等字段是池投影，仅供识别）");
-    if (surfaceLine) {
-      // U3：按类目计数（ADMIT_SEL 可见口径）——区分"页面没有交互事实"与"准入面没覆盖"。
-      say(ctx, `ℹ 可见类目计数：${surfaceLine}（准入面；池只展示 ${view.count} 个）`);
-    }
-    if (windowInfo.out_of_window_total > 0) {
-      const examples = windowInfo.out_of_window
-        .slice(0, 3)
-        .map((e) => `${e.label || e.tag} (${e.tag})`)
-        .join("、");
-      say(ctx, `ℹ ${windowInfo.out_of_window_total} 个可见交互在默认窗口外（池只展示 ${view.count}/${windowInfo.visible_interactive}）`
-        + `，例如 ${examples}——宽扫/收窄 hint 或直接观察目标；窗口不是页面事实，别把"不在池"读成"不存在"`);
-    }
-    if (axSnap) {
-      // 措辞红线：只说“池未指向/未进池”，不说“不可点击/不存在”。AX 是浏览器语义参照，
-      // 不是池的一部分；不可用时不打印（空白 > 误导）。
-      const roleLine = Object.entries(axSnap.interactive_counts_by_role)
-        .slice(0, 4)
-        .map(([role, n]) => `${role} ${n}`)
-        .join("、");
-      say(ctx, `ℹ AX 树：可交互 ${axSnap.interactive_count}（池 ${view.count}；其中 ${axNotInPool ?? 0} 个未进池）`
-        + `${roleLine ? `，可交互 role：${roleLine}` : ""}——浏览器语义参照；池仍是选择器闭集，AX 不进决策`);
-    }
-    if (nearEmpty) {
-      // U3：文案引用 sniff 证据（ADMIT_SEL 可见计数 / 窗口外 / 类目），区分两种事实：
-      //   ① 页面**有**准入面覆盖的交互元素而池没收进来 = 窗口/投影问题（池口径，不是不可点击）；
-      //   ② 页面没有可见的准入面候选 = 未水合/只落在准入面之外（[tabindex] 等）——宽扫也难救。
-      // 措辞红线沿用：只说「池无法指向」，不说「不可点击/不存在」。
-      const admittedVisible = windowInfo.visible_interactive;
-      const counts = Object.entries(windowInfo.surface_counts).map(([k, v]) => `${k}=${v}`).join(", ") || "none";
-      say(ctx, admittedVisible > 0
-        ? `⚠ 主池近空而准入面可见 ${admittedVisible} 个（surface: ${counts}；窗口外 ${windowInfo.out_of_window_total}）：池投影/窗口问题，不是页面没有——试 --wide --pool，或 1 步探针应用先行（见 docs/APP_SCRIPT_AUTHORING.md 快速路径）`
-        : `⚠ 主池为空且准入面 0 个可见候选（surface: ${counts}; interactive_on_page=${interactiveOnPage}）：页面未渲染出可动作事实或只落在准入面之外（如仅 [tabindex]）——宽扫也难救，直接 1 步探针应用先行（arrive + read，见 docs/APP_SCRIPT_AUTHORING.md 快速路径）`);
-    }
-    for (const e of elements) {
-      say(ctx, `  ${e.ref.padEnd(6)} ${e.tag.padEnd(8)} ${e.label.slice(0, 60)}`
-        + `${e.hint_candidates.length ? `  hints: ${e.hint_candidates.join(" | ")}` : ""}`);
-    }
-    for (const p of probes) {
-      const verdict = probeVerdict(p);
-      say(ctx, `  probe  ${p.selector} → ${verdict}`);
-    }
-    for (const a of shownAdvisories) say(ctx, `  ⚠ ${String(a.message)}`);
-    if (text) say(ctx, `\n文本摘要：${text}`);
+    renderInspectOutcome(ctx, {
+      title: data.title, url: data.url, elementCount: data.element_count, truncated: data.truncated,
+      elements, sawAt, waitMs, max, windowInfo, view, axSnap, axNotInPool, nearEmpty,
+      interactiveOnPage, probes, shownAdvisories, text, summary,
+    });
     return 0;
   } finally {
     await session.close();
