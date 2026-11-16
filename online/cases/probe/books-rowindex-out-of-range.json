@@ -8,7 +8,7 @@
       "desc": "声明越界序号 row-index:99（11 个成员的网格）——期望确定性落空（零动作零错点；停因码如实观测记录）",
       "start_url": "https://books.toscrape.com/catalogue/category/books/travel_2/index.html",
       "commands": [
-        { "op": "click", "target": "button row-index:99" }
+        { "id": "c1", "op": "click", "target": "button row-index:99" }
       ],
       "signal": { "css_exists": "[data-rowindex-never]" },
       "retries": 0

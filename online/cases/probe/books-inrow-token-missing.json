@@ -8,7 +8,7 @@
       "desc": "声明一个页面行词元中必然不存在的 in-row token——期望零动作零错点（停因码如实观测记录，不预设 target_not_found）",
       "start_url": "https://books.toscrape.com/catalogue/category/books/travel_2/index.html",
       "commands": [
-        { "op": "click", "target": "button in-row:zzq-missing-token-9x8" }
+        { "id": "c1", "op": "click", "target": "button in-row:zzq-missing-token-9x8" }
       ],
       "signal": { "css_exists": "[data-inrow-missing-never]" },
       "retries": 0

@@ -3280,7 +3280,17 @@ export class BrowserMiddleware {
     // P2 command space: the ordered closed set for THIS subgoal. Progress is per-run
     // local state (a retry re-runs the whole subgoal, so the space restarts walking
     // from the top — exactly the `retries` contract).
-    const cmdSpace: CommandDecl[] = (commands ?? []).filter((c) => c && typeof c.id === "string");
+    // 批 2 遗留收编（E 项流转修复）：**id 缺失的命令不再静默丢弃**——丢弃会让声明命令退化为
+    // 模型提名，违反命令空间契约（"NEVER a fallback to the full pool, NEVER a model pick"）。
+    // 实锤：批 1/批 2 probe 用例（commands 无 id）两次真站实测停于 low_confidence 即此——
+    // 在线套件路径（runOneCase → TaskPlan）不过 validateCommands 的 id 必填校验面（计划/应用
+    // 包加载面照旧拦截），到执行器才被本行旧 filter 丢掉。回退 id = `cmd<序>`（确定性）；
+    // 无 id 命令此后照常参与命令行走廊（未解析 → target_not_found + 行锚证据，绝不模型提名）。
+    const cmdSpace: CommandDecl[] = (commands ?? [])
+      .filter((c): c is CommandDecl => !!c && typeof c === "object")
+      .map((c, i) => typeof c.id === "string" && c.id !== ""
+        ? c
+        : { ...c, id: `cmd${i}` });
     const cmdDone = new Set<string>();
     let cmdI = 0;
     /** A2：每条命令已试过的候选数（最多 CMD_CANDIDATE_ATTEMPTS 个，全败不静默 done）。 */
@@ -3864,16 +3874,22 @@ export class BrowserMiddleware {
             + `(checkVisibility CSS / zero box); hidden elements are never acted on`;
         // F82/F83 批 2 遗留收编（E 项，ROW_INDEX_HINT_PLAN §8 遗留 #8 的 additive 接线）：
         // 规划面停因（low_confidence / no_model_runtime / hint_matched_nothing /
-        // action_space_exhausted）的停因点**池在手（elems）+ curHint 可达** ⇒ 单点复用
+        // action_space_exhausted）的停因点**池在手（elems）+ 声明目标可达** ⇒ 单点复用
         // frameHintFailureEvidence（与命令空间/strict/会话 act 同一证据面，不另立函数）。
-        // 无行锚声明 = 空串（reason 逐字节不变）；stopCode 不变（规划面语义不变——只是
-        // reason 自诊断，probe 的 fail-closed 观测口径不变）。零新增页面 I/O
-        // （allowedFrameOrigins 是 host 侧帧 URL 读；证据本体纯内存）。
-        const rowAnchorNote = (hint: string | null): string => {
-          if (hint === null) return "";
-          const note = frameHintFailureEvidence(pg, this._frameHosts, [hint], elems);
+        // hint 来源取**该步的有效声明目标**（E 项评审修正）：决策步 = [curHint]；命令步 =
+        // cmdSpace 各命令的 target（frameHintFailureEvidence 本就收 targets 数组——防御面：
+        // 命令步正常停在命令行走廊内〔那里已按 pendingUnresolved targets 接线〕，走廊外到达
+        // 这些停因时仍出证据）。无行锚声明 = 空串（reason 逐字节不变）；stopCode 不变
+        // （规划面语义不变——只是 reason 自诊断，probe 的 fail-closed 观测口径不变）。
+        // 零新增页面 I/O（allowedFrameOrigins 是 host 侧帧 URL 读；证据本体纯内存）。
+        const rowAnchorNote = (targets: readonly (string | null | undefined)[]): string => {
+          const list = targets.filter((t): t is string => typeof t === "string" && t.trim() !== "");
+          if (list.length === 0) return "";
+          const note = frameHintFailureEvidence(pg, this._frameHosts, list, elems);
           return note ? ` — ${note}` : "";
         };
+        const declaredTargets = (): readonly (string | null | undefined)[] =>
+          commandMode ? cmdSpace.map((c) => c.target) : [curHint];
 
         // P0-C DRF 声明目标解析（declared target resolution，meta.policy.target_resolution:
         // "declared" 才启用）：只服务**这一步作者声明的目标**（命令 target / act hint）——
@@ -4766,7 +4782,7 @@ export class BrowserMiddleware {
               // A3：provider 是抛错降级（而非本来就没装）时，把 HTTP 事实带上——排查不必再猜。
               + this.degradedReasonSuffix() + identityHiddenSuffix()
               // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
-              + rowAnchorNote(curHint), stepNo);
+              + rowAnchorNote(declaredTargets()), stepNo);
           } else {
             stop("action_space_exhausted",
               `action space exhausted on step ${stepNo}`
@@ -4774,7 +4790,7 @@ export class BrowserMiddleware {
                   ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
                   : "") + identityHiddenSuffix()
               // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
-              + rowAnchorNote(curHint), stepNo);
+              + rowAnchorNote(declaredTargets()), stepNo);
           }
           if (verbose && this.rulesOnly) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
@@ -4796,7 +4812,7 @@ export class BrowserMiddleware {
               // F73：DRF 计数事实（实跑且零命中才非空；缺省 declared 关 = 恒空串，逐字节不变）。
               + declaredHiddenSuffix() + declaredMissSuffix()
               // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
-              + rowAnchorNote(curHint), stepNo);
+              + rowAnchorNote(declaredTargets()), stepNo);
           } else {
             stop("step_names_no_target",
               `step ${stepNo} names no target: no target_hint(s), no rule matched any of the `
@@ -4969,7 +4985,7 @@ export class BrowserMiddleware {
                   + lowConfDiscrimination(instruction, elems, ref)
                   // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串，
                   // reason 逐字节不变）。
-                  + rowAnchorNote(curHint), stepNo);
+                  + rowAnchorNote(declaredTargets()), stepNo);
                 break;
               }
             }

@@ -123,12 +123,22 @@ R2-5 整组回退纪律），是第四类尾缀。规格与评审记录：`docs/
   unreachable / login_required / captured / **failed**）；`validateCase` 成员校验口径定案
   （非法观测值加载期 config_error——与 F61 信号形态纪律一致；现网两批 probe 用例成员都在
   闭集内，收紧零回归）；`runner.probeOutcome` 的 `as never` 放行简化为文档化窄断言。
-- **规划面诊断三案接线（§8 遗留 #8 收口，additive GO）**：调查结论 = 规划链四个停因点
+- **规划面诊断三案接线（§8 遗留 #8 收口，additive GO + 流转修复）**：调查结论 = 规划链四个停因点
   （`low_confidence` / `no_model_runtime` / `hint_matched_nothing` / `action_space_exhausted`）
-  **池在手（elems）+ curHint 可达** ⇒ 干净接线成立：停因点复用 `frameHintFailureEvidence`
+  **池在手（elems）+ 声明目标可达** ⇒ 干净接线成立：停因点复用 `frameHintFailureEvidence`
   单点（不另立函数）追加行锚证据——**stopCode 不变**（规划面语义不变）、无行锚声明 =
-  reason 逐字节不变、零新增页面 I/O（allowedFrameOrigins 是 host 侧帧 URL 读）。批 1 probe
-  实测的 `low_confidence` 停因从此自诊断（案①报组大小 K + 行词元）。
+  reason 逐字节不变、零新增页面 I/O（allowedFrameOrigins 是 host 侧帧 URL 读）。**评审发回
+  修复（实锤流转根因）**：probe 用例的 commands 无 `id`——`validateCommands` 的 id 必填校验
+  只在计划/应用包加载面生效，在线套件路径（runOneCase → TaskPlan）不过该面，命令到执行器被
+  `cmdSpace` 构造的 filter **静默丢弃** ⇒ 命令行走廊从未运行 ⇒ 退化为模型提名（违反命令空间
+  契约 "NEVER a fallback to the full pool, NEVER a model pick"；批 1/批 2 两次真站实测停
+  `low_confidence` 即此）。修复 = ① id 缺失命令不再丢弃（回退 id `cmd<序>`，照常参与走廊——
+  未解析 → `target_not_found` + 行锚证据）；② 停因证据 hint 来源取**该步有效声明目标**
+  （`declaredTargets()`：命令步 = cmdSpace targets、决策步 = [curHint]——镜像 trace
+  row_evidence 口径）；③ probe 用例补显式 id。**真站验收重跑**：两 probe 停因 `target_not_found`
+  reason 均含案①证据——`books-inrow-token-missing`：行词元 ≤8 在场；`books-rowindex-out-of-range`：
+  `row-index:99 超出网格组大小——网格组大小 ≤3 组: [a "Books" K=2, button "Add to basket"
+  K=11]` + 行词元 ✓；零动作、observed=failed ∈ 预期集合、probe 语义（exit 3）不变。
 
 ### 显式缺口（批 2 不做，留档）
 
