@@ -16,8 +16,8 @@
  *
  * Everything here is lazy: constructing a runtime touches nothing, `load()`
  * checks the artifacts, and the 1.7 GB session/weights are only mapped on the
- * first `predict`. That keeps `npm test` green and fast on a box without the
- * checkpoint (see 历史回归, which skips the heavy cases).
+ * first `predict`. That keeps local runs fast on a box without the checkpoint
+ * (heavy inference is only exercised when the artifact is present).
  *
  * `node-port-poc/laya.mjs` proved the numbers (probs max|diff| 2.98e-5 vs Python
  * ORT); this file is that proof turned into a module, reusing `laya-format.ts`

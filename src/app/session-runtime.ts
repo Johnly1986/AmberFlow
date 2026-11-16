@@ -87,7 +87,7 @@ export const FLAP_WINDOW_MS = 1_500;
 /**
  * 静默早退：open 返回后这么久仍**没有**主 frame 导航 → 稳定页，立刻放行响应（零新字段）。
  * 阈值必须大于「flap 页首次客户端导航的延迟」——zh.wikipedia 文章页实测 ~0.37–0.9s
- * （task38/ROOT-CAUSE.md probe-nav）、本地 fixture 250ms——取 600ms 可盖住两者实测下界；
+ * 本地 fixture 250ms——取 600ms 可盖住两者实测下界；
  * 代价是稳定页 open 多等 ~600ms（任务书原文写 ≤100ms，实测对照见 task38/assert-results，
  * 常数是单点可调项，由 lead 裁决）。稳定页一旦在窗口内出现任何 post-open 导航，
  * 就放弃早退、观察满整个窗口再判严格签名。
@@ -578,7 +578,7 @@ export class SessionRuntime {
     const page = await this.page();
     // task-38：主 frame 导航监听。挂在 ctx.open **之前**——flap 若在 goto 返回与挂监听
     // 之间的几毫秒里启动，挂晚了就看不见第一批事件；判定按 ts>=openEnd 过窗，goto 期间的
-    // 正常重定向天然不计入（「正常重定向 1-2 次绝不触发」）。没有 .on 的假页面（测试桩）
+    // 正常重定向天然不计入（「正常重定向 1-2 次绝不触发」）。没有 .on 的页面对象（非 Playwright 替身）
     // 直接跳过检测，响应形状不变。启动自动 open 与每次显式 open 走同一条路径。
     const navs: NavEvent[] = [];
     const pw = page as unknown as {
@@ -782,7 +782,7 @@ export class SessionRuntime {
       this.recordAction({
         op: "scroll", target: scrollTarget,
         // B2：只记**实际发生的事实**——没走通的滚动不记方向/语义；没请求 to/by 的元素滚动
-        // 不再伪记 to:"bottom"（旧实现把"滚入视口"记成一次方向滚动）。
+        // 也不伪记 to:"bottom"（"滚入视口"不是一次方向滚动）。
         ...(out.ok === true ? { scroll_mode: scrollMode } : {}),
         ...(out.ok === true && wantsContainer
           ? { ...(toDir === undefined ? {} : { to: toDir }), ...(by === undefined ? {} : { by }) }

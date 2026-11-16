@@ -358,7 +358,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       ...(deps.poolGate === undefined ? {} : { poolGate: deps.poolGate }),
       ...(deps.surfacePolicy === undefined ? {} : { surfacePolicy: deps.surfacePolicy }),
       ...(req.timeoutMs === undefined
-        // 04-F：步级 timeoutMs 以前声明了却从未接进执行器——现在映射到该步的 done 等待上限
+        // 04-F：步级 timeoutMs 映射到该步的 done 等待上限
         // （本次显式 > meta.policy.done_timeout_ms）。它约束的是"动作后等信号成立"的窗口，
         // 不约束整步挂钟时长（模型咨询/导航耗时不在其内）。
         // F3：显式 timeoutMs 同时是该步的**整步挂钟帽**（stepTimeoutMs）——reobserve/升级
@@ -568,7 +568,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       call, desc, ok,
       ...(stopCode === undefined ? {} : { stop_code: stopCode }),
       // 08-C：attempts/code/refused 进事件 result（投影面从这里读，不再只有脚本侧 evidence）。
-      // T6：工具步至少带 code/ok（事件顶层 ok）/artifact/stderr_tail——失败不再是空壳。
+      // T6：工具步至少带 code/ok（事件顶层 ok）/artifact/stderr_tail——失败也带结构化事实，不是空壳。
       result: {
         source: req.source,
         ...(isCli ? {} : { adapter: req.adapter }),
@@ -953,7 +953,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       await paceBeforeStep();
       const started = Date.now();
       const label = req.desc ?? `到达 ${u}`;
-      // 纯导航：只 goto + 等信号，**不做元素选择、不花模型**（以前误走 step 路径：
+      // 纯导航：只 goto + 等信号，**不做元素选择、不花模型**（误走 step 路径会：
       // 记录成 step、还会因选不到元素而 no_model_runtime —— 三实现漂移，replay 必 mismatch）。
       await navigate(u, "arrive", label, req.timeoutMs, req.desc, false);
       const timeout = req.timeoutMs ?? 15_000;
@@ -1695,9 +1695,9 @@ export function createCtx(deps: CtxDeps): Ctx {
       const dedupe = req.dedupe !== false;
       const maxRounds = req.maxRounds ?? 30;
       // C2：行/字段选择器的唯一预检就在**入口这一处**（循环内不重复、每次轮询零额外往返）。
-      // 旧实现在这里用 DOM `querySelectorAll` 预检，会把 Playwright 自己的选择器扩展
-      //（`:has-text(...)` 等）误判成非法——现在与 extract 走同一个 Playwright 解析面
-      //（`locator(sel).count()`），顺带修掉那个旧行为。
+      // 预检必须与 extract 走同一个 Playwright 解析面（`locator(sel).count()`）：
+      // 用 DOM `querySelectorAll` 会把 Playwright 自己的选择器扩展（`:has-text(...)` 等）
+      // 误判成非法。
       await checkExtractSelectors(p, req.row, fields, "ctx.collect");
       const rows: Array<Record<string, string>> = [];
       const seen = new Set<string>();

@@ -22,7 +22,7 @@ function httpOriginOf(frame: FrameLike): string | undefined {
   return origin;
 }
 
-/** detached（isDetached 有即问；测试替身可缺省）⇒ 帧已死 = 未知 origin。 */
+/** detached（isDetached 有即问；缺省按未 detach 处理）⇒ 帧已死 = 未知 origin。 */
 function frameAlive(frame: FrameLike): boolean {
   if (typeof frame.isDetached !== "function") return true;
   try { return frame.isDetached() !== true; } catch { return false; }
@@ -31,7 +31,7 @@ function frameAlive(frame: FrameLike): boolean {
 /**
  * frame 的完整 origin 链（外→内，恒含自身帧）：`[rootOrigin, …, ownOrigin]`。
  * 根判定用 `parentFrame()===null`（**不**假设 `frames()[0]` 是主帧）；无 `parentFrame`
- * 成员（`framesOf` 的 `[page as FrameLike]` 兜底 / 测试替身）= 主帧，链 = `[ownOrigin]`。
+ * 成员（`framesOf` 的 `[page as FrameLike]` 兜底）= 主帧，链 = `[ownOrigin]`。
  * 任一环（含祖先）detached 或 origin 未知 ⇒ undefined。深度帽 8 只防病态循环；
  * 正常页面 `framesOf ≤6`，截断只丢链头、尾部对齐匹配仍正确。
  */

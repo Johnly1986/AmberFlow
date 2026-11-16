@@ -10,7 +10,7 @@
  * | `coin-flip` | 在候选里均匀随机（**可复现**：种子 = goal + 候选指纹） | 模型的**下界**：任何决策模型打不过它，就不值得留在关键路径上 |
  * | `always-abstain` | 永远不选（`ref = null`） | 兜底缺席时会发生什么：block 路径、梯级账单、退出码——不靠"关掉模型"这种副作用来测 |
  *
- * 第三个尤其重要：以前要测"没有模型兜底"只能跑 `--ablate rules-only`，那同时改变了
+ * 第三个尤其重要：要测"没有模型兜底"时跑 `--ablate rules-only` 会同时改变
  * 好几件事（不装 runtime、风险头、完成投票）。`always-abstain` 只改一件事。
  *
  * 注册在 `registerBaselines()`（幂等）。用 `--provider coin-flip` 选中（仅实验/对照，

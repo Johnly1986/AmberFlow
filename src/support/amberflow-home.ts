@@ -36,7 +36,7 @@ export function userAppsDir(env: NodeJS.ProcessEnv = process.env): string {
 /**
  * 计划检查点的默认落点：`$AMBERFLOW_HOME/task_plan.json`。
  *
- * 它以前写在**仓库根**（`.task_plan.json`）——运行产物被塞进引擎的安装目录：git status
+ * 不能写在**仓库根**（`.task_plan.json`）——运行产物被塞进引擎的安装目录：git status
  * 变脏、多 checkout 互相覆盖、升级即丢（与用户作用域迁移同一个理由）。`start` 与
  * `plan-cli` 共用这一个函数：两个入口各写一个默认值，就是"同一件事两个落点"的复发形状。
  */

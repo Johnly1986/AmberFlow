@@ -97,8 +97,8 @@ import { cliBinOf, transportClient } from "./datasource.ts";
 /**
  * 报告里的"前 N 条原始行"（数据源的 `report.preview`）的**单一实现**。
  *
- * 为什么要单独拎出来：这段"取最早一天、按 `columns` 投影、截 `limit` 行"以前只写在
- * `reportMarkdown` 里，于是应用运行器的数据腿**没有** preview 可展示——同一份声明在两个
+ * 为什么要单独拎出来：这段"取最早一天、按 `columns` 投影、截 `limit` 行"只写在
+ * `reportMarkdown` 里时，应用运行器的数据腿**没有** preview 可展示——同一份声明在两个
  * 出口长出两个形状（一个看得到原始行、一个只看得到 counts/selects）。现在报告（`reportMarkdown`）
  * 与应用报告（`app-runner.appReportMarkdown`）都读这一个函数。
  */

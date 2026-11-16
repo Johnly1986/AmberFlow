@@ -116,6 +116,15 @@ online/cases/probe/*.json
 - 新增站点/用例优先写成数据；共享层不认识具体站点。
 - 应用脚本是进程内任意代码：信任边界 = “用户作用域 + 不放仓库”；结果带 `script_sha256`，沙箱未做。
 
+## 注释规约
+
+注释解释**代码本身说不出来的事**，不是变更日志。历史归宿是 `CHANGELOG.md`（不新建 `docs/DECISIONS.md`）；设计取舍进既有 docs 设计文档。中英文注释同规。
+
+- **写**：契约与不变量（必填/缺省语义、fail-closed 边界）、安全语义（红线/掩码/危险动作）、非显然 why（为什么必须 A 不能 B、踩过的约束）、符号指针（"唯一出处 = `rules.anchorChainMatch`"）。
+- **不写**：日期戳（`2026-xx-xx`）；方案/批次编号（`Fxx` / `批 N` / `task-N` / `L1` / `C1`——实施记录进 CHANGELOG，代码里只在必要时引用已存在的编号，且必须能在 `CHANGELOG.md` 或 `src/cli/schema-gen.ts` 解析）；行号锚点（`executor.ts:1234` / `L1234`——改指符号名，行号必然漂移）；变更叙事（"以前/现在改成/旧实现是"——`git log` / `git blame` 是权威）。
+- **失效引用**：不得引用仓库中不存在的文件、测试或套件（已删除的回归套件、缺失的 docs、旧 `src/app/**` 路径）；写引用前先确认目标存在。
+- **TODO/FIXME**：默认禁止；确需遗留时必须在 CHANGELOG 或 issue 有归属，注释只写"待办 → 归属"，不写裸 TODO。
+
 ## 文档
 
 `README.md`、`ARCHITECTURE.md`、`docs/AGENT_INTERFACE.md`、`docs/APP_SCRIPT_AUTHORING.md`、`docs/MANUAL_STEPS_AND_PACE.md`、`docs/DECISION_SERVICE_CONFIG.md`、`docs/PROMPT_SYSTEM.md`（三层提示词系统设计与审查记录）、`docs/ROW_ANCHOR_HINT_PLAN.md` / `docs/ROW_INDEX_HINT_PLAN.md`（行锚 `in-row:` / `row-index:` 两方案 v1.0 已实施 + 实施记录）、`docs/INTERVENTION_RESCUE_MODULE.md`（2026-11-12 介入/救援中断模块设计方案：产品+架构双视角研判合成；**实施中——步 0-3 + 步 5 桥半边已实施**）、`docs/BACKLOG.md`（工程优化待办：决策入口统一/候选列表应用层化/候选窗口指数递增）、`docs/MAINLINE.md`（依赖分层 L0–L6+L1.5 / 执行阶段 S0–S5 / 三类入口 / seam 冻结表；`npm run maintain:check` 的 mainline 组校验）、`docs/IMPROVEMENT_PLAN.md`（2026-11-17 可维护性/可扩展性治理方案 v2.1：五项问题→五条治理线 + 证据 lane/门禁 + 条件化 P0/P1/P2 路线图；已过架构评审，记录见 `docs/IMPROVEMENT_PLAN_REVIEW.md`；基线 `main @ 91bf379`，proposal 待排期；取代 2026-11-10 v1）。不要引用已删除的旧报告/基准/应用清单。

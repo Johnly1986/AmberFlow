@@ -152,10 +152,10 @@ export interface AnyLoc {
   click(opts?: Record<string, unknown>): Promise<void>;
   fill(value: string, opts?: Record<string, unknown>): Promise<void>;
   selectOption(value: unknown, opts?: Record<string, unknown>): Promise<void>;
-  /** S4 hover 原语；可选（测试替身没有时按 action_unsupported 诚实报）。 */
+  /** S4 hover 原语；可选（未提供时按 action_unsupported 诚实报）。 */
   hover?(opts?: Record<string, unknown>): Promise<void>;
   dragTo?(target: unknown, opts?: Record<string, unknown>): Promise<void>;
-  /** U6 上传原语；可选（测试替身没有时按 action_unsupported 诚实报）。 */
+  /** U6 上传原语；可选（未提供时按 action_unsupported 诚实报）。 */
   setInputFiles?(files: unknown, opts?: Record<string, unknown>): Promise<void>;
   count(): Promise<number> | number;
   all(): Promise<unknown[]>;

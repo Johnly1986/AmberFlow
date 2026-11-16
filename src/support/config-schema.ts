@@ -1,9 +1,9 @@
 /**
  * **配置面的唯一声明**：哪些键可以被 `amber config` 读写、属于哪一组、内建默认值是什么。
  *
- * 以前同一件事散在 `rcfile.ts`（白名单）、`config-store.ts`（秘密正则）、
- * `run-defaults.ts`（运行默认值键）、`decision-service.ts`（服务键）和示例 JSON 五处；
- * 改一个键要在五个地方同步，示例还长期只写 25/47 个键。现在只有这一份：
+ * 同一件事散在 `rcfile.ts`（白名单）、`config-store.ts`（秘密正则）、
+ * `run-defaults.ts`（运行默认值键）、`decision-service.ts`（服务键）和示例 JSON 五处时，
+ * 改一个键要在五个地方同步，示例还长期只写 25/47 个键。所以只有这一份：
  *   - `RC_GROUPS` / `CONFIG_KEYS` 由这里派生；
  *   - 示例 `configs/amberflowrc.example.json` 由 `tools/config-example.ts` 生成；
  *   - 秘密掩码、默认值查询也在这里。

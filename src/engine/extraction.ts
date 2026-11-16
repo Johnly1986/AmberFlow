@@ -208,7 +208,7 @@ export interface ActionLocatorLike {
   click(opts?: Record<string, unknown>): Promise<void>;
   fill(value: string, opts?: Record<string, unknown>): Promise<void>;
   selectOption(value: unknown, opts?: Record<string, unknown>): Promise<void>;
-  /** S4：指针悬停原语（可选——测试替身可能没有，缺了按 action_unsupported 报）。 */
+  /** S4：指针悬停原语（可选——未提供时按 action_unsupported 报）。 */
   hover?(opts?: Record<string, unknown>): Promise<void>;
   /** U6：文件上传原语（Playwright locator.setInputFiles；可选，缺了按 action_unsupported 报）。 */
   setInputFiles?(files: unknown, opts?: Record<string, unknown>): Promise<void>;
@@ -218,7 +218,7 @@ export interface ActionLocatorLike {
 }
 
 /**
- * ActionAdapter：把"元素能做什么"从动作散布改成显式能力面。
+ * ActionAdapter：显式能力面——"元素能做什么"收敛在这里，不散在动作实现里。
  * `canApply` 是 PoolView / inspect 的静态能力判定；`apply` 是执行器未来接入的同一能力面。
  * 模型不能发明动作；它只能点能力面里已声明的 kind。
  */
@@ -447,9 +447,9 @@ export function extractSlots(instruction: string): Record<string, string> {
 export interface InnerLoc {
   innerText(opts?: { timeout?: number }): Promise<string> | string;
   inputValue(opts?: { timeout?: number }): Promise<string> | string;
-  /** 读属性（Playwright Locator.getAttribute 的同一语义：不存在 → null）。可选：测试替身可能没有。 */
+  /** 读属性（Playwright Locator.getAttribute 的同一语义：不存在 → null）。可选：实现方可以不提供。 */
   getAttribute?(name: string, opts?: { timeout?: number }): Promise<string | null> | string | null;
-  /** 可见性（Playwright Locator.isVisible）。可选：测试替身可能没有——调用方按"不可判定"处理。 */
+  /** 可见性（Playwright Locator.isVisible）。可选：实现方可以不提供——调用方按"不可判定"处理。 */
   isVisible?(): Promise<boolean> | boolean;
 }
 export interface LocLike {
@@ -457,7 +457,7 @@ export interface LocLike {
   /** Python exposes `.first` as a property; the Node API as a method. */
   first: InnerLoc | (() => InnerLoc);
   all?(): Promise<unknown[]>;
-  /** 可见性（Playwright Locator.isVisible）。可选：测试替身可能没有。 */
+  /** 可见性（Playwright Locator.isVisible）。可选：实现方可以不提供。 */
   isVisible?(): Promise<boolean> | boolean;
 }
 
@@ -471,7 +471,7 @@ export interface FrameLike {
   evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
   url?: string | (() => string);
   /**
-   * A 批（frame:<origin> 帧链）：父帧（Playwright Frame.parentFrame）。可选——测试替身与
+   * A 批（frame:<origin> 帧链）：父帧（Playwright Frame.parentFrame）。可选——
    * `framesOf` 的 `[page as FrameLike]` 兜底没有它 = 主帧（帧链 = [ownOrigin]）。
    * 判根用 `parentFrame()===null`，**不**假设 `frames()[0]` 是主帧。
    */
@@ -1654,8 +1654,8 @@ export interface ExcludedHintProbe {
   matchedChains: Array<{ frame: number; origin: string; chain: string[] }>;
   /**
    * E6（BACKLOG #7 / WITHIN_PARITY_PLAN §8）：命中帧的**全量 distinct 链数**（去重口径，
-   * ≥ `matchedChains.length`）。旧实现把"去重"与"截断到 ≤4"共用一个条件，>4 条时证据里
-   * 连总数都看不到；现在总数恒有、列表仍 ≤4。
+   * ≥ `matchedChains.length`）。把"去重"与"截断到 ≤4"共用一个条件时，>4 条证据里
+   * 连总数都看不到；这里总数恒有、列表仍 ≤4。
    */
   matched_chains_total: number;
   /** E6：列表被截断（`matched_chains_total > matchedChains.length`）时为 `true`；≤4 条时省略。 */
@@ -1902,8 +1902,8 @@ export function frameHintFailureEvidence(
       + `在允许帧里没有命中（检查 origin 是否写错/该帧是否被 hosts 排除）`);
   }
   // 实施复审 N-R2a（E1 后更新）：同帧 within 已在回捞面生效（E1——五池补 anchor_ids +
-  // FW8/F64/DRF-text 按 within 过滤/DRF-attr 经 hintCandidates→inAnchor 自动消费），不再是
-  // "回捞面不生效"的旧事实。跨帧 within（锚在另一文档）不受支持——anchor_ids 是帧内文档
+  // FW8/F64/DRF-text 按 within 过滤/DRF-attr 经 hintCandidates→inAnchor 自动消费），即
+  // "回捞面不生效"不成立。跨帧 within（锚在另一文档）不受支持——anchor_ids 是帧内文档
   // 祖先链，宿主页 iframe 元素不会出现在子帧内容的祖先链里（§13.4 文档边界，不静默）。
   // declared 分支语义不变：只在"声明链合法但没命中 + 同时声明了 within"时追加本条。
   if (declared.length > 0 && withinAnchor !== undefined) {

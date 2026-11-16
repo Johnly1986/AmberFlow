@@ -421,9 +421,9 @@ const HINT_TOKEN_LINE_EN = HINT_SHAPES.map((s) => s.en).join(" | ");
  * 依据：attrSubstr/attrEq 按 `e[poolAttr(attr)]` 匹配（rules.ts），`poolAttr` 只给
  * test/type 发别名、其余直取同名字段——**凡是 Elem 池字段**的属性都可命中
  * （extraction.ts `Elem`：data_test/name/id/input_type/href/role/near）；
- * class/title 等非池字段永不命中。历史教训：文档曾写「title、href 等不在池字段
- * 模型里」，与本文件自证示例 `a[href~travel_2]`（books-category rule:match 实测
- * 命中）直接矛盾——真实 Agent 首用即被搅浑（2026-10-29 实测报告）。
+ * class/title 等非池字段永不命中。注意：文档不能写「title、href 等不在池字段
+ * 模型里」——与本文件自证示例 `a[href~travel_2]`（books-category rule:match 实测
+ * 命中）直接矛盾，会误导 Agent 首用。
  */
 export const MATCHABLE_POOL_ATTRS: readonly string[] = [
   "test→data-test",

@@ -18,8 +18,8 @@
  *    等于把"provider 不给概率"伪装成"模型很不确定"。这是最容易犯也最难发现的错。
  * 3. **`undefined` 与 `null` 是两种结果**：`undefined` = 答了但没有可用元素（该说人话：
  *    hint 没命中 / 这一步没点名），`null` = 根本没答（action space exhausted）。
- *    这条区别是承重的——本轮把它抹平成 `null` 时，两条 UX 测试当场打红
- *    （见 历史回归 里那条"§2 答了但没给出可用元素"）。
+ *    这条区别是承重的——把两者抹平成 `null`，会让"答了但没给出可用元素"的步骤
+ *    被误报成 action space exhausted。
  *
  * 与旧缝的关系：`LayaRuntime` **保留**，它是 laya 的实现细节；`layaProvider()` 把它包成
  * provider。`installLayaRuntime()` 仍是 51 个文件在用的那扇门，两扇门最终汇到同一处
@@ -502,9 +502,8 @@ export async function applyDecisionSelection(
  *
  * `pick()` **逐字照抄**今天 `BrowserMiddleware.pickInner` 的调用序列（criteria_view →
  * `agentFor(state)` → `predictShortlist(k=8)` → 两支各自的 conf 口径），
- * 这样 Stage 2 把执行器接过来时，行为不是"应该一样"而是**被测试钉住一样**
- * （历史回归 拿同一份夹具比 `provider.pick()` 与
- * `mw.pickProposal()` 的每个字段）。
+ * 这样执行器切到 provider 缝时行为不是"应该一样"而是**逐字段等价**
+ * （同一 runtime 输入下 `pick()` 与 `mw.pickProposal()` 产出每个字段一致）。
  */
 export function layaProvider(opts: {
   runtime: LayaRuntime;

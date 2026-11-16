@@ -21,7 +21,7 @@ export const TOOL_TEXT_CAP = 8 * 1024;
 /** 失败诊断里 stderr 摘要的长度上限（进 `reason`/trace 的 `stderr_tail`）。 */
 export const TOOL_STDERR_TAIL_CAP = 400;
 
-/** 有界文本：只截头，不改变内容语义；`truncated` 标记"这里不再是全文"。 */
+/** 有界文本：只截头，不改变内容语义；`truncated` 标记"这里不是全文"。 */
 export function capToolText(value: unknown): { text: string; truncated: boolean } {
   const text = typeof value === "string" ? value
     : value === undefined || value === null ? "" : String(value);

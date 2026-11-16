@@ -5,16 +5,16 @@
  * 不生成 token。它的 `/v1/systemone` 就是 System One 协议，所以本项目只做这一层适配
  * ，模型加载/推理在服务侧。
  *
- * profile 吸收的 JevK5 特有差异（与百炼不同处，实测钉在 历史回归）：
+ * profile 吸收的 JevK5 特有差异（与百炼不同处，按实测约束固定）：
  *   - 无认证、body 不带 `model` 字段；
  *   - choice 要求**至少两个选项**（`server.py:normalized` 会 400）⇒ minOptions=2，单候选不发请求；
  *   - 信任服务端返回的 choice（validateChoiceInPool=false）；
  *   - `confidence` 就是 `max(probs)`（`jevk5/prompt.py:answer`）——score 读 confidence，
  *     pTop1/pTop2/margin 从 probabilities 取；score_kind=calibrated_prob。
  *
- * 本机没有 4B bf16 的 CUDA 余量（~9GB），但 GGUF 路径已经通了：llama-server + jevk5-gguf-serve.py 桥
- * （见 docs/DECISION_PROVIDER_JEVK5.md 的 B 节），Q8_0 choice 239 ms/题。契约测试仍用假 `/v1/systemone`（CI 不需权重）。
- * 起真服务见 docs/DECISION_PROVIDER_JEVK5.md。
+ * 本机没有 4B bf16 的 CUDA 余量（~9GB），但 GGUF 路径已经通了：llama-server + jevk5-gguf-serve.py 桥，
+ * Q8_0 choice 239 ms/题。适配层形状可用假 `/v1/systemone` 离线验证（不需要权重）。
+ * 起真服务见 docs/DECISION_SERVICE_CONFIG.md 的 JevK5 行。
  */
 import type { DecisionProvider, ProviderCapabilities } from "./decision-provider.ts";
 import { systemOneClient, type SystemOneProfile } from "./system-one-client.ts";
@@ -44,7 +44,7 @@ export function jevk5Provider(opts: JevK5Options = {}): DecisionProvider {
     label: "JevK5",
     capabilities: CAPABILITIES,
     resolveEndpoint: () => opts.endpoint ?? env.JEVK5_ENDPOINT ?? ENDPOINT_DEFAULT,
-    endpointHint: "设 JEVK5_ENDPOINT 指向 /v1/systemone；起服务见 docs/DECISION_PROVIDER_JEVK5.md",
+    endpointHint: "设 JEVK5_ENDPOINT 指向 /v1/systemone；起服务见 docs/DECISION_SERVICE_CONFIG.md 的 JevK5 行",
     // JevK5 本地服务无认证。
     extraBody: () => ({}),
     minOptions: 2,               // choice 要 ≥2 个选项，否则服务端 400
@@ -52,7 +52,7 @@ export function jevk5Provider(opts: JevK5Options = {}): DecisionProvider {
     choiceInstructions,
     riskInstructions: riskInstructionsJevk5,
     doneInstructions: doneInstructionsLong,
-    unreachableHint: "起服务见 docs/DECISION_PROVIDER_JEVK5.md；没起就别选 --provider jevk5。",
+    unreachableHint: "起服务见 docs/DECISION_SERVICE_CONFIG.md 的 JevK5 行；没起就别选 --provider jevk5。",
     timeoutMs: opts.timeoutMs,
     fetchImpl: opts.fetchImpl,
   };

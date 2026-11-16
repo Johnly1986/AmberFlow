@@ -44,7 +44,7 @@ function originOf(u: string): string {
   }
 }
 
-/** 从真实 Playwright page / 测试替身读取当前 PageState；只读，不决策。 */
+/** 从 Playwright page（或等价的页面替身）读取当前 PageState；只读，不决策。 */
 export function pageStateOf(page: PageLike, readiness: PageReadiness = "interactive"): PageState {
   const url = urlOf(page);
   const origins = new Set<string>();

@@ -1,9 +1,9 @@
 /**
  * `target_hint` 语法的**唯一**解析器（P0-B）。
  *
- * 背景：池侧（`rules.hintMatchImpl`）与 DOM 侧回捞（`extraction.hintLookup`）曾经各写一遍
- * 字符串解析，靠"成对改"的纪律维持同构，漂移过两次（`#id` 只加一侧、`=` 漏大小写折叠）。
- * 现在"这串 hint 是什么形状"只在这里回答一次；两个面只回答"在我的底座上它命中谁"
+ * 背景：池侧（`rules.hintMatchImpl`）与 DOM 侧回捞（`extraction.hintLookup`）各写一遍
+ * 字符串解析会漂移（`#id` 只加一侧、`=` 漏大小写折叠），靠"成对改"的纪律不可维护。
+ * 所以"这串 hint 是什么形状"只在这里回答一次；两个面只回答"在我的底座上它命中谁"
  * （池侧 = `Elem` 字段投影，DOM 侧 = 活页面属性/标签）。
  *
  * 注意：解析只管**形状**。属性名是否在池子的字段模型里、值怎么比（精确/包含/按路径段分档）
@@ -13,8 +13,8 @@
  * `target_hint` 的**解析结果**——语法只有这一份（`parseHint`），两个观察面各自提供"匹配底座"：
  * 池侧按 `Elem` 字段匹配，DOM 侧按活页面属性/标签匹配（回捞被预算挤出的元素）。
  *
- * 为什么把解析抽出来：两面曾经各写一遍字符串解析，漂移过两次（`#id` 只加一侧、`=` 漏大小写
- * 折叠）。现在"这串 hint 是什么形状"只在一个函数里回答；两面只回答"在这个底座上它命中谁"。
+ * 为什么把解析抽出来：两面各写一遍字符串解析会漂移（`#id` 只加一侧、`=` 漏大小写折叠）。
+ * "这串 hint 是什么形状"只在一个函数里回答；两面只回答"在这个底座上它命中谁"。
  */
 export type ParsedHint =
   | { kind: "id"; value: string; within?: string[]; frameChain?: string[]; inRow?: string; rowIndex?: number }
@@ -55,7 +55,7 @@ export function poolAttr(attr: string): string {
  * **串尾词法预扫 + 循环剥离**（R2-5）：三类后缀各**至多一次**，只认「前置空白 + 串尾」；
  * 任一类超限 / 值非法 / 空段 ⇒ **整组后缀都不应用**——按原始串回退（禁止半剥），
  * 原串按既有形状解析 → 大概率落空 = 显式失败，绝不静默取第一个。计数只数**串尾预扫**
- * 发现的后缀，不做全局子串计数（旧实现 `(h.match(/within:/g)).length` 会把值内的伪后缀
+ * 发现的后缀，不做全局子串计数（`(h.match(/within:/g)).length` 会把值内的伪后缀
  * 误当成第二个尾缀而整串拒绝——`host within:8080 within:#panel` 就是这个误伤）。
  *
  * 注意：解析只管**形状**。属性名是否在池子的字段模型里、值怎么比（精确/包含/按路径段分档）
@@ -286,7 +286,7 @@ export function splitTailSuffixes(hint: string): { base: string; within?: string
 }
 
 export function parseHint(hint: string): ParsedHint {
-  // 串尾剥离收口在 splitTailSuffixes（唯一出处）；先小写再剥离，与旧实现逐字节同口径。
+  // 串尾剥离收口在 splitTailSuffixes（唯一出处）；先小写再剥离，口径逐字节不变。
   const s = splitTailSuffixes(hint.toLowerCase());
   const rest = s.base;
   const within = s.within;
@@ -309,8 +309,8 @@ export function parseHint(hint: string): ParsedHint {
     return withSuffix({ kind: "attrSubstr", tag, attr: DOM_ATTR[body.slice(0, tilde)] ?? body.slice(0, tilde), value: body.slice(tilde + 1) });
   }
   if (rest.split("[").pop()!.includes("~")) {
-    // 04-E：无括号的 `tag~token` 是文档声明的合法形状（:40），但旧实现无括号时走
-    // `indexOf("[") >= 0 ? … : 0` 分支——tag 恒为空串。按 "~" 切开：前段是 tag，后段是 token。
+    // 04-E：无括号的 `tag~token` 是文档声明的合法形状（:40），不能走
+    // `indexOf("[") >= 0 ? … : 0` 分支——那会让 tag 恒为空串。按 "~" 切开：前段是 tag，后段是 token。
     const bracket = rest.indexOf("[");
     const tilde = rest.indexOf("~");
     const tag = bracket >= 0 ? rest.slice(0, bracket) : rest.slice(0, tilde);

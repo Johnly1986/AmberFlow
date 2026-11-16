@@ -3,8 +3,8 @@
  *
  * 三处要回答同一个问题"真模型在不在"：`npm run doctor`（缺件要报哪一件、给哪条补法命令）、
  * `npm run model:fetch`（往哪儿放、放齐了没有）、应用运行器（结果与桥的 summary 要写
- * `model: on|off(missing)`）。以前这个判断散在 start.ts 的一行 `existsSync` 里，而
- * laya-onnx 的 `load()` 又是另一套报错——两处对"齐不齐"的定义一旦漂移，doctor 就会
+ * `model: on|off(missing)`）。这个判断散在 start.ts 的一行 `existsSync` 里、而
+ * laya-onnx 的 `load()` 又是另一套报错时，两处对"齐不齐"的定义一旦漂移，doctor 就会
  * 在真跑挂掉时说"✓ 真模型"。这里钉成一个模块：
  *
  *   图（.onnx）· 外置权重（.onnx.data）· tokenizer（HF 快照目录或 LAYA_TOKENIZER_DIR）
@@ -37,7 +37,7 @@ export interface ModelArtifacts {
 
 /**
  * 默认图路径：项目目录 `models/laya_dec.onnx`（`MODELS_DIR` 是这一落点的单一出处，
- * `src/model/laya-onnx.ts` 也读它——两处写死两个默认值曾经正是"两处实现"的形状）。
+ * `src/model/laya-onnx.ts` 也读它——两处写死两个默认值正是"两处实现"的形状）。
  */
 export const DEFAULT_ONNX_PATH = path.join(MODELS_DIR, "laya_dec.onnx");
 

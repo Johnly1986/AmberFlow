@@ -19,9 +19,9 @@ import { hintPromptTokens, signalPromptLines } from "./grammar-prompt.ts";
 /**
  * 一步的可逆性声明。
  *
- * 曾经还有第二个键 `verify_after`（`signal` | `none`）。项目方裁定：
+ * 不允许第二个键 `verify_after`（`signal` | `none`）。项目方裁定：
  * **`none` 不允许存在**——"动作后不要求证据也算完成"就是放松红线③；
- * 而 `signal` 正是执行循环今天的默认行为。一个键的两个取值里，一个是空转、一个被禁，
+ * 而 `signal` 正是执行循环的默认行为。一个键的两个取值里，一个是空转、一个被禁，
  * 那它就不该存在（留着只会让人以为"完成可以被声明关掉"）。
  * 将来若要"动作后额外校验"，那是一个**新原语**（见 §4 的 undo 约束），不是把这个键加回来。
  */
@@ -160,7 +160,7 @@ export function createPathWalk(
 export class PlanningRules {
   // NOTE: explicit fields, not constructor parameter properties — the repo's
   // tool scripts run under `node --experimental-strip-types`, which cannot strip
-  // parameter properties (历史回归 guards this).
+  // parameter properties.
   maxSubgoals: number;
   requireSignal: boolean;
   requireStartUrl: boolean;
@@ -250,7 +250,7 @@ export class PlanningRules {
       const sig = (s.signal ?? {}) as SignalSpec;
       // 语法校验只有一份：`signals.validateSignalSpec`（DOM 面的算子表 = `SIGNAL_OPS`）。
       // `when` 与 `signal` 是同一门语言（`signals.ts` 回答两个问题），所以必须走同一个
-      // 走查器。历史：`when` 曾只喂求值器、没走校验，`when: {magic_op}` 过了加载期、
+      // 走查器。只喂求值器、不走校验时，`when: {magic_op}` 会过了加载期、
       // 到运行期才炸成 `stop_reason: "error: … unknown signal spec"` + BLOCKED
       // （响亮，但晚了一轮）。组合算子与 `manual`（无参叶子）的规则也只在那一处。
       if (Object.keys(sig).length === 0) {
@@ -358,8 +358,8 @@ export class TaskPlan {
         obstacle: null,
       };
       for (const k of ["target_hint", "target_hints", "slots", "when", "commands", "id", "next",
-        // 2026-10-14 实测修断链：`effect` 以前不在这张清单里 ⇒ 构造器把它丢了，于是 §4/W1 的
-        // `effect.irreversible` 声明**从没穿过 pack→plan→executor**（0 个包用过它，所以没暴露）。
+        // `effect` 必须在这张清单里：不在时构造器会把它丢了，于是 §4/W1 的
+        // `effect.irreversible` 声明**穿不过 pack→plan→executor**（0 个包用过它，所以没暴露）。
         // A2′ 的放开资格正建立在这个声明上，必须先让它活下来。`adjudicate` 同批加入。
         "effect", "adjudicate"] as const) {
         if (s[k]) out[k] = s[k] as never;      // truthy-only, exactly like Python

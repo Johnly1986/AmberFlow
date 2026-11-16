@@ -251,7 +251,7 @@ export function validateExpandRequest(target: unknown, opts: unknown): void {
   if (!isObj(opts)) throw new StopError("config_error", "ctx.expand: opts must be an object like { count: { rows, fields? } }");
   const count = opts["count"];
   if (!isObj(count)) {
-    // S0：首句点破**类型**（以前只说形状，number/string 这类错要读到句尾才反应过来）。
+    // S0：首句点破**类型**（只说形状会让 number/string 这类错要读到句尾才反应过来）。
     const got = count === null ? "null" : Array.isArray(count) ? "array" : typeof count;
     throw new StopError("config_error",
       `ctx.expand: opts.count must be an object { rows: selector } | { selector } — got ${got}`);

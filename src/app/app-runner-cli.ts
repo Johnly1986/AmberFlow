@@ -140,7 +140,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   // --today：时钟缝（数据腿相对日期表达式 + ctx.runtime.today）。格式错是**用法错误**
-  // （exit 2）；空缺 = 系统日期。2026-10-28 起不再是环境变量 LAYA_TODAY。
+  // （exit 2）；空缺 = 系统日期（时钟是本次调用的显式参数，不读环境变量）。
   let today: string | undefined;
   {
     const raw = cliString(v, "today");
@@ -162,7 +162,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
   const pack = loaded.pack;
 
-  // 槽位名打错曾是**静默**的：不在声明里就是用法错误（exit 2），并且把已声明的列出来。
+  // 槽位名打错必须**响亮**：不在声明里就是用法错误（exit 2），并且把已声明的列出来。
   const declaredSlots = new Set([
     ...Object.keys(pack.slots ?? {}),
     ...((pack.required_slots ?? []) as string[]),

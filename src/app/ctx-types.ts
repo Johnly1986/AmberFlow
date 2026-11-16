@@ -436,7 +436,7 @@ export interface Ctx {
    * 重置）。dry 面给合成值 0——dry 没有真实页面观察，不假装有。
    *
    * `dry`（eval3 消歧义）= 本会话是否 dry/replay 面：dry 与 replay 恒 `true`，真跑恒 `false`。
-   * **两面判据就用它**——`epoch === 0` 不再是 dry 判据（真跑首个观察前 epoch 同样是 0）；
+   * **两面判据就用它**——`epoch === 0` **不是** dry 判据（真跑首个观察前 epoch 同样是 0）；
    * 数据驱动分支/断言请用 `ctx.runtime.dry`（此前文档建议的 `runId === "(dry)"` 仍可用，
    * 但那只是 CLI 惯例值不是契约）。
    */

@@ -762,7 +762,7 @@ export async function browserSession(
   try {
     if (device && Object.keys(device).length) {
       // 有设备声明就开一个带 UA/视口/触摸的上下文；没有就保持老的 `browser.newPage()` 路径，
-      // 免得给所有既有应用引入一层新对象（它们的验收输出不该因为这次改动而变化）。
+      // 免得给既有应用引入一层新对象（验收输出不该因此变化）。
       const ctx = await (browser as unknown as {
         newContext(o?: Record<string, unknown>): Promise<{
           newPage(): Promise<AnyPage>; close(): Promise<void>;

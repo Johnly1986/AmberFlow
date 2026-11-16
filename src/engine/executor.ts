@@ -817,7 +817,7 @@ export class BrowserMiddleware {
     try {
       const r = await settle(page as unknown as SettlePage, policy);
       this._settleWaitMs += r.waitedMs;
-      // C7：把 settled/timedOut 接回调用方（以前只累计 waitedMs，结论被丢掉）。
+      // C7：把 settled/timedOut 接回调用方（只累计 waitedMs 会丢掉结论）。
       return r;
     } catch {
       // 稳定门是观察增强：传感器坏了也照常抽池（页面自会给出 target_not_found 等诚实停因）。
@@ -991,7 +991,7 @@ export class BrowserMiddleware {
     // **决策提供者层的入口**：
     //   ① 显式装了 provider（换模型测试走这条）⇒ 直接用它，不要求 laya runtime 存在；
     //   ② 否则走旧门：装了 `LayaRuntime` 就就地包一层适配器 ⇒ 行为与今天逐字段相同
-    //      （等价由 历史回归 钉住，不是"看着一样"）；
+    //      （等价由逐字段替换验证钉住，不是"看着一样"）；
     //   ③ 两者都没有 ⇒ rules-only（下面那段既有逻辑，一个字没改）。
     const explicit = decisionProviderOrNull();
     if (explicit) {
@@ -1227,7 +1227,7 @@ export class BrowserMiddleware {
       return { ref: null, conf: 0.0, probs: {}, passthrough: true };
     }
     // 视图构造、state 渲染、短名单重问、两支各自的 conf 口径——**全部在适配器里**，
-    // 且与替换前的实现逐字段等价（历史回归 ①）。
+    // 且与替换前的实现逐字段等价（逐字段替换验证 ①）。
     //
     // ── S5 状态接入（默认两项 off ⇒ 下面整段短路，决策路径逐字节不变）───────────────
     // 判据「规则层仍歧义」不需要再问一遍：pickInner 是**规则层没解出 ref**（ruleRef 为
@@ -3337,8 +3337,8 @@ export class BrowserMiddleware {
     /** A2：每条命令已试过的候选数（最多 CMD_CANDIDATE_ATTEMPTS 个，全败不静默 done）。 */
     const CMD_CANDIDATE_ATTEMPTS = 4;
     const cmdAttempts: Record<string, number> = {};
-    // A1（2026-11 真站实测）：act 是多动作命令闭集（N≥2）时，done 必须等**全部命令走完**才评估——
-    // 以前每个动作后都判一次 done，第一击点开菜单的中间态就能让信号成立（trace 里 hows 记了
+    // A1：act 是多动作命令闭集（N≥2）时，done 必须等**全部命令走完**才评估——
+    // 若每个动作后都判一次 done，第一击点开菜单的中间态就会让信号成立（trace 里 hows 记了
     // clicked、status 却是 done），第二个命令从未执行，整轮"排序成功"全为假绿。"走完"沿用既有
     // walk 语义：skip 按定义解决、执行成功、或目标已 forbidden 而 walk 放行；中途某命令解析失败
     // 仍走既有 target_not_found / action_unsupported / needs_value 结构化停因（本改动不加诊断）。
@@ -3428,8 +3428,8 @@ export class BrowserMiddleware {
     let lastEffect: StateEffect | null = null;
     let donePreheldSeen = false;
     let stopCode: StopCode = "max_steps";
-    // 03-D5：这个默认值只在"动作循环自然用满、没有任何站点显式 stop"时存活——以前 reason
-    // 就是裸三个字符（对比 no_progress 的详文），作者无从判断预算与进度。现在带数字。
+    // 03-D5：这个默认值只在"动作循环自然用满、没有任何站点显式 stop"时存活——裸 reason
+    // 只剩三个字符（对比 no_progress 的详文），作者无从判断预算与进度；这里带数字。
     let stopReason =
       `subgoal action budget used up (${this.maxSteps} action step(s) tried) without the done-signal ever holding — `
       + `raise the budget, narrow the target, or check what the page did after each action`;
@@ -3438,7 +3438,7 @@ export class BrowserMiddleware {
     // task-11（B3）：报告期限速嗅探要用的跨循环事实（步循环内的块作用域变量够不着报告点）。
     let lastPageRef: AnyPage | null = null;
     let lastDeclaredHiddenBox: { target: string; hidden: number; total: number } | null = null;
-    // 闭包内的赋值 TS 控制流看不见（与 L4247 getDeclared 同一个坑）——getter 返回注解类型。
+    // 闭包内的赋值 TS 控制流看不见（与 getDeclared 同一个坑）——getter 返回注解类型。
     const getLastDeclaredHidden = (): { target: string; hidden: number; total: number } | null =>
       lastDeclaredHiddenBox;
     let lastPoolWaitedMs = 0;
@@ -3724,7 +3724,7 @@ export class BrowserMiddleware {
           gateBudgetMs = Math.max(0, poolReadyTimeoutMs);
           const readyDeadline = readyStarted + gateBudgetMs;
           // C8：每轮 settle 的 timeout 都由 _extractPoolSettled 钳到剩余预算 ⇒ 总等待有真上限
-          // （以前每轮 settle 最长可阻塞到 5s，声明 700ms 的窗口实际可超冲到 ~5.1s）。
+          // （不钳制时每轮 settle 最长可阻塞到 5s，声明 700ms 的窗口实际可超冲到 ~5.1s）。
           let ex = await this._extractPoolSettled(pg, candidatePriority, readyDeadline);
           elems = ex.elems; gateSettle = ex.settle;
           while (Object.keys(elems).length === 0 && Date.now() < readyDeadline) {
@@ -4792,7 +4792,7 @@ export class BrowserMiddleware {
         }
         let ref: string | null = null;
         let conf = 0;
-        // 方法标签跟着决策源走（2026-11-01 ④）：provider 自报其名（decision-service / 基线名…）；
+        // 方法标签跟着决策源走：provider 自报其名（decision-service / 基线名…）；
         // legacy runtime 包装的归一化为 "laya"——本地 laya 档的 method 串逐字节不变。
         const mm = this.modelLabel();
         let method = mm;
@@ -4863,7 +4863,7 @@ export class BrowserMiddleware {
                 + `本步需要模型选点，规则面无法替代；${decisionDegradedAdvice(
                   this.decisionDegraded.reason_class === "midrun_death" ? "unknown" : this.decisionDegraded.reason_class)}`);
             }
-            // 诚实停因（2026-11-01 产品评审 P1）：这一步**什么动作都没声明**（无 target_hint、
+            // 诚实停因：这一步**什么动作都没声明**（无 target_hint、
             // 无命令空间）时，"缺模型"是个谎言——真正的问题要么是"信号已成立但这步没声明
             // 零动作命令，引擎不肯替作者宣布完成"，要么是"信号根本不成立"。当场评估一次
             // 信号（只在走向停止时付这一次），把实况和出路说出口，而不是把用户引去装模型。
@@ -4907,7 +4907,7 @@ export class BrowserMiddleware {
         // answer is nonsense). The Python reference reads `elems[ref]` unguarded
         // and dies with a KeyError; stop the subgoal with a reason instead.
         if (elems[ref] === undefined) {
-          // 这条曾经是使用者最看不懂的一句：`picked ref 'undefined' is not in the element
+          // 这条是最难懂的一句：`picked ref 'undefined' is not in the element
           // pool on step 1`。它真正的意思是"这一步没有能点到的目标"——计划没点名（没有
           // target_hint），规则也没命中，于是一个不存在的 ref 被交到这里。把病因写出来，
           // 并且告诉使用者下一步该改什么（加 target_hint），而不是复述执行器的内部产物。
@@ -4951,7 +4951,7 @@ export class BrowserMiddleware {
             // Reporting "low confidence 0.00" here would blame the model for not existing.
             stop("no_model_runtime",
               `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`
-              // 同 low_confidence：hint 被点名却没解出来时，当场送闭集（规划引导，见 2026-10-29 实测）。
+              // 同 low_confidence：hint 被点名却没解出来时，当场送闭集（规划引导）。
               + (curHint !== null && ruleRef === null
                   ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
                   : "")
@@ -5080,7 +5080,7 @@ export class BrowserMiddleware {
                 stop("low_confidence",
                   `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`
                   // 规划引导：计划点了名、规则却没解出来——当场把闭集送给作者，省一次读源码确诊
-                  // （2026-10-29 实测：act hint 落空静默回退模型，报错无提示，Agent 读完 hint.ts/rules.ts 才定位）。
+                  // （实测：act hint 落空会静默回退模型、报错无提示，作者需读 hint.ts/rules.ts 才能定位）。
                   + (curHint !== null && ruleRef === null
                       ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
                       : "")

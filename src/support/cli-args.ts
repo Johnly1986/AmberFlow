@@ -45,7 +45,7 @@ export function usageErrorLine(err: unknown): string {
  * 改名/废弃参数的迁移表——给"上一版调用方"指路（升级窗口里的旧插件、旧脚本、旧文档抄来的命令）。
  * `--no-model` 是 2026-10 改名轮的活案例：名实不符（桩被标成 rules-only）所以拆成
  * `--ablate stub|rules-only`，但正在运行的旧桥仍会发 `--no-model`（link 安装形态下
- * 桥是宿主进程里的旧模块、引擎 CLI 是子进程里的新代码——README/DEVELOPING.md 的"重启一次"）。
+ * 桥是宿主进程里的旧模块、引擎 CLI 是子进程里的新代码——重启一次宿主进程即可加载新 CLI）。
  * 报错必须回答"那我该写什么"，否则使用者只能翻 git log。
  */
 const RENAMED_HINTS: Array<[RegExp, string]> = [
@@ -164,7 +164,7 @@ export interface CliParseSpec {
 
 /**
  * 每个 CLI 入口的**同一段开头**：吃掉空命令 `--` → 解析 → 用法错误变成一行话 + usage。
- * 以前这段（含"别把堆栈甩给使用者"的纪律）在每个入口手抄一遍，抄漏一处就是裸堆栈。
+ * 这段（含"别把堆栈甩给使用者"的纪律）若在每个入口手抄一遍，抄漏一处就是裸堆栈。
  */
 export function parseCliArgs(argv: readonly string[], spec: CliParseSpec): CliParseResult {
   const say = spec.say ?? ((line: string) => console.error(line));

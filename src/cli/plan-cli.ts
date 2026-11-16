@@ -37,8 +37,8 @@ import { defaultPlanPath } from "../support/amberflow-home.ts";
 
 /**
  * 计划文件的默认落点：与 `npm start` 同一处——**用户作用域** `$AMBERFLOW_HOME/task_plan.json`
- * （`src/app/amberflow-home.ts`）。以前它俩各写一个默认值（一个仓库根、一个相对路径），
- * 于是"我的计划在哪"取决于你是从哪个入口进来的。
+ * （`src/support/amberflow-home.ts`）。与 `npm start` 共用同一出处，
+ * 避免"我的计划在哪"取决于你是从哪个入口进来的。
  */
 export const DEFAULT_FILE = defaultPlanPath();
 
@@ -62,9 +62,9 @@ export function parseSignal(s: string): SignalSpec {
     const [sel, ...rest] = val.split("|");
     spec = { [op]: [sel, rest.join("|")] };
   }
-  // U4：解析期就拒绝真空操作数——手写 `--signal url_contains=` / `text=#h1|` 曾经被
+  // U4：解析期就拒绝真空操作数——手写 `--signal url_contains=` / `text=#h1|` 若被
   // 静默接受，运行期该信号恒真 ⇒ 零动作假过。语法只有一份（validateSignalSpec）；
-  // C3：合法写法提示也只有一份（signals.ts 的 SIGNAL_SHAPE_HINT），示例串与改动前逐字一致。
+  // C3：合法写法提示也只有一份（signals.ts 的 SIGNAL_SHAPE_HINT），示例串保持逐字一致。
   const problems = validateSignalSpec(spec, "signal");
   if (problems.length) throw new Error(signalProblemText(problems, "cli"));
   return spec;
@@ -422,7 +422,7 @@ export async function main(argv: string[] = process.argv.slice(2), io: CliIO = d
   const max = Number(parsed.values.max ?? 8);
   const pos = parsed.positionals;
 
-  // 索引必须是整数：`add x` 以前会 insert(NaN) —— 打错的参数**污染计划文件**比报错更糟。
+  // 索引必须是整数：`add x` 若 insert(NaN)，打错的参数**污染计划文件**比报错更糟。
   const index = (raw: string | undefined, which: string): number | null => {
     const n = Number(raw);
     if (raw === undefined || !Number.isInteger(n) || n < 0) {

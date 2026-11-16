@@ -455,5 +455,5 @@ export async function captureStateView(
   return { url: urlOf(page as never), elems };
 }
 
-/** `evaluate` with a real function: a string body is not reliably called (see PORTING.md). */
+/** `evaluate` with a real function: a string body is not reliably called. */
 const WITNESS_FN = new Function("arg", `return (${WITNESS_JS})(arg);`) as (arg: unknown) => unknown;

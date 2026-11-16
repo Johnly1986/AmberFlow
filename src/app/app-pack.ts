@@ -126,8 +126,8 @@ export function validateSiteBlock(site: unknown, where: string, p: string[]): vo
  * **数据腿的结果回写槽位**（`source_slots`）——一条声明，把"数据源查到了什么"接到
  * "旅程用什么值去走"。
  *
- * 以前数据腿与旅程是两条**各跑各的**腿：`sources` 跑完只进报告（rows/counts/selects），
- * 旅程用的槽位只能是人写死的默认值（`slots`）——于是"打开榜首番剧"这种应用必须先把
+ * 数据腿与旅程必须是**同一条运行里的两条腿**：`sources` 跑完只进报告（rows/counts/selects）
+ * 时，旅程用的槽位只能是人写死的默认值（`slots`）——于是"打开榜首番剧"这种应用必须先把
  * 榜首 URL 抄进包里，抄完就过期，而数据腿明明刚刚查到了它。
  *
  * 声明形状（`{slot: {source, select|count, field?}}`）：
@@ -168,7 +168,7 @@ function rowMainValue(row: Record<string, string> | null): string {
 /**
  * **运行策略可以声明**。
  *
- * 配置面以前被劈成两半："应用是什么"在包里，"这次怎么跑"只在命令行——于是同一个包的含义随
+ * 配置面必须收敛到包声明："应用是什么"在包里、"这次怎么跑"只在命令行时，同一个包的含义随
  * 命令行变，而 `tieredHint`（窄问）这类**属于站点知识**的开关，包作者根本没法为自己的包打开。
  * 现在包级可以声明这些策略；**缺省 = 今天的行为**（不写 policy 的包逐字节不变），
  * CLI 显式参数只覆盖本次运行，报告打印生效值与来源。
@@ -1036,8 +1036,8 @@ export function validatePack(pack: AppPack,
       for (const k of Object.keys(entry)) {
         if (!appStepKeys().includes(k)) p.push(`journey[${i}].${k}: unknown step key`);
       }
-      // 合并后**类型互斥键**仍要查：角色模板走 checkStep，但内联覆盖以前只查键名，
-      // 于是 `{role: <浏览器角色>, args:[...]}` 会把 args 静默丢掉（"写了没用"）。
+      // 合并后**类型互斥键**仍要查：角色模板走 checkStep，内联覆盖也必须连类型一起查——
+      // 只查键名时 `{role: <浏览器角色>, args:[...]}` 会把 args 静默丢掉（"写了没用"）。
       const tpl = roles[String(roleName)];
       if (isDict(tpl)) {
         const merged = { ...tpl, ...entry };

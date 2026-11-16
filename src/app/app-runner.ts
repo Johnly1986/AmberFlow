@@ -124,7 +124,7 @@ export interface AppRunOptions {
   /**
    * 时钟缝：把"今天"钉成 `YYYY-MM-DD`（CLI `--today`）。影响数据腿的相对日期表达式
    * （`day_offset` / `next_week` / `weekday_cn`）与 flow 脚本的 `ctx.runtime.today`。
-   * 空缺 = 系统日期。（2026-10-28 起不再是环境变量 `LAYA_TODAY`——时钟不是机器配置，
+   * 空缺 = 系统日期。（不是环境变量 `LAYA_TODAY`——时钟不是机器配置，
    * 是本次调用的显式参数。）
    */
   today?: string;
@@ -189,7 +189,7 @@ export interface AppRunOptions {
   /**
    * 本次运行跑在哪个模型层级：`on`（真模型，**默认**）/ `off(missing)`（产物不齐，如实降级）/
    * `off(ablation:scripted-stub)` 与 `off(ablation:rules-only)`（**消融实验臂**，`--ablate` 显式才出现）。
-   * 旧名字 `off(rules-only)` 曾指"装了个脚本桩"——名实不符，已随 `--no-model` 一起改掉。
+   * 旧名字 `off(rules-only)` 指"装了个脚本桩"——名实不符，随 `--no-model` 统一改名。
    * 由**调用方**（CLI / 套件 / 桥的桩）判定并传入——运行器自己不猜：装进 `installLayaRuntime`
    * 的东西对这里透明，而"真模型在不在"的判定出处在 `src/model/model-artifacts.ts`。
    * 结果 JSON 与桥的 summary 都念这一个值（LAYA_VALUE_PLAN P0：用户先要知道此刻跑在哪层）。
@@ -212,7 +212,7 @@ export interface AppRunOptions {
    */
   tieredHint?: boolean;
   /**
-   * R2（2026-10-14 立项）：**学习环接主链路**——把"模型选对且推进了子目标"的观察
+   * R2：**学习环接主链路**——把"模型选对且推进了子目标"的观察
    * 变成规则（`src/model/hint-memory.ts` 的既有纪律：authored 恒优先、句柄必须稳定、
    * 键 =（精确 url, 子目标））。**学到的永不进被审计的包**——它是 sidecar，
    * 与 plan-cli `--learn-hints` 同一形状；不开这个口时运行器与产物逐字节不变。
@@ -387,7 +387,7 @@ export function summarizeDecisions(
   for (const t of steps) {
     const m = typeof t["method"] === "string" ? t["method"] : "other";
     byMethod[m] = (byMethod[m] ?? 0) + 1;
-    // 粗分类读 trace 自带的 decision_kind（2026-11-01 ④：method 显示名跟着 provider 走，
+    // 粗分类读 trace 自带的 decision_kind（method 显示名跟着 provider 走，
     // 聚合不能跟着显示名漂）；无该字段的旧 trace（replay 的历史证据）按旧精确串回退。
     const kind = t["decision_kind"];
     const isModel = kind === "model"
@@ -460,7 +460,7 @@ export function summarizeDecisions(
     escalate,
     ladder: {
       rule,
-      // 梯级账单（2026-11-01 ④ 起键名 model）：决策源真名进 trace.method，聚合按粗分类。
+      // 梯级账单（键名 model）：决策源真名进 trace.method，聚合按粗分类。
       model,
       reobserve, escalate,
       // A2′：裁决级单独计数（梯级账单要能看见"这一级今天兜回过没有"）。
@@ -546,7 +546,7 @@ export interface AppInvariantResult {
 }
 
 /**
- * **拒绝原因的唯一定义**。同一个状态曾经有三种说法：CLI 说 `REFUSED (dangerous)`、
+ * **拒绝原因的唯一定义**。同一个状态若有三处说法会漂移：CLI 说 `REFUSED (dangerous)`、
  * 单应用报告的表里写 `**dangerous**`（那是类别，不是结论）、套件说"待放行(未执行)"——
  * 单独把 .md 发给别人看，它像一次成功的干跑。现在三个界面都念这一张表，
  * 并且一律把"怎么补救"和"有没有落盘"写在同一句里。
@@ -777,7 +777,7 @@ export interface AppRunResult {
     result?: unknown;
     /** `captureStateView: true` 时这一步**开始时**的页面状态（缺字段 = 没开，缺省等价纪律）。 */
     state_view?: StepStateView;
-    /** 该 step 曾 transient failed，但后续 step / done 信号成立（仅引擎/驱动观察，不改变完成真值）。 */
+    /** 该 step transient failed，但后续 step / done 信号成立（仅引擎/驱动观察，不改变完成真值）。 */
     recovered?: boolean;
     /** 恢复它的后续 step 标识/描述（仅 recovered=true 时出现）。 */
     recovered_by?: string | null;
@@ -842,8 +842,8 @@ export async function runToolStep(
     if (typeof v === "string") {
       // Slice 2：`{dataset:NAME}` 从运行级数据集现读（缺失 = 结构化 needs_value，绝不猜；
       // 与 `{out_dir}`/`{run_id}` 同一条"运行期占位符"纪律，只是值来自前序步骤）。
-      // 替换的**唯一实现**在 `app-adapters.substituteDatasetPlaceholders`——以前这里
-      // 手抄了一份同名的正则，两份实现各扫各的正是本仓库的复发缺陷形状。
+      // 替换的**唯一实现**在 `app-adapters.substituteDatasetPlaceholders`——手抄一份同名的正则
+      // 就会两份实现各扫各的，正是本仓库的复发缺陷形状。
       const withRuntime = v.split("{out_dir}").join(outDir).split("{run_id}").join(runId);
       const { value, missing } = substituteDatasetPlaceholders(withRuntime, opts.dataset);
       for (const m of missing) missingDataset.add(m);
@@ -1262,8 +1262,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   // 节奏：本次显式 > pack.pace > 环境变量 > 0。缺省全 0 = 与今天逐字节一致。
   const pace = resolvePace(pack, opts);
   // 数据源的**配置**也在跑之前全部加载：`loadSource` 会在加载期跑 `validate_source`
-  // （未知抽取器/op/transport 键、错的捕获组数……）。以前第 2 个源的坏配置要等第 1 个源
-  // 真的打完网络才浮出来——网络副作用已经发生，报错却在半路。加载不产生副作用。
+  // （未知抽取器/op/transport 键、错的捕获组数……）。不在加载期校验，第 2 个源的坏配置就要等
+  // 第 1 个源真的打完网络才浮出来——网络副作用已经发生，报错却在半路。加载不产生副作用。
   {
     const cfgNames = new Set<string>();
     const isObj = (x: unknown): x is Record<string, unknown> =>
@@ -1281,7 +1281,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     for (const n of cfgNames) loadSource(n);
   }
   // 坏包在**任何网络动作之前**就炸：校验是纯函数，放在数据腿之前是"0 副作用"纪律的另一半
-  // （以前坏包要等数据腿打完一圈网络才被发现）。
+  // （否则坏包要等数据腿打完一圈网络才被发现）。
   {
     const problems = validateApp(pack, { slots: { ...(pack.slots ?? {}), ...slots } });
     if (problems.length) {
@@ -1291,8 +1291,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   let endState: StateView | undefined;
 
   // ---- 数据腿：同一套数据源引擎（HTTP 或 CLI 通道） -------------------------
-  // 它现在跑在**展开之前**：数据腿的结果要回写槽位（`source_slots`），而槽位替换发生在展开期。
-  // 顺序从"展开 → 数据腿"改成"校验 → 数据腿 → 展开"，坏包仍然在任何网络动作之前就被拒
+  // 它跑在**展开之前**：数据腿的结果要回写槽位（`source_slots`），而槽位替换发生在展开期。
+  // 顺序是"校验 → 数据腿 → 展开"，坏包仍然在任何网络动作之前就被拒
   // （校验已在上面单独跑过一遍）。
   const sourceResults: AppSourceResult[] = [];
   /** 数据腿的观察面（回写槽位的输入；与报告里的 counts/selects 同一份数据）。 */
@@ -1413,8 +1413,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     candidatePriority: policy.candidate_priority.value,
     riskyThreshold: 0.6,
     doneThreshold: 0.5,
-    // P0-4（导航信封）：`hosts` 以前只在**加载期**校验类型、给防泄漏门禁当输入，
-    // 运行期谁也不看它——包可以导航到任何主机。现在包声明的 hosts 就是这次旅程的
+    // P0-4（导航信封）：`hosts` 若只在**加载期**校验类型、给防泄漏门禁当输入，
+    // 运行期不参与检查——包就可以导航到任何主机。包声明的 hosts 就是这次旅程的
     // 信封：未声明的主机在 goto 前拒绝、动作后落到未声明主机即停（结构化理由）。
     // 空列表/未声明 = 不启用信封：离线夹具包逐字节不受影响。
     hosts: (pack.hosts ?? null) as string[] | null,
@@ -1734,8 +1734,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       for (const by of returnsByStep.get(stepKey) ?? []) dataset.invalidateStep(by);
       returnsByStep.delete(stepKey);
       // B1 最小步间距（应用配置表 `pace.between_steps_ms` / 环境变量；0 = 今天的行为）：
-      // 本步开始时刻与上一步开始时刻至少隔 gap——等待量 = paceRemainder(...)，不再是
-      // 「上一步 outcome 后无条件 sleep」（旧语义连最后一步之后也补等，已随 B1 移除）。
+      // 本步开始时刻与上一步开始时刻至少隔 gap——等待量 = paceRemainder(...)，
+      // 不是「上一步 outcome 后无条件 sleep」（也不会在最后一步之后补等）。
       if (pace.between_steps_ms > 0) {
         const now = Date.now();
         const wait = paceRemainder(pace.between_steps_ms, lastStepStartTs, now);
@@ -1847,7 +1847,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     if (holder.session !== null) await holder.session.close();
   }
 
-  // Slice 4：类型账（只在**混用 ≥2 种类型**的旅程里出现，既有应用产物逐字节不变）。
+  // Slice 4：类型账（只在**混用 ≥2 种类型**的旅程里出现，单一类型产物逐字节不变）。
   const typeCounts: Record<string, number> = {};
   for (const st of expanded.steps) typeCounts[st.adapter] = (typeCounts[st.adapter] ?? 0) + 1;
   const stepTypes = Object.keys(typeCounts).length > 1 ? typeCounts : undefined;
@@ -1920,7 +1920,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       mw.rejectedAskConfMetrics()),
     // R2：学习环的账——只在**开了**的时候写字段（缺省等价纪律，同 path_visits）。
     // `rejected` 要 cast：接口只承诺 entries/used，它是 HintMemory 实现多给的——
-    // 跨实现注入（测试桩/别的记忆）时不能假设它在。
+    // 跨实现注入（别的记忆实现）时不能假设它在。
     ...(opts.hintMemory ? {
       hint_memory: {
         path: opts.hintMemoryPath ?? null,
@@ -2030,7 +2030,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   // 节奏：CLI 显式 > meta.pace > 环境变量 > 0；与 runApp 共用同一个解析实现。
   const pace = resolvePace(pack, opts);
   /**
-   * T2：运行级数据集**在脚本路径也有一份**（以前只有声明式旅程创建它）——
+   * T2：运行级数据集**在脚本路径也有一份**（与声明式旅程共用同一份 DatasetStore 纪律）——
    * `ctx.run` 的 `returns` 写这里、`ctx.step` 的命令值 `{from:"dataset"}` 从这里现读。
    * 与 `runApp` 同一个 `DatasetStore` 实现、同一条 generation/失效纪律（不另造一套）。
    */
@@ -2184,8 +2184,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           actionDelayMs: pace.between_actions_ms,
           hintMemory: opts.hintMemory ?? null,
           // 语义必须与 runApp 的 confirmFn 一致：默认按干跑证据拒绝破坏性动作；
-          // `--confirm-unsafe`（confirmSafe === false）才放行。历史上这里曾反接
-          // （默认放行、unsafe 反而拒绝）——e2e 实测抓出，改回同向。
+          // `--confirm-unsafe`（confirmSafe === false）才放行。反接（默认放行、unsafe
+          // 反而拒绝）会造成安全语义颠倒——e2e 实测过，必须保持同向。
           confirmFn: opts.confirmSafe === false
             ? () => true
             : (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x)),
@@ -2268,7 +2268,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     /** 工具步：接到既有 `runToolStep`（干跑/确认/幂等重试的唯一实现，不复制）。 */
     const toolRunner = async (req: ToolRunRequest): Promise<ToolRunResult> => {
       // ① 非 cli 适配器：与声明式 journey 用**同一份**适配器实现（validate → expand → run）。
-      //    以前 ctx.run 硬编码 `adapter:"cli"`，声明式能写的 ssh/stdio 步在 flow 脚本里不可表达。
+      //    若 ctx.run 硬编码 `adapter:"cli"`，声明式能写的 ssh/stdio 步在 flow 脚本里不可表达。
       if (req.adapter !== undefined && req.adapter !== "cli") {
         const adapter = getAppAdapter(req.adapter);
         const base = { code: null as number | null, stdout: "", stderr: "", attempts: 0 };
@@ -2491,7 +2491,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   }
 
   // 声明了结束态不变量却从未调用 ctx.done()：**验收根本没发生**。
-  // 以前这里 ok 仍为 true（suite 甚至会打"0/1 不变量 · 通过"）——那是最坏的一类假绿。
+  // ok 不得在这种情况下仍为 true（suite 会打"0/1 不变量 · 通过"——那是最坏的一类假绿）。
   const declaredInvariants = (pack.invariants ?? []).length;
   if (opts.replayTrace === undefined && ok && declaredInvariants > 0
     && !trace.events.some((e) => e.call === "done")) {
@@ -2700,8 +2700,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   if (envViewport === undefined && envDevice.viewport !== undefined) envViewport = envDevice.viewport;
   if (envUserAgent === undefined && envDevice.user_agent !== undefined) envUserAgent = envDevice.user_agent;
   // ---- T1/T6：工具步与数据腿的投影（只从既有 trace 事件重建，不另存一份状态） ----
-  // 以前脚本路径的 `tool_steps` 恒 []、`sources` 恒 []：工具跑过但产物读不到（T1），
-  // 工具失败也只留在脚本局部变量里（T6）。事件本来就是这两条腿的唯一记录面——投影它。
+  // 只从脚本局部变量读会让 `tool_steps`/`sources` 恒空：工具跑过但产物读不到（T1），
+  // 工具失败也只留在局部变量里（T6）。事件本来就是这两条腿的唯一记录面——投影它。
   const toolStepProjection: ToolStepResult[] = trace.events
     .filter((e) => e.call === "run" || e.call === "dangerous")
     .map((e, i) => {

@@ -28,8 +28,8 @@ export const REPO = findRepoRoot(HERE);
 /**
  * 模型产物的**统一落点**：项目目录 `models/`。
  *
- * 图（`laya_dec.onnx`）、外置权重、tokenizer 都在这一个目录下——以前默认落在 `/tmp`、
- * tokenizer 又另在 HF 缓存里找，"模型到底下到哪了"要猜两次。写在项目目录里对再clone、
+ * 图（`laya_dec.onnx`）、外置权重、tokenizer 都在这一个目录下——默认落在 `/tmp`、
+ * tokenizer 又另在 HF 缓存里找时，"模型到底下到哪了"要猜两次。写在项目目录里对再clone、
  * 换机器都稳定（它就是一份**大文件缓存**，跟着 checkout 走，不跟 `$TMPDIR` 走）。
  * `LAYA_ONNX_MODEL` / `LAYA_TOKENIZER_DIR` 仍然是显式覆盖口（测试与 CI 靠它隔离）。
  */

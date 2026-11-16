@@ -8,7 +8,7 @@
  *   - 叶子同样是"可验证的事实"，不是"模型说完成了"；
  *   - 加载期校验和浏览器面一样严格（未知算子/参数个数）。
  *
- * 为什么叶子是这几个（每个都有真实消费者，见 既有应用 与 历史回归）：
+ * 为什么叶子是这几个（每个在 flow 应用与工具步里都有真实消费者）：
  *   `exit_ok`            —— 退出码在 source 的 `exit_ok` 白名单里（最常用的"跑成功了"）
  *   `exit_code_equals`   —— 精确退出码（`grep`/`diff` 这类语义化退出码）
  *   `stdout_contains`    —— 产物里必须出现的事实
@@ -62,7 +62,7 @@ export function artifactPath(p: string): string {
 /**
  * 加载期校验：未知算子、参数个数、组合递归。**走的是与浏览器面同一个走查器**
  * （`signals.validateSignalSpec`），本文件只提供叶子算子表——所以"两套语法同构"
- * 不再是靠人成对改的纪律，而是构造性质。
+ * 是构造性质，不靠人成对改。
  */
 export function validateToolSignal(spec: ToolSignal, where = "signal"): string[] {
   return [

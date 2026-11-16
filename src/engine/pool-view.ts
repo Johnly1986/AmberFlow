@@ -71,7 +71,7 @@ export function poolView(elems: ElemPool, page: PageLike, maxElements: number): 
     // U3：类目标记只进 PoolView/inspect/类目计数（不进 ChoiceRequest.elems 的模型投影）。
     if (typeof e.surface === "string" && e.surface !== "") extras.surface = e.surface;
     // A 批（B6 修复）：元素行 frame_origin 改用 `Elem.frame_origin` **单一出处**——
-    // 旧实现 `[pageUrl, ...frames()].map(origin).sort()` 的下标映射会重复/排序打乱 fi↔origin，
+    // 不能用 `[pageUrl, ...frames()].map(origin).sort()` 的下标映射：会重复/排序打乱 fi↔origin，
     // 跨源页会全反（有意的行为修复：cross-origin 页 inspect 行的 frame_origin 值变对，
     // CHANGELOG 记录）。行上没有 frame_origin = 未知 origin 帧（about:blank/srcdoc）→
     // 如实报 "opaque"，不再用错误的映射编一个 origin。顶层 frame_origins 仍按帧枚举口径。

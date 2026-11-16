@@ -6,7 +6,7 @@
  * app → support、online → support，无环；本模块不 import 任何上层）。
  *
  * 语义（2026-11-05 拍板）：**最小步间距（start-to-start ≥ gap）**——相邻两次引擎单元
- * **开始时刻**至少隔 gap 毫秒；上一步耗时长则本步**不补等**（不再是「无条件 sleep」）。
+ * **开始时刻**至少隔 gap 毫秒；上一步耗时长则本步**不补等**（不是「无条件 sleep」）。
  * 等待量 = `paceRemainder(gap, 上一次单元开始时刻, now)`。三脸共用这份计算与 env 口径，
  * 各自持有自己的时钟：
  *   - flow：单元 = ctx 引擎调用（step/arrive/manual/run/scrollList/expand/setRange/collect）；
