@@ -30,6 +30,7 @@ import { stateText, urlOf } from "../engine/extraction.ts";
 import { systemOneClient, type SystemOneProfile } from "./system-one-client.ts";
 import { normalizeOpenAIDecisionsEndpoint, openaiDecisionsProvider } from "./decision-openai.ts";
 import { DECISION_SERVICE_KEYS, DEFAULT_DECISION_TIMEOUT_MS } from "../support/config-schema.ts";
+import { envText } from "../support/decision-env.ts";
 import { choiceInstructions, RISK_INSTRUCTIONS_SHORT, doneInstructionsShort } from "../prompts/model-prompts.ts";
 
 export { DECISION_SERVICE_KEYS };
@@ -46,26 +47,22 @@ const CAPABILITIES: ProviderCapabilities = {
   score_kind: "calibrated_prob",
 };
 
-function envOf(v: string | undefined): string {
-  return (v ?? "").trim();
-}
-
 /** `AMBERFLOW_DECISION_BASE_URL`，空串 = 未配置。 */
 export function serviceBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
-  return envOf(env.AMBERFLOW_DECISION_BASE_URL);
+  return envText(env, "AMBERFLOW_DECISION_BASE_URL");
 }
 
 export function serviceModel(env: NodeJS.ProcessEnv = process.env): string {
-  return envOf(env.AMBERFLOW_DECISION_MODEL);
+  return envText(env, "AMBERFLOW_DECISION_MODEL");
 }
 
 export function serviceApiKey(env: NodeJS.ProcessEnv = process.env): string {
-  return envOf(env.AMBERFLOW_DECISION_API_KEY);
+  return envText(env, "AMBERFLOW_DECISION_API_KEY");
 }
 
 /** 协议：显式 `AMBERFLOW_DECISION_PROTOCOL` 优先；否则按 URL 形状推断（默认 systemone）。 */
 export function serviceProtocol(env: NodeJS.ProcessEnv = process.env): DecisionServiceProtocol | string {
-  const declared = envOf(env.AMBERFLOW_DECISION_PROTOCOL).toLowerCase() || null;
+  const declared = envText(env, "AMBERFLOW_DECISION_PROTOCOL").toLowerCase() || null;
   if (declared !== null) return declared;
   const raw = serviceBaseUrl(env);
   if (raw === "") return "systemone";
@@ -120,7 +117,7 @@ function isLocalHost(raw: string): boolean {
 }
 
 function parseFloatInRange(raw: string | undefined, key: string): number | null {
-  const text = envOf(raw);
+  const text = (raw ?? "").trim();
   if (text === "") return null;
   const value = Number(text);
   return Number.isFinite(value) ? value : null;
@@ -152,18 +149,18 @@ export function serviceConfigError(env: NodeJS.ProcessEnv = process.env): string
       + "本地自托管（localhost/127.0.0.1）可留空";
   }
   const floor = parseFloatInRange(env.AMBERFLOW_DECISION_FLOOR, "AMBERFLOW_DECISION_FLOOR");
-  if (envOf(env.AMBERFLOW_DECISION_FLOOR) !== "" && (floor === null || floor < 0 || floor > 1)) {
+  if (envText(env, "AMBERFLOW_DECISION_FLOOR") !== "" && (floor === null || floor < 0 || floor > 1)) {
     return "AMBERFLOW_DECISION_FLOOR 必须是 0–1 的数字";
   }
-  const kind = envOf(env.AMBERFLOW_DECISION_SCORE_KIND);
+  const kind = envText(env, "AMBERFLOW_DECISION_SCORE_KIND");
   if (kind !== "" && !["calibrated_prob", "entropy_conf", "rank_only"].includes(kind)) {
     return "AMBERFLOW_DECISION_SCORE_KIND 只能是 calibrated_prob / entropy_conf / rank_only";
   }
-  const timeout = envOf(env.AMBERFLOW_DECISION_TIMEOUT_MS);
+  const timeout = envText(env, "AMBERFLOW_DECISION_TIMEOUT_MS");
   if (timeout !== "" && (!Number.isFinite(Number(timeout)) || Number(timeout) <= 0)) {
     return "AMBERFLOW_DECISION_TIMEOUT_MS 必须是正整数";
   }
-  const minOptions = envOf(env.AMBERFLOW_DECISION_MIN_OPTIONS);
+  const minOptions = envText(env, "AMBERFLOW_DECISION_MIN_OPTIONS");
   if (minOptions !== "" && (!Number.isInteger(Number(minOptions)) || Number(minOptions) < 1)) {
     return "AMBERFLOW_DECISION_MIN_OPTIONS 必须 ≥1 的整数";
   }
@@ -174,11 +171,11 @@ export function serviceConfigError(env: NodeJS.ProcessEnv = process.env): string
 export function systemOneServiceProfile(env: NodeJS.ProcessEnv = process.env): SystemOneProfile {
   const base = serviceBaseUrl(env);
   const model = serviceModel(env);
-  const floorKind = envOf(env.AMBERFLOW_DECISION_SCORE_KIND) || CAPABILITIES.score_kind;
+  const floorKind = envText(env, "AMBERFLOW_DECISION_SCORE_KIND") || CAPABILITIES.score_kind;
   const scoreKind = floorKind as ProviderCapabilities["score_kind"];
-  const timeout = Number(envOf(env.AMBERFLOW_DECISION_TIMEOUT_MS) || String(DEFAULT_DECISION_TIMEOUT_MS));
-  const minOptions = Number(envOf(env.AMBERFLOW_DECISION_MIN_OPTIONS) || "1");
-  const stateContext = envOf(env.AMBERFLOW_DECISION_STATE_CONTEXT) !== "0";
+  const timeout = Number(envText(env, "AMBERFLOW_DECISION_TIMEOUT_MS") || String(DEFAULT_DECISION_TIMEOUT_MS));
+  const minOptions = Number(envText(env, "AMBERFLOW_DECISION_MIN_OPTIONS") || "1");
+  const stateContext = envText(env, "AMBERFLOW_DECISION_STATE_CONTEXT") !== "0";
   return {
     name: "decision-service",
     version: model !== "" ? model : "systemone",
@@ -233,7 +230,7 @@ export function decisionServiceProvider(env: NodeJS.ProcessEnv = process.env): D
       model: serviceModel(env),
       apiKey: serviceApiKey(env),
       ...(floor === null ? {} : { floor }),
-      timeoutMs: Number(envOf(env.AMBERFLOW_DECISION_TIMEOUT_MS) || String(DEFAULT_DECISION_TIMEOUT_MS)),
+      timeoutMs: Number(envText(env, "AMBERFLOW_DECISION_TIMEOUT_MS") || String(DEFAULT_DECISION_TIMEOUT_MS)),
       configError: () => serviceConfigError(env),
     });
   }

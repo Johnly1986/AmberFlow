@@ -61,6 +61,7 @@ export function contextPageCount(page: PageLike): number {
   }
 }
 
+import { MASK } from "../support/mask.ts";
 import { disallowedHost } from "./host-envelope.ts";
 export { disallowedHost } from "./host-envelope.ts";
 
@@ -73,15 +74,14 @@ export function redactValue(el: Elem, val: unknown): unknown {
   const t = String(el["input_type"] ?? "").toLowerCase();
   if (!SECRET_INPUT_TYPES.has(t)) return val;
   const s = String(val);
-  return `***(${s.length})`;
+  return `${MASK}(${s.length})`;
 }
 
 /**
- * W8：敏感槽位 fill 的 effect 掩码值。与 `app/redaction.ts` 的 `MASKED_SLOT` 同值
- * （顶层 slots 掩码、收尾 scrubSecrets 的替换值都用它）；engine 不反向依赖 app 层，
- * 字面量就地同值——改掩码形状时两处同步。
+ * W8：敏感槽位 fill 的 effect 掩码值。sentinel 唯一出处 = `src/support/mask.ts` 的 `MASK`
+ * （顶层 slots 掩码、收尾 scrubSecrets 用同一 sentinel）；engine 不反向依赖 app 层，只依赖 L0。
  */
-export const EFFECT_MASK = "***";
+export const EFFECT_MASK = MASK;
 
 /**
  * W8：s 是否携带敏感值——精确全等不限长度；子串沿用收尾 `scrubSecrets` 的 ≥4 纪律

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { REPO } from "../support/paths.ts";
+import { decisionBaseUrl, envText } from "../support/decision-env.ts";
 import { resolveConfig } from "../support/config-store.ts";
 import { applyEnvNoOverwrite, restoreEnv } from "../support/merge-env.ts";
 import { commandHelp, commandSpec, COMMANDS, globalHelp, helpCommandsPayload, suggestion } from "./registry.ts";
@@ -258,8 +259,8 @@ async function home(ctx: CliContext): Promise<number> {
   } catch {
     // 首页是轻量状态页：体检模块自己坏了也不该让 amber 无输出。
   }
-  const serviceUrl = (ctx.env.AMBERFLOW_DECISION_BASE_URL ?? "").trim();
-  const modelName = (ctx.env.AMBERFLOW_DECISION_MODEL ?? "").trim();
+  const serviceUrl = decisionBaseUrl(ctx.env);
+  const modelName = envText(ctx.env, "AMBERFLOW_DECISION_MODEL");
   const provider = serviceUrl
     ? `service → ${serviceUrl}${modelName ? `（${modelName}）` : ""}`
     : modelReady

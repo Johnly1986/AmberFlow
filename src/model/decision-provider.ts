@@ -27,6 +27,7 @@
  */
 import { ariaInteractiveLines, criteriaView, stateText, urlOf, type PageLike } from "../engine/extraction.ts";
 import { withDecisionCache, type DecisionCacheStats } from "./decision-cache.ts";
+import { decisionServiceConfigured } from "../support/decision-env.ts";
 import * as layaModelModule from "./model.ts";
 import {
   getLayaRuntime, installLayaRuntime, countingRuntime,
@@ -424,7 +425,7 @@ export async function resolveProviderSpec(
   // 线上/本地是**三件套的有无**，不是另一个开关：有服务地址就走统一服务，
   // 没有就用本地 checkpoint。`--provider NAME` 只作为本次实验的显式覆盖。
   const explicitName = name ?? null;
-  const serviceConfigured = (env.AMBERFLOW_DECISION_BASE_URL ?? "").trim() !== "";
+  const serviceConfigured = decisionServiceConfigured(env);
   const wanted = explicitName ?? (serviceConfigured ? "decision-service" : "laya-onnx");
 
   if (wanted === "decision-service") {

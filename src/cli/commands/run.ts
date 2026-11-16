@@ -11,6 +11,7 @@ import { flatList, injectOptionalValue, normalizeAliases, parseSlots } from "../
 import { toAgentRunView } from "../../app/agent-view.ts";
 import type { AppRunResult } from "../../app/app-runner.ts";
 import { appsOutDir } from "../../support/amberflow-home.ts";
+import { decisionServiceConfigured } from "../../support/decision-env.ts";
 import { maskSecretSlots, secretSlotKeys } from "../../app/redaction.ts";
 
 export const DEFAULT_PLAN = "./.amberflow/plan.json";
@@ -64,11 +65,6 @@ function str(v: string | boolean | string[] | undefined): string | undefined {
 
 function bool(v: string | boolean | string[] | undefined): boolean {
   return v === true;
-}
-
-/** A5：在线决策源是否配置（只判断"配置面在不在"；凭据是否真能过网关由运行/探针判定）。 */
-function decisionServiceConfigured(ctx: CliContext): boolean {
-  return (ctx.env.AMBERFLOW_DECISION_BASE_URL ?? "").trim() !== "";
 }
 
 /** 结果落盘目录（默认路径单源在 `support/amberflow-home.ts` 的 appsOutDir）。 */
@@ -415,7 +411,7 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
     ));
     if (evidence) {
       await announceDecisionChannelGuidance(ctx, evidence);
-    } else if (code === 2 && decisionServiceConfigured(ctx)) {
+    } else if (code === 2 && decisionServiceConfigured(ctx.env)) {
       // 连结果文件都没有 = 预检/装配阶段就退了；在线决策源已配置时先给同一条指引（只是提示）。
       await announceDecisionChannelGuidance(ctx, "run_failed_before_result");
     }
@@ -496,7 +492,7 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   }
 
   // A5：没产出结果 + exit 2 + 在线决策源已配置 ⇒ 决策通道是首要嫌疑；stderr 与 next[] 同一指引。
-  if (code === 2 && decisionServiceConfigured(ctx)) {
+  if (code === 2 && decisionServiceConfigured(ctx.env)) {
     next.push(await announceDecisionChannelGuidance(ctx, "run_failed_before_result"));
   }
   const envelope = successEnvelope("run", {

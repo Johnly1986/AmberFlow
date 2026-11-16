@@ -40,6 +40,7 @@ import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../sup
 import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";
+import { decisionServiceConfigured } from "../support/decision-env.ts";
 // B1 节奏统一：语义与 env 口径的唯一来源在 support/pace.ts（engine/app/online 三脸共用，无环）。
 import { PaceConfigError, paceNonDefault, paceRemainder, resolvePace as paceResolve } from "../support/pace.ts";
 import { sleepMs } from "../support/sleep.ts";
@@ -1460,8 +1461,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
 
   // task-14（D1·兼容性三件）：声明式路径与 flow 路径同账——起跑探测一次（只探默认配置面，
   // 未显式指定 provider 时）。探测失败 = 兼容降级（规则面继续），mw 上留痕（收尾进 result）。
-  if (typeof process.env.AMBERFLOW_DECISION_BASE_URL === "string"
-      && process.env.AMBERFLOW_DECISION_BASE_URL !== "") {
+  if (decisionServiceConfigured()) {
     mw.decisionCompat = true;
     const probe = await probeDecisionPlane();
     if (!probe.ok && probe.reasonClass !== undefined) {
@@ -2202,8 +2202,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // 已配置且未显式指定 provider；显式意图优先，探测不适用）。探测通过 = 一切照旧（result
     // 逐字节不变，唯一差异是起跑多付一次最小 ask）；失败 = 兼容降级：本次 run 停发模型调用
     // （规则面继续、升级链规则兜底、死服务不重试），result 顶层 decision.degraded 留痕。
-    if (typeof process.env.AMBERFLOW_DECISION_BASE_URL === "string"
-        && process.env.AMBERFLOW_DECISION_BASE_URL !== "") {
+    if (decisionServiceConfigured()) {
       getMw().decisionCompat = true;
       const probe = await probeDecisionPlane();
       if (!probe.ok && probe.reasonClass !== undefined) {
@@ -2629,8 +2628,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // = idle：不是故障，一句话点明（免得"模型面坏了？"的误诊）；D1 降级场景已有
     // decision_degraded 覆盖，不重复。
     {
-      const planeConfigured = typeof process.env.AMBERFLOW_DECISION_BASE_URL === "string"
-        && process.env.AMBERFLOW_DECISION_BASE_URL !== "";
+      const planeConfigured = decisionServiceConfigured();
       const strictOn = actHintStrictForWarn;
       const asksSoFar = opts.pickAsks ? opts.pickAsks() : 0;
       if (planeConfigured && strictOn && asksSoFar === 0 && decisionDegraded === null) {

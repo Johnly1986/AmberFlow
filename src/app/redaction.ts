@@ -12,12 +12,14 @@
  * 纪律：**不修改入参**；返回新对象。掩码只换值、保留键，报告仍能看出"这里有一个敏感槽位"。
  */
 
+import { MASK } from "../support/mask.ts";
+
 /** 槽位名启发：命中即按敏感处理（显式声明优先，启发只加不减）。 */
 export const SECRET_SLOT_NAME =
   /(pass(word|wd)?|secret|token|api[_-]?key|apikey|credential|passwd|pwd|pin|cookie|session|otp)/i;
 
-/** 掩码后的值：不保留长度/前缀，避免"长度也是信息"。 */
-export const MASKED_SLOT = "***";
+/** 掩码后的值（sentinel 唯一出处 = support/mask.ts）：不保留长度/前缀，避免"长度也是信息"。 */
+export const MASKED_SLOT = MASK;
 
 /** 敏感槽位键集合 = 显式声明 ∪ 名称启发（启发只对已声明槽位做，避免误伤数据槽）。 */
 export function secretSlotKeys(

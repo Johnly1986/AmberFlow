@@ -6,6 +6,7 @@ import { usageFromParseError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { runExecutable } from "../process.ts";
 import { REPO } from "../../support/paths.ts";
+import { decisionServiceConfigured } from "../../support/decision-env.ts";
 import { ensureDir, userAppsDir } from "../../support/amberflow-home.ts";
 import { listAppInfos } from "./apps.ts";
 import { userConfigPath, projectConfigPath, resolveConfig } from "../../support/config-store.ts";
@@ -102,10 +103,10 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
   // 装配路径真发一次最小 ask（一次请求）；`--no-ask-probe` 关闭（部署侧不希望默认请求），
   // `--ask-probe` 强制（没有在线源也发，用来确认"真的没配"）。
   // 医生只诊断：探针成败**不改变退出码**（exitCode 与它无关），失败只如实多报事实 + 通道指引。
-  const decisionServiceConfigured = (ctx.env.AMBERFLOW_DECISION_BASE_URL ?? "").trim() !== "";
+  const serviceConfigured = decisionServiceConfigured(ctx.env);
   const askProbeDisabled = v["no-ask-probe"] === true;
   const askProbeForced = v["ask-probe"] === true;
-  const askProbe = !askProbeDisabled && (askProbeForced || decisionServiceConfigured)
+  const askProbe = !askProbeDisabled && (askProbeForced || serviceConfigured)
     ? await runAskProbe(provider)
     : null;
   // 决策源解析失败是“可用性警告”，不是核心阻塞项；退出码只看 Node / Chromium / 配置。
