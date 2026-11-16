@@ -621,10 +621,27 @@ export function hintCandidates(
  * hint_candidates 与歧义证据的 suggested_hint（ambiguity.suggestHints[0]）自动受益。
  * `out.slice(0, 4)` cap 不动（R-10：链候选与 frame 候选互不挤占的顺序纪律不变；within
  * 恒空的页面 in-row 拿得到槽位）。
+ *
+ * F83 批 3（deny-list 可配化）：第 5 档词元护栏（tokenOk）的**放行词元表**可由调用方注入
+ * ——`opts.tokenAllow`（小写折叠比较；缺省 undefined = 既有护栏行为逐字节不变）。目的：
+ * SKU 恰似数字被价格/时段 deny 模式误杀时的外科调优出口（deny 追加不解决误杀，放行才
+ * 解决——按语义命名 `tokenAllow` 不按"deny-list"代号，实施记录报备）。结构约束（非空/
+ * 禁 `>`/≤40 字符）不受放行表影响（词法卫生不退让）。
  */
+export interface HintSuggestOptions {
+  /**
+   * 第 5 档词元护栏的**放行词元表**（小写折叠比较）：表内词元跳过价格/时段 deny 模式直接
+   * 参与候选生成。缺省 undefined = 既有护栏行为逐字节不变。配置链 = meta.policy.
+   * hint_token_allow（app-pack 校验/EffectivePolicy + executor 字段 → ambiguity 面；+
+   * CtxDeps → ctx.observe → observePage 面审查批——单点消费在本函数 tokenOk）。
+   */
+  tokenAllow?: readonly string[];
+}
+
 export function suggestHints(
   elem: Elem,
   elems: ElemPool,
+  opts?: HintSuggestOptions,
 ): string[] {
   const out: string[] = [];
   const push = (hint: string): boolean => {
@@ -706,12 +723,16 @@ export function suggestHints(
     // `sc7960`、`order-1042`），跳过纯价格/货币/百分比词元与时段词元——带 unstable 警告的
     // 候选是半成品承诺，作者会照抄且警告没人读，宁可不产出交回人（不产 unstable 标记机制）。
     // 无 row_texts（非重复组）时此档天然不产出（fail-closed 与匹配面同一对称）。
+    // F83 批 3（deny-list 可配化）：opts.tokenAllow 在场的词元**跳过价格/时段 deny 模式**
+    // 直接参与生成（结构约束不退让）；缺省 undefined = 护栏行为逐字节不变。
     let inRowPushed = false;   // F83：第 5 档是否已产出候选（第 6 档只在"内容不可分网格"上跑）
     if (!withinPushed && Array.isArray(elem.row_texts) && elem.row_texts.length > 0) {
-      const tokenOk = (t: string): boolean =>
-        t !== "" && !t.includes(">") && t.length <= 40
-        && !/^[¥$€£\d.,%*\s]+$/.test(t)
-        && !/^\d{1,2}:\d{2}$/.test(t);
+      const allow = opts?.tokenAllow;
+      const tokenOk = (t: string): boolean => {
+        if (t === "" || t.includes(">") || t.length > 40) return false;
+        if (allow !== undefined && allow.some((a) => a.toLowerCase() === t)) return true;
+        return !/^[¥$€£\d.,%*\s]+$/.test(t) && !/^\d{1,2}:\d{2}$/.test(t);
+      };
       const identifierLike = (t: string): boolean => /[a-z]/i.test(t) && /\d/.test(t);
       const tokens: string[] = [];
       for (const line of elem.row_texts) {

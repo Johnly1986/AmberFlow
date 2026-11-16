@@ -203,6 +203,9 @@ export const POLICY_KEYS = [
   "attr_value_match",
   // task-43：浏览器通道选择面（缺省不写 = 现状链逐字节不变；优先级 env > meta > default）。
   "browser",
+  // F83 批 3（deny-list 可配化）：第 5 档词元护栏的放行词元表（缺省不写 = 护栏行为逐字节
+  // 不变；SKU 恰似数字被价格/时段 deny 模式误杀时的外科调优出口）。
+  "hint_token_allow",
 ] as const;
 
 /** 导航纪律档位（`meta.policy.navigation`）。 */
@@ -323,6 +326,21 @@ export interface PackPolicy {
    * inspect/observe/session 无 policy，恒 `full_label`。显式声明才进 effective_policy。
    */
   attr_value_match?: (typeof ATTR_VALUE_MATCH_MODES)[number];
+  /**
+   * F83 批 3（deny-list 可配化）：第 5 档词元护栏的**放行词元表**（`meta.policy.
+   * hint_token_allow`；缺省不写 = 护栏行为逐字节不变）。
+   *   - 用途：SKU 恰似数字被价格/时段 deny 模式误杀时的外科调优出口（表内词元跳过 deny
+   *     模式直接参与 in-row 候选生成；结构约束〔非空/禁 `>`/≤40 字符〕不退让）。
+   *   - 校验：字符串数组、每项非空且无内部空白、≤40 字符、至多 16 项（非法 = config_error）；
+   *     比较时小写折叠。
+   *   - 配置面选择理由（meta.policy vs config-schema 二选一）：词元误杀是**站点内容特征**
+   *     （SKU 形态随站点而变）→ per-app policy；config-schema 全局键会跨站点污染（A 站的
+   *     SKU 放行不该影响 B 站）。沿 F58 attr_value_match / F59 act_hint_tier 先例。
+   *   - 面覆盖：run 面（歧义证据 suggested_hint）与 ctx.observe（自证池 hint_candidates）
+   *     生效；inspect CLI（无 meta 面）与 session/桥面缺省——F58 同款面边界，文档写明。
+   *   - 显式声明才进 effective_policy。
+   */
+  hint_token_allow?: string[];
   /**
    * task-43：浏览器通道（`"chrome" | "headless-shell"`；**缺省不写 = 现状链逐字节不变**）。
    * 优先级 env(AMBERFLOW_BROWSER_CHANNEL) > meta > default——env 是部署/CI 的机器级覆盖，
@@ -1363,6 +1381,28 @@ export function validatePack(pack: AppPack,
       const avm = pol["attr_value_match"];
       if (avm !== undefined && !(ATTR_VALUE_MATCH_MODES as readonly string[]).includes(String(avm))) {
         p.push(`policy.attr_value_match: unknown value ${JSON.stringify(String(avm))} (config_error; must be one of ${ATTR_VALUE_MATCH_MODES.map((x) => JSON.stringify(x)).join(" | ")})`);
+      }
+      // F83 批 3（deny-list 可配化）：hint_token_allow 形状校验——字符串数组、每项非空且
+      // 无内部空白、≤40 字符、至多 16 项；比较时小写折叠（consumption 侧）。非法 = config_error
+      // （与 F61 信号形态/validateCommands 加载期纪律一致）。
+      const hta = pol["hint_token_allow"];
+      if (hta !== undefined) {
+        if (!Array.isArray(hta)) {
+          p.push("policy.hint_token_allow: must be a list of tokens (string[])");
+        } else {
+          if (hta.length > 16) {
+            p.push(`policy.hint_token_allow: ${hta.length} 项超过上限 16（放行表是外科出口不是白名单全集）`);
+          }
+          for (const [i, tok] of hta.entries()) {
+            if (typeof tok !== "string" || tok.trim() === "") {
+              p.push(`policy.hint_token_allow[${i}]: must be a non-empty string (got ${JSON.stringify(String(tok))})`);
+            } else if (/\s/.test(tok)) {
+              p.push(`policy.hint_token_allow[${i}]: 词元不含空白（行词元按空白切分；got ${JSON.stringify(tok)}）`);
+            } else if (tok.length > 40) {
+              p.push(`policy.hint_token_allow[${i}]: ${tok.length} 字符超过上限 40`);
+            }
+          }
+        }
       }
       // task-43：浏览器通道——合法值闭集在加载期响亮拒绝（同 navigation/act_hint 先例）。
       const bc = pol["browser"];

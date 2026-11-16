@@ -27,7 +27,7 @@
  * 本函数只在**歧义停**的路径上被调用，末尾再用同 target 的 `hintCandidates` 复原该旁路——
  * 于是会话面 task-34 的 `ambiguous`/`matched_others` 回显仍指向本条 target 的解析。
  */
-import { hintCandidates, suggestHints } from "./rules.ts";
+import { hintCandidates, suggestHints, type HintSuggestOptions } from "./rules.ts";
 import type { Elem, ElemPool } from "./extraction.ts";
 
 /** 证据里最多列出的候选行数（总集大小另记 `candidates_total`）。 */
@@ -156,6 +156,11 @@ export interface AmbiguityInput {
   /** `resolveCommandRef` 的返回（可行动优先排序；空数组 = 池内零命中）。 */
   orderedRefs: readonly string[];
   /**
+   * F83 批 3（deny-list 可配化）：meta.policy.hint_token_allow 下传（词元护栏放行表）——
+   * 缺省 undefined = 护栏行为逐字节不变。单点消费在 suggestHints.tokenOk。
+   */
+  hintTokenAllow?: readonly string[];
+  /**
    * E2：歧义命中顺序（`decision.ambiguous_ordering`；缺省 `"dom-preorder"`）。
    * 决定 `would_act_ref` 之外的 additive 证据字段与 `_resolveOne` 的实际命中顺序。
    */
@@ -174,7 +179,7 @@ function normalizedLabel(e: Elem): string {
 /** 池面候选行的单行证据（`source:"dom_fallback"` 关掉 near / suggested_hint）。 */
 function candidateView(
   ref: string, e: Elem, labelCounts: ReadonlyMap<string, number>,
-  opts: { suggestions: boolean; near: boolean }, elems: ElemPool,
+  opts: { suggestions: boolean; near: boolean } & HintSuggestOptions, elems: ElemPool,
 ): AmbiguityCandidate {
   const label = clip(String(e.full_label ?? e.label ?? "").replace(/\s+/g, " ").trim(), AMBIGUITY_LABEL_MAX);
   const cls = Array.isArray(e.class_names) && typeof e.class_names[0] === "string" && e.class_names[0] !== ""
@@ -188,7 +193,9 @@ function candidateView(
   const frameOrigin = typeof e.frame_origin === "string" && e.frame_origin !== ""
     ? clip(e.frame_origin, AMBIGUITY_ORIGIN_MAX)
     : undefined;
-  const hint = opts.suggestions ? suggestHints(e, elems)[0] : undefined;
+  // F83 批 3（deny-list 可配化）：meta.policy.hint_token_allow 经 AmbiguityInput 下传——
+  // 词元护栏放行表直达 suggestHints（单点消费）。
+  const hint = opts.suggestions ? suggestHints(e, elems, { tokenAllow: opts.tokenAllow })[0] : undefined;
   const norm = normalizedLabel(e);
   return {
     ref: clip(ref, AMBIGUITY_REF_MAX),
@@ -238,7 +245,11 @@ export function describeAmbiguity(input: AmbiguityInput): AmbiguityView | null {
   for (const ref of rows) {
     const e = input.elems[ref];
     if (e === undefined) continue;
-    candidates.push(candidateView(ref, e, labelCounts, { suggestions: withSuggestions, near: withSuggestions }, input.elems));
+    candidates.push(candidateView(ref, e, labelCounts,
+      {
+        suggestions: withSuggestions, near: withSuggestions,
+        ...(input.hintTokenAllow !== undefined ? { tokenAllow: input.hintTokenAllow } : {}),
+      }, input.elems));
   }
   // 复原 B1 旁路模块态（suggestHints 内部 hintMatch 会重写它）：让会话面 task-34 的
   // ambiguous/matched_others 仍对应本条 target 的解析。对 bare/attrSubstr 的 target 这正是

@@ -661,6 +661,12 @@ export interface CtxDeps {
    */
   attrValueMatch?: "full_label" | "display";
   /**
+   * F83 批 3（deny-list 可配化）：第 5 档词元护栏的放行词元表（来自
+   * `meta.policy.hint_token_allow`；缺省 undefined = 护栏行为逐字节不变）。
+   * 只服务 `ctx.observe` 自证池的 hint_candidates 生成——歧义面在执行器实例上（同一 policy）。
+   */
+  hintTokenAllow?: readonly string[];
+  /**
    * P0-B：`meta.site.pages` 声明的页面 URL 清单。仅 `navPolicy:"entry-only"` 使用：
    * 再次直接导航到**声明页**（URL 经 `new URL().href` 归一后全等）放行——例如
    * `ctx.openPage("home")` 回入口页；未声明的 URL 仍 `navigation_forbidden`。

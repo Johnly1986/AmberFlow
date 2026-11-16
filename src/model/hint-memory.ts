@@ -19,7 +19,8 @@
  * plan is where it pays: the step resolves `rule:hint` at zero model cost.
  */
 import fs from "node:fs";
-import type { Elem } from "../engine/extraction.ts";
+import type { Elem, ElemPool } from "../engine/extraction.ts";
+import { hintMatch, suggestHints } from "../engine/rules.ts";
 import { isVolatile } from "../flow/signal-induction.ts";
 
 /** Attributes in preference order: the most stable handle the element actually has. */
@@ -55,22 +56,45 @@ function frameSuffixOf(elem: Elem): string {
  *
  * E5：子帧元素在稳定句柄后追加 ` frame:<own origin>`（主帧 / 未知 origin 帧不加）——
  * 回放面 `currentHint → hintMatch → parseHint` 已支持尾缀，消费链路无需新增代码。
+ *
+ * F82/F83 批 3 首项（记忆产物带行锚）：`elems` 在手时，若普通形状（identity / near~label）
+ * **不自证唯一**（hintMatch 歧义或落空）且元素是**同文案重复组成员**（row_texts/row_index
+ * 在场），复用 `suggestHints` 第 5/6 档纪律取行锚候选（内容候选优先、row-index 仅内容不可分
+ * ——同一 push 自证唯一，不发明第二套生成逻辑；与歧义面收编同判例），并按 E5 先例追加帧尾缀。
+ * **非 dup / 已唯一 / 不传 elems 场景产物逐字节不变**（全部既有调用点单参调用不受影响）。
  */
-export function induceHint(elem: Elem | undefined | null): string | null {
+export function induceHint(elem: Elem | undefined | null, elems?: ElemPool): string | null {
   if (!elem) return null;
   for (const [field, attr] of HANDLE_ATTRS) {
     const raw = elem[field];
     const value = typeof raw === "string" ? raw.trim() : "";
     if (!value || isVolatile(value)) continue;
     // the grammar's `=` branch case-folds, so store the raw value as-is
-    return `[${attr}=${value}]${frameSuffixOf(elem)}`;
+    return finishLearnedHint(elem, `[${attr}=${value}]${frameSuffixOf(elem)}`, elems);
   }
   const token = String(elem.label ?? "").trim();
   const tag = String(elem.tag ?? "").trim();
   if (token && tag && !isVolatile(token) && token.length <= 48) {
-    return `${tag}[near~${token}]${frameSuffixOf(elem)}`;
+    return finishLearnedHint(elem, `${tag}[near~${token}]${frameSuffixOf(elem)}`, elems);
   }
   return null;
+}
+
+/**
+ * F82/F83 批 3 首项：普通形状不自证唯一 + 重复组成员 ⇒ suggestHints 第 5/6 档行锚候选。
+ * 自证口径 = `hintMatch(base, elems) === elem.ref`（恰好唯一命中；歧义/落空都算不自证）。
+ * 行锚候选取 `suggestHints(elem, elems)` 输出里第一条含 ` in-row:` / ` row-index:` 的候选
+ * （该函数内部同一 push 自证唯一才保留；第 5 档内容候选优先、第 6 档 row-index 仅内容
+ * 不可分——复用，不复制）。elems 缺省 / 自证唯一 / 非重复组 = 原产物逐字节返回。
+ */
+function finishLearnedHint(elem: Elem, base: string, elems?: ElemPool): string {
+  if (elems === undefined) return base;
+  if (hintMatch(base, elems) === elem.ref) return base;   // 已自证唯一：逐字节不变
+  const dupMember = typeof elem.row_index === "number" || Array.isArray(elem.row_texts);
+  if (!dupMember) return base;                            // 非重复组：行锚恒落空，不产死 hint
+  const rowAnchor = suggestHints(elem, elems)
+    .find((h) => h.includes(" in-row:") || h.includes(" row-index:"));
+  return rowAnchor !== undefined ? `${rowAnchor}${frameSuffixOf(elem)}` : base;
 }
 
 export interface HintMemoryLike {

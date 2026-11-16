@@ -574,6 +574,12 @@ export class BrowserMiddleware {
    * `display` = A1 之前只看前 40 字 label。只作用于 hint 匹配（inspect/observe/session 无 policy）。
    */
   attrValueMatch: "full_label" | "display" = "full_label";
+  /**
+   * F83 批 3（deny-list 可配化）：第 5 档词元护栏的放行词元表（`meta.policy.hint_token_allow`；
+   * 缺省 undefined = 护栏行为逐字节不变）。生效面 = 歧义证据 suggested_hint（describeAmbiguity
+   * 下传）——单点消费在 rules.suggestHints.tokenOk；inspect CLI / session 面缺省（F58 同款面边界）。
+   */
+  hintTokenAllow?: readonly string[];
   /** See `MiddlewareOptions.candidatePriority`（A2 分桶窗口；缺省 bucketed）。 */
   candidatePriority: "bucketed" | "main-first" = "bucketed";
   /**
@@ -932,6 +938,7 @@ export class BrowserMiddleware {
     this.targetResolutionDeclared = opts.targetResolution === "declared";
     this.actHintDomFallback = opts.actHintDomFallback === true;
     this.attrValueMatch = opts.attrValueMatch ?? this.attrValueMatch;
+    this.hintTokenAllow = opts.hintTokenAllow ?? this.hintTokenAllow;
     if (opts.surfacePolicy !== undefined) this.surfacePolicy = { ...opts.surfacePolicy };
     this.donePreheldPolicy = opts.donePreheldPolicy ?? this.donePreheldPolicy;
     this.doneGuardPolicy = opts.doneGuardPolicy ?? this.doneGuardPolicy;
@@ -2267,6 +2274,7 @@ export class BrowserMiddleware {
     if (onAmbiguous === "fail") {
       const ambiguity = describeAmbiguity({
         target, source: "pool", elems, orderedRefs: refs, ordering: this.ambiguousOrdering,
+        ...(this.hintTokenAllow !== undefined ? { hintTokenAllow: this.hintTokenAllow } : {}),
       });
       if (ambiguity !== null) {
         return {
@@ -2397,6 +2405,7 @@ export class BrowserMiddleware {
     if (onAmbiguous === "fail") {
       const ambiguity = describeAmbiguity({
         target, source: "pool", elems: fresh, orderedRefs: refs, ordering: this.ambiguousOrdering,
+        ...(this.hintTokenAllow !== undefined ? { hintTokenAllow: this.hintTokenAllow } : {}),
       });
       if (ambiguity !== null) {
         return {
@@ -2652,6 +2661,7 @@ export class BrowserMiddleware {
       const ambiguity = describeAmbiguity({
         target, source: "dom_fallback", elems: synthetic, orderedRefs: refs,
         ordering: this.ambiguousOrdering,
+        ...(this.hintTokenAllow !== undefined ? { hintTokenAllow: this.hintTokenAllow } : {}),
       });
       if (ambiguity !== null) { await cleanup(); return { ambiguity }; }
     }
@@ -5568,7 +5578,10 @@ export class BrowserMiddleware {
           // it (stable handles only, via induceHint) so the next run of this exact url +
           // subgoal resolves by rule at zero model cost. Rule hits need no help.
           if (hintMemory && this._hintKey && (decisionKind === "model" || decisionKind === "escalate")) {
-            const learned = induceHint(el);
+            // F82/F83 批 3 首项：记忆产物带行锚——池在手（elems）时 dup 成员且普通形状
+            // 不自证唯一 ⇒ suggestHints 第 5/6 档行锚候选（复用，不发明第二套生成逻辑）；
+            // 非 dup/已唯一场景产物逐字节不变（induceHint 单参语义保持）。
+            const learned = induceHint(el, elems);
             if (learned) {
               hintMemory.record(this._hintKey, learned);
               if (verbose) console.log(`  step ${stepNo}: learned hint ${learned} for this page+subgoal`);

@@ -980,6 +980,14 @@ export interface MiddlewareOptions {
    */
   attrValueMatch?: AttrValueMatch;
   /**
+   * F83 批 3（deny-list 可配化）：第 5 档词元护栏的放行词元表（来自
+   * `meta.policy.hint_token_allow`；缺省不传 = 护栏行为逐字节不变）。生效面 = 歧义证据
+   * suggested_hint（describeAmbiguity 下传 suggestHints 单点消费）与 ctx.observe 自证池
+   * hint_candidates（CtxDeps 下传 observePage）；inspect CLI / session / 桥面缺省
+   * （F58 attr_value_match 同款面边界）。
+   */
+  hintTokenAllow?: readonly string[];
+  /**
    * S5：状态接入决策（来自 `meta.policy.decision_state`；缺省两项都 "off" = 今天的行为）。
    * 见 `DecisionStatePolicy`：gate 决定"stable_only 时先 settle + 同池同题不重复问"，
    * context 决定"决策请求是否带 ≤200B 结构化 state_digest"。

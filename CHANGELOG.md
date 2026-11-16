@@ -4,6 +4,56 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 行锚批 3 首项：记忆产物带行锚 + 桥 ElementView 透传 + 词元护栏放行表（F84）
+
+### 背景
+
+行锚 `in-row:`（F82）/`row-index:`（F83）落地后，三条消费链尚未收口：learn/record 的记忆
+产物落在同文案重复组时仍是普通形状（回放歧义 → 退模型，记忆价值打折）；桥 ElementView
+白名单未列 `row_texts`/`row_index`（Agent 桥面看不到行锚底座事实）；第 5 档词元护栏把
+"恰似数字"的 SKU 词元连同价格/时段一并拒绝（误杀无调优出口）。本批一次收口。
+
+### 记忆产物带行锚（induceHint 双参形态）
+
+- `induceHint(elem, elems?)`：`elems` 在手时，普通形状（identity / near~label）
+  **不自证唯一**（`hintMatch(base, elems) === elem.ref` 不成立——歧义或落空）且元素是
+  **同文案重复组成员**（row_texts/row_index 在场）⇒ 复用 `suggestHints` 第 5/6 档纪律取
+  行锚候选（内容候选优先、row-index 仅内容不可分——同一 push 自证唯一，**不发明第二套
+  生成逻辑**；与批 2 遗留收编的歧义面同判例）+ E5 先例帧尾缀。
+- **非 dup / 已自证唯一 / 单参调用产物逐字节不变**（全部既有调用点——findByHint 对照面、
+  amber start 演示面——保持单参调用）；record 面（executor 的 hintMemory.record）改传
+  `(el, elems)`。回放消费链 `currentHint → hintMatch → parseHint` 的尾缀 parse 由
+  splitTailSuffixes 唯一出处自动支持（核验，零新增代码）。
+
+### 词元护栏放行表（deny-list 可配化，meta.policy.hint_token_allow）
+
+- 第 5 档词元护栏（价格/时段 deny 模式）的**放行词元表**可由应用声明：表内词元跳过 deny
+  模式直接参与 in-row 候选生成——SKU 恰似数字被误杀时的外科调优出口（deny 追加不解决
+  误杀，放行才解决——按语义命名 `tokenAllow`，不按"deny-list"代号，实施记录报备）。
+- **配置面 = meta.policy**（理由：词元误杀是站点内容特征，SKU 形态随站点而变 → per-app
+  policy；config-schema 全局键会跨站点污染；沿 F58 attr_value_match / F59 act_hint_tier
+  先例）。校验 = 字符串数组、≤16 项、每项非空无内部空白 ≤40 字符（非法 = config_error）；
+  比较小写折叠；**结构约束（非空/禁 `>`/≤40）不退让**；缺省不写 = 护栏行为逐字节不变。
+- **单点消费** = `rules.suggestHints.tokenOk`（新增 `HintSuggestOptions.tokenAllow` opts 链）。
+  **面覆盖**：run 面歧义证据 suggested_hint（executor → describeAmbiguity 下传）+
+  `ctx.observe` 自证池 hint_candidates（CtxDeps → observePage 下传）；inspect CLI /
+  session / 桥面缺省——F58 attr_value_match 同款面边界，文档写明。
+- 显式声明才进 `effective_policy.hint_token_allow`。
+
+### 桥 ElementView 透传 row_texts / row_index（BACKLOG #4 收口）
+
+- `integrations/dsh-bridge/src/element-view.ts` 白名单两键：`row_texts`（strArray ≤6 行 ×
+  ≤40 字符，与引擎口径同界）、`row_index`（number 透传）——**仅同文案重复组元素携带**
+  （引擎 dup 门控采集；非重复组/缺省不出键，桥不补字段）。批 1/批 2 文档的"桥白名单未列"
+  边界声明关闭。
+
+### 文档与契约
+
+- schema **F84** 声明（dist/schema/ctx.json 快照随 precheck 重生成）；
+  `docs/APP_SCRIPT_AUTHORING.md`：meta.policy 表 + policy 键表 + §4.12 词元护栏段加
+  hint_token_allow；`docs/AGENT_INTERFACE.md`：ElementView 表 `row_texts`/`row_index` 行
+  改写为已收编；`docs/BACKLOG.md`：行锚立项 #4/#8 收口、#5 注记、#9 批 3 状态。
+
 ## [Unreleased] — 顺序行锚 hint `row-index:N`（F83 批 2：解析/匹配/编号底座/回捞/回退/生成纪律/observe 闭环/trace 证据）
 
 ### 背景

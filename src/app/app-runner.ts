@@ -1060,6 +1060,12 @@ export interface EffectivePolicy {
    */
   attr_value_match?: { value: "full_label" | "display"; source: "app" };
   /**
+   * F83 批 3（deny-list 可配化）：第 5 档词元护栏的放行词元表（**仅声明时出现** = 缺省
+   * 产物逐字节不变）。生效面 = run 面歧义证据 suggested_hint + ctx.observe 自证池
+   * hint_candidates；inspect CLI / session / 桥面缺省（F58 attr_value_match 同款面边界）。
+   */
+  hint_token_allow?: { value: readonly string[]; source: "app" };
+  /**
    * task-43 浏览器通道（**仅 env/meta 任一存在时出现** = 缺省产物逐字节不变）。
    * 生效值按 env(AMBERFLOW_BROWSER_CHANNEL) > meta.policy.browser 记账；真实二进制以
    * `env.browser.binary_basename`（D-1 启动事实）为准——那是 channel 解析后的地面真相。
@@ -1198,6 +1204,10 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
   // A1：属性值匹配底座**仅声明时出现**（缺省 full_label = 修复后；"display" 显式声明才进账）。
   if (declaredPolicy.attr_value_match !== undefined) {
     policy.attr_value_match = { value: declaredPolicy.attr_value_match, source: "app" as const };
+  }
+  // F83 批 3（deny-list 可配化）：放行词元表**仅声明时出现**（缺省 = 护栏行为逐字节不变）。
+  if (declaredPolicy.hint_token_allow !== undefined) {
+    policy.hint_token_allow = { value: declaredPolicy.hint_token_allow, source: "app" as const };
   }
   // task-43：浏览器通道——env(AMBERFLOW_BROWSER_CHANNEL) > meta.policy.browser，任一存在才
   // 进账（缺省产物逐字节不变）。最终二进制由 launchKwargs 同一优先级解析，env.browser
@@ -1417,6 +1427,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     actHintDomFallback: policy.act_hint_dom_fallback?.value === true,
     // A1：aria-label 属性 hint 的池侧匹配底座（缺省 full_label = 修复后；display = A1 之前）。
     attrValueMatch: policy.attr_value_match?.value,
+    // F83 批 3（deny-list 可配化）：词元护栏放行表（缺省不写 = 护栏行为逐字节不变）。
+    hintTokenAllow: policy.hint_token_allow?.value,
     // §W1：`risk_ask: rules-only` 让"要不要拦"不再花一次每步的前向（批模式下它的答案本来就被丢掉）。
     riskAsk: policy.risk_ask.value === "rules-only" ? "rules-only" : "always",
     reobserve: policy.reobserve.value,
@@ -2151,6 +2163,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           actHintDomFallback: resolvedPolicy.policy.act_hint_dom_fallback?.value === true,
           // A1：aria-label 属性 hint 的池侧匹配底座（缺省 full_label；display = A1 之前）。
           attrValueMatch: resolvedPolicy.policy.attr_value_match?.value,
+          // F83 批 3（deny-list 可配化）：词元护栏放行表（缺省不写 = 护栏行为逐字节不变）。
+          hintTokenAllow: resolvedPolicy.policy.hint_token_allow?.value,
           riskAsk: resolvedPolicy.policy.risk_ask.value === "rules-only" ? "rules-only" : "always",
           reobserve: resolvedPolicy.policy.reobserve.value,
           maxEffectiveRepeats: resolvedPolicy.policy.max_effective_repeats.value,
@@ -2387,6 +2401,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       navPolicy: policy.navigation?.value,
       // A1：ctx.waitForTarget 的命中口径（缺省 undefined = full_label；与执行器同一 policy）。
       attrValueMatch: policy.attr_value_match?.value,
+      // F83 批 3（deny-list 可配化）：ctx.observe 自证池的词元护栏放行表（缺省不写 = 逐字节不变；
+      // 与执行器歧义面同一 policy）。
+      hintTokenAllow: policy.hint_token_allow?.value,
       // P0-B：声明页放行清单（仅 entry-only 用它；缺省 undefined = 逐字节不变）。
       declaredPages: declaredPageUrls(pack),
       onRunReport: (rep) => {

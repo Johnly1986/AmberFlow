@@ -232,7 +232,7 @@ export const meta = (kit) => ({
 | `site` | 站点面：页面角色 `pages`、命名行抽取 `listExtract`（见 §5） |
 | `model` / `maxSubgoals` | 决策模型 checkpoint / 子目标上界（高级，缺省即可） |
 | `notes` | 给人看的备注（字符串列表），不参与运行 |
-| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` / `candidate_priority` / `done_preheld` / `effect_readback` / `settle` / `pool_gate` / `surface` / `decision_state` / `navigation` / `act_hint` / `act_hint_tier` / `attr_value_match` |
+| `policy` | 运行策略：`conf_floor` / `tiered_hint` / `reobserve` / `max_effective_repeats` / `risk_ask` / `done_timeout_ms` / `done_poll_ms` / `pool_ready_timeout_ms` / `pool_ready_poll_ms` / `candidate_priority` / `done_preheld` / `effect_readback` / `settle` / `pool_gate` / `surface` / `decision_state` / `navigation` / `act_hint` / `act_hint_tier` / `attr_value_match` / `hint_token_allow` |
 | `pace` | 运行节奏：`between_steps_ms` / `between_actions_ms` |
 | `invariants` | 结束态断言：`{ id, desc?, signal }` |
 | `recordedFrom` / `generatedFrom` | 血统：这段脚本从哪次演示/哪份生成物来 |
@@ -861,7 +861,10 @@ ctx.hint("删除 in-row:1042 frame:https://shop.example.com");
   唯一命中才保留）。**词元启发式**：优先"类标识符"词元（字母+数字混合，如 `sc7960`、
   `order-1042`），跳过纯价格/货币/百分比词元（`^[¥$€£\d.,%*\s]+$`）与时段词元
   （`^\d{1,2}:\d{2}$`）——价格/时段是页面最易漂移的文本，拿它做锚 = 假唯一失败面；作者
-  **手写** in-row 不受此限制，但请优先选身份文本（改版不漂移的列）。
+  **手写** in-row 不受此限制，但请优先选身份文本（改版不漂移的列）。**deny-list 可配化
+  （F83 批 3）**：SKU 恰似数字被护栏误杀时，`meta.policy.hint_token_allow: ["45021", …]`
+  放行指定词元（≤16 项、每项非空无空白 ≤40 字符、小写折叠比较；结构约束不退让）——run 面
+  歧义证据与 `ctx.observe` 生效，inspect CLI / session 面缺省（F58 同款面边界）。
 - **near vs row_texts 一句话分工**：`near` = 模型视图单行（宿主挑选后的展示装饰，进
   criteriaView 的 `[near=...]`）；`row_texts` = in-row 匹配底座（自证候选的词元来源，不进
   模型面）。作者只照抄 `hint_candidates`，不需要手工区分两者。
@@ -1120,6 +1123,7 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `browser` | （不写 = 现状链） | **task-43 浏览器通道**：`"chrome"`（系统 Chrome，Playwright `channel:"chrome"`，new headless）\| `"headless-shell"`（ms-playwright 的 headless-shell，= 缺省现状）。优先级 **env(`AMBERFLOW_BROWSER_CHANNEL`) > meta > 缺省**——env 是部署/CI 的机器级覆盖，meta 是应用作者的站点知识（已知 headless-shell 下坏的站点在此点名 chrome，如 zh.wikipedia 文章页的客户端 URL flap）。主机没有系统 Chrome 时 launch **如实报错不静默回退**（要回退请删 meta 或改 env）；与 `--headful` 正交组合（headful 语义独立：人工步等仍强制可见窗口）。生效值与来源进 `effective_policy.browser`（仅 env/meta 任一存在时出现）；真实二进制以 `env.browser.binary_basename`（D-1 启动事实）为准。已知代价（task-39 实测）：chrome 通道冷启动 +~13%，zh.wiki 类页面 open 快 ~3.5s 且免 flap |
 | `attr_value_match` | `full_label` | **A1 属性值匹配底座**：`full_label`（缺省）= `[aria-label=…]` / `[aria-label~…]` 同时比 ≤200 的 `full_label` 与模型视图 `label`（前 40 字）——>40 字的 aria-label 值可命中；`display` = A1 之前（只比前 40 字 label，>40 的值永不命中；逃生口/对照臂）。attrEq 与 attrSubstr 同一函数、一处修两形状；≤40 的值等值命中集合不变。显式声明才进 `effective_policy.attr_value_match`；inspect/observe/session 无 policy 恒 `full_label` |
 | `act_hint_tier` | `any` | **A3 弱档门槛**：`any`（缺省 = 现行为逐字节不变）= 弱档（bare 词前缀/词包含、attrSubstr loose 子串）胜出照旧执行 + `matched_others` 警告；`strong` = 弱档胜出判为**未命中**（step warning 换 `weak_hint_rejected`），随后按 `act_hint`：`widen` 交模型 / `strict` 结构化 `target_not_found`（reason 写弱档被拒 + 候选≤3 + 两条改法）。与 `act_hint` **正交**（`widen`+`strong` 合法）；判据复用 `takeHintMatchOthers()` 的既有 `suspicious`，不另造档位表；池解析与 rules-only 宽扫重解析共用同一判定；命令 target / learned hint / 决策步不受影响；显式声明才进 `effective_policy.act_hint_tier`（声明 `"any"` 也进账） |
+| `hint_token_allow` | （不写 = 护栏行为逐字节不变） | **F83 批 3：行锚词元护栏的放行表（deny-list 可配化）**：第 5 档 in-row 候选生成的词元护栏跳过价格/时段 deny 模式的词元表——SKU 恰似数字（如 `"45021"`）被护栏误杀时的外科调优出口。形状 = 字符串数组（≤16 项、每项非空无内部空白 ≤40 字符、比较小写折叠；非法 = `config_error`）。**面覆盖**：run 面歧义证据 suggested_hint + `ctx.observe` 自证池 hint_candidates 生效；inspect CLI / session / 桥面缺省（F58 attr_value_match 同款面边界）。**结构约束不退让**：非空/禁 `>`/≤40 字符仍强制。显式声明才进 `effective_policy.hint_token_allow` |
 
 产物里的 `effective_policy` 只在非缺省时出现，并写明来源（`cli` / `config` / `app` / `provider` / `env` / `default`）。
 

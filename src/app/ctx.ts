@@ -1087,7 +1087,10 @@ export function createCtx(deps: CtxDeps): Ctx {
       if (problems.length) throw new StopError("config_error", problems.join("；"));
       const started = Date.now();
       const session = await deps.ensureSession();
-      const result = await observePage(session.page as unknown as PageLike, opts, deps.surfacePolicy);
+      const result = deps.hintTokenAllow !== undefined
+        ? await observePage(session.page as unknown as PageLike, opts, deps.surfacePolicy,
+            { hintTokenAllow: deps.hintTokenAllow })
+        : await observePage(session.page as unknown as PageLike, opts, deps.surfacePolicy);
       // 只记摘要：counts + truncated + 判分样例（task-21/D-1：前 5 个元素 tag/label≤40/
       // hints≤3 的有界投影——0/5 判分所需字段的流式可见；全量明细仍只在 observe 返回值里，
       // result 装配时经 scrubSecrets 掩码）。

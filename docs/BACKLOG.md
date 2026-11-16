@@ -203,12 +203,12 @@ executor.ts 头部注释区、类型区、纯函数区、报告尾（`runReportT
 | 1 | `findByHint` 支持 `in-row:` | `plan check --probe` 的旧匹配器（身份形状 + `induceHint` 产物）未适配 in-row 尾缀——组合后缀的 `splitTailSuffixes` 剥离已继承（N6 唯一出处），行锚判定需接 `row_texts` 底座或如实声明不支持 | 方案批 2 |
 | 2 | apps check hint-lint in-row 语义提醒 | hint-lint（declaration-scan 消费面）经 parseHint 自动继承形状位；"in-row 写在非重复组元素上 = 恒落空"可做静态提醒（需要声明面重复组事实，先例：nearToken 提醒） | 方案批 2 |
 | 3 | 歧义证据反向提示"改用 in-row" | on_ambiguous 兜底命中的场景里，候选带同文案重复组事实时建议"改用 `<label> in-row:<token>`"——逐步挤出运气兜底；触发条件设计见方案 §8.7 | 方案批 2 |
-| 4 | 桥 ElementView 透传 row_texts | 引擎 observe 面已产 `row_texts`（dup 门控）；桥投影合同 `element-view.ts` 未列入该键（批 1 范围外，照抄入口走 hint_candidates 的 in-row 候选）——透传需把键加进 ElementView 白名单并定上限 | F54 合同 |
-| 5 | 词边界档位 / 多 token 组合（`in-row:a>b`） | row_texts 是已切分原子行、碰撞面小一个量级——有实测碰撞证据再议；`>` 词法已保留 | 方案批 3 / §8 |
+| 4 | 桥 ElementView 透传 row_texts / row_index | 引擎 observe/inspect 面已产 `row_texts`（≤6 行 × ≤40，dup 门控）与 `row_index`（1-based 组序）——照抄入口走 hint_candidates 的 in-row/row-index 候选 | **批 3 已收口**：`element-view.ts` 白名单两键（`row_texts` ≤6×≤40 strArray、`row_index` num 透传；仅重复组元素携带，非重复组不出键——桥不补字段）；AGENT_INTERFACE ElementView 表同步 |
+| 5 | 词边界档位 / 多 token 组合（`in-row:a>b`） | row_texts 是已切分原子行、碰撞面小一个量级——有实测碰撞证据再议；`>` 词法已保留 | 批 3 首项（induceHint 行锚/桥透传/deny-list）已落地，本项仍开放（§2 非目标维持） |
 | 6 | NFKC 归一（全角 fail-closed 放行） | 两面新增归一层 = 纯漂移面（两轮架构评审仲裁否决）；等实站全角案例再议 | 方案 §8.8 |
 | 7 | OBSERVE_JS 大重复网格时延实测 | 100+ 同文按钮的 observe 爬升成本需 ctrip 实测一次；超标则 observe 侧爬升帽降 4 层（与 run 面 8 层不同帽需写入契约）或拆批 1b（同条目两步、不可跨迭代） | 方案 §8.10 / R9 |
-| 8 | deny-list 可配化 | SKU 恰似数字的误杀调优（连续数字 ≥5 位行过滤的误放面）——词元启发式的 deny-list 配置化 | 方案批 3 |
-| 9 | 批 2/批 3 主链 | **row-index 顺序行锚（批 2 首项）——已实施**（`docs/ROW_INDEX_HINT_PLAN.md` v1.0 契约 c2ee024；a38e674）；**批 2 遗留收编（本批）——findByHint 行锚适配（start.findByHint 四类尾缀过滤 + plan probe 面传 elems）/ apps check hint-lint 行锚提醒（rejected+dupOnly 通道）/ 歧义证据 row_index 事实（反向提示复用 suggestHints 第 5/6 档，不发明第二套生成逻辑）/ probe expect "failed" 类型联合收编（types.ts ProbeExpectMember + case.ts 成员校验 + runner 去 as never）/ 规划面诊断三案 additive 接线（§8 遗留 #8 收口——四个停因点池在手 + curHint 可达，stopCode 不变、reason 附证据）**；桥 ElementView 透传 row_index/row_texts（#4，合同变更另立）；induceHint 记忆产物带 in-row/row-index、criteriaView [near] 演进（批 3） | 方案 §5 |
+| 8 | deny-list 可配化 | SKU 恰似数字被护栏误杀的调优出口——词元启发式的放行表配置化 | **批 3 已收口**：`meta.policy.hint_token_allow`（≤16 项、每项非空无空白 ≤40 字符、小写折叠；非法 = config_error）——表内词元跳过价格/时段 deny 模式直接参与第 5 档生成（结构约束不退让）；缺省不写 = 逐字节不变；面覆盖 = run 面歧义 + ctx.observe，inspect/session/桥面缺省（F58 同款边界）；配置面选 meta.policy 的理由留档（站点内容特征 → per-app，全局键跨站点污染） |
+| 9 | 批 2/批 3 主链 | **row-index 顺序行锚（批 2 首项）——已实施**（`docs/ROW_INDEX_HINT_PLAN.md` v1.0 契约 c2ee024；a38e674）；**批 2 遗留收编——已实施**（13cd7ca + E 项流转修复：findByHint 行锚适配 / apps check hint-lint 行锚提醒 / 歧义证据 row_index 事实 / probe expect "failed" 类型联合收编 / 规划面诊断三案 additive 接线 + id 缺失命令不再静默丢弃）；**批 3 首项——induceHint 记忆产物带行锚（双参形态，复用 suggestHints 第 5/6 档）+ 桥 ElementView 透传 row_texts/row_index（#4 同批收口）+ deny-list 可配化（meta.policy.hint_token_allow，#8 同批收口）**；criteriaView [near] 演进（另议） | 方案 §5 |
 
 **示例（批 1 已收口的闭环）**：`订票 in-row:sc7960` 在 15 个同名订票按钮的列表页唯一命中
 SC7960 那一卡的按钮——token 来自 `inspect`/`ctx.observe` 的 `hint_candidates`（同一 hintMatch
