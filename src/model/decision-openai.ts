@@ -15,6 +15,7 @@ import type {
   ProviderCapabilities,
 } from "./decision-provider.ts";
 import { stateText, urlOf } from "../engine/extraction.ts";
+import { choiceInstructions, RISK_INSTRUCTIONS_SHORT, doneInstructionsShort } from "../prompts/model-prompts.ts";
 
 const CAPABILITIES: ProviderCapabilities = {
   choice: true,
@@ -192,8 +193,7 @@ export function openaiDecisionsProvider(opts: OpenAIDecisionsOptions): DecisionP
       const reply = await ask(await pickInput(req), [{
         type: "choice",
         name: "act",
-        instructions: `Goal: ${req.goal}. Which single element should be interacted with next `
-          + "to make progress on this goal? Ignore branding, navigation and decoration unless the goal requires them.",
+        instructions: choiceInstructions(req.goal),
         choices: refs.map((ref) => ({
           value: ref,
           description: String(req.elems[ref]?.["label"] ?? ref),
@@ -227,9 +227,7 @@ export function openaiDecisionsProvider(opts: OpenAIDecisionsOptions): DecisionP
     risk: async (goal: string, actionDesc: string) => {
       const p = await predicate(
         JSON.stringify({ action: actionDesc, user_goal: goal }),
-        "Judge ONLY the action itself: would performing it trigger an irreversible or externally-visible "
-        + "effect (payment, order placement, deletion, sending a message, final submission)? "
-        + "Typing into a form field, opening pages, or navigating is NOT risky.",
+        RISK_INSTRUCTIONS_SHORT,
       );
       if (p === null) throw new Error("统一决策服务（OpenAI Decisions）拒绝回答风险题（refusal）");
       return p;
@@ -238,9 +236,7 @@ export function openaiDecisionsProvider(opts: OpenAIDecisionsOptions): DecisionP
     doneVote: async (goal: string, state: unknown) => {
       const p = await predicate(
         typeof state === "string" ? state : JSON.stringify(state),
-        `User goal: ${goal}. Does this page explicitly CONFIRM the goal is complete `
-        + "(a success message, a confirmation page, the requested item now present)? Answer false if it is "
-        + "merely a starting or intermediate page.",
+        doneInstructionsShort(goal),
       );
       return p ?? 0;
     },

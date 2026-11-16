@@ -1,0 +1,61 @@
+{
+  "note": "模型提示词快照（P0-0.4 单源化）。sha256 = 用 SAMPLE_GOAL 渲染的逐字节摘要；模型 prompt 改动 = 行为变更，必须 `node --experimental-strip-types tools/prompt-hit.ts --fix` 显式刷新并由 model 组重审。",
+  "sample_goal": "TEST_GOAL_123",
+  "prompts": {
+    "decision.choice": {
+      "version": 1,
+      "chars": 177,
+      "sha256": "dba652ff3b762de704aacbaed8977697873b62195163b1273f1762c04213376c"
+    },
+    "picker.choice": {
+      "version": 1,
+      "chars": 78,
+      "sha256": "cb660b2b1f9b07339be1bcf4d8d070e3fb3e0cf8913a0f8e09f6f11143cdf2b9"
+    },
+    "decision.risk.short": {
+      "version": 1,
+      "chars": 246,
+      "sha256": "26f794212426799f2a2ca7fc3e14b76066dbba60669e9482c7f562be05373e04"
+    },
+    "decision.risk.long": {
+      "version": 1,
+      "chars": 332,
+      "sha256": "871c777f6eb74c0f9efb79a7c0f0d020a020b2558c16737ad4bc16f831df005e"
+    },
+    "decision.risk.jevk5": {
+      "version": 1,
+      "chars": 334,
+      "sha256": "fdcc91df03f2eb9968fbcf047e3621064a3ec94ad0fd638e176c4462edf0dcf1"
+    },
+    "decision.done.short": {
+      "version": 1,
+      "chars": 216,
+      "sha256": "1679eb49c57406aa17e6ea91aba0b4e4ec940595e13e2c2923ffb346da20f665"
+    },
+    "decision.done.long": {
+      "version": 1,
+      "chars": 234,
+      "sha256": "3fb3cd06274bb8647f13f36d7f8ca361c19157cc2e20ec6602a3eabf5f8d03ec"
+    },
+    "decision.escalate": {
+      "version": 1,
+      "chars": 401,
+      "sha256": "bce6456a2d4d7797399618546341dd7dd35977086bda982288e4b87da5e1213e"
+    },
+    "audit.trace": {
+      "version": 1,
+      "chars": 397,
+      "sha256": "5fd849551ed410bc874e8656b26cd8711399d0535c181631e6895d76a312e06a"
+    },
+    "picker.irreversible": {
+      "version": 1,
+      "chars": 95,
+      "sha256": "640a223321144eacfa7f91ea19a3771b5ed5566d0a4866f6323609d2f7ddfd80"
+    },
+    "picker.attack": {
+      "version": 1,
+      "chars": 143,
+      "sha256": "6aafd3fb227b441a6e1b2ce21d0b6acb397d0eba2ef31c255633083df9b1cfd5"
+    }
+  }
+}

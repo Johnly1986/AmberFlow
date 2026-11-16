@@ -18,6 +18,7 @@
  */
 import type { DecisionProvider, ProviderCapabilities } from "./decision-provider.ts";
 import { systemOneClient, type SystemOneProfile } from "./system-one-client.ts";
+import { choiceInstructions, riskInstructionsJevk5, doneInstructionsLong } from "../prompts/model-prompts.ts";
 
 const ENDPOINT_DEFAULT = "http://127.0.0.1:8090/v1/systemone";
 
@@ -48,15 +49,9 @@ export function jevk5Provider(opts: JevK5Options = {}): DecisionProvider {
     extraBody: () => ({}),
     minOptions: 2,               // choice 要 ≥2 个选项，否则服务端 400
     validateChoiceInPool: false, // 信任服务端返回的 choice
-    choiceInstructions: (goal) => `Goal: ${goal}. Which single element should be interacted with next `
-      + "to make progress on this goal? Ignore branding, navigation and decoration unless the goal requires them.",
-    riskInstructions: (goal) => "The user goal is given for context only. Judge ONLY the action itself: would performing "
-      + "it trigger an irreversible or externally-visible effect (payment, order placement, deletion, sending a message, "
-      + "final submission)? Typing text into a visible form field, opening pages, or navigating is NOT risky. "
-      + `{action} (context: ${goal})`,
-    doneInstructions: (goal) => `User goal: ${goal}. Look at this page: does it explicitly CONFIRM the goal is complete `
-      + "(a success message, a confirmation page, the requested item now present)? Answer false "
-      + "if the page is merely a starting or intermediate page.",
+    choiceInstructions,
+    riskInstructions: riskInstructionsJevk5,
+    doneInstructions: doneInstructionsLong,
     unreachableHint: "起服务见 docs/DECISION_PROVIDER_JEVK5.md；没起就别选 --provider jevk5。",
     timeoutMs: opts.timeoutMs,
     fetchImpl: opts.fetchImpl,

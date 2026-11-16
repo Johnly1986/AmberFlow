@@ -23,6 +23,7 @@
 import type { DecisionProvider, ProviderCapabilities } from "./decision-provider.ts";
 import { stateText, urlOf } from "../engine/extraction.ts";
 import { systemOneClient, type SystemOneProfile } from "./system-one-client.ts";
+import { choiceInstructions, RISK_INSTRUCTIONS_SHORT, doneInstructionsShort } from "../prompts/model-prompts.ts";
 
 const MODEL_DEFAULT = "decision-model-preview";
 
@@ -93,9 +94,8 @@ export function tokenPlanProvider(opts: TokenPlanOptions = {}): DecisionProvider
     extraBody: () => ({ model }),
     minOptions: 1,
     validateChoiceInPool: true,
-    // 问法与百炼同族（同一 decision-model-preview 后端；措辞是实测过的那套）。
-    choiceInstructions: (goal) => `Goal: ${goal}. Which single element should be interacted with next `
-      + "to make progress on this goal? Ignore branding, navigation and decoration unless the goal requires them.",
+    // 问法与百炼同族（同一 decision-model-preview 后端；措辞唯一出处 = src/prompts/model-prompts.ts）。
+    choiceInstructions,
     // **带上文**（2026-10-20）：choice 的 state 从 `{goal}` 扩为 `goal+url+title+main_text`，
     // 与本地 laya 分支的 pick 同一口径（复用 stateText/urlOf，不新造渲染）——之前模型在
     // "看不见页面"的条件下被问，conf 0.03 究竟多少归能力、多少归信息量，必须先补上信息量再测。
@@ -111,12 +111,8 @@ export function tokenPlanProvider(opts: TokenPlanOptions = {}): DecisionProvider
       } catch { /* fake page/死页：少正文，题照问 */ }
       return st;
     },
-    riskInstructions: () => "Judge ONLY the action itself: would performing it trigger an irreversible or "
-      + "externally-visible effect (payment, order placement, deletion, sending a message, final submission)? "
-      + "Typing into a form field, opening pages, or navigating is NOT risky.",
-    doneInstructions: (goal) => `User goal: ${goal}. Does this page explicitly CONFIRM the goal is complete `
-      + "(a success message, a confirmation page, the requested item now present)? Answer false if it is "
-      + "merely a starting or intermediate page.",
+    riskInstructions: () => RISK_INSTRUCTIONS_SHORT,
+    doneInstructions: doneInstructionsShort,
     unreachableHint: "检查网络与 TOKEN_PLAN_ENDPOINT；token 只从环境读：TOKEN_PLAN_API_KEY。",
     timeoutMs: opts.timeoutMs,
     fetchImpl: opts.fetchImpl,

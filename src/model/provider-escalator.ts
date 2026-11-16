@@ -18,6 +18,7 @@
  */
 import type { EscalatorLike } from "../engine/executor.ts";
 import { decisionProviderOrNull, type ClosedSetRequest } from "./decision-provider.ts";
+import { ESCALATOR_INSTRUCTIONS } from "../prompts/model-prompts.ts";
 
 /**
  * 梯级题面：原 `llmEscalator` system 提示词的语义核心逐字保留（可比性）；末尾
@@ -25,12 +26,7 @@ import { decisionProviderOrNull, type ClosedSetRequest } from "./decision-provid
  * 协议层所有（SystemOne / laya / OpenAI-decisions 各自定义），题面再硬编码格式
  * 会跟协议层打架。
  */
-export const ESCALATOR_INSTRUCTIONS =
-  "You are a stronger reasoner consulted by a browser-automation harness when its local "
-  + "decision model is unsure. You are given the same candidate elements the local model "
-  + "saw, and they ALREADY EXIST on the page. Choose the single element that best advances "
-  + "the goal. You may NOT invent elements, values or actions, and you may not propose "
-  + "steps. If none of the candidates advances the goal, answer none.";
+export { ESCALATOR_INSTRUCTIONS };
 
 /**
  * 从**当前已装**的决策源构造 escalation 梯级。

@@ -32,6 +32,7 @@ import {
   getLayaRuntime, installLayaRuntime, countingRuntime,
   type DecisionAgent, type LayaRuntime, type ModelState,
 } from "./model.ts";
+import { choiceInstructions, RISK_INSTRUCTIONS_LONG, doneInstructionsLong } from "../prompts/model-prompts.ts";
 
 /** 一个决策提供者的身份与能力声明。 */
 export interface ProviderCapabilities {
@@ -538,7 +539,7 @@ export function layaProvider(opts: {
       const res = await runtime.predictShortlist(agent, state, {
         act: {
           type: "choice",
-          instructions: `Goal: ${req.goal}. Which single element should be interacted with next to make progress on this goal? Ignore branding, navigation and decoration unless the goal requires them.`,
+          instructions: choiceInstructions(req.goal),
           criteria: view,
         },
       }, { embedFn, k: req.k });
@@ -585,7 +586,7 @@ export function layaProvider(opts: {
       const res = await agent.predict({ action: actionDesc, user_goal: goal }, {
         r: {
           type: "noul",
-          instructions: "The user goal is given for context only. Judge ONLY the action itself: would performing it trigger an irreversible or externally-visible effect (payment, order placement, deletion, sending a message, final submission)? Typing text into a visible form field, opening pages, or navigating is NOT risky. {action} (context: {user_goal})",
+          instructions: RISK_INSTRUCTIONS_LONG,
         },
       });
       const r = res.answers["r"] as { noul?: number } | undefined;
@@ -599,7 +600,7 @@ export function layaProvider(opts: {
           type: "noul",
           // **逐字照抄** `BrowserMiddleware.isDone` 的问法：换缝不该换问题——
           // 这条 noul 分数会进报告（advisory），文案变了它就不可比。
-          instructions: `User goal: ${goal}. Look at this page: does it explicitly CONFIRM the goal is complete (a success message, a confirmation page, the requested item now present)? Answer false if the page is merely a starting or intermediate page.`,
+          instructions: doneInstructionsLong(goal),
         },
       });
       const d = res.answers["d"] as { noul?: number } | undefined;

@@ -17,6 +17,7 @@
  */
 import type { DecisionProvider, ProviderCapabilities } from "./decision-provider.ts";
 import { systemOneClient, type SystemOneProfile } from "./system-one-client.ts";
+import { choiceInstructions, RISK_INSTRUCTIONS_SHORT, doneInstructionsShort } from "../prompts/model-prompts.ts";
 
 const MODEL_DEFAULT = "decision-model-preview";
 const REGION_DEFAULT = "cn-beijing";
@@ -80,14 +81,9 @@ export function bailianProvider(opts: BailianOptions = {}): DecisionProvider {
     extraBody: () => ({ model }),
     minOptions: 1,
     validateChoiceInPool: true,
-    choiceInstructions: (goal) => `Goal: ${goal}. Which single element should be interacted with next `
-      + "to make progress on this goal? Ignore branding, navigation and decoration unless the goal requires them.",
-    riskInstructions: () => "Judge ONLY the action itself: would performing it trigger an irreversible or "
-      + "externally-visible effect (payment, order placement, deletion, sending a message, final submission)? "
-      + "Typing into a form field, opening pages, or navigating is NOT risky.",
-    doneInstructions: (goal) => `User goal: ${goal}. Does this page explicitly CONFIRM the goal is complete `
-      + "(a success message, a confirmation page, the requested item now present)? Answer false if it is "
-      + "merely a starting or intermediate page.",
+    choiceInstructions,
+    riskInstructions: () => RISK_INSTRUCTIONS_SHORT,
+    doneInstructions: doneInstructionsShort,
     unreachableHint: "检查网络/端点/workspace id；没配好就别选 --provider bailian。",
     timeoutMs: opts.timeoutMs,
     fetchImpl: opts.fetchImpl,

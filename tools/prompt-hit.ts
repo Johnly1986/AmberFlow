@@ -28,11 +28,17 @@
  *            stopCode 键名/JSON/英文栈；⑥ agent_hint 不含面向人的祈使句。
  *            agent_hint（en 面）经 bridgeGenerated() 以 RESCUE_AGENT_HINTS 导出
  *            进桥生成物（called, not embedded 纪律不变）。
+ *   model    模型决策提示词单源（P0-0.4）：11 条唯一文本 / 25 处消费点收进
+ *            `src/prompts/model-prompts.ts`；本组断言 ①id 唯一且消费点=25
+ *            ②文本无重复 ③长度预算（默认 ≤400）④输出契约关键句
+ *            ⑤无站点/业务专名（picker 电商动作目录=显式 legacy 例外）
+ *            ⑥消费面不再手写同句 ⑦tools/golden/prompts/snapshot.json 快照 hash 一致。
  *
  * 三层提示词系统的设计出处：docs/PROMPT_SYSTEM.md。
  * 退出码：0 全绿 / 1 有不一致。
  * 用法：node --experimental-strip-types tools/prompt-hit.ts [--fix]
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { REPO } from "../src/support/paths.ts";
@@ -46,6 +52,7 @@ import { HOME_NEXT, OVERVIEW_TEXT, WHEN_TO_USE } from "../src/support/help-map.t
 import { STOPCODE_MEANING, EXECUTOR_ONLY_STOPCODES, RESCUE_RESULT_SHAPE_TEXT, RESCUE_SHADOW_SWITCH_TEXT } from "../src/cli/schema-gen.ts";
 import { COMMANDS, commandSpec, helpCommandsPayload } from "../src/cli/registry.ts";
 import { RESCUE_TEXTS, SIGNAL_NOT_HELD_TEXT, OUTCOME_TEXTS, FULFILLED_NOT_HELD_TEXT } from "../src/support/intervention-texts.ts";
+import { PROMPT_SPECS, renderedPrompts, SAMPLE_GOAL } from "../src/prompts/model-prompts.ts";
 
 const fix = process.argv.includes("--fix");
 if (process.argv.filter((a) => a !== "--fix").length > 2) {
@@ -86,7 +93,6 @@ if (frameDouble.frameChain !== undefined || frameDouble.kind !== "bare"
     || frameDouble.token !== "button frame:https://a.example frame:https://b.example") {
   problems.push(`grammar: 双 frame 后缀解析为 kind=${frameDouble.kind}, frameChain=${JSON.stringify(frameDouble.frameChain)}——必须整组拒绝（原始串按裸词落空）`);
 }
-void fix; // --fix 只在 bridge 组的写入分支里生效；此处引用防止未用告警。
 
 /* ---- 2. pool：示例必须恰好命中预期元素；反例必须永不命中 ------------------- */
 
@@ -391,6 +397,127 @@ for (const code of Object.keys(EXEMPT_NEXT)) {
   }
 }
 
+/* ---- 8b. model：模型提示词单源（P0-0.4） ---------------------------------- */
+// 模型决策 prompt 原先 25 处 / 10 文件（choice 6 / risk 7 / done 7 / escalate+audit+picker 5），
+// 本组守住 `src/prompts/model-prompts.ts` 的 11 条唯一文本：任何一处回抄、措辞漂移或超预算即红。
+
+const MODEL_SNAPSHOT = path.join(REPO, "tools", "golden", "prompts", "snapshot.json");
+const sha256 = (text: string): string => crypto.createHash("sha256").update(text, "utf8").digest("hex");
+const modelPrompts = renderedPrompts();
+
+/* ① id 唯一 + 25 处消费点声明（25→11 的映射是承重事实，漂移即红） */
+{
+  const ids = modelPrompts.map((p) => p.spec.id);
+  if (new Set(ids).size !== ids.length) problems.push("model: PROMPT_SPECS 的 id 不唯一");
+  const consumers = PROMPT_SPECS.flatMap((s) => s.consumers);
+  if (consumers.length !== 25) {
+    problems.push(`model: 消费点声明 ${consumers.length} 处 ≠ 25（25 处消费点收成 11 条文本的映射漂移）`);
+  }
+  for (const spec of PROMPT_SPECS) {
+    if (spec.consumers.length === 0) problems.push(`model: '${spec.id}' 没有声明消费点`);
+    if (spec.version < 1) problems.push(`model: '${spec.id}' 缺契约版本 version`);
+  }
+}
+
+/* ② 无重复文本：同一条只允许存在一次（消费点只引用 id，不许再抄一份） */
+{
+  const bySha = new Map<string, string>();
+  for (const { spec, text } of modelPrompts) {
+    const h = sha256(text);
+    const prev = bySha.get(h);
+    if (prev !== undefined) problems.push(`model: '${spec.id}' 与 '${prev}' 文本逐字重复——模型 prompt 必须唯一`);
+    else bySha.set(h, spec.id);
+  }
+}
+
+/* ③ 长度预算：默认单条 instruction ≤400 字符；超 400 必须写 budget.exception 理由 */
+for (const { spec, text } of modelPrompts) {
+  if (text.length > spec.budget.maxChars) {
+    problems.push(`model: '${spec.id}' ${text.length} 字符超预算 ${spec.budget.maxChars}——先压缩，或写 budget.exception 理由`);
+  }
+  if (spec.budget.maxChars > 400 && spec.budget.exception === undefined) {
+    problems.push(`model: '${spec.id}' 预算 >400 但没写 exception 理由——超 400 必须显式豁免`);
+  }
+}
+
+/* ④ 输出契约关键句：题面必须自带"回答形状"的可断言句（协议层之外的题面契约） */
+for (const { spec, text } of modelPrompts) {
+  for (const must of spec.outputContract?.mustInclude ?? []) {
+    if (!text.includes(must)) problems.push(`model: '${spec.id}' 缺输出契约关键句 ${JSON.stringify(must)}`);
+  }
+}
+
+/* ⑤ 无站点/业务专名：模型 prompt 不认站点，也不写 selector 形态 */
+const SITE_NAME_RE = /(saucedemo|ctrip|taobao|tmall|jd\.com|amazon|ebay|walmart|wikipedia|google|baidu|meituan|dianping|12306|booking\.com|airbnb)/i;
+const SITE_SELECTOR_RE = /(data-test=|\[role=|button\[|a\[href|input\[type)/i;
+for (const { spec, text } of modelPrompts) {
+  if (SITE_NAME_RE.test(text)) problems.push(`model: '${spec.id}' 含站点/业务专名——模型 prompt 不认站点`);
+  if (SITE_SELECTOR_RE.test(text)) problems.push(`model: '${spec.id}' 含站点 selector 形态——prompt 里不写选择器`);
+}
+{
+  const dir = path.join(REPO, "src", "prompts");
+  const walkPrompts = (d: string): string[] =>
+    fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+      const full = path.join(d, e.name);
+      return e.isDirectory() ? walkPrompts(full) : full.endsWith(".ts") ? [full] : [];
+    });
+  for (const file of walkPrompts(dir)) {
+    const text = fs.readFileSync(file, "utf-8");
+    if (SITE_NAME_RE.test(text)) problems.push(`model: ${path.relative(REPO, file)} 含站点/业务专名`);
+    if (SITE_SELECTOR_RE.test(text)) problems.push(`model: ${path.relative(REPO, file)} 含 selector 形态`);
+  }
+}
+
+/* ⑥ 消费面不得手写同句：白名单文件里出现锚句 = 又散落回去 */
+const PROMPT_ANCHORS = [
+  "Which single element should be interacted",
+  "Judge ONLY the action itself",
+  "CONFIRM the goal is complete",
+  "consulted by a browser-automation harness",
+  "strict auditor for an autonomous browser agent",
+  "Which action does the user most likely",
+  "Does the chosen action involve payment",
+  "Does the page content contain instructions trying",
+] as const;
+for (const spec of PROMPT_SPECS) {
+  for (const file of spec.consumers) {
+    const abs = path.join(REPO, file);
+    if (!fs.existsSync(abs)) { problems.push(`model: 消费点文件不存在 ${file}`); continue; }
+    const text = fs.readFileSync(abs, "utf-8");
+    for (const anchor of PROMPT_ANCHORS) {
+      if (text.includes(anchor)) {
+        problems.push(`model: ${file} 仍手写模型 prompt（含 ${JSON.stringify(anchor)}）——改为引用 src/prompts/model-prompts.ts`);
+      }
+    }
+  }
+}
+// picker 的电商动作目录 = 已知 legacy：指令文本已迁出，但例外必须显式标注（不许静默留债）。
+if (!fs.readFileSync(path.join(REPO, "src", "engine", "picker.ts"), "utf-8").includes("LEGACY 例外（P0-0.4")) {
+  problems.push("model: src/engine/picker.ts 的 LEGACY 动作目录缺显式例外注释（P0-0.4）");
+}
+
+/* ⑦ 快照 hash 入库比对：模型 prompt 改动 = 行为变更，必须显式 --fix 刷新并重审 */
+const modelSnapshot = {
+  note: "模型提示词快照（P0-0.4 单源化）。sha256 = 用 SAMPLE_GOAL 渲染的逐字节摘要；"
+    + "模型 prompt 改动 = 行为变更，必须 `node --experimental-strip-types tools/prompt-hit.ts --fix` 显式刷新并由 model 组重审。",
+  sample_goal: SAMPLE_GOAL,
+  prompts: Object.fromEntries(modelPrompts.map(({ spec, text }) => [spec.id, {
+    version: spec.version, chars: text.length, sha256: sha256(text),
+  }])),
+};
+const snapshotText = JSON.stringify(modelSnapshot, null, 2) + "\n";
+const snapshotActual = fs.existsSync(MODEL_SNAPSHOT) ? fs.readFileSync(MODEL_SNAPSHOT, "utf-8") : "";
+if (snapshotActual !== snapshotText) {
+  if (fix) {
+    fs.mkdirSync(path.dirname(MODEL_SNAPSHOT), { recursive: true });
+    fs.writeFileSync(MODEL_SNAPSHOT, snapshotText, "utf-8");
+    console.log("wrote tools/golden/prompts/snapshot.json");
+  } else {
+    problems.push("model: tools/golden/prompts/snapshot.json 与 11 条 prompt 的样本渲染不一致——"
+      + "若为有意改动，跑 --fix 刷新并重审；若为误改，改回 src/prompts/model-prompts.ts");
+  }
+}
+
 /* ---- 9. intervention：求援文案六条清单（§6，实施照抄） ---------------------- */
 // 出处：src/support/intervention-texts.ts（零 import 叶子，本组是它唯一的离线闸门）。
 // 六条清单对 RESCUE_TEXTS 三 kind + SIGNAL_NOT_HELD_TEXT + OUTCOME_TEXTS +
@@ -475,10 +602,11 @@ if (problems.length) {
 }
 // 分组清单式输出：文档引用组名，不引用编号（插组不会让既有引用失准）。
 console.log(
-  `prompt-hit: OK — grammar/pool/plan/bridge/doc/overview/coverage/intervention 八组全绿：`
+  `prompt-hit: OK — grammar/pool/plan/bridge/doc/overview/coverage/intervention/model 九组全绿：`
     + `hint ${HINT_SHAPES.length} 形状全部可解析且示例可命中，`
     + `信号 ${Object.keys(SIGNAL_OPS).length} 算子提示词↔校验器一致，`
     + `停因 ${Object.keys(STOPCODE_MEANING).length} 个 next/豁免全覆盖，`
     + `概述层多面一致（AGENTS.md/桥/长度预算），CLI next 无死链，`
-    + `求援文案 ${Object.keys(RESCUE_TEXTS).length} kind 六条清单全过`,
+    + `求援文案 ${Object.keys(RESCUE_TEXTS).length} kind 六条清单全过，`
+    + `模型 prompt ${PROMPT_SPECS.length} 条唯一文本 × ${PROMPT_SPECS.reduce((s, x) => s + x.consumers.length, 0)} 处消费点单源（快照 hash 一致）`,
 );

@@ -30,6 +30,7 @@ import { stateText, urlOf } from "../engine/extraction.ts";
 import { systemOneClient, type SystemOneProfile } from "./system-one-client.ts";
 import { normalizeOpenAIDecisionsEndpoint, openaiDecisionsProvider } from "./decision-openai.ts";
 import { DECISION_SERVICE_KEYS, DEFAULT_DECISION_TIMEOUT_MS } from "../support/config-schema.ts";
+import { choiceInstructions, RISK_INSTRUCTIONS_SHORT, doneInstructionsShort } from "../prompts/model-prompts.ts";
 
 export { DECISION_SERVICE_KEYS };
 
@@ -201,8 +202,7 @@ export function systemOneServiceProfile(env: NodeJS.ProcessEnv = process.env): S
     // （`meta.policy.decision_state.context: "delta"` 时执行器才会真的带上；缺省不带）。
     // 协议没有版本字段：这是 state 内的**可选**键，老服务忽略未知键即向后兼容。
     stateDigest: true,
-    choiceInstructions: (goal) => `Goal: ${goal}. Which single element should be interacted with next `
-      + "to make progress on this goal? Ignore branding, navigation and decoration unless the goal requires them.",
+    choiceInstructions,
     ...(stateContext ? {
       stateBuilder: async (req) => {
         const st: Record<string, unknown> = { goal: req.goal };
@@ -215,12 +215,8 @@ export function systemOneServiceProfile(env: NodeJS.ProcessEnv = process.env): S
         return st;
       },
     } : {}),
-    riskInstructions: () => "Judge ONLY the action itself: would performing it trigger an irreversible or "
-      + "externally-visible effect (payment, order placement, deletion, sending a message, final submission)? "
-      + "Typing into a form field, opening pages, or navigating is NOT risky.",
-    doneInstructions: (goal) => `User goal: ${goal}. Does this page explicitly CONFIRM the goal is complete `
-      + "(a success message, a confirmation page, the requested item now present)? Answer false if it is "
-      + "merely a starting or intermediate page.",
+    riskInstructions: () => RISK_INSTRUCTIONS_SHORT,
+    doneInstructions: doneInstructionsShort,
     unreachableHint: "检查网络与 AMBERFLOW_DECISION_BASE_URL；密钥只从环境/配置按名读："
       + "AMBERFLOW_DECISION_API_KEY。",
     configError: () => serviceConfigError(env),

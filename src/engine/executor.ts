@@ -140,6 +140,7 @@ import { checkSignal, isWeakNegativeSignal, LOGIN_WALL_TEXTS, LOGIN_WALL_URL_RE,
 import { DEFAULT_SETTLE, installSettle, settle, type SettlePage, type SettleResult } from "./settle.ts";
 // 语法报错文案的唯一出处：形状清单不再手抄（grammar-prompt import 时自证与 parseHint 对齐）。
 import { HINT_CLOSED_SET_TEXT } from "./grammar-prompt.ts";
+import { RISK_INSTRUCTIONS_LONG, doneInstructionsLong } from "../prompts/model-prompts.ts";
 // A2 判别：命令 target 是 hint 语法字符串，词面要从同一份解析器里取（不新开第二种解析）。
 import { parseHint } from "./hint.ts";
 import { LayaNotConfiguredError, type LayaRuntime } from "../model/model.ts";
@@ -247,7 +248,6 @@ interface RunReportTailCtx {
 }
 
 /* ------------------------------------------------------------------ helpers */
-
 
 /**
  * Navigation envelope (P0-4).
@@ -1371,7 +1371,7 @@ export class BrowserMiddleware {
     const res = await agent.predict(state, {
       r: {
         type: "noul",
-        instructions: "The user goal is given for context only. Judge ONLY the action itself: would performing it trigger an irreversible or externally-visible effect (payment, order placement, deletion, sending a message, final submission)? Typing text into a visible form field, opening pages, or navigating is NOT risky. {action} (context: {user_goal})",
+        instructions: RISK_INSTRUCTIONS_LONG,
       },
     });
     // Same guard as `isDone`: a missing answer must not crash the step (the gate
@@ -1406,7 +1406,7 @@ export class BrowserMiddleware {
     const res = await agent.predict(state, {
       d: {
         type: "noul",
-        instructions: `User goal: ${goal}. Look at this page: does it explicitly CONFIRM the goal is complete (a success message, a confirmation page, the requested item now present)? Answer false if the page is merely a starting or intermediate page.`,
+        instructions: doneInstructionsLong(goal),
       },
     });
     // A runtime that did not answer the question (a scripted/partial model) must
