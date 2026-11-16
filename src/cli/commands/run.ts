@@ -37,6 +37,7 @@ const OPTIONS = {
   "slot-file": { type: "string" as const },
   "manual-fail-fast": { type: "boolean" as const },
   rescue: { type: "boolean" as const },
+  "no-rescue": { type: "boolean" as const },
   "emit-trace": { type: "string" as const },
   replay: { type: "string" as const },
   remember: { type: "boolean" as const },
@@ -229,7 +230,7 @@ function validatePlanFlags(v: Values): void {
   if (str(v["max-steps"])) throw usageError("--max-steps 只用于应用运行（计划用 --max）");
   if (bool(v.walk)) throw usageError("--walk 只用于应用运行");
   if (bool(v["confirm-safe"]) || bool(v["confirm-unsafe"]) || bool(v["manual-fail-fast"]) || bool(v.rescue)) {
-    throw usageError("--confirm-safe / --confirm-unsafe / --manual-fail-fast / --rescue 只用于应用运行");
+    throw usageError("--confirm-safe / --confirm-unsafe / --manual-fail-fast / --rescue / --no-rescue 只用于应用运行");
   }
   if (str(v["slot-file"])) throw usageError("--slot-file 只用于应用运行");
   if (bool(v["skip-data"])) throw usageError("--skip-data 只用于应用运行");
@@ -251,7 +252,7 @@ function validateGoalFlags(v: Values): void {
   if (str(v["max-steps"])) throw usageError("--max-steps 只用于应用运行");
   if (bool(v.walk)) throw usageError("--walk 只用于应用运行");
   if (bool(v["confirm-safe"]) || bool(v["confirm-unsafe"]) || bool(v["manual-fail-fast"]) || bool(v.rescue)) {
-    throw usageError("--confirm-safe / --confirm-unsafe / --manual-fail-fast / --rescue 只用于应用运行");
+    throw usageError("--confirm-safe / --confirm-unsafe / --manual-fail-fast / --rescue / --no-rescue 只用于应用运行");
   }
   if (str(v["slot-file"])) throw usageError("--slot-file 只用于应用运行");
   if (bool(v["skip-data"])) throw usageError("--skip-data 只用于应用运行");
@@ -371,8 +372,12 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   if (bool(v["confirm-unsafe"])) args.push("--confirm-unsafe");
   if (slotFile !== undefined) args.push("--slot-file", slotFile);
   if (bool(v["manual-fail-fast"])) args.push("--manual-fail-fast");
-  // §8 步 5：rescue 透传开关；`--rescue` 显式开，默认缺省不透传（产物逐字节不变）。
+  // §8 步 2/5：rescue 开关；默认缺省不透传（产物逐字节不变）；显式二选一。
+  if (bool(v.rescue) && bool(v["no-rescue"])) {
+    throw usageError("--rescue 与 --no-rescue 只能选一个（默认关）");
+  }
   if (bool(v.rescue)) args.push("--rescue");
+  if (bool(v["no-rescue"])) args.push("--no-rescue");
   if (bool(v.remember)) args.push("--learn-hints");
   const emitTrace = str(v["emit-trace"]);
   if (emitTrace !== undefined) args.push("--emit-trace", emitTrace);

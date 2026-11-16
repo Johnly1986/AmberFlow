@@ -42,6 +42,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (!cli.ok) return cli.code;
   const v = cli.values;
   if (cliBool(v, "help")) { console.log(USAGE); return 0; }
+  // §8 步 2/5：--rescue / --no-rescue 互斥（默认关；显式二选一，避免"两个都写"歧义）。
+  if (cliBool(v, "rescue") && cliBool(v, "no-rescue")) {
+    console.error("--rescue 与 --no-rescue 只能选一个（默认关）");
+    return 2;
+  }
   // A6 防呆：walk 是真跑调试模式，dry 无浏览器、无导航可言——同给是用法错误（exit 2）。
   if (cliBool(v, "dry") && cliBool(v, "walk")) {
     console.error("--walk 与 --dry 互斥：walk 是真跑调试模式（ctx.step 同页重锚不重导航），dry 只展开调用序列、没有浏览器。");
@@ -331,8 +336,8 @@ function buildScriptRunOptions(
     sources: !noSources, confirmSafe, captureTraces: cliBool(v, "trace"),
     maxSteps,
     manualFailFast: cliBool(v, "manual-fail-fast"),
-    // §8 步 5：rescue 透传开关（v1 声明面；默认关 = 不进 opts，产物逐字节不变）。
-    ...(cliBool(v, "rescue") ? { rescue: true } : {}),
+    // §8 步 2/5：rescue 开关（默认关 = 不进 opts，产物逐字节不变；开 = 真实求援时 result 带 rescue 键）。
+    ...(cliBool(v, "rescue") && !cliBool(v, "no-rescue") ? { rescue: true } : {}),
     headful, allowDangerous: cliBool(v, "allow-dangerous"),
     tieredHint: tieredHint ? true : undefined,
     hintMemory, hintMemoryPath,

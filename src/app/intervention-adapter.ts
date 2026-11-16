@@ -17,6 +17,14 @@ import type { RescueKind, RescueRequest } from "../support/intervention-contract
 import { RESCUE_TEXTS } from "../support/intervention-texts.ts";
 import { shadowRescue } from "../intervention/index.ts";
 import type { ShadowRecorder } from "./intervention-shadow.ts";
+// `--rescue` 的 result.rescue 生产面（stop 模式）单列在 intervention-result.ts；本文件做转口，
+// 让 app-runner 只依赖唯一适配层（与 shadowManualOutcome 同一个入口）。
+export {
+  RescueRequestBuilder, buildRescueRequest, journeyRescueInput, lastManualFactsFromTrace,
+  rescueField, rescueKindForStopCode,
+  type JourneyManualFact, type JourneyToolFact, type LastManualFacts, type RescueField, type RescueInput,
+  type RescueRequest,
+} from "./intervention-result.ts";
 
 /** RescueKind 品牌化 string——app 层以受控断言落地（与契约注册表同键集）。 */
 const ACTION_KIND = "action" as RescueKind;

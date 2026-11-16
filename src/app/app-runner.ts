@@ -8,9 +8,8 @@
  *        ↓
  *   验收（`ctx.done()` 在同一浏览器会话的结束状态上断言 `meta.invariants`）
  *
- * 它**不分叉执行器**：浏览器步就是 `runSubgoalWithRetries`（执行循环
- * 始终是 `BrowserMiddleware.run`），只是把会话的生命周期握在自己手里——会话在**第一个**浏览器
- * 步时才创建，并且推迟 `close()`，好让旅程结束后的不变量还能在同一页面/cookie 上求值。
+ * 它**不分叉执行器**：浏览器步就是 `runSubgoalWithRetries`（执行循环始终是 `BrowserMiddleware.run`），
+ * 只是把会话的生命周期握在自己手里——会话在**第一个**浏览器步时才创建，并且推迟 `close()`，好让旅程结束后的不变量还能在同一页面/cookie 上求值。
  * 之所以不再整段交给 `runPlan`：旅程现在混了两种面（DOM / 进程），`runPlan` 只认识 DOM 步。
  *
  * 工具步的三条纪律（都来自"浏览器里重点一次很便宜、命令行重跑可能不可逆"）：
@@ -48,7 +47,7 @@ import { PaceConfigError, paceNonDefault, paceRemainder, resolvePace as paceReso
 import { sleepMs } from "../support/sleep.ts";
 // §8 步 2 影子模式接线：记录器 + 开关（仅 AMBERFLOW_RESCUE_SHADOW=1 创建；缺省零行为变化）。
 import { createShadowRecorder, isRescueShadowEnabled, type ShadowRecorder } from "./intervention-shadow.ts";
-import { pickManualApprover, shadowManualOutcome } from "./intervention-adapter.ts";
+import { pickManualApprover, shadowManualOutcome, RescueRequestBuilder, journeyRescueInput, lastManualFactsFromTrace, rescueField, type RescueRequest } from "./intervention-adapter.ts";
 import type { PaceSource, ResolvedPace } from "../support/pace.ts";
 import {
   cliRunDetailed, defaultDates, loadSource, previewTable, runSource, urlFor, ValueError,
@@ -234,9 +233,9 @@ export interface AppRunOptions {
   /** 非交互调用遇到 manual 步时：不启动浏览器，直接返回 needs_human 结果。 */
   manualFailFast?: boolean;
   /**
-   * 介入/救援透传开关（设计 §8 步 5，v1 声明面）：`--rescue` = 本次运行允许 result.rescue
-   * 键出现（真实求援的结构化请求）；默认关 = 产物逐字节不变。v1 无真实求援写入路径，
-   * 本字段只完成 CLI→runScriptApp 的接线与类型面。
+   * 介入/救援开关（设计 §8 步 2/5，v1 真实生产路径）：`--rescue` = 本次运行允许 result.rescue
+   * 键出现（真实人工停因的结构化求援，mode=stop）；默认关 = 产物逐字节不变。
+   * 分类器语义：只映射 kind（action/value/authorization），不改 stopCode/status/控制流。
    */
   rescue?: boolean;
   /** 分段运行：只跑第 N 步（1-based，`expanded.steps` 的声明序号）。不能与 fromStep 同用。 */
@@ -660,6 +659,7 @@ export interface AppRunResult {
     attested?: boolean;
     reason?: string;
   }>;
+  /** 结构化求援（stop 模式）：仅 --rescue 开且最终停因命中映射时出现；缺字段 = 产物逐字节不变。 */ rescue?: RescueRequest;
   /** 本次生效的节奏（B1：任一键非 0 或来源非 default 才出现；默认档逐字节不变）。 */  pace?: ResolvedPace;
   /**
    * 数据腿**真的写回槽位**的那部分（`source_slots` 的回写结果）。缺字段 = 没有回写
@@ -1274,8 +1274,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     modelId = pack.model ?? "english",
   } = opts;
   const t0 = Date.now();
-  // E2/E1-c/E1-a/E1-b：决策开关（decision.*）的配置层默认值（非法值已在 CLI 入口报错；
-  // 这里只取已解析的强类型值）。run/dry/replay 共用这一份解析。
+  // E2/E1-c/E1-a/E1-b：决策开关（decision.*）的配置层默认值（非法值已在 CLI 入口报错；这里只取已解析的强类型值，run/dry/replay 共用）。
   const decisionDefaults = parseRunDefaults(opts.env ?? process.env).defaults;
   const secretKeys = secretSlotKeys(
     [...Object.keys(pack.slots ?? {}), ...((pack.required_slots ?? []) as string[]), ...Object.keys(slots)],
@@ -1438,12 +1437,10 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     riskyThreshold: 0.6,
     doneThreshold: 0.5,
     // P0-4（导航信封）：`hosts` 若只在**加载期**校验类型、给防泄漏门禁当输入，
-    // 运行期不参与检查——包就可以导航到任何主机。包声明的 hosts 就是这次旅程的
-    // 信封：未声明的主机在 goto 前拒绝、动作后落到未声明主机即停（结构化理由）。
+    // 运行期不参与检查——包就可以导航到任何主机；包声明的 hosts 就是这次旅程的信封：未声明的主机在 goto 前拒绝、动作后落到未声明主机即停（结构化理由）。
     // 空列表/未声明 = 不启用信封：离线夹具包逐字节不受影响。
     hosts: (pack.hosts ?? null) as string[] | null,
-    // P1 窄问开关（默认关；开了也只影响"档内歧义的 hint 步"问模型的范围，阶梯与 method 不动）。
-    // §3：优先级 CLI(本次) > pack.policy(声明) > 缺省(false)。不写 policy 的包逐字节不变。
+    // P1 窄问开关（默认关；开了也只影响"档内歧义的 hint 步"问模型的范围，阶梯与 method 不动；§3 优先级 CLI(本次) > pack.policy(声明) > 缺省(false)，不写 policy 的包逐字节不变）。
     tieredHint: policy.tiered_hint.value,
     // A3：弱档算不算命中（缺省 any；strong = 弱档改判未命中，再按 actHint 语义走——声明式
     // 路径本就不传 actHint，故 strong 在此等于"交模型"，与 flow 面 widen+strong 同语义）。
@@ -1603,6 +1600,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   // 应用支持器运行上下文：web/cli 两个内建适配器
   // **迁移桥**——执行委托回下面两个服务（执行循环本身不搬进适配器）；新类型自己实现 run。
   const appRunId = `${Date.now().toString(36)}-${process.pid}`;
+  const rescueBuilder = opts.rescue === true ? new RescueRequestBuilder(appRunId) : null;
   // §8 步 3 影子旁路（journey 声明式人工步）：仅 AMBERFLOW_RESCUE_SHADOW=1 创建；判定逻辑
   // 零变化，收尾 flush 到 outDir/rescue-shadow.json（sidecar 不进 result/trace/report）。
   const rescueShadowRecorder = isRescueShadowEnabled() ? createShadowRecorder(appRunId) : null;
@@ -1698,6 +1696,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
         attempts: sg.attempts ?? 0, obstacle: sg.obstacle ?? null,
       })),
       tool_steps: [], invariants: [], manual_steps: manualSteps,
+      ...rescueField(rescueBuilder, journeyRescueInput(manualSteps, [], undefined)),
       sources: [], ok: false, secs: 0,
       decisions: summarizeDecisions([], null, 0),
       ...(segmentRequested ? { partial: true as const, segment: { from: segmentStart + 1, to: segmentEnd } } : {}),
@@ -1902,6 +1901,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     completed: `${doneCount}/${segmentRequested ? executedIndices.size : expanded.steps.length}`,
     subgoals, tool_steps: toolSteps, invariants: invariantResults,
     ...(manualSteps.length ? { manual_steps: manualSteps } : {}),
+    ...rescueField(rescueBuilder, journeyRescueInput(manualSteps, toolSteps, pathStopOut)),
     ...(paceNonDefault(pace) ? { pace } : {}),
     ...(stepTypes !== undefined ? { step_types: stepTypes } : {}),
     ...(opts.captureTraces ? { step_traces: stepTraces } : {}),
@@ -2033,14 +2033,14 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   const planPath = opts.planPath ?? path.join(appsOutDir(), `${pack.id}-plan.json`);
   const outDir = opts.outDir ?? path.dirname(planPath);
   const runId = opts.runId ?? `${Date.now().toString(36)}-${process.pid}`;
+  const rescueBuilder = opts.rescue === true ? new RescueRequestBuilder(runId) : null;
   const inputs = inputsSha256(slots, (pack.hosts ?? []) as string[]);
   const trace = newTrace({ app: pack.id, script_sha256: loaded.scriptSha256, inputs_sha256: inputs });
   const verbose = opts.verbose !== false;
   // 节奏：CLI 显式 > meta.pace > 环境变量 > 0；与 runApp 共用同一个解析实现。
   const pace = resolvePace(pack, opts);
   /**
-   * T2：运行级数据集**在脚本路径也有一份**（与声明式旅程共用同一份 DatasetStore 纪律）——
-   * `ctx.run` 的 `returns` 写这里、`ctx.step` 的命令值 `{from:"dataset"}` 从这里现读。
+   * T2：运行级数据集**在脚本路径也有一份**（与声明式旅程共用同一份 DatasetStore 纪律）——`ctx.run` 的 `returns` 写这里、`ctx.step` 的命令值 `{from:"dataset"}` 从这里现读。
    * 与 `runApp` 同一个 `DatasetStore` 实现、同一条 generation/失效纪律（不另造一套）。
    */
   const dataset = opts.dataset ?? new DatasetStore();
@@ -2764,8 +2764,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     ...(stepsFailed > 0 ? { steps_failed: stepsFailed } : {}),
     // eval3 曝光面：警告一等公民（与 steps_failed 同口径，仅 >0 出现）。
     ...(runWarnings.length > 0 ? { warnings_count: runWarnings.length } : {}),
-    // T2：返回值写进数据集后的审计视图（含 writtenBy/generation；没有 returns ⇒ 键缺席，
-    // 与声明式路径同一字段名/形状，不另造一套）。
+    // T2：返回值写进数据集后的审计视图（含 writtenBy/generation；没有 returns ⇒ 键缺席，与声明式路径同一字段名/形状，不另造一套）。
     ...(dataset.entriesView().length > 0 ? { dataset_view: [...dataset.entriesView()] } : {}),
     ...(partial ? { partial: true as const } : {}),
     // A6：walk 调试跑显式自报——缺字段 = 正式语义；walk 产物不冒充正式 run。
@@ -2806,6 +2805,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     ...(d2Injected > 0 ? { site_facts_injected: d2Injected } : {}),
     step_traces: stepTraces,
     ...(runWarnings.length ? { warnings: runWarnings } : {}),
+    ...rescueField(rescueBuilder, { stopCode, lastManualFacts: lastManualFactsFromTrace(trace.events), pageUrl: finalUrl }),
     ...(logs.length ? { logs } : {}),
     // task-21/D-1：流式 observation 投影（判分面；只增字段——无 read/extract/observe 调用
     // 时键缺席，clean 键集与基线逐字节一致）。result 装配后经 scrubSecrets 统一掩码。
