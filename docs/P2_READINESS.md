@@ -1,6 +1,6 @@
 # P2 决策请求包（Readiness / 待项目方拍板）
 
-> **状态**：**等待决策（阻断）**。P0/P1 已完成；P2 按方案 §6.3 的五项前置核对中 **②已满足、①③④⑤未满足**，因此 P2 未启动。
+> **状态**：**已批准，等待 ③ 收尾**（2026-11-17 回执：D1=A/D2=先完成/D3=#4→#2→#3/D4=接受建议）。P0/P1 已完成；P2 前置 ①②④⑤ 已满足，唯一剩余 ③ = INTERVENTION 默认切换（实现中）。
 > **复核记录**：2026-11-17 连续 3 轮复核（goal round 4/5/6），①③④⑤ 事实均未变化；仓库保持 P0/P1 已交付 + 证据 lane 夜间运行，未启动任何 `run()`/编排改造。
 > **目的**：把「缺什么」变成可勾选的决定，避免 P2 在缺少发布/改造窗口授权时动最高 churn 文件（`executor.ts` 6139 行、`app-runner.ts` 2854 行、`ctx.ts` 1799 行）。
 > **依据**：`docs/IMPROVEMENT_PLAN.md` §0/§6.3、`docs/IMPROVEMENT_PLAN_REVIEW.md`（架构评审 B1/B5、红队 C2）、`docs/MAINLINE.md` §4 seam 冻结表、`docs/INTERVENTION_RESCUE_MODULE.md` §8。
@@ -84,9 +84,9 @@
 
 | 决定 | 选择 | 日期/参数 |
 |---|---|---|
-| D1 发布/冻结 | ☐ A ☐ B ☐ C | freeze：____ 至 ____；范围：________ |
-| D2 INTERVENTION 收尾 | ☐ P2 前完成 ☐ 书面豁免 | 排期：________ |
-| D3 BACKLOG 顺序 | ☐ #4→#2→#3 ☐ #2→#4→#3 ☐ 其它 | 4d 先行：☐ 是 ☐ 否 |
-| D4 freeze window 参数 | ☐ 接受建议 ☐ 修改 | 参数：________ |
+| D1 发布/冻结 | ☑ A（2026-11-17） | freeze：2026-11-17 起 2 周；范围：executor/ctx/app-runner 只收 P2 PR + 关键 bugfix + 证据 lane |
+| D2 INTERVENTION 收尾 | ☑ P2 前完成 | 剩余 = 步 2 默认切换（`--rescue` 真实 result.rescue 生产路径）；首批实现中 |
+| D3 BACKLOG 顺序 | ☑ #4→#2→#3 | 4d 先行：☑ 是 |
+| D4 freeze window 参数 | ☑ 接受建议 | 每阶段约 3 个工作日；整体 2 周 |
 
 > 未收到回执时：P2 保持关闭，仓库继续 P0/P1 已交付状态 + 证据 lane 夜间运行；不启动任何 `run()`/编排改造。

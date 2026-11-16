@@ -524,13 +524,13 @@ interface PromptSpec {
 
 | # | P2 启动条件 | 当前事实 | 状态 |
 |---|---|---|---|
-| ① | 2.0 发布/特性冻结决策已定 | README 明示「2.0.0 未发布，发布准备中」；无 freeze 决策记录 | ❌ 未满足（需项目方） |
+| ① | 2.0 发布/特性冻结决策已定 | **已定（2026-11-17）**：先声明 2 周 feature-freeze 做 P2（2026-11-17 起），同时准备发布物料；窗口内 executor/ctx/app-runner 只收 P2 PR + 关键 bugfix + 证据 lane | ✅ 已满足 |
 | ② | 0.8 等价 lane 在 CI/本地可重复 | examples canonical golden 进 check；split-check 3 manifests 进 check；verify:offline 非门禁绿 | ✅ 已满足 |
-| ③ | INTERVENTION 步 4/5 与默认切换完成 | 设计状态「实施中——步 0-3 + 步 5 桥半边已实施」；action/authorization 已接线，captcha/credential 二期；默认切换未见记录 | ❌ 未满足 |
-| ④ | BACKLOG #2/#3/#4 顺序决策已定 | 三条均 open（#4 部分批收口）；无排序/拆窗决策记录 | ❌ 未满足（需项目方） |
-| ⑤ | 声明 freeze window | 未声明 | ❌ 未满足（需项目方） |
+| ③ | INTERVENTION 步 4/5 与默认切换完成 | 步 4（texts/schema/docs）与步 5 CLI/桥透传已实现（prompt-hit intervention 组/`schema ctx --topic intervention`/bridge rescue schema 均在位）；**剩余 = 步 2 默认切换**：`--rescue` 目前只有类型/透传面，引擎尚无真实 `result.rescue` 生产路径 | 🟡 进行中（首批实现中） |
+| ④ | BACKLOG #2/#3/#4 顺序决策已定 | **已定（2026-11-17）**：`#4 → #2 → #3`，允许 4d 先行（与 #2 同段 run() 排他） | ✅ 已满足 |
+| ⑤ | 声明 freeze window | **已声明（2026-11-17）**：整体 2 周；run() 每阶段约 3 个工作日窗口；T1/T2/T3 停手触发器沿用 §5.3 | ✅ 已满足 |
 
-> 结论：**P2 暂不启动**。方案保持 active；待 ①③④⑤ 外部输入满足后，按 §6 P2 批次执行（先 2.0 RunCtx+evidence collector，再 run() 九阶段，均以 0.8 运行时 lane 与 freeze window 为门）。
+> 结论：**P2 已获批准（2026-11-17，freeze 立即生效）**；唯一剩余前置 ③（INTERVENTION 默认切换）正在实现（首批：`--rescue` 真实 `result.rescue` 生产路径）。③ 完成后按 D3 顺序执行：2.0 RunCtx + evidence collector → 4d/run() 九阶段（每阶段 3 个工作日窗口）→ #2 → #3。
 > **决策请求包**：[P2_READINESS.md](P2_READINESS.md)（D1 发布/冻结、D2 INTERVENTION 收尾、D3 BACKLOG #2/#3/#4 顺序、D4 freeze window 参数；含推荐选项与回执表）。
 > 0.8 证据 lane 已接夜间 CI：`.github/workflows/checks.yml` 新增 `offline` job（schedule/manual，非门禁）。
 
