@@ -142,10 +142,61 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 
 ---
 
+## 4. executor.ts 按功能划分拆分：第二波文件级外搬 + run() 提九阶段
+
+**状态**：open ｜ **优先级建议**：P2（①②③ 可随时独立做；④ 建议在 #2 候选契约冻结前完成）
+**来源**：2026-11-13 executor.ts 内部逻辑解读 + 功能耦合度实测；细化为 IMPROVEMENT_PLAN.md §4 F2 第二波 / F3 的可执行版（该文行号锚点已声明漂移，本条以**符号名**定位）。
+**总纪律**（沿用 IMPROVEMENT_PLAN §8 禁区）：同门面机械拆分——`BrowserMiddleware` 类名与 `run()` 签名逐字节不变；`src/index.ts` 的 `export *` 零改动（新文件由类内薄委托转发，facade re-export 先例：executor-types/executor-pure/eval-snippets）；**不另写执行器、不改任何语义**。
+
+### 现状（2026-11-13 实测）
+
+executor.ts 头部注释区、类型区、纯函数区、报告尾（`runReportTail`）已外搬（F2 第一波，`2c73d71` 等）。
+剩余类体按功能簇实测 `this.` 耦合度（行数为当日快照，以符号定位为准）：
+
+| 功能簇 | 符号 | 规模 | `this.` 耦合 | 处置 |
+|---|---|---|---|---|
+| 滚动/范围原语 | `_scrollIntoViewWithEvidence` / `scrollIntoView` / `_scrollContainerForElement` / `_scrollWithLoc` / `scrollContainer` / `scrollDocument` / `setRange` | ~306 行 | 只碰 **5 个成员**（`_locatorFor`/`_resolveOne`/三个滚动私有） | **外搬最优**（deps 最少） |
+| 单动作事务 | `actOnce` / `_resolveOne` / `_domFallbackResolve` / `resolveCommandRef` | ~452 行 | 19 个成员（`snapshot`/`occludedReason`/`_hintOpts`/歧义诊断…) | 外搬（中） |
+| 动作执行族 | `_executeElement` / `_clickOnly` / `_optionCandidates` | ~245 行 | 7 个成员（`fillReadback`/敏感值账/`_slotValue`…) | 外搬（中低） |
+| 风险/感知/值绑定 | `isRisky` / `isDone` / `snapshot` / `occludedReason` / `dryRunProbe` / `_slotValue` 等 | ~510 行 | 持有 `decision`/`agent`/`ready()`/`_lastProbeError` 等**调用内私有状态** | **留类内**（执行语义本体，外搬=搬空） |
+| 主循环 | `run()` | ~2400 行 | 138 处 `this.` | **不拆文件**，只提九阶段私有函数（④） |
+
+### 目标（四个子项，每项独立提交、可单独 revert）
+
+- **4a** `src/engine/scroll.ts`：滚动/范围原语外搬为模块级函数；deps = `{_locatorFor, _resolveOne}` 显式注入；类内保留同签名薄委托方法。
+- **4b** `src/engine/action-exec.ts`：`_executeElement` 族外搬；deps = `{fillReadback, secretSlotKeys, _secretValuesSeen(跨步累计语义注明), _slotValue, _isSubmit, _locatorFor, _clickOnly}`。
+- **4c** `src/engine/act-once.ts`：单动作事务簇外搬；deps 接口显式声明（含 `_lastProbeError`/`_takeActionabilityDetail` 的「同一次调用内消费」纪律）。
+- **4d** `run()` 提九阶段私有方法（IMPROVEMENT_PLAN F3 原案）：`runSetup` / `runFrameGate` / 循环内 `runPoolGate` / `runDeclaredTargets`（命令空间 walk + FW8 身份回捞 + DRF） / `runModelPick`（ask/floor/宽扫/升级/裁决） / `runActionPhase`（dry 探针/风险确认/执行/stale/clickAt/upload） / `runPostAction`（动作后账/done 轮询/manual/inert/anti-repeat） / `runReportTail`（✅ 已抽出）；四组记账闭包（`stop`/`forbid`+`forbidWhy`/`noteSkipped`/`unforbid`+`pruneForbids`）升为一个 run 上下文对象，**零语义差**。
+
+### 验收标准
+
+1. 每子项一个独立提交，`npm run check` 必过；任一子项可单独 revert。
+2. 4a/4b/4c：`amber inspect --url <URL> --json` 拆分前后**逐字节一致**；session 内 scroll/setRange/fill/upload 各冒烟一次（实测证据路径，与最近两次有头窗口验证同法）。
+3. 4d：`npm run test -- --tier smoke` 冒烟 + **1 个 core case 的 trace JSON 除时间戳外一致**；`run()` 与类名逐字节不变；九阶段合计行数与拆分前持平（纯搬移，不借机改写）。
+4. 拆分后 executor.ts 类体只剩「执行循环 + 感知/风险服务」，预期 ≤ ~4300 行（4a-c 后）；巨型函数（run）降至 9 个 200-400 行阶段。
+5. 禁区复核：完成只认信号（`checkSignal` 裁决点不被搬动）；`confirmSafe` 默认拒绝方向不动；`forbid`/`stop` 唯一出口纪律不破；`checkSignal`/`DESTRUCTIVE_PATTERNS` 等共享语言不复制第二份。
+
+### 已知风险（搬家最易破的三处，实施时逐条对照）
+
+1. **位置性 ref**：`forbid`/`pruneForbids` 依赖「重新抽池后按元素签名重剪」——跨文件传 forbidden 状态时不得改变重剪次序。
+2. **私有状态语义**：`_lastActionabilityDetail`/`_lastProbeError`（单次调用内消费）与 `_secretValuesSeen`（跨步累计、不随 run 重置）外搬时必须写进 deps 类型注释，防止语义漂移。
+3. **鸭子类型缝**：新文件签名只用 `PageLike`/`AnyLoc`/`Elem`（结构类型），不引入具体 Playwright 类型——避免 `as unknown as` 强转（全仓 87 处）扩散到新文件。
+
+### 涉及文件
+
+`src/engine/executor.ts`、新增 `src/engine/scroll.ts` / `action-exec.ts` / `act-once.ts`、`src/index.ts`（零改动，验收项）。
+
+### 与 #2/#3 的顺序关系
+
+4a-4c 与 #2/#3 无文件交集，可随时并行；**4d（runModelPick/runDeclaredTargets 阶段）与 #2 的候选契约改的是 `run()` 的同一段**——两个重构不要同时动它：要么 4d 先行（契约冻结前），要么排在 #2 落地之后。
+
+---
+
 ## 实施顺序建议
 
 #3 依赖 #2 的候选契约；#1 独立可先行。建议顺序：**#1 → #2 → #3**；
 每条独立成提交，行为等价性验收先行（#2 的逐字节对比是硬门）。
+#4 的 4a-4c（文件级外搬）与 #2/#3 无依赖、可随时穿插；**4d（run() 提函数）与 #2 改 run() 同段，须前后错开**（见 #4 末节）。
 **进度（2026-11-07）**：#1 已完成（规划归 Agent 前提下重定义落地，见条目内落地记录）；**#2 / #3 仍开放**（验收标准不变）。相邻的实施队列第 7 项（T4/T3/T7 依赖评审，`369f895`）与第 8 项（U2a/U2b learn 观测面与值管道，`5d11e0b`/`c1e1f71`）均已落地，且**未新增运行时依赖**——下节依赖评审的结论对新能力面同样成立；learn 的可见性/值候选只扩观测与生成面（`schema-gen.ts` F38/F39），不改运行时 judge/池语义。
 
 ---
