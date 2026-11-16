@@ -1,0 +1,63 @@
+{
+  "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
+  "id": "app-pack-pure",
+  "note": "app-pack 稳定纯区拆分：40 个顶层符号逐字节搬迁（pack-policy 11 / pack-expand 10 / validate-pack 1 / app-pack 保留 18；hash 全部与搬移前一致）。非纯搬移符号（已从 manifest 移除）：substitute（validate-pack 复用它，需加 export 前缀）、validatePack（拆成 8 组子校验以过 150 行函数上限）、isDict（改用 support/pystr.ts 既有单源）；validateSiteBlock 随 validate-pack 搬迁、hash 一致。",
+  "files": {
+    "src/app/pack-policy.ts": {
+      "symbols": {
+        "ACT_HINT_MODES": "1aa8e8305119004d2164646ebbdfc135e21be6ea989534056bb5ffae3951c924",
+        "ACT_HINT_TIER_MODES": "462b0b24d8d1ae8ad91094e8e54cbc6c84dbccdfe27879154cb3e842a207429f",
+        "ATTR_VALUE_MATCH_MODES": "6ee2a81e9bb2891f1da2e1ac355b702ace71a27ab0e568393b801c1dc8d139bc",
+        "BROWSER_CHANNELS": "39e6c55f9122ba6918039403ac04c2ccbdd7f22bc55d2ed0598f897b255450d7",
+        "DECISION_STATE_CONTEXTS": "053b5e5517ba96a1ca67d9e75aed45ac2a4dd3cd9807ae8fa1e04f160a4448d1",
+        "DECISION_STATE_GATES": "e8d90a9805b51c54fec1a51bc1b325caa586df3d22004e8c93230182cb63032a",
+        "NAVIGATION_MODES": "5ffae217ef265bba35f411d8eae90271dd421b2848da06ea77f5e1d9d02a34e1",
+        "PackPolicy": "d301db382e2c384fd9c792931a735e530c57f6391d9598d57fe2c2e93a36b36a",
+        "POLICY_KEYS": "3b2c81801c120afcb1b817b5d1afc82a4c193a858d0b450d70ce8b6553d58991",
+        "RISK_ASK_MODES": "85282030cac3144e7392debabb1630331c9fc9e868082e589d341cf1d7c47eb7",
+        "TARGET_RESOLUTION_MODES": "a2993806269751232f1fd00961f49cb4fd042ba2adf425fcbd27bdccff68d1ab"
+      }
+    },
+    "src/app/pack-expand.ts": {
+      "symbols": {
+        "adapterKind": "00a90d34c9feadc47233769fe10fff413e000567b526442610427613f94b06a2",
+        "ExpandedPack": "31b05e9ba707ccd7dc37562c45bfe22f1f1fcd131324399d9b5706e7b79d0333",
+        "expandPack": "16c89246d1007551c0a62f4a103c12908e20f724671a0bf6a1f4fb5cb1688561",
+        "expandStep": "a602de3b224c602b889e636ebd9a43908a18ccc2ceee89c29b0226eaef2defd0",
+        "PLACEHOLDER": "d395a9a55ec9604a73048742ea1b0502635b6f810cd2fd414ce8e60e9e6b6881",
+        "placeholders": "feffc75956b45bd4f0aa103de87e1bfd64cd020ca075c3dff8322e32831c2417",
+        "resolveSourceSlots": "3acb52a1ca5524b1f4e6a4b1ed0cb3da3d09f0eb7982e8ba05ec1c94398d1d45",
+        "rowMainValue": "461b0a88d1b68e0d9596b4fe99d3493f8ae97369b1c565c785294d6637b5a4fa",
+        "RUNTIME_PLACEHOLDERS": "40e1fcffb6e873eba5d215ab73c800c26861f3725cf0534c8e9fa32031df9426",
+        "stepKind": "f8d34affd73f2ef65f31f6e58201a6eeec439e83649d79903add3d4d85bf836e"
+      }
+    },
+    "src/app/app-pack.ts": {
+      "symbols": {
+        "APP_SCRIPT_FILENAMES": "8a4d2a664d35bb1f9ac824ab832ea5ae28b9e085d3c6e0ff0567ad4075b61ae9",
+        "AppDirEntry": "99ecfd2f5a3010ae28e1ae5067b3b3b2f488f3ebce1ebeac20758badd56eb102",
+        "appDirs": "a35de7dcdcb810dcd7aca3836ffc2fe85dd21e3c7a77d5bd4af4fe84020c1ff9",
+        "AppInvariant": "8b2c92324be310e5e4c23819505c6397b57f1ab41e6f33475621dc9e1280137e",
+        "AppPack": "a463f409805cd8d66d9aa94ac3e95a5993e821c8a9d2598ba36e342c4187831d",
+        "APPS_DIR": "a1a89478f880a12a4a2eeea6a8f1fc77d643345cfe68af8c3ab728adab570ee9",
+        "appScriptFile": "541ce031d6488fd1bc25404fff9412bbe004cd25ec8dfd5935ff50a2360e70ea",
+        "appStepKeys": "b9a4036f61cba2e5be5c7e756f7ef61f1271abc99dab6ca87decd9e20cc3407a",
+        "DEVICE_KEYS": "4d96b40bb3e6f427be8ca432ebcb79b2b49cddc49cca6a6bc6fa9022ef7c7e8d",
+        "ExpandedStep": "8ac2cc0f8e089423bb5713d0e3e72cada1fd28a287a037fb51dac899ff1dc5b8",
+        "listAppDirs": "d04bb23ea0cd6099b60c7fa27266d2ea08dd71a02d97b01936581ed822ba84cb",
+        "PACK_KEYS": "c41fd148b19f829b09b9fd224933e2bf6dcf6a067d17eeef8ae115d33d7b1028",
+        "PackPace": "a67e295f6b5b3962d77835eb69032ed64162896c89036a4881985e4b9ba596d6",
+        "PackSite": "01b26f7fd53eadef9e50d86f7f8b6755cf67fd89b12c3e6afa1ec9fe43e4f908",
+        "SourceObservation": "f01fa8ed36c6cca9c7201d3d7059348b009788ba152aba4925b81d79c373bab8",
+        "SourceSlotBinding": "cc57e0323c05ca3893d483867eab115f16574384f364482293811539d96db4d8",
+        "SPEC_VERSION": "b386fd22ca68c920beb8680c4e0f5a3fa26efe9f49d03ef2ea44741481e4b418",
+        "STEP_KEYS": "baa8cabfeebdb64277608fd46446b654d57d9fe36cdfc0e2ae01473af7f925f3"
+      }
+    },
+    "src/app/validate-pack.ts": {
+      "symbols": {
+        "validateSiteBlock": "df948881722780271c7fb5aad64e74f935374c1f816f5495d75b54f122cf2a19"
+      }
+    }
+  }
+}

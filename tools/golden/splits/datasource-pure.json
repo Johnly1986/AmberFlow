@@ -1,0 +1,110 @@
+{
+  "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
+  "id": "datasource-pure",
+  "note": "datasource 稳定纯区拆分：83 个顶层符号逐字节搬迁（types 13 / transport 18 / extract-ops 42 / source-validate 9 / datasource 1；hash 全部与搬移前一致）。非纯搬移：validateSource（151 行 > 新函数硬上限 150，拆出同文件私有 helper validateCliTransport，检查顺序与错误文案不变）。",
+  "files": {
+    "src/data/extract-ops.ts": {
+      "symbols": {
+        "applyOps": "3de4ab27d701a8d92ab6551b01e66282b5c23099b0034b74ac8d495494c7a81a",
+        "auditRows": "c2f8fcbd3f1d67e4a4c0e5fef5cb2b05d7c73b0c1b17b7d7669db58787b6113a",
+        "countRows": "0eb95bf86d007271a7fdb1976ef4d9a8a37115c1ceef03693c83842a3122b997",
+        "DATE_EXPRS": "5cc31f3ad24f7d1d3cd2ed653a3c38af42b5573cc8af56e6ea04d0e8d89103a0",
+        "dateExpr": "c98cae142a6a52f4e4d8ec0d3864307d9ab190ae2a75b73eb09eb2a4e0ca4387",
+        "dateParams": "7c4b3eeebdf6a9dc1c77d622b16e027b96b4bd0c46383d276bf517696e5c39a1",
+        "dateToEpochDay": "47628d2697f33df506edd8c7159ecc2c8232755478610530e13064c755ad28bd",
+        "defaultDates": "6df6de979e53698a8a778046cf567723c86cf9c32e0f1c614038d83183e81088",
+        "defaultDatesSlotNames": "73bf12825c12ae7e9830e14db2bf300c19ebd0007b6b6d1cbfc706fa7e4be37b",
+        "epochDayToIso": "84e3928e9bf98db81cfa0681884b8f3223f2000fda98582d7103ce2da434fd17",
+        "escapeRegExp": "4c6310d2cd2f62c68b872392c4843cb011bea7ced8f1ff4db8c010c952f60ba7",
+        "extract": "e39d826f76567d8b853aa64d88069baa0fa83dac17cd5ad637d4e65c1f024c1c",
+        "EXTRACT_KINDS": "f55f49525c5b5cd6666f0c41a40d4b371588ad56980df9ace66eba5c38fd4396",
+        "EXTRACTORS": "b2228bba48f17c541df986154f78143177727a6af3fcff4bf35ee7a787a580d6",
+        "fieldValue": "89b4cf0ea2c4e578506836c00266f0f443f9ef58649793a64bf552479bd77c96",
+        "HEAD": "6d23278e2becdc219a0dc0150ddaa318a16f4b2b262f4ed813b51a7d3be0d9f2",
+        "htmlRegex": "d333f8272b5ff3b1d31489ca8d5cff87bc5fe93dc75e2d203c7e0ce7170bc419",
+        "INDEX": "fb29c7a8614e33e1ee85559d79cdf75895ae2c4f996299e03608b58c4757989c",
+        "inWindow": "e7798fa692421875ec352efe994e6bd497b4af26c8dab7463de0d7a13eadb4a7",
+        "isoDateOrThrow": "cf489ad677dab085e7b80d359d91b8177129262d58e0780b1f578e82c3386586",
+        "jsonInScript": "5ad5e38a6c532203f68c972ef326f51d5d6140fe5e169df0f6074b918456c97b",
+        "jsonStdout": "0786e6a7bbb205c85b2314d91589d68b9a13ca6538faecb41206218e70b20028",
+        "linesRegex": "8e852553a3963e48f85cd5524fe474df449316b6d317bbba31c15a5c6e0c4ea4",
+        "matches": "c92451d9872ddd76d06f3d1587c74029a781dc4796dd30add60b4dddf4a52cba",
+        "MissingKey": "0351fa67c02e21da8479832c4efcb6d5f0a30900ce0c78e275776d4f1af36a8a",
+        "nextWeekDates": "52bdfe4672126586ab0ca448eaf8974e2e0ec83e301e1b902f688aabf753fc47",
+        "nn": "9cc40ef814d506e382797027e9a39956c93fb6c3c3ca8d2b2bae480d1c7cfc6a",
+        "OPS": "25097d58a9dc55cec458aff91a80fc3000734f2687497eb34f13d5da086d4cba",
+        "parseDatesValue": "8d7b39bd0978b08cc3c451f89eb1d745cf23751f5f11bee3024e9af90b79256b",
+        "poolOf": "af4e2c2b62dc824351d6081f2aa358d8a4feb28dbb9e2efa1c5ac2897c1ecd53",
+        "pyFormat": "08b75636c9a9dafaaab96f7b9263c081e22cacd905cee080e8f6af3f2f368e64",
+        "pyWeekday": "2d47b04dd996ead11c874fedb084bc0fa107d50fcc218db6bfb8d2061ceb6c75",
+        "resolve": "b34307d24bc88c3a861990fa6cc0e8319fb04ac21a3c55f81f719964454eaeff",
+        "rowOf": "971da7ea6440f8cbea3fc8488b345b22cbc202c5bd4443fc235899c1b2f1f0d5",
+        "selectBest": "50d9a0ff66a606e1f0da5add305fd71c979cd394e8884c5b43a148fa3ced13f0",
+        "selectIndex": "28332da508783f9f876c1f599f1a2ff38ee821672e69b23610546c68878aa4af",
+        "slotPlaceholder": "0851377c7be80a6a5763c4ad3c056c2e7b3d7e896f89de54388b970a4d49d468",
+        "todayEpochDay": "14381c4b77efed25f8f4b9bfb54d4e63452790aae607b83fdd43fe3d1d690072",
+        "todayIso": "dcb88f2e93a5f3a9bb3745e093a3774188f5e14e843f95de6e516b706a3a6356",
+        "urlFor": "b25870e8d5aa0c4b0f449b771482c1f6a1c86fdcac30d8b6b227f8029a5187d3",
+        "WEEKDAYS_CN": "c29a091c8493a5c41b975504d1fc795b472c14a8b3da13b0ac07f3a202e1bfbc",
+        "windowOf": "4c3c84cdc9e64bcb9e32f0266e9ec55846e95200fdf8da852b5e676bd5eb5ed3"
+      }
+    },
+    "src/data/datasource.ts": {
+      "symbols": {
+        "ARGV1": "ce02411aaabfcb9a6c9e9a9ba1e48e5ff2f7a1edbd92e98a783fe1513cc0a160"
+      }
+    },
+    "src/data/transport.ts": {
+      "symbols": {
+        "blocked": "b25ee651f7d0f0018d54d7d1d598dc37ebe12efb42e4a6ac9ce6039acaadc05c",
+        "checkVersion": "cb4e2e092876a048275843c437146e1aa8877467cfc40bdf4418ce337e37f67d",
+        "CLI_KEYS": "82ecc7090b61cc3b7ef593511cb55e764036200b2a3246880f59a271f01fe1b2",
+        "cliBinOf": "ec0417d1b54e733dab6e4d16c9de97cc0fa95d0f5080f77226931ba4f2a814a8",
+        "cliCwd": "25595d3ab17c4cd1b1a3eddacc248939a2bfd881cc01ca017ec688a36528705f",
+        "CLIENTS": "aacbec586c41005aced23b7a38b70b630c306054e2b55fb44a532be4ad6b58a4",
+        "cliEnv": "052c47c78c7621f1fcd92139ff451966c8365fc068ed459af2dcbe565d58ec12",
+        "cliFormat": "02b2fa2457e380bf3e1bc57436cc16017e0916ed9ac58d18b2b7800c3c3e56a3",
+        "cliParams": "2e07022861fcafea23978a5828be837161aa1210c7768144fc2cdc90c506e3bd",
+        "cliRun": "a7594c89d686b5ed6bb4c4437e6ecd88eb32cb96e15a0c2583a08eab34bac351",
+        "cliRunDetailed": "adcbb5348ac5d584738d3e9b4ef56c0557fee5f6f76353675b6770f09f72ac09",
+        "cliSpec": "436608fbc553cf42a6e0143fc45f7508cf76aa711cb07d24be9ca8303dd775b6",
+        "cliVersion": "9032fbafc28fc7145d8a7974d4eaf5c3cd69b8948c6c1e8fbb48c722c151702b",
+        "curlGet": "630d3f5cc7d53af4c9f7000d663986eb50caecfe2013f523f1b7f25626843c72",
+        "fetchSource": "65391bb78f347da72e9fe4d01023ec20a9c61ee9fe3e25115768d53c5c47a8f9",
+        "httpxGet": "8e49e9d5656b79d3f0658d7ffa63ca49fd6bc2355a9369def6652291c8074eae",
+        "transportClient": "a2c56d9a9be42284d9f93c198b83cae471c38857ca2c27d0357ac8d96c8f4ddc",
+        "TRANSPORTS": "13912bd9a0f665e50f4a6507af4c87b8d4c8d69bc5acb3e0ab691ce52cb02315"
+      }
+    },
+    "src/data/types.ts": {
+      "symbols": {
+        "Client": "fa3671974cdb4128e0fe2dedf8cbc02776b53d78486707145c0beebd07939915",
+        "CliObservation": "86d7b1c522ad7e9aa2c45d96459ada2f8f880277125e60e5ee921bcf2386e7d5",
+        "DateEntry": "85b8352ce5b41c4ca59d97bc99d0b5277d76c692eb7b7cafba0ebc827b5306ed",
+        "DateLike": "8dc07956bcf71ef7b51abd16fd8d059f53bc4cb0219dd0939f3cd6e2497ea446",
+        "FileNotFoundError": "b2f15e8ba238af115ec965ad13c3495d872915ef1dc628ab5081b77fde06aa75",
+        "KeyError": "d9051e75fab131142a54ee4dada4ec7dc25efb7a6d7da6bae9b46eb77f086e67",
+        "Page": "b7e936e059ba2504583628a72015e55607774a8f999a4c0f227d2e1be4715fb1",
+        "Rendered": "4e7db7261e65661dabd9ad361f62a0d936fb4af10daf5353b0ec2fadc49ff2ad",
+        "Row": "8178bca01e0a9dd21f0474a3a48cf9a8a74d0b13587641aab41e77fd07873e64",
+        "RunOptions": "76aec1f8c689a92e05d85ebb4224dbee461bc17fb58f5dc59aec69af20aa77f3",
+        "RunResult": "e50b025fae65b2ed025f058bc4d9dda39bceb91ad21f425a09b5f0b41f54e000",
+        "Source": "b842ed75b5cdb50fbf485f79e1a01db8e61a0a478eecfedd9a0fa809fa693eab",
+        "ValueError": "8dfd54fbefab843c96b838f8ef4136e7df9f4215dba97b8b5c1dacc44a0af1da"
+      }
+    },
+    "src/data/source-validate.ts": {
+      "symbols": {
+        "countGroups": "b10d36b4411e61cdcd7f5a336c105d19472bda4d2d0bbfc5551ab89f1dc65ea1",
+        "isoNowSeconds": "d962192825ae638aa46580b5662e014c927044a3eaf741c031ac0d9a73a819a0",
+        "listSources": "f6e5f83e52f621869f7e3718f7ab942618684356ef37cfed0737aff02791a55e",
+        "loadSource": "378e1db6697d6cc61a25ba296a56a7871c287c21a4aa6a5de2831f962b357768",
+        "main": "11b4818906300a03ee2241a7c121d4c1d293d81ed84df50e51528d1b49351f13",
+        "renderAndSnapshot": "98700d2f0d7fe1e0ee608933158454ab85e3e7b9ffdd7ecf51baa72132b450f4",
+        "runSource": "cf9e9226db5711ba6e0b7f809e4ff0a28c387084503417b3152a00f874bb7042",
+        "sourceDirs": "3be9a60782dd26a27439b003fba5d06e0159fbee038f2f98ad92c6c01636cd54",
+        "USAGE": "d3999c2ea48d2fc3a6b0981209abdcf6baae9fc2168eb2f6c34fdc0932e126e4"
+      }
+    }
+  }
+}
