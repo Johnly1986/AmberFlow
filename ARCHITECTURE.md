@@ -13,13 +13,18 @@ AmberFlow 是一个**冻结计划执行器**：流程由人（或规划器）给
 
 行为硬规则（完成只认信号、值只来自计划/观察、失败是结果、不绕过反爬、证据不进仓库、危险步/人工步/凭据纪律）的唯一出处见 [AGENTS.md](AGENTS.md) 的「硬规则」一节——这里不重复，改规则只改那一处。
 
+模块→依赖层的完整映射、入口分类（CLI / 工具 / 库）与执行阶段图统一维护在 `docs/MAINLINE.md`（P0 0.6 待建；在它落地前以本文 §2/§5 为准）。
+
 ## 2. 分层
 
 ```
 signals.ts       完成信号语言：url_contains / css_* / 组合器 / manual
+prompts/（规划中） 模型提示词单源（P0 0.4：PromptSpec 最小形态；engine 与 model 都可 import）
 extraction.ts    单次 JS 扫描元素池（主 frame + 可达子 frame，同源/跨源均可 + shadow root）
                  ├ pool-js.ts     内嵌 JS 探针与宿主编译产物（浏览器执行的字符串区）
                  └ identity.ts    FW8 声明驱动的身份回捞（#id / [attr=value] 白名单）
+declared.ts      DRF（P0-C）声明目标解析：池 hintMatch → ADMIT 回捞 → FW8 之后按声明做 attr/文本 DOM 解析
+                 （click 前 hit-test；证据见 docs/APP_SCRIPT_AUTHORING.md §4.11）
 rules.ts         确定性规则：导航、affordance、hint 分档匹配
 intervention/    介入/救援中断模块（L1.5）：结构化求援的编排、通道、幂等
                  依赖白名单：node:* + support/intervention-contract.ts + support/intervention-texts.ts
@@ -33,11 +38,13 @@ planner.ts       runPlan / runSubgoalWithRetries：计划级执行
 plan.ts          TaskPlan / PlanningRules：计划 JSON、加载期校验、槽位、when/retries
         ↓
 app/             应用层：flow 脚本加载（meta → IR）、运行期 ctx、轨迹、适配器、运行器
-                 （app-runner.ts 运行本体；app-runner-cli.ts CLI 入口；app-report-view.ts 报告渲染）
+                 （app-runner.ts 运行本体；app-runner-cli.ts CLI 入口；app-report-view.ts 报告渲染；
+                   session-runtime.ts 交互式 authoring 面；session-export.ts 轨迹→app.mjs 骨架）
         ↓
 data/            数据腿（datasource.ts 引擎 + report-view.ts 报告视图）
         ↓
 cli/             amber 命令入口 + 线上套件入口
+                 （main.ts 命令表；cli/start.ts 一次性目标；cli/plan-cli.ts 计划文件 CLI；test.ts 套件入口）
 ```
 
 ### 2.1 执行器
@@ -133,18 +140,21 @@ cli/             amber 命令入口 + 线上套件入口
 ## 5. 目录
 
 ```
-src/engine/       执行器、计划、信号、提取、规则、审计、动作
+src/engine/       执行器、计划、信号、提取、规则、审计、动作（含 declared.ts DRF 声明目标解析）
 src/intervention/ 介入/救援中断模块（L1.5；依赖白名单 node:* + support 两叶子）
 src/model/        决策提供者、服务协议、缓存、学习、ONNX
-src/app/          flow 应用：加载器、meta 投影、运行期 ctx、轨迹、适配器、运行器
+src/prompts/      （规划中，P0 0.4）模型提示词单源；engine 与 model 都可依赖的 L1 叶子
+src/app/          flow 应用：加载器、meta 投影、运行期 ctx、轨迹、适配器、运行器、
+                  session 运行时与导出（session-runtime / session-export）
 src/flow/         信号归纳与共享基础
-src/cli/          amber 命令与线上套件入口
+src/cli/          amber 命令与线上套件入口（main / start / plan-cli / test）
 src/browser/      chromium、工具信号
 src/data/         通用数据腿
 integrations/
   dsh-bridge/     DSH 桥（只拼 CLI、解析 JSON、投影有界摘要）
+fixtures/engine/  零依赖静态页：仅用于非门禁本地等价验证（不进 npm run check）
 online/           站点档案 + 用例声明
-docs/             当前有效的设计/接入文档
+docs/             当前有效的设计/接入文档（docs/MAINLINE.md 待 P0 0.6 建）
 ```
 
 ## 6. 验证
@@ -152,4 +162,5 @@ docs/             当前有效的设计/接入文档
 - PR：`npm run check`（typecheck + 配置示例一致性 + `test:validate`），不访问外网。
 - 作者回路：用用户作用域临时应用跑 `apps new → apps check → apps explain → run --dry-run → run --max-steps`。
 - 手动/定时：`npm run test -- --tier smoke`、`core`，有网络与模型时再跑 `deep`；`probe` 单独跑并按 3 退出。
+- 离线等价验证（**非门禁**）：`fixtures/engine/*.html` 是零依赖静态页，供本地确定性重放/消融对比；`verify:offline` lane 待 P0 0.8 接入，不进 `npm run check`。
 - 线上任务产物作为 CI artifact 保存；仓库内不留运行结果。

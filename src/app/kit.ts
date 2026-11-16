@@ -5,14 +5,16 @@
  *
  * ```js
  * export const meta = (kit) => ({ id, goal, hosts, slots, sources, invariants, ... });
- * export const app  = (kit) => ({ data: {...}, exec: [ ...steps ] });
+ * export async function flow(ctx) {
+ *   // 普通 JS 控制流：if / for / while / 函数
+ * }
  * ```
  *
- * `meta` 是**声明面**（load 期、任何网络动作之前可校验：hosts/slots/invariants 形状）；
- * `app` 是**动作面**（L1 里是声明式步骤列表，L2 才升级成 `flow(ctx)` 的运行期控制流）。
+ * **唯一作者模型**：`meta`（声明面，load 期、任何网络动作之前可校验：hosts/slots/invariants 形状）
+ * + `flow(ctx)`（动作面：控制流在脚本里，每一步的解析/动作/完成判定在引擎里）。
+ * 旧的声明式 `app()` / `{ data, exec }` 格式已删除，加载期显式报错（见 `app-script.ts`）。
  *
- * 三段骨架：`data`（数据槽）｜`judge`（决策判断，落在每步的 `done`/`when` 与 `invariants`）｜
- * `exec`（决策执行）。kit 只提供构造器，**不提供**模型、时钟、网络、文件系统。
+ * kit 只提供构造器，**不提供**模型、时钟、网络、文件系统。
  */
 import { loginWallSignal, type SignalSpec } from "../engine/signals.ts";
 import type { ToolSignal } from "../browser/tool-signals.ts";

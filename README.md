@@ -49,7 +49,7 @@ cd AmberFlow
 npm ci
 npx playwright install chromium
 npm run doctor          # 体检：Node / Chromium / 模型与配置
-npm run examples-check  # 离线跑通 4 个示例（零网络、零模型）
+npm run examples-check  # 离线跑通 5 个示例（零网络、零模型）
 ```
 
 从示例开始，把应用复制到你的用户目录：
@@ -65,6 +65,8 @@ node --experimental-strip-types src/cli/main.ts run 01-basic-step
 ```
 
 > 仓库内为什么不用 `npx amber`：本包的 bin 没链进 `node_modules/.bin`，`npx` 会去解析远端同名包。就地用上面的 `node --experimental-strip-types src/cli/main.ts`，或者先 `npm link` 后直接用 `amber`。npm 包发布准备中（当前 2.0.0 未发布，建议从源码使用）。
+
+**消费面与包身份（2026-11-17 决策）**：本包的消费面 = **CLI + DSH 插件**；**不承诺引擎库 `import` API**——`src/index.ts` 不是稳定公共面，`package.json` 的 `exports` 只提供 DSH 插件入口。要把 AmberFlow 嵌进别的系统，请通过 CLI（子进程、JSON 契约）或 DSH 桥，不要 `import` 引擎内部模块。
 
 创建自己的应用：
 
@@ -99,11 +101,15 @@ AmberFlow 2.0.0 是**未发布**版本，正在从「可运行」走向「可交
 
 ## 文档
 
+- [架构总览](ARCHITECTURE.md)
 - [离线示例与用法](examples/README.md)
 - [应用脚本作者指南](docs/APP_SCRIPT_AUTHORING.md)
 - [Agent / DSH 接入契约](docs/AGENT_INTERFACE.md)
 - [人工步骤与运行节奏](docs/MANUAL_STEPS_AND_PACE.md)
 - [决策服务配置](docs/DECISION_SERVICE_CONFIG.md)
+- [三层提示词系统](docs/PROMPT_SYSTEM.md)
+- [可维护性/可扩展性治理方案 v2.1](docs/IMPROVEMENT_PLAN.md)
+- [治理方案评审记录](docs/IMPROVEMENT_PLAN_REVIEW.md)
 - [梯队A（v2）落地实施文档](docs/IMPLEMENTATION-PLAN-TIER-A-v2.md)
 - [安全策略](SECURITY.md)
 - [变更记录](CHANGELOG.md)
@@ -115,7 +121,7 @@ npm run check              # PR 门禁：预检/快照重生成 + 类型检查 +
 npm run test -- --tier smoke   # 真实站点（需要网络；跳过 ≠ 通过）
 ```
 
-仓库没有单元测试与离线夹具是**设计决定**：真实站点套件是唯一测试层；运行证据不进仓库。发现问题请通过 issue 反馈，安全问题请走 [SECURITY.md](SECURITY.md) 的报告渠道。
+仓库没有单元测试是**设计决定**：真实站点套件是唯一测试层；离线夹具（`fixtures/engine/`）只用于非门禁本地等价验证，不进 `npm run check`；运行证据不进仓库。发现问题请通过 issue 反馈，安全问题请走 [SECURITY.md](SECURITY.md) 的报告渠道。
 
 ## License
 

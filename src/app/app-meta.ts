@@ -142,7 +142,8 @@ export function lowerMeta(meta: ScriptMeta): AppPack {
     slots: isObj(m["slots"]) ? { ...m["slots"] } : {},
     required_slots: asList(m["requiredSlots"], "requiredSlots"),
     sources: asList(m["sources"], "sources"),
-    // 流程在 flow(ctx) 里，IR 的 journey 只用于共用校验/报告，永远为空。
+    // legacy：journey 恒为空（流程在 flow(ctx) 里）——只为复用既有校验/报告保留字段形状，
+    // 不承载步骤；不改名、不删（P0 0.5 文档纠真，见 docs/IMPROVEMENT_PLAN.md）。
     journey: [],
     invariants: asList(m["invariants"], "invariants"),
   };
