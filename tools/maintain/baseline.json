@@ -1,0 +1,158 @@
+{
+  "_doc": "可维护性存量基线（tools/maintain/baseline.json）。只允许下调：--update 拒绝任何增长/新增超标项；新增超标项由代码硬上限拦截。",
+  "size": {
+    "newFileMaxLines": 800,
+    "newFunctionMaxLines": 150,
+    "phaseFunctionMaxLines": 400,
+    "files": {
+      "src/engine/executor.ts": 6140,
+      "src/app/app-runner.ts": 2864,
+      "src/engine/extraction.ts": 1966,
+      "src/app/ctx.ts": 1799,
+      "src/app/app-pack.ts": 1512,
+      "src/app/session-runtime.ts": 1460,
+      "src/data/datasource.ts": 1417,
+      "src/engine/pool-js.ts": 1102,
+      "src/engine/executor-types.ts": 1005,
+      "src/app/app-adapters.ts": 988,
+      "src/engine/executor-pure.ts": 907,
+      "src/cli/commands/apps.ts": 877
+    },
+    "functions": [
+      {
+        "file": "src/engine/executor.ts",
+        "name": "run",
+        "lines": 2685
+      },
+      {
+        "file": "src/app/ctx.ts",
+        "name": "createCtx",
+        "lines": 1704
+      },
+      {
+        "file": "src/app/app-runner.ts",
+        "name": "runScriptApp",
+        "lines": 821
+      },
+      {
+        "file": "src/app/app-runner.ts",
+        "name": "runApp",
+        "lines": 709
+      },
+      {
+        "file": "src/app/app-pack.ts",
+        "name": "validatePack",
+        "lines": 690
+      },
+      {
+        "file": "src/app/ctx-dry.ts",
+        "name": "createDryCtx",
+        "lines": 542
+      },
+      {
+        "file": "src/cli/commands/inspect.ts",
+        "name": "runInspect",
+        "lines": 365
+      },
+      {
+        "file": "src/app/app-runner-cli.ts",
+        "name": "main",
+        "lines": 322
+      },
+      {
+        "file": "src/app/ctx-replay.ts",
+        "name": "createReplayCtx",
+        "lines": 319
+      },
+      {
+        "file": "src/app/ctx.ts",
+        "name": "runOneStep",
+        "lines": 260
+      },
+      {
+        "file": "src/cli/commands/run.ts",
+        "name": "runApp",
+        "lines": 245
+      },
+      {
+        "file": "src/engine/executor.ts",
+        "name": "_executeElement",
+        "lines": 236
+      },
+      {
+        "file": "src/engine/rules.ts",
+        "name": "hintMatchImpl",
+        "lines": 222
+      },
+      {
+        "file": "src/app/session-export.ts",
+        "name": "buildAppSource",
+        "lines": 214
+      },
+      {
+        "file": "src/cli/commands/apps.ts",
+        "name": "flowScriptTemplate",
+        "lines": 214
+      },
+      {
+        "file": "src/cli/commands/apps-rehearsal.ts",
+        "name": "appsRehearsal",
+        "lines": 208
+      },
+      {
+        "file": "src/cli/commands/doctor.ts",
+        "name": "runDoctor",
+        "lines": 202
+      },
+      {
+        "file": "src/app/session-runtime.ts",
+        "name": "doAct",
+        "lines": 199
+      },
+      {
+        "file": "src/app/app-report-view.ts",
+        "name": "appReportMarkdown",
+        "lines": 194
+      },
+      {
+        "file": "src/engine/executor.ts",
+        "name": "runReportTail",
+        "lines": 193
+      },
+      {
+        "file": "src/engine/executor.ts",
+        "name": "actOnce",
+        "lines": 186
+      },
+      {
+        "file": "src/cli/start.ts",
+        "name": "commandJob",
+        "lines": 160
+      },
+      {
+        "file": "src/engine/extraction.ts",
+        "name": "frameHintFailureEvidence",
+        "lines": 157
+      },
+      {
+        "file": "src/data/datasource.ts",
+        "name": "validateSource",
+        "lines": 151
+      }
+    ],
+    "phaseFunctions": []
+  },
+  "docs": {
+    "readmeExamples": 5,
+    "requiredDocLinks": [
+      "ARCHITECTURE.md",
+      "docs/IMPROVEMENT_PLAN.md",
+      "docs/IMPROVEMENT_PLAN_REVIEW.md",
+      "docs/PROMPT_SYSTEM.md"
+    ]
+  },
+  "mainline": {
+    "mwConstructions": 6,
+    "runEntryCalls": 12
+  }
+}

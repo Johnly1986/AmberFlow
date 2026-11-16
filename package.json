@@ -45,7 +45,7 @@
     "doctor": "node --experimental-strip-types src/cli/start.ts --doctor",
     "model:fetch": "node --experimental-strip-types src/model/model-fetch.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run precheck && npm run typecheck && npm run config:example:check && npm run schema:check && npm run prompt-hit && npm run secret-scan && npm run examples-check && npm run row-anchor:check && npm run test:validate",
+    "check": "npm run precheck && npm run typecheck && npm run config:example:check && npm run schema:check && npm run prompt-hit && npm run secret-scan && npm run examples-check && npm run row-anchor:check && npm run maintain:check && npm run test:validate",
     "test": "node --experimental-strip-types src/cli/test.ts",
     "test:validate": "node --experimental-strip-types src/cli/test.ts --validate",
     "apps": "node --experimental-strip-types src/app/app-runner.ts",
@@ -62,7 +62,8 @@
     "secret-scan": "node --experimental-strip-types tools/secret-scan.ts",
     "examples-check": "node --experimental-strip-types tools/examples-check.ts",
     "check:ci": "node --experimental-strip-types src/cli/main.ts schema ctx --out dist/schema/ctx.json && npm run check",
-    "precheck": "node --experimental-strip-types tools/schema-ensure.ts"
+    "precheck": "node --experimental-strip-types tools/schema-ensure.ts",
+    "maintain:check": "node --experimental-strip-types tools/maintain/index.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
