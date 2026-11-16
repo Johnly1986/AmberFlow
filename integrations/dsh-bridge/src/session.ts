@@ -380,11 +380,16 @@ export class SessionManager {
     const id = newSessionId()
     const outDir = path.join(this.evidenceRoot, id)
     const recordPath = args.record === false ? null : path.join(outDir, 'actions.jsonl')
-    // F80 spawn 联动：CLI 孤儿兜底 = max(CLI_ORPHAN_IDLE_MS, 2×ttl)；ttl 未给/0 = 既有 600s
-    //（关键不变量：缺省 ttl=300s ⇒ max(600s,600s)=600s ⇒ spawn argv 逐字节不变）。
+    // F80 spawn 联动（2026-11-16 评审收口）：子进程 idle 与 per-session TTL **同源**——
+    // 显式 ttl 原样下发，否则 `idle_timeout_ms:0` 只是桥侧不限、子进程仍在 600s 后自杀
+    // （headful 等人 >10min 照样死，F80 的动机没被解决）。规则：
+    //   - 未显式（undefined）→ CLI_ORPHAN_IDLE_MS(600s)：缺省 300s 下 spawn argv 逐字节不变；
+    //   - 显式 0 → 子进程 0（真·不限；桥 reaper 跳过 + 子进程 stdin EOF 退出兜底）；
+    //   - 显式 >0 → min(24h, max(600s, 2×ttl))：孤儿兜底，且不再越 CLI --idle-timeout-ms 的 24h 帽
+    //     （旧实现对 >12h 的 ttl 会生成 >24h argv 触发 spawn 用法错误）。
     const orphanIdleMs = idleTtl === undefined
       ? CLI_ORPHAN_IDLE_MS
-      : (idleTtl === 0 ? CLI_ORPHAN_IDLE_MS : Math.max(CLI_ORPHAN_IDLE_MS, 2 * idleTtl))
+      : (idleTtl === 0 ? 0 : Math.min(24 * 60 * 60 * 1000, Math.max(CLI_ORPHAN_IDLE_MS, 2 * idleTtl)))
     const argv = this.argvFor({
       url, outDir, recordPath, hosts,
       headful: args.headful === true,

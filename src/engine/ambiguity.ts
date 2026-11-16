@@ -156,7 +156,7 @@ export interface AmbiguityInput {
   /** `resolveCommandRef` 的返回（可行动优先排序；空数组 = 池内零命中）。 */
   orderedRefs: readonly string[];
   /**
-   * F83 批 3（deny-list 可配化）：meta.policy.hint_token_allow 下传（词元护栏放行表）——
+   * F84 批 3（deny-list 可配化）：meta.policy.hint_token_allow 下传（词元护栏放行表）——
    * 缺省 undefined = 护栏行为逐字节不变。单点消费在 suggestHints.tokenOk。
    */
   hintTokenAllow?: readonly string[];
@@ -193,7 +193,7 @@ function candidateView(
   const frameOrigin = typeof e.frame_origin === "string" && e.frame_origin !== ""
     ? clip(e.frame_origin, AMBIGUITY_ORIGIN_MAX)
     : undefined;
-  // F83 批 3（deny-list 可配化）：meta.policy.hint_token_allow 经 AmbiguityInput 下传——
+  // F84 批 3（deny-list 可配化）：meta.policy.hint_token_allow 经 AmbiguityInput 下传——
   // 词元护栏放行表直达 suggestHints（单点消费）。
   const hint = opts.suggestions ? suggestHints(e, elems, { tokenAllow: opts.tokenAllow })[0] : undefined;
   const norm = normalizedLabel(e);

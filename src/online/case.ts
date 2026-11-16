@@ -8,6 +8,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { REPO } from "../support/paths.ts";
 import { validateSignalSpec } from "../engine/signals.ts";
+import { PlanningRules, TaskPlan, type Subgoal } from "../engine/plan.ts";
+import { extractSlots } from "../engine/extraction.ts";
 import { isSecretKey } from "../support/config-schema.ts";
 import { PROBE_EXPECT_MEMBERS, type ProbeExpectMember } from "./types.ts";
 import type {
@@ -231,6 +233,34 @@ export function validateCase(c: OnlineCase, sites: Map<string, OnlineSite>, wher
     checkSecrets(sg.slots ?? {}, `${at}.slots`, p);
   }
 
+  // **加载期接回计划面校验**（a1dd95f 根因）：online case 的 `subgoals` 与 app-pack 的 journey
+  // 是同一种 TaskPlan 声明，加载期必须跑**同一个** `PlanningRules.problems`。历史上这里自建
+  // 一份只校 desc/signal/start_url/when/retries/slots 的子集，`commands` 缺 id / 非法 op /
+  // 未绑定 target / 数据集绑定等配置错误全部绕过加载期，到执行器才退化成页面事实或被静默丢弃。
+  // 与 app-pack 同款：先构造 TaskPlan，再把 problems 并入本函数已有的 problems 数组
+  // （同一通道、同一 `plan:` 前缀），加载期即 config_error（`test --validate` 退出码 2）。
+  // 只在校验已确认每个子目标都是对象时构造（否则 plan 构造会抛裸栈，掩盖更具体的字段错误）。
+  if (Array.isArray(subgoals) && subgoals.length > 0 && subgoals.every((sg) => isObject(sg))) {
+    try {
+      const plan = new TaskPlan(
+        String(c.goal ?? ""),
+        subgoals as unknown as Array<Partial<Subgoal>>,
+        ":memory:",
+        c.slots ?? {},
+      );
+      // 已知数据袋键 = case 槽位 + 每个子目标自带 slots + goal 文本里的 `k=v`（与 app-pack
+      // 算全“四样”同一理由：少一样就会把合法绑定判成未声明 = 假红）。
+      const slotKeys = new Set<string>([
+        ...Object.keys(c.slots ?? {}),
+        ...subgoals.flatMap((sg) => (isObject(sg) && isObject(sg.slots) ? Object.keys(sg.slots) : [])),
+        ...Object.keys(extractSlots(String(c.goal ?? ""))),
+      ]);
+      p.push(...new PlanningRules().problems(plan, { slotKeys }).map((x) => `plan: ${x}`));
+    } catch (e) {
+      p.push(`plan: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   const inv = c.invariants ?? [];
   if (!Array.isArray(inv)) p.push(`${where}: invariants must be a list`);
   else for (const [i, x] of inv.entries()) {
@@ -256,6 +286,13 @@ export function validateCase(c: OnlineCase, sites: Map<string, OnlineSite>, wher
       }
     }
   }
+  if (c.expect_zero_actions !== undefined && typeof c.expect_zero_actions !== "boolean") {
+    p.push(`${where}: expect_zero_actions must be a boolean`);
+  }
+  // 语义：这是“本次执行一条动作都不许有”的断言，任意 tier 可用（probe 的 fail-closed 证明是
+  // 主要用途，纯观察 case 声明它是漂移护栏）。0 动作仍是 probe 观测（skipped≠通过）；N>0 动作
+  // 判真失败（runner 执行后汇总 trace 的已执行动作行，reason 写 "expected zero actions, N executed"）。
+  // 放宽放在这里不做 tier 限制：断言本身与环境无关，限制 tier 只会让同一句话换个 tier 就失效。
   if (c.tier !== "probe") {
     if (!subgoals.length && !c.start_url) p.push(`${where}: 非 probe 用例至少要有 subgoals 或 start_url`);
     if (!inv.length) p.push(`${where}: 非 probe 用例至少要有 1 条结束态 invariant`);

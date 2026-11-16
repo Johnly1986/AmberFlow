@@ -344,6 +344,21 @@ function ambiguityStopReason(target: string, poolSize: number, amb: AmbiguityVie
     + `or use on_ambiguous:"act" (--on-ambiguous act) to act on the first actionable candidate (the old behaviour)`;
 }
 
+/**
+ * F82/F83 评审收口（P0）：目标串是否声明了行锚尾缀（`in-row:` / `row-index:`）。
+ *
+ * 行锚声明下"多候选 = 零动作"是产品承诺（`ROW_ANCHOR_HINT_PLAN §3.9` / `APP_SCRIPT §10`）：
+ * 行身份是"哪一行"，不是可互换的重复元素。`rules.hintMatchImpl` 已对行锚 fail-closed
+ * （候选 >1 返回 null），但命令走廊/决策步的候选列表来自 `resolveCommandRef`
+ * （`hintCandidates` 的 refs 按"逐个尝试"语义返回多个）——两处消费面必须在**取首候选/
+ * widen 之前**把行锚歧义落成结构化 `target_ambiguous`，否则仍会"静默点第一行/交模型猜"。
+ */
+function declaresRowAnchor(hint: string | null | undefined): boolean {
+  if (typeof hint !== "string" || hint.trim() === "") return false;
+  const parsed = parseHint(hint);
+  return parsed.inRow !== undefined || parsed.rowIndex !== undefined;
+}
+
 /* ------------------------------------------ E1（within 权威对等）：A3/F64 的 PASS 常量 */
 // （导出仅为离线断言可访问——差分对照脚本真跑 pass；运行时调用面只用本文件内的
 //  PASS_DOM_FALLBACK / PASS_ID_FALLBACK。）
@@ -373,14 +388,17 @@ ${ROW_CLIMB_JS}
   const out = [];
   const all = g.document.querySelectorAll(sel);
   const rowCtx = (arg.inRow === undefined && arg.rowIndex === undefined) ? null : (() => {
-    const pairs = [];
+    // F85（评审收口）：dup 键用共享 __rowLabelOf（与池/observe 同口径），且只计**可见**成员
+    // ——池/observe 的编号都基于可见成员；A3 收集本含隐藏元素，若把隐藏成员计入编号，
+    // 同一个 N 会指到与池面不同的行。
+    const pairs = [], els = [];
     for (let i = 0; i < all.length; i++) {
       const e = all[i];
-      const lb = String(e.getAttribute("aria-label") || e.getAttribute("title") || e.innerText
-        || e.getAttribute("placeholder") || e.getAttribute("value") || "").replace(/\s+/g, " ").trim().slice(0, 40);
-      pairs.push([String(e.tagName || "").toLowerCase(), lb]);
+      if (!__rowVisible(e)) continue;
+      pairs.push([__rowTag(e), __rowLabelOf(e)]);
+      els.push(e);
     }
-    return { labels: __dupLabelsOf(pairs), pairs: pairs };
+    return { labels: __dupLabelsOf(pairs), pairs: pairs, els: els };
   })();
   const rowIdxMap = new Map();
   if (arg.rowIndex !== undefined && rowCtx !== null) {
@@ -394,7 +412,7 @@ ${ROW_CLIMB_JS}
       const k = __dupKeyOf(rowCtx.pairs[i][0], rowCtx.pairs[i][1]);
       if ((cnt[k] || 0) <= 1) continue;
       seen[k] = (seen[k] || 0) + 1;
-      rowIdxMap.set(all[i], seen[k]);
+      rowIdxMap.set(rowCtx.els[i], seen[k]);
     }
   }
   for (let i = 0; i < all.length; i++) {
@@ -404,7 +422,7 @@ ${ROW_CLIMB_JS}
       || e.getAttribute("placeholder") || e.getAttribute("value") || "").replace(/\s+/g, " ").trim().slice(0, 200);
     e.setAttribute("data-af-probe", tok + "-" + i);
     let rowTexts = null;
-    if (arg.inRow !== undefined && rowCtx !== null) {
+    if (arg.inRow !== undefined && rowCtx !== null && __rowVisible(e)) {
       const c = __rowClimb(e, rowCtx.labels);
       if (c.rows.length) rowTexts = c.rows;
     }
@@ -575,7 +593,7 @@ export class BrowserMiddleware {
    */
   attrValueMatch: "full_label" | "display" = "full_label";
   /**
-   * F83 批 3（deny-list 可配化）：第 5 档词元护栏的放行词元表（`meta.policy.hint_token_allow`；
+   * F84 批 3（deny-list 可配化）：第 5 档词元护栏的放行词元表（`meta.policy.hint_token_allow`；
    * 缺省 undefined = 护栏行为逐字节不变）。生效面 = 歧义证据 suggested_hint（describeAmbiguity
    * 下传）——单点消费在 rules.suggestHints.tokenOk；inspect CLI / session 面缺省（F58 同款面边界）。
    */
@@ -2448,6 +2466,9 @@ export class BrowserMiddleware {
     if (this.idFallback !== true) return null;
     const parsed = parseHint(target);
     if (parsed.kind !== "id" || !parsed.value) return null;
+    // F82/F83 评审收口（fail-closed）：F64 是 `#id` 单点直查，没有行上下文底座——声明行锚
+    // 时不参与直查，避免按 id 命中后静默丢掉行约束（落回既有 target_not_found + 行锚证据）。
+    if (parsed.inRow !== undefined || parsed.rowIndex !== undefined) return null;
     // A 批（frame:<origin>）：声明链过滤帧循环；并补 `frameInHostsEnvelope` hosts 检查
     // （既有缺陷修正——F64 的跨帧直查此前不查 hosts 信封，`#id` 可能落在排除帧里被动作；
     // 现在与池/hintLookup/FW8 同口径：主帧恒允许，子帧不在信封内跳过。CHANGELOG 记录行为变更）。
@@ -3296,11 +3317,21 @@ export class BrowserMiddleware {
     // 在线套件路径（runOneCase → TaskPlan）不过 validateCommands 的 id 必填校验面（计划/应用
     // 包加载面照旧拦截），到执行器才被本行旧 filter 丢掉。回退 id = `cmd<序>`（确定性）；
     // 无 id 命令此后照常参与命令行走廊（未解析 → target_not_found + 行锚证据，绝不模型提名）。
-    const cmdSpace: CommandDecl[] = (commands ?? [])
-      .filter((c): c is CommandDecl => !!c && typeof c === "object")
-      .map((c, i) => typeof c.id === "string" && c.id !== ""
-        ? c
-        : { ...c, id: `cmd${i}` });
+    // 评审收口：自动 id 不得与**显式 id** 撞车——重复 id 会在走廊里经 `cmdDone.has` 被静默
+    // 跳过（第二条命令零证据消失），所以按显式集合去重后追加 `_`。
+    const cmdSpace: CommandDecl[] = (() => {
+      const filtered = (commands ?? []).filter((c): c is CommandDecl => !!c && typeof c === "object");
+      const ids = new Set(filtered
+        .filter((c) => typeof c.id === "string" && c.id !== "")
+        .map((c) => c.id as string));
+      return filtered.map((c, i) => {
+        if (typeof c.id === "string" && c.id !== "") return c;
+        let id = `cmd${i}`;
+        while (ids.has(id)) id = `${id}_`;
+        ids.add(id);
+        return { ...c, id };
+      });
+    })();
     const cmdDone = new Set<string>();
     let cmdI = 0;
     /** A2：每条命令已试过的候选数（最多 CMD_CANDIDATE_ATTEMPTS 个，全败不静默 done）。 */
@@ -4027,6 +4058,8 @@ export class BrowserMiddleware {
         // model pick). Order is decided by the declaration and the page, not by scoring;
         // completion truth stays the subgoal signal (红线③ untouched).
         let cmdPick: { cmd: CommandDecl; ref: string; index: number; cands: string[] } | null = null;
+        /** F82/F83 评审收口：行锚声明下的结构化歧义停（命令走廊取首候选之前）。 */
+        let rowAmbStop: { code: StopCode; reason: string } | null = null;
         if (cmdSpace.length) {
           const scans = new Set(Object.values(elems).map((x) => x.scan));
           let pendingUnresolved: string[] = [];
@@ -4143,6 +4176,31 @@ export class BrowserMiddleware {
               }
             }
             pruneForbids(elems);
+            // F82/F83 评审收口（P0）：行锚声明 = 多候选零动作。命令走廊的候选列表来自
+            // `resolveCommandRef`（hintCandidates 的 refs，按"逐个尝试"语义返回多个）；行锚
+            // 声明下这里必须在**取首候选之前**停成结构化歧义——否则就是"静默点第一行"。
+            // 判定与决策步/会话面同一谓词（hintCandidates decided===null && refs>1）。
+            if (candRefs.length > 1 && declaresRowAnchor(target)) {
+              const cand = hintCandidates(target, elems, this._hintOpts());
+              if (cand !== null && cand.refs.length > 1) {
+                for (const candRef of cand.refs) {
+                  noteSkipped({
+                    command_id: c.id, target, ref: candRef, reason: "target_ambiguous",
+                    detail: `${cand.refs.length} row-anchor candidate(s) for ${JSON.stringify(target)}; `
+                      + "row anchors never act on the first of several rows",
+                  });
+                }
+                rowAmbStop = {
+                  code: "target_ambiguous",
+                  reason: `command ${JSON.stringify(c.id)} target ${JSON.stringify(target)} declares a row `
+                    + `anchor and matches ${cand.refs.length} candidate(s) (${cand.refs.join(", ")}) on `
+                    + `step ${stepNo} — row anchors are fail-closed: several distinct rows never resolve to `
+                    + `"the first one"; narrow in-row:<token> to a content token unique to one row or fix `
+                    + `the row being pointed at`,
+                };
+                break;
+              }
+            }
             if (candRefs.length > 0) {
               cmdPick = { cmd: c, ref: candRefs[0]!, index: i, cands: candRefs.slice(0, CMD_CANDIDATE_ATTEMPTS) };
               break;
@@ -4170,6 +4228,12 @@ export class BrowserMiddleware {
           // P0-C：DRF 的歧义/首版能力面同样是结构化停因（绝不回退模型或"随便选一个"）。
           if (declaredStop !== null) {
             stop(declaredStop.code, declaredStop.reason, stepNo);
+            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            break;
+          }
+          // F82/F83 评审收口：行锚声明的多候选在命令走廊内已是结构化歧义（零动作）。
+          if (rowAmbStop !== null) {
+            stop(rowAmbStop.code, rowAmbStop.reason, stepNo);
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
           }
@@ -4375,6 +4439,29 @@ export class BrowserMiddleware {
           stop(declaredStop.code, declaredStop.reason, stepNo);
           if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
           break;
+        }
+        // F82/F83 评审收口（P0）：行锚声明 = 多候选零动作。`rules` 已对行锚 fail-closed
+        // （hintMatch → null），但决策步的下游是 widen（交模型猜一行）/ strict——两者都不是
+        // "零动作"。这里在 widen 之前把"多候选"落成结构化歧义：候选进 skipped_actions，
+        // 停因 target_ambiguous，绝不取首行、绝不交模型。
+        if (cmdSpace.length === 0 && curHint !== null && declaresRowAnchor(curHint)) {
+          const cand = hintCandidates(curHint, elems, this._hintOpts());
+          if (cand !== null && cand.refs.length > 1) {
+            for (const candRef of cand.refs) {
+              noteSkipped({
+                ref: candRef, reason: "target_ambiguous",
+                detail: `${cand.refs.length} row-anchor candidate(s) for ${JSON.stringify(curHint)}; `
+                  + "row anchors never act on the first of several rows",
+              });
+            }
+            stop("target_ambiguous",
+              `target_hint ${JSON.stringify(curHint)} declares a row anchor and matches ${cand.refs.length} `
+              + `candidate(s) (${cand.refs.join(", ")}) on step ${stepNo} — row anchors are fail-closed: `
+              + `several distinct rows never resolve to "the first one"; narrow in-row:<token> to a content `
+              + `token unique to one row, or narrow within:/frame: on step ${stepNo}`, stepNo);
+            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            break;
+          }
         }
         if (identityHidden !== null) {
           warnings.push(`identity_hidden: target ${JSON.stringify(identityHidden.target)} matched `
@@ -4625,10 +4712,20 @@ export class BrowserMiddleware {
           if ("scan" in df) {
             domFallbackMissed = true;   // 探针已由回退面自清（scan 分支内 cleanup）
           } else if ("ambiguity" in df) {
+            // 评审收口（F75 证据弱化）：同一歧义谓词，候选与 skipped_actions 必须与命令走廊/
+            // 会话面同强度——停因不是"就停一下"，要能回答"到底撞了哪几个"。
+            const amb = df.ambiguity;
+            for (const c of amb.candidates) {
+              noteSkipped({
+                ref: `dom_fallback:${c.ref}`, reason: "target_ambiguous",
+                detail: `${amb.candidates_total} DOM-fallback candidate(s) for ${JSON.stringify(curHint)}; never guessed`,
+              });
+            }
             stop("target_ambiguous",
-              `declared target_hint ${JSON.stringify(curHint)} matches several DOM-fallback candidates `
-              + `(main-frame ADMIT_SEL; same ambiguity predicate as the pool) on step ${stepNo} — `
-              + `narrow the hint (unique #id / [data-test=…] / exact visible text)`,
+              `declared target_hint ${JSON.stringify(curHint)} matches ${amb.candidates_total} DOM-fallback `
+              + `candidates (main-frame ADMIT_SEL; same ambiguity predicate as the pool) on step ${stepNo} — `
+              + `candidates: ${amb.candidates.slice(0, 5).map((c) => `${c.tag} "${c.label}"`).join(" | ") || "-"}`
+              + ` — narrow the hint (unique #id / [data-test=…] / exact visible text)`,
               stepNo);
             if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
             break;
@@ -5578,10 +5675,13 @@ export class BrowserMiddleware {
           // it (stable handles only, via induceHint) so the next run of this exact url +
           // subgoal resolves by rule at zero model cost. Rule hits need no help.
           if (hintMemory && this._hintKey && (decisionKind === "model" || decisionKind === "escalate")) {
-            // F82/F83 批 3 首项：记忆产物带行锚——池在手（elems）时 dup 成员且普通形状
-            // 不自证唯一 ⇒ suggestHints 第 5/6 档行锚候选（复用，不发明第二套生成逻辑）；
-            // 非 dup/已唯一场景产物逐字节不变（induceHint 单参语义保持）。
-            const learned = induceHint(el, elems);
+            // F84（批 3）首项：记忆产物带行锚——池在手（elems）时 dup 成员且普通形状
+            // 不自证唯一 ⇒ suggestHints 第 5 档**内容**行锚候选（复用，不发明第二套生成
+            // 逻辑）；评审收口：单用 row-index 位置性 hint 不进记忆（见 hint-memory.ts）。
+            // F84 面覆盖补齐：run 面的 `hint_token_allow` 同批下传到记忆生成面（词元护栏
+            // 放行表在 record 面与歧义证据面同口径）。
+            const learned = induceHint(el, elems,
+              this.hintTokenAllow !== undefined ? { tokenAllow: this.hintTokenAllow } : undefined);
             if (learned) {
               hintMemory.record(this._hintKey, learned);
               if (verbose) console.log(`  step ${stepNo}: learned hint ${learned} for this page+subgoal`);
@@ -6000,6 +6100,8 @@ export class BrowserMiddleware {
         ...(position !== null ? { position } : {}),
         ...(t["resolved_by"] === "dom_identity" ? { resolved_by: "dom_identity" as const } : {}),
         ...(t["resolved_by"] === "declared_dom" ? { resolved_by: "declared_dom" as const } : {}),
+        // F75 评审收口：run 决策步 DOM 回退跳的解析事实此前只活在 raw trace，结果面丢失。
+        ...(t["resolved_by"] === "dom_fallback" ? { resolved_by: "dom_fallback" as const } : {}),
         ...(typeof t["declared_resolve"] === "object" && t["declared_resolve"] !== null
           ? { declared_resolve: t["declared_resolve"] as NonNullable<ExecutedAction["declared_resolve"]> } : {}),
       };

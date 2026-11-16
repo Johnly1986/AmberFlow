@@ -661,7 +661,7 @@ export interface CtxDeps {
    */
   attrValueMatch?: "full_label" | "display";
   /**
-   * F83 批 3（deny-list 可配化）：第 5 档词元护栏的放行词元表（来自
+   * F84 批 3（deny-list 可配化）：第 5 档词元护栏的放行词元表（来自
    * `meta.policy.hint_token_allow`；缺省 undefined = 护栏行为逐字节不变）。
    * 只服务 `ctx.observe` 自证池的 hint_candidates 生成——歧义面在执行器实例上（同一 policy）。
    */

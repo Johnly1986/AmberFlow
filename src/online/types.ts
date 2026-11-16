@@ -84,6 +84,19 @@ export interface OnlineCase {
   oracle?: OnlineOracle;
   /** 只允许 probe 用例：这些结果不是失败，而是“本次线上环境观测到的事实”。 */
   expect?: ProbeExpectMember[];
+  /**
+   * **声明面可证伪的零动作断言**（fail-closed 正向证明；任意 tier 可用，语义是“这次执行
+   * 一条动作都不许有”，典型用途是 probe）。
+   *
+   * 与 probe 的 `expect` 正交：`expect` 只比最终 status，闭集里含 `failed` 时“点错行 +
+   * done 失败”也会被记 skipped（跳过 ≠ 通过，但也没有“零动作”这个断言载体）。声明
+   * `expect_zero_actions: true` 后，执行期从 trace 的已执行动作行汇总实际动作数：
+   *   - 0 条动作 ⇒ 仍按 probe 语义记 skipped（环境观测，不是通过）；
+   *   - N>0 条动作 ⇒ 本 case 判**真失败**（status=failed，套件退出码 1），reason 写明
+   *     `expected zero actions, N executed`——不因 `expect` 含 `failed` 被吞成 skipped。
+   * 纯观察 probe（无 subgoals）声明它是未来漂移的护栏：以后若有人加了会动作的步，执行期会红。
+   */
+  expect_zero_actions?: boolean;
   tags?: string[];
 }
 
@@ -134,6 +147,15 @@ export interface CaseOutcome {
   subgoals: SubgoalOutcome[];
   invariants: Array<{ id: string; desc: string; held: boolean }>;
   oracle?: { ok: boolean; detail: string };
+  /**
+   * 本次用例**实际执行**的动作总数：从本次全部子目标 attempt 的 trace 汇总“已执行动作行”
+   * （`executed === true` 且动作词 ∈ clicked/filled/scrolled/dragged/hovered/uploaded，
+   * 与执行器 `executed_actions` 同一口径；manual 确认不算动作）。0 = 零动作。
+   * 证据面用它承载 `expect_zero_actions` 的正向证明；没有声明也照记（诚实字段，不硬造）。
+   */
+  actions_executed: number;
+  /** 声明了 `expect_zero_actions` 却执行了动作：判真失败（probe 也不降级成 skipped）。 */
+  zero_action_violation?: true;
   evidence_dir?: string;
 }
 

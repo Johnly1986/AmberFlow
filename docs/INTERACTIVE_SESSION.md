@@ -52,17 +52,39 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
 |---|---|---|---|
 | `open` | `url`, `timeoutMs?` | `url, title?, hosts` | `host_not_allowed` / `unreachable` / `config_error` |
 | `observe` | `max?`, `selector?`, `includeHidden?`, `includeFrames?`, `includeStructure?`（B 批，缺省 false；结构证据仅诊断，不可照抄） | `ObserveResult`（`url,title?,frames?,counts,elements`；每元素带 `frame` 下标、`frame_origin?`/`frame_path?`（帧链）与 `hint_candidates`（含 `frame:` 候选）；`includeStructure:true` 时另有 `structure_path`（≤160）+ `structure_unstable:true`；多 frame 时另有 `frame_counts`） | `bad_selector` |
-| `act` | `op`(`click/check/fill/select/hover/scroll`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll；给 = 容器滚动，不给 = 滚入视口), `onAmbiguous?`(`fail`\|`act`，缺省 `fail`), `screenshot?`(缺省 `false`；失败时落 `act-<n>-failure.png`), `observeAfter?` | `op,target,executed,ref,how,changed,url,after?`；scroll 另有实测 `moved`/`delta?`/`scroll?`（`changed === moved`）；歧义时另有 `ambiguous`/`matched_others?`/`hint_kind?`/`hint_tier?`/`hint_suspicious?`；非 timeout 异常且 URL 已变时另有 `probe_navigated:true`；**歧义停**时 `ok:false, code:"target_ambiguous", executed:false, ambiguity`；**动作失败**时 `ok:false, code, reason` 并（被遮挡/超时时）带 `actionability`、`screenshot_file?`、落空（`target_not_found`）时带 `diagnostics` | `target_ambiguous` / `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `not-actionable-or-covered` / `action-timeout` / `config_error` |
+| `act` | `op`(`click/check/fill/select/hover/scroll`), `target`(hint), `value?`(fill/select 必填), `to?/by?`(scroll；给 = 容器滚动，不给 = 滚入视口), `onAmbiguous?`(`fail`\|`act`，缺省 `fail`), `screenshot?`(缺省 `false`；失败时落 `act-<n>-failure.png`), `observeAfter?`, `rehydrateRescan?`(F72 opt-in，只接受 `true`；落空且步首 settle 未静默时等 2s 重抽池重解析同一 hint，至多 1 次) | `op,target,executed,ref,how,changed,url,after?`；scroll 另有实测 `moved`/`delta?`/`scroll?`（`changed === moved`）；歧义时另有 `ambiguous`/`matched_others?`/`hint_kind?`/`hint_tier?`/`hint_suspicious?`；非 timeout 异常且 URL 已变时另有 `probe_navigated:true`；**歧义停**时 `ok:false, code:"target_ambiguous", executed:false, ambiguity`；**动作失败**时 `ok:false, code, reason` 并（被遮挡/超时时）带 `actionability`、`screenshot_file?`、落空（`target_not_found`）时带 `diagnostics` | `target_ambiguous` / `target_not_found` / `stale_ref` / `needs_value` / `action_unsupported` / `action_failed` / `not_scrollable` / `not-actionable-or-covered` / `action-timeout` / `config_error` |
 | `read` | `what`(`text/value/count/attr`), `selector`, `attr?` | `what,selector,value`（读不到 = `null`） | `config_error` |
 | `extract` | `rows`, `fields`（`"."` = 行文本；`"@attr"` = 行属性；或子 CSS）, `maxItems?`, `offset?`（续页起点，0-based 整数 0..10000） | `rows,count,capped`；**`capped` 或 `offset>0` 时**另有 `offset,total,has_more`——`count` 是**本页返回行数**不是总数，`total` 才是匹配总数，`has_more = offset+count < total` | `config_error` |
 | `waitFor` | `signal`, `timeoutMs?`(缺省 15000), `pollMs?`(200) | `held,timeout_ms,elapsed_ms` | `config_error`（坏信号形状） |
 | `signal` | `signal` | `held,elapsed_ms` | `config_error` |
 | `snapshot` | `screenshot?`(缺省 true), `poolMax?`(120) | `snapshot_file,pool_file,screenshot_file?,counts` | `io_error` |
 | `mark` | `note` | `note`（只进 `--record` 轨迹，不动页面） | `config_error` |
+| `tab` | `action?`(`list` 缺省 \| `switch`), `match?`(`{index}` \| `{urlContains}` \| `{titleContains}`，多键 AND) | `list`：`action:"list",tabs:[{index,url,title,active}],active`（免费只读，**不写轨迹、不记动作**）；`switch`：`action:"switch",switched:{index,url,title}`（写一条 JSONL record） | `config_error`（缺/空/未知 match 键、0 个或多于 1 个匹配）/ `host_not_allowed` |
 | `close` | — | `closed,requests,actions,snapshots,duration_ms,urls,evidence_dir` | — |
 
 会话级异常会补发一行 `{"type":"session_end","unsolicited":true,"ok":false,"code":…}`（`idle_timeout` /
 `browser_dead` / `interrupted`），它不是任何请求的响应。
+
+### tab：枚举与切换标签页（F76/F77）
+
+- `{"type":"tab","action":"list"}`（`action` 缺省 `list`）：枚举当前 browser context 里**未关闭**的
+  标签页，返回 `tabs:[{index,url,title,active}]`（`context.pages()` 枚举序 = index、`active` =
+  会话当前页；`isClosed` 过滤）。**免费只读**：不写 `--record` 轨迹、不记动作；列表可以包含
+  `hosts` 信封外的页面（与 `ctx.tabs()` 同一判定）。
+- `{"type":"tab","action":"switch","match":{…}}`：切到**恰好一个**匹配的标签页。`match` 是
+  `{index}` | `{urlContains}` | `{titleContains}`（0-based 序；子串大小写不敏感；多键 AND）。
+  `match` 缺失/空对象/未知键 ⇒ `config_error`（文案同 `ctx-validate.ts` 纯函数）；0 个或 >1 个
+  匹配 ⇒ `config_error`（reason 带 `describeTabs` 现场，**不回退随便选一个**）；目标 URL 在 `open`
+  时声明的 hosts 信封外 ⇒ `host_not_allowed` 且**不切换**。命中后会话当前页切换（后续
+  `read`/`act`/`observe` 全跟）+ 有界 `bringToFront`（≤2s）/`domcontentloaded`（≤5s）+ settle，
+  写一条 JSONL 动作记录（与 `act` 同一条流）。
+- 语义边界：**不迁移不重复 F2 newTab**——`ctx.step newTab`（动作前去重采用/动作开新标签自动
+  跟随）留在 flow 面；会话 `tab` 只做显式枚举/显式切换（动作打开的新标签页不会自动跟随，先
+  `action:"list"` 确认再 switch）。
+- record→export（F81）：`amber session export` 识别 `op:"tab"` switch 行 → 生成
+  `await ctx.switchTab({ urlContains: 落点URL | index })` 原语（URL 子串优先、URL 缺失退 index、
+  两者都缺 = 注释块不发明；`ctx.switchTab` 自身计 1 个 flow step）；`list`/未知 tab 行与
+  `ok:false` 行 = 注释块保留、不发明动作。
 
 ### 分页：extract 有 offset，observe 没有
 
@@ -204,6 +226,16 @@ task-34 的回显是弱档旁路诊断（照旧执行 `refs[0]`）；A2 起，�
 - `run` 面/命令步/`ctx.expand`/`ctx.scrollList` 内部点击**不传** `diagnostics` 开关，返回值与
   reason 逐字节不变；只有会话 `act` 失败带这两块证据。
 
+### act 的重水合补偿（F72，opt-in）
+
+`rehydrateRescan:true`（只接受 `true`；缺省不出现 = 引擎缺省关、行为逐字节不变）是重水合
+SPA 的失败路径补偿：声明 hint 真落空（`hintMatch` 零命中）**且**步首 settle 报告页面未静默
+（`timedOut`——抽到 SSR 中间态池）时，等 2s → 重抽池 → 用**同一 hint** 重解析（确定性
+`rule:match`，不重走决策面；至多 1 次，受整步挂钟帽钳制）。命中 = 成功响应带
+`resolved_via:"rehydrate-rescan"`；重扫池上歧义照旧走同一谓词；仍未命中 = 原停因不变 +
+`diagnostics.rescan`。`settle:"off"` 时门控信号不存在，重扫永不触发。首选仍是 act 前用
+`ctx.waitForTarget` / `wait_for` 正锚。
+
 ### act 的滚动语义（B2，`changed` 只认实测）
 
 `act scroll` 有**两种**语义，由请求带不带 `to`/`by` 决定（没有第三种）：
@@ -332,7 +364,8 @@ headless 实现选择面（换完整 Chrome new headless）另见 task-39 的受
   由 launch **如实报错，不静默回退**（要回退请删 env/meta）。生效值见 run 的
   `effective_policy.browser`（仅声明时出现）；真实二进制以 `env.browser.binary_basename` 为准。
   详见 `docs/APP_SCRIPT_AUTHORING.md` §8 policy 表与 `iterations/interactive-session/task39/DESIGN.md`。
-- `snapshot` 的截图/DOM 文本落 `--out`；不做 cookie/存储注入、不多标签页（`ctx.tabs` 面留待后续）。
+- `snapshot` 的截图/DOM 文本落 `--out`；不做 cookie/存储注入；多标签页走**会话面显式 `tab` op**
+  （`list`/`switch`，见上）；flow 面的 `ctx.tabs()` / `ctx.switchTab()` 见 `docs/APP_SCRIPT_AUTHORING.md`。
 - 会话结束（含 SIGINT）一定关闭浏览器；`close` 之前没碰过页面就不会启动浏览器。
 - 不新增 npm 依赖；不影响任何既有命令的默认行为。
 

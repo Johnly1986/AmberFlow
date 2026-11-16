@@ -4,6 +4,91 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-16 架构评审收口（F85）：行锚 fail-closed + 恢复面/记忆面/编号口径 + F80 + lint + 在线校验 + 仓内断言
+
+### 编号口径（一次写清，全文以此为准）
+
+- **批 1 = F82**（`in-row:<token>`）、**批 2 = F83**（`row-index:N`）、**批 3 = F84**（记忆产物
+  带行锚 + 桥 ElementView 透传 + `hint_token_allow`）。部分文档/TS 注释此前写作"F83 批 3"，
+  以本条映射为准（本文件与 BACKLOG 各写一次；其他文档只引用不重述）。
+- **本次评审修复批次 = F85**（schema 声明「行锚消费面 fail-closed 收口」）：行锚多候选零动作、
+  恢复面四面 fail-closed、记忆面禁产单用 row-index、编号/标签口径对齐、lint 聚合等——下文
+  各条均属 F85。
+
+### 行锚 fail-closed（P0；**行为变更（有意为之）**：多候选从"取首行/交模型"改为结构化停）
+
+- `src/engine/rules.ts` 的 `hintMatchImpl`：声明 `in-row:`/`row-index:` 且 `limit` 后候选 >1 时
+  返回 null——不再用 `firstIfSame` 合并同签名候选（11 个同文案 "Add to basket" 签名相同，
+  点错行 = 买错商品）。**未声明行锚时 `firstIfSame` 语义逐字节不变**。
+- 执行器在**命令步**与**决策步 act hint**（widen/strict 之前）检测
+  `hintCandidates(target).refs.length > 1` 时结构化 `target_ambiguous`、**零动作**、候选进
+  `skipped_actions`——不取首候选、不交模型猜；会话 act / strict / A3 面经同一谓词自动继承。
+- 文档同步：`docs/ROW_ANCHOR_HINT_PLAN.md` / `docs/ROW_INDEX_HINT_PLAN.md` /
+  `docs/APP_SCRIPT_AUTHORING.md` 的"token 撞多行 = `target_ambiguous` 零动作（永不选第一行）"
+  从承诺改为**已由解析面兑现**（本次 review 收口）。
+
+### 恢复面 fail-closed（FW8 / DRF / F64 / A3 统一）
+
+- `identityHintInfo`（FW8）、`declaredLookup`（DRF）、F64 `#id` live-DOM 直查在目标声明了行锚
+  时**不参与恢复**（返回 ineligible / 不尝试）：声明行锚落空 = `target_not_found` + 行锚证据，
+  绝不会按 base 身份/文本绕过行约束动作。A3/回捞行已支持行锚底座（F82 批 1）。
+- 修复路径定性：恢复面按 base 找到唯一元素直接动作、静默丢掉作者写的行约束，比显式落空更危险
+  ——四面统一为 fail-closed（证据单点仍为 `extraction.frameHintFailureEvidence`）。
+
+### 记忆面（learned hint 不固化序号）
+
+- `induceHint` 不再产出"单用 `row-index`"的 learned hint——位置性 hint 的序漂移责任只属于作者
+  显式声明（learned hint 是后续同 url+subgoal 的权威，命中错行不回退模型）；只接受含
+  ` in-row:` 的内容候选，内容不可分时宁可回退 base。
+- `meta.policy.hint_token_allow` 下传到记忆生成面（`induceHint(..., {tokenAllow})`）——面覆盖
+  补齐：**run 歧义证据 + `ctx.observe` + record/`induceHint`**。
+
+### 编号/标签口径对齐（四采集面同一出处）
+
+- 池 `addNearContext` / `OBSERVE_JS` / `HINT_HEAD` / A3 四 pass 的 dup 键统一为共享
+  `__rowLabelOf`（与池 label 同口径：aria-label→title→**首子节点文本**→innerText→placeholder→
+  value；input/select 追加 label 包裹文本；PUA 剥除 + 空白折叠 + 40 字符）；池/observe/
+  `HINT_HEAD`/A3 的编号只计**可见**成员（与池/observe 对齐）。
+- **残余边界（如实写）**：池面元素宇宙 = `POOL_SEL`+heuristic 候选集、回捞/observe 面 =
+  `ADMIT_SEL` 集合；池帽只截尾、编号是页面前缀不压缩——两集合对同组成员不一致时 N 仍可能
+  不可移植。口径 = **跨面可移植的前提 = 同名组成员在两个收集面都在场；照抄 inspect 候选前用
+  `ctx.observe`/run 复核**（后续项见 BACKLOG「编号基统一到页级全量收集」）。
+
+### schema / grammar 单源
+
+- `schema-gen.ts` 的 `HINT_GRAMMAR` 增加 `row_suffix`/`row_index_suffix`（含 row-index 生成
+  纪律与 fail-closed 语义），cheat sheet 同步；TS 侧注释约 20 处"F83 批 3"统一为"F84 批 3"
+  （仅注释，无运行时行为）。
+
+### 门禁 / 工具链
+
+- `tools/schema-ensure.ts`（precheck）改为**无条件重生成**快照：`npm run check` 本机可绿；
+  `schema:check` 退化为"渲染一致性"检查（快照是 gitignored 构建产物），漂移门由发布/CI 的
+  `npm run check:ci` 承担。
+- `hint-lint`：合法行锚声明（`dupOnly`）不再逐条刷 stderr，聚合为一行汇总（`rejected` 仍
+  逐条）；"用行锚的 app 永远不 clean"问题解除。
+- `npm run check` 现在以 `npm run precheck`（无条件重生成快照）开头，并在 `test:validate` 前接
+  `npm run row-anchor:check`（`tools/row-anchor-check.ts`，合成 ElemPool 24 条断言）：行锚解析/
+  匹配 fail-closed（多候选 = null）、恢复面四面不参与、记忆面禁单用 row-index、四采集面编号/
+  dup 键同口径。`npm run check` 本机可绿；真站证据仍在仓库外。
+
+### 在线声明面
+
+- `validateBundle` 构造 TaskPlan 后跑 `PlanningRules.problems`（commands/target_hint/slots 等
+  在加载期拦截）；probe 用例新增零动作断言能力（**可断言零动作/零错点**，字段名以在线层实现
+  为准）——probe 的 fail-closed 正向证明不再只靠"诚实落空"的文字观察。
+
+### 辅助收口（F85）
+
+- `meta.policy.hint_token_allow` 含 `>` 的项加载期 `config_error`（该词元按 hint 词法永不生效，
+  静默放行 = 假配置）；record 面 tokenAllow 与歧义证据面同口径。
+- 命令空间自动 id（`cmd<序>`）不再与显式 id 撞车——重复 id 会经 `cmdDone.has` 被静默跳过
+  （第二条命令零证据消失），按显式集合去重后追加 `_`。
+
+### F80 修复（桥 open 的 idle_timeout_ms 原样下传）
+
+- 见下方「架构师裁决补丁批次二」F80 小节（本次修正 `0` / `>0` 的子进程下传语义）。
+
 ## [Unreleased] — 行锚批 3 首项：记忆产物带行锚 + 桥 ElementView 透传 + 词元护栏放行表（F84）
 
 ### 背景
@@ -49,7 +134,8 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 
 ### 文档与契约
 
-- schema **F84** 声明（dist/schema/ctx.json 快照随 precheck 重生成）；
+- schema **F84** 声明（dist/schema/ctx.json 是 gitignored 构建产物；`precheck` 无条件由当前源
+  重生成，`schema:check` 只验渲染一致性，发布/CI 的 `check:ci` 才是漂移门）；
   `docs/APP_SCRIPT_AUTHORING.md`：meta.policy 表 + policy 键表 + §4.12 词元护栏段加
   hint_token_allow；`docs/AGENT_INTERFACE.md`：ElementView 表 `row_texts`/`row_index` 行
   改写为已收编；`docs/BACKLOG.md`：行锚立项 #4/#8 收口、#5 注记、#9 批 3 状态。
@@ -123,10 +209,13 @@ R2-5 整组回退纪律），是第四类尾缀。规格与评审记录：`docs/
   真实行词元 ≤8；② 序号已定位但行内无 base/守卫不符 → 核对组合守卫 token 或改 base 不改
   序号；③ 组合后仍多候选（跨帧同名网格）→ `target_ambiguous` 零动作；④ 尾缀形状非法 →
   整组回退 + describe 点名（`0`/负数点名"row-index 从 1 开始"）。四案 reason 可区分。
-- **诊断可达面矩阵（如实写明）**：三案证据**保证面** = app flow 命令空间 / `act_hint:"strict"`
-  / 会话 act；**规划面（plan/probe）不保证**——批 1 probe 真站实测：声明行锚落空在规划链停
-  `low_confidence`（0.13 < floor，词面诊断），非三案 reason；规划面接线属后续项（BACKLOG
-  #9）。probe 用例期望口径相应为"零动作 + 诚实落空"（批 1 正向观察：序号缺失 ⇒ 零错点成立）。
+- **诊断可达面矩阵（历史沿革 + 现状）**：本批（批 2 `a38e674`）实施时三案证据**保证面** =
+  app flow 命令空间 / `act_hint:"strict"` / 会话 act；**规划面（plan/probe）不保证**——批 1
+  probe 真站实测：声明行锚落空在规划链停 `low_confidence`（0.13 < floor，词面诊断），非三案
+  reason。**该缺口已随后续"批 2 遗留收编"（`13cd7ca` + `a1dd95f`）收口**：规划链四个停因点
+  复用同一 `frameHintFailureEvidence` 单点追加行锚证据（stopCode 不变、无行锚声明 reason
+  逐字节不变），probe 用例期望口径随之从"零动作 + 诚实落空"升级为可断言 `target_not_found`
+  + 案①证据与零动作/零错点（详见下方「批 2 遗留收编」）。
 
 ### 文档与契约
 
@@ -137,7 +226,8 @@ R2-5 整组回退纪律），是第四类尾缀。规格与评审记录：`docs/
   序数场景；`docs/RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md` §2.2 F83 注记（序数类收口、D2 进一步
   限缩）；`docs/BACKLOG.md` #9 收编更新；批 1 probe `books-inrow-token-missing` goal 文案按
   实测口径顺带修正。
-- schema **F83** 声明（dist/schema/ctx.json 快照随 precheck 重生成）；grammar-prompt
+- schema **F83** 声明（dist/schema/ctx.json 是 gitignored 构建产物；`precheck` 无条件由当前源
+  重生成，`schema:check` 只验渲染一致性，发布/CI 的 `check:ci` 才是漂移门）；grammar-prompt
   `HINT_ROW_INDEX_SUFFIX` 示例 + import 时 parseHint 自证断言（六形状 × row-index、四尾缀
   **24 排列全采样**、整组回退、值闭集边界）。
 - online 用例声明：core `books-row-index.json`（单用 `row-index:5` + 组合守卫
@@ -145,10 +235,13 @@ R2-5 整组回退纪律），是第四类尾缀。规格与评审记录：`docs/
   （`row-index:99` ⇒ 零动作 + 诚实落空，期望口径按可达面矩阵）。test:validate 过即入批；
   真站执行属批后验证。
 
-### 显式缺口（批 2 不做，留档）
+### 显式缺口（批 2 实施时留档；均已由后续批次收口）
 
 - FW8 白名单不含 row-index 底座；findByHint / plan check --probe / apps check hint-lint /
   桥 ElementView 透传 / 规划面三案接线属后续项（BACKLOG #9）；词边界档位不做。
+- **收口记录**：行锚恢复面已由 F85 统一 fail-closed（不参与恢复，落空 = `target_not_found`
+  + 行锚证据）；findByHint / hint-lint / 规划面证据由 `13cd7ca`/`a1dd95f` 收编；桥透传由
+  `3fcb098` 收编。
 
 ### 批 2 遗留收编（同批后续项，一次 PR）
 
@@ -182,15 +275,17 @@ R2-5 整组回退纪律），是第四类尾缀。规格与评审记录：`docs/
   只在计划/应用包加载面生效，在线套件路径（runOneCase → TaskPlan）不过该面，命令到执行器被
   `cmdSpace` 构造的 filter **静默丢弃** ⇒ 命令行走廊从未运行 ⇒ 退化为模型提名（违反命令空间
   契约 "NEVER a fallback to the full pool, NEVER a model pick"；批 1/批 2 两次真站实测停
-  `low_confidence` 即此）。修复 = ① id 缺失命令不再丢弃（回退 id `cmd<序>`，照常参与走廊——
+  `low_confidence` 即此）。**行为变更（有意为之）**：id 缺失命令此前被 `cmdSpace` 静默丢弃 →
+  退化为模型提名；现在照常参与命令走廊（回退 id `cmd<序>`），未解析即结构化
+  `target_not_found` + 行锚证据（零动作、不交模型自由选）——修复命令空间契约
+  "NEVER a fallback to the full pool, NEVER a model pick" 的违背。修复 = ① id 缺失命令不再丢弃
+  （回退 id `cmd<序>`，照常参与走廊——
   未解析 → `target_not_found` + 行锚证据）；② 停因证据 hint 来源取**该步有效声明目标**
   （`declaredTargets()`：命令步 = cmdSpace targets、决策步 = [curHint]——镜像 trace
   row_evidence 口径）；③ probe 用例补显式 id。**真站验收重跑**：两 probe 停因 `target_not_found`
   reason 均含案①证据——`books-inrow-token-missing`：行词元 ≤8 在场；`books-rowindex-out-of-range`：
   `row-index:99 超出网格组大小——网格组大小 ≤3 组: [a "Books" K=2, button "Add to basket"
   K=11]` + 行词元 ✓；零动作、observed=failed ∈ 预期集合、probe 语义（exit 3）不变。
-
-### 显式缺口（批 2 不做，留档）
 
 ## [Unreleased] — 行锚 hint `in-row:<token>`（F82 批 1：解析/匹配/数据面/回捞/回退/建议/observe 闭环）
 
@@ -284,8 +379,9 @@ R2-5 整组回退纪律），是第四类尾缀。规格与评审记录：`docs/
   （in-row 候选）；`docs/README.md` 能力 bullet；`docs/RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md`
   §2.2 注记（行身份类由 in-row 收口、D2 限缩为容器结构消歧）；`docs/BACKLOG.md` 立项条目
   （批 2/3 + 桥透传 + 时延实测）。
-- schema F82 声明（statement/truth 对齐 F69/F70 行内风格；dist/schema/ctx.json 快照随
-  precheck 重生成）；grammar-prompt `HINT_ROW_SUFFIX` 示例 + import 时 parseHint 自证断言
+- schema F82 声明（statement/truth 对齐 F69/F70 行内风格；dist/schema/ctx.json 是 gitignored
+  构建产物——`precheck` 无条件由当前源重生成，`schema:check` 只验渲染一致性，发布/CI 的
+  `check:ci` 才是漂移门）；grammar-prompt `HINT_ROW_SUFFIX` 示例 + import 时 parseHint 自证断言
   （六形状 × in-row、双 in-row/含 >/空/>40/伪尾缀整组拒绝、三尾缀组合任意次序）。
 - online 用例声明：core 增「重复按钮网格 + `<label> in-row:<token>` 声明 hint + 结束态
   不变量」（books.toscrape 同文案订票按钮网格）；probe 增「token 页面缺失 ⇒ target_not_found」
@@ -295,7 +391,8 @@ R2-5 整组回退纪律），是第四类尾缀。规格与评审记录：`docs/
 ### 显式缺口（批 1 不做，留档）
 
 - `identity.ts`/`declared.ts` 的 FW8 声明目标恢复路径白名单只认身份形状（#id / [attr=value]），
-  **不含 in-row 底座**——池外行锚恢复属 Phase 2 诉求，批 1 行为与今日逐字节一致；
+  **不含 in-row 底座**——池外行锚恢复属 Phase 2 诉求；**2026-11-16 评审收口已改为 fail-closed**
+  （声明行锚时 FW8/DRF/F64/A3 不参与恢复，见顶部 review 条目），不再按 base 身份绕过行约束；
 - `findByHint` / `plan check --probe` / apps check hint-lint / 歧义反向提示属批 2；
   induceHint 记忆产物带 in-row 属批 3。
 
@@ -318,8 +415,12 @@ R2-5 整组回退纪律），是第四类尾缀。规格与评审记录：`docs/
   ——headful 会话等人登录/扫码/支付期间零调用必被 reaper 收割，慢支付超 1h 调参也救不了。
 - `open` 可传 `idle_timeout_ms`：缺省不传 = 管理器缺省（逐字节不变）；`0` = 不限（仅显式，
   reaper 跳过）；非整数/1..999 = config_error。per-session 显式值不受部署 1h 帽约束。
-  孤儿兜底联动 `max(600s, 2×ttl)`——缺省 300s 下 spawn argv 逐字节不变（回归不变量）。
   `op:"list"` additive 回显生效值。会话面 rescue 透传维持 NO-GO。
+- **本次评审修正（`0` / `>0` 的子进程下传语义）**：显式 `idle_timeout_ms` 现在**原样传给引擎
+  子进程**（此前 `0`/大值被统一折算成 600s 或 `max(600s,2×ttl)`，子进程侧实际并不 "不限"）：
+  `0` ⇒ 子进程也 0（真·不限，仅靠 stdin EOF 退出兜底）；`>0` ⇒
+  `min(24h, max(600s, 2×ttl))`（仅孤儿兜底，且不再越 CLI 的 24h 帽）；缺省不传 ⇒ 子进程 600s
+  **逐字节不变**。契约同步 `docs/AGENT_INTERFACE.md` / `docs/INTERACTIVE_SESSION.md`。
 
 ## [Unreleased] — 架构师裁决补丁批次一：DRF 诚实化（F73）+ run 决策步 DOM 回退跳（F74/F75）
 

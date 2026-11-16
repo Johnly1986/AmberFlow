@@ -2,7 +2,7 @@
   "id": "books-rowindex-out-of-range",
   "site": "books",
   "tier": "probe",
-  "goal": "fail-closed 正向证明（探针，非门禁）：row-index:N 越界（N=99 > 组大小 K=11）⇒ 零动作 + 诚实落空——期望口径按 §3.9 诊断可达面矩阵：规划面停因如实观测（low_confidence 与 target_not_found 皆在预期集合），不静默取第一行、不错点；三案证据保证面为 app flow 命令空间/strict/会话 act，规划面不保证（§8 遗留 #8）",
+  "goal": "fail-closed 正向证明（探针，非门禁；零动作断言 expect_zero_actions）：row-index:N 越界（N=99 > 组大小 K=11）⇒ 零动作 + 诚实落空——期望口径按 §3.9 诊断可达面矩阵：规划面停因如实观测（a1dd95f 实测 target_not_found 走廊停 + 案①证据；low_confidence 亦在预期集合），不静默取第一行、不错点；三案证据保证面 = app flow 命令空间/strict/会话 act + 规划面（批 2 遗留收编已 additive 接线，stopCode 不变）",
   "subgoals": [
     {
       "desc": "声明越界序号 row-index:99（11 个成员的网格）——期望确定性落空（零动作零错点；停因码如实观测记录）",
@@ -15,5 +15,6 @@
     }
   ],
   "expect": ["failed", "blocked", "unreachable", "login_required", "captured"],
-  "tags": ["probe", "row-index", "fail-closed"]
+  "expect_zero_actions": true,
+  "tags": ["probe", "row-index", "fail-closed", "zero-actions"]
 }

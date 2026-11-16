@@ -1,14 +1,15 @@
 /**
- * `precheck` —— 让 `npm run check` 在**干净 checkout** 上直接绿。
+ * `precheck` —— 让 `npm run check` 在任何 checkout 上都**可重复地绿**。
  *
- * `dist/schema/ctx.json` 是 gitignored 的构建产物：`schema:check` 要靠它做"引擎契约 ↔ 快照"漂移比较。
- * 干净 checkout 没有快照，原行为是 `SCHEMA_SNAPSHOT_MISSING` exit 2；CI 里可以先生成再 check，
- * 但本地使用者/新贡献者不该先读一段报错才知道要跑什么。这里：
- *   - 快照**存在** → 不动它（让 schema:check 做真正的漂移比较）；
- *   - 快照**缺失** → 用当前源生成（此时没有历史基线，只能证明"当前源可渲染"，不是漂移比较）。
+ * `dist/schema/ctx.json` 是 gitignored 的构建产物：`schema:check` 拿它做"引擎契约 ↔ 快照"
+ * 比较。但它**没有任何版本基线**（不进仓库）——旧快照只会让本地 `npm run check` 恒红，
+ * 且无法区分"代码改坏了契约"与"快照过期"（2026-11-16 架构评审实测：F72-F84 落地后，
+ * 本机 check 恒以 SCHEMA_DRIFT exit 2，而 CI 因为先生成再 check 反而全绿）。
  *
- * 注意：这是**precheck**，只挂在 `npm run check` 前；`npm run schema:check` 本身仍保持严格的
- * "缺失即错"，发布/CI 需要显式漂移门时用后者。纯 Node 内建模块，无网络、无浏览器。
+ * 评审收口：precheck 改为**无条件重生成**快照——`schema:check` 退化为"当前源能渲染且
+ * 渲染结果自洽"的检查（仍能拦住渲染期崩溃/非确定性输出）；发布物/CI 的快照正确性由
+ * 构建流程（`check:ci`）负责，而不是靠开发者机器上的陈旧产物。纯 Node 内建模块，
+ * 无网络、无浏览器。
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -16,10 +17,8 @@ import path from "node:path";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const snapshot = path.join(REPO, "dist", "schema", "ctx.json");
-if (fs.existsSync(snapshot)) process.exit(0);
-
 fs.mkdirSync(path.dirname(snapshot), { recursive: true });
-console.error("[precheck] dist/schema/ctx.json 不存在（干净 checkout / 构建产物已清理）：先用当前源生成快照，再跑漂移检查。");
+console.error("[precheck] 重新生成契约快照 dist/schema/ctx.json（gitignored 构建产物、无版本基线：schema:check 只验当前源自洽）。");
 const r = spawnSync(process.execPath, [
   "--experimental-strip-types",
   path.join(REPO, "src", "cli", "main.ts"),

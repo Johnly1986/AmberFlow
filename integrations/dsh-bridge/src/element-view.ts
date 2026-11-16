@@ -55,9 +55,9 @@ export const FRAME_PATH_MAX_ITEMS = 4
 export const FRAME_PATH_SEGMENT_MAX_CHARS = 64
 /** structure_path 上限（B 批独立诊断上限；与 hint 的 200 分开——它不是 hint）。 */
 export const STRUCTURE_PATH_MAX_CHARS = 160
-/** F83 批 3：row_texts 行数上限（与引擎 Elem.row_texts 的 ≤6 行同口径）。 */
+/** F84 批 3：row_texts 行数上限（与引擎 Elem.row_texts 的 ≤6 行同口径）。 */
 export const ROW_TEXTS_MAX_LINES = 6
-/** F83 批 3：row_texts 单行上限（与引擎的 ≤40 字符行过滤同口径）。 */
+/** F84 批 3：row_texts 单行上限（与引擎的 ≤40 字符行过滤同口径）。 */
 export const ROW_TEXTS_LINE_MAX_CHARS = 40
 
 /* ------------------------------------------------------------ 合同形状 */
@@ -122,12 +122,12 @@ export interface ElementView {
   /** inspect 面 extras：near 锚（hint 白名单属性）。 */
   near?: string
   /**
-   * F83 批 3：行上下文文本（in-row 匹配底座 + 词元来源）——**仅同文案重复组元素携带**
+   * F84 批 3：行上下文文本（in-row 匹配底座 + 词元来源）——**仅同文案重复组元素携带**
    * （≤6 行 × ≤40 字符，引擎 dup 门控采集；非重复组不出键）。不进模型面。
    */
   row_texts?: string[]
   /**
-   * F83 批 3：dup 组内 DOM 先序位次（1-based；row-index 匹配底座）——仅同文案重复组元素
+   * F84 批 3：dup 组内 DOM 先序位次（1-based；row-index 匹配底座）——仅同文案重复组元素
    * 携带（非重复组不出键）。序号即语义的序漂移责任在作者（组合 in-row 守卫 = fail-safe）。
    */
   row_index?: number
@@ -179,7 +179,7 @@ export function projectElementView(raw: unknown): ElementView | null {
   const classNames = strArray(raw['class_names'], CLASS_NAMES_PER_ELEMENT, CLASS_NAME_MAX_CHARS)
   const framePath = strArray(raw['frame_path'], FRAME_PATH_MAX_ITEMS, FRAME_PATH_SEGMENT_MAX_CHARS)
   const capabilities = strArray(raw['action_capabilities'], 8, IDENTITY_MAX_CHARS)
-  // F83 批 3：行上下文（仅同文案重复组元素携带；≤6 行 × ≤40 字符——引擎口径本就同界）。
+  // F84 批 3：行上下文（仅同文案重复组元素携带；≤6 行 × ≤40 字符——引擎口径本就同界）。
   const rowTexts = strArray(raw['row_texts'], ROW_TEXTS_MAX_LINES, ROW_TEXTS_LINE_MAX_CHARS)
   const rowIndex = num(raw['row_index'])
   const bboxRaw = isObj(raw['bbox']) ? raw['bbox'] : undefined
@@ -224,7 +224,7 @@ export function projectElementView(raw: unknown): ElementView | null {
     ...(str(raw['data_test'], IDENTITY_MAX_CHARS) === undefined ? {} : { data_test: str(raw['data_test'], IDENTITY_MAX_CHARS) as string }),
     ...(str(raw['input_type'], IDENTITY_MAX_CHARS) === undefined ? {} : { input_type: str(raw['input_type'], IDENTITY_MAX_CHARS) as string }),
     ...(str(raw['near'], IDENTITY_MAX_CHARS) === undefined ? {} : { near: str(raw['near'], IDENTITY_MAX_CHARS) as string }),
-    // F83 批 3：行锚两键（仅同文案重复组元素携带；缺省/非重复组不出键——桥不补字段）。
+    // F84 批 3：行锚两键（仅同文案重复组元素携带；缺省/非重复组不出键——桥不补字段）。
     ...(rowTexts.items.length ? { row_texts: rowTexts.items } : {}),
     ...(rowIndex === undefined ? {} : { row_index: rowIndex }),
     ...(str(raw['surface'], IDENTITY_MAX_CHARS) === undefined ? {} : { surface: str(raw['surface'], IDENTITY_MAX_CHARS) as string }),

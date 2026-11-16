@@ -144,7 +144,12 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 
 ## 4. executor.ts 按功能划分拆分：第二波文件级外搬 + run() 提九阶段
 
-**状态**：open ｜ **优先级建议**：P2（①②③ 可随时独立做；④ 建议在 #2 候选契约冻结前完成）
+**状态**：open ｜ **优先级建议**：**P1**（本评审裁定：拆分窗口内**冻结新机制进 `run()`**；先落
+RunCtx + evidence collector，再 4c/4d）
+
+> 本评审裁定（2026-11-16）：executor.ts 拆分升为 P1。窗口期内不再往 `run()` 加新机制；先落
+> RunCtx（四组记账闭包收敛）+ evidence collector（行锚/帧/DRF 证据单点），再动 4c/4d。
+
 **来源**：2026-11-13 executor.ts 内部逻辑解读 + 功能耦合度实测；细化为 IMPROVEMENT_PLAN.md §4 F2 第二波 / F3 的可执行版（该文行号锚点已声明漂移，本条以**符号名**定位）。
 **总纪律**（沿用 IMPROVEMENT_PLAN §8 禁区）：同门面机械拆分——`BrowserMiddleware` 类名与 `run()` 签名逐字节不变；`src/index.ts` 的 `export *` 零改动（新文件由类内薄委托转发，facade re-export 先例：executor-types/executor-pure/eval-snippets）；**不另写执行器、不改任何语义**。
 
@@ -200,7 +205,7 @@ executor.ts 头部注释区、类型区、纯函数区、报告尾（`runReportT
 
 | # | 项 | 说明 | 关联 |
 |---|---|---|---|
-| 1 | `findByHint` 支持 `in-row:` | `plan check --probe` 的旧匹配器（身份形状 + `induceHint` 产物）未适配 in-row 尾缀——组合后缀的 `splitTailSuffixes` 剥离已继承（N6 唯一出处），行锚判定需接 `row_texts` 底座或如实声明不支持 | 方案批 2 |
+| 1 | `findByHint` 支持 `in-row:` | **已实施（批 2 遗留收编 `13cd7ca`）**：`plan check --probe` 的旧匹配器已适配行锚——in-row = `rules.rowMatch` 同口径（row_texts 任一行 includes、仅小写折叠）、row-index = `row_index` 整数全等；四类尾缀组合 = 独立 AND；两消费面池都经 `addNearContext` 采集。原"未适配"表述作废（与第 9 行"已实施"统一） | 方案批 2（已收口） |
 | 2 | apps check hint-lint in-row 语义提醒 | hint-lint（declaration-scan 消费面）经 parseHint 自动继承形状位；"in-row 写在非重复组元素上 = 恒落空"可做静态提醒（需要声明面重复组事实，先例：nearToken 提醒） | 方案批 2 |
 | 3 | 歧义证据反向提示"改用 in-row" | on_ambiguous 兜底命中的场景里，候选带同文案重复组事实时建议"改用 `<label> in-row:<token>`"——逐步挤出运气兜底；触发条件设计见方案 §8.7 | 方案批 2 |
 | 4 | 桥 ElementView 透传 row_texts / row_index | 引擎 observe/inspect 面已产 `row_texts`（≤6 行 × ≤40，dup 门控）与 `row_index`（1-based 组序）——照抄入口走 hint_candidates 的 in-row/row-index 候选 | **批 3 已收口**：`element-view.ts` 白名单两键（`row_texts` ≤6×≤40 strArray、`row_index` num 透传；仅重复组元素携带，非重复组不出键——桥不补字段）；AGENT_INTERFACE ElementView 表同步 |
@@ -214,6 +219,20 @@ executor.ts 头部注释区、类型区、纯函数区、报告尾（`runReportT
 SC7960 那一卡的按钮——token 来自 `inspect`/`ctx.observe` 的 `hint_candidates`（同一 hintMatch
 自证「恰好唯一命中」），row_texts 由 dup 门控采集（≤6 行 × ≤40 字符、连续数字 ≥5 位行救援
 纯数字订单号）；token 无匹配时 reason 列真实行词元 ≤8，撞多行走 `target_ambiguous` 零动作。
+
+---
+
+## 2026-11-16 架构评审后续立项（F85 收口后）
+
+| # | 项 | 说明 | 状态 |
+|---|---|---|---|
+| 1 | 桥 typecheck 纳入门禁 | 桥（`integrations/dsh-bridge`）尚无独立 tsc 门禁——先修既有 tsc 错误，再把桥 typecheck 接入 `npm run check`/CI，防止桥侧类型漂移逃过 PR 门禁 | open（需先修 bridge 既有 tsc 错误） |
+| 2 | row-index 编号基统一到页级全量收集 | 当前编号基 = 各面收集到的成员（池面 `POOL_SEL`+heuristic vs 回捞/observe 面 `ADMIT_SEL` 两个元素宇宙）；跨面 N 可移植的前提 = 同名组成员在两集合都在场。统一到**页级全量收集（合并 POOL_SEL/ADMIT_SEL 口径）**后 N 才无条件可移植；池帽仍只截尾、编号是页面前缀。文档口径：照抄 inspect 候选前用 `ctx.observe`/run 复核 | open（有实测不可移植案例再排期） |
+| 3 | F72 `rehydrate_rescan` 的 miss+strict 路径 RunReport 缺重扫事实 | 评审 P2：act hint miss 且 `act_hint:"strict"` 时，RunReport/汇总未带 `rehydrate_rescan` 重扫事实（trace 行有、报告尾缺），归因链断一截 | open（待收口） |
+
+**已收口（本轮 F85 一并关闭）**：`resolved_by` / F75 决策步 DOM 回退的歧义证据（同一
+`hintCandidates` 谓词 + `skipped_actions` 已统一）；行锚消费面 fail-closed（F85）见 CHANGELOG
+与 `docs/ROW_ANCHOR_HINT_PLAN.md` §10。
 
 ---
 

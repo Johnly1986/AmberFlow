@@ -203,7 +203,7 @@ export const POLICY_KEYS = [
   "attr_value_match",
   // task-43：浏览器通道选择面（缺省不写 = 现状链逐字节不变；优先级 env > meta > default）。
   "browser",
-  // F83 批 3（deny-list 可配化）：第 5 档词元护栏的放行词元表（缺省不写 = 护栏行为逐字节
+  // F84 批 3（deny-list 可配化）：第 5 档词元护栏的放行词元表（缺省不写 = 护栏行为逐字节
   // 不变；SKU 恰似数字被价格/时段 deny 模式误杀时的外科调优出口）。
   "hint_token_allow",
 ] as const;
@@ -327,7 +327,7 @@ export interface PackPolicy {
    */
   attr_value_match?: (typeof ATTR_VALUE_MATCH_MODES)[number];
   /**
-   * F83 批 3（deny-list 可配化）：第 5 档词元护栏的**放行词元表**（`meta.policy.
+   * F84 批 3（deny-list 可配化）：第 5 档词元护栏的**放行词元表**（`meta.policy.
    * hint_token_allow`；缺省不写 = 护栏行为逐字节不变）。
    *   - 用途：SKU 恰似数字被价格/时段 deny 模式误杀时的外科调优出口（表内词元跳过 deny
    *     模式直接参与 in-row 候选生成；结构约束〔非空/禁 `>`/≤40 字符〕不退让）。
@@ -1382,9 +1382,11 @@ export function validatePack(pack: AppPack,
       if (avm !== undefined && !(ATTR_VALUE_MATCH_MODES as readonly string[]).includes(String(avm))) {
         p.push(`policy.attr_value_match: unknown value ${JSON.stringify(String(avm))} (config_error; must be one of ${ATTR_VALUE_MATCH_MODES.map((x) => JSON.stringify(x)).join(" | ")})`);
       }
-      // F83 批 3（deny-list 可配化）：hint_token_allow 形状校验——字符串数组、每项非空且
+      // F84 批 3（deny-list 可配化）：hint_token_allow 形状校验——字符串数组、每项非空且
       // 无内部空白、≤40 字符、至多 16 项；比较时小写折叠（consumption 侧）。非法 = config_error
-      // （与 F61 信号形态/validateCommands 加载期纪律一致）。
+      // （与 F61 信号形态/validateCommands 加载期纪律一致）。评审收口：含 ">" 的项在
+      // `suggestHints.tokenOk` 里被结构约束先拒（行锚 token 词法保留字符）——加载期直接拒绝，
+      // 不让"写了但永不生效"的放行项存在。
       const hta = pol["hint_token_allow"];
       if (hta !== undefined) {
         if (!Array.isArray(hta)) {
@@ -1398,6 +1400,8 @@ export function validatePack(pack: AppPack,
               p.push(`policy.hint_token_allow[${i}]: must be a non-empty string (got ${JSON.stringify(String(tok))})`);
             } else if (/\s/.test(tok)) {
               p.push(`policy.hint_token_allow[${i}]: 词元不含空白（行词元按空白切分；got ${JSON.stringify(tok)}）`);
+            } else if (tok.includes(">")) {
+              p.push(`policy.hint_token_allow[${i}]: 词元禁 ">"（行锚 token 词法保留字符；放行表也无法让它生效——got ${JSON.stringify(tok)}）`);
             } else if (tok.length > 40) {
               p.push(`policy.hint_token_allow[${i}]: ${tok.length} 字符超过上限 40`);
             }

@@ -411,11 +411,29 @@ function hintMatchImpl(
     parsed.rowIndex === undefined ? refs
       : refs.filter((r) => elems[r]!.row_index === parsed.rowIndex);
   const limit = (refs: string[]): string[] => rowIdx(inRow(inAnchor(refs)));
+  /**
+   * F82/F83 评审收口（P0）：**行锚声明 = 多候选零动作**。行身份是"哪一行"，不是可互换的
+   * 重复元素——同签名合并（`firstIfSame`）在这里恰恰是错的：11 个同文案 "Add to basket"
+   * 按钮签名相同，但点错行就是买错商品。所以声明了 `in-row:` 或 `row-index:` 时，限定后
+   * 候选 >1 一律判**歧义**（返回 null，`sink.refs` 保留全部候选供 `target_ambiguous` 证据
+   * 与 `skipped_actions`），绝不取首行、绝不交给 `firstIfSame` 合并。未声明行锚 =
+   * `firstIfSame` 既有语义逐字节不变（bbc 两条相同 /news 链接那类"任选其一等价"不受影响）。
+   *
+   * 消费面：`hintMatch` 返回 null → 执行器命令步/决策步 act hint 结构化 `target_ambiguous`
+   * 零动作；`hintCandidates` 的 `decided === null && refs.length > 1` 谓词同时成立（会话 act /
+   * strict / A3 面自动继承）。
+   */
+  const rowAnchorDeclared = parsed.inRow !== undefined || parsed.rowIndex !== undefined;
+  const decide = (refs: Iterable<string>): string | null => {
+    const list = [...new Set(refs)];
+    if (rowAnchorDeclared) return list.length === 1 ? list[0]! : null;
+    return firstIfSame(new Set(list), elems);
+  };
   /** Record the strongest tier's refs, then resolve exactly as before. */
   const emit = (refs: string[], tier: number): string | null => {
     const limited = limit(refs);
     if (sink) { sink.refs = limited; sink.tier = tier; sink.decided = null; }
-    return firstIfSame(new Set(limited), elems);
+    return decide(limited);
   };
 
   if (parsed.kind === "id") {
@@ -442,7 +460,8 @@ function hintMatchImpl(
     // task-9：每次 attrSubstr 解析都旁路记录撞词候选（含 loose 档的 suspicious 标记）——
     // 返回值与 sink 语义逐字节不变；记录被执行器 take 走（见 takeHintMatchOthers）。
     const finishSubstr = (refs: string[], tier: number): string | null => {
-      const decided = firstIfSame(new Set(refs), elems);
+      // F82/F83 收口：行锚声明下多候选 = 零动作（同 emit 的 decide 口径）。
+      const decided = decide(refs);
       if (recordDiag) {
         lastHintOthersDiag = {
           hint, kind: "attrSubstr", tier, suspicious: tier >= 3, decided,
@@ -541,7 +560,8 @@ function hintMatchImpl(
       // 限定后空 → 直接跳到全落空记录（限定内没有任何档命中）。
       const refs = limit([...hits]);
       if (refs.length === 0) break;
-      const decided = firstIfSame(new Set(refs), elems);
+      // F82/F83 收口：行锚声明下多候选 = 零动作（同 emit 的 decide 口径）。
+      const decided = decide(refs);
       // 弱档（词前缀 t=3 / 词包含 t=4）胜出 = 容器撞车/同缀误中的高发形状（实测：
       // 裸词"价格"前缀命中整块结果容器 div.Vo5ZAe）。记录不改返回值/选择语义。
       if (recordDiag) {
@@ -622,7 +642,7 @@ export function hintCandidates(
  * `out.slice(0, 4)` cap 不动（R-10：链候选与 frame 候选互不挤占的顺序纪律不变；within
  * 恒空的页面 in-row 拿得到槽位）。
  *
- * F83 批 3（deny-list 可配化）：第 5 档词元护栏（tokenOk）的**放行词元表**可由调用方注入
+ * F84 批 3（deny-list 可配化）：第 5 档词元护栏（tokenOk）的**放行词元表**可由调用方注入
  * ——`opts.tokenAllow`（小写折叠比较；缺省 undefined = 既有护栏行为逐字节不变）。目的：
  * SKU 恰似数字被价格/时段 deny 模式误杀时的外科调优出口（deny 追加不解决误杀，放行才
  * 解决——按语义命名 `tokenAllow` 不按"deny-list"代号，实施记录报备）。结构约束（非空/
@@ -723,7 +743,7 @@ export function suggestHints(
     // `sc7960`、`order-1042`），跳过纯价格/货币/百分比词元与时段词元——带 unstable 警告的
     // 候选是半成品承诺，作者会照抄且警告没人读，宁可不产出交回人（不产 unstable 标记机制）。
     // 无 row_texts（非重复组）时此档天然不产出（fail-closed 与匹配面同一对称）。
-    // F83 批 3（deny-list 可配化）：opts.tokenAllow 在场的词元**跳过价格/时段 deny 模式**
+    // F84 批 3（deny-list 可配化）：opts.tokenAllow 在场的词元**跳过价格/时段 deny 模式**
     // 直接参与生成（结构约束不退让）；缺省 undefined = 护栏行为逐字节不变。
     let inRowPushed = false;   // F83：第 5 档是否已产出候选（第 6 档只在"内容不可分网格"上跑）
     if (!withinPushed && Array.isArray(elem.row_texts) && elem.row_texts.length > 0) {

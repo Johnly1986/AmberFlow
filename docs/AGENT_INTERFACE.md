@@ -48,8 +48,8 @@ apps list → app_show（路径 + 当前源码）→ 编辑 app.mjs
   但脚本自身的文件/进程副作用会真的发生（check 输出带一行提示；JSON 面 `data.dry_semantics`）。
   脚本两面判据用 `ctx.runtime.dry`（dry/replay `true`、真跑 `false`）；`epoch === 0` 不作 dry 判据。
   `app_create` 的骨架含「卡点→能力」cookbook 速查段；会话内实时观察用 `ctx.observe()`。
-- `inspect` 只读：标题、URL、有界元素、候选 hint；`--json` 另带只读的可访问性树证据块 `ax`（浏览器 AX role/name/focusable/disabled + `not_in_pool` 近似口径，不进池/匹配/模型/运行路径）；不点击、不输入、不调模型。**inspect 是独立一次性会话**（新开浏览器、不 attach 运行会话）——会话内实时看当前页用应用内 `ctx.observe()`。元素行带 `frame_origin`/`frame_path`（帧链）；`hint_candidates` 在多 frame 同名场景会给 `<label> frame:<origin>` 或 ≤4 段完整链候选，同文案重复组会给 `<label> in-row:<token>` 行锚候选（F82）；`structure_path`（若出现）只是诊断证据（`structure_unstable:true`，动态页面可能失效）——**不是 hint，不可照抄**。
-- **learn 录制 hint vs inspect 候选**：learn 的 `hint` 是六形状闭集（可带 `within:#id` / `frame:<origin>` / `in-row:<token>` 尾缀，同一 `parseHint`）、属性白名单只认 `test`（→data-test）/`type`/`aria-label`；inspect 的 `hint_candidates` 是引擎经同一个 `hintMatch` 自证过的可照抄结果（输出的就是六形状之一；跨帧同名时可能是 `<label> frame:<origin>` / ≤4 段链，同名组可能是 `<label> within:#id`，同文案重复组可能是 `<label> in-row:<token>`）。inspect 候选可直接抄进 act/learn；自己挑的属性先过白名单。
+- `inspect` 只读：标题、URL、有界元素、候选 hint；`--json` 另带只读的可访问性树证据块 `ax`（浏览器 AX role/name/focusable/disabled + `not_in_pool` 近似口径，不进池/匹配/模型/运行路径）；不点击、不输入、不调模型。**inspect 是独立一次性会话**（新开浏览器、不 attach 运行会话）——会话内实时看当前页用应用内 `ctx.observe()`。元素行带 `frame_origin`/`frame_path`（帧链）；`hint_candidates` 在多 frame 同名场景会给 `<label> frame:<origin>` 或 ≤4 段完整链候选，同文案重复组会给 `<label> in-row:<token>` 行锚候选（F82），内容不可分网格会给 `<label> row-index:N` 顺序行锚候选（F83）；`structure_path`（若出现）只是诊断证据（`structure_unstable:true`，动态页面可能失效）——**不是 hint，不可照抄**。
+- **learn 录制 hint vs inspect 候选**：learn 的 `hint` 是六形状闭集（可带 `within:#id` / `frame:<origin>` / `in-row:<token>` / `row-index:N` 尾缀，同一 `parseHint`）、属性白名单只认 `test`（→data-test）/`type`/`aria-label`；inspect 的 `hint_candidates` 是引擎经同一个 `hintMatch` 自证过的可照抄结果（输出的就是六形状之一；跨帧同名时可能是 `<label> frame:<origin>` / ≤4 段链，同名组可能是 `<label> within:#id`，同文案重复组可能是 `<label> in-row:<token>`，内容不可分网格可能是 `<label> row-index:N`）。inspect 候选可直接抄进 act/learn；自己挑的属性先过白名单。
 - `run --max-steps N` 是**执行预算**，不是“从第 N 步开始”：脚本按自己的控制流执行，
   用满预算时以 `budget_exceeded` 停下，结果带已执行步骤与 trace。
 - `run --trace` 把每个 `ctx.step` / `ctx.arrive` 的 `id`、`desc`、URL、结果带进 JSON。
@@ -426,9 +426,11 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
   会话）；非整数或 1..999 ⇒ `config_error`（`idle_timeout_ms must be 0 or an integer >= 1000`）。
   **不受部署 `sessionIdleMs` 的 1h 配置帽约束**——那约束的是管理器缺省值的配置面，不是单会话
   显式值。其他 op 传入 ⇒ `config_error`（不静默忽略）。
-- 联动与回显：引擎子进程的 CLI 孤儿兜底自动取 `max(600s, 2×idle_timeout_ms)`（缺省/0 = 600s，
-  spawn argv 逐字节不变）；`op:"list"` 每行 additive 回显生效值 `idle_timeout_ms`（显式 0 回显
-  0）；`open` 响应的 `idle_ttl_ms` 同口径回显本会话生效值（缺省不传 = 管理器缺省，不变）。
+- 引擎子进程**原样跟随**（F80 评审修正）：显式 `0` ⇒ 子进程 `--idle-timeout-ms 0`（真·不限，
+  仅靠 stdin EOF 退出兜底）；显式 `>0` ⇒ `min(24h, max(600s, 2×ttl))`（仅孤儿兜底，且不越
+  CLI 的 24h 帽）；缺省不传 ⇒ 子进程 600s（spawn argv 逐字节不变，回归不变量）。
+- 回显：`op:"list"` 每行 additive 回显生效值 `idle_timeout_ms`（显式 0 回显 0）；`open` 响应的
+  `idle_ttl_ms` 同口径回显本会话生效值（缺省不传 = 管理器缺省，不变）。
 
 ### 3.1 决策通道：桥 vs CLI（A5）
 
@@ -460,8 +462,8 @@ observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,
 |---|---|---|
 | `ref` | — | 展示/对账锚：inspect=`eN`（池 ref），observe=`oN`（观察序号）。**不是动作地址**；act/read 只认 hint 字符串 / CSS。 |
 | `hint_candidates` | ≤6 条 × ≤200 字符 | 每条经同一个 `hintMatch` 自证「恰好唯一命中」，可照抄；跨帧同名时可能是 `<label> frame:<origin>` 或 ≤4 段链候选，同名组可能是 `<label> within:#id`（单层/链），**同文案重复组可能是 `<label> in-row:<token>`（F82 行锚，token 来自该元素 `row_texts` 行词元，仅小写折叠）或 `<label> row-index:N`（F83 顺序行锚——仅内容不可分网格产出：行内容词元全被生成期护栏拒绝时，序号即语义的候选出口）**。 |
-| `row_texts`（F82） | ≤6 行 × 每行 ≤40 字符 | 行上下文文本（in-row 匹配底座 + 词元来源）——**仅同文案重复组元素携带**（引擎 observe/inspect 面 dup 门控采集；与 `near` 同触发）。**不进模型面**。F83 批 3：桥 ElementView 投影已收编（`element-view.ts` 白名单两键 + ≤6×≤40 上限）；观察面 dup 判定只对"观察集合内可见同文案计数"执行（max 截断边界）。 |
-| `row_index`（F83） | 1-based 正整数 | dup 组内 DOM 先序位次（row-index 匹配底座 + 第 6 档候选序号来源）——**仅同文案重复组元素携带**（帧内同组；无 dup 页不出字段）。**不进模型面**；序号即语义的序漂移责任在作者（组合守卫 `row-index:N in-row:<token>` = fail-safe 主推）。F83 批 3：桥 ElementView 投影已收编（number 透传）。 |
+| `row_texts`（F82） | ≤6 行 × 每行 ≤40 字符 | 行上下文文本（in-row 匹配底座 + 词元来源）——**仅同文案重复组元素携带**（引擎 observe/inspect 面 dup 门控采集；与 `near` 同触发）。**不进模型面**。F84 批 3：桥 ElementView 投影已收编（`element-view.ts` 白名单两键 + ≤6×≤40 上限）；观察面 dup 判定只对"观察集合内可见同文案计数"执行（max 截断边界）。 |
+| `row_index`（F83） | 1-based 正整数 | dup 组内 DOM 先序位次（row-index 匹配底座 + 第 6 档候选序号来源）——**仅同文案重复组元素携带**（帧内同组；无 dup 页不出字段）。**不进模型面**；序号即语义的序漂移责任在作者（组合守卫 `row-index:N in-row:<token>` = fail-safe 主推）。F84 批 3：桥 ElementView 投影已收编（number 透传）。**跨面可移植的前提 = 同名组成员在两个收集面都在场**（池面 `POOL_SEL`+heuristic / 回捞·observe 面 `ADMIT_SEL` 两个元素宇宙不同；照抄 inspect 候选前用 `ctx.observe`/run 复核）。 |
 | `label` / `label_truncated` | ≤200（匹配口径 `full_label`） | `href`/`href_full` ≤160；`class_names` ≤8×40；`why_not_admitted` ≤120；role/id 等短标识 ≤60。 |
 | `frame` | 0 = 主 frame | 对应 `frames[]` 下标；observe 多帧另有 `frame_counts:[{index,url,elements}]`（单帧不出现）。 |
 | `frame_origin` / `frame_path` | origin 桥 ≤60（引擎歧义证据 ≤120）；path ≤4 段×64 | 帧链底座：`frame_path` 省略 = 主帧；两字段都缺 = 未知 origin 帧（about:blank/srcdoc，不可被 `frame:` 命中）。 |

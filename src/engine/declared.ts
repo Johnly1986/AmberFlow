@@ -270,6 +270,11 @@ export async function declaredLookup(
     rows: [], candidates: [], total_matches: 0, hidden_matches: 0, visible_matches: 0, cleanup: noop,
   };
   if (parsed === null) return out;
+  // F82/F83 评审收口（fail-closed）：DRF 是 base 形状（attr 模式）/ base 文本（text 模式）的
+  // 恢复面——两种模式都不读 `row_texts`/`row_index` 底座。声明行锚时**不参与恢复**
+  // （eligible:false），让调用方落回既有 target_not_found + 行锚证据；绝不按 base 绕过行
+  // 约束动作（静默丢弃声明约束比显式落空更危险）。
+  if (parsed.inRow !== undefined || parsed.rowIndex !== undefined) return out;
 
   const admitAll = admitSelectorWithJsFor(surfacePolicy);
   const attrSel = op === "scroll"

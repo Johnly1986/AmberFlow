@@ -67,6 +67,11 @@ export function identityHintInfo(hint: string): IdentityHintInfo {
   const frameChain = parsed.frameChain;
   const miss = (shape: string): IdentityHintInfo =>
     ({ eligible: false, shape, attr: "", value: "", tag: "" });
+  // F82/F83 评审收口（fail-closed）：行锚尾缀（`in-row:` / `row-index:`）是"行身份"约束，
+  // FW8 身份回捞只认 #id / [attr=value] 底座、没有行上下文可判——声明行锚时**不参与恢复**。
+  // 否则恢复面会按 base 身份找到唯一元素直接动作，静默丢掉作者写的行约束（比落空更危险）。
+  // 调用方（命令步/act hint）落回既有 target_not_found + 行锚证据（extraction 证据面）。
+  if (parsed.inRow !== undefined || parsed.rowIndex !== undefined) return miss("row-anchor");
   if (parsed.kind === "id") {
     if (parsed.value === "") return miss("id");
     return { eligible: true, shape: "#id", attr: "id", value: parsed.value, tag: "",

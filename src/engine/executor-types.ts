@@ -208,10 +208,12 @@ export interface ExecutedAction {
   /** U7：clickAt 实际点击的**元素相对**坐标（与声明绑定同值）；其它 op 缺席。 */
   position?: { x: number; y: number };
   /**
-   * FW8：本动作的**声明目标**由身份回捞解析（合成 ref，如 `dom:0`；不是池 ref）。
-   * 缺字段 = 普通池解析。trace 行的同一事实还带 `identity:{shape,attr,value,…}`。
+   * FW8/F74：本动作的**声明目标**由非池面恢复链解析（合成 ref）——`dom_identity` = FW8 身份
+   * 回捞（如 `dom:0`）、`declared_dom` = DRF（P0-C）、`dom_fallback` = F75 run 决策步 DOM 回退跳
+   * （如 `df:p0`）。缺字段 = 普通池解析。trace 行的同一事实还带 `identity:{…}` /
+   * `declared_resolve:{…}` 证据。
    */
-  resolved_by?: "dom_identity" | "declared_dom";
+  resolved_by?: "dom_identity" | "declared_dom" | "dom_fallback";
   /**
    * P0-C：DRF 命中证据（与 trace 行 `declared_resolve` 同源同值；仅 declared 解析时出现）。
    * `hit_test` 只在 click 族动作前跑过 hit-test 时出现（covered/ancestor 表示未点击）。
@@ -980,7 +982,7 @@ export interface MiddlewareOptions {
    */
   attrValueMatch?: AttrValueMatch;
   /**
-   * F83 批 3（deny-list 可配化）：第 5 档词元护栏的放行词元表（来自
+   * F84 批 3（deny-list 可配化）：第 5 档词元护栏的放行词元表（来自
    * `meta.policy.hint_token_allow`；缺省不传 = 护栏行为逐字节不变）。生效面 = 歧义证据
    * suggested_hint（describeAmbiguity 下传 suggestHints 单点消费）与 ctx.observe 自证池
    * hint_candidates（CtxDeps 下传 observePage）；inspect CLI / session / 桥面缺省

@@ -302,7 +302,51 @@ export const ROW_CLIMB_JS = String.raw`  const __dupKeyOf = (tag, label) => Stri
       if (out.length >= 3 && rows.length >= 6) break;
     }
     return {out: out, rows: rows};
-  };`;
+  };
+  // F85（评审收口）：dup 键的**标签口径唯一出处**——与池行 label 同口径（labelOfRaw 全逻辑的
+  // 内联复刻：aria-label→title→首子节点文本→innerText→placeholder→value；input/textarea/select
+  // 追加 label 包裹文本；PUA 字形剥除 + 空白折叠 + 40 字符截断）。池侧 addNearContext 用
+  // Elem.label（= 本函数同口径），observe/HINT_HEAD/A3 若各写一份会对长标签/表单控件分组
+  // 不同（K 不同 → 同一 row-index:N 指到不同成员）。改名 __rowLabelOf 避免与 LABEL_HELPERS_JS
+  // 的 labelOfRaw 冲突（四 pass 里只有 OBSERVE 内插了 LABEL_HELPERS_JS）。
+  const __rowTag = (el) => String(el.tagName || el.nodeName || '').toLowerCase();
+  const __rowLabelOf = (el) => {
+    const tag = __rowTag(el);
+    const norm = (t) => String(t || '').replace(/[\uE000-\uF8FF]/g, '').replace(/[ \t\n\r\f\v]+/g, ' ').trim();
+    const first = el.childNodes && el.childNodes.length ? String(el.childNodes[0].textContent || '') : '';
+    let label = norm(el.getAttribute('aria-label') || el.getAttribute('title') || first || '');
+    const text = (!label || tag === 'select') ? norm(el.innerText || '') : '';
+    if (!label) label = text || el.getAttribute('placeholder') || el.getAttribute('value') || '';
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+      const own = String(el.value || '').trim();
+      let p = el.closest ? el.closest('label') : null;
+      if (!p && el.id) {
+        try { p = document.querySelector('label[for="' + (globalThis.CSS && CSS.escape ? CSS.escape(el.id) : el.id) + '"]'); } catch (err) { p = null; }
+      }
+      let wrapper = p ? norm(p.innerText) : '';
+      if (own && wrapper.indexOf(own) === 0) wrapper = wrapper.slice(own.length).trim();
+      if (!label) label = wrapper;
+      else if (wrapper && wrapper !== label && label.indexOf(wrapper) === -1) label = label + ' / ' + wrapper;
+    } else if (!label) {
+      label = norm(el.innerText || '');
+    }
+    return norm(label).slice(0, 40);
+  };
+  // “可见”与池/observe 同口径：必须有**非零盒**（EXTRACT 也要求 getClientRects 非零——
+  // 无头区/折叠容器里 checkVisibility 为 true 但 Playwright 点不到，这类成员不能计入编号基，
+  // 否则跨面 N 会错位）+ CSS 可见性（checkOpacity 与 OBSERVE 一致关掉）。
+  const __rowVisible = (e) => {
+    const rects = e.getClientRects ? e.getClientRects() : null;
+    let hasBox = rects === null;
+    if (rects !== null) {
+      for (let k = 0; k < rects.length; k++) {
+        if (rects[k].width > 0 && rects[k].height > 0) { hasBox = true; break; }
+      }
+    }
+    if (!hasBox) return false;
+    return e.checkVisibility ? e.checkVisibility({checkVisibilityCSS: true, checkOpacity: false}) : true;
+  };
+`;
 
 /**
  * ONE round trip for the whole page: tag, label (incl. <label>-wrapper text),
@@ -685,30 +729,34 @@ ${ANCHOR_JS}
       ...(structurePath ? {structure_path: structurePath, structure_unstable: true} : {}),
     });
   }
+  // F85（评审收口）：dup 键改用共享 __rowLabelOf（与池行 label 同口径，40 字符）——
+  // 长标签/表单控件此前 observe 用全长 label、池用 40 字符 label，分组 K 会不同。
+  const rowKeys = [];
+  for (let i = 0; i < rows.length; i++) {
+    rowKeys.push(rows[i].visible === true ? __dupKeyOf(__rowTag(rowEls[i]), __rowLabelOf(rowEls[i])) : '');
+  }
   const dupCnt = {};
   for (let i = 0; i < rows.length; i++) {
     if (rows[i].visible !== true) continue;
-    const k = __dupKeyOf(rows[i].tag, rows[i].label);
-    dupCnt[k] = (dupCnt[k] || 0) + 1;
+    dupCnt[rowKeys[i]] = (dupCnt[rowKeys[i]] || 0) + 1;
   }
   const dupLabels = new Set();
   for (let i = 0; i < rows.length; i++) {
     if (rows[i].visible !== true) continue;
-    if ((dupCnt[__dupKeyOf(rows[i].tag, rows[i].label)] || 0) > 1) dupLabels.add(rows[i].label);
+    if ((dupCnt[rowKeys[i]] || 0) > 1) dupLabels.add(__rowLabelOf(rowEls[i]));
   }
   // F83：dup 组成员按 rows 数组序（= 本帧 DOM 先序）编号 1..K（帧内同组；additive 字段，
   // 无 dup 页不出键 ⇒ 观察 JSON 逐字节不变）。row_index 独立于爬升——组序是纯计数。
   const rowIdxSeen = {};
   for (let i = 0; i < rows.length; i++) {
     if (rows[i].visible !== true) continue;
-    const k = __dupKeyOf(rows[i].tag, rows[i].label);
-    if ((dupCnt[k] || 0) <= 1) continue;
-    rowIdxSeen[k] = (rowIdxSeen[k] || 0) + 1;
-    rows[i].row_index = rowIdxSeen[k];
+    if ((dupCnt[rowKeys[i]] || 0) <= 1) continue;
+    rowIdxSeen[rowKeys[i]] = (rowIdxSeen[rowKeys[i]] || 0) + 1;
+    rows[i].row_index = rowIdxSeen[rowKeys[i]];
   }
   for (let i = 0; i < rows.length; i++) {
     if (rows[i].visible !== true) continue;
-    if ((dupCnt[__dupKeyOf(rows[i].tag, rows[i].label)] || 0) <= 1) continue;
+    if ((dupCnt[rowKeys[i]] || 0) <= 1) continue;
     const c = __rowClimb(rowEls[i], dupLabels);
     if (c.rows.length) rows[i].row_texts = c.rows;
   }
@@ -895,20 +943,26 @@ ${ROW_CLIMB_JS}
                 // F83 编号（v1.0 §3.5 C 项）：**一次 O(n) 全组位次表**——__dupLabelsOf 分出的同
                 // 组成员按 __dupKeyOf 键计数、DOM 先序位次 1..K；memo 只适用组合守卫的 row_texts
                 // 爬升；**单用 row-index 声明零爬升成本**（纯查表比较，computed 恒 0）。
-                const pairs = [];
-                for (let i = 0; i < all.length; i++) pairs.push([all[i].tagName.toLowerCase(), labelOf(all[i])]);
-                const dupLabels = __dupLabelsOf(pairs);
-                const dupCnt = {};
-                for (let i = 0; i < pairs.length; i++) {
-                    const k = __dupKeyOf(pairs[i][0], pairs[i][1]);
+                // F85（评审收口）：编号基只计**可见**成员、dup 键用共享 __rowLabelOf（与池/
+                // observe 同口径）。此前这里对 selector 全集（含隐藏）按自写 labelOf 编号，
+                // 会与池面 addNearContext 的可见成员编号错位（同一个 N 指到不同行）。
+                const visPairs = [], visEls = [];
+                for (let i = 0; i < all.length; i++) {
+                    if (!__rowVisible(all[i])) continue;
+                    visPairs.push([__rowTag(all[i]), __rowLabelOf(all[i])]);
+                    visEls.push(all[i]);
+                }
+                const dupLabels = __dupLabelsOf(visPairs);
+                const dupCnt = {}, idxSeen = {};
+                for (let i = 0; i < visPairs.length; i++) {
+                    const k = __dupKeyOf(visPairs[i][0], visPairs[i][1]);
                     dupCnt[k] = (dupCnt[k] || 0) + 1;
                 }
-                const idxSeen = {};
-                for (let i = 0; i < all.length; i++) {
-                    const k = __dupKeyOf(pairs[i][0], pairs[i][1]);
+                for (let i = 0; i < visPairs.length; i++) {
+                    const k = __dupKeyOf(visPairs[i][0], visPairs[i][1]);
                     if ((dupCnt[k] || 0) <= 1) continue;
                     idxSeen[k] = (idxSeen[k] || 0) + 1;
-                    rowIdxMap.set(all[i], idxSeen[k]);
+                    rowIdxMap.set(visEls[i], idxSeen[k]);
                 }
                 picked = [];
                 let computed = 0;

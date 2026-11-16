@@ -267,7 +267,7 @@ export async function flow(ctx) {
 | 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, values?, when?, timeoutMs?, force?, forceAct?, staleRetry?, rehydrateRescan?, newTab? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}`；`values` 是决策步的显式值袋，见 §4.5；`newTab` 把 `target=_blank` 的新标签升为一等完成面（见 §4.9）；`timeoutMs` 是动作后信号窗口 + 整步挂钟帽（见下）。**步级 `slots` 的键仍须在 `meta.slots` 声明**（dry 校验按 `meta.slots` 口径查键，步级提供的是**值**不是新键——键没声明时 check 直接红 `value.key … is not a declared slot`） |
 | 人工步 | `ctx.manual(desc, { done, instructions?, id? })` | 见 §7；非 TTY 返回 `needs_human`，不假装有人 |
 | 观察 | `ctx.url()` / `ctx.read.{text,value,count,attr}(sel[, attr])` / `ctx.holds(signal)` / `ctx.waitFor(signal, {timeoutMs?, pollMs?})` / `ctx.waitForTarget(hint, {visible?, timeoutMs?, pollMs?})` | 只读；读不到返回 `null` / `0`；`waitFor` 轮询到 bounded deadline，返回 boolean；`waitForTarget`（C2）等一个 hint 语义目标进可见准入池——返回 `{found, count}`，超时如实 `found:false`（**不假装**）；免费只读、不计预算、不进模型请求面。dry 合成 `{found:false, count:0, dry:true}`（与 `waitFor` 的 dry「立即 true」口径不同：那是"信号已成立"的模拟，这里没有可模拟的命中事实）；`url()` 首次导航前是 `"about:blank"`，别拿它当入口页判断 |
-| 只读侦察 | `ctx.observe({ max?, selector?, includeHidden?, includeFrames?, includeStructure? })` | **免费只读**：返回当前页 DOM 侧真实存在的元素清单（`ref o0/o1…`；字段 `tag/label/role/id/name/data-test/type/href/class_names/visible/bbox/frame/frame_origin?/frame_path?` + `admitted`/`why_not_admitted`/`hint_candidates`；`includeStructure:true` 时另有 `structure_path`（≤160）+ `structure_unstable:true`）。不计 flow step/预算、不写 outDir、**不进模型请求面**、不改页面状态（无点击/滚动/导航）。默认走当前准入面（ADMIT_SEL 投影 + `[data-js-ref]` 后缀，不新增类目）；`selector` 可用任意只读 CSS 看池外目标。`hint_candidates` 用同一个 `hintMatch` 在本次观察到的准入面元素集合上**自证**（唯一命中才给），可直接照抄进 `ctx.hint(...)`/命令 `target`——但自证范围就是本次观察集合：默认观察（未截断）时等于整个准入面；`selector` 或 `truncated:true` 时只在所选子集/前 max 行内自证，照抄前应再做一次默认观察复核；`admitted` = 匹配准入面 + 可见 + 至少一条自证 hint（**不等于**"一定在本次 120 窗口内"，窗口见 `inspect --json` 的 `window`）。`frame_origin`/`frame_path` 是帧链底座（`frame:` 候选由此自证）；`structure_path` 只是诊断证据（动态页面可能失效、不可照抄、不进 hint/模型面）。最多 200 行、≤6 帧；`max` 超出/未知选项 = `config_error`；非法 CSS 返回 `{ok:false, error:"bad_selector", reason}`（不抛栈、不中断 flow）。dry = `{ok:true, dry:true, counts 全 0, elements:[]}`；replay = `{ok:true, replay:true, …}`（只还原 counts/truncated，元素明细未进 trace），trace 只记 `{call:"observe", url, counts, truncated}` |
+| 只读侦察 | `ctx.observe({ max?, selector?, includeHidden?, includeFrames?, includeStructure? })` | **免费只读**：返回当前页 DOM 侧真实存在的元素清单（`ref o0/o1…`；字段 `tag/label/role/id/name/data-test/type/href/class_names/visible/bbox/frame/frame_origin?/frame_path?/row_texts?/row_index?` + `admitted`/`why_not_admitted`/`hint_candidates`；`includeStructure:true` 时另有 `structure_path`（≤160）+ `structure_unstable:true`）。不计 flow step/预算、不写 outDir、**不进模型请求面**、不改页面状态（无点击/滚动/导航）。默认走当前准入面（ADMIT_SEL 投影 + `[data-js-ref]` 后缀，不新增类目）；`selector` 可用任意只读 CSS 看池外目标。`hint_candidates` 用同一个 `hintMatch` 在本次观察到的准入面元素集合上**自证**（唯一命中才给），可直接照抄进 `ctx.hint(...)`/命令 `target`——但自证范围就是本次观察集合：默认观察（未截断）时等于整个准入面；`selector` 或 `truncated:true` 时只在所选子集/前 max 行内自证，照抄前应再做一次默认观察复核；`admitted` = 匹配准入面 + 可见 + 至少一条自证 hint（**不等于**"一定在本次 120 窗口内"，窗口见 `inspect --json` 的 `window`）。`frame_origin`/`frame_path` 是帧链底座（`frame:` 候选由此自证）；`row_texts`/`row_index` 是行锚底座（`in-row:`/`row-index:` 候选由此自证，仅同文案重复组元素携带）；`structure_path` 只是诊断证据（动态页面可能失效、不可照抄、不进 hint/模型面）。最多 200 行、≤6 帧；`max` 超出/未知选项 = `config_error`；非法 CSS 返回 `{ok:false, error:"bad_selector", reason}`（不抛栈、不中断 flow）。dry = `{ok:true, dry:true, counts 全 0, elements:[]}`；replay = `{ok:true, replay:true, …}`（只还原 counts/truncated，元素明细未进 trace），trace 只记 `{call:"observe", url, counts, truncated}` |
 | 站点面 | `ctx.openPage(role)` / `ctx.extract(nameOrSpec)` / `ctx.rows(...)`（v1 关闭） | 具名抽取声明在 `meta.site.listExtract`；inline 抽取用 `{ rows, fields, maxItems? }`（例：`ctx.extract({ rows: "li.item", fields: { title: ".title" } })`，无需 meta 声明）；`rows` 调用给结构化错误 |
 | 数据 | `ctx.source(name, {dates?})` / `ctx.data.{min,max}(rows, by)` | 数据腿按需拉取；`--skip-data` 时 `source` 报结构化错误。`dates` 显式给本次范围（单日 / `A..B` / `next_week`）；缺省按 source JSON 的 `default_dates`（支持 `"{slot}"` 占位符，从包默认 + `--slot` 解析；不许引用 `source_slots` 产物）。观察视图 `byDate` 按日期保留完整 counts/selects/rows |
 | 进程 | `ctx.run(...)` / `ctx.dangerous({...dryRunArgs})` | 见 §4.8（`returns` → 数据集、工件、失败诊断）；危险步默认拒绝 |
@@ -842,9 +842,10 @@ await ctx.step("订 SC7960 那一班的票", {
   act: ctx.hint("订票 in-row:sc7960"),           // <label> in-row:<token>；hint 先整串小写
   done: ctx.judge.exists("[data-test=order-draft]"),
 });
-// 三类尾缀可组合（各至多一次、任意次序、整组回退）：
+// 四类尾缀可组合（各至多一次、任意次序、整组回退）：
 ctx.hint("button[near~add] in-row:order-1042 within:#modal");
 ctx.hint("删除 in-row:1042 frame:https://shop.example.com");
+ctx.hint("add to basket row-index:3 in-row:america");
 ```
 
 - **数据面**：行上下文 `row_texts`（≤6 行、每行 ≤40 字符）只在**同文案重复组**元素上采集
@@ -854,33 +855,41 @@ ctx.hint("删除 in-row:1042 frame:https://shop.example.com");
   ≙ frame 对未知 origin 帧不可命中）——行锚只服务"同文案网格"这一它要解决的问题。
 - **匹配口径**：`row_texts` 任一行 `includes(token)`，逐行匹配不做跨行拼接；归一**仅小写
   折叠**（不做 NFKC——全角 `ＳＣ７９６０` 显式落空；作者从 `hint_candidates` 照抄真实行
-  词元构造上必中）。三尾缀组合 = 三个独立 AND 过滤（frame 入口过滤 + within/inRow 后置），
-  集合可交换故书写次序无关；限定后本档清空 = 落空，不让行内更弱档越级顶上。
+  词元构造上必中）。四尾缀组合 = 四个独立 AND 过滤（frame 入口过滤 + within/inRow/rowIdx
+  后置），集合可交换故书写次序无关；限定后本档清空 = 落空，不让行内更弱档越级顶上。
+- **解析面 fail-closed（F85 评审收口）**：声明了行锚（`in-row:`/`row-index:`）且限定后
+  候选 >1 时，`rules.hintMatchImpl` **直接返回 null**（不再用 `firstIfSame` 合并同签名候选）；
+  命令步/决策步在取首候选与 widen/strict 之前结构化 `target_ambiguous`、**零动作**、候选进
+  `skipped_actions`——"token 撞多行 = 零动作、永不选第一行"从文档承诺变为解析面兑现。
+- **恢复面 fail-closed（F85 评审收口）**：**声明行锚后 identity（FW8）/DRF/F64 `#id` 直查
+  不参与恢复**——落空 = `target_not_found` + 行锚证据，绝不按 base 身份/文本绕过行约束动作。
 - **建议闭环**：`inspect`/`ctx.observe` 的 `hint_candidates` 会对同名组自动产出可照抄的
   `<label> in-row:<token>` 候选（within 链生长全落空后的第 5 档；同一 `hintMatch` 自证恰好
   唯一命中才保留）。**词元启发式**：优先"类标识符"词元（字母+数字混合，如 `sc7960`、
   `order-1042`），跳过纯价格/货币/百分比词元（`^[¥$€£\d.,%*\s]+$`）与时段词元
   （`^\d{1,2}:\d{2}$`）——价格/时段是页面最易漂移的文本，拿它做锚 = 假唯一失败面；作者
   **手写** in-row 不受此限制，但请优先选身份文本（改版不漂移的列）。**deny-list 可配化
-  （F83 批 3）**：SKU 恰似数字被护栏误杀时，`meta.policy.hint_token_allow: ["45021", …]`
+  （F84 批 3）**：SKU 恰似数字被护栏误杀时，`meta.policy.hint_token_allow: ["45021", …]`
   放行指定词元（≤16 项、每项非空无空白 ≤40 字符、小写折叠比较；结构约束不退让）——run 面
-  歧义证据与 `ctx.observe` 生效，inspect CLI / session 面缺省（F58 同款面边界）。
+  歧义证据、`ctx.observe` 与 record/`induceHint` 记忆生成面生效，inspect CLI / session 面缺省
+  （F58 同款面边界）。
 - **near vs row_texts 一句话分工**：`near` = 模型视图单行（宿主挑选后的展示装饰，进
   criteriaView 的 `[near=...]`）；`row_texts` = in-row 匹配底座（自证候选的词元来源，不进
   模型面）。作者只照抄 `hint_candidates`，不需要手工区分两者。
 - **语义边界（如实定义，不当 bug 修）**：in-row 是"目标所在容器路径可见文本"的关系锚，
   **不是严格几何"行"判定**——目标容器路径跨 2 行且只含 1 个重复按钮时会继续爬升，邻居行
-  文本可能入集（网格级 break 只挡"整网格"）；token 命中多行 → 限定后仍多候选 → 照常歧义
-  谓词（`target_ambiguous` 零动作，**永不静默取第一个**）；行文本漂移（价格改版、文案 A/B）
-  的失败形态 = 显式落空或歧义拒绝，**永不错点**。
+  文本可能入集（网格级 break 只挡"整网格"）；token 命中多行 → 限定后仍多候选 → 解析面
+  fail-closed 直接 null → 命令步/决策步结构化 `target_ambiguous` 零动作（**永不静默取第一
+  行**）；行文本漂移（价格改版、文案 A/B）的失败形态 = 显式落空或歧义拒绝，**永不错点**。
 - **回捞/回退对等**：声明 hint 被 40/120 窗口挤出时，回捞（ADMIT 宽扫）与 A3 DOM 回退面
   同口径补 `row_texts` 并按同一 in-row 门收集（惰性 + memoized + 凑满 5 早退 + 总计算封顶
   120，超标 fail-closed）——半链上线会让"观察面说有、run 面落空"，本批一次到位。
 - **已知边界**：观察面的 dup 判定只对"观察集合内可见同文案计数"执行（`max` 截断边界：
   被截掉的行不参与计数）；虚拟列表里 `row_texts` 与池窗口同界——超窗行先滚动/分块取证
-  （`ctx.scrollList`/`ctx.collect`）；`identity.ts` 的 FW8 身份回捞白名单**不含** in-row
-  底座（in-row 不是身份形状，声明目标恢复路径不适用）；`plan check --probe` 的
-  `findByHint` 尚未适配 in-row（批 2）。
+  （`ctx.scrollList`/`ctx.collect`）；**声明行锚后 identity（FW8）/DRF/F64 `#id` 直查不参与
+  恢复**（落空 = `target_not_found` + 行锚证据，绝不按 base 绕过行约束）；`findByHint`
+  （`plan check --probe`）**已适配**行锚（批 2 遗留收编：in-row = `rowMatch` 同口径、
+  row-index = `row_index` 整数全等；两消费面池都经 `addNearContext` 采集）。
 
 ### 4.13 顺序行锚：`row-index:N`（序号即语义与内容守卫）
 
@@ -907,7 +916,11 @@ ctx.hint("add to basket row-index:3 in-row:america");
   组**元素上编号（帧内 (tag+label) 子组 DOM 先序 1..K；非重复组写 `row-index:` = 恒落空，
   fail-closed 对称）。`row-index:N ≠ 页面第 N 个元素`——页面有两个网格时 `row-index:2`
   命中两个网格各自的第 2 个成员 → `target_ambiguous` 零动作（用 `frame:`/`within:`/`in-row:`
-  收窄）。
+  收窄）。**解析面 fail-closed（F85 评审收口）**：声明行锚且限定后候选 >1 时 `hintMatchImpl`
+  直接返回 null（不再 `firstIfSame` 合并），命令步/决策步在 widen 之前结构化
+  `target_ambiguous`、零动作、候选进 `skipped_actions`——不交模型猜一行。
+- **恢复面 fail-closed（F85 评审收口）**：**声明行锚后 identity（FW8）/DRF/F64 `#id` 直查
+  不参与恢复**——落空 = `target_not_found` + 行锚证据，绝不按 base 身份/文本绕过行约束动作。
 - **done 断言纪律（把静默错点降级为 done 失败）**：单用形态的步骤请配内容/结果锚定的
   done（如 `judge.text(行选择器, 期望内容)` 或组合守卫本身）——序漂移时 done 失败可查，
   而不是"成功"地做在错的对象上。trace 的 `row_evidence`（所选行 `row_index` + `row_texts`）
@@ -924,9 +937,12 @@ ctx.hint("add to basket row-index:3 in-row:america");
   停因点 additive 接入（stopCode 不变，reason 附证据；批 1 实测的 `low_confidence` 停因
   从此自诊断）。
 - **已知边界**：编号底座 = 本面收集到的成员（池窗口截断/观察 max/虚拟列表会让 K 小于页面
-  真实组大小——单用形态的错点面由组合守卫与 done 纪律缓解）；FW8 白名单不含 row-index
-  底座；`findByHint`（plan check --probe）未适配 row-index；跨帧同名网格各自编号（跨帧
-  歧义走既有 `frame:`/歧义谓词口径）。
+  真实组大小——单用形态的错点面由组合守卫与 done 纪律缓解）；编号是**页面前缀**（池帽只截尾、
+  不重新编号）；`row-index` 跨面可移植的前提 = 同名组成员在两个收集面都在场（池面
+  `POOL_SEL`+heuristic / 回捞·observe 面 `ADMIT_SEL` 两个元素宇宙不同）——**照抄 inspect
+  候选前用 `ctx.observe`/run 复核**；FW8/DRF/F64 在声明行锚时不参与恢复（fail-closed）；
+  `findByHint`（plan check --probe）**已适配** row-index（整数全等）；跨帧同名网格各自编号
+  （跨帧歧义走既有 `frame:`/歧义谓词口径）。
 
 ## 5. 站点面：`meta.site`
 
@@ -1123,7 +1139,7 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `browser` | （不写 = 现状链） | **task-43 浏览器通道**：`"chrome"`（系统 Chrome，Playwright `channel:"chrome"`，new headless）\| `"headless-shell"`（ms-playwright 的 headless-shell，= 缺省现状）。优先级 **env(`AMBERFLOW_BROWSER_CHANNEL`) > meta > 缺省**——env 是部署/CI 的机器级覆盖，meta 是应用作者的站点知识（已知 headless-shell 下坏的站点在此点名 chrome，如 zh.wikipedia 文章页的客户端 URL flap）。主机没有系统 Chrome 时 launch **如实报错不静默回退**（要回退请删 meta 或改 env）；与 `--headful` 正交组合（headful 语义独立：人工步等仍强制可见窗口）。生效值与来源进 `effective_policy.browser`（仅 env/meta 任一存在时出现）；真实二进制以 `env.browser.binary_basename`（D-1 启动事实）为准。已知代价（task-39 实测）：chrome 通道冷启动 +~13%，zh.wiki 类页面 open 快 ~3.5s 且免 flap |
 | `attr_value_match` | `full_label` | **A1 属性值匹配底座**：`full_label`（缺省）= `[aria-label=…]` / `[aria-label~…]` 同时比 ≤200 的 `full_label` 与模型视图 `label`（前 40 字）——>40 字的 aria-label 值可命中；`display` = A1 之前（只比前 40 字 label，>40 的值永不命中；逃生口/对照臂）。attrEq 与 attrSubstr 同一函数、一处修两形状；≤40 的值等值命中集合不变。显式声明才进 `effective_policy.attr_value_match`；inspect/observe/session 无 policy 恒 `full_label` |
 | `act_hint_tier` | `any` | **A3 弱档门槛**：`any`（缺省 = 现行为逐字节不变）= 弱档（bare 词前缀/词包含、attrSubstr loose 子串）胜出照旧执行 + `matched_others` 警告；`strong` = 弱档胜出判为**未命中**（step warning 换 `weak_hint_rejected`），随后按 `act_hint`：`widen` 交模型 / `strict` 结构化 `target_not_found`（reason 写弱档被拒 + 候选≤3 + 两条改法）。与 `act_hint` **正交**（`widen`+`strong` 合法）；判据复用 `takeHintMatchOthers()` 的既有 `suspicious`，不另造档位表；池解析与 rules-only 宽扫重解析共用同一判定；命令 target / learned hint / 决策步不受影响；显式声明才进 `effective_policy.act_hint_tier`（声明 `"any"` 也进账） |
-| `hint_token_allow` | （不写 = 护栏行为逐字节不变） | **F83 批 3：行锚词元护栏的放行表（deny-list 可配化）**：第 5 档 in-row 候选生成的词元护栏跳过价格/时段 deny 模式的词元表——SKU 恰似数字（如 `"45021"`）被护栏误杀时的外科调优出口。形状 = 字符串数组（≤16 项、每项非空无内部空白 ≤40 字符、比较小写折叠；非法 = `config_error`）。**面覆盖**：run 面歧义证据 suggested_hint + `ctx.observe` 自证池 hint_candidates 生效；inspect CLI / session / 桥面缺省（F58 attr_value_match 同款面边界）。**结构约束不退让**：非空/禁 `>`/≤40 字符仍强制。显式声明才进 `effective_policy.hint_token_allow` |
+| `hint_token_allow` | （不写 = 护栏行为逐字节不变） | **F84 批 3：行锚词元护栏的放行表（deny-list 可配化）**：第 5 档 in-row 候选生成的词元护栏跳过价格/时段 deny 模式的词元表——SKU 恰似数字（如 `"45021"`）被护栏误杀时的外科调优出口。形状 = 字符串数组（≤16 项、每项非空无内部空白 ≤40 字符、比较小写折叠；非法 = `config_error`）。**面覆盖**：run 面歧义证据 suggested_hint + `ctx.observe` 自证池 hint_candidates + **record/`induceHint` 记忆生成面**（`induceHint(..., {tokenAllow})`）生效；inspect CLI / session / 桥面缺省（F58 attr_value_match 同款面边界）。**结构约束不退让**：非空/禁 `>`/≤40 字符仍强制。显式声明才进 `effective_policy.hint_token_allow` |
 
 产物里的 `effective_policy` 只在非缺省时出现，并写明来源（`cli` / `config` / `app` / `provider` / `env` / `default`）。
 
@@ -1183,7 +1199,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `precondition_skipped` | `when` 不成立，这一步没有执行（`ok:false`，trace 状态 `skipped`；同样计一次执行预算）——脚本按 stopCode 分支继续，不是失败 |
 | `page_not_ready` | 元素池为空，页面还没稳定；等页面 ready，或修 done 信号 |
 | `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标。`meta.policy.act_hint:"strict"` 下 act hint 解析链全落空也用它（reason 显式写 `act_hint="strict"`，**不再回退模型自由选**；缺省 `widen` 才回退）。`meta.policy.act_hint_tier:"strong"` 下**弱档胜出被判未命中**（bare 词前缀/词包含、attrSubstr loose 子串）同样报它：strict 时 reason 写明弱档被拒 + 候选≤3 + 两条改法（收窄成强形状 / 回 `act_hint_tier:"any"`）；缺省 `any` 才有 `matched_others` 警告。声明目标（act hint/命令）在池+ADMIT+FW8 全落空且**未声明** `target_resolution` 时，reason 追加一行 DRF 提示（自绘控件可声明 `meta.policy.target_resolution:"declared"` 走 attr/文本精确匹配）；**已声明** `"declared"` 的同场景走 DRF、不再提示（避免噪音）。**F73 起**：已声明 declared 且 DRF 实跑可见零命中时，落空 reason 追加 DRF 计数（`total/hidden/visible=0`），strict 的解析链列举句同步点名 DRF；未声明时逐字节不变。**C 批起**：若 hint 带 `frame:` 尾缀，reason 末尾追加该尾缀的拒绝原因（多尾缀 / 非法 origin / 空段 / >4 段 / 带 path·query·显式默认端口）或合法但未命中时**页面实际可用 origin**（允许帧去重 ≤6、主帧也列）；无 `frame:` 参与时旧 reason 逐字节不变。**F82 起**：若 hint 带 `in-row:` 尾缀，reason 按**三案口径**给出可区分证据（见下方「行锚三案/四案口径」；尾缀形状非法时先点名拒绝原因——多尾缀 / 空值 / 含 `>` / 超 40 字符 / 值内伪尾缀；无 `in-row:` 参与时旧 reason 逐字节不变）。**F83 起**：若 hint 带 `row-index:` 尾缀，reason 按**四案口径**给出可区分证据（同下；`0`/负数/非数字点名"row-index 从 1 开始"；无 `row-index:` 参与时旧 reason 逐字节不变） |
-| `target_ambiguous` | 目标命中多个不同候选；收窄 hint。`target_resolution:"declared"` 下 DRF 的两个可见文本/属性匹配同样报它（候选 tag/文本/frame/visible 在 reason 与 `skipped_actions`）。**F82 起**：`in-row:` token 撞多行时也走本停因——零动作、候选照常列出（**永不静默取第一个**；候选各自带 label/same_label/near，行归属看 `row_texts` 证据）。**F83 起**：`row-index:N` 组合后仍多候选（跨帧同名网格/多网格同页各含同序成员）同样走本停因——收窄 `frame:`/`within:`/`in-row:` |
+| `target_ambiguous` | 目标命中多个不同候选；收窄 hint。`target_resolution:"declared"` 下 DRF 的两个可见文本/属性匹配同样报它（候选 tag/文本/frame/visible 在 reason 与 `skipped_actions`）。**F82 起**：`in-row:` token 撞多行时也走本停因——解析面 fail-closed（多候选直接 null），零动作、候选照常列出（**永不静默取第一个**；候选各自带 label/same_label/near，行归属看候选的 `row_index`——引擎歧义证据 additive，桥面暂不投影）。**F83 起**：`row-index:N` 组合后仍多候选（跨帧同名网格/多网格同页各含同序成员）同样走本停因——收窄 `frame:`/`within:`/`in-row:` |
 | `action_unsupported` | 目标存在但声明的动作 op 不在元素能力面内；换动作或换目标。DRF 首版只允许 `click`/`scroll`/`hover`——对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` 也报它（reason 明说首版限制） |
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |
 | `false_done` | **P0-E**（`done_guard:"fail"` 档）：done 成立但只读复核 guard 命中假绿特征——登录墙特征（URL/标题登录文案/跨出 hosts 信封）或「有动作但 changed=false 且 done 是否定式」的零前进蹭成立（R11：误点进登录页被算成功）。给 done 配正向锚（`all_of(not(...), 正向锚)`，必要时配 `ctx.judge.loginWall()`）；确属误报把 policy 改回 `warn`。缺省 `warn` 档只记 `false_done:` step warning，不改判定 |
@@ -1215,8 +1231,9 @@ hint 落空时，`target_not_found` reason 末尾按现场给出其一（尾缀�
 2. **行已定位但行内无 `<base>` 命中** → reason 报「行已定位 + 行内词面」：`in-row:"sc7960"
    已定位 N 个带该行词面的元素（e12, …）但行内没有命中 base "button"——行已定位：改 base
    不改 token`；作者换 base 形状/词面，token 保留。
-3. **token 撞多行** → 不进 `target_not_found`：`target_ambiguous` 歧义谓词零动作、候选照常
-   列出（**永不选第一行**——结构性安全承诺）；收窄 token 或 base。
+3. **token 撞多行** → 不进 `target_not_found`：解析面 fail-closed（声明行锚且限定后候选 >1
+   → `hintMatchImpl` 直接 null）→ 命令步/决策步结构化 `target_ambiguous` 零动作；候选照常
+   列出（**永不选第一行**——结构性安全承诺已由解析面兑现）；收窄 token 或 base。
 4. **尾缀形状非法**（双 in-row / 空值 / 含 `>` / 超 40 字符 / 属性值内伪尾缀）→ 整组回退
    显式落空 + reason 点名拒绝原因（BACKLOG #8/E2 先例——与 frame: 尾缀同一 describe 机制）。
 
@@ -1241,8 +1258,9 @@ hint 落空时，`target_not_found` reason 末尾按现场给出其一（尾缀�
 `no_model_runtime` / `hint_matched_nothing` / `action_space_exhausted`，池在手 + curHint 可达）
 additive 接入同一证据面（`frameHintFailureEvidence` 单点复用）：**stopCode 不变**（规划面语义
 不变），reason 在声明行锚落空时附三案证据；无行锚声明 = reason 逐字节不变。`findByHint`
-（`plan check --probe` / `amber start --target` 的旧匹配器）已适配行锚（in-row = rowMatch 同
-口径、row-index = 整数全等；两消费面池都经 addNearContext 编号/采集）。
+（`plan check --probe` / `amber start --target` 的旧匹配器）**已适配四类尾缀**（within/frame/
+in-row/row-index；in-row = rowMatch 同口径、row-index = 整数全等；两消费面池都经
+addNearContext 编号/采集）。
 
 **信号形状报错自带合法形态（C3）**：`validateSignalSpec` 的 arity 不匹配（以及 `all_of`/`any_of`/`not` 的形状错）现在把**合法形态**写进 problem —— 叶算子的操作数**按位置放数组** `{op: [arg…]}`（对象形 `{selector, text}` 不是合法形状），组合算子 `all_of`/`any_of` 收非空数组、`not` 收单个对象。提示的唯一出处是 `src/engine/signals.ts` 的 `SIGNAL_SHAPE_HINT` / `signalProblemText`：`apps check` / `plan check` / `test --validate` 的加载期 problems 直接继承；`amber plan-cli … --signal` 走 cli 版（`--signal` 示例串与改动前逐字一致），`amber session` 的 `signal`/`waitFor` 失败 reason 走 json 版（`problems` 数组原样）。合法信号的校验结果与产物逐字节不变。
 
@@ -1316,9 +1334,12 @@ additive 接入同一证据面（`frameHintFailureEvidence` 单点复用）：**
   个元素`**——多网格同页时命中各网格第 N 个成员 → 歧义谓词兜住；序漂移是序号语义的固有属性
   （单用形态作者显式承担——组合守卫与 done 断言纪律把静默错点降级为显式落空，见 §4.13）；
   编号底座 = 本面收集到的成员（池窗口截断/观察 max 让 K 小于页面真实组大小——案①如实报
-  本面 K）；跨帧同名网格各自编号、firstIfSame 同签名合并沿 D2 既有口径；FW8 白名单不含
-  row-index 底座；`findByHint`（plan check --probe）**已适配** row-index（整数全等）；三案
-  证据已覆盖规划面（批 2 遗留收编——stopCode 不变、reason additive）。
+  本面 K）；编号是页面前缀（池帽只截尾）；跨面可移植的前提 = 同名组成员在两个收集面都在场
+  （池面 `POOL_SEL`+heuristic vs 回捞/observe 面 `ADMIT_SEL`，照抄 inspect 候选前用
+  `ctx.observe`/run 复核）；跨帧同名网格各自编号、firstIfSame 同签名合并沿 D2 既有口径；
+  FW8/DRF/F64 在声明行锚时不参与恢复（fail-closed）；`findByHint`（plan check --probe）
+  **已适配** row-index（整数全等）；三案证据已覆盖规划面（批 2 遗留收编——stopCode 不变、
+  reason additive）。
 
 ## 12. 扩展配方（改引擎的人看）
 

@@ -57,43 +57,57 @@ function frameSuffixOf(elem: Elem): string {
  * E5：子帧元素在稳定句柄后追加 ` frame:<own origin>`（主帧 / 未知 origin 帧不加）——
  * 回放面 `currentHint → hintMatch → parseHint` 已支持尾缀，消费链路无需新增代码。
  *
- * F82/F83 批 3 首项（记忆产物带行锚）：`elems` 在手时，若普通形状（identity / near~label）
+ * F84（批 3）首项（记忆产物带行锚）：`elems` 在手时，若普通形状（identity / near~label）
  * **不自证唯一**（hintMatch 歧义或落空）且元素是**同文案重复组成员**（row_texts/row_index
- * 在场），复用 `suggestHints` 第 5/6 档纪律取行锚候选（内容候选优先、row-index 仅内容不可分
- * ——同一 push 自证唯一，不发明第二套生成逻辑；与歧义面收编同判例），并按 E5 先例追加帧尾缀。
+ * 在场），复用 `suggestHints` 第 5 档纪律取**内容锚**候选（`in-row:<token>`——同一 push 自证
+ * 唯一，不发明第二套生成逻辑；与歧义面收编同判例），并按 E5 先例追加帧尾缀。
  * **非 dup / 已唯一 / 不传 elems 场景产物逐字节不变**（全部既有调用点单参调用不受影响）。
+ *
+ * 评审收口（记忆面禁产单用 `row-index`）：`suggestHints` 第 6 档的 `<label> row-index:N` 是
+ * **位置性** hint——单次 inspect 自证唯一，但跨运行遇排序/懒加载/广告插入就会静默指到另一行；
+ * 作者显式承担序漂移的前提**不适用于引擎自动学到的 hint**（learned hint 是后续同 url+subgoal
+ * 的权威，命中错行不回退模型）。所以记忆面只接受含 ` in-row:` 的内容候选；内容不可分时宁可
+ * 回退 base（下次仍交模型/规则重新观察），不把序号固化成记忆。
  */
-export function induceHint(elem: Elem | undefined | null, elems?: ElemPool): string | null {
+export function induceHint(
+  elem: Elem | undefined | null, elems?: ElemPool,
+  opts?: { tokenAllow?: readonly string[] },
+): string | null {
   if (!elem) return null;
   for (const [field, attr] of HANDLE_ATTRS) {
     const raw = elem[field];
     const value = typeof raw === "string" ? raw.trim() : "";
     if (!value || isVolatile(value)) continue;
     // the grammar's `=` branch case-folds, so store the raw value as-is
-    return finishLearnedHint(elem, `[${attr}=${value}]${frameSuffixOf(elem)}`, elems);
+    return finishLearnedHint(elem, `[${attr}=${value}]${frameSuffixOf(elem)}`, elems, opts);
   }
   const token = String(elem.label ?? "").trim();
   const tag = String(elem.tag ?? "").trim();
   if (token && tag && !isVolatile(token) && token.length <= 48) {
-    return finishLearnedHint(elem, `${tag}[near~${token}]${frameSuffixOf(elem)}`, elems);
+    return finishLearnedHint(elem, `${tag}[near~${token}]${frameSuffixOf(elem)}`, elems, opts);
   }
   return null;
 }
 
 /**
- * F82/F83 批 3 首项：普通形状不自证唯一 + 重复组成员 ⇒ suggestHints 第 5/6 档行锚候选。
+ * F84（批 3）首项：普通形状不自证唯一 + 重复组成员 ⇒ suggestHints 第 5 档**内容**行锚候选。
  * 自证口径 = `hintMatch(base, elems) === elem.ref`（恰好唯一命中；歧义/落空都算不自证）。
- * 行锚候选取 `suggestHints(elem, elems)` 输出里第一条含 ` in-row:` / ` row-index:` 的候选
- * （该函数内部同一 push 自证唯一才保留；第 5 档内容候选优先、第 6 档 row-index 仅内容
- * 不可分——复用，不复制）。elems 缺省 / 自证唯一 / 非重复组 = 原产物逐字节返回。
+ * 记忆面只取含 ` in-row:` 的候选（内容身份）；单用 `row-index` 是位置性 hint，评审收口：
+ * 不学、不固化（内容不可分 → 回退 base，下次重新观察）。
+ * `opts.tokenAllow` 与 run 面同一份 `meta.policy.hint_token_allow`（F84 面覆盖补齐）。
+ * elems 缺省 / 自证唯一 / 非重复组 = 原产物逐字节返回。
  */
-function finishLearnedHint(elem: Elem, base: string, elems?: ElemPool): string {
+function finishLearnedHint(
+  elem: Elem, base: string, elems?: ElemPool,
+  opts?: { tokenAllow?: readonly string[] },
+): string {
   if (elems === undefined) return base;
   if (hintMatch(base, elems) === elem.ref) return base;   // 已自证唯一：逐字节不变
   const dupMember = typeof elem.row_index === "number" || Array.isArray(elem.row_texts);
   if (!dupMember) return base;                            // 非重复组：行锚恒落空，不产死 hint
-  const rowAnchor = suggestHints(elem, elems)
-    .find((h) => h.includes(" in-row:") || h.includes(" row-index:"));
+  const suggestOpts = opts?.tokenAllow !== undefined ? { tokenAllow: opts.tokenAllow } : undefined;
+  const rowAnchor = suggestHints(elem, elems, suggestOpts)
+    .find((h) => h.includes(" in-row:"));
   return rowAnchor !== undefined ? `${rowAnchor}${frameSuffixOf(elem)}` : base;
 }
 

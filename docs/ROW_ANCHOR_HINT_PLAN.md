@@ -1,6 +1,8 @@
-# 行锚 hint：`in-row:<token>` 落地方案（v1.0 · 评审通过待实施）
+# 行锚 hint：`in-row:<token>` 落地方案（v1.0 · 已实施）
 
-> 状态：**评审通过待实施**（2026-11-16 架构/产品双子代理独立评审后合成；未经实施）
+> 状态：**已实施**（2026-11-16；批 1 `c3d38f7`、姊妹方案批 2 首项 `a38e674`、批 2 遗留收编
+> `13cd7ca`/`a1dd95f`、批 3 首项 `3fcb098` + **F85（2026-11-16 评审收口）**；实施记录、验收
+> 证据与未落地项见 §10）
 > 规格版本：v1.0（基于 lead 走查实测 + 架构裁决 b13f715f + 产品裁决 db7ab9a2 的合成）
 > 关联：F69（within:#id 链）、F70（frame:<origin>）、F63（歧义命中顺序）、F14/T9（模型面剥离纪律）、
 >       F-1（回捞行补 anchor_ids 先例）、B5（guard+解构双写教训）、BACKLOG #2（候选列表契约，实施前对齐）、
@@ -188,7 +190,7 @@
 |---|---|
 | token 在任何行词元中无匹配 | 列出该池面真实行词元 ≤8（镜像 frame: "页面实际可用 origin" 先例，APP_SCRIPT_AUTHORING.md:1085） |
 | 行已定位但行内无 `<hint>` 命中 | 报"行已定位 + 行内词面"——作者改 base 不改 token |
-| token 撞多行 | `target_ambiguous` 按行分组展示、零动作（永不选第一行——结构性安全承诺，写进文档） |
+| token 撞多行 | `target_ambiguous` 按现场列出、零动作（永不选第一行——结构性安全承诺）。**已由解析面 fail-closed 兑现（F85 评审收口）**：`rules.hintMatchImpl` 在声明行锚且限定后候选 >1 时返回 null（不再用 `firstIfSame` 合并同签名候选）；命令步/决策步 act hint 在取首候选与 widen/strict 之前结构性 `target_ambiguous`，候选进 `skipped_actions`——不依赖 `on_ambiguous` 偶然性，也不交模型挑一行 |
 | 尾缀形状非法 | 整组回退显式落空 + 缺主体诊断（BACKLOG #8/E2 先例） |
 
 三案 reason 必须可区分。
@@ -198,8 +200,9 @@
 - **"爬升路径文本 ≠ 严格几何行"**：目标容器路径跨 2 行且只含 1 个重复按钮时继续爬，邻居行文本可能入集
   （风险 R3）——in-row 是"目标所在容器路径可见文本"的关系锚；grid-break 只挡整网格级；错误命中面被
   歧义门与自证兜住；
-- **token 命中多行** → 限定后仍多候选 → 照常歧义谓词（fail 或 on_ambiguous），in-row 不新增
-  "静默取第一个"；
+- **token 命中多行** → 限定后仍多候选 → **解析面 fail-closed（F85 评审收口）**：`rules.hintMatchImpl`
+  声明行锚时多候选直接返回 null，命令步/决策步 act hint 在 widen 之前结构化 `target_ambiguous`
+  零动作、候选进 `skipped_actions`；in-row 不新增"静默取第一个"，也不再有"on_ambiguous 碰运气"面；
 - **行文本漂移**（价格改版、文案 A/B）：推荐身份文本做锚；suggest 启发式已剔除价格类，但不禁止
   作者手写价格锚——与 near 同一信任模型；假唯一失败形态 = 显式落空或歧义拒绝，**永不错点**；
 - **重复 id（M6②）、anchor_ids ≤8 截断、重复组按池内可见计数**等既有 fail-closed 条款原样适用；
@@ -222,22 +225,28 @@
 | `src/engine/executor.ts`（A3 DOM fallback） | `DOM_FALLBACK_COLLECT_JS` 内插 ROW_CLIMB_JS + fallback 行补 row_texts | 缺字段=重演 F-1 半链缺口（executor.ts:358-360） |
 | `src/engine/executor-pure.ts` | modelProjectionOf 剥离 row_texts | **guard 与解构两处同步**（B5） |
 | `src/engine/observe.ts` | syntheticElem 透传；whyNotAdmitted 文案改写 | 缺口/边界声明随文案 |
-| `src/cli/schema-gen.ts` | 新 F71 声明（statement/truth 对齐 F69/F70 写法） | schema 快照重生成 |
+| `src/cli/schema-gen.ts` | 新 F82 声明（statement/truth 对齐 F69/F70 写法） | schema 快照为 gitignored 构建产物，`check:ci` 负责漂移门 |
 | `src/engine/grammar-prompt.ts` | `HINT_ROW_SUFFIX` 示例 + import 时 parseHint 自证断言 | 语法对齐既有自证机制 |
 | docs | APP_SCRIPT_AUTHORING §4 尾缀三并列 + 新 §4.x「列表/表格行：内容身份定位」（工作示例/词元启发式/边界）+ §10 停因表三案口径 + §11 已知边界；AGENT_INTERFACE ElementView 表加 row_texts 行 + hint_candidates 形态说明；README 能力 bullet；RUN_TAKEOVER §2.2 注记（行身份类由 in-row 收口、D2 限缩为容器结构消歧）；BACKLOG 立项条目；CHANGELOG 单条 Unreleased 仿 frame 批结构 | — |
 
 **免改核验项**：hintLookupArgs（parsed 自动携带 inRow）；esig/firstIfSame；PASS_NEAR 唯一消费点
 （extraction.ts:1509）；hint-lint（parseHint 自动继承）。
 
-**显式缺口声明（批 1 不做，留档）**：identity.ts/declared.ts 的 FW8 声明目标恢复路径
-（identity.ts:126-140 / declared.ts:281-290）白名单只认身份形状（#id / [attr=value]），**不含 in-row
-底座**——池外行锚恢复属 Phase 2 诉求，批 1 行为与今日逐字节一致。
+**恢复面行锚语义（F85 评审收口后的现状，原"显式缺口"已关闭）**：四面（FW8 `identityHintInfo` /
+DRF `declaredLookup` / F64 `#id` live-DOM 直查 / A3 DOM 回退）在目标声明了 `in-row:`/`row-index:`
+行锚时**统一 fail-closed、不参与恢复**——声明行锚落空 = `target_not_found` + 行锚证据，
+绝不会按 base 身份/文本绕过行约束动作；A3 与回捞行（HINT_HEAD）已支持 `row_texts` 底座
+（批 1 同批补字段）。池外行锚恢复（Phase 2）仍不做。
 
-**批 2**：findByHint / plan check --probe 适配；apps check hint-lint；歧义证据反向提示"改用 in-row"
-（逐步挤出 on_ambiguous 运气兜底）。
+**批 2（已实施，`13cd7ca` + `a1dd95f`）**：findByHint / plan check --probe 行锚适配；apps check
+hint-lint 行锚提醒（合法声明聚合为一行汇总，不再逐条刷 stderr）；歧义证据反向提示"改用行锚"
+（`AmbiguityCandidate.row_index`）；规划面诊断三案 additive 接线（`frameHintFailureEvidence`
+单点，stopCode 不变）。
 
-**批 3（择期）**：induceHint 记忆产物带 in-row（hint-memory 消费链路已支持尾缀 parse）；词边界档；
-deny-list 可配化（SKU 恰似数字的误杀调优）；criteriaView [near] 演进。
+**批 3（首项已实施 `3fcb098`，其余择期）**：induceHint 记忆产物带 `in-row:`（内容候选；
+**记忆面禁产单用 `row-index`**——位置性 hint 的序漂移责任只属于作者显式声明，不固化进 learned
+hint）、`hint_token_allow` 下传到记忆生成面、桥 ElementView 透传 row_texts/row_index；
+词边界档、deny-list 可配化（已随批 3 首项落地为放行表）、criteriaView [near] 演进仍择期。
 
 ## 6. 风险表
 
@@ -279,14 +288,17 @@ deny-list 可配化（SKU 恰似数字的误杀调优）；criteriaView [near] �
 
 1. row_texts 字段形状实施前与 BACKLOG #2（候选列表上移应用层）契约对一次，避免两次改池
    （RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md:164-165 教训）；
-2. in-row 诊断函数与 target_not_found reason 的接线深度（是否带修法文案）——批 1 实现时定；
+2. in-row 诊断函数与 target_not_found reason 的接线深度——**已定并实施**：`extraction.frameHintFailureEvidence`
+   单点接线（命令步 / strict / 会话 act / 规划面停因），reason 带修法文案与真实行词元（见 §10）；
 3. 嵌套表/卡片套卡片下的行边界（R3）——有误锚案例再议行容器启发式；
 4. OBSERVE_JS 若触发降级预案，批 1b 不可跨迭代（§3.8）；
 5. 虚拟列表 row_texts 与池窗口同界——文档接 ctx.scrollList/collect 分块指引；
 6. BACKLOG #2 落地后重估 D2 去留（D2 管"容器结构可分"，与 in-row 互补不互代）；
-7. 批 2 歧义证据反向提示"改用 in-row"的触发条件设计；
+7. 批 2 歧义证据反向提示"改用 in-row"——**已实施**（`AmbiguityCandidate.row_index` additive +
+   `suggested_hint` 复用 suggestHints 行锚档；见 CHANGELOG 批 2 遗留收编）；
 8. 全角/NFKC 归一：fail-closed 放行（§3.3 仲裁），等实站案例再议；
-9. FW8 声明目标恢复路径不含 in-row 底座（§5 显式缺口）——如需池外行锚恢复属 Phase 2；
+9. FW8/DRF/F64/A3 声明行锚的恢复路径——**已收口**（本次 review：四面统一 fail-closed、不参与
+   恢复，落空 = `target_not_found` + 行锚证据）；池外行锚恢复（Phase 2）仍不做；
 10. OBSERVE_JS 大重复网格（100+ 同文按钮）时延需 ctrip 实测一次；超标则 observe 侧爬升帽降 4 层
     （与 run 面 8 层不同帽需写入契约）；
 11. 多 token 组合行锚（`in-row:a>b`）：单尾缀已覆盖实测案例（`>` 已在词法保留），等真实案例再议。
@@ -315,3 +327,41 @@ deny-list 可配化（SKU 恰似数字的误杀调优）；criteriaView [near] �
   - 行过滤：采用架构二的"现行过滤 OR 连续数字≥5 位"（最小 delta 救援订单号场景），架构一的
     全宽松版降为备选（若实站出现被剔的有效行再放宽）；
   - 其余全部收敛，无未决分歧。
+
+## 10. 实施记录（2026-11-16）
+
+**状态**：已实施（批 1 一次 PR 不可拆 + 批 2 遗留收编 + 批 3 首项 + F85 评审收口）。
+
+**提交清单**：
+
+| 提交 | 内容 |
+|---|---|
+| `c3d38f7` | 批 1：解析（`in-row:` 尾缀）/ 匹配（`limit=inRow(inAnchor())`）/ 数据面（`Elem.row_texts` 双累加器）/ 回捞（HINT_HEAD 门）/ A3 回退 / 建议（suggestHints 第 5 档）/ observe 闭环 |
+| `13cd7ca` | 批 2 遗留：findByHint 行锚适配 / apps check hint-lint 行锚提醒 / 歧义证据 `row_index` / probe expect 类型收编 / 规划面诊断三案 additive 接线 |
+| `a1dd95f` | 规划面命令步证据覆盖 + 命令空间契约违背修复（id-less 命令不再静默丢弃 → `target_not_found` + 行锚证据；停因证据 hint 取该步有效声明目标） |
+| `3fcb098` | 批 3 首项：`induceHint` 记忆产物带行锚（禁产单用 row-index）/ `hint_token_allow` 下传记忆面 / 桥 ElementView 透传 `row_texts`/`row_index` |
+| **F85（2026-11-16 评审收口）** | 行锚 fail-closed 进解析面（多候选 = null）；恢复面四面（FW8/DRF/F64/A3）不参与；记忆面禁产单用 row-index + tokenAllow 下传 record；四采集面 dup 键（`__rowLabelOf`）/可见成员编号统一；`HINT_GRAMMAR` 补 `row_suffix`/`row_index_suffix`；lint `dupOnly` 聚合；命令自动 id 去重；`npm run check` 接 `precheck` + `row-anchor:check` |
+
+**验收证据**：
+
+- `npm run check` 全绿：`precheck`（无条件重生成快照）+ typecheck + 配置示例一致性 + schema
+  渲染一致性 + prompt-hit + secret-scan + examples-check + `row-anchor:check` + test:validate；
+- 仓内断言 `tools/row-anchor-check.ts` 经 `npm run row-anchor:check` 纳入 `npm run check`：
+  行锚解析/匹配 fail-closed（多候选 = null，绝不取首行）、恢复面四面不参与、记忆面禁单用
+  row-index、四采集面编号/dup 键同口径；
+- 真站证据（core `books-inrow-dup-grid`、probe `books-inrow-token-missing` 等）在仓库外
+  `$AMBERFLOW_HOME/online-runs/`，**不提交**。
+
+**未落地项与降级结论**：
+
+- §7.4 的 ctrip 断言（"命中正确卡时断言航班号 / 撞多行按行分组证据"）**未实现**，只保留
+  observe/run 观察；ctrip probe 用例按真实可达面观测，不作本批验收硬门（降级为观察项）。
+- 规划面可达面矩阵**已由 `a1dd95f` 接线**（规划链停因点复用 `frameHintFailureEvidence`
+  单点证据，stopCode 不变、无行锚声明时 reason 逐字节不变）——本方案与 ROW_INDEX 方案里
+  历史"规划面不保证/属后续项"的表述统一为**已收口（a1dd95f）**，证据单点
+  `frameHintFailureEvidence`。
+- `row-index` 跨面可移植的**残余边界**如实保留：编号基 = 各面收集到的成员（池面 =
+  `POOL_SEL`+heuristic 候选集，回捞/observe 面 = `ADMIT_SEL` 集合）；池帽只截尾、编号是
+  页面前缀不压缩，但两集合对同组成员不一致时 N 仍可能不可移植。文档口径：**跨面可移植的
+  前提 = 同名组成员在两个收集面都在场；照抄 inspect 候选前用 `ctx.observe`/run 复核**。
+  后续项见 BACKLOG「编号基统一到页级全量收集」。

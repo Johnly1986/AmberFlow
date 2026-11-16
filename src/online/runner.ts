@@ -12,6 +12,7 @@ import {
 import { TaskPlan } from "../engine/plan.ts";
 import { runSubgoalWithRetries } from "../engine/planner.ts";
 import { checkSignal } from "../engine/signals.ts";
+import type { TraceStep } from "../engine/audit.ts";
 import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts";
 import {
   applySpecToRuntime, installDecisionProvider, resolveProviderSpec,
@@ -110,6 +111,22 @@ function newMiddleware(maxSteps = 8, actionDelayMs = 0): BrowserMiddleware {
   });
 }
 
+/** 真正执行过动作的 trace 词（与执行器汇总 `executed_actions` 的 executedRows 同一闭集）。 */
+const EXECUTED_ACTION_HOWS: ReadonlySet<string> = new Set([
+  "clicked", "filled", "scrolled", "dragged", "hovered", "uploaded",
+]);
+
+/**
+ * 已执行动作行计数——`expect_zero_actions` 的执行期判据。
+ *
+ * 事实来源与执行器产出 `executed_actions` 时用的是**同一份 trace 口径**：行上
+ * `executed === true` 且动作词在真实执行闭集内。`manual`（人工确认）、done 预评估、
+ * 解析失败的 skipped 行都不算动作（它们没有执行任何东西）。
+ */
+function countExecutedActions(steps: readonly TraceStep[]): number {
+  return steps.filter((t) => t.executed === true && EXECUTED_ACTION_HOWS.has(String(t["how"] ?? ""))).length;
+}
+
 async function runOneCase(
   c: OnlineCase, site: OnlineSite, runDir: string, opts: RunOptions,
   paceClock: PaceClock, actionDelayMs: number,
@@ -120,8 +137,12 @@ async function runOneCase(
   const out: CaseOutcome = {
     id: c.id, site: c.site, tier: c.tier, status: "failed",
     duration_ms: 0, subgoals: [], invariants: [],
+    actions_executed: 0,
     evidence_dir: runDir,
   };
+  // `expect_zero_actions` 的执行期判据：从 trace 的已执行动作行汇总（跨子目标/跨重试），
+  // 在 finally 里统一裁决——classify 提前返回、异常、正常完成三条路径都走同一处。
+  let actionsExecuted = 0;
   let session: BrowserSession | null = null;
   let pageRef: PageAny | undefined;
   try {
@@ -153,6 +174,8 @@ async function runOneCase(
         const { rep, attempt, steps } = await runSubgoalWithRetries(
           mw as never, sg, plan, String(sg.start_url), page, session.pw, false, {}, paceClock,
         );
+        // 本次子目标全部 attempt 的已执行动作（`steps` 是执行器 trace，跨重试累积）。
+        actionsExecuted += countExecutedActions(steps);
         const last = (steps.length ? steps[steps.length - 1] : rep.steps[rep.steps.length - 1]) as
           { method?: string; confidence?: number } | undefined;
         out.subgoals.push({
@@ -194,6 +217,16 @@ async function runOneCase(
     out.reason = e instanceof Error ? e.message : String(e);
   } finally {
     out.duration_ms = Date.now() - t0;
+    // expect_zero_actions 裁决（声明面可证伪）：0 条动作不改变结论（probe 照旧是 skipped
+    // 环境观测，跳过 ≠ 通过）；N>0 条动作 = 声明被证伪，判**真失败**（套件退出码 1）。
+    // 放在 finally：classify 提前返回 / 异常 / 正常完成三条路径都要过同一道门。
+    out.actions_executed = actionsExecuted;
+    if (c.expect_zero_actions === true && actionsExecuted > 0) {
+      out.zero_action_violation = true;
+      out.status = "failed";
+      out.reason = `expected zero actions, ${actionsExecuted} executed`
+        + (out.reason ? ` — otherwise observed: ${out.reason}` : "");
+    }
     // 证据必须在 close 之前取（截图/DOM 是页面上的事实）；close 后只剩结果账。
     try {
       await writeCaseEvidence({ runId: path.basename(runDir), dir: runDir }, out, pageRef);
@@ -211,6 +244,9 @@ function probeOutcome(c: OnlineCase, base: CaseOutcome): CaseOutcome {
   // 批 2 遗留收编（D 项）：`"failed"` 已入 ProbeExpectMember 联合（fail-closed 正向证明的
   // probe 用例口径）——as never 放行简化为类型安全比较（observed 非 passed 时 ∈
   // "failed"|"blocked"|"unreachable"|"login_required"，全部是联合成员）。
+  // expect_zero_actions 违约是**真失败**（声明被证伪）：不能被 probe 的观测映射吞成
+  // skipped——`expect` 闭集含 "failed" 正是旧口径"点错行 + done 失败也记 skipped"的漏洞。
+  if (base.zero_action_violation === true) return base;
   const expected = c.expect ?? [];
   const observed = base.status;
   const inExpected = observed === "passed"
@@ -241,6 +277,9 @@ export async function runSuite(
       outcomes.push({
         id: c.id, site: c.site, tier: c.tier, status: "failed", duration_ms: 0,
         reason: `unknown site ${c.site}`, subgoals: [], invariants: [],
+        // 没拿到 site 就一个动作都没跑；字段是 CaseOutcome 的诚实事实（加载期校验会先拦掉
+        // unknown site，这条分支只防手搓/绕过校验的调用方）。
+        actions_executed: 0,
       });
       continue;
     }

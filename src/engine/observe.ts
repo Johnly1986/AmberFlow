@@ -249,7 +249,7 @@ function whyNotAdmitted(row: ObserveRawRow, classNames: string[] | undefined): s
  * 在当前会话页上做一次只读观察。**不**调用 provider、**不**抽决策池、**不**写文件。
  * 非法 selector 返回 `{ok:false, error:"bad_selector", reason}`（不抛栈、不中断 flow）。
  *
- * F83 批 3（deny-list 可配化）：`extras.hintTokenAllow`（meta.policy.hint_token_allow 经
+ * F84 批 3（deny-list 可配化）：`extras.hintTokenAllow`（meta.policy.hint_token_allow 经
  * CtxDeps 下传）直达自证池的 suggestHints 词元护栏（单点消费）；缺省 undefined = 护栏行为
  * 逐字节不变。会话/桥面无 meta policy → 缺省（面边界与 F58 attr_value_match 同款）。
  */
@@ -321,7 +321,7 @@ export async function observePage(
     pool[e.ref!] = e;
   });
   let admittedCount = 0;
-  // F83 批 3（deny-list 可配化）：放行词元表直达自证池的 suggestHints（单点消费）。
+  // F84 批 3（deny-list 可配化）：放行词元表直达自证池的 suggestHints（单点消费）。
   const suggestExtras = extras?.hintTokenAllow !== undefined
     ? { tokenAllow: extras.hintTokenAllow } : undefined;
   for (const view of elements) {

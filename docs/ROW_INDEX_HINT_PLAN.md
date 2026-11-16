@@ -1,6 +1,8 @@
-# 顺序行锚 hint：`row-index:N` 落地方案（v1.0 · 评审通过待实施）
+# 顺序行锚 hint：`row-index:N` 落地方案（v1.0 · 已实施）
 
-> 状态：**评审通过待实施**（2026-11-16 lead 评审仲裁定稿：Q1-Q6 全部裁决 + 四项必改收编，见 §9；升 v1.0 后作为批 2 首项的实施契约；本文件只定方案，不改任何代码）
+> 状态：**已实施**（2026-11-16；批 2 首项 `a38e674` + 批 2 遗留收编 `13cd7ca`/`a1dd95f` +
+> 批 3 首项 `3fcb098` + **F85（2026-11-16 评审收口）**；姊妹方案 `ROW_ANCHOR_HINT_PLAN.md` §10
+> 有共用实施记录与验收证据）
 > 规格版本：v1.0（v0.9 评审稿 → v1.0 定稿；结构范本 ROW_ANCHOR_HINT_PLAN.md，机制先例 F82 批 1 `c3d38f7`）
 > 关联：F82（`in-row:<token>` 行锚，批 1 已实施 `c3d38f7`——本方案与之同构的姊妹方案，大量机制直接复用）、
 >       F69（within:#id 链）、F70（frame:<origin>）、F63（歧义命中顺序 dom-preorder）、
@@ -81,7 +83,9 @@ PASS）。在同一页面上：
 - `near~` 形状复用 row_texts/row_index 作匹配底座——沿用批 1 R8 否决（改既有形状语义无字节纪律保护）；
 - done/when 信号面（天然 CSS；"第 N 个元素存在"用 `css_count_equals`/`css_count_min` 已可表达）；
 - stability 元数据 / unstable 标记机制——沿用批 1 §2 否决（结构性安全优于警告标记，警告没人读）；
-- FW8 声明目标恢复路径白名单扩展——沿用批 1 显式缺口（row-index 不是身份形状，批 2 行为与今日逐字节一致）。
+- FW8 / DRF / F64 / A3 声明目标恢复路径白名单扩展——**不做且已 fail-closed**：声明行锚时
+  恢复面不参与（落空 = `target_not_found` + 行锚证据，绝不按 base 绕过行约束）；池外行锚恢复
+  仍属 Phase 2。
 
 ## 3. 设计
 
@@ -153,15 +157,25 @@ PASS）。在同一页面上：
     运行（一帧一次 evaluate，只见本帧文档）；池侧 `addNearContext` 的 dup 计数（`cnt`）虽是
     跨帧的（触发面：跨帧同名互为 dup、near/row_texts 同触发不变），但**编号**按
     `(frame, tag+label)` 子组内 scan 升序做——单帧场景 = 纯 DOM 先序，跨帧同名网格各自编号；
+  - **四采集面同口径（F85 评审收口）**：池 `addNearContext` / `OBSERVE_JS` / `HINT_HEAD` / A3
+    四 pass 的 dup 键统一为共享 `__rowLabelOf`（与池 label 同口径：aria-label→title→**首子节点
+    文本**→innerText→placeholder→value；input/select 追加 label 包裹文本；PUA 剥除 + 空白
+    折叠 + 40 字符）；`HINT_HEAD`/A3 的编号只计**可见**成员（与池/observe 对齐——隐藏成员不
+    占序号）；
   - 为什么不是页面级行号：跨网格、跨 tag 的页面级序号没有稳定底座（§4 语义边界）；
   - **跨帧同名组**：两个帧里各有一个"订票"网格时，各自 1..K；`row-index:2` 会同时命中两帧
     的第 2 个成员 → **跨帧歧义**由既有口径兜住（`frame:` 尾缀收窄 / `firstIfSame` 同签名
     合并 / `target_ambiguous` 歧义谓词）——不新增跨帧处理（D2 边界沿 frame: 批条款）；
-- **编号底座的截断边界（如实声明）**：编号基于**本面收集到的 dup 成员**——池面 = 池内可见
-  成员（40/120 窗口截断同界），回捞面 = ADMIT 收集面全组，observe 面 = 观察集合内可见成员
-  （max 截断同界）。同面内编号自洽；**跨面 K 可能不同**（池面被截断时 K 小于页面真实组大小）
-  ——序漂移的一种来源，组合守卫缓解 + 诊断面报本面 K（§3.9 案①），批 1 遗留 #5（虚拟列表
-  同界）同源；
+- **编号底座的截断边界（如实声明）**：编号是**页面前缀**（1..K 按扫描到的 DOM 先序），
+  池帽只会**截尾**（窗口截断丢掉尾部成员，不重新编号、不压缩前缀）。编号基于**本面收集到的
+  dup 成员**——池面 = 池内可见成员（`POOL_SEL`+heuristic 候选集，40/120 窗口截断同界），
+  回捞面 = `ADMIT_SEL` 收集面全组，observe 面 = 观察集合内可见成员（max 截断同界）。同面内
+  编号自洽；**跨面 K 可能不同**（池面被截断时 K 小于页面真实组大小）——序漂移的一种来源，
+  组合守卫缓解 + 诊断面报本面 K（§3.9 案①），批 1 遗留 #5（虚拟列表同界）同源；
+  **跨面可移植的前提 = 同名组成员在两个收集面都在场**：两个收集面的元素宇宙不同
+  （池面 `POOL_SEL`+heuristic 候选集 vs 回捞/observe 面 `ADMIT_SEL` 集合），对同组成员不一致
+  时 N 仍可能不可移植——**照抄 inspect 候选前用 `ctx.observe`/run 复核**；编号基统一到页级
+  全量收集列为 BACKLOG 后续项；
 - **采集接线（实现锚点，全部在 c3d38f7 已就位的结构上做 additive 扩展）**：
   - 池面：`addNearContext` 已有全组 dup 清单（`dups: [ref, scan, frame]` + `cnt`）——宿主侧
     按 `(frame, tag+label)` 子组 scan 升序编号写入 `elems[r].row_index`（纯宿主计算，零新增
@@ -262,26 +276,26 @@ PASS）。在同一页面上：
 三案 reason 必须可区分；接线深度镜像批 1（extraction.ts 证据面单点扩展，`elems` 可选参
 既有结构上加 row-index 分支——`frameHintFailureEvidence` 不新增第二个证据函数）。
 
-**诊断可达面矩阵（v1.0 必改 A 项；批 1 真站实测暴露，如实写明保证面/不保证面）**
+**诊断可达面矩阵（v1.0 必改 A 项；批 1 真站实测暴露 → 批 2 遗留收编 `a1dd95f` 后已覆盖）**
 三案证据的接线点（executor 命令空间停因 / `act_hint:"strict"` / 会话 act，全部经
-`frameHintFailureEvidence` 单点）只在 app flow / 会话面可达；**规划面（plan/probe 子目标，
-`runSubgoalWithRetries` 链）不保证**——批 1 probe `books-inrow-token-missing` 真站实测：
-声明 hint 落空后走决策链 reobserve，停因为规划面 `low_confidence`（0.13 < floor，
-`method=decision-service:reobserve`，reason 为词面扫描诊断），**不是** target_not_found
-三案 reason：
+`frameHintFailureEvidence` 单点）批 1 时只在 app flow / 会话面可达；**规划面（plan/probe
+子目标，`runSubgoalWithRetries` 链）已在批 2 遗留收编 `a1dd95f` 接线**——规划链停因点复用
+同一 `frameHintFailureEvidence` 单点追加行锚证据（stopCode 不变、无行锚声明 reason 逐字节
+不变）。批 1 probe 真站实测的 `low_confidence`（0.13 < floor）停因是**收口前的历史观察**，
+现状见下表：
 
 | 停因路径 | 三案证据可达性 | 依据 |
 |---|---|---|
-| app flow 命令空间停因（pending unresolved → `target_not_found`） | ✅ 保证 | executor 命令空间停因处的证据接线点（批 1 已接 elems 参） |
+| app flow 命令空间停因（pending unresolved → `target_not_found`） | ✅ 保证 | executor 命令空间停因处的证据接线点（批 1 已接 elems 参；`a1dd95f` 覆盖命令步） |
 | `act_hint:"strict"` 停因 | ✅ 保证 | strict 分支证据接线点（批 1 已接） |
 | 会话 act 落空诊断（`diagnostics:true`） | ✅ 保证 | 会话 act 证据接线点（批 1 已接） |
-| act hint widen（缺省）落空 → 回退模型 | ⚠️ 不保证 | widen 路径不产 `target_not_found`（回退 `low_confidence`，词面诊断） |
-| 规划面（plan/probe 子目标） | ⚠️ 不保证 | 批 1 实测：`low_confidence`（见上）；规划面三案接线属后续项（§8 遗留） |
+| act hint widen（缺省）落空 → 回退模型 | ⚠️ 不保证 | widen 路径不产 `target_not_found`（回退 `low_confidence`，词面诊断）——**这是 widen 路径本身的设计**，不是行锚缺口 |
+| 规划面（plan/probe 子目标） | ✅ **已覆盖**（`a1dd95f`） | 规划链停因点复用 `frameHintFailureEvidence` 单点；证据单点 = `frameHintFailureEvidence`（本方案 §8 遗留 #8 已收口） |
 
 **probe 用例期望口径（相应调整）**：`books-rowindex-out-of-range` 的 fail-closed 正向证明 =
-**零动作 + 诚实落空**（规划面停因如实观测：`low_confidence` 与 `target_not_found` 皆在预期
-集合）；"target_not_found + 案①报 K" 的可达性**不作为本批验收**（§8 遗留）。批 1 probe
+**零动作 + 诚实落空**；规划面停因现为 `target_not_found` + 案①证据（`a1dd95f` 起）。批 1 probe
 观察同时留档了一条正向结论：**序号缺失 ⇒ 零动作零错点成立**（规划面也没有静默取第一行）。
+probe 现在还可断言**零动作/零错点**（在线声明面的零动作断言字段，见 CHANGELOG review 收口条）。
 
 ## 4. 语义边界（写进文档，不当 bug 修）
 
@@ -291,9 +305,12 @@ PASS）。在同一页面上：
   （收窄 within/frame/in-row 或换内容锚）；
 - **序漂移的两种失败形态**（§1.3）：单用 = 可能静默错点（作者显式承担——序号即语义的
   代价，文档写明）；组合 = 显式落空（fail-safe）。**引擎不新增"静默取第一个"**；
-- **编号底座是"本面收集到的成员"**：池窗口截断 / 观察集合 max / 虚拟列表都会让 K 小于
-  页面真实组大小（批 1 遗留 #5 同源）——单用形态在此场景的错点面由组合守卫与
-  done 断言纪律缓解；有实测误锚案例再议"全组编号"（需池外计数，成本另评）；
+- **编号底座是"本面收集到的成员"**：编号本身是**页面前缀**（1..K 按扫描到的 DOM 先序），
+  池帽只会截尾（丢尾部成员，不重新编号/不压缩）——池窗口截断 / 观察集合 max / 虚拟列表都会
+  让 K 小于页面真实组大小（批 1 遗留 #5 同源）——单用形态在此场景的错点面由组合守卫与
+  done 断言纪律缓解；有实测误锚案例再议"全组编号"（需池外计数，成本另评）。**跨面可移植的
+  前提 = 同名组成员在两个收集面都在场**（池面 `POOL_SEL`+heuristic / 回捞·observe 面
+  `ADMIT_SEL` 两个元素宇宙不同；照抄 inspect 候选前用 `ctx.observe`/run 复核）；
 - **DOM 插入/重排**（列表插入广告、懒加载补行）：编号随 DOM 先序变化——这是序号语义的
   固有属性，不是缺陷；fail-safe 形态把它转成显式落空；
 - **重复组按池内可见计数**、`anchor_ids` ≤8 截断、重复 id（M6②）等既有 fail-closed 条款
@@ -307,8 +324,8 @@ PASS）。在同一页面上：
 
 ## 5. 分批实施清单
 
-**批 2 首项（一次 PR；结构镜像批 1，全部为 c3d38f7 已就位结构上的 additive 扩展）**
-实施前须 lead 评审通过本方案 v1.0；声明 id 预留 **F83**（以实施时 schema-gen 实际空闲为准）。
+**批 2 首项（已实施，一次 PR；结构镜像批 1，全部为 c3d38f7 已就位结构上的 additive 扩展）**
+代次口径：`row-index` 声明编号 **F83**（批 2 = F83；批 3 = F84，见 CHANGELOG 映射）。
 
 | 文件 | 改动 | 字节/纪律约束 |
 |---|---|---|
@@ -320,20 +337,22 @@ PASS）。在同一页面上：
 | `src/engine/executor-pure.ts` | modelProjectionOf 剥离 row_index | **guard 与解构两处同步**（B5） |
 | `src/engine/observe.ts` | syntheticElem 透传；ObserveElement.row_index；whyNotAdmitted 追加 row-index 指引 | 边界声明随文案（桥白名单边界如实标注） |
 | `src/engine/executor.ts`（trace） | 动作 trace 行 additive `row_evidence: {row_index, row_texts?}` | 仅声明 row-index/in-row 且解析成功时出现；缺省路径零新字段 |
-| `src/cli/schema-gen.ts` | 新 F83 声明（statement/truth 对齐 F69/F70/F82 写法） | schema 快照重生成（precheck） |
+| `src/cli/schema-gen.ts` | 新 F83 声明（statement/truth 对齐 F69/F70/F82 写法） | schema 快照为 gitignored 构建产物；`check:ci` 负责漂移门 |
 | `src/engine/grammar-prompt.ts` | `HINT_ROW_INDEX_SUFFIX` 示例 + import 时 parseHint 自证断言（四尾缀全组合排列、整组回退、单用形状） | 语法对齐既有自证机制（prompt-hit 组保持绿） |
 | docs | APP_SCRIPT_AUTHORING §4 尾缀四并列 + 新 §4.13「顺序行锚：序号即语义与内容守卫」（两类语义/组合守卫/done 断言纪律/越界）+ §10 停因表四案口径 + §11 已知边界；AGENT_INTERFACE ElementView 表加 row_index 行 + trace 证据说明；README 能力 bullet 增序数场景；RUN_TAKEOVER §2.2 注记补序数类；BACKLOG 立项条目更新（本条收编）；CHANGELOG 批 2 单条 Unreleased | — |
-| online | core/books-row-index.json（序数场景：单用 `row-index:5`（Q5 仲裁定稿：进 core，N 取中段）+ 组合守卫 `row-index:3 in-row:<token>` 双子目标 + 结束态不变量）；probe/books-rowindex-out-of-range.json（`row-index:99` ⇒ 零动作 + 诚实落空——期望口径按 §3.9 诊断可达面矩阵：规划面停因如实观测 `low_confidence`/`target_not_found` 皆在预期集合，"target_not_found + 案①报 K"可达性**不作本批验收**（§8 遗留）） | URL 真实 http(s)；凭据只允许 {{env:NAME|default}}；test:validate 过即入批，真站执行批后验证；批 1 既有 `books-inrow-token-missing` 的 goal 文案（"期望 target_not_found"）随批 2 docs 项顺带按实测口径修正 |
+| online | core/books-row-index.json（序数场景：单用 `row-index:5`（Q5 仲裁定稿：进 core，N 取中段）+ 组合守卫 `row-index:3 in-row:<token>` 双子目标 + 结束态不变量）；probe/books-rowindex-out-of-range.json（`row-index:99` ⇒ 零动作 + 诚实落空；规划面停因已由 `a1dd95f` 接成 `target_not_found` + 案①证据，probe 可断言零动作/零错点——§8 遗留 #8 已收口） | URL 真实 http(s)；凭据只允许 {{env:NAME|default}}；test:validate 过即入批，真站执行批后验证；批 1 既有 `books-inrow-token-missing` 的 goal 文案（"期望 target_not_found"）随批 2 docs 项顺带按实测口径修正 |
 
 **免改核验项（实施时只做断言核验，不修改）**：`hintLookupArgs`（parsed 自动携带
 rowIndex）；esig/firstIfSame（天然不含 row_index）；`ROW_CLIMB_JS` 三 helper 与 out/rows
 累加器（编号不进爬升）；PASS_NEAR 唯一消费点；hint-lint（parseHint 自动继承）；nearToken
 池侧语义；`near~` 形状；批 1 的 near/observe golden 面（无声明路径逐字节不变的正向证明）。
 
-**显式缺口声明（批 2 不做，留档）**：identity.ts/declared.ts 的 FW8 声明目标恢复路径
-白名单不含 row-index 底座（与批 1 in-row 同款——池外行锚恢复属 Phase 2）；findByHint /
-plan check --probe / apps check hint-lint 适配属批 2 后续项（BACKLOG 立条目）；桥
-ElementView 透传 row_index/row_texts 属合同变更另立（BACKLOG #4 同款）。
+**恢复面行锚语义（F85 评审收口，原"显式缺口"已关闭）**：identity.ts/declared.ts 的 FW8
+声明目标恢复路径、DRF、F64 `#id` 直查与 A3 DOM 回退在声明行锚时**统一 fail-closed、不参与
+恢复**——落空 = `target_not_found` + 行锚证据，不按 base 身份/文本绕过行约束；A3/HINT_HEAD
+已支持 `row_index` 底座（§3.5）。批 2 后续项已收编：findByHint / plan check --probe /
+apps check hint-lint 行锚适配（`13cd7ca`）；桥 ElementView 透传 row_index/row_texts 属合同
+变更（`3fcb098` 已收编）。池外行锚恢复仍属 Phase 2。
 
 ## 6. 风险表
 
@@ -367,9 +386,9 @@ ElementView 透传 row_index/row_texts 属合同变更另立（BACKLOG #4 同款
      语义形态）+ 组合守卫 `row-index:3 in-row:<第 3 本书名 token>`（fail-safe 形态）
      双子目标 + 结束态不变量；
    - probe `books-rowindex-out-of-range`：`row-index:99` ⇒ **零动作 + 诚实落空**（fail-closed
-     正向证明）——期望口径按 §3.9 诊断可达面矩阵：规划面停因如实观测（`low_confidence` 与
-     `target_not_found` 皆在预期集合），"target_not_found + 案①报 K" 可达性不作本批验收
-     （§8 遗留）。
+     正向证明）——规划面停因已由 `a1dd95f` 接成 `target_not_found` + 案①证据；probe 还可
+     断言零动作/零错点（在线声明面零动作断言字段）。**ctrip 的"命中卡断言航班号 / 撞多行
+     按行分组证据"未落地**（随 ROW_ANCHOR_HINT_PLAN §10 降级为观察项，不作本批验收）。
 5. **用户故事级验收（产品）**：
    - US1 排序榜：排序命令后 `row-index:1` 命中榜首行（序号即语义）；
    - US2 fail-safe：同一声明在行序被广告插入打乱后重跑 = 显式落空（reason 报序号已定位 +
@@ -387,17 +406,18 @@ ElementView 透传 row_index/row_texts 属合同变更另立（BACKLOG #4 同款
    遗留 #1 的延续，两次改池问题同样适用本字段；
 4. 跨帧同名组的 firstIfSame 同签名合并（同 tag+label 同 row_index 跨帧）——D2 边界沿
    frame: 批既有条款，批 2 实现时加验证断言（不新增处理）；
-5. FW8 / findByHint / hint-lint / 桥 ElementView 透传——显式缺口（§5），随批 2 后续项收编；
+5. FW8 / findByHint / hint-lint / 桥 ElementView 透传——**已收口**（F85：四面恢复
+   fail-closed；`13cd7ca` findByHint/hint-lint；`3fcb098` 桥透传）；池外行锚恢复仍属 Phase 2；
 6. 生成纪律的"部分可分"网格（部分行有标识词元、部分没有）：第 5 档对有词元的行成功、
    没词元的行走第 6 档——逐元素独立触发，天然支持；无额外工作，实施时加一条断言钉死；
 7. `row-index` 与 `in-row` 的诊断证据函数合并度（同一证据面内两个分支 vs 各自函数）——
    批 1 证据面已单点接线（`frameHintFailureEvidence` 可选 elems 参），批 2 在其上加分支，
    不另立函数；实现时定文案合并形态；
-8. **规划面三案接线（A 项仲裁产出的新遗留）**：诊断三案证据当前保证面 = app flow 命令
-   空间 / strict / 会话 act（§3.9 矩阵）；规划面（plan/probe 子目标）停因可落
-   `low_confidence`（批 1 probe 实测留档）——规划面的 target_not_found 三案证据可达性属
-   后续项（规划链停因面接线设计另评）；批 1 既有 `books-inrow-token-missing` 的 goal
-   文案随批 2 docs 项按实测口径顺带修正。
+8. **规划面三案接线——已收口（`a1dd95f`）**：诊断三案证据的保证面原为 app flow 命令空间 /
+   strict / 会话 act（§3.9 矩阵）；批 1 probe 实测的 `low_confidence` 停因已由批 2 遗留收编
+   在规划链四个停因点 additive 接线（同一 `frameHintFailureEvidence` 单点，stopCode 不变），
+   probe 用例按 `target_not_found` + 案①证据观测。批 1 既有 `books-inrow-token-missing` 的
+   goal 文案已随批 2 docs 项按实测口径修正。
 
 ## 9. 评审记录（2026-11-16，v0.9 → v1.0）
 
@@ -418,8 +438,10 @@ lead 评审结论：**方案骨架合格**；开放问题 Q1-Q6 全部裁决（�
 - **A. §3.9 增"诊断可达面矩阵"**（最重要——批 1 probe `books-inrow-token-missing` 真站实测
   暴露：规划面停因是 `low_confidence`（0.13 < floor，`method=decision-service:reobserve`，
   词面扫描诊断），不是三案 reason）：三案证据**保证面** = app flow 命令空间 / strict / 会话
-  act；**规划面不保证**；probe 用例期望口径相应调整（fail-closed 正向证明 = 零动作 + 诚实
-  落空）；"target_not_found + 案①报 K"可达性列为 §8 遗留 #8（规划面三案接线属后续项）。
+  act；**规划面不保证**（**历史口径——已于 `a1dd95f` 收口，现状见 §3.9 矩阵与 §8 #8**）；
+  probe 用例期望口径相应调整（fail-closed 正向证明 = 零动作 + 诚实
+  落空）；"target_not_found + 案①报 K"可达性列为 §8 遗留 #8（**已收口**：规划面三案接线
+  已在 `a1dd95f` 落地）。
   该项同时留档批 1 的正向观察：序号缺失 ⇒ 零错点成立。
 - **B. rowIndexValueProblem 类别修正**：`0` 是数字但非法（1-based）——归 not-numeric 语义
   不准；定稿为 empty / **not-positive-integer**（0/负/非数字/带字母归此，文案必须点名
@@ -432,8 +454,8 @@ lead 评审结论：**方案骨架合格**；开放问题 Q1-Q6 全部裁决（�
 
 ## 10. 评审要点（给评审者的核对单）
 
-> v1.0 状态：Q1-Q6 已仲裁（§9）；本核对单保留为**实施前复核清单**——实施 PR 与评审者按此
-> 逐条核对实现与定稿口径的一致性。
+> v1.0 状态：Q1-Q6 已仲裁（§9）；方案已实施（`a38e674` 等）——本核对单保留为**实施复核
+> 记录**：实施 PR 与评审者按此逐条核对实现与定稿口径（含 `a1dd95f` 规划面接线收口）。
 
 1. **语义两类裁决**（§1.3/§3.1）：单用合法 + 组合 fail-safe 主推（Q2 已裁决：不强制内容
    守卫；"内容可分时优先手写组合" = 推荐纪律）——实现不得把组合守卫做成强制；
@@ -447,12 +469,12 @@ lead 评审结论：**方案骨架合格**；开放问题 Q1-Q6 全部裁决（�
 5. **截断边界**（R8）：编号基于本面收集到的成员、跨面 K 可不同——文档如实声明，案①报
    本面 K；
 6. **诊断四案 + 可达面矩阵**（§3.9）：案①报 K + 行词元、案②序号已定位改 token、案③歧义
-   谓词、案④整组回退；**保证面 = 命令空间 / strict / 会话 act，规划面不保证**——实现不得
-   在规划面新增三案接线承诺（遗留 #8）；
+   谓词、案④整组回退；**保证面 = 命令空间 / strict / 会话 act / 规划面（`a1dd95f` 收口，
+   证据单点 `frameHintFailureEvidence`）**——遗留 #8 已关闭；
 7. **模型面与证据面**（§3.7，Q6 已裁决：独立键 `row_evidence`）：row_index 剥离
    （guard+解构双写）+ trace additive（仅声明且解析成功时出现）；
 8. **批 2 清单与验收**（§5/§7 正式版）：文件面/免改核验/显式缺口/online 用例形态
    （core 单用 `row-index:5` + 组合守卫；probe 期望口径按可达面矩阵）——核对无遗漏面；
-9. **诊断可达面矩阵确认**（A 项必改）：核对三案证据的**保证面/不保证面划分**与 probe
-   期望口径的一致性——probe 用例不得声明 "target_not_found + 案①报 K" 为本批验收
-   （§8 遗留 #8）；批 1 probe 实测（low_confidence、零错点）已留档 §3.9。
+9. **诊断可达面矩阵确认**（A 项必改，**已收口**）：三案证据的保证面 = 命令空间 / strict /
+   会话 act / 规划面（`a1dd95f`）；probe 可声明 `target_not_found` + 案①报 K 与零动作/零错点
+   断言（遗留 #8 已关闭）；批 1 probe 实测（`low_confidence`）作为收口前历史观察留档 §3.9。

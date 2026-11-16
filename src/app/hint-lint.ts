@@ -241,17 +241,28 @@ export function renderHintLintLines(result: HintLintResult): string[] {
       + "仅静态提醒，不影响 VALID/exit）");
   }
   // F82/F83 批 2 遗留收编：行锚尾缀提醒（独立 stderr 行；clean 应用零输出，三类 lint 的
-  // 判定/计数不变）。
-  for (const f of result.rowAnchorFindings.slice(0, 3)) {
+  // 判定/计数不变）。评审收口（噪音）：`dupOnly` 是"合法声明 but 行锚只服务同文案重复网格"
+  // 的静态提醒——用行锚的 app **每次都命中**，逐条刷屏没有行动价值。这里逐条只报
+  // `rejected`（值必被解析拒绝 = 必不命中），`dupOnly` 聚合成一行汇总（含位置清单与指路）。
+  const rejectedAnchors = result.rowAnchorFindings.filter((f) => f.kind === "rejected");
+  const dupOnlyAnchors = result.rowAnchorFindings.filter((f) => f.kind === "dupOnly");
+  for (const f of rejectedAnchors.slice(0, 3)) {
     const locs = f.locations.slice(0, 3).map((l) => `${l.file}:${l.line}`).join("、");
     const rest = f.locations.length > 3 ? `（另 ${f.locations.length - 3} 处略）` : "";
-    const label = f.kind === "rejected" ? "行锚尾缀必被解析拒绝" : "行锚只服务同文案重复网格";
-    lines.push(`hintLint: ${label} — ${locs}${rest} ${JSON.stringify(f.hint)} —— ${f.reason}`
+    lines.push(`hintLint: 行锚尾缀必被解析拒绝 — ${locs}${rest} ${JSON.stringify(f.hint)} —— ${f.reason}`
       + "（仅静态提醒，不影响 VALID/exit）");
   }
-  if (result.rowAnchorFindings.length > 3) {
-    lines.push(`hintLint: 行锚尾缀另有 ${result.rowAnchorFindings.length - 3} 处提醒（只列前 3；`
+  if (rejectedAnchors.length > 3) {
+    lines.push(`hintLint: 行锚尾缀另有 ${rejectedAnchors.length - 3} 处必被解析拒绝（只列前 3；`
       + "仅静态提醒，不影响 VALID/exit）");
+  }
+  if (dupOnlyAnchors.length > 0) {
+    const locs = dupOnlyAnchors.slice(0, 3)
+      .map((f) => f.locations[0]).filter((l): l is { file: string; line: number } => l !== undefined)
+      .map((l) => `${l.file}:${l.line}`).join("、");
+    const rest = dupOnlyAnchors.length > 3 ? ` 等 ${dupOnlyAnchors.length} 处` : "";
+    lines.push(`hintLint: ${dupOnlyAnchors.length} 处行锚声明（in-row/row-index）${locs ? `：${locs}${rest}` : ""}`
+      + ` —— ${ROW_ANCHOR_DUP_ONLY_NOTE}（仅静态提醒，不影响 VALID/exit）`);
   }
   return lines;
 }
