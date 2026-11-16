@@ -1,0 +1,426 @@
+{
+  "_doc": "verify-offline 基线（tools/verify-offline.ts，非门禁）：本地静态夹具 + 无头 chromium 的确定性观测。页面/代码变化后显式 --record 更新；端口已归一为 <LOCAL>，不得手改。",
+  "expected": {
+    "dom": {
+      "body_text_prefix": "首页机票酒店火车票 汽车票旅游门票攻略 租车邮轮团购美食 购物周边游国内游出境游 签证保险金融积分 礼品卡客服帮助关于 App电脑版繁体English 无障碍 航空公司 起飞时间 价格 仅直飞 舱等 CA1448 08:30-11:05订票 MU5101 09:00-11:20订票 CZ3907 10:15-12:40订票 HU7607 11:30-13:55订票 ZH9101 12:45-15:10订票 3U8882 13:55-16:20订票 MF8103 15:10-1",
+      "counts": {
+        "button": 41,
+        "input": 0,
+        "li": 5,
+        "link": 0,
+        "role_dialog": 0
+      },
+      "texts": {
+        "dialogs": [],
+        "first_buttons": [
+          "首页",
+          "机票",
+          "酒店",
+          "火车票",
+          "汽车票",
+          "旅游",
+          "门票",
+          "攻略"
+        ],
+        "h1": []
+      },
+      "title": "F2 filter-bar — E1-c / E1-b fixture"
+    },
+    "external_requests": [],
+    "hints": {
+      "#filter_item_airline": {
+        "decided": null,
+        "match": "e8",
+        "ref_count": 1,
+        "refs": [
+          "e8"
+        ],
+        "tier": 0
+      },
+      "button": {
+        "decided": null,
+        "match": null,
+        "ref_count": 35,
+        "refs": [
+          "e0",
+          "e1",
+          "e2",
+          "e3",
+          "e4",
+          "e5",
+          "e6",
+          "e7",
+          "e13",
+          "e14",
+          "e15",
+          "e16",
+          "e17",
+          "e18",
+          "e19",
+          "e20",
+          "e21",
+          "e22",
+          "e23",
+          "e24"
+        ],
+        "tier": 0
+      },
+      "航空公司": {
+        "decided": null,
+        "match": "e8",
+        "ref_count": 1,
+        "refs": [
+          "e8"
+        ],
+        "tier": 0
+      },
+      "订票": {
+        "decided": null,
+        "match": "e13",
+        "ref_count": 12,
+        "refs": [
+          "e13",
+          "e14",
+          "e15",
+          "e16",
+          "e17",
+          "e18",
+          "e19",
+          "e20",
+          "e21",
+          "e22",
+          "e23",
+          "e24"
+        ],
+        "tier": 0
+      }
+    },
+    "pool": {
+      "count": 40,
+      "rows": [
+        {
+          "frame": 0,
+          "label": "首页",
+          "ref": "e0",
+          "scan": 0,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "机票",
+          "ref": "e1",
+          "scan": 1,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "酒店",
+          "ref": "e2",
+          "scan": 2,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "火车票",
+          "ref": "e3",
+          "scan": 3,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "汽车票",
+          "ref": "e4",
+          "scan": 4,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "旅游",
+          "ref": "e5",
+          "scan": 5,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "门票",
+          "ref": "e6",
+          "scan": 6,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "攻略",
+          "ref": "e7",
+          "scan": 7,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "租车",
+          "ref": "e25",
+          "scan": 8,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "邮轮",
+          "ref": "e26",
+          "scan": 9,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "团购",
+          "ref": "e27",
+          "scan": 10,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "美食",
+          "ref": "e28",
+          "scan": 11,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "购物",
+          "ref": "e29",
+          "scan": 12,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "周边游",
+          "ref": "e30",
+          "scan": 13,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "国内游",
+          "ref": "e31",
+          "scan": 14,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "出境游",
+          "ref": "e32",
+          "scan": 15,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "签证",
+          "ref": "e33",
+          "scan": 16,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "保险",
+          "ref": "e34",
+          "scan": 17,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "金融",
+          "ref": "e35",
+          "scan": 18,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "积分",
+          "ref": "e36",
+          "scan": 19,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "礼品卡",
+          "ref": "e37",
+          "scan": 20,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "客服",
+          "ref": "e38",
+          "scan": 21,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "帮助",
+          "ref": "e39",
+          "scan": 22,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "id": "filter_item_airline",
+          "label": "航空公司",
+          "ref": "e8",
+          "scan": 29,
+          "tag": "li"
+        },
+        {
+          "frame": 0,
+          "id": "filter_item_time",
+          "label": "起飞时间",
+          "ref": "e9",
+          "scan": 30,
+          "tag": "li"
+        },
+        {
+          "frame": 0,
+          "id": "filter_item_price",
+          "label": "价格",
+          "ref": "e10",
+          "scan": 31,
+          "tag": "li"
+        },
+        {
+          "frame": 0,
+          "id": "filter_item_direct",
+          "label": "仅直飞",
+          "ref": "e11",
+          "scan": 32,
+          "tag": "li"
+        },
+        {
+          "frame": 0,
+          "id": "filter_item_cabin",
+          "label": "舱等",
+          "ref": "e12",
+          "scan": 33,
+          "tag": "li"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e13",
+          "scan": 34,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e14",
+          "scan": 35,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e15",
+          "scan": 36,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e16",
+          "scan": 37,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e17",
+          "scan": 38,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e18",
+          "scan": 39,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e19",
+          "scan": 40,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e20",
+          "scan": 41,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e21",
+          "scan": 42,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e22",
+          "scan": 43,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e23",
+          "scan": 44,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e24",
+          "scan": 45,
+          "surface": "native-control",
+          "tag": "button"
+        }
+      ]
+    }
+  },
+  "fixture": "filter-bar",
+  "schema_version": 1
+}

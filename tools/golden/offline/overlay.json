@@ -1,0 +1,115 @@
+{
+  "_doc": "verify-offline 基线（tools/verify-offline.ts，非门禁）：本地静态夹具 + 无头 chromium 的确定性观测。页面/代码变化后显式 --record 更新；端口已归一为 <LOCAL>，不得手改。",
+  "expected": {
+    "external_requests": [],
+    "overlay_off": {
+      "dom": {
+        "body_text_prefix": "遮罩拦截演示 确认提交 温馨提示 会话已过期，请重新登录后继续操作。 我知道了",
+        "counts": {
+          "button": 2,
+          "input": 0,
+          "li": 0,
+          "link": 0,
+          "role_dialog": 1
+        },
+        "texts": {
+          "dialogs": [
+            "温馨提示\n    会话已过期，请重新登录后继续操作。\n    我知道了"
+          ],
+          "first_buttons": [
+            "确认提交",
+            "我知道了"
+          ],
+          "h1": [
+            "遮罩拦截演示"
+          ]
+        },
+        "title": "F4 overlay — E4 遮罩证据 fixture"
+      },
+      "pool": {
+        "count": 1,
+        "rows": [
+          {
+            "frame": 0,
+            "id": "under-btn",
+            "label": "确认提交",
+            "ref": "e0",
+            "scan": 0,
+            "surface": "native-control",
+            "tag": "button"
+          }
+        ]
+      }
+    },
+    "overlay_on": {
+      "dom": {
+        "body_text_prefix": "遮罩拦截演示 确认提交 温馨提示 会话已过期，请重新登录后继续操作。 我知道了",
+        "counts": {
+          "button": 2,
+          "input": 0,
+          "li": 0,
+          "link": 0,
+          "role_dialog": 1
+        },
+        "texts": {
+          "dialogs": [
+            "温馨提示\n    会话已过期，请重新登录后继续操作。\n    我知道了"
+          ],
+          "first_buttons": [
+            "确认提交",
+            "我知道了"
+          ],
+          "h1": [
+            "遮罩拦截演示"
+          ]
+        },
+        "title": "F4 overlay — E4 遮罩证据 fixture"
+      },
+      "hints": {
+        "我知道了": {
+          "decided": null,
+          "match": "e1",
+          "ref_count": 1,
+          "refs": [
+            "e1"
+          ],
+          "tier": 0
+        },
+        "确认提交": {
+          "decided": null,
+          "match": "e0",
+          "ref_count": 1,
+          "refs": [
+            "e0"
+          ],
+          "tier": 0
+        }
+      },
+      "pool": {
+        "count": 2,
+        "rows": [
+          {
+            "frame": 0,
+            "id": "under-btn",
+            "label": "确认提交",
+            "ref": "e0",
+            "scan": 0,
+            "surface": "native-control",
+            "tag": "button"
+          },
+          {
+            "frame": 0,
+            "id": "modal-close",
+            "label": "我知道了",
+            "ref": "e1",
+            "scan": 1,
+            "surface": "native-control",
+            "tag": "button"
+          }
+        ]
+      }
+    }
+  },
+  "fixture": "overlay",
+  "schema_version": 1
+}

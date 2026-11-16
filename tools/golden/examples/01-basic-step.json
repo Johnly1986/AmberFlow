@@ -1,0 +1,126 @@
+{
+  "_doc": "examples-check canonical golden（tools/examples-check.ts）：命令输出经归一（临时 HOME/仓库路径/时间戳/canary/slot-file 路径）后的基线。只在预期行为变更时用 --record-golden 更新，不得手改。",
+  "schema_version": 1,
+  "app": "01-basic-step",
+  "checks": {
+    "apps-check": {
+      "argv": [
+        "apps",
+        "check",
+        "01-basic-step"
+      ],
+      "exit_code": 0,
+      "stdout": "✓ 01-basic-step  <TMP_HOME>/apps/01-basic-step/app.mjs\n\n  dry: flow 已真实执行（浏览器调用合成；脚本副作用为真）\n1 个应用全部通过校验。",
+      "stderr": ""
+    },
+    "apps-explain": {
+      "argv": [
+        "apps",
+        "explain",
+        "01-basic-step",
+        "--json"
+      ],
+      "exit_code": 0,
+      "json": {
+        "command": "apps explain",
+        "data": {
+          "app": "01-basic-step",
+          "events": [
+            {
+              "call": "arrive",
+              "desc": "到达 example.com",
+              "i": 1,
+              "id": "arrive-home",
+              "ok": true,
+              "url": "https://example.com/"
+            },
+            {
+              "call": "step",
+              "desc": "确认示例页标题",
+              "i": 2,
+              "id": "verify-heading",
+              "ok": true,
+              "url": "https://example.com/"
+            },
+            {
+              "call": "done",
+              "i": 3,
+              "ok": true
+            }
+          ],
+          "goal": "打开示例页，用 DOM 信号确认页面已到达，并在结束态验收",
+          "invariants": [
+            {
+              "desc": "结束时停在 example.com",
+              "done": "URL 含「example.com」",
+              "id": "on-example-page",
+              "signal": {
+                "url_contains": "example.com"
+              }
+            }
+          ],
+          "label": "01 · 最小步（arrive + step）",
+          "path": "<TMP_HOME>/apps/01-basic-step/app.mjs",
+          "plan_sha256": "<DYNAMIC>",
+          "problems": [],
+          "script_sha256": "8a6c7490c5a4524306d680f686dc74859f047b9678fcb5405daa966b81950b94"
+        },
+        "diagnostics": [],
+        "exit_code": 0,
+        "next": [
+          "amber run 01-basic-step"
+        ],
+        "ok": true,
+        "schema_version": 1
+      }
+    },
+    "app-runner-dry": {
+      "argv": [
+        "app-runner",
+        "--app",
+        "01-basic-step",
+        "--dry"
+      ],
+      "exit_code": 0,
+      "json": {
+        "app": "01-basic-step",
+        "dry_run": true,
+        "events": [
+          {
+            "call": "arrive",
+            "desc": "到达 example.com",
+            "i": 1,
+            "id": "arrive-home",
+            "ok": true,
+            "url": "https://example.com/"
+          },
+          {
+            "call": "step",
+            "desc": "确认示例页标题",
+            "i": 2,
+            "id": "verify-heading",
+            "ok": true,
+            "url": "https://example.com/"
+          },
+          {
+            "call": "done",
+            "i": 3,
+            "ok": true
+          }
+        ],
+        "goal": "打开示例页，用 DOM 信号确认页面已到达，并在结束态验收",
+        "invariants": [
+          {
+            "desc": "结束时停在 example.com",
+            "id": "on-example-page"
+          }
+        ],
+        "label": "01 · 最小步（arrive + step）",
+        "mode": "flow",
+        "model_status": "off(missing)",
+        "problems": [],
+        "slots": {}
+      }
+    }
+  }
+}

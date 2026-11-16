@@ -1,0 +1,6 @@
+{
+  "_doc": "split-check 模板（本文件以 _ 开头，--check 跳过；它只是目录占位 + 格式说明）。真实 manifest 用 `--record <id> --file <当前路径> [--file …]` 生成：files 键 = 仓库相对路径，symbols 键 = 顶层声明名，值 = 该声明的源码文本 sha256。拆分 PR 只改 files 路径（hash 一个都不许动），--check 绿 = 纯搬移逐字节一致。",
+  "id": "template",
+  "note": "占位：不含任何断言。",
+  "files": {}
+}

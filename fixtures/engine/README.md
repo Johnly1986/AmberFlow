@@ -19,3 +19,17 @@
 - 真实携程页面仅作一次性人工走查（验收演示），不进自动回归；如纳入巡检按 live-tier 管理
   （blocked/unreachable 不计失败）。
 - 运行产物不提交仓库。
+
+## 非门禁定位（唯一消费方：`tools/verify-offline.ts`）
+
+`fixtures/engine/` 是**等价验证**资产，不是测试套件，**不进 `npm run check`**：
+
+- 只服务 `tools/verify-offline.ts`（本地/定时跑，需要 chromium；PR 门禁保持纯离线、不启浏览器）。
+- 页面必须保持**零外部网络请求**：verify-offline 会把任何外部请求判红，并把空清单写入基线。
+- 基线在 `tools/golden/offline/**`：默认比对，`--record` 显式更新；随机端口已归一为 `<LOCAL>`。
+- 观测口径（确定性、与时机无关）：title / 元素计数 / 文本前缀 + 引擎元素池的稳定字段
+  （ref/scan/tag/label/role/id/data_test/href）+ 代表性 hint 的候选计数、档位、裁决。
+- `lazy-list` 只记录「加载后自稳定」的行数（滚动收敛计数受行高/视口像素差异影响，
+  跨机器会假红，故不纳入基线）；`overlay` 记录遮罩出现态与 `?overlay=0` 对照态。
+- 页面/引擎行为变化导致基线不一致时：先确认是预期变更，再 `--record` 更新，并在 PR 说明。
+- AGENTS.md「仓库是什么」的离线夹具表述以本节为准（非门禁、仅等价验证）。

@@ -1,0 +1,181 @@
+{
+  "_doc": "verify-offline 基线（tools/verify-offline.ts，非门禁）：本地静态夹具 + 无头 chromium 的确定性观测。页面/代码变化后显式 --record 更新；端口已归一为 <LOCAL>，不得手改。",
+  "expected": {
+    "dom": {
+      "body_text_prefix": "订票列表（歧义顺序） 订票 订票 订票 订票 订票 订票 订票 订票 订票 订票 订票 订票",
+      "counts": {
+        "button": 12,
+        "input": 0,
+        "li": 0,
+        "link": 0,
+        "role_dialog": 0
+      },
+      "texts": {
+        "dialogs": [],
+        "first_buttons": [
+          "订票",
+          "订票",
+          "订票",
+          "订票",
+          "订票",
+          "订票",
+          "订票",
+          "订票"
+        ],
+        "h1": [
+          "订票列表（歧义顺序）"
+        ]
+      },
+      "title": "F1 ambiguity-order — E2 歧义命中顺序 fixture"
+    },
+    "external_requests": [],
+    "hints": {
+      "#not-exist": {
+        "match": null
+      },
+      "button": {
+        "decided": null,
+        "match": "e0",
+        "ref_count": 12,
+        "refs": [
+          "e0",
+          "e1",
+          "e2",
+          "e3",
+          "e4",
+          "e5",
+          "e6",
+          "e7",
+          "e8",
+          "e9",
+          "e10",
+          "e11"
+        ],
+        "tier": 0
+      },
+      "订票": {
+        "decided": null,
+        "match": "e0",
+        "ref_count": 12,
+        "refs": [
+          "e0",
+          "e1",
+          "e2",
+          "e3",
+          "e4",
+          "e5",
+          "e6",
+          "e7",
+          "e8",
+          "e9",
+          "e10",
+          "e11"
+        ],
+        "tier": 0
+      }
+    },
+    "pool": {
+      "count": 12,
+      "rows": [
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e0",
+          "scan": 0,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e1",
+          "scan": 1,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e2",
+          "scan": 2,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e3",
+          "scan": 3,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e4",
+          "scan": 4,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e5",
+          "scan": 5,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e6",
+          "scan": 6,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e7",
+          "scan": 7,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e8",
+          "scan": 8,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e9",
+          "scan": 9,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e10",
+          "scan": 10,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "订票",
+          "ref": "e11",
+          "scan": 11,
+          "surface": "native-control",
+          "tag": "button"
+        }
+      ]
+    }
+  },
+  "fixture": "ambiguity-order",
+  "schema_version": 1
+}

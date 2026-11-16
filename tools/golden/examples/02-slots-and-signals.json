@@ -1,0 +1,124 @@
+{
+  "_doc": "examples-check canonical golden（tools/examples-check.ts）：命令输出经归一（临时 HOME/仓库路径/时间戳/canary/slot-file 路径）后的基线。只在预期行为变更时用 --record-golden 更新，不得手改。",
+  "schema_version": 1,
+  "app": "02-slots-and-signals",
+  "checks": {
+    "apps-check": {
+      "argv": [
+        "apps",
+        "check",
+        "02-slots-and-signals"
+      ],
+      "exit_code": 0,
+      "stdout": "✓ 02-slots-and-signals  <TMP_HOME>/apps/02-slots-and-signals/app.mjs\n\n  dry: flow 已真实执行（浏览器调用合成；脚本副作用为真）\n1 个应用全部通过校验。",
+      "stderr": ""
+    },
+    "apps-explain": {
+      "argv": [
+        "apps",
+        "explain",
+        "02-slots-and-signals",
+        "--json"
+      ],
+      "exit_code": 0,
+      "json": {
+        "command": "apps explain",
+        "data": {
+          "app": "02-slots-and-signals",
+          "events": [
+            {
+              "call": "openPage",
+              "desc": "home",
+              "i": 1,
+              "ok": null,
+              "url": "https://example.com/"
+            },
+            {
+              "call": "step",
+              "desc": "把城市「上海」填进搜索框",
+              "i": 2,
+              "id": "fill-city",
+              "ok": true,
+              "url": "https://example.com/"
+            },
+            {
+              "call": "done",
+              "i": 3,
+              "ok": true
+            }
+          ],
+          "goal": "把声明的城市槽位填进搜索框，并确认登录浮层没有出现",
+          "invariants": [
+            {
+              "desc": "结束时仍在入口页",
+              "done": "URL 含「example.com」",
+              "id": "on-home",
+              "signal": {
+                "url_contains": "example.com"
+              }
+            }
+          ],
+          "label": "02 · 槽位与组合信号",
+          "path": "<TMP_HOME>/apps/02-slots-and-signals/app.mjs",
+          "plan_sha256": "<DYNAMIC>",
+          "problems": [],
+          "script_sha256": "2a4590a89312ac2d6b3ef90d8028844644e159b7ffbc5e0918ed75c90487f82b"
+        },
+        "diagnostics": [],
+        "exit_code": 0,
+        "next": [
+          "amber run 02-slots-and-signals"
+        ],
+        "ok": true,
+        "schema_version": 1
+      }
+    },
+    "app-runner-dry": {
+      "argv": [
+        "app-runner",
+        "--app",
+        "02-slots-and-signals",
+        "--dry"
+      ],
+      "exit_code": 0,
+      "json": {
+        "app": "02-slots-and-signals",
+        "dry_run": true,
+        "events": [
+          {
+            "call": "openPage",
+            "desc": "home",
+            "i": 1,
+            "ok": null,
+            "url": "https://example.com/"
+          },
+          {
+            "call": "step",
+            "desc": "把城市「上海」填进搜索框",
+            "i": 2,
+            "id": "fill-city",
+            "ok": true,
+            "url": "https://example.com/"
+          },
+          {
+            "call": "done",
+            "i": 3,
+            "ok": true
+          }
+        ],
+        "goal": "把声明的城市槽位填进搜索框，并确认登录浮层没有出现",
+        "invariants": [
+          {
+            "desc": "结束时仍在入口页",
+            "id": "on-home"
+          }
+        ],
+        "label": "02 · 槽位与组合信号",
+        "mode": "flow",
+        "model_status": "off(missing)",
+        "problems": [],
+        "slots": {}
+      }
+    }
+  }
+}

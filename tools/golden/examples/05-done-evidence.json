@@ -1,0 +1,138 @@
+{
+  "_doc": "examples-check canonical golden（tools/examples-check.ts）：命令输出经归一（临时 HOME/仓库路径/时间戳/canary/slot-file 路径）后的基线。只在预期行为变更时用 --record-golden 更新，不得手改。",
+  "schema_version": 1,
+  "app": "05-done-evidence",
+  "checks": {
+    "apps-check": {
+      "argv": [
+        "apps",
+        "check",
+        "05-done-evidence"
+      ],
+      "exit_code": 0,
+      "stdout": "✓ 05-done-evidence  <TMP_HOME>/apps/05-done-evidence/app.mjs\n\n  dry: flow 已真实执行（浏览器调用合成；脚本副作用为真）\n1 个应用全部通过校验。",
+      "stderr": ""
+    },
+    "apps-explain": {
+      "argv": [
+        "apps",
+        "explain",
+        "05-done-evidence",
+        "--json"
+      ],
+      "exit_code": 0,
+      "json": {
+        "command": "apps explain",
+        "data": {
+          "app": "05-done-evidence",
+          "events": [
+            {
+              "call": "arrive",
+              "desc": "到达 example.com",
+              "i": 1,
+              "id": "arrive-home",
+              "ok": true,
+              "url": "https://example.com/"
+            },
+            {
+              "call": "step",
+              "desc": "确认示例页标题（零动作命令 + forceAct 声明）",
+              "i": 2,
+              "id": "verify-heading",
+              "ok": true,
+              "url": "https://example.com/"
+            },
+            {
+              "call": "log",
+              "desc": "动作执行证据",
+              "i": 3,
+              "ok": null
+            },
+            {
+              "call": "done",
+              "i": 4,
+              "ok": true
+            }
+          ],
+          "goal": "到达示例页，用零动作验证步确认标题，并判读 StepResult 的动作执行证据",
+          "invariants": [
+            {
+              "desc": "结束时停在 example.com",
+              "done": "URL 含「example.com」",
+              "id": "on-example-page",
+              "signal": {
+                "url_contains": "example.com"
+              }
+            }
+          ],
+          "label": "05 · 动作执行证据（forceAct + done_preheld 判读）",
+          "path": "<TMP_HOME>/apps/05-done-evidence/app.mjs",
+          "plan_sha256": "<DYNAMIC>",
+          "problems": [],
+          "script_sha256": "4a118c4248c007d7d608693d869d357343148f533ab9936f311cdccb75e5bd7e"
+        },
+        "diagnostics": [],
+        "exit_code": 0,
+        "next": [
+          "amber run 05-done-evidence"
+        ],
+        "ok": true,
+        "schema_version": 1
+      }
+    },
+    "app-runner-dry": {
+      "argv": [
+        "app-runner",
+        "--app",
+        "05-done-evidence",
+        "--dry"
+      ],
+      "exit_code": 0,
+      "json": {
+        "app": "05-done-evidence",
+        "dry_run": true,
+        "events": [
+          {
+            "call": "arrive",
+            "desc": "到达 example.com",
+            "i": 1,
+            "id": "arrive-home",
+            "ok": true,
+            "url": "https://example.com/"
+          },
+          {
+            "call": "step",
+            "desc": "确认示例页标题（零动作命令 + forceAct 声明）",
+            "i": 2,
+            "id": "verify-heading",
+            "ok": true,
+            "url": "https://example.com/"
+          },
+          {
+            "call": "log",
+            "desc": "动作执行证据",
+            "i": 3,
+            "ok": null
+          },
+          {
+            "call": "done",
+            "i": 4,
+            "ok": true
+          }
+        ],
+        "goal": "到达示例页，用零动作验证步确认标题，并判读 StepResult 的动作执行证据",
+        "invariants": [
+          {
+            "desc": "结束时停在 example.com",
+            "id": "on-example-page"
+          }
+        ],
+        "label": "05 · 动作执行证据（forceAct + done_preheld 判读）",
+        "mode": "flow",
+        "model_status": "off(missing)",
+        "problems": [],
+        "slots": {}
+      }
+    }
+  }
+}

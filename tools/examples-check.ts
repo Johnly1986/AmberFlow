@@ -13,8 +13,23 @@
  * 另外对 `03-secret-slots`：把一次性 canary 写进 `--slot-file`（JSON，chmod 600）再 dry，
  * 断言 stdout 含掩码 `***`、且 canary 在 stdout+stderr 零命中。
  *
- * 用法：node --experimental-strip-types tools/examples-check.ts
- * 退出码：0 = 全过；1 = 有失败（打印命令与输出；临时 home 保留以便排查）。
+ * **canonical golden（默认比对，`--record-golden` 显式更新）**：每条命令的输出先经
+ * `normalize*` 归一（临时 HOME/仓库绝对路径、时间戳、随机 canary、槽位文件路径），
+ * 再与 `tools/golden/examples/<app>.json` 逐字节比对。目的：给「机械拆分 / 运行期重构」
+ * 一条**可重复**的离线等价证据——命令的退出码、JSON 结构、字段与文案任何漂移都会红，
+ * 不再依赖"本地手工跑一遍看着一样"。
+ *
+ * 确定性环境（否则 golden 只是把本机状态钉死）：
+ *   - 子进程 cwd = 临时 home：不吸收仓库 `.amberflow/config.json` 与旧 `configs/amberflowrc.json`；
+ *   - 清空继承的 `AMBERFLOW_*` / `LAYA*` 环境变量，再显式设 HOME/APPS_OUT；
+ *   - `VITEST=1` 走仓库既有的「测试进程不吸收本机配置」约定；
+ *   - 决策/模型相关键显式置空、模型路径指向临时 home 内不存在的位置 ⇒ 本机是否下载过模型
+ *     都不影响 dry 产物（model_status 恒 `off(missing)`，CI 与本机同口径）。
+ *
+ * 用法：
+ *   node --experimental-strip-types tools/examples-check.ts                  # 校验 + golden 比对
+ *   node --experimental-strip-types tools/examples-check.ts --record-golden  # 重写 golden
+ * 退出码：0 = 全过；1 = 有失败（打印规范化后的命令与输出差异；临时 home 保留以便排查）。
  */
 import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
@@ -26,7 +41,10 @@ const REPO = path.resolve(import.meta.dirname, "..");
 const EXAMPLES_APPS = path.join(REPO, "examples", "apps");
 const CLI_ENTRY = path.join(REPO, "src", "cli", "main.ts");
 const APP_RUNNER_ENTRY = path.join(REPO, "src", "app", "app-runner.ts");
+const GOLDEN_DIR = path.join(REPO, "tools", "golden", "examples");
 const NODE_FLAGS = ["--experimental-strip-types"];
+const RECORD_GOLDEN = process.argv.slice(2).includes("--record-golden");
+const USAGE = "usage: node --experimental-strip-types tools/examples-check.ts [--record-golden]";
 
 /** 示例下限：task 要求 ≥3 个，少一个就是交付不完整。 */
 const MIN_EXAMPLES = 3;
@@ -35,6 +53,21 @@ const MASKED_SLOT = "***";
 /** 失败输出截断：完整日志没必要全刷，但要够定位。 */
 const OUTPUT_TAIL_LINES = 30;
 const OUTPUT_TAIL_CHARS = 4000;
+/** golden 里可替换的「每次必变」字段（归一为固定 token；不得靠删字段掩盖）。 */
+const DYNAMIC_KEYS = new Set([
+  "run_id", "started_at", "finished_at", "started", "saved_at", "at", "epoch",
+  "elapsed_ms", "elapsed", "duration_ms", "secs",
+  // plan_sha256 = lowest IR 的 canonical JSON hash，而 IR 里带应用脚本的**绝对路径**
+  // （app-script.ts: pack._path = scriptPath）；换一次临时 home 就换一次值。脚本内容
+  // 由 script_sha256 钉住，这里只把与机器路径耦合的那一维归一，不为它放宽其他字段。
+  "plan_sha256",
+]);
+const ISO_RE = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/g;
+const GOLDEN_DOC =
+  "examples-check canonical golden（tools/examples-check.ts）：命令输出经归一（临时 HOME/仓库路径/时间戳/canary/slot-file 路径）后的基线。"
+  + "只在预期行为变更时用 --record-golden 更新，不得手改。";
+
+/* ------------------------------------------------------------------ 类型 */
 
 interface CommandRun {
   argv: string[];
@@ -56,13 +89,35 @@ interface Failure {
 type RunCmd = (argv: string[]) => CommandRun;
 type Validate = (r: CommandRun) => string | null;
 
+/** 一条命令的归一化产物：文本命令存 stdout/stderr；JSON 命令存解析后的结构。 */
+interface CanonicalCheck {
+  argv: string[];
+  exit_code: number | null;
+  stdout?: string;
+  stderr?: string;
+  json?: unknown;
+}
+
+interface AppGolden {
+  _doc?: string;
+  schema_version: 1;
+  app: string;
+  checks: Record<string, CanonicalCheck>;
+}
+
+/** 归一化上下文：这些值在产物里出现即替换为固定 token。 */
+interface NormalizeContext {
+  tmpHome: string;
+  canary: string;
+}
+
 /* ------------------------------------------------------------------ 子进程 */
 
-function spawnRun(argv: string[], env: NodeJS.ProcessEnv): CommandRun {
+function spawnRun(argv: string[], env: NodeJS.ProcessEnv, cwd: string): CommandRun {
   const exe = argv[0];
   if (exe === undefined) throw new Error("spawnRun: argv 不能为空");
   const res = spawnSync(exe, argv.slice(1), {
-    cwd: REPO,
+    cwd,
     env,
     encoding: "utf8",
     timeout: 120_000,
@@ -76,16 +131,34 @@ function spawnRun(argv: string[], env: NodeJS.ProcessEnv): CommandRun {
   };
 }
 
-/** 子进程环境：临时 AMBERFLOW_HOME；并清掉决策服务/模型旋钮，保证 dry 不因本机配置漂移。 */
+/**
+ * 子进程环境：临时 AMBERFLOW_HOME + 配置/模型面隔离。
+ * 清掉继承的机器级开关，保证「本机有没有配置/模型」不改变 dry 产物；模型路径显式指向
+ * 临时 home 内不存在的位置 ⇒ model_status 恒 off(missing)，CI 与本机同口径。
+ */
 function buildChildEnv(tmpHome: string): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith("AMBERFLOW_") || /^LAYAA?_/.test(key)) continue;
+    env[key] = value;
+  }
+  Object.assign(env, {
     AMBERFLOW_HOME: tmpHome,
     AMBERFLOW_APPS_OUT: path.join(tmpHome, "apps-out"),
-  };
-  for (const key of Object.keys(env)) {
-    if (key.startsWith("AMBERFLOW_DECISION_")) delete env[key];
-  }
+    // 仓库既有约定：测试进程不吸收本机用户/项目配置（apply-config-env.ts 的 includeFiles）。
+    VITEST: "1",
+    NO_COLOR: "1",
+    // 决策面显式置空（空串 = 未配置）：本机 rc/环境不会把 dry 变成"有决策源"。
+    AMBERFLOW_DECISION_BASE_URL: "",
+    AMBERFLOW_DECISION_MODEL: "",
+    AMBERFLOW_DECISION_API_KEY: "",
+    AMBERFLOW_DECISION_PROTOCOL: "",
+    // 模型工件缺失是确定性的（不是"本机刚好下过"）。
+    LAYA_ONNX_MODEL: path.join(tmpHome, "no-model.onnx"),
+    LAYAA_ONNX_MODEL: path.join(tmpHome, "no-model.onnx"),
+    LAYA_TOKENIZER_DIR: path.join(tmpHome, "no-tokenizer"),
+    LAYAA_TOKENIZER_DIR: path.join(tmpHome, "no-tokenizer"),
+  });
   return env;
 }
 
@@ -95,6 +168,67 @@ function nodeCli(args: string[]): string[] {
 
 function nodeAppRunner(args: string[]): string[] {
   return [process.execPath, ...NODE_FLAGS, APP_RUNNER_ENTRY, ...args];
+}
+
+/* ------------------------------------------------------------------ 归一化 */
+
+/** 文本归一：临时 home / 仓库绝对路径 / ISO 时间戳 / canary → 固定 token。 */
+function normalizeText(raw: string, ctx: NormalizeContext): string {
+  let text = raw;
+  // 长的先替换（realpath 可能让临时 home 多一层前缀）。
+  const homeVariants = new Set([ctx.tmpHome, safeRealpath(ctx.tmpHome)]);
+  for (const home of [...homeVariants].filter((h): h is string => h !== null).sort((a, b) => b.length - a.length)) {
+    text = text.split(home).join("<TMP_HOME>");
+  }
+  text = text.split(REPO).join("<REPO>");
+  if (ctx.canary !== "") text = text.split(ctx.canary).join("<CANARY>");
+  text = text.replace(ISO_RE, "<TIMESTAMP>");
+  return text.replace(/\r\n/g, "\n").replace(/[ \t]+$/gm, "").replace(/\n+$/g, "");
+}
+
+function safeRealpath(target: string): string | null {
+  try { return fs.realpathSync(target); } catch { return null; }
+}
+
+/** JSON 归一：键递归排序（同内容 = 同字节）；已知每次必变键 → `<DYNAMIC>`。 */
+function normalizeValue(value: unknown, ctx: NormalizeContext): unknown {
+  if (typeof value === "string") return normalizeText(value, ctx);
+  if (Array.isArray(value)) return value.map((entry) => normalizeValue(entry, ctx));
+  if (typeof value === "object" && value !== null) {
+    const source = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(source).sort()) {
+      out[key] = DYNAMIC_KEYS.has(key) ? "<DYNAMIC>" : normalizeValue(source[key], ctx);
+    }
+    return out;
+  }
+  return value;
+}
+
+/** 文本命令的归一化产物（argv 用语义形态，便于 golden 直接读懂）。 */
+function canonicalText(argv: string[], r: CommandRun, ctx: NormalizeContext): CanonicalCheck {
+  return {
+    argv,
+    exit_code: r.status,
+    stdout: normalizeText(r.stdout, ctx),
+    stderr: normalizeText(r.stderr, ctx),
+  };
+}
+
+/** JSON 命令的归一化产物；解析失败时保留 null（校验器已先报错，golden 不掩盖失败）。 */
+function canonicalJson(argv: string[], r: CommandRun, ctx: NormalizeContext): CanonicalCheck {
+  let json: unknown = null;
+  try {
+    json = JSON.parse(r.stdout);
+  } catch {
+    json = null;
+  }
+  return { argv, exit_code: r.status, json: normalizeValue(json, ctx) };
+}
+
+/** 稳定序列化（键已排序；用于 golden 写入与比对）。 */
+function stableStringify(value: unknown): string {
+  return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 /* ------------------------------------------------------------------ 断言 */
@@ -173,15 +307,17 @@ function validateCanary(r: CommandRun, canary: string): string | null {
   return null;
 }
 
-function expectOk(label: string, argv: string[], run: RunCmd, validate: Validate, failures: Failure[]): void {
+/** 跑一条命令并校验；返回原始 CommandRun 供 golden 使用。 */
+function expectOk(label: string, argv: string[], run: RunCmd, validate: Validate, failures: Failure[]): CommandRun {
   const r = run(argv);
   const problem = r.error !== null ? `子进程启动失败：${r.error}` : validate(r);
   if (problem !== null) {
     failures.push({ label, argv, problem, stdout: r.stdout, stderr: r.stderr });
     console.log(`  ✗ ${label}`);
-    return;
+    return r;
   }
   console.log(`  ✓ ${label}`);
+  return r;
 }
 
 /* ------------------------------------------------------------------ 示例发现 / 复制 */
@@ -201,6 +337,55 @@ function copyExamplesToHome(apps: string[], tmpHome: string): void {
   for (const app of apps) {
     fs.cpSync(path.join(EXAMPLES_APPS, app), path.join(destRoot, app), { recursive: true });
   }
+}
+
+/* ------------------------------------------------------------------ golden I/O */
+
+function goldenFileOf(app: string): string {
+  return path.join(GOLDEN_DIR, `${app}.json`);
+}
+
+function goldenPayload(app: string, checks: Record<string, CanonicalCheck>): AppGolden {
+  return { schema_version: 1, app, checks };
+}
+
+/** 比对一份产出与 golden；返回问题（空 = 一致）。 */
+function compareGolden(app: string, actual: AppGolden): string[] {
+  const file = goldenFileOf(app);
+  const rel = path.relative(REPO, file);
+  if (!fs.existsSync(file)) return [`缺少 golden：${rel}（运行 --record-golden 生成）`];
+  let goldenRaw: unknown;
+  try {
+    goldenRaw = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (err) {
+    return [`${rel} 解析失败：${err instanceof Error ? err.message : String(err)}`];
+  }
+  if (!isRecord(goldenRaw)) return [`${rel} 不是 JSON 对象`];
+  const expected = stableStringify(goldenPayload(
+    typeof goldenRaw["app"] === "string" ? goldenRaw["app"] : app,
+    isRecord(goldenRaw["checks"]) ? goldenRaw["checks"] as Record<string, CanonicalCheck> : {},
+  ));
+  const got = stableStringify(actual);
+  if (got === expected) return [];
+  const expLines = expected.split("\n");
+  const actLines = got.split("\n");
+  for (let i = 0; i < Math.max(expLines.length, actLines.length); i++) {
+    if (expLines[i] === actLines[i]) continue;
+    return [`${rel} 与本次产出不一致（首个差异第 ${i + 1} 行）\n    golden: ${expLines[i] ?? "<无>"}\n    实际:   ${actLines[i] ?? "<无>"}`];
+  }
+  return [`${rel} 与本次产出不一致`];
+}
+
+/** 写入 golden（`--record-golden`）。 */
+function writeGolden(app: string, actual: AppGolden): void {
+  fs.mkdirSync(GOLDEN_DIR, { recursive: true });
+  fs.writeFileSync(goldenFileOf(app), stableStringify({ _doc: GOLDEN_DOC, ...actual }), "utf8");
+}
+
+function staleGoldenFiles(apps: string[]): string[] {
+  if (!fs.existsSync(GOLDEN_DIR)) return [];
+  const keep = new Set(apps.map((app) => `${app}.json`));
+  return fs.readdirSync(GOLDEN_DIR).filter((f) => f.endsWith(".json") && !keep.has(f)).sort();
 }
 
 /* ------------------------------------------------------------------ 输出格式 */
@@ -241,6 +426,12 @@ function printFailures(failures: Failure[], scrub: (text: string) => string): vo
 /* ------------------------------------------------------------------ 主流程 */
 
 function main(): number {
+  for (const arg of process.argv.slice(2)) {
+    if (arg !== "--record-golden") {
+      console.error(`examples-check: 未知参数 ${JSON.stringify(arg)}\n${USAGE}`);
+      return 2;
+    }
+  }
   const apps = discoverExampleApps();
   if (apps.length < MIN_EXAMPLES) {
     console.error(`✗ examples/apps 下只发现 ${apps.length} 个示例（至少需要 ${MIN_EXAMPLES} 个）`
@@ -250,6 +441,7 @@ function main(): number {
 
   console.log(`examples-check：离线校验 examples/apps/（${apps.length} 个示例；不启浏览器、不调模型、不联网）`);
   console.log(`  示例：${apps.join(" · ")}`);
+  if (RECORD_GOLDEN) console.log("  模式：--record-golden（写入 tools/golden/examples/，不比对）");
 
   const failures: Failure[] = [];
   // 一次性 canary：每次运行随机生成，只活在本进程 + 临时 slot-file 里。
@@ -257,54 +449,81 @@ function main(): number {
   const scrub = (text: string): string => (text === "" ? text : text.split(canary).join(MASKED_SLOT));
 
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "amberflow-examples-"));
+  const goldens = new Map<string, AppGolden>();
   let thrown: string | null = null;
   try {
     copyExamplesToHome(apps, tmpHome);
     console.log(`  临时 AMBERFLOW_HOME：${tmpHome}\n`);
 
     const childEnv = buildChildEnv(tmpHome);
-    const run: RunCmd = (argv) => spawnRun(argv, childEnv);
+    const run: RunCmd = (argv) => spawnRun(argv, childEnv, tmpHome);
+    const normCtx: NormalizeContext = { tmpHome, canary };
 
     for (const app of apps) {
-      expectOk(`${app} · apps check`, nodeCli(["apps", "check", app]), run, exitProblem, failures);
-      expectOk(`${app} · apps explain --json`, nodeCli(["apps", "explain", app, "--json"]), run, validateExplain, failures);
-      expectOk(`${app} · app-runner --dry`, nodeAppRunner(["--app", app, "--dry"]), run, validateDry, failures);
-    }
+      const checks: Record<string, CanonicalCheck> = {};
 
-    // 敏感槽位：canary 走 --slot-file（不写进 argv），dry 输出必须是 ***。
-    if (!apps.includes(SECRET_APP)) {
-      failures.push({
-        label: `${SECRET_APP} · canary 掩码`,
-        argv: [],
-        problem: `examples/apps 缺少 ${SECRET_APP}`,
-        stdout: "",
-        stderr: "",
-      });
-      console.log(`  ✗ ${SECRET_APP} · canary 掩码`);
-    } else {
-      const slotFile = path.join(tmpHome, "canary-slots.json");
-      fs.writeFileSync(slotFile, `${JSON.stringify({ password: canary })}\n`, { encoding: "utf-8", mode: 0o600 });
-      fs.chmodSync(slotFile, 0o600);            // writeFileSync 的 mode 会被 umask 削，chmod 兜底
-      expectOk(
-        `${SECRET_APP} · canary 掩码（--slot-file）`,
-        nodeAppRunner(["--app", SECRET_APP, "--dry", "--slot-file", slotFile]),
-        run,
-        (r) => validateCanary(r, canary),
-        failures,
-      );
+      const checkArgv = ["apps", "check", app];
+      const checkRun = expectOk(`${app} · apps check`, nodeCli(checkArgv), run, exitProblem, failures);
+      checks["apps-check"] = canonicalText(checkArgv, checkRun, normCtx);
+
+      const explainArgv = ["apps", "explain", app, "--json"];
+      const explainRun = expectOk(`${app} · apps explain --json`, nodeCli(explainArgv), run, validateExplain, failures);
+      checks["apps-explain"] = canonicalJson(explainArgv, explainRun, normCtx);
+
+      const dryArgv = ["app-runner", "--app", app, "--dry"];
+      const dryRun = expectOk(`${app} · app-runner --dry`, nodeAppRunner(dryArgv), run, validateDry, failures);
+      checks["app-runner-dry"] = canonicalJson(dryArgv, dryRun, normCtx);
+
+      // 敏感槽位：canary 走 --slot-file（不写进 argv），dry 输出必须是 ***。
+      if (app === SECRET_APP) {
+        const slotFile = path.join(tmpHome, `${SECRET_APP}-canary-slots.json`);
+        fs.writeFileSync(slotFile, `${JSON.stringify({ password: canary })}\n`, { encoding: "utf-8", mode: 0o600 });
+        fs.chmodSync(slotFile, 0o600);            // writeFileSync 的 mode 会被 umask 削，chmod 兜底
+        const canaryArgv = ["app-runner", "--app", SECRET_APP, "--dry", "--slot-file", "<SLOT_FILE>"];
+        const canaryRun = expectOk(
+          `${SECRET_APP} · canary 掩码（--slot-file）`,
+          nodeAppRunner(["app-runner", "--app", SECRET_APP, "--dry", "--slot-file", slotFile]),
+          run,
+          (r) => validateCanary(r, canary),
+          failures,
+        );
+        checks["app-runner-dry-slot-file"] = canonicalJson(canaryArgv, canaryRun, normCtx);
+      }
+      goldens.set(app, goldenPayload(app, checks));
     }
   } catch (e) {
     thrown = e instanceof Error ? (e.stack ?? e.message) : String(e);
   }
 
-  const ok = failures.length === 0 && thrown === null;
+  // golden：只在全部语义校验通过后写/比（失败时不制造"看似有效"的基线）。
+  const goldenProblems: string[] = [];
+  if (thrown === null && failures.length === 0) {
+    if (RECORD_GOLDEN) {
+      for (const app of apps) writeGolden(app, goldens.get(app)!);
+      for (const stale of staleGoldenFiles(apps)) {
+        fs.rmSync(path.join(GOLDEN_DIR, stale));
+        console.log(`  删除过期 golden：${stale}`);
+      }
+      console.log(`  已记录 ${apps.length} 份 golden → tools/golden/examples/`);
+    } else {
+      for (const app of apps) goldenProblems.push(...compareGolden(app, goldens.get(app)!));
+      for (const stale of staleGoldenFiles(apps)) goldenProblems.push(`过期 golden：tools/golden/examples/${stale}（示例已不存在；--record-golden 会清理）`);
+    }
+  }
+
+  const ok = failures.length === 0 && thrown === null && goldenProblems.length === 0;
   if (thrown !== null) console.error(`\n✗ examples-check 自身异常：\n${thrown}`);
   if (failures.length > 0) printFailures(failures, scrub);
+  if (goldenProblems.length > 0) {
+    console.error("\ngolden 不一致（canonical golden）：");
+    for (const problem of goldenProblems.map((p) => scrub(p))) console.error(`  - ${problem}`);
+    console.error("  确认是预期行为变更后，运行 `node --experimental-strip-types tools/examples-check.ts --record-golden` 更新基线，并随 PR 说明改动。");
+  }
 
   if (ok) {
     fs.rmSync(tmpHome, { recursive: true, force: true });
     console.log(`\nPASS：${apps.length} 个示例全绿`
-      + `（每个 3 项：apps check + explain --json + app-runner --dry；${SECRET_APP} 含 canary 掩码断言）`);
+      + `（每个 3 项：apps check + explain --json + app-runner --dry；${SECRET_APP} 含 canary 掩码断言；golden ${RECORD_GOLDEN ? "已记录" : "一致"}）`);
     return 0;
   }
   console.error(`\n临时 AMBERFLOW_HOME 保留以便排查：${tmpHome}`);
