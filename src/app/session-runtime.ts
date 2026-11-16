@@ -36,10 +36,13 @@ import {
   countAnyFrame, extractElements, urlOf, type ElemPool, type PageLike,
 } from "../engine/extraction.ts";
 import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
+// F76/P3：tab op 复用 ctx-validate 的**纯函数层**（校验/匹配/现场描述），不发明第二套匹配语义。
+import { describeTabs, switchTabMatches, validateSwitchTabMatch } from "./ctx-validate.ts";
+import type { SwitchTabMatch, TabInfo } from "./ctx-types.ts";
 // task-34（B1 旁路复用）：与 run 面**同一个**弱档命中诊断（`rules.hintMatchImpl` 的模块态），
 // 会话只 take 出来回显，不改选择语义、不改 run 面任何代码。
 import { takeHintMatchOthers } from "../engine/rules.ts";
-import { DEFAULT_SETTLE } from "../engine/settle.ts";
+import { DEFAULT_SETTLE, settle } from "../engine/settle.ts";
 import type { LaunchWindowMode } from "../browser/browser-env.ts";
 import type { AmbiguityView } from "../engine/ambiguity.ts";
 
@@ -69,7 +72,7 @@ interface SessionScrollOut {
 
 /** 请求类型闭集（未知 type = 结构化 config_error + 这张表）。 */
 export const SESSION_REQUEST_TYPES = [
-  "open", "observe", "act", "read", "extract", "waitFor", "signal", "snapshot", "mark", "close",
+  "open", "observe", "act", "read", "extract", "waitFor", "signal", "snapshot", "mark", "tab", "close",
 ] as const;
 
 /** 缺省 idle 超时（两次请求之间的静默上限）。 */
@@ -249,6 +252,30 @@ function intIn(v: unknown, lo: number, hi: number): number | undefined {
   const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
   if (!Number.isFinite(n)) return undefined;
   return Math.max(lo, Math.min(hi, Math.floor(n)));
+}
+
+/**
+ * F76：best-effort 的有界等待（与 ctx.ts 的同名 helper 同语义）：超时/失败都不致命——
+ * 切页事实已经发生，置前/等载失败只是"没等到"，不是错误。
+ */
+async function bounded(fn: () => Promise<unknown> | undefined, ms: number): Promise<void> {
+  try { await Promise.race([Promise.resolve().then(fn), sleepMs(ms)]); } catch { /* best effort */ }
+}
+
+/**
+ * F76：任意标签页的标题读取有界（2s）：一个卡死的标签页不能拖住 tab list/switch 的响应
+ * （与 ctx.ts 的 tabs titleOf 同口径；catch 在 race 之前挂上，race 输了也不产生未处理拒绝）。
+ */
+async function tabTitleOf(p: AnyPage): Promise<string> {
+  try {
+    const title = Promise.resolve()
+      .then(() => p.title())
+      .then((t) => String(t ?? ""))
+      .catch(() => "");
+    return await Promise.race([title, sleepMs(2000).then(() => "")]);
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -530,6 +557,7 @@ export class SessionRuntime {
       case "signal": return this.doSignal(req);
       case "snapshot": return this.doSnapshot(req);
       case "mark": return this.doMark(req);
+      case "tab": return this.doTab(req);
       case "close": return this.doClose();
       default:
         return { ok: false, code: "config_error", reason: "unknown request type" };
@@ -698,6 +726,15 @@ export class SessionRuntime {
         allowed_modes: ["fail", "act"],
       };
     }
+    // F72：rehydrateRescan 是显式 opt-in（缺省不出现 = 既有行为逐字节不变）；非法值 = 结构化
+    // config_error（与 onAmbiguous 同一纪律，不静默取缺省）。
+    if (req["rehydrateRescan"] !== undefined && req["rehydrateRescan"] !== true) {
+      return {
+        ok: false, code: "config_error",
+        reason: `act.rehydrateRescan must be true when present (got ${JSON.stringify(req["rehydrateRescan"])})`,
+      };
+    }
+    const rehydrateRescan = req["rehydrateRescan"] === true;
     const targetRaw = req["target"];
     const page = await this.page();
     const hosts = this.hosts ?? undefined;
@@ -731,7 +768,7 @@ export class SessionRuntime {
         )
         : await this.mw().actOnce(page, String(targetRaw), "scroll", null, ambiguousMode,
           wantsContainer ? { ...(toDir === undefined ? {} : { to: toDir }), ...(by === undefined ? {} : { by }) } : undefined,
-          { diagnostics: true });
+          { diagnostics: true, ...(rehydrateRescan ? { rehydrateRescan: true } : {}) });
       const scrollAmb = synthetic ? {} : this.actAmbiguity(String(targetRaw), out.ref ?? null);
       // A2：只有元素 scroll（actOnce 分支）可能带歧义证据；合成目标走 scrollDocument，没有该键。
       const scrollAmbiguity: AmbiguityView | undefined = out.ambiguity;
@@ -810,9 +847,12 @@ export class SessionRuntime {
     // fill/select/hover 与 run 面走同一条既有路径（不传第 7 参）。
     const wantOcclusion = actOp === "click" || actOp === "check";
     const out = actOp === "hover"
-      ? await mw.actOnce(page, target, "hover", null, ambiguousMode, undefined, { diagnostics: true })
+      ? await mw.actOnce(page, target, "hover", null, ambiguousMode, undefined,
+        { diagnostics: true, ...(rehydrateRescan ? { rehydrateRescan: true } : {}) })
       : await mw.actOnce(page, target, actOp, bind, ambiguousMode, undefined,
-        wantOcclusion ? { occlusionProbe: true, diagnostics: true } : { diagnostics: true });
+        wantOcclusion
+          ? { occlusionProbe: true, diagnostics: true, ...(rehydrateRescan ? { rehydrateRescan: true } : {}) }
+          : { diagnostics: true, ...(rehydrateRescan ? { rehydrateRescan: true } : {}) });
     // 解析证据在 take 后立刻读取（observeAfter 会再次触发 hintMatch，不能放在它之后）。
     const amb = this.actAmbiguity(target, out.ref);
     this.recordAction({
@@ -1205,6 +1245,106 @@ export class SessionRuntime {
     this.recordMark(note);
     this.log(`mark: ${note}`);
     return Promise.resolve({ ok: true, note });
+  }
+
+  /**
+   * F76：枚举当前 browser context 里**未关闭**的标签页（与 ctx.ts 的 `listTabs` 同形状同序：
+   * `context.pages()` 序 = index 序，0-based；`active` = 会话当前页）。Playwright 的 page 在
+   * 两条会话构造路径上都能 `page.context().pages()` 枚举；替身可能把 context/pages 给成属性，
+   * 两种形状都认；`isClosed()` 不可用或抛错的页面按关闭处理（绝不对关掉的页做 title 读取/切换）。
+   */
+  private async listTabs(session: BrowserSession): Promise<Array<TabInfo & { page: AnyPage }>> {
+    const active = session.page;
+    const contextValue = (active as unknown as { context?: unknown }).context;
+    const context = (typeof contextValue === "function"
+      ? contextValue.call(active)
+      : contextValue) as { pages?: ArrayLike<AnyPage> | (() => ArrayLike<AnyPage>) } | undefined;
+    const raw = typeof context?.pages === "function" ? context.pages() : context?.pages;
+    const pages = Array.from(raw ?? []).filter((p) => {
+      try { return p.isClosed?.() !== true; } catch { return false; }
+    });
+    const out: Array<TabInfo & { page: AnyPage }> = [];
+    for (const [index, p] of pages.entries()) {
+      let url = "";
+      try { url = urlOf(p) || ""; } catch { url = ""; }
+      out.push({ index, url, title: await tabTitleOf(p), active: p === active, page: p });
+    }
+    return out;
+  }
+
+  /**
+   * F76/P3：`tab` 请求——`action:"list"`（缺省，免费只读）枚举标签页；`action:"switch"` 显式切到
+   * 恰好一个匹配的标签页。匹配语义/校验/现场描述**全部复用** ctx-validate 的纯函数
+   * （`validateSwitchTabMatch`/`switchTabMatches`/`describeTabs`），不发明第二套语义：
+   *   - match 缺失/空对象/未知键/类型非法 ⇒ `config_error`（文案同 ctx-validate.ts）；
+   *   - 0 个或 >1 个匹配 ⇒ `config_error`（reason 带 describeTabs 现场，不回退随便选一个）；
+   *   - 目标 URL 在 open 时声明的 hosts 信封外 ⇒ `host_not_allowed`，且**不切换**；
+   *   - 命中：会话当前 page 指向目标页 + bringToFront（有界 2s）+ domcontentloaded（有界 5s，
+   *     均失败不致命——照抄 ctx.switchTab 的处理）+ settle（有界、失败不致命）；switch 写一条
+   *     JSONL 动作记录（与 act 的 record 同一条流），list 不写。
+   */
+  private async doTab(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const action = req["action"] === undefined ? "list" : req["action"];
+    if (action !== "list" && action !== "switch") {
+      return {
+        ok: false, code: "config_error",
+        reason: `tab.action must be one of list | switch (got ${JSON.stringify(action)})`,
+        allowed_actions: ["list", "switch"],
+      };
+    }
+    // switch 的形状校验先于浏览器惰性创建（StopError 由 handleLine 统一转结构化失败）——
+    // match 缺失/空对象的 config_error 不该付出一次浏览器启动的代价。
+    if (action === "switch") validateSwitchTabMatch(req["match"]);
+    const session = await this.ensureSession();
+    const listed = await this.listTabs(session);
+    if (action === "list") {
+      // 免费只读：不切页、不写轨迹、不记动作；列表可以包含 hosts 信封外的页面（与 ctx.tabs 同一判定）。
+      return {
+        ok: true,
+        action: "list",
+        tabs: listed.map(({ index, url, title, active }) => ({ index, url, title, active })),
+        active: listed.find((t) => t.active === true)?.index ?? -1,
+      };
+    }
+    const match = req["match"] as SwitchTabMatch;
+    const matched = listed.filter((t) => switchTabMatches(t, match));
+    if (matched.length !== 1) {
+      const why = matched.length === 0 ? "no tab matches" : `${matched.length} tabs match`;
+      throw new StopError("config_error",
+        `tab switch: ${why} ${JSON.stringify(match)} — expected exactly 1; current tabs: ${describeTabs(listed)}`
+        + ' (tab action "list" shows the same tabs; no implicit fallback to an arbitrary tab)');
+    }
+    const target = matched[0]!;
+    // 导航信封：列表可以只读看到信封外页面，切过去不行（与 ctx.switchTab / open 同一判定）。
+    if (this.hosts !== null && this.hosts.length > 0 && disallowedHost(target.url, this.hosts) !== null) {
+      throw new StopError("host_not_allowed",
+        `tab switch: ${JSON.stringify(target.url)} is outside the declared hosts envelope (${this.hosts.join(", ")})`
+        + " — the tab was not activated");
+    }
+    const before = urlOf(session.page) || "";
+    // 换页：holder 里的 BrowserSession 是同一个对象，ctx 面/执行器后续都经 ensureSession().page
+    // 拿当前页——指向目标页即全会话生效（ctx.switchTab 同一条事实路径）。
+    session.page = target.page as unknown as AnyPage;
+    // Playwright 成熟做法：置前 + 有界等 domcontentloaded；两者失败都不致命（切页已是事实）。
+    await bounded(() => (target.page as unknown as { bringToFront?: () => Promise<void> }).bringToFront?.(), 2000);
+    await bounded(() => target.page.waitForLoadState?.("domcontentloaded", { timeout: 5000 }), 5000);
+    // settle（有界、永不抛、失败不致命）：给下一个 observe/extract 一个已装好传感器的静默页。
+    try { await settle(target.page); } catch { /* settle 不抛；防御性 no-op */ }
+    this.urls.push(target.url);
+    this.actionCount += 1;
+    this.recordAction({
+      op: "tab", action: "switch", target: null,
+      ok: true, ref: null, how: "switched", changed: true,
+      from: { url: before },
+      to: { index: target.index, url: target.url, title: target.title },
+      url: target.url,
+    });
+    this.log(`tab switch → #${target.index} ${target.url}`);
+    return {
+      ok: true,
+      action: "switch",
+      switched: { index: target.index, url: target.url, title: target.title },
+    };
   }
 
   private async doClose(): Promise<Record<string, unknown>> {

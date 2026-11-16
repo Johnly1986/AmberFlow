@@ -4,6 +4,71 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 架构师裁决补丁批次二：会话面 tab op（F76/F77）+ 桥 idle_timeout_ms（F80）
+
+### P3 会话面 tab op（F76 协议 + F77 桥）
+
+- **【背景】** 携程"订票"是 window.open 弹新标签——编排面（ctx.tabs/switchTab/F2 newTab）能力
+  完整但被卡点 1 堵住，会话腿能点却跟不过去：两头各缺一截。
+- 会话面新增 `tab` op（additive）：`list` 免费只读枚举（context.pages() 序、active=会话当前页）；
+  `switch` 复用 ctx-validate 纯函数与信封判定（0/多匹配=config_error 带 describeTabs 现场、
+  信封外=host_not_allowed 不切换），命中换会话当前页（后续读/动作面全跟）+ 有界
+  bringToFront/DCL + settle + JSONL record。桥三层（SESSION_OPS/参数 schema/渲染）同步透传。
+- record→export 闭环（F81）：export 识别 `op:"tab"` switch 行 → `ctx.switchTab({urlContains|index})`
+  原语（URL 子串优先、缺落点事实=注释块不发明；`ctx.switchTab` 自身计 1 个 flow step）。
+
+### P4 桥 open 专属 idle_timeout_ms（F80）
+
+- **【背景】** 桥 TTL 管理器级 300s 缺省、1h 硬帽、无 0=不限；lastActivity 只在工具调用时刷新
+  ——headful 会话等人登录/扫码/支付期间零调用必被 reaper 收割，慢支付超 1h 调参也救不了。
+- `open` 可传 `idle_timeout_ms`：缺省不传 = 管理器缺省（逐字节不变）；`0` = 不限（仅显式，
+  reaper 跳过）；非整数/1..999 = config_error。per-session 显式值不受部署 1h 帽约束。
+  孤儿兜底联动 `max(600s, 2×ttl)`——缺省 300s 下 spawn argv 逐字节不变（回归不变量）。
+  `op:"list"` additive 回显生效值。会话面 rescue 透传维持 NO-GO。
+
+## [Unreleased] — 架构师裁决补丁批次一：DRF 诚实化（F73）+ run 决策步 DOM 回退跳（F74/F75）
+
+### P1 丙：DRF 诚实化（F73）
+
+- **【背景】** DRF（`target_resolution:"declared"`）实跑且可见零命中时，落空停因 reason 完全不提
+  DRF（strict 链列举句只写到 "after hintMatch / ADMIT recovery / FW8"）——作者无法区分
+  "hint 写错 / 被池帽挤出 / DRF 扫过仍看不见"（携程 v4 探针 reason 与 v1 逐字相同即此）。
+- DRF 实跑且 visible=0（含 total=0 真零命中与 hidden>0 全隐藏）时，落空 reason 追加
+  `declared-DOM resolution (DRF, attr|text mode) ran: total=N, hidden=M, visible=0`；四处落空面
+  （命令空间停因 / strict 两分支 / 非 strict hint_matched_nothing）统一追加；strict 解析链列举句
+  条件化（declared 下点名 DRF）。未声明 declared 时逐字节不变。
+
+### P2 甲：run 决策步 DOM 回退跳（F74/F75）
+
+- **【背景】** 会话 act 的 DOM 回退面（`_domFallbackResolve`：主帧 ADMIT_SEL、**不过滤可见性**、
+  含 0×0 自绘控件）是会话面独占；run 决策步 act hint 的五跳（hintLookup/FW8/DRF/U5/F72）全部
+  要求可见盒/可见匹配——"会话 act 能解的声明 hint 在 run 解不了"的 authoring→run 可移植性缺口。
+- 新 policy 键 `meta.policy.act_hint_dom_fallback`（布尔，缺省 false = 逐字节不变）：声明 hint
+  全链真落空后补一次 DOM 回退跳；命中 = 合成行注入本步局部池（`df:` 前缀）+ 确定性
+  `rule:match`（不进模型投影），trace 记 `resolved_by:"dom_fallback"`；歧义 = 同一谓词结构化；
+  落空 = 原停因 + strict reason 补"已试 DOM 回退"。章纪律随 cleanupIdentity 全部清点同步；
+  `_locatorFor` additive 链首 `af_probe` 分支；`Elem.af_probe` 仅合成行携带。
+- 明确不做：on_ambiguous 开关（恒 fail）；PUA 字形口径修复（丙2，触发条件见 F73）；
+  shadow 扩面（等 walk 实验）。
+
+## [Unreleased] — 重水合补偿（F72）：落空诊断诚实化 + rehydrate_rescan 有界重扫
+
+- **【背景】** 重水合 SPA（轮播广告 + React 分阶段水合）上 act 抽池前的 settle 门是纯负信号
+  （等 DOM 静默 ≥400ms），静默永不达成时超时后照常抽池——抽到 SSR 中间态池报 `target_not_found`，
+  数分钟后同一 hint 直接成功。此前失败诊断不含任何渲染线索，staleRetry 只管"解析成功后"的动作
+  失败，解析落空无补偿。
+- **①诊断诚实化**：`_resolveOne` 保留 settle 结论（不再就地丢弃）；会话 act 落空（诊断面）在页面
+  未静默时 additive `diagnostics.settle_timed_out`/`settle_waited_ms` 两键 + reason 尾缀一行渲染
+  提示；页面静默正常与非诊断面（run/scroll/setRange）键与 reason 逐字节不变。
+- **②rehydrate_rescan（opt-in，缺省 false）**：run 面步级 `rehydrateRescan:true` / 会话 act 单行
+  `rehydrateRescan` / 桥参数 `rehydrate_rescan`——act hint 真落空（hintMatch 零命中）且步首 settle
+  timedOut 时等 2s → 重抽池 → 同一 hint 重解析（affordanceRule+declaredAllow，U5 同款档位纪律，
+  至多 1 次，确定性 rule:match 不重走决策面；受整步挂钟帽钳制）。命中：run 面 trace/汇总记
+  `rehydrate_rescan`，会话面 `resolved_via:"rehydrate-rescan"`（桥 additive 回显）；重扫池上歧义
+  照旧同一谓词；仍未命中 = 原停因不变 + `diagnostics.rescan`。`settle:"off"` 时门控信号不存在。
+- 面板：`ctx.waitForTarget` 正锚配方 + `meta.policy.settle.timeout_ms` 放宽写入
+  `docs/APP_SCRIPT_AUTHORING.md`「重水合 SPA 配方」；schema F72。
+
 ## [Unreleased] — frame:<origin> 帧限定 hint（解析/匹配/数据面/候选/诊断/契约）
 
 ### A 批（解析 / 匹配 / 数据面 / 回捞 / 契约）

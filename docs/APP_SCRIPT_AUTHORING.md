@@ -264,7 +264,7 @@ export async function flow(ctx) {
 | 元信息 | `ctx.app` / `ctx.slots` / `ctx.runtime` / `ctx.budget` / `ctx.log(msg, data?)` | `slots` 只读；`runtime = {outDir, runId, today, epoch, dry}`（`epoch` = 执行器状态游标只读投影，每次抽池/观察 +1，每个 `step` 重置；dry 恒 0；`dry` = 两面判据——dry/replay `true`、真跑 `false`，见 §2 消歧义）；`today` = CLI `--today YYYY-MM-DD` 钉住的"今天"，没钉 = 系统日期 |
 | 导航 | `ctx.open(url)` / `ctx.openPage(role)` / `ctx.arrive(url, {done, desc?, id?, timeoutMs?})` | `arrive` = 纯导航 + 等信号，不做元素选择、不花模型；`hosts` 信封在起点与落地都强制 |
 | 标签页 | `ctx.tabs()` / `ctx.switchTab({index?, urlContains?, titleContains?})` | `tabs()` 免费只读列出未关闭页（`{index,url,title,active}`）；`switchTab` 显式切到**恰好一个**匹配页（计 1 个 flow step），0/多匹配 = `config_error`、信封外 = `host_not_allowed`。新标签页**不会自动跟随**，见 §4.9 |
-| 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, values?, when?, timeoutMs?, force?, forceAct?, staleRetry?, newTab? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}`；`values` 是决策步的显式值袋，见 §4.5；`newTab` 把 `target=_blank` 的新标签升为一等完成面（见 §4.9）；`timeoutMs` 是动作后信号窗口 + 整步挂钟帽（见下）。**步级 `slots` 的键仍须在 `meta.slots` 声明**（dry 校验按 `meta.slots` 口径查键，步级提供的是**值**不是新键——键没声明时 check 直接红 `value.key … is not a declared slot`） |
+| 决策语句 | `ctx.step(goal, { id?, act?, done, url?, slots?, values?, when?, timeoutMs?, force?, forceAct?, staleRetry?, rehydrateRescan?, newTab? })` | `done` 必填；`act` 省略 = 引擎决定目标，给了 `ctx.hint()`/命令闭集才收窄候选；返回 `{ok, id?, stopCode?, reason?, evidence}`；`values` 是决策步的显式值袋，见 §4.5；`newTab` 把 `target=_blank` 的新标签升为一等完成面（见 §4.9）；`timeoutMs` 是动作后信号窗口 + 整步挂钟帽（见下）。**步级 `slots` 的键仍须在 `meta.slots` 声明**（dry 校验按 `meta.slots` 口径查键，步级提供的是**值**不是新键——键没声明时 check 直接红 `value.key … is not a declared slot`） |
 | 人工步 | `ctx.manual(desc, { done, instructions?, id? })` | 见 §7；非 TTY 返回 `needs_human`，不假装有人 |
 | 观察 | `ctx.url()` / `ctx.read.{text,value,count,attr}(sel[, attr])` / `ctx.holds(signal)` / `ctx.waitFor(signal, {timeoutMs?, pollMs?})` / `ctx.waitForTarget(hint, {visible?, timeoutMs?, pollMs?})` | 只读；读不到返回 `null` / `0`；`waitFor` 轮询到 bounded deadline，返回 boolean；`waitForTarget`（C2）等一个 hint 语义目标进可见准入池——返回 `{found, count}`，超时如实 `found:false`（**不假装**）；免费只读、不计预算、不进模型请求面。dry 合成 `{found:false, count:0, dry:true}`（与 `waitFor` 的 dry「立即 true」口径不同：那是"信号已成立"的模拟，这里没有可模拟的命中事实）；`url()` 首次导航前是 `"about:blank"`，别拿它当入口页判断 |
 | 只读侦察 | `ctx.observe({ max?, selector?, includeHidden?, includeFrames?, includeStructure? })` | **免费只读**：返回当前页 DOM 侧真实存在的元素清单（`ref o0/o1…`；字段 `tag/label/role/id/name/data-test/type/href/class_names/visible/bbox/frame/frame_origin?/frame_path?` + `admitted`/`why_not_admitted`/`hint_candidates`；`includeStructure:true` 时另有 `structure_path`（≤160）+ `structure_unstable:true`）。不计 flow step/预算、不写 outDir、**不进模型请求面**、不改页面状态（无点击/滚动/导航）。默认走当前准入面（ADMIT_SEL 投影 + `[data-js-ref]` 后缀，不新增类目）；`selector` 可用任意只读 CSS 看池外目标。`hint_candidates` 用同一个 `hintMatch` 在本次观察到的准入面元素集合上**自证**（唯一命中才给），可直接照抄进 `ctx.hint(...)`/命令 `target`——但自证范围就是本次观察集合：默认观察（未截断）时等于整个准入面；`selector` 或 `truncated:true` 时只在所选子集/前 max 行内自证，照抄前应再做一次默认观察复核；`admitted` = 匹配准入面 + 可见 + 至少一条自证 hint（**不等于**"一定在本次 120 窗口内"，窗口见 `inspect --json` 的 `window`）。`frame_origin`/`frame_path` 是帧链底座（`frame:` 候选由此自证）；`structure_path` 只是诊断证据（动态页面可能失效、不可照抄、不进 hint/模型面）。最多 200 行、≤6 帧；`max` 超出/未知选项 = `config_error`；非法 CSS 返回 `{ok:false, error:"bad_selector", reason}`（不抛栈、不中断 flow）。dry = `{ok:true, dry:true, counts 全 0, elements:[]}`；replay = `{ok:true, replay:true, …}`（只还原 counts/truncated，元素明细未进 trace），trace 只记 `{call:"observe", url, counts, truncated}` |
@@ -461,8 +461,33 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
   是单数 `stale_retry`，`step` 结果/RunReport 侧的汇总数组字段是复数 `stale_retries`——两个名字并存，
   勿混写）；最终失败仍按既有 stopCode
   （`stale_ref` / `action_failed` / `not-actionable-or-covered` …）诚实报告。
+- `rehydrateRescan?: boolean`（F72）：声明 act hint **真落空**（hintMatch 零命中；弱档胜出不算）且
+  步首抽池时**页面未静默**（settle timedOut——重水合 SPA 轮播页抽到中间态池的信号）时，引擎等 2s
+  → 重抽池 → 用**同一 hint** 重解析一次（至多 1 次；确定性 rule:match，不重走决策面；不额外计步
+  预算；受整步挂钟帽钳制）。命中 = 照常执行，trace 行/step 结果/RunReport 记
+  `rehydrate_rescan:{waited_ms,pool_size_before,pool_size,resolved,ref?}`；重扫池上歧义照旧同一谓词
+  结构化；仍未命中 = 原停因不变。会话 act 面有同一开关：单行请求字段 `rehydrateRescan:true` /
+  桥参数 `rehydrate_rescan:true`，命中响应带 `resolved_via:"rehydrate-rescan"`，落空响应的
+  `diagnostics` additive 带 `settle_timed_out`/`settle_waited_ms`（渲染可疑）与 `rescan`（重扫事实）。
+  `meta.policy.settle:"off"` 时门控信号不存在，重扫永不触发。dry 面只记声明（`rehydrate_rescan:true`）。
 - `hover` 命令：见 §4 命令闭集——它只移动指针（`:hover` 菜单/图层面板），不点击、不导航、不触发预填；
   快照没变不判 inert（与 scroll/drag 同口径），完成仍只认 done 信号。
+
+**重水合 SPA（携程类：轮播广告 + React 分阶段水合）配方（F72）**
+
+重水合页的典型事故：act 首次调用抽到 SSR 中间态池 → `target_not_found`，数分钟后同一 hint 直接成功。
+按优先级三件套：
+
+1. **正锚优先（首选，声明式）**：act 前 `ctx.waitForTarget("input[name=owACity]", { timeoutMs: 8000 })`
+   （免费只读不计预算；返回 `{found, count}`，超时如实 `found:false`）——把"猜页面多久渲染好"变成
+   "声明页面就绪条件"，作者声明一次全程受益。
+2. **失败路径补偿（opt-in）**：`ctx.step(..., { rehydrateRescan: true })`——hint 真落空且页面未静默时
+   引擎自行等 2s 重扫一次（见上）；会话面用 `rehydrateRescan`（请求字段）/ `rehydrate_rescan`（桥参数）。
+3. **稳定门放宽（次选）**：`meta.policy.settle:{ timeout_ms: 8000 }`——控制流不变（超时后照常抽池），
+   但多等的墙钟本身就是水合窗口；轮播页静默永不达成时它只是"多等一会儿再抽"，不解决正信号缺失。
+
+注意：`target_not_found` 不是最坏结局——strict 关（缺省 widen）时水合期模型可能从中间态池**选错目标**
+点下去；给脆弱步显式 act hint 或声明 `meta.policy.act_hint:"strict"` 才能守住。
 
 **S1 状态层与 pre-held 策略**
 - `meta.policy.done_preheld`：`"warn"`（缺省，只记 flag + `warnings[]`，不拦动作）/ `"fail"`（动作前结构化停止，
@@ -779,6 +804,12 @@ export const meta = (kit) => ({
 5. 仍落空：命令步 `target_not_found`；act hint 按 `act_hint` 档位（`widen` 回退模型 /
    `strict` 直接 `target_not_found`）。
 
+**F73 诚实化**：DRF **实跑**且可见零命中时，落空停因 reason 会回显 DRF 计数
+（`declared-DOM resolution (DRF, attr|text mode) ran: total=N, hidden=M, visible=0`）——
+作者可据此区分"hint 写错 / 被池帽挤出 / DRF 扫过仍看不见"三类病因；未声明
+`target_resolution` 时串逐字节不变（strict 的解析链列举句同步条件化：声明了 declared
+才会点名 DRF）。
+
 纪律与证据：
 
 - **恰好一个可见匹配**：跨 frame（≤6）统计；**>1 可见 → `target_ambiguous`**（reason /
@@ -989,6 +1020,7 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `navigation` | `free` | 导航纪律（仅 flow 面）：`"entry-only"` = 入口之外的引擎直接 URL 导航默认被 `navigation_forbidden` 拒绝，但 **`meta.site.pages` 里声明的页面 URL 可再次直接导航**（`URL.href` 归一后全等才放行，见 §4.10）；缺省/"`free`" = 不约束，产物逐字节不变 |
 | `act_hint` | `widen` | 声明目标（`act: ctx.hint(...)` / `target_hints`）解析链（池 hintMatch → ADMIT 回捞 → FW8 身份回捞）全落空时的档位：`widen` = 交给模型自由选（**缺省 = 现行为逐字节不变**）；`strict` = **禁止模型回退**，直接结构化 `target_not_found`（reason 写明 `act_hint="strict"` + 原 hint + 池快照）。命令步不受影响；FW8 的 `#id`/`[data-test]`/`[name]` 声明回捞先执行。显式声明才进 `effective_policy.act_hint` |
 | `target_resolution` | `off` | **声明目标解析链（DRF，P0-C）**：`off` = 现行为逐字节不变；`declared` = 命令 `target` / act hint 在池 hintMatch → ADMIT 回捞 → FW8 身份回捞全部落空后，再由 DOM 侧兜底解析（属性型 hint 走 ADMIT_SEL + 同一套 hint 语义；裸词 hint 走可见文本精确匹配；跨 frame **恰好一个可见**才动作，>1 → `target_ambiguous`，全隐藏 = 未命中 + hidden 诊断）。click 族动作前必须 hit-test（中心被覆盖则不点击、记 `hit_test` 证据）。首版只允许 `click`/`scroll`/`hover`，对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` → 结构化 `action_unsupported`。回捞元素只进本步局部池，**模型不参与**。显式声明才进 `effective_policy.target_resolution`；dry 只校验 policy 值（DOM 事实无法离线验证，不新增绿，见 §4.11） |
+| `act_hint_dom_fallback` | `false` | **F74：决策步 act hint 的 DOM 回退跳**：true = 声明 hint 在 池→ADMIT 回捞→FW8→(DRF)→(U5/F72) 全链真落空后，再走一次主帧 ADMIT_SEL DOM 回退面（与会话 act 同一实现，**不过滤可见性**、含 0×0 自绘控件）；命中 = 确定性 `rule:match`（不进模型投影，trace 记 `resolved_by:"dom_fallback"`）；歧义 = 同一谓词 `target_ambiguous`；落空 = 原停因 + strict reason 补"已试 DOM 回退"；至多一次/步。缺省 false = 逐字节不变 |
 | `browser` | （不写 = 现状链） | **task-43 浏览器通道**：`"chrome"`（系统 Chrome，Playwright `channel:"chrome"`，new headless）\| `"headless-shell"`（ms-playwright 的 headless-shell，= 缺省现状）。优先级 **env(`AMBERFLOW_BROWSER_CHANNEL`) > meta > 缺省**——env 是部署/CI 的机器级覆盖，meta 是应用作者的站点知识（已知 headless-shell 下坏的站点在此点名 chrome，如 zh.wikipedia 文章页的客户端 URL flap）。主机没有系统 Chrome 时 launch **如实报错不静默回退**（要回退请删 meta 或改 env）；与 `--headful` 正交组合（headful 语义独立：人工步等仍强制可见窗口）。生效值与来源进 `effective_policy.browser`（仅 env/meta 任一存在时出现）；真实二进制以 `env.browser.binary_basename`（D-1 启动事实）为准。已知代价（task-39 实测）：chrome 通道冷启动 +~13%，zh.wiki 类页面 open 快 ~3.5s 且免 flap |
 | `attr_value_match` | `full_label` | **A1 属性值匹配底座**：`full_label`（缺省）= `[aria-label=…]` / `[aria-label~…]` 同时比 ≤200 的 `full_label` 与模型视图 `label`（前 40 字）——>40 字的 aria-label 值可命中；`display` = A1 之前（只比前 40 字 label，>40 的值永不命中；逃生口/对照臂）。attrEq 与 attrSubstr 同一函数、一处修两形状；≤40 的值等值命中集合不变。显式声明才进 `effective_policy.attr_value_match`；inspect/observe/session 无 policy 恒 `full_label` |
 | `act_hint_tier` | `any` | **A3 弱档门槛**：`any`（缺省 = 现行为逐字节不变）= 弱档（bare 词前缀/词包含、attrSubstr loose 子串）胜出照旧执行 + `matched_others` 警告；`strong` = 弱档胜出判为**未命中**（step warning 换 `weak_hint_rejected`），随后按 `act_hint`：`widen` 交模型 / `strict` 结构化 `target_not_found`（reason 写弱档被拒 + 候选≤3 + 两条改法）。与 `act_hint` **正交**（`widen`+`strong` 合法）；判据复用 `takeHintMatchOthers()` 的既有 `suspicious`，不另造档位表；池解析与 rules-only 宽扫重解析共用同一判定；命令 target / learned hint / 决策步不受影响；显式声明才进 `effective_policy.act_hint_tier`（声明 `"any"` 也进账） |
@@ -1050,7 +1082,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `arrive_signal_not_held` | `ctx.arrive` 导航完成但 done 信号在超时内未成立 |
 | `precondition_skipped` | `when` 不成立，这一步没有执行（`ok:false`，trace 状态 `skipped`；同样计一次执行预算）——脚本按 stopCode 分支继续，不是失败 |
 | `page_not_ready` | 元素池为空，页面还没稳定；等页面 ready，或修 done 信号 |
-| `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标。`meta.policy.act_hint:"strict"` 下 act hint 解析链全落空也用它（reason 显式写 `act_hint="strict"`，**不再回退模型自由选**；缺省 `widen` 才回退）。`meta.policy.act_hint_tier:"strong"` 下**弱档胜出被判未命中**（bare 词前缀/词包含、attrSubstr loose 子串）同样报它：strict 时 reason 写明弱档被拒 + 候选≤3 + 两条改法（收窄成强形状 / 回 `act_hint_tier:"any"`）；缺省 `any` 才有 `matched_others` 警告。声明目标（act hint/命令）在池+ADMIT+FW8 全落空且**未声明** `target_resolution` 时，reason 追加一行 DRF 提示（自绘控件可声明 `meta.policy.target_resolution:"declared"` 走 attr/文本精确匹配）；**已声明** `"declared"` 的同场景走 DRF、不再提示（避免噪音）。**C 批起**：若 hint 带 `frame:` 尾缀，reason 末尾追加该尾缀的拒绝原因（多尾缀 / 非法 origin / 空段 / >4 段 / 带 path·query·显式默认端口）或合法但未命中时**页面实际可用 origin**（允许帧去重 ≤6、主帧也列）；无 `frame:` 参与时旧 reason 逐字节不变 |
+| `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标。`meta.policy.act_hint:"strict"` 下 act hint 解析链全落空也用它（reason 显式写 `act_hint="strict"`，**不再回退模型自由选**；缺省 `widen` 才回退）。`meta.policy.act_hint_tier:"strong"` 下**弱档胜出被判未命中**（bare 词前缀/词包含、attrSubstr loose 子串）同样报它：strict 时 reason 写明弱档被拒 + 候选≤3 + 两条改法（收窄成强形状 / 回 `act_hint_tier:"any"`）；缺省 `any` 才有 `matched_others` 警告。声明目标（act hint/命令）在池+ADMIT+FW8 全落空且**未声明** `target_resolution` 时，reason 追加一行 DRF 提示（自绘控件可声明 `meta.policy.target_resolution:"declared"` 走 attr/文本精确匹配）；**已声明** `"declared"` 的同场景走 DRF、不再提示（避免噪音）。**F73 起**：已声明 declared 且 DRF 实跑可见零命中时，落空 reason 追加 DRF 计数（`total/hidden/visible=0`），strict 的解析链列举句同步点名 DRF；未声明时逐字节不变。**C 批起**：若 hint 带 `frame:` 尾缀，reason 末尾追加该尾缀的拒绝原因（多尾缀 / 非法 origin / 空段 / >4 段 / 带 path·query·显式默认端口）或合法但未命中时**页面实际可用 origin**（允许帧去重 ≤6、主帧也列）；无 `frame:` 参与时旧 reason 逐字节不变 |
 | `target_ambiguous` | 目标命中多个不同候选；收窄 hint。`target_resolution:"declared"` 下 DRF 的两个可见文本/属性匹配同样报它（候选 tag/文本/frame/visible 在 reason 与 `skipped_actions`） |
 | `action_unsupported` | 目标存在但声明的动作 op 不在元素能力面内；换动作或换目标。DRF 首版只允许 `click`/`scroll`/`hover`——对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` 也报它（reason 明说首版限制） |
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |

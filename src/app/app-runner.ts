@@ -1050,6 +1050,11 @@ export interface EffectivePolicy {
    */
   target_resolution?: { value: "off" | "declared"; source: "app" };
   /**
+   * F74 决策步 act hint 的 DOM 回退跳（**仅声明时出现** = 缺省产物逐字节不变）。
+   * true = 声明 act hint 解析链全落空后补一次主帧 ADMIT_SEL DOM 回退面（A3 对称）。
+   */
+  act_hint_dom_fallback?: { value: boolean; source: "app" };
+  /**
    * A1 属性值匹配底座（**仅声明时出现** = 缺省产物逐字节不变；缺省 `full_label` 是修复后行为）。
    * `"display"` = A1 之前只看模型视图前 40 字 label（>40 的 aria-label 值永不命中）。
    */
@@ -1185,6 +1190,10 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
   // P0-C：target_resolution 同样**仅声明时出现**（缺省 off = 今天；"off" 显式声明也进账）。
   if (declaredPolicy.target_resolution !== undefined) {
     policy.target_resolution = { value: declaredPolicy.target_resolution, source: "app" as const };
+  }
+  // F74：DOM 回退跳（布尔；仅显式声明时进账，缺省 false = 逐字节不变）。
+  if (declaredPolicy.act_hint_dom_fallback !== undefined) {
+    policy.act_hint_dom_fallback = { value: declaredPolicy.act_hint_dom_fallback === true, source: "app" as const };
   }
   // A1：属性值匹配底座**仅声明时出现**（缺省 full_label = 修复后；"display" 显式声明才进账）。
   if (declaredPolicy.attr_value_match !== undefined) {
@@ -1404,6 +1413,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     // A3：弱档算不算命中（缺省 any；strong = 弱档改判未命中，再按 actHint 语义走——声明式
     // 路径本就不传 actHint，故 strong 在此等于"交模型"，与 flow 面 widen+strong 同语义）。
     actHintTier: policy.act_hint_tier?.value,
+    // F74：DOM 回退跳（缺省 false = 逐字节不变；true = 声明 hint 全链落空后补 A3 对称跳）。
+    actHintDomFallback: policy.act_hint_dom_fallback?.value === true,
     // A1：aria-label 属性 hint 的池侧匹配底座（缺省 full_label = 修复后；display = A1 之前）。
     attrValueMatch: policy.attr_value_match?.value,
     // §W1：`risk_ask: rules-only` 让"要不要拦"不再花一次每步的前向（批模式下它的答案本来就被丢掉）。
@@ -2136,6 +2147,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           actHintTier: resolvedPolicy.policy.act_hint_tier?.value,
           // P0-C：DRF（缺省 off = 今天；declared = 声明目标解析链启用 DOM 兜底）。
           targetResolution: resolvedPolicy.policy.target_resolution?.value,
+          // F74：DOM 回退跳（缺省 false = 今天；true = 声明 hint 全链落空后补 A3 对称跳）。
+          actHintDomFallback: resolvedPolicy.policy.act_hint_dom_fallback?.value === true,
           // A1：aria-label 属性 hint 的池侧匹配底座（缺省 full_label；display = A1 之前）。
           attrValueMatch: resolvedPolicy.policy.attr_value_match?.value,
           riskAsk: resolvedPolicy.policy.risk_ask.value === "rules-only" ? "rules-only" : "always",

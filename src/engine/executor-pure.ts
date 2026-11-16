@@ -280,6 +280,20 @@ export interface ActMissDiagnostics {
   near: ActMissRow[];
   /** 池外回退扫描到、但被可见性过滤的近似行（≤3，`why:"not visible"`）。 */
   rejected: ActMissRow[];
+  /**
+   * F72-①：步首 settle 的**渲染可疑信号**——只在页面未静默（`timedOut:true`，整段等待都没
+   * 达成静默）时出现。它不是说"目标一定在后面"，而是把"抽到的池可能是水合中间态"变成
+   * 结构化事实：优先 `ctx.waitForTarget` 正锚后重试，而不是换目标绕路。
+   */
+  settle_timed_out?: boolean;
+  /** F72-①：settle 实际等待的毫秒（伴随 `settle_timed_out:true` 出现）。 */
+  settle_waited_ms?: number;
+  /**
+   * F72-②：`rehydrateRescan` 显式重扫**未命中**的事实（等了多少 ms、重扫池多大；仅显式
+   * 开启且重扫落空时出现）。重扫命中时不产生 diagnostics——actOnce 直接以
+   * `resolved_via:"rehydrate-rescan"` 成功返回。
+   */
+  rescan?: { waited_ms: number; pool_size: number };
 }
 
 /** 词面近似比较的池字段（`label` 是前 40 字视图，`full_label` 是 ≤200 的匹配口径）。 */
@@ -346,6 +360,10 @@ export function actMissDiagnostics(input: {
   rejected?: readonly ActMissRow[];
   /** E1-a：池预算帽回显（缺省 40 = MAX_ELEMENTS；只观测不改行为）。 */
   poolCap?: number;
+  /** F72-①：settle 渲染可疑信号（executor 侧已判定 timedOut 才传；缺省不出现 = 键集不变）。 */
+  settleTimedOut?: { waitedMs: number };
+  /** F72-②：显式重扫未命中的事实（仅 rehydrateRescan 开启且重扫落空时传）。 */
+  rescan?: { waited_ms: number; pool_size: number };
 }): ActMissDiagnostics {
   const hint = String(input.target ?? "");
   const parsed = parseHint(hint);
@@ -362,6 +380,12 @@ export function actMissDiagnostics(input: {
     target: hint,
     pool_size: Object.keys(input.pool).length,
     ...(input.poolCap === undefined ? {} : { pool_cap: input.poolCap }),
+    // F72-①/②：渲染可疑信号与重扫事实（additive；调用方不传 = 键集与之前逐字节一致）。
+    ...(input.settleTimedOut === undefined ? {} : {
+      settle_timed_out: true,
+      settle_waited_ms: Math.max(0, Math.round(input.settleTimedOut.waitedMs)),
+    }),
+    ...(input.rescan === undefined ? {} : { rescan: input.rescan }),
     hint_shape: parsed.kind,
     hint_len: hint.length,
     candidates,

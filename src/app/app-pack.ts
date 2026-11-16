@@ -196,6 +196,9 @@ export const POLICY_KEYS = [
   "act_hint_tier",
   // P0-C：声明目标解析链是否启用 DRF（缺省 "off" = 现行为逐字节不变）。
   "target_resolution",
+  // F74：决策步 act hint 的 DOM 回退跳（缺省 false = 现行为逐字节不变；true = 解析链全落空
+  // 后补一次主帧 ADMIT_SEL 回退面，A3 对称）。
+  "act_hint_dom_fallback",
   // A1：aria-label 属性 hint 的池侧匹配底座（缺省 "full_label" = 修复后；"display" = A1 之前）。
   "attr_value_match",
   // task-43：浏览器通道选择面（缺省不写 = 现状链逐字节不变；优先级 env > meta > default）。
@@ -302,6 +305,14 @@ export interface PackPolicy {
    *     dry/apps check 只校验 policy 值（DOM 事实无法离线验证，不新增绿）。
    */
   target_resolution?: (typeof TARGET_RESOLUTION_MODES)[number];
+  /**
+   * F74：决策步 act hint 的 **DOM 回退跳**（布尔；缺省 false = 现行为逐字节不变）。
+   * true = 声明 act hint 在 池→ADMIT 回捞→FW8→(DRF)→(U5/F72) 全链真落空后，再走一次
+   * 主帧 ADMIT_SEL DOM 回退面（与会话 act 的 `_domFallbackResolve` 同一实现，不过滤
+   * 可见性、含 0×0 自绘控件）；命中 = 确定性 rule:match（不进模型投影）；至多一次/步。
+   * 与 `act_hint` 族命名对齐但形状是布尔（非档位）。显式声明才进 effective_policy。
+   */
+  act_hint_dom_fallback?: boolean;
   /**
    * A1：`tag[aria-label=…]` / `tag[aria-label~…]` 的**池侧**属性值匹配底座。
    *   - `"full_label"`（缺省）：`[full_label, label]` 双底座——池字段 `full_label` 是
@@ -1342,6 +1353,11 @@ export function validatePack(pack: AppPack,
       const tr = pol["target_resolution"];
       if (tr !== undefined && !(TARGET_RESOLUTION_MODES as readonly string[]).includes(String(tr))) {
         p.push(`policy.target_resolution: unknown value ${JSON.stringify(String(tr))} (config_error; must be one of ${TARGET_RESOLUTION_MODES.map((x) => JSON.stringify(x)).join(" | ")})`);
+      }
+      // F74：DOM 回退跳——布尔键，非法值响亮拒绝（同 act_hint 先例）。
+      const ahdf = pol["act_hint_dom_fallback"];
+      if (ahdf !== undefined && ahdf !== true && ahdf !== false) {
+        p.push(`policy.act_hint_dom_fallback: must be a boolean (got ${JSON.stringify(String(ahdf))}; true = 声明 act hint 解析链全落空后补一次主帧 ADMIT_SEL DOM 回退跳)`);
       }
       // A1：属性值匹配底座——合法值闭集在加载期响亮拒绝（同 navigation/act_hint 先例）。
       const avm = pol["attr_value_match"];

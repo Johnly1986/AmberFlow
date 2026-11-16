@@ -364,6 +364,13 @@ export interface RunReport {
   stale_retries?: Array<{ attempt: number; reason: string; ref: string }>;
   /** S4：本子目标至少一个动作按步级 `force` 声明执行（trace 行 `forced=true` 的汇总）。 */
   forced?: boolean;
+  /**
+   * F72-②：本子目标声明 `rehydrateRescan` 且**跑过**显式重扫时的事实（缺字段 = 没跑过；
+   * 至多一次）。与 trace 行事件字段 `rehydrate_rescan` 是同一份证据（单对象：本机制至多一次）。
+   */
+  rehydrate_rescan?: {
+    waited_ms: number; pool_size_before: number; pool_size: number; resolved: boolean; ref?: string;
+  };
   /** 命令步在解析/动作前对 done 信号的预评估结果（仅命令步出现；不改变执行顺序）。 */
   done_preheld?: boolean;
   /** 运行期诚实性警告（如 suspected_async）；只在产生时出现。 */
@@ -738,6 +745,17 @@ export interface RunOptions {
    */
   staleRetry?: boolean;
   /**
+   * F72 `rehydrateRescan`（opt-in，步级声明；缺省 false = 今天的行为逐字节不变）：
+   * 声明 act hint 在 池 → ADMIT 回捞 → FW8 身份回捞（→ rules-only 宽扫）**真落空**
+   * （hintMatch 零命中；弱档胜出不触发）且**步首抽池时页面未静默**（settle timedOut——
+   * 重水合 SPA 轮播页抽到中间态池的信号）时，做一次有界重扫：等 2s（受整步挂钟帽钳制）
+   * → 重抽池 → 同一 hint 走 affordanceRule + declaredAllow（U5 宽扫同款档位纪律），
+   * 至多 1 次、不额外计入子目标动作预算。命中 = 确定性 rule:match 执行（不重走决策面），
+   * trace 行/汇总记 `rehydrate_rescan`；仍未命中 = 原停因不变。settle 策略关闭（policy.settle:"off"）
+   * 时门控信号不存在，重扫永不触发。
+   */
+  rehydrateRescan?: boolean;
+  /**
    * NL Flow S1：`dataset` 绑定来源的读取面。
    * 命令参数可声明 `{"from":"dataset","key":"…"}` 引用**前序步骤的具名产出**；
    * 解析在绑定那一刻现读最新 generation——陈旧世代不可读。缺省 null ⇒ 该来源
@@ -944,6 +962,14 @@ export interface MiddlewareOptions {
    * 回捞元素只进本步局部池，绝不进模型候选（pickInner 剥离 `declared` 标记）。
    */
   targetResolution?: "off" | "declared";
+  /**
+   * F74：`meta.policy.act_hint_dom_fallback`（缺省 false = 今天逐字节不变）。true = 决策步
+   * act hint 解析链真落空后补一次主帧 ADMIT_SEL DOM 回退跳（`_domFallbackResolve`，不过滤
+   * 可见性）；命中 = 确定性 rule:match（不进模型投影）；歧义 = 同一谓词 target_ambiguous；
+   * 落空 = 原停因 + strict reason 补"已试 DOM 回退"。与 targetResolution 正交：declared
+   * 场景排在 DRF 之后。
+   */
+  actHintDomFallback?: boolean;
   /** U3：surface 类目策略（缺省 native_activation="window"）。 */
   surfacePolicy?: SurfacePolicy;
   /**

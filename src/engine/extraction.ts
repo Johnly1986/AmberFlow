@@ -51,6 +51,12 @@ export interface Elem {
   tag: string;
   label: string;
   data_test?: string;
+  /**
+   * F75：A3 DOM 回退面合成行的探针句柄（`data-af-probe="<批次>-<序号>"` 的值）——run 决策步
+   * 复用回退面时 `_locatorFor` 的 af_probe 首分支据此重建 locator。仅合成行携带；真池行
+   * 恒缺省（键不出现 = 行为不变）。
+   */
+  af_probe?: string;
   name?: string;
   id?: string;
   /**

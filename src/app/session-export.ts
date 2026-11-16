@@ -17,6 +17,8 @@
  *   {"i":N,"op":"click|check|fill|select|hover|scroll", "target":…, "to"?,"by"?,
  *    "scroll_mode"?:"container"|"into_view", "moved"?, "delta"?, "scrollTop"?,
  *    "ok":bool, "code"?, "ref", "how", "changed", "url", "observe_hints"?}
+ *   {"i":N,"op":"tab","action":"switch","from":{url},"to":{index,url,title},
+ *    "ok":true,"url":…}                     F81：switch → await ctx.switchTab({urlContains|index})
  *   `scroll_mode` 是 B2 起的滚动语义标记：旧轨迹没有它（导出与今天逐字节一致）；
  *   "container" = to/by 容器滚动（`ctx.scrollList`），"into_view" = 滚入视口（命令闭集的
  *   `ctx.command("scroll", …)`，无 to）。
@@ -38,6 +40,15 @@ export interface RecordedAction {
   moved?: boolean;
   delta?: number;
   scrollTop?: number;
+  /**
+   * F81：会话 tab op 轨迹行（`op:"tab"`；`action:"switch"` 才生成动作）。
+   * `from_url`/`to_*` 来自轨迹的 from/to 事实对象——只进注释与匹配口径，不发明动作。
+   */
+  action?: string;
+  from_url?: string;
+  to_index?: number;
+  to_url?: string;
+  to_title?: string;
   ok: boolean;
   code?: string;
   reason?: string;
@@ -152,6 +163,24 @@ export function readRecord(file: string): {
       problems.push(`line ${idx + 1}: neither an open/mark event nor an action with an op`);
       return;
     }
+    // F81：tab 轨迹行的 from/to 事实提取（其余 op 恒空对象——展开零字段）。
+    const tabFacts: Partial<RecordedAction> = (() => {
+      if (parsed["op"] !== "tab") return {};
+      const out: Partial<RecordedAction> = {};
+      if (parsed["action"] === "switch" || parsed["action"] === "list") {
+        out["action"] = parsed["action"] as string;
+      }
+      if (isObj(parsed["from"]) && typeof parsed["from"]["url"] === "string") {
+        out["from_url"] = parsed["from"]["url"] as string;
+      }
+      if (isObj(parsed["to"])) {
+        const t = parsed["to"] as Record<string, unknown>;
+        if (typeof t["index"] === "number") out["to_index"] = t["index"];
+        if (typeof t["url"] === "string") out["to_url"] = t["url"];
+        if (typeof t["title"] === "string") out["to_title"] = t["title"];
+      }
+      return out;
+    })();
     actions.push({
       ...(typeof parsed["i"] === "number" ? { i: parsed["i"] } : {}),
       op: parsed["op"],
@@ -164,6 +193,8 @@ export function readRecord(file: string): {
       ...(typeof parsed["moved"] === "boolean" ? { moved: parsed["moved"] } : {}),
       ...(typeof parsed["delta"] === "number" ? { delta: parsed["delta"] } : {}),
       ...(typeof parsed["scrollTop"] === "number" ? { scrollTop: parsed["scrollTop"] } : {}),
+      // F81：tab 轨迹行的 from/to 事实对象（switch 行才有；只进注释/匹配口径，不发明动作）。
+      ...tabFacts,
       ok: parsed["ok"] === true,
       ...(typeof parsed["code"] === "string" ? { code: parsed["code"] } : {}),
       ...(typeof parsed["reason"] === "string" ? { reason: parsed["reason"] } : {}),
@@ -247,6 +278,11 @@ export function buildAppSource(input: {
       );
       continue;
     }
+    if (a.op === "tab" && a.action !== "switch") {
+      // F81：tab list/未知动作行不生成动作也不计步（list 免费只读；不发明）。
+      body.push(`  // tab ${a.action ?? "?"} 轨迹行不生成动作（list 免费只读/未知动作，不发明）`, "");
+      continue;
+    }
     stepNo += 1;
     const id = stepIdOf(stepNo, a.op);
     const desc = `${a.op}${a.target === undefined ? "" : ` ${a.target}`}`.slice(0, 80);
@@ -313,6 +349,36 @@ export function buildAppSource(input: {
       body.push(
         `  // scroll 导出为原语（轨迹里是 ${a.target === "document" ? "mw.scrollDocument" : "元素 scrollIntoView"}）：`,
         `  await ctx.scrollList(${js(target === "document" ? "document" : target)}, { to: ${js(to)} });`,
+        "",
+      );
+      continue;
+    }
+    if (a.op === "tab") {
+      // F81：switch 生成 ctx.switchTab 原语（自身计 1 个 flow step）。轨迹只存了**落点事实**
+      //（from/to），没存当时的 match 口径——导出按 URL 子串重建（确定性最高），URL 缺失退
+      // index；作者可按现场改 titleContains/index。ctx.switchTab 要求恰好 1 个匹配
+      //（0/多 = config_error 响亮失败，不静默选）。
+      const matchParts: string[] = [];
+      if (typeof a.to_url === "string" && a.to_url.trim() !== "") {
+        matchParts.push(`urlContains: ${js(a.to_url)}`);
+      }
+      if (matchParts.length === 0 && typeof a.to_index === "number") {
+        matchParts.push(`index: ${a.to_index}`);
+      }
+      const titleAlt = typeof a.to_title === "string" && a.to_title.trim() !== ""
+        ? `；备选口径：titleContains ${js(a.to_title)}`
+        : "";
+      if (matchParts.length === 0) {
+        body.push(
+          `  // ── ⚠ ${where} —— tab switch 缺落点事实（无 url/index），未生成动作 ──────────────`,
+          `  // 按现场手写：await ctx.switchTab({ urlContains: "…" });${titleAlt}`,
+          "",
+        );
+        continue;
+      }
+      body.push(
+        `  // 导出为 ctx.switchTab（自身计 1 个 flow step；轨迹事实 from=${js(a.from_url ?? "")}${titleAlt}）：`,
+        `  await ctx.switchTab({ ${matchParts.join(", ")} });`,
         "",
       );
       continue;

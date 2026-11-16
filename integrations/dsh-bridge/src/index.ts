@@ -1223,7 +1223,7 @@ export function apply(ctx: Context, config: Config): void {
     parameters: {
       op: {
         type: 'string', required: true,
-        enum: ['open', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'close', 'list'],
+        enum: ['open', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'close', 'list'],
         description: 'The session operation. `open` creates a session and returns session_id (all other ops except list need it).',
       },
       session_id: { type: 'string', description: 'Session id returned by `open`. Required for every op except open/list.' },
@@ -1251,6 +1251,10 @@ export function apply(ctx: Context, config: Config): void {
       on_ambiguous: {
         type: 'string', enum: ['fail', 'act'],
         description: 'act: what to do when the target hint matches several distinct candidates. Default "fail" — NOTHING is executed; the result carries code:"target_ambiguous" and a bounded `ambiguity` evidence block (candidate refs/tags/labels, which candidate would have been acted on, whether labels can discriminate), using the SAME predicate as a run command step. Set "act" to restore the pre-A2 behaviour (act on the first actionable candidate) — only to reproduce/debug an old flow or when the candidates are known-equivalent. Prefer narrowing the hint (unique #id / [data-test=…] / role word) over guessing.',
+      },
+      rehydrate_rescan: {
+        type: 'boolean',
+        description: 'act: opt-in bounded rescan for hydration-race misses. When the first resolve finds nothing AND the pre-pool settle reported the page never went quiet (timedOut — carousel/hydration intermediate pool), the engine waits ~2s, re-extracts the pool and re-resolves the SAME hint (pure hint matching, no model vote, at most once). On hit the result carries resolved_via:"rehydrate-rescan"; on still-miss the failure keeps the original stopCode and carries diagnostics.rescan facts. Default off — byte-identical behavior. Prefer ctx.waitForTarget / wait_for positive anchoring when authoring.',
       },
       value: { type: 'string', description: 'act fill/select: the value to type/select. Explicit only — the tool never invents values.' },
       to: {
@@ -1295,6 +1299,19 @@ export function apply(ctx: Context, config: Config): void {
           + '`structure_unstable:true`. It is NOT a hint — dynamic pages may invalidate it; never copy it into a target.',
       },
       screenshot: { type: 'boolean', description: 'snapshot: also write a viewport screenshot; act: write act-<n>-failure.png ONLY when the action fails (default false; only paths are returned, never inline).' },
+      tab_action: {
+        type: 'string', enum: ['list', 'switch'],
+        description: 'tab: "list" (default) enumerates the context pages as TabInfo rows {index,url,title,active} plus the top-level active index (free read-only — no switch, no record, no action count; the list may include pages outside the declared hosts envelope); '
+          + '"switch" moves the session to the ONE tab matching `match` (required) and refreshes the idle TTL (counts as one activity). It does NOT re-implement step newTab adoption — new-tab semantics stay on the flow face.',
+      },
+      match: {
+        type: 'object', additionalProperties: true,
+        description: 'tab switch: match {index} | {urlContains} | {titleContains} (0-based index; case-insensitive substrings; several keys AND-narrow). At least one key — missing/empty match, 0 or >1 matches = config_error (reason lists the current tabs, no implicit fallback); a target outside the open-declared hosts envelope = host_not_allowed and the tab is NOT activated. switch writes one JSONL action record; list does not.',
+      },
+      idle_timeout_ms: {
+        type: 'integer',
+        description: 'open-only: per-session idle TTL in ms. Omitted = the deployment manager default (Config.sessionIdleMs) — byte-identical to before; `0` = unlimited (explicit only — the reaper skips the session); non-integer or 1..999 = config_error ("idle_timeout_ms must be 0 or an integer >= 1000"). NOT capped by the deployment sessionIdleMs 1h limit (that cap governs the manager default, not a per-session value). Any other op passing this parameter = config_error. The engine child\'s CLI orphan backstop is linked automatically to max(600s, 2×idle_timeout_ms) (0/omitted = 600s unchanged); op:"list" rows echo the effective value as idle_timeout_ms (explicit 0 echoes 0).',
+      },
     },
     output: {
       // 结果形态按 op 不同（设计师 §2/§3）：只声明公共 ok/op/session_id 与额外的宽松键。
@@ -1475,6 +1492,26 @@ function renderSessionResult(value: Record<string, unknown>): string {
         + `\nsnapshot: ${String(value.snapshot_file ?? '')}`
         + `\npool: ${String(value.pool_file ?? '')}`
         + (value.screenshot_file === undefined ? '' : `\nscreenshot: ${String(value.screenshot_file)}`)
+    case 'tab': {
+      const sw = typeof value.switched === 'object' && value.switched !== null
+        ? value.switched as Record<string, unknown>
+        : undefined
+      if (value.action === 'switch' || sw !== undefined) {
+        return `${tag}: switched → #${String(sw?.index ?? '?')} ${String(sw?.url ?? '')}`
+          + (sw?.title === undefined || sw?.title === '' ? '' : ` — ${String(sw?.title)}`)
+      }
+      const tabs = Array.isArray(value.tabs) ? value.tabs : []
+      const lines = tabs.slice(0, 10).map((raw) => {
+        const t = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {}
+        return `  #${String(t.index ?? '?')} ${String(t.url ?? '')}`
+          + (t.title === undefined || t.title === '' ? '' : ` — ${String(t.title)}`)
+          + (t.active === true ? ' [active]' : '')
+      })
+      const more = tabs.length - lines.length
+      return `${tag}: ${tabs.length} tab(s), active=#${String(value.active ?? '?')}`
+        + (lines.length ? `\n${lines.join('\n')}` : '')
+        + (more > 0 ? `\n… +${more} more (full list in the JSON result)` : '')
+    }
     case 'close':
       return `${tag}: closed after ${String(value.requests ?? 0)} request(s), ${String(value.actions ?? 0)} action(s);`
         + ` evidence: ${String(value.evidence_dir ?? '')}`

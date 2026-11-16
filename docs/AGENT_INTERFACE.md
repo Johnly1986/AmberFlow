@@ -222,7 +222,7 @@ amber apps remove <id> [--yes] [--force]
 | `amberflow_app_show` | `amber apps show --json --code` | 路径、元数据、当前源码、版本锚点 |
 | `amberflow_app_check` | `amber apps check --json` | 加载 + dry 调用序列校验 |
 | `amberflow_inspect` | `amber inspect --json` | 只读页面观察（含 `ax` 可访问性证据块）与候选 hint |
-| `amberflow_session` | `amber session` | 跨工具调用保持页面状态的交互式试错会话（`open/observe/act/read/extract/signal/wait_for/snapshot/close/list`）；不判完成、不写 run 结果；`act` 缺省歧义零动作（见下） |
+| `amberflow_session` | `amber session` | 跨工具调用保持页面状态的交互式试错会话（`open/observe/act/read/extract/signal/wait_for/snapshot/tab/close/list`）；不判完成、不写 run 结果；`act` 缺省歧义零动作（见下） |
 | `amberflow_app_create` | `amber apps new … --json` | 生成 flow 骨架 |
 | `amberflow_run` | `app-runner`（与 `amber run` 同一运行器） | 运行；**桥用部署配置**决策三件套；`max_steps` 是执行预算，`timeout_sec` 是本次墙钟上限；决策通道故障时结果带恢复指引 |
 | `amberflow_learn` | `learn --json` | 一次录制 → 归纳信号 → 生成 `app.mjs` flow（回放门通过才落盘） |
@@ -321,6 +321,12 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
   `matched_others` 回显；`near` 是纯内存前缀/包含（token 来自同一个 `parseHint`，不扩语法）；
   `rejected` 只对既有池外回退扫描的 ≤5 行做一次可见性判定。成功路径与非落空失败键集不变，
   run 面/命令步不传该开关，行为与产物逐字节不变。
+- F72（重水合补偿）：落空响应 additive 两面——①步首 settle 未静默（timedOut）时 `diagnostics`
+  多 `settle_timed_out`/`settle_waited_ms` 两键、`reason` 尾缀一行渲染提示（"可能仍在水合/渲染，
+  建议 wait_for 锚定后重试"）；②显式 opt-in `rehydrate_rescan:true`（桥参数 / 单行请求字段
+  `rehydrateRescan`）在 hint 真落空且页面未静默时等 2s 重抽池重解析同一 hint（至多 1 次）：
+  命中 = 成功响应带 `resolved_via:"rehydrate-rescan"`；仍未命中 = 原停因不变 + `diagnostics.rescan`
+  （`{waited_ms,pool_size}`）。缺省关 = 键集与 reason 逐字节不变。
 
 `amberflow_session` 的 `act_op:"scroll"` 语义（B2）：
 
@@ -385,6 +391,44 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
   `{selector,text}` 非法），与 CLI/加载期同一出处（`src/engine/signals.ts` 的 `SIGNAL_SHAPE_HINT`）。
   `problems` 数组原样保留，调用方不用再拼提示；桥的失败投影给 `code` + `reason`（含同一份提示），
   `problems` 留在引擎会话响应里。
+
+`amberflow_session` 的 `tab` op（F76/F77，P3）：
+
+- `{"op":"tab","tab_action":"list"}`（`tab_action` 缺省 `list`）：枚举当前 browser context 里
+  **未关闭**的标签页，返回 `tabs:[{index,url,title,active}]`（TabInfo 形状；枚举序 =
+  `context.pages()` 序，0-based）+ 顶层 `active`（active 行的下标）。**免费只读**：不切页、不写
+  轨迹、不记动作；列表可以包含 hosts 信封外的页面（与 `ctx.tabs()` 同一判定）。
+- `{"op":"tab","tab_action":"switch","match":{…}}`：切到**恰好一个**匹配的标签页。`match` 是
+  `{index}` | `{urlContains}` | `{titleContains}`（0-based 序；子串大小写不敏感；多键 AND 收窄）。
+  `match` 缺失/空对象/未知键 ⇒ `config_error`（文案同 `ctx-validate.ts`）；0 个或 >1 个匹配 ⇒
+  `config_error`（reason 带 `describeTabs` 现场，**不回退随便选一个**）；目标 URL 在 open 时声明
+  的 hosts 信封外 ⇒ `host_not_allowed` 且**不切换**（与 `ctx.switchTab` 同一判定）。命中后引擎
+  当前页指向目标页（bringToFront 有界 2s + domcontentloaded 有界 5s，均失败不致命——切页事实已
+  发生）+ settle；成功返回 `{ok:true, switched:{index,url,title}}`，并写一条 JSONL 动作记录
+  （与 `act` 的 record 同一条流；`list` 不写）。`switch` 刷新桥侧 idle TTL（与其它 op 同一记活
+  语义），`list` 免费。
+- 语义边界：**不迁移不重复 F2 newTab**——`ctx.step newTab`（动作前去重采用/动作开新标签自动
+  跟随）语义留在 flow 面；会话 `tab` 只做显式枚举/显式切换（动作打开的新标签页不会自动跟随，
+  先 `tab_action:"list"` 确认再 switch）。两个 op 共用同一份 TabInfo 序与信封判定——匹配/校验/
+  现场描述复用 `ctx-validate.ts` 纯函数（`switchTabMatches`/`validateSwitchTabMatch`/
+  `describeTabs`），不发明第二套匹配语义。桥只做形状校验（isObj + 字段类型 + 键闭集），结果
+  透传引擎响应。
+
+- record→export（F81）：`amber session export` 识别 `op:"tab"` switch 行——生成
+  `await ctx.switchTab({ urlContains: 落点URL | index })` 原语（URL 子串优先、URL 缺失退
+  index、两者都缺=注释块不发明；轨迹只存 from/to 事实，作者按现场核对匹配口径；
+  `ctx.switchTab` 自身计 1 个 flow step）。
+
+`amberflow_session` 的 `idle_timeout_ms`（F80，open 专属）：
+
+- `open` 时可传 `idle_timeout_ms`（整数）：**本会话**的桥侧 idle TTL。缺省不传 = 部署管理器缺省
+  （`Config.sessionIdleMs`，缺省 300s）——行为逐字节不变；`0` = **不限**（仅显式，reaper 跳过该
+  会话）；非整数或 1..999 ⇒ `config_error`（`idle_timeout_ms must be 0 or an integer >= 1000`）。
+  **不受部署 `sessionIdleMs` 的 1h 配置帽约束**——那约束的是管理器缺省值的配置面，不是单会话
+  显式值。其他 op 传入 ⇒ `config_error`（不静默忽略）。
+- 联动与回显：引擎子进程的 CLI 孤儿兜底自动取 `max(600s, 2×idle_timeout_ms)`（缺省/0 = 600s，
+  spawn argv 逐字节不变）；`op:"list"` 每行 additive 回显生效值 `idle_timeout_ms`（显式 0 回显
+  0）；`open` 响应的 `idle_ttl_ms` 同口径回显本会话生效值（缺省不传 = 管理器缺省，不变）。
 
 ### 3.1 决策通道：桥 vs CLI（A5）
 

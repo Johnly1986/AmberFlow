@@ -75,7 +75,7 @@ export interface SessionManagerOptions {
    * 测试缝：子进程 argv 构造器。缺省 = `cliArgs(bridge, ['session', …])`。
    * 真引擎与 fake engine 共用同一条 spawn 路径（fake 用它把 node 指向假引擎脚本）。
    */
-  spawnArgv?: (spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean; window: 'maximized' | 'fullscreen' | null }) => string[]
+  spawnArgv?: (spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean; window: 'maximized' | 'fullscreen' | null; /** F80：CLI 孤儿兜底（已按 openSession 规则算好；缺省 = CLI_ORPHAN_IDLE_MS 逐字节不变）。 */ orphanIdleMs?: number }) => string[]
   /** 测试缝：额外环境变量（在 buildEnv + appsEnv 之后合并）。 */
   env?: NodeJS.ProcessEnv
   /** reaper 扫描间隔（缺省 5s；测试可调小）。 */
@@ -99,6 +99,8 @@ interface SessionState {
   nextId: number
   queue: Promise<unknown>
   lastActivity: number
+  /** F80：本会话的 idle TTL（open 的 idle_timeout_ms；undefined = 管理器缺省，`0` = reaper 跳过）。 */
+  idleMs?: number
   url: string
   title?: string | undefined
   actions: number
@@ -118,6 +120,8 @@ export interface SessionListRow {
   session_id: string
   url: string
   idle_ms: number
+  /** F80：本会话的生效 idle TTL（显式 0 回显 0 = 不限；缺省 = 管理器缺省）。 */
+  idle_timeout_ms: number
   actions: number
   requests: number
   evidence_dir: string
@@ -136,6 +140,8 @@ export interface SessionToolArgs {
   target?: string
   /** A2：不传 = 引擎缺省 fail（歧义不执行）；`"act"` 恢复旧行为。只在有值时透传。 */
   on_ambiguous?: 'fail' | 'act'
+  /** F72：act 的 rehydrate 重扫 opt-in（true 才透传；缺省不传 = 引擎缺省关）。 */
+  rehydrate_rescan?: boolean
   value?: unknown
   to?: 'bottom' | 'top' | 'page'
   by?: number
@@ -156,11 +162,20 @@ export interface SessionToolArgs {
   /** B 批：observe 的结构证据 opt-in（透传 `includeStructure`；缺省不传 = 引擎 false）。 */
   include_structure?: boolean
   screenshot?: boolean
+  /** F76：tab op 的动作（缺省 'list'；非法值 = config_error 报闭集）。 */
+  tab_action?: 'list' | 'switch'
+  /** F76：tab switch 的匹配条件（AND；至少一个键的语义校验在引擎 ctx-validate，桥只做形状校验）。 */
+  match?: { index?: number; urlContains?: string; titleContains?: string }
+  /**
+   * F80：open 专属的会话 idle TTL（ms）。undefined = 管理器缺省（逐字节不变）；`0` = 不限
+   * （仅显式，reaper 跳过该会话）；非整数或 1..999 = config_error。**其他 op 传入 = config_error**。
+   */
+  idle_timeout_ms?: number
 }
 
 export type SessionToolResult = Record<string, unknown>
 
-const SESSION_OPS = ['open', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'close', 'list'] as const
+const SESSION_OPS = ['open', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'close', 'list'] as const
 const ACT_OPS = ['click', 'check', 'fill', 'select', 'hover', 'scroll'] as const
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -227,6 +242,8 @@ export class SessionManager {
         session_id: s.id,
         url: s.url,
         idle_ms: now - s.lastActivity,
+        // F80：生效 TTL additive 回显（显式 0 回显 0 = 不限；缺省 = 管理器缺省）。
+        idle_timeout_ms: s.idleMs ?? this.options.idleMs,
         actions: s.actions,
         requests: s.requests,
         evidence_dir: path.join(this.evidenceRoot, s.id),
@@ -250,7 +267,9 @@ export class SessionManager {
     const now = Date.now()
     for (const [id, s] of this.sessions) {
       if (s.dead) { this.sessions.delete(id); continue }
-      if (now - s.lastActivity > this.options.idleMs) {
+      // F80：会话级 TTL —— `0` = 显式不限（reaper 跳过该会话）；undefined = 管理器缺省（逐字节不变）。
+      const ttl = s.idleMs
+      if (ttl !== 0 && now - s.lastActivity > (ttl ?? this.options.idleMs)) {
         await this.closeSession(id, 'idle_timeout').catch(() => undefined)
       }
     }
@@ -263,6 +282,10 @@ export class SessionManager {
       throw new SessionToolError('config_error', `op must be one of ${SESSION_OPS.join(' | ')} (got ${JSON.stringify(args.op)})`, {
         allowed_ops: [...SESSION_OPS],
       })
+    }
+    // F80：idle_timeout_ms 是 open 专属参数——其他 op 传入 = config_error（不静默忽略）。
+    if (op !== 'open' && args.idle_timeout_ms !== undefined) {
+      throw new SessionToolError('config_error', `idle_timeout_ms is open-only; op ${JSON.stringify(op)} does not accept it`)
     }
     if (op === 'list') return { ok: true, op, sessions: this.list() }
     if (op === 'open') return await this.openSession(args)
@@ -288,6 +311,7 @@ export class SessionManager {
         case 'signal': return await this.signal(state, args)
         case 'wait_for': return await this.waitFor(state, args)
         case 'snapshot': return await this.snapshot(state, args)
+        case 'tab': return await this.tab(state, args)
         case 'close': return await this.closeSessionOp(state)
         default:
           throw new SessionToolError('config_error', `unsupported op ${JSON.stringify(op)}`)
@@ -317,6 +341,16 @@ export class SessionManager {
   private async openSession(args: SessionToolArgs): Promise<SessionToolResult> {
     if (!nonEmpty(args.url)) throw new SessionToolError('config_error', 'open needs a url')
     const url = this.validateUrl(args.url)
+    // F80：open 专属 idle TTL。undefined = 管理器缺省（逐字节不变）；`0` = 不限（仅显式）；
+    // 非整数或 1..999 = config_error（不静默取缺省）。没有上限帽——不受部署 sessionIdleMs
+    // 的 1h 配置帽约束（那约束的是管理器缺省值，不是单会话显式值）。
+    const idleTtl = args.idle_timeout_ms === undefined ? undefined : args.idle_timeout_ms
+    if (args.idle_timeout_ms !== undefined
+      && (typeof args.idle_timeout_ms !== 'number'
+        || !Number.isInteger(args.idle_timeout_ms)
+        || (args.idle_timeout_ms !== 0 && args.idle_timeout_ms < 1000))) {
+      throw new SessionToolError('config_error', `idle_timeout_ms must be 0 or an integer >= 1000 (got ${JSON.stringify(args.idle_timeout_ms)})`)
+    }
     const hosts: string[] = []
     if (args.hosts !== undefined) {
       if (!Array.isArray(args.hosts) || args.hosts.some(h => typeof h !== 'string' || h.trim() === '')) {
@@ -346,10 +380,16 @@ export class SessionManager {
     const id = newSessionId()
     const outDir = path.join(this.evidenceRoot, id)
     const recordPath = args.record === false ? null : path.join(outDir, 'actions.jsonl')
+    // F80 spawn 联动：CLI 孤儿兜底 = max(CLI_ORPHAN_IDLE_MS, 2×ttl)；ttl 未给/0 = 既有 600s
+    //（关键不变量：缺省 ttl=300s ⇒ max(600s,600s)=600s ⇒ spawn argv 逐字节不变）。
+    const orphanIdleMs = idleTtl === undefined
+      ? CLI_ORPHAN_IDLE_MS
+      : (idleTtl === 0 ? CLI_ORPHAN_IDLE_MS : Math.max(CLI_ORPHAN_IDLE_MS, 2 * idleTtl))
     const argv = this.argvFor({
       url, outDir, recordPath, hosts,
       headful: args.headful === true,
       window: args.window ?? null,
+      orphanIdleMs,
     })
     const env = {
       ...buildEnv(this.options.bridge),
@@ -377,6 +417,8 @@ export class SessionManager {
       nextId: 1,
       queue: Promise.resolve(),
       lastActivity: Date.now(),
+      // F80：显式给的会话级 TTL 才写入（缺省不出现 = 管理器缺省，reap/list 行为逐字节不变）。
+      ...(idleTtl === undefined ? {} : { idleMs: idleTtl }),
       url,
       actions: 0,
       requests: 0,
@@ -430,7 +472,8 @@ export class SessionManager {
         hosts: Array.isArray(ready['hosts']) ? ready['hosts'] : hosts,
         evidence_dir: outDir,
         record: recordPath,
-        idle_ttl_ms: this.options.idleMs,
+        // F80：回显本会话的生效 TTL（显式 0 = 不限；缺省 = 管理器缺省，逐字节不变）。
+        idle_ttl_ms: state.idleMs ?? this.options.idleMs,
         ...flapFields,
       }
     } catch (error) {
@@ -443,9 +486,12 @@ export class SessionManager {
     }
   }
 
-  private argvFor(spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean; window: 'maximized' | 'fullscreen' | null }): string[] {
+  private argvFor(spec: { url: string; outDir: string; recordPath: string | null; hosts: string[]; headful: boolean; window: 'maximized' | 'fullscreen' | null; orphanIdleMs?: number }): string[] {
     if (this.options.spawnArgv !== undefined) return this.options.spawnArgv(spec)
-    const args = ['session', '--url', spec.url, '--out', spec.outDir, '--idle-timeout-ms', String(CLI_ORPHAN_IDLE_MS)]
+    // F80：CLI 侧孤儿兜底只兜"桥进程整个没了"的会话（双层 idle）——openSession 已按
+    // max(600s, 2×ttl) 算好传入；spec 没带（旧测试缝/直接调用）= 既有 600s 逐字节不变。
+    const orphanIdleMs = spec.orphanIdleMs === undefined ? CLI_ORPHAN_IDLE_MS : spec.orphanIdleMs
+    const args = ['session', '--url', spec.url, '--out', spec.outDir, '--idle-timeout-ms', String(orphanIdleMs)]
     for (const h of spec.hosts) args.push('--host', h)
     // headful 透传（task-37 后续修复）：工具参数 headful:true 时让引擎起可见窗口；
     // 缺省 false 不加旗标（产物/行为与此前逐字节一致）。
@@ -680,6 +726,13 @@ export class SessionManager {
     if (args.by !== undefined) body['by'] = args.by
     // B1：失败截图 opt-in（缺省不传 = 会话不碰截图；只在动作失败时落盘）。
     if (args.screenshot === true) body['screenshot'] = true
+    // F72：解析落空 + 页面未静默时的有界重扫 opt-in（true 才透传；缺省不传 = 引擎关）。
+    if (args.rehydrate_rescan !== undefined) {
+      if (args.rehydrate_rescan !== true) {
+        throw new SessionToolError('config_error', `rehydrate_rescan must be true when present (got ${JSON.stringify(args.rehydrate_rescan)})`)
+      }
+      body['rehydrateRescan'] = true
+    }
     const response = await this.request(state, body)
     const base = { op: 'act', session_id: state.id, act_op: actOp, target: args.target ?? null }
     // task-36：歧义诊断**原样透传**（引擎有这些键才出现）——交互试错第一诉求是"为什么点错/
@@ -705,6 +758,8 @@ export class SessionManager {
       ok: true,
       ...base,
       executed: response['executed'] === true,
+      // F72：解析通道证据透传（引擎给才有：#id 直查兜底 / rehydrate 重扫命中）。
+      ...(typeof response['resolved_via'] === 'string' ? { resolved_via: response['resolved_via'] } : {}),
       ref: response['ref'] ?? null,
       how: response['how'] ?? null,
       changed: response['changed'] === true,
@@ -988,6 +1043,62 @@ export class SessionManager {
     }
   }
 
+  /**
+   * F76/P3：tab op——`tab_action:"list"`（缺省）免费只读枚举标签页；`"switch"` 显式切到恰好一个
+   * 匹配的标签页。桥只做**形状校验**（isObj + 字段类型 + 键闭集，非法 = config_error 报闭集），
+   * 匹配语义/信封判定/文案全部在引擎 `amber session`（ctx-validate 纯函数层同一份）；结果
+   * 透传引擎响应（tabs/active/switched），桥不重算、不补键。switch 刷新 idle TTL（与其它 op
+   * 同一记活语义——request() 统一更新 lastActivity），list 免费。
+   */
+  private async tab(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
+    const action = args.tab_action === undefined ? 'list' : args.tab_action
+    if (action !== 'list' && action !== 'switch') {
+      throw new SessionToolError('config_error', `tab_action must be one of list | switch (got ${JSON.stringify(args.tab_action)})`, {
+        allowed_actions: ['list', 'switch'],
+      })
+    }
+    const body: Record<string, unknown> = { type: 'tab' }
+    if (args.tab_action !== undefined) body['action'] = action
+    if (args.match !== undefined) {
+      const m: unknown = args.match
+      if (!isObj(m)) {
+        throw new SessionToolError('config_error', `tab match must be an object like {index} | {urlContains} | {titleContains} (got ${JSON.stringify(m)})`)
+      }
+      const unknown = Object.keys(m).filter(k => k !== 'index' && k !== 'urlContains' && k !== 'titleContains')
+      if (unknown.length > 0) {
+        throw new SessionToolError('config_error', `tab match has unknown key(s) ${unknown.map(k => JSON.stringify(k)).join(', ')} (allowed: index, urlContains, titleContains)`)
+      }
+      const index = m['index']
+      if (index !== undefined && (typeof index !== 'number' || !Number.isInteger(index) || index < 0)) {
+        throw new SessionToolError('config_error', `tab match.index must be a 0-based integer (got ${JSON.stringify(index)})`)
+      }
+      for (const k of ['urlContains', 'titleContains'] as const) {
+        const v = m[k]
+        if (v !== undefined && (typeof v !== 'string' || v.trim() === '')) {
+          throw new SessionToolError('config_error', `tab match.${k} must be a non-empty string (got ${JSON.stringify(v)})`)
+        }
+      }
+      body['match'] = m
+    }
+    const response = await this.request(state, body)
+    if (response['ok'] !== true) return this.engineFailure(response, 'tab')
+    const switched = isObj(response['switched']) ? response['switched'] : undefined
+    // 换页成功后同步桥侧记账（list 行的 url 与 act 失败回退的 state.url 保持真实）。
+    if (action === 'switch' && switched !== undefined && typeof switched['url'] === 'string' && switched['url'] !== '') {
+      state.url = switched['url']
+      if (typeof switched['title'] === 'string') state.title = switched['title']
+    }
+    return {
+      ok: true,
+      op: 'tab',
+      session_id: state.id,
+      action,
+      ...(Array.isArray(response['tabs']) ? { tabs: response['tabs'] } : {}),
+      ...(typeof response['active'] === 'number' ? { active: response['active'] } : {}),
+      ...(switched !== undefined ? { switched } : {}),
+    }
+  }
+
   private async closeSessionOp(state: SessionState): Promise<SessionToolResult> {
     const summary = await this.closeSession(state.id, 'closed')
     return {
@@ -1030,6 +1141,8 @@ export class SessionManager {
    *
    * 上限：`candidates` ≤3、`near` ≤3、`rejected` ≤2 行；每行 `ref`/`tag` ≤16、`label`/`why`
    * ≤40；`hint_shape` ≤32。缺键 = 引擎没提供，桥不发明（与 `ambiguityEvidence` 同一纪律）。
+   * F72：`settle_timed_out`/`settle_waited_ms`（渲染可疑信号）与 `rescan.{waited_ms,pool_size}`
+   * （显式重扫未命中事实）同样只透传、不改语义。
    */
   private missDiagnosticsEvidence(raw: unknown): Record<string, unknown> | undefined {
     if (!isObj(raw)) return undefined
@@ -1038,6 +1151,15 @@ export class SessionManager {
     if (typeof raw['pool_size'] === 'number') out['pool_size'] = raw['pool_size']
     if (typeof raw['hint_shape'] === 'string') out['hint_shape'] = clip(raw['hint_shape'], 32)
     if (typeof raw['hint_len'] === 'number') out['hint_len'] = raw['hint_len']
+    // F72：渲染可疑信号与显式重扫事实（引擎给才有；只透传）。
+    if (raw['settle_timed_out'] === true) out['settle_timed_out'] = true
+    if (typeof raw['settle_waited_ms'] === 'number') out['settle_waited_ms'] = raw['settle_waited_ms']
+    if (isObj(raw['rescan'])) {
+      const rs: Record<string, unknown> = {}
+      if (typeof raw['rescan']['waited_ms'] === 'number') rs['waited_ms'] = raw['rescan']['waited_ms']
+      if (typeof raw['rescan']['pool_size'] === 'number') rs['pool_size'] = raw['rescan']['pool_size']
+      if (Object.keys(rs).length > 0) out['rescan'] = rs
+    }
     const rows = (key: string, cap: number): Array<Record<string, unknown>> | undefined => {
       const list = raw[key]
       if (!Array.isArray(list)) return undefined

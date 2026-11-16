@@ -259,7 +259,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     url?: string; done: DomSignal | Record<string, unknown>; act?: TargetDecl | CommandDecl[];
     slots?: Record<string, string>; values?: Record<string, string>;
     when?: DomSignal | null; id?: string; timeoutMs?: number;
-    forceAct?: boolean; force?: boolean; staleRetry?: boolean;
+    forceAct?: boolean; force?: boolean; staleRetry?: boolean; rehydrateRescan?: boolean;
     newTab?: { urlContains?: string };
   }): Promise<StepResult> => {
     assertOpen(`ctx.step(${JSON.stringify(desc)})`);
@@ -383,6 +383,8 @@ export function createCtx(deps: CtxDeps): Ctx {
     // S4：步级 force / staleRetry 同样是显式声明（缺省不出现 = 既有行为逐字节不变）。
     if (req.force === true) opts["force"] = true;
     if (req.staleRetry === true) opts["staleRetry"] = true;
+    // F72：步级 rehydrateRescan 同样是显式声明（缺省不出现 = 既有行为逐字节不变）。
+    if (req.rehydrateRescan === true) opts["rehydrateRescan"] = true;
     if (ntActive && !ntSkipAction && req.act !== undefined && !Array.isArray(req.act)
         && (req.act as { kind?: string }).kind === "hint") {
       // F2：newTab + 单条 act hint → 收敛为**恰好一次点击**的单命令闭集：点完即判 done，
@@ -468,6 +470,7 @@ export function createCtx(deps: CtxDeps): Ctx {
       ...(rep.executed_actions === undefined ? {} : { executed_actions: rep.executed_actions }),
       ...(rep.skipped_actions === undefined ? {} : { skipped_actions: rep.skipped_actions }),
       ...(rep.stale_retries === undefined ? {} : { stale_retries: rep.stale_retries }),
+      ...(rep.rehydrate_rescan === undefined ? {} : { rehydrate_rescan: rep.rehydrate_rescan }),
       ...(rep.forced === undefined ? {} : { forced: rep.forced }),
       ...(rep.done_preheld === undefined ? {} : { done_preheld: rep.done_preheld }),
       ...(rep.warnings === undefined ? {} : { warnings: rep.warnings }),
@@ -501,6 +504,7 @@ export function createCtx(deps: CtxDeps): Ctx {
         ...(result.executed_actions === undefined ? {} : { executed_actions: result.executed_actions }),
         ...(result.skipped_actions === undefined ? {} : { skipped_actions: result.skipped_actions }),
         ...(result.stale_retries === undefined ? {} : { stale_retries: result.stale_retries }),
+        ...(result.rehydrate_rescan === undefined ? {} : { rehydrate_rescan: result.rehydrate_rescan }),
         ...(result.forced === undefined ? {} : { forced: result.forced }),
         ...(result.done_preheld === undefined ? {} : { done_preheld: result.done_preheld }),
         ...(result.warnings === undefined ? {} : { warnings: result.warnings }),

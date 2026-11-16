@@ -216,7 +216,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
     return { before: fp, after: fp, actions: { attempted: 0, executed: 0, changed: 0 }, flags: [] };
   };
   const recordStep = (desc: string, done?: unknown, ok = true, stopCode?: string, id?: string,
-                      forceAct = false, force = false, staleRetry = false,
+                      forceAct = false, force = false, staleRetry = false, rehydrateRescan = false,
                       when?: unknown, newTab = false): StepResult => {
     checkBudget();
     budget.stepsUsed += 1;
@@ -230,6 +230,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
       // A1：forceAct 是声明面——dry 只记录声明，不改变模拟（step 仍 ok:true，不重新决策）。
       // S4：force / staleRetry 同样是声明面——dry 只记 `forced` / `stale_retry`（布尔标记），
       //     不模拟重试、不改变 ok；真实面的重试证据是 trace 行上的数组，见 schema F22。
+      // F72：rehydrateRescan 同为声明面——dry 只记 `rehydrate_rescan: true`（不模拟等待/重扫）。
       // S1：state 是合成形状（见 dryState），保证 dry/真实消费者不分叉。
       result: {
         ...(done === undefined ? {} : { done }),
@@ -238,6 +239,7 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
         ...(forceAct ? { force_act: true } : {}),
         ...(force ? { forced: true } : {}),
         ...(staleRetry ? { stale_retry: true } : {}),
+        ...(rehydrateRescan ? { rehydrate_rescan: true } : {}),
         // F2：newTab 是声明面——dry 只记 `new_tab: true`（不模拟标签行为：无浏览器，
         // 新标签出现/采用/去重只能真实运行验证）。
         ...(newTab ? { new_tab: true } : {}),
@@ -372,7 +374,8 @@ export function createDryCtx(deps: DryCtxDeps): Ctx {
         currentUrl = resolved;
       }
       return recordStep(desc, req.done, true, undefined, req.id,
-        req.forceAct === true, req.force === true, req.staleRetry === true, req.when,
+        req.forceAct === true, req.force === true, req.staleRetry === true,
+        req.rehydrateRescan === true, req.when,
         req.newTab !== undefined && req.newTab !== null);
     },
     // A3 dry 桩：**参数校验真做**（未知形状/非法值在 dry 期红），动作与结果按文档形状确定性模拟。
