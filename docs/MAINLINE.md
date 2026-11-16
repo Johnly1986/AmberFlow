@@ -106,7 +106,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 
 | 计划 | 预留文件/区域 | 约束 |
 |---|---|---|
-| INTERVENTION（实施中） | `src/intervention/*`、`src/app/intervention-adapter.ts`、`src/app/intervention-shadow.ts`、`support/intervention-*.ts`、`app-runner.ts` 人工步区、`bridge.ts` rescue 映射区 | 运行期拆分（W1-c）以步 4/5 + 默认切换为前置；不得在预留区做无关搬移 |
+| INTERVENTION（v1 实施完成 2026-11-17） | `src/intervention/*`、`src/app/intervention-adapter.ts`、`src/app/intervention-result.ts`、`src/app/intervention-shadow.ts`、`support/intervention-*.ts`、`app-runner.ts` 人工步区、`bridge.ts` rescue 映射区 | 步 4/5 + 默认切换已完成（W1-c 前置满足）；仍不得在预留区做无关搬移 |
 | STATE_LAYER（已实施） | `src/engine/settle.ts`、executor 状态钩子、`ctx.runtime.epoch`、policy 键 | W1-c 九阶段必须携带 StateCursor、钩子顺序不变 |
 | PACE（已实施） | `src/support/pace.ts` | kernel 内不加 sleep；unit 边界留源适配器 |
 | RUN_TAKEOVER（proposal） | `session-runtime` attach 面、result/evidence artifacts | attach 是调试面，不进 runExecution |

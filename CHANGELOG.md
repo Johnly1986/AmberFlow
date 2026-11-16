@@ -4,6 +4,18 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-17 介入/救援 v1 默认切换（P2 最后一项前置）
+
+### 行为（仅在显式 `--rescue` 开启时新增字段）
+
+- `--rescue` 从「CLI/桥透传类型面」补成**真实 `result.rescue` 生产路径**：真实人工停因发生时，按停因映射 kind 并序列化结构化求援（`mode:"stop"`）；默认关 = 产物逐字节不变。
+- kind 分类器（集中 `src/app/intervention-result.ts` 的 `STOP_CODE_KIND`）：`needs_human` / `needs_interactive_terminal` / `manual_declined` / `manual_handler_error` / `manual_signal_not_held` → `action`；`needs_value` → `value`；危险动作拒绝（`dangerous` / `declined`）→ `authorization`；其余停因不产出（null）。**只分类，不改 stopCode/status/exit code/控制流**；`needs_value`/危险拒绝不挂起。
+- request 生成后当场 `validateRescueRequest`（fail-closed 拒写）；summary 取 `RESCUE_TEXTS[kind].summary`（≤400），`what_would_unblock` ≤3，evidence 仅 desc + 去 query/hash 的 http(s) URL。
+- `--no-rescue` 补齐定义并与 `--rescue` 互斥（此前帮助里写了但未定义，实测 exit 2）；`--rescue`/`--no-rescue` 在 `run` 与 `app-runner` 两个入口同步接受。
+- 离线验收：manual-only app 不带 flag = 20 键、无 rescue、`stop_code=needs_human`；带 `--rescue` = 21 键、唯一差异为 `rescue` 键（kind=action / mode=stop / request_id / summary≤400 / unblock≤3 / validate 通过）。
+- 文档状态：`docs/INTERVENTION_RESCUE_MODULE.md` v1 实施完成（步 0-5）；`docs/P2_READINESS.md` 五项前置全部满足；P2 按 D3 顺序启动 2.0 RunCtx + evidence collector。
+
+
 ## Decisions（设计决策索引）
 
 > 本节不是发布条目，而是**约束未来代码的设计决策索引**（为什么这样做、以后别再改回去）。

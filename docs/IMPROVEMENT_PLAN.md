@@ -6,7 +6,7 @@
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2：1.1–1.5，含 P1 出口指标达标；1.6 按条件保留、handler 进程内化按 §4.5 延期）；**P2 未启动**——前置核对见 §6.3（0.8 lane 已满足，其余 4 项待项目方/INTERVENTION 输入）。
+> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 已批准且五项前置全部满足**（§6.3；freeze 自 2026-11-17 起 2 周；INTERVENTION 默认切换已补齐）——下一步按 D3 启动 2.0 RunCtx + evidence collector。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -526,11 +526,11 @@ interface PromptSpec {
 |---|---|---|---|
 | ① | 2.0 发布/特性冻结决策已定 | **已定（2026-11-17）**：先声明 2 周 feature-freeze 做 P2（2026-11-17 起），同时准备发布物料；窗口内 executor/ctx/app-runner 只收 P2 PR + 关键 bugfix + 证据 lane | ✅ 已满足 |
 | ② | 0.8 等价 lane 在 CI/本地可重复 | examples canonical golden 进 check；split-check 3 manifests 进 check；verify:offline 非门禁绿 | ✅ 已满足 |
-| ③ | INTERVENTION 步 4/5 与默认切换完成 | 步 4（texts/schema/docs）与步 5 CLI/桥透传已实现（prompt-hit intervention 组/`schema ctx --topic intervention`/bridge rescue schema 均在位）；**剩余 = 步 2 默认切换**：`--rescue` 目前只有类型/透传面，引擎尚无真实 `result.rescue` 生产路径 | 🟡 进行中（首批实现中） |
+| ③ | INTERVENTION 步 4/5 与默认切换完成 | **已完成（2026-11-17）**：步 4/步 5 已在位；步 2 默认切换落地——`--rescue` 真实 `result.rescue` 生产路径（stop 模式、kind action/value/authorization 分类器、默认关产物逐字节不变、`--no-rescue` 显式关闭互斥），离线 manual-only app 验证：无 flag 20 键/有 flag 唯一新增 `rescue` 键 | ✅ 已满足 |
 | ④ | BACKLOG #2/#3/#4 顺序决策已定 | **已定（2026-11-17）**：`#4 → #2 → #3`，允许 4d 先行（与 #2 同段 run() 排他） | ✅ 已满足 |
 | ⑤ | 声明 freeze window | **已声明（2026-11-17）**：整体 2 周；run() 每阶段约 3 个工作日窗口；T1/T2/T3 停手触发器沿用 §5.3 | ✅ 已满足 |
 
-> 结论：**P2 已获批准（2026-11-17，freeze 立即生效）**；唯一剩余前置 ③（INTERVENTION 默认切换）正在实现（首批：`--rescue` 真实 `result.rescue` 生产路径）。③ 完成后按 D3 顺序执行：2.0 RunCtx + evidence collector → 4d/run() 九阶段（每阶段 3 个工作日窗口）→ #2 → #3。
+> 结论：**P2 五项前置全部满足（2026-11-17）**；按 D3 顺序立即启动：**2.0 RunCtx + evidence collector**（BACKLOG #4 前置）→ 4d/run() 九阶段（每阶段 3 个工作日窗口）→ #2 → #3。freeze 自 2026-11-17 起 2 周，窗口内 executor/ctx/app-runner 只收 P2 PR + 关键 bugfix + 证据 lane。
 > **决策请求包**：[P2_READINESS.md](P2_READINESS.md)（D1 发布/冻结、D2 INTERVENTION 收尾、D3 BACKLOG #2/#3/#4 顺序、D4 freeze window 参数；含推荐选项与回执表）。
 > 0.8 证据 lane 已接夜间 CI：`.github/workflows/checks.yml` 新增 `offline` job（schedule/manual，非门禁）。
 
