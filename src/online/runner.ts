@@ -9,6 +9,7 @@ import os from "node:os";
 import {
   BrowserMiddleware, browserSession, type BrowserSession,
 } from "../engine/executor.ts";
+import { buildMiddleware } from "../app/middleware-factory.ts";
 import { TaskPlan } from "../engine/plan.ts";
 import { runSubgoalWithRetries } from "../engine/planner.ts";
 import { checkSignal } from "../engine/signals.ts";
@@ -101,13 +102,16 @@ async function classify(
 }
 
 function newMiddleware(maxSteps = 8, actionDelayMs = 0): BrowserMiddleware {
-  return new BrowserMiddleware({
-    maxSteps,
-    confFloor: DEFAULT_CONF_FLOOR,
-    confirmFn: () => true,
-    manualConfirmFn: null,
-    // B1：动作间间距接线（env-only；缺省 0 = 行为不变）。
-    actionDelayMs,
+  return buildMiddleware({
+    face: "online",
+    confirmPolicy: { kind: "allow-all" },
+    options: {
+      maxSteps,
+      confFloor: DEFAULT_CONF_FLOOR,
+      manualConfirmFn: null,
+      // B1：动作间间距接线（env-only；缺省 0 = 行为不变）。
+      actionDelayMs,
+    },
   });
 }
 

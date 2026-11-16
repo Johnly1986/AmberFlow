@@ -23,6 +23,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { createCtx, isSyntheticScrollTarget, StopError, type Ctx } from "./ctx.ts";
+import { buildMiddleware } from "./middleware-factory.ts";
 import { amberflowHome, ensureDir } from "../support/amberflow-home.ts";
 import { sleepMs } from "../support/sleep.ts"; import { NAVIGATION_GOTO_TIMEOUT_MS, SESSION_IDLE_TIMEOUT_MS } from "../support/tuning.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";
@@ -338,16 +339,15 @@ export class SessionRuntime {
     return this.holder.session;
   }
 
-  /** 执行器：与 `runScriptApp` 同一个构造模板；不注入任何决策 provider（auditor 是 Mock）。 */
+  /** 执行器：经 buildMiddleware 单点构造；不注入决策 provider（auditor 是 Mock），确认询问保持执行器缺省拒绝。 */
   private mw(): BrowserMiddleware {
     if (this.mwHolder.current === null) {
       // E2/E1-c/E1-a/E1-b：决策开关（decision.*）从配置层默认值解析（非法值已在 CLI 入口报错）。
       const { defaults } = parseRunDefaults(this.opts.env ?? process.env);
-      this.mwHolder.current = new BrowserMiddleware({
+      this.mwHolder.current = buildMiddleware({ face: "session", confirmPolicy: { kind: "default-deny" }, options: {
         modelId: "english",
         auditor: new MockAuditor(),
-        hosts: this.hosts,
-        maxSteps: 8,
+        hosts: this.hosts, maxSteps: 8,
         reobserve: true,
         // S2 稳定门：与 run 的缺省档一致（抽池前等页面静默）。
         settle: DEFAULT_SETTLE,
@@ -355,7 +355,7 @@ export class SessionRuntime {
         ...(defaults.idFallback === undefined ? {} : { idFallback: defaults.idFallback }),
         ...(defaults.actPoolCap === undefined ? {} : { actPoolCap: defaults.actPoolCap }),
         ...(defaults.poolQuotaMode === undefined ? {} : { poolQuotaMode: defaults.poolQuotaMode }),
-      });
+      } });
     }
     return this.mwHolder.current;
   }

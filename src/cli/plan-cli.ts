@@ -24,6 +24,7 @@ import { PlanningRules, TaskPlan } from "../engine/plan.ts";
 import { runPlan, type PlannerLike } from "../engine/planner.ts";
 import { SIGNAL_OPS, checkSignal, signalProblemText, validateSignalSpec, type SignalSpec } from "../engine/signals.ts";
 import { browserSession, BrowserMiddleware, type EscalatorLike } from "../engine/executor.ts";
+import { buildMiddleware } from "../app/middleware-factory.ts";
 import { extractElements, frameHintFailureEvidence } from "../engine/extraction.ts";
 import { getAuditor, type AuditVerdict } from "../engine/audit.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
@@ -337,12 +338,16 @@ export async function cmdRun(a: RunArgs, io: CliIO = defaultIO, deps: RunDeps = 
       }
     }
   }
-  const mw = (deps.middleware ?? new BrowserMiddleware({
-    confirmFn,
-    // B1：规划脸动作间间距（env-only；缺省 0 = 行为不变）。
-    actionDelayMs: paceEnv.between_actions_ms ?? 0,
-    hintMemory: hints,
-    ...(escalateFn ? { escalateFn } : {}),
+  const mw = (deps.middleware ?? buildMiddleware({
+    face: "plan",
+    // confirm 语义由调用方决定（allow / deny / ask）；工厂只校验函数存在。
+    confirmPolicy: { kind: "caller", confirmFn },
+    options: {
+      // B1：规划脸动作间间距（env-only；缺省 0 = 行为不变）。
+      actionDelayMs: paceEnv.between_actions_ms ?? 0,
+      hintMemory: hints,
+      ...(escalateFn ? { escalateFn } : {}),
+    },
   })) as BrowserMiddleware;
   const start = plan.subgoals.find((s) => s.start_url)?.start_url ?? null;
   if (start === null) throw new Error("no subgoal has a start_url");

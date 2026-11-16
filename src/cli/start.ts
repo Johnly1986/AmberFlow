@@ -27,7 +27,8 @@ import { defaultPlanPath } from "../support/amberflow-home.ts";
 import { readOptionalString } from "../support/env.ts";
 import { NAVIGATION_GOTO_TIMEOUT_MS } from "../support/tuning.ts";
 import * as browserEnv from "../browser/browser-env.ts";
-import { browserSession, BrowserMiddleware, type BrowserSession } from "../engine/executor.ts";
+import { browserSession, type BrowserSession } from "../engine/executor.ts";
+import { buildMiddleware } from "../app/middleware-factory.ts";
 import { extractElements, type Elem, type ElemPool } from "../engine/extraction.ts";
 import { parseHint, splitTailSuffixes } from "../engine/hint.ts";
 import { frameScopeMatches } from "../engine/frame-scope.ts";
@@ -291,6 +292,22 @@ async function chooseTarget(
   return { ref: refs[idx]!, auto: false };
 }
 
+/** start 面的执行器：allow-all 确认 + 单步人工确认（TTY 里问一次）。 */
+function startMiddleware(io: Io, modelId: string | undefined, actionDelayMs: number) {
+  return buildMiddleware({
+    face: "start",
+    confirmPolicy: { kind: "allow-all" },
+    options: {
+      ...(modelId === undefined ? {} : { modelId }),
+      manualConfirmFn: async () => {
+        const a = await io.ask("这一步完成了么？(y/N) > ");
+        return a === "y" || a === "Y";
+      },
+      actionDelayMs,
+    },
+  });
+}
+
 /**
  * The onboarding path: demonstrate ONE step, compile its completion signal, record the
  * target's stable handle, save the plan, run it.
@@ -418,10 +435,7 @@ async function commandJob(
       io.out(USAGE);
       return 2;
     }
-    const mw = new BrowserMiddleware({ confirmFn: () => true, ...(modelId === undefined ? {} : { modelId }), manualConfirmFn: async () => {
-      const a = await io.ask("这一步完成了么？(y/N) > ");
-      return a === "y" || a === "Y";
-    }, actionDelayMs });
+    const mw = startMiddleware(io, modelId, actionDelayMs);
     const rep = await runPlan(mw as never, plan, { startUrl: url, verbose: false });
     for (const t of rep.traces) {
       io.out(`  ${t.how} · ${t.method} · conf=${t.conf}${t.inert ? " · 无变化" : ""}`);

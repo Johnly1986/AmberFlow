@@ -67,7 +67,6 @@ import { urlOf } from "../engine/extraction.ts";
 import { REPO } from "../flow/flow.ts";
 import { installLayaRuntime } from "../model/model.ts";
 import { runSubgoalWithRetries } from "../engine/planner.ts";
-import { DESTRUCTIVE_PATTERNS } from "../engine/rules.ts";
 import { checkSignal } from "../engine/signals.ts";
 import { checkToolSignal, explainToolSignal, type ToolSignal } from "../browser/tool-signals.ts";
 import { channelFromEnv } from "../browser/browser-env.ts";
@@ -87,7 +86,9 @@ import { MASKED_SLOT, SECRET_SLOT_NAME, maskSecretSlots, scrubSecrets, secretSlo
 import { dryRunFlow, loadScriptApp, type LoadedScriptApp } from "./app-script.ts";
 import { StopError, createCtx, type ToolRunRequest, type ToolRunResult } from "./ctx.ts";
 import type { CtxDeps } from "./ctx-types.ts";
+import type { MiddlewareOptions } from "../engine/executor-types.ts";
 import { createReplayCtx } from "./ctx-replay.ts";
+import { buildMiddleware } from "./middleware-factory.ts";
 import {
   finishTrace, inputsSha256, newTrace, readTrace, replayCompatibility, writeTrace,
   type AppTrace, type TraceEvent,
@@ -1244,6 +1245,27 @@ async function promptManualOnTty(req: ManualStepRequest): Promise<boolean> {
   }
 }
 
+/**
+ * 起跑探测一次默认决策面：`AMBERFLOW_DECISION_BASE_URL` 配置面在才探；失败 = 兼容降级
+ * （规则面继续、本次 run 停发模型调用），mw 上留痕（收尾进 result）并给 stderr 一行；
+ * 探测通过 = 零字段零输出（result 逐字节不变，唯一差异是起跑多付一次最小 ask）。
+ * 传 thunk：未配置决策面时不构造执行器（两个 app 面的调用点语义一致）。
+ */
+async function probeCompatDecisionPlane(getMw: () => BrowserMiddleware): Promise<void> {
+  if (!decisionServiceConfigured()) return;
+  const mw = getMw();
+  mw.decisionCompat = true;
+  const probe = await probeDecisionPlane();
+  if (probe.ok || probe.reasonClass === undefined) return;
+  mw.markDecisionDegraded({
+    reason_class: probe.reasonClass,
+    message: probe.error ?? "",
+    config_source: "AMBERFLOW_DECISION_BASE_URL",
+  });
+  console.error(`decision_degraded: 决策面探测失败（${probe.reasonClass}）——本次 run 停发模型调用，`
+    + `规则面继续；${probe.advice ?? ""}`);
+}
+
 /** 跑一个应用包。返回结构化结果（报告与退出码都由调用方决定）。 */
 export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<AppRunResult> {
   const {
@@ -1405,7 +1427,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     // 工具步的 source JSON 日期参数用同一个值袋（包默认 + CLI 覆盖）。
     slotBag: { ...(pack.slots ?? {}), ...(opts.slots ?? {}) },
   };
-  const mw = new BrowserMiddleware({
+  const mwOptions: Omit<MiddlewareOptions, "confirmFn"> = {
     modelId,
     auditor: new MockAuditor(),
     // Slice 2：浏览器命令步可以 `{"from":"dataset","key":"NAME"}` 消费前序步骤的返回值。
@@ -1449,33 +1471,18 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     hintMemory: opts.hintMemory ?? null,
     // 动作间最小等待（应用配置表 `pace.between_actions_ms` / 环境变量；0 = 今天的行为）。
     actionDelayMs: pace.between_actions_ms,
-    // M0 起默认安全：拒绝破坏性浏览器动作；`confirmSafe: false`（CLI `--confirm-unsafe`
-    // 或 AMBERFLOW_CONFIRM_SAFE=0）才恢复旧的"风险只记录不阻断"。
-    confirmFn: confirmSafe
-      ? (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x))
-      : () => true,
     // E2/E1-c/E1-a/E1-b：决策开关（decision.*）从配置层默认值解析（非法值已在 CLI 入口报错）。
     ...(decisionDefaults.ambiguousOrdering === undefined ? {} : { ambiguousOrdering: decisionDefaults.ambiguousOrdering }),
     ...(decisionDefaults.idFallback === undefined ? {} : { idFallback: decisionDefaults.idFallback }),
     ...(decisionDefaults.actPoolCap === undefined ? {} : { actPoolCap: decisionDefaults.actPoolCap }),
     ...(decisionDefaults.poolQuotaMode === undefined ? {} : { poolQuotaMode: decisionDefaults.poolQuotaMode }),
+  };
+  const mw = buildMiddleware({
+    face: "app-declared",
+    confirmPolicy: { kind: "safe-browser", confirmSafe },
+    options: mwOptions,
   });
-
-  // task-14（D1·兼容性三件）：声明式路径与 flow 路径同账——起跑探测一次（只探默认配置面，
-  // 未显式指定 provider 时）。探测失败 = 兼容降级（规则面继续），mw 上留痕（收尾进 result）。
-  if (decisionServiceConfigured()) {
-    mw.decisionCompat = true;
-    const probe = await probeDecisionPlane();
-    if (!probe.ok && probe.reasonClass !== undefined) {
-      mw.markDecisionDegraded({
-        reason_class: probe.reasonClass,
-        message: probe.error ?? "",
-        config_source: "AMBERFLOW_DECISION_BASE_URL",
-      });
-      console.error(`decision_degraded: 决策面探测失败（${probe.reasonClass}）——本次 run 停发模型调用，`
-        + `规则面继续；${probe.advice ?? ""}`);
-    }
-  }
+  await probeCompatDecisionPlane(() => mw);
   // task-15（D2）：声明式路径同账——SITE_FACTS 按 meta.hosts 匹配（stderr 提示 + result.site_facts）。
   const siteFacts = matchSiteFacts(loadSiteFacts((m) => console.error(m)), (pack.hosts ?? []) as string[]);
   for (const line of renderSiteFactLines(siteFacts)) console.error(line);
@@ -2143,7 +2150,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     const mwHolder: { current: BrowserMiddleware | null } = { current: null };
     const getMw = (): BrowserMiddleware => {
       if (mwHolder.current === null) {
-        mwHolder.current = new BrowserMiddleware({
+        const mwOptions: Omit<MiddlewareOptions, "confirmFn"> = {
           modelId: pack.model ?? "english",
           auditor: new MockAuditor(),
           // T2：命令步的 `{from:"dataset",key:…}` 从这里现读（与声明式旅程同一份 store）。
@@ -2185,38 +2192,21 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           decisionState: resolvedPolicy.policy.decision_state.value,
           actionDelayMs: pace.between_actions_ms,
           hintMemory: opts.hintMemory ?? null,
-          // 语义必须与 runApp 的 confirmFn 一致：默认按干跑证据拒绝破坏性动作；
-          // `--confirm-unsafe`（confirmSafe === false）才放行。反接（默认放行、unsafe
-          // 反而拒绝）会造成安全语义颠倒——e2e 实测过，必须保持同向。
-          confirmFn: opts.confirmSafe === false
-            ? () => true
-            : (desc: string) => !DESTRUCTIVE_PATTERNS.some((x) => desc.toLowerCase().includes(x)),
           // E2/E1-c/E1-a/E1-b：决策开关与声明式路径同一份解析（decisionDefaults 在 runScriptApp 顶部解析）。
           ...(decisionDefaults.ambiguousOrdering === undefined ? {} : { ambiguousOrdering: decisionDefaults.ambiguousOrdering }),
           ...(decisionDefaults.idFallback === undefined ? {} : { idFallback: decisionDefaults.idFallback }),
           ...(decisionDefaults.actPoolCap === undefined ? {} : { actPoolCap: decisionDefaults.actPoolCap }),
           ...(decisionDefaults.poolQuotaMode === undefined ? {} : { poolQuotaMode: decisionDefaults.poolQuotaMode }),
+        };
+        mwHolder.current = buildMiddleware({
+          face: "app-script",
+          confirmPolicy: { kind: "safe-browser", confirmSafe: opts.confirmSafe !== false },
+          options: mwOptions,
         });
       }
       return mwHolder.current;
     };
-    // task-14（D1·兼容性三件）：起跑探测一次——只探默认配置面（AMBERFLOW_DECISION_BASE_URL
-    // 已配置且未显式指定 provider；显式意图优先，探测不适用）。探测通过 = 一切照旧（result
-    // 逐字节不变，唯一差异是起跑多付一次最小 ask）；失败 = 兼容降级：本次 run 停发模型调用
-    // （规则面继续、升级链规则兜底、死服务不重试），result 顶层 decision.degraded 留痕。
-    if (decisionServiceConfigured()) {
-      getMw().decisionCompat = true;
-      const probe = await probeDecisionPlane();
-      if (!probe.ok && probe.reasonClass !== undefined) {
-        getMw().markDecisionDegraded({
-          reason_class: probe.reasonClass,
-          message: probe.error ?? "",
-          config_source: "AMBERFLOW_DECISION_BASE_URL",
-        });
-        console.error(`decision_degraded: 决策面探测失败（${probe.reasonClass}）——本次 run 停发模型调用，`
-          + `规则面继续；${probe.advice ?? ""}`);
-      }
-    }
+    await probeCompatDecisionPlane(getMw);
     // task-15（D2）：SITE_FACTS 按 meta.hosts 匹配 → stderr 提示（运行前一次；仅命中出现；
     // 事实不进模型请求面）。无命中 = 零输出（默认等价）。命中集提到函数层（结果装配在分支外）。
     siteFacts = matchSiteFacts(loadSiteFacts((m) => console.error(m)), (pack.hosts ?? []) as string[]);
