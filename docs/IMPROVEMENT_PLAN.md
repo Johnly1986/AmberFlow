@@ -6,7 +6,7 @@
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：P0 全部 9 批完成（§6.1）；P1 1.1–1.5 已落地（§6.2）：tuning/env/constants、CHANGELOG Decisions+comments 协议、app-pack/datasource 拆分、`buildMiddleware` 工厂（mw 6→1）+ 帧门禁/pickRow 收口。1.6（Agent prompt wrapper/证据 spec）按「真实失败案例驱动」条件保留待触发；P1 出口指标差距见 §6.2 尾注。
+> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2：1.1–1.5，含 P1 出口指标达标；1.6 按条件保留、handler 进程内化按 §4.5 延期）；**P2 未启动**——前置核对见 §6.3（0.8 lane 已满足，其余 4 项待项目方/INTERVENTION 输入）。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -495,26 +495,42 @@ interface PromptSpec {
 - 0.8/0.9 产物存在且被引用：0.9 的 seam 表在 MAINLINE §4；0.8 的 split-check 已进 check、golden 已进 examples-check、verify-offline 非门禁可用。
 - T1/T2/T3 未触发。P0 未逐日计时，但范围未扩张、未引入 fallback。
 
-### 6.2 P1 落地记录（进行中，2026-11-17）
+### 6.2 P1 落地记录（已完成，2026-11-17）
 
 | 批 | 交付 | 提交 | 证据 |
 |---|---|---|---|
 | 1.1 + 1.2 | `tuning.ts` 11 常量（26 处同值替换）+ `env.ts` typed getter（裸读 21 行/18 变量 → 8 处/4 平台变量）+ maintain `constants` 组 | `3e5da4f` + `70e698d` | `maintain --self-test` 23 条；constants 0 fail/0 warn；examples golden 一致 |
 | 1.4 | app-pack 1512→296 facade（3 新模块）；datasource 1417→74 facade（4 新模块） | `18e16cd` | split manifest 40+83 符号 hash 全一致；examples golden/verify:offline/check 绿 |
 | 1.3 | `CHANGELOG.md` `## Decisions` 索引（D1–D12）+ comments `--update` ratchet 协议 | `1fbb9c1` | comments 组 + 2 条更新协议负向自测绿 |
-| 1.5 | `buildMiddleware` 工厂（6 入口→1 构造点，per-face confirm 策略）+ app-runner 决策探测去重 + 帧门禁 10 处/pickRow 三面收口 | 本批提交 | mw 真实构造=1；mainline baseline 6→1；examples golden/verify:offline/check 绿 |
+| 1.5 | `buildMiddleware` 工厂（6 入口→1 构造点，per-face confirm 策略）+ app-runner 决策探测去重 + 帧门禁 10 处/pickRow 三面收口 | `e9aa330` + `3521f42` + `ad7110d` | mw 真实构造=1；mainline baseline 6→1；examples golden/verify:offline/check 绿 |
+| 1.5c | `executor-types` 1005→826，外搬 `executor-middleware-types`（202 行纯类型，facade 保导出面） | 本批提交 | >1000 行文件 7→6；split hash 36 符号一致 |
+| 1.5d | `app-runner-cli.main` 322→272、`inspect.runInspect` 365→230（各抽 2 helper ≤150 行） | 本批提交 | ≥300 行函数 8→6；9 份 CLI 输出逐字节一致；examples golden 一致 |
 | 1.6 | Agent prompt wrapper 收口 + 证据 spec（条件） | 待做 | — |
 
-> P1 出口指标（§3.4）核对（2026-11-17）：注释禁止类=0、配置漂移=0、prompt 重复=0、白名单外裸 env=0、新文件/函数上限生效、文档断点=0、mw 构造=1、split-check/golden/offline 绿。
-> **未达标 2 项**：>1000 行文件 7（目标 ≤6；余 executor/app-runner/extraction/ctx/session-runtime/pool-js/executor-types）；≥300 行函数 8（目标 ≤6；余 run/createCtx/runScriptApp/runApp/createDryCtx/runInspect/app-runner-cli.main/createReplayCtx）。
-> **明确延期**：handler 子进程转交 12 处（P2 内进程化前置未满足，按 §4.5 延后）；1.6 证据 spec 等真实失败案例。
-> 结论：P1 主体收口，不启动 P2（P2 五项前置条件仍未满足）；上述 2 项差距留 P1 尾批或随 P2 的 W1-c 处理。
+**P1 出口核对（2026-11-17，全部指标见上表）**：
+
+- 注释禁止类=0、配置漂移=0、prompt 重复=0、白名单外裸 env=0、新文件/函数上限生效、文档断点=0、mw 构造=1、split-check/golden/offline 绿。
+- **规模达标**：>1000 行文件 **6**（目标 ≤6：executor/app-runner/extraction/ctx/session-runtime/pool-js）；≥300 行函数 **6**（目标 ≤6：run/createCtx/runScriptApp/runApp/createDryCtx/createReplayCtx）；≥100 行函数 22（基线 22，只减不增）。
+- **明确延期（条件未触发）**：handler 子进程转交 12 处（按 §4.5 延后，待 P2 进程内化前置）；1.6 Agent prompt wrapper/证据 spec（按方案「真实失败案例驱动」条件保留，当前无失败案例）。
+- 结论：**P1 收口完成**；P2 不启动（前置条件核对见 §6.3）。
 
 ### P1 收口（3–5 周，12–18 人日；低 churn 优先）
 
 1.1 `tuning.ts`（只收 11 概念）+ 单源断言；1.2 typed getter + 全量白名单 + env gate；1.3 注释 B4 选择性迁移 → CHANGELOG `## Decisions`、B3 机会主义；1.4 W1-b 稳定纯区拆分（app-pack/datasource/extraction 纯区/app-runner 外围，依赖 0.8/0.9）；1.5 W1-a 剩余 + `buildMiddleware` 工厂（per-face policy，CLI 进程边界不动）；1.6 Agent prompt 收口 + 证据 spec（条件，真实失败案例驱动）。
 
 **P1 出口**：§3.4 P1 列 fail 项达标；真实 mw 构造收敛到 1 工厂 + 2 调试面；W1-b 每批有 canonical golden/hash 证据；注释禁止类=0、B 类仅存 CHANGELOG Decisions；裸 env 白名单外=0；模型 prompt 重复=0。
+
+### 6.3 P2 前置核对（2026-11-17，不启动）
+
+| # | P2 启动条件 | 当前事实 | 状态 |
+|---|---|---|---|
+| ① | 2.0 发布/特性冻结决策已定 | README 明示「2.0.0 未发布，发布准备中」；无 freeze 决策记录 | ❌ 未满足（需项目方） |
+| ② | 0.8 等价 lane 在 CI/本地可重复 | examples canonical golden 进 check；split-check 3 manifests 进 check；verify:offline 非门禁绿 | ✅ 已满足 |
+| ③ | INTERVENTION 步 4/5 与默认切换完成 | 设计状态「实施中——步 0-3 + 步 5 桥半边已实施」；action/authorization 已接线，captcha/credential 二期；默认切换未见记录 | ❌ 未满足 |
+| ④ | BACKLOG #2/#3/#4 顺序决策已定 | 三条均 open（#4 部分批收口）；无排序/拆窗决策记录 | ❌ 未满足（需项目方） |
+| ⑤ | 声明 freeze window | 未声明 | ❌ 未满足（需项目方） |
+
+> 结论：**P2 暂不启动**。方案保持 active；待 ①②③④⑤ 中 ①③④⑤ 外部输入满足后，按 §6 P2 批次执行（先 2.0 RunCtx+evidence collector，再 run() 九阶段，均以 0.8 运行时 lane 与 freeze window 为门）。
 
 ### P2 主线（条件启动；3–5 周，12–20 人日）
 

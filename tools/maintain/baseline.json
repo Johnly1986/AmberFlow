@@ -11,10 +11,10 @@
       "src/app/ctx.ts": 1799,
       "src/app/session-runtime.ts": 1460,
       "src/engine/pool-js.ts": 1102,
-      "src/engine/executor-types.ts": 1005,
       "src/app/app-adapters.ts": 988,
       "src/engine/executor-pure.ts": 907,
-      "src/cli/commands/apps.ts": 877
+      "src/cli/commands/apps.ts": 877,
+      "src/engine/executor-types.ts": 826
     },
     "functions": [
       {
@@ -43,19 +43,14 @@
         "lines": 542
       },
       {
-        "file": "src/cli/commands/inspect.ts",
-        "name": "runInspect",
-        "lines": 365
+        "file": "src/app/ctx-replay.ts",
+        "name": "createReplayCtx",
+        "lines": 319
       },
       {
         "file": "src/app/app-runner-cli.ts",
         "name": "main",
-        "lines": 322
-      },
-      {
-        "file": "src/app/ctx-replay.ts",
-        "name": "createReplayCtx",
-        "lines": 319
+        "lines": 272
       },
       {
         "file": "src/app/ctx.ts",
@@ -71,6 +66,11 @@
         "file": "src/engine/executor.ts",
         "name": "_executeElement",
         "lines": 236
+      },
+      {
+        "file": "src/cli/commands/inspect.ts",
+        "name": "runInspect",
+        "lines": 230
       },
       {
         "file": "src/engine/rules.ts",
