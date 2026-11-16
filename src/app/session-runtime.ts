@@ -24,7 +24,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { createCtx, isSyntheticScrollTarget, StopError, type Ctx } from "./ctx.ts";
 import { amberflowHome, ensureDir } from "../support/amberflow-home.ts";
-import { sleepMs } from "../support/sleep.ts";
+import { sleepMs } from "../support/sleep.ts"; import { NAVIGATION_GOTO_TIMEOUT_MS, SESSION_IDLE_TIMEOUT_MS } from "../support/tuning.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";
 import { inputsSha256, newTrace, sha256, writeTrace, type AppTrace } from "./trace.ts";
 import { MockAuditor } from "../engine/audit.ts";
@@ -76,7 +76,7 @@ export const SESSION_REQUEST_TYPES = [
 ] as const;
 
 /** 缺省 idle 超时（两次请求之间的静默上限）。 */
-export const SESSION_DEFAULT_IDLE_TIMEOUT_MS = 300_000;
+export const SESSION_DEFAULT_IDLE_TIMEOUT_MS = SESSION_IDLE_TIMEOUT_MS;
 /** 单行请求上限。 */
 export const SESSION_DEFAULT_MAX_REQUEST_BYTES = 1_048_576;
 
@@ -670,7 +670,7 @@ export class SessionRuntime {
       return { healed: false, heal_url: healUrl, reason: `自愈目标 ${healUrl} 在 hosts 信封外（${deny}），不尝试` };
     }
     try {
-      await page.goto(healUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await page.goto(healUrl, { waitUntil: "domcontentloaded", timeout: NAVIGATION_GOTO_TIMEOUT_MS });
     } catch (e) {
       return { healed: false, heal_url: healUrl, reason: `自愈导航失败: ${errMsg(e)}` };
     }

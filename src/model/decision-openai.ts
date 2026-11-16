@@ -14,6 +14,7 @@ import type {
   ChoiceOutcome, ChoiceRequest, ClosedSetChoice, ClosedSetRequest, DecisionProvider,
   ProviderCapabilities,
 } from "./decision-provider.ts";
+import { DECISION_REQUEST_TIMEOUT_MS } from "../support/tuning.ts";
 import { stateText, urlOf } from "../engine/extraction.ts";
 import { choiceInstructions, RISK_INSTRUCTIONS_SHORT, doneInstructionsShort } from "../prompts/model-prompts.ts";
 
@@ -149,7 +150,7 @@ export function openaiDecisionsProvider(opts: OpenAIDecisionsOptions): DecisionP
   const endpoint = opts.endpoint;
   const model = opts.model?.trim() || OPENAI_DECISIONS_DEFAULT_MODEL;
   const apiKey = opts.apiKey?.trim() ?? "";
-  const timeoutMs = opts.timeoutMs ?? 30_000;
+  const timeoutMs = opts.timeoutMs ?? DECISION_REQUEST_TIMEOUT_MS;
   const doFetch = opts.fetchImpl ?? fetch;
 
   async function ask(input: string, questions: Array<Record<string, unknown>>): Promise<OpenAIDecisionsReply> {

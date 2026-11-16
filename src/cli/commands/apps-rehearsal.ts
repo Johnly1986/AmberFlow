@@ -28,6 +28,7 @@ import { scanDeclarations } from "../../app/declaration-scan.ts";
 import { resolveCtxUrl } from "../../app/ctx.ts";
 import { userAppsDir } from "../../support/amberflow-home.ts";
 import { browserSession } from "../../engine/executor.ts";
+import { CLI_COMMAND_DEFAULT_TIMEOUT_MS } from "../../support/tuning.ts";
 import { extractElements } from "../../engine/extraction.ts";
 import { hintCandidates, hintMatch } from "../../engine/rules.ts";
 import { createHintMemory } from "../../model/hint-memory.ts";
@@ -87,7 +88,7 @@ export async function appsRehearsal(args: string[], ctx: CliContext): Promise<nu
   const positional = parsed.positionals[0];
   if (!positional) throw usageError("apps rehearsal 需要一个应用 id 或脚本路径", { next: ["amber apps list"] });
   const max = Math.min(200, Math.max(1, Math.floor(num(v["max-elements"]) ?? 120)));
-  const timeout = Math.min(120_000, Math.max(1_000, Math.floor(num(v.timeout) ?? 30_000)));
+  const timeout = Math.min(120_000, Math.max(1_000, Math.floor(num(v.timeout) ?? CLI_COMMAND_DEFAULT_TIMEOUT_MS)));
   const wantJson = ctx.globals.json || v.json === true;
 
   const loaded = await loadScriptApp(positional);

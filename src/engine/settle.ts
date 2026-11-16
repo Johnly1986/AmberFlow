@@ -23,6 +23,7 @@
  * 就是 0 等待（静态页稳态零开销）。导航会丢弃 window 上下文，执行器在 goto 后重装。
  */
 import { sleep } from "../support/sleep.ts";
+import { SETTLE_QUIET_MS, SETTLE_TIMEOUT_MS } from "../support/tuning.ts";
 
 /** settle 可观察的最小页面面（Playwright page / frame 的 evaluate）。 */
 export interface SettlePage {
@@ -47,7 +48,7 @@ export interface SettleResult {
 
 /** `meta.policy.settle` 的缺省档（方案 §2.5）。 */
 export const DEFAULT_SETTLE: Readonly<{ quietMs: number; timeoutMs: number }> =
-  Object.freeze({ quietMs: 400, timeoutMs: 5000 });
+  Object.freeze({ quietMs: SETTLE_QUIET_MS, timeoutMs: SETTLE_TIMEOUT_MS });
 
 /** 轮询间隔：~50ms（与方案 §2.3 一致）。 */
 const POLL_MS = 50;

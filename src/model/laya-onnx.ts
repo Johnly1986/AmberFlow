@@ -28,6 +28,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { readLegacyString, readOptionalString } from "../support/env.ts";
 import { MODELS_DIR } from "../support/paths.ts";
 import {
   QTYPES, buildSequence, clampTemperature, confidenceFromProbs, pyJsonDumps,
@@ -59,9 +60,10 @@ export const DEFAULT_SHORTLIST_K = 8;
 
 function hfHubRoots(): string[] {
   const roots: string[] = [];
-  const hubCache = process.env.HF_HUB_CACHE ?? process.env.HUGGINGFACE_HUB_CACHE;
+  const hubCache = readOptionalString("HF_HUB_CACHE") ?? readLegacyString("HUGGINGFACE_HUB_CACHE");
   if (hubCache) roots.push(hubCache);
-  if (process.env.HF_HOME) roots.push(path.join(process.env.HF_HOME, "hub"));
+  const hfHome = readOptionalString("HF_HOME");
+  if (hfHome) roots.push(path.join(hfHome, "hub"));
   roots.push(path.join(os.homedir(), ".cache", "huggingface", "hub"));
   return [...new Set(roots)];
 }
@@ -75,7 +77,7 @@ function hfHubRoots(): string[] {
  * Returns null when the checkpoint was never downloaded.
  */
 export function findDefaultTokenizerDir(): string | null {
-  const override = process.env.LAYAA_TOKENIZER_DIR ?? process.env.LAYA_TOKENIZER_DIR;
+  const override = readLegacyString("LAYAA_TOKENIZER_DIR") ?? readOptionalString("LAYA_TOKENIZER_DIR");
   if (override && fs.existsSync(path.join(override, "tokenizer.json"))) return override;
 
   // 项目目录 `models/tokenizer/`：`npm run model:fetch` 的默认落点（与图同处一地），
@@ -672,7 +674,7 @@ export function createLayaOnnxRuntime(opts: CreateLayaOnnxRuntimeOptions = {}): 
     // compatibility. The two orders disagreed once — doctor checked `LAYA_*` while this
     // runtime loaded `LAYAA_*` first, so an env setting both (or only the typo name) made
     // "artifacts complete" mean different files in two places. Keep them identical.
-    ?? process.env.LAYA_ONNX_MODEL ?? process.env.LAYAA_ONNX_MODEL
+    ?? readOptionalString("LAYA_ONNX_MODEL") ?? readLegacyString("LAYAA_ONNX_MODEL")
     ?? DEFAULT_ONNX_PATH;
   const tokenizerDir = opts.tokenizerDir ?? findDefaultTokenizerDir();
 

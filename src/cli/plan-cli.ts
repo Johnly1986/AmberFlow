@@ -19,6 +19,7 @@
  * exited 1 and the audit said REJECT. Here "finished" = done + skipped.
  */
 import { parseArgs } from "node:util";
+import { NAVIGATION_GOTO_TIMEOUT_MS } from "../support/tuning.ts";
 import { PlanningRules, TaskPlan } from "../engine/plan.ts";
 import { runPlan, type PlannerLike } from "../engine/planner.ts";
 import { SIGNAL_OPS, checkSignal, signalProblemText, validateSignalSpec, type SignalSpec } from "../engine/signals.ts";
@@ -206,7 +207,7 @@ export async function probePlan(file: string, io: CliIO = defaultIO): Promise<bo
     for (const url of urls) {
       io.out(`  → ${url}`);
       try {
-        await session.page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        await session.page.goto(url, { waitUntil: "domcontentloaded", timeout: NAVIGATION_GOTO_TIMEOUT_MS });
       } catch (e) {
         io.out(`    ✗ 打不开：${(e as Error).message}`);
         failed = true;

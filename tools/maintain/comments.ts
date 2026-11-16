@@ -120,3 +120,29 @@ export function counts(snapshot: CommentsSnapshot): CommentsBaseline {
     todo: snapshot.lines.filter((l) => TODO.test(l.text) && !/TODO-REPLACE-ME|EXPORT_DONE_PLACEHOLDER/.test(l.text)).length,
   };
 }
+
+/**
+ * comments 基线只降不升的更新协议（P1-1.3）。
+ * 硬失败类必须为 0 才允许写基线；ratchet 类只允许下降/持平，增长即拒绝。
+ */
+export function mergeCommentsForUpdate(
+  previous: CommentsBaseline,
+  current: CommentsBaseline,
+): { next: CommentsBaseline; errors: string[] } {
+  const errors: string[] = [];
+  const absolute: Array<keyof CommentsBaseline> = ["lineAnchors", "ghostRefs", "todo"];
+  for (const key of absolute) {
+    if (current[key] > 0) errors.push(`${key}=${current[key]}：硬失败类必须为 0，不能写进基线`);
+  }
+  const ratchet: Array<keyof CommentsBaseline> = ["dateStamps", "planTokens", "historyWording"];
+  const next: CommentsBaseline = { ...previous };
+  for (const key of ratchet) {
+    if (current[key] > previous[key]) {
+      errors.push(`${key} 从基线 ${previous[key]} 增长到 ${current[key]}：只减不增`);
+      continue;
+    }
+    next[key] = current[key];
+  }
+  for (const key of absolute) next[key] = current[key];
+  return { next, errors };
+}

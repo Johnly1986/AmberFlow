@@ -14,12 +14,13 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { TOOL_STDERR_TAIL_CAP_CHARS } from "../support/tuning.ts";
 import { scrubSecrets } from "./redaction.ts";
 
 /** stdout/stderr 的单值上限（每个工具步各自截断，互不侵占）。 */
 export const TOOL_TEXT_CAP = 8 * 1024;
 /** 失败诊断里 stderr 摘要的长度上限（进 `reason`/trace 的 `stderr_tail`）。 */
-export const TOOL_STDERR_TAIL_CAP = 400;
+export const TOOL_STDERR_TAIL_CAP = TOOL_STDERR_TAIL_CAP_CHARS;
 
 /** 有界文本：只截头，不改变内容语义；`truncated` 标记"这里不是全文"。 */
 export function capToolText(value: unknown): { text: string; truncated: boolean } {

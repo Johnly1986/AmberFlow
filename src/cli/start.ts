@@ -24,6 +24,8 @@ import { fileURLToPath } from "node:url";
 import readline from "node:readline/promises";
 import { chromium } from "playwright";
 import { defaultPlanPath } from "../support/amberflow-home.ts";
+import { readOptionalString } from "../support/env.ts";
+import { NAVIGATION_GOTO_TIMEOUT_MS } from "../support/tuning.ts";
 import * as browserEnv from "../browser/browser-env.ts";
 import { browserSession, BrowserMiddleware, type BrowserSession } from "../engine/executor.ts";
 import { extractElements, type Elem, type ElemPool } from "../engine/extraction.ts";
@@ -121,8 +123,8 @@ export function preflight(): Preflight {
     chromium: chromiumPath,
     model: artifacts.ready,
     artifacts,
-    llm: Boolean(process.env.OPENAI_BASE_URL && process.env.OPENAI_API_KEY),
-    browserPath: process.env.PLAYWRIGHT_BROWSERS_PATH ?? null,
+    llm: Boolean(readOptionalString("OPENAI_BASE_URL") && readOptionalString("OPENAI_API_KEY")),
+    browserPath: readOptionalString("PLAYWRIGHT_BROWSERS_PATH") ?? null,
   };
 }
 
@@ -312,7 +314,7 @@ async function commandJob(
     const page = session.page;
     io.out(`打开 ${url}`);
     try {
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: NAVIGATION_GOTO_TIMEOUT_MS });
     } catch (err) {
       io.out(`打不开这个页面：${(err as Error).message}`);
       return 2;

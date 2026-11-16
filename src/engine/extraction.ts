@@ -19,7 +19,7 @@ import {
   frameChainValueProblem, parseHint, splitTailSuffixes, type ParsedHint,
 } from "./hint.ts";
 import { parseClickAtValue } from "./click-at.ts";
-import { sleepMs } from "../support/sleep.ts";
+import { sleepMs } from "../support/sleep.ts"; import { POOL_CAP_ELEMENTS, STATE_TEXT_BUDGET_CHARS, WIDE_SCAN_POOL_ELEMENTS } from "../support/tuning.ts";
 // frame:<origin> 帧链 helper（A 批，唯一出处 frame-scope.ts）：extraction 只做打点/帧过滤，
 // 判定与 frameOriginOf 的实现都在 frame-scope（这里 re-export 保持既有导出面不变）。
 import { elemFrameStamp, frameChainOf, frameOriginOf, frameScopeMatchesFrame } from "./frame-scope.ts";
@@ -829,12 +829,12 @@ export const INTERACTIVE = POOL_SEL;
  * 既有成员顺序与 U3 之前逐字节一致，新类目只追加在尾部 ⇒ 不含新类目的页面结果集合不变。
  */
 export const INTERACTIVE_ALL = INTERACTIVE + ", [data-js-ref]";
-export const MAX_ELEMENTS = 40;
+export const MAX_ELEMENTS = POOL_CAP_ELEMENTS;
 /**
  * 低置信恢复路径宽扫的元素预算（executor 的 ONE wider look；R2 起同通道展开
  * 启发式伪按钮候选）。单一出处：executor 与 inspect --wide 共用。
  */
-export const WIDE_POOL_ELEMENTS = 120;
+export const WIDE_POOL_ELEMENTS = WIDE_SCAN_POOL_ELEMENTS;
 
 /**
  * A2 分桶闭集与配额。为什么要有配额：默认池是 40 个名额的**有界窗口**，旧排序是
@@ -1933,7 +1933,7 @@ export async function pageText(page: PageLike, head = 300, tail = 150): Promise<
  * only the hits into the budget. Deterministic on purpose — laya's domain-tuned
  * encoder is measurably unreliable as a general text-similarity ranker.
  */
-export async function stateText(page: PageLike, query: string, _embedFn: unknown = null, budget = 320): Promise<string> {
+export async function stateText(page: PageLike, query: string, _embedFn: unknown = null, budget = STATE_TEXT_BUDGET_CHARS): Promise<string> {
   const text = (await firstOf(page.locator!("main, body")).innerText()).trim();
   const lines: string[] = [];
   const seen = new Set<string>();

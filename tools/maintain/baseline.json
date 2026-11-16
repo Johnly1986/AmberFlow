@@ -162,5 +162,9 @@
     "lineAnchors": 0,
     "ghostRefs": 0,
     "todo": 0
+  },
+  "constants": {
+    "envReads": 0,
+    "tuningHits": 0
   }
 }

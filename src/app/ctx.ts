@@ -17,7 +17,7 @@ import {
   disallowedHost, type BrowserMiddleware, type BrowserSession, type ExecutedAction,
   type RunReport, type SkippedAction, type StepStateRecord,
 } from "../engine/executor.ts";
-import { validateCommands } from "../engine/actions.ts";
+import { NAVIGATION_GOTO_TIMEOUT_MS } from "../support/tuning.ts"; import { validateCommands } from "../engine/actions.ts";
 import {
   firstOf, framesOf, locatorAnyFrame, urlOf, extractElements, poolSniff,
   splitFrameSuffixFromSelector, frameScopeEvidenceOf, frameScopeMatchesFrame, frameInHostsEnvelope,
@@ -230,7 +230,7 @@ export function createCtx(deps: CtxDeps): Ctx {
     const p = await page();
     try {
       await (p as unknown as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
-        url, { waitUntil: "domcontentloaded", timeout: timeoutMs ?? 30_000 },
+        url, { waitUntil: "domcontentloaded", timeout: timeoutMs ?? NAVIGATION_GOTO_TIMEOUT_MS },
       );
     } catch (e) {
       // 网络/可达性失败 ≠ 声明错误：DNS 解析失败、连接拒绝、导航超时都是「站点此刻

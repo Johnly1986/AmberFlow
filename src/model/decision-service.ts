@@ -29,7 +29,8 @@ import type { DecisionProvider, ProviderCapabilities } from "./decision-provider
 import { stateText, urlOf } from "../engine/extraction.ts";
 import { systemOneClient, type SystemOneProfile } from "./system-one-client.ts";
 import { normalizeOpenAIDecisionsEndpoint, openaiDecisionsProvider } from "./decision-openai.ts";
-import { DECISION_SERVICE_KEYS, DEFAULT_DECISION_TIMEOUT_MS } from "../support/config-schema.ts";
+import { DECISION_SERVICE_KEYS } from "../support/config-schema.ts";
+import { DECISION_REQUEST_TIMEOUT_MS } from "../support/tuning.ts";
 import { envText } from "../support/decision-env.ts";
 import { choiceInstructions, RISK_INSTRUCTIONS_SHORT, doneInstructionsShort } from "../prompts/model-prompts.ts";
 
@@ -173,7 +174,7 @@ export function systemOneServiceProfile(env: NodeJS.ProcessEnv = process.env): S
   const model = serviceModel(env);
   const floorKind = envText(env, "AMBERFLOW_DECISION_SCORE_KIND") || CAPABILITIES.score_kind;
   const scoreKind = floorKind as ProviderCapabilities["score_kind"];
-  const timeout = Number(envText(env, "AMBERFLOW_DECISION_TIMEOUT_MS") || String(DEFAULT_DECISION_TIMEOUT_MS));
+  const timeout = Number(envText(env, "AMBERFLOW_DECISION_TIMEOUT_MS") || String(DECISION_REQUEST_TIMEOUT_MS));
   const minOptions = Number(envText(env, "AMBERFLOW_DECISION_MIN_OPTIONS") || "1");
   const stateContext = envText(env, "AMBERFLOW_DECISION_STATE_CONTEXT") !== "0";
   return {
@@ -217,7 +218,7 @@ export function systemOneServiceProfile(env: NodeJS.ProcessEnv = process.env): S
     unreachableHint: "检查网络与 AMBERFLOW_DECISION_BASE_URL；密钥只从环境/配置按名读："
       + "AMBERFLOW_DECISION_API_KEY。",
     configError: () => serviceConfigError(env),
-    timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : DEFAULT_DECISION_TIMEOUT_MS,
+    timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : DECISION_REQUEST_TIMEOUT_MS,
   };
 }
 
@@ -230,7 +231,7 @@ export function decisionServiceProvider(env: NodeJS.ProcessEnv = process.env): D
       model: serviceModel(env),
       apiKey: serviceApiKey(env),
       ...(floor === null ? {} : { floor }),
-      timeoutMs: Number(envText(env, "AMBERFLOW_DECISION_TIMEOUT_MS") || String(DEFAULT_DECISION_TIMEOUT_MS)),
+      timeoutMs: Number(envText(env, "AMBERFLOW_DECISION_TIMEOUT_MS") || String(DECISION_REQUEST_TIMEOUT_MS)),
       configError: () => serviceConfigError(env),
     });
   }

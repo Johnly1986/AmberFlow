@@ -18,10 +18,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { collectSize, evaluateSize, mergeBaselineForUpdate, type Problem, type SizeBaseline } from "./size.ts";
+import { collectSize, evaluateSize, mergeBaselineForUpdate, type Problem, type Severity, type SizeBaseline } from "./size.ts";
 import { collectDocs, evaluateDocs, type DocsBaseline, type DocsSnapshot } from "./docs.ts";
 import { collectMainline, evaluateMainline, type MainlineBaseline, type MainlineSnapshot } from "./mainline.ts";
-import { collectComments, counts as commentCounts, evaluateComments, type CommentLine, type CommentsBaseline, type CommentsSnapshot } from "./comments.ts";
+import { collectComments, counts as commentCounts, evaluateComments, mergeCommentsForUpdate, type CommentLine, type CommentsBaseline, type CommentsSnapshot } from "./comments.ts";
+import { collectConstants, evaluateConstants, scanConstants, type ConstantProblem, type ConstantsBaseline } from "./constants.ts";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const BASELINE_PATH = path.join(REPO, "tools", "maintain", "baseline.json");
@@ -34,6 +35,7 @@ interface Baseline {
   docs: DocsBaseline;
   mainline: MainlineBaseline;
   comments: CommentsBaseline;
+  constants: ConstantsBaseline;
 }
 
 function readBaseline(): Baseline {
@@ -50,7 +52,7 @@ function report(problems: Problem[], json: boolean): number {
     for (const p of fails) console.error(`[${p.group}] FAIL ${p.message}`);
     for (const p of warns) console.error(`[${p.group}] WARN ${p.message}`);
     if (fails.length === 0) {
-      console.log(`maintain: OK — size/docs/mainline/comments 四组通过（warn ${warns.length}）`);
+      console.log(`maintain: OK — size/docs/mainline/comments/constants 五组通过（warn ${warns.length}）`);
     } else {
       console.error(`maintain: FAIL — ${fails.length} 个问题（warn ${warns.length}）；基线文件 ${path.relative(REPO, BASELINE_PATH)}`);
     }
@@ -66,6 +68,8 @@ function check(json: boolean): number {
   problems.push(...evaluateDocs(collectDocs(REPO), baseline.docs));
   problems.push(...evaluateMainline(collectMainline(REPO), baseline.mainline));
   problems.push(...evaluateComments(collectComments(REPO), baseline.comments));
+  // constants 组自带 group 字面量；Problem.group 闭集在 size.ts（非本批写域），边界断言保持接线最小。
+  problems.push(...(evaluateConstants(collectConstants(REPO), baseline.constants) as unknown as Problem[]));
   return report(problems, json);
 }
 
@@ -81,12 +85,19 @@ function update(): number {
     console.error("maintain --update: 拒绝写入（基线只许下调/删除；新增超标项必须先在代码里解决）");
     return 1;
   }
+  const commentUpdate = mergeCommentsForUpdate(previous.comments, commentCounts(collectComments(REPO)));
+  if (commentUpdate.errors.length > 0) {
+    for (const e of commentUpdate.errors) console.error(`maintain --update: comments ${e}`);
+    console.error("maintain --update: 拒绝写入（comments 硬失败类必须为 0；ratchet 类只减不增）");
+    return 1;
+  }
   const out: Baseline = {
     _doc: previous._doc,
     size: next,
     docs: previous.docs,
     mainline: previous.mainline,
-    comments: previous.comments,
+    comments: commentUpdate.next,
+    constants: previous.constants,
   };
   fs.writeFileSync(BASELINE_PATH, `${JSON.stringify(out, null, 2)}\n`);
   console.log(`maintain --update: 已写入 ${path.relative(REPO, BASELINE_PATH)}（files ${Object.keys(next.files).length} / functions ${next.functions.length}）`);
@@ -208,7 +219,36 @@ function selfTest(): number {
   expectProblem("comments 裸 TODO", evaluateComments({ lines: [commentLine("TODO 以后再说。")] }, commentsBaseline), /TODO/);
   const commentsDateBaseline: CommentsBaseline = { ...commentsBaseline, dateStamps: 1 };
   expectProblem("comments 日期 ratchet", evaluateComments({ lines: [commentLine("实测（2026-10-29）结论。"), commentLine("另一处（2026-11-01）。")] }, commentsDateBaseline), /日期戳/);
-  console.log("maintain --self-test: OK — 负向断言 19 条（size 4 / docs 5 / mainline 4 / comments 4 / 正例 2）全部符合预期");
+
+  // constants：正例（env.ts 读取点 / 平台变量不报）+ 负向（白名单外裸读 fail；调参回写 warn）
+  const expectConstantProblem = (label: string, problems: ConstantProblem[], match: RegExp, severity: Severity = "fail"): void => {
+    if (!problems.some((p) => p.severity === severity && match.test(p.message))) {
+      failures.push(`${label}: 合成违规未被抓住（期望 ${severity} 匹配 ${match}）`);
+    }
+  };
+  const constantsBaseline: ConstantsBaseline = { envReads: 0, tuningHits: 0 };
+  const constantsPositive = evaluateConstants(scanConstants([
+    { file: "src/support/env.ts", text: "const v = process.env.AMBERFLOW_DECISION_API_KEY;" },
+    { file: "src/cli/main.ts", text: 'process.env.NO_COLOR = "1";' },
+  ]), constantsBaseline);
+  if (constantsPositive.length > 0) {
+    failures.push(`constants 正例被误报：${constantsPositive.map((p) => p.message).join("; ")}`);
+  }
+  expectConstantProblem("constants 白名单外裸读", evaluateConstants(scanConstants([
+    { file: "src/model/foo.ts", text: "const x = process.env.AMBERFLOW_DECISION_API_KEY;" },
+  ]), constantsBaseline), /裸读 process\.env\.AMBERFLOW_DECISION_API_KEY/);
+  expectConstantProblem("constants 调参回写", evaluateConstants(scanConstants([
+    { file: "src/engine/foo.ts", text: "await page.goto(url, { timeout: 30_000 });" },
+  ]), constantsBaseline), /疑似回写 tuning 常量 NAVIGATION_GOTO_TIMEOUT_MS/, "warn");
+  // comments --update 协议：只降不升 + 硬失败类必须为 0
+  const mergeBase: CommentsBaseline = { dateStamps: 3, planTokens: 5, historyWording: 7, lineAnchors: 0, ghostRefs: 0, todo: 0 };
+  const mergeOk = mergeCommentsForUpdate(mergeBase, { ...mergeBase, dateStamps: 2 });
+  if (mergeOk.errors.length > 0 || mergeOk.next.dateStamps !== 2) failures.push("comments update 正例（下调）被误报");
+  const mergeGrowth = mergeCommentsForUpdate(mergeBase, { ...mergeBase, historyWording: 8 });
+  if (!mergeGrowth.errors.some((e) => /historyWording/.test(e))) failures.push("comments update 增长未被拒绝");
+  const mergeAbsolute = mergeCommentsForUpdate({ ...mergeBase, lineAnchors: 0 }, { ...mergeBase, lineAnchors: 1 });
+  if (!mergeAbsolute.errors.some((e) => /lineAnchors/.test(e))) failures.push("comments update 硬失败类非 0 未被拒绝");
+  console.log("maintain --self-test: OK — 负向断言 21 条（size 4 / docs 5 / mainline 4 / comments 4 / comments-update 2 / constants 2）+ 正例 6 条全部符合预期");
   return 0;
 }
 

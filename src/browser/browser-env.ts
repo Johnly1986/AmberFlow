@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { readOptionalString, readString } from "../support/env.ts";
 
 function glob(pattern: string): string[] {
   // Segment-by-segment expansion (the patterns below use `*` at any depth).
@@ -41,8 +42,8 @@ function glob(pattern: string): string[] {
 
 function browserRoots(): string[] {
   const roots: string[] = [];
-  const env = process.env.PLAYWRIGHT_BROWSERS_PATH;
-  if (env) roots.push(env.replace(/^~/, os.homedir()));
+  const browserPath = readOptionalString("PLAYWRIGHT_BROWSERS_PATH");
+  if (browserPath) roots.push(browserPath.replace(/^~/, os.homedir()));
   if (process.platform === "win32") {
     const ld = process.env.LOCALAPPDATA ?? "";
     if (ld) roots.push(path.join(ld, "ms-playwright"));
@@ -117,7 +118,7 @@ export type BrowserChannel = "chrome" | "headless-shell";
 
 /** env 层通道（未设/未知值 = null——未知值不炸，走缺省链；apps check 面的闭集只管 meta）。 */
 export function channelFromEnv(): BrowserChannel | null {
-  const v = process.env.AMBERFLOW_BROWSER_CHANNEL;
+  const v = readString("AMBERFLOW_BROWSER_CHANNEL");
   return v === "chrome" || v === "headless-shell" ? v : null;
 }
 

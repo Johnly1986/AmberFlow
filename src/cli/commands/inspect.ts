@@ -15,6 +15,7 @@ import { emitJson, say } from "../context.ts";
 import { usageError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { browserSession } from "../../engine/executor.ts";
+import { CLI_COMMAND_DEFAULT_TIMEOUT_MS } from "../../support/tuning.ts";
 // AX 证据源（只读观察面）：浏览器自己算的 accessibility 语义。只在 inspect 跑一次，
 // 不进池构成/hint 匹配/模型视图/动作路径（见 src/engine/ax.ts 文件头纪律）。
 import { AX_NOT_IN_POOL_BASIS, countAxNotInPool, snapshotAx } from "../../engine/ax.ts";
@@ -186,7 +187,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     throw usageError(`inspect 只接受 http(s)，拒绝 ${JSON.stringify(url)}`);
   }
   const max = Math.min(200, Math.max(1, Math.floor(num(v["max-elements"]) ?? 60)));
-  const timeout = Math.min(120_000, Math.max(1_000, Math.floor(num(v.timeout) ?? 30_000)));
+  const timeout = Math.min(120_000, Math.max(1_000, Math.floor(num(v.timeout) ?? CLI_COMMAND_DEFAULT_TIMEOUT_MS)));
   // P0-A：`--wait-ms` = 抽取前额外等待（默认 0，上限 5000）——给迟渲染/异步水合的页面。
   // `load` 完成 + 3s 交互计数稳定轮询仍在它之前（两者叠加：先等页面自身稳定，再按需等待）。
   // 非法值 = usageError（不静默当 0，否则"等了却没用"又无法归因）。

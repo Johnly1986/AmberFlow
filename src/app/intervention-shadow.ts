@@ -16,10 +16,11 @@ import fs from "node:fs";
 import path from "node:path";
 import type { RescueShadowRecord } from "../support/intervention-contract.ts";
 import { createRescueState, type RescueChain, type RescueState } from "../intervention/index.ts";
+import { readString } from "../support/env.ts";
 
 /** 影子模式总开关：仅 `AMBERFLOW_RESCUE_SHADOW=1` 生效（其余值一律视为关）。 */
 export function isRescueShadowEnabled(): boolean {
-  return process.env.AMBERFLOW_RESCUE_SHADOW === "1";
+  return readString("AMBERFLOW_RESCUE_SHADOW") === "1";
 }
 
 /** 影子记录器：一个 run 一份；records 在内存累积，flush 才碰文件系统。 */

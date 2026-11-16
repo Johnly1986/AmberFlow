@@ -8,6 +8,7 @@
  *
  * Port note: `audit()` is async here (fetch), while Python's httpx call is sync.
  */
+import { readOptionalString, readString } from "../support/env.ts";
 import { AUDIT_SYSTEM_PROMPT } from "../prompts/model-prompts.ts";
 
 export interface TraceStep {
@@ -78,13 +79,13 @@ export class LLMAuditor implements Auditor {
   timeout: number;
 
   constructor(baseUrl?: string, apiKey?: string, model?: string, timeout = 30.0) {
-    const b = baseUrl ?? process.env.OPENAI_BASE_URL;
-    const k = apiKey ?? process.env.OPENAI_API_KEY;
+    const b = baseUrl ?? readOptionalString("OPENAI_BASE_URL");
+    const k = apiKey ?? readOptionalString("OPENAI_API_KEY");
     if (!b) throw new Error("LLMAuditor needs OPENAI_BASE_URL");
     if (!k) throw new Error("LLMAuditor needs OPENAI_API_KEY");
     this.baseUrl = b.replace(/\/+$/, "");
     this.apiKey = k;
-    this.model = model ?? process.env.AUDIT_MODEL ?? "gpt-4o-mini";
+    this.model = model ?? readString("AUDIT_MODEL");
     this.timeout = timeout;
   }
 
@@ -119,7 +120,7 @@ export class LLMAuditor implements Auditor {
 
 /** LLM when the endpoint is configured, mock otherwise (offline runs stay green). */
 export function getAuditor(): Auditor {
-  if (process.env.OPENAI_API_KEY) {
+  if (readOptionalString("OPENAI_API_KEY")) {
     try {
       return new LLMAuditor();
     } catch {

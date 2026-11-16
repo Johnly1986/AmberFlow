@@ -16,6 +16,7 @@
 import type {
   ChoiceOutcome, ChoiceRequest, ClosedSetChoice, ClosedSetRequest, DecisionProvider, ProviderCapabilities,
 } from "./decision-provider.ts";
+import { DECISION_REQUEST_TIMEOUT_MS } from "../support/tuning.ts";
 
 /** SystemOne 的一个答案（choice/noul/score 共用一个形状，字段按类型出现）。 */
 export interface SystemOneAnswer {
@@ -171,7 +172,7 @@ const emptyOutcome = (scoreKind: ProviderCapabilities["score_kind"], asked: numb
 /** 一个 SystemOne 服务 → 一个 DecisionProvider。这是本项目对决策服务的全部适配。 */
 export function systemOneClient(p: SystemOneProfile): DecisionProvider {
   const doFetch = p.fetchImpl ?? fetch;
-  const timeoutMs = p.timeoutMs ?? 30_000;
+  const timeoutMs = p.timeoutMs ?? DECISION_REQUEST_TIMEOUT_MS;
 
   async function ask(body: object): Promise<SystemOneReply> {
     const url = p.resolveEndpoint();

@@ -114,7 +114,7 @@ import {
 import { decisionFailureFact, decisionProviderOrNull, layaProvider, type DecisionProvider } from "../model/decision-provider.ts";
 // task-24/6a：限速判据阈值单一出处（step 侧与 arrive 侧共用）。
 import { THROTTLE_BODY_FLOOR, THROTTLE_COLLAPSE_RATIO, THROTTLE_POOL_HIGH_MIN } from "./throttle-signature.ts";
-import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts";
+import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts"; import { DONE_POLL_INTERVAL_MS, NAVIGATION_GOTO_TIMEOUT_MS, POOL_CAP_ELEMENTS } from "../support/tuning.ts";
 import { sleep } from "../support/sleep.ts";
 // task-14（D1）：探测失败分类与建议文案的单一出处。
 import { classifyDecisionFailure, decisionDegradedAdvice } from "../model/decision-probe.ts";
@@ -624,7 +624,7 @@ export class BrowserMiddleware {
    * E1-a：池预算帽的观测面回显（`decision.act_pool_cap`；缺省 40 = MAX_ELEMENTS）。
    * **只观测**：池构成不因它变化；落空诊断把它带进 `pool_cap` 供归因。
    */
-  actPoolCap = 40;
+  actPoolCap = POOL_CAP_ELEMENTS;
   /** S1：pre-held done 处置（缺省 warn；fail 在动作前结构化停止）。 */
   donePreheldPolicy: "warn" | "fail" | "allow" = "warn";
   /** P0-E：false_done guard 处置（缺省 warn；fail 在 done 成立后结构化停止）。 */
@@ -928,7 +928,7 @@ export class BrowserMiddleware {
     this.outcomeMemory = opts.outcomeMemory ?? null;
     this.outcomeMemoryMode = opts.outcomeMemoryMode ?? "forbid";
     this.hintMemory = opts.hintMemory ?? null;
-    this.gotoTimeout = opts.gotoTimeout ?? 30000;
+    this.gotoTimeout = opts.gotoTimeout ?? NAVIGATION_GOTO_TIMEOUT_MS;
     this.hosts = opts.hosts ?? null;
     // P0-D（A 批补漏）：会话面的 frame 门禁必须与 `meta.hosts` 同语义——此前 `_frameHosts`
     // 只在 run 面方法里由 `hosts ?? this.hosts` 赋值，session 面从未设置 ⇒ 池/FW8/DRF/F64
@@ -3286,7 +3286,7 @@ export class BrowserMiddleware {
       poolReadyPollMs = 100,
       poolGate = this.poolGate,
       surfacePolicy = this.surfacePolicy,
-      donePollMs = 120,
+      donePollMs = DONE_POLL_INTERVAL_MS,
       doneTimeoutMs = 2000,
       // F3：步级显式 timeoutMs 的整步挂钟帽（缺省 undefined = 无帽，行为逐字节不变）。
       stepTimeoutMs,

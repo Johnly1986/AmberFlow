@@ -40,6 +40,8 @@ import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../sup
 import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { parseRunDefaults } from "../support/run-defaults.ts";
+import { readString } from "../support/env.ts";
+import { DONE_POLL_INTERVAL_MS, NAVIGATION_GOTO_TIMEOUT_MS, SETTLE_QUIET_MS, SETTLE_TIMEOUT_MS } from "../support/tuning.ts";
 import { decisionServiceConfigured } from "../support/decision-env.ts";
 // B1 节奏统一：语义与 env 口径的唯一来源在 support/pace.ts（engine/app/online 三脸共用，无环）。
 import { PaceConfigError, paceNonDefault, paceRemainder, resolvePace as paceResolve } from "../support/pace.ts";
@@ -1119,7 +1121,7 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
       source: declaredPolicy.done_timeout_ms !== undefined ? "app" as const : "default" as const,
     },
     done_poll_ms: {
-      value: declaredPolicy.done_poll_ms ?? 120,
+      value: declaredPolicy.done_poll_ms ?? DONE_POLL_INTERVAL_MS,
       source: declaredPolicy.done_poll_ms !== undefined ? "app" as const : "default" as const,
     },
     pool_ready_timeout_ms: {
@@ -1166,8 +1168,8 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
       value: declaredPolicy.settle === "off"
         ? null
         : {
-            quietMs: declaredPolicy.settle?.quiet_ms ?? 400,
-            timeoutMs: declaredPolicy.settle?.timeout_ms ?? 5000,
+            quietMs: declaredPolicy.settle?.quiet_ms ?? SETTLE_QUIET_MS,
+            timeoutMs: declaredPolicy.settle?.timeout_ms ?? SETTLE_TIMEOUT_MS,
           },
       source: declaredPolicy.settle !== undefined ? "app" as const : "default" as const,
     },
@@ -1511,7 +1513,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       const shell = await getShell();
       try {
         await (shell.page as unknown as { goto(u: string, o?: unknown): Promise<unknown> })
-          .goto(target, { waitUntil: "domcontentloaded", timeout: 30_000 });
+          .goto(target, { waitUntil: "domcontentloaded", timeout: NAVIGATION_GOTO_TIMEOUT_MS });
       } catch (e) {
         return { done: false, reason: `navigation_failed: ${e instanceof Error ? e.message : String(e)}` };
       }
@@ -1610,7 +1612,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       if (opts.captureTraces && opts.captureStateView && sg.start_url) {
         try {
           await (shell.page as unknown as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
-            sg.start_url, { waitUntil: "domcontentloaded", timeout: 30_000 },
+            sg.start_url, { waitUntil: "domcontentloaded", timeout: NAVIGATION_GOTO_TIMEOUT_MS },
           );
           stateView = await captureStepStateView(shell.page as never);
         } catch { stateView = null; }
@@ -2224,7 +2226,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // 由此成立）；计数进 result 顶层 site_facts_injected（只增字段）。
     let d2Notes: string | null = null;
     d2Injected = 0;
-    if (process.env.AMBERFLOW_SITE_FACTS_INTO_MODEL === "1") {
+    if (readString("AMBERFLOW_SITE_FACTS_INTO_MODEL") === "1") {
       d2Notes = renderModelFence(siteFacts);
       d2Injected = d2Notes === null ? 0 : Math.min(3, siteFacts.length);
       if (d2Notes !== null) {
