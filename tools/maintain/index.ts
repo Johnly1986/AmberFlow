@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectSize, evaluateSize, mergeBaselineForUpdate, type Problem, type Severity, type SizeBaseline } from "./size.ts";
 import { collectDocs, evaluateDocs, type DocsBaseline, type DocsSnapshot } from "./docs.ts";
-import { collectMainline, evaluateMainline, type MainlineBaseline, type MainlineSnapshot } from "./mainline.ts";
+import { collectMainline, evaluateMainline, mergeMainlineForUpdate, type MainlineBaseline, type MainlineSnapshot } from "./mainline.ts";
 import { collectComments, counts as commentCounts, evaluateComments, mergeCommentsForUpdate, type CommentLine, type CommentsBaseline, type CommentsSnapshot } from "./comments.ts";
 import { collectConstants, evaluateConstants, scanConstants, type ConstantProblem, type ConstantsBaseline } from "./constants.ts";
 
@@ -85,6 +85,16 @@ function update(): number {
     console.error("maintain --update: 拒绝写入（基线只许下调/删除；新增超标项必须先在代码里解决）");
     return 1;
   }
+  const mainlineSnap = collectMainline(REPO);
+  const mainlineUpdate = mergeMainlineForUpdate(previous.mainline, {
+    mwConstructions: mainlineSnap.mwConstructions,
+    runEntryCalls: mainlineSnap.runEntryCalls,
+  });
+  if (mainlineUpdate.errors.length > 0) {
+    for (const e of mainlineUpdate.errors) console.error(`maintain --update: mainline ${e}`);
+    console.error("maintain --update: 拒绝写入（mainline 计数只减不增）");
+    return 1;
+  }
   const commentUpdate = mergeCommentsForUpdate(previous.comments, commentCounts(collectComments(REPO)));
   if (commentUpdate.errors.length > 0) {
     for (const e of commentUpdate.errors) console.error(`maintain --update: comments ${e}`);
@@ -95,7 +105,7 @@ function update(): number {
     _doc: previous._doc,
     size: next,
     docs: previous.docs,
-    mainline: previous.mainline,
+    mainline: mainlineUpdate.next,
     comments: commentUpdate.next,
     constants: previous.constants,
   };
@@ -248,7 +258,12 @@ function selfTest(): number {
   if (!mergeGrowth.errors.some((e) => /historyWording/.test(e))) failures.push("comments update 增长未被拒绝");
   const mergeAbsolute = mergeCommentsForUpdate({ ...mergeBase, lineAnchors: 0 }, { ...mergeBase, lineAnchors: 1 });
   if (!mergeAbsolute.errors.some((e) => /lineAnchors/.test(e))) failures.push("comments update 硬失败类非 0 未被拒绝");
-  console.log("maintain --self-test: OK — 负向断言 21 条（size 4 / docs 5 / mainline 4 / comments 4 / comments-update 2 / constants 2）+ 正例 6 条全部符合预期");
+  // mainline --update 协议：只降不升
+  const mlLower = mergeMainlineForUpdate({ mwConstructions: 6, runEntryCalls: 12 }, { mwConstructions: 1, runEntryCalls: 12 });
+  if (mlLower.errors.length > 0 || mlLower.next.mwConstructions !== 1) failures.push("mainline update 正例（工厂下调）被误报");
+  const mlGrow = mergeMainlineForUpdate({ mwConstructions: 1, runEntryCalls: 12 }, { mwConstructions: 2, runEntryCalls: 12 });
+  if (!mlGrow.errors.some((e) => /mwConstructions/.test(e))) failures.push("mainline update 增长未被拒绝");
+  console.log("maintain --self-test: OK — 负向断言 22 条（size 4 / docs 5 / mainline 4 / mainline-update 1 / comments 4 / comments-update 2 / constants 2）+ 正例 7 条全部符合预期");
   return 0;
 }
 

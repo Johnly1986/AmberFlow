@@ -5,13 +5,11 @@
     "newFunctionMaxLines": 150,
     "phaseFunctionMaxLines": 400,
     "files": {
-      "src/engine/executor.ts": 6140,
-      "src/app/app-runner.ts": 2864,
-      "src/engine/extraction.ts": 1966,
+      "src/engine/executor.ts": 6139,
+      "src/app/app-runner.ts": 2854,
+      "src/engine/extraction.ts": 1959,
       "src/app/ctx.ts": 1799,
-      "src/app/app-pack.ts": 1512,
       "src/app/session-runtime.ts": 1460,
-      "src/data/datasource.ts": 1417,
       "src/engine/pool-js.ts": 1102,
       "src/engine/executor-types.ts": 1005,
       "src/app/app-adapters.ts": 988,
@@ -32,17 +30,12 @@
       {
         "file": "src/app/app-runner.ts",
         "name": "runScriptApp",
-        "lines": 821
+        "lines": 802
       },
       {
         "file": "src/app/app-runner.ts",
         "name": "runApp",
-        "lines": 709
-      },
-      {
-        "file": "src/app/app-pack.ts",
-        "name": "validatePack",
-        "lines": 690
+        "lines": 693
       },
       {
         "file": "src/app/ctx-dry.ts",
@@ -127,17 +120,12 @@
       {
         "file": "src/cli/start.ts",
         "name": "commandJob",
-        "lines": 160
+        "lines": 157
       },
       {
         "file": "src/engine/extraction.ts",
         "name": "frameHintFailureEvidence",
         "lines": 157
-      },
-      {
-        "file": "src/data/datasource.ts",
-        "name": "validateSource",
-        "lines": 151
       }
     ],
     "phaseFunctions": []
@@ -152,12 +140,12 @@
     ]
   },
   "mainline": {
-    "mwConstructions": 6,
+    "mwConstructions": 1,
     "runEntryCalls": 12
   },
   "comments": {
     "dateStamps": 34,
-    "planTokens": 416,
+    "planTokens": 414,
     "historyWording": 67,
     "lineAnchors": 0,
     "ghostRefs": 0,

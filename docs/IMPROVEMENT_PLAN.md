@@ -6,7 +6,7 @@
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：P0 全部 9 批完成（出口证据见 §6.1）；P1 进行中：1.1 tuning / 1.2 env typed getter + constants 门禁 / 1.3 CHANGELOG Decisions + comments 更新协议 / 1.4 app-pack+datasource 稳定纯区拆分 已落地（§6.2）；1.5 `buildMiddleware` 工厂 + W1-a 剩余、1.6 Agent prompt/证据 spec 待做。
+> **实施进度（2026-11-17）**：P0 全部 9 批完成（§6.1）；P1 1.1–1.5 已落地（§6.2）：tuning/env/constants、CHANGELOG Decisions+comments 协议、app-pack/datasource 拆分、`buildMiddleware` 工厂（mw 6→1）+ 帧门禁/pickRow 收口。1.6（Agent prompt wrapper/证据 spec）按「真实失败案例驱动」条件保留待触发；P1 出口指标差距见 §6.2 尾注。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -502,10 +502,13 @@ interface PromptSpec {
 | 1.1 + 1.2 | `tuning.ts` 11 常量（26 处同值替换）+ `env.ts` typed getter（裸读 21 行/18 变量 → 8 处/4 平台变量）+ maintain `constants` 组 | `3e5da4f` + `70e698d` | `maintain --self-test` 23 条；constants 0 fail/0 warn；examples golden 一致 |
 | 1.4 | app-pack 1512→296 facade（3 新模块）；datasource 1417→74 facade（4 新模块） | `18e16cd` | split manifest 40+83 符号 hash 全一致；examples golden/verify:offline/check 绿 |
 | 1.3 | `CHANGELOG.md` `## Decisions` 索引（D1–D12）+ comments `--update` ratchet 协议 | `1fbb9c1` | comments 组 + 2 条更新协议负向自测绿 |
-| 1.5 | `buildMiddleware` 工厂 + W1-a 剩余同构（会话创建/决策探测/pickRow/帧谓词） | 待做 | — |
+| 1.5 | `buildMiddleware` 工厂（6 入口→1 构造点，per-face confirm 策略）+ app-runner 决策探测去重 + 帧门禁 10 处/pickRow 三面收口 | 本批提交 | mw 真实构造=1；mainline baseline 6→1；examples golden/verify:offline/check 绿 |
 | 1.6 | Agent prompt wrapper 收口 + 证据 spec（条件） | 待做 | — |
 
-> P1 出口指标（§3.4）尚未全部达标：>1000 行文件从 9 降到 7（ctx/app-runner/executor/extraction 等仍在），≥300 行函数仍 8 个；属 1.5/后续 W1-b 批次范围。
+> P1 出口指标（§3.4）核对（2026-11-17）：注释禁止类=0、配置漂移=0、prompt 重复=0、白名单外裸 env=0、新文件/函数上限生效、文档断点=0、mw 构造=1、split-check/golden/offline 绿。
+> **未达标 2 项**：>1000 行文件 7（目标 ≤6；余 executor/app-runner/extraction/ctx/session-runtime/pool-js/executor-types）；≥300 行函数 8（目标 ≤6；余 run/createCtx/runScriptApp/runApp/createDryCtx/runInspect/app-runner-cli.main/createReplayCtx）。
+> **明确延期**：handler 子进程转交 12 处（P2 内进程化前置未满足，按 §4.5 延后）；1.6 证据 spec 等真实失败案例。
+> 结论：P1 主体收口，不启动 P2（P2 五项前置条件仍未满足）；上述 2 项差距留 P1 尾批或随 P2 的 W1-c 处理。
 
 ### P1 收口（3–5 周，12–18 人日；低 churn 优先）
 

@@ -143,3 +143,20 @@ export function evaluateMainline(snapshot: MainlineSnapshot, baseline: MainlineB
   }
   return problems;
 }
+
+/** mainline 基线只降不升的更新协议（P1-1.5 工厂落地后把 mw 构造计数从 6 降到 1）。 */
+export function mergeMainlineForUpdate(
+  previous: MainlineBaseline,
+  current: MainlineBaseline,
+): { next: MainlineBaseline; errors: string[] } {
+  const errors: string[] = [];
+  const next: MainlineBaseline = { ...previous };
+  for (const key of ["mwConstructions", "runEntryCalls"] as const) {
+    if (current[key] > previous[key]) {
+      errors.push(`${key} 从基线 ${previous[key]} 增长到 ${current[key]}：只减不增`);
+      continue;
+    }
+    next[key] = current[key];
+  }
+  return { next, errors };
+}

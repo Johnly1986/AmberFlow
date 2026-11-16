@@ -94,7 +94,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | `RunOptions` 组装（引擎步） | `src/engine/planner.ts:runOnce` 与 `src/app/ctx.ts:runOneStep` | 两条路径 | **冻结**（不新增第 4 个 RunOptions；P2 execStep 合并） | 能力面新增必须双端 + 等价验收 |
 | 工具步装配 | `src/app/app-runner.ts:runToolStep` + `Ctx.toolRunner` | ctx.run / dangerous | **冻结**（不进引擎步装配） | 独立变更 + 危险步确认链 review |
 | `DecisionProvider` 接口 | 当前 `src/model/decision-provider.ts` → 目标 `src/support/decision-provider-contract.ts`（L0） | engine（仅契约类型）、model（实现）、组合根（装配） | **方向冻结**：engine 不 import 具体实现 | 契约变更需 model/engine 双侧 typecheck + rules-only 消融 |
-| 决策源装配（resolve/build） | 各处 `resolveProviderSpec → applySpecToRuntime → installLayaRuntime` → 目标 `buildMiddleware(config)` | 入口/组合根 | **冻结**：组合根唯一（P1） | 任一新入口不得自建装配；per-face confirm 策略必填 |
+| 决策源装配（resolve/build） | 各处 `resolveProviderSpec → applySpecToRuntime → installLayaRuntime` → **`buildMiddleware({face,confirmPolicy,options})`（P1-1.5 已落地，provider 解析仍在入口）** | 入口/组合根 | **冻结**：组合根唯一，构造点唯一（P1 已达成）；run-scoped provider 注入留 P2 | 任一新入口不得自建 `new BrowserMiddleware`；per-face confirm 策略必填 |
 | 模型 prompt | 目标 `src/prompts/`（L1 叶子） | model providers + executor legacy 兜底（P2 收编） | **方向冻结**（不放 src/model；不 import 实现） | 文本变更 version+1 + 快照 hash + A/B 证据 |
 | Ctx 契约 | `src/app/ctx-types.ts`（接口已存在） | flow 脚本、ctx-dry/replay、session-runtime | **接口冻结**；缺行为矩阵 | 新增原语需 matrix + conformance + dry/replay 同步 |
 | 执行结果包络 | `src/app/app-runner.ts:AppRunResult` + `planner:RunPlanResult` + `online/types:CaseOutcome` | 各源 | **冻结**；目标 P2 `RunOutcome` 核心包络 | 各源形状逐字节保留；新字段只增不改 |
@@ -147,7 +147,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | 维度 | 当前（HEAD 91bf379） | 目标（P1/P2） |
 |---|---|---|
 | 编排 | 4 套 | kernel + 3 源适配器 + 套件聚合器（P2 条件） |
-| mw 装配 | 6 处真实构造 | 1 个 `buildMiddleware` 工厂 + 2 个调试面（P1） |
+| mw 装配 | **1 处真实构造**（`src/app/middleware-factory.ts`，6 入口共用） | 1 个 `buildMiddleware` 工厂 + 2 个调试面（P1 已达成） |
 | 入口 | 19 个，三类混编 | 三类登记 + 进程边界明确（P0 本文件） |
 | 公共面 | `src/index.ts` 25 导出/0 消费者，宣称 Public surface | 删宣称；exports 表锁定；无 sdk（P1/P2） |
 | 决策契约 | engine 直接 import model 装配/类型 | 契约下沉 L0 + 组合根注入（P2 条件） |
@@ -162,7 +162,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | 本文档存在且含 `L1.5`、`S0`、`S5`、三类入口 | 防止层表/阶段图回到空洞 |
 | 所有顶层 `src/` 目录与 `integrations/dsh-bridge`、`tools` 在 §1.1 目录→层映射中出现 | 未登记目录报红 |
 | `src/index.ts` 仓内 importer = 0 | 公共面不自欺 |
-| `new BrowserMiddleware(` 真实构造数 ≤ 基线（6，注释行不算） | 装配点只减不增（P1 工厂后下调基线） |
+| `new BrowserMiddleware(` 真实构造数 ≤ 基线（1，工厂内唯一构造；注释行不算） | 装配点只减不增（P1-1.5 工厂已把 6 处收到 1 处） |
 | `ctx.runEntry(` 调用点数 ≤ 基线（12） | 子进程转交只减不增 |
 | 命名表/入口表/预留表存在 | 文档真值最低线 |
 
