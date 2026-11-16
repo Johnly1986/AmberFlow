@@ -103,6 +103,21 @@ export const HINT_ROW_SUFFIX: { token: string; en: string; example: string; anch
   note: "行锚限定：把命中集限定到行上下文文本包含 token 的元素（列表/表格行的内容身份定位；row_texts 只在同文案重复组上采集，非重复组恒落空；token 非空/无空白/禁 >/≤40 字符、仅小写折叠；与 within:/frame: 可组合，任一超限 = 整组后缀拒绝）",
 };
 
+/**
+ * F83：`row-index:N` 顺序行锚尾缀（与 within/frame/in-row 同构的**第四类**尾缀）——任意形状
+ * 后缀它，命中集限定到"**同 dup 组内 DOM 先序第 N 个成员**"（1-based、无前导 0、≤9 位）。
+ * 序号即语义的合法场景（排序榜/低价列表/排序命令后点第 N 行）由作者显式承担序漂移；
+ * `row-index:N in-row:<token>` 组合 = 内容守卫（双条件 AND，内容不符 = 显式落空，fail-safe
+ * 主推形态，组合不强制——推荐纪律）。row_index 只在**同文案重复组**上编号（帧内 (tag+label)
+ * 子组 DOM 先序；非重复组元素写 row-index = 恒落空，fail-closed 对称）。与三类尾缀可组合
+ * （各至多一次、任意次序）；任一类超限/值非法 = 整组后缀拒绝（原始串回退，绝不半剥）。
+ */
+export const HINT_ROW_INDEX_SUFFIX: { token: string; en: string; example: string; anchor: string; note: string } = {
+  token: "row-index:N", en: "row-index:N", example: "订票 row-index:3",
+  anchor: "row-index:5",
+  note: "顺序行锚：把命中集限定到同 dup 组内 DOM 先序第 N 个成员（1-based 正整数、无前导 0、≤9 位；0/负数/非数字 = 整组后缀拒绝；序号即语义——排序榜/排序后点第 N 行，作者承担序漂移；组合 in-row:<token> = 内容守卫，内容不符 = 显式落空；非重复组恒落空）",
+};
+
 /* ---- import 时自证 1：示例 ↔ 唯一解析器 ---------------------------------- */
 
 for (const s of HINT_SHAPES) {
@@ -273,6 +288,89 @@ for (const s of HINT_SHAPES) {
           + `——三类尾缀任意次序都必须剥出三字段`,
       );
     }
+  }
+}
+
+/* F83 自证：row-index:N 尾缀被解析层剥离并落进 rowIndex（number，六形状均可后缀）；四类尾缀
+   全组合 24 排列（程序化枚举）任意次序都成立；双 row-index / 0 / 负数 / 非数字 / 超位数 /
+   空值 / 属性值内伪尾缀被**整组**拒绝（原始串回退，绝不半剥）。 */
+{
+  const ok = parseHint(HINT_ROW_INDEX_SUFFIX.example);
+  if (ok.rowIndex === undefined || ok.rowIndex !== 3 || ok.kind !== "bare") {
+    throw new Error(
+      `grammar-prompt: HINT_ROW_INDEX_SUFFIX 示例 '${HINT_ROW_INDEX_SUFFIX.example}' 解析为 `
+        + `kind='${ok.kind}', rowIndex=${JSON.stringify(ok.rowIndex)}——期望 bare + rowIndex=3`,
+    );
+  }
+  // 六形状 × row-index（解析只管形状）。
+  const shapes = [
+    parseHint("#login-button row-index:5"),
+    parseHint("a[href~travel_2] row-index:5"),
+    parseHint("button~onesie row-index:5"),
+    parseHint("[data-test=add] row-index:5"),
+    parseHint("button row-index:5"),
+    parseHint("添加到购物车 row-index:5"),
+  ];
+  const wantKinds = ["id", "attrSubstr", "nearToken", "attrEq", "tag", "bare"];
+  shapes.forEach((p, i) => {
+    if (p.rowIndex !== 5 || p.kind !== wantKinds[i]) {
+      throw new Error(
+        `grammar-prompt: row-index × 六形状自证失败（第 ${i + 1} 形状解析为 kind='${p.kind}', `
+          + `rowIndex=${JSON.stringify(p.rowIndex)}，期望 ${wantKinds[i]} + 5）`,
+      );
+    }
+  });
+  // 四类尾缀全组合 24 排列（程序化枚举，v1.0 Q1-Q6 定稿口径）。
+  const tail4 = ["within:#dialog", "frame:https://checkout.example.com", "in-row:sc7960", "row-index:3"];
+  const perms4: string[][] = [];
+  const permute = (arr: string[], acc: string[] = []): void => {
+    if (arr.length === 0) { perms4.push(acc); return; }
+    for (let i = 0; i < arr.length; i++) {
+      permute([...arr.slice(0, i), ...arr.slice(i + 1)], [...acc, arr[i]!]);
+    }
+  };
+  permute(tail4);
+  if (perms4.length !== 24) throw new Error("grammar-prompt: 4! 排列枚举漂移");
+  for (const perm of perms4) {
+    const p = parseHint(`保存 ${perm.join(" ")}`);
+    if (p.kind !== "bare" || p.within?.join(">") !== "dialog"
+        || p.frameChain?.join(">") !== "https://checkout.example.com"
+        || p.inRow !== "sc7960" || p.rowIndex !== 3) {
+      throw new Error(
+        `grammar-prompt: 四尾缀组合解析漂移（次序 ${perm.join(" ")}→within=${JSON.stringify(p.within)}, `
+          + `frameChain=${JSON.stringify(p.frameChain)}, inRow=${JSON.stringify(p.inRow)}, `
+          + `rowIndex=${JSON.stringify(p.rowIndex)}）——四类尾缀任意次序都必须剥出四字段`,
+      );
+    }
+  }
+  // 双 row-index = 整组拒绝（原始串回退，绝不半剥）。
+  const double = parseHint("button row-index:2 row-index:3");
+  if (double.rowIndex !== undefined || double.kind !== "bare"
+      || double.token !== "button row-index:2 row-index:3") {
+    throw new Error(
+      `grammar-prompt: 双 row-index 示例被静默接受（rowIndex=${JSON.stringify(double.rowIndex)}）`
+        + `——解析器必须整组拒绝（按原始串回退 = 裸词落空）`,
+    );
+  }
+  // 值闭集：0 / 负数 / 非数字 / 超 9 位 / 空值 = 整组拒绝。
+  for (const bad of ["button row-index:0", "button row-index:-1", "button row-index:abc",
+    `button row-index:${"9".repeat(10)}`, "button row-index:"]) {
+    const p = parseHint(bad);
+    if (p.rowIndex !== undefined) {
+      throw new Error(`grammar-prompt: 非法 row-index 值 '${bad}' 被静默接受（rowIndex=${p.rowIndex}）——必须整组拒绝`);
+    }
+  }
+  // 边界：恰 9 位合法、row-index:1 合法。
+  if (parseHint("button row-index:999999999").rowIndex !== 999999999) {
+    throw new Error("grammar-prompt: 9 位 row-index 应合法（≤9 位词法卫生）");
+  }
+  // 属性值内伪尾缀：`tag[attr=x row-index:3]` 的 row-index: 落在属性值里——不是语法后缀。
+  const pseudo = parseHint("tag[attr=x row-index:3]");
+  if (pseudo.rowIndex !== undefined || pseudo.kind !== "attrEq") {
+    throw new Error(
+      `grammar-prompt: 属性值内伪尾缀被当后缀（kind='${pseudo.kind}', rowIndex=${JSON.stringify(pseudo.rowIndex)}）`
+        + `——应按原始串回退为 attrEq（值含伪尾缀文本）`,
+    );
   }
 }
 

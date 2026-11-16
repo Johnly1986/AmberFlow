@@ -4,6 +4,102 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 顺序行锚 hint `row-index:N`（F83 批 2：解析/匹配/编号底座/回捞/回退/生成纪律/observe 闭环/trace 证据）
+
+### 背景
+
+`in-row:<token>`（F82）解决了"行内容可分"的同名网格；但排序榜、低价列表、"排序命令后点
+第 N 行"场景里**序号可以是语义本身**——内容随排序翻动，顺序才是目标定义，内容词元锚
+必然漂移。`row-index:N` 与 `in-row:` 同构（同一 dup 组底座、同一 fail-closed 对称、同一
+R2-5 整组回退纪律），是第四类尾缀。规格与评审记录：`docs/ROW_INDEX_HINT_PLAN.md` v1.0
+（v0.9 评审稿 + lead Q1-Q6 仲裁定稿；批 2 首项，一次 PR）。
+
+### 语法与解析（hint.ts）
+
+- 任意形状可后缀 ` row-index:N`：值闭集 = 1-based 正整数、无前导 0、≤9 位（Q4 仲裁）；
+  `0`/负数/非数字/带空白 = 整组回退（绝不半剥）。四类尾缀（within/frame/in-row/row-index）
+  各至多一次、任意书写次序、可组合；**三类既有解析分支逐字节不动**，row-index 分支同结构
+  追加（含属性值内伪尾缀守卫）。`ParsedHint` 六形状各加可选 `rowIndex: number`；
+  `rowIndexValueProblem` 三类（empty / not-positive-integer〔文案点名"row-index 从 1 开始"〕
+  / too-many-digits，B 项修正）+ `describeRowIndexSuffixRejection`（与 frame/in-row 版同构）。
+
+### 匹配（rules.ts）
+
+- `limit = rowIdx(inRow(inAnchor(refs)))`——rowIdx = `row_index === N` **整数全等比较**
+  （序号是离散身份，无子串语义）；批 1 已把全部形状调用点收口成单一 `limit` 出口，row-index
+  并入即自动覆盖六形状/档位/tag-submit/bare（无须逐点接线）；限定后本档清空 = 落空不跨档
+  降级；**fail-closed 对称**：元素无 `row_index`（非重复组）⇔ row-index 恒不命中。
+
+### 数据面（Elem.row_index：dup 组 DOM 先序编号）
+
+- `Elem.row_index`（1-based）：dup 组内 DOM 先序位次。编号口径 = **帧内 (tag+label) 子组
+  scan 升序**（跨帧同名网格各自编号；跨帧歧义由 `frame:`/firstIfSame/歧义谓词兜住，D2 既有
+  口径）；**仅同文案重复组携带**（与 near/row_texts 同触发）；**不进模型面**
+  （`modelProjectionOf` guard+解构两处同步剥离，B5 教训）、**不进 esig/firstIfSame 签名**。
+- `addNearContext` 宿主编号（纯内存排序，零新增页面往返）；OBSERVE_JS dup 门控编号
+  （rows 数组序 = DOM 先序；**无 dup 页观察 JSON 逐字节不变**）；ROW_CLIMB_JS 本体不动
+  （编号不是爬升产物）。
+
+### 回捞/回退对等（F-1 同构）
+
+- **HINT_HEAD 门触发条件扩为 in-row 或 row-index 声明**；编号 = **一次 O(n) 全组位次表**
+  （`__dupLabelsOf`/`__dupKeyOf` 单一出处；C 项修正：非逐候选计算——**单用 row-index 零爬升
+  成本**，memo 只适用组合守卫的 row_texts 爬升）；收集谓词 = 单用 `row_index === N` /
+  组合双条件 AND（与池侧同口径）；凑满 5 早退 + 封顶 120 超标 fail-closed 沿批 1；回捞行补
+  `row_index`（additive）；PASS_HINT_PROBE 派生自动继承。
+- **A3 DOM fallback**：`arg.rowIndex` 随 inRow 同点下发，每行补 `row_index`（位次表）；
+  row-index-only 不触发爬升；未声明任一行锚时行形状逐字节不变。
+
+### 生成纪律（suggestHints 第 6 档）
+
+- **仅当 within 全落空 且 第 5 档（in-row 词元）全落空**（内容不可分网格 = 硬案例本体）才
+  生成 `<label> row-index:N`（同一 push → hintMatch 自证）；**内容可分时内容候选优先**；
+  **单用 only 不产组合候选**（Q3；作者手写组合走推荐纪律）；不产 unstable 标记（批 1 裁决
+  理由）；`out.slice(0,4)` cap 与 R-10 顺序纪律不动。inspect/observe 的 hint_candidates 与
+  歧义证据 suggested_hint 自动受益——**内容不可分网格从此可准入**（批 1 硬案例闭环）。
+
+### 证据面与 observe 闭环
+
+- **trace 行 additive `row_evidence: {row_index?, row_texts?}`**（声明 row-index/in-row 且
+  解析成功、字段存在时出现；缺省路径零新字段；Q6 仲裁：独立键对齐 `declared_resolve` 先例）
+  ——事后可审计"点的是哪一行"（done 断言纪律的归因证据）。
+- `syntheticElem` 透传 row_index → observe 自证池闭环；`ObserveElement` 增可选 `row_index`
+  （桥白名单边界沿批 1 row_texts 先例如实标注）；`whyNotAdmitted` 追加 row-index 可行动指引
+  （行内容全同时按网格内顺序定位 + 序漂移责任声明）。
+
+### 失败诊断四案（stopCode 不加新码）
+
+- ① 越界（N > K）或组不存在 → reason 报**网格组大小 K**（按 tag+label 分组 ≤3 组）+ 池面
+  真实行词元 ≤8；② 序号已定位但行内无 base/守卫不符 → 核对组合守卫 token 或改 base 不改
+  序号；③ 组合后仍多候选（跨帧同名网格）→ `target_ambiguous` 零动作；④ 尾缀形状非法 →
+  整组回退 + describe 点名（`0`/负数点名"row-index 从 1 开始"）。四案 reason 可区分。
+- **诊断可达面矩阵（如实写明）**：三案证据**保证面** = app flow 命令空间 / `act_hint:"strict"`
+  / 会话 act；**规划面（plan/probe）不保证**——批 1 probe 真站实测：声明行锚落空在规划链停
+  `low_confidence`（0.13 < floor，词面诊断），非三案 reason；规划面接线属后续项（BACKLOG
+  #9）。probe 用例期望口径相应为"零动作 + 诚实落空"（批 1 正向观察：序号缺失 ⇒ 零错点成立）。
+
+### 文档与契约
+
+- `docs/APP_SCRIPT_AUTHORING.md`：§4 尾缀四并列、新 §4.13「顺序行锚：序号即语义与内容守卫」
+  （语义两类/组合守卫/done 断言纪律/生成纪律/四案/边界）、§10 row-index 四案口径 + 可达面
+  边界、§11 已知边界；`docs/AGENT_INTERFACE.md`：ElementView 表加 `row_index` 行 +
+  `hint_candidates` row-index 候选形态 + trace `row_evidence` 说明；README 能力 bullet 增
+  序数场景；`docs/RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md` §2.2 F83 注记（序数类收口、D2 进一步
+  限缩）；`docs/BACKLOG.md` #9 收编更新；批 1 probe `books-inrow-token-missing` goal 文案按
+  实测口径顺带修正。
+- schema **F83** 声明（dist/schema/ctx.json 快照随 precheck 重生成）；grammar-prompt
+  `HINT_ROW_INDEX_SUFFIX` 示例 + import 时 parseHint 自证断言（六形状 × row-index、四尾缀
+  **24 排列全采样**、整组回退、值闭集边界）。
+- online 用例声明：core `books-row-index.json`（单用 `row-index:5` + 组合守卫
+  `row-index:3 in-row:america` 双子目标 + 结束态不变量）；probe `books-rowindex-out-of-range.json`
+  （`row-index:99` ⇒ 零动作 + 诚实落空，期望口径按可达面矩阵）。test:validate 过即入批；
+  真站执行属批后验证。
+
+### 显式缺口（批 2 不做，留档）
+
+- FW8 白名单不含 row-index 底座；findByHint / plan check --probe / apps check hint-lint /
+  桥 ElementView 透传 / 规划面三案接线属后续项（BACKLOG #9）；词边界档位不做。
+
 ## [Unreleased] — 行锚 hint `in-row:<token>`（F82 批 1：解析/匹配/数据面/回捞/回退/建议/observe 闭环）
 
 ### 背景

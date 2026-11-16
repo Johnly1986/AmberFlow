@@ -400,7 +400,17 @@ function hintMatchImpl(
   const inRow = (refs: string[]): string[] =>
     parsed.inRow === undefined ? refs
       : refs.filter((r) => rowMatch(elems[r]!, parsed.inRow!));
-  const limit = (refs: string[]): string[] => inRow(inAnchor(refs));
+  /**
+   * F83（row-index 顺序行锚）：与 inAnchor/inRow 同构的后置过滤——parsed.rowIndex 已声明时，
+   * 命中集限定到 `row_index === N` 的元素（**整数全等比较**——序号是离散身份，无"子串序号"
+   * 语义）。fail-closed 对称：元素无 row_index（非重复组）⇔ row-index 恒不命中 ≙ in-row 无
+   * row_texts ≙ frame 对未知 origin 帧不可命中。批 1 把全部形状调用点收口成单一 `limit` 出口
+   * ——row-index 并入即自动覆盖六形状/档位/tag-submit/bare，无须逐点接线。
+   */
+  const rowIdx = (refs: string[]): string[] =>
+    parsed.rowIndex === undefined ? refs
+      : refs.filter((r) => elems[r]!.row_index === parsed.rowIndex);
+  const limit = (refs: string[]): string[] => rowIdx(inRow(inAnchor(refs)));
   /** Record the strongest tier's refs, then resolve exactly as before. */
   const emit = (refs: string[], tier: number): string | null => {
     const limited = limit(refs);
@@ -696,6 +706,7 @@ export function suggestHints(
     // `sc7960`、`order-1042`），跳过纯价格/货币/百分比词元与时段词元——带 unstable 警告的
     // 候选是半成品承诺，作者会照抄且警告没人读，宁可不产出交回人（不产 unstable 标记机制）。
     // 无 row_texts（非重复组）时此档天然不产出（fail-closed 与匹配面同一对称）。
+    let inRowPushed = false;   // F83：第 5 档是否已产出候选（第 6 档只在"内容不可分网格"上跑）
     if (!withinPushed && Array.isArray(elem.row_texts) && elem.row_texts.length > 0) {
       const tokenOk = (t: string): boolean =>
         t !== "" && !t.includes(">") && t.length <= 40
@@ -712,8 +723,19 @@ export function suggestHints(
       }
       const ordered = [...tokens.filter(identifierLike), ...tokens.filter((t) => !identifierLike(t))];
       for (const tok of ordered) {
-        if (push(`${label} in-row:${tok}`)) break;
+        if (push(`${label} in-row:${tok}`)) { inRowPushed = true; break; }
       }
+    }
+    // F83 第 6 档（row-index 建议闭环，生成纪律 v1.0 §3.6）：**仅当 within 全落空 且 第 5 档
+    // 全落空**——即行内容词元全被生成期护栏拒绝或全不自证（**内容不可分网格 = 硬案例本体**）
+    // ——才从 `row_index` 生成 `<label> row-index:N`（N = 该元素 dup 组内 DOM 先序位次），走
+    // 同一个 push → hintMatch 自证（恰好唯一命中才保留）。**内容可分时内容候选优先**（第 5
+    // 档先行且命中即停 ⇒ 候选清单里不出现 row-index）；**单用 only**（生成器不产组合候选，
+    // Q3 仲裁；作者手写组合走推荐纪律）；**不产 unstable 标记**（批 1 裁决理由：row-index
+    // 候选只在内容完全不可分时才产，此时它是唯一可行动出口而非半成品）。序号是身份代理，
+    // 能不用就不用——本档只回答"引擎建议什么"，不限制"作者可以声明什么"。
+    if (!withinPushed && !inRowPushed && elem.row_index !== undefined) {
+      push(`${label} row-index:${elem.row_index}`);
     }
   }
   return out.slice(0, 4);

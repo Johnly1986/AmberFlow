@@ -459,8 +459,9 @@ observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,
 | 字段 | 上限 / 口径 | 说明 |
 |---|---|---|
 | `ref` | — | 展示/对账锚：inspect=`eN`（池 ref），observe=`oN`（观察序号）。**不是动作地址**；act/read 只认 hint 字符串 / CSS。 |
-| `hint_candidates` | ≤6 条 × ≤200 字符 | 每条经同一个 `hintMatch` 自证「恰好唯一命中」，可照抄；跨帧同名时可能是 `<label> frame:<origin>` 或 ≤4 段链候选，同名组可能是 `<label> within:#id`（单层/链），**同文案重复组可能是 `<label> in-row:<token>`（F82 行锚，token 来自该元素 `row_texts` 行词元，仅小写折叠）**。 |
+| `hint_candidates` | ≤6 条 × ≤200 字符 | 每条经同一个 `hintMatch` 自证「恰好唯一命中」，可照抄；跨帧同名时可能是 `<label> frame:<origin>` 或 ≤4 段链候选，同名组可能是 `<label> within:#id`（单层/链），**同文案重复组可能是 `<label> in-row:<token>`（F82 行锚，token 来自该元素 `row_texts` 行词元，仅小写折叠）或 `<label> row-index:N`（F83 顺序行锚——仅内容不可分网格产出：行内容词元全被生成期护栏拒绝时，序号即语义的候选出口）**。 |
 | `row_texts`（F82） | ≤6 行 × 每行 ≤40 字符 | 行上下文文本（in-row 匹配底座 + 词元来源）——**仅同文案重复组元素携带**（引擎 observe 面 dup 门控采集；与 `near` 同触发）。**不进模型面**。桥面 ElementView 投影（`element-view.ts`）尚未列入该键——批 1 引擎 observe 面先行，照抄入口是 `hint_candidates` 的 `in-row:` 候选；观察面 dup 判定只对"观察集合内可见同文案计数"执行（max 截断边界）。 |
+| `row_index`（F83） | 1-based 正整数 | dup 组内 DOM 先序位次（row-index 匹配底座 + 第 6 档候选序号来源）——**仅同文案重复组元素携带**（帧内同组；无 dup 页不出字段）。**不进模型面**；序号即语义的序漂移责任在作者（组合守卫 `row-index:N in-row:<token>` = fail-safe 主推）。桥白名单边界同 `row_texts`（未列入前桥面不出现）。 |
 | `label` / `label_truncated` | ≤200（匹配口径 `full_label`） | `href`/`href_full` ≤160；`class_names` ≤8×40；`why_not_admitted` ≤120；role/id 等短标识 ≤60。 |
 | `frame` | 0 = 主 frame | 对应 `frames[]` 下标；observe 多帧另有 `frame_counts:[{index,url,elements}]`（单帧不出现）。 |
 | `frame_origin` / `frame_path` | origin 桥 ≤60（引擎歧义证据 ≤120）；path ≤4 段×64 | 帧链底座：`frame_path` 省略 = 主帧；两字段都缺 = 未知 origin 帧（about:blank/srcdoc，不可被 `frame:` 命中）。 |
@@ -472,9 +473,14 @@ observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,
 - `ambiguity`（会话 `act` 歧义停，A2/F55）：`target ≤120`、`source`、`tier`、`would_act_ref`、
   `candidates_total`/`truncated`，候选 ≤5 行（`ref`/`tag`/`role` ≤16、`label`/`class`/`near` ≤40、
   `frame`、`frame_origin`（引擎 ≤120，桥 clip ≤60）、`same_label`、`suggested_hint` ≤200——B 批后
-  可容 4 段 `frame:` 链，F82 起可容 `in-row:<token>` 行锚候选）。`source:"dom_fallback"` 不给
+  可容 4 段 `frame:` 链，F82 起可容 `in-row:<token>` 行锚候选，F83 起可容 `row-index:N`
+  顺序行锚候选）。`source:"dom_fallback"` 不给
   `near`/`suggested_hint`。判据与 run 命令步
   同一份 `hintCandidates` 谓词，**run 面不受影响**。
+- `row_evidence`（run 面动作 trace 行，F83）：声明 `row-index:`/`in-row:` 的目标解析成功后
+  additive `{row_index?, row_texts?}`（所选 Elem 实值，字段存在才出现；缺省路径零新字段）——
+  事后可审计"点的是哪一行"（row_index 回答第几个成员、row_texts 回答那一行长什么样）；
+  事后归因用途见 APP_SCRIPT_AUTHORING §4.13 的 done 断言纪律。
 
 ---
 

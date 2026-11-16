@@ -1,0 +1,29 @@
+{
+  "id": "books-row-index",
+  "site": "books",
+  "tier": "core",
+  "goal": "在 Travel 分类页验证顺序行锚 row-index:N：同名按钮网格内按 DOM 先序定位第 N 个成员（序号即语义）与组合守卫（序号+行内容双条件，fail-safe）",
+  "subgoals": [
+    {
+      "desc": "单用序数（序号即语义）：点击网格内第 5 个 Add to basket（第 5 本书 Under the Tuscan Sun）——作者显式承担序漂移；表单 GET 提交后 URL 带查询串",
+      "start_url": "https://books.toscrape.com/catalogue/category/books/travel_2/index.html",
+      "target_hint": "add to basket row-index:5",
+      "signal": { "url_contains": "index.html?" },
+      "retries": 2
+    },
+    {
+      "desc": "组合守卫（fail-safe 主推形态）：row-index:3 + in-row:america 双条件——第 3 个成员且行内容含第 3 本书名词元；序漂移时内容不符 = 显式落空而非错点",
+      "start_url": "https://books.toscrape.com/catalogue/category/books/travel_2/index.html",
+      "target_hint": "add to basket row-index:3 in-row:america",
+      "signal": { "url_contains": "index.html?" },
+      "retries": 2
+    }
+  ],
+  "invariants": [
+    {
+      "id": "category-reloaded",
+      "desc": "提交后回到同一分类页（11 张商品卡齐全，页面状态未被破坏）",
+      "signal": { "css_count_equals": ["article.product_pod", 11] }
+    }
+  ]
+}

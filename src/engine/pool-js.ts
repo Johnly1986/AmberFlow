@@ -696,6 +696,16 @@ ${ANCHOR_JS}
     if (rows[i].visible !== true) continue;
     if ((dupCnt[__dupKeyOf(rows[i].tag, rows[i].label)] || 0) > 1) dupLabels.add(rows[i].label);
   }
+  // F83：dup 组成员按 rows 数组序（= 本帧 DOM 先序）编号 1..K（帧内同组；additive 字段，
+  // 无 dup 页不出键 ⇒ 观察 JSON 逐字节不变）。row_index 独立于爬升——组序是纯计数。
+  const rowIdxSeen = {};
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].visible !== true) continue;
+    const k = __dupKeyOf(rows[i].tag, rows[i].label);
+    if ((dupCnt[k] || 0) <= 1) continue;
+    rowIdxSeen[k] = (rowIdxSeen[k] || 0) + 1;
+    rows[i].row_index = rowIdxSeen[k];
+  }
   for (let i = 0; i < rows.length; i++) {
     if (rows[i].visible !== true) continue;
     if ((dupCnt[__dupKeyOf(rows[i].tag, rows[i].label)] || 0) <= 1) continue;
@@ -876,29 +886,48 @@ ${ROW_CLIMB_JS}
                     return e.checkVisibility ? e.checkVisibility({checkVisibilityCSS: true}) : true; });
             let picked = visHits;
             const rowMemo = new Map();
-            if (p.inRow !== undefined) {
-                // F82 in-row 门（惰性 + memoized + 凑满 5 早退 + 总计算封顶 120，超标 fail-closed）：
-                // 先收集形状命中（不含 in-row 过滤——上面各分支），按 DOM 序逐候选算 row_texts
-                // （memo 每候选一次），行词面命中才收集。只补字段不进门的话 slice(0,5) 可能全被
-                // 非命中占满 ⇒ 回捞路径整体死路（F-1 同构缺口）。封顶：至多 120 次爬升计算
-                // （回捞上限本就 5 行；凑满即退——超标停算，已收集者如实返回 = 显式落空不猜）。
+            const rowIdxMap = new Map();
+            if (p.inRow !== undefined || p.rowIndex !== undefined) {
+                // F82/F83 in-row/row-index 门（惰性 + memoized + 凑满 5 早退 + 总计算封顶 120，
+                // 超标 fail-closed）：先收集形状命中（不含 in-row/row-index 过滤——上面各分支），
+                // 按 DOM 序逐候选处理，行词面/组序命中才收集。只补字段不进门的话 slice(0,5)
+                // 可能全被非命中占满 ⇒ 回捞路径整体死路（F-1 同构缺口）。
+                // F83 编号（v1.0 §3.5 C 项）：**一次 O(n) 全组位次表**——__dupLabelsOf 分出的同
+                // 组成员按 __dupKeyOf 键计数、DOM 先序位次 1..K；memo 只适用组合守卫的 row_texts
+                // 爬升；**单用 row-index 声明零爬升成本**（纯查表比较，computed 恒 0）。
                 const pairs = [];
                 for (let i = 0; i < all.length; i++) pairs.push([all[i].tagName.toLowerCase(), labelOf(all[i])]);
                 const dupLabels = __dupLabelsOf(pairs);
+                const dupCnt = {};
+                for (let i = 0; i < pairs.length; i++) {
+                    const k = __dupKeyOf(pairs[i][0], pairs[i][1]);
+                    dupCnt[k] = (dupCnt[k] || 0) + 1;
+                }
+                const idxSeen = {};
+                for (let i = 0; i < all.length; i++) {
+                    const k = __dupKeyOf(pairs[i][0], pairs[i][1]);
+                    if ((dupCnt[k] || 0) <= 1) continue;
+                    idxSeen[k] = (idxSeen[k] || 0) + 1;
+                    rowIdxMap.set(all[i], idxSeen[k]);
+                }
                 picked = [];
                 let computed = 0;
                 for (let k = 0; k < visHits.length; k++) {
                     if (picked.length >= 5 || computed >= 120) break;
                     const e = all[visHits[k]];
-                    let rows = rowMemo.get(e);
-                    if (rows === undefined) {
-                        computed += 1;
-                        rows = __rowClimb(e, dupLabels).rows;
-                        rowMemo.set(e, rows);
+                    let rows = null;
+                    if (p.inRow !== undefined) {
+                        rows = rowMemo.get(e);
+                        if (rows === undefined) {
+                            computed += 1;
+                            rows = __rowClimb(e, dupLabels).rows;
+                            rowMemo.set(e, rows);
+                        }
                     }
-                    for (let m = 0; m < rows.length; m++) {
-                        if (String(rows[m]).toLowerCase().includes(String(p.inRow))) { picked.push(visHits[k]); break; }
-                    }
+                    const rowOk = p.inRow === undefined
+                        || rows.some((t) => String(t).toLowerCase().includes(String(p.inRow)));
+                    const idxOk = p.rowIndex === undefined || rowIdxMap.get(e) === p.rowIndex;
+                    if (rowOk && idxOk) picked.push(visHits[k]);
                 }
             }
             return picked
@@ -911,6 +940,7 @@ ${ROW_CLIMB_JS}
                     const stamp = nonce + '-' + ref;
                     e.setAttribute('data-hintref', stamp);
                     const climbRows = rowMemo.get(e);
+                    const selIdx = p.rowIndex !== undefined ? rowIdxMap.get(e) : undefined;
                     return {hint_ref: stamp, scan: i, tag: e.tagName.toLowerCase(),
                             dsh_ref: e.getAttribute('data-dshref') || '',
                             // A1 不变量：label === full_label 的前 40 字（同一 labelOf 截断）。
@@ -924,6 +954,10 @@ ${ROW_CLIMB_JS}
                             // 才有底座；缺字段 = 过滤清零 = 回捞死路。in-row 未声明时 rowMemo 恒空
                             // ⇒ 键不出现（回捞行形状与今天逐字节一致）。
                             ...(climbRows !== undefined && climbRows.length ? {row_texts: climbRows} : {}),
+                            // F83（row-index 权威对等）：回捞行补 row_index（additive）——回捞行
+                            // 并入主池后二次 hintMatch 的 rowIdx 过滤才有底座；缺字段 = 过滤清零 =
+                            // 死路。row-index 未声明时键不出现（批 1 in-row 回捞行逐字节不变）。
+                            ...(selIdx !== undefined ? {row_index: selIdx} : {}),
                             input_type: (e.getAttribute('type') || '').toLowerCase(),
                             href: href ? href.split('?')[0].replace(/\/+$/,'').split('/').slice(-2).join('/') : '',
                             ...(href ? {href_full: href} : {})};

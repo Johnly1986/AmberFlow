@@ -2,10 +2,10 @@
   "id": "books-inrow-token-missing",
   "site": "books",
   "tier": "probe",
-  "goal": "fail-closed 正向证明（探针，非门禁）：in-row token 页面缺失 ⇒ 声明目标确定性 target_not_found（命令闭集不回退全池、不静默取第一行），reason 三案①列真实行词元；本 case 只记录观测",
+  "goal": "fail-closed 正向证明（探针，非门禁；口径按 ROW_INDEX_HINT_PLAN §3.9 可达面矩阵实测修正）：in-row token 页面缺失 ⇒ 零动作 + 诚实落空——规划面停因如实观测（批 1 实测为 low_confidence，规划面三案证据不保证、接线属后续项），不回退全池、不静默取第一行；本 case 只记录观测",
   "subgoals": [
     {
-      "desc": "声明一个页面行词元中必然不存在的 in-row token——期望 target_not_found（含行词元证据），不命中任何按钮",
+      "desc": "声明一个页面行词元中必然不存在的 in-row token——期望零动作零错点（停因码如实观测记录，不预设 target_not_found）",
       "start_url": "https://books.toscrape.com/catalogue/category/books/travel_2/index.html",
       "commands": [
         { "op": "click", "target": "button in-row:zzq-missing-token-9x8" }

@@ -92,6 +92,13 @@ export interface ObserveElement {
    */
   row_texts?: string[];
   /**
+   * F83（row-index 观察面闭环）：dup 组内 DOM 先序位次（1-based）——**仅同文案重复组元素
+   * 携带**（帧内同组；无 dup 页不出字段 ⇒ 观察 JSON 逐字节不变）。row-index 匹配底座与
+   * suggestHints 第 6 档的序号来源（内容不可分网格的可行动出口）；不进模型面。序号即语义
+   * 的序漂移责任在作者（APP_SCRIPT_AUTHORING §4.13）。
+   */
+  row_index?: number;
+  /**
    * B 批：**结构证据**（仅 `includeStructure:true` 时出现；≤160 字符）。祖先 tag/`#id` +
    * 同 tag 兄弟序号 + 帧下标前缀（如 `f2>div#panel>button[2]`）——只回答"在哪个子树"，
    * **不是 hint**：动态页面可能失效、不可照抄。
@@ -192,6 +199,9 @@ function syntheticElem(row: ObserveRawRow, ref: string): Elem {
     // 与池行同构，suggestHints 第 5 档据此给出 in-row 候选（anchor_ids 先例：无 dup 组时
     // 字段不出现，观察集合形状不变）。
     ...(Array.isArray(row.row_texts) && row.row_texts.length > 0 ? { row_texts: row.row_texts } : {}),
+    // F83（row-index 观察面闭环）：dup 组内 DOM 先序位次透传——suggestHints 第 6 档据此给出
+    // row-index 候选（内容不可分网格的可行动出口）；无 dup 组时字段不出现。
+    ...(typeof row.row_index === "number" ? { row_index: row.row_index } : {}),
     // A 批（frame:<origin>）：observeElements 宿主侧按帧打点的帧链两字段透传——observe
     // 自证池与池行同构，帧限定候选（frame:<origin>）因此可被自证/给出（R2-9）。
     ...(row.frame_origin !== undefined ? { frame_origin: row.frame_origin } : {}),
@@ -227,7 +237,11 @@ function whyNotAdmitted(row: ObserveRawRow, classNames: string[] | undefined): s
     + " — for identical-text row grids (same-label buttons/cards), anchor by row content instead:"
     + " copy a self-verified `<label> in-row:<token>` from hint_candidates (`row_texts` rows carry"
     + " the tokens; row context is collected for same-text duplicate groups ONLY — a non-duplicate"
-    + " element can never match `in-row:`, by design). Boundary: hint_candidates self-verify against"
+    + " element can never match `in-row:`, by design); when every row's content is identical (no"
+    + " distinguishing tokens), use `<label> row-index:N` to pick by grid order instead (1-based"
+    + " DOM order within the duplicate group — the order IS the semantics, the author owns order"
+    + " drift; pairing it with an in-row guard or a content done-assertion turns silent mis-picks"
+    + " into explicit misses). Boundary: hint_candidates self-verify against"
     + " THIS observation set, not the run pool window (admitted ≠ in the 40/120 pool)";
 }
 
@@ -269,6 +283,8 @@ export async function observePage(
     const structurePath = orUndef(row.structure_path);
     // F82：dup 门控采集的行上下文（仅重复组携带；无 dup 页不出字段 ⇒ 观察 JSON 逐字节不变）。
     const rowTexts = Array.isArray(row.row_texts) && row.row_texts.length > 0 ? row.row_texts : undefined;
+    // F83：dup 组内 DOM 先序位次（仅重复组携带；无 dup 页不出字段 ⇒ 观察 JSON 逐字节不变）。
+    const rowIndex = typeof row.row_index === "number" ? row.row_index : undefined;
     return {
       ref: `o${i}`,
       tag: row.tag,
@@ -288,6 +304,7 @@ export async function observePage(
       ...(framePath === undefined ? {} : { frame_path: framePath }),
       ...(structurePath === undefined ? {} : { structure_path: structurePath, structure_unstable: true as const }),
       ...(rowTexts === undefined ? {} : { row_texts: rowTexts }),
+      ...(rowIndex === undefined ? {} : { row_index: rowIndex }),
     };
   });
   // 自证池 = 本次观察到的**准入面 + 可见**元素（真实池的上界；隐藏/池外元素不在其中，

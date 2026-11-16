@@ -15,8 +15,8 @@
  */
 
 import {
-  describeFrameSuffixRejection, describeRowSuffixRejection, frameChainValueProblem,
-  parseHint, splitTailSuffixes, type ParsedHint,
+  describeFrameSuffixRejection, describeRowIndexSuffixRejection, describeRowSuffixRejection,
+  frameChainValueProblem, parseHint, splitTailSuffixes, type ParsedHint,
 } from "./hint.ts";
 import { parseClickAtValue } from "./click-at.ts";
 import { sleepMs } from "../support/sleep.ts";
@@ -93,6 +93,15 @@ export interface Elem {
    * row_texts = in-row 匹配底座（自证候选的词元来源）。
    */
   row_texts?: string[];
+  /**
+   * F83（row-index 顺序行锚）：dup 组内 **DOM 先序位次**（1-based）——`row-index:N` 尾缀的
+   * 池侧匹配底座（整数全等比较）与 suggestHints 第 6 档的序号来源。编号口径（v1.0 §3.4）：
+   * 帧内 (tag+label) dup 子组按 scan 升序——单帧场景 = 纯 DOM 先序；跨帧同名网格各自编号。
+   * **仅同文案重复组元素携带**（与 near/row_texts 同触发）；**不进模型面**
+   * （`modelProjectionOf` guard+解构两处剥离）、**不进 esig/firstIfSame 签名**；只服务匹配/
+   * 回捞/建议/证据。序号即语义的合法场景（排序榜/排序命令后点第 N 行）由作者显式承担序漂移。
+   */
+  row_index?: number;
   /**
    * U3 类目标记（native-control / native-label / aria-role / aria-widget / native-activation）。
    * **只进 PoolView / inspect / 类目计数**，不进 `ChoiceRequest.elems` 的模型投影（F14）。
@@ -1009,6 +1018,12 @@ export interface ObserveRawRow {
    * observe 自证池与池行同构，suggestHints 第 5 档可给出 in-row 候选。不进模型面。
    */
   row_texts?: string[];
+  /**
+   * F83：dup 组内 DOM 先序位次（1-based）——OBSERVE_JS dup 门控编号（帧内同组按 rows 数组序；
+   * 无 dup 页不出字段 ⇒ 观察 JSON 逐字节不变）。syntheticElem 透传后 observe 自证池与池行
+   * 同构，suggestHints 第 6 档可给出 row-index 候选。不进模型面。
+   */
+  row_index?: number;
   visible?: boolean;
   bbox?: { x: number; y: number; w: number; h: number };
   in_surface?: boolean;
@@ -1510,6 +1525,10 @@ export function criteriaView(
  * pool-js ROW_CLIMB_JS），两个累加器独立——`out`（near）累加序/行过滤/3 行窗口逐字符不动
  * ⇒ near 逐字节相等；`rows`（row_texts）独立行过滤（现行过滤 OR 连续数字 ≥5 位）、窗口 6 行。
  * row_texts **仅重复组携带**（本函数只碰 dup 元素）、不进模型面（modelProjectionOf 剥离）。
+ *
+ * F83（row_index 编号接线，纯宿主计算零页面往返）：dup 清单（dups，跨帧计数触发面不变）按
+ * **(frame, tag+label) 子组 scan 升序**编号 1..K 写入 `elems[r].row_index`（v1.0 §3.4 编号
+ * 口径：帧内 dup 组 DOM 先序；跨帧同名网格各自编号——四面 JS pass 天然 per-frame 对齐）。
  */
 export async function addNearContext(page: PageLike, elems: ElemPool): Promise<void> {
   const cnt = new Map<string, number>();
@@ -1521,6 +1540,19 @@ export async function addNearContext(page: PageLike, elems: ElemPool): Promise<v
     .filter(([, e]) => (cnt.get(`${e.tag}\u0000${e.label}`) ?? 0) > 1 && e.scan !== undefined)
     .map(([r, e]) => [r, e.scan!, e.frame ?? 0]);
   if (!dups.length) return;
+  // F83：row_index 编号 = 帧内 (tag+label) 子组 scan 升序的 1-based 位次（与 near/row_texts
+  // 同触发——同一 dups 清单；纯内存排序，零新增往返）。
+  const rowGroups = new Map<string, Array<{ ref: string; scan: number }>>();
+  for (const [r, i, fi] of dups) {
+    const e = elems[r]!;
+    const key = `${fi}\u0000${e.tag}\u0000${e.label}`;
+    if (!rowGroups.has(key)) rowGroups.set(key, []);
+    rowGroups.get(key)!.push({ ref: r, scan: i });
+  }
+  for (const members of rowGroups.values()) {
+    members.sort((a, b) => a.scan - b.scan);
+    members.forEach((m, idx) => { elems[m.ref]!.row_index = idx + 1; });
+  }
   const labels = [...new Set(dups.map(([r]) => elems[r]!.label))].sort();
   const byFrame = new Map<number, Array<[string, number]>>();
   for (const [r, i, fi] of dups) {
@@ -1738,6 +1770,9 @@ export function frameHintFailureEvidence(
   // F82：in-row 侧证据状态（被拒文案 / 第一个合法声明的 token）。
   const rowRejections: string[] = [];
   let declaredToken: string | undefined;
+  // F83：row-index 侧证据状态（被拒文案 / 第一个合法声明的序号）。
+  const rowIdxRejections: string[] = [];
+  let declaredRowIndex: number | undefined;
   for (const target of targets) {
     if (typeof target !== "string" || target.trim() === "") continue;
     const rejection = describeFrameSuffixRejection(target);
@@ -1759,11 +1794,21 @@ export function frameHintFailureEvidence(
     } else if (parsed.inRow !== undefined && declaredToken === undefined) {
       declaredToken = parsed.inRow;
     }
+    // F83：row-index 侧（同目标串）——被拒点名；合法声明记序号（只记第一个，证据有界）。
+    const rowIdxRejection = describeRowIndexSuffixRejection(target);
+    if (rowIdxRejection !== null) {
+      if (!rowIdxRejections.includes(rowIdxRejection)) rowIdxRejections.push(rowIdxRejection);
+    } else if (parsed.rowIndex !== undefined && declaredRowIndex === undefined) {
+      declaredRowIndex = parsed.rowIndex;
+    }
   }
-  // 无尾缀参与 = 空串（旧 reason 逐字节不变）。F82：in-row 参与（被拒尝试或合法声明 +
-  // 池在手）也要给证据，故提前返回条件在旧条件上 additive。
+  // 无尾缀参与 = 空串（旧 reason 逐字节不变）。F82/F83：in-row / row-index 参与（被拒尝试
+  // 或合法声明 + 池在手）也要给证据，故提前返回条件在旧条件上 additive。
   if (rejections.length === 0 && declared.length === 0 && rowRejections.length === 0
-      && !(elems !== undefined && declaredToken !== undefined)) return "";
+      && rowIdxRejections.length === 0
+      && !(elems !== undefined && (declaredToken !== undefined || declaredRowIndex !== undefined))) {
+    return "";
+  }
   // F82：in-row 三案证据（纯内存；elems 未传 = 跳过，调用面行为逐字节不变）。
   // 匹配口径与 rules.rowMatch 同一行 includes（extraction 不能 import rules——rules → extraction
   // 既有依赖方向；一行口径改动须两处同步，勿另写第二套）。
@@ -1798,10 +1843,60 @@ export function frameHintFailureEvidence(
         + `行已定位：改 base 不改 token`;
     }
   }
+  // F83：row-index 案①/②证据（纯内存；elems 未传 = 跳过）。匹配口径 = row_index 整数全等
+  // （与 rules.rowIdx 同口径；extraction 不能 import rules，一行口径改动须两处同步）。
+  // 编号口径 = 帧内 (tag+label) dup 子组 DOM 先序（addNearContext 宿主编号）——本面 K 即池面
+  // 可见组大小（截断边界 v1.0 §3.4，案①如实报本面 K）。
+  let rowIdxEvidence: string | null = null;
+  if (elems !== undefined && declaredRowIndex !== undefined) {
+    const n = declaredRowIndex;
+    const hitRefs = Object.entries(elems)
+      .filter(([, e]) => e.row_index === n)
+      .map(([r]) => r);
+    if (hitRefs.length === 0) {
+      // 案①：越界（N > K）或组不存在 → 报本面网格组大小 K（按 tag+label 分组，≤3 组）
+      // + 真实行词元 ≤8（镜像 in-row 案①与 frame: "页面实际可用 origin" 先例）。
+      const groups = new Map<string, { tag: string; label: string; k: number }>();
+      for (const e of Object.values(elems)) {
+        if (e.row_index === undefined) continue;
+        const key = `${e.tag}\u0000${e.label}`;
+        const g = groups.get(key)
+          ?? { tag: e.tag, label: e.label, k: 0 };
+        g.k = Math.max(g.k, e.row_index);
+        groups.set(key, g);
+      }
+      const groupsText = [...groups.values()].slice(0, 3)
+        .map((g) => `${g.tag} ${JSON.stringify(g.label)} K=${g.k}`).join(", ");
+      const toks: string[] = [];
+      for (const e of Object.values(elems)) {
+        for (const line of Array.isArray(e.row_texts) ? e.row_texts : []) {
+          for (const w of String(line).toLowerCase().split(/\s+/)) {
+            if (w === "" || w.length > 20 || toks.includes(w)) continue;
+            toks.push(w);
+          }
+          if (toks.length >= 8) break;
+        }
+        if (toks.length >= 8) break;
+      }
+      rowIdxEvidence = `row-index:${JSON.stringify(n)} 超出网格组大小（row-index 从 1 开始、按组内`
+        + ` DOM 先序编号）——网格组大小 ≤3 组: [${groupsText || "-"}]——池面真实行词元 ≤8: `
+        + `[${toks.join(", ") || "-"}]`;
+    } else {
+      // 案②：序号已定位（第 N 个成员在池内）但 hint 整体未命中 → 作者核对组合守卫 token /
+      // 改 base 不改序号。
+      const withIdx = targets.find((t) => typeof t === "string" && parseHint(t as string).rowIndex !== undefined) as string;
+      const base = splitTailSuffixes(withIdx).base;
+      rowIdxEvidence = `row-index:${JSON.stringify(n)} 已定位 ${hitRefs.length} 个第 ${n} 成员`
+        + `（${hitRefs.slice(0, 3).join(", ")}）但行内没有命中 base ${JSON.stringify(base)}——`
+        + `序号已定位：核对组合守卫 in-row token 或改 base 不改序号`;
+    }
+  }
   const parts: string[] = [];
   if (rejections.length > 0) parts.push(rejections.slice(0, 2).join("；"));
   if (rowRejections.length > 0) parts.push(rowRejections.slice(0, 2).join("；"));
+  if (rowIdxRejections.length > 0) parts.push(rowIdxRejections.slice(0, 2).join("；"));
   if (rowEvidence !== null) parts.push(rowEvidence);
+  if (rowIdxEvidence !== null) parts.push(rowIdxEvidence);
   if (declared.length > 0) {
     parts.push(`声明链 ${declared.slice(0, 2).map((c) => JSON.stringify(c)).join(" / ")} `
       + `在允许帧里没有命中（检查 origin 是否写错/该帧是否被 hosts 排除）`);

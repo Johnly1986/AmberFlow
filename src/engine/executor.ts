@@ -360,6 +360,10 @@ function ambiguityStopReason(target: string, poolSize: number, amb: AmbiguityVie
  * ≤40 字符）——fallback 行并入主池后同样走二次 hintMatch 的 inRow 过滤，缺字段 =
  * 重演 F-1 半链缺口（回捞死路）。in-row 未声明时 dupLabels 为 null、零爬升、行形状与
  * 今天逐字节一致。
+ *
+ * F83（A3 row-index 对等）：`arg.rowIndex` 声明时每行补 `row_index`（dup 组内 DOM 先序
+ * 位次表，一次 O(n)——v1.0 §3.5 单用零爬升：row-index-only 不触发 __rowClimb）；缺字段 =
+ * rowIdx 过滤清零 = 死路。未声明任一行锚时行形状与今天逐字节一致。
  */
 export const DOM_FALLBACK_COLLECT_JS = String.raw`(arg) => {
   const g = globalThis;
@@ -368,7 +372,7 @@ ${ROW_CLIMB_JS}
   const sel = arg.sel, tok = arg.tok;
   const out = [];
   const all = g.document.querySelectorAll(sel);
-  const dupLabels = arg.inRow === undefined ? null : (() => {
+  const rowCtx = (arg.inRow === undefined && arg.rowIndex === undefined) ? null : (() => {
     const pairs = [];
     for (let i = 0; i < all.length; i++) {
       const e = all[i];
@@ -376,8 +380,23 @@ ${ROW_CLIMB_JS}
         || e.getAttribute("placeholder") || e.getAttribute("value") || "").replace(/\s+/g, " ").trim().slice(0, 40);
       pairs.push([String(e.tagName || "").toLowerCase(), lb]);
     }
-    return __dupLabelsOf(pairs);
+    return { labels: __dupLabelsOf(pairs), pairs: pairs };
   })();
+  const rowIdxMap = new Map();
+  if (arg.rowIndex !== undefined && rowCtx !== null) {
+    const cnt = {};
+    for (let i = 0; i < rowCtx.pairs.length; i++) {
+      const k = __dupKeyOf(rowCtx.pairs[i][0], rowCtx.pairs[i][1]);
+      cnt[k] = (cnt[k] || 0) + 1;
+    }
+    const seen = {};
+    for (let i = 0; i < rowCtx.pairs.length; i++) {
+      const k = __dupKeyOf(rowCtx.pairs[i][0], rowCtx.pairs[i][1]);
+      if ((cnt[k] || 0) <= 1) continue;
+      seen[k] = (seen[k] || 0) + 1;
+      rowIdxMap.set(all[i], seen[k]);
+    }
+  }
   for (let i = 0; i < all.length; i++) {
     const e = all[i];
     const tag = String(e.tagName || "").toLowerCase();
@@ -385,10 +404,11 @@ ${ROW_CLIMB_JS}
       || e.getAttribute("placeholder") || e.getAttribute("value") || "").replace(/\s+/g, " ").trim().slice(0, 200);
     e.setAttribute("data-af-probe", tok + "-" + i);
     let rowTexts = null;
-    if (dupLabels !== null) {
-      const c = __rowClimb(e, dupLabels);
+    if (arg.inRow !== undefined && rowCtx !== null) {
+      const c = __rowClimb(e, rowCtx.labels);
       if (c.rows.length) rowTexts = c.rows;
     }
+    const selIdx = arg.rowIndex !== undefined && rowCtx !== null ? rowIdxMap.get(e) : undefined;
     out.push({
       i, tag, label,
       role: String(e.getAttribute("role") || "").toLowerCase(),
@@ -398,6 +418,7 @@ ${ROW_CLIMB_JS}
       draggable: String(e.getAttribute("draggable") || "").toLowerCase() === "true",
       anchors: anchorIdsOf(e),
       ...(rowTexts !== null ? { row_texts: rowTexts } : {}),
+      ...(selIdx !== undefined ? { row_index: selIdx } : {}),
     });
   }
   return out;
@@ -2529,10 +2550,16 @@ export class BrowserMiddleware {
       // E1（within 权威对等）：inline TS arrow → PASS_DOM_FALLBACK（compile() 常量，行补 anchors；
       // 闭包不跨——共享 ANCHOR_JS 必须 ${} 内插进 pass 源码）。
       // F82：in-row 声明随 arg 下发（inRow）——回退面每行补 row_texts（A3 半链缺口闭合）；
-      // 未声明时 arg 不带键，pass 内零爬升、行形状逐字节不变。
-      const inRowTok = parseHint(target).inRow;
+      // F83：row-index 声明随 arg 下发（rowIndex）——回退面每行补 row_index（对等）。
+      // 未声明时 arg 不带键，pass 内零计算、行形状逐字节不变。
+      const parsedTarget = parseHint(target);
+      const inRowTok = parsedTarget.inRow;
+      const rowIdxTok = parsedTarget.rowIndex;
       rows = (await page.evaluate(PASS_DOM_FALLBACK,
-        { sel: fallbackSel, tok: token, ...(inRowTok !== undefined ? { inRow: inRowTok } : {}) })) as Array<Record<string, unknown>>;
+        { sel: fallbackSel, tok: token,
+          ...(inRowTok !== undefined ? { inRow: inRowTok } : {}),
+          ...(rowIdxTok !== undefined ? { rowIndex: rowIdxTok } : {}),
+        })) as Array<Record<string, unknown>>;
     } catch {
       rows = [];
     }
@@ -2569,6 +2596,8 @@ export class BrowserMiddleware {
         // 合成行并入主池后二次 hintMatch 的 inRow 过滤才有底座；缺字段 = 过滤清零 = 死路。
         ...(Array.isArray(r["row_texts"]) && (r["row_texts"] as string[]).length > 0
           ? { row_texts: (r["row_texts"] as string[]).map((x) => String(x)) } : {}),
+        // F83（A3 row-index 对等）：fallback 行补 row_index（additive）——rowIdx 过滤底座。
+        ...(typeof r["row_index"] === "number" ? { row_index: r["row_index"] } : {}),
         ...(mainStamp.frame_origin !== undefined ? { frame_origin: mainStamp.frame_origin } : {}),
         ...(mainStamp.frame_path !== undefined ? { frame_path: mainStamp.frame_path } : {}),
       } as Elem;
@@ -5427,6 +5456,21 @@ export class BrowserMiddleware {
           warnings.push(warning);
           if (verbose) console.log(`  step ${stepNo}: ${warning}`);
         };
+        // F83：行证据（row_evidence，v1.0 §3.7 目标⑤）——声明 row-index/in-row 的目标解析
+        // 成功后，所选 Elem 的实值进 trace（事后可审计"点的是哪一行"：row_index 回答第几个
+        // 成员、row_texts 回答那一行长什么）。仅字段存在时出现；缺省路径零新字段。
+        const rowDeclaredHint = commandMode && cmdPick ? String(cmdPick.cmd.target ?? "") : curHint;
+        const rowParsed = rowDeclaredHint ? parseHint(rowDeclaredHint) : null;
+        const rowEvidenceOut = rowParsed !== null
+          && (rowParsed.rowIndex !== undefined || rowParsed.inRow !== undefined)
+          && (el.row_index !== undefined || el.row_texts !== undefined)
+          ? {
+              row_evidence: {
+                ...(el.row_index !== undefined ? { row_index: el.row_index } : {}),
+                ...(el.row_texts !== undefined ? { row_texts: el.row_texts } : {}),
+              },
+            }
+          : {};
         trace.push({
           step: stepNo, desc, how, value: redactValue(el, uploadFiles ?? (clickPosition !== null ? null : arg)),
           risky, executed, confirmed, method,
@@ -5446,7 +5490,7 @@ export class BrowserMiddleware {
           ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question
           inert, url: urlOf(pg),
           ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(),
-          ...identityEvidence(), ...declaredEvidence(), ...domFallbackEvidence(),
+          ...identityEvidence(), ...declaredEvidence(), ...domFallbackEvidence(), ...rowEvidenceOut,
         });
         // A1 子改动③：这个已执行动作的 after 签名等下一次观察落账（见循环头部的落账点）。
         pendingAfterIdx = trace.length - 1;
