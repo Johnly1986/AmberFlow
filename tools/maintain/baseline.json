@@ -6,7 +6,6 @@
     "phaseFunctionMaxLines": 400,
     "files": {
       "src/engine/executor.ts": 2721,
-      "src/app/ctx.ts": 1799,
       "src/app/session-runtime.ts": 992,
       "src/app/app-adapters.ts": 988,
       "src/app/app-runner.ts": 974,
@@ -17,11 +16,6 @@
       "src/engine/pool-js.ts": 824
     },
     "functions": [
-      {
-        "file": "src/app/ctx.ts",
-        "name": "createCtx",
-        "lines": 1703
-      },
       {
         "file": "src/app/app-runner.ts",
         "name": "runScriptApp",
@@ -46,11 +40,6 @@
         "file": "src/app/app-runner-cli.ts",
         "name": "main",
         "lines": 272
-      },
-      {
-        "file": "src/app/ctx.ts",
-        "name": "runOneStep",
-        "lines": 260
       },
       {
         "file": "src/cli/commands/run.ts",
@@ -120,7 +109,13 @@
       "src/app/app-runner-declared.ts#runApp": 686,
       "src/engine/executor-actions.ts#actOnce": 184,
       "src/engine/executor-resolve-a.ts#_executeElement": 234,
-      "src/engine/executor-phases-c.ts#runReportTail": 193
+      "src/engine/executor-phases-c.ts#runReportTail": 193,
+      "src/app/ctx-nav.ts#createCtxNav": 213,
+      "src/app/ctx-read.ts#createCtxRead": 460,
+      "src/app/ctx-runtime.ts#createCtxRuntime": 277,
+      "src/app/ctx-scroll.ts#createCtxScroll": 159,
+      "src/app/ctx-step.ts#runOneStep": 263,
+      "src/app/ctx-tools.ts#createCtxTools": 196
     }
   },
   "docs": {

@@ -1,0 +1,48 @@
+{
+  "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
+  "id": "ctx-modules",
+  "files": {
+    "src/app/ctx-manual.ts": {
+      "symbols": {
+        "createCtxManual": "3db355e4f2480018522b9adc6081d55e224ef33f73d58cc847f31194094ce6ff"
+      }
+    },
+    "src/app/ctx-nav.ts": {
+      "symbols": {
+        "createCtxNav": "e301bde15006e4ad05287dfeb6023c292d8f488be901e5991f61d1860ce22847"
+      }
+    },
+    "src/app/ctx-read.ts": {
+      "symbols": {
+        "createCtxRead": "1513618967034b5779e30a4799a359a2c1fe55e6ab390ffad3dcf0239fc97388"
+      }
+    },
+    "src/app/ctx-runtime.ts": {
+      "symbols": {
+        "createCtxRuntime": "258318e02d925f8c68b8f4be20f4fde2989ac614879fbeea0de4c92effefe81c",
+        "CtxRuntime": "600a772830673ea801d89028bb0f20bd1e6fefca0e266df1503e9b07aae40356",
+        "TabPage": "564feae46d03c6e89db41bd82f7c6030987e0bf5ff6f53a2bf7646d5a4dc9e77"
+      }
+    },
+    "src/app/ctx-scroll.ts": {
+      "symbols": {
+        "createCtxScroll": "e967e943661bc668cd85a689fd2a73c00ef2af0e2323adfd2d53d05144084347"
+      }
+    },
+    "src/app/ctx-step.ts": {
+      "symbols": {
+        "runOneStep": "41f7404b93a4bfc9b7537cd3c439cf5d692fdce369ad719d97a14fe8f4493ffa"
+      }
+    },
+    "src/app/ctx-tools.ts": {
+      "symbols": {
+        "createCtxTools": "c0ab8241352a56e5eb12953544323a38379c178dc2931c8f74df9c160138f46e"
+      }
+    },
+    "src/app/ctx.ts": {
+      "symbols": {
+        "createCtx": "c72112555e7d016de16596ea7f89dfa786bb3112d46d38007fb451bc1f0f1952"
+      }
+    }
+  }
+}
