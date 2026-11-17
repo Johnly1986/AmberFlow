@@ -663,6 +663,7 @@ interface PromptSpec {
 |---|---|---|---|
 | E1 | `extraction.ts` 1569→**858** 行纯区外搬：element model/Elem 形状/动作能力面/槽位 → `src/engine/elem-model.ts`（434 行）；帧读侧（帧门禁/selector frame 尾缀/anyFrame/帧证据）→ `src/engine/frame-scope.ts`（149→438 行）；`firstOf/urlOf/framesOf` → `src/engine/page-shapes.ts`（28 行）。既有 importer 经 extraction re-export 零改动 | 运行时导出面 `Object.keys(extraction)` 改前=改后（逐字相同）；split-check `extraction-pure`（4 文件/87 符号；与搬前 extraction 的 77 个同名符号 hash **0 mismatch**）；`npm run check` + `verify:offline` + `verify:runtime:offline` 全绿；基线 extraction 1612→858 | 本批提交 |
 | E2 | `pool-js.ts` 1102→**824** 行纯区外搬：共享 JS 片段（COLLECT / BUCKET / LABEL / STRUCTURE / ANCHOR / ROW_CLIMB）+ 宿主 `compile` → `src/engine/pool-js-core.ts`（296 行）；pool-js 的 pass 仍内插同一份并 re-export 导出面 | 运行时导出面与**全部字符串/编译函数值 hash** 改前=改后（27 符号 0 mismatch）；split-check `pool-js-pure`（2 文件/27 符号）；check + 双 lane 绿；基线 pool-js 1102→824 | 本批提交 |
+| E3 | `session-runtime.ts` 1460→**992** 行：契约（选项/退出码/小工具）→ `session-runtime-contract.ts`（245）；响应证据/校验 helper 提为显式依赖函数 → `session-runtime-evidence.ts`（195）；`runSession` 入口（stdio/超时/退出码）→ `session-runtime-entry.ts`（79）；原文件 re-export 导出面 | **会话协议 A/B**：fixtures 静态服务 + `runSession`（in-process，inputFile 驱动 open/observe/act/read/signal/extract/mark/close 全链路），归一化响应 JSON 改前=改后（逐字节）；check + 双 lane 绿；基线 session-runtime 1460→992 | 本批提交 |
 
 
 ### P2 主线（条件启动；3–5 周，12–20 人日）
