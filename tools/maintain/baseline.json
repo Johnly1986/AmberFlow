@@ -8,7 +8,7 @@
       "src/engine/executor.ts": 5829,
       "src/app/app-runner.ts": 2847,
       "src/app/ctx.ts": 1799,
-      "src/app/session-runtime.ts": 1460,
+      "src/app/session-runtime.ts": 992,
       "src/app/app-adapters.ts": 988,
       "src/engine/executor-pure.ts": 907,
       "src/cli/commands/apps.ts": 877,

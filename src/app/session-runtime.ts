@@ -46,244 +46,19 @@ import { takeHintMatchOthers } from "../engine/rules.ts";
 import { DEFAULT_SETTLE, settle } from "../engine/settle.ts";
 import type { LaunchWindowMode } from "../browser/browser-env.ts";
 import type { AmbiguityView } from "../engine/ambiguity.ts";
+import {
+  actAmbiguity, actionabilityResponse, ambiguityMode, ambiguityRecord, ambiguityResponse, displayHow,
+  doRead, doSignal, doWaitFor, failureScreenshot, missDiagnosticsResponse, observeAfter, signalSpec,
+} from "./session-runtime-evidence.ts";
+import {
+  FLAP_HEAL_SETTLE_MS, FLAP_QUIET_EXIT_MS, FLAP_WINDOW_MS, SESSION_ACT_OPS, SESSION_DEFAULT_MAX_REQUEST_BYTES,
+  bounded, encodedFormUrl, errMsg, SESSION_REQUEST_TYPES, intIn, isDeadPageError, isObj, judgeFlapNavs, nonEmpty, tabTitleOf,
+  type FlapHealResult, type FlapJudgement, type NavEvent, type SessionActOp, type SessionExit,
+  type SessionOptions, type SessionScrollOut, type SessionSink,
+} from "./session-runtime-contract.ts";
+export * from "./session-runtime-contract.ts";
+export { runSession } from "./session-runtime-entry.ts";
 
-/** `act` 的 MVP 能力面（执行器里 drag/upload/clickAt 也有，但 authoring MVP 不暴露）。 */
-export const SESSION_ACT_OPS = ["click", "check", "fill", "select", "hover", "scroll"] as const;
-export type SessionActOp = (typeof SESSION_ACT_OPS)[number];
-
-/**
- * `act scroll` 两条路径（合成目标 = `mw.scrollDocument`，元素目标 = `mw.actOnce`）的共同
- * 返回形状（B2 起含实测滚动证据）。两边都是"引擎给什么就有什么"，所以全部可选——会话层
- * 只**回显**，不补算 moved/delta。
- */
-interface SessionScrollOut {
-  ok: boolean;
-  stopCode?: string;
-  reason?: string;
-  ref?: string;
-  moved?: boolean;
-  delta?: number;
-  scrollTop?: number;
-  scrollHeight?: number;
-  clientHeight?: number;
-  ambiguity?: AmbiguityView;
-  /** A4：落空（`target_not_found`）判别证据；引擎给才有。 */
-  diagnostics?: ActMissDiagnostics;
-}
-
-/** 请求类型闭集（未知 type = 结构化 config_error + 这张表）。 */
-export const SESSION_REQUEST_TYPES = [
-  "open", "observe", "act", "read", "extract", "waitFor", "signal", "snapshot", "mark", "tab", "close",
-] as const;
-
-/** 缺省 idle 超时（两次请求之间的静默上限）。 */
-export const SESSION_DEFAULT_IDLE_TIMEOUT_MS = SESSION_IDLE_TIMEOUT_MS;
-/** 单行请求上限。 */
-export const SESSION_DEFAULT_MAX_REQUEST_BYTES = 1_048_576;
-
-/* ---------------------- task-38：导航 flap 检测与有界自愈 ---------------------- */
-
-/** flap 观察窗口（open 返回后 / 自愈落地后各观察一次的时长）。 */
-export const FLAP_WINDOW_MS = 1_500;
-/**
- * 静默早退：open 返回后这么久仍**没有**主 frame 导航 → 稳定页，立刻放行响应（零新字段）。
- * 阈值必须大于「flap 页首次客户端导航的延迟」——zh.wikipedia 文章页实测 ~0.37–0.9s
- * 本地 fixture 250ms——取 600ms 可盖住两者实测下界；
- * 代价是稳定页 open 多等 ~600ms（任务书原文写 ≤100ms，实测对照见 task38/assert-results，
- * 常数是单点可调项，由 lead 裁决）。稳定页一旦在窗口内出现任何 post-open 导航，
- * 就放弃早退、观察满整个窗口再判严格签名。
- */
-export const FLAP_QUIET_EXIT_MS = 600;
-/** 自愈导航落地（DCL）后的 settle 等待，之后开复察窗口。 */
-export const FLAP_HEAL_SETTLE_MS = 500;
-
-/** 一条主 frame 导航事件（flap 检测的原始观察）。 */
-export interface NavEvent { ts: number; url: string }
-
-/** flap 判定结果（严格签名，见 `judgeFlapNavs`）。 */
-export interface FlapJudgement {
-  navigations: number;
-  window_ms: number;
-  /** 去重后的导航形态样例（≤5，保持首次出现顺序）。 */
-  urls_sample: string[];
-  /** 窗口内最后一次主 frame 导航的 URL（自愈兜底目标）。 */
-  last_url: string;
-}
-
-/** 一次有界自愈的结果。 */
-export interface FlapHealResult {
-  healed: boolean;
-  heal_url: string;
-  reason?: string;
-}
-
-const urlOriginOf = (u: string): string => { try { return new URL(u).origin; } catch { return ""; } };
-const urlPathOf = (u: string): string => { try { return new URL(u).pathname; } catch { return ""; } };
-const stripFragment = (u: string): string => { const i = u.indexOf("#"); return i >= 0 ? u.slice(0, i) : u; };
-
-/**
- * 共同 path 前缀：逐字符 LCP，完全相同则原样返回，否则回退到最后一个 "/"。
- * 返回 null = 没有非平凡前缀（如 "/a" 与 "/b" 只共出 "/"——那不是同一页面在翻形态）。
- */
-function commonPathPrefix(paths: string[]): string | null {
-  if (paths.length === 0) return null;
-  let lcp = paths[0]!;
-  for (const p of paths.slice(1)) {
-    let i = 0;
-    while (i < lcp.length && i < p.length && lcp[i] === p[i]) i += 1;
-    lcp = lcp.slice(0, i);
-    if (lcp === "") return null;
-  }
-  if (paths.every((p) => p === lcp)) return lcp;
-  const cut = lcp.lastIndexOf("/");
-  return cut > 0 ? lcp.slice(0, cut + 1) : null;
-}
-
-/**
- * task-38：主 frame 导航序列是否构成「URL flap」（**严格**触发签名）：
- *   1.5s 窗口内 ≥4 次主 frame 导航，且 URL 在 ≥2 种形态间反复交替——
- *   同一 origin、同一 path 前缀、去重后 ≥2 个 URL、至少一个形态出现 ≥2 次
- *   （A↔B 交替满足；正常重定向 1-2 次不满足次数；单向重定向链每个 URL 只出现一次，
- *   不满足「反复」；刷新同一 URL 不满足「≥2 形态」）。
- * 返回 null = 不是 flap。
- */
-export function judgeFlapNavs(seq: NavEvent[], windowMs: number): FlapJudgement | null {
-  if (seq.length < 4) return null;
-  const urls = seq.map((n) => stripFragment(n.url));
-  const distinct = [...new Set(urls)];
-  if (distinct.length < 2) return null;
-  if (new Set(distinct.map(urlOriginOf)).size !== 1) return null;
-  const prefix = commonPathPrefix(distinct.map(urlPathOf));
-  if (prefix === null || prefix.length <= 1) return null;
-  if (!distinct.some((u) => urls.filter((x) => x === u).length >= 2)) return null;
-  return {
-    navigations: seq.length,
-    window_ms: windowMs,
-    urls_sample: distinct.slice(0, 5),
-    last_url: urls[urls.length - 1]!,
-  };
-}
-
-/**
- * task-38：自愈目标 URL——优先「编码形态」（path 含百分比编码，如 zh.wikipedia 的
- * /wiki/%E8…；实测编码标题 URL 直开是稳定的），判不出编码形态就用最后一次
- * framenavigated 的 URL。
- */
-function encodedFormUrl(urls: string[]): string | null {
-  for (const u of urls) {
-    try {
-      const p = new URL(u).pathname;
-      if (p.includes("%") && decodeURIComponent(p) !== p) return u;
-    } catch { /* 坏 URL 不候选 */ }
-  }
-  return null;
-}
-
-export interface SessionOptions {
-  /** 启动后自动 open 的入口页（`--url`）。 */
-  url?: string | null;
-  /** 导航信封（`--host`/`--hosts`；缺省从 `--url` 推断）。 */
-  hosts?: string[] | null;
-  headful?: boolean;
-  /** 有头窗口尺寸模式（`--window`）：maximized | fullscreen；仅 headful 生效。 */
-  window?: LaunchWindowMode | null;
-  /** 证据落点（缺省 `$AMBERFLOW_HOME/session/<runId>`）。 */
-  outDir?: string | null;
-  /** 动作轨迹 JSONL 落点（`--record`；给了才写）。 */
-  record?: string | null;
-  /**
-   * `--record-values`（缺省 false）：轨迹里 fill/select 除 `value_hash` 外**再记明文 `value`**。
-   * 安全取舍：轨迹可能被复制进仓库/`app.mjs`，所以明文只由作者显式 opt-in；缺省恒 hash。
-   */
-  recordValues?: boolean;
-  /** 从文件读请求而不是 stdin（`--input`；Windows 管道不可靠时用）。 */
-  inputFile?: string | null;
-  /**
-   * A2：`act` 的缺省歧义策略（`--on-ambiguous`）。
-   *   - `"fail"`（缺省）：命令步同一个歧义谓词成立时**零动作** → 结构化 `target_ambiguous`
-   *     + 有界 `ambiguity` 证据（会话不再"随便点第一个候选"）；
-   *   - `"act"`：恢复旧行为（`resolveCommandRef` 可行动优先取 refs[0] 直接执行）。
-   * 单行请求可用 `onAmbiguous` 覆盖本次（见 `doAct`）。
-   */
-  onAmbiguous?: "fail" | "act";
-  /**
-   * S2/E5：稳定门（`--settle off` = 关）。关 = extract 不做滚动稳定判定
-   * （响应不带 `scroll_settled`）、执行器抽池不等静默——与既有 settle 语义同源。
-   */
-  settle?: "off" | null;
-  idleTimeoutMs?: number;
-  maxRequestBytes?: number;
-  verbose?: boolean;
-  quiet?: boolean;
-  env?: NodeJS.ProcessEnv;
-}
-
-/** 输出面：`respond` 一行一个 JSON 对象（stdout）；`log` 人话（stderr）。 */
-export interface SessionSink {
-  respond(obj: Record<string, unknown>): void;
-  log(line: string): void;
-}
-
-/** 会话收尾原因（决定退出码）。 */
-export type SessionExit = "closed" | "eof" | "idle_timeout" | "browser_dead" | "interrupted";
-
-/** 退出码：0 干净关闭 / 1 不可恢复 / 3 被挡住（idle 超时）。用完即弃的会话不是"失败"。 */
-export function sessionExitCode(exit: SessionExit): number {
-  if (exit === "closed" || exit === "eof") return 0;
-  if (exit === "idle_timeout") return 3;
-  return 1;
-}
-
-const isObj = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
-
-const nonEmpty = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
-
-function errMsg(e: unknown): string {
-  const m = e instanceof Error ? e.message : String(e);
-  return m.split("\n")[0]!.slice(0, 400);
-}
-
-/** 浏览器/页面已不可复用（唯一的会话级升级判据；其余失败都只是单行失败）。 */
-function isDeadPageError(msg: string): boolean {
-  return /Target page, context or browser has been closed|Target closed|browser has been closed|Browser has been closed|Session closed|Page closed|has been disconnected/i.test(msg);
-}
-
-function intIn(v: unknown, lo: number, hi: number): number | undefined {
-  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
-  if (!Number.isFinite(n)) return undefined;
-  return Math.max(lo, Math.min(hi, Math.floor(n)));
-}
-
-/**
- * F76：best-effort 的有界等待（与 ctx.ts 的同名 helper 同语义）：超时/失败都不致命——
- * 切页事实已经发生，置前/等载失败只是"没等到"，不是错误。
- */
-async function bounded(fn: () => Promise<unknown> | undefined, ms: number): Promise<void> {
-  try { await Promise.race([Promise.resolve().then(fn), sleepMs(ms)]); } catch { /* best effort */ }
-}
-
-/**
- * F76：任意标签页的标题读取有界（2s）：一个卡死的标签页不能拖住 tab list/switch 的响应
- * （与 ctx.ts 的 tabs titleOf 同口径；catch 在 race 之前挂上，race 输了也不产生未处理拒绝）。
- */
-async function tabTitleOf(p: AnyPage): Promise<string> {
-  try {
-    const title = Promise.resolve()
-      .then(() => p.title())
-      .then((t) => String(t ?? ""))
-      .catch(() => "");
-    return await Promise.race([title, sleepMs(2000).then(() => "")]);
-  } catch {
-    return "";
-  }
-}
-
-/**
- * 一条持续会话。生命周期：`start()`（可选自动 open）→ `handleLine()` 逐行 →
- * `finish()`（写 trace/轨迹收尾 + 关浏览器）。每条失败只产出一个 `ok:false` 响应，
- * 只有"页面已死"会把会话升级终止。
- */
 export class SessionRuntime {
   readonly runId: string;
   readonly outDir: string;
@@ -551,10 +326,10 @@ export class SessionRuntime {
       case "open": return this.doOpen(req);
       case "observe": return this.doObserve(req);
       case "act": return this.doAct(req);
-      case "read": return this.doRead(req);
+      case "read": return doRead(this.ctx(), req);
       case "extract": return this.doExtract(req);
-      case "waitFor": return this.doWaitFor(req);
-      case "signal": return this.doSignal(req);
+      case "waitFor": return doWaitFor(this.ctx(), (l) => this.log(l), req);
+      case "signal": return doSignal(this.ctx(), (l) => this.log(l), req);
       case "snapshot": return this.doSnapshot(req);
       case "mark": return this.doMark(req);
       case "tab": return this.doTab(req);
@@ -718,7 +493,7 @@ export class SessionRuntime {
     const actOp = op as SessionActOp;
     // A2：本行歧义策略 = 请求字段 onAmbiguous（桥逐调用透传）> 会话旗标/缺省 fail。
     // 非法值 = 结构化 config_error（与其它请求字段同一形状校验纪律，不静默取缺省）。
-    const ambiguousMode = this.ambiguityMode(req);
+    const ambiguousMode = ambiguityMode(req, this.opts.onAmbiguous);
     if (ambiguousMode === null) {
       return {
         ok: false, code: "config_error",
@@ -769,7 +544,7 @@ export class SessionRuntime {
         : await this.mw().actOnce(page, String(targetRaw), "scroll", null, ambiguousMode,
           wantsContainer ? { ...(toDir === undefined ? {} : { to: toDir }), ...(by === undefined ? {} : { by }) } : undefined,
           { diagnostics: true, ...(rehydrateRescan ? { rehydrateRescan: true } : {}) });
-      const scrollAmb = synthetic ? {} : this.actAmbiguity(String(targetRaw), out.ref ?? null);
+      const scrollAmb = synthetic ? {} : actAmbiguity(String(targetRaw), out.ref ?? null);
       // A2：只有元素 scroll（actOnce 分支）可能带歧义证据；合成目标走 scrollDocument，没有该键。
       const scrollAmbiguity: AmbiguityView | undefined = out.ambiguity;
       const scrollTarget = nonEmpty(targetRaw) ? String(targetRaw) : "document";
@@ -795,7 +570,7 @@ export class SessionRuntime {
         ...(delta === undefined ? {} : { delta }),
         ...(scrollTop === undefined ? {} : { scrollTop }),
         url: urlOf(page),
-        ...this.ambiguityRecord(scrollAmbiguity),
+        ...ambiguityRecord(scrollAmbiguity),
         ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
       });
       if (out.ok !== true) {
@@ -803,9 +578,9 @@ export class SessionRuntime {
           ok: false, code: String(out.stopCode ?? "not_scrollable"), reason: String(out.reason ?? "scroll failed"),
           op: actOp, target: scrollTarget, executed: false,
           ...scrollAmb,
-          ...this.ambiguityResponse(scrollAmbiguity),
-          ...this.missDiagnosticsResponse(out.diagnostics),
-          ...(await this.failureScreenshot(page, this.actionCount, req)),
+          ...ambiguityResponse(scrollAmbiguity),
+          ...missDiagnosticsResponse(out.diagnostics),
+          ...(await failureScreenshot(this.outDir, (l) => this.log(l), page, this.actionCount, req)),
         };
       }
       const scroll = typeof scrollTop === "number"
@@ -821,7 +596,7 @@ export class SessionRuntime {
         ...(scroll === undefined ? {} : { scroll }),
         url: urlOf(page), elapsed_ms: Date.now() - started,
         ...scrollAmb,
-        ...(await this.observeAfter(req)),
+        ...(await observeAfter(this.ctx(), req)),
       };
     }
 
@@ -854,7 +629,7 @@ export class SessionRuntime {
           ? { occlusionProbe: true, diagnostics: true, ...(rehydrateRescan ? { rehydrateRescan: true } : {}) }
           : { diagnostics: true, ...(rehydrateRescan ? { rehydrateRescan: true } : {}) });
     // 解析证据在 take 后立刻读取（observeAfter 会再次触发 hintMatch，不能放在它之后）。
-    const amb = this.actAmbiguity(target, out.ref);
+    const amb = actAmbiguity(target, out.ref);
     this.recordAction({
       op: actOp, target,
       ...(actOp === "fill" || actOp === "select"
@@ -870,7 +645,7 @@ export class SessionRuntime {
       how: out.how ?? null,
       changed: out.changed === true,
       url: urlOf(page),
-      ...this.ambiguityRecord(out.ambiguity),
+      ...ambiguityRecord(out.ambiguity),
       ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
     });
     if (out.ok !== true) {
@@ -885,24 +660,24 @@ export class SessionRuntime {
         reason: String(out.reason ?? ""), op: actOp, target, executed: false,
         ...(out.ref === undefined ? {} : { ref: out.ref }),
         url: urlOf(page), elapsed_ms: Date.now() - started,
-        ...this.actionabilityResponse(out.actionability),
-        ...(await this.failureScreenshot(page, this.actionCount, req)),
+        ...actionabilityResponse(out.actionability),
+        ...(await failureScreenshot(this.outDir, (l) => this.log(l), page, this.actionCount, req)),
         ...(overlay !== null && overlay.length > 0 ? { overlay } : {}),
         ...amb,
-        ...this.ambiguityResponse(out.ambiguity),
-        ...this.missDiagnosticsResponse(out.diagnostics),
+        ...ambiguityResponse(out.ambiguity),
+        ...missDiagnosticsResponse(out.diagnostics),
       };
     }
     this.log(`act ${actOp} ${JSON.stringify(target)} → ${String(out.how)} changed=${out.changed === true}`);
     return {
       ok: true, op: actOp, target, executed: true,
-      ref: out.ref ?? null, how: this.displayHow(actOp, out.how), changed: out.changed === true,
+      ref: out.ref ?? null, how: displayHow(actOp, out.how), changed: out.changed === true,
       url: urlOf(page), elapsed_ms: Date.now() - started,
       ...(out.probe_navigated === true ? { probe_navigated: true } : {}),
       // E1-c：`#id` 直查兜底命中的解析通道证据（additive；其余路径键集不变）。
       ...(out.resolved_via === undefined ? {} : { resolved_via: out.resolved_via }),
       ...amb,
-      ...(await this.observeAfter(req)),
+      ...(await observeAfter(this.ctx(), req)),
     };
   }
 
@@ -916,155 +691,6 @@ export class SessionRuntime {
    * `chosenRef` = 会话实际执行的那个元素：从 matched_others 里排除（别人 = "除选中者外的撞词
    * 候选"）；池外回退时 diag/ref 都是合成 ref（`pN`），仍如实回显并在文档写明。
    */
-  private actAmbiguity(target: string, chosenRef: string | null | undefined): Record<string, unknown> {
-    const diag = takeHintMatchOthers();
-    if (diag === null || diag.hint !== target) return {};
-    const others = diag.candidates
-      .filter((c) => c.ref !== diag.decided && c.ref !== chosenRef)
-      .slice(0, 3);
-    return {
-      ambiguous: diag.candidates.length > 1,
-      ...(others.length === 0
-        ? {}
-        : {
-          matched_others: others.map((c) => ({
-            ref: c.ref, tag: c.tag, class: c.class, label: c.label,
-          })),
-        }),
-      // 只有弱档（词前缀/词包含、loose 子串）才值得提示"可能是容器/同缀元素"。
-      ...(diag.suspicious ? { hint_kind: diag.kind, hint_tier: diag.tier, hint_suspicious: true } : {}),
-    };
-  }
-
-  /**
-   * A2：本行 `act` 的歧义策略（`"fail"` = 缺省，歧义即零动作；`"act"` = 旧行为）。
-   * 优先级：请求字段 `onAmbiguous`（桥逐调用透传）> 会话旗标 `--on-ambiguous` > 缺省 fail。
-   * 返回 null = 请求字段是非法值（调用方报结构化 config_error，不静默取缺省）。
-   */
-  private ambiguityMode(req: Record<string, unknown>): "fail" | "act" | null {
-    const raw = req["onAmbiguous"];
-    if (raw === undefined || raw === null) return this.opts.onAmbiguous === "act" ? "act" : "fail";
-    return raw === "fail" || raw === "act" ? raw : null;
-  }
-
-  /**
-   * A2：歧义停因进 `--record` 轨迹的最小记账（`code` 已由调用方记录）：
-   * 候选 ref（≤5）+ 总集大小。没开记录时 `recordAction` 本身是 no-op。
-   */
-  private ambiguityRecord(amb: AmbiguityView | undefined): Record<string, unknown> {
-    if (amb === undefined) return {};
-    return {
-      candidate_refs: amb.candidates.map((c) => c.ref).slice(0, 5),
-      candidates_total: amb.candidates_total,
-    };
-  }
-
-  /** A2：失败响应上的 `ambiguity` 证据（只有引擎真的给了才出现；成功响应键集不变）。 */
-  private ambiguityResponse(amb: AmbiguityView | undefined): Record<string, unknown> {
-    return amb === undefined ? {} : { ambiguity: amb };
-  }
-
-  /**
-   * task-34：会话面的执行证据词按动作语义回显（`select` → `selected`）。
-   *
-   * 为什么只在会话面映射、不改执行器：`how` 是 run 的 `executed_actions`/trace 共享产物，
-   * 改引擎词会让既有应用的产物变化（task-34 红线：缺省参数下产物逐字节不变）。所以引擎词
-   * 保持 `filled`（选择/填写同一个动作结果词），会话这一层按 op 精确化——文档已写明。
-   */
-  private displayHow(op: SessionActOp, how: unknown): unknown {
-    if (op === "select" && how === "filled") return "selected";
-    return how ?? null;
-  }
-
-  /**
-   * B1：act 失败响应上的 `actionability` 证据（引擎给才有；成功响应键集不变）。
-   * 原样复用引擎的 `ActionabilityDetail`（reason/bbox/blocker/requery），会话层不重算、不补键。
-   */
-  private actionabilityResponse(detail: ActionabilityDetail | undefined): Record<string, unknown> {
-    return detail === undefined ? {} : { actionability: detail };
-  }
-
-  /**
-   * A4：act 落空（`target_not_found`）的判别证据在会话面的回显。
-   *
-   * 引擎已按上限构造（`candidates` ≤5 / `near` ≤5 / `rejected` ≤3、label ≤40、why 只在有原因
-   * 时出现），会话层**原样**回显——与 `actionabilityResponse` 同一纪律：不重算、不补键。
-   * 没有该字段（成功路径 / 非落空失败）= 响应键集与之前逐字节一致。
-   */
-  private missDiagnosticsResponse(diag: ActMissDiagnostics | undefined): Record<string, unknown> {
-    return diag === undefined ? {} : { diagnostics: diag };
-  }
-
-  /**
-   * B1：act 失败时的**opt-in**截图（请求 `screenshot:true` 才写；缺省不碰页面）。
-   * 文件落会话证据目录 `act-<n>-failure.png`（n = 本次会话的动作序号），响应只回
-   * `screenshot_file` 路径，不内联图片。截图失败只记日志，不改变动作失败事实。
-   */
-  private async failureScreenshot(page: AnyPage, n: number, req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    if (req["screenshot"] !== true) return {};
-    const file = path.join(this.outDir, `act-${n}-failure.png`);
-    try {
-      const shot = (page as unknown as {
-        screenshot?: (o: Record<string, unknown>) => Promise<unknown>;
-      }).screenshot;
-      if (typeof shot !== "function") return {};
-      ensureDir(this.outDir);
-      await shot.call(page, { path: file, fullPage: false });
-      this.log(`act failure screenshot #${n} → ${file}`);
-      return { screenshot_file: file };
-    } catch (e) {
-      this.log(`act failure screenshot failed: ${errMsg(e)}`);
-      return {};
-    }
-  }
-
-  /** 动作后的有界回读（缺省开）：只给 counts/url/title，不返回元素明细（明细请显式 observe）。 */
-  private async observeAfter(req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    if (req["observeAfter"] === false) return {};
-    try {
-      const result = await this.ctx().observe({ max: 40 });
-      return {
-        after: {
-          url: result.url,
-          counts: result.counts,
-          truncated: result.truncated,
-          ...(result.title === undefined ? {} : { title: result.title }),
-        },
-      };
-    } catch {
-      return {}; // 回读失败不影响动作事实（动作已经发生）
-    }
-  }
-
-  private async doRead(req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const what = req["what"];
-    if (what !== "text" && what !== "value" && what !== "count" && what !== "attr") {
-      return {
-        ok: false, code: "config_error",
-        reason: `read.what must be one of text | value | count | attr (got ${JSON.stringify(what)})`,
-      };
-    }
-    const selector = req["selector"];
-    if (!nonEmpty(selector)) {
-      return { ok: false, code: "config_error", reason: "read needs a non-empty selector string" };
-    }
-    const ctx = this.ctx();
-    if (what === "count") {
-      const value = await ctx.read.count(selector);
-      return { ok: true, what, selector, value };
-    }
-    if (what === "attr") {
-      const attr = req["attr"];
-      if (!nonEmpty(attr)) {
-        return { ok: false, code: "config_error", reason: "read.what='attr' needs a non-empty attr string" };
-      }
-      const value = await ctx.read.attr(selector, attr);
-      return { ok: true, what, selector, attr, value };
-    }
-    const value = what === "text" ? await ctx.read.text(selector) : await ctx.read.value(selector);
-    return { ok: true, what, selector, value };
-  }
-
   private async doExtract(req: Record<string, unknown>): Promise<Record<string, unknown>> {
     const rows = req["rows"];
     if (!nonEmpty(rows)) {
@@ -1158,36 +784,6 @@ export class SessionRuntime {
       prev = now;
     }
     return false;
-  }
-
-  private signalSpec(req: Record<string, unknown>): { ok: true; spec: Record<string, unknown> } | { ok: false; resp: Record<string, unknown> } {
-    const spec = req["signal"];
-    const problems = validateSignalSpec(spec, "signal");
-    if (problems.length > 0) {
-      // C3：reason 与 CLI/加载期**同一份**合法形态提示（json 版示例串）；problems 数组原样。
-      return { ok: false, resp: { ok: false, code: "config_error", reason: signalProblemText(problems, "json"), problems } };
-    }
-    return { ok: true, spec: spec as Record<string, unknown> };
-  }
-
-  private async doSignal(req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const parsed = this.signalSpec(req);
-    if (!parsed.ok) return parsed.resp;
-    const started = Date.now();
-    const held = await this.ctx().holds(parsed.spec as never);
-    this.log(`signal held=${held}`);
-    return { ok: true, held, elapsed_ms: Date.now() - started };
-  }
-
-  private async doWaitFor(req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const parsed = this.signalSpec(req);
-    if (!parsed.ok) return parsed.resp;
-    const timeoutMs = intIn(req["timeoutMs"], 0, 600_000) ?? 15_000;
-    const pollMs = intIn(req["pollMs"], 1, 60_000) ?? 200;
-    const started = Date.now();
-    const held = await this.ctx().waitFor(parsed.spec as never, { timeoutMs, pollMs });
-    this.log(`waitFor held=${held} (${Date.now() - started}ms)`);
-    return { ok: true, held, timeout_ms: timeoutMs, poll_ms: pollMs, elapsed_ms: Date.now() - started };
   }
 
   private async doSnapshot(req: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -1394,67 +990,3 @@ export class SessionRuntime {
   }
 }
 
-/** 起会话 + 逐行驱动 + 收尾（stdin 或 `--input` 文件）。返回进程退出码。 */
-export async function runSession(opts: SessionOptions, sink: SessionSink): Promise<number> {
-  const rt = new SessionRuntime(opts, sink);
-  const idleMs = intIn(opts.idleTimeoutMs, 0, 24 * 60 * 60 * 1000) ?? SESSION_DEFAULT_IDLE_TIMEOUT_MS;
-  let exit: SessionExit = "eof";
-  let idleFired = false;
-  let interrupted = false;
-  let rl: readline.Interface | null = null;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  const onInterrupt = (): void => { interrupted = true; rl?.close(); };
-  process.once("SIGINT", onInterrupt);
-  process.once("SIGTERM", onInterrupt);
-  try {
-    await rt.start();
-    const input = opts.inputFile !== null && opts.inputFile !== undefined
-      ? fs.createReadStream(path.resolve(opts.inputFile), { encoding: "utf8" })
-      : process.stdin;
-    rl = opts.inputFile !== null && opts.inputFile !== undefined
-      ? readline.createInterface({ input, crlfDelay: Infinity })
-      : readline.createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });
-
-    const arm = (): void => {
-      if (idleMs <= 0) return;
-      if (timer !== undefined) clearTimeout(timer);
-      timer = setTimeout(() => { idleFired = true; rl?.close(); }, idleMs);
-    };
-    arm();
-    for await (const line of rl) {
-      // Windows/PowerShell 的 UTF-8 **带 BOM** 文件会让第一行的 JSON 解析失败（实测：
-      // `Set-Content -Encoding UTF8` 的 --input 文件）。BOM 不是请求内容，剥掉它；
-      // 只有行首这一个字符可能受影响，其余行逐字节不变。
-      const raw = line.charCodeAt(0) === 0xfeff ? line.slice(1) : line;
-      if (raw.trim() === "") { arm(); continue; }
-      if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
-      const stop = await rt.handleLine(raw);
-      if (stop) { exit = "closed"; break; }
-      arm();
-    }
-    if (idleFired) {
-      exit = "idle_timeout";
-      sink.respond({
-        type: "session_end", unsolicited: true, ok: false, code: "idle_timeout",
-        reason: `no request for ${idleMs}ms (--idle-timeout-ms); closing`,
-      });
-    } else if (interrupted) {
-      exit = "interrupted";
-      sink.respond({ type: "session_end", unsolicited: true, ok: false, code: "interrupted", reason: "signal received" });
-    }
-  } catch (e) {
-    exit = "browser_dead";
-    sink.respond({
-      type: "session_end", unsolicited: true, ok: false, code: "browser_dead",
-      reason: errMsg(e),
-    });
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    process.removeListener("SIGINT", onInterrupt);
-    process.removeListener("SIGTERM", onInterrupt);
-    rl?.close();
-    await rt.finish(exit);
-  }
-  return sessionExitCode(exit);
-}
