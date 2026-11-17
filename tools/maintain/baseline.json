@@ -5,7 +5,7 @@
     "newFunctionMaxLines": 150,
     "phaseFunctionMaxLines": 400,
     "files": {
-      "src/engine/executor.ts": 5844,
+      "src/engine/executor.ts": 5837,
       "src/app/app-runner.ts": 2854,
       "src/engine/extraction.ts": 1959,
       "src/app/ctx.ts": 1799,
@@ -20,7 +20,7 @@
       {
         "file": "src/engine/executor.ts",
         "name": "run",
-        "lines": 1989
+        "lines": 1882
       },
       {
         "file": "src/app/ctx.ts",
