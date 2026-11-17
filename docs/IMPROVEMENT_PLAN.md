@@ -642,6 +642,28 @@ interface PromptSpec {
 
 **E. 状态**：P2 收口（2026-11-17）；freeze（2026-11-17 起 2 周）内不再排 P2 批次；BACKLOG #3 与上述条件项按触发条件在冻结结束/前置就绪后启动；回访 1（30 天不回潮）与回访 2（可扩展定性）按 §9 在冻结结束后的回访窗口执行。
 
+### 6.6 大文件拆分（新阶段，2026-11-17 启动）
+
+**裁决（用户 2026-11-17）**：提前结束 freeze window，启动大文件拆分。目标口径 = **最大文件 ≤3000，且 >1000 行文件归零**——唯一例外是唯一执行器 `src/engine/executor.ts`（≤3000）；其余所有 `src/**/*.ts` 必须 <1000 行。每批纪律：纯搬移（split-check manifest 钉源码 hash）+ `npm run check` + `verify:offline` + `verify:runtime:offline` + examples golden；不改执行语义、不改 `BrowserMiddleware` 类名/`run()` 签名、不移动/改名 bridge spawn 的 `app-runner.ts` 路径。
+
+| 阶段 | 范围 | 目标 | 前置 / 证据 |
+|---|---|---|---|
+| E1 | `src/engine/extraction.ts` 纯区外搬：element model → `elem-model.ts`、帧读侧 → `frame-scope.ts`、page-shape helpers → `page-shapes.ts` | <1000 | split-check `extraction-pure` + 双 lane |
+| E2 | `src/engine/pool-js.ts` JS 片段/编译辅助外搬 | <1000 | 同上 |
+| E3 | `src/app/session-runtime.ts`（调试面）helpers / 动作执行外搬 | <1000 | 同上（session 非主线，行为不变） |
+| A1 | `src/app/app-runner.ts` 外围（类型区 / tool-step / report 组装），入口 guard 与路径不动 | <1000 | examples golden + 运行期 lane；bridge spawn 路径冻结 |
+| C1 | `src/app/ctx.ts`（`createCtx` 1703 行）按原语分组拆分 | <1000 | **前置 W5-2**：ctx 行为矩阵 + `tools/ctx-conformance.ts` 离线 diff |
+| X1 | `src/engine/executor.ts` 非阶段区（类型/证据/辅助）外搬 | ≤3000 | **前置**：运行期 lane 扩 upload / scroll / setRange 场景，证明覆盖后再动 |
+
+> 批次记录追加在本节。阶段 C1/X1 的前置满足前不启动对应拆分（与 §8 风险表一致：运行期拆分在 CI 不可验证时不上线）。
+
+**批次记录**
+
+| 批 | 交付 | 证据 | 状态 |
+|---|---|---|---|
+| E1 | `extraction.ts` 1569→**858** 行纯区外搬：element model/Elem 形状/动作能力面/槽位 → `src/engine/elem-model.ts`（434 行）；帧读侧（帧门禁/selector frame 尾缀/anyFrame/帧证据）→ `src/engine/frame-scope.ts`（149→438 行）；`firstOf/urlOf/framesOf` → `src/engine/page-shapes.ts`（28 行）。既有 importer 经 extraction re-export 零改动 | 运行时导出面 `Object.keys(extraction)` 改前=改后（逐字相同）；split-check `extraction-pure`（4 文件/87 符号；与搬前 extraction 的 77 个同名符号 hash **0 mismatch**）；`npm run check` + `verify:offline` + `verify:runtime:offline` 全绿；基线 extraction 1612→858 | 本批提交 |
+
+
 ### P2 主线（条件启动；3–5 周，12–20 人日）
 
 **启动条件**见 §0。批次：2.0 RunCtx + evidence collector（BACKLOG #4 前置）→ 2.1 `run()` 九阶段（freeze window；StateCursor 携带、钩子顺序不变）→ 2.2 `runExecution` 内核 + 源适配器 + `ctx-conformance` → 2.3 公共面清理（index internal、extension 删、picker deprecate、exports 锁定、无 sdk）+ 站点知识出引擎 + 扩展演练。
