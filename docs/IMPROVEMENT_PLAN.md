@@ -6,7 +6,7 @@
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0 完成；**4d 进行中——runFrameGate/runPoolGate/runDeclaredTargets/runModelPick/runPostAction 已落地**；下一步 runActionPhase（拆子阶段）→ runSetup → runTail → #2 → #3）。
+> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0 完成；**4d 进行中——runFrameGate/runPoolGate/runDeclaredTargets/runModelPick/runActionPhase+Execute/runPostAction 已落地**；下一步 runSetup → runTail → #2 → #3）。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -548,7 +548,8 @@ interface PromptSpec {
 | 4d-3c runDeclaredHint | act-hint 解析面提为私有阶段方法（88 行）：hintLookup 注入/FW8/DRF/pruneForbids/dead-hint 前进/identityStop+declaredStop+行锚+frame 四类早停/hidden warnings；`runDeclaredTargets` 全貌（命令 walk + act-hint 两面）齐 | 本批提交 | run() 1989→1882、executor 5844→5837；运行期 lane 4 场景绿（success-filter-bar 覆盖 act-hint 面） |
 | 4d-4 runModelPick | 决策选择段（规则命中/ask/tieredHint/floor/reobserve/escalate/adjudicate/R2b/nominated-family 修复）提为私有阶段方法（363 行，phaseFunctions 例外）；返回 ModelPickPhase 11 字段（含宽扫后 elems 与 label 同源） | 本批提交 | run() 1882→1508、executor 5837=基线；运行期 lane 4 场景绿（rule:match 分支） |
 | 4d-5 runPostAction | 循环体尾段（动作日志/host+popup 复核/done 评估+学习/SPA settle/manual 三分支/inert+anti-repeat/rehydrate 证据）提为私有阶段方法（182 行）；返回值驱动 control（9 break + 2 continue 落位）；pendingAfterIdx 经 setter 回写保证 flagSuspectedAsync 时序 | 本批提交 | run() 1508→1316、executor 5837=基线；运行期 lane 4 场景绿（done/SPA settle 与失败后路径） |
-| 4d-6 runActionPhase / runSetup / runTail | runActionPhase 约 450 行需拆子阶段；runSetup 与可变状态容器同批；4707..4754 run 级 epilogue 下一批提 runTail；reportTail 已抽出待复核 | 待做 | 每阶段独立提交 + 运行期 lane + examples golden |
+| 4d-6 runActionPhase + runActionExecute | 动作阶段 449 行拆两阶段方法：runActionPhase 166（能力面/DRY-RUN/needs_value/pre-fill/风险闸门）+ runActionExecute 251（stale/执行分派/证据/trace.push）；返回 ActionPhaseResult 驱动 control 与 run 级回写 | 本批提交 | run() 1316→884、executor 5836≤基线；运行期 lane 4 场景绿（正常动作/遮挡证据） |
+| 4d-7 runSetup + runTail | runSetup（与可变状态容器同批）；4707..4754 run 级 epilogue 提 runTail；reportTail 已抽出待复核 | 待做 | 每阶段独立提交 + 运行期 lane + examples golden |
 
 > P2 已启动：freeze 2026-11-17 起 2 周、每阶段约 3 个工作日窗口；按 D3 顺序 `#4 → #2 → #3`，4d 先行。任一窗口内 T1/T2/T3 触发即停该批。
 
