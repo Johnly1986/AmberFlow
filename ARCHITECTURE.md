@@ -13,14 +13,16 @@ AmberFlow 是一个**冻结计划执行器**：流程由人（或规划器）给
 
 行为硬规则（完成只认信号、值只来自计划/观察、失败是结果、不绕过反爬、证据不进仓库、危险步/人工步/凭据纪律）的唯一出处见 [AGENTS.md](AGENTS.md) 的「硬规则」一节——这里不重复，改规则只改那一处。
 
-模块→依赖层的完整映射、入口分类（CLI / 工具 / 库）与执行阶段图统一维护在 `docs/MAINLINE.md`（P0 0.6 待建；在它落地前以本文 §2/§5 为准）。
+包身份与公共面（2026-11-17 决策）：消费面 = **CLI + DSH 插件**；**不承诺引擎库 `import` API**。`src/index.ts` 是 internal barrel（仓内 importer = 0），`package.json` 的 `exports["."]` 只指向 DSH 桥（插件安装门），不提供引擎库入口；嵌入请走 CLI（子进程 + JSON 契约）或 DSH 桥。
+
+模块→依赖层的完整映射、入口分类（CLI / 工具 / 库）与执行阶段图统一维护在 `docs/MAINLINE.md`（已落地，以它为准）。
 
 ## 2. 分层
 
 ```
 signals.ts       完成信号语言：url_contains / css_* / 组合器 / manual
 prompts/（规划中） 模型提示词单源（P0 0.4：PromptSpec 最小形态；engine 与 model 都可 import）
-extraction.ts    单次 JS 扫描元素池（主 frame + 可达子 frame，同源/跨源均可 + shadow root）
+extraction.ts    元素类型/共享机制（Elem/ElemPool、恢复链、预算常量）；候选扫描实现已归 app 层 src/app/candidate-scan.ts（2.2b）
                  ├ pool-js.ts     内嵌 JS 探针与宿主编译产物（浏览器执行的字符串区）
                  └ identity.ts    FW8 声明驱动的身份回捞（#id / [attr=value] 白名单）
 declared.ts      DRF（P0-C）声明目标解析：池 hintMatch → ADMIT 回捞 → FW8 之后按声明做 attr/文本 DOM 解析

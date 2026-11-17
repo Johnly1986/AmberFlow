@@ -63,7 +63,7 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 
 ## 2. 候选元素列表上移应用层：浏览器相关代码抽离出引擎
 
-**状态**：in_progress（2.1 已落地：`CandidateProducer` 契约 + 引擎消费 seam，默认实现仍为引擎扫描、行为零变化；2.2a 已落地：app 层 `createAppCandidateProducer` + `middleware-factory` 默认接线，所有工厂入口默认走 app producer；2.2b-0 已落地：model/page-context 与 data/render 的扫描依赖改为显式注入（不再 import extractElements）；2.2b 扫描/筛选实现搬 app 层并删除 engine 默认待做）｜ **优先级建议**：P2（架构重构，需先定接口）
+**状态**：done（2026-11-17，2.2b 完成）：契约 `CandidateProducer`（engine，纯结构类型）+ app 生产者 `src/app/candidate-source.ts` + 扫描实现 `src/app/candidate-scan.ts`（367 行，`extractElements`+4 助手逐字节搬移、split hash 一致）；engine `extraction.ts` 1959→1612 且扫描 import 清零；验收：examples golden、verify:offline、verify:runtime:offline 4/4（buildMiddleware→app producer→app 扫描）、inspect/dry 口径不变 ｜ **优先级建议**：P2（已收口）
 
 ### 现状（问题）
 
@@ -102,7 +102,7 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 
 ## 3. 候选列表重要性排序：候选窗口随未命中指数递增
 
-**状态**：open ｜ **优先级建议**：P2（依赖 #2 的契约先行）
+**状态**：open（前置已满足：#2 候选契约 2.2b 完成；本项是**行为变更特性**，按 P2「零行为变更」纪律冻结结束后启动）｜ **优先级建议**：P2
 
 ### 现状（问题）
 

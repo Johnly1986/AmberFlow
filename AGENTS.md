@@ -46,7 +46,7 @@ npm run apps -- --app <id>             # 用户作用域应用（同一运行器
 npm run learn                          # 演示一次，录成应用
 npx amber record https://<页面> --name <id>   # 同一入口的 CLI 形式
 npm run model:fetch -- --from <url|路径>
-npm run picker-server
+npm run picker-server                 # DEPRECATED（P2-2.3）：MV3 extension 已删除，保留一版后评估移除
 ```
 
 `npm run test` 是真实站点套件，不是单元测试；没有 `npm run verify`。PR 门禁只走 `npm run check`，真实站点回归走 `npm run test`（声明数据在 `online/`）。
@@ -129,4 +129,4 @@ online/cases/probe/*.json
 
 ## 文档
 
-`README.md`、`ARCHITECTURE.md`、`docs/AGENT_INTERFACE.md`、`docs/APP_SCRIPT_AUTHORING.md`、`docs/MANUAL_STEPS_AND_PACE.md`、`docs/DECISION_SERVICE_CONFIG.md`、`docs/PROMPT_SYSTEM.md`（三层提示词系统设计与审查记录）、`docs/ROW_ANCHOR_HINT_PLAN.md` / `docs/ROW_INDEX_HINT_PLAN.md`（行锚 `in-row:` / `row-index:` 两方案 v1.0 已实施 + 实施记录）、`docs/INTERVENTION_RESCUE_MODULE.md`（2026-11-12 介入/救援中断模块设计方案：产品+架构双视角研判合成；**v1 实施完成（2026-11-17）——步 0-5 落地，含 --rescue 真实 result.rescue 默认切换**；captcha/credential 二期）、`docs/BACKLOG.md`（工程优化待办：决策入口统一/候选列表应用层化/候选窗口指数递增）、`docs/MAINLINE.md`（依赖分层 L0–L6+L1.5 / 执行阶段 S0–S5 / 三类入口 / seam 冻结表；`npm run maintain:check` 的 mainline 组校验）、`docs/P2_READINESS.md`（P2 决策请求包：发布/冻结、INTERVENTION 收尾、BACKLOG #2/#3/#4 顺序、freeze window 参数；含推荐与回执表）、`docs/IMPROVEMENT_PLAN.md`（2026-11-17 可维护性/可扩展性治理方案 v2.1：五项问题→五条治理线 + 证据 lane/门禁 + 条件化 P0/P1/P2 路线图；已过架构评审，记录见 `docs/IMPROVEMENT_PLAN_REVIEW.md`；基线 `main @ 91bf379`；**P0/P1 已完成（2026-11-17）；P2 进行中（freeze 2026-11-17 起 2 周；2.0 RunCtx + evidence collector + 运行期等价 lane 已落地，下一步 4d run() 九阶段）**；取代 2026-11-10 v1）。不要引用已删除的旧报告/基准/应用清单。
+`README.md`、`ARCHITECTURE.md`、`docs/AGENT_INTERFACE.md`、`docs/APP_SCRIPT_AUTHORING.md`、`docs/MANUAL_STEPS_AND_PACE.md`、`docs/DECISION_SERVICE_CONFIG.md`、`docs/PROMPT_SYSTEM.md`（三层提示词系统设计与审查记录）、`docs/ROW_ANCHOR_HINT_PLAN.md` / `docs/ROW_INDEX_HINT_PLAN.md`（行锚 `in-row:` / `row-index:` 两方案 v1.0 已实施 + 实施记录）、`docs/INTERVENTION_RESCUE_MODULE.md`（2026-11-12 介入/救援中断模块设计方案：产品+架构双视角研判合成；**v1 实施完成（2026-11-17）——步 0-5 落地，含 --rescue 真实 result.rescue 默认切换**；captcha/credential 二期）、`docs/BACKLOG.md`（工程优化待办：决策入口统一/候选列表应用层化/候选窗口指数递增）、`docs/MAINLINE.md`（依赖分层 L0–L6+L1.5 / 执行阶段 S0–S5 / 三类入口 / seam 冻结表；`npm run maintain:check` 的 mainline 组校验）、`docs/P2_READINESS.md`（P2 决策请求包：发布/冻结、INTERVENTION 收尾、BACKLOG #2/#3/#4 顺序、freeze window 参数；含推荐与回执表）、`docs/IMPROVEMENT_PLAN.md`（2026-11-17 可维护性/可扩展性治理方案 v2.1：五项问题→五条治理线 + 证据 lane/门禁 + 条件化 P0/P1/P2 路线图；已过架构评审，记录见 `docs/IMPROVEMENT_PLAN_REVIEW.md`；基线 `main @ 91bf379`；**P0/P1 已完成（2026-11-17）；P2 进行中（freeze 2026-11-17 起 2 周：2.0/4d/BACKLOG #2/2.3 已完成；剩余 2.2 runExecution 内核；BACKLOG #3 冻结后启动）**；取代 2026-11-10 v1）。不要引用已删除的旧报告/基准/应用清单。

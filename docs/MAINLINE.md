@@ -78,7 +78,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 |---|---|---|---|
 | **① 引擎入口** | `bin/amber.mjs` → `src/cli/main.ts` → `src/cli/registry.ts`（11 命令 + help/version/completion） | 当前部分 handler 经 `ctx.runEntry` 子进程转交旧入口（12 个调用点） | 新增命令只改 registry + handler + help-map；不新增第二命令表 |
 | **② 宿主集成** | `integrations/dsh-bridge/*`；`amber session` 长驻子进程 | **进程边界是契约**：bridge 只拼 CLI/解析 JSON/投影摘要（called, not embedded），spawn 是有意设计 | 不改 `package.json` `exports["."]`（= DSH 插件安装门）；`src/app/app-runner.ts` 路径本身是桥契约（checkout 探测 + spawn），**不得移动/改名** |
-| **③ 开发/创作脚本** | `npm start` / `apps` / `learn` / `test` / `plan-cli` / `tools/*` / MV3 extension | 非产品主线 | 新旗标只进 registry；extension 已废弃（P2 删除候选） |
+| **③ 开发/创作脚本** | `npm start` / `apps` / `learn` / `test` / `plan-cli` / `tools/*` / MV3 extension | 非产品主线 | 新旗标只进 registry；**extension 已删除（P2-2.3）**，picker-server deprecated 一版后评估移除 |
 
 **进程内化**（handler 不再 spawn）：**延后**，不在 P0/P1 承诺。任何内进程化必须保持退出码矩阵与 JSON envelope 逐字节一致，并先解决 provider 装配的 run-scoped 注入（禁模块级全局）。
 
