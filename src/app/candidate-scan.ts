@@ -14,6 +14,7 @@ import {
   candidateMeta, frameAt, framesOf, listenerCache, urlOf,
   type Elem, type ElemPool, type FrameLike, type PageLike, type PoolQuotas,
 } from "../engine/extraction.ts";
+import { FULL_LABEL_MAX, MODEL_LABEL_MAX } from "../engine/elem-model.ts";
 import { elemFrameStamp, frameGateExcludes } from "../engine/frame-scope.ts";
 import { FN_FIRST, FN_TAG, FN_WRAPPER, PASS_EXTRACT, PASS_HEURISTIC, PASS_NEAR } from "../engine/pool-js.ts";
 import { SURFACE_SELECTORS, WINDOW_CAPS, poolSelectorWithJsFor, type SurfacePolicy } from "../engine/surface.ts";
@@ -159,7 +160,7 @@ export async function extractRowsPerElement(page: PageLike, maxElements: number 
     } catch { /* 拿不到就当 false（语义分类退回结构判据） */ }
     elems.push({
       // A1 不变量：label === full_label 的前 40 字（同一 label 截断）。
-      ref: `e${elems.length}`, scan: i, tag, label: label.slice(0, 40), full_label: label.slice(0, 200),
+      ref: `e${elems.length}`, scan: i, tag, label: label.slice(0, MODEL_LABEL_MAX), full_label: label.slice(0, FULL_LABEL_MAX),
       data_test: (await el.getAttribute("data-test")) ?? "",
       name: (await el.getAttribute("name")) ?? "",
       id: (await el.getAttribute("id")) ?? "",
@@ -191,8 +192,8 @@ export async function extractHeuristicWidgets(
       ...(mainStamp.frame_origin !== undefined ? { frame_origin: mainStamp.frame_origin } : {}),
       tag: String(r["tag"] ?? "div"),
       // A1 不变量：label === full_label 的前 40 字（行由 HEURISTIC_WIDGET_JS 按同一 full 构造）。
-      label: String(r["label"] ?? "").slice(0, 40),
-      full_label: String(r["full_label"] ?? r["label"] ?? "").slice(0, 200),
+      label: String(r["label"] ?? "").slice(0, MODEL_LABEL_MAX),
+      full_label: String(r["full_label"] ?? r["label"] ?? "").slice(0, FULL_LABEL_MAX),
       // E1（M3 第五池）：heuristic 伪按钮行透传 anchor_ids（行由 HEURISTIC_WIDGET_JS 经共享
       // ANCHOR_JS 算好；无 id 祖先 = 行字段省略 ⇒ Elem 也不写，与真池口径一致）。
       ...(Array.isArray(r["anchor_ids"]) && (r["anchor_ids"] as string[]).length > 0

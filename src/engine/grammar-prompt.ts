@@ -14,8 +14,10 @@
  * `integrations/dsh-bridge/src/grammar.generated.ts`，由 `npm run prompt-hit` 生成并校验同步。
  */
 
+import { POOL_CAP_ELEMENTS, WIDE_SCAN_POOL_ELEMENTS } from "../support/tuning.ts";
 import { parseHint } from "./hint.ts";
 import { SIGNAL_OPS } from "./signal-ops.ts";
+import { FULL_LABEL_MAX, MODEL_LABEL_MAX, POOL_QUOTAS } from "./elem-model.ts";
 
 /** 语法描述里的一个 hint 形状。 */
 export interface HintShape {
@@ -376,7 +378,7 @@ for (const s of HINT_SHAPES) {
 
 /**
  * 信号算子的提示词描述，键集合必须与 `SIGNAL_OPS` **双向一致**（下方 import 时断言）。
- * 描述面向英文提示词（`PlanningRules.promptText()`）；前五个叶子的措辞与历史版本逐字一致。
+ * 描述面向英文提示词（`PlanningRules.promptText()`）；前五个叶子的措辞与既有版本逐字一致。
  */
 export const SIGNAL_OP_PROMPT: Readonly<Record<string, string>> = {
   url_contains: "substring of the final url  (op=value)",
@@ -460,11 +462,11 @@ export const HINT_CLOSED_SET_TEXT =
  * 逐字包含，prompt-hit 的 doc 组不校验这段，但「唯一出处」纪律仍适用）。
  */
 export const CANDIDATE_WINDOW_TEXT =
-  "候选窗口是**有界快照**：每步只取 40（宽扫 120）个候选，按桶配额来自当前视口——"
-  + "chrome 8 / viewport 16 / contentNear 8 / mainOffscreen 6 / other 2，不足时按 "
+  `候选窗口是**有界快照**：每步只取 ${POOL_CAP_ELEMENTS}（宽扫 ${WIDE_SCAN_POOL_ELEMENTS}）个候选，按桶配额来自当前视口——`
+  + `chrome ${POOL_QUOTAS.chrome} / viewport ${POOL_QUOTAS.viewport} / contentNear ${POOL_QUOTAS.contentNear} / mainOffscreen ${POOL_QUOTAS.mainOffscreen} / other ${POOL_QUOTAS.other}，不足时按 `
   + "viewport→contentNear→mainOffscreen→other 顺延；窗口外不等于页面上没有（inspect --json 的 "
   + "window 会给出窗口外可见交互），引擎不自动滚动。真正需要读完整列表时用滚动/展开原语分块取证。"
-  + "hint 匹配用**完整标签**（≤200，full_label）而不是模型视图的 40 字前缀："
+  + `hint 匹配用**完整标签**（≤${FULL_LABEL_MAX}，full_label）而不是模型视图的 ${MODEL_LABEL_MAX} 字前缀：`
   + "裸词按大小写不敏感的词边界/前缀匹配，`[aria-label~x]` 是 label 的别名。"
   + "要回退 A2 之前的主内容优先排序，在 meta.policy 写 candidate_priority: 'main-first'";
 

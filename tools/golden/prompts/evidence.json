@@ -1,0 +1,56 @@
+{
+  "note": "决策证据载荷快照：合成输入固定，渲染委托既有实现；预算/契约门禁见 prompt-hit evidence 组。行为改动（措辞/截断）须 --fix 刷新并重审。",
+  "inputs": {
+    "criteria": "syntheticElems(n)：tag=button/a，label='Action item <i>'，href=/products/<i>，data_test 每 3 个一个",
+    "state_text": "fake page innerText = 80 × \"Line <i>: Action item <i> detail text for the page\"；query=\"Action item 3\"；budget=320",
+    "state_digest": "{\"nav_epoch_delta\":1,\"settled\":true,\"pool_changed\":false,\"flags\":[\"reobserve\"]}",
+    "site_facts": "3 × MatchedSiteFact（site=example.test，statement ≤200 字符）",
+    "notes": "[tried before, page did not change]"
+  },
+  "prompts": {
+    "evidence.criteria": {
+      "version": 1,
+      "chars": 9503,
+      "bytes": 9503,
+      "sha256": "6d2a65d8c8e57677e1065d2b84a2883f2414b4212a1343071708cf7980b62775",
+      "tiers": {
+        "40": {
+          "chars": 1815,
+          "sha256": "27d9147e89be925b564f0e305962d966325f58a748c952f7eda37f4d238c558a"
+        },
+        "120": {
+          "chars": 5551,
+          "sha256": "0d7014dec8e7b9990d450650a995c7818a812abe91c50db8803047949dd0f8e5"
+        },
+        "200": {
+          "chars": 9503,
+          "sha256": "6d2a65d8c8e57677e1065d2b84a2883f2414b4212a1343071708cf7980b62775"
+        }
+      }
+    },
+    "evidence.state_text": {
+      "version": 1,
+      "chars": 281,
+      "bytes": 281,
+      "sha256": "6908029391d07a72849868bb9c142cfbc416830453baba3a2e6f3a0b447c2fe4"
+    },
+    "evidence.state_digest": {
+      "version": 1,
+      "chars": 79,
+      "bytes": 79,
+      "sha256": "6bc5d5d6d98a8855bd787db9bf559e42e9941674d45a8a3c1faacb02119590f5"
+    },
+    "evidence.site_facts": {
+      "version": 1,
+      "chars": 359,
+      "bytes": 407,
+      "sha256": "0e154fb76205600efcad80e4fa57351232526757df1e487ea66a7f8956713bb8"
+    },
+    "evidence.notes": {
+      "version": 1,
+      "chars": 35,
+      "bytes": 35,
+      "sha256": "65ae229592743903991862e6f636490da906ca61063f9e247ca5c10ee978a58d"
+    }
+  }
+}

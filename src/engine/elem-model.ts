@@ -9,6 +9,11 @@ import { parseClickAtValue } from "./click-at.ts";
 
 /* ------------------------------------------------------------------ element model */
 
+/** 完整标签上限（`full_label`；hint 匹配口径，池行与文档共用）。 */
+export const FULL_LABEL_MAX = 200;
+/** 模型视图标签前缀上限（`label`；恒为 `full_label` 的前缀）。 */
+export const MODEL_LABEL_MAX = 40;
+
 export interface Elem {
   ref?: string;
   scan?: number;

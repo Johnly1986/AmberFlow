@@ -33,6 +33,18 @@
  *            ②文本无重复 ③长度预算（默认 ≤400）④输出契约关键句
  *            ⑤无站点/业务专名（picker 电商动作目录=显式 legacy 例外）
  *            ⑥消费面不再手写同句 ⑦tools/golden/prompts/snapshot.json 快照 hash 一致。
+ *   agent    Agent 规划面单源：`plan.rules` 收进 `src/prompts/agent-prompts.ts`，
+ *            断言 ①spec 形状/预算/消费点 ②plan.ts 只装配不手抄 ③逐字节冻结
+ *            （sha256 基线）④默认/变体 ≤ 预算 ⑤playbook short ≤500 / full ≤2200
+ *            ⑥CANDIDATE_WINDOW_TEXT 数字由 tuning/elem-model 常量渲染。
+ *   evidence 决策证据载荷 spec/预算/快照：`src/prompts/evidence-prompts.ts`
+ *            闭集 5 条，断言 ①都有 version/budget/consumers ②候选渲染分级预算
+ *            （40≤6k / 120≤12k / 200 帽≤20k，合成池实测）③单档预算（state_text 320 /
+ *            state_digest 200B / site_facts 700 / notes 80）④契约句 ⑤无站点名
+ *            ⑥tools/golden/prompts/evidence.json 快照 hash 一致（不改截断行为）。
+ *   bridge_desc 桥手写工具描述覆盖（**warn-only**）：扫 dsh-bridge index.ts 的
+ *            description 字符串——长度 ≤800/条、`amber <cmd>` 死链、站点/业务专名；
+ *            命中只打 warn（退出码不受影响），并输出统计行（N/总数）。
  *
  * 三层提示词系统的设计出处：docs/PROMPT_SYSTEM.md。
  * 退出码：0 全绿 / 1 有不一致。
@@ -44,7 +56,10 @@ import path from "node:path";
 import { REPO } from "../src/support/paths.ts";
 import { parseHint } from "../src/engine/hint.ts";
 import { SIGNAL_OPS } from "../src/engine/signal-ops.ts";
-import { HINT_SHAPES, HINT_FRAME_SUFFIX, SIGNAL_OP_PROMPT, ATTR_MATCH_MODEL_TEXT } from "../src/engine/grammar-prompt.ts";
+import {
+  HINT_SHAPES, HINT_FRAME_SUFFIX, SIGNAL_OP_PROMPT, ATTR_MATCH_MODEL_TEXT,
+  CANDIDATE_WINDOW_TEXT, hintPromptTokens, signalPromptLines,
+} from "../src/engine/grammar-prompt.ts";
 import { PLAN_PLAYBOOK_TEXT, FAILURE_SIGNS_TEXT, PLAN_PLAYBOOK_SHORT, STOP_ESCALATION_TEXT, STOP_NEXT, EXEMPT_NEXT, nextForStop } from "../src/engine/planning-playbook.ts";
 import { hintMatch } from "../src/engine/rules.ts";
 import { validateSignalSpec } from "../src/engine/signals.ts";
@@ -53,6 +68,15 @@ import { STOPCODE_MEANING, EXECUTOR_ONLY_STOPCODES, RESCUE_RESULT_SHAPE_TEXT, RE
 import { COMMANDS, commandSpec, helpCommandsPayload } from "../src/cli/registry.ts";
 import { RESCUE_TEXTS, SIGNAL_NOT_HELD_TEXT, OUTCOME_TEXTS, FULFILLED_NOT_HELD_TEXT } from "../src/support/intervention-texts.ts";
 import { PROMPT_SPECS, renderedPrompts, SAMPLE_GOAL } from "../src/prompts/model-prompts.ts";
+import { AGENT_PROMPT_SPECS, PLAN_RULES_SPEC, buildPlanRulesPrompt } from "../src/prompts/agent-prompts.ts";
+import {
+  EVIDENCE_SPECS, buildEvidence, type EvidenceRenderers,
+} from "../src/prompts/evidence-prompts.ts";
+import { PlanningRules } from "../src/engine/plan.ts";
+import { criteriaView, stateText, POOL_QUOTAS } from "../src/engine/extraction.ts";
+import { renderModelFence, type MatchedSiteFact } from "../src/app/site-facts.ts";
+import { STATE_DIGEST_MAX_BYTES } from "../src/engine/executor-types.ts";
+import { POOL_CAP_ELEMENTS, WIDE_SCAN_POOL_ELEMENTS, STATE_TEXT_BUDGET_CHARS } from "../src/support/tuning.ts";
 
 const fix = process.argv.includes("--fix");
 if (process.argv.filter((a) => a !== "--fix").length > 2) {
@@ -518,6 +542,309 @@ if (snapshotActual !== snapshotText) {
   }
 }
 
+
+/* ---- 8c. agent：Agent 规划面 prompt 单源 -------------------------------- */
+// PlanRules.promptText() 原为 plan.ts 内联 1,433 字符；收进 src/prompts/agent-prompts.ts 后
+// 本组守住「单源 + 预算 + 逐字节冻结」：改措辞 = 改行为，必须同步更新冻结 sha256 并重审。
+
+/** plan.rules 默认上下文的冻结 sha256（收口前 `new PlanningRules().promptText()` 的基线）。 */
+const PLAN_RULES_FROZEN_SHA256 =
+  "994a8dfde9b5e38024844ad436507d70976734e8e32463072e1a09bcbb1f586d";
+
+{
+  /* ① spec 形状 + 消费点存在 */
+  const agentIds = AGENT_PROMPT_SPECS.map((x) => x.id);
+  if (new Set(agentIds).size !== agentIds.length) problems.push("agent: AGENT_PROMPT_SPECS 的 id 不唯一");
+  for (const spec of AGENT_PROMPT_SPECS) {
+    if (!(spec.version >= 1)) problems.push(`agent: '${spec.id}' 缺契约版本`);
+    if (spec.role !== "agent") problems.push(`agent: '${spec.id}' role 必须是 agent`);
+    if (spec.budget.maxChars < 1) problems.push(`agent: '${spec.id}' 缺长度预算`);
+    if (spec.contract.mustInclude.length === 0) problems.push(`agent: '${spec.id}' 缺契约句`);
+    for (const c of spec.consumers) {
+      if (!fs.existsSync(path.join(REPO, c))) problems.push(`agent: '${spec.id}' 消费点文件不存在 ${c}`);
+    }
+  }
+
+  /* ② plan.ts 只装配不手抄 */
+  const planSrc = fs.readFileSync(path.join(REPO, "src/engine/plan.ts"), "utf-8");
+  if (!planSrc.includes("buildPlanRulesPrompt(")) {
+    problems.push("agent: plan.ts 未调用 buildPlanRulesPrompt（Agent wrapper 单源失效）");
+  }
+  if (planSrc.includes("Planning rules (hard constraints):")) {
+    problems.push("agent: plan.ts 仍手抄 plan.rules 题面——移到 src/prompts/agent-prompts.ts");
+  }
+
+  /* ③ 逐字节冻结 + 默认/变体预算（全部走真实 PlanningRules.promptText()） */
+  const defaultText = new PlanningRules().promptText();
+  const variantText = new PlanningRules(8, true, true, ["buy", "submit"], true).promptText();
+  const smallText = new PlanningRules(3, false, false, [], false).promptText();
+  const defaultSha = sha256(defaultText);
+  if (defaultSha !== PLAN_RULES_FROZEN_SHA256) {
+    problems.push(`agent: plan.rules 文本漂移（sha256 ${defaultSha.slice(0, 16)}… ≠ 冻结基线）——改措辞须同步更新冻结哈希并重审`);
+  }
+  for (const [label, text] of [["default", defaultText], ["full", variantText], ["small", smallText]] as const) {
+    if (text.length > PLAN_RULES_SPEC.budget.maxChars) {
+      problems.push(`agent: plan.rules/${label} ${text.length} 字符超预算 ${PLAN_RULES_SPEC.budget.maxChars}`);
+    }
+  }
+  for (const must of PLAN_RULES_SPEC.contract.mustInclude) {
+    if (!defaultText.includes(must)) problems.push(`agent: plan.rules 缺契约句 ${JSON.stringify(must)}`);
+  }
+  const built = buildPlanRulesPrompt({
+    maxSubgoals: 8, requireStartUrl: false, forbiddenWords: [],
+    hintTokens: hintPromptTokens(), signalOpLines: signalPromptLines(),
+  });
+  if (built !== defaultText) problems.push("agent: spec.build 与 PlanningRules.promptText() 输出不一致（单源断裂）");
+
+  /* ④ 两档 playbook 预算（不满足只报告，不静默改措辞） */
+  if (PLAN_PLAYBOOK_SHORT.length > 500) {
+    problems.push(`agent: PLAN_PLAYBOOK_SHORT ${PLAN_PLAYBOOK_SHORT.length} 字符超预算 500——压缩后再进桥`);
+  }
+  if (PLAN_PLAYBOOK_TEXT.length > 2200) {
+    problems.push(`agent: PLAN_PLAYBOOK_TEXT ${PLAN_PLAYBOOK_TEXT.length} 字符超预算 2200——压缩方案见报告`);
+  }
+
+  /* ⑤ CANDIDATE_WINDOW_TEXT 的数字必须由 tuning/elem-model 常量渲染 */
+  const windowHead = `每步只取 ${POOL_CAP_ELEMENTS}（宽扫 ${WIDE_SCAN_POOL_ELEMENTS}）个候选`;
+  const windowQuota = `chrome ${POOL_QUOTAS.chrome} / viewport ${POOL_QUOTAS.viewport}`
+    + ` / contentNear ${POOL_QUOTAS.contentNear} / mainOffscreen ${POOL_QUOTAS.mainOffscreen}`
+    + ` / other ${POOL_QUOTAS.other}`;
+  if (!CANDIDATE_WINDOW_TEXT.includes(windowHead)) {
+    problems.push(`agent: CANDIDATE_WINDOW_TEXT 未由 POOL_CAP_ELEMENTS/WIDE_SCAN_POOL_ELEMENTS 渲染（缺 ${JSON.stringify(windowHead)}）`);
+  }
+  if (!CANDIDATE_WINDOW_TEXT.includes(windowQuota)) {
+    problems.push("agent: CANDIDATE_WINDOW_TEXT 的桶配额未由 POOL_QUOTAS 渲染");
+  }
+  const grammarSrc = fs.readFileSync(path.join(REPO, "src/engine/grammar-prompt.ts"), "utf-8");
+  if (!grammarSrc.includes("POOL_CAP_ELEMENTS") || !grammarSrc.includes("POOL_QUOTAS")) {
+    problems.push("agent: grammar-prompt.ts 未 import tuning/elem-model 常量（候选窗口数字仍是裸值）");
+  }
+  if (CANDIDATE_WINDOW_TEXT.length > 500) {
+    problems.push(`agent: CANDIDATE_WINDOW_TEXT ${CANDIDATE_WINDOW_TEXT.length} 字符超预算 500`);
+  }
+}
+
+/* ---- 8d. evidence：决策证据载荷 spec/预算/快照 -------------------------- */
+// 证据载荷没有固定文案，但预算与形状必须离线可证。合成输入写死在下方（快照可复现）；
+// 渲染一律委托既有实现（criteriaView / stateText / renderModelFence / executor 的字节账），
+// 本组只做 spec/预算/契约/快照门禁——不改任何渲染措辞或截断逻辑。
+
+const EVIDENCE_SNAPSHOT = path.join(REPO, "tools", "golden", "prompts", "evidence.json");
+const EVIDENCE_CANDIDATE_SIZES = [40, 120, 200] as const;
+const EVIDENCE_PAGE_TEXT = Array.from({ length: 80 }, (_, i) => `Line ${i}: Action item ${i} detail text for the page`).join("\n");
+const EVIDENCE_DIGEST = { nav_epoch_delta: 1, settled: true, pool_changed: false, flags: ["reobserve"] };
+const EVIDENCE_FACTS: MatchedSiteFact[] = [0, 1, 2].map((i) => ({
+  id: `fact-${i}`, site: "example.test", as_of: "2026-11-01", evidence: ["observed"],
+  statement: `Observed page behavior number ${i} in a descriptive, non-imperative voice.`,
+  source: "repo:example.test",
+}));
+const EVIDENCE_NOTE = "[tried before, page did not change]";
+
+function syntheticElems(n: number): Record<string, { tag: string; label: string; href: string; data_test?: string }> {
+  const pool: Record<string, { tag: string; label: string; href: string; data_test?: string }> = {};
+  for (let i = 0; i < n; i += 1) {
+    pool[`e${i}`] = {
+      tag: i % 5 === 0 ? "button" : "a",
+      label: `Action item ${i}`,
+      href: `/products/${i}`,
+      ...(i % 3 === 0 ? { data_test: `item-${i}` } : {}),
+    };
+  }
+  return pool;
+}
+const evidencePage = { locator: () => ({ first: () => ({ innerText: async () => EVIDENCE_PAGE_TEXT }) }) };
+const evidenceStateText = await stateText(evidencePage as never, "Action item 3", null, STATE_TEXT_BUDGET_CHARS);
+const evidenceRenderers: EvidenceRenderers = {
+  "evidence.criteria": (input) => {
+    const view = criteriaView(input as never, new Set(), null, null);
+    return Object.entries(view).map(([ref, line]) => `${ref}: ${line}`).join("\n");
+  },
+  "evidence.state_text": (input) => String(input),
+  "evidence.state_digest": (input) => JSON.stringify(input),
+  "evidence.site_facts": (input) => renderModelFence(input as MatchedSiteFact[]) ?? "",
+  "evidence.notes": (input) => String(input),
+};
+const evidenceCriteria = new Map<number, string>();
+for (const size of EVIDENCE_CANDIDATE_SIZES) {
+  evidenceCriteria.set(size, buildEvidence("evidence.criteria", syntheticElems(size), evidenceRenderers));
+}
+const evidenceSamples: ReadonlyArray<{ id: (typeof EVIDENCE_SPECS)[number]["id"]; text: string }> = [
+  { id: "evidence.criteria", text: evidenceCriteria.get(200)! },
+  { id: "evidence.state_text", text: buildEvidence("evidence.state_text", evidenceStateText, evidenceRenderers) },
+  { id: "evidence.state_digest", text: buildEvidence("evidence.state_digest", EVIDENCE_DIGEST, evidenceRenderers) },
+  { id: "evidence.site_facts", text: buildEvidence("evidence.site_facts", EVIDENCE_FACTS, evidenceRenderers) },
+  { id: "evidence.notes", text: buildEvidence("evidence.notes", EVIDENCE_NOTE, evidenceRenderers) },
+];
+{
+  /* ① spec 形状（version/budget/consumers 每条都必须有） */
+  const evidenceIds = EVIDENCE_SPECS.map((x) => x.id);
+  if (new Set(evidenceIds).size !== evidenceIds.length) problems.push("evidence: EVIDENCE_SPECS 的 id 不唯一");
+  for (const spec of EVIDENCE_SPECS) {
+    if (!(spec.version >= 1)) problems.push(`evidence: '${spec.id}' 缺契约版本`);
+    if (!(spec.budget.maxChars >= 1)) problems.push(`evidence: '${spec.id}' 缺长度预算`);
+    if (spec.consumers.length === 0) problems.push(`evidence: '${spec.id}' 缺消费点`);
+    if (spec.contract.mustInclude.length === 0) problems.push(`evidence: '${spec.id}' 缺契约句`);
+    if (spec.renderer.trim() === "") problems.push(`evidence: '${spec.id}' 未声明既有渲染实现`);
+    for (const c of spec.consumers) {
+      if (!fs.existsSync(path.join(REPO, c))) problems.push(`evidence: '${spec.id}' 消费点文件不存在 ${c}`);
+    }
+  }
+
+  /* ② 候选渲染分级预算（用真实 criteriaView 在合成池上实测） */
+  const criteriaSpec = EVIDENCE_SPECS.find((x) => x.id === "evidence.criteria")!;
+  for (const tier of criteriaSpec.budget.tiers ?? []) {
+    const measured = evidenceCriteria.get(tier.candidates);
+    if (measured === undefined) { problems.push(`evidence: 缺 ${tier.candidates} 候选的实测样本`); continue; }
+    if (measured.length > tier.maxChars) {
+      problems.push(`evidence: criteria/${tier.label}（${tier.candidates} 候选）实测 ${measured.length} 字符超预算 ${tier.maxChars}`);
+    }
+  }
+
+  /* ③ 单档预算（与既有实现的常量对齐） */
+  for (const spec of EVIDENCE_SPECS) {
+    const sample = evidenceSamples.find((x) => x.id === spec.id);
+    if (sample === undefined) { problems.push(`evidence: 缺 '${spec.id}' 的渲染样本`); continue; }
+    const measured = spec.budget.unit === "bytes" ? Buffer.byteLength(sample.text, "utf8") : sample.text.length;
+    if (measured > spec.budget.maxChars) {
+      problems.push(`evidence: '${spec.id}' 实测 ${measured} ${spec.budget.unit} 超预算 ${spec.budget.maxChars}`);
+    }
+    for (const must of spec.contract.mustInclude) {
+      if (!sample.text.includes(must)) problems.push(`evidence: '${spec.id}' 缺契约句 ${JSON.stringify(must)}`);
+    }
+  }
+  const stateTextSpec = EVIDENCE_SPECS.find((x) => x.id === "evidence.state_text")!;
+  if (stateTextSpec.budget.maxChars !== STATE_TEXT_BUDGET_CHARS) {
+    problems.push(`evidence: state_text 预算 ${stateTextSpec.budget.maxChars} ≠ tuning.STATE_TEXT_BUDGET_CHARS ${STATE_TEXT_BUDGET_CHARS}`);
+  }
+  const digestSpec = EVIDENCE_SPECS.find((x) => x.id === "evidence.state_digest")!;
+  if (digestSpec.budget.maxChars !== STATE_DIGEST_MAX_BYTES) {
+    problems.push(`evidence: state_digest 预算 ${digestSpec.budget.maxChars} ≠ STATE_DIGEST_MAX_BYTES ${STATE_DIGEST_MAX_BYTES}`);
+  }
+
+  /* ④ 无站点/业务专名（证据样本也不认站点） */
+  for (const sample of evidenceSamples) {
+    if (SITE_NAME_RE.test(sample.text)) problems.push(`evidence: '${sample.id}' 渲染样本含站点/业务专名`);
+  }
+
+  /* ⑤ 快照 hash 入库（合成输入固定；改动须 --fix 显式刷新并重审） */
+  const evidenceSnapshot = {
+    note: "决策证据载荷快照：合成输入固定，渲染委托既有实现；"
+      + "预算/契约门禁见 prompt-hit evidence 组。行为改动（措辞/截断）须 --fix 刷新并重审。",
+    inputs: {
+      criteria: "syntheticElems(n)：tag=button/a，label='Action item <i>'，href=/products/<i>，data_test 每 3 个一个",
+      state_text: `fake page innerText = 80 × "Line <i>: Action item <i> detail text for the page"；query="Action item 3"；budget=${STATE_TEXT_BUDGET_CHARS}`,
+      state_digest: JSON.stringify(EVIDENCE_DIGEST),
+      site_facts: "3 × MatchedSiteFact（site=example.test，statement ≤200 字符）",
+      notes: EVIDENCE_NOTE,
+    },
+    prompts: Object.fromEntries(EVIDENCE_SPECS.map((spec) => {
+      const sample = evidenceSamples.find((x) => x.id === spec.id)!;
+      const payload: Record<string, unknown> = {
+        version: spec.version,
+        chars: sample.text.length,
+        bytes: Buffer.byteLength(sample.text, "utf8"),
+        sha256: sha256(sample.text),
+      };
+      if (spec.id === "evidence.criteria") {
+        payload.tiers = Object.fromEntries(EVIDENCE_CANDIDATE_SIZES.map((size) => {
+          const text = evidenceCriteria.get(size)!;
+          return [String(size), { chars: text.length, sha256: sha256(text) }];
+        }));
+      }
+      return [spec.id, payload];
+    })),
+  };
+  const evidenceSnapshotText = JSON.stringify(evidenceSnapshot, null, 2) + "\n";
+  const evidenceSnapshotActual = fs.existsSync(EVIDENCE_SNAPSHOT) ? fs.readFileSync(EVIDENCE_SNAPSHOT, "utf-8") : "";
+  if (evidenceSnapshotActual !== evidenceSnapshotText) {
+    if (fix) {
+      fs.mkdirSync(path.dirname(EVIDENCE_SNAPSHOT), { recursive: true });
+      fs.writeFileSync(EVIDENCE_SNAPSHOT, evidenceSnapshotText, "utf-8");
+      console.log("wrote tools/golden/prompts/evidence.json");
+    } else {
+      problems.push("evidence: tools/golden/prompts/evidence.json 与合成渲染不一致——"
+        + "若有意的渲染/预算改动，跑 --fix 刷新并重审；若为误改，改回既有渲染实现");
+    }
+  }
+}
+
+/* ---- 8e. bridge_desc：桥手写工具描述覆盖（warn-only） ------------------- */
+// 桥工具描述是 Agent 可见 prompt 的第三块（82 条手写 description）。本轮只做**只读覆盖**：
+// 长度预算 ≤800/条、`amber <cmd>` 死链、站点/业务专名——全部只 warn，不改变退出码
+// （桥面模板化留待后续；warn 是覆盖度观测，不是门禁阻断）。
+
+/** 从 `description:` 值表达式里抽出字面量拼接文本（支持跨行 `'a' + 'b'`，不 import TS）。 */
+function extractDescriptions(text: string): string[] {
+  const out: string[] = [];
+  const re = /description\s*:/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    let i = m.index + m[0].length;
+    while (i < text.length && /\s/.test(text[i]!)) i += 1;
+    let expr = "";
+    let depth = 0;
+    let quote: string | null = null;
+    for (; i < text.length; i += 1) {
+      const c = text[i]!;
+      if (quote !== null) {
+        expr += c;
+        if (c === "\\") { expr += text[i + 1] ?? ""; i += 1; continue; }
+        if (c === quote) quote = null;
+        continue;
+      }
+      if (c === "'" || c === '"' || c === "`") { quote = c; expr += c; continue; }
+      if (c === "(" || c === "[" || c === "{") { depth += 1; expr += c; continue; }
+      if (c === ")" || c === "]" || c === "}") { depth -= 1; expr += c; continue; }
+      if (c === "," && depth === 0) break;
+      expr += c;
+    }
+    let value = "";
+    const lit = /'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g;
+    let lm: RegExpExecArray | null;
+    while ((lm = lit.exec(expr)) !== null) value += lm[1] ?? lm[2] ?? lm[3] ?? "";
+    out.push(value.replace(/\\n/g, "\n").replace(/\\'/g, "'").replace(/\\"/g, '"'));
+  }
+  return out;
+}
+
+const bridgeWarnings: string[] = [];
+const BRIDGE_DESC_MAX_CHARS = 800;
+{
+  const bridgePath = path.join(REPO, "integrations", "dsh-bridge", "src", "index.ts");
+  const descriptions = extractDescriptions(fs.readFileSync(bridgePath, "utf-8"));
+  const knownCommands = new Set<string>(["help", "version", "completion", ...COMMANDS.map((c) => c.name)]);
+  let totalChars = 0;
+  let overBudget = 0;
+  let deadLinks = 0;
+  let siteNames = 0;
+  descriptions.forEach((text, i) => {
+    totalChars += text.length;
+    if (text.length > BRIDGE_DESC_MAX_CHARS) {
+      overBudget += 1;
+      bridgeWarnings.push(`bridge_desc: #${i + 1} ${text.length} 字符超预算 ${BRIDGE_DESC_MAX_CHARS}`);
+    }
+    for (const cmd of text.matchAll(/\bamber\s+([a-z][a-z0-9-]*)/g)) {
+      if (!knownCommands.has(cmd[1]!)) {
+        deadLinks += 1;
+        bridgeWarnings.push(`bridge_desc: #${i + 1} 引用未知命令 'amber ${cmd[1]}'`);
+      }
+    }
+    if (SITE_NAME_RE.test(text)) {
+      siteNames += 1;
+      bridgeWarnings.push(`bridge_desc: #${i + 1} 含站点/业务专名`);
+    }
+  });
+  // 基线 82 条（桥面盘点值）：数量漂移只 warn——桥面新增工具描述是正常演进，重审预算即可。
+  const BRIDGE_DESC_BASELINE = 82;
+  if (descriptions.length !== BRIDGE_DESC_BASELINE) {
+    bridgeWarnings.push(`bridge_desc: description 数量 ${descriptions.length}/${BRIDGE_DESC_BASELINE} 与基线不同——新增/删除桥面描述需重审长度预算`);
+  }
+  console.log(
+    `prompt-hit: bridge_desc（warn-only）— ${descriptions.length}/${BRIDGE_DESC_BASELINE} 个 description / 共 ${totalChars} 字符；`
+      + `> ${BRIDGE_DESC_MAX_CHARS}: ${overBudget}；amber 死链: ${deadLinks}；站点名: ${siteNames}`,
+  );
+}
+
 /* ---- 9. intervention：求援文案六条清单（§6，实施照抄） ---------------------- */
 // 出处：src/support/intervention-texts.ts（零 import 叶子，本组是它唯一的离线闸门）。
 // 六条清单对 RESCUE_TEXTS 三 kind + SIGNAL_NOT_HELD_TEXT + OUTCOME_TEXTS +
@@ -596,17 +923,23 @@ for (const [label, text] of otherHumanTexts) {
 
 /* ---- 汇总 ------------------------------------------------------------------ */
 
+// warn-only 组（bridge_desc）只观测、不阻断：打印在问题块之前，退出码不受影响。
+for (const w of bridgeWarnings) console.error(`prompt-hit: warn — ${w}`);
+
 if (problems.length) {
   for (const p of problems) console.error(`prompt-hit: ${p}`);
   process.exit(1);
 }
 // 分组清单式输出：文档引用组名，不引用编号（插组不会让既有引用失准）。
 console.log(
-  `prompt-hit: OK — grammar/pool/plan/bridge/doc/overview/coverage/intervention/model 九组全绿：`
+  `prompt-hit: OK — grammar/pool/plan/bridge/doc/overview/coverage/intervention/model/agent/evidence/bridge_desc 十二组全绿（bridge_desc 仅 warn）：`
     + `hint ${HINT_SHAPES.length} 形状全部可解析且示例可命中，`
     + `信号 ${Object.keys(SIGNAL_OPS).length} 算子提示词↔校验器一致，`
     + `停因 ${Object.keys(STOPCODE_MEANING).length} 个 next/豁免全覆盖，`
     + `概述层多面一致（AGENTS.md/桥/长度预算），CLI next 无死链，`
     + `求援文案 ${Object.keys(RESCUE_TEXTS).length} kind 六条清单全过，`
-    + `模型 prompt ${PROMPT_SPECS.length} 条唯一文本 × ${PROMPT_SPECS.reduce((s, x) => s + x.consumers.length, 0)} 处消费点单源（快照 hash 一致）`,
+    + `模型 prompt ${PROMPT_SPECS.length} 条唯一文本 × ${PROMPT_SPECS.reduce((s, x) => s + x.consumers.length, 0)} 处消费点单源（快照 hash 一致），`
+    + `Agent plan.rules ${new PlanningRules().promptText().length} 字符（预算 ${PLAN_RULES_SPEC.budget.maxChars}；`
+    + `playbook ${PLAN_PLAYBOOK_SHORT.length}/${PLAN_PLAYBOOK_TEXT.length} ≤500/2200；候选窗口 ${CANDIDATE_WINDOW_TEXT.length} 字符由常量渲染），`
+    + `证据 spec ${EVIDENCE_SPECS.length} 条（候选 40/120/200 分级预算 + 快照 hash 一致）`,
 );

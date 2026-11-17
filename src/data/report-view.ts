@@ -93,6 +93,7 @@ function pyTruthy(v: unknown): boolean {
 
 import type { DateEntry, Rendered, Row, Source } from "./datasource.ts";
 import { cliBinOf, transportClient } from "./datasource.ts";
+import { firstNonEmptyScalar, selectSortKeys, selectValueField } from "./extract-ops.ts";
 
 /**
  * 报告里的"前 N 条原始行"（数据源的 `report.preview`）的**单一实现**。
@@ -123,6 +124,46 @@ export function previewTable(source: Source, perDate: Record<string, DateEntry>)
   return { date, columns, rows };
 }
 
+/** 配置里的字符串字段名列表（过滤非字符串/空白；未配 = []）。 */
+function stringFields(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x): x is string => typeof x === "string" && x.trim() !== "");
+}
+
+/** 按声明顺序取第一个真值字段（pyTruthy 口径，与既有渲染一致）。 */
+function firstDeclaredValue(row: Row, fields: readonly string[]): string {
+  for (const f of fields) {
+    if (pyTruthy(row[f])) return pyStr(row[f]);
+  }
+  return "";
+}
+
+/** 行标识文本（报告表格的 select 单元格与 CLI 摘要共用）：`report.value_fields` 顺序；未配 = 通用回退。 */
+export function selectIdentityText(source: Source, row: Row): string {
+  const rep = (source["report"] || {}) as Record<string, any>;
+  const fields = stringFields(rep["value_fields"]);
+  if (fields.length > 0) return firstDeclaredValue(row, fields);
+  const generic = firstNonEmptyScalar(row);
+  return generic === undefined ? "" : pyStr(generic);
+}
+
+/**
+ * 值文本（报告加粗值与 CLI 摘要的唯一实现）：字段 = select 的 `value_field`（缺省 `sort_by[0]`）；
+ * 只有显式 `report.currency_field` 命中该字段时才加货币前缀。
+ */
+export function selectValueText(source: Source, sel: Record<string, any>, row: Row): string {
+  const rep = (source["report"] || {}) as Record<string, any>;
+  const field = selectValueField(sel);
+  if (field === null) return "";
+  const raw = row[field];
+  if (raw !== undefined && raw !== null) {
+    const curField = pyTruthy(rep["currency_field"]) ? pyStr(rep["currency_field"]) : null;
+    const cur = curField !== null && curField === field ? pyStr(getOr(rep, "currency", "")) : "";
+    return `${cur}${pyStr(raw)}`;
+  }
+  return pyStr(getOr(row, field, ""));
+}
+
 export function reportMarkdown(
   source: Source,
   perDate: Record<string, DateEntry>,
@@ -151,6 +192,7 @@ export function reportMarkdown(
   }
   if (pyTruthy(rep["source_note"])) L.push(`- 数据来源：${pyStr(rep["source_note"])}`);
 
+  const repFields = stringFields(rep["value_fields"]);
   const selects = (source["selects"] || []) as Array<Record<string, any>>;
   const counts = (source["counts"] || []) as Array<Record<string, any>>;
   const audits = (source["audits"] || []) as Array<Record<string, any>>;
@@ -158,7 +200,7 @@ export function reportMarkdown(
     const label = (x: Record<string, any>): string => pyStr(getOr(x, "label", x["key"]));
     const head = "| 日期 | " + [...counts.map(label), ...selects.map(label), ...audits.map(label)].join(" | ") + " |";
     L.push("", head, "|" + "---|".repeat(1 + counts.length + selects.length + audits.length));
-    const timeFieldRaw = hasOwn(f, "time_field") ? f["time_field"] : "dep";
+    const timeFieldRaw = hasOwn(f, "time_field") ? f["time_field"] : null;
     const timeField = timeFieldRaw === null || timeFieldRaw === undefined ? null : pyStr(timeFieldRaw);
     for (const date of Object.keys(perDate).sort()) {
       const d = perDate[date]!;
@@ -166,19 +208,11 @@ export function reportMarkdown(
       for (const s of selects) {
         const b = ((d["selects"] || {}) as Record<string, Row | null>)[pyStr(s["key"])];
         if (b) {
-          // 出行类数据源的标识列是 `flight_no` / `name`；别的数据源（CLI 工具输出这类）
-          // 用 `id`，再没有就留空。价格同理：有 `price` 就按配置的货币前缀渲染（机票报告
-          // 逐字节不变），没有就渲染 `sort_by` 的第一个键——报告格式不该要求每份数据源
-          // 都长成机票表。
-          const no = pyTruthy(b["flight_no"]) ? b["flight_no"]
-            : pyTruthy(b["name"]) ? b["name"]
-              : pyTruthy(b["id"]) ? b["id"] : "";
+          // 标识列 = `report.value_fields` 声明顺序（未配 = 行内首个非空标量）；
+          // 时间列 = `filters.time_field`（未配 = 不渲染）；值列 = `selects[].value_field`。
+          const no = repFields.length > 0 ? firstDeclaredValue(b, repFields) : selectIdentityText(source, b);
           const dep = timeField === null ? "" : pyStr(getOr(b, timeField, ""));
-          const key0 = pyStr(((s["sort_by"] as string[] | undefined) ?? ["price"])[0] ?? "price");
-          const priceVal = b["price"] === undefined || b["price"] === null
-            ? pyStr(getOr(b, key0, ""))
-            : `${pyStr(cur)}${pyStr(b["price"])}`;
-          cells.push(`${pyStr(no)} ${dep} **${priceVal}**`.trim());
+          cells.push(`${pyStr(no)} ${dep} **${selectValueText(source, s, b)}**`.trim());
         } else {
           cells.push("-");
         }
@@ -191,32 +225,26 @@ export function reportMarkdown(
       L.push(`| ${date} | ` + cells.join(" | ") + " |");
     }
     for (const s of selects) {                       // 跨日期结论
+      const cmpField = selectValueField(s);
+      const detailFields = stringFields(s["detail_fields"]);
+      const fallbackFields = stringFields(rep["detail_fallback_fields"]);
       let best: [string, Row] | null = null;
       for (const date of Object.keys(perDate)) {
         const b = ((perDate[date]!["selects"] || {}) as Record<string, Row | null>)[pyStr(s["key"])];
         if (!pyTruthy(b)) continue;
-        // 比较键：有 price 用 price（机票口径，逐字节不变），否则用 sort_by 的第一个键。
-        const key0 = pyStr(((s["sort_by"] as string[] | undefined) ?? ["price"])[0] ?? "price");
-        const val = pyTruthy(b![key0]) ? b![key0] : 1 << 30;
-        if (best === null) {
-          best = [date, b!];
-          continue;
-        }
-        const bestVal = pyTruthy(best[1][key0]) ? best[1][key0] : 1 << 30;
+        const val = cmpField !== null && pyTruthy(b![cmpField]) ? b![cmpField] : 1 << 30;
+        if (best === null) { best = [date, b!]; continue; }
+        const bestVal = cmpField !== null && pyTruthy(best[1][cmpField]) ? best[1][cmpField] : 1 << 30;
         if (pyCompareTuple([val, date], [bestVal, best[0]]) < 0) best = [date, b!];
       }
       if (best) {
         const [date, b] = best;
-        const key0 = pyStr(((s["sort_by"] as string[] | undefined) ?? ["price"])[0] ?? "price");
-        const desc = ["flight_no", "airline", "dep", "arr", "dep_port", "arr_port", "cabin", "discount"]
-          .filter((k) => pyTruthy(b[k]))
-          .map((k) => pyStr(b[k]))
-          .join(" ");
-        // 非"价格型"数据源：渲染标识列 + 排序键的值，而不是把 None 打出来。
-        const hasPrice = b["price"] !== undefined && b["price"] !== null;
-        const shown = hasPrice ? `${pyStr(cur)}${pyStr(b["price"])}` : pyStr(getOr(b, key0, ""));
-        const ident = hasPrice || pyTruthy(desc) ? desc
-          : ["id", "name", "label"].map((k) => (pyTruthy(b[k]) ? pyStr(b[k]) : "")).filter(Boolean).join(" ");
+        const desc = detailFields.filter((k) => pyTruthy(b[k])).map((k) => pyStr(b[k])).join(" ");
+        const hasValue = cmpField !== null && b[cmpField] !== undefined && b[cmpField] !== null;
+        const shown = hasValue ? selectValueText(source, s, b) : pyStr(getOr(b, cmpField ?? "", ""));
+        const ident = hasValue || desc !== ""
+          ? desc
+          : (fallbackFields.length > 0 ? firstDeclaredValue(b, fallbackFields) : selectIdentityText(source, b));
         L.push("", `**${pyStr(getOr(s, "label", s["key"]))}（真实数据）**：${date} ${ident} **${shown}**`);
       }
     }

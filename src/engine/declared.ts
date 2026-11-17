@@ -23,6 +23,7 @@
  *     模型投影（调用方在 pickInner 剥离 `declared` 旁路标记）。
  */
 import { framesOf, type Elem, type ElemPool, type PageLike } from "./extraction.ts";
+import { FULL_LABEL_MAX, MODEL_LABEL_MAX } from "./elem-model.ts";
 import { elemFrameStamp, frameGateExcludes, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
 import { anchorChainMatch, hintCandidates, type HintMatchOptions } from "./rules.ts";
@@ -91,7 +92,7 @@ ${ANCHOR_JS}
     const full = String(
       e.getAttribute("aria-label") || e.getAttribute("title") || e.innerText
       || e.getAttribute("placeholder") || e.getAttribute("value") || "",
-    ).replace(/\s+/g, " ").trim().slice(0, 200);
+    ).replace(/\s+/g, " ").trim().slice(0, FULL_LABEL_MAX);
     const href = String(e.getAttribute("href") || "");
     let visible = true;
     try {
@@ -107,7 +108,7 @@ ${ANCHOR_JS}
     try { e.setAttribute("data-hintref", stamp); } catch (err) { /* 只读节点：按未盖章处理 */ }
     out.push({
       // A1 不变量：label === full_label 的前 40 字（同一 full 截断）。
-      i, stamp, tag, full_label: full, label: full.slice(0, 40),
+      i, stamp, tag, full_label: full, label: full.slice(0, MODEL_LABEL_MAX),
       role: String(e.getAttribute("role") || "").toLowerCase(),
       id: String(e.id || ""),
       dt: String(e.getAttribute("data-test") || ""),
@@ -170,7 +171,7 @@ ${ANCHOR_JS}
   for (let i = 0; i < deepest.length; i++) {
     const e = deepest[i];
     const href = String(e.getAttribute("href") || "");
-    const full = String(e.innerText || "").replace(/\s+/g, " ").trim().slice(0, 200);
+    const full = String(e.innerText || "").replace(/\s+/g, " ").trim().slice(0, FULL_LABEL_MAX);
     let visible = true;
     try {
       visible = e.checkVisibility ? e.checkVisibility({ checkVisibilityCSS: true }) : true;
@@ -185,7 +186,7 @@ ${ANCHOR_JS}
     try { e.setAttribute("data-hintref", stamp); } catch (err) { /* 只读节点：按未盖章处理 */ }
     out.push({
       // A1 不变量：label === full_label 的前 40 字（同一 full 截断）。
-      i, stamp, tag: String(e.tagName || "").toLowerCase(), full_label: full, label: full.slice(0, 40),
+      i, stamp, tag: String(e.tagName || "").toLowerCase(), full_label: full, label: full.slice(0, MODEL_LABEL_MAX),
       role: String(e.getAttribute("role") || "").toLowerCase(),
       id: String(e.id || ""),
       dt: String(e.getAttribute("data-test") || ""),

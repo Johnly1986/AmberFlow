@@ -28,10 +28,10 @@ export const RUNTIME_PLACEHOLDERS: Readonly<Record<string, string>> = {
   run_id: "{run_id}",
 };
 
-/** 行里的"主值"（与数据腿报告里 selects 列的渲染同一顺序：price → id → name）。 */
+/** 行里的"主值"的**通用回退**：行内首个非空值（不点名任何业务字段）。 */
 function rowMainValue(row: Record<string, string> | null): string {
   if (!row) return "";
-  for (const k of ["price", "id", "name"] as const) {
+  for (const k of Object.keys(row)) {
     const v = row[k];
     if (v !== undefined && v !== null && String(v) !== "") return String(v);
   }
@@ -190,6 +190,8 @@ export function expandPack(pack: AppPack, overrides: Record<string, unknown> = {
  */
 export function resolveSourceSlots(
   pack: AppPack, observed: Record<string, SourceObservation>,
+  /** 数据源配置决定的主值（source → select → 值）；缺省 = 行内首个非空的通用回退。 */
+  selectValues: Record<string, Record<string, string>> = {},
 ): Record<string, string> {
   const decl = pack.source_slots;
   if (!isDict(decl)) return {};
@@ -202,7 +204,10 @@ export function resolveSourceSlots(
       const row = obs.selects[String(b["select"])] ?? null;
       if (row === null) continue;
       const f = b["field"];
-      const v = f === undefined ? rowMainValue(row) : row[String(f)];
+      const configured = selectValues[String(b["source"])]?.[String(b["select"])];
+      const v = f === undefined
+        ? (configured !== undefined ? configured : rowMainValue(row))
+        : row[String(f)];
       if (v === undefined || v === null || String(v) === "") continue;
       out[slot] = String(v);
     } else if (b["count"] !== undefined) {

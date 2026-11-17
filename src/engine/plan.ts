@@ -15,6 +15,7 @@ import { validateCommands, type CommandDecl } from "./actions.ts";
 // 语法描述的唯一出处：hint 形状行与信号算子行由 grammar-prompt 生成，不再手抄
 // （grammar-prompt import 时自证与 parseHint / SIGNAL_OPS 对齐）。
 import { hintPromptTokens, signalPromptLines } from "./grammar-prompt.ts";
+import { buildPlanRulesPrompt } from "../prompts/agent-prompts.ts";
 
 /**
  * 一步的可逆性声明。
@@ -181,21 +182,15 @@ export class PlanningRules {
     this.requireHint = requireHint;
   }
 
+  /** 题面唯一出处 = `src/prompts/agent-prompts.ts` 的 `plan.rules` spec（这里只做参数装配）。 */
   promptText(): string {
-    const lines = [
-      "Planning rules (hard constraints):",
-      `- at most ${this.maxSubgoals} subgoals, ordered, each independently verifiable`,
-      '- when the page elements are given, add "target_hint" naming the element the',
-      `  subgoal drives: ${hintPromptTokens()}. It is resolved by rule at zero model`,
-      "  cost; omit it only when the target is genuinely ambiguous in the snapshot",
-      "- every subgoal MUST carry a done-signal, one of:",
-      ...signalPromptLines().map((l) => `    ${l}`),
-    ];
-    if (this.requireStartUrl) lines.push("- every subgoal needs an explicit start_url");
-    if (this.forbiddenWords.length) {
-      lines.push(`- forbidden in descriptions: ${this.forbiddenWords.join(", ")}`);
-    }
-    return lines.join("\n") + "\n";
+    return buildPlanRulesPrompt({
+      maxSubgoals: this.maxSubgoals,
+      requireStartUrl: this.requireStartUrl,
+      forbiddenWords: this.forbiddenWords,
+      hintTokens: hintPromptTokens(),
+      signalOpLines: signalPromptLines(),
+    });
   }
 
   /**

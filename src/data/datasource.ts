@@ -52,7 +52,7 @@ import { main } from "./source-validate.ts";
 export { ValueError, FileNotFoundError, KeyError } from "./types.ts";
 export type { Row, Source, Page, Rendered, DateEntry, RunResult, Client, CliObservation, DateLike, RunOptions } from "./types.ts";
 export { curlGet, httpxGet, CLI_KEYS, cliBinOf, cliRunDetailed, cliRun, cliVersion, checkVersion, CLIENTS, TRANSPORTS, transportClient, fetchSource, blocked } from "./transport.ts";
-export { resolve, EXTRACT_KINDS, OPS, DATE_EXPRS, applyOps, fieldValue, rowOf, EXTRACTORS, extract, todayIso, dateExpr, dateParams, nextWeekDates, parseDatesValue, defaultDatesSlotNames, defaultDates, urlFor, inWindow, matches, selectIndex, selectBest, auditRows, countRows } from "./extract-ops.ts";
+export { resolve, EXTRACT_KINDS, OPS, DATE_EXPRS, applyOps, fieldValue, rowOf, EXTRACTORS, extract, todayIso, dateExpr, dateParams, nextWeekDates, parseDatesValue, defaultDatesSlotNames, defaultDates, urlFor, inWindow, matches, selectIndex, selectBest, selectSortKeys, selectValueField, selectValueFields, selectMainValue, firstNonEmptyScalar, auditRows, countRows } from "./extract-ops.ts";
 export { sourceDirs, renderAndSnapshot, loadSource, listSources, countGroups, validateSource, runSource, main } from "./source-validate.ts";
 
 // py 语义小工具（pyStr/pyTruthy/getOr/pyCompareTuple/pyJsonDumpsIndent 等）已收敛到
@@ -64,7 +64,7 @@ export {
 } from "../support/pystr.ts";
 // 报告视图区（PreviewTable/previewTable/reportMarkdown）拆到 report-view.ts（F7）；
 // 这里 re-export 维持既有导出面不变（index.ts `export * as datasource` 与既有调用方零改动）。
-export { previewTable, reportMarkdown, type PreviewTable } from "./report-view.ts";
+export { previewTable, reportMarkdown, selectIdentityText, selectValueText, type PreviewTable } from "./report-view.ts";
 
 /* 直接 `node --experimental-strip-types src/data/datasource.ts --list` 时执行。 */
 const ARGV1 = process.argv[1];

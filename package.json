@@ -45,7 +45,7 @@
     "doctor": "node --experimental-strip-types src/cli/start.ts --doctor",
     "model:fetch": "node --experimental-strip-types src/model/model-fetch.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run precheck && npm run typecheck && npm run config:example:check && npm run schema:check && npm run prompt-hit && npm run secret-scan && npm run examples-check && npm run row-anchor:check && npm run maintain:check && npm run split:check && npm run test:validate",
+    "check": "npm run precheck && npm run typecheck && npm run config:example:check && npm run schema:check && npm run prompt-hit && npm run site-knowledge:check && npm run secret-scan && npm run examples-check && npm run row-anchor:check && npm run maintain:check && npm run split:check && npm run test:validate",
     "test": "node --experimental-strip-types src/cli/test.ts",
     "test:validate": "node --experimental-strip-types src/cli/test.ts --validate",
     "apps": "node --experimental-strip-types src/app/app-runner.ts",
@@ -68,7 +68,8 @@
     "verify:offline": "node --experimental-strip-types tools/verify-offline.ts",
     "verify:offline:record": "node --experimental-strip-types tools/verify-offline.ts --record",
     "verify:runtime:offline": "node --experimental-strip-types tools/verify-runtime-offline.ts",
-    "verify:runtime:offline:record": "node --experimental-strip-types tools/verify-runtime-offline.ts --record"
+    "verify:runtime:offline:record": "node --experimental-strip-types tools/verify-runtime-offline.ts --record",
+    "site-knowledge:check": "node --experimental-strip-types tools/site-knowledge-check.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

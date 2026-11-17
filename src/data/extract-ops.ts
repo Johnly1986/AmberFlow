@@ -496,8 +496,68 @@ function poolOf(rows: Row[], source: Source, spec: Record<string, any>): Row[] {
  *
  * @returns 胜者在 `rows` 里的下标；空行集返回 -1。
  */
+/**
+ * `sort_by` 的配置解释（唯一出处）：只认非空字符串数组；未配 = 空数组（**不猜业务字段**）。
+ * 空数组在 `selectIndex` 里表示"不排序、取池内第一行"——通用回退，不点名任何业务字段。
+ */
+export function selectSortKeys(sel: Record<string, any>): string[] {
+  const raw = sel["sort_by"];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((k): k is string => typeof k === "string" && k.trim() !== "");
+}
+
+/** 主值字段候选顺序：`value_fields` > `value_field` > `sort_by`；未配 = []（调用方用通用回退）。 */
+export function selectValueFields(sel: Record<string, any>): string[] {
+  const list = sel["value_fields"];
+  if (Array.isArray(list)) {
+    const fields = list.filter((k): k is string => typeof k === "string" && k.trim() !== "");
+    if (fields.length > 0) return fields;
+  }
+  const single = sel["value_field"];
+  if (typeof single === "string" && single.trim() !== "") return [single];
+  return selectSortKeys(sel);
+}
+
+/** 报告里加粗显示的"主值字段"：`value_field` > `sort_by[0]`；未配 = null（调用方通用回退）。 */
+export function selectValueField(sel: Record<string, any>): string | null {
+  const single = sel["value_field"];
+  if (typeof single === "string" && single.trim() !== "") return single;
+  return selectSortKeys(sel)[0] ?? null;
+}
+
+/** 行的第一个非空标量值（通用回退；不点名任何业务字段；对象/数组跳过）。 */
+export function firstNonEmptyScalar(row: Row | null | undefined): unknown {
+  if (row === null || row === undefined) return undefined;
+  for (const k of Object.keys(row)) {
+    const v = (row as Record<string, unknown>)[k];
+    if (v === null || v === undefined) continue;
+    const t = typeof v;
+    if (t !== "string" && t !== "number" && t !== "boolean") continue;
+    if (String(v) !== "") return v;
+  }
+  return undefined;
+}
+
+/**
+ * 行的"主值"：按声明字段顺序取第一个非空值；未声明任何字段才走通用回退
+ * （行内首个非空标量）。声明了但全空 = undefined（不跨到配置外猜字段）。
+ */
+export function selectMainValue(row: Row | null | undefined, sel: Record<string, any>): unknown {
+  if (row === null || row === undefined) return undefined;
+  const fields = selectValueFields(sel);
+  if (fields.length > 0) {
+    for (const f of fields) {
+      const v = (row as Record<string, unknown>)[f];
+      if (v !== undefined && v !== null) return v;
+    }
+    return undefined;
+  }
+  return firstNonEmptyScalar(row);
+}
+
 export function selectIndex(rows: Row[], sel: Record<string, any>): number {
-  const keys = (sel["sort_by"] as string[] | undefined) || ["price"];
+  const keys = selectSortKeys(sel);
+  if (keys.length === 0) return rows.length > 0 ? 0 : -1;
   const wantMax = pyStr(sel["order"] ?? "min") === "max";
   let best = -1;
   let bestKey: unknown[] | null = null;
@@ -526,7 +586,7 @@ export function selectBest(rows: Row[], source: Source, sel: Record<string, any>
   return i < 0 ? null : pool[i]!;
 }
 
-/** 按配置核查数据质量：`{"field": "price", "empty": true}` -> 有多少行为空。 */
+/** 按配置核查数据质量：`{"field": "<字段>", "empty": true}` -> 有多少行为空。 */
 export function auditRows(rows: Row[], spec: Record<string, any>): number {
   const f = pyStr(spec["field"]);
   if (pyTruthy(spec["empty"])) {

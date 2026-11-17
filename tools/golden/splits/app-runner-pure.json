@@ -1,13 +1,8 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "app-runner-pure",
-  "note": "app-runner.ts 拆分（A1a/A1b）：类型/纯助手→types、策略→policy、工具步→tool-step、runApp→declared；纯搬移 hash（除 6 个加 export 修饰的跨模块助手外逐字节相同）",
+  "note": "app-runner.ts 拆分（A1a/A1b）：类型/纯助手→types、策略→policy、工具步→tool-step、runApp→declared；纯搬移 hash（除 6 个加 export 修饰的跨模块助手外逐字节相同）；W3-4：runApp 的 selects 回写改配置驱动（抽 buildSelectObservation 保持行数预算），非纯搬移",
   "files": {
-    "src/app/app-runner-declared.ts": {
-      "symbols": {
-        "runApp": "3dac63e36330ec804c5ce4a63d751e1b57d8e59a8f6d90e2da19953ff8c3307a"
-      }
-    },
     "src/app/app-runner-policy.ts": {
       "symbols": {
         "AppRunConfigError": "d37f30210e7838160b2d8d6b785e8513706157ce11949ed487e13ff32f0b5885",

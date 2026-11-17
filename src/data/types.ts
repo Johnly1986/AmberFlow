@@ -8,7 +8,20 @@
 
 export type Row = Record<string, unknown>;
 
-/** 一份数据源配置（`<site>/sources/<name>.json`），加 `_path`。 */
+/**
+ * 一份数据源配置（`<site>/sources/<name>.json`），加 `_path`。
+ *
+ * **字段映射属于配置，不属于机制**（数据/报表引擎不认具体业务字段）：
+ *   - `selects[].sort_by`        排序键；未配 = 不排序、取第一行（通用回退）
+ *   - `selects[].value_field`    报告加粗/主值字段；缺省 = `sort_by[0]`
+ *   - `selects[].value_fields`   槽位回写主值候选顺序；缺省 = `value_field` / `sort_by`
+ *   - `selects[].detail_fields`  跨日期结论的描述字段顺序；缺省 = []（不渲染描述）
+ *   - `report.value_fields`      报告行标识列候选顺序；缺省 = 行内首个非空标量
+ *   - `report.currency_field`    加货币前缀的字段；缺省不加上缀
+ *   - `report.detail_fallback_fields` 跨日期结论标识回退链；缺省 = 通用回退
+ *   - `filters.time_field`       报告时间列字段；未配 = 不渲染
+ *   - `report.preview.columns`   报告预览列（既有字段，保持不变）
+ */
 export interface Source {
   name?: string;
   label?: string;

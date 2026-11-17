@@ -2,7 +2,7 @@
  * 声明式运行面 `runApp`（从 app-runner.ts 纯搬移，大文件拆分 A1b）：journey 展开 → 数据腿 →
  * web/cli/manual 适配器 → 不变量验收 → 结果装配。`app-runner.ts` re-export 保持既有导出面。
  */
-import { defaultDates, loadSource, previewTable, runSource } from "../data/datasource.ts";
+import { defaultDates, loadSource, previewTable, runSource, selectMainValue } from "../data/datasource.ts";
 import { MockAuditor, type TraceStep } from "../engine/audit.ts";
 import { DatasetStore } from "../engine/dataset.ts";
 import { type MiddlewareOptions } from "../engine/executor-types.ts";
@@ -30,6 +30,40 @@ import { buildMiddleware } from "./middleware-factory.ts";
 import { MASKED_SLOT, maskSecretSlots, secretSlotKeys } from "./redaction.ts";
 import { createRunScope } from "./run-scope.ts";
 import { loadSiteFacts, matchSiteFacts, renderSiteFactLines } from "./site-facts.ts";
+/**
+ * 数据腿 selects → 观测面（整行 + 配置驱动主值）。
+ *
+ * 主值字段映射来自数据源配置（`selects[].value_fields/value_field`），引擎不猜业务字段；
+ * 空串不写入 `selectValues`（回写槽位继续看通用回退，与既有口径一致）。
+ */
+function buildSelectObservation(
+  src: Record<string, any>, rawSelects: Record<string, any>,
+): {
+  selects: Record<string, string>;
+  selectsFull: Record<string, Record<string, string> | null>;
+  selectValues: Record<string, string>;
+} {
+  const selects: Record<string, string> = {};
+  const selectsFull: Record<string, Record<string, string> | null> = {};
+  const selectValues: Record<string, string> = {};
+  const selectSpecs = new Map(
+    ((src["selects"] || []) as Array<Record<string, any>>)
+      .map((s) => [String(s["key"] ?? ""), s] as const),
+  );
+  for (const [k, row] of Object.entries(rawSelects)) {
+    // 回写槽位要能取到**具体字段**（`selects` 只留"主值"给报告看；声明点名 `field` 时要有整行）。
+    selectsFull[k] = row === null || row === undefined
+      ? null
+      : Object.fromEntries(Object.entries(row as Record<string, unknown>).map(([f, v]) => [f, String(v ?? "")]));
+    if (row === null || row === undefined) continue;
+    const spec = selectSpecs.get(k);
+    const main = spec === undefined ? undefined : selectMainValue(row, spec);
+    selects[k] = String(main ?? "");
+    if (main !== undefined && main !== null && String(main) !== "") selectValues[k] = String(main);
+  }
+  return { selects, selectsFull, selectValues };
+}
+
 export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<AppRunResult> {
   const {
     slots = {}, sources = true, confirmSafe = true, verbose = true,
@@ -83,6 +117,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const sourceResults: AppSourceResult[] = [];
   /** 数据腿的观察面（回写槽位的输入；与报告里的 counts/selects 同一份数据）。 */
   const observed: Record<string, SourceObservation> = {};
+  /** 数据源配置决定的主值（source → select → 值）：`resolveSourceSlots` 的唯一输入。 */
+  const selectValuesBySource: Record<string, Record<string, string>> = {};
   if (sources) {
     // 数据腿的日期参数值袋 = 包默认槽位 + 本次 CLI 槽位（**不含** source_slots 产物——
     // 环封口由 validateApp 在上面校验：default_dates 引用数据腿产物 = 加载期拒绝）。
@@ -93,18 +129,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       const res = await runSource(src, dates, { verbose: false, today: opts.today });
       const day = Object.values(res.dates)[0] as Record<string, any> | undefined;
       const counts = (day?.counts ?? {}) as Record<string, number>;
-      const selects: Record<string, string> = {};
-      const selectsFull: Record<string, Record<string, string> | null> = {};
-      for (const [k, row] of Object.entries((day?.selects ?? {}) as Record<string, any>)) {
-        // 回写槽位要能取到**具体字段**（`selects` 只留一个"主值"是给报告看的；
-        // 声明里点名 `field` 时得有整行）。
-        selectsFull[k] = row
-          ? Object.fromEntries(Object.entries(row as Record<string, unknown>)
-            .map(([f, v]) => [f, String(v ?? "")]))
-          : null;
-        if (row) selects[k] = String(row.price ?? row.id ?? row.name ?? "");
-      }
-      observed[String(name)] = { selects: selectsFull, counts };
+      const obs = buildSelectObservation(src, (day?.selects ?? {}) as Record<string, any>);
+      observed[String(name)] = { selects: obs.selectsFull, counts };
+      selectValuesBySource[String(name)] = obs.selectValues;
       const pv = previewTable(src, res.dates);
       // 多日期范围在这里保留完整观察（`dates` 键控）；回写槽位仍取第一天，口径不变。
       const byDate: NonNullable<AppSourceResult["byDate"]> = {};
@@ -119,7 +146,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
         };
       }
       sourceResults.push({
-        name: String(name), rows: (day?.rows ?? []).length, counts, selects,
+        name: String(name), rows: (day?.rows ?? []).length, counts, selects: obs.selects,
         ...(pv ? { preview: pv } : {}),
         ...(res.tool_version ? { tool_version: res.tool_version } : {}),
         ...(Object.keys(byDate).length ? { byDate } : {}),
@@ -132,7 +159,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   // 优先级：包里的默认值 < **数据腿查到的观测值** < CLI 显式 `--slot`。
   // 观测值压过默认值正是这条声明存在的理由（"打开榜首"的 URL 不该是人抄进包里的过期字面量）；
   // 而人这次显式给的值压过观测值——那是"这次就用这个"的显式意图。
-  const sourceSlots = resolveSourceSlots(pack, observed);
+  const sourceSlots = resolveSourceSlots(pack, observed, selectValuesBySource);
   const expanded = expandPack(pack, { ...sourceSlots, ...slots }, scope.planPath);
   const plan = expanded.plan;
   // R3/U2b：**计划文件也是产物**——敏感槽位的明文只留在内存里的运行袋，落盘的 plan 一律

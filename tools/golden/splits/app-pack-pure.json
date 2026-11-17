@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "app-pack-pure",
-  "note": "app-pack 稳定纯区拆分：40 个顶层符号逐字节搬迁（pack-policy 11 / pack-expand 10 / validate-pack 1 / app-pack 保留 18；hash 全部与搬移前一致）。非纯搬移符号（已从 manifest 移除）：substitute（validate-pack 复用它，需加 export 前缀）、validatePack（拆成 8 组子校验以过 150 行函数上限）、isDict（改用 support/pystr.ts 既有单源）；validateSiteBlock 随 validate-pack 搬迁、hash 一致。",
+  "note": "app-pack 稳定纯区拆分：40 个顶层符号逐字节搬迁（pack-policy 11 / pack-expand 10 / validate-pack 1 / app-pack 保留 18；hash 全部与搬移前一致）。非纯搬移符号（已从 manifest 移除）：substitute（validate-pack 复用它，需加 export 前缀）、validatePack（拆成 8 组子校验以过 150 行函数上限）、isDict（改用 support/pystr.ts 既有单源）；validateSiteBlock 随 validate-pack 搬迁、hash 一致。；W3-4 字段映射配置化：resolveSourceSlots/rowMainValue 有意非纯搬移（移出 price→id→name 业务默认）",
   "files": {
     "src/app/pack-policy.ts": {
       "symbols": {
@@ -26,8 +26,6 @@
         "expandStep": "a602de3b224c602b889e636ebd9a43908a18ccc2ceee89c29b0226eaef2defd0",
         "PLACEHOLDER": "d395a9a55ec9604a73048742ea1b0502635b6f810cd2fd414ce8e60e9e6b6881",
         "placeholders": "feffc75956b45bd4f0aa103de87e1bfd64cd020ca075c3dff8322e32831c2417",
-        "resolveSourceSlots": "3acb52a1ca5524b1f4e6a4b1ed0cb3da3d09f0eb7982e8ba05ec1c94398d1d45",
-        "rowMainValue": "461b0a88d1b68e0d9596b4fe99d3493f8ae97369b1c565c785294d6637b5a4fa",
         "RUNTIME_PLACEHOLDERS": "40e1fcffb6e873eba5d215ab73c800c26861f3725cf0534c8e9fa32031df9426",
         "stepKind": "f8d34affd73f2ef65f31f6e58201a6eeec439e83649d79903add3d4d85bf836e"
       }

@@ -7,7 +7,7 @@ import { REPO } from "../support/paths.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { pyJsonDumpsIndent, pyTruthy, pyStr, pyRepr, hasOwn, getOr, pyIterate, pyTuple, isDict, pyTypeName } from "../support/pystr.ts";
-import { reportMarkdown } from "./report-view.ts";
+import { reportMarkdown, selectIdentityText, selectValueText } from "./report-view.ts";
 import { FileNotFoundError, ValueError } from "./types.ts";
 import type { Rendered, Source, RunOptions, RunResult, DateEntry, Row } from "./types.ts";
 import type { ElemPool, PageLike } from "../engine/extraction.ts";
@@ -356,16 +356,48 @@ export function validateSource(src: Source): string[] {
   for (const a of ((src["audits"] as Array<Record<string, any>>) || [])) {
     if (!pyTruthy(a["key"]) || !pyTruthy(a["field"])) p.push("every audit needs a key and a field");
   }
+  const fieldName = (v: unknown): boolean => typeof v === "string" && v.trim() !== "";
+  const fieldNameList = (v: unknown): boolean => Array.isArray(v) && v.length > 0 && v.every(fieldName);
   for (const s of ((src["selects"] as Array<Record<string, any>>) || [])) {
     if (!pyTruthy(s["key"])) p.push("every select needs a key");
-    const sb = hasOwn(s, "sort_by") ? s["sort_by"] : null;
-    for (const k of (pyTruthy(sb) ? pyIterate(sb) : ["price"])) {
-      if (typeof k !== "string") p.push(`select ${pyStr(s["key"])}: sort_by must be field names`);
+    const sb = s["sort_by"];
+    if (sb !== undefined && sb !== null) {
+      const keys = pyTruthy(sb) ? pyIterate(sb) : [];
+      if (keys.length === 0) p.push(`select ${pyStr(s["key"])}: sort_by must be a non-empty list of field names`);
+      for (const k of keys) {
+        if (typeof k !== "string") p.push(`select ${pyStr(s["key"])}: sort_by must be field names`);
+      }
     }
     const ord = s["order"];
     if (ord !== undefined && ord !== "min" && ord !== "max") {
       p.push(`select ${pyStr(s["key"])}: order must be min|max (got ${pyRepr(ord)})`);
     }
+    // 主值/展示字段映射是**数据源配置**（引擎不猜业务字段名）。
+    const vf = s["value_field"];
+    if (vf !== undefined && vf !== null && !fieldName(vf)) {
+      p.push(`select ${pyStr(s["key"])}: value_field must be a non-empty field name`);
+    }
+    for (const key of ["value_fields", "detail_fields"] as const) {
+      const list = s[key];
+      if (list !== undefined && list !== null && !fieldNameList(list)) {
+        p.push(`select ${pyStr(s["key"])}: ${key} must be a non-empty list of field names`);
+      }
+    }
+  }
+  const rep = (src["report"] || {}) as Record<string, unknown>;
+  for (const key of ["value_fields", "detail_fallback_fields"] as const) {
+    const list = rep[key];
+    if (list !== undefined && list !== null && !fieldNameList(list)) {
+      p.push(`report.${key} must be a non-empty list of field names`);
+    }
+  }
+  const curField = rep["currency_field"];
+  if (curField !== undefined && curField !== null && !fieldName(curField)) {
+    p.push("report.currency_field must be a non-empty field name");
+  }
+  const timeField = ((src["filters"] || {}) as Record<string, unknown>)["time_field"];
+  if (timeField !== undefined && timeField !== null && !fieldName(timeField)) {
+    p.push("filters.time_field must be a non-empty field name");
   }
   return p;
 }
@@ -422,10 +454,15 @@ export async function runSource(source: Source, dates: string[], opts: RunOption
       const bits = ((source["counts"] || []) as Array<Record<string, any>>)
         .map((c) => `${pyStr(c["label"])} ${counts[pyStr(c["key"])]}`).join(" | ");
       const best = selects["best"];
+      const bestSpec = ((source["selects"] || []) as Array<Record<string, any>>)
+        .find((x) => pyStr(x["key"]) === "best");
+      const fdef = (source["filters"] || {}) as Record<string, unknown>;
+      const timeField = hasOwn(fdef, "time_field") ? pyStr(fdef["time_field"]) : "";
       console.log(`${date}: ${rows.length} 条` + (bits ? ` | ${bits}` : "")
-        + (best ? ` | 最低 ${pyStr(pyTruthy(best["flight_no"]) ? best["flight_no"] : best["name"])} `
-          + `${pyStr(getOr(best, "dep", ""))} ${pyStr(getOr(source["report"] || {}, "currency", ""))}`
-          + `${pyStr(best["price"])}` : ""));
+        + (best && bestSpec
+          ? ` | ${pyStr(getOr(bestSpec, "label", bestSpec["key"]))} ${selectIdentityText(source, best)} `
+            + `${pyStr(getOr(best, timeField, ""))} ${selectValueText(source, bestSpec, best)}`
+          : ""));
     }
     if (saveRaw) {
       fs.mkdirSync(saveRaw, { recursive: true });
