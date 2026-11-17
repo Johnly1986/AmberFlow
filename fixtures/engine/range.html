@@ -1,0 +1,9 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>lane fixture — range input</title>
+<style>body { font: 16px/1.3 sans-serif; padding: 12px; } label { display: block; margin: 12px 0; }</style></head>
+<body>
+<!-- 确定性 range 夹具：input[type=range] 归 fill 族（run 面容差路径），setRange 三策略走 range.ts；无网络、无定时器。 -->
+<label for="vol">音量 <input id="vol" type="range" min="0" max="100" step="5" value="10"></label>
+</body>
+</html>

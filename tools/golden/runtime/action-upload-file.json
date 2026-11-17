@@ -1,0 +1,70 @@
+{
+  "_doc": "verify-runtime-offline 基线（非门禁）：本地 fixtures + 无头 chromium + BrowserMiddleware.run 的运行期事实。只用于运行期重构前后的等价对比：--record 显式更新（同场景连跑两次一致才入库）；端口已归一为 <LOCAL>；位置性 ref / 耗时 / timing 类字段不入库，不得手改。",
+  "expected": {
+    "audit_verdict": "APPROVE",
+    "diagnostics": null,
+    "done": true,
+    "evidence": {
+      "upload": {
+        "count": 1,
+        "types": [
+          "application/octet-stream"
+        ]
+      }
+    },
+    "executed": true,
+    "executed_actions": [
+      {
+        "changed": true,
+        "how": "setInputFiles",
+        "op": "upload",
+        "target": "#file"
+      }
+    ],
+    "external_requests": [],
+    "goal": "上传文件",
+    "skipped": false,
+    "skipped_actions": [],
+    "state": {
+      "actions": {
+        "attempted": 1,
+        "changed": 1,
+        "executed": 1
+      },
+      "after": {
+        "epoch": 2,
+        "navEpoch": 1,
+        "readyState": "complete",
+        "url": "<LOCAL>/upload.html"
+      },
+      "before": {
+        "epoch": 1,
+        "navEpoch": 1,
+        "readyState": "complete",
+        "url": "<LOCAL>/upload.html"
+      },
+      "flags": []
+    },
+    "steps": [
+      {
+        "changed": true,
+        "decision_kind": "rule",
+        "desc": "upload input \"选择文件\"",
+        "executed": true,
+        "how": "uploaded",
+        "method": "rule:match",
+        "op": "upload",
+        "skip_reason": null,
+        "skipped": null,
+        "step": 1,
+        "target": "#file",
+        "url": "<LOCAL>/upload.html"
+      }
+    ],
+    "stop_code": "dom_goal_signal",
+    "stop_reason": "dom goal signal",
+    "stop_step": 1
+  },
+  "scenario": "action-upload-file",
+  "schema_version": 1
+}

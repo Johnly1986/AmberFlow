@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>lane fixture — scroll container</title>
+<style>
+  html, body { margin: 0; padding: 0; font: 16px/1.25 sans-serif; }
+  /* 锁定几何：clientHeight 120 / scrollHeight 400（spacer 撑高，按钮 absolute 不参与内容高）→ max scrollTop 280 */
+  #scroller { width: 320px; height: 120px; overflow-y: auto; position: relative; border: 0; padding: 0; }
+  #spacer { height: 400px; }
+  #deep-btn { position: absolute; top: 360px; left: 8px; height: 24px; padding: 0; border: 0; }
+</style></head>
+<body>
+<!-- 确定性容器滚动夹具：元素目标 #deep-btn 的可滚动祖先是 #scroller（to/by 都走同一容器）；无网络、无定时器。 -->
+<div id="scroller">
+  <div id="spacer"></div>
+  <button id="deep-btn" type="button">底部按钮</button>
+</div>
+</body>
+</html>

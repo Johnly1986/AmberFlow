@@ -12,6 +12,9 @@
 | `filter-bar.html` (F2) | 批次二 E1-c / 批次三 E1-b | 复刻携程结构：≈30 个无 id 导航壳按钮 + class-only 筛选栏（`li#filter_item_airline` 等，无 role 有 id）+ 12 个 class-only 订票按钮。`#filter_item_airline` 可作为 act hint 命中；壳元素不因配额调整被逐出池。 |
 | `lazy-list.html` (F3) | 批次二 E5 | 初始 7 行，滚动到底每次追加 1 行至 12 行停止（`?infinite=1` 恒可追加）。初始态 `css_count_equals(.lazy-row, 7)`；收敛后断 12 且 `scroll_settled=true`；infinite 模式 `scroll_settled` 恒 false。 |
 | `overlay.html` (F4) | 批次二 E4 | 打开 2.5s 后弹全屏遮罩（role=dialog，label「温馨提示」，关闭按钮「我知道了」），覆盖待点击按钮。被遮点击 → act 失败且错误证据含 `overlay_detected/overlay_label/overlay_dismiss_hint`；`?overlay=0` = 无遮罩对照（成功路径错误证据无 overlay 字段）。 |
+| `upload.html` (L1) | 运行期等价 lane | 单个可见 `input[type=file]`：`op:"upload"` 的 `setInputFiles` 分支（证据：files 数/MIME；不记路径）。 |
+| `scroll.html` (L2) | 运行期等价 lane | 锁定几何容器 `#scroller`（120/400 ⇒ max scrollTop 280）+ 底部按钮 `#deep-btn`：`op:"scroll" to:"bottom"` 容器滚动与 moved/delta 几何证据。 |
+| `range.html` (L3) | 运行期等价 lane | `input[type=range]`（fill 族）：`op:"fill"` 现有执行路径写值 70；值事实读回。 |
 
 ## 通用验收纪律
 
@@ -24,7 +27,7 @@
 
 `fixtures/engine/` 是**等价验证**资产，不是测试套件，**不进 `npm run check`**：
 
-- 只服务 `tools/verify-offline.ts`（本地/定时跑，需要 chromium；PR 门禁保持纯离线、不启浏览器）。
+- 只服务非门禁等价 lane：`tools/verify-offline.ts`（抽取面）与 `tools/verify-runtime-offline.ts`（运行期面；本地/定时跑，需要 chromium；PR 门禁保持纯离线、不启浏览器）。
 - 页面必须保持**零外部网络请求**：verify-offline 会把任何外部请求判红，并把空清单写入基线。
 - 基线在 `tools/golden/offline/**`：默认比对，`--record` 显式更新；随机端口已归一为 `<LOCAL>`。
 - 观测口径（确定性、与时机无关）：title / 元素计数 / 文本前缀 + 引擎元素池的稳定字段

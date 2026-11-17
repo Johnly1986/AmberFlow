@@ -1,0 +1,67 @@
+{
+  "_doc": "verify-runtime-offline 基线（非门禁）：本地 fixtures + 无头 chromium + BrowserMiddleware.run 的运行期事实。只用于运行期重构前后的等价对比：--record 显式更新（同场景连跑两次一致才入库）；端口已归一为 <LOCAL>；位置性 ref / 耗时 / timing 类字段不入库，不得手改。",
+  "expected": {
+    "audit_verdict": "APPROVE",
+    "diagnostics": null,
+    "done": true,
+    "evidence": {
+      "range": {
+        "value_after_run": "70"
+      }
+    },
+    "executed": true,
+    "executed_actions": [
+      {
+        "changed": true,
+        "how": "filled",
+        "op": "fill",
+        "target": "#vol"
+      }
+    ],
+    "external_requests": [],
+    "goal": "设置音量",
+    "skipped": false,
+    "skipped_actions": [],
+    "state": {
+      "actions": {
+        "attempted": 1,
+        "changed": 1,
+        "executed": 1
+      },
+      "after": {
+        "epoch": 2,
+        "navEpoch": 1,
+        "readyState": "complete",
+        "url": "<LOCAL>/range.html"
+      },
+      "before": {
+        "epoch": 1,
+        "navEpoch": 1,
+        "readyState": "complete",
+        "url": "<LOCAL>/range.html"
+      },
+      "flags": []
+    },
+    "steps": [
+      {
+        "changed": true,
+        "decision_kind": "rule",
+        "desc": "type text into input \"10 / 音量\"",
+        "executed": true,
+        "how": "filled",
+        "method": "rule:match",
+        "op": "fill",
+        "skip_reason": null,
+        "skipped": null,
+        "step": 1,
+        "target": "#vol",
+        "url": "<LOCAL>/range.html"
+      }
+    ],
+    "stop_code": "dom_goal_signal",
+    "stop_reason": "dom goal signal",
+    "stop_step": 1
+  },
+  "scenario": "action-range-fill-and-setRange",
+  "schema_version": 1
+}

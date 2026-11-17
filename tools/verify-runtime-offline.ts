@@ -41,6 +41,7 @@
  */
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { browserSession } from "../src/engine/executor.ts";
 import { buildMiddleware } from "../src/app/middleware-factory.ts";
@@ -60,7 +61,7 @@ const GOLDEN_DOC =
   + "只用于运行期重构前后的等价对比：--record 显式更新（同场景连跑两次一致才入库）；端口已归一为 <LOCAL>；"
   + "位置性 ref / 耗时 / timing 类字段不入库，不得手改。";
 const SCHEMA_VERSION = 1;
-const REQUIRED_FIXTURES = 4;
+const REQUIRED_FIXTURES = 7;   // 4 个历史夹具 + upload/scroll/range 三个动作面条
 
 /* ------------------------------------------------------------------ 静态 HTTP */
 
@@ -250,6 +251,12 @@ interface ScenarioContext {
 interface Scenario {
   name: string;
   run(ctx: ScenarioContext): Promise<RunReport>;
+  /**
+   * 运行后证据（可选）：动作面**结构化事实**（几何读数 / 控件值 / primitive 返回码）。
+   * 只允许确定性、非位置性、无时序的事实；经同一个 `normalize` 归一后入库，
+   * 报告投影仍走 `projectStep` / `projectRunReport`。
+   */
+  evidence?(ctx: ScenarioContext): Promise<Dict>;
 }
 
 /** 成功路径：`#filter_item_airline` 由规则面命中 → 点击 → `window.__hits` 记账 → done 信号成立。 */
@@ -259,6 +266,26 @@ const GOAL_AIRLINE_CLICKED =
 /** 遮挡出现判据（`overlay.html` 的 2.5s 定时器把 `#modal-overlay` 去掉 hidden）。 */
 const OVERLAY_VISIBLE =
   `(() => { const el = document.getElementById("modal-overlay"); return !!el && !el.hidden; })()`;
+
+/** upload：input[type=file] 已装入文件（done 信号 + 证据共用同一判据）。 */
+const UPLOAD_READY =
+  `(() => { const f = document.getElementById("file"); return !!f && f.files.length > 0; })()`;
+/** upload 稳定事实：文件数 + 每个文件的 MIME（不记路径——路径长度/平台差异不进基线）。 */
+const UPLOAD_FACTS =
+  `(() => { const f = document.getElementById("file");
+    return f ? { count: f.files.length, types: Array.from(f.files).map((x) => x.type) } : null; })()`;
+/** 容器滚动到底判据（scroll.html 锁定几何：scrollHeight 400 / clientHeight 120）。 */
+const SCROLLER_AT_BOTTOM =
+  `(() => { const s = document.getElementById("scroller");
+    return !!s && s.scrollHeight - s.clientHeight - s.scrollTop <= 1; })()`;
+/** 容器滚动几何读数（fixture 锁定尺寸，数字确定性；不依赖字体/视口）。 */
+const SCROLL_GEOMETRY =
+  `(() => { const s = document.getElementById("scroller");
+    return s ? { scrollTop: s.scrollTop, scrollHeight: s.scrollHeight, clientHeight: s.clientHeight } : null; })()`;
+/** range 控件值读数（字符串口径，避免数字格式平台差异）。 */
+const RANGE_VALUE =
+  `(() => { const r = document.getElementById("vol"); return r ? String(r.value) : null; })()`;
+interface ScrollGeometry { scrollTop: number; scrollHeight: number; clientHeight: number }
 
 const SCENARIOS: Scenario[] = [
   {
@@ -307,6 +334,63 @@ const SCENARIOS: Scenario[] = [
       verbose: false,
     }),
   },
+  {
+    // 上传：命令闭集 op=upload 命中 input[type=file] ⇒ 引擎 `setInputFiles` 分支（值只来自 slot 绑定）。
+    name: "action-upload-file",
+    run: async ({ mw, page, origin }) => {
+      const filePath = path.join(os.tmpdir(), "amberflow-lane-upload.bin");
+      fs.writeFileSync(filePath, "lane-upload-payload");
+      return await mw.run("上传文件", `${origin}/upload.html`, {
+        page,
+        verbose: false,
+        slots: { laneUploadPath: filePath },
+        commands: [{ id: "u1", op: "upload", target: "#file", value: { from: "slot", key: "laneUploadPath" } }],
+        goalSignalFn: async (p) => Boolean(await p.evaluate(UPLOAD_READY)),
+      });
+    },
+    evidence: async ({ page }) => ({ upload: await page.evaluate(UPLOAD_FACTS) }),
+  },
+  {
+    // 容器滚动：run 命令闭集只有 `to`（元素目标 → 最近可滚动祖先）；`by` 属 act 面 scrollContainer 原语、
+    // run() 面不可达（任务允许：不可达则如实说明）。moved/delta/scrollTop/scrollHeight/clientHeight
+    // 由 fixture 锁定几何 + DOM 读数给出（与 `_scrollWithLoc` 的 ScrollEvidence 同一对读数口径）。
+    name: "action-scroll-container",
+    run: async ({ mw, page, origin }) => await mw.run("滚到容器底部", `${origin}/scroll.html`, {
+      page,
+      verbose: false,
+      commands: [{ id: "s1", op: "scroll", target: "#deep-btn", to: "bottom" }],
+      goalSignalFn: async (p) => Boolean(await p.evaluate(SCROLLER_AT_BOTTOM)),
+    }),
+    evidence: async ({ page }) => {
+      const afterRun = await page.evaluate(SCROLL_GEOMETRY) as ScrollGeometry | null;
+      const runFacts = afterRun === null ? null : {
+        ...afterRun,
+        // fixture 初始 scrollTop=0（无持久滚动），after 读数即 before/after 一对读数的事实：
+        // moved = after !== before；delta = after - before（与 `_scrollWithLoc` 的 ScrollEvidence 同口径）。
+        moved: afterRun.scrollTop > 0,
+        delta: afterRun.scrollTop,
+        at_bottom: afterRun.scrollHeight - afterRun.clientHeight - afterRun.scrollTop <= 1,
+      };
+      return { scroll: { run_to_bottom: runFacts } };
+    },
+  },
+  {
+    // range：run() 面无 set_range op；input[type=range] 归 fill 族，按现有 fill 执行路径覆盖（值事实读回）。
+    name: "action-range-fill-and-setRange",
+    run: async ({ mw, page, origin }) => await mw.run("设置音量", `${origin}/range.html`, {
+      page,
+      verbose: false,
+      slots: { laneRangeValue: "70" },
+      commands: [{ id: "r1", op: "fill", target: "#vol", value: { from: "slot", key: "laneRangeValue" } }],
+      goalSignalFn: async (p) => String(await p.evaluate(RANGE_VALUE)) === "70",
+    }),
+    evidence: async ({ page }) => {
+      // run() 面没有 set_range 命令 op：range input 归 fill 族，走既有 fill 执行路径（本场景即证据）。
+      // act 面另有 `mw.setRange`（range.ts 三策略），不在本 lane 的 BrowserMiddleware.run 口径内。
+      const value = await page.evaluate(RANGE_VALUE);
+      return { range: { value_after_run: value } };
+    },
+  },
 ];
 
 /* ------------------------------------------------------------------ 观测 */
@@ -338,8 +422,13 @@ async function observeScenario(scenario: Scenario, origin: string): Promise<Scen
   };
   const mw = buildMiddleware({ face: "online", confirmPolicy: { kind: "allow-all" }, options });
   try {
-    const report = await scenario.run({ mw, page, origin });
-    return { expected: projectRunReport(report), external: [...external].sort() };
+    const ctx: ScenarioContext = { mw, page, origin };
+    const report = await scenario.run(ctx);
+    const evidence = scenario.evidence === undefined ? undefined : await scenario.evidence(ctx);
+    return {
+      expected: { ...projectRunReport(report), ...(evidence === undefined ? {} : { evidence }) },
+      external: [...external].sort(),
+    };
   } finally {
     await session.close();
   }
