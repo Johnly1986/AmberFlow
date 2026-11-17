@@ -1,0 +1,57 @@
+{
+  "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
+  "id": "app-runner-pure",
+  "note": "app-runner.ts 拆分（A1a/A1b）：类型/纯助手→types、策略→policy、工具步→tool-step、runApp→declared；纯搬移 hash（除 6 个加 export 修饰的跨模块助手外逐字节相同）",
+  "files": {
+    "src/app/app-runner-declared.ts": {
+      "symbols": {
+        "runApp": "3dac63e36330ec804c5ce4a63d751e1b57d8e59a8f6d90e2da19953ff8c3307a"
+      }
+    },
+    "src/app/app-runner-policy.ts": {
+      "symbols": {
+        "AppRunConfigError": "d37f30210e7838160b2d8d6b785e8513706157ce11949ed487e13ff32f0b5885",
+        "declaredPageUrls": "e6d5201c9812351c6364a9518b2f4887456b53a311d3d3eff4ec57715352875c",
+        "EffectivePolicy": "045265b699fb87ff58c5afd78014c130983af4b54a10de410615fd2b9e10decc",
+        "preflightConfig": "809a26c4f0e2865a01e0582c308a3fd631ac2fea734cfc561e6ddd44f4e855f7",
+        "probeCompatDecisionPlane": "12ebcd7b8b1ab07d687f1510744abb51806306af41debd8d4d1304157e7c916b",
+        "promptManualOnTty": "d65cb838611d2c909384d8f7e74ffff7f22b6c8ad14b5512cd90e2b925ff5060",
+        "resolvePace": "b94a3c8ad0ff6becbb5cb4deaaeea4a22b1b08b4473eae63f1c3254c229552c3",
+        "resolveRunPolicy": "aec0e8fd8b608dc10cc43d65d8396af0b9998b6ad80ad65c0a12d07b5f986dc1"
+      }
+    },
+    "src/app/app-runner-tool-step.ts": {
+      "symbols": {
+        "RUN_SEQ": "42891e7374b368d2a28270ad4189a875b67e827c3c1c5b733e1219fb5fef1649",
+        "runToolStep": "7d717c4b51db3bd2993b933336e94b9f398d68a307cd3ae1f6d24a66dca9f0ff"
+      }
+    },
+    "src/app/app-runner-types.ts": {
+      "symbols": {
+        "AfterSignature": "ba255641ad741a60f8cd1304e2c4dfb63fc243c33d572d01598e0e4a63fa761f",
+        "AppDecisions": "ebb86af10e529e9d9efcb98bd00b7dc0d359201c8d58ffcc9eda4388f6ee3c7c",
+        "AppInvariantResult": "d541041dfee135b8a7e38eeff35c508264129a5ae03a7de112dcbf06c44965cc",
+        "AppRunEnv": "52904feda85d36565142f4e2a1ed3b3844a59b31faf5643a4fa3d7771f8d3628",
+        "AppRunOptions": "54c683b3407f64b3c75de1a364bf1ac7d1f301ddda9869774c418d29d18e7062",
+        "AppRunResult": "a4206805bdff6f8813cb77294b6170d80865b36757706c75d708f092fa7e4b60",
+        "AppSourceResult": "06e41e30a22225b38fb6bd3052832604b8142428414ad681cc3773ab2b16249b",
+        "asAfterSignature": "0f5595b8ef6e05ee4b2b51607cb100141ae6c841b5bcc9929d4287b0b534b7bb",
+        "cleanStampAttrs": "69e068cb8c5cdcfe41b892f4ee47a579633ea324956859b1ab3376a877413c9c",
+        "invariantsFromTrace": "a7c0bcc5d410aa64b7d15f163641107c4f6350f4068fa19273edcec76dd3a10d",
+        "REFUSAL_LABELS": "4c2da5de4a34bb2537f38e8ef66350dffccca75b22e530e0134e207f16f72ec1",
+        "refusalLine": "7aef5ae131a71d33f732297457644a01a747819b784200bcd5b7a397561715e7",
+        "startUrl": "0c1daadf5b8e435ee4dd25abf199904335eec19d96a9eb5f996594742f387d3d",
+        "summarizeDecisions": "5a584c94cff95c0968e1e85d174ab17374f0292e1470682ed69d9b5f6257c6fc",
+        "ToolStepEvidence": "1bfae83134d97d808a7a999f1618f945bd665f70516bf5f8ed524e92c92cde9e",
+        "ToolStepResult": "be859d85dac7bbb75ff409bbbc75214878dc956d9cc9a6bebea37e1189080a15"
+      }
+    },
+    "src/app/app-runner.ts": {
+      "symbols": {
+        "runScriptApp": "dcc71a606a7ad203bebcdc00af5455fe51a0eea3accee39ac636e9d62fa4d4b1",
+        "ScriptRunOptions": "aa342514ed664bf534f30fa39026e76da0aff88a862d2ea8f5be55dfa64c64c0",
+        "USAGE": "d74682ed00984f7122b6b338aba61755f1f626ac2a48ffce62134f5a8431dc92"
+      }
+    }
+  }
+}

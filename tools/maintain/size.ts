@@ -42,6 +42,11 @@ export interface SizeBaseline extends SizeLimits {
   functions: FunctionInfo[];
   /** 计划内阶段函数 allowlist：`文件#函数名`（允许超 newFunctionMaxLines，但不超过 phaseFunctionMaxLines）。 */
   phaseFunctions: string[];
+  /**
+   * **纯搬移函数** allowlist（`文件#函数名` → 搬移时行数）：既有超标函数按 W1-b 纯搬移纪律
+   * 换到新文件后，不按"新函数"硬上限重罚；行数只许降不许增（split-check 提供搬移等价证据）。
+   */
+  movedFunctions?: Record<string, number>;
 }
 
 export type Severity = "fail" | "warn";
@@ -111,7 +116,7 @@ export function evaluateSize(
   files: FileInfo[],
   functions: FunctionInfo[],
   limits: SizeLimits,
-  baseline: Pick<SizeBaseline, "files" | "functions" | "phaseFunctions">,
+  baseline: Pick<SizeBaseline, "files" | "functions" | "phaseFunctions"> & { movedFunctions?: Record<string, number> },
 ): Problem[] {
   const problems: Problem[] = [];
   const phase = new Set(baseline.phaseFunctions);
@@ -142,6 +147,17 @@ export function evaluateSize(
     const isPhase = phase.has(`${fn.file}#${fn.name}`);
     const max = isPhase ? limits.phaseFunctionMaxLines : limits.newFunctionMaxLines;
     if (fn.lines <= max) continue;
+    const movedKey = `${fn.file}#${fn.name}`;
+    const movedMax = baseline.movedFunctions?.[movedKey];
+    if (movedMax !== undefined && fn.lines <= movedMax) continue;
+    if (movedMax !== undefined) {
+      problems.push({
+        group: "size",
+        severity: "fail",
+        message: `纯搬移函数 ${movedKey} 从登记 ${movedMax} 行增长到 ${fn.lines} 行——只许降不许增`,
+      });
+      continue;
+    }
     const recorded = baselineFns.get(key);
     if (recorded === undefined) {
       problems.push({
@@ -189,11 +205,13 @@ export function mergeBaselineForUpdate(input: UpdateInput, previous: SizeBaselin
   const prevFns = new Map<string, number>();
   for (const fn of previous.functions) prevFns.set(`${fn.file}\u0000${fn.name}`, fn.lines);
   const phaseFns = new Set(previous.phaseFunctions);
+  const movedFns = previous.movedFunctions ?? {};
   const nextFns: FunctionInfo[] = [];
   for (const fn of input.functions) {
     // 计划内阶段函数是显式 allowlist 例外（≤ phaseFunctionMaxLines），--update 不把它当
     // "新增超标函数"拒绝，也不把它记入 functions 存量清单（另有 phaseFunctions 名单）。
     if (phaseFns.has(`${fn.file}#${fn.name}`)) continue;
+    if (`${fn.file}#${fn.name}` in movedFns) continue;
     if (fn.lines <= input.limits.newFunctionMaxLines) continue;
     const old = prevFns.get(`${fn.file}\u0000${fn.name}`);
     if (old === undefined) {
@@ -211,6 +229,7 @@ export function mergeBaselineForUpdate(input: UpdateInput, previous: SizeBaselin
     files: Object.fromEntries(Object.entries(nextFiles).sort((a, b) => b[1] - a[1])),
     functions: nextFns.sort((a, b) => b.lines - a.lines),
     phaseFunctions: previous.phaseFunctions,
+    ...(previous.movedFunctions === undefined ? {} : { movedFunctions: previous.movedFunctions }),
   };
   return { next, errors };
 }

@@ -6,10 +6,10 @@
     "phaseFunctionMaxLines": 400,
     "files": {
       "src/engine/executor.ts": 5829,
-      "src/app/app-runner.ts": 2847,
       "src/app/ctx.ts": 1799,
       "src/app/session-runtime.ts": 992,
       "src/app/app-adapters.ts": 988,
+      "src/app/app-runner.ts": 974,
       "src/engine/executor-pure.ts": 907,
       "src/cli/commands/apps.ts": 877,
       "src/engine/extraction.ts": 858,
@@ -31,11 +31,6 @@
         "file": "src/engine/executor.ts",
         "name": "run",
         "lines": 741
-      },
-      {
-        "file": "src/app/app-runner.ts",
-        "name": "runApp",
-        "lines": 686
       },
       {
         "file": "src/app/ctx-dry.ts",
@@ -135,7 +130,10 @@
       "src/engine/executor.ts#runActionPhase",
       "src/engine/executor.ts#runActionExecute",
       "src/engine/executor.ts#runSetup"
-    ]
+    ],
+    "movedFunctions": {
+      "src/app/app-runner-declared.ts#runApp": 686
+    }
   },
   "docs": {
     "readmeExamples": 5,
