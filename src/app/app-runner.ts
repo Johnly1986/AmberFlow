@@ -73,6 +73,7 @@ import { captureStateView } from "../flow/signal-induction.ts";
 import { captureStepStateView, type StepStateView } from "../model/page-context.ts";
 import { createAppCandidateProducer } from "./candidate-source.ts";
 import { createSessionLease } from "../engine/session-lease.ts";
+import { createRunScope } from "./run-scope.ts";
 import type { StateView } from "../engine/signals.ts";
 import {
   expandPack, listAppDirs, resolveSourceSlots,
@@ -1272,9 +1273,9 @@ async function probeCompatDecisionPlane(getMw: () => BrowserMiddleware): Promise
 export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<AppRunResult> {
   const {
     slots = {}, sources = true, confirmSafe = true, verbose = true,
-    planPath = path.join(appsOutDir(), `${pack.id}-plan.json`),
     modelId = pack.model ?? "english",
   } = opts;
+  const scope = createRunScope({ appId: pack.id, planPath: opts.planPath });
   const t0 = Date.now();
   // E2/E1-c/E1-a/E1-b：决策开关（decision.*）的配置层默认值（非法值已在 CLI 入口报错；这里只取已解析的强类型值，run/dry/replay 共用）。
   const decisionDefaults = parseRunDefaults(opts.env ?? process.env).defaults;
@@ -1372,7 +1373,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   // 观测值压过默认值正是这条声明存在的理由（"打开榜首"的 URL 不该是人抄进包里的过期字面量）；
   // 而人这次显式给的值压过观测值——那是"这次就用这个"的显式意图。
   const sourceSlots = resolveSourceSlots(pack, observed);
-  const expanded = expandPack(pack, { ...sourceSlots, ...slots }, planPath);
+  const expanded = expandPack(pack, { ...sourceSlots, ...slots }, scope.planPath);
   const plan = expanded.plan;
   // R3/U2b：**计划文件也是产物**——敏感槽位的明文只留在内存里的运行袋，落盘的 plan 一律
   // 掩码。plan.save() 在每一步状态变化时都会被调，这里包一层：只在写盘那一刻换成掩码副本，
@@ -1597,16 +1598,15 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   let pathStopOut: AppRunResult["path_stop"];
   // 应用支持器运行上下文：web/cli 两个内建适配器
   // **迁移桥**——执行委托回下面两个服务（执行循环本身不搬进适配器）；新类型自己实现 run。
-  const appRunId = `${Date.now().toString(36)}-${process.pid}`;
-  const rescueBuilder = opts.rescue === true ? new RescueRequestBuilder(appRunId) : null;
+  const rescueBuilder = opts.rescue === true ? new RescueRequestBuilder(scope.runId) : null;
   // §8 步 3 影子旁路（journey 声明式人工步）：仅 AMBERFLOW_RESCUE_SHADOW=1 创建；判定逻辑
   // 零变化，收尾 flush 到 outDir/rescue-shadow.json（sidecar 不进 result/trace/report）。
-  const rescueShadowRecorder = isRescueShadowEnabled() ? createShadowRecorder(appRunId) : null;
+  const rescueShadowRecorder = isRescueShadowEnabled() ? createShadowRecorder(scope.runId) : null;
   const adapterCtx: AdapterRunContext = {
-    outDir: path.dirname(planPath),
+    outDir: scope.outDir,
     verbose,
     dataset,
-    runId: appRunId,
+    runId: scope.runId,
     runWebStep: async (st: ExpandedStep): Promise<{ done: boolean }> => {
       const sg = plan.subgoals[browserIndexOf[st.index]!]!;
       const shell = await getShell();
@@ -1682,7 +1682,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       .filter((j) => j >= 0));
     return {
       app: pack.id, label: pack.label, goal: pack.goal,
-      pack_path: pack._path ?? "", plan_path: planPath,
+      pack_path: pack._path ?? "", plan_path: scope.planPath,
       ...(expanded.rolesUsed.length ? { roles_used: expanded.rolesUsed } : {}),
       slots: maskSecretSlots(expanded.slots, secretKeys),
       completed: `0/${segmentSteps.length}`,
@@ -1887,11 +1887,11 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const stats = opts.runtimeStats ? opts.runtimeStats() : null;
   // §8 步 3 影子旁路收尾：journey 面的 sidecar（开关默认关 = 零产物；失败静默不影响结果）。
   if (rescueShadowRecorder !== null) {
-    rescueShadowRecorder.flush(path.dirname(planPath));
+    rescueShadowRecorder.flush(scope.outDir);
   }
   return {
     app: pack.id, label: pack.label, goal: pack.goal,
-    pack_path: pack._path ?? "", plan_path: planPath,
+    pack_path: pack._path ?? "", plan_path: scope.planPath,
     ...(expanded.rolesUsed.length ? { roles_used: expanded.rolesUsed } : {}),
     slots: maskSecretSlots(expanded.slots, secretKeys),
     completed: `${doneCount}/${segmentRequested ? executedIndices.size : expanded.steps.length}`,
@@ -2026,9 +2026,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     pack.secret_slots,
   );
   const secretValues = secretValuesFromSlots(slots, secretKeys);
-  const planPath = opts.planPath ?? path.join(appsOutDir(), `${pack.id}-plan.json`);
-  const outDir = opts.outDir ?? path.dirname(planPath);
-  const runId = opts.runId ?? `${Date.now().toString(36)}-${process.pid}`;
+  // S1 RunScope：planPath/outDir/runId/today 唯一解析点（flow 面接受显式注入）。
+  const scope = createRunScope({ appId: pack.id, planPath: opts.planPath, outDir: opts.outDir, runId: opts.runId, today: opts.today });
+  const { planPath, outDir, runId } = scope;
   const rescueBuilder = opts.rescue === true ? new RescueRequestBuilder(runId) : null;
   const inputs = inputsSha256(slots, (pack.hosts ?? []) as string[]);
   const trace = newTrace({ app: pack.id, script_sha256: loaded.scriptSha256, inputs_sha256: inputs });
@@ -2099,7 +2099,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     if (problems.length) throw new Error(`replay refused:\n  - ${problems.join("\n  - ")}`);
     const { ctx, remaining } = createReplayCtx({
       pack: pack as never, slots: slots as Record<string, string>,
-      runtime: { outDir, runId, today: opts.today ?? "" },
+      runtime: scope.runtime,
       trace: recorded, maxSteps: opts.maxSteps,
     });
     try {
@@ -2358,7 +2358,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     const ctx = createCtx({
       pack: pack as never,
       slots: slots as Record<string, string>,
-      runtime: { outDir, runId, today: opts.today ?? "" },
+      runtime: scope.runtime,
       ensureSession: () => lease.get(), mw: getMw, trace, toolRunner,
       // T2：脚本路径与声明式旅程共享同一份运行级数据集（ctx.run 的 returns 写这里）。
       dataset,
