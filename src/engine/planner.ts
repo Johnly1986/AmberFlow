@@ -19,6 +19,7 @@
 import { extractSlots } from "./extraction.ts";
 import { PlanningRules, TaskPlan, type Subgoal } from "./plan.ts";
 import { checkSignal } from "./signals.ts";
+import { createSessionLease } from "./session-lease.ts";
 import { browserSession, type BrowserSession, type RunOptions } from "./executor.ts";
 import type { TraceStep } from "./audit.ts";
 // B1 节奏统一（engine → support，无环）：规划脸节奏 = env-only——规划脸没有 pack/meta，
@@ -202,7 +203,7 @@ export async function runPlan(
 ): Promise<RunPlanResult> {
   const { startUrl = "", replan = true, planner = null, rules = null,
           maxReplans = 2, verbose = true } = opts;
-  const sessionFactory = opts.sessionFactory ?? (() => browserSession());
+  const lease = createSessionLease(opts.sessionFactory ?? (() => browserSession()));
 
   // P4 声明式后继只在**应用旅程**这一层落地（`app-runner` 的走步循环按步 id 走，
   // 上界与环检测由 `plan.createPathWalk` 提供）。计划级 runner 用的是 resume 队列
@@ -238,8 +239,8 @@ export async function runPlan(
       console.log(`  [pace] between_steps=${paceClock.gapMs}ms(${paceSrc(paceEnv.between_steps_ms !== undefined)})`
         + ` between_actions=${paceActionsMs}ms(${paceSrc(paceEnv.between_actions_ms !== undefined)})`);
     }
-    const session = await sessionFactory();
     try {
+      const session = await lease.get();
       while (todo.length) {
         const sg = todo.shift()!;
         await paceBeforeUnit(paceClock, (w) =>
@@ -302,7 +303,7 @@ export async function runPlan(
         if (added) todo.push(...plan.subgoals.slice(before));
       }
     } finally {
-      await session.close();
+      await lease.close();
     }
   }
 

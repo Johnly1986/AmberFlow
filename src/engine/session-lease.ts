@@ -1,10 +1,12 @@
 /**
- * P2-2.2 S1 执行内核 · 会话租约（SessionLease）。
+ * S1 执行内核 · 会话租约（SessionLease）。
  *
- * 目标态（docs/MAINLINE.md §2 S1）：三个源适配器（flow / plan / suite）共享同一份
- * `SessionLease(惰性创建 / finally 关闭)` 语义，而不是各自手写「holder.session + close」。
- * 本批先落地 seam 本身并接入 suite 适配器（online runner）；flow（app-runner）与
- * plan（planner 注入 page/pw）在后续批次接入，接入前保持各自现状、不得改写语义。
+ * 三个源适配器（flow / plan / suite）共享同一份 `SessionLease(惰性创建 / finally 关闭)`
+ * 语义，而不是各自手写「holder.session + close」：flow = `app-runner` 两面，plan =
+ * `planner.runPlan`，suite = `online/runner`。
+ *
+ * 归属 L4 而非 L5：`BrowserSession` 是执行器类型，且 `planner`（L4）同层消费；app/online
+ * 适配器向下引用。本文件不得反向 import app 层。
  *
  * 契约（行为冻结）：
  *   - **惰性**：create 只在第一次 `get()` 时调用；未创建时 `close()` 是 no-op。
@@ -13,7 +15,7 @@
  *     调用方不应使用本租约的 close（改由上层持有），以免关闭调用方资源——这个边界由
  *     适配器显式选择（见各调用点注释），租约本身不做推断。
  */
-import type { BrowserSession } from "../engine/executor.ts";
+import type { BrowserSession } from "./executor.ts";
 
 /** 惰性会话租约：一个 run（或一个用例）一份。 */
 export interface SessionLease {

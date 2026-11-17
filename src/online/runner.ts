@@ -10,7 +10,7 @@ import {
   BrowserMiddleware, browserSession, type BrowserSession,
 } from "../engine/executor.ts";
 import { buildMiddleware } from "../app/middleware-factory.ts";
-import { createSessionLease } from "../app/session-lease.ts";
+import { createSessionLease } from "../engine/session-lease.ts";
 import { TaskPlan } from "../engine/plan.ts";
 import { runSubgoalWithRetries } from "../engine/planner.ts";
 import { checkSignal } from "../engine/signals.ts";

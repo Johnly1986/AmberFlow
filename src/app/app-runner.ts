@@ -72,7 +72,7 @@ import { channelFromEnv } from "../browser/browser-env.ts";
 import { captureStateView } from "../flow/signal-induction.ts";
 import { captureStepStateView, type StepStateView } from "../model/page-context.ts";
 import { createAppCandidateProducer } from "./candidate-source.ts";
-import { createSessionLease } from "./session-lease.ts";
+import { createSessionLease } from "../engine/session-lease.ts";
 import type { StateView } from "../engine/signals.ts";
 import {
   expandPack, listAppDirs, resolveSourceSlots,
