@@ -71,6 +71,7 @@ import { checkToolSignal, explainToolSignal, type ToolSignal } from "../browser/
 import { channelFromEnv } from "../browser/browser-env.ts";
 import { captureStateView } from "../flow/signal-induction.ts";
 import { captureStepStateView, type StepStateView } from "../model/page-context.ts";
+import { createAppCandidateProducer } from "./candidate-source.ts";
 import type { StateView } from "../engine/signals.ts";
 import {
   expandPack, listAppDirs, resolveSourceSlots,
@@ -1612,14 +1613,12 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     runWebStep: async (st: ExpandedStep): Promise<{ done: boolean }> => {
       const sg = plan.subgoals[browserIndexOf[st.index]!]!;
       const shell = await getShell();
-      // S0 上下文实验：快照这一步**开始时**的页面（只读；只在本开关打开时多付一次导航）。
+      // S0 上下文实验：快照这一步**开始时**的页面（只读；本开关打开才多付一次导航）。
       let stateView: StepStateView | null = null;
       if (opts.captureTraces && opts.captureStateView && sg.start_url) {
         try {
-          await (shell.page as unknown as { goto(u: string, o?: unknown): Promise<unknown> }).goto(
-            sg.start_url, { waitUntil: "domcontentloaded", timeout: NAVIGATION_GOTO_TIMEOUT_MS },
-          );
-          stateView = await captureStepStateView(shell.page as never);
+          await (shell.page as unknown as { goto(u: string, o?: unknown): Promise<unknown> }).goto(sg.start_url, { waitUntil: "domcontentloaded", timeout: NAVIGATION_GOTO_TIMEOUT_MS });
+          stateView = await captureStepStateView(shell.page as never, (p) => createAppCandidateProducer().extract({ page: p }));
         } catch { stateView = null; }
       }
       const { rep, attempt, steps } = await runSubgoalWithRetries(

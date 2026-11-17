@@ -9,7 +9,7 @@
  * 边界：这里只做**只读摘要**（URL/标题/正文 240 字/控件能力分组），不写页面、不读站点知识；
  * 控件分类走 `extraction.elemFamily()`（与执行器同一判据）。
  */
-import { elemFamily, extractElements, urlOf, type ElemPool } from "../engine/extraction.ts";
+import { elemFamily, urlOf, type ElemPool, type PageLike } from "../engine/extraction.ts";
 
 /** 一步**开始时**的页面状态（只读快照；`captureStateView` 开关才采）。 */
 export interface StepStateView {
@@ -38,7 +38,9 @@ const clipText = (s: string, n: number): string => (s.length > n ? `${s.slice(0,
  * 调用方拿不到 url/title 时应当把这一步当作"没有上下文"（S0 的教训：没有上下文就别问）。
  */
 export async function captureStepStateView(
-  page: Parameters<typeof extractElements>[0],
+  page: PageLike,
+  /** 扫描注入点：扫描实现归应用层（模型层只消费池；2.2b 迁移后引擎不再 import 扫描）。 */
+  scan: (page: PageLike) => Promise<ElemPool>,
 ): Promise<StepStateView> {
   const out: StepStateView = {
     url: (() => { try { return urlOf(page as never); } catch { return ""; } })(),
@@ -53,7 +55,7 @@ export async function captureStepStateView(
     out.text = clipText(String(body ?? ""), 240);
   } catch { /* 留空 */ }
   try {
-    const elems: ElemPool = await extractElements(page);
+    const elems: ElemPool = await scan(page);
     const push = (arr: string[], label: string): void => {
       const l = label.trim();
       if (l && arr.length < 8 && !arr.includes(l)) arr.push(clipText(l, 40));

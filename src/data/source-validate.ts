@@ -10,6 +10,7 @@ import { pyJsonDumpsIndent, pyTruthy, pyStr, pyRepr, hasOwn, getOr, pyIterate, p
 import { reportMarkdown } from "./report-view.ts";
 import { FileNotFoundError, ValueError } from "./types.ts";
 import type { Rendered, Source, RunOptions, RunResult, DateEntry, Row } from "./types.ts";
+import type { ElemPool, PageLike } from "../engine/extraction.ts";
 import { TRANSPORTS, CLI_KEYS, checkVersion, transportClient, fetchSource, blocked, cliBinOf } from "./transport.ts";
 import { dateExpr, EXTRACT_KINDS, OPS, urlFor, extract, countRows, auditRows, selectBest, defaultDates } from "./extract-ops.ts";
 
@@ -55,28 +56,60 @@ export function sourceDirs(): string[] {
  * `criteria_view` 渲染空间（这里直接复用 `extraction.criteriaView`，是为了让
  * `--render` 在 Node 的 strip-only 模式下也能跑）。
  */
-export async function renderAndSnapshot(html: string): Promise<Rendered> {
+export async function renderAndSnapshot(
+  html: string,
+  /** 扫描注入点：Data 层只消费池（扫描实现归应用层；2.2b 迁移后引擎不再被 data 反向依赖）。 */
+  scan: (page: PageLike) => Promise<ElemPool>,
+): Promise<Rendered> {
   const pw: any = await import("playwright");
   const browserEnv: any = await import("../browser/browser-env.ts");
-  const extraction: any = await import("../engine/extraction.ts");
   const b: any = await browserEnv.launch(pw, true);
   try {
     const pg: any = await b.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     await pg.setContent(html, { waitUntil: "domcontentloaded" });
     await pg.waitForTimeout(1500);
-    const elems = await extraction.extractElements(pg);
+    const elems = await scan(pg as PageLike);
     const snapshot = !elems || Object.keys(elems).length === 0
       ? ""
-      : Object.values(extraction.criteriaView(elems, new Set(), null)).slice(0, 40).join("\n");
+      : Object.values(renderCriteriaView(elems)).slice(0, 40).join("\n");
     return {
       elements: Object.keys(elems).length,
       snapshot,
-      text: await extraction.pageText(pg),
+      text: await renderPageText(pg),
       title: await pg.title(),
     };
   } finally {
     await b.close();
   }
+}
+
+/**
+ * render 展示面（`criteriaView` 的 null-ARIA 分支）：`--render` 无仓内调用方，
+ * 这里只保留原显示口径（tag/label/属性 + 重复标签 near 消歧）；2.2b 扫描迁入 app 时统一收敛。
+ */
+function renderCriteriaView(elems: ElemPool): Record<string, string> {
+  const crit: Record<string, string> = {};
+  const ordered = Object.entries(elems)
+    .sort((a, b) => (a[1].scan ?? Number(a[0].slice(1))) - (b[1].scan ?? Number(b[0].slice(1))));
+  for (const [ref, e] of ordered) {
+    const attrs = (e.data_test ? ` [test=${e.data_test}]` : "") + (e.href ? ` -> ${e.href}` : "");
+    crit[ref] = `${e.tag} "${e.label}"${attrs}`;
+  }
+  const counts = new Map<string, number>();
+  for (const v of Object.values(crit)) counts.set(v, (counts.get(v) ?? 0) + 1);
+  for (const [ref, v] of Object.entries(crit)) {
+    const near = elems[ref]?.near;
+    if ((counts.get(v) ?? 0) > 1 && near) crit[ref] = `${v} [near=${near}]`;
+  }
+  return crit;
+}
+
+/** render 展示面：等价引擎 `pageText`（main/body 文本，首 300 + 末 150）。 */
+async function renderPageText(page: any): Promise<string> {
+  const loc = page.locator("main, body");
+  const target = typeof loc.first === "function" ? loc.first() : loc;
+  const text = String(await target.innerText()).trim();
+  return text.length <= 450 ? text : text.slice(0, 300) + "\n...\n" + text.slice(-150);
 }
 
 /* ---------------------------------------------------------------- 配置加载与校验 */
@@ -346,8 +379,12 @@ function isoNowSeconds(): string {
     + `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-export async function runSource(source: Source, dates: string[], opts: RunOptions = {}): Promise<RunResult> {
-  const { today = null, saveRaw = null, render = false, verbose = true } = opts;
+/** 2.2b：render 需要的注入扫描器（Data 层 RunOptions 的本地扩展；不引 data→app import）。 */
+export type RenderScan = (page: PageLike) => Promise<ElemPool>;
+type RunOptionsWithScan = RunOptions & { scan?: RenderScan };
+
+export async function runSource(source: Source, dates: string[], opts: RunOptionsWithScan = {}): Promise<RunResult> {
+  const { today = null, saveRaw = null, render = false, verbose = true, scan } = opts;
   // 版本 pin：工具输出随版本漂移，pin 不住就响亮失败（同「冻结语料不能依赖墙上时钟」）。
   const toolVersion = checkVersion(source);
   const isCli = pyStr(transportClient(source)) === "cli";
@@ -395,7 +432,10 @@ export async function runSource(source: Source, dates: string[], opts: RunOption
       fs.writeFileSync(path.join(saveRaw, `${pyStr(source["name"])}-${date}.html`), body, "utf-8");
     }
   }
-  const rendered = render && rawFirst !== null ? await renderAndSnapshot(rawFirst) : null;
+  if (render && rawFirst !== null && scan === undefined) {
+    throw new ValueError("render 需要注入扫描器（P2 2.2b 迁移中）：runSource(..., { render: true, scan }) —— 不静默丢 render");
+  }
+  const rendered = render && rawFirst !== null ? await renderAndSnapshot(rawFirst, scan!) : null;
   const renderedOut: Record<string, unknown> = {};
   if (rendered) {
     for (const [k, v] of Object.entries(rendered)) if (k !== "text") renderedOut[k] = v;
@@ -412,7 +452,7 @@ const USAGE = `usage: datasource [-h] [--source SOURCE] [--list] [--sources-dir 
 
 按配置从站点取数（数据源引擎）`;
 
-export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+export async function main(argv: string[] = process.argv.slice(2), scan?: RenderScan): Promise<number> {
   let sourceArg: string | undefined;
   let doList = false;
   let sourcesDir: string[] | null = null;
@@ -458,6 +498,11 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 2;
   }
 
+  if (render && scan === undefined) {
+    console.log("datasource: render 需要注入扫描器（P2 2.2b 迁移中）—— --render 暂无默认实现");
+    return 2;
+  }
+
   const dirs = sourcesDir;
   if (doList || !sourceArg) {
     for (const [name, label, p] of listSources(dirs)) {
@@ -484,7 +529,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   const useDates = dates && dates.length ? dates : defaultDates(source);
-  const res = await runSource(source, useDates, { saveRaw, render });
+  const res = await runSource(source, useDates, { saveRaw, render, scan });
   // 报告跟着 source 走：<sources 目录>/../results —— 引擎不指名任何站点目录
   const srcPath = pyStr(source["_path"]);
   const outdir = outPath ? path.resolve(outPath) : path.join(path.dirname(path.dirname(srcPath)), "results");

@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "datasource-pure",
-  "note": "datasource 稳定纯区拆分：83 个顶层符号逐字节搬迁（types 13 / transport 18 / extract-ops 42 / source-validate 9 / datasource 1；hash 全部与搬移前一致）。非纯搬移：validateSource（151 行 > 新函数硬上限 150，拆出同文件私有 helper validateCliTransport，检查顺序与错误文案不变）。",
+  "note": "datasource 稳定纯区拆分：83 个顶层符号逐字节搬迁（types 13 / transport 18 / extract-ops 42 / source-validate 9 / datasource 1；hash 全部与搬移前一致）。非纯搬移：validateSource（151 行 > 新函数硬上限 150，拆出同文件私有 helper validateCliTransport，检查顺序与错误文案不变）；P2-2.2b-0（BACKLOG #2 扫描解耦）有意修改 main/renderAndSnapshot/runSource 的签名与实现（扫描器改为显式注入 scan 参数、移除对 engine extraction 的扫描依赖），三符号移出纯搬移 manifest，变更由该批 PR 说明承载；其余 6 个符号保持纯搬移 hash。",
   "files": {
     "src/data/extract-ops.ts": {
       "symbols": {
@@ -99,9 +99,6 @@
         "isoNowSeconds": "d962192825ae638aa46580b5662e014c927044a3eaf741c031ac0d9a73a819a0",
         "listSources": "f6e5f83e52f621869f7e3718f7ab942618684356ef37cfed0737aff02791a55e",
         "loadSource": "378e1db6697d6cc61a25ba296a56a7871c287c21a4aa6a5de2831f962b357768",
-        "main": "11b4818906300a03ee2241a7c121d4c1d293d81ed84df50e51528d1b49351f13",
-        "renderAndSnapshot": "98700d2f0d7fe1e0ee608933158454ab85e3e7b9ffdd7ecf51baa72132b450f4",
-        "runSource": "cf9e9226db5711ba6e0b7f809e4ff0a28c387084503417b3152a00f874bb7042",
         "sourceDirs": "3be9a60782dd26a27439b003fba5d06e0159fbee038f2f98ad92c6c01636cd54",
         "USAGE": "d3999c2ea48d2fc3a6b0981209abdcf6baae9fc2168eb2f6c34fdc0932e126e4"
       }
