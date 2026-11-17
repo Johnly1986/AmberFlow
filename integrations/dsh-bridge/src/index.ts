@@ -1075,7 +1075,7 @@ export function apply(ctx: Context, config: Config): void {
     name: `${toolPrefix}_session`,
     description:
       'Start a state-preserving authoring session against one live page. `open` returns `session_id`; '
-        + 'then call `observe`/`act`/`read`/`extract`/`signal`/`wait_for`/`snapshot`/`tab`; `close` ends '
+        + 'then call `observe`/`act`/`goto`/`read`/`extract`/`signal`/`wait_for`/`snapshot`/`tab`; `close` ends '
         + 'it. Calls do not re-navigate, so SPA state survives. Use it to try a flow step by step or debug '
         + 'one failing step; `*_inspect` is the one-shot read and `*_run` is completion truth: this tool '
         + 'never judges completion. `observe` returns verified hint candidates; `act` needs an explicit '
@@ -1084,11 +1084,12 @@ export function apply(ctx: Context, config: Config): void {
     parameters: {
       op: {
         type: 'string', required: true,
-        enum: ['open', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'close', 'list'],
-        description: 'Operation to run; `open` creates a session and returns `session_id`.',
+        enum: ['open', 'goto', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'close', 'list'],
+        description: 'Operation to run; `open` creates a session and returns `session_id`; `goto` navigates the '
+          + 'current tab within the declared hosts envelope.',
       },
       session_id: { type: 'string', description: 'Session id returned by `open`; required for every op except `open` and `list`.' },
-      url: { type: 'string', description: 'open: entry page (http(s) only; checkout-relative paths are rejected).' },
+      url: { type: 'string', description: 'open/goto: entry page (http(s) only; checkout-relative paths are rejected).' },
       hosts: {
         type: 'array', items: { type: 'string' },
         description: 'open: navigation envelope; same semantics as `meta.hosts` (defaults to the URL host).',
@@ -1166,7 +1167,11 @@ export function apply(ctx: Context, config: Config): void {
           + 'Operators: `url_contains`, `css_exists`, `css_exists_text`, `css_visible_exists`, '
           + '`css_text_contains`, `css_text_equals`, `css_value_equals`, `all_of`, `any_of`, `not`, `manual`.',
       },
-      timeout_ms: { type: 'integer', description: 'wait_for: poll window in milliseconds.' },
+      timeout_ms: {
+        type: 'integer',
+        description: 'wait_for: poll window in milliseconds. goto: navigation timeout (integer 1..120000; '
+          + 'engine default 30s).',
+      },
       max: { type: 'integer', description: 'observe: maximum rows (same ElementView cap as `*_inspect` `max_elements`).' },
       include_hidden: { type: 'boolean', description: 'observe: include invisible elements.' },
       include_structure: {
@@ -1292,6 +1297,13 @@ function renderSessionResult(value: Record<string, unknown>): string {
         + `\nevidence: ${String(value.evidence_dir ?? '')}`
         + (value.record === undefined || value.record === null ? '\nrecord: off' : `\nrecord: ${String(value.record)}`)
         + `\nidle TTL: ${String(value.idle_ttl_ms ?? '?')}ms`
+    case 'goto':
+      return `${tag}: ${String(value.url ?? '')}${value.title === undefined ? '' : ` — ${String(value.title)}`}`
+        + (value.code === 'navigation_flapping'
+          ? `\nnavigation flap: ${value.healed === true
+            ? `healed — re-nav to ${String(value.heal_url ?? '')}`
+            : 'NOT healed'} (${String(value.navigations ?? '?')} navs in ${String(value.window_ms ?? '?')}ms)`
+          : '')
     case 'observe': {
       const el = Array.isArray(value.elements) ? value.elements : []
       const lines = el.slice(0, OBSERVE_DISPLAY).map((raw) => {

@@ -41,8 +41,12 @@ export const HINT_MAX_CHARS = 200
 export const LABEL_MAX_CHARS = 200
 /** href 展示投影上限。 */
 export const HREF_MAX_CHARS = 160
-/** why_not_admitted 诊断文本上限。 */
-export const WHY_NOT_ADMITTED_MAX_CHARS = 120
+/**
+ * why_not_admitted 诊断文本上限（词边界截断，见 `clipWhyNotAdmitted`）：断点落在空白/标点处，
+ * 寻址 token（`#id` / `[data-test=…]` / `[name=…]` / `role=…`）不从中间切断——token 自身
+ * 越过上限时保 token 完整、截其余叙述（唯一可超本上限的情形，字段仍 ≤ 引擎原文长度）。
+ */
+export const WHY_NOT_ADMITTED_MAX_CHARS = 400
 /** class_names 条数上限（与引擎 F41 口径一致）。 */
 export const CLASS_NAMES_PER_ELEMENT = 8
 /** 单个 class 名上限（与引擎 F41 口径一致）。 */
@@ -68,8 +72,10 @@ export const ROW_TEXTS_LINE_MAX_CHARS = 40
  *     可直接照抄进 act target / ctx.hint / app.mjs；
  *   - `admitted` / `why_not_admitted`：observe 面的池准入诊断（为什么进不了池/没有可解析
  *     hint）；inspect 面的元素本来就是池内行，不出现这对字段；
- *   - `ax` / `advisories` / `window` 是 inspect 面的顶层证据块（不在元素行内），经
- *     service.ts 原样透传。
+ *   - `ax` / `advisories` / `window` 是**顶层证据块，不在元素行内**：inspect 面的
+ *     ax/advisories/window 经 service.ts 原样透传；session observe 面的 ax（引擎缺省附带、
+ *     与 inspect 同一取树实现同一口径，pool_size/not_in_pool 的对照底座是本次观察的准入
+ *     元素）经 session.ts 原样透传——advisories/window 仍是 inspect 专属。
  */
 export interface ElementView {
   /** inspect=池 ref `eN`（与 run 的 executed_actions 可对账）；observe=观察序号 `oN`。展示锚，非动作地址。 */
@@ -85,7 +91,7 @@ export interface ElementView {
   hints_truncated?: boolean
   /** observe 面：是否满足「准入面 + 可见 + 至少一条自证 hint」。 */
   admitted?: boolean
-  /** observe 面：不满足 admitted 的可行动原因。 */
+  /** observe 面：不满足 admitted 的可行动原因（≤WHY_NOT_ADMITTED_MAX_CHARS，词边界截断）。 */
   why_not_admitted?: string
   /** observe 面：可见性（includeHidden:true 时 false 行会出现）。 */
   visible?: boolean
@@ -167,6 +173,97 @@ function strArray(v: unknown, maxItems: number, maxChars: number): { items: stri
   return { items: raw.slice(0, maxItems).map((s) => clip(s, maxChars)), truncated: raw.length > maxItems }
 }
 
+/* ------------------------------------------ why_not_admitted 的词边界截断 */
+
+/**
+ * 词边界字符：空白 + 收束标点。连接符（`-` `:` `=` `/` `<` `>`）与开括号不算——它们是
+ * token / 复合词的内部结构（`row-index:N`、`within:#outer`、`id/name`），断在上面同样毁证据。
+ */
+const BOUNDARY_CHARS = new Set([')', ']', '}', ',', ';', '.', '!', '?', '…', '—', '"', "'", '`'])
+
+function isBoundaryChar(c: string | undefined): boolean {
+  if (c === undefined) return false
+  return /\s/.test(c) || BOUNDARY_CHARS.has(c)
+}
+
+/** 寻址 token 的终止字符（token 在它之前结束；空白总是终止）。 */
+const TOKEN_STOP_CHARS = new Set([')', ']', '}', '"', "'", '`', ',', ';', '…'])
+
+/**
+ * 扫描寻址 token 的闭区间（`[start, end)`，end 排他；扫描器逐段消费，区间互不重叠）。三种形态：
+ *   - `[attr=…]`：`[` 到配对 `]`（含）——覆盖 `[data-test=…]` / `[name=…]`；无 `]` 时保守保护到下一空白；
+ *   - `#id`：`#` 起到空白/终止字符前——`(#id)` 的 `)`、`` `#id` `` 的反引号不属于 token，
+ *     `within:#outer>#inner` 的 `>` 属于 token 内部（链式锚不可断）；
+ *   - `role=…`：词边界上的 `role=` 起（`hero=` 不算），值可带引号（`role="button"`）。
+ */
+function protectedTokenSpans(s: string): Array<[number, number]> {
+  const stop = (from: number): number => {
+    let j = from
+    while (j < s.length) {
+      const c = s[j]!
+      if (/\s/.test(c) || TOKEN_STOP_CHARS.has(c)) break
+      j += 1
+    }
+    return j
+  }
+  const spans: Array<[number, number]> = []
+  let i = 0
+  while (i < s.length) {
+    const c = s[i]!
+    if (c === '[') {
+      const close = s.indexOf(']', i + 1)
+      const end = close === -1 ? stop(i + 1) : close + 1
+      spans.push([i, end])
+      i = end
+    } else if (c === '#') {
+      const end = stop(i + 1)
+      spans.push([i, end])
+      i = end
+    } else if (c === 'r' && s.startsWith('role=', i) && !/[A-Za-z0-9_-]/.test(i > 0 ? s[i - 1]! : ' ')) {
+      const valueStart = i + 5
+      const quote = s[valueStart]
+      let end: number
+      if (quote === '"' || quote === "'") {
+        const closeQuote = s.indexOf(quote, valueStart + 1)
+        end = closeQuote === -1 ? stop(valueStart + 1) : closeQuote + 1
+      } else {
+        end = stop(valueStart)
+      }
+      spans.push([i, end])
+      i = end
+    } else {
+      i += 1
+    }
+  }
+  return spans
+}
+
+/** 截断点是否落在某个 token 内部（区间开闭：token 起点与末位本身都允许截断——前者丢弃 token，后者保其完整）。 */
+function insideToken(spans: Array<[number, number]>, p: number): boolean {
+  return spans.some(([start, end]) => start < p && p < end)
+}
+
+/**
+ * why_not_admitted 承载"为什么进不了池"的第一证据，其中寻址 token（稳定句柄）是可行动性的
+ * 关键——`#filter_item_trans_coupon` 被切在中间的诊断不可判读。与通用 `clip` 的硬切不同：
+ * 截断点落在空白/标点处，token 不从中间切断；token 自身越过上限时保 token 完整、截其余叙述
+ * （此时字段长度 = token 末位 + …，仍 ≤ 引擎原文长度）。
+ */
+function clipWhyNotAdmitted(s: string, max: number): string {
+  if (s.length <= max) return s
+  const limit = max - 1 // 结尾省略号占一位
+  const spans = protectedTokenSpans(s)
+  const straddling = spans.find(([start, end]) => start < limit && end > limit)
+  if (straddling !== undefined) return `${s.slice(0, straddling[1])}…`
+  for (let p = limit; p >= 1; p -= 1) {
+    if (insideToken(spans, p)) continue
+    if (isBoundaryChar(s[p - 1]) || isBoundaryChar(s[p])) {
+      return `${s.slice(0, p).replace(/\s+$/, '')}…`
+    }
+  }
+  return `${s.slice(0, limit)}…` // 上限内没有任何词边界：退回硬切，守住有界承诺
+}
+
 /**
  * 一行引擎元素 → 合同形状。返回 null 仅当输入根本不是对象（数组里混进的垃圾行）。
  * 未列入合同的引擎键一律丢弃——要透传新字段，先把它加进 ElementView。
@@ -182,6 +279,11 @@ export function projectElementView(raw: unknown): ElementView | null {
   // F84 批 3：行上下文（仅同文案重复组元素携带；≤6 行 × ≤40 字符——引擎口径本就同界）。
   const rowTexts = strArray(raw['row_texts'], ROW_TEXTS_MAX_LINES, ROW_TEXTS_LINE_MAX_CHARS)
   const rowIndex = num(raw['row_index'])
+  // why_not_admitted：词边界截断（见 clipWhyNotAdmitted）——寻址 token 不切中。
+  const whyNot =
+    typeof raw['why_not_admitted'] === 'string' && raw['why_not_admitted'] !== ''
+      ? clipWhyNotAdmitted(raw['why_not_admitted'], WHY_NOT_ADMITTED_MAX_CHARS)
+      : undefined
   const bboxRaw = isObj(raw['bbox']) ? raw['bbox'] : undefined
   const bbox = bboxRaw
     ? {
@@ -199,9 +301,7 @@ export function projectElementView(raw: unknown): ElementView | null {
     hint_candidates: hints.items,
     ...(hints.truncated ? { hints_truncated: true } : {}),
     ...(bool(raw['admitted']) === undefined ? {} : { admitted: raw['admitted'] as boolean }),
-    ...(str(raw['why_not_admitted'], WHY_NOT_ADMITTED_MAX_CHARS) === undefined
-      ? {}
-      : { why_not_admitted: str(raw['why_not_admitted'], WHY_NOT_ADMITTED_MAX_CHARS) as string }),
+    ...(whyNot === undefined ? {} : { why_not_admitted: whyNot }),
     ...(bool(raw['visible']) === undefined ? {} : { visible: raw['visible'] as boolean }),
     ...(str(raw['role'], IDENTITY_MAX_CHARS) === undefined ? {} : { role: str(raw['role'], IDENTITY_MAX_CHARS) as string }),
     ...(str(raw['href'], HREF_MAX_CHARS) === undefined ? {} : { href: str(raw['href'], HREF_MAX_CHARS) as string }),

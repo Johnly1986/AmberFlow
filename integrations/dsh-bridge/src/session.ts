@@ -175,7 +175,7 @@ export interface SessionToolArgs {
 
 export type SessionToolResult = Record<string, unknown>
 
-const SESSION_OPS = ['open', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'close', 'list'] as const
+const SESSION_OPS = ['open', 'goto', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'close', 'list'] as const
 const ACT_OPS = ['click', 'check', 'fill', 'select', 'hover', 'scroll'] as const
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -304,6 +304,7 @@ export class SessionManager {
     }
     try {
       switch (op) {
+        case 'goto': return await this.gotoOp(state, args)
         case 'observe': return await this.observe(state, args)
         case 'act': return await this.act(state, args)
         case 'read': return await this.read(state, args)
@@ -488,6 +489,52 @@ export class SessionManager {
       throw new SessionToolError('child_exited', error instanceof Error ? error.message : String(error), {
         stderr_tail: this.tail(state),
       })
+    }
+  }
+
+  /* ------------------------------------------------------------ goto */
+
+  /**
+   * goto：受控导航——引擎侧与 open **同一条实现**（hosts 信封前置检查、goto(domcontentloaded)、
+   * unreachable/config_error 结构化分类、落地后 302 跨主机拒绝；flap 监听与有界自愈同 open
+   * 路径）。桥只做形状校验 + 透传，并维护 state.url/title（tab list/会话清单显示当前页）。
+   * 成功响应与 open 同形（url/title/hosts）；flap 自愈成功 = additive 诊断字段组（与 open
+   * 的 flapFields 同一组键）；自愈失败 = 引擎 ok:false → engineFailure 原样投影。
+   */
+  private async gotoOp(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
+    if (!nonEmpty(args.url)) throw new SessionToolError('config_error', 'goto needs a url')
+    const url = this.validateUrl(args.url)
+    if (args.timeout_ms !== undefined
+      && (typeof args.timeout_ms !== 'number' || !Number.isInteger(args.timeout_ms)
+        || args.timeout_ms < 1 || args.timeout_ms > 120_000)) {
+      throw new SessionToolError('config_error',
+        `goto timeout_ms must be an integer in [1, 120000] (got ${JSON.stringify(args.timeout_ms)})`)
+    }
+    const response = await this.request(state, {
+      type: 'goto', url,
+      ...(args.timeout_ms === undefined ? {} : { timeoutMs: args.timeout_ms }),
+    })
+    if (response['ok'] !== true) return this.engineFailure(response, 'goto')
+    if (typeof response['url'] === 'string' && response['url'] !== '') state.url = response['url']
+    if (typeof response['title'] === 'string' && response['title'] !== '') state.title = response['title']
+    return {
+      ok: true,
+      op: 'goto',
+      session_id: state.id,
+      url: response['url'],
+      ...(typeof response['title'] === 'string' ? { title: response['title'] } : {}),
+      ...(Array.isArray(response['hosts']) ? { hosts: response['hosts'] } : {}),
+      // flap 自愈成功的诊断组（未判 flap 时键不存在 → 响应与普通导航一致）。
+      ...(response['code'] === 'navigation_flapping' ? {
+        code: 'navigation_flapping',
+        ...(typeof response['navigations'] === 'number' ? { navigations: response['navigations'] } : {}),
+        ...(typeof response['window_ms'] === 'number' ? { window_ms: response['window_ms'] } : {}),
+        ...(Array.isArray(response['urls_sample']) ? { urls_sample: (response['urls_sample'] as unknown[]).slice(0, 5).map(String) } : {}),
+        ...(response['healed'] === true ? { healed: true } : {}),
+        ...(typeof response['heal_url'] === 'string' ? { heal_url: response['heal_url'] } : {}),
+        ...(typeof response['reason'] === 'string' ? { reason: String(response['reason']).slice(0, 200) } : {}),
+        ...(typeof response['suggestion'] === 'string' ? { suggestion: String(response['suggestion']).slice(0, 200) } : {}),
+      } : {}),
     }
   }
 
@@ -698,6 +745,9 @@ export class SessionManager {
       truncated,
       elements,
       ...(Array.isArray(response['frame_counts']) ? { frame_counts: response['frame_counts'] } : {}),
+      // AX 证据块（引擎缺省附带，与 inspect 同口径）：原样透传——桥不发明、不重算；
+      // 缺键 = 该响应没给（dry/replay 合成形状或旧引擎）。
+      ...(isObj(response['ax']) ? { ax: response['ax'] } : {}),
     }
   }
 

@@ -222,7 +222,7 @@ amber apps remove <id> [--yes] [--force]
 | `amberflow_app_show` | `amber apps show --json --code` | 路径、元数据、当前源码、版本锚点 |
 | `amberflow_app_check` | `amber apps check --json` | 加载 + dry 调用序列校验 |
 | `amberflow_inspect` | `amber inspect --json` | 只读页面观察（含 `ax` 可访问性证据块）与候选 hint |
-| `amberflow_session` | `amber session` | 跨工具调用保持页面状态的交互式试错会话（`open/observe/act/read/extract/signal/wait_for/snapshot/tab/close/list`）；不判完成、不写 run 结果；`act` 缺省歧义零动作（见下） |
+| `amberflow_session` | `amber session` | 跨工具调用保持页面状态的交互式试错会话（`open/goto/observe/act/read/extract/signal/wait_for/snapshot/tab/close/list`）；不判完成、不写 run 结果；`act` 缺省歧义零动作（见下） |
 | `amberflow_app_create` | `amber apps new … --json` | 生成 flow 骨架 |
 | `amberflow_run` | `app-runner`（与 `amber run` 同一运行器） | 运行；**桥用部署配置**决策三件套；`max_steps` 是执行预算，`timeout_sec` 是本次墙钟上限；决策通道故障时结果带恢复指引 |
 | `amberflow_learn` | `learn --json` | 一次录制 → 归纳信号 → 生成 `app.mjs` flow（回放门通过才落盘） |
@@ -434,6 +434,23 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 - 回显：`op:"list"` 每行 additive 回显生效值 `idle_timeout_ms`（显式 0 回显 0）；`open` 响应的
   `idle_ttl_ms` 同口径回显本会话生效值（缺省不传 = 管理器缺省，不变）。
 
+`amberflow_session` 的 `goto` op（受控导航）：
+
+- `{"op":"goto","session_id":"s-…","url":"…","timeout_ms?":…}`：受控导航——**与 open 同一条实现**
+  （引擎 `CtxRuntime.navigate` 单一判定：hosts 信封前置检查 → goto(domcontentloaded) →
+  `unreachable`/`config_error` 结构化分类 → 落地检查（302 跨主机 = `host_not_allowed`））；
+  导航纪律缺省沿用会话 hosts（会话无 meta，entry-only 闸门对会话面恒放行，与 open 同口径）。
+  **不带 referer 参数**：同源导航浏览器按自身策略自动带 referer；跨源 goto 携带旧页 referer
+  无收益——桥/引擎都不发明 referer 语义，保持裸 goto 形态。
+- 成功返回 `{ok:true, op:"goto", session_id, url, title?, hosts}`（与 open 同形；桥同步
+  state.url/title，tab list/会话清单显示新页）；task-38 flap 监听与有界自愈对 goto 同样生效——
+  判定 flap 时响应带 `code:"navigation_flapping"` + `navigations/window_ms/urls_sample/healed/
+  heal_url?` 诊断组（自愈失败 = `ok:false` 结构化透传）。`timeout_ms` 为整数 1..120000
+  （缺省引擎 30s 帽；越界 = `config_error`，不静默钳制）。
+- 轨迹与导出：goto 记 `type:"goto"` 行（`amber session export` 只认 open/mark/act 行，goto 行被
+  如实跳过——导出的骨架不含导航步，作者按现场手写 `ctx.open`/`ctx.arrive`）。换日期/换列表页
+  从此不用关开会话改 URL（高频开关撞站点风控的动因由此消除）。
+
 ### 3.1 决策通道：桥 vs CLI（A5）
 
 同一份决策三件套有两个注入面：**桥通道**（DSH 插件配置页 → 桥注入子进程环境变量，部署配置，
@@ -458,7 +475,8 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 `amberflow_inspect` 与 `amberflow_session op:"observe"` 的元素行共用
 `integrations/dsh-bridge/src/element-view.ts` 的**同一份投影合同**（单一出处，schema F54）：同形同义，
 只有信封不同——inspect 是一次性无状态面（`url` 入参、顶层 `element_count`/`ax`/`advisories`/`window`），
-observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,omitted}`，多帧另有 `frame_counts`）。
+observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,omitted}`，多帧另有 `frame_counts`，
+顶层另有 `ax` 证据块，见下）。
 
 | 字段 | 上限 / 口径 | 说明 |
 |---|---|---|
@@ -466,11 +484,11 @@ observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,
 | `hint_candidates` | ≤6 条 × ≤200 字符 | 每条经同一个 `hintMatch` 自证「恰好唯一命中」，可照抄；跨帧同名时可能是 `<label> frame:<origin>` 或 ≤4 段链候选，同名组可能是 `<label> within:#id`（单层/链），**同文案重复组可能是 `<label> in-row:<token>`（F82 行锚，token 来自该元素 `row_texts` 行词元，仅小写折叠）或 `<label> row-index:N`（F83 顺序行锚——仅内容不可分网格产出：行内容词元全被生成期护栏拒绝时，序号即语义的候选出口）**。 |
 | `row_texts`（F82） | ≤6 行 × 每行 ≤40 字符 | 行上下文文本（in-row 匹配底座 + 词元来源）——**仅同文案重复组元素携带**（引擎 observe/inspect 面 dup 门控采集；与 `near` 同触发）。**不进模型面**。F84 批 3：桥 ElementView 投影已收编（`element-view.ts` 白名单两键 + ≤6×≤40 上限）；观察面 dup 判定只对"观察集合内可见同文案计数"执行（max 截断边界）。 |
 | `row_index`（F83） | 1-based 正整数 | dup 组内 DOM 先序位次（row-index 匹配底座 + 第 6 档候选序号来源）——**仅同文案重复组元素携带**（帧内同组；无 dup 页不出字段）。**不进模型面**；序号即语义的序漂移责任在作者（组合守卫 `row-index:N in-row:<token>` = fail-safe 主推）。F84 批 3：桥 ElementView 投影已收编（number 透传）。**跨面可移植的前提 = 同名组成员在两个收集面都在场**（池面 `POOL_SEL`+heuristic / 回捞·observe 面 `ADMIT_SEL` 两个元素宇宙不同；照抄 inspect 候选前用 `ctx.observe`/run 复核）。 |
-| `label` / `label_truncated` | ≤200（匹配口径 `full_label`） | `href`/`href_full` ≤160；`class_names` ≤8×40；`why_not_admitted` ≤120；role/id 等短标识 ≤60。 |
+| `label` / `label_truncated` | ≤200（匹配口径 `full_label`） | `href`/`href_full` ≤160；`class_names` ≤8×40；`why_not_admitted` ≤400（词边界截断）；role/id 等短标识 ≤60。 |
 | `frame` | 0 = 主 frame | 对应 `frames[]` 下标；observe 多帧另有 `frame_counts:[{index,url,elements}]`（单帧不出现）。 |
 | `frame_origin` / `frame_path` | origin 桥 ≤60（引擎歧义证据 ≤120）；path ≤4 段×64 | 帧链底座：`frame_path` 省略 = 主帧；两字段都缺 = 未知 origin 帧（about:blank/srcdoc，不可被 `frame:` 命中）。 |
 | `structure_path` / `structure_unstable` | ≤160 | **仅诊断**：inspect 面默认输出（本来就是诊断面）；`ctx.observe({includeStructure:true})` / 桥 `include_structure:true` 时出现。动态页面会失效，**不是 hint、不可照抄**，不进模型面/歧义证据。 |
-| `admitted` / `why_not_admitted` | — | observe 面的准入诊断；inspect 面不出现（元素本来就来自池）。 |
+| `admitted` / `why_not_admitted` | ≤400（词边界截断） | observe 面的准入诊断；截断点落在空白/标点处，`#id` / `[data-test=…]` / `[name=…]` / `role=…` 寻址 token 不从中间切断（token 自身越限时保 token 完整、截其余叙述——唯一可超 400 的情形，仍 ≤ 引擎原文长度）；inspect 面不出现（元素本来就来自池）。 |
 
 - 行数 cap：缺省 60、硬上限 200（inspect 参数 `max_elements`，observe 参数 `max`）；observe 元素硬上限
   200、帧上限 ≤6。缺键 = 该面引擎未提供，桥**透传不补算**。
@@ -485,6 +503,15 @@ observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,
   additive `{row_index?, row_texts?}`（所选 Elem 实值，字段存在才出现；缺省路径零新字段）——
   事后可审计"点的是哪一行"（row_index 回答第几个成员、row_texts 回答那一行长什么样）；
   事后归因用途见 APP_SCRIPT_AUTHORING §4.13 的 done 断言纪律。
+- `ax`（observe 顶层证据块，引擎缺省随观察附带）：与 `inspect --json` 的 `ax` 同一取树实现
+  （`src/engine/ax.ts`）同一口径——`{available:true, source:"playwright"|"cdp", interactive_count,
+  counts_by_role, interactive_counts_by_role, nodes(≤50), nodes_truncated, total_nodes, pool_size,
+  not_in_pool, not_in_pool_basis}`；与 inspect 的唯一差异是 `pool_size`/`not_in_pool` 的对照底座：
+  inspect 对照运行池投影 label，observe 对照**本次观察的准入元素**（admitted）label（`not_in_pool_basis`
+  随块给出口径原文）。近似口径只用于指出"浏览器认为可交互而观察集合没指向"的信息差，不作
+  可点击/存在性断言。取树失败/无 CDP 会话/超时 ≤3s = `{available:false, reason}`，不抛栈、
+  不阻断其余观察面；只读证据：不进模型面、不参与 admitted 判定；dry/replay 不访问浏览器 =
+  无此键（缺键 = 引擎没给，桥透传不补算）。
 
 ---
 
