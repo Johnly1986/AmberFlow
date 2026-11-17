@@ -1,6 +1,6 @@
 # P2 决策请求包（Readiness / 待项目方拍板）
 
-> **状态**：**已批准且五项前置全部满足（2026-11-17）**。P0/P1 已完成；③ INTERVENTION 默认切换已补齐（`--rescue` 真实 `result.rescue`，默认关逐字节不变）。2.0 已完成（运行期等价 lane + 2.0a RunCtx + 2.0b evidence collector）；按 D3 下一步启动 4d run() 九阶段（每阶段约 3 个工作日窗口）。freeze 自 2026-11-17 起 2 周。
+> **状态**：**已批准且五项前置全部满足（2026-11-17）**；**P2 已收口（2026-11-17，出口核对见 `docs/IMPROVEMENT_PLAN.md` §6.5）**。P0/P1 已完成；③ INTERVENTION 默认切换已补齐（`--rescue` 真实 `result.rescue`，默认关逐字节不变）。2.0/4d 九阶段/2.2 执行内核/2.3 公共面/扩展演练 5/5 已完成；条件项与冻结后待办见 plan §6.5 D。freeze 自 2026-11-17 起 2 周。
 > **复核记录**：2026-11-17 连续 3 轮复核（goal round 4/5/6），①③④⑤ 事实均未变化；仓库保持 P0/P1 已交付 + 证据 lane 夜间运行，未启动任何 `run()`/编排改造。
 > **目的**：把「缺什么」变成可勾选的决定，避免 P2 在缺少发布/改造窗口授权时动最高 churn 文件（`executor.ts` 6139 行、`app-runner.ts` 2854 行、`ctx.ts` 1799 行）。
 > **依据**：`docs/IMPROVEMENT_PLAN.md` §0/§6.3、`docs/IMPROVEMENT_PLAN_REVIEW.md`（架构评审 B1/B5、红队 C2）、`docs/MAINLINE.md` §4 seam 冻结表、`docs/INTERVENTION_RESCUE_MODULE.md` §8。

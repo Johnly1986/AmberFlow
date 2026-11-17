@@ -143,7 +143,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | [INTERVENTION_RESCUE_MODULE.md](INTERVENTION_RESCUE_MODULE.md) | 实施中 | L1.5 已登记；W1-c 前置；文件预留见 §4.1 |
 | [RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md](RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md) | proposal | attach 归 session-runtime；失败现场四件套进 artifacts |
 | [BACKLOG.md](BACKLOG.md) #2/#3/#4 | #2 done（2.2b）、#4 前置完成（4d）、#3 ready | #3 候选窗口指数递增可启动（契约/生产者已就位） |
-| IMPROVEMENT_PLAN v2.1 | proposal（已评审） | 本文件是其 §3.1/§4.5 的落地形态 |
+| IMPROVEMENT_PLAN v2.1 | **已收口（2026-11-17；P0/P1/P2 出口核对见其 §6.1/§6.2/§6.5）** | 本文件是其 §3.1/§4.5 的落地形态；延期条件项见 plan §6.5 D |
 
 ---
 
