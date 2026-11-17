@@ -4096,54 +4096,8 @@ export class BrowserMiddleware {
         if (postPhase.control === "continue") continue;
 
       }
-      // S1 收尾观察：本 run 的 after 指纹。一次池提取，页面不可读时整条省略（不硬造）。
-      let afterFp: StateFingerprint | undefined;
-      try {
-        const elemsAfter = (await this._extractPoolSettled(pg, candidatePriority)).elems;
-        afterFp = await observeState(elemsAfter);
-      } catch { afterFp = undefined; }
-      // 前进性判定（§2.4）：只在本 run 的**实际事务**上算，done 语言不变。
-      const actionRows = trace.filter((t) => t.executed === true || t.skipped === true);
-      const attempted = actionRows.length;
-      const executedN = actionRows.filter((t) => t.executed === true).length;
-      const changedN = actionRows.filter((t) => t.executed === true && t.changed === true).length;
-      // 没有 after 观察就不判前进性（不能把“没看见”写成“没前进”）。
-      const observed = beforeFp !== null && afterFp !== undefined;
-      const progressed = beforeFp !== null && afterFp !== undefined
-        && (afterFp.struct !== beforeFp.struct
-          || afterFp.url !== beforeFp.url
-          || afterFp.navEpoch !== beforeFp.navEpoch);
-      const lastActionStep = actionRows.length
-        ? Number((actionRows[actionRows.length - 1] as Record<string, unknown>)["step"] ?? 0) || undefined
-        : undefined;
-      const flags: StateFlag[] = [];
-      if (poolEmptyThisStep) flags.push("pool_empty");
-      if (donePreheldSeen) flags.push("done_preheld");
-      if (done && observed && attempted > 0 && executedN > 0 && changedN === 0 && !progressed) {
-        flags.push("no_state_progress");
-        warnings.push(
-          `no_state_progress: done held after ${executedN} executed action(s) but the page snapshot `
-          + `did not change and the state fingerprint did not advance`
-          + (lastActionStep === undefined ? "" : ` (step ${lastActionStep})`)
-          + ` — the signal may not be evidence of the action`,
-        );
-      }
-      // W1 验收：原“attempted>0 && executed==0 && done && !progressed”的串扰 flag
-      // 在控制流上不可达——全 skip 的步会先因 done 不成立而失败，done 成立则必有 executed>0。
-      // 该 flag 类别已移除；r8 跨城串扰签名由 done_preheld（命令步动作前预评估）+ no_state_progress 覆盖。
-      // S5b：下一次 ask 的 state_digest 只带**已经发生过**的 flags（本步判定完才更新）。
-      this._runFlags = [...flags];
-      if (beforeFp !== null) {
-        stepState = {
-          before: beforeFp,
-          ...(afterFp === undefined ? {} : { after: afterFp }),
-          // S2：策略关闭时键省略（缺字段 = 该事实不适用）；开启时 0 也表示"settle 跑过但无需等待"。
-          ...(this.settlePolicy === null ? {} : { settleMs: this._settleWaitMs }),
-          actions: { attempted, executed: executedN, changed: changedN },
-          flags,
-          ...(lastEffect === null ? {} : { effect: lastEffect }),
-        };
-      }
+      // S1 收尾观察/前进性/stepState 提 runTail（循环后 epilogue）
+      stepState = await this.runTail({ pg, candidatePriority, observeState, trace, beforeFp, lastEffect, poolEmptyThisStep, donePreheldSeen, done, warnings });
     } finally {
       // Only close the browser run() launched itself: an injected page/pw belongs
       // to the caller (PORT NOTE 5, Python's owns_browser/_stop_playwright_owned).
@@ -5640,6 +5594,47 @@ export class BrowserMiddleware {
    * 平移，仅把 run() 局部变量改为 ctx.xxx；`ctx.stop` 由 run() 包装原 stop
    * 闭包并同步 ctx.stopCode/stopReason/stopStep（false_done 档需要）。
    */
+  /** 4d 阶段：循环后 run 级 epilogue（after 指纹 / 前进性 / flags / _runFlags / stepState）。 */
+  private async runTail(a: {
+    pg: AnyPage; candidatePriority: "bucketed" | "main-first";
+    observeState: (elems: ElemPool | null) => Promise<StateFingerprint>;
+    trace: TraceStep[]; beforeFp: StateFingerprint | null; lastEffect: StateEffect | null;
+    poolEmptyThisStep: boolean; donePreheldSeen: boolean; done: boolean; warnings: string[];
+  }): Promise<StepStateRecord | undefined> {
+    const { pg, candidatePriority, observeState, trace, beforeFp, lastEffect, poolEmptyThisStep, donePreheldSeen, done, warnings } = a;
+    let afterFp: StateFingerprint | undefined;
+    try { afterFp = await observeState((await this._extractPoolSettled(pg, candidatePriority)).elems); } catch { afterFp = undefined; }
+    const actionRows = trace.filter((t) => t.executed === true || t.skipped === true);
+    const attempted = actionRows.length;
+    const executedN = actionRows.filter((t) => t.executed === true).length;
+    const changedN = actionRows.filter((t) => t.executed === true && t.changed === true).length;
+    const observed = beforeFp !== null && afterFp !== undefined; // 没看见 ≠ 没前进
+    const progressed = beforeFp !== null && afterFp !== undefined && (afterFp.struct !== beforeFp.struct || afterFp.url !== beforeFp.url || afterFp.navEpoch !== beforeFp.navEpoch);
+    const lastActionStep = actionRows.length ? Number((actionRows[actionRows.length - 1] as Record<string, unknown>)["step"] ?? 0) || undefined : undefined;
+    const flags: StateFlag[] = [];
+    if (poolEmptyThisStep) flags.push("pool_empty");
+    if (donePreheldSeen) flags.push("done_preheld");
+    if (done && observed && attempted > 0 && executedN > 0 && changedN === 0 && !progressed) {
+      flags.push("no_state_progress");
+      warnings.push(
+        `no_state_progress: done held after ${executedN} executed action(s) but the page snapshot `
+        + `did not change and the state fingerprint did not advance`
+        + (lastActionStep === undefined ? "" : ` (step ${lastActionStep})`)
+        + ` — the signal may not be evidence of the action`,
+      );
+    }
+    this._runFlags = [...flags]; // S5b：下一次 ask 的 state_digest 只带已发生的 flags
+    if (beforeFp === null) return undefined;
+    return {
+      before: beforeFp,
+      ...(afterFp === undefined ? {} : { after: afterFp }),
+      ...(this.settlePolicy === null ? {} : { settleMs: this._settleWaitMs }),
+      actions: { attempted, executed: executedN, changed: changedN },
+      flags,
+      ...(lastEffect === null ? {} : { effect: lastEffect }),
+    };
+  }
+
   private async runReportTail(ctx: RunReportTailCtx): Promise<RunReport> {
     // P0-D：done 只在被排除 frame 上成立 = 完成依赖被排除帧，结构化停因（不留假成功，
     // 也不混成普通 done_not_held）。
