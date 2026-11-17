@@ -5,7 +5,7 @@
     "newFunctionMaxLines": 150,
     "phaseFunctionMaxLines": 400,
     "files": {
-      "src/engine/executor.ts": 5837,
+      "src/engine/executor.ts": 5836,
       "src/app/app-runner.ts": 2854,
       "src/engine/extraction.ts": 1959,
       "src/app/ctx.ts": 1799,
@@ -25,7 +25,7 @@
       {
         "file": "src/engine/executor.ts",
         "name": "run",
-        "lines": 1316
+        "lines": 884
       },
       {
         "file": "src/app/app-runner.ts",
@@ -131,7 +131,9 @@
     "phaseFunctions": [
       "src/engine/executor.ts#runDeclaredTargets",
       "src/engine/executor.ts#runModelPick",
-      "src/engine/executor.ts#runPostAction"
+      "src/engine/executor.ts#runPostAction",
+      "src/engine/executor.ts#runActionPhase",
+      "src/engine/executor.ts#runActionExecute"
     ]
   },
   "docs": {
