@@ -264,7 +264,9 @@ function selfTest(): number {
   const mlGrow = mergeMainlineForUpdate({ mwConstructions: 1, runEntryCalls: 12 }, { mwConstructions: 2, runEntryCalls: 12 });
   if (!mlGrow.errors.some((e) => /mwConstructions/.test(e))) failures.push("mainline update 增长未被拒绝");
   // phaseFunctions：显式阶段例外不得被 --update 误报为「新增超标函数」
-  const phaseBaseline = { ...empty, phaseFunctions: ["src/engine/executor.ts#phaseFn"] };
+  const phaseBaseline: SizeBaseline = {
+    ...limits, files: {}, functions: [], phaseFunctions: ["src/engine/executor.ts#phaseFn"],
+  };
   const phaseUpdate = mergeBaselineForUpdate({
     files: [], functions: [{ file: "src/engine/executor.ts", name: "phaseFn", lines: 269 }],
     limits, template: phaseBaseline,
