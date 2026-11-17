@@ -657,7 +657,9 @@ interface PromptSpec {
 
 > 批次记录追加在本节。阶段 C1/X1 的前置满足前不启动对应拆分（与 §8 风险表一致：运行期拆分在 CI 不可验证时不上线）。
 
-> **门禁扩展（A1）**：`maintain` size 组新增 `movedFunctions` allowlist（`文件#函数名` → 搬移时行数）——既有超标函数按 W1-b 纯搬移纪律换到新文件时，不按"新函数 >150 行"重罚，行数只许降不许增；搬移等价由 split-check manifest 提供。当前仅登记 `src/app/app-runner-declared.ts#runApp`（686 行）。
+> **门禁扩展（A1）**：`maintain` size 组新增 `movedFunctions` allowlist（`文件#函数名` → 搬移时行数）——既有超标函数按 W1-b 纯搬移纪律换到新文件时，不按"新函数 >150 行"重罚，行数只许降不许增；搬移等价由 split-check manifest 提供。当前登记：`app-runner-declared.ts#runApp`、`executor-actions.ts#actOnce`、`executor-resolve-a.ts#_executeElement`、`executor-phases-c.ts#runReportTail`；九阶段函数改用 `phaseFunctions` 新路径（规格保持 ≤400）。> **X1 证据口径**：本批不是纯搬移（方法体 `this.`→`mw.`、调用点改成显式依赖），等价证据 = 7 场景运行期 lane（`BrowserMiddleware.run` 真跑 + golden 对比）+ examples canonical golden + check；类名与 `run()` 签名字面未变（mainline 门禁在位）。`executor.ts` 保留公开方法薄包装，外部调用面（ctx/session）不变。
+> **L1 说明**：`by` 不在 run() 命令闭集（属 act 面 `scrollContainer` 原语）；`set_range` 无 run() 面 op（range input 归 fill 族）——lane 如实覆盖既有可达路径，不硬造场景。
+
 
 
 **批次记录**
@@ -668,6 +670,8 @@ interface PromptSpec {
 | E2 | `pool-js.ts` 1102→**824** 行纯区外搬：共享 JS 片段（COLLECT / BUCKET / LABEL / STRUCTURE / ANCHOR / ROW_CLIMB）+ 宿主 `compile` → `src/engine/pool-js-core.ts`（296 行）；pool-js 的 pass 仍内插同一份并 re-export 导出面 | 运行时导出面与**全部字符串/编译函数值 hash** 改前=改后（27 符号 0 mismatch）；split-check `pool-js-pure`（2 文件/27 符号）；check + 双 lane 绿；基线 pool-js 1102→824 | 本批提交 |
 | E3 | `session-runtime.ts` 1460→**992** 行：契约（选项/退出码/小工具）→ `session-runtime-contract.ts`（245）；响应证据/校验 helper 提为显式依赖函数 → `session-runtime-evidence.ts`（195）；`runSession` 入口（stdio/超时/退出码）→ `session-runtime-entry.ts`（79）；原文件 re-export 导出面 | **会话协议 A/B**：fixtures 静态服务 + `runSession`（in-process，inputFile 驱动 open/observe/act/read/signal/extract/mark/close 全链路），归一化响应 JSON 改前=改后（逐字节）；check + 双 lane 绿；基线 session-runtime 1460→992 | 本批提交 |
 | A1 | `app-runner.ts` 2847→**974** 行（bridge spawn 路径与 CLI 入口 guard 不动）：类型/纯助手 → `app-runner-types.ts`（752）；策略面（EffectivePolicy/resolveRunPolicy/preflightConfig/resolvePace/探测）→ `app-runner-policy.ts`（357）；工具步 → `app-runner-tool-step.ts`（149）；声明式面 `runApp` → `app-runner-declared.ts`（718）；app-runner 保留 `runScriptApp` + facade re-export | **两面运行期 A/B**：夹具 + rules-only 真实 `runApp`/`runScriptApp`（声明式 journey + flow 脚本）归一化结果/落盘 plan 改前=改后；导出面 24 个既有键全保留（仅新增内部助手导出）；split-check `app-runner-pure`（30 符号，24 个逐字节相同，6 个仅加 `export` 修饰）；check + 双 lane 绿 | 本批提交 |
+| L1 | 运行期等价 lane 扩场景（executor 拆分前置）：4→**7** 场景——upload（`setInputFiles`）、scroll（元素目标容器滚动 + moved/delta/scroll 证据）、range fill（`input[type=range]` 执行路径） | 每场景 `--record` 连跑两次一致；外部请求 0；`--check` 7/7 绿；原 4 份 golden 逐字节不变 | 本批提交 |
+| X1 | `executor.ts` 5829→**2721** 行（类名/`run()` 签名逐字节不变）：九阶段/动作/解析实现切成显式 `mw` 依赖的模块函数——`executor-phases-a/b/c.ts`（491/570/777）、`executor-actions.ts`（534）、`executor-resolve-a/b.ts`（383/470）；类保留构造/核心循环/5 个公开方法薄包装（actOnce/scrollIntoView/scrollContainer/scrollDocument/setRange），phase 类型与跨模块 helper 导出 | **7 场景运行期 lane --check 全绿**（覆盖成功/停因/遮挡/precondition/upload/scroll/range）；examples golden + `npm run check` 绿；>1000 行文件仅剩 ctx.ts（C1 进行中） | 本批提交 |
 
 
 ### P2 主线（条件启动；3–5 周，12–20 人日）
