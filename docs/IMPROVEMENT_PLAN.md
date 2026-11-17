@@ -6,7 +6,7 @@
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0 完成、4d 九阶段全部落地、**BACKLOG #2：2.1 契约 + 2.2a app 生产者接线已落地**；下一步 2.2b 扫描实现搬 app 层 → #3）。
+> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0 完成、4d 九阶段全部落地、**BACKLOG #2：2.1 契约 + 2.2a app 生产者接线 + 2.2b-0 跨层解耦已落地**；下一步 2.2b 扫描实现搬 app 层 → #3）。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -554,6 +554,8 @@ interface PromptSpec {
 
 | 2.1（BACKLOG #2 第一步） | 候选生产者契约 `CandidateProducer`（`candidate-contract.ts` 66 行，纯数据/结构类型，无 Playwright 具体类型）+ 引擎消费 seam（MiddlewareOptions 可选 `candidateProducer`；executor 6 处 `extractElements` 直调全部改走 `this.candidates.extract`，参数逐字） | `595eff9` | 运行期 lane 4 场景 + examples golden 绿；split-check：MiddlewareOptions 有意非纯搬移移出 manifest，变更由 PR 说明承载 |
 | 2.2a（BACKLOG #2 第二步） | 应用层候选生产者 `src/app/candidate-source.ts`（34 行，`createAppCandidateProducer` 逐字转调引擎扫描，占位实现）+ `middleware-factory` 默认注入 `candidateProducer`（显式优先）——所有工厂入口默认走 app producer，行为零变化；2.2b 再搬扫描实现并删引擎默认 | `本批提交` | 运行期 lane 4 场景 = app producer 路径直接等价证据；examples golden/check 绿 |
+
+| 2.2b-0（BACKLOG #2 前置） | 扫描跨层消费者解耦：`model/page-context` 的 `captureStepStateView(page, scan)` 与 `data/source-validate` 的 `renderAndSnapshot(html, scan)` 改为**显式注入**（不再 import `extractElements`）；app-runner 注入 app 层 producer；data `--render` 无注入时结构化报错。为 2.2b 搬扫描实现清障 | `b6eec00` | runtime lane 4/4、examples golden、check 绿；split-check：3 符号有意非纯变更移出 datasource-pure manifest |
 
 **4d 九阶段出口核对（2026-11-17，完成）**：
 

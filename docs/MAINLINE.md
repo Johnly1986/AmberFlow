@@ -43,6 +43,8 @@
 
 **门禁口径**：不追 `grep=0` 的审美目标；新代码不得新增反向边，已有边按批次减少并在此表登记。
 
+> 2.2b-0（BACKLOG #2）：`model/page-context` 与 `data/source-validate` 的扫描依赖已改为显式注入（不再 import `extractElements`）；engine 内扫描实现待 2.2b 搬 app 层后从 extraction 移除。
+
 ---
 
 ## 2. 执行阶段 S0–S5（主线目标态）
