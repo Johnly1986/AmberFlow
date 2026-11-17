@@ -272,6 +272,14 @@ type DeclaredHintPhase = {
   curHint: string | null;
 };
 
+/** `runModelPick` 的返回值：stopped = 选择段已停（stop 已记账）；elems 为宽扫后的本步视图。 */
+type ModelPickPhase = {
+  stopped: boolean; ref: string | null; conf: number; method: string;
+  decisionKind: "rule" | "model" | "escalate"; layaMargin: number | null;
+  tierAsk: { n: number; tier: number } | null; nominatedRepair: boolean;
+  escalatedPick: string | null; elems: ElemPool; label: string;
+};
+
 /* ------------------------------------------------------------------ helpers */
 
 /**
@@ -4027,395 +4035,21 @@ export class BrowserMiddleware {
             reAdmitted.add(br);
           }
         }
-        let ref: string | null = null;
-        let conf = 0;
-        // 方法标签跟着决策源走：provider 自报其名（decision-service / 基线名…）；
-        // legacy runtime 包装的归一化为 "laya"——本地 laya 档的 method 串逐字节不变。
-        const mm = this.modelLabel();
-        let method = mm;
-        // 粗分类（聚合用）：rule=规则/闭集解析，model=provider 决策票，escalate=老师点名。
-        // 显示名交给 method（可含 :reobserve/:adjudicated 后缀），聚合读这个字段。
-        let decisionKind: "rule" | "model" | "escalate" = "model";
-        let layaMargin: number | null = null;      // C3-R top-two margin (diagnostic)
-        let tierAsk: { n: number; tier: number } | null = null;   // P1 diagnostic: the narrowed question
-        if (ruleRef && !(ruleRef in forbidden)) {
-          ref = ruleRef;
-          conf = 1.0;
-          method = "rule:match";
-          decisionKind = "rule";
-        } else {
-          // the rule's target is forbidden (inert or tried) -> fall through to
-          // laya with the reduced action space instead of re-hitting a known-dead
-          // element
-          const forbiddenSet = new Set(Object.keys(forbidden));
-          // P1 TIERED HINT (opt-in, `tieredHint`; OFF keeps today's behaviour byte-identical):
-          // an ambiguous-in-tier plan hint used to collapse to null and become
-          // "pick 1 of the whole 40" — now it becomes "pick 1 of THESE candidates".
-          // The tier is a SMALLER QUESTION, never a decider: below floor or no answer,
-          // the step re-asks the full pool and every later rung stays as today.
-          let askPool = orderedPool();
-          if (tieredHint && curHint !== null && ruleRef === null) {
-            const cand = hintCandidates(curHint, elems, this._hintOpts());
-            if (cand !== null && cand.decided === null && cand.refs.length > 1) {
-              const subset: ElemPool = {};
-              for (const r of cand.refs) {
-                if (elems[r] !== undefined && !forbiddenSet.has(r)) subset[r] = elems[r]!;
-              }
-              if (Object.keys(subset).length > 1) {
-                askPool = subset;
-                tierAsk = { n: Object.keys(subset).length, tier: cand.tier };
-              }
-            }
-          }
-          let [picked, pconf, pprobs] = await this.pickElement(
-            instruction, pg, askPool, forbiddenSet, noted);
-          if (askPool !== elems && tierAsk !== null && (picked === null || pconf < this.confFloor)) {
-            // narrowed ask abstained: today's full-pool ask still gets its turn
-            if (verbose) console.log(`  step ${stepNo}: tiered hint (${tierAsk!.n} candidates) abstained -> full pool`);
-            tierAsk = null;
-            [picked, pconf, pprobs] = await this.pickElement(
-              instruction, pg, elems, forbiddenSet, noted);
-          }
-          ref = picked;
-          conf = pconf;
-          method = mm;
-          layaMargin = topTwoMargin(pprobs);
-        }
-        if (ref === null) {
-          // A2：候选窗口超过决策服务上限——结构化停因，绝不把 200+ 选项硬塞过去。
-          if (this._choiceLimitReason !== null) {
-            const why = this._choiceLimitReason;
-            this._choiceLimitReason = null;
-            stop("decision_service_choice_limit", why, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-            break;
-          }
-          // In rules-only mode a null ref usually means "no runtime to ask", which is not
-          // the same failure as "every element is forbidden" — say which one it is.
-          if (this.rulesOnly) {
-            // task-14（D1）：被降级吞掉的步（本需要模型选点）在 step warning 记 decision_degraded
-            // ——停因保留（诚实机制不变），留痕说明这是配置面问题而非模型缺席，并给分类建议。
-            if (this.decisionDegraded !== null) {
-              warnings.push(`decision_degraded: 决策面已降级（${this.decisionDegraded.reason_class}）——`
-                + `本步需要模型选点，规则面无法替代；${decisionDegradedAdvice(
-                  this.decisionDegraded.reason_class === "midrun_death" ? "unknown" : this.decisionDegraded.reason_class)}`);
-            }
-            // 诚实停因：这一步**什么动作都没声明**（无 target_hint、
-            // 无命令空间）时，"缺模型"是个谎言——真正的问题要么是"信号已成立但这步没声明
-            // 零动作命令，引擎不肯替作者宣布完成"，要么是"信号根本不成立"。当场评估一次
-            // 信号（只在走向停止时付这一次），把实况和出路说出口，而不是把用户引去装模型。
-            if (curHint === null && cmdSpace.length === 0) {
-              const held = goalSignalFn ? (await goalHeld()) : false;
-              stop("no_model_runtime",
-                `step ${stepNo} declares no action (no target_hint, no commands) and rules-only has no model `
-                + `to pick one — its done-signal ${held ? "ALREADY holds on this page: declare a zero-action "
-                    + 'command (commands: [{"op":"skip"}]) on this subgoal, or name a target_hint, so the '
-                    + "signal can be honored"
-                  : "does not hold on this page either: name a target_hint, declare commands, "
-                    + "or provide a decision model"}`
-                + this.degradedReasonSuffix(), stepNo);
-              if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-              break;
-            }
-            stop("no_model_runtime",
-              `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`
-              // 规划引导：计划点了名、规则没解出来、模型又不在/弃权——当场送闭集。
-              + (curHint !== null && ruleRef === null
-                  ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
-                  : "")
-              // A3：provider 是抛错降级（而非本来就没装）时，把 HTTP 事实带上——排查不必再猜。
-              + this.degradedReasonSuffix() + identityHiddenSuffix(targets.identityHidden)
-              // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
-              + rowAnchorNote(declaredTargets()), stepNo);
-          } else {
-            stop("action_space_exhausted",
-              `action space exhausted on step ${stepNo}`
-              + (curHint !== null && ruleRef === null
-                  ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
-                  : "") + identityHiddenSuffix(targets.identityHidden)
-              // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
-              + rowAnchorNote(declaredTargets()), stepNo);
-          }
-          if (verbose && this.rulesOnly) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-          break;
-        }
-        // PORT FIX: a model answer can name a ref that is no longer in THIS
-        // step's pool (the screen changed between the scan and the pick, or the
-        // answer is nonsense). The Python reference reads `elems[ref]` unguarded
-        // and dies with a KeyError; stop the subgoal with a reason instead.
-        if (elems[ref] === undefined) {
-          // 这条是最难懂的一句：`picked ref 'undefined' is not in the element
-          // pool on step 1`。它真正的意思是"这一步没有能点到的目标"——计划没点名（没有
-          // target_hint），规则也没命中，于是一个不存在的 ref 被交到这里。把病因写出来，
-          // 并且告诉使用者下一步该改什么（加 target_hint），而不是复述执行器的内部产物。
-          const poolSize = Object.keys(elems).length;
-          if (curHint) {
-            stop("hint_matched_nothing",
-              `target_hint ${JSON.stringify(curHint)} matched nothing in a pool of ${poolSize} `
-              + `element(s) on step ${stepNo}`
-              // F73：DRF 计数事实（实跑且零命中才非空；缺省 declared 关 = 恒空串，逐字节不变）。
-              + declaredHiddenSuffix(targets.getDeclaredHidden()) + declaredMissSuffix(targets.declaredMiss)
-              // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
-              + rowAnchorNote(declaredTargets()), stepNo);
-          } else {
-            stop("step_names_no_target",
-              `step ${stepNo} names no target: no target_hint(s), no rule matched any of the `
-              + `${poolSize} element(s), and the picker returned no usable element`
-              + `（给这一步加 target_hint，或在页面上点名一个稳定句柄）`, stepNo);
-          }
-          if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-          break;
-        }
-        // The confidence floor decays as failed elements are forbidden: a
-        // shrunken action space legitimately lowers the margin.
-        const floor = Math.max(0.10, this.confFloor - 0.05 * Object.keys(forbidden).length);
-        if (conf < floor) {
-          const pending = elems[ref]!;
-          // U8：本次 ask 的 conf（后续恢复路径会改写 conf 变量；记账用分支入口的值）。
-          const askConf = conf;
-          /** U8：本分支内被闸门丢掉的 ask conf（暂存；提交点见各出口——adjudicate 复用意见时撤回）。 */
-          const gateRejected: number[] = [];
-          // A frozen plan may legitimately re-drive an element within one
-          // subgoal. If this exact element already executed successfully
-          // earlier in THIS subgoal, allow it once more at >= 0.10.
-          const wantDesc = (this._isTyping(pending) ? "type text into" : "click")
-            + ` ${pending.tag} "${pending.label}"`;
-          const priorHit = trace.some((t) => t.desc === wantDesc && t.executed);
-          if (priorHit && conf >= 0.10) {
-            /* re-drive: proceed despite floor */
-          } else if (this.rulesOnly) {
-            // No runtime installed and no rule/hint resolved this step: say exactly that.
-            // Reporting "low confidence 0.00" here would blame the model for not existing.
-            stop("no_model_runtime",
-              `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`
-              // 同 low_confidence：hint 被点名却没解出来时，当场送闭集（规划引导）。
-              + (curHint !== null && ruleRef === null
-                  ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
-                  : "")
-              // A3：同上——降级原因（HTTP 状态码 + 服务错误关键句）随停因透出。
-              + this.degradedReasonSuffix(), stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-            break;
-          } else if (!(adjudicate && ref !== null)
-            && Object.keys(forbidden).length >= Math.max(0, Object.keys(elems).length - 1)) {
-            // A2′：`adjudicate` 开着且还有活着的候选时，不能用"动作空间耗尽"抢在裁决前面——
-            // 那最后一个低置信候选正是该被信号裁决的那一个（"错了白跑"是作者声明过的）。
-            // 没开裁决时这个提前停原样保留（逐字节今天）。
-            gateRejected.push(askConf);   // U8：意见在 floor 处被丢，动作空间也已耗尽——记一笔
-            stop("action_space_exhausted",
-              `action space exhausted (${Object.keys(forbidden).length} forbidden) on step ${stepNo}`, stepNo);
-            break;
-          } else {
-            // U8：走到恢复分支 = 原 ask 的意见已被闸门丢弃（reobserve/escalate 换别的意见、
-            // low_confidence 停；唯一例外是 adjudicate 复用原意见——下面 pop 撤回）。
-            gateRejected.push(askConf);
-            // OBSERVATION-BOTTLENECK RECOVERY (browser-use's "the button is there, we
-            // just failed to show it"): the pool is the model's entire world, so a
-            // target that never entered it cannot be chosen no matter how good the
-            // model is. Take ONE wider look and re-ask before blocking the subgoal.
-            // Only the way to stopping pays for the extra scan; the pick is recorded
-            // as `<provider>:reobserve` so a widened step is visible in the trace/audit.
-            let recovered = false;
-            // A2′：加宽重看即便没过闸门，它看到的候选也可能比窄池那一个更好——
-            // 记下来，若这一步声明了裁决资格，就用**最后一次观察到的**低置信选择（elems 已是宽视图）。
-            let widePick: { ref: string; conf: number } | null = null;
-            if (reobserve && !reobserved && ref !== null && stepTimeoutLeft() > 0) {
-              // F3：步级 timeoutMs 过期后不再起新的宽扫重问（每轮受整步挂钟帽约束）。
-              reobserved = true;
-              await this._settleBeforeExtract(pg);
-              const wide = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true, quotas: WIDE_QUOTAS, candidatePriority, hosts: this._frameHosts });
-              if (Object.keys(wide).length > Object.keys(elems).length) {
-                // refs are positional: re-prune forbids whose ref now names a
-                // different element before re-asking (same rule as the step head).
-                pruneForbids(wide);
-                // 宽视图同样只做**排序先验**（不丢元素：加宽看到的东西不该被族过滤掉）。
-                const wideAsk = orderedPool(wide);
-                const [ref2, conf2] = await this.pickElement(
-                  instruction, pg, wideAsk, new Set(Object.keys(forbidden)), noted);
-                // The wider view BECOMES the step's view even when the local model
-                // stays unsure: a stronger reasoner (escalation) must be able to see
-                // what the wider look already found, or widening would be pointless.
-                // (Measured: the escalator was handed the 40-element narrow view and
-                // the target was still invisible to it.)
-                elems = wide;
-                if (ref2 !== null && conf2 >= floor) {
-                  ref = ref2;
-                  conf = conf2;
-                  method = `${mm}:reobserve`;
-                  recovered = true;
-                  if (verbose) {
-                    console.log(`  step ${stepNo}: re-observed wider `
-                      + `(${Object.keys(wide).length} elements) -> ${ref} conf=${conf2.toFixed(2)}`);
-                  }
-                } else {
-                  if (ref2 !== null) {
-                    widePick = { ref: ref2, conf: conf2 };
-                    gateRejected.push(conf2);   // U8：宽看重问的意见也未过 floor（adjudicate 复用时撤回）
-                  }
-                  if (verbose) {
-                    console.log(`  step ${stepNo}: re-observed wider `
-                      + `(${Object.keys(wide).length} elements) -> still below floor`);
-                  }
-                }
-              }
-            }
-            // ESCALATION (C3-R's deliberative path): a stronger reasoner may still
-            // name one of the elements the harness showed. It is a picker, not a
-            // planner — an answer that is not a ref from THIS view is rejected, so
-            // nothing it says can invent an element, a value or an action.
-            // task-14（D1）：决策面已降级（起跑探判死/中途死亡）→ 升级链规则兜底，
-            // 不再咨询死服务（死服务不重试超过 1 次：probe 1 次 / pickInner 捕获 1 次）。
-            if (!recovered && escalateFn && !escalated && this.decisionDegraded === null
-                && stepTimeoutLeft() > 0) {
-              // F3：步级 timeoutMs 过期后不再发起新的升级点名。
-              escalated = true;
-              const crit = criteriaView(orderedPool(), new Set(Object.keys(forbidden)),
-                await ariaInteractiveLines(pg));
-              const state = {
-                url: urlOf(pg), title: await pg.title(),
-                main_text: await stateText(pg, instruction, this.embedFn),
-              };
-              try {
-                const pick = await escalateFn({
-                  instruction, criteria: crit, why: `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)}`,
-                  ...state,
-                });
-                if (pick && crit[pick] !== undefined && !(pick in forbidden)) {
-                  ref = pick;
-                  method = "escalate";
-                  decisionKind = "escalate";
-                  escalatedPick = pick;
-                  recovered = true;
-                  if (verbose) console.log(`  step ${stepNo}: escalated -> ${pick}`);
-                } else if (verbose) {
-                  console.log(`  step ${stepNo}: escalation rejected (${pick === null ? "no answer" : `'${pick}' is not a shown candidate`})`);
-                }
-              } catch (e) {
-                if (verbose) console.log(`  step ${stepNo}: escalation failed (${describeActionError(e)})`);
-              }
-            }
-            if (!recovered) {
-              // A2′：这一步声明了"错了白跑"（`adjudicate`，加载期已钉 `effect.irreversible:false`
-              // + 可判定信号），于是"低置信"不再是阻塞理由——把模型此刻的选择**执行**，让这一步
-              // 自己的 DOM 信号事后裁决（信号成立 = done；不成立 = 下面循环尾部禁掉这个元素，
-              // 一次白跑就是它的全部代价）。这是老师的"提名被执行、信号定生死"同一认识论，
-              // 只是爆炸半径由作者声明限定。没声明 ⇒ 逐字节今天（低置信即阻塞）。
-              const bestPick = widePick ?? (ref !== null ? { ref, conf } : null);
-              if (adjudicate && bestPick !== null && !this.rulesOnly) {
-                // U8：被裁决执行的那份意见（原 ask 或宽看重问）不算被拒——撤回最后一笔暂存。
-                gateRejected.pop();
-                ref = bestPick.ref;
-                conf = bestPick.conf;
-                method = `${mm}:adjudicated`;
-                if (verbose) {
-                  console.log(`  step ${stepNo}: adjudicating below gate (${ref} `
-                    + `conf=${conf.toFixed(2)} < floor ${floor.toFixed(2)}) — the step's own signal judges`);
-                }
-              } else {
-                // U8：提交点①——low_confidence 停，暂存的意见确被丢弃。
-                this._rejectedAskConfs.push(...gateRejected);
-                stop("low_confidence",
-                  `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`
-                  // 规划引导：计划点了名、规则却没解出来——当场把闭集送给作者，省一次读源码确诊
-                  // （实测：act hint 落空会静默回退模型、报错无提示，作者需读 hint.ts/rules.ts 才能定位）。
-                  + (curHint !== null && ruleRef === null
-                      ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
-                      : "")
-                  // eval3 曝光面：observe 是会话内的免费侦察通道（R02 自发使用并获赞），
-                  // 低置信/池判别落空时当场点名它，省一次"故意失败步捞池"的绕行。
-                  + `；用 ctx.observe() 在会话内看准入面与 why_not_admitted`
-                  // A2 判别②：分数不过闸门 ≠ 目标不存在——用内存里的池把两种问题分开说
-                  // （候选在而置信度低 = 闸门问题；池里没有词面相关候选 = 目标可能不在本页面）。
-                  + lowConfDiscrimination(instruction, elems, ref)
-                  // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串，
-                  // reason 逐字节不变）。
-                  + rowAnchorNote(declaredTargets()), stepNo);
-                break;
-              }
-            }
-            // U8：提交点②——reobserve/escalate 挽回了这一步，但被丢弃的意见照记（它们
-            // 确实在 floor 处被拒过；挽回意见本身走 trace 进既有 `conf` 聚合）。
-            this._rejectedAskConfs.push(...gateRejected);
-          }
-        }
-        // R2b：词面零重叠守卫（宽扫的第二个触发器）。模型提名（非规则命中、非满置信）
-        // 的 label 与指令零词面重叠（CJK 二元组/ASCII 词）时，是"自信地错"的典型形态——
-        // 低置信恢复等不到（模型不觉得自己错，m.ctrip 实证：指令"出发地" vs 提名
-        // "组合交通出行"，conf 0.71 过闸点走页脚）。执行前强制一次宽扫重问（宽池含 R2/
-        // R2c 启发式候选），重问结果照常过闸；无更优则保留原提名。规则命中与 conf=1.00
-        // 的模型提名不触发（books/quotes/hn 全量 rule:match conf=1.00 实证零回归面）。
-        if (ref !== null && !reobserved && method === mm && conf < 0.9
-            && stepTimeoutLeft() > 0
-            && !lexicalOverlap(instruction, String(elems[ref]?.label ?? ""))) {
-          reobserved = true;
-          await this._settleBeforeExtract(pg);
-          const wideR2b = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true, quotas: WIDE_QUOTAS, candidatePriority, hosts: this._frameHosts });
-          if (Object.keys(wideR2b).length > Object.keys(elems).length) {
-            pruneForbids(wideR2b);
-            const wideAskR2b = orderedPool(wideR2b);
-            const [ref2, conf2] = await this.pickElement(
-              instruction, pg, wideAskR2b, new Set(Object.keys(forbidden)), noted);
-            elems = wideR2b;
-            if (ref2 !== null && conf2 >= floor) {
-              ref = ref2;
-              conf = conf2;
-              method = `${mm}:reobserve`;
-              if (verbose) {
-                console.log(`  step ${stepNo}: R2b relevance widen -> ${ref} conf=${conf2.toFixed(2)}`);
-              }
-            } else if (verbose) {
-              console.log(`  step ${stepNo}: R2b relevance widen -> keep original `
-                + `(${ref2 === null ? "no pick" : `conf ${conf2.toFixed(2)}`} below floor)`);
-            }
-          }
-        }
-        // S2 ③ **有界修复**（只在走向停止时付一次成本）：第一轮用全池（软先验）解析出的动作族
-        // 与提名不符 / 没解出目标时，才用"该族"再做一次解析；仍不成立 ⇒ 结构化停，
-        // 绝不执行一个与提名矛盾的动作。
-        // 为什么不是第一道过滤：结构族 ≠ 语义动作（div[role=combobox] = click 但语义 select、
-        // contenteditable = click 但语义 fill、input[type=range] = fill 但语义设值），硬过滤会
-        // 把真目标或关键上下文元素一并排掉（项目方推敲结论）。
-        let nominatedRepair = false;
-        if (expectedFamily !== null) {
-          const pickedFamily = ref !== null ? elemFamily(elems[ref]!) : null;
-          if (ref === null || pickedFamily !== expectedFamily) {
-            const narrow = filterElemsByFamily(elems, expectedFamily);
-            if (Object.keys(narrow).length === 0) {
-              stop("nominated_family_empty",
-                `nominated instruction "${expectedFamily}" but this page has no ${expectedFamily} `
-                + `candidates on step ${stepNo}`, stepNo);
-              if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-              break;
-            }
-            const repairFloor = Math.max(0.10, this.confFloor - 0.05 * Object.keys(forbidden).length);
-            const forbiddenSet = new Set(Object.keys(forbidden));
-            const repairRule = navRule(instruction, narrow) ?? affordanceRule(instruction, narrow, null);
-            let repaired: { ref: string; conf: number; method: string } | null = null;
-            if (repairRule !== null && !(repairRule in forbidden)) {
-              repaired = { ref: repairRule, conf: 1, method: "rule:match" };
-            }
-            if (repaired === null) {
-              const [rp, rconf] = await this.pickElement(instruction, pg, narrow, forbiddenSet, noted);
-              if (rp !== null && rconf >= repairFloor) repaired = { ref: rp, conf: rconf, method: mm };
-            }
-            if (repaired === null) {
-              stop("nominated_family_mismatch",
-                `nominated instruction "${expectedFamily}", but the page resolved ${pickedFamily ?? "nothing"} `
-                + `and no ${expectedFamily} candidate passed the floor on step ${stepNo}`, stepNo);
-              if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-              break;
-            }
-            if (verbose) {
-              console.log(`  step ${stepNo}: nominated-family repair ${expectedFamily} -> `
-                + `${repaired.ref} (${repaired.method})`);
-            }
-            ref = repaired.ref;
-            conf = repaired.conf;
-            method = repaired.method;
-            nominatedRepair = true;
-          }
-        }
-        // S4：stale 重解析重试会换成本步重新解析出的元素，故 el 可重新绑定（ref 本就是 let）。
+        const pickPhase = await this.runModelPick({
+          pg, stepNo, instruction, verbose, elems, ruleRef, curHint, commandMode, forbidden, noted, trace, targets, adjudicate, reobserve, escalateFn, expectedFamily,
+          confFloor: this.confFloor, candidatePriority, tieredHint, rulesOnly: this.rulesOnly, decisionDegradedReasonClass: this.decisionDegraded?.reason_class ?? null, rejectedAskConfs: this._rejectedAskConfs, warnings,
+          reobserved, escalated, escalatedPick, stepTimeoutLeft, stop, stopReason: () => acct.stopReason, pickElement: (g, page, pool, blocked, notes) => this.pickElement(g, page, pool, blocked, notes),
+          orderedPool, settleBeforeExtract: (page) => this._settleBeforeExtract(page), pruneForbids, hintOpts: () => this._hintOpts(), frameHosts: this._frameHosts, stateTextFn: (page, instr) => stateText(page, instr, this.embedFn),
+          rowAnchorNote, declaredTargets, goalHeld, goalSignalFn, isTyping: (el) => this._isTyping(el), modelLabel: () => this.modelLabel(), degradedReasonSuffix: () => this.degradedReasonSuffix(),
+          choiceLimitReason: () => this._choiceLimitReason, clearChoiceLimitReason: () => { this._choiceLimitReason = null; },
+        });
+        elems = pickPhase.elems;
+        escalatedPick = pickPhase.escalatedPick;
+        if (pickPhase.stopped) break;
+        let ref = pickPhase.ref;
+        const { conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, label: mm } = pickPhase;
+        if (ref === null) break;
+
         let el = elems[ref]!;
         // ActionAdapter 能力面：命令闭集声明的 op 必须是当前元素已声明的能力。
         // 这不是新的动作生成路径，只是把"跑了才发现不支持"提前到执行前。
@@ -5633,6 +5267,372 @@ export class BrowserMiddleware {
       }
     }
     return { stopped: false, curHint };
+  }
+
+  /** 4d 阶段：模型选择（rule → ask → floor → reobserve → escalate → adjudicate → R2b → nominated-family 修复）；
+   * 早停/日志已在此记账；宽扫替换本步视图（elems 随返回值交回）。动作执行仍在 run()。 */
+  private async runModelPick(a: {
+    pg: AnyPage; stepNo: number; instruction: string; verbose: boolean; elems: ElemPool; ruleRef: string | null;
+    curHint: string | null; commandMode: boolean; forbidden: Record<string, Sig>; noted: Record<string, string> | null;
+    targets: DeclaredTargetsResolver;
+    trace: TraceStep[]; adjudicate: boolean; reobserve: boolean; escalateFn: EscalatorLike | null;
+    expectedFamily: ElemFamily | null; confFloor: number; candidatePriority: "bucketed" | "main-first";
+    tieredHint: boolean; rulesOnly: boolean; decisionDegradedReasonClass: NonNullable<BrowserMiddleware["decisionDegraded"]>["reason_class"] | null; rejectedAskConfs: number[];
+    warnings: string[];
+    reobserved: boolean; escalated: boolean; escalatedPick: string | null;
+    stepTimeoutLeft: () => number; stop: (code: StopCode, detail?: string, at?: number) => void; stopReason: () => string;
+    pickElement: (goal: string, page: AnyPage, pool: ElemPool, blocked: Set<string>, notes: Record<string, string> | null) => Promise<[string | null, number, Record<string, number>]>;
+    orderedPool: (pool?: ElemPool) => ElemPool; settleBeforeExtract: (page: AnyPage) => Promise<unknown>;
+    pruneForbids: (pool: ElemPool) => void; hintOpts: () => HintMatchOptions; frameHosts: string[] | null;
+    stateTextFn: (page: AnyPage, instr: string) => Promise<string>;
+    rowAnchorNote: (targets: readonly (string | null | undefined)[]) => string;
+    declaredTargets: () => readonly (string | null | undefined)[];
+    goalHeld: () => Promise<boolean>; goalSignalFn: ((page: AnyPage) => boolean | Promise<boolean>) | null;
+    isTyping: (el: Elem) => boolean; modelLabel: () => string; degradedReasonSuffix: () => string;
+    choiceLimitReason: () => string | null; clearChoiceLimitReason: () => void;
+  }): Promise<ModelPickPhase> {
+    const { pg, stepNo, instruction, verbose, elems: elemsInit, ruleRef, curHint, commandMode, forbidden, noted, trace, targets,
+      adjudicate, reobserve, escalateFn, expectedFamily, confFloor, candidatePriority, tieredHint, rulesOnly,
+      decisionDegradedReasonClass, rejectedAskConfs, warnings, stepTimeoutLeft, stop, stopReason, pickElement, orderedPool,
+      settleBeforeExtract, pruneForbids, hintOpts, frameHosts, stateTextFn, rowAnchorNote, declaredTargets,
+      goalHeld, goalSignalFn, isTyping, modelLabel, degradedReasonSuffix, choiceLimitReason, clearChoiceLimitReason,
+      reobserved: reobservedInit, escalated: escalatedInit, escalatedPick: escalatedPickInit } = a;
+    let elems = elemsInit;
+    let ref: string | null = null; let conf = 0;
+    // 方法标签跟着决策源走：provider 自报其名（decision-service / 基线名…）；
+    const mm = modelLabel();
+    let method = mm;
+    // 粗分类（聚合用）：rule=规则/闭集解析，model=provider 决策票，escalate=老师点名。
+    let decisionKind: "rule" | "model" | "escalate" = "model";
+    let layaMargin: number | null = null;      // C3-R top-two margin (diagnostic)
+    let tierAsk: { n: number; tier: number } | null = null;   // P1 diagnostic: the narrowed question
+    let reobserved = reobservedInit; let escalated = escalatedInit; let escalatedPick = escalatedPickInit;
+    let nominatedRepair = false;
+    if (ruleRef && !(ruleRef in forbidden)) {
+      ref = ruleRef;
+      conf = 1.0;
+      method = "rule:match";
+      decisionKind = "rule";
+    } else {
+      // the rule's target is forbidden (inert or tried) -> fall through to
+      const forbiddenSet = new Set(Object.keys(forbidden));
+      // P1 TIERED HINT (opt-in, `tieredHint`; OFF keeps today's behaviour byte-identical):
+      // an ambiguous-in-tier plan hint used to collapse to null and become
+      // "pick 1 of the whole 40" — now it becomes "pick 1 of THESE candidates".
+      // The tier is a SMALLER QUESTION, never a decider: below floor or no answer,
+      // the step re-asks the full pool and every later rung stays as today.
+      let askPool = orderedPool();
+      if (tieredHint && curHint !== null && ruleRef === null) {
+        const cand = hintCandidates(curHint, elems, hintOpts());
+        if (cand !== null && cand.decided === null && cand.refs.length > 1) {
+          const subset: ElemPool = {};
+          for (const r of cand.refs) {
+            if (elems[r] !== undefined && !forbiddenSet.has(r)) subset[r] = elems[r]!;
+          }
+          if (Object.keys(subset).length > 1) {
+            askPool = subset;
+            tierAsk = { n: Object.keys(subset).length, tier: cand.tier };
+          }
+        }
+      }
+      let [picked, pconf, pprobs] = await pickElement(instruction, pg, askPool, forbiddenSet, noted);
+      if (askPool !== elems && tierAsk !== null && (picked === null || pconf < confFloor)) {
+        // narrowed ask abstained: today's full-pool ask still gets its turn
+        if (verbose) console.log(`  step ${stepNo}: tiered hint (${tierAsk!.n} candidates) abstained -> full pool`);
+        tierAsk = null;
+        [picked, pconf, pprobs] = await pickElement(instruction, pg, elems, forbiddenSet, noted);
+      }
+      ref = picked;
+      conf = pconf;
+      method = mm;
+      layaMargin = topTwoMargin(pprobs);
+    }
+    if (ref === null) {
+      // A2：候选窗口超过决策服务上限——结构化停因，绝不把 200+ 选项硬塞过去。
+      if (choiceLimitReason() !== null) {
+        const why = choiceLimitReason()!;
+        clearChoiceLimitReason();
+        stop("decision_service_choice_limit", why, stepNo);
+        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
+      }
+      // In rules-only mode a null ref usually means "no runtime to ask", which is not
+      if (rulesOnly) {
+        // task-14（D1）：被降级吞掉的步（本需要模型选点）在 step warning 记 decision_degraded
+        // ——停因保留（诚实机制不变），留痕说明这是配置面问题而非模型缺席，并给分类建议。
+        if (decisionDegradedReasonClass !== null) {
+          warnings.push(`decision_degraded: 决策面已降级（${decisionDegradedReasonClass}）——`
+            + `本步需要模型选点，规则面无法替代；${decisionDegradedAdvice(
+              decisionDegradedReasonClass === "midrun_death" ? "unknown" : decisionDegradedReasonClass)}`);
+        }
+        // 诚实停因：这一步**什么动作都没声明**（无 target_hint、
+        // 无命令空间）时，"缺模型"是个谎言——真正的问题要么是"信号已成立但这步没声明
+        // 零动作命令，引擎不肯替作者宣布完成"，要么是"信号根本不成立"。当场评估一次
+        // 信号（只在走向停止时付这一次），把实况和出路说出口，而不是把用户引去装模型。
+        if (curHint === null && !commandMode) {
+          const held = goalSignalFn ? (await goalHeld()) : false;
+          stop("no_model_runtime",
+            `step ${stepNo} declares no action (no target_hint, no commands) and rules-only has no model `
+            + `to pick one — its done-signal ${held ? "ALREADY holds on this page: declare a zero-action "
+                + 'command (commands: [{"op":"skip"}]) on this subgoal, or name a target_hint, so the '
+                + "signal can be honored"
+              : "does not hold on this page either: name a target_hint, declare commands, "
+                + "or provide a decision model"}`
+            + degradedReasonSuffix(), stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
+        }
+        stop("no_model_runtime",
+          `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`
+          // 规划引导：计划点了名、规则没解出来、模型又不在/弃权——当场送闭集。
+          + (curHint !== null && ruleRef === null
+              ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
+              : "")
+          // A3：provider 是抛错降级（而非本来就没装）时，把 HTTP 事实带上——排查不必再猜。
+          + degradedReasonSuffix() + identityHiddenSuffix(targets.identityHidden)
+          // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
+          + rowAnchorNote(declaredTargets()), stepNo);
+      } else {
+        stop("action_space_exhausted",
+          `action space exhausted on step ${stepNo}`
+          + (curHint !== null && ruleRef === null
+              ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
+              : "") + identityHiddenSuffix(targets.identityHidden)
+          // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
+          + rowAnchorNote(declaredTargets()), stepNo);
+      }
+      if (verbose && rulesOnly) console.log(`  step ${stepNo}: ${stopReason()}`);
+      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
+    }
+    // PORT FIX: a model answer can name a ref that is no longer in THIS
+    // step's pool (the screen changed between the scan and the pick, or the
+    // answer is nonsense). The Python reference reads `elems[ref]` unguarded
+    // and dies with a KeyError; stop the subgoal with a reason instead.
+    if (elems[ref] === undefined) {
+      // 这条是最难懂的一句：`picked ref 'undefined' is not in the element
+      const poolSize = Object.keys(elems).length;
+      if (curHint) {
+        stop("hint_matched_nothing",
+          `target_hint ${JSON.stringify(curHint)} matched nothing in a pool of ${poolSize} element(s) on step ${stepNo}`
+          // F73：DRF 计数事实（实跑且零命中才非空；缺省 declared 关 = 恒空串，逐字节不变）。
+          + declaredHiddenSuffix(targets.getDeclaredHidden()) + declaredMissSuffix(targets.declaredMiss)
+          // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
+          + rowAnchorNote(declaredTargets()), stepNo);
+      } else {
+        stop("step_names_no_target",
+          `step ${stepNo} names no target: no target_hint(s), no rule matched any of the ${poolSize} element(s), and the picker returned no usable element（给这一步加 target_hint，或在页面上点名一个稳定句柄）`, stepNo);
+      }
+      if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
+    }
+    // The confidence floor decays as failed elements are forbidden: a
+    // shrunken action space legitimately lowers the margin.
+    const floor = Math.max(0.10, confFloor - 0.05 * Object.keys(forbidden).length);
+    if (conf < floor) {
+      const pending = elems[ref]!;
+      // U8：本次 ask 的 conf（后续恢复路径会改写 conf 变量；记账用分支入口的值）。
+      const askConf = conf;
+      /** U8：本分支内被闸门丢掉的 ask conf（暂存；提交点见各出口——adjudicate 复用意见时撤回）。 */
+      const gateRejected: number[] = [];
+      // A frozen plan may legitimately re-drive an element within one
+      const wantDesc = (isTyping(pending) ? "type text into" : "click")
+        + ` ${pending.tag} "${pending.label}"`;
+      const priorHit = trace.some((t) => t.desc === wantDesc && t.executed);
+      if (priorHit && conf >= 0.10) {
+        /* re-drive: proceed despite floor */
+      } else if (rulesOnly) {
+        // No runtime installed and no rule/hint resolved this step: say exactly that.
+        stop("no_model_runtime",
+          `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`
+          // 同 low_confidence：hint 被点名却没解出来时，当场送闭集（规划引导）。
+          + (curHint !== null && ruleRef === null
+              ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
+              : "")
+          // A3：同上——降级原因（HTTP 状态码 + 服务错误关键句）随停因透出。
+          + degradedReasonSuffix(), stepNo);
+        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
+      } else if (!(adjudicate && ref !== null)
+        && Object.keys(forbidden).length >= Math.max(0, Object.keys(elems).length - 1)) {
+        // A2′：`adjudicate` 开着且还有活着的候选时，不能用"动作空间耗尽"抢在裁决前面——
+        // 那最后一个低置信候选正是该被信号裁决的那一个（"错了白跑"是作者声明过的）。
+        // 没开裁决时这个提前停原样保留（逐字节今天）。
+        gateRejected.push(askConf);   // U8：意见在 floor 处被丢，动作空间也已耗尽——记一笔
+        stop("action_space_exhausted",
+          `action space exhausted (${Object.keys(forbidden).length} forbidden) on step ${stepNo}`, stepNo);
+      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
+      } else {
+        // U8：走到恢复分支 = 原 ask 的意见已被闸门丢弃（reobserve/escalate 换别的意见、
+        // low_confidence 停；唯一例外是 adjudicate 复用原意见——下面 pop 撤回）。
+        gateRejected.push(askConf);
+        // OBSERVATION-BOTTLENECK RECOVERY (browser-use's "the button is there, we
+        let recovered = false;
+        // A2′：加宽重看即便没过闸门，它看到的候选也可能比窄池那一个更好——
+        // 记下来，若这一步声明了裁决资格，就用**最后一次观察到的**低置信选择（elems 已是宽视图）。
+        let widePick: { ref: string; conf: number } | null = null;
+        if (reobserve && !reobserved && ref !== null && stepTimeoutLeft() > 0) {
+          // F3：步级 timeoutMs 过期后不再起新的宽扫重问（每轮受整步挂钟帽约束）。
+          reobserved = true;
+          await settleBeforeExtract(pg);
+          const wide = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true, quotas: WIDE_QUOTAS, candidatePriority, hosts: frameHosts });
+          if (Object.keys(wide).length > Object.keys(elems).length) {
+            // refs are positional: re-prune forbids whose ref now names a
+            pruneForbids(wide);
+            // 宽视图同样只做**排序先验**（不丢元素：加宽看到的东西不该被族过滤掉）。
+            const wideAsk = orderedPool(wide);
+            const [ref2, conf2] = await pickElement(instruction, pg, wideAsk, new Set(Object.keys(forbidden)), noted);
+            // The wider view BECOMES the step's view even when the local model
+            elems = wide;
+            if (ref2 !== null && conf2 >= floor) {
+              ref = ref2;
+              conf = conf2;
+              method = `${mm}:reobserve`;
+              recovered = true;
+              if (verbose) console.log(`  step ${stepNo}: re-observed wider (${Object.keys(wide).length} elements) -> ${ref} conf=${conf2.toFixed(2)}`);
+            } else {
+              if (ref2 !== null) {
+                widePick = { ref: ref2, conf: conf2 };
+                gateRejected.push(conf2);   // U8：宽看重问的意见也未过 floor（adjudicate 复用时撤回）
+              }
+              if (verbose) console.log(`  step ${stepNo}: re-observed wider (${Object.keys(wide).length} elements) -> still below floor`);
+            }
+          }
+        }
+        // ESCALATION (C3-R's deliberative path): a stronger reasoner may still
+        // name one of the elements the harness showed. It is a picker, not a
+        // planner — an answer that is not a ref from THIS view is rejected, so
+        // nothing it says can invent an element, a value or an action.
+        // task-14（D1）：决策面已降级（起跑探判死/中途死亡）→ 升级链规则兜底，
+        // 不再咨询死服务（死服务不重试超过 1 次：probe 1 次 / pickInner 捕获 1 次）。
+        if (!recovered && escalateFn && !escalated && decisionDegradedReasonClass === null
+            && stepTimeoutLeft() > 0) {
+          // F3：步级 timeoutMs 过期后不再发起新的升级点名。
+          escalated = true;
+          const crit = criteriaView(orderedPool(), new Set(Object.keys(forbidden)), await ariaInteractiveLines(pg));
+          const state = { url: urlOf(pg), title: await pg.title(), main_text: await stateTextFn(pg, instruction) };
+          try {
+            const pick = await escalateFn({ instruction, criteria: crit, why: `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)}`, ...state });
+            if (pick && crit[pick] !== undefined && !(pick in forbidden)) {
+              ref = pick;
+              method = "escalate";
+              decisionKind = "escalate";
+              escalatedPick = pick;
+              recovered = true;
+              if (verbose) console.log(`  step ${stepNo}: escalated -> ${pick}`);
+            } else if (verbose) console.log(`  step ${stepNo}: escalation rejected (${pick === null ? "no answer" : `'${pick}' is not a shown candidate`})`);
+          } catch (e) {
+            if (verbose) console.log(`  step ${stepNo}: escalation failed (${describeActionError(e)})`);
+          }
+        }
+        if (!recovered) {
+          // A2′：这一步声明了"错了白跑"（`adjudicate`，加载期已钉 `effect.irreversible:false`
+          // + 可判定信号），于是"低置信"不再是阻塞理由——把模型此刻的选择**执行**，让这一步
+          // 自己的 DOM 信号事后裁决（信号成立 = done；不成立 = 下面循环尾部禁掉这个元素，
+          // 一次白跑就是它的全部代价）。这是老师的"提名被执行、信号定生死"同一认识论，
+          // 只是爆炸半径由作者声明限定。没声明 ⇒ 逐字节今天（低置信即阻塞）。
+          const bestPick = widePick ?? (ref !== null ? { ref, conf } : null);
+          if (adjudicate && bestPick !== null && !rulesOnly) {
+            // U8：被裁决执行的那份意见（原 ask 或宽看重问）不算被拒——撤回最后一笔暂存。
+            gateRejected.pop();
+            ref = bestPick.ref;
+            conf = bestPick.conf;
+            method = `${mm}:adjudicated`;
+            if (verbose) console.log(`  step ${stepNo}: adjudicating below gate (${ref} conf=${conf.toFixed(2)} < floor ${floor.toFixed(2)}) — the step's own signal judges`);
+          } else {
+            // U8：提交点①——low_confidence 停，暂存的意见确被丢弃。
+            rejectedAskConfs.push(...gateRejected);
+            stop("low_confidence",
+              `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`
+              // 规划引导：计划点了名、规则却没解出来——当场把闭集送给作者，省一次读源码确诊
+              + (curHint !== null && ruleRef === null
+                  ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
+                  : "")
+              // eval3 曝光面：observe 是会话内的免费侦察通道（R02 自发使用并获赞），
+              + `；用 ctx.observe() 在会话内看准入面与 why_not_admitted`
+              // A2 判别②：分数不过闸门 ≠ 目标不存在——用内存里的池把两种问题分开说
+              // （候选在而置信度低 = 闸门问题；池里没有词面相关候选 = 目标可能不在本页面）。
+              + lowConfDiscrimination(instruction, elems, ref)
+              // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串，
+              // reason 逐字节不变）。
+              + rowAnchorNote(declaredTargets()), stepNo);
+      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
+          }
+        }
+        // U8：提交点②——reobserve/escalate 挽回了这一步，但被丢弃的意见照记（它们
+        // 确实在 floor 处被拒过；挽回意见本身走 trace 进既有 `conf` 聚合）。
+        rejectedAskConfs.push(...gateRejected);
+      }
+    }
+    // R2b：词面零重叠守卫（宽扫的第二个触发器）。模型提名（非规则命中、非满置信）
+    // 的 label 与指令零词面重叠（CJK 二元组/ASCII 词）时，是"自信地错"的典型形态——
+    // 低置信恢复等不到（模型不觉得自己错，m.ctrip 实证：指令"出发地" vs 提名
+    // "组合交通出行"，conf 0.71 过闸点走页脚）。执行前强制一次宽扫重问（宽池含 R2/
+    // R2c 启发式候选），重问结果照常过闸；无更优则保留原提名。规则命中与 conf=1.00
+    // 的模型提名不触发（books/quotes/hn 全量 rule:match conf=1.00 实证零回归面）。
+    if (ref !== null && !reobserved && method === mm && conf < 0.9
+        && stepTimeoutLeft() > 0
+        && !lexicalOverlap(instruction, String(elems[ref]?.label ?? ""))) {
+      reobserved = true;
+      await settleBeforeExtract(pg);
+      const wideR2b = await extractElements(pg, true, WIDER_ELEMENTS, { widgets: true, quotas: WIDE_QUOTAS, candidatePriority, hosts: frameHosts });
+      if (Object.keys(wideR2b).length > Object.keys(elems).length) {
+        pruneForbids(wideR2b);
+        const wideAskR2b = orderedPool(wideR2b);
+        const [ref2, conf2] = await pickElement(instruction, pg, wideAskR2b, new Set(Object.keys(forbidden)), noted);
+        elems = wideR2b;
+        if (ref2 !== null && conf2 >= floor) {
+          ref = ref2;
+          conf = conf2;
+          method = `${mm}:reobserve`;
+          if (verbose) console.log(`  step ${stepNo}: R2b relevance widen -> ${ref} conf=${conf2.toFixed(2)}`);
+        } else if (verbose) {
+          console.log(`  step ${stepNo}: R2b relevance widen -> keep original `
+            + `(${ref2 === null ? "no pick" : `conf ${conf2.toFixed(2)}`} below floor)`);
+        }
+      }
+    }
+    // S2 ③ **有界修复**（只在走向停止时付一次成本）：第一轮用全池（软先验）解析出的动作族
+    // 与提名不符 / 没解出目标时，才用"该族"再做一次解析；仍不成立 ⇒ 结构化停，
+    // 绝不执行一个与提名矛盾的动作。
+    // 为什么不是第一道过滤：结构族 ≠ 语义动作（div[role=combobox] = click 但语义 select、
+    // contenteditable = click 但语义 fill、input[type=range] = fill 但语义设值），硬过滤会
+    // 把真目标或关键上下文元素一并排掉（项目方推敲结论）。
+    if (expectedFamily !== null) {
+      const pickedFamily = ref !== null ? elemFamily(elems[ref]!) : null;
+      if (ref === null || pickedFamily !== expectedFamily) {
+        const narrow = filterElemsByFamily(elems, expectedFamily);
+        if (Object.keys(narrow).length === 0) {
+          stop("nominated_family_empty",
+            `nominated instruction "${expectedFamily}" but this page has no ${expectedFamily} candidates on step ${stepNo}`, stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
+        }
+        const repairFloor = Math.max(0.10, confFloor - 0.05 * Object.keys(forbidden).length);
+        const forbiddenSet = new Set(Object.keys(forbidden));
+        const repairRule = navRule(instruction, narrow) ?? affordanceRule(instruction, narrow, null);
+        let repaired: { ref: string; conf: number; method: string } | null = null;
+        if (repairRule !== null && !(repairRule in forbidden)) {
+          repaired = { ref: repairRule, conf: 1, method: "rule:match" };
+        }
+        if (repaired === null) {
+          const [rp, rconf] = await pickElement(instruction, pg, narrow, forbiddenSet, noted);
+          if (rp !== null && rconf >= repairFloor) repaired = { ref: rp, conf: rconf, method: mm };
+        }
+        if (repaired === null) {
+          stop("nominated_family_mismatch",
+            `nominated instruction "${expectedFamily}", but the page resolved ${pickedFamily ?? "nothing"} and no ${expectedFamily} candidate passed the floor on step ${stepNo}`, stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
+        }
+        if (verbose) console.log(`  step ${stepNo}: nominated-family repair ${expectedFamily} -> ${repaired.ref} (${repaired.method})`);
+        ref = repaired.ref;
+        conf = repaired.conf;
+        method = repaired.method;
+        nominatedRepair = true;
+      }
+    }
+    // S4：stale 重解析重试会换成本步重新解析出的元素，故 el 可重新绑定（ref 本就是 let）。
+    return { stopped: false, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
   }
 
   /**
