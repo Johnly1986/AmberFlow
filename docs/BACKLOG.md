@@ -343,3 +343,15 @@ lowercase（`i` 旗标），`parseHint` 的 `frameChain` 归一为小写规范 o
 ① hint.ts:323 运行时文案「段首 # 可选」与 F69 新口径（首段必须 #）不一致——待 E56-G10 基线重置时一并改；
 ② HINT_HEAD 小写 id Map 可加 `document.getElementById` 快路径（miss 才建映射，within 低频面非紧迫）；
 ③ N7 组合信号树（all_of 内叶子）经新接入点的直测断言（现由 G8a+G3e 传递覆盖）。
+
+---
+
+## P2 出口演练发现（2026-11-17）
+
+**状态**：open｜**来源**：`docs/IMPROVEMENT_PLAN.md` §6.5 C 的 5 项扩展演练（临时 worktree 真实补丁 → 计数 → 回滚，未入库）。两项缺口均落在已登记 P2 条件项（W4-4 / W5-3）边界内。
+
+| # | 项 | 现状锚点（演练实测改动面） | 目标 / 验收 |
+|---|---|---|---|
+| P2-1 | provider 注册清单单点 | 新 provider 实测 **3 处**：adapter + `src/model/decision-provider.ts:resolveProviderSpec` 的动态注册 + `src/cli/commands/doctor.ts` 的注册清单（两处各自 import 同一批模块） | 新 provider = adapter + 1 处注册；`doctor` 与解析器共用幂等的 `registerAllProviders()`，`--doctor` 列表与 `--provider` 解析面不漂移；check + doctor 列表断言 |
+| P2-2 | 配置键作用点并入 schema | 新配置键实测 **3 手写处**：`src/support/config-schema.ts` + 消费点 + `tools/config-example.ts` 的 `WHERE_USED` 作用点表（缺 `WHERE_USED` 时生成器 exit 2，用户需读报错才知道要补）；生成物 3 份由 `npm run config:example` 刷新 | 新键 = schema（作用点作为键 spec 字段 `usedAt`）+ 消费点 **2 处**；`WHERE_USED` 表删除，生成器从 schema 派生；`config:example:check` 与 3 份生成物保持一致 |
+

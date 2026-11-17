@@ -1,12 +1,12 @@
 # 可维护性与可扩展性治理方案 v2.1（架构评审修订版）
 
-> **状态**：**实施中 — P0/P1 已完成，P2 进行中**（2026-11-17；P0 9/9 批见 §6.1；P1 见 §6.2；P2 前置全部满足、freeze 生效，2.0a RunCtx + 运行期等价 lane 已落地，见 §6.4）
+> **状态**：**P0/P1/P2 已收口（2026-11-17）**；P2 条件项与冻结后待办明确延期（见 §6.5 D）。P0 9/9 批见 §6.1；P1 见 §6.2；P2 见 §6.4/§6.5
 > **基线**：`main @ 91bf379`；`npm run check` 全绿（本轮实测：预检/类型/配置/schema/prompt/泄露/示例/行锚/用例校验 9 项通过）
 > **评审**：3 个独立只读评审（目标架构 / 迁移治理 / 红队）+ Lead 裁决，记录见 [IMPROVEMENT_PLAN_REVIEW.md](IMPROVEMENT_PLAN_REVIEW.md)。本版已按裁决修订：砍 `sdk.ts`/伪端口/单一编排，新增 0.8 等价证据 lane 与 0.9 seam 冻结，门禁降档，P2 条件化。
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0/4d/BACKLOG #2/2.3 完成；**2.2 执行内核：SessionLease（suite+flow+plan 三面）+ RunScope（app 两面）+ S3 套件聚合器 + StopClassifier 退出码映射单源已落地**；W5-3 契约下沉（部分）已落地；剩余 runExecution 组合根（P2 条件）与 ctx 行为矩阵；BACKLOG #3 冻结后启动）。
+> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 已收口**（§6.4 落地记录 + §6.5 出口核对：2.0/4d/BACKLOG #2/2.3/2.2 执行内核（SessionLease 三面、RunScope 两面、S3 聚合器、StopClassifier 映射单源）/W5-3 契约下沉（部分）完成；扩展演练 3/5 达标，2 项缺口入 BACKLOG；runExecution 组合根与 ctx 行为矩阵等条件项延期，触发条件见 §6.5 D）。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -534,7 +534,7 @@ interface PromptSpec {
 > **决策请求包**：[P2_READINESS.md](P2_READINESS.md)（D1 发布/冻结、D2 INTERVENTION 收尾、D3 BACKLOG #2/#3/#4 顺序、D4 freeze window 参数；含推荐选项与回执表）。
 > 0.8 证据 lane 已接夜间 CI：`.github/workflows/checks.yml` 新增 `offline` job（schedule/manual，非门禁）。
 
-### 6.4 P2 落地记录（进行中，2026-11-17）
+### 6.4 P2 落地记录（已收口，2026-11-17）
 
 | 批 | 交付 | 提交 | 证据 |
 |---|---|---|---|
@@ -586,6 +586,61 @@ interface PromptSpec {
 > P2 已启动：freeze 2026-11-17 起 2 周、每阶段约 3 个工作日窗口；按 D3 顺序 `#4 → #2 → #3`，4d 先行。任一窗口内 T1/T2/T3 触发即停该批。
 
 > **指标口径注**：4d 阶段函数（如 `runModelPick` 363 行）按九阶段显式例外（phaseFunctions ≤400）计入「≥300 行函数」统计，故 P2 期间该项为 report-only（当前 7，含该阶段函数）；P2 最终目标按 §3.4 P2 列评估（≤3000 / ≤6），阶段函数例外在冻结表内声明。
+
+### 6.5 P2 出口核对（2026-11-17，收口）
+
+> 口径：§3.4 P2 列 + §9 五痛点闭环 + 扩展演练 5 项（§3.5）。结论：**P2 收口**——主指标与门禁项全部达标；条件项按"修订后范围"明确延期（D），与 P1 出口同格式，不以行数/函数数为绿。
+
+**A. §3.4 P2 列指标**
+
+| 维度 | P2 目标 | 实测（2026-11-17） | 判定 |
+|---|---|---|---|
+| 语义 · 同一语义实现份数 | ≤3 | 登记 seam 已单点：mw 构造 1（工厂）/ 候选生产者 1（app）/ SessionLease 1（flow+plan+suite）/ RunScope 1（app 两面）/ 套件聚合器 1 / 停因→退出码名映射 1；重试与业务判定按 S1 契约**归源**（刻意不共享） | ✅ |
+| 注释 · 禁止类 / ratchet | 0 / 0 | `maintain` comments 组 0 fail / 0 warn；禁止类（日期戳/行号锚点/幽灵引用/裸 TODO）=0 | ✅ |
+| 配置 · 漂移 / 裸 env | 0 / 0 | constants 组 0 fail；三向生成文档一致（33 keys）；白名单外裸读 env 由门禁覆盖 | ✅ |
+| 提示词 · 重复 / spec | 0；11/11 | prompt-hit 九组全绿；模型 prompt 11 条唯一文本 × 25 消费点（快照 hash 一致）；证据 spec 仍为条件项（D） | ✅ |
+| 规模 · 新文件 / 新函数 | ≤800 / ≤150（阶段函数 ≤400 例外） | 本阶段新文件最大 367（`candidate-scan.ts`）；新函数均 ≤150；阶段函数例外已入 `phaseFunctions` 冻结表 | ✅ |
+| 规模 · 最大文件 / ≥300 行函数 | 条件目标 ≤3000 / ≤6 | 最大 5829（executor，4d：6139→5829）；≥300 行函数 6 + 阶段函数例外 1（report-only，§6.4 已注明） | ⚠️ report（条件未承诺） |
+| 主线 · 真实 mw 构造 | 1 工厂 + 2 调试面 | 真实 `new BrowserMiddleware(` = 1（`middleware-factory.ts`），mainline 门禁冻结 | ✅ |
+| 主线 · 源适配器 | kernel + 3 适配器 + 套件聚合器 | S2 三适配器与 S3 聚合器已登记（`docs/MAINLINE.md` §2）；S1 kernel 已完成 SessionLease/RunScope/StopClassifier/聚合器原语的共享化，`runExecution` 组合根为条件项（D） | ⚠️ 部分（条件项） |
+| 主线 · 入口 / 公共面 | 三类登记；死导出 0 | MAINLINE §3 三类入口已登记；extension 删除、`index.ts` internal、`exports["."]`=DSH 插件锁定、无 sdk（mainline 门禁） | ✅ |
+| 验证 · 运行期等价 lane | 已决 | `verify:runtime:offline`（4 场景，非门禁）+ `tools/golden/runtime/**`；0.8 lane 证据贯穿 2.0/4d/2.2 | ✅ |
+
+**B. §9 五点闭环**
+
+| # | 痛点 | 本轮闭环证据 | 判定 |
+|---|---|---|---|
+| 1 | 大文件难读 | 同语义实现份数按 A 表收敛；执行器 `run()` 2685→741（九阶段方法，类名/签名逐字节冻结）；新文件 ≤800 硬门禁 | ✅ |
+| 2 | 注释历史 | 禁止类=0；历史只在 `CHANGELOG.md`（`## Decisions` 索引 D1–D12）；ratchet 只减不增 | ✅ |
+| 3 | 常量配置 | 11 调参单源 + typed getter（白名单外裸读=0）+ 配置文档三向生成一致；站点知识出引擎为冻结后条件项 | ✅（条件部分见 D） |
+| 4 | 提示词 | 25→11 spec；prompt-hit 九组（含模型 11 条 × 25 消费点）；重复字符门禁=0 | ✅ |
+| 5 | 主线 | MAINLINE 含 L0–L6/L1.5 + S0–S5 + 三类入口 + 目录映射；mw 构造=1；kernel/3 适配器/聚合器已登记（`runExecution` 组合根条件项）；index 宣称删除 + exports 锁定 + 6 处文档断点=0 | ✅（条件部分见 D） |
+
+**C. 扩展演练 5 项（临时 worktree 真实补丁 → 计数 → 回滚，未入库）**
+
+| 演练 | §3.3/§3.5 目标 | 实测改动面 | 判定 / 发现 |
+|---|---|---|---|
+| 新决策 provider | ≤2（adapter + registry 引用） | **3**：adapter 文件 + `resolveProviderSpec` 动态注册 + `doctor` 注册清单 | ❌ 差 1：解析器与 doctor 各自维护注册清单 → 建议 `registerAllProviders()` 单点（入 BACKLOG） |
+| 新配置键 | ≤2（schema + 消费点；文档由 schema 生成） | **3 手写**（schema + 消费点 + `tools/config-example.ts` 的 `WHERE_USED` 作用点）+ **3 生成物**（`.env.example`/`amberflowrc.example.json`/`CONFIG_REFERENCE.md`；生成器对缺 `WHERE_USED` 的键 exit 2） | ❌ 差 1：作用点表仍手写 → 建议并入 schema 字段（入 BACKLOG） |
+| 新调参常量 | 1 处（定义单源） | **定义 1**（`tuning.ts` + `TUNING_VALUES`）+ 消费 1 + 门禁概念登记 1（`tools/maintain/constants.ts`，漏登记不 fail、只失去回写 warn 覆盖） | ✅ 定义单源达成；门禁登记是可预期维护成本 |
+| 新桥字段 / 策略键 | ≤3（共享契约模块 + 生成物） | **5**：tool schema（`index.ts`）→ `AmberFlowRunArgs`（`service.ts`）→ `runArgs` argv（`bridge.ts`）→ engine CLI 解析（`app-runner-cli.ts`）→ engine 选项（`app-runner.ts`） | ❌ 差 2：桥字段无共享契约 → 属 W4-4 条件项边界，冻结后处理 |
+| 新 ctx 原语 | ≤4（types/live/dry/replay/kit/scan/schema） | **4**：`ctx-types` + `ctx`（live）+ `ctx-dry` + `ctx-replay`；只读原语不触 kit/scan/schema（`amber schema ctx` 仍自洽）；作者文档另计 | ✅ |
+
+> 定性评审：5 项中 3 项达标；2 项不达标均落在**已登记的 P2 条件项边界内**（W4-4 桥描述/字段、W5-3 组合根），不是新架构分叉。演练补丁均在 `/tmp` worktree 完成并回滚；复现口径见 CHANGELOG 同名条目。
+
+**D. 明确延期（条件未触发；与 P1 出口同格式）**
+
+| 项 | 触发条件 / 归属 |
+|---|---|
+| `runExecution(source,deps)` 组合根 + ctx 行为矩阵 / `tools/ctx-conformance.ts`（W5-2 条件） | 需先有三源 canonical 对比夹具；冻结窗口后按 W5-2 |
+| W5-3 剩余：engine 的 3 个 runtime 函数（`decisionProviderOrNull`/`layaProvider`/`decisionFailureFact`）改组合根注入；model→engine 反向边收缩 | 组合根批次同批 |
+| W4-4 桥字段/描述共享契约（P2 降级：只 warn） | 桥契约批次；本次演练已量化 5 处穿透 |
+| W3-4 站点知识出引擎（`datasource` 航班字段 / `report-view` price 默认值） | 涉及行为默认值，冻结窗口后 |
+| BACKLOG #3 候选窗口指数递增（40→80→160 cap）+ trace 观测 | 行为变更，冻结窗口后（D3 顺序 #2→#3 的 #3） |
+| 1.6 证据 spec / Agent prompt wrapper（条件：真实失败案例驱动） | 当前无失败案例 |
+| handler 子进程内化 12 处 | P0/P1 已登记延后（§4.5） |
+
+**E. 状态**：P2 收口（2026-11-17）；freeze（2026-11-17 起 2 周）内不再排 P2 批次；BACKLOG #3 与上述条件项按触发条件在冻结结束/前置就绪后启动；回访 1（30 天不回潮）与回访 2（可扩展定性）按 §9 在冻结结束后的回访窗口执行。
 
 ### P2 主线（条件启动；3–5 周，12–20 人日）
 
