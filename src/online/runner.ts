@@ -10,6 +10,7 @@ import {
   BrowserMiddleware, browserSession, type BrowserSession,
 } from "../engine/executor.ts";
 import { buildMiddleware } from "../app/middleware-factory.ts";
+import { createSessionLease } from "../app/session-lease.ts";
 import { TaskPlan } from "../engine/plan.ts";
 import { runSubgoalWithRetries } from "../engine/planner.ts";
 import { checkSignal } from "../engine/signals.ts";
@@ -147,10 +148,11 @@ async function runOneCase(
   // `expect_zero_actions` 的执行期判据：从 trace 的已执行动作行汇总（跨子目标/跨重试），
   // 在 finally 里统一裁决——classify 提前返回、异常、正常完成三条路径都走同一处。
   let actionsExecuted = 0;
-  let session: BrowserSession | null = null;
+  // S1 SessionLease（P2-2.2 首批）：惰性创建 + finally 关闭一次（suite 适配器自己拥有会话）。
+  const lease = createSessionLease(() => browserSession(opts.headless !== false, c.device ?? site.device ?? null));
   let pageRef: PageAny | undefined;
   try {
-    session = await browserSession(opts.headless !== false, c.device ?? site.device ?? null);
+    const session = await lease.get();
     const page: PageAny = session.page;
     pageRef = page;
     page.setDefaultTimeout?.(caseTimeout);
@@ -235,9 +237,7 @@ async function runOneCase(
     try {
       await writeCaseEvidence({ runId: path.basename(runDir), dir: runDir }, out, pageRef);
     } catch { /* 证据失败不改变结论 */ }
-    if (session) {
-      try { await session.close(); } catch { /* 已关闭 */ }
-    }
+    await lease.close();
   }
   return { outcome: out };
 }

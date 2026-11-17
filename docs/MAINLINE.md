@@ -53,7 +53,7 @@
 S0 入口三类    引擎入口（bin/amber.mjs → cli/main.ts → registry）
                宿主集成（DSH bridge / amber session 子进程；进程边界=契约）
                开发/创作脚本（npm start / apps / learn / test / plan-cli / extension；非产品主线）
-S1 执行内核    runExecution(source, deps)                                  ← 规划中（P2 条件）
+S1 执行内核    runExecution(source, deps)                                  ← 规划中（P2 条件；首批 SessionLease 已落地并接入 suite 适配器）
                共享：SessionLease(惰性创建/finally 关闭) · RunScope{run_id,outDir,budget,deadline,trace,result,warnings}
                      StopClassifier(停因→退出码) · mask/scrub · artifacts 落盘 · attempt 记账
                不共享：重试（归源）、sleep（归 pace 应用点）、业务判定（归 ctx/checkSignal）
