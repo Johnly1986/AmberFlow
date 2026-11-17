@@ -1,0 +1,72 @@
+{
+  "_doc": "verify-runtime-offline 基线（非门禁）：本地 fixtures + 无头 chromium + BrowserMiddleware.run 的运行期事实。只用于运行期重构前后的等价对比：--record 显式更新（同场景连跑两次一致才入库）；端口已归一为 <LOCAL>；位置性 ref / 耗时 / timing 类字段不入库，不得手改。",
+  "expected": {
+    "audit_verdict": "REJECT",
+    "diagnostics": null,
+    "done": false,
+    "executed": false,
+    "executed_actions": [],
+    "external_requests": [],
+    "goal": "点击确认提交",
+    "skipped": false,
+    "skipped_actions": [
+      {
+        "command_id": null,
+        "detail": {
+          "blocker": "div#modal-overlay",
+          "has_bbox": true,
+          "requery": "present"
+        },
+        "reason": "not-actionable-or-covered:div#modal-overlay",
+        "target": null
+      }
+    ],
+    "state": {
+      "actions": {
+        "attempted": 1,
+        "changed": 0,
+        "executed": 0
+      },
+      "after": {
+        "epoch": 2,
+        "navEpoch": 0,
+        "readyState": "complete",
+        "url": "<LOCAL>/overlay.html"
+      },
+      "before": {
+        "epoch": 1,
+        "navEpoch": 0,
+        "readyState": "complete",
+        "url": "<LOCAL>/overlay.html"
+      },
+      "flags": []
+    },
+    "steps": [
+      {
+        "actionability": {
+          "blocker": "div#modal-overlay",
+          "has_bbox": true,
+          "reason": "not-actionable-or-covered:div#modal-overlay",
+          "requery": "present"
+        },
+        "changed": null,
+        "decision_kind": null,
+        "desc": "click button \"确认提交\"",
+        "executed": false,
+        "how": "not-actionable-or-covered:div#modal-overlay",
+        "method": "rule:match",
+        "op": null,
+        "skip_reason": "not-actionable-or-covered:div#modal-overlay",
+        "skipped": true,
+        "step": 1,
+        "target": null,
+        "url": "<LOCAL>/overlay.html"
+      }
+    ],
+    "stop_code": "max_steps",
+    "stop_reason": "subgoal action budget used up (1 action step(s) tried) without the done-signal ever holding — raise the budget, narrow the target, or check what the page did after each action",
+    "stop_step": null
+  },
+  "scenario": "overlay-occluded",
+  "schema_version": 1
+}

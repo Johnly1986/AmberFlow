@@ -1,0 +1,21 @@
+{
+  "_doc": "verify-runtime-offline 基线（非门禁）：本地 fixtures + 无头 chromium + BrowserMiddleware.run 的运行期事实。只用于运行期重构前后的等价对比：--record 显式更新（同场景连跑两次一致才入库）；端口已归一为 <LOCAL>；位置性 ref / 耗时 / timing 类字段不入库，不得手改。",
+  "expected": {
+    "audit_verdict": "SKIPPED",
+    "diagnostics": null,
+    "done": true,
+    "executed": null,
+    "executed_actions": [],
+    "external_requests": [],
+    "goal": "这一步不适用",
+    "skipped": true,
+    "skipped_actions": [],
+    "state": null,
+    "steps": [],
+    "stop_code": "precondition_skipped",
+    "stop_reason": "precondition not met -> skipped",
+    "stop_step": null
+  },
+  "scenario": "precondition-skip",
+  "schema_version": 1
+}

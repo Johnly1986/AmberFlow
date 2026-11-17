@@ -66,7 +66,9 @@
     "maintain:check": "node --experimental-strip-types tools/maintain/index.ts",
     "split:check": "node --experimental-strip-types tools/split-check.ts",
     "verify:offline": "node --experimental-strip-types tools/verify-offline.ts",
-    "verify:offline:record": "node --experimental-strip-types tools/verify-offline.ts --record"
+    "verify:offline:record": "node --experimental-strip-types tools/verify-offline.ts --record",
+    "verify:runtime:offline": "node --experimental-strip-types tools/verify-runtime-offline.ts",
+    "verify:runtime:offline:record": "node --experimental-strip-types tools/verify-runtime-offline.ts --record"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

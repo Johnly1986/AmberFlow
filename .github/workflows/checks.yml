@@ -50,6 +50,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Verify offline equivalence (fixtures/engine; non-gating)
         run: npm run verify:offline
+      - name: Verify runtime offline equivalence (fixtures + BrowserMiddleware.run; non-gating)
+        run: npm run verify:runtime:offline
 
   online:
     name: live online suite

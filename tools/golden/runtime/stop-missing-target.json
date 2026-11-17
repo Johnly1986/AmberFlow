@@ -1,0 +1,50 @@
+{
+  "_doc": "verify-runtime-offline 基线（非门禁）：本地 fixtures + 无头 chromium + BrowserMiddleware.run 的运行期事实。只用于运行期重构前后的等价对比：--record 显式更新（同场景连跑两次一致才入库）；端口已归一为 <LOCAL>；位置性 ref / 耗时 / timing 类字段不入库，不得手改。",
+  "expected": {
+    "audit_verdict": "REJECT",
+    "diagnostics": {
+      "pool_size": 12,
+      "target": null
+    },
+    "done": false,
+    "executed": false,
+    "executed_actions": [],
+    "external_requests": [],
+    "goal": "点击一个不存在的目标",
+    "skipped": false,
+    "skipped_actions": [
+      {
+        "command_id": "c1",
+        "detail": null,
+        "reason": "target_not_found",
+        "target": "#not-exist"
+      }
+    ],
+    "state": {
+      "actions": {
+        "attempted": 0,
+        "changed": 0,
+        "executed": 0
+      },
+      "after": {
+        "epoch": 2,
+        "navEpoch": 1,
+        "readyState": "complete",
+        "url": "<LOCAL>/ambiguity-order.html"
+      },
+      "before": {
+        "epoch": 1,
+        "navEpoch": 1,
+        "readyState": "complete",
+        "url": "<LOCAL>/ambiguity-order.html"
+      },
+      "flags": []
+    },
+    "steps": [],
+    "stop_code": "target_not_found",
+    "stop_reason": "command space matches nothing on this page — pending unresolved: c1 (unresolvable candidates are OUT; the space never falls back to the full pool) on step 1. hint 语法是 6 形状闭集（#id / tag[attr~substr] / tag~token / tag[attr=value] / 角色词 / 裸词；属性名按池字段匹配：test→data-test、type→input_type、aria-label→label、href、name、id、role、near；aria-label 是 label 的别名（提取期已并进 label），label/href 按完整值（≤200）匹配（label = full_label + label、href = href_full + href 双底座），class、title 等不在池字段模型里，永不命中）——容器/后代 CSS（如 \"#outer input\"）会被当成一个永不命中的形状，报\"matches nothing\"而非语法错误。判别: 页面上不存在词面匹配「#not-exist」的候选（池 12 项：button×12: 订票, 订票, 订票, 订票, 订票；其余略）——目标很可能不在本页面存在 — 自绘控件可声明 meta.policy.target_resolution:\"declared\" 让声明目标走 DRF（attr/文本精确匹配）",
+    "stop_step": 1
+  },
+  "scenario": "stop-missing-target",
+  "schema_version": 1
+}
