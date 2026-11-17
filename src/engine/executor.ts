@@ -211,7 +211,7 @@ import {
  * 保证调用点零改写；`stop` 闭包以函数形式传入（runReportTail 在 false_done
  * 档会写 stopCode/stopReason，复用同一闭包保持记账单一来源）。
  */
-interface RunReportTailCtx {
+export interface RunReportTailCtx {
   instruction: string;
   done: boolean;
   manualDone: boolean;
@@ -244,13 +244,13 @@ interface RunReportTailCtx {
 }
 
 /** `runFrameGate` 的返回值：early = 早停报告；ready = 循环所需状态（doneInExcluded 走 getter 跨阶段可观察）。 */
-type FrameGatePhase =
+export type FrameGatePhase =
   | { readonly kind: "early"; readonly report: RunReport }
   | { readonly kind: "ready"; readonly frameGate: FrameGate | null; readonly goalHeld: () => Promise<boolean>;
       readonly frameTargetStop: (target: string) => Promise<{ code: StopCode; reason: string } | null>; readonly doneInExcluded: () => boolean; };
 
 /** `runPoolGate` 的返回值：stopped = 页面未就绪早停；其余为后续循环/报告尾要用的每步事实。 */
-type PoolGatePhase = {
+export type PoolGatePhase = {
   stopped: boolean; stepStartUrl: string; stepStartTabs: number; elems: ElemPool;
   gateSettle: SettleResult | null; lastPoolSize: number; lastPoolWaitedMs: number;
   beforeFp: StateFingerprint | null; pendingAfterIdx: number | null; lastReadiness: Readiness | null;
@@ -258,7 +258,7 @@ type PoolGatePhase = {
 };
 
 /** `runDeclaredTargets` 的返回值：stopped = 命令 walk 已停（stop 已记账）；cmdPick 供后续动作面。 */
-type DeclaredTargetsPhase = {
+export type DeclaredTargetsPhase = {
   stopped: boolean;
   cmdPick: { cmd: CommandDecl; ref: string; index: number; cands: string[] } | null;
   rowAmbStop: { code: StopCode; reason: string } | null;
@@ -266,13 +266,13 @@ type DeclaredTargetsPhase = {
 };
 
 /** `runDeclaredHint` 的返回值：stopped = act-hint 解析面已停（stop 已记账）；curHint 供后续规则/动作面。 */
-type DeclaredHintPhase = {
+export type DeclaredHintPhase = {
   stopped: boolean;
   curHint: string | null;
 };
 
 /** `runModelPick` 的返回值：stopped = 选择段已停（stop 已记账）；elems 为宽扫后的本步视图。 */
-type ModelPickPhase = {
+export type ModelPickPhase = {
   stopped: boolean; ref: string | null; conf: number; method: string;
   decisionKind: "rule" | "model" | "escalate"; layaMargin: number | null;
   tierAsk: { n: number; tier: number } | null; nominatedRepair: boolean;
@@ -280,13 +280,13 @@ type ModelPickPhase = {
 };
 
 /** `runPostAction` 的返回值：control 决定调用点 continue/break；run 级状态用返回值回写。 */
-type PostActionPhase = {
+export type PostActionPhase = {
   control: "next" | "continue" | "break";
   done: boolean; manualDone: boolean;
 };
 
 /** `runActionPhase`（经 `runActionExecute`）的返回值：control 决定 continue/break；其余回写 run()。 */
-type ActionPhaseResult = {
+export type ActionPhaseResult = {
   control: "next" | "continue" | "break";
   ref: string; el: Elem; elems: ElemPool;
   desc?: string; how?: string | null; executed?: boolean; inert?: boolean;
@@ -296,7 +296,7 @@ type ActionPhaseResult = {
 };
 
 /** `runSetup` 的返回值：early = 预检拒绝（report 原样返回）；ready = 页面/浏览器/观察闭包。 */
-type SetupPhase =
+export type SetupPhase =
   | { kind: "early"; report: RunReport; browser: BrowserHandle | null }
   | { kind: "ready"; pg: AnyPage; browser: BrowserHandle | null; observeState: (elems: ElemPool | null) => Promise<StateFingerprint> };
 
@@ -312,6 +312,12 @@ type SetupPhase =
  * stops the subgoal with a structured reason). An empty/absent list disables the
  * envelope: offline fixture packs declare no hosts and must keep working unchanged.
 /** 纯函数区（helpers/池判定/风险刻画/缺省确认）—— 拆到 executor-pure.ts（F2）。 */
+import { _executeElement, _missingRequired, _hintOpts, resolveCommandRef } from "./executor-resolve-a.ts";
+import { _resolveOne, _rehydrateRescanOnce, _liveDomIdFallback, _probeCleanup, _domFallbackResolve } from "./executor-resolve-b.ts";
+import { actOnce, _scrollIntoViewWithEvidence, scrollIntoView, _scrollContainerForElement, _scrollWithLoc, scrollContainer, scrollDocument, setRange } from "./executor-actions.ts";
+import { runFrameGate, runPoolGate, runDeclaredTargets, runDeclaredHint } from "./executor-phases-a.ts";
+import { runModelPick, runPostAction } from "./executor-phases-b.ts";
+import { runActionPhase, runActionExecute, runSetup, runTail, runReportTail } from "./executor-phases-c.ts";
 export * from "./executor-pure.ts";
 import type { ActMissDiagnostics, ActMissRow, DeviceSpec } from "./executor-pure.ts";
 import {
@@ -381,7 +387,7 @@ export interface ScrollEvidence {
  * B2：容器几何三件套。三个都是有限数才算"有几何"——缺一个键就不附（"有则附，没有就不附"），
  * 不在响应里填 undefined 占位，也不拿默认值假装量到了。
  */
-function scrollGeoOf(v: { scrollTop?: number; scrollHeight?: number; clientHeight?: number }): {
+export function scrollGeoOf(v: { scrollTop?: number; scrollHeight?: number; clientHeight?: number }): {
   scrollTop?: number; scrollHeight?: number; clientHeight?: number;
 } {
   return typeof v.scrollTop === "number" && Number.isFinite(v.scrollTop)
@@ -395,7 +401,7 @@ function scrollGeoOf(v: { scrollTop?: number; scrollHeight?: number; clientHeigh
  * A2：单动作面（`actOnce` 的 `onAmbiguous:"fail"` 档）歧义停因的人读 reason。
  * 结构化证据在 `ambiguity`；这里只说明「为什么不动作」与两条修法。
  */
-function ambiguityStopReason(target: string, poolSize: number, amb: AmbiguityView): string {
+export function ambiguityStopReason(target: string, poolSize: number, amb: AmbiguityView): string {
   const where = amb.source === "dom_fallback"
     ? `the DOM fallback candidate set (${amb.candidates_total} distinct candidate(s); nothing matched the visible pool of ${poolSize})`
     : `a pool of ${poolSize} element(s) (${amb.candidates_total} distinct candidate(s))`;
@@ -413,7 +419,7 @@ function ambiguityStopReason(target: string, poolSize: number, amb: AmbiguityVie
  * （`hintCandidates` 的 refs 按"逐个尝试"语义返回多个）——两处消费面必须在**取首候选/
  * widen 之前**把行锚歧义落成结构化 `target_ambiguous`，否则仍会"静默点第一行/交模型猜"。
  */
-function declaresRowAnchor(hint: string | null | undefined): boolean {
+export function declaresRowAnchor(hint: string | null | undefined): boolean {
   if (typeof hint !== "string" || hint.trim() === "") return false;
   const parsed = parseHint(hint);
   return parsed.inRow !== undefined || parsed.rowIndex !== undefined;
@@ -528,6 +534,9 @@ ${ANCHOR_JS}
 }`;
 export const PASS_ID_FALLBACK = compile("arg", `return (${ID_FALLBACK_PROBE_JS})(arg);`);
 
+/** X1：去掉实现函数第一个参数（`mw`）后的参数元组；包装方法用它保持原签名类型。 */
+type OmitMw<T extends readonly unknown[]> = T extends readonly [unknown, ...infer R] ? R : never;
+
 export class BrowserMiddleware {
   /** Vocabulary of the rule layer, aliased for callers/tests (`rules.ts`). */
   static readonly STOP_TOKENS = STOP_TOKENS;
@@ -603,14 +612,14 @@ export class BrowserMiddleware {
    * P0-D：本次 run 生效的 host 信封（`hosts ?? this.hosts`）。池/hint/identity/DRF 的抽帧面
    * 用它排除第三方 iframe；null = 无声明 = 与今天逐字节相同。
    */
-  private _frameHosts: string[] | null = null;
+  _frameHosts: string[] | null = null;
   /** task-11（B3）：会话级池高峰（每次抽池记账，零成本）——限速骤降判据的基线。 */
-  private _sessionPoolHigh = 0;
-  private _sessionFirstPoolTs = 0;
+  _sessionPoolHigh = 0;
+  _sessionFirstPoolTs = 0;
   /** task-11（B3）：上一次失败路径嗅探（正文/可交互基线；只在失败路径更新）。 */
-  private _lastFailSniff: { body_text: number; admitted: number } | null = null;
+  _lastFailSniff: { body_text: number; admitted: number } | null = null;
   /** task-16（B3+）：会话正文峰值（每次失败嗅探记账；arrive 侧限速判据的基线来源）。 */
-  private _bodyTextPeak = 0;
+  _bodyTextPeak = 0;
 
   /**
    * task-26（D2 A/B）：模型面注入的 fenced 站点事实块（opt-in——app-runner 按
@@ -700,27 +709,27 @@ export class BrowserMiddleware {
    * 那时当次袋里可能已看不到该值（步级 slots 只对那一步可见）。实例寿命 ≈ 一次
    * 应用运行（app-runner 每次运行新建执行器）；跨实例不共享。
    */
-  private _secretValuesSeen = new Set<string>();
+  _secretValuesSeen = new Set<string>();
   /**
    * S2：抽池前的稳定门（null = off）。缺省开启（方案 §2.5）；应用层按 meta.policy.settle 覆盖。
    * 只在"页面在动"时等待——已静默立即返回 0ms。
    */
   settlePolicy: { quietMs: number; timeoutMs: number } | null = { ...DEFAULT_SETTLE };
   /** 本次 run 累计的静默等待（毫秒）；写进 `StepStateRecord.settleMs`。 */
-  private _settleWaitMs = 0;
+  _settleWaitMs = 0;
   /**
    * S1 状态游标（运行期私产，每次 `run()` 重置）：epoch/navEpoch/当前指纹。
    * 只读投影给 `ctx.runtime.epoch`；观察来源永远只有执行器（不自建第二份）。
    */
-  private _state: { epoch: number; navEpoch: number; current: StateFingerprint | null } =
+  _state: { epoch: number; navEpoch: number; current: StateFingerprint | null } =
     { epoch: 0, navEpoch: 0, current: null };
   /** 上一条 `not-actionable-or-covered` 的结构化现场（只在同一次调用内消费）。 */
-  private _lastActionabilityDetail: ActionabilityDetail | null = null;
+  _lastActionabilityDetail: ActionabilityDetail | null = null;
   /**
    * B1：`occludedReason` 返回 null（非 timeout 异常 / hit-test 读不到）时的 Playwright 首行。
    * 只在同一次单动作调用内消费（与 `_lastActionabilityDetail` 同一纪律），不改 run 面返回值。
    */
-  private _lastProbeError: string | null = null;
+  _lastProbeError: string | null = null;
 
   /* -- S5 decision-state ---------------------------------------------------- */
 
@@ -730,14 +739,14 @@ export class BrowserMiddleware {
    * S5 指标（**实例级累计**）：一个 flow 应用会对同一 mw 跑多个 `ctx.step`，应用产物的
    * `decisions` 要的是整次旅程的数，所以计数**不随 run() 重置**。每个应用一次新 mw。
    */
-  private _decisionMetrics: DecisionStateMetrics =
+  _decisionMetrics: DecisionStateMetrics =
     { asks_saved: 0, gate_waits: 0, context_sent: 0, context_skipped: 0 };
   /**
    * S5a：上一次真 ask 的题面指纹与导航代（每次 run() 重置——refs/导航代都是 run 内口径）。
    * 只服务 S5b 的 `state_digest`（`nav_epoch_delta` / `pool_changed` 的基线）；"不重复问"的
    * 复用账在 `_askedPools`（按池结构指纹）。
    */
-  private _lastAsk: {
+  _lastAsk: {
     key: string;
     poolSig: string;
     navEpoch: number;
@@ -753,15 +762,15 @@ export class BrowserMiddleware {
    * 不能安全复用（上一次的选择已被禁/已不在池里）时**照常问**：拿一个过时答复去动作
    * 比多问一次更糟，引擎不替模型编答案。
    */
-  private _askedPools = new Map<string, {
+  _askedPools = new Map<string, {
     key: string;
     goalKey: string;
     result: { ref: string | null; conf: number; probs: Record<string, number>; passthrough: boolean };
   }>();
   /** S5b：本次 run 到目前为止出现过的 S1 flags（摘要里只放已经发生的事实）。 */
-  private _runFlags: StateFlag[] = [];
+  _runFlags: StateFlag[] = [];
   /** S5b：最近一次 effect 读回（只留 kind/applied，值本身不进摘要）。 */
-  private _lastEffectSeen: { kind: StateEffect["kind"]; applied: boolean } | null = null;
+  _lastEffectSeen: { kind: StateEffect["kind"]; applied: boolean } | null = null;
   /**
    * U8：被置信闸门拒绝的 ask conf 账（R8 J3 幸存者偏差的补观测）。记的是**模型意见在
    * floor 处被丢弃**的 ask：主闸门 `conf < floor` 且未被 priorHit 复驾、意见最终也没被
@@ -769,7 +778,7 @@ export class BrowserMiddleware {
    * R2b 词面宽扫是词面触发的复核重问、非 conf 闸门事件，不在此账）。计数位置只有
    * 执行器的闸门分支，不在报告层重算——与 `model_asks`（ask 发生数）同一口径来源。
    */
-  private readonly _rejectedAskConfs: number[] = [];
+  readonly _rejectedAskConfs: number[] = [];
 
   /** S5：指标快照（应用产物 `decisions` 的唯一来源；默认档全 0）。 */
   decisionStateMetrics(): DecisionStateMetrics {
@@ -792,7 +801,7 @@ export class BrowserMiddleware {
    * 页面已静默时 0ms 返回，不改变既有节奏。超时/传感器失败按 `null`（不阻断继续问）。
    * 只有**真的等了**（waitedMs > 0）才计 `gate_waits`——0ms 检查不是"等待"。
    */
-  private async _gateSettle(page: AnyPage): Promise<boolean | null> {
+  async _gateSettle(page: AnyPage): Promise<boolean | null> {
     if (this.settlePolicy === null) return null;
     try {
       const r = await settle(page as unknown as SettlePage, this.settlePolicy);
@@ -808,7 +817,7 @@ export class BrowserMiddleware {
    * + goal。它回答"是不是同一个问题"（一字不差 ⇒ 可直接复用答复）；候选集合变了但池
    * 结构没变时，由 `_askedPools` 的第二条判据（上次选择仍可行动）决定能不能复用。
    */
-  private _askSignature(goal: string, elems: ElemPool, forbidden: Set<string>):
+  _askSignature(goal: string, elems: ElemPool, forbidden: Set<string>):
     { key: string; poolSig: string } {
     const refs = Object.keys(elems).filter((r) => !forbidden.has(r) && elems[r] !== undefined).sort();
     const parts = refs.map((r) => `${r}\u0001${esig(elems[r]!).join("\u0001")}`);
@@ -821,7 +830,7 @@ export class BrowserMiddleware {
    * 裁剪顺序固定：`flags` → `last_effect`（字段全可丢，base 三键 ~60B 永不超）；
    * 绝不截断 JSON（半个对象对模型是噪声，不是事实）。没有可说的就返回 null。
    */
-  private _buildStateDigest(input: {
+  _buildStateDigest(input: {
     settled: boolean | null;
     poolChanged: boolean;
   }): StateDigest | null {
@@ -848,7 +857,7 @@ export class BrowserMiddleware {
    * S5b：不带等待地探测页面是否已静默（`timeoutMs: 0`：只读一次传感器，不睡）。
    * gate 关闭而 context 开启时用；`policy.settle: "off"` 时用缺省 quietMs 口径。
    */
-  private async _probeSettled(page: AnyPage): Promise<boolean | null> {
+  async _probeSettled(page: AnyPage): Promise<boolean | null> {
     try {
       const r = await settle(page as unknown as SettlePage, {
         quietMs: this.settlePolicy?.quietMs ?? DEFAULT_SETTLE.quietMs,
@@ -868,7 +877,7 @@ export class BrowserMiddleware {
    * S2：抽池前等页面静默（按 `settlePolicy`）。已静默立即返回；超时不抛、不阻断抽取。
    * 等待毫秒数累计到本 run 的 `StepStateRecord.settleMs`。
    */
-  private async _settleBeforeExtract(page: AnyPage, deadlineMs?: number): Promise<SettleResult | null> {
+  async _settleBeforeExtract(page: AnyPage, deadlineMs?: number): Promise<SettleResult | null> {
     if (this.settlePolicy === null) return null;
     // C8：闸门预算真上限——每轮 settle 的 timeout 钳到剩余预算（缺省无 deadline = 旧行为）。
     const policy = deadlineMs === undefined
@@ -885,7 +894,7 @@ export class BrowserMiddleware {
     }
   }
   /** S2：settle + 默认池抽取（决策/act 解析、pool ready、收尾观察共用同一序）。 */
-  private async _extractPoolSettled(
+  async _extractPoolSettled(
     page: AnyPage, candidatePriority: "bucketed" | "main-first", deadlineMs?: number,
   ): Promise<{ elems: ElemPool; settle: SettleResult | null }> {
     const settleRes = await this._settleBeforeExtract(page, deadlineMs);
@@ -900,7 +909,7 @@ export class BrowserMiddleware {
    * 判据只用已有观测（settle 结论）+ 一次只读 sniff（readyState/准入面计数），
    * 不新增"猜测式"往返；`not_ready` 才是 run 级判死，`ready_empty` 是步级事实。
    */
-  private async _poolReadiness(
+  async _poolReadiness(
     page: AnyPage, settleRes: SettleResult | null, waitedMs: number, budgetMs: number, poolSize: number,
   ): Promise<Readiness> {
     // sniff 用**本 run 生效的**准入面（off 臂不能拿默认 window 面的计数当证据）。
@@ -967,9 +976,9 @@ export class BrowserMiddleware {
   _choiceLimitReason: string | null = null;
   lastRouting: Record<string, unknown> | null = null;
   _routedModel: string | null = null;
-  private _ready = false;
+  _ready = false;
   /** BACKLOG #2：候选生产者（`buildMiddleware` 必注入；直接构造执行器视为误用 ⇒ null 断言）。 */
-  private readonly candidates: CandidateProducer | null;
+  readonly candidates: CandidateProducer | null;
 
   constructor(opts: MiddlewareOptions = {}) {
     this.modelId = opts.modelId ?? "convaiinnovations/laya";
@@ -1038,7 +1047,7 @@ export class BrowserMiddleware {
    * Build the resident checkpoint + the optional router ONCE (PORT NOTE 4 —
    * Python does this in `__init__`, which cannot await). Idempotent.
    */
-  private async ready(): Promise<void> {
+  async ready(): Promise<void> {
     if (this._ready) return;
     // task-14（D1）：起跑探测已判死决策面（probe 失败 → markDecisionDegraded）——
     // 与"本地模型不在位"同一条规则面：不建 decision（done 票/风险问询自然跳过），
@@ -1240,7 +1249,7 @@ export class BrowserMiddleware {
    * legacy runtime 被包装时的名字（`laya(legacy-runtime)`）归一化为 `laya`——本地 laya 档
    * 的 method 串保持逐字节不变；换任何别的 provider，标签就是那个 provider 的真名。
    */
-  private modelLabel(): string {
+  modelLabel(): string {
     const n = this.decision?.name ?? "laya";
     return n === "laya(legacy-runtime)" ? "laya" : n;
   }
@@ -1251,7 +1260,7 @@ export class BrowserMiddleware {
    * 「配了决策源但它 403 了」是两件事，停因必须分得清。空串 = 本次 rules-only 是
    * 「本来就没装模型」（LayaNotConfiguredError 路径），后缀缺席，输出逐字节不变。
    */
-  private degradedReasonSuffix(): string {
+  degradedReasonSuffix(): string {
     const d = this.providerDegraded.trim();
     return d === "" ? "" : `（决策源不可用：${d.slice(0, 240)}）`;
   }
@@ -1260,7 +1269,7 @@ export class BrowserMiddleware {
    * 一次提问的全部事实：选了什么、conf 怎么来的（passthrough 与否决定它的含义）、原始概率。
    * `pickElement` 是它的三元组视图（保持既有调用点与 trace 口径不变），`pickProposal` 是带形状的视图。
    */
-  private async pickInner(
+  async pickInner(
     goal: string,
     page: AnyPage,
     elems: ElemPool,
@@ -1676,7 +1685,7 @@ export class BrowserMiddleware {
    * 目标的祖先，典型是目标 `pointer-events:none` 或布局在父容器上）。命中非目标时
    * 记录覆盖者摘要（tag#id.class），让失败证据能直接指认现场。
    */
-  private async _declaredHitTest(page: AnyPage, el: Elem):
+  async _declaredHitTest(page: AnyPage, el: Elem):
     Promise<{ ok: true } | { ok: false; kind: "covered" | "ancestor"; blocker: string }> {
     const loc = await this._locatorFor(page, el);
     if (loc === null) return { ok: false, kind: "covered", blocker: "stale_ref" };
@@ -1711,7 +1720,7 @@ export class BrowserMiddleware {
   }
 
   /** S1：取走并清空上一条 actionability 现场（一次调用只消费一次，避免跨步串用）。 */
-  private _takeActionabilityDetail(): ActionabilityDetail | null {
+  _takeActionabilityDetail(): ActionabilityDetail | null {
     const detail = this._lastActionabilityDetail;
     this._lastActionabilityDetail = null;
     return detail;
@@ -1751,7 +1760,7 @@ export class BrowserMiddleware {
    * S1：读取一次 actionability 现场（bbox / 覆盖者 / 节点是否还在）。
    * 读不到不造假：bbox=null、requery=unknown，reason 仍保留。
    */
-  private async _readActionabilityDetail(loc: AnyLoc, reason: string): Promise<ActionabilityDetail> {
+  async _readActionabilityDetail(loc: AnyLoc, reason: string): Promise<ActionabilityDetail> {
     const unknown: ActionabilityDetail = { reason, bbox: null, blocker: null, requery: "unknown" };
     try {
       const raw = await firstLoc(loc).evaluate(FN_HIT_DETAIL);
@@ -1826,7 +1835,7 @@ export class BrowserMiddleware {
   }
 
   /** U1：`_slotValue` 的单袋两档匹配核心（精确键命中 → 互含词面），原 `_slotValue` 逐字节逻辑。 */
-  private _matchValueBag(el: Elem, bag: Record<string, unknown>): unknown {
+  _matchValueBag(el: Elem, bag: Record<string, unknown>): unknown {
     const keys = [el["data_test"], el["label"], el["name"], el["id"]].filter((k) => !!k) as string[];
     for (const k of keys) {
       if (k in bag) return bag[k];                 // exact key hit first
@@ -1847,7 +1856,7 @@ export class BrowserMiddleware {
    * 掩码同一份），**值本体不经构造参数传**：步级 slots 合并后的真值只在执行器可见。
    * 口径与 `app/redaction.ts` 的 `secretValuesFromSlots` 一致（非字符串 String() 化）。
    */
-  private _secretValuesIn(slots: Record<string, unknown>): string[] {
+  _secretValuesIn(slots: Record<string, unknown>): string[] {
     const out: string[] = [];
     for (const k of this.secretSlotKeys) {
       const v = slots[k];
@@ -1929,1371 +1938,6 @@ export class BrowserMiddleware {
       return [];
     }
   }
-
-  /**
-   * The action model: click / fill / select — with submit-type inputs clicked
-   * (never filled: their `value` is the visible label) and `select` trying the
-   * human label first with a SHORT timeout (a slot usually carries the machine
-   * value, so the label probe is expected to miss and Playwright's 30 s default
-   * would charge that miss to every select fill).
-   *
-   * P3 exception: when the value came from a **declared** `{from:"option"}` binding it was already
-   * resolved against this page's option list, so the fill selects by VALUE directly (`bound.byValue`)
-   * — the label probe would only cost 1.5 s and could select a different option whose label happens
-   * to equal the machine value. Every path without a declared binding keeps the order above.
-   */
-  async _executeElement(
-    page: AnyPage, el: Elem, slots: Record<string, unknown>,
-    /**
-     * P2/P3：命令闭集带来的**具名绑定**。`byValue` = 这个值是从当次观察到的候选里按值解出来的
-     * （`{from:"option"}`），所以 `<select>` 直接按值选——见下面 select 分支的注释。
-     */
-    bound?: { value: unknown; byValue?: boolean } | null,
-    op?: string,
-    /** S4：步级 `force`（Playwright force 语义；缺省 false = 逐字节今天）。 */
-    force = false,
-    /**
-     * U1：步级显式值袋（决策路径传入；命令步不传——`bound` 具名绑定恒优先）。
-     * 只在无 `bound` 时参与 `_slotValue` 的值解析。
-     */
-    values?: Record<string, unknown> | null,
-  ): Promise<[string, unknown, StateEffect?]> {
-    const tag = el.tag;
-    const forceOpt = force ? { force: true } : {};
-    if (op === "clickAt") {
-      // U7：坐标点击原语。坐标值只来自声明绑定（slot/dataset），是**元素相对**坐标
-      // （Playwright locator.click({position}) 语义：相对元素 padding box 左上角）。
-      // 坏格式/越界都是结构化 config_error（reason 点名合法格式/实测尺寸），不是页面问题。
-      if (elemFamily(el) !== "click") {
-        return ["action_unsupported", "clickAt requires a click-family element"];
-      }
-      const parsed = parseClickAtValue(bound?.value);
-      if (!parsed.ok) return ["config_error", parsed.reason];
-      const loc = await this._locatorFor(page, el);
-      if (loc === null) return ["stale_ref", null];
-      const target = firstLoc(loc);
-      const measure = (target as unknown as {
-        boundingBox?: () => Promise<{ x: number; y: number; width: number; height: number } | null>;
-      }).boundingBox;
-      const box = typeof measure === "function" ? await measure.call(target) : null;
-      if (box === null) {
-        return ["action_failed", "clickAt: element has no bounding box (detached or zero-size)"];
-      }
-      const { x, y } = parsed.position;
-      if (x < 0 || x >= box.width || y < 0 || y >= box.height) {
-        return ["config_error",
-          `clickAt position ${x},${y} is outside the element ${el.tag} "${el.label}" — measured `
-          + `width=${box.width}, height=${box.height} (need 0 <= x < width, 0 <= y < height)`];
-      }
-      try {
-        await target.click({ position: { x, y }, timeout: 5000, ...forceOpt });
-      } catch (e) {
-        return ["action_failed", describeActionError(e)];
-      }
-      return ["clicked", { position: { x, y } }];
-    }
-    if (op === "hover") {
-      // S4：hover 原语——只移动指针，不点击、不导航；`locator.hover()` 同样受 force 影响。
-      const loc = await this._locatorFor(page, el);
-      if (loc === null) return ["stale_ref", null];
-      const hover = (firstLoc(loc) as unknown as { hover?: (o?: unknown) => Promise<void> }).hover;
-      if (typeof hover !== "function") return ["action_unsupported", "locator has no hover"];
-      try {
-        await hover.call(firstLoc(loc), { timeout: 5000, ...forceOpt });
-      } catch (e) {
-        return ["action_failed", describeActionError(e)];
-      }
-      return ["hovered", null];
-    }
-    if (op === "drag") {
-      const loc = await this._locatorFor(page, el);
-      if (loc === null) return ["stale_ref", null];
-      const destSel = bound && bound.value !== undefined && bound.value !== null ? String(bound.value) : "";
-      if (!destSel.trim()) return ["needs_value", null];
-      const dragTo = (firstLoc(loc) as unknown as { dragTo?: (t: unknown, o?: unknown) => Promise<void> }).dragTo;
-      if (typeof dragTo !== "function") return ["action_unsupported", "locator has no dragTo"];
-      try {
-        await dragTo.call(firstLoc(loc), page.locator(destSel), { timeout: 5000, ...forceOpt });
-      } catch (e) {
-        return ["action_failed", describeActionError(e)];
-      }
-      return ["dragged", destSel];
-    }
-    if (op === "scroll") {
-      const loc = await this._locatorFor(page, el);
-      if (loc === null) return ["stale_ref", null];
-      try {
-        await firstLoc(loc).evaluate((node: unknown) => {
-          const el = node as { scrollIntoView(o?: unknown): void };
-          const anyEl = node as { scrollIntoViewIfNeeded?: (o?: unknown) => void };
-          if (typeof anyEl.scrollIntoViewIfNeeded === "function") {
-            anyEl.scrollIntoViewIfNeeded({ block: "center", behavior: "instant" });
-          } else {
-            el.scrollIntoView({ block: "center", behavior: "instant" });
-          }
-        });
-      } catch (e) {
-        return ["action_failed", describeActionError(e)];
-      }
-      return ["scrolled", null];
-    }
-    if (op === "upload") {
-      // U6：上传原语。能力面由调用方（actionCapabilities/命令预检）先判一次；这里再守一道，
-      // 保证非 file 目标得到结构化 action_unsupported，而不是 Playwright 的裸错。
-      const isFileInput = tag === "input" && String(el["input_type"] ?? "").toLowerCase() === "file";
-      if (!isFileInput) return ["action_unsupported", "upload requires input[type=file]"];
-      const raw = bound?.value;
-      let files: string[];
-      if (typeof raw === "string") files = [raw];
-      else if (Array.isArray(raw) && raw.every((x) => typeof x === "string")) files = raw.slice() as string[];
-      else if (raw === null || raw === undefined) return ["needs_value", null];
-      else {
-        return ["config_error",
-          `upload value must be a path string or a string[] of paths (got ${Array.isArray(raw) ? "array" : typeof raw})`];
-      }
-      if (files.length === 0 || files.some((f) => f.trim() === "")) {
-        return ["config_error",
-          "upload value is empty — a declared path is required (empty string / empty list is not a file)"];
-      }
-      // 值只来自声明绑定：不做通配/目录遍历/环境变量展开；执行前逐条校验存在性。
-      const missing = files.filter((f) => {
-        try { return !fs.existsSync(f); } catch { return true; }
-      });
-      if (missing.length) {
-        return ["config_error",
-          `upload file(s) not found: ${missing.map((f) => path.basename(f)).join(", ")}`];
-      }
-      const loc = await this._locatorFor(page, el);
-      if (loc === null) return ["stale_ref", null];
-      const target = firstLoc(loc);
-      const setInputFiles = (target as unknown as {
-        setInputFiles?: (f: unknown, o?: unknown) => Promise<void>;
-      }).setInputFiles;
-      if (typeof setInputFiles !== "function") return ["action_unsupported", "locator has no setInputFiles"];
-      try {
-        // Playwright 1.58 的 setInputFiles 只认 noWaitAfter/timeout（没有 force）；步级 force 不作用于上传。
-        await setInputFiles.call(target, files, { timeout: 5000 });
-      } catch (e) {
-        return ["action_failed", describeActionError(e)];
-      }
-      // 证据只记 basename；changed 由调用方按 count >= expected 判（读不到就如实记 null）。
-      let count: number | null = null;
-      try {
-        const n = await target.evaluate((node: unknown) => {
-          const f = (node as { files?: { length?: number } | null }).files;
-          return f && typeof f.length === "number" ? f.length : 0;
-        });
-        count = typeof n === "number" && Number.isFinite(n) ? n : null;
-      } catch { count = null; }
-      return ["uploaded", { files: files.map((f) => path.basename(f)), count, expected: files.length }];
-    }
-    if (tag === "input" || tag === "textarea" || tag === "select") {
-      if (this._isSubmit(el)) return this._clickOnly(page, el, force);
-      // P2: a command-space fill/select arrives with its value ALREADY BOUND BY NAME
-      // (`{from:"slot", key}` from the plan) — it must not fall back to `_slotValue`'s
-      // substring heuristic, which is how a value once got handed to a radio. When no
-      // binding was given (every pre-existing path), the heuristic stays exactly as today.
-      const val = bound !== undefined && bound !== null ? bound.value : this._slotValue(el, slots, values ?? undefined);
-      if (val === null || val === undefined) return ["needs_value", null];
-      // W8 secretSlots：本次 fill 的值若携带当次袋里的敏感槽位值 → (a) 整步 before/after
-      // 一律掩码（含 applied=false 的分支——「一律」口径；applied 布尔仍保留）；(b) 把命中
-      // 的**真值本身**（不是可能更长的合成串）记入实例级集合，供后续步在同一输入上的残留
-      // before 命中——那时当次袋里可能已看不到该值（R3 案例 S 的值就是步级 slots 提供的）。
-      // 对 select 同样生效（select 无读回、不影响本步 effect，但值可能残留在页面上）。
-      const secretsNow = [
-        ...this._secretValuesIn(slots),
-        // U1/W8 同口径：values 袋里键命中敏感槽位名单的条目，其值同样算"敏感值"——
-        // 同一秘密经 values 声明与经 slots 声明在 effect 读回掩码上不应当有两样待遇。
-        ...this._secretValuesIn(values ?? {}),
-      ];
-      const valStr = String(val);
-      let valSecret = false;
-      for (const x of secretsNow) {
-        if (valStr === x || (x.length >= 4 && valStr.includes(x))) {
-          valSecret = true;
-          this._secretValuesSeen.add(x);
-        }
-      }
-      const loc = await this._locatorFor(page, el);
-      if (loc === null) return ["stale_ref", null];
-      // A failing action is a RESULT, not an exception: a disabled/hidden field
-      // or a page that unmounts mid-step must forbid the ref (the loop does that
-      // for any non-"filled"/"clicked" outcome) and keep the subgoal alive. The
-      // Python reference let Playwright's TimeoutError escape `run()` and killed
-      // the whole plan; found by the live zh.wikipedia case.
-      let effect: StateEffect | undefined;
-      try {
-        if (tag === "select") {
-          if (bound?.byValue) {
-            // 声明式绑定已经**按值**命中过当次观察到的候选：直接按值选（不付 label 探测，
-            // 也不会选中"标签恰好等于这个机器值"的另一个 option）。
-            await firstLoc(loc).selectOption({ value: String(val) }, { timeout: 5000, ...forceOpt });
-          } else {
-            try {
-              await firstLoc(loc).selectOption({ label: String(val) }, { timeout: 1500, ...forceOpt });
-            } catch {
-              await firstLoc(loc).selectOption({ value: String(val) }, { timeout: 5000, ...forceOpt });
-            }
-          }
-        } else {
-          // S1 effect 读回：动作只证明“调用了 fill”，读回值才证明“真的填进去了”。
-          // 读不到（组件不可读/被卸载）就整条省略——降级跳过，不假装。
-          let before: string | null = null;
-          if (this.fillReadback) {
-            try {
-              const b = await firstLoc(loc).inputValue();
-              before = typeof b === "string" ? b : null;
-            } catch { before = null; }
-          }
-          await firstLoc(loc).fill(String(val), force ? { force: true } : undefined);
-          if (this.fillReadback && before !== null) {
-            let after: string | null = null;
-            try {
-              const a = await firstLoc(loc).inputValue();
-              after = typeof a === "string" ? a : null;
-            } catch { after = null; }
-            if (after !== null) {
-              // W8 掩码在**源头**做（执行器构造 effect 一次，step_traces[i].result.state.effect
-              // 与 step_traces[i].state.effect 两条投影同源同掩，收尾不再处理）。判定链：
-              // ① 值来自敏感槽位（valSecret）→ before/after 整体 "***"（EFFECT_MASK，与顶层
-              //    slots 掩码同值、不保留长度——秘密值绝不进产物）；
-              // ② 读回内容命中敏感值（当次袋 ∪ 实例累计——跨步残留 before）→ 同样掩码；
-              // ③ 都不命中 → 维持既有行为：password/file/hidden 输入形态 redactValue 的
-              //    "***(N)"，其余明文（非敏感槽位/字面值的读回证据不变）。
-              // applied 用**原始读回**判定：保留布尔、不保留值——“真的填进去了”是核心证据。
-              const secretHit = (s: string): boolean =>
-                valSecret || carriesSecret(s, secretsNow) || carriesSecret(s, this._secretValuesSeen);
-              const masked = (s: string): string => (secretHit(s) ? EFFECT_MASK : String(redactValue(el, s)));
-              effect = {
-                kind: "fill", before: masked(before), after: masked(after),
-                applied: after === String(val),
-              };
-            }
-          }
-        }
-      } catch (e) {
-        return ["action_failed", describeActionError(e)];
-      }
-      return effect === undefined ? ["filled", val] : ["filled", val, effect];
-    }
-    return this._clickOnly(page, el, force);
-  }
-
-  /**
-   * Visible empty inputs/textareas whose value the frozen plan supplies.
-   *
-   * Not just `[required]`: a submit button guarded by JS on an empty field is
-   * inert without it. Deterministic pre-fill from the plan's data bag — values
-   * never come from the model. Reuses the scan the caller already has:
-   * re-extracting here cost a SECOND full extraction before every click.
-   */
-  async _missingRequired(
-    page: AnyPage, slots: Record<string, unknown>, elems: ElemPool | null = null,
-    /**
-     * U1：步级显式值袋（决策路径的预填通道——required 空字段的值请求与当步 fill/select
-     * 用同一个解析顺序「values → slots」，两通道不一致会出现"过滤放行、执行却 needs_value"的错位）。
-     */
-    values?: Record<string, unknown> | null,
-    candidatePriority: "bucketed" | "main-first" = "bucketed",
-  ): Promise<Elem[]> {
-    const empties: Array<{ tag: string; dt: string; name: string; id: string }> = [];
-    for (const fr of framesOf(page)) {
-      try {
-        empties.push(...((await fr.evaluate(FN_EMPTIES)) as Array<{ tag: string; dt: string; name: string; id: string }> ?? []));
-      } catch {
-        continue;
-      }
-    }
-    const out: Elem[] = [];
-    for (const em of empties) {
-      // Match a slot to this field by attribute AND by the label text
-      // `_slotValue` would see (placeholder/wrapper label): composer fields are
-      // keyed by their placeholder, not by data-test.
-      const elemsNow = elems ?? (await this._extractPoolSettled(page, candidatePriority)).elems;
-      let match: Elem | undefined;
-      for (const e of Object.values(elemsNow)) {
-        if ((em.dt && e["data_test"] === em.dt)
-          || (em.id && e["id"] === em.id)
-          || (em.name && e["name"] === em.name)) {
-          match = e;
-          break;
-        }
-      }
-      if (match === undefined || this._slotValue(match, slots, values ?? undefined) === null) continue;
-      // carry the handle fields so _locatorFor resolves inside the right frame
-      // instead of degrading to a bare attribute lookup
-      out.push({
-        ref: match["ref"] as string,
-        frame: (match["frame"] as number) ?? 0,
-        dsh_ref: (match["dsh_ref"] as string) ?? "",
-        tag: em.tag,
-        label: match.label,
-        data_test: em.dt,
-        name: em.name,
-        id: em.id,
-        input_type: (match["input_type"] as string) ?? "",
-        href: "",
-      });
-    }
-    return out;
-  }
-
-  /* -- A1 hint matching options --------------------------------------------- */
-
-  /**
-   * A1：本实例的池侧 hint 匹配口径（`meta.policy.attr_value_match`）。run 面的每一处
-   * hintMatch/hintCandidates/affordanceRule 都从这里取；缺省 `full_label`（= A1 修复后）。
-   * inspect/observe/session 不构造 policy ⇒ 同一缺省（恒 full_label）。
-   */
-  private _hintOpts(): HintMatchOptions {
-    return { attrValueMatch: this.attrValueMatch };
-  }
-
-  /* -- A2 command-target resolution ---------------------------------------- */
-
-  /**
-   * A2：命令目标的**可行动优先**候选解析（纯函数，不动作、不猜）。
-   *
-   * 为什么需要它：`hintMatch` 只给一个 ref，遇到同 label 的 `div[role=button]` + `button`
-   * 时会按 DOM 序选中 div——被覆盖层挡住就白烧一次动作，而真正可点的是后面的 button。
-   * 这里把"候选集"按可行动性排序后交给动作层**逐个尝试**（最多前 4 个）：
-   *   1. 动作族对得上当前 op 的优先（click 会剔除明确不可点击的族；若剔除后为空则保留原
-   *      顺序，让动作层照旧给 `action_unsupported` 的诚实停因）；
-   *   2. 原生可行动 tag/role（a/button/input/label/select/textarea；role button/link/menuitem/
-   *      tab/option…）优先于自绘 div/span；
-   *   3. 最后按 DOM 序（scan）——与旧行为同序，确定性。
-   * `forbidden` 里的 ref 会被过滤（动作阶段失败的候选由 forbid 记账，下一步自动看下一个）。
-   */
-  resolveCommandRef(
-    target: string, elems: ElemPool, op: string, forbidden?: ReadonlySet<string> | null,
-  ): string[] {
-    if (typeof target !== "string" || !target.trim()) return [];
-    const cand = hintCandidates(target, elems, this._hintOpts());
-    if (cand === null) return [];
-    const seen = new Set<string>();
-    const refs: string[] = [];
-    for (const r of (cand.decided === null ? cand.refs : [cand.decided, ...cand.refs])) {
-      if (elems[r] === undefined || seen.has(r)) continue;
-      seen.add(r);
-      refs.push(r);
-    }
-    const eligible = forbidden ? refs.filter((r) => !forbidden.has(r)) : refs;
-    const opCap = op as ActionCapability;
-    const fits = (r: string): boolean => actionCapabilities(elems[r]!).includes(opCap);
-    const nativeRank = (r: string): number => {
-      const e = elems[r]!;
-      const tag = String(e.tag ?? "").toLowerCase();
-      const role = String(e.role ?? "").toLowerCase();
-      const nativeTag = ["a", "button", "input", "label", "select", "textarea"].includes(tag);
-      const nativeRole = ["button", "link", "menuitem", "tab", "option", "checkbox", "radio",
-        "switch", "textbox", "searchbox", "combobox", "slider"].includes(role);
-      return nativeTag || nativeRole ? 0 : 1;
-    };
-    const posOf = new Map(refs.map((r, i) => [r, i]));
-    const ordered = [...eligible].sort((a, b) =>
-      (fits(a) ? 0 : 1) - (fits(b) ? 0 : 1)
-      || nativeRank(a) - nativeRank(b)
-      || ((elems[a]!.scan ?? posOf.get(a) ?? 0) - (elems[b]!.scan ?? posOf.get(b) ?? 0)));
-    // click：剔除明确不可点击的族；若全被剔除（目标确实不是按钮），保留原顺序交给动作层报
-    // action_unsupported，而不是把目标"变成不存在"。
-    if (op === "click" || op === "clickAt") {
-      const clickable = ordered.filter(fits);
-      return clickable.length ? clickable : ordered;
-    }
-    return ordered;
-  }
-
-  /* -- A3 list/range primitives ------------------------------------------- */
-
-  /**
-   * 解析一个 hint 目标到单个可动作元素（actOnce/scrollContainer/setRange 共用）。
-   *
-   * A2：`onAmbiguous` 只在**单动作面**（actOnce，缺省 fail）传入。"fail" 且命令步同一个
-   * 歧义谓词成立（`hintCandidates` 非空 && `decided === null` && `refs.length > 1`）时，
-   * 不动作、返回结构化 `target_ambiguous` + 有界 `ambiguity` 证据；"act"/缺省把
-   * `resolveCommandRef` 排出的 refs[0] 照旧交给动作层（既有 run 原语与 scrollList 内部点击
-   * 完整保持今日行为）。解析/排序/回退逻辑本身零改动。
-   *
-   * A4：`wantDiagnostics` 只在**会话 act** 面为 true（actOnce 的 `opts.diagnostics`）。落空
-   * （`target_not_found`）时构造 `diagnostics`（同档候选 / 词面近似 / 池外近似但不可见）并在
-   * `reason` 末尾追加一行纯内存判别；false/缺省 = 返回值与 reason **逐字节不变**
-   * （scrollContainer / setRange / ctx.expand 等既有调用面不受影响）。
-   *
-   * F72-①：settle 结论不再就地丢弃——落空诊断在"页面未静默"（timedOut）时 additive
-   * `settle_timed_out`/`settle_waited_ms` 两键 + reason 尾缀一行渲染提示（同在诊断面）。
-   * F72-②：`rehydrateRescan` 只在**会话 act** 面可开——首次解析落空且抽池时页面未静默时做
-   * 一次有界重扫（等 2s → 重抽池 → 同一 hint 重解析，纯 hintMatch 不重走决策面，至多 1 次）；
-   * 命中 = `resolved_via:"rehydrate-rescan"`；仍未命中 = 既有诊断 + `rescan` 事实。缺省逐字节不变。
-   */
-  private async _resolveOne(
-    page: AnyPage, target: string, op: string,
-    onAmbiguous?: "fail" | "act", wantDiagnostics?: boolean, rehydrateRescan?: boolean,
-  ): Promise<
-    | {
-      ref: string; el: Elem | null; loc: AnyLoc; poolSize: number; fallback: boolean; cleanup?: () => Promise<void>;
-      /** E1-c：`#id` 直查兜底命中时出现（additive；其余路径不出现 = 键集与之前一致）。 */
-      resolvedVia?: "live-dom-id-fallback" | "rehydrate-rescan";
-    }
-    | {
-      error: string; poolSize: number; stopCode?: "target_ambiguous"; ambiguity?: AmbiguityView;
-      /** A4：仅 `wantDiagnostics` 且落空（target_not_found）时出现。 */
-      diagnostics?: ActMissDiagnostics;
-    }
-  > {
-    // F72-①：settle 结论不再就地丢弃——落空诊断与重扫门控要用它（零新增页面往返）。
-    const headExtract = await this._extractPoolSettled(page, this.candidatePriority);
-    const elems = headExtract.elems;
-    const settleRes = headExtract.settle;
-    /** F72-②：显式重扫未命中的事实（仅 rehydrateRescan 开启且走满一次重扫后才有）。 */
-    let rescanFact: { waited_ms: number; pool_size: number } | undefined;
-    const poolSize = Object.keys(elems).length;
-    if (typeof target !== "string" || !target.trim()) {
-      return { error: "target must be a non-empty hint string (path_id / bare label / [data-test=…])", poolSize };
-    }
-    const refs = this.resolveCommandRef(target, elems, op, null);
-    if (onAmbiguous === "fail") {
-      const ambiguity = describeAmbiguity({
-        target, source: "pool", elems, orderedRefs: refs, ordering: this.ambiguousOrdering,
-        ...(this.hintTokenAllow !== undefined ? { hintTokenAllow: this.hintTokenAllow } : {}),
-      });
-      if (ambiguity !== null) {
-        return {
-          error: ambiguityStopReason(target, poolSize, ambiguity), poolSize,
-          stopCode: "target_ambiguous", ambiguity,
-        };
-      }
-    }
-    // E2：歧义模式（onAmbiguous:"act"）的命中顺序确定性化——命中档按 act 时刻 live-DOM
-    // 文档序重排（跨帧按帧序 → 帧内文档序；scan 缺失退回池内相对位置），取首个 actionable。
-    // 谓词与"actionable"判定不变（仍是 resolveCommandRef 的可行动优先排序结果）；
-    // `"pool-order"`（回退开关）= 旧行为，跳过重排。单候选（refs.length <= 1）不进本路径。
-    let ordered = refs;
-    if (onAmbiguous === "act" && this.ambiguousOrdering === "dom-preorder" && refs.length > 1) {
-      ordered = orderCandidatesByDomPreorder(refs, elems);
-    }
-    if (ordered.length) {
-      const ref = ordered[0]!;
-      const el = elems[ref]!;
-      const loc = await this._locatorFor(page, el);
-      if (loc !== null) return { ref, el, loc, poolSize, fallback: false };
-    }
-    // E1-c：`#id` hint 的 **live-DOM 单点直查兜底**（decision.id_fallback，缺省开）。
-    // 背景：诊断-收编一致性 defect——扫描器能报出 stable handle（id 在页面上），act 却因
-    // 元素未收编进池（配额逐出/准入面不含它）而 target_not_found。兜底只限形态 1（`#id`）：
-    //   - 命中 → 打探针属性、复用同一可交互性检查（可见盒 + actionCapabilities），证据块
-    //     `resolved_via:"live-dom-id-fallback"`（additive；调用方回显）；
-    //   - 未命中/不可交互 → 维持既有 target_not_found 语义（继续走 A3 池外回退面）；
-    //   - 其余 5 种 hint 形态**不做**直查（封闭集边界不变，任意 CSS 仍拒绝）。
-    const idFallback = await this._liveDomIdFallback(page, target, op);
-    if (idFallback !== null) {
-      return {
-        ref: idFallback.ref, el: null, loc: idFallback.loc, poolSize,
-        fallback: true, cleanup: idFallback.cleanup,
-        resolvedVia: "live-dom-id-fallback",
-      };
-    }
-    // A3 回退面：目标可能是**池外元素**——典型是 0×0 的自绘 slider 手柄（提取按可见盒过滤，
-    // 它永远进不了池），或滚轮容器内的不可见控件。这里做一次 DOM 侧候选收集（含 0×0），
-    // 用同一套 hint 语义（hintMatch/可行动优先排序）解析，并给命中的元素打临时探针属性，
-    // 让 locator 能稳定指到它；调用方用完负责 cleanup。
-    const fallback = await this._domFallbackResolve(page, target, op, onAmbiguous, wantDiagnostics);
-    if ("scan" in fallback) {
-      // F72-②：rehydrate_rescan（opt-in）——首次解析落空且抽池时页面未静默 ⇒ 池可能是水合
-      // 中间态。等一小段有界时间重抽池、用**同一 hint**（纯 hintMatch 语义，不重走决策面）
-      // 重解析一次：命中 = resolved_via:"rehydrate-rescan"；重扫后歧义照旧结构化（同一谓词，
-      // 不绕过零动作承诺）；仍未命中 = 落到既有诊断（rescan 事实 additive）。
-      if (rehydrateRescan === true && settleRes !== null && settleRes.timedOut === true) {
-        const rescan = await this._rehydrateRescanOnce(page, target, op, onAmbiguous);
-        if ("ok" in rescan) {
-          return { ...rescan.ok, fallback: false, resolvedVia: "rehydrate-rescan" as const };
-        }
-        if ("ambiguous" in rescan) {
-          return {
-            error: rescan.ambiguous.error, poolSize: rescan.ambiguous.poolSize,
-            stopCode: "target_ambiguous", ambiguity: rescan.ambiguous.ambiguity,
-          };
-        }
-        rescanFact = rescan.fact;
-      }
-      const base = `target ${JSON.stringify(target)} matched nothing in a pool of ${poolSize} element(s)`;
-      if (wantDiagnostics !== true) return { error: base, poolSize };
-      // A4：落空诊断（纯内存；唯一的页面读取是池外回退扫描行里 ≤5 行的可见性，已在上一步完成）。
-      const diagnostics = actMissDiagnostics({
-        target, pool: elems, op, hintOpts: this._hintOpts(), rejected: fallback.scan.rejected,
-        poolCap: this.actPoolCap,   // E1-a：观测面回显（不改池构成）
-        // F72-①：settle 未静默（渲染可疑）与 F72-② 显式重扫事实（additive；缺省/静默正常时键不出现）。
-        ...(settleRes !== null && settleRes.timedOut === true
-          ? { settleTimedOut: { waitedMs: settleRes.waitedMs } } : {}),
-        ...(rescanFact === undefined ? {} : { rescan: rescanFact }),
-      });
-      // C 批（B8）：会话 act 的失败 reason 同样追加 frame: 尾缀诊断 + 页面可用 origin
-      // （只有 `opts.diagnostics:true` 的会话 act 面走这里；scrollContainer/setRange 等既有
-      // 调用面不传 ⇒ reason 逐字节不变）。diagnostics 结构体本身不改形状。
-      // F82：池在手 = 追加 in-row 三案证据（token 无匹配列真实行词元 / 行已定位改 base）。
-      const frameNote = frameHintFailureEvidence(page, this._frameHosts, [target], elems);
-      // F72-①：页面未静默时把"渲染可能未完成"写进 reason（让调用方第一时间知道"该等"而不是
-      // 绕路换目标）；F72-②：显式重扫跑过且仍未命中时如实记重扫事实。两者都只在诊断面出现。
-      const renderNote = settleRes !== null && settleRes.timedOut === true
-        ? `；页面在 ${Math.max(0, Math.round(settleRes.waitedMs))}ms 内未静默（可能仍在水合/渲染）——`
-          + `目标缺失可能因渲染未完成，建议 wait_for/ctx.waitForTarget 锚定后重试而非换目标`
-        : "";
-      const rescanNote = rescanFact === undefined
-        ? ""
-        : `；rehydrate_rescan 已等 ${rescanFact.waited_ms}ms 重抽池（${rescanFact.pool_size} 项）仍未命中`;
-      return {
-        error: `${base}\n判别: ${actMissDiscrimination(diagnostics, elems, op)}`
-          + (frameNote ? ` — ${frameNote}` : "") + renderNote + rescanNote,
-        poolSize, diagnostics,
-      };
-    }
-    if ("ambiguity" in fallback) {
-      return {
-        error: ambiguityStopReason(target, poolSize, fallback.ambiguity), poolSize,
-        stopCode: "target_ambiguous", ambiguity: fallback.ambiguity,
-      };
-    }
-    return { ref: fallback.ref, el: null, loc: fallback.loc, poolSize, fallback: true, cleanup: fallback.cleanup };
-  }
-
-  /**
-   * F72-②：声明目标解析落空后的**有界重扫**（`rehydrateRescan`，opt-in；至多 1 次）。
-   *
-   * 只在首次解析落空且抽池时页面未静默（settle timedOut——轮播/水合页抽到中间态池的信号）
-   * 后调用：等一小段有界时间（2s）→ 重抽池（**不再 settle**——刚等过的墙钟就是给水合的
-   * 窗口，settle 在轮播页只会再白等满 5s）→ 用**同一 hint** 走 `resolveCommandRef`（与首次
-   * 解析同一套语义，`on_ambiguous:"fail"` 时重过同一歧义谓词——重扫不绕过零动作承诺）。
-   * 命中返回可动作元素；重扫池上歧义照旧结构化；仍未命中只回事实（waited_ms/pool_size），
-   * 由调用方落进既有诊断。不猜、不换目标、不重走决策面。
-   */
-  private async _rehydrateRescanOnce(
-    page: AnyPage, target: string, op: string, onAmbiguous?: "fail" | "act",
-  ): Promise<
-    | { ok: { ref: string; el: Elem; loc: AnyLoc; poolSize: number } }
-    | { ambiguous: { error: string; poolSize: number; ambiguity: AmbiguityView } }
-    | { fact: { waited_ms: number; pool_size: number } }
-  > {
-    const RESCAN_WAIT_MS = 2000;
-    const started = Date.now();
-    await sleep(RESCAN_WAIT_MS);
-    const fresh = await this.candidates!.extract({
-      page, jsProbe: true, candidatePriority: this.candidatePriority, surface: this.surfacePolicy, hosts: this._frameHosts,
-      ...(this.poolQuotaMode === "quota" ? { poolQuotaMode: "quota" } : {}),
-    });
-    const freshSize = Object.keys(fresh).length;
-    const refs = this.resolveCommandRef(target, fresh, op, null);
-    if (onAmbiguous === "fail") {
-      const ambiguity = describeAmbiguity({
-        target, source: "pool", elems: fresh, orderedRefs: refs, ordering: this.ambiguousOrdering,
-        ...(this.hintTokenAllow !== undefined ? { hintTokenAllow: this.hintTokenAllow } : {}),
-      });
-      if (ambiguity !== null) {
-        return {
-          ambiguous: {
-            error: ambiguityStopReason(target, freshSize, ambiguity),
-            poolSize: freshSize, ambiguity,
-          },
-        };
-      }
-    }
-    let ordered = refs;
-    if (onAmbiguous === "act" && this.ambiguousOrdering === "dom-preorder" && refs.length > 1) {
-      ordered = orderCandidatesByDomPreorder(refs, fresh);
-    }
-    if (ordered.length) {
-      const ref = ordered[0]!;
-      const el = fresh[ref]!;
-      const loc = await this._locatorFor(page, el);
-      if (loc !== null) return { ok: { ref, el, loc, poolSize: freshSize } };
-    }
-    return { fact: { waited_ms: Date.now() - started, pool_size: freshSize } };
-  }
-
-  /**
-   * E1-c：`#id` hint 的 live-DOM 单点直查兜底（`decision.id_fallback`，缺省开）。
-   *
-   * 只在池内解析（含可行动优先排序）**零命中**且 hint 形状是 `#id` 时尝试：
-   *   1. `document.getElementById(id)` 单点直查（跨可达子 frame 逐帧尝试，主 frame 优先）；
-   *   2. 命中后做**同一套可交互性检查**（可见盒 + `actionCapabilities` 含当前 op）——
-   *      不可交互 = 返回 null（维持既有 target_not_found，交给后续 A3 回退面统一诊断）；
-   *   3. 可交互 = 打带批次的临时探针属性 `data-af-probe="<批次>-id"`，返回可重复求值的
-   *      locator（调用方 cleanup）。
-   *
-   * 纪律：**兜底仅限形态 1（`#id`）**；其余 5 种 hint 形态不做直查（封闭集边界不变，
-   * 任意 CSS 仍拒绝）。`idFallback === false`（回退开关）= 本方法恒 null，逐字节旧行为。
-   */
-  private async _liveDomIdFallback(
-    page: AnyPage, target: string, op: string,
-  ): Promise<{ ref: string; loc: AnyLoc; cleanup: () => Promise<void> } | null> {
-    if (this.idFallback !== true) return null;
-    const parsed = parseHint(target);
-    if (parsed.kind !== "id" || !parsed.value) return null;
-    // F82/F83 评审收口（fail-closed）：F64 是 `#id` 单点直查，没有行上下文底座——声明行锚
-    // 时不参与直查，避免按 id 命中后静默丢掉行约束（落回既有 target_not_found + 行锚证据）。
-    if (parsed.inRow !== undefined || parsed.rowIndex !== undefined) return null;
-    // A 批（frame:<origin>）：声明链过滤帧循环；并补 `frameInHostsEnvelope` hosts 检查
-    // （既有缺陷修正——F64 的跨帧直查此前不查 hosts 信封，`#id` 可能落在排除帧里被动作；
-    // 现在与池/hintLookup/FW8 同口径：主帧恒允许，子帧不在信封内跳过。CHANGELOG 记录行为变更）。
-    const frameChain = parsed.frameChain;
-    const frames = framesOf(page as never);
-    const token = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
-    const probeAttr = `data-af-probe="${token}-id"`;
-    for (let fi = 0; fi < frames.length; fi++) {
-      const fr = frames[fi]!;
-      if (frameGateExcludes(fi, fr, this._frameHosts)) continue;
-      if (frameChain !== undefined && !frameScopeMatchesFrame(frameChain, fr)) continue;
-      try {
-        // E1（within 权威对等）：一次 evaluate 返回 anchors + TS 判定（inline TS arrow →
-        // PASS_ID_FALLBACK，compile() 常量 + ANCHOR_JS 内插）——二次求值多一次跨源往返且
-        // 原子性差；anchors 还能区分「找到但在锚外」与「找不到」。
-        const hit = (await (fr as unknown as {
-          evaluate(fn: unknown, arg?: unknown): Promise<unknown>;
-        }).evaluate(PASS_ID_FALLBACK, { id: parsed.value, attr: probeAttr })) as Record<string, unknown> | null;
-        if (hit === null) continue;
-        // E1：within 存在时命中后校验 anchors（与池侧 inAnchor 同口径）。不在锚内 =
-        // 该帧不命中——「找到但在锚外」与「找不到」在 evaluate 结果里可区分（hit 非 null
-        // 且 anchors 不含 within vs hit 为 null）；清探针章后尝试下一帧（锚内命中可能在
-        // 另一帧）。两帧都不命中 → 返回 null → 维持既有 target_not_found 语义走 A3。
-        // E2：within = 链（外→内），校验走 anchorChainMatch 嵌套序包含（唯一出处 rules.ts）
-        // ——单层 membership 逐字节不变；链任一段缺失/序错 = 该帧不命中（尝试下一帧）。
-        if (parsed.within !== undefined) {
-          const anchors = Array.isArray(hit["anchors"]) ? (hit["anchors"] as string[]) : [];
-          if (!anchorChainMatch(anchors, parsed.within)) {
-            await this._probeCleanup(page, token);
-            continue;
-          }
-        }
-        // 可交互性：可见 + 动作能力面含当前 op（与池内 actionable 同一判据的 DOM 侧投影）。
-        if (hit["visible"] !== true) {
-          await this._probeCleanup(page, token);
-          return null;
-        }
-        const cap = actionCapabilities({
-          tag: String(hit["tag"] ?? ""),
-          role: "",
-          label: String(hit["label"] ?? ""),
-          input_type: "",
-        } as Elem);
-        if (!(cap as readonly string[]).includes(op)) {
-          await this._probeCleanup(page, token);
-          return null;
-        }
-        return {
-          ref: `id:${parsed.value}`,
-          loc: (fr as unknown as { locator(s: string): AnyLoc }).locator(`[${probeAttr}]`),
-          cleanup: async () => { await this._probeCleanup(page, token); },
-        };
-      } catch {
-        continue;   // 跨源 frame：evaluate 抛错，尝试下一帧
-      }
-    }
-    return null;
-  }
-
-  /** E1-c：探针属性清理（`_liveDomIdFallback` 与后续复用共用；失败静默）。 */
-  private async _probeCleanup(page: AnyPage, token: string): Promise<void> {
-    for (const fr of framesOf(page as never)) {
-      try {
-        await (fr as unknown as { evaluate(fn: (tok: string) => void, tok: string): Promise<void> }).evaluate((tok: string) => {
-          const g = globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<any> } };
-          const all = g.document.querySelectorAll(`[data-af-probe^="${tok}-"]`);
-          for (let i = 0; i < all.length; i++) all[i].removeAttribute("data-af-probe");
-        }, token);
-      } catch { /* 跨源 frame 清理失败不影响结论 */ }
-    }
-  }
-
-  /**
-   * A3 池外回退解析：DOM 侧收集**全部**匹配选择器的元素（不按可见性过滤），用同一套
-   * hint 语义（rules.hintMatch / resolveCommandRef 的可行动优先）挑一个，给它打一个带
-   * 批次的临时属性 `data-af-probe="<批次>-<序号>"`，返回可重复求值的 locator。
-   *
-   * A2：`onAmbiguous:"fail"` 时合成池上同样要过命令步的歧义谓词——歧义 → 先 cleanup 再返回
-   * `{ambiguity}`（`source:"dom_fallback"`，不给 near/suggested_hint）；其余情况行为不变。
-   *
-   * A4：解析落空时把**扫描行**一并回传（`{scan:{rows,rejected}}`，< 本次行为 null 的等效形状）：
-   * `rows` 是词面近似的合成行（`nearCandidates` ≤5，纯内存），`rejected` 是其中**不可见**的行
-   * （≤3，`why:"not visible"`，措辞与 observe 的 `why_not_admitted` 同源）。只对这几行做一次
-   * 可见性判定（仍是本回退路径内的页面读取）；不扫面外元素、不新造 why 分支、不改变任何
-   * 解析结果（命中/歧义两个分支的返回形状与语义逐字节不变）。
-   */
-  private async _domFallbackResolve(
-    page: AnyPage, target: string, op: string, onAmbiguous?: "fail" | "act", wantDiagnostics?: boolean,
-  ): Promise<
-    | { ref: string; loc: AnyLoc; cleanup: () => Promise<void>; elem: Elem }
-    | { ambiguity: AmbiguityView }
-    | { scan: { rows: ActMissRow[]; rejected: ActMissRow[] } }
-  > {
-    // A3 修正：scrollList 的目标常常是**非交互容器**（`div[role="feed"]`、`main`…），
-    // 它们不在扫描面里。滚动语义只需要"能定位到容器"，所以 scroll 操作把回退面扩到
-    // 常见容器角色（仍只在池解析失败时走；正常路径零变化）。
-    //
-    // U3/C11：本路径是 **grandfathered** 的——它按**身份**（hint 语义 + data-af-probe 盖章）
-    // 寻址，不是位置序号，所以这里用准入面 ADMIT_SEL（window ∪ resolve），不用池基准。
-    // 既有语义刻意保持不变：仅主 frame、**不做可见性过滤**（0×0 的自绘 slider 手柄只能靠
-    // 这条路径被点到）。任何收紧（可见性/子 frame/池基准）都会打断既有 flow 应用。
-    const admitAll = admitSelectorWithJsFor(this.surfacePolicy);
-    const fallbackSel = op === "scroll"
-      ? `${admitAll}, [role='feed'], [role='list'], [role='main'], [role='region'], [role='article'], [role='listitem'], main`
-      : admitAll;
-    const token = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
-    let rows: Array<Record<string, unknown>> = [];
-    try {
-      // E1（within 权威对等）：inline TS arrow → PASS_DOM_FALLBACK（compile() 常量，行补 anchors；
-      // 闭包不跨——共享 ANCHOR_JS 必须 ${} 内插进 pass 源码）。
-      // F82：in-row 声明随 arg 下发（inRow）——回退面每行补 row_texts（A3 半链缺口闭合）；
-      // F83：row-index 声明随 arg 下发（rowIndex）——回退面每行补 row_index（对等）。
-      // 未声明时 arg 不带键，pass 内零计算、行形状逐字节不变。
-      const parsedTarget = parseHint(target);
-      const inRowTok = parsedTarget.inRow;
-      const rowIdxTok = parsedTarget.rowIndex;
-      rows = (await page.evaluate(PASS_DOM_FALLBACK,
-        { sel: fallbackSel, tok: token,
-          ...(inRowTok !== undefined ? { inRow: inRowTok } : {}),
-          ...(rowIdxTok !== undefined ? { rowIndex: rowIdxTok } : {}),
-        })) as Array<Record<string, unknown>>;
-    } catch {
-      rows = [];
-    }
-    const cleanup = async (): Promise<void> => {
-      try {
-        await page.evaluate((tok: string) => {
-          const g = globalThis as unknown as { document: { querySelectorAll(s: string): ArrayLike<any> } };
-          const all = g.document.querySelectorAll(`[data-af-probe^="${tok}-"]`);
-          for (let i = 0; i < all.length; i++) all[i].removeAttribute("data-af-probe");
-        }, token);
-      } catch { /* 清理失败不影响结论 */ }
-    };
-    if (!rows.length) { await cleanup(); return { scan: { rows: [], rejected: [] } }; }
-    // A 批（frame:<origin>，B3）：A3 回退面是**仅主帧**（page.evaluate）——合成行按主帧
-    // 链打点（elemFrameStamp 对 page-as-FrameLike = 主帧，frame_path 省略）。声明链指向
-    // 子帧时这些行不会命中链过滤 ⇒ 如实落空（绝不越帧动作）；frame_origin/frame_path 不进
-    // 模型面（pickInner.modelProjectionOf 剥离）。
-    const mainStamp = elemFrameStamp(page as unknown as FrameLike);
-    const synthetic: ElemPool = {};
-    for (const r of rows) {
-      const idx = Number(r["i"]);
-      // A1 不变量：label === full_label 的前 40 字（同一 label 截断；合成池与真池同构）。
-      synthetic[`p${idx}`] = {
-        ref: `p${idx}`, tag: String(r["tag"] ?? ""), label: String(r["label"] ?? "").slice(0, 40),
-        full_label: String(r["label"] ?? "").slice(0, 200),
-        role: String(r["role"] ?? ""), id: String(r["id"] ?? ""), data_test: String(r["dt"] ?? ""),
-        input_type: String(r["type"] ?? ""),
-        ...(r["draggable"] === true ? { draggable: true } : {}),
-        // E1（within 权威对等）：合成主帧行补 anchor_ids（与真池行同构，additive）——
-        // resolveCommandRef → hintMatch.inAnchor 据此消费 within（与池/回捞面同语义）。
-        ...(Array.isArray(r["anchors"]) && (r["anchors"] as string[]).length > 0
-          ? { anchor_ids: (r["anchors"] as string[]).map((x) => String(x).toLowerCase()) } : {}),
-        // F82（A3 半链缺口闭合）：fallback 行补 row_texts（additive，与真池行同构）——
-        // 合成行并入主池后二次 hintMatch 的 inRow 过滤才有底座；缺字段 = 过滤清零 = 死路。
-        ...(Array.isArray(r["row_texts"]) && (r["row_texts"] as string[]).length > 0
-          ? { row_texts: (r["row_texts"] as string[]).map((x) => String(x)) } : {}),
-        // F83（A3 row-index 对等）：fallback 行补 row_index（additive）——rowIdx 过滤底座。
-        ...(typeof r["row_index"] === "number" ? { row_index: r["row_index"] } : {}),
-        ...(mainStamp.frame_origin !== undefined ? { frame_origin: mainStamp.frame_origin } : {}),
-        ...(mainStamp.frame_path !== undefined ? { frame_path: mainStamp.frame_path } : {}),
-      } as Elem;
-    }
-    const refs = this.resolveCommandRef(target, synthetic, op, null);
-    if (!refs.length) {
-      // A4：只对**词面近似**行（≤5）做一次可见性判定——池外扫描面本来就含隐藏元素，
-      // "扫描到了但不可见"是这条回退唯一能诚实回答的落空原因。措辞复用 observe 的
-      // `not visible`（不新造 why_not_admitted 分支，也不扫面外元素）。
-      // 只有要判别证据的调用面（会话 act）才做这次读取：run 面/原语路径零新增页面往返。
-      if (wantDiagnostics !== true) {
-        await cleanup();
-        return { scan: { rows: [], rejected: [] } };
-      }
-      const near = nearCandidates(target, synthetic, 5);
-      let rejected: ActMissRow[] = [];
-      if (near.length > 0) {
-        let visible: Record<string, boolean> = {};
-        try {
-          visible = (await page.evaluate((arg: { tok: string; refs: string[] }) => {
-            const g = globalThis as unknown as {
-              document: { querySelector(s: string): any };
-              getComputedStyle(x: any): { display: string; visibility: string };
-            };
-            const out: Record<string, boolean> = {};
-            for (const ref of arg.refs) {
-              const el = g.document.querySelector(`[data-af-probe="${arg.tok}-${ref.slice(1)}"]`);
-              if (el === null) { out[ref] = false; continue; }
-              const rect = el.getBoundingClientRect();
-              const cs = g.getComputedStyle(el);
-              out[ref] = rect.width > 0 && rect.height > 0
-                && cs.display !== "none" && cs.visibility !== "hidden";
-            }
-            return out;
-          }, {
-            tok: token,
-            refs: near.map((r) => r.ref ?? "").filter((r) => r !== ""),
-          })) as Record<string, boolean>;
-        } catch {
-          visible = {};
-        }
-        rejected = near
-          .filter((r) => r.ref === undefined || visible[r.ref] !== true)
-          .map((r) => ({ ref: r.ref, tag: r.tag, label: r.label, why: "not visible" }))
-          .slice(0, 3);
-      }
-      await cleanup();
-      return { scan: { rows: near, rejected } };
-    }
-    if (onAmbiguous === "fail") {
-      // A2：合成池自证 ≠ 真池——只停动作、如实给合成候选身份，不提供 near/suggested_hint。
-      const ambiguity = describeAmbiguity({
-        target, source: "dom_fallback", elems: synthetic, orderedRefs: refs,
-        ordering: this.ambiguousOrdering,
-        ...(this.hintTokenAllow !== undefined ? { hintTokenAllow: this.hintTokenAllow } : {}),
-      });
-      if (ambiguity !== null) { await cleanup(); return { ambiguity }; }
-    }
-    // E2：池外回退面的歧义模式同样按 DOM 序重排（合成池的 `pN` ref 序即 DOM 收集序，
-    // 本已确定；重排只在 scan 缺失时退回池序——即与旧行为一致）。缺省路径与旧行为同序。
-    let fallbackOrdered = refs;
-    if (onAmbiguous === "act" && this.ambiguousOrdering === "dom-preorder" && refs.length > 1) {
-      fallbackOrdered = orderCandidatesByDomPreorder(refs, synthetic);
-    }
-    const ref = fallbackOrdered[0]!;
-    const idx = ref.slice(1);
-    // F75：run 决策步复用本回退面时需要 Elem + 探针句柄（`_locatorFor` 的 af_probe 首分支
-    // 据此重建 locator）；会话 act 路径不用该字段（additive，既有调用点键集不变）。
-    const elem = { ...synthetic[ref]!, af_probe: `${token}-${idx}` } as Elem;
-    return {
-      ref,
-      loc: page.locator(`[data-af-probe="${token}-${idx}"]`),
-      cleanup,
-      elem,
-    };
-  }
-
-  /**
-   * A3 `mw.actOnce`：**单动作**解析 + 执行（不评估 done、不占 flow 预算、不写 trace）。
-   *
-   * 列表展开/滚动这类原语内部要重复"点一次"，每次点击都走完整 `run()` 会重新判完成、
-   * 重新承担子目标停因，既贵又语义错位。actOnce 只做"解析一个可动作候选并执行一次"，
-   * 证据口径与 A1 的动作 trace 一致（stale_ref/needs_value/action_failed… 都是结构化结果）。
-   */
-  async actOnce(
-    // task-33（`amber session` authoring 面）：op 类型**加宽** `"hover"`——`_executeElement`
-    // 的 hover 分支早已存在（hover 原语只移动指针、不点击），这里只是让单动作面能透传它。
-    // 纯类型加宽、零行为变化：所有既有调用点只传原有字面量，hover 在加宽前不可达。
-    page: AnyPage, target: string, op: "click" | "check" | "fill" | "select" | "scroll" | "drag" | "hover" = "click",
-    bind?: { value: unknown; byValue?: boolean } | null,
-    // A2：单动作面的歧义策略（只影响**解析失败面**的形状）。缺省/`"act"` = 既有行为
-    // （可行动优先取 refs[0] 直接执行）——run 原语与 ctx.scrollList 内部点击都不传它；
-    // `"fail"` = 命令步同一个歧义谓词成立时零动作 + 结构化 target_ambiguous + `ambiguity` 证据。
-    onAmbiguous?: "fail" | "act",
-    /**
-     * B2：`op:"scroll"` 的方向原语。**给 to/by = 容器滚动**（元素自身或最近可滚动祖先，
-     * 走 `_scrollContainerForElement`→`_scrollWithLoc`，与 `ctx.scrollList` 同一条实现）；
-     * **省略 = 旧语义「把元素滚入视口」**（`scrollIntoViewIfNeeded`），但 moved/delta 是
-     * 实测的。与 A2 正交：歧义判定仍在解析阶段（`_resolveOne`）先发生，零动作语义不变。
-     */
-    scroll?: { to?: "bottom" | "top" | "page"; by?: number },
-    /**
-     * B1：单动作面的**被遮挡证据**（只有会话 `act` 的 click/check 传 `{occlusionProbe:true}`）。
-     * 打开时点击本身走 `occludedReason`（探针即点击，800ms 快路径 + 5s 慢元素重试），不再调
-     * `_clickOnly`——不存在"预检后再点"的双点窗口。省略 = 缺省 `_clickOnly` 路径逐字节不变
-     * （run 命令步 / `ctx.expand` / `ctx.scrollList` 都不传）。
-     *
-     * A4：`diagnostics:true` 只在**会话 act** 面传——落空（`target_not_found`）时多带
-     * `diagnostics` 并在 reason 末尾追加一行判别。省略 = 返回值与 reason 逐字节不变
-     * （`ctx.expand` 等既有调用面不传）。
-     *
-     * F72：`rehydrateRescan:true`（会话 act 显式 opt-in）——首次解析落空且页面未静默
-     * （settle timedOut）时做一次有界重扫（等 2s 重抽池重解析同一 hint，至多 1 次）；
-     * 命中 = `resolved_via:"rehydrate-rescan"`。缺省 = 行为逐字节不变。
-     */
-    opts?: { occlusionProbe?: boolean; diagnostics?: boolean; rehydrateRescan?: boolean },
-  ): Promise<{
-    ok: boolean; how?: string; ref?: string; changed?: boolean;
-    moved?: boolean; delta?: number; scrollTop?: number; scrollHeight?: number; clientHeight?: number;
-    stopCode?: string; reason?: string; ambiguity?: AmbiguityView;
-    /** A4：落空（`target_not_found`）判别证据；只有 `opts.diagnostics` 才出现。 */
-    diagnostics?: ActMissDiagnostics;
-    /** B1：失败现场（`not-actionable-or-covered` / `action-timeout` 才有）。 */
-    actionability?: ActionabilityDetail;
-    /** B1：非 timeout 异常后 URL 已变 = 点击已发生（不补点，如实记）。 */
-    probe_navigated?: boolean;
-    /** E1-c/F72：`#id` 直查兜底 / rehydrate 重扫命中时出现（additive；其余路径键集不变）。 */
-    resolved_via?: "live-dom-id-fallback" | "rehydrate-rescan";
-  }> {
-    const resolved = await this._resolveOne(page, target, op, onAmbiguous, opts?.diagnostics === true,
-      opts?.rehydrateRescan === true);
-    if ("error" in resolved) {
-      return {
-        ok: false,
-        stopCode: resolved.stopCode ?? "target_not_found",
-        reason: resolved.error,
-        ...(resolved.ambiguity === undefined ? {} : { ambiguity: resolved.ambiguity }),
-        ...(resolved.diagnostics === undefined ? {} : { diagnostics: resolved.diagnostics }),
-      };
-    }
-    const { ref, el, loc, cleanup } = resolved;
-    // E1-c：解析通道证据（additive）——只有 `#id` 直查兜底命中的那次动作才带。
-    const resolvedVia = "resolvedVia" in resolved ? resolved.resolvedVia : undefined;
-    // B2：滚动请求是否走容器语义（to/by 任一给值）。其余 op 不认 scroll 参数。
-    const wantContainer = op === "scroll" && scroll !== undefined
-      && (scroll.to !== undefined || scroll.by !== undefined);
-    // 快照 diff 只服务非 scroll 的 changed；scroll 的 changed 是实测的 moved（不做两次无用的
-    // innerText/values 快照——那正是旧路径"只能硬编码 true"的原因）。
-    const pre = op === "scroll" ? null : await this.snapshot(page);
-    let how: string | null = null;
-    let arg: unknown = null;
-    let scrollFact: { moved: boolean; delta: number; scrollTop?: number; scrollHeight?: number; clientHeight?: number } | null = null;
-    let scrollStop: { stopCode: string; reason: string } | null = null;
-    /** B1：被遮挡/超时的结构化失败（只有 `opts.occlusionProbe` 会产生）。 */
-    let probeStop: { code: string; reason: string; detail: ActionabilityDetail | null } | null = null;
-    /** B1：探针返回 null 后 URL 已变 ⇒ 点击已发生（不补点）。 */
-    let probeNavigated = false;
-    try {
-      if (op === "scroll") {
-        // 元素目标的两种滚动语义（B2）：
-        //   - 带 to/by = 容器滚动（自身或最近可滚动祖先；找不到可滚动容器 = not_scrollable，
-        //     不静默无操作）；
-        //   - 不带 to/by = 滚入视口（旧语义），moved/delta 实测。
-        // 池外回退（el === null，如 0×0 目标）没有 Elem，但有已定位的 locator：容器面走
-        // `_scrollWithLoc`、视口面走 `_scrollIntoViewWithEvidence`——同一实现，不猜元素。
-        const sr = wantContainer
-          ? (el === null
-            ? await this._scrollWithLoc(page, loc, scroll!.to ?? "bottom", scroll!.by)
-            : await this._scrollContainerForElement(page, el, scroll!.to ?? "bottom", scroll!.by))
-          : (el === null
-            ? await this._scrollIntoViewWithEvidence(page, loc)
-            : await this.scrollIntoView(page, el));
-        if (sr.ok !== true) {
-          scrollStop = {
-            stopCode: sr.stopCode ?? (wantContainer ? "not_scrollable" : "action_failed"),
-            reason: sr.reason ?? "scroll failed",
-          };
-        } else {
-          how = "scrolled";
-          scrollFact = {
-            moved: sr.moved === true,
-            delta: typeof sr.delta === "number" ? sr.delta : 0,
-            ...scrollGeoOf(sr),
-          };
-        }
-      } else if (el === null) {
-        // 池外回退（如 0×0 手柄）：直接对探针 locator 点一次（单动作原语的通用兜底）。
-        await firstLoc(loc).click({ timeout: 5000 });
-        how = "clicked";
-      } else if (op === "click" || op === "check") {
-        if (opts?.occlusionProbe === true) {
-          // B1：探针即点击——`occludedReason` 的快路径本身就是一次真点击，成功即"已点"，
-          // 绝不再调 `_clickOnly`（无双点）。被遮挡 ~0.8s 报；未遮挡慢元素仍留 5s 重试。
-          const probe = await this.occludedReason(page, el, 800, 5000);
-          if (probe === "__clicked__") {
-            try {
-              await page.waitForLoadState("domcontentloaded", { timeout: 3000 });
-            } catch {
-              /* the page may never fire it; the action already happened */
-            }
-            how = "clicked";
-          } else if (probe === null) {
-            // 非 timeout 异常：click 可能已派发——**不补点**；URL 变了就按已点击记。
-            if (pre !== null && urlOf(page) !== pre.url) {
-              probeNavigated = true;
-              how = "clicked";
-            } else {
-              probeStop = {
-                code: "action_failed",
-                reason: this._lastProbeError ?? "click failed (probe returned no result)",
-                detail: null,
-              };
-            }
-          } else if (probe === "stale_ref") {
-            probeStop = { code: "stale_ref", reason: "stale_ref", detail: null };
-          } else {
-            // 失败串是既有 skip_reason 词面：`code` 取冒号前 token，`reason` 保留原文。
-            const cut = probe.indexOf(":");
-            const code = cut > 0 ? probe.slice(0, cut) : probe;
-            const detail = code === "not-actionable-or-covered"
-              ? this._takeActionabilityDetail()
-              : await this._readActionabilityDetail(loc, probe);
-            probeStop = { code, reason: probe, detail };
-          }
-        } else {
-          [how, arg] = await this._clickOnly(page, el);
-        }
-      } else {
-        [how, arg] = await this._executeElement(page, el,
-          (bind?.value === undefined ? {} : { value: bind.value }), bind ?? null, op);
-      }
-    } catch (e) {
-      if (cleanup !== undefined) await cleanup();
-      return { ok: false, ref, stopCode: "action_failed", reason: describeActionError(e) };
-    }
-    if (cleanup !== undefined) await cleanup();
-    // 容器面/视口面的失败在自己的闭集里（not_scrollable / stale_ref / action_failed），
-    // 不进下面的 `how` 判定（那里只认动作执行器的既有关键词）。
-    if (scrollStop !== null) {
-      return { ok: false, ref, how: scrollStop.stopCode, stopCode: scrollStop.stopCode, reason: scrollStop.reason };
-    }
-    // B1：被遮挡 / 超时 / 探针异常的结构化失败——code 是既有 skip_reason 词面，不新增停因。
-    if (probeStop !== null) {
-      return {
-        ok: false, ref, how: probeStop.code, stopCode: probeStop.code, reason: probeStop.reason,
-        ...(probeStop.detail === null ? {} : { actionability: probeStop.detail }),
-      };
-    }
-    const ok = how !== "stale_ref" && how !== "needs_value" && how !== "action_failed"
-      && how !== "action_unsupported" && how !== null;
-    const viaField = resolvedVia === undefined ? {} : { resolved_via: resolvedVia };
-    if (!ok) return { ok: false, ref, how: String(how), stopCode: String(how ?? "action_failed"), reason: describeActionError(arg), ...viaField };
-    if (op === "scroll") {
-      const moved = scrollFact?.moved === true;
-      const delta = scrollFact?.delta ?? 0;
-      void loc;
-      return {
-        ok: true, how: String(how), ref, changed: moved, moved, delta,
-        ...scrollGeoOf(scrollFact ?? {}),
-        ...viaField,
-      };
-    }
-    const post = await this.snapshot(page);
-    void loc;
-    return {
-      ok: true, how: String(how), ref, changed: JSON.stringify(pre) !== JSON.stringify(post),
-      ...(probeNavigated ? { probe_navigated: true } : {}),
-      ...viaField,
-    };
-  }
-
-  /**
-   * B2：元素目标的「滚入视口」**实测证据**。
-   *
-   * 旧路径（`_executeElement` 的 scroll 分支）调完 `scrollIntoViewIfNeeded` 就返回
-   * `["scrolled", null]`——页面到底动没动没人知道，会话层只能硬编码 `changed:true`。
-   * 这里在**同一次 page.evaluate** 里取滚动容器 scrollTop 前后差（元素自身/最近可滚动
-   * 祖先 → 最后退回主滚动器），把 moved/delta 变成观察事实。
-   *
-   * 只加测量、不改滚动行为：调用的仍是同一个 `scrollIntoViewIfNeeded({block:"center",
-   * behavior:"instant"})`（缺省）→ `scrollIntoView` 兜底，与 `_executeElement` 的 scroll
-   * 分支是**同一次页面调用**；没有可滚动的容器/祖先时 moved:false（这不是失败——元素本来
-   * 就在视口里）。
-   */
-  private async _scrollIntoViewWithEvidence(page: AnyPage, loc: AnyLoc): Promise<ScrollEvidence> {
-    let box: Record<string, unknown> | null = null;
-    try {
-      box = await firstLoc(loc).evaluate((node: any) => {
-        // 浏览器侧执行（Node strip-types 下类型注释被擦除，源码原样进页面）。
-        const g = globalThis as unknown as {
-          document: { scrollingElement: any; documentElement: any; body: any };
-          getComputedStyle: (x: any) => { overflowY: string; overflowX: string };
-        };
-        const doc = g.document;
-        const scrollable = (x: any) => {
-          if (!x || x === doc.body || x === doc.documentElement) return false;
-          const cs = g.getComputedStyle(x);
-          const oy = cs.overflowY, ox = cs.overflowX;
-          const canY = (oy === "auto" || oy === "scroll" || oy === "overlay") && x.scrollHeight > x.clientHeight + 2;
-          const canX = (ox === "auto" || ox === "scroll" || ox === "overlay") && x.scrollWidth > x.clientWidth + 2;
-          return canY || canX;
-        };
-        // 观测面 = 元素自身到根的候选滚动器链（最近优先），最后兜底主滚动器：
-        // 滚入视口可能滚祖先容器，也可能滚整个文档——哪个变了就报哪个。
-        const chain: any[] = [];
-        for (let p: any = node, k = 0; p && k < 32; k++, p = p.parentElement) {
-          if (scrollable(p)) chain.push(p);
-          if (p === doc.documentElement || p === doc.body) break;
-        }
-        const se = doc.scrollingElement ?? doc.documentElement ?? doc.body;
-        if (se) chain.push(se);
-        const before = chain.map((x) => Number(x.scrollTop) || 0);
-        const el = node as { scrollIntoView(o?: unknown): void };
-        const anyEl = node as { scrollIntoViewIfNeeded?: (o?: unknown) => void };
-        if (typeof anyEl.scrollIntoViewIfNeeded === "function") {
-          anyEl.scrollIntoViewIfNeeded({ block: "center", behavior: "instant" });
-        } else {
-          el.scrollIntoView({ block: "center", behavior: "instant" });
-        }
-        let picked: any = null;
-        let delta = 0;
-        for (let i = 0; i < chain.length; i++) {
-          const now = Number(chain[i].scrollTop) || 0;
-          if (now !== before[i]) { picked = chain[i]; delta = now - (before[i] as number); break; }
-        }
-        // 没有任何滚动发生：如实 moved:false；若链上确实有可滚动容器（最近的那个）就把它
-        // 此刻的几何带出（"滚不动"是因为已到边界/已在视口，几何是证据不是猜测）。
-        if (picked === null && chain.length > 0) picked = chain[0];
-        return picked === null
-          ? { ok: true, moved: false, delta: 0 }
-          : {
-            ok: true, moved: delta !== 0, delta,
-            scrollTop: Number(picked.scrollTop) || 0,
-            scrollHeight: Number(picked.scrollHeight) || 0,
-            clientHeight: Number(picked.clientHeight) || 0,
-          };
-      }) as Record<string, unknown> | null;
-    } catch (e) {
-      return { ok: false, stopCode: "action_failed", reason: describeActionError(e) };
-    }
-    if (box === null || box["ok"] !== true) {
-      return { ok: false, stopCode: "action_failed", reason: String(box?.["reason"] ?? "scrollIntoView failed") };
-    }
-    return {
-      ok: true,
-      moved: box["moved"] === true,
-      delta: Number(box["delta"] ?? 0),
-      ...(box["scrollTop"] === undefined ? {} : {
-        scrollTop: Number(box["scrollTop"]),
-        scrollHeight: Number(box["scrollHeight"] ?? 0),
-        clientHeight: Number(box["clientHeight"] ?? 0),
-      }),
-    };
-  }
-
-  /**
-   * B2 `mw.scrollIntoView`：把元素滚入视口并**如实**回有没有动（moved/delta + 容器几何）。
-   *
-   * 只服务会话单动作面（`actOnce`）；run 的命令步/原语路径仍走 `_executeElement` 的
-   * scroll 分支，产物逐字节不变。
-   */
-  async scrollIntoView(page: AnyPage, el: Elem): Promise<ScrollEvidence> {
-    const loc = await this._locatorFor(page, el);
-    if (loc === null) return { ok: false, stopCode: "stale_ref", reason: "the resolved element could not be located anymore" };
-    return this._scrollIntoViewWithEvidence(page, loc);
-  }
-
-  /** A3：把元素（或最近可滚动祖先）滚到 to/by；纯 DOM scrollTop，不做滚轮模拟。 */
-  private async _scrollContainerForElement(
-    page: AnyPage, el: Elem, to: "bottom" | "top" | "page", by?: number, settleMs = 150,
-  ): Promise<ScrollEvidence> {
-    const loc = await this._locatorFor(page, el);
-    if (loc === null) return { ok: false, stopCode: "stale_ref", reason: "the resolved element could not be located anymore" };
-    return this._scrollWithLoc(page, loc, to, by, settleMs);
-  }
-
-  /**
-   * A3：对一个已定位的容器执行滚动（scrollContainer 的池外回退面也走它）。
-   * B2：成功时如实带 `delta`（after - before，与 `moved` 同一对读数）——会话层要能
-   * 回显「滚了多少」，而不是只知道"滚过"。
-   */
-  private async _scrollWithLoc(
-    page: AnyPage, loc: AnyLoc, to: "bottom" | "top" | "page", by?: number, settleMs = 150,
-  ): Promise<ScrollEvidence> {
-    let box: Record<string, unknown> | null = null;
-    try {
-      box = await firstLoc(loc).evaluate((node: any, arg: { to: string; by?: number }) => {
-        // `document`/`getComputedStyle` 跑在浏览器里，不在本仓 TS lib 面上：只就地声明用到的形状
-        // （类型注释在 Node strip-types 下被擦除，函数源码进浏览器仍可执行）。
-        const g = globalThis as unknown as {
-          document: { body: unknown; documentElement: unknown };
-          getComputedStyle: (x: any) => { overflowY: string; overflowX: string };
-        };
-        const doc = g.document;
-        const scrollable = (x: any) => {
-          if (!x || x === doc.body || x === doc.documentElement) return false;
-          const cs = g.getComputedStyle(x);
-          const oy = cs.overflowY, ox = cs.overflowX;
-          const canY = (oy === "auto" || oy === "scroll" || oy === "overlay") && x.scrollHeight > x.clientHeight + 2;
-          const canX = (ox === "auto" || ox === "scroll" || ox === "overlay") && x.scrollWidth > x.clientWidth + 2;
-          return canY || canX;
-        };
-        let t: any = node;
-        if (!scrollable(t)) {
-          let p = node.parentElement;
-          for (let k = 0; k < 32 && p; k++, p = p.parentElement) {
-            if (scrollable(p)) { t = p; break; }
-            if (p === doc.body) break;
-          }
-        }
-        if (!t || !scrollable(t)) {
-          // F49 风格的能力提示：not_scrollable 不是沉默失败——把祖先的 overflow 事实带出来，
-          // 让 Agent 能区分「没有可滚动祖先」/「最近 overflow 祖先内容不溢出」/「页面用
-          // overflow:hidden 程序化 scrollTop 的自定义滚动面板」。判据与 stopCode 语义不变
-          // （标准滚动器只认 overflow:auto/scroll/overlay + 内容溢出）。
-          const diag: Array<{ tag: string; cls: string; oy: string; sh: number; ch: number; prog: boolean }> = [];
-          let p2: any = node.parentElement;
-          for (let k = 0; k < 32 && p2 && diag.length < 3; k++, p2 = p2.parentElement) {
-            if (p2 === doc.body || p2 === doc.documentElement) break;
-            const cs2 = g.getComputedStyle(p2);
-            if (cs2.overflowY === "visible") continue;
-            const sh2 = Number(p2.scrollHeight) || 0;
-            const ch2 = Number(p2.clientHeight) || 0;
-            diag.push({
-              tag: String(p2.tagName || "").toLowerCase(),
-              cls: String(p2.className || "").split(/\s+/)[0] || "",
-              oy: cs2.overflowY, sh: sh2, ch: ch2,
-              prog: sh2 > ch2 + 2 && cs2.overflowY !== "clip",
-            });
-          }
-          const fmt = diag.map((d) =>
-            `${d.tag}${d.cls ? "." + d.cls : ""} overflow:${d.oy} ${d.sh}/${d.ch}`
-            + (d.prog ? " (programmatically scrollable, not a standard scroller)" : "")).join("; ");
-          const prog = diag.some((d) => d.prog);
-          const why = diag.length === 0
-            ? "no overflow ancestor (every ancestor is overflow:visible)"
-            : `ancestors: ${fmt}`;
-          const hint = prog
-            ? " — the page likely uses a custom overflow:hidden scroll panel; the engine scrolls standard overflow:auto/scroll containers only (scroll a target inside one, or use ctx.scrollList(\"document\"))"
-            : "";
-          return {
-            ok: false,
-            reason: `no standard scrollable container found on the element or its ancestors — ${why}${hint}`,
-          };
-        }
-        const before = t.scrollTop;
-        const max = Math.max(0, t.scrollHeight - t.clientHeight);
-        let next = before;
-        if (typeof arg.by === "number") next = before + arg.by;
-        else if (arg.to === "bottom") next = max;
-        else if (arg.to === "top") next = 0;
-        else if (arg.to === "page") next = Math.min(max, before + Math.max(1, Math.round(t.clientHeight * 0.9)));
-        next = Math.max(0, Math.min(max, next));
-        t.scrollTop = next;
-        return { ok: true, before, scrollTop: t.scrollTop, scrollHeight: t.scrollHeight, clientHeight: t.clientHeight };
-      }, { to, ...(by === undefined ? {} : { by }) }) as Record<string, unknown> | null;
-    } catch (e) {
-      return { ok: false, stopCode: "not_scrollable", reason: describeActionError(e) };
-    }
-    if (box === null || box["ok"] !== true) {
-      return { ok: false, stopCode: "not_scrollable", reason: String(box?.["reason"] ?? "scroll failed") };
-    }
-    if (settleMs > 0) await sleep(settleMs);
-    const scrollTop = Number(box["scrollTop"] ?? 0);
-    const before = Number(box["before"] ?? 0);
-    return {
-      ok: true, scrollTop,
-      scrollHeight: Number(box["scrollHeight"] ?? 0),
-      clientHeight: Number(box["clientHeight"] ?? 0),
-      moved: scrollTop !== before,
-      delta: scrollTop - before,
-    };
-  }
-
-  /**
-   * A3 `mw.scrollContainer`：解析目标 hint → 元素自身或最近可滚动祖先 → 滚到 to/by。
-   * 找不到可滚动容器 = 结构化 `not_scrollable`（不是静默无操作）。
-   */
-  async scrollContainer(
-    page: AnyPage, target: string, to: "bottom" | "top" | "page" = "bottom",
-    opts?: { by?: number; settleMs?: number },
-  ): Promise<ScrollEvidence> {
-    const resolved = await this._resolveOne(page, target, "scroll");
-    if ("error" in resolved) return { ok: false, stopCode: "target_not_found", reason: resolved.error };
-    if (resolved.el !== null) {
-      return this._scrollContainerForElement(page, resolved.el, to, opts?.by, opts?.settleMs ?? 150);
-    }
-    try {
-      return await this._scrollWithLoc(page, resolved.loc, to, opts?.by, opts?.settleMs ?? 150);
-    } finally {
-      if (resolved.cleanup !== undefined) await resolved.cleanup();
-    }
-  }
-
-  /**
-   * F1：`ctx.scrollList` 的**合成滚动目标**（`"document" | "body" | "html" | "window"`，
-   * 大小写不敏感）。这些名字不进元素池、不占池位：统一解析为 `document.scrollingElement`
-   * （兜底 body → documentElement），执行与容器目标同一套滚动语义（to top/bottom/page
-   * 或 by 像素 + settle 等待），如实返回 moved——不可滚（scrollHeight <= clientHeight，
-   * 如短页）= `{ok:false, moved:false, stopCode:"not_scrollable"}`，绝不假成功。
-   * 容器目标的既有路径（`scrollContainer` → `_scrollWithLoc`）逐字节不变。
-   * B2：成功时带 `delta`（after - before），与 `_scrollWithLoc` 同一口径。
-   */
-  async scrollDocument(
-    page: AnyPage, to: "bottom" | "top" | "page" = "bottom",
-    opts?: { by?: number; settleMs?: number },
-  ): Promise<ScrollEvidence> {
-    let box: Record<string, unknown> | null = null;
-    try {
-      box = await page.evaluate((arg: { to: string; by?: number }) => {
-        // 浏览器侧执行（Node strip-types 下类型注释被擦除，源码原样进页面）。
-        const g = globalThis as unknown as {
-          document?: {
-            scrollingElement?: { scrollTop: number; scrollHeight: number; clientHeight: number; scrollWidth: number; clientWidth: number } | null;
-            documentElement?: { scrollTop: number; scrollHeight: number; clientHeight: number; scrollWidth: number; clientWidth: number } | null;
-            body?: { scrollTop: number; scrollHeight: number; clientHeight: number; scrollWidth: number; clientWidth: number } | null;
-          } | null;
-        };
-        const doc = g.document;
-        if (!doc) return { ok: false, reason: "no document" };
-        // document.scrollingElement 即主滚动器（标准模式下 = documentElement，
-        // quirks 模式下 = body）——"window"/"html"/"body"/"document" 四个合成名都落到它。
-        const se = doc.scrollingElement ?? doc.documentElement ?? doc.body;
-        if (!se) return { ok: false, reason: "no scrolling element found (document.scrollingElement/documentElement/body all null)" };
-        const scrollHeight = Number(se.scrollHeight) || 0;
-        const clientHeight = Number(se.clientHeight) || 0;
-        const scrollWidth = Number(se.scrollWidth) || 0;
-        const clientWidth = Number(se.clientWidth) || 0;
-        const before = Number(se.scrollTop) || 0;
-        const maxY = Math.max(0, scrollHeight - clientHeight);
-        const maxX = Math.max(0, scrollWidth - clientWidth);
-        if (maxY <= 2 && maxX <= 2) {
-          return { ok: false, moved: false, scrollTop: before, scrollHeight, clientHeight,
-            reason: `document is not scrollable (scrollHeight=${scrollHeight} <= clientHeight=${clientHeight})` };
-        }
-        let next = before;
-        if (typeof arg.by === "number") next = before + arg.by;
-        else if (arg.to === "bottom") next = maxY;
-        else if (arg.to === "top") next = 0;
-        else if (arg.to === "page") next = Math.min(maxY, before + Math.max(1, Math.round(clientHeight * 0.9)));
-        next = Math.max(0, Math.min(maxY, next));
-        se.scrollTop = next;
-        return { ok: true, before, scrollTop: Number(se.scrollTop) || 0, scrollHeight, clientHeight };
-      }, { to, ...(opts?.by === undefined ? {} : { by: opts.by }) }) as Record<string, unknown> | null;
-    } catch (e) {
-      return { ok: false, moved: false, stopCode: "not_scrollable", reason: describeActionError(e) };
-    }
-    if (box === null || box["ok"] !== true) {
-      return {
-        ok: false, moved: false,
-        ...(box !== null && box["scrollTop"] !== undefined ? { scrollTop: Number(box["scrollTop"]) } : {}),
-        ...(box !== null && box["scrollHeight"] !== undefined ? { scrollHeight: Number(box["scrollHeight"]) } : {}),
-        ...(box !== null && box["clientHeight"] !== undefined ? { clientHeight: Number(box["clientHeight"]) } : {}),
-        stopCode: "not_scrollable",
-        reason: String(box?.["reason"] ?? "document scroll failed"),
-      };
-    }
-    const settleMs = opts?.settleMs ?? 150;
-    if (settleMs > 0) await sleep(settleMs);
-    const scrollTop = Number(box["scrollTop"] ?? 0);
-    const before = Number(box["before"] ?? 0);
-    return {
-      ok: true, scrollTop,
-      scrollHeight: Number(box["scrollHeight"] ?? 0),
-      clientHeight: Number(box["clientHeight"] ?? 0),
-      moved: scrollTop !== before,
-      delta: scrollTop - before,
-    };
-  }
-
-  /**
-   * A3 `mw.setRange`：解析目标 hint → 定位 → `range.ts` 三策略（fill/keyboard/pointer）。
-   * 目标不存在 = `target_not_found`；存在但设不了 = `slider_not_settable`（绝不假装成功）。
-   */
-  async setRange(
-    page: AnyPage, target: string, value: RangeValue, opts?: RangeOptions,
-  ): Promise<RangeOutcome> {
-    // 真站实测：筛选面板是异步渲染的，刚打开时 DOM 会在一次 re-render 中换掉 slider 节点，
-    // 回退解析打的临时探针属性会随旧节点消失（readState = null）。重解析一次即可恢复——
-    // 这是**解析面**的瞬态，不是"设不了"；只有第二次仍读不到才按 slider_not_settable 报。
-    let last: RangeOutcome | null = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (attempt > 0) await sleep(300);
-      const resolved = await this._resolveOne(page, target, "slider");
-      if ("error" in resolved) {
-        const isSliderish = /matched nothing/i.test(resolved.error);
-        last = {
-          ok: false,
-          stopCode: isSliderish ? "target_not_found" : "stale_ref",
-          reason: resolved.error,
-        };
-        continue;
-      }
-      try {
-        const r = await applyRange(page, resolved.loc, value, opts);
-        if (r.ok || !/cannot read the slider state/i.test(String(r.reason ?? ""))) return r;
-        last = r;
-      } finally {
-        if (resolved.cleanup !== undefined) await resolved.cleanup();
-      }
-    }
-    return last ?? { ok: false, stopCode: "slider_not_settable", reason: "slider state could not be read" };
-  }
-
-  /* -- the loop ------------------------------------------------------------ */
 
   /**
    * One subgoal, start to finish.
@@ -3504,7 +2148,7 @@ export class BrowserMiddleware {
 
     try {
       // S1：每次 run 重置状态游标（epoch/navEpoch 都是**本次 run** 的口径）。
-      const setup = await this.runSetup({ instruction, startUrl, hostGate, verbose, pageIn, pwIn,
+      const setup = await runSetup(this, { instruction, startUrl, hostGate, verbose, pageIn, pwIn,
         skipNavigation: opts.skipNavigation === true, settleMs: opts.settleMs });
       browser = setup.browser;
       if (setup.kind === "early") return setup.report;
@@ -3513,7 +2157,7 @@ export class BrowserMiddleware {
       page = pg;
       lastPageRef = pg;
 
-      gatePhase = await this.runFrameGate({ instruction, pg, hostGate, goalSignalFn, precondition, warnings, verbose });
+      gatePhase = await runFrameGate(this, { instruction, pg, hostGate, goalSignalFn, precondition, warnings, verbose });
       if (gatePhase.kind === "early") return gatePhase.report;
       const { goalHeld, frameTargetStop } = gatePhase;
 
@@ -3535,7 +2179,7 @@ export class BrowserMiddleware {
         // A1：done_preheld 是**逐步**事实——每步开头重置，避免上一步的值被本步的 trace 行
         // 或最终 RunReport 误带（只有命令步会在下面重新评估它）。
         donePreheld = null;
-        const pool = await this.runPoolGate({ pg, stepNo, candidatePriority, poolReady, poolReadyTimeoutMs,
+        const pool = await runPoolGate(this, { pg, stepNo, candidatePriority, poolReady, poolReadyTimeoutMs,
           poolReadyPollMs, poolGate, verbose, observeState, trace, warnings, pendingAfterIdx, beforeFp,
           lastPoolSize, lastPoolWaitedMs, lastReadiness, poolEmptyThisStep, readyEmptyWarned, stop }); if (pool.stopped) break;
         let { stepStartUrl, stepStartTabs, elems, gateSettle } = pool; ({ lastPoolSize, lastPoolWaitedMs, beforeFp,
@@ -3621,7 +2265,7 @@ export class BrowserMiddleware {
         // 逐 step 的 FW8/DRF 解析状态（resolver 持有去重集合/命中/停因/隐藏证据；证据形状见 evidence.ts）。
         // 每步新建：同一步同一条 hint 只尝试一次；不得跨步复用。
         const targets: DeclaredTargetsResolver = createDeclaredTargetsResolver({
-          pg, stepNo, noteSkipped, hintOpts: () => this._hintOpts(), surfacePolicy: this.surfacePolicy,
+          pg, stepNo, noteSkipped, hintOpts: () => _hintOpts(this, ), surfacePolicy: this.surfacePolicy,
           frameHosts: this._frameHosts, targetResolutionDeclared: this.targetResolutionDeclared,
           onDeclaredHidden: (facts) => { lastDeclaredHiddenBox = facts; },
         });
@@ -3636,22 +2280,22 @@ export class BrowserMiddleware {
         };
         const declaredTargets = (): readonly (string | null | undefined)[] =>
           commandMode ? cmdSpace.map((c) => c.target) : [curHint];
-        const declaredPhase = await this.runDeclaredTargets({
+        const declaredPhase = await runDeclaredTargets(this, {
           pg, stepNo, verbose, elems, cmdSpace, cmdDone, cmdI, cmdAttempts, noteSkipped, zeroExecSummary,
           goalHeld, goalSignalFn, frameTargetStop, targets, stop, stopReason: () => acct.stopReason, forbidden, pruneForbids,
-          hintOpts: () => this._hintOpts(), surfacePolicy: this.surfacePolicy, frameHosts: this._frameHosts,
+          hintOpts: () => _hintOpts(this, ), surfacePolicy: this.surfacePolicy, frameHosts: this._frameHosts,
           targetResolutionDeclared: this.targetResolutionDeclared, candidateAttempts: CMD_CANDIDATE_ATTEMPTS,
-          resolveCommandRef: (t, e, op, f) => this.resolveCommandRef(t, e, op, f),
+          resolveCommandRef: (t, e, op, f) => resolveCommandRef(this, t, e, op, f),
           setDone: () => { done = true; }, setViewportUnderloaded: (v) => { viewportUnderloaded = v; },
         });
         cmdI = declaredPhase.cmdI;
         if (declaredPhase.stopped) break;
         const cmdPick = declaredPhase.cmdPick;
 
-        const hintPhase = await this.runDeclaredHint({
+        const hintPhase = await runDeclaredHint(this, {
           pg, stepNo, verbose, elems, commandMode: cmdSpace.length > 0, targets, warnings, stop, noteSkipped, targetResolutionDeclared: this.targetResolutionDeclared,
           stopReason: () => acct.stopReason, frameTargetStop, pruneForbids, forbidden, advanceHint: () => this._advanceHint(), currentHint: () => this.currentHint(), hintIndex: () => this._hintI, hintCount: this.targetHints.length,
-          hintMatch, hintLookup, hintCandidates, declaresRowAnchor, hintOpts: () => this._hintOpts(), surfacePolicy: this.surfacePolicy, frameHosts: this._frameHosts, isTyping: (el) => this._isTyping(el),
+          hintMatch, hintLookup, hintCandidates, declaresRowAnchor, hintOpts: () => _hintOpts(this, ), surfacePolicy: this.surfacePolicy, frameHosts: this._frameHosts, isTyping: (el) => this._isTyping(el),
         });
         let { curHint } = hintPhase;
         if (hintPhase.stopped) break;
@@ -3758,7 +2402,7 @@ export class BrowserMiddleware {
           // a hint that matches nothing is LAYA ("rather than gambling on a token").
           // 计划声明的 hint 是权威；否则规则在**排序先验池**里找（该族在前，其余仍在）。
           ruleRef = curHint
-            ? affordanceRule(instruction, elems, curHint, this._hintOpts())
+            ? affordanceRule(instruction, elems, curHint, _hintOpts(this, ))
             : (navRule(instruction, orderedPool()) ?? affordanceRule(instruction, orderedPool(), null));
           // task-9（评审 #2）：弱档命中的旁路诊断 → step warning `matched_others`。
           // 只在弱档胜出（bare 词前缀/词包含、attrSubstr loose 子串）时告警——精确命中
@@ -3797,7 +2441,7 @@ export class BrowserMiddleware {
             if (Object.keys(wide).length > Object.keys(elems).length) {
               // refs 是位置性的：先把"换位后已不是同一元素"的禁用记录清掉（与步头同规则）。
               pruneForbids(wide);
-              const wideRef = affordanceRule(instruction, wide, curHint, this._hintOpts());
+              const wideRef = affordanceRule(instruction, wide, curHint, _hintOpts(this, ));
               // A3：宽扫命中**同样受 strong 约束**（同一个 `declaredAllow`；宽池新增候选
               // 可能让档位更强，也可能仍只在弱档胜出——后者不改写池，按"未命中"记账）。
               const wideGate = declaredAllow(
@@ -3830,7 +2474,7 @@ export class BrowserMiddleware {
         // 命中 = elems/ruleRef 换新池（确定性 rule:match，不重走决策面）；仍未命中 = 原有
         // strict/模型路径逐字节不变，事实进 trace 行与运行汇总。
         if (rehydrateRescan && !commandMode && curHint !== null && weakRejected === null
-            && hintMatch(curHint, elems, this._hintOpts()) === null
+            && hintMatch(curHint, elems, _hintOpts(this, )) === null
             && gateSettle !== null && gateSettle.timedOut === true
             && stepTimeoutLeft() > 0) {
           const waitMs = Math.min(2000, Math.max(0, stepTimeoutLeft() - 250));
@@ -3840,7 +2484,7 @@ export class BrowserMiddleware {
               surface: this.surfacePolicy, hosts: this._frameHosts,
               ...(this.poolQuotaMode === "quota" ? { poolQuotaMode: "quota" } : {}) });
             pruneForbids(fresh);
-            const freshRef = affordanceRule(instruction, fresh, curHint, this._hintOpts());
+            const freshRef = affordanceRule(instruction, fresh, curHint, _hintOpts(this, ));
             const freshGate = declaredAllow(
               freshRef, takeHintMatchOthers(), curHint,
               this.actHintTier === "strong" && !this._learnedHintApplied,
@@ -3876,9 +2520,9 @@ export class BrowserMiddleware {
         // 不变，仅 strict reason 补"已试 DOM 回退"事实。至多一次/步；不放大 attempts；
         // weakRejected（strong 档已判弱档未命中）不翻案。
         if (this.actHintDomFallback && !commandMode && curHint !== null && ruleRef === null
-            && weakRejected === null && hintMatch(curHint, elems, this._hintOpts()) === null
+            && weakRejected === null && hintMatch(curHint, elems, _hintOpts(this, )) === null
             && stepTimeoutLeft() > 0) {
-          const df = await this._domFallbackResolve(pg, curHint, "click", "fail", false);
+          const df = await _domFallbackResolve(this, pg, curHint, "click", "fail", false);
           if ("scan" in df) {
             domFallbackMissed = true;   // 探针已由回退面自清（scan 分支内 cleanup）
           } else if ("ambiguity" in df) {
@@ -3919,7 +2563,7 @@ export class BrowserMiddleware {
         // `weakRejected === null`，条件/文案与今天逐字节一致。
         if (this.actHintStrict && !this._learnedHintApplied && !commandMode
             && curHint !== null
-            && (weakRejected !== null || hintMatch(curHint, elems, this._hintOpts()) === null)) {
+            && (weakRejected !== null || hintMatch(curHint, elems, _hintOpts(this, )) === null)) {
           const poolSize = Object.keys(elems).length;
           const summary = poolRoleSummary(elems, ALL_FAMILIES);
           // C 批（B8）：strict 的两条 reason 也追加 frame: 尾缀诊断 + 页面可用 origin（无 frame:
@@ -3960,11 +2604,11 @@ export class BrowserMiddleware {
             reAdmitted.add(br);
           }
         }
-        const pickPhase = await this.runModelPick({
+        const pickPhase = await runModelPick(this, {
           pg, stepNo, instruction, verbose, elems, ruleRef, curHint, commandMode, forbidden, noted, trace, targets, adjudicate, reobserve, escalateFn, expectedFamily,
           confFloor: this.confFloor, candidatePriority, tieredHint, rulesOnly: this.rulesOnly, decisionDegradedReasonClass: this.decisionDegraded?.reason_class ?? null, rejectedAskConfs: this._rejectedAskConfs, warnings,
           reobserved, escalated, escalatedPick, stepTimeoutLeft, stop, stopReason: () => acct.stopReason, pickElement: (g, page, pool, blocked, notes) => this.pickElement(g, page, pool, blocked, notes),
-          orderedPool, settleBeforeExtract: (page) => this._settleBeforeExtract(page), pruneForbids, hintOpts: () => this._hintOpts(), frameHosts: this._frameHosts, stateTextFn: (page, instr) => stateText(page, instr, this.embedFn),
+          orderedPool, settleBeforeExtract: (page) => this._settleBeforeExtract(page), pruneForbids, hintOpts: () => _hintOpts(this, ), frameHosts: this._frameHosts, stateTextFn: (page, instr) => stateText(page, instr, this.embedFn),
           rowAnchorNote, declaredTargets, goalHeld, goalSignalFn, isTyping: (el) => this._isTyping(el), modelLabel: () => this.modelLabel(), degradedReasonSuffix: () => this.degradedReasonSuffix(),
           choiceLimitReason: () => this._choiceLimitReason, clearChoiceLimitReason: () => { this._choiceLimitReason = null; },
         });
@@ -3976,7 +2620,7 @@ export class BrowserMiddleware {
         if (ref === null) break;
 
         let el = elems[ref]!;
-        const action = await this.runActionPhase({
+        const action = await runActionPhase(this, {
           pg, stepNo, instruction, verbose, elems, ref, el, cmdPick, commandMode, commandValue, commandByValue,
           commandBindMissing, dryRun, force, effect, slots, values, candidatePriority, curHint, method, conf, mm,
           decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, prevented, noted, staleRetry,
@@ -3991,7 +2635,7 @@ export class BrowserMiddleware {
         executedCount += action.executedDelta ?? 0;
         if (action.cmdDoneId != null) { cmdDone.add(action.cmdDoneId); cmdI = action.nextCmdI ?? cmdI; }
         const post = action.post!;
-        const postPhase = await this.runPostAction({
+        const postPhase = await runPostAction(this, {
           pg, stepNo, verbose, instruction, elems, ref, el, desc: action.desc!, how: action.how!,
           method, conf, inert: action.inert!, executed: action.executed!, mm, decisionKind, post, hostGate,
           trace, setPendingAfterIdx: (idx) => { pendingAfterIdx = idx; }, done, manualDone, donePreheld, manualGoal,
@@ -4006,7 +2650,7 @@ export class BrowserMiddleware {
 
       }
       // S1 收尾观察/前进性/stepState 提 runTail（循环后 epilogue）
-      stepState = await this.runTail({ pg, candidatePriority, observeState, trace, beforeFp, lastEffect, poolEmptyThisStep, donePreheldSeen, done, warnings });
+      stepState = await runTail(this, { pg, candidatePriority, observeState, trace, beforeFp, lastEffect, poolEmptyThisStep, donePreheldSeen, done, warnings });
     } finally {
       // Only close the browser run() launched itself: an injected page/pw belongs
       // to the caller (PORT NOTE 5, Python's owns_browser/_stop_playwright_owned).
@@ -4052,1778 +2696,26 @@ export class BrowserMiddleware {
       if (detail !== undefined) rttCtx.stopReason = detail;
       if (at !== undefined) rttCtx.stopStep = at;
     };
-    return await this.runReportTail(rttCtx);
+    return await runReportTail(this, rttCtx);
   }
 
-  /** 4d 阶段：帧门禁与适用性（导航/弹窗信封由 run() 处理；本阶段只读）。返回早停报告或循环所需状态。 */
-  private async runFrameGate(a: {
-    instruction: string; pg: AnyPage; hostGate: string[] | null;
-    goalSignalFn: ((page: AnyPage) => Promise<boolean> | boolean) | null;
-    precondition: SignalSpec | null; warnings: string[]; verbose: boolean;
-  }): Promise<FrameGatePhase> {
-    const { instruction, pg, hostGate, goalSignalFn, precondition, warnings, verbose } = a;
-    let doneInExcluded = false;
-    // P0-D：声明 hosts 信封外的第三方 iframe 默认**只排除出解析面**（池/hint/FW8/DRF/locatorAnyFrame/
-    // done/when 都不读），不再是整步 REJECT；只有声明 target/done 仅存在于被排除帧才 frame_not_allowed。
-    const frameGate = hostGate && hostGate.length ? frameGateOf(pg, hostGate) : null;
-    const excludedView = frameGate === null
-      ? null : framesScopedPage(pg, frameGate.excluded.map((e) => e.frame));
-    /** 允许帧视图：所有读面（done/when/池…）都只看它；无排除帧时就是真 page（零行为差）。 */
-    const readPage: AnyPage = frameGate === null
-      ? pg : (framesScopedPage(pg, frameGate.allowed) as unknown as AnyPage);
-    if (frameGate !== null) {
-      warnings.push(
-        `frames_excluded: [${frameGate.origins.join(", ")}] — ${frameGate.excluded.length} third-party `
-        + `frame(s) outside the declared hosts envelope (${hostGate!.join(", ")}) are EXCLUDED from the `
-        + `read surface (pool / hint / identity / declared-DOM / done / when / locatorAnyFrame); `
-        + `已排除、不影响页面其余操作。Only if a declared target or done signal truly needs one of these `
-        + `frames is frame_not_allowed raised — at that point decide whether to add its origin to meta.hosts`,
-      );
-    }
-    // P0-D：done/when 求值唯一入口——allowed 帧先判，不成立再**只读**探 excluded 帧一次；只在那里
-    // 成立 = done 依赖被排除帧（doneInExcluded），收尾升级 frame_not_allowed。E4：css_* 的 ` frame:<链>`
-    // 尾缀由 locatorAnyFrame/countAnyFrame 的帧过滤底座继承（双面天然 suffix-aware；非法尾缀按原 CSS）。
-    const goalHeld = async (): Promise<boolean> => {
-      if (goalSignalFn === null) return false;
-      if ((await goalSignalFn(readPage)) === true) return true;
-      if (excludedView !== null) {
-        try {
-          if ((await goalSignalFn(excludedView as unknown as AnyPage)) === true) doneInExcluded = true;
-        } catch { /* 排除帧求值失败不改变判定：仍按未成立 */ }
-      }
-      return false;
-    };
-    // P0-D：声明目标解析失败后的**只读**复核——目标是否只存在于被排除 frame；命中 = 结构化
-    // frame_not_allowed（reason/证据文案唯一出处 executor-pure.frameTargetStopReason），绝不宽化、绝不操作排除帧。
-    const frameTargetStop = async (
-      target: string,
-    ): Promise<{ code: StopCode; reason: string } | null> => {
-      if (target === "" || hostGate === null || hostGate.length === 0) return null;
-      const probe = await probeExcludedHint(pg, hostGate, target, admitSelectorWithJsFor(this.surfacePolicy));
-      if (probe === null) return null;
-      return { code: "frame_not_allowed", reason: frameTargetStopReason(target, hostGate, probe) };
-    };
-    // "Does this step apply?" — asked before spending a step; a skipped subgoal reports done.
-    if (precondition !== null && precondition !== undefined && !(await checkSignal(readPage, precondition))) {
-      // P0-D/E4：when 只在被排除 frame 上成立 ⇒ 结构化 frame_not_allowed（frame: 尾缀双面同样生效）。
-      if (excludedView !== null && (await checkSignal(excludedView as never, precondition))) {
-        const why = `when/precondition signal ${JSON.stringify(precondition)} holds only inside frame(s) `
-          + `${frameGate === null ? "-" : frameGate.origins.join(", ")} excluded by the declared hosts envelope `
-          + `(${hostGate!.join(", ")}) — the step does not apply on the allowed frames; `
-          + `frames_excluded 只是默认排除第三方非交互 frame，不需要为此加 hosts；仅当该 when 确需此 frame 时才评估把它加进 meta.hosts`;
-        if (verbose) console.log(`  -> REFUSED: ${why}`);
-        return { kind: "early", report: {
-          goal: instruction, done: false,
-          stop_reason: why, stop_code: "frame_not_allowed", steps: [],
-          audit: { verdict: "REJECT", reasons: [why], auditor: "frame-gate" },
-        } };
-      }
-      if (verbose) console.log(`    -> SKIPPED (precondition not met: ${JSON.stringify(precondition)})`);
-      return { kind: "early", report: {
-        goal: instruction, done: true, skipped: true,
-        stop_reason: "precondition not met -> skipped", stop_code: "precondition_skipped", steps: [],
-        audit: { verdict: "SKIPPED", reasons: ["precondition not met"], auditor: "n/a" },
-      } };
-    }
-    return { kind: "ready", frameGate, goalHeld, frameTargetStop, doneInExcluded: () => doneInExcluded };
+
+
+  /* X1：公开方法面（实现已搬 executor-actions.ts；类型由实现函数推导，调用契约不变） */
+  async actOnce(...args: OmitMw<Parameters<typeof actOnce>>): ReturnType<typeof actOnce> {
+    return actOnce(this, ...args);
+  }
+  async scrollIntoView(...args: OmitMw<Parameters<typeof scrollIntoView>>): ReturnType<typeof scrollIntoView> {
+    return scrollIntoView(this, ...args);
+  }
+  async scrollDocument(...args: OmitMw<Parameters<typeof scrollDocument>>): ReturnType<typeof scrollDocument> {
+    return scrollDocument(this, ...args);
+  }
+  async scrollContainer(...args: OmitMw<Parameters<typeof scrollContainer>>): ReturnType<typeof scrollContainer> {
+    return scrollContainer(this, ...args);
+  }
+  async setRange(...args: OmitMw<Parameters<typeof setRange>>): ReturnType<typeof setRange> {
+    return setRange(this, ...args);
   }
 
-  /** 4d 阶段：步首抽池与就绪闸门（poolReady 轮询 / 池空判档 / after 补签 / before 指纹）。stopped = 页面未就绪。 */
-  private async runPoolGate(a: {
-    pg: AnyPage; stepNo: number; candidatePriority: "bucketed" | "main-first"; poolReady: boolean; poolReadyTimeoutMs: number;
-    poolReadyPollMs: number; poolGate: RunOptions["poolGate"]; verbose: boolean;
-    observeState: (elems: ElemPool | null) => Promise<StateFingerprint>; trace: TraceStep[]; warnings: string[];
-    pendingAfterIdx: number | null; beforeFp: StateFingerprint | null; lastPoolSize: number; lastPoolWaitedMs: number;
-    lastReadiness: Readiness | null; poolEmptyThisStep: boolean; readyEmptyWarned: boolean; stop: (code: StopCode, detail?: string, at?: number) => void;
-  }): Promise<PoolGatePhase> {
-    const { pg, stepNo, candidatePriority, poolReady, poolReadyTimeoutMs, poolReadyPollMs, poolGate, verbose, observeState, trace, warnings } = a;
-    let { pendingAfterIdx, beforeFp, lastPoolSize, lastPoolWaitedMs, lastReadiness, poolEmptyThisStep, readyEmptyWarned } = a;
-    // eval3 曝光面：no_progress 的 newTab 提示基线——步首 URL 与 context 页数（只读，零动作）。
-    const stepStartUrl = urlOf(pg); const stepStartTabs = contextPageCount(pg);
-    // P0 pool ready gate：SPA 的 domcontentloaded 可能先于交互元素渲染；这里只做“pool 非空”，目标/可执行性由后面分支判断。
-    let elems: ElemPool; let poolWaitedMs = 0;
-    let gateSettle: SettleResult | null = null; let gateBudgetMs = 0;
-    if (poolReady) {
-      const readyStarted = Date.now();
-      gateBudgetMs = Math.max(0, poolReadyTimeoutMs);
-      const readyDeadline = readyStarted + gateBudgetMs;
-      // C8：每轮 settle 的 timeout 都被 _extractPoolSettled 钳到剩余预算 ⇒ 总等待有真上限。
-      let ex = await this._extractPoolSettled(pg, candidatePriority, readyDeadline);
-      elems = ex.elems; gateSettle = ex.settle;
-      while (Object.keys(elems).length === 0 && Date.now() < readyDeadline) {
-        const remaining = readyDeadline - Date.now();
-        await sleep(Math.max(0, Math.min(poolReadyPollMs, remaining)));
-        if (Date.now() >= readyDeadline) break;   // 预算耗尽：不再起一轮会越界的 settle
-        ex = await this._extractPoolSettled(pg, candidatePriority, readyDeadline);
-        elems = ex.elems; gateSettle = ex.settle;
-      }
-      poolWaitedMs = Date.now() - readyStarted;
-    } else {
-      // F72-②：步首 settle 结论保留——rehydrateRescan 门控要用（非 poolReady 路径写它零行为影响）。
-      const headExtract = await this._extractPoolSettled(pg, candidatePriority);
-      elems = headExtract.elems; gateSettle = headExtract.settle;
-    }
-    lastPoolSize = Object.keys(elems).length;
-    // task-11（B3）：会话池高峰基线——池大小本来就算好了，记账零成本。
-    if (this._sessionFirstPoolTs === 0) this._sessionFirstPoolTs = Date.now();
-    if (lastPoolSize > this._sessionPoolHigh) this._sessionPoolHigh = lastPoolSize; lastPoolWaitedMs = poolWaitedMs;
-    // S1：before 指纹取**第一次已有观察**（步首池），零新增页面往返。
-    if (beforeFp === null) beforeFp = await observeState(elems);
-    // A1 子改动③：上一动作的 after 签名在此落账（本步首提取 = 上一动作后页面状态；先于 walk/hintLookup 与空池停因，清空也照实记）。
-    if (pendingAfterIdx !== null) {
-      const prev = trace[pendingAfterIdx];
-      if (prev !== undefined && prev.after === undefined) {
-        const ft = firstPoolText(elems);
-        prev.after = { url: urlOf(pg), pool_size: lastPoolSize, ...(ft === null ? {} : { first_text: ft }) };
-      }
-      pendingAfterIdx = null;
-    }
-    if (poolReady && Object.keys(elems).length === 0) {
-      // U3 四档判档（§5.3，唯一出处）：池空 ≠ 未就绪（not_ready 保留 run 级停因；ready_empty = 步级事实+warning 后继续；strict = 改判 not_ready）。
-      const readiness = await this._poolReadiness(pg, gateSettle, poolWaitedMs, gateBudgetMs, 0); lastReadiness = readiness; const strict = poolGate === "strict";
-      if (readiness.verdict === "not_ready" || strict) {
-        if (strict && readiness.verdict === "ready_empty") readiness.verdict = "not_ready";
-        const ev = readiness.evidence; const why = `page not ready: element pool stayed empty after ${ev.waited_ms}ms (budget_ms=${ev.budget_ms}, `
-          + `settled=${String(ev.settled)}, settle_timed_out=${String(ev.settle_timed_out)}, readyState=${ev.ready_state}`
-          + `${strict ? ", pool_gate=strict" : ""}) on step ${stepNo}`;
-        a.stop("page_not_ready", why, stepNo); if (verbose) console.log(`  step ${stepNo}: ${why}`);
-        return { stopped: true, stepStartUrl, stepStartTabs, elems, gateSettle, lastPoolSize, lastPoolWaitedMs, beforeFp, pendingAfterIdx, lastReadiness, poolEmptyThisStep, readyEmptyWarned };
-      }
-      // ready_empty：池空但页面已就绪 = 页面事实，不是未就绪证据；记证据后继续，让后续给出真正失败原因。
-      poolEmptyThisStep = true;
-      if (!readyEmptyWarned) {
-        readyEmptyWarned = true;
-        warnings.push(
-          `pool_empty: the pool stayed empty although the page is settled and readyState=complete `
-          + `(step ${stepNo}; sniff admitted=${readiness.evidence.sniff?.admitted ?? 0} visible ADMIT_SEL element(s), `
-          + `focusable=${readiness.evidence.sniff?.focusable ?? 0}, aria=${readiness.evidence.sniff?.aria ?? 0}, `
-          + `frames=${readiness.evidence.sniff?.frames ?? 0}, body_text=${readiness.evidence.sniff?.body_text ?? 0}) — continuing; pool_gate:"strict" would stop with page_not_ready；用 ctx.observe() 在会话内看准入面与 why_not_admitted`,
-        );
-      }
-    }
-    return { stopped: false, stepStartUrl, stepStartTabs, elems, gateSettle, lastPoolSize, lastPoolWaitedMs, beforeFp, pendingAfterIdx, lastReadiness, poolEmptyThisStep, readyEmptyWarned };
-  }
-
-  /**
-   * 4d 阶段：声明目标（**命令空间 walk**）——按当前观察在闭合集上走一遍；找不到 = 结构化
-   * target_not_found（永不回退全池/模型）。覆盖范围仅命令 walk；act-hint 解析面仍在 run()。
-   * 早停由本方法 stop() 记账（stopReason 回调保证日志与调用点一致）。
-   */
-  private async runDeclaredTargets(a: {
-    pg: AnyPage; stepNo: number; verbose: boolean; elems: ElemPool; cmdSpace: CommandDecl[]; cmdDone: Set<string>;
-    cmdI: number; cmdAttempts: Record<string, number>; noteSkipped: (s: SkippedAction) => void;
-    zeroExecSummary: () => string; goalHeld: () => Promise<boolean>;
-    goalSignalFn: ((page: AnyPage) => boolean | Promise<boolean>) | null;
-    frameTargetStop: (target: string) => Promise<{ code: StopCode; reason: string } | null>;
-    targets: DeclaredTargetsResolver; stop: (code: StopCode, detail?: string, at?: number) => void;
-    stopReason: () => string; forbidden: Record<string, Sig>; pruneForbids: (pool: ElemPool) => void;
-    hintOpts: () => HintMatchOptions; surfacePolicy: SurfacePolicy; frameHosts: string[] | null;
-    targetResolutionDeclared: boolean; candidateAttempts: number;
-    resolveCommandRef: (target: string, pool: ElemPool, op: string, blocked: Set<string>) => string[];
-    setDone: () => void;
-    setViewportUnderloaded: (v: { tag: string; id: string; scrollHeight: number; clientHeight: number; rendered: number }[] | null) => void;
-  }): Promise<DeclaredTargetsPhase> {
-    const { pg, stepNo, verbose, elems, cmdSpace, cmdDone, cmdAttempts, noteSkipped, zeroExecSummary,
-      goalHeld, goalSignalFn, frameTargetStop, targets, stop, stopReason, forbidden, pruneForbids, hintOpts,
-      surfacePolicy, frameHosts, targetResolutionDeclared, candidateAttempts, resolveCommandRef,
-      setDone, setViewportUnderloaded } = a;
-    let cmdI = a.cmdI;
-    let cmdPick: { cmd: CommandDecl; ref: string; index: number; cands: string[] } | null = null;
-    let rowAmbStop: { code: StopCode; reason: string } | null = null;
-    /** P0-C 首版能力面：DRF 目标只允许 click/scroll/hover（写值/拖拽/上传/坐标点击拒绝）。 */
-    const DECLARED_OPS = new Set(["click", "scroll", "hover"]);
-    // P2 COMMAND SPACE — the step's action is chosen ON THE CLOSED SET, not on the pool:
-    if (cmdSpace.length) {
-      const scans = new Set(Object.values(elems).map((x) => x.scan));
-      let pendingUnresolved: string[] = [];
-      for (let i = cmdI; i < cmdSpace.length; i++) {
-        const c = cmdSpace[i]!;
-        if (cmdDone.has(c.id)) continue;
-        if (c.op === "skip") {          // skip: resolves by definition, moves the page not at all
-          cmdDone.add(c.id);
-          cmdI = i + 1;
-          continue;
-        }
-        const target = c.target ?? "";
-        if ((cmdAttempts[c.id] ?? 0) >= candidateAttempts) {
-          // A2：一条命令最多试前 4 个可行动候选；到顶仍没成 = 这条命令在本步 OUT
-          //（记 attempt_limit 证据；后续 done 成立/不成立都有零执行摘要，不静默 done）。
-          noteSkipped({
-            command_id: c.id, target: c.target ?? null, reason: "attempt_limit",
-            detail: `${candidateAttempts} candidate(s) tried without success`,
-          });
-          cmdDone.add(c.id);
-          cmdI = i + 1;
-          continue;
-        }
-        // A2：可行动优先的候选列表（`null` 起 = 池里没有这个目标，先做一次 DOM 回捞）。
-        let candRefs = resolveCommandRef(target, elems, String(c.op), new Set(Object.keys(forbidden)));
-        if (candRefs.length === 0 && target !== "" && hintCandidates(target, elems, hintOpts()) === null) {
-          for (const [ref, e] of Object.entries(await hintLookup(pg, target, admitSelectorWithJsFor(this.surfacePolicy), { hosts: frameHosts }))) {
-            if (!e.dsh_ref) elems[ref] = e;
-          }
-          pruneForbids(elems);
-          candRefs = resolveCommandRef(target, elems, String(c.op), new Set(Object.keys(forbidden)));
-        }
-        if (candRefs.length === 0 && target !== "" && hintCandidates(target, elems, hintOpts()) === null) {
-          const attempt = await targets.tryIdentity(target, {
-            reasonPrefix: `command ${JSON.stringify(c.id)} identity target ${JSON.stringify(target)}`,
-            narrowNoun: "declaration", commandId: c.id,
-          });
-          if (attempt.kind === "ambiguous") break;
-          if (attempt.kind === "row") {
-            const { ref, el } = attempt;
-            elems[ref] = el;
-            pruneForbids(elems);
-            const pickedRefs = resolveCommandRef(target, elems, String(c.op),
-              new Set(Object.keys(forbidden)));
-            cmdPick = {
-              cmd: c, ref: pickedRefs[0] ?? ref, index: i,
-              cands: (pickedRefs.length ? pickedRefs : [ref]).slice(0, candidateAttempts),
-            };
-            break;
-          }
-        }
-        if (candRefs.length === 0 && target !== "" && targetResolutionDeclared
-            && hintCandidates(target, elems, hintOpts()) === null) {
-          const got = await targets.tryDeclared(target, String(c.op));
-          if (targets.declaredStop !== null) break;
-          if (got !== null) {
-            if (!DECLARED_OPS.has(String(c.op))) {
-              await targets.cleanupDeclared();
-              targets.declaredStop = {
-                code: "action_unsupported",
-                reason: `command ${JSON.stringify(c.id)} declares op '${String(c.op)}', but its target ${JSON.stringify(target)} was resolved by the declared-DOM fallback (DRF) on step ${stepNo} — the first version allows only click/scroll/hover for DRF targets; use a pool/identity target for '${String(c.op)}' or pick a supported op`,
-              };
-              break;
-            }
-            elems[got.ref] = got.el;
-            pruneForbids(elems);
-            cmdPick = { cmd: c, ref: got.ref, index: i, cands: [got.ref] };
-            break;
-          }
-        }
-        pruneForbids(elems);
-        if (candRefs.length > 1 && declaresRowAnchor(target)) {
-          const cand = hintCandidates(target, elems, hintOpts());
-          if (cand !== null && cand.refs.length > 1) {
-            for (const candRef of cand.refs) {
-              noteSkipped({
-                command_id: c.id, target, ref: candRef, reason: "target_ambiguous",
-                detail: `${cand.refs.length} row-anchor candidate(s) for ${JSON.stringify(target)}; `
-                  + "row anchors never act on the first of several rows",
-              });
-            }
-            rowAmbStop = {
-              code: "target_ambiguous",
-              reason: `command ${JSON.stringify(c.id)} target ${JSON.stringify(target)} declares a row anchor and matches ${cand.refs.length} candidate(s) (${cand.refs.join(", ")}) on step ${stepNo} — row anchors are fail-closed: several distinct rows never resolve to "the first one"; narrow in-row:<token> to a content token unique to one row or fix the row being pointed at`,
-            };
-            break;
-          }
-        }
-        if (candRefs.length > 0) {
-          cmdPick = { cmd: c, ref: candRefs[0]!, index: i, cands: candRefs.slice(0, candidateAttempts) };
-          break;
-        }
-        if (hintCandidates(target, elems, hintOpts()) === null) {
-          pendingUnresolved.push(c.id);
-          noteSkipped({ command_id: c.id, target: c.target ?? null, reason: "target_not_found" });
-          continue;
-        }
-        noteSkipped({
-          command_id: c.id, target: c.target ?? null, reason: "forbidden",
-          detail: `${cmdAttempts[c.id] ?? 0} candidate(s) tried, remaining candidates are forbidden`,
-        });
-        cmdDone.add(c.id);
-        cmdI = i + 1;
-      }
-      if (targets.identityStop !== null) {
-        stop(targets.identityStop.code, targets.identityStop.reason, stepNo);
-        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-        return { stopped: true, cmdPick, rowAmbStop, cmdI };
-      }
-      if (targets.declaredStop !== null) {
-        stop(targets.declaredStop.code, targets.declaredStop.reason, stepNo);
-        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-        return { stopped: true, cmdPick, rowAmbStop, cmdI };
-      }
-      if (rowAmbStop !== null) {
-        stop(rowAmbStop.code, rowAmbStop.reason, stepNo);
-        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-        return { stopped: true, cmdPick, rowAmbStop, cmdI };
-      }
-      if (cmdPick === null) {
-        let cmdFrameStop: { code: StopCode; reason: string } | null = null;
-        for (const cid of pendingUnresolved) {
-          const c = cmdSpace.find((x) => x.id === cid);
-          if (c === undefined || !c.target) continue;
-          cmdFrameStop = await frameTargetStop(c.target);
-          if (cmdFrameStop !== null) break;
-        }
-        if (cmdFrameStop !== null) {
-          stop(cmdFrameStop.code, cmdFrameStop.reason, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-          return { stopped: true, cmdPick, rowAmbStop, cmdI };
-        }
-        // 区分“目标不存在”和“目标存在但歧义”：歧义不是空间为空，而是候选集 > 1。
-        const ambiguous = cmdSpace.find((c) => {
-          if (c.op === "skip" || !c.target) return false;
-          if ((cmdAttempts[c.id] ?? 0) > 0) return false;
-          const cand = hintCandidates(c.target, elems, hintOpts());
-          return cand !== null && cand.decided === null && cand.refs.length > 1;
-        });
-        if (ambiguous?.target) {
-          const cand = hintCandidates(ambiguous.target, elems, hintOpts())!;
-          // A1：歧义的每个候选都进 skipped_actions——零执行不能只剩一句停因文案。
-          for (const candRef of cand.refs) {
-            noteSkipped({
-              command_id: ambiguous.id, target: ambiguous.target, ref: candRef,
-              reason: "target_ambiguous",
-              detail: `${cand.refs.length} distinct candidates for ${JSON.stringify(ambiguous.target)}; never guessed`,
-            });
-          }
-          stop("target_ambiguous",
-            `command ${JSON.stringify(ambiguous.id)} matches ${cand.refs.length} distinct candidates (${cand.refs.join(", ")}) for target ${JSON.stringify(ambiguous.target)} on step ${stepNo}`
-            + zeroExecSummary(), stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-          return { stopped: true, cmdPick, rowAmbStop, cmdI };
-        }
-        if (cmdDone.size >= cmdSpace.length) {
-          if (goalSignalFn && (await goalHeld())) {
-            setDone();
-            stop("dom_goal_signal",
-              `dom goal signal (commands resolved without action; signal held)${zeroExecSummary()}`, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: -> done (signal held after exhausted commands, 04-A)`);
-            return { stopped: true, cmdPick, rowAmbStop, cmdI };
-          }
-          stop("done_not_held",
-            `commands exhausted (${cmdDone.size}/${cmdSpace.length} acted) but the done-signal never held on step ${stepNo}`
-            + zeroExecSummary(), stepNo);
-        } else {
-          const under = await viewportUnderload(pg);
-          setViewportUnderloaded(under.length ? under : null);
-          const underNote = under.length
-            ? ` — viewport_underloaded: `
-              + under.map((h) => `${h.tag}${h.id ? `#${h.id}` : ""} scrollHeight=${h.scrollHeight} `
-                + `> clientHeight=${h.clientHeight}, rendered children=${h.rendered}`).join("; ")
-              + `（目标可能在未渲染/视口外的滚动内容里；不自动滚动，按六步法② 用滚动/展开原语或收窄窗口取证）`
-            : "";
-          const frameTargets = pendingUnresolved
-            .map((id) => cmdSpace.find((c) => c.id === id)?.target)
-            .filter((t): t is string => typeof t === "string" && t !== "");
-          const frameNote = frameHintFailureEvidence(pg, frameHosts, frameTargets, elems);
-          stop("target_not_found",
-            `command space matches nothing on this page — pending unresolved: ${pendingUnresolved.join(", ") || "-"} (unresolvable candidates are OUT; the space never falls back to the full pool) on step ${stepNo}. `
-            + HINT_CLOSED_SET_TEXT
-            + cmdDiscrimination(cmdSpace, pendingUnresolved, elems)
-            + identityHiddenSuffix(targets.identityHidden)
-            + declaredHiddenSuffix(targets.getDeclaredHidden())
-            + declaredMissSuffix(targets.declaredMiss)
-            + drfHintSuffix(targetResolutionDeclared)
-            + underNote
-            + (frameNote ? ` — ${frameNote}` : ""), stepNo);
-        }
-        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-        return { stopped: true, cmdPick, rowAmbStop, cmdI };
-      }
-    }
-    return { stopped: false, cmdPick, rowAmbStop, cmdI };
-  }
-
-  /**
-   * 4d 阶段：声明目标（**act-hint 解析面**）——恢复/回捞/DRF 把声明 hint 变成可引用元素；
-   * dead hint 沿有序 targetHints 前进；身份/DRF 结构化停因与 row-anchor 歧义在此早停。
-   * 覆盖范围仅 act-hint 解析；commandValue binding 之后逻辑仍在 run()。
-   */
-  private async runDeclaredHint(a: {
-    pg: AnyPage; stepNo: number; verbose: boolean; elems: ElemPool; commandMode: boolean; targets: DeclaredTargetsResolver;
-    warnings: string[]; stop: (code: StopCode, detail?: string, at?: number) => void; stopReason: () => string;
-    noteSkipped: (s: SkippedAction) => void; hintMatch: typeof hintMatch; hintLookup: typeof hintLookup;
-    hintCandidates: typeof hintCandidates; declaresRowAnchor: typeof declaresRowAnchor;
-    frameTargetStop: (target: string) => Promise<{ code: StopCode; reason: string } | null>;
-    pruneForbids: (pool: ElemPool) => void; forbidden: Record<string, Sig>;
-    advanceHint: () => void; currentHint: () => string | null; hintIndex: () => number; hintCount: number;
-    hintOpts: () => HintMatchOptions; surfacePolicy: SurfacePolicy; frameHosts: string[] | null;
-    targetResolutionDeclared: boolean; isTyping: (el: Elem) => boolean;
-  }): Promise<DeclaredHintPhase> {
-    const { pg, stepNo, verbose, elems, commandMode, targets, warnings, stop, stopReason, noteSkipped,
-      hintMatch, hintLookup, hintCandidates, declaresRowAnchor, frameTargetStop, pruneForbids, forbidden,
-      advanceHint, currentHint, hintIndex, hintCount, hintOpts, surfacePolicy, frameHosts,
-      targetResolutionDeclared, isTyping } = a;
-    let curHint = commandMode ? null : currentHint();
-    for (let guard = 0; curHint !== null && guard < 8; guard++) {
-      if (hintMatch(curHint, elems, hintOpts()) === null) {
-        // U3/C10：节点身份去重（见命令路径同一处注释）。
-        for (const [ref, e] of Object.entries(await hintLookup(pg, curHint, admitSelectorWithJsFor(surfacePolicy), { hosts: frameHosts }))) if (!e.dsh_ref) elems[ref] = e;
-        // FW8：act hint 声明面身份回捞（池+ADMIT 都落空后；决策步不走、命中只进本步局部池）。
-        if (hintMatch(curHint, elems, hintOpts()) === null) {
-          const attempt = await targets.tryIdentity(curHint, {
-            reasonPrefix: `target_hint ${JSON.stringify(curHint)} identity declaration`, narrowNoun: "hint",
-          });
-          if (attempt.kind === "row") elems[attempt.ref] = attempt.el;
-        }
-        // P0-C：DRF 是声明目标解析链最后一段（命中即注入局部池给 ref；fill 族 = action_unsupported）。
-        if (hintMatch(curHint, elems, hintOpts()) === null && targetResolutionDeclared) {
-          const got = await targets.tryDeclared(curHint, "click");
-          if (targets.declaredStop !== null) break;
-          if (got !== null) {
-            if (isTyping(got.el)) {
-              await targets.cleanupDeclared();
-              targets.declaredStop = { code: "action_unsupported", reason: `act hint ${JSON.stringify(curHint)} was resolved by the declared-DOM fallback (DRF) but the target ${got.el.tag} "${got.el.label}" needs a typing action on step ${stepNo} — the first version allows only click/scroll/hover for DRF targets; use a pool/identity target or declare the target on a click element` };
-              break;
-            }
-            elems[got.ref] = got.el;
-          }
-        }
-      }
-      // drop forbids whose ref now points at a different element
-      pruneForbids(elems);
-      // dead hint（有序声明）= 前进一步到下一条声明，而不是烧掉这个 subgoal。
-      const dead = hintMatch(curHint, elems, hintOpts());
-      if (dead !== null && dead in forbidden && hintIndex() < hintCount - 1) {
-        advanceHint();
-        curHint = currentHint();
-        continue;
-      }
-      break;
-    }
-    // FW8：身份歧义是结构化停因，绝不回退"随便选一个"或交给模型猜。
-    if (targets.identityStop !== null) {
-      stop(targets.identityStop.code, targets.identityStop.reason, stepNo);
-      if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`); return { stopped: true, curHint };
-    }
-    // P0-C：DRF 歧义/首版能力面同样是结构化停因。
-    if (targets.declaredStop !== null) {
-      stop(targets.declaredStop.code, targets.declaredStop.reason, stepNo);
-      if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-      return { stopped: true, curHint };
-    }
-    // F82/F83：行锚声明 = 多候选零动作——widen 之前落成结构化歧义（候选进 skipped，绝不取首行）。
-    if (!commandMode && curHint !== null && declaresRowAnchor(curHint)) {
-      const cand = hintCandidates(curHint, elems, hintOpts());
-      if (cand !== null && cand.refs.length > 1) {
-        for (const candRef of cand.refs) {
-          noteSkipped({ ref: candRef, reason: "target_ambiguous", detail: `${cand.refs.length} row-anchor candidate(s) for ${JSON.stringify(curHint)}; ` + "row anchors never act on the first of several rows", });
-        }
-        stop("target_ambiguous",
-          `target_hint ${JSON.stringify(curHint)} declares a row anchor and matches ${cand.refs.length} candidate(s) (${cand.refs.join(", ")}) on step ${stepNo} — row anchors are fail-closed: several distinct rows never resolve to "the first one"; narrow in-row:<token> to a content token unique to one row, or narrow within:/frame: on step ${stepNo}`, stepNo);
-        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`); return { stopped: true, curHint };
-      }
-    }
-    if (targets.identityHidden !== null) warnings.push(`identity_hidden: target ${JSON.stringify(targets.identityHidden.target)} matched ${targets.identityHidden.total} element(s) in the DOM but ${targets.identityHidden.hidden} are hidden (checkVisibility CSS / zero box) — not acted on; the step continues on the declared failure path`);
-    const declaredHiddenNow = targets.getDeclaredHidden();
-    if (declaredHiddenNow !== null) warnings.push(`declared_hidden: target ${JSON.stringify(declaredHiddenNow.target)} matched ${declaredHiddenNow.total} element(s) in the DOM but ${declaredHiddenNow.hidden} are hidden (checkVisibility CSS / zero box) — not acted on; the step continues on the declared failure path`);
-    // P0-D：声明 act hint 只在被排除 frame 里存在 → frame_not_allowed（只读探测，不回退模型）。
-    if (!commandMode && curHint !== null && hintMatch(curHint, elems, hintOpts()) === null) {
-      const hintFrameStop = await frameTargetStop(curHint);
-      if (hintFrameStop !== null) {
-        stop(hintFrameStop.code, hintFrameStop.reason, stepNo);
-        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`); return { stopped: true, curHint };
-      }
-    }
-    return { stopped: false, curHint };
-  }
-
-  /** 4d 阶段：模型选择（rule → ask → floor → reobserve → escalate → adjudicate → R2b → nominated-family 修复）；
-   * 早停/日志已在此记账；宽扫替换本步视图（elems 随返回值交回）。动作执行仍在 run()。 */
-  private async runModelPick(a: {
-    pg: AnyPage; stepNo: number; instruction: string; verbose: boolean; elems: ElemPool; ruleRef: string | null;
-    curHint: string | null; commandMode: boolean; forbidden: Record<string, Sig>; noted: Record<string, string> | null;
-    targets: DeclaredTargetsResolver;
-    trace: TraceStep[]; adjudicate: boolean; reobserve: boolean; escalateFn: EscalatorLike | null;
-    expectedFamily: ElemFamily | null; confFloor: number; candidatePriority: "bucketed" | "main-first";
-    tieredHint: boolean; rulesOnly: boolean; decisionDegradedReasonClass: NonNullable<BrowserMiddleware["decisionDegraded"]>["reason_class"] | null; rejectedAskConfs: number[];
-    warnings: string[];
-    reobserved: boolean; escalated: boolean; escalatedPick: string | null;
-    stepTimeoutLeft: () => number; stop: (code: StopCode, detail?: string, at?: number) => void; stopReason: () => string;
-    pickElement: (goal: string, page: AnyPage, pool: ElemPool, blocked: Set<string>, notes: Record<string, string> | null) => Promise<[string | null, number, Record<string, number>]>;
-    orderedPool: (pool?: ElemPool) => ElemPool; settleBeforeExtract: (page: AnyPage) => Promise<unknown>;
-    pruneForbids: (pool: ElemPool) => void; hintOpts: () => HintMatchOptions; frameHosts: string[] | null;
-    stateTextFn: (page: AnyPage, instr: string) => Promise<string>;
-    rowAnchorNote: (targets: readonly (string | null | undefined)[]) => string;
-    declaredTargets: () => readonly (string | null | undefined)[];
-    goalHeld: () => Promise<boolean>; goalSignalFn: ((page: AnyPage) => boolean | Promise<boolean>) | null;
-    isTyping: (el: Elem) => boolean; modelLabel: () => string; degradedReasonSuffix: () => string;
-    choiceLimitReason: () => string | null; clearChoiceLimitReason: () => void;
-  }): Promise<ModelPickPhase> {
-    const { pg, stepNo, instruction, verbose, elems: elemsInit, ruleRef, curHint, commandMode, forbidden, noted, trace, targets,
-      adjudicate, reobserve, escalateFn, expectedFamily, confFloor, candidatePriority, tieredHint, rulesOnly,
-      decisionDegradedReasonClass, rejectedAskConfs, warnings, stepTimeoutLeft, stop, stopReason, pickElement, orderedPool,
-      settleBeforeExtract, pruneForbids, hintOpts, frameHosts, stateTextFn, rowAnchorNote, declaredTargets,
-      goalHeld, goalSignalFn, isTyping, modelLabel, degradedReasonSuffix, choiceLimitReason, clearChoiceLimitReason,
-      reobserved: reobservedInit, escalated: escalatedInit, escalatedPick: escalatedPickInit } = a;
-    let elems = elemsInit;
-    let ref: string | null = null; let conf = 0;
-    // 方法标签跟着决策源走：provider 自报其名（decision-service / 基线名…）；
-    const mm = modelLabel();
-    let method = mm;
-    // 粗分类（聚合用）：rule=规则/闭集解析，model=provider 决策票，escalate=老师点名。
-    let decisionKind: "rule" | "model" | "escalate" = "model";
-    let layaMargin: number | null = null;      // C3-R top-two margin (diagnostic)
-    let tierAsk: { n: number; tier: number } | null = null;   // P1 diagnostic: the narrowed question
-    let reobserved = reobservedInit; let escalated = escalatedInit; let escalatedPick = escalatedPickInit;
-    let nominatedRepair = false;
-    if (ruleRef && !(ruleRef in forbidden)) {
-      ref = ruleRef;
-      conf = 1.0;
-      method = "rule:match";
-      decisionKind = "rule";
-    } else {
-      // the rule's target is forbidden (inert or tried) -> fall through to
-      const forbiddenSet = new Set(Object.keys(forbidden));
-      // P1 TIERED HINT (opt-in, `tieredHint`; OFF keeps today's behaviour byte-identical):
-      // an ambiguous-in-tier plan hint used to collapse to null and become
-      // "pick 1 of the whole 40" — now it becomes "pick 1 of THESE candidates".
-      // The tier is a SMALLER QUESTION, never a decider: below floor or no answer,
-      // the step re-asks the full pool and every later rung stays as today.
-      let askPool = orderedPool();
-      if (tieredHint && curHint !== null && ruleRef === null) {
-        const cand = hintCandidates(curHint, elems, hintOpts());
-        if (cand !== null && cand.decided === null && cand.refs.length > 1) {
-          const subset: ElemPool = {};
-          for (const r of cand.refs) {
-            if (elems[r] !== undefined && !forbiddenSet.has(r)) subset[r] = elems[r]!;
-          }
-          if (Object.keys(subset).length > 1) {
-            askPool = subset;
-            tierAsk = { n: Object.keys(subset).length, tier: cand.tier };
-          }
-        }
-      }
-      let [picked, pconf, pprobs] = await pickElement(instruction, pg, askPool, forbiddenSet, noted);
-      if (askPool !== elems && tierAsk !== null && (picked === null || pconf < confFloor)) {
-        // narrowed ask abstained: today's full-pool ask still gets its turn
-        if (verbose) console.log(`  step ${stepNo}: tiered hint (${tierAsk!.n} candidates) abstained -> full pool`);
-        tierAsk = null;
-        [picked, pconf, pprobs] = await pickElement(instruction, pg, elems, forbiddenSet, noted);
-      }
-      ref = picked;
-      conf = pconf;
-      method = mm;
-      layaMargin = topTwoMargin(pprobs);
-    }
-    if (ref === null) {
-      // A2：候选窗口超过决策服务上限——结构化停因，绝不把 200+ 选项硬塞过去。
-      if (choiceLimitReason() !== null) {
-        const why = choiceLimitReason()!;
-        clearChoiceLimitReason();
-        stop("decision_service_choice_limit", why, stepNo);
-        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
-      }
-      // In rules-only mode a null ref usually means "no runtime to ask", which is not
-      if (rulesOnly) {
-        // task-14（D1）：被降级吞掉的步（本需要模型选点）在 step warning 记 decision_degraded
-        // ——停因保留（诚实机制不变），留痕说明这是配置面问题而非模型缺席，并给分类建议。
-        if (decisionDegradedReasonClass !== null) {
-          warnings.push(`decision_degraded: 决策面已降级（${decisionDegradedReasonClass}）——`
-            + `本步需要模型选点，规则面无法替代；${decisionDegradedAdvice(
-              decisionDegradedReasonClass === "midrun_death" ? "unknown" : decisionDegradedReasonClass)}`);
-        }
-        // 诚实停因：这一步**什么动作都没声明**（无 target_hint、
-        // 无命令空间）时，"缺模型"是个谎言——真正的问题要么是"信号已成立但这步没声明
-        // 零动作命令，引擎不肯替作者宣布完成"，要么是"信号根本不成立"。当场评估一次
-        // 信号（只在走向停止时付这一次），把实况和出路说出口，而不是把用户引去装模型。
-        if (curHint === null && !commandMode) {
-          const held = goalSignalFn ? (await goalHeld()) : false;
-          stop("no_model_runtime",
-            `step ${stepNo} declares no action (no target_hint, no commands) and rules-only has no model `
-            + `to pick one — its done-signal ${held ? "ALREADY holds on this page: declare a zero-action "
-                + 'command (commands: [{"op":"skip"}]) on this subgoal, or name a target_hint, so the '
-                + "signal can be honored"
-              : "does not hold on this page either: name a target_hint, declare commands, "
-                + "or provide a decision model"}`
-            + degradedReasonSuffix(), stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
-        }
-        stop("no_model_runtime",
-          `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`
-          // 规划引导：计划点了名、规则没解出来、模型又不在/弃权——当场送闭集。
-          + (curHint !== null && ruleRef === null
-              ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
-              : "")
-          // A3：provider 是抛错降级（而非本来就没装）时，把 HTTP 事实带上——排查不必再猜。
-          + degradedReasonSuffix() + identityHiddenSuffix(targets.identityHidden)
-          // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
-          + rowAnchorNote(declaredTargets()), stepNo);
-      } else {
-        stop("action_space_exhausted",
-          `action space exhausted on step ${stepNo}`
-          + (curHint !== null && ruleRef === null
-              ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
-              : "") + identityHiddenSuffix(targets.identityHidden)
-          // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
-          + rowAnchorNote(declaredTargets()), stepNo);
-      }
-      if (verbose && rulesOnly) console.log(`  step ${stepNo}: ${stopReason()}`);
-      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
-    }
-    // PORT FIX: a model answer can name a ref that is no longer in THIS
-    // step's pool (the screen changed between the scan and the pick, or the
-    // answer is nonsense). The Python reference reads `elems[ref]` unguarded
-    // and dies with a KeyError; stop the subgoal with a reason instead.
-    if (elems[ref] === undefined) {
-      // 这条是最难懂的一句：`picked ref 'undefined' is not in the element
-      const poolSize = Object.keys(elems).length;
-      if (curHint) {
-        stop("hint_matched_nothing",
-          `target_hint ${JSON.stringify(curHint)} matched nothing in a pool of ${poolSize} element(s) on step ${stepNo}`
-          // F73：DRF 计数事实（实跑且零命中才非空；缺省 declared 关 = 恒空串，逐字节不变）。
-          + declaredHiddenSuffix(targets.getDeclaredHidden()) + declaredMissSuffix(targets.declaredMiss)
-          // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
-          + rowAnchorNote(declaredTargets()), stepNo);
-      } else {
-        stop("step_names_no_target",
-          `step ${stepNo} names no target: no target_hint(s), no rule matched any of the ${poolSize} element(s), and the picker returned no usable element（给这一步加 target_hint，或在页面上点名一个稳定句柄）`, stepNo);
-      }
-      if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
-    }
-    // The confidence floor decays as failed elements are forbidden: a
-    // shrunken action space legitimately lowers the margin.
-    const floor = Math.max(0.10, confFloor - 0.05 * Object.keys(forbidden).length);
-    if (conf < floor) {
-      const pending = elems[ref]!;
-      // U8：本次 ask 的 conf（后续恢复路径会改写 conf 变量；记账用分支入口的值）。
-      const askConf = conf;
-      /** U8：本分支内被闸门丢掉的 ask conf（暂存；提交点见各出口——adjudicate 复用意见时撤回）。 */
-      const gateRejected: number[] = [];
-      // A frozen plan may legitimately re-drive an element within one
-      const wantDesc = (isTyping(pending) ? "type text into" : "click")
-        + ` ${pending.tag} "${pending.label}"`;
-      const priorHit = trace.some((t) => t.desc === wantDesc && t.executed);
-      if (priorHit && conf >= 0.10) {
-        /* re-drive: proceed despite floor */
-      } else if (rulesOnly) {
-        // No runtime installed and no rule/hint resolved this step: say exactly that.
-        stop("no_model_runtime",
-          `no model runtime: this step needs a model pick (rules-only mode) on step ${stepNo}`
-          // 同 low_confidence：hint 被点名却没解出来时，当场送闭集（规划引导）。
-          + (curHint !== null && ruleRef === null
-              ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
-              : "")
-          // A3：同上——降级原因（HTTP 状态码 + 服务错误关键句）随停因透出。
-          + degradedReasonSuffix(), stepNo);
-        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
-      } else if (!(adjudicate && ref !== null)
-        && Object.keys(forbidden).length >= Math.max(0, Object.keys(elems).length - 1)) {
-        // A2′：`adjudicate` 开着且还有活着的候选时，不能用"动作空间耗尽"抢在裁决前面——
-        // 那最后一个低置信候选正是该被信号裁决的那一个（"错了白跑"是作者声明过的）。
-        // 没开裁决时这个提前停原样保留（逐字节今天）。
-        gateRejected.push(askConf);   // U8：意见在 floor 处被丢，动作空间也已耗尽——记一笔
-        stop("action_space_exhausted",
-          `action space exhausted (${Object.keys(forbidden).length} forbidden) on step ${stepNo}`, stepNo);
-      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
-      } else {
-        // U8：走到恢复分支 = 原 ask 的意见已被闸门丢弃（reobserve/escalate 换别的意见、
-        // low_confidence 停；唯一例外是 adjudicate 复用原意见——下面 pop 撤回）。
-        gateRejected.push(askConf);
-        // OBSERVATION-BOTTLENECK RECOVERY (browser-use's "the button is there, we
-        let recovered = false;
-        // A2′：加宽重看即便没过闸门，它看到的候选也可能比窄池那一个更好——
-        // 记下来，若这一步声明了裁决资格，就用**最后一次观察到的**低置信选择（elems 已是宽视图）。
-        let widePick: { ref: string; conf: number } | null = null;
-        if (reobserve && !reobserved && ref !== null && stepTimeoutLeft() > 0) {
-          // F3：步级 timeoutMs 过期后不再起新的宽扫重问（每轮受整步挂钟帽约束）。
-          reobserved = true;
-          await settleBeforeExtract(pg);
-          const wide = await this.candidates!.extract({ page: pg, jsProbe: true, maxElements: WIDER_ELEMENTS, widgets: true, quotas: WIDE_QUOTAS, candidatePriority, hosts: frameHosts });
-          if (Object.keys(wide).length > Object.keys(elems).length) {
-            // refs are positional: re-prune forbids whose ref now names a
-            pruneForbids(wide);
-            // 宽视图同样只做**排序先验**（不丢元素：加宽看到的东西不该被族过滤掉）。
-            const wideAsk = orderedPool(wide);
-            const [ref2, conf2] = await pickElement(instruction, pg, wideAsk, new Set(Object.keys(forbidden)), noted);
-            // The wider view BECOMES the step's view even when the local model
-            elems = wide;
-            if (ref2 !== null && conf2 >= floor) {
-              ref = ref2;
-              conf = conf2;
-              method = `${mm}:reobserve`;
-              recovered = true;
-              if (verbose) console.log(`  step ${stepNo}: re-observed wider (${Object.keys(wide).length} elements) -> ${ref} conf=${conf2.toFixed(2)}`);
-            } else {
-              if (ref2 !== null) {
-                widePick = { ref: ref2, conf: conf2 };
-                gateRejected.push(conf2);   // U8：宽看重问的意见也未过 floor（adjudicate 复用时撤回）
-              }
-              if (verbose) console.log(`  step ${stepNo}: re-observed wider (${Object.keys(wide).length} elements) -> still below floor`);
-            }
-          }
-        }
-        // ESCALATION (C3-R's deliberative path): a stronger reasoner may still
-        // name one of the elements the harness showed. It is a picker, not a
-        // planner — an answer that is not a ref from THIS view is rejected, so
-        // nothing it says can invent an element, a value or an action.
-        // task-14（D1）：决策面已降级（起跑探判死/中途死亡）→ 升级链规则兜底，
-        // 不再咨询死服务（死服务不重试超过 1 次：probe 1 次 / pickInner 捕获 1 次）。
-        if (!recovered && escalateFn && !escalated && decisionDegradedReasonClass === null
-            && stepTimeoutLeft() > 0) {
-          // F3：步级 timeoutMs 过期后不再发起新的升级点名。
-          escalated = true;
-          const crit = criteriaView(orderedPool(), new Set(Object.keys(forbidden)), await ariaInteractiveLines(pg));
-          const state = { url: urlOf(pg), title: await pg.title(), main_text: await stateTextFn(pg, instruction) };
-          try {
-            const pick = await escalateFn({ instruction, criteria: crit, why: `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)}`, ...state });
-            if (pick && crit[pick] !== undefined && !(pick in forbidden)) {
-              ref = pick;
-              method = "escalate";
-              decisionKind = "escalate";
-              escalatedPick = pick;
-              recovered = true;
-              if (verbose) console.log(`  step ${stepNo}: escalated -> ${pick}`);
-            } else if (verbose) console.log(`  step ${stepNo}: escalation rejected (${pick === null ? "no answer" : `'${pick}' is not a shown candidate`})`);
-          } catch (e) {
-            if (verbose) console.log(`  step ${stepNo}: escalation failed (${describeActionError(e)})`);
-          }
-        }
-        if (!recovered) {
-          // A2′：这一步声明了"错了白跑"（`adjudicate`，加载期已钉 `effect.irreversible:false`
-          // + 可判定信号），于是"低置信"不再是阻塞理由——把模型此刻的选择**执行**，让这一步
-          // 自己的 DOM 信号事后裁决（信号成立 = done；不成立 = 下面循环尾部禁掉这个元素，
-          // 一次白跑就是它的全部代价）。这是老师的"提名被执行、信号定生死"同一认识论，
-          // 只是爆炸半径由作者声明限定。没声明 ⇒ 逐字节今天（低置信即阻塞）。
-          const bestPick = widePick ?? (ref !== null ? { ref, conf } : null);
-          if (adjudicate && bestPick !== null && !rulesOnly) {
-            // U8：被裁决执行的那份意见（原 ask 或宽看重问）不算被拒——撤回最后一笔暂存。
-            gateRejected.pop();
-            ref = bestPick.ref;
-            conf = bestPick.conf;
-            method = `${mm}:adjudicated`;
-            if (verbose) console.log(`  step ${stepNo}: adjudicating below gate (${ref} conf=${conf.toFixed(2)} < floor ${floor.toFixed(2)}) — the step's own signal judges`);
-          } else {
-            // U8：提交点①——low_confidence 停，暂存的意见确被丢弃。
-            rejectedAskConfs.push(...gateRejected);
-            stop("low_confidence",
-              `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)} on step ${stepNo}`
-              // 规划引导：计划点了名、规则却没解出来——当场把闭集送给作者，省一次读源码确诊
-              + (curHint !== null && ruleRef === null
-                  ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
-                  : "")
-              // eval3 曝光面：observe 是会话内的免费侦察通道（R02 自发使用并获赞），
-              + `；用 ctx.observe() 在会话内看准入面与 why_not_admitted`
-              // A2 判别②：分数不过闸门 ≠ 目标不存在——用内存里的池把两种问题分开说
-              // （候选在而置信度低 = 闸门问题；池里没有词面相关候选 = 目标可能不在本页面）。
-              + lowConfDiscrimination(instruction, elems, ref)
-              // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串，
-              // reason 逐字节不变）。
-              + rowAnchorNote(declaredTargets()), stepNo);
-      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
-          }
-        }
-        // U8：提交点②——reobserve/escalate 挽回了这一步，但被丢弃的意见照记（它们
-        // 确实在 floor 处被拒过；挽回意见本身走 trace 进既有 `conf` 聚合）。
-        rejectedAskConfs.push(...gateRejected);
-      }
-    }
-    // R2b：词面零重叠守卫（宽扫的第二个触发器）。模型提名（非规则命中、非满置信）
-    // 的 label 与指令零词面重叠（CJK 二元组/ASCII 词）时，是"自信地错"的典型形态——
-    // 低置信恢复等不到（模型不觉得自己错，m.ctrip 实证：指令"出发地" vs 提名
-    // "组合交通出行"，conf 0.71 过闸点走页脚）。执行前强制一次宽扫重问（宽池含 R2/
-    // R2c 启发式候选），重问结果照常过闸；无更优则保留原提名。规则命中与 conf=1.00
-    // 的模型提名不触发（books/quotes/hn 全量 rule:match conf=1.00 实证零回归面）。
-    if (ref !== null && !reobserved && method === mm && conf < 0.9
-        && stepTimeoutLeft() > 0
-        && !lexicalOverlap(instruction, String(elems[ref]?.label ?? ""))) {
-      reobserved = true;
-      await settleBeforeExtract(pg);
-      const wideR2b = await this.candidates!.extract({ page: pg, jsProbe: true, maxElements: WIDER_ELEMENTS, widgets: true, quotas: WIDE_QUOTAS, candidatePriority, hosts: frameHosts });
-      if (Object.keys(wideR2b).length > Object.keys(elems).length) {
-        pruneForbids(wideR2b);
-        const wideAskR2b = orderedPool(wideR2b);
-        const [ref2, conf2] = await pickElement(instruction, pg, wideAskR2b, new Set(Object.keys(forbidden)), noted);
-        elems = wideR2b;
-        if (ref2 !== null && conf2 >= floor) {
-          ref = ref2;
-          conf = conf2;
-          method = `${mm}:reobserve`;
-          if (verbose) console.log(`  step ${stepNo}: R2b relevance widen -> ${ref} conf=${conf2.toFixed(2)}`);
-        } else if (verbose) {
-          console.log(`  step ${stepNo}: R2b relevance widen -> keep original `
-            + `(${ref2 === null ? "no pick" : `conf ${conf2.toFixed(2)}`} below floor)`);
-        }
-      }
-    }
-    // S2 ③ **有界修复**（只在走向停止时付一次成本）：第一轮用全池（软先验）解析出的动作族
-    // 与提名不符 / 没解出目标时，才用"该族"再做一次解析；仍不成立 ⇒ 结构化停，
-    // 绝不执行一个与提名矛盾的动作。
-    // 为什么不是第一道过滤：结构族 ≠ 语义动作（div[role=combobox] = click 但语义 select、
-    // contenteditable = click 但语义 fill、input[type=range] = fill 但语义设值），硬过滤会
-    // 把真目标或关键上下文元素一并排掉（项目方推敲结论）。
-    if (expectedFamily !== null) {
-      const pickedFamily = ref !== null ? elemFamily(elems[ref]!) : null;
-      if (ref === null || pickedFamily !== expectedFamily) {
-        const narrow = filterElemsByFamily(elems, expectedFamily);
-        if (Object.keys(narrow).length === 0) {
-          stop("nominated_family_empty",
-            `nominated instruction "${expectedFamily}" but this page has no ${expectedFamily} candidates on step ${stepNo}`, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
-        }
-        const repairFloor = Math.max(0.10, confFloor - 0.05 * Object.keys(forbidden).length);
-        const forbiddenSet = new Set(Object.keys(forbidden));
-        const repairRule = navRule(instruction, narrow) ?? affordanceRule(instruction, narrow, null);
-        let repaired: { ref: string; conf: number; method: string } | null = null;
-        if (repairRule !== null && !(repairRule in forbidden)) {
-          repaired = { ref: repairRule, conf: 1, method: "rule:match" };
-        }
-        if (repaired === null) {
-          const [rp, rconf] = await pickElement(instruction, pg, narrow, forbiddenSet, noted);
-          if (rp !== null && rconf >= repairFloor) repaired = { ref: rp, conf: rconf, method: mm };
-        }
-        if (repaired === null) {
-          stop("nominated_family_mismatch",
-            `nominated instruction "${expectedFamily}", but the page resolved ${pickedFamily ?? "nothing"} and no ${expectedFamily} candidate passed the floor on step ${stepNo}`, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-      return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
-        }
-        if (verbose) console.log(`  step ${stepNo}: nominated-family repair ${expectedFamily} -> ${repaired.ref} (${repaired.method})`);
-        ref = repaired.ref;
-        conf = repaired.conf;
-        method = repaired.method;
-        nominatedRepair = true;
-      }
-    }
-    // S4：stale 重解析重试会换成本步重新解析出的元素，故 el 可重新绑定（ref 本就是 let）。
-    return { stopped: false, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
-  }
-
-  /** 4d 阶段：动作后阶段（日志 → host/popup 信封复核 → learned-hint → done 评估/学习 →
-   * SPA settle → manual → noul → 重复守卫 → inert/anti-repeat）。早停 stop()/日志已在此记账；
-   * 返回 control 决定调用点 continue/break。run 级 epilogue（_runFlags/stepState）留在 run()。 */
-  private async runPostAction(a: {
-    pg: AnyPage; stepNo: number; verbose: boolean; instruction: string; elems: ElemPool; ref: string; el: Elem;
-    desc: string; how: string; method: string; conf: number; inert: boolean; executed: boolean; mm: string;
-    decisionKind: "rule" | "model" | "escalate";
-    post: { url: string }; hostGate: string[] | null; trace: TraceStep[];
-    setPendingAfterIdx: (idx: number) => void; done: boolean; manualDone: boolean; donePreheld: boolean | null;
-    manualGoal: boolean; manualConfirmFn: ((desc: string, stateExcerpt: string) => boolean | Promise<boolean>) | null;
-    goalSignalFn: ((page: AnyPage) => boolean | Promise<boolean>) | null; goalHeld: () => Promise<boolean>;
-    cmdWalkComplete: () => boolean; flagSuspectedAsync: () => void; forbid: (ref: string, el: Elem, why: string) => void;
-    outcomeMemory: OutcomeMemoryLike | null; effectiveRuns: Record<string, number>; hintMemory: HintMemoryLike | null;
-    doneTimeoutMs: number; donePollMs: number; stepStartUrl: string; stepStartTabs: number;
-    stop: (code: StopCode, detail?: string, at?: number) => void; stopReason: () => string;
-    isDone: (instruction: string, page: AnyPage) => Promise<number>;
-  }): Promise<PostActionPhase> {
-    const { pg, stepNo, verbose, instruction, elems, ref, el, desc, how, method, conf, inert, executed, mm, decisionKind, post,
-      hostGate, trace, donePreheld, manualGoal, manualConfirmFn, goalSignalFn, goalHeld, cmdWalkComplete,
-      flagSuspectedAsync, forbid, outcomeMemory, effectiveRuns, hintMemory, doneTimeoutMs, donePollMs,
-      stepStartUrl, stepStartTabs, stop, stopReason, isDone, setPendingAfterIdx,
-      done: done0, manualDone: manualDone0 } = a;
-    let done = done0; let manualDone = manualDone0;
-    setPendingAfterIdx(trace.length - 1);
-    if (verbose) console.log(`  step ${stepNo}: ${desc} (${how}, ${method}, conf=${conf.toFixed(2)}${inert ? ", inert" : ""})`);
-    // NAVIGATION ENVELOPE, post-action half: an executed action must not land
-    const landed = disallowedHost(post.url, hostGate);
-    if (landed !== null) {
-      stop("host_not_allowed",
-        `navigated off the envelope to '${landed}' — not among the declared hosts (${hostGate!.join(", ")}) on step ${stepNo}`, stepNo);
-      if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-      return { control: "break", done, manualDone };
-    }
-    if (hostGate && hostGate.length) {
-      const landedPopup = deniedContextUrl(pg, hostGate);
-      if (landedPopup !== null) {
-        stop("popup_not_allowed",
-          `action opened ${landedPopup} outside the declared hosts envelope (${hostGate.join(", ")}) on step ${stepNo}`, stepNo);
-        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-        return { control: "break", done, manualDone };
-      }
-    }
-
-    if (executed && !inert && this._learnedHintApplied && method === "rule:match") {
-      (hintMemory as HintMemoryLike | null)?.countUsed?.(1);
-    }
-    if (executed && !inert) this._advanceHint();
-    // A1：多动作闭集（N≥2）未走完时，中间动作不评估 done（goalSignalFn 不付这次页面往返）；
-    // 同时上面"信号成立才学的 hint"也自然不会学到中间态。单命令/无命令步恒真，逐字节原行为。
-    if (goalSignalFn && cmdWalkComplete() && (await goalHeld())) {
-      // A MODEL pick that actually advanced the subgoal is a hint we EARNED: record
-      if (hintMemory && this._hintKey && (decisionKind === "model" || decisionKind === "escalate")) {
-        // F84（批 3）首项：记忆产物带行锚——池在手（elems）时 dup 成员且普通形状
-        // 不自证唯一 ⇒ suggestHints 第 5 档**内容**行锚候选（复用，不发明第二套生成
-        // 逻辑）；评审收口：单用 row-index 位置性 hint 不进记忆（见 hint-memory.ts）。
-        // F84 面覆盖补齐：run 面的 `hint_token_allow` 同批下传到记忆生成面（词元护栏
-        // 放行表在 record 面与歧义证据面同口径）。
-        const learned = induceHint(el, elems,
-          this.hintTokenAllow !== undefined ? { tokenAllow: this.hintTokenAllow } : undefined);
-        if (learned) {
-          hintMemory.record(this._hintKey, learned);
-          if (verbose) console.log(`  step ${stepNo}: learned hint ${learned} for this page+subgoal`);
-        }
-      }
-      done = true;
-      flagSuspectedAsync();
-      stop("dom_goal_signal", "dom goal signal", stepNo);
-      return { control: "break", done, manualDone };
-    }
-    // ---- SPA settle ------------------------------------------------------
-    if (goalSignalFn && executed) {
-      // A1：闭集未走完时中间动作不进入 done 轮询（评估推迟到最后一个命令之后；单命令步不变）。
-      // popup 复扫不 gate：它不是 done 评估，是导航信封的安全复扫，逐动作都该付。
-      if (cmdWalkComplete()) {
-        const settleDeadline = Date.now() + Math.max(0, doneTimeoutMs);
-        let poll = 0;
-        while (Date.now() < settleDeadline) {
-          await sleep(Math.max(1, donePollMs));
-          poll++;
-          if (await goalHeld()) {
-            done = true;
-            flagSuspectedAsync();
-            stop("dom_goal_signal", "dom goal signal", stepNo);
-            if (verbose) console.log(`  step ${stepNo}: -> done (dom goal signal, settled after ${poll * Math.max(1, donePollMs)} ms)`);
-            break;
-          }
-        }
-      }
-      // Popup 可能在 action 之后几十/几百 ms 才 commit；done 轮询结束后再扫一次 context，
-      if (hostGate && hostGate.length) {
-        const settledPopup = deniedContextUrl(pg, hostGate);
-        if (settledPopup !== null) {
-          done = false;
-          stop("popup_not_allowed",
-            `action opened ${settledPopup} outside the declared hosts envelope (${hostGate.join(", ")}) on step ${stepNo}`, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-          return { control: "break", done, manualDone };
-        }
-      }
-      if (done) return { control: "break", done, manualDone };
-    }
-    // `{manual: true}`: no DOM fact can confirm this step, so the human is asked
-    if (manualGoal && executed && !inert) {
-      const excerpt = JSON.stringify(post).slice(0, 300);
-      if (!manualConfirmFn) {
-        stop("manual_needs_human",
-          "manual step needs a human: no manualConfirmFn configured", stepNo);
-        return { control: "break", done, manualDone };
-      }
-      const attested = await manualConfirmFn(instruction, excerpt);
-      trace.push({ step: stepNo, desc, how: attested ? "manual_confirmed" : "manual_declined",
-        executed: true, method: "manual", conf: round3(conf), manual: true,
-        url: urlOf(pg), state: excerpt,
-      });
-      if (attested) {
-        done = true;
-        manualDone = true;
-        stop("manual_confirmation", "manual confirmation (human oracle)", stepNo);
-        return { control: "break", done, manualDone };
-      }
-    }
-    // DOM signals are the only truth, so the model's noul is consulted ONLY
-    if (goalSignalFn === null) {
-      const doneP = await isDone(instruction, pg);
-      if (doneP >= this.doneThreshold) {
-        done = false;
-        stop("noul_unverified",
-          `laya claims done (p=${doneP.toFixed(2)}) but no DOM signal to verify`, stepNo);
-        return { control: "break", done, manualDone };
-      }
-    }
-    // D3/R-4：同一元素在本 subgoal 内被有效驱动多次而信号始终不成立 = 死目标（按元素签名
-    // 计数，ref 位置性会重编号）；有倒计时/轮播的页面永远 inert，噪声不能只靠 max_steps 收尾。
-    {
-      const repeatKey = JSON.stringify(esig(el));
-      const ran = (effectiveRuns[repeatKey] ?? 0) + 1;
-      effectiveRuns[repeatKey] = ran;
-      if (this.maxEffectiveRepeats > 0 && ran > this.maxEffectiveRepeats) {
-        // eval3 曝光面（_blank 连点 4 次重复标签 3/3 轮）：URL 没动 + context 里多出了
-        // 标签 = 动作八成开进了新标签而引擎还留在原页——当场把 newTab opts 指给作者。
-        // 替身拿不到页数（-1）或拿不到 URL 时不提示，绝不误报。
-        const nowUrl = urlOf(pg);
-        const nowTabs = contextPageCount(pg);
-        const newTabHint = nowTabs > stepStartTabs && stepStartTabs >= 0
-          && typeof nowUrl === "string" && nowUrl !== "" && nowUrl === stepStartUrl
-          ? ` — 动作疑似打开新标签：用 step opts newTab:{urlContains} 自动采用并去重`
-          : "";
-        stop("no_progress",
-          `${el.tag} "${el.label}" was executed ${ran} time(s) in this subgoal and the done-signal never held — the target looks dead (or the signal can never fire); stopping here instead of blaming the step budget (max_steps=${this.maxSteps}) on step ${stepNo}`
-          + newTabHint,
-          stepNo);
-        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-        return { control: "break", done, manualDone };
-      }
-    }
-    // Inert action on this element -> forbid it for the rest of the subgoal
-    // regardless of method (this is what killed the Sign-in loops).
-    // A1 §2.2.5：**done 在动作前已成立**（done_preheld）时，click 快照没变不能判死元素——
-    // 动作可能是异步生效，或 done 本来就成立、这次动作只是搭便车。记 suspected_async 警告，
-    // 不 forbid、不写 outcome memory inert（否则会把一次有效动作记成死元素，跨运行继续误伤）。
-    // 动作后 done 成立的路径在这之前已 break，不会走到这里。
-    if (inert) {
-      if (how === "clicked" && donePreheld === true) {
-        flagSuspectedAsync();
-        return { control: "continue", done, manualDone };
-      }
-      forbid(ref, el, "inert");
-      outcomeMemory?.record(outcomeMemory.key(urlOf(pg), instruction), JSON.stringify(esig(el)), "inert");
-      return { control: "continue", done, manualDone };
-    }
-    // It worked: forget any earlier inert mark for this exact element (pages
-    outcomeMemory?.record(outcomeMemory.key(urlOf(pg), instruction), JSON.stringify(esig(el)), "effective");
-    if (this.antiRepeat) {
-      // Forbid after a *semantic* (laya) pick that missed the signal, or
-      if (method === mm || how === "filled") forbid(ref, el, "anti-repeat");
-    }
-    // A2′：裁决过一次的元素不配第二次机会——声明说"错了白跑"，白跑一次就是它的全部代价。
-    // 不挂在 antiRepeat 下（那是循环通用卫生），因为"一次裁决"是 A2′ 的语义本身：
-    // 走到这里 = 执行了、非惰性、信号没成立 ⇒ 这一格裁判已给出"不算"，禁掉换下一个候选。
-    if (method === `${mm}:adjudicated` && executed) forbid(ref, el, "adjudicated-missed");
-    // 动作间最小等待：只在实际执行过动作、且还要继续要下一个动作时付。
-    if (executed && this.actionDelayMs > 0) await sleep(this.actionDelayMs);
-    return { control: "next", done, manualDone };
-  }
-
-  /** 4d 阶段：动作准备（ActionAdapter 能力面/命令文案/DRY-RUN/needs_value 早停/pre-fill/风险闸门）；
-   * 准备通过后交给 runActionExecute（stale 重试/执行/证据/trace.push）。 */
-  private async runActionPhase(a: {
-    pg: AnyPage; stepNo: number; instruction: string; verbose: boolean; elems: ElemPool; ref: string; el: Elem;
-    cmdPick: { cmd: CommandDecl; ref: string; index: number; cands: string[] } | null; commandMode: boolean;
-    commandValue: unknown; commandByValue: boolean; commandBindMissing: string | null;
-    dryRun: boolean; force: boolean; effect: { irreversible?: boolean } | null | undefined;
-    slots: Record<string, unknown>; values: Record<string, unknown>; candidatePriority: "bucketed" | "main-first";
-    curHint: string | null; method: string; conf: number; mm: string; decisionKind: "rule" | "model" | "escalate";
-    layaMargin: number | null; tierAsk: { n: number; tier: number } | null; nominatedRepair: boolean;
-    escalatedPick: string | null; prevented: number; noted: Record<string, string> | null;
-    staleRetry: boolean; rehydrateRescanFact: unknown;
-    targets: DeclaredTargetsResolver; trace: TraceStep[]; cmdAttempts: Record<string, number>;
-    blockedRetry: Record<string, [number, number]>; reAdmitted: Set<string>;
-    forbidden: Record<string, Sig>; forbid: (ref: string, el: Elem, why: string) => void;
-    noteSkipped: (s: SkippedAction) => void; pruneForbids: (pool: ElemPool) => void;
-    stop: (code: StopCode, detail?: string, at?: number) => void; stopReason: () => string;
-    domFallbackCleanup: () => Promise<void>; markDryRan: () => void;
-    getPendingAfterIdx: () => number | null; warnings: string[];
-    actionDeclEvidence: () => Record<string, unknown>; refCollision: () => Record<string, unknown>;
-    domFallbackEvidence: () => Record<string, unknown>;
-  }): Promise<ActionPhaseResult> {
-    const { pg, stepNo, instruction, verbose, elems, ref, el, cmdPick, commandMode, commandValue, commandByValue,
-      commandBindMissing, dryRun, force, effect, slots, values, candidatePriority, curHint, method, conf, mm,
-      decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, prevented, noted, staleRetry,
-      rehydrateRescanFact, targets, trace, cmdAttempts, blockedRetry, reAdmitted, forbidden, forbid, noteSkipped,
-      pruneForbids, stop, stopReason, domFallbackCleanup, markDryRan, getPendingAfterIdx, warnings,
-      actionDeclEvidence, refCollision, domFallbackEvidence } = a;
-    // ActionAdapter 能力面：命令闭集声明的 op 必须是当前元素已声明的能力。
-    if (commandMode && cmdPick) {
-      const caps = actionCapabilities(el);
-      const op = String(cmdPick.cmd.op);
-      if (op !== "skip" && !caps.includes(op as ActionCapability)) {
-        // A2：这个候选不满足 op 能力面，但命令还有其他候选 ⇒ 记跳过、禁用本候选、下一步
-        const alt = cmdPick.cands.some((r) => r !== ref && !(r in forbidden)
-          && actionCapabilities(elems[r]!).includes(op as ActionCapability));
-        if (alt) {
-          forbid(ref, el, "action_unsupported");
-          noteSkipped({ command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null, ref, reason: "action_unsupported",
-            detail: `element declares [${caps.join(", ")}] but the command op is '${op}'; trying the next candidate` });
-          cmdAttempts[cmdPick.cmd.id] = (cmdAttempts[cmdPick.cmd.id] ?? 0) + 1;
-          if (verbose) console.log(`  step ${stepNo}: command ${cmdPick.cmd.id} candidate ${ref} lacks '${op}' -> next candidate`);
-          return { control: "continue", ref, el, elems };
-        }
-        // B1：fill（命令闭集里唯一的取值/打字 op）被拒时点名出路——只说"元素不声明这个 op"
-        const remedy = op === "fill"
-          ? (caps.includes("upload")
-            // U6：file input 归 upload 族——fill 被拒时直接点名正确的 op，别把作者引向决策语句。
-            ? `。该目标是文件输入（input[type=file]）——上传用命令 op 'upload'（值走声明绑定），不是 fill`
-            : `。该输入族不支持命令 ${op}——改用决策语句（省略 act，值经 slots 绑定）或深链直达目标 URL`)
-          : op === "upload"
-            ? "。upload 只对 input[type=file] 成立——检查目标 hint 是否指到了文件输入"
-            : op === "clickAt"
-              ? "。clickAt 只对 click 族元素成立（如 canvas）——检查目标 hint 是否指到了非点击控件"
-              : "";
-        await targets.cleanupIdentity();   // FW8：能力守门在动作前停——章到此已无用途
-        await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
-        stop("action_unsupported",
-          `command ${JSON.stringify(cmdPick.cmd.id)} declares op '${op}', but element ${ref} (${el.tag} "${el.label}") only declares [${caps.join(", ")}] on step ${stepNo}`
-          + remedy, stepNo);
-        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-        return { control: "break", ref, el, elems };
-      }
-    }
-    // 05-B：动作文案按命令 op 派生（此前只有 typing/click 两态，scroll 步
-    const cmdOpName = commandMode && cmdPick ? String(cmdPick.cmd.op) : "";
-    const verb = cmdOpName === "scroll" ? "scroll to"
-      : cmdOpName === "drag" ? "drag"
-      : cmdOpName === "check" ? "check"
-      : cmdOpName === "hover" ? "hover"
-      : cmdOpName === "clickAt" ? "click at"
-      : cmdOpName === "upload" ? "upload"
-      : cmdOpName === "fill" ? (this._isTyping(el) ? "type text into" : "fill")
-      : cmdOpName === "select" ? "select"
-      : this._isTyping(el) ? "type text into" : "click";
-    const desc = `${verb} ${el.tag} "${el.label}"`;
-    // DRY RUN stops HERE: the target is resolved (rule hint / local model /
-    if (dryRun) {
-      const probe = await this.dryRunProbe(pg, el, force);
-      markDryRan();
-      await targets.cleanupIdentity();   // FW8：干跑探测结束，章不再需要
-      await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
-      if (probe.actionable) {
-        stop("dry_run", `dry-run: would ${desc}${force ? " (force)" : ""} (${method}, conf=${conf.toFixed(2)})`, stepNo);
-      } else {
-        stop("dry_run_not_actionable",
-          `dry-run: target not actionable (${probe.reason ?? "unknown"})`, stepNo);
-      }
-      trace.push({ step: stepNo, desc, method, conf: round3(conf), executed: false, dry_run: true, actionable: probe.actionable, ...(probe.reason === null ? {} : { reason: probe.reason }), ...(force ? { forced: true } : {}),
-        would: `${el.tag} "${el.label}"`, url: urlOf(pg),
-        ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
-      });
-      if (verbose) {
-        console.log(`  step ${stepNo}: DRY-RUN `
-          + (probe.actionable ? `would ${desc}${force ? " (force)" : ""}` : `not actionable (${probe.reason ?? "unknown"})`));
-      }
-      return { control: "break", ref, el, elems };
-    }
-    // P2: a fill/select whose DECLARED binding has no value stops here — honestly,
-    if (commandMode && commandBindMissing !== null) {
-      noteSkipped({ command_id: cmdPick!.cmd.id, target: cmdPick!.cmd.target ?? null, ref: cmdPick!.ref, reason: "needs_value", detail: commandBindMissing });
-      trace.push({ step: stepNo, desc, how: "needs_value", executed: false, method, conf: 1.0, command: cmdPick!.cmd.id, ref: cmdPick!.ref, skipped: true, skip_reason: "needs_value",
-        url: urlOf(pg), ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
-      });
-      await targets.cleanupIdentity();   // FW8：缺值在动作前停——章到此已无用途
-      await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
-      stop("needs_value",
-        `command ${JSON.stringify(cmdPick!.cmd.id)}: ${commandBindMissing} — a declared binding either has its value in the plan or the step stops (红线②: never guessed) on step ${stepNo}`, stepNo);
-      if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-      return { control: "break", ref, el, elems };
-    }
-    // Pre-fill guard: a click whose form has empty fields that the plan's
-    if (!this._isTyping(el) && cmdOpName !== "hover") {
-      // Pre-fill before ANY click, including clicks on a submit-type input.
-      for (const pe of await this._missingRequired(pg, slots, elems, values, candidatePriority)) {
-        const [phow] = await this._executeElement(pg, pe, slots, null, undefined, false, values);
-        if (verbose) console.log(`  step ${stepNo}.pre: fill required ${JSON.stringify(pe.label)} -> ${phow}`);
-      }
-    } else if (method === "rule:match" && !commandMode) {
-      // A rule-picked field with no slot value cannot be filled; forbid it so
-      if (this._slotValue(el, slots, values) === null && !this._isSubmit(el)) {
-        forbid(ref, el, "needs_value");
-        noteSkipped({ ref, reason: "needs_value", ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
-        trace.push({ step: stepNo, desc, how: "needs_value", executed: false, method, conf: round3(conf), ref, skipped: true, skip_reason: "needs_value", url: urlOf(pg),
-          ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
-        });
-        await targets.cleanupIdentity();   // FW8：本步不再动作（needs_value）——章清零
-        await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
-        if (verbose) console.log(`  step ${stepNo}: (needs_value, rule) -> skip ${ref}`);
-        return { control: "continue", ref, el, elems };
-      }
-    }
-    // §4：可逆性是**声明**，不该靠关键词猜。写了 effect.irreversible 就以它为准
-    let risky: boolean, riskP: number;
-    // U6：上传的可逆性弱（只写 input.files，不提交表单），不新增 risky 语义——
-    if (cmdOpName === "upload") {
-      risky = false;
-      riskP = 0;
-    } else if (effect?.irreversible !== undefined) {
-      risky = effect.irreversible;
-      riskP = effect.irreversible ? 1.0 : 0.0;
-    } else {
-      [risky, riskP] = await this.isRisky(instruction, desc);
-    }
-    let confirmed = false;
-    if (risky) {
-      if (verbose) console.log(`  step ${stepNo}: RISKY ${desc} (p=${riskP.toFixed(2)}) -> asks for confirmation`);
-      confirmed = await this.confirmFn(desc);
-      if (!confirmed) {
-        forbid(ref, el, "risk-declined");
-        noteSkipped({ ref, reason: "risk-declined", ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
-        trace.push({ step: stepNo, desc, risky: true, executed: false, confirmed: false, url: urlOf(pg), ref, skipped: true, skip_reason: "risk-declined",
-          ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
-        });
-        await targets.cleanupIdentity();   // FW8：风险闸门拒绝 = 本步不动作——章清零
-        await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
-        return { control: "continue", ref, el, elems };
-      }
-    }
-    return this.runActionExecute({
-      pg, stepNo, instruction, verbose, elems, ref, el, desc, cmdOpName, risky, confirmed, force, method, conf, mm,
-      decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, prevented, noted, cmdPick, commandMode,
-      commandValue, commandByValue, slots, values, candidatePriority, curHint, staleRetry, rehydrateRescanFact,
-      targets, trace, cmdAttempts, blockedRetry, reAdmitted, forbidden, forbid, noteSkipped, pruneForbids,
-      stop, stopReason, domFallbackCleanup, getPendingAfterIdx, warnings, actionDeclEvidence, refCollision,
-      domFallbackEvidence,
-    });
-  }
-
-  /** 4d 阶段：动作执行（stale 重试/分派/证据/trace.push）；返回 run 级回写字段。 */
-  private async runActionExecute(a: {
-    pg: AnyPage; stepNo: number; instruction: string; verbose: boolean; elems: ElemPool; ref: string; el: Elem;
-    desc: string; cmdOpName: string; risky: boolean; confirmed: boolean; force: boolean; method: string; conf: number;
-    mm: string; decisionKind: "rule" | "model" | "escalate"; layaMargin: number | null;
-    tierAsk: { n: number; tier: number } | null; nominatedRepair: boolean; escalatedPick: string | null;
-    prevented: number; noted: Record<string, string> | null;
-    cmdPick: { cmd: CommandDecl; ref: string; index: number; cands: string[] } | null; commandMode: boolean;
-    commandValue: unknown; commandByValue: boolean; slots: Record<string, unknown>; values: Record<string, unknown>;
-    candidatePriority: "bucketed" | "main-first"; curHint: string | null; staleRetry: boolean;
-    rehydrateRescanFact: unknown; targets: DeclaredTargetsResolver; trace: TraceStep[];
-    cmdAttempts: Record<string, number>; blockedRetry: Record<string, [number, number]>; reAdmitted: Set<string>;
-    forbidden: Record<string, Sig>; forbid: (ref: string, el: Elem, why: string) => void;
-    noteSkipped: (s: SkippedAction) => void; pruneForbids: (pool: ElemPool) => void;
-    stop: (code: StopCode, detail?: string, at?: number) => void; stopReason: () => string;
-    domFallbackCleanup: () => Promise<void>; getPendingAfterIdx: () => number | null; warnings: string[];
-    actionDeclEvidence: () => Record<string, unknown>; refCollision: () => Record<string, unknown>;
-    domFallbackEvidence: () => Record<string, unknown>;
-  }): Promise<ActionPhaseResult> {
-    const { pg, stepNo, instruction, verbose, elems: elems0, ref: ref0, el: el0, desc, cmdOpName, risky, confirmed,
-      force, method, conf, mm, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, prevented, noted,
-      cmdPick, commandMode, commandValue, commandByValue, slots, values, candidatePriority, curHint, staleRetry,
-      rehydrateRescanFact, targets, trace, cmdAttempts, blockedRetry, reAdmitted, forbidden, forbid, noteSkipped,
-      pruneForbids, stop, stopReason, domFallbackCleanup, getPendingAfterIdx, warnings, actionDeclEvidence,
-      refCollision, domFallbackEvidence } = a;
-    let elems = elems0; let ref = ref0; let el = el0;
-    let executedDelta = 0; let lastEffectOut: StateEffect | undefined; let cmdDoneId: string | null = null;
-    let nextCmdI: number | null = null;
-    // S4：stale 重解析重试的账户（本步内最多 STALE_RETRY_MAX 次；trace 每次记录一条）。
-    const STALE_RETRY_MAX = 2;
-    const staleRetries: Array<{ attempt: number; reason: string; ref: string }> = [];
-    const staleEvidence = (): Record<string, unknown> => (staleRetries.length ? { stale_retry: staleRetries.slice() } : {});
-    /** S4：步级 force 声明的执行证据（动作 trace 行上 forced=true）。 */
-    const forcedEvidence = (): Record<string, unknown> => (force ? { forced: true } : {});
-    /** F72-②：显式重扫事实（trace 行 additive；本步至多一次，没跑 = 键不出现）。 */
-    const rehydrateRescanEvidence = (): Record<string, unknown> => (rehydrateRescanFact === null ? {} : { rehydrate_rescan: rehydrateRescanFact });
-    /**
-     * 重试只能对着**可复现的声明**重新解析：命令 target 优先，其次 act hint（规则命中）。
-     * 纯模型挑元素的决策步没有声明目标 ⇒ 不重试（重解析必须复现，不能猜一个"看起来像"的）。
-     */
-    const declaredStaleTarget = commandMode && cmdPick
-      && typeof cmdPick.cmd.target === "string" && cmdPick.cmd.target.trim()
-      ? cmdPick.cmd.target
-      : (method === "rule:match" && curHint !== null ? curHint : null);
-    let pre = await this.snapshot(pg);
-    // Click path goes through the actionability probe: a free element is
-    let how: string | null = null;
-    let arg: unknown = null;
-    /** S1：本动作的 effect 读回（只有 fill 会产生；最后一次非空值进 StepStateRecord）。 */
-    let fillEffect: StateEffect | undefined;
-    const isScrollCommand = cmdOpName === "scroll";
-    const isDragCommand = cmdOpName === "drag";
-    const isHoverCommand = cmdOpName === "hover";
-    const isClickAtCommand = cmdOpName === "clickAt";
-    let actionability: ActionabilityDetail | null = null;
-    /** 本条动作（含重试）最后一次 actionability 探针给出的失败原因。 */
-    let probeFailure: string | null = null;
-    for (let attempt = 0; ; attempt++) {
-      how = null; arg = null; fillEffect = undefined; actionability = null; probeFailure = null;
-      // force：跳过 actionability 探针，直接按 Playwright force 语义动作（仍要求可定位）。
-      // 不点击，如实记 hit_test 证据（绝不静默成功）。命中通过后仍走既有 actionability 探针。
-      const declaredNow = targets.getDeclared();
-      if (!force && declaredNow !== null && declaredNow.ref === ref && !this._isTyping(el)
-          && !isScrollCommand && !isDragCommand && !isHoverCommand && !isClickAtCommand) {
-        const ht = await this._declaredHitTest(pg, el);
-        if (!ht.ok) {
-          probeFailure = `hit_test:${ht.kind}`;
-          declaredNow.hit_test = ht.kind;
-          declaredNow.blocker = ht.blocker;
-          actionability = { reason: probeFailure, bbox: null, blocker: ht.blocker, requery: "present" };
-        }
-      }
-      if (probeFailure === null && !force && !this._isTyping(el) && !isScrollCommand
-          && !isDragCommand && !isHoverCommand && !isClickAtCommand) {
-        probeFailure = await this.occludedReason(pg, el);
-        // S1：actionability 失败现场（bbox/覆盖者/重查是否还在）；非该原因时保持 null。
-        actionability = this._takeActionabilityDetail();
-        if (probeFailure === "__clicked__") {
-          try {
-            await pg.waitForLoadState("domcontentloaded", { timeout: 3000 });
-          } catch {
-            /* nothing to wait for */
-          }
-          how = "clicked";
-          arg = null;
-        }
-      }
-      if (probeFailure === null && how === null) {
-        // Submit-type inputs carry their label in `value` and must be clicked,
-        if (isHoverCommand) {
-          // S4：hover 原语——只移动指针（:hover 展开菜单/图层面板），不点击、不导航。
-          [how, arg, fillEffect] = await this._executeElement(pg, el, slots, null, "hover", force);
-        } else if (isClickAtCommand) {
-          // U7：坐标点击原语——走 _executeElement 的 clickAt 分支（含坐标解析与 bbox 越界校验），
-          [how, arg, fillEffect] = await this._executeElement(pg, el, slots, commandMode ? { value: commandValue, byValue: commandByValue } : null, "clickAt", force);
-        } else if (isScrollCommand || isDragCommand) {
-          // A3：`scroll` 命令可带方向原语 `to`（ctx.command("scroll", sel, {to:"bottom"})）——
-          const scrollTo = isScrollCommand ? cmdPick?.cmd.to : undefined;
-          if (scrollTo !== undefined) {
-            const sr = await this._scrollContainerForElement(pg, el, scrollTo);
-            how = sr.ok ? "scrolled" : "action_failed";
-            arg = sr.ok ? sr.scrollTop : (sr.stopCode ?? "not_scrollable");
-          } else {
-            [how, arg, fillEffect] = await this._executeElement(pg, el, slots, commandMode ? { value: commandValue, byValue: commandByValue } : null, isDragCommand ? "drag" : "scroll", force);
-          }
-        } else if (!this._isTyping(el)) {
-          [how, arg] = await this._clickOnly(pg, el, force);
-        } else {
-          [how, arg, fillEffect] = await this._executeElement(pg, el, slots, commandMode ? { value: commandValue, byValue: commandByValue } : null, commandMode ? String(cmdPick!.cmd.op) : undefined, force,
-            // U1：决策路径的显式值袋（命令步的具名绑定 `bound` 恒优先，values 不参与）。
-            commandMode ? undefined : values);
-        }
-      }
-      // S4 stale 判据（只有这三类；action-timeout / 有覆盖者且节点仍在都不算 stale）。
-      const staleReason = probeFailure !== null && probeFailure !== "__clicked__"
-        ? (probeFailure === "stale_ref"
-          || (probeFailure.startsWith("not-actionable-or-covered") && actionability?.requery === "detached")
-          ? probeFailure : null)
-        : (how === "stale_ref" || how === "action_failed" ? how : null);
-      if (!staleRetry || staleReason === null || attempt >= STALE_RETRY_MAX || declaredStaleTarget === null) break;
-      // 重抽池：先给重渲染一个短拍（settle 在脏页上会再等静默），再用**同一声明目标**
-      await sleep(120);
-      const fresh = (await this._extractPoolSettled(pg, candidatePriority)).elems;
-      pruneForbids(fresh);
-      // 命令目标：按 op 的能力面重新排候选并剔除已禁；act hint：同一 hint 语义重解析。
-      let freshRef: string | null = null;
-      if (commandMode) {
-        freshRef = this.resolveCommandRef(declaredStaleTarget, fresh, cmdOpName || "click", new Set(Object.keys(forbidden)))[0] ?? null;
-      } else {
-        const r = hintMatch(declaredStaleTarget, fresh, this._hintOpts());
-        if (r !== null && !(r in forbidden)) freshRef = r;
-      }
-      if (freshRef === null || fresh[freshRef] === undefined) break;   // 此刻仍解析不到：不猜、按原失败报
-      const prevDeclared = targets.getDeclared();
-      if (prevDeclared !== null && prevDeclared.ref !== freshRef) targets.setDeclared(null);   // 证据只跟同一元素
-      staleRetries.push({ attempt: attempt + 1, reason: staleReason, ref: freshRef });
-      if (verbose) console.log(`  step ${stepNo}: stale retry ${attempt + 1} (${staleReason}) -> ${freshRef}`);
-      elems = fresh;
-      ref = freshRef;
-      el = fresh[freshRef]!;
-      pre = await this.snapshot(pg);   // 重试动作的 pre 快照 = 此刻页面
-    }
-    // FW8：身份回捞的章只服务本次动作定位——动作尝试（含 stale 重试）一结束就清，
-    await targets.cleanupIdentity();
-    await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
-    // U6/U7：upload 的文件/声明值非法、clickAt 的坐标坏格式/越界都是**配置错误**，
-    // 不是页面问题——结构化停在这里，不落成"跳过这个候选继续猜下一个"
-    if (how === "config_error") {
-      const detail = String(arg ?? `${cmdOpName || "command"} configuration error`);
-      forbid(ref, el, "config_error");
-      noteSkipped({ ref, reason: "config_error", ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}), detail });
-      trace.push({ step: stepNo, desc, how: "config_error", executed: false, method, conf: round3(conf), ref, skipped: true, skip_reason: "config_error", url: urlOf(pg), ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
-        ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
-      });
-      stop("config_error", detail, stepNo);
-      if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
-      return { control: "break", ref, el, elems };
-    }
-    if (fillEffect !== undefined) {
-      lastEffectOut = fillEffect;
-      // S5b：摘要只留 kind/applied（值本身可能是凭据/隐私，进模型上文的面只要事实）。
-      this._lastEffectSeen = { kind: fillEffect.kind, applied: fillEffect.applied };
-    }
-    const executed = how === "clicked" || how === "filled" || how === "scrolled"
-      || how === "dragged" || how === "hovered" || how === "uploaded";
-    if (!executed) {
-      // 末次失败原因：actionability 探针给出的，或动作本身返回的（stale_ref/needs_value/
-      const reason = probeFailure !== null && probeFailure !== "__clicked__" ? probeFailure : String(how);
-      // needs_value / stale_ref: this element cannot advance the plan right
-      forbid(ref, el, reason);
-      if (reason.startsWith("not-actionable-or-covered") && !reAdmitted.has(ref)) {
-        blockedRetry[ref] = [stepNo, trace.length];
-      }
-      // A1：动作阶段没执行成 —— skipped_actions 记原因与命令身份（零执行步骤的证据）。
-      // S1：not-actionable-or-covered 另附结构化现场（bbox/覆盖者/重查节点是否还在）。
-      noteSkipped({
-        ref, reason, ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}), ...(actionability === null ? {} : {
-          detail: `bbox=${actionability.bbox === null ? "?" : `${actionability.bbox.x},${actionability.bbox.y} ${actionability.bbox.width}x${actionability.bbox.height}`}`
-            + `; blocker=${actionability.blocker ?? "none"}; requery=${actionability.requery}`,
-        }),
-      });
-      // A2：命令步的候选尝试计数（前 4 个为止；失败的候选已被 forbid，下一步换下一个）。
-      if (cmdPick) cmdAttempts[cmdPick.cmd.id] = (cmdAttempts[cmdPick.cmd.id] ?? 0) + 1;
-      trace.push({ step: stepNo, desc, how: reason, executed: false, method, conf: round3(conf), ref, skipped: true, skip_reason: reason, url: urlOf(pg), ...(cmdPick ? { command: cmdPick.cmd.id } : {}), ...(actionability === null ? {} : { actionability }),
-        ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
-      });
-      if (verbose) console.log(`  step ${stepNo}: (${reason}, ${method}) -> skip ${ref}`);
-      return { control: "continue", ref, el, elems };
-    }
-    const post = await this.snapshot(pg);
-    // U7：clickAt 的实际点击坐标进证据（trace 行 position + executed_actions.position）；
-    const clickRaw = cmdOpName === "clickAt" && typeof arg === "object" && arg !== null
-      ? (arg as { position?: unknown }).position
-      : undefined;
-    const clickPosition = typeof clickRaw === "object" && clickRaw !== null
-      && typeof (clickRaw as { x?: unknown }).x === "number"
-      && typeof (clickRaw as { y?: unknown }).y === "number"
-      ? { x: (clickRaw as { x: number }).x, y: (clickRaw as { y: number }).y }
-      : null;
-    // U6：upload 的 changed 是**动作结果**而不是快照 diff——文件写进 input 不一定改
-    const upload = how === "uploaded" && typeof arg === "object" && arg !== null ? arg as { files?: unknown; count?: unknown; expected?: unknown } : null;
-    const uploadFiles = upload !== null && Array.isArray(upload.files)
-      ? upload.files.filter((f): f is string => typeof f === "string")
-      : null;
-    // A1：changed = pre/post 快照是否变化（诚实字段，供审查判"点击成功但页面没动"）。
-    const changed = upload !== null
-      ? Number(upload.count) >= Number(upload.expected)
-      : JSON.stringify(pre) !== JSON.stringify(post);
-    // scroll 改变的是 viewport，不是 url/text/input 快照；不能把“快照没变”误判成 inert。
-    const inert = (how === "scrolled" || how === "dragged" || how === "hovered") ? false : !changed;
-    // A1：本子目标真的执行了几个动作（零执行步骤的判据）。
-    executedDelta = 1;
-    // P2: an executed command is ACTED whether or not the page moved — the walk
-    if (executed && cmdPick) {
-      cmdDoneId = cmdPick.cmd.id; nextCmdI = cmdPick.index + 1;
-    }
-    // A1：动作身份（op/ref/target）落 trace —— executed_actions / skipped_actions 从这里对账。
-    const actionOp = commandMode && cmdPick ? String(cmdPick.cmd.op)
-      : how === "filled" ? (el.tag === "select" ? "select" : "fill")
-      : how === "scrolled" ? "scroll"
-      : how === "dragged" ? "drag"
-      : how === "hovered" ? "hover"
-      : "click";
-    // A1 §2.2.5：click 执行了、但 pre/post 快照没变，随后 done 却成立 —— 这不是"死元素"，
-    const flagSuspectedAsync = (): void => {
-      if (how !== "clicked" || changed) return;
-      const idx = getPendingAfterIdx();
-      const row = idx === null ? undefined : trace[idx];
-      if (row !== undefined) {
-        row.inert = false;            // 不是 inert：效果在快照之后到达
-        row.suspected_async = true;
-      }
-      const warning = `suspected_async: click on ${el.tag} "${el.label}" did not change the pre/post snapshot, but the done signal held afterwards (step ${stepNo})`;
-      warnings.push(warning);
-      if (verbose) console.log(`  step ${stepNo}: ${warning}`);
-    };
-    // F83：行证据（row_evidence，v1.0 §3.7 目标⑤）——声明 row-index/in-row 的目标解析
-    const rowDeclaredHint = commandMode && cmdPick ? String(cmdPick.cmd.target ?? "") : curHint;
-    const rowParsed = rowDeclaredHint ? parseHint(rowDeclaredHint) : null;
-    const rowEvidenceOut = rowEvidence(el, rowParsed);
-    trace.push({ step: stepNo, desc, how, value: redactValue(el, uploadFiles ?? (clickPosition !== null ? null : arg)), risky, executed, confirmed, method, decision_kind: decisionKind, conf: round3(conf), ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
-      ref, op: actionOp, ...(cmdPick?.cmd.target !== undefined && cmdPick.cmd.target !== "" ? { target: cmdPick.cmd.target } : {}), changed, ...(uploadFiles !== null ? { files: uploadFiles } : {}),
-      ...(clickPosition !== null ? { position: clickPosition } : {}), ...(nominatedRepair ? { nominated_family_repair: true } : {}), ...(decisionKind === "model" && layaMargin !== null
-        ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}), ...(method === "escalate" && escalatedPick ? { escalated: true } : {}), ...(prevented ? { prevented } : {}), ...(noted ? { noted: Object.keys(noted).length } : {}),
-      ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question
-      inert, url: urlOf(pg), ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(),
-      ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(), ...rowEvidenceOut,
-    });
-    // A1 子改动③：这个已执行动作的 after 签名等下一次观察落账（见循环头部的落账点）。
-    return { control: "next", ref, el, elems, desc, how, executed, inert, post, lastEffect: lastEffectOut,
-      flagSuspectedAsync, cmdDoneId, nextCmdI, executedDelta };
-  }
-
-  /** 4d 阶段：active setup（重置/ready/config+信封早返回/launch+newPage/goto+settle/observeState 闭包）。 */
-  private async runSetup(a: {
-    instruction: string; startUrl: string; hostGate: string[] | null; verbose: boolean;
-    pageIn: AnyPage | null; pwIn: PwLike | null; skipNavigation: boolean; settleMs: number | undefined;
-  }): Promise<SetupPhase> {
-    const { instruction, startUrl, hostGate, verbose, pageIn, pwIn, skipNavigation, settleMs } = a;
-  let browser: BrowserHandle | null = null; const ownsBrowser = pageIn === null; let page: AnyPage | null = pageIn;
-    this._state = { epoch: 0, navEpoch: 0, current: null }; this._lastActionabilityDetail = null;
-    this._settleWaitMs = 0;
-    // S5：上次 ask 的题面/答复与 run 内 flags 都是 run 内口径（refs 会重编号）；指标不重置。
-    this._lastAsk = null; this._askedPools.clear();
-    this._runFlags = []; this._lastEffectSeen = null;
-    await this.ready();
-    // A config error is not a transient failure: acting on rules-only anyway would
-    // silently downgrade what the operator explicitly configured, and retrying it
-    // just repeats the same error with more side effects (D6). Refuse cleanly,
-    // BEFORE the navigation envelope and before a single step.
-    if (this.configError !== null) {
-      const why = `model runtime config error: ${this.configError}`;
-      if (verbose) console.log(`  -> REFUSED before navigation: ${why}（配置类错误不重试、不降级跑）`);
-      return { kind: "early", browser, report: {
-        goal: instruction, done: false,
-        stop_reason: why, stop_code: "config_error",
-        steps: [],
-        audit: { verdict: "REJECT", reasons: [why], auditor: "preflight" },
-      } };
-    }
-    // NAVIGATION ENVELOPE (P0-4): refuse BEFORE the browser opens the page. A
-    // refused subgoal has touched nothing — zero steps, zero side effects.
-    const deniedHost = disallowedHost(startUrl, hostGate);
-    if (deniedHost !== null) {
-      const why = `host not allowed: '${deniedHost}' is not among the declared hosts `
-        + `(${hostGate!.join(", ")}) — add it to the pack's hosts list if this step is meant to leave for it`;
-      if (verbose) console.log(`  -> REFUSED before navigation: ${why}`);
-      return { kind: "early", browser, report: {
-        goal: instruction, done: false,
-        stop_reason: why, stop_code: "host_not_allowed",
-        steps: [],
-        audit: { verdict: "REJECT", reasons: [why], auditor: "navigation-envelope" },
-      } };
-    }
-    if (ownsBrowser) {
-      // PORT NOTE 5: `sync_playwright()` has no twin; the module IS the
-      // connection. Use the injected pw when given, else the imported one.
-      let pw = pwIn;
-      if (pw === null) { const mod = await import("playwright"); pw = { chromium: mod.chromium as unknown as PwLike["chromium"] }; }
-      browser = (await browserEnv.launch(pw, true)) as unknown as BrowserHandle;
-      page = (await browser.newPage()) as AnyPage;
-    }
-    const pg = page as AnyPage;
-    /**
-     * S1：生成一次状态指纹并推进 cursor。`elems` 用**已有观察**（步首池）传进来；
-     * 收尾处才允许传 null（此时由调用方决定是否先重新抽池）。只读，不发动作。
-     */
-    const observeState = async (elems: ElemPool | null): Promise<StateFingerprint> => {
-      this._state.epoch += 1;
-      let url = "";
-      try { url = String(urlOf(pg as never) ?? ""); } catch { url = ""; }
-      let readyState: ReadyState = "complete";
-      try {
-        const rs = await pg.evaluate(() => (globalThis as unknown as { document?: { readyState?: unknown } }).document?.readyState);
-        if (rs === "loading" || rs === "interactive" || rs === "complete") readyState = rs;
-      } catch { /* 页面已关闭：readyState 只是诊断，不阻塞收尾 */ }
-      const struct = structDigest(elems); const content = contentDigest(elems);
-      const fp: StateFingerprint = { epoch: this._state.epoch, navEpoch: this._state.navEpoch, url, readyState, struct, ...(content === undefined ? {} : { content }) };
-      this._state.current = fp; return fp;
-    };
-    if (!skipNavigation) {
-      await pg.goto(startUrl, { waitUntil: "domcontentloaded", timeout: this.gotoTimeout }); this._state.navEpoch += 1;
-      // S2：导航会丢掉 window 上下文——observer 在 goto 后重装（幂等；只作传感器）。
-      if (this.settlePolicy !== null) await installSettle(pg as unknown as SettlePage);
-      if (typeof settleMs === "number" && settleMs > 0) {
-        await new Promise((r) => setTimeout(r, settleMs));
-      }
-    }
-    if (hostGate && hostGate.length) {
-      const deniedPopup = deniedContextUrl(pg, hostGate);
-      if (deniedPopup !== null) {
-        const why = `popup not allowed: ${deniedPopup} is outside the declared hosts envelope (${hostGate.join(", ")}) — popup/new-tab origins are part of the same host gate`;
-        if (verbose) console.log(`  -> REFUSED before navigation: ${why}`);
-        return { kind: "early", browser, report: {
-          goal: instruction, done: false, stop_reason: why, stop_code: "popup_not_allowed",
-          steps: [], audit: { verdict: "REJECT", reasons: [why], auditor: "navigation-envelope" },
-        } };
-      }
-    }
-  return { kind: "ready", pg, browser, observeState };
-  }
-
-  /**
-   * F3：run() 报告尾（原 run 内 finally 之后的收尾块）。只读执行循环留下的
-   * 状态快照（RunReportTailCtx），产出最终 RunReport。零行为差异——逻辑逐行
-   * 平移，仅把 run() 局部变量改为 ctx.xxx；`ctx.stop` 由 run() 包装原 stop
-   * 闭包并同步 ctx.stopCode/stopReason/stopStep（false_done 档需要）。
-   */
-  /** 4d 阶段：循环后 run 级 epilogue（after 指纹 / 前进性 / flags / _runFlags / stepState）。 */
-  private async runTail(a: {
-    pg: AnyPage; candidatePriority: "bucketed" | "main-first";
-    observeState: (elems: ElemPool | null) => Promise<StateFingerprint>;
-    trace: TraceStep[]; beforeFp: StateFingerprint | null; lastEffect: StateEffect | null;
-    poolEmptyThisStep: boolean; donePreheldSeen: boolean; done: boolean; warnings: string[];
-  }): Promise<StepStateRecord | undefined> {
-    const { pg, candidatePriority, observeState, trace, beforeFp, lastEffect, poolEmptyThisStep, donePreheldSeen, done, warnings } = a;
-    let afterFp: StateFingerprint | undefined;
-    try { afterFp = await observeState((await this._extractPoolSettled(pg, candidatePriority)).elems); } catch { afterFp = undefined; }
-    const actionRows = trace.filter((t) => t.executed === true || t.skipped === true);
-    const attempted = actionRows.length;
-    const executedN = actionRows.filter((t) => t.executed === true).length;
-    const changedN = actionRows.filter((t) => t.executed === true && t.changed === true).length;
-    const observed = beforeFp !== null && afterFp !== undefined; // 没看见 ≠ 没前进
-    const progressed = beforeFp !== null && afterFp !== undefined && (afterFp.struct !== beforeFp.struct || afterFp.url !== beforeFp.url || afterFp.navEpoch !== beforeFp.navEpoch);
-    const lastActionStep = actionRows.length ? Number((actionRows[actionRows.length - 1] as Record<string, unknown>)["step"] ?? 0) || undefined : undefined;
-    const flags: StateFlag[] = [];
-    if (poolEmptyThisStep) flags.push("pool_empty");
-    if (donePreheldSeen) flags.push("done_preheld");
-    if (done && observed && attempted > 0 && executedN > 0 && changedN === 0 && !progressed) {
-      flags.push("no_state_progress");
-      warnings.push(
-        `no_state_progress: done held after ${executedN} executed action(s) but the page snapshot `
-        + `did not change and the state fingerprint did not advance`
-        + (lastActionStep === undefined ? "" : ` (step ${lastActionStep})`)
-        + ` — the signal may not be evidence of the action`,
-      );
-    }
-    this._runFlags = [...flags]; // S5b：下一次 ask 的 state_digest 只带已发生的 flags
-    if (beforeFp === null) return undefined;
-    return {
-      before: beforeFp,
-      ...(afterFp === undefined ? {} : { after: afterFp }),
-      ...(this.settlePolicy === null ? {} : { settleMs: this._settleWaitMs }),
-      actions: { attempted, executed: executedN, changed: changedN },
-      flags,
-      ...(lastEffect === null ? {} : { effect: lastEffect }),
-    };
-  }
-
-  private async runReportTail(ctx: RunReportTailCtx): Promise<RunReport> {
-    // P0-D：done 只在被排除 frame 上成立 = 完成依赖被排除帧，结构化停因（不留假成功，
-    // 也不混成普通 done_not_held）。
-    if (!ctx.done && ctx.doneInExcluded) {
-      ctx.stopCode = "frame_not_allowed";
-      ctx.stopReason = `done signal holds only inside frame(s) `
-        + `${ctx.frameGate === null ? "-" : ctx.frameGate.origins.join(", ")} excluded by the declared hosts envelope `
-        + `(${(ctx.hostGate ?? []).join(", ")}) — `
-        + `frames_excluded 只是默认排除第三方非交互 frame，不需要为此加 hosts；`
-        + `仅当声明 done 确需该 frame 时才评估把它的 origin 加进 meta.hosts，`
-        + `否则把 done 锚到允许 frame 内的事实`;
-    }
-    // P0-E 完成语义诚实：done 成立后的**只读**复核 guard（false_done）。不改完成判定——
-    // 除非 policy.done_guard:"fail"；缺省 warn 档只把证据记进 warnings（步骤仍 ok）。
-    // 触发面：① 登录墙特征（主 frame URL 词边界命中 / title 或 h1-h3 登录文案 /
-    // 跨出 meta.hosts 信封）；② 有动作但全部 changed=false 且 done 是否定式（零前进蹭成立）。
-    if (ctx.done && !ctx.manualDone && !ctx.dryRan && ctx.goalSignalFn !== null && ctx.page !== null) {
-      const liveUrl = (() => { try { return String(urlOf(ctx.page) ?? ""); } catch { return ""; } })();
-      const ev = await (async (): Promise<Record<string, string> | null> => {
-        const out: Record<string, string> = {};
-        if (LOGIN_WALL_URL_RE.test(liveUrl)) out.url_hit = liveUrl;
-        if (ctx.hostGate !== null && ctx.hostGate.length > 0 && liveUrl
-          && !urlInHostsEnvelope(liveUrl, ctx.hostGate)) out.host_outside = liveUrl;
-        try {
-          const r = await (ctx.page as AnyPage).evaluate(FN_GUARD) as { hit?: string | null; where?: string | null };
-          if (r && r.hit) out.text_hit = `${r.where}: "${r.hit}"`;
-        } catch { /* 只读复核拿不到就跳过这一项，不影响判定 */ }
-        return Object.keys(out).length ? out : null;
-      })();
-      const zeroProgress = ctx.doneSpec !== null && isWeakNegativeSignal(ctx.doneSpec)
-        && ctx.executedCount > 0 && !ctx.trace.some((t) => t["executed"] === true && t["changed"] === true);
-      if (ev !== null || zeroProgress) {
-        const parts: string[] = [];
-        if (ev?.url_hit) parts.push(`main-frame URL matches a login-wall feature`);
-        if (ev?.text_hit) parts.push(`page text matches a login-wall feature (${ev.text_hit})`);
-        if (ev?.host_outside) parts.push(`main frame is outside the declared hosts envelope`);
-        if (zeroProgress) parts.push("done is negative-only and executed action(s) changed nothing (changed=false)");
-        const why = `false_done guard: the done signal held but ${parts.join("; ")} `
-          + `— completion may have been borrowed by unrelated navigation `
-          + `(R11: a mis-click to a login page counted as success); current URL: ${liveUrl || "(unknown)"}; `
-          + `evidence: ${JSON.stringify(ev ?? {})} `
-          + `；修法：给 done 配正向锚（exists/holds/url），如 all_of(not(...), 正向锚)，必要时配 ctx.judge.loginWall()`
-          + `；可直接抄的构造器：done: ctx.judge.all(not(ctx.judge.loginWall()), <正向锚>)`
-          + `（信号语言的 all_of；loginWall 是 kit 一等构造器；<正向锚> 换成动作后才成立的 exists/holds/url 事实）`;
-        if (this.doneGuardPolicy === "fail") {
-          ctx.done = false;
-          ctx.stop("false_done", why);
-          if (ctx.verbose) console.log(`  step: ${ctx.stopReason}`);
-        } else {
-          if (!ctx.warnings.some((w) => w.startsWith("false_done:"))) ctx.warnings.push(`false_done: ${why}`);
-          if (ctx.verbose) console.log(`  step: warning false_done (done stays ok; policy.done_guard="warn")`);
-        }
-      }
-    }
-    const verdict = (await this.auditor.audit(ctx.instruction, ctx.trace, ctx.done)) as AuditVerdict;
-    const stoppedCode = ctx.stopCode as StopCode;
-    // task-11（B3，评审 #8）：信号不成立时的会话级骤降嗅探——限速/降频判读证据。
-    // 组合判据防误报（正常小页面本来元素就少，不触发）：本会话池高峰 ≥20 且当前池 ≤ 高峰/4
-    // （probe3 现场 202→15），或两次失败嗅探之间正文塌缩（prev ≥2000 且 cur ≤ prev/4）。
-    // 成本：只有失败路径付一次只读 sniff（U3 同款底座 poolSniff）；成功路径零改动。
-    // 不新增 stopCode（stopCode 表是脚本分支契约）——warning + diagnostics 证据，判读
-    // 指引见 docs/APP_SCRIPT_AUTHORING.md §10（已知处置：冷却/降频/分批，不绕过）。
-    let throttleSuspect: ThrottleSuspect | null = null;
-    if (ctx.done !== true && ctx.lastPageRef !== null) {
-      let failSniff: Awaited<ReturnType<typeof poolSniff>> | null = null;
-      try {
-        failSniff = await poolSniff(ctx.lastPageRef as never, admitSelectorWithJsFor(this.surfacePolicy));
-      } catch { /* 观察让位事实：页面已不可读时不硬来 */ }
-      const bodyPrev = this._lastFailSniff?.body_text ?? null;
-      const admittedPrev = this._lastFailSniff?.admitted ?? null;
-      // task-24/6a：阈值单源化（throttle-signature.ts——step 侧与 arrive 侧共用，标定改一处）。
-      const poolDrop = this._sessionPoolHigh >= THROTTLE_POOL_HIGH_MIN
-        && ctx.lastPoolSize > 0
-        && ctx.lastPoolSize * THROTTLE_COLLAPSE_RATIO <= this._sessionPoolHigh;
-      const bodyDrop = bodyPrev !== null && bodyPrev >= THROTTLE_BODY_FLOOR
-        && failSniff !== null && failSniff.body_text * THROTTLE_COLLAPSE_RATIO <= bodyPrev;
-      if (failSniff !== null && (poolDrop || bodyDrop)) {
-        const dh = ctx.getLastDeclaredHidden();
-        throttleSuspect = {
-          evidence: {
-            pool_size: ctx.lastPoolSize,
-            pool_size_session_high: this._sessionPoolHigh,
-            body_text: failSniff.body_text,
-            ...(bodyPrev !== null ? { body_text_prev: bodyPrev } : {}),
-            admitted: failSniff.admitted,
-            ...(admittedPrev !== null ? { admitted_prev: admittedPrev } : {}),
-            ready_state: String(failSniff.ready_state ?? "unknown"),
-            session_elapsed_ms: this._sessionFirstPoolTs === 0
-              ? 0 : Date.now() - this._sessionFirstPoolTs,
-            ...(dh !== null
-              ? { declared_hidden: { target: dh.target, hidden: dh.hidden, total: dh.total } }
-              : {}),
-          },
-        };
-        ctx.warnings.push(`throttle_suspect: 信号不成立且观测到会话级骤降`
-          + `（池 ${this._sessionPoolHigh}→${ctx.lastPoolSize}${bodyDrop ? `；正文 ${bodyPrev}→${failSniff.body_text}` : ""}`
-          + `；本会话已运行 ${throttleSuspect.evidence.session_elapsed_ms}ms）`
-          + "——疑似站点限速/降频/风控分批。已知处置：冷却后重试、降频（拉大 meta.pace）、分批跑，不绕过反爬；"
-          + "证据见 step_traces[].result.diagnostics.throttle_suspect");
-      }
-      // 失败嗅探即基线（无论是否触发）：下一次失败对比用它。正文峰值同步记账
-      // （task-16/B3+：arrive 侧限速判据的基线来源——仍只在失败路径更新，成功路径零成本）。
-      if (failSniff !== null && failSniff.body_text > this._bodyTextPeak) {
-        this._bodyTextPeak = failSniff.body_text;
-      }
-      this._lastFailSniff = failSniff === null
-        ? null : { body_text: failSniff.body_text, admitted: failSniff.admitted };
-    }
-    const diagnostics: RunReport["diagnostics"] | undefined = (
-      stoppedCode === "page_not_ready" || stoppedCode === "target_not_found"
-      || stoppedCode === "target_ambiguous" || stoppedCode === "action_space_exhausted"
-      // U3：ready_empty 没有停因（步级继续），但"池空且已就绪"是必须落盘的事实。
-      || (ctx.lastReadiness !== null && ctx.lastReadiness.verdict !== "ready")
-      // B3：限速判读证据落盘（该步信号不成立 + 会话级骤降）。
-      || throttleSuspect !== null
-    ) ? {
-      pool_size: ctx.lastPoolSize,
-      ...(ctx.poolReady ? { waited_ms: ctx.lastPoolWaitedMs } : {}),
-      ...(ctx.viewportUnderloaded !== null ? { viewport_underloaded: ctx.viewportUnderloaded } : {}),
-      ...(ctx.lastReadiness !== null && ctx.lastReadiness.verdict !== "ready" ? { readiness: ctx.lastReadiness } : {}),
-      ...(throttleSuspect !== null ? { throttle_suspect: throttleSuspect } : {}),
-    } : undefined;
-    // A1 动作执行证据汇总（只从 trace 汇总一次，不新增页面往返）：
-    //   executed        —— 本子目标是否有动作真的执行（有动作面时必答；缺字段 = 没有动作面）；
-    //   executed_actions—— 每个已执行动作的 op/ref/target/how/changed；
-    //   skipped_actions —— 每条"为什么没动作"的结构化原因（见 skippedActions）；
-    //   done_preheld    —— 命令步动作前的 done 预评估（缺字段 = 本步不是命令步/没信号）；
-    //   warnings        —— suspected_async 等运行期诚实话。
-    // 动作行 = 有 changed（执行过）或有 skipped（尝试过但没执行）的行；manual 等非动作行不混进来。
-    const actionRows = ctx.trace.filter((t) =>
-      Object.prototype.hasOwnProperty.call(t, "changed") || t["skipped"] === true);
-    const executedRows = actionRows.filter((t) => t["executed"] === true
-      && ["clicked", "filled", "scrolled", "dragged", "hovered", "uploaded"].includes(String(t["how"] ?? "")));
-    const hasActionFace = ctx.cmdSpace.length > 0 || actionRows.length > 0;
-    const executedActions: ExecutedAction[] = executedRows.map((t) => {
-      const rawHow = String(t["how"] ?? "clicked");
-      const files = Array.isArray(t["files"])
-        ? (t["files"] as unknown[]).filter((f): f is string => typeof f === "string")
-        : null;
-      // U7：clickAt 的元素相对坐标从 trace 行原样汇总（声明值与实测点击同源）。
-      const p = t["position"] as { x?: unknown; y?: unknown } | undefined;
-      const position = p !== undefined && typeof p.x === "number" && typeof p.y === "number"
-        ? { x: p.x, y: p.y }
-        : null;
-      return {
-        op: String(t["op"] ?? rawHow ?? "click"),
-        target: typeof t["target"] === "string" ? t["target"] : null,
-        ref: String(t["ref"] ?? ""),
-        // U6：upload 的动作结果词是 uploaded，证据面按 Playwright 原语名记 setInputFiles。
-        how: (rawHow === "uploaded" ? "setInputFiles" : rawHow) as ExecutedAction["how"],
-        desc: String(t["desc"] ?? ""),
-        changed: t["changed"] === true,
-        ...(files !== null ? { files } : {}),
-        ...(position !== null ? { position } : {}),
-        ...(t["resolved_by"] === "dom_identity" ? { resolved_by: "dom_identity" as const } : {}),
-        ...(t["resolved_by"] === "declared_dom" ? { resolved_by: "declared_dom" as const } : {}),
-        // F75 评审收口：run 决策步 DOM 回退跳的解析事实此前只活在 raw trace，结果面丢失。
-        ...(t["resolved_by"] === "dom_fallback" ? { resolved_by: "dom_fallback" as const } : {}),
-        ...(typeof t["declared_resolve"] === "object" && t["declared_resolve"] !== null
-          ? { declared_resolve: t["declared_resolve"] as NonNullable<ExecutedAction["declared_resolve"]> } : {}),
-      };
-    });
-    // S4 证据汇总：stale 重试每次一条（trace 行本来就一次只落一行），force 只在真正执行时出现。
-    const staleRetries: Array<{ attempt: number; reason: string; ref: string }> = [];
-    for (const t of ctx.trace) {
-      if (Array.isArray(t["stale_retry"])) {
-        staleRetries.push(...(t["stale_retry"] as Array<{ attempt: number; reason: string; ref: string }>));
-      }
-    }
-    const forcedExecuted = executedRows.some((t) => t["forced"] === true);
-    // F72-②：显式重扫事实汇总（本 run 至多一次/步；缺字段 = 没跑过）。
-    const rehydrateRescanFact = ctx.trace.map((t) => t["rehydrate_rescan"])
-      .find((v) => v !== undefined) as
-      | { waited_ms: number; pool_size_before: number; pool_size: number; resolved: boolean; ref?: string }
-      | undefined;
-    return {
-      goal: ctx.instruction, done: ctx.done, stop_reason: ctx.stopReason, steps: ctx.trace, audit: verdict,
-      stop_code: ctx.stopCode,
-      ...(hasActionFace ? { executed: executedRows.length > 0 } : {}),
-      ...(executedActions.length ? { executed_actions: executedActions } : {}),
-      ...(ctx.skippedActions.length ? { skipped_actions: ctx.skippedActions.slice(0, 20) } : {}),
-      ...(staleRetries.length ? { stale_retries: staleRetries } : {}),
-      ...(rehydrateRescanFact !== undefined ? { rehydrate_rescan: rehydrateRescanFact } : {}),
-      ...(forcedExecuted ? { forced: true } : {}),
-      ...(ctx.donePreheld !== null ? { done_preheld: ctx.donePreheld } : {}),
-      ...(ctx.warnings.length ? { warnings: ctx.warnings } : {}),
-      ...(ctx.stepState === undefined ? {} : { state: ctx.stepState }),
-      ...(diagnostics !== undefined ? { diagnostics } : {}),
-      ...(ctx.stopStep !== undefined ? { stop_step: ctx.stopStep } : {}),
-      ...(ctx.manualDone ? { manual: true } : {}),
-      ...(ctx.dryRan ? { dry_run: true } : {}),
-    };
-  }
 }

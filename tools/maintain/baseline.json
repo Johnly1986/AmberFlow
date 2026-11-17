@@ -5,7 +5,7 @@
     "newFunctionMaxLines": 150,
     "phaseFunctionMaxLines": 400,
     "files": {
-      "src/engine/executor.ts": 5829,
+      "src/engine/executor.ts": 2721,
       "src/app/ctx.ts": 1799,
       "src/app/session-runtime.ts": 992,
       "src/app/app-adapters.ts": 988,
@@ -58,11 +58,6 @@
         "lines": 244
       },
       {
-        "file": "src/engine/executor.ts",
-        "name": "_executeElement",
-        "lines": 236
-      },
-      {
         "file": "src/cli/commands/inspect.ts",
         "name": "runInspect",
         "lines": 230
@@ -103,16 +98,6 @@
         "lines": 194
       },
       {
-        "file": "src/engine/executor.ts",
-        "name": "runReportTail",
-        "lines": 193
-      },
-      {
-        "file": "src/engine/executor.ts",
-        "name": "actOnce",
-        "lines": 186
-      },
-      {
         "file": "src/cli/start.ts",
         "name": "commandJob",
         "lines": 157
@@ -124,15 +109,18 @@
       }
     ],
     "phaseFunctions": [
-      "src/engine/executor.ts#runDeclaredTargets",
-      "src/engine/executor.ts#runModelPick",
-      "src/engine/executor.ts#runPostAction",
-      "src/engine/executor.ts#runActionPhase",
-      "src/engine/executor.ts#runActionExecute",
-      "src/engine/executor.ts#runSetup"
+      "src/engine/executor-phases-a.ts#runDeclaredTargets",
+      "src/engine/executor-phases-b.ts#runModelPick",
+      "src/engine/executor-phases-b.ts#runPostAction",
+      "src/engine/executor-phases-c.ts#runActionPhase",
+      "src/engine/executor-phases-c.ts#runActionExecute",
+      "src/engine/executor-phases-c.ts#runSetup"
     ],
     "movedFunctions": {
-      "src/app/app-runner-declared.ts#runApp": 686
+      "src/app/app-runner-declared.ts#runApp": 686,
+      "src/engine/executor-actions.ts#actOnce": 184,
+      "src/engine/executor-resolve-a.ts#_executeElement": 234,
+      "src/engine/executor-phases-c.ts#runReportTail": 193
     }
   },
   "docs": {
@@ -150,7 +138,7 @@
   },
   "comments": {
     "dateStamps": 34,
-    "planTokens": 405,
+    "planTokens": 404,
     "historyWording": 65,
     "lineAnchors": 0,
     "ghostRefs": 0,
