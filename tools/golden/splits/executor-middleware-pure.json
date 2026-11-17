@@ -1,12 +1,11 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "executor-middleware-pure",
-  "note": "executor-types 纯类型拆分：BrowserSession + MiddlewareOptions 逐字节搬到 executor-middleware-types.ts（executor-types 保 facade re-export）。",
+  "note": "executor-types 纯类型拆分：BrowserSession + MiddlewareOptions 逐字节搬到 executor-middleware-types.ts（executor-types 保 facade re-export）。P2-2.1 候选契约（BACKLOG #2 第一步）在 MiddlewareOptions 上新增可选 candidateProducer 字段——这是**有意的非纯搬移**（契约 seam 是本批交付物），故 MiddlewareOptions 移出纯搬移 manifest，由本批 PR 说明承载变更；BrowserSession 保持纯搬移 hash。",
   "files": {
     "src/engine/executor-middleware-types.ts": {
       "symbols": {
-        "BrowserSession": "f3d502db180780ed9307b142f88392547bd7a464affead70527f8c5c43f34e6b",
-        "MiddlewareOptions": "c11f3a1abb57162c3c945ca86cbc03319045690bf598e4d7b6643c6f103e30e7"
+        "BrowserSession": "f3d502db180780ed9307b142f88392547bd7a464affead70527f8c5c43f34e6b"
       }
     },
     "src/engine/executor-types.ts": {

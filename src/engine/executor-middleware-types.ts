@@ -14,6 +14,7 @@ import type { AmbiguousOrdering } from "./ambiguity.ts";
 import type { DatasetReader } from "./dataset.ts";
 import type { AttrValueMatch } from "./rules.ts";
 import type { SurfacePolicy } from "./surface.ts";
+import type { CandidateProducer } from "./candidate-contract.ts";
 import type {
   AnyPage, BrowserHandle, DecisionStatePolicy, EscalatorLike, HintMemoryLike,
   OutcomeMemoryLike, PwLike,
@@ -57,6 +58,8 @@ export interface MiddlewareOptions {
   outcomeMemory?: OutcomeMemoryLike | null;
   /** See RunOptions.outcomeMemoryMode (default "forbid"). */
   outcomeMemoryMode?: "forbid" | "rank";
+  /** BACKLOG #2：候选生产者 seam（缺省 null = 引擎默认实现 createEngineCandidateProducer）。 */
+  candidateProducer?: CandidateProducer | null;
   /** See RunOptions.hintMemory (default: none — only authored hints are used). */
   hintMemory?: HintMemoryLike | null;
   gotoTimeout?: number;
