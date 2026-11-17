@@ -13,10 +13,10 @@
 
 | 层 | 模块/文件 | 允许依赖 | 说明 |
 |---|---|---|---|
-| **L0 support** | `src/support/*`（paths / config-schema / config-store / rcfile / apply-config-env / merge-env / amberflow-home / pace / sleep / cli-args / intervention-contract / intervention-texts / **decision-provider-contract**） | node:* 仅 | 叶子层；provider 接口类型契约下沉至此，engine 只 import 契约、model 实现 |
+| **L0 support** | `src/support/*`（paths / config-schema / config-store / rcfile / apply-config-env / merge-env / amberflow-home / pace / sleep / cli-args / intervention-contract / intervention-texts / **decision-provider-contract** / **page-like**） | node:* 仅 | 叶子层；**provider 接口类型契约（W5-3 已落地）与页面形状纯类型**在此，engine 只 import 契约、model 实现 |
 | **L1 共享语言/叶子** | `signals` + `signal-ops`、`hint`、`click-at`、`surface`、`plan`（类型）、`pystr`、路径解析、host-envelope、**`src/prompts/`（模型提示词单源，规划中 0.4）** | L0 | 纯语言/数据；engine 与 model 都可 import |
 | **L1.5 intervention** | `src/intervention/`（合同/文本零依赖 + runtime 只依赖 L0 两叶子）；`src/app/intervention-adapter.ts` 是唯一适配 | L0 两叶子 + node:* | 见 [INTERVENTION_RESCUE_MODULE.md](INTERVENTION_RESCUE_MODULE.md) §2；**不反向依赖 app/engine/model/cli/browser/data** |
-| **L2 机制** | `browser-env`、`tool-signals`、`extraction`（pool-js/identity/frame-scope）、`actions`、`rules`、`settle`、`dataset`、`datasource`（传输/来源） | L0–L1 | 页面扫描、动作、稳定门、数据腿等机制 |
+| **L2 机制** | `browser-env`、`tool-signals`、`extraction`（pool-js/identity/frame-scope；页面形状类型已下沉 L0 `support/page-like.ts`，extraction re-export）、`actions`、`rules`、`settle`、`dataset`、`datasource`（传输/来源） | L0–L1 | 页面扫描、动作、稳定门、数据腿等机制 |
 | **L3 决策** | `src/model/*`（provider 协议 / 缓存 / ONNX / prompt views / 审计） | L0–L2（经契约） | 实现 L0 的 provider 契约；现有 `model→engine` 反向边见 §1.2 |
 | **L4 执行** | `executor`、`planner`、`bindings`、`observe`、`pool-view`、`picker`、`audit` | L0–L2 + 契约 | 唯一执行循环；只消费契约与机制，不 import 具体 provider 装配 |
 | **L5 应用** | `src/app/*`（ctx / runner / adapters / trace / report / session-runtime / session-export / intervention-adapter） | L0–L4 | flow 运行期面；session-runtime 是**调试面**（复用 createCtx，不是第 5 个 ctx 实现） |
@@ -38,7 +38,7 @@
 
 | 方向 | 现状 | 收缩路径 |
 |---|---|---|
-| engine → model | 约 9 处（`executor.ts`、`executor-pure.ts`、`executor-types.ts`、`picker.ts` 等，具体以 grep 为准） | provider 接口契约下沉 L0 + 组合根注入（P2 W5-3，条件） |
+| engine → model | 约 9 处（`executor.ts`、`executor-pure.ts`、`executor-types.ts`、`picker.ts` 等，具体以 grep 为准）；W5-3 后 `decision-provider` 引用 3 文件→1 文件（`executor.ts` 仅 3 个 runtime 函数；`DecisionProvider` 类型已走 L0 契约） | provider 接口契约下沉 L0 + 组合根注入（P2 W5-3，已部分落地） |
 | model → engine | 约 7 处（`decision-provider.ts`、`hint-memory.ts`、`decision-openai.ts`、`decision-service.ts`、`decision-tokenplan.ts`、`page-context.ts`、`provider-escalator.ts`） | prompt views / 页面文本渲染迁 L1 或经契约（W4 证据 spec 后收缩） |
 
 **门禁口径**：不追 `grep=0` 的审美目标；新代码不得新增反向边，已有边按批次减少并在此表登记。
@@ -96,7 +96,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | `BrowserMiddleware.run` | `src/engine/executor.ts` | 唯一执行循环；ctx/planner/online 经装配调用 | **逐字节冻结**（类名 + `run()` 签名不变；不另写执行器）；`maintain mainline` 断言两字面存在 | 九阶段提函数=P2 条件，每阶段独立 PR + 0.8 证据（运行期 lane 已就绪）；九阶段已落地（4d 完成） |
 | `RunOptions` 组装（引擎步） | `src/engine/planner.ts:runOnce` 与 `src/app/ctx.ts:runOneStep` | 两条路径 | **冻结**（不新增第 4 个 RunOptions；P2 execStep 合并） | 能力面新增必须双端 + 等价验收 |
 | 工具步装配 | `src/app/app-runner.ts:runToolStep` + `Ctx.toolRunner` | ctx.run / dangerous | **冻结**（不进引擎步装配） | 独立变更 + 危险步确认链 review |
-| `DecisionProvider` 接口 | 当前 `src/model/decision-provider.ts` → 目标 `src/support/decision-provider-contract.ts`（L0） | engine（仅契约类型）、model（实现）、组合根（装配） | **方向冻结**：engine 不 import 具体实现 | 契约变更需 model/engine 双侧 typecheck + rules-only 消融 |
+| `DecisionProvider` 接口 | `src/support/decision-provider-contract.ts`（L0，W5-3 已落地）+ 实现 `src/model/decision-provider.ts` 与各 provider | engine（仅契约类型）、model（实现）、组合根（装配） | **方向冻结**：engine 不 import 具体实现；runtime 函数（`decisionProviderOrNull`/`layaProvider`/`decisionFailureFact`）仍在 model，待组合根注入后收缩 | 契约变更需 model/engine 双侧 typecheck + rules-only 消融 |
 | 决策源装配（resolve/build） | 各处 `resolveProviderSpec → applySpecToRuntime → installLayaRuntime` → **`buildMiddleware({face,confirmPolicy,options})`（P1-1.5 已落地，provider 解析仍在入口）** | 入口/组合根 | **冻结**：组合根唯一，构造点唯一（P1 已达成）；run-scoped provider 注入留 P2 | 任一新入口不得自建 `new BrowserMiddleware`；per-face confirm 策略必填 |
 | 模型 prompt | 目标 `src/prompts/`（L1 叶子） | model providers + executor legacy 兜底（P2 收编） | **方向冻结**（不放 src/model；不 import 实现） | 文本变更 version+1 + 快照 hash + A/B 证据 |
 | Ctx 契约 | `src/app/ctx-types.ts`（接口已存在） | flow 脚本、ctx-dry/replay、session-runtime | **接口冻结**；缺行为矩阵 | 新增原语需 matrix + conformance + dry/replay 同步 |

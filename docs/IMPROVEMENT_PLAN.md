@@ -6,7 +6,7 @@
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0/4d/BACKLOG #2/2.3 完成；**2.2 执行内核：SessionLease（suite+flow+plan 三面）+ RunScope（app 两面）+ S3 套件聚合器 + StopClassifier 退出码映射单源已落地**；剩余 runExecution 组合根（P2 条件）与 ctx 行为矩阵；BACKLOG #3 冻结后启动）。
+> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0/4d/BACKLOG #2/2.3 完成；**2.2 执行内核：SessionLease（suite+flow+plan 三面）+ RunScope（app 两面）+ S3 套件聚合器 + StopClassifier 退出码映射单源已落地**；W5-3 契约下沉（部分）已落地；剩余 runExecution 组合根（P2 条件）与 ctx 行为矩阵；BACKLOG #3 冻结后启动）。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -572,6 +572,8 @@ interface PromptSpec {
 | 2.2-5（P2 执行内核 · S1/plan 适配器） | SessionLease 下移 L4（`src/engine/session-lease.ts`；`BrowserSession` 是执行器类型、planner 同层消费，engine 不得反向 import app）+ `planner.runPlan` 手写 `sessionFactory + finally close` 改租约；flow/app 与 suite/online import 同步。plan 面运行期 A/B：夹具 + rules-only 真实 `runPlan`，done（rule:match）与 blocked（规则未命中）两路径归一化结果改前=改后 | 本批提交 | 唯一差异：close 抛错不再覆盖 run 结果（S1 租约契约）；check/verify:offline/verify:runtime:offline 4/4 全绿 |
 
 | 2.2-6（P2 执行内核 · S1/RunScope） | RunScope 契约 `src/app/run-scope.ts`（45 行）：run_id/outDir/planPath/today 默认值链 + `ctx.runtime` 投影单点；声明式 `runApp` 与 flow `runScriptApp` 接入（声明式面以 planPath 派生产物目录、flow 面保留 outDir/runId 注入，所有权差异留在适配器）。其余目标字段 budget/deadline/trace/result/warnings 仍归源 | 本批提交 | app-runner 2847=基线（净 0）；两面运行期 A/B：夹具 + rules-only 真实 `runApp`/`runScriptApp` 归一化结果 + 落盘 plan 改前=改后（仅时间/run_id 易变字段不同）；check/verify:offline/verify:runtime:offline 全绿 |
+
+| W5-3（P2 条件，部分） | DecisionProvider 契约下沉 L0：`src/support/decision-provider-contract.ts`（159 行）+ 页面形状纯类型 `src/support/page-like.ts`（54 行）；`decision-provider.ts` 改 re-export（628→510）、`extraction.ts` re-export（1612→1569）；engine 三处类型导入改契约（`grep model/decision-provider src/engine` 3 文件→1，仅 executor.ts 的 runtime 函数） | 本批提交 | executor 行数不变（基线内）；类型-only 搬移，check/runtime lane 4/4/verify:offline/examples golden 全绿；组合根注入与 runtime 函数收缩留在后续 |
 
 **4d 九阶段出口核对（2026-11-17，完成）**：
 
