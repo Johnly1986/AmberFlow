@@ -1,6 +1,6 @@
 # 可维护性与可扩展性治理方案 v2.1（架构评审修订版）
 
-> **状态**：**P0/P1/P2 已收口（2026-11-17）**；P2 条件项与冻结后待办明确延期（见 §6.5 D）。P0 9/9 批见 §6.1；P1 见 §6.2；P2 见 §6.4/§6.5
+> **状态**：**P0/P1/P2 已收口（2026-11-17）**；**大文件拆分目标已达成（§6.7：最大文件 2721 ≤3000，>1000 行文件仅剩 executor 例外）**；P2 条件项与冻结后待办明确延期（见 §6.5 D）。P0 9/9 批见 §6.1；P1 见 §6.2；P2 见 §6.4/§6.5
 > **基线**：`main @ 91bf379`；`npm run check` 全绿（本轮实测：预检/类型/配置/schema/prompt/泄露/示例/行锚/用例校验 9 项通过）
 > **评审**：3 个独立只读评审（目标架构 / 迁移治理 / 红队）+ Lead 裁决，记录见 [IMPROVEMENT_PLAN_REVIEW.md](IMPROVEMENT_PLAN_REVIEW.md)。本版已按裁决修订：砍 `sdk.ts`/伪端口/单一编排，新增 0.8 等价证据 lane 与 0.9 seam 冻结，门禁降档，P2 条件化。
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
@@ -672,7 +672,34 @@ interface PromptSpec {
 | A1 | `app-runner.ts` 2847→**974** 行（bridge spawn 路径与 CLI 入口 guard 不动）：类型/纯助手 → `app-runner-types.ts`（752）；策略面（EffectivePolicy/resolveRunPolicy/preflightConfig/resolvePace/探测）→ `app-runner-policy.ts`（357）；工具步 → `app-runner-tool-step.ts`（149）；声明式面 `runApp` → `app-runner-declared.ts`（718）；app-runner 保留 `runScriptApp` + facade re-export | **两面运行期 A/B**：夹具 + rules-only 真实 `runApp`/`runScriptApp`（声明式 journey + flow 脚本）归一化结果/落盘 plan 改前=改后；导出面 24 个既有键全保留（仅新增内部助手导出）；split-check `app-runner-pure`（30 符号，24 个逐字节相同，6 个仅加 `export` 修饰）；check + 双 lane 绿 | 本批提交 |
 | L1 | 运行期等价 lane 扩场景（executor 拆分前置）：4→**7** 场景——upload（`setInputFiles`）、scroll（元素目标容器滚动 + moved/delta/scroll 证据）、range fill（`input[type=range]` 执行路径） | 每场景 `--record` 连跑两次一致；外部请求 0；`--check` 7/7 绿；原 4 份 golden 逐字节不变 | 本批提交 |
 | X1 | `executor.ts` 5829→**2721** 行（类名/`run()` 签名逐字节不变）：九阶段/动作/解析实现切成显式 `mw` 依赖的模块函数——`executor-phases-a/b/c.ts`（491/570/777）、`executor-actions.ts`（534）、`executor-resolve-a/b.ts`（383/470）；类保留构造/核心循环/5 个公开方法薄包装（actOnce/scrollIntoView/scrollContainer/scrollDocument/setRange），phase 类型与跨模块 helper 导出 | **7 场景运行期 lane --check 全绿**（覆盖成功/停因/遮挡/precondition/upload/scroll/range）；examples golden + `npm run check` 绿；>1000 行文件仅剩 ctx.ts（C1 进行中） | 本批提交 |
+| C1 | `ctx.ts` 1799→**170** 行（`createCtx` 闭包拆为显式 deps 工厂）：`ctx-runtime`（313）/`ctx-step`（280，runOneStep）/`ctx-tools`（211）/`ctx-read`（480）/`ctx-nav`（231）/`ctx-scroll`（171）/`ctx-manual`（154）；ctx.ts 只做组装 + kit/runtimeView/done。ctx-types/ctx-dry/ctx-replay/app-runner 零改动 | 导出面 53/53 一致；**三面 A/B**（dry+live_result+flow，覆盖 arrive/step/hint/when/read/observe/extract/collect/scrollList/expand/setRange/errors/manual/tabs/done）归一化后 **30,501 bytes 完全相等**；split-check 后置基线 `ctx-modules`（8 文件/10 符号）；check + 双 lane 绿 | 本批提交 |
 
+
+### 6.7 大文件拆分收口（2026-11-17）
+
+**口径（用户裁决）**：最大文件 ≤3000，且 >1000 行文件归零；唯一例外 = 唯一执行器 `executor.ts`（≤3000）。
+
+**收口快照（2026-11-17）**
+
+| 原文件 | 拆分前 | 拆分后 | 去向 |
+|---|---|---|---|
+| `src/engine/executor.ts` | 5829（基线 6139） | **2721** | `executor-phases-a/b/c`、`executor-actions`、`executor-resolve-a/b`（均 <800） |
+| `src/app/app-runner.ts` | 2847 | **974** | `app-runner-types/policy/tool-step/declared` + facade |
+| `src/app/ctx.ts` | 1799 | **170** | `ctx-runtime/step/tools/read/nav/scroll/manual`（均 <800） |
+| `src/app/session-runtime.ts` | 1460 | **992** | `session-runtime-contract/evidence/entry` |
+| `src/engine/extraction.ts` | 1569 | **858** | `elem-model` / `page-shapes` / `frame-scope` 扩展 |
+| `src/engine/pool-js.ts` | 1102 | **824** | `pool-js-core` |
+
+- **>1000 行文件：6 → 1**（仅 `executor.ts` 2721 ≤3000）；其余全部 <1000；新文件全部 ≤800。
+- **≥300 行函数 7**（report）：`runScriptApp` 799、`run` 741（未改）、`runApp` 686、`createDryCtx` 542、`createCtxRead` 460、`runModelPick` 363、`createReplayCtx` 319；`createCtx` 1703 与 `_executeElement`/`actOnce` 等大函数已按模块收敛。
+
+**批次与提交**：E1 `2d8072a`/`bbbc4ea`、E2 `a9fc0fa`/`acb3876`、E3 `b64d9eb`/`9268bfe`、A1 `9d8bcce`/`c320d47`、L1 `115750f`、X1 `bb8dda6`/`27056d3`、C1 `43413c5`（文档批次同批记录）。
+
+**等价证据栈**：每批 check + `verify:offline` + `verify:runtime:offline`；A1/E1–E3/C1 各自有行为 A/B（声明式/flow 两面、session 协议、ctx 三面）；X1 以 **7 场景运行期 lane**（成功/停因/遮挡/precondition/upload/scroll/range）+ examples canonical golden 为准；split-check 现有 8 manifests（extraction-pure / pool-js-pure / app-runner-pure / ctx-modules + 原 4 个）。
+
+**门禁扩展（随批次）**：size 组新增 `movedFunctions`（纯搬移的大函数，行数只许降不许增）与 `phaseFunctions` 新路径；当前 movedFunctions 10 条、phaseFunctions 6 条；size baseline files 9 / functions 16。
+
+**明确仍属条件项**：W5-2 的完整 `tools/ctx-conformance.ts`（fake PageLike 离线 diff）未落地——C1 用临时三面 A/B 代替并留后置 manifest；`runExecution(source,deps)` 组合根仍按 §6.5 D 条件延期；`run()` 741 行与九个 phase 方法签名保持冻结。
 
 ### P2 主线（条件启动；3–5 周，12–20 人日）
 
