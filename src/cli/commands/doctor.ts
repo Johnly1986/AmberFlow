@@ -39,18 +39,14 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
     return 0;
   }
 
-  const [{ preflight, doctorReport }, provider, baselines] = await Promise.all([
+  const [{ preflight, doctorReport }, provider] = await Promise.all([
     import("../start.ts"),
     import("../../model/decision-provider.ts"),
-    import("../../model/decision-baselines.ts"),
   ]);
-  await Promise.all([
-    import("../../model/decision-jevk5.ts").then((m) => m.registerJevK5()),
-    import("../../model/decision-bailian.ts").then((m) => m.registerBailian()),
-    import("../../model/decision-tokenplan.ts").then((m) => m.registerTokenPlan()),
-    import("../../model/decision-service.ts").then((m) => m.registerDecisionService()),
-  ]);
-  baselines.registerBaselines();
+  // 内置 provider 的注册清单单源在 decision-provider.registerAllProviders()；条件注册的
+  // decision-service 仍在 doctor 这面显式补（与解析面一致）。
+  await provider.registerAllProviders();
+  await import("../../model/decision-service.ts").then((m) => m.registerDecisionService());
 
   let p = preflight();
   if (v.fix) {

@@ -44,7 +44,8 @@ import { parseRunDefaults } from "../support/run-defaults.ts";
 import { envPace } from "../support/pace.ts";
 import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
 import {
-  applySpecToRuntime, BUILTIN_LAYA_PROVIDERS, installDecisionProvider, listDecisionProviders, resolveProviderSpec,
+  applySpecToRuntime, BUILTIN_LAYA_PROVIDERS, installDecisionProvider, listDecisionProviders,
+  registerAllProviders, resolveProviderSpec,
 } from "../model/decision-provider.ts";
 import { BASELINE_PROVIDERS, registerBaselines } from "../model/decision-baselines.ts";
 import { PlanningRules, TaskPlan } from "../engine/plan.ts";
@@ -508,15 +509,9 @@ export async function main(argv: string[] = process.argv.slice(2), io: Io = defa
     return 0;
   }
   if (cliBool(v, "doctor")) {
-    // 外部 provider 的注册**不需要权重/服务在场**（只有真调用才需要）——先注册，
-    // 体检才列得出"能选谁"（jevk5 / bailian）。否则 doctor 的 provider 行会漏掉它们，
-    // 而代码注释早就声称"doctor 能列出它"——这里把那句话变成真的。
-    const { registerJevK5 } = await import("../model/decision-jevk5.ts");
-    const { registerBailian } = await import("../model/decision-bailian.ts");
-    const { registerTokenPlan } = await import("../model/decision-tokenplan.ts");
-    await registerJevK5();
-    await registerBailian();
-    await registerTokenPlan();
+    // 外部 provider 的注册**不需要权重/服务在场**（只有真调用才需要）——单一清单见
+    // decision-provider.registerAllProviders()；先注册，体检才列得出"能选谁"。
+    await registerAllProviders();
     const report = doctorReport(preflight());
     for (const l of report.lines) io.out(l);
     // 生效档位：按缺省配置解析出的**真实决策源**——"缺本地 ONNX"那一行不再误导在线档。

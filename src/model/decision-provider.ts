@@ -279,6 +279,27 @@ export async function applySpecToRuntime(spec: ProviderSpec): Promise<AppliedSpe
 }
 
 /**
+ * 注册全部**内置** provider（幂等）。新增 provider 只需：adapter 文件 + 在本函数加一行
+ * import/register——`resolveProviderSpec`、`amber doctor` 与 `start --doctor` 三面都走这里，
+ * 不再各自维护注册清单（扩展演练实测过清单漂移的代价）。
+ *
+ * 条件注册的除外：`decision-service` 只在真要解析线上档时才注册（见 resolveProviderSpec），
+ * 这里不注册它，保持三面可见集合与既有行为一致。
+ */
+export async function registerAllProviders(): Promise<void> {
+  const [{ registerBaselines }, { registerJevK5 }, { registerBailian }, { registerTokenPlan }] = await Promise.all([
+    import("./decision-baselines.ts"),
+    import("./decision-jevk5.ts"),
+    import("./decision-bailian.ts"),
+    import("./decision-tokenplan.ts"),
+  ]);
+  registerBaselines();
+  await registerJevK5();
+  await registerBailian();
+  await registerTokenPlan();
+}
+
+/**
  * 按**三件套或显式名字**解析该装什么（不安装）。四个门，一个入口：
  *   有 `AMBERFLOW_DECISION_BASE_URL` → 统一决策服务（不需要 provider 键）
  *   `laya-onnx`      没有服务地址时的本地端口；产物不齐时 tier 如实写 `off(missing)`
@@ -291,18 +312,10 @@ export async function applySpecToRuntime(spec: ProviderSpec): Promise<AppliedSpe
 export async function resolveProviderSpec(
   name?: string | null, env: NodeJS.ProcessEnv = process.env,
 ): Promise<ProviderSpec> {
-  const { registerBaselines, BASELINE_PROVIDERS } = await import("./decision-baselines.ts");
-  registerBaselines();
-  // 外部 provider 在这里注册（**注册不需要权重**，只有真调用才需要服务端在场——
-  // 所以 doctor 能列出它，而没起服务时错误信息会指路，而不是"未知 provider"）。
-  const { registerJevK5 } = await import("./decision-jevk5.ts");
-  await registerJevK5();
-  // 百炼 decision-model-preview：同样注册不需要 key/端点，真调用缺了才报错指路。
-  const { registerBailian } = await import("./decision-bailian.ts");
-  await registerBailian();
-  // token-plan MaaS 网关（同一 SystemOne 协议，共享端点、Token 只从环境读）。
-  const { registerTokenPlan } = await import("./decision-tokenplan.ts");
-  await registerTokenPlan();
+  // 外部 provider 的注册**不需要权重/服务在场**（只有真调用才需要）——单一清单见
+  // `registerAllProviders()`；没起服务时错误信息会指路，而不是"未知 provider"。
+  const { BASELINE_PROVIDERS } = await import("./decision-baselines.ts");
+  await registerAllProviders();
 
   // 线上/本地是**三件套的有无**，不是另一个开关：有服务地址就走统一服务，
   // 没有就用本地 checkpoint。`--provider NAME` 只作为本次实验的显式覆盖。
