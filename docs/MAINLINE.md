@@ -60,7 +60,7 @@ S1 执行内核    runExecution(source, deps)                                  �
 S2 源适配器    flow    : loadScriptApp → flow(ctx)；重试/分支 = 脚本控制流；完成 = ctx.done 不变量
                plan    : TaskPlan 子目标循环 + retries/replan + NEVER_RETRY_CODES 查询；结果 = RunPlanResult
                suite   : 用例 preflight/case 执行/oracle/证据；case 结果 = CaseOutcome
-S3 套件聚合器  tier 选择、exit code 0/1/2/3、--require-all、证据目录（源之上薄层，不是第 5 套编排）
+S3 套件聚合器  tier 选择、exit code 0/1/2/3、--require-all、证据目录（源之上薄层，不是第 5 套编排；退出码/probe 期望单点已落 src/online/suite-aggregate.ts）
 S4 引擎步装配  execStep(ports, EngineStepSpec)                               ← 规划中（P2 条件）
                仅引擎步；工具步由 Ctx 契约的 toolRunner 单列，不进执行器
 S5 唯一循环    BrowserMiddleware.run（不变，不重写）

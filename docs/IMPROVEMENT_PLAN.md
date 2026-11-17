@@ -6,7 +6,7 @@
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0/4d/BACKLOG #2/2.3 完成；**2.2 执行内核：SessionLease 已落地并接入 suite + flow 两面**；剩余 RunScope/StopClassifier/runExecution 组合根 + plan 适配器；BACKLOG #3 冻结后启动）。
+> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0/4d/BACKLOG #2/2.3 完成；**2.2 执行内核：SessionLease（suite+flow）+ S3 套件聚合器原语已落地**；剩余 RunScope 契约、runExecution 组合根、plan 适配器接入；BACKLOG #3 冻结后启动）。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -564,6 +564,8 @@ interface PromptSpec {
 | 2.2-1（P2 执行内核首批） | **S1 共享 seam：SessionLease**——`src/app/session-lease.ts`（51 行：惰性 `get()` 并发共享/创建失败可重试、`close()` 幂等且不覆盖结果、所有权边界由适配器显式选择）；suite 适配器（`src/online/runner.ts`）接入，替换手写 `browserSession + finally close`。flow/plan 适配器后续接入 | 本批提交 | typecheck/check、examples golden、运行期 lane 不受影响（suite 非离线 lane 覆盖）；online runner 320 行不变（净 0） |
 
 | 2.2-2（P2 执行内核） | SessionLease 接入 **flow 适配器**（app-runner 两面）：`peek()` 小扩展 + runApp/runScriptApp 手写 holder/ensureSession 全改租约；创建时机/参数/factory 优先/close 时序逐字不变。flow 面运行期实测：fixtures 静态服务 + 临时 flow app 的**改前×2 / 改后×2 归一化结果逐字节一致** | 本批提交 | app-runner 2853→2847（净 −6）；typecheck/check/examples golden/verify lane 全绿 |
+
+| 2.2-3（P2 执行内核 · S3） | 套件聚合器原语单点：`src/online/suite-aggregate.ts`（35 行）——`suiteExitCode`（0/1/3，requireAll 语义）+ `applyProbeExpectations`（probe 观测→skipped；expect_zero_actions 违约不被吞）；online runner 复用，删除本地副本 | 本批提交 | runner 320→301（−19）；typecheck/check/examples golden/verify lane 全绿（纯函数逐字搬移） |
 
 **4d 九阶段出口核对（2026-11-17，完成）**：
 
