@@ -104,7 +104,7 @@ export async function flow(ctx) {
 
 | 卡点 | 能力 |
 |---|---|
-| 自绘 div 筛选/按钮不在池 | `meta.policy.target_resolution:"declared"`（DRF：attr/文本精确匹配+唯一可见+hit-test，§4.11） |
+| 自绘 div 筛选/按钮不在池 | DRF 已**缺省启用**（`target_resolution` 缺省 `declared`：attr/文本精确匹配+唯一可见+hit-test，§4.11；仅显式 `"off"` 时需恢复） |
 | 看不到当前页元素/池 | `ctx.observe()`（免费只读；admitted/why_not_admitted/hint_candidates；dry 下 `elements=[]` 只验形状） |
 | `target=_blank` 会开新标签 | step opts `newTab:{urlContains}`（自动采用+去重，别重复点击；§4.9） |
 | 慢 SPA/步内挂死 | step `timeoutMs`（=整步挂钟帽，超时 stop `step_timeout`） |
@@ -471,7 +471,7 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
   声明；S4 起还有 `forced`（步级 force 实际生效）与 `stale_retry:[{attempt,reason,ref}]`（每次 stale 重解析重试一条）；
   `after` 仅在"动作后有下一次观察"时补（done 立即成立的收尾动作没有下一跳，故不补）。
 
-**S4 执行韧性（步级 opt-in，缺省不出现 = 行为逐字节不变）**
+**S4 执行韧性（force/staleRetry 步级 opt-in，缺省不出现 = 行为逐字节不变）**
 
 - `force?: boolean`：动作走 Playwright 的 **force 语义**（`click({force:true})` / `fill(v,{force:true})` /
   `selectOption(...,{force:true})` / `hover({force:true})`）——跳过 actionability 检查（可见/稳定/可接收
@@ -487,14 +487,15 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
   是单数 `stale_retry`，`step` 结果/RunReport 侧的汇总数组字段是复数 `stale_retries`——两个名字并存，
   勿混写）；最终失败仍按既有 stopCode
   （`stale_ref` / `action_failed` / `not-actionable-or-covered` …）诚实报告。
-- `rehydrateRescan?: boolean`（F72）：声明 act hint **真落空**（hintMatch 零命中；弱档胜出不算）且
-  步首抽池时**页面未静默**（settle timedOut——重水合 SPA 轮播页抽到中间态池的信号）时，引擎等 2s
-  → 重抽池 → 用**同一 hint** 重解析一次（至多 1 次；确定性 rule:match，不重走决策面；不额外计步
-  预算；受整步挂钟帽钳制）。命中 = 照常执行，trace 行/step 结果/RunReport 记
-  `rehydrate_rescan:{waited_ms,pool_size_before,pool_size,resolved,ref?}`；重扫池上歧义照旧同一谓词
-  结构化；仍未命中 = 原停因不变。会话 act 面有同一开关：单行请求字段 `rehydrateRescan:true` /
-  桥参数 `rehydrate_rescan:true`，命中响应带 `resolved_via:"rehydrate-rescan"`，落空响应的
-  `diagnostics` additive 带 `settle_timed_out`/`settle_waited_ms`（渲染可疑）与 `rescan`（重扫事实）。
+- `rehydrateRescan?: boolean`（F72）：兼容声明（**不再有额外效果**——重扫已缺省自动）。act hint
+  **真落空**（hintMatch 零命中；弱档胜出不算）且步首抽池时**页面未静默**（settle timedOut——重水合
+  SPA 轮播页抽到中间态池的信号）时，引擎自动等 2s → 重抽池 → 用**同一 hint** 重解析一次（至多 1 次；
+  确定性 rule:match，不重走决策面；不额外计步预算；受整步挂钟帽钳制）。命中 = 照常执行，trace 行/step
+  结果/RunReport 记 `rehydrate_rescan:{waited_ms,pool_size_before,pool_size,resolved,ref?}`；重扫池上
+  歧义照旧同一谓词结构化；仍未命中 = 原停因不变。会话 act 面同一机制自动生效：单行请求字段
+  `rehydrateRescan:true` / 桥参数 `rehydrate_rescan:true` 仍被接受（兼容），命中响应带
+  `resolved_via:"rehydrate-rescan"`，落空响应的 `diagnostics` additive 带
+  `settle_timed_out`/`settle_waited_ms`（渲染可疑）与 `rescan`（重扫事实）。
   `meta.policy.settle:"off"` 时门控信号不存在，重扫永不触发。dry 面只记声明（`rehydrate_rescan:true`）。
 - `hover` 命令：见 §4 命令闭集——它只移动指针（`:hover` 菜单/图层面板），不点击、不导航、不触发预填；
   快照没变不判 inert（与 scroll/drag 同口径），完成仍只认 done 信号。
@@ -507,8 +508,9 @@ done 是不是动作前就已成立"变成结构化证据（全部**可选字段
 1. **正锚优先（首选，声明式）**：act 前 `ctx.waitForTarget("input[name=owACity]", { timeoutMs: 8000 })`
    （免费只读不计预算；返回 `{found, count}`，超时如实 `found:false`）——把"猜页面多久渲染好"变成
    "声明页面就绪条件"，作者声明一次全程受益。
-2. **失败路径补偿（opt-in）**：`ctx.step(..., { rehydrateRescan: true })`——hint 真落空且页面未静默时
-   引擎自行等 2s 重扫一次（见上）；会话面用 `rehydrateRescan`（请求字段）/ `rehydrate_rescan`（桥参数）。
+2. **失败路径补偿（缺省自动，无需声明）**：hint 真落空且页面未静默时引擎自行等 2s 重扫一次（见上）；
+   `ctx.step(..., { rehydrateRescan: true })` / 会话面 `rehydrateRescan`（请求字段）/
+   `rehydrate_rescan`（桥参数）仍被接受（兼容，不再有额外效果）。
 3. **稳定门放宽（次选）**：`meta.policy.settle:{ timeout_ms: 8000 }`——控制流不变（超时后照常抽池），
    但多等的墙钟本身就是水合窗口；轮播页静默永不达成时它只是"多等一会儿再抽"，不解决正信号缺失。
 
@@ -806,12 +808,14 @@ export const meta = (kit) => ({
 
 自绘控件（无 role/onclick/id，甚至不在准入选择器 ADMIT_SEL 里）让**作者声明的目标**解析不到：
 池 hintMatch → ADMIT 回捞 → FW8 身份回捞全落空，命令步 `target_not_found`、act hint 在
-`widen` 档回退模型自由选。声明式逃生口（**opt-in，缺省逐字节不变**）：
+`widen` 档回退模型自由选。**缺省 `"declared"`（批准的默认翻转）**：class-only 站点的裸词/attr
+声明目标由 DOM 侧兜底恢复，作者不需要知道这个开关也要能走通；**显式 `"off"` = opt-out**
+（逃生口/对照臂）：
 
 ```js
 export const meta = (kit) => ({
   // ...
-  policy: { target_resolution: "declared" },
+  policy: { target_resolution: "off" },   // 显式 opt-out（缺省 declared）
 });
 ```
 
@@ -832,9 +836,9 @@ export const meta = (kit) => ({
 
 **F73 诚实化**：DRF **实跑**且可见零命中时，落空停因 reason 会回显 DRF 计数
 （`declared-DOM resolution (DRF, attr|text mode) ran: total=N, hidden=M, visible=0`）——
-作者可据此区分"hint 写错 / 被池帽挤出 / DRF 扫过仍看不见"三类病因；未声明
-`target_resolution` 时串逐字节不变（strict 的解析链列举句同步条件化：声明了 declared
-才会点名 DRF）。
+作者可据此区分"hint 写错 / 被池帽挤出 / DRF 扫过仍看不见"三类病因（缺省 declared 下这段
+计数即缺省账；strict 的解析链列举句同步点名 DRF）。显式 `"off"` 时 DRF 整链关闭，落空
+reason 回到无 DRF 参与的形态，并恢复"可声明 declared"能力提示（见 §10 `target_not_found`）。
 
 纪律与证据：
 
@@ -844,8 +848,11 @@ export const meta = (kit) => ({
 - **click 前 hit-test**：click 族动作前 `elementFromPoint(中心点)`，命中元素必须是目标自身
   或其后代。否则**不点击**：`skipped_actions` 记 `hit_test:covered` / `hit_test:ancestor`，
   result 的 `declared_resolve.hit_test` 带现场（blocker），done 不成立。
-- **首版能力面**：只允许 `click` / `scroll` / `hover`；对 DRF 目标声明 `fill`/`select`/
-  `drag`/`upload`/`clickAt` → 结构化 `action_unsupported`（reason 明说首版限制）。
+- **能力面（单点在解析资格侧）**：DRF 只救 `click` / `scroll` / `hover`——能力面外的命令
+  op（`fill`/`select`/`drag`/`upload`/`clickAt`）与 typing 形 act-hint 命中**不参与救援**
+  （解析资格单点 = `declared-targets.tryDeclared`）：命令落回既有 `target_not_found`、act
+  hint 落回 `widen`/`strict` 既有路径，**绝不先解析再拒绝成 `action_unsupported`**——缺省
+  declared 下能力面外目标的行为与关闭 DRF 逐字节一致。
 - **证据**：trace 行 `resolved_by:"declared_dom"` + `declared_resolve:{mode:"attr"|"text",
   target, matches, hidden_matches, total_matches, frame, hit_test?}`；`executed_actions` 的
   `ref` 用合成标识 `drf:N`（不伪装池 ref）并带 `resolved_by`/`declared_resolve`；命中行临时
@@ -854,6 +861,20 @@ export const meta = (kit) => ({
   进 provider 前也剥离 `declared` 旁路标记。
 - **dry / replay**：只校验 policy 值；DOM 事实无法离线验证，**不新增绿**（语义上
   `resolution:"unverified(dry)"`，结果里不造字段）。未知值加载期 `config_error`。
+
+**最后手段：文本 bbox 中心坐标点击（clickxy，P2-10）**——只发生在**全链落空之后**：
+
+- 解析链再补两档（run 决策步的 act hint 面）：第五档 **AX 回退**（可访问性树里可交互有名
+  节点与 hint 词面匹配，命中反解 DOM 盖临时探针章，`resolved_by:"ax_fallback"`；弱档命中在
+  `act_hint_tier:"strong"` 下被判未命中不执行）；第六档 **clickxy**——文本全等且**唯一可见**
+  的元素（无任何可寻址句柄）→ 取其 bbox 中心，`resolved_by:"clickxy_fallback"` +
+  `clickxy:{x,y}` 进 trace/executed 证据。位置直接写进动作描述（`click at (x, y) text "…"`）。
+- **危险门控（缺省拒绝）**：clickxy 合成行在风险闸门上被**强制**判 risky——动作前必须过
+  `confirmFn`（dry-run 先行：`dry_run` 停因如实写 `would click at (x, y)`；无确认函数/非交互
+  运行恒拒绝，`--confirm-unsafe` 才放行）。被拒绝 = `skip_reason:"risk-declined"` 零动作。
+- **绝不猜**：文本命中 >1 个可见元素 = `clickxy_ambiguous` 警告 + 零动作（落既有
+  `target_not_found`/`strict` 路径）；仅裸词 hint 参与（`#id`/attr 形状有 DRF/直查面，坐标无增益）；
+  主帧只读探测，异常 = null（既有诊断逐字节不变）。
 
 ### 4.12 列表/表格行：内容身份定位（`in-row:<token>`）
 
@@ -1160,7 +1181,7 @@ if (!m.ok) ctx.fail(m.stopCode ?? "needs_human", m.reason);
 | `decision_state` | `{gate:"off",context:"off"}` | S5 决策状态接入（A/B）：`gate:"stable_only"` = ask 前 settle + 同池同题不重复问（`decisions.asks_saved/gate_waits`）；`context:"delta"` = 请求带 ≤200B 结构化 `state_digest`（provider 不支持则跳过，记 `context_skipped`） |
 | `navigation` | `free` | 导航纪律（仅 flow 面）：`"entry-only"` = 入口之外的引擎直接 URL 导航默认被 `navigation_forbidden` 拒绝，但 **`meta.site.pages` 里声明的页面 URL 可再次直接导航**（`URL.href` 归一后全等才放行，见 §4.10）；缺省/"`free`" = 不约束，产物逐字节不变 |
 | `act_hint` | `widen` | 声明目标（`act: ctx.hint(...)` / `target_hints`）解析链（池 hintMatch → ADMIT 回捞 → FW8 身份回捞）全落空时的档位：`widen` = 交给模型自由选（**缺省 = 现行为逐字节不变**）；`strict` = **禁止模型回退**，直接结构化 `target_not_found`（reason 写明 `act_hint="strict"` + 原 hint + 池快照）。命令步不受影响；FW8 的 `#id`/`[data-test]`/`[name]` 声明回捞先执行。显式声明才进 `effective_policy.act_hint` |
-| `target_resolution` | `off` | **声明目标解析链（DRF，P0-C）**：`off` = 现行为逐字节不变；`declared` = 命令 `target` / act hint 在池 hintMatch → ADMIT 回捞 → FW8 身份回捞全部落空后，再由 DOM 侧兜底解析（属性型 hint 走 ADMIT_SEL + 同一套 hint 语义；裸词 hint 走可见文本精确匹配；跨 frame **恰好一个可见**才动作，>1 → `target_ambiguous`，全隐藏 = 未命中 + hidden 诊断）。click 族动作前必须 hit-test（中心被覆盖则不点击、记 `hit_test` 证据）。首版只允许 `click`/`scroll`/`hover`，对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` → 结构化 `action_unsupported`。回捞元素只进本步局部池，**模型不参与**。显式声明才进 `effective_policy.target_resolution`；dry 只校验 policy 值（DOM 事实无法离线验证，不新增绿，见 §4.11） |
+| `target_resolution` | `declared` | **声明目标解析链（DRF，P0-C；缺省 declared = 批准的默认翻转）**：命令 `target` / act hint 在池 hintMatch → ADMIT 回捞 → FW8 身份回捞全部落空后，再由 DOM 侧兜底解析（属性型 hint 走 ADMIT_SEL + 同一套 hint 语义；裸词 hint 走可见文本精确匹配；跨 frame **恰好一个可见**才动作，>1 → `target_ambiguous`，全隐藏 = 未命中 + hidden 诊断）。click 族动作前必须 hit-test（中心被覆盖则不点击、记 `hit_test` 证据）。能力面 = `click`/`scroll`/`hover`，**单点在解析资格侧**（declared-targets.tryDeclared）：能力面外的命令 op（`fill`/`select`/`drag`/`upload`/`clickAt`）与 typing 形 act-hint 命中**不参与救援**，落回既有 `target_not_found` / `widen`/`strict` 路径。回捞元素只进本步局部池，**模型不参与**。**恒进 `effective_policy.target_resolution`**（显式声明 source=app，缺省 source=default；显式 `"off"` = opt-out 逃生口）；dry 只校验 policy 值（DOM 事实无法离线验证，不新增绿，见 §4.11） |
 | `act_hint_dom_fallback` | `false` | **F74：决策步 act hint 的 DOM 回退跳**：true = 声明 hint 在 池→ADMIT 回捞→FW8→(DRF)→(U5/F72) 全链真落空后，再走一次主帧 ADMIT_SEL DOM 回退面（与会话 act 同一实现，**不过滤可见性**、含 0×0 自绘控件）；命中 = 确定性 `rule:match`（不进模型投影，trace 记 `resolved_by:"dom_fallback"`）；歧义 = 同一谓词 `target_ambiguous`；落空 = 原停因 + strict reason 补"已试 DOM 回退"；至多一次/步。缺省 false = 逐字节不变 |
 | `browser` | （不写 = 现状链） | **task-43 浏览器通道**：`"chrome"`（系统 Chrome，Playwright `channel:"chrome"`，new headless）\| `"headless-shell"`（ms-playwright 的 headless-shell，= 缺省现状）。优先级 **env(`AMBERFLOW_BROWSER_CHANNEL`) > meta > 缺省**——env 是部署/CI 的机器级覆盖，meta 是应用作者的站点知识（已知 headless-shell 下坏的站点在此点名 chrome，如 zh.wikipedia 文章页的客户端 URL flap）。主机没有系统 Chrome 时 launch **如实报错不静默回退**（要回退请删 meta 或改 env）；与 `--headful` 正交组合（headful 语义独立：人工步等仍强制可见窗口）。生效值与来源进 `effective_policy.browser`（仅 env/meta 任一存在时出现）；真实二进制以 `env.browser.binary_basename`（D-1 启动事实）为准。已知代价（task-39 实测）：chrome 通道冷启动 +~13%，zh.wiki 类页面 open 快 ~3.5s 且免 flap |
 | `attr_value_match` | `full_label` | **A1 属性值匹配底座**：`full_label`（缺省）= `[aria-label=…]` / `[aria-label~…]` 同时比 ≤200 的 `full_label` 与模型视图 `label`（前 40 字）——>40 字的 aria-label 值可命中；`display` = A1 之前（只比前 40 字 label，>40 的值永不命中；逃生口/对照臂）。attrEq 与 attrSubstr 同一函数、一处修两形状；≤40 的值等值命中集合不变。显式声明才进 `effective_policy.attr_value_match`；inspect/observe/session 无 policy 恒 `full_label` |
@@ -1224,9 +1245,9 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 | `arrive_signal_not_held` | `ctx.arrive` 导航完成但 done 信号在超时内未成立 |
 | `precondition_skipped` | `when` 不成立，这一步没有执行（`ok:false`，trace 状态 `skipped`；同样计一次执行预算）——脚本按 stopCode 分支继续，不是失败 |
 | `page_not_ready` | 元素池为空，页面还没稳定；等页面 ready，或修 done 信号 |
-| `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标。`meta.policy.act_hint:"strict"` 下 act hint 解析链全落空也用它（reason 显式写 `act_hint="strict"`，**不再回退模型自由选**；缺省 `widen` 才回退）。`meta.policy.act_hint_tier:"strong"` 下**弱档胜出被判未命中**（bare 词前缀/词包含、attrSubstr loose 子串）同样报它：strict 时 reason 写明弱档被拒 + 候选≤3 + 两条改法（收窄成强形状 / 回 `act_hint_tier:"any"`）；缺省 `any` 才有 `matched_others` 警告。声明目标（act hint/命令）在池+ADMIT+FW8 全落空且**未声明** `target_resolution` 时，reason 追加一行 DRF 提示（自绘控件可声明 `meta.policy.target_resolution:"declared"` 走 attr/文本精确匹配）；**已声明** `"declared"` 的同场景走 DRF、不再提示（避免噪音）。**F73 起**：已声明 declared 且 DRF 实跑可见零命中时，落空 reason 追加 DRF 计数（`total/hidden/visible=0`），strict 的解析链列举句同步点名 DRF；未声明时逐字节不变。**C 批起**：若 hint 带 `frame:` 尾缀，reason 末尾追加该尾缀的拒绝原因（多尾缀 / 非法 origin / 空段 / >4 段 / 带 path·query·显式默认端口）或合法但未命中时**页面实际可用 origin**（允许帧去重 ≤6、主帧也列）；无 `frame:` 参与时旧 reason 逐字节不变。**F82 起**：若 hint 带 `in-row:` 尾缀，reason 按**三案口径**给出可区分证据（见下方「行锚三案/四案口径」；尾缀形状非法时先点名拒绝原因——多尾缀 / 空值 / 含 `>` / 超 40 字符 / 值内伪尾缀；无 `in-row:` 参与时旧 reason 逐字节不变）。**F83 起**：若 hint 带 `row-index:` 尾缀，reason 按**四案口径**给出可区分证据（同下；`0`/负数/非数字点名"row-index 从 1 开始"；无 `row-index:` 参与时旧 reason 逐字节不变） |
+| `target_not_found` | 目标声明在页面上不存在；改 hint 或换目标。`meta.policy.act_hint:"strict"` 下 act hint 解析链全落空也用它（reason 显式写 `act_hint="strict"`，**不再回退模型自由选**；缺省 `widen` 才回退）。`meta.policy.act_hint_tier:"strong"` 下**弱档胜出被判未命中**（bare 词前缀/词包含、attrSubstr loose 子串）同样报它：strict 时 reason 写明弱档被拒 + 候选≤3 + 两条改法（收窄成强形状 / 回 `act_hint_tier:"any"`）；缺省 `any` 才有 `matched_others` 警告。声明目标（act hint/命令）在池+ADMIT+FW8 全落空且 **DRF 关闭（仅显式 `target_resolution:"off"`）** 时，reason 追加一行 DRF 提示（恢复缺省 `declared` 可走 attr/文本精确匹配）；缺省 `declared` 的同场景 DRF 已实跑过、不再提示（避免噪音）。**F73 起**：DRF 实跑可见零命中时，落空 reason 追加 DRF 计数（`total/hidden/visible=0`），strict 的解析链列举句同步点名 DRF。**C 批起**：若 hint 带 `frame:` 尾缀，reason 末尾追加该尾缀的拒绝原因（多尾缀 / 非法 origin / 空段 / >4 段 / 带 path·query·显式默认端口）或合法但未命中时**页面实际可用 origin**（允许帧去重 ≤6、主帧也列）；无 `frame:` 参与时旧 reason 逐字节不变。**F82 起**：若 hint 带 `in-row:` 尾缀，reason 按**三案口径**给出可区分证据（见下方「行锚三案/四案口径」；尾缀形状非法时先点名拒绝原因——多尾缀 / 空值 / 含 `>` / 超 40 字符 / 值内伪尾缀；无 `in-row:` 参与时旧 reason 逐字节不变）。**F83 起**：若 hint 带 `row-index:` 尾缀，reason 按**四案口径**给出可区分证据（同下；`0`/负数/非数字点名"row-index 从 1 开始"；无 `row-index:` 参与时旧 reason 逐字节不变） |
 | `target_ambiguous` | 目标命中多个不同候选；收窄 hint。`target_resolution:"declared"` 下 DRF 的两个可见文本/属性匹配同样报它（候选 tag/文本/frame/visible 在 reason 与 `skipped_actions`）。**F82 起**：`in-row:` token 撞多行时也走本停因——解析面 fail-closed（多候选直接 null），零动作、候选照常列出（**永不静默取第一个**；候选各自带 label/same_label/near，行归属看候选的 `row_index`——引擎歧义证据 additive，桥面暂不投影）。**F83 起**：`row-index:N` 组合后仍多候选（跨帧同名网格/多网格同页各含同序成员）同样走本停因——收窄 `frame:`/`within:`/`in-row:` |
-| `action_unsupported` | 目标存在但声明的动作 op 不在元素能力面内；换动作或换目标。DRF 首版只允许 `click`/`scroll`/`hover`——对 DRF 目标声明 `fill`/`select`/`drag`/`upload`/`clickAt` 也报它（reason 明说首版限制） |
+| `action_unsupported` | 目标存在但声明的动作 op 不在元素能力面内；换动作或换目标。DRF **不产生**本停因：能力面外（非 `click`/`scroll`/`hover`）的声明目标在解析资格侧就不参与救援，落回既有 `target_not_found` / `widen`/`strict` 路径（见 §4.11） |
 | `done_not_held` | 命令闭集已走完，但 done 信号仍未成立；检查完成信号或页面状态 |
 | `false_done` | **P0-E**（`done_guard:"fail"` 档）：done 成立但只读复核 guard 命中假绿特征——登录墙特征（URL/标题登录文案/跨出 hosts 信封）或「有动作但 changed=false 且 done 是否定式」的零前进蹭成立（R11：误点进登录页被算成功）。给 done 配正向锚（`all_of(not(...), 正向锚)`，必要时配 `ctx.judge.loginWall()`）；确属误报把 policy 改回 `warn`。缺省 `warn` 档只记 `false_done:` step warning，不改判定 |
 | `step_timeout` | **F3**：该步显式声明了 `timeoutMs`，整步挂钟（含 reobserve/升级循环的每轮与总时长）超了声明值——循环不再进入下一轮（已在途的决策调用不可抢占，超额 ≤ 一次在途调用）。放宽 `timeoutMs`、收窄该步 done/target，或拆分流程；未声明 `timeoutMs` 的步骤没有这个帽 |
@@ -1240,7 +1261,7 @@ amber run my-app --replay /tmp/run.trace.json       # 不重新决策；脚本�
 
 **停因自带能力提示（eval3 曝光面改造；仅追加一行 reason、成功路径零改动）**——对应能力已经存在，停因当场点名修法，不用再去翻文档：
 
-- `target_not_found`（声明目标池+ADMIT+FW8 全落空且未声明 `target_resolution`）→ 提示声明 `meta.policy.target_resolution:"declared"`（DRF：attr/文本精确匹配+唯一可见+hit-test）；
+- `target_not_found`（声明目标池+ADMIT+FW8 全落空且 DRF 关闭——仅显式 `target_resolution:"off"`）→ 提示恢复缺省 `declared`（DRF：attr/文本精确匹配+唯一可见+hit-test）；
 - `no_progress`（本步动作没改当前页 URL 但 **context 标签数增加了**）→ 提示用 step opts `newTab:{urlContains}` 自动采用并去重（消 `_blank` 重复点击）；
 - `false_done` 警告（warn/fail 两档同文案）→ 给出可直接抄的构造器 `done: ctx.judge.all(not(ctx.judge.loginWall()), <正向锚>)`；
 - `step_timeout` reason → 点明 `timeoutMs` 是**整步挂钟帽**（settle/reobserve/升级/动作共享），不是逐动作超时；

@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "extraction-pure",
-  "note": "extraction.ts 纯区外搬（element model→elem-model.ts / 帧读侧→frame-scope.ts / page-shape helpers→page-shapes.ts；2026-11-17）",
+  "note": "extraction.ts 纯区外搬（element model→elem-model.ts / 帧读侧→frame-scope.ts / page-shape helpers→page-shapes.ts；2026-11-17）；clickxy 最后手段（P2-10）给 Elem 契约新增可选 `clickxy?:{x,y}` 字段——有意非纯搬移，按 split-check 纪律将 Elem 从 manifest 移除（其余符号保持纯搬移 hash 不动）",
   "files": {
     "src/engine/elem-model.ts": {
       "symbols": {
@@ -16,7 +16,6 @@
         "CLICK_ADAPTER": "06d6364edaf2834930b2fa507d95391a04450770ec8c5cb63040c39ed0984006",
         "CLICK_AT_ADAPTER": "65a4cd488d10013c263e5a733992d9a5c9758f141e1ea86a556d8dd4cc65fd26",
         "DRAG_ADAPTER": "3eca60d5b613b9ec00e497a34b362c3b85a28f623fe3d07d5f6e617c43d23035",
-        "Elem": "c07da8a9c474cbd87863704f38a144fd7f7186aaeff421cb1734b88d95bf73c1",
         "elemFamily": "6ce6da482e175083617ab0cbb6faee7de870b8902a2b38bf0061a7f08429b5d4",
         "ElemFamily": "27d0d6972855255eb3541807fc784c0dcf0b6e7b29cb4bf19905344d7ed15f94",
         "ElemPool": "76831f5df6244e0dce8925b95117c0154e28c0f37c6c483a114ba184dbdac454",

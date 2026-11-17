@@ -1,18 +1,16 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "app-runner-pure",
-  "note": "app-runner.ts 拆分（A1a/A1b）：类型/纯助手→types、策略→policy、工具步→tool-step、runApp→declared；纯搬移 hash（除 6 个加 export 修饰的跨模块助手外逐字节相同）；W3-4：runApp 的 selects 回写改配置驱动（抽 buildSelectObservation 保持行数预算），非纯搬移；S1：runScriptApp 改为 runExecution 内核上的 flow 源适配器（非纯搬移，符号移出 manifest，等价由 tools/verify-run-execution.ts 四源 lane 承担）；工具步适配抽到 app-runner-script-tools.ts（签名变化，非纯搬移）",
+  "note": "app-runner.ts 拆分（A1a/A1b）：类型/纯助手→types、策略→policy、工具步→tool-step、runApp→declared；纯搬移 hash（除 6 个加 export 修饰的跨模块助手外逐字节相同）；W3-4：runApp 的 selects 回写改配置驱动（抽 buildSelectObservation 保持行数预算），非纯搬移；S1：runScriptApp 改为 runExecution 内核上的 flow 源适配器（非纯搬移，符号移出 manifest，等价由 tools/verify-run-execution.ts 四源 lane 承担）；工具步适配抽到 app-runner-script-tools.ts（签名变化，非纯搬移）；P1-1 DRF 缺省翻转：EffectivePolicy.target_resolution 恒在账（source app|default）+ resolveRunPolicy 缺省 declared，有意非纯搬移——两符号已按 split-check 文档纪律从 manifest 删除（其余符号恢复原 hash 钉子）",
   "files": {
     "src/app/app-runner-policy.ts": {
       "symbols": {
         "AppRunConfigError": "d37f30210e7838160b2d8d6b785e8513706157ce11949ed487e13ff32f0b5885",
         "declaredPageUrls": "e6d5201c9812351c6364a9518b2f4887456b53a311d3d3eff4ec57715352875c",
-        "EffectivePolicy": "045265b699fb87ff58c5afd78014c130983af4b54a10de410615fd2b9e10decc",
         "preflightConfig": "809a26c4f0e2865a01e0582c308a3fd631ac2fea734cfc561e6ddd44f4e855f7",
         "probeCompatDecisionPlane": "12ebcd7b8b1ab07d687f1510744abb51806306af41debd8d4d1304157e7c916b",
         "promptManualOnTty": "d65cb838611d2c909384d8f7e74ffff7f22b6c8ad14b5512cd90e2b925ff5060",
-        "resolvePace": "b94a3c8ad0ff6becbb5cb4deaaeea4a22b1b08b4473eae63f1c3254c229552c3",
-        "resolveRunPolicy": "aec0e8fd8b608dc10cc43d65d8396af0b9998b6ad80ad65c0a12d07b5f986dc1"
+        "resolvePace": "b94a3c8ad0ff6becbb5cb4deaaeea4a22b1b08b4473eae63f1c3254c229552c3"
       }
     },
     "src/app/app-runner-tool-step.ts": {
@@ -43,6 +41,7 @@
     },
     "src/app/app-runner.ts": {
       "symbols": {
+        "runScriptApp": "7866e86ce1cab020fdd583f2426cf4ad886d5d0b708b46e6fce11297f87ca2db",
         "ScriptRunOptions": "aa342514ed664bf534f30fa39026e76da0aff88a862d2ea8f5be55dfa64c64c0",
         "USAGE": "d74682ed00984f7122b6b338aba61755f1f626ac2a48ffce62134f5a8431dc92"
       }

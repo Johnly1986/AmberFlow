@@ -81,6 +81,7 @@ const TUNING_CONCEPTS: ReadonlyArray<{ concept: TuningConcept; context: RegExp }
   { concept: "DONE_POLL_INTERVAL_MS", context: /donePoll|done_poll|pollMs|poll_ms/i },
   { concept: "POOL_CAP_ELEMENTS", context: /MAX_ELEMENTS|actPoolCap|act_pool_cap|POOL_CAP/i },
   { concept: "WIDE_SCAN_POOL_ELEMENTS", context: /WIDE_POOL|wide_scan|wideScan|--wide/i },
+  { concept: "WIDE_SCAN_POOL_ELEMENTS_MAX", context: /WIDER_ELEMENTS_MAX|window.?escalation|WIDE_SCAN_POOL_ELEMENTS_MAX/i },
   { concept: "SETTLE_QUIET_MS", context: /quietMs|quiet_ms|settle/i },
   { concept: "SETTLE_TIMEOUT_MS", context: /settle|quiet_ms|DEFAULT_SETTLE/i },
   { concept: "STATE_TEXT_BUDGET_CHARS", context: /stateText|state_text|budget/i },

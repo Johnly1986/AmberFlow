@@ -1,35 +1,8 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "app-pack-pure",
-  "note": "app-pack 稳定纯区拆分：40 个顶层符号逐字节搬迁（pack-policy 11 / pack-expand 10 / validate-pack 1 / app-pack 保留 18；hash 全部与搬移前一致）。非纯搬移符号（已从 manifest 移除）：substitute（validate-pack 复用它，需加 export 前缀）、validatePack（拆成 8 组子校验以过 150 行函数上限）、isDict（改用 support/pystr.ts 既有单源）；validateSiteBlock 随 validate-pack 搬迁、hash 一致。；W3-4 字段映射配置化：resolveSourceSlots/rowMainValue 有意非纯搬移（移出 price→id→name 业务默认）",
+  "note": "app-pack 稳定纯区拆分：40 个顶层符号逐字节搬迁（pack-policy 11 / pack-expand 10 / validate-pack 1 / app-pack 保留 18；hash 全部与搬移前一致）。非纯搬移符号（已从 manifest 移除）：substitute（validate-pack 复用它，需加 export 前缀）、validatePack（拆成 8 组子校验以过 150 行函数上限）、isDict（改用 support/pystr.ts 既有单源）；validateSiteBlock 随 validate-pack 搬迁、hash 一致。；W3-4 字段映射配置化：resolveSourceSlots/rowMainValue 有意非纯搬移（移出 price→id→name 业务默认）；P1-1 DRF 缺省翻转：PackPolicy/POLICY_KEYS 的 target_resolution 注释与缺省语义改写（缺省 declared + off opt-out），有意非纯搬移——两符号已按 split-check 文档纪律从 manifest 删除（其余符号恢复原 hash 钉子）",
   "files": {
-    "src/app/pack-policy.ts": {
-      "symbols": {
-        "ACT_HINT_MODES": "1aa8e8305119004d2164646ebbdfc135e21be6ea989534056bb5ffae3951c924",
-        "ACT_HINT_TIER_MODES": "462b0b24d8d1ae8ad91094e8e54cbc6c84dbccdfe27879154cb3e842a207429f",
-        "ATTR_VALUE_MATCH_MODES": "6ee2a81e9bb2891f1da2e1ac355b702ace71a27ab0e568393b801c1dc8d139bc",
-        "BROWSER_CHANNELS": "39e6c55f9122ba6918039403ac04c2ccbdd7f22bc55d2ed0598f897b255450d7",
-        "DECISION_STATE_CONTEXTS": "053b5e5517ba96a1ca67d9e75aed45ac2a4dd3cd9807ae8fa1e04f160a4448d1",
-        "DECISION_STATE_GATES": "e8d90a9805b51c54fec1a51bc1b325caa586df3d22004e8c93230182cb63032a",
-        "NAVIGATION_MODES": "5ffae217ef265bba35f411d8eae90271dd421b2848da06ea77f5e1d9d02a34e1",
-        "PackPolicy": "d301db382e2c384fd9c792931a735e530c57f6391d9598d57fe2c2e93a36b36a",
-        "POLICY_KEYS": "3b2c81801c120afcb1b817b5d1afc82a4c193a858d0b450d70ce8b6553d58991",
-        "RISK_ASK_MODES": "85282030cac3144e7392debabb1630331c9fc9e868082e589d341cf1d7c47eb7",
-        "TARGET_RESOLUTION_MODES": "a2993806269751232f1fd00961f49cb4fd042ba2adf425fcbd27bdccff68d1ab"
-      }
-    },
-    "src/app/pack-expand.ts": {
-      "symbols": {
-        "adapterKind": "00a90d34c9feadc47233769fe10fff413e000567b526442610427613f94b06a2",
-        "ExpandedPack": "31b05e9ba707ccd7dc37562c45bfe22f1f1fcd131324399d9b5706e7b79d0333",
-        "expandPack": "16c89246d1007551c0a62f4a103c12908e20f724671a0bf6a1f4fb5cb1688561",
-        "expandStep": "a602de3b224c602b889e636ebd9a43908a18ccc2ceee89c29b0226eaef2defd0",
-        "PLACEHOLDER": "d395a9a55ec9604a73048742ea1b0502635b6f810cd2fd414ce8e60e9e6b6881",
-        "placeholders": "feffc75956b45bd4f0aa103de87e1bfd64cd020ca075c3dff8322e32831c2417",
-        "RUNTIME_PLACEHOLDERS": "40e1fcffb6e873eba5d215ab73c800c26861f3725cf0534c8e9fa32031df9426",
-        "stepKind": "f8d34affd73f2ef65f31f6e58201a6eeec439e83649d79903add3d4d85bf836e"
-      }
-    },
     "src/app/app-pack.ts": {
       "symbols": {
         "APP_SCRIPT_FILENAMES": "8a4d2a664d35bb1f9ac824ab832ea5ae28b9e085d3c6e0ff0567ad4075b61ae9",
@@ -52,9 +25,48 @@
         "STEP_KEYS": "baa8cabfeebdb64277608fd46446b654d57d9fe36cdfc0e2ae01473af7f925f3"
       }
     },
+    "src/app/pack-expand.ts": {
+      "symbols": {
+        "adapterKind": "00a90d34c9feadc47233769fe10fff413e000567b526442610427613f94b06a2",
+        "ExpandedPack": "31b05e9ba707ccd7dc37562c45bfe22f1f1fcd131324399d9b5706e7b79d0333",
+        "expandPack": "16c89246d1007551c0a62f4a103c12908e20f724671a0bf6a1f4fb5cb1688561",
+        "expandStep": "a602de3b224c602b889e636ebd9a43908a18ccc2ceee89c29b0226eaef2defd0",
+        "PLACEHOLDER": "d395a9a55ec9604a73048742ea1b0502635b6f810cd2fd414ce8e60e9e6b6881",
+        "placeholders": "feffc75956b45bd4f0aa103de87e1bfd64cd020ca075c3dff8322e32831c2417",
+        "resolveSourceSlots": "7933c4facef23c681c276d62fd71f6dccbd0e9033914df6f65d57d741ef8b9cf",
+        "rowMainValue": "e0114df34fb203a0b37b31c117b24fec6701c834bf1d82530717bcc3131036d6",
+        "RUNTIME_PLACEHOLDERS": "40e1fcffb6e873eba5d215ab73c800c26861f3725cf0534c8e9fa32031df9426",
+        "stepKind": "f8d34affd73f2ef65f31f6e58201a6eeec439e83649d79903add3d4d85bf836e",
+        "substitute": "81831a8a018e0ba6ea9e297a2ea93a7024cad515c1c3fc6c03788138413901e3"
+      }
+    },
+    "src/app/pack-policy.ts": {
+      "symbols": {
+        "ACT_HINT_MODES": "1aa8e8305119004d2164646ebbdfc135e21be6ea989534056bb5ffae3951c924",
+        "ACT_HINT_TIER_MODES": "462b0b24d8d1ae8ad91094e8e54cbc6c84dbccdfe27879154cb3e842a207429f",
+        "ATTR_VALUE_MATCH_MODES": "6ee2a81e9bb2891f1da2e1ac355b702ace71a27ab0e568393b801c1dc8d139bc",
+        "BROWSER_CHANNELS": "39e6c55f9122ba6918039403ac04c2ccbdd7f22bc55d2ed0598f897b255450d7",
+        "DECISION_STATE_CONTEXTS": "053b5e5517ba96a1ca67d9e75aed45ac2a4dd3cd9807ae8fa1e04f160a4448d1",
+        "DECISION_STATE_GATES": "e8d90a9805b51c54fec1a51bc1b325caa586df3d22004e8c93230182cb63032a",
+        "NAVIGATION_MODES": "5ffae217ef265bba35f411d8eae90271dd421b2848da06ea77f5e1d9d02a34e1",
+        "RISK_ASK_MODES": "85282030cac3144e7392debabb1630331c9fc9e868082e589d341cf1d7c47eb7",
+        "TARGET_RESOLUTION_MODES": "a2993806269751232f1fd00961f49cb4fd042ba2adf425fcbd27bdccff68d1ab",
+        "validatePolicyExtras": "2e385292c755a5bdc12560aaecee09d0b85fbc6a06960704eb0f9e38b9d2a409"
+      }
+    },
     "src/app/validate-pack.ts": {
       "symbols": {
-        "validateSiteBlock": "df948881722780271c7fb5aad64e74f935374c1f816f5495d75b54f122cf2a19"
+        "validateDependenciesAndProvenance": "35f8eb936c8e423960a6fd74e1dbfb57cd0e41c53d85cdf7d8644d67f02ff9bc",
+        "validateInvariants": "1b637f8ebb0b5e2bb53489a13851a4816d9ef96a7ffaae596b10dc6170c6203f",
+        "validateJourneyEdges": "afa168514fae1e6c72eac1dda5e51713b370a2bd8a8ad949387338eb5dc1ef37",
+        "validateJourneyShape": "01a6d46e459dee9e8fb00e83d9f64e66c16a0730cdd34b84167b6960b998455c",
+        "validatePack": "9bc44631ffa6411aa19b4459b20ce7ded65f2e793f8aa23088368982a81c8ed0",
+        "validatePackHeaderFields": "aaee9437db374ef6bad4d406430b052d4768d8a1601369c1864da2f16e37dc89",
+        "ValidatePackOptions": "ff9fce12ba2673ce46b7743d02bb8880eb9adba554a98ac6b90862ef57abf5d9",
+        "validatePlanExpansion": "e25e9ff51ee515e9665322ab2983b64e84bb47282c4e2ef4aaa1437184a7258d",
+        "validatePolicy": "878acac41b3ae6b7955dd7516d6e47e1faf7b31be8e79925ae482c12a9b6dc3e",
+        "validateSiteBlock": "df948881722780271c7fb5aad64e74f935374c1f816f5495d75b54f122cf2a19",
+        "validateStepDeclarations": "839cc58c701b9e2888d81db921e8b6cf58edd04932d42bdf30a7e6f321eb612b"
       }
     }
   }

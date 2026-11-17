@@ -14,8 +14,8 @@
  * 断言 stdout 含掩码 `***`、且 canary 在 stdout+stderr 零命中。
  *
  * **canonical golden（默认比对，`--record-golden` 显式更新）**：每条命令的输出先经
- * `normalize*` 归一（临时 HOME/仓库绝对路径、时间戳、随机 canary、槽位文件路径），
- * 再与 `tools/golden/examples/<app>.json` 逐字节比对。目的：给「机械拆分 / 运行期重构」
+ * `normalize*` 归一（临时 HOME/仓库绝对路径、时间戳、随机 canary、槽位文件路径、
+ * 路径分隔符 \ → / ——跨平台），再与 `tools/golden/examples/<app>.json` 逐字节比对。目的：给「机械拆分 / 运行期重构」
  * 一条**可重复**的离线等价证据——命令的退出码、JSON 结构、字段与文案任何漂移都会红，
  * 不再依赖"本地手工跑一遍看着一样"。
  *
@@ -183,7 +183,10 @@ function normalizeText(raw: string, ctx: NormalizeContext): string {
   text = text.split(REPO).join("<REPO>");
   if (ctx.canary !== "") text = text.split(ctx.canary).join("<CANARY>");
   text = text.replace(ISO_RE, "<TIMESTAMP>");
-  return text.replace(/\r\n/g, "\n").replace(/[ \t]+$/gm, "").replace(/\n+$/g, "");
+  // golden 平台无关：Windows 的路径分隔符 \ 归一为 /（与既有 golden 记录形态一致）。
+  // 必须在 CRLF 折叠之后做——残余的 \ 只剩路径分隔符，比对与记录两侧对称。
+  return text.replace(/\r\n/g, "\n").replaceAll("\\", "/")
+    .replace(/[ \t]+$/gm, "").replace(/\n+$/g, "");
 }
 
 function safeRealpath(target: string): string | null {

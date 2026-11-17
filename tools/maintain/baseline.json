@@ -5,21 +5,21 @@
     "newFunctionMaxLines": 150,
     "phaseFunctionMaxLines": 400,
     "files": {
-      "src/engine/executor.ts": 2668,
-      "src/app/session-runtime.ts": 992,
+      "src/engine/executor.ts": 2830,
+      "src/app/session-runtime.ts": 1008,
       "src/app/app-adapters.ts": 988,
-      "src/engine/executor-pure.ts": 907,
-      "src/cli/commands/apps.ts": 877,
+      "src/engine/executor-pure.ts": 934,
+      "src/cli/commands/apps.ts": 878,
       "src/app/app-runner.ts": 872,
-      "src/engine/extraction.ts": 858,
+      "src/engine/extraction.ts": 1101,
       "src/engine/executor-types.ts": 826,
-      "src/engine/pool-js.ts": 824
+      "src/engine/pool-js.ts": 852
     },
     "functions": [
       {
         "file": "src/engine/executor.ts",
         "name": "run",
-        "lines": 741
+        "lines": 883
       },
       {
         "file": "src/app/app-runner.ts",
@@ -64,7 +64,7 @@
       {
         "file": "src/cli/commands/apps.ts",
         "name": "flowScriptTemplate",
-        "lines": 214
+        "lines": 215
       },
       {
         "file": "src/cli/commands/apps-rehearsal.ts",
@@ -103,10 +103,11 @@
       "src/engine/executor-phases-b.ts#runPostAction",
       "src/engine/executor-phases-c.ts#runActionPhase",
       "src/engine/executor-phases-c.ts#runActionExecute",
-      "src/engine/executor-phases-c.ts#runSetup"
+      "src/engine/executor-phases-c.ts#runSetup",
+      "src/engine/executor-resolve-b.ts#_resolveOne"
     ],
     "movedFunctions": {
-      "src/app/app-runner-declared.ts#runApp": 686,
+      "src/app/app-runner-declared.ts#runApp": 689,
       "src/engine/executor-actions.ts#actOnce": 184,
       "src/engine/executor-resolve-a.ts#_executeElement": 234,
       "src/engine/executor-phases-c.ts#runReportTail": 193,
