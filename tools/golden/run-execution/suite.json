@@ -1,0 +1,45 @@
+{
+  "_doc": "verify-run-execution 基线（非门禁）：本地 fixtures + 无头 chromium + rules-only，三源 （flow runScriptApp / plan runPlan / suite runSuite）的归一化产物。只用于四条编排迁到 runExecution 内核前后的等价对比：--record 显式更新（同源连跑两次一致才入库）；端口/仓库根/工作目录/临时目录已归一，时间/run_id/UA 类易变字段已剔除，不得手改。",
+  "schema_version": 1,
+  "source": "suite",
+  "expected": {
+    "cases": [
+      {
+        "actions_executed": 1,
+        "evidence_dir": "<WORK>/suite-out",
+        "id": "run-execution-case",
+        "invariants": [
+          {
+            "desc": "筛选已选中",
+            "held": true,
+            "id": "filter-active"
+          }
+        ],
+        "oracle": {
+          "detail": "count=1 expected 1..1",
+          "ok": true
+        },
+        "site": "lane-fixtures",
+        "status": "passed",
+        "subgoals": [
+          {
+            "attempts": 1,
+            "desc": "点击航空公司筛选",
+            "done": true,
+            "method": "rule:match",
+            "steps": 1,
+            "stop_code": "dom_goal_signal",
+            "stop_reason": "dom goal signal"
+          }
+        ],
+        "tier": "core"
+      }
+    ],
+    "code": 0,
+    "external_requests": [],
+    "failed": 0,
+    "passed": 1,
+    "skipped": 0,
+    "tier": "core (provider=none, tier=off(ablation:rules-only))"
+  }
+}

@@ -13,6 +13,7 @@
 | 路径 | 作用 |
 |---|---|
 | `src/` | 工具与其背后的服务缝（`ctx.amberflow`，供别的插件调用） |
+| `src/run-contract.generated.ts` | **生成文件**：`src/support/run-args-contract.ts` 的桥侧投影（tool 参数 schema、`runArgs` argv 描述符、`AmberFlowRunArgs` 形状、桥侧校验文案）；由仓库根 `npm run run-args:gen` 生成，`npm run check` 里的 `run-args:check` 校验过期 |
 | `client.js` | 浏览器半：在 `plugins.row.config` 注册配置页（决策模型 URL / Token Key / ModelName + 步间距 + HEADFUL 开关——即 Config 全部 `.volatile()` 字段） |
 | `client-root.js` | **生成文件**：仓库根安装门的 client bundle（`node scripts/client-root-sync.mjs` 重新生成） |
 | `scripts/client-root-sync.mjs` | `client.js` → `client-root.js` 的唯一生成器（改 id/行 key 后重新生成） |
@@ -36,6 +37,22 @@ npm run build          # tsc -b → lib/types/*.js + *.d.ts（不需要打包器
 
 本仓库的 PR 门禁只做 `typecheck` 与线上用例声明校验，不跑桥接测试。
 要验证桥接，设 `DSH_ROOT` 后在真实 DSH 进程里手工加载。
+
+## 增删/修改 `*_run` 字段
+
+`*_run` 的字段四张脸——模型可见 tool 参数、桥进程 argv、引擎 CLI 旗标、引擎
+`ScriptRunOptions` 选项——单源在仓库根的 `src/support/run-args-contract.ts`。本包不能
+import 仓库 `src`（`rootDir=src`），只读 `src/run-contract.generated.ts` 这份生成物。
+
+```bash
+# 在仓库根：改契约 → 重新生成 → 桥构建（生成物随 src 一起编译）
+npm run run-args:gen
+cd integrations/dsh-bridge && npm run build
+```
+
+不要把参数 schema、`AmberFlowRunArgs` 字段或 argv 拼装手抄回本包：手改会在仓库根的
+`npm run check`（`run-args:check`）判红；契约里没有 `tool` 块的字段是桥/引擎内部转发参数，
+模型看不到。
 
 `npm run setup` 建立的链接**只服务于编译期**。运行时不需要它们：DSH 进程自己提供宿主包，并按它
 checkout 的 tsconfig paths 解析到这些包的**源码**——插件因此与宿主共用同一个模块实例。

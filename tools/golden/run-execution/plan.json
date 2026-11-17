@@ -1,0 +1,80 @@
+{
+  "_doc": "verify-run-execution 基线（非门禁）：本地 fixtures + 无头 chromium + rules-only，三源 （flow runScriptApp / plan runPlan / suite runSuite）的归一化产物。只用于四条编排迁到 runExecution 内核前后的等价对比：--record 显式更新（同源连跑两次一致才入库）；端口/仓库根/工作目录/临时目录已归一，时间/run_id/UA 类易变字段已剔除，不得手改。",
+  "schema_version": 1,
+  "source": "plan",
+  "expected": {
+    "completed": "1/3 (+1 skipped) (1 retried)",
+    "external_requests": [],
+    "plan": {
+      "goal": "runExecution lane · plan",
+      "slots": {},
+      "subgoals": [
+        {
+          "attempts": 2,
+          "desc": "点击一个不存在的目标（配置类停因：两次尝试后 blocked）",
+          "obstacle": "no model runtime: this step needs a model pick (rules-only mode) on step 1 — target_hint \"#not-exist\" 未被规则命中，hint 语法是 6 形状闭集（#id / tag[attr~substr] / tag~token / tag[attr=value] / 角色词 / 裸词；属性名按池字段匹配：test→data-test、type→input_type、aria-label→label、href、name、id、role、near；aria-label 是 label 的别名（提取期已并进 label），label/href 按完整值（≤200）匹配（label = full_label + label、href = href_full + href 双底座），class、title 等不在池字段模型里，永不命中）——容器/后代 CSS（如 \"#outer input\"）会被当成一个永不命中的形状，报\"matches nothing\"而非语法错误",
+          "retries": 1,
+          "signal": {
+            "css_exists": "#not-exist"
+          },
+          "start_url": "<LOCAL>/filter-bar.html",
+          "status": "blocked",
+          "target_hint": "#not-exist"
+        },
+        {
+          "attempts": 1,
+          "desc": "点击航空公司筛选",
+          "signal": {
+            "css_exists": "#filter_item_airline.active"
+          },
+          "start_url": "<LOCAL>/filter-bar.html",
+          "status": "done",
+          "target_hint": "#filter_item_airline"
+        },
+        {
+          "attempts": 1,
+          "desc": "这一步不适用（when 不成立 → skipped）",
+          "signal": {
+            "css_exists": "#nope"
+          },
+          "start_url": "<LOCAL>/filter-bar.html",
+          "status": "skipped",
+          "when": {
+            "css_exists": "#nope"
+          }
+        }
+      ]
+    },
+    "replans": 0,
+    "retried": 1,
+    "skipped": 1,
+    "traces": [
+      {
+        "changed": true,
+        "conf": 1,
+        "confirmed": false,
+        "decision_kind": "rule",
+        "desc": "click li \"航空公司\"",
+        "executed": true,
+        "how": "clicked",
+        "identity": {
+          "attr": "id",
+          "frame": 0,
+          "hidden_matches": 0,
+          "matches": 1,
+          "shape": "#id",
+          "target": "#filter_item_airline",
+          "total_matches": 1,
+          "value": "filter_item_airline"
+        },
+        "inert": false,
+        "method": "rule:match",
+        "op": "click",
+        "risky": false,
+        "step": 1,
+        "url": "<LOCAL>/filter-bar.html",
+        "value": null
+      }
+    ]
+  }
+}

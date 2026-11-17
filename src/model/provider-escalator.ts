@@ -16,9 +16,24 @@
  * **步级决策**（在已有候选里点名一个 ref，不发明元素/值/动作，不提案步骤），所以它
  * 保留并走 provider 缝，而不是跟规划一起被摘除。
  */
-import type { EscalatorLike } from "../engine/executor.ts";
 import { decisionProviderOrNull, type ClosedSetRequest } from "./decision-provider.ts";
 import { ESCALATOR_INSTRUCTIONS } from "../prompts/model-prompts.ts";
+
+/**
+ * 梯级签名的结构类型，与 `engine/executor-types.ts` 的 `EscalatorLike` / `EscalationRequest`
+ * 逐字段等价。**刻意不 import engine**：model 是实现层、engine 是执行层，这条反向边不登记；
+ * 结构等价由赋值处（plan-cli → `RunOptions.escalateFn`）的 typecheck 保证。
+ */
+interface EscalationRequestLike {
+  instruction: string;
+  criteria: Record<string, string>;
+  url: string;
+  title: string;
+  main_text: string;
+  why: string;
+}
+
+type EscalatorLike = (req: EscalationRequestLike) => string | null | Promise<string | null>;
 
 /**
  * 梯级题面：原 `llmEscalator` system 提示词的语义核心逐字保留（可比性）；末尾

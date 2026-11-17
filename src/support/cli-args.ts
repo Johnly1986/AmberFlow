@@ -20,6 +20,7 @@
  */
 
 import { parseArgs } from "node:util";
+import { RUN_ARG_FIELDS } from "./run-args-contract.ts";
 
 /** parseArgs 会抛的"你给错了"类错误码（其余的 code 是程序 bug，不许截肢成一行话）。 */
 const USAGE_ERROR_CODES = new Set([
@@ -87,17 +88,29 @@ export type CliValue = string | boolean | Array<string | boolean> | undefined;
 export type CliValues = Record<string, CliValue>;
 
 /**
- * `apps` 的运行旗标：闸门刻度、学习环、消融等。
+ * run 字段的旗标表**单源**：来自 `src/support/run-args-contract.ts` 的 `cli` 块。
+ * 新字段只改契约，这里与 app-runner-cli 的映射一起跟着变——不必再各抄一行。
+ */
+function runContractOptions(): CliOptions {
+  const out: CliOptions = {};
+  for (const field of RUN_ARG_FIELDS) {
+    if (field.cli === undefined) continue;
+    out[field.cli.flag] = {
+      type: field.cli.type,
+      ...(field.cli.multiple === true ? { multiple: true } : {}),
+    };
+  }
+  return out;
+}
+
+/**
+ * `apps` 的运行旗标里**不属于** run 字段契约的入口/环境旗标。
  * 模型名不走命令行：没有服务地址时由 `AMBERFLOW_DECISION_MODEL` 选本地 checkpoint。
  */
 export const SHARED_RUN_OPTIONS: CliOptions = {
   out: { type: "string" },
-  provider: { type: "string" },
-  headful: { type: "boolean" },
   /** 显式无窗口：压过配置层的 runDefaults.headful（CLI 旗标 > env > 配置文件；run.ts 透传）。 */
   headless: { type: "boolean" },
-  /** 消融臂：`stub` = 脚本桩，`rules-only` = 规则档（两个入口同一个取值集合）。 */
-  ablate: { type: "string" },
   /** 置信度闸门刻度（0<N≤1）。 */
   "conf-floor": { type: "string" },
   /** R2 学习环：开，落点用默认 sidecar。 */
@@ -110,43 +123,20 @@ export const SHARED_RUN_OPTIONS: CliOptions = {
   help: { type: "boolean" },
 };
 
-/** apps 专属：应用包与槽位。 */
+/** apps 专属、且不属于 run 字段契约的入口旗标。 */
 export const APP_ONLY_OPTIONS: CliOptions = {
   list: { type: "boolean" },
-  app: { type: "string" },
-  dry: { type: "boolean" },
-  /** 结果里带每步执行证据（step_traces）；不执行额外页面扫描。 */
-  trace: { type: "boolean" },
-  /** flow 的执行预算：本次最多执行几个 ctx.step/arrive（调试用）。 */
-  "max-steps": { type: "string" },
-  /** 非交互：遇到 manual 步直接返回 needs_human，不拉 headed 浏览器。 */
-  "manual-fail-fast": { type: "boolean" },
-  /**
-   * 介入/救援透传开关（设计 §8 步 5）：`--rescue` = 本次运行允许 result.rescue 键出现
-   * （真实求援的结构化请求）；`--no-rescue` = 显式关闭（默认关 = 产物逐字节不变）。
-   */
-  rescue: { type: "boolean" },
   /** 显式关闭 rescue（默认关；`amber run` 入口与 `--rescue` 互斥；直接 app-runner 入口以关闭优先）。 */
   "no-rescue": { type: "boolean" },
-  slot: { type: "string", multiple: true },
   /** 从 JSON 文件读槽位（避免敏感值进 argv）。 */
   "slot-file": { type: "string" },
-  /** 时钟缝：把"今天"钉成 YYYY-MM-DD（数据腿相对日期表达式 + ctx.runtime.today）。 */
-  today: { type: "string" },
-  "no-sources": { type: "boolean" },
-  "confirm-safe": { type: "boolean" },
   /** 显式恢复旧行为：危险浏览器动作不再逐次拒绝（M0 默认已翻转为安全）。 */
   "confirm-unsafe": { type: "boolean" },
-  "allow-dangerous": { type: "boolean" },
-  "tiered-hint": { type: "boolean" },
-  /** L2 脚本应用：把本次执行轨迹写成 JSON（审计/交接）。 */
-  "emit-trace": { type: "string" },
-  /** L2 脚本应用：按一条已记录轨迹重放（版本/输入不一致直接拒跑）。 */
-  replay: { type: "string" },
 };
 
+/** app-runner 的完整旗标表：契约派生的 run 字段 + 本入口其余旗标。 */
 export function appOptions(): CliOptions {
-  return { ...SHARED_RUN_OPTIONS, ...APP_ONLY_OPTIONS };
+  return { ...SHARED_RUN_OPTIONS, ...APP_ONLY_OPTIONS, ...runContractOptions() };
 }
 
 /* ------------------------------------------------------------------ 一个入口的解析 */

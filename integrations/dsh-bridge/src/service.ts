@@ -16,79 +16,19 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  cliArgs, diagnoseFailure, learnArgs, listApps as listAppSummaries, parseJsonDocument,
+  cliArgs, diagnoseFailure, fillArgMessage, learnArgs, listApps as listAppSummaries, parseJsonDocument,
   parseSource, pruneRunDirs, runArgs, runProcess, summarizeLearn, summarizeRun,
   type AppSummary, type BridgeOptions, type JsonObject, type LearnSummary,
   type RunSummary,
 } from './bridge.ts'
 import { clampElementMax, ELEMENT_DEFAULT_MAX, projectElementViews } from './element-view.ts'
+import {
+  RUN_BRIDGE_DEFAULTS, RUN_BRIDGE_MESSAGES, RUN_SERVICE_FIELDS, RUN_TIMEOUT_MAX_SEC,
+  type BridgeRunArgs, type BridgeServiceRunArgs,
+} from './run-contract.generated.ts'
 
 /** One `run` call, mirroring the `…_run` tool parameters with camelCase names. */
-export interface AmberFlowRunArgs {
-  /** App id from {@link AmberFlowService.listApps}. */
-  app: string
-  /** Only dry-run the flow's call sequence: no browser, no tools. */
-  dry?: boolean
-  /** Ablation arm (`stub` = scripted fake model, `rules-only` = no model at all). Omit for a real run. */
-  ablate?: "stub" | "rules-only"
-  /** Override the decision provider for this call (laya-onnx, decision-service, a baseline, or an ablation). */
-  provider?: string
-  /** Skip the data leg. */
-  noSources?: boolean
-  /**
-   * Visible browser window on the machine running the engine.
-   * The window is not in the caller's browser page: the deployment host needs a real display, or a
-   * virtual one (`xvfb-run -a`) plus VNC/noVNC, for a human to see it.
-   */
-  headful?: boolean
-  /** Permit dangerous tool steps; refused unless the deployment set `allowDangerous`. */
-  allowDangerous?: boolean
-  /**
-   * The engine's middle gate (`--confirm-safe`): with `allowDangerous`, destructive actions are
-   * still confirmed per step against their dry-run evidence instead of blanket-approved.
-   */
-  confirmSafe?: boolean
-  /**
-   * P1 experiment switch (engine `--tiered-hint`): an ambiguous-in-tier target hint becomes a
-   * SMALLER question to the model (it sees only that tier's candidates instead of the whole pool).
-   * Off by default — behaviour byte-identical to before; used for A/B on live apps.
-   */
-  tieredHint?: boolean
-  /**
-   * Walk DEBUG mode for this run (engine `--walk`), default off: `ctx.step` stops reloading the
-   * page when its declared `url` re-anchors to the current page (same origin+path; query/hash
-   * ignored), so SPA client state survives across steps for single-session walk-throughs and
-   * forensics. Cross-page explicit urls and ctx.open/openPage/arrive still navigate. Debug
-   * surface only — formal runs keep the re-navigation semantics; the result marks `walk: true`.
-   * Mutually exclusive with `dry`.
-   */
-  walk?: boolean
-  /**
-   * Execution budget for this call (engine `--max-steps`), NOT a 1-based step index: the script runs
-   * under its own control flow and stops with `budget_exceeded` when the budget is used up
-   * (`status=partial`, `verified=false`).
-   */
-  maxSteps?: number
-  /**
-   * Hard wall-clock cap for THIS call, in seconds: the bridge kills the engine child process when the
-   * call exceeds it. Defaults to the deployment's `timeoutMs` (900 s — live runs are slow by nature);
-   * a long flow (deep tier, many pages) passes a larger value here instead of being killed with all
-   * its completed work lost. Integer, 1..{@link MAX_RUN_TIMEOUT_SEC}; a killed run leaves
-   * `run-killed.json` in its outDir with the partial evidence.
-   */
-  timeoutSec?: number
-  /** Include per-step execution evidence in the result. Defaults to true for the bridge. */
-  trace?: boolean
-  /**
-   * Rescue passthrough (engine `--rescue`, design §8 step 5): allow a structured
-   * `result.rescue` request to appear on a real human-needed stop. Default off = artifacts
-   * byte-identical; the bridge never suspends (stop mode only).
-   */
-  rescue?: boolean
-  /** Values for declared slots. */
-  slots?: Record<string, string>
-}
-
+export interface AmberFlowRunArgs extends BridgeServiceRunArgs {}
 /** One `learn` call, mirroring the `…_learn` tool parameters with camelCase names. */
 export interface AmberFlowLearnArgs {
   /** One line describing the flow to perform. */
@@ -278,9 +218,6 @@ export function newOutDir(tag: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), `dsh-amberflow-${tag}-`))
 }
 
-/** 防呆上限：单次 run 的墙钟覆盖最多 2 小时——比这更长的流程应拆成小应用，而不是占住一个调用。 */
-const MAX_RUN_TIMEOUT_SEC = 7200
-
 /**
  * Whether a value is a usable reference: a non-empty string. A plugin calling the service can be
  * plain JavaScript, so a field the TYPE marks required still needs a runtime guard.
@@ -302,30 +239,25 @@ function isFilled(value: unknown): value is string {
 export async function runApp(
   options: BridgeOptions, args: AmberFlowRunArgs,
 ): Promise<{ summary: RunSummary; outDir: string }> {
+  const toolName = `${options.toolPrefix}_run`
   if (args.allowDangerous && !options.allowDangerous) {
-    throw new Error(
-      'amberflow-bridge: this deployment does not permit dangerous tool steps; '
-      + `set Config.allowDangerous=true to allow ${options.toolPrefix}_run with allow_dangerous`,
-    )
+    throw new Error(fillArgMessage(RUN_BRIDGE_MESSAGES.dangerousGate, { tool: toolName }))
   }
   // 防呆 before spawning anything: a bad per-call wall-clock cap is a usage error, so refuse it here
   // (both doors — the tool and this service — go through this function) instead of silently clamping.
   if (args.timeoutSec !== undefined
-    && (!Number.isInteger(args.timeoutSec) || args.timeoutSec <= 0 || args.timeoutSec > MAX_RUN_TIMEOUT_SEC)) {
-    throw new Error(
-      `amberflow-bridge: ${options.toolPrefix}_run timeout_sec must be an integer in 1..${MAX_RUN_TIMEOUT_SEC} `
-      + `seconds (omit it to use the deployment timeoutMs: ${Math.round(options.timeoutMs / 1000)} s)`,
-    )
+    && (!Number.isInteger(args.timeoutSec) || args.timeoutSec <= 0 || args.timeoutSec > RUN_TIMEOUT_MAX_SEC)) {
+    throw new Error(fillArgMessage(RUN_BRIDGE_MESSAGES.timeoutSec, {
+      tool: toolName,
+      max: String(RUN_TIMEOUT_MAX_SEC),
+      defaultSec: String(Math.round(options.timeoutMs / 1000)),
+    }))
   }
   // A6 fool-proofing: walk is a LIVE-run debug mode (ctx.step stops re-anchoring to the current
   // page); dry has no browser and no navigation, so combining them is a usage error, not a flag
   // one side silently drops.
   if (args.walk === true && args.dry === true) {
-    throw new Error(
-      `amberflow-bridge: ${options.toolPrefix}_run walk and dry are mutually exclusive — walk is a `
-      + 'live-run debug mode (ctx.step keeps SPA state across steps by not re-navigating to the '
-      + 'current page), dry only expands the call sequence with no browser',
-    )
+    throw new Error(fillArgMessage(RUN_BRIDGE_MESSAGES.walkDry, { tool: toolName }))
   }
   const outDir = newOutDir('run')
   pruneRunDirs(options.keepRuns)
@@ -335,25 +267,31 @@ export async function runApp(
   const spawnOptions: BridgeOptions = args.timeoutSec === undefined
     ? options
     : { ...options, timeoutMs: args.timeoutSec * 1000 }
-  const outcome = await runProcess(spawnOptions, runArgs(options, {
-    app: args.app,
-    outDir,
-    ...(args.dry === undefined ? {} : { dry: args.dry }),
-    ...(args.ablate === undefined ? {} : { ablate: args.ablate }),
-    ...(args.provider === undefined ? {} : { provider: args.provider }),
-    ...(args.noSources === undefined ? {} : { noSources: args.noSources }),
-    ...(args.headful === undefined ? {} : { headful: args.headful }),
-    ...(args.allowDangerous === undefined ? {} : { dangerous: args.allowDangerous }),
-    ...(args.confirmSafe === undefined ? {} : { confirmSafe: args.confirmSafe }),
-    ...(args.tieredHint === undefined ? {} : { tieredHint: args.tieredHint }),
-    ...(args.walk === undefined ? {} : { walk: args.walk }),
-    ...(args.maxSteps === undefined ? {} : { maxSteps: args.maxSteps }),
-    trace: args.trace ?? true,
-    manualFailFast: true,
-    ...(args.rescue === undefined ? {} : { rescue: args.rescue }),
-    ...(args.slots === undefined ? {} : { slots: args.slots }),
-  }))
-  return { summary: summarizeRun(outDir, args.app, outcome, `${options.toolPrefix}_run`), outDir }
+  const outcome = await runProcess(spawnOptions, runArgs(options, toRunArgs(args, outDir)))
+  return { summary: summarizeRun(outDir, args.app, outcome, toolName), outDir }
+}
+
+/**
+ * Project one tool/service call onto `runArgs`' camelCase argv arguments through the shared
+ * contract: every field with an argv binding is copied as-is, then the contract's fixed defaults
+ * (`RUN_BRIDGE_DEFAULTS`) fill the bridge-internal passthroughs the model never sets. A field added
+ * to the contract needs no edit here.
+ * @param args - the model-facing run arguments.
+ * @param outDir - this call's artifact directory (argv-only, never a tool parameter).
+ * @returns the argv argument object `runArgs` consumes.
+ */
+function toRunArgs(args: AmberFlowRunArgs, outDir: string): BridgeRunArgs {
+  const out: Record<string, unknown> = { app: args.app, outDir }
+  const values = args as unknown as Readonly<Record<string, unknown>>
+  for (const field of RUN_SERVICE_FIELDS) {
+    if (field.argvKey === undefined) continue
+    const value = values[field.key]
+    if (value !== undefined) out[field.argvKey] = value
+  }
+  for (const fixed of RUN_BRIDGE_DEFAULTS) {
+    if (out[fixed.key] === undefined) out[fixed.key] = fixed.value
+  }
+  return out as unknown as BridgeRunArgs
 }
 
 /**

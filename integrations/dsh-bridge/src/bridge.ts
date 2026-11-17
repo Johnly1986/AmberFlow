@@ -16,6 +16,19 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
+import { RUN_ARGV_FIELDS, type BridgeRunArgs } from './run-contract.generated.ts'
+
+/**
+ * Fill one contract message template (`{name}` placeholders). The texts themselves live in the
+ * shared contract; this only substitutes the caller's values so a validation sentence cannot drift
+ * between the tool door, the service door and the generated contract copy.
+ * @param template - the message template from `RUN_BRIDGE_MESSAGES`.
+ * @param vars - placeholder values; an unknown placeholder is left literal so a typo is visible.
+ * @returns the filled message.
+ */
+export function fillArgMessage(template: string, vars: Readonly<Record<string, string>>): string {
+  return template.replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g, (whole, name: string) => vars[name] ?? whole)
+}
 
 /**
  * A JSON value, structurally identical to the harness's own `JsonValue` so tool outputs (and the
@@ -397,71 +410,47 @@ export async function listApps(options: BridgeOptions, filter = ''): Promise<App
  * The argv for one app-runner invocation. The external CLI is the contract, so the flags are
  * assembled here (and asserted in tests) instead of being strung together at the call site.
  *
+ * Flag order and emission semantics come from `run-contract.generated.ts` (the bridge-side
+ * projection of `src/support/run-args-contract.ts`): a field added to the contract reaches this argv
+ * without touching this function. Provider fallback is the one registered special case.
+ *
  * `--max-steps` is an **execution budget**, not a step index: the script runs under its own control
  * flow and stops with `budget_exceeded` when the budget is used up.
  * @param options - resolved bridge options.
  * @param args - the model-facing call arguments.
  * @returns argv including the node binary as element 0.
  */
-export function runArgs(
-  options: BridgeOptions,
-  args: {
-    app: string
-    outDir: string
-    dry?: boolean
-    ablate?: "stub" | "rules-only"
-    provider?: string
-    noSources?: boolean
-    dangerous?: boolean
-    /**
-     * Visible browser window for this run (engine `--headful`). The window appears on the machine
-     * running the engine — the deployment host, not the caller's browser page — so it needs a real
-     * display there, or a virtual one (`xvfb-run -a`) plus VNC/noVNC to actually be seen.
-     */
-    headful?: boolean
-    /** Ask the engine to refuse destructive actions per dry-run evidence (middle gate). */
-    confirmSafe?: boolean
-    /** P1 experiment: narrowed model question for an ambiguous-in-tier hint (engine `--tiered-hint`). */
-    tieredHint?: boolean
-    /**
-     * Walk DEBUG mode for this run (engine `--walk`): `ctx.step` stops re-navigating when its
-     * declared `url` re-anchors the current page (same origin+path), so SPA client state survives
-     * across steps — single-session walk-through/forensics. Debug surface only.
-     */
-    walk?: boolean
-    /** Execution budget for this call (engine `--max-steps`), not a 1-based step selector. */
-    maxSteps?: number
-    trace?: boolean
-    manualFailFast?: boolean
-    /**
-     * Rescue passthrough switch (engine `--rescue`, design §8 step 5): when true the engine may
-     * surface a structured `result.rescue` request on a real human-needed stop. Default off =
-     * byte-identical artifacts; the bridge NEVER suspends (stop mode only).
-     */
-    rescue?: boolean
-    slots?: Record<string, string>
-  },
-): string[] {
+export function runArgs(options: BridgeOptions, args: BridgeRunArgs): string[] {
   const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []), '--experimental-strip-types', path.join(options.repoPath, 'src', 'app', 'app-runner.ts')]
   argv.push('--app', args.app, '--out', args.outDir)
-  if (args.dry) argv.push('--dry')
-  if (args.headful) argv.push('--headful')
-  if (args.ablate) argv.push('--ablate', String(args.ablate))
-  // An explicitly requested provider wins; otherwise a fully configured decision model makes the
-  // run use the online provider. Ablation arms are explicit experiments, so they never get the
-  // default provider (they measure a different plane).
-  const provider = args.provider ?? (args.ablate === undefined ? options.decisionProvider : undefined)
-  if (provider !== undefined) argv.push('--provider', String(provider))
-  if (args.noSources) argv.push('--no-sources')
-  if (args.dangerous) argv.push('--allow-dangerous')
-  if (args.confirmSafe) argv.push('--confirm-safe')
-  if (args.tieredHint) argv.push('--tiered-hint')
-  if (args.walk) argv.push('--walk')
-  if (args.maxSteps !== undefined) argv.push('--max-steps', String(args.maxSteps))
-  if (args.trace) argv.push('--trace')
-  if (args.manualFailFast) argv.push('--manual-fail-fast')
-  if (args.rescue) argv.push('--rescue')
-  for (const [key, value] of Object.entries(args.slots ?? {})) argv.push('--slot', `${key}=${value}`)
+  // Values are read through one loose view: the generated key union is the single source of the
+  // shape, and the provider case needs to see two fields at once.
+  const values = args as unknown as Readonly<Record<string, unknown>>
+  for (const field of RUN_ARGV_FIELDS) {
+    const raw = values[field.key]
+    switch (field.kind) {
+      case 'flag':
+        if (raw) argv.push(field.flag)
+        break
+      case 'value':
+        if (raw !== undefined && (field.when === 'defined' || raw)) argv.push(field.flag, String(raw))
+        break
+      case 'repeated':
+        for (const [slotKey, slotValue] of Object.entries((raw ?? {}) as Record<string, string>)) {
+          argv.push(field.flag, `${slotKey}=${slotValue}`)
+        }
+        break
+      case 'provider': {
+        // An explicitly requested provider wins; otherwise a fully configured decision model makes
+        // the run use the online provider. Ablation arms are explicit experiments, so they never get
+        // the default provider (they measure a different plane).
+        const provider = (raw as string | undefined)
+          ?? (values['ablate'] === undefined ? options.decisionProvider : undefined)
+        if (provider !== undefined) argv.push(field.flag, String(provider))
+        break
+      }
+    }
+  }
   return argv
 }
 
@@ -725,7 +714,9 @@ export interface RunSummary {
     kind: string
     mode: string
     why_stuck: { summary: string; stop_code?: string; step_id?: string }
-    what_would_unblock: string[]
+    // Optional to match the producer: an empty list is omitted from the artifact (byte-identical
+    // summary), which exactOptionalPropertyTypes would otherwise reject as a required property.
+    what_would_unblock?: string[]
   }
   outDir: string
   /** The report to read, or '' when the run wrote none (a dry run, or one killed before it did). */

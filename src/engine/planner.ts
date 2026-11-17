@@ -19,12 +19,12 @@
 import { extractSlots } from "./extraction.ts";
 import { PlanningRules, TaskPlan, type Subgoal } from "./plan.ts";
 import { checkSignal } from "./signals.ts";
-import { createSessionLease } from "./session-lease.ts";
-import { browserSession, type BrowserSession, type RunOptions } from "./executor.ts";
+import { browserSession, type BrowserMiddleware, type BrowserSession, type RunOptions } from "./executor.ts";
+import { CONFIG_CLASS_STOPS, runExecution } from "./run-execution.ts";
 import type { TraceStep } from "./audit.ts";
 // B1 节奏统一（engine → support，无环）：规划脸节奏 = env-only——规划脸没有 pack/meta，
 // `meta.pace` 是应用脸专属；间距语义（start-to-start ≥ gap）与 env 口径与另外两脸同源。
-import { envPace, newPaceClock, paceBeforeUnit, type PaceClock } from "../support/pace.ts";
+import { newPaceClock, paceBeforeUnit, type PaceClock } from "../support/pace.ts";
 
 /* ------------------------------------------------------------------ planners */
 
@@ -59,11 +59,7 @@ export interface MiddlewareReport {
  * with its own side effects. (Measured: a bad artifact path ran the data leg AND
  * the first tool step, then repeated the config error two more times.)
  */
-export const NEVER_RETRY_CODES: ReadonlySet<string> = new Set([
-  "config_error", "host_not_allowed", "needs_value",
-  // S2 ③：提名指令收窄后本页没有该族候选——同一页重试 N 次也是同一个空集。
-  "nominated_family_empty",
-]);
+export const NEVER_RETRY_CODES: ReadonlySet<string> = CONFIG_CLASS_STOPS;
 
 export interface MiddlewareLike {
   run(instruction: string, startUrl: string, opts?: RunOptions): Promise<MiddlewareReport>;
@@ -203,7 +199,6 @@ export async function runPlan(
 ): Promise<RunPlanResult> {
   const { startUrl = "", replan = true, planner = null, rules = null,
           maxReplans = 2, verbose = true } = opts;
-  const lease = createSessionLease(opts.sessionFactory ?? (() => browserSession()));
 
   // P4 声明式后继只在**应用旅程**这一层落地（`app-runner` 的走步循环按步 id 走，
   // 上界与环检测由 `plan.createPathWalk` 提供）。计划级 runner 用的是 resume 队列
@@ -225,95 +220,105 @@ export async function runPlan(
   let replans = 0;
   const todo = plan.subgoals.filter((s) => !["done", "blocked", "skipped"].includes(String(s.status)));
 
+  const finish = (): RunPlanResult => {
+    const doneN = plan.subgoals.filter((s) => s.status === "done").length;
+    const skippedN = plan.subgoals.filter((s) => s.status === "skipped").length;
+    const retriedN = plan.subgoals.filter((s) => Number(s.attempts ?? 1) > 1).length;
+    return {
+      plan, traces, replans, skipped: skippedN, retried: retriedN,
+      completed: `${doneN}/${plan.subgoals.length}`
+        + (skippedN ? ` (+${skippedN} skipped)` : "")
+        + (retriedN ? ` (${retriedN} retried)` : ""),
+    };
+  };
+
   // Resume semantics: an already-finished plan must not even open a browser.
-  if (todo.length) {
-    mw._planVerbose = verbose;
+  if (!todo.length) return finish();
+
+  return await runExecution({
+    source: "plan",
+    appId: "plan",
+    planPath: plan.path,
+    // 调用方装配的执行器经内核入口交给源适配器（一个 run 一个实例）。
+    middleware: mw as unknown as BrowserMiddleware,
+    createSession: opts.sessionFactory ?? (() => browserSession()),
+  }, async (run) => {
+    // 执行器经内核装配入口取本 run 唯一实例（由 deps.middleware 传入的同一对象）。
+    const runnerMw = run.middleware() as unknown as MiddlewareLike;
+    runnerMw._planVerbose = verbose;
     // B1 节奏（env-only）：子目标之间按 `AMBERFLOW_STEP_DELAY_MS` 的**最小步间距**等待
     // （start-to-start ≥ gap；首个子目标之前不等）；重试之间同值同源（见
     // runSubgoalWithRetries 的 paceClock）。坏 env 值在这里响亮报错（开浏览器之前）。
-    const paceEnv = envPace(process.env);
-    const paceClock = newPaceClock(paceEnv.between_steps_ms ?? 0);
-    const paceActionsMs = paceEnv.between_actions_ms ?? 0;
-    const paceSrc = (provided: boolean): string => (provided ? "env" : "default");
+    const pace = run.envPace();
+    const paceClock = run.paceClock();
+    const paceActionsMs = pace.betweenActionsMs;
+    const paceSrc = (source: "env" | "default"): string => source;
     if (verbose && (paceClock.gapMs > 0 || paceActionsMs > 0)) {
-      console.log(`  [pace] between_steps=${paceClock.gapMs}ms(${paceSrc(paceEnv.between_steps_ms !== undefined)})`
-        + ` between_actions=${paceActionsMs}ms(${paceSrc(paceEnv.between_actions_ms !== undefined)})`);
+      console.log(`  [pace] between_steps=${paceClock.gapMs}ms(${paceSrc(pace.sources.betweenStepsMs)})`
+        + ` between_actions=${paceActionsMs}ms(${paceSrc(pace.sources.betweenActionsMs)})`);
     }
-    try {
-      const session = await lease.get();
-      while (todo.length) {
-        const sg = todo.shift()!;
-        await paceBeforeUnit(paceClock, (w) =>
-          console.log(`  [pace] ${w}ms before subgoal ${JSON.stringify(String(sg.id ?? sg.desc))}`
-            + ` (min start-to-start gap ${paceClock.gapMs}ms)`));
-        sg.status = "doing";
+    const session = await run.session();
+    while (todo.length) {
+      const sg = todo.shift()!;
+      await paceBeforeUnit(paceClock, (w) =>
+        console.log(`  [pace] ${w}ms before subgoal ${JSON.stringify(String(sg.id ?? sg.desc))}`
+          + ` (min start-to-start gap ${paceClock.gapMs}ms)`));
+      sg.status = "doing";
+      plan.save();
+      if (verbose) console.log(`  [subgoal] ${sg.desc}`);
+      const url = sg.start_url ?? startUrl;
+      const { rep, attempt, steps } = await runSubgoalWithRetries(
+        runnerMw, sg, plan, url, session.page, session.pw, verbose, {}, paceClock);
+      traces.push(...steps);
+      sg.attempts = run.attempts.record(`plan:${String(sg.id ?? sg.desc)}`, attempt);
+      if (rep.done) {
+        // a skipped subgoal is FINISHED, not pending: resume must not retry a
+        // conditional step that did not apply
+        sg.status = rep.skipped ? "skipped" : "done";
+        if (verbose) console.log(`    -> ${rep.skipped ? "skipped" : "done"} (${rep.stop_reason})`);
         plan.save();
-        if (verbose) console.log(`  [subgoal] ${sg.desc}`);
-        const url = sg.start_url ?? startUrl;
-        const { rep, attempt, steps } = await runSubgoalWithRetries(
-          mw, sg, plan, url, session.page, session.pw, verbose, {}, paceClock);
-        traces.push(...steps);
-        sg.attempts = attempt;
-        if (rep.done) {
-          // a skipped subgoal is FINISHED, not pending: resume must not retry a
-          // conditional step that did not apply
-          sg.status = rep.skipped ? "skipped" : "done";
-          if (verbose) console.log(`    -> ${rep.skipped ? "skipped" : "done"} (${rep.stop_reason})`);
-          plan.save();
-          continue;
-        }
-        sg.status = "blocked";
-        sg.obstacle = rep.stop_reason;
-        if (verbose) console.log(`    -> BLOCKED after ${attempt} attempt(s): ${rep.stop_reason}`);
-        plan.save();
-        if (!(replan && planner) || replans >= maxReplans) continue;
-        let amended: TaskPlan | null = null;
-        try {
-          amended = await planner.replan(plan, sg, rules);
-        } catch (e) {
-          // A bad LLM reply must not kill the run -- and must never be silent:
-          // a swallowed planner error looks exactly like "nothing to add".
-          console.log(`    -> replan FAILED (${(e as Error).name}: ${(e as Error).message}); continuing blocked`);
-          amended = null;                       // PORT FIX H1 (Python crashes here)
-        }
-        if (amended === null || amended === plan) continue;   // no-op planner
-        const known = new Set(plan.subgoals.map((x) => x.desc));
-        const before = plan.subgoals.length;
-        for (const s of amended.subgoals ?? []) {
-          if (known.has(s.desc)) continue;       // never re-queue known work
-          known.add(s.desc);
-          // 入口那道守卫只看**初始**计划；一次 replan 补丁是运行期新增的结构，必须同样过闸。
-          // 这里是"响亮地不采纳"而不是"静默忽略"：与 replan 异常同一条纪律——吞掉的错误
-          // 与"没有补充"长得一模一样。
-          const edges = (s.next ?? []).filter((x) => !!x);
-          if (edges.length) {
-            console.log(`    -> replan amendment ${JSON.stringify(s.id ?? s.desc)} declares \`next\` `
-              + `(${edges.join(", ")}), which runPlan cannot honour — the edges are dropped, `
-              + `the subgoal is kept`);
-          }
-          plan.insert(plan.subgoals.length, s.desc, s.signal, s.start_url ?? null,
-            s.target_hint ?? null, s.target_hints ?? null, s.slots ?? null,
-            s.when ?? null, s.retries ?? null, s.commands ?? null,
-            { id: s.id ?? null, next: edges.length ? null : (s.next ?? null) });
-        }
-        const added = plan.subgoals.length - before;
-        replans += 1;
-        if (verbose) console.log(`    -> replan #${replans}: +${added} subgoal(s)`);
-        plan.save();
-        if (added) todo.push(...plan.subgoals.slice(before));
+        continue;
       }
-    } finally {
-      await lease.close();
+      sg.status = "blocked";
+      sg.obstacle = rep.stop_reason;
+      if (verbose) console.log(`    -> BLOCKED after ${attempt} attempt(s): ${rep.stop_reason}`);
+      plan.save();
+      if (!(replan && planner) || replans >= maxReplans) continue;
+      let amended: TaskPlan | null = null;
+      try {
+        amended = await planner.replan(plan, sg, rules);
+      } catch (e) {
+        // A bad LLM reply must not kill the run -- and must never be silent:
+        // a swallowed planner error looks exactly like "nothing to add".
+        console.log(`    -> replan FAILED (${(e as Error).name}: ${(e as Error).message}); continuing blocked`);
+        amended = null;                       // PORT FIX H1 (Python crashes here)
+      }
+      if (amended === null || amended === plan) continue;   // no-op planner
+      const known = new Set(plan.subgoals.map((x) => x.desc));
+      const before = plan.subgoals.length;
+      for (const s of amended.subgoals ?? []) {
+        if (known.has(s.desc)) continue;       // never re-queue known work
+        known.add(s.desc);
+        // 入口那道守卫只看**初始**计划；一次 replan 补丁是运行期新增的结构，必须同样过闸。
+        // 这里是"响亮地不采纳"而不是"静默忽略"：与 replan 异常同一条纪律——吞掉的错误
+        // 与"没有补充"长得一模一样。
+        const edges = (s.next ?? []).filter((x) => !!x);
+        if (edges.length) {
+          console.log(`    -> replan amendment ${JSON.stringify(s.id ?? s.desc)} declares \`next\` `
+            + `(${edges.join(", ")}), which runPlan cannot honour — the edges are dropped, `
+            + `the subgoal is kept`);
+        }
+        plan.insert(plan.subgoals.length, s.desc, s.signal, s.start_url ?? null,
+          s.target_hint ?? null, s.target_hints ?? null, s.slots ?? null,
+          s.when ?? null, s.retries ?? null, s.commands ?? null,
+          { id: s.id ?? null, next: edges.length ? null : (s.next ?? null) });
+      }
+      const added = plan.subgoals.length - before;
+      replans += 1;
+      if (verbose) console.log(`    -> replan #${replans}: +${added} subgoal(s)`);
+      plan.save();
+      if (added) todo.push(...plan.subgoals.slice(before));
     }
-  }
-
-  const doneN = plan.subgoals.filter((s) => s.status === "done").length;
-  const skippedN = plan.subgoals.filter((s) => s.status === "skipped").length;
-  const retriedN = plan.subgoals.filter((s) => Number(s.attempts ?? 1) > 1).length;
-  return {
-    plan, traces, replans, skipped: skippedN, retried: retriedN,
-    completed: `${doneN}/${plan.subgoals.length}`
-      + (skippedN ? ` (+${skippedN} skipped)` : "")
-      + (retriedN ? ` (${retriedN} retried)` : ""),
-  };
+    return finish();
+  });
 }

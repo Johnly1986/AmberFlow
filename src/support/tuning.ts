@@ -40,6 +40,13 @@ export const SETTLE_TIMEOUT_MS = 5000;
 /** `stateText` 状态压缩的字符预算（默认值；调用方可用 budget 参数覆盖）。 */
 export const STATE_TEXT_BUDGET_CHARS = 320;
 
+/**
+ * laya 序列证据的字符预算折算：每个 token 名额允许的保守字符数。
+ * 唯一消费点 = `src/model/laya-format.ts` 的 `fitText`（超名额文本先按字符预算裁剪再编码）。
+ * 取接近英文 wordpiece 的经验值；更密的 tokenizer（CJK / byte-level）由 token 安全网兜底并记账。
+ */
+export const LAYA_EVIDENCE_CHARS_PER_TOKEN = 4;
+
 /** 工具步失败诊断里 stderr 摘要的字符上限：`tool-artifact.TOOL_STDERR_TAIL_CAP` 唯一出处。 */
 export const TOOL_STDERR_TAIL_CAP_CHARS = 400;
 
@@ -53,7 +60,7 @@ export const SESSION_IDLE_TIMEOUT_MS = 300_000;
 export const CLI_COMMAND_DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
- * 门禁视图：本模块收口的 11 个概念 → 值（供 `tools/maintain/constants.ts` 派生 token，
+ * 门禁视图：本模块收口的 12 个概念 → 值（供 `tools/maintain/constants.ts` 派生 token，
  * 不复制字面量）。新增/调整常量时同步本表，门禁与单源保持同一步。
  */
 export const TUNING_VALUES = {
@@ -65,6 +72,7 @@ export const TUNING_VALUES = {
   SETTLE_QUIET_MS,
   SETTLE_TIMEOUT_MS,
   STATE_TEXT_BUDGET_CHARS,
+  LAYA_EVIDENCE_CHARS_PER_TOKEN,
   TOOL_STDERR_TAIL_CAP_CHARS,
   SESSION_IDLE_TIMEOUT_MS,
   CLI_COMMAND_DEFAULT_TIMEOUT_MS,

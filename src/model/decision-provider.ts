@@ -451,13 +451,19 @@ export function layaProvider(opts: {
         pTop1: values[0] ?? null, pTop2: values[1] ?? null,
         margin: values.length >= 2 ? values[0]! - values[1]! : (values[0] ?? null),
       };
+      // 证据截断记账只做透传：运行时（laya-onnx）没裁过证据就不出现该键，
+      // 其他 provider 不填 ⇒ outcome 形状与既有消费点不变。
+      const evidence: Pick<ChoiceOutcome, "evidence_truncated"> =
+        res.evidence_truncated === undefined ? {} : { evidence_truncated: res.evidence_truncated };
       if (sl.passthrough) {
         return { ref: a.choice as string | null | undefined, score: a.confidence ?? 0,
-          scoreKind: caps.score_kind, signals, options: values.length, passthrough: true, probs };
+          scoreKind: caps.score_kind, signals, options: values.length, passthrough: true, probs,
+          ...evidence };
       }
       return { ref: a.choice as string | null | undefined,
         score: values.length ? values[0]! : (a.confidence ?? 0),
-        scoreKind: caps.score_kind, signals, options: values.length, passthrough: false, probs };
+        scoreKind: caps.score_kind, signals, options: values.length, passthrough: false, probs,
+        ...evidence };
     },
 
     async askChoice(req: ClosedSetRequest): Promise<ClosedSetChoice | null> {

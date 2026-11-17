@@ -29,7 +29,7 @@
 | `src/support/` | L0 |
 | `src/prompts/`（规划中） | L1 |
 | `src/intervention/` | L1.5 |
-| `src/browser/`、`src/data/`、`src/engine/`（extraction/rules/settle 等）、`src/flow/` | L2（`src/engine/executor.ts` / planner / bindings / observe / picker / audit / session-lease 为 L4；候选扫描实现已归 `src/app/candidate-scan.ts`，engine extraction 仅保留共享机制/类型，2.2b） |
+| `src/browser/`、`src/data/`、`src/engine/`（extraction/rules/settle 等）、`src/flow/` | L2（`src/engine/executor.ts` / planner / bindings / observe / picker / audit / session-lease / **run-execution** / **run-scope** / **decision-seam** 为 L4；候选扫描实现已归 `src/app/candidate-scan.ts`，engine extraction 仅保留共享机制/类型，2.2b） |
 | `src/model/` | L3 |
 | `src/app/` | L5 |
 | `src/cli/`、`src/online/`、`tools/`、`integrations/dsh-bridge/` | L6 |
@@ -38,8 +38,8 @@
 
 | 方向 | 现状 | 收缩路径 |
 |---|---|---|
-| engine → model | 约 9 处（`executor.ts`、`executor-pure.ts`、`executor-types.ts`、`picker.ts` 等，具体以 grep 为准）；W5-3 后 `decision-provider` 引用 3 文件→1 文件（`executor.ts` 仅 3 个 runtime 函数；`DecisionProvider` 类型已走 L0 契约） | provider 接口契约下沉 L0 + 组合根注入（P2 W5-3，已部分落地） |
-| model → engine | 约 7 处（`decision-provider.ts`、`hint-memory.ts`、`decision-openai.ts`、`decision-service.ts`、`decision-tokenplan.ts`、`page-context.ts`、`provider-escalator.ts`） | prompt views / 页面文本渲染迁 L1 或经契约（W4 证据 spec 后收缩） |
+| engine → model | 约 8 处（`executor.ts`、`executor-types.ts`、`executor-middleware-types.ts`、`picker.ts` 等，具体以 grep 为准）；W5-3 收口后 `decision-provider` 引用 **engine=0**（3 个 runtime 函数经 `DecisionRuntimeHooks` 注入，装配在 `src/app/decision-runtime.ts`；`DecisionProvider` 类型走 L0 契约）；engine 仍 import `model/model.ts` 的 legacy `LayaRuntime` 门与 `decision-probe`/`hint-memory`（行为要求本身如此） | 剩余 prompt views/页面文本渲染迁 L1（W4 后续） |
+| model → engine | 约 **6** 处（`decision-provider.ts`、`hint-memory.ts`、`decision-openai.ts`、`decision-service.ts`、`decision-tokenplan.ts`、`page-context.ts`）；`provider-escalator.ts` 已改本地结构类型，不再 import engine | prompt views / 页面文本渲染迁 L1 或经契约（W4 证据 spec 后收缩） |
 
 **门禁口径**：不追 `grep=0` 的审美目标；新代码不得新增反向边，已有边按批次减少并在此表登记。
 
@@ -53,13 +53,14 @@
 S0 入口三类    引擎入口（bin/amber.mjs → cli/main.ts → registry）
                宿主集成（DSH bridge / amber session 子进程；进程边界=契约）
                开发/创作脚本（npm start / apps / learn / test / plan-cli / extension；非产品主线）
-S1 执行内核    runExecution(source, deps)                                  ← 规划中（P2 条件；SessionLease 三面 + RunScope 两面已落地）
-               共享：SessionLease(惰性创建/finally 关闭；`src/engine/session-lease.ts`) · RunScope(run_id/outDir/planPath/today；`src/app/run-scope.ts`)
-                     RunScope 目标字段中的 budget/deadline/trace/result/warnings 仍归各源；StopClassifier(停因→退出码) · mask/scrub · artifacts 落盘 · attempt 记账
+S1 执行内核    runExecution(deps, source)                                  ← 已落地（§6.10；src/engine/run-execution.ts，294 行）
+               共享：SessionLease(惰性创建/finally 关闭；`src/engine/session-lease.ts`) · RunScope(run_id/outDir/planPath/today；`src/engine/run-scope.ts`，app 面 re-export)
+                     RunScope 目标字段中的 budget/deadline/trace/result/warnings 仍归各源；StopClassifier(停因分类：`classifyStop`/`budgetExhausted`) · mask/scrub · artifacts 交接 · attempt 记账
                不共享：重试（归源）、sleep（归 pace 应用点）、业务判定（归 ctx/checkSignal）
-S2 源适配器    flow    : loadScriptApp → flow(ctx)；重试/分支 = 脚本控制流；完成 = ctx.done 不变量
+S2 源适配器    flow    : 两面——`runScriptApp`（loadScriptApp → flow(ctx)；完成 = ctx.done 不变量）与 `runApp`（声明式 journey，冻结）；重试/分支 = 脚本控制流
                plan    : TaskPlan 子目标循环 + retries/replan + NEVER_RETRY_CODES 查询；结果 = RunPlanResult
                suite   : 用例 preflight/case 执行/oracle/证据；case 结果 = CaseOutcome
+               四源真实调用点 = 4；等价证据 = `tools/verify-run-execution.ts`（非门禁四源 canonical lane）
 S3 套件聚合器  tier 选择、exit code 0/1/2/3、--require-all、证据目录（源之上薄层，不是第 5 套编排；退出码/probe 期望单点已落 src/online/suite-aggregate.ts）
 S4 引擎步装配  execStep(ports, EngineStepSpec)                               ← 规划中（P2 条件）
                仅引擎步；工具步由 Ctx 契约的 toolRunner 单列，不进执行器
@@ -68,7 +69,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 非主线        session-runtime（attach/调试，复用 createCtx）· record/learn · 一次性 goal（演示→归纳→执行）
 ```
 
-**现状与目标的差距**：当前 4 套编排（`runPlan`/`runSubgoalWithRetries`、`ctx.runOneStep`、`runScriptApp`/`runApp`、各入口自建 mw）与 6 处真实 `new BrowserMiddleware`。P1 先做 `buildMiddleware` 工厂；P2 在满足启动条件后引入 `runExecution` 内核与源适配器。
+**现状与目标的差距**：S1 内核已落地——4 套编排（`runPlan`/`runSubgoalWithRetries`、`runScriptApp`/`runApp`、`runOneCase`）全部经 `runExecution` 组合根，真实 `new BrowserMiddleware` = 1（`buildMiddleware` 工厂）。剩余：S4 `execStep(ports, EngineStepSpec)` 引擎步装配仍为规划态；`ctx` 行为矩阵 / `tools/ctx-conformance.ts` 仍条件保留。
 
 ---
 
@@ -91,13 +92,15 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 
 | Seam | 当前/目标归属 | 允许调用方 | 冻结状态 | 变更协议 |
 |---|---|---|---|---|
-| `browserSession` / 会话生命周期 | `src/browser/browser-env.ts`（`browserSession` 唯一实现）+ 生命周期模板 `src/engine/session-lease.ts`（flow/plan/suite 三面共用） | executor、ctx、tools、session-runtime | **冻结**（P1 只允许 `buildMiddleware` 收口，不改语义） | 改创建/关闭顺序必须 A/B + 会话生命周期测试 |
-| RunScope（run_id/outDir/planPath/today） | `src/app/run-scope.ts`（唯一解析点；声明式/flow app 两面接入） | app 两面适配器；plan 面无落点、suite 用 case 证据目录 | **字段只减不增**：budget/deadline/trace/result/warnings 仍归各源，新增字段先改本表 | 默认值/所有权变更必须 A/B（两面归一化结果） |
+| `browserSession` / 会话生命周期 | `src/browser/browser-env.ts`（`browserSession` 唯一实现）+ 生命周期模板 `src/engine/session-lease.ts`（经 `runExecution` 供 flow/declared-flow/plan/suite 四源共用） | executor、ctx、tools、session-runtime、runExecution | **冻结**（P1 只允许 `buildMiddleware` 收口，不改语义；§6.10 起生命周期统一经内核） | 改创建/关闭顺序必须 A/B + 会话生命周期测试 |
+| RunScope（run_id/outDir/planPath/today） | `src/engine/run-scope.ts`（L4，唯一解析点）+ `src/app/run-scope.ts` re-export；四源经 `runExecution` 接入 | runExecution 与四源适配器 | **字段只减不增**：budget/deadline/trace/result/warnings 仍归各源，新增字段先改本表 | 默认值/所有权变更必须 A/B（四源归一化结果） |
 | `BrowserMiddleware.run` | `src/engine/executor.ts` | 唯一执行循环；ctx/planner/online 经装配调用 | **逐字节冻结**（类名 + `run()` 签名不变；不另写执行器）；`maintain mainline` 断言两字面存在 | 九阶段提函数=P2 条件，每阶段独立 PR + 0.8 证据（运行期 lane 已就绪）；九阶段已落地（4d 完成） |
 | `RunOptions` 组装（引擎步） | `src/engine/planner.ts:runOnce` 与 `src/app/ctx.ts:runOneStep` | 两条路径 | **冻结**（不新增第 4 个 RunOptions；P2 execStep 合并） | 能力面新增必须双端 + 等价验收 |
 | 工具步装配 | `src/app/app-runner.ts:runToolStep` + `Ctx.toolRunner` | ctx.run / dangerous | **冻结**（不进引擎步装配） | 独立变更 + 危险步确认链 review |
-| `DecisionProvider` 接口 | `src/support/decision-provider-contract.ts`（L0，W5-3 已落地）+ 实现 `src/model/decision-provider.ts` 与各 provider | engine（仅契约类型）、model（实现）、组合根（装配） | **方向冻结**：engine 不 import 具体实现；runtime 函数（`decisionProviderOrNull`/`layaProvider`/`decisionFailureFact`）仍在 model，待组合根注入后收缩 | 契约变更需 model/engine 双侧 typecheck + rules-only 消融 |
-| 决策源装配（resolve/build） | 各处 `resolveProviderSpec → applySpecToRuntime → installLayaRuntime` → **`buildMiddleware({face,confirmPolicy,options})`（P1-1.5 已落地，provider 解析仍在入口）** | 入口/组合根 | **冻结**：组合根唯一，构造点唯一（P1 已达成）；run-scoped provider 注入留 P2 | 任一新入口不得自建 `new BrowserMiddleware`；per-face confirm 策略必填 |
+| `DecisionProvider` 接口 | `src/support/decision-provider-contract.ts`（L0，W5-3 已落地）+ 实现 `src/model/decision-provider.ts` 与各 provider | engine（仅契约类型 + 注入面）、model（实现）、组合根（装配） | **方向冻结**：engine 不 import 具体实现；3 个 runtime 函数（`decisionProviderOrNull`/`layaProvider`/`decisionFailureFact`）经 `DecisionRuntimeHooks` 注入（§6.10），engine `grep model/decision-provider`=0 | 契约变更需 model/engine 双侧 typecheck + rules-only 消融 |
+| 决策源装配（resolve/build） | 各处 `resolveProviderSpec → applySpecToRuntime → installLayaRuntime` → **`buildMiddleware({face,confirmPolicy,options})`（P1-1.5 已落地，provider 解析仍在入口）**；runtime 函数组合根 `src/app/decision-runtime.ts`（§6.10） | 入口/组合根 | **冻结**：组合根唯一，构造点唯一；`buildMiddleware` 缺省注入 `appDecisionRuntime`（显式优先） | 任一新入口不得自建 `new BrowserMiddleware`；per-face confirm 策略必填 |
+| `runExecution` 内核 | `src/engine/run-execution.ts`（L4；`runExecution(deps, source)` + `RunExecution` 面） | 四源适配器（flow/declared-flow/plan/suite） | **冻结**：SessionLease/RunScope/mw 装配入口/pace/attempt/停因分类/artifact 交接单点；**不共享** retry/sleep/业务判定 | 新增源适配器先改本表 + MAINLINE §2；内核不得内嵌 sleep；行为等价以四源 lane 为准 |
+| `DecisionRuntimeHooks` 注入契约 | engine 类型面 `src/engine/executor-middleware-types.ts`；实现 `src/app/decision-runtime.ts`（L5） | engine 执行器只消费类型；app 层装配 | **方向冻结**：engine 不 import model 实现；新增 hook 需 engine/app 双侧 typecheck | rules-only 消融 trace 一致；`grep model/decision-provider src/engine`=0 |
 | 模型 prompt | 目标 `src/prompts/`（L1 叶子） | model providers + executor legacy 兜底（P2 收编） | **方向冻结**（不放 src/model；不 import 实现） | 文本变更 version+1 + 快照 hash + A/B 证据 |
 | Ctx 契约 | `src/app/ctx-types.ts`（接口已存在） | flow 脚本、ctx-dry/replay、session-runtime | **接口冻结**；缺行为矩阵 | 新增原语需 matrix + conformance + dry/replay 同步 |
 | 执行结果包络 | `src/app/app-runner.ts:AppRunResult` + `planner:RunPlanResult` + `online/types:CaseOutcome` | 各源 | **冻结**；目标 P2 `RunOutcome` 核心包络 | 各源形状逐字节保留；新字段只增不改 |
@@ -106,6 +109,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | 证据/产物落盘 | `app/trace.ts`、`app/app-report-view.ts`、`data/report-view.ts`、`online/report.ts` | 各源 | 稳定区（允许 W1-b 纯搬） | 产物字段逐字节 + 不提交仓库 |
 | fixtures/engine | `fixtures/engine/*.html` | 仅 `verify:offline` / `verify:runtime:offline` 非门禁 lane | 稳定 | 不进 `npm run check`；新夹具只服务等价验证 |
 | 运行期等价 lane | `tools/verify-runtime-offline.ts`、`tools/golden/runtime/**` | 非门禁（需 chromium）；跑 `BrowserMiddleware.run` 的 **7 个确定性场景**（成功/停因/遮挡/precondition/upload/scroll/range） | 稳定 | 运行期重构前后对比；`--record` 同场景两次一致才入库 |
+| 编排等价 lane | `tools/verify-run-execution.ts`、`tools/golden/run-execution/**`、`fixtures/engine/run-execution/**`（§6.10） | 非门禁（需 chromium）；四源（flow/declared-flow/plan/suite）canonical JSON，rules-only 零模型、外部请求 0 | 稳定 | 内核/适配器迁移前后对比；基线在干净 HEAD 副本 `--record` 两次一致才入库 |
 
 ### 4.1 文件预留（并行设计）
 
@@ -143,20 +147,20 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | [INTERVENTION_RESCUE_MODULE.md](INTERVENTION_RESCUE_MODULE.md) | 实施中 | L1.5 已登记；W1-c 前置；文件预留见 §4.1 |
 | [RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md](RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md) | proposal | attach 归 session-runtime；失败现场四件套进 artifacts |
 | [BACKLOG.md](BACKLOG.md) #2/#3/#4 | #2 done（2.2b）、#4 前置完成（4d）、#3 ready | #3 候选窗口指数递增可启动（契约/生产者已就位） |
-| IMPROVEMENT_PLAN v2.1 | **已收口（2026-11-17；P0/P1/P2 出口核对见其 §6.1/§6.2/§6.5）** | 本文件是其 §3.1/§4.5 的落地形态；延期条件项见 plan §6.5 D |
+| IMPROVEMENT_PLAN v2.1 | **已收口（2026-11-17；P0/P1/P2 出口核对见其 §6.1/§6.2/§6.5；§6.5 D 条件项四项 + 桥 TS2375 由 §6.10 收口）** | 本文件是其 §3.1/§4.5 的落地形态；仍延期项见 plan §6.10 F |
 
 ---
 
 ## 7. 目标态与当前差距（只作路线引用，不重复计划全文）
 
-| 维度 | 当前（HEAD 91bf379） | 目标（P1/P2） |
+| 维度 | 当前（HEAD ac2216e + §6.10 工作树） | 目标（P1/P2） |
 |---|---|---|
-| 编排 | 4 套 | kernel + 3 源适配器 + 套件聚合器（P2 条件） |
+| 编排 | **内核 + 四源适配器**（`runExecution`，§6.10 已落地） | kernel + 源适配器 + 套件聚合器（已达成；S4 execStep 仍条件） |
 | mw 装配 | **1 处真实构造**（`src/app/middleware-factory.ts`，6 入口共用） | 1 个 `buildMiddleware` 工厂 + 2 个调试面（P1 已达成） |
 | 入口 | 19 个，三类混编 | 三类登记 + 进程边界明确（P0 本文件） |
 | 公共面 | `src/index.ts` 25 导出/0 消费者，宣称 Public surface | 删宣称；exports 表锁定；无 sdk（P1/P2） |
-| 决策契约 | engine 直接 import model 装配/类型 | 契约下沉 L0 + 组合根注入（P2 条件） |
-| ctx | 接口已存在，行为差异散落注释 | 行为矩阵 + `tools/ctx-conformance.ts`（P1/P2） |
+| 决策契约 | engine 只 import L0 契约 + `DecisionRuntimeHooks` 注入；`grep model/decision-provider src/engine`=0（§6.10） | 契约下沉 L0 + 组合根注入（已达成） |
+| ctx | 接口已存在，行为差异散落注释 | 行为矩阵 + `tools/ctx-conformance.ts`（仍条件） |
 
 ---
 

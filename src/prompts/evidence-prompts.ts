@@ -13,8 +13,9 @@ import { STATE_TEXT_BUDGET_CHARS } from "../support/tuning.ts";
  *     `app/site-facts.renderModelFence` / `executor` 的 outcome-memory 注记）；
  *     `build` 是**委托入口**：真实渲染器由装配处（`tools/prompt-hit.ts` 的 evidence 组）注入
  *     （叶子不 import 它们，避免把 engine 拖进 L1）。
- *   - **行为冻结**：本模块只做 spec/预算/快照门禁，不改渲染措辞、不改截断逻辑；
- *     laya 的 token 级静默截断（`laya-format.buildSequence`）是已知条件项，先报告不动。
+ *   - **行为面**：本模块只做 spec/预算/快照门禁，不改渲染措辞，也不复制渲染/裁剪逻辑；
+ *     laya 序列的证据裁剪归 `laya-format.buildSequence`（字符预算预裁 + token 安全网兜底，
+ *     事实经 `PredictResult.evidence_truncated` 透出到 provider outcome）。
  *   - **预算分级**：候选渲染按窗口档位分档（40/120/200 帽），其余按单载荷上限。
  */
 

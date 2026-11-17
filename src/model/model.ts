@@ -11,6 +11,7 @@
  * `node-port-poc/` already proved the ONNX path produces bit-comparable
  * decisions; this file is the seam it will plug into.
  */
+import type { EvidenceTruncation } from "../support/decision-provider-contract.ts";
 
 export type QType = "choice" | "score" | "noul";
 
@@ -40,6 +41,12 @@ export type Answer = ChoiceAnswer | NoulAnswer | ScoreAnswer;
 export interface PredictResult {
   answers: Record<string, Answer>;
   shortlist?: Record<string, { passthrough?: boolean; kept?: string[] }>;
+  /**
+   * 证据截断记账（可选）：本次前向里若有证据被裁剪，带上面/规模/题号。
+   * 未裁剪时**不出现**该键——默认路径的返回形状与既有消费点逐字节不变。
+   * 形状单源在 L0 `decision-provider-contract.ts` 的 `EvidenceTruncation`。
+   */
+  evidence_truncated?: EvidenceTruncation;
 }
 
 export type ModelState = string | Record<string, unknown> | unknown[];

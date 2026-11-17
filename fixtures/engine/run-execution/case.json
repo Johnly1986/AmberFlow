@@ -1,0 +1,24 @@
+{
+  "id": "run-execution-case",
+  "site": "lane-fixtures",
+  "tier": "core",
+  "goal": "runExecution lane · suite",
+  "start_url": "{ENTRY}",
+  "timeout_ms": 30000,
+  "subgoals": [
+    {
+      "desc": "点击航空公司筛选",
+      "signal": { "css_exists": "#filter_item_airline.active" },
+      "start_url": "{ENTRY}",
+      "target_hint": "#filter_item_airline"
+    }
+  ],
+  "invariants": [
+    {
+      "id": "filter-active",
+      "desc": "筛选已选中",
+      "signal": { "css_exists": "#filter_item_airline.active" }
+    }
+  ],
+  "oracle": { "kind": "css_count", "selector": "#filter_item_airline.active", "min": 1, "max": 1 }
+}

@@ -33,12 +33,14 @@ import { MODELS_DIR } from "../support/paths.ts";
 import {
   QTYPES, buildSequence, clampTemperature, confidenceFromProbs, pyJsonDumps,
   renderOptions, serializeState, softmaxWithTemperature, tempBucket,
-  type QuestionDef, type SeqTokenizer, type StateLike,
+  type QuestionDef, type SeqTokenizer, type SequenceTruncation, type StateLike,
+  type TextTruncation,
 } from "./laya-format.ts";
 import type {
   Answer, ChoiceAnswer, DecisionAgent, LayaRuntime, ModelState, PredictResult,
   Question,
 } from "./model.ts";
+import type { EvidenceTruncation, EvidenceTruncationFact } from "../support/decision-provider-contract.ts";
 
 /* ----------------------------------------------------------------- discovery */
 
@@ -299,6 +301,8 @@ export interface PreparedQuestion {
   markers: number[];
   /** Label order for probability reporting: criteria keys, `0..k-1`, or false/true. */
   labels: string[];
+  /** 该题面的证据裁剪事实（三面分开；未裁剪 = truncated:false）。 */
+  truncation: SequenceTruncation;
 }
 
 /** Mirror of Python `Agent._to_internal`: choice list criteria become `{label: None}`. */
@@ -344,7 +348,7 @@ export function prepareQuestionSequences(
   const out: PreparedQuestion[] = [];
   for (const [qid, q] of Object.entries(questions)) {
     const def = normalizeQuestion(q);
-    const { ids, markers } = buildSequence(tok, state as StateLike, def, maxLen, headMaxLen);
+    const { ids, markers, truncation } = buildSequence(tok, state as StateLike, def, maxLen, headMaxLen);
     const labels = questionLabels(q);
     if (markers.length !== labels.length) {
       throw new Error(
@@ -352,9 +356,36 @@ export function prepareQuestionSequences(
         `(${markers.length} markers for ${labels.length} options)`,
       );
     }
-    out.push({ qid, qtype: QTYPES[q.type], ids, markers, labels });
+    out.push({ qid, qtype: QTYPES[q.type], ids, markers, labels, truncation });
   }
   return out;
+}
+
+/** 把一个题面的裁剪事实合并进聚合槽：取各面单题最大规模（同一批前向可能问多题）。 */
+function mergeTruncationFact(target: EvidenceTruncationFact, source: TextTruncation): void {
+  target.truncated = target.truncated || source.truncated;
+  target.dropped_chars = Math.max(target.dropped_chars, source.droppedChars);
+  target.dropped_tokens = Math.max(target.dropped_tokens, source.droppedTokens);
+}
+
+/**
+ * 一次前向的证据截断记账（`PredictResult.evidence_truncated` 的唯一构造点）。
+ * 无裁剪时返回 undefined：调用方不填该键，默认返回形状与既有消费点逐字节一致。
+ */
+export function aggregateEvidenceTruncation(
+  prepared: readonly PreparedQuestion[],
+): EvidenceTruncation | undefined {
+  const fact = (): EvidenceTruncationFact => ({ truncated: false, dropped_chars: 0, dropped_tokens: 0 });
+  const aggregate: EvidenceTruncation = { state: fact(), head: fact(), options: fact(), questions: [] };
+  for (const p of prepared) {
+    const t = p.truncation;
+    if (!t.state.truncated && !t.head.truncated && !t.options.truncated) continue;
+    aggregate.questions.push(p.qid);
+    mergeTruncationFact(aggregate.state, t.state);
+    mergeTruncationFact(aggregate.head, t.head);
+    mergeTruncationFact(aggregate.options, t.options);
+  }
+  return aggregate.questions.length === 0 ? undefined : aggregate;
 }
 
 /* --------------------------------------------------------------- ORT session */
@@ -473,11 +504,12 @@ class LayaOnnxAgent implements DecisionAgent {
       tok, state, runnable, this.config.maxLen, this.config.headMaxLen,
     );
     if (!prepared.length) return { answers };
+    const evidence = aggregateEvidenceTruncation(prepared);
     const rows = await this.runLogits(prepared, tok);
     prepared.forEach((p, r) => {
       answers[p.qid] = this.answerFor(p, rows[r] ?? []);
     });
-    return { answers };
+    return evidence === undefined ? { answers } : { answers, evidence_truncated: evidence };
   }
 
   /**
@@ -740,7 +772,13 @@ export function createLayaOnnxRuntime(opts: CreateLayaOnnxRuntimeOptions = {}): 
       }
 
       const result = await agent.predict(state, reduced);
-      return { answers: result.answers, shortlist: meta };
+      return {
+        answers: result.answers,
+        shortlist: meta,
+        ...(result.evidence_truncated === undefined
+          ? {}
+          : { evidence_truncated: result.evidence_truncated }),
+      };
     },
   };
 }

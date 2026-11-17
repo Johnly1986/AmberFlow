@@ -67,16 +67,15 @@ import { checkToolSignal, explainToolSignal, type ToolSignal } from "../browser/
 import { channelFromEnv } from "../browser/browser-env.ts";
 import { captureStateView } from "../flow/signal-induction.ts";
 import { captureStepStateView, type StepStateView } from "../model/page-context.ts";
-import { createAppCandidateProducer } from "./candidate-source.ts";
-import { createSessionLease } from "../engine/session-lease.ts";
-import { createRunScope } from "./run-scope.ts";
+import { runExecution } from "../engine/run-execution.ts";
 import type {  StateView  } from "../engine/signals.ts";
 import { expandPack, listAppDirs, resolveSourceSlots, type AppPack, type ExpandedStep, type PackPace, type PackPolicy, type SourceObservation } from "./app-pack.ts";
 import { extractProcessReturns, getAppAdapter, substituteDatasetPlaceholders, type AdapterRunContext, type ManualStepDecl, type ManualStepRequest, type ManualStepRun } from "./app-adapters.ts";
 import { validateApp } from "./cross-ref.ts";
 import { MASKED_SLOT, SECRET_SLOT_NAME, maskSecretSlots, scrubSecrets, secretSlotKeys, secretValuesFromSlots } from "./redaction.ts";
 import { dryRunFlow, loadScriptApp, type LoadedScriptApp } from "./app-script.ts";
-import { StopError, createCtx, type ToolRunRequest, type ToolRunResult } from "./ctx.ts";
+import { StopError, createCtx } from "./ctx.ts";
+import { createScriptToolRunner } from "./app-runner-script-tools.ts";
 import type {  CtxDeps  } from "./ctx-types.ts";
 import type {  MiddlewareOptions  } from "../engine/executor-types.ts";
 import { createReplayCtx } from "./ctx-replay.ts";
@@ -169,10 +168,12 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     pack.secret_slots,
   );
   const secretValues = secretValuesFromSlots(slots, secretKeys);
-  // S1 RunScope：planPath/outDir/runId/today 唯一解析点（flow 面接受显式注入）。
-  const scope = createRunScope({ appId: pack.id, planPath: opts.planPath, outDir: opts.outDir, runId: opts.runId, today: opts.today });
-  const { planPath, outDir, runId } = scope;
-  const rescueBuilder = opts.rescue === true ? new RescueRequestBuilder(runId) : null;
+  const own = opts.sessionFactory === undefined;
+  // 内核交给本 run 的产物落点（RunScope 投影；在 runExecution 里解析一次）。
+  let planPath = "";
+  let outDir = "";
+  let runId = "";
+  let rescueBuilder: RescueRequestBuilder | null = null;
   const inputs = inputsSha256(slots, (pack.hosts ?? []) as string[]);
   const trace = newTrace({ app: pack.id, script_sha256: loaded.scriptSha256, inputs_sha256: inputs });
   const verbose = opts.verbose !== false;
@@ -186,6 +187,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
 
 
   let ok = false;
+  /** 预算用满 = partial 执行事实（内核的停因分类单点判定；不是配置错误）。 */
+  let partial = false;
   let stopCode: string | undefined;
   let stopReason: string | undefined;
   /** navigation_forbidden 的结构化证据（StopError.diagnostics 原样透出；缺省 undefined）。 */
@@ -232,17 +235,48 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   const decisionStepGroups: TraceStep[][] = [];
   // §8 步 2 影子模式记录器：仅 AMBERFLOW_RESCUE_SHADOW=1 创建；收尾 flush 到
   // outDir/rescue-shadow.json（sidecar 不进 result/trace/report；失败静默）。
-  const rescueShadow = isRescueShadowEnabled() ? createShadowRecorder(runId) : null;
+  let rescueShadow: ShadowRecorder | null = null;
+  /**
+   * 内核回调里赋值的运行结果事实：TS 的控制流分析看不见闭包内的赋值，收尾读取经这个
+   * holder（与既有 `mwHolder` 同一个理由），避免 `let` 被收窄成 never。
+   */
+  const captured: {
+    policy: EffectivePolicy | null;
+    anyDeclared: boolean;
+    actHintStrictForWarn: boolean;
+    decisionDegraded: NonNullable<BrowserMiddleware["decisionDegraded"]> | null;
+    rescueShadow: ShadowRecorder | null;
+  } = { policy: null, anyDeclared: false, actHintStrictForWarn: false, decisionDegraded: null, rescueShadow: null };
 
-  if (opts.replayTrace !== undefined) {
-    const recorded = readTrace(opts.replayTrace);
+  // S1 执行内核组合根：RunScope（flow 面接受显式 outDir/runId 注入）+ 惰性会话租约 +
+  // 执行器装配入口。脚本控制流与结束态验收留在本适配器（`ctx.done` 仍在页面上裁决）。
+  await runExecution({
+    source: "flow",
+    appId: pack.id,
+    planPath: opts.planPath,
+    outDir: opts.outDir,
+    runId: opts.runId,
+    today: opts.today,
+    maxSteps: opts.maxSteps,
+    createSession: async () => {
+      const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
+      return own
+        ? browserSession(opts.headful !== true, device, pack.policy?.browser ?? null)
+        : opts.sessionFactory!();
+    },
+  }, async (run) => {
+    ({ planPath, outDir, runId } = run.artifacts);
+    rescueBuilder = opts.rescue === true ? new RescueRequestBuilder(runId) : null;
+    rescueShadow = isRescueShadowEnabled() ? createShadowRecorder(runId) : null;
+    if (opts.replayTrace !== undefined) {
+      const recorded = readTrace(opts.replayTrace);
     const problems = replayCompatibility(recorded, {
       app: pack.id, script_sha256: loaded.scriptSha256, inputs_sha256: inputs,
     });
     if (problems.length) throw new Error(`replay refused:\n  - ${problems.join("\n  - ")}`);
     const { ctx, remaining } = createReplayCtx({
       pack: pack as never, slots: slots as Record<string, string>,
-      runtime: scope.runtime,
+      runtime: run.scope.runtime,
       trace: recorded, maxSteps: opts.maxSteps,
     });
     try {
@@ -263,14 +297,6 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   } else {
     preflightConfig(opts);
     for (const n of pack.sources ?? []) loadSource(String(n));
-    const own = opts.sessionFactory === undefined;
-    // 惰性会话租约（与 suite/runApp 同一份语义）：首个需要页面的调用才建会话；收尾关一次。
-    const lease = createSessionLease(async () => {
-      const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
-      return own
-        ? browserSession(opts.headful !== true, device, pack.policy?.browser ?? null)
-        : opts.sessionFactory!();
-    });
     // §3：与 `runApp` 共用同一份策略解析——否则脚本应用会静默忽略 meta.policy
     // （同一个 `policy.conf_floor` 在数据脚本上生效、在 flow 脚本上不生效）。
     const resolvedPolicy = resolveRunPolicy(pack, opts);
@@ -280,11 +306,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     anyDeclared = resolvedPolicy.anyDeclared;
     // task-24/4：strict 旗标存活到报告点（runWarnings 的 model_face_idle 判定用）。
     actHintStrictForWarn = resolvedPolicy.policy.act_hint?.value === "strict";
-    // 裸 `let` 会被 TS 的控制流收窄成 never（闭包里的赋值它看不见）——用 holder：
-    // 收尾要把 `providerDegraded` 从执行器实例上读出来（A3）。
-    const mwHolder: { current: BrowserMiddleware | null } = { current: null };
-    const getMw = (): BrowserMiddleware => {
-      if (mwHolder.current === null) {
+    // 执行器装配入口：本 run 唯一实例，首个 getMw() 调用时经内核装配一次；收尾事实也经内核读。
+    const getMw = (): BrowserMiddleware => run.middleware(() => {
+      {
         const mwOptions: Omit<MiddlewareOptions, "confirmFn"> = {
           modelId: pack.model ?? "english",
           auditor: new MockAuditor(),
@@ -333,14 +357,13 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
           ...(decisionDefaults.actPoolCap === undefined ? {} : { actPoolCap: decisionDefaults.actPoolCap }),
           ...(decisionDefaults.poolQuotaMode === undefined ? {} : { poolQuotaMode: decisionDefaults.poolQuotaMode }),
         };
-        mwHolder.current = buildMiddleware({
+        return buildMiddleware({
           face: "app-script",
           confirmPolicy: { kind: "safe-browser", confirmSafe: opts.confirmSafe !== false },
           options: mwOptions,
         });
       }
-      return mwHolder.current;
-    };
+    });
     await probeCompatDecisionPlane(getMw);
     // task-15（D2）：SITE_FACTS 按 meta.hosts 匹配 → stderr 提示（运行前一次；仅命中出现；
     // 事实不进模型请求面）。无命中 = 零输出（默认等价）。命中集提到函数层（结果装配在分支外）。
@@ -359,150 +382,15 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       }
     }
     getMw().siteFactsNotes = d2Notes;
-    /**
-     * T1：工具步工件序号（每次 flow 运行从 1 起；只用于**文件名**，不是步骤 id）。
-     * T1：把一次工具步的进程观察落成工件（`scrubSecrets` 掩码 → `outDir/tool-steps/NN-slug.json`）。
-     * 返回相对 outDir 的 posix 路径；写不了就返回 undefined（工件失败不改变工具步结论）。
-     */
-    let toolStepSeq = 0;
-    const writeToolArtifact = (
-      started: number,
-      desc: string,
-      source: string,
-      adapter: string | undefined,
-      obs: {
-        code: number | null; stdout: string; stderr: string; attempts: number; ok: boolean;
-        stopCode?: string; argv?: string[]; args?: string[]; reason?: string;
-      },
-    ): string | undefined => {
-      const seq = ++toolStepSeq;
-      const out = capToolText(obs.stdout);
-      const err = capToolText(obs.stderr);
-      const artifact = writeToolStepArtifact(outDir, seq, desc, {
-        index: seq, desc, source,
-        ...(adapter === undefined ? {} : { adapter }),
-        ...(obs.args === undefined ? {} : { args: obs.args }),
-        ...(obs.argv === undefined ? {} : { argv: obs.argv }),
-        code: obs.code, ok: obs.ok,
-        ...(obs.stopCode === undefined ? {} : { stop_code: obs.stopCode }),
-        ...(obs.reason === undefined ? {} : { reason: obs.reason }),
-        attempts: obs.attempts, elapsed_ms: Date.now() - started,
-        stdout: out.text, stderr: err.text,
-        ...(out.truncated || err.truncated ? { truncated: true as const } : {}),
-      }, secretValues);
-      return artifact ?? undefined;
-    };
-    /** 工具步：接到既有 `runToolStep`（干跑/确认/幂等重试的唯一实现，不复制）。 */
-    const toolRunner = async (req: ToolRunRequest): Promise<ToolRunResult> => {
-      // ① 非 cli 适配器：与声明式 journey 用**同一份**适配器实现（validate → expand → run）。
-      //    若 ctx.run 硬编码 `adapter:"cli"`，声明式能写的 ssh/stdio 步在 flow 脚本里不可表达。
-      if (req.adapter !== undefined && req.adapter !== "cli") {
-        const adapter = getAppAdapter(req.adapter);
-        const base = { code: null as number | null, stdout: "", stderr: "", attempts: 0 };
-        if (adapter === undefined) {
-          return { ok: false, stopCode: "config_error", reason: `unknown app adapter ${JSON.stringify(req.adapter)}`, ...base };
-        }
-        const where = `ctx.run(${JSON.stringify(req.desc)})`;
-        const raw = { ...(req.rawStep ?? {}), signal: req.done };
-        const problems: string[] = [];
-        let decl: unknown;
-        try {
-          adapter.validateStep(raw, where, problems);
-          if (!problems.length) decl = adapter.expand(raw, where).decl;
-        } catch (e) {
-          return { ok: false, stopCode: "config_error", reason: e instanceof Error ? e.message : String(e), ...base };
-        }
-        if (problems.length) return { ok: false, stopCode: "config_error", reason: problems.join("；"), ...base };
-        const step = {
-          index: 0, adapter: adapter.kind, kind: adapter.legacyKind,
-          desc: req.desc, role: null, id: null, next: [], decl,
-        } as unknown as ExpandedStep;
-        const started = Date.now();
-        const adapterCtx = {
-          // T2：适配器的 `{dataset:NAME}` 占位符也从这份运行级数据集现读（stdio argv 等）。
-          outDir, verbose, runId, dataset,
-          runWebStep: async (): Promise<{ done: boolean }> => { throw new Error("ctx.run: browser steps go through ctx.step()"); },
-          runCliStep: async (): Promise<ToolStepResult> => { throw new Error("ctx.run: use the cli form for cli steps"); },
-          runManualStep: async (): Promise<ManualStepRun> => ({
-            done: false, reason: "manual steps are declared in the journey, not executed through ctx.run",
-          }),
-        };
-        const out = await adapter.run(decl, step, adapterCtx);
-        const t = out.tool;
-        const stopCode = out.done ? undefined : (t?.refused ?? "tool_failed");
-        // T1：非 cli 步同样落工件 + 把适配器抽出的 returns 交回 ctx（ctx 负责写数据集）。
-        const artifact = writeToolArtifact(started, req.desc, req.source, adapter.kind, {
-          code: t?.code ?? null, stdout: t?.stdout ?? "", stderr: t?.stderr ?? "",
-          attempts: t?.attempts ?? 1, ok: out.done,
-          ...(stopCode === undefined ? {} : { stopCode }),
-          ...(t?.reason === undefined ? {} : { reason: t.reason }),
-          ...(t?.argv === undefined ? {} : { argv: t.argv }),
-        });
-        return {
-          ok: out.done,
-          ...(stopCode === undefined ? {} : { stopCode }),
-          ...(t?.refused === undefined ? {} : { refused: t.refused }),
-          // T4：优先信号诊断（path/类型/值摘要）；没有才退回 stderr 首行。
-          ...(t?.reason ? { reason: t.reason }
-            : t?.stderr ? { reason: t.stderr.split("\n")[0]!.slice(0, 300) } : {}),
-          ...(out.returns === undefined ? {} : { returns: out.returns }),
-          code: t?.code ?? null, stdout: t?.stdout ?? "", stderr: t?.stderr ?? "",
-          attempts: t?.attempts ?? 1,
-          ...(t?.dry_run ? { dryRun: t.dry_run } : {}),
-          ...(artifact === undefined ? {} : { artifact }),
-        };
-      }
-      // ② cli（默认）：接到 runToolStep。
-      const decl = {
-        source: req.source,
-        args: req.args ?? [],
-        dry_run_args: req.dryRunArgs ?? null,
-        signal: req.done as never,
-        retries: req.retries ?? 0,
-        idempotent: req.idempotent === true,
-        dangerous: req.dangerous === true,
-        // T2：`returns` 走既有 `ReturnExtractor` 声明面（校验在 ctx 侧，fail closed）。
-        returns: req.returns ?? null,
-      };
-      const step = {
-        index: 0, adapter: "cli", kind: "tool",
-        desc: req.desc, role: null, id: null, next: [], decl, tool: decl,
-      } as unknown as ExpandedStep;
-      const started = Date.now();
-      const r = await runToolStep(step, { ...opts, outDir, runId, verbose, slotBag: slots });
-      const stopCode = r.done ? undefined : (r.refused ?? "tool_failed");
-      // T2：信号成立后按**同一份** `extractProcessReturns` 抽取（与声明式适配器同源）。
-      const returns = r.done && req.returns !== null && req.returns !== undefined
-        ? extractProcessReturns(req.returns, { stdout: r.stdout ?? "", stderr: r.stderr ?? "", code: r.code })
-        : undefined;
-      const artifact = writeToolArtifact(started, req.desc, req.source, undefined, {
-        code: r.code, stdout: r.stdout ?? "", stderr: r.stderr ?? "", attempts: r.attempts, ok: r.done,
-        ...(stopCode === undefined ? {} : { stopCode }),
-        ...(r.reason === undefined ? {} : { reason: r.reason }),
-        args: req.args ?? [],
-        ...((r.argv ?? []).length > 0 ? { argv: r.argv } : {}),
-      });
-      return {
-        ok: r.done,
-        ...(stopCode === undefined ? {} : { stopCode }),
-        // T4：信号诊断（path/类型/值摘要）优先；有底层 stderr 时由 ctx 组
-        // 「exit + stderr 尾行」的诊断；两者都没有才退到拒绝话术。
-        ...(stopCode === undefined ? {}
-          : r.reason !== undefined ? { reason: r.reason }
-            : (r.stderr ?? "").trim() === "" ? { reason: refusalLine(stopCode) } : {}),
-        ...(r.refused === undefined ? {} : { refused: r.refused }),
-        ...(returns === undefined ? {} : { returns }),
-        code: r.code, stdout: r.stdout ?? "", stderr: r.stderr ?? "", attempts: r.attempts,
-        ...(r.dry_run === null ? {} : { dryRun: r.dry_run }),
-        ...(artifact === undefined ? {} : { artifact }),
-      };
-    };
-
+    // 工具步适配（ctx.run 的唯一实现）：runToolStep 干跑/确认/幂等重试 + 工件 + returns 抽取。
+    const toolRunner = createScriptToolRunner({
+      opts, outDir, runId, verbose, slots, dataset, secretValues,
+    });
     const ctx = createCtx({
       pack: pack as never,
       slots: slots as Record<string, string>,
-      runtime: scope.runtime,
-      ensureSession: () => lease.get(), mw: getMw, trace, toolRunner,
+      runtime: run.scope.runtime,
+      ensureSession: () => run.session(), mw: getMw, trace, toolRunner,
       // T2：脚本路径与声明式旅程共享同一份运行级数据集（ctx.run 的 returns 写这里）。
       dataset,
       allowSources: opts.sources !== false,
@@ -565,7 +453,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     } finally {
       // B2（P5）：先读会话事实再关会话（关了就读不到 final_url 了）；读失败按缺键处理，
       // 不让证据采集影响运行结果本身。字段语义见 `AppRunEnv`。
-      const liveSession = lease.peek();
+      const liveSession = run.peekSession();
       if (liveSession !== null) {
         // task-21/D-1：浏览器启动事实（binary_basename/headless/persistent_profile）——
         // 会话关闭前读一次（与 final_url/viewport 同一先例；sessionFactory 注入的会话缺字段省略）。
@@ -595,19 +483,30 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         try { await liveSession.page.evaluate(cleanStampAttrs); } catch { /* 清理失败不影响结果 */ }
       }
       // 会话关闭与 runApp 同一位置：不变量/结束态/环境事实都读完之后；未创建 = no-op。
-      await lease.close();
-      // A3：决策源降级的原因只活在执行器实例上——脚本抛 StopError 也不能把它弄丢
-      //（拿不到场就记 null：重放分支没有执行器，字段缺席 = 没降级，与 runApp 同口径）。
-      providerDegraded = mwHolder.current?.providerDegraded || null;
-      // task-14（D1）：起跑探测失败/中途死亡的降级留痕（同一场读一次；缺字段 = 未降级）。
-      decisionDegraded = mwHolder.current?.decisionDegraded ?? null;
-      // S5：同一处读指标（一个 flow 应用会复用同一个执行器跑多个 ctx.step，计数在实例上累计）。
-      decisionStateMetrics = mwHolder.current?.decisionStateMetrics() ?? null;
-      // U8：同源同处读（执行器闸门分支记账，实例累计跨 ctx.step）。
-      rejectedConfMetrics = mwHolder.current?.rejectedAskConfMetrics() ?? null;
+      await run.close();
+      // 收尾事实（A3 降级原因 / D1 决策面降级 / S5 指标 / U8 被拒 ask）经内核一次取齐；
+      // 重放分支没有执行器 ⇒ 全 null（字段缺席 = 没降级，与 runApp 同口径）。
+      const facts = run.middlewareFacts();
+      providerDegraded = facts.providerDegraded;
+      decisionDegraded = facts.decisionDegraded;
+      decisionStateMetrics = facts.decisionStateMetrics;
+      rejectedConfMetrics = facts.rejectedAskConf;
     }
-    invariants = invariantsFromTrace(trace, pack ?? {});
   }
+    invariants = invariantsFromTrace(trace, pack ?? {});
+    partial = run.budgetExhausted(stopCode);
+    captured.policy = policy;
+    captured.anyDeclared = anyDeclared;
+    captured.actHintStrictForWarn = actHintStrictForWarn;
+    captured.decisionDegraded = decisionDegraded;
+    captured.rescueShadow = rescueShadow;
+  });
+
+  const finalPolicy = captured.policy;
+  const finalAnyDeclared = captured.anyDeclared;
+  const finalStrict = captured.actHintStrictForWarn;
+  const finalDecisionDegraded = captured.decisionDegraded;
+  const finalRescueShadow = captured.rescueShadow;
 
   // 人工步不能因为脚本“没 ctx.fail 就继续走”而变绿：人工没完成是全局未完成，
   // 即使后续步骤和结束态不变量都成立。脚本可以吞异常，但产物不能吞事实。
@@ -636,7 +535,6 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       + invariants.filter((i) => !i.held).map((i) => i.id).join(", ");
   }
   // `--max-steps N` 是执行预算：用满时已经执行的步骤是事实，不是“配置错误”。
-  const partial = stopCode === "budget_exceeded" && opts.maxSteps !== undefined;
   finishTrace(trace, {
     done: ok,
     ...(stopCode === undefined ? {} : { stop_code: stopCode }),
@@ -747,9 +645,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     }
     // task-14（D1）：决策面兼容降级时保底一条 run warning（即使没有步被吞掉——
     // probe 失败本身就该在 result.warnings 里可见）。
-    if (decisionDegraded !== null) {
-      runWarnings.push(`decision_degraded: 决策面已降级（${decisionDegraded.reason_class}）`
-        + `——本次 run 停发模型调用，规则面继续（${decisionDegraded.message.slice(0, 200)}）`);
+    if (finalDecisionDegraded !== null) {
+      runWarnings.push(`decision_degraded: 决策面已降级（${finalDecisionDegraded.reason_class}）`
+        + `——本次 run 停发模型调用，规则面继续（${finalDecisionDegraded.message.slice(0, 200)}）`);
     }
     // task-24/4：模型面参与度提示（评审 A.4 因果纠正——strict/rules-only 不改变模型参与度，
     // 只改未命中兜底与风险票来源；0 咨询的因是规则面全命中）。决策面已配置 + strict + 0 咨询
@@ -757,9 +655,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // decision_degraded 覆盖，不重复。
     {
       const planeConfigured = decisionServiceConfigured();
-      const strictOn = actHintStrictForWarn;
+      const strictOn = finalStrict;
       const asksSoFar = opts.pickAsks ? opts.pickAsks() : 0;
-      if (planeConfigured && strictOn && asksSoFar === 0 && decisionDegraded === null) {
+      if (planeConfigured && strictOn && asksSoFar === 0 && finalDecisionDegraded === null) {
         runWarnings.push("model_face_idle: 决策面已配置且 act_hint=\"strict\"，但本次 run 零模型咨询"
           + "（规则面全命中或全未命中）——这是策略预期行为不是故障；strict/rules-only 不改变模型参与度，"
           + "只改未命中兜底与风险票来源");
@@ -815,9 +713,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   const stats = opts.runtimeStats ? opts.runtimeStats() : null;
   const decisions = summarizeDecisions(decisionSteps, stats, opts.pickAsks ? opts.pickAsks() : 0,
     opts.pickFailedAsks ? opts.pickFailedAsks() : 0,
-    // S5：与声明式路径同一条范围判定——policy 声明了 decision_state 才投影指标；
+    // S5：与声明式路径同一条范围判定——finalPolicy 声明了 decision_state 才投影指标；
     // 声明了但脚本一步没跑 = 全 0（这一臂确实跑过，只是没发生决策）。
-    policy !== null && policy.decision_state.source === "app"
+    finalPolicy !== null && finalPolicy.decision_state.source === "app"
       ? (decisionStateMetrics ?? { asks_saved: 0, gate_waits: 0, context_sent: 0, context_skipped: 0 })
       : null,
     // U8：被拒 ask 的 conf 分布（脚本跑过才有执行器可读；n=0 ⇒ null ⇒ 字段缺席）。
@@ -870,7 +768,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   const finishedAtIso = new Date().toISOString();
   // §8 步 2 影子模式收尾：sidecar 落盘放在写 result 的收尾路径（正常/异常都到得了这里）；
   // 开关关时 recorder 为 null（零字节不变）。失败静默——影子不掩盖运行结果。
-  if (rescueShadow !== null) rescueShadow.flush(outDir);
+  if (finalRescueShadow !== null) finalRescueShadow.flush(outDir);
   const result: AppRunResult = {
     app: pack.id,
     label: pack.label ?? pack.id,
@@ -923,7 +821,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       ...(envBrowser === undefined ? {} : { browser: envBrowser }),
     },
     // §3：生效策略只在非缺省时进产物（与 runApp 同一纪律）；模型层级照写（脚本应用同样要能说清）。
-    ...(anyDeclared && policy !== null ? { effective_policy: policy } : {}),
+    ...(finalAnyDeclared && finalPolicy !== null ? { effective_policy: finalPolicy } : {}),
     // 导航纪律拦下的直接导航证据（缺省不出现 = 产物逐字节不变）。
     ...(stopDiagnostics !== undefined ? { diagnostics: stopDiagnostics } : {}),
     ...(opts.modelStatus === undefined ? {} : { model_status: opts.modelStatus }),
@@ -932,7 +830,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     ...(providerDegraded ? { provider_degraded: providerDegraded } : {}),
     // task-14（D1）：决策面兼容降级留痕（仅 degraded 时出现，只增字段——healthy/无决策面
     // 的 run 键集与基线逐字节一致）。
-    ...(decisionDegraded !== null ? { decision: { degraded: decisionDegraded } } : {}),
+    ...(finalDecisionDegraded !== null ? { decision: { degraded: finalDecisionDegraded } } : {}),
     // task-15（D2）：site_facts 仅命中时出现（只增字段；无命中 = 键集与基线逐字节一致）。
     ...(siteFacts.length > 0 ? {
       site_facts: siteFacts.map((f) => ({ site: f.site, id: f.id, as_of: f.as_of, evidence: f.evidence, statement: f.statement })),

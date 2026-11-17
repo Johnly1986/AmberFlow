@@ -72,7 +72,7 @@ const ENV_EXCEPTIONS: ReadonlyArray<{ file: string; reason: string }> = [
 ];
 
 /**
- * 11 个调参概念的「同语义上下文」正则：token 只在出现这些词的行才算疑似回写。
+ * 12 个调参概念的「同语义上下文」正则：token 只在出现这些词的行才算疑似回写。
  * 只用于 warn 判据；豁免按文件+概念登记。
  */
 const TUNING_CONCEPTS: ReadonlyArray<{ concept: TuningConcept; context: RegExp }> = [
@@ -84,6 +84,7 @@ const TUNING_CONCEPTS: ReadonlyArray<{ concept: TuningConcept; context: RegExp }
   { concept: "SETTLE_QUIET_MS", context: /quietMs|quiet_ms|settle/i },
   { concept: "SETTLE_TIMEOUT_MS", context: /settle|quiet_ms|DEFAULT_SETTLE/i },
   { concept: "STATE_TEXT_BUDGET_CHARS", context: /stateText|state_text|budget/i },
+  { concept: "LAYA_EVIDENCE_CHARS_PER_TOKEN", context: /charsPerToken|CHAR_PER_TOKEN|evidence_truncated|laya.*budget/i },
   { concept: "TOOL_STDERR_TAIL_CAP_CHARS", context: /stderr|TOOL_STDERR/i },
   { concept: "SESSION_IDLE_TIMEOUT_MS", context: /idle/i },
   { concept: "CLI_COMMAND_DEFAULT_TIMEOUT_MS", context: /v\.timeout|--timeout|commandTimeout/i },

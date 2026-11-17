@@ -21,6 +21,7 @@ export type StateLike = string | Record<string, unknown> | unknown[];
  * downstream token position.
  */
 import { pyJsonDumps } from "../support/pystr.ts";
+import { LAYA_EVIDENCE_CHARS_PER_TOKEN } from "../support/tuning.ts";
 export { pyJsonDumps };
 
 export function serializeState(state: StateLike): string {
@@ -72,9 +73,102 @@ export interface SeqTokenizer {
   encode(text: string, opts?: { addSpecialTokens?: boolean }): number[];
 }
 
+/** 每条选项渲染文本的 token 名额（checkpoint 训练时的选项上限，序列布局的一部分）。 */
+export const OPTION_TOKEN_BUDGET = 48;
+
+/** 一次文本装载的裁剪事实：字符级预算裁剪与 token 安全网分开记账，互不重叠。 */
+export interface TextTruncation {
+  /** 是否发生任何裁剪（字符级预算裁剪或 token 安全网）。 */
+  truncated: boolean;
+  /** 字符级预算裁剪丢弃的字符数（按字符边界裁，不切断代理对）。 */
+  droppedChars: number;
+  /** 字符级预算裁剪后编码仍超名额时，token 安全网丢弃的 token 数。 */
+  droppedTokens: number;
+  /** 字符级预算裁剪发生在文本左侧（`truncateLeft` 的 tail 保留模式）。 */
+  fromLeft?: boolean;
+}
+
+/** 一条 laya 序列三个证据面的裁剪事实。 */
+export interface SequenceTruncation {
+  state: TextTruncation;
+  head: TextTruncation;
+  options: TextTruncation;
+}
+
+/** 无裁剪事实（共享只读常量：调用方不得原地改）。 */
+const NO_TRUNCATION: TextTruncation = Object.freeze({
+  truncated: false, droppedChars: 0, droppedTokens: 0,
+});
+
+/**
+ * 按字符预算裁剪文本，且不切断代理对：切点落在代理对的中间时，整对码点一起裁掉
+ * （前缀模式后退切点，tail 模式前移起点）——宁可少留一个码点，也不产出孤立代理。
+ */
+export function truncateTextToChars(
+  text: string,
+  maxChars: number,
+  fromLeft = false,
+): { text: string; droppedChars: number } {
+  const keep = Math.max(0, Math.floor(maxChars));
+  if (text.length <= keep) return { text, droppedChars: 0 };
+  let start = 0;
+  let end = text.length;
+  if (fromLeft) {
+    start = text.length - keep;
+    const first = text.charCodeAt(start);
+    if (first >= 0xdc00 && first <= 0xdfff) start += 1;
+  } else {
+    end = keep;
+    const last = text.charCodeAt(end - 1);
+    if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  }
+  return { text: text.slice(start, end), droppedChars: text.length - (end - start) };
+}
+
+interface FittedIds {
+  ids: number[];
+  truncation: TextTruncation;
+}
+
+/**
+ * 按 token 名额装载一段文本。口径（`buildSequence` 三个证据面共用）：
+ *   1. 未超名额 ⇒ 原样编码返回——默认路径的 ids 与既有实现逐字节一致；
+ *   2. 超名额 ⇒ **先按字符预算裁文本**（名额 × `LAYA_EVIDENCE_CHARS_PER_TOKEN`，常量单源），
+ *      再编码裁过的文本；模型面从此看不到超预算的整段原文；
+ *   3. 字符预算下编码仍超名额（更密的 tokenizer：CJK / byte-level）⇒ 才在 token 边界做
+ *      最终安全网，并如实记 `droppedTokens`。
+ */
+function fitText(
+  tok: SeqTokenizer,
+  text: string,
+  tokenBudget: number,
+  fromLeft = false,
+): FittedIds {
+  const cap = Math.max(0, tokenBudget);
+  const full = tok.encode(text, { addSpecialTokens: false });
+  if (full.length <= cap) return { ids: full, truncation: NO_TRUNCATION };
+  const cut = truncateTextToChars(text, cap * LAYA_EVIDENCE_CHARS_PER_TOKEN, fromLeft);
+  let ids = tok.encode(cut.text, { addSpecialTokens: false });
+  let droppedTokens = 0;
+  if (ids.length > cap) {
+    droppedTokens = ids.length - cap;
+    ids = fromLeft ? ids.slice(-cap) : ids.slice(0, cap);
+  }
+  return {
+    ids,
+    truncation: {
+      truncated: true, droppedChars: cut.droppedChars, droppedTokens,
+      ...(fromLeft ? { fromLeft: true } : {}),
+    },
+  };
+}
+
 /**
  * Format: `[CLS] <type> instructions [SEP] [MASK] opt0 [MASK] opt1 ... [SEP] state [SEP]`.
  * Marker positions are the indices of each option's `[MASK]`.
+ *
+ * 三个证据面（head/options/state）都走 `fitText`：超名额时先裁文本再编码，并把裁剪事实
+ * 放进返回值的 `truncation`；调用方经 `prepareQuestionSequences` 聚合成 `evidence_truncated`。
  */
 export function buildSequence(
   tok: SeqTokenizer,
@@ -84,27 +178,32 @@ export function buildSequence(
   headMaxLen = 192,
   optionOrder: number[] | null = null,
   truncateLeft = false,
-): { ids: number[]; markers: number[] } {
+): { ids: number[]; markers: number[]; truncation: SequenceTruncation } {
   const mask = tok.maskToken;
   const opts = renderOptions(q);
   const order = optionOrder ?? opts.map((_o, i) => i);
   const ins = String(q.instructions ?? q.ins ?? "").replaceAll(mask, " ");
-  let headIds = tok.encode(`${q.type} question: ${ins}`, { addSpecialTokens: false });
+  let optionChars = 0;
+  let optionTokens = 0;
   let optIds: number[][] = [];
   for (const i of order) {
-    optIds.push([
-      tok.maskTokenId,
-      ...tok.encode(" " + opts[i]!.replaceAll(mask, " "), { addSpecialTokens: false }).slice(0, 48),
-    ]);
+    const fitted = fitText(tok, " " + opts[i]!.replaceAll(mask, " "), OPTION_TOKEN_BUDGET);
+    optIds.push([tok.maskTokenId, ...fitted.ids]);
+    optionChars += fitted.truncation.droppedChars;
+    optionTokens += fitted.truncation.droppedTokens;
   }
   let optBudget = headMaxLen - optIds.reduce((a, o) => a + o.length, 0);
   if (optBudget < 16) {
     const per = Math.max(4, Math.floor((headMaxLen - 16) / Math.max(1, optIds.length)));
-    optIds = optIds.map((o) => o.slice(0, per));
+    optIds = optIds.map((o) => {
+      if (o.length <= per) return o;
+      optionTokens += o.length - per;
+      return o.slice(0, per);
+    });
     optBudget = headMaxLen - optIds.reduce((a, o) => a + o.length, 0);
   }
-  headIds = headIds.slice(0, Math.max(8, optBudget));
-  let ids = [tok.clsTokenId, ...headIds, tok.sepTokenId];
+  const head = fitText(tok, `${q.type} question: ${ins}`, Math.max(8, optBudget));
+  let ids = [tok.clsTokenId, ...head.ids, tok.sepTokenId];
   const markers: number[] = [];
   for (const o of optIds) {
     markers.push(ids.length);
@@ -112,10 +211,19 @@ export function buildSequence(
   }
   ids.push(tok.sepTokenId);
   const room = Math.max(0, maxLen - ids.length - 1);
-  let st = tok.encode(serializeState(state).replaceAll(mask, " "), { addSpecialTokens: false });
-  st = truncateLeft ? st.slice(-room) : st.slice(0, room);
-  ids = ids.concat(st, [tok.sepTokenId]);
-  return { ids: ids.slice(0, maxLen), markers: markers.filter((m) => m < maxLen) };
+  const st = fitText(tok, serializeState(state).replaceAll(mask, " "), room, truncateLeft);
+  ids = ids.concat(st.ids, [tok.sepTokenId]);
+  return {
+    ids: ids.slice(0, maxLen),
+    markers: markers.filter((m) => m < maxLen),
+    truncation: {
+      state: st.truncation,
+      head: head.truncation,
+      options: optionChars > 0 || optionTokens > 0
+        ? { truncated: true, droppedChars: optionChars, droppedTokens: optionTokens }
+        : NO_TRUNCATION,
+    },
+  };
 }
 
 /* ---------------------------------------------------------------- calibration */

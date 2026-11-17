@@ -13,6 +13,7 @@
  */
 import { DESTRUCTIVE_PATTERNS } from "../engine/rules.ts";
 import { createAppCandidateProducer } from "./candidate-source.ts";
+import { appDecisionRuntime } from "./decision-runtime.ts";
 import { BrowserMiddleware } from "../engine/executor.ts";
 import type { MiddlewareOptions } from "../engine/executor-types.ts";
 
@@ -101,6 +102,8 @@ export function buildMiddleware(config: BuildMiddlewareConfig): BrowserMiddlewar
   return new BrowserMiddleware({
     ...options,
     candidateProducer: options.candidateProducer ?? createAppCandidateProducer(),
+    // W5-3：决策运行时装配缺省注入组合根实现（engine 不 import model 实现；显式优先）。
+    decisionRuntime: options.decisionRuntime ?? appDecisionRuntime,
     ...(confirmFn === undefined ? {} : { confirmFn }),
   });
 }

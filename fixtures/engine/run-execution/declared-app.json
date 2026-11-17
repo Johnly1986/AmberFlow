@@ -1,0 +1,24 @@
+{
+  "spec_version": 1,
+  "id": "run-execution-declared",
+  "label": "runExecution lane · declared",
+  "goal": "到达筛选页，点击航空公司筛选并验收 active 状态",
+  "hosts": ["127.0.0.1"],
+  "slots": { "entry": "" },
+  "journey": [
+    {
+      "id": "filter-airline",
+      "desc": "点击航空公司筛选",
+      "start_url": "{entry}",
+      "target_hint": "#filter_item_airline",
+      "signal": { "css_exists": "#filter_item_airline.active" }
+    }
+  ],
+  "invariants": [
+    {
+      "id": "filter-active",
+      "desc": "筛选已选中",
+      "signal": { "css_exists": "#filter_item_airline.active" }
+    }
+  ]
+}

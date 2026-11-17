@@ -9,7 +9,7 @@ import { type MiddlewareOptions } from "../engine/executor-types.ts";
 import { type BrowserSession, type StepStateRecord, browserSession, disallowedHost } from "../engine/executor.ts";
 import { DEFAULT_MAX_STEP_VISITS, createPathWalk } from "../engine/plan.ts";
 import { runSubgoalWithRetries } from "../engine/planner.ts";
-import { createSessionLease } from "../engine/session-lease.ts";
+import { runExecution } from "../engine/run-execution.ts";
 import { type StateView, checkSignal } from "../engine/signals.ts";
 import { captureStateView } from "../flow/signal-induction.ts";
 import { type StepStateView, captureStepStateView } from "../model/page-context.ts";
@@ -28,7 +28,6 @@ import { RescueRequestBuilder, journeyRescueInput, pickManualApprover, rescueFie
 import { createShadowRecorder, isRescueShadowEnabled } from "./intervention-shadow.ts";
 import { buildMiddleware } from "./middleware-factory.ts";
 import { MASKED_SLOT, maskSecretSlots, secretSlotKeys } from "./redaction.ts";
-import { createRunScope } from "./run-scope.ts";
 import { loadSiteFacts, matchSiteFacts, renderSiteFactLines } from "./site-facts.ts";
 /**
  * 数据腿 selects → 观测面（整行 + 配置驱动主值）。
@@ -69,7 +68,6 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     slots = {}, sources = true, confirmSafe = true, verbose = true,
     modelId = pack.model ?? "english",
   } = opts;
-  const scope = createRunScope({ appId: pack.id, planPath: opts.planPath });
   const t0 = Date.now();
   // E2/E1-c/E1-a/E1-b：决策开关（decision.*）的配置层默认值（非法值已在 CLI 入口报错；这里只取已解析的强类型值，run/dry/replay 共用）。
   const decisionDefaults = parseRunDefaults(opts.env ?? process.env).defaults;
@@ -109,7 +107,6 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     }
   }
   let endState: StateView | undefined;
-
   // ---- 数据腿：同一套数据源引擎（HTTP 或 CLI 通道） -------------------------
   // 它跑在**展开之前**：数据腿的结果要回写槽位（`source_slots`），而槽位替换发生在展开期。
   // 顺序是"校验 → 数据腿 → 展开"，坏包仍然在任何网络动作之前就被拒
@@ -155,12 +152,30 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     }
   }
 
+  // 内核组合根：RunScope + 会话租约 + 执行器装配入口 + attempt 账本；旅程语义留在本适配器。
+  let manualInSegment = false;
+  return await runExecution({
+    source: "declared-flow",
+    appId: pack.id,
+    planPath: opts.planPath,
+    createSession: async () => {
+      if (opts.sessionFactory !== undefined) return opts.sessionFactory();
+      // 包声明了设备就用它（只有手机版页面存在的站点，桌面 DOM 里 hint 必然落空）
+      const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
+      // 人工步默认开可见窗口：人要在里面登录/过验证码；`--headful` 只是显式同义。
+      const headless = opts.headful !== true && !manualInSegment;
+      // task-43：meta.policy.browser 通道随 pack 下传（env 盖 meta 语义见 launchKwargs 单源）。
+      return browserSession(headless, device, pack.policy?.browser ?? null);
+    },
+  }, async (exec) => {
+    const { planPath, outDir, runId } = exec.artifacts;
+
   // ---- 数据腿 → 槽位（回写的唯一实现在 `app-pack.resolveSourceSlots`） --------
   // 优先级：包里的默认值 < **数据腿查到的观测值** < CLI 显式 `--slot`。
   // 观测值压过默认值正是这条声明存在的理由（"打开榜首"的 URL 不该是人抄进包里的过期字面量）；
   // 而人这次显式给的值压过观测值——那是"这次就用这个"的显式意图。
   const sourceSlots = resolveSourceSlots(pack, observed, selectValuesBySource);
-  const expanded = expandPack(pack, { ...sourceSlots, ...slots }, scope.planPath);
+  const expanded = expandPack(pack, { ...sourceSlots, ...slots }, planPath);
   const plan = expanded.plan;
   // R3/U2b：**计划文件也是产物**——敏感槽位的明文只留在内存里的运行袋，落盘的 plan 一律
   // 掩码。plan.save() 在每一步状态变化时都会被调，这里包一层：只在写盘那一刻换成掩码副本，
@@ -264,30 +279,20 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     ...(decisionDefaults.actPoolCap === undefined ? {} : { actPoolCap: decisionDefaults.actPoolCap }),
     ...(decisionDefaults.poolQuotaMode === undefined ? {} : { poolQuotaMode: decisionDefaults.poolQuotaMode }),
   };
-  const mw = buildMiddleware({
+  const mw = exec.middleware(() => buildMiddleware({
     face: "app-declared",
     confirmPolicy: { kind: "safe-browser", confirmSafe },
     options: mwOptions,
-  });
+  }));
   await probeCompatDecisionPlane(() => mw);
   // task-15（D2）：声明式路径同账——SITE_FACTS 按 meta.hosts 匹配（stderr 提示 + result.site_facts）。
   const siteFacts = matchSiteFacts(loadSiteFacts((m) => console.error(m)), (pack.hosts ?? []) as string[]);
   for (const line of renderSiteFactLines(siteFacts)) console.error(line);
 
-  const own = opts.sessionFactory === undefined;
-  // 惰性会话租约（与 suite/flow 适配器同一份语义）：首个浏览器步才建；finally 关一次。
-  const lease = createSessionLease(async () => {
-    if (!own) return opts.sessionFactory!();
-    // 包声明了设备就用它（只有手机版页面存在的站点，桌面 DOM 里 hint 必然落空）
-    const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
-    // 人工步默认开可见窗口：人要在里面登录/过验证码；`--headful` 只是显式同义。
-    const headless = opts.headful !== true && !manualInSegment;
-    // task-43：meta.policy.browser 通道随 pack 下传（env 盖 meta 语义见 launchKwargs 单源）。
-    return browserSession(headless, device, pack.policy?.browser ?? null);
-  });
+  // 会话由内核租约持有（首个浏览器步才建；收尾关一次）。执行器拿到的是**壳**：
+  // 它关掉的是这个壳，真正的 page 留到结束态不变量之后。
   const getShell = async (): Promise<BrowserSession> => {
-    const s = await lease.get();
-    // 会话的生命周期由本函数掌握：执行器关掉的是这个壳，真正的 page 留到不变量之后。
+    const s = await exec.session();
     return { page: s.page, pw: s.pw, browser: s.browser, close: async () => {} };
   };
 
@@ -309,8 +314,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       }
       page = shell.page;
       url = target;
-    } else if (lease.peek() !== null) {
-      page = lease.peek()!.page;
+    } else if (exec.peekSession() !== null) {
+      page = exec.peekSession()!.page;
       try { url = String((page as unknown as { url(): string }).url()); } catch { url = null; }
     }
     if (verbose) {
@@ -385,15 +390,15 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   let pathStopOut: AppRunResult["path_stop"];
   // 应用支持器运行上下文：web/cli 两个内建适配器
   // **迁移桥**——执行委托回下面两个服务（执行循环本身不搬进适配器）；新类型自己实现 run。
-  const rescueBuilder = opts.rescue === true ? new RescueRequestBuilder(scope.runId) : null;
+  const rescueBuilder = opts.rescue === true ? new RescueRequestBuilder(runId) : null;
   // §8 步 3 影子旁路（journey 声明式人工步）：仅 AMBERFLOW_RESCUE_SHADOW=1 创建；判定逻辑
   // 零变化，收尾 flush 到 outDir/rescue-shadow.json（sidecar 不进 result/trace/report）。
-  const rescueShadowRecorder = isRescueShadowEnabled() ? createShadowRecorder(scope.runId) : null;
+  const rescueShadowRecorder = isRescueShadowEnabled() ? createShadowRecorder(runId) : null;
   const adapterCtx: AdapterRunContext = {
-    outDir: scope.outDir,
+    outDir,
     verbose,
     dataset,
-    runId: scope.runId,
+    runId,
     runWebStep: async (st: ExpandedStep): Promise<{ done: boolean }> => {
       const sg = plan.subgoals[browserIndexOf[st.index]!]!;
       const shell = await getShell();
@@ -428,7 +433,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
         });
       }
       sg.status = rep.done ? (rep.skipped ? "skipped" : "done") : "blocked";
-      sg.attempts = attempt;
+      sg.attempts = exec.attempts.record(`step:${String(sg.id ?? sg.desc)}`, attempt);   // attempt 记账单点（与 flow/suite 同源）
       sg.obstacle = rep.done ? null : rep.stop_reason;
       if (!rep.done && rep.stop_code) (sg as Record<string, unknown>).stop_code = rep.stop_code;
       plan.save();
@@ -457,7 +462,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     : opts.segmentMaxSteps ?? Number.POSITIVE_INFINITY;
   const segmentEnd = Math.min(expanded.steps.length, segmentStart + segmentLimit);
   const segmentSteps = expanded.steps.slice(segmentStart, segmentEnd);
-  const manualInSegment = segmentSteps.some((st) => st.adapter === "manual");
+  manualInSegment = segmentSteps.some((st) => st.adapter === "manual");
   // 非交互调用（桥）遇到本段的 manual 步：不猜、不假装有人在，也不在没有显示器时硬拉
   // headed 浏览器（那会变成一句 Playwright 启动失败）。直接返回结构化 needs_human。
   if (manualInSegment && opts.manualFailFast === true && opts.manualHandler === undefined && !process.stdin.isTTY) {
@@ -469,7 +474,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       .filter((j) => j >= 0));
     return {
       app: pack.id, label: pack.label, goal: pack.goal,
-      pack_path: pack._path ?? "", plan_path: scope.planPath,
+      pack_path: pack._path ?? "", plan_path: planPath,
       ...(expanded.rolesUsed.length ? { roles_used: expanded.rolesUsed } : {}),
       slots: maskSecretSlots(expanded.slots, secretKeys),
       completed: `0/${segmentSteps.length}`,
@@ -571,13 +576,13 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
         const sg = plan.subgoals[browserIndexOf[j]!];
         const when = sg?.when;
         if (when === undefined || when === null) return true;
-        if (lease.peek() === null) {
+        if (exec.peekSession() === null) {
           // 还没有页面可问（旅程第一步是工具步、候选却在浏览器步上）：此刻无法成立，
           // 如实当作"不适用"，继续看下一个候选——不为了让分支走通去偷偷开一个浏览器。
           if (verbose) console.log(`  [journey] next candidate ${JSON.stringify(cand.id ?? j)} not evaluated (no page yet)`);
           return false;
         }
-        return await checkSignal(lease.peek()!.page as never, when, { hosts: pack.hosts ?? null });
+        return await checkSignal(exec.peekSession()!.page as never, when, { hosts: pack.hosts ?? null });
       });
       // 被声明式边**跨过去**的步：这条边就是作者对"这条路径上它不适用"的声明，
       // 所以记成 `skipped`（不是留在 pending——那会让任何前向分支都红）。
@@ -598,7 +603,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     // 分段跑不验收整条旅程：它不是“完整流程通过”，只是“这一段通过”。
     if (!segmentRequested) {
     // 结束态/不变量要读的会话（惰性未建 = null：web 不变量按"未成立"处理）。
-    const live = lease.peek();
+    const live = exec.peekSession();
     // `expanded.invariants`（不是 pack.invariants）：展开期已做槽位替换，与 journey 同一套规则。
     for (const inv of expanded.invariants) {
       const kind = inv.adapter ?? "web";
@@ -635,7 +640,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     }
     }
   } finally {
-    await lease.close();
+    await exec.close();
   }
 
   // Slice 4：类型账（只在**混用 ≥2 种类型**的旅程里出现，单一类型产物逐字节不变）。
@@ -674,11 +679,11 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const stats = opts.runtimeStats ? opts.runtimeStats() : null;
   // §8 步 3 影子旁路收尾：journey 面的 sidecar（开关默认关 = 零产物；失败静默不影响结果）。
   if (rescueShadowRecorder !== null) {
-    rescueShadowRecorder.flush(scope.outDir);
+    rescueShadowRecorder.flush(outDir);
   }
   return {
     app: pack.id, label: pack.label, goal: pack.goal,
-    pack_path: pack._path ?? "", plan_path: scope.planPath,
+    pack_path: pack._path ?? "", plan_path: planPath,
     ...(expanded.rolesUsed.length ? { roles_used: expanded.rolesUsed } : {}),
     slots: maskSecretSlots(expanded.slots, secretKeys),
     completed: `${doneCount}/${segmentRequested ? executedIndices.size : expanded.steps.length}`,
@@ -742,4 +747,5 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     ...(segmentRequested ? { partial: true as const, segment: { from: segmentStart + 1, to: segmentEnd } } : {}),
     secs: Math.round((Date.now() - t0) / 100) / 10,
   };
+  });
 }

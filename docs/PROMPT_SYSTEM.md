@@ -222,7 +222,7 @@ prompt-hit coverage 组断言（2026-10-31 起为**双向 + executor 闭环**）
 | model | 模型决策 prompt 单源（`src/prompts/model-prompts.ts`）：11 条唯一文本 × 25 消费点、去重/预算/快照 hash/无站点名/输出契约句 | 新增（P0-0.4） |
 | agent | Agent 侧 wrapper 单源：`plan.rules` PromptSpec（预算 1600）、playbook short ≤500/full ≤2200、候选窗口数字由引擎常量渲染、plan.ts 无回抄 | 新增（W4-3） |
 | evidence | 证据渲染 spec 5 条（criteria/state_text/state_digest/site_facts/notes）：version/budget/consumers、候选 40/120/200 分级预算、合成池快照 hash | 新增（W4-2，渲染文本不变） |
-| bridge_desc | 桥 82 个手写 description：首句 ≤120、总长 ≤600（硬上限 800）、`amber <cmd>` 死链、站点名、模糊措辞；输出 N/82 统计 | 新增（W4-4，**warn-only**，不阻断） |
+| bridge_desc | 桥 82 条 description：首句 ≤120、总长 ≤600（硬上限 800）、`amber <cmd>` 死链、站点名、模糊措辞；输出 N/82 统计。**扫描面自 W4-4 字段契约起 = `index.ts` + `run-contract.generated.ts`**（`*_run` 参数描述随契约生成），恢复 82/82 | 新增（W4-4，**warn-only**，不阻断） |
 | clarity（新） | Agent/用户面文案语义清晰度：禁模糊措辞（尽量/也许/大概/可能/视情况…）、禁双重否定、禁 TODO/待定；单句 ≤200 字符；STOP_NEXT ≤120；概述必须含「什么时候用 / 从哪开始」；HOME_NEXT why ≤40。契约文本（grammar.attr_match / hint_closed_set）只豁免句长一项并在此登记 | 新增（2026-11-17 审查） |
 | coverage（新） | 停因三表双向闭环（schema ↔ STOP_NEXT/EXEMPT ↔ executor union，内部码边界见 EXECUTOR_ONLY_STOPCODES）；CLI/agent-view/playbook 的 next 无死链；registry help/AGENTS/桥同一事实（max-steps=执行预算）抽查一致 | 新增 |
 
@@ -237,7 +237,7 @@ prompt-hit coverage 组断言（2026-10-31 起为**双向 + executor 闭环**）
 | `PLAN_PLAYBOOK_TEXT` | 步骤内嵌大量括号补语，「先走通再写应用」的目标被淹没 | 顶部显式「目标」行；每步 ≤3 句；重复说明合并 | 2061→**1402** 字符 |
 | `FAILURE_SIGNS_TEXT` | 条件与动作混在一句，失败时不易对照执行 | 条件 → 动作逐条 bullet；反爬红线保留 | 309→**258** 字符 |
 | `STOP_NEXT`（37 条） | 3 条超 120 字符预算，长解释挤掉可执行建议 | 全部 ≤120（最长 200→**115**）；保留命令/参数与判据 | 5 条重写 |
-| 桥 82 条 description | 总 21,136 字符、3 条 >800（最长 3,725）；大段引擎内幕重复、schema 已表达的默认值再写一遍 | 目标先行（首句 ≤120）、总长目标 ≤600、去重、命令反引号 | 21,136→**11,692（−44.7%）**；最长 3,725→**584**；>800 **0** |
+| 桥 82 条 description | 总 21,136 字符、3 条 >800（最长 3,725）；大段引擎内幕重复、schema 已表达的默认值再写一遍 | 目标先行（首句 ≤120）、总长目标 ≤600、去重、命令反引号 | 21,136→**11,692（−44.7%）**；最长 3,725→**584**；>800 **0**。W4-4 字段契约后扫描器同扫生成物，口径修正为 **11,645**（旧值含 47 字符把下一属性名并入 description 的抽取伪影；描述文本本身未变） |
 | grammar 契约文本 | `ATTR_MATCH_MODEL_TEXT` 等逐字嵌入文档/报错，无法按句拆 | 保留逐字契约；clarity 仅查模糊词/待定词，句长显式豁免并登记 | 文本未改 |
 | 模型 11 条 | 78–401 字符、单一任务、输出契约显式、无站点名/模糊承诺 | **不改措辞**（改动需 version+1+快照+真站 A/B；当前无失败案例驱动） | 冻结 |
 

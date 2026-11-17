@@ -42,9 +42,10 @@
  *            （40≤6k / 120≤12k / 200 帽≤20k，合成池实测）③单档预算（state_text 320 /
  *            state_digest 200B / site_facts 700 / notes 80）④契约句 ⑤无站点名
  *            ⑥tools/golden/prompts/evidence.json 快照 hash 一致（不改截断行为）。
- *   bridge_desc 桥手写工具描述覆盖（**warn-only**）：扫 dsh-bridge index.ts 的
- *            description 字符串——长度 ≤800/条、`amber <cmd>` 死链、站点/业务专名；
- *            命中只打 warn（退出码不受影响），并输出统计行（N/总数）。
+ *   bridge_desc 桥工具描述覆盖（**warn-only**）：扫 dsh-bridge `index.ts` 与生成物
+ *            `run-contract.generated.ts` 的 description 字符串——长度 ≤800/条、
+ *            `amber <cmd>` 死链、站点/业务专名；命中只打 warn（退出码不受影响），
+ *            并输出统计行（N/总数）。
  *   clarity  Agent/用户面提示词语义清晰度（fail）：overview/playbook/failure_signs/
  *            stop_escalation/stop_next/exempt/grammar 文案——禁模糊措辞（尽量/也许/大概/
  *            可能/视情况…）、禁双重否定、禁 TODO/待定；单句 ≤200 字符；STOP_NEXT ≤120；
@@ -365,9 +366,14 @@ for (const code of Object.keys(EXEMPT_NEXT)) {
     problems.push("coverage: AGENTS.md 的 --max-steps 表述不再含「执行预算」关键句——与 registry 同一事实需一致");
   }
   const bridgeText = fs.readFileSync(GENERATED, "utf-8");
-  const bridgeHasBudget = bridgeText.includes("Execution budget") || fs.readFileSync(
-    path.join(REPO, "integrations", "dsh-bridge", "src", "index.ts"), "utf-8",
-  ).includes("EXECUTION BUDGET");
+  const bridgeContractText = fs.readFileSync(
+    path.join(REPO, "integrations", "dsh-bridge", "src", "run-contract.generated.ts"), "utf-8",
+  );
+  const bridgeHasBudget = bridgeText.includes("Execution budget")
+    || fs.readFileSync(
+      path.join(REPO, "integrations", "dsh-bridge", "src", "index.ts"), "utf-8",
+    ).includes("EXECUTION BUDGET")
+    || bridgeContractText.includes("EXECUTION BUDGET");
   if (!bridgeHasBudget) {
     problems.push("coverage: 桥 amberflow_run 的 max_steps 描述未含 EXECUTION BUDGET 关键句——三处同一事实需一致");
   }
@@ -777,7 +783,11 @@ const evidenceSamples: ReadonlyArray<{ id: (typeof EVIDENCE_SPECS)[number]["id"]
 // 长度预算 ≤800/条、`amber <cmd>` 死链、站点/业务专名——全部只 warn，不改变退出码
 // （桥面模板化留待后续；warn 是覆盖度观测，不是门禁阻断）。
 
-/** 从 `description:` 值表达式里抽出字面量拼接文本（支持跨行 `'a' + 'b'`，不 import TS）。 */
+/**
+ * 从 `description:` 值表达式里抽出字面量拼接文本（支持跨行 `'a' + 'b'`，不 import TS）。
+ * @param text - 待抽取的源码文本。
+ * @returns 每个 `description:` 的字面量拼接结果（顺序为源码序）。
+ */
 function extractDescriptions(text: string): string[] {
   const out: string[] = [];
   const re = /description\s*:/g;
@@ -814,8 +824,15 @@ function extractDescriptions(text: string): string[] {
 const bridgeWarnings: string[] = [];
 const BRIDGE_DESC_MAX_CHARS = 800;
 {
+  // 桥面描述自 W4-4 起分两处：仍手写的工具描述在 index.ts，`*_run` 的参数描述随共享契约
+  // 生成到 run-contract.generated.ts。只扫 index.ts 会把后者漏报成「数量 67/82 与基线不同」
+  // 的假 warning，所以两处一起扫（生成物本身由 `run-args:check` 把关）。
   const bridgePath = path.join(REPO, "integrations", "dsh-bridge", "src", "index.ts");
-  const descriptions = extractDescriptions(fs.readFileSync(bridgePath, "utf-8"));
+  const bridgeContractPath = path.join(REPO, "integrations", "dsh-bridge", "src", "run-contract.generated.ts");
+  const descriptions = [
+    ...extractDescriptions(fs.readFileSync(bridgePath, "utf-8")),
+    ...extractDescriptions(fs.readFileSync(bridgeContractPath, "utf-8")),
+  ];
   const knownCommands = new Set<string>(["help", "version", "completion", ...COMMANDS.map((c) => c.name)]);
   let totalChars = 0;
   let overBudget = 0;

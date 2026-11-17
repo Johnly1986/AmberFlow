@@ -10,7 +10,7 @@ import {
   BrowserMiddleware, browserSession, type BrowserSession,
 } from "../engine/executor.ts";
 import { buildMiddleware } from "../app/middleware-factory.ts";
-import { createSessionLease } from "../engine/session-lease.ts";
+import { runExecution } from "../engine/run-execution.ts";
 import { TaskPlan } from "../engine/plan.ts";
 import { runSubgoalWithRetries } from "../engine/planner.ts";
 import { checkSignal } from "../engine/signals.ts";
@@ -42,6 +42,11 @@ export interface RunOptions {
   maxSteps?: number;
   /** 与 run 的 `--timeout` 对齐：覆盖 site/case 的毫秒超时。 */
   timeoutSec?: number;
+  /**
+   * 测试缝：注入会话工厂（缺省 = 本进程 `browserSession`）。与 `AppRunOptions.sessionFactory`
+   * / `RunPlanOptions.sessionFactory` 同一语义：调用方拥有注入会话，适配器按租约关闭一次。
+   */
+  sessionFactory?: () => Promise<BrowserSession>;
 }
 
 type PageAny = any;
@@ -149,98 +154,108 @@ async function runOneCase(
   // `expect_zero_actions` 的执行期判据：从 trace 的已执行动作行汇总（跨子目标/跨重试），
   // 在 finally 里统一裁决——classify 提前返回、异常、正常完成三条路径都走同一处。
   let actionsExecuted = 0;
-  // S1 SessionLease（P2-2.2 首批）：惰性创建 + finally 关闭一次（suite 适配器自己拥有会话）。
-  const lease = createSessionLease(() => browserSession(opts.headless !== false, c.device ?? site.device ?? null));
-  let pageRef: PageAny | undefined;
-  try {
-    const session = await lease.get();
-    const page: PageAny = session.page;
-    pageRef = page;
-    page.setDefaultTimeout?.(caseTimeout);
-    const target = c.start_url ?? site.home;
-    if (!/^https?:\/\//i.test(target)) throw new Error(`start_url must be http(s): ${target}`);
-    if (isLocalhost(target) && site.allow_local !== true) throw new Error("localhost is not allowed by site.allow_local");
+  // 内核组合根：RunScope（outDir/runId = 用例证据目录）+ 会话租约 + 执行器装配入口 +
+  // attempt 账本；用例语义（preflight 分类 / 子目标 / 不变量 / oracle / 证据）留在本适配器。
+  return await runExecution({
+    source: "suite",
+    appId: `case-${c.id}`,
+    outDir: runDir,
+    runId: path.basename(runDir),
+    pace: { clock: paceClock, betweenActionsMs: actionDelayMs },
+    createSession: opts.sessionFactory
+      ?? (() => browserSession(opts.headless !== false, c.device ?? site.device ?? null)),
+  }, async (run) => {
+    let pageRef: PageAny | undefined;
+    try {
+      const session = await run.session();
+      const page: PageAny = session.page;
+      pageRef = page;
+      page.setDefaultTimeout?.(caseTimeout);
+      const target = c.start_url ?? site.home;
+      if (!/^https?:\/\//i.test(target)) throw new Error(`start_url must be http(s): ${target}`);
+      if (isLocalhost(target) && site.allow_local !== true) throw new Error("localhost is not allowed by site.allow_local");
 
-    const pre = await classify(page, site, target, caseTimeout);
-    if (pre.status !== "captured") {
-      out.status = pre.status === "blocked" ? "blocked" : pre.status === "login_required" ? "login_required" : "unreachable";
-      out.reason = pre.reason;
-      out.duration_ms = Date.now() - t0;
-      return { outcome: out, page };
-    }
+      const pre = await classify(page, site, target, caseTimeout);
+      if (pre.status !== "captured") {
+        out.status = pre.status === "blocked" ? "blocked" : pre.status === "login_required" ? "login_required" : "unreachable";
+        out.reason = pre.reason;
+        out.duration_ms = Date.now() - t0;
+        return { outcome: out, page };
+      }
 
-    if ((c.subgoals ?? []).length > 0) {
-      const plan = new TaskPlan(c.goal, c.subgoals ?? [], path.join(os.tmpdir(), `online-${c.id}.json`), c.slots ?? {});
-      const mw = newMiddleware(opts.maxSteps, actionDelayMs);
-      for (let si = 0; si < plan.subgoals.length; si++) {
-        const sg = plan.subgoals[si]!;
-        // B1：同一用例内子目标之间的最小间距（start-to-start ≥ gap；首个子目标之前不等
-        // ——用例级的间距已由 runSuite 的用例间 paceBeforeUnit 覆盖，这里只记录开始时刻）。
-        if (si > 0) await paceBeforeUnit(paceClock);
-        else if (paceClock.gapMs > 0) paceClock.lastStart = Date.now();
-        const { rep, attempt, steps } = await runSubgoalWithRetries(
-          mw as never, sg, plan, String(sg.start_url), page, session.pw, false, {}, paceClock,
-        );
-        // 本次子目标全部 attempt 的已执行动作（`steps` 是执行器 trace，跨重试累积）。
-        actionsExecuted += countExecutedActions(steps);
-        const last = (steps.length ? steps[steps.length - 1] : rep.steps[rep.steps.length - 1]) as
-          { method?: string; confidence?: number } | undefined;
-        out.subgoals.push({
-          desc: sg.desc,
-          done: rep.done === true,
-          attempts: attempt,
-          stop_reason: String(rep.stop_reason ?? ""),
-          ...(rep.stop_code === undefined ? {} : { stop_code: String(rep.stop_code) }),
-          steps: steps.length || rep.steps.length,
-          ...(last?.method === undefined ? {} : { method: last.method }),
-          ...(last?.confidence === undefined ? {} : { confidence: last.confidence }),
-        });
-        if (!rep.done) {
-          out.reason = `subgoal ${out.subgoals.length}: ${rep.stop_reason}`;
-          break;
+      if ((c.subgoals ?? []).length > 0) {
+        const plan = new TaskPlan(c.goal, c.subgoals ?? [], path.join(os.tmpdir(), `online-${c.id}.json`), c.slots ?? {});
+        const mw = run.middleware(() => newMiddleware(opts.maxSteps, actionDelayMs));
+        for (let si = 0; si < plan.subgoals.length; si++) {
+          const sg = plan.subgoals[si]!;
+          // B1：同一用例内子目标之间的最小间距（start-to-start ≥ gap；首个子目标之前不等
+          // ——用例级的间距已由 runSuite 的用例间 paceBeforeUnit 覆盖，这里只记录开始时刻）。
+          if (si > 0) await paceBeforeUnit(paceClock);
+          else if (paceClock.gapMs > 0) paceClock.lastStart = Date.now();
+          const { rep, attempt, steps } = await runSubgoalWithRetries(
+            mw as never, sg, plan, String(sg.start_url), page, session.pw, false, {}, paceClock,
+          );
+          // 本次子目标全部 attempt 的已执行动作（`steps` 是执行器 trace，跨重试累积）。
+          actionsExecuted += countExecutedActions(steps);
+          const last = (steps.length ? steps[steps.length - 1] : rep.steps[rep.steps.length - 1]) as
+            { method?: string; confidence?: number } | undefined;
+          out.subgoals.push({
+            desc: sg.desc,
+            done: rep.done === true,
+            attempts: run.attempts.record(`case:${c.id}:${si}`, attempt),
+            stop_reason: String(rep.stop_reason ?? ""),
+            ...(rep.stop_code === undefined ? {} : { stop_code: String(rep.stop_code) }),
+            steps: steps.length || rep.steps.length,
+            ...(last?.method === undefined ? {} : { method: last.method }),
+            ...(last?.confidence === undefined ? {} : { confidence: last.confidence }),
+          });
+          if (!rep.done) {
+            out.reason = `subgoal ${out.subgoals.length}: ${rep.stop_reason}`;
+            break;
+          }
         }
       }
-    }
 
-    for (const inv of c.invariants ?? []) {
-      const held = await checkSignal(page as never, inv.signal);
-      out.invariants.push({ id: inv.id, desc: inv.desc, held });
-    }
-    if (c.oracle) out.oracle = await checkOracle(page, c.oracle);
+      for (const inv of c.invariants ?? []) {
+        const held = await checkSignal(page as never, inv.signal);
+        out.invariants.push({ id: inv.id, desc: inv.desc, held });
+      }
+      if (c.oracle) out.oracle = await checkOracle(page, c.oracle);
 
-    const allSub = out.subgoals.every((s) => s.done);
-    const allInv = out.invariants.every((i) => i.held);
-    const oracleOk = out.oracle?.ok ?? true;
-    out.status = allSub && allInv && oracleOk ? "passed" : "failed";
-    if (out.status === "failed" && !out.reason) {
-      out.reason = [
-        ...out.subgoals.filter((s) => !s.done).map((s) => `subgoal: ${s.desc}`),
-        ...out.invariants.filter((i) => !i.held).map((i) => `invariant: ${i.id}`),
-        ...(out.oracle && !out.oracle.ok ? [`oracle: ${out.oracle.detail}`] : []),
-      ].join("; ");
-    }
-  } catch (e) {
-    out.status = "failed";
-    out.reason = e instanceof Error ? e.message : String(e);
-  } finally {
-    out.duration_ms = Date.now() - t0;
-    // expect_zero_actions 裁决（声明面可证伪）：0 条动作不改变结论（probe 照旧是 skipped
-    // 环境观测，跳过 ≠ 通过）；N>0 条动作 = 声明被证伪，判**真失败**（套件退出码 1）。
-    // 放在 finally：classify 提前返回 / 异常 / 正常完成三条路径都要过同一道门。
-    out.actions_executed = actionsExecuted;
-    if (c.expect_zero_actions === true && actionsExecuted > 0) {
-      out.zero_action_violation = true;
+      const allSub = out.subgoals.every((s) => s.done);
+      const allInv = out.invariants.every((i) => i.held);
+      const oracleOk = out.oracle?.ok ?? true;
+      out.status = allSub && allInv && oracleOk ? "passed" : "failed";
+      if (out.status === "failed" && !out.reason) {
+        out.reason = [
+          ...out.subgoals.filter((s) => !s.done).map((s) => `subgoal: ${s.desc}`),
+          ...out.invariants.filter((i) => !i.held).map((i) => `invariant: ${i.id}`),
+          ...(out.oracle && !out.oracle.ok ? [`oracle: ${out.oracle.detail}`] : []),
+        ].join("; ");
+      }
+    } catch (e) {
       out.status = "failed";
-      out.reason = `expected zero actions, ${actionsExecuted} executed`
-        + (out.reason ? ` — otherwise observed: ${out.reason}` : "");
+      out.reason = e instanceof Error ? e.message : String(e);
+    } finally {
+      out.duration_ms = Date.now() - t0;
+      // expect_zero_actions 裁决（声明面可证伪）：0 条动作不改变结论（probe 照旧是 skipped
+      // 环境观测，跳过 ≠ 通过）；N>0 条动作 = 声明被证伪，判**真失败**（套件退出码 1）。
+      // 放在 finally：classify 提前返回 / 异常 / 正常完成三条路径都要过同一道门。
+      out.actions_executed = actionsExecuted;
+      if (c.expect_zero_actions === true && actionsExecuted > 0) {
+        out.zero_action_violation = true;
+        out.status = "failed";
+        out.reason = `expected zero actions, ${actionsExecuted} executed`
+          + (out.reason ? ` — otherwise observed: ${out.reason}` : "");
+      }
+      // 证据必须在 close 之前取（截图/DOM 是页面上的事实）；close 后只剩结果账。
+      try {
+        await writeCaseEvidence({ runId: path.basename(runDir), dir: runDir }, out, pageRef);
+      } catch { /* 证据失败不改变结论 */ }
+      await run.close();
     }
-    // 证据必须在 close 之前取（截图/DOM 是页面上的事实）；close 后只剩结果账。
-    try {
-      await writeCaseEvidence({ runId: path.basename(runDir), dir: runDir }, out, pageRef);
-    } catch { /* 证据失败不改变结论 */ }
-    await lease.close();
-  }
-  return { outcome: out };
+    return { outcome: out };
+  });
 }
 
 

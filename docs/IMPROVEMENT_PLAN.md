@@ -1,12 +1,12 @@
 # 可维护性与可扩展性治理方案 v2.1（架构评审修订版）
 
-> **状态**：**P0/P1/P2 已收口（2026-11-17）**；**大文件拆分目标已达成（§6.7：最大文件 2721 ≤3000，>1000 行文件仅剩 executor 例外）**；**常量配置与提示词两线条件项已收口（§6.8）**；**提示词用户/产品视角审查与优化已落地（§6.9：概述/六步法/失败速查/停因 next/桥 82 描述改写 + clarity 门禁）**；P2 条件项与冻结后待办明确延期（见 §6.5 D）。P0 9/9 批见 §6.1；P1 见 §6.2；P2 见 §6.4/§6.5
+> **状态**：**P0/P1/P2 已收口（2026-11-17）**；**大文件拆分目标已达成（§6.7：最大文件 2721 ≤3000，>1000 行文件仅剩 executor 例外）**；**常量配置与提示词两线条件项已收口（§6.8）**；**提示词用户/产品视角审查与优化已落地（§6.9：概述/六步法/失败速查/停因 next/桥 82 描述改写 + clarity 门禁）**；**§6.5 D 四项条件项 + 桥 TS2375 已收口（§6.10：runExecution 组合根、W5-3 runtime 注入、W4-4 桥字段共享契约、laya 截断行为变更）**；仅余 ctx conformance（W5-2 另一半）、BACKLOG #3、handler 内化。P0 9/9 批见 §6.1；P1 见 §6.2；P2 见 §6.4/§6.5
 > **基线**：`main @ 91bf379`；`npm run check` 全绿（本轮实测：预检/类型/配置/schema/prompt/泄露/示例/行锚/用例校验 9 项通过）
 > **评审**：3 个独立只读评审（目标架构 / 迁移治理 / 红队）+ Lead 裁决，记录见 [IMPROVEMENT_PLAN_REVIEW.md](IMPROVEMENT_PLAN_REVIEW.md)。本版已按裁决修订：砍 `sdk.ts`/伪端口/单一编排，新增 0.8 等价证据 lane 与 0.9 seam 冻结，门禁降档，P2 条件化。
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 已收口**（§6.4 落地记录 + §6.5 出口核对：2.0/4d/BACKLOG #2/2.3/2.2 执行内核（SessionLease 三面、RunScope 两面、S3 聚合器、StopClassifier 映射单源）/W5-3 契约下沉（部分）完成；扩展演练 5/5 达标（2 项缺口已由 P2-1/P2-2 修复）；runExecution 组合根与 ctx 行为矩阵等条件项延期，触发条件见 §6.5 D）。
+> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 已收口**（§6.4 落地记录 + §6.5 出口核对：2.0/4d/BACKLOG #2/2.3/2.2 执行内核（SessionLease 三面、RunScope 两面、S3 聚合器、StopClassifier 映射单源）/W5-3 契约下沉（部分）完成；扩展演练 5/5 达标（2 项缺口已由 P2-1/P2-2 修复）；runExecution 组合根与 ctx 行为矩阵等条件项延期，触发条件见 §6.5 D）。**2026-11-17 追加**：§6.5 D 四项条件项（runExecution 组合根、W5-3 runtime 注入、W4-4 桥字段共享契约、laya 截断行为变更）+ 桥既有 TS2375 已收口（§6.10，全门禁绿）。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -284,7 +284,7 @@ S5 唯一循环   BrowserMiddleware.run（不变，不重写）+ buildMiddleware
 | 规模 | 新函数行数 | — | ≤150（计划内阶段函数 ≤400 例外） | 同左 | warn |
 | 规模 | 最大文件/≥300 行函数 | 6140 / 9 | report；运行期拆分需 0.8/0.9/freeze | report；条件目标 ≤3000 / ≤6 | report |
 | 主线 | 真实 mw 构造 | 6 | 1 工厂 + 调试面 2 | 1 工厂 + 调试面 2 | warn→fail |
-| 主线 | 源适配器 | 4 套编排 | 文档登记 3 类 | kernel + 3 适配器 + 套件聚合器 | fail（P2） |
+| 主线 | 源适配器 | 4 套编排 | 文档登记 3 类 | kernel + 四源适配器 + 套件聚合器（**已达成，§6.10**） | ✅（P2 收口） |
 | 主线 | 入口分类/进程边界 | 混在一起 | MAINLINE 三类登记 | 同左 | fail（docs） |
 | 主线 | 公共导出 | 25/20 模块，0 消费者 | 删 Public surface 宣称、锁 exports | 死导出=0 | fail |
 | 主线 | 文档断点 | 6 | 0 | 0 | fail |
@@ -386,9 +386,9 @@ interface PromptSpec {
 | 批 | 内容 | 预期 |
 |---|---|---|
 | W4-1（P0 0.4） | 11 条去重文本收进 `src/prompts/`；6 个 provider + `executor.ts:1374/1409` 兜底 + picker 改为引用 id；文本**逐字节不变**（hash 对照）；prompt-hit 加 `model` 组（去重/预算/快照/无站点名/契约句） | −2,941 字符（53%）；25 处→11 处；零行为变化 |
-| W4-2（P1 条件 1.6） | 证据渲染 spec 化（`criteriaView`/`stateText`/`state_digest`/`site_facts`/`notes`）+ 预算 + 合成池 golden snapshot；laya 截断改为「先裁剪再编码」并记 `evidence_truncated`；仅在真实失败案例驱动下推进 | 40 候选 ≤6k、120 ≤12k、200 帽 ≤20k；超限告警 |
+| W4-2（P1 条件 1.6） | 证据渲染 spec 化（`criteriaView`/`stateText`/`state_digest`/`site_facts`/`notes`）+ 预算 + 合成池 golden snapshot；~~laya 截断改为「先裁剪再编码」并记 `evidence_truncated`~~ **已收口（§6.10）**：三面先按字符预算裁文本再编码、token 切片仅兜底，`ChoiceOutcome.evidence_truncated` 记录并进模型步 trace；`tools/laya-truncation-check.ts` 复现/回归（非门禁→已进 check） | 40 候选 ≤6k、120 ≤12k、200 帽 ≤20k；超限告警 |
 | W4-3（P1） | Agent wrapper 收口：`plan.ts:184` 1,433 字符 → `plan.rules` spec；`CANDIDATE_WINDOW_TEXT` 的数字由 `extraction.ts` 常量渲染；`PLAN_PLAYBOOK_*` short/full 两档 | 数字阈值单源 |
-| W4-4（P2，降级） | 桥 82 个手写 description：只加「长度预算 + 命令死链 + 无站点名」warn，不做模板化 | 桥描述纳入 coverage |
+| W4-4（P2，降级） | 桥 82 个手写 description：只加「长度预算 + 命令死链 + 无站点名」warn，不做模板化；**字段面已收口（§6.10）**：run 字段单一契约 + 桥侧生成物，新字段穿透 5→2 | 桥描述纳入 coverage（现扫 index.ts + 生成物） |
 | W4-5 | **砍**（schema-gen 长 statement 拆分移出）；只保留 `STOP_NEXT` 每键 ≤120 字符的小约束 | — |
 
 **预算分级**（进 gate）：模型单条指令 ≤400 字符；单请求证据 40 候选 ≤6k / 120 ≤12k / 200 帽 ≤20k；Agent 概述 ≤400（已有）、playbook short ≤500 / full ≤2,200、`STOP_NEXT` 每键 ≤120。**压缩策略**：结构化优先（`state_digest` JSON 替代散文、候选行保持 `role "label" [test] [href]`）、短/长两档取代 246/321/332 多变体、证据按预算优先级裁剪并记账。
@@ -401,8 +401,8 @@ interface PromptSpec {
 |---|---|---|
 | W5-0（P0 0.6） | 新增 `docs/MAINLINE.md`：**依赖分层 L0–L6(+L1.5) + 执行阶段 S0–S5 + 目录→层映射 + 三类入口表 + 命名表 + 并行设计/文件预留**；mainline 静态断言：入口分类、`new BrowserMiddleware(` 计数（基线 6+1 注释）、`ctx.runEntry` 计数（12）、`src/index.ts` importer=0、目录→层映射、未登记目录报红 | `npm run check`；负向自测（合成违规必红） |
 | W5-1（P1 1.5） | 单一 `buildMiddleware(config)` 工厂替换 6 处装配；**confirm/掩码/pace 为 per-face 必填策略**（app-runner 默认拒绝、start/online 的自动放行不改，单独立项复核）；provider 装配 run-scoped 注入，禁全局 install；handler 进程内化**延后**（bridge/session 进程边界是契约） | 同应用走 `amber run` 与 `npm run apps` 产物 canonical diff（除时间戳）；退出码矩阵不变；confirm 解析来源离线断言 |
-| W5-2（P2 条件） | `runExecution(source, deps)` 内核 + 三类源适配器（flow/plan/suite-case）+ 套件聚合器；Ctx 行为矩阵（预算/导航/工具步/人工步/错误形状/trace/pace）+ `tools/ctx-conformance.ts`（fake PageLike 离线 diff）；`journey` 只冻结不改名 | `apps check/explain` dry 不变；flow/plan/suite 三源 canonical JSON 对比；ctx conformance 绿 |
-| W5-3（P2 条件，降级） | `DecisionProvider` 接口契约下沉 `src/support/decision-provider-contract.ts`；engine 只 import 契约，model 实现，组合根注入；现有 engine↔model 例外登记并逐步收缩；**不做 BrowserPort/TargetResolutionPort**；TargetResolution 改为执行器内部 `resolveTarget` 阶段 + 单恢复策略表，候选契约跟 BACKLOG #2 | `grep 'model/decision-provider' src/engine/` 不新增且按批减少；rules-only 消融 trace 一致；与 BACKLOG #2/#3 排他 |
+| W5-2（P2 条件） | **已落地（§6.10）**：`runExecution(source, deps)` 内核 + 四源适配器（flow/declared-flow/plan/suite-case）+ 套件聚合器；Ctx 行为矩阵（预算/导航/工具步/人工步/错误形状/trace/pace）+ `tools/ctx-conformance.ts`（fake PageLike 离线 diff）**仍条件保留**；`journey` 只冻结不改名 | 四源 canonical JSON 对比（`tools/verify-run-execution.ts` 绿）；`apps check/explain` dry 不变；ctx conformance 绿 |
+| W5-3（P2 条件，降级） | **已落地（§6.10）**：`DecisionProvider` 接口契约下沉 `src/support/decision-provider-contract.ts`；engine 只 import 契约，model 实现，组合根注入（`DecisionRuntimeHooks` + `src/app/decision-runtime.ts`）；现有 engine↔model 例外登记并逐步收缩（`decision-provider` 引用 engine=0；model→engine 7→6）；**不做 BrowserPort/TargetResolutionPort**；TargetResolution 改为执行器内部 `resolveTarget` 阶段 + 单恢复策略表，候选契约跟 BACKLOG #2 | `grep 'model/decision-provider' src/engine/` = 0；rules-only 消融 trace 一致；与 BACKLOG #2/#3 排他 |
 | W5-4（P1/P2） | 公共面：删 `src/index.ts` 的 "Public surface" 宣称（改 internal）；**不改 `exports["."]`（DSH 插件安装门）**；**不建 sdk**；extension 立删；picker-server 先 deprecated；死导出清理；包身份 ADR 先于任何 exports 变更 | exports 表锁定 + 死导出=0 + README/ARCHITECTURE 补「无引擎库导入面」说明 |
 
 **旧路径处置**：
@@ -602,9 +602,9 @@ interface PromptSpec {
 | 规模 · 新文件 / 新函数 | ≤800 / ≤150（阶段函数 ≤400 例外） | 本阶段新文件最大 367（`candidate-scan.ts`）；新函数均 ≤150；阶段函数例外已入 `phaseFunctions` 冻结表 | ✅ |
 | 规模 · 最大文件 / ≥300 行函数 | 条件目标 ≤3000 / ≤6 | 最大 **2721**（executor，§6.7；≤3000 达成）；≥300 行函数 **7**（report，§6.7 已列） | ✅ max / ⚠️ 函数 report |
 | 主线 · 真实 mw 构造 | 1 工厂 + 2 调试面 | 真实 `new BrowserMiddleware(` = 1（`middleware-factory.ts`），mainline 门禁冻结 | ✅ |
-| 主线 · 源适配器 | kernel + 3 适配器 + 套件聚合器 | S2 三适配器与 S3 聚合器已登记（`docs/MAINLINE.md` §2）；S1 kernel 已完成 SessionLease/RunScope/StopClassifier/聚合器原语的共享化，`runExecution` 组合根为条件项（D） | ⚠️ 部分（条件项） |
+| 主线 · 源适配器 | kernel + 3 适配器 + 套件聚合器 | **已落地（§6.10）**：`src/engine/run-execution.ts` 内核 + 四源适配器（flow / declared-flow / plan / suite）+ S3 聚合器；四源 canonical lane 绿；ctx conformance 为 W5-2 另一半、仍条件保留 | ✅（ctx conformance 余项） |
 | 主线 · 入口 / 公共面 | 三类登记；死导出 0 | MAINLINE §3 三类入口已登记；extension 删除、`index.ts` internal、`exports["."]`=DSH 插件锁定、无 sdk（mainline 门禁） | ✅ |
-| 验证 · 运行期等价 lane | 已决 | `verify:runtime:offline`（4 场景，非门禁）+ `tools/golden/runtime/**`；0.8 lane 证据贯穿 2.0/4d/2.2 | ✅ |
+| 验证 · 运行期等价 lane | 已决 | `verify:runtime:offline`（**7 场景**，非门禁）+ `tools/golden/runtime/**`；§6.10 新增**四源** `tools/verify-run-execution.ts`（flow/declared-flow/plan/suite，非门禁）+ `tools/golden/run-execution/**`；0.8 lane 证据贯穿 2.0/4d/2.2/§6.10 | ✅ |
 
 **B. §9 五点闭环**
 
@@ -614,7 +614,7 @@ interface PromptSpec {
 | 2 | 注释历史 | 禁止类=0；历史只在 `CHANGELOG.md`（`## Decisions` 索引 D1–D12）；ratchet 只减不增 | ✅ |
 | 3 | 常量配置 | 11 调参单源 + typed getter（白名单外裸读=0）+ 配置文档三向生成一致；**站点/业务知识出引擎 + 扫词门禁零命中（§6.8）** | ✅ |
 | 4 | 提示词 | 25→11 spec；**prompt-hit 十二组（模型/证据/Agent/桥四面）**；重复字符门禁=0；文本 hash 逐字节不变（§6.8） | ✅ |
-| 5 | 主线 | MAINLINE 含 L0–L6/L1.5 + S0–S5 + 三类入口 + 目录映射；mw 构造=1；kernel/3 适配器/聚合器已登记（`runExecution` 组合根条件项）；index 宣称删除 + exports 锁定 + 6 处文档断点=0 | ✅（条件部分见 D） |
+| 5 | 主线 | MAINLINE 含 L0–L6/L1.5 + S0–S5 + 三类入口 + 目录映射；mw 构造=1；kernel/四源适配器/聚合器已登记并落地（`runExecution` 组合根，§6.10）；index 宣称删除 + exports 锁定 + 6 处文档断点=0 | ✅ |
 
 **C. 扩展演练 5 项（临时 worktree 真实补丁 → 计数 → 回滚，未入库）**
 
@@ -623,24 +623,26 @@ interface PromptSpec {
 | 新决策 provider | ≤2（adapter + registry 引用） | **3**：adapter 文件 + `resolveProviderSpec` 动态注册 + `doctor` 注册清单 | ✅ 修复后 2（**P2-1** `registerAllProviders()` 单点，`85ebdfa`；doctor/未知 provider 输出逐字节等价） |
 | 新配置键 | ≤2（schema + 消费点；文档由 schema 生成） | **3 手写**（schema + 消费点 + `tools/config-example.ts` 的 `WHERE_USED` 作用点）+ **3 生成物**（`.env.example`/`amberflowrc.example.json`/`CONFIG_REFERENCE.md`；生成器对缺 `WHERE_USED` 的键 exit 2） | ✅ 修复后 2（**P2-2** `ConfigKeySpec.usedAt` 单源，`accd0e3`；手写 `WHERE_USED` 删除，3 份生成物逐字节不变） |
 | 新调参常量 | 1 处（定义单源） | **定义 1**（`tuning.ts` + `TUNING_VALUES`）+ 消费 1 + 门禁概念登记 1（`tools/maintain/constants.ts`，漏登记不 fail、只失去回写 warn 覆盖） | ✅ 定义单源达成；门禁登记是可预期维护成本 |
-| 新桥字段 / 策略键 | ≤3（共享契约模块 + 生成物） | **5**：tool schema（`index.ts`）→ `AmberFlowRunArgs`（`service.ts`）→ `runArgs` argv（`bridge.ts`）→ engine CLI 解析（`app-runner-cli.ts`）→ engine 选项（`app-runner.ts`） | ❌ 差 2：桥字段无共享契约 → 属 W4-4 条件项边界，冻结后处理 |
+| 新桥字段 / 策略键 | ≤3（共享契约模块 + 生成物） | **5**：tool schema（`index.ts`）→ `AmberFlowRunArgs`（`service.ts`）→ `runArgs` argv（`bridge.ts`）→ engine CLI 解析（`app-runner-cli.ts`）→ engine 选项（`app-runner.ts`） | ✅ **已收口（§6.10）**：字段单源契约 `src/support/run-args-contract.ts` + 桥侧生成物 `run-contract.generated.ts`（`run-args:check` 进 check）→ 新字段穿透 **5→2**（只改契约 + 重新生成；两侧消费点 byte-unchanged） |
 | 新 ctx 原语 | ≤4（types/live/dry/replay/kit/scan/schema） | **4**：`ctx-types` + `ctx`（live）+ `ctx-dry` + `ctx-replay`；只读原语不触 kit/scan/schema（`amber schema ctx` 仍自洽）；作者文档另计 | ✅ |
 
-> 定性评审：5 项演练最初 3 项达标，2 项缺口（provider 注册清单、配置键作用点）当轮修复（P2-1/P2-2）后复测 5/5 达标；桥字段 5 处穿透归 W4-4 条件项、不在本轮回合修。演练补丁均在 `/tmp` worktree 完成并回滚；修复批次与复现口径见 CHANGELOG 同名条目。
+> 定性评审：5 项演练最初 3 项达标，2 项缺口（provider 注册清单、配置键作用点）当轮修复（P2-1/P2-2）；桥字段 5 处穿透由 §6.10 的共享契约收口（5→2），复测 **5/5 达标**。演练补丁均在 `/tmp` worktree 完成并回滚；修复批次与复现口径见 CHANGELOG 同名条目。
 
 **D. 明确延期（条件未触发；与 P1 出口同格式）**
 
+> **2026-11-17 追加收口**：本表当时延期的主要条件项已由 §6.10 落地（runExecution 组合根、W5-3 runtime 注入、W4-4 桥字段共享契约、laya 截断）；表内保留历史触发条件，已完成行以删除线/已收口标注。**仍延期**：ctx 行为矩阵 / `tools/ctx-conformance.ts`（W5-2 另一半）、BACKLOG #3、handler 子进程内化。
+
 | 项 | 触发条件 / 归属 |
 |---|---|
-| `runExecution(source,deps)` 组合根 + ctx 行为矩阵 / `tools/ctx-conformance.ts`（W5-2 条件） | 需先有三源 canonical 对比夹具；冻结窗口后按 W5-2 |
-| W5-3 剩余：engine 的 3 个 runtime 函数（`decisionProviderOrNull`/`layaProvider`/`decisionFailureFact`）改组合根注入；model→engine 反向边收缩 | 组合根批次同批 |
-| W4-4 剩余：桥**字段**共享契约（5 处穿透） | 描述覆盖已收口（bridge_desc warn 组，§6.8）；字段共享契约仍条件项 |
+| ~~`runExecution(source,deps)` 组合根~~ **已收口（§6.10）**；ctx 行为矩阵 / `tools/ctx-conformance.ts`（W5-2 条件）仍延 | 三源 canonical 夹具已随 §6.10 落地（四源 lane）；ctx conformance 需 fake PageLike 离线 diff，单独批次 |
+| ~~W5-3 剩余：engine 的 3 个 runtime 函数改组合根注入；model→engine 反向边收缩~~ | **已收口（§6.10）**：`DecisionRuntimeHooks` 注入 + `src/app/decision-runtime.ts`；engine `grep model/decision-provider`=0；model→engine 7→6 |
+| ~~W4-4 剩余：桥**字段**共享契约（5 处穿透）~~ | **已收口（§6.10）**：单源契约 + 生成物，穿透 5→2；桥既有 TS2375 同批修复 |
 | ~~W3-4 站点知识出引擎~~ | **已收口（§6.8）**：Source JSON 字段映射 + 扫词门禁零命中；缺配迁移差异见 CHANGELOG |
-| BACKLOG #3 候选窗口指数递增（40→80→160 cap）+ trace 观测 | 行为变更，冻结窗口后（D3 顺序 #2→#3 的 #3） |
-| ~~1.6 证据 spec / Agent prompt wrapper~~ | **已收口（§6.8）**：证据 spec 5 条 + Agent plan.rules；仅 laya token 级截断行为变更仍条件保留 |
-| handler 子进程内化 12 处 | P0/P1 已登记延后（§4.5） |
+| BACKLOG #3 候选窗口指数递增（40→80→160 cap）+ trace 观测 | 行为变更，仍延期（D3 顺序 #2→#3 的 #3） |
+| ~~1.6 证据 spec / Agent prompt wrapper~~ | **已收口（§6.8）**：证据 spec 5 条 + Agent plan.rules；~~仅 laya token 级截断行为变更仍条件保留~~ → **已收口（§6.10）** |
+| handler 子进程内化 12 处 | P0/P1 已登记延后（§4.5），仍延期 |
 
-**E. 状态**：P2 收口（2026-11-17）；freeze（2026-11-17 起 2 周）内不再排 P2 批次；BACKLOG #3 与上述条件项按触发条件在冻结结束/前置就绪后启动；回访 1（30 天不回潮）与回访 2（可扩展定性）按 §9 在冻结结束后的回访窗口执行。
+**E. 状态**：P2 收口（2026-11-17）；§6.5 D 四项条件项 + 桥 TS2375 于同日由 §6.10 收口（全门禁绿）。仍延期：ctx conformance、BACKLOG #3、handler 内化；回访 1（30 天不回潮）与回访 2（可扩展定性）按 §9 在回访窗口执行。
 
 ### 6.6 大文件拆分（新阶段，2026-11-17 启动）
 
@@ -699,7 +701,7 @@ interface PromptSpec {
 
 **门禁扩展（随批次）**：size 组新增 `movedFunctions`（纯搬移的大函数，行数只许降不许增）与 `phaseFunctions` 新路径；当前 movedFunctions 10 条、phaseFunctions 6 条；size baseline files 9 / functions 16。
 
-**明确仍属条件项**：W5-2 的完整 `tools/ctx-conformance.ts`（fake PageLike 离线 diff）未落地——C1 用临时三面 A/B 代替并留后置 manifest；`runExecution(source,deps)` 组合根仍按 §6.5 D 条件延期；`run()` 741 行与九个 phase 方法签名保持冻结。
+**明确仍属条件项**：W5-2 的完整 `tools/ctx-conformance.ts`（fake PageLike 离线 diff）未落地——C1 用临时三面 A/B 代替并留后置 manifest；~~`runExecution(source,deps)` 组合根仍按 §6.5 D 条件延期~~ **已收口（§6.10）**：内核 + 四源适配器 + 四源 canonical lane；`run()` 2668 行（≤基线 2721）与九个 phase 方法签名保持冻结。
 
 ### 6.8 常量配置与提示词收口（2026-11-17）
 
@@ -724,7 +726,7 @@ interface PromptSpec {
 | 桥 | `bridge_desc`（warn-only，按 W4-4 降级） | 82/82 描述 / 21,136 字符；>800 三条 warn（#3/#25/#51）；`amber` 命令死链 0；站点名 0；不阻断 |
 | 数字阈值单源 | `FULL_LABEL_MAX`/`MODEL_LABEL_MAX` + tuning 常量 | label 40/200 与 pool/quota 数字由常量渲染，渲染文本 hash 不变 |
 
-**C. 最终 §9 判定**：五条痛点判据全部 ✅（大文件 §6.7、注释 P0/P1、常量配置 §6.8A、提示词 §6.8B、主线 §6.5）；两条回访条件（30 天不回潮 / 扩展定性回访）仍按 §9 在未来回访窗口执行。残留条件项（不阻塞 §9 判据）：`runExecution` 组合根/ctx conformance（W5-2）、W5-3 runtime 注入、W4-4 桥字段共享契约、laya token 级截断行为变更、BACKLOG #3、handler 内化。
+**C. 最终 §9 判定**：五条痛点判据全部 ✅（大文件 §6.7、注释 P0/P1、常量配置 §6.8A、提示词 §6.8B、主线 §6.5）；两条回访条件（30 天不回潮 / 扩展定性回访）仍按 §9 在未来回访窗口执行。~~残留条件项（不阻塞 §9 判据）：`runExecution` 组合根/ctx conformance（W5-2）、W5-3 runtime 注入、W4-4 桥字段共享契约、laya token 级截断行为变更~~ **已由 §6.10 收口**；仍余：ctx conformance（W5-2 另一半）、BACKLOG #3、handler 内化。
 
 ### 6.9 提示词产品化审查与优化（2026-11-17）
 
@@ -740,6 +742,69 @@ interface PromptSpec {
 | 模型 11 条 | 78–401 字符、单任务、输出契约显式 | 冻结不改（改动需 version+1+快照+真站 A/B） |
 
 新增 `clarity` 门禁（fail）：禁模糊措辞/双重否定/TODO；单句 ≤200；STOP_NEXT ≤120；概述含「什么时候用/从哪开始」；HOME_NEXT why ≤40；契约文本只豁免句长并登记。`prompt-hit` 现 **13 组**全绿（bridge_desc 0 warn）；check + 双 lane 绿。
+
+### 6.10 §6.5 D 条件项收口（2026-11-17，用户指令）
+
+**范围**：§6.5 D 仍挂着的四项条件项（runExecution 组合根、W5-3 runtime 注入、W4-4 桥字段共享契约、laya token 级截断行为变更）+ 桥 `bridge.ts` 的 HEAD 既有 TS2375。全部改动在工作树（未入库），本表就是收口证据；仍延期的项见 F。
+
+**A. runExecution 组合根（W5-2 主半）**
+
+| 项 | 交付 |
+|---|---|
+| S1 内核 | `src/engine/run-execution.ts`（294 行）：`runExecution(deps, source)` 组合根；`RunExecution` 面 = `scope`（RunScope）/`artifacts`（产物目录交接）/`session()`+`peekSession()`（SessionLease 惰性、finally 关闭一次）/`middleware(factory)`+`middlewareFacts()`（一 run 一执行器 + 收尾事实）/`envPace()`+`paceClock()`（节奏时钟，**内核不 sleep**）/`attempts` 账本/`classifyStop`+`budgetExhausted`（停因与预算分类单点）/`close` |
+| 四源适配器 | `runScriptApp`（flow）/`runApp`（declared-flow）/`runPlan`（plan）/`runOneCase`（suite）全部改走内核（`runExecution(` 真实调用点 = 4）；公开签名、result/trace/report/证据目录、会话所有权、退出码矩阵保持不变；不共享项（flow 控制流与不变量、plan 重试/replan、suite preflight/oracle/证据、业务判定）留在适配器 |
+| RunScope 下沉 | `src/engine/run-scope.ts`（45 行，纯搬移自 `src/app/run-scope.ts`；app 面保留 re-export）；split manifest `run-scope-pure` 钉 hash；`app-runner-pure` 移除 `runScriptApp`（实现被迁移=非纯搬移）并更新 note |
+| 等价 lane | `tools/verify-run-execution.ts`（506 行，非门禁）：本地静态夹具 + 无头 chromium + rules-only（零模型调用），四源 canonical JSON（flow/declared-flow/plan/suite），外部请求恒 `[]`；`--record` 每源连跑两次一致才入库；基线在**干净 HEAD 副本**（`git archive HEAD` → /tmp + 仅 `sessionFactory` 测试缝）录制后拷回 → 改后 `--check` 两次绿。golden：`tools/golden/run-execution/**`；fixtures：`fixtures/engine/run-execution/**` |
+| 规模 | executor 2734→**2668**（≤基线 2721）；app-runner.ts 974→**872**；`runScriptApp` 799→**698**；`app-runner-cli#main` 272→**231**；maintain baseline 只下调，无上调 |
+
+**B. W5-3 runtime 注入（engine 不再 import 具体 provider 实现）**
+
+| 项 | 交付 |
+|---|---|
+| 注入契约 | engine 侧 `MiddlewareOptions.decisionRuntime?: DecisionRuntimeHooks`（三函数：`providerOrNull` / `wrapLaya` / `failureFact`）；装配逻辑从 `executor.ready()` 拆到 `src/engine/decision-seam.ts`（87 行，三档：显式 provider / legacy LayaRuntime / rules-only） |
+| 组合根实现 | `src/app/decision-runtime.ts`（38 行）：从 `model/decision-provider` 装配 3 个 runtime 函数；`middleware-factory.buildMiddleware` 缺省注入（显式优先） |
+| 验收 | `grep -rn "model/decision-provider" src/engine/` = **0**；真实 `new BrowserMiddleware(` = **1**（工厂）；model→engine 反向边 **7→6**（`provider-escalator` 改本地结构类型，不再 import engine）；rules-only/显式 provider/legacy runtime/probe-degraded 四条路径由 runtime lane 7 场景 + examples + 四源 lane 覆盖 |
+
+**C. W4-4 桥字段共享契约（5→2 处穿透）+ TS2375**
+
+| 项 | 交付 |
+|---|---|
+| 单源契约 | `src/support/run-args-contract.ts`（395 行，L0 纯数据、无 node import）：19 个 run 字段 × tool 参数 / CLI flag / argv 顺序 / engine 选项映射 / 校验文案 |
+| 生成物 | `tools/run-args-gen.ts`（256 行，`--write`/`--check` + 契约自检）；`integrations/dsh-bridge/src/run-contract.generated.ts`（312 行，check in，过期即红）；`npm run run-args:check` 已进 check（第 2 项） |
+| 派生面 | tool parameters（`index.ts`）、`AmberFlowRunArgs`（`service.ts`）、`runArgs` argv（`bridge.ts`）、引擎 option 表与映射（`src/support/cli-args.ts` + `src/app/app-runner-cli.ts`）全部由契约派生；新桥字段 = **只改契约 + 重新生成（2 处）**，五处消费点 byte-unchanged |
+| 等价证据 | tool schema 10/10 deep-equal；`runArgs` argv 13/13 逐元素；`runApp` 端到端 argv 10/10；桥校验文案 5/5 + slot 文案 3/3 逐字节；引擎 CLI 13/13（exit+stdout+stderr）；类型双向赋值探针 0 错；新字段 dry patch = 2 文件（契约 + 生成物），回滚后 7 文件 sha256 全等 |
+| TS2375 | `RunSummary.rescue.what_would_unblock` 改可选（与「空则省略」的生产者一致；保留 exactOptionalPropertyTypes 注释）；运行期 summary 字节不变；桥包 clean `tsc -b` **0 error** |
+| 桥描述门禁 | `prompt-hit` 的 bridge_desc/coverage 改为同时扫 `index.ts` + 生成物 → 恢复 **82/82、0 warn**（字符总数 11,645；旧 11,692 含旧扫描器把下一属性名并入 description 的 47 字符抽取伪影） |
+
+**D. laya token 级截断 → 先裁剪再编码 + `evidence_truncated`**
+
+| 项 | 交付 |
+|---|---|
+| 行为变更 | `src/model/laya-format.ts`：`fitText`/`truncateTextToChars` 统一三面（head/options/state）——未超名额原样编码（**逐字节不变**）→ 超名额先按字符预算裁文本再编码 → 字符预算仍超才 token 切片兜底；`OPTION_TOKEN_BUDGET=48` 收口；`LAYA_EVIDENCE_CHARS_PER_TOKEN=4`（`tuning.ts` 单源，12 概念） |
+| 记账链路 | `PreparedQuestion.truncation` → `aggregateEvidenceTruncation` → `PredictResult.evidence_truncated?`（`model.ts`）→ `layaProvider.pick` → L0 `ChoiceOutcome.evidence_truncated?`（**可选**字段，既有字段/语义不变）→ engine `pickInner` 记到模型步 trace 行（无裁剪不出现，默认产物逐字节不变） |
+| 复现/回归 | `tools/laya-truncation-check.ts`（frozen 参考基线做 A/B，fake tokenizer，无 ONNX/浏览器/网络）：默认 25 断言、`--self-test` 28 断言；已接入 check（`laya-truncation:check`） |
+| 改前事实 | 长 state 整段 1503 token → 静默保留 512、无记账；长 option 109→48 token 静默；改后分别裁 4049 字符 / 标记 243 字符，且未超预算路径 ids/markers sha256 与改前一致 |
+
+**E. 门禁与证据（全量复跑，Lead 独立执行）**
+
+| 命令 | 结果 |
+|---|---|
+| `npm run check` | **exit 0**（14 个 npm-run 步骤；新增 `run-args:check` 与 `laya-truncation:check`；maintain 五组 warn 0；split 10 manifest） |
+| `npm run verify:offline` / `npm run verify:runtime:offline` | exit 0 / 0（4 夹具页 / 7 场景） |
+| `npm run verify:run-execution` | exit 0（四源 canonical 与 HEAD 基线一致；外部请求 0；零模型） |
+| `npm run examples-check` | PASS 5/5（3 项 × 5） |
+| 桥包 `tsc -b` | 0 error（TS2375 消除）；`run-args:check` 正/负测（改生成物 → exit 1 → 恢复 exit 0） |
+| 结构断言 | engine `model/decision-provider`=0；`new BrowserMiddleware(`=1；`runExecution(`=4；model→engine=6 |
+
+**F. 仍延期（不在本批，明确不粉饰）**
+
+- **ctx 行为矩阵 + `tools/ctx-conformance.ts`**：W5-2 的另一半；C1 当时用临时三面 A/B 代替，仍未落成可复跑离线 diff。
+- **BACKLOG #3** 候选窗口指数递增（行为变更）；**handler 子进程内化 12 处**。
+- 四源 lane 的归一化**主动剔除**位置性 `ref`/`resolved_by`/指纹与路径派生 hash（静态页冷/热启动会在池命中与 FW8 身份回捞间摆动，页面事实相同）；只在这些字段里的变化 lane 抓不到（唯一执行循环另有 runtime lane 7 场景）。
+- `runScriptApp` 的 `--replay` 分支不在四源 lane 覆盖内（scope 默认值链同名同序，建议后续补 replay lane 或人工跑一次 `--emit-trace/--replay`）。
+- W4-2 的 engine 侧 trace 透传目前只有一次性内存假 provider 自测，未入库回归；laya 工具只覆盖 model 侧。
+- laya 新阈值按英文 wordpiece 经验值（4 字符/token）保守折算，CJK/byte-level 由 token 安全网兜底并记账；未跑真实 checkpoint/真站 A/B（本批以 fake tokenizer 的确定性前后对照为准）。
+- 以上改动全部未 commit（工作树交付，便于整体评审/回退）。
 
 ### P2 主线（条件启动；3–5 周，12–20 人日）
 
@@ -757,13 +822,14 @@ interface PromptSpec {
 
 | 变更类型 | CI 可重复（进 check） | 本地人工（一次性，PR 附证据） | 不可验证时 |
 |---|---|---|---|
-| 一切提交 | `npm run check`（现有 9 项 + maintain 的 fail 组 + prompt-hit model + config docs） | — | — |
+| 一切提交 | `npm run check`（14 个 npm-run 步骤：precheck / run-args / typecheck / config / schema / prompt-hit / site-knowledge / secret-scan / examples / row-anchor / laya-truncation / maintain / split / test:validate） | — | — |
 | 文档/注释/基线 | maintain 的 docs/comments 组 + 负向自测 | 抽查 A 类注释保护清单 | 拆成纯文本小 PR |
 | 配置/常量 | `config:example:check` + `config:docs:check` + `doctor` | 入口抽查（`amber run` vs `npm run apps`） | — |
 | 提示词去重（P0） | 快照 hash 逐字节一致 | 真实站点 smoke（有网络时） | 不合并 |
 | 提示词压缩（P1+） | 快照 hash 变更 + version+1 | 一条真站 A/B 证据进 PR | 推迟 |
 | 纯搬移拆文件 | `tools/split-check.ts`（搬迁符号源码 hash）+ examples canonical golden | `apps check/explain` dry 对比 | 不搬 |
 | 运行期拆分（P2） | 0.8 运行时 lane（fixtures 或静态页 + rules-only 消融 + normalize 后 trace/result） | 一个 core case trace 对比；smoke | 不启动 |
+| 执行内核/编排迁移（§6.10） | **四源 canonical lane** `tools/verify-run-execution.ts --check`（flow/declared-flow/plan/suite，非门禁，需 chromium）+ runtime lane 7 场景 + examples golden | 四源改前=改后（干净 HEAD 副本录基线）；会话/产物/退出码逐字节 | 不合并 |
 | 主线/公共面 | mainline 断言 + exports 表锁定 + 死导出检查 | `node -e 'import("amberflow")'` 名字集合（构建后） | 不改 exports |
 | 门禁自身 | `--self-test` 合成违规必红 | — | 不上线 |
 
@@ -821,7 +887,7 @@ interface PromptSpec {
 | 2 | 注释历史 | src 禁止类（日期/行号锚点/幽灵引用/方案台账 token）=0；历史只存在于 CHANGELOG `## Decisions`；A 类契约注释占比不降；注释占比只作 report |
 | 3 | 常量配置 | 9 例漂移=0；白名单外裸读 env=0；14 概念中 11 个多写/半单源清零；配置文档 3/3 生成/校验；站点知识代码面=0 |
 | 4 | 提示词 | 25→11 spec；重复字符=0；11/11 有快照/预算/消费方；prompt-hit model 组绿；模型+证据+Agent+桥四面都在门禁内 |
-| 5 | 主线 | MAINLINE 含依赖分层 + 执行阶段 + 三类入口 + 目录映射；真实 mw 构造 = 1 工厂 + 2 调试面；kernel + 3 源适配器登记（P2 条件）；`index.ts` Public surface 宣称删除、exports 锁定；6 处文档断点=0 |
+| 5 | 主线 | MAINLINE 含依赖分层 + 执行阶段 + 三类入口 + 目录映射；真实 mw 构造 = 1 工厂 + 2 调试面；kernel + 3 源适配器登记（P2 条件）→ **已落地（§6.10：四源适配器）**；`index.ts` Public surface 宣称删除、exports 锁定；6 处文档断点=0 |
 | 回访 1 | 不回潮 | 完成后 30 天：fail 组仍绿、基线无上调、无 allowlist 过期未续；T1/T2/T3 未触发 |
 | 回访 2 | 可扩展 | 用 §3.3 的 5 个代表性扩展各演练一次，记录实际改动面与隐式耦合；定性评审通过（不只看文件数） |
 

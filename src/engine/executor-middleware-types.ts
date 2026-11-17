@@ -9,7 +9,7 @@
  * 本文件只允许 `import type`：它被 facade 以 `export *` 反向依赖，值 import 会造运行期环。
  */
 import type { Auditor } from "./audit.ts";
-import type { DecisionAgent, RouterLike } from "../model/model.ts";
+import type { DecisionAgent, ModelState, RouterLike } from "../model/model.ts";
 import type { AmbiguousOrdering } from "./ambiguity.ts";
 import type { DatasetReader } from "./dataset.ts";
 import type { AttrValueMatch } from "./rules.ts";
@@ -19,6 +19,7 @@ import type {
   AnyPage, BrowserHandle, DecisionStatePolicy, EscalatorLike, HintMemoryLike,
   OutcomeMemoryLike, PwLike,
 } from "./executor-types.ts";
+import type { DecisionProvider, ProviderCapabilities } from "../support/decision-provider-contract.ts";
 
 export interface BrowserSession {
   pw: PwLike;
@@ -32,6 +33,34 @@ export interface BrowserSession {
    * 缺省不出现 = 会话不是本进程 browserSession() 创建的（sessionFactory 注入等）。
    */
   envBrowser?: { binary_basename: string; headless: boolean; persistent_profile: boolean };
+}
+
+/**
+ * W5-3 决策运行时注入契约（engine 侧）：执行器只经这组函数装配决策提供者，
+ * **不 import** 具体 provider 实现模块（实现只在 app 侧组合根装配）。
+ *
+ * 为什么放在 engine 的类型面：执行器是唯一执行循环，它需要"装了什么 provider /
+ * 有没有 legacy LayaRuntime / ask 失败的事实文案"，但这些是**装配**而不是循环本身。
+ * 组合根（`src/app/decision-runtime.ts`）从 model 实现装配，`buildMiddleware` 缺省注入；
+ * 直接构造执行器的嵌入方要么显式给实现，要么如实进 rules-only。
+ *
+ * 契约（行为冻结，逐字段等价由 rules-only 消融与运行期 lane 钉住）：
+ *   - `providerOrNull()`：显式安装的 provider（换模型/在线服务测试）；未装 = null。
+ *   - `layaProvider(opts)`：把 legacy `LayaRuntime` 包成 provider；名字/版本/能力面与
+ *     既有缝逐字段相同（调用方传 runtime 与 agentFor，provider 装配细节归实现）。
+ *   - `failureFact(err)`：从 ask 抛错取「事实部分」（剥掉统一追加的恢复指引）——
+ *     文案进入 `decision_degraded.message`，必须逐字不变。
+ */
+export interface DecisionRuntimeHooks {
+  providerOrNull(): DecisionProvider | null;
+  layaProvider(opts: {
+    runtime: unknown;
+    agentFor: (state: ModelState) => Promise<{ agent: DecisionAgent; embedFn: unknown }>;
+    name?: string;
+    version?: string;
+    capabilities?: Partial<ProviderCapabilities>;
+  }): DecisionProvider;
+  failureFact(err: unknown): string;
 }
 
 export interface MiddlewareOptions {
@@ -60,6 +89,11 @@ export interface MiddlewareOptions {
   outcomeMemoryMode?: "forbid" | "rank";
   /** BACKLOG #2：候选生产者 seam（缺省 null = 引擎默认实现 createEngineCandidateProducer）。 */
   candidateProducer?: CandidateProducer | null;
+  /**
+   * W5-3：决策运行时注入（组合根装配；`buildMiddleware` 缺省注入 app 侧实现）。
+   * 缺省 null = rules-only（执行器不 import model 实现，也不自行装配 provider）。
+   */
+  decisionRuntime?: DecisionRuntimeHooks | null;
   /** See RunOptions.hintMemory (default: none — only authored hints are used). */
   hintMemory?: HintMemoryLike | null;
   gotoTimeout?: number;

@@ -438,6 +438,7 @@ export async function runActionExecute(mw: BrowserMiddleware, a: {
       ...(clickPosition !== null ? { position: clickPosition } : {}), ...(nominatedRepair ? { nominated_family_repair: true } : {}), ...(decisionKind === "model" && layaMargin !== null
         ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}), ...(method === "escalate" && escalatedPick ? { escalated: true } : {}), ...(prevented ? { prevented } : {}), ...(noted ? { noted: Object.keys(noted).length } : {}),
       ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question
+      ...(decisionKind === "model" && mw.lastPickEvidence !== null ? { evidence_truncated: mw.lastPickEvidence } : {}),
       inert, url: urlOf(pg), ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(),
       ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(), ...rowEvidenceOut,
     });

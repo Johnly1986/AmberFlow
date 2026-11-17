@@ -72,7 +72,7 @@
 
 1. **2.0 RunCtx + evidence collector**（BACKLOG #4 前置；3–5 天，单 PR 可回滚）：四组记账闭包收敛为 run context 对象；evidence collector 收行锚/帧/DRF 证据为单点。
 2. **2.1 run() 九阶段**（`runSetup` / `runFrameGate` / `runPoolGate` / `runDeclaredTargets` / `runModelPick` / `runActionPhase` / `runPostAction` / `reportTail`），每阶段独立提交；携带 StateCursor、钩子顺序不变；阶段函数 ≤400 行例外入 baseline。
-3. **2.2 `runExecution` 内核 + 三个源适配器 + 套件聚合器**（flow/plan/suite-case），ctx 行为矩阵 + `tools/ctx-conformance.ts`。
+3. **2.2 `runExecution` 内核 + 三个源适配器 + 套件聚合器**（flow/plan/suite-case），ctx 行为矩阵 + `tools/ctx-conformance.ts`。**状态**：内核 + 四源适配器已于 §6.10 落地（四源 canonical lane）；ctx 行为矩阵 / `tools/ctx-conformance.ts` 仍条件延期。
 4. **2.3 公共面清理**（index internal、extension 删除、picker deprecated、exports 锁定）+ 站点知识出引擎 + 扩展演练（5 项）。
 5. 每批：`npm run check` + examples golden + split-check 必绿；运行期批次额外跑 `verify:offline` 与一个 core case trace 对比（有网络/模型时）。
 

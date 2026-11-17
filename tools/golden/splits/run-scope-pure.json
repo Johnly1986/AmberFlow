@@ -1,0 +1,14 @@
+{
+  "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
+  "id": "run-scope-pure",
+  "note": "S1 RunScope 实现下沉 L4（execute kernel 组合根消费）：src/app/run-scope.ts → src/engine/run-scope.ts，纯搬移 hash 一致；app 侧保留 re-export 导入面",
+  "files": {
+    "src/engine/run-scope.ts": {
+      "symbols": {
+        "createRunScope": "8f5d2b1c58e2f3f37b3d99b27b44bf01b2b92afbaa3c9d0dd357f383228d8120",
+        "RunScope": "3bf9ada73e3ee90b832b5b8d1ab32506bc16b79e6f42f1a2a6be2d24ec712797",
+        "RunScopeOptions": "48d77aed63c27449c66d6108eb881dca55de62dffa5fef0000638a9bd93ac859"
+      }
+    }
+  }
+}

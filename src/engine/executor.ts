@@ -95,6 +95,7 @@ import {
   type PageLike,
 } from "./extraction.ts";
 import { elemFrameStamp, frameGateExcludes, frameScopeMatchesFrame } from "./frame-scope.ts";
+import { assembleDecisionRuntime } from "./decision-seam.ts";
 import { ANCHOR_JS, ROW_CLIMB_JS, compile } from "./pool-js.ts";
 import { describeAmbiguity, orderCandidatesByDomPreorder, type AmbiguityView, type AmbiguousOrdering } from "./ambiguity.ts";
 import { admitSelectorWithJsFor, type SurfacePolicy } from "./surface.ts";
@@ -106,10 +107,9 @@ import {
   type NoulAnswer,
   type RouterLike,
 } from "../model/model.ts";
-import { decisionFailureFact, decisionProviderOrNull, layaProvider } from "../model/decision-provider.ts";
 // task-24/6a：限速判据阈值单一出处（step 侧与 arrive 侧共用）。
 import { THROTTLE_BODY_FLOOR, THROTTLE_COLLAPSE_RATIO, THROTTLE_POOL_HIGH_MIN } from "./throttle-signature.ts";
-import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts"; import { DONE_POLL_INTERVAL_MS, NAVIGATION_GOTO_TIMEOUT_MS, POOL_CAP_ELEMENTS } from "../support/tuning.ts"; import type { DecisionProvider } from "../support/decision-provider-contract.ts";
+import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts"; import { DONE_POLL_INTERVAL_MS, NAVIGATION_GOTO_TIMEOUT_MS, POOL_CAP_ELEMENTS } from "../support/tuning.ts"; import type { DecisionProvider, EvidenceTruncation } from "../support/decision-provider-contract.ts";
 import { sleep } from "../support/sleep.ts";
 // task-14（D1）：探测失败分类与建议文案的单一出处。
 import { classifyDecisionFailure, decisionDegradedAdvice } from "../model/decision-probe.ts";
@@ -138,7 +138,6 @@ import { HINT_CLOSED_SET_TEXT } from "./grammar-prompt.ts";
 import { RISK_INSTRUCTIONS_LONG, doneInstructionsLong } from "../prompts/model-prompts.ts";
 // A2 判别：命令 target 是 hint 语法字符串，词面要从同一份解析器里取（不新开第二种解析）。
 import { parseHint } from "./hint.ts";
-import { LayaNotConfiguredError, type LayaRuntime } from "../model/model.ts";
 import { induceHint } from "../model/hint-memory.ts";
 import { instantiateSpace, resolveCommandValue, type CommandDecl } from "./actions.ts";
 import { emptySlotBindingReason, type BindingDiagnostics } from "./bindings.ts";
@@ -166,6 +165,7 @@ import type {
   AuditVerdictLike,
   BrowserHandle,
   BrowserSession,
+  DecisionRuntimeHooks,
   DecisionStateContext,
   DecisionStateGate,
   DecisionStateMetrics,
@@ -350,7 +350,6 @@ import {
   nearCandidates,
   poolRoleSummary,
   redactValue,
-  routerMaxLoaded,
   safeUrl,
   targetMatcher,
   weakHintRejectedWarning,
@@ -940,9 +939,11 @@ export class BrowserMiddleware {
   riskAsk: "always" | "rules-only" = "always";
   /**
    * 本次运行实际用的决策提供者（`ready()` 里解析；null = 没有决策层，走 rules-only）。
-   * 换模型是配置不是改代码：见 src/model/decision-provider.ts 的头注释。
+   * 换模型是配置不是改代码：装配面见 `src/app/decision-runtime.ts`。
    */
   decision: DecisionProvider | null = null;
+  /** 最近一次 provider pick 的证据截断记账（没裁剪/没问过 = null；只进模型步 trace）。 */
+  lastPickEvidence: EvidenceTruncation | null = null;
   /**
    * 风险头调用失败的原因（null = 没失败过）。报告与线上套件要把它显式说出来：
    * 一次"退化成关键词判定"的运行和一次正常运行**不是同一件事**，不许混在同一个绿色里。
@@ -979,6 +980,11 @@ export class BrowserMiddleware {
   _ready = false;
   /** BACKLOG #2：候选生产者（`buildMiddleware` 必注入；直接构造执行器视为误用 ⇒ null 断言）。 */
   readonly candidates: CandidateProducer | null;
+  /**
+   * W5-3：决策运行时注入（`buildMiddleware` 缺省注入 app 组合根的实现）。
+   * 执行器只依赖这组函数，不 import 具体 provider 实现；null = rules-only。
+   */
+  readonly decisionRuntime: DecisionRuntimeHooks | null;
 
   constructor(opts: MiddlewareOptions = {}) {
     this.modelId = opts.modelId ?? "convaiinnovations/laya";
@@ -987,6 +993,7 @@ export class BrowserMiddleware {
     this.router = opts.router ?? null;
     this.auditor = opts.auditor ?? getAuditor();
     this.candidates = opts.candidateProducer ?? null;
+    this.decisionRuntime = opts.decisionRuntime ?? null;
     this.maxSteps = opts.maxSteps ?? 8;
     this.confFloor = opts.confFloor ?? DEFAULT_CONF_FLOOR;
     this.riskyThreshold = opts.riskyThreshold ?? 0.6;
@@ -1059,69 +1066,7 @@ export class BrowserMiddleware {
       this._ready = true;
       return;
     }
-    // **决策提供者层的入口**：
-    //   ① 显式装了 provider（换模型测试走这条）⇒ 直接用它，不要求 laya runtime 存在；
-    //   ② 否则走旧门：装了 `LayaRuntime` 就就地包一层适配器 ⇒ 行为与今天逐字段相同
-    //      （等价由逐字段替换验证钉住，不是"看着一样"）；
-    //   ③ 两者都没有 ⇒ rules-only（下面那段既有逻辑，一个字没改）。
-    const explicit = decisionProviderOrNull();
-    if (explicit) {
-      this.decision = explicit;
-      this._ready = true;
-      return;
-    }
-    let rt: LayaRuntime;
-    try {
-      rt = getLayaRuntime();
-    } catch (err) {
-      if (!(err instanceof LayaNotConfiguredError)) throw err;
-      // RULES-ONLY MODE. A frozen plan that NAMES its targets needs no model at all, so an
-      // unconfigured runtime must not abort the whole run: the steps that rules/hints can
-      // decide are executed, and a step that genuinely needs a pick blocks with this reason.
-      // (Measured need: `npm start` on a fresh checkout has no ONNX artifacts and blocked
-      //  immediately, which also made the doctor's "规则模式也能跑" claim false.)
-      this.rulesOnly = true;
-      this.rulesOnlyReason = (err as Error).message;
-      this._ready = true;
-      return;
-    }
-    if (this.agent === null) {
-      try {
-        this.agent = typeof this.modelId === "string" ? await rt.load(this.modelId) : this.modelId;
-      } catch (e) {
-        // CONFIG error (bad artifact path etc.): rules cannot stand in for a model
-        // the operator explicitly pointed at — refuse to act, and say so once.
-        this.configError = e instanceof Error ? e.message : String(e);
-        this._ready = true;
-        return;
-      }
-    }
-    this.embedFn = rt.embedFnFromAgent(this.agent);
-    if (this.routeModels) {
-      if (this.router === null) {
-        this.router = rt.createRouter ? rt.createRouter({ maxLoaded: routerMaxLoaded() }) : null;
-      }
-      // The default checkpoint was just built: hand THAT agent to the router
-      // instead of letting it build a second copy (Router.attach exists for
-      // exactly this). Without it a 3 GB box would hold two.
-      try {
-        if (this.router) {
-          if (this.router.attach && this.router.default && this.agent) {
-            this.router.attach(this.router.default, this.agent);
-          }
-          this._routedModel = this.router.default ?? null;
-        }
-      } catch {
-        /* routing is an optimization, not a dependency */
-      }
-    }
-    this.decision = layaProvider({
-      runtime: rt,
-      agentFor: (st) => this.agentFor(st),
-      name: `laya-onnx`, version: this.modelId === undefined ? "default" : String(this.modelId),
-      capabilities: { choice: true, risk: true, done: true, shortlist: true, score_kind: "entropy_conf" },
-    });
-    this._ready = true;
+    await assembleDecisionRuntime(this);
   }
 
   /* -- hybrid picking: deterministic affordance rule + laya fallback -------- */
@@ -1368,14 +1313,15 @@ export class BrowserMiddleware {
         ...(digest === null ? {} : { state_digest: digest }),
       });
     } catch (err) {
+      this.lastPickEvidence = null;
       this.rulesOnly = true;
       this.rulesOnlyReason = (err as Error).message;
       this.providerDegraded = (err as Error).message;
       // task-14（D1）：运行中途死亡同样降级一次（死服务不重试——rulesOnly 永久翻转 +
       // escalate 守卫；分类 midrun_death）。只在兼容范围（默认配置面）记账；显式 provider
       // 维持今天的 provider_degraded 面貌（显式意图优先）。
-      if (this.decisionCompat && this.decisionDegraded === null) {
-        const fact = decisionFailureFact(err);
+      if (this.decisionCompat && this.decisionDegraded === null && this.decisionRuntime !== null) {
+        const fact = this.decisionRuntime.failureFact(err);
         this.markDecisionDegraded({
           reason_class: "midrun_death",
           message: fact.slice(0, 300),
@@ -1384,6 +1330,7 @@ export class BrowserMiddleware {
       }
       return { ref: null, conf: 0.0, probs: {}, passthrough: true };
     }
+    this.lastPickEvidence = out.evidence_truncated ?? null;
     const result = {
       ref: out.ref as string | null, conf: out.score, probs: out.probs, passthrough: out.passthrough,
     };

@@ -103,6 +103,36 @@ export interface ChoiceOutcome {
   passthrough: boolean;
   /** 原始分布（诊断用；闸门不该依赖它的存在）。 */
   probs: Record<string, number>;
+  /**
+   * 证据截断记账（**可选**）：provider 若裁剪过模型看到的证据，必须如实报告裁剪面与规模。
+   * 缺省不出现 = 没裁剪，或该 provider 不做这条记账——两种 provider 的既有字段/语义不变。
+   * 尺寸口径见 `EvidenceTruncationFact`：`dropped_chars` 是字符预算裁剪、`dropped_tokens`
+   * 是 token 安全网兜底，两者互不重叠。
+   */
+  evidence_truncated?: EvidenceTruncation;
+}
+
+/** 一个证据面的裁剪事实：字符级预算裁剪与 token 安全网分开记，互不重叠。 */
+export interface EvidenceTruncationFact {
+  /** 该面是否发生任何裁剪（字符级预算裁剪或 token 安全网）。 */
+  truncated: boolean;
+  /** 字符级预算裁剪丢弃的字符数（不切断代理对）。 */
+  dropped_chars: number;
+  /** 字符级预算裁剪后仍超名额时，token 安全网丢弃的 token 数。 */
+  dropped_tokens: number;
+}
+
+/**
+ * 一次决策请求里的证据截断记账。三个证据面与 laya 序列布局一一对应：
+ * `head` = 题面指令，`options` = 各选项渲染文本之和，`state` = 状态正文。
+ * 各面数字是本次请求内受影响题目的**最大单题规模**（同一批前向可能问多题）。
+ */
+export interface EvidenceTruncation {
+  state: EvidenceTruncationFact;
+  head: EvidenceTruncationFact;
+  options: EvidenceTruncationFact;
+  /** 发生裁剪的题号（按提问顺序；空数组不在正常路径出现——无裁剪时不填该字段）。 */
+  questions: string[];
 }
 
 /**

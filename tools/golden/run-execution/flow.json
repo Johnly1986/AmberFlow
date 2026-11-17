@@ -1,0 +1,284 @@
+{
+  "_doc": "verify-run-execution 基线（非门禁）：本地 fixtures + 无头 chromium + rules-only，三源 （flow runScriptApp / plan runPlan / suite runSuite）的归一化产物。只用于四条编排迁到 runExecution 内核前后的等价对比：--record 显式更新（同源连跑两次一致才入库）；端口/仓库根/工作目录/临时目录已归一，时间/run_id/UA 类易变字段已剔除，不得手改。",
+  "schema_version": 1,
+  "source": "flow",
+  "expected": {
+    "external_requests": [],
+    "result": {
+      "app": "run-execution-flow",
+      "completed": "2 step(s) via flow(ctx)",
+      "decisions": {
+        "by_method": {
+          "rule:match": 1
+        },
+        "cache": null,
+        "conf": {
+          "max": null,
+          "min": null,
+          "n": 0
+        },
+        "escalate": 0,
+        "failed_asks": 0,
+        "ladder": {
+          "adjudicated": 0,
+          "asked_not_passed": 0,
+          "escalate": 0,
+          "model": 0,
+          "reobserve": 0,
+          "rule": 1
+        },
+        "line": "rule 1 · model 0 · reobserve 0 · escalate 0",
+        "model_asks": 0,
+        "model_face": "idle",
+        "model_steps": 0,
+        "reobserve": 0,
+        "total_steps": 1
+      },
+      "env": {
+        "final_url": "<LOCAL>/filter-bar.html",
+        "viewport": {
+          "height": 720,
+          "width": 1280
+        }
+      },
+      "goal": "到达筛选页，点击航空公司筛选并验收 active 状态",
+      "invariants": [
+        {
+          "desc": "筛选已选中",
+          "held": true,
+          "id": "filter-active"
+        }
+      ],
+      "label": "runExecution lane · flow",
+      "ok": true,
+      "pack_path": "<REPO>/fixtures/engine/run-execution/flow-app/app.mjs",
+      "plan_path": "<TMP>/amberflow-apps/run-execution-flow-plan.json",
+      "script": {
+        "mode": "flow",
+        "script_path": "<REPO>/fixtures/engine/run-execution/flow-app/app.mjs",
+        "script_sha256": "c594443b9671d2fcaffce06b900d71b754f933b519206790a32e45d83886d8dc",
+        "steps": 2,
+        "trace_path": "<WORK>/flow-trace.json"
+      },
+      "slots": {
+        "entry": "<LOCAL>/filter-bar.html"
+      },
+      "sources": [],
+      "step_traces": [
+        {
+          "desc": "到达夹具筛选页",
+          "descs": [],
+          "hows": [],
+          "id": "arrive-entry",
+          "index": 0,
+          "methods": [],
+          "result": {
+            "ok": true,
+            "page_state": {
+              "frame_origins": [
+                "<LOCAL>"
+              ],
+              "pool_version": 3,
+              "readiness": "settled"
+            },
+            "reason": "arrive signal held"
+          },
+          "status": "done",
+          "url": "<LOCAL>/filter-bar.html"
+        },
+        {
+          "desc": "点击航空公司筛选",
+          "descs": [
+            "click li \"航空公司\""
+          ],
+          "executed": true,
+          "executed_actions": [
+            {
+              "changed": true,
+              "desc": "click li \"航空公司\"",
+              "how": "clicked",
+              "op": "click",
+              "target": null
+            }
+          ],
+          "hows": [
+            "clicked"
+          ],
+          "id": "filter-airline",
+          "index": 1,
+          "methods": [
+            "rule:match"
+          ],
+          "result": {
+            "executed": true,
+            "executed_actions": [
+              {
+                "changed": true,
+                "desc": "click li \"航空公司\"",
+                "how": "clicked",
+                "op": "click",
+                "target": null
+              }
+            ],
+            "ok": true,
+            "page_state": {
+              "frame_origins": [
+                "<LOCAL>"
+              ],
+              "pool_version": 4,
+              "readiness": "settled"
+            },
+            "reason": "dom goal signal",
+            "state": {
+              "actions": {
+                "attempted": 1,
+                "changed": 1,
+                "executed": 1
+              },
+              "after": {
+                "content": "<HASH>",
+                "epoch": 2,
+                "navEpoch": 0,
+                "readyState": "complete",
+                "struct": "40:<HASH>",
+                "url": "<LOCAL>/filter-bar.html"
+              },
+              "before": {
+                "content": "<HASH>",
+                "epoch": 1,
+                "navEpoch": 0,
+                "readyState": "complete",
+                "struct": "40:<HASH>",
+                "url": "<LOCAL>/filter-bar.html"
+              },
+              "flags": []
+            }
+          },
+          "state": {
+            "actions": {
+              "attempted": 1,
+              "changed": 1,
+              "executed": 1
+            },
+            "after": {
+              "content": "<HASH>",
+              "epoch": 2,
+              "navEpoch": 0,
+              "readyState": "complete",
+              "struct": "40:<HASH>",
+              "url": "<LOCAL>/filter-bar.html"
+            },
+            "before": {
+              "content": "<HASH>",
+              "epoch": 1,
+              "navEpoch": 0,
+              "readyState": "complete",
+              "struct": "40:<HASH>",
+              "url": "<LOCAL>/filter-bar.html"
+            },
+            "flags": []
+          },
+          "status": "done",
+          "url": "<LOCAL>/filter-bar.html"
+        }
+      ],
+      "subgoals": [],
+      "tool_steps": []
+    },
+    "trace": {
+      "app": "run-execution-flow",
+      "done": true,
+      "events": [
+        {
+          "call": "arrive",
+          "desc": "到达夹具筛选页",
+          "i": 1,
+          "id": "arrive-entry",
+          "ok": true,
+          "result": {
+            "ok": true,
+            "page_state": {
+              "frame_origins": [
+                "<LOCAL>"
+              ],
+              "pool_version": 3,
+              "readiness": "settled"
+            },
+            "reason": "arrive signal held"
+          },
+          "url": "<LOCAL>/filter-bar.html"
+        },
+        {
+          "call": "step",
+          "desc": "点击航空公司筛选",
+          "i": 2,
+          "id": "filter-airline",
+          "ok": true,
+          "result": {
+            "executed": true,
+            "executed_actions": [
+              {
+                "changed": true,
+                "desc": "click li \"航空公司\"",
+                "how": "clicked",
+                "op": "click",
+                "target": null
+              }
+            ],
+            "ok": true,
+            "page_state": {
+              "frame_origins": [
+                "<LOCAL>"
+              ],
+              "pool_version": 4,
+              "readiness": "settled"
+            },
+            "reason": "dom goal signal",
+            "state": {
+              "actions": {
+                "attempted": 1,
+                "changed": 1,
+                "executed": 1
+              },
+              "after": {
+                "content": "<HASH>",
+                "epoch": 2,
+                "navEpoch": 0,
+                "readyState": "complete",
+                "struct": "40:<HASH>",
+                "url": "<LOCAL>/filter-bar.html"
+              },
+              "before": {
+                "content": "<HASH>",
+                "epoch": 1,
+                "navEpoch": 0,
+                "readyState": "complete",
+                "struct": "40:<HASH>",
+                "url": "<LOCAL>/filter-bar.html"
+              },
+              "flags": []
+            }
+          },
+          "stop_code": "dom_goal_signal",
+          "url": "<LOCAL>/filter-bar.html"
+        },
+        {
+          "call": "done",
+          "i": 3,
+          "ok": true,
+          "result": {
+            "invariants": [
+              {
+                "held": true,
+                "id": "filter-active"
+              }
+            ]
+          }
+        }
+      ],
+      "invariants_ok": true,
+      "schema_version": 1,
+      "script_sha256": "c594443b9671d2fcaffce06b900d71b754f933b519206790a32e45d83886d8dc"
+    }
+  }
+}

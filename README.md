@@ -117,11 +117,11 @@ AmberFlow 2.0.0 是**未发布**版本，正在从「可运行」走向「可交
 ## 开发与贡献
 
 ```bash
-npm run check              # PR 门禁：预检/快照重生成 + 类型检查 + 配置/schema 一致性 + 行锚断言 + 提示词/信号校验 + 泄露扫描 + 示例校验 + 用例声明
+npm run check              # PR 门禁：预检/快照重生成 + 契约生成物一致性 + 类型检查 + 配置/schema 一致性 + 行锚断言 + 提示词/信号/截断记账校验 + 泄露扫描 + 示例校验 + 用例声明
 npm run test -- --tier smoke   # 真实站点（需要网络；跳过 ≠ 通过）
 ```
 
-仓库没有单元测试是**设计决定**：真实站点套件是唯一测试层；离线夹具（`fixtures/engine/`）只用于非门禁本地等价验证，不进 `npm run check`；运行证据不进仓库。发现问题请通过 issue 反馈，安全问题请走 [SECURITY.md](SECURITY.md) 的报告渠道。
+仓库没有单元测试是**设计决定**：真实站点套件是唯一测试层；离线夹具（`fixtures/engine/`）只用于非门禁本地等价验证（抽取面 / 运行期 / 四源编排 lane），不进 `npm run check`；运行证据不进仓库。发现问题请通过 issue 反馈，安全问题请走 [SECURITY.md](SECURITY.md) 的报告渠道。
 
 ## License
 

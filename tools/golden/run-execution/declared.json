@@ -1,0 +1,106 @@
+{
+  "_doc": "verify-run-execution 基线（非门禁）：本地 fixtures + 无头 chromium + rules-only，三源 （flow runScriptApp / plan runPlan / suite runSuite）的归一化产物。只用于四条编排迁到 runExecution 内核前后的等价对比：--record 显式更新（同源连跑两次一致才入库）；端口/仓库根/工作目录/临时目录已归一，时间/run_id/UA 类易变字段已剔除，不得手改。",
+  "schema_version": 1,
+  "source": "declared",
+  "expected": {
+    "external_requests": [],
+    "result": {
+      "app": "run-execution-declared",
+      "completed": "1/1",
+      "decisions": {
+        "by_method": {
+          "rule:match": 1
+        },
+        "cache": null,
+        "conf": {
+          "max": null,
+          "min": null,
+          "n": 0
+        },
+        "escalate": 0,
+        "failed_asks": 0,
+        "ladder": {
+          "adjudicated": 0,
+          "asked_not_passed": 0,
+          "escalate": 0,
+          "model": 0,
+          "reobserve": 0,
+          "rule": 1
+        },
+        "line": "rule 1 · model 0 · reobserve 0 · escalate 0",
+        "model_asks": 0,
+        "model_face": "idle",
+        "model_steps": 0,
+        "reobserve": 0,
+        "total_steps": 1
+      },
+      "goal": "到达筛选页，点击航空公司筛选并验收 active 状态",
+      "invariants": [
+        {
+          "desc": "筛选已选中",
+          "held": true,
+          "id": "filter-active"
+        }
+      ],
+      "label": "runExecution lane · declared",
+      "ok": true,
+      "pack_path": "",
+      "plan_path": "<WORK>/declared-plan.json",
+      "slots": {
+        "entry": "<LOCAL>/filter-bar.html"
+      },
+      "sources": [],
+      "step_traces": [
+        {
+          "desc": "点击航空公司筛选",
+          "descs": [
+            "click li \"航空公司\""
+          ],
+          "hows": [
+            "clicked"
+          ],
+          "id": "filter-airline",
+          "index": 0,
+          "methods": [
+            "rule:match"
+          ],
+          "state": {
+            "actions": {
+              "attempted": 1,
+              "changed": 1,
+              "executed": 1
+            },
+            "after": {
+              "content": "<HASH>",
+              "epoch": 2,
+              "navEpoch": 1,
+              "readyState": "complete",
+              "struct": "40:<HASH>",
+              "url": "<LOCAL>/filter-bar.html"
+            },
+            "before": {
+              "content": "<HASH>",
+              "epoch": 1,
+              "navEpoch": 1,
+              "readyState": "complete",
+              "struct": "40:<HASH>",
+              "url": "<LOCAL>/filter-bar.html"
+            },
+            "flags": []
+          },
+          "status": "done"
+        }
+      ],
+      "subgoals": [
+        {
+          "attempts": 1,
+          "desc": "点击航空公司筛选",
+          "obstacle": null,
+          "status": "done"
+        }
+      ],
+      "tool_steps": [],
+      "verified": true
+    }
+  }
+}

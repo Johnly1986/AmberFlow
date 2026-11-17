@@ -11,7 +11,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyConfiguredEnv } from "../support/apply-config-env.ts";
 import { appOptions, cliBool, cliString, cliStrings, parseCliArgs, type CliValues } from "../support/cli-args.ts";
-import { parseRunDefaults } from "../support/run-defaults.ts";
+import { RUN_ARG_FIELDS, RUN_ARG_RULES, type RunArgField } from "../support/run-args-contract.ts";
+import { parseRunDefaults, type RunDefaults } from "../support/run-defaults.ts";
 import { appsOutDir, ensureDir, userAppsDir } from "../support/amberflow-home.ts";
 import { dryRunFlow, loadScriptApp, type LoadedScriptApp } from "./app-script.ts";
 import { listAppDirs } from "./app-pack.ts";
@@ -35,17 +36,18 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   // 打错的参数 → 一行点名 + usage，绝不甩 parseArgs 的堆栈（src/support/cli-args.ts 的体例）。
   const cli = parseCliArgs(argv, {
     allowPositionals: true,
-    // A6 --walk 是 app-runner 专属调试旗标：在本入口并进共用旗标表（共用表文件不动）。
-    options: { ...appOptions(), walk: { type: "boolean" } },
+    options: appOptions(),
     usage: USAGE,
   });
   if (!cli.ok) return cli.code;
   const v = cli.values;
   if (cliBool(v, "help")) { console.log(USAGE); return 0; }
-  // A6 防呆：walk 是真跑调试模式，dry 无浏览器、无导航可言——同给是用法错误（exit 2）。
-  if (cliBool(v, "dry") && cliBool(v, "walk")) {
-    console.error("--walk 与 --dry 互斥：walk 是真跑调试模式（ctx.step 同页重锚不重导航），dry 只展开调用序列、没有浏览器。");
-    return 2;
+  // 契约登记的旗标互斥规则（walk×dry 等）：旗标与逐字文案单源在 run-args-contract.ts。
+  for (const rule of RUN_ARG_RULES) {
+    if (rule.kind === "mutually-exclusive" && rule.flags.every((flag) => cliBool(v, flag))) {
+      console.error(rule.message);
+      return 2;
+    }
   }
   // 运行参数的配置默认值（全局 < 项目 < 环境变量；CLI 旗标仍最优先）。
   const { defaults: runDefaults, errors: runDefaultErrors } = parseRunDefaults();
@@ -56,24 +58,21 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   const quiet = cliBool(v, "quiet") || runDefaults.quiet === true;
   // headless/headful 都解析：CLI 显式 --headless 压过配置层的 runDefaults.headful（此前
   // --headless 被解析但不透传，rc 配了 headful=true 的机器上用户无法退出有头——透传修复）。
-  // 两个旗标同时给 = 用法错误（与 run.ts 的互斥检查同一条纪律）。
+  // 两个旗标同时给 = 用法错误（与 run.ts 的互斥检查同一条纪律）。合并成 headful 的逻辑
+  // 在契约里（engine.map: "headful"），与配置层默认值的层叠不在这里重写。
   if (cliBool(v, "headless") && cliBool(v, "headful")) {
     console.error("--headful 与 --headless 只能选一个");
     return 2;
   }
-  const headful = !cliBool(v, "headless") && (cliBool(v, "headful") || runDefaults.headful === true);
-  const confirmUnsafe = cliBool(v, "confirm-unsafe");
-  const confirmSafe = !confirmUnsafe && (cliBool(v, "confirm-safe") || runDefaults.confirmSafe !== false);
-  const noSources = cliBool(v, "no-sources") || runDefaults.noSources === true;
-  const tieredHint = cliBool(v, "tiered-hint") || runDefaults.tieredHint === true;
   const maxStepsRaw = cliString(v, "max-steps");
   let maxSteps: number | undefined;
   if (maxStepsRaw !== undefined) {
-    maxSteps = Number(maxStepsRaw);
-    if (!Number.isInteger(maxSteps) || maxSteps < 1) {
-      console.error(`--max-steps 需要正整数（收到 ${JSON.stringify(maxStepsRaw)}）`);
+    const checked = validateRunArg("maxSteps", maxStepsRaw);
+    if ("error" in checked) {
+      console.error(checked.error);
       return 2;
     }
+    maxSteps = checked.value as number;
   }
   if (cliBool(v, "list") || cliString(v, "app") === undefined) {
     for (const entry of listAppDirs()) console.log(`${entry.id.padEnd(22)} ${entry.script}`);
@@ -86,70 +85,23 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
   }
 
-  const slots: Record<string, unknown> = {};
-  const cliSlotKeys = new Set<string>();
-  for (const s of cliStrings(v, "slot")) {
-    const i = s.indexOf("=");
-    if (i <= 0) { console.error(`--slot needs k=v, got ${JSON.stringify(s)}`); return 2; }
-    const key = s.slice(0, i);
-    cliSlotKeys.add(key);
-    if (Object.prototype.hasOwnProperty.call(slots, key)) {
-      console.error(`--slot ${JSON.stringify(key)} 给了两次（${JSON.stringify(slots[key])} 与 `
-        + `${JSON.stringify(s.slice(i + 1))}）：一个槽位只能有一个值`);
-      return 2;
-    }
-    slots[key] = s.slice(i + 1);
-  }
-  const slotFileArg = cliString(v, "slot-file");
-  if (slotFileArg !== undefined) {
-    let raw: unknown;
-    const slotFile = path.resolve(slotFileArg);
-    try {
-      try {
-        const st = fs.statSync(slotFile);
-        if (process.platform !== "win32" && (st.mode & 0o077) !== 0) {
-          console.error(`[warn] --slot-file ${slotFile} 对 group/other 可读（mode ${(st.mode & 0o777).toString(8)}）；建议 chmod 600`);
-        }
-      } catch { /* stat 失败交给下面的 readFileSync 报清楚 */ }
-      raw = JSON.parse(fs.readFileSync(slotFile, "utf-8"));
-    } catch (e) {
-      console.error(`--slot-file 读不了或不是 JSON：${e instanceof Error ? e.message : String(e)}`);
-      return 2;
-    }
-    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-      console.error("--slot-file 顶层必须是对象（槽位名 → 值）");
-      return 2;
-    }
-    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-      const t = typeof value;
-      if (t !== "string" && t !== "number" && t !== "boolean") {
-        console.error(`--slot-file 的 ${JSON.stringify(key)} 必须是字符串/数字/布尔`);
-        return 2;
-      }
-      if (Object.prototype.hasOwnProperty.call(slots, key)) {
-        console.error(`--slot-file 的 ${JSON.stringify(key)} 被 --slot 覆盖`);
-        continue;
-      }
-      slots[key] = value;
-    }
-  }
-  for (const key of cliSlotKeys) {
-    if (SECRET_SLOT_NAME.test(key)) {
-      console.error(`[warn] --slot ${JSON.stringify(key)} 的明文会出现在进程参数/桥 argv；敏感值请用 --slot-file（或 meta/env）`);
-    }
-  }
+  const slotArgs = parseSlotArguments(v);
+  if (slotArgs === null) return 2;
+  const { slots, cliSlotKeys } = slotArgs;
 
   // --today：时钟缝（数据腿相对日期表达式 + ctx.runtime.today）。格式错是**用法错误**
-  // （exit 2）；空缺 = 系统日期（时钟是本次调用的显式参数，不读环境变量）。
+  // （exit 2）；空缺 = 系统日期（时钟是本次调用的显式参数，不读环境变量）。校验种类与文案
+  // 由契约的 validate 块给出（date 校验返回 trim 后的值）。
   let today: string | undefined;
   {
     const raw = cliString(v, "today");
     if (raw !== undefined) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
-        console.error(`--today 要是 YYYY-MM-DD（拿到 ${JSON.stringify(raw)}）`);
+      const checked = validateRunArg("today", raw);
+      if ("error" in checked) {
+        console.error(checked.error);
         return 2;
       }
-      today = raw.trim();
+      today = checked.value as string;
     }
   }
 
@@ -186,10 +138,15 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   // 模型层级在哪一层，**每个出口都要回答**（dry 也不例外——桥的 summary 靠它写
   // `model: on|off(missing)`，用户先要知道此刻跑在哪个层级，再谈结果可不可信）。
-  const ablate = cliString(v, "ablate");
-  if (ablate !== undefined && ablate !== "stub" && ablate !== "rules-only") {
-    console.error(`--ablate 只接受 stub | rules-only（收到 ${JSON.stringify(ablate)}）`);
-    return 2;
+  const ablateRaw = cliString(v, "ablate");
+  let ablate: string | undefined;
+  if (ablateRaw !== undefined) {
+    const checked = validateRunArg("ablate", ablateRaw);
+    if ("error" in checked) {
+      console.error(checked.error);
+      return 2;
+    }
+    ablate = checked.value as string;
   }
   const providerWanted = cliString(v, "provider")
     ?? (ablate === "stub" ? "scripted-stub" : ablate === "rules-only" ? "none" : undefined);
@@ -281,11 +238,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     cliConfFloor = n;
   }
 
+  // run 字段的 CLI 值 → ScriptRunOptions：映射种类单源在契约（run-args-contract.ts），
+  // 这里只把入口已经解析/校验好的上下文（槽位袋、today、预算）递给契约驱动的装配。
+  const contractOptions = contractRunOptions(v, runDefaults, { slots, today, maxSteps });
   let result: AppRunResult;
   try {
     result = await runScriptApp(loaded, buildScriptRunOptions(
-      slots, outDir, quiet, today, noSources, confirmSafe, v, maxSteps, headful, tieredHint,
-      hintMemory, hintMemoryPath, cliConfFloor, confFloorFromCli, modelStatus, localModelId, applied,
+      outDir, quiet, hintMemory, hintMemoryPath, cliConfFloor, confFloorFromCli, modelStatus, localModelId, applied,
+      contractOptions,
     ));
   } catch (e) {
     if (e instanceof AppRunConfigError) {
@@ -303,20 +263,14 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 }
 
 /**
- * `runScriptApp` 的 options 装配（入口侧只做解析与编排，options 形状集中在这里）。
- * 形参与原局部名同名，options 字面量逐字节保留——本函数不读外层闭包状态。
+ * `runScriptApp` 的 options 装配（入口侧只做解析与编排）。
+ *
+ * run 字段的选项来自 `contractOptions`（契约驱动的映射）；这里只补入口侧解析出来的注入
+ * （学习环 sidecar、闸门刻度、模型层级、运行时统计）——本函数不读外层闭包状态。
  */
 function buildScriptRunOptions(
-  slots: Record<string, unknown>,
   outDir: string,
   quiet: boolean,
-  today: string | undefined,
-  noSources: boolean,
-  confirmSafe: boolean,
-  v: CliValues,
-  maxSteps: number | undefined,
-  headful: boolean,
-  tieredHint: boolean,
   hintMemory: HintMemoryLike | null,
   hintMemoryPath: string | null,
   cliConfFloor: number | undefined,
@@ -324,31 +278,169 @@ function buildScriptRunOptions(
   modelStatus: string,
   localModelId: string | undefined,
   applied: Awaited<ReturnType<typeof applySpecToRuntime>>,
+  contractOptions: Partial<ScriptRunOptions>,
 ): ScriptRunOptions {
   return {
-    slots, outDir, verbose: !quiet,
-    ...(today === undefined ? {} : { today }),
-    sources: !noSources, confirmSafe, captureTraces: cliBool(v, "trace"),
-    maxSteps,
-    manualFailFast: cliBool(v, "manual-fail-fast"),
-    // §8 步 2/5：rescue 开关（默认关 = 不进 opts，产物逐字节不变；开 = 真实求援时 result 带 rescue 键）。
-    ...(cliBool(v, "rescue") && !cliBool(v, "no-rescue") ? { rescue: true } : {}),
-    headful, allowDangerous: cliBool(v, "allow-dangerous"),
-    tieredHint: tieredHint ? true : undefined,
+    outDir, verbose: !quiet,
+    ...contractOptions,
     hintMemory, hintMemoryPath,
     confFloor: cliConfFloor,
     ...(cliConfFloor === undefined ? {} : { confFloorSource: confFloorFromCli ? "cli" as const : "config" as const }),
     providerFloor: activeProviderInfo()?.floor,
     modelStatus,
     ...(localModelId === undefined ? {} : { modelId: localModelId }),
-    ...(cliString(v, "emit-trace") === undefined ? {} : { emitTrace: cliString(v, "emit-trace") }),
-    ...(cliString(v, "replay") === undefined ? {} : { replayTrace: cliString(v, "replay") }),
-    // A6：walk 调试旗标（默认关 = 不进 opts，产物逐字节不变）。
-    ...(cliBool(v, "walk") ? { walk: true } : {}),
     runtimeStats: applied.stats ?? undefined,
     pickAsks: applied.asks ?? undefined,
     pickFailedAsks: applied.failedAsks ?? undefined,
   };
+}
+
+/**
+ * 解析 `--slot k=v`（可重复）与 `--slot-file`：成功返回槽位袋 + 本次命令行给的键（敏感值告警用），
+ * 用法错误打印一行并返回 null（与 `parseCliArgs` 同一体例：入口只关心能不能继续）。
+ */
+function parseSlotArguments(v: CliValues): { slots: Record<string, unknown>; cliSlotKeys: Set<string> } | null {
+  const slots: Record<string, unknown> = {};
+  const cliSlotKeys = new Set<string>();
+  for (const s of cliStrings(v, "slot")) {
+    const i = s.indexOf("=");
+    if (i <= 0) { console.error(`--slot needs k=v, got ${JSON.stringify(s)}`); return null; }
+    const key = s.slice(0, i);
+    cliSlotKeys.add(key);
+    if (Object.prototype.hasOwnProperty.call(slots, key)) {
+      console.error(`--slot ${JSON.stringify(key)} 给了两次（${JSON.stringify(slots[key])} 与 `
+        + `${JSON.stringify(s.slice(i + 1))}）：一个槽位只能有一个值`);
+      return null;
+    }
+    slots[key] = s.slice(i + 1);
+  }
+  const slotFileArg = cliString(v, "slot-file");
+  if (slotFileArg !== undefined) {
+    let raw: unknown;
+    const slotFile = path.resolve(slotFileArg);
+    try {
+      try {
+        const st = fs.statSync(slotFile);
+        if (process.platform !== "win32" && (st.mode & 0o077) !== 0) {
+          console.error(`[warn] --slot-file ${slotFile} 对 group/other 可读（mode ${(st.mode & 0o777).toString(8)}）；建议 chmod 600`);
+        }
+      } catch { /* stat 失败交给下面的 readFileSync 报清楚 */ }
+      raw = JSON.parse(fs.readFileSync(slotFile, "utf-8"));
+    } catch (e) {
+      console.error(`--slot-file 读不了或不是 JSON：${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+      console.error("--slot-file 顶层必须是对象（槽位名 → 值）");
+      return null;
+    }
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      const t = typeof value;
+      if (t !== "string" && t !== "number" && t !== "boolean") {
+        console.error(`--slot-file 的 ${JSON.stringify(key)} 必须是字符串/数字/布尔`);
+        return null;
+      }
+      if (Object.prototype.hasOwnProperty.call(slots, key)) {
+        console.error(`--slot-file 的 ${JSON.stringify(key)} 被 --slot 覆盖`);
+        continue;
+      }
+      slots[key] = value;
+    }
+  }
+  for (const key of cliSlotKeys) {
+    if (SECRET_SLOT_NAME.test(key)) {
+      console.error(`[warn] --slot ${JSON.stringify(key)} 的明文会出现在进程参数/桥 argv；敏感值请用 --slot-file（或 meta/env）`);
+    }
+  }
+
+  return { slots, cliSlotKeys };
+}
+
+/* ------------------------------------------------------- 契约驱动的旗标校验与选项映射 */
+
+/** 契约文案的 `{name}` 占位替换（引擎与桥各有一份同名小工具：进程边界两侧不共享运行期代码）。 */
+function fillContractMessage(template: string, vars: Readonly<Record<string, string>>): string {
+  return template.replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g, (whole, name: string) => vars[name] ?? whole);
+}
+
+/** 按 key 取契约字段（入口只读自己用过的那几条；查不到是契约漏登记，直接抛）。 */
+function runArgField(key: string): RunArgField {
+  const field = RUN_ARG_FIELDS.find((candidate) => candidate.key === key);
+  if (field === undefined) throw new Error(`run-args-contract: unknown field ${key}`);
+  return field;
+}
+
+/**
+ * 契约登记的单字段校验（`validate` 块）：返回解析后的值，或逐字报错文案。
+ * `{value}` 统一代入 `JSON.stringify(原始输入)`——与既有 CLI 报错格式一致。
+ */
+function validateRunArg(key: string, raw: string): { value: unknown } | { error: string } {
+  const field = runArgField(key);
+  const spec = field.validate;
+  if (spec === undefined) return { value: raw };
+  const valueText = JSON.stringify(raw);
+  const reject = (): { error: string } => ({ error: fillContractMessage(spec.message, { value: valueText }) });
+  if (spec.kind === "positive-integer") {
+    const parsed = Number(raw);
+    return Number.isInteger(parsed) && parsed >= 1 ? { value: parsed } : reject();
+  }
+  if (spec.kind === "date") {
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw.trim()) ? { value: raw.trim() } : reject();
+  }
+  const allowed = field.tool?.enum ?? [];
+  return allowed.includes(raw) ? { value: raw } : reject();
+}
+
+/** 契约字段没有本次取值（缺省 = 不写选项，保留引擎的声明层/默认值语义）。 */
+const SKIP_OPTION = Symbol("skip-option");
+
+/** 一个契约字段的 CLI 值 → 选项值；映射种类单源在契约的 `engine.map`。 */
+function engineOptionValue(
+  field: RunArgField, v: CliValues, defaults: RunDefaults,
+  ctx: { slots: Record<string, unknown>; today: string | undefined; maxSteps: number | undefined },
+): unknown {
+  const flag = field.cli?.flag;
+  switch (field.engine?.map) {
+    case "flag":
+      return flag === undefined ? SKIP_OPTION : cliBool(v, flag);
+    case "flag-true":
+      return flag !== undefined && cliBool(v, flag) ? true : SKIP_OPTION;
+    case "string": {
+      const text = flag === undefined ? undefined : cliString(v, flag);
+      return text === undefined ? SKIP_OPTION : text;
+    }
+    case "context": {
+      const value = (ctx as unknown as Record<string, unknown>)[field.key];
+      return value === undefined ? SKIP_OPTION : value;
+    }
+    case "sources":
+      return !(cliBool(v, "no-sources") || defaults.noSources === true);
+    case "headful":
+      return !cliBool(v, "headless") && (cliBool(v, "headful") || defaults.headful === true);
+    case "confirm-safe":
+      return !cliBool(v, "confirm-unsafe") && (cliBool(v, "confirm-safe") || defaults.confirmSafe !== false);
+    case "tiered-hint":
+      return cliBool(v, "tiered-hint") || defaults.tieredHint === true ? true : SKIP_OPTION;
+    case "rescue":
+      return cliBool(v, "rescue") && !cliBool(v, "no-rescue") ? true : SKIP_OPTION;
+    default:
+      return SKIP_OPTION;
+  }
+}
+
+/** 契约字段的 CLI 值 → `ScriptRunOptions` 选项；没有契约登记的字段不会出现在这里。 */
+function contractRunOptions(
+  v: CliValues, defaults: RunDefaults,
+  ctx: { slots: Record<string, unknown>; today: string | undefined; maxSteps: number | undefined },
+): Partial<ScriptRunOptions> {
+  const out: Record<string, unknown> = {};
+  for (const field of RUN_ARG_FIELDS) {
+    const engine = field.engine;
+    if (engine === undefined || engine.option === undefined) continue;
+    const value = engineOptionValue(field, v, defaults, ctx);
+    if (value !== SKIP_OPTION) out[engine.option] = value;
+  }
+  return out as Partial<ScriptRunOptions>;
 }
 
 /**

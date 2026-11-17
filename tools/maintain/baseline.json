@@ -5,26 +5,26 @@
     "newFunctionMaxLines": 150,
     "phaseFunctionMaxLines": 400,
     "files": {
-      "src/engine/executor.ts": 2721,
+      "src/engine/executor.ts": 2668,
       "src/app/session-runtime.ts": 992,
       "src/app/app-adapters.ts": 988,
-      "src/app/app-runner.ts": 974,
       "src/engine/executor-pure.ts": 907,
       "src/cli/commands/apps.ts": 877,
+      "src/app/app-runner.ts": 872,
       "src/engine/extraction.ts": 858,
       "src/engine/executor-types.ts": 826,
       "src/engine/pool-js.ts": 824
     },
     "functions": [
       {
-        "file": "src/app/app-runner.ts",
-        "name": "runScriptApp",
-        "lines": 799
-      },
-      {
         "file": "src/engine/executor.ts",
         "name": "run",
         "lines": 741
+      },
+      {
+        "file": "src/app/app-runner.ts",
+        "name": "runScriptApp",
+        "lines": 698
       },
       {
         "file": "src/app/ctx-dry.ts",
@@ -37,14 +37,14 @@
         "lines": 319
       },
       {
-        "file": "src/app/app-runner-cli.ts",
-        "name": "main",
-        "lines": 272
-      },
-      {
         "file": "src/cli/commands/run.ts",
         "name": "runApp",
         "lines": 244
+      },
+      {
+        "file": "src/app/app-runner-cli.ts",
+        "name": "main",
+        "lines": 231
       },
       {
         "file": "src/cli/commands/inspect.ts",
@@ -133,8 +133,8 @@
   },
   "comments": {
     "dateStamps": 34,
-    "planTokens": 404,
-    "historyWording": 65,
+    "planTokens": 403,
+    "historyWording": 64,
     "lineAnchors": 0,
     "ghostRefs": 0,
     "todo": 0
