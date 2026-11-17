@@ -6,7 +6,7 @@
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置全部满足、freeze 生效；§6.4：运行期等价 lane + 2.0a RunCtx + 2.0b evidence collector 已落地，**2.0 完成**；下一步 4d run() 九阶段 → #2 → #3）。
+> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0 RunCtx + evidence collector + 运行期 lane 已完成；**4d 进行中——runFrameGate 已提**，下一步 runSetup → runPoolGate → runDeclaredTargets → runModelPick → runActionPhase → runPostAction → #2 → #3）。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -541,7 +541,8 @@ interface PromptSpec {
 | 2.0 前置 | `tools/verify-runtime-offline.ts`（非门禁运行期等价 lane：4 场景：成功/停因/遮挡/precondition 跳过；HEAD baseline 由干净 worktree 录制，连跑两次一致才入库） | 本批提交 | 主工作区 `--check` 连跑 2 次绿；外部请求 0；不进 `npm run check` |
 | 2.0a RunCtx | `src/engine/run-context.ts`（109 行）：stop/forbid+forbidWhy/noteSkipped/unforbid+pruneForbids 四组记账收敛单点；每 run 实例化、无模块级状态 | 本批提交 | executor 6139→6084 行、run() 2685→2629；typecheck/check/examples golden 绿；运行期 lane check 绿 |
 | 2.0b evidence collector | `src/engine/evidence.ts`（140 行）：Identity/Declared 事实类型单源 + 证据构造/停因尾缀/行锚证据纯函数；executor 6084→6023（run() 2629→2562） | 本批提交 | 运行期 lane 4 场景 --check 绿；examples golden/check 绿 |
-| 4d run() 九阶段 | runSetup/runFrameGate/runPoolGate/runDeclaredTargets/runModelPick/runActionPhase/runPostAction/reportTail；每阶段独立提交 + 3 工作日窗口 | 待做 | 每阶段运行期 lane + examples golden |
+| 4d-1 runFrameGate | 帧门禁/excludedView/readPage/goalHeld 双面/frameTargetStop/precondition 早返回 提为私有方法（72 行）；导航 goto/popup 留 run()（最小风险） | 本批提交 | run() 2562→2479、executor 6023→6019；运行期 lane 4 场景 --check 绿 |
+| 4d 其余阶段 | runSetup / runPoolGate / runDeclaredTargets / runModelPick / runActionPhase / runPostAction；reportTail 已抽出待接线复核 | 待做 | 每阶段独立提交 + 运行期 lane + examples golden |
 
 > P2 已启动：freeze 2026-11-17 起 2 周、每阶段约 3 个工作日窗口；按 D3 顺序 `#4 → #2 → #3`，4d 先行。任一窗口内 T1/T2/T3 触发即停该批。
 

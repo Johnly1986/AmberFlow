@@ -21,6 +21,7 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - 新增 `tools/verify-runtime-offline.ts` + `tools/golden/runtime/**`：**非门禁**运行期等价 lane（本地 fixtures 静态页 + 无头 chromium + `BrowserMiddleware.run`），4 个确定性场景覆盖成功/停因/遮挡失败证据/precondition 跳过；强制 rules-only、零模型、零外部请求；同场景 `--record` 连跑两次一致才入库。基线由干净 HEAD worktree 录制，P2 运行期重构前后用 `--check` 对比。
 - 新增 `src/engine/evidence.ts`（140 行）：`run()` 内散落的行锚/身份/DRF 证据形状与停因尾缀收敛为纯函数 + 类型单源（`IdentityFacts`/`DeclaredFacts` 等；键顺序/条件 spread/文案逐字节不变）；帧证据仍由 `frame-scope.frameHintFailureEvidence` 单点。executor 6084→6023（run() 2629→2562），运行期 lane 4 场景不变。
 - `package.json` 增 `verify:runtime:offline`（默认 check）与 `verify:runtime:offline:record`；夜间非门禁 CI 的 offline job 追加运行该 lane；不进 `npm run check`。
+- 4d-1：`run()` 提出私有阶段方法 `runFrameGate`（72 行）——frame 门禁 / `excludedView`+`readPage` / `frames_excluded` warning / `goalHeld` 双面求值（`doneInExcluded` 经 getter 跨阶段可观察）/ `frameTargetStop` / precondition 双面证据与 `frame_not_allowed`/`skipped` 早返回；导航 goto/popup 信封检查仍在 `run()`（发生在帧门禁前，最小风险）。早返回 RunReport 字段/顺序/文案逐字不变；executor 6023→6019、run() 2562→2479；运行期 lane 4 场景不变。
 
 
 ## Decisions（设计决策索引）
