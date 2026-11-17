@@ -17,11 +17,11 @@ export const HINT_SHAPE_TOKENS: readonly string[] = [
 
 export const HINT_LEARN_NOTE = "A hint is a STABLE-HANDLE CLOSED SET of 6 shapes (#id | tag[attr~substr] | tag~token | tag[attr=value] | tag (button|link|input|textarea|select) | bare-token; only test=data-test, type and aria-label attribute names take part in matching), NOT arbitrary CSS - container/descendant selectors (e.g. \"#outer input\") parse but can never match (target_not_found).";
 
-export const PLAN_PLAYBOOK_SHORT = "高效规划六步法 v2.1（走查先行）：① inspect 先看（验证过的 hint_candidates 照抄 + 核对 op 能力面与词面在池）→ ② 全流程走查（探针链或 plan check --probe 按真实步序走通，或 walk 模式 --walk 单会话串真实步序：同页不重导航、跨页仍导航，带出能力墙/产品事实/提槽/done 素材/绕行决策五样）→ ③ 规划应用（slots + done 正向锚/否定配 exists/多动作后判/状态前进自检 + 分块采样）→ ④ apps check <id> --slot k=v 离线分支校验 + 信号 lint（裸 not / any 含 not(exists)）→ ⑤ run --trace 真跑，失败看 stopCode/reason（reason 自带池快照判别）→ ⑥ 失败取证判别（引擎缺陷/产品事实/任务口径；A/B、对照、双腿取数）。";
+export const PLAN_PLAYBOOK_SHORT = "高效规划六步法 v2.1（走查先行）。\n① inspect 先看：`amber inspect --url <页> --json`，hint_candidates 有候选就照抄，并核对 op 能力面与词面在池。\n② 全流程走查：按真实步序走通，带出能力墙/产品事实/提槽清单/done 素材/绕行决策。\n③ 规划应用：slots + done 正向锚、否定配 exists、多动作后判、状态前进自检。\n④ `amber apps check <id> --slot k=v` 离线验分支，改掉裸 not / any 含 not(exists) 两条 lint。\n⑤ `amber run <id> --trace` 真跑，失败先看 stopCode/reason。\n⑥ 失败取证：分清引擎缺陷/产品事实/任务口径（A/B、对照、双腿），判别不了就上报。";
 
 export const STOP_ESCALATION_TEXT = "同一停因按 next 修正后重跑仍出现 2 次以上 → 停手：如实上报 stopCode / reason / 已试过的修正，等待人或上游决策；不要再自行迭代脚本或重试。";
 
-export const OVERVIEW_TEXT = "AmberFlow 是冻结计划的浏览器自动化引擎：计划由人给出（app.mjs 的 flow(ctx) 脚本），引擎逐步选元素、执行动作、验证完成信号；模型只做选择/风险/完成票（完成票仅 advisory），不生成动作，完成只认 DOM/工具信号。什么时候用：要在真实网站上自动化一条可验证的流程（采集、下单、巡检、回归），且希望每一步有结构化证据与完成裁决时。从哪开始：已安装 → amber doctor 体检；checkout 内 → node --experimental-strip-types src/cli/main.ts doctor（裸 amber 不在 PATH，npx amber 会挂住）。";
+export const OVERVIEW_TEXT = "AmberFlow 是浏览器自动化引擎：你把流程写成 app.mjs 的 flow(ctx) 脚本，引擎逐步选元素、执行动作、验证完成信号；模型只投票（选择/风险/完成），不生成动作，完成只认页面/工具信号。\n什么时候用：在真实网站上跑可验证的流程（采集、下单、巡检、回归），并要求每步有结构化证据与完成裁决。\n从哪开始：amber doctor 体检；checkout 内用 node --experimental-strip-types src/cli/main.ts doctor（裸 amber 不在 PATH，npx amber 会挂住）。";
 
 export const RESCUE_AGENT_HINTS: Readonly<Record<string, { fact: string; recommended_action: string; stop_condition: string }>> = {
   "action": {

@@ -358,15 +358,13 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_apps`,
     description:
-      'List the flow apps this machine can run, via `amber apps list --json`. Apps live in the user '
-      + 'scope (`$AMBERFLOW_HOME/apps/<id>/app.mjs`, by default ~/.amberflow/apps) — the repository '
-      + 'ships no apps, whatever is under its `apps/` is a development fixture. Every row names the '
-      + 'app id, label, one-line goal, the writable script path, its source (user scope or checkout '
-      + 'fixture), invariant count and allowed hosts. There is only ONE app format — a JS flow '
-      + 'script — so there is no static step table: steps are runtime facts. A row carrying `error` '
-      + 'failed to load. Starts no browser and calls no model.',
+      'List runnable flow apps and their metadata; use it to pick an app id for `*_run`, `*_app_show` '
+        + 'or `*_app_check`. Here `*_<name>` means this bridge\'s tool of that name under any prefix. Each '
+        + 'row gives id, label, goal, script path, source, invariant count and allowed hosts; a row with '
+        + '`error` failed to load. `filter` matches id, label or goal case-insensitively. Starts no browser '
+        + 'and calls no model.',
     parameters: {
-      filter: { type: 'string', description: 'Optional case-insensitive substring match on id/label/goal.' },
+      filter: { type: 'string', description: 'Case-insensitive substring match on app id, label or goal.' },
     },
     output: {
       schema: {
@@ -426,91 +424,64 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_run`,
     description:
-      'Run one flow app (a user-scope `app.mjs`; the repository ships no apps) end to end: the '
-      + 'script\'s `flow(ctx)` owns the control '
-      + 'flow (if/for/while, sub-functions), the engine decides each step\'s target, gate, action and '
-      + 'completion signal, and the declared end-state invariants are the only pass/fail truth. '
-      + '`max_steps` is an EXECUTION BUDGET, not a step index: the script runs under its own control '
-      + 'flow and stops with `budget_exceeded` when the budget is used up (status=partial, '
-      + 'verified=false). By default it runs the whole flow. `trace` defaults to true. `dry` only '
-      + 'dry-runs the call sequence without a browser; `ablate` is an explicit ablation arm, not a '
-      + 'routine mode. Returns a compact summary with status, failed steps, invariants, model tier, '
-      + 'result/report paths and the first structured failure. The bridge also enforces a hard '
-      + 'wall-clock cap per call: 900 s by default (the deployment `timeoutMs` config), overridden '
-      + 'per call by `timeout_sec` — raise it for long flows instead of being killed with the '
-      + 'completed work lost; a killed run writes `run-killed.json` into its outDir as partial '
-      + 'evidence. It runs with THIS deployment\'s decision config (the bridge injects '
-      + '`AMBERFLOW_DECISION_*`), which may differ from the CLI\'s user-scope config: prefer this '
-      + 'tool over a local `amber run` when the CLI decision plane is stale or returns 401/403. '
-      + '结构化停因自带能力提示（DRF/newTab/observe）；result 顶层 steps_failed/warnings_count 仅 >0 出现。 '
-      + '导航应经由页面入口/控件；直接构造 URL 跳转易触发站点风控，需要引擎强制时在 meta.policy 声明 navigation:"entry-only"（违规跳转会得到 navigation_forbidden）。 '
-      + 'Escalation rule: '
+      'Run one flow app end to end; declared end-state invariants decide pass/fail. Returns `status`, '
+      + '`verified`, failed steps and report paths. `max_steps` is a budget, not a step index; used up = '
+      + '`budget_exceeded` (status=partial, verified=false). `dry` dry-runs without a browser; '
+      + '`ablate`/`provider` are experiment-only overrides. A killed call writes `run-killed.json`; raise '
+      + '`timeout_sec` for long flows. Navigate via page controls; direct URL jumps can trip site risk '
+      + 'controls. Escalation rule: '
       + STOP_ESCALATION_TEXT,
     parameters: {
-      app: { type: 'string', required: true, description: 'The app id from `' + toolPrefix + '_apps`.' },
-      dry: { type: 'boolean', description: 'Only dry-run the script\'s call sequence; no browser, no tools.' },
-      ablate: { type: 'string', enum: ['stub', 'rules-only'], description: 'ABLATION EXPERIMENT ONLY. `stub` installs a scripted fake model; `rules-only` runs with no model at all. Omit to use the plane the checkout is configured with: the online service when AMBERFLOW_DECISION_BASE_URL is set, otherwise the local model (run `npm run doctor` in the checkout to see which one resolves).' },
-      provider: { type: 'string', description: 'Override the decision provider for this call (laya-onnx, decision-service, a baseline, or an ablation). Omit to use the configured three-key service, or the local model when no service URL is set.' },
-      no_sources: { type: 'boolean', description: 'Skip the data leg (use already-available data).' },
-      headful: { type: 'boolean', description: 'Open a VISIBLE browser window for the run (engine '
-        + '--headful). The window appears on the machine that runs the engine — the deployment host, '
-        + 'not inside this browser page — so that host needs a real display, or a virtual one '
-        + '(`xvfb-run -a`) plus VNC/noVNC, for a person to watch. Default false (headless).' },
+      app: { type: 'string', required: true, description: 'App id from `*_apps`.' },
+      dry: { type: 'boolean', description: 'Dry-run the script\'s call sequence; no browser, no tools.' },
+      ablate: { type: 'string', enum: ['stub', 'rules-only'], description: 'Ablation arm for experiments: `stub` (scripted fake model) or `rules-only` (no model). Use only '
+        + 'for A/B runs, not routine execution.' },
+      provider: { type: 'string', description: 'Override the decision provider for this call: `laya-onnx`, `decision-service`, a baseline or an '
+        + 'ablation. Omit to use the configured service or local model.' },
+      no_sources: { type: 'boolean', description: 'Skip the data leg; use already-available data.' },
+      headful: { type: 'boolean', description: 'Show the browser window on the engine host; that host needs a display (or `xvfb-run -a` plus '
+        + 'VNC). Headless when omitted.' },
       allow_dangerous: {
         type: 'boolean',
         description: 'Permit dangerous tool steps (dry-run gated). Requires the deployment to enable it.',
       },
       confirm_safe: {
         type: 'boolean',
-        description: 'With allow_dangerous, still confirm each destructive step against its dry-run '
-          + 'evidence (the engine\'s middle gate) instead of blanket-approving.',
+        description: 'With `allow_dangerous`, confirm each destructive step against its dry-run evidence instead of '
+          + 'blanket-approving.',
       },
       tiered_hint: {
         type: 'boolean',
-        description: 'P1 experiment: when a target hint resolves to an ambiguous tier, the model is '
-          + 'asked a SMALLER question (only that tier\'s candidates, not the whole pool). Off by '
-          + 'default — behavior identical to before; use it for A/B runs.',
+        description: 'A/B experiment: when a target hint matches an ambiguous tier, ask the model for that tier\'s '
+          + 'candidates only. Off by default; use for experiments, not routine runs.',
       },
       walk: {
         type: 'boolean',
-        description: 'Walk DEBUG mode for this run (engine `--walk`), default off. Single-session '
-          + 'walk-through/forensics: `ctx.step` no longer reloads the page when its declared `url` '
-          + 're-anchors to the CURRENT page (same origin+path; query/hash ignored), so SPA client '
-          + 'state survives across steps — act→read→act→read chains reproduce problems that only '
-          + 'appear on session-evolved state. An explicit url pointing at ANOTHER page still '
-          + 'navigates, and ctx.open/openPage/arrive are unchanged; done judgment, stop codes, '
-          + 'after-signatures and decision stats are identical. Debug surface only: formal runs '
-          + 'keep the re-navigation semantics (that is where their done determinism comes from); '
-          + 'the result JSON marks walk:true. Mutually exclusive with `dry`.',
+        description: 'Walk debug mode: keep one session and skip re-navigation when a step\'s declared URL is the '
+          + 'current page. SPA state then survives across steps, which reproduces state-evolution bugs; '
+          + 'formal runs keep re-navigation semantics.',
       },
       slots: {
         type: 'array',
-        description: 'Values for declared slots, as "key=value" entries (e.g. ["date=2026-10-12"]).',
+        description: 'Slot values as `key=value` entries (repeatable), e.g. `date=2026-10-12`.',
         items: { type: 'string' },
       },
       max_steps: {
         type: 'integer',
-        description: 'Execution budget for this call (engine `--max-steps`), NOT a 1-based step '
-          + 'index. When the budget is used up the script stops with `budget_exceeded` '
-          + '(status=partial, verified=false).',
+        description: '`EXECUTION BUDGET` for this call, counted in steps, not a 1-based start index. When used up the '
+          + 'run stops with `budget_exceeded` (status=partial, verified=false).',
       },
       timeout_sec: {
         type: 'integer',
-        description: 'Hard wall-clock cap for THIS call, in seconds: the bridge kills the engine '
-          + 'child process when the call exceeds it. Default 900 (the deployment `timeoutMs` '
-          + 'config); raise it for a long flow (deep tier, many pages) instead of losing the run at '
-          + '15 minutes, or split the flow into smaller apps. Integer, 1..7200; a run killed at the '
-          + 'cap leaves `run-killed.json` in its outDir with the partial evidence.',
+        description: 'Hard wall-clock cap for this call in seconds; the bridge kills the engine child when exceeded. '
+          + 'Raise it for long flows. A killed call leaves `run-killed.json` as partial evidence.',
       },
-      trace: { type: 'boolean', description: 'Include per-step execution evidence in the result. Defaults to true.' },
+      trace: { type: 'boolean', description: 'Include per-step execution evidence in the result.' },
       rescue: {
         type: 'boolean',
-        description: 'Rescue passthrough (engine `--rescue`), default OFF — artifacts stay byte-identical. '
-          + 'When true, a real human-needed stop may carry a structured `rescue` request '
-          + '(`{kind, mode:\'stop\', why_stuck:{summary, stop_code?, step_id?}, what_would_unblock[]}`) so '
-          + 'the Agent can see WHY a human is needed. The bridge never suspends waiting for a person '
-          + '— the request is serialized into the result; answer it asynchronously (re-run after the '
-          + 'human acted, or supply the missing value).',
+        description: 'Attach a structured `rescue` request to the result when a human is needed. The bridge records '
+          + 'the request and never waits for a person; answer it asynchronously by re-running after the human '
+          + 'acts or by supplying the missing value.',
       },
     },
     output: {
@@ -770,13 +741,10 @@ export function apply(ctx: Context, config: Config): void {
     name: `${toolPrefix}_status`,
     description:
       OVERVIEW_TEXT + '\n\n'
-      + 'Report the environment the engine will run in: Node, Chromium, local model artifacts, the '
-      + 'effective decision source (online service or local), and whether the outer LLM is configured. '
-      + 'Reads only; no browser, no model call, no secrets (API keys are masked). It also carries the '
-      + 'default-on ask probe (`provider.ask_probe`): one minimal real ask through the configured '
-      + 'decision plane (the bridge deployment config) — diagnosis only, it never changes ok/exit code. '
-      + 'When it fails, look at the two decision channels (this deployment\'s config vs the CLI user '
-      + 'config) before editing the app.',
+        + 'Report the engine environment: Node, Chromium, model artifacts, decision source and outer LLM '
+        + 'status. No browser, no model call, keys masked. Also runs the default-on ask probe '
+        + '(`provider.ask_probe`): one minimal real ask through this deployment\'s decision plane; on '
+        + 'failure check the deployment and CLI configs.',
     parameters: {},
     output: {
       schema: {
@@ -816,12 +784,11 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_app_show`,
     description:
-      'Read one flow app: metadata (hosts, slots, sources, invariants, policy, pace), the writable '
-      + 'script path, both version anchors (`script_sha256` / `plan_sha256`) and the CURRENT source of '
-      + '`app.mjs`. Use this before editing; it loads the script (no browser, no run). The Agent reads '
-      + 'and edits the file itself — this bridge never writes app code.',
+      'Read one flow app before editing it: metadata, writable script path, version anchors and current '
+        + '`app.mjs` source. Loads the script without a browser or run; the bridge never writes app code, '
+        + 'you edit the file yourself.',
     parameters: {
-      app: { type: 'string', required: true, description: 'The app id from the apps tool.' },
+      app: { type: 'string', required: true, description: 'App id from `*_apps`.' },
     },
     output: {
       schema: appDetailSchema,
@@ -846,17 +813,16 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_app_check`,
     description:
-      'Statically validate one flow app: load `app.mjs` (meta contract + imports) and dry-run its '
-      + '`flow(ctx)` call sequence, checking targets/signals/slots/commands without launching a '
-      + 'browser. Returns per-app problems (with script line when available); an empty list means the '
-      + 'script is loadable and its call sequence is legal — not that page state will hold.',
+      'Validate a flow app offline: load `app.mjs` and dry-run its `flow(ctx)` call sequence. Checks '
+        + 'targets, signals, slots and commands without a browser; returns per-app problems with the script '
+        + 'line when available. An empty list means the script loads and its call sequence is legal, not '
+        + 'that page state will hold.',
     parameters: {
-      app: { type: 'string', required: true, description: 'The app id from the apps tool.' },
+      app: { type: 'string', required: true, description: 'App id from `*_apps`.' },
       slots: {
         type: 'array', items: { type: 'string' },
-        description: 'Values for declared slots as "k=v" entries (repeatable), forwarded as `--slot` to '
-          + 'the dry validation — validate slot-parameterized branches offline. Required slots still need '
-          + 'a declared (possibly empty-string) default in meta.',
+        description: 'Slot values for the offline branch check, in the same `key=value` format as `*_run` slots. '
+          + 'Required slots still need a declared default in meta.',
       },
     },
     output: {
@@ -896,28 +862,22 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_inspect`,
     description:
-      'Observe a live page without acting: title, URL, a bounded list of elements with verified hint '
-      + 'candidates (copy a candidate into the target hint — never invent CSS), browser AX-tree evidence '
-      + '(`ax`, incl. how many named interactive nodes are NOT reachable by the pool) and engine '
-      + 'advisories (why a probe hit cannot become an act target). Element rows follow the SAME '
-      + 'ElementView contract as `' + toolPrefix + '_session op:"observe"`; `ref` is a display/audit '
-      + 'anchor, NOT an act address — act targets are hint strings. `hint_candidates` may carry a '
-      + '`frame:<origin>` suffix (single segment or <=4-segment origin chain) when a shared label is '
-      + 'disambiguated by frame; `structure_path` is diagnostic-only (unstable, NEVER copy it into a '
-      + 'target). Use this before writing a step '
-      + 'target hint. inspect 是独立一次性会话（新开浏览器，不 attach 运行会话）；会话内实时观察用'
-      + '应用内 ctx.observe()。 No clicks, no typing, no model call; only http(s) URLs.',
+      'Observe a live page read-only before writing a target hint: title, URL and verified hint '
+        + 'candidates. Returns elements with `hint_candidates`, AX-tree evidence and engine advisories. '
+        + 'Element rows use the same ElementView contract as `*_session` `op:"observe"`; `ref` is a display '
+        + 'anchor, not an act address, and the `hint_candidates` are the strings to copy: never invent CSS. '
+        + '`structure_path` is diagnostic only, not a target. Starts its own one-shot session; use '
+        + '`*_session` for repeated in-page steps. No clicks, typing or model calls; http(s) URLs only.',
     parameters: {
-      url: { type: 'string', required: true, description: 'The http(s) page to observe.' },
-      max_elements: { type: 'integer', description: 'Default 60, max 200.' },
+      url: { type: 'string', required: true, description: 'http(s) page to observe; the bridge rejects checkout-relative paths.' },
+      max_elements: { type: 'integer', description: 'Maximum element rows to return (default 60, max 200).' },
       include_text: { type: 'boolean', description: 'Include a bounded body-text excerpt.' },
       headful: { type: 'boolean', description: 'Show a browser window on the engine host.' },
       probes: {
         type: 'array', items: { type: 'string' },
         description:
-          'Read-only CSS selector probes (repeatable, max 10): existence count + up to 5 text '
-          + 'excerpts each. Use for non-interactive done signals (h1/.class) that the interactive '
-          + 'element pool cannot show.',
+          'Read-only CSS selector probes (repeatable, max 10): match count plus up to 5 text excerpts each. '
+            + 'Use for non-interactive done signals that the element pool cannot expose.',
       },
     },
     output: {
@@ -985,18 +945,18 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_test`,
     description:
-      'Use the real-site regression suite: list cases, validate declarations offline, or run a tier. '
-      + 'Never counts blocked/unreachable/skipped as passed; evidence is written outside the repo and '
-      + 'the path is returned.',
+      'Run the real-site regression suite: list cases, validate declarations offline, or run a tier. '
+        + 'Blocked, unreachable and skipped are never counted as passed; evidence is written outside the '
+        + 'repo and its path is returned.',
     parameters: {
       action: { type: 'string', required: true, enum: ['list', 'validate', 'run'] },
-      tier: { type: 'string', description: 'smoke | core | deep | probe | all | default' },
-      case: { type: 'string', description: 'Run one case id.' },
-      site: { type: 'string', description: 'Restrict to one site.' },
+      tier: { type: 'string', description: 'Suite tier to run; the closed set is declared in the schema.' },
+      case: { type: 'string', description: 'Run one case id instead of a whole tier.' },
+      site: { type: 'string', description: 'Restrict to one site declared under `online/sites`.' },
       headful: { type: 'boolean' },
-      require_all: { type: 'boolean', description: 'Treat skipped/blocked as failure (scheduled runs).' },
-      max_steps: { type: 'integer', description: 'Per-case subgoal execution budget (default 8).' },
-      timeout_sec: { type: 'integer', description: 'Override site/case timeout in seconds.' },
+      require_all: { type: 'boolean', description: 'Treat skipped or blocked cases as failures (for scheduled runs).' },
+      max_steps: { type: 'integer', description: 'Execution budget per case subgoal.' },
+      timeout_sec: { type: 'integer', description: 'Per-site or per-case timeout override, in seconds.' },
     },
     output: {
       schema: {
@@ -1044,21 +1004,18 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_app_create`,
     description:
-      'Create a flow app skeleton under the user scope via `amber apps new`: `apps/<id>/app.mjs` '
-      + 'with `meta` + an empty `flow(ctx)` to fill in. Returns the new app, its writable path and its '
-      + 'current source. Only the skeleton is generated — the Agent edits the script itself; there is '
-      + 'no step/format/kind parameter and no JSON app format. '
-      + '骨架含「卡点→能力」cookbook；新能力：ctx.observe / newTab / scrollList 合成目标 / timeoutMs 步帽 / policy target_resolution|act_hint|done_guard|navigation。 '
-      + '导航应经由页面入口/控件；直接构造 URL 跳转易触发站点风控，需要引擎强制时在 meta.policy 声明 navigation:"entry-only"（违规跳转会得到 navigation_forbidden）。 '
-      + PLAN_PLAYBOOK_SHORT,
+      'Create a flow app skeleton under the user scope via `amber apps new`; you then edit the '
+        + 'generated `app.mjs`. Returns the app id, path and current source. The skeleton is guidance only: '
+        + 'no step table, no JSON app format. '
+        + PLAN_PLAYBOOK_SHORT,
     parameters: {
       id: { type: 'string', required: true, description: 'Lowercase id; also the directory name.' },
       goal: { type: 'string', description: 'One-line goal written into `meta.goal`.' },
-      hosts: { type: 'array', items: { type: 'string' }, description: 'Allowed hosts (repeatable `--host`).' },
+      hosts: { type: 'array', items: { type: 'string' }, description: 'Allowed hosts, repeatable (`--host`).' },
       url: {
         type: 'string',
-        description: 'Entry page forwarded to the CLI `--url`: `site.pages.home` becomes this real '
-          + 'page instead of the example.com placeholder, and its host joins the allowed hosts.',
+        description: 'Entry page forwarded as `--url`: `site.pages.home` becomes this page and its host joins the '
+          + 'allowed hosts.',
       },
     },
     output: {
@@ -1082,35 +1039,32 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_learn`,
     description:
-      'Hand one browser flow to AmberFlow so it can be recorded instead of hand-written: give the '
-      + 'recorded action list plus the page it starts from, and the engine runs it once, induces each '
-      + "step's completion signal and the end-state invariants from the observed transitions, and "
-      + 'writes a **flow app** (`apps/<id>/app.mjs`) ONLY when a rules-only replay of the generated '
-      + 'script with zero model calls still passes. The result reports that replay honestly, so a flow '
-      + 'that cannot be reproduced is never reported as learned. A live demonstration is NOT available '
-      + 'through a tool call — the engine records from a human on an interactive terminal and a tool '
-      + 'call has none — so `script` is required. Needs a browser and the local decision runtime on the '
-      + 'machine running the checkout.',
+      'Record one browser flow into a flow app from a recorded action list plus its start page. The '
+        + 'engine runs the list once, induces each step\'s completion signal and the end-state invariants, '
+        + 'and writes `apps/<id>/app.mjs` only when a rules-only replay with zero model calls still passes. '
+        + 'The result reports that replay honestly; a flow that cannot be reproduced is never reported as '
+        + 'learned. A live demo is unavailable through a tool call, so `script` is required. Needs a '
+        + 'browser and the local decision runtime on the engine host.',
     parameters: {
       goal: { type: 'string', required: true, description: 'One line describing the flow to perform.' },
-      url: { type: 'string', required: true, description: 'The http(s) page to start from.' },
+      url: { type: 'string', required: true, description: 'http(s) page to start the recording from.' },
       script: {
         type: 'string',
         required: true,
         description:
-          'Path to the recorded action list: a JSON array of '
-          + '{"op":"click"|"type","hint":"<selector hint>"[,"value":"…"][,"label":"…"]} entries. '
-          + HINT_LEARN_NOTE + ' '
-          + 'Required, and the only action source that works without a terminal.',
+          'Path to the recorded action list: a JSON array of action entries. Each entry is '
+            + '`{"op":"click"|"type","hint":"<selector hint>","value"?,"label"?}`. Required; the only action '
+            + 'source that works without a terminal. '
+            + HINT_LEARN_NOTE,
       },
-      id: { type: 'string', description: 'App id to save under (defaults to a slug of host+goal).' },
-      cdp: { type: 'string', description: 'CDP websocket URL of the browser to attach to; selects the browser, not the actions.' },
-      headful: { type: 'boolean', description: 'Launch a visible browser for the recording (debug aid for a flaky flow).' },
+      id: { type: 'string', description: 'App id to save under; defaults to a slug of host plus goal.' },
+      cdp: { type: 'string', description: 'CDP WebSocket URL of the browser to attach to; selects the browser, not the actions.' },
+      headful: { type: 'boolean', description: 'Launch a visible browser for the recording (debug aid for flaky flows).' },
       apps_dir: {
         type: 'string',
-        description: 'Directory to write the flow app into (the CLI\'s `--apps-dir`). Defaults to '
-        + 'the user-scope apps dir ($AMBERFLOW_HOME/apps, or ~/.amberflow/apps) — NOT inside the '
-        + 'checkout. Recorded apps are user config; the checkout\'s apps/ are only development fixtures.',
+        description: 'Directory to write the flow app into (the CLI\'s `--apps-dir`); defaults to the user-scope apps '
+          + 'dir, never the checkout. Recorded apps are user config; checkout `apps/` are development '
+          + 'fixtures.',
       },
     },
     output: {
@@ -1175,142 +1129,124 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: `${toolPrefix}_session`,
     description:
-      'One STATE-PRESERVING authoring session against a live page: open → observe → act → '
-      + 'read/extract/signal/wait_for → snapshot → close. Each call reads back immediately, and the '
-      + 'page is NOT re-navigated between calls, so SPA state (open menus, scroll position, typed '
-      + 'values) survives across tool calls. Element resolution, action execution and signal '
-      + 'evaluation use the SAME engine implementation as a real run (hint-matched element pool, same '
-      + 'action executors, same signal checker) — but this tool NEVER judges completion, never writes '
-      + 'a run result and never emits a pass/fail verdict. '
-      + 'USE IT before authoring an app.mjs (trial and error) or to reproduce/debug ONE failing step: '
-      + '`op:"open"` once (returns session_id), then `observe` to see elements with self-verified hint '
-      + 'candidates (copy them into target hints — never invent CSS) and pool-admission diagnostics '
-      + '(admitted / why_not_admitted explain why an element cannot be addressed yet), `act` to perform '
-      + 'one action (click/check/fill/select/hover/scroll — a value '
-      + 'must be supplied explicitly; the tool never invents values). '
-      + '`act_op:"scroll"`: with `to`/`by` the target element\'s scrollable container (the element '
-      + 'itself or its nearest scrollable ancestor) is scrolled and the result carries the measured '
-      + '`moved`/`delta`/`scroll`; without `to`/`by` the element is scrolled INTO the viewport and '
-      + '`changed` is that same measured `moved` — a target with no scrollable container is '
-      + 'code:"not_scrollable", never a silent no-op. '
-      + 'Then read/extract/signal to read '
-      + 'the immediate facts back. `extract` pages with `offset` (`count` = rows returned on this '
-      + 'page, not the total; advance by `count`, stop when `has_more` is false) and can persist the '
-      + 'full result with `save:true` (<=2000 rows / 4MB, returns the file path + saved/bytes). '
-      + '`observe` has NO offset (element order moves as the page hydrates) — narrow with selector or '
-      + 'max, or take a snapshot for the full element pool. Element rows follow the SAME ElementView contract as '
-      + '`' + toolPrefix + '_inspect` (one shared projection: hint_candidates, bounded clipping, same caps); '
-      + 'hint_candidates may carry a `frame:<origin>` suffix (single segment, or a <=4-segment origin chain for '
-      + 'nested frames) when a shared label is disambiguated by frame. `include_structure:true` adds a '
-      + 'diagnostic-only `structure_path` (unstable, NEVER copy it into a target — it is not a hint). '
-      + '`ref` is a display/audit anchor, NOT an act address — act targets are hint strings. '
-      + '`act` echoes ambiguity diagnostics (`ambiguous` / '
-      + '`matched_others`) when the hint matched several candidates — re-observe and retry with a '
-      + 'narrower hint instead of guessing. When several DISTINCT candidates match, `act` does not '
-      + 'execute by default: it returns code:"target_ambiguous" plus a bounded `ambiguity` evidence '
-      + 'block (same predicate as a run command step); set on_ambiguous:"act" only to restore the old '
-      + 'first-candidate click. Raw records land under `$AMBERFLOW_HOME/session/<id>/` and can later '
-      + 'become an app.mjs skeleton via `amber session export --record <file>` — that skeleton is an '
-      + 'authoring hint, not a verified plan. '
-      + 'USE `' + toolPrefix + '_run` to execute/verify a frozen plan or app — completion truth '
-      + '(status/verified/invariants) lives ONLY there. USE `' + toolPrefix + '_inspect` for a one-shot '
-      + 'read-only look at a URL with no session and no actions. '
-      + 'Errors: an engine-level failure comes back as {ok:false, code, reason} and the session stays '
-      + 'alive (e.g. target_not_found / needs_value / action_failed); session_unavailable codes are '
-      + 'session_not_found / session_limit / child_exited / bridge_timeout / engine_feature_missing. '
-      + 'held:false / changed:false are FACTS, not errors. Sessions expire after an idle TTL and are '
-      + 'hard-killed with their browser; `op:"close"` ends one explicitly; `op:"list"` shows live ids.',
+      'Start a state-preserving authoring session against one live page. `open` returns `session_id`; '
+        + 'then call `observe`/`act`/`read`/`extract`/`signal`/`wait_for`/`snapshot`/`tab`; `close` ends '
+        + 'it. Calls do not re-navigate, so SPA state survives. Use it to try a flow step by step or debug '
+        + 'one failing step; `*_inspect` is the one-shot read and `*_run` is completion truth: this tool '
+        + 'never judges completion. `observe` returns verified hint candidates; `act` needs an explicit '
+        + '`value`. Errors return `{ok:false, code, reason}` and keep the session alive. Sessions expire '
+        + 'after an idle TTL.',
     parameters: {
       op: {
         type: 'string', required: true,
         enum: ['open', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'close', 'list'],
-        description: 'The session operation. `open` creates a session and returns session_id (all other ops except list need it).',
+        description: 'Operation to run; `open` creates a session and returns `session_id`.',
       },
-      session_id: { type: 'string', description: 'Session id returned by `open`. Required for every op except open/list.' },
-      url: { type: 'string', description: 'open: entry page. http(s) only — the bridge refuses checkout-relative paths.' },
+      session_id: { type: 'string', description: 'Session id returned by `open`; required for every op except `open` and `list`.' },
+      url: { type: 'string', description: 'open: entry page (http(s) only; checkout-relative paths are rejected).' },
       hosts: {
         type: 'array', items: { type: 'string' },
-        description: 'open: navigation envelope (hosts). Defaults to the URL host inside the engine; same semantics as meta.hosts.',
+        description: 'open: navigation envelope; same semantics as `meta.hosts` (defaults to the URL host).',
       },
-      headful: { type: 'boolean', description: 'open: show a browser window (default false; deploy hosts usually have no display).' },
+      headful: { type: 'boolean', description: 'open: show a browser window.' },
       window: {
         type: 'string', enum: ['maximized', 'fullscreen'],
-        description: 'open: window size for a HEADED session — `maximized` (maximized, browser chrome kept) or '
-          + '`fullscreen` (F11 semantics, page covers the screen). Needs a visible window (headful:true or the '
-          + 'deployment Config.headful); a headless session rejects it instead of silently ignoring it.',
+        description: 'open: window size for a headed session: `maximized` keeps browser chrome, `fullscreen` covers '
+          + 'the screen. Needs a visible window (headful or deployment config); a headless session rejects '
+          + 'it.',
       },
       record: {
         type: 'boolean',
-        description: 'open: record the action trajectory JSONL under the session evidence dir (default TRUE — `close` returns the record path for `amber session export`). `false` disables it.',
+        description: 'open: record the action trajectory JSONL under the session evidence dir. `close` returns the '
+          + 'record path for `amber session export`; set `false` to disable.',
       },
       act_op: {
         type: 'string', enum: ['click', 'check', 'fill', 'select', 'hover', 'scroll'],
-        description: 'act: which single action to perform.',
+        description: 'act: single action to perform.',
       },
-      target: { type: 'string', description: 'act: target hint string (the engine hint grammar: #id, tag[attr=value], tag[attr~substr], tag~token, role word, bare word).' },
+      target: { type: 'string', description: 'act: target hint string (hint grammar: `#id`, `tag[attr=value]`, `tag[attr~substr]`, '
+        + '`tag~token`, role word, bare word).' },
       on_ambiguous: {
         type: 'string', enum: ['fail', 'act'],
-        description: 'act: what to do when the target hint matches several distinct candidates. Default "fail" — NOTHING is executed; the result carries code:"target_ambiguous" and a bounded `ambiguity` evidence block (candidate refs/tags/labels, which candidate would have been acted on, whether labels can discriminate), using the SAME predicate as a run command step. Set "act" to restore the pre-A2 behaviour (act on the first actionable candidate) — only to reproduce/debug an old flow or when the candidates are known-equivalent. Prefer narrowing the hint (unique #id / [data-test=…] / role word) over guessing.',
+        description: 'act: what to do when several distinct candidates match the hint. `fail` executes nothing and '
+          + 'returns `code:"target_ambiguous"` with a bounded ambiguity block; `act` clicks the first '
+          + 'actionable candidate (legacy behavior, use only to reproduce an old flow). Prefer narrowing the '
+          + 'hint over guessing.',
       },
       rehydrate_rescan: {
         type: 'boolean',
-        description: 'act: opt-in bounded rescan for hydration-race misses. When the first resolve finds nothing AND the pre-pool settle reported the page never went quiet (timedOut — carousel/hydration intermediate pool), the engine waits ~2s, re-extracts the pool and re-resolves the SAME hint (pure hint matching, no model vote, at most once). On hit the result carries resolved_via:"rehydrate-rescan"; on still-miss the failure keeps the original stopCode and carries diagnostics.rescan facts. Default off — byte-identical behavior. Prefer ctx.waitForTarget / wait_for positive anchoring when authoring.',
+        description: 'act: opt-in bounded rescan for hydration races. When the first resolve misses and the page never '
+          + 'settled, wait 2 s, re-extract and re-resolve the same hint at most once, with no model vote. '
+          + 'Reports `resolved_via:"rehydrate-rescan"` on hit; otherwise keeps the original stop code. Prefer '
+          + '`wait_for` anchoring when authoring.',
       },
-      value: { type: 'string', description: 'act fill/select: the value to type/select. Explicit only — the tool never invents values.' },
+      value: { type: 'string', description: 'act `fill`/`select`: the value to type or select; explicit only, never invented.' },
       to: {
         type: 'string', enum: ['bottom', 'top', 'page'],
-        description: 'act scroll: container direction. With to/by the target element\'s scrollable container (itself or nearest scrollable ancestor; the document for a synthetic target) is scrolled — NOT the element into view. Omit to/by to scroll the element INTO the viewport instead.',
+        description: 'act `scroll`: scroll the target\'s scrollable container to `bottom` or `top`, or use `page` for '
+          + 'the document. Omit `to` and `by` to scroll the target into the viewport instead.',
       },
       by: {
         type: 'integer',
-        description: 'act scroll: container pixel delta (alternative to `to`, and preferred when both are given); finite, non-zero. Omit to/by to scroll the element into the viewport.',
+        description: 'act `scroll`: pixel delta for the container; preferred when both `to` and `by` are given. Must '
+          + 'be finite and non-zero.',
       },
-      selector: { type: 'string', description: 'read: CSS selector.' },
+      selector: { type: 'string', description: 'read: CSS selector to read.' },
       what: {
         type: 'string', enum: ['text', 'value', 'count', 'attr'],
-        description: 'read: text (innerText), value (inputValue), count (match count), attr (attribute value).',
+        description: 'read: what to read: `text` (innerText), `value` (inputValue), `count` (match count) or `attr` '
+          + '(attribute value).',
       },
-      attr: { type: 'string', description: 'read what=attr: attribute name.' },
+      attr: { type: 'string', description: 'read with `what:"attr"`: attribute name.' },
       rows: { type: 'string', description: 'extract: row CSS selector.' },
       fields: {
         type: 'object', additionalProperties: true,
-        description: 'extract: field map {name: css | "." (row text) | "@attr"}. Same semantics as ctx.extract inline.',
+        description: 'extract: field map `{name: css | row text | @attr}`; same semantics as inline `ctx.extract`.',
       },
-      max_items: { type: 'integer', description: 'extract: rows per page (default 20, max 20 through the bridge; the engine accepts up to 500). count is the rows returned on THIS page, not the total.' },
+      max_items: { type: 'integer', description: 'extract: rows per page; `count` is the rows returned on this page, not the total.' },
       offset: {
         type: 'integer',
-        description: 'extract: 0-based row offset for the next page (integer 0..10000; invalid = config_error). Advance by the returned `count` and stop when `has_more` is false. The response carries `offset`/`total`/`has_more` only when the page was capped or offset > 0.',
+        description: 'extract: 0-based row offset for the next page; advance by the returned `count` and stop when '
+          + '`has_more` is false. Out of range returns `config_error`.',
       },
       save: {
         type: 'boolean',
-        description: 'extract: page through the result in the bridge (500 rows per page, hard cap 2000 rows / 4MB) and write it to <evidence_dir>/extract-<n>.json; the result then carries file/saved/bytes and, when a cap stopped it, truncated/save_limit. rows still shows the first page (<=20).',
+        description: 'extract: persist the full result to an evidence file. Pages through the result in the bridge '
+          + '(hard cap 2000 rows / 4MB) and writes `<evidence_dir>/extract-<n>.json`; the result then carries '
+          + '`file`/`saved`/`bytes` and, when capped, `truncated`/`save_limit`.',
       },
       signal: {
         type: 'object', additionalProperties: true,
-        description: 'signal/wait_for: a verifiable-signal object using the SAME operator set as run done/when signals (url_contains, css_exists, css_exists_text, css_visible_exists, css_text_contains, css_text_equals, css_value_equals, all_of, any_of, not, manual).',
+        description: 'signal/`wait_for`: verifiable-signal object, same operator set as run done/when signals. '
+          + 'Operators: `url_contains`, `css_exists`, `css_exists_text`, `css_visible_exists`, '
+          + '`css_text_contains`, `css_text_equals`, `css_value_equals`, `all_of`, `any_of`, `not`, `manual`.',
       },
-      timeout_ms: { type: 'integer', description: 'wait_for: poll window in ms (default 15000, max 120000).' },
-      max: { type: 'integer', description: 'observe: max rows (default 60, max 200 — the same ElementView cap as ' + toolPrefix + '_inspect max_elements).' },
-      include_hidden: { type: 'boolean', description: 'observe: include invisible elements (default false).' },
+      timeout_ms: { type: 'integer', description: 'wait_for: poll window in milliseconds.' },
+      max: { type: 'integer', description: 'observe: maximum rows (same ElementView cap as `*_inspect` `max_elements`).' },
+      include_hidden: { type: 'boolean', description: 'observe: include invisible elements.' },
       include_structure: {
         type: 'boolean',
-        description: 'observe: include diagnostic-only structure evidence (default false). Each row then carries '
-          + '`structure_path` (<=160 chars, ancestor tag/#id + same-tag sibling index + frame index) and '
-          + '`structure_unstable:true`. It is NOT a hint — dynamic pages may invalidate it; never copy it into a target.',
+        description: 'observe: include diagnostic-only `structure_path` evidence. It is unstable and not a hint; never '
+          + 'copy it into a target.',
       },
-      screenshot: { type: 'boolean', description: 'snapshot: also write a viewport screenshot; act: write act-<n>-failure.png ONLY when the action fails (default false; only paths are returned, never inline).' },
+      screenshot: { type: 'boolean', description: 'snapshot: also write a viewport screenshot. `act`: write a failure screenshot only when the '
+        + 'action fails; only paths are returned.' },
       tab_action: {
         type: 'string', enum: ['list', 'switch'],
-        description: 'tab: "list" (default) enumerates the context pages as TabInfo rows {index,url,title,active} plus the top-level active index (free read-only — no switch, no record, no action count; the list may include pages outside the declared hosts envelope); '
-          + '"switch" moves the session to the ONE tab matching `match` (required) and refreshes the idle TTL (counts as one activity). It does NOT re-implement step newTab adoption — new-tab semantics stay on the flow face.',
+        description: 'tab: `list` enumerates context pages without switching: active index plus TabInfo rows. `switch` '
+          + 'moves the session to the one tab matching `match` and refreshes the idle TTL.',
       },
       match: {
         type: 'object', additionalProperties: true,
-        description: 'tab switch: match {index} | {urlContains} | {titleContains} (0-based index; case-insensitive substrings; several keys AND-narrow). At least one key — missing/empty match, 0 or >1 matches = config_error (reason lists the current tabs, no implicit fallback); a target outside the open-declared hosts envelope = host_not_allowed and the tab is NOT activated. switch writes one JSONL action record; list does not.',
+        description: 'tab `switch`: match by `{index}`, `{urlContains}` or `{titleContains}`; keys AND-narrow and at '
+          + 'least one is required. Missing, empty, 0 or more than 1 matches return `config_error`; a tab '
+          + 'outside the declared hosts envelope returns `host_not_allowed` and is not activated.',
       },
       idle_timeout_ms: {
         type: 'integer',
-        description: 'open-only: per-session idle TTL in ms. Omitted = the deployment manager default (Config.sessionIdleMs) — byte-identical to before; `0` = unlimited (explicit only — the reaper skips the session); non-integer or 1..999 = config_error ("idle_timeout_ms must be 0 or an integer >= 1000"). NOT capped by the deployment sessionIdleMs 1h limit (that cap governs the manager default, not a per-session value). Any other op passing this parameter = config_error. The engine child\'s CLI orphan backstop is linked automatically to max(600s, 2×idle_timeout_ms) (0/omitted = 600s unchanged); op:"list" rows echo the effective value as idle_timeout_ms (explicit 0 echoes 0).',
+        description: 'open: per-session idle TTL in milliseconds. Omit for the deployment default; `0` means '
+          + 'unlimited. Values 1..999 are rejected with `config_error`; other ops passing it also return '
+          + '`config_error`. `op:"list"` rows echo the effective value.',
       },
     },
     output: {

@@ -45,6 +45,10 @@
  *   bridge_desc 桥手写工具描述覆盖（**warn-only**）：扫 dsh-bridge index.ts 的
  *            description 字符串——长度 ≤800/条、`amber <cmd>` 死链、站点/业务专名；
  *            命中只打 warn（退出码不受影响），并输出统计行（N/总数）。
+ *   clarity  Agent/用户面提示词语义清晰度（fail）：overview/playbook/failure_signs/
+ *            stop_escalation/stop_next/exempt/grammar 文案——禁模糊措辞（尽量/也许/大概/
+ *            可能/视情况…）、禁双重否定、禁 TODO/待定；单句 ≤200 字符；STOP_NEXT ≤120；
+ *            概述必须含「什么时候用 / 从哪开始」两段；HOME_NEXT why ≤40。
  *
  * 三层提示词系统的设计出处：docs/PROMPT_SYSTEM.md。
  * 退出码：0 全绿 / 1 有不一致。
@@ -58,7 +62,7 @@ import { parseHint } from "../src/engine/hint.ts";
 import { SIGNAL_OPS } from "../src/engine/signal-ops.ts";
 import {
   HINT_SHAPES, HINT_FRAME_SUFFIX, SIGNAL_OP_PROMPT, ATTR_MATCH_MODEL_TEXT,
-  CANDIDATE_WINDOW_TEXT, hintPromptTokens, signalPromptLines,
+  CANDIDATE_WINDOW_TEXT, HINT_CLOSED_SET_TEXT, hintPromptTokens, signalPromptLines,
 } from "../src/engine/grammar-prompt.ts";
 import { PLAN_PLAYBOOK_TEXT, FAILURE_SIGNS_TEXT, PLAN_PLAYBOOK_SHORT, STOP_ESCALATION_TEXT, STOP_NEXT, EXEMPT_NEXT, nextForStop } from "../src/engine/planning-playbook.ts";
 import { hintMatch } from "../src/engine/rules.ts";
@@ -832,6 +836,9 @@ const BRIDGE_DESC_MAX_CHARS = 800;
     if (SITE_NAME_RE.test(text)) {
       siteNames += 1;
       bridgeWarnings.push(`bridge_desc: #${i + 1} 含站点/业务专名`);
+    if (/(possibly|probably|maybe|might)\b|(?:尽量|也许|大概|或许|酌情|视情况)/i.test(text)) {
+      bridgeWarnings.push(`bridge_desc: #${i + 1} 含模糊措辞——改成明确条件/动作`);
+    }
     }
   });
   // 基线 82 条（桥面盘点值）：数量漂移只 warn——桥面新增工具描述是正常演进，重审预算即可。
@@ -843,6 +850,53 @@ const BRIDGE_DESC_MAX_CHARS = 800;
     `prompt-hit: bridge_desc（warn-only）— ${descriptions.length}/${BRIDGE_DESC_BASELINE} 个 description / 共 ${totalChars} 字符；`
       + `> ${BRIDGE_DESC_MAX_CHARS}: ${overBudget}；amber 死链: ${deadLinks}；站点名: ${siteNames}`,
   );
+}
+
+/* ---- 8f. clarity：Agent/用户面提示词语义清晰度（fail） -------------------- */
+// 「言简意赅、目标明确、表达清晰、无歧义」的可机械判定部分：模糊措辞/双重否定/长句/
+// 待定词/停因文案预算。模型 prompt 不在本组（它们是英文输出契约，另行冻结）。
+
+const CLARITY_HEDGE_RE = /(尽量|也许|大概|或许|酌情|视情况|必要时|等等|之类|差不多|可能)/;
+const CLARITY_DOUBLE_NEG_RE = /(不是不|不能不|不无|并非不)/;
+const CLARITY_TODO_RE = /(TODO|FIXME|待定|暂定)/;
+const CLARITY_MAX_SENTENCE = 200;
+/** 契约类文本（必须逐字嵌入文档/报错）保留高密度单句；只豁免「句长」一项，模糊措辞等仍查。 */
+const CLARITY_LONG_EXEMPT = new Set(["grammar.attr_match", "grammar.hint_closed_set"]);
+
+function clarityCheck(label: string, text: string): void {
+  const hedge = text.match(CLARITY_HEDGE_RE);
+  if (hedge !== null) problems.push(`clarity: ${label} 含模糊措辞 ${JSON.stringify(hedge[0])}——改成明确条件/明确动作`);
+  const dbl = text.match(CLARITY_DOUBLE_NEG_RE);
+  if (dbl !== null) problems.push(`clarity: ${label} 含双重否定 ${JSON.stringify(dbl[0])}——改成正述`);
+  const todo = text.match(CLARITY_TODO_RE);
+  if (todo !== null) problems.push(`clarity: ${label} 含待定词 ${JSON.stringify(todo[0])}`);
+  if (!CLARITY_LONG_EXEMPT.has(label)) {
+    const long = text.split(/[。；;！？\n]/).map((x) => x.trim()).filter((x) => x.length > CLARITY_MAX_SENTENCE);
+    if (long.length > 0) problems.push(`clarity: ${label} 有 ${long.length} 句超过 ${CLARITY_MAX_SENTENCE} 字符——拆句`);
+  }
+}
+
+const clarityTexts: Array<[string, string]> = [
+  ["overview", OVERVIEW_TEXT],
+  ["playbook.short", PLAN_PLAYBOOK_SHORT],
+  ["playbook.full", PLAN_PLAYBOOK_TEXT],
+  ["failure_signs", FAILURE_SIGNS_TEXT],
+  ["stop_escalation", STOP_ESCALATION_TEXT],
+  ["grammar.attr_match", ATTR_MATCH_MODEL_TEXT],
+  ["grammar.candidate_window", CANDIDATE_WINDOW_TEXT],
+  ["grammar.hint_closed_set", HINT_CLOSED_SET_TEXT],
+  ...Object.entries(STOP_NEXT).map(([k, v]) => [`stop_next.${k}`, v] as [string, string]),
+  ...Object.entries(EXEMPT_NEXT).map(([k, v]) => [`exempt.${k}`, v] as [string, string]),
+];
+for (const [label, text] of clarityTexts) clarityCheck(label, text);
+if (!OVERVIEW_TEXT.includes("什么时候用") || !OVERVIEW_TEXT.includes("从哪开始")) {
+  problems.push("clarity: overview 缺「什么时候用 / 从哪开始」两段——目标与入口必须显式");
+}
+for (const [code, text] of Object.entries(STOP_NEXT)) {
+  if (text.length > 120) problems.push(`clarity: stop_next '${code}' ${text.length} 字符 > 120 预算——压到一句可执行建议`);
+}
+for (const h of HOME_NEXT) {
+  if (h.why.length > 40) problems.push(`clarity: HOME_NEXT '${h.cmd}' why ${h.why.length} 字符 > 40`);
 }
 
 /* ---- 9. intervention：求援文案六条清单（§6，实施照抄） ---------------------- */
@@ -932,7 +986,7 @@ if (problems.length) {
 }
 // 分组清单式输出：文档引用组名，不引用编号（插组不会让既有引用失准）。
 console.log(
-  `prompt-hit: OK — grammar/pool/plan/bridge/doc/overview/coverage/intervention/model/agent/evidence/bridge_desc 十二组全绿（bridge_desc 仅 warn）：`
+  `prompt-hit: OK — grammar/pool/plan/bridge/doc/overview/coverage/intervention/model/agent/evidence/bridge_desc/clarity 十三组全绿（bridge_desc 仅 warn）：`
     + `hint ${HINT_SHAPES.length} 形状全部可解析且示例可命中，`
     + `信号 ${Object.keys(SIGNAL_OPS).length} 算子提示词↔校验器一致，`
     + `停因 ${Object.keys(STOPCODE_MEANING).length} 个 next/豁免全覆盖，`
@@ -941,5 +995,6 @@ console.log(
     + `模型 prompt ${PROMPT_SPECS.length} 条唯一文本 × ${PROMPT_SPECS.reduce((s, x) => s + x.consumers.length, 0)} 处消费点单源（快照 hash 一致），`
     + `Agent plan.rules ${new PlanningRules().promptText().length} 字符（预算 ${PLAN_RULES_SPEC.budget.maxChars}；`
     + `playbook ${PLAN_PLAYBOOK_SHORT.length}/${PLAN_PLAYBOOK_TEXT.length} ≤500/2200；候选窗口 ${CANDIDATE_WINDOW_TEXT.length} 字符由常量渲染），`
-    + `证据 spec ${EVIDENCE_SPECS.length} 条（候选 40/120/200 分级预算 + 快照 hash 一致）`,
+    + `证据 spec ${EVIDENCE_SPECS.length} 条（候选 40/120/200 分级预算 + 快照 hash 一致），`
+    + `clarity 0 违规（模糊措辞/双重否定/长句/停因预算/概述结构）`,
 );

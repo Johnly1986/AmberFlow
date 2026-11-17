@@ -13,15 +13,10 @@
  * 叶子模块：零 import。
  */
 
-/** 概述全文（≤400 字符；含两条差异声明，纠正"直接写 Playwright"的错误心智）。 */
-export const OVERVIEW_TEXT =
-  "AmberFlow 是冻结计划的浏览器自动化引擎：计划由人给出（app.mjs 的 flow(ctx) 脚本），"
-  + "引擎逐步选元素、执行动作、验证完成信号；模型只做选择/风险/完成票（完成票仅 advisory），不生成动作，完成只认 DOM/工具信号。"
-  + "什么时候用：要在真实网站上自动化一条可验证的流程（采集、下单、巡检、回归），"
-  + "且希望每一步有结构化证据与完成裁决时。"
-  + "从哪开始：已安装 → amber doctor 体检；checkout 内 → "
-  + "node --experimental-strip-types src/cli/main.ts doctor"
-  + "（裸 amber 不在 PATH，npx amber 会挂住）。";
+/** 概述全文（≤400 字符；三段式：引擎是什么 / 什么时候用 / 从哪开始）。 */
+export const OVERVIEW_TEXT = `AmberFlow 是浏览器自动化引擎：你把流程写成 app.mjs 的 flow(ctx) 脚本，引擎逐步选元素、执行动作、验证完成信号；模型只投票（选择/风险/完成），不生成动作，完成只认页面/工具信号。
+什么时候用：在真实网站上跑可验证的流程（采集、下单、巡检、回归），并要求每步有结构化证据与完成裁决。
+从哪开始：amber doctor 体检；checkout 内用 node --experimental-strip-types src/cli/main.ts doctor（裸 amber 不在 PATH，npx amber 会挂住）。`;
 
 /** 概述层与工具层的桥梁：每个 CLI 命令一行"何时用"（每条 ≤40 字符）。 */
 export interface WhenToUse {
