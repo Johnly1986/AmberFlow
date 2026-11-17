@@ -6,7 +6,7 @@
     "phaseFunctionMaxLines": 400,
     "files": {
       "src/engine/executor.ts": 5829,
-      "src/app/app-runner.ts": 2853,
+      "src/app/app-runner.ts": 2847,
       "src/app/ctx.ts": 1799,
       "src/engine/extraction.ts": 1612,
       "src/app/session-runtime.ts": 1460,
@@ -25,7 +25,7 @@
       {
         "file": "src/app/app-runner.ts",
         "name": "runScriptApp",
-        "lines": 802
+        "lines": 799
       },
       {
         "file": "src/engine/executor.ts",
@@ -35,7 +35,7 @@
       {
         "file": "src/app/app-runner.ts",
         "name": "runApp",
-        "lines": 691
+        "lines": 687
       },
       {
         "file": "src/app/ctx-dry.ts",
