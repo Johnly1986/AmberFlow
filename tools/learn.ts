@@ -31,7 +31,7 @@ import { validatePack, type AppPack } from "../src/app/app-pack.ts";
 import { ensureDir, userAppsDir } from "../src/support/amberflow-home.ts";
 import { runApp, runScriptApp, startUrl } from "../src/app/app-runner.ts";
 import { browserSession } from "../src/engine/executor.ts";
-import { extractElements } from "../src/engine/extraction.ts";
+import { extractElements } from "../src/app/candidate-scan.ts";
 import { hintMatch } from "../src/engine/rules.ts";
 import { installLayaRuntime, scriptedAgent, scriptedRuntime } from "../src/model/model.ts";
 import { captureStateView, induceSignals } from "../src/flow/signal-induction.ts";

@@ -34,14 +34,14 @@ import {
   type ActionabilityDetail, type ActMissDiagnostics, type AnyPage, type BrowserSession,
 } from "../engine/executor.ts";
 import {
-  countAnyFrame, extractElements, urlOf, type ElemPool, type PageLike,
+  countAnyFrame, urlOf, type ElemPool, type PageLike,
 } from "../engine/extraction.ts";
+import { extractElements } from "./candidate-scan.ts";
 import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
 // F76/P3：tab op 复用 ctx-validate 的**纯函数层**（校验/匹配/现场描述），不发明第二套匹配语义。
 import { describeTabs, switchTabMatches, validateSwitchTabMatch } from "./ctx-validate.ts";
 import type { SwitchTabMatch, TabInfo } from "./ctx-types.ts";
-// task-34（B1 旁路复用）：与 run 面**同一个**弱档命中诊断（`rules.hintMatchImpl` 的模块态），
-// 会话只 take 出来回显，不改选择语义、不改 run 面任何代码。
+// task-34（B1 旁路复用）：与 run 面**同一个**弱档命中诊断（`rules.hintMatchImpl` 的模块态）， 会话只 take 出来回显，不改选择语义、不改 run 面任何代码。
 import { takeHintMatchOthers } from "../engine/rules.ts";
 import { DEFAULT_SETTLE, settle } from "../engine/settle.ts";
 import type { LaunchWindowMode } from "../browser/browser-env.ts";

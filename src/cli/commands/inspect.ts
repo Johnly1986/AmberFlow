@@ -20,8 +20,9 @@ import { CLI_COMMAND_DEFAULT_TIMEOUT_MS } from "../../support/tuning.ts";
 // 不进池构成/hint 匹配/模型视图/动作路径（见 src/engine/ax.ts 文件头纪律）。
 import { AX_NOT_IN_POOL_BASIS, countAxNotInPool, snapshotAx } from "../../engine/ax.ts";
 import {
-  extractElements, frameOriginOf, framesOf, INTERACTIVE_ALL, WIDE_POOL_ELEMENTS, windowAudit,
+  frameOriginOf, framesOf, INTERACTIVE_ALL, WIDE_POOL_ELEMENTS, windowAudit,
 } from "../../engine/extraction.ts";
+import { extractElements } from "../../app/candidate-scan.ts";
 import { poolView } from "../../engine/pool-view.ts";
 import { poolNearEmpty, nextForInspect } from "../../engine/planning-playbook.ts";
 import { matchSelector } from "../../engine/signals.ts";

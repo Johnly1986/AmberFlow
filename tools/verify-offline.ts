@@ -24,7 +24,8 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { browserSession } from "../src/engine/executor.ts";
-import { extractElements, type ElemPool, type PageLike } from "../src/engine/extraction.ts";
+import { type ElemPool, type PageLike } from "../src/engine/extraction.ts";
+import { extractElements } from "../src/app/candidate-scan.ts";
 import { hintCandidates, hintMatch } from "../src/engine/rules.ts";
 import type { AnyPage } from "../src/engine/executor-types.ts";
 

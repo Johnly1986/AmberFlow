@@ -67,7 +67,6 @@ import {
   ariaInteractiveLines,
   criteriaView,
   esig,
-  extractElements,
   extractSlots,
   elemFamily,
   lexicalOverlap,
@@ -352,7 +351,7 @@ import {
   weakRejectedReason,
 } from "./executor-pure.ts";
 import { createRunAccounting, type RunAccounting } from "./run-context.ts";
-import { createEngineCandidateProducer, type CandidateProducer } from "./candidate-contract.ts";
+import type { CandidateProducer } from "./candidate-contract.ts";
 import { createDeclaredTargetsResolver, type DeclaredTargetsResolver } from "./declared-targets.ts";
 import {
   declaredEvidence, declaredHiddenSuffix, declaredMissSuffix, drfHintSuffix,
@@ -890,7 +889,7 @@ export class BrowserMiddleware {
     page: AnyPage, candidatePriority: "bucketed" | "main-first", deadlineMs?: number,
   ): Promise<{ elems: ElemPool; settle: SettleResult | null }> {
     const settleRes = await this._settleBeforeExtract(page, deadlineMs);
-    const elems = await this.candidates.extract({
+    const elems = await this.candidates!.extract({
       page, jsProbe: true, candidatePriority, surface: this.surfacePolicy,
       hosts: this._frameHosts,   // P0-D：被排除 frame 不进池
       ...(this.poolQuotaMode === "quota" ? { poolQuotaMode: "quota" } : {}),   // E1-b
@@ -969,7 +968,8 @@ export class BrowserMiddleware {
   lastRouting: Record<string, unknown> | null = null;
   _routedModel: string | null = null;
   private _ready = false;
-  /** BACKLOG #2：候选生产者（缺省 = 引擎默认实现；2.2 起由应用层注入）。 */ private readonly candidates: CandidateProducer;
+  /** BACKLOG #2：候选生产者（`buildMiddleware` 必注入；直接构造执行器视为误用 ⇒ null 断言）。 */
+  private readonly candidates: CandidateProducer | null;
 
   constructor(opts: MiddlewareOptions = {}) {
     this.modelId = opts.modelId ?? "convaiinnovations/laya";
@@ -977,7 +977,7 @@ export class BrowserMiddleware {
     this.routeModels = Boolean(opts.routeModels);
     this.router = opts.router ?? null;
     this.auditor = opts.auditor ?? getAuditor();
-    this.candidates = opts.candidateProducer ?? createEngineCandidateProducer();
+    this.candidates = opts.candidateProducer ?? null;
     this.maxSteps = opts.maxSteps ?? 8;
     this.confFloor = opts.confFloor ?? DEFAULT_CONF_FLOOR;
     this.riskyThreshold = opts.riskyThreshold ?? 0.6;
@@ -2475,7 +2475,7 @@ export class BrowserMiddleware {
     const RESCAN_WAIT_MS = 2000;
     const started = Date.now();
     await sleep(RESCAN_WAIT_MS);
-    const fresh = await this.candidates.extract({
+    const fresh = await this.candidates!.extract({
       page, jsProbe: true, candidatePriority: this.candidatePriority, surface: this.surfacePolicy, hosts: this._frameHosts,
       ...(this.poolQuotaMode === "quota" ? { poolQuotaMode: "quota" } : {}),
     });
@@ -3793,7 +3793,7 @@ export class BrowserMiddleware {
             // F3：步级 timeoutMs 过期后不再起新的宽扫重解析。
             reobserved = true;
             await this._settleBeforeExtract(pg);
-            const wide = await this.candidates.extract({ page: pg, jsProbe: true, maxElements: WIDER_ELEMENTS, widgets: true, candidatePriority: "main-first", hosts: this._frameHosts });
+            const wide = await this.candidates!.extract({ page: pg, jsProbe: true, maxElements: WIDER_ELEMENTS, widgets: true, candidatePriority: "main-first", hosts: this._frameHosts });
             if (Object.keys(wide).length > Object.keys(elems).length) {
               // refs 是位置性的：先把"换位后已不是同一元素"的禁用记录清掉（与步头同规则）。
               pruneForbids(wide);
@@ -3836,7 +3836,7 @@ export class BrowserMiddleware {
           const waitMs = Math.min(2000, Math.max(0, stepTimeoutLeft() - 250));
           if (waitMs > 0) {
             await sleep(waitMs);
-            const fresh = await this.candidates.extract({ page: pg, jsProbe: true, candidatePriority,
+            const fresh = await this.candidates!.extract({ page: pg, jsProbe: true, candidatePriority,
               surface: this.surfacePolicy, hosts: this._frameHosts,
               ...(this.poolQuotaMode === "quota" ? { poolQuotaMode: "quota" } : {}) });
             pruneForbids(fresh);
@@ -4729,7 +4729,7 @@ export class BrowserMiddleware {
           // F3：步级 timeoutMs 过期后不再起新的宽扫重问（每轮受整步挂钟帽约束）。
           reobserved = true;
           await settleBeforeExtract(pg);
-          const wide = await this.candidates.extract({ page: pg, jsProbe: true, maxElements: WIDER_ELEMENTS, widgets: true, quotas: WIDE_QUOTAS, candidatePriority, hosts: frameHosts });
+          const wide = await this.candidates!.extract({ page: pg, jsProbe: true, maxElements: WIDER_ELEMENTS, widgets: true, quotas: WIDE_QUOTAS, candidatePriority, hosts: frameHosts });
           if (Object.keys(wide).length > Object.keys(elems).length) {
             // refs are positional: re-prune forbids whose ref now names a
             pruneForbids(wide);
@@ -4829,7 +4829,7 @@ export class BrowserMiddleware {
         && !lexicalOverlap(instruction, String(elems[ref]?.label ?? ""))) {
       reobserved = true;
       await settleBeforeExtract(pg);
-      const wideR2b = await this.candidates.extract({ page: pg, jsProbe: true, maxElements: WIDER_ELEMENTS, widgets: true, quotas: WIDE_QUOTAS, candidatePriority, hosts: frameHosts });
+      const wideR2b = await this.candidates!.extract({ page: pg, jsProbe: true, maxElements: WIDER_ELEMENTS, widgets: true, quotas: WIDE_QUOTAS, candidatePriority, hosts: frameHosts });
       if (Object.keys(wideR2b).length > Object.keys(elems).length) {
         pruneForbids(wideR2b);
         const wideAskR2b = orderedPool(wideR2b);

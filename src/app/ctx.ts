@@ -19,11 +19,12 @@ import {
 } from "../engine/executor.ts";
 import { NAVIGATION_GOTO_TIMEOUT_MS } from "../support/tuning.ts"; import { validateCommands } from "../engine/actions.ts"; import { frameGateExcludes } from "../engine/frame-scope.ts";
 import {
-  firstOf, framesOf, locatorAnyFrame, urlOf, extractElements, poolSniff,
+  firstOf, framesOf, locatorAnyFrame, urlOf, poolSniff,
   splitFrameSuffixFromSelector, frameScopeEvidenceOf, frameScopeMatchesFrame,
   type FrameScopeEvidence,
   type FrameLike, type PageLike,
 } from "../engine/extraction.ts";
+import { extractElements } from "./candidate-scan.ts";
 // task-16（B3+）：arrive 侧限速判据的嗅探面选择器（与执行器同口径的准入面）。
 import { admitSelectorWithJsFor } from "../engine/surface.ts";
 // task-24/6a：限速判据阈值单一出处（step 侧与 arrive 侧共用）。
@@ -233,8 +234,7 @@ export function createCtx(deps: CtxDeps): Ctx {
         url, { waitUntil: "domcontentloaded", timeout: timeoutMs ?? NAVIGATION_GOTO_TIMEOUT_MS },
       );
     } catch (e) {
-      // 网络/可达性失败 ≠ 声明错误：DNS 解析失败、连接拒绝、导航超时都是「站点此刻
-      // 不可达」，正确动作是验证可达后重试/放宽 --timeout，不是改声明。只有其余
+      // 网络/可达性失败 ≠ 声明错误：DNS 解析失败、连接拒绝、导航超时都是「站点此刻 不可达」，正确动作是验证可达后重试/放宽 --timeout，不是改声明。只有其余
       // 异常（如畸形 URL）才归 config_error（改声明，不要重试）。
       const msg = e instanceof Error ? e.message : String(e);
       if (/Timeout .*ms exceeded|ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_REFUSED|ERR_CONNECTION_TIMED_OUT|ERR_CONNECTION_RESET|ERR_INTERNET_DISCONNECTED|ERR_NAVIGATION_ABORTED/.test(msg)) {

@@ -9,23 +9,22 @@
  * 纪律：
  *   - 不 import Playwright 具体类型（`PageLike` 是引擎结构类型，兼容注入的 page/session）；
  *   - 纯数据入参/出参（`ElemPool` + 可选的步级预算元数据）；
- *   - 默认实现是**临时**的：内部转调 `extraction.extractElements`，参数逐字搬移，
- *     行为与改造前逐字节等价。2.2 把扫描实现搬到 app 层后，本默认实现随之删除/降级。
+ *   - 本文件只留契约类型（扫描实现在 `src/app/candidate-scan.ts`，应用层注入）。
  */
-import { extractElements, type ElemPool, type PageLike, type PoolQuotas } from "./extraction.ts";
+import type { ElemPool, PageLike, PoolQuotas } from "./extraction.ts";
 import type { SurfacePolicy } from "./surface.ts";
 
-/** 一次候选抽取请求（字段与 `extraction.extractElements` 的实参面一一对应）。 */
+/** 一次候选抽取请求（字段与应用层扫描 `src/app/candidate-scan.ts` 的实参面一一对应）。 */
 export interface CandidateExtractRequest {
   /** 结构页面类型（Playwright 的 Page 与引擎注入面都满足它；无具体类型 import）。 */
   page: PageLike;
-  /** 是否跑交互控件探测（缺省 true，与 `extractElements` 一致）。 */
+  /** 是否跑交互控件探测（缺省 true，与应用层扫描一致）。 */
   jsProbe?: boolean;
-  /** 池上限：缺省 = `extractElements` 的 `MAX_ELEMENTS`；宽扫传 `WIDER_ELEMENTS`。 */
+  /** 池上限：缺省 = 引擎预算常量 `MAX_ELEMENTS`；宽扫传 `WIDER_ELEMENTS`。 */
   maxElements?: number;
   /** 抽控件面（`jsInteractiveWidgets` 前置探针）；宽扫用 true。 */
   widgets?: boolean;
-  /** A2 分桶配额；`null` = main-first 回退面（与 `extractElements` 同义）。 */
+  /** A2 分桶配额；`null` = main-first 回退面（与应用层扫描同义）。 */
   quotas?: PoolQuotas | null;
   /** A2：`meta.policy.candidate_priority`（缺省 "bucketed"）。 */
   candidatePriority?: "bucketed" | "main-first";
@@ -36,31 +35,14 @@ export interface CandidateExtractRequest {
   /** E1-b：池配额模型（缺省 "legacy"）。 */
   poolQuotaMode?: "legacy" | "quota";
   /**
-   * 步级剩余预算（毫秒）——**纯元数据**：默认实现不使用（`extractElements` 无此参数），
+   * 步级剩余预算（毫秒）——**纯元数据**：默认实现不使用（应用层扫描无此参数），
    * 留给 2.2 应用层生产者决定 settle/扫描预算；引擎只负责如实传递。
    */
   deadlineMs?: number;
 }
 
-/** 候选生产者：引擎唯一依赖的抽池 seam（默认实现见 `createEngineCandidateProducer`）。 */
+/** 候选生产者：引擎唯一依赖的抽池 seam（实现由应用层注入，见 `src/app/candidate-source.ts`）。 */
 export interface CandidateProducer {
   extract(req: CandidateExtractRequest): Promise<ElemPool>;
 }
 
-/**
- * 临时默认实现：包当前引擎扫描 `extractElements`，参数逐字搬移（缺省语义不变）。
- * 2.2 扫描实现上移应用层后由应用层注入的 producer 取代；在那之前这是唯一实现。
- */
-export function createEngineCandidateProducer(): CandidateProducer {
-  return {
-    extract: (req) =>
-      extractElements(req.page, req.jsProbe ?? true, req.maxElements, {
-        ...(req.widgets === undefined ? {} : { widgets: req.widgets }),
-        ...(req.quotas === undefined ? {} : { quotas: req.quotas }),
-        ...(req.candidatePriority === undefined ? {} : { candidatePriority: req.candidatePriority }),
-        ...(req.surface === undefined ? {} : { surface: req.surface }),
-        ...(req.hosts === undefined ? {} : { hosts: req.hosts }),
-        ...(req.poolQuotaMode === undefined ? {} : { poolQuotaMode: req.poolQuotaMode }),
-      }),
-  };
-}

@@ -1,0 +1,16 @@
+{
+  "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变；文件名以 _ 开头的被 --check 跳过。",
+  "id": "candidate-scan-pure",
+  "note": "P2-2.2b：候选扫描 extractElements 与扫描独占助手从 src/engine/extraction.ts 整函数搬入 src/app/candidate-scan.ts（应用层候选生产；hash 保持 = 纯搬移）。",
+  "files": {
+    "src/app/candidate-scan.ts": {
+      "symbols": {
+        "extractElements": "c8fd11eac531dc243304f0f49eeea307cbbb863cc1d077ea9fd927424bd4238a",
+        "extractRowsPerElement": "f234d5e5c9f60c83ae8f5ee390f2c0f4b996f1ec0175ed7d4869194e9b378af3",
+        "extractHeuristicWidgets": "91da4befbb5e099c302f33d2679f500cfbca56c4e7bda9dd9395323e62899320",
+        "jsInteractiveWidgets": "8fa724e06c13748ff9d3785f85912ee6ba3356660f67054e384b9dd6658bd1a7",
+        "addNearContext": "3fd66f7eeeb7b43d80bcdc6954cc783f5a10811a14fb8415868fd81e4a0c8ff1"
+      }
+    }
+  }
+}
