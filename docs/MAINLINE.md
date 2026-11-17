@@ -90,7 +90,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | Seam | 当前/目标归属 | 允许调用方 | 冻结状态 | 变更协议 |
 |---|---|---|---|---|
 | `browserSession` / 会话生命周期 | `src/browser/browser-env.ts` + `src/app/app-runner.ts`（会话创建两处） | executor、ctx、tools、session-runtime | **冻结**（P1 只允许 `buildMiddleware` 收口，不改语义） | 改创建/关闭顺序必须 A/B + 会话生命周期测试 |
-| `BrowserMiddleware.run` | `src/engine/executor.ts` | 唯一执行循环；ctx/planner/online 经装配调用 | **逐字节冻结**（类名 + `run()` 签名不变；不另写执行器） | 九阶段提函数=P2 条件，每阶段独立 PR + 0.8 证据（运行期 lane 已就绪） |
+| `BrowserMiddleware.run` | `src/engine/executor.ts` | 唯一执行循环；ctx/planner/online 经装配调用 | **逐字节冻结**（类名 + `run()` 签名不变；不另写执行器）；`maintain mainline` 断言两字面存在 | 九阶段提函数=P2 条件，每阶段独立 PR + 0.8 证据（运行期 lane 已就绪）；九阶段已落地（4d 完成） |
 | `RunOptions` 组装（引擎步） | `src/engine/planner.ts:runOnce` 与 `src/app/ctx.ts:runOneStep` | 两条路径 | **冻结**（不新增第 4 个 RunOptions；P2 execStep 合并） | 能力面新增必须双端 + 等价验收 |
 | 工具步装配 | `src/app/app-runner.ts:runToolStep` + `Ctx.toolRunner` | ctx.run / dangerous | **冻结**（不进引擎步装配） | 独立变更 + 危险步确认链 review |
 | `DecisionProvider` 接口 | 当前 `src/model/decision-provider.ts` → 目标 `src/support/decision-provider-contract.ts`（L0） | engine（仅契约类型）、model（实现）、组合根（装配） | **方向冻结**：engine 不 import 具体实现 | 契约变更需 model/engine 双侧 typecheck + rules-only 消融 |

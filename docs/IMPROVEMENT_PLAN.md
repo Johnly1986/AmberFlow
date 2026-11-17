@@ -6,7 +6,7 @@
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0 完成；**4d 进行中——runFrameGate/runPoolGate/runDeclaredTargets/runModelPick/runActionPhase+Execute/runPostAction/runTail 已落地**；最后 runSetup → #2 → #3）。
+> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0 完成、**4d 九阶段全部落地（出口核对完成）**；下一步按 D3 启动 #2 候选契约 → #3）。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -550,7 +550,15 @@ interface PromptSpec {
 | 4d-5 runPostAction | 循环体尾段（动作日志/host+popup 复核/done 评估+学习/SPA settle/manual 三分支/inert+anti-repeat/rehydrate 证据）提为私有阶段方法（182 行）；返回值驱动 control（9 break + 2 continue 落位）；pendingAfterIdx 经 setter 回写保证 flagSuspectedAsync 时序 | 本批提交 | run() 1508→1316、executor 5837=基线；运行期 lane 4 场景绿（done/SPA settle 与失败后路径） |
 | 4d-6 runActionPhase + runActionExecute | 动作阶段 449 行拆两阶段方法：runActionPhase 166（能力面/DRY-RUN/needs_value/pre-fill/风险闸门）+ runActionExecute 251（stale/执行分派/证据/trace.push）；返回 ActionPhaseResult 驱动 control 与 run 级回写 | 本批提交 | run() 1316→884、executor 5836≤基线；运行期 lane 4 场景绿（正常动作/遮挡证据） |
 | 4d-7a runTail | 循环后 run 级 epilogue（after 指纹/前进性判定/flags/_runFlags/stepState）提为私有方法；`run()` 收尾调用 | 本批提交 | executor 5836→5831、run() 继续下降；运行期 lane 4 场景绿（含收尾观察） |
-| 4d-7b runSetup | start→ready 的重置/预算/导航前校验段（与可变状态容器同批，4d 最后一批）；reportTail 已抽出待复核 | 待做 | 每阶段独立提交 + 运行期 lane + examples golden |
+| 4d-7b runSetup | run() active setup（状态游标重置/ready/configError/导航信封/launch+pg/observeState/goto+settle/popup）提为私有阶段方法（87 行）；早返回带 browser 保持 finally 关闭语义 | 本批提交 | run() 838→743、executor 5830≤基线；运行期 lane 4 场景绿（曾捕获 skipNavigation 双重取反回归并修复） |
+
+**4d 九阶段出口核对（2026-11-17，完成）**：
+
+- 阶段函数：runSetup 87 / runFrameGate 72 / runPoolGate 74 / runDeclaredTargets 220 / runDeclaredHint 88 / runModelPick 363 / runActionPhase 166 / runActionExecute 251 / runPostAction 182 / runTail + reportTail（既有）；均 ≤400（phaseFunctions 显式例外）。
+- `BrowserMiddleware` 类名与 `run()` 签名逐字节不变——新增 maintain mainline 断言（`EXECUTOR_RUN_SIGNATURE`/`MIDDLEWARE_CLASS` 字面存在，负向自测 +2）。
+- 等价证据：examples canonical golden、`npm run check`、`verify:offline`、`verify:runtime:offline` 4 场景全绿；运行期 lane 在本批实拦住一次 `skipNavigation` 双重取反回归（改前 3 场景红，改后 4/4 绿）。
+- 规模：executor 6139→5830（−309）、run() 2685→743（−1942）；>1000 行文件仍 6。
+- 未做：完整 RunCtx 可变状态迁移（setup/loop 状态仍以 run() 局部变量承载）——列入 #2/后续状态收敛批次。
 
 > P2 已启动：freeze 2026-11-17 起 2 周、每阶段约 3 个工作日窗口；按 D3 顺序 `#4 → #2 → #3`，4d 先行。任一窗口内 T1/T2/T3 触发即停该批。
 
