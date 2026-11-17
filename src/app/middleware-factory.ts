@@ -12,6 +12,7 @@
  * 非 confirm 字段原样透传给执行器；`confirmFn` 只能经 `confirmPolicy` 声明。
  */
 import { DESTRUCTIVE_PATTERNS } from "../engine/rules.ts";
+import { createAppCandidateProducer } from "./candidate-source.ts";
 import { BrowserMiddleware } from "../engine/executor.ts";
 import type { MiddlewareOptions } from "../engine/executor-types.ts";
 
@@ -99,6 +100,7 @@ export function buildMiddleware(config: BuildMiddlewareConfig): BrowserMiddlewar
   const confirmFn = confirmFnFor(face, confirmPolicy);
   return new BrowserMiddleware({
     ...options,
+    candidateProducer: options.candidateProducer ?? createAppCandidateProducer(),
     ...(confirmFn === undefined ? {} : { confirmFn }),
   });
 }
