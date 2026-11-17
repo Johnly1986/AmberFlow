@@ -20,7 +20,7 @@
       {
         "file": "src/engine/executor.ts",
         "name": "run",
-        "lines": 2479
+        "lines": 2395
       },
       {
         "file": "src/app/ctx.ts",

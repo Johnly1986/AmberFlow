@@ -22,6 +22,7 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - 新增 `src/engine/evidence.ts`（140 行）：`run()` 内散落的行锚/身份/DRF 证据形状与停因尾缀收敛为纯函数 + 类型单源（`IdentityFacts`/`DeclaredFacts` 等；键顺序/条件 spread/文案逐字节不变）；帧证据仍由 `frame-scope.frameHintFailureEvidence` 单点。executor 6084→6023（run() 2629→2562），运行期 lane 4 场景不变。
 - `package.json` 增 `verify:runtime:offline`（默认 check）与 `verify:runtime:offline:record`；夜间非门禁 CI 的 offline job 追加运行该 lane；不进 `npm run check`。
 - 4d-1：`run()` 提出私有阶段方法 `runFrameGate`（72 行）——frame 门禁 / `excludedView`+`readPage` / `frames_excluded` warning / `goalHeld` 双面求值（`doneInExcluded` 经 getter 跨阶段可观察）/ `frameTargetStop` / precondition 双面证据与 `frame_not_allowed`/`skipped` 早返回；导航 goto/popup 信封检查仍在 `run()`（发生在帧门禁前，最小风险）。早返回 RunReport 字段/顺序/文案逐字不变；executor 6023→6019、run() 2562→2479；运行期 lane 4 场景不变。
+- 4d-2：`run()` 提出私有阶段方法 `runPoolGate`（74 行）——步首快照/抽池/settle/poolReady 轮询/非 poolReady 分支/池高峰记账/beforeFp 首次观察/pendingAfterIdx after 补签/空池 `_poolReadiness` 判档（not_ready/ready_empty/strict）/`page_not_ready` 早停/pool_empty warning；返回 12 字段 PoolGatePhase，`stopped=true` 立即 break。`page_not_ready` 文案/日志/证据/落账时机不变；executor 6019=基线、run() 2479→2395；运行期 lane 4 场景不变。
 
 
 ## Decisions（设计决策索引）
