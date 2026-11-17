@@ -8,12 +8,12 @@
       "src/engine/executor.ts": 5829,
       "src/app/app-runner.ts": 2847,
       "src/app/ctx.ts": 1799,
-      "src/engine/extraction.ts": 1612,
       "src/app/session-runtime.ts": 1460,
       "src/engine/pool-js.ts": 1102,
       "src/app/app-adapters.ts": 988,
       "src/engine/executor-pure.ts": 907,
       "src/cli/commands/apps.ts": 877,
+      "src/engine/extraction.ts": 858,
       "src/engine/executor-types.ts": 826
     },
     "functions": [
@@ -35,7 +35,7 @@
       {
         "file": "src/app/app-runner.ts",
         "name": "runApp",
-        "lines": 687
+        "lines": 686
       },
       {
         "file": "src/app/ctx-dry.ts",
@@ -60,7 +60,7 @@
       {
         "file": "src/cli/commands/run.ts",
         "name": "runApp",
-        "lines": 245
+        "lines": 244
       },
       {
         "file": "src/engine/executor.ts",
@@ -93,14 +93,14 @@
         "lines": 208
       },
       {
-        "file": "src/cli/commands/doctor.ts",
-        "name": "runDoctor",
-        "lines": 202
-      },
-      {
         "file": "src/app/session-runtime.ts",
         "name": "doAct",
         "lines": 199
+      },
+      {
+        "file": "src/cli/commands/doctor.ts",
+        "name": "runDoctor",
+        "lines": 198
       },
       {
         "file": "src/app/app-report-view.ts",

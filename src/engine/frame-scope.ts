@@ -12,7 +12,10 @@
  * `frameOriginOf` 从 extraction.ts 移入这里（extraction re-export 保持既有导出面不变），
  * 让本模块对 extraction 只有**类型**依赖、不引入运行期环。
  */
-import type { Elem, FrameLike } from "./extraction.ts";
+import type { Elem } from "./extraction.ts";
+import type { FrameLike, LocLike, PageLike } from "../support/page-like.ts";
+import { framesOf, urlOf } from "./page-shapes.ts";
+import { frameChainValueProblem } from "./hint.ts";
 import { urlInHostsEnvelope } from "./host-envelope.ts";
 
 /** 一个 frame 的 origin（http/https 规范形）；不可解析/非 http(s)/空 = undefined。 */
@@ -147,3 +150,289 @@ export function frameGateExcludes(
 ): boolean {
   return fi > 0 && !frameInHostsEnvelope(frame, hosts);
 }
+
+/** P0-D：frame 的 origin 证据文案已移入 frame-scope.ts（唯一出处；文件头 re-export 保持导出面）。 */
+
+/**
+ * P0-D：**帧门禁**。主 frame 恒允许（导航信封已经强制过它）；子 frame 的 origin 不在
+ * `meta.hosts` 内 → 进 `excluded`（不参与池/hint/identity/DRF/done/when 的解析面）。
+ * 无 hosts 声明或没有任何被排除帧时 `null`（缺省路径零新行为）。
+ *
+ * 索引纪律：`frames` / `allowedIndexes` 保留**真实**下标，池行的 `frame`/`f<fi>:` ref
+ * 因此逐字节不变——被排除的只是解析面，不是编号。
+ */
+export interface FrameGate {
+  hosts: string[];
+  frames: FrameLike[];
+  allowed: FrameLike[];
+  allowedIndexes: number[];
+  excluded: Array<{ index: number; frame: FrameLike; origin: string }>;
+  origins: string[];
+}
+
+export function frameGateOf(page: PageLike, hosts: string[] | null | undefined): FrameGate | null {
+  if (!hosts || hosts.length === 0) return null;
+  const frames = framesOf(page, 64);
+  if (frames.length <= 1) return null;
+  const allowed: FrameLike[] = [frames[0]!];
+  const allowedIndexes: number[] = [0];
+  const excluded: Array<{ index: number; frame: FrameLike; origin: string }> = [];
+  for (let i = 1; i < frames.length; i++) {
+    const fr = frames[i]!;
+    if (frameInHostsEnvelope(fr, hosts)) { allowed.push(fr); allowedIndexes.push(i); }
+    else excluded.push({ index: i, frame: fr, origin: frameOriginOf(fr) });
+  }
+  if (excluded.length === 0) return null;
+  const origins = [...new Set(excluded.map((e) => e.origin || "about:blank"))];
+  return { hosts, frames, allowed, allowedIndexes, excluded, origins };
+}
+
+/**
+ * P0-D：一个只暴露指定 frame 的**页面视图**（读面用）。只转发信号/池解析真正用到的
+ * 成员（url / frames / locator / evaluate）；动作路径永远拿真实 page。
+ */
+export function framesScopedPage(page: PageLike, frames: FrameLike[]): PageLike {
+  const view: PageLike = {
+    url: () => urlOf(page),
+    frames: () => frames,
+    ...(page.locator === undefined ? {} : { locator: (sel, opts) => page.locator!(sel, opts) }),
+    ...(page.evaluate === undefined ? {} : { evaluate: (fn, arg) => page.evaluate!(fn, arg) }),
+  };
+  return view;
+}
+
+/** The frame an element came from (0 = main); undefined once it has detached. */
+export function frameAt(page: PageLike, index: number): FrameLike | undefined {
+  try {
+    const f = typeof page.frames === "function" ? page.frames() : page.frames;
+    const list = (f ?? []) as FrameLike[];
+    return index >= 0 && index < list.length ? list[index] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/* ------------------------------------------------ 读侧帧限定（E4，M4 收口） */
+
+/**
+ * E4（读侧帧限定对称化）：CSS 选择器串尾 ` frame:<origin链>` 尾缀的**唯一**剥离出处
+ * （消费面：`locatorAnyFrame`/`countAnyFrame` 的帧循环过滤 + ctx 读/抽取面的证据与诊断）。
+ *
+ * 语义（架构师裁决）：
+ *   - **值不合法 ⇒ 整串按原 CSS 处理**（显式落空），绝不半剥——防选择器属性值以
+ *     ` frame:` 结尾的伪尾缀误伤。`rejected` 带 B8 同款拒因，调用方只在原样 CSS
+ *     解析失败时附注（M4①），成功路径零影响。
+ *   - **值合法 ⇒ 帧限定查询**。纯 CSS 形态在 E4 前必然是非法 CSS（`frame:<origin>` 落在
+ *     选择器尾只能是伪类语法、永不成立），故尾缀**只能激活原本就保证失败的纯 CSS 串**——
+ *     既有 CSS 选择器零影响（无尾缀 = `selector` 逐字节原样返回）。**非 CSS 引擎不保证**
+ *     （Playwright `text=` 等把整串当文本）：作者需把文本显式引用（或依赖下列守卫拒绝），
+ *     详见 N4 守卫与文档。
+ *   - **N4 守卫**：剥离后的 base 必须引号/括号配对（`"`/`'`/`(`/`)`/`[`/`]`；CSS 字符串内
+ *     的对比字符不算、反斜杠转义跳过）——`new URL()` 会接受 `)`/`'`/`"` 作为 host 字符，
+ *     让 `div:has-text("x frame:https://a.com")` 这类**引号内**的尾缀被误剥；不配对 ⇒
+ *     整串原样 + rejected（"选择器含未闭合引号/括号，尾缀未应用"）。
+ *   - **N5 空值**：词法收 ` frame:` 后无值（`(\S*)`）——整串原样 + rejected（"frame: 后没有值"）。
+ *   - 校验与 hint 的 `frame:` 尾缀同一份 `frameChainValueProblem`（`>` 分隔外→内、
+ *     ≤4 段、每段 `v === new URL(v).origin` 的 http(s) 规范形）；同一串至多一个尾缀——
+ *     剥离后 base 仍以「规范 origin 值的 frame: 尾缀」结尾 = 第二个真尾缀 ⇒ 整组拒绝
+ *     （值内伪尾缀的捕获必然带着 CSS 收尾字符、过不了 origin 校验，不会误伤）。
+ *   - `within:` 不在剥面（读侧 CSS 无锚定语义；带 within 的串按原 CSS 显式落空）。
+ */
+export interface SplitSelectorFrameSuffix {
+  /** 剥离后的 CSS（无尾缀/被拒 = **原串逐字节**，含原大小写与空白）。 */
+  selector: string;
+  /** 合法声明链（小写规范 origin，外→内）；无合法尾缀时省略。 */
+  frameChain?: string[];
+  /** M4①：串含 ` frame:` 尾缀形状但未生效（值非法/缺主体/空值/双尾缀/引号括号不配对）时的拒因；其余省略。 */
+  rejected?: string;
+}
+
+const SELECTOR_FRAME_TAIL_RE = /(?:\s+frame:)(\S*)\s*$/i;
+
+/**
+ * E7（N4）：剥离后 base 的引号/括号配对守卫。只做词法配对（不认识 CSS 语义）：
+ * 反斜杠转义跳过、字符串内的 `(`/`[` 等不参与配对；出现**先闭后开**或收尾未闭合即视为
+ * 不配对。用于拦截"尾缀原本落在引号/括号内部"的误剥（`new URL()` 会把 `)`/`'`/`"` 当
+ * host 字符收下，单看值校验发现不了）。
+ */
+function selectorDelimiterProblem(base: string): string | null {
+  let quote: '"' | "'" | null = null;
+  let round = 0;
+  let square = 0;
+  for (let i = 0; i < base.length; i++) {
+    const ch = base[i]!;
+    if (ch === "\\") { i += 1; continue; }
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === "(") round += 1;
+    else if (ch === ")") round -= 1;
+    else if (ch === "[") square += 1;
+    else if (ch === "]") square -= 1;
+    if (round < 0 || square < 0) return "选择器含未闭合引号/括号，尾缀未应用";
+  }
+  if (quote !== null || round !== 0 || square !== 0) return "选择器含未闭合引号/括号，尾缀未应用";
+  return null;
+}
+
+export function splitFrameSuffixFromSelector(sel: string): SplitSelectorFrameSuffix {
+  const m = SELECTOR_FRAME_TAIL_RE.exec(sel);
+  if (m === null) return { selector: sel };
+  const base = sel.slice(0, m.index).trim();
+  const value = m[1]!.toLowerCase();
+  if (base === "" || value === "" || frameChainValueProblem(value) !== null) {
+    return {
+      selector: sel,
+      rejected: base === ""
+        ? "frame: 尾缀前没有选择器主体（必须写成 `<css> frame:<origin>`）——整串按原 CSS 处理"
+        : `frame: 尾缀未被应用（${selectorFrameChainProblemText(value)}）——整串按原 CSS 处理`
+          + "（显式落空，绝不半剥）",
+    };
+  }
+  // N4：尾缀可能落在引号/括号内部（值侧 `new URL()` 收得下 `)`/`'`/`"`）——base 不配对 =
+  // 这不是一个真正的串尾语法后缀，整串原样（诊断照旧只在失败路径附注）。
+  const delimiter = selectorDelimiterProblem(base);
+  if (delimiter !== null) {
+    return {
+      selector: sel,
+      rejected: `${delimiter}（尾缀前的主体引号/括号不配对）——整串按原 CSS 处理（显式落空，绝不半剥）`,
+    };
+  }
+  const residual = SELECTOR_FRAME_TAIL_RE.exec(base);
+  if (residual !== null && frameChainValueProblem(residual[1]!.toLowerCase()) === null) {
+    return {
+      selector: sel,
+      rejected: "同一串出现多个 frame: 尾缀（至多一次）——整串按原 CSS 处理（显式落空，绝不半剥）",
+    };
+  }
+  return { selector: base, frameChain: value.split(">") };
+}
+
+/** `frame:` 尾缀值问题的人话（与 hint.ts 的 frameChainProblemText 同一判定类别）。 */
+function selectorFrameChainProblemText(value: string): string {
+  const p = frameChainValueProblem(value);
+  switch (p?.kind) {
+    case "empty": return "frame: 后没有值";
+    case "too-long": return `声明 ${p.segments} 段超过上限 4 段`;
+    case "empty-segment": return "链里有空段（\">\" 两侧都必须有 origin）";
+    case "not-http-origin": return `值 ${JSON.stringify(p.segment)} 不是 http(s) origin（需要 scheme://host[:port] 规范形）`;
+    case "not-canonical": return `值 ${JSON.stringify(p.segment)} 不是规范 origin（带 path/query/显式默认端口；如 https://a:443 要写 https://a）`;
+    default: return "值非法";
+  }
+}
+
+/**
+ * E4（M4②）：读侧声明帧的**帧级扫描证据**（ctx.read/ctx.extract 的 miss trace 用，
+ * additive；与 `locatorAnyFrame`/`countAnyFrame` 的帧循环同一谓词、同一帧序——
+ * 链匹配 ∧ 信封规则（主帧恒允许、子帧按 hosts））。
+ * `excluded` 非空 = 声明帧存在但被 hosts 信封排除（未扫描）；两者皆空 = 声明帧不存在/链写错。
+ */
+export interface FrameScopeEvidence {
+  declared: string[];
+  excluded: string[];
+  scanned: string[];
+}
+
+export function frameScopeEvidenceOf(
+  page: PageLike, hosts: string[] | null | undefined, declared: readonly string[],
+): FrameScopeEvidence {
+  const excluded: string[] = [];
+  const scanned: string[] = [];
+  const frames = framesOf(page);
+  for (let fi = 0; fi < frames.length; fi++) {
+    const fr = frames[fi]!;
+    if (!frameScopeMatchesFrame(declared, fr)) continue;
+    const origin = frameOriginOf(fr).toLowerCase();
+    if (frameGateExcludes(fi, fr, hosts)) {
+      if (!excluded.includes(origin) && excluded.length < 6) excluded.push(origin);
+    } else if (!scanned.includes(origin) && scanned.length < 6) {
+      scanned.push(origin);
+    }
+  }
+  return { declared: [...declared], excluded, scanned };
+}
+
+/**
+ * First matching locator across the main frame and reachable child frames
+ * (same-origin and cross-origin both resolve through Playwright locators;
+ * cross-origin stability is measured, R11 B5). Signals are frequently rendered
+ * inside an iframe (a success banner, an embedded form's own field), where
+ * `page.locator` never looks.
+ *
+ * `opts.hasText` 透传给每一帧的 `locator(selector, { hasText })`（`css_exists_text`
+ * 用它跨 frame 找"文本含 text"的元素；Playwright 的 hasText 是大小写不敏感的子串匹配）。
+ *
+ * E4：选择器可尾缀 ` frame:<origin链>`（`splitFrameSuffixFromSelector` 唯一剥离出处）——
+ * 声明了合法尾缀时帧循环按 `frameScopeMatchesFrame` 过滤（与 hint 同一尾部对齐判定），
+ * 信封规则不变（主帧恒允许、子帧按 hosts；被信封排除且链匹配的帧不扫描）；声明帧一个都
+ * 没扫到（不存在/链写错/全在信封外）= 结构化 miss（null），绝不落到 test-double 回捞——
+ * 那会拿另一份 DOM 冒充声明帧的答案。无尾缀路径逐字节不变。
+ */
+export async function locatorAnyFrame(
+  page: PageLike, selector: string, opts?: { hasText?: string; hosts?: string[] | null },
+): Promise<LocLike | null> {
+  // E4（M4④）：split 在一切帧遍历与 test-double fallback 之前。
+  const split = splitFrameSuffixFromSelector(selector);
+  const declared = split.frameChain;
+  if (page.frames !== undefined || page.locator !== undefined) {
+    const frames = framesOf(page);
+    let chainScanned = 0;   // E4：链匹配且被实际扫描的帧数（声明帧全缺席时的短路依据）
+    for (let fi = 0; fi < frames.length; fi++) {
+      const fr = frames[fi]!;
+      // E4：声明了合法尾缀 = 只查链匹配的帧（frameScopeMatchesFrame 尾部对齐，与 hint 同一口径）。
+      if (declared !== undefined && !frameScopeMatchesFrame(declared, fr)) continue;
+      // P0-D：被排除的 frame 不参与信号求值（主 frame 恒在面内；无 hosts = 旧行为）。
+      if (frameGateExcludes(fi, fr, opts?.hosts)) continue;
+      chainScanned += 1;
+      try {
+        const loc = opts === undefined ? fr.locator(split.selector) : fr.locator(split.selector, opts);
+        if (await loc.count()) return loc;
+      } catch {
+        continue;   // frame detached mid-scan / no execution context: skip（跨源 frame 不在此抛——R11 B5 实测可跨源 locator 定位）
+      }
+    }
+    // E4：声明帧在本页一个都没扫到 ⇒ 结构化 miss（不回捞替身 DOM）。
+    if (declared !== undefined && chainScanned === 0) return null;
+  }
+  // Test doubles / non-Playwright pages may provide their own resolver.
+  // E4（M4④）：fallback 在 split 之后——替身拿到剥离后的 base（无尾缀 = 原串逐字节）。
+  return (await page.locatorAnyFrame?.(split.selector)) ?? null;
+}
+
+/**
+ * E5：selector 在主 frame + 可达子 frame 的**命中总数**（`css_count_equals` /
+ * `css_count_min` 的求值底座）。帧序与 `locatorAnyFrame` 相同（framesOf；被排除
+ * frame 不计数，P0-D 信封同口径）；单帧抛错（中途分离等）跳过该帧继续数——
+ * 计数是观察面，不因一帧失联把整个信号打成 false。空 selector 返回 null
+ * （语法错不猜：调用方按"不成立"处理，与 css_exists 空串的抛错-捕获路径同向）。
+ *
+ * E4：选择器可尾缀 ` frame:<origin链>`（与 `locatorAnyFrame` 同一剥离出处与同一
+ * 帧过滤口径：链匹配 ∧ 信封规则；值非法 = 整串按原 CSS 处理——原串对 locator 是
+ * 非法 CSS → 各帧抛错跳过 → 计 0，显式落空）。无尾缀路径逐字节不变。
+ */
+export async function countAnyFrame(
+  page: PageLike, selector: string, opts?: { hosts?: string[] | null },
+): Promise<number | null> {
+  if (selector.trim() === "") return null;
+  const split = splitFrameSuffixFromSelector(selector);
+  const declared = split.frameChain;
+  if (page.frames !== undefined || page.locator !== undefined) {
+    const frames = framesOf(page);
+    let total = 0;
+    for (let fi = 0; fi < frames.length; fi++) {
+      const fr = frames[fi]!;
+      if (declared !== undefined && !frameScopeMatchesFrame(declared, fr)) continue;
+      if (frameGateExcludes(fi, fr, opts?.hosts)) continue;
+      try {
+        total += await fr.locator(split.selector).count();
+      } catch {
+        continue;   // frame detached mid-scan / invalid selector piece in this frame
+      }
+    }
+    return total;
+  }
+  return null;
+}
+

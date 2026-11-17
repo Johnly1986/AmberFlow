@@ -1,0 +1,110 @@
+{
+  "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
+  "id": "extraction-pure",
+  "note": "extraction.ts 纯区外搬（element model→elem-model.ts / 帧读侧→frame-scope.ts / page-shape helpers→page-shapes.ts；2026-11-17）",
+  "files": {
+    "src/engine/elem-model.ts": {
+      "symbols": {
+        "ACTION_ADAPTERS": "63b5affe6ae56838ab41ce98a4f7e155a61c6220cc88fe4eedeb886a4c7e0ada",
+        "ActionAdapter": "e1b97013d0e5baf43059e922e063a42991219bc7647b3783c7518633c8e5a41c",
+        "actionCapabilities": "d74f3f65e7d6ade6bc8f91dbed8a78c37710de834246c12af1862ec0177f67f9",
+        "ActionCapability": "81b3449ee66472514cd029ca92d51d87213c0cc2d8d63dd39b718b76c2c8e89b",
+        "ActionLocatorLike": "64bbe0025dfe1078dfeaf48882ccd76160f16befc65971a68e542908389c6ff7",
+        "BUCKET_FILL_ORDER": "a27fd8c37bd1ed68a404f5fe7954cdc76de8354b43ddd1fe710f1a09973b682d",
+        "BUCKET_ORDER": "877bf9041207bc839adc4671a3a3cd94088d81ff44a1d364298c661f71e0f272",
+        "CHECK_ADAPTER": "11f050e0c1629a6900cce1236d40469348143958153c2c686fe9f39dc7d377a2",
+        "CLICK_ADAPTER": "06d6364edaf2834930b2fa507d95391a04450770ec8c5cb63040c39ed0984006",
+        "CLICK_AT_ADAPTER": "65a4cd488d10013c263e5a733992d9a5c9758f141e1ea86a556d8dd4cc65fd26",
+        "DRAG_ADAPTER": "3eca60d5b613b9ec00e497a34b362c3b85a28f623fe3d07d5f6e617c43d23035",
+        "Elem": "c07da8a9c474cbd87863704f38a144fd7f7186aaeff421cb1734b88d95bf73c1",
+        "elemFamily": "6ce6da482e175083617ab0cbb6faee7de870b8902a2b38bf0061a7f08429b5d4",
+        "ElemFamily": "27d0d6972855255eb3541807fc784c0dcf0b6e7b29cb4bf19905344d7ed15f94",
+        "ElemPool": "76831f5df6244e0dce8925b95117c0154e28c0f37c6c483a114ba184dbdac454",
+        "esig": "34144087faceed5d946c45cc9f5805e6d98fc190791c3839d70864901e25465f",
+        "extractSlots": "2eaa6b4200f36de54fff6c0ca595511fbcca6e6a0a24b9e7679c86cf6fc1ff6a",
+        "FILL_ADAPTER": "c5f18d61b0aae433a3aa54cf310f04225faaa4d382259dd68c4b4a87a0466801",
+        "filterElemsByFamily": "91a98ceb51dc923e1925b96174bf09d63436a9969a136e926ad1bda604a64408",
+        "firstIfSame": "29cbee0cb274eda85e04fe9ede09966fda3c70acbae8992814d0fb344e73f1ae",
+        "HOVER_ADAPTER": "07b508e13bfffee60f71166ed0272d0d31bf10521e812bd2233f63b0175cccb5",
+        "orderElemsByFamily": "1a4752139519b32e9248effda66ce6f506bef77f1be5674265f1854b2883bb90",
+        "POOL_QUOTAS": "024b1b6518bc19bca8caffc9ae7ddf1cedd480465588d45d8b2a016dafac68a6",
+        "PoolBucket": "53bfcdbb622f0be22a9c95b650589066907805630527eb73466cbe3ee8cf7d88",
+        "PoolQuotas": "2c4d0debecb2c558e96e6606fc8cc9ae8e239133455ff4d8fc896331e8ebc65c",
+        "QUOTA_MODE_QUOTAS": "ebaf19599d0a87b220f46dc63fac9d4ee8805c58c245d7d3129aeb70f2e4a7ec",
+        "QUOTA_MODE_WIDE_QUOTAS": "0e089b1109a0ccb372b21488780147e7fa5d5838db9a89c072d164bd7a50eb1c",
+        "SCROLL_ADAPTER": "931608d28a5fe974961802cc3af2eac3600d776938e38ac98f12912f8043ee4e",
+        "SELECT_ADAPTER": "5efc87e5c60aa1fa575639b4fa8aa875f59148a72966d8985a1cf6d5934fea26",
+        "SLIDER_ADAPTER": "942129984926c12eaf0545eae414f48d87fce6f71ae6f541e62afdc841b96c7f",
+        "SLOT_RE": "5e40c7b6450b0d5b62ad6ce406145450a8d57a4f0459da8ada54583183c1c710",
+        "UPLOAD_ADAPTER": "09930c7eecf4715c0d2ad46441bb29f9dc28ddd040417545efef6988aa3eb1a7",
+        "WIDE_QUOTAS": "52555db667aba040a8539138f714db165eca2c22929d7e9ce82d1347ff52d839"
+      }
+    },
+    "src/engine/extraction.ts": {
+      "symbols": {
+        "allowedFrameOrigins": "8b5bca6656e08f5c9f7eb5221117b9dbba1f7dedf749b0a03d342918f11ac4c8",
+        "ARIA_INTERACTIVE_ROLES": "112aafef698df8ffe45c17e02c83ad7d4699f3484c8b55bbe5e589b27c7db50e",
+        "ARIA_LINE_RE": "87d81560bbbf4f77327b154e85aca205849fd9599bebf7db9c0a3a599b7cbcaf",
+        "ariaInteractiveLines": "573e3f39d8e170f1a58643c1e5c1515074d5a6047a120c04a0206c478ccc32a1",
+        "candidateMeta": "ab562366285de937c65e7a440ef14f541fef9f9cfd8ba3c76b683d3dba0a3641",
+        "CLICKY_EVENTS": "27cd3140b5a15243366358a6d4abb8efc552fa99bd30dda776d5eea0d8b8112a",
+        "criteriaView": "e7c76237da3f78e159c1b648967487b36558875eead2d657131958279ec5fb44",
+        "CUSTOM_WIDGET_TAGS": "39bcaf07b8be47d1e9eeeb033c843549aecc9369f4da98984b9b2cbfef04905d",
+        "ExcludedHintProbe": "69703460497f6bfaf091c2c30ee3bc39d57acc766c6dad4f3c63f55afcd9365d",
+        "frameHintFailureEvidence": "698bb6b0c84714a3ac77ede3758b607dc58f3592f2cd27a2acb26743b3f44b6a",
+        "frameUrlOf": "39086f12a3f21d30029b31f08cc777cd680a2fe9cc1d6f87f0d03e84b03dba28",
+        "hintLookup": "aaf24f84f097f2439441a44571c599f88a70c95401ecebdffc8cee4bb622ccff",
+        "hintLookupArgs": "0d273b2e24973c65261e0bfdd75791588d02530d864f2cc44660da51f354381c",
+        "INTERACTIVE": "bdb1d357bf6fbcc76d827cbba8be683c75fa427a92c837b76878973d72628405",
+        "INTERACTIVE_ALL": "f25f4e3da4ef22c5878eaacc7bcc9bacb9a55e5d809043c35b05283ecd20df87",
+        "lexicalOverlap": "2e6445b3c2e08c8422f1a5eb24f6890a78bf4755294b8219aede9e496d4b5535",
+        "listenerCache": "273869cb6e35483c2729800137ea11b9abb0d53a20ae02df7e637d842b3e7d4e",
+        "MAX_CHOICES": "47af8724182f95c8383eefbc6fe954b694857097db21c216d63287540a8c800e",
+        "MAX_ELEMENTS": "65d1cc62084a189120590259439d48f2a5ce9dba3fba15e2b445763a3d2ad73a",
+        "observeElements": "4d80cc1644013f57f5be6a7d0bccd4f3e020aeea83dc1856949f68aff7c7f6d5",
+        "ObserveRawRow": "c3b168bcf43db284efac4386998ec2f506fa8cd86af9c03f3df44f8e6e237bc8",
+        "pageText": "09815618a0db22efcb2d3f15f6fc6779e51fe4e451eb8237415a6bb6bc21ef98",
+        "poolSniff": "806b1e47c97da8ad8ce4f04caea58d951e8d0e94580553249076d44c8eee5c82",
+        "probeExcludedHint": "05765154b8daed328ca695a72488d753d1b89581aa87ac117c3236c775c2da07",
+        "stateText": "448fd719c4efd5fcc4fe2329b453488de43c55fb232a326f5cda0113118eb06c",
+        "viewportUnderload": "f96d2a759726cb0c2c52f6ec5a4e93b1db81e1788dcd3323fc371f17910336c7",
+        "WIDE_POOL_ELEMENTS": "41d7af97c6276ec77f934958e2ee8a2c82df53ac25fd8ece127f0979842ca0d7",
+        "windowAudit": "0f8ae0c9f1de6eae9c402c1fb33accd3a86701cc448e31701a25cd35c4f174ec"
+      }
+    },
+    "src/engine/frame-scope.ts": {
+      "symbols": {
+        "chainSuffixMatch": "c1e13d58052af89fbfba3677ddb14ff5e5e1d62b182cce487b0c495683402d00",
+        "countAnyFrame": "2aa42f27c7d729f4c998906a28790717b78d80a59e9a08b9a0a6c8f8e0aff1c4",
+        "elemFrameStamp": "8a827e182d87e1ff7d214931544dc60bfd159683ccbef9d951784fe490f09500",
+        "frameAlive": "d9f9e0d78d1ffab5322f88e94a9d96edc38ff84d7809e9d1cbdd6e7987525242",
+        "frameAt": "2ad86ea1868fca7852c4c0ebef4a560890aa39cf0e3e12ce49aa6db4f8e7fdb0",
+        "frameChainOf": "2ab3801e600c4f899e45fae77aaa645080e9dd73a6e79757998ccd9dcc098cdc",
+        "FrameGate": "b4e6f61b3594f2d94330f8d49daa943f16b309fba03db0986fbc1e1d51fe8000",
+        "frameGateExcludes": "c6ad6e6cb818b551957b5ed876444c5e58477169a9d320dba0c88883c80e3e22",
+        "frameGateOf": "30d7ddb4c3b176560f3290db0dcbec1d82508267365aed284f33130475cd5740",
+        "frameInHostsEnvelope": "abff8f3f7154bb660c05fca7c2a5e3e5761db3748970c360b057b604577a08b0",
+        "frameOriginOf": "710b9552031bd14bddad08c98f1c37958cd7f1ef2c7d2369faa599e6da66e364",
+        "FrameScopeEvidence": "160fa2242f4cec074d83aaadb1bb97e1d5a1b65d337cf0ae8391656ccc331390",
+        "frameScopeEvidenceOf": "f73af22294c8dbd0d27d0b41a5f90924258a581d1412bcc9e0e1380ccdf140da",
+        "frameScopeMatches": "cf6667834cc7d123dd3fa12a7c1e2be5209b175e7ed5bacf3c1521ca8402acd6",
+        "frameScopeMatchesFrame": "782bae42fdeb14000c2f7077dcb29ce4d83a3e3c7a16fbe677dfe05440b02b4c",
+        "framesScopedPage": "eeb165e5e3838ab633b8f9ec6cda62609886c1f44420c7c051175f9e0f4c16e4",
+        "httpOriginOf": "1c37340c12242886b65a4eb5c3ceafed027923cbda493cb004ddc1ed62f5438d",
+        "locatorAnyFrame": "579383316a927f4d4f515db4f3fe44e5cc8329046f88f9102734fcee38186b42",
+        "SELECTOR_FRAME_TAIL_RE": "69b6b5fee57e1dfd229dcdfc0c841f9aa56cc5379fc67c90f1b8f6a8c6201269",
+        "selectorDelimiterProblem": "5170c7cba1e8dd1b9434e31759bb30fd5c7977c842da89a4d77a9a29a4226437",
+        "selectorFrameChainProblemText": "695a2588ceedd4e9f7a03566c9e07656b9ca158d7305aa5802dbee4f8bd0ca52",
+        "splitFrameSuffixFromSelector": "6fd674fe53563583aba3f801950f9a806ebc81801204ce31f23c206ce87f51b5",
+        "SplitSelectorFrameSuffix": "bac0a7839244cfd048ae7bf9bdc39383b3d54197bb7e42dfa5c2e7010729dc31"
+      }
+    },
+    "src/engine/page-shapes.ts": {
+      "symbols": {
+        "firstOf": "b4907f6af49a35b462cf11c5aedee6156bd4979d765726f50a47209ff7602d17",
+        "framesOf": "1de368c45f99719a36fb82519a616d648ffff57b4c13476f50861f0cf7d07373",
+        "urlOf": "aca4902ea7e083e216f0a55d65d244d68eab812124c01436f35e00c4400fb5e4"
+      }
+    }
+  }
+}
