@@ -23,6 +23,7 @@ import { installLayaRuntime } from "../model/model.ts";
 import { checkOracle } from "./oracle.ts";
 import { expandEnvValue } from "./case.ts";
 import { createRun, writeCaseEvidence, writeSummary } from "./report.ts";
+import { applyProbeExpectations, suiteExitCode } from "./suite-aggregate.ts";
 // B1 节奏统一：套件跟随 env 节奏（不显式关闭）；子目标/用例间/重试间都是
 // 「最小步间距」（start-to-start ≥ gap）语义，与规划脸共用同一时钟实现。
 import { envPace, newPaceClock, paceBeforeUnit, type PaceClock } from "../support/pace.ts";
@@ -242,26 +243,6 @@ async function runOneCase(
   return { outcome: out };
 }
 
-function probeOutcome(c: OnlineCase, base: CaseOutcome): CaseOutcome {
-  // 探针的“结果”是环境观测，不是产品通过/失败；预期集合内记 skipped，集合外也记 skipped
-  // 但 reason 点明“未在预期集合内”，并让套件退出码 3，避免把跳过伪装成绿。
-  // 批 2 遗留收编（D 项）：`"failed"` 已入 ProbeExpectMember 联合（fail-closed 正向证明的
-  // probe 用例口径）——as never 放行简化为类型安全比较（observed 非 passed 时 ∈
-  // "failed"|"blocked"|"unreachable"|"login_required"，全部是联合成员）。
-  // expect_zero_actions 违约是**真失败**（声明被证伪）：不能被 probe 的观测映射吞成
-  // skipped——`expect` 闭集含 "failed" 正是旧口径"点错行 + done 失败也记 skipped"的漏洞。
-  if (base.zero_action_violation === true) return base;
-  const expected = c.expect ?? [];
-  const observed = base.status;
-  const inExpected = observed === "passed"
-    ? expected.includes("captured")
-    : expected.includes(observed as Exclude<CaseStatus, "passed" | "skipped">);
-  return {
-    ...base,
-    status: "skipped",
-    reason: `probe observed=${observed} expected=${expected.join("|")}${inExpected ? "" : " (UNEXPECTED)"}`,
-  };
-}
 
 export async function runSuite(
   cases: OnlineCase[], sites: Map<string, OnlineSite>, opts: RunOptions = {},
@@ -291,7 +272,7 @@ export async function runSuite(
     // B1：用例之间的最小间距（start-to-start ≥ gap；首个用例之前不等）。
     await paceBeforeUnit(paceClock);
     const base = (await runOneCase(c, site, run.dir, opts, paceClock, paceActionsMs)).outcome;
-    const outcome = c.tier === "probe" ? probeOutcome(c, base) : base;
+    const outcome = c.tier === "probe" ? applyProbeExpectations(c, base) : base;
     outcomes.push(outcome);
     if (opts.verbose !== false) console.error(`  -> ${outcome.status}${outcome.reason ? ` (${outcome.reason})` : ""}`);
   }
@@ -316,6 +297,6 @@ export async function runSuite(
     } : {}),
   };
   writeSummary(run, suite);
-  const code = failed > 0 ? 1 : skipped > 0 ? (opts.requireAll ? 1 : 3) : 0;
+  const code = suiteExitCode(failed, skipped, opts.requireAll);
   return { suite, code, dir: run.dir };
 }
