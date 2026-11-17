@@ -13,8 +13,9 @@ import {
   type BindingDiagnostics,
   type OptionCandidate,
 } from "./bindings.ts";
-import { actionCapabilities, elemFamily, urlOf, type ActionCapability, type Elem, type ElemFamily, type ElemPool, type ExcludedHintProbe, type FrameGate, type PageLike } from "./extraction.ts";
+import { actionCapabilities, elemFamily, urlOf, type ActionCapability, type Elem, type ElemFamily, type ElemPool, type ExcludedHintProbe, type FrameGate, type HintInDomProbe, type PageLike } from "./extraction.ts";
 import { WIDE_POOL_ELEMENTS } from "./extraction.ts";
+import { WIDE_SCAN_POOL_ELEMENTS_MAX } from "../support/tuning.ts";
 import type { CommandDecl } from "./actions.ts";
 import { parseHint } from "./hint.ts";
 import { hintCandidates, hintMatch, type HintMatchCandidate, type HintMatchOptions, type HintMatchOthersDiag } from "./rules.ts";
@@ -295,11 +296,22 @@ export interface ActMissDiagnostics {
   /** F72-①：settle 实际等待的毫秒（伴随 `settle_timed_out:true` 出现）。 */
   settle_waited_ms?: number;
   /**
-   * F72-②：`rehydrateRescan` 显式重扫**未命中**的事实（等了多少 ms、重扫池多大；仅显式
-   * 开启且重扫落空时出现）。重扫命中时不产生 diagnostics——actOnce 直接以
+   * 自动重扫**未命中**的事实（等了多少 ms、重扫池多大；重扫落空时出现）。
+   * 重扫命中时不产生 diagnostics——actOnce 直接以
    * `resolved_via:"rehydrate-rescan"` 成功返回。
    */
   rescan?: { waited_ms: number; pool_size: number };
+  /**
+   * DOM 等价探测命中的事实块（元素在 DOM 却未进池；additive——未命中/探测异常/
+   * 不适用形状 = 键不出现，键集与之前一致）。单一出处 = extraction.probeHintInDom。
+   */
+  in_dom_but_not_admitted?: HintInDomProbe;
+  /**
+   * `act_hint_tier:"strong"` 拒掉 AX 弱档命中的事实（probe = 已清理的探针章值；
+   * additive——未发生 = 键不出现）。declaredAllow 同门：强档判弱档未命中，宁显式落空
+   * 不做静默弱配；命中被执行时本键不出现（执行事实走 resolved_via:"ax-fallback"）。
+   */
+  ax_weak_rejected?: { probe: string };
 }
 
 /** 词面近似比较的池字段（`label` 是前 40 字视图，`full_label` 是 ≤200 的匹配口径）。 */
@@ -368,7 +380,7 @@ export function actMissDiagnostics(input: {
   poolCap?: number;
   /** F72-①：settle 渲染可疑信号（executor 侧已判定 timedOut 才传；缺省不出现 = 键集不变）。 */
   settleTimedOut?: { waitedMs: number };
-  /** F72-②：显式重扫未命中的事实（仅 rehydrateRescan 开启且重扫落空时传）。 */
+  /** 自动重扫未命中的事实（重扫落空时传）。 */
   rescan?: { waited_ms: number; pool_size: number };
 }): ActMissDiagnostics {
   const hint = String(input.target ?? "");
@@ -838,8 +850,23 @@ export function firstLoc(loc: any): AnyLoc {
   return typeof loc.first === "function" ? loc.first() : loc.first;
 }
 
-/** Budget for the ONE wider look a low-confidence decision is allowed to take. */
+/** Budget for the first widening rung of the per-step window-escalation chain (40 -> this -> WIDER_ELEMENTS_MAX; a hit stops the chain). */
 export const WIDER_ELEMENTS = WIDE_POOL_ELEMENTS;
+
+/** 窗口递增链的硬顶档（120 档仍 miss 后的最后一档；40/120 既有常量不动，单源 = tuning）。 */
+export const WIDER_ELEMENTS_MAX = WIDE_SCAN_POOL_ELEMENTS_MAX;
+
+/** 窗口递增链的单档事实（window=该档抽取预算；miss=触发该档的未命中序号，1-based；命中带 ref）。 */
+export type WindowChainFact = { window: number; miss: number; resolved: boolean; ref?: string };
+
+/**
+ * 窗口递增链跑过且**全档未命中**时的停因尾缀（additive，仅失败路径出现）。
+ * 链没跑过、或任一档命中 = 空串——既有 reason 逐字节不变。
+ */
+export function windowChainMissSuffix(facts: readonly WindowChainFact[]): string {
+  if (facts.length === 0 || facts.some((f) => f.resolved)) return "";
+  return `; window escalation ${facts.map((f) => `#${f.miss}@${f.window}`).join(" -> ")} still no match`;
+}
 
 export function round3(n: number): number {
   return Math.round(n * 1000) / 1000;

@@ -48,9 +48,10 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
      * `diagnostics` 并在 reason 末尾追加一行判别。省略 = 返回值与 reason 逐字节不变
      * （`ctx.expand` 等既有调用面不传）。
      *
-     * F72：`rehydrateRescan:true`（会话 act 显式 opt-in）——首次解析落空且页面未静默
-     * （settle timedOut）时做一次有界重扫（等 2s 重抽池重解析同一 hint，至多 1 次）；
-     * 命中 = `resolved_via:"rehydrate-rescan"`。缺省 = 行为逐字节不变。
+     * F72：重扫**缺省自动**——首次解析落空且页面未静默（settle timedOut）时做一次有界
+     * 重扫（等 2s 重抽池重解析同一 hint，至多 1 次）；命中 = `resolved_via:"rehydrate-rescan"`。
+     * `rehydrateRescan:true` 声明仍被接受（兼容，不再有额外效果）；settle 关闭/结论缺失
+     * 时门控信号不存在，重扫永不触发。
      */
     opts?: { occlusionProbe?: boolean; diagnostics?: boolean; rehydrateRescan?: boolean },): Promise<{
     ok: boolean; how?: string; ref?: string; changed?: boolean;
@@ -62,11 +63,10 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
     actionability?: ActionabilityDetail;
     /** B1：非 timeout 异常后 URL 已变 = 点击已发生（不补点，如实记）。 */
     probe_navigated?: boolean;
-    /** E1-c/F72：`#id` 直查兜底 / rehydrate 重扫命中时出现（additive；其余路径键集不变）。 */
-    resolved_via?: "live-dom-id-fallback" | "rehydrate-rescan";
+    /** E1-c/F72/AX 回退：`#id` 直查兜底 / rehydrate 重扫 / AX 回退命中时出现（additive；其余路径键集不变）。 */
+    resolved_via?: "live-dom-id-fallback" | "rehydrate-rescan" | "ax-fallback";
   }> {
-    const resolved = await _resolveOne(mw, page, target, op, onAmbiguous, opts?.diagnostics === true,
-      opts?.rehydrateRescan === true);
+    const resolved = await _resolveOne(mw, page, target, op, onAmbiguous, opts?.diagnostics === true);
     if ("error" in resolved) {
       return {
         ok: false,

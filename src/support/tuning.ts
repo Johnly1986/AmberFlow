@@ -31,6 +31,12 @@ export const POOL_CAP_ELEMENTS = 40;
 /** 低置信恢复/宽扫的元素预算（120）：`extraction.WIDE_POOL_ELEMENTS` 唯一出处（inspect --wide 共用）。 */
 export const WIDE_SCAN_POOL_ELEMENTS = 120;
 
+/**
+ * 候选窗口递增链的硬顶（240）：主池 40 → 宽扫 120 → 顶窗 240，miss 逐级触发、命中即停。
+ * 消费点 = 执行器宽扫链（executor / executor-phases-b）经 `executor-pure.WIDER_ELEMENTS_MAX`。
+ */
+export const WIDE_SCAN_POOL_ELEMENTS_MAX = 240;
+
 /** 稳定门（`meta.policy.settle`）缺省静默判定时长（毫秒）。 */
 export const SETTLE_QUIET_MS = 400;
 
@@ -60,7 +66,7 @@ export const SESSION_IDLE_TIMEOUT_MS = 300_000;
 export const CLI_COMMAND_DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
- * 门禁视图：本模块收口的 12 个概念 → 值（供 `tools/maintain/constants.ts` 派生 token，
+ * 门禁视图：本模块收口的 13 个概念 → 值（供 `tools/maintain/constants.ts` 派生 token，
  * 不复制字面量）。新增/调整常量时同步本表，门禁与单源保持同一步。
  */
 export const TUNING_VALUES = {
@@ -69,6 +75,7 @@ export const TUNING_VALUES = {
   DONE_POLL_INTERVAL_MS,
   POOL_CAP_ELEMENTS,
   WIDE_SCAN_POOL_ELEMENTS,
+  WIDE_SCAN_POOL_ELEMENTS_MAX,
   SETTLE_QUIET_MS,
   SETTLE_TIMEOUT_MS,
   STATE_TEXT_BUDGET_CHARS,

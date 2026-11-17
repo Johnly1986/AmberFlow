@@ -4,12 +4,12 @@
  * 为什么需要它：引擎的元素池是一个**选择器闭集**（POOL_SEL + 投影 + 窗口），它回答
  * “我们能指向什么”；浏览器算出的 accessibility tree 回答的是另一件事——
  * “页面在语义上可交互/有名字的节点有哪些”。两者不是同一个口径，把后者当参照面，
- * 才能在 inspect 里说清“浏览器认为可交互、而池没指向的”这类信息差（例如只有
+ * 才能在观察面里说清“浏览器认为可交互、而池没指向的”这类信息差（例如只有
  * `aria-label` 的 `div[role=button]`、`tabindex=0` 的自绘面板）。
  *
- * 纪律（本波只做只读证据）：
- *   1. **不改行为**：本模块不参与抽池、hint 匹配、模型视图、动作或判定；只有
- *      `inspect` 调它，每页一次。池仍是选择器闭集。
+ * 纪律（只做只读证据）：
+ *   1. **不改行为**：本模块不参与抽池、hint 匹配、模型视图、动作或判定；调用方只有
+ *      `observe` 与 `inspect` 两个只读观察面（各自每次观察至多取一次树）。池仍是选择器闭集。
  *   2. **不猜**：可交互判定只有两条确定性依据——原生可聚焦/可激活的 AX role，
  *      或浏览器给的 `focusable=true`；原始 role 原样输出供人判读。`disabled` 同理。
  *   3. **失败即 null，绝不抛裸栈**：优先 Playwright `page.accessibility.snapshot`
@@ -26,7 +26,14 @@
  * 有界输出：语义节点按「可交互 → 有名 → 其余」三段 + 文档树序截断到 200；静态文本
  * 叶子（StaticText/InlineTextBox/LineBreak）不进证据（它们不是可动作语义，且会把
  * 有界清单压满；可读文本走 `inspect --text` / `ctx.read.text`）。
+ *
+ * 边界修订（解析链第五档）：观察面的只读纪律不变；`snapshotAxForResolve` + `stampAxProbe`
+ * 两条 CDP 面服务**解析落空后的第五档 AX 回退**（executor-resolve-b._resolveAxFallback
+ * 单点编排）——它们同样 fail-closed（不可用/抛错 = null，绝不抛栈），盖章是临时探针属性
+ * （data-af-probe，用完由调用方清理，FW8/A3 同纪律）；AX 合成行带 declared:true 旁路标记，
+ * 绝不进 ChoiceRequest（modelProjectionOf 剥离）。
  */
+import { parseHint } from "./hint.ts";
 
 /** 一次 AX 观察的归一节点（形状固定；role 保留浏览器原值）。 */
 export interface AxNode {
@@ -54,7 +61,7 @@ export interface AxSnapshot {
   truncated: boolean;
 }
 
-/** 取树总超时：超过就当作不可用（inspect 不该被 AX 拖住）。 */
+/** 取树总超时：超过就当作不可用（观察面不该被 AX 拖住）。 */
 export const AX_TIMEOUT_MS = 3000;
 /** nodes 有界上限（inspect 展示再取前 50）。 */
 export const AX_MAX_NODES = 200;
@@ -307,4 +314,158 @@ function withTimeout<T>(p: Promise<T | null>, ms: number): Promise<T | null> {
   return Promise.race([p.catch(() => null), timeout]).finally(() => {
     if (timer !== undefined) clearTimeout(timer);
   });
+}
+
+/* ---------------- 解析链第五档（AX 执行链）---------------- */
+
+/** 第五档候选：可交互 + 有名 + 非 disabled 的 AX 节点，带反解 DOM 的唯一链接。 */
+export interface AxExecCandidate {
+  role: string;
+  name: string;
+  focusable: boolean;
+  /** CDP backendDOMNodeId——AX 节点反解 DOM 元素的唯一链接；无此值的合成 AX 节点已被剔除。 */
+  backendDOMNodeId: number;
+}
+
+/**
+ * 第五档候选捕获（只读）：`Accessibility.getFullAXTree` 保留 `backendDOMNodeId`。
+ *
+ * 只走 CDP：Playwright accessibility API（1.58 已移除）不提供节点→DOM 的链接，反解无从
+ * 做起——该路径不可用即整体 null（第五档静默跳过，不降级）。过滤 = ignored/空 role/文本
+ * 叶子剔除 + `axNodeInteractive` + 有名 + 非 disabled + 有 backendDOMNodeId；同元素多 AX
+ * 节点按 backendDOMNodeId 去重；有界 ≤ AX_MAX_NODES（树序）。任何异常 = null，绝不抛栈。
+ */
+export async function snapshotAxForResolve(page: AxPageLike): Promise<AxExecCandidate[] | null> {
+  if (!page || typeof page !== "object") return null;
+  const context = typeof page.context === "function" ? page.context() : null;
+  if (!context || typeof context.newCDPSession !== "function") return null;
+  let session: CdpSessionLike;
+  try {
+    session = await context.newCDPSession(page);
+  } catch {
+    return null;
+  }
+  if (!session || typeof session.send !== "function") return null;
+  try {
+    await session.send("Accessibility.enable");
+    try { await session.send("DOM.enable"); } catch { /* DOM 域已被宿主开启：忽略 */ }
+    const tree = await session.send("Accessibility.getFullAXTree");
+    const nodes = (tree as { nodes?: unknown } | null)?.nodes;
+    if (!Array.isArray(nodes)) return null;
+    const out: AxExecCandidate[] = [];
+    const seen = new Set<number>();
+    for (const item of nodes) {
+      if (!item || typeof item !== "object") continue;
+      const n = item as Record<string, unknown>;
+      if (n.ignored === true) continue;
+      const roleVal = (n.role as { value?: unknown } | undefined)?.value;
+      const role = typeof roleVal === "string" ? roleVal.trim() : "";
+      if (!role || TEXT_LEAF_AX_ROLES.has(role.toLowerCase())) continue;
+      const props = new Map<string, unknown>();
+      if (Array.isArray(n.properties)) {
+        for (const p of n.properties) {
+          if (!p || typeof p !== "object") continue;
+          const pr = p as Record<string, unknown>;
+          const pname = typeof pr.name === "string" ? pr.name : "";
+          if (pname) props.set(pname, (pr.value as { value?: unknown } | undefined)?.value);
+        }
+      }
+      const nameVal = (n.name as { value?: unknown } | undefined)?.value;
+      const name = normalizeName(nameVal);
+      const focusable = props.get("focusable") === true || props.get("focusable") === "true";
+      const disabled = props.get("disabled") === true || props.get("disabled") === "true";
+      if (!axNodeInteractive(role, focusable) || !name || disabled) continue;
+      const backend = typeof n.backendDOMNodeId === "number" ? n.backendDOMNodeId : null;
+      if (backend === null || seen.has(backend)) continue;
+      seen.add(backend);
+      out.push({ role, name, focusable, backendDOMNodeId: backend });
+      if (out.length >= AX_MAX_NODES) break;
+    }
+    return out;
+  } catch {
+    return null;
+  } finally {
+    try { await session.detach?.(); } catch { /* 页面已关/已 detach：不影响结论 */ }
+  }
+}
+
+/** 词面匹配的单条结果；weak = 词前缀/词包含档（非全等）。 */
+export interface AxNameMatch { candidate: AxExecCandidate; weak: boolean }
+
+/**
+ * AX name 与声明 hint 的词面匹配（纯函数；与 rules 词面纪律同口径的 AX 投影）：
+ *   - 裸词：归一化全等优先（强档）→ 词前缀 → 词包含（两档都标弱档）；归一 = 空白折叠 +
+ *     trim + 小写（与 countAxNotInPool 同一口径）；每档只取最强非空档，候选 ≤5。
+ *   - `tag[attr=value]` / `tag[attr~substr]` → **AX name 全等**（AX 侧不再分档；attr 的
+ *     池侧 label 别名投影到 AX name 天然成立——AX name 的计算来源就含 aria-label）。
+ *   - `#id` / `tag` / `tag~token` 不匹配（#id 另有 live-DOM 直查兜底；near 是上下文面）；
+ *     带 within/in-row/frame 声明的 hint 也不匹配（池面结构约束，fail-closed 同
+ *     `_liveDomIdFallback` 的行锚取舍）。
+ */
+export function matchAxNames(candidates: readonly AxExecCandidate[], hint: string): AxNameMatch[] | null {
+  let parsed: ReturnType<typeof parseHint>;
+  try { parsed = parseHint(hint); } catch { return null; }
+  if (parsed.within !== undefined || parsed.inRow !== undefined || parsed.rowIndex !== undefined
+      || parsed.frameChain !== undefined) return null;
+  const norm = (s: string): string => s.replace(/\s+/g, " ").trim().toLowerCase();
+  if (parsed.kind === "bare") {
+    const h = norm(parsed.token);
+    if (!h) return null;
+    const whole = candidates.filter((c) => norm(c.name) === h);
+    if (whole.length > 0) return whole.slice(0, 5).map((c) => ({ candidate: c, weak: false }));
+    const prefixed = candidates.filter((c) => norm(c.name).split(/\s+/).some((w) => w.startsWith(h)));
+    if (prefixed.length > 0) return prefixed.slice(0, 5).map((c) => ({ candidate: c, weak: true }));
+    const contains = candidates.filter((c) => norm(c.name).split(/\s+/).some((w) => w.includes(h)));
+    if (contains.length > 0) return contains.slice(0, 5).map((c) => ({ candidate: c, weak: true }));
+    return null;
+  }
+  if (parsed.kind === "attrEq" || parsed.kind === "attrSubstr") {
+    const v = norm(parsed.value);
+    if (!v) return null;
+    const hits = candidates.filter((c) => norm(c.name) === v);
+    return hits.length > 0 ? hits.slice(0, 5).map((c) => ({ candidate: c, weak: false })) : null;
+  }
+  return null;
+}
+
+/**
+ * AX 节点反解 DOM 并盖临时探针属性（单一出处）：`DOM.resolveNode(backendDOMNodeId)` →
+ * `Runtime.callFunctionOn(objectId)` 给元素盖 `data-af-probe="<probeValue>"` 并回读
+ * tagName/id（合成行与歧义证据用）。反解失败/跨执行上下文不可达/节点已卸载 = null——
+ * 调用方丢弃该候选（绝不抛栈）。每调用独立 CDP 会话（≤5 次/解析，失败路径才走；
+ * best-effort detach）。清理由调用方统一做（_probeCleanup 前缀匹配移除）。
+ */
+export async function stampAxProbe(page: AxPageLike, backendDOMNodeId: number, probeValue: string): Promise<{ tag: string; id: string } | null> {
+  if (!page || typeof page !== "object") return null;
+  const context = typeof page.context === "function" ? page.context() : null;
+  if (!context || typeof context.newCDPSession !== "function") return null;
+  let session: CdpSessionLike;
+  try {
+    session = await context.newCDPSession(page);
+  } catch {
+    return null;
+  }
+  if (!session || typeof session.send !== "function") return null;
+  try {
+    try { await session.send("DOM.enable"); } catch { /* DOM 域已被宿主开启：忽略 */ }
+    // CDP 参数名是 `backendNodeId`（不是 AX 树字段名 `backendDOMNodeId`）——名字错了协议
+    // 会报 "Either nodeId or backendNodeId must be specified"（被 catch 吞成 null，极难定位）。
+    const resolved = await session.send("DOM.resolveNode", { backendNodeId: backendDOMNodeId }) as { object?: { objectId?: unknown } } | null;
+    const objectId = typeof resolved?.object?.objectId === "string" ? resolved.object.objectId : null;
+    if (objectId === null) return null;
+    const stamped = await session.send("Runtime.callFunctionOn", {
+      objectId,
+      functionDeclaration: "function (tok) { this.setAttribute('data-af-probe', tok); "
+        + "return { tag: String((this.tagName || '')).toLowerCase(), id: String(this.id || '') }; }",
+      arguments: [{ value: probeValue }],
+      returnByValue: true,
+    }) as { result?: { value?: { tag?: unknown; id?: unknown } } } | null;
+    const value = stamped?.result?.value;
+    if (!value || typeof value.tag !== "string" || value.tag === "") return null;
+    return { tag: value.tag, id: typeof value.id === "string" ? value.id : "" };
+  } catch {
+    return null;
+  } finally {
+    try { await session.detach?.(); } catch { /* 页面已关/已 detach：不影响结论 */ }
+  }
 }

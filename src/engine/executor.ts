@@ -73,6 +73,7 @@ import {
   filterElemsByFamily,
   actionCapabilities,
   firstOf,
+  probeHintInDom,
   frameAt,
   frameGateOf,
   frameHintFailureEvidence,
@@ -313,7 +314,7 @@ export type SetupPhase =
  * envelope: offline fixture packs declare no hosts and must keep working unchanged.
 /** 纯函数区（helpers/池判定/风险刻画/缺省确认）—— 拆到 executor-pure.ts（F2）。 */
 import { _executeElement, _missingRequired, _hintOpts, resolveCommandRef } from "./executor-resolve-a.ts";
-import { _resolveOne, _rehydrateRescanOnce, _liveDomIdFallback, _probeCleanup, _domFallbackResolve } from "./executor-resolve-b.ts";
+import { _resolveOne, _rehydrateRescanOnce, _liveDomIdFallback, _probeCleanup, _domFallbackResolve, _resolveAxFallback, _resolveClickxyFallback } from "./executor-resolve-b.ts";
 import { actOnce, _scrollIntoViewWithEvidence, scrollIntoView, _scrollContainerForElement, _scrollWithLoc, scrollContainer, scrollDocument, setRange } from "./executor-actions.ts";
 import { runFrameGate, runPoolGate, runDeclaredTargets, runDeclaredHint } from "./executor-phases-a.ts";
 import { runModelPick, runPostAction } from "./executor-phases-b.ts";
@@ -322,7 +323,8 @@ export * from "./executor-pure.ts";
 import type { ActMissDiagnostics, ActMissRow, DeviceSpec } from "./executor-pure.ts";
 import {
   firstLoc, round3, fnv1aText, structDigest, contentDigest, topTwoMargin,
-  describeActionError, sigEq, WIDER_ELEMENTS,
+  describeActionError, sigEq, WIDER_ELEMENTS, WIDER_ELEMENTS_MAX, windowChainMissSuffix,
+  type WindowChainFact,
   ALL_FAMILIES,
   DEFAULT_CONFIRM,
   EFFECT_MASK,
@@ -1748,6 +1750,9 @@ export class BrowserMiddleware {
    * `isEnabled`) plus the same centre hit-test, so the page state is untouched.
    */
   async dryRunProbe(page: AnyPage, el: Elem, force = false): Promise<{ actionable: boolean; reason: string | null }> {
+    // clickxy：clickxy 合成行没有 locator——干跑回答"坐标在视口内可点"（bbox 中心由解析面
+    // 实测过），可行动性由坐标本身承载；证据里 desc 已带 `at (x, y)`。
+    if (el.clickxy !== undefined) return { actionable: true, reason: null };
     const loc = await this._locatorFor(page, el);
     if (loc === null) return { actionable: false, reason: "stale_ref" };
     // S4 `force`：干跑只回答"能不能定位"——force 语义本就会跳过其余 actionability 检查。
@@ -1840,6 +1845,21 @@ export class BrowserMiddleware {
 
   /** Click, then give the page a short window to reach domcontentloaded. */
   async _clickOnly(page: AnyPage, el: Elem, force = false): Promise<[string, unknown]> {
+    // clickxy：坐标点击合成行（clickxy）——**唯一执行点**。不经 locator（无句柄可寻址），
+    // 直接点 bbox 中心（视口 CSS 像素）。危险门控在上游风险闸门（risky → confirmFn）。
+    if (el.clickxy !== undefined) {
+      try {
+        await page.mouse.click(el.clickxy.x, el.clickxy.y);
+      } catch (e) {
+        return ["action_failed", describeActionError(e)];
+      }
+      try {
+        await page.waitForLoadState("domcontentloaded", { timeout: 3000 });
+      } catch {
+        /* the page may never fire it; the action already happened */
+      }
+      return ["clicked", { clickxy: { x: el.clickxy.x, y: el.clickxy.y } }];
+    }
     const loc = await this._locatorFor(page, el);
     if (loc === null) return ["stale_ref", null];
     // Same containment as `_executeElement`: an element that passes the
@@ -1945,8 +1965,6 @@ export class BrowserMiddleware {
       forceAct = false,
       force = false,
       staleRetry = false,
-      // F72-②：解析落空 + 页面未静默时的有界重扫（步级 opt-in，缺省 false = 行为逐字节不变）。
-      rehydrateRescan = false,
       candidatePriority = this.candidatePriority,
       // E2：run 级歧义命中顺序（缺省继承实例字段——constructor 已从配置层解析）。
       ambiguousOrdering = this.ambiguousOrdering,
@@ -2045,6 +2063,17 @@ export class BrowserMiddleware {
     let executedCount = 0;
     const warnings: string[] = [];
     let donePreheld: boolean | null = null;
+    /** 窗口递增链事实（本步内累计；循环头每步重置为空数组——与 donePreheld 同一 reset 节奏，
+     * 避免上一步的链证据被本步 trace 行误带）。phases-b 持同一数组就地追加。 */
+    let windowChainFacts: WindowChainFact[] = [];
+    /** 第五档 AX 回退事实（本步内至多一次；循环头每步重置——与 donePreheld 同一节奏）。
+     * ref/weak 供 actionDeclEvidence 的 additive 证据；cleanupFn 由 domFallbackCleanup 统一清。 */
+    let axFallbackRef: string | null = null;
+    let axFallbackWeak = false;
+    let axFallbackCleanupFn: (() => Promise<void>) | null = null;
+    /** clickxy：第六档 clickxy 合成行的坐标（本步内至多一次；循环头每步重置）。
+     * 证据面：actionDeclEvidence 的 resolved_by/clickxy additive 键（命中才出现）。 */
+    let clickxyHit: { x: number; y: number } | null = null;
     /** A2：target_not_found 现场发现的滚动容器事实（进 diagnostics 的结构化证据）。 */
     let viewportUnderloaded: Array<{ tag: string; id: string; scrollHeight: number; clientHeight: number; rendered: number }> | null = null;
     /** 零执行摘要（A1 §2.2.2）：命令闭集走完而一个动作都没执行时，把跳过证据写进停因文案。 */
@@ -2059,6 +2088,13 @@ export class BrowserMiddleware {
     const actionDeclEvidence = (): Record<string, unknown> => ({
       ...(donePreheld === true ? { done_preheld: true } : {}),
       ...(forceAct ? { force_act: true } : {}),
+      // 窗口递增链事实（additive；本步链真跑过才出现——只发生在 miss/低置信路径）。
+      ...(windowChainFacts.length > 0 ? { window_escalation: windowChainFacts } : {}),
+      // 第五档 AX 回退命中标记（additive；命中才出现——resolved_by 与 dom_fallback 同族）。
+      ...(axFallbackRef !== null ? { resolved_by: "ax_fallback" as const } : {}),
+      ...(axFallbackWeak ? { ax_weak_tier: true } : {}),
+      // clickxy：第六档 clickxy 合成行事实（additive；命中才出现；危险门控在上游风险闸门）。
+      ...(clickxyHit === null ? {} : { resolved_by: "clickxy_fallback" as const, clickxy: clickxyHit }),
     });
     // A1 子改动③：逐步动作后的轻量 after 签名 {url, pool_size, first_text}，挂在**已执行动作**
     // 的 trace 事件上。动作事件先落账，签名在下一次观察（下一动作步首的那次池提取——内存里
@@ -2126,6 +2162,11 @@ export class BrowserMiddleware {
         // A1：done_preheld 是**逐步**事实——每步开头重置，避免上一步的值被本步的 trace 行
         // 或最终 RunReport 误带（只有命令步会在下面重新评估它）。
         donePreheld = null;
+        windowChainFacts = [];
+        axFallbackRef = null;
+        axFallbackWeak = false;
+        axFallbackCleanupFn = null;
+        clickxyHit = null;
         const pool = await runPoolGate(this, { pg, stepNo, candidatePriority, poolReady, poolReadyTimeoutMs,
           poolReadyPollMs, poolGate, verbose, observeState, trace, warnings, pendingAfterIdx, beforeFp,
           lastPoolSize, lastPoolWaitedMs, lastReadiness, poolEmptyThisStep, readyEmptyWarned, stop }); if (pool.stopped) break;
@@ -2321,11 +2362,16 @@ export class BrowserMiddleware {
         let domFallbackRef: string | null = null;
         let domFallbackCleanupFn: (() => Promise<void>) | null = null;
         let domFallbackMissed = false;
+        // F75 与第五档 AX 回退的探针章统一清理点（动作尝试结束后调用；各自失败不阻断，
+        // 章值唯一，残留不会误指）。
         const domFallbackCleanup = async (): Promise<void> => {
-          if (domFallbackCleanupFn === null) return;
-          const fn = domFallbackCleanupFn;
+          const fns = [domFallbackCleanupFn, axFallbackCleanupFn];
           domFallbackCleanupFn = null;
-          try { await fn(); } catch { /* 清理失败不阻断：章值唯一，残留不会误指 */ }
+          axFallbackCleanupFn = null;
+          for (const fn of fns) {
+            if (fn === null) continue;
+            try { await fn(); } catch { /* 清理失败不阻断 */ }
+          }
         };
         const domFallbackEvidence = (): Record<string, unknown> =>
           domFallbackRef === null ? {} : { resolved_by: "dom_fallback" as const };
@@ -2376,9 +2422,10 @@ export class BrowserMiddleware {
           // U5（W10）：rules-only 没有模型可回退，也就没有决策脸的"低置信宽扫重看"那一级。
           // 声明的 target_hint 若落在常规 40 窗口之外（分页链接/长列表底部），规则直接未命中，
           // 3 attempts 后 target_not_found —— 明明页面上就在那儿。
-          // 这里补**一次**宽扫重解析：120 元素、main-first（与决策脸的加宽恢复同预算档），
-          // hintMatch 是确定性的，命中即用、不猜；常规窗口内命中时这条路一步都不走（零多付），
-          // 决策脸路径不变（由 rulesOnly 门住）。不放大 attempts、不引入模型。
+          // 这里补**递增宽扫链**：120 → 240（硬顶档）逐级扩窗重解析，命中即停；120 档未命中
+          // （含弱档胜出）且窗口确有增长才升 240 档。hintMatch 是确定性的，命中即用、不猜；
+          // 常规窗口内命中时这条路一步都不走（零多付），决策脸路径不变（由 rulesOnly 门住）。
+          // 不放大 attempts、不引入模型。链事实 additive 进 trace 行（window_escalation）。
           if (ruleRef === null && this.rulesOnly && curHint !== null && !reobserved
               && stepTimeoutLeft() > 0) {
             // F3：步级 timeoutMs 过期后不再起新的宽扫重解析。
@@ -2398,29 +2445,69 @@ export class BrowserMiddleware {
               if (wideGate.ref !== null && !(wideGate.ref in forbidden)) {
                 elems = wide;
                 ruleRef = wideGate.ref;
+                windowChainFacts.push({ window: WIDER_ELEMENTS, miss: 1, resolved: true, ref: wideGate.ref });
                 if (verbose) {
                   console.log(`  step ${stepNo}: rules-only re-scanned wider `
                     + `(${Object.keys(wide).length} elements) -> ${wideGate.ref}`);
                 }
-              } else if (wideGate.rejected !== null) {
-                // 宽扫也只在弱档胜出：候选/档位以宽池的事实为准（停因 reason 用）。
-                weakRejected = wideGate.rejected;
-                if (verbose) {
-                  console.log(`  step ${stepNo}: rules-only wide re-scan hit a weak tier only `
-                    + `(tier=${wideGate.rejected.tier}) — rejected by act_hint_tier:"strong"`);
+              } else {
+                windowChainFacts.push({ window: WIDER_ELEMENTS, miss: 1, resolved: false });
+                if (wideGate.rejected !== null) {
+                  // 宽扫也只在弱档胜出：候选/档位以宽池的事实为准（停因 reason 用）。
+                  weakRejected = wideGate.rejected;
+                  if (verbose) {
+                    console.log(`  step ${stepNo}: rules-only wide re-scan hit a weak tier only `
+                      + `(tier=${wideGate.rejected.tier}) — rejected by act_hint_tier:"strong"`);
+                  }
+                }
+                // 递增链第二档：120 档未命中且窗口确有增长 → 扩到硬顶再重解析一次（命中即停；
+                // 增长判据对 120 窗口——240 档必须带来新候选才值得付这次抽取）。
+                if (stepTimeoutLeft() > 0) {
+                  const wider = await this.candidates!.extract({ page: pg, jsProbe: true, maxElements: WIDER_ELEMENTS_MAX, widgets: true, candidatePriority: "main-first", hosts: this._frameHosts });
+                  if (Object.keys(wider).length > Object.keys(wide).length) {
+                    pruneForbids(wider);
+                    const widerRef = affordanceRule(instruction, wider, curHint, _hintOpts(this, ));
+                    const widerGate = declaredAllow(
+                      widerRef, takeHintMatchOthers(), curHint,
+                      this.actHintTier === "strong" && !this._learnedHintApplied,
+                    );
+                    if (widerGate.ref !== null && !(widerGate.ref in forbidden)) {
+                      // 硬顶档全档命中：120 档的弱档判词是对旧窗口的，不再约束 strict 停因。
+                      elems = wider;
+                      ruleRef = widerGate.ref;
+                      weakRejected = null;
+                      windowChainFacts.push({ window: WIDER_ELEMENTS_MAX, miss: 2, resolved: true, ref: widerGate.ref });
+                      if (verbose) {
+                        console.log(`  step ${stepNo}: rules-only wide re-scan window `
+                          + `${WIDER_ELEMENTS_MAX} (${Object.keys(wider).length} elements) -> ${widerGate.ref}`);
+                      }
+                    } else {
+                      if (widerGate.rejected !== null) {
+                        // 候选/档位以**最新窗口**的事实为准（与 120 档同款）。
+                        weakRejected = widerGate.rejected;
+                      }
+                      windowChainFacts.push({ window: WIDER_ELEMENTS_MAX, miss: 2, resolved: false });
+                      if (verbose) {
+                        console.log(`  step ${stepNo}: rules-only wide re-scan window ${WIDER_ELEMENTS_MAX} `
+                          + `-> ${widerGate.rejected !== null ? `weak tier only (tier=${widerGate.rejected.tier})` : "no match"}`);
+                      }
+                    }
+                  }
                 }
               }
             }
           }
         }
-        // F72-②：rehydrate_rescan（步级 opt-in，缺省 false = 行为逐字节不变）——声明 act hint
-        // 在 池 → ADMIT 回捞 → FW8 身份回捞（→ rules-only 宽扫）全链**真落空**（hintMatch 零命中；
-        // 弱档胜出不进本路径）且**步首抽池时页面未静默**（settle timedOut——水合中间态池的信号）
-        // 时，做一次有界重扫：等 2s（受整步挂钟帽钳制）→ 重抽池（不再 settle——刚等过的墙钟就是
-        // 给水合的窗口）→ 同一 hint 走 affordanceRule + declaredAllow（与 U5 宽扫同一档位纪律）。
-        // 命中 = elems/ruleRef 换新池（确定性 rule:match，不重走决策面）；仍未命中 = 原有
-        // strict/模型路径逐字节不变，事实进 trace 行与运行汇总。
-        if (rehydrateRescan && !commandMode && curHint !== null && weakRejected === null
+        // rehydrate_rescan（**缺省自动**；步级 rehydrateRescan:true 声明仍被接受但
+        // 不再有额外效果）——act hint 在 池 → ADMIT 回捞 → FW8 身份回捞（→ rules-only 宽扫）全链
+        // **真落空**（hintMatch 零命中；弱档胜出不进本路径）且**步首抽池时页面未静默**
+        // （settle timedOut——水合中间态池的信号）时，做一次有界重扫：等 2s（受整步挂钟帽钳制）
+        // → 重抽池（不再 settle——刚等过的墙钟就是给水合的窗口）→ 同一 hint 走 affordanceRule
+        // + declaredAllow（与 U5 宽扫同一档位纪律）。命中 = elems/ruleRef 换新池（确定性
+        // rule:match，不重走决策面）；仍未命中 = 原有 strict/模型路径逐字节不变，事实进 trace
+        // 行与运行汇总。policy.settle:"off"（或 settle 传感器失败）时步首 settle 结论为 null，
+        // 门控信号不存在，重扫永不触发。
+        if (!commandMode && curHint !== null && weakRejected === null
             && hintMatch(curHint, elems, _hintOpts(this, )) === null
             && gateSettle !== null && gateSettle.timedOut === true
             && stepTimeoutLeft() > 0) {
@@ -2499,6 +2586,66 @@ export class BrowserMiddleware {
             if (verbose) console.log(`  step ${stepNo}: dom fallback -> ${dfRef}`);
           }
         }
+        // 第五档 AX 回退（strict 停因前；本步至多 1 次）——解析链
+        // 池→ADMIT 回捞→FW8→(DRF)→U5/F72/F74/F75 全部落空后的最后手段：AX 可交互有名
+        // 节点与 act hint 词面匹配（裸词归一化全等优先，词前缀/词包含标弱档并告警；
+        // attr 形状 = AX name 全等；#id/tag/tag~token 不参与——#id 另有直查兜底），反解
+        // DOM 盖临时探针章。命中 = ax: 合成行注入本步局部池（declared:true 旁路标记，
+        // 绝不进 ChoiceRequest）+ 确定性 rule:match（不进模型面）；>1 候选 = 同一
+        // describeAmbiguity 谓词零动作停；快照不可用/无匹配/反解全败 = 既有 strict 路径
+        // 逐字节不变。
+        if (!commandMode && curHint !== null && ruleRef === null && weakRejected === null
+            && axFallbackRef === null) {
+          const ax = await _resolveAxFallback(this, pg, curHint, "fail", { strong: this.actHintTier === "strong" });
+          if (ax !== null && "hit" in ax) {
+            axFallbackRef = ax.hit.ref;
+            axFallbackWeak = ax.hit.weak;
+            axFallbackCleanupFn = ax.hit.cleanup;
+            elems[ax.hit.ref] = ax.hit.elem;
+            ruleRef = ax.hit.ref;
+            if (ax.hit.weak) {
+              warnings.push(`ax_fallback_weak_tier: act hint "${curHint}" matched an AX node name only at a weak tier `
+                + `(word prefix/contains) — resolved via the AX fallback as a last resort; verify the target`);
+            }
+            if (verbose) console.log(`  step ${stepNo}: ax fallback -> ${ax.hit.ref} (${ax.hit.elem.label})`);
+          } else if (ax !== null && "rejected_weak" in ax) {
+            // declaredAllow 同门：act_hint_tier:"strong" 判弱档**未命中**——清章 + 警告，
+            // 落回既有 strict 停因路径（宁显式落空不做静默弱配；门在 _resolveAxFallback 单点）。
+            warnings.push(`ax_fallback_weak_tier: act hint "${curHint}" matched an AX node name only at a weak tier `
+              + `(word prefix/contains) — rejected by act_hint_tier:"strong" (weak tiers are not hits; `
+              + `set "any" to accept the AX last-resort)`);
+            if (verbose) console.log(`  step ${stepNo}: ax fallback weak tier rejected by act_hint_tier:"strong"`);
+          } else if (ax !== null && "ambiguity" in ax) {
+            stop("target_ambiguous",
+              `declared target_hint ${JSON.stringify(curHint)} matches ${ax.ambiguity.candidates_total} AX candidates `
+              + `(accessibility-tree fallback; same ambiguity predicate as the pool) on step ${stepNo} — `
+              + `candidates: ${ax.ambiguity.candidates.slice(0, 5).map((c) => `${c.tag} "${c.label}"`).join(" | ") || "-"}`
+              + ` — narrow the hint (unique #id / [data-test=…] / exact visible text)`,
+              stepNo);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
+            break;
+          }
+        }
+        // clickxy：第六档（**最后手段**）——文本 bbox 中心坐标点击。全链（含 AX 第五档）落空后，
+        // 若页面上存在文本全等且唯一可见的元素（无任何可寻址句柄），解析为 clickxy 合成行；
+        // 动作经 _clickOnly 的坐标分支执行，**危险门控**由风险闸门强制 confirmFn（缺省拒绝、
+        // 非交互恒拒绝）。>1 可见 = 歧义零动作（落 strict target_not_found，绝不猜坐标）；
+        // 本步至多 1 次；快照/探测异常 = null，既有路径逐字节不变。
+        if (!commandMode && curHint !== null && ruleRef === null && weakRejected === null
+            && axFallbackRef === null && clickxyHit === null) {
+          const cx = await _resolveClickxyFallback(pg, curHint);
+          if (cx !== null && "hit" in cx) {
+            clickxyHit = { x: cx.hit.elem.clickxy!.x, y: cx.hit.elem.clickxy!.y };
+            elems[cx.hit.ref] = cx.hit.elem;
+            ruleRef = cx.hit.ref;
+            if (verbose) {
+              console.log(`  step ${stepNo}: clickxy fallback -> (${clickxyHit.x}, ${clickxyHit.y}) "${curHint}"`);
+            }
+          } else if (cx !== null && "refused" in cx) {
+            warnings.push(`clickxy_ambiguous: act hint "${curHint}" matched ${cx.refused.total} visible element(s) `
+              + `by exact text — coordinate click refused (never guesses a position)`);
+          }
+        }
         // P0-B `meta.policy.act_hint:"strict"`：声明目标解析链（池 hintMatch → ADMIT 回捞
         // → FW8 身份回捞 → rules-only 宽扫）全部未命中时，**不再静默回退到模型自由选**
         // （R08 实测：未命中的 act hint 被模型换成"酒店"登录入口 → host_not_allowed 中止）。
@@ -2522,13 +2669,26 @@ export class BrowserMiddleware {
             stop("target_not_found",
               weakRejectedReason(weakRejected, curHint, stepNo, poolSize, summary)
               + identityHiddenSuffix(targets.identityHidden) + declaredHiddenSuffix(targets.getDeclaredHidden()) + declaredMissSuffix(targets.declaredMiss) + drfHintSuffix(this.targetResolutionDeclared)
-              + (frameNote ? ` — ${frameNote}` : ""), stepNo);
+              + (frameNote ? ` — ${frameNote}` : "")
+              + windowChainMissSuffix(windowChainFacts), stepNo);
           } else {
             // F73：解析链列举句按声明状态条件化——declared 场景下 DRF 是链的一环，实跑了
             // 就要被点名（缺省未声明时串逐字节不变）。
             const chainNote = this.targetResolutionDeclared
               ? "after hintMatch / ADMIT recovery / FW8 identity recovery / DRF declared-DOM resolution. "
               : "after hintMatch / ADMIT recovery / FW8 identity recovery. ";
+            // DOM 等价探测（只读，主帧；单一出处 = extraction.probeHintInDom）——strict
+            // 落定前区分"池准入失败"与"页面没有"。命中 = reason 追加"在 DOM 但未进池"段（含
+            // 可行动原因）；未命中/探测异常 = 空串（reason 逐字节不变）。弱档胜出分支不探测
+            // （目标已可解析，只是档位不够——"在不在 DOM"没有判别力）。
+            const inDom = await probeHintInDom(pg, curHint);
+            const firstDom = inDom !== null && inDom.matches.length > 0
+              ? `<${inDom.matches[0]!.tag}${inDom.matches[0]!.id ? `#${inDom.matches[0]!.id}` : ""}`
+                + `${inDom.matches[0]!.class ? `.${inDom.matches[0]!.class}` : ""}>`
+              : "";
+            const domProbeNote = inDom === null ? ""
+              : `; DOM probe: the hint matches ${inDom.total} element(s) in the live DOM`
+                + `${firstDom ? ` (first: ${firstDom})` : ""} but none entered the pool — ${inDom.note}`;
             stop("target_not_found",
               `step ${stepNo}: act_hint="strict" forbids the model fallback — declared target_hint `
               + `${JSON.stringify(curHint)} matched nothing in the pool (${poolSize} element(s)`
@@ -2537,7 +2697,9 @@ export class BrowserMiddleware {
               + `or remove meta.policy.act_hint:"strict" to let the decision model pick instead`
               + identityHiddenSuffix(targets.identityHidden) + declaredHiddenSuffix(targets.getDeclaredHidden()) + declaredMissSuffix(targets.declaredMiss)
               + domFallbackMissSuffix() + drfHintSuffix(this.targetResolutionDeclared)
-              + (frameNote ? ` — ${frameNote}` : ""), stepNo);
+              + (frameNote ? ` — ${frameNote}` : "")
+              + domProbeNote
+              + windowChainMissSuffix(windowChainFacts), stepNo);
           }
           if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
           break;
@@ -2554,7 +2716,7 @@ export class BrowserMiddleware {
         const pickPhase = await runModelPick(this, {
           pg, stepNo, instruction, verbose, elems, ruleRef, curHint, commandMode, forbidden, noted, trace, targets, adjudicate, reobserve, escalateFn, expectedFamily,
           confFloor: this.confFloor, candidatePriority, tieredHint, rulesOnly: this.rulesOnly, decisionDegradedReasonClass: this.decisionDegraded?.reason_class ?? null, rejectedAskConfs: this._rejectedAskConfs, warnings,
-          reobserved, escalated, escalatedPick, stepTimeoutLeft, stop, stopReason: () => acct.stopReason, pickElement: (g, page, pool, blocked, notes) => this.pickElement(g, page, pool, blocked, notes),
+          reobserved, escalated, escalatedPick, windowChainFacts, stepTimeoutLeft, stop, stopReason: () => acct.stopReason, pickElement: (g, page, pool, blocked, notes) => this.pickElement(g, page, pool, blocked, notes),
           orderedPool, settleBeforeExtract: (page) => this._settleBeforeExtract(page), pruneForbids, hintOpts: () => _hintOpts(this, ), frameHosts: this._frameHosts, stateTextFn: (page, instr) => stateText(page, instr, this.embedFn),
           rowAnchorNote, declaredTargets, goalHeld, goalSignalFn, isTyping: (el) => this._isTyping(el), modelLabel: () => this.modelLabel(), degradedReasonSuffix: () => this.degradedReasonSuffix(),
           choiceLimitReason: () => this._choiceLimitReason, clearChoiceLimitReason: () => { this._choiceLimitReason = null; },

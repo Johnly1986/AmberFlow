@@ -8,7 +8,8 @@ import { sleep } from "../support/sleep.ts";
 import { type TraceStep } from "./audit.ts";
 import { type DeclaredTargetsResolver } from "./declared-targets.ts";
 import { declaredHiddenSuffix, declaredMissSuffix, identityHiddenSuffix } from "./evidence.ts";
-import { WIDER_ELEMENTS, contextPageCount, deniedContextUrl, describeActionError, disallowedHost, lowConfDiscrimination, round3, topTwoMargin } from "./executor-pure.ts";
+import { WIDER_ELEMENTS, WIDER_ELEMENTS_MAX, windowChainMissSuffix, contextPageCount, deniedContextUrl, describeActionError, disallowedHost, lowConfDiscrimination, round3, topTwoMargin, type WindowChainFact } from "./executor-pure.ts";
+import { runWindowEscalationRung } from "./window-escalation.ts";
 import { type AnyPage, type EscalatorLike, type HintMemoryLike, type OutcomeMemoryLike, type Sig, type StopCode } from "./executor-types.ts";
 import { type Elem, type ElemFamily, type ElemPool, WIDE_QUOTAS, ariaInteractiveLines, criteriaView, elemFamily, esig, filterElemsByFamily, lexicalOverlap, urlOf } from "./extraction.ts";
 import { HINT_CLOSED_SET_TEXT } from "./grammar-prompt.ts";
@@ -28,6 +29,8 @@ export async function runModelPick(mw: BrowserMiddleware, a: {
     tieredHint: boolean; rulesOnly: boolean; decisionDegradedReasonClass: NonNullable<BrowserMiddleware["decisionDegraded"]>["reason_class"] | null; rejectedAskConfs: number[];
     warnings: string[];
     reobserved: boolean; escalated: boolean; escalatedPick: string | null;
+    /** 窗口递增链事实（run() 持有的本步数组；本阶段就地追加，trace 行证据共享同一份）。 */
+    windowChainFacts: WindowChainFact[];
     stepTimeoutLeft: () => number; stop: (code: StopCode, detail?: string, at?: number) => void; stopReason: () => string;
     pickElement: (goal: string, page: AnyPage, pool: ElemPool, blocked: Set<string>, notes: Record<string, string> | null) => Promise<[string | null, number, Record<string, number>]>;
     orderedPool: (pool?: ElemPool) => ElemPool; settleBeforeExtract: (page: AnyPage) => Promise<unknown>;
@@ -44,7 +47,7 @@ export async function runModelPick(mw: BrowserMiddleware, a: {
       decisionDegradedReasonClass, rejectedAskConfs, warnings, stepTimeoutLeft, stop, stopReason, pickElement, orderedPool,
       settleBeforeExtract, pruneForbids, hintOpts, frameHosts, stateTextFn, rowAnchorNote, declaredTargets,
       goalHeld, goalSignalFn, isTyping, modelLabel, degradedReasonSuffix, choiceLimitReason, clearChoiceLimitReason,
-      reobserved: reobservedInit, escalated: escalatedInit, escalatedPick: escalatedPickInit } = a;
+      reobserved: reobservedInit, escalated: escalatedInit, escalatedPick: escalatedPickInit, windowChainFacts } = a;
     let elems = elemsInit;
     let ref: string | null = null; let conf = 0;
     // 方法标签跟着决策源走：provider 自报其名（decision-service / 基线名…）；
@@ -236,13 +239,24 @@ export async function runModelPick(mw: BrowserMiddleware, a: {
               conf = conf2;
               method = `${mm}:reobserve`;
               recovered = true;
+              windowChainFacts.push({ window: WIDER_ELEMENTS, miss: 1, resolved: true, ref: ref2 });
               if (verbose) console.log(`  step ${stepNo}: re-observed wider (${Object.keys(wide).length} elements) -> ${ref} conf=${conf2.toFixed(2)}`);
             } else {
               if (ref2 !== null) {
                 widePick = { ref: ref2, conf: conf2 };
                 gateRejected.push(conf2);   // U8：宽看重问的意见也未过 floor（adjudicate 复用时撤回）
               }
+              windowChainFacts.push({ window: WIDER_ELEMENTS, miss: 1, resolved: false });
               if (verbose) console.log(`  step ${stepNo}: re-observed wider (${Object.keys(wide).length} elements) -> still below floor`);
+              // 窗口递增链第二档：120 档重问仍未过 floor → 扩到硬顶再重问一次（命中即停）；
+              // widePick/"最后一次观察到的意见"语义随档位滚动（240 档成为最后一次观察）。
+              const rung = await runWindowEscalationRung(mw, { pg, stepNo, instruction, verbose, elems, floor, forbidden, noted, candidatePriority, frameHosts, stepTimeoutLeft, pickElement, orderedPool, pruneForbids, windowChainFacts, logTag: "re-observed wider",
+                hitNote: (poolSize, ref3, conf3) => `(${poolSize} elements) -> ${ref3} conf=${conf3.toFixed(2)}`, missNote: () => "still below floor" });
+              if (rung.grew) {
+                elems = rung.pool;
+                if (rung.adopted && rung.ref !== null) { ref = rung.ref; conf = rung.conf; method = `${mm}:reobserve`; recovered = true; }
+                else if (rung.ref !== null) { widePick = { ref: rung.ref, conf: rung.conf }; gateRejected.push(rung.conf); }
+              }
             }
           }
         }
@@ -302,7 +316,9 @@ export async function runModelPick(mw: BrowserMiddleware, a: {
               + lowConfDiscrimination(instruction, elems, ref)
               // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串，
               // reason 逐字节不变）。
-              + rowAnchorNote(declaredTargets()), stepNo);
+              + rowAnchorNote(declaredTargets())
+              // 窗口递增链跑满且全档未命中时的事实尾缀（additive；链没跑/命中过 = 空串）。
+              + windowChainMissSuffix(windowChainFacts), stepNo);
       return { stopped: true, ref, conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, elems, label: mm };
           }
         }
@@ -332,10 +348,23 @@ export async function runModelPick(mw: BrowserMiddleware, a: {
           ref = ref2;
           conf = conf2;
           method = `${mm}:reobserve`;
+          windowChainFacts.push({ window: WIDER_ELEMENTS, miss: 1, resolved: true, ref: ref2 });
           if (verbose) console.log(`  step ${stepNo}: R2b relevance widen -> ${ref} conf=${conf2.toFixed(2)}`);
-        } else if (verbose) {
-          console.log(`  step ${stepNo}: R2b relevance widen -> keep original `
-            + `(${ref2 === null ? "no pick" : `conf ${conf2.toFixed(2)}`} below floor)`);
+        } else {
+          windowChainFacts.push({ window: WIDER_ELEMENTS, miss: 1, resolved: false });
+          if (verbose) {
+            console.log(`  step ${stepNo}: R2b relevance widen -> keep original `
+              + `(${ref2 === null ? "no pick" : `conf ${conf2.toFixed(2)}`} below floor)`);
+          }
+          // 窗口递增链第二档：仍未过 floor → 扩到硬顶再重问一次；仍未过 = 保留原提名（R2b
+          // 是质量守卫，不是停因路径）。超时/零增长在 helper 内零动作返回。
+          const rungR2b = await runWindowEscalationRung(mw, { pg, stepNo, instruction, verbose, elems, floor, forbidden, noted, candidatePriority, frameHosts, stepTimeoutLeft, pickElement, orderedPool, pruneForbids, windowChainFacts, logTag: "R2b relevance widen",
+            hitNote: (_n, ref3, conf3) => `-> ${ref3} conf=${conf3.toFixed(2)}`,
+            missNote: (p) => `keep original (${p.ref === null ? "no pick" : `conf ${p.conf.toFixed(2)}`} below floor)` });
+          if (rungR2b.grew) {
+            elems = rungR2b.pool;
+            if (rungR2b.adopted && rungR2b.ref !== null) { ref = rungR2b.ref; conf = rungR2b.conf; method = `${mm}:reobserve`; }
+          }
         }
       }
     }

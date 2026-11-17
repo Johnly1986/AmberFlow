@@ -8,11 +8,12 @@ import { type ActMissDiagnostics, type ActMissRow, actMissDiagnostics, actMissDi
 import { _hintOpts, resolveCommandRef } from "./executor-resolve-a.ts";
 import { type AnyLoc, type AnyPage } from "./executor-types.ts";
 import { PASS_DOM_FALLBACK, PASS_ID_FALLBACK, ambiguityStopReason } from "./executor.ts";
-import { type Elem, type ElemPool, type FrameLike, actionCapabilities, frameHintFailureEvidence, framesOf } from "./extraction.ts";
+import { type Elem, type ElemPool, type FrameLike, actionCapabilities, frameHintFailureEvidence, framesOf, probeHintInDom, probeTextBbox } from "./extraction.ts";
 import { elemFrameStamp, frameGateExcludes, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { parseHint } from "./hint.ts";
 import { anchorChainMatch } from "./rules.ts";
 import { admitSelectorWithJsFor } from "./surface.ts";
+import { matchAxNames, stampAxProbe, snapshotAxForResolve, type AxPageLike } from "./ax.ts";
 import type { BrowserMiddleware } from "./executor.ts";
 
   /**
@@ -31,16 +32,18 @@ import type { BrowserMiddleware } from "./executor.ts";
    *
    * F72-①：settle 结论不再就地丢弃——落空诊断在"页面未静默"（timedOut）时 additive
    * `settle_timed_out`/`settle_waited_ms` 两键 + reason 尾缀一行渲染提示（同在诊断面）。
-   * F72-②：`rehydrateRescan` 只在**会话 act** 面可开——首次解析落空且抽池时页面未静默时做
-   * 一次有界重扫（等 2s → 重抽池 → 同一 hint 重解析，纯 hintMatch 不重走决策面，至多 1 次）；
-   * 命中 = `resolved_via:"rehydrate-rescan"`；仍未命中 = 既有诊断 + `rescan` 事实。缺省逐字节不变。
+   * F72-②：**缺省自动**——首次解析落空且抽池时页面未静默（settle timedOut）即做一次有界
+   * 重扫（等 2s → 重抽池 → 同一 hint 重解析，纯 hintMatch 不重走决策面，至多 1 次）；
+   * 命中 = `resolved_via:"rehydrate-rescan"`；仍未命中 = 既有诊断 + `rescan` 事实。
+   * settle:"off"（或传感器失败）时 settle 结论为 null，门控信号不存在，重扫永不触发；
+   * 显式 `rehydrateRescan:true` 声明仍被接受（兼容，不再有额外效果）。
    */
 export async function _resolveOne(mw: BrowserMiddleware, page: AnyPage, target: string, op: string,
-    onAmbiguous?: "fail" | "act", wantDiagnostics?: boolean, rehydrateRescan?: boolean,): Promise<
+    onAmbiguous?: "fail" | "act", wantDiagnostics?: boolean,): Promise<
     | {
       ref: string; el: Elem | null; loc: AnyLoc; poolSize: number; fallback: boolean; cleanup?: () => Promise<void>;
-      /** E1-c：`#id` 直查兜底命中时出现（additive；其余路径不出现 = 键集与之前一致）。 */
-      resolvedVia?: "live-dom-id-fallback" | "rehydrate-rescan";
+      /** E1-c：`#id` 直查兜底 / 第五档 AX 回退命中时出现（additive；其余路径不出现 = 键集与之前一致）。 */
+      resolvedVia?: "live-dom-id-fallback" | "rehydrate-rescan" | "ax-fallback";
     }
     | {
       error: string; poolSize: number; stopCode?: "target_ambiguous"; ambiguity?: AmbiguityView;
@@ -52,7 +55,7 @@ export async function _resolveOne(mw: BrowserMiddleware, page: AnyPage, target: 
     const headExtract = await mw._extractPoolSettled(page, mw.candidatePriority);
     const elems = headExtract.elems;
     const settleRes = headExtract.settle;
-    /** F72-②：显式重扫未命中的事实（仅 rehydrateRescan 开启且走满一次重扫后才有）。 */
+    /** F72-②：重扫未命中的事实（走满一次重扫且仍未命中才有）。 */
     let rescanFact: { waited_ms: number; pool_size: number } | undefined;
     const poolSize = Object.keys(elems).length;
     if (typeof target !== "string" || !target.trim()) {
@@ -106,11 +109,11 @@ export async function _resolveOne(mw: BrowserMiddleware, page: AnyPage, target: 
     // 让 locator 能稳定指到它；调用方用完负责 cleanup。
     const fallback = await _domFallbackResolve(mw, page, target, op, onAmbiguous, wantDiagnostics);
     if ("scan" in fallback) {
-      // F72-②：rehydrate_rescan（opt-in）——首次解析落空且抽池时页面未静默 ⇒ 池可能是水合
+      // rehydrate_rescan（缺省自动）——首次解析落空且抽池时页面未静默 ⇒ 池可能是水合
       // 中间态。等一小段有界时间重抽池、用**同一 hint**（纯 hintMatch 语义，不重走决策面）
       // 重解析一次：命中 = resolved_via:"rehydrate-rescan"；重扫后歧义照旧结构化（同一谓词，
       // 不绕过零动作承诺）；仍未命中 = 落到既有诊断（rescan 事实 additive）。
-      if (rehydrateRescan === true && settleRes !== null && settleRes.timedOut === true) {
+      if (settleRes !== null && settleRes.timedOut === true) {
         const rescan = await _rehydrateRescanOnce(mw, page, target, op, onAmbiguous);
         if ("ok" in rescan) {
           return { ...rescan.ok, fallback: false, resolvedVia: "rehydrate-rescan" as const };
@@ -123,24 +126,57 @@ export async function _resolveOne(mw: BrowserMiddleware, page: AnyPage, target: 
         }
         rescanFact = rescan.fact;
       }
+      // 第五档 AX 回退（解析链末端、全链真落空后的最后手段；本解析至多 1 次）——
+      // AX 可交互有名节点与 hint 词面匹配，命中反解 DOM 盖临时探针章（FW8/A3 同纪律：
+      // 身份寻址 + 用完清理）；>1 候选走同一 describeAmbiguity 谓词零动作。快照不可用/
+      // 无词面匹配/反解全败 = null → 既有 miss 诊断路径（含 DOM 探测）逐字节不变。
+      const ax = await _resolveAxFallback(mw, page, target, onAmbiguous, { strong: mw.actHintTier === "strong" });
+      /** A3 同款弱档纪律的事实面（act_hint_tier:"strong" 判弱档未命中 → 拒绝后进诊断）。 */
+      let axWeakRejected: { probe: string } | null = null;
+      if (ax !== null && "hit" in ax) {
+        return { ref: ax.hit.ref, el: null, loc: ax.hit.loc, poolSize, fallback: true, cleanup: ax.hit.cleanup, resolvedVia: "ax-fallback" as const };
+      }
+      if (ax !== null && "rejected_weak" in ax) {
+        axWeakRejected = ax.rejected_weak;
+      }
+      if (ax !== null && "ambiguity" in ax) {
+        return {
+          error: ambiguityStopReason(target, poolSize, ax.ambiguity), poolSize,
+          stopCode: "target_ambiguous" as const, ambiguity: ax.ambiguity,
+        };
+      }
       const base = `target ${JSON.stringify(target)} matched nothing in a pool of ${poolSize} element(s)`;
       if (wantDiagnostics !== true) return { error: base, poolSize };
+      // DOM 等价探测（只读，主帧；单一出处 = extraction.probeHintInDom）——命中 =
+      // 元素在 DOM 却未进池的事实块 + reason 改写为"在 DOM 但未进池"级文案；未命中/探测
+      // 异常/不适用形状 = null → base 与 reason 逐字节不变。
+      const inDom = await probeHintInDom(page, target);
+      const missBase = inDom === null
+        ? base
+        : `target ${JSON.stringify(target)} exists in the DOM (${inDom.total} match(es)) but none entered `
+          + `the pool of ${poolSize} element(s) — ${inDom.note}`;
       // A4：落空诊断（纯内存；唯一的页面读取是池外回退扫描行里 ≤5 行的可见性，已在上一步完成）。
-      const diagnostics = actMissDiagnostics({
-        target, pool: elems, op, hintOpts: _hintOpts(mw, ), rejected: fallback.scan.rejected,
-        poolCap: mw.actPoolCap,   // E1-a：观测面回显（不改池构成）
-        // F72-①：settle 未静默（渲染可疑）与 F72-② 显式重扫事实（additive；缺省/静默正常时键不出现）。
-        ...(settleRes !== null && settleRes.timedOut === true
-          ? { settleTimedOut: { waitedMs: settleRes.waitedMs } } : {}),
-        ...(rescanFact === undefined ? {} : { rescan: rescanFact }),
-      });
+      const diagnostics = {
+        ...actMissDiagnostics({
+          target, pool: elems, op, hintOpts: _hintOpts(mw, ), rejected: fallback.scan.rejected,
+          poolCap: mw.actPoolCap,   // E1-a：观测面回显（不改池构成）
+          // F72-①：settle 未静默（渲染可疑）与 F72-② 重扫事实（additive；静默正常时键不出现）。
+          ...(settleRes !== null && settleRes.timedOut === true
+            ? { settleTimedOut: { waitedMs: settleRes.waitedMs } } : {}),
+          ...(rescanFact === undefined ? {} : { rescan: rescanFact }),
+        }),
+        // DOM 探测命中才出现的键（additive；未命中 = 键集与之前一致）。
+        ...(inDom === null ? {} : { in_dom_but_not_admitted: inDom }),
+        // strong 拒掉 AX 弱档命中的事实（additive；未发生 = 键集与之前一致）。
+        ...(axWeakRejected === null ? {} : { ax_weak_rejected: axWeakRejected }),
+      };
       // C 批（B8）：会话 act 的失败 reason 同样追加 frame: 尾缀诊断 + 页面可用 origin
       // （只有 `opts.diagnostics:true` 的会话 act 面走这里；scrollContainer/setRange 等既有
       // 调用面不传 ⇒ reason 逐字节不变）。diagnostics 结构体本身不改形状。
       // F82：池在手 = 追加 in-row 三案证据（token 无匹配列真实行词元 / 行已定位改 base）。
       const frameNote = frameHintFailureEvidence(page, mw._frameHosts, [target], elems);
       // F72-①：页面未静默时把"渲染可能未完成"写进 reason（让调用方第一时间知道"该等"而不是
-      // 绕路换目标）；F72-②：显式重扫跑过且仍未命中时如实记重扫事实。两者都只在诊断面出现。
+      // 绕路换目标）；F72-②：重扫跑过且仍未命中时如实记重扫事实。两者都只在诊断面出现。
       const renderNote = settleRes !== null && settleRes.timedOut === true
         ? `；页面在 ${Math.max(0, Math.round(settleRes.waitedMs))}ms 内未静默（可能仍在水合/渲染）——`
           + `目标缺失可能因渲染未完成，建议 wait_for/ctx.waitForTarget 锚定后重试而非换目标`
@@ -149,7 +185,7 @@ export async function _resolveOne(mw: BrowserMiddleware, page: AnyPage, target: 
         ? ""
         : `；rehydrate_rescan 已等 ${rescanFact.waited_ms}ms 重抽池（${rescanFact.pool_size} 项）仍未命中`;
       return {
-        error: `${base}\n判别: ${actMissDiscrimination(diagnostics, elems, op)}`
+        error: `${missBase}\n判别: ${actMissDiscrimination(diagnostics, elems, op)}`
           + (frameNote ? ` — ${frameNote}` : "") + renderNote + rescanNote,
         poolSize, diagnostics,
       };
@@ -164,7 +200,7 @@ export async function _resolveOne(mw: BrowserMiddleware, page: AnyPage, target: 
   }
 
   /**
-   * F72-②：声明目标解析落空后的**有界重扫**（`rehydrateRescan`，opt-in；至多 1 次）。
+   * F72-②：声明目标解析落空后的**有界重扫**（缺省自动；至多 1 次）。
    *
    * 只在首次解析落空且抽池时页面未静默（settle timedOut——轮播/水合页抽到中间态池的信号）
    * 后调用：等一小段有界时间（2s）→ 重抽池（**不再 settle**——刚等过的墙钟就是给水合的
@@ -215,8 +251,128 @@ export async function _rehydrateRescanOnce(mw: BrowserMiddleware, page: AnyPage,
   }
 
   /**
-   * E1-c：`#id` hint 的 live-DOM 单点直查兜底（`decision.id_fallback`，缺省开）。
+   * 第五档 AX 回退（解析链末端；run 决策步与会话 act 共用的**单一出处**编排）：
+   * AX 快照（可交互有名节点，带 backendDOMNodeId）→ hint 词面匹配（裸词归一化全等优先，
+   * 词前缀/词包含标弱档；attr 形状 = AX name 全等；其余形状不参与）→ 逐候选反解 DOM 并
+   * 盖临时探针章（`data-af-probe="<token>-ax<N>"`，有界 ≤5，失败节点丢弃）→ 命中返回
+   * 探针 locator + 合成行（declared:true 旁路标记，绝不进 ChoiceRequest；af_probe 供
+   * `_locatorFor` 首分支重建 locator）→ 用完由调用方 cleanup（_probeCleanup 前缀移除）。
+   * >1 候选 = 同一 describeAmbiguity 谓词结构化 target_ambiguous（先清理再零动作返回，
+   * 不绕过零动作承诺）。**强档门（单点）**：`opts.strong === true`（= act_hint_tier:"strong"）
+   * 且最强档命中是弱档（词前缀/词包含）→ 清章返回 `{rejected_weak}`（declaredAllow 同门：
+   * 强档判弱档未命中，宁显式落空不做静默弱配）；两面调用点只消费事实（session 进
+   * diagnostics.ax_weak_rejected、run 进 step warning + strict 落因）。快照不可用/无词面
+   * 匹配/反解全败 = null（第五档静默跳过）。
+   * 合成候选的歧义 source 暂落 "dom_fallback" 同款口径（合成池自证 ≠ 真池：只给候选身份、
+   * 不给 near/suggested_hint——AX 合成行同理）；union 扩 "ax_fallback" 由账本统一登记。
+   */
+export async function _resolveAxFallback(mw: BrowserMiddleware, page: AnyPage, target: string,
+    onAmbiguous?: "fail" | "act", opts?: { strong?: boolean }): Promise<
+    | { hit: { ref: string; loc: AnyLoc; cleanup: () => Promise<void>; elem: Elem; weak: boolean } }
+    | { ambiguity: AmbiguityView }
+    | { rejected_weak: { probe: string } }
+    | null
+  > {
+    // AnyPage.context 的类型面是 unknown——AX 面的页形转换在此收口一次（observe 同款先例）。
+    const axPage = page as unknown as AxPageLike;
+    const candidates = await snapshotAxForResolve(axPage);
+    if (candidates === null) return null;
+    const matched = matchAxNames(candidates, target);
+    if (matched === null || matched.length === 0) return null;
+    const token = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const resolved: Array<{ idx: number; name: string; role: string; tag: string; id: string; weak: boolean }> = [];
+    for (let i = 0; i < matched.length; i++) {
+      const m = matched[i]!;
+      const stamped = await stampAxProbe(axPage, m.candidate.backendDOMNodeId, `${token}-ax${i}`);
+      if (stamped === null) continue;   // 节点已卸载/跨执行上下文不可达：丢弃该候选
+      resolved.push({ idx: i, name: m.candidate.name, role: m.candidate.role, tag: stamped.tag, id: stamped.id, weak: m.weak });
+    }
+    if (resolved.length === 0) return null;
+    const synthetic: ElemPool = {};
+    for (const r of resolved) {
+      synthetic[`ax${r.idx}`] = {
+        ref: `ax${r.idx}`, tag: r.tag, label: r.name, full_label: r.name, role: r.role,
+        ...(r.id ? { id: r.id } : {}),
+        af_probe: `${token}-ax${r.idx}`,
+        // 旁路标记：模型投影剥离（executor-pure.modelProjectionOf），绝不进 ChoiceRequest。
+        declared: true,
+      } as Elem;
+    }
+    const orderedRefs = resolved.map((r) => `ax${r.idx}`);
+    if (onAmbiguous === "fail" && resolved.length > 1) {
+      const ambiguity = describeAmbiguity({
+        target, source: "dom_fallback", elems: synthetic, orderedRefs, ordering: mw.ambiguousOrdering,
+        ...(mw.hintTokenAllow !== undefined ? { hintTokenAllow: mw.hintTokenAllow } : {}),
+      });
+      if (ambiguity !== null) {
+        await _probeCleanup(mw, page, token);
+        return { ambiguity };
+      }
+    }
+    const first = resolved[0]!;
+    // 强档门（单点）：strong 下弱档命中不采纳——清章 + 显式事实（两面各落各的证据面）。
+    if (opts?.strong === true && first.weak) {
+      await _probeCleanup(mw, page, token);
+      return { rejected_weak: { probe: `${token}-ax${first.idx}` } };
+    }
+    return {
+      hit: {
+        ref: `ax${first.idx}`,
+        loc: page.locator(`[data-af-probe="${token}-ax${first.idx}"]`),
+        cleanup: async () => { await _probeCleanup(mw, page, token); },
+        elem: synthetic[`ax${first.idx}`]!,
+        weak: first.weak,
+      },
+    };
+  }
+
+  /**
+   * clickxy：**最后手段**——文本 bbox 中心坐标点击的解析面（run 面第六档，排在 AX 回退之后）。
    *
+   * 何时才用：声明的 act hint 走完 池→ADMIT→FW8→DRF→U5/F72/F74/F75→AX 全链仍落空，
+   * 而页面上存在**文本全等且唯一可见**的元素（`extraction.probeTextBbox` 同一底座）——
+   * 这类元素没有任何可寻址句柄（否则前几档早就命中），唯一剩下的动作方式是坐标点击。
+   *
+   * 纪律：
+   *   - **只读解析**（不动作）：返回合成行 `clickxy:{x,y}`，执行单点 = `_clickOnly` 的
+   *     clickxy 分支（`page.mouse.click`），**不经 locator**；
+   *   - **危险门控**在 run 面的风险闸门（clickxy 行强制 `risky=true` → `confirmFn`，缺省
+   *     拒绝、非交互恒拒绝）；本函数不做门控判断，只给事实；
+   *   - 文本**>1 可见 → 歧义**（`refused`，调用方零动作落 strict target_not_found——
+   *     绝不猜坐标）；0 可见/探测异常 = null（既有路径逐字节不变）；
+   *   - 仅裸词 hint 参与（attr/#id 形状另有 DRF/直查面；坐标点击对它们无增益）。
+   */
+export async function _resolveClickxyFallback(page: AnyPage, target: string): Promise<
+    | { hit: { ref: string; elem: Elem } }
+    | { refused: { reason: "ambiguous"; total: number } }
+    | null
+  > {
+    let parsed: ReturnType<typeof parseHint>;
+    try { parsed = parseHint(target); } catch { return null; }
+    if (parsed.kind !== "bare" || parsed.token === "") return null;
+    if (parsed.within !== undefined || parsed.inRow !== undefined || parsed.rowIndex !== undefined
+        || parsed.frameChain !== undefined) return null;
+    const probe = await probeTextBbox(page, parsed.token);
+    if (probe === null) return null;
+    if ("ambiguous" in probe) return { refused: { reason: "ambiguous", total: probe.total } };
+    return {
+      hit: {
+        ref: "cx0",
+        elem: {
+          ref: "cx0",
+          tag: probe.hit.tag,
+          label: parsed.token,
+          full_label: parsed.token,
+          ...(probe.hit.id ? { id: probe.hit.id } : {}),
+          clickxy: { x: probe.hit.x, y: probe.hit.y },
+          // 旁路标记：模型投影剥离（同 declared/af_probe 合成行纪律）。
+          declared: true,
+        } as Elem,
+      },
+    };
+  }
+
+  /**
    * 只在池内解析（含可行动优先排序）**零命中**且 hint 形状是 `#id` 时尝试：
    *   1. `document.getElementById(id)` 单点直查（跨可达子 frame 逐帧尝试，主 frame 优先）；
    *   2. 命中后做**同一套可交互性检查**（可见盒 + `actionCapabilities` 含当前 op）——

@@ -124,7 +124,7 @@ export async function runPoolGate(mw: BrowserMiddleware, a: {
       }
       poolWaitedMs = Date.now() - readyStarted;
     } else {
-      // F72-②：步首 settle 结论保留——rehydrateRescan 门控要用（非 poolReady 路径写它零行为影响）。
+      // 步首 settle 结论保留——重扫自动触发的门控要用（settle timedOut 即触发）。
       const headExtract = await mw._extractPoolSettled(pg, candidatePriority);
       elems = headExtract.elems; gateSettle = headExtract.settle;
     }
@@ -195,8 +195,6 @@ export async function runDeclaredTargets(mw: BrowserMiddleware, a: {
     let cmdI = a.cmdI;
     let cmdPick: { cmd: CommandDecl; ref: string; index: number; cands: string[] } | null = null;
     let rowAmbStop: { code: StopCode; reason: string } | null = null;
-    /** P0-C 首版能力面：DRF 目标只允许 click/scroll/hover（写值/拖拽/上传/坐标点击拒绝）。 */
-    const DECLARED_OPS = new Set(["click", "scroll", "hover"]);
     // P2 COMMAND SPACE — the step's action is chosen ON THE CLOSED SET, not on the pool:
     if (cmdSpace.length) {
       const scans = new Set(Object.values(elems).map((x) => x.scan));
@@ -251,17 +249,12 @@ export async function runDeclaredTargets(mw: BrowserMiddleware, a: {
         }
         if (candRefs.length === 0 && target !== "" && targetResolutionDeclared
             && hintCandidates(target, elems, hintOpts()) === null) {
+          // op 门在 tryDeclared 单点（DECLARED_TARGET_OPS）：能力面外的 op（fill/select/
+          // drag/upload/clickAt）拿到 null，落到下方 pendingUnresolved → 既有
+          // target_not_found——绝不"先解析再拒绝成 action_unsupported"。
           const got = await targets.tryDeclared(target, String(c.op));
           if (targets.declaredStop !== null) break;
           if (got !== null) {
-            if (!DECLARED_OPS.has(String(c.op))) {
-              await targets.cleanupDeclared();
-              targets.declaredStop = {
-                code: "action_unsupported",
-                reason: `command ${JSON.stringify(c.id)} declares op '${String(c.op)}', but its target ${JSON.stringify(target)} was resolved by the declared-DOM fallback (DRF) on step ${stepNo} — the first version allows only click/scroll/hover for DRF targets; use a pool/identity target for '${String(c.op)}' or pick a supported op`,
-              };
-              break;
-            }
             elems[got.ref] = got.el;
             pruneForbids(elems);
             cmdPick = { cmd: c, ref: got.ref, index: i, cands: [got.ref] };
@@ -427,16 +420,16 @@ export async function runDeclaredHint(mw: BrowserMiddleware, a: {
           });
           if (attempt.kind === "row") elems[attempt.ref] = attempt.el;
         }
-        // P0-C：DRF 是声明目标解析链最后一段（命中即注入局部池给 ref；fill 族 = action_unsupported）。
+        // P0-C：DRF 是声明目标解析链最后一段。能力面纪律在**解析资格侧**（不在命中后拒绝）：
+        // typing 形元素（isTyping）= DRF 不参与救援——立即清章与账（如同未命中），落回既有
+        // widen/strict 路径；缺省 declared 下绝不把能力面外的解析结果变成新硬停。
         if (hintMatch(curHint, elems, hintOpts()) === null && targetResolutionDeclared) {
           const got = await targets.tryDeclared(curHint, "click");
           if (targets.declaredStop !== null) break;
-          if (got !== null) {
-            if (isTyping(got.el)) {
-              await targets.cleanupDeclared();
-              targets.declaredStop = { code: "action_unsupported", reason: `act hint ${JSON.stringify(curHint)} was resolved by the declared-DOM fallback (DRF) but the target ${got.el.tag} "${got.el.label}" needs a typing action on step ${stepNo} — the first version allows only click/scroll/hover for DRF targets; use a pool/identity target or declare the target on a click element` };
-              break;
-            }
+          if (got !== null && isTyping(got.el)) {
+            await targets.cleanupDeclared();
+            targets.setDeclared(null);
+          } else if (got !== null) {
             elems[got.ref] = got.el;
           }
         }

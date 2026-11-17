@@ -26,6 +26,7 @@ import type { Elem, ElemPool, PageLike } from "./extraction.ts";
 import { observeElements, urlOf, type ObserveRawRow } from "./extraction.ts";
 import type { SurfacePolicy } from "./surface.ts";
 import { suggestHints } from "./rules.ts";
+import { countAxNotInPool, snapshotAx, type AxNode, type AxPageLike } from "./ax.ts";
 
 /** `ctx.observe({max})` 的缺省与硬上限（有界：单次观察最多 200 行）。 */
 export const OBSERVE_DEFAULT_MAX = 120;
@@ -108,6 +109,51 @@ export interface ObserveElement {
   structure_unstable?: true;
 }
 
+/** observe 面展示的 AX 节点数上限（与 inspect 的 nodes 展示口径一致）。 */
+export const OBSERVE_AX_NODES_SHOWN = 50;
+
+/**
+ * observe 面 `not_in_pool` 的口径说明。判定函数与 inspect 共用 ax.ts 的 `countAxNotInPool`
+ * （不复制实现），只是对照底座不同：inspect 对照运行池投影 label，observe 对照**本次观察的
+ * 准入元素** label。
+ */
+export const OBSERVE_AX_NOT_IN_POOL_BASIS =
+  "近似口径：AX 可交互且有名字的节点中，name 与本次观察的准入元素（admitted）label 归一化后全等/互相包含算“已指向”，否则计未指向；空名节点不参与（看 interactive_count），有界节点内计算；观察集合被 max 截断时以截断后集合为准";
+
+/**
+ * observe 面的 AX 证据块（与 `inspect --json` 的 `ax` 同口径；同一取树实现 `snapshotAx`）。
+ * 浏览器自己算的 accessibility 语义——回答「浏览器认为可交互/有名字的节点有哪些、哪些没被
+ * 本次观察的准入元素指向」。**只读证据**：不进模型请求面、不参与 admitted 判定、不改页面
+ * 状态；取树失败/无 CDP 会话/超时 ≤3s = `{available:false, reason}`，绝不抛栈、不阻断其余
+ * 观察面。dry/replay 不访问浏览器，无此键。
+ */
+export type ObserveAxEvidence = {
+  available: true;
+  /** 树从哪个 API 取到：playwright（旧运行时仍有的 API）或 cdp。 */
+  source: "playwright" | "cdp";
+  /** 全树可交互节点数（不受 nodes 有界截断影响）。 */
+  interactive_count: number;
+  /** 全树（非 ignored、非文本叶子）按 role 计数；空名节点同样计入 role。 */
+  counts_by_role: Record<string, number>;
+  /** 可交互节点的 role 计数（人读摘要）。 */
+  interactive_counts_by_role: Record<string, number>;
+  /** 有界节点（≤ OBSERVE_AX_NODES_SHOWN，"可交互→有名→其余" + 文档树序）。 */
+  nodes: AxNode[];
+  /** nodes 被截断过（> 展示上限，或取树层 > 200）。 */
+  nodes_truncated: boolean;
+  /** 全树参与统计的节点数。 */
+  total_nodes: number;
+  /** 本次观察的准入元素数（`not_in_pool` 的对照底座大小）。 */
+  pool_size: number;
+  /** 近似口径：AX 可交互有名节点中未被本次准入元素 label 指向的数量（只指出信息差，不作断言）。 */
+  not_in_pool: number;
+  /** `not_in_pool` 的口径说明（observe 面：对照底座是本次观察的准入元素）。 */
+  not_in_pool_basis: string;
+} | {
+  available: false;
+  reason: string;
+};
+
 export interface ObserveResult {
   ok: boolean;
   url: string;
@@ -117,6 +163,12 @@ export interface ObserveResult {
   counts: { elements: number; admitted: number; omitted: number };
   truncated: boolean;
   elements: ObserveElement[];
+  /**
+   * AX 证据块（缺省随观察附带；与 inspect 的既有纪律同一份：观察面证据、取树超时 ≤3s、
+   * 失败即 `{available:false, reason}`）。缺键发生在 dry/replay（不访问浏览器）与
+   * `ok:false` 的结构化错误响应（bad_selector 走早期返回）。
+   */
+  ax?: ObserveAxEvidence;
   /** 结构化错误（目前只有非法 `selector`）；`ok:false` 时出现，不抛栈、不中断 flow。 */
   error?: "bad_selector";
   reason?: string;
@@ -339,6 +391,35 @@ export async function observePage(
       view.why_not_admitted = whyNotAdmitted(row, view.class_names);
     }
   }
+  // AX 证据块（缺省随观察附带）：与 inspect 的既有纪律同一份——观察面证据、取树超时 ≤3s
+  // （snapshotAx 内建）、失败即 {available:false, reason}，绝不抛栈、不阻断其余观察面。
+  // 不做 opt-in：作者「不知道也不开」正是要消除的诊断盲区；waitFor/waitForTarget 的轮询
+  // 不走本原语（直接 extractElements），唯一重复付费点是会话 observeAfter（每 act 至多一次
+  // 有界取树）。对照底座 = 本次观察的准入元素 label（inspect 面对照运行池投影）；admitted
+  // 环在上面已定，这里只读结果——AX 不参与 admitted 判定，也不进模型面。
+  const axSnap = await snapshotAx(page as unknown as AxPageLike);
+  const admittedLabels = elements
+    .filter((e) => e.admitted)
+    .map((e) => e.label ?? "")
+    .filter((s) => s !== "");
+  const ax: ObserveAxEvidence = axSnap
+    ? {
+        available: true,
+        source: axSnap.source,
+        interactive_count: axSnap.interactive_count,
+        counts_by_role: axSnap.counts_by_role,
+        interactive_counts_by_role: axSnap.interactive_counts_by_role,
+        nodes: axSnap.nodes.slice(0, OBSERVE_AX_NODES_SHOWN),
+        nodes_truncated: axSnap.nodes.length > OBSERVE_AX_NODES_SHOWN || axSnap.truncated,
+        total_nodes: axSnap.total_nodes,
+        pool_size: admittedCount,
+        not_in_pool: countAxNotInPool(axSnap, admittedLabels),
+        not_in_pool_basis: OBSERVE_AX_NOT_IN_POOL_BASIS,
+      }
+    : {
+        available: false,
+        reason: "AX 树不可用（该运行时无 accessibility API / 无 CDP 会话 / 取树失败或超时 ≤3s）；其余观察面照常",
+      };
   const omitted = Math.max(0, collected.total - elements.length);
   let title: string | undefined;
   try {
@@ -363,5 +444,6 @@ export async function observePage(
     counts: { elements: elements.length, admitted: admittedCount, omitted },
     truncated: omitted > 0,
     elements,
+    ax,
   };
 }

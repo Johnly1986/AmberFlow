@@ -99,7 +99,9 @@ export async function runActionPhase(mw: BrowserMiddleware, a: {
       : cmdOpName === "fill" ? (mw._isTyping(el) ? "type text into" : "fill")
       : cmdOpName === "select" ? "select"
       : mw._isTyping(el) ? "type text into" : "click";
-    const desc = `${verb} ${el.tag} "${el.label}"`;
+    const desc = el.clickxy !== undefined
+      ? `click at (${el.clickxy.x}, ${el.clickxy.y}) text "${el.label}"`
+      : `${verb} ${el.tag} "${el.label}"`;
     // DRY RUN stops HERE: the target is resolved (rule hint / local model /
     if (dryRun) {
       const probe = await mw.dryRunProbe(pg, el, force);
@@ -158,8 +160,12 @@ export async function runActionPhase(mw: BrowserMiddleware, a: {
     }
     // §4：可逆性是**声明**，不该靠关键词猜。写了 effect.irreversible 就以它为准
     let risky: boolean, riskP: number;
-    // U6：上传的可逆性弱（只写 input.files，不提交表单），不新增 risky 语义——
-    if (cmdOpName === "upload") {
+    // clickxy：坐标点击（clickxy 合成行）是**危险动作**——强制走确认闸门（confirmFn；
+    // 缺省拒绝、非交互恒拒绝，`--confirm-unsafe` 才放行）。位置在动作描述里可见。
+    if (el.clickxy !== undefined) {
+      risky = true;
+      riskP = 1.0;
+    } else if (cmdOpName === "upload") {
       risky = false;
       riskP = 0;
     } else if (effect?.irreversible !== undefined) {

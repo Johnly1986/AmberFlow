@@ -26,6 +26,13 @@ export interface Elem {
    * 恒缺省（键不出现 = 行为不变）。
    */
   af_probe?: string;
+  /**
+   * clickxy：文本 bbox 中心坐标点击的**合成行**标记（`{x,y}` = 视口 CSS 像素中心）。
+   * 仅 `_resolveClickxyFallback` 的合成行携带（最后手段：文本定位成功但无任何可用句柄时）；
+   * 执行单点 = `_clickOnly` 的 clickxy 首分支（page.mouse.click），**不经 locator**。
+   * 危险门控：该行强制走确认闸门（`risky=true` → `confirmFn`，缺省拒绝）。
+   */
+  clickxy?: { x: number; y: number };
   name?: string;
   id?: string;
   /**

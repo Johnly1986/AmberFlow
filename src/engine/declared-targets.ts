@@ -86,6 +86,15 @@ export interface DeclaredTargetsResolver {
 }
 
 /**
+ * DRF 首版能力面（**单一出处**，`tryDeclared` 单点强制）：声明目标解析只救
+ * click/scroll/hover。能力面外的声明目标不参与救援（拿 null，落回调用方既有失败路径）——
+ * 绝不"先解析再拒绝成 action_unsupported"（缺省 declared 后那等于把既有 target_not_found
+ * 误伤成新硬停）。act-hint 面恒传 "click"（在面内）；typing 形命中由调用方的 isTyping
+ * 资格门二次把关（同样不参与救援）。
+ */
+export const DECLARED_TARGET_OPS = new Set(["click", "scroll", "hover"]);
+
+/**
  * 每步一个的声明目标 resolver（stepNo/pg 固定；状态全部实例化）。
  * `identityTried`/`declaredTried` 的 per-step 语义 = 每次 run 的每步新建本对象。
  */
@@ -148,6 +157,9 @@ export function createDeclaredTargetsResolver(deps: DeclaredTargetsDeps): Declar
     },
     async tryDeclared(target: string, op: string): Promise<{ ref: string; el: Elem } | null> {
       if (!deps.targetResolutionDeclared || target === "" || declaredTried.has(target)) return null;
+      // op 门（能力面单点，见 DECLARED_TARGET_OPS）：在 dedup 之前判定——同一步同一
+      // target 换一个面内 op 的后续命令仍可正常走 DRF，不被面外 op 的空跑占掉额度。
+      if (!DECLARED_TARGET_OPS.has(op)) return null;
       declaredTried.add(target);
       const dr = await declaredLookup(
         deps.pg, target, op, deps.surfacePolicy, deps.frameHosts, deps.hintOpts(),

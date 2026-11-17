@@ -369,7 +369,7 @@ export interface RunReport {
   /** S4：本子目标至少一个动作按步级 `force` 声明执行（trace 行 `forced=true` 的汇总）。 */
   forced?: boolean;
   /**
-   * F72-②：本子目标声明 `rehydrateRescan` 且**跑过**显式重扫时的事实（缺字段 = 没跑过；
+   * F72-②：目标解析全链落空且页面未静默（settle timedOut）时**自动重扫**跑过且仍未命中的事实（缺字段 = 没跑过；
    * 至多一次）。与 trace 行事件字段 `rehydrate_rescan` 是同一份证据（单对象：本机制至多一次）。
    */
   rehydrate_rescan?: {
@@ -749,7 +749,7 @@ export interface RunOptions {
    */
   staleRetry?: boolean;
   /**
-   * F72 `rehydrateRescan`（opt-in，步级声明；缺省 false = 今天的行为逐字节不变）：
+   * `rehydrateRescan`（兼容声明——重扫已缺省自动，本键不再有额外效果。引擎行为）：
    * 声明 act hint 在 池 → ADMIT 回捞 → FW8 身份回捞（→ rules-only 宽扫）**真落空**
    * （hintMatch 零命中；弱档胜出不触发）且**步首抽池时页面未静默**（settle timedOut——
    * 重水合 SPA 轮播页抽到中间态池的信号）时，做一次有界重扫：等 2s（受整步挂钟帽钳制）
