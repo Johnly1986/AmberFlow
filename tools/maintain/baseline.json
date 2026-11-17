@@ -25,7 +25,7 @@
       {
         "file": "src/engine/executor.ts",
         "name": "run",
-        "lines": 1508
+        "lines": 1316
       },
       {
         "file": "src/app/app-runner.ts",
@@ -130,7 +130,8 @@
     ],
     "phaseFunctions": [
       "src/engine/executor.ts#runDeclaredTargets",
-      "src/engine/executor.ts#runModelPick"
+      "src/engine/executor.ts#runModelPick",
+      "src/engine/executor.ts#runPostAction"
     ]
   },
   "docs": {
