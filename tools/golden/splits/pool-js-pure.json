@@ -1,0 +1,42 @@
+{
+  "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
+  "id": "pool-js-pure",
+  "note": "pool-js.ts 共享 JS 片段外搬（COLLECT/BUCKET/LABEL/STRUCTURE/ANCHOR/ROW_CLIMB/compile→pool-js-core.ts；2026-11-17，逐字节）",
+  "files": {
+    "src/engine/pool-js-core.ts": {
+      "symbols": {
+        "ANCHOR_JS": "ff266f6936a6784360c9ef68565387b6f1341e659f45e17cb7f5b2847b27ee29",
+        "BUCKET_HELPERS_JS": "079b2c7addbb2da675043582985849c7c287f32a56c79ceb76f3f2cc9f70bb42",
+        "COLLECT_JS": "70a20216716813127e5409997d7d9ae808e3d60d612fc49cf8d2063cc061d598",
+        "compile": "5f17f11158ef2bcafdf1e1c1d52114c84a76bdfe2578cb8e14d8b22d0efe576f",
+        "LABEL_HELPERS_JS": "1a9669a0faf67360cca9f99bcfb3f1f619f1b8a0799e48cb4ef9abda6d943cb7",
+        "ROW_CLIMB_JS": "53fbb67e16b721882d6aca7ecee17df081b0a08acd02e47583174d0609b85ad4",
+        "STRUCTURE_HELPERS_JS": "d662b7b63a9a2752f4d0280e0f992239552abf0526c9bc71f99008163f6a1554"
+      }
+    },
+    "src/engine/pool-js.ts": {
+      "symbols": {
+        "EXTRACT_JS": "e9fd03d2e58853dbbf51f373b32edcecf87ea1a8473a76b7c8de2b06736bf5c0",
+        "FN_FIRST": "d355f17f69626186848d5e8a89a4c6f7bb2a06a1cee0e9a022c5d8a5323fd3fa",
+        "FN_TAG": "625a94832966392ec17f259c91ef681f2e32bc4b0090b374d48bbd55146fd605",
+        "FN_WRAPPER": "2c1bd711156ea059b79f942d2e2110dd494504dd2b25e0908c3d2653929c141e",
+        "HEURISTIC_WIDGET_JS": "d0f58c1de427643a3a36d6015c0de47ee0a5e2e34acdff6fa6e22f51b07aaa50",
+        "HINT_HEAD": "5ce582d4e7614c9d535db3165aa0925f67220a72d54911c3eca4ddfa57dd46a5",
+        "META_JS": "845e6f94c97c12301b172f07ee8ed1fd73cfc3b3badf5e68721cf9b111c7cfea",
+        "NEAR_JS": "75f0cb28b51ed50442b1dddd012ec982f7d89ff31d4c0aa1af815dd73ec8d0ec",
+        "OBSERVE_JS": "78795751d5389ec083ca28e4b1387e090e508adb422450b9d0225fd66db820bc",
+        "PASS_EXTRACT": "59387f580ed1bf4bf99427dbeff1cfbe883b7cb01de8bdc8c16e12b005b94d77",
+        "PASS_HEURISTIC": "52250d41dccd75a4c896146cc7096a8f690037cdab3363945ffb87f286ff6307",
+        "PASS_HINT": "071f8839fbf2761290a18ad3aa5fe221ad5d7261b75d1599ab17e6ac42ce66e2",
+        "PASS_HINT_PROBE": "b5fb516138b0f11523ebb7c19e75035089e371e3168abe8a660d58e2ca872b6a",
+        "PASS_META": "ce9d9302243b2c00700b347356f970fb455e2333625dc0b2f69788cd7b66a987",
+        "PASS_NEAR": "09dce1df1600f31ab8af229c4ba9c7d0479d9f3cabbae8259ca97d551eaffa86",
+        "PASS_OBSERVE": "27ef7aaf437f008f94a6dbd0e61d3bbb1e80004ddebeab44c3d2e52f0f6fddff",
+        "PASS_UNDERLOAD": "ee44941958af985a00bd74c82848aeddf8bcd700eabaa2fc762bfff2ad53a88f",
+        "PASS_WINDOW": "f3e48541e138728986d43e056f06a3003709b03ecdf527145c3f04aa1086afbc",
+        "VIEWPORT_UNDERLOAD_JS": "029b21c8ece1fd1eb6623d4ad157eb8fc600c29ae8ba913aada706304aae0177",
+        "WINDOW_AUDIT_JS": "e5c8206dd9821c98d73aef97dc86b361d4c0110f30c4f5c190243905ae95513b"
+      }
+    }
+  }
+}
