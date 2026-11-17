@@ -1,6 +1,6 @@
 # 可维护性与可扩展性治理方案 v2.1（架构评审修订版）
 
-> **状态**：**P0/P1/P2 已收口（2026-11-17）**；**大文件拆分目标已达成（§6.7：最大文件 2721 ≤3000，>1000 行文件仅剩 executor 例外）**；P2 条件项与冻结后待办明确延期（见 §6.5 D）。P0 9/9 批见 §6.1；P1 见 §6.2；P2 见 §6.4/§6.5
+> **状态**：**P0/P1/P2 已收口（2026-11-17）**；**大文件拆分目标已达成（§6.7：最大文件 2721 ≤3000，>1000 行文件仅剩 executor 例外）**；**常量配置与提示词两线条件项已收口（§6.8：§9 #3 站点知识代码面=0 + §9 #4 模型/证据/Agent/桥四面在门禁内）**；P2 条件项与冻结后待办明确延期（见 §6.5 D）。P0 9/9 批见 §6.1；P1 见 §6.2；P2 见 §6.4/§6.5
 > **基线**：`main @ 91bf379`；`npm run check` 全绿（本轮实测：预检/类型/配置/schema/prompt/泄露/示例/行锚/用例校验 9 项通过）
 > **评审**：3 个独立只读评审（目标架构 / 迁移治理 / 红队）+ Lead 裁决，记录见 [IMPROVEMENT_PLAN_REVIEW.md](IMPROVEMENT_PLAN_REVIEW.md)。本版已按裁决修订：砍 `sdk.ts`/伪端口/单一编排，新增 0.8 等价证据 lane 与 0.9 seam 冻结，门禁降档，P2 条件化。
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
@@ -598,9 +598,9 @@ interface PromptSpec {
 | 语义 · 同一语义实现份数 | ≤3 | 登记 seam 已单点：mw 构造 1（工厂）/ 候选生产者 1（app）/ SessionLease 1（flow+plan+suite）/ RunScope 1（app 两面）/ 套件聚合器 1 / 停因→退出码名映射 1；重试与业务判定按 S1 契约**归源**（刻意不共享） | ✅ |
 | 注释 · 禁止类 / ratchet | 0 / 0 | `maintain` comments 组 0 fail / 0 warn；禁止类（日期戳/行号锚点/幽灵引用/裸 TODO）=0 | ✅ |
 | 配置 · 漂移 / 裸 env | 0 / 0 | constants 组 0 fail；三向生成文档一致（33 keys）；白名单外裸读 env 由门禁覆盖 | ✅ |
-| 提示词 · 重复 / spec | 0；11/11 | prompt-hit 九组全绿；模型 prompt 11 条唯一文本 × 25 消费点（快照 hash 一致）；证据 spec 仍为条件项（D） | ✅ |
+| 提示词 · 重复 / spec | 0；11/11 | prompt-hit **十二组**全绿：模型 11 条唯一文本 × 25 消费点；证据 spec 5 条（分级预算+快照）；Agent plan.rules/playbook 预算；桥 82 描述覆盖（warn-only） | ✅ |
 | 规模 · 新文件 / 新函数 | ≤800 / ≤150（阶段函数 ≤400 例外） | 本阶段新文件最大 367（`candidate-scan.ts`）；新函数均 ≤150；阶段函数例外已入 `phaseFunctions` 冻结表 | ✅ |
-| 规模 · 最大文件 / ≥300 行函数 | 条件目标 ≤3000 / ≤6 | 最大 5829（executor，4d：6139→5829）；≥300 行函数 6 + 阶段函数例外 1（report-only，§6.4 已注明） | ⚠️ report（条件未承诺） |
+| 规模 · 最大文件 / ≥300 行函数 | 条件目标 ≤3000 / ≤6 | 最大 **2721**（executor，§6.7；≤3000 达成）；≥300 行函数 **7**（report，§6.7 已列） | ✅ max / ⚠️ 函数 report |
 | 主线 · 真实 mw 构造 | 1 工厂 + 2 调试面 | 真实 `new BrowserMiddleware(` = 1（`middleware-factory.ts`），mainline 门禁冻结 | ✅ |
 | 主线 · 源适配器 | kernel + 3 适配器 + 套件聚合器 | S2 三适配器与 S3 聚合器已登记（`docs/MAINLINE.md` §2）；S1 kernel 已完成 SessionLease/RunScope/StopClassifier/聚合器原语的共享化，`runExecution` 组合根为条件项（D） | ⚠️ 部分（条件项） |
 | 主线 · 入口 / 公共面 | 三类登记；死导出 0 | MAINLINE §3 三类入口已登记；extension 删除、`index.ts` internal、`exports["."]`=DSH 插件锁定、无 sdk（mainline 门禁） | ✅ |
@@ -612,8 +612,8 @@ interface PromptSpec {
 |---|---|---|---|
 | 1 | 大文件难读 | 同语义实现份数按 A 表收敛；执行器 `run()` 2685→741（九阶段方法，类名/签名逐字节冻结）；新文件 ≤800 硬门禁 | ✅ |
 | 2 | 注释历史 | 禁止类=0；历史只在 `CHANGELOG.md`（`## Decisions` 索引 D1–D12）；ratchet 只减不增 | ✅ |
-| 3 | 常量配置 | 11 调参单源 + typed getter（白名单外裸读=0）+ 配置文档三向生成一致；站点知识出引擎为冻结后条件项 | ✅（条件部分见 D） |
-| 4 | 提示词 | 25→11 spec；prompt-hit 九组（含模型 11 条 × 25 消费点）；重复字符门禁=0 | ✅ |
+| 3 | 常量配置 | 11 调参单源 + typed getter（白名单外裸读=0）+ 配置文档三向生成一致；**站点/业务知识出引擎 + 扫词门禁零命中（§6.8）** | ✅ |
+| 4 | 提示词 | 25→11 spec；**prompt-hit 十二组（模型/证据/Agent/桥四面）**；重复字符门禁=0；文本 hash 逐字节不变（§6.8） | ✅ |
 | 5 | 主线 | MAINLINE 含 L0–L6/L1.5 + S0–S5 + 三类入口 + 目录映射；mw 构造=1；kernel/3 适配器/聚合器已登记（`runExecution` 组合根条件项）；index 宣称删除 + exports 锁定 + 6 处文档断点=0 | ✅（条件部分见 D） |
 
 **C. 扩展演练 5 项（临时 worktree 真实补丁 → 计数 → 回滚，未入库）**
@@ -634,10 +634,10 @@ interface PromptSpec {
 |---|---|
 | `runExecution(source,deps)` 组合根 + ctx 行为矩阵 / `tools/ctx-conformance.ts`（W5-2 条件） | 需先有三源 canonical 对比夹具；冻结窗口后按 W5-2 |
 | W5-3 剩余：engine 的 3 个 runtime 函数（`decisionProviderOrNull`/`layaProvider`/`decisionFailureFact`）改组合根注入；model→engine 反向边收缩 | 组合根批次同批 |
-| W4-4 桥字段/描述共享契约（P2 降级：只 warn） | 桥契约批次；本次演练已量化 5 处穿透 |
-| W3-4 站点知识出引擎（`datasource` 航班字段 / `report-view` price 默认值） | 涉及行为默认值，冻结窗口后 |
+| W4-4 剩余：桥**字段**共享契约（5 处穿透） | 描述覆盖已收口（bridge_desc warn 组，§6.8）；字段共享契约仍条件项 |
+| ~~W3-4 站点知识出引擎~~ | **已收口（§6.8）**：Source JSON 字段映射 + 扫词门禁零命中；缺配迁移差异见 CHANGELOG |
 | BACKLOG #3 候选窗口指数递增（40→80→160 cap）+ trace 观测 | 行为变更，冻结窗口后（D3 顺序 #2→#3 的 #3） |
-| 1.6 证据 spec / Agent prompt wrapper（条件：真实失败案例驱动） | 当前无失败案例 |
+| ~~1.6 证据 spec / Agent prompt wrapper~~ | **已收口（§6.8）**：证据 spec 5 条 + Agent plan.rules；仅 laya token 级截断行为变更仍条件保留 |
 | handler 子进程内化 12 处 | P0/P1 已登记延后（§4.5） |
 
 **E. 状态**：P2 收口（2026-11-17）；freeze（2026-11-17 起 2 周）内不再排 P2 批次；BACKLOG #3 与上述条件项按触发条件在冻结结束/前置就绪后启动；回访 1（30 天不回潮）与回访 2（可扩展定性）按 §9 在冻结结束后的回访窗口执行。
@@ -700,6 +700,31 @@ interface PromptSpec {
 **门禁扩展（随批次）**：size 组新增 `movedFunctions`（纯搬移的大函数，行数只许降不许增）与 `phaseFunctions` 新路径；当前 movedFunctions 10 条、phaseFunctions 6 条；size baseline files 9 / functions 16。
 
 **明确仍属条件项**：W5-2 的完整 `tools/ctx-conformance.ts`（fake PageLike 离线 diff）未落地——C1 用临时三面 A/B 代替并留后置 manifest；`runExecution(source,deps)` 组合根仍按 §6.5 D 条件延期；`run()` 741 行与九个 phase 方法签名保持冻结。
+
+### 6.8 常量配置与提示词收口（2026-11-17）
+
+**A. 常量配置线（§9 #3 全达标）**
+
+| 判据 | 证据（门禁/实测） |
+|---|---|
+| 9 例配置漂移=0 | `maintain` constants 组 0 fail；三向生成文档一致（33 keys） |
+| 白名单外裸读 env=0 | constants 组门禁（`env.ts` typed getter 单源） |
+| 14 概念中 11 个多写/半单源清零 | `tuning.ts` 11 概念 + `TUNING_VALUES` 单源 |
+| 配置文档 3/3 生成/校验 | `config:example:check` + `schema:check` |
+| **站点知识代码面=0（W3-4）** | 数据/报表机制移除业务字段默认：`selects[].value_field/value_fields/detail_fields`、`report.value_fields/currency_field/detail_fallback_fields`、`filters.time_field` 全部配置驱动（加载期校验 + 缺配通用回退）；新增 `tools/site-knowledge-check.ts`（23 词闭集 / 8 条带理由白名单 / 9 条自测）并接入 `npm run check`：**src 零命中** |
+| 等价证据 | 显式配置路径 A/B 逐字节一致（reportMarkdown 377B sha `aedb1ba0…`、null-price 变体、previewTable、selectIndex/selectBest、resolveSourceSlots、validateSource、runSource CLI stdout）；仅“未配字段映射”路径按迁移说明变化（见 CHANGELOG） |
+
+**B. 提示词线（§9 #4 全达标）**
+
+| 面 | 门禁（prompt-hit 组） | 实测 |
+|---|---|---|
+| 模型 | `model`（fail） | 11 条唯一文本 × 25 消费点；快照 hash 一致；重复=0 |
+| 证据 | `evidence`（fail） | 5 条 spec（version/budget/consumers）；criteria 40/120/200 = 1815/5551/9503 字符 ≤6k/12k/20k；`tools/golden/prompts/evidence.json` 快照；state_text 281≤320、digest 79B≤200、site_facts 359≤700、notes 35≤80 |
+| Agent | `agent`（fail） | `plan.rules` spec 1433 字符 ≤1600（default/full/small hash 改前=改后）；候选窗口 403 字符数字由常量渲染；playbook short 407≤500 / full 2061≤2200；`plan.ts` 无回抄 |
+| 桥 | `bridge_desc`（warn-only，按 W4-4 降级） | 82/82 描述 / 21,136 字符；>800 三条 warn（#3/#25/#51）；`amber` 命令死链 0；站点名 0；不阻断 |
+| 数字阈值单源 | `FULL_LABEL_MAX`/`MODEL_LABEL_MAX` + tuning 常量 | label 40/200 与 pool/quota 数字由常量渲染，渲染文本 hash 不变 |
+
+**C. 最终 §9 判定**：五条痛点判据全部 ✅（大文件 §6.7、注释 P0/P1、常量配置 §6.8A、提示词 §6.8B、主线 §6.5）；两条回访条件（30 天不回潮 / 扩展定性回访）仍按 §9 在未来回访窗口执行。残留条件项（不阻塞 §9 判据）：`runExecution` 组合根/ctx conformance（W5-2）、W5-3 runtime 注入、W4-4 桥字段共享契约、laya token 级截断行为变更、BACKLOG #3、handler 内化。
 
 ### P2 主线（条件启动；3–5 周，12–20 人日）
 

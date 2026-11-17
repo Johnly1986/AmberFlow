@@ -16,7 +16,7 @@
 | **L0 support** | `src/support/*`（paths / config-schema / config-store / rcfile / apply-config-env / merge-env / amberflow-home / pace / sleep / cli-args / intervention-contract / intervention-texts / **decision-provider-contract** / **page-like**） | node:* 仅 | 叶子层；**provider 接口类型契约（W5-3 已落地）与页面形状纯类型**在此，engine 只 import 契约、model 实现 |
 | **L1 共享语言/叶子** | `signals` + `signal-ops`、`hint`、`click-at`、`surface`、`plan`（类型）、`pystr`、路径解析、host-envelope、**`src/prompts/`（模型提示词单源，规划中 0.4）** | L0 | 纯语言/数据；engine 与 model 都可 import |
 | **L1.5 intervention** | `src/intervention/`（合同/文本零依赖 + runtime 只依赖 L0 两叶子）；`src/app/intervention-adapter.ts` 是唯一适配 | L0 两叶子 + node:* | 见 [INTERVENTION_RESCUE_MODULE.md](INTERVENTION_RESCUE_MODULE.md) §2；**不反向依赖 app/engine/model/cli/browser/data** |
-| **L2 机制** | `browser-env`、`tool-signals`、`extraction`（pool-js（+core）/identity/frame-scope/**elem-model/page-shapes**；页面形状类型已下沉 L0 `support/page-like.ts`，extraction re-export）、`actions`、`rules`、`settle`、`dataset`、`datasource`（传输/来源） | L0–L1 | 页面扫描、动作、稳定门、数据腿等机制 |
+| **L2 机制** | `browser-env`、`tool-signals`、`extraction`（pool-js（+core）/identity/frame-scope/**elem-model/page-shapes**；页面形状类型已下沉 L0 `support/page-like.ts`，extraction re-export）、`actions`、`rules`、`settle`、`dataset`、`datasource`（传输/来源；字段映射配置驱动，W3-4） | L0–L1 | 页面扫描、动作、稳定门、数据腿等机制；**数据/报表机制不认识站点/业务字段**（扫词门禁） |
 | **L3 决策** | `src/model/*`（provider 协议 / 缓存 / ONNX / prompt views / 审计） | L0–L2（经契约） | 实现 L0 的 provider 契约；现有 `model→engine` 反向边见 §1.2 |
 | **L4 执行** | `executor`（实现片段：executor-phases/actions/resolve 模块；类名/`run()` 冻结）、`planner`、`bindings`、`observe`、`pool-view`、`picker`、`audit` | L0–L2 + 契约 | 唯一执行循环；只消费契约与机制，不 import 具体 provider 装配 |
 | **L5 应用** | `src/app/*`（ctx（+runtime/step/tools/read/nav/scroll/manual 模块；ctx.ts 为组装面）/ runner / adapters / trace / report / session-runtime（+contract/evidence/entry）/ session-export / intervention-adapter） | L0–L4 | flow 运行期面；session-runtime 是**调试面**（复用 createCtx，不是第 5 个 ctx 实现） |
@@ -169,6 +169,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | `src/index.ts` 仓内 importer = 0 | 公共面不自欺 |
 | `new BrowserMiddleware(` 真实构造数 ≤ 基线（1，工厂内唯一构造；注释行不算） | 装配点只减不增（P1-1.5 工厂已把 6 处收到 1 处） |
 | `ctx.runEntry(` 调用点数 ≤ 基线（12） | 子进程转交只减不增 |
+| `npm run site-knowledge:check`（src 站点/业务词零命中） | W3-4：数据/报表机制不认业务字段；词表/白名单在工具内逐条登记 |
 | 命名表/入口表/预留表存在 | 文档真值最低线 |
 
 > 门禁实现见 `tools/maintain/mainline.ts`；基线值在 `tools/maintain/baseline.json` 的 `mainline` 节，`--update` 只许下调。

@@ -241,6 +241,34 @@ export const meta = (kit) => ({
 - `meta` 在加载期调用一次，必须**无副作用**：不要在这里开浏览器、发网络请求或读运行期状态。
 - `meta` 是唯一声明面；没有任何“按步骤序号声明/编辑流程”的接口。
 
+### 数据源 JSON 的字段映射（字段知识只在配置里）
+
+数据腿 source JSON 的**业务字段映射**全部是声明，引擎不认识具体站点/业务词。可选字段（`src/data/types.ts` 有类型与注释；`source-validate` 加载期校验，缺配走通用回退）：
+
+| 字段 | 作用 |
+|---|---|
+| `selects[].value_field` | 该 selects 的“主值字段”（报告加粗 / 槽位回写优先） |
+| `selects[].value_fields` | 该 selects 的字段顺序（取第一个非空） |
+| `selects[].detail_fields` | 跨日期明细行展示的字段顺序 |
+| `selects[].label` | 选择器的人读标签（CLI 摘要用它，不再内置“最低”等业务词） |
+| `report.value_fields` | 报告标识列展示的字段顺序 |
+| `report.currency_field` | 货币前缀应用的字段（不配则不加前缀） |
+| `report.detail_fallback_fields` | 明细字段全缺时的回退顺序 |
+| `filters.time_field` / `selects[].sort_by` | 时间列字段 / 赢家排序键（不再有隐式 `["price"]`） |
+
+旧配置迁移（旧引擎隐式行为等价模板）：
+```json
+{
+  "filters": { "time_field": "dep" },
+  "selects": [{ "label": "最低", "sort_by": ["price"], "value_field": "price",
+                "value_fields": ["price", "id", "name"],
+                "detail_fields": ["flight_no", "airline", "dep", "arr", "dep_port", "arr_port", "cabin", "discount"] }],
+  "report": { "value_fields": ["flight_no", "name", "id"], "currency_field": "price",
+              "detail_fallback_fields": ["id", "name", "label"] }
+}
+```
+未配字段映射时：排序缺省=取首行、报告加粗值缺省=空、标识列=行内首个非空标量、无货币前缀——**如实展示配置，不猜业务字段**。站点知识门禁：`npm run site-knowledge:check`（扫 `src/**/*.ts`，注释剥离、字符串保留；命中业务/站点词 fail）。
+
 ## 4. `flow(ctx)`：运行期面
 
 ```js

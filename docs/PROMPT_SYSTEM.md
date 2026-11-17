@@ -219,6 +219,10 @@ prompt-hit coverage 组断言（2026-10-31 起为**双向 + executor 闭环**）
 | bridge | 桥生成物同步（grammar + playbook + **overview**） | 扩展 |
 | doc | 文档逐字含 ATTR_MATCH_MODEL_TEXT / PLAN_PLAYBOOK_TEXT / FAILURE_SIGNS_TEXT / STOP_ESCALATION_TEXT | 扩展 |
 | overview（新） | AGENTS.md 逐字含 OVERVIEW_TEXT；长度预算（概述 ≤400 字符、when ≤40、flow ≤4 行）；WHEN_TO_USE 与 registry when 双向一致（registry 由 help-map 投影）；HOME_NEXT 单源渲染首页 next；overview 进桥生成物**并接进 status 工具描述** | 新增 |
+| model | 模型决策 prompt 单源（`src/prompts/model-prompts.ts`）：11 条唯一文本 × 25 消费点、去重/预算/快照 hash/无站点名/输出契约句 | 新增（P0-0.4） |
+| agent | Agent 侧 wrapper 单源：`plan.rules` PromptSpec（预算 1600）、playbook short ≤500/full ≤2200、候选窗口数字由引擎常量渲染、plan.ts 无回抄 | 新增（W4-3） |
+| evidence | 证据渲染 spec 5 条（criteria/state_text/state_digest/site_facts/notes）：version/budget/consumers、候选 40/120/200 分级预算、合成池快照 hash | 新增（W4-2，渲染文本不变） |
+| bridge_desc | 桥 82 个手写 description 的长度/命令死链/站点名覆盖 | 新增（W4-4，**warn-only**，不阻断） |
 | coverage（新） | 停因三表双向闭环（schema ↔ STOP_NEXT/EXEMPT ↔ executor union，内部码边界见 EXECUTOR_ONLY_STOPCODES）；CLI/agent-view/playbook 的 next 无死链；registry help/AGENTS/桥同一事实（max-steps=执行预算）抽查一致 | 新增 |
 
 ## 6. 可验收判据
