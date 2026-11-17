@@ -32,6 +32,7 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - 4d-7a：`run()` 循环后 run 级 epilogue（after 指纹/前进性判定/flags/`_runFlags`/stepState）提为私有方法 `runTail`，返回 stepState；`no_state_progress` warning 与 flags 判定逐字不变。executor 5836→5831、run() 继续下降；运行期 lane 4 场景不变（含收尾观察）。
 - 4d-7b：`run()` 的 active setup（状态游标重置 / `await ready()` / configError 早返回 / 导航信封 host 早返回 / launch+newPage / `pg` / observeState 闭包 / goto+settle / popup 信封）提为私有方法 `runSetup`（87 行），返回 `SetupPhase{kind:"early"|"ready", ...}`；early 带 browser 保持 finally 关闭语义（注入 page 不关）。运行期 lane 在本批实拦住一次 `skipNavigation` 双重取反回归（改前 3 场景红，改后 4/4 绿）。executor 5831→5830、run() 838→743。
 - **4d 九阶段完成**：runSetup/runFrameGate/runPoolGate/runDeclaredTargets/runDeclaredHint/runModelPick/runActionPhase/runActionExecute/runPostAction/runTail（+既有 reportTail）全部落地；新增 maintain mainline 断言冻结 `BrowserMiddleware` 类名与 `run()` 签名字面（负向自测 22→24 条）。累计 executor 6139→5830、run() 2685→743；examples golden / verify:offline / verify:runtime:offline 4 场景全绿。
+- 2.1（BACKLOG #2 第一步）：候选生产者契约 `CandidateProducer`（`candidate-contract.ts`，纯数据/结构类型、无 Playwright 具体类型）+ 引擎消费 seam——`MiddlewareOptions` 可选 `candidateProducer`，executor 全部 6 处 `extractElements` 直调改走 `this.candidates.extract`（默认实现仍为引擎扫描，参数逐字、行为零变化）；split-check 将 `MiddlewareOptions` 移出纯搬移 manifest（有意的契约 seam 变更）。2.2 扫描/筛选实现搬 app 层待做。
 - gate：`baseline.size.phaseFunctions` 新增 `src/engine/executor.ts#runDeclaredTargets`（九阶段显式例外 ≤400 行）；`maintain --update` 协议修正为跳过 phaseFunctions 名单（不再误报「新增超标函数」），负向自测 + 1 条正例。
 
 

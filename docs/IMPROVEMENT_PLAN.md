@@ -6,7 +6,7 @@
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0 完成、**4d 九阶段全部落地（出口核对完成）**；下一步按 D3 启动 #2 候选契约 → #3）。
+> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置满足、freeze 生效；§6.4：2.0 完成、4d 九阶段全部落地（出口核对完成）、**BACKLOG #2 第一步（2.1 候选契约 + seam）已落地**；下一步 2.2 扫描实现搬 app 层 → #3）。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -551,6 +551,8 @@ interface PromptSpec {
 | 4d-6 runActionPhase + runActionExecute | 动作阶段 449 行拆两阶段方法：runActionPhase 166（能力面/DRY-RUN/needs_value/pre-fill/风险闸门）+ runActionExecute 251（stale/执行分派/证据/trace.push）；返回 ActionPhaseResult 驱动 control 与 run 级回写 | 本批提交 | run() 1316→884、executor 5836≤基线；运行期 lane 4 场景绿（正常动作/遮挡证据） |
 | 4d-7a runTail | 循环后 run 级 epilogue（after 指纹/前进性判定/flags/_runFlags/stepState）提为私有方法；`run()` 收尾调用 | 本批提交 | executor 5836→5831、run() 继续下降；运行期 lane 4 场景绿（含收尾观察） |
 | 4d-7b runSetup | run() active setup（状态游标重置/ready/configError/导航信封/launch+pg/observeState/goto+settle/popup）提为私有阶段方法（87 行）；早返回带 browser 保持 finally 关闭语义 | 本批提交 | run() 838→743、executor 5830≤基线；运行期 lane 4 场景绿（曾捕获 skipNavigation 双重取反回归并修复） |
+
+| 2.1（BACKLOG #2 第一步） | 候选生产者契约 `CandidateProducer`（`candidate-contract.ts` 66 行，纯数据/结构类型，无 Playwright 具体类型）+ 引擎消费 seam（MiddlewareOptions 可选 `candidateProducer`；executor 6 处 `extractElements` 直调全部改走 `this.candidates.extract`，参数逐字） | `595eff9` | 运行期 lane 4 场景 + examples golden 绿；split-check：MiddlewareOptions 有意非纯搬移移出 manifest，变更由 PR 说明承载 |
 
 **4d 九阶段出口核对（2026-11-17，完成）**：
 
