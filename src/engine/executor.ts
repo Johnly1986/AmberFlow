@@ -162,7 +162,7 @@ import { optionCandidatesFrom, type OptionCandidate } from "./bindings.ts";
 export * from "./executor-types.ts";
 import {
   DEFAULT_DECISION_STATE, STATE_DIGEST_MAX_BYTES,
-  type Sig, type AnyLoc,
+  type AnyLoc,
 } from "./executor-types.ts";
 import type {
   ActionabilityDetail,
@@ -296,6 +296,7 @@ import {
   weakHintRejectedWarning,
   weakRejectedReason,
 } from "./executor-pure.ts";
+import { createRunAccounting, type RunAccounting } from "./run-context.ts";
 
 /**
  * B2：一次滚动的**实测证据**（容器滚动与滚入视口共用同一形状）。
@@ -3303,6 +3304,11 @@ export class BrowserMiddleware {
     // E2：歧义命中顺序同理——实例字段是后续 actOnce/命令步读取的唯一口径。
     this.ambiguousOrdering = ambiguousOrdering;
 
+    // 四组记账（stop / forbid+why / noteSkipped / unforbid·pruneForbids）的唯一载体：
+    // 状态与逻辑都在 RunCtx；run() 只持入口，调用点零改写（顺序/时机由本函数掌握）。
+    const acct: RunAccounting = createRunAccounting({ maxSteps: this.maxSteps });
+    const { stop, forbid, unforbid, pruneForbids, noteSkipped, forbidden, forbidWhy, blockedRetry, reAdmitted, skippedActions } = acct;
+
     // The navigation envelope: run-level declaration wins, else the middleware's
     // (set once for a whole journey by the app runner from `pack.hosts`).
     const hostGate = hosts ?? this.hosts;
@@ -3385,7 +3391,6 @@ export class BrowserMiddleware {
     //   warnings       —— 运行期诚实警告（如 suspected_async）；
     //   donePreheld    —— 命令步动作前对 done 的一次预评估（只记录，不改变执行顺序）。
     let executedCount = 0;
-    const skippedActions: SkippedAction[] = [];
     const warnings: string[] = [];
     let donePreheld: boolean | null = null;
     /** A2：target_not_found 现场发现的滚动容器事实（进 diagnostics 的结构化证据）。 */
@@ -3403,16 +3408,6 @@ export class BrowserMiddleware {
       ...(donePreheld === true ? { done_preheld: true } : {}),
       ...(forceAct ? { force_act: true } : {}),
     });
-    /** A1：一条被跳过的命令/动作（原因单一出处，trace 行与 skipped_actions 共用）。
-     *  同一 (command_id, ref, reason) 只记一次——多步 walk 里同一命令被"已禁"而越过多轮时，
-     *  重复条目只会让产物变长，不增加信息。 */
-    const seenSkipped = new Set<string>();
-    const noteSkipped = (s: SkippedAction): void => {
-      const key = `${s.command_id ?? ""}\u0000${s.ref ?? ""}\u0000${s.reason}`;
-      if (seenSkipped.has(key)) return;
-      seenSkipped.add(key);
-      skippedActions.push(s);
-    };
     // A1 子改动③：逐步动作后的轻量 after 签名 {url, pool_size, first_text}，挂在**已执行动作**
     // 的 trace 事件上。动作事件先落账，签名在下一次观察（下一动作步首的那次池提取——内存里
     // 已有的池）补上，它就是上一动作后的页面状态；复用既有提取、零新增页面往返。相邻两个动作
@@ -3426,13 +3421,6 @@ export class BrowserMiddleware {
     let beforeFp: StateFingerprint | null = null;
     let lastEffect: StateEffect | null = null;
     let donePreheldSeen = false;
-    let stopCode: StopCode = "max_steps";
-    // 03-D5：这个默认值只在"动作循环自然用满、没有任何站点显式 stop"时存活——裸 reason
-    // 只剩三个字符（对比 no_progress 的详文），作者无从判断预算与进度；这里带数字。
-    let stopReason =
-      `subgoal action budget used up (${this.maxSteps} action step(s) tried) without the done-signal ever holding — `
-      + `raise the budget, narrow the target, or check what the page did after each action`;
-    let stopStep: number | undefined;
     let lastPoolSize = 0;
     // task-11（B3）：报告期限速嗅探要用的跨循环事实（步循环内的块作用域变量够不着报告点）。
     let lastPageRef: AnyPage | null = null;
@@ -3450,49 +3438,6 @@ export class BrowserMiddleware {
     /** P0-D：帧门禁（null = 无声明/无排除帧 = 旧行为）与 "done 只在被排除帧成立" 事实。 */
     let frameGate: FrameGate | null = null;
     let doneInExcluded = false;
-    /** ONE place where the loop decides to stop (D1/D4): sets code + step, and the
-     *  human string when given. Every stop site goes through here. */
-    const stop = (code: StopCode, detail?: string, at?: number): void => {
-      stopCode = code;
-      if (detail !== undefined) stopReason = detail;
-      if (at !== undefined) stopStep = at;
-    };
-    const forbidden: Record<string, Sig> = {};                 // ref -> element signature (esig)
-    // WHY each ref was forbidden — diagnostics only (D1: "which of the seven
-    // egresses killed this element" used to require reading the code).
-    const forbidWhy: Record<string, string> = {};
-    // refs skipped ONLY because an overlay blocked them: retryable once the page
-    // changes (the blocker may be gone); never counted as exhausted.
-    const blockedRetry: Record<string, [number, number]> = {};  // ref -> (step, len(trace))
-    const reAdmitted = new Set<string>();
-    /** THE forbid egress (D1): an element leaves the action space exactly here.
-     *  Seven call sites used to assign the signature directly, each with its own
-     *  trace shape; the assignment is now single-sourced. */
-    const forbid = (ref: string, el: Elem, why: string): void => {
-      forbidden[ref] = esig(el);
-      forbidWhy[ref] = why;
-    };
-    /** THE un-forbid egress (re-admission after a page change removes the blocker). */
-    const unforbid = (ref: string): void => {
-      delete forbidden[ref];
-      delete blockedRetry[ref];
-      delete forbidWhy[ref];
-    };
-    /**
-     * THE re-prune egress (D2): forbiddances key on refs, and refs are re-indexed
-     * on every scan — a stale forbid now pointing at a DIFFERENT element must go.
-     * This same invariant used to be hand-written at three sites (step head,
-     * wider re-scan, overlay re-entry); one implementation now.
-     */
-    const pruneForbids = (elems: ElemPool): void => {
-      for (const r of Object.keys(forbidden)) {
-        const cur = elems[r];
-        if (cur === undefined || !sigEq(forbidden[r]!, esig(cur))) {
-          unforbid(r);
-          reAdmitted.delete(r);
-        }
-      }
-    };
     let page: AnyPage | null = pageIn;
     const ownsBrowser = page === null;
     let browser: BrowserHandle | null = null;
@@ -3701,7 +3646,7 @@ export class BrowserMiddleware {
             + `not a per-action timeout; `
             + `raise timeoutMs, narrow the step's done/target, or split the flow`,
             stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
           break;
         }
         // A1：done_preheld 是**逐步**事实——每步开头重置，避免上一步的值被本步的 trace 行
@@ -3779,7 +3724,7 @@ export class BrowserMiddleware {
               + `(budget_ms=${ev.budget_ms}, settled=${String(ev.settled)}, `
               + `settle_timed_out=${String(ev.settle_timed_out)}, readyState=${ev.ready_state}`
               + `${strict ? ", pool_gate=strict" : ""}) on step ${stepNo}`, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           }
           // ready_empty：池空但页面已就绪 = 页面事实，不是未就绪证据。记证据后继续，
@@ -3823,7 +3768,7 @@ export class BrowserMiddleware {
               `done signal already held BEFORE this step's actions on step ${stepNo} `
               + `(policy.done_preheld="fail") — the completion is not evidence of this step; `
               + `anchor done to post-action evidence, or set forceAct:true / policy.done_preheld:"warn"`, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           }
           if (this.donePreheldPolicy === "warn") {
@@ -4221,19 +4166,19 @@ export class BrowserMiddleware {
           // FW8：身份回捞给出的结构化停因（歧义）优先于后续命令选择——绝不"随便选一个"。
           if (identityStop !== null) {
             stop(identityStop.code, identityStop.reason, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           }
           // P0-C：DRF 的歧义/首版能力面同样是结构化停因（绝不回退模型或"随便选一个"）。
           if (declaredStop !== null) {
             stop(declaredStop.code, declaredStop.reason, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           }
           // F82/F83 评审收口：行锚声明的多候选在命令走廊内已是结构化歧义（零动作）。
           if (rowAmbStop !== null) {
             stop(rowAmbStop.code, rowAmbStop.reason, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           }
           if (cmdPick === null) {
@@ -4248,7 +4193,7 @@ export class BrowserMiddleware {
             }
             if (cmdFrameStop !== null) {
               stop(cmdFrameStop.code, cmdFrameStop.reason, stepNo);
-              if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+              if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
               break;
             }
             // 区分“目标不存在”和“目标存在但歧义”：歧义不是空间为空，而是候选集 > 1。
@@ -4273,7 +4218,7 @@ export class BrowserMiddleware {
                 `command ${JSON.stringify(ambiguous.id)} matches ${cand.refs.length} distinct candidates `
                 + `(${cand.refs.join(", ")}) for target ${JSON.stringify(ambiguous.target)} on step ${stepNo}`
                 + zeroExecSummary(), stepNo);
-              if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+              if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
               break;
             }
             if (cmdDone.size >= cmdSpace.length) {
@@ -4328,7 +4273,7 @@ export class BrowserMiddleware {
                 + underNote
                 + (frameNote ? ` — ${frameNote}` : ""), stepNo);
             }
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           }
         }
@@ -4430,13 +4375,13 @@ export class BrowserMiddleware {
         // FW8：身份歧义是结构化停因，绝不回退"随便选一个"或交给模型猜。
         if (identityStop !== null) {
           stop(identityStop.code, identityStop.reason, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
           break;
         }
         // P0-C：DRF 歧义/首版能力面同样是结构化停因。
         if (declaredStop !== null) {
           stop(declaredStop.code, declaredStop.reason, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
           break;
         }
         // F82/F83 评审收口（P0）：行锚声明 = 多候选零动作。`rules` 已对行锚 fail-closed
@@ -4458,7 +4403,7 @@ export class BrowserMiddleware {
               + `candidate(s) (${cand.refs.join(", ")}) on step ${stepNo} — row anchors are fail-closed: `
               + `several distinct rows never resolve to "the first one"; narrow in-row:<token> to a content `
               + `token unique to one row, or narrow within:/frame: on step ${stepNo}`, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           }
         }
@@ -4479,7 +4424,7 @@ export class BrowserMiddleware {
           const hintFrameStop = await frameTargetStop(curHint);
           if (hintFrameStop !== null) {
             stop(hintFrameStop.code, hintFrameStop.reason, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           }
         }
@@ -4726,7 +4671,7 @@ export class BrowserMiddleware {
               + `candidates: ${amb.candidates.slice(0, 5).map((c) => `${c.tag} "${c.label}"`).join(" | ") || "-"}`
               + ` — narrow the hint (unique #id / [data-test=…] / exact visible text)`,
               stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           } else {
             const dfRef = `df:${df.ref.slice(1)}`;   // df.ref 是合成池的 pN；换 df: 前缀入池
@@ -4777,7 +4722,7 @@ export class BrowserMiddleware {
               + domFallbackMissSuffix() + drfHintSuffix()
               + (frameNote ? ` — ${frameNote}` : ""), stepNo);
           }
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
           break;
         }
         // re-admit refs whose only sin was being covered at an earlier step, but
@@ -4849,7 +4794,7 @@ export class BrowserMiddleware {
             const why = this._choiceLimitReason;
             this._choiceLimitReason = null;
             stop("decision_service_choice_limit", why, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           }
           // In rules-only mode a null ref usually means "no runtime to ask", which is not
@@ -4876,7 +4821,7 @@ export class BrowserMiddleware {
                   : "does not hold on this page either: name a target_hint, declare commands, "
                     + "or provide a decision model"}`
                 + this.degradedReasonSuffix(), stepNo);
-              if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+              if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
               break;
             }
             stop("no_model_runtime",
@@ -4898,7 +4843,7 @@ export class BrowserMiddleware {
               // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
               + rowAnchorNote(declaredTargets()), stepNo);
           }
-          if (verbose && this.rulesOnly) console.log(`  step ${stepNo}: ${stopReason}`);
+          if (verbose && this.rulesOnly) console.log(`  step ${stepNo}: ${acct.stopReason}`);
           break;
         }
         // PORT FIX: a model answer can name a ref that is no longer in THIS
@@ -4925,7 +4870,7 @@ export class BrowserMiddleware {
               + `${poolSize} element(s), and the picker returned no usable element`
               + `（给这一步加 target_hint，或在页面上点名一个稳定句柄）`, stepNo);
           }
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
           break;
         }
         // The confidence floor decays as failed elements are forbidden: a
@@ -4956,7 +4901,7 @@ export class BrowserMiddleware {
                   : "")
               // A3：同上——降级原因（HTTP 状态码 + 服务错误关键句）随停因透出。
               + this.degradedReasonSuffix(), stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           } else if (!(adjudicate && ref !== null)
             && Object.keys(forbidden).length >= Math.max(0, Object.keys(elems).length - 1)) {
@@ -5146,7 +5091,7 @@ export class BrowserMiddleware {
               stop("nominated_family_empty",
                 `nominated instruction "${expectedFamily}" but this page has no ${expectedFamily} `
                 + `candidates on step ${stepNo}`, stepNo);
-              if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+              if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
               break;
             }
             const repairFloor = Math.max(0.10, this.confFloor - 0.05 * Object.keys(forbidden).length);
@@ -5164,7 +5109,7 @@ export class BrowserMiddleware {
               stop("nominated_family_mismatch",
                 `nominated instruction "${expectedFamily}", but the page resolved ${pickedFamily ?? "nothing"} `
                 + `and no ${expectedFamily} candidate passed the floor on step ${stepNo}`, stepNo);
-              if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+              if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
               break;
             }
             if (verbose) {
@@ -5216,7 +5161,7 @@ export class BrowserMiddleware {
               `command ${JSON.stringify(cmdPick.cmd.id)} declares op '${op}', but element ${ref} `
               + `(${el.tag} "${el.label}") only declares [${caps.join(", ")}] on step ${stepNo}`
               + remedy, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           }
         }
@@ -5278,7 +5223,7 @@ export class BrowserMiddleware {
           stop("needs_value",
             `command ${JSON.stringify(cmdPick!.cmd.id)}: ${commandBindMissing} `
             + `— a declared binding either has its value in the plan or the step stops (红线②: never guessed) on step ${stepNo}`, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
           break;
         }
         // Pre-fill guard: a click whose form has empty fields that the plan's
@@ -5497,7 +5442,7 @@ export class BrowserMiddleware {
             ...identityEvidence(), ...declaredEvidence(), ...domFallbackEvidence(),
           });
           stop("config_error", detail, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
           break;
         }
         if (fillEffect !== undefined) {
@@ -5649,7 +5594,7 @@ export class BrowserMiddleware {
           stop("host_not_allowed",
             `navigated off the envelope to '${landed}' — not among the declared hosts `
             + `(${hostGate!.join(", ")}) on step ${stepNo}`, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+          if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
           break;
         }
         if (hostGate && hostGate.length) {
@@ -5658,7 +5603,7 @@ export class BrowserMiddleware {
             stop("popup_not_allowed",
               `action opened ${landedPopup} outside the declared hosts envelope `
               + `(${hostGate.join(", ")}) on step ${stepNo}`, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           }
         }
@@ -5734,7 +5679,7 @@ export class BrowserMiddleware {
               stop("popup_not_allowed",
                 `action opened ${settledPopup} outside the declared hosts envelope `
                 + `(${hostGate.join(", ")}) on step ${stepNo}`, stepNo);
-              if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+              if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
               break;
             }
           }
@@ -5804,7 +5749,7 @@ export class BrowserMiddleware {
               + `stopping here instead of blaming the step budget (max_steps=${this.maxSteps}) on step ${stepNo}`
               + newTabHint,
               stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${stopReason}`);
+            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
             break;
           }
         }
@@ -5902,9 +5847,9 @@ export class BrowserMiddleware {
       manualDone,
       dryRan,
       donePreheld,
-      stopCode,
-      stopReason,
-      stopStep,
+      stopCode: acct.stopCode,
+      stopReason: acct.stopReason,
+      stopStep: acct.stopStep,
       trace,
       goalSignalFn,
       page,
