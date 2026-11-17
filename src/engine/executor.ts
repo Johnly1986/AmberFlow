@@ -252,6 +252,14 @@ type FrameGatePhase =
   | { readonly kind: "ready"; readonly frameGate: FrameGate | null; readonly goalHeld: () => Promise<boolean>;
       readonly frameTargetStop: (target: string) => Promise<{ code: StopCode; reason: string } | null>; readonly doneInExcluded: () => boolean; };
 
+/** `runPoolGate` 的返回值：stopped = 页面未就绪早停；其余为后续循环/报告尾要用的每步事实。 */
+type PoolGatePhase = {
+  stopped: boolean; stepStartUrl: string; stepStartTabs: number; elems: ElemPool;
+  gateSettle: SettleResult | null; lastPoolSize: number; lastPoolWaitedMs: number;
+  beforeFp: StateFingerprint | null; pendingAfterIdx: number | null; lastReadiness: Readiness | null;
+  poolEmptyThisStep: boolean; readyEmptyWarned: boolean;
+};
+
 /* ------------------------------------------------------------------ helpers */
 
 /**
@@ -3581,96 +3589,12 @@ export class BrowserMiddleware {
         // A1：done_preheld 是**逐步**事实——每步开头重置，避免上一步的值被本步的 trace 行
         // 或最终 RunReport 误带（只有命令步会在下面重新评估它）。
         donePreheld = null;
-        // eval3 曝光面：no_progress 的 newTab 提示基线——步首 URL 与 context 页数。
-        // 只读读面，零动作；比较发生在本步的 no_progress 停因处。
-        const stepStartUrl = urlOf(pg);
-        const stepStartTabs = contextPageCount(pg);
-        // P0 pool ready gate：SPA 的 domcontentloaded 可能先于交互元素渲染。
-        // 这里只做“pool 非空”这一件事；目标是否存在、动作是否可执行仍由后面分支判断。
-        let elems: ElemPool;
-        let poolWaitedMs = 0;
-        /** U3：闸门最后一次 settle 的结论与真实预算（判档证据；非池空路径不产生）。 */
-        let gateSettle: SettleResult | null = null;
-        let gateBudgetMs = 0;
-        if (poolReady) {
-          const readyStarted = Date.now();
-          gateBudgetMs = Math.max(0, poolReadyTimeoutMs);
-          const readyDeadline = readyStarted + gateBudgetMs;
-          // C8：每轮 settle 的 timeout 都由 _extractPoolSettled 钳到剩余预算 ⇒ 总等待有真上限
-          // （不钳制时每轮 settle 最长可阻塞到 5s，声明 700ms 的窗口实际可超冲到 ~5.1s）。
-          let ex = await this._extractPoolSettled(pg, candidatePriority, readyDeadline);
-          elems = ex.elems; gateSettle = ex.settle;
-          while (Object.keys(elems).length === 0 && Date.now() < readyDeadline) {
-            const remaining = readyDeadline - Date.now();
-            await sleep(Math.max(0, Math.min(poolReadyPollMs, remaining)));
-            if (Date.now() >= readyDeadline) break;   // 预算耗尽：不再起一轮会越界的 settle
-            ex = await this._extractPoolSettled(pg, candidatePriority, readyDeadline);
-            elems = ex.elems; gateSettle = ex.settle;
-          }
-          poolWaitedMs = Date.now() - readyStarted;
-        } else {
-          // F72-②：步首 settle 结论保留（此前就地丢弃）——rehydrateRescan 的门控要用；
-          // gateSettle 只在 poolReady 的池空判档被读，非 poolReady 路径写它零行为影响。
-          const headExtract = await this._extractPoolSettled(pg, candidatePriority);
-          elems = headExtract.elems;
-          gateSettle = headExtract.settle;
-        }
-        lastPoolSize = Object.keys(elems).length;
-        // task-11（B3）：会话池高峰基线——池大小本来就算好了，记账零成本。
-        if (this._sessionFirstPoolTs === 0) this._sessionFirstPoolTs = Date.now();
-        if (lastPoolSize > this._sessionPoolHigh) this._sessionPoolHigh = lastPoolSize;
-        lastPoolWaitedMs = poolWaitedMs;
-        // S1：本 run 的 before 指纹取**第一次已有观察**（步首池），零新增页面往返。
-        if (beforeFp === null) beforeFp = await observeState(elems);
-        // A1 子改动③：上一次已执行动作的 after 签名在这里落账——本步步首的这次提取就是上一动作
-        // 后的页面状态。放在 walk/hintLookup 之前（hint 注入的元素不算观察事实）、放在 poolReady
-        // 空池停因之前（动作后页面真被清空也照实记 {pool_size:0}）。
-        if (pendingAfterIdx !== null) {
-          const prev = trace[pendingAfterIdx];
-          if (prev !== undefined && prev.after === undefined) {
-            const ft = firstPoolText(elems);
-            prev.after = {
-              url: urlOf(pg),
-              pool_size: lastPoolSize,
-              ...(ft === null ? {} : { first_text: ft }),
-            };
-          }
-          pendingAfterIdx = null;
-        }
-        if (poolReady && Object.keys(elems).length === 0) {
-          // U3 四档判档（§5.3，唯一出处）：池空 ≠ 页面未就绪。
-          //   not_ready    —— 预算耗尽且 settle 未静默 / readyState 未达（真未就绪，保留 run 级停因）；
-          //   ready_empty  —— 预算耗尽但页面已就绪且池为 0（步级事实 + warning，**继续**）；
-          //   strict       —— 逃生口：ready_empty 改判 not_ready（U3 之前的快败行为）。
-          const readiness = await this._poolReadiness(pg, gateSettle, poolWaitedMs, gateBudgetMs, 0);
-          lastReadiness = readiness;
-          const strict = poolGate === "strict";
-          if (readiness.verdict === "not_ready" || strict) {
-            if (strict && readiness.verdict === "ready_empty") readiness.verdict = "not_ready";
-            const ev = readiness.evidence;
-            stop("page_not_ready",
-              `page not ready: element pool stayed empty after ${ev.waited_ms}ms `
-              + `(budget_ms=${ev.budget_ms}, settled=${String(ev.settled)}, `
-              + `settle_timed_out=${String(ev.settle_timed_out)}, readyState=${ev.ready_state}`
-              + `${strict ? ", pool_gate=strict" : ""}) on step ${stepNo}`, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-            break;
-          }
-          // ready_empty：池空但页面已就绪 = 页面事实，不是未就绪证据。记证据后继续，
-          // 让后续命令/信号给出真正的失败原因（不再整页判死）。
-          poolEmptyThisStep = true;
-          if (!readyEmptyWarned) {
-            readyEmptyWarned = true;
-            warnings.push(
-              `pool_empty: the pool stayed empty although the page is settled and readyState=complete `
-              + `(step ${stepNo}; sniff admitted=${readiness.evidence.sniff?.admitted ?? 0} visible ADMIT_SEL element(s), `
-              + `focusable=${readiness.evidence.sniff?.focusable ?? 0}, aria=${readiness.evidence.sniff?.aria ?? 0}, `
-              + `frames=${readiness.evidence.sniff?.frames ?? 0}, body_text=${readiness.evidence.sniff?.body_text ?? 0}) `
-              + `— continuing; pool_gate:"strict" would stop with page_not_ready`
-              + `；用 ctx.observe() 在会话内看准入面与 why_not_admitted`,
-            );
-          }
-        }
+        const pool = await this.runPoolGate({ pg, stepNo, candidatePriority, poolReady, poolReadyTimeoutMs,
+          poolReadyPollMs, poolGate, verbose, observeState, trace, warnings, pendingAfterIdx, beforeFp,
+          lastPoolSize, lastPoolWaitedMs, lastReadiness, poolEmptyThisStep, readyEmptyWarned, stop }); if (pool.stopped) break;
+        let { stepStartUrl, stepStartTabs, elems, gateSettle } = pool; ({ lastPoolSize, lastPoolWaitedMs, beforeFp,
+          pendingAfterIdx, lastReadiness, poolEmptyThisStep, readyEmptyWarned } = pool);
+
         // A1 §2.2.3：命令步在解析/动作前评估一次 done 并记录 done_preheld（**决策步不付**这次
         // 评估）。默认不改变执行：既有流程照旧动作，这个记录只回答"动作前信号是否已成立"——
         // 否则一次 done=true 分不清是"动作推进了页面"还是"信号本来就成立、动作只是搭便车"。
@@ -5815,6 +5739,82 @@ export class BrowserMiddleware {
       } };
     }
     return { kind: "ready", frameGate, goalHeld, frameTargetStop, doneInExcluded: () => doneInExcluded };
+  }
+
+  /** 4d 阶段：步首抽池与就绪闸门（poolReady 轮询 / 池空判档 / after 补签 / before 指纹）。stopped = 页面未就绪。 */
+  private async runPoolGate(a: {
+    pg: AnyPage; stepNo: number; candidatePriority: "bucketed" | "main-first"; poolReady: boolean; poolReadyTimeoutMs: number;
+    poolReadyPollMs: number; poolGate: RunOptions["poolGate"]; verbose: boolean;
+    observeState: (elems: ElemPool | null) => Promise<StateFingerprint>; trace: TraceStep[]; warnings: string[];
+    pendingAfterIdx: number | null; beforeFp: StateFingerprint | null; lastPoolSize: number; lastPoolWaitedMs: number;
+    lastReadiness: Readiness | null; poolEmptyThisStep: boolean; readyEmptyWarned: boolean; stop: (code: StopCode, detail?: string, at?: number) => void;
+  }): Promise<PoolGatePhase> {
+    const { pg, stepNo, candidatePriority, poolReady, poolReadyTimeoutMs, poolReadyPollMs, poolGate, verbose, observeState, trace, warnings } = a;
+    let { pendingAfterIdx, beforeFp, lastPoolSize, lastPoolWaitedMs, lastReadiness, poolEmptyThisStep, readyEmptyWarned } = a;
+    // eval3 曝光面：no_progress 的 newTab 提示基线——步首 URL 与 context 页数（只读，零动作）。
+    const stepStartUrl = urlOf(pg); const stepStartTabs = contextPageCount(pg);
+    // P0 pool ready gate：SPA 的 domcontentloaded 可能先于交互元素渲染；这里只做“pool 非空”，目标/可执行性由后面分支判断。
+    let elems: ElemPool; let poolWaitedMs = 0;
+    let gateSettle: SettleResult | null = null; let gateBudgetMs = 0;
+    if (poolReady) {
+      const readyStarted = Date.now();
+      gateBudgetMs = Math.max(0, poolReadyTimeoutMs);
+      const readyDeadline = readyStarted + gateBudgetMs;
+      // C8：每轮 settle 的 timeout 都被 _extractPoolSettled 钳到剩余预算 ⇒ 总等待有真上限。
+      let ex = await this._extractPoolSettled(pg, candidatePriority, readyDeadline);
+      elems = ex.elems; gateSettle = ex.settle;
+      while (Object.keys(elems).length === 0 && Date.now() < readyDeadline) {
+        const remaining = readyDeadline - Date.now();
+        await sleep(Math.max(0, Math.min(poolReadyPollMs, remaining)));
+        if (Date.now() >= readyDeadline) break;   // 预算耗尽：不再起一轮会越界的 settle
+        ex = await this._extractPoolSettled(pg, candidatePriority, readyDeadline);
+        elems = ex.elems; gateSettle = ex.settle;
+      }
+      poolWaitedMs = Date.now() - readyStarted;
+    } else {
+      // F72-②：步首 settle 结论保留——rehydrateRescan 门控要用（非 poolReady 路径写它零行为影响）。
+      const headExtract = await this._extractPoolSettled(pg, candidatePriority);
+      elems = headExtract.elems; gateSettle = headExtract.settle;
+    }
+    lastPoolSize = Object.keys(elems).length;
+    // task-11（B3）：会话池高峰基线——池大小本来就算好了，记账零成本。
+    if (this._sessionFirstPoolTs === 0) this._sessionFirstPoolTs = Date.now();
+    if (lastPoolSize > this._sessionPoolHigh) this._sessionPoolHigh = lastPoolSize; lastPoolWaitedMs = poolWaitedMs;
+    // S1：before 指纹取**第一次已有观察**（步首池），零新增页面往返。
+    if (beforeFp === null) beforeFp = await observeState(elems);
+    // A1 子改动③：上一动作的 after 签名在此落账（本步首提取 = 上一动作后页面状态；先于 walk/hintLookup 与空池停因，清空也照实记）。
+    if (pendingAfterIdx !== null) {
+      const prev = trace[pendingAfterIdx];
+      if (prev !== undefined && prev.after === undefined) {
+        const ft = firstPoolText(elems);
+        prev.after = { url: urlOf(pg), pool_size: lastPoolSize, ...(ft === null ? {} : { first_text: ft }) };
+      }
+      pendingAfterIdx = null;
+    }
+    if (poolReady && Object.keys(elems).length === 0) {
+      // U3 四档判档（§5.3，唯一出处）：池空 ≠ 未就绪（not_ready 保留 run 级停因；ready_empty = 步级事实+warning 后继续；strict = 改判 not_ready）。
+      const readiness = await this._poolReadiness(pg, gateSettle, poolWaitedMs, gateBudgetMs, 0); lastReadiness = readiness; const strict = poolGate === "strict";
+      if (readiness.verdict === "not_ready" || strict) {
+        if (strict && readiness.verdict === "ready_empty") readiness.verdict = "not_ready";
+        const ev = readiness.evidence; const why = `page not ready: element pool stayed empty after ${ev.waited_ms}ms (budget_ms=${ev.budget_ms}, `
+          + `settled=${String(ev.settled)}, settle_timed_out=${String(ev.settle_timed_out)}, readyState=${ev.ready_state}`
+          + `${strict ? ", pool_gate=strict" : ""}) on step ${stepNo}`;
+        a.stop("page_not_ready", why, stepNo); if (verbose) console.log(`  step ${stepNo}: ${why}`);
+        return { stopped: true, stepStartUrl, stepStartTabs, elems, gateSettle, lastPoolSize, lastPoolWaitedMs, beforeFp, pendingAfterIdx, lastReadiness, poolEmptyThisStep, readyEmptyWarned };
+      }
+      // ready_empty：池空但页面已就绪 = 页面事实，不是未就绪证据；记证据后继续，让后续给出真正失败原因。
+      poolEmptyThisStep = true;
+      if (!readyEmptyWarned) {
+        readyEmptyWarned = true;
+        warnings.push(
+          `pool_empty: the pool stayed empty although the page is settled and readyState=complete `
+          + `(step ${stepNo}; sniff admitted=${readiness.evidence.sniff?.admitted ?? 0} visible ADMIT_SEL element(s), `
+          + `focusable=${readiness.evidence.sniff?.focusable ?? 0}, aria=${readiness.evidence.sniff?.aria ?? 0}, `
+          + `frames=${readiness.evidence.sniff?.frames ?? 0}, body_text=${readiness.evidence.sniff?.body_text ?? 0}) — continuing; pool_gate:"strict" would stop with page_not_ready；用 ctx.observe() 在会话内看准入面与 why_not_admitted`,
+        );
+      }
+    }
+    return { stopped: false, stepStartUrl, stepStartTabs, elems, gateSettle, lastPoolSize, lastPoolWaitedMs, beforeFp, pendingAfterIdx, lastReadiness, poolEmptyThisStep, readyEmptyWarned };
   }
 
   /**
