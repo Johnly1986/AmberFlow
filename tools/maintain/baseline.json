@@ -18,14 +18,14 @@
     },
     "functions": [
       {
-        "file": "src/engine/executor.ts",
-        "name": "run",
-        "lines": 1882
-      },
-      {
         "file": "src/app/ctx.ts",
         "name": "createCtx",
         "lines": 1704
+      },
+      {
+        "file": "src/engine/executor.ts",
+        "name": "run",
+        "lines": 1508
       },
       {
         "file": "src/app/app-runner.ts",
@@ -129,7 +129,8 @@
       }
     ],
     "phaseFunctions": [
-      "src/engine/executor.ts#runDeclaredTargets"
+      "src/engine/executor.ts#runDeclaredTargets",
+      "src/engine/executor.ts#runModelPick"
     ]
   },
   "docs": {
