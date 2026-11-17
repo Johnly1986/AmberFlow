@@ -27,6 +27,12 @@ export interface ConfigKeySpec {
   legacy?: readonly string[];
   /** 给示例与帮助用的一句话。 */
   description: string;
+  /**
+   * `CONFIG_REFERENCE.md` 的「作用点」导航：消费该键的代码位置（以代码为准）。
+   * **唯一出处**（生成器从这里读）；**配置面键必填**（缺失 → 生成/校验 exit 2）；
+   * `PROVIDER_ONLY_KEYS` 是仅文档性分组，不要求。
+   */
+  usedAt?: string;
 }
 
 export interface ConfigGroupSpec {
@@ -38,78 +44,78 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
   {
     group: "决策模型产物",
     keys: [
-      { key: "LAYA_ONNX_MODEL", legacy: ["LAYAA_ONNX_MODEL"], description: "本地 ONNX 图路径；空 = <repo>/models/laya_dec.onnx" },
-      { key: "LAYA_TOKENIZER_DIR", legacy: ["LAYAA_TOKENIZER_DIR"], description: "tokenizer 目录；空 = 自动发现 HF 缓存/项目目录" },
-      { key: "HF_HOME", description: "HuggingFace 根目录；空 = 默认缓存位置" },
-      { key: "HF_HUB_CACHE", legacy: ["HUGGINGFACE_HUB_CACHE"], description: "HuggingFace hub 缓存；空 = 默认位置" },
+      { key: "LAYA_ONNX_MODEL", usedAt: "`src/model/laya-onnx.ts`（模型装载）", legacy: ["LAYAA_ONNX_MODEL"], description: "本地 ONNX 图路径；空 = <repo>/models/laya_dec.onnx" },
+      { key: "LAYA_TOKENIZER_DIR", usedAt: "`src/model/laya-onnx.ts`（tokenizer 发现）", legacy: ["LAYAA_TOKENIZER_DIR"], description: "tokenizer 目录；空 = 自动发现 HF 缓存/项目目录" },
+      { key: "HF_HOME", usedAt: "`src/model/laya-onnx.ts`（HF 缓存根）", description: "HuggingFace 根目录；空 = 默认缓存位置" },
+      { key: "HF_HUB_CACHE", usedAt: "`src/model/laya-onnx.ts`（HF hub 缓存）", legacy: ["HUGGINGFACE_HUB_CACHE"], description: "HuggingFace hub 缓存；空 = 默认位置" },
     ],
   },
   {
     group: "决策服务（统一配置）",
     keys: [
-      { key: "AMBERFLOW_DECISION_BASE_URL", description: "线上决策服务地址；空 = 使用本地模型" },
-      { key: "AMBERFLOW_DECISION_MODEL", description: "线上模型名；无服务地址时是本地 checkpoint（空 = english；可填 multilingual）" },
-      { key: "AMBERFLOW_DECISION_API_KEY", secret: true, description: "线上服务密钥；本地自托管可空" },
-      { key: "AMBERFLOW_DECISION_PROTOCOL", description: "systemone 或 openai-decisions；空 = 按 URL 自动推断" },
-      { key: "AMBERFLOW_DECISION_FLOOR", description: "闸门刻度；空 = 不覆盖 provider 自报/全局 0.25；会被 --conf-floor（或 AMBERFLOW_CONF_FLOOR）覆盖" },
-      { key: "AMBERFLOW_DECISION_SCORE_KIND", default: "calibrated_prob", description: "score 语义：calibrated_prob/entropy_conf/rank_only" },
-      { key: "AMBERFLOW_DECISION_TIMEOUT_MS", default: "30000", description: "单次请求超时（毫秒）" },
-      { key: "AMBERFLOW_DECISION_STATE_CONTEXT", default: "1", description: "1 = choice 题带 url/title/正文；0 = 只带 goal" },
-      { key: "AMBERFLOW_DECISION_MIN_OPTIONS", default: "1", description: "choice 选项下限；自托管 JevK5 用 2" },
+      { key: "AMBERFLOW_DECISION_BASE_URL", usedAt: "`src/model/decision-service.ts`（有地址即线上）", description: "线上决策服务地址；空 = 使用本地模型" },
+      { key: "AMBERFLOW_DECISION_MODEL", usedAt: "`src/model/decision-service.ts` / `src/model/checkpoint.ts`（无地址时选本地 checkpoint）", description: "线上模型名；无服务地址时是本地 checkpoint（空 = english；可填 multilingual）" },
+      { key: "AMBERFLOW_DECISION_API_KEY", usedAt: "`src/model/decision-service.ts`（鉴权；掩码展示）", secret: true, description: "线上服务密钥；本地自托管可空" },
+      { key: "AMBERFLOW_DECISION_PROTOCOL", usedAt: "`src/model/decision-service.ts`（协议推断覆盖）", description: "systemone 或 openai-decisions；空 = 按 URL 自动推断" },
+      { key: "AMBERFLOW_DECISION_FLOOR", usedAt: "`src/model/decision-service.ts`（闸门刻度）", description: "闸门刻度；空 = 不覆盖 provider 自报/全局 0.25；会被 --conf-floor（或 AMBERFLOW_CONF_FLOOR）覆盖" },
+      { key: "AMBERFLOW_DECISION_SCORE_KIND", usedAt: "`src/model/decision-service.ts`（score 语义）", default: "calibrated_prob", description: "score 语义：calibrated_prob/entropy_conf/rank_only" },
+      { key: "AMBERFLOW_DECISION_TIMEOUT_MS", usedAt: "`src/model/decision-service.ts`（单请求超时）", default: "30000", description: "单次请求超时（毫秒）" },
+      { key: "AMBERFLOW_DECISION_STATE_CONTEXT", usedAt: "`src/model/decision-service.ts`（choice 题上下文）", default: "1", description: "1 = choice 题带 url/title/正文；0 = 只带 goal" },
+      { key: "AMBERFLOW_DECISION_MIN_OPTIONS", usedAt: "`src/model/decision-service.ts`（choice 选项下限）", default: "1", description: "choice 选项下限；自托管 JevK5 用 2" },
     ],
   },
   {
     group: "外层 LLM（事后审计）",
     keys: [
-      { key: "OPENAI_BASE_URL", description: "OpenAI 兼容服务地址（仅供事后审计 LLMAuditor）；空 = 用内置替身。规划归 Agent：引擎内没有 LLM 规划面" },
-      { key: "OPENAI_API_KEY", secret: true, description: "外层 LLM 密钥（事后审计用）" },
-      { key: "AUDIT_MODEL", default: "gpt-4o-mini", description: "审计模型名" },
+      { key: "OPENAI_BASE_URL", usedAt: "`src/engine/audit.ts`（事后审计 LLMAuditor）", description: "OpenAI 兼容服务地址（仅供事后审计 LLMAuditor）；空 = 用内置替身。规划归 Agent：引擎内没有 LLM 规划面" },
+      { key: "OPENAI_API_KEY", usedAt: "`src/engine/audit.ts`（事后审计；掩码展示）", secret: true, description: "外层 LLM 密钥（事后审计用）" },
+      { key: "AUDIT_MODEL", usedAt: "`src/engine/audit.ts`（审计模型名）", default: "gpt-4o-mini", description: "审计模型名" },
     ],
   },
   {
     group: "浏览器与落盘",
     keys: [
-      { key: "PLAYWRIGHT_BROWSERS_PATH", description: "Playwright 浏览器目录；空 = 自动发现" },
-      { key: "AMBERFLOW_HOME", description: "用户作用域目录；空 = ~/.amberflow" },
-      { key: "AMBERFLOW_APPS_OUT", description: "应用运行产物目录；空 = 系统临时目录/amberflow-apps" },
-      { key: "AMBERFLOW_REPO", legacy: ["LAYAWEBUSE_REPO"], description: "DSH 桥指向的 checkout；空 = 自动发现" },
+      { key: "PLAYWRIGHT_BROWSERS_PATH", usedAt: "`src/browser/browser-env.ts`（浏览器发现）", description: "Playwright 浏览器目录；空 = 自动发现" },
+      { key: "AMBERFLOW_HOME", usedAt: "`src/support/amberflow-home.ts`（用户作用域目录）", description: "用户作用域目录；空 = ~/.amberflow" },
+      { key: "AMBERFLOW_APPS_OUT", usedAt: "`src/support/amberflow-home.ts`（应用运行产物目录）", description: "应用运行产物目录；空 = 系统临时目录/amberflow-apps" },
+      { key: "AMBERFLOW_REPO", usedAt: "`integrations/dsh-bridge/src/index.ts`（桥指向的 checkout）", legacy: ["LAYAWEBUSE_REPO"], description: "DSH 桥指向的 checkout；空 = 自动发现" },
     ],
   },
   {
     group: "人工步骤与操作节奏",
     keys: [
-      { key: "AMBERFLOW_STEP_DELAY_MS", default: "0", description: "步骤间最小延迟（毫秒）" },
-      { key: "AMBERFLOW_ACTION_DELAY_MS", default: "0", description: "动作间最小延迟（毫秒）" },
+      { key: "AMBERFLOW_STEP_DELAY_MS", usedAt: "`src/support/pace.ts`（步间节奏）", default: "0", description: "步骤间最小延迟（毫秒）" },
+      { key: "AMBERFLOW_ACTION_DELAY_MS", usedAt: "`src/support/pace.ts`（动作前节奏）", default: "0", description: "动作间最小延迟（毫秒）" },
     ],
   },
   {
     group: "运行参数（CLI 旗标的配置默认值）",
     keys: [
-      { key: "AMBERFLOW_HEADFUL", default: "0", description: "1 = 显示浏览器窗口" },
-      { key: "AMBERFLOW_CONF_FLOOR", description: "闸门刻度覆盖；空 = 不覆盖。优先级：--conf-floor / 此键 > AMBERFLOW_DECISION_FLOOR > 全局 0.25" },
-      { key: "AMBERFLOW_TIERED_HINT", default: "0", description: "1 = 打开 tiered hint 实验" },
-      { key: "AMBERFLOW_CONFIRM_SAFE", default: "1", description: "1 = 危险动作仍逐次确认（默认，安全）；0 = 放行（旧行为，需显式）" },
-      { key: "AMBERFLOW_NO_SOURCES", default: "0", description: "1 = 跳过应用数据腿" },
-      { key: "AMBERFLOW_QUIET", default: "0", description: "1 = 只输出结论" },
+      { key: "AMBERFLOW_HEADFUL", usedAt: "`src/cli/start.ts` / `src/cli/test.ts`（CLI 旗标默认值）", default: "0", description: "1 = 显示浏览器窗口" },
+      { key: "AMBERFLOW_CONF_FLOOR", usedAt: "`src/support/run-defaults.ts` → `src/app/app-runner.ts`（闸门刻度覆盖）", description: "闸门刻度覆盖；空 = 不覆盖。优先级：--conf-floor / 此键 > AMBERFLOW_DECISION_FLOOR > 全局 0.25" },
+      { key: "AMBERFLOW_TIERED_HINT", usedAt: "`src/support/run-defaults.ts` → `src/app/app-runner.ts`（P1 实验）", default: "0", description: "1 = 打开 tiered hint 实验" },
+      { key: "AMBERFLOW_CONFIRM_SAFE", usedAt: "`src/support/run-defaults.ts` → `src/app/app-runner.ts`（干跑证据确认）", default: "1", description: "1 = 危险动作仍逐次确认（默认，安全）；0 = 放行（旧行为，需显式）" },
+      { key: "AMBERFLOW_NO_SOURCES", usedAt: "`src/support/run-defaults.ts` → `src/app/app-runner-cli.ts`（跳过数据腿）", default: "0", description: "1 = 跳过应用数据腿" },
+      { key: "AMBERFLOW_QUIET", usedAt: "`src/support/run-defaults.ts` → `src/app/app-runner-cli.ts`（只输出结论）", default: "0", description: "1 = 只输出结论" },
     ],
   },
   {
     group: "决策开关（decision.*，行为变更面）",
     keys: [
       {
-        key: "AMBERFLOW_AMBIGUOUS_ORDERING", default: "dom-preorder",
+        key: "AMBERFLOW_AMBIGUOUS_ORDERING", usedAt: "`src/engine/executor.ts`（act 歧义命中顺序）", default: "dom-preorder",
         description: "on_ambiguous:act 的歧义命中顺序：dom-preorder（缺省，命中 act 时刻 DOM 序首个 actionable 候选）| pool-order（旧池序，回退开关）",
       },
       {
-        key: "AMBERFLOW_ID_FALLBACK", default: "1",
+        key: "AMBERFLOW_ID_FALLBACK", usedAt: "`src/engine/executor.ts`（#id 直查兜底）", default: "1",
         description: "act 的 #id hint 池内未命中时是否做 live-DOM getElementById 单点直查兜底：1（缺省）= 兜底；0 = 维持旧 target_not_found（回退开关）",
       },
       {
-        key: "AMBERFLOW_ACT_POOL_CAP",
+        key: "AMBERFLOW_ACT_POOL_CAP", usedAt: "`src/engine/executor.ts`（act 落空归因的池帽回显）",
         description: "act 池上限（decision.act_pool_cap；空 = 引擎默认 40）。仅观测面可配；默认值调整需另行变更",
       },
       {
-        key: "AMBERFLOW_POOL_QUOTA_MODE", default: "legacy",
+        key: "AMBERFLOW_POOL_QUOTA_MODE", usedAt: "`src/engine/extraction.ts`（池配额模型）", default: "legacy",
         description: "池构建配额模型：legacy（缺省，优先级逐出）| quota（双配额：viewport 保底 + id-backed 保留 + 壳元素限额；灰度站点显式开启）",
       },
     ],
@@ -117,7 +123,7 @@ export const CONFIG_GROUPS: readonly ConfigGroupSpec[] = [
   {
     group: "实验开关（opt-in）",
     keys: [
-      { key: "AMBERFLOW_SITE_FACTS_INTO_MODEL", default: "0", description: "1 = 站点事实注入模型请求面（fenced 块；缺省 OFF = notes 原样）" },
+      { key: "AMBERFLOW_SITE_FACTS_INTO_MODEL", usedAt: "`src/app/app-runner.ts`（站点事实注入模型请求面）", default: "0", description: "1 = 站点事实注入模型请求面（fenced 块；缺省 OFF = notes 原样）" },
     ],
   },
 ];
