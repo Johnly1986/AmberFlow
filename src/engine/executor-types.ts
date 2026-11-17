@@ -14,7 +14,7 @@ import type { DeclaredCandidate } from "./declared.ts";
 import type {
   ChoiceAnswer, DecisionAgent, ModelState, NoulAnswer, RouterLike,
 } from "../model/model.ts";
-import type { DecisionProvider } from "../model/decision-provider.ts";
+import type { DecisionProvider } from "../support/decision-provider-contract.ts";
 import type { RangeOptions, RangeOutcome, RangeValue } from "./range.ts";
 import type { AttrValueMatch, HintMatchCandidate } from "./rules.ts";
 import type { AmbiguousOrdering } from "./ambiguity.ts";

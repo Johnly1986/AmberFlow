@@ -20,7 +20,7 @@ import { parseHint } from "./hint.ts";
 import { hintCandidates, hintMatch, type HintMatchCandidate, type HintMatchOptions, type HintMatchOthersDiag } from "./rules.ts";
 import { checkSignal, isWeakNegativeSignal, LOGIN_WALL_TEXTS, LOGIN_WALL_URL_RE, type SignalSpec } from "./signals.ts";
 import { FILLER_TOKENS, ROLE_TOKENS, STOP_TOKENS } from "./rules.ts";
-import type { DecisionProvider } from "../model/decision-provider.ts";
+import type { DecisionProvider } from "../support/decision-provider-contract.ts";
 import type { RangeOptions, RangeOutcome, RangeValue } from "./range.ts";
 import type { AuditVerdictLike, Readiness, ReadinessVerdict, AnyLoc, PickProposal, PageSnapshot, HintMemoryLike, BrowserSession, PwLike, BrowserHandle, AnyPage } from "./executor-types.ts";
 /** Frame URL 的 host gate：host 边界覆盖 frame，而不是只覆盖顶层导航。 */

@@ -106,10 +106,10 @@ import {
   type NoulAnswer,
   type RouterLike,
 } from "../model/model.ts";
-import { decisionFailureFact, decisionProviderOrNull, layaProvider, type DecisionProvider } from "../model/decision-provider.ts";
+import { decisionFailureFact, decisionProviderOrNull, layaProvider } from "../model/decision-provider.ts";
 // task-24/6a：限速判据阈值单一出处（step 侧与 arrive 侧共用）。
 import { THROTTLE_BODY_FLOOR, THROTTLE_COLLAPSE_RATIO, THROTTLE_POOL_HIGH_MIN } from "./throttle-signature.ts";
-import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts"; import { DONE_POLL_INTERVAL_MS, NAVIGATION_GOTO_TIMEOUT_MS, POOL_CAP_ELEMENTS } from "../support/tuning.ts";
+import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts"; import { DONE_POLL_INTERVAL_MS, NAVIGATION_GOTO_TIMEOUT_MS, POOL_CAP_ELEMENTS } from "../support/tuning.ts"; import type { DecisionProvider } from "../support/decision-provider-contract.ts";
 import { sleep } from "../support/sleep.ts";
 // task-14（D1）：探测失败分类与建议文案的单一出处。
 import { classifyDecisionFailure, decisionDegradedAdvice } from "../model/decision-probe.ts";

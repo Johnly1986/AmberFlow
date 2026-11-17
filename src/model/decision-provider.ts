@@ -1,5 +1,5 @@
 /**
- * **决策提供者层**（provider seam）——把"问哪个决策模型"从执行器里分出来。
+ * **决策提供者层**（provider seam；接口类型已下沉 `src/support/decision-provider-contract.ts`）——把"问哪个决策模型"从执行器里分出来。
  *
  * 为什么要多这一层（2026-10-13）：项目方要**换不同的决策模型做测试**，而原来的缝
  * （`src/model/model.ts` 的 `LayaRuntime`）是 **laya 形状的**：它要求一个 laya `DecisionAgent`、
@@ -35,151 +35,33 @@ import {
 } from "./model.ts";
 import { choiceInstructions, RISK_INSTRUCTIONS_LONG, doneInstructionsLong } from "../prompts/model-prompts.ts";
 
-/** 一个决策提供者的身份与能力声明。 */
-export interface ProviderCapabilities {
-  /** 能不能从枚举候选里选一个（几乎所有 provider 都能；不能的只能做打分）。 */
-  choice: boolean;
-  /** 有没有"这个动作是否不可逆"的头（laya 的 noul）。没有 ⇒ 执行器不该为它花一次前向。 */
-  risk: boolean;
-  /** 有没有"子目标是否已完成"的投票（advisory，永远不能单独判完成——红线③）。 */
-  done: boolean;
-  /** 支持不支持"先收窄再问"（laya 的 shortlist）。不支持的 provider，`narrow` 请求会被原样拒绝。 */
-  shortlist: boolean;
-  /**
-   * `score` 这个数**该怎么读**：
-   *   - `calibrated_prob`：就是概率（可跨 k 比的 max-prob / margin 都属此类）；
-   *   - `entropy_conf`：`1 − H/log k` 这种归一化熵——**随选项数变形，跨桶不可比**（laya 出厂值）；
-   *   - `rank_only`：只有名次，没有概率 ⇒ `pTop1/pTop2/margin` 必须为 null。
-   */
-  score_kind: "calibrated_prob" | "entropy_conf" | "rank_only";
-  /**
-   * 支持在决策请求里带结构化 `state_digest`（S5b；缺省/不声明 = 不支持）。
-   * 只有观测面是**不透明包**的 provider（SystemOne 的 `state`）才能附加这个可选键；
-   * 输入 schema 固定或协议严格的 provider（本地 laya-onnx、OpenAI Decisions 的 `input`）
-   * 必须保持不声明——执行器会整段跳过并记 `context_skipped`，不把 JSON 硬塞进自然语言。
-   */
-  state_digest?: boolean;
-}
+import type {
+  ChoiceOutcome,
+  ChoiceRequest,
+  ClosedSetChoice,
+  ClosedSetRequest,
+  DecisionProvider,
+  ProviderCapabilities,
+  ProviderFactory,
+  ProviderInfo,
+  ProviderPage,
+  StateDigestPayload,
+} from "../support/decision-provider-contract.ts";
 
-export interface ProviderInfo {
-  name: string;
-  version: string;
-  capabilities: ProviderCapabilities;
-  /**
-   * provider 自报的**闸门刻度**（可选）：它的 `score` 落在哪个值以上才算"够把握"。
-   * 为什么必须由 provider 说：闸门比的是 `score`，而 `score_kind` 不同的两支不可比
-   * （laya 的归一化熵 vs 在线服务的标定概率）——0.25 在两种刻度上不是同一件事。
-   * 缺省不声明 = 用全局缺省 0.25（既有行为逐字节不变）。优先级：CLI > pack.policy > 本字段 > 0.25。
-   */
-  floor?: number;
-}
+/** 接口类型单源在 L0（`src/support/decision-provider-contract.ts`）；这里 re-export 保持既有 importer 不变。 */
+export type {
+  ChoiceOutcome,
+  ChoiceRequest,
+  ClosedSetChoice,
+  ClosedSetRequest,
+  DecisionProvider,
+  ProviderCapabilities,
+  ProviderFactory,
+  ProviderInfo,
+  ProviderPage,
+  StateDigestPayload,
+} from "../support/decision-provider-contract.ts";
 
-/** provider 需要读页面（渲染视图、取 URL/标题）；执行器传的是它自己那个 page。 */
-export type ProviderPage = PageLike & { title(): Promise<string> };
-
-/**
- * 一次"选元素"的请求。`narrow` 是收窄后的候选（窄问），null = 全池。
- *
- * S5b：`state_digest` 是**结构化**状态摘要（≤200B；只有 `capabilities.state_digest === true`
- * 的 provider 会收到）。形状写在这里而不是从执行器 import，避免 model ← engine 的反向依赖；
- * 结构是封闭的五键，字段语义见 execution 层 `StateDigest` 与 schema F25。
- */
-export interface StateDigestPayload {
-  nav_epoch_delta: number;
-  last_effect?: { kind: string; applied: boolean };
-  settled: boolean;
-  pool_changed: boolean;
-  flags?: string[];
-}
-
-export interface ChoiceRequest {
-  goal: string;
-  page: ProviderPage;
-  /** 元素池（provider 自己决定怎么渲染成它的视图）。 */
-  elems: Record<string, { tag: string; label: string; data_test?: string; [k: string]: unknown }>;
-  forbidden: Set<string>;
-  notes: Record<string, string> | null;
-  narrow: string[] | null;
-  /** 短名单粒度（laya 用 8）。provider 可以忽略它，但忽略时要说。 */
-  k: number;
-  /**
-   * S5b：可选的 ≤200B **结构化**状态摘要（`meta.policy.decision_state.context: "delta"`；
-   * 只有 `capabilities.state_digest === true` 的 provider 会收到这个键）。缺省不出现
-   * ⇒ 默认档的请求体逐字节不变。它只带观测事实（导航代数差 / 最近 effect / 是否静默 /
-   * 池是否变化 / flags），**不是建议、更不是动作**——模型仍只在一组 ref 里投票。
-   */
-  state_digest?: StateDigestPayload;
-}
-
-/** 一次"选元素"的完整结果：选择 + 所有可用信号 + 这次问的是什么形状。 */
-export interface ChoiceOutcome {
-  /** `undefined` = 答了但没可用元素；`null` = 没答/没得选。两者语义不同，不许归一。 */
-  ref: string | null | undefined;
-  /** provider 自己那个"把握"数，含义由 `info.capabilities.score_kind` 解释。 */
-  score: number;
-  scoreKind: ProviderCapabilities["score_kind"];
-  /** 与选项数无关的信号；provider 给不出时**必须是 null**（不是 0）。 */
-  signals: { pTop1: number | null; pTop2: number | null; margin: number | null };
-  /** 这次实际问了多少个选项——分档要按它，不是按池子大小。 */
-  options: number;
-  /** 是否发生了"重问子集"（laya 的 shortlist 分支）。 */
-  passthrough: boolean;
-  /** 原始分布（诊断用；闸门不该依赖它的存在）。 */
-  probs: Record<string, number>;
-}
-
-/**
- * 一次"闭集选择"请求（S2 ③ 提名梯级的模型窄问形状）：**不依赖页面元素池**——
- * 选项与题面都由调用方给。与 `pick` 的区别就在这：pick 的选项来自页面池，askChoice 的选项
- * 是调用方声明的闭集（如指令闭集）。
- */
-export interface ClosedSetRequest {
-  /** 题面里的目标（通常是这一步的自然语言描述）。 */
-  goal: string;
-  /** 给模型的指令。措辞影响行为——由调用方提供它测过的那一版，不在 provider 里硬编码。 */
-  instructions: string;
-  /** 闭集选项：ref → 描述。返回值保证在池内（池外答案一律当没答）。 */
-  criteria: Record<string, string>;
-  /** 可选：额外的 state 字段（运行期提名器可以把当次页面状态带上；缺省只有 goal）。 */
-  state?: Record<string, unknown>;
-}
-
-/** 闭集选择结果。`ref` 已做闭集校验（池外 → null）。 */
-export interface ClosedSetChoice {
-  ref: string | null;
-  /** 把握数，含义由 `ProviderCapabilities.score_kind` 解释。 */
-  score: number;
-  scoreKind: ProviderCapabilities["score_kind"];
-  probs: Record<string, number>;
-}
-
-/** 一个决策提供者。`pick` 是必须的，其余按能力声明。 */
-export interface DecisionProvider extends ProviderInfo {
-  pick(req: ChoiceRequest): Promise<ChoiceOutcome>;
-  /**
-   * 能力：对**调用方给定的闭集**做一次 choice（S2 ③ 提名）。
-   * 不实现 = 该 provider 不能做提名窄问；梯级按"③ 弃权"往下走（fail closed，不猜）。
-   * 实现方必须自己保证返回的 ref 在 `criteria` 内（池外答案 → null）。
-   */
-  askChoice?(req: ClosedSetRequest): Promise<ClosedSetChoice | null>;
-  /** `capabilities.risk` 为真时才会被调用。返回 `[0,1]` 的风险概率。 */
-  risk?(goal: string, actionDesc: string): Promise<number>;
-  /** `capabilities.done` 为真时才会被调用。永远只是参考（红线③）。 */
-  doneVote?(goal: string, state: ModelState): Promise<number>;
-  /**
-   * 这个服务是否**已配置到可用**（缺凭据/端点等）。返回一句指路串 = 未配置；返回 null = 就绪。
-   * 解析时（`resolveProviderSpec`）用它区分：显式点名却没配 ⇒ 响亮报错；
-   * 环境默认却没配 ⇒ 干净落到 rules-only（不装一个每步都抛的 provider）。
-   * 不实现 = 视为已配置（本地基线、有默认端点的服务）。
-   */
-  configError?(): string | null;
-  /** 释放权重/连接。可选。 */
-  close?(): void | Promise<void>;
-}
-
-/* ── 注册表 ─────────────────────────────────────────────────────────────── */
-
-export type ProviderFactory = () => DecisionProvider | Promise<DecisionProvider>;
 
 const registry = new Map<string, ProviderFactory>();
 let active: DecisionProvider | null = null;
