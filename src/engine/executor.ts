@@ -296,6 +296,11 @@ type ActionPhaseResult = {
   cmdDoneId?: string | null; nextCmdI?: number | null; executedDelta?: number;
 };
 
+/** `runSetup` 的返回值：early = 预检拒绝（report 原样返回）；ready = 页面/浏览器/观察闭包。 */
+type SetupPhase =
+  | { kind: "early"; report: RunReport; browser: BrowserHandle | null }
+  | { kind: "ready"; pg: AnyPage; browser: BrowserHandle | null; observeState: (elems: ElemPool | null) => Promise<StateFingerprint> };
+
 /* ------------------------------------------------------------------ helpers */
 
 /**
@@ -3492,116 +3497,21 @@ export class BrowserMiddleware {
     let poolEmptyThisStep = false;
     let gatePhase: FrameGatePhase | null = null;
     let page: AnyPage | null = pageIn;
-    const ownsBrowser = page === null;
     let browser: BrowserHandle | null = null;
     /** S1：本 run 的 StepStateRecord（在收尾处组装；无观察时省略）。 */
     let stepState: StepStateRecord | undefined;
 
     try {
       // S1：每次 run 重置状态游标（epoch/navEpoch 都是**本次 run** 的口径）。
-      this._state = { epoch: 0, navEpoch: 0, current: null };
-      this._lastActionabilityDetail = null;
-      this._settleWaitMs = 0;
-      // S5：上次 ask 的题面/答复与 run 内 flags 都是 run 内口径（refs 会重编号）；指标不重置。
-      this._lastAsk = null;
-      this._askedPools.clear();
-      this._runFlags = [];
-      this._lastEffectSeen = null;
-      await this.ready();
-      // A config error is not a transient failure: acting on rules-only anyway would
-      // silently downgrade what the operator explicitly configured, and retrying it
-      // just repeats the same error with more side effects (D6). Refuse cleanly,
-      // BEFORE the navigation envelope and before a single step.
-      if (this.configError !== null) {
-        const why = `model runtime config error: ${this.configError}`;
-        if (verbose) console.log(`  -> REFUSED before navigation: ${why}（配置类错误不重试、不降级跑）`);
-        return {
-          goal: instruction, done: false,
-          stop_reason: why, stop_code: "config_error",
-          steps: [],
-          audit: { verdict: "REJECT", reasons: [why], auditor: "preflight" },
-        };
-      }
-      // NAVIGATION ENVELOPE (P0-4): refuse BEFORE the browser opens the page. A
-      // refused subgoal has touched nothing — zero steps, zero side effects.
-      const deniedHost = disallowedHost(startUrl, hostGate);
-      if (deniedHost !== null) {
-        const why = `host not allowed: '${deniedHost}' is not among the declared hosts `
-          + `(${hostGate!.join(", ")}) — add it to the pack's hosts list if this step is meant to leave for it`;
-        if (verbose) console.log(`  -> REFUSED before navigation: ${why}`);
-        return {
-          goal: instruction, done: false,
-          stop_reason: why, stop_code: "host_not_allowed",
-          steps: [],
-          audit: { verdict: "REJECT", reasons: [why], auditor: "navigation-envelope" },
-        };
-      }
-      if (ownsBrowser) {
-        // PORT NOTE 5: `sync_playwright()` has no twin; the module IS the
-        // connection. Use the injected pw when given, else the imported one.
-        let pw = pwIn;
-        if (pw === null) {
-          const mod = await import("playwright");
-          pw = { chromium: mod.chromium as unknown as PwLike["chromium"] };
-        }
-        browser = (await browserEnv.launch(pw, true)) as unknown as BrowserHandle;
-        page = (await browser.newPage()) as AnyPage;
-      }
-      const pg = page as AnyPage;
-      // task-11（B3）：报告期（循环外）限速嗅探要用的最后页面引用——每步刷新。
+      const setup = await this.runSetup({ instruction, startUrl, hostGate, verbose, pageIn, pwIn,
+        skipNavigation: opts.skipNavigation === true, settleMs: opts.settleMs });
+      browser = setup.browser;
+      if (setup.kind === "early") return setup.report;
+      const pg = setup.pg;
+      const observeState = setup.observeState;
+      page = pg;
       lastPageRef = pg;
-      /**
-       * S1：生成一次状态指纹并推进 cursor。`elems` 用**已有观察**（步首池）传进来；
-       * 收尾处才允许传 null（此时由调用方决定是否先重新抽池）。只读，不发动作。
-       */
-      const observeState = async (elems: ElemPool | null): Promise<StateFingerprint> => {
-        this._state.epoch += 1;
-        let url = "";
-        try { url = String(urlOf(pg as never) ?? ""); } catch { url = ""; }
-        let readyState: ReadyState = "complete";
-        try {
-          const rs = await pg.evaluate(() => {
-            const g = globalThis as unknown as { document?: { readyState?: unknown } };
-            return g.document?.readyState;
-          });
-          if (rs === "loading" || rs === "interactive" || rs === "complete") readyState = rs;
-        } catch { /* 页面已关闭：readyState 只是诊断，不阻塞收尾 */ }
-        const struct = structDigest(elems);
-        const content = contentDigest(elems);
-        const fp: StateFingerprint = {
-          epoch: this._state.epoch,
-          navEpoch: this._state.navEpoch,
-          url,
-          readyState,
-          struct,
-          ...(content === undefined ? {} : { content }),
-        };
-        this._state.current = fp;
-        return fp;
-      };
-      if (opts.skipNavigation !== true) {
-        await pg.goto(startUrl, { waitUntil: "domcontentloaded", timeout: this.gotoTimeout });
-        this._state.navEpoch += 1;
-        // S2：导航会丢掉 window 上下文——observer 在 goto 后重装（幂等；只作传感器）。
-        if (this.settlePolicy !== null) await installSettle(pg as unknown as SettlePage);
-        if (typeof opts.settleMs === "number" && opts.settleMs > 0) {
-          await new Promise((r) => setTimeout(r, opts.settleMs));
-        }
-      }
-      if (hostGate && hostGate.length) {
-        const deniedPopup = deniedContextUrl(pg, hostGate);
-        if (deniedPopup !== null) {
-          const why = `popup not allowed: ${deniedPopup} is outside the declared hosts envelope `
-            + `(${hostGate.join(", ")}) — popup/new-tab origins are part of the same host gate`;
-          if (verbose) console.log(`  -> REFUSED before navigation: ${why}`);
-          return {
-            goal: instruction, done: false,
-            stop_reason: why, stop_code: "popup_not_allowed",
-            steps: [],
-            audit: { verdict: "REJECT", reasons: [why], auditor: "navigation-envelope" },
-          };
-        }
-      }
+
       gatePhase = await this.runFrameGate({ instruction, pg, hostGate, goalSignalFn, precondition, warnings, verbose });
       if (gatePhase.kind === "early") return gatePhase.report;
       const { goalHeld, frameTargetStop } = gatePhase;
@@ -5586,6 +5496,95 @@ export class BrowserMiddleware {
     // A1 子改动③：这个已执行动作的 after 签名等下一次观察落账（见循环头部的落账点）。
     return { control: "next", ref, el, elems, desc, how, executed, inert, post, lastEffect: lastEffectOut,
       flagSuspectedAsync, cmdDoneId, nextCmdI, executedDelta };
+  }
+
+  /** 4d 阶段：active setup（重置/ready/config+信封早返回/launch+newPage/goto+settle/observeState 闭包）。 */
+  private async runSetup(a: {
+    instruction: string; startUrl: string; hostGate: string[] | null; verbose: boolean;
+    pageIn: AnyPage | null; pwIn: PwLike | null; skipNavigation: boolean; settleMs: number | undefined;
+  }): Promise<SetupPhase> {
+    const { instruction, startUrl, hostGate, verbose, pageIn, pwIn, skipNavigation, settleMs } = a;
+  let browser: BrowserHandle | null = null; const ownsBrowser = pageIn === null; let page: AnyPage | null = pageIn;
+    this._state = { epoch: 0, navEpoch: 0, current: null }; this._lastActionabilityDetail = null;
+    this._settleWaitMs = 0;
+    // S5：上次 ask 的题面/答复与 run 内 flags 都是 run 内口径（refs 会重编号）；指标不重置。
+    this._lastAsk = null; this._askedPools.clear();
+    this._runFlags = []; this._lastEffectSeen = null;
+    await this.ready();
+    // A config error is not a transient failure: acting on rules-only anyway would
+    // silently downgrade what the operator explicitly configured, and retrying it
+    // just repeats the same error with more side effects (D6). Refuse cleanly,
+    // BEFORE the navigation envelope and before a single step.
+    if (this.configError !== null) {
+      const why = `model runtime config error: ${this.configError}`;
+      if (verbose) console.log(`  -> REFUSED before navigation: ${why}（配置类错误不重试、不降级跑）`);
+      return { kind: "early", browser, report: {
+        goal: instruction, done: false,
+        stop_reason: why, stop_code: "config_error",
+        steps: [],
+        audit: { verdict: "REJECT", reasons: [why], auditor: "preflight" },
+      } };
+    }
+    // NAVIGATION ENVELOPE (P0-4): refuse BEFORE the browser opens the page. A
+    // refused subgoal has touched nothing — zero steps, zero side effects.
+    const deniedHost = disallowedHost(startUrl, hostGate);
+    if (deniedHost !== null) {
+      const why = `host not allowed: '${deniedHost}' is not among the declared hosts `
+        + `(${hostGate!.join(", ")}) — add it to the pack's hosts list if this step is meant to leave for it`;
+      if (verbose) console.log(`  -> REFUSED before navigation: ${why}`);
+      return { kind: "early", browser, report: {
+        goal: instruction, done: false,
+        stop_reason: why, stop_code: "host_not_allowed",
+        steps: [],
+        audit: { verdict: "REJECT", reasons: [why], auditor: "navigation-envelope" },
+      } };
+    }
+    if (ownsBrowser) {
+      // PORT NOTE 5: `sync_playwright()` has no twin; the module IS the
+      // connection. Use the injected pw when given, else the imported one.
+      let pw = pwIn;
+      if (pw === null) { const mod = await import("playwright"); pw = { chromium: mod.chromium as unknown as PwLike["chromium"] }; }
+      browser = (await browserEnv.launch(pw, true)) as unknown as BrowserHandle;
+      page = (await browser.newPage()) as AnyPage;
+    }
+    const pg = page as AnyPage;
+    /**
+     * S1：生成一次状态指纹并推进 cursor。`elems` 用**已有观察**（步首池）传进来；
+     * 收尾处才允许传 null（此时由调用方决定是否先重新抽池）。只读，不发动作。
+     */
+    const observeState = async (elems: ElemPool | null): Promise<StateFingerprint> => {
+      this._state.epoch += 1;
+      let url = "";
+      try { url = String(urlOf(pg as never) ?? ""); } catch { url = ""; }
+      let readyState: ReadyState = "complete";
+      try {
+        const rs = await pg.evaluate(() => (globalThis as unknown as { document?: { readyState?: unknown } }).document?.readyState);
+        if (rs === "loading" || rs === "interactive" || rs === "complete") readyState = rs;
+      } catch { /* 页面已关闭：readyState 只是诊断，不阻塞收尾 */ }
+      const struct = structDigest(elems); const content = contentDigest(elems);
+      const fp: StateFingerprint = { epoch: this._state.epoch, navEpoch: this._state.navEpoch, url, readyState, struct, ...(content === undefined ? {} : { content }) };
+      this._state.current = fp; return fp;
+    };
+    if (!skipNavigation) {
+      await pg.goto(startUrl, { waitUntil: "domcontentloaded", timeout: this.gotoTimeout }); this._state.navEpoch += 1;
+      // S2：导航会丢掉 window 上下文——observer 在 goto 后重装（幂等；只作传感器）。
+      if (this.settlePolicy !== null) await installSettle(pg as unknown as SettlePage);
+      if (typeof settleMs === "number" && settleMs > 0) {
+        await new Promise((r) => setTimeout(r, settleMs));
+      }
+    }
+    if (hostGate && hostGate.length) {
+      const deniedPopup = deniedContextUrl(pg, hostGate);
+      if (deniedPopup !== null) {
+        const why = `popup not allowed: ${deniedPopup} is outside the declared hosts envelope (${hostGate.join(", ")}) — popup/new-tab origins are part of the same host gate`;
+        if (verbose) console.log(`  -> REFUSED before navigation: ${why}`);
+        return { kind: "early", browser, report: {
+          goal: instruction, done: false, stop_reason: why, stop_code: "popup_not_allowed",
+          steps: [], audit: { verdict: "REJECT", reasons: [why], auditor: "navigation-envelope" },
+        } };
+      }
+    }
+  return { kind: "ready", pg, browser, observeState };
   }
 
   /**
