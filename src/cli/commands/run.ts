@@ -4,7 +4,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import type { CliContext } from "../context.ts";
 import { say, diag, emitJson } from "../context.ts";
-import { usageError, usageFromParseError } from "../errors.ts";
+import { exitCodeName, usageError, usageFromParseError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { emitPlanStatus } from "../plan-result.ts";
 import { flatList, injectOptionalValue, normalizeAliases, parseSlots } from "../args.ts";
@@ -479,8 +479,7 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
     if (code !== 0 && !partial) {
       envelope.ok = false;
       envelope.error = {
-        code: view.status === "needs_human" ? "NEEDS_HUMAN"
-          : code === 3 ? "BLOCKED" : code === 2 ? "USAGE" : "INCOMPLETE",
+        code: view.status === "needs_human" ? "NEEDS_HUMAN" : exitCodeName(code),
         message: view.status === "needs_human"
           ? `应用 ${appId} 需要人工介入（非 TTY 或人工步未完成）`
           : `应用 ${appId} 未通过（退出码 ${code}）`,
@@ -505,7 +504,7 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   }, { exitCode: code, next });
   envelope.ok = false;
   envelope.error = {
-    code: code === 130 ? "INTERRUPTED" : code === 3 ? "BLOCKED" : code === 2 ? "USAGE" : "INCOMPLETE",
+    code: exitCodeName(code),
     message: `应用 ${appId} 没有产出结果（退出码 ${code}）`,
     hint: "预检或浏览器阶段失败；诊断在 stderr。",
     next,

@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import type { CliContext } from "../context.ts";
 import { say, emitJson } from "../context.ts";
-import { usageError, usageFromParseError } from "../errors.ts";
+import { exitCodeName, usageError, usageFromParseError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 
 /**
@@ -130,7 +130,7 @@ export async function runRecord(args: string[], ctx: CliContext): Promise<number
     const replayFailed = result?.status === "replay-failed";
     envelope.ok = false;
     envelope.error = {
-      code: code === 130 ? "INTERRUPTED" : code === 2 ? "USAGE" : "INCOMPLETE",
+      code: exitCodeName(code),
       message: replayFailed ? "回放没通过，录制没有落盘" : `录制未完成（退出码 ${code}）`,
       hint: replayFailed
         ? "页面或信号不稳定；重新演示，或先检查 stderr 里的失败不变量。"

@@ -3,7 +3,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import type { CliContext } from "../context.ts";
 import { say, emitJson } from "../context.ts";
-import { usageError, usageFromParseError } from "../errors.ts";
+import { exitCodeName, usageError, usageFromParseError } from "../errors.ts";
 import { successEnvelope } from "../json.ts";
 import { stringValue } from "../args.ts";
 import { checkArtifacts, missingPieces, onnxModelPath } from "../../model/model-artifacts.ts";
@@ -157,7 +157,7 @@ async function modelFetch(args: string[], ctx: CliContext): Promise<number> {
   if (code !== 0) {
     envelope.ok = false;
     envelope.error = {
-      code: code === 130 ? "INTERRUPTED" : code === 2 ? "USAGE" : "INCOMPLETE",
+      code: exitCodeName(code),
       message: `模型安装未完成（退出码 ${code}）`,
       hint: "安装进度与诊断在 stderr。",
       next,

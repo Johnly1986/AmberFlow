@@ -37,6 +37,26 @@ export class CliError extends Error {
   }
 }
 
+/** 结果包络 `error.code` 的退出码映射（唯一出处）。各入口共用，避免分支各自漂移。 */
+export type ResultCode = "OK" | "INCOMPLETE" | "USAGE" | "BLOCKED" | "QUALITY_GATE" | "INTERRUPTED";
+
+export function exitCodeName(exitCode: number): ResultCode {
+  switch (exitCode) {
+    case EXIT.OK:
+      return "OK";
+    case EXIT.USAGE:
+      return "USAGE";
+    case EXIT.BLOCKED:
+      return "BLOCKED";
+    case EXIT.QUALITY_GATE:
+      return "QUALITY_GATE";
+    case EXIT.INTERRUPTED:
+      return "INTERRUPTED";
+    default:
+      return "INCOMPLETE";
+  }
+}
+
 export function usageError(message: string, opts: { hint?: string | null; next?: string[] } = {}): CliError {
   return new CliError("USAGE", message, { ...opts, exitCode: EXIT.USAGE });
 }

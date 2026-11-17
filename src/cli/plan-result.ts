@@ -1,6 +1,7 @@
 import type { CliContext } from "./context.ts";
 import { emitJson } from "./context.ts";
 import { successEnvelope } from "./json.ts";
+import { exitCodeName } from "./errors.ts";
 
 /**
  * 执行类旧入口（plan-cli / start）不返回结构化结果，但都会把步骤状态写回计划。
@@ -42,7 +43,7 @@ export async function emitPlanStatus(
   if (opts.code !== 0) {
     envelope.ok = false;
     envelope.error = {
-      code: opts.code === 130 ? "INTERRUPTED" : opts.code === 3 ? "BLOCKED" : opts.code === 2 ? "USAGE" : "INCOMPLETE",
+      code: exitCodeName(opts.code),
       message: `计划未跑完（退出码 ${opts.code}）`,
       hint: "步骤状态在 data.steps；执行日志在 stderr。",
       next,
