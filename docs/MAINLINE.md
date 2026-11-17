@@ -29,7 +29,7 @@
 | `src/support/` | L0 |
 | `src/prompts/`（规划中） | L1 |
 | `src/intervention/` | L1.5 |
-| `src/browser/`、`src/data/`、`src/engine/`（extraction/rules/settle 等）、`src/flow/` | L2（`src/engine/executor.ts` / planner / bindings / observe / picker / audit 为 L4） |
+| `src/browser/`、`src/data/`、`src/engine/`（extraction/rules/settle 等）、`src/flow/` | L2（`src/engine/executor.ts` / planner / bindings / observe / picker / audit 为 L4；候选扫描实现已归 `src/app/candidate-scan.ts`，engine extraction 仅保留共享机制/类型，2.2b） |
 | `src/model/` | L3 |
 | `src/app/` | L5 |
 | `src/cli/`、`src/online/`、`tools/`、`integrations/dsh-bridge/` | L6 |
@@ -101,6 +101,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | Ctx 契约 | `src/app/ctx-types.ts`（接口已存在） | flow 脚本、ctx-dry/replay、session-runtime | **接口冻结**；缺行为矩阵 | 新增原语需 matrix + conformance + dry/replay 同步 |
 | 执行结果包络 | `src/app/app-runner.ts:AppRunResult` + `planner:RunPlanResult` + `online/types:CaseOutcome` | 各源 | **冻结**；目标 P2 `RunOutcome` 核心包络 | 各源形状逐字节保留；新字段只增不改 |
 | 候选/目标解析恢复链 | `extraction` + `declared.ts`（DRF）/`identity.ts`（FW8）/executor `_liveDomIdFallback`/`_domFallbackResolve` | executor | **冻结**（不新增第 5 条） | 恢复策略表单源；与 BACKLOG #2 候选契约排他 |
+| 候选生产者 `CandidateProducer` | 契约 `src/engine/candidate-contract.ts`（engine，纯结构类型，无 Playwright 类型）；实现 `src/app/candidate-scan.ts` + `src/app/candidate-source.ts`（L5，app 层唯一扫描实现） | engine executor 只消费契约；`buildMiddleware` 默认注入 app producer | **方向冻结**（2.2b 完成）：engine 不得 import 扫描实现；新增实现 = 架构变更 | 扫描实现变更跑运行期 lane + examples golden；纯搬移走 split-check |
 | 证据/产物落盘 | `app/trace.ts`、`app/app-report-view.ts`、`data/report-view.ts`、`online/report.ts` | 各源 | 稳定区（允许 W1-b 纯搬） | 产物字段逐字节 + 不提交仓库 |
 | fixtures/engine | `fixtures/engine/*.html` | 仅 `verify:offline` / `verify:runtime:offline` 非门禁 lane | 稳定 | 不进 `npm run check`；新夹具只服务等价验证 |
 | 运行期等价 lane | `tools/verify-runtime-offline.ts`、`tools/golden/runtime/**` | 非门禁（需 chromium）；跑 `BrowserMiddleware.run` 的 4 个确定性场景 | 稳定 | 运行期重构前后对比；`--record` 同场景两次一致才入库 |
@@ -140,7 +141,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | [PACE_UNIFICATION_PLAN.md](PACE_UNIFICATION_PLAN.md) | 已实施 | kernel 共享 pace 工具，不内嵌 sleep |
 | [INTERVENTION_RESCUE_MODULE.md](INTERVENTION_RESCUE_MODULE.md) | 实施中 | L1.5 已登记；W1-c 前置；文件预留见 §4.1 |
 | [RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md](RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md) | proposal | attach 归 session-runtime；失败现场四件套进 artifacts |
-| [BACKLOG.md](BACKLOG.md) #2/#3/#4 | open/部分裁定 | #4 是 W1-c 前置；#2 候选契约优先于 resolve 改造 |
+| [BACKLOG.md](BACKLOG.md) #2/#3/#4 | #2 done（2.2b）、#4 前置完成（4d）、#3 ready | #3 候选窗口指数递增可启动（契约/生产者已就位） |
 | IMPROVEMENT_PLAN v2.1 | proposal（已评审） | 本文件是其 §3.1/§4.5 的落地形态 |
 
 ---
