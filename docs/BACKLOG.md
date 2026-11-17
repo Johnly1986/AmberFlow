@@ -348,10 +348,10 @@ lowercase（`i` 旗标），`parseHint` 的 `frameChain` 归一为小写规范 o
 
 ## P2 出口演练发现（2026-11-17）
 
-**状态**：open｜**来源**：`docs/IMPROVEMENT_PLAN.md` §6.5 C 的 5 项扩展演练（临时 worktree 真实补丁 → 计数 → 回滚，未入库）。两项缺口均落在已登记 P2 条件项（W4-4 / W5-3）边界内。
+**状态**：done（P2-1/P2-2 已收口；桥字段穿透仍归 P2 条件项 W4-4）｜**来源**：`docs/IMPROVEMENT_PLAN.md` §6.5 C 的 5 项扩展演练（临时 worktree 真实补丁 → 计数 → 回滚，未入库）。两项缺口均落在已登记 P2 条件项（W4-4 / W5-3）边界内。
 
 | # | 项 | 现状锚点（演练实测改动面） | 目标 / 验收 |
 |---|---|---|---|
-| P2-1 | provider 注册清单单点 | 新 provider 实测 **3 处**：adapter + `src/model/decision-provider.ts:resolveProviderSpec` 的动态注册 + `src/cli/commands/doctor.ts` 的注册清单（两处各自 import 同一批模块） | 新 provider = adapter + 1 处注册；`doctor` 与解析器共用幂等的 `registerAllProviders()`，`--doctor` 列表与 `--provider` 解析面不漂移；check + doctor 列表断言 |
-| P2-2 | 配置键作用点并入 schema | 新配置键实测 **3 手写处**：`src/support/config-schema.ts` + 消费点 + `tools/config-example.ts` 的 `WHERE_USED` 作用点表（缺 `WHERE_USED` 时生成器 exit 2，用户需读报错才知道要补）；生成物 3 份由 `npm run config:example` 刷新 | 新键 = schema（作用点作为键 spec 字段 `usedAt`）+ 消费点 **2 处**；`WHERE_USED` 表删除，生成器从 schema 派生；`config:example:check` 与 3 份生成物保持一致 |
+| P2-1 ✅ `85ebdfa` | provider 注册清单单点 | 新 provider 实测 **3 处**：adapter + `src/model/decision-provider.ts:resolveProviderSpec` 的动态注册 + `src/cli/commands/doctor.ts` 的注册清单（两处各自 import 同一批模块） | **已收口**：`registerAllProviders()` 幂等单点，三面（解析/doctor/start --doctor）共用；doctor `--json` 与未知 provider 列表改前=改后逐字节一致；新增 provider = adapter + 清单 1 行 |
+| P2-2 ✅ `accd0e3` | 配置键作用点并入 schema | 新配置键实测 **3 手写处**：`src/support/config-schema.ts` + 消费点 + `tools/config-example.ts` 的 `WHERE_USED` 作用点表（缺 `WHERE_USED` 时生成器 exit 2，用户需读报错才知道要补）；生成物 3 份由 `npm run config:example` 刷新 | **已收口**：`ConfigKeySpec.usedAt` 必填（缺失 exit 2 点名键）+ 消费点 = 2 处；手写 `WHERE_USED` 删除，3 份生成物逐字节不变 |
 

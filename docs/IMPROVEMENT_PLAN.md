@@ -6,7 +6,7 @@
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 已收口**（§6.4 落地记录 + §6.5 出口核对：2.0/4d/BACKLOG #2/2.3/2.2 执行内核（SessionLease 三面、RunScope 两面、S3 聚合器、StopClassifier 映射单源）/W5-3 契约下沉（部分）完成；扩展演练 3/5 达标，2 项缺口入 BACKLOG；runExecution 组合根与 ctx 行为矩阵等条件项延期，触发条件见 §6.5 D）。
+> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 已收口**（§6.4 落地记录 + §6.5 出口核对：2.0/4d/BACKLOG #2/2.3/2.2 执行内核（SessionLease 三面、RunScope 两面、S3 聚合器、StopClassifier 映射单源）/W5-3 契约下沉（部分）完成；扩展演练 5/5 达标（2 项缺口已由 P2-1/P2-2 修复）；runExecution 组合根与 ctx 行为矩阵等条件项延期，触发条件见 §6.5 D）。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -589,7 +589,7 @@ interface PromptSpec {
 
 ### 6.5 P2 出口核对（2026-11-17，收口）
 
-> 口径：§3.4 P2 列 + §9 五痛点闭环 + 扩展演练 5 项（§3.5）。结论：**P2 收口**——主指标与门禁项全部达标；条件项按"修订后范围"明确延期（D），与 P1 出口同格式，不以行数/函数数为绿。
+> 口径：§3.4 P2 列 + §9 五痛点闭环 + 扩展演练 5 项（§3.5）。结论：**P2 收口**——主指标与门禁项全部达标；条件项按"修订后范围"明确延期（D），与 P1 出口同格式，不以行数/函数数为绿。出口演练暴露的 2 项缺口（P2-1 provider 注册清单、P2-2 配置键作用点）已在本轮修复并复测。
 
 **A. §3.4 P2 列指标**
 
@@ -620,13 +620,13 @@ interface PromptSpec {
 
 | 演练 | §3.3/§3.5 目标 | 实测改动面 | 判定 / 发现 |
 |---|---|---|---|
-| 新决策 provider | ≤2（adapter + registry 引用） | **3**：adapter 文件 + `resolveProviderSpec` 动态注册 + `doctor` 注册清单 | ❌ 差 1：解析器与 doctor 各自维护注册清单 → 建议 `registerAllProviders()` 单点（入 BACKLOG） |
-| 新配置键 | ≤2（schema + 消费点；文档由 schema 生成） | **3 手写**（schema + 消费点 + `tools/config-example.ts` 的 `WHERE_USED` 作用点）+ **3 生成物**（`.env.example`/`amberflowrc.example.json`/`CONFIG_REFERENCE.md`；生成器对缺 `WHERE_USED` 的键 exit 2） | ❌ 差 1：作用点表仍手写 → 建议并入 schema 字段（入 BACKLOG） |
+| 新决策 provider | ≤2（adapter + registry 引用） | **3**：adapter 文件 + `resolveProviderSpec` 动态注册 + `doctor` 注册清单 | ✅ 修复后 2（**P2-1** `registerAllProviders()` 单点，`85ebdfa`；doctor/未知 provider 输出逐字节等价） |
+| 新配置键 | ≤2（schema + 消费点；文档由 schema 生成） | **3 手写**（schema + 消费点 + `tools/config-example.ts` 的 `WHERE_USED` 作用点）+ **3 生成物**（`.env.example`/`amberflowrc.example.json`/`CONFIG_REFERENCE.md`；生成器对缺 `WHERE_USED` 的键 exit 2） | ✅ 修复后 2（**P2-2** `ConfigKeySpec.usedAt` 单源，`accd0e3`；手写 `WHERE_USED` 删除，3 份生成物逐字节不变） |
 | 新调参常量 | 1 处（定义单源） | **定义 1**（`tuning.ts` + `TUNING_VALUES`）+ 消费 1 + 门禁概念登记 1（`tools/maintain/constants.ts`，漏登记不 fail、只失去回写 warn 覆盖） | ✅ 定义单源达成；门禁登记是可预期维护成本 |
 | 新桥字段 / 策略键 | ≤3（共享契约模块 + 生成物） | **5**：tool schema（`index.ts`）→ `AmberFlowRunArgs`（`service.ts`）→ `runArgs` argv（`bridge.ts`）→ engine CLI 解析（`app-runner-cli.ts`）→ engine 选项（`app-runner.ts`） | ❌ 差 2：桥字段无共享契约 → 属 W4-4 条件项边界，冻结后处理 |
 | 新 ctx 原语 | ≤4（types/live/dry/replay/kit/scan/schema） | **4**：`ctx-types` + `ctx`（live）+ `ctx-dry` + `ctx-replay`；只读原语不触 kit/scan/schema（`amber schema ctx` 仍自洽）；作者文档另计 | ✅ |
 
-> 定性评审：5 项中 3 项达标；2 项不达标均落在**已登记的 P2 条件项边界内**（W4-4 桥描述/字段、W5-3 组合根），不是新架构分叉。演练补丁均在 `/tmp` worktree 完成并回滚；复现口径见 CHANGELOG 同名条目。
+> 定性评审：5 项演练最初 3 项达标，2 项缺口（provider 注册清单、配置键作用点）当轮修复（P2-1/P2-2）后复测 5/5 达标；桥字段 5 处穿透归 W4-4 条件项、不在本轮回合修。演练补丁均在 `/tmp` worktree 完成并回滚；修复批次与复现口径见 CHANGELOG 同名条目。
 
 **D. 明确延期（条件未触发；与 P1 出口同格式）**
 
