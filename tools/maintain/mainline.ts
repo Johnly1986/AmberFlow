@@ -24,12 +24,21 @@ export interface MainlineSnapshot {
   runEntryCalls: number;
   /** 指向任意 `index.ts` 的仓内 import（相对路径），应为空。 */
   indexImporters: string[];
+  /** P2 冻结面：`executor.ts` 的 `run()` 签名逐字节存在（九阶段拆分不得改）。 */
+  runSignature: boolean;
+  /** P2 冻结面：`BrowserMiddleware` 类名逐字节存在。 */
+  browserClass: boolean;
 }
 
 export interface MainlineBaseline {
   mwConstructions: number;
   runEntryCalls: number;
 }
+
+/** P2 运行期重构冻结面（BACKLOG #4）：类名与 run() 签名逐字节不变。 */
+export const EXECUTOR_RUN_SIGNATURE =
+  "async run(instruction: string, startUrl: string, opts: RunOptions = {}): Promise<RunReport>";
+export const MIDDLEWARE_CLASS = "export class BrowserMiddleware";
 
 const REQUIRED_TOKENS: ReadonlyArray<{ token: string; why: string }> = [
   { token: "L1.5", why: "依赖分层缺 L1.5（intervention 登记）" },
@@ -78,6 +87,8 @@ export function collectMainline(repo: string): MainlineSnapshot {
   };
 
   const srcText = readTs(["src"]);
+  const executorPath = path.join(repo, "src", "engine", "executor.ts");
+  const executorText = fs.existsSync(executorPath) ? fs.readFileSync(executorPath, "utf8") : "";
   const cliText = readTs(["src/cli"]);
   const mwConstructions = countCodeMatches(srcText, /new BrowserMiddleware\(/);
   const runEntryCalls = countCodeMatches(cliText, /ctx\.runEntry\(/);
@@ -112,7 +123,11 @@ export function collectMainline(repo: string): MainlineSnapshot {
   };
   for (const root of scanRoots) walkFiles(root);
 
-  return { doc, srcDirs, mwConstructions, runEntryCalls, indexImporters };
+  return {
+    doc, srcDirs, mwConstructions, runEntryCalls, indexImporters,
+    runSignature: executorText.includes(EXECUTOR_RUN_SIGNATURE),
+    browserClass: executorText.includes(MIDDLEWARE_CLASS),
+  };
 }
 
 /** 纯函数：给定快照与基线，返回问题列表（可离线负向断言）。 */
@@ -132,6 +147,10 @@ export function evaluateMainline(snapshot: MainlineSnapshot, baseline: MainlineB
   }
   if (!snapshot.doc.includes("integrations/dsh-bridge")) fail("MAINLINE 未登记 integrations/dsh-bridge 的层位");
   if (!snapshot.doc.includes("tools/")) fail("MAINLINE 未登记 tools/ 的层位");
+  if (!snapshot.runSignature) {
+    fail("executor.ts 的 run() 签名被改动或缺失——P2 冻结面（类名 + run() 签名逐字节不变）");
+  }
+  if (!snapshot.browserClass) fail("executor.ts 的 `export class BrowserMiddleware` 被改动或缺失——P2 冻结面");
   if (snapshot.indexImporters.length > 0) {
     fail(`src/index.ts 有 ${snapshot.indexImporters.length} 个仓内 importer（公共面应为 internal）：${snapshot.indexImporters.slice(0, 3).join("；")}`);
   }

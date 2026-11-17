@@ -5,7 +5,7 @@
     "newFunctionMaxLines": 150,
     "phaseFunctionMaxLines": 400,
     "files": {
-      "src/engine/executor.ts": 5831,
+      "src/engine/executor.ts": 5830,
       "src/app/app-runner.ts": 2854,
       "src/engine/extraction.ts": 1959,
       "src/app/ctx.ts": 1799,
@@ -23,14 +23,14 @@
         "lines": 1704
       },
       {
-        "file": "src/engine/executor.ts",
-        "name": "run",
-        "lines": 838
-      },
-      {
         "file": "src/app/app-runner.ts",
         "name": "runScriptApp",
         "lines": 802
+      },
+      {
+        "file": "src/engine/executor.ts",
+        "name": "run",
+        "lines": 743
       },
       {
         "file": "src/app/app-runner.ts",
@@ -133,7 +133,8 @@
       "src/engine/executor.ts#runModelPick",
       "src/engine/executor.ts#runPostAction",
       "src/engine/executor.ts#runActionPhase",
-      "src/engine/executor.ts#runActionExecute"
+      "src/engine/executor.ts#runActionExecute",
+      "src/engine/executor.ts#runSetup"
     ]
   },
   "docs": {
@@ -151,7 +152,7 @@
   },
   "comments": {
     "dateStamps": 34,
-    "planTokens": 406,
+    "planTokens": 405,
     "historyWording": 65,
     "lineAnchors": 0,
     "ghostRefs": 0,

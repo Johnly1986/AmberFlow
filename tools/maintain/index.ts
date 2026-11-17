@@ -202,6 +202,8 @@ function selfTest(): number {
     mwConstructions: 2,
     runEntryCalls: 3,
     indexImporters: [],
+    runSignature: true,
+    browserClass: true,
   };
   const mainlineBaseline: MainlineBaseline = { mwConstructions: 6, runEntryCalls: 12 };
   const mainlinePositive = evaluateMainline(mainlineOk, mainlineBaseline);
@@ -214,6 +216,8 @@ function selfTest(): number {
     evaluateMainline({ ...mainlineOk, indexImporters: ["src/x.ts: from \"./index.ts\""] }, mainlineBaseline),
     /importer/,
   );
+  expectProblem("mainline run 签名漂移", evaluateMainline({ ...mainlineOk, runSignature: false }, mainlineBaseline), /run\(\) 签名/);
+  expectProblem("mainline 类名漂移", evaluateMainline({ ...mainlineOk, browserClass: false }, mainlineBaseline), /BrowserMiddleware/);
   failures.push();
   const mainlineFailures = failures.filter((f) => f.startsWith("mainline"));
   if (mainlineFailures.length > 0) failures.length = failures.length; // keep all
@@ -272,7 +276,7 @@ function selfTest(): number {
     limits, template: phaseBaseline,
   }, phaseBaseline);
   if (phaseUpdate.errors.length > 0) failures.push("phaseFunctions 例外被 --update 误报为新增超标函数");
-  console.log("maintain --self-test: OK — 负向断言 22 条（size 4 / docs 5 / mainline 4 / mainline-update 1 / comments 4 / comments-update 2 / constants 2）+ 正例 8 条全部符合预期");
+  console.log("maintain --self-test: OK — 负向断言 24 条（size 4 / docs 5 / mainline 6 / mainline-update 1 / comments 4 / comments-update 2 / constants 2）+ 正例 8 条全部符合预期");
   return 0;
 }
 
