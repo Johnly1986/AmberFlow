@@ -189,6 +189,7 @@ import type {
   SkippedAction,
   StateDigest,
   StateEffect,
+  Sig,
   StateFingerprint,
   StateFlag,
   StepStateRecord,
@@ -255,6 +256,14 @@ type PoolGatePhase = {
   gateSettle: SettleResult | null; lastPoolSize: number; lastPoolWaitedMs: number;
   beforeFp: StateFingerprint | null; pendingAfterIdx: number | null; lastReadiness: Readiness | null;
   poolEmptyThisStep: boolean; readyEmptyWarned: boolean;
+};
+
+/** `runDeclaredTargets` 的返回值：stopped = 命令 walk 已停（stop 已记账）；cmdPick 供后续动作面。 */
+type DeclaredTargetsPhase = {
+  stopped: boolean;
+  cmdPick: { cmd: CommandDecl; ref: string; index: number; cands: string[] } | null;
+  rowAmbStop: { code: StopCode; reason: string } | null;
+  cmdI: number;
 };
 
 /* ------------------------------------------------------------------ helpers */
@@ -3686,255 +3695,18 @@ export class BrowserMiddleware {
         };
         const declaredTargets = (): readonly (string | null | undefined)[] =>
           commandMode ? cmdSpace.map((c) => c.target) : [curHint];
-        /** P0-C 首版能力面：DRF 目标只允许 click/scroll/hover（写值/拖拽/上传/坐标点击拒绝）。 */
-        const DECLARED_OPS = new Set(["click", "scroll", "hover"]);
-        // P2 COMMAND SPACE — the step's action is chosen ON THE CLOSED SET, not on the pool:
-        // `instantiateSpace` semantics implemented as the walk below (declaration × this
-        // step's observation; a command resolving to nothing is OUT — with the same
-        // "the plan-named target is never eaten by the budget" recovery hints get — and
-        // nothing left is a structured stop, NEVER a fallback to the full pool, NEVER a
-        // model pick). Order is decided by the declaration and the page, not by scoring;
-        // completion truth stays the subgoal signal (红线③ untouched).
-        let cmdPick: { cmd: CommandDecl; ref: string; index: number; cands: string[] } | null = null;
-        /** F82/F83 评审收口：行锚声明下的结构化歧义停（命令走廊取首候选之前）。 */
-        let rowAmbStop: { code: StopCode; reason: string } | null = null;
-        if (cmdSpace.length) {
-          const scans = new Set(Object.values(elems).map((x) => x.scan));
-          let pendingUnresolved: string[] = [];
-          for (let i = cmdI; i < cmdSpace.length; i++) {
-            const c = cmdSpace[i]!;
-            if (cmdDone.has(c.id)) continue;
-            if (c.op === "skip") {          // skip: resolves by definition, moves the page not at all
-              cmdDone.add(c.id);
-              cmdI = i + 1;
-              continue;
-            }
-            const target = c.target ?? "";
-            if ((cmdAttempts[c.id] ?? 0) >= CMD_CANDIDATE_ATTEMPTS) {
-              // A2：一条命令最多试前 4 个可行动候选；到顶仍没成 = 这条命令在本步 OUT
-              //（记 attempt_limit 证据；后续 done 成立/不成立都有零执行摘要，不静默 done）。
-              noteSkipped({
-                command_id: c.id, target: c.target ?? null, reason: "attempt_limit",
-                detail: `${CMD_CANDIDATE_ATTEMPTS} candidate(s) tried without success`,
-              });
-              cmdDone.add(c.id);
-              cmdI = i + 1;
-              continue;
-            }
-            // A2：可行动优先的候选列表（`null` 起 = 池里没有这个目标，先做一次 DOM 回捞）。
-            let candRefs = this.resolveCommandRef(target, elems, String(c.op), new Set(Object.keys(forbidden)));
-            if (candRefs.length === 0 && target !== "" && hintCandidates(target, elems, this._hintOpts()) === null) {
-              for (const [ref, e] of Object.entries(await hintLookup(pg, target, admitSelectorWithJsFor(this.surfacePolicy), { hosts: this._frameHosts }))) {
-                // U3/C10：回捞去重按**节点身份**（已带 data-dshref = 已在池），不再比 scan 序号——
-                // 回捞面(ADMIT_SEL)与池面(POOL_SEL)两套序号空间本就不可比。
-                if (!e.dsh_ref) elems[ref] = e;
-              }
-              pruneForbids(elems);
-              candRefs = this.resolveCommandRef(target, elems, String(c.op), new Set(Object.keys(forbidden)));
-            }
-            // FW8：池 + hint 回捞都空之后做一次声明驱动的身份回捞（形状白名单见 identityHintInfo；
-            // 决策步与模型选出的元素永不走这里）。within 过滤在 lookup 内部，本调用点零额外判定。
-            if (candRefs.length === 0 && target !== "" && hintCandidates(target, elems, this._hintOpts()) === null) {
-              const attempt = await targets.tryIdentity(target, {
-                reasonPrefix: `command ${JSON.stringify(c.id)} identity target ${JSON.stringify(target)}`,
-                narrowNoun: "declaration", commandId: c.id,
-              });
-              if (attempt.kind === "ambiguous") break;
-              if (attempt.kind === "row") {
-                const { ref, el } = attempt;
-                // 只进**本步解析用的局部池**：命令面不再询问模型（cmdPick 直接解析出 ref），
-                // 所以它不会进入 ChoiceRequest.elems；下一步重新抽池即消失。
-                elems[ref] = el;
-                pruneForbids(elems);
-                const pickedRefs = this.resolveCommandRef(target, elems, String(c.op),
-                  new Set(Object.keys(forbidden)));
-                cmdPick = {
-                  cmd: c, ref: pickedRefs[0] ?? ref, index: i,
-                  cands: (pickedRefs.length ? pickedRefs : [ref]).slice(0, CMD_CANDIDATE_ATTEMPTS),
-                };
-                break;
-              }
-            }
-            // P0-C：池 + hint 回捞 + FW8 身份回捞都空之后，policy=declared 才走 DRF
-            // （声明目标解析面）。命中即解析出 ref，不再询问模型；首版能力面 click/scroll/hover。
-            if (candRefs.length === 0 && target !== "" && this.targetResolutionDeclared
-                && hintCandidates(target, elems, this._hintOpts()) === null) {
-              const got = await targets.tryDeclared(target, String(c.op));
-              if (targets.declaredStop !== null) break;
-              if (got !== null) {
-                if (!DECLARED_OPS.has(String(c.op))) {
-                  await targets.cleanupDeclared();
-                  targets.declaredStop = {
-                    code: "action_unsupported",
-                    reason: `command ${JSON.stringify(c.id)} declares op '${String(c.op)}', but its target `
-                      + `${JSON.stringify(target)} was resolved by the declared-DOM fallback (DRF) on step ${stepNo}`
-                      + ` — the first version allows only click/scroll/hover for DRF targets; use a pool/`
-                      + `identity target for '${String(c.op)}' or pick a supported op`,
-                  };
-                  break;
-                }
-                // 只进本步局部池：cmdPick 直接给出 ref，命令面不再询问模型（模型面剥离 declared 标记）。
-                elems[got.ref] = got.el;
-                pruneForbids(elems);
-                cmdPick = { cmd: c, ref: got.ref, index: i, cands: [got.ref] };
-                break;
-              }
-            }
-            pruneForbids(elems);
-            // F82/F83 评审收口（P0）：行锚声明 = 多候选零动作。命令走廊的候选列表来自
-            // `resolveCommandRef`（hintCandidates 的 refs，按"逐个尝试"语义返回多个）；行锚
-            // 声明下这里必须在**取首候选之前**停成结构化歧义——否则就是"静默点第一行"。
-            // 判定与决策步/会话面同一谓词（hintCandidates decided===null && refs>1）。
-            if (candRefs.length > 1 && declaresRowAnchor(target)) {
-              const cand = hintCandidates(target, elems, this._hintOpts());
-              if (cand !== null && cand.refs.length > 1) {
-                for (const candRef of cand.refs) {
-                  noteSkipped({
-                    command_id: c.id, target, ref: candRef, reason: "target_ambiguous",
-                    detail: `${cand.refs.length} row-anchor candidate(s) for ${JSON.stringify(target)}; `
-                      + "row anchors never act on the first of several rows",
-                  });
-                }
-                rowAmbStop = {
-                  code: "target_ambiguous",
-                  reason: `command ${JSON.stringify(c.id)} target ${JSON.stringify(target)} declares a row `
-                    + `anchor and matches ${cand.refs.length} candidate(s) (${cand.refs.join(", ")}) on `
-                    + `step ${stepNo} — row anchors are fail-closed: several distinct rows never resolve to `
-                    + `"the first one"; narrow in-row:<token> to a content token unique to one row or fix `
-                    + `the row being pointed at`,
-                };
-                break;
-              }
-            }
-            if (candRefs.length > 0) {
-              cmdPick = { cmd: c, ref: candRefs[0]!, index: i, cands: candRefs.slice(0, CMD_CANDIDATE_ATTEMPTS) };
-              break;
-            }
-            if (hintCandidates(target, elems, this._hintOpts()) === null) {
-              pendingUnresolved.push(c.id);
-              noteSkipped({ command_id: c.id, target: c.target ?? null, reason: "target_not_found" });
-              continue;
-            }
-            // 候选都在禁用面（动作阶段失败已由 forbid 记账）/ 不满足 op 能力：这条命令 OUT。
-            // A1：这也是"没有动作"的一条证据——为什么这条命令被跳过。
-            noteSkipped({
-              command_id: c.id, target: c.target ?? null, reason: "forbidden",
-              detail: `${cmdAttempts[c.id] ?? 0} candidate(s) tried, remaining candidates are forbidden`,
-            });
-            cmdDone.add(c.id);
-            cmdI = i + 1;
-          }
-          // FW8：身份回捞给出的结构化停因（歧义）优先于后续命令选择——绝不"随便选一个"。
-          if (targets.identityStop !== null) {
-            stop(targets.identityStop.code, targets.identityStop.reason, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-            break;
-          }
-          // P0-C：DRF 的歧义/首版能力面同样是结构化停因（绝不回退模型或"随便选一个"）。
-          if (targets.declaredStop !== null) {
-            stop(targets.declaredStop.code, targets.declaredStop.reason, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-            break;
-          }
-          // F82/F83 评审收口：行锚声明的多候选在命令走廊内已是结构化歧义（零动作）。
-          if (rowAmbStop !== null) {
-            stop(rowAmbStop.code, rowAmbStop.reason, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-            break;
-          }
-          if (cmdPick === null) {
-            // P0-D：待解析命令目标只存在于被排除 frame → frame_not_allowed（只读探测；
-            // 不是普通 target_not_found，也不能拿模型自由选来"绕过"声明）。
-            let cmdFrameStop: { code: StopCode; reason: string } | null = null;
-            for (const cid of pendingUnresolved) {
-              const c = cmdSpace.find((x) => x.id === cid);
-              if (c === undefined || !c.target) continue;
-              cmdFrameStop = await frameTargetStop(c.target);
-              if (cmdFrameStop !== null) break;
-            }
-            if (cmdFrameStop !== null) {
-              stop(cmdFrameStop.code, cmdFrameStop.reason, stepNo);
-              if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-              break;
-            }
-            // 区分“目标不存在”和“目标存在但歧义”：歧义不是空间为空，而是候选集 > 1。
-            const ambiguous = cmdSpace.find((c) => {
-              if (c.op === "skip" || !c.target) return false;
-              // A2：已经试过候选的命令不再按"歧义"停——它的候选是被逐个尝试后禁用的。
-              if ((cmdAttempts[c.id] ?? 0) > 0) return false;
-              const cand = hintCandidates(c.target, elems, this._hintOpts());
-              return cand !== null && cand.decided === null && cand.refs.length > 1;
-            });
-            if (ambiguous?.target) {
-              const cand = hintCandidates(ambiguous.target, elems, this._hintOpts())!;
-              // A1：歧义的每个候选都进 skipped_actions——零执行不能只剩一句停因文案。
-              for (const candRef of cand.refs) {
-                noteSkipped({
-                  command_id: ambiguous.id, target: ambiguous.target, ref: candRef,
-                  reason: "target_ambiguous",
-                  detail: `${cand.refs.length} distinct candidates for ${JSON.stringify(ambiguous.target)}; never guessed`,
-                });
-              }
-              stop("target_ambiguous",
-                `command ${JSON.stringify(ambiguous.id)} matches ${cand.refs.length} distinct candidates `
-                + `(${cand.refs.join(", ")}) for target ${JSON.stringify(ambiguous.target)} on step ${stepNo}`
-                + zeroExecSummary(), stepNo);
-              if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-              break;
-            }
-            if (cmdDone.size >= cmdSpace.length) {
-              // 04-A：skip 命令"按定义解决"后从未评估过 done——宣布 "never held" 之前必须先查
-              // 一遍信号（与 :2499 正常评估同形；不改评估顺序，只补这条死路的评估缺失）。
-              // 这让"零动作验证步"（skip+done）从机制性必死变成合法可用。
-              if (goalSignalFn && (await goalHeld())) {
-                done = true;
-                // A1 §2.2.2：done 成立但一个动作都没执行时，停因文案必须带上跳过摘要
-                //（done 来自"信号本来就成立"，不是伪造的执行证据）。
-                stop("dom_goal_signal",
-                  `dom goal signal (commands resolved without action; signal held)${zeroExecSummary()}`, stepNo);
-                if (verbose) console.log(`  step ${stepNo}: -> done (signal held after exhausted commands, 04-A)`);
-                break;
-              }
-              stop("done_not_held",
-                `commands exhausted (${cmdDone.size}/${cmdSpace.length} acted) but the done-signal never held on step ${stepNo}`
-                + zeroExecSummary(), stepNo);
-            } else {
-              // A2：目标"找不到"到底是页面没有、还是滚动容器里的内容没渲染（虚拟列表/懒加载）？
-              // 失败路径上付一次廉价 DOM 探测，把 viewport_underloaded 事实写进停因（与 diagnostics）。
-              const under = await viewportUnderload(pg);
-              viewportUnderloaded = under.length ? under : null;
-              const underNote = under.length
-                ? ` — viewport_underloaded: `
-                  + under.map((h) => `${h.tag}${h.id ? `#${h.id}` : ""} scrollHeight=${h.scrollHeight} `
-                    + `> clientHeight=${h.clientHeight}, rendered children=${h.rendered}`).join("; ")
-                  + `（目标可能在未渲染/视口外的滚动内容里；不自动滚动，按六步法② 用滚动/展开原语或收窄窗口取证）`
-                : "";
-              // C 批（B8）：被拒的 frame: 尾缀 / 合法但写错的链要在此点名 + 列页面可用 origin
-              // （无 frame: 参与 = 空串，旧 reason 逐字节不变）。
-              // F82：池在手 = in-row 尾缀被拒点名 / 三案证据同批（stopCode 不加新码）。
-              const frameTargets = pendingUnresolved
-                .map((id) => cmdSpace.find((c) => c.id === id)?.target)
-                .filter((t): t is string => typeof t === "string" && t !== "");
-              const frameNote = frameHintFailureEvidence(pg, this._frameHosts, frameTargets, elems);
-              stop("target_not_found",
-                `command space matches nothing on this page — pending unresolved: `
-                + `${pendingUnresolved.join(", ") || "-"} (unresolvable candidates are OUT; the space never falls back to the full pool) on step ${stepNo}. `
-                + HINT_CLOSED_SET_TEXT
-                // A2 判别①：报错现场用内存里已有的池回答「目标不在页面上 vs 闭集没把它放进
-                // 命令空间」（12 轮真站实测：9/11 轮把产品 UI 本来就没有的排序项误读成引擎池缺陷）。
-                + cmdDiscrimination(cmdSpace, pendingUnresolved, elems)
-                // FW8：身份回捞匹配到了、但**全不可见**——按 0 处理，把隐藏匹配数作为诊断证据。
-                + identityHiddenSuffix(targets.identityHidden)
-                + declaredHiddenSuffix(targets.getDeclaredHidden())
-                + declaredMissSuffix(targets.declaredMiss)
-                + drfHintSuffix(this.targetResolutionDeclared)
-                + underNote
-                + (frameNote ? ` — ${frameNote}` : ""), stepNo);
-            }
-            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-            break;
-          }
-        }
+        const declaredPhase = await this.runDeclaredTargets({
+          pg, stepNo, verbose, elems, cmdSpace, cmdDone, cmdI, cmdAttempts, noteSkipped, zeroExecSummary,
+          goalHeld, goalSignalFn, frameTargetStop, targets, stop, stopReason: () => acct.stopReason, forbidden, pruneForbids,
+          hintOpts: () => this._hintOpts(), surfacePolicy: this.surfacePolicy, frameHosts: this._frameHosts,
+          targetResolutionDeclared: this.targetResolutionDeclared, candidateAttempts: CMD_CANDIDATE_ATTEMPTS,
+          resolveCommandRef: (t, e, op, f) => this.resolveCommandRef(t, e, op, f),
+          setDone: () => { done = true; }, setViewportUnderloaded: (v) => { viewportUnderloaded = v; },
+        });
+        cmdI = declaredPhase.cmdI;
+        if (declaredPhase.stopped) break;
+        const cmdPick = declaredPhase.cmdPick;
+
         // A frozen plan that NAMES its target must never be blocked by the
         // extraction budget: retrieve the hinted element(s) into the pool when
         // they were evicted. And a hint whose element is already forbidden is
@@ -5642,6 +5414,232 @@ export class BrowserMiddleware {
       }
     }
     return { stopped: false, stepStartUrl, stepStartTabs, elems, gateSettle, lastPoolSize, lastPoolWaitedMs, beforeFp, pendingAfterIdx, lastReadiness, poolEmptyThisStep, readyEmptyWarned };
+  }
+
+  /**
+   * 4d 阶段：声明目标（**命令空间 walk**）——按当前观察在闭合集上走一遍；找不到 = 结构化
+   * target_not_found（永不回退全池/模型）。覆盖范围仅命令 walk；act-hint 解析面仍在 run()。
+   * 早停由本方法 stop() 记账（stopReason 回调保证日志与调用点一致）。
+   */
+  private async runDeclaredTargets(a: {
+    pg: AnyPage; stepNo: number; verbose: boolean; elems: ElemPool; cmdSpace: CommandDecl[]; cmdDone: Set<string>;
+    cmdI: number; cmdAttempts: Record<string, number>; noteSkipped: (s: SkippedAction) => void;
+    zeroExecSummary: () => string; goalHeld: () => Promise<boolean>;
+    goalSignalFn: ((page: AnyPage) => boolean | Promise<boolean>) | null;
+    frameTargetStop: (target: string) => Promise<{ code: StopCode; reason: string } | null>;
+    targets: DeclaredTargetsResolver; stop: (code: StopCode, detail?: string, at?: number) => void;
+    stopReason: () => string; forbidden: Record<string, Sig>; pruneForbids: (pool: ElemPool) => void;
+    hintOpts: () => HintMatchOptions; surfacePolicy: SurfacePolicy; frameHosts: string[] | null;
+    targetResolutionDeclared: boolean; candidateAttempts: number;
+    resolveCommandRef: (target: string, pool: ElemPool, op: string, blocked: Set<string>) => string[];
+    setDone: () => void;
+    setViewportUnderloaded: (v: { tag: string; id: string; scrollHeight: number; clientHeight: number; rendered: number }[] | null) => void;
+  }): Promise<DeclaredTargetsPhase> {
+    const { pg, stepNo, verbose, elems, cmdSpace, cmdDone, cmdAttempts, noteSkipped, zeroExecSummary,
+      goalHeld, goalSignalFn, frameTargetStop, targets, stop, stopReason, forbidden, pruneForbids, hintOpts,
+      surfacePolicy, frameHosts, targetResolutionDeclared, candidateAttempts, resolveCommandRef,
+      setDone, setViewportUnderloaded } = a;
+    let cmdI = a.cmdI;
+    let cmdPick: { cmd: CommandDecl; ref: string; index: number; cands: string[] } | null = null;
+    let rowAmbStop: { code: StopCode; reason: string } | null = null;
+    /** P0-C 首版能力面：DRF 目标只允许 click/scroll/hover（写值/拖拽/上传/坐标点击拒绝）。 */
+    const DECLARED_OPS = new Set(["click", "scroll", "hover"]);
+    // P2 COMMAND SPACE — the step's action is chosen ON THE CLOSED SET, not on the pool:
+    if (cmdSpace.length) {
+      const scans = new Set(Object.values(elems).map((x) => x.scan));
+      let pendingUnresolved: string[] = [];
+      for (let i = cmdI; i < cmdSpace.length; i++) {
+        const c = cmdSpace[i]!;
+        if (cmdDone.has(c.id)) continue;
+        if (c.op === "skip") {          // skip: resolves by definition, moves the page not at all
+          cmdDone.add(c.id);
+          cmdI = i + 1;
+          continue;
+        }
+        const target = c.target ?? "";
+        if ((cmdAttempts[c.id] ?? 0) >= candidateAttempts) {
+          // A2：一条命令最多试前 4 个可行动候选；到顶仍没成 = 这条命令在本步 OUT
+          //（记 attempt_limit 证据；后续 done 成立/不成立都有零执行摘要，不静默 done）。
+          noteSkipped({
+            command_id: c.id, target: c.target ?? null, reason: "attempt_limit",
+            detail: `${candidateAttempts} candidate(s) tried without success`,
+          });
+          cmdDone.add(c.id);
+          cmdI = i + 1;
+          continue;
+        }
+        // A2：可行动优先的候选列表（`null` 起 = 池里没有这个目标，先做一次 DOM 回捞）。
+        let candRefs = resolveCommandRef(target, elems, String(c.op), new Set(Object.keys(forbidden)));
+        if (candRefs.length === 0 && target !== "" && hintCandidates(target, elems, hintOpts()) === null) {
+          for (const [ref, e] of Object.entries(await hintLookup(pg, target, admitSelectorWithJsFor(this.surfacePolicy), { hosts: frameHosts }))) {
+            if (!e.dsh_ref) elems[ref] = e;
+          }
+          pruneForbids(elems);
+          candRefs = resolveCommandRef(target, elems, String(c.op), new Set(Object.keys(forbidden)));
+        }
+        if (candRefs.length === 0 && target !== "" && hintCandidates(target, elems, hintOpts()) === null) {
+          const attempt = await targets.tryIdentity(target, {
+            reasonPrefix: `command ${JSON.stringify(c.id)} identity target ${JSON.stringify(target)}`,
+            narrowNoun: "declaration", commandId: c.id,
+          });
+          if (attempt.kind === "ambiguous") break;
+          if (attempt.kind === "row") {
+            const { ref, el } = attempt;
+            elems[ref] = el;
+            pruneForbids(elems);
+            const pickedRefs = resolveCommandRef(target, elems, String(c.op),
+              new Set(Object.keys(forbidden)));
+            cmdPick = {
+              cmd: c, ref: pickedRefs[0] ?? ref, index: i,
+              cands: (pickedRefs.length ? pickedRefs : [ref]).slice(0, candidateAttempts),
+            };
+            break;
+          }
+        }
+        if (candRefs.length === 0 && target !== "" && targetResolutionDeclared
+            && hintCandidates(target, elems, hintOpts()) === null) {
+          const got = await targets.tryDeclared(target, String(c.op));
+          if (targets.declaredStop !== null) break;
+          if (got !== null) {
+            if (!DECLARED_OPS.has(String(c.op))) {
+              await targets.cleanupDeclared();
+              targets.declaredStop = {
+                code: "action_unsupported",
+                reason: `command ${JSON.stringify(c.id)} declares op '${String(c.op)}', but its target ${JSON.stringify(target)} was resolved by the declared-DOM fallback (DRF) on step ${stepNo} — the first version allows only click/scroll/hover for DRF targets; use a pool/identity target for '${String(c.op)}' or pick a supported op`,
+              };
+              break;
+            }
+            elems[got.ref] = got.el;
+            pruneForbids(elems);
+            cmdPick = { cmd: c, ref: got.ref, index: i, cands: [got.ref] };
+            break;
+          }
+        }
+        pruneForbids(elems);
+        if (candRefs.length > 1 && declaresRowAnchor(target)) {
+          const cand = hintCandidates(target, elems, hintOpts());
+          if (cand !== null && cand.refs.length > 1) {
+            for (const candRef of cand.refs) {
+              noteSkipped({
+                command_id: c.id, target, ref: candRef, reason: "target_ambiguous",
+                detail: `${cand.refs.length} row-anchor candidate(s) for ${JSON.stringify(target)}; `
+                  + "row anchors never act on the first of several rows",
+              });
+            }
+            rowAmbStop = {
+              code: "target_ambiguous",
+              reason: `command ${JSON.stringify(c.id)} target ${JSON.stringify(target)} declares a row anchor and matches ${cand.refs.length} candidate(s) (${cand.refs.join(", ")}) on step ${stepNo} — row anchors are fail-closed: several distinct rows never resolve to "the first one"; narrow in-row:<token> to a content token unique to one row or fix the row being pointed at`,
+            };
+            break;
+          }
+        }
+        if (candRefs.length > 0) {
+          cmdPick = { cmd: c, ref: candRefs[0]!, index: i, cands: candRefs.slice(0, candidateAttempts) };
+          break;
+        }
+        if (hintCandidates(target, elems, hintOpts()) === null) {
+          pendingUnresolved.push(c.id);
+          noteSkipped({ command_id: c.id, target: c.target ?? null, reason: "target_not_found" });
+          continue;
+        }
+        noteSkipped({
+          command_id: c.id, target: c.target ?? null, reason: "forbidden",
+          detail: `${cmdAttempts[c.id] ?? 0} candidate(s) tried, remaining candidates are forbidden`,
+        });
+        cmdDone.add(c.id);
+        cmdI = i + 1;
+      }
+      if (targets.identityStop !== null) {
+        stop(targets.identityStop.code, targets.identityStop.reason, stepNo);
+        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+        return { stopped: true, cmdPick, rowAmbStop, cmdI };
+      }
+      if (targets.declaredStop !== null) {
+        stop(targets.declaredStop.code, targets.declaredStop.reason, stepNo);
+        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+        return { stopped: true, cmdPick, rowAmbStop, cmdI };
+      }
+      if (rowAmbStop !== null) {
+        stop(rowAmbStop.code, rowAmbStop.reason, stepNo);
+        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+        return { stopped: true, cmdPick, rowAmbStop, cmdI };
+      }
+      if (cmdPick === null) {
+        let cmdFrameStop: { code: StopCode; reason: string } | null = null;
+        for (const cid of pendingUnresolved) {
+          const c = cmdSpace.find((x) => x.id === cid);
+          if (c === undefined || !c.target) continue;
+          cmdFrameStop = await frameTargetStop(c.target);
+          if (cmdFrameStop !== null) break;
+        }
+        if (cmdFrameStop !== null) {
+          stop(cmdFrameStop.code, cmdFrameStop.reason, stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+          return { stopped: true, cmdPick, rowAmbStop, cmdI };
+        }
+        // 区分“目标不存在”和“目标存在但歧义”：歧义不是空间为空，而是候选集 > 1。
+        const ambiguous = cmdSpace.find((c) => {
+          if (c.op === "skip" || !c.target) return false;
+          if ((cmdAttempts[c.id] ?? 0) > 0) return false;
+          const cand = hintCandidates(c.target, elems, hintOpts());
+          return cand !== null && cand.decided === null && cand.refs.length > 1;
+        });
+        if (ambiguous?.target) {
+          const cand = hintCandidates(ambiguous.target, elems, hintOpts())!;
+          // A1：歧义的每个候选都进 skipped_actions——零执行不能只剩一句停因文案。
+          for (const candRef of cand.refs) {
+            noteSkipped({
+              command_id: ambiguous.id, target: ambiguous.target, ref: candRef,
+              reason: "target_ambiguous",
+              detail: `${cand.refs.length} distinct candidates for ${JSON.stringify(ambiguous.target)}; never guessed`,
+            });
+          }
+          stop("target_ambiguous",
+            `command ${JSON.stringify(ambiguous.id)} matches ${cand.refs.length} distinct candidates (${cand.refs.join(", ")}) for target ${JSON.stringify(ambiguous.target)} on step ${stepNo}`
+            + zeroExecSummary(), stepNo);
+          if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+          return { stopped: true, cmdPick, rowAmbStop, cmdI };
+        }
+        if (cmdDone.size >= cmdSpace.length) {
+          if (goalSignalFn && (await goalHeld())) {
+            setDone();
+            stop("dom_goal_signal",
+              `dom goal signal (commands resolved without action; signal held)${zeroExecSummary()}`, stepNo);
+            if (verbose) console.log(`  step ${stepNo}: -> done (signal held after exhausted commands, 04-A)`);
+            return { stopped: true, cmdPick, rowAmbStop, cmdI };
+          }
+          stop("done_not_held",
+            `commands exhausted (${cmdDone.size}/${cmdSpace.length} acted) but the done-signal never held on step ${stepNo}`
+            + zeroExecSummary(), stepNo);
+        } else {
+          const under = await viewportUnderload(pg);
+          setViewportUnderloaded(under.length ? under : null);
+          const underNote = under.length
+            ? ` — viewport_underloaded: `
+              + under.map((h) => `${h.tag}${h.id ? `#${h.id}` : ""} scrollHeight=${h.scrollHeight} `
+                + `> clientHeight=${h.clientHeight}, rendered children=${h.rendered}`).join("; ")
+              + `（目标可能在未渲染/视口外的滚动内容里；不自动滚动，按六步法② 用滚动/展开原语或收窄窗口取证）`
+            : "";
+          const frameTargets = pendingUnresolved
+            .map((id) => cmdSpace.find((c) => c.id === id)?.target)
+            .filter((t): t is string => typeof t === "string" && t !== "");
+          const frameNote = frameHintFailureEvidence(pg, frameHosts, frameTargets, elems);
+          stop("target_not_found",
+            `command space matches nothing on this page — pending unresolved: ${pendingUnresolved.join(", ") || "-"} (unresolvable candidates are OUT; the space never falls back to the full pool) on step ${stepNo}. `
+            + HINT_CLOSED_SET_TEXT
+            + cmdDiscrimination(cmdSpace, pendingUnresolved, elems)
+            + identityHiddenSuffix(targets.identityHidden)
+            + declaredHiddenSuffix(targets.getDeclaredHidden())
+            + declaredMissSuffix(targets.declaredMiss)
+            + drfHintSuffix(targetResolutionDeclared)
+            + underNote
+            + (frameNote ? ` — ${frameNote}` : ""), stepNo);
+        }
+        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+        return { stopped: true, cmdPick, rowAmbStop, cmdI };
+      }
+    }
+    return { stopped: false, cmdPick, rowAmbStop, cmdI };
   }
 
   /**
