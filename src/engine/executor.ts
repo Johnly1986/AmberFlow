@@ -246,6 +246,12 @@ interface RunReportTailCtx {
   stop: (code: StopCode, detail?: string, at?: number) => void;
 }
 
+/** `runFrameGate` 的返回值：early = 早停报告；ready = 循环所需状态（doneInExcluded 走 getter 跨阶段可观察）。 */
+type FrameGatePhase =
+  | { readonly kind: "early"; readonly report: RunReport }
+  | { readonly kind: "ready"; readonly frameGate: FrameGate | null; readonly goalHeld: () => Promise<boolean>;
+      readonly frameTargetStop: (target: string) => Promise<{ code: StopCode; reason: string } | null>; readonly doneInExcluded: () => boolean; };
+
 /* ------------------------------------------------------------------ helpers */
 
 /**
@@ -3441,9 +3447,7 @@ export class BrowserMiddleware {
     let readyEmptyWarned = false;
     /** U3：本 run 是否出现过 ready_empty（池空但已就绪）——进 flags，不改变 done 语言。 */
     let poolEmptyThisStep = false;
-    /** P0-D：帧门禁（null = 无声明/无排除帧 = 旧行为）与 "done 只在被排除帧成立" 事实。 */
-    let frameGate: FrameGate | null = null;
-    let doneInExcluded = false;
+    let gatePhase: FrameGatePhase | null = null;
     let page: AnyPage | null = pageIn;
     const ownsBrowser = page === null;
     let browser: BrowserHandle | null = null;
@@ -3555,90 +3559,9 @@ export class BrowserMiddleware {
           };
         }
       }
-      /**
-       * P0-D：**frame 门禁精确化**。声明 host 信封之外的第三方 iframe 默认**只排除出解析面**
-       * （池/hint/FW8/DRF/locatorAnyFrame/done/when 都不读它），不再是"整步 REJECT"。
-       * 只有"声明 target / done 仅存在于被排除 frame"才结构化 frame_not_allowed（见下方
-       * 声明目标解析失败点与收尾 done 复核）。无排除帧 = 逐字节旧行为。
-       */
-      frameGate = hostGate && hostGate.length ? frameGateOf(pg, hostGate) : null;
-      const excludedView = frameGate === null
-        ? null : framesScopedPage(pg, frameGate.excluded.map((e) => e.frame));
-      /** 允许帧视图：所有读面（done/when/池…）都只看它；无排除帧时就是真 page（零行为差）。 */
-      const readPage: AnyPage = frameGate === null
-        ? pg : (framesScopedPage(pg, frameGate.allowed) as unknown as AnyPage);
-      if (frameGate !== null) {
-        warnings.push(
-          `frames_excluded: [${frameGate.origins.join(", ")}] — ${frameGate.excluded.length} third-party `
-          + `frame(s) outside the declared hosts envelope (${hostGate!.join(", ")}) are EXCLUDED from the `
-          + `read surface (pool / hint / identity / declared-DOM / done / when / locatorAnyFrame); `
-          + `已排除、不影响页面其余操作。Only if a declared target or done signal truly needs one of these `
-          + `frames is frame_not_allowed raised — at that point decide whether to add its origin to meta.hosts`,
-        );
-      }
-      /**
-       * P0-D：done/when 求值的唯一入口。先在 allowed frames 上判；不成立时**只读**在被排除
-       * frame 上再判一次——只在那里成立 = done 依赖被排除帧，收尾升级为 frame_not_allowed
-       * （绝不留假成功，也不当普通 done_not_held 糊过去）。
-       *
-       * E4（M4③，suffix-aware）：done/when 的 css_* 选择器可尾缀 ` frame:<origin链>`——
-       * 求值底座 locatorAnyFrame/countAnyFrame 已按声明链过滤帧循环，因此**双面探测自动
-       * suffix-aware**：allowed 视图上声明帧（指向被排除帧的链）恒零命中 → 探针落到
-       * excluded 视图（帧循环链匹配被排除帧、本面不传 hosts 无信封跳过）→ 命中即
-       * doneInExcluded → 收尾升级 frame_not_allowed。声明链指向允许帧 = 正常完成面；
-       * 非法尾缀值 = 整串按原 CSS 处理（非法 CSS 双面都 false → 普通 done_not_held，不升级）。
-       */
-      const goalHeld = async (): Promise<boolean> => {
-        if (goalSignalFn === null) return false;
-        if ((await goalSignalFn(readPage)) === true) return true;
-        if (excludedView !== null) {
-          try {
-            if ((await goalSignalFn(excludedView as unknown as AnyPage)) === true) doneInExcluded = true;
-          } catch { /* 排除帧求值失败不改变判定：仍按未成立 */ }
-        }
-        return false;
-      };
-      /**
-       * P0-D：声明目标（act hint / 命令 target）解析失败后的**只读**复核：目标是否只存在于
-       * 被排除 frame。命中 → 结构化 `frame_not_allowed`（reason 点名声明链 + 命中帧完整链 +
-       * 目标 + 只读匹配证据 + 修法；文案唯一出处 executor-pure.frameTargetStopReason），
-       * 绝不把声明目标宽化成别的元素、也绝不操作排除帧。
-       */
-      const frameTargetStop = async (
-        target: string,
-      ): Promise<{ code: StopCode; reason: string } | null> => {
-        if (target === "" || hostGate === null || hostGate.length === 0) return null;
-        const probe = await probeExcludedHint(pg, hostGate, target, admitSelectorWithJsFor(this.surfacePolicy));
-        if (probe === null) return null;
-        return { code: "frame_not_allowed", reason: frameTargetStopReason(target, hostGate, probe) };
-      };
-      // "Does this step apply?" — asked on the page the step will act on, before
-      // spending a single step. A skipped subgoal reports done, so the plan
-      // moves on exactly as if the step had succeeded.
-      if (precondition !== null && precondition !== undefined && !(await checkSignal(readPage, precondition))) {
-        // P0-D：when/precondition 只在被排除 frame 上成立 ⇒ 声明依赖被排除帧，结构化停因。
-        // E4（M4③）：css_* 选择器带合法 ` frame:` 尾缀时本双面探测同样 suffix-aware
-        // （底座 locatorAnyFrame/countAnyFrame 已按声明链过滤——allowed 视图零命中、
-        // excluded 视图命中 = 升级；声明帧在允许帧内 = 正常适用面）。
-        if (excludedView !== null && (await checkSignal(excludedView as never, precondition))) {
-          const why = `when/precondition signal ${JSON.stringify(precondition)} holds only inside frame(s) `
-            + `${frameGate === null ? "-" : frameGate.origins.join(", ")} excluded by the declared hosts envelope `
-            + `(${hostGate!.join(", ")}) — the step does not apply on the allowed frames; `
-            + `frames_excluded 只是默认排除第三方非交互 frame，不需要为此加 hosts；仅当该 when 确需此 frame 时才评估把它加进 meta.hosts`;
-          if (verbose) console.log(`  -> REFUSED: ${why}`);
-          return {
-            goal: instruction, done: false,
-            stop_reason: why, stop_code: "frame_not_allowed", steps: [],
-            audit: { verdict: "REJECT", reasons: [why], auditor: "frame-gate" },
-          };
-        }
-        if (verbose) console.log(`    -> SKIPPED (precondition not met: ${JSON.stringify(precondition)})`);
-        return {
-          goal: instruction, done: true, skipped: true,
-          stop_reason: "precondition not met -> skipped", stop_code: "precondition_skipped", steps: [],
-          audit: { verdict: "SKIPPED", reasons: ["precondition not met"], auditor: "n/a" },
-        };
-      }
+      gatePhase = await this.runFrameGate({ instruction, pg, hostGate, goalSignalFn, precondition, warnings, verbose });
+      if (gatePhase.kind === "early") return gatePhase.report;
+      const { goalHeld, frameTargetStop } = gatePhase;
 
       for (let stepNo = 1; stepNo <= this.maxSteps; stepNo++) {
         // F3：步级 timeoutMs 显式声明时，reobserve/升级循环的**每轮**受它约束——
@@ -5795,8 +5718,8 @@ export class BrowserMiddleware {
       hostGate,
       doneSpec,
       executedCount,
-      frameGate,
-      doneInExcluded,
+      frameGate: gatePhase !== null && gatePhase.kind === "ready" ? gatePhase.frameGate : null,
+      doneInExcluded: gatePhase !== null && gatePhase.kind === "ready" ? gatePhase.doneInExcluded() : false,
       warnings,
       lastPageRef,
       lastPoolSize,
@@ -5819,6 +5742,79 @@ export class BrowserMiddleware {
       if (at !== undefined) rttCtx.stopStep = at;
     };
     return await this.runReportTail(rttCtx);
+  }
+
+  /** 4d 阶段：帧门禁与适用性（导航/弹窗信封由 run() 处理；本阶段只读）。返回早停报告或循环所需状态。 */
+  private async runFrameGate(a: {
+    instruction: string; pg: AnyPage; hostGate: string[] | null;
+    goalSignalFn: ((page: AnyPage) => Promise<boolean> | boolean) | null;
+    precondition: SignalSpec | null; warnings: string[]; verbose: boolean;
+  }): Promise<FrameGatePhase> {
+    const { instruction, pg, hostGate, goalSignalFn, precondition, warnings, verbose } = a;
+    let doneInExcluded = false;
+    // P0-D：声明 hosts 信封外的第三方 iframe 默认**只排除出解析面**（池/hint/FW8/DRF/locatorAnyFrame/
+    // done/when 都不读），不再是整步 REJECT；只有声明 target/done 仅存在于被排除帧才 frame_not_allowed。
+    const frameGate = hostGate && hostGate.length ? frameGateOf(pg, hostGate) : null;
+    const excludedView = frameGate === null
+      ? null : framesScopedPage(pg, frameGate.excluded.map((e) => e.frame));
+    /** 允许帧视图：所有读面（done/when/池…）都只看它；无排除帧时就是真 page（零行为差）。 */
+    const readPage: AnyPage = frameGate === null
+      ? pg : (framesScopedPage(pg, frameGate.allowed) as unknown as AnyPage);
+    if (frameGate !== null) {
+      warnings.push(
+        `frames_excluded: [${frameGate.origins.join(", ")}] — ${frameGate.excluded.length} third-party `
+        + `frame(s) outside the declared hosts envelope (${hostGate!.join(", ")}) are EXCLUDED from the `
+        + `read surface (pool / hint / identity / declared-DOM / done / when / locatorAnyFrame); `
+        + `已排除、不影响页面其余操作。Only if a declared target or done signal truly needs one of these `
+        + `frames is frame_not_allowed raised — at that point decide whether to add its origin to meta.hosts`,
+      );
+    }
+    // P0-D：done/when 求值唯一入口——allowed 帧先判，不成立再**只读**探 excluded 帧一次；只在那里
+    // 成立 = done 依赖被排除帧（doneInExcluded），收尾升级 frame_not_allowed。E4：css_* 的 ` frame:<链>`
+    // 尾缀由 locatorAnyFrame/countAnyFrame 的帧过滤底座继承（双面天然 suffix-aware；非法尾缀按原 CSS）。
+    const goalHeld = async (): Promise<boolean> => {
+      if (goalSignalFn === null) return false;
+      if ((await goalSignalFn(readPage)) === true) return true;
+      if (excludedView !== null) {
+        try {
+          if ((await goalSignalFn(excludedView as unknown as AnyPage)) === true) doneInExcluded = true;
+        } catch { /* 排除帧求值失败不改变判定：仍按未成立 */ }
+      }
+      return false;
+    };
+    // P0-D：声明目标解析失败后的**只读**复核——目标是否只存在于被排除 frame；命中 = 结构化
+    // frame_not_allowed（reason/证据文案唯一出处 executor-pure.frameTargetStopReason），绝不宽化、绝不操作排除帧。
+    const frameTargetStop = async (
+      target: string,
+    ): Promise<{ code: StopCode; reason: string } | null> => {
+      if (target === "" || hostGate === null || hostGate.length === 0) return null;
+      const probe = await probeExcludedHint(pg, hostGate, target, admitSelectorWithJsFor(this.surfacePolicy));
+      if (probe === null) return null;
+      return { code: "frame_not_allowed", reason: frameTargetStopReason(target, hostGate, probe) };
+    };
+    // "Does this step apply?" — asked before spending a step; a skipped subgoal reports done.
+    if (precondition !== null && precondition !== undefined && !(await checkSignal(readPage, precondition))) {
+      // P0-D/E4：when 只在被排除 frame 上成立 ⇒ 结构化 frame_not_allowed（frame: 尾缀双面同样生效）。
+      if (excludedView !== null && (await checkSignal(excludedView as never, precondition))) {
+        const why = `when/precondition signal ${JSON.stringify(precondition)} holds only inside frame(s) `
+          + `${frameGate === null ? "-" : frameGate.origins.join(", ")} excluded by the declared hosts envelope `
+          + `(${hostGate!.join(", ")}) — the step does not apply on the allowed frames; `
+          + `frames_excluded 只是默认排除第三方非交互 frame，不需要为此加 hosts；仅当该 when 确需此 frame 时才评估把它加进 meta.hosts`;
+        if (verbose) console.log(`  -> REFUSED: ${why}`);
+        return { kind: "early", report: {
+          goal: instruction, done: false,
+          stop_reason: why, stop_code: "frame_not_allowed", steps: [],
+          audit: { verdict: "REJECT", reasons: [why], auditor: "frame-gate" },
+        } };
+      }
+      if (verbose) console.log(`    -> SKIPPED (precondition not met: ${JSON.stringify(precondition)})`);
+      return { kind: "early", report: {
+        goal: instruction, done: true, skipped: true,
+        stop_reason: "precondition not met -> skipped", stop_code: "precondition_skipped", steps: [],
+        audit: { verdict: "SKIPPED", reasons: ["precondition not met"], auditor: "n/a" },
+      } };
+    }
+    return { kind: "ready", frameGate, goalHeld, frameTargetStop, doneInExcluded: () => doneInExcluded };
   }
 
   /**
