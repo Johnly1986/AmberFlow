@@ -266,6 +266,12 @@ type DeclaredTargetsPhase = {
   cmdI: number;
 };
 
+/** `runDeclaredHint` 的返回值：stopped = act-hint 解析面已停（stop 已记账）；curHint 供后续规则/动作面。 */
+type DeclaredHintPhase = {
+  stopped: boolean;
+  curHint: string | null;
+};
+
 /* ------------------------------------------------------------------ helpers */
 
 /**
@@ -3707,121 +3713,14 @@ export class BrowserMiddleware {
         if (declaredPhase.stopped) break;
         const cmdPick = declaredPhase.cmdPick;
 
-        // A frozen plan that NAMES its target must never be blocked by the
-        // extraction budget: retrieve the hinted element(s) into the pool when
-        // they were evicted. And a hint whose element is already forbidden is
-        // "this action is done" for an ORDERED sequence (`target_hints`): advance
-        // and RESOLVE THE NEXT HINT IN THE SAME STEP. Advancing without
-        // re-resolving handed the very next action to the model — measured on the
-        // live saucedemo logout step, whose menu click is classified `inert`
-        // (opening a CSS sidebar changes no url/text/input value), so in
-        // rules-only mode the subgoal blocked with "needs a model pick" even
-        // though the ordered hint list named the logout link all along.
-        let curHint = cmdSpace.length ? null : this.currentHint();
-        for (let guard = 0; curHint !== null && guard < 8; guard++) {
-          if (hintMatch(curHint, elems, this._hintOpts()) === null) {
-            for (const [ref, e] of Object.entries(await hintLookup(pg, curHint, admitSelectorWithJsFor(this.surfacePolicy), { hosts: this._frameHosts }))) {
-              // U3/C10：节点身份去重（见命令路径同一处注释）。
-              if (!e.dsh_ref) elems[ref] = e;
-            }
-            // FW8：act hint 的**声明面**身份回捞——池 + hint 回捞都落空后才尝试（同步同一 hint 只试一次）；
-            // 决策步（无 act）不会来到这里；命中只进本步局部池，模型面永不可见（下面 rule 直接给 ref）。
-            if (hintMatch(curHint, elems, this._hintOpts()) === null) {
-              const attempt = await targets.tryIdentity(curHint, {
-                reasonPrefix: `target_hint ${JSON.stringify(curHint)} identity declaration`, narrowNoun: "hint",
-              });
-              if (attempt.kind === "row") elems[attempt.ref] = attempt.el;
-            }
-            // P0-C：act hint 的声明目标解析链最后一段——池 + ADMIT 回捞 + FW8 都落空后，
-            // policy=declared 才走 DRF。命中即注入本步局部池，规则层直接给出 ref（不问模型）；
-            // 首版只允许 click/scroll/hover，落到 fill 族目标 = 结构化 action_unsupported。
-            if (hintMatch(curHint, elems, this._hintOpts()) === null && this.targetResolutionDeclared) {
-              const got = await targets.tryDeclared(curHint, "click");
-              if (targets.declaredStop !== null) break;
-              if (got !== null) {
-                if (this._isTyping(got.el)) {
-                  await targets.cleanupDeclared();
-                  targets.declaredStop = {
-                    code: "action_unsupported",
-                    reason: `act hint ${JSON.stringify(curHint)} was resolved by the declared-DOM fallback `
-                      + `(DRF) but the target ${got.el.tag} "${got.el.label}" needs a typing action on `
-                      + `step ${stepNo} — the first version allows only click/scroll/hover for DRF targets; `
-                      + `use a pool/identity target or declare the target on a click element`,
-                  };
-                  break;
-                }
-                elems[got.ref] = got.el;
-              }
-            }
-          }
-          // drop forbids whose ref now points at a different element
-          pruneForbids(elems);
-          // A dead hint means "this action is done/failed" for an ordered
-          // sequence: move to the next one instead of burning the subgoal.
-          const dead = hintMatch(curHint, elems, this._hintOpts());
-          if (dead !== null && dead in forbidden && this._hintI < this.targetHints.length - 1) {
-            this._advanceHint();
-            curHint = this.currentHint();
-            continue;
-          }
-          break;
-        }
-        // FW8：身份歧义是结构化停因，绝不回退"随便选一个"或交给模型猜。
-        if (targets.identityStop !== null) {
-          stop(targets.identityStop.code, targets.identityStop.reason, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-          break;
-        }
-        // P0-C：DRF 歧义/首版能力面同样是结构化停因。
-        if (targets.declaredStop !== null) {
-          stop(targets.declaredStop.code, targets.declaredStop.reason, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-          break;
-        }
-        // F82/F83 评审收口（P0）：行锚声明 = 多候选零动作。`rules` 已对行锚 fail-closed
-        // （hintMatch → null），但决策步的下游是 widen（交模型猜一行）/ strict——两者都不是
-        // "零动作"。这里在 widen 之前把"多候选"落成结构化歧义：候选进 skipped_actions，
-        // 停因 target_ambiguous，绝不取首行、绝不交模型。
-        if (cmdSpace.length === 0 && curHint !== null && declaresRowAnchor(curHint)) {
-          const cand = hintCandidates(curHint, elems, this._hintOpts());
-          if (cand !== null && cand.refs.length > 1) {
-            for (const candRef of cand.refs) {
-              noteSkipped({
-                ref: candRef, reason: "target_ambiguous",
-                detail: `${cand.refs.length} row-anchor candidate(s) for ${JSON.stringify(curHint)}; `
-                  + "row anchors never act on the first of several rows",
-              });
-            }
-            stop("target_ambiguous",
-              `target_hint ${JSON.stringify(curHint)} declares a row anchor and matches ${cand.refs.length} `
-              + `candidate(s) (${cand.refs.join(", ")}) on step ${stepNo} — row anchors are fail-closed: `
-              + `several distinct rows never resolve to "the first one"; narrow in-row:<token> to a content `
-              + `token unique to one row, or narrow within:/frame: on step ${stepNo}`, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-            break;
-          }
-        }
-        if (targets.identityHidden !== null) {
-          warnings.push(`identity_hidden: target ${JSON.stringify(targets.identityHidden.target)} matched `
-            + `${targets.identityHidden.total} element(s) in the DOM but ${targets.identityHidden.hidden} are hidden `
-            + `(checkVisibility CSS / zero box) — not acted on; the step continues on the declared failure path`);
-        }
-        const declaredHiddenNow = targets.getDeclaredHidden();
-        if (declaredHiddenNow !== null) {
-          warnings.push(`declared_hidden: target ${JSON.stringify(declaredHiddenNow.target)} matched `
-            + `${declaredHiddenNow.total} element(s) in the DOM but ${declaredHiddenNow.hidden} are hidden `
-            + `(checkVisibility CSS / zero box) — not acted on; the step continues on the declared failure path`);
-        }
-        // P0-D：声明 act hint 只在被排除 frame 里存在 → frame_not_allowed（只读探测，绝不
-        // 回退模型去猜一个"页面上别处长得像"的元素，也绝不操作排除帧）。
-        if (cmdSpace.length === 0 && curHint !== null && hintMatch(curHint, elems, this._hintOpts()) === null) {
-          const hintFrameStop = await frameTargetStop(curHint);
-          if (hintFrameStop !== null) {
-            stop(hintFrameStop.code, hintFrameStop.reason, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-            break;
-          }
-        }
+        const hintPhase = await this.runDeclaredHint({
+          pg, stepNo, verbose, elems, commandMode: cmdSpace.length > 0, targets, warnings, stop, noteSkipped, targetResolutionDeclared: this.targetResolutionDeclared,
+          stopReason: () => acct.stopReason, frameTargetStop, pruneForbids, forbidden, advanceHint: () => this._advanceHint(), currentHint: () => this.currentHint(), hintIndex: () => this._hintI, hintCount: this.targetHints.length,
+          hintMatch, hintLookup, hintCandidates, declaresRowAnchor, hintOpts: () => this._hintOpts(), surfacePolicy: this.surfacePolicy, frameHosts: this._frameHosts, isTyping: (el) => this._isTyping(el),
+        });
+        let { curHint } = hintPhase;
+        if (hintPhase.stopped) break;
+
         const commandMode = cmdSpace.length > 0;
         // resolve the picked command's parameter binding NOW (fill/select). A missing
         // declared binding is a STRUCTURED `needs_value` stop, never a guess (红线②):
@@ -5640,6 +5539,100 @@ export class BrowserMiddleware {
       }
     }
     return { stopped: false, cmdPick, rowAmbStop, cmdI };
+  }
+
+  /**
+   * 4d 阶段：声明目标（**act-hint 解析面**）——恢复/回捞/DRF 把声明 hint 变成可引用元素；
+   * dead hint 沿有序 targetHints 前进；身份/DRF 结构化停因与 row-anchor 歧义在此早停。
+   * 覆盖范围仅 act-hint 解析；commandValue binding 之后逻辑仍在 run()。
+   */
+  private async runDeclaredHint(a: {
+    pg: AnyPage; stepNo: number; verbose: boolean; elems: ElemPool; commandMode: boolean; targets: DeclaredTargetsResolver;
+    warnings: string[]; stop: (code: StopCode, detail?: string, at?: number) => void; stopReason: () => string;
+    noteSkipped: (s: SkippedAction) => void; hintMatch: typeof hintMatch; hintLookup: typeof hintLookup;
+    hintCandidates: typeof hintCandidates; declaresRowAnchor: typeof declaresRowAnchor;
+    frameTargetStop: (target: string) => Promise<{ code: StopCode; reason: string } | null>;
+    pruneForbids: (pool: ElemPool) => void; forbidden: Record<string, Sig>;
+    advanceHint: () => void; currentHint: () => string | null; hintIndex: () => number; hintCount: number;
+    hintOpts: () => HintMatchOptions; surfacePolicy: SurfacePolicy; frameHosts: string[] | null;
+    targetResolutionDeclared: boolean; isTyping: (el: Elem) => boolean;
+  }): Promise<DeclaredHintPhase> {
+    const { pg, stepNo, verbose, elems, commandMode, targets, warnings, stop, stopReason, noteSkipped,
+      hintMatch, hintLookup, hintCandidates, declaresRowAnchor, frameTargetStop, pruneForbids, forbidden,
+      advanceHint, currentHint, hintIndex, hintCount, hintOpts, surfacePolicy, frameHosts,
+      targetResolutionDeclared, isTyping } = a;
+    let curHint = commandMode ? null : currentHint();
+    for (let guard = 0; curHint !== null && guard < 8; guard++) {
+      if (hintMatch(curHint, elems, hintOpts()) === null) {
+        // U3/C10：节点身份去重（见命令路径同一处注释）。
+        for (const [ref, e] of Object.entries(await hintLookup(pg, curHint, admitSelectorWithJsFor(surfacePolicy), { hosts: frameHosts }))) if (!e.dsh_ref) elems[ref] = e;
+        // FW8：act hint 声明面身份回捞（池+ADMIT 都落空后；决策步不走、命中只进本步局部池）。
+        if (hintMatch(curHint, elems, hintOpts()) === null) {
+          const attempt = await targets.tryIdentity(curHint, {
+            reasonPrefix: `target_hint ${JSON.stringify(curHint)} identity declaration`, narrowNoun: "hint",
+          });
+          if (attempt.kind === "row") elems[attempt.ref] = attempt.el;
+        }
+        // P0-C：DRF 是声明目标解析链最后一段（命中即注入局部池给 ref；fill 族 = action_unsupported）。
+        if (hintMatch(curHint, elems, hintOpts()) === null && targetResolutionDeclared) {
+          const got = await targets.tryDeclared(curHint, "click");
+          if (targets.declaredStop !== null) break;
+          if (got !== null) {
+            if (isTyping(got.el)) {
+              await targets.cleanupDeclared();
+              targets.declaredStop = { code: "action_unsupported", reason: `act hint ${JSON.stringify(curHint)} was resolved by the declared-DOM fallback (DRF) but the target ${got.el.tag} "${got.el.label}" needs a typing action on step ${stepNo} — the first version allows only click/scroll/hover for DRF targets; use a pool/identity target or declare the target on a click element` };
+              break;
+            }
+            elems[got.ref] = got.el;
+          }
+        }
+      }
+      // drop forbids whose ref now points at a different element
+      pruneForbids(elems);
+      // dead hint（有序声明）= 前进一步到下一条声明，而不是烧掉这个 subgoal。
+      const dead = hintMatch(curHint, elems, hintOpts());
+      if (dead !== null && dead in forbidden && hintIndex() < hintCount - 1) {
+        advanceHint();
+        curHint = currentHint();
+        continue;
+      }
+      break;
+    }
+    // FW8：身份歧义是结构化停因，绝不回退"随便选一个"或交给模型猜。
+    if (targets.identityStop !== null) {
+      stop(targets.identityStop.code, targets.identityStop.reason, stepNo);
+      if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`); return { stopped: true, curHint };
+    }
+    // P0-C：DRF 歧义/首版能力面同样是结构化停因。
+    if (targets.declaredStop !== null) {
+      stop(targets.declaredStop.code, targets.declaredStop.reason, stepNo);
+      if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+      return { stopped: true, curHint };
+    }
+    // F82/F83：行锚声明 = 多候选零动作——widen 之前落成结构化歧义（候选进 skipped，绝不取首行）。
+    if (!commandMode && curHint !== null && declaresRowAnchor(curHint)) {
+      const cand = hintCandidates(curHint, elems, hintOpts());
+      if (cand !== null && cand.refs.length > 1) {
+        for (const candRef of cand.refs) {
+          noteSkipped({ ref: candRef, reason: "target_ambiguous", detail: `${cand.refs.length} row-anchor candidate(s) for ${JSON.stringify(curHint)}; ` + "row anchors never act on the first of several rows", });
+        }
+        stop("target_ambiguous",
+          `target_hint ${JSON.stringify(curHint)} declares a row anchor and matches ${cand.refs.length} candidate(s) (${cand.refs.join(", ")}) on step ${stepNo} — row anchors are fail-closed: several distinct rows never resolve to "the first one"; narrow in-row:<token> to a content token unique to one row, or narrow within:/frame: on step ${stepNo}`, stepNo);
+        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`); return { stopped: true, curHint };
+      }
+    }
+    if (targets.identityHidden !== null) warnings.push(`identity_hidden: target ${JSON.stringify(targets.identityHidden.target)} matched ${targets.identityHidden.total} element(s) in the DOM but ${targets.identityHidden.hidden} are hidden (checkVisibility CSS / zero box) — not acted on; the step continues on the declared failure path`);
+    const declaredHiddenNow = targets.getDeclaredHidden();
+    if (declaredHiddenNow !== null) warnings.push(`declared_hidden: target ${JSON.stringify(declaredHiddenNow.target)} matched ${declaredHiddenNow.total} element(s) in the DOM but ${declaredHiddenNow.hidden} are hidden (checkVisibility CSS / zero box) — not acted on; the step continues on the declared failure path`);
+    // P0-D：声明 act hint 只在被排除 frame 里存在 → frame_not_allowed（只读探测，不回退模型）。
+    if (!commandMode && curHint !== null && hintMatch(curHint, elems, hintOpts()) === null) {
+      const hintFrameStop = await frameTargetStop(curHint);
+      if (hintFrameStop !== null) {
+        stop(hintFrameStop.code, hintFrameStop.reason, stepNo);
+        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`); return { stopped: true, curHint };
+      }
+    }
+    return { stopped: false, curHint };
   }
 
   /**
