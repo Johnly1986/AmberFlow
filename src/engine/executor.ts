@@ -297,6 +297,12 @@ import {
   weakRejectedReason,
 } from "./executor-pure.ts";
 import { createRunAccounting, type RunAccounting } from "./run-context.ts";
+import {
+  declaredEvidence, declaredHiddenSuffix, declaredMissSuffix, drfHintSuffix,
+  identityEvidence, identityHiddenSuffix, rowEvidence,
+  type DeclaredFacts, type DeclaredHiddenFacts, type DeclaredMissFacts,
+  type IdentityFacts, type IdentityHiddenFacts,
+} from "./evidence.ts";
 
 /**
  * B2：一次滚动的**实测证据**（容器滚动与滚入视口共用同一形状）。
@@ -3824,15 +3830,12 @@ export class BrowserMiddleware {
         // 选出的元素永不走这里。形状白名单与跨 frame 可见性匹配在 extraction.identityLookup；
         // `identityTried` 保证同一步里同一条 hint 只尝试一次。
         const identityTried = new Set<string>();
-        let identity: {
-          ref: string; target: string; shape: string; attr: string; value: string;
-          matches: number; total_matches: number; hidden_matches: number; frame: number;
-        } | null = null;
+        let identity: IdentityFacts | null = null;
         let identityCleanup: (() => Promise<void>) | null = null;
         /** 身份面已在**外部循环**里给出的结构化停因（能力/歧义）；命令循环结束后统一执行。 */
         let identityStop: { code: StopCode; reason: string } | null = null;
         /** 身份回捞命中但全不可见：按 0 处理（绝不操作隐藏元素），只留诊断证据。 */
-        let identityHidden: { target: string; hidden: number; total: number } | null = null;
+        let identityHidden: IdentityHiddenFacts | null = null;
         /** 与 A3 同纪律：章只服务本次动作定位，动作尝试一结束就清。 */
         const cleanupIdentity = async (): Promise<void> => {
           if (identityCleanup !== null) {
@@ -3844,19 +3847,6 @@ export class BrowserMiddleware {
           // 定义在后（闭包在此调用时已初始化）。
           await cleanupDeclared();
         };
-        const identityEvidence = (): Record<string, unknown> => (identity === null ? {} : {
-          resolved_by: "dom_identity",
-          identity: {
-            target: identity.target, shape: identity.shape, attr: identity.attr, value: identity.value,
-            matches: identity.matches, total_matches: identity.total_matches,
-            hidden_matches: identity.hidden_matches, frame: identity.frame,
-          },
-        });
-        /** FW8：命中但全不可见时的停因补充（诊断必须带隐藏匹配计数）。 */
-        const identityHiddenSuffix = (): string => identityHidden === null ? ""
-          : ` — identity recovery: ${JSON.stringify(identityHidden.target)} matched `
-            + `${identityHidden.total} element(s) in the DOM but ${identityHidden.hidden} are hidden `
-            + `(checkVisibility CSS / zero box); hidden elements are never acted on`;
         // F82/F83 批 2 遗留收编（E 项，ROW_INDEX_HINT_PLAN §8 遗留 #8 的 additive 接线）：
         // 规划面停因（low_confidence / no_model_runtime / hint_matched_nothing /
         // action_space_exhausted）的停因点**池在手（elems）+ 声明目标可达** ⇒ 单点复用
@@ -3882,25 +3872,20 @@ export class BrowserMiddleware {
         // （ADMIT_SEL + 同一套 hint 语义）或 text 模式（归一化 innerText 全等）。恰好一个
         // 可见才动作；命中行只进本步局部池，模型面剥离 `declared` 旁路标记。
         const declaredTried = new Set<string>();
-        type DeclaredState = {
-          ref: string; target: string; mode: "attr" | "text";
-          matches: number; total_matches: number; hidden_matches: number; frame: number;
-          hit_test?: "covered" | "ancestor"; blocker?: string;
-        };
-        let declared: DeclaredState | null = null;
+        let declared: DeclaredFacts | null = null;
         // 闭包（tryDeclared）里的赋值 TS 控制流看不见，直接读会被收窄成 null/never——用
         // getter 返回声明类型（与 runScriptApp 的 mwHolder 同一个坑）。
-        const getDeclared = (): DeclaredState | null => declared;
-        const setDeclared = (v: DeclaredState | null): void => { declared = v; };
+        const getDeclared = (): DeclaredFacts | null => declared;
+        const setDeclared = (v: DeclaredFacts | null): void => { declared = v; };
         let declaredCleanup: (() => Promise<void>) | null = null;
         /** DRF 已在**外部循环**里给出的结构化停因（歧义/首版能力面）；命令循环结束后统一执行。 */
         let declaredStop: { code: StopCode; reason: string } | null = null;
         /** DRF 匹配到但全不可见：按 0 处理（绝不操作隐藏元素），只留诊断证据。 */
-        let declaredHidden: { target: string; hidden: number; total: number } | null = null;
-        const getDeclaredHidden = (): { target: string; hidden: number; total: number } | null => declaredHidden;
+        let declaredHidden: DeclaredHiddenFacts | null = null;
+        const getDeclaredHidden = (): DeclaredHiddenFacts | null => declaredHidden;
         /** F73：DRF **实跑**且可见零命中（visible=0）的事实——此前 total=0 真零命中时 DRF 在停因里
          *  完全隐身，作者无法区分"hint 写错 / 被池帽挤出 / DRF 扫过仍看不见"（携程 v4≈v1 即此）。 */
-        let declaredMiss: { target: string; mode: "attr" | "text"; total: number; hidden: number } | null = null;
+        let declaredMiss: DeclaredMissFacts | null = null;
         /** 与 A3/FW8 同纪律：章只服务本次动作定位，动作尝试一结束就清。 */
         const cleanupDeclared = async (): Promise<void> => {
           if (declaredCleanup === null) return;
@@ -3908,40 +3893,6 @@ export class BrowserMiddleware {
           declaredCleanup = null;
           try { await fn(); } catch { /* 清理失败不阻断：章值唯一，残留不会误指 */ }
         };
-        const declaredEvidence = (): Record<string, unknown> => {
-          const d = getDeclared();
-          return d === null ? {} : {
-            resolved_by: "declared_dom",
-            declared_resolve: {
-              mode: d.mode, target: d.target, matches: d.matches,
-              hidden_matches: d.hidden_matches, total_matches: d.total_matches,
-              frame: d.frame,
-              ...(d.hit_test === undefined ? {} : { hit_test: d.hit_test }),
-              ...(d.blocker === undefined ? {} : { blocker: d.blocker }),
-            },
-          };
-        };
-        const declaredHiddenSuffix = (): string => {
-          const dh = getDeclaredHidden();
-          return dh === null ? ""
-            : ` — declared-DOM resolution: ${JSON.stringify(dh.target)} matched `
-              + `${dh.total} element(s) in the DOM but ${dh.hidden} are hidden `
-              + `(checkVisibility CSS / zero box); hidden elements are never acted on`;
-        };
-        /** F73：DRF 实跑且可见零命中的停因尾缀（不新增 frames 字段——DeclaredResolveResult 只有
-         *  total/hidden/visible 三数，不为尾缀新增 plumbing；只回显实测字段）。 */
-        const declaredMissSuffix = (): string => {
-          const dm = declaredMiss;
-          return dm === null ? ""
-            : ` — declared-DOM resolution (DRF, ${dm.mode} mode) ran: `
-              + `total=${dm.total}, hidden=${dm.hidden}, visible=0`;
-        };
-        // eval3 曝光面（能力发现率 0→2→0）：target_not_found 是"自绘控件不在池"的高频落点，
-        // 停因当场指向 DRF。仅**未声明** target_resolution 时追加——声明了 "declared" 的场景
-        // 已经走 DRF，再提示就是噪音。
-        const drfHintSuffix = (): string => this.targetResolutionDeclared
-          ? ""
-          : ` — 自绘控件可声明 meta.policy.target_resolution:"declared" 让声明目标走 DRF（attr/文本精确匹配）`;
         /**
          * 对一条声明目标跑一次 DRF（同一步同一条 hint 只跑一次）。返回命中行；未命中返回
          * null（全隐藏只留诊断）。歧义/首版能力面通过 `declaredStop` 交给外层统一停。
@@ -4263,13 +4214,10 @@ export class BrowserMiddleware {
                 // 命令空间」（12 轮真站实测：9/11 轮把产品 UI 本来就没有的排序项误读成引擎池缺陷）。
                 + cmdDiscrimination(cmdSpace, pendingUnresolved, elems)
                 // FW8：身份回捞匹配到了、但**全不可见**——按 0 处理，把隐藏匹配数作为诊断证据。
-                + (identityHidden === null ? ""
-                  : ` — identity recovery: ${JSON.stringify(identityHidden.target)} matched `
-                    + `${identityHidden.total} element(s) in the DOM but ${identityHidden.hidden} are hidden `
-                    + `(checkVisibility CSS / zero box); hidden elements are never acted on`)
-                + declaredHiddenSuffix()
-                + declaredMissSuffix()
-                + drfHintSuffix()
+                + identityHiddenSuffix(identityHidden)
+                + declaredHiddenSuffix(getDeclaredHidden())
+                + declaredMissSuffix(declaredMiss)
+                + drfHintSuffix(this.targetResolutionDeclared)
                 + underNote
                 + (frameNote ? ` — ${frameNote}` : ""), stepNo);
             }
@@ -4704,7 +4652,7 @@ export class BrowserMiddleware {
           if (weakRejected !== null) {
             stop("target_not_found",
               weakRejectedReason(weakRejected, curHint, stepNo, poolSize, summary)
-              + identityHiddenSuffix() + declaredHiddenSuffix() + declaredMissSuffix() + drfHintSuffix()
+              + identityHiddenSuffix(identityHidden) + declaredHiddenSuffix(getDeclaredHidden()) + declaredMissSuffix(declaredMiss) + drfHintSuffix(this.targetResolutionDeclared)
               + (frameNote ? ` — ${frameNote}` : ""), stepNo);
           } else {
             // F73：解析链列举句按声明状态条件化——declared 场景下 DRF 是链的一环，实跑了
@@ -4718,8 +4666,8 @@ export class BrowserMiddleware {
               + `${summary ? `: ${summary}` : ""}) ${chainNote}`
               + `Fix the hint (closed set: #id | tag[attr=value] | tag[attr~substr] | tag~token | tag | bare-token) `
               + `or remove meta.policy.act_hint:"strict" to let the decision model pick instead`
-              + identityHiddenSuffix() + declaredHiddenSuffix() + declaredMissSuffix()
-              + domFallbackMissSuffix() + drfHintSuffix()
+              + identityHiddenSuffix(identityHidden) + declaredHiddenSuffix(getDeclaredHidden()) + declaredMissSuffix(declaredMiss)
+              + domFallbackMissSuffix() + drfHintSuffix(this.targetResolutionDeclared)
               + (frameNote ? ` — ${frameNote}` : ""), stepNo);
           }
           if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
@@ -4831,7 +4779,7 @@ export class BrowserMiddleware {
                   ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
                   : "")
               // A3：provider 是抛错降级（而非本来就没装）时，把 HTTP 事实带上——排查不必再猜。
-              + this.degradedReasonSuffix() + identityHiddenSuffix()
+              + this.degradedReasonSuffix() + identityHiddenSuffix(identityHidden)
               // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
               + rowAnchorNote(declaredTargets()), stepNo);
           } else {
@@ -4839,7 +4787,7 @@ export class BrowserMiddleware {
               `action space exhausted on step ${stepNo}`
               + (curHint !== null && ruleRef === null
                   ? ` — target_hint "${curHint}" 未被规则命中，${HINT_CLOSED_SET_TEXT}`
-                  : "") + identityHiddenSuffix()
+                  : "") + identityHiddenSuffix(identityHidden)
               // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
               + rowAnchorNote(declaredTargets()), stepNo);
           }
@@ -4861,7 +4809,7 @@ export class BrowserMiddleware {
               `target_hint ${JSON.stringify(curHint)} matched nothing in a pool of ${poolSize} `
               + `element(s) on step ${stepNo}`
               // F73：DRF 计数事实（实跑且零命中才非空；缺省 declared 关 = 恒空串，逐字节不变）。
-              + declaredHiddenSuffix() + declaredMissSuffix()
+              + declaredHiddenSuffix(getDeclaredHidden()) + declaredMissSuffix(declaredMiss)
               // F82/F83 批 2 遗留收编（E 项）：规划面停因的行锚证据（无行锚声明 = 空串）。
               + rowAnchorNote(declaredTargets()), stepNo);
           } else {
@@ -5200,7 +5148,7 @@ export class BrowserMiddleware {
             ...(probe.reason === null ? {} : { reason: probe.reason }),
             ...(force ? { forced: true } : {}),
             would: `${el.tag} "${el.label}"`, url: urlOf(pg),
-            ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(), ...declaredEvidence(), ...domFallbackEvidence(),
+            ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(identity), ...declaredEvidence(getDeclared()), ...domFallbackEvidence(),
           });
           if (verbose) {
             console.log(`  step ${stepNo}: DRY-RUN `
@@ -5216,7 +5164,7 @@ export class BrowserMiddleware {
           trace.push({
             step: stepNo, desc, how: "needs_value", executed: false, method, conf: 1.0,
             command: cmdPick!.cmd.id, ref: cmdPick!.ref, skipped: true, skip_reason: "needs_value",
-            url: urlOf(pg), ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(), ...declaredEvidence(), ...domFallbackEvidence(),
+            url: urlOf(pg), ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(identity), ...declaredEvidence(getDeclared()), ...domFallbackEvidence(),
           });
           await cleanupIdentity();   // FW8：缺值在动作前停——章到此已无用途
           await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
@@ -5247,7 +5195,7 @@ export class BrowserMiddleware {
             trace.push({
               step: stepNo, desc, how: "needs_value", executed: false, method, conf: round3(conf),
               ref, skipped: true, skip_reason: "needs_value", url: urlOf(pg),
-              ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(), ...declaredEvidence(), ...domFallbackEvidence(),
+              ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(identity), ...declaredEvidence(getDeclared()), ...domFallbackEvidence(),
             });
             await cleanupIdentity();   // FW8：本步不再动作（needs_value）——章清零
             await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
@@ -5280,7 +5228,7 @@ export class BrowserMiddleware {
             trace.push({
               step: stepNo, desc, risky: true, executed: false, confirmed: false, url: urlOf(pg),
               ref, skipped: true, skip_reason: "risk-declined",
-              ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(), ...declaredEvidence(), ...domFallbackEvidence(),
+              ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(identity), ...declaredEvidence(getDeclared()), ...domFallbackEvidence(),
             });
             await cleanupIdentity();   // FW8：风险闸门拒绝 = 本步不动作——章清零
             await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
@@ -5439,7 +5387,7 @@ export class BrowserMiddleware {
             ref, skipped: true, skip_reason: "config_error", url: urlOf(pg),
             ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
             ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(),
-            ...identityEvidence(), ...declaredEvidence(), ...domFallbackEvidence(),
+            ...identityEvidence(identity), ...declaredEvidence(getDeclared()), ...domFallbackEvidence(),
           });
           stop("config_error", detail, stepNo);
           if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
@@ -5480,7 +5428,7 @@ export class BrowserMiddleware {
             ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
             ...(actionability === null ? {} : { actionability }),
             ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(),
-            ...identityEvidence(), ...declaredEvidence(), ...domFallbackEvidence(),
+            ...identityEvidence(identity), ...declaredEvidence(getDeclared()), ...domFallbackEvidence(),
           });
           if (verbose) console.log(`  step ${stepNo}: (${reason}, ${method}) -> skip ${ref}`);
           continue;
@@ -5549,16 +5497,7 @@ export class BrowserMiddleware {
         // 成员、row_texts 回答那一行长什么）。仅字段存在时出现；缺省路径零新字段。
         const rowDeclaredHint = commandMode && cmdPick ? String(cmdPick.cmd.target ?? "") : curHint;
         const rowParsed = rowDeclaredHint ? parseHint(rowDeclaredHint) : null;
-        const rowEvidenceOut = rowParsed !== null
-          && (rowParsed.rowIndex !== undefined || rowParsed.inRow !== undefined)
-          && (el.row_index !== undefined || el.row_texts !== undefined)
-          ? {
-              row_evidence: {
-                ...(el.row_index !== undefined ? { row_index: el.row_index } : {}),
-                ...(el.row_texts !== undefined ? { row_texts: el.row_texts } : {}),
-              },
-            }
-          : {};
+        const rowEvidenceOut = rowEvidence(el, rowParsed);
         trace.push({
           step: stepNo, desc, how, value: redactValue(el, uploadFiles ?? (clickPosition !== null ? null : arg)),
           risky, executed, confirmed, method,
@@ -5578,7 +5517,7 @@ export class BrowserMiddleware {
           ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question
           inert, url: urlOf(pg),
           ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(),
-          ...identityEvidence(), ...declaredEvidence(), ...domFallbackEvidence(), ...rowEvidenceOut,
+          ...identityEvidence(identity), ...declaredEvidence(getDeclared()), ...domFallbackEvidence(), ...rowEvidenceOut,
         });
         // A1 子改动③：这个已执行动作的 after 签名等下一次观察落账（见循环头部的落账点）。
         pendingAfterIdx = trace.length - 1;
