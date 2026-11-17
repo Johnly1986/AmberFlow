@@ -90,7 +90,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | Seam | 当前/目标归属 | 允许调用方 | 冻结状态 | 变更协议 |
 |---|---|---|---|---|
 | `browserSession` / 会话生命周期 | `src/browser/browser-env.ts` + `src/app/app-runner.ts`（会话创建两处） | executor、ctx、tools、session-runtime | **冻结**（P1 只允许 `buildMiddleware` 收口，不改语义） | 改创建/关闭顺序必须 A/B + 会话生命周期测试 |
-| `BrowserMiddleware.run` | `src/engine/executor.ts` | 唯一执行循环；ctx/planner/online 经装配调用 | **逐字节冻结**（类名 + `run()` 签名不变；不另写执行器） | 九阶段提函数=P2 条件，每阶段独立 PR + 0.8 证据 |
+| `BrowserMiddleware.run` | `src/engine/executor.ts` | 唯一执行循环；ctx/planner/online 经装配调用 | **逐字节冻结**（类名 + `run()` 签名不变；不另写执行器） | 九阶段提函数=P2 条件，每阶段独立 PR + 0.8 证据（运行期 lane 已就绪） |
 | `RunOptions` 组装（引擎步） | `src/engine/planner.ts:runOnce` 与 `src/app/ctx.ts:runOneStep` | 两条路径 | **冻结**（不新增第 4 个 RunOptions；P2 execStep 合并） | 能力面新增必须双端 + 等价验收 |
 | 工具步装配 | `src/app/app-runner.ts:runToolStep` + `Ctx.toolRunner` | ctx.run / dangerous | **冻结**（不进引擎步装配） | 独立变更 + 危险步确认链 review |
 | `DecisionProvider` 接口 | 当前 `src/model/decision-provider.ts` → 目标 `src/support/decision-provider-contract.ts`（L0） | engine（仅契约类型）、model（实现）、组合根（装配） | **方向冻结**：engine 不 import 具体实现 | 契约变更需 model/engine 双侧 typecheck + rules-only 消融 |
@@ -100,7 +100,8 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | 执行结果包络 | `src/app/app-runner.ts:AppRunResult` + `planner:RunPlanResult` + `online/types:CaseOutcome` | 各源 | **冻结**；目标 P2 `RunOutcome` 核心包络 | 各源形状逐字节保留；新字段只增不改 |
 | 候选/目标解析恢复链 | `extraction` + `declared.ts`（DRF）/`identity.ts`（FW8）/executor `_liveDomIdFallback`/`_domFallbackResolve` | executor | **冻结**（不新增第 5 条） | 恢复策略表单源；与 BACKLOG #2 候选契约排他 |
 | 证据/产物落盘 | `app/trace.ts`、`app/app-report-view.ts`、`data/report-view.ts`、`online/report.ts` | 各源 | 稳定区（允许 W1-b 纯搬） | 产物字段逐字节 + 不提交仓库 |
-| fixtures/engine | `fixtures/engine/*.html` | 仅 `verify:offline` 非门禁 lane | 稳定 | 不进 `npm run check`；新夹具只服务等价验证 |
+| fixtures/engine | `fixtures/engine/*.html` | 仅 `verify:offline` / `verify:runtime:offline` 非门禁 lane | 稳定 | 不进 `npm run check`；新夹具只服务等价验证 |
+| 运行期等价 lane | `tools/verify-runtime-offline.ts`、`tools/golden/runtime/**` | 非门禁（需 chromium）；跑 `BrowserMiddleware.run` 的 4 个确定性场景 | 稳定 | 运行期重构前后对比；`--record` 同场景两次一致才入库 |
 
 ### 4.1 文件预留（并行设计）
 

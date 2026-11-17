@@ -15,6 +15,12 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - 离线验收：manual-only app 不带 flag = 20 键、无 rescue、`stop_code=needs_human`；带 `--rescue` = 21 键、唯一差异为 `rescue` 键（kind=action / mode=stop / request_id / summary≤400 / unblock≤3 / validate 通过）。
 - 文档状态：`docs/INTERVENTION_RESCUE_MODULE.md` v1 实施完成（步 0-5）；`docs/P2_READINESS.md` 五项前置全部满足；P2 按 D3 顺序启动 2.0 RunCtx + evidence collector。
 
+### P2 2.0a RunCtx + 运行期等价 lane（非门禁）
+
+- 新增 `src/engine/run-context.ts`：`run()` 内四组记账闭包（stop 停因 / forbid+forbidWhy / noteSkipped / unforbid+pruneForbids）收敛为每 run 实例化的 `RunAccounting`；无模块级可变状态、无 Playwright 具体类型；`run()` 调用顺序/返回值/证据逐字节不变（executor.ts 6139→6084，run() 2685→2629）。
+- 新增 `tools/verify-runtime-offline.ts` + `tools/golden/runtime/**`：**非门禁**运行期等价 lane（本地 fixtures 静态页 + 无头 chromium + `BrowserMiddleware.run`），4 个确定性场景覆盖成功/停因/遮挡失败证据/precondition 跳过；强制 rules-only、零模型、零外部请求；同场景 `--record` 连跑两次一致才入库。基线由干净 HEAD worktree 录制，P2 运行期重构前后用 `--check` 对比。
+- `package.json` 增 `verify:runtime:offline`（默认 check）与 `verify:runtime:offline:record`；夜间非门禁 CI 的 offline job 追加运行该 lane；不进 `npm run check`。
+
 
 ## Decisions（设计决策索引）
 

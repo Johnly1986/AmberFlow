@@ -17,7 +17,7 @@ AmberFlow 是冻结计划的浏览器自动化引擎：计划由人给出（app.
 
 ## 仓库是什么
 
-冻结计划的浏览器自动化中间件（TypeScript，Node ≥ 22.6）。计划由人给出，执行器逐步选元素、动作、检查可验证信号；模型只做选择/风险/完成票，不生成动作。应用只有一种格式：`$AMBERFLOW_HOME/apps/<id>/app.mjs` 的 `meta` + `flow(ctx)` 脚本。仓库不包含单元测试、复刻站、内置应用或真实站点冻结证据；离线夹具仅用于非门禁本地等价验证（`fixtures/engine/`），不进 `npm run check`；验证由 `online/` 真实站点套件承担。
+冻结计划的浏览器自动化中间件（TypeScript，Node ≥ 22.6）。计划由人给出，执行器逐步选元素、动作、检查可验证信号；模型只做选择/风险/完成票，不生成动作。应用只有一种格式：`$AMBERFLOW_HOME/apps/<id>/app.mjs` 的 `meta` + `flow(ctx)` 脚本。仓库不包含单元测试、复刻站、内置应用或真实站点冻结证据；离线夹具仅用于非门禁本地等价验证（`fixtures/engine/`：`verify:offline` 抽取面 + `verify:runtime:offline` 运行期 lane），不进 `npm run check`；验证由 `online/` 真实站点套件承担。
 
 ## 命令
 
@@ -26,6 +26,8 @@ npm ci
 npx playwright install chromium
 npm run doctor                         # 环境 / 配置 / 决策源体检
 npm run check                          # precheck + typecheck + 配置/schema 一致性 + 行锚断言 + test:validate（PR 门禁）
+npm run verify:offline                 # 非门禁等价验证（fixtures 抽取面；需 chromium，不进 check）
+npm run verify:runtime:offline         # 非门禁运行期等价 lane（fixtures + BrowserMiddleware.run；需 chromium）
 npm run test -- --tier smoke         # 真实站点快速可达性
 npm run test -- --tier core          # 短流程
 npm run test -- --tier deep          # 长流程
@@ -127,4 +129,4 @@ online/cases/probe/*.json
 
 ## 文档
 
-`README.md`、`ARCHITECTURE.md`、`docs/AGENT_INTERFACE.md`、`docs/APP_SCRIPT_AUTHORING.md`、`docs/MANUAL_STEPS_AND_PACE.md`、`docs/DECISION_SERVICE_CONFIG.md`、`docs/PROMPT_SYSTEM.md`（三层提示词系统设计与审查记录）、`docs/ROW_ANCHOR_HINT_PLAN.md` / `docs/ROW_INDEX_HINT_PLAN.md`（行锚 `in-row:` / `row-index:` 两方案 v1.0 已实施 + 实施记录）、`docs/INTERVENTION_RESCUE_MODULE.md`（2026-11-12 介入/救援中断模块设计方案：产品+架构双视角研判合成；**v1 实施完成（2026-11-17）——步 0-5 落地，含 --rescue 真实 result.rescue 默认切换**；captcha/credential 二期）、`docs/BACKLOG.md`（工程优化待办：决策入口统一/候选列表应用层化/候选窗口指数递增）、`docs/MAINLINE.md`（依赖分层 L0–L6+L1.5 / 执行阶段 S0–S5 / 三类入口 / seam 冻结表；`npm run maintain:check` 的 mainline 组校验）、`docs/P2_READINESS.md`（P2 决策请求包：发布/冻结、INTERVENTION 收尾、BACKLOG #2/#3/#4 顺序、freeze window 参数；含推荐与回执表）、`docs/IMPROVEMENT_PLAN.md`（2026-11-17 可维护性/可扩展性治理方案 v2.1：五项问题→五条治理线 + 证据 lane/门禁 + 条件化 P0/P1/P2 路线图；已过架构评审，记录见 `docs/IMPROVEMENT_PLAN_REVIEW.md`；基线 `main @ 91bf379`；**P0/P1 已完成（2026-11-17）；P2 已批准且前置全部满足（freeze 2026-11-17 起 2 周；INTERVENTION 默认切换已完成），下一步启动 2.0**；取代 2026-11-10 v1）。不要引用已删除的旧报告/基准/应用清单。
+`README.md`、`ARCHITECTURE.md`、`docs/AGENT_INTERFACE.md`、`docs/APP_SCRIPT_AUTHORING.md`、`docs/MANUAL_STEPS_AND_PACE.md`、`docs/DECISION_SERVICE_CONFIG.md`、`docs/PROMPT_SYSTEM.md`（三层提示词系统设计与审查记录）、`docs/ROW_ANCHOR_HINT_PLAN.md` / `docs/ROW_INDEX_HINT_PLAN.md`（行锚 `in-row:` / `row-index:` 两方案 v1.0 已实施 + 实施记录）、`docs/INTERVENTION_RESCUE_MODULE.md`（2026-11-12 介入/救援中断模块设计方案：产品+架构双视角研判合成；**v1 实施完成（2026-11-17）——步 0-5 落地，含 --rescue 真实 result.rescue 默认切换**；captcha/credential 二期）、`docs/BACKLOG.md`（工程优化待办：决策入口统一/候选列表应用层化/候选窗口指数递增）、`docs/MAINLINE.md`（依赖分层 L0–L6+L1.5 / 执行阶段 S0–S5 / 三类入口 / seam 冻结表；`npm run maintain:check` 的 mainline 组校验）、`docs/P2_READINESS.md`（P2 决策请求包：发布/冻结、INTERVENTION 收尾、BACKLOG #2/#3/#4 顺序、freeze window 参数；含推荐与回执表）、`docs/IMPROVEMENT_PLAN.md`（2026-11-17 可维护性/可扩展性治理方案 v2.1：五项问题→五条治理线 + 证据 lane/门禁 + 条件化 P0/P1/P2 路线图；已过架构评审，记录见 `docs/IMPROVEMENT_PLAN_REVIEW.md`；基线 `main @ 91bf379`；**P0/P1 已完成（2026-11-17）；P2 进行中（freeze 2026-11-17 起 2 周；2.0a RunCtx + 运行期等价 lane 已落地，下一步 2.0b evidence collector → 4d run() 九阶段）**；取代 2026-11-10 v1）。不要引用已删除的旧报告/基准/应用清单。

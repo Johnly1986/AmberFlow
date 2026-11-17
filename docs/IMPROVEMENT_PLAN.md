@@ -1,12 +1,12 @@
 # 可维护性与可扩展性治理方案 v2.1（架构评审修订版）
 
-> **状态**：**实施中 — P0 已完成**（2026-11-17；9/9 批落地，出口验收通过，记录见 §6.1）；P1 待启动（依赖本版 0.8 证据 lane，已就绪）
+> **状态**：**实施中 — P0/P1 已完成，P2 进行中**（2026-11-17；P0 9/9 批见 §6.1；P1 见 §6.2；P2 前置全部满足、freeze 生效，2.0a RunCtx + 运行期等价 lane 已落地，见 §6.4）
 > **基线**：`main @ 91bf379`；`npm run check` 全绿（本轮实测：预检/类型/配置/schema/prompt/泄露/示例/行锚/用例校验 9 项通过）
 > **评审**：3 个独立只读评审（目标架构 / 迁移治理 / 红队）+ Lead 裁决，记录见 [IMPROVEMENT_PLAN_REVIEW.md](IMPROVEMENT_PLAN_REVIEW.md)。本版已按裁决修订：砍 `sdk.ts`/伪端口/单一编排，新增 0.8 等价证据 lane 与 0.9 seam 冻结，门禁降档，P2 条件化。
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
 > **方法**：5 份只读审计（结构/注释/提示词/常量配置/主线，口径见附录 B）+ 3 份架构评审 + Lead 抽验。文中 `file:line` 为 HEAD 91bf379 实测值；落地时一律以**符号名**定位（行号锚点已实测漂移，见 §2.2）。
 > **纪律**：只做行为等价治理；不改硬规则（唯一执行器 / 完成只认信号 / 值不来自猜测 / 凭据与危险步纪律 / 不绕过反爬）；每批独立提交、可单独回滚。
-> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 已批准且五项前置全部满足**（§6.3；freeze 自 2026-11-17 起 2 周；INTERVENTION 默认切换已补齐）——下一步按 D3 启动 2.0 RunCtx + evidence collector。
+> **实施进度（2026-11-17）**：**P0 全部完成**（§6.1）；**P1 全部完成**（§6.2）；**P2 进行中**（§6.3 前置全部满足、freeze 生效；§6.4：运行期等价 lane + 2.0a RunCtx 已落地；下一步 2.0b evidence collector → 4d run() 九阶段 → #2 → #3）。
 
 **如何读**：决策看 §0、§3.4、§6；实施看 §4、§5；复核看 §2、§7、附录 A；评审裁决看 [评审记录](IMPROVEMENT_PLAN_REVIEW.md)。
 
@@ -533,6 +533,17 @@ interface PromptSpec {
 > 结论：**P2 五项前置全部满足（2026-11-17）**；按 D3 顺序立即启动：**2.0 RunCtx + evidence collector**（BACKLOG #4 前置）→ 4d/run() 九阶段（每阶段 3 个工作日窗口）→ #2 → #3。freeze 自 2026-11-17 起 2 周，窗口内 executor/ctx/app-runner 只收 P2 PR + 关键 bugfix + 证据 lane。
 > **决策请求包**：[P2_READINESS.md](P2_READINESS.md)（D1 发布/冻结、D2 INTERVENTION 收尾、D3 BACKLOG #2/#3/#4 顺序、D4 freeze window 参数；含推荐选项与回执表）。
 > 0.8 证据 lane 已接夜间 CI：`.github/workflows/checks.yml` 新增 `offline` job（schedule/manual，非门禁）。
+
+### 6.4 P2 落地记录（进行中，2026-11-17）
+
+| 批 | 交付 | 提交 | 证据 |
+|---|---|---|---|
+| 2.0 前置 | `tools/verify-runtime-offline.ts`（非门禁运行期等价 lane：4 场景：成功/停因/遮挡/precondition 跳过；HEAD baseline 由干净 worktree 录制，连跑两次一致才入库） | 本批提交 | 主工作区 `--check` 连跑 2 次绿；外部请求 0；不进 `npm run check` |
+| 2.0a RunCtx | `src/engine/run-context.ts`（109 行）：stop/forbid+forbidWhy/noteSkipped/unforbid+pruneForbids 四组记账收敛单点；每 run 实例化、无模块级状态 | 本批提交 | executor 6139→6084 行、run() 2685→2629；typecheck/check/examples golden 绿；运行期 lane check 绿 |
+| 2.0b evidence collector | 行锚/帧/DRF 证据单点（BACKLOG #4 前置后半） | 待做 | 完成后跑运行期 lane |
+| 4d run() 九阶段 | runSetup/runFrameGate/runPoolGate/runDeclaredTargets/runModelPick/runActionPhase/runPostAction/reportTail；每阶段独立提交 + 3 工作日窗口 | 待做 | 每阶段运行期 lane + examples golden |
+
+> P2 已启动：freeze 2026-11-17 起 2 周、每阶段约 3 个工作日窗口；按 D3 顺序 `#4 → #2 → #3`，4d 先行。任一窗口内 T1/T2/T3 触发即停该批。
 
 ### P2 主线（条件启动；3–5 周，12–20 人日）
 
