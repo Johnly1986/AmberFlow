@@ -822,3 +822,31 @@ export const HEURISTIC_WIDGET_JS = String.raw`(arg) => {
 }`;
 
 export const PASS_HEURISTIC = compile("arg", `${COLLECT_JS}\nreturn (${HEURISTIC_WIDGET_JS})(arg);`);
+
+/**
+ * 监听探针缓存键的 DOM 指纹（宿主侧单源 = `extraction.listenerCacheKeyOf`）：只读四项
+ * 计数——总元素数 / body 顶层子元素数 / 可见原生交互数（口径与池 pass 一致：非零盒 +
+ * checkVisibility CSS）/ 已盖 `data-js-ref` 数。可见性口径复用 EXTRACT_JS 的判据
+ * （checkVisibilityCSS:true、checkOpacity:false），防止"指纹说变了、池说没变"的漂移。
+ */
+export const LISTENER_FINGERPRINT_JS = String.raw`(arg) => {
+  const doc = document;
+  const q = (sel) => { try { return doc.querySelectorAll(sel).length; } catch (err) { return -1; } };
+  let vis = -1;
+  try {
+    vis = 0;
+    for (const e of doc.querySelectorAll(arg.interactiveSel)) {
+      const r = e.getClientRects();
+      let box = false;
+      for (let k = 0; k < r.length; k++) if (r[k].width > 0 && r[k].height > 0) { box = true; break; }
+      if (!box) continue;
+      let cv = true;
+      try { if (e.checkVisibility) cv = e.checkVisibility({checkVisibilityCSS: true, checkOpacity: false}); } catch (err) { cv = true; }
+      if (cv) vis += 1;
+    }
+  } catch (err) { vis = -1; }
+  return { nodes: q('*'), bodyChildren: doc.body ? doc.body.childElementCount : -1,
+           visibleInteractive: vis, jsStamped: q('[data-js-ref]') };
+}`;
+
+export const PASS_LISTENER_FINGERPRINT = compile("arg", `return (${LISTENER_FINGERPRINT_JS})(arg);`);

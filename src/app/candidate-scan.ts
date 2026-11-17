@@ -11,7 +11,7 @@
 import {
   CLICKY_EVENTS, CUSTOM_WIDGET_TAGS, INTERACTIVE_ALL, MAX_ELEMENTS,
   POOL_QUOTAS, QUOTA_MODE_QUOTAS, QUOTA_MODE_WIDE_QUOTAS, WIDE_QUOTAS,
-  candidateMeta, frameAt, framesOf, listenerCache, urlOf,
+  candidateMeta, frameAt, framesOf, listenerCache, listenerCacheKeyOf,
   type Elem, type ElemPool, type FrameLike, type PageLike, type PoolQuotas,
 } from "../engine/extraction.ts";
 import { FULL_LABEL_MAX, MODEL_LABEL_MAX } from "../engine/elem-model.ts";
@@ -218,14 +218,103 @@ export async function extractHeuristicWidgets(
 }
 
 /**
+ * JS 监听探针预算（硬顶，never raises）：探针是**每一次抽池**前面的 best-effort 前置步
+ * （缓存命中时零成本），超预算宁可少盖章也不拖慢抽池。成本口径：maxExamined 计
+ * `DOMDebugger.getEventListeners` 次数（每次 ~3-5ms CDP 往返，600 次 ≈ 2-3s 墙钟），
+ * budgetS 是慢 CDP/超大 DOM 的墙钟兜底，maxAdd 是盖章总数硬顶（自身监听元素与委托
+ * 叶子合计——委托放大了单次命中的盖章面，总顶不放宽）。
+ */
+const JS_PROBE_MAX_ADD = 30;
+const JS_PROBE_MAX_EXAMINED = 600;
+const JS_PROBE_BUDGET_S = 4.0;
+/** 单个委托容器最多盖多少个叶子后代（有界：容器子树大小不可控，盖满即止）。 */
+const JS_PROBE_MAX_LEAVES_PER_CONTAINER = 10;
+
+/**
+ * 委托探针的容器集合（结构标签）。**不含** HEURISTIC 通道的 nav/aside/footer/header
+ * 排除——两通道取舍相互独立：HEURISTIC 是宽扫伪按钮洪水（壳层标签噪声大，整枝排除），
+ * 委托盖章是"容器上真实存在 CLICKY 监听"的证据面，命中即盖，壳层里的委托控件同样是
+ * 真控件。body/html/document 也不在集合内：文档级委托会让盖章面失控为全页叶子。
+ */
+const JS_PROBE_CONTAINER_TAGS = new Set([
+  "div", "span", "ul", "ol", "li", "td", "tr", "tbody", "table",
+  "section", "article", "nav", "aside", "header", "footer", "main", "form",
+]);
+
+/**
+ * 委托容器的叶子盖章（页面侧，Runtime.callFunctionOn 一次一容器）：给容器内**有可见
+ * 文本的最内层载体**盖 `data-js-ref`——无 id/data-test/role/href、未被
+ * data-js-ref/data-dshref/data-hintref 盖章（原生控件标签跳过：POOL_SEL 已覆盖，不花
+ * 探针额度）。≤maxLeaves 个/容器、≤400 节点访问/容器（病态大容器有界）、深度 ≤24。
+ * innerText 为空 = 子树无渲染文本，整枝跳过；innerText >80 的叶子不是控件（长文本块），
+ * 但其子树仍下探（短文本叶子可能更深）。
+ */
+const JS_PROBE_LEAF_STAMP_FN = String.raw`function(maxLeaves, base){
+  const SKIP = new Set(['a','button','input','select','textarea','label','script','style',
+    'noscript','template','iframe','svg','canvas','video','audio','object','embed']);
+  const out = [];
+  let visited = 0;
+  const visible = (e) => {
+    try {
+      const r = e.getClientRects();
+      let box = false;
+      for (let k = 0; k < r.length; k++) if (r[k].width > 0 && r[k].height > 0) { box = true; break; }
+      if (!box) return false;
+      if (e.checkVisibility) return e.checkVisibility({checkVisibilityCSS: true, checkOpacity: false}) !== false;
+    } catch (err) { return false; }
+    return true;
+  };
+  const walk = (el, depth) => {
+    if (out.length >= maxLeaves || depth > 24 || visited > 400) return;
+    for (const c of el.children) {
+      if (out.length >= maxLeaves || visited > 400) return;
+      visited += 1;
+      const tag = String(c.tagName || '').toLowerCase();
+      if (SKIP.has(tag)) continue;
+      if (c.id || c.getAttribute('data-test') || c.getAttribute('role') || c.getAttribute('href')
+          || c.getAttribute('data-js-ref') || c.getAttribute('data-dshref') || c.getAttribute('data-hintref')) {
+        walk(c, depth + 1);           // 身份载体/已盖章：自身不盖，子树仍可能有无身份叶子
+        continue;
+      }
+      const text = String(c.innerText || '').trim();
+      if (!text) continue;            // 无渲染文本 = 子树无可盖叶子（innerText 口径）
+      let childText = false;
+      for (const gc of c.children) { if (String(gc.innerText || '').trim()) { childText = true; break; } }
+      if (!childText && text.length <= 80 && visible(c)) {
+        const jsref = 'js' + (base + out.length);
+        c.setAttribute('data-js-ref', jsref);
+        out.push({ tag: tag, label: String(c.getAttribute('aria-label') || c.getAttribute('title') || text).slice(0, 40), id: '' });
+        continue;
+      }
+      walk(c, depth + 1);
+    }
+  };
+  walk(this, 0);
+  return out;
+}`;
+
+/**
  * Elements interactive ONLY via JS listeners — the SPA idiom CSS cannot see
  * (`<div>Save</div>` + addEventListener, no onclick attr). Detection stamps each
  * hit with `data-js-ref` during the walk, so identity is exact. Cost is bounded
- * on purpose (~4 ms per candidate); never raises.
+ * on purpose (JS_PROBE_* hard caps); never raises.
+ *
+ * 两条盖章通道共用一次 walk，每元素至多一次 `DOMDebugger.getEventListeners`（examined
+ * 计一次）：
+ *   - **自身监听**：CUSTOM_WIDGET_TAGS 元素挂 CLICKY 监听 → 盖元素自身；
+ *   - **容器委托**：JS_PROBE_CONTAINER_TAGS 结构容器挂 CLICKY 监听 → 盖其有可见文本的
+ *     叶子后代（≤10/容器）。两通道对同一元素可双命中（容器自身 + 叶子都进池）——
+ *     重复有界（maxAdd 总顶）。
+ *
+ * capture 阶段与 bubble 同权：`getEventListeners` 不分阶段返回 listeners（`useCapture`
+ * 只是标记位），按 type 过滤天然含 capture；委托常以 capture=true 挂容器，按阶段过滤
+ * 就是系统性漏检——所以 clicky 判定对两种注册方式等价。
+ * 结果按 `listenerCacheKeyOf`（URL+DOM 指纹）缓存；CDP 任何错误不抛、不阻断抽池。
  */
-export async function jsInteractiveWidgets(page: PageLike, maxAdd = 10, maxExamined = 150,
-                                          budgetS = 2.0): Promise<unknown[]> {
-  const key = urlOf(page);
+export async function jsInteractiveWidgets(page: PageLike, maxAdd = JS_PROBE_MAX_ADD,
+                                          maxExamined = JS_PROBE_MAX_EXAMINED,
+                                          budgetS = JS_PROBE_BUDGET_S): Promise<unknown[]> {
+  const key = await listenerCacheKeyOf(page);
   if (listenerCache.has(key)) return listenerCache.get(key)!;
   const out: Array<Record<string, unknown>> = [];
   const examined = [0];
@@ -242,9 +331,15 @@ export async function jsInteractiveWidgets(page: PageLike, maxAdd = 10, maxExami
         const d: Record<string, string> = {};
         for (let i = 0; i < at.length; i += 2) d[at[i]!] = at[i + 1]!;
         const tag = String(node.nodeName ?? "").toLowerCase();
-        if (CUSTOM_WIDGET_TAGS.has(tag) && !("onclick" in d)
+        // 容器预过滤数**元素**子节点（CDP children 含文本节点）：无元素子节点 = 无叶子
+        // 后代可盖，不值得花一次 getEventListeners 额度。
+        const hasElementChild = (node.children ?? []).some((c: any) => c?.nodeType === 1);
+        const selfCandidate = CUSTOM_WIDGET_TAGS.has(tag) && !("onclick" in d)
             && !["button", "link", "checkbox", "tab"].includes(d.role ?? "")
-            && !d["data-test"] && !d.href && !d["data-js-ref"]) {
+            && !d["data-test"] && !d.href && !d["data-js-ref"];
+        const containerCandidate = JS_PROBE_CONTAINER_TAGS.has(tag) && hasElementChild
+            && !d["data-js-ref"];
+        if (selfCandidate || containerCandidate) {
           examined[0] += 1;
           if (examined[0] > maxExamined) return;
           try {
@@ -252,7 +347,7 @@ export async function jsInteractiveWidgets(page: PageLike, maxAdd = 10, maxExami
             const ls = await cdp.send("DOMDebugger.getEventListeners", { objectId: oid });
             const clicky = [...new Set((ls.listeners as Array<{ type: string }>).map((l) => l.type))]
               .filter((t) => CLICKY_EVENTS.has(t)).sort();
-            if (clicky.length) {
+            if (selfCandidate && clicky.length) {
               const r = await cdp.send("Runtime.callFunctionOn", {
                 objectId: oid, returnByValue: true,
                 arguments: [{ value: `js${seq[0]}` }],
@@ -273,6 +368,28 @@ export async function jsInteractiveWidgets(page: PageLike, maxAdd = 10, maxExami
                 out.push({ ...info, ref_tag: `js${seq[0] - 1}`, js_events: clicky });
               }
             }
+            if (containerCandidate && clicky.length && out.length < maxAdd) {
+              // 委托命中：容器自身多半是壳（不盖），给其有可见文本的叶子盖章。want 双重
+              // 上界 = ≤10/容器 + maxAdd 总顶。DFS 先序保证外层委托容器先盖章（其叶子即
+              // 内层目标——内层容器再探到监听时叶子已带章，叶子盖章天然跳过、零重复）。
+              const want = Math.min(JS_PROBE_MAX_LEAVES_PER_CONTAINER, maxAdd - out.length);
+              const base = seq[0];
+              const r = await cdp.send("Runtime.callFunctionOn", {
+                objectId: oid, returnByValue: true,
+                arguments: [{ value: want }, { value: base }],
+                functionDeclaration: JS_PROBE_LEAF_STAMP_FN,
+              });
+              const infos = r?.result?.value;
+              if (Array.isArray(infos)) {
+                // ref_tag 与页面侧 jsref 同序：叶子 fn 以 `js${base + i}` 编号（i = 本容器内
+                // 位次），宿主侧按同一 i 回填——不能用 out.length（含此前所有产出，会错位）。
+                for (let i = 0; i < infos.length; i++) {
+                  out.push({ ...(infos[i] as Record<string, unknown>),
+                    ref_tag: `js${base + i}`, js_events: clicky, delegated: true });
+                }
+                seq[0] += infos.length;
+              }
+            }
           } catch {
             /* per-node hiccup: keep walking */
           }
@@ -290,7 +407,18 @@ export async function jsInteractiveWidgets(page: PageLike, maxAdd = 10, maxExami
     listenerCache.set(key, []);
     return [];
   }
-  listenerCache.set(key, out);
+  // 盖章改变指纹（jsStamped 分量）：有产出时按**盖章后**的状态重算缓存键，否则下一次
+  // 查找必然 miss、每个页面状态多付一次全量探针。listenerCacheKeyOf 内部已兜底不抛，
+  // 这里再兜一层是"CDP 任何错误不抛"纪律的 belt-and-braces。
+  let storeKey = key;
+  if (out.length > 0) {
+    try {
+      storeKey = await listenerCacheKeyOf(page);
+    } catch {
+      storeKey = key;
+    }
+  }
+  listenerCache.set(storeKey, out);
   return out;
 }
 

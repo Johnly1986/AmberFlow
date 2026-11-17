@@ -28,6 +28,7 @@ export { elemFrameStamp, frameChainOf, frameInHostsEnvelope, frameScopeMatches, 
 import {
   COLLECT_JS, PASS_EXTRACT, PASS_OBSERVE, PASS_WINDOW, PASS_UNDERLOAD,
   PASS_META, PASS_NEAR, PASS_HINT, PASS_HINT_PROBE, PASS_HEURISTIC, FN_TAG, FN_FIRST, FN_WRAPPER,
+  PASS_LISTENER_FINGERPRINT,
   BUCKET_HELPERS_JS, compile,
 } from "./pool-js.ts";
 // FW8 身份回捞区（identityHintInfo/identityLookup 等）拆到 identity.ts（F6）；
@@ -47,7 +48,7 @@ import {
 } from "./surface.ts";
 
 /* ---- 纯区外搬（本轮拆分）：导出面由此处 re-export，既有 importer 零改动 ---- */
-import { firstOf, framesOf } from "./page-shapes.ts";
+import { firstOf, framesOf, urlOf } from "./page-shapes.ts";
 import { frameGateOf } from "./frame-scope.ts";
 import type { Elem, ElemPool } from "./elem-model.ts";
 export {
@@ -123,13 +124,47 @@ export const CLICKY_EVENTS = new Set(["click", "mousedown", "mouseup", "keydown"
 /** 2.2b 过渡：共享给 app 候选扫描（`src/app/candidate-scan.ts` 的 jsInteractiveWidgets）。 */
 export const listenerCache = new Map<string, unknown[]>();
 
+/** `listenerCacheKeyOf` 的指纹读数（`PASS_LISTENER_FINGERPRINT` 的返回形状）。 */
+interface ListenerDomFingerprint {
+  nodes?: unknown;
+  bodyChildren?: unknown;
+  visibleInteractive?: unknown;
+  jsStamped?: unknown;
+}
+
+/**
+ * 监听探针缓存键的**唯一出处**：`<url>|<总元素数>|<body 子元素数>|<可见原生交互数>|<已盖
+ * data-js-ref 数>`（裸 URL 键会把陈旧"已扫"结论套到 SPA 换页/换日期后的新 DOM 上——URL
+ * 不变而交互面已换，新控件永远盖不上 `data-js-ref`）。
+ *
+ * 为什么四项计数足以区分 SPA 换页/换日期：状态迁移是 DOM 重写——总元素数与 body 顶层
+ * 结构几乎必然变化；新出现的原生交互面改变可见交互数；"已盖 data-js-ref 数"捕捉最隐蔽的
+ * **同形重建**（节点数/结构/交互数全同、但旧章随旧节点消失）。指纹只读计数，单次
+ * evaluate、零 CDP 往返；`jsStamped` 分量要求缓存键按**盖章后**的状态取——调用方在探针
+ * 有产出时用盖章后的指纹重算键落缓存，否则自己的盖章会让下一次查找必然 miss。
+ * evaluate 不可用/页面已换 → `|nofp` 后缀 = 退化为裸 URL 键（fail-open 到旧口径，不抛）。
+ */
+export async function listenerCacheKeyOf(page: PageLike): Promise<string> {
+  const url = urlOf(page);
+  let fp: ListenerDomFingerprint | null = null;
+  try {
+    fp = (await page.evaluate!(PASS_LISTENER_FINGERPRINT, { interactiveSel: POOL_SEL })) as ListenerDomFingerprint | null;
+  } catch {
+    fp = null;
+  }
+  const part = (v: unknown): string => (typeof v === "number" && Number.isFinite(v) ? String(v) : "?");
+  if (fp === null || typeof fp !== "object") return `${url}|nofp`;
+  return `${url}|${part(fp.nodes)}|${part(fp.bodyChildren)}|${part(fp.visibleInteractive)}|${part(fp.jsStamped)}`;
+}
+
 
 /* ------------------------------------------------------------------ discovery */
 
 /**
  * Discover the interactive elements the model and the executor may act on.
- * `jsProbe` runs the CDP listener walk once per URL first, so JS-only widgets
- * (addEventListener divs) are stamped `data-js-ref` and join the scan.
+ * `jsProbe` runs the CDP listener walk first (cached per `listenerCacheKeyOf`:
+ * URL + DOM fingerprint), so JS-only widgets (addEventListener divs) are stamped
+ * `data-js-ref` and join the scan.
  */
 /**
  * Extract the interaction pool.
@@ -614,6 +649,214 @@ export async function probeExcludedHint(
     ...(total > matchedChains.length ? { matched_chains_truncated: true as const } : {}),
     matches,
   };
+}
+
+/** DOM 等价探测的单条匹配（class 首段仅诊断显示用；visible = 可见盒判定）。 */
+export type HintInDomMatch = { tag: string; id: string; class?: string; visible: boolean };
+
+/** DOM 等价探测命中的事实块：total = 全量 distinct 命中数；matches = 前 5 条带可见性；note = 可行动原因。 */
+export type HintInDomProbe = { total: number; matches: HintInDomMatch[]; note: string };
+
+/** 文本 bbox 探测的单条命中（视口 CSS 像素；visible 已过滤）。 */
+export type TextBboxHit = { tag: string; id: string; class?: string; x: number; y: number; w: number; h: number };
+
+/**
+ * clickxy：文本全等的**唯一可见**命中 → bbox 中心（clickxy 最后手段的定位底座）。
+ *
+ * 语义与 DRF text 模式同口径：TreeWalker 走文本节点（≤20000），取归一化后 innerText 全等
+ * 的元素（trim + 小写折叠两侧），**最深优先**（祖先含后代时只留后代），**恰好一个可见**
+ * 才返回（>1 = 歧义，返回 `{ambiguous:true, total}` 供调用方零动作；0 可见 = null）。
+ * 与 DRF text 的差异只在**输出**：这里给 bbox 中心而不是 locator（无句柄可寻址的场景）。
+ * 单一出处 = 本 helper（`_resolveClickxyFallback` 唯一消费）；只读、主帧、异常 = null。
+ */
+export async function probeTextBbox(page: PageLike, token: string): Promise<{ hit: TextBboxHit; total: number } | { ambiguous: true; total: number } | null> {
+  const want = String(token ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (want === "") return null;
+  let got: unknown;
+  try {
+    got = await page.evaluate!((arg: { want: string; maxInt: number }) => {
+      const g = globalThis as unknown as {
+        document: {
+          body: any; documentElement: any;
+          createTreeWalker(root: any, whatToShow: number): { nextNode(): any };
+        };
+      };
+      const doc = g.document;
+      const norm = (s: unknown): string => String(s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+      const root = doc.body ?? doc.documentElement;
+      const found: any[] = [];
+      const seen = new Set<any>();
+      const walker = doc.createTreeWalker(root, 4 /* SHOW_TEXT */);
+      let node = walker.nextNode(); let scanned = 0;
+      while (node !== null && scanned < arg.maxInt) {
+        scanned += 1;
+        if (norm(node.nodeValue) === arg.want) {
+          const el = node.parentElement;
+          if (el !== null && !seen.has(el)) { seen.add(el); found.push(el); }
+        }
+        node = walker.nextNode();
+      }
+      // 最深优先：祖先候选（严格包含另一个候选）剪掉。
+      const deepest = found.filter((e: any) => !found.some((o: any) => o !== e && e.contains(o)));
+      const visible = deepest.filter((e: any) => {
+        try {
+          if (e.checkVisibility && !e.checkVisibility({ checkVisibilityCSS: true, checkOpacity: false })) return false;
+          const r = e.getBoundingClientRect();
+          return r.width > 0 && r.height > 0;
+        } catch { return false; }
+      });
+      const rows = visible.map((e: any) => {
+        const r = e.getBoundingClientRect();
+        const cls = String(e.getAttribute("class") ?? "").trim();
+        return {
+          tag: String(e.tagName ?? "").toLowerCase(), id: String(e.id ?? ""),
+          ...(cls ? { class: cls.split(/\s+/)[0].slice(0, 40) } : {}),
+          x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
+          w: Math.round(r.width), h: Math.round(r.height),
+        };
+      });
+      return { total: rows.length, rows: rows.slice(0, 5) };
+    }, { want, maxInt: 20000 });
+  } catch {
+    return null;
+  }
+  const row = (got ?? null) as { total: number; rows: Array<Record<string, unknown>> } | null;
+  if (row === null || !(Number(row.total) > 0)) return null;
+  if (Number(row.total) > 1) return { ambiguous: true, total: Number(row.total) };
+  const m = row.rows[0]!;
+  return {
+    hit: {
+      tag: String(m["tag"] ?? ""), id: String(m["id"] ?? ""),
+      ...(m["class"] !== undefined && String(m["class"]) !== "" ? { class: String(m["class"]) } : {}),
+      x: Number(m["x"] ?? 0), y: Number(m["y"] ?? 0), w: Number(m["w"] ?? 0), h: Number(m["h"] ?? 0),
+    },
+    total: 1,
+  };
+}
+
+/**
+ * `target_not_found` 落定前的**只读 CSS 等价探测**——区分"池准入失败"与"页面没有"。
+ *
+ * 单一出处 = 本 helper（session act 诊断面与 run strict 面共用）；observe 面的人读文案
+ * 另有镜像，不从这里取。探测口径与解析闭集对齐：
+ *   - `#id` → `getElementById`；
+ *   - `tag[attr=value]` / `tag[attr~substr]` → `querySelectorAll`（`~` 的 loose 子串 = CSS
+ *     `*=`，值引号转义；aria-label 的池侧别名在 label 字段——DOM 侧以 aria-label 属性为
+ *     该字段的投影，与 hintMatch 同口径）；
+ *   - 裸词 → 文本全等（TreeWalker 走**文本节点**、有界 ≤20000，取直接父元素按元素去重；
+ *     复用 DRF text 收集思路）+ `aria-label` 属性全等（图标按钮无可见文本，label 别名是
+ *     hintMatch 的实际匹配面）。
+ * `tag` / `tag~token` 形状不探测（存在性近乎恒真 / near 是上下文面，无判别力）；带
+ * `within` / `in-row:` / `frame:` 声明的 hint 也不探测——那些是池面结构约束，命中会误导
+ * （锚外/行外/跨帧元素同样"在 DOM"，但落空原因不是准入；fail-closed 同 `_liveDomIdFallback`
+ * 的行锚取舍）。归一 = trim + 小写折叠两侧（bare 梯队 tier-0 同口径，不含内部空白折叠）。
+ * 主帧 only（page.evaluate）；任何异常 = 返回 null（调用方 reason 逐字节不变，绝不抛栈）。
+ */
+export async function probeHintInDom(page: PageLike, hint: string): Promise<HintInDomProbe | null> {
+  let parsed: ParsedHint;
+  try { parsed = parseHint(hint); } catch { return null; }
+  const mode = parsed.kind === "id" ? "id"
+    : parsed.kind === "attrEq" ? "attrEq"
+    : parsed.kind === "attrSubstr" ? "attrSubstr"
+    : parsed.kind === "bare" ? "bare" : null;
+  if (mode === null) return null;
+  if (parsed.within !== undefined || parsed.inRow !== undefined || parsed.rowIndex !== undefined
+      || parsed.frameChain !== undefined) return null;
+  let got: unknown;
+  try {
+    got = await page.evaluate!((arg: { mode: string; tag: string; attr: string; value: string; token: string; maxMatches: number }) => {
+      // 浏览器侧执行（Node strip-types 下类型注释被擦除，源码原样进页面）；document 等
+      // 浏览器全局只在这里就地声明（与 PASS_* 常量的本地声明同一惯例）。
+      const g = globalThis as unknown as {
+        document: {
+          body: any; documentElement: any;
+          getElementById(id: string): any;
+          querySelectorAll(sel: string): ArrayLike<any>;
+          createTreeWalker(root: any, whatToShow: number): { nextNode(): any };
+        };
+        getComputedStyle(el: any): { display: string; visibility: string };
+      };
+      const doc = g.document;
+      const norm = (s: unknown): string => String(s ?? "").trim().toLowerCase();
+      const visible = (el: any): boolean => {
+        const r = el.getBoundingClientRect();
+        const cs = g.getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && cs.display !== "none" && cs.visibility !== "hidden";
+      };
+      const capOf = (el: any): Record<string, unknown> => {
+        const cls = String(el.getAttribute("class") ?? "").trim();
+        return {
+          tag: String(el.tagName ?? "").toLowerCase(),
+          id: String(el.id ?? ""),
+          ...(cls ? { class: cls.split(/\s+/)[0].slice(0, 40) } : {}),
+        };
+      };
+      const q = (v: string): string => `"${v.replace(/[\\"]/g, "\\$&")}"`;
+      let els: any[] = [];
+      if (arg.mode === "id") {
+        const el = doc.getElementById(arg.value);
+        if (el !== null) els = [el];
+      } else if (arg.mode === "attrEq" || arg.mode === "attrSubstr") {
+        // `~` 的池侧语义是 loose 子串（attrMatchValues.includes）→ CSS 等价 = `*=`（值默认
+        // 大小写敏感，与池侧一致）。
+        const sel = `${arg.tag}[${arg.attr}${arg.mode === "attrEq" ? "=" : "*="}${q(arg.value)}]`;
+        els = Array.from(doc.querySelectorAll(sel));
+      } else {
+        // 裸词：文本全等（TreeWalker SHOW_TEXT=4，≤20000 文本节点；直接父元素即候选，按元素
+        // 去重）+ aria-label 全等（label 别名，与 hintMatch 同口径）。
+        const seen = new Set<any>();
+        const root = doc.body ?? doc.documentElement;
+        const walker = doc.createTreeWalker(root, 4);
+        let node = walker.nextNode(); let scanned = 0;
+        while (node !== null && scanned < 20000) {
+          scanned++;
+          if (norm(node.data) === arg.token) {
+            const el = node.parentElement;
+            if (el !== null) seen.add(el);
+          }
+          node = walker.nextNode();
+        }
+        for (const el of Array.from(doc.querySelectorAll("[aria-label]"))) {
+          if (norm(el.getAttribute("aria-label")) === arg.token) seen.add(el);
+        }
+        els = Array.from(seen);
+      }
+      const withId = els.filter((el) => String(el.id ?? "") !== "").length;
+      const withDataTest = els.filter((el) => el.hasAttribute("data-test")).length;
+      const matches = els.slice(0, arg.maxMatches).map((el) => ({ ...capOf(el), visible: visible(el) }));
+      return { total: els.length, withId, withDataTest, matches };
+    }, {
+      mode,
+      tag: parsed.kind === "attrEq" || parsed.kind === "attrSubstr" ? parsed.tag : "",
+      attr: parsed.kind === "attrEq" || parsed.kind === "attrSubstr" ? parsed.attr : "",
+      value: parsed.kind === "id" ? parsed.value
+        : parsed.kind === "attrEq" || parsed.kind === "attrSubstr" ? parsed.value : "",
+      token: parsed.kind === "bare" ? parsed.token : "",
+      maxMatches: 5,
+    });
+  } catch {
+    return null;                 // 探测异常 = 跳过（绝不抛栈）；reason 逐字节不变
+  }
+  const row = (got ?? null) as { total: number; withId: number; withDataTest: number; matches: Array<Record<string, unknown>> } | null;
+  if (row === null || !(Number(row.total) > 0)) return null;
+  const matches: HintInDomMatch[] = (Array.isArray(row.matches) ? row.matches : []).slice(0, 5).map((m) => ({
+    tag: String(m["tag"] ?? ""),
+    id: String(m["id"] ?? ""),
+    ...(m["class"] !== undefined && String(m["class"]) !== "" ? { class: String(m["class"]) } : {}),
+    visible: m["visible"] === true,
+  }));
+  // 可行动原因按**全量命中**的句柄事实判定（不只看前 5 条）：无句柄 = class-only（准入面
+  // 收不进来）；有句柄 = 池帽/准入面/帧排除类原因。
+  const withId = Number(row.withId ?? 0);
+  const withDataTest = Number(row.withDataTest ?? 0);
+  const handle = withId > 0 && withDataTest > 0 ? "id/data-test" : withId > 0 ? "id" : withDataTest > 0 ? "data-test" : null;
+  const note = handle === null
+    ? "class-only control(s) (no id/data-test stable handle) — the pool admission surface never collects "
+      + "them; give one a stable handle (id/[data-test]) or enable declared-DOM resolution "
+      + "(meta.policy.target_resolution:\"declared\")"
+    : `stable handle present (${handle}) but the matched element(s) stayed outside the pool `
+      + "(pool cap / surface policy / frame exclusion)";
+  return { total: Number(row.total), matches, note };
 }
 
 /**
