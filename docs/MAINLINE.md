@@ -53,9 +53,9 @@
 S0 入口三类    引擎入口（bin/amber.mjs → cli/main.ts → registry）
                宿主集成（DSH bridge / amber session 子进程；进程边界=契约）
                开发/创作脚本（npm start / apps / learn / test / plan-cli / extension；非产品主线）
-S1 执行内核    runExecution(source, deps)                                  ← 规划中（P2 条件；SessionLease 已落地并接入 suite + flow + plan 三面）
-               共享：SessionLease(惰性创建/finally 关闭；`src/engine/session-lease.ts`) · RunScope{run_id,outDir,budget,deadline,trace,result,warnings}
-                     StopClassifier(停因→退出码) · mask/scrub · artifacts 落盘 · attempt 记账
+S1 执行内核    runExecution(source, deps)                                  ← 规划中（P2 条件；SessionLease 三面 + RunScope 两面已落地）
+               共享：SessionLease(惰性创建/finally 关闭；`src/engine/session-lease.ts`) · RunScope(run_id/outDir/planPath/today；`src/app/run-scope.ts`)
+                     RunScope 目标字段中的 budget/deadline/trace/result/warnings 仍归各源；StopClassifier(停因→退出码) · mask/scrub · artifacts 落盘 · attempt 记账
                不共享：重试（归源）、sleep（归 pace 应用点）、业务判定（归 ctx/checkSignal）
 S2 源适配器    flow    : loadScriptApp → flow(ctx)；重试/分支 = 脚本控制流；完成 = ctx.done 不变量
                plan    : TaskPlan 子目标循环 + retries/replan + NEVER_RETRY_CODES 查询；结果 = RunPlanResult
@@ -92,6 +92,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | Seam | 当前/目标归属 | 允许调用方 | 冻结状态 | 变更协议 |
 |---|---|---|---|---|
 | `browserSession` / 会话生命周期 | `src/browser/browser-env.ts`（`browserSession` 唯一实现）+ 生命周期模板 `src/engine/session-lease.ts`（flow/plan/suite 三面共用） | executor、ctx、tools、session-runtime | **冻结**（P1 只允许 `buildMiddleware` 收口，不改语义） | 改创建/关闭顺序必须 A/B + 会话生命周期测试 |
+| RunScope（run_id/outDir/planPath/today） | `src/app/run-scope.ts`（唯一解析点；声明式/flow app 两面接入） | app 两面适配器；plan 面无落点、suite 用 case 证据目录 | **字段只减不增**：budget/deadline/trace/result/warnings 仍归各源，新增字段先改本表 | 默认值/所有权变更必须 A/B（两面归一化结果） |
 | `BrowserMiddleware.run` | `src/engine/executor.ts` | 唯一执行循环；ctx/planner/online 经装配调用 | **逐字节冻结**（类名 + `run()` 签名不变；不另写执行器）；`maintain mainline` 断言两字面存在 | 九阶段提函数=P2 条件，每阶段独立 PR + 0.8 证据（运行期 lane 已就绪）；九阶段已落地（4d 完成） |
 | `RunOptions` 组装（引擎步） | `src/engine/planner.ts:runOnce` 与 `src/app/ctx.ts:runOneStep` | 两条路径 | **冻结**（不新增第 4 个 RunOptions；P2 execStep 合并） | 能力面新增必须双端 + 等价验收 |
 | 工具步装配 | `src/app/app-runner.ts:runToolStep` + `Ctx.toolRunner` | ctx.run / dangerous | **冻结**（不进引擎步装配） | 独立变更 + 危险步确认链 review |
