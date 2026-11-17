@@ -34,7 +34,7 @@ export const POLICY_KEYS = [
   // A3：弱档命中（bare 词前缀/词包含、attrSubstr loose 子串）算不算命中
   // （缺省 any = 现行为逐字节不变；strong = 改判未命中）。
   "act_hint_tier",
-  // P0-C：声明目标解析链是否启用 DRF（缺省 "off" = 现行为逐字节不变）。
+  // P0-C：声明目标解析链是否启用 DRF（缺省 "declared" = 批准的默认翻转；"off" = opt-out）。
   "target_resolution",
   // F74：决策步 act hint 的 DOM 回退跳（缺省 false = 现行为逐字节不变；true = 解析链全落空
   // 后补一次主帧 ADMIT_SEL 回退面，A3 对称）。
@@ -63,7 +63,7 @@ export const ACT_HINT_MODES = ["widen", "strict"] as const;
  */
 export const ACT_HINT_TIER_MODES = ["any", "strong"] as const;
 
-/** 声明目标解析链档位（`meta.policy.target_resolution`；缺省 off = 现行为逐字节不变）。 */
+/** 声明目标解析链档位（`meta.policy.target_resolution`；缺省 declared = 批准的默认翻转，"off" = opt-out）。 */
 export const TARGET_RESOLUTION_MODES = ["off", "declared"] as const;
 
 /**
@@ -138,15 +138,20 @@ export interface PackPolicy {
    */
   act_hint_tier?: (typeof ACT_HINT_TIER_MODES)[number];
   /**
-   * P0-C 声明目标解析链（DRF，declared target resolution）：
-   *   - `"off"`（缺省）= 现行为逐字节不变；
+   * P0-C 声明目标解析链（DRF，declared target resolution）——**缺省 `"declared"`**
+   * （本方案唯一批准的默认行为变更）：class-only 站点的裸词/attr 声明目标在池/ADMIT/FW8
+   * 全落空时由 DOM 侧兜底恢复，作者不需要知道这个开关也要能走通；**显式 `"off"` =
+   * opt-out**（逃生口/对照臂）。
    *   - `"declared"` = 命令 `target` / act hint 在池 hintMatch → ADMIT 回捞 → FW8 身份回捞
    *     全部落空后，再由 DOM 侧兜底：属性型 hint 走 ADMIT_SEL + 同一套 hint 语义，裸词 hint
    *     走可见文本精确匹配；跨 frame 恰好一个可见才动作（>1 → target_ambiguous，全隐藏 =
-   *     未命中 + hidden 诊断）。click 族动作前必须 hit-test（被覆盖不点击）。首版只允许
-   *     click/scroll/hover，fill/select/drag/upload/clickAt → 结构化 action_unsupported。
-   *     回捞元素只进本步局部池，**模型不参与**（不进 ChoiceRequest.elems）。
+   *     未命中 + hidden 诊断）。click 族动作前必须 hit-test（被覆盖不点击）。能力面 =
+   *     click/scroll/hover，**单点在解析资格侧**（declared-targets.tryDeclared 的
+   *     DECLARED_TARGET_OPS）：能力面外的 op（fill/select/drag/upload/clickAt）与 typing 形
+   *     act-hint 命中一律**不参与救援**，落回既有失败路径——绝不先解析再拒绝成
+   *     action_unsupported。回捞元素只进本步局部池，**模型不参与**（不进 ChoiceRequest.elems）。
    *     dry/apps check 只校验 policy 值（DOM 事实无法离线验证，不新增绿）。
+   *   - `"off"` = DRF 整链关闭（既有行为逐字节不变）。
    */
   target_resolution?: (typeof TARGET_RESOLUTION_MODES)[number];
   /**

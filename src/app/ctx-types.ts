@@ -81,7 +81,7 @@ export interface StepRequest {
    */
   staleRetry?: boolean;
   /**
-   * F72 `rehydrateRescan`（opt-in，缺省 false = 既有行为逐字节不变）：声明 act hint 真落空
+   * `rehydrateRescan`（兼容声明——重扫已缺省自动，本键不再有额外效果）：act hint 真落空
    * （hintMatch 零命中）且步首抽池时页面未静默（settle timedOut——重水合 SPA 抽到水合中间态池）
    * 时，引擎等 2s 重抽池、用**同一 hint** 重解析一次（至多 1 次，确定性 rule:match 不重走模型；
    * 不额外计步预算）。命中 = trace/汇总记 `rehydrate_rescan`；仍未命中 = 原停因不变。
@@ -150,7 +150,7 @@ export interface StepResult {
   done_preheld?: boolean;
   /** S4：stale 重解析重试证据（每次一条；缺字段 = 没重试过）。与 trace 行事件字段 `stale_retry`（同一条目数组）是同一份证据的汇总面；字段名两处不同（trace 行单数、这里复数），文案勿混写（R9 记录项 1）。 */
   stale_retries?: Array<{ attempt: number; reason: string; ref: string }>;
-  /** F72-②：显式 rehydrate 重扫事实（至多一次；缺字段 = 没跑过）。与 trace 行事件字段 `rehydrate_rescan` 是同一份证据。 */
+  /** 自动 rehydrate 重扫事实（至多一次；缺字段 = 没跑过）。与 trace 行事件字段 `rehydrate_rescan` 是同一份证据。 */
   rehydrate_rescan?: {
     waited_ms: number; pool_size_before: number; pool_size: number; resolved: boolean; ref?: string;
   };

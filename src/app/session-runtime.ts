@@ -324,6 +324,7 @@ export class SessionRuntime {
   private async dispatch(req: Record<string, unknown>): Promise<Record<string, unknown>> {
     switch (req["type"]) {
       case "open": return this.doOpen(req);
+      case "goto": return this.doGoto(req);
       case "observe": return this.doObserve(req);
       case "act": return this.doAct(req);
       case "read": return doRead(this.ctx(), req);
@@ -340,13 +341,28 @@ export class SessionRuntime {
   }
 
   private doOpen(req: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.openInner(req);
+    return this.openInner(req, "open");
   }
 
-  private async openInner(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+  /**
+   * goto：受控导航原语——与 open **同一条实现**（openInner → `ctx.open` →
+   * `CtxRuntime.navigate` 单一判定：hosts 信封前置检查、goto(domcontentloaded)、
+   * unreachable/config_error 结构化分类、落地后 302 跨主机拒绝、PageState settled）。
+   * 不带 referer 参数（`page.goto` 的 referer 选项不用）：同源导航浏览器按自身策略自动带
+   * referer；跨源 goto 携带旧页 referer 无收益还可能污染目标站的来源基线——保持与 open
+   * 相同的裸 goto 形态。会话无 meta，entry-only 闸门对会话面恒放行（与 open 同口径）；
+   * task-38 的 flap 监听与有界自愈对 goto 同样生效（同一 openInner 路径）。
+   * 轨迹记 `type:"goto"`（session export 只认 open/mark/act 行，goto 行被如实跳过，
+   * 导出的骨架不含导航步——作者按现场手写 `ctx.open`/`ctx.arrive`）。
+   */
+  private doGoto(req: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.openInner(req, "goto");
+  }
+
+  private async openInner(req: Record<string, unknown>, op: "open" | "goto"): Promise<Record<string, unknown>> {
     const url = req["url"];
     if (!nonEmpty(url)) {
-      return { ok: false, code: "config_error", reason: "open needs a non-empty url string" };
+      return { ok: false, code: "config_error", reason: `${op} needs a non-empty url string` };
     }
     const timeoutMs = intIn(req["timeoutMs"], 1, 120_000);
     const ctx = this.ctx();
@@ -379,10 +395,10 @@ export class SessionRuntime {
       const landed = urlOf(page) || ctx.url() || String(url);
       this.urls.push(landed);
       const title = await this.titleOf();
-      this.log(`open ${landed}${title === undefined ? "" : ` — ${title}`}`);
+      this.log(`${op} ${landed}${title === undefined ? "" : ` — ${title}`}`);
       // Phase 2：入口页是导出骨架的 `meta.site.pages.entry` 来源（open 也是轨迹的一部分）。
       this.recordEvent({
-        type: "open", url: landed, ...(title === undefined ? {} : { title }),
+        type: op, url: landed, ...(title === undefined ? {} : { title }),
         ...(flap === null ? {} : { flap: { navigations: flap.navigations, healed: heal?.healed === true } }),
       });
       // 正常页（未判定 flap）：响应与改动前**逐字节一致**——零新字段、除静默早退窗口外零额外等待。
@@ -391,7 +407,7 @@ export class SessionRuntime {
       }
       // 判定 flap → 只增诊断字段（healed:false → ok:false 如实报；有界自愈只试一次，不再重试）。
       const healed = heal?.healed === true;
-      this.log(`open flap detected: ${flap.navigations} main-frame navigations in ${flap.window_ms}ms, healed=${healed}`);
+      this.log(`${op} flap detected: ${flap.navigations} main-frame navigations in ${flap.window_ms}ms, healed=${healed}`);
       return {
         ok: healed,
         url: landed,

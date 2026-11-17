@@ -250,6 +250,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     // A3：弱档算不算命中（缺省 any；strong = 弱档改判未命中，再按 actHint 语义走——声明式
     // 路径本就不传 actHint，故 strong 在此等于"交模型"，与 flow 面 widen+strong 同语义）。
     actHintTier: policy.act_hint_tier?.value,
+    // P0-C：DRF（缺省 declared = 批准的默认翻转；"off" = 显式 opt-out）——journey 面与
+    // flow 面消费同一份生效账：effective_policy 记 declared，执行器就开着（账实一致）。
+    targetResolution: policy.target_resolution.value,
     // F74：DOM 回退跳（缺省 false = 逐字节不变；true = 声明 hint 全链落空后补 A3 对称跳）。
     actHintDomFallback: policy.act_hint_dom_fallback?.value === true,
     // A1：aria-label 属性 hint 的池侧匹配底座（缺省 full_label = 修复后；display = A1 之前）。

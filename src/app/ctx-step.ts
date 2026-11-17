@@ -146,7 +146,7 @@ export async function runOneStep(rt: CtxRuntime, desc: string, req: {
     // S4：步级 force / staleRetry 同样是显式声明（缺省不出现 = 既有行为逐字节不变）。
     if (req.force === true) opts["force"] = true;
     if (req.staleRetry === true) opts["staleRetry"] = true;
-    // F72：步级 rehydrateRescan 同样是显式声明（缺省不出现 = 既有行为逐字节不变）。
+    // 步级 rehydrateRescan 兼容声明（重扫已缺省自动；透传只为声明链兼容，引擎不再读）。
     if (req.rehydrateRescan === true) opts["rehydrateRescan"] = true;
     if (ntActive && !ntSkipAction && req.act !== undefined && !Array.isArray(req.act)
         && (req.act as { kind?: string }).kind === "hint") {

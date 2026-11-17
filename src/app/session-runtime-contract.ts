@@ -37,7 +37,7 @@ export interface SessionScrollOut {
 
 /** 请求类型闭集（未知 type = 结构化 config_error + 这张表）。 */
 export const SESSION_REQUEST_TYPES = [
-  "open", "observe", "act", "read", "extract", "waitFor", "signal", "snapshot", "mark", "tab", "close",
+  "open", "goto", "observe", "act", "read", "extract", "waitFor", "signal", "snapshot", "mark", "tab", "close",
 ] as const;
 
 /** 缺省 idle 超时（两次请求之间的静默上限）。 */

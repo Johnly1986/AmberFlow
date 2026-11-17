@@ -111,7 +111,7 @@ function flowScriptTemplate(id: string, goal: string, hosts: string[], startUrl:
 ${playbook}
  *
  * 常见卡点 → 引擎能力（速查；细节见下方 ctx/policy 说明与 amber schema ctx 契约）：
- * · 自绘 div 筛选/按钮不在池      → meta.policy.target_resolution:"declared"（DRF：attr/文本精确匹配+唯一可见+hit-test）
+ * · 自绘 div 筛选/按钮不在池      → DRF 已缺省开启（target_resolution 缺省 declared：attr/文本精确匹配+唯一可见+hit-test；显式 "off" = opt-out）
  * · 看不到当前页元素/池           → ctx.observe()（免费只读；admitted/why_not_admitted/hint_candidates；dry 下 elements=[] 只验形状）
  * · target=_blank 会开新标签      → step opts newTab:{urlContains}（自动采用+去重，别重复点击）
  * · 慢 SPA/步内挂死               → step timeoutMs（=整步挂钟帽，超时 stop step_timeout）
@@ -166,14 +166,15 @@ ${playbook}
  *   judge.existsText(sel, "Traffic") = 存在文本含 Traffic 的元素；judge.exists(sel, {visible:true})
  *   = 存在且可见（池/离线面判不出可见性，诱导期不据此下结论）。
  *
- * 执行韧性（S4，两项都是步级 opt-in，缺省不写 = 行为不变）：
+ * 执行韧性（S4，force/staleRetry 是步级 opt-in，缺省不写 = 行为不变）：
  *   force:true       动作走 Playwright force 语义（跳过 actionability，仍要求可定位）；
  *                    只用于作者已确认的瞬态弹层/动画控件——可能点到被遮挡目标（坐标上的顶层元素收事件）。
  *   staleRetry:true  动作失败且疑似 stale（stale_ref / action_failed / not-actionable 且节点已卸载）时，
  *                    重抽池→重解析同一声明目标→重试，最多 2 次（每次进 trace 行事件 stale_retry:[{attempt,reason,ref}]；结果汇总字段 stale_retries）。
- *   rehydrateRescan:true  声明 act hint 真落空（hintMatch 零命中）且步首 settle 超时（页面未静默——
- *                    重水合 SPA 抽到中间态池）时，等 2s 重抽池重解析同一 hint（至多 1 次；
- *                    trace/汇总记 rehydrate_rescan；确定性 rule:match，不重走模型）。
+ *   rehydrateRescan:true  兼容声明（不再有额外效果）——重扫已缺省自动：act hint 真落空（hintMatch
+ *                    零命中）且步首 settle 超时（页面未静默——重水合 SPA 抽到中间态池）时，引擎自动
+ *                    等 2s 重抽池重解析同一 hint（至多 1 次；trace/汇总记 rehydrate_rescan；确定性
+ *                    rule:match，不重走模型）；meta.policy.settle:"off" 时门控信号不存在，永不触发。
  *   hover：命令闭集的指针原语——ctx.command("hover", sel) 只把指针移上去（:hover 菜单/图层面板），
  *     done 仍要写成动作后才成立的证据（例如 judge.exists("#panel-item", {visible:true})）。
  *   upload：命令闭集的上传原语——ctx.command("upload", "#file", ctx.value.slot("path")) 只对
@@ -279,7 +280,7 @@ export async function flow(ctx) {
   //
   // 瞬态弹层/SPA 重渲染（S4，opt-in）：staleRetry 在点前节点被替换时重抽池→重解析同一目标→重试（≤2 次）；
   // force 跳过 actionability（只用于已确认的动画/瞬态遮挡，可能点到被遮挡目标）。
-  // 重水合 SPA（F72，opt-in）：act hint 落空 + 页面未静默（settle 超时）时延迟重扫一次（等 2s 重抽池）；
+  // 重水合 SPA（缺省自动）：act hint 落空 + 页面未静默（settle 超时）时延迟重扫一次（等 2s 重抽池）；
   // 首选仍是 act 前 ctx.waitForTarget("input[name=q]", { timeoutMs: 8000 }) 正锚。
   // const sort = await ctx.step("按价格排序", {
   //   act: [ctx.command("click", "[data-test=sort-price]")],

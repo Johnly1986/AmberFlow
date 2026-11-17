@@ -108,11 +108,12 @@ export interface EffectivePolicy {
    */
   act_hint_tier?: { value: "any" | "strong"; source: "app" };
   /**
-   * P0-C 声明目标解析链（**仅声明时出现** = 缺省产物逐字节不变；显式 "off" 也进账）。
-   * "declared" = 命令 target / act hint 在池/ADMIT/FW8 之后走 DRF（attr/text 两模式、
-   * 恰好一个可见、click 前 hit-test；首版 click/scroll/hover）。
+   * P0-C 声明目标解析链（**恒在账**：缺省 `"declared"` = 批准的默认翻转；显式声明进
+   * `source:"app"`，显式 `"off"` = opt-out 也进账）。"declared" = 命令 target / act hint
+   * 在池/ADMIT/FW8 之后走 DRF（attr/text 两模式、恰好一个可见、click 前 hit-test；
+   * 能力面 click/scroll/hover，单点在 declared-targets.tryDeclared）。
    */
-  target_resolution?: { value: "off" | "declared"; source: "app" };
+  target_resolution: { value: "off" | "declared"; source: "app" | "default" };
   /**
    * F74 决策步 act hint 的 DOM 回退跳（**仅声明时出现** = 缺省产物逐字节不变）。
    * true = 声明 act hint 解析链全落空后补一次主帧 ADMIT_SEL DOM 回退面（A3 对称）。
@@ -243,6 +244,13 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
       },
       source: declaredPolicy.decision_state !== undefined ? "app" as const : "default" as const,
     },
+    // P0-C：DRF **恒在账**（缺省 declared = 批准的默认翻转；显式声明进 source:"app"，
+    // 显式 "off" = opt-out 也进账）——报告要说得出"这一跑 DRF 是否启用"。缺省值不参与
+    // anyDeclared：effective_policy 只在包声明过任一策略时出现，无声明包产物逐字节不变。
+    target_resolution: {
+      value: declaredPolicy.target_resolution ?? "declared",
+      source: declaredPolicy.target_resolution !== undefined ? "app" as const : "default" as const,
+    },
   };
   // 导航纪律：**仅声明时出现**（缺省键不写进 policy 对象 = 产物逐字节不变）。
   // 必须在 anyDeclared 之前挂上——只声明 navigation 的包也要能进 effective_policy 的账。
@@ -256,10 +264,6 @@ export function resolveRunPolicy(pack: AppPack, opts: AppRunOptions = {}): {
   // A3：act_hint_tier 同样**仅声明时出现**（缺省 any = 今天；"any" 显式声明也进账）。
   if (declaredPolicy.act_hint_tier !== undefined) {
     policy.act_hint_tier = { value: declaredPolicy.act_hint_tier, source: "app" as const };
-  }
-  // P0-C：target_resolution 同样**仅声明时出现**（缺省 off = 今天；"off" 显式声明也进账）。
-  if (declaredPolicy.target_resolution !== undefined) {
-    policy.target_resolution = { value: declaredPolicy.target_resolution, source: "app" as const };
   }
   // F74：DOM 回退跳（布尔；仅显式声明时进账，缺省 false = 逐字节不变）。
   if (declaredPolicy.act_hint_dom_fallback !== undefined) {
