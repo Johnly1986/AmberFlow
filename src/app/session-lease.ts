@@ -19,6 +19,8 @@ import type { BrowserSession } from "../engine/executor.ts";
 export interface SessionLease {
   /** 首次调用触发 create；并发调用共享同一个 Promise 结果（不重复建会话）。 */
   get(): Promise<BrowserSession>;
+  /** 同步读已创建会话：惰性未创建 = null；close 之后 = null（不触发创建）。 */
+  peek(): BrowserSession | null;
   /** 幂等关闭：从未创建 = no-op；关闭异常静默（不让 finally 掩盖真实结果）。 */
   close(): Promise<void>;
 }
@@ -38,6 +40,7 @@ export function createSessionLease(create: () => Promise<BrowserSession>): Sessi
       session = await pending;
       return session;
     },
+    peek(): BrowserSession | null { return session; },
     async close(): Promise<void> {
       if (closed) return;
       closed = true;

@@ -72,6 +72,7 @@ import { channelFromEnv } from "../browser/browser-env.ts";
 import { captureStateView } from "../flow/signal-induction.ts";
 import { captureStepStateView, type StepStateView } from "../model/page-context.ts";
 import { createAppCandidateProducer } from "./candidate-source.ts";
+import { createSessionLease } from "./session-lease.ts";
 import type { StateView } from "../engine/signals.ts";
 import {
   expandPack, listAppDirs, resolveSourceSlots,
@@ -1486,22 +1487,18 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   for (const line of renderSiteFactLines(siteFacts)) console.error(line);
 
   const own = opts.sessionFactory === undefined;
-  // 用 holder 而不是裸的 `let`：会话是在闭包里惰性创建的，裸变量的控制流收窄会把后续读取
-  // 变成 never（TS 看不到闭包里的赋值）。
-  const holder: { session: BrowserSession | null } = { session: null };
+  // 惰性会话租约（与 suite/flow 适配器同一份语义）：首个浏览器步才建；finally 关一次。
+  const lease = createSessionLease(async () => {
+    if (!own) return opts.sessionFactory!();
+    // 包声明了设备就用它（只有手机版页面存在的站点，桌面 DOM 里 hint 必然落空）
+    const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
+    // 人工步默认开可见窗口：人要在里面登录/过验证码；`--headful` 只是显式同义。
+    const headless = opts.headful !== true && !manualInSegment;
+    // task-43：meta.policy.browser 通道随 pack 下传（env 盖 meta 语义见 launchKwargs 单源）。
+    return browserSession(headless, device, pack.policy?.browser ?? null);
+  });
   const getShell = async (): Promise<BrowserSession> => {
-    if (holder.session === null) {
-      // 包声明了设备就用它（只有手机版页面存在的站点，桌面 DOM 里 hint 必然落空）
-      const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
-      // 人工步默认开可见窗口：人要在里面登录/过验证码；`--headful` 只是显式同义。
-      const headless = opts.headful !== true && !manualInSegment;
-      // task-43：meta.policy.browser 通道随 pack 下传（env 优先级在 launchKwargs 单源实现，
-      // 这里只传 meta 值——env 盖 meta 的语义与 effective_policy.browser 同一出处）。
-      holder.session = own
-        ? await browserSession(headless, device, pack.policy?.browser ?? null)
-        : await opts.sessionFactory!();
-    }
-    const s = holder.session;
+    const s = await lease.get();
     // 会话的生命周期由本函数掌握：执行器关掉的是这个壳，真正的 page 留到不变量之后。
     return { page: s.page, pw: s.pw, browser: s.browser, close: async () => {} };
   };
@@ -1524,8 +1521,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       }
       page = shell.page;
       url = target;
-    } else if (holder.session !== null) {
-      page = holder.session.page;
+    } else if (lease.peek() !== null) {
+      page = lease.peek()!.page;
       try { url = String((page as unknown as { url(): string }).url()); } catch { url = null; }
     }
     if (verbose) {
@@ -1787,13 +1784,13 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
         const sg = plan.subgoals[browserIndexOf[j]!];
         const when = sg?.when;
         if (when === undefined || when === null) return true;
-        if (holder.session === null) {
+        if (lease.peek() === null) {
           // 还没有页面可问（旅程第一步是工具步、候选却在浏览器步上）：此刻无法成立，
           // 如实当作"不适用"，继续看下一个候选——不为了让分支走通去偷偷开一个浏览器。
           if (verbose) console.log(`  [journey] next candidate ${JSON.stringify(cand.id ?? j)} not evaluated (no page yet)`);
           return false;
         }
-        return await checkSignal(holder.session.page as never, when, { hosts: pack.hosts ?? null });
+        return await checkSignal(lease.peek()!.page as never, when, { hosts: pack.hosts ?? null });
       });
       // 被声明式边**跨过去**的步：这条边就是作者对"这条路径上它不适用"的声明，
       // 所以记成 `skipped`（不是留在 pending——那会让任何前向分支都红）。
@@ -1813,8 +1810,8 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     // ---- 验收：结束状态上的不变量（同一会话、同一 cookie/页面） -------------
     // 分段跑不验收整条旅程：它不是“完整流程通过”，只是“这一段通过”。
     if (!segmentRequested) {
-    // 显式再标注一次类型：`session` 是在 `getShell` 闭包里赋值的，控制流分析看不到。
-    const live = holder.session;
+    // 结束态/不变量要读的会话（惰性未建 = null：web 不变量按"未成立"处理）。
+    const live = lease.peek();
     // `expanded.invariants`（不是 pack.invariants）：展开期已做槽位替换，与 journey 同一套规则。
     for (const inv of expanded.invariants) {
       const kind = inv.adapter ?? "web";
@@ -1851,7 +1848,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     }
     }
   } finally {
-    if (holder.session !== null) await holder.session.close();
+    await lease.close();
   }
 
   // Slice 4：类型账（只在**混用 ≥2 种类型**的旅程里出现，单一类型产物逐字节不变）。
@@ -2123,18 +2120,14 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
   } else {
     preflightConfig(opts);
     for (const n of pack.sources ?? []) loadSource(String(n));
-    const holder: { session: BrowserSession | null } = { session: null };
-    const ensureSession = async (): Promise<BrowserSession> => {
-      if (holder.session === null) {
-        const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
-        holder.session = opts.sessionFactory !== undefined
-          ? await opts.sessionFactory()
-          : await browserSession(opts.headful !== true, device, pack.policy?.browser ?? null);
-      }
-      const session = holder.session;
-      if (session === null) throw new Error("browser session was not created");
-      return session;
-    };
+    const own = opts.sessionFactory === undefined;
+    // 惰性会话租约（与 suite/runApp 同一份语义）：首个需要页面的调用才建会话；收尾关一次。
+    const lease = createSessionLease(async () => {
+      const device = (pack.device ?? null) as Parameters<typeof browserSession>[1];
+      return own
+        ? browserSession(opts.headful !== true, device, pack.policy?.browser ?? null)
+        : opts.sessionFactory!();
+    });
     // §3：与 `runApp` 共用同一份策略解析——否则脚本应用会静默忽略 meta.policy
     // （同一个 `policy.conf_floor` 在数据脚本上生效、在 flow 脚本上不生效）。
     const resolvedPolicy = resolveRunPolicy(pack, opts);
@@ -2144,8 +2137,8 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     anyDeclared = resolvedPolicy.anyDeclared;
     // task-24/4：strict 旗标存活到报告点（runWarnings 的 model_face_idle 判定用）。
     actHintStrictForWarn = resolvedPolicy.policy.act_hint?.value === "strict";
-    // 裸 `let` 会被 TS 的控制流收窄成 never（闭包里的赋值它看不见）——与上面的 session
-    // 同一个坑，用 holder：收尾要把 `providerDegraded` 从执行器实例上读出来（A3）。
+    // 裸 `let` 会被 TS 的控制流收窄成 never（闭包里的赋值它看不见）——用 holder：
+    // 收尾要把 `providerDegraded` 从执行器实例上读出来（A3）。
     const mwHolder: { current: BrowserMiddleware | null } = { current: null };
     const getMw = (): BrowserMiddleware => {
       if (mwHolder.current === null) {
@@ -2366,7 +2359,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       pack: pack as never,
       slots: slots as Record<string, string>,
       runtime: { outDir, runId, today: opts.today ?? "" },
-      ensureSession, mw: getMw, trace, toolRunner,
+      ensureSession: () => lease.get(), mw: getMw, trace, toolRunner,
       // T2：脚本路径与声明式旅程共享同一份运行级数据集（ctx.run 的 returns 写这里）。
       dataset,
       allowSources: opts.sources !== false,
@@ -2429,7 +2422,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     } finally {
       // B2（P5）：先读会话事实再关会话（关了就读不到 final_url 了）；读失败按缺键处理，
       // 不让证据采集影响运行结果本身。字段语义见 `AppRunEnv`。
-      const liveSession = holder.session;
+      const liveSession = lease.peek();
       if (liveSession !== null) {
         // task-21/D-1：浏览器启动事实（binary_basename/headless/persistent_profile）——
         // 会话关闭前读一次（与 final_url/viewport 同一先例；sessionFactory 注入的会话缺字段省略）。
@@ -2457,8 +2450,9 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         } catch { /* 拿不到就省略 */ }
         // A4：关会话前清章（复用会话时旧章不该跨运行残留）。best-effort，失败吞掉。
         try { await liveSession.page.evaluate(cleanStampAttrs); } catch { /* 清理失败不影响结果 */ }
-        try { await liveSession.close(); } catch { /* 关会话失败不该掩盖运行结果 */ }
       }
+      // 会话关闭与 runApp 同一位置：不变量/结束态/环境事实都读完之后；未创建 = no-op。
+      await lease.close();
       // A3：决策源降级的原因只活在执行器实例上——脚本抛 StopError 也不能把它弄丢
       //（拿不到场就记 null：重放分支没有执行器，字段缺席 = 没降级，与 runApp 同口径）。
       providerDegraded = mwHolder.current?.providerDegraded || null;
