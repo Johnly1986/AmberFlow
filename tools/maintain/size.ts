@@ -188,8 +188,12 @@ export function mergeBaselineForUpdate(input: UpdateInput, previous: SizeBaselin
   }
   const prevFns = new Map<string, number>();
   for (const fn of previous.functions) prevFns.set(`${fn.file}\u0000${fn.name}`, fn.lines);
+  const phaseFns = new Set(previous.phaseFunctions);
   const nextFns: FunctionInfo[] = [];
   for (const fn of input.functions) {
+    // 计划内阶段函数是显式 allowlist 例外（≤ phaseFunctionMaxLines），--update 不把它当
+    // "新增超标函数"拒绝，也不把它记入 functions 存量清单（另有 phaseFunctions 名单）。
+    if (phaseFns.has(`${fn.file}#${fn.name}`)) continue;
     if (fn.lines <= input.limits.newFunctionMaxLines) continue;
     const old = prevFns.get(`${fn.file}\u0000${fn.name}`);
     if (old === undefined) {

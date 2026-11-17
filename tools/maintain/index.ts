@@ -263,7 +263,14 @@ function selfTest(): number {
   if (mlLower.errors.length > 0 || mlLower.next.mwConstructions !== 1) failures.push("mainline update 正例（工厂下调）被误报");
   const mlGrow = mergeMainlineForUpdate({ mwConstructions: 1, runEntryCalls: 12 }, { mwConstructions: 2, runEntryCalls: 12 });
   if (!mlGrow.errors.some((e) => /mwConstructions/.test(e))) failures.push("mainline update 增长未被拒绝");
-  console.log("maintain --self-test: OK — 负向断言 22 条（size 4 / docs 5 / mainline 4 / mainline-update 1 / comments 4 / comments-update 2 / constants 2）+ 正例 7 条全部符合预期");
+  // phaseFunctions：显式阶段例外不得被 --update 误报为「新增超标函数」
+  const phaseBaseline = { ...empty, phaseFunctions: ["src/engine/executor.ts#phaseFn"] };
+  const phaseUpdate = mergeBaselineForUpdate({
+    files: [], functions: [{ file: "src/engine/executor.ts", name: "phaseFn", lines: 269 }],
+    limits, template: phaseBaseline,
+  }, phaseBaseline);
+  if (phaseUpdate.errors.length > 0) failures.push("phaseFunctions 例外被 --update 误报为新增超标函数");
+  console.log("maintain --self-test: OK — 负向断言 22 条（size 4 / docs 5 / mainline 4 / mainline-update 1 / comments 4 / comments-update 2 / constants 2）+ 正例 8 条全部符合预期");
   return 0;
 }
 
