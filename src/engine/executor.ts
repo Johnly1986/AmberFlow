@@ -286,6 +286,16 @@ type PostActionPhase = {
   done: boolean; manualDone: boolean;
 };
 
+/** `runActionPhase`（经 `runActionExecute`）的返回值：control 决定 continue/break；其余回写 run()。 */
+type ActionPhaseResult = {
+  control: "next" | "continue" | "break";
+  ref: string; el: Elem; elems: ElemPool;
+  desc?: string; how?: string | null; executed?: boolean; inert?: boolean;
+  post?: Awaited<ReturnType<BrowserMiddleware["snapshot"]>>;
+  lastEffect?: StateEffect; flagSuspectedAsync?: () => void;
+  cmdDoneId?: string | null; nextCmdI?: number | null; executedDelta?: number;
+};
+
 /* ------------------------------------------------------------------ helpers */
 
 /**
@@ -4057,459 +4067,27 @@ export class BrowserMiddleware {
         if (ref === null) break;
 
         let el = elems[ref]!;
-        // ActionAdapter 能力面：命令闭集声明的 op 必须是当前元素已声明的能力。
-        // 这不是新的动作生成路径，只是把"跑了才发现不支持"提前到执行前。
-        if (commandMode && cmdPick) {
-          const caps = actionCapabilities(el);
-          const op = String(cmdPick.cmd.op);
-          if (op !== "skip" && !caps.includes(op as ActionCapability)) {
-            // A2：这个候选不满足 op 能力面，但命令还有其他候选 ⇒ 记跳过、禁用本候选、下一步
-            // 换下一个（可行动优先的意义）；全部候选都试完仍不支持 ⇒ 走下面的诚实停因。
-            const alt = cmdPick.cands.some((r) => r !== ref && !(r in forbidden)
-              && actionCapabilities(elems[r]!).includes(op as ActionCapability));
-            if (alt) {
-              forbid(ref, el, "action_unsupported");
-              noteSkipped({ command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null, ref, reason: "action_unsupported",
-                detail: `element declares [${caps.join(", ")}] but the command op is '${op}'; trying the next candidate` });
-              cmdAttempts[cmdPick.cmd.id] = (cmdAttempts[cmdPick.cmd.id] ?? 0) + 1;
-              if (verbose) console.log(`  step ${stepNo}: command ${cmdPick.cmd.id} candidate ${ref} lacks '${op}' -> next candidate`);
-              continue;
-            }
-            // B1：fill（命令闭集里唯一的取值/打字 op）被拒时点名出路——只说"元素不声明这个 op"
-            // 用户不知道怎么走（12 轮实测：Maps 搜索框 role=combobox 归 select 族，fill 被拒）。
-            // click/scroll 被拒的出路不同（A2 停因判别已覆盖），不加这句。
-            const remedy = op === "fill"
-              ? (caps.includes("upload")
-                // U6：file input 归 upload 族——fill 被拒时直接点名正确的 op，别把作者引向决策语句。
-                ? `。该目标是文件输入（input[type=file]）——上传用命令 op 'upload'（值走声明绑定），不是 fill`
-                : `。该输入族不支持命令 ${op}——改用决策语句（省略 act，值经 slots 绑定）或深链直达目标 URL`)
-              : op === "upload"
-                ? "。upload 只对 input[type=file] 成立——检查目标 hint 是否指到了文件输入"
-                : op === "clickAt"
-                  ? "。clickAt 只对 click 族元素成立（如 canvas）——检查目标 hint 是否指到了非点击控件"
-                  : "";
-            await targets.cleanupIdentity();   // FW8：能力守门在动作前停——章到此已无用途
-            await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
-            stop("action_unsupported",
-              `command ${JSON.stringify(cmdPick.cmd.id)} declares op '${op}', but element ${ref} `
-              + `(${el.tag} "${el.label}") only declares [${caps.join(", ")}] on step ${stepNo}`
-              + remedy, stepNo);
-            if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-            break;
-          }
-        }
-        // 05-B：动作文案按命令 op 派生（此前只有 typing/click 两态，scroll 步
-        // 出现 `hows:["scrolled"]` 配 `descs:["click a \"…\""]` 的自相矛盾行）。
-        // 非命令模式保持原语义（typing→click 两态）；desc 只进展示与风险票措辞，不是功能键。
-        const cmdOpName = commandMode && cmdPick ? String(cmdPick.cmd.op) : "";
-        const verb = cmdOpName === "scroll" ? "scroll to"
-          : cmdOpName === "drag" ? "drag"
-          : cmdOpName === "check" ? "check"
-          : cmdOpName === "hover" ? "hover"
-          : cmdOpName === "clickAt" ? "click at"
-          : cmdOpName === "upload" ? "upload"
-          : cmdOpName === "fill" ? (this._isTyping(el) ? "type text into" : "fill")
-          : cmdOpName === "select" ? "select"
-          : this._isTyping(el) ? "type text into" : "click";
-        const desc = `${verb} ${el.tag} "${el.label}"`;
-        // DRY RUN stops HERE: the target is resolved (rule hint / local model /
-        // re-observe / escalate) and probed, and nothing on the page is touched —
-        // the pre-fill guard below and `occludedReason` (which clicks) are never
-        // reached. The caller gets "what WOULD happen" as evidence.
-        if (dryRun) {
-          const probe = await this.dryRunProbe(pg, el, force);
-          dryRan = true;
-          await targets.cleanupIdentity();   // FW8：干跑探测结束，章不再需要
-          await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
-          if (probe.actionable) {
-            stop("dry_run", `dry-run: would ${desc}${force ? " (force)" : ""} (${method}, conf=${conf.toFixed(2)})`, stepNo);
-          } else {
-            stop("dry_run_not_actionable",
-              `dry-run: target not actionable (${probe.reason ?? "unknown"})`, stepNo);
-          }
-          trace.push({
-            step: stepNo, desc, method, conf: round3(conf), executed: false,
-            dry_run: true, actionable: probe.actionable,
-            ...(probe.reason === null ? {} : { reason: probe.reason }),
-            ...(force ? { forced: true } : {}),
-            would: `${el.tag} "${el.label}"`, url: urlOf(pg),
-            ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
-          });
-          if (verbose) {
-            console.log(`  step ${stepNo}: DRY-RUN `
-              + (probe.actionable ? `would ${desc}${force ? " (force)" : ""}` : `not actionable (${probe.reason ?? "unknown"})`));
-          }
-          break;
-        }
-        // P2: a fill/select whose DECLARED binding has no value stops here — honestly,
-        // structurally, and never with a guessed value. (The substring-heuristic path
-        // below is the old behaviour; a command space replaces guessing with binding.)
-        if (commandMode && commandBindMissing !== null) {
-          noteSkipped({ command_id: cmdPick!.cmd.id, target: cmdPick!.cmd.target ?? null, ref: cmdPick!.ref, reason: "needs_value", detail: commandBindMissing });
-          trace.push({
-            step: stepNo, desc, how: "needs_value", executed: false, method, conf: 1.0,
-            command: cmdPick!.cmd.id, ref: cmdPick!.ref, skipped: true, skip_reason: "needs_value",
-            url: urlOf(pg), ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
-          });
-          await targets.cleanupIdentity();   // FW8：缺值在动作前停——章到此已无用途
-          await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
-          stop("needs_value",
-            `command ${JSON.stringify(cmdPick!.cmd.id)}: ${commandBindMissing} `
-            + `— a declared binding either has its value in the plan or the step stops (红线②: never guessed) on step ${stepNo}`, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-          break;
-        }
-        // Pre-fill guard: a click whose form has empty fields that the plan's
-        // slots can supply would die in HTML5 validation or JS checks — an inert
-        // click and a wasted step. Values come from the plan, never the model.
-        // S4：hover 只移动指针、不应顺手改表单，故不触发预填（既有 click/scroll/drag 行为不变）。
-        if (!this._isTyping(el) && cmdOpName !== "hover") {
-          // Pre-fill before ANY click, including clicks on a submit-type input.
-          for (const pe of await this._missingRequired(pg, slots, elems, values, candidatePriority)) {
-            const [phow] = await this._executeElement(pg, pe, slots, null, undefined, false, values);
-            if (verbose) console.log(`  step ${stepNo}.pre: fill required ${JSON.stringify(pe.label)} -> ${phow}`);
-          }
-        } else if (method === "rule:match" && !commandMode) {
-          // A rule-picked field with no slot value cannot be filled; forbid it so
-          // the next step goes to laya instead of burning the subgoal on
-          // needs_value. Submit-type inputs are the exception: they are CLICKED,
-          // never filled.
-          if (this._slotValue(el, slots, values) === null && !this._isSubmit(el)) {
-            forbid(ref, el, "needs_value");
-            noteSkipped({ ref, reason: "needs_value", ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
-            trace.push({
-              step: stepNo, desc, how: "needs_value", executed: false, method, conf: round3(conf),
-              ref, skipped: true, skip_reason: "needs_value", url: urlOf(pg),
-              ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
-            });
-            await targets.cleanupIdentity();   // FW8：本步不再动作（needs_value）——章清零
-            await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
-            if (verbose) console.log(`  step ${stepNo}: (needs_value, rule) -> skip ${ref}`);
-            continue;
-          }
-        }
-        // §4：可逆性是**声明**，不该靠关键词猜。写了 effect.irreversible 就以它为准
-        // （true ⇒ 一定问人；false ⇒ 这一步非破坏性，跳过一次模型前向，省下 W1 要省的那笔钱）。
-        // 没写就完全走今天的路径：关键词 + 模型票。
-        let risky: boolean, riskP: number;
-        // U6：上传的可逆性弱（只写 input.files，不提交表单），不新增 risky 语义——
-        // 也不让目标 label 的关键词把它误判成破坏性动作。其它 op 的既有判定逐字节不变。
-        if (cmdOpName === "upload") {
-          risky = false;
-          riskP = 0;
-        } else if (effect?.irreversible !== undefined) {
-          risky = effect.irreversible;
-          riskP = effect.irreversible ? 1.0 : 0.0;
-        } else {
-          [risky, riskP] = await this.isRisky(instruction, desc);
-        }
-        let confirmed = false;
-        if (risky) {
-          if (verbose) console.log(`  step ${stepNo}: RISKY ${desc} (p=${riskP.toFixed(2)}) -> asks for confirmation`);
-          confirmed = await this.confirmFn(desc);
-          if (!confirmed) {
-            forbid(ref, el, "risk-declined");
-            noteSkipped({ ref, reason: "risk-declined", ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
-            trace.push({
-              step: stepNo, desc, risky: true, executed: false, confirmed: false, url: urlOf(pg),
-              ref, skipped: true, skip_reason: "risk-declined",
-              ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
-            });
-            await targets.cleanupIdentity();   // FW8：风险闸门拒绝 = 本步不动作——章清零
-            await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
-            continue;
-          }
-        }
-        // S4：stale 重解析重试的账户（本步内最多 STALE_RETRY_MAX 次；trace 每次记录一条）。
-        const STALE_RETRY_MAX = 2;
-        const staleRetries: Array<{ attempt: number; reason: string; ref: string }> = [];
-        const staleEvidence = (): Record<string, unknown> =>
-          staleRetries.length ? { stale_retry: staleRetries.slice() } : {};
-        /** S4：步级 force 声明的执行证据（动作 trace 行上 forced=true）。 */
-        const forcedEvidence = (): Record<string, unknown> => (force ? { forced: true } : {});
-        /** F72-②：显式重扫事实（trace 行 additive；本步至多一次，没跑 = 键不出现）。 */
-        const rehydrateRescanEvidence = (): Record<string, unknown> =>
-          rehydrateRescanFact === null ? {} : { rehydrate_rescan: rehydrateRescanFact };
-        /**
-         * 重试只能对着**可复现的声明**重新解析：命令 target 优先，其次 act hint（规则命中）。
-         * 纯模型挑元素的决策步没有声明目标 ⇒ 不重试（重解析必须复现，不能猜一个"看起来像"的）。
-         */
-        const declaredStaleTarget = commandMode && cmdPick
-          && typeof cmdPick.cmd.target === "string" && cmdPick.cmd.target.trim()
-          ? cmdPick.cmd.target
-          : (method === "rule:match" && curHint !== null ? curHint : null);
-        let pre = await this.snapshot(pg);
-        // Click path goes through the actionability probe: a free element is
-        // clicked inside it ("__clicked__"); a covered/slow one costs 0.8 s and
-        // reports why, instead of burning 5 s + an inert step.
-        let how: string | null = null;
-        let arg: unknown = null;
-        /** S1：本动作的 effect 读回（只有 fill 会产生；最后一次非空值进 StepStateRecord）。 */
-        let fillEffect: StateEffect | undefined;
-        const isScrollCommand = cmdOpName === "scroll";
-        const isDragCommand = cmdOpName === "drag";
-        const isHoverCommand = cmdOpName === "hover";
-        const isClickAtCommand = cmdOpName === "clickAt";
-        let actionability: ActionabilityDetail | null = null;
-        /** 本条动作（含重试）最后一次 actionability 探针给出的失败原因。 */
-        let probeFailure: string | null = null;
-        for (let attempt = 0; ; attempt++) {
-          how = null; arg = null; fillEffect = undefined; actionability = null; probeFailure = null;
-          // force：跳过 actionability 探针，直接按 Playwright force 语义动作（仍要求可定位）。
-          // hover：探针的快路径本身就是一次真点击，悬停必须走 hover 分支、不能过探针。
-          // P0-C：DRF 目标的 click 族动作前必须 hit-test——中心点被覆盖/命中的是祖先时
-          // 不点击，如实记 hit_test 证据（绝不静默成功）。命中通过后仍走既有 actionability 探针。
-          const declaredNow = targets.getDeclared();
-          if (!force && declaredNow !== null && declaredNow.ref === ref && !this._isTyping(el)
-              && !isScrollCommand && !isDragCommand && !isHoverCommand && !isClickAtCommand) {
-            const ht = await this._declaredHitTest(pg, el);
-            if (!ht.ok) {
-              probeFailure = `hit_test:${ht.kind}`;
-              declaredNow.hit_test = ht.kind;
-              declaredNow.blocker = ht.blocker;
-              actionability = {
-                reason: probeFailure, bbox: null, blocker: ht.blocker, requery: "present",
-              };
-            }
-          }
-          if (probeFailure === null && !force && !this._isTyping(el) && !isScrollCommand
-              && !isDragCommand && !isHoverCommand && !isClickAtCommand) {
-            probeFailure = await this.occludedReason(pg, el);
-            // S1：actionability 失败现场（bbox/覆盖者/重查是否还在）；非该原因时保持 null。
-            actionability = this._takeActionabilityDetail();
-            if (probeFailure === "__clicked__") {
-              try {
-                await pg.waitForLoadState("domcontentloaded", { timeout: 3000 });
-              } catch {
-                /* nothing to wait for */
-              }
-              how = "clicked";
-              arg = null;
-            }
-          }
-          if (probeFailure === null && how === null) {
-            // Submit-type inputs carry their label in `value` and must be clicked,
-            // never filled — `_executeElement`'s input branch would return
-            // needs_value otherwise. scroll 是 viewport 语义，必须走专用分支。
-            if (isHoverCommand) {
-              // S4：hover 原语——只移动指针（:hover 展开菜单/图层面板），不点击、不导航。
-              [how, arg, fillEffect] = await this._executeElement(pg, el, slots, null, "hover", force);
-            } else if (isClickAtCommand) {
-              // U7：坐标点击原语——走 _executeElement 的 clickAt 分支（含坐标解析与 bbox 越界校验），
-              // 不能落入下面的中心点击路径，否则坐标原语就退化成"点元素中心"。
-              [how, arg, fillEffect] = await this._executeElement(pg, el, slots,
-                commandMode ? { value: commandValue, byValue: commandByValue } : null,
-                "clickAt", force);
-            } else if (isScrollCommand || isDragCommand) {
-              // A3：`scroll` 命令可带方向原语 `to`（ctx.command("scroll", sel, {to:"bottom"})）——
-              // 语义是"滚动**容器**到方向"，与旧的"把目标滚入视口"不同；旧调用（无 to）逐字节不变。
-              const scrollTo = isScrollCommand ? cmdPick?.cmd.to : undefined;
-              if (scrollTo !== undefined) {
-                const sr = await this._scrollContainerForElement(pg, el, scrollTo);
-                how = sr.ok ? "scrolled" : "action_failed";
-                arg = sr.ok ? sr.scrollTop : (sr.stopCode ?? "not_scrollable");
-              } else {
-                [how, arg, fillEffect] = await this._executeElement(pg, el, slots,
-                  commandMode ? { value: commandValue, byValue: commandByValue } : null,
-                  isDragCommand ? "drag" : "scroll", force);
-              }
-            } else if (!this._isTyping(el)) {
-              [how, arg] = await this._clickOnly(pg, el, force);
-            } else {
-              [how, arg, fillEffect] = await this._executeElement(pg, el, slots,
-                commandMode ? { value: commandValue, byValue: commandByValue } : null,
-                commandMode ? String(cmdPick!.cmd.op) : undefined, force,
-                // U1：决策路径的显式值袋（命令步的具名绑定 `bound` 恒优先，values 不参与）。
-                commandMode ? undefined : values);
-            }
-          }
-          // S4 stale 判据（只有这三类；action-timeout / 有覆盖者且节点仍在都不算 stale）。
-          const staleReason = probeFailure !== null && probeFailure !== "__clicked__"
-            ? (probeFailure === "stale_ref"
-              || (probeFailure.startsWith("not-actionable-or-covered") && actionability?.requery === "detached")
-              ? probeFailure : null)
-            : (how === "stale_ref" || how === "action_failed" ? how : null);
-          if (!staleRetry || staleReason === null || attempt >= STALE_RETRY_MAX || declaredStaleTarget === null) break;
-          // 重抽池：先给重渲染一个短拍（settle 在脏页上会再等静默），再用**同一声明目标**
-          // 在新池上重新解析——这就是 r7 弹层"点前节点被替换/重挂载"的确定性修法。
-          await sleep(120);
-          const fresh = (await this._extractPoolSettled(pg, candidatePriority)).elems;
-          pruneForbids(fresh);
-          // 命令目标：按 op 的能力面重新排候选并剔除已禁；act hint：同一 hint 语义重解析。
-          let freshRef: string | null = null;
-          if (commandMode) {
-            freshRef = this.resolveCommandRef(declaredStaleTarget, fresh, cmdOpName || "click",
-              new Set(Object.keys(forbidden)))[0] ?? null;
-          } else {
-            const r = hintMatch(declaredStaleTarget, fresh, this._hintOpts());
-            if (r !== null && !(r in forbidden)) freshRef = r;
-          }
-          if (freshRef === null || fresh[freshRef] === undefined) break;   // 此刻仍解析不到：不猜、按原失败报
-          const prevDeclared = targets.getDeclared();
-          if (prevDeclared !== null && prevDeclared.ref !== freshRef) targets.setDeclared(null);   // 证据只跟同一元素
-          staleRetries.push({ attempt: attempt + 1, reason: staleReason, ref: freshRef });
-          if (verbose) console.log(`  step ${stepNo}: stale retry ${attempt + 1} (${staleReason}) -> ${freshRef}`);
-          elems = fresh;
-          ref = freshRef;
-          el = fresh[freshRef]!;
-          pre = await this.snapshot(pg);   // 重试动作的 pre 快照 = 此刻页面
-        }
-        // FW8：身份回捞的章只服务本次动作定位——动作尝试（含 stale 重试）一结束就清，
-        // 成功/失败同纪律（与 A3 data-af-probe cleanup 同一做法）。
-        await targets.cleanupIdentity();
-        await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
-        // U6/U7：upload 的文件/声明值非法、clickAt 的坐标坏格式/越界都是**配置错误**，
-        // 不是页面问题——结构化停在这里，不落成"跳过这个候选继续猜下一个"
-        // （那会把配置错误伪装成目标缺失）。
-        if (how === "config_error") {
-          const detail = String(arg ?? `${cmdOpName || "command"} configuration error`);
-          forbid(ref, el, "config_error");
-          noteSkipped({ ref, reason: "config_error",
-            ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}),
-            detail });
-          trace.push({
-            step: stepNo, desc, how: "config_error", executed: false, method, conf: round3(conf),
-            ref, skipped: true, skip_reason: "config_error", url: urlOf(pg),
-            ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
-            ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(),
-            ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
-          });
-          stop("config_error", detail, stepNo);
-          if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
-          break;
-        }
-        if (fillEffect !== undefined) {
-          lastEffect = fillEffect;
-          // S5b：摘要只留 kind/applied（值本身可能是凭据/隐私，进模型上文的面只要事实）。
-          this._lastEffectSeen = { kind: fillEffect.kind, applied: fillEffect.applied };
-        }
-        const executed = how === "clicked" || how === "filled" || how === "scrolled"
-          || how === "dragged" || how === "hovered" || how === "uploaded";
-        if (!executed) {
-          // 末次失败原因：actionability 探针给出的，或动作本身返回的（stale_ref/needs_value/
-          // action_unsupported/action_failed）。
-          const reason = probeFailure !== null && probeFailure !== "__clicked__" ? probeFailure : String(how);
-          // needs_value / stale_ref: this element cannot advance the plan right
-          // now; forbid and try another (no model call).
-          forbid(ref, el, reason);
-          if (reason.startsWith("not-actionable-or-covered") && !reAdmitted.has(ref)) {
-            blockedRetry[ref] = [stepNo, trace.length];
-          }
-          // A1：动作阶段没执行成 —— skipped_actions 记原因与命令身份（零执行步骤的证据）。
-          // S1：not-actionable-or-covered 另附结构化现场（bbox/覆盖者/重查节点是否还在）。
-          noteSkipped({
-            ref, reason,
-            ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}),
-            ...(actionability === null ? {} : {
-              detail: `bbox=${actionability.bbox === null ? "?" : `${actionability.bbox.x},${actionability.bbox.y} ${actionability.bbox.width}x${actionability.bbox.height}`}`
-                + `; blocker=${actionability.blocker ?? "none"}; requery=${actionability.requery}`,
-            }),
-          });
-          // A2：命令步的候选尝试计数（前 4 个为止；失败的候选已被 forbid，下一步换下一个）。
-          if (cmdPick) cmdAttempts[cmdPick.cmd.id] = (cmdAttempts[cmdPick.cmd.id] ?? 0) + 1;
-          trace.push({
-            step: stepNo, desc, how: reason, executed: false, method, conf: round3(conf),
-            ref, skipped: true, skip_reason: reason, url: urlOf(pg),
-            ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
-            ...(actionability === null ? {} : { actionability }),
-            ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(),
-            ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
-          });
-          if (verbose) console.log(`  step ${stepNo}: (${reason}, ${method}) -> skip ${ref}`);
-          continue;
-        }
-        const post = await this.snapshot(pg);
-        // U7：clickAt 的实际点击坐标进证据（trace 行 position + executed_actions.position）；
-        // changed/inert 沿用 click 的口径（pre/post 快照 diff），不为坐标原语新造判据。
-        const clickRaw = cmdOpName === "clickAt" && typeof arg === "object" && arg !== null
-          ? (arg as { position?: unknown }).position
-          : undefined;
-        const clickPosition = typeof clickRaw === "object" && clickRaw !== null
-          && typeof (clickRaw as { x?: unknown }).x === "number"
-          && typeof (clickRaw as { y?: unknown }).y === "number"
-          ? { x: (clickRaw as { x: number }).x, y: (clickRaw as { y: number }).y }
-          : null;
-        // U6：upload 的 changed 是**动作结果**而不是快照 diff——文件写进 input 不一定改
-        // url/text/input value 快照。口径：调用后 input.files.length >= 期望数。
-        const upload = how === "uploaded" && typeof arg === "object" && arg !== null
-          ? arg as { files?: unknown; count?: unknown; expected?: unknown }
-          : null;
-        const uploadFiles = upload !== null && Array.isArray(upload.files)
-          ? upload.files.filter((f): f is string => typeof f === "string")
-          : null;
-        // A1：changed = pre/post 快照是否变化（诚实字段，供审查判"点击成功但页面没动"）。
-        const changed = upload !== null
-          ? Number(upload.count) >= Number(upload.expected)
-          : JSON.stringify(pre) !== JSON.stringify(post);
-        // scroll 改变的是 viewport，不是 url/text/input 快照；不能把“快照没变”误判成 inert。
-        // S4 hover 同理：它改变的是指针/`:hover` 状态，纯视觉展开未必改快照——不据此判死元素。
-        const inert = (how === "scrolled" || how === "dragged" || how === "hovered") ? false : !changed;
-        // A1：本子目标真的执行了几个动作（零执行步骤的判据）。
-        executedCount += 1;
-        // P2: an executed command is ACTED whether or not the page moved — the walk
-        // must not re-drive the same command next step (its element is forbidden on
-        // inert anyway, but the closed set advances by the command's identity, not the
-        // element's). `executed && !inert` also advances `target_hints` below.
-        if (executed && cmdPick) {
-          cmdDone.add(cmdPick.cmd.id);
-          cmdI = cmdPick.index + 1;
-        }
-        // A1：动作身份（op/ref/target）落 trace —— executed_actions / skipped_actions 从这里对账。
-        const actionOp = commandMode && cmdPick ? String(cmdPick.cmd.op)
-          : how === "filled" ? (el.tag === "select" ? "select" : "fill")
-          : how === "scrolled" ? "scroll"
-          : how === "dragged" ? "drag"
-          : how === "hovered" ? "hover"
-          : "click";
-        // A1 §2.2.5：click 执行了、但 pre/post 快照没变，随后 done 却成立 —— 这不是"死元素"，
-        // 而是效果异步到达（实测形态：点击后 1s 才长出新行）。此时必须记 suspected_async 警告，
-        // 而不是 forbid + 写 outcome memory inert（那会把一次有效动作记成死元素，跨运行继续误伤）。
-        const flagSuspectedAsync = (): void => {
-          if (how !== "clicked" || changed) return;
-          const idx = pendingAfterIdx;
-          const row = idx === null ? undefined : trace[idx];
-          if (row !== undefined) {
-            row.inert = false;            // 不是 inert：效果在快照之后到达
-            row.suspected_async = true;
-          }
-          const warning = `suspected_async: click on ${el.tag} "${el.label}" did not change the pre/post `
-            + `snapshot, but the done signal held afterwards (step ${stepNo})`;
-          warnings.push(warning);
-          if (verbose) console.log(`  step ${stepNo}: ${warning}`);
-        };
-        // F83：行证据（row_evidence，v1.0 §3.7 目标⑤）——声明 row-index/in-row 的目标解析
-        // 成功后，所选 Elem 的实值进 trace（事后可审计"点的是哪一行"：row_index 回答第几个
-        // 成员、row_texts 回答那一行长什么）。仅字段存在时出现；缺省路径零新字段。
-        const rowDeclaredHint = commandMode && cmdPick ? String(cmdPick.cmd.target ?? "") : curHint;
-        const rowParsed = rowDeclaredHint ? parseHint(rowDeclaredHint) : null;
-        const rowEvidenceOut = rowEvidence(el, rowParsed);
-        trace.push({
-          step: stepNo, desc, how, value: redactValue(el, uploadFiles ?? (clickPosition !== null ? null : arg)),
-          risky, executed, confirmed, method,
-          decision_kind: decisionKind,
-          conf: round3(conf), ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
-          ref, op: actionOp,
-          ...(cmdPick?.cmd.target !== undefined && cmdPick.cmd.target !== "" ? { target: cmdPick.cmd.target } : {}),
-          changed,
-          ...(uploadFiles !== null ? { files: uploadFiles } : {}),
-          ...(clickPosition !== null ? { position: clickPosition } : {}),
-          ...(nominatedRepair ? { nominated_family_repair: true } : {}),
-          ...(decisionKind === "model" && layaMargin !== null
-            ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}),
-          ...(method === "escalate" && escalatedPick ? { escalated: true } : {}),
-          ...(prevented ? { prevented } : {}),
-          ...(noted ? { noted: Object.keys(noted).length } : {}),
-          ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question
-          inert, url: urlOf(pg),
-          ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(),
-          ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(), ...rowEvidenceOut,
+        const action = await this.runActionPhase({
+          pg, stepNo, instruction, verbose, elems, ref, el, cmdPick, commandMode, commandValue, commandByValue,
+          commandBindMissing, dryRun, force, effect, slots, values, candidatePriority, curHint, method, conf, mm,
+          decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, prevented, noted, staleRetry,
+          rehydrateRescanFact, targets, trace, cmdAttempts, blockedRetry, reAdmitted, forbidden, forbid, noteSkipped,
+          pruneForbids, stop, stopReason: () => acct.stopReason, domFallbackCleanup, markDryRan: () => { dryRan = true; },
+          getPendingAfterIdx: () => pendingAfterIdx, warnings, actionDeclEvidence, refCollision, domFallbackEvidence,
         });
-        // A1 子改动③：这个已执行动作的 after 签名等下一次观察落账（见循环头部的落账点）。
+        ref = action.ref; el = action.el; elems = action.elems;
+        if (action.control === "continue") continue;
+        if (action.control === "break") break;
+        if (action.lastEffect !== undefined) lastEffect = action.lastEffect;
+        executedCount += action.executedDelta ?? 0;
+        if (action.cmdDoneId != null) { cmdDone.add(action.cmdDoneId); cmdI = action.nextCmdI ?? cmdI; }
+        const post = action.post!;
         const postPhase = await this.runPostAction({
-          pg, stepNo, verbose, instruction, elems, ref: ref!, el, desc, how: how!, method, conf, inert, executed, mm, decisionKind, post, hostGate,
+          pg, stepNo, verbose, instruction, elems, ref, el, desc: action.desc!, how: action.how!,
+          method, conf, inert: action.inert!, executed: action.executed!, mm, decisionKind, post, hostGate,
           trace, setPendingAfterIdx: (idx) => { pendingAfterIdx = idx; }, done, manualDone, donePreheld, manualGoal,
           manualConfirmFn, goalSignalFn, goalHeld,
-          cmdWalkComplete, flagSuspectedAsync, forbid, outcomeMemory, effectiveRuns, hintMemory, doneTimeoutMs, donePollMs,
+          cmdWalkComplete, flagSuspectedAsync: action.flagSuspectedAsync!, forbid, outcomeMemory, effectiveRuns, hintMemory, doneTimeoutMs, donePollMs,
           stepStartUrl, stepStartTabs, stop, stopReason: () => acct.stopReason, isDone: (instr, page) => this.isDone(instr, page),
         });
         done = postPhase.done;
@@ -5559,8 +5137,7 @@ export class BrowserMiddleware {
         return { control: "break", done, manualDone };
       }
       const attested = await manualConfirmFn(instruction, excerpt);
-      trace.push({
-        step: stepNo, desc, how: attested ? "manual_confirmed" : "manual_declined",
+      trace.push({ step: stepNo, desc, how: attested ? "manual_confirmed" : "manual_declined",
         executed: true, method: "manual", conf: round3(conf), manual: true,
         url: urlOf(pg), state: excerpt,
       });
@@ -5633,6 +5210,428 @@ export class BrowserMiddleware {
     // 动作间最小等待：只在实际执行过动作、且还要继续要下一个动作时付。
     if (executed && this.actionDelayMs > 0) await sleep(this.actionDelayMs);
     return { control: "next", done, manualDone };
+  }
+
+  /** 4d 阶段：动作准备（ActionAdapter 能力面/命令文案/DRY-RUN/needs_value 早停/pre-fill/风险闸门）；
+   * 准备通过后交给 runActionExecute（stale 重试/执行/证据/trace.push）。 */
+  private async runActionPhase(a: {
+    pg: AnyPage; stepNo: number; instruction: string; verbose: boolean; elems: ElemPool; ref: string; el: Elem;
+    cmdPick: { cmd: CommandDecl; ref: string; index: number; cands: string[] } | null; commandMode: boolean;
+    commandValue: unknown; commandByValue: boolean; commandBindMissing: string | null;
+    dryRun: boolean; force: boolean; effect: { irreversible?: boolean } | null | undefined;
+    slots: Record<string, unknown>; values: Record<string, unknown>; candidatePriority: "bucketed" | "main-first";
+    curHint: string | null; method: string; conf: number; mm: string; decisionKind: "rule" | "model" | "escalate";
+    layaMargin: number | null; tierAsk: { n: number; tier: number } | null; nominatedRepair: boolean;
+    escalatedPick: string | null; prevented: number; noted: Record<string, string> | null;
+    staleRetry: boolean; rehydrateRescanFact: unknown;
+    targets: DeclaredTargetsResolver; trace: TraceStep[]; cmdAttempts: Record<string, number>;
+    blockedRetry: Record<string, [number, number]>; reAdmitted: Set<string>;
+    forbidden: Record<string, Sig>; forbid: (ref: string, el: Elem, why: string) => void;
+    noteSkipped: (s: SkippedAction) => void; pruneForbids: (pool: ElemPool) => void;
+    stop: (code: StopCode, detail?: string, at?: number) => void; stopReason: () => string;
+    domFallbackCleanup: () => Promise<void>; markDryRan: () => void;
+    getPendingAfterIdx: () => number | null; warnings: string[];
+    actionDeclEvidence: () => Record<string, unknown>; refCollision: () => Record<string, unknown>;
+    domFallbackEvidence: () => Record<string, unknown>;
+  }): Promise<ActionPhaseResult> {
+    const { pg, stepNo, instruction, verbose, elems, ref, el, cmdPick, commandMode, commandValue, commandByValue,
+      commandBindMissing, dryRun, force, effect, slots, values, candidatePriority, curHint, method, conf, mm,
+      decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, prevented, noted, staleRetry,
+      rehydrateRescanFact, targets, trace, cmdAttempts, blockedRetry, reAdmitted, forbidden, forbid, noteSkipped,
+      pruneForbids, stop, stopReason, domFallbackCleanup, markDryRan, getPendingAfterIdx, warnings,
+      actionDeclEvidence, refCollision, domFallbackEvidence } = a;
+    // ActionAdapter 能力面：命令闭集声明的 op 必须是当前元素已声明的能力。
+    if (commandMode && cmdPick) {
+      const caps = actionCapabilities(el);
+      const op = String(cmdPick.cmd.op);
+      if (op !== "skip" && !caps.includes(op as ActionCapability)) {
+        // A2：这个候选不满足 op 能力面，但命令还有其他候选 ⇒ 记跳过、禁用本候选、下一步
+        const alt = cmdPick.cands.some((r) => r !== ref && !(r in forbidden)
+          && actionCapabilities(elems[r]!).includes(op as ActionCapability));
+        if (alt) {
+          forbid(ref, el, "action_unsupported");
+          noteSkipped({ command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null, ref, reason: "action_unsupported",
+            detail: `element declares [${caps.join(", ")}] but the command op is '${op}'; trying the next candidate` });
+          cmdAttempts[cmdPick.cmd.id] = (cmdAttempts[cmdPick.cmd.id] ?? 0) + 1;
+          if (verbose) console.log(`  step ${stepNo}: command ${cmdPick.cmd.id} candidate ${ref} lacks '${op}' -> next candidate`);
+          return { control: "continue", ref, el, elems };
+        }
+        // B1：fill（命令闭集里唯一的取值/打字 op）被拒时点名出路——只说"元素不声明这个 op"
+        const remedy = op === "fill"
+          ? (caps.includes("upload")
+            // U6：file input 归 upload 族——fill 被拒时直接点名正确的 op，别把作者引向决策语句。
+            ? `。该目标是文件输入（input[type=file]）——上传用命令 op 'upload'（值走声明绑定），不是 fill`
+            : `。该输入族不支持命令 ${op}——改用决策语句（省略 act，值经 slots 绑定）或深链直达目标 URL`)
+          : op === "upload"
+            ? "。upload 只对 input[type=file] 成立——检查目标 hint 是否指到了文件输入"
+            : op === "clickAt"
+              ? "。clickAt 只对 click 族元素成立（如 canvas）——检查目标 hint 是否指到了非点击控件"
+              : "";
+        await targets.cleanupIdentity();   // FW8：能力守门在动作前停——章到此已无用途
+        await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
+        stop("action_unsupported",
+          `command ${JSON.stringify(cmdPick.cmd.id)} declares op '${op}', but element ${ref} (${el.tag} "${el.label}") only declares [${caps.join(", ")}] on step ${stepNo}`
+          + remedy, stepNo);
+        if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+        return { control: "break", ref, el, elems };
+      }
+    }
+    // 05-B：动作文案按命令 op 派生（此前只有 typing/click 两态，scroll 步
+    const cmdOpName = commandMode && cmdPick ? String(cmdPick.cmd.op) : "";
+    const verb = cmdOpName === "scroll" ? "scroll to"
+      : cmdOpName === "drag" ? "drag"
+      : cmdOpName === "check" ? "check"
+      : cmdOpName === "hover" ? "hover"
+      : cmdOpName === "clickAt" ? "click at"
+      : cmdOpName === "upload" ? "upload"
+      : cmdOpName === "fill" ? (this._isTyping(el) ? "type text into" : "fill")
+      : cmdOpName === "select" ? "select"
+      : this._isTyping(el) ? "type text into" : "click";
+    const desc = `${verb} ${el.tag} "${el.label}"`;
+    // DRY RUN stops HERE: the target is resolved (rule hint / local model /
+    if (dryRun) {
+      const probe = await this.dryRunProbe(pg, el, force);
+      markDryRan();
+      await targets.cleanupIdentity();   // FW8：干跑探测结束，章不再需要
+      await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
+      if (probe.actionable) {
+        stop("dry_run", `dry-run: would ${desc}${force ? " (force)" : ""} (${method}, conf=${conf.toFixed(2)})`, stepNo);
+      } else {
+        stop("dry_run_not_actionable",
+          `dry-run: target not actionable (${probe.reason ?? "unknown"})`, stepNo);
+      }
+      trace.push({ step: stepNo, desc, method, conf: round3(conf), executed: false, dry_run: true, actionable: probe.actionable, ...(probe.reason === null ? {} : { reason: probe.reason }), ...(force ? { forced: true } : {}),
+        would: `${el.tag} "${el.label}"`, url: urlOf(pg),
+        ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
+      });
+      if (verbose) {
+        console.log(`  step ${stepNo}: DRY-RUN `
+          + (probe.actionable ? `would ${desc}${force ? " (force)" : ""}` : `not actionable (${probe.reason ?? "unknown"})`));
+      }
+      return { control: "break", ref, el, elems };
+    }
+    // P2: a fill/select whose DECLARED binding has no value stops here — honestly,
+    if (commandMode && commandBindMissing !== null) {
+      noteSkipped({ command_id: cmdPick!.cmd.id, target: cmdPick!.cmd.target ?? null, ref: cmdPick!.ref, reason: "needs_value", detail: commandBindMissing });
+      trace.push({ step: stepNo, desc, how: "needs_value", executed: false, method, conf: 1.0, command: cmdPick!.cmd.id, ref: cmdPick!.ref, skipped: true, skip_reason: "needs_value",
+        url: urlOf(pg), ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
+      });
+      await targets.cleanupIdentity();   // FW8：缺值在动作前停——章到此已无用途
+      await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
+      stop("needs_value",
+        `command ${JSON.stringify(cmdPick!.cmd.id)}: ${commandBindMissing} — a declared binding either has its value in the plan or the step stops (红线②: never guessed) on step ${stepNo}`, stepNo);
+      if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+      return { control: "break", ref, el, elems };
+    }
+    // Pre-fill guard: a click whose form has empty fields that the plan's
+    if (!this._isTyping(el) && cmdOpName !== "hover") {
+      // Pre-fill before ANY click, including clicks on a submit-type input.
+      for (const pe of await this._missingRequired(pg, slots, elems, values, candidatePriority)) {
+        const [phow] = await this._executeElement(pg, pe, slots, null, undefined, false, values);
+        if (verbose) console.log(`  step ${stepNo}.pre: fill required ${JSON.stringify(pe.label)} -> ${phow}`);
+      }
+    } else if (method === "rule:match" && !commandMode) {
+      // A rule-picked field with no slot value cannot be filled; forbid it so
+      if (this._slotValue(el, slots, values) === null && !this._isSubmit(el)) {
+        forbid(ref, el, "needs_value");
+        noteSkipped({ ref, reason: "needs_value", ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
+        trace.push({ step: stepNo, desc, how: "needs_value", executed: false, method, conf: round3(conf), ref, skipped: true, skip_reason: "needs_value", url: urlOf(pg),
+          ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
+        });
+        await targets.cleanupIdentity();   // FW8：本步不再动作（needs_value）——章清零
+        await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
+        if (verbose) console.log(`  step ${stepNo}: (needs_value, rule) -> skip ${ref}`);
+        return { control: "continue", ref, el, elems };
+      }
+    }
+    // §4：可逆性是**声明**，不该靠关键词猜。写了 effect.irreversible 就以它为准
+    let risky: boolean, riskP: number;
+    // U6：上传的可逆性弱（只写 input.files，不提交表单），不新增 risky 语义——
+    if (cmdOpName === "upload") {
+      risky = false;
+      riskP = 0;
+    } else if (effect?.irreversible !== undefined) {
+      risky = effect.irreversible;
+      riskP = effect.irreversible ? 1.0 : 0.0;
+    } else {
+      [risky, riskP] = await this.isRisky(instruction, desc);
+    }
+    let confirmed = false;
+    if (risky) {
+      if (verbose) console.log(`  step ${stepNo}: RISKY ${desc} (p=${riskP.toFixed(2)}) -> asks for confirmation`);
+      confirmed = await this.confirmFn(desc);
+      if (!confirmed) {
+        forbid(ref, el, "risk-declined");
+        noteSkipped({ ref, reason: "risk-declined", ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}) });
+        trace.push({ step: stepNo, desc, risky: true, executed: false, confirmed: false, url: urlOf(pg), ref, skipped: true, skip_reason: "risk-declined",
+          ...actionDeclEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
+        });
+        await targets.cleanupIdentity();   // FW8：风险闸门拒绝 = 本步不动作——章清零
+        await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
+        return { control: "continue", ref, el, elems };
+      }
+    }
+    return this.runActionExecute({
+      pg, stepNo, instruction, verbose, elems, ref, el, desc, cmdOpName, risky, confirmed, force, method, conf, mm,
+      decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, prevented, noted, cmdPick, commandMode,
+      commandValue, commandByValue, slots, values, candidatePriority, curHint, staleRetry, rehydrateRescanFact,
+      targets, trace, cmdAttempts, blockedRetry, reAdmitted, forbidden, forbid, noteSkipped, pruneForbids,
+      stop, stopReason, domFallbackCleanup, getPendingAfterIdx, warnings, actionDeclEvidence, refCollision,
+      domFallbackEvidence,
+    });
+  }
+
+  /** 4d 阶段：动作执行（stale 重试/分派/证据/trace.push）；返回 run 级回写字段。 */
+  private async runActionExecute(a: {
+    pg: AnyPage; stepNo: number; instruction: string; verbose: boolean; elems: ElemPool; ref: string; el: Elem;
+    desc: string; cmdOpName: string; risky: boolean; confirmed: boolean; force: boolean; method: string; conf: number;
+    mm: string; decisionKind: "rule" | "model" | "escalate"; layaMargin: number | null;
+    tierAsk: { n: number; tier: number } | null; nominatedRepair: boolean; escalatedPick: string | null;
+    prevented: number; noted: Record<string, string> | null;
+    cmdPick: { cmd: CommandDecl; ref: string; index: number; cands: string[] } | null; commandMode: boolean;
+    commandValue: unknown; commandByValue: boolean; slots: Record<string, unknown>; values: Record<string, unknown>;
+    candidatePriority: "bucketed" | "main-first"; curHint: string | null; staleRetry: boolean;
+    rehydrateRescanFact: unknown; targets: DeclaredTargetsResolver; trace: TraceStep[];
+    cmdAttempts: Record<string, number>; blockedRetry: Record<string, [number, number]>; reAdmitted: Set<string>;
+    forbidden: Record<string, Sig>; forbid: (ref: string, el: Elem, why: string) => void;
+    noteSkipped: (s: SkippedAction) => void; pruneForbids: (pool: ElemPool) => void;
+    stop: (code: StopCode, detail?: string, at?: number) => void; stopReason: () => string;
+    domFallbackCleanup: () => Promise<void>; getPendingAfterIdx: () => number | null; warnings: string[];
+    actionDeclEvidence: () => Record<string, unknown>; refCollision: () => Record<string, unknown>;
+    domFallbackEvidence: () => Record<string, unknown>;
+  }): Promise<ActionPhaseResult> {
+    const { pg, stepNo, instruction, verbose, elems: elems0, ref: ref0, el: el0, desc, cmdOpName, risky, confirmed,
+      force, method, conf, mm, decisionKind, layaMargin, tierAsk, nominatedRepair, escalatedPick, prevented, noted,
+      cmdPick, commandMode, commandValue, commandByValue, slots, values, candidatePriority, curHint, staleRetry,
+      rehydrateRescanFact, targets, trace, cmdAttempts, blockedRetry, reAdmitted, forbidden, forbid, noteSkipped,
+      pruneForbids, stop, stopReason, domFallbackCleanup, getPendingAfterIdx, warnings, actionDeclEvidence,
+      refCollision, domFallbackEvidence } = a;
+    let elems = elems0; let ref = ref0; let el = el0;
+    let executedDelta = 0; let lastEffectOut: StateEffect | undefined; let cmdDoneId: string | null = null;
+    let nextCmdI: number | null = null;
+    // S4：stale 重解析重试的账户（本步内最多 STALE_RETRY_MAX 次；trace 每次记录一条）。
+    const STALE_RETRY_MAX = 2;
+    const staleRetries: Array<{ attempt: number; reason: string; ref: string }> = [];
+    const staleEvidence = (): Record<string, unknown> => (staleRetries.length ? { stale_retry: staleRetries.slice() } : {});
+    /** S4：步级 force 声明的执行证据（动作 trace 行上 forced=true）。 */
+    const forcedEvidence = (): Record<string, unknown> => (force ? { forced: true } : {});
+    /** F72-②：显式重扫事实（trace 行 additive；本步至多一次，没跑 = 键不出现）。 */
+    const rehydrateRescanEvidence = (): Record<string, unknown> => (rehydrateRescanFact === null ? {} : { rehydrate_rescan: rehydrateRescanFact });
+    /**
+     * 重试只能对着**可复现的声明**重新解析：命令 target 优先，其次 act hint（规则命中）。
+     * 纯模型挑元素的决策步没有声明目标 ⇒ 不重试（重解析必须复现，不能猜一个"看起来像"的）。
+     */
+    const declaredStaleTarget = commandMode && cmdPick
+      && typeof cmdPick.cmd.target === "string" && cmdPick.cmd.target.trim()
+      ? cmdPick.cmd.target
+      : (method === "rule:match" && curHint !== null ? curHint : null);
+    let pre = await this.snapshot(pg);
+    // Click path goes through the actionability probe: a free element is
+    let how: string | null = null;
+    let arg: unknown = null;
+    /** S1：本动作的 effect 读回（只有 fill 会产生；最后一次非空值进 StepStateRecord）。 */
+    let fillEffect: StateEffect | undefined;
+    const isScrollCommand = cmdOpName === "scroll";
+    const isDragCommand = cmdOpName === "drag";
+    const isHoverCommand = cmdOpName === "hover";
+    const isClickAtCommand = cmdOpName === "clickAt";
+    let actionability: ActionabilityDetail | null = null;
+    /** 本条动作（含重试）最后一次 actionability 探针给出的失败原因。 */
+    let probeFailure: string | null = null;
+    for (let attempt = 0; ; attempt++) {
+      how = null; arg = null; fillEffect = undefined; actionability = null; probeFailure = null;
+      // force：跳过 actionability 探针，直接按 Playwright force 语义动作（仍要求可定位）。
+      // 不点击，如实记 hit_test 证据（绝不静默成功）。命中通过后仍走既有 actionability 探针。
+      const declaredNow = targets.getDeclared();
+      if (!force && declaredNow !== null && declaredNow.ref === ref && !this._isTyping(el)
+          && !isScrollCommand && !isDragCommand && !isHoverCommand && !isClickAtCommand) {
+        const ht = await this._declaredHitTest(pg, el);
+        if (!ht.ok) {
+          probeFailure = `hit_test:${ht.kind}`;
+          declaredNow.hit_test = ht.kind;
+          declaredNow.blocker = ht.blocker;
+          actionability = { reason: probeFailure, bbox: null, blocker: ht.blocker, requery: "present" };
+        }
+      }
+      if (probeFailure === null && !force && !this._isTyping(el) && !isScrollCommand
+          && !isDragCommand && !isHoverCommand && !isClickAtCommand) {
+        probeFailure = await this.occludedReason(pg, el);
+        // S1：actionability 失败现场（bbox/覆盖者/重查是否还在）；非该原因时保持 null。
+        actionability = this._takeActionabilityDetail();
+        if (probeFailure === "__clicked__") {
+          try {
+            await pg.waitForLoadState("domcontentloaded", { timeout: 3000 });
+          } catch {
+            /* nothing to wait for */
+          }
+          how = "clicked";
+          arg = null;
+        }
+      }
+      if (probeFailure === null && how === null) {
+        // Submit-type inputs carry their label in `value` and must be clicked,
+        if (isHoverCommand) {
+          // S4：hover 原语——只移动指针（:hover 展开菜单/图层面板），不点击、不导航。
+          [how, arg, fillEffect] = await this._executeElement(pg, el, slots, null, "hover", force);
+        } else if (isClickAtCommand) {
+          // U7：坐标点击原语——走 _executeElement 的 clickAt 分支（含坐标解析与 bbox 越界校验），
+          [how, arg, fillEffect] = await this._executeElement(pg, el, slots, commandMode ? { value: commandValue, byValue: commandByValue } : null, "clickAt", force);
+        } else if (isScrollCommand || isDragCommand) {
+          // A3：`scroll` 命令可带方向原语 `to`（ctx.command("scroll", sel, {to:"bottom"})）——
+          const scrollTo = isScrollCommand ? cmdPick?.cmd.to : undefined;
+          if (scrollTo !== undefined) {
+            const sr = await this._scrollContainerForElement(pg, el, scrollTo);
+            how = sr.ok ? "scrolled" : "action_failed";
+            arg = sr.ok ? sr.scrollTop : (sr.stopCode ?? "not_scrollable");
+          } else {
+            [how, arg, fillEffect] = await this._executeElement(pg, el, slots, commandMode ? { value: commandValue, byValue: commandByValue } : null, isDragCommand ? "drag" : "scroll", force);
+          }
+        } else if (!this._isTyping(el)) {
+          [how, arg] = await this._clickOnly(pg, el, force);
+        } else {
+          [how, arg, fillEffect] = await this._executeElement(pg, el, slots, commandMode ? { value: commandValue, byValue: commandByValue } : null, commandMode ? String(cmdPick!.cmd.op) : undefined, force,
+            // U1：决策路径的显式值袋（命令步的具名绑定 `bound` 恒优先，values 不参与）。
+            commandMode ? undefined : values);
+        }
+      }
+      // S4 stale 判据（只有这三类；action-timeout / 有覆盖者且节点仍在都不算 stale）。
+      const staleReason = probeFailure !== null && probeFailure !== "__clicked__"
+        ? (probeFailure === "stale_ref"
+          || (probeFailure.startsWith("not-actionable-or-covered") && actionability?.requery === "detached")
+          ? probeFailure : null)
+        : (how === "stale_ref" || how === "action_failed" ? how : null);
+      if (!staleRetry || staleReason === null || attempt >= STALE_RETRY_MAX || declaredStaleTarget === null) break;
+      // 重抽池：先给重渲染一个短拍（settle 在脏页上会再等静默），再用**同一声明目标**
+      await sleep(120);
+      const fresh = (await this._extractPoolSettled(pg, candidatePriority)).elems;
+      pruneForbids(fresh);
+      // 命令目标：按 op 的能力面重新排候选并剔除已禁；act hint：同一 hint 语义重解析。
+      let freshRef: string | null = null;
+      if (commandMode) {
+        freshRef = this.resolveCommandRef(declaredStaleTarget, fresh, cmdOpName || "click", new Set(Object.keys(forbidden)))[0] ?? null;
+      } else {
+        const r = hintMatch(declaredStaleTarget, fresh, this._hintOpts());
+        if (r !== null && !(r in forbidden)) freshRef = r;
+      }
+      if (freshRef === null || fresh[freshRef] === undefined) break;   // 此刻仍解析不到：不猜、按原失败报
+      const prevDeclared = targets.getDeclared();
+      if (prevDeclared !== null && prevDeclared.ref !== freshRef) targets.setDeclared(null);   // 证据只跟同一元素
+      staleRetries.push({ attempt: attempt + 1, reason: staleReason, ref: freshRef });
+      if (verbose) console.log(`  step ${stepNo}: stale retry ${attempt + 1} (${staleReason}) -> ${freshRef}`);
+      elems = fresh;
+      ref = freshRef;
+      el = fresh[freshRef]!;
+      pre = await this.snapshot(pg);   // 重试动作的 pre 快照 = 此刻页面
+    }
+    // FW8：身份回捞的章只服务本次动作定位——动作尝试（含 stale 重试）一结束就清，
+    await targets.cleanupIdentity();
+    await domFallbackCleanup();   // F75：DOM 回退跳的章同样只服务本次动作定位
+    // U6/U7：upload 的文件/声明值非法、clickAt 的坐标坏格式/越界都是**配置错误**，
+    // 不是页面问题——结构化停在这里，不落成"跳过这个候选继续猜下一个"
+    if (how === "config_error") {
+      const detail = String(arg ?? `${cmdOpName || "command"} configuration error`);
+      forbid(ref, el, "config_error");
+      noteSkipped({ ref, reason: "config_error", ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}), detail });
+      trace.push({ step: stepNo, desc, how: "config_error", executed: false, method, conf: round3(conf), ref, skipped: true, skip_reason: "config_error", url: urlOf(pg), ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
+        ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
+      });
+      stop("config_error", detail, stepNo);
+      if (verbose) console.log(`  step ${stepNo}: ${stopReason()}`);
+      return { control: "break", ref, el, elems };
+    }
+    if (fillEffect !== undefined) {
+      lastEffectOut = fillEffect;
+      // S5b：摘要只留 kind/applied（值本身可能是凭据/隐私，进模型上文的面只要事实）。
+      this._lastEffectSeen = { kind: fillEffect.kind, applied: fillEffect.applied };
+    }
+    const executed = how === "clicked" || how === "filled" || how === "scrolled"
+      || how === "dragged" || how === "hovered" || how === "uploaded";
+    if (!executed) {
+      // 末次失败原因：actionability 探针给出的，或动作本身返回的（stale_ref/needs_value/
+      const reason = probeFailure !== null && probeFailure !== "__clicked__" ? probeFailure : String(how);
+      // needs_value / stale_ref: this element cannot advance the plan right
+      forbid(ref, el, reason);
+      if (reason.startsWith("not-actionable-or-covered") && !reAdmitted.has(ref)) {
+        blockedRetry[ref] = [stepNo, trace.length];
+      }
+      // A1：动作阶段没执行成 —— skipped_actions 记原因与命令身份（零执行步骤的证据）。
+      // S1：not-actionable-or-covered 另附结构化现场（bbox/覆盖者/重查节点是否还在）。
+      noteSkipped({
+        ref, reason, ...(cmdPick ? { command_id: cmdPick.cmd.id, target: cmdPick.cmd.target ?? null } : {}), ...(actionability === null ? {} : {
+          detail: `bbox=${actionability.bbox === null ? "?" : `${actionability.bbox.x},${actionability.bbox.y} ${actionability.bbox.width}x${actionability.bbox.height}`}`
+            + `; blocker=${actionability.blocker ?? "none"}; requery=${actionability.requery}`,
+        }),
+      });
+      // A2：命令步的候选尝试计数（前 4 个为止；失败的候选已被 forbid，下一步换下一个）。
+      if (cmdPick) cmdAttempts[cmdPick.cmd.id] = (cmdAttempts[cmdPick.cmd.id] ?? 0) + 1;
+      trace.push({ step: stepNo, desc, how: reason, executed: false, method, conf: round3(conf), ref, skipped: true, skip_reason: reason, url: urlOf(pg), ...(cmdPick ? { command: cmdPick.cmd.id } : {}), ...(actionability === null ? {} : { actionability }),
+        ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(), ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(),
+      });
+      if (verbose) console.log(`  step ${stepNo}: (${reason}, ${method}) -> skip ${ref}`);
+      return { control: "continue", ref, el, elems };
+    }
+    const post = await this.snapshot(pg);
+    // U7：clickAt 的实际点击坐标进证据（trace 行 position + executed_actions.position）；
+    const clickRaw = cmdOpName === "clickAt" && typeof arg === "object" && arg !== null
+      ? (arg as { position?: unknown }).position
+      : undefined;
+    const clickPosition = typeof clickRaw === "object" && clickRaw !== null
+      && typeof (clickRaw as { x?: unknown }).x === "number"
+      && typeof (clickRaw as { y?: unknown }).y === "number"
+      ? { x: (clickRaw as { x: number }).x, y: (clickRaw as { y: number }).y }
+      : null;
+    // U6：upload 的 changed 是**动作结果**而不是快照 diff——文件写进 input 不一定改
+    const upload = how === "uploaded" && typeof arg === "object" && arg !== null ? arg as { files?: unknown; count?: unknown; expected?: unknown } : null;
+    const uploadFiles = upload !== null && Array.isArray(upload.files)
+      ? upload.files.filter((f): f is string => typeof f === "string")
+      : null;
+    // A1：changed = pre/post 快照是否变化（诚实字段，供审查判"点击成功但页面没动"）。
+    const changed = upload !== null
+      ? Number(upload.count) >= Number(upload.expected)
+      : JSON.stringify(pre) !== JSON.stringify(post);
+    // scroll 改变的是 viewport，不是 url/text/input 快照；不能把“快照没变”误判成 inert。
+    const inert = (how === "scrolled" || how === "dragged" || how === "hovered") ? false : !changed;
+    // A1：本子目标真的执行了几个动作（零执行步骤的判据）。
+    executedDelta = 1;
+    // P2: an executed command is ACTED whether or not the page moved — the walk
+    if (executed && cmdPick) {
+      cmdDoneId = cmdPick.cmd.id; nextCmdI = cmdPick.index + 1;
+    }
+    // A1：动作身份（op/ref/target）落 trace —— executed_actions / skipped_actions 从这里对账。
+    const actionOp = commandMode && cmdPick ? String(cmdPick.cmd.op)
+      : how === "filled" ? (el.tag === "select" ? "select" : "fill")
+      : how === "scrolled" ? "scroll"
+      : how === "dragged" ? "drag"
+      : how === "hovered" ? "hover"
+      : "click";
+    // A1 §2.2.5：click 执行了、但 pre/post 快照没变，随后 done 却成立 —— 这不是"死元素"，
+    const flagSuspectedAsync = (): void => {
+      if (how !== "clicked" || changed) return;
+      const idx = getPendingAfterIdx();
+      const row = idx === null ? undefined : trace[idx];
+      if (row !== undefined) {
+        row.inert = false;            // 不是 inert：效果在快照之后到达
+        row.suspected_async = true;
+      }
+      const warning = `suspected_async: click on ${el.tag} "${el.label}" did not change the pre/post snapshot, but the done signal held afterwards (step ${stepNo})`;
+      warnings.push(warning);
+      if (verbose) console.log(`  step ${stepNo}: ${warning}`);
+    };
+    // F83：行证据（row_evidence，v1.0 §3.7 目标⑤）——声明 row-index/in-row 的目标解析
+    const rowDeclaredHint = commandMode && cmdPick ? String(cmdPick.cmd.target ?? "") : curHint;
+    const rowParsed = rowDeclaredHint ? parseHint(rowDeclaredHint) : null;
+    const rowEvidenceOut = rowEvidence(el, rowParsed);
+    trace.push({ step: stepNo, desc, how, value: redactValue(el, uploadFiles ?? (clickPosition !== null ? null : arg)), risky, executed, confirmed, method, decision_kind: decisionKind, conf: round3(conf), ...(cmdPick ? { command: cmdPick.cmd.id } : {}),
+      ref, op: actionOp, ...(cmdPick?.cmd.target !== undefined && cmdPick.cmd.target !== "" ? { target: cmdPick.cmd.target } : {}), changed, ...(uploadFiles !== null ? { files: uploadFiles } : {}),
+      ...(clickPosition !== null ? { position: clickPosition } : {}), ...(nominatedRepair ? { nominated_family_repair: true } : {}), ...(decisionKind === "model" && layaMargin !== null
+        ? { margin: Math.round(layaMargin * 1000) / 1000 } : {}), ...(method === "escalate" && escalatedPick ? { escalated: true } : {}), ...(prevented ? { prevented } : {}), ...(noted ? { noted: Object.keys(noted).length } : {}),
+      ...(tierAsk ? { hint_tier: tierAsk } : {}),   // P1: this pick answered a NARROWED question
+      inert, url: urlOf(pg), ...actionDeclEvidence(), ...forcedEvidence(), ...staleEvidence(), ...rehydrateRescanEvidence(), ...refCollision(),
+      ...identityEvidence(targets.identity), ...declaredEvidence(targets.getDeclared()), ...domFallbackEvidence(), ...rowEvidenceOut,
+    });
+    // A1 子改动③：这个已执行动作的 after 签名等下一次观察落账（见循环头部的落账点）。
+    return { control: "next", ref, el, elems, desc, how, executed, inert, post, lastEffect: lastEffectOut,
+      flagSuspectedAsync, cmdDoneId, nextCmdI, executedDelta };
   }
 
   /**
