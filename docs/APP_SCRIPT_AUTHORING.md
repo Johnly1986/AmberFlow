@@ -9,16 +9,14 @@
 > 同一份六步法（v2.1）也写在 `apps new` 骨架注释头部与桥 `_app_create` 工具描述里（同一出处，多面分发）。
 
 ```text
-高效规划六步法 v2.1（走查先行——先用引擎把流程按真实步序走通，再写正式应用）：
-① inspect 先看：amber inspect --url <页> --json 拿验证过的 hint_candidates——有候选照抄，别自创选择器；同时核对目标 op 在能力面内（amber schema ctx --topic commands）与词面真的在池里（probe/DOM 命中 ≠ hint 可命中）；
-② 全流程走查：按真实步序用引擎走通一遍，五样产出物全带出来——能力墙清单（哪步走不通、卡在什么停因）/ 产品事实清单（真实文案、控件、URL 规律——done 与 hint 只能从这里来）/ 提槽清单（哪些值随任务变化、进 meta.slots）/ done 素材（每步动作前后页面各长什么样）/ 绕行决策（走不通的步骤就地找等价路径：换入口页、换来源、换控件族；反爬风控不绕，早停）；
-   走查工具三选一：探针链（每步一个 1 步微型应用：arrive+read 验证页面可达 / 登录与验证可处理 / 无风控拦截 / 数据在 DOM——探针 30 秒判死刑，好过全流程应用跑 5 轮）或 plan 面草稿（plan new → plan add --signal … → plan check --probe 只读预检 → plan run 真执行）或 walk 模式（amber run <id> --walk 一个临时应用单会话按真实步序 act→read 串完整流程：步声明的 url 与当前页同页就不重导航、SPA 状态跨步保持，跨页显式 url 仍导航——适合复现「只在演进状态出现」的问题）；
-③ 规划应用：提槽 + done 双向清单——done 四形态：正向锚（url_* / css_*）、否定配 exists（裸 not 在空池/重渲染瞬间空洞成立）、多动作后判（两连击的第一击是中间态，不算完成）、状态前进自检（信号跟着页面真前进，不是恒真）；
-   值只认 slot：fill/select/drag/upload/clickAt 的值来自任务输入或数据源（缺值如实 needs_value，不猜）；采样与分块：虚拟列表按视口采样（池里只有已渲染的行，滚动/翻页分块取全）、长流程分块成多个短应用、多源双腿（meta.sources 数据腿 + 浏览器腿互核）；
-   候选窗口有界：每步只取 40（宽扫 120）个候选并按当前视口分桶（chrome/viewport 优先，内容优先级见 amber schema ctx），窗口外不等于页面上没有——要穷举列表用 ctx.scrollList/ctx.expand 分块取证（各计 1 flow step，expand 内部点击不占预算；范围控件用 ctx.setRange），引擎不自动滚动；hint 用完整 label（≤200）匹配、aria-label 是 label 别名；要回退 A2 前的主内容优先排序在 meta.policy 写 candidate_priority: "main-first"（缺省 bucketed）；扫描面（B2）含 div[role=menuitem/menuitemradio/menuitemcheckbox/option/tab]（click 族）——弹层菜单项/下拉选项/页签可直接 act；这是全局行为变更：候选构成与排序可能变化、同名候选增多可能引入新歧义（如 tab 与按钮同 label），hint 按 label 匹配不受影响；
-④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy 声明 done_timeout_ms，不盲等；amber apps check <id> --slot k=v（不启浏览器）验证各分支调用序列——stderr 的两条信号 lint（裸 not / any 含 not(exists)）当场改掉再进 ⑤；
-⑤ 真跑留证：amber run <id> --trace；失败先看 trace 的 stopCode/reason——reason 自带池快照判别（「目标不在页面」还是「候选在而闸门拒/闭集约束」）与决策源降级原因；动作步再看 executed/changed 与 skipped_actions/done_preheld——done=true 但零执行时先看跳过原因，别把「信号本来就成立」当成动作推进；被杀有 run-killed.json 部分证据；
-⑥ 失败取证判别：最小取证探针先区分引擎缺陷 / 产品事实 / 任务口径再动手——A/B（单变量重跑）、对照（--provider 换决策源或 rules-only 消融）、双腿取数（数据腿核产品事实）；判别不了就上报，别靠反复重跑收敛。
+高效规划六步法 v2.1（走查先行）
+目标：先用引擎按真实步序走通一遍，再写正式应用；禁止先写完整应用再反复修。
+① inspect 先看：`amber inspect --url <页> --json`。hint_candidates 有候选就照抄；核对目标 op 在 `amber schema ctx --topic commands` 能力面内，且词面真的在池里（probe/DOM 命中 ≠ hint 可命中）。
+② 全流程走查：三选一——探针链（每步 1 步微型应用 arrive+read，30 秒判定可达/登录/风控/数据在 DOM）、plan 面草稿（plan new → plan add --signal → plan check --probe → plan run）、walk 模式（`amber run <id> --walk`：同页不重导航、SPA 状态跨步保持，跨页仍导航）。必须带出五样：能力墙（哪步走不通、停因是什么）、产品事实（真实文案/控件/URL 规律）、提槽清单（随任务变化的值 → meta.slots）、done 素材（动作前后页面形态）、绕行决策（换入口/来源/控件族；不绕反爬，早停）。
+③ 规划应用：done 四形态——正向锚（url_*/css_*）、否定配 exists（裸 not 在空池或重渲染瞬间会空洞成立，必须配 exists）、多动作后判（第一击是中间态，不算完成）、状态前进自检（信号随页面真前进，不是恒真）。值只认 slot（缺值如实 needs_value，不猜）；虚拟列表按视口采样，长流程分块，多源双腿互核。候选窗口有界：每步 40（宽扫 120），按当前视口分桶；要穷举用 ctx.scrollList/ctx.expand 分块（各计 1 步，expand 内点击不占预算；范围控件用 ctx.setRange），引擎不自动滚动；hint 用完整 label（≤200）匹配，aria-label 是 label 别名；回退主内容优先排序在 meta.policy 写 candidate_priority:"main-first"。
+④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy.done_timeout_ms；`amber apps check <id> --slot k=v` 离线验分支，改掉两条信号 lint（裸 not / any 含 not(exists)）再进 ⑤。
+⑤ 真跑留证：`amber run <id> --trace`。失败先看 stopCode/reason（reason 自带池快照判别与决策源降级原因）；再看 executed/changed、skipped_actions、done_preheld——done=true 但零执行时先查跳过原因，别把「信号本来就成立」当成动作推进；被 kill 时看 run-killed.json 部分证据。
+⑥ 失败取证：最小探针先区分引擎缺陷/产品事实/任务口径——A/B（单变量重跑）、对照（--provider 换源或 rules-only）、双腿取数（数据腿核产品事实）；判别不了就上报，不靠反复重跑收敛。
 ```
 
 > S2/S3 补充（不在上面的六步法正文内）：动态加载的长列表可用 `ctx.collect` 自动「滚动→抽行→去重」
@@ -26,11 +24,11 @@
 > 缺省开启稳定门（抽池前只在页面有 DOM 突变时等静默，等待进 `state.settleMs`）。
 
 ```text
-失败特征速查（只判不绕反爬风控：命中反爬风控即 ctx.fail("blocked:…") 早停；验证环节可代过）：
-- body 极短（<200 字符）+「登录/注册」浮层 = 登录墙：换可匿名读价的来源，或用凭据 + 验证步骤处理；无凭据/无授权时如实标 blocked，别重试表单；
-- 卡片价格处全是「登录看低价」= 服务端价格闸：匿名会话拿不到价格，不是渲染问题，早停；
-- 价格列全是「查价」+ 页尾「服务器异常」= 站点限流：等待与重试无效，早停；
-- 「依次点击图标验证 / 滑动拼图」= 验证码：属验证环节，可在用户授权下由人工步/注入处理器代过；若站点同时以风控/限流拦截（反爬），不绕，立即早停。
+失败特征速查（只判不绕过反爬风控；验证环节可代过）：
+- body 极短（<200 字符）+「登录/注册」浮层 = 登录墙：换可匿名读的来源，或凭据+验证步骤；无凭据/未授权 → blocked，别重试表单。
+- 卡片价格位显示「登录看低价」= 服务端价格闸：匿名会话拿不到价格，不是渲染问题，早停。
+- 价格列全为「查价」+ 页尾「服务器异常」= 站点限流：等待/重试无效，早停。
+- 「依次点击图标 / 滑动拼图」= 验证码：用户授权后可用人工步或处理器代过；站点同时以风控/限流拦截（反爬）→ 不绕，立即早停。
 ```
 
 ## 0.5 走查先行（六步法 ②）：先走通，再写应用

@@ -231,6 +231,8 @@ amber apps remove <id> [--yes] [--force]
 **不再提供** `amberflow_plan`、`amberflow_app_set_step`、`amberflow_app_set_invariant`、
 `amberflow_app_remove_step`。Agent 用文件系统读取/编辑 `app.mjs`；桥不写任意代码。
 
+工具描述约定（82 条 description 的产品口径，由 `npm run prompt-hit` 的 bridge_desc 组观测）：目标先行——首句 ≤120 字符说明「何时用 + 做什么」；总长目标 ≤600 字符（硬上限 800）；`*_<name>` 参数前缀约定只在 `amberflow_app_check` 描述里声明一次，其它工具不重复；`amber <cmd>` 必须存在于 registry；不写站点/业务专名。
+
 `amberflow_run` 参数：
 
 ```json
