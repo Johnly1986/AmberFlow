@@ -95,7 +95,7 @@ amber run my-app --json           # 非 TTY：确认 status=needs_human、exit 1
 
 人工步背后的介入/救援模块（v1）把「引擎卡住、需要人」变成**结构化求援**，而不是一句停因：
 
-- CLI：`--rescue` 显式开启（默认关 = 产物逐字节不变；`--no-rescue` 显式关闭，与 `--rescue` 互斥）；开启后仅在真实人工停因时追加 `result.rescue` 键（mode=stop，分类器语义，不改 stopCode/控制流）。
+- CLI：`--rescue` 显式开启（默认关 = 产物逐字节不变；`--no-rescue` 显式关闭；`amber run` 入口二者同给视为用法错误）；开启后仅在真实人工停因时追加 `result.rescue` 键（mode=stop，分类器语义，不改 stopCode/控制流）。
 - `result.rescue` **只在真实求援出现**——正常运行产物逐字节不变。权威形状句（逐字来自
   `schema-gen.ts` 的 `RESCUE_RESULT_SHAPE_TEXT`，prompt-hit doc 组闸门，勿手抄改写）：
 

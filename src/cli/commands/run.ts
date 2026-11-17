@@ -372,12 +372,8 @@ async function runApp(app: string, v: Values, headful: boolean, ctx: CliContext)
   if (bool(v["confirm-unsafe"])) args.push("--confirm-unsafe");
   if (slotFile !== undefined) args.push("--slot-file", slotFile);
   if (bool(v["manual-fail-fast"])) args.push("--manual-fail-fast");
-  // §8 步 2/5：rescue 开关；默认缺省不透传（产物逐字节不变）；显式二选一。
-  if (bool(v.rescue) && bool(v["no-rescue"])) {
-    throw usageError("--rescue 与 --no-rescue 只能选一个（默认关）");
-  }
-  if (bool(v.rescue)) args.push("--rescue");
-  if (bool(v["no-rescue"])) args.push("--no-rescue");
+  if (bool(v.rescue) && bool(v["no-rescue"])) throw usageError("--rescue 与 --no-rescue 只能选一个（默认关）"); // §8 步 2/5 显式二选一
+  if (bool(v.rescue)) args.push("--rescue"); else if (bool(v["no-rescue"])) args.push("--no-rescue"); // 默认缺省不透传 = 产物逐字节不变
   if (bool(v.remember)) args.push("--learn-hints");
   const emitTrace = str(v["emit-trace"]);
   if (emitTrace !== undefined) args.push("--emit-trace", emitTrace);

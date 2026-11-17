@@ -126,7 +126,7 @@ export const APP_ONLY_OPTIONS: CliOptions = {
    * （真实求援的结构化请求）；`--no-rescue` = 显式关闭（默认关 = 产物逐字节不变）。
    */
   rescue: { type: "boolean" },
-  /** 显式关闭 rescue（默认关；与 `--rescue` 互斥）。 */
+  /** 显式关闭 rescue（默认关；`amber run` 入口与 `--rescue` 互斥；直接 app-runner 入口以关闭优先）。 */
   "no-rescue": { type: "boolean" },
   slot: { type: "string", multiple: true },
   /** 从 JSON 文件读槽位（避免敏感值进 argv）。 */
