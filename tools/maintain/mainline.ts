@@ -28,6 +28,10 @@ export interface MainlineSnapshot {
   runSignature: boolean;
   /** P2 冻结面：`BrowserMiddleware` 类名逐字节存在。 */
   browserClass: boolean;
+  /** 包身份冻结面：`package.json` 的 `exports["."]`（DSH 插件安装门）。 */
+  packageExportsRoot: string | null;
+  /** 包身份冻结面：`src/sdk.ts` 必须不存在（不建 sdk）。 */
+  sdkModule: boolean;
 }
 
 export interface MainlineBaseline {
@@ -39,6 +43,8 @@ export interface MainlineBaseline {
 export const EXECUTOR_RUN_SIGNATURE =
   "async run(instruction: string, startUrl: string, opts: RunOptions = {}): Promise<RunReport>";
 export const MIDDLEWARE_CLASS = "export class BrowserMiddleware";
+/** 包身份决策：exports["."] 必须是 DSH 插件入口（README「消费面与包身份」）。 */
+export const DSH_BRIDGE_EXPORT = "./integrations/dsh-bridge/src/index.ts";
 
 const REQUIRED_TOKENS: ReadonlyArray<{ token: string; why: string }> = [
   { token: "L1.5", why: "依赖分层缺 L1.5（intervention 登记）" },
@@ -89,6 +95,13 @@ export function collectMainline(repo: string): MainlineSnapshot {
   const srcText = readTs(["src"]);
   const executorPath = path.join(repo, "src", "engine", "executor.ts");
   const executorText = fs.existsSync(executorPath) ? fs.readFileSync(executorPath, "utf8") : "";
+  let packageExportsRoot: string | null = null;
+  try {
+    const pkgPath = path.join(repo, "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { exports?: Record<string, unknown> };
+    const root = pkg.exports?.["."];
+    packageExportsRoot = typeof root === "string" ? root : null;
+  } catch { packageExportsRoot = null; }
   const cliText = readTs(["src/cli"]);
   const mwConstructions = countCodeMatches(srcText, /new BrowserMiddleware\(/);
   const runEntryCalls = countCodeMatches(cliText, /ctx\.runEntry\(/);
@@ -127,6 +140,8 @@ export function collectMainline(repo: string): MainlineSnapshot {
     doc, srcDirs, mwConstructions, runEntryCalls, indexImporters,
     runSignature: executorText.includes(EXECUTOR_RUN_SIGNATURE),
     browserClass: executorText.includes(MIDDLEWARE_CLASS),
+    packageExportsRoot,
+    sdkModule: fs.existsSync(path.join(repo, "src", "sdk.ts")),
   };
 }
 
@@ -151,6 +166,10 @@ export function evaluateMainline(snapshot: MainlineSnapshot, baseline: MainlineB
     fail("executor.ts 的 run() 签名被改动或缺失——P2 冻结面（类名 + run() 签名逐字节不变）");
   }
   if (!snapshot.browserClass) fail("executor.ts 的 `export class BrowserMiddleware` 被改动或缺失——P2 冻结面");
+  if (snapshot.packageExportsRoot !== DSH_BRIDGE_EXPORT) {
+    fail(`package.json 的 exports["."] 必须是 DSH 插件入口 ${DSH_BRIDGE_EXPORT}（包身份冻结；实际 ${JSON.stringify(snapshot.packageExportsRoot)}）`);
+  }
+  if (snapshot.sdkModule) fail("src/sdk.ts 存在——包身份决策不建 sdk（P2-2.3）");
   if (snapshot.indexImporters.length > 0) {
     fail(`src/index.ts 有 ${snapshot.indexImporters.length} 个仓内 importer（公共面应为 internal）：${snapshot.indexImporters.slice(0, 3).join("；")}`);
   }

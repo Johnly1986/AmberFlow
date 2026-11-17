@@ -1,4 +1,7 @@
 /**
+ * **DEPRECATED（P2-2.3）**：MV3 `extension/` 已删除；本服务仅作为兼容入口保留一版，
+ * 评估后删除。新集成请走 CLI / DSH 桥（包身份见 README「消费面与包身份」）。
+ *
  * Path B in TypeScript — the TS twin of `picker_server.py`.
  *
  * The Python service is FastAPI + uvicorn:
@@ -7,11 +10,8 @@
  *   POST /pick   -> PickRequest {state, confidence_threshold?, attack_threshold?}
  *                   -> picker.pick(state) (the whole decision dict)
  *
- * The extension in `extension/` is the only client. `background.js` POSTs
- * `JSON.stringify({ state: msg.state })` to `http://127.0.0.1:8765/pick` and
- * `content.js` reads `decision.auto_execute` / `decision.selector` /
- * `decision.reason` / `decision.candidates[].{label,probability,selector}` — so
- * the response is passed through verbatim, never re-shaped here.
+ * 扩展客户端（`extension/`）已移除；本服务保留原协议形状一版以兼容既有脚本。
+ * 响应逐字透传、不在本层重塑。
  *
  * This port uses `node:http` (no express/fastify) and mirrors the pydantic v2
  * failure semantics: validation errors are 422 with
