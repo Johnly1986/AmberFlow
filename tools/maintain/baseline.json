@@ -9,7 +9,7 @@
       "src/app/session-runtime.ts": 1008,
       "src/app/app-adapters.ts": 988,
       "src/engine/executor-pure.ts": 934,
-      "src/cli/commands/apps.ts": 878,
+      "src/cli/commands/apps.ts": 880,
       "src/app/app-runner.ts": 872,
       "src/engine/extraction.ts": 1101,
       "src/engine/executor-types.ts": 826,
@@ -64,7 +64,7 @@
       {
         "file": "src/cli/commands/apps.ts",
         "name": "flowScriptTemplate",
-        "lines": 215
+        "lines": 217
       },
       {
         "file": "src/cli/commands/apps-rehearsal.ts",

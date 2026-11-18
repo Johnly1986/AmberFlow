@@ -18,6 +18,119 @@ import { isObj, validateCollectRequest, validateExtractOptions, validateWaitForT
 import { pickRowMin, pickRowMax } from "./ctx-tool.ts";
 import type { CtxRuntime } from "./ctx-runtime.ts";
 
+/**
+ * Playwright 专属选择器语法（页内 querySelector 永不命中或语义不同）——批量行抽取快路径
+ * 的静态拒入名单：字段选择器命中任一 → 直接走旧路径（不浪费一次往返）。名单只收
+ * "确定不支持"的语法；拿不准的交给页内执行的整体回退（快路径只是加速，不是语义源）。
+ */
+const PW_ONLY_CELL_RE =
+  /:has-text\(|:visible|:hidden|:hover|:nth\s*=|:left-of|:right-of|:above|:below|:near\b|>>|(?:^|>>|\s)(?:text|xpath|css|id)\s*=/i;
+
+/**
+ * 批量行抽取快路径（readRows 的加速面，旧路径仍是语义源）：一次 evaluateAll 完成
+ * 全部行×字段（1 次往返），替代逐行逐字段 locator 读（rows × fields 次往返，每字段
+ * 1500ms 超时帽——选择器无命中的字段每格付 2×1500ms，16 行 × 2 空字段实测 ≥96s，
+ * 18 行 × 6 字段整体超桥 60s op 帽 = bridge_timeout 且引擎 trace 无记录）。
+ * 语义逐字节对齐旧路径：
+ *   - 页内 querySelector = 文档序首个（= locator.first() 同口径）；shadow DOM 深查对齐
+ *     locator 的 pierce-open-shadow 语义；
+ *   - "."/":scope" = 行自身 innerText；"@attr" = 行自身 attribute；
+ *   - 无命中 = ""（旧行为：innerText 1500ms 超时抛 → inputValue 1500ms 再抛 → 外层
+ *     catch ""，净结果一致；页内 attached 元素 innerText 不抛，故 matched 元素不存在
+ *     value 兜底——这里同样不加，trim 同口径）；
+ * 返回 null = 条件不满足（test double 无 evaluateAll / Playwright 专属语法）或页内失败
+ * （非法 CSS 等）→ 调用方回退旧路径。
+ */
+async function tryBatchExtractRows(
+  rowsLoc: unknown, fields: Record<string, string>, cap: number, offset: number,
+): Promise<{ rows: Array<Record<string, string>>; total: number } | null> {
+  const loc = rowsLoc as {
+    evaluateAll?: (fn: (els: any[], arg: { entries: Array<[string, string]> }) => unknown,
+      arg?: { entries: Array<[string, string]> }) => Promise<unknown>;
+  };
+  if (typeof loc.evaluateAll !== "function") return null;
+  const entries = Object.entries(fields);
+  for (const [, sel] of entries) {
+    if (sel !== "." && sel !== ":scope" && !(sel.startsWith("@") && sel.length > 1)
+        && PW_ONLY_CELL_RE.test(sel)) {
+      return null;
+    }
+  }
+  const out = await loc.evaluateAll!((els, arg) => {
+    // 页内执行（Node strip-types 下本函数源码原样进浏览器，保持纯 JS）：
+    const deepQuery = (root: any, sel: any): any => {
+      const hit = root.querySelector(sel);
+      if (hit) return hit;
+      for (const el of root.querySelectorAll("*")) {
+        if (el.shadowRoot) {
+          const found = deepQuery(el.shadowRoot, sel);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+    return els.map((row: any) => {
+      const rec: Record<string, string> = {};
+      for (const [name, sel] of arg.entries) {
+        if (sel === "." || sel === ":scope") {
+          rec[name] = String(row.innerText ?? "").trim();
+          continue;
+        }
+        if (sel.charAt(0) === "@" && sel.length > 1) {
+          rec[name] = String(row.getAttribute(sel.slice(1)) ?? "").trim();
+          continue;
+        }
+        const cell = deepQuery(row, sel);
+        const v = cell === null ? "" : String(cell.innerText ?? "");
+        rec[name] = String(v ?? "").trim();
+      }
+      return rec;
+    });
+  }, { entries }) as Array<Record<string, string>> | null;
+  if (!Array.isArray(out)) return null;
+  return { rows: out.slice(offset, offset + cap), total: out.length };
+}
+
+/**
+ * 行抽取旧路径（**语义源**）：逐行逐字段 locator 读，实现逐字保留（含 1500ms 超时帽、
+ * catch→inputValue 兜底、task-24/3c 属性投影）。批量快路径不可用/页内失败时的唯一回退，
+ * 也是快路径语义对齐的基准——改这里 = 改抽取语义，必须连带核对 tryBatchExtractRows。
+ */
+async function extractRowsLegacy(
+  all: unknown[], fields: Record<string, string>, cap: number, offset: number,
+  rows: Array<Record<string, string>>,
+): Promise<void> {
+  for (const row of all.slice(offset, offset + cap)) {
+    const locators = row as {
+      locator?: (s: string) => { first(): { innerText(o?: { timeout?: number }): Promise<string>; inputValue(o?: { timeout?: number }): Promise<string> } };
+      innerText?: (o?: { timeout?: number }) => Promise<string>;
+      getAttribute?: (name: string) => Promise<string | null>;
+    };
+    const rec: Record<string, string> = {};
+    for (const [field, cellSel] of Object.entries(fields)) {
+      let value = "";
+      try {
+        if (cellSel === "." || cellSel === ":scope") {
+          if (typeof locators.innerText === "function") value = await locators.innerText({ timeout: 1500 });
+        } else if (cellSel.startsWith("@") && cellSel.length > 1) {
+          // task-24/3c：属性投影（opt-in——"@" 前缀）——读**行元素自身**的 attribute
+          //（如 fields:{rating:"@aria-label"}；无子选择器、无行内回退；读不到 → "" 与现行为一致）。
+          // 旧 fields（无 @ 前缀）逐字节不变。
+          if (typeof locators.getAttribute === "function") {
+            value = (await locators.getAttribute(cellSel.slice(1))) ?? "";
+          }
+        } else if (typeof locators.locator === "function") {
+          const cell = locators.locator(cellSel).first();
+          try { value = await cell.innerText({ timeout: 1500 }); }
+          catch { value = await cell.inputValue({ timeout: 1500 }); }
+        }
+      } catch { value = ""; }
+      rec[field] = String(value ?? "").trim();
+    }
+    rows.push(rec);
+  }
+}
+
 export function createCtxRead(rt: CtxRuntime): Pick<Ctx, "observe" | "read" | "holds" | "waitFor" | "waitForTarget" | "source" | "data" | "rows" | "extract" | "collect"> {
     const { deps, pack, slots, trace, budget, hosts, pageState, assertOpen, page, checkBudget, paceBeforeStep, scrollRowsContainer } = rt;
 
@@ -104,35 +217,9 @@ export function createCtxRead(rt: CtxRuntime): Pick<Ctx, "observe" | "read" | "h
     if (all === null) {
       throw new StopError("config_error", "ctx.extract needs a Playwright locator (locator.all() is not available here)");
     }
-    for (const row of all.slice(offset, offset + cap)) {
-      const locators = row as {
-        locator?: (s: string) => { first(): { innerText(o?: { timeout?: number }): Promise<string>; inputValue(o?: { timeout?: number }): Promise<string> } };
-        innerText?: (o?: { timeout?: number }) => Promise<string>;
-        getAttribute?: (name: string) => Promise<string | null>;
-      };
-      const rec: Record<string, string> = {};
-      for (const [field, cellSel] of Object.entries(fields)) {
-        let value = "";
-        try {
-          if (cellSel === "." || cellSel === ":scope") {
-            if (typeof locators.innerText === "function") value = await locators.innerText({ timeout: 1500 });
-          } else if (cellSel.startsWith("@") && cellSel.length > 1) {
-            // task-24/3c：属性投影（opt-in——"@" 前缀）——读**行元素自身**的 attribute
-            //（如 fields:{rating:"@aria-label"}；无子选择器、无行内回退；读不到 → "" 与现行为一致）。
-            // 旧 fields（无 @ 前缀）逐字节不变。
-            if (typeof locators.getAttribute === "function") {
-              value = (await locators.getAttribute(cellSel.slice(1))) ?? "";
-            }
-          } else if (typeof locators.locator === "function") {
-            const cell = locators.locator(cellSel).first();
-            try { value = await cell.innerText({ timeout: 1500 }); }
-            catch { value = await cell.inputValue({ timeout: 1500 }); }
-          }
-        } catch { value = ""; }
-        rec[field] = String(value ?? "").trim();
-      }
-      rows.push(rec);
-    }
+    // 批量快路径（1 次 evaluateAll 完成 rows×fields）；条件不满足/页内失败 → 走旧路径（语义源）。
+    const batch = all.length > 0 ? await tryBatchExtractRows(rowsLoc, fields, cap, offset).catch(() => null) : null; if (batch !== null) return { rows: rows.concat(batch.rows), total: batch.total, truncated: offset + batch.rows.length < batch.total };
+    await extractRowsLegacy(all, fields, cap, offset, rows);
     return { rows, total: all.length, truncated: offset + rows.length < all.length };
   };
 

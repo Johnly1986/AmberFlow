@@ -114,6 +114,8 @@ export async function flow(ctx) {
 | 弱档命中（`matched_others`）点到了容器/同缀元素 | `meta.policy.act_hint_tier:"strong"`（弱档不算命中；配合 `act_hint` 决定交模型还是停因，§8） |
 | 需要回入口页 | entry-only 放行 `meta.site.pages` 声明页（URL 归一全等；§4.10） |
 | React 受控输入 `judge.value` 不成立 | 改用 text/exists/JS 可见事实（value readback 对受控输入不可靠，§6） |
+| 自绘组合框/日期选择器（页面无原生 input） | `fill` 填不了：先 `ctx.observe` 看有没有真 input；没有就走点击-选择流或站点自身 URL 参数（携程列表页 `depdate` 即此形态） |
+| 预订/下单点击后长延迟跳转（URL 很久才变） | done 用 `url_contains` 同标签 + 拉长该步 `timeoutMs`（整步挂钟帽会吃掉慢跳转；别急着重试点击） |
 
 ## 1. 只有一种格式
 
