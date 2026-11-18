@@ -86,6 +86,12 @@ export class SessionRuntime {
   private snapshotCount = 0;
   private readonly urls: string[] = [];
   private finished = false;
+  /**
+   * S4：最近成功解析记录（target → 命中现场）。`target_not_found` 时若同 hint 在
+   * ≤10 个动作内命中过，落空诊断带 `recently_resolved`——"行内容可能已变，建议重新
+   * observe" 的引导事实。纯内存零页面往返；只影响会话 authoring 面，run 面不接。
+   */
+  private readonly recentResolutions = new Map<string, { actionSeq: number; op: string; how: string }>();
 
   constructor(opts: SessionOptions, sink: SessionSink, runId?: string) {
     this.opts = opts;
@@ -223,6 +229,33 @@ export class SessionRuntime {
 
   private recordMark(note: string): void {
     this.recordEvent({ type: "mark", note: note.slice(0, 300) });
+  }
+
+  /** S4：成功解析进 LRU（≤20 条，插入序即淘汰序；重复 target 刷新到队尾）。 */
+  private rememberResolution(target: string, op: string, how: string): void {
+    this.recentResolutions.delete(target);
+    this.recentResolutions.set(target, { actionSeq: this.actionCount, op, how });
+    if (this.recentResolutions.size > 20) {
+      const oldest = this.recentResolutions.keys().next().value;
+      if (oldest !== undefined) this.recentResolutions.delete(oldest);
+    }
+  }
+
+  /**
+   * S4：落空诊断的最近命中提示（纯内存）。同 target 在 ≤10 个动作内命中过 →
+   * 顶层独立键 `recently_resolved`（steps_ago/last_op/last_how）+ reason 尾行；
+   * 无历史 = 空对象（键不出现，键集不变）。只陈述事实，不自动重试——
+   * "重新 observe" 由作者决定。
+   */
+  private recentlyResolved(target: string): { diag: Record<string, unknown>; reasonLine: string } {
+    const hit = this.recentResolutions.get(target);
+    if (hit === undefined) return { diag: {}, reasonLine: "" };
+    const stepsAgo = this.actionCount - hit.actionSeq;
+    if (stepsAgo <= 0 || stepsAgo > 10) return { diag: {}, reasonLine: "" };
+    return {
+      diag: { recently_resolved: { steps_ago: stepsAgo, last_op: hit.op, last_how: hit.how } },
+      reasonLine: `；该 hint 曾在 ${stepsAgo} 个动作前命中（op=${hit.op}, how=${hit.how}）——行内容可能已变（展开/刷新），建议重新 observe 后换锚`,
+    };
   }
 
   /**
@@ -763,9 +796,13 @@ export class SessionRuntime {
       // 与遮罩无归因关系，不多付这次页面往返。
       const wantOverlay = out.stopCode === "target_not_found" || out.stopCode === "not-actionable-or-covered";
       const overlay = wantOverlay ? await this.mw().overlayEvidence(page) : null;
+      // S4：落空时的最近命中提示（纯内存；独立键 recently_resolved，不覆盖引擎 A4 的
+      // diagnostics；无历史 = 键不出现，响应键集不变）。
+      const recent = out.stopCode === "target_not_found" ? this.recentlyResolved(target) : { diag: {}, reasonLine: "" };
       return {
         ok: false, code: String(out.stopCode ?? "action_failed"),
-        reason: String(out.reason ?? ""), op: actOp, target, executed: false,
+        reason: String(out.reason ?? "") + recent.reasonLine,
+        op: actOp, target, executed: false,
         ...(out.ref === undefined ? {} : { ref: out.ref }),
         url: urlOf(page), elapsed_ms: Date.now() - started,
         ...actionabilityResponse(out.actionability),
@@ -774,9 +811,12 @@ export class SessionRuntime {
         ...amb,
         ...ambiguityResponse(out.ambiguity),
         ...missDiagnosticsResponse(out.diagnostics),
+        ...recent.diag,
       };
     }
     this.log(`act ${actOp} ${JSON.stringify(target)} → ${String(out.how)} changed=${out.changed === true}`);
+    // S4：成功解析进 LRU——同 target 后续落空时的"最近命中过"引导事实。
+    this.rememberResolution(target, actOp, String(out.how ?? ""));
     // S3：opt-in 的同标签页导航事实探测（缺省不出现 = 零额外等待、键集不变）。
     // 只报事实不判完成——`same_tab_navigation` 不是 done 信号，与 waitFor/signal 不冒充。
     // 成功路径专属：失败现场证据已有自己的归因面，不做这次探测。
