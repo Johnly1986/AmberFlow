@@ -761,11 +761,12 @@ export class BrowserMiddleware {
    *   ② 结构相同、goal 相同、且上一次的选择**此刻仍可行动**（在池里且未 forbidden）⇒ 复用答复。
    * 两者的答复都继续走既有的 floor/reobserve/escalate 裁决——这就是"既有降级路径"。
    * 不能安全复用（上一次的选择已被禁/已不在池里）时**照常问**：拿一个过时答复去动作
-   * 比多问一次更糟，引擎不替模型编答案。
+   * 比多问一次更糟，引擎不替模型编答案。url 记答复观察时的页面——SPA 同构翻页骗不过它。
    */
   _askedPools = new Map<string, {
     key: string;
     goalKey: string;
+    url: string;
     result: { ref: string | null; conf: number; probs: Record<string, number>; passthrough: boolean };
   }>();
   /** S5b：本次 run 到目前为止出现过的 S1 flags（摘要里只放已经发生的事实）。 */
@@ -1222,7 +1223,7 @@ export class BrowserMiddleware {
     elems: ElemPool,
     forbidden: Set<string>,
     notes: Record<string, string> | null,
-  ): Promise<{ ref: string | null; conf: number; probs: Record<string, number>; passthrough: boolean }> {
+  ): Promise<{ ref: string | null; conf: number; probs: Record<string, number>; passthrough: boolean; choiceLimit?: string }> {  // choiceLimit=超限原因（A2 即取即清）
     // `pickElement`/`pickProposal` 也允许被**单独调用**（测试与外部嵌入方就这么用），而 provider
     // 是在 ready() 里解析的：不先 ready 就会拿着 null 当成"没得选"。ready() 幂等，
     // run() 那条路早已 await 过，这里不会重复加载权重。
@@ -1236,13 +1237,17 @@ export class BrowserMiddleware {
       return { ref: null, conf: 0.0, probs: {}, passthrough: true };
     }
     // A2：决策服务把候选清单当选项列表，服务侧上限 255——超限不是"窗口开大一点"能解决的，
-    // 必须结构化停因（收窄 hint / 用分桶优先级），不能把 200+ 选项硬塞过去。
+    // 必须结构化停因（收窄 hint / 用分桶优先级），不能把 200+ 选项硬塞过去。原因经返回值
+    // 即取即清（不留成员状态）——此前写入 _choiceLimitReason 后仅在"模型没答"分支被消费，
+    // 正常答出的步会把上一轮的超限原因残留到后续某个失败步上（由 pickElement 落账）。
     const candidateCount = Object.keys(elems).filter((r) => !forbidden.has(r)).length;
     if (candidateCount > MAX_CHOICES) {
-      this._choiceLimitReason =
-        `candidate window ${candidateCount} > MAX_CHOICES (${MAX_CHOICES}) — the decision service takes at most `
-        + `255 choices; narrow the hint or rely on bucket priority (chrome/viewport first) instead of widening the pool`;
-      return { ref: null, conf: 0.0, probs: {}, passthrough: true };
+      this.lastPickEvidence = null;
+      return {
+        ref: null, conf: 0.0, probs: {}, passthrough: true,
+        choiceLimit: `candidate window ${candidateCount} > MAX_CHOICES (${MAX_CHOICES}) — the decision service takes at most `
+          + `255 choices; narrow the hint or rely on bucket priority (chrome/viewport first) instead of widening the pool`,
+      };
     }
     // 视图构造、state 渲染、短名单重问、两支各自的 conf 口径——**全部在适配器里**，
     // 且与替换前的实现逐字段等价（逐字段替换验证 ①）。
@@ -1261,8 +1266,10 @@ export class BrowserMiddleware {
       // ② 池指纹未变 + 规则层仍歧义 ⇒ 不重复敲门，复用该池结构下的上一次答复：
       //    题面一字不差（key 相同）直接复用；仅结构相同则要求上一次的选择此刻仍可行动
       //    （在池里且未 forbidden），否则这次答复已经过时——照常问，不拿死答案去动作。
+      //    页面状态判据（S5a 补）：structDigest 只统计 tag/role 计数，SPA 同构翻页下指纹
+      //    不变——不加 url 判据，"点下一页"的旧答复会在后续同构页被反复复用（原地打转）。
       const prior = this._askedPools.get(poolStruct);
-      if (prior !== undefined && prior.goalKey === goalKey) {
+      if (prior !== undefined && prior.goalKey === goalKey && prior.url === urlOf(page)) {
         const stillActionable = prior.result.ref !== null
           && elems[prior.result.ref] !== undefined && !forbidden.has(prior.result.ref);
         if (prior.key === askSig.key || stillActionable) {
@@ -1290,18 +1297,10 @@ export class BrowserMiddleware {
       }
     }
     // **在线 provider 掉线/没配好 ⇒ 优雅降级到 rules-only**（与"本地模型不在位"同一条路）：
-    // 缺 key/缺端点/网络不可达时，不该把整条计划崩掉，也不该每步再敲一次坏服务——
-    // 声明点名的步照跑，需要选目标的步按 rules-only 如实 block。这是"默认在线 provider"
-    // 不破坏开箱（无 key 也能跑声明）的地基。风险头那边早就这么降级（isRisky 的 catch）；
-    // pick 这边补齐，两条兜底档对"服务不可用"的反应一致。
-    // U3 硬约束：`Elem.surface` 是旁路标记（PoolView/inspect/类目计数用），**不进模型请求体**——
-    // provider 看到的元素形状与 U3 之前逐字段一致（第三方 provider 也不该继承引擎内部标记）。
-    // T9：`Elem.href_full` 同理（原始 href 只服务 hint 匹配/inspect），与 surface 同一处剥离；
-    // 模型面仍只看展示投影 `href`。
-    // FW8：`Elem.identity`（身份回捞合成的旁路标记）同理剥离——回捞元素按设计不会走到模型面，
-    // 这里仍做一层防御：第三方 provider 永远看不到引擎内部标记。
-    // A 批（frame:<origin>，B5）：frame_origin / frame_path（帧限定打点）同样剥离——
-    // guard 与解构两处都收口在 executor-pure.modelProjectionOf（模块级纯函数，离线可断言）。
+    // 缺 key/缺端点/网络不可达时，不崩整条计划、不每步敲坏服务——声明步照跑，选目标的步
+    // 如实 block。风险头早就这么降级（isRisky 的 catch），pick 这边对齐。
+    // U3/T9/FW8/A批（B5）：surface/href_full/identity/frame_* 都是旁路标记，**不进模型请求体**
+    //——剥离收口在 executor-pure.modelProjectionOf，第三方 provider 永远看不到引擎内部标记。
     const modelElems: ElemPool = modelProjectionOf(elems);
     let out;
     try {
@@ -1340,7 +1339,7 @@ export class BrowserMiddleware {
     this._lastAsk = { key: askSig.key, poolSig: askSig.poolSig, navEpoch: this._state.navEpoch, result };
     // 池结构指纹 → 该结构下最近一次真 ask 的答复（同页同 goal 的重复咨询不再敲门）。
     if (this._askedPools.size > 32) this._askedPools.clear();   // 有界：池形状种类远小于此
-    this._askedPools.set(poolStruct, { key: askSig.key, goalKey, result });
+    this._askedPools.set(poolStruct, { key: askSig.key, goalKey, url: urlOf(page), result });
     return result;
   }
 
@@ -1353,6 +1352,7 @@ export class BrowserMiddleware {
     notes: Record<string, string> | null = null,
   ): Promise<[string | null, number, Record<string, number>]> {
     const r = await this.pickInner(goal, page, elems, forbidden, notes);
+    if (r.choiceLimit !== undefined) this._choiceLimitReason = r.choiceLimit;   // 即取即清（A2）
     return [r.ref, r.conf, r.probs];
   }
 

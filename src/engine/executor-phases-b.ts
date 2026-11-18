@@ -270,7 +270,9 @@ export async function runModelPick(mw: BrowserMiddleware, a: {
             && stepTimeoutLeft() > 0) {
           // F3：步级 timeoutMs 过期后不再发起新的升级点名。
           escalated = true;
-          const crit = criteriaView(orderedPool(), new Set(Object.keys(forbidden)), await ariaInteractiveLines(pg));
+          // 显式传当前（宽化后的）池：orderedPool 无参形式读到的是 run() 闭包的旧窄视图
+          // ——低置信恢复刚把 elems 换成宽视图时，升级题面必须与 pickElement 看到的是同一份。
+          const crit = criteriaView(orderedPool(elems), new Set(Object.keys(forbidden)), await ariaInteractiveLines(pg));
           const state = { url: urlOf(pg), title: await pg.title(), main_text: await stateTextFn(pg, instruction) };
           try {
             const pick = await escalateFn({ instruction, criteria: crit, why: `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)}`, ...state });

@@ -102,17 +102,28 @@ export class LLMAuditor implements Auditor {
       signal: ctrl,
     });
     if (!r.ok) throw new Error(`auditor endpoint ${r.status}`);
-    const body = (await r.json()) as { choices: Array<{ message: { content: string } }> };
-    const content = body.choices[0]!.message.content;
+    const body = (await r.json().catch(() => null)) as { choices?: Array<{ message?: { content?: string } }> } | null;
+    // 空 choices / 缺 message 是网关兼容面的真实形状——按不可解析处理（REJECT + 原文留痕），
+    // 不让一次 TypeError 把整个 run 的收尾打崩（两个调用点都没有 try/catch）。
+    const content = body?.choices?.[0]?.message?.content ?? "";
     let verdict: AuditVerdict;
     try {
       const from = content.indexOf("{");
       const to = content.lastIndexOf("}");
       verdict = JSON.parse(content.slice(from, to + 1)) as AuditVerdict;
     } catch {
-      verdict = { verdict: "REJECT", reasons: [`unparseable auditor reply: ${content.slice(0, 200)}`], auditor: this.model };
-      return verdict;
+      return { verdict: "REJECT", reasons: [`unparseable auditor reply: ${content.slice(0, 200)}`], auditor: this.model };
     }
+    // 枚举校验：模型回 "approve"（小写）/ 其他字符串时不能当 APPROVE 落产物——审计语义
+    // 只有 APPROVE/REJECT 两个值，其余一律按不可判读处理（fail-closed 到 REJECT + 留痕）。
+    if (verdict.verdict !== "APPROVE" && verdict.verdict !== "REJECT") {
+      return {
+        verdict: "REJECT",
+        reasons: [`invalid verdict ${JSON.stringify(verdict.verdict ?? null)} (expected "APPROVE"|"REJECT"): ${content.slice(0, 200)}`],
+        auditor: this.model,
+      };
+    }
+    if (!Array.isArray(verdict.reasons)) verdict.reasons = [JSON.stringify(verdict.reasons ?? "")];
     verdict.auditor = this.model;
     return verdict;
   }

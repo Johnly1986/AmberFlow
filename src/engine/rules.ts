@@ -33,6 +33,10 @@ export const NAV_VERBS = new Set(["open", "navigate", "visit", "goto", "switch",
 export const DESTRUCTIVE_PATTERNS: readonly string[] = [
   "pay", "checkout", "purchase", "place order",
   "delete", "remove", "submit", "send", "confirm payment",
+  // 中文站风险闸门：确定性关键词规则（rules-only 档与 provider 掉线降级共用本表）——
+  // 只收「点了就不可逆/外部可见」的动作词；「登录/搜索/翻页」等可逆动作词不入表，
+  // 否则 safe-browser 面的 confirmFn 会把普通站点流程全数拦下。
+  "支付", "付款", "结算", "下单", "提交订单", "删除", "移除", "发送", "确认付款", "结算并支付",
 ];
 
 const words = (s: string, re: RegExp): string[] => s.match(re) ?? [];
