@@ -60,7 +60,7 @@ export type {
 export { BUCKET_FILL_ORDER, BUCKET_ORDER, POOL_QUOTAS, QUOTA_MODE_QUOTAS, QUOTA_MODE_WIDE_QUOTAS, WIDE_QUOTAS } from "./elem-model.ts";
 export { firstOf, framesOf, urlOf } from "./page-shapes.ts";
 export {
-  countAnyFrame, frameAt, frameGateOf, frameScopeEvidenceOf, framesScopedPage, locatorAnyFrame, splitFrameSuffixFromSelector,
+  countAnyFrame, rowStatsAnyFrame, frameAt, frameGateOf, frameScopeEvidenceOf, framesScopedPage, locatorAnyFrame, splitFrameSuffixFromSelector,
 } from "./frame-scope.ts";
 export type { FrameGate, FrameScopeEvidence, SplitSelectorFrameSuffix } from "./frame-scope.ts";
 

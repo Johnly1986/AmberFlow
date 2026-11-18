@@ -436,3 +436,51 @@ export async function countAnyFrame(
   return null;
 }
 
+/**
+ * S2（盲测复盘）：selector 的**行数 + 空行数**双指标（主 frame + 可达子 frame，
+ * 帧序/信封口径与 `countAnyFrame` 同一份循环）。空行 = `innerText.trim() === ""`
+ * 的匹配元素——懒渲染骨架节点的典型形态。单次 evaluate 一次往返拿两个数，
+ * 供 extract 的稳定判定（行数与空行数连续两轮相等才算稳定）与 `blank_rows`
+ * 事实回显。读不到（替身页/帧全失联）= null（调用方按"判不了"处理，不猜）。
+ */
+export async function rowStatsAnyFrame(
+  page: PageLike, selector: string, opts?: { hosts?: string[] | null },
+): Promise<{ rows: number; blank: number } | null> {
+  if (selector.trim() === "") return null;
+  const split = splitFrameSuffixFromSelector(selector);
+  const declared = split.frameChain;
+  if (page.frames !== undefined || page.locator !== undefined) {
+    const frames = framesOf(page);
+    let rows = 0;
+    let blank = 0;
+    for (let fi = 0; fi < frames.length; fi++) {
+      const fr = frames[fi]!;
+      if (declared !== undefined && !frameScopeMatchesFrame(declared, fr)) continue;
+      if (frameGateExcludes(fi, fr, opts?.hosts)) continue;
+      try {
+        const per = await fr.evaluate((sel: string) => {
+          const g = globalThis as unknown as {
+            document?: { querySelectorAll(s: string): ArrayLike<{ innerText?: string }> },
+          };
+          const doc = g.document;
+          if (!doc) return { rows: 0, blank: 0 };
+          const all = doc.querySelectorAll(sel);
+          let b = 0;
+          for (let i = 0; i < all.length; i++) {
+            if (String(all[i]!.innerText ?? "").trim() === "") b += 1;
+          }
+          return { rows: all.length, blank: b };
+        }, split.selector) as { rows: number; blank: number } | null;
+        if (per !== null && typeof per === "object") {
+          rows += Number(per.rows) || 0;
+          blank += Number(per.blank) || 0;
+        }
+      } catch {
+        continue;   // frame detached mid-scan：观察面不因一帧失联整体失败
+      }
+    }
+    return { rows, blank };
+  }
+  return null;
+}
+

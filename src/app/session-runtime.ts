@@ -34,7 +34,7 @@ import {
   type ActionabilityDetail, type ActMissDiagnostics, type AnyPage, type BrowserSession,
 } from "../engine/executor.ts";
 import {
-  countAnyFrame, urlOf, type ElemPool, type PageLike,
+  countAnyFrame, rowStatsAnyFrame, urlOf, type ElemPool, type PageLike,
 } from "../engine/extraction.ts";
 import { extractElements } from "./candidate-scan.ts";
 import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
@@ -729,6 +729,12 @@ export class SessionRuntime {
       };
     }
     const offset = typeof rawOffset === "number" ? rawOffset : 0;
+    // S2：`waitSettled:true`（显式 opt-in）= 双指标稳定门（行数与空行数连续两轮相等）。
+    // 缺省不出现 = 既有 E5 滚动稳定判定照旧，键集与行为逐字节不变。
+    if (req["waitSettled"] !== undefined && req["waitSettled"] !== true) {
+      return { ok: false, code: "config_error", reason: `extract.waitSettled must be true when present (got ${JSON.stringify(req["waitSettled"])})` };
+    }
+    const wantSettled = req["waitSettled"] === true;
     this.extractStats.total = 0;
     // E5：**滚动稳定判定**（缺省开；`settle:"off"` 跳过）。懒加载列表在抽行前可能还在
     // 增长——直接抽会把"截断"错报成"就这么多"。两次连读 rows 命中数相等 = 稳定；最多
@@ -738,6 +744,12 @@ export class SessionRuntime {
     let scrollSettled = true;
     if (!settleOff) {
       scrollSettled = await this.rowsSettled(String(rows));
+    }
+    // S2：稳定读（只在显式 opt-in 时发生）。行数与空行数双指标连续 2 轮相等才算稳定；
+    // 超窗如实回 `settled:false`——抽取照常发生（读到的就是此刻事实），不静默放行也不无界等。
+    let settled: boolean | undefined;
+    if (wantSettled) {
+      settled = await this.rowsSettledDual(String(rows));
     }
     // inline 形态：与 meta.site.listExtract 的声明走同一个 `ctx.extract` → `readRows` 实现
     //（MVP 只接 inline；named 需要 app pack，见 design §7）。
@@ -760,8 +772,20 @@ export class SessionRuntime {
     const count = out.length;
     const capped = count >= cap;
     const total = this.extractStats.total;
+    // S2：空行事实（恒带——只是"本页返回行里所有字段都是空串的行数"，不猜骨架/未渲染，
+    // 判读权在调用方）。先在本页行集合上数（零页面往返）；rowStats 读不到时再探测一次。
+    let blankRows = out.filter((r) => Object.values(r).every((v) => String(v ?? "").trim() === "")).length;
+    if (wantSettled && settled === false) {
+      const stats = await rowStatsAnyFrame(await this.page(), String(rows),
+        this.hosts === null ? undefined : { hosts: this.hosts });
+      if (stats !== null) blankRows = stats.blank;
+    }
     return {
       ok: true, rows: out, count, capped, max_items: cap,
+      // S2：空行事实（additive；懒渲染页与"真没有值"的判别面）。
+      blank_rows: blankRows,
+      // S2：稳定读证据（只在 waitSettled:true 时出现——超窗 = false 如实回，不是失败）。
+      ...(wantSettled ? { settled: settled === true } : {}),
       // E5：滚动稳定证据（additive；settle:"off" 时不出现，键集与旧行为一致）。
       ...(settleOff ? {} : { scroll_settled: scrollSettled }),
       // C1：分页事实只在「本页被 cap 挡住」或「offset>0」时出现——旧响应键集不变。
@@ -797,6 +821,34 @@ export class SessionRuntime {
       const now = await read();
       if (now === null) return true;
       if (now === prev) return true;
+      prev = now;
+    }
+    return false;
+  }
+
+  /**
+   * S2：rows 选择器的**双指标**稳定判定——行数与空行数（`rowStatsAnyFrame`，一次
+   * evaluate 同时拿两个数）连续 2 轮相等即稳定。空行数单独盯：懒渲染页的行数
+   * 可以先稳定（骨架节点已挂载）而内容还在灌——只看行数会提前放行，代理只能
+   * 用重复 extract 轮询把这笔税交出去。窗口与 E5 同款（600ms × 至多 5 轮）；
+   * 读不到（替身页/帧全失联）= 稳定（让 extract 本体去报结构化结果，这里不抢答）。
+   */
+  private async rowsSettledDual(rowsSel: string): Promise<boolean> {
+    const read = async (): Promise<{ rows: number; blank: number } | null> => {
+      try {
+        return await rowStatsAnyFrame(await this.page(), rowsSel,
+          this.hosts === null ? undefined : { hosts: this.hosts });
+      } catch {
+        return null;
+      }
+    };
+    let prev = await read();
+    if (prev === null) return true;
+    for (let round = 0; round < 4; round++) {
+      await sleepMs(600);
+      const now = await read();
+      if (now === null) return true;
+      if (now.rows === prev.rows && now.blank === prev.blank) return true;
       prev = now;
     }
     return false;
