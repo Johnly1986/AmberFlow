@@ -777,11 +777,39 @@ export class SessionRuntime {
       };
     }
     this.log(`act ${actOp} ${JSON.stringify(target)} → ${String(out.how)} changed=${out.changed === true}`);
+    // S3：opt-in 的同标签页导航事实探测（缺省不出现 = 零额外等待、键集不变）。
+    // 只报事实不判完成——`same_tab_navigation` 不是 done 信号，与 waitFor/signal 不冒充。
+    // 成功路径专属：失败现场证据已有自己的归因面，不做这次探测。
+    if (req["navProbeMs"] !== undefined && (typeof req["navProbeMs"] !== "number" || !Number.isInteger(req["navProbeMs"]) || req["navProbeMs"] < 100 || req["navProbeMs"] > 3000)) {
+      return { ok: false, code: "config_error", reason: `act.navProbeMs must be an integer in [100, 3000] (got ${JSON.stringify(req["navProbeMs"])})` };
+    }
+    const navProbeMs = typeof req["navProbeMs"] === "number" ? req["navProbeMs"] : undefined;
+    let navFacts: Record<string, unknown> = {};
+    if (navProbeMs !== undefined && out.probe_navigated !== true) {
+      const urlBefore = urlOf(page);
+      const deadline = Date.now() + navProbeMs;
+      let lastUrl = urlBefore;
+      while (Date.now() < deadline) {
+        await sleepMs(100);
+        const now = urlOf(page);
+        if (now !== urlBefore) { lastUrl = now; break; }
+      }
+      const urlAfter = urlOf(page);
+      if (urlAfter !== urlBefore) {
+        navFacts = { same_tab_navigation: true, nav_from: urlBefore, nav_to: urlAfter, probe_ms: navProbeMs };
+        this.urls.push(urlAfter);
+        // S3：导航事实进轨迹（recordEvent 与 mark 同流；这是动作的**后续观察**，不是第二个动作）。
+        this.recordEvent({ type: "nav_probe", target, nav_from: urlBefore, nav_to: urlAfter });
+      } else {
+        navFacts = { same_tab_navigation: false, probe_ms: navProbeMs };
+      }
+    }
     return {
       ok: true, op: actOp, target, executed: true,
       ref: out.ref ?? null, how: displayHow(actOp, out.how), changed: out.changed === true,
       url: urlOf(page), elapsed_ms: Date.now() - started,
       ...(out.probe_navigated === true ? { probe_navigated: true } : {}),
+      ...navFacts,
       // E1-c：`#id` 直查兜底命中的解析通道证据（additive；其余路径键集不变）。
       ...(out.resolved_via === undefined ? {} : { resolved_via: out.resolved_via }),
       ...amb,
