@@ -284,7 +284,13 @@ export async function navProbeFacts(
 export class RecentResolutions {
   private readonly map = new Map<string, { actionSeq: number; op: string; how: string }>();
 
-  constructor(private readonly capacity: number = 20) {}
+  // Node --experimental-strip-types 只擦类型、不支持 TS 参数属性（constructor(private …)）
+  // ——会话子进程启动即崩（child_exited）；字段必须显式赋值。
+  private readonly capacity: number;
+
+  constructor(capacity: number = 20) {
+    this.capacity = capacity;
+  }
 
   remember(target: string, actionSeq: number, op: string, how: string): void {
     this.map.delete(target);
