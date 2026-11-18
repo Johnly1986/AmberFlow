@@ -9,6 +9,8 @@ import path from "node:path";
 import { ensureDir } from "../support/amberflow-home.ts";
 import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
 import { takeHintMatchOthers } from "../engine/rules.ts";
+import { countAnyFrame, rowStatsAnyFrame, type PageLike } from "../engine/extraction.ts";
+import { sleepMs } from "../support/sleep.ts";
 import type { ActionabilityDetail, ActMissDiagnostics, AnyPage } from "../engine/executor.ts";
 import type { AmbiguityView } from "../engine/ambiguity.ts";
 import type { Ctx } from "./ctx.ts";
@@ -192,4 +194,120 @@ export async function doWaitFor(ctx: Ctx, log: (line: string) => void, req: Reco
   const held = await ctx.waitFor(parsed.spec as never, { timeoutMs, pollMs });
   log(`waitFor held=${held} (${Date.now() - started}ms)`);
   return { ok: true, held, timeout_ms: timeoutMs, poll_ms: pollMs, elapsed_ms: Date.now() - started };
+}
+
+/**
+ * E5：rows 选择器的**滚动稳定判定**——两次连读命中数相等即稳定。间隔 600ms、
+ * 最多 5 轮（首读 + 至多 4 次复读 = 有界窗口 ~2.4s）。选择器非法/不可定位时
+ * 返回 true（让 extract 本体去报结构化错误，这里不抢答）。
+ */
+export async function rowsSettled(
+  page: () => Promise<PageLike>, rowsSel: string,
+): Promise<boolean> {
+  const read = async (): Promise<number | null> => {
+    try {
+      return await countAnyFrame(await page(), rowsSel);
+    } catch {
+      return null;
+    }
+  };
+  let prev = await read();
+  if (prev === null) return true;
+  for (let round = 0; round < 4; round++) {
+    await sleepMs(600);
+    const now = await read();
+    if (now === null) return true;
+    if (now === prev) return true;
+    prev = now;
+  }
+  return false;
+}
+
+/**
+ * S2：rows 选择器的**双指标**稳定判定——行数与空行数（`rowStatsAnyFrame`，一次
+ * evaluate 同时拿两个数）连续 2 轮相等即稳定。空行数单独盯：懒渲染页的行数
+ * 可以先稳定（骨架节点已挂载）而内容还在灌——只看行数会提前放行，代理只能
+ * 用重复 extract 轮询把这笔税交出去。窗口与 E5 同款（600ms × 至多 5 轮）；
+ * 读不到（替身页/帧全失联）= 稳定（让 extract 本体去报结构化结果，这里不抢答）。
+ */
+export async function rowsSettledDual(
+  page: () => Promise<PageLike>, hosts: string[] | null, rowsSel: string,
+): Promise<boolean> {
+  const read = async (): Promise<{ rows: number; blank: number } | null> => {
+    try {
+      return await rowStatsAnyFrame(await page(), rowsSel,
+        hosts === null ? undefined : { hosts });
+    } catch {
+      return null;
+    }
+  };
+  let prev = await read();
+  if (prev === null) return true;
+  for (let round = 0; round < 4; round++) {
+    await sleepMs(600);
+    const now = await read();
+    if (now === null) return true;
+    if (now.rows === prev.rows && now.blank === prev.blank) return true;
+    prev = now;
+  }
+  return false;
+}
+
+/**
+ * S3：act 成功后的同标签页导航事实探测（纯页面读 + 时钟，无会话依赖）。
+ * 100ms 间隔轮询 `urlOf` 最多 `probeMs`；变 = `{same_tab_navigation:true, nav_from,
+ * nav_to, probe_ms}`，未变 = `{same_tab_navigation:false, probe_ms}`。只报事实不判完成。
+ */
+export async function navProbeFacts(
+  page: AnyPage, urlOf: (p: AnyPage) => string, probeMs: number, sleepMs: (ms: number) => Promise<void>,
+): Promise<{ facts: Record<string, unknown>; from: string; to: string }> {
+  const urlBefore = urlOf(page);
+  const deadline = Date.now() + probeMs;
+  while (Date.now() < deadline) {
+    await sleepMs(100);
+    if (urlOf(page) !== urlBefore) break;
+  }
+  const urlAfter = urlOf(page);
+  if (urlAfter !== urlBefore) {
+    return {
+      facts: { same_tab_navigation: true, nav_from: urlBefore, nav_to: urlAfter, probe_ms: probeMs },
+      from: urlBefore, to: urlAfter,
+    };
+  }
+  return { facts: { same_tab_navigation: false, probe_ms: probeMs }, from: urlBefore, to: urlAfter };
+}
+
+/**
+ * S4：最近成功解析记录（会话内存 LRU，≤capacity 条；插入序即淘汰序，重复 target
+ * 刷新到队尾）。落空诊断用它回答「这个 hint 上一步还点得动吗」。
+ */
+export class RecentResolutions {
+  private readonly map = new Map<string, { actionSeq: number; op: string; how: string }>();
+
+  constructor(private readonly capacity: number = 20) {}
+
+  remember(target: string, actionSeq: number, op: string, how: string): void {
+    this.map.delete(target);
+    this.map.set(target, { actionSeq, op, how });
+    if (this.map.size > this.capacity) {
+      const oldest = this.map.keys().next().value;
+      if (oldest !== undefined) this.map.delete(oldest);
+    }
+  }
+
+  /**
+   * 落空提示：同 target 在 ≤10 个动作内命中过 → 独立键 `recently_resolved`
+   * （steps_ago/last_op/last_how）+ reason 尾行；无历史/隔太久 = 两个空值
+   * （键不出现，响应键集不变）。只陈述事实，不自动重试。
+   */
+  hint(target: string, actionSeqNow: number): { diag: Record<string, unknown>; reasonLine: string } {
+    const hit = this.map.get(target);
+    if (hit === undefined) return { diag: {}, reasonLine: "" };
+    const stepsAgo = actionSeqNow - hit.actionSeq;
+    if (stepsAgo <= 0 || stepsAgo > 10) return { diag: {}, reasonLine: "" };
+    return {
+      diag: { recently_resolved: { steps_ago: stepsAgo, last_op: hit.op, last_how: hit.how } },
+      reasonLine: `；该 hint 曾在 ${stepsAgo} 个动作前命中（op=${hit.op}, how=${hit.how}）——行内容可能已变（展开/刷新），建议重新 observe 后换锚`,
+    };
+  }
 }

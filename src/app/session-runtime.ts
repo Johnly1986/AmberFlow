@@ -23,8 +23,8 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { createCtx, isSyntheticScrollTarget, StopError, type Ctx } from "./ctx.ts";
-// S1：行容器滚动（rows 寻址）直接用模块级实现——与 ctx.collect 同一份容器判定。
-import { scrollRowsToImpl, type RowsScrollProbe } from "./ctx-runtime.ts";
+// S1：行容器滚动（rows 寻址）与 scroll 分支执行体在独立模块（主文件只减不增）。
+import { doActScroll } from "./session-act-scroll.ts";
 import { buildMiddleware } from "./middleware-factory.ts";
 import { amberflowHome, ensureDir } from "../support/amberflow-home.ts";
 import { sleepMs } from "../support/sleep.ts"; import { NAVIGATION_GOTO_TIMEOUT_MS, SESSION_IDLE_TIMEOUT_MS } from "../support/tuning.ts";
@@ -50,7 +50,8 @@ import type { LaunchWindowMode } from "../browser/browser-env.ts";
 import type { AmbiguityView } from "../engine/ambiguity.ts";
 import {
   actAmbiguity, actionabilityResponse, ambiguityMode, ambiguityRecord, ambiguityResponse, displayHow,
-  doRead, doSignal, doWaitFor, failureScreenshot, missDiagnosticsResponse, observeAfter, signalSpec,
+  doRead, doSignal, doWaitFor, failureScreenshot, missDiagnosticsResponse, navProbeFacts, observeAfter,
+  RecentResolutions, rowsSettled, rowsSettledDual, signalSpec,
 } from "./session-runtime-evidence.ts";
 import {
   FLAP_HEAL_SETTLE_MS, FLAP_QUIET_EXIT_MS, FLAP_WINDOW_MS, SESSION_ACT_OPS, SESSION_DEFAULT_MAX_REQUEST_BYTES,
@@ -87,11 +88,11 @@ export class SessionRuntime {
   private readonly urls: string[] = [];
   private finished = false;
   /**
-   * S4：最近成功解析记录（target → 命中现场）。`target_not_found` 时若同 hint 在
-   * ≤10 个动作内命中过，落空诊断带 `recently_resolved`——"行内容可能已变，建议重新
-   * observe" 的引导事实。纯内存零页面往返；只影响会话 authoring 面，run 面不接。
+   * S4：最近成功解析记录（evidence 模块的 RecentResolutions）。`target_not_found`
+   * 时若同 hint 在 ≤10 个动作内命中过，落空诊断带 `recently_resolved`——"行内容
+   * 可能已变，建议重新 observe" 的引导事实。纯内存零页面往返；只影响会话面。
    */
-  private readonly recentResolutions = new Map<string, { actionSeq: number; op: string; how: string }>();
+  private readonly recentResolutions = new RecentResolutions();
 
   constructor(opts: SessionOptions, sink: SessionSink, runId?: string) {
     this.opts = opts;
@@ -229,33 +230,6 @@ export class SessionRuntime {
 
   private recordMark(note: string): void {
     this.recordEvent({ type: "mark", note: note.slice(0, 300) });
-  }
-
-  /** S4：成功解析进 LRU（≤20 条，插入序即淘汰序；重复 target 刷新到队尾）。 */
-  private rememberResolution(target: string, op: string, how: string): void {
-    this.recentResolutions.delete(target);
-    this.recentResolutions.set(target, { actionSeq: this.actionCount, op, how });
-    if (this.recentResolutions.size > 20) {
-      const oldest = this.recentResolutions.keys().next().value;
-      if (oldest !== undefined) this.recentResolutions.delete(oldest);
-    }
-  }
-
-  /**
-   * S4：落空诊断的最近命中提示（纯内存）。同 target 在 ≤10 个动作内命中过 →
-   * 顶层独立键 `recently_resolved`（steps_ago/last_op/last_how）+ reason 尾行；
-   * 无历史 = 空对象（键不出现，键集不变）。只陈述事实，不自动重试——
-   * "重新 observe" 由作者决定。
-   */
-  private recentlyResolved(target: string): { diag: Record<string, unknown>; reasonLine: string } {
-    const hit = this.recentResolutions.get(target);
-    if (hit === undefined) return { diag: {}, reasonLine: "" };
-    const stepsAgo = this.actionCount - hit.actionSeq;
-    if (stepsAgo <= 0 || stepsAgo > 10) return { diag: {}, reasonLine: "" };
-    return {
-      diag: { recently_resolved: { steps_ago: stepsAgo, last_op: hit.op, last_how: hit.how } },
-      reasonLine: `；该 hint 曾在 ${stepsAgo} 个动作前命中（op=${hit.op}, how=${hit.how}）——行内容可能已变（展开/刷新），建议重新 observe 后换锚`,
-    };
   }
 
   /**
@@ -572,7 +546,8 @@ export class SessionRuntime {
 
     // ---- scroll：合成目标（document/body/html/window）走 mw.scrollDocument；元素目标走 actOnce
     //      （B2：带 to/by = 容器滚动，不带 = 滚入视口且 changed 实测 moved）；
-    //      S1：`rows` 字段 = 行容器寻址（匹配行的最近可滚动祖先，与 collect 同一份判定）----
+    //      S1：`rows` 字段 = 行容器寻址（匹配行的最近可滚动祖先，与 collect 同一份判定）。
+    //      执行体整段在 session-act-scroll.ts（doAct 的存量行数只减不增）。----
     if (actOp === "scroll") {
       const to = req["to"];
       if (to !== undefined && to !== "bottom" && to !== "top" && to !== "page") {
@@ -593,152 +568,14 @@ export class SessionRuntime {
           return { ok: false, code: "config_error", reason: "scroll.rows needs to (bottom|top|page) or by (pixels)" };
         }
       }
-      const wantRowsScroll = rowsSel !== undefined;
-      const synthetic = !wantRowsScroll && (!nonEmpty(targetRaw) || isSyntheticScrollTarget(String(targetRaw)));
-      // B2：to/by 是**容器滚动**语义（元素自身或最近可滚动祖先，与 ctx.scrollList 同一条实现
-      // `_scrollWithLoc`；找不到可滚动容器 = not_scrollable，不静默无操作）。不给 to/by =
-      // 旧语义「把元素滚入视口」，但 moved/delta 由引擎实测（不再硬编码 changed:true）。
-      const wantsContainer = toDir !== undefined || by !== undefined;
-      // task-34：B1 旁路是**模块态**（最后一次解析者写）——先清场，避免把 record 观察或上一次
-      // 动作的诊断算到本次头上。元素 scroll 仍走 hint 解析，故同样回显歧义。
-      takeHintMatchOthers();
-      // S1：rows 形态走模块级 scrollRowsToImpl（与 ctx.collect 同一份容器判定；不进池、
-      // 不做 hint 匹配）。to:"bottom" 有界循环步进到 atBottom（每轮复用同一实现，懒加载
-      // 页滚到中途会加载新行——单次直写到底会跳过中途内容）；by/top/page 单步直写。
-      if (wantRowsScroll) {
-        const rowsSelStr = String(rowsSel);
-        takeHintMatchOthers();   // rows 不走 hint 解析，但清场纪律与其它路径一致
-        let probe: RowsScrollProbe;
-        if (toDir === "bottom" && by === undefined) {
-          let rounds = 0;
-          probe = { ok: false, zeroRows: true };
-          // 有界循环：≤50 轮步进（单轮 ~0.8 屏），到 atBottom 即停——防懒加载无限流挂死。
-          while (rounds < 50) {
-            rounds += 1;
-            const step = await scrollRowsToImpl(() => Promise.resolve(page), this.hosts, rowsSelStr, "page");
-            if (step.zeroRows === true) { probe = step; break; }
-            if (step.notScrollable === true) { probe = step; break; }
-            probe = step;
-            if (step.atBottom === true || step.moved === false) break;
-            await sleepMs(150);   // 与容器滚动 settle 同款间隔，给懒加载一拍
-          }
-        } else {
-          probe = await scrollRowsToImpl(() => Promise.resolve(page), this.hosts, rowsSelStr, toDir ?? "bottom", by);
-        }
-        if (probe.zeroRows === true) {
-          this.recordAction({
-            op: "scroll", target: rowsSelStr, ok: false, code: "target_not_found",
-            ref: null, how: null, changed: false, url: urlOf(page),
-            ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
-          });
-          return {
-            ok: false, code: "target_not_found", executed: false,
-            reason: `rows selector ${JSON.stringify(rowsSelStr)} matched no elements (in any reachable frame)`,
-            op: actOp, target: rowsSelStr,
-            ...(await failureScreenshot(this.outDir, (l) => this.log(l), page, this.actionCount, req)),
-          };
-        }
-        if (probe.notScrollable === true) {
-          this.recordAction({
-            op: "scroll", target: rowsSelStr, ok: false, code: "not_scrollable",
-            ref: null, how: null, changed: false, url: urlOf(page),
-            ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
-          });
-          return {
-            ok: false, code: "not_scrollable", executed: false,
-            reason: `rows selector ${JSON.stringify(rowsSelStr)} matched elements but no scrollable container found (nearest scrollable ancestor and document scrolling element are both not scrollable)`,
-            op: actOp, target: rowsSelStr,
-            ...(await failureScreenshot(this.outDir, (l) => this.log(l), page, this.actionCount, req)),
-          };
-        }
-        const rowsMoved = probe.moved === true;
-        const rowsScroll = typeof probe.scrollTop === "number"
-          && typeof probe.scrollHeight === "number" && typeof probe.clientHeight === "number"
-          ? { scrollTop: probe.scrollTop, scrollHeight: probe.scrollHeight, clientHeight: probe.clientHeight }
-          : undefined;
-        this.recordAction({
-          op: "scroll", target: rowsSelStr,
-          scroll_mode: "rows_container",
-          ...(toDir === undefined ? {} : { to: toDir }), ...(by === undefined ? {} : { by }),
-          ok: true, ref: null, how: "scrolled", changed: rowsMoved,
-          moved: rowsMoved,
-          ...(probe.delta === undefined ? {} : { delta: probe.delta }),
-          ...(typeof probe.scrollTop === "number" ? { scrollTop: probe.scrollTop } : {}),
-          url: urlOf(page),
-          ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
+      return await doActScroll(req, actOp, toDir, by,
+        rowsSel === undefined ? undefined : String(rowsSel), targetRaw, ambiguousMode,
+        rehydrateRescan, recordHints, {
+          page, hosts: this.hosts, outDir: this.outDir, actionCount: this.actionCount,
+          startedAt: started, log: (l) => this.log(l),
+          recordAction: (e) => this.recordAction(e),
+          mw: () => this.mw(), ctx: () => this.ctx(),
         });
-        return {
-          ok: true, op: actOp, target: rowsSelStr,
-          executed: true, ref: null, how: "scrolled", changed: rowsMoved,
-          moved: rowsMoved,
-          ...(probe.delta === undefined ? {} : { delta: probe.delta }),
-          ...(rowsScroll === undefined ? {} : { scroll: rowsScroll }),
-          url: urlOf(page), elapsed_ms: Date.now() - started,
-          ...(await observeAfter(this.ctx(), req)),
-        };
-      }
-      const out: SessionScrollOut = synthetic
-        ? await this.mw().scrollDocument(
-          (await this.ensureSession()).page, toDir ?? "bottom",
-          { ...(by === undefined ? {} : { by }) },
-        )
-        : await this.mw().actOnce(page, String(targetRaw), "scroll", null, ambiguousMode,
-          wantsContainer ? { ...(toDir === undefined ? {} : { to: toDir }), ...(by === undefined ? {} : { by }) } : undefined,
-          { diagnostics: true, ...(rehydrateRescan ? { rehydrateRescan: true } : {}) });
-      const scrollAmb = synthetic ? {} : actAmbiguity(String(targetRaw), out.ref ?? null);
-      // A2：只有元素 scroll（actOnce 分支）可能带歧义证据；合成目标走 scrollDocument，没有该键。
-      const scrollAmbiguity: AmbiguityView | undefined = out.ambiguity;
-      const scrollTarget = nonEmpty(targetRaw) ? String(targetRaw) : "document";
-      // B2：滚动语义进轨迹（export 需要它才知道该还原成哪种原语；旧轨迹没有这个键）。
-      const scrollMode: "container" | "into_view" = synthetic || wantsContainer ? "container" : "into_view";
-      // B2：changed = **实测** moved（没有 moved 证据 = false，不假装滚过）。
-      const moved = typeof out.moved === "boolean" ? out.moved : undefined;
-      const delta = typeof out.delta === "number" ? out.delta : undefined;
-      const scrollTop = typeof out.scrollTop === "number" ? out.scrollTop : undefined;
-      this.recordAction({
-        op: "scroll", target: scrollTarget,
-        // B2：只记**实际发生的事实**——没走通的滚动不记方向/语义；没请求 to/by 的元素滚动
-        // 也不伪记 to:"bottom"（"滚入视口"不是一次方向滚动）。
-        ...(out.ok === true ? { scroll_mode: scrollMode } : {}),
-        ...(out.ok === true && wantsContainer
-          ? { ...(toDir === undefined ? {} : { to: toDir }), ...(by === undefined ? {} : { by }) }
-          : {}),
-        ok: out.ok === true,
-        ...(out.ok === true ? {} : { code: String(out.stopCode ?? "not_scrollable") }),
-        ref: null, how: out.ok === true ? "scrolled" : null,
-        changed: moved === true,
-        ...(moved === undefined ? {} : { moved }),
-        ...(delta === undefined ? {} : { delta }),
-        ...(scrollTop === undefined ? {} : { scrollTop }),
-        url: urlOf(page),
-        ...ambiguityRecord(scrollAmbiguity),
-        ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
-      });
-      if (out.ok !== true) {
-        return {
-          ok: false, code: String(out.stopCode ?? "not_scrollable"), reason: String(out.reason ?? "scroll failed"),
-          op: actOp, target: scrollTarget, executed: false,
-          ...scrollAmb,
-          ...ambiguityResponse(scrollAmbiguity),
-          ...missDiagnosticsResponse(out.diagnostics),
-          ...(await failureScreenshot(this.outDir, (l) => this.log(l), page, this.actionCount, req)),
-        };
-      }
-      const scroll = typeof scrollTop === "number"
-        && typeof out.scrollHeight === "number" && typeof out.clientHeight === "number"
-        ? { scrollTop, scrollHeight: out.scrollHeight, clientHeight: out.clientHeight }
-        : undefined;
-      return {
-        ok: true, op: actOp, target: scrollTarget,
-        executed: true, ref: null, how: "scrolled",
-        changed: moved === true,
-        ...(moved === undefined ? {} : { moved }),
-        ...(delta === undefined ? {} : { delta }),
-        ...(scroll === undefined ? {} : { scroll }),
-        url: urlOf(page), elapsed_ms: Date.now() - started,
-        ...scrollAmb,
-        ...(await observeAfter(this.ctx(), req)),
-      };
     }
 
     if (!nonEmpty(targetRaw)) {
@@ -797,8 +634,8 @@ export class SessionRuntime {
       const wantOverlay = out.stopCode === "target_not_found" || out.stopCode === "not-actionable-or-covered";
       const overlay = wantOverlay ? await this.mw().overlayEvidence(page) : null;
       // S4：落空时的最近命中提示（纯内存；独立键 recently_resolved，不覆盖引擎 A4 的
-      // diagnostics；无历史 = 键不出现，响应键集不变）。
-      const recent = out.stopCode === "target_not_found" ? this.recentlyResolved(target) : { diag: {}, reasonLine: "" };
+      // diagnostics；无记录 = 键不出现，响应键集不变）。
+      const recent = out.stopCode === "target_not_found" ? this.recentResolutions.hint(target, this.actionCount) : { diag: {}, reasonLine: "" };
       return {
         ok: false, code: String(out.stopCode ?? "action_failed"),
         reason: String(out.reason ?? "") + recent.reasonLine,
@@ -816,7 +653,7 @@ export class SessionRuntime {
     }
     this.log(`act ${actOp} ${JSON.stringify(target)} → ${String(out.how)} changed=${out.changed === true}`);
     // S4：成功解析进 LRU——同 target 后续落空时的"最近命中过"引导事实。
-    this.rememberResolution(target, actOp, String(out.how ?? ""));
+    this.recentResolutions.remember(target, this.actionCount, actOp, String(out.how ?? ""));
     // S3：opt-in 的同标签页导航事实探测（缺省不出现 = 零额外等待、键集不变）。
     // 只报事实不判完成——`same_tab_navigation` 不是 done 信号，与 waitFor/signal 不冒充。
     // 成功路径专属：失败现场证据已有自己的归因面，不做这次探测。
@@ -826,22 +663,12 @@ export class SessionRuntime {
     const navProbeMs = typeof req["navProbeMs"] === "number" ? req["navProbeMs"] : undefined;
     let navFacts: Record<string, unknown> = {};
     if (navProbeMs !== undefined && out.probe_navigated !== true) {
-      const urlBefore = urlOf(page);
-      const deadline = Date.now() + navProbeMs;
-      let lastUrl = urlBefore;
-      while (Date.now() < deadline) {
-        await sleepMs(100);
-        const now = urlOf(page);
-        if (now !== urlBefore) { lastUrl = now; break; }
-      }
-      const urlAfter = urlOf(page);
-      if (urlAfter !== urlBefore) {
-        navFacts = { same_tab_navigation: true, nav_from: urlBefore, nav_to: urlAfter, probe_ms: navProbeMs };
-        this.urls.push(urlAfter);
+      const probe = await navProbeFacts(page, (p) => urlOf(p), navProbeMs, sleepMs);
+      navFacts = probe.facts;
+      if (probe.to !== probe.from) {
+        this.urls.push(probe.to);
         // S3：导航事实进轨迹（recordEvent 与 mark 同流；这是动作的**后续观察**，不是第二个动作）。
-        this.recordEvent({ type: "nav_probe", target, nav_from: urlBefore, nav_to: urlAfter });
-      } else {
-        navFacts = { same_tab_navigation: false, probe_ms: navProbeMs };
+        this.recordEvent({ type: "nav_probe", target, nav_from: probe.from, nav_to: probe.to });
       }
     }
     return {
@@ -903,13 +730,13 @@ export class SessionRuntime {
     const settleOff = this.settleDisabled();
     let scrollSettled = true;
     if (!settleOff) {
-      scrollSettled = await this.rowsSettled(String(rows));
+      scrollSettled = await rowsSettled(() => this.page(), String(rows));
     }
     // S2：稳定读（只在显式 opt-in 时发生）。行数与空行数双指标连续 2 轮相等才算稳定；
     // 超窗如实回 `settled:false`——抽取照常发生（读到的就是此刻事实），不静默放行也不无界等。
     let settled: boolean | undefined;
     if (wantSettled) {
-      settled = await this.rowsSettledDual(String(rows));
+      settled = await rowsSettledDual(() => this.page(), this.hosts, String(rows));
     }
     // inline 形态：与 meta.site.listExtract 的声明走同一个 `ctx.extract` → `readRows` 实现
     //（MVP 只接 inline；named 需要 app pack，见 design §7）。
@@ -946,7 +773,7 @@ export class SessionRuntime {
       blank_rows: blankRows,
       // S2：稳定读证据（只在 waitSettled:true 时出现——超窗 = false 如实回，不是失败）。
       ...(wantSettled ? { settled: settled === true } : {}),
-      // E5：滚动稳定证据（additive；settle:"off" 时不出现，键集与旧行为一致）。
+      // E5：滚动稳定证据（additive；settle:"off" 时不出现，键集与缺省响应一致）。
       ...(settleOff ? {} : { scroll_settled: scrollSettled }),
       // C1：分页事实只在「本页被 cap 挡住」或「offset>0」时出现——旧响应键集不变。
       ...(capped || offset > 0
@@ -958,60 +785,6 @@ export class SessionRuntime {
   /** E5：`meta.policy.settle === "off"`（会话构造时已知）= 跳过滚动稳定判定。 */
   private settleDisabled(): boolean {
     return this.opts.settle === "off";
-  }
-
-  /**
-   * E5：rows 选择器的**滚动稳定判定**——两次连读命中数相等即稳定。间隔 600ms、
-   * 最多 5 轮（首读 + 至多 4 次复读 = 有界窗口 ~2.4s）。选择器非法/不可定位时
-   * 返回 true（让 extract 本体去报结构化错误，这里不抢答）。
-   */
-  private async rowsSettled(rowsSel: string): Promise<boolean> {
-    const read = async (): Promise<number | null> => {
-      try {
-        const n = await countAnyFrame(await this.page(), rowsSel);
-        return n;
-      } catch {
-        return null;
-      }
-    };
-    let prev = await read();
-    if (prev === null) return true;
-    for (let round = 0; round < 4; round++) {
-      await sleepMs(600);
-      const now = await read();
-      if (now === null) return true;
-      if (now === prev) return true;
-      prev = now;
-    }
-    return false;
-  }
-
-  /**
-   * S2：rows 选择器的**双指标**稳定判定——行数与空行数（`rowStatsAnyFrame`，一次
-   * evaluate 同时拿两个数）连续 2 轮相等即稳定。空行数单独盯：懒渲染页的行数
-   * 可以先稳定（骨架节点已挂载）而内容还在灌——只看行数会提前放行，代理只能
-   * 用重复 extract 轮询把这笔税交出去。窗口与 E5 同款（600ms × 至多 5 轮）；
-   * 读不到（替身页/帧全失联）= 稳定（让 extract 本体去报结构化结果，这里不抢答）。
-   */
-  private async rowsSettledDual(rowsSel: string): Promise<boolean> {
-    const read = async (): Promise<{ rows: number; blank: number } | null> => {
-      try {
-        return await rowStatsAnyFrame(await this.page(), rowsSel,
-          this.hosts === null ? undefined : { hosts: this.hosts });
-      } catch {
-        return null;
-      }
-    };
-    let prev = await read();
-    if (prev === null) return true;
-    for (let round = 0; round < 4; round++) {
-      await sleepMs(600);
-      const now = await read();
-      if (now === null) return true;
-      if (now.rows === prev.rows && now.blank === prev.blank) return true;
-      prev = now;
-    }
-    return false;
   }
 
   private async doSnapshot(req: Record<string, unknown>): Promise<Record<string, unknown>> {
