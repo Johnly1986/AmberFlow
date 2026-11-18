@@ -150,3 +150,21 @@ S2（最高税：25 次 extract 重试的主因） → S1（64 次 observe/滚�
 - `observe` 不加 offset（元素序无稳定锚的既有决策维持）；
 - DSH 编排面（#7–#10）不在本仓库实施；
 - 不新增运行时依赖。
+
+## 4. 实施状态（2026-11-18）
+
+S 组四条已全部落地（每条独立提交，缺省路径逐字节不变均以 typecheck + 既有测试门验证）：
+
+| 条 | 提交 | 实施要点 |
+|---|---|---|
+| S2 | `39bb2fb` | `rowStatsAnyFrame`（frame-scope）单次 evaluate 拿行数+空行数；`extract` `waitSettled:true` 双指标稳定门（行数与空行数连续 2 轮相等）；响应恒带 `blank_rows` |
+| S1 | `7d8d388` | `scrollRowsBase` 模块级统一实现（步进/绝对两模式）；`act scroll` `rows` 参数（与 `target` 互斥）；`to:"bottom"` 有界循环 ≤50 轮到 `atBottom`；`scroll_mode:"rows_container"` 进轨迹 |
+| S3 | `23f06ef` | `act` 成功路径 `navProbeMs`（100..3000ms）轮询同标签页 URL；`same_tab_navigation` + `nav_from`/`nav_to`；record 留 `nav_probe` 事件行 |
+| S4 | `ccd99d3` | 会话内 LRU（≤20）；`target_not_found` 且同 hint ≤10 动作内命中过 → 独立键 `recently_resolved` + reason 尾行（不覆盖引擎 A4 `diagnostics`） |
+
+- 手册同步：`docs/INTERACTIVE_SESSION.md` 新增四节 + 分页节交叉引用。
+- S5（桥投影截断 `order_note`）维持 **P2 观察项**：snapshot 兜底已可用，待下次编排面
+  对接实测再决定是否实施。
+- O1 维持划界不变；"长任务用 session 面"的桥描述提示词调优随 S 组实施一并观测。
+- 操作税验收：以下次同型任务实测复核（observe 轮询与 extract 重试的下降是
+  **观测项**，不是承诺）。

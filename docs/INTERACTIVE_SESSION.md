@@ -95,7 +95,8 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
 - `offset=0` 且本页没被 cap 挡住时，响应与分页之前逐字节一致（不多出 `offset/total/has_more`）。
 - `total` 是**当前 DOM 匹配行总数**（这一刻的事实）；懒加载/无限滚动页面在滚动后 `total` 会变，
   续页之间页面若发生插入/删除，offset 分页可能重/漏——需要"翻到底"的穷举请用 `ctx.collect`
-  （应用脚本面）或接受逐页快照的语义。
+  （应用脚本面）或接受逐页快照的语义。抽行前要"等列表稳定"用 `waitSettled:true`（见
+  「extract 的稳定读与空行事实」节）；滚动到列表底用 `act scroll rows`（见 S1 节）。
 - `observe` **不提供 offset**：元素序随水合/动画变化，没有稳定锚（用 offset 续页会悄悄错位）。
   行数太多时用 `selector` 收窄、`max` 放宽（硬上限 200），要全量元素快照就用 `snapshot`
   （`pool-<n>.json`）。
@@ -260,6 +261,70 @@ SPA 的失败路径补偿：声明 hint 真落空（`hintMatch` 零命中）**�
   `ctx.command("scroll", target)`（滚入视口），两种都能过 `apps check`。
 - **边界**：run 面/命令步（`ctx.command("scroll", sel, {to})`）/`ctx.scrollList`/`scrollDocument`
   的既有语义与产物**逐字节不变**——本项只改会话单动作面（`actOnce` 的 scroll 分支与会话层）。
+
+### act scroll 的行容器寻址（S1，`rows` 字段）
+
+B2 的容器滚动需要**先命中一个元素 hint**（`target` + `to/by`）；懒加载列表没有稳定单元素锚
+（行内容会整体替换）时，第三种 target 形态直接给**行选择器**：
+
+```json
+{"type":"act","op":"scroll","rows":".search-result","to":"bottom"}
+```
+
+| 请求 | 语义 |
+|---|---|
+| `rows` + `to`（或 `by`） | 滚动**匹配行的最近可滚动祖先**（无则主滚动器）到方向/像素——与 `ctx.collect` 内部滚动**同一份容器判定**（最近可滚动祖先、帧序、信封、` frame:` 尾缀剥离），不是第二套语义 |
+
+- `rows` 与 `target` **互斥**（同给 = `config_error`）；`rows` 需要 `to`/`by` 至少其一。
+- `to:"bottom"` 是**有界循环步进**（每轮 ~0.9 屏 + 150ms settle，≤50 轮，滚到 `atBottom` 即停）：
+  懒加载页滚到中途会加载新行，单次直写到底会跳过中途内容；无限流 50 轮上限防挂死。
+  `top`/`page`/`by` 是单步直写。
+- 行零命中 = `target_not_found`（reason 点名 rows 选择器）；行在但容器不可滚 = `not_scrollable`
+  ——两个都是**既有停因码**，不新增。
+- 响应证据与 B2 同口径：`moved`、`delta`、`scroll:{scrollTop,scrollHeight,clientHeight}`；
+  `--record` 记 `scroll_mode:"rows_container"`（`session export` 还原成 `ctx.scrollList(rows, {to|by})`）。
+- 缺省（不给 `rows`）= 三种既有语义逐字节不变。
+
+### extract 的稳定读与空行事实（S2）
+
+懒渲染页的两个高频事故：直接抽到"还在灌"的半截列表；把骨架空行当真值。`extract` 增两个
+additive 面（缺省不给 = 响应除 `blank_rows` 外逐字节不变）：
+
+- `waitSettled:true`（只接受 `true`）：抽行前做**双指标稳定门**——行数与空行数（一次 evaluate
+  同时拿两个数）连续 2 轮相等才算稳定（600ms 间隔，至多 5 轮，与 E5 滚动稳定窗同款）。空行数
+  单独盯：行数可以先稳定（骨架节点已挂载）而内容还在灌。超窗 = 抽取照常发生 + 如实回
+  `settled:false`——**不是失败**，读到的就是此刻事实；不等价于 waitFor，也不判 done。
+- `blank_rows`（恒带）：本页返回行里**所有字段都是空串**的行数（判读权在调用方）；`waitSettled`
+  未稳定时会用行选择器再统计一次全 DOM 空行数兜底。骨架行/懒加载未灌满的第一判别信号。
+
+### act 的同标签页导航事实（S3，`navProbeMs`）
+
+`act`（click 为典型）触发页面内跳转时，成功响应只有动作后的 `url`——跳没跳、跳去哪，调用方
+只能再发一条 read/observe 对比。opt-in 探测：
+
+```json
+{"type":"act","op":"click","target":"下一页","navProbeMs":800}
+```
+
+- 成功路径动作后以 100ms 间隔轮询同标签页 URL，最多 `navProbeMs`（整数 100..3000；缺省不给 =
+  零额外等待、键集不变）。URL 变 = `same_tab_navigation:true` + `nav_from`/`nav_to`/`probe_ms`；
+  未变 = `same_tab_navigation:false` + `probe_ms`。
+- 与异常路径的 `probe_navigated:true` 互斥出现（那条是免费事实，不重复探测）。
+- **只报事实不判完成**：`same_tab_navigation` 不是 done 信号；要确定性判定用 `waitFor`/`signal`。
+- `--record` 以 `nav_probe` 事件行留导航事实（与 mark 同流，不占动作序）。
+
+### act 落空时的最近命中提示（S4）
+
+同一 hint 上一步还点得动、下一步 `target_not_found`——典型场景是列表行内容整体刷新（展开/
+翻页/水合）。会话内存里维护最近成功解析记录（≤20 条）：落空且该 hint 在 ≤10 个动作内命中过
+时，失败响应多两处**纯内存**引导（零页面往返）：
+
+- 顶层 `recently_resolved:{steps_ago, last_op, last_how}`（独立键，不覆盖引擎 A4 的 `diagnostics`）。
+- `reason` 尾行：`该 hint 曾在 N 个动作前命中（op=…, how=…）——行内容可能已变，建议重新 observe 后换锚`。
+
+无历史（首次使用/隔太久）= 键不出现、reason 不变，响应键集与之前一致。只陈述事实，不自动重试、
+不自动换锚——重新 observe 是作者的决定。
+
 
 ### observe 与 iframe（task-34 口径）
 
