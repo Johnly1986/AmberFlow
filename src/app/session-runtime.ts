@@ -23,6 +23,8 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { createCtx, isSyntheticScrollTarget, StopError, type Ctx } from "./ctx.ts";
+// S1：行容器滚动（rows 寻址）直接用模块级实现——与 ctx.collect 同一份容器判定。
+import { scrollRowsToImpl, type RowsScrollProbe } from "./ctx-runtime.ts";
 import { buildMiddleware } from "./middleware-factory.ts";
 import { amberflowHome, ensureDir } from "../support/amberflow-home.ts";
 import { sleepMs } from "../support/sleep.ts"; import { NAVIGATION_GOTO_TIMEOUT_MS, SESSION_IDLE_TIMEOUT_MS } from "../support/tuning.ts";
@@ -536,7 +538,8 @@ export class SessionRuntime {
     const recordHints = await this.hintsForRecord(nonEmpty(targetRaw) ? String(targetRaw) : undefined);
 
     // ---- scroll：合成目标（document/body/html/window）走 mw.scrollDocument；元素目标走 actOnce
-    //      （B2：带 to/by = 容器滚动，不带 = 滚入视口且 changed 实测 moved）----
+    //      （B2：带 to/by = 容器滚动，不带 = 滚入视口且 changed 实测 moved）；
+    //      S1：`rows` 字段 = 行容器寻址（匹配行的最近可滚动祖先，与 collect 同一份判定）----
     if (actOp === "scroll") {
       const to = req["to"];
       if (to !== undefined && to !== "bottom" && to !== "top" && to !== "page") {
@@ -544,7 +547,21 @@ export class SessionRuntime {
       }
       const toDir = to as "bottom" | "top" | "page" | undefined;
       const by = req["by"] === undefined ? undefined : intIn(req["by"], -1_000_000, 1_000_000);
-      const synthetic = !nonEmpty(targetRaw) || isSyntheticScrollTarget(String(targetRaw));
+      // S1：rows 与 target 互斥（滚动语义的第三种 target 形态，不是 hint；缺省不出现 = 行为不变）。
+      const rowsSel = req["rows"];
+      if (rowsSel !== undefined) {
+        if (!nonEmpty(rowsSel)) {
+          return { ok: false, code: "config_error", reason: "scroll.rows must be a non-empty CSS selector string when present" };
+        }
+        if (nonEmpty(targetRaw)) {
+          return { ok: false, code: "config_error", reason: "scroll takes either target (hint) or rows (CSS selector), not both" };
+        }
+        if (toDir === undefined && by === undefined) {
+          return { ok: false, code: "config_error", reason: "scroll.rows needs to (bottom|top|page) or by (pixels)" };
+        }
+      }
+      const wantRowsScroll = rowsSel !== undefined;
+      const synthetic = !wantRowsScroll && (!nonEmpty(targetRaw) || isSyntheticScrollTarget(String(targetRaw)));
       // B2：to/by 是**容器滚动**语义（元素自身或最近可滚动祖先，与 ctx.scrollList 同一条实现
       // `_scrollWithLoc`；找不到可滚动容器 = not_scrollable，不静默无操作）。不给 to/by =
       // 旧语义「把元素滚入视口」，但 moved/delta 由引擎实测（不再硬编码 changed:true）。
@@ -552,6 +569,81 @@ export class SessionRuntime {
       // task-34：B1 旁路是**模块态**（最后一次解析者写）——先清场，避免把 record 观察或上一次
       // 动作的诊断算到本次头上。元素 scroll 仍走 hint 解析，故同样回显歧义。
       takeHintMatchOthers();
+      // S1：rows 形态走模块级 scrollRowsToImpl（与 ctx.collect 同一份容器判定；不进池、
+      // 不做 hint 匹配）。to:"bottom" 有界循环步进到 atBottom（每轮复用同一实现，懒加载
+      // 页滚到中途会加载新行——单次直写到底会跳过中途内容）；by/top/page 单步直写。
+      if (wantRowsScroll) {
+        const rowsSelStr = String(rowsSel);
+        takeHintMatchOthers();   // rows 不走 hint 解析，但清场纪律与其它路径一致
+        let probe: RowsScrollProbe;
+        if (toDir === "bottom" && by === undefined) {
+          let rounds = 0;
+          probe = { ok: false, zeroRows: true };
+          // 有界循环：≤50 轮步进（单轮 ~0.8 屏），到 atBottom 即停——防懒加载无限流挂死。
+          while (rounds < 50) {
+            rounds += 1;
+            const step = await scrollRowsToImpl(() => Promise.resolve(page), this.hosts, rowsSelStr, "page");
+            if (step.zeroRows === true) { probe = step; break; }
+            if (step.notScrollable === true) { probe = step; break; }
+            probe = step;
+            if (step.atBottom === true || step.moved === false) break;
+            await sleepMs(150);   // 与容器滚动 settle 同款间隔，给懒加载一拍
+          }
+        } else {
+          probe = await scrollRowsToImpl(() => Promise.resolve(page), this.hosts, rowsSelStr, toDir ?? "bottom", by);
+        }
+        if (probe.zeroRows === true) {
+          this.recordAction({
+            op: "scroll", target: rowsSelStr, ok: false, code: "target_not_found",
+            ref: null, how: null, changed: false, url: urlOf(page),
+            ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
+          });
+          return {
+            ok: false, code: "target_not_found", executed: false,
+            reason: `rows selector ${JSON.stringify(rowsSelStr)} matched no elements (in any reachable frame)`,
+            op: actOp, target: rowsSelStr,
+            ...(await failureScreenshot(this.outDir, (l) => this.log(l), page, this.actionCount, req)),
+          };
+        }
+        if (probe.notScrollable === true) {
+          this.recordAction({
+            op: "scroll", target: rowsSelStr, ok: false, code: "not_scrollable",
+            ref: null, how: null, changed: false, url: urlOf(page),
+            ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
+          });
+          return {
+            ok: false, code: "not_scrollable", executed: false,
+            reason: `rows selector ${JSON.stringify(rowsSelStr)} matched elements but no scrollable container found (nearest scrollable ancestor and document scrolling element are both not scrollable)`,
+            op: actOp, target: rowsSelStr,
+            ...(await failureScreenshot(this.outDir, (l) => this.log(l), page, this.actionCount, req)),
+          };
+        }
+        const rowsMoved = probe.moved === true;
+        const rowsScroll = typeof probe.scrollTop === "number"
+          && typeof probe.scrollHeight === "number" && typeof probe.clientHeight === "number"
+          ? { scrollTop: probe.scrollTop, scrollHeight: probe.scrollHeight, clientHeight: probe.clientHeight }
+          : undefined;
+        this.recordAction({
+          op: "scroll", target: rowsSelStr,
+          scroll_mode: "rows_container",
+          ...(toDir === undefined ? {} : { to: toDir }), ...(by === undefined ? {} : { by }),
+          ok: true, ref: null, how: "scrolled", changed: rowsMoved,
+          moved: rowsMoved,
+          ...(probe.delta === undefined ? {} : { delta: probe.delta }),
+          ...(typeof probe.scrollTop === "number" ? { scrollTop: probe.scrollTop } : {}),
+          url: urlOf(page),
+          ...(recordHints.length > 0 ? { observe_hints: recordHints } : {}),
+        });
+        return {
+          ok: true, op: actOp, target: rowsSelStr,
+          executed: true, ref: null, how: "scrolled", changed: rowsMoved,
+          moved: rowsMoved,
+          ...(probe.delta === undefined ? {} : { delta: probe.delta }),
+          ...(rowsScroll === undefined ? {} : { scroll: rowsScroll }),
+          url: urlOf(page), elapsed_ms: Date.now() - started,
+          ...(await observeAfter(this.ctx(), req)),
+        };
+      }
       const out: SessionScrollOut = synthetic
         ? await this.mw().scrollDocument(
           (await this.ensureSession()).page, toDir ?? "bottom",
