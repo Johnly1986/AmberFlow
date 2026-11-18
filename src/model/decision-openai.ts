@@ -15,7 +15,7 @@ import type {
   ProviderCapabilities,
 } from "./decision-provider.ts";
 import { DECISION_REQUEST_TIMEOUT_MS } from "../support/tuning.ts";
-import { stateText, urlOf } from "../engine/extraction.ts";
+import { ariaInteractiveLines, criteriaView, stateText, urlOf } from "../engine/extraction.ts";
 import { choiceInstructions, RISK_INSTRUCTIONS_SHORT, doneInstructionsShort } from "../prompts/model-prompts.ts";
 
 const CAPABILITIES: ProviderCapabilities = {
@@ -191,13 +191,22 @@ export function openaiDecisionsProvider(opts: OpenAIDecisionsOptions): DecisionP
         (r) => !req.forbidden.has(r) && req.elems[r] !== undefined,
       );
       if (refs.length < 1) return emptyChoiceOutcome(CAPABILITIES.score_kind, refs.length);
+      // 候选渲染与 laya/SystemOne 同一张 criteriaView（同文案选项行带 [near] 消歧）；
+      // fake page（无 locator）抛错时退回裸 label——题照问，不因测试桩缺形状而崩（B4）。
+      let criteria: Record<string, string>;
+      try {
+        const pool = Object.fromEntries(refs.map((r) => [r, req.elems[r]!]));
+        criteria = criteriaView(pool, new Set(), await ariaInteractiveLines(req.page), req.notes);
+      } catch {
+        criteria = Object.fromEntries(refs.map((r) => [r, String(req.elems[r]?.["label"] ?? r)]));
+      }
       const reply = await ask(await pickInput(req), [{
         type: "choice",
         name: "act",
         instructions: choiceInstructions(req.goal),
         choices: refs.map((ref) => ({
           value: ref,
-          description: String(req.elems[ref]?.["label"] ?? ref),
+          description: criteria[ref] ?? String(req.elems[ref]?.["label"] ?? ref),
         })),
       }]);
       const answer = reply.answers?.find((a) => a.name === "act");

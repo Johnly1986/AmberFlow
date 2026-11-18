@@ -272,7 +272,9 @@ export async function runModelPick(mw: BrowserMiddleware, a: {
           escalated = true;
           // 显式传当前（宽化后的）池：orderedPool 无参形式读到的是 run() 闭包的旧窄视图
           // ——低置信恢复刚把 elems 换成宽视图时，升级题面必须与 pickElement 看到的是同一份。
-          const crit = criteriaView(orderedPool(elems), new Set(Object.keys(forbidden)), await ariaInteractiveLines(pg));
+          // noted 同步传入（B6）：pickElement 五个 ask 点都带 outcome-memory 注记，升级题面
+          // 不带 = 更强的推理者反而看不见"这个候选已白跑过"的事实，点名成本花在旧坑上。
+          const crit = criteriaView(orderedPool(elems), new Set(Object.keys(forbidden)), await ariaInteractiveLines(pg), noted);
           const state = { url: urlOf(pg), title: await pg.title(), main_text: await stateTextFn(pg, instruction) };
           try {
             const pick = await escalateFn({ instruction, criteria: crit, why: `low confidence ${conf.toFixed(2)} < floor ${floor.toFixed(2)}`, ...state });

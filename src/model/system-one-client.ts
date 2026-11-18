@@ -17,6 +17,7 @@ import type {
   ChoiceOutcome, ChoiceRequest, ClosedSetChoice, ClosedSetRequest, DecisionProvider, ProviderCapabilities,
 } from "./decision-provider.ts";
 import { DECISION_REQUEST_TIMEOUT_MS } from "../support/tuning.ts";
+import { ariaInteractiveLines, criteriaView } from "../engine/extraction.ts";
 
 /** SystemOne 的一个答案（choice/noul/score 共用一个形状，字段按类型出现）。 */
 export interface SystemOneAnswer {
@@ -139,7 +140,16 @@ async function buildChoiceBody(p: SystemOneProfile, req: ChoiceRequest):
     (r) => !req.forbidden.has(r) && req.elems[r] !== undefined,
   );
   if (refs.length < p.minOptions) return { empty: true, asked: refs.length };
-  const criteria = Object.fromEntries(refs.map((r) => [r, String(req.elems[r]?.["label"] ?? r)]));
+  // 候选渲染与 laya 同一张 criteriaView（role+label+attrs+[near] 消歧）：裸 label 会把
+  // 同文案候选渲染成逐字相同的选项行——网格/分页场景下模型只能靠 ref 序号猜（B4）。
+  // aria 对齐失败（行数不齐）时 criteriaView 自动退回 tag+label，无第二实现。
+  const pool = Object.fromEntries(refs.map((r) => [r, req.elems[r]!]));
+  let criteria: Record<string, string>;
+  try {
+    criteria = criteriaView(pool, new Set(), await ariaInteractiveLines(req.page), req.notes);
+  } catch {
+    criteria = Object.fromEntries(refs.map((r) => [r, String(req.elems[r]?.["label"] ?? r)]));
+  }
   const state = p.stateBuilder ? await p.stateBuilder(req) : { goal: req.goal };
   // S5b：结构化状态摘要挂在 state 包内的可选键上（不并入正文、不改 questions、不发明协议字段）。
   // 只有 profile 声明 stateDigest 才会走到这里；执行器端已按能力过滤，双保险。

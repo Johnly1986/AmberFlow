@@ -768,6 +768,8 @@ export class BrowserMiddleware {
     goalKey: string;
     url: string;
     result: { ref: string | null; conf: number; probs: Record<string, number>; passthrough: boolean };
+    /** A6：上次选中元素的 esig（ref 是位置键，跨抽池重编号不可比，签名才可比）。 */
+    pickedSig: [string, string, string] | null;
   }>();
   /** S5b：本次 run 到目前为止出现过的 S1 flags（摘要里只放已经发生的事实）。 */
   _runFlags: StateFlag[] = [];
@@ -1224,9 +1226,8 @@ export class BrowserMiddleware {
     forbidden: Set<string>,
     notes: Record<string, string> | null,
   ): Promise<{ ref: string | null; conf: number; probs: Record<string, number>; passthrough: boolean; choiceLimit?: string }> {  // choiceLimit=超限原因（A2 即取即清）
-    // `pickElement`/`pickProposal` 也允许被**单独调用**（测试与外部嵌入方就这么用），而 provider
-    // 是在 ready() 里解析的：不先 ready 就会拿着 null 当成"没得选"。ready() 幂等，
-    // run() 那条路早已 await 过，这里不会重复加载权重。
+    // `pickElement`/`pickProposal` 也允许被**单独调用**（测试/外部嵌入方），而 provider 在
+    // ready() 里解析——先 ready 才不会把 null 当"没得选"（ready 幂等，run() 路径不重复加载）。
     await this.ready();
     if (this.rulesOnly) {
       // no model to ask: the caller reports "needs a model pick" instead of a crash
@@ -1236,10 +1237,8 @@ export class BrowserMiddleware {
     if (!provider) {
       return { ref: null, conf: 0.0, probs: {}, passthrough: true };
     }
-    // A2：决策服务把候选清单当选项列表，服务侧上限 255——超限不是"窗口开大一点"能解决的，
-    // 必须结构化停因（收窄 hint / 用分桶优先级），不能把 200+ 选项硬塞过去。原因经返回值
-    // 即取即清（不留成员状态）——此前写入 _choiceLimitReason 后仅在"模型没答"分支被消费，
-    // 正常答出的步会把上一轮的超限原因残留到后续某个失败步上（由 pickElement 落账）。
+    // A2：决策服务把候选清单当选项列表，服务侧上限 255——超限必须结构化停因（收窄 hint /
+    // 分桶优先级），不能硬塞 200+ 选项。原因经返回值即取即清（不留成员状态残留）。
     const candidateCount = Object.keys(elems).filter((r) => !forbidden.has(r)).length;
     if (candidateCount > MAX_CHOICES) {
       this.lastPickEvidence = null;
@@ -1253,29 +1252,27 @@ export class BrowserMiddleware {
     // 且与替换前的实现逐字段等价（逐字段替换验证 ①）。
     //
     // ── S5 状态接入（默认两项 off ⇒ 下面整段短路，决策路径逐字节不变）───────────────
-    // 判据「规则层仍歧义」不需要再问一遍：pickInner 是**规则层没解出 ref**（ruleRef 为
-    // null / 被 forbidden）之后唯一的模型入口（调用点见 pickElement 的三处），走到这里
-    // 就说明规则层给不出目标。
+    // 判据「规则层仍歧义」不需要再问一遍：pickInner 是规则层没解出 ref 后唯一的模型入口。
     const askSig = this._askSignature(goal, elems, forbidden);
     const goalKey = fnv1aText(goal);
+    const notesKey = fnv1aText(JSON.stringify(notes ?? {}));   // A7：notes 进题面指纹
     const poolStruct = structDigest(elems);
     let settledNow: boolean | null = null;
     if (this.decisionState.gate === "stable_only") {
       // ① 页面在动 ⇒ 先等到静默（走 policy.settle 参数；超时不阻断，照旧问）。
       settledNow = await this._gateSettle(page);
-      // ② 池指纹未变 + 规则层仍歧义 ⇒ 不重复敲门，复用该池结构下的上一次答复：
-      //    题面一字不差（key 相同）直接复用；仅结构相同则要求上一次的选择此刻仍可行动
-      //    （在池里且未 forbidden），否则这次答复已经过时——照常问，不拿死答案去动作。
-      //    页面状态判据（S5a 补）：structDigest 只统计 tag/role 计数，SPA 同构翻页下指纹
-      //    不变——不加 url 判据，"点下一页"的旧答复会在后续同构页被反复复用（原地打转）。
+      // ② 池指纹未变 + 规则层仍歧义 ⇒ 不重复敲门：题面一字不差（key 相同）直接复用；
+      //    仅结构相同则要求上次选择此刻仍可行动。SPA 同构翻页骗不过 url 判据（S5a）。
       const prior = this._askedPools.get(poolStruct);
+      // A6：ref 是位置键（抽池重编号），"仍在池里"≠"还是那个元素"——补 esig 校验（与
+      // stale-forbidden 剪枝同口径）：签名逐字段相等才可复用，否则答复过时、照常问。
       if (prior !== undefined && prior.goalKey === goalKey && prior.url === urlOf(page)) {
-        const stillActionable = prior.result.ref !== null
-          && elems[prior.result.ref] !== undefined && !forbidden.has(prior.result.ref);
-        if (prior.key === askSig.key || stillActionable) {
+        const stillActionable = prior.result.ref !== null && prior.pickedSig !== null
+          && elems[prior.result.ref] !== undefined && !forbidden.has(prior.result.ref)
+          && sigEq(esig(elems[prior.result.ref]!), prior.pickedSig);
+        if (prior.key === `${askSig.key}\u0000${notesKey}` || stillActionable) {
           this._decisionMetrics.asks_saved += 1;
-          // 复用的答复继续走既有 floor/reobserve/escalate 裁决（就是"既有降级路径"）。
-          return { ...prior.result, probs: { ...prior.result.probs } };
+          return { ...prior.result, probs: { ...prior.result.probs } };   // 复用答复仍走既有裁决
         }
       }
     }
@@ -1335,11 +1332,14 @@ export class BrowserMiddleware {
     const result = {
       ref: out.ref as string | null, conf: out.score, probs: out.probs, passthrough: out.passthrough,
     };
-    // S5a：只有真问过才更新"上一次 ask"（被闸门省掉的不覆盖题面/答复）。
+    // S5a：只有真问过才更新"上一次 ask"；池结构指纹 → 最近一次真 ask 的答复
+    // （key 含 notes 指纹 A7；pickedSig 留元素签名 A6；同页同 goal 不重复敲门）。
     this._lastAsk = { key: askSig.key, poolSig: askSig.poolSig, navEpoch: this._state.navEpoch, result };
-    // 池结构指纹 → 该结构下最近一次真 ask 的答复（同页同 goal 的重复咨询不再敲门）。
     if (this._askedPools.size > 32) this._askedPools.clear();   // 有界：池形状种类远小于此
-    this._askedPools.set(poolStruct, { key: askSig.key, goalKey, url: urlOf(page), result });
+    this._askedPools.set(poolStruct, {
+      key: `${askSig.key}\u0000${notesKey}`, goalKey, url: urlOf(page), result,
+      pickedSig: result.ref !== null ? esig(elems[result.ref]!) : null,
+    });
     return result;
   }
 
