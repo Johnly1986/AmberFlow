@@ -153,7 +153,7 @@ S2（最高税：25 次 extract 重试的主因） → S1（64 次 observe/滚�
 
 ## 4. 实施状态（2026-11-18）
 
-S 组四条已全部落地（每条独立提交，缺省路径逐字节不变均以 typecheck + 既有测试门验证）：
+S 组四条已全部落地（每条独立提交，缺省路径逐字节不变均以 `npm run check` 全绿验证）：
 
 | 条 | 提交 | 实施要点 |
 |---|---|---|
@@ -161,6 +161,7 @@ S 组四条已全部落地（每条独立提交，缺省路径逐字节不变均
 | S1 | `7d8d388` | `scrollRowsBase` 模块级统一实现（步进/绝对两模式）；`act scroll` `rows` 参数（与 `target` 互斥）；`to:"bottom"` 有界循环 ≤50 轮到 `atBottom`；`scroll_mode:"rows_container"` 进轨迹 |
 | S3 | `23f06ef` | `act` 成功路径 `navProbeMs`（100..3000ms）轮询同标签页 URL；`same_tab_navigation` + `nav_from`/`nav_to`；record 留 `nav_probe` 事件行 |
 | S4 | `ccd99d3` | 会话内 LRU（≤20）；`target_not_found` 且同 hint ≤10 动作内命中过 → 独立键 `recently_resolved` + reason 尾行（不覆盖引擎 A4 `diagnostics`） |
+| 门禁合规 | `730777f` | scroll 执行体拆 `session-act-scroll.ts`、稳定判定/S3 探测/S4 LRU 移 evidence 模块（主文件与 doAct 回到存量基线内）；split manifest 移除非纯搬移符号 |
 
 - 手册同步：`docs/INTERACTIVE_SESSION.md` 新增四节 + 分页节交叉引用。
 - S5（桥投影截断 `order_note`）维持 **P2 观察项**：snapshot 兜底已可用，待下次编排面
