@@ -223,6 +223,7 @@ amber apps remove <id> [--yes] [--force]
 | `amberflow_app_check` | `amber apps check --json` | 加载 + dry 调用序列校验 |
 | `amberflow_inspect` | `amber inspect --json` | 只读页面观察（含 `ax` 可访问性证据块）与候选 hint |
 | `amberflow_session` | `amber session` | 跨工具调用保持页面状态的交互式试错会话（`open/goto/observe/act/read/extract/signal/wait_for/snapshot/tab/close/list`）；不判完成、不写 run 结果；`act` 缺省歧义零动作（见下） |
+| `amberflow_pilot`（桥面待接入；CLI 已可用） | `amber pilot` | 模型驾驶走查：决策模型逐步投票驾驶（规则档先行零模型），停因时投影 `handoff`（截图 + observe + 确定性解锁建议）；Agent 兜底指令闭集 `resume\|redirect\|finish\|abort`；完成只认信号；产物带 `pilot:true`；`amber pilot export` 把 `--record` 轨迹还原成 app.mjs 骨架（picked_by 来源标记保留，done 占位符待补） |
 | `amberflow_app_create` | `amber apps new … --json` | 生成 flow 骨架 |
 | `amberflow_run` | `app-runner`（与 `amber run` 同一运行器） | 运行；**桥用部署配置**决策三件套；`max_steps` 是执行预算，`timeout_sec` 是本次墙钟上限；决策通道故障时结果带恢复指引 |
 | `amberflow_learn` | `learn --json` | 一次录制 → 归纳信号 → 生成 `app.mjs` flow（回放门通过才落盘） |

@@ -31,6 +31,7 @@ export const WHEN_TO_USE: readonly WhenToUse[] = [
   { cmd: "apps", when: "创建、查看、离线校验一个应用" },
   { cmd: "inspect", when: "写流程前先只读看一眼真实页面" },
   { cmd: "session", when: "要边点边看、一步一读地试错时" },
+  { cmd: "pilot", when: "让决策模型驾驶走查、我只做兜底时" },
   { cmd: "schema", when: "无源码时查引擎语义契约" },
   { cmd: "doctor", when: "环境、浏览器、决策源有问题先体检" },
   { cmd: "config", when: "查看或修改机器/项目配置" },

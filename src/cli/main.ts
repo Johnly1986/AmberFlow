@@ -200,6 +200,10 @@ async function dispatch(command: string, rest: string[], ctx: CliContext, rawRes
       const { runSessionCommand } = await import("./commands/session.ts");
       return runSessionCommand(rest, ctx);
     }
+    case "pilot": {
+      const { runPilotCommand } = await import("./commands/pilot.ts");
+      return runPilotCommand(rest, ctx);
+    }
     case "schema": {
       const { runSchema } = await import("./commands/schema.ts");
       return runSchema(rest, ctx);

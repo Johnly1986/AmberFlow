@@ -9,6 +9,17 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - **§14（close 收口）**：泄漏形态清单核查先行——① CLI 行循环形态（close/EOF 两路）本就经入口 finally 走 `finish`（真浏览器探针实证 exit 0、chromium 零残留，无泄漏）；② bridge 常驻宿主的 `taskkill /T /F` 兜底保证子进程树必死（强制收口，边界如实记录不改）；③ 真正泄漏形态 = 无入口循环的直调 dispatch 驱动（一次性 embedder）。修法：`doClose` 在摘要算好后于本调用内 `await finish("closed")`——close 语义自包含，三种驱动都自然收口；`finish` 幂等，两条真实路径行为不变。进程级验收 lane `npm run verify:session:close`（非门禁，需 chromium）：C1×N 连续 open/close 循环 + C2(eof) + C3(embedder) 全部 exit 0 且 chromium 进程数回基线。
 - **§15（桥层回归 harness）**：`integrations/dsh-bridge/test/`（`node --test` + fake-engine.cjs JSONL 缝经 `SessionManager.spawnArgv` 注入——真跑桥面投影代码，纯进程内、零浏览器、离线）——五组断言：act 失败 `wide_scan` 有界透传（hint 行优先/≤40 行/clip/pool_size 如实/缺键形状不变）、`ambiguity` 失败面 + 成功面、snapshot `window` 审计块透传与缺键形状、open/goto 往返 + engineFailure 投影。门禁接入选主仓 check 新步 `bridge:test`（14→15 步；依据：断言为确定性进程内事实，白名单投影丢字段正是 PR 门禁该拦的回归类；桥目录无 package.json 不单建）。断言面配套：引擎 `doSnapshot` additive 带 `window`（windowAudit 有界证据）+ 桥 `windowAuditEvidence` 有界透传（out_of_window ≤10 / dedup_dropped ≤40 / tag16 / label40 / why32 / surface_counts 有限数；缺键 = 旧响应形状不变）。BACKLOG §14/§15 条目标注完成提交号。
 - **账本**：baseline session-runtime 1008→1018；check 链 14→15 步。门禁：`npm run check` exit 0（含 bridge:test 7/7）；verify:offline 10 夹具 OK；verify:runtime:offline 7 场景 OK；smoke 随外部网络波动（0 failed）。
+## [Unreleased] — 2026-11-19 模型驾驶走查（amber pilot / PW1+PW2+PW3）
+
+### 模型驾驶走查落地（docs/PILOTED_WALKTHROUGH_PLAN.md 全量实施）
+
+- **新增 `amber pilot` 命令（第 12 命令）**：走查阶段的**模型主控面**——决策模型逐步投票驾驶（规则档先行零模型 → 池内闭集 `pickProposal` 投票 → 置信闸门 → `actOnce` 执行），停因时投影结构化交接块（`PilotHandoff`：截图 + observe 落盘 + 确定性解锁建议），Agent 只在交接时兜底（stdin JSONL 闭集：`resume`（hint 点名确定性执行/value 显式给值）| `redirect`（换 url 或 goal）| `finish` | `abort`）。完成只认信号（`checkSignal` 验证 `--final-signal`）；产物恒带 `pilot:true` 不冒充 run 结论；退出码 0=信号收尾 / 1=browser_dead / 3=待兜底。
+- **停因闭集 8 码全部确定性判定**：`final_signal_held`/`budget_exceeded`/`low_confidence`/`target_ambiguous`/`needs_value`/`stuck_inert`（连续 inert≥3）/`no_model_runtime`（rules-only 如实停）/`browser_dead`——零新 stopCode 语义，全部来自引擎既有停因码或 pilot 收尾正因。
+- **红线落地**：模型只投票不生成（动作类型由 affordance 族判定；驾驶问句走闭集 ref）；值不猜（fill/select 缺值 = `needs_value` 停，只接受 slots 预声明或 resume 显式给值）；`resume` 带 hint 走 `hintMatch` 确定性执行（零模型票）。
+- **新增 `amber pilot export`**：驾驶轨迹（`--record` JSONL：drive/handoff/command 三类行）→ app.mjs 骨架——`picked_by` 来源标记（决策票/规则档）忠实保留、handoff 兜底上下文注释化、失败步不生成假动作、done 占位符待作者补（与 session export 同一「只出骨架不归纳」纪律）。
+- **装配面**：`middleware-factory` 加 `pilot` face（`FACE_POLICY.pilot="default-deny"` 与 session 同档——兜底指令闭集里不存在 confirm 类指令）；决策源装配与 run 同序列（`resolveProviderSpec` → `applySpecToRuntime`）；执行链完全复用（`_extractPoolSettled`/`pickProposal`/`actOnce`/`checkSignal`/`hintMatch`/`navRule`/`affordanceRule` 单源消费）。
+- **端到端冒烟**（books.toscrape.com 实测）：起飞 → 模型低置信如实交接（截图+observe 落盘）→ Agent resume hint 点名 → 规则档确定性点击进商品页 → `final_signal_held` exit 0；`--input` 文件剧本整段只开一次（修复跨轮重复消费）。
+- 文件：`src/app/pilot-contract.ts`（契约单源）、`src/app/pilot-runtime.ts`（驾驶运行时）、`src/app/pilot-entry.ts`（入口编排）、`src/app/pilot-export.ts`（导出）、`src/cli/commands/pilot.ts`（CLI）；`registry.ts`/`help-map.ts`/`main.ts` 登记；`MAINLINE.md`（命令数 11→12、L5 模块表、预留表）同步。方案文档状态 proposal→implemented + §7 落地索引。
 
 ## [Unreleased] — 2026-11-19 候选池改造批 2+：桶内排序/组保底/会话宽扫/hit-test 核实（F5 不做）
 
