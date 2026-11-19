@@ -691,7 +691,7 @@ export class BrowserMiddleware {
    */
   poolQuotaMode: "legacy" | "quota" = "legacy";
   /**
-   * E1-a：池预算帽的观测面回显（`decision.act_pool_cap`；缺省 40 = MAX_ELEMENTS）。
+   * E1-a：池预算帽的观测面回显（`decision.act_pool_cap`；缺省 64 = MAX_ELEMENTS）。
    * **只观测**：池构成不因它变化；落空诊断把它带进 `pool_cap` 供归因。
    */
   actPoolCap = POOL_CAP_ELEMENTS;

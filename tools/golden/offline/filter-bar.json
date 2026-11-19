@@ -40,7 +40,7 @@
       "button": {
         "decided": null,
         "match": null,
-        "ref_count": 35,
+        "ref_count": 41,
         "refs": [
           "e0",
           "e1",
@@ -96,7 +96,7 @@
       }
     },
     "pool": {
-      "count": 40,
+      "count": 46,
       "rows": [
         {
           "frame": 0,
@@ -279,6 +279,54 @@
           "label": "帮助",
           "ref": "e39",
           "scan": 22,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "关于",
+          "ref": "e40",
+          "scan": 23,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "App",
+          "ref": "e41",
+          "scan": 24,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "电脑版",
+          "ref": "e42",
+          "scan": 25,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "繁体",
+          "ref": "e43",
+          "scan": 26,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "English",
+          "ref": "e44",
+          "scan": 27,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "无障碍",
+          "ref": "e45",
+          "scan": 28,
           "surface": "native-control",
           "tag": "button"
         },

@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "extraction-pure",
-  "note": "extraction.ts 纯区外搬（element model→elem-model.ts / 帧读侧→frame-scope.ts / page-shape helpers→page-shapes.ts；2026-11-17）；clickxy 最后手段（P2-10）给 Elem 契约新增可选 `clickxy?:{x,y}` 字段——有意非纯搬移，按 split-check 纪律将 Elem 从 manifest 移除（其余符号保持纯搬移 hash 不动）",
+  "note": "extraction.ts 纯区外搬（element model→elem-model.ts / 帧读侧→frame-scope.ts / page-shape helpers→page-shapes.ts；2026-11-17）；clickxy 最后手段（P2-10）给 Elem 契约新增可选 `clickxy?:{x,y}` 字段——有意非纯搬移，按 split-check 纪律将 Elem 从 manifest 移除（其余符号保持纯搬移 hash 不动）；候选池容量重配（池帽 64/宽扫 128）把 elem-model 的 POOL_QUOTAS/WIDE_QUOTAS/QUOTA_MODE_QUOTAS/QUOTA_MODE_WIDE_QUOTAS 四张配额表有意改值，按同一纪律从 manifest 移除（其余符号保持纯搬移 hash 不动）",
   "files": {
     "src/engine/elem-model.ts": {
       "symbols": {
@@ -26,17 +26,13 @@
         "firstIfSame": "29cbee0cb274eda85e04fe9ede09966fda3c70acbae8992814d0fb344e73f1ae",
         "HOVER_ADAPTER": "07b508e13bfffee60f71166ed0272d0d31bf10521e812bd2233f63b0175cccb5",
         "orderElemsByFamily": "1a4752139519b32e9248effda66ce6f506bef77f1be5674265f1854b2883bb90",
-        "POOL_QUOTAS": "024b1b6518bc19bca8caffc9ae7ddf1cedd480465588d45d8b2a016dafac68a6",
         "PoolBucket": "53bfcdbb622f0be22a9c95b650589066907805630527eb73466cbe3ee8cf7d88",
         "PoolQuotas": "2c4d0debecb2c558e96e6606fc8cc9ae8e239133455ff4d8fc896331e8ebc65c",
-        "QUOTA_MODE_QUOTAS": "ebaf19599d0a87b220f46dc63fac9d4ee8805c58c245d7d3129aeb70f2e4a7ec",
-        "QUOTA_MODE_WIDE_QUOTAS": "0e089b1109a0ccb372b21488780147e7fa5d5838db9a89c072d164bd7a50eb1c",
         "SCROLL_ADAPTER": "931608d28a5fe974961802cc3af2eac3600d776938e38ac98f12912f8043ee4e",
         "SELECT_ADAPTER": "5efc87e5c60aa1fa575639b4fa8aa875f59148a72966d8985a1cf6d5934fea26",
         "SLIDER_ADAPTER": "942129984926c12eaf0545eae414f48d87fce6f71ae6f541e62afdc841b96c7f",
         "SLOT_RE": "5e40c7b6450b0d5b62ad6ce406145450a8d57a4f0459da8ada54583183c1c710",
-        "UPLOAD_ADAPTER": "09930c7eecf4715c0d2ad46441bb29f9dc28ddd040417545efef6988aa3eb1a7",
-        "WIDE_QUOTAS": "52555db667aba040a8539138f714db165eca2c22929d7e9ce82d1347ff52d839"
+        "UPLOAD_ADAPTER": "09930c7eecf4715c0d2ad46441bb29f9dc28ddd040417545efef6988aa3eb1a7"
       }
     },
     "src/engine/extraction.ts": {

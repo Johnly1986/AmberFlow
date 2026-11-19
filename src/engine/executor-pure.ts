@@ -273,7 +273,7 @@ export interface ActMissDiagnostics {
   target: string;
   pool_size: number;
   /**
-   * E1-a：本池的预算帽（`decision.act_pool_cap`；缺省 40 = `MAX_ELEMENTS`）。
+   * E1-a：本池的预算帽（`decision.act_pool_cap`；缺省 64 = `MAX_ELEMENTS`）。
    * 只观测：池构成不因它变化，它是"落空时池帽是多少"的回显，供归因
    * "目标是否可能被帽挤出"。
    */
@@ -376,7 +376,7 @@ export function actMissDiagnostics(input: {
   op: string;
   hintOpts?: HintMatchOptions;
   rejected?: readonly ActMissRow[];
-  /** E1-a：池预算帽回显（缺省 40 = MAX_ELEMENTS；只观测不改行为）。 */
+  /** E1-a：池预算帽回显（缺省 64 = MAX_ELEMENTS；只观测不改行为）。 */
   poolCap?: number;
   /** F72-①：settle 渲染可疑信号（executor 侧已判定 timedOut 才传；缺省不出现 = 键集不变）。 */
   settleTimedOut?: { waitedMs: number };
