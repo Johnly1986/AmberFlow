@@ -941,6 +941,50 @@ export class SessionManager {
     return out
   }
 
+  /**
+   * §15：快照响应 `window` 审计块（windowAudit）的**有界透传**（引擎有才有；不重算、不补键）。
+   *
+   * 来源：引擎 doSnapshot 的 additive `window`（一次只读 evaluate：池外可见交互 + 被剔账）。
+   * 裁剪：out_of_window ≤10 行、dedup_dropped ≤40 行（引擎已各自限界，桥按同值复核）；
+   * 每行 tag ≤16 / label ≤40 / why ≤32，prio/bucket 原样（有界枚举值）；surface_counts 只收
+   * 有限数。缺键 = 引擎没提供（旧快照响应形状不变）。
+   */
+  private windowAuditEvidence(raw: unknown): Record<string, unknown> | undefined {
+    if (!isObj(raw)) return undefined
+    const out: Record<string, unknown> = {}
+    if (typeof raw['visible_interactive'] === 'number') out['visible_interactive'] = raw['visible_interactive']
+    if (typeof raw['shown'] === 'number') out['shown'] = raw['shown']
+    if (typeof raw['out_of_window_total'] === 'number') out['out_of_window_total'] = raw['out_of_window_total']
+    const rows = (key: string, cap: number, clipWhy: boolean): Array<Record<string, unknown>> | undefined => {
+      const list = raw[key]
+      if (!Array.isArray(list)) return undefined
+      const mapped = list.slice(0, cap).map((rawRow) => {
+        const r = isObj(rawRow) ? rawRow : {}
+        const row: Record<string, unknown> = {}
+        if (typeof r['tag'] === 'string') row['tag'] = clip(r['tag'], 16)
+        if (typeof r['label'] === 'string') row['label'] = clip(r['label'], 40)
+        if (typeof r['prio'] === 'number') row['prio'] = r['prio']
+        if (typeof r['bucket'] === 'string') row['bucket'] = clip(r['bucket'], 16)
+        if (clipWhy && typeof r['why'] === 'string') row['why'] = clip(r['why'], 32)
+        return row
+      })
+      return mapped.length > 0 ? mapped : undefined
+    }
+    const oow = rows('out_of_window', 10, false)
+    if (oow !== undefined) out['out_of_window'] = oow
+    const drops = rows('dedup_dropped', 40, true)
+    if (drops !== undefined) out['dedup_dropped'] = drops
+    const countsRaw = raw['surface_counts']
+    if (isObj(countsRaw)) {
+      const counts: Record<string, number> = {}
+      for (const [k, v] of Object.entries(countsRaw)) {
+        if (typeof v === 'number' && Number.isFinite(v)) counts[k] = v
+      }
+      if (Object.keys(counts).length > 0) out['surface_counts'] = counts
+    }
+    return Object.keys(out).length > 0 ? out : undefined
+  }
+
   private async read(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
     const what = typeof args.what === 'string' ? args.what : ''
     if (!['text', 'value', 'count', 'attr'].includes(what)) {
@@ -1114,6 +1158,8 @@ export class SessionManager {
       screenshot: args.screenshot === true,
     }, Math.max(this.options.opTimeoutMs, 90_000))
     if (response['ok'] !== true) return this.engineFailure(response, 'snapshot')
+    // §15：windowAudit 证据（引擎有才有——doSnapshot additive；缺键 = 旧快照响应形状不变）。
+    const window = this.windowAuditEvidence(response['window'])
     return {
       ok: true,
       op: 'snapshot',
@@ -1123,6 +1169,7 @@ export class SessionManager {
       snapshot_file: response['snapshot_file'],
       pool_file: response['pool_file'],
       ...(response['screenshot_file'] === undefined ? {} : { screenshot_file: response['screenshot_file'] }),
+      ...(window === undefined ? {} : { window }),
       counts: response['counts'],
     }
   }

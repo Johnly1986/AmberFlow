@@ -37,7 +37,7 @@ import {
   type ActionabilityDetail, type ActMissDiagnostics, type AnyPage, type BrowserSession,
 } from "../engine/executor.ts";
 import {
-  countAnyFrame, rowStatsAnyFrame, urlOf, type ElemPool, type PageLike,
+  countAnyFrame, rowStatsAnyFrame, urlOf, windowAudit, type ElemPool, type PageLike,
 } from "../engine/extraction.ts";
 import { extractElements } from "./candidate-scan.ts";
 import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
@@ -808,6 +808,15 @@ export class SessionRuntime {
       this.log(`snapshot pool extraction failed: ${errMsg(e)}`);
     }
     const snapshotFile = path.join(this.outDir, `snapshot-${n}.json`);
+    // §15 断言面：快照响应 additive 带 `window`（windowAudit 一次只读 evaluate 的有界证据）
+    // ——池外可见交互与被剔账（dedup_dropped）经会话面可达，桥面据此透传。评估失败 =
+    // windowAudit 内部兜底返回零值事实（池证据文件仍在，计数如实为 0）。
+    let windowAuditBlock: Record<string, unknown> | undefined;
+    try {
+      windowAuditBlock = await windowAudit(page as unknown as PageLike, Object.keys(pool).length, 10) as unknown as Record<string, unknown>;
+    } catch {
+      windowAuditBlock = undefined;
+    }
     // B3：可勾选控件状态签名一并落盘（有界；无此类控件时字段缺席 ⇒ 旧产物逐字节不变）。
     const checks = snap.checks === undefined ? "" : snap.checks.slice(0, 4000);
     const snapFrames = snap.frames.map((f) => (
@@ -837,6 +846,7 @@ export class SessionRuntime {
       ok: true, n, url: snap.url, title: snap.title,
       snapshot_file: snapshotFile, pool_file: poolFile,
       ...(screenshotFile === undefined ? {} : { screenshot_file: screenshotFile }),
+      ...(windowAuditBlock !== undefined ? { window: windowAuditBlock } : {}),
       counts: { pool: Object.keys(pool).length, text_chars: snap.text.length, frames: snap.frames.length },
     };
   }
