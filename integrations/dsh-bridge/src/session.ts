@@ -912,6 +912,35 @@ export class SessionManager {
     return Object.keys(out).length > 0 ? out : undefined
   }
 
+  /**
+   * F6：act 歧义/落空时引擎宽扫回传的**有界透传**（引擎有才有；不重算、不补 hint）。
+   *
+   * 来源：引擎 doAct 失败路径的 `wide_scan`（target_not_found/target_ambiguous 停因专属；
+   * 零动作的一次 ≤128 宽扫）——`window`/`pool_size`/`candidates[{ref,tag,label,hint?}]`。
+   * 裁剪：candidates ≤40 行，**带自证 hint 的行优先**（组内保持引擎顺序——作者先看可寻址
+   * 词面），每行 tag ≤16 / label ≤40 / hint ≤200（hint 引擎已自证，桥不重算、不发明）；
+   * 完整口径由 `pool_size` 如实表达。其它停因引擎不带该键 ⇒ 缺键 = 响应形状不变。
+   */
+  private wideScanEvidence(raw: unknown): Record<string, unknown> | undefined {
+    if (!isObj(raw)) return undefined
+    const rawRows = raw['candidates']
+    if (!Array.isArray(rawRows)) return undefined
+    const rows = rawRows.filter((r): r is Record<string, unknown> => isObj(r))
+    const hasHint = (r: Record<string, unknown>): boolean => typeof r['hint'] === 'string' && r['hint'] !== ''
+    const picked = [...rows.filter(hasHint), ...rows.filter((r) => !hasHint(r))].slice(0, 40)
+    const out: Record<string, unknown> = {
+      candidates: picked.map((r) => ({
+        ...(typeof r['ref'] === 'string' ? { ref: r['ref'] } : {}),
+        ...(typeof r['tag'] === 'string' ? { tag: clip(r['tag'], 16) } : {}),
+        ...(typeof r['label'] === 'string' ? { label: clip(r['label'], 40) } : {}),
+        ...(hasHint(r) ? { hint: clip(String(r['hint']), 200) } : {}),
+      })),
+    }
+    if (typeof raw['window'] === 'number') out['window'] = raw['window']
+    if (typeof raw['pool_size'] === 'number') out['pool_size'] = raw['pool_size']
+    return out
+  }
+
   private async read(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
     const what = typeof args.what === 'string' ? args.what : ''
     if (!['text', 'value', 'count', 'attr'].includes(what)) {
@@ -1177,6 +1206,8 @@ export class SessionManager {
     const ambiguity = this.ambiguityEvidence(response['ambiguity'])
     // A4：落空判别证据（引擎有才有；act 的 target_not_found 路径）。其它 op 的失败不带它。
     const diagnostics = this.missDiagnosticsEvidence(response['diagnostics'])
+    // F6：歧义/落空的宽扫回传（引擎有才有——只在这两个停因出现；其它 op/停因缺键形状不变）。
+    const wide = this.wideScanEvidence(response['wide_scan'])
     return {
       ok: false,
       op,
@@ -1188,6 +1219,7 @@ export class SessionManager {
       session_alive: true,
       ...(ambiguity === undefined ? {} : { ambiguity }),
       ...(diagnostics === undefined ? {} : { diagnostics }),
+      ...(wide === undefined ? {} : { wide_scan: wide }),
     }
   }
 

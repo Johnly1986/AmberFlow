@@ -125,6 +125,18 @@ export interface Elem {
   inScrollContainer?: boolean;
   bucket?: PoolBucket;
   prio?: number;
+  /**
+   * 一区域一候选的采集期事实（EXTRACT_JS 采集期计算；只进证据面/审计，不进模型投影——
+   * `modelProjectionOf` guard+解构两处剥离，与 surface/row_texts 同纪律；不进 esig/firstIfSame 签名）：
+   *   contains_candidate —— 该候选的子树里还有其它候选（祖先打标 ≤32 层）；
+   *   kind —— container = 含候选后代 且（自身无文案 或 与内层候选同 label），否则 atomic
+   *   （键只在 container 出现：atomic = 缺省）；
+   *   prominence —— 分桶醒目度：viewport 桶用可见交集面积（真人此刻看到多少），
+   *   视口外桶用原始 rect 面积（看不到但体积大仍可能是主控件）；排序平局由 scan 定。
+   */
+  contains_candidate?: true;
+  kind?: "container";
+  prominence?: number;
   [k: string]: unknown;
 }
 export type ElemPool = Record<string, Elem>;
@@ -428,17 +440,19 @@ export function extractSlots(instruction: string): Record<string, string> {
  */
 export type PoolBucket = "chrome" | "viewport" | "contentNear" | "mainOffscreen" | "other";
 export type PoolQuotas = Record<PoolBucket, number>;
-/** 默认池（40）的分桶配额（合计 40）。 */
-export const POOL_QUOTAS: PoolQuotas = { chrome: 8, viewport: 16, contentNear: 8, mainOffscreen: 6, other: 2 };
-/** 宽扫池（120）的分桶配额（合计 120）。 */
-export const WIDE_QUOTAS: PoolQuotas = { chrome: 16, viewport: 48, contentNear: 32, mainOffscreen: 16, other: 8 };
+/** 默认池（64）的分桶配额（合计 64）。档位依据：真人浏览一屏会扫 60+ 控件，窗口应覆盖"一屏+邻近"。 */
+export const POOL_QUOTAS: PoolQuotas = { chrome: 8, viewport: 24, contentNear: 16, mainOffscreen: 12, other: 4 };
+/** 宽扫池（128 = 默认池翻倍）的分桶配额（合计 128）。 */
+export const WIDE_QUOTAS: PoolQuotas = { chrome: 16, viewport: 52, contentNear: 34, mainOffscreen: 17, other: 9 };
 /**
  * E1-b：`decision.pool_quota_mode:"quota"` 灰度档的换档配额——viewport 保底加大、
- * 壳限额收紧（chrome 8→6）。总数不变（40/120 两档预算不动）；只改"谁被逐出"。
+ * 壳限额收紧（chrome 8→6）。换档表按**新基础表的比例**放大（chrome×0.75、viewport×1.5、
+ * 其余×1.0）并**保留超额订阅**语义：表合计（74/150）大于池帽（64/128），靠 BUCKET_FILL_ORDER
+ * 填序截断——只改"谁被逐出"，总预算仍由 max 决定。
  * id-backed 保留不在配额表里（PIN_CAP 在探针侧，跨桶合计）。
  */
-export const QUOTA_MODE_QUOTAS: PoolQuotas = { chrome: 6, viewport: 24, contentNear: 8, mainOffscreen: 6, other: 2 };
-export const QUOTA_MODE_WIDE_QUOTAS: PoolQuotas = { chrome: 12, viewport: 72, contentNear: 32, mainOffscreen: 16, other: 8 };
+export const QUOTA_MODE_QUOTAS: PoolQuotas = { chrome: 6, viewport: 36, contentNear: 16, mainOffscreen: 12, other: 4 };
+export const QUOTA_MODE_WIDE_QUOTAS: PoolQuotas = { chrome: 12, viewport: 78, contentNear: 34, mainOffscreen: 17, other: 9 };
 /** 拼接顺序（ref 编号 / 诊断展示顺序）：chrome 在前，其余按"离当前视口由近到远"。 */
 export const BUCKET_ORDER: readonly PoolBucket[] = ["chrome", "viewport", "contentNear", "mainOffscreen", "other"];
 /** 配额没填满时的顺延顺序（chrome 最后兜底：它通常量小且已配额内收全）。 */

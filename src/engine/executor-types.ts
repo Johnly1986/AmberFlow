@@ -708,7 +708,7 @@ export interface RunOptions {
    */
   poolQuotaMode?: "legacy" | "quota";
   /**
-   * E1-a：池预算帽的观测面（`decision.act_pool_cap`；缺省 40 = MAX_ELEMENTS）。
+   * E1-a：池预算帽的观测面（`decision.act_pool_cap`；缺省 64 = MAX_ELEMENTS）。
    * **只观测**：落空诊断回显 `pool_cap`；池构成不因它变化（默认值调整需另行变更）。
    */
   actPoolCap?: number;

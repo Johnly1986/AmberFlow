@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>pool-dedup ④：卡内独立按钮（不同 label）+ 空名容器子排前</title></head>
+<body>
+  <!-- 卡片与卡内独立按钮 label 不同 = 不同操作，都不剔（去重误杀守卫）。
+         再加空名容器形态：无文案包装层（icon 型按钮，aria-label 有文案）与内层按钮
+         都留——容器只降权不除名，atomic 子排前（类目维排序的可见证据） -->
+  <div id="card-1" role="button"><span>商品卡片 Alpha</span><button id="buy-1">加入购物车</button></div>
+  <div id="card-2" role="button"><span>商品卡片 Beta</span><button id="buy-2">立即购买</button></div>
+  <div id="wrap-empty" role="button" data-js-ref="jsfix5" style="display:inline-block;width:200px;height:60px"><button id="buy-3" aria-label="加入购物车" style="display:inline-block;width:16px;height:16px"></button></div>
+</body>
+</html>

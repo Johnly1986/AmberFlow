@@ -1,0 +1,84 @@
+{
+  "_doc": "verify-offline 基线（tools/verify-offline.ts，非门禁）：本地静态夹具 + 无头 chromium 的确定性观测。页面/代码变化后显式 --record 更新；端口已归一为 <LOCAL>，不得手改。",
+  "expected": {
+    "external_requests": [],
+    "pool": {
+      "count": 6,
+      "rows": [
+        {
+          "frame": 0,
+          "id": "card-1",
+          "label": "商品卡片 Alpha",
+          "ref": "e0",
+          "role": "button",
+          "scan": 0,
+          "surface": "aria-role",
+          "tag": "div"
+        },
+        {
+          "frame": 0,
+          "id": "buy-1",
+          "label": "加入购物车",
+          "ref": "e2",
+          "scan": 1,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "id": "card-2",
+          "label": "商品卡片 Beta",
+          "ref": "e1",
+          "role": "button",
+          "scan": 2,
+          "surface": "aria-role",
+          "tag": "div"
+        },
+        {
+          "frame": 0,
+          "id": "buy-2",
+          "label": "立即购买",
+          "ref": "e3",
+          "scan": 3,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "id": "wrap-empty",
+          "label": "",
+          "ref": "e5",
+          "role": "button",
+          "scan": 4,
+          "surface": "aria-role",
+          "tag": "div"
+        },
+        {
+          "frame": 0,
+          "id": "buy-3",
+          "label": "加入购物车",
+          "ref": "e4",
+          "scan": 5,
+          "surface": "native-control",
+          "tag": "button"
+        }
+      ]
+    },
+    "ref_order": [
+      "e0",
+      "e1",
+      "e2",
+      "e3",
+      "e4",
+      "e5"
+    ],
+    "window": {
+      "dedup_dropped": [],
+      "out_of_window_total": 0,
+      "shown": 6,
+      "visible_interactive": 6
+    }
+  },
+  "fixture": "pool-dedup-card-independent",
+  "schema_version": 1
+}

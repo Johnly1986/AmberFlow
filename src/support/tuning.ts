@@ -25,17 +25,22 @@ export const DECISION_REQUEST_TIMEOUT_MS = DEFAULT_DECISION_TIMEOUT_MS;
 /** done 信号轮询间隔（毫秒）：执行器缺省参数 + `effective_policy.done_poll_ms` 缺省账共用。 */
 export const DONE_POLL_INTERVAL_MS = 120;
 
-/** 默认元素池名额（每页 40）：`extraction.MAX_ELEMENTS` 与 `executor.actPoolCap` 缺省值共用。 */
-export const POOL_CAP_ELEMENTS = 40;
+/**
+ * 默认元素池名额（每页 64）：`extraction.MAX_ELEMENTS` 与 `executor.actPoolCap` 缺省值共用。
+ * 档位依据（公理 0）：一个真人浏览一屏会扫过 60+ 个控件，窗口应覆盖"一屏 + 邻近"；
+ * 40 帽在长列表页会把主目标挤到窗口外（flights.ctrip.com 列表页 scrollTop=0 实测 40 帽
+ * 只剩 2 个订票候选，64 帽 + 一区域一候选后 7 个全入池）。
+ */
+export const POOL_CAP_ELEMENTS = 64;
 
-/** 低置信恢复/宽扫的元素预算（120）：`extraction.WIDE_POOL_ELEMENTS` 唯一出处（inspect --wide 共用）。 */
-export const WIDE_SCAN_POOL_ELEMENTS = 120;
+/** 低置信恢复/宽扫的元素预算（128 = 默认池翻倍）：`extraction.WIDE_POOL_ELEMENTS` 唯一出处（inspect --wide 共用）。 */
+export const WIDE_SCAN_POOL_ELEMENTS = 128;
 
 /**
- * 候选窗口递增链的硬顶（240）：主池 40 → 宽扫 120 → 顶窗 240，miss 逐级触发、命中即停。
+ * 候选窗口递增链的硬顶（256）：主池 64 → 宽扫 128 → 顶窗 256，miss 逐级触发、命中即停。
  * 消费点 = 执行器宽扫链（executor / executor-phases-b）经 `executor-pure.WIDER_ELEMENTS_MAX`。
  */
-export const WIDE_SCAN_POOL_ELEMENTS_MAX = 240;
+export const WIDE_SCAN_POOL_ELEMENTS_MAX = 256;
 
 /** 稳定门（`meta.policy.settle`）缺省静默判定时长（毫秒）。 */
 export const SETTLE_QUIET_MS = 400;

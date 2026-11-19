@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>pool-dedup hit-test：父候选中心命中其后代</title></head>
+<body>
+  <!-- hit-test 语义锚：容器候选 #hit-region 的中心点被其绝对定位子元素 #hit-child 盖住
+       ——hit-test（HIT_JS / HIT_DETAIL_JS / DRF _declaredHitTest）必须判"正常操作成立"
+       （后代命中放行），绝不判 covered。第三方元素盖住中心才算 covered -->
+  <div id="hit-region" role="button" style="position:relative;width:200px;height:60px">
+    <span id="hit-child" style="position:absolute;left:80px;top:20px;width:40px;height:20px"></span>
+  </div>
+</body>
+</html>

@@ -14,8 +14,11 @@
  *      timedOut:true` 返回——稳定门是观察增强，不该把一次运行变成崩溃。
  *
  * 传感器只听**页面自己的**突变：引擎的池盖章属性（`data-af-probe` / `data-js-ref` /
- * `data-dshref` / `data-hintref`）在 MutationObserver 回调里被过滤掉。否则每次抽池插桩
+ * `data-dshref` / `data-dshdrop` / `data-hintref`）在 MutationObserver 回调里被过滤掉。否则每次抽池插桩
  * 都会把页面标脏，下一步白等一个 quietMs（实测静态页每步 829ms → 修后首步 ~400ms、其后 0）。
+ * `data-dshdrop` 是一区域一候选的被剔章（EXTRACT_JS 盖/清，一次抽池可写清多个属性）——
+ * 漏过滤会让静态页的每一步 settle 都退化为白等 quietMs，并污染 timedOut 信号
+ * （rehydrate 重扫触发与 pool_ready not_ready 判据被插桩噪声驱动）。
  *
  * 安装语义：安装那一刻**视为刚脏**（`lastMutationTs = Date.now()`）。理由：导航后
  * 页面正处于"刚 domcontentloaded、还没渲染完"的窗口，把它当静默会让稳定门在最有用的
@@ -65,7 +68,7 @@ const QUIET_JS = `() => {
      * 只回写"观察者看到的页面突变"，不把引擎插桩算成脏——否则每次抽池后的下一步都要
      * 白等一次 quietMs（实测：静态页每步 829ms → 修后首步 ~400ms、其后 0）。
      */
-    const IGNORED = { 'data-af-probe': 1, 'data-js-ref': 1, 'data-dshref': 1, 'data-hintref': 1 };
+    const IGNORED = { 'data-af-probe': 1, 'data-js-ref': 1, 'data-dshref': 1, 'data-dshdrop': 1, 'data-hintref': 1 };
     const q = { lastMutationTs: Date.now(), count: 0, installedAt: Date.now() };
     const doc = w.document;
     const target = doc && (doc.documentElement || doc);

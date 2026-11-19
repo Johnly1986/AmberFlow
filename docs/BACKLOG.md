@@ -355,3 +355,23 @@ lowercase（`i` 旗标），`parseHint` 的 `frameChain` 归一为小写规范 o
 | P2-1 ✅ `85ebdfa` | provider 注册清单单点 | 新 provider 实测 **3 处**：adapter + `src/model/decision-provider.ts:resolveProviderSpec` 的动态注册 + `src/cli/commands/doctor.ts` 的注册清单（两处各自 import 同一批模块） | **已收口**：`registerAllProviders()` 幂等单点，三面（解析/doctor/start --doctor）共用；doctor `--json` 与未知 provider 列表改前=改后逐字节一致；新增 provider = adapter + 清单 1 行 |
 | P2-2 ✅ `accd0e3` | 配置键作用点并入 schema | 新配置键实测 **3 手写处**：`src/support/config-schema.ts` + 消费点 + `tools/config-example.ts` 的 `WHERE_USED` 作用点表（缺 `WHERE_USED` 时生成器 exit 2，用户需读报错才知道要补）；生成物 3 份由 `npm run config:example` 刷新 | **已收口**：`ConfigKeySpec.usedAt` 必填（缺失 exit 2 点名键）+ 消费点 = 2 处；手写 `WHERE_USED` 删除，3 份生成物逐字节不变 |
 
+
+## 14. 会话 close 后子进程/浏览器句柄不退出（事件循环不收口）
+
+**状态**：todo（2026-11-19 盲测/探针过程发现）｜ **优先级建议**：P2
+
+> **现状锚点**：`src/app/session-runtime.ts`（close 语义）+ `integrations/dsh-bridge/src/session.ts`（terminate/reap，`taskkill /T /F` 兜底）。一次性 throwaway 探针进程在 dispatch `close` 后事件循环不退出、浏览器子进程句柄存活，需 `process.exit` 收尾；真实桥面是否同样受影响未系统核查。
+>
+> **目标**：核查桥面 `close`/reaper 路径是否总能收口浏览器子进程与事件循环（含 headful、persistent context、未关 tab 等形态）；若存在泄漏形态，修到 close 后进程可自然退出，验收 = 连续 open/close 循环后进程数回到基线。
+>
+> **来源**：候选池批 2 探针过程发现（dev-pool，2026-11-19）。
+
+## 15. DSH 桥层无回归测试基建（JSONL 缝存在但无已提交测试）
+
+**状态**：todo（2026-11-19 候选池批 2 review 过程发现）｜ **优先级建议**：P2
+
+> **现状锚点**：`integrations/dsh-bridge/src/session.ts`（SessionManager 的 `spawnArgv` 测试缝——可注入 fake-engine JSONL 真跑桥面代码）+ `integrations/dsh-bridge/DEVELOPING.md`。桥目录无任何已提交测试：F6 `wide_scan` 桥面透传（commit c0c669d）的验收靠一次性探针脚本（.session_tmps，不入库），透传回归（白名单投影丢字段类）在现有门禁下不可检测——`npm run check` 不含桥层，桥自有 tsconfig 亦无测试。
+>
+> **目标**：建桥层最小回归 harness（fake-engine JSONL 缝 + 若干透传断言：act 失败响应的 additive 键组 wide_scan/ambiguity/overlay/dedup_dropped 各一条），接入桥侧构建门禁；验收 = 断言存在且 `tsc -b` + 断言全绿。
+>
+> **来源**：候选池批 2 review（lead 复核发现 wide_scan 桥面不可达，2026-11-19）。

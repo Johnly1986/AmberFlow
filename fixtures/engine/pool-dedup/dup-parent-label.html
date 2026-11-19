@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>pool-dedup ①：父子同 label</title></head>
+<body>
+  <!-- 形态 A（默认裁决）：div[role=button] 包原生 button，等 label、双方都无监听章 → 留父剔子 -->
+  <div id="region-a" role="button"><button id="btn-a">登录</button></div>
+  <!-- 形态 B（唯一例外）：监听章（data-js-ref）证明 handler 在子、父仅 ARIA 声明 → 留子剔父 -->
+  <div id="region-b" role="button" aria-label="搜索"><button id="btn-b" data-js-ref="jsfix">搜索</button></div>
+</body>
+</html>
