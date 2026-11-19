@@ -960,6 +960,14 @@ export class SessionRuntime {
       evidence_dir: this.outDir,
       ...(this.opts.record === null || this.opts.record === undefined ? {} : { record: path.resolve(this.opts.record) }),
     };
+    // close 收口（BACKLOG §14）：close 请求本身即"会话终结"——摘要在本调用内先算好，
+    // 随后完成浏览器终止与句柄清理，**不依赖外层有入口循环替它收尾**。泄漏形态核查结论：
+    // CLI 行循环与桥子进程两条真实路径本就经入口 finally 走 finish（探针实证 exit 0、
+    // chromium 零残留）；泄漏只存在于"无入口循环的直调 dispatch 驱动"（一次性 embedder，
+    // 探针实证事件循环不退出）。把 finish 收进 close 语义后，三种驱动都自然收口；
+    // finish 幂等（finished 旗标），入口 finally 的再次调用是无害 no-op，两条真实路径
+    // 行为不变。
+    await this.finish("closed");
     return summary;
   }
 
