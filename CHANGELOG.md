@@ -4,6 +4,12 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-19 BACKLOG §14/§15 收口：会话 close 自收口 + 桥层回归 harness
+
+- **§14（close 收口）**：泄漏形态清单核查先行——① CLI 行循环形态（close/EOF 两路）本就经入口 finally 走 `finish`（真浏览器探针实证 exit 0、chromium 零残留，无泄漏）；② bridge 常驻宿主的 `taskkill /T /F` 兜底保证子进程树必死（强制收口，边界如实记录不改）；③ 真正泄漏形态 = 无入口循环的直调 dispatch 驱动（一次性 embedder）。修法：`doClose` 在摘要算好后于本调用内 `await finish("closed")`——close 语义自包含，三种驱动都自然收口；`finish` 幂等，两条真实路径行为不变。进程级验收 lane `npm run verify:session:close`（非门禁，需 chromium）：C1×N 连续 open/close 循环 + C2(eof) + C3(embedder) 全部 exit 0 且 chromium 进程数回基线。
+- **§15（桥层回归 harness）**：`integrations/dsh-bridge/test/`（`node --test` + fake-engine.cjs JSONL 缝经 `SessionManager.spawnArgv` 注入——真跑桥面投影代码，纯进程内、零浏览器、离线）——五组断言：act 失败 `wide_scan` 有界透传（hint 行优先/≤40 行/clip/pool_size 如实/缺键形状不变）、`ambiguity` 失败面 + 成功面、snapshot `window` 审计块透传与缺键形状、open/goto 往返 + engineFailure 投影。门禁接入选主仓 check 新步 `bridge:test`（14→15 步；依据：断言为确定性进程内事实，白名单投影丢字段正是 PR 门禁该拦的回归类；桥目录无 package.json 不单建）。断言面配套：引擎 `doSnapshot` additive 带 `window`（windowAudit 有界证据）+ 桥 `windowAuditEvidence` 有界透传（out_of_window ≤10 / dedup_dropped ≤40 / tag16 / label40 / why32 / surface_counts 有限数；缺键 = 旧响应形状不变）。BACKLOG §14/§15 条目标注完成提交号。
+- **账本**：baseline session-runtime 1008→1018；check 链 14→15 步。门禁：`npm run check` exit 0（含 bridge:test 7/7）；verify:offline 10 夹具 OK；verify:runtime:offline 7 场景 OK；smoke 随外部网络波动（0 failed）。
+
 ## [Unreleased] — 2026-11-19 候选池改造批 2+：桶内排序/组保底/会话宽扫/hit-test 核实（F5 不做）
 
 - **桶内类目维排序 + 醒目度（两分支同比较器）**：`pool-js-dedup` 增 `__poolRowOrder`——桶内 atomic 先、container 后（container 只降权不除名：点卡片与点按钮是两种操作）→ `prominence` 降序（viewport=可见交集面积、其余桶=原始 rect 面积；平局 scan 升序，确定性）；EXTRACT_JS 的 quota 与 legacy 分支同改（main-first 回退分支保持逐字节旧序=显式回滚面）。复算矩阵保持：pool-1（scrollTop=0）64 帽订票 7/7 含首行 s103（排序后反列首选）、pool-2 订票 13/13。

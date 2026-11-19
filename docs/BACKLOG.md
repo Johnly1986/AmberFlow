@@ -358,20 +358,24 @@ lowercase（`i` 旗标），`parseHint` 的 `frameChain` 归一为小写规范 o
 
 ## 14. 会话 close 后子进程/浏览器句柄不退出（事件循环不收口）
 
-**状态**：todo（2026-11-19 盲测/探针过程发现）｜ **优先级建议**：P2
+**状态**：✅ `8a33616`（2026-11-19 盲测/探针过程发现）｜ **优先级建议**：P2
 
 > **现状锚点**：`src/app/session-runtime.ts`（close 语义）+ `integrations/dsh-bridge/src/session.ts`（terminate/reap，`taskkill /T /F` 兜底）。一次性 throwaway 探针进程在 dispatch `close` 后事件循环不退出、浏览器子进程句柄存活，需 `process.exit` 收尾；真实桥面是否同样受影响未系统核查。
 >
 > **目标**：核查桥面 `close`/reaper 路径是否总能收口浏览器子进程与事件循环（含 headful、persistent context、未关 tab 等形态）；若存在泄漏形态，修到 close 后进程可自然退出，验收 = 连续 open/close 循环后进程数回到基线。
 >
 > **来源**：候选池批 2 探针过程发现（dev-pool，2026-11-19）。
+>
+> **收口（`8a33616`）**：泄漏形态清单核查结论——① CLI 行循环形态（close 请求/EOF 两路）本就经入口 finally 走 `finish`，真浏览器探针实证 exit 0、chromium 进程数回基线（delta=0），无泄漏；② bridge 常驻宿主的 `taskkill /T /F` 兜底保证子进程树必死（强制收口、非自然退出——边界如实记录，不改它）；③ 真正的泄漏形态 = **无入口循环的直调 dispatch 驱动**（一次性 embedder），探针实证事件循环不退出。修法 = `doClose` 在摘要算好后于本调用内 `await finish("closed")`（close 语义自包含；`finish` 幂等，两条真实路径行为不变）。进程级验收 = `npm run verify:session:close`（`d74bd47`，非门禁 lane）：C1×N 连续 open/close 循环 + C2(eof) + C3(embedder) 全部 exit 0 且 chromium 零残留。
 
 ## 15. DSH 桥层无回归测试基建（JSONL 缝存在但无已提交测试）
 
-**状态**：todo（2026-11-19 候选池批 2 review 过程发现）｜ **优先级建议**：P2
+**状态**：✅ `d74bd47`（2026-11-19 候选池批 2 review 过程发现）｜ **优先级建议**：P2
 
 > **现状锚点**：`integrations/dsh-bridge/src/session.ts`（SessionManager 的 `spawnArgv` 测试缝——可注入 fake-engine JSONL 真跑桥面代码）+ `integrations/dsh-bridge/DEVELOPING.md`。桥目录无任何已提交测试：F6 `wide_scan` 桥面透传（commit c0c669d）的验收靠一次性探针脚本（.session_tmps，不入库），透传回归（白名单投影丢字段类）在现有门禁下不可检测——`npm run check` 不含桥层，桥自有 tsconfig 亦无测试。
 >
 > **目标**：建桥层最小回归 harness（fake-engine JSONL 缝 + 若干透传断言：act 失败响应的 additive 键组 wide_scan/ambiguity/overlay/dedup_dropped 各一条），接入桥侧构建门禁；验收 = 断言存在且 `tsc -b` + 断言全绿。
 >
 > **来源**：候选池批 2 review（lead 复核发现 wide_scan 桥面不可达，2026-11-19）。
+>
+> **收口（`d74bd47`）**：harness = `integrations/dsh-bridge/test/`（`node --test` + fake-engine JSONL 缝经 `spawnArgv` 注入，纯进程内、零浏览器、离线）；断言五组——wide_scan（hint 行优先/≤40 行/clip/pool_size 如实/缺键形状不变）、ambiguity 失败面 + 成功面、snapshot `window` 审计块（windowAudit/dedup_dropped 透传 + 缺键形状不变）、open/goto 往返 + engineFailure 投影。门禁接入选**主仓 check 新步**（`bridge:test`，14→15 步）——依据：断言是确定性进程内事实（fake-engine、零浏览器、<30s），白名单投影丢字段正是 PR 门禁该拦的回归类；桥目录无 package.json，为测试单建会割裂门禁面。断言面配套：引擎 doSnapshot additive 带 `window`（windowAudit 有界证据）+ 桥 `windowAuditEvidence` 有界透传（overlay 断言面不在桥 session op 闭集内，如实缺位——windowAudit/dedup_dropped 经 snapshot 面覆盖）。
