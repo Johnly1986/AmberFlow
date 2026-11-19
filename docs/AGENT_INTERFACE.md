@@ -329,6 +329,13 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
   `rehydrateRescan`）在 hint 真落空且页面未静默时等 2s 重抽池重解析同一 hint（至多 1 次）：
   命中 = 成功响应带 `resolved_via:"rehydrate-rescan"`；仍未命中 = 原停因不变 + `diagnostics.rescan`
   （`{waited_ms,pool_size}`）。缺省关 = 键集与 reason 逐字节不变。
+- F6（歧义/落空的宽扫回传）：`target_not_found` / `target_ambiguous` 停因时响应 additive 带
+  `wide_scan`（其它停因不出键）——引擎**一次**有界宽扫（≤128）的全量候选
+  `{ref, tag, label, hint?}`；`hint` 经引擎同一 `hintMatch` 自证"恰好唯一命中"才给出（引擎不自造
+  词面，生成不出自证候选的行如实缺键）。**零动作**：宽扫不点击、不滚动、不重试——看完再决定
+  是人的决定。桥对它做有界透传：candidates ≤40 行、带 hint 的行优先、tag ≤16/label ≤40/
+  hint ≤200，完整口径由 `pool_size` 如实表达；模型可见的失败行追加一行
+  `wide-scan: <n> candidate(s) (<m> with hints, showing <k>)`。
 
 `amberflow_session` 的 `act_op:"scroll"` 语义（B2）：
 

@@ -1279,12 +1279,24 @@ function renderSessionResult(value: Record<string, unknown>): string {
         + (missRows('candidates') === '' ? '' : ` — candidates: ${missRows('candidates')}`)
         + (missRows('near') === '' ? '' : ` — near: ${missRows('near')}`)
         + (missRows('rejected') === '' ? '' : ` — rejected: ${missRows('rejected')}`)
+    // F6：宽扫回传摘要（引擎给了 wide_scan 才有这一行）——总数/自证 hint 行数/展示行数，≤1 行。
+    const wide = typeof value.wide_scan === 'object' && value.wide_scan !== null
+      ? value.wide_scan as Record<string, unknown>
+      : undefined
+    const wideRows = wide !== undefined && Array.isArray(wide.candidates)
+      ? wide.candidates.filter((raw): raw is Record<string, unknown> => typeof raw === 'object' && raw !== null)
+      : []
+    const withHints = wideRows.filter((c) => typeof c.hint === 'string' && c.hint !== '').length
+    const wideLine = wide === undefined
+      ? ''
+      : `\nwide-scan: ${String(wide.pool_size ?? '?')} candidate(s) (${withHints} with hints, showing ${wideRows.length} — see wide_scan.candidates)`
     return `${tag}: ${String(value.code ?? 'error')}${value.reason === undefined ? '' : ` — ${String(value.reason)}`}`
       + (value.session_alive === true ? ' (session still alive)' : '')
       + header
       + detail
       + blocked
       + missLine
+      + wideLine
   }
   switch (op) {
     case 'open':
