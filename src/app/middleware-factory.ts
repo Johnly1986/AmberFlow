@@ -24,7 +24,8 @@ export type MiddlewareFace =
   | "online"       // 真实站点套件
   | "app-declared" // 声明式应用运行器
   | "app-script"   // flow 脚本应用运行器
-  | "session";     // amber session 交互式 authoring
+  | "session"      // amber session 交互式 authoring
+  | "pilot";       // amber pilot 模型驾驶走查（决策模型逐步投票；Agent 兜底回路）
 
 export type ConfirmFn = (desc: string) => boolean | Promise<boolean>;
 
@@ -57,6 +58,9 @@ const FACE_POLICY: Readonly<Record<MiddlewareFace, ConfirmPolicy["kind"]>> = {
   "app-declared": "safe-browser",
   "app-script": "safe-browser",
   session: "default-deny",
+  // pilot 与 session 同档：破坏性动作默认拒绝——Agent 在 pilot 会话里同样不能确认危险动作
+  //（对齐 RUN_TAKEOVER §1.5 红线；兜底指令闭集里不存在 confirm 类指令）。
+  pilot: "default-deny",
 };
 
 /** 关键词命中即视为破坏性动作（与执行器的风险关键词同一闭集）。 */

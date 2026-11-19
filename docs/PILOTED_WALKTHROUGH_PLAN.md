@@ -1,6 +1,6 @@
 # 方案提案：模型驾驶走查（决策模型主控 · Agent 兜底）
 
-> **状态**：proposal（待项目方确认排期）
+> **状态**：implemented（PW1+PW2+PW3 已落地并通过端到端冒烟；见 §6 落地索引）
 > **日期**：2026-11-19 ｜ **来源**：项目方提出——走查阶段由决策模型控制接管走查流程，Agent 做兜底。
 > 阅读前提：`docs/APP_SCRIPT_AUTHORING.md` §0.5（走查先行与三工具）、`docs/INTERACTIVE_SESSION.md`
 > （session 面与「零模型」纪律）、`docs/RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md`（接管先例与四件套）、
@@ -191,3 +191,21 @@ amber pilot --url https://example.org/list --goal "找到第一条详情的标�
 - **BACKLOG**：#1 不受影响（见红线）；pilot 的候选窗口消费与 #3（窗口指数递增）同底座，
   排期时避免同改一个匹配面。
 - 不触碰禁区：完成只认信号、不另写执行器、hint 语法闭集不动、危险/人工/凭据纪律全部维持。
+
+## 7. 落地索引（2026-11-19 实施记录）
+
+PW1+PW2+PW3 已落地（`amber pilot` / `amber pilot export` 可用），文件与方案的对应：
+
+| 件 | 文件 | 说明 |
+|---|---|---|
+| 契约 | `src/app/pilot-contract.ts` | 停因闭集（8 码）/ 兜底指令闭集（4 指令）/ `PilotHandoff` 交接块 / 轨迹行类型 / 选项面与解锁建议查表 |
+| 驾驶运行时 | `src/app/pilot-runtime.ts` | `PilotRuntime`：抽池 → resume-hint 确定性执行 → 规则档先行 → `pickProposal` 闭集投票 → 闸门 → `actOnce` 执行 → inert/信号判定；决策源装配与 run 同序列（`resolveProviderSpec` → `applySpecToRuntime`） |
+| 入口编排 | `src/app/pilot-entry.ts` | `runPilot`：起飞 → 驾驶轮 ↔ 兜底等待（stdin 每轮 / `--input` 文件整段只开一次）→ 收尾退出码 |
+| CLI | `src/cli/commands/pilot.ts` | flags 解析 + `export` 子动词；`src/cli/main.ts` 分派、`registry.ts` 帮助、`help-map.ts` 何时用 |
+| 工厂 | `src/app/middleware-factory.ts` | `MiddlewareFace` 加 `"pilot"`；`FACE_POLICY.pilot = "default-deny"`（与 session 同档） |
+| 导出 | `src/app/pilot-export.ts` | 驾驶轨迹 → app.mjs 骨架（`picked_by` 来源标记 + handoff 注释保留；done 占位符同 session export） |
+
+端到端冒烟（books.toscrape.com 实测）：起飞 → 模型低置信如实交接（截图 + observe 落盘）→
+Agent `resume` 带 hint 点名 → 规则档确定性点击（零模型）→ `final_signal_held` → exit 0；
+`pilot export` 骨架生成成功。尚未落地：桥面 `amberflow_pilot` 工具、`--driver agent|model`
+消融双臂、走查验收的 fixtures 全套（§3.2/§3.3 的完整矩阵）——按原计划属后续批次。
