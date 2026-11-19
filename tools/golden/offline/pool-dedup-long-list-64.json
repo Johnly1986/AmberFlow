@@ -1,0 +1,572 @@
+{
+  "_doc": "verify-offline 基线（tools/verify-offline.ts，非门禁）：本地静态夹具 + 无头 chromium 的确定性观测。页面/代码变化后显式 --record 更新；端口已归一为 <LOCAL>，不得手改。",
+  "expected": {
+    "external_requests": [],
+    "pool": {
+      "count": 61,
+      "rows": [
+        {
+          "frame": 0,
+          "label": "item-1",
+          "ref": "e0",
+          "scan": 0,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-2",
+          "ref": "e1",
+          "scan": 1,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-3",
+          "ref": "e2",
+          "scan": 2,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-4",
+          "ref": "e3",
+          "scan": 3,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-5",
+          "ref": "e4",
+          "scan": 4,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-6",
+          "ref": "e5",
+          "scan": 5,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-7",
+          "ref": "e6",
+          "scan": 6,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-8",
+          "ref": "e7",
+          "scan": 7,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-9",
+          "ref": "e8",
+          "scan": 8,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-10",
+          "ref": "e9",
+          "scan": 9,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-11",
+          "ref": "e10",
+          "scan": 10,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-12",
+          "ref": "e11",
+          "scan": 11,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-13",
+          "ref": "e12",
+          "scan": 12,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-14",
+          "ref": "e13",
+          "scan": 13,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-15",
+          "ref": "e14",
+          "scan": 14,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-16",
+          "ref": "e15",
+          "scan": 15,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-17",
+          "ref": "e16",
+          "scan": 16,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-18",
+          "ref": "e17",
+          "scan": 17,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-19",
+          "ref": "e18",
+          "scan": 18,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-20",
+          "ref": "e19",
+          "scan": 19,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-21",
+          "ref": "e20",
+          "scan": 20,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-22",
+          "ref": "e21",
+          "scan": 21,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-23",
+          "ref": "e22",
+          "scan": 22,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-24",
+          "ref": "e23",
+          "scan": 23,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-25",
+          "ref": "e24",
+          "scan": 24,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-26",
+          "ref": "e25",
+          "scan": 25,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-27",
+          "ref": "e26",
+          "scan": 26,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-28",
+          "ref": "e27",
+          "scan": 27,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-29",
+          "ref": "e28",
+          "scan": 28,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-30",
+          "ref": "e29",
+          "scan": 29,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-31",
+          "ref": "e30",
+          "scan": 30,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-32",
+          "ref": "e31",
+          "scan": 31,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-33",
+          "ref": "e32",
+          "scan": 32,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-34",
+          "ref": "e33",
+          "scan": 33,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-35",
+          "ref": "e34",
+          "scan": 34,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-36",
+          "ref": "e35",
+          "scan": 35,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-37",
+          "ref": "e36",
+          "scan": 36,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-38",
+          "ref": "e37",
+          "scan": 37,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-39",
+          "ref": "e38",
+          "scan": 38,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-40",
+          "ref": "e39",
+          "scan": 39,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-41",
+          "ref": "e40",
+          "scan": 40,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-42",
+          "ref": "e41",
+          "scan": 41,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-43",
+          "ref": "e42",
+          "scan": 42,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-44",
+          "ref": "e43",
+          "scan": 43,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-45",
+          "ref": "e44",
+          "scan": 44,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-46",
+          "ref": "e45",
+          "scan": 45,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-47",
+          "ref": "e46",
+          "scan": 46,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-48",
+          "ref": "e47",
+          "scan": 47,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-49",
+          "ref": "e48",
+          "scan": 48,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "id": "target-50",
+          "label": "item-50",
+          "ref": "e49",
+          "scan": 49,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-51",
+          "ref": "e50",
+          "scan": 50,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-52",
+          "ref": "e51",
+          "scan": 51,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-53",
+          "ref": "e52",
+          "scan": 52,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-54",
+          "ref": "e53",
+          "scan": 53,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-55",
+          "ref": "e54",
+          "scan": 54,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-56",
+          "ref": "e55",
+          "scan": 55,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-57",
+          "ref": "e56",
+          "scan": 56,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-58",
+          "ref": "e57",
+          "scan": 57,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-59",
+          "ref": "e58",
+          "scan": 58,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-60",
+          "ref": "e59",
+          "scan": 59,
+          "surface": "native-control",
+          "tag": "button"
+        },
+        {
+          "frame": 0,
+          "label": "item-61",
+          "ref": "e60",
+          "scan": 60,
+          "surface": "native-control",
+          "tag": "button"
+        }
+      ]
+    },
+    "ref_order": [
+      "e0",
+      "e1",
+      "e2",
+      "e3",
+      "e4",
+      "e5",
+      "e6",
+      "e7",
+      "e8",
+      "e9",
+      "e10",
+      "e11",
+      "e12",
+      "e13",
+      "e14",
+      "e15",
+      "e16",
+      "e17",
+      "e18",
+      "e19",
+      "e20",
+      "e21",
+      "e22",
+      "e23",
+      "e24",
+      "e25",
+      "e26",
+      "e27",
+      "e28",
+      "e29",
+      "e30",
+      "e31",
+      "e32",
+      "e33",
+      "e34",
+      "e35",
+      "e36",
+      "e37",
+      "e38",
+      "e39",
+      "e40",
+      "e41",
+      "e42",
+      "e43",
+      "e44",
+      "e45",
+      "e46",
+      "e47",
+      "e48",
+      "e49",
+      "e50",
+      "e51",
+      "e52",
+      "e53",
+      "e54",
+      "e55",
+      "e56",
+      "e57",
+      "e58",
+      "e59",
+      "e60"
+    ],
+    "target_in_pool": true,
+    "window": {
+      "dedup_dropped": [],
+      "out_of_window_total": 0,
+      "shown": 61,
+      "visible_interactive": 61
+    }
+  },
+  "fixture": "pool-dedup-long-list-64",
+  "schema_version": 1
+}

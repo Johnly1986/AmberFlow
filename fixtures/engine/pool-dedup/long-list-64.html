@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>pool-dedup ⑤：61 控件网格（64 帽目标可达）</title></head>
+<body>
+  <!-- 61 个同尺寸控件全部落在首屏网格里（6 列 × 11 行，约 300px 高）：viewport 桶
+       24 配额 + 顺延可容 64 → 全部入池，第 50 个目标可达；40 帧下它会被挤出窗口 -->
+  <div id="grid" style="display:grid;grid-template-columns:repeat(6,120px);gap:4px">
+    <button>item-1</button><button>item-2</button><button>item-3</button><button>item-4</button><button>item-5</button><button>item-6</button>
+    <button>item-7</button><button>item-8</button><button>item-9</button><button>item-10</button><button>item-11</button><button>item-12</button>
+    <button>item-13</button><button>item-14</button><button>item-15</button><button>item-16</button><button>item-17</button><button>item-18</button>
+    <button>item-19</button><button>item-20</button><button>item-21</button><button>item-22</button><button>item-23</button><button>item-24</button>
+    <button>item-25</button><button>item-26</button><button>item-27</button><button>item-28</button><button>item-29</button><button>item-30</button>
+    <button>item-31</button><button>item-32</button><button>item-33</button><button>item-34</button><button>item-35</button><button>item-36</button>
+    <button>item-37</button><button>item-38</button><button>item-39</button><button>item-40</button><button>item-41</button><button>item-42</button>
+    <button>item-43</button><button>item-44</button><button>item-45</button><button>item-46</button><button>item-47</button><button>item-48</button>
+    <button>item-49</button><button id="target-50">item-50</button><button>item-51</button><button>item-52</button><button>item-53</button><button>item-54</button>
+    <button>item-55</button><button>item-56</button><button>item-57</button><button>item-58</button><button>item-59</button><button>item-60</button>
+    <button>item-61</button>
+  </div>
+</body>
+</html>

@@ -4,6 +4,14 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-19 候选池改造批 1：容量 64/128/256 + 一区域一候选（父优先）
+
+- **容量与配额表**：`POOL_CAP_ELEMENTS` 40→**64** / `WIDE_SCAN_POOL_ELEMENTS` 120→**128** / `WIDE_SCAN_POOL_ELEMENTS_MAX` 240→**256**（宽扫链经 `executor-pure.WIDER_ELEMENTS*` 自动跟随）；`elem-model` 四张配额表重配——`POOL_QUOTAS` 8/24/16/12/4=64、`WIDE_QUOTAS` 16/52/34/17/9=128、`QUOTA_MODE_*` 按基础表比例放大并保留超额订阅语义（表合计 74/150 > 池帽，靠 BUCKET_FILL_ORDER 填序截断，只改"谁被逐出"）。档位依据（公理 0）：真人浏览一屏扫 60+ 控件，40 帽在长列表页把主目标挤出窗口（flights.ctrip.com scrollTop=0 实测 40 帽仅 2 个订票候选）。`schema-gen` F65 换档表数字跟新。
+- **一区域一候选（父优先）**：新增 `src/engine/pool-js-dedup.ts`（页内去重片段，公理 0 单一出处）——`EXTRACT_JS` 采集期祖先打标（`contains_candidate` ≤32 层）并在配额/填序前裁决：父子 DOM 包含且（等 label 或子空名）只留一份，默认**留父、子让位**（父承载命中面积与 label、事件冒泡到父 handler）；唯一例外 = 监听探针章（`data-js-ref`）证明 handler 在子而父无章且非原生 → 留子；label 不同且子非空名都不剔（卡内独立按钮守卫）。被剔元素盖 `data-dshdrop` 章（每趟开头与 `data-dshref` 同批清旧章，清章块前移与 EXTRACT_JS docblock 对齐）；被剔节点 DOM 原样保留，作者显式点名仍可 DRF/ADMIT 回捞（能力不丢）。不引入自动滚动；完成只认信号。
+- **证据面（additive，旧键不变）**：池行新增 `prominence`（viewport 桶=可见交集面积、视口外桶=原始 rect 面积，平局 scan）、`contains_candidate`、`kind`（container=含候选后代且（自身无文案或与内层同 label）；键只在 container 出现）——`modelProjectionOf` guard+解构两处剥离（模型面/esig/firstIfSame 不变）；`WINDOW_AUDIT_JS` 读被剔章 → `windowAudit` 增 `dedup_dropped[{tag,label,why}]`（why ∈ label-dup/empty-child/listener-child，有界 40，无被剔不出键）。
+- **离线夹具**：`fixtures/engine/pool-dedup/` 五页（父子同 label 含例外形态/装饰子/空名子/卡内独立按钮/61 控件网格）接入 verify-offline，golden 钉住留父剔子、留子剔父、都留不误杀、64 帽 item-50 可达与被剔账 why。docs/APP_SCRIPT_AUTHORING.md 候选窗口段落、W10 宽扫数字与 `--wide` 面同步；CANDIDATE_WINDOW_TEXT 补"一区域一候选/父优先"一句（405→约 450 字符 ≤500 预算）。
+- **验收与账本**：复算脚本对 s-JjYKfwbkxD 重放新规则——pool-1（scrollTop=0）64 帽订票 7/7 含首行 s103（无去重仅 5）；pool-2（滚动 400px）订票 13/13。split manifest 按先例（24bb60b/7fede7a）删除有意改值符号条目（四张配额表/EXTRACT_JS/WINDOW_AUDIT_JS/windowAudit）；baseline 定向上调 pool-js 852→883 / extraction 1101→1113 / executor-pure 934→938（新逻辑主体在新模块）。门禁：`npm run check` exit 0；verify:offline 9 夹具 golden 一致；verify:runtime:offline 7 场景零漂移；smoke 套件通过。
+
 ## [Unreleased] — 2026-11-17 介入/救援 v1 默认切换（P2 最后一项前置）
 
 ### 携程 class-only 可用性批（P0-2 / P0-4；架构师实施 + Lead 验收）

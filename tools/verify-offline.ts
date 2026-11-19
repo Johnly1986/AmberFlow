@@ -24,7 +24,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { browserSession } from "../src/engine/executor.ts";
-import { type ElemPool, type PageLike } from "../src/engine/extraction.ts";
+import { type ElemPool, type PageLike, windowAudit } from "../src/engine/extraction.ts";
 import { extractElements } from "../src/app/candidate-scan.ts";
 import { hintCandidates, hintMatch } from "../src/engine/rules.ts";
 import type { AnyPage } from "../src/engine/executor-types.ts";
@@ -196,6 +196,28 @@ async function observeHtml(ctx: ObservationContext, html: string, hints: string[
   };
 }
 
+/**
+ * 一区域一候选夹具（fixtures/engine/pool-dedup/）的观测：池投影（稳定字段）+ ref 拾取序
+ * + windowAudit 的被剔账（dedup_dropped）。golden 把"留父剔子 / 留子剔父 / 都留 / 64 帽可达"
+ * 钉成逐字节事实：被剔行不出现在 pool 里、被剔账带 why、无被剔页 dedup_dropped 为空数组。
+ */
+async function observePoolDedup(ctx: ObservationContext, html: string): Promise<Record<string, unknown>> {
+  await ctx.page.goto(`${ctx.origin}/${html}`, { waitUntil: "load", timeout: 15_000 });
+  const pool = await extractElements(ctx.page as unknown as PageLike, true);
+  const shown = Object.keys(pool).length;
+  const audit = await windowAudit(ctx.page as unknown as PageLike, shown, 10);
+  return {
+    pool: poolProjection(pool),
+    ref_order: Object.keys(pool),
+    window: {
+      visible_interactive: audit.visible_interactive,
+      shown: audit.shown,
+      out_of_window_total: audit.out_of_window_total,
+      dedup_dropped: audit.dedup_dropped ?? [],
+    },
+  };
+}
+
 interface ObservationCase {
   name: string;
   run(ctx: ObservationContext): Promise<Record<string, unknown>>;
@@ -240,6 +262,39 @@ const CASES: ObservationCase[] = [
         overlay_on: overlayOn,
         overlay_off: { dom: await ctx.page.evaluate(DOM_EXPR), pool: poolProjection(overlayOffPool) },
       };
+    },
+  },
+  {
+    name: "pool-dedup-parent-label",
+    // ① 父子同 label：默认留父剔子（region-a 的 button 让位）；监听章在子 → 留子剔父
+    //（region-b 的 div 让位）。被剔账 why = label-dup / listener-child 各一条。
+    run: async (ctx) => await observePoolDedup(ctx, "pool-dedup/dup-parent-label.html"),
+  },
+  {
+    name: "pool-dedup-deco-child",
+    // ② 装饰子：自绘按钮 div 与文本 span 同文案、双方带监听章 → 留父剔子（why=label-dup）。
+    run: async (ctx) => await observePoolDedup(ctx, "pool-dedup/deco-child.html"),
+  },
+  {
+    name: "pool-dedup-empty-child",
+    // ③ 空名子：页签 li 与空 label 图标 i → 剔子留父（why=empty-child×2）；li 保持 atomic。
+    run: async (ctx) => await observePoolDedup(ctx, "pool-dedup/empty-child.html"),
+  },
+  {
+    name: "pool-dedup-card-independent",
+    // ④ 卡内独立按钮（不同 label）→ 两者都留，不误杀；ref 序 = DOM 先序（等 label 去重
+    // 不重排；atomic 子排前由候选类目排序交付，落地后 golden 随之更新）。
+    run: async (ctx) => await observePoolDedup(ctx, "pool-dedup/card-independent.html"),
+  },
+  {
+    name: "pool-dedup-long-list-64",
+    // ⑤ 61 控件全在首屏网格：64 帽全入池、item-50 可达（40 帧下它被挤出窗口）。
+    run: async (ctx) => {
+      const out = await observePoolDedup(ctx, "pool-dedup/long-list-64.html");
+      return { ...out, target_in_pool: out["pool"] !== undefined
+        ? Object.values((out["pool"] as { rows: Array<Record<string, unknown>> }).rows)
+            .some((r) => r["id"] === "target-50")
+        : false };
     },
   },
 ];

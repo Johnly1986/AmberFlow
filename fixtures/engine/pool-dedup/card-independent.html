@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>pool-dedup ④：卡内独立按钮（不同 label）</title></head>
+<body>
+  <!-- 卡片与卡内独立按钮 label 不同 = 不同操作，都不剔（去重误杀守卫）。
+       本页同时钉住 ref 拾取序：等label 去重不重排，卡在 DOM 先序（atomic 子排前由
+       候选类目排序交付，落地后 golden 随之更新） -->
+  <div id="card-1" role="button"><span>商品卡片 Alpha</span><button id="buy-1">加入购物车</button></div>
+  <div id="card-2" role="button"><span>商品卡片 Beta</span><button id="buy-2">立即购买</button></div>
+</body>
+</html>
