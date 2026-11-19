@@ -11,9 +11,11 @@
 import {
   ANCHOR_JS, BUCKET_HELPERS_JS, COLLECT_JS, LABEL_HELPERS_JS, ROW_CLIMB_JS, STRUCTURE_HELPERS_JS, compile,
 } from "./pool-js-core.ts";
+import { DEDUP_DROP_ATTR, DEDUP_HELPERS_JS } from "./pool-js-dedup.ts";
 export {
   ANCHOR_JS, BUCKET_HELPERS_JS, COLLECT_JS, LABEL_HELPERS_JS, ROW_CLIMB_JS, STRUCTURE_HELPERS_JS, compile,
 } from "./pool-js-core.ts";
+export { DEDUP_DROP_ATTR, DEDUP_WHY_CODES } from "./pool-js-dedup.ts";
 
 /**
  * A2 窗口透明化：页面上**可见**的交互元素里，有多少没进本次元素池（被窗口/排序挤掉），
@@ -26,6 +28,7 @@ export const WINDOW_AUDIT_JS = String.raw`(arg) => {
   const all = [];
   __collectAll(document, arg.sel, all);
   const out = [];
+  const drops = [];
   const counts = {};
   const cats = arg.cats || [];
   const surfaceOf = (e) => {
@@ -45,6 +48,17 @@ export const WINDOW_AUDIT_JS = String.raw`(arg) => {
     const cat = surfaceOf(e);
     if (cat) counts[cat] = (counts[cat] || 0) + 1;
     if (e.getAttribute('data-dshref')) continue;   // A4 章：该元素已在本次池里
+    const dropWhy = e.getAttribute('${DEDUP_DROP_ATTR}');
+    if (dropWhy) {
+      // 一区域一候选的被剔章（EXTRACT_JS 盖）：元素可见、过了准入面，只是同区域重复让位
+      // ——单列 dedup_dropped，不混进 out_of_window（不是"窗口挤出"，是"区域重复"）。
+      // 旧章由 EXTRACT_JS 每趟开头清；audit 读到的是最近一次建池的裁决。
+      drops.push({ tag: e.tagName.toLowerCase(),
+                   label: norm(e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText
+                     || e.getAttribute('placeholder') || e.getAttribute('value') || '').slice(0, 40),
+                   why: String(dropWhy) });
+      continue;
+    }
     const tag = e.tagName.toLowerCase();
     const label = norm(e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText || e.getAttribute('placeholder') || e.getAttribute('value') || '').slice(0, 40);
     if (!label && (tag === 'a' || tag === 'button')) continue;
@@ -55,7 +69,8 @@ export const WINDOW_AUDIT_JS = String.raw`(arg) => {
   out.sort((a, b) => a.prio - b.prio);
   const limit = arg.limit > 0 ? arg.limit : 10;
   return { visible_interactive: visible, out_of_window_total: out.length,
-           out_of_window: out.slice(0, limit), surface_counts: counts };
+           out_of_window: out.slice(0, limit), surface_counts: counts,
+           ...(drops.length ? { dedup_dropped: drops } : {}) };
 }`;
 
 /**
@@ -96,9 +111,20 @@ export const EXTRACT_JS = String.raw`(arg) => {
   ${BUCKET_HELPERS_JS}
   ${LABEL_HELPERS_JS}
   ${STRUCTURE_HELPERS_JS}
+${DEDUP_HELPERS_JS}
   const sel = arg.sel, max = arg.max;
   // A2：分桶配额（null = main-first 旧行为，policy.candidate_priority 的回退面）。
   const quotas = arg.quotas || null;
+  // A4：本趟提取开头先清掉上一轮的旧章。ref 是**位置性**的（e0/e1…），而页面元素会换位
+  //（列表插入/滚动重排/SPA 复用 DOM）：不清章时同一个元素身上还挂着旧 ref，本轮
+  // 另一个元素又拿到同一个 ref，[data-dshref="e2"] 就会命中两个节点——按章取元素
+  // 从"点错"退化到 Playwright strict mode 直接报错。一次全页 querySelectorAll 的开销
+  // 远小于一次误点，且只在提取期付。被剔章（data-dshdrop）同批清理：章是批次的，
+  // 残留会让 windowAudit 把已经不再重复的元素谎报成 dedup_dropped。
+  try {
+    document.querySelectorAll('[data-dshref]').forEach((e) => e.removeAttribute('data-dshref'));
+    document.querySelectorAll('[${DEDUP_DROP_ATTR}]').forEach((e) => e.removeAttribute('${DEDUP_DROP_ATTR}'));
+  } catch (err) { /* 清理失败不阻断提取：nonce 仍保证新章不撞旧章 */ }
   const all = [];
   __collectAll(document, sel, all);
   // A2：池行的 full_label 是**匹配口径**（≤200）——模型视图仍用前 40，但 hint 匹配/诊断
@@ -249,6 +275,10 @@ export const EXTRACT_JS = String.raw`(arg) => {
     capped.push(r);
   }
   rows = capped;
+  // 一区域一候选（父优先）：同区域重复只留一份候选——裁决规则与证据章见
+  // pool-js-dedup 的片段注释（公理 0：模拟正常操作）。在配额/填序前执行：被剔的不占
+  // 几何与配额面；被显式点名的节点仍走 DRF/ADMIT 回捞（DOM 原样，能力不丢）。
+  rows = __dedupPoolRows(rows, all);
   // A2：先给每个候选补窗口/几何字段（bucket/prio 由同一份 __classify 产出，不另写口径）。
   for (const r of rows) {
     const el = all[r.i];
@@ -261,6 +291,12 @@ export const EXTRACT_JS = String.raw`(arg) => {
     r.inScrollContainer = cls.inScrollContainer;
     r.bucket = cls.bucket;
     r.prio = cls.prio;
+    // 分桶醒目度：viewport 用可见交集面积（真人此刻看到多少），视口外桶用原始 rect 面积
+    //（看不到但体积大仍可能是主控件）；排序平局由 scan 定（确定性）。
+    r.prominence = r.bucket === 'viewport'
+      ? Math.round(Math.max(0, Math.min(cls.rect.left + cls.rect.width, __vw) - Math.max(cls.rect.left, 0))
+          * Math.max(0, Math.min(cls.rect.top + cls.rect.height, __vh) - Math.max(cls.rect.top, 0)))
+      : Math.max(0, cls.rect.width) * Math.max(0, cls.rect.height);
   }
   let ordered;
   if (!quotas) {
@@ -333,14 +369,6 @@ export const EXTRACT_JS = String.raw`(arg) => {
     }
     ordered = picked.slice(0, max);
   }
-  // A4：盖章前先清掉上一轮的旧章。ref 是**位置性**的（e0/e1…），而页面元素会换位
-  //（列表插入/滚动重排/SPA 复用 DOM）：不清章时同一个元素身上还挂着旧 ref，本轮
-  // 另一个元素又拿到同一个 ref，[data-dshref="e2"] 就会命中两个节点——按章取元素
-  // 从"点错"退化到 Playwright strict mode 直接报错。一次全页 querySelectorAll 的开销
-  // 远小于一次误点，且只在提取期付。
-  try {
-    document.querySelectorAll('[data-dshref]').forEach((e) => e.removeAttribute('data-dshref'));
-  } catch (err) { /* 清理失败不阻断提取：nonce 仍保证新章不撞旧章 */ }
   // nonce：页内全局递增的批次号，章值 = 批次-位置（如 af3-e2）。旧批次章在清章后
   // 不残留，跨两次提取也不会共用同一个选择器；同一页多次提取共享计数，所以挂
   // globalThis（跨导航自动重置——旧 DOM 已经不在了，重号无害）。
@@ -376,6 +404,9 @@ ${ANCHOR_JS}
             data_test: r.data_test, name: r.name, id: r.id, input_type: r.input_type, href: r.href,
             ...(r.href_full ? {href_full: r.href_full} : {}),
             ...(r.surface ? {surface: r.surface} : {}),
+            ...(r.contains_candidate ? {contains_candidate: true} : {}),
+            ...(r.kind === 'container' ? {kind: 'container'} : {}),
+            ...(typeof r.prominence === 'number' ? {prominence: r.prominence} : {}),
             ...(r.role ? {role: r.role} : {}),
             ...(r.content_editable ? {content_editable: true} : {}),
             ...(r.draggable ? {draggable: true} : {})};

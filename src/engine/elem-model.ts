@@ -125,6 +125,18 @@ export interface Elem {
   inScrollContainer?: boolean;
   bucket?: PoolBucket;
   prio?: number;
+  /**
+   * 一区域一候选的采集期事实（EXTRACT_JS 采集期计算；只进证据面/审计，不进模型投影——
+   * `modelProjectionOf` guard+解构两处剥离，与 surface/row_texts 同纪律；不进 esig/firstIfSame 签名）：
+   *   contains_candidate —— 该候选的子树里还有其它候选（祖先打标 ≤32 层）；
+   *   kind —— container = 含候选后代 且（自身无文案 或 与内层候选同 label），否则 atomic
+   *   （键只在 container 出现：atomic = 缺省）；
+   *   prominence —— 分桶醒目度：viewport 桶用可见交集面积（真人此刻看到多少），
+   *   视口外桶用原始 rect 面积（看不到但体积大仍可能是主控件）；排序平局由 scan 定。
+   */
+  contains_candidate?: true;
+  kind?: "container";
+  prominence?: number;
   [k: string]: unknown;
 }
 export type ElemPool = Record<string, Elem>;

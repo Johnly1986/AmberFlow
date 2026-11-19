@@ -129,7 +129,9 @@ export function firstPoolText(pool: ElemPool): string | null {
  *   row_texts（F82 in-row 匹配底座，≤6 行 × ≤40 字符——只服务匹配/回捞/建议，再灌 6 行 × 15 卡
  *   是请求体爆炸且改变模型世界；near 以"每重复元素一行"进 criteriaView 是模型视图装饰，
  *   row_texts 不是）、row_index（F83 顺序行锚匹配底座，dup 组内 DOM 先序位次——引擎内部
- *   定位底座，灌进模型视图 = 诱导模型按序号提名（位置性 ref 的老坑））。
+ *   定位底座，灌进模型视图 = 诱导模型按序号提名（位置性 ref 的老坑））、
+ *   contains_candidate / kind / prominence（一区域一候选与分桶醒目度的采集期事实——
+ *   只服务证据面/审计与后续排序，不改变模型看到的候选语义）。
  * **快路径 guard 与解构两处同步**（B5 教训：只改解构会把「只带 frame_origin」的行泄漏进
  * 模型面）。esig / firstIfSame 签名**不含**这些字段（副作用边界不变）。
  */
@@ -139,13 +141,15 @@ export function modelProjectionOf(elems: ElemPool): ElemPool {
     if (e.surface === undefined && e.href_full === undefined && e.identity === undefined
         && e.declared === undefined && e.frame_origin === undefined && e.frame_path === undefined
         && e.structure_path === undefined && e.structure_unstable === undefined
-        && e.row_texts === undefined && e.row_index === undefined) {
+        && e.row_texts === undefined && e.row_index === undefined
+        && e.contains_candidate === undefined && e.kind === undefined && e.prominence === undefined) {
       modelElems[ref] = e; continue;
     }
     const { surface: _surface, href_full: _hrefFull, identity: _identity,
       declared: _declared, frame_origin: _frameOrigin, frame_path: _framePath,
       structure_path: _structurePath, structure_unstable: _structureUnstable,
-      row_texts: _rowTexts, row_index: _rowIndex, ...rest } = e;
+      row_texts: _rowTexts, row_index: _rowIndex,
+      contains_candidate: _containsCandidate, kind: _kind, prominence: _prominence, ...rest } = e;
     modelElems[ref] = rest as Elem;
   }
   return modelElems;

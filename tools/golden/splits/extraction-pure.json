@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "extraction-pure",
-  "note": "extraction.ts 纯区外搬（element model→elem-model.ts / 帧读侧→frame-scope.ts / page-shape helpers→page-shapes.ts；2026-11-17）；clickxy 最后手段（P2-10）给 Elem 契约新增可选 `clickxy?:{x,y}` 字段——有意非纯搬移，按 split-check 纪律将 Elem 从 manifest 移除（其余符号保持纯搬移 hash 不动）；候选池容量重配（池帽 64/宽扫 128）把 elem-model 的 POOL_QUOTAS/WIDE_QUOTAS/QUOTA_MODE_QUOTAS/QUOTA_MODE_WIDE_QUOTAS 四张配额表有意改值，按同一纪律从 manifest 移除（其余符号保持纯搬移 hash 不动）",
+  "note": "extraction.ts 纯区外搬（element model→elem-model.ts / 帧读侧→frame-scope.ts / page-shape helpers→page-shapes.ts；2026-11-17）；clickxy 最后手段（P2-10）给 Elem 契约新增可选 `clickxy?:{x,y}` 字段——有意非纯搬移，按 split-check 纪律将 Elem 从 manifest 移除（其余符号保持纯搬移 hash 不动）；候选池容量重配（池帽 64/宽扫 128）把 elem-model 的 POOL_QUOTAS/WIDE_QUOTAS/QUOTA_MODE_QUOTAS/QUOTA_MODE_WIDE_QUOTAS 四张配额表有意改值，windowAudit 增 dedup_dropped 有界透传（一区域一候选证据面）——均按同一纪律从 manifest 移除（其余符号保持纯搬移 hash 不动）",
   "files": {
     "src/engine/elem-model.ts": {
       "symbols": {
@@ -63,8 +63,7 @@
         "probeExcludedHint": "05765154b8daed328ca695a72488d753d1b89581aa87ac117c3236c775c2da07",
         "stateText": "448fd719c4efd5fcc4fe2329b453488de43c55fb232a326f5cda0113118eb06c",
         "viewportUnderload": "f96d2a759726cb0c2c52f6ec5a4e93b1db81e1788dcd3323fc371f17910336c7",
-        "WIDE_POOL_ELEMENTS": "41d7af97c6276ec77f934958e2ee8a2c82df53ac25fd8ece127f0979842ca0d7",
-        "windowAudit": "0f8ae0c9f1de6eae9c402c1fb33accd3a86701cc448e31701a25cd35c4f174ec"
+        "WIDE_POOL_ELEMENTS": "41d7af97c6276ec77f934958e2ee8a2c82df53ac25fd8ece127f0979842ca0d7"
       }
     },
     "src/engine/frame-scope.ts": {

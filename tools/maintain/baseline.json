@@ -8,12 +8,12 @@
       "src/engine/executor.ts": 2830,
       "src/app/session-runtime.ts": 1008,
       "src/app/app-adapters.ts": 988,
-      "src/engine/executor-pure.ts": 934,
+      "src/engine/executor-pure.ts": 938,
       "src/cli/commands/apps.ts": 880,
       "src/app/app-runner.ts": 872,
-      "src/engine/extraction.ts": 1101,
+      "src/engine/extraction.ts": 1113,
       "src/engine/executor-types.ts": 826,
-      "src/engine/pool-js.ts": 852
+      "src/engine/pool-js.ts": 883
     },
     "functions": [
       {

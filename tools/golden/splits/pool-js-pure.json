@@ -1,7 +1,7 @@
 {
   "_doc": "纯搬移等价 manifest（tools/split-check.ts）：files→symbols→源码文本 sha256。拆分 PR 只许改 files 路径，hash 必须不变。文件名以 _ 开头的被 --check 跳过。",
   "id": "pool-js-pure",
-  "note": "pool-js.ts 共享 JS 片段外搬（COLLECT/BUCKET/LABEL/STRUCTURE/ANCHOR/ROW_CLIMB/compile→pool-js-core.ts；2026-11-17，逐字节）",
+  "note": "pool-js.ts 共享 JS 片段外搬（COLLECT/BUCKET/LABEL/STRUCTURE/ANCHOR/ROW_CLIMB/compile→pool-js-core.ts；2026-11-17，逐字节）；候选池一区域一候选改造（EXTRACT_JS 内插 pool-js-dedup 的去重片段 + 被剔章清理前移、WINDOW_AUDIT_JS 增 dedup_dropped 读取）为**有意非纯搬移变更**，按 split-check 文档纪律将 EXTRACT_JS/WINDOW_AUDIT_JS 从 manifest 删除（其余符号保持纯搬移 hash 不动）",
   "files": {
     "src/engine/pool-js-core.ts": {
       "symbols": {
@@ -16,7 +16,6 @@
     },
     "src/engine/pool-js.ts": {
       "symbols": {
-        "EXTRACT_JS": "e9fd03d2e58853dbbf51f373b32edcecf87ea1a8473a76b7c8de2b06736bf5c0",
         "FN_FIRST": "d355f17f69626186848d5e8a89a4c6f7bb2a06a1cee0e9a022c5d8a5323fd3fa",
         "FN_TAG": "625a94832966392ec17f259c91ef681f2e32bc4b0090b374d48bbd55146fd605",
         "FN_WRAPPER": "2c1bd711156ea059b79f942d2e2110dd494504dd2b25e0908c3d2653929c141e",
@@ -34,8 +33,7 @@
         "PASS_OBSERVE": "27ef7aaf437f008f94a6dbd0e61d3bbb1e80004ddebeab44c3d2e52f0f6fddff",
         "PASS_UNDERLOAD": "ee44941958af985a00bd74c82848aeddf8bcd700eabaa2fc762bfff2ad53a88f",
         "PASS_WINDOW": "f3e48541e138728986d43e056f06a3003709b03ecdf527145c3f04aa1086afbc",
-        "VIEWPORT_UNDERLOAD_JS": "029b21c8ece1fd1eb6623d4ad157eb8fc600c29ae8ba913aada706304aae0177",
-        "WINDOW_AUDIT_JS": "e5c8206dd9821c98d73aef97dc86b361d4c0110f30c4f5c190243905ae95513b"
+        "VIEWPORT_UNDERLOAD_JS": "029b21c8ece1fd1eb6623d4ad157eb8fc600c29ae8ba913aada706304aae0177"
       }
     }
   }

@@ -289,13 +289,16 @@ export async function observeElements(
 
 /**
  * A2：`inspect --json` 的 `window` 小节数据——页面上可见的交互元素总数、以及**没进本次池**
- * 的那些（被 40/120 窗口或分桶顺序挤出；≤limit 条，按桶优先级排序）。
+ * 的那些（被 64/128 窗口或分桶顺序挤出；≤limit 条，按桶优先级排序）。
  * `shown` 由调用方给（池大小），这里只回答"页面有多少 / 窗口外还有哪些"。
+ * 一区域一候选证据面（additive）：`dedup_dropped` = 同区域重复裁决里让位的元素
+ * （tag/label/why；章由 EXTRACT_JS 盖、每趟清旧章）——它们不是"窗口挤出"，单列成账；
+ * 无被剔时不出现该键（旧产物逐字节不变）。
  */
 export async function windowAudit(
   page: PageLike, shown: number, limit = 10,
-): Promise<{ visible_interactive: number; shown: number; out_of_window_total: number; out_of_window: Array<{ tag: string; label: string; prio: number; bucket: string }>; surface_counts: Record<string, number> }> {
-  type WindowRaw = { visible_interactive?: number; out_of_window_total?: number; out_of_window?: unknown; surface_counts?: unknown };
+): Promise<{ visible_interactive: number; shown: number; out_of_window_total: number; out_of_window: Array<{ tag: string; label: string; prio: number; bucket: string }>; surface_counts: Record<string, number>; dedup_dropped?: Array<{ tag: string; label: string; why: string }> }> {
+  type WindowRaw = { visible_interactive?: number; out_of_window_total?: number; out_of_window?: unknown; surface_counts?: unknown; dedup_dropped?: unknown };
   let raw: WindowRaw | null = null;
   try {
     // U3：只读计数面用 ADMIT_SEL（不是池基准）；绝不用它的下标当 scan。
@@ -304,6 +307,7 @@ export async function windowAudit(
     raw = null;
   }
   const rows = Array.isArray(raw?.out_of_window) ? (raw!.out_of_window as Array<Record<string, unknown>>) : [];
+  const drops = Array.isArray(raw?.dedup_dropped) ? (raw!.dedup_dropped as Array<Record<string, unknown>>) : [];
   const counts: Record<string, number> = {};
   if (raw?.surface_counts && typeof raw.surface_counts === "object") {
     for (const [k, v] of Object.entries(raw.surface_counts as Record<string, unknown>)) {
@@ -322,6 +326,14 @@ export async function windowAudit(
       prio: Number(r["prio"] ?? 0) || 0,
       bucket: String(r["bucket"] ?? ""),
     })),
+    // 有界证据（40 条足够归因；整页被剔通常是个位数）。无被剔 = 键不出现（additive）。
+    ...(drops.length > 0
+      ? { dedup_dropped: drops.slice(0, 40).map((r) => ({
+          tag: String(r["tag"] ?? ""),
+          label: String(r["label"] ?? ""),
+          why: String(r["why"] ?? ""),
+        })) }
+      : {}),
   };
 }
 
