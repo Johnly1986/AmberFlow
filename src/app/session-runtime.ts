@@ -25,6 +25,7 @@ import readline from "node:readline";
 import { createCtx, isSyntheticScrollTarget, StopError, type Ctx } from "./ctx.ts";
 // S1：行容器滚动（rows 寻址）与 scroll 分支执行体在独立模块（主文件只减不增）。
 import { doActScroll } from "./session-act-scroll.ts";
+import { wideScanCandidates } from "./session-wide-scan.ts";
 import { buildMiddleware } from "./middleware-factory.ts";
 import { amberflowHome, ensureDir } from "../support/amberflow-home.ts";
 import { sleepMs } from "../support/sleep.ts"; import { NAVIGATION_GOTO_TIMEOUT_MS, SESSION_IDLE_TIMEOUT_MS } from "../support/tuning.ts";
@@ -636,6 +637,11 @@ export class SessionRuntime {
       // S4：落空时的最近命中提示（纯内存；独立键 recently_resolved，不覆盖引擎 A4 的
       // diagnostics；无记录 = 键不出现，响应键集不变）。
       const recent = out.stopCode === "target_not_found" ? this.recentResolutions.hint(target, this.actionCount) : { diag: {}, reasonLine: "" };
+      // F6：歧义/落空时**一次**有界宽扫（≤128；零动作）——把全量候选与自证 hint 回传给作者
+      // 再决定（收窄 hint / 换锚点 / 滚动取证）。additive 证据面：键只在这两个停因出现，
+      // 其余响应键集与旧产物逐字节不变；绝不点击/滚动/重试（宽扫不是动作，不改变页面）。
+      const wantWide = out.stopCode === "target_not_found" || out.stopCode === "target_ambiguous";
+      const wide = wantWide ? await wideScanCandidates(page, this.hosts) : null;
       return {
         ok: false, code: String(out.stopCode ?? "action_failed"),
         reason: String(out.reason ?? "") + recent.reasonLine,
@@ -645,6 +651,7 @@ export class SessionRuntime {
         ...actionabilityResponse(out.actionability),
         ...(await failureScreenshot(this.outDir, (l) => this.log(l), page, this.actionCount, req)),
         ...(overlay !== null && overlay.length > 0 ? { overlay } : {}),
+        ...(wide !== null ? { wide_scan: wide } : {}),
         ...amb,
         ...ambiguityResponse(out.ambiguity),
         ...missDiagnosticsResponse(out.diagnostics),
