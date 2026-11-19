@@ -464,7 +464,8 @@ export const HINT_CLOSED_SET_TEXT =
 export const CANDIDATE_WINDOW_TEXT =
   `候选窗口是**有界快照**：每步只取 ${POOL_CAP_ELEMENTS}（宽扫 ${WIDE_SCAN_POOL_ELEMENTS}）个候选，按桶配额来自当前视口——`
   + `chrome ${POOL_QUOTAS.chrome} / viewport ${POOL_QUOTAS.viewport} / contentNear ${POOL_QUOTAS.contentNear} / mainOffscreen ${POOL_QUOTAS.mainOffscreen} / other ${POOL_QUOTAS.other}，不足时按 `
-  + "viewport→contentNear→mainOffscreen→other 顺延；同区域父子重复（等 label 或子空名）只留一份候选，"
+  + "viewport→contentNear→mainOffscreen→other 顺延；桶内原子控件先于容器、按醒目度排序。"
+  + "同区域父子重复（等 label 或子空名）只留一份候选，"
   + "父优先——监听探针证明 handler 在子时留子。"
   + "窗口外不等于页面上没有（inspect --json 的 "
   + "window 会给出窗口外可见交互与被剔账 dedup_dropped），引擎不自动滚动。真正需要读完整列表时用滚动/展开原语分块取证。"

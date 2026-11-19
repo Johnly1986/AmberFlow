@@ -4,6 +4,14 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-19 候选池改造批 2+：桶内排序/组保底/会话宽扫/hit-test 核实（F5 不做）
+
+- **桶内类目维排序 + 醒目度（两分支同比较器）**：`pool-js-dedup` 增 `__poolRowOrder`——桶内 atomic 先、container 后（container 只降权不除名：点卡片与点按钮是两种操作）→ `prominence` 降序（viewport=可见交集面积、其余桶=原始 rect 面积；平局 scan 升序，确定性）；EXTRACT_JS 的 quota 与 legacy 分支同改（main-first 回退分支保持逐字节旧序=显式回滚面）。复算矩阵保持：pool-1（scrollTop=0）64 帽订票 7/7 含首行 s103（排序后反列首选）、pool-2 订票 13/13。
+- **组级保底**：`__dupGroupMinsOf` + `__GROUP_PIN_CAP=8`——去重后仍存在的同 (tag,label) 行组每组保 scan-min 组锚（救回在顺延填充前、fill 跳过已入池行；键口径与 addNearContext 一致防跨面组号错位）；排序/配额不再让同文案行组整组消失（row-index/in-row 与"点第 N 行"任务的组锚前提）。
+- **会话 act 宽扫回传（additive）**：新增 `src/app/session-wide-scan.ts`；`doAct` 失败路径在 `target_not_found`/`target_ambiguous` 停因回传 `wide_scan{window,pool_size,candidates[{ref,tag,label,hint?}]}`——一次有界宽扫（≤128）、零动作；hint 经 `suggestHints` 的 push→hintMatch 自证恰好唯一命中才给出。页内探针：落空回传结账按钮 `#checkout-btn`、歧义回传 8 个订票行各带 `订票 row-index:1..8` 自证 hint；旧响应键集逐字节不变。
+- **hit-test 语义核实（现状已正确，零行为变更）**：`eval-snippets` 的 HIT_JS/HIT_DETAIL_JS 与 `executor._declaredHitTest` 对"中心命中后代/祖先"放行（后代命中=正常操作成立，事件冒泡回容器 handler），仅第三方元素判 covered——三处补公理 0 注释并声明判据不得漂移；新增离线锚 `fixtures/engine/pool-dedup/hit-descendant.html` + verify-offline `center_hit` 断言（中心命中=自己的子元素）。
+- **契约/账本**：schema-gen 登记 F87（桶内排序/组保底/宽扫回传/hit-test 核实四条 truth 面齐全）；F86 statement 随 rework 登记（容量+一区域一候选+settle 过滤纪律）；APP_SCRIPT_AUTHORING 候选窗口段补"桶内原子控件先于容器、按醒目度排序"（prompt 477→约 495 字符 ≤500）与排序/保底/宽扫卡点；fixtures README 补 hit-descendant 行。门禁：`npm run check` exit 0；verify:offline 10 夹具两次一致入库；verify:runtime:offline 7 场景零漂移；smoke 7 passed / 0 failed；复算矩阵 7/13。
+
 ## [Unreleased] — 2026-11-19 候选池改造批 1：容量 64/128/256 + 一区域一候选（父优先）
 
 - **容量与配额表**：`POOL_CAP_ELEMENTS` 40→**64** / `WIDE_SCAN_POOL_ELEMENTS` 120→**128** / `WIDE_SCAN_POOL_ELEMENTS_MAX` 240→**256**（宽扫链经 `executor-pure.WIDER_ELEMENTS*` 自动跟随）；`elem-model` 四张配额表重配——`POOL_QUOTAS` 8/24/16/12/4=64、`WIDE_QUOTAS` 16/52/34/17/9=128、`QUOTA_MODE_*` 按基础表比例放大并保留超额订阅语义（表合计 74/150 > 池帽，靠 BUCKET_FILL_ORDER 填序截断，只改"谁被逐出"）。档位依据（公理 0）：真人浏览一屏扫 60+ 控件，40 帽在长列表页把主目标挤出窗口（flights.ctrip.com scrollTop=0 实测 40 帽仅 2 个订票候选）。`schema-gen` F65 换档表数字跟新。

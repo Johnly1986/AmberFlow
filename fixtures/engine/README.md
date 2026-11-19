@@ -20,6 +20,7 @@
 | `pool-dedup/empty-child.html` | 一区域一候选 | 页签 li 与空 label 图标 i → 剔子留父（why=empty-child）；i 必须有非零盒（可见性过滤在前）。 |
 | `pool-dedup/card-independent.html` | 类目维排序 | 卡片与卡内独立按钮 label 不同 = 不同操作，两者都留（误杀守卫）；空名容器包装层与 icon 型原子按钮都留且 atomic 子排前（container 只降权不除名）。 |
 | `pool-dedup/long-list-64.html` | 池容量 | 61 控件全在首屏网格：64 帽全入池、item-50 可达（40 帧下被挤出窗口）。 |
+| `pool-dedup/hit-descendant.html` | hit-test 语义 | 容器候选中心点被自己的绝对定位子元素盖住：`center_hit` 断言后代命中（executor 三处 hit-test 对此放行，绝不判 covered）。 |
 
 ## 通用验收纪律
 

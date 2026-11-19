@@ -64,7 +64,13 @@ const FN_CHECKS = asFunction(CHECKS_JS);
 const STATE_JS = `() => ({ vals: (${VALS_JS})(), checks: (${CHECKS_JS})() })`;
 const FN_STATE = asFunction(STATE_JS);
 
-/** Centre hit-test: distinguishes "covered" from "slow but unblocked". */
+/**
+ * Centre hit-test: distinguishes "covered" from "slow but unblocked".
+ * 公理 0（模拟正常操作）：中心命中的是**自己的后代** = 正常操作成立——真人点这块区域
+ * 就会命中子节点、事件冒泡回元素的 handler（容器候选的常态），绝不判 covered；
+ * 命中**自己的祖先** = 元素 pointer-events:none 或布局在祖先上，同样放行（Playwright
+ * 的 actionability 与冒泡路径都能成立）；只有**第三方元素**盖住中心才算 covered。
+ */
 const HIT_JS = `(e) => {
   const r = e.getBoundingClientRect();
   if (!r.width || !r.height) return 'zero-size';
@@ -79,6 +85,7 @@ const FN_HIT = asFunction(HIT_JS);
 /**
  * S1 actionability 现场（只读）：bbox + 中心点覆盖者 + 重查时节点是否仍在文档里。
  * 与 HIT_JS 分开是因为 HIT_JS 的返回值被两处当成“有无覆盖者”的布尔语义（不能改形状）。
+ * 覆盖者判据与 HIT_JS 同一条公理：后代/祖先命中不算被盖（见 HIT_JS 注释），只有第三方算。
  */
 const HIT_DETAIL_JS = `(e) => {
   const rr = e.getBoundingClientRect();

@@ -139,6 +139,18 @@ const DOM_EXPR = `(() => {
 })()`;
 
 const OVERLAY_VISIBLE_EXPR = `(() => { const el = document.getElementById("modal-overlay"); return !!el && !el.hidden; })()`;
+/** hit-test 语义的页面事实：容器候选的中心点命中谁（后代命中 = 正常操作，不得判 covered）。 */
+const CENTER_HIT_EXPR = `(() => {
+  const parent = document.getElementById("hit-region");
+  const r = parent.getBoundingClientRect();
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return {
+    hit_tag: hit ? hit.tagName.toLowerCase() : null,
+    hit_id: hit && hit.id ? hit.id : "",
+    is_descendant: hit !== null && parent.contains(hit),
+    is_self: hit === parent,
+  };
+})()`;
 const LAZY_EXPR = `(() => {
   const rows = document.querySelectorAll(".lazy-row");
   const last = rows.length ? (rows[rows.length - 1].textContent || "").trim() : "";
@@ -295,6 +307,15 @@ const CASES: ObservationCase[] = [
         ? Object.values((out["pool"] as { rows: Array<Record<string, unknown>> }).rows)
             .some((r) => r["id"] === "target-50")
         : false };
+    },
+  },
+  {
+    name: "pool-dedup-hit-descendant",
+    // hit-test 语义锚：容器候选的中心点被自己的绝对定位子元素盖住——页面事实 = 后代命中
+    //（executor 的 HIT_JS/HIT_DETAIL_JS/DRF _declaredHitTest 对这种形态放行，绝不判 covered）。
+    run: async (ctx) => {
+      const out = await observePoolDedup(ctx, "pool-dedup/hit-descendant.html");
+      return { ...out, center_hit: await ctx.page.evaluate(CENTER_HIT_EXPR) };
     },
   },
 ];

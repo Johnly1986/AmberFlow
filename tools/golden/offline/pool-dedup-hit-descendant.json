@@ -1,0 +1,38 @@
+{
+  "_doc": "verify-offline 基线（tools/verify-offline.ts，非门禁）：本地静态夹具 + 无头 chromium 的确定性观测。页面/代码变化后显式 --record 更新；端口已归一为 <LOCAL>，不得手改。",
+  "expected": {
+    "center_hit": {
+      "hit_id": "hit-child",
+      "hit_tag": "span",
+      "is_descendant": true,
+      "is_self": false
+    },
+    "external_requests": [],
+    "pool": {
+      "count": 1,
+      "rows": [
+        {
+          "frame": 0,
+          "id": "hit-region",
+          "label": "",
+          "ref": "e0",
+          "role": "button",
+          "scan": 0,
+          "surface": "aria-role",
+          "tag": "div"
+        }
+      ]
+    },
+    "ref_order": [
+      "e0"
+    ],
+    "window": {
+      "dedup_dropped": [],
+      "out_of_window_total": 0,
+      "shown": 1,
+      "visible_interactive": 1
+    }
+  },
+  "fixture": "pool-dedup-hit-descendant",
+  "schema_version": 1
+}

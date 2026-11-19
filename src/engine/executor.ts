@@ -1633,6 +1633,9 @@ export class BrowserMiddleware {
    * **不点击**——返回 covered（无关元素盖住 / 中心点无元素）或 ancestor（命中目标是
    * 目标的祖先，典型是目标 `pointer-events:none` 或布局在父容器上）。命中非目标时
    * 记录覆盖者摘要（tag#id.class），让失败证据能直接指认现场。
+   * 公理 0：**后代命中 = 正常操作成立**——容器候选的中心点命中其子（图标/内层按钮）
+   * 是真人点击的常态，事件冒泡回容器的 handler；`node.contains(hit)` 放行，绝不判
+   * covered（与 eval-snippets 的 HIT_JS/HIT_DETAIL_JS 同一条判据，三处不得漂移）。
    */
   async _declaredHitTest(page: AnyPage, el: Elem):
     Promise<{ ok: true } | { ok: false; kind: "covered" | "ancestor"; blocker: string }> {
