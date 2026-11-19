@@ -9,7 +9,7 @@
           "frame": 0,
           "id": "region-a",
           "label": "登录",
-          "ref": "e0",
+          "ref": "e1",
           "role": "button",
           "scan": 0,
           "surface": "aria-role",
@@ -19,7 +19,7 @@
           "frame": 0,
           "id": "btn-b",
           "label": "搜索",
-          "ref": "e1",
+          "ref": "e0",
           "scan": 3,
           "surface": "native-control",
           "tag": "button"

@@ -18,7 +18,7 @@
 | `pool-dedup/dup-parent-label.html` | 一区域一候选 | 父子同 label 两形态：默认留父剔子（region-a 的 button 让位，why=label-dup）；监听章在子 → 留子剔父（region-b 的 div 让位，why=listener-child）。 |
 | `pool-dedup/deco-child.html` | 一区域一候选 | 自绘按钮 div 与文本 span 同盒同文案、双方带监听章 → 留父剔子（why=label-dup）。 |
 | `pool-dedup/empty-child.html` | 一区域一候选 | 页签 li 与空 label 图标 i → 剔子留父（why=empty-child）；i 必须有非零盒（可见性过滤在前）。 |
-| `pool-dedup/card-independent.html` | 一区域一候选 | 卡片与卡内独立按钮 label 不同 = 不同操作，两者都留（误杀守卫）；ref 序 = DOM 先序。 |
+| `pool-dedup/card-independent.html` | 类目维排序 | 卡片与卡内独立按钮 label 不同 = 不同操作，两者都留（误杀守卫）；空名容器包装层与 icon 型原子按钮都留且 atomic 子排前（container 只降权不除名）。 |
 | `pool-dedup/long-list-64.html` | 池容量 | 61 控件全在首屏网格：64 帽全入池、item-50 可达（40 帧下被挤出窗口）。 |
 
 ## 通用验收纪律

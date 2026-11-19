@@ -298,9 +298,12 @@ ${DEDUP_HELPERS_JS}
           * Math.max(0, Math.min(cls.rect.top + cls.rect.height, __vh) - Math.max(cls.rect.top, 0)))
       : Math.max(0, cls.rect.width) * Math.max(0, cls.rect.height);
   }
+  // F7 组级保底的组清单（去重后的 rows 上算一次，quota 与 legacy 两分支共用）。
+  const groupMins = __dupGroupMinsOf(rows);
   let ordered;
   if (!quotas) {
-    // main-first 回退面（meta.policy.candidate_priority:"main-first"）：与 A2 之前逐字节同序。
+    // main-first 回退面（meta.policy.candidate_priority:"main-first"）：与 A2 之前逐字节同序
+    // （它是显式回滚面——类目/醒目度排序与组保底都不进这条分支）。
     ordered = rows.filter((r) => r.main).concat(rows.filter((r) => !r.main)).slice(0, max);
   } else if (arg.quotaMode === 'quota') {
     // E1-b 双配额模型（decision.pool_quota_mode:"quota" 灰度档；legacy = 上面既有分支）。
@@ -319,6 +322,8 @@ ${DEDUP_HELPERS_JS}
       const b = r.bucket || 'other';
       (byBucket[b] || byBucket.other).push(r);
     }
+    // 类目/醒目度排序（与 legacy 分支同一比较器）：桶内 atomic 先、prominence 降序、平局 scan。
+    for (const b of ['chrome', 'viewport', 'contentNear', 'mainOffscreen', 'other']) (byBucket[b] || []).sort(__poolRowOrder);
     const picked = [];
     const pickedIdx = {};   // row.i -> true（已入池标记；fill 阶段跳过）
     let pinnedTaken = 0;
@@ -331,6 +336,12 @@ ${DEDUP_HELPERS_JS}
         if (n < q) { n++; picked.push(r); pickedIdx[r.i] = true; continue; }
         if (r.id && pinnedTaken < PIN_CAP) { pinnedTaken++; picked.push(r); pickedIdx[r.i] = true; }
       }
+    }
+    // F7 组级保底：未入池的组 scan-min 优先占座（限幅；在顺延填充之前，保证每组锚进池）。
+    let groupPinned = 0;
+    for (const r of groupMins.values()) {
+      if (picked.length >= max || groupPinned >= __GROUP_PIN_CAP) break;
+      if (!pickedIdx[r.i]) { picked.push(r); pickedIdx[r.i] = true; groupPinned += 1; }
     }
     if (picked.length < max) {
       for (const b of ['viewport', 'contentNear', 'mainOffscreen', 'other', 'chrome']) {
@@ -345,26 +356,39 @@ ${DEDUP_HELPERS_JS}
     }
     ordered = picked.slice(0, max);
   } else {
-    // 分桶配额：每桶按 DOM 序取至多 quota 个 → 不足部分按 BUCKET_FILL_ORDER 顺延 → 截断 max。
+    // 分桶配额：每桶按类目/醒目度序（__poolRowOrder，与 quota 分支同一比较器）取至多
+    // quota 个 → F7 组保底救回 → 不足部分按 BUCKET_FILL_ORDER 顺延 → 截断 max。
     const byBucket = { chrome: [], viewport: [], contentNear: [], mainOffscreen: [], other: [] };
     for (const r of rows) {
       const b = r.bucket || 'other';
       (byBucket[b] || byBucket.other).push(r);
     }
+    for (const b of ['chrome', 'viewport', 'contentNear', 'mainOffscreen', 'other']) (byBucket[b] || []).sort(__poolRowOrder);
     const picked = [];
+    const pickedIdx = {};   // row.i -> true（组保底插入后，fill 必须跳过已入池行）
     const taken = { chrome: 0, viewport: 0, contentNear: 0, mainOffscreen: 0, other: 0 };
     for (const b of ['chrome', 'viewport', 'contentNear', 'mainOffscreen', 'other']) {
       const q = typeof quotas[b] === 'number' ? quotas[b] : 0;
       const arr = byBucket[b] || [];
       const n = Math.min(q, arr.length);
-      for (let k = 0; k < n; k++) picked.push(arr[k]);
+      for (let k = 0; k < n; k++) { picked.push(arr[k]); pickedIdx[arr[k].i] = true; }
       taken[b] = n;
+    }
+    // F7 组级保底：未入池的组 scan-min 优先占座（限幅；在顺延填充之前，保证每组锚进池）。
+    let groupPinned = 0;
+    for (const r of groupMins.values()) {
+      if (picked.length >= max || groupPinned >= __GROUP_PIN_CAP) break;
+      if (!pickedIdx[r.i]) { picked.push(r); pickedIdx[r.i] = true; groupPinned += 1; }
     }
     if (picked.length < max) {
       for (const b of ['viewport', 'contentNear', 'mainOffscreen', 'other', 'chrome']) {
         if (picked.length >= max) break;
         const arr = byBucket[b] || [];
-        for (let k = taken[b] || 0; k < arr.length && picked.length < max; k++) picked.push(arr[k]);
+        for (let k = taken[b] || 0; k < arr.length && picked.length < max; k++) {
+          const r = arr[k];
+          if (pickedIdx[r.i]) continue;
+          picked.push(r); pickedIdx[r.i] = true;
+        }
       }
     }
     ordered = picked.slice(0, max);

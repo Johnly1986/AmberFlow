@@ -1,10 +1,11 @@
 /**
- * 池抽取的**同区域去重**共享 JS 片段（一区域一候选，父优先）。
+ * 池抽取的**池构成规则**共享 JS 片段（一区域一候选去重 + 桶内类目/醒目度排序 + 组级保底）。
  *
- * 为什么独立成模块：去重是采集期的新逻辑（EXTRACT_JS 与 WINDOW_AUDIT_JS 经模板内插共用
- * 同一份），放在 pool-js.ts 会把它埋进既有 pass 串里；单独成模块后"公理 0 的裁决规则写在哪、
- * 证据面读哪个章"有单一出处。片段是**纯 JS**（写给浏览器执行的 String.raw 模板），
- * 不含任何 TS 专属语法（strip-types 会擦掉类型注释，页内模板必须可直接执行）。
+ * 为什么独立成模块：去重/排序/保底都是"谁进池、按什么序"的构成规则（EXTRACT_JS 与
+ * WINDOW_AUDIT_JS 经模板内插共用同一份），放在 pool-js.ts 会把它埋进既有 pass 串里；
+ * 单独成模块后"公理 0 的裁决规则写在哪、证据面读哪个章"有单一出处。片段是**纯 JS**
+ * （写给浏览器执行的 String.raw 模板），不含任何 TS 专属语法（strip-types 会擦掉类型注释，
+ * 页内模板必须可直接执行）。
  *
  * 公理 0（去重与裁决的唯一判准）：候选的语义 = 模拟正常操作——一个真人点这块区域时，
  * 浏览器命中谁、事件冒泡给谁、布局意图上谁承载可点区域，就留谁。正常操作命中的是整块
@@ -99,5 +100,40 @@ export const DEDUP_HELPERS_JS = String.raw`
     }
     if (dropped.size === 0) return rows;
     return rows.filter((r) => !dropped.has(r));
+  };
+  // 桶内排序（类目维 + 醒目度，两分支同用）：atomic 先、container 后（container 只降权
+  // 不除名——"点卡片进详情"与"点按钮加购"是两种操作，容器排后仍可被显式点名或模型选中）；
+  // 同类目内 prominence 降序（viewport 桶 = 可见交集面积 = 真人此刻看到多少；视口外桶 =
+  // 原始 rect 面积 = 看不到但体积大仍可能是主控件——用可见交集量视口外元素会恒 0，退化成
+  // scan 序）；平局 scan 升序（确定性，绝不掷骰子）。跨桶次序仍由 BUCKET_ORDER 决定。
+  const __poolRowOrder = (a, b) => {
+    const ka = a.kind === 'container' ? 1 : 0;
+    const kb = b.kind === 'container' ? 1 : 0;
+    if (ka !== kb) return ka - kb;
+    const p = ((b.prominence || 0) - (a.prominence || 0)) || 0;
+    if (p !== 0) return p;
+    return ((a.scan || 0) - (b.scan || 0));
+  };
+  // 组级保底（GROUP_PIN_CAP 限幅）：去重后仍存在的同 (tag,label) 组，每组保 scan-min 一员——
+  // 排序/配额不应让"同文案行组"整组消失：组的首个成员是该组的 DOM 锚，row-index:N /
+  // in-row 声明与"点第 N 行"类任务都以组在池为前提。键口径与宿主 addNearContext 一致
+  // （tag+\u0000+label40），跨面组号不错位。限幅防"全页都是重复控件"的病态面把顺延填充
+  // 挤成全保底。
+  const __GROUP_PIN_CAP = 8;
+  const __dupGroupMinsOf = (rows) => {
+    const cnt = {};
+    for (const r of rows) {
+      const k = String(r.tag || '') + '\u0000' + String(r.label || '');
+      cnt[k] = (cnt[k] || 0) + 1;
+    }
+    const mins = new Map();
+    for (const r of rows) {
+      const k = String(r.tag || '') + '\u0000' + String(r.label || '');
+      if (cnt[k] > 1) {
+        const cur = mins.get(k);
+        if (cur === undefined || ((r.scan || 0) < (cur.scan || 0))) mins.set(k, r);
+      }
+    }
+    return mins;
   };
 `;

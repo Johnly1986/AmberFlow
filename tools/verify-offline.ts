@@ -282,8 +282,8 @@ const CASES: ObservationCase[] = [
   },
   {
     name: "pool-dedup-card-independent",
-    // ④ 卡内独立按钮（不同 label）→ 两者都留，不误杀；ref 序 = DOM 先序（等 label 去重
-    // 不重排；atomic 子排前由候选类目排序交付，落地后 golden 随之更新）。
+    // ④ 卡内独立按钮（不同 label）→ 两者都留，不误杀；空名容器包装层（icon 型按钮）与
+    // 内层原子按钮都留且**atomic 子排前**（类目维排序：container 只降权不除名）。
     run: async (ctx) => await observePoolDedup(ctx, "pool-dedup/card-independent.html"),
   },
   {
