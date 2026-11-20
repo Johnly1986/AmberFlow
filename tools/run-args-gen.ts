@@ -15,6 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  PILOT_ARG_FIELDS,
   RUN_ARG_FIELDS,
   RUN_BRIDGE_MESSAGES,
   RUN_TIMEOUT_MAX_SEC,
@@ -27,6 +28,9 @@ const GENERATED_PATH = path.join(REPO, "integrations", "dsh-bridge", "src", "run
 
 /** 引擎侧可能出现的选项声明来源（`ScriptRunOptions` 在 app-runner.ts，其余在 types）。 */
 const ENGINE_OPTION_SOURCES = ["src/app/app-runner.ts", "src/app/app-runner-types.ts"];
+
+/** `*_pilot` 段的选项声明来源（`PilotOptions` 在 pilot-contract.ts）。 */
+const PILOT_ENGINE_OPTION_SOURCES = ["src/app/pilot-contract.ts"];
 
 const MAP_KINDS: ReadonlySet<RunEngineMap> = new Set<RunEngineMap>([
   "flag", "flag-true", "string", "context", "sources", "headful", "confirm-safe", "tiered-hint", "rescue", "none",
@@ -100,6 +104,7 @@ function typeText(field: RunArgField): string {
   if (tool !== undefined) {
     if (tool.type === "boolean") return "boolean";
     if (tool.type === "integer") return "number";
+    if (tool.type === "number") return "number";
     if (tool.type === "array") return "string[]";
     const values = tool.enum;
     if (values !== undefined && values.length > 0) return values.map((v) => JSON.stringify(v)).join(" | ");
@@ -122,9 +127,9 @@ function interfaceProperty(field: RunArgField, optional: boolean): string[] {
 }
 
 /** 桥 tool 参数对象（`as const` 后投影给 `defineTool`，required 仍是本项目 tool 框架的注解位）。 */
-function toolParametersSource(fields: readonly RunArgField[]): string {
+function toolParametersSource(fields: readonly RunArgField[], constName: string): string {
   const toolFields = fields.filter((field) => field.tool !== undefined);
-  const lines: string[] = ["export const RUN_TOOL_PARAMETERS = {"];
+  const lines: string[] = [`export const ${constName} = {`];
   for (const field of toolFields) {
     const tool = field.tool;
     if (tool === undefined || field.param === undefined) continue;
@@ -174,7 +179,7 @@ function renderGenerated(fields: readonly RunArgField[]): string {
   for (const field of toolFields) serviceLines.push(...interfaceProperty(field, field.tool?.required !== true));
   serviceLines.push("}");
   parts.push(serviceLines.join("\n"));
-  parts.push(toolParametersSource(fields));
+  parts.push(toolParametersSource(fields, "RUN_TOOL_PARAMETERS"));
   parts.push(
     "export const RUN_TOOL_FIELDS: readonly BridgeToolFieldBinding[] = [\n"
     + toolFields.map((field) => `  { key: ${JSON.stringify(field.key)}, param: ${JSON.stringify(field.param)}, `
@@ -210,10 +215,62 @@ function renderGenerated(fields: readonly RunArgField[]): string {
   return `${parts.join("\n")}`;
 }
 
-/** 引擎类型面里的属性名闭集（用于 engine.option 存在性自检）。 */
-function engineOptionNames(): Set<string> {
+/**
+ * `*_pilot` 段（PILOTED_WALKTHROUGH §PW3.2：schema 走同一生成链）。与 run 段共用同一份
+ * 契约类型与发射纪律；差异只有三处——argv 键域是 `BridgePilotArgs`、kind 闭集没有
+ * provider（pilot 不传决策源覆盖）、没有 fallback 固定转发（pilot 的缺省转发只有 `--out`
+ * 与可选 `--input`，由 pilotArgs 硬编码）。
+ */
+function renderPilotSection(fields: readonly RunArgField[]): string {
+  const argvFields = fields
+    .filter((field) => field.argv !== undefined)
+    .sort((a, b) => (a.argv?.order ?? 0) - (b.argv?.order ?? 0));
+  const toolFields = fields.filter((field) => field.tool !== undefined);
+  const parts: string[] = [];
+  parts.push(
+    "/**\n"
+    + " * `*_pilot` 段——契约 = src/support/run-args-contract.ts 的 PILOT_ARG_FIELDS（同 run 段生成纪律）。\n"
+    + " */\n",
+  );
+  parts.push(
+    "/** `*_pilot` 桥进程 argv 的一个发射项（键域 = BridgePilotArgs；无 provider kind）。 */\n"
+    + "export interface BridgePilotArgvField {\n"
+    + "  readonly key: keyof BridgePilotArgs;\n"
+    + "  readonly flag: string;\n"
+    + "  readonly kind: 'flag' | 'value' | 'repeated';\n"
+    + "  readonly when?: 'truthy' | 'defined';\n"
+    + "}\n",
+  );
+  // BridgePilotArgs 的入参面：tool 字段的 camelCase 形状（url/goal 必填，其余可选）。
+  const serviceLines = ["export interface BridgePilotArgs {"];
+  for (const field of toolFields) serviceLines.push(...interfaceProperty(field, field.tool?.required !== true));
+  serviceLines.push("}");
+  parts.push(serviceLines.join("\n"));
+  parts.push(toolParametersSource(fields, "PILOT_TOOL_PARAMETERS"));
+  parts.push(
+    "export const PILOT_TOOL_FIELDS: readonly BridgeToolFieldBinding[] = [\n"
+    + toolFields.map((field) => `  { key: ${JSON.stringify(field.key)}, param: ${JSON.stringify(field.param)}, `
+      + `${field.tool?.collect === undefined ? "" : `collect: ${JSON.stringify(field.tool.collect)}, `}},\n`).join("")
+    + "];\n",
+  );
+  parts.push(
+    "export const PILOT_ARGV_FIELDS: readonly BridgePilotArgvField[] = [\n"
+    + argvFields.map((field) => {
+      const argv = field.argv;
+      if (argv === undefined) return "";
+      const when = argv.when === undefined ? "" : `, when: ${JSON.stringify(argv.when)}`;
+      return `  { key: ${JSON.stringify(argv.key ?? field.key)}, flag: ${JSON.stringify(argv.flag)}, `
+        + `kind: ${JSON.stringify(argv.kind)}${when} },\n`;
+    }).join("")
+    + "];\n",
+  );
+  return parts.join("\n");
+}
+
+/** 引擎类型面里的属性名闭集（用于 engine.option 存在性自检；来源按段给定）。 */
+function engineOptionNames(sources: readonly string[]): Set<string> {
   const names = new Set<string>();
-  for (const rel of ENGINE_OPTION_SOURCES) {
+  for (const rel of sources) {
     const text = fs.readFileSync(path.join(REPO, rel), "utf8");
     for (const line of text.split("\n")) {
       const m = /^\s{2}([A-Za-z_][A-Za-z0-9_]*)\??\s*:/.exec(line);
@@ -230,13 +287,16 @@ function main(argv: readonly string[]): number {
     console.error("usage: run-args-gen (--write | --check)");
     return 2;
   }
-  const problems = checkContract(RUN_ARG_FIELDS, engineOptionNames());
+  const problems = [
+    ...checkContract(RUN_ARG_FIELDS, engineOptionNames(ENGINE_OPTION_SOURCES)),
+    ...checkContract(PILOT_ARG_FIELDS, engineOptionNames(PILOT_ENGINE_OPTION_SOURCES)),
+  ];
   if (problems.length > 0) {
     for (const problem of problems) console.error(`run-args: ${problem}`);
     console.error("run-args: 契约自检失败——先修 src/support/run-args-contract.ts");
     return 1;
   }
-  const source = renderGenerated(RUN_ARG_FIELDS);
+  const source = `${renderGenerated(RUN_ARG_FIELDS)}\n${renderPilotSection(PILOT_ARG_FIELDS)}`;
   const current = fs.existsSync(GENERATED_PATH) ? fs.readFileSync(GENERATED_PATH, "utf8") : "";
   if (write) {
     fs.writeFileSync(GENERATED_PATH, source);

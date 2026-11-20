@@ -20,7 +20,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { SessionManager, handleSessionTool } from '../src/session.ts'
-import type { BridgeOptions } from '../src/bridge.ts'
+import { pilotArgs, type BridgeOptions } from '../src/bridge.ts'
+import { runPilotBridge } from '../src/pilot.ts'
 import type { SessionToolArgs } from '../src/session.ts'
 
 const REPO = path.resolve(import.meta.dirname, '..', '..', '..')
@@ -230,4 +231,82 @@ test('open/goto：基础往返 + engineFailure 投影', async () => {
     assert.equal(fail['session_alive'], true)
     assert.ok(typeof fail.reason === 'string' && fail.reason.length > 0)
   })
+})
+
+/* ---- 5. `amberflow_pilot`（PILOTED_WALKTHROUGH §PW3.2）：argv 组装 + JSONL 投影 + 剧本物化 - */
+
+/** 桥选项的测试构造（与 session harness 同形；pilot 一次性调用不经 SessionManager）。 */
+function pilotBridgeOptions(): BridgeOptions {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'af-bridge-pilot-'))
+  return {
+    repoPath: dir, nodeBin: process.execPath, timeoutMs: 60_000, allowDangerous: false,
+    toolPrefix: 'amberflow', envMode: 'inherit', forwardEnv: [],
+    decisionModel: { endpoint: '', apiKey: '', model: '' },
+    headful: false, appsEnv: {},
+  } as unknown as BridgeOptions
+}
+
+test('pilot: held 一跑的摘要面（终态字段 + 事件白名单投影）', async () => {
+  const summary = await runPilotBridge(pilotBridgeOptions(), {
+    url: 'https://fixture.local/page', goal: 'open the first detail', finalSignal: '{"url_contains":"detail"}',
+  }, {
+    buildArgv: (options, args) => {
+      // 契约驱动面：先让真实 pilotArgs 组装（断言必填/桥自管旗标都在），再换成 fake 引擎。
+      const real = pilotArgs(options, args)
+      assert.ok(real.includes('--url') && real.includes('--goal') && real.includes('--out'))
+      assert.ok(real.includes('--final-signal'), 'final-signal must be argv-emitted from the contract')
+      assert.ok(!real.includes('--input'), 'no playbook = no --input flag')
+      return [process.execPath, FAKE, '--pilot-scenario', 'hold']
+    },
+  })
+  assert.equal(summary.status, 'held')
+  assert.equal(summary.ok, true)
+  assert.equal(summary.stop_code, 'final_signal_held')
+  assert.equal(summary.steps, 1)
+  assert.equal(summary.model_asks, 1)
+  assert.deepEqual(summary.cache, { hits: 0, misses: 2 })
+  assert.equal(summary.events.length, 2)
+  assert.ok(summary.events.some((e) => e['started'] === true))
+  const drive = summary.events.find((e) => e['drive'] === true) as Record<string, unknown>
+  assert.equal(drive['target'], 'Learn more')
+  assert.equal(drive['via'], 'ask')
+  assert.equal(summary.exit_code, 0)
+  assert.equal(summary.timed_out, false)
+})
+
+test('pilot: 停因交接投影 + commands 剧本物化走 --input', async () => {
+  const summary = await runPilotBridge(pilotBridgeOptions(), {
+    url: 'https://fixture.local/page', goal: 'open the first detail',
+    commands: '{"cmd":"resume","hint":"Learn more"}',
+  }, {
+    buildArgv: (options, args) => {
+      const real = pilotArgs(options, args)
+      assert.ok(real.includes('--input'), 'playbook must reach the engine as --input')
+      // 把物化剧本的路径透传给 fake 引擎（真 argv 已断言，fake 消费同一份文件）。
+      const inputPath = real[real.indexOf('--input') + 1]
+      return [process.execPath, FAKE, '--pilot-scenario', 'stop', '--input', inputPath]
+    },
+  })
+  assert.equal(summary.status, 'stopped')
+  assert.equal(summary.stop_code, 'low_confidence')
+  assert.equal(summary.handoffs, 1)
+  assert.equal(summary.fallbacks, 1)
+  const hand = (summary.handoffs_detail ?? [])[0] as Record<string, unknown>
+  assert.equal(hand['stop_code'], 'low_confidence')
+  assert.ok(String(hand['summary']).startsWith('low_confidence @ step 1'))
+  assert.equal((hand['unblock'] as string[]).length, 2)
+  assert.equal((hand['evidence'] as Record<string, unknown>)['dom'], '/tmp/fake-pilot/handoff-1.dom.html')
+  // 剧本物化核对：out_dir 里的 commands.jsonl 逐行原样。
+  const script = fs.readFileSync(path.join(summary.out_dir, 'commands.jsonl'), 'utf8').trim()
+  assert.equal(script, '{"cmd":"resume","hint":"Learn more"}')
+  // 引擎侧对 --input 的消费事实经 log 行回显（notes 白名单投影）。
+  assert.ok((summary.notes ?? []).some((n) => n.includes('input={"cmd":"resume","hint":"Learn more"}')))
+  assert.equal(summary.exit_code, 3)
+})
+
+test('pilot: timeout_sec 防呆（非正整数 = 用法错误，不 spawn）', async () => {
+  await assert.rejects(
+    () => runPilotBridge(pilotBridgeOptions(), { url: 'https://fixture.local/', goal: 'g', timeoutSec: 0 }),
+    /timeout_sec/,
+  )
 })

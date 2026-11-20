@@ -16,7 +16,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
-import { RUN_ARGV_FIELDS, type BridgeRunArgs } from './run-contract.generated.ts'
+import { PILOT_ARGV_FIELDS, RUN_ARGV_FIELDS, type BridgePilotArgs, type BridgeRunArgs } from './run-contract.generated.ts'
 
 /**
  * Fill one contract message template (`{name}` placeholders). The texts themselves live in the
@@ -476,6 +476,45 @@ export function learnArgs(
   if (args.appsDir) argv.push('--apps-dir', args.appsDir)
   if (args.headful) argv.push('--headful')
   argv.push('--out', args.outDir)
+  return argv
+}
+
+/**
+ * The argv for one `amber pilot` invocation: the model-driven walkthrough door (one-shot shape —
+ * the driving loop and the fallback playbook live in the engine CLI, never here). The bridge owns
+ * `--out` (a temp dir) and the optional `--input` script file; every model-facing flag comes from
+ * the shared pilot contract (`PILOT_ARGV_FIELDS`), so a field added to the contract needs no edit
+ * here. No `provider` kind: the pilot face takes its decision source from deployment config.
+ * @param options - resolved bridge options.
+ * @param args - the model-facing call arguments plus the bridge-owned `outDir`/`inputScript`.
+ * @returns argv including the node binary as element 0.
+ */
+export function pilotArgs(
+  options: BridgeOptions,
+  args: BridgePilotArgs & { outDir: string; inputScript?: string | null },
+): string[] {
+  const argv = [options.nodeBin, ...(options.tsxCli !== undefined ? [options.tsxCli] : []), '--experimental-strip-types', path.join(options.repoPath, 'src', 'cli', 'main.ts'), 'pilot']
+  argv.push('--out', args.outDir)
+  const values = args as unknown as Readonly<Record<string, unknown>>
+  for (const field of PILOT_ARGV_FIELDS) {
+    const raw = values[field.key]
+    switch (field.kind) {
+      case 'flag':
+        if (raw) argv.push(field.flag)
+        break
+      case 'value':
+        if (raw !== undefined && (field.when === 'defined' || raw)) argv.push(field.flag, String(raw))
+        break
+      case 'repeated':
+        for (const [slotKey, slotValue] of Object.entries((raw ?? {}) as Record<string, string>)) {
+          argv.push(field.flag, `${slotKey}=${slotValue}`)
+        }
+        break
+    }
+  }
+  if (args.inputScript !== undefined && args.inputScript !== null && args.inputScript !== '') {
+    argv.push('--input', args.inputScript)
+  }
   return argv
 }
 

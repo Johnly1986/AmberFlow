@@ -379,3 +379,23 @@ lowercase（`i` 旗标），`parseHint` 的 `frameChain` 归一为小写规范 o
 > **来源**：候选池批 2 review（lead 复核发现 wide_scan 桥面不可达，2026-11-19）。
 >
 > **收口（`d74bd47`）**：harness = `integrations/dsh-bridge/test/`（`node --test` + fake-engine JSONL 缝经 `spawnArgv` 注入，纯进程内、零浏览器、离线）；断言五组——wide_scan（hint 行优先/≤40 行/clip/pool_size 如实/缺键形状不变）、ambiguity 失败面 + 成功面、snapshot `window` 审计块（windowAudit/dedup_dropped 透传 + 缺键形状不变）、open/goto 往返 + engineFailure 投影。门禁接入选**主仓 check 新步**（`bridge:test`，14→15 步）——依据：断言是确定性进程内事实（fake-engine、零浏览器、<30s），白名单投影丢字段正是 PR 门禁该拦的回归类；桥目录无 package.json，为测试单建会割裂门禁面。断言面配套：引擎 doSnapshot additive 带 `window`（windowAudit 有界证据）+ 桥 `windowAuditEvidence` 有界透传（overlay 断言面不在桥 session op 闭集内，如实缺位——windowAudit/dedup_dropped 经 snapshot 面覆盖）。
+
+## 16. pilot 自主驾驶的规则误配与访问循环守卫（消融实测发现）
+
+**状态**：proposal（消融实测已复现）｜ **优先级建议**：P1（价值门相关——循环无声烧预算）
+
+> **现状锚点**：`src/app/pilot-runtime.ts` driveOnce 规则档 + anti-repeat（inertRun）。消融实测（books.toscrape，见 PILOTED_WALKTHROUGH_PLAN §7）：goal 词 "book" 被 affordanceRule 命中侧栏类目 "Books"，与模型互乒乓——URL 每步都变 ⇒ `ok+changed` 动作永不进禁选、inert 判定捕获不到，6 步预算无声烧尽；budget_exceeded 交接的 why_stuck 只见终点、不见循环成因。
+>
+> **目标**：①驾驶循环加访问环守卫（URL 去重计数：同一 URL 第 2 次到达即把引回该 URL 的动作按 inert 处理并禁选，或引入循环停因如实交代）；②评估自主驾驶（无声明 hint）时规则档对 chrome/侧栏词面的免疫或降档。验收 = 消融同任务复测不再乒乓烧预算，停因可读。
+>
+> **来源**：2026-11-20 pilot 消融双臂实测（PILOTED_WALKTHROUGH_PLAN §7）：纯 model 4 配置 0/4 到达，其中 2 个配置由该循环形态烧尽预算。
+
+## 17. pilot budget_exceeded 后兜底死局：redirect 的预算语义待拍板
+
+**状态**：proposal（消融实测已复现）｜ **优先级建议**：P2
+
+> **现状锚点**：`src/app/pilot-runtime.ts` drive 的预算门先于 resume/redirect 生效。混合臂实测：budget_exceeded 交接后 Agent 发 `resume`（hint 到位）被消费且回执 ok，但预算已花光，下一轮 drive 立即再次 budget_exceeded——兜底指令被「成功消费」却无效，纯烧一条指令；unblock 提示如实指向「新起 pilot / 增大 --max-steps」。
+>
+> **目标**：产品拍板二选一——①redirect 显式带预算重开档（语义：换目标=新驾驶，与「步史清段重新累计」一致）；②保持死局但 resume/redirect 在 budget_exceeded 交接上直接回 config_error（不再「成功消费」无效指令）。验收 = 消融剧本复测无无效消费。
+>
+> **来源**：2026-11-20 pilot 消融混合臂实测（PILOTED_WALKTHROUGH_PLAN §7）。

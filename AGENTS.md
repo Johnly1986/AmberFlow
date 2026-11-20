@@ -30,6 +30,7 @@ npm run doctor                         # 环境 / 配置 / 决策源体检
 npm run check                          # precheck + 契约生成物一致性 + typecheck + 配置/schema 一致性 + 提示词/站点词/泄露/示例/行锚/截断记账 + maintain/split + test:validate（PR 门禁）
 npm run verify:offline                 # 非门禁等价验证（fixtures 抽取面；需 chromium，不进 check）
 npm run verify:runtime:offline         # 非门禁运行期等价 lane（fixtures + BrowserMiddleware.run；需 chromium）
+npm run verify:pilot                  # 非门禁：PILOTED_WALKTHROUGH §3.2 走查验收矩阵（停因/兜底/危险拒绝/降级；需 chromium）
 npm run test -- --tier smoke         # 真实站点快速可达性
 npm run test -- --tier core          # 短流程
 npm run test -- --tier deep          # 长流程

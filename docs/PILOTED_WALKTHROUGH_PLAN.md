@@ -1,6 +1,8 @@
 # 方案提案：模型驾驶走查（决策模型主控 · Agent 兜底）
 
-> **状态**：implemented（PW1+PW2+PW3 已落地并通过端到端冒烟；见 §6 落地索引）
+> **状态**：partial（PW1+PW2 主体落地——2026-11-20 修正批收口 finish 信号验证、低置信
+> reobserve、四件套证据、redirect 清段、终态可读性与 CLI 边界；PW3 仅 `pilot export` 落地，
+> 桥面工具 / `--driver` 消融 / §3.2-§3.3 验收矩阵属后续批次。见 §7 落地索引与 CHANGELOG）
 > **日期**：2026-11-19 ｜ **来源**：项目方提出——走查阶段由决策模型控制接管走查流程，Agent 做兜底。
 > 阅读前提：`docs/APP_SCRIPT_AUTHORING.md` §0.5（走查先行与三工具）、`docs/INTERACTIVE_SESSION.md`
 > （session 面与「零模型」纪律）、`docs/RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md`（接管先例与四件套）、
@@ -207,5 +209,72 @@ PW1+PW2+PW3 已落地（`amber pilot` / `amber pilot export` 可用），文件�
 
 端到端冒烟（books.toscrape.com 实测）：起飞 → 模型低置信如实交接（截图 + observe 落盘）→
 Agent `resume` 带 hint 点名 → 规则档确定性点击（零模型）→ `final_signal_held` → exit 0；
-`pilot export` 骨架生成成功。尚未落地：桥面 `amberflow_pilot` 工具、`--driver agent|model`
-消融双臂、走查验收的 fixtures 全套（§3.2/§3.3 的完整矩阵）——按原计划属后续批次。
+`pilot export` 骨架生成成功。
+
+**2026-11-20 修正批**（实施审查 → 修复，实施记录见 CHANGELOG 同日条目）：
+
+- `finish` 指令改必须 `checkSignal` 验证（`signal_not_held` 单行拒绝）——收口红线
+  「完成只认信号」（审查实测：无任何信号声明也可 exit 0 / ok:true 的旁路已堵）；
+- 低置信先付一次宽扫重问（WIDER_ELEMENTS/WIDE_QUOTAS + esig 平移禁选，与 run 的 4d
+  阶段同序）；`--conf-floor` 接 provider 自报链（CLI > `ProviderInfo.floor` > 0.25）；
+- 交接四件套补齐：DOM 快照（>2MB 截断）与独立池快照文件（此前 pool_snapshot 复用
+  observe 文件、无 DOM）；
+- `redirect` 步史与禁选清段重新累计（预算不清零）；`resume` 支持 `value:{k:v}` 多槽与
+  `skip`（禁选最近一票）；兜底指令记录的 `value` 只留省略标记（值不落明文轨迹）；
+- `pilot_end` 终态只发一条且 `stop_code` 不再丢失；摘要补 model_asks / rule_picks /
+  model_picks / handoffs / fallbacks（laya 档含 cache 命中）；坏 JSON / 被拒指令单行
+  失败继续等待（session 同纪律），不再杀会话；
+- CLI：`--max-steps 1` 边界与 `pilot export --json` 修复；主命令位吞掉全局 `--json`。
+
+**2026-11-20 消融实测（PW3 价值验证门，books.toscrape 真站）**：同一任务（打开第一本书的
+详情页；信号 `css_exists:".product_main"`；预算 6-8），`--driver agent|model` 双臂 +
+「模型主控 + Agent 兜底」混合臂：
+
+| 臂 | 决策源 / goal | 到达 | 步数 | 模型咨询 | Agent 指令 | 停因 |
+|---|---|---|---|---|---|---|
+| model 纯自主 ×4 | laya english(zh) ／ laya multilingual(zh) ／ laya multilingual(en) ／ 在线 decision-model-preview(en) | **0/4** | 1-6 | 0-3（+1 failed） | 0 | budget ／ target_ambiguous ／ low_confidence（在线源失败如实降级） |
+| hybrid 模型主控+兜底 | laya multilingual(zh) | ✓ | 4 | 3 | 1 | final_signal_held（exit 0） |
+| agent 纯人工驾驶（`--driver agent`） | 无模型（en） | ✓ | 2 | 0 | 1 | final_signal_held（exit 0） |
+
+墙钟：model 34.9-75.8s（含 ONNX 冷加载 ~32s）；hybrid 40.6s；agent 端到端 28.8s
+（含外层 Agent 工具调用间隔；引擎内动作仅 0.77s）。
+
+**结论（实测为准，不预设倍数）**：本任务上价值门**未过**——模型腿没有把多轮观察压缩成
+净收益：纯 model 4 种配置 0 到达（票面偏 chrome/导航元素：next／logo／类目／Add to basket）；
+hybrid 到达但比纯 agent 更贵（3 次咨询 + 3 个浪费步 + 1 条兜底 vs 1 条指令到达）。方案的成本
+主张在本地 laya 档上不成立，需更强的决策源或目标更明确的任务复测。实测同时暴露三面可行动
+能力墙：①规则档对自主 goal 的词面误配（"book"→类目 "Books"）与 URL 变化型乒乓——URL 每步
+都变 ⇒ `ok+changed` 永不进禁选、anti-repeat 捕获不到，预算无声烧尽（登记 BACKLOG §16）；
+②budget_exceeded 后 resume 被消费却无效、立即再次 budget（登记 BACKLOG §17，redirect 的预算
+语义待产品拍板）；③在线决策源失败如实降级 + `failed_asks` 记账（修正批观测面立功）。修正批
+新增的 `via`／四件套／终态 stop_code／摘要指标让失败臂全程结构化可审计。
+
+**2026-11-20 桥面 `amberflow_pilot` v1 落地（PW3 第②项）**：one-shot 驾驶调用——拼 CLI
+（`pilotArgs`；schema 走 run-args-contract 生成链的 `PILOT_ARG_FIELDS` 单源，run 段生成物
+字节不变）、收引擎 JSONL 协议流、投影有界摘要（终态字段 + 事件白名单 ≤60 + 交接细节 ≤4；
+`commands` 兜底剧本物化 ≤200 行走 `--input`；`timeout_sec` 桥侧墙钟，超时写
+`pilot-killed.json`）。桥层回归 `npm run bridge:test` 10/10（fake-engine 场景 + 真实
+`pilotArgs` 断言 + 剧本透传核对），真引擎端到端冒烟 exit 0。交互式常驻驾驶（跨调用保持
+现场、逐交接喂指令）仍属后续批次。
+
+**2026-11-20 部署面补齐 + 真实线上端到端**：桥包 `tsc -b` 构建通过（`lib` 产物含
+`pilot.js` 与 `amberflow_pilot` 注册——部署按 lib 加载，此前 lib 缺 pilot 即工具不可见
+的真因；构建另修正 4 类 strip-types 下不可见的类型问题）。用构建产物 `lib/types/pilot.js`
+对 books.toscrape.com 跑通真实线上走查：模型 3 步 → `target_ambiguous` 交接 → Agent 1 条
+`resume` 点名 → 到达详情页，`status=held` / `exit 0`（33.1 s 含 ONNX 冷加载），四件套
+落盘，`pilot export` 骨架过 `apps check`。
+
+**2026-11-20 §3.2 验收矩阵落地（PW3 收尾）**：`npm run verify:pilot`（`tools/verify-pilot.ts`
++ `fixtures/engine/pilot/`；本地静态服务 + 决策源不可达档，零模型加载、规则面确定性、
+不依赖本机 laya 工件）7 场景全绿——①rules 零模型到达；②每类停因 + resume 成功
+（needs_value 值+点名 / stuck_inert 换目标 / target_ambiguous 收窄 / budget）；③危险
+default-deny 且兜底闭集无 confirm 可越过；④终态摘要保停因；⑤决策源不可达降级两步
+如实（low_confidence → no_model_runtime）。矩阵抓出两枚真缺陷并同步修复：**驾驶面危险
+闸门此前不生效**（run 的风险闸门在动作相位，actOnce 旁路；default-deny face 不装
+confirmFn）——改为 `DESTRUCTIVE_PATTERNS` 关键词闭集前置判定（单源 rules.ts），拒绝 =
+`risk_declined` 结构化失败 + 禁选；**resume-hint 撞歧义静默回落**——改为裁决视图
+（hintMatch）为 null 且候选 >1 时 `target_ambiguous` 只停不选（与 run/session 同一谓词）。
+
+尚未落地（后续批次）：交互式常驻桥面驾驶（跨调用同现场、逐交接喂指令）；BACKLOG §16/§17
+两枚能力墙（访问循环守卫；budget 后兜底死局的 redirect 预算语义拍板）。`--driver` 双臂、
+消融实测、桥面 one-shot 与 §3.2 验收矩阵均已落地（见上）。

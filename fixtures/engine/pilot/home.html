@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>pilot acceptance: home</title>
+</head>
+<body>
+  <!-- ② target_ambiguous：同 label 双链接放两个区域（避开池「一区域一候选」去重），actOnce 词面解析即歧义 -->
+  <header><a class="same" href="first.html">Same label</a></header>
+  <main>
+    <!-- ① rules 命中即到达：goal 词面与 label 全等 -->
+    <p><a id="detail-link" href="detail.html">Open the detail page</a></p>
+    <!-- ② stuck_inert：点了没变化的死目标（button 无处理器：不导航、零变化） -->
+    <p><button id="dead" type="button">Dead end</button></p>
+    <!-- ② needs_value：fill 缺值（无 slot 预声明时如实停） -->
+    <p><input id="q" type="text" aria-label="Search term"></p>
+    <!-- ③ 危险词面：default-deny 应拒绝且 Agent 无 confirm 指令可越过 -->
+    <p><a id="del" href="deleted.html">删除全部数据</a></p>
+  </main>
+  <footer><a class="same" href="second.html">Same label</a></footer>
+</body>
+</html>

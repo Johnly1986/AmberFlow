@@ -3,8 +3,10 @@
  *
  * 编排模板照搬 session-runtime-entry（大文件拆分后只持有"进程/stdio/空闲超时/退出码"层）：
  *   - 驾驶循环每停一次（非 browser_dead）就把 stdin 交给兜底指令 readline；
- *     resume/redirect 后重新进驾驶轮（预算不清零），finish/abort 结束会话。
+ *     resume/redirect 后重新进驾驶轮（预算不清零），finish（信号验证成立）/abort 结束会话。
  *   - `--input` 文件 = 非交互剧本（Agent 兜底自动化）；EOF 且无未决交接 = 干净收尾。
+ *   - 终态行 `pilot_end` 只发一条：idle/中断/异常的 {code, reason} 以 note 并进
+ *     rt.finish 的汇总，不各自抢先再发一条。
  *
  * 退出码：0 = final_signal_held；1 = browser_dead / 输入流错误；3 = 被停因挡住（含 abort）。
  */
@@ -77,7 +79,10 @@ export async function runPilot(opts: PilotOptions, sink: PilotSink): Promise<num
   };
   let stdinIter: readline.Interface | null = null;
 
-  /** 一段兜底等待：读指令直到 resume/redirect（继续）或 finish/abort/EOF（结束）。 */
+  /**
+   * 一段兜底等待：读指令直到 resume/redirect（回驾驶）或 finish/abort/EOF（收尾）。
+   * 被拒指令是单行失败（runtime 回 "stay"）：继续等下一条，不杀会话（session 同纪律）。
+   */
   const awaitCommands = async (): Promise<"continue" | "closed"> => {
     armIdle();
     while (true) {
@@ -89,14 +94,19 @@ export async function runPilot(opts: PilotOptions, sink: PilotSink): Promise<num
       const raw = line.charCodeAt(0) === 0xfeff ? line.slice(1) : line;
       if (raw.trim() === "") { armIdle(); continue; }
       if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
-      const { driveAgain } = await rt.handleLine(raw);
-      if (!driveAgain) return "closed";
-      // resume/redirect：指令流保持打开（文件模式跨轮续读；stdin 模式续读同一接口），
-      // 直接回驾驶轮。
-      return "continue";
+      const outcome = await rt.handleLine(raw);
+      if (outcome === "close") return "closed";
+      if (outcome === "drive") {
+        // resume/redirect：指令流保持打开（文件模式跨轮续读；stdin 模式续读同一接口），
+        // 直接回驾驶轮。
+        return "continue";
+      }
+      armIdle();   // stay：单行失败已回执，继续等下一条
     }
   };
 
+  /** 终态补充面：idle/中断/异常的 {code, reason} 并进 finish 的唯一一条 pilot_end。 */
+  let endNote: { code: string; reason: string } | null = null;
   try {
     await rt.start();
     // 驾驶轮：停因 → 兜底等待 → resume/redirect 再进下一轮；browser_dead 直接收尾。
@@ -107,24 +117,20 @@ export async function runPilot(opts: PilotOptions, sink: PilotSink): Promise<num
       const next = await awaitCommands();
       if (next === "closed") break;
       // 交接已被 resume/redirect 解除：继续驾驶（预算不清零）。
-    }    if (idleFired) {
-      sink.respond({
-        type: "pilot_end", unsolicited: true, ok: false, code: "idle_timeout",
-        reason: `no fallback command for ${idleMs}ms (--idle-timeout-ms); closing`,
-      });
+    }
+    if (idleFired) {
+      endNote = { code: "idle_timeout", reason: `no fallback command for ${idleMs}ms (--idle-timeout-ms); closing` };
     } else if (interrupted) {
-      sink.respond({ type: "pilot_end", unsolicited: true, ok: false, code: "interrupted", reason: "signal received" });
+      endNote = { code: "interrupted", reason: "signal received" };
     }
   } catch (e) {
-    sink.respond({
-      type: "pilot_end", unsolicited: true, ok: false, code: "browser_dead", reason: errMsg(e),
-    });
+    endNote = { code: "browser_dead", reason: errMsg(e) };
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     process.removeListener("SIGINT", onInterrupt);
     process.removeListener("SIGTERM", onInterrupt);
     closeRl();
-    await rt.finish(null);
+    await rt.finish(null, endNote);
     await rt.closeBrowser();
   }
   return interrupted || idleFired ? 3 : rt.exitCode;

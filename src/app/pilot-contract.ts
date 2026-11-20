@@ -28,9 +28,21 @@ export const PILOT_STOP_CODES = [
 ] as const;
 export type PilotStopCode = (typeof PILOT_STOP_CODES)[number];
 
-/** Agent 兜底指令闭集（stdin JSONL；观察类指令复用 session 请求面）。 */
+/**
+ * Agent 兜底指令闭集（stdin JSONL；观察类指令复用 session 请求面）。形状：
+ *   resume { hint?, value?（对象 = 多槽 k:v；字符串 = 单值，键取 target）, skip? } ｜
+ *   redirect { url? | goal? }（步史/禁选清段重新累计，预算不清零）｜
+ *   finish { signal }（或复用预声明的 --final-signal；checkSignal 验证成立才记 held）｜
+ *   abort {}。
+ */
 export const PILOT_AGENT_COMMANDS = ["resume", "redirect", "finish", "abort"] as const;
 export type PilotAgentCommand = (typeof PILOT_AGENT_COMMANDS)[number];
+
+/**
+ * agent 驾驶模式的步间等待标记（不是停因）：drive() 返回它 = 本步无 hint 待选，
+ * 已投影 `step_request` 候选、在等 Agent 的 `resume{hint}` 点名（零模型票）。
+ */
+export const PILOT_AWAIT_PICK = "await_pick";
 
 /**
  * 停因交接块（PW1 冻结面）：pilot 停止时向 Agent 投影的结构化现场。
@@ -47,9 +59,10 @@ export interface PilotHandoff {
   why_stuck: { summary: string; evidence: Record<string, unknown> };
   /** 「怎样解锁」的建议闭集（≤3 条，按停因确定性生成，不是模型建议）。 */
   what_would_unblock: string[];
-  /** 现场证据引用（截图/池快照/observe 明细的落盘路径；PW1 四件套）。 */
+  /** 现场证据引用（四件套落盘路径：截图 / DOM / 池快照 / observe 明细；各自独立失败独立缺字段）。 */
   evidence_refs: {
     screenshot?: string;
+    dom?: string;
     pool_snapshot?: string;
     observe?: string;
   };
@@ -66,12 +79,14 @@ export interface PilotStepRecord {
   goal: string;
   /** 本步选择来源：rule = 规则档命中（零模型）；model = 决策 pick。 */
   picked_by: "rule" | "model";
-  /** 模型票（picked_by=model 才有；闭集 ref + conf + shape）。 */
+  /** 模型票（picked_by=model 才有；闭集 ref + conf + shape + 轮次来源）。 */
   pick?: {
     ref: string;
     conf: number;
     shape: string;
     pool_size: number;
+    /** 票来自首轮问句还是低置信后的宽扫重问（run 4d 的 reobserve 同款）。 */
+    via?: "ask" | "reobserve";
   };
   /** 执行事实（actOnce 同口径）。 */
   action: {
@@ -133,6 +148,8 @@ export interface PilotOptions {
   outDir?: string | null;
   /** 驾驶轨迹 JSONL 落点（给了才写；缺省 = outDir/pilot-trace.jsonl）。 */
   record?: string | null;
+  /** 驾驶者（缺省 model = 决策模型投票；agent = 每步等 Agent `resume{hint}` 点名，零模型票——消融对照臂）。 */
+  driver?: "model" | "agent";
   /** 无人兜底时的静默上限（缺省 SESSION_IDLE_TIMEOUT_MS；0 = 不限）。 */
   idleTimeoutMs?: number;
   headful?: boolean;
@@ -145,7 +162,7 @@ export const PILOT_DEFAULT_MAX_STEPS = 12;
 export const PILOT_DEFAULT_IDLE_TIMEOUT_MS = SESSION_IDLE_TIMEOUT_MS;
 /** 连续 inert 判定阈值（与执行器 maxEffectiveRepeats 缺省同源的驾驶面口径）。 */
 export const PILOT_INERT_LIMIT = 3;
-/** 步史摘要上限（驾驶问句里带的历史步数；有界，防题面膨胀）。 */
+/** 已走步数摘要上限（驾驶问句里带的已走步数；有界，防题面膨胀）。 */
 export const PILOT_HISTORY_STEPS = 6;
 
 /** 停因 → 解锁建议闭集（确定性生成；≤3 条，按停因查表，不是模型建议）。 */
@@ -178,8 +195,8 @@ export function unblockHintsFor(stop: PilotStopCode): string[] {
       ];
     case "budget_exceeded":
       return [
-        "redirect 重新驾驶（预算清零）",
-        "增大 --max-steps 重试",
+        "增大 --max-steps 重试（redirect 不清预算；预算重置请起新 pilot）",
+        "redirect 换目标或入口重驾驶（步史清段重新累计）",
       ];
     case "browser_dead":
       return ["redirect 重开入口页（浏览器已死，现场不可恢复）"];

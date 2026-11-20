@@ -9,13 +9,18 @@
  * 同源纪律（红线①：模型只投票不生成）：
  *   - 驾驶问句 = `mw.pickProposal`（池内闭集 ref 投票；绝不生成自由文本动作）；
  *   - 规则档先行：`affordanceRule`/`navRule` 命中即确定性执行（零模型），与 run 同一序；
+ *   - 低置信回流与 run 同序（红线②「不提前弹人」）：gated 意见先付一次宽扫重问
+ *     （WIDER_ELEMENTS/WIDE_QUOTAS，宽池真变大才重问），仍不过闸才 low_confidence 交接；
+ *     弃权（choiceRef=null）与 run 的 abstain 判定同源，直接停、不走宽扫；
  *   - 执行 = `mw.actOnce`（与 session.act / run 命令步同一条解析与执行链）；
- *   - 完成只认信号：`checkSignal`（与 run 的 done 面、session 的 signal 面同一实现）；
+ *   - 完成只认信号：`checkSignal`（--final-signal 每轮判 + finish 指令声明后验证，
+ *     成立才记 final_signal_held）；产物恒带 `pilot:true`——走查证据，不冒充 run 结论；
  *   - 值不猜：fill/select 缺值 = `needs_value` 停 → 只接受 Agent resume 显式给值。
  *
  * 兜底协议（红线②：触发确定性）：停因闭集见 pilot-contract.ts；停止时投影
  * `PilotHandoff`（intervention 合同形状），stdin JSONL 只认 resume/redirect/finish/abort。
- * 产物恒带 `pilot:true`——它是走查证据，不冒充 run 结论。
+ * 单行失败纪律与 session 同源：坏 JSON/未知指令/被拒指令都只回执一条错误、继续等
+ * 下一条，不杀会话；只有 finish(验证成立)/abort/EOF 关闭会话。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -34,12 +39,17 @@ import {
 import { urlOf } from "../engine/extraction.ts";
 import type { Elem, ElemPool } from "../engine/elem-model.ts";
 import { checkSignal, type SignalSpec } from "../engine/signals.ts";
-import { affordanceRule, hintMatch, navRule } from "../engine/rules.ts";
+import { affordanceRule, DESTRUCTIVE_PATTERNS, hintCandidates, hintMatch, navRule } from "../engine/rules.ts";
 import { DEFAULT_SETTLE, settle } from "../engine/settle.ts";
-import { applySpecToRuntime, resolveProviderSpec } from "../model/decision-provider.ts";
-import { bounded, errMsg, isDeadPageError, isObj, nonEmpty } from "./session-runtime-contract.ts";
+import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
 import {
-  PILOT_AGENT_COMMANDS, PILOT_DEFAULT_MAX_STEPS, PILOT_HISTORY_STEPS,
+  activeProviderInfo, applySpecToRuntime, resolveProviderSpec, type AppliedSpec,
+} from "../model/decision-provider.ts";
+import { errMsg, isDeadPageError, isObj, nonEmpty } from "./session-runtime-contract.ts";
+import { modelVote } from "./pilot-vote.ts";
+import { agentStepCandidates, handoffEvidence } from "./pilot-evidence.ts";
+import {
+  PILOT_AGENT_COMMANDS, PILOT_AWAIT_PICK, PILOT_DEFAULT_MAX_STEPS, PILOT_HISTORY_STEPS,
   PILOT_INERT_LIMIT, pilotExitCode, unblockHintsFor,
   type PilotAgentCommand, type PilotHandoff, type PilotOptions, type PilotRecordLine, type PilotStopCode,
 } from "./pilot-contract.ts";
@@ -61,13 +71,6 @@ interface DrivingStep {
 const MAX_LABEL = 40;
 const buf = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 
-/** 决策票的置信判定（pickProposal 的 shape 分档闸门；与 run 的 low_confidence 同一认识论）。 */
-function gateOf(shape: { kind: "full" | "shortlist" | "none" }): "full" | "shortlist" | null {
-  if (shape.kind === "full") return "full";
-  if (shape.kind === "shortlist") return "shortlist";
-  return null;
-}
-
 export class PilotRuntime {
   readonly runId: string;
   readonly outDir: string;
@@ -75,7 +78,8 @@ export class PilotRuntime {
   private readonly sink: PilotSink;
   private readonly hosts: string[] | null;
   private readonly maxSteps: number;
-  private readonly confFloor: number;
+  /** floor 优先级与 run 同链（app-runner-policy conf_floor）：CLI > provider 自报 > 缺省。 */
+  private confFloor: number;
   private readonly slots: Record<string, string>;
 
   private session: BrowserSession | null = null;
@@ -86,9 +90,26 @@ export class PilotRuntime {
   private recordPath: string | null = null;
   private resumeHint: string | null = null;
   private lastError: string | null = null;
+  /** 驾驶者：model = 决策模型投票（缺省）；agent = 每步等 Agent resume{hint} 点名（零模型票）。 */
+  private readonly driverMode: "model" | "agent";
+  /** 本地 laya checkpoint 名（配置 > 缺省 english；在线 provider 档不消费它）。 */
+  private readonly checkpointId: string;
+  /** 决策源装配结果（结束摘要的 asks/cache 取数口；装配失败 = null，摘要走本面计数兜底）。 */
+  private applied: AppliedSpec | null = null;
+  /** 最近一次驾驶轮用的池（交接时落池快照；改道/换页即失效置 null）。 */
+  private lastPool: ElemPool | null = null;
+  /** 最近一次驾驶选中的 ref（resume.skip 禁选的对象）。 */
+  private lastPickedRef: string | null = null;
+  private aborted = false;
 
   private stepCount = 0;
   private inertRun = 0;
+  /** 本面口径的模型咨询数兜底（applied.asks 在场时以 provider 计数为准）。 */
+  private modelAsks = 0;
+  private rulePicks = 0;
+  private modelPicks = 0;
+  private handoffCount = 0;
+  private fallbackCount = 0;
   private readonly history: DrivingStep[] = [];
   private readonly forbidden = new Set<string>();
   private handoffOpen: PilotHandoff | null = null;
@@ -110,6 +131,14 @@ export class PilotRuntime {
     this.confFloor = typeof opts.confFloor === "number" && Number.isFinite(opts.confFloor)
       ? Math.max(0, Math.min(1, opts.confFloor)) : 0.25;
     this.slots = { ...(opts.slots ?? {}) };
+    this.driverMode = opts.driver === "agent" ? "agent" : "model";
+    try {
+      this.checkpointId = resolveLocalCheckpoint(opts.env ?? process.env);
+    } catch {
+      // 非法 AMBERFLOW_DECISION_MODEL 由决策源装配面（resolveProviderSpec）如实报；
+      // 这里保底缺省档，mw 构造面不崩成未结构化错误。
+      this.checkpointId = "english";
+    }
     this.outDir = opts.outDir && opts.outDir.trim() !== ""
       ? path.resolve(opts.outDir)
       : path.join(amberflowHome(opts.env ?? process.env), "pilot", this.runId);
@@ -125,7 +154,7 @@ export class PilotRuntime {
     if (this.mwHolder === null) {
       const { defaults } = parseRunDefaults(this.opts.env ?? process.env);
       this.mwHolder = buildMiddleware({ face: "pilot", confirmPolicy: { kind: "default-deny" }, options: {
-        modelId: "english",
+        modelId: this.checkpointId,
         auditor: new MockAuditor(),
         hosts: this.hosts,
         maxSteps: this.maxSteps,
@@ -186,21 +215,15 @@ export class PilotRuntime {
     }
   }
 
+  /**
+   * 停驶现场四件套（截图/DOM/池快照/observe）：实现拆在 pilot-evidence.ts
+   * （每件独立失败、独立缺字段——一件失败不掩盖停因本身）。
+   */
   private async evidenceRefs(page: AnyPage): Promise<PilotHandoff["evidence_refs"]> {
-    const refs: PilotHandoff["evidence_refs"] = {};
-    try {
-      const shot = path.join(this.outDir, `handoff-${this.stepCount}.png`);
-      await bounded(() => page.screenshot?.({ path: shot }), 5000);
-      refs.screenshot = shot;
-    } catch { /* 截图失败不掩盖停因 */ }
-    try {
-      const obs = await this.ctx().observe({ max: 120 });
-      const p = path.join(this.outDir, `handoff-${this.stepCount}.observe.json`);
-      fs.writeFileSync(p, JSON.stringify(obs, null, 2), "utf8");
-      refs.observe = p;
-      refs.pool_snapshot = p;
-    } catch { /* observe 失败如实缺字段 */ }
-    return refs;
+    return await handoffEvidence({
+      page, outDir: this.outDir, stepCount: this.stepCount,
+      lastPool: this.lastPool, observe: (o) => this.ctx().observe(o),
+    });
   }
 
   /* ---------------------------------------------------------------- 驾驶循环 */
@@ -215,9 +238,10 @@ export class PilotRuntime {
 
   /**
    * 一步驾驶：规则档先行（零模型）→ 池内闭集投票（pickProposal）→ 闸门 → actOnce 执行。
-   * 返回 null = 正常继续；PilotStopCode = 停止（兜底协议接管）。
+   * 返回 null = 正常继续；PilotStopCode = 停止（兜底协议接管）；
+   * PILOT_AWAIT_PICK = agent 驾驶的步间等待（候选已投影，等 resume{hint} 点名）。
    */
-  private async driveOnce(): Promise<PilotStopCode | null> {
+  private async driveOnce(): Promise<PilotStopCode | typeof PILOT_AWAIT_PICK | null> {
     const mw = this.mw();
     const page = await this.page();
     const goal = this.drivingGoal();
@@ -225,10 +249,14 @@ export class PilotRuntime {
     // ① 抽池（settle 门 + 与 run 同一条抽取链）。
     const { elems } = await mw._extractPoolSettled(page, "bucketed");
     const poolSize = Object.keys(elems).length;
+    this.lastPool = elems;
 
-    // ①′ resume 带 hint 的确定性执行（Agent 兜底点名）：hint 在当前池唯一命中即执行，
+    // ①′ resume 带 hint 的确定性执行（Agent 兜底点名）：hint 唯一命中即执行，
     //    与 run 声明目标同一认识论——hint 是作者/兜底方的显式决定，不花模型票。
-    //    用后即清（一次性），未命中 = 回落规则档/模型路径并如实记录。
+    //    裁决视图 = hintMatch（firstIfSame：同签名重复组任选其一）；裁决为 null 且
+    //    候选证据 >1（hintCandidates，签名互异不合并）= target_ambiguous 只停不选
+    //    （与 run/session 同一份谓词），不静默回落；真正落空才回落规则档/模型路径。
+    //    用后即清（一次性）。
     const resumeHint = this.resumeHint;
     this.resumeHint = null;
     if (resumeHint !== null) {
@@ -236,34 +264,42 @@ export class PilotRuntime {
       if (hintRef !== null && elems[hintRef] !== undefined) {
         return await this.executePicked(page, elems, hintRef, "rule", null, poolSize, goal);
       }
+      const cands = hintCandidates(resumeHint, elems, {});
+      if (cands !== null && cands.refs.length > 1) {
+        return "target_ambiguous";
+      }
     }
 
     // ② 规则档先行：导航规则（nav 词面）→ affordance 规则（与 run 的 hybrid picking 同一序）。
-    const navRef = navRule(goal, elems);
-    const ruleRef = navRef !== null ? navRef : affordanceRule(goal, elems, null, {});
+    //    规则只吃发起方的原始 goal——步史摘要若进规则匹配面，已执行过的标签词面会被灌回
+    //    匹配目标里，一次误选可被规则反复复读（不该把「做过什么」当「要做什么」）。
+    const navRef = navRule(this.opts.goal, elems);
+    const ruleRef = navRef !== null ? navRef : affordanceRule(this.opts.goal, elems, null, {});
     if (ruleRef !== null && elems[ruleRef] !== undefined) {
       return await this.executePicked(page, elems, ruleRef, "rule", null, poolSize, goal);
     }
 
-    // ③ 模型投票（闭集 ref；模型不在位 = 如实停，绝不装会抛的 runtime）。
-    await mw.ready();
-    if (mw.rulesOnly) {
-      return "no_model_runtime";
+    // ③′ agent 驾驶（--driver agent，消融对照臂）：决策权交还 Agent——不发模型票，
+    //     无 hint 待选时以步间等待（await_pick）投影候选并等 resume{hint} 点名。
+    if (this.driverMode === "agent") {
+      return PILOT_AWAIT_PICK;
     }
-    const proposal = await mw.pickProposal(goal, page, elems, this.forbidden, null);
-    if (proposal.choiceRef === null) {
-      return "low_confidence";
-    }
-    const gate = gateOf(proposal.shape);
-    if (gate === "full" && proposal.entropyConf < this.confFloor) return "low_confidence";
-    if (gate === "shortlist" && proposal.shape.options > 1 && (proposal.pTop1 ?? 0) < this.confFloor) {
-      return "low_confidence";
-    }
+
+    // ③ 模型投票（闭集 ref；模型不在位 = 如实停，绝不装会抛的 runtime）。阶梯拆在
+    //    pilot-vote.ts：floor 闸门 + 低置信宽扫重问一次（run 4d 同序，不提前弹人）。
+    const vote = await modelVote({
+      mw, page, goal, elems, forbidden: this.forbidden,
+      confFloor: this.confFloor, hosts: this.hosts,
+    });
+    if (vote.kind === "no_model_runtime") return "no_model_runtime";
+    this.modelAsks += vote.asked;
+    if (vote.pool !== null) this.lastPool = vote.pool;
+    if (vote.kind === "low_confidence") return "low_confidence";
     const pickEvidence = {
-      ref: proposal.choiceRef, conf: proposal.entropyConf,
-      shape: proposal.shape.kind, pool_size: poolSize,
+      ref: vote.ref, conf: vote.conf, shape: vote.shape,
+      pool_size: Object.keys(vote.pool).length, via: vote.via,
     };
-    return await this.executePicked(page, elems, proposal.choiceRef, "model", pickEvidence, poolSize, goal);
+    return await this.executePicked(page, vote.pool, vote.ref, "model", pickEvidence, Object.keys(vote.pool).length, goal);
   }
 
   /**
@@ -272,11 +308,13 @@ export class PilotRuntime {
    */
   private async executePicked(
     page: AnyPage, elems: ElemPool, ref: string,
-    pickedBy: "rule" | "model", pick: { ref: string; conf: number; shape: string; pool_size: number } | null,
+    pickedBy: "rule" | "model", pick: { ref: string; conf: number; shape: string; pool_size: number; via?: "ask" | "reobserve" } | null,
     poolSize: number, goal: string,
   ): Promise<PilotStopCode | null> {
     const el = elems[ref] as Elem | undefined;
     if (el === undefined) return "low_confidence";
+    this.lastPickedRef = ref;
+    if (pickedBy === "model") this.modelPicks += 1; else this.rulePicks += 1;
     const urlBefore = urlOf(page);
 
     // 族判定（与执行器 firstExecFamily 同一分类口径）。
@@ -300,6 +338,31 @@ export class PilotRuntime {
     // 执行：与 session.act 同一条链（歧义 fail 档、click/check 带遮挡探针）。
     const started = Date.now();
     const target = buf(String(el.label ?? el.text ?? el.tag ?? ref), MAX_LABEL);
+    // 危险闸门（红线⑥「default-deny 不放宽」）：run 面的风险闸门在动作相位（isRisky→confirmFn），
+    // actOnce 不经过它；default-deny face 又不装 confirmFn（执行器缺省 DEFAULT_CONFIRM 只在
+    // 风险闸门处拒一切）。驾驶面在这里对**每个待执行动作**做确定性关键词判定——与桥
+    // denyDestructive 同一份闭集（单源 rules.ts 的 DESTRUCTIVE_PATTERNS），零模型票。
+    // 拒绝 = 结构化失败 + 禁选 + inert 记账，绝不静默执行；连续拒绝达阈值 = stuck_inert 如实停。
+    const denyDesc = `${op} ${target}`.toLowerCase();
+    if (DESTRUCTIVE_PATTERNS.some((x) => denyDesc.includes(x))) {
+      this.history.push({ op, target, ref: null, how: null, ok: false, changed: false });
+      this.stepCount += 1;
+      const deniedAction = { op, target, ref: null, how: null, ok: false, changed: false, elapsed_ms: 0, code: "risk_declined" };
+      this.record({
+        i: this.stepCount - 1, ts: new Date().toISOString(), type: "drive", goal,
+        picked_by: pickedBy, ...(pick === null ? {} : { pick }),
+        action: deniedAction, url_before: urlBefore, url_after: urlBefore,
+      });
+      this.sink.respond({
+        type: "drive", ok: false, step: this.stepCount, picked_by: pickedBy,
+        op, target, ref: null, changed: false, url: urlBefore, elapsed_ms: 0,
+        ...(pick === null ? {} : { conf: pick.conf, shape: pick.shape, pool_size: pick.pool_size, via: pick.via }),
+      });
+      this.forbidden.add(ref);
+      this.inertRun += 1;
+      if (this.inertRun >= PILOT_INERT_LIMIT) return "stuck_inert";
+      return null;
+    }
     const out = await this.mw().actOnce(page, target, op, bind, "fail", undefined, {
       ...(op === "click" || op === "check" ? { occlusionProbe: true } : {}),
       diagnostics: true,
@@ -321,7 +384,7 @@ export class PilotRuntime {
     this.sink.respond({
       type: "drive", ok: out.ok === true, step: this.stepCount, picked_by: pickedBy,
       op, target, ref: step.ref, changed: step.changed, url: urlAfter, elapsed_ms: elapsedMs,
-      ...(pick === null ? {} : { conf: pick.conf, shape: pick.shape, pool_size: poolSize }),
+      ...(pick === null ? {} : { conf: pick.conf, shape: pick.shape, pool_size: poolSize, via: pick.via }),
     });
 
     if (out.ok !== true) {
@@ -345,9 +408,8 @@ export class PilotRuntime {
 
   /* ---------------------------------------------------------------- 完成判定 */
 
-  private async finalSignalHeld(): Promise<boolean> {
-    const spec = this.opts.finalSignal;
-    if (spec === null || spec === undefined || !isObj(spec) || Object.keys(spec).length === 0) return false;
+  /** checkSignal 验证一条信号声明在当前页是否成立（--final-signal 每轮判与 finish 指令共用）。 */
+  private async signalHeld(spec: Record<string, unknown>): Promise<boolean> {
     try {
       return await checkSignal(await this.page() as never, spec as SignalSpec, { hosts: this.hosts });
     } catch {
@@ -355,10 +417,19 @@ export class PilotRuntime {
     }
   }
 
+  private async finalSignalHeld(): Promise<boolean> {
+    const spec = this.opts.finalSignal;
+    if (spec === null || spec === undefined || !isObj(spec) || Object.keys(spec).length === 0) return false;
+    return await this.signalHeld(spec);
+  }
+
   /* ---------------------------------------------------------------- 兜底协议 */
 
-  /** 停止时投影交接块（intervention 合同形状）并写记录；返回交接块。 */
+  /** 停止时投影交接块（intervention 合同形状）并写记录；返回交接块。
+   *  停因同时钉进 this.stopCode：无人应答（EOF/idle）时终态摘要不失停因。 */
   private async handoff(stop: PilotStopCode): Promise<PilotHandoff> {
+    this.stopCode = stop;
+    this.handoffCount += 1;
     let page: AnyPage | null = null;
     try { page = await this.page(); } catch { /* 浏览器已死：证据缺字段 */ }
     const url = page === null ? "" : urlOf(page);
@@ -381,22 +452,57 @@ export class PilotRuntime {
   }
 
   /**
-   * 兜底指令分派（stdin JSONL 闭集）。返回 true = 驾驶继续；false = 会话收尾。
+   * agent 驾驶的步间投影（--driver agent）：候选行拆在 pilot-evidence.ts
+   * （observe 契约行的有界子集，hint_candidates 经 hintMatch 自证唯一命中，Agent 照抄进
+   * resume.hint 即确定性执行）。不进驾驶轨迹记录（记录的是已执行动作）。
    */
-  private async command(cmd: PilotAgentCommand, args: Record<string, unknown>): Promise<boolean> {
-    this.record({ i: this.stepCount, ts: new Date().toISOString(), type: "command", command: cmd, args });
+  private async emitStepRequest(): Promise<void> {
+    let page: AnyPage | null = null;
+    try { page = await this.page(); } catch { /* 浏览器已死：空候选投影 */ }
+    const view = page === null
+      ? { url: "", poolSize: 0, candidates: [] as Array<Record<string, unknown>> }
+      : await agentStepCandidates({
+        page, observe: (o) => this.ctx().observe(o), lastPool: this.lastPool,
+      });
+    this.sink.respond({
+      type: "step_request", unsolicited: true, pilot: true, driver: "agent",
+      step: this.stepCount, goal: this.drivingGoal(),
+      url: view.url, pool_size: view.poolSize, candidates: view.candidates,
+    });
+  }
+
+  /**
+   * 兜底指令分派（stdin JSONL 闭集）。返回 "drive" = 回驾驶轮；"close" = 会话收尾；
+   * "stay" = 单行被拒/失败（回执已发，继续等下一条——session 的单行失败纪律）。
+   */
+  private async command(cmd: PilotAgentCommand, args: Record<string, unknown>): Promise<"stay" | "drive" | "close"> {
+    this.fallbackCount += 1;
+    // 值不落明文轨迹（与 pilot export 的「值已省略」同一纪律）：record 里 value 只留省略标记。
+    const masked = { ...args, ...(args["value"] === undefined ? {} : { value: "<已省略>" }) };
+    this.record({ i: this.stepCount, ts: new Date().toISOString(), type: "command", command: cmd, args: masked });
     switch (cmd) {
       case "resume": {
-        if (this.handoffOpen === null) {
+        // agent 驾驶模式：resume 就是每步点名，无需 open handoff；model 模式 = 解除停因交接。
+        if (this.handoffOpen === null && this.driverMode !== "agent") {
           this.sink.respond({ type: "command_result", ok: false, code: "config_error", reason: "resume without an open handoff" });
-          return true;
+          return "stay";
         }
-        // resume.value 显式给值（红线②：值只能从这里或预声明 slots 来）。
+        // resume.value 显式给值（红线②：值只能从这里或预声明 slots 来）：
+        // 对象 = 多槽 k:v 全并入值袋；字符串 = 单值（键取 args.target，缺省 "resumed"）。
         const value = args["value"];
-        if (value !== undefined && value !== null && nonEmpty(String(value))) {
+        if (isObj(value)) {
+          for (const [k, v] of Object.entries(value)) {
+            if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+              this.slots[buf(String(k), 40)] = String(v);
+            }
+          }
+        } else if (typeof value === "string" && nonEmpty(value)) {
           const key = buf(String(args["target"] ?? ""), 40) || "resumed";
-          this.slots[key] = String(value);
+          this.slots[key] = value;
         }
+        // resume.skip：把最近一次驾驶选中的目标加入禁选后继续（不点名换目标的兜底）。
+        const skipped = args["skip"] === true && this.lastPickedRef !== null;
+        if (skipped) this.forbidden.add(this.lastPickedRef as string);
         // resume.hint 点名收窄：写进下一步的规则档（hint 命中即确定性执行，零模型）。
         const hint = args["hint"];
         if (typeof hint === "string" && hint.trim() !== "") {
@@ -404,8 +510,11 @@ export class PilotRuntime {
         }
         this.inertRun = 0;
         this.handoffOpen = null;
-        this.sink.respond({ type: "command_result", ok: true, resumed: true, step: this.stepCount });
-        return true;
+        this.sink.respond({
+          type: "command_result", ok: true, resumed: true, step: this.stepCount,
+          ...(skipped ? { skipped: this.lastPickedRef } : {}),
+        });
+        return "drive";
       }
       case "redirect": {
         const url = args["url"];
@@ -417,39 +526,69 @@ export class PilotRuntime {
             if (bad !== null) throw new Error(bad);
             await page.goto(url, { timeout: NAVIGATION_GOTO_TIMEOUT_MS, waitUntil: "domcontentloaded" });
             try { await settle(page as never); } catch { /* settle 不抛 */ }
-            this.inertRun = 0;
-            this.handoffOpen = null;
+            this.redirectReset();
             this.sink.respond({ type: "command_result", ok: true, redirected: true, url: urlOf(page) });
-            return true;
+            return "drive";
           } catch (e) {
             this.sink.respond({ type: "command_result", ok: false, code: "nav_failed", reason: errMsg(e) });
-            return true;
+            return "stay";
           }
         }
         if (typeof goal === "string" && nonEmpty(goal)) {
           // redirect 只有 goal = 换总目标重驾驶（预算不清零；预算重置请起新 pilot）。
           this.opts.goal = buf(goal, 400);
-          this.inertRun = 0;
-          this.handoffOpen = null;
+          this.redirectReset();
           this.sink.respond({ type: "command_result", ok: true, redirected: true, goal_digest: buf(goal, 200) });
-          return true;
+          return "drive";
         }
         this.sink.respond({ type: "command_result", ok: false, code: "config_error", reason: "redirect needs url or goal" });
-        return true;
+        return "stay";
       }
       case "finish": {
+        // 完成只认信号（红线③）：finish 声明最终信号（args.signal 或起会话时预声明的
+        // --final-signal），checkSignal 验证成立才记 final_signal_held；不成立 = 单行被拒，
+        // 交接保持打开，Agent 可 resume/redirect/abort。
+        const argSig = args["signal"];
+        const spec = isObj(argSig) && Object.keys(argSig).length > 0
+          ? argSig
+          : (isObj(this.opts.finalSignal) && Object.keys(this.opts.finalSignal).length > 0
+            ? this.opts.finalSignal
+            : null);
+        if (spec === null) {
+          this.sink.respond({
+            type: "command_result", ok: false, code: "config_error",
+            reason: 'finish needs a signal: {"cmd":"finish","signal":{...}} or a pre-declared --final-signal',
+          });
+          return "stay";
+        }
+        if (!(await this.signalHeld(spec))) {
+          this.sink.respond({
+            type: "command_result", ok: false, code: "signal_not_held", pilot: true,
+            reason: "declared final signal does not hold on the current page",
+          });
+          return "stay";
+        }
         this.finished = true;
         this.stopCode = "final_signal_held";
-        this.sink.respond({ type: "command_result", ok: true, finished: true, pilot: true });
-        return false;
+        this.sink.respond({ type: "command_result", ok: true, finished: true, signal_held: true, pilot: true });
+        return "close";
       }
       case "abort": {
         this.finished = true;
-        this.stopCode = null; // 非正因收尾：退出码 3 由 finish() 决定
+        this.aborted = true;   // 终止（落已走轨迹）：stop_code 保持最近一次停因
         this.sink.respond({ type: "command_result", ok: true, aborted: true });
-        return false;
+        return "close";
       }
     }
+  }
+
+  /** 改道即换语境：步史与禁选清段重新累计（预算不清零——它是已执行驾驶步的事实）。 */
+  private redirectReset(): void {
+    this.history.length = 0;
+    this.forbidden.clear();
+    this.lastPool = null;
+    this.inertRun = 0;
+    this.handoffOpen = null;
   }
 
   /* ---------------------------------------------------------------- 主循环 */
@@ -463,9 +602,15 @@ export class PilotRuntime {
     ensureDir(path.dirname(this.recordPath));
 
     // 决策源装配（与 run 面同一序列：resolveProviderSpec → applySpecToRuntime）。
+    // floor 优先级与 run 同链（app-runner-policy 的 conf_floor）：CLI --conf-floor >
+    // provider 自报（ProviderInfo.floor）> 0.25 缺省——mw 惰性构造，此处改写后首个驾驶轮才读。
     try {
       const spec = await resolveProviderSpec(undefined, undefined);
-      await applySpecToRuntime(spec);
+      this.applied = await applySpecToRuntime(spec);
+      if (this.opts.confFloor === undefined) {
+        const pf = activeProviderInfo()?.floor;
+        if (typeof pf === "number" && pf >= 0 && pf <= 1) this.confFloor = pf;
+      }
     } catch (e) {
       this.log(`决策源装配失败（继续以 rules-only 探路）：${errMsg(e)}`);
     }
@@ -487,9 +632,10 @@ export class PilotRuntime {
 
   /**
    * 驾驶主循环：每步先判最终信号 → 驾驶一步 → 停因投影交接 → 等兜底指令。
-   * 由入口（runPilot）在 stdin 就绪时调用；返回最终停因（null = 被中断/abort）。
+   * 由入口（runPilot）在 stdin 就绪时调用；返回最终停因（null = 被中断/abort）；
+   * agent 模式另返回 PILOT_AWAIT_PICK（步间等待：候选已投影，等 resume{hint} 点名）。
    */
-  async drive(): Promise<PilotStopCode | null> {
+  async drive(): Promise<PilotStopCode | typeof PILOT_AWAIT_PICK | null> {
     while (!this.finished && this.stepCount < this.maxSteps) {
       // 完成只认信号（每步动作后判一次；动作前不判——forceAct 语义）。
       if (await this.finalSignalHeld()) {
@@ -498,7 +644,7 @@ export class PilotRuntime {
         this.finished = true;
         return this.stopCode;
       }
-      let stop: PilotStopCode | null = null;
+      let stop: PilotStopCode | typeof PILOT_AWAIT_PICK | null = null;
       try {
         stop = await this.driveOnce();
       } catch (e) {
@@ -509,6 +655,11 @@ export class PilotRuntime {
           this.lastError = msg;
           stop = "stuck_inert";
         }
+      }
+      if (stop === PILOT_AWAIT_PICK) {
+        // agent 驾驶的步间等待：投影候选（step_request）后回入口等 resume{hint}；不是停因。
+        await this.emitStepRequest();
+        return stop;
       }
       if (stop !== null) {
         if (stop === "browser_dead") { this.stopCode = stop; return stop; }
@@ -526,12 +677,13 @@ export class PilotRuntime {
   }
 
   /**
-   * 兜底指令入口（外部 readline 循环把合法指令递进来）。非法输入 = 结构化 config_error，
-   * 不杀会话。返回 true = 驾驶继续（重新进 drive 轮）。
+   * 兜底指令入口（外部 readline 循环把每行递进来）。单行失败纪律与 session 同源：
+   * 空行/坏 JSON/未知指令/被拒指令都只是**单行失败**——回执已发、继续等下一条，不杀会话。
+   * 返回 "stay"（继续等）| "drive"（回驾驶轮）| "close"（收尾）。
    */
-  async handleLine(line: string): Promise<{ handled: boolean; driveAgain: boolean }> {
+  async handleLine(line: string): Promise<"stay" | "drive" | "close"> {
     const raw = line.charCodeAt(0) === 0xfeff ? line.slice(1) : line;
-    if (raw.trim() === "") return { handled: false, driveAgain: false };
+    if (raw.trim() === "") return "stay";
     let req: Record<string, unknown>;
     try {
       const parsed: unknown = JSON.parse(raw);
@@ -539,7 +691,7 @@ export class PilotRuntime {
       req = parsed;
     } catch (e) {
       this.sink.respond({ type: "error", ok: false, code: "config_error", reason: `bad JSONL: ${errMsg(e)}` });
-      return { handled: false, driveAgain: false };
+      return "stay";
     }
     const cmd = req["cmd"] ?? req["type"];
     if (typeof cmd !== "string" || !(PILOT_AGENT_COMMANDS as readonly string[]).includes(cmd)) {
@@ -547,21 +699,36 @@ export class PilotRuntime {
         type: "error", ok: false, code: "config_error",
         reason: `pilot commands are ${PILOT_AGENT_COMMANDS.join(" | ")} (got ${JSON.stringify(cmd)})`,
       });
-      return { handled: false, driveAgain: false };
+      return "stay";
     }
-    const again = await this.command(cmd as PilotAgentCommand, req);
-    return { handled: true, driveAgain: again };
+    return await this.command(cmd as PilotAgentCommand, req);
   }
 
-  /** 收尾：产物落盘（trace + 汇总），浏览器关闭由入口层负责。 */
-  async finish(stop: PilotStopCode | null): Promise<void> {
+  /**
+   * 收尾：产物落盘（trace + 汇总）。终态行 `pilot_end` 只在这里发一条——入口层的
+   * idle/中断/异常路径把 {code, reason} 作为 note 并进来，不各自再发一条。
+   * 浏览器关闭由入口层负责。
+   */
+  async finish(stop: PilotStopCode | null, note: { code: string; reason: string } | null = null): Promise<void> {
     const finalStop = this.stopCode ?? stop;
-    const summary = {
+    const cache = this.applied !== null && this.applied.stats !== null ? this.applied.stats() : null;
+    // 模型咨询数：provider 在场走它自己的计数（缓存命中也算咨询，与 run 摘要同口径）；
+    // 装配失败（rules-only 探路）走本面计数兜底。
+    const asks = this.applied !== null && this.applied.asks !== null ? this.applied.asks() : this.modelAsks;
+    const failedAsks = this.applied !== null && this.applied.failedAsks != null ? this.applied.failedAsks() : null;
+    const summary: Record<string, unknown> = {
       type: "pilot_end", unsolicited: true, pilot: true,
-      ok: finalStop === "final_signal_held",
+      ok: finalStop === "final_signal_held" && !this.aborted,
       stop_code: finalStop, steps: this.stepCount, max_steps: this.maxSteps,
+      model_asks: asks, rule_picks: this.rulePicks, model_picks: this.modelPicks,
+      handoffs: this.handoffCount, fallbacks: this.fallbackCount,
+      ...(this.driverMode === "agent" ? { driver: "agent" } : {}),
+      ...(this.aborted ? { aborted: true } : {}),
+      ...(failedAsks !== null && failedAsks > 0 ? { failed_asks: failedAsks } : {}),
+      ...(cache !== null ? { cache: { hits: cache.hits, misses: cache.misses } } : {}),
       url: (() => { try { return urlOf(this.session?.page as never); } catch { return ""; } })(),
       out_dir: this.outDir,
+      ...(note !== null ? { code: note.code, reason: note.reason } : {}),
       ...(this.lastError !== null ? { last_error: this.lastError } : {}),
     };
     if (this.traceRef !== null) {
@@ -596,6 +763,9 @@ export function validatePilotOptions(opts: PilotOptions): string | null {
   }
   if (opts.confFloor !== undefined && (typeof opts.confFloor !== "number" || opts.confFloor! < 0 || opts.confFloor! > 1)) {
     return "pilot --conf-floor must be a number in [0, 1]";
+  }
+  if (opts.driver !== undefined && opts.driver !== "model" && opts.driver !== "agent") {
+    return "pilot --driver must be model|agent";
   }
   return null;
 }

@@ -49,6 +49,10 @@ apps list → app_show（路径 + 当前源码）→ 编辑 app.mjs
   脚本两面判据用 `ctx.runtime.dry`（dry/replay `true`、真跑 `false`）；`epoch === 0` 不作 dry 判据。
   `app_create` 的骨架含「卡点→能力」cookbook 速查段；会话内实时观察用 `ctx.observe()`。
 - `inspect` 只读：标题、URL、有界元素、候选 hint；`--json` 另带只读的可访问性树证据块 `ax`（浏览器 AX role/name/focusable/disabled + `not_in_pool` 近似口径，不进池/匹配/模型/运行路径）；不点击、不输入、不调模型。**inspect 是独立一次性会话**（新开浏览器、不 attach 运行会话）——会话内实时看当前页用应用内 `ctx.observe()`。元素行带 `frame_origin`/`frame_path`（帧链）；`hint_candidates` 在多 frame 同名场景会给 `<label> frame:<origin>` 或 ≤4 段完整链候选，同文案重复组会给 `<label> in-row:<token>` 行锚候选（F82），内容不可分网格会给 `<label> row-index:N` 顺序行锚候选（F83）；`structure_path`（若出现）只是诊断证据（`structure_unstable:true`，动态页面可能失效）——**不是 hint，不可照抄**。
+- 走查（写应用前把流程走通）：四种走查面见 `docs/APP_SCRIPT_AUTHORING.md` §0.5——探针链 /
+  plan 面草稿 / `amber run --walk` / `amber pilot`（模型驾驶 + Agent 兜底；协议、交接块与桥面
+  `amberflow_pilot` 见 §3.3）。pilot 产物带 `pilot:true`，**走查通过 ≠ 应用通过**；走通后用
+  `amber pilot export` 出 app.mjs 骨架，再补 done/slot 走正式 `amber run`。
 - **learn 录制 hint vs inspect 候选**：learn 的 `hint` 是六形状闭集（可带 `within:#id` / `frame:<origin>` / `in-row:<token>` / `row-index:N` 尾缀，同一 `parseHint`）、属性白名单只认 `test`（→data-test）/`type`/`aria-label`；inspect 的 `hint_candidates` 是引擎经同一个 `hintMatch` 自证过的可照抄结果（输出的就是六形状之一；跨帧同名时可能是 `<label> frame:<origin>` / ≤4 段链，同名组可能是 `<label> within:#id`，同文案重复组可能是 `<label> in-row:<token>`，内容不可分网格可能是 `<label> row-index:N`）。inspect 候选可直接抄进 act/learn；自己挑的属性先过白名单。
 - `run --max-steps N` 是**执行预算**，不是“从第 N 步开始”：脚本按自己的控制流执行，
   用满预算时以 `budget_exceeded` 停下，结果带已执行步骤与 trace。
@@ -223,7 +227,7 @@ amber apps remove <id> [--yes] [--force]
 | `amberflow_app_check` | `amber apps check --json` | 加载 + dry 调用序列校验 |
 | `amberflow_inspect` | `amber inspect --json` | 只读页面观察（含 `ax` 可访问性证据块）与候选 hint |
 | `amberflow_session` | `amber session` | 跨工具调用保持页面状态的交互式试错会话（`open/goto/observe/act/read/extract/signal/wait_for/snapshot/tab/close/list`）；不判完成、不写 run 结果；`act` 缺省歧义零动作（见下） |
-| `amberflow_pilot`（桥面待接入；CLI 已可用） | `amber pilot` | 模型驾驶走查：决策模型逐步投票驾驶（规则档先行零模型），停因时投影 `handoff`（截图 + observe + 确定性解锁建议）；Agent 兜底指令闭集 `resume\|redirect\|finish\|abort`；完成只认信号；产物带 `pilot:true`；`amber pilot export` 把 `--record` 轨迹还原成 app.mjs 骨架（picked_by 来源标记保留，done 占位符待补） |
+| `amberflow_pilot` | `amber pilot` | 模型驾驶走查（one-shot）：决策模型逐步投票驾驶（规则档先行零模型；低置信先宽扫重问一次），停因交接投影 `handoff`（四件套 + 确定性解锁建议）；`commands` 是兜底剧本（JSONL 文本，引擎闭集逐行消费，被拒 = 单行失败）；返回有界摘要（终态字段 + 事件白名单 + handoff 细节），超时写 `pilot-killed.json`；完成只认信号、不冒充 run 结论；协议契约见 §3.3；`amber pilot export` 把 `--record` 轨迹还原成 app.mjs 骨架（picked_by 来源标记保留，done 占位符待补） |
 | `amberflow_app_create` | `amber apps new … --json` | 生成 flow 骨架 |
 | `amberflow_run` | `app-runner`（与 `amber run` 同一运行器） | 运行；**桥用部署配置**决策三件套；`max_steps` 是执行预算，`timeout_sec` 是本次墙钟上限；决策通道故障时结果带恢复指引 |
 | `amberflow_learn` | `learn --json` | 一次录制 → 归纳信号 → 生成 `app.mjs` flow（回放门通过才落盘） |
@@ -520,6 +524,51 @@ observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,
   可点击/存在性断言。取树失败/无 CDP 会话/超时 ≤3s = `{available:false, reason}`，不抛栈、
   不阻断其余观察面；只读证据：不进模型面、不参与 admitted 判定；dry/replay 不访问浏览器 =
   无此键（缺键 = 引擎没给，桥透传不补算）。
+
+### 3.3 `amber pilot` 驾驶协议（CLI 与桥面 `amberflow_pilot` 均已接入）
+
+stdout 纯 JSONL：`started` / `drive` / `handoff` / `command_result` / `pilot_end` 每行一个
+JSON 对象；`pilot_end` 只发一条（idle/中断/异常的 `code`/`reason` 并进汇总行），摘要恒含
+`steps`/`stop_code`/`model_asks`/`rule_picks`/`model_picks`/`handoffs`/`fallbacks`
+（laya 档另带 `cache:{hits,misses}`），恒带 `pilot:true`。退出码：0 = `final_signal_held`；
+1 = `browser_dead`；3 = 被停因挡住（含 abort / idle 超时）。
+
+stdin 兜底指令闭集（每行一个 JSON 对象；单行失败纪律与 session 同源——坏 JSON/未知/被拒
+指令只回执一条错误、继续等下一条，不杀会话）：
+
+| 指令 | 形状 | 语义 |
+|---|---|---|
+| `resume` | `{hint?, value?, skip?}` | `value` 对象 = 多槽 k:v 并入值袋；字符串 = 单值（键取 `target`，缺省 `resumed`）；`hint` 唯一命中即确定性执行（零模型），撞歧义（多候选签名互异）= `target_ambiguous` 只停不选；`skip:true` 把最近一次驾驶选中的目标加入禁选后继续 |
+| `redirect` | `{url? \| goal?}` | 换入口或换目标；步史与禁选清段重新累计，**预算不清零**（预算重置请起新 pilot） |
+| `finish` | `{signal}` | 声明最终信号（或复用预声明的 `--final-signal`）；引擎 `checkSignal` 验证成立才记 `final_signal_held`；不成立 = `code:"signal_not_held"` 单行拒绝，交接保持打开 |
+| `abort` | `{}` | 终止，落已走轨迹（exit 3） |
+
+`--driver agent`（消融对照臂）：每步投影 `step_request`（有界候选：`ref`/`tag`/`label`/
+`hint_candidates`，≤40 行——hint_candidates 经引擎 `hintMatch` 自证唯一命中，照抄进
+`resume.hint` 即确定性执行）后等待点名，零模型票；`resume` 无需 open handoff；
+`pilot_end` 摘要带 `driver:"agent"`。
+
+危险闸门：每个待执行动作过 `DESTRUCTIVE_PATTERNS` 关键词闭集（单源 rules.ts，与桥
+denyDestructive 同源）——命中 = `risk_declined` 结构化失败 + 禁选，绝不静默执行；连续
+拒绝达 inert 阈值 = `stuck_inert`；兜底指令闭集里没有 confirm，Agent 无法越过。
+
+桥面 `amberflow_pilot`（one-shot）：拼 CLI + 收 JSONL 协议流 + 投影有界摘要三件事不变——
+schema 走 `run-args-contract` 生成链（`PILOT_ARG_FIELDS` 单源，`run-args:check` 双段校验），
+`commands`（兜底剧本 JSONL 文本）由桥物化成临时文件走 `--input`，`timeout_sec` 是桥侧墙钟
+（超时写 `pilot-killed.json` 部分证据）；返回摘要带 `status`/`stop_code`/步数与咨询计数、
+事件白名单（≤60）、交接细节（≤4）。交互式常驻驾驶（跨调用同现场、逐交接喂指令）属后续批次。
+
+`PilotHandoff` 交接块（停因投影；字段冻结，单源 `src/app/pilot-contract.ts`）：
+
+| 字段 | 口径 | 说明 |
+|---|---|---|
+| `stop_code` | 闭集 8 码 | `final_signal_held` / `budget_exceeded` / `low_confidence` / `target_ambiguous` / `needs_value` / `stuck_inert` / `no_model_runtime` / `browser_dead` |
+| `step_id` | 0-based 驾驶步号 | `budget_exceeded` 时 = `max_steps` |
+| `goal_digest` | ≤200 字符 | 总目标有界投影 |
+| `why_stuck` | `{summary, evidence}` | 一句话摘要 + 有界证据（`inert_run` / `forbidden` ≤40） |
+| `what_would_unblock` | ≤3 条 | 按停因查表确定性生成，不是模型建议 |
+| `evidence_refs` | 四件套落盘路径 | 截图 `.png` / DOM `.dom.html`（>2MB 截断）/ 池快照 `.pool.json` / observe `.observe.json`；各自独立失败、独立缺字段 |
+| `url` | — | 停驶页现场锚点 |
 
 ---
 

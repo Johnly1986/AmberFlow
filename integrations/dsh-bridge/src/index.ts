@@ -38,7 +38,9 @@ import {
   appCheck, appShow, createApp, inspect, learn, runApp, status, test,
   createService, type AmberFlowRunArgs, type AmberFlowService,
 } from './service.ts'
-import { RUN_BRIDGE_MESSAGES, RUN_TOOL_FIELDS, RUN_TOOL_PARAMETERS } from './run-contract.generated.ts'
+import {
+  PILOT_TOOL_FIELDS, PILOT_TOOL_PARAMETERS, RUN_BRIDGE_MESSAGES, RUN_TOOL_FIELDS, RUN_TOOL_PARAMETERS,
+} from './run-contract.generated.ts'
 // 语法/规划引导/概述层生成物（勿手改）：唯一出处是引擎的 grammar-prompt.ts、
 // planning-playbook.ts 与 help-map.ts，这里只收字符串（桥不 import 引擎代码）；
 // 漂移由 `npm run prompt-hit` 校验。
@@ -46,6 +48,7 @@ import { HINT_LEARN_NOTE, OVERVIEW_TEXT, PLAN_PLAYBOOK_SHORT, STOP_ESCALATION_TE
 import {
   DEFAULT_MAX_SESSIONS, DEFAULT_SESSION_IDLE_MS, handleSessionTool, SessionManager, type SessionToolArgs,
 } from './session.ts'
+import { runPilotBridge, type AmberFlowPilotArgs } from './pilot.ts'
 
 /**
  * C1：会话结果的模型可见渲染只给有界行数（完整形状在结构化 value 里，模型看不到）。
@@ -653,6 +656,120 @@ export function apply(ctx: Context, config: Config): void {
         ...(summary.failure === undefined ? {} : { failure: summary.failure }),
         ...(summary.warnings === undefined ? {} : { warnings: summary.warnings }),
         ...(summary.rescue === undefined ? {} : { rescue: summary.rescue }),
+      }
+    },
+  }))
+
+  // ---------- `amberflow_pilot`（PILOTED_WALKTHROUGH §PW3.2）：模型驾驶走查的一次性调用 ------
+  // 桥契约三件事不变：拼 CLI（pilotArgs）、收 JSONL 协议流、投影有界摘要；停因/指令闭集、
+  // 信号验证、危险 default-deny 全部留在引擎 CLI。commands（兜底剧本）与 timeout_sec 不是
+  // 引擎旗标（剧本物化走 --input、墙钟是桥侧 spawn 策略），在工具面手写声明。
+  ctx.tools.register(defineTool({
+    name: `${toolPrefix}_pilot`,
+    description:
+      'Run one model-driven walkthrough of a live page: the decision model votes each step, the engine '
+        + 'executes and verifies signals. Rule layer first (zero model); on a stop cause the engine projects '
+        + 'a handoff with four-piece evidence and deterministic unblock hints, and `commands` is a fallback '
+        + 'playbook consumed line by line at those pauses (resume|redirect|finish|abort, engine-verified; a '
+        + 'rejected line is a single-line failure). The summary is walkthrough evidence (a `pilot` face, '
+        + 'never a run verdict). Use `*_run` for frozen apps; `*_session` to drive each step yourself.',
+    parameters: PILOT_TOOL_PARAMETERS,
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          status: { type: 'string', required: true },
+          ok: { type: 'boolean', required: true },
+          stop_code: { type: 'string' },
+          steps: { type: 'integer', required: true },
+          model_asks: { type: 'integer' },
+          rule_picks: { type: 'integer' },
+          model_picks: { type: 'integer' },
+          handoffs: { type: 'integer' },
+          fallbacks: { type: 'integer' },
+          driver: { type: 'string' },
+          failed_asks: { type: 'integer' },
+          cache: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              hits: { type: 'integer', required: true },
+              misses: { type: 'integer', required: true },
+            },
+          },
+          url: { type: 'string' },
+          out_dir: { type: 'string', required: true },
+          timed_out: { type: 'boolean', required: true },
+          exit_code: { type: 'integer' },
+          events: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
+          handoffs_detail: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          events_truncated: { type: 'integer' },
+          notes: { type: 'array', items: { type: 'string' } },
+          end_code: { type: 'string' },
+          stdout_tail: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `PILOT ${value.status.toUpperCase()}`
+          + (value.stop_code ? ` (${value.stop_code})` : '')
+          + ` — steps ${String(value.steps)}`
+          + (value.model_asks ? `, asks ${String(value.model_asks)}` : '')
+          + (value.handoffs ? `, handoffs ${String(value.handoffs)}` : '')
+          + (value.fallbacks ? `, fallbacks ${String(value.fallbacks)}` : '')
+          + (value.driver === 'agent' ? ', driver agent' : '')
+          + (value.url ? `; at ${value.url}` : '')
+          + `; out ${value.out_dir}`,
+      }],
+    },
+    async execute(args) {
+      // Tool parameter → camelCase comes from the shared pilot contract; only the slot bag needs its
+      // own collection step (array of `k=v` → record) because the engine CLI takes repeated flags.
+      const slots = new Map<string, string>()
+      for (const entry of (args as { slots?: string[] }).slots ?? []) {
+        const at = entry.indexOf('=')
+        if (at <= 0) {
+          throw new Error(fillArgMessage(RUN_BRIDGE_MESSAGES.slotFormat, { value: JSON.stringify(entry) }))
+        }
+        const key = entry.slice(0, at)
+        // The CLI treats a repeated slot as a usage error; catching it here keeps the bridge from
+        // silently dropping the first value before the CLI ever sees the duplicate.
+        if (slots.has(key)) {
+          throw new Error(fillArgMessage(RUN_BRIDGE_MESSAGES.slotDuplicate, { value: JSON.stringify(key) }))
+        }
+        slots.set(key, entry.slice(at + 1))
+      }
+      const pilotValues: Record<string, unknown> = {}
+      for (const field of PILOT_TOOL_FIELDS) {
+        const value = (args as unknown as Readonly<Record<string, unknown>>)[field.param]
+        if (value === undefined) continue
+        pilotValues[field.key] = field.collect === 'slots' ? Object.fromEntries(slots) : value
+      }
+      const summary = await runPilotBridge(options, pilotValues as unknown as AmberFlowPilotArgs)
+      return {
+        status: summary.status,
+        ok: summary.ok,
+        ...(summary.stop_code === null ? {} : { stop_code: summary.stop_code }),
+        steps: summary.steps,
+        ...(summary.model_asks === null ? {} : { model_asks: summary.model_asks }),
+        ...(summary.rule_picks === null ? {} : { rule_picks: summary.rule_picks }),
+        ...(summary.model_picks === null ? {} : { model_picks: summary.model_picks }),
+        ...(summary.handoffs === null ? {} : { handoffs: summary.handoffs }),
+        ...(summary.fallbacks === null ? {} : { fallbacks: summary.fallbacks }),
+        ...(summary.driver === undefined ? {} : { driver: summary.driver }),
+        ...(summary.failed_asks === undefined ? {} : { failed_asks: summary.failed_asks }),
+        ...(summary.cache === undefined ? {} : { cache: summary.cache }),
+        ...(summary.url === undefined ? {} : { url: summary.url }),
+        out_dir: summary.out_dir,
+        timed_out: summary.timed_out,
+        ...(summary.exit_code === null ? {} : { exit_code: summary.exit_code }),
+        events: summary.events,
+        ...(summary.handoffs_detail === undefined ? {} : { handoffs_detail: summary.handoffs_detail }),
+        ...(summary.events_truncated === undefined ? {} : { events_truncated: summary.events_truncated }),
+        ...(summary.notes === undefined ? {} : { notes: summary.notes }),
+        ...(summary.end_code === undefined ? {} : { end_code: summary.end_code }),
+        stdout_tail: summary.stdout_tail,
       }
     },
   }))

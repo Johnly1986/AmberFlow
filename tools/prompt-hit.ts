@@ -858,8 +858,9 @@ const BRIDGE_DESC_MAX_CHARS = 800;
     }
     }
   });
-  // 基线 82 条（桥面盘点值）：数量漂移只 warn——桥面新增工具描述是正常演进，重审预算即可。
-  const BRIDGE_DESC_BASELINE = 82;
+  // 基线 94 条（桥面盘点值；含 `amberflow_pilot` 工具 1 条 + 其 11 个参数描述）：数量漂移只
+  // warn——桥面新增工具描述是正常演进，重审长度预算后同步本基线。
+  const BRIDGE_DESC_BASELINE = 94;
   if (descriptions.length !== BRIDGE_DESC_BASELINE) {
     bridgeWarnings.push(`bridge_desc: description 数量 ${descriptions.length}/${BRIDGE_DESC_BASELINE} 与基线不同——新增/删除桥面描述需重审长度预算`);
   }

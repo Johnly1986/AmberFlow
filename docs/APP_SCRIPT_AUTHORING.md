@@ -12,7 +12,7 @@
 高效规划六步法 v2.1（走查先行）
 目标：先用引擎按真实步序走通一遍，再写正式应用；禁止先写完整应用再反复修。
 ① inspect 先看：`amber inspect --url <页> --json`。hint_candidates 有候选就照抄；核对目标 op 在 `amber schema ctx --topic commands` 能力面内，且词面真的在池里（probe/DOM 命中 ≠ hint 可命中）。
-② 全流程走查：三选一——探针链（每步 1 步微型应用 arrive+read，30 秒判定可达/登录/风控/数据在 DOM）、plan 面草稿（plan new → plan add --signal → plan check --probe → plan run）、walk 模式（`amber run <id> --walk`：同页不重导航、SPA 状态跨步保持，跨页仍导航）。必须带出五样：能力墙（哪步走不通、停因是什么）、产品事实（真实文案/控件/URL 规律）、提槽清单（随任务变化的值 → meta.slots）、done 素材（动作前后页面形态）、绕行决策（换入口/来源/控件族；不绕反爬，早停）。
+② 全流程走查：四选一——探针链（每步 1 步微型应用 arrive+read，30 秒判定可达/登录/风控/数据在 DOM）、plan 面草稿（plan new → plan add --signal → plan check --probe → plan run）、walk 模式（`amber run <id> --walk`：同页不重导航、SPA 状态跨步保持，跨页仍导航）。模型驾驶走查（`amber pilot`：决策模型逐步投票驾驶 + 停因交接 Agent 兜底，规则档先行零模型）；走通后 `amber pilot export --record` 还原 app.mjs 骨架，只出骨架不归纳 done。必须带出五样：能力墙（哪步走不通、停因是什么）、产品事实（真实文案/控件/URL 规律）、提槽清单（随任务变化的值 → meta.slots）、done 素材（动作前后页面形态）、绕行决策（换入口/来源/控件族；不绕反爬，早停）。
 ③ 规划应用：done 四形态——正向锚（url_*/css_*）、否定配 exists（裸 not 在空池或重渲染瞬间会空洞成立，必须配 exists）、多动作后判（第一击是中间态，不算完成）、状态前进自检（信号随页面真前进，不是恒真）。值只认 slot（缺值如实 needs_value，不猜）；虚拟列表按视口采样，长流程分块，多源双腿互核。候选窗口有界：每步 40（宽扫 120），按当前视口分桶；要穷举用 ctx.scrollList/ctx.expand 分块（各计 1 步，expand 内点击不占预算；范围控件用 ctx.setRange），引擎不自动滚动；hint 用完整 label（≤200）匹配，aria-label 是 label 别名；回退主内容优先排序在 meta.policy 写 candidate_priority:"main-first"。
 ④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy.done_timeout_ms；`amber apps check <id> --slot k=v` 离线验分支，改掉两条信号 lint（裸 not / any 含 not(exists)）再进 ⑤。
 ⑤ 真跑留证：`amber run <id> --trace`。失败先看 stopCode/reason（reason 自带池快照判别与决策源降级原因）；再看 executed/changed、skipped_actions、done_preheld——done=true 但零执行时先查跳过原因，别把「信号本来就成立」当成动作推进；被 kill 时看 run-killed.json 部分证据。
@@ -45,7 +45,7 @@
 | done 素材 | 每步「动作前不成立、动作后成立」的具体信号 | 各步 `done`（拿不准先 `amber inspect --probe "<selector>"` 实证） |
 | 绕行决策 | 走不通的步骤选哪条等价路径 | 换入口页（`meta.site.pages` + `openPage`）/ 换来源（多源双腿）/ 换控件族；**反爬风控不绕，早停** |
 
-走查工具（按流程形态选用，也可混用；第三种 walk 模式见下）：
+走查工具（按流程形态选用，也可混用；walk 与 pilot 见下）：
 
 - **探针链**：每步一个 1 步微型 flow 应用——`apps new <id>-probe<N>` → `arrive + read` 或单个
   `ctx.step` → `amber run <id>-probe<N> --trace`。适合交互步为主、必须真实动作才能看到下一态的
@@ -53,6 +53,19 @@
 - **plan 面草稿**：`plan new → plan add --signal … → plan check --probe → plan run`。适合线性流程
   快速串步：`plan check --probe` 是只读预检（实况核对 hint 解析与验证步信号，不执行动作），
   `plan run` 才真执行。
+
+- **模型驾驶走查（`amber pilot`，第四种）**：`amber pilot --url <入口页> --goal "<一句话>"
+  [--final-signal '<JSON>'] [--max-steps N] [--record <轨迹>]`——决策模型逐步投票驾驶（规则档
+  先行零模型、低置信先宽扫重问，与 run 同序），停因时投影四件套交接（截图/DOM/池快照/
+  observe）+ 确定性解锁建议，等 Agent 兜底（闭集：`resume`（hint 点名零模型 / `value{k:v}`
+  显式给值 / `skip` 禁选上一票）/ `redirect` / `finish` / `abort`）；`--driver agent` 是零模型
+  对照臂（每步等 Agent 点名）。适合目标明确、交互步多的走查。**边界**：产物带 `pilot:true`，
+  走查通过 ≠ 应用通过（正式结论只能来自生成的 app.mjs 走 `amber run`）；`finish` 必须带信号并
+  经 `checkSignal` 验证；危险词面动作确定性拒绝（`risk_declined`，兜底闭集无 confirm 可越过）；
+  被拒指令 = 单行失败不杀会话。**闭环**：`--record` 驾驶轨迹 → `amber pilot export --record
+  <轨迹> --id <app>` 骨架 → `amber apps check` → 补 done/slot → `amber run`（export 只出骨架，
+  done 是占位符）。协议/交接块契约见 `docs/AGENT_INTERFACE.md` §3.3；桥面 one-shot
+  `amberflow_pilot` 同源（重建桥包后生效）；验收矩阵 `npm run verify:pilot`（非门禁，§3.2）。
 
 **walk 模式（A6，调试旗标，默认关）**：`amber run <id> --walk --trace` 让一个临时 flow 应用在
 **一次 run 内**按真实步序 act→read→act→read 串完整流程，用于本节的走查与失败取证。与默认模式的

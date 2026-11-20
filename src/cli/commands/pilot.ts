@@ -5,11 +5,21 @@
  * 本文件只做 CLI 形状：解析 flags → runPilot（驾驶/兜底回路在 src/app/pilot-entry.ts）。
  *
  * 协议（stdout 纯 JSONL，stderr 人话）：
- *   stdout started / drive / handoff / command_result / pilot_end 各一行一个 JSON 对象；
- *   stdin  兜底指令闭集（每行一个 JSON 对象）：
- *     {"cmd":"resume","hint":"…","value":"…"}   解除交接继续驾驶（hint 点名/value 给值）
+ *   stdout started / drive / handoff / command_result / pilot_end 各一行一个 JSON 对象
+ *   （pilot_end 只发一条：idle/中断/异常的 code 并进汇总行，不重复发终态）；
+ *   stdin  兜底指令闭集（每行一个 JSON 对象；被拒 = 单行失败，继续等下一条）：
+ *     {"cmd":"resume","hint":"…","value":{"k":"v"},"skip":true}
+ *         解除交接继续驾驶：hint 点名即确定性执行（零模型）；value 对象 = 多槽 k:v
+ *         显式给值；skip = 把最近一次驾驶选中的目标加入禁选后继续。
  *     {"cmd":"redirect","url":"…"} | {"cmd":"redirect","goal":"…"}
- *     {"cmd":"finish"} | {"cmd":"abort"}
+ *         换入口或换目标（步史与禁选清段重新累计；预算不清零）。
+ *     {"cmd":"finish","signal":{…}}
+ *         声明最终信号——引擎 checkSignal 验证成立才记 final_signal_held（exit 0）；
+ *         未声明 --final-signal 且不带 signal = config_error 单行拒绝。
+ *     {"cmd":"abort"}   终止（落已走轨迹，exit 3）。
+ *
+ * --driver（缺省 model）：model = 决策模型投票驾驶；agent = 消融对照臂——每步投影
+ * step_request（有界候选含 hint_candidates），等 Agent resume{hint} 点名，零模型票。
  *
  * 纪律：不改任何既有命令的默认行为；不新增依赖；产物恒带 pilot:true。
  */
@@ -62,6 +72,7 @@ export async function runPilotExport(args: string[], ctx: CliContext): Promise<n
         host: { type: "string", multiple: true },
         hosts: { type: "string" },
         force: { type: "boolean" },
+        json: { type: "boolean" },
       },
     });
   } catch (err) {
@@ -92,7 +103,8 @@ export async function runPilotExport(args: string[], ctx: CliContext): Promise<n
       next: ["amber pilot --help"],
     });
   }
-  if (ctx.globals.json) {
+  // --json 允许出现在命令后（全局约定）：globals 已置位或本命令位都走 envelope 输出。
+  if (ctx.globals.json || v.json === true) {
     emitJson(ctx, successEnvelope("pilot export", {
       app_id: result.app_id,
       path: result.path,
@@ -162,6 +174,10 @@ export async function runPilotCommand(args: string[], ctx: CliContext): Promise<
         record: { type: "string" },
         "idle-timeout-ms": { type: "string" },
         headful: { type: "boolean" },
+        driver: { type: "string" },
+        // 全局约定：--json 允许出现在命令后、命令解析器会再看到一次——声明并吞掉，
+        // stdout 本就是 JSONL 协议流，不再叠加 envelope 输出。
+        json: { type: "boolean" },
       },
     });
   } catch (err) {
@@ -199,18 +215,26 @@ export async function runPilotCommand(args: string[], ctx: CliContext): Promise<
     }
   }
 
-  const num = (raw: string | undefined, flag: string, lo: number, hi: number, allowZero: boolean): number | undefined => {
+  // 边界含两端：下界本身合法（--max-steps 1 可用；--idle-timeout-ms 0 = 不限）。
+  const num = (raw: string | undefined, flag: string, lo: number, hi: number): number | undefined => {
     if (raw === undefined) return undefined;
     const n = Number(raw);
-    if (!Number.isFinite(n) || !Number.isInteger(n) || n < lo || n > hi || (!allowZero && n === lo)) {
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < lo || n > hi) {
       throw usageError(`${flag} 需要 ${lo}..${hi} 的整数（拿到 ${JSON.stringify(raw)}）`, {
         next: ["amber pilot --help"],
       });
     }
     return n;
   };
-  const maxSteps = num(v["max-steps"], "--max-steps", 1, 200, false);
-  const idleTimeoutMs = num(v["idle-timeout-ms"], "--idle-timeout-ms", 0, 24 * 60 * 60 * 1000, true);
+  const maxSteps = num(v["max-steps"], "--max-steps", 1, 200);
+  const idleTimeoutMs = num(v["idle-timeout-ms"], "--idle-timeout-ms", 0, 24 * 60 * 60 * 1000);
+  // --driver model|agent：消融对照臂（agent = 每步等 resume{hint} 点名，零模型票）。
+  const driver = v.driver === undefined ? undefined : String(v.driver);
+  if (driver !== undefined && driver !== "model" && driver !== "agent") {
+    throw usageError(`--driver 只接受 model | agent（拿到 ${JSON.stringify(v.driver)}）`, {
+      next: ["amber pilot --help"],
+    });
+  }
   let confFloor: number | undefined;
   if (typeof v["conf-floor"] === "string") {
     const f = Number(v["conf-floor"]);
@@ -246,6 +270,7 @@ export async function runPilotCommand(args: string[], ctx: CliContext): Promise<
     ...(finalSignal === null ? {} : { finalSignal }),
     ...(maxSteps === undefined ? {} : { maxSteps }),
     ...(confFloor === undefined ? {} : { confFloor }),
+    ...(driver === undefined ? {} : { driver }),
     ...(Object.keys(slots).length === 0 ? {} : { slots }),
     inputFile: typeof v.input === "string" ? path.resolve(ctx.cwd, v.input) : null,
     outDir,

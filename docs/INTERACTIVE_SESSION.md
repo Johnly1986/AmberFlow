@@ -4,6 +4,11 @@
 > 元素解析 / 动作执行 / 信号判定与正式 `run` **同源**（调用同一批函数，不是照抄语义）。
 > 正式执行仍然是「冻结计划 + 运行时消歧」：session 不产生 `done`、不写 `result.json`、
 > 不替代 `run` 的通过/失败结论。设计稿见 `iterations/interactive-session/design.md`。
+>
+> 划界（pilot 是并列新面，本面纪律不变）：`amber pilot`（PILOTED_WALKTHROUGH_PLAN）是
+> **模型驾驶走查面**——决策模型逐步投票驾驶、Agent 只在停因交接时兜底；session 保持
+> 「一步都不问模型」的 authoring 纪律。两面的证据与可复现口径各自独立（session 的请求
+> 记录 vs pilot 的驾驶轨迹 + trace），互不借道、互不冒充。
 
 ## 什么时候用
 
