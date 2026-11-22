@@ -46,6 +46,8 @@ const CAPABILITIES: ProviderCapabilities = {
   done: true,
   shortlist: false,
   score_kind: "calibrated_prob",
+  // DC4：决策服务档消费 L0–L4（goal/候选/注记/计划叙事/站点知识）。
+  context: "full",
 };
 
 /** `AMBERFLOW_DECISION_BASE_URL`，空串 = 未配置。 */

@@ -24,6 +24,8 @@ const CAPABILITIES: ProviderCapabilities = {
   done: true,
   shortlist: false,
   score_kind: "calibrated_prob",
+  // DC4：OpenAI Decisions 档消费 L0–L4（与统一决策服务同档）。
+  context: "full",
 };
 
 /** 当前 OpenAI 原生 Decisions 唯一的模型；留空时用它。 */

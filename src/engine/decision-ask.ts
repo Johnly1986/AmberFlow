@@ -11,14 +11,18 @@
  * 本实现只承载 pilot 面当前模型票所需的阶梯；窗口升级/升级票/裁决票/R2b/族修复**未实现**，
  * `profile` 的对应开关在本文件无效（调用方不得假设它们生效）。
  *
- * `DecisionAskHost` 是纯结构类型（engine 不 import 应用层）：面把 middleware/账本折成这四个
+ * 上文能力档（DC4）只影响**逐层回执**，不改变询问行为：`none`/`minimal` 档的 L3/L4 记
+ * `unsupported`（有声明但 provider 不收）；`full`/未声明档按产出事实记 `sent`/`absent`；
+ * 提供了段但未注册 face/段 = `rejected`（校验不过，照常询问，不 abort）。
+ *
+ * `DecisionAskHost` 是纯结构类型（engine 不 import 应用层）：面把 middleware/账本折成这些
  * 观察与投票原语注入；`ready` 让"模型不在位"如实回 `no_model`，而不是伪装成弃权。
  */
 import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts";
 import type { ProviderCapabilities, ProviderPage } from "../support/decision-provider-contract.ts";
 import type {
   DecisionAccounting, DecisionAsk, DecisionAskIntent, DecisionAskLadderCode, DecisionAskOutcome,
-  DecisionAskPorts, DecisionLayerReceipt, DecisionLifetime, DecisionPickProfile,
+  DecisionAskPorts, DecisionLayerReceipt, DecisionLifetime, DecisionPickProfile, DecisionSegment,
 } from "./decision-ask-contract.ts";
 import { esig, type ElemPool } from "./elem-model.ts";
 import type { PickProposal } from "./executor-types.ts";
@@ -46,11 +50,13 @@ export interface DecisionAskHost {
   filter(pool: ElemPool): ElemPool | null;
   /** 把握数解释档（floor 闸门怎么读 `score`）；null = 面未声明，回执按 entropy_conf 记。 */
   scoreKind(): ProviderCapabilities["score_kind"] | null;
+  /** DC4 上文能力档（provider 自报）；null = 未声明（回执不据此判 unsupported）。 */
+  contextCapability(): ProviderCapabilities["context"] | null;
 }
 
-/** 装配选项（S1 只保留端口占位：face/段/site-facts 校验与 L4 取数未接线）。 */
+/** 装配选项（S3：端口参与段校验与逐层回执；不改询问行为）。 */
 export interface DecisionAskOptions {
-  /** 组合根注入端口（S1 不消费；S3 起用于面注册校验与站点知识取数）。 */
+  /** 组合根注入端口（faces/segments/siteFacts）。缺省 undefined = 无端口（回执按未产出记 absent）。 */
   ports?: DecisionAskPorts;
 }
 
@@ -78,33 +84,73 @@ async function extractWide(host: DecisionAskHost, page: ProviderPage): Promise<E
   }
 }
 
+/** 计算逐层回执的输入事实（一次询问内固定；只读，不参与裁决）。 */
+interface ReceiptContext {
+  /** `intent.segments`（S3 起接受面传入，S4 才作为请求段上线）。 */
+  segments: readonly DecisionSegment[];
+  /** provider 自报的上文能力档；null = 未声明。 */
+  capability: ProviderCapabilities["context"] | null;
+  /** 组合根注入端口；undefined = 未接线。 */
+  ports: DecisionAskPorts | undefined;
+  /** 当前询问面（注册校验用；未注册 = generic，行为不变）。 */
+  face: string;
+}
+
+/** 能力档是否允许某层：`none`/`minimal` 只到 L2（L3/L4 = provider 不收）；`full`/未声明不设限。 */
+function capabilityAllows(cap: ProviderCapabilities["context"] | null, layer: "L0" | "L1" | "L2" | "L3" | "L4"): boolean {
+  if (cap === "none" || cap === "minimal") return layer === "L0" || layer === "L1" || layer === "L2";
+  return true;
+}
+
+/** 层产出事实的字符数（L0 goal 原文 / L1 候选数×近似字节 / L2 注记 JSON；L3/L4 由段产出）。 */
+function producedChars(
+  layer: "L0" | "L1" | "L2" | "L3" | "L4",
+  goal: string, pool: ElemPool | null, notes: Record<string, string> | null,
+): number {
+  if (layer === "L0") return typeof goal === "string" ? goal.trim().length : 0;
+  if (layer === "L1") return (pool === null ? 0 : Object.keys(pool).length) * LAYER1_CHARS_PER_CANDIDATE;
+  if (layer === "L2") return notes === null ? 0 : Object.keys(notes).length === 0 ? 0 : JSON.stringify(notes).length;
+  return 0;
+}
+
 /**
- * 最小逐层回执（DC1.3：带/未带都如实回传，任何裁剪/缺席都不静默）：
- *   - L0 = 目标语义（goal），chars = 原文长度；
- *   - L1 = 候选池（chars = 候选数 × 每候选近似字节）；
- *   - L2 = 账本注记（chars = 注记 JSON 长度）；
- *   - L3/L4 在 S1 尚无注入路径（面不传段、无 site-facts 端口）→ 回执 `absent`，
- *     不伪造 sent/clipped；S3/S4 接段与端口后改为真实状态。
+ * 单层回执：**先声明档、再段校验、最后产出事实**（DC1.3：带/未带/收不了一律如实回传）。
+ * 状态闭集语义：`sent` = 真带上；`absent` = 没产出；`unsupported` = provider 声明档不收；
+ * `rejected` = 提供了段但校验不过（未注册 face/段或层不符）——rejected 不阻断询问本身。
  */
-function layerReceipts(goal: string, pool: ElemPool | null, notes: Record<string, string> | null): DecisionLayerReceipt[] {
-  const layers: DecisionLayerReceipt[] = [];
-  const goalText = typeof goal === "string" ? goal : "";
-  layers.push(goalText.trim() === ""
-    ? { layer: "L0", status: "absent", chars: 0 }
-    : { layer: "L0", status: "sent", chars: goalText.length });
-  const candidateCount = pool === null ? 0 : Object.keys(pool).length;
-  layers.push(candidateCount === 0
-    ? { layer: "L1", status: "absent", chars: 0 }
-    : { layer: "L1", status: "sent", chars: candidateCount * LAYER1_CHARS_PER_CANDIDATE });
-  const noteCount = notes === null ? 0 : Object.keys(notes).length;
-  layers.push(noteCount === 0
-    ? { layer: "L2", status: "absent", chars: 0 }
-    : { layer: "L2", status: "sent", chars: JSON.stringify(notes).length });
-  // L3/L4：本批无注入路径（S3/S4 接段与 site-facts 端口），如实报 absent——
-  // 「没带」必须可被审计，不能靠"数组里没有"表达。
-  layers.push({ layer: "L3", status: "absent", chars: 0 });
-  layers.push({ layer: "L4", status: "absent", chars: 0 });
-  return layers;
+function layerReceipt(
+  layer: "L0" | "L1" | "L2" | "L3" | "L4", ctx: ReceiptContext,
+  goal: string, pool: ElemPool | null, notes: Record<string, string> | null,
+): DecisionLayerReceipt {
+  if ((layer === "L3" || layer === "L4") && !capabilityAllows(ctx.capability, layer)) {
+    return { layer, status: "unsupported", chars: 0 };
+  }
+  const produced = producedChars(layer, goal, pool, notes);
+  const segs = ctx.segments.filter((s) => s.layer === layer);
+  if (segs.length === 0) {
+    return produced === 0 ? { layer, status: "absent", chars: 0 } : { layer, status: "sent", chars: produced };
+  }
+  // 段校验 fail-closed：无端口 / face 未注册 / 段未注册或层不符 → rejected（询问照常继续）。
+  if (ctx.ports === undefined) return { layer, status: "rejected", chars: 0 };
+  if ((ctx.ports.faces?.(ctx.face) ?? null) === null) return { layer, status: "rejected", chars: 0 };
+  let chars = produced;
+  let budget = 0;
+  let truncated = false;
+  for (const s of segs) {
+    const reg = ctx.ports.segments?.(s.kind);
+    if (reg === undefined || reg === null || reg.layer !== layer) return { layer, status: "rejected", chars: 0 };
+    budget += reg.budgetChars;
+    chars += Math.min(s.text.length, reg.budgetChars);
+    if (s.text.length > reg.budgetChars) truncated = true;
+  }
+  return { layer, status: "sent", chars, ...(budget === 0 ? {} : { budget }), ...(truncated ? { truncated } : {}) };
+}
+
+/** 五层回执（顺序固定 L0→L4；层闭集不得增第六层）。 */
+function layerReceipts(
+  ctx: ReceiptContext, goal: string, pool: ElemPool | null, notes: Record<string, string> | null,
+): DecisionLayerReceipt[] {
+  return (["L0", "L1", "L2", "L3", "L4"] as const).map((layer) => layerReceipt(layer, ctx, goal, pool, notes));
 }
 
 /** 弃权回执：`executionPool` 为最后一次真实询问所用的池（窄问弃权 = null；宽扫后 = 宽池）。 */
@@ -120,10 +166,9 @@ function abstained(
 
 /**
  * 造一次询问 seam：内部按 `host` 自取池并执行窄问 → 闸门 → 宽扫阶梯，回执行池与投票信号。
- * 端口（face/段/site-facts）本批未接线——`opts` 只为固定组合根注入形状。
+ * `opts.ports` 只参与段校验与逐层回执（S3），不改变 picked/abstained 语义。
  */
 export function createDecisionAsk(host: DecisionAskHost, opts: DecisionAskOptions = {}): DecisionAsk {
-  void opts;   // S1：端口未消费（见 DecisionAskOptions 注释）
   return {
     async ask(
       page: ProviderPage, scope: DecisionLifetime, accounting: DecisionAccounting,
@@ -133,12 +178,17 @@ export function createDecisionAsk(host: DecisionAskHost, opts: DecisionAskOption
       const goal = intent.goal;
       const instruction = intent.instruction ?? goal;
       const confFloor = profile.confFloor ?? DEFAULT_CONF_FLOOR;
+      const ready = await host.ready();
+      const receipts = (pool: ElemPool | null, notes: Record<string, string> | null): DecisionLayerReceipt[] =>
+        layerReceipts({
+          segments: intent.segments ?? [], capability: host.contextCapability(), ports: opts.ports, face: profile.face,
+        }, goal, pool, notes);
 
       // ⓪ 模型不在位 = 如实 no_model（绝不装会抛的 runtime，也不伪装弃权）。
-      if ((await host.ready()).rulesOnly) {
+      if (ready.rulesOnly) {
         return {
           kind: "no_model", asked: 0, reason: { code: "no_model_runtime" }, executionPool: null,
-          context: { layers: layerReceipts(goal, null, null) },
+          context: { layers: receipts(null, null) },
         };
       }
 
@@ -154,7 +204,7 @@ export function createDecisionAsk(host: DecisionAskHost, opts: DecisionAskOption
       let asked = 1;
       let proposal = await host.pick(goal, page, pool, forbidden, notes);
       if (proposal.choiceRef === null) {
-        return abstained(null, [], asked, layerReceipts(goal, pool, notes));
+        return abstained(null, [], asked, receipts(pool, notes));
       }
 
       // ④ floor 闸门不过 = 低置信回流：先付一次宽扫，宽池**真变大**才重问；否则如实弃权
@@ -164,14 +214,14 @@ export function createDecisionAsk(host: DecisionAskHost, opts: DecisionAskOption
       const ladder: DecisionAskLadderCode[] = [];
       const gated = !passesFloor(proposal, confFloor);
       if (gated && profile.reobserve === false) {
-        return abstained(pool, [], asked, layerReceipts(goal, pool, notes));
+        return abstained(pool, [], asked, receipts(pool, notes));
       }
       if (gated) {
         const wideRaw = await extractWide(host, page);
         const wide = wideRaw === null ? null : (host.filter(wideRaw) ?? wideRaw);
         ladder.push("wide_reobserve");
         if (wide === null || Object.keys(wide).length <= Object.keys(pool).length) {
-          return abstained(null, ladder, asked, layerReceipts(goal, pool, notes));
+          return abstained(null, ladder, asked, receipts(pool, notes));
         }
         // 宽池重编号：账本禁选按 esig 平移（策略在工厂），注记按新池重投影后重问。
         accounting.prune(wide);
@@ -182,7 +232,7 @@ export function createDecisionAsk(host: DecisionAskHost, opts: DecisionAskOption
         proposal = await host.pick(goal, page, pool, forbidden, notes);
         via = "reobserve";
         if (proposal.choiceRef === null || !passesFloor(proposal, confFloor)) {
-          return abstained(pool, ladder, asked, layerReceipts(goal, pool, notes));
+          return abstained(pool, ladder, asked, receipts(pool, notes));
         }
       }
 
@@ -190,7 +240,7 @@ export function createDecisionAsk(host: DecisionAskHost, opts: DecisionAskOption
       const ref = proposal.choiceRef;
       const el = pool[ref];
       if (el === undefined) {
-        return abstained(pool, ladder, asked, layerReceipts(goal, pool, notes),
+        return abstained(pool, ladder, asked, receipts(pool, notes),
           "pick returned a ref outside the execution pool");
       }
       return {
@@ -198,7 +248,7 @@ export function createDecisionAsk(host: DecisionAskHost, opts: DecisionAskOption
         method: via === "reobserve" ? "model:reobserve" : "model",
         ladder, via, asked,
         signal: { proposal, scoreKind: host.scoreKind() ?? "entropy_conf" },
-        context: { layers: layerReceipts(goal, pool, notes) },
+        context: { layers: receipts(pool, notes) },
       };
     },
   };

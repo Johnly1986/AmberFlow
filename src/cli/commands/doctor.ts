@@ -81,16 +81,8 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
   const config = resolveConfig(ctx.baseEnv, ctx.cwd, ctx.explicitConfig);
   const apps = await listAppInfos(ctx);
   const userCount = apps.filter((a) => a.source === "user").length;
-  let providerDefault: { name: string; tier: string } | null = null;
-  let providerError: string | null = null;
-  try {
-    const dflt = await provider.resolveProviderSpec(undefined);
-    providerDefault = { name: dflt.name, tier: String(dflt.tier) };
-  } catch (err) {
-    // A5：解析期错误已附「两条通道」指引；JSON 的 `provider.error` 仍只放事实（旧字段语义不变），
-    // 指引在文本输出与文档里给。
-    providerError = provider.decisionFailureFact(err);
-  }
+  // 决策源声明事实（A3/A5 的 default/error + DC4 能力矩阵）：只读解析，不建 runtime、不探网。
+  const { providerDefault, providerError, decisionContext } = await resolveProviderFacts(provider);
   const providers = provider.listDecisionProviders();
   // A3（决策源对齐）：真实 ask 探针。doctor 的静态检查只看"配置项在不在"，看不出凭据是否
   // 真能过网关——实测有"配置齐全 + 403 AccessDenied.Unpurchased"的组合，引擎把它吞成静默降级。
@@ -118,6 +110,7 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
       llm: { configured: p.llm },
       provider: {
         default: providerDefault, error: providerError, available: providers,
+        context: decisionContext,
         // A5：探针真跑过才出现这个字段（没配在线决策源 / --no-ask-probe 时缺席——
         // 那种情况下的 JSON 形状与旧版逐字段一致）。
         ...(askProbe === null ? {} : { ask_probe: askProbe }),
@@ -192,6 +185,7 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
   } else if (providerError) {
     say(ctx, `当前决策源：解析失败（${providerError}）`);
   }
+  say(ctx, decisionContextLine(decisionContext));
   // A3/A5：探针结果单独一行（或未发请求时的提示）。成败都不动退出码——医生只诊断。
   if (askProbe === null) {
     say(ctx, askProbeDisabled
@@ -212,6 +206,46 @@ export async function runDoctor(args: string[], ctx: CliContext): Promise<number
     say(ctx, "下一步：amber doctor --fix / amber config show");
   }
   return exitCode;
+}
+
+/** DC4 能力矩阵的一行（provider 的**声明**，不是探测结论；未解析出决策源 = none）。 */
+interface DecisionContextFact {
+  provider: string;
+  context: "none" | "minimal" | "full";
+  state_digest: boolean;
+}
+
+/** 无决策源时的如实声明（fail-closed：不发明第四档）。 */
+const NO_DECISION_CONTEXT: DecisionContextFact = { provider: "none", context: "none", state_digest: false };
+
+/**
+ * 决策源声明事实（doctor 只读面）：解析 `ProviderSpec` → default 名/tier、解析期错误、DC4
+ * `context`/`state_digest` 声明。**不建 runtime、不发请求**；无决策源如实 none。
+ */
+async function resolveProviderFacts(
+  provider: typeof import("../../model/decision-provider.ts"),
+): Promise<{
+  providerDefault: { name: string; tier: string } | null;
+  providerError: string | null;
+  decisionContext: DecisionContextFact;
+}> {
+  try {
+    const spec = await provider.resolveProviderSpec(undefined);
+    return {
+      providerDefault: { name: spec.name, tier: String(spec.tier) },
+      providerError: null,
+      decisionContext: provider.declaredDecisionContext(spec),
+    };
+  } catch (err) {
+    // A5：解析期错误已附「两条通道」指引；JSON 的 `provider.error` 仍只放事实（旧字段语义不变），
+    // 指引在文本输出与文档里给。
+    return { providerDefault: null, providerError: provider.decisionFailureFact(err), decisionContext: NO_DECISION_CONTEXT };
+  }
+}
+
+/** DC4 能力矩阵文本行（doctor 审计面的格式单点）。 */
+function decisionContextLine(d: DecisionContextFact): string {
+  return `decision context: provider=${d.provider} context=${d.context} state_digest=${String(d.state_digest)}`;
 }
 
 /** A3/A5：`doctor` 缺省 ask 探针（`--no-ask-probe` 可关）的一次结果。医生只诊断：成败都不影响退出码。 */

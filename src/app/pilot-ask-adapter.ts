@@ -17,6 +17,7 @@ import type {
   DecisionAccounting, DecisionAsk, DecisionAskOutcome, DecisionLifetime,
 } from "../engine/decision-ask-contract.ts";
 import { WIDER_ELEMENTS } from "../engine/executor-pure.ts";
+import { decisionAskPortsOf } from "./middleware-factory.ts";
 import type { AnyPage, BrowserMiddleware } from "../engine/executor.ts";
 import type { ProviderPage } from "../support/decision-provider-contract.ts";
 import { PilotLedger } from "./pilot-ledger.ts";
@@ -33,7 +34,8 @@ export interface PilotAskCall {
  * 适配器要能在 middleware 之前构造（字段初始化顺序不成为耦合）。
  */
 export class PilotAskAdapter {
-  private readonly ask: DecisionAsk;
+  /** 询问 seam（惰性建：端口来自 `buildMiddleware` 的 WeakMap，构造期 middleware 可能还不存在）。 */
+  private askSeam: DecisionAsk | null = null;
   private readonly ledger: PilotLedger;
   private readonly mwRef: () => BrowserMiddleware;
   private readonly hostsRef: () => string[] | null;
@@ -49,7 +51,6 @@ export class PilotAskAdapter {
     this.ledger = ledger;
     this.hostsRef = hosts;
     this.runId = runId;
-    this.ask = createDecisionAsk(this.host());
   }
 
   /** 改道 = 换语境：leg 自增，下一轮询问用新作用域的账本实例。 */
@@ -63,9 +64,17 @@ export class PilotAskAdapter {
     return { kind: "pilot-leg", runId: this.runId, leg: this.leg };
   }
 
+  /** 询问 seam：组合根经 `buildMiddleware` 注入的端口随 middleware 一起取（缺省 = 无端口）。 */
+  private seam(): DecisionAsk {
+    if (this.askSeam === null) {
+      this.askSeam = createDecisionAsk(this.host(), { ports: decisionAskPortsOf(this.mwRef()) });
+    }
+    return this.askSeam;
+  }
+
   /** 询问一次：引擎自取池、读账本、执行窄问→闸门→宽扫阶梯，回执行池与投票信号。 */
   async vote(a: PilotAskCall): Promise<DecisionAskOutcome> {
-    return await this.ask.ask(
+    return await this.seam().ask(
       a.page as unknown as ProviderPage,
       this.scope(),
       this.accountingForLeg(),
@@ -104,6 +113,7 @@ export class PilotAskAdapter {
         await this.mwRef().pickProposal(goal, page as unknown as AnyPage, pool, forbidden, notes),
       filter: (pool: ElemPool): ElemPool | null => PilotLedger.filterAggregate(pool),
       scoreKind: () => this.mwRef().decision?.capabilities.score_kind ?? "entropy_conf",
+      contextCapability: () => this.mwRef().decision?.capabilities.context ?? null,
     };
   }
 }

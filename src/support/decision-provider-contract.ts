@@ -30,6 +30,15 @@ export interface ProviderCapabilities {
    */
   score_kind: "calibrated_prob" | "entropy_conf" | "rank_only";
   /**
+   * DC4 上文能力档：该 provider **消费哪些上文层**（声明 ≠ 协议；只决定询问面怎么记回执）：
+   *   - `none`    = 不消费分层上文（请求方无需装配，回执 L3/L4 记 unsupported）；
+   *   - `minimal` = L0–L2（本地 laya 档：goal / 候选池 / 账本注记，受既有 token 单源约束）；
+   *   - `full`    = L0–L4（决策服务档：另含 L3 计划叙事 / L4 站点知识）。
+   * 缺省不声明 = 未声明（询问面不得据此推断"不支持"，按未声明处理）。**只声明能力**：
+   * 本字段不改变任何 provider 的输入协议，也不把新字段塞进决策请求。
+   */
+  context?: "none" | "minimal" | "full";
+  /**
    * 支持在决策请求里带结构化 `state_digest`（S5b；缺省/不声明 = 不支持）。
    * 只有观测面是**不透明包**的 provider（SystemOne 的 `state`）才能附加这个可选键；
    * 输入 schema 固定或协议严格的 provider（本地 laya-onnx、OpenAI Decisions 的 `input`）

@@ -12,6 +12,7 @@
  * 非 confirm 字段原样透传给执行器；`confirmFn` 只能经 `confirmPolicy` 声明。
  */
 import { DESTRUCTIVE_PATTERNS } from "../engine/rules.ts";
+import type { DecisionAskPorts } from "../engine/decision-ask-contract.ts";
 import { createAppCandidateProducer } from "./candidate-source.ts";
 import { appDecisionRuntime } from "./decision-runtime.ts";
 import { BrowserMiddleware } from "../engine/executor.ts";
@@ -46,8 +47,25 @@ export type ConfirmPolicy =
 export interface BuildMiddlewareConfig {
   face: MiddlewareFace;
   confirmPolicy: ConfirmPolicy;
-  /** 除 `confirmFn` 外的执行器选项，原样透传。 */
-  options?: Omit<MiddlewareOptions, "confirmFn">;
+  /**
+   * 除 `confirmFn` 外的执行器选项，原样透传。额外收 `decisionAskPorts`（DC7 组合根注入面）：
+   * 它**不进执行器**（不是执行选项），由本工厂按 middleware 实例寄存，询问适配器经
+   * `decisionAskPortsOf` 取回；缺省 undefined = 无端口（回执按未产出记）。
+   */
+  options?: Omit<MiddlewareOptions, "confirmFn"> & { decisionAskPorts?: DecisionAskPorts };
+}
+
+/**
+ * 询问端口寄存（middleware 实例 → 端口）。为什么用 WeakMap 而不是执行器字段：
+ * 端口属**组合根装配**（engine 的 `DecisionAskPorts` 由 app 注入），执行器构造面（
+ * `MiddlewareOptions`）是冻结的执行选项面——把装配面混进去会让执行器 import 询问实现。
+ * 生命周期随 middleware 实例，不跨实例泄漏。
+ */
+const DECISION_ASK_PORTS = new WeakMap<BrowserMiddleware, DecisionAskPorts>();
+
+/** 取回本 middleware 注入的询问端口（未注入 = undefined）。 */
+export function decisionAskPortsOf(mw: BrowserMiddleware): DecisionAskPorts | undefined {
+  return DECISION_ASK_PORTS.get(mw);
 }
 
 /** face → 唯一合法的 `confirmPolicy.kind`（构造期校验的唯一出处）。 */
@@ -96,6 +114,7 @@ function confirmFnFor(face: MiddlewareFace, policy: ConfirmPolicy): ConfirmFn | 
  */
 export function buildMiddleware(config: BuildMiddlewareConfig): BrowserMiddleware {
   const { face, confirmPolicy, options = {} } = config;
+  const { decisionAskPorts, ...engineOptions } = options;
   if (!(face in FACE_POLICY)) {
     throw new Error(`buildMiddleware: 未知 face ${JSON.stringify(face)}（已登记：${Object.keys(FACE_POLICY).join(" / ")}）`);
   }
@@ -103,11 +122,13 @@ export function buildMiddleware(config: BuildMiddlewareConfig): BrowserMiddlewar
     throw new Error("buildMiddleware: confirmFn 只能经 confirmPolicy 声明，不能放进 options");
   }
   const confirmFn = confirmFnFor(face, confirmPolicy);
-  return new BrowserMiddleware({
-    ...options,
-    candidateProducer: options.candidateProducer ?? createAppCandidateProducer(),
+  const mw = new BrowserMiddleware({
+    ...engineOptions,
+    candidateProducer: engineOptions.candidateProducer ?? createAppCandidateProducer(),
     // W5-3：决策运行时装配缺省注入组合根实现（engine 不 import model 实现；显式优先）。
-    decisionRuntime: options.decisionRuntime ?? appDecisionRuntime,
+    decisionRuntime: engineOptions.decisionRuntime ?? appDecisionRuntime,
     ...(confirmFn === undefined ? {} : { confirmFn }),
   });
+  if (decisionAskPorts !== undefined) DECISION_ASK_PORTS.set(mw, decisionAskPorts);
+  return mw;
 }

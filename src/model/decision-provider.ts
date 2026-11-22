@@ -194,6 +194,29 @@ export type ProviderSpec =
   | { kind: "none"; name: string; tier: string; ablation: true };
 
 /**
+ * DC4：按 `ProviderSpec` 读**声明**的上下文能力档（doctor/报告用；不建 runtime、不发请求）。
+ * `laya` 档按名字区分：本地 laya-onnx = `minimal`，`scripted-stub` 消融臂 = `none`。
+ * 未声明 = 按 `none` 呈现（"不消费分层上文"），报告不发明第四档。
+ */
+export function declaredContextOf(spec: ProviderSpec): "none" | "minimal" | "full" {
+  if (spec.kind === "none") return "none";
+  if (spec.kind === "provider") return spec.provider.capabilities.context ?? "none";
+  return spec.name === "scripted-stub" ? "none" : "minimal";
+}
+
+/** DC4 同源：`state_digest` 的声明事实（无声明 = false；laya/none 档恒 false）。 */
+export function declaredStateDigestOf(spec: ProviderSpec): boolean {
+  return spec.kind === "provider" && spec.provider.capabilities.state_digest === true;
+}
+
+/** DC4 声明矩阵的一行投影（doctor 一行的单一出处；`provider` 与 `ChoiceRequest` 面同源名）。 */
+export function declaredDecisionContext(spec: ProviderSpec): {
+  provider: string; context: "none" | "minimal" | "full"; state_digest: boolean;
+} {
+  return { provider: spec.name, context: declaredContextOf(spec), state_digest: declaredStateDigestOf(spec) };
+}
+
+/**
  * 给 provider 套一层咨询计数（基线 provider 也要出场数，否则梯级账单会把它算成零咨询）。
  * A3 补了一本**失败账**：ask 抛错（HTTP 403/超时/DNS……）是基础设施失败，不是"模型给的意见
  * 没过闸门"——闸门是对意见打分，抛错说明根本没拿到意见。旧行为把抛错的 ask 也计进 asks，
@@ -411,6 +434,8 @@ export function layaProvider(opts: {
   const { runtime, agentFor } = opts;
   const caps: ProviderCapabilities = {
     choice: true, risk: true, done: true, shortlist: true, score_kind: "entropy_conf",
+    // DC4：本地 laya 档只消费 L0–L2（goal/候选/注记）；不消费 L3/L4。
+    context: "minimal",
     ...opts.capabilities,
   };
   return {

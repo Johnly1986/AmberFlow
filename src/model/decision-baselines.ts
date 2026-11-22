@@ -39,7 +39,7 @@ const openRefs = (req: ChoiceRequest): string[] => {
 export function firstCandidateProvider(): DecisionProvider {
   return {
     name: "first-candidate", version: "1",
-    capabilities: { choice: true, risk: false, done: false, shortlist: false, score_kind: "rank_only" },
+    capabilities: { choice: true, risk: false, done: false, shortlist: false, score_kind: "rank_only", context: "none" },
     async pick(req: ChoiceRequest): Promise<ChoiceOutcome> {
       const refs = openRefs(req);
       const ref = refs[0] ?? null;
@@ -56,7 +56,7 @@ export function firstCandidateProvider(): DecisionProvider {
 export function coinFlipProvider(): DecisionProvider {
   return {
     name: "coin-flip", version: "1",
-    capabilities: { choice: true, risk: false, done: false, shortlist: false, score_kind: "calibrated_prob" },
+    capabilities: { choice: true, risk: false, done: false, shortlist: false, score_kind: "calibrated_prob", context: "none" },
     async pick(req: ChoiceRequest): Promise<ChoiceOutcome> {
       const refs = openRefs(req);
       if (!refs.length) {
@@ -80,7 +80,7 @@ export function coinFlipProvider(): DecisionProvider {
 export function alwaysAbstainProvider(): DecisionProvider {
   return {
     name: "always-abstain", version: "1",
-    capabilities: { choice: true, risk: false, done: false, shortlist: false, score_kind: "rank_only" },
+    capabilities: { choice: true, risk: false, done: false, shortlist: false, score_kind: "rank_only", context: "none" },
     async pick(req: ChoiceRequest): Promise<ChoiceOutcome> {
       const refs = openRefs(req);
       return { ref: null, score: 0, scoreKind: "rank_only",

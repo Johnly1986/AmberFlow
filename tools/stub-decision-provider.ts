@@ -70,7 +70,7 @@ export function makeStubProvider(
     version: "characterization-1",
     capabilities: {
       choice: true, risk: false, done: false, shortlist: true,
-      score_kind: "calibrated_prob", ...capabilities,
+      score_kind: "calibrated_prob", context: "none", ...capabilities,
     },
     async pick(req: ChoiceRequest): Promise<ChoiceOutcome> {
       const snap = snapshotOf(req, requests.length);

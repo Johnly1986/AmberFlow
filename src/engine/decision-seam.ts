@@ -81,7 +81,11 @@ export async function assembleDecisionRuntime(mw: BrowserMiddleware): Promise<vo
       runtime: rt,
       agentFor: (st) => mw.agentFor(st),
       name: `laya-onnx`, version: mw.modelId === undefined ? "default" : String(mw.modelId),
-      capabilities: { choice: true, risk: true, done: true, shortlist: true, score_kind: "entropy_conf" },
+      capabilities: {
+        choice: true, risk: true, done: true, shortlist: true, score_kind: "entropy_conf",
+        // DC4：本地 laya 档只消费 L0–L2（与 `layaProvider` 缺省同值）。
+        context: "minimal",
+      },
     });
     mw._ready = true;
 }
