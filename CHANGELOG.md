@@ -4,6 +4,27 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-22 S1 一期：引擎 ask seam 落地 + pilot 切面（双臂零差异）
+
+- **引擎 `ask` seam（DC7 S1 一期）**：新增 `src/engine/decision-ask.ts` —— 把 pilot 当前 `modelVote` 语义
+  搬进引擎：窄问（`host.extract` 自取池 + `filter` 剔无角色聚合容器）→ 账本 `forbiddenRefs`/`notesFor`
+  （作用域策略由 `DecisionAccounting` 工厂绑定）→ floor 闸门（`gateOf`/`passesFloor` 单源上收）→
+  低置信宽扫重问（宽池真变大才重问，`accounting.prune` 按 esig 平移）→ 弃权/命中；回执
+  `executionPool` + `target{ref, sig}` + `signal{proposal, scoreKind}` + 逐层 `context.layers`
+  （L0–L4，未注入的 L3/L4 如实 `absent`）。
+- **pilot 切面**：新增 `src/app/pilot-ask-adapter.ts`（mw+PilotLedger → `DecisionAskHost`；pilot-leg
+  作用域 + `noteRedirect()` 换 leg）；`modelVote` 改为委托 adapter（`modelVoteLegacy` 保留为对照臂，
+  缺省注入时退回 legacy 防静默换语义）；`pilot-runtime` 净 +1 行（**800/800**）。
+- **双臂对照 lane（非门禁）**：`tools/verify-decision-ask-parity.ts` —— 5 场景 × 3 臂（legacy / ask /
+  新路径）确定性 stub 对照（请求投影/返回投影/ref/conf/shape/via/asked/执行池 ref 序/命中 sig），
+  **零差异**；首现差异逐条打印并 exit 1。
+- **已知差异（记录在案）**：ask 内部重新抽一次池（S1.1 用 executionPool 复用消除）；宽扫重问的
+  notes 按宽池重算（legacy 复用窄池 notes，属改善）。
+- **S1.2 留口**：escalate/adjudicate/R2b/族修复/窗口升级、`tieredHint` 窄问、`rules_first`、`limit`、
+  `stepTimeoutMs` 硬约束、L3/L4 段与 ports、跨作用域 memory。
+- 验收：`verify:pilot` 12/12、`verify:decision-characterization` 10/10、`verify:runtime:offline` 8/8、
+  `verify-decision-ask-parity` 5/5 零差异、typecheck/maintain/`npm run check` 绿。
+
 ## [Unreleased] — 2026-11-22 决策 characterization 扩面 + verify:offline 基线结案
 
 - **S0a 二期 characterization 场景（4 条新增，共 10 条）**：`run-escalate`（`decision_kind=escalate`/`method=escalate`/不产生第二次 provider 询问）、`run-family-repair`（族不符 → `nominated_family_empty` 或 `nominated_family_repair`）、`run-r2b`（`conf∈[floor,0.9)` + 提名与指令词面零重叠 → 第二次宽扫，池 64→100，**按 conf/重叠判定进入条件**而非 method）、`run-retry-memory`（同一 `OutcomeMemory` 两次 attempt：记忆键跨 attempt 稳定 + rank 档第二次带 `[tried before, page did not change]` 注记）。`verify-decision-characterization`：10/10（`--record` 连跑两次逐字节一致）；pilot-leg 生命周期场景列为后续（需 pilot runtime harness，避免与 verify-pilot 耦合）。

@@ -1,37 +1,27 @@
 /**
- * `amber pilot` 的模型投票阶梯（pilot-runtime 第③段拆分；方案见
- * docs/PILOTED_WALKTHROUGH_PLAN.md §PW2）。
+ * `amber pilot` 的模型投票阶梯（pilot-runtime 第③段拆分；方案见 docs/PILOTED_WALKTHROUGH_PLAN.md §PW2）。
  *
- * 全部组合既有原语（pickProposal / settle / 宽抽池 / esig），不另写执行器：
- *   - 池内闭集投票（红线①：模型只票 ref，不生成动作）；
- *   - floor 闸门按 shape 分档（与 run 的 4d 阶段同口径）；
- *   - 低置信回流与 run 同序（红线②「不提前弹人」）：gated 意见先付一次宽扫重问
- *     （WIDER_ELEMENTS/WIDE_QUOTAS，宽池真变大才重问），仍不过闸才 low_confidence；
- *   - 弃权（choiceRef=null）与 run 的 abstain 判定同源，直接停、不走宽扫。
+ * 两条通道：
+ *   - `modelVote`（执行路径）：委托引擎 `DecisionAsk` seam（经 `PilotAskAdapter` 注入面的观察与
+ *     投票原语）。窄问 → floor 闸门 → 低置信宽扫重问 → 弃权即停的阶梯由
+ *     `src/engine/decision-ask.ts` 单点实现，候选池/禁选/注记归引擎自取；
+ *   - `modelVoteLegacy`（对照臂）：迁移前的逐字节阶梯实现——只用于 S1 双臂等价度量，
+ *     不接执行路径。
+ *
+ * floor 闸门（`gateOf`/`passesFloor`）唯一出处已上收到引擎（`decision-ask.ts`），本模块只
+ * re-export 供既有 import 面继续使用（不保留第二份判据）。
  */
 import { esig, WIDE_QUOTAS } from "../engine/extraction.ts";
 import { PilotLedger } from "./pilot-ledger.ts";
 import { WIDER_ELEMENTS } from "../engine/executor-pure.ts";
-import type { PickProposal } from "../engine/executor-types.ts";
+import { gateOf, passesFloor } from "../engine/decision-ask.ts";
 import type { AnyPage, BrowserMiddleware } from "../engine/executor.ts";
 import type { Elem, ElemPool } from "../engine/elem-model.ts";
+import type { PilotAskAdapter } from "./pilot-ask-adapter.ts";
 
-/** 决策票的置信判定（pickProposal 的 shape 分档闸门；与 run 的 low_confidence 同一认识论）。 */
-export function gateOf(shape: { kind: "full" | "shortlist" | "none" }): "full" | "shortlist" | null {
-  if (shape.kind === "full") return "full";
-  if (shape.kind === "shortlist") return "shortlist";
-  return null;
-}
+export { gateOf, passesFloor };
 
-/** floor 闸门（shape 分档，与 run 的 4d 同口径；弃权不进这里——它直接停）。 */
-export function passesFloor(p: PickProposal, confFloor: number): boolean {
-  const gate = gateOf(p.shape);
-  if (gate === "full") return p.entropyConf >= confFloor;
-  if (gate === "shortlist") return !(p.shape.options > 1 && (p.pTop1 ?? 0) < confFloor);
-  return false;
-}
-
-/** 宽扫视图（run 4d 同款参数）：settle 后按 WIDER_ELEMENTS/WIDE_QUOTAS 重抽；失败如实 null。 */
+/** 宽扫视图（执行期 4d 同款参数）：settle 后按 WIDER_ELEMENTS/WIDE_QUOTAS 重抽；失败如实 null。 */
 export async function widePool(
   mw: BrowserMiddleware, page: AnyPage, hosts: string[] | null,
 ): Promise<ElemPool | null> {
@@ -74,8 +64,8 @@ export type PilotVote =
     conf: number; shape: string; via: "ask" | "reobserve";
   };
 
-/** 模型投票阶梯（模型不在位 = 如实停，绝不装会抛的 runtime）。 */
-export async function modelVote(a: {
+/** 阶梯入参（两条通道共用形状；`ask` 只由新路径消费）。 */
+interface ModelVoteArgs {
   mw: BrowserMiddleware;
   page: AnyPage;
   goal: string;
@@ -85,7 +75,13 @@ export async function modelVote(a: {
   notes?: Record<string, string> | null;
   confFloor: number;
   hosts: string[] | null;
-}): Promise<PilotVote> {
+}
+
+/**
+ * 对照臂：迁移前的模型投票阶梯（模型不在位 = 如实停，绝不装会抛的 runtime）。
+ * 保留它的唯一目的是与 `modelVote` 做同场景双臂对照；新增行为不得只改这里。
+ */
+export async function modelVoteLegacy(a: ModelVoteArgs): Promise<PilotVote> {
   const { mw, page, goal, elems, forbidden, confFloor, hosts, notes } = a;
   await mw.ready();
   if (mw.rulesOnly) return { kind: "no_model_runtime", asked: 0, pool: null };
@@ -121,4 +117,33 @@ export async function modelVote(a: {
     kind: "picked", asked, pool, ref: proposal.choiceRef as string,
     conf: proposal.entropyConf, shape: proposal.shape.kind, via,
   };
+}
+
+/**
+ * 模型投票（执行路径）：委托 `PilotAskAdapter` → 引擎 `DecisionAsk`。
+ * `ask` 由 pilot 运行时注入（唯一调用点已接线）；缺省退回对照臂，保证独立嵌入方不会因为
+ * 少接线而静默换语义。回执映射保持 `PilotVote` 逐字段口径（conf = proposal.entropyConf）。
+ */
+export async function modelVote(a: ModelVoteArgs & { ask?: PilotAskAdapter }): Promise<PilotVote> {
+  const { ask } = a;
+  if (ask === undefined) return await modelVoteLegacy(a);
+  const outcome = await ask.vote({ page: a.page, goal: a.goal, confFloor: a.confFloor });
+  switch (outcome.kind) {
+    case "no_model":
+      return { kind: "no_model_runtime", asked: 0, pool: null };
+    case "picked": {
+      // S1 只接模型票分支（规则/升级票没有模型信号）：不冒充模型票，如实弃权交接。
+      if (outcome.origin !== "model" || outcome.signal === null) {
+        return { kind: "low_confidence", asked: outcome.asked, pool: outcome.executionPool };
+      }
+      return {
+        kind: "picked", asked: outcome.asked, pool: outcome.executionPool, ref: outcome.target.ref,
+        conf: outcome.signal.proposal.entropyConf, shape: outcome.signal.proposal.shape.kind, via: outcome.via,
+      };
+    }
+    case "abstained":
+      return { kind: "low_confidence", asked: outcome.asked, pool: outcome.executionPool };
+    case "limit":
+      return { kind: "low_confidence", asked: outcome.asked, pool: null };
+  }
 }

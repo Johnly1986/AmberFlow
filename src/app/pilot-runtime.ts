@@ -48,6 +48,7 @@ import {
 } from "../model/decision-provider.ts";
 import { errMsg, isDeadPageError, isObj, nonEmpty } from "./session-runtime-contract.ts";
 import { modelVote } from "./pilot-vote.ts";
+import { PilotAskAdapter } from "./pilot-ask-adapter.ts";
 import { PilotLedger } from "./pilot-ledger.ts";
 import { emitStepRequest as emitStepRequestEvidence, handoffEvidence } from "./pilot-evidence.ts";
 import {
@@ -118,6 +119,7 @@ export class PilotRuntime {
   private readonly history: DrivingStep[] = [];
   /** 守卫账本（单源，见 pilot-ledger）：禁选/守停/证据都从它派生。 */
   private readonly ledger = new PilotLedger();
+  private readonly askAdapter = new PilotAskAdapter(() => this.mw(), this.ledger, () => this.hosts); // 模型询问单点（pilot-ask-adapter；改道换 leg）
   /** 本轮 ref 键禁选视图（每轮抽池后由账本按新 esig 重算；模型票/证据消费）。 */
   private readonly forbidden = new Set<string>();
   private handoffOpen: PilotHandoff | null = null;
@@ -151,7 +153,6 @@ export class PilotRuntime {
       ? path.resolve(opts.outDir)
       : path.join(amberflowHome(opts.env ?? process.env), "pilot", this.runId);
   }
-
 
   private log(line: string): void {
     this.sink.respond({ type: "log", unsolicited: true, line });
@@ -303,7 +304,7 @@ export class PilotRuntime {
     //    pilot-vote.ts：floor 闸门 + 低置信宽扫重问一次（run 4d 同序，不提前弹人）。
     const vote = await modelVote({
       mw, page, goal, elems, forbidden: this.forbidden, notes: this.ledger.notesFor(elems),
-      confFloor: this.confFloor, hosts: this.hosts,
+      confFloor: this.confFloor, hosts: this.hosts, ask: this.askAdapter,
     });
     if (vote.kind === "no_model_runtime") return "no_model_runtime";
     this.modelAsks += vote.asked;
@@ -611,11 +612,11 @@ export class PilotRuntime {
     this.history.length = 0;
     this.forbidden.clear();
     this.ledger.clear();
+    this.askAdapter.noteRedirect();
     this.lastPool = null;
     this.inertRun = 0;
     this.handoffOpen = null;
   }
-
 
   /** 起飞：解析决策源 → 开入口页 → 驾驶直到停因/预算/信号。 */
   async start(): Promise<void> {

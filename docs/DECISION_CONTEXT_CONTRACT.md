@@ -245,6 +245,16 @@ Ports 接线 → **S4** 结构化段 + 步史迁出 goal（单独 A/B）。
   → S0b（账本适配不删旧账，逐项验证 prune/notes/effective-清-inert/desc 一致）** → S1（仅切 pilot
   `modelVote`，新旧双臂含成功票与宽扫）→ S2（run 只在 `runModelPick` 整段接入）→ S3（白名单 +
   context 能力档）→ S4（结构化段 + 步史迁移单独 A/B）。
+- **S1 一期（最小切片）已交付（2026-11-22）**：`src/engine/decision-ask.ts` 实现 `ask` 的**当前
+  `modelVote` 语义**（窄问 → `filter` 聚合容器剔除 → 账本 forbidden/notes → floor 闸门 → 低置信宽扫
+  重问（宽池真变大才重问）→ 弃权/命中），floor 闸门 `gateOf`/`passesFloor` 单源上收引擎；
+  `src/app/pilot-ask-adapter.ts` 把 mw+PilotLedger 折成 `DecisionAskHost`（含 `ready()` 折 rules-only）
+  并维护 pilot-leg 作用域/`noteRedirect()`；pilot 的 `modelVote` 已切面（legacy 保留为对照臂）。
+  双臂对照 `tools/verify-decision-ask-parity.ts`：**5 场景 × 3 臂（legacy/ask/newPath）零差异**
+  （请求投影/返回投影/ref/conf/shape/via/asked/执行池 ref 序/命中 sig）。**S1.2 未接入**：
+  escalate/adjudicate/R2b/族修复/窗口升级、`tieredHint` 窄问、`rules_first`、`limit`、`stepTimeoutMs`
+  硬约束、L3/L4 段与 ports、跨作用域 memory。已知差异（记录）：ask 内部重新抽一次池（S1.1 用
+  executionPool 复用消除）；宽扫重问的 notes 按宽池重算（legacy 复用窄池 notes，属改善）。
 - **当前状态：工作树 v5（**未提交、未冻结**；类型单源 / executionPool / 工厂绑定账本 / Ports 注入 /
   StopCode 复用 / ts 对齐 DC3；审计 P1 已修：`run` 元数据补 `conf`/`label`、`notesFor` 增可选作用域、
   `forbid/unforbid` pilot 不对称与 `entries≤8/不含守停现场` 写进契约、`ruleSkip` 的聚合容器归池构成事实）。

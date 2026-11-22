@@ -19,7 +19,7 @@
 | **L2 机制** | `browser-env`、`tool-signals`、`extraction`（pool-js（+core）/identity/frame-scope/**elem-model/page-shapes**；页面形状类型已下沉 L0 `support/page-like.ts`，extraction re-export）、`actions`、`rules`、`settle`、`dataset`、`datasource`（传输/来源；字段映射配置驱动，W3-4） | L0–L1 | 页面扫描、动作、稳定门、数据腿等机制；**数据/报表机制不认识站点/业务字段**（扫词门禁） |
 | **L3 决策** | `src/model/*`（provider 协议 / 缓存 / ONNX / prompt views / 审计） | L0–L2（经契约） | 实现 L0 的 provider 契约；现有 `model→engine` 反向边见 §1.2 |
 | **L4 执行** | `executor`（实现片段：executor-phases/actions/resolve 模块；类名/`run()` 冻结）、`planner`、`bindings`、`observe`、`pool-view`、`picker`、`audit` | L0–L2 + 契约 | 唯一执行循环；只消费契约与机制，不 import 具体 provider 装配 |
-| **L5 应用** | `src/app/*`（ctx（+runtime/step/tools/read/nav/scroll/manual 模块；ctx.ts 为组装面）/ runner / adapters / trace / report / session-runtime（+contract/evidence/entry）/ session-export / pilot-runtime（+contract/entry/export/vote/evidence/ledger/ask-adapter）/ intervention-adapter） | L0–L4 | flow 运行期面；session-runtime 是**调试面**（复用 createCtx，不是第 5 个 ctx 实现）；pilot-runtime 是**模型驾驶走查面**（组合既有原语：抽池/pick/actOnce/checkSignal，不另写执行器） |
+| **L5 应用** | `src/app/*`（ctx（+runtime/step/tools/read/nav/scroll/manual 模块；ctx.ts 为组装面）/ runner / adapters / trace / report / session-runtime（+contract/evidence/entry）/ session-export / pilot-runtime（+contract/entry/export/vote/evidence/ledger/ask-adapter，`pilot-ask-adapter.ts` 为 DC7 询问适配器）/ intervention-adapter） | L0–L4 | flow 运行期面；session-runtime 是**调试面**（复用 createCtx，不是第 5 个 ctx 实现）；pilot-runtime 是**模型驾驶走查面**（组合既有原语：抽池/pick/actOnce/checkSignal，不另写执行器） |
 | **L6 入口** | `src/cli/*`、`src/online/*`、`src/flow/*`（归纳）、`tools/*`、`integrations/dsh-bridge/*` | 全部下层 | 入口层；bridge 是宿主集成（called, not embedded） |
 
 ### 1.1 目录 → 层映射（门禁按此断言）
