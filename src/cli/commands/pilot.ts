@@ -168,6 +168,7 @@ export async function runPilotCommand(args: string[], ctx: CliContext): Promise<
         "final-signal": { type: "string" },
         "max-steps": { type: "string" },
         "conf-floor": { type: "string" },
+        "expect-url": { type: "string" },
         slot: { type: "string", multiple: true },
         input: { type: "string" },
         out: { type: "string" },
@@ -247,6 +248,9 @@ export async function runPilotCommand(args: string[], ctx: CliContext): Promise<
   }
 
   const slots = parseSlots(v.slot, "--slot");
+  // --expect-url：任务页 URL 子串（漂移即 off_task_page 确定性停）。空串 = 不判。
+  const expectUrl = typeof v["expect-url"] === "string" && v["expect-url"].trim() !== ""
+    ? v["expect-url"].trim() : undefined;
   const runId = `${Date.now().toString(36)}-${process.pid}`;
   const outDir = typeof v.out === "string" && v.out.trim() !== ""
     ? path.resolve(ctx.cwd, v.out)
@@ -261,7 +265,8 @@ export async function runPilotCommand(args: string[], ctx: CliContext): Promise<
     return 2;
   }
   const headful = v.headful === true || runDefaults.headful === true;
-  diag(ctx, `[pilot] ${runId}  max-steps=${maxSteps ?? 12}  conf-floor=${confFloor ?? 0.25}  out=${outDir}`);
+  diag(ctx, `[pilot] ${runId}  max-steps=${maxSteps ?? 12}  conf-floor=${confFloor ?? 0.25}`
+    + `${expectUrl === undefined ? "" : `  expect-url=${expectUrl}`}  out=${outDir}`);
 
   return await runPilot({
     url: v.url,
@@ -270,6 +275,7 @@ export async function runPilotCommand(args: string[], ctx: CliContext): Promise<
     ...(finalSignal === null ? {} : { finalSignal }),
     ...(maxSteps === undefined ? {} : { maxSteps }),
     ...(confFloor === undefined ? {} : { confFloor }),
+    ...(expectUrl === undefined ? {} : { expectUrl }),
     ...(driver === undefined ? {} : { driver }),
     ...(Object.keys(slots).length === 0 ? {} : { slots }),
     inputFile: typeof v.input === "string" ? path.resolve(ctx.cwd, v.input) : null,

@@ -4,12 +4,12 @@
  */
 import { sleep } from "../support/sleep.ts";
 import { type AmbiguityView, describeAmbiguity, orderCandidatesByDomPreorder } from "./ambiguity.ts";
-import { type ActMissDiagnostics, type ActMissRow, actMissDiagnostics, actMissDiscrimination, nearCandidates } from "./executor-pure.ts";
+import { type ActMissDiagnostics, type ActMissRow, actMissDiagnostics, actMissDiscrimination, nearCandidates, sigEq } from "./executor-pure.ts";
 import { _hintOpts, resolveCommandRef } from "./executor-resolve-a.ts";
 import { foldNestedDuplicates } from "./executor-actionability.ts";
 import { type AnyLoc, type AnyPage } from "./executor-types.ts";
 import { PASS_DOM_FALLBACK, PASS_ID_FALLBACK, ambiguityStopReason } from "./executor.ts";
-import { type Elem, type ElemPool, type FrameLike, actionCapabilities, frameHintFailureEvidence, framesOf, probeHintInDom, probeTextBbox } from "./extraction.ts";
+import { type Elem, type ElemPool, type FrameLike, actionCapabilities, esig, frameHintFailureEvidence, framesOf, probeHintInDom, probeTextBbox } from "./extraction.ts";
 import { elemFrameStamp, frameGateExcludes, frameScopeMatchesFrame } from "./frame-scope.ts";
 import { parseHint } from "./hint.ts";
 import { anchorChainMatch } from "./rules.ts";
@@ -210,6 +210,75 @@ export async function _resolveOne(mw: BrowserMiddleware, page: AnyPage, target: 
     }
     return { ref: fallback.ref, el: null, loc: fallback.loc, poolSize, fallback: true, cleanup: fallback.cleanup };
   }
+
+  /**
+   * 决策 ref 执行锁（`actOnce` 的 `opts.lock`）：决策面已经按**池 ref** 选中元素，
+   * 执行面就按同一轮抽池的身份直接定位，不再把 ref 还原成 label 重新解析——同名重复
+   * 候选（两个 `"4.5"`）在重新解析里是 `target_ambiguous`，而决策票本身已经给了唯一身份。
+   *
+   * 契约：`pool`/`ref` 必须来自**同一轮抽池**，`sig` = `esig` 的该元素签名。ref 是位置键
+   * （重抽池会重编号），只有签名可比，所以锁命中要签名 + 活章双证；任一环不成立都回退既有
+   * 解析链（零新停因）——锁是消歧与加速，不是绕过解析的强制通道。
+   */
+export interface ActLock {
+  pool: ElemPool;
+  ref: string;
+  sig: [string, string, string];
+}
+
+  /**
+   * `_resolveOne` 的带锁入口：先试决策 ref 锁，锁不成立再走既有解析链。
+   *
+   * 必须在 `_resolveOne` **重新抽池之前**试锁：抽池开头会清掉上一轮 `data-dshref` 章
+   * （章是批次-位置的），重抽后旧 ref 的句柄必然失效，锁就永远是 stale。
+   *
+   * 锁命中要求**唯一章仍指向同一个元素**：`_locatorFor` 在章缺失时会退到 data-test /
+   * 位置序等可重复句柄，页面删掉/复制节点后可能指到别的元素——那正是误点来源，所以这里
+   * 先用一次只读 evaluate 复核元素身上的章值；章不符 / 元素已卸载 = 锁 stale，回退既有链。
+   * 跨 frame 元素由 `_locatorFor` 按 `el.frame` 收窄作用域，`loc.evaluate` 在所属 frame
+   * 求值，无需另写帧处理。
+   */
+export async function _resolveOneWithLock(mw: BrowserMiddleware, page: AnyPage, target: string, op: string,
+    onAmbiguous?: "fail" | "act", opts?: { diagnostics?: boolean; lock?: ActLock },): Promise<
+    | Awaited<ReturnType<typeof _resolveOne>>
+    | {
+      ref: string; el: Elem; loc: AnyLoc; poolSize: number; fallback: false;
+      cleanup?: () => Promise<void>; resolvedVia: "ref-lock";
+    }
+  > {
+    const lock = opts?.lock;
+    if (lock !== undefined) {
+      const el = lock.pool[lock.ref];
+      if (el !== undefined && sigEq(esig(el), lock.sig)) {
+        const loc = await mw._locatorFor(page, el);
+        if (loc !== null && await _lockStampIsLive(loc, el.dsh_ref)) {
+          return {
+            ref: lock.ref, el, loc, poolSize: Object.keys(lock.pool).length,
+            fallback: false, resolvedVia: "ref-lock",
+          };
+        }
+      }
+    }
+    return await _resolveOne(mw, page, target, op, onAmbiguous, opts?.diagnostics === true);
+  }
+
+  /**
+   * 锁的身份复核：元素身上仍挂着自己被锁时的那枚 `data-dshref` 章才算锁成立。
+   *
+   * 为什么不只看 `loc.count()`：`_locatorFor` 已经计过数；这里要回答的是**句柄是不是
+   * 唯一章**——章值本身必须等于 `dsh_ref`（元素无章、章被新一轮抽池清掉、或 locator
+   * 落到位置序别名都算 stale）。`loc.evaluate` 在 Playwright strict mode 下多命中会抛，
+   * 因此这一条读数同时覆盖"章撞车"。
+   */
+async function _lockStampIsLive(loc: AnyLoc, dshRef: string | undefined): Promise<boolean> {
+  if (typeof dshRef !== "string" || dshRef === "") return false;
+  try {
+    const live = await loc.evaluate((node: any) => String(node.getAttribute("data-dshref") ?? ""));
+    return live === dshRef;
+  } catch {
+    return false;   // 0 命中（元素已卸载）/ 多命中 / 跨源 frame 读不到 = 锁不可用
+  }
+}
 
   /**
    * F72-②：声明目标解析落空后的**有界重扫**（缺省自动；至多 1 次）。

@@ -25,7 +25,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { PilotRuntime, type PilotSink } from "../src/app/pilot-runtime.ts";
-import type { PilotOptions } from "../src/app/pilot-contract.ts";
+import { drivingGoalText, unblockHintsFor, type PilotOptions } from "../src/app/pilot-contract.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const FIXTURES = path.join(REPO, "fixtures", "engine", "pilot");
@@ -35,8 +35,9 @@ interface SinkEvent extends Record<string, unknown> { type?: string }
 
 /* ------------------------------------------------------------------ 静态服务 */
 
-/** 只服务 `fixtures/engine/pilot/` 下 .html 的本地服务（随机端口，绑定 127.0.0.1）。 */
-async function startFixtureServer(): Promise<{ origin: string; close(): Promise<void> }> {
+/** 只服务 `fixtures/engine/pilot/` 下 .html 的本地服务（随机端口；默认绑定 127.0.0.1，
+ *  frame 场景用 127.0.0.2 造**不同 host** 的跨源帧——信封按 hostname 判，端口不算跨源）。 */
+async function startFixtureServer(bindHost = "127.0.0.1"): Promise<{ origin: string; close(): Promise<void> }> {
   const server = http.createServer((req, res) => {
     const rel = decodeURIComponent(new URL(req.url ?? "/", "http://127.0.0.1").pathname);
     const abs = path.resolve(FIXTURES, `.${rel}`);
@@ -49,10 +50,10 @@ async function startFixtureServer(): Promise<{ origin: string; close(): Promise<
     res.setHeader("content-type", "text/html; charset=utf-8");
     res.end(fs.readFileSync(abs));
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, bindHost, resolve));
   const port = (server.address() as { port: number }).port;
   return {
-    origin: `http://127.0.0.1:${port}`,
+    origin: `http://${bindHost}:${port}`,
     close: () => new Promise<void>((resolve, reject) => server.close((e) => (e === undefined ? resolve() : reject(e)))),
   };
 }
@@ -380,6 +381,93 @@ async function scenarioNoModel(origin: string): Promise<void> {
 
 /* ------------------------------------------------------------------ main */
 
+/** 驾驶上文（floor 根因实验的前提）：步史必须是"已执行 + outcome"，当前页/期望页可读，
+ *  frame 排除是第一条解锁建议。 */
+async function scenarioContextText(_origin: string): Promise<void> {
+  const plain = drivingGoalText("打开详情", [], "https://a.test/list", "");
+  assert.equal(plain, "打开详情 | 当前页: https://a.test/list");
+  const text = drivingGoalText("打开详情", [
+    { target: "Filter", ok: true, changed: false },
+    { target: "Row", ok: true, changed: true },
+    { target: "Boom", ok: false, changed: false },
+  ], "https://a.test/list", "/list");
+  assert.ok(text.includes("期望页: /list"), "expected page joins the driving question");
+  assert.ok(text.includes("1.Filter[no_change]"), "a no-op click must not read as progress");
+  assert.ok(text.includes("2.Row[changed]"), "changed outcome is recorded");
+  assert.ok(text.includes("3.Boom[failed]"), "failed outcome is recorded");
+  assert.ok(text.includes("已执行:"), "wording is executed, not completed");
+  const hints = unblockHintsFor("low_confidence", { framesExcluded: ["https://ogs.google.com"] });
+  assert.ok(hints.length <= 3 && hints[0]!.includes("https://ogs.google.com"), "frame exclusion is the first unblock hint");
+  const budgetHints = unblockHintsFor("budget_exceeded", { framesExcluded: ["https://ogs.google.com"] });
+  assert.ok(!budgetHints[0]!.includes("iframe"), "a budget terminal must not lead with a frame hint (it misleads)");
+}
+
+/** 任务页漂移：--expect-url 不含当前 URL → 确定性 off_task_page；redirect 回任务页即恢复。 */
+async function scenarioOffTaskPage(origin: string): Promise<void> {
+  const { rt, events } = await boot({
+    url: `${origin}/home.html`, goal: "zerblonix frobnicate", expectUrl: "/home.html", maxSteps: 3,
+  });
+  try {
+    // 同 host 改道到非任务页（信封允许，但任务页约束不允许）。
+    assert.equal(await rt.handleLine(`{"cmd":"redirect","url":"${origin}/detail.html"}`), "drive");
+    const stop = await rt.drive();
+    assert.equal(stop, "off_task_page", "URL drift is a deterministic stop");
+    const handoff = events.find((e) => e["type"] === "handoff") as Record<string, unknown> | undefined;
+    assert.ok(handoff !== undefined, "handoff projected for the drift stop");
+    const h = handoff!["handoff"] as Record<string, unknown>;
+    assert.equal(h["stop_code"], "off_task_page");
+    const ev = (h["why_stuck"] as Record<string, unknown>)["evidence"] as Record<string, unknown>;
+    assert.equal(ev["expect_url"], "/home.html", "handoff carries the declared task page");
+    assert.ok((h["what_would_unblock"] as string[]).some((w) => w.includes("redirect")), "unblock says redirect back");
+    // redirect 回任务页 = 守卫放行（不再 off_task_page）。
+    assert.equal(await rt.handleLine(`{"cmd":"redirect","url":"${origin}/home.html"}`), "drive");
+    const next = await rt.drive();
+    assert.notEqual(next, "off_task_page", "back on the task page the guard releases");
+    await rt.finish(null);
+  } finally {
+    await rt.closeBrowser();
+  }
+}
+
+/** frame 准入显式信号：被 hosts 信封排除的跨源 iframe → handoff 证据 + "加入 hosts" 建议。 */
+async function scenarioFrameExcluded(origin: string): Promise<void> {
+  const child = await startFixtureServer("127.0.0.2");
+  const host = http.createServer((req, res) => {
+    const p = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+    if (p === "/frame-host.html") {
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.end(`<!doctype html><html><body><iframe src="${child.origin}/home.html" width="400" height="300"></iframe></body></html>`);
+      return;
+    }
+    res.statusCode = 404;
+    res.end("not found");
+  });
+  await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve));
+  const hostOrigin = `http://127.0.0.1:${(host.address() as { port: number }).port}`;
+  void origin;
+  const { rt, events } = await boot({
+    url: `${hostOrigin}/frame-host.html`, goal: "zerblonix frobnicate", maxSteps: 2,
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 800));   // 等跨源 iframe 载入
+    const stop = await rt.drive();
+    assert.equal(stop, "low_confidence", "no model candidate inside the excluded frame ⇒ honest stop");
+    const handoff = events.find((e) => e["type"] === "handoff") as Record<string, unknown> | undefined;
+    assert.ok(handoff !== undefined, "handoff projected");
+    const h = handoff!["handoff"] as Record<string, unknown>;
+    const ev = (h["why_stuck"] as Record<string, unknown>)["evidence"] as Record<string, unknown>;
+    const frames = ev["frames_excluded"] as Array<{ origin?: string }> | undefined;
+    assert.ok(Array.isArray(frames) && frames.some((f) => f.origin === child.origin), "excluded frame origin is explicit evidence");
+    assert.ok((h["what_would_unblock"] as string[]).some((w) => w.includes("hosts") && w.includes(child.origin)),
+      "unblock names the origin to add to hosts");
+    await rt.finish(null);
+  } finally {
+    await rt.closeBrowser();
+    await new Promise<void>((resolve) => host.close(() => resolve()));
+    await child.close();
+  }
+}
+
 const SCENARIOS: Array<[string, (origin: string) => Promise<void>]> = [
   ["arrival(rules 零模型到达)", scenarioArrival],
   ["needs_value→resume 值+点名", scenarioNeedsValue],
@@ -393,6 +481,9 @@ const SCENARIOS: Array<[string, (origin: string) => Promise<void>]> = [
   ["budget_exceeded 终态保停因", scenarioBudget],
   ["危险 default-deny 不可越过", scenarioDangerous],
   ["决策源不可达 no_model_runtime", scenarioNoModel],
+  ["驾驶上文：已执行+outcome/当前页/期望页", scenarioContextText],
+  ["任务页漂移→off_task_page", scenarioOffTaskPage],
+  ["frame 排除→显式证据+加入 hosts 建议", scenarioFrameExcluded],
 ];
 
 async function main(): Promise<number> {

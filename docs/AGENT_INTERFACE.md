@@ -533,6 +533,16 @@ JSON 对象；`pilot_end` 只发一条（idle/中断/异常的 `code`/`reason` �
 （laya 档另带 `cache:{hits,misses}`），恒带 `pilot:true`。退出码：0 = `final_signal_held`；
 1 = `browser_dead`；3 = 被停因挡住（含 abort / idle 超时）。
 
+驾驶问句 = 总目标 + `当前页: <url>` +（声明了 `--expect-url` 时）`期望页: <子串>` +
+`已执行: 1.<label>[changed|no_change|failed]; …`（最近 ≤6 步、每步 ≤40 字）。步史只记
+**已执行 + outcome**，不写"已完成"——no-op 点击若被当成进展，模型会复读烧预算。
+
+`--expect-url <子串>`（可选）：每轮驾驶前检查当前 URL 是否包含它；不包含 = 确定性停
+`off_task_page`，不继续在漂移页上抽池/问模型。`started` 事件与 handoff 证据都回显
+`expect_url`；`started`/`handoff` 证据还回显 `frames_excluded:[{origin,index}]`（被 hosts
+信封排除的跨源子 frame）——桥面把它们投影给 Agent，`what_would_unblock` 第一条给出
+"把 origin 加入 hosts 后重试"的确定性建议。
+
 stdin 兜底指令闭集（每行一个 JSON 对象；单行失败纪律与 session 同源——坏 JSON/未知/被拒
 指令只回执一条错误、继续等下一条，不杀会话）：
 
@@ -562,10 +572,10 @@ schema 走 `run-args-contract` 生成链（`PILOT_ARG_FIELDS` 单源，`run-args
 
 | 字段 | 口径 | 说明 |
 |---|---|---|
-| `stop_code` | 闭集 8 码 | `final_signal_held` / `budget_exceeded` / `low_confidence` / `target_ambiguous` / `needs_value` / `stuck_inert` / `no_model_runtime` / `browser_dead` |
+| `stop_code` | 闭集 9 码 | `final_signal_held` / `budget_exceeded` / `off_task_page` / `low_confidence` / `target_ambiguous` / `needs_value` / `stuck_inert` / `no_model_runtime` / `browser_dead` |
 | `step_id` | 0-based 驾驶步号 | `budget_exceeded` 时 = `max_steps` |
 | `goal_digest` | ≤200 字符 | 总目标有界投影 |
-| `why_stuck` | `{summary, evidence}` | 一句话摘要 + 有界证据（`inert_run` / `forbidden` ≤40） |
+| `why_stuck` | `{summary, evidence}` | 一句话摘要 + 有界证据（`inert_run` / `forbidden` ≤40；`frames_excluded` ≤6；声明时 `expect_url`） |
 | `what_would_unblock` | ≤3 条 | 按停因查表确定性生成，不是模型建议 |
 | `evidence_refs` | 四件套落盘路径 | 截图 `.png` / DOM `.dom.html`（>2MB 截断）/ 池快照 `.pool.json` / observe `.observe.json`；各自独立失败、独立缺字段 |
 | `url` | — | 停驶页现场锚点 |

@@ -349,6 +349,10 @@ export interface BridgePilotArgs {
    */
   confFloor?: number;
   /**
+   * Task-page URL substring for the deterministic off_task_page guard.
+   */
+  expectUrl?: string;
+  /**
    * Pre-declared value bag.
    */
   slots?: Record<string, string>;
@@ -397,6 +401,10 @@ export const PILOT_TOOL_PARAMETERS = {
     type: "number",
     description: "Confidence floor override in [0,1]; priority: this flag > provider self-report > 0.25. Below it the engine re-asks once wider before any handoff.",
   },
+  expect_url: {
+    type: "string",
+    description: "Task-page URL substring (e.g. '/maps'); when the current URL no longer contains it the pilot stops with `off_task_page` before the next driving step instead of continuing on a drifted page. Omit = no drift guard.",
+  },
   slots: {
     type: "array",
     description: "Pre-declared slot values as `k=v` entries for fill/select decisions; both bags empty = needs_value stop, never guessed.",
@@ -427,6 +435,7 @@ export const PILOT_TOOL_FIELDS: readonly BridgeToolFieldBinding[] = [
   { key: "finalSignal", param: "final_signal", },
   { key: "maxSteps", param: "max_steps", },
   { key: "confFloor", param: "conf_floor", },
+  { key: "expectUrl", param: "expect_url", },
   { key: "slots", param: "slots", collect: "slots", },
   { key: "driver", param: "driver", },
   { key: "headful", param: "headful", },
@@ -441,6 +450,7 @@ export const PILOT_ARGV_FIELDS: readonly BridgePilotArgvField[] = [
   { key: "finalSignal", flag: "--final-signal", kind: "value" },
   { key: "maxSteps", flag: "--max-steps", kind: "value", when: "defined" },
   { key: "confFloor", flag: "--conf-floor", kind: "value", when: "defined" },
+  { key: "expectUrl", flag: "--expect-url", kind: "value" },
   { key: "slots", flag: "--slot", kind: "repeated" },
   { key: "driver", flag: "--driver", kind: "value" },
   { key: "headful", flag: "--headful", kind: "flag" },

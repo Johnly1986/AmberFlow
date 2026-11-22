@@ -4,6 +4,34 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-23 pilot 驾驶上文与执行身份（1/2/3 三项）
+
+- **驾驶上文（任务3）**：`drivingGoalText` 的步史从"已完成: 1.<label>"改为
+  "已执行: 1.<label>[changed|no_change|failed]"（只记已执行 + outcome，no-op 点击不再伪装进展），
+  并把 `当前页: <url>` 与（声明时）`期望页: <expectUrl>` 并入驾驶问句（每步 ≤40 字/≤6 步/URL ≤120）。
+  新增 `--expect-url <子串>`（桥 tool `expect_url`，契约走 `src/support/run-args-contract.ts` +
+  `run-args:gen`）：每轮驾驶前当前 URL 不含它 → 确定性停 `off_task_page`（退出码 3），
+  handoff 证据带 `expect_url`，解锁建议给 redirect 回任务页；`started`/`pilot_end` 回显
+  `expect_url`。`PILOT_STOP_CODES` 8→9。
+- **frame 准入显式信号（任务1）**：pilot 每轮抽池后投影 `frames_excluded:[{origin,index}]`
+  （≤6）进 handoff 证据；`unblockHintsFor(stop, {framesExcluded})` 把"把 origin 加入 hosts
+  后重试"放第一条（仍 ≤3 条）。桥面 `amberflow_pilot` 的 started/handoff 投影同步透传
+  `frames_excluded` 与 `expect_url`（其余字段/键集不变）。走查实测：Google 九宫格是
+  `ogs.google.com` 跨源 iframe，默认 hosts 只含 `www.google.com` 时元素不进动作池 → 旧路径
+  只报 `target_not_found`/`low_confidence`，现在根因显式可解。
+- **决策 ref 执行锁（任务2）**：`actOnce` 增 `opts.lock?: ActLock = {pool, ref, sig}`——决策面
+  已按池 ref 选中元素时，执行面按同一轮抽池的身份定位（`sigEq(esig)` + `data-dshref` 活章
+  复核 + `_locatorFor`），四证全过才执行（`resolved_via:"ref-lock"`，additive）；任一不成立
+  回退既有 `_resolveOne` 全链、零新 stopCode。修复同名重复候选（两个 `"4.5"`）把高置信
+  ref 票打成 `target_ambiguous` 的浪费；pilot `executePicked` 已接线并把 `resolved_via` 写进
+  drive 记录/事件。`actOnce` 行数 183 ≤ movedFunctions 基线 184（无增长）。
+- **验收**：`verify:pilot` **15/15**（旧 12 + 驾驶上文/`off_task_page`/frame 排除三场景）；
+  新增 `tools/verify-act-lock.ts`（4 PASS + 1 INFO，零模型/零外部请求）；`typecheck`、
+  `maintain:check`、`run-args:check`、`verify-runtime-offline --check` 8/8、
+  `verify-offline` 11/11 绿。文档同步：`docs/AGENT_INTERFACE.md` §3.3（9 码/expect_url/
+  frames_excluded）、`docs/APP_SCRIPT_AUTHORING.md` §0.5、`docs/PILOTED_WALKTHROUGH_PLAN.md`
+  §PW2/§3。**未提交 git。**
+
 ## [Unreleased] — 2026-11-22 S3 完整 + S2-Stage-3（旧实现退役）
 
 - **S3 完整**：`ProviderCapabilities.context?: "none"|"minimal"|"full"`（只声明不改协议）；本地 laya=minimal、

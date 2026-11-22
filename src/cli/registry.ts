@@ -313,7 +313,7 @@ amber session export --record <轨迹文件> [--out <app.mjs|目录>] [--id <app
     ],
     usage: `amber pilot --url <入口页> --goal "<一句话总目标>"
              [--host HOST]... [--hosts h1,h2] [--final-signal '<JSON>']
-             [--max-steps N] [--conf-floor F] [--slot k=v]...
+             [--max-steps N] [--conf-floor F] [--expect-url <子串>] [--slot k=v]...
              [--input <指令文件>] [--out <目录>] [--record <轨迹文件>]
              [--idle-timeout-ms N] [--headful]
 amber pilot export --record <轨迹文件> [--out <app.mjs|目录>] [--id <appId>]
@@ -332,6 +332,7 @@ amber pilot export --record <轨迹文件> [--out <app.mjs|目录>] [--id <appId
       "--final-signal '<JSON>'   完成信号声明（如 '{\"url_contains\":\"/success\"}'）。缺省 = 无信号收尾：预算内推进、连续无变化即停",
       "--max-steps N             驾驶步预算（缺省 12，上限 200）。预算用尽 = budget_exceeded 交接",
       "--conf-floor F            置信闸门覆盖（优先级：本旗标 > provider 自报 floor > 0.25；[0,1]）。低于闸门先宽扫重问一次，仍低才 low_confidence 交接",
+      "--expect-url <子串>       任务页 URL 子串（缺省不判）。每轮驾驶前当前 URL 不含它 → 确定性停 off_task_page 并交接；用于页面漂移（如 /maps 漂到 /preferences）",
       "--slot k=v                预声明槽位值（可重复）：fill/select 决策步的值袋；两袋都落空 = needs_value 停，绝不猜",
       "--input <文件>            兜底指令从文件逐行读（Agent 自动化剧本），而不是 stdin",
       "--out <目录>              证据落点（缺省 $AMBERFLOW_HOME/pilot/<runId>）；handoff 四件套（截图/DOM/池快照/observe）写这里",

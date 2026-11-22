@@ -104,6 +104,7 @@ function projectPilotOutcome(outDir: string, outcome: ProcessOutcome): AmberFlow
       if (handoffNotes.length >= PILOT_HANDOFFS_MAX) continue
       const h = (obj['handoff'] ?? {}) as Record<string, unknown>
       const why = (h['why_stuck'] ?? {}) as Record<string, unknown>
+      const whyEv = (why['evidence'] ?? {}) as Record<string, unknown>
       const refs = (h['evidence_refs'] ?? {}) as Record<string, unknown>
       handoffNotes.push({
         stop_code: scalar(h['stop_code']),
@@ -118,6 +119,14 @@ function projectPilotOutcome(outDir: string, outcome: ProcessOutcome): AmberFlow
           ...(refs['dom'] === undefined ? {} : { dom: clip(refs['dom'], 300) }),
           ...(refs['pool_snapshot'] === undefined ? {} : { pool_snapshot: clip(refs['pool_snapshot'], 300) }),
           ...(refs['observe'] === undefined ? {} : { observe: clip(refs['observe'], 300) }),
+          ...(Array.isArray(whyEv['frames_excluded'])
+            ? {
+                frames_excluded: (whyEv['frames_excluded'] as Array<Record<string, unknown>>).slice(0, 6).map((f) => ({
+                  origin: clip(f['origin'], 200), index: scalar(f['index']),
+                })),
+              }
+            : {}),
+          ...(whyEv['expect_url'] === undefined ? {} : { expect_url: clip(whyEv['expect_url'], 200) }),
         },
       })
       continue
@@ -127,7 +136,17 @@ function projectPilotOutcome(outDir: string, outcome: ProcessOutcome): AmberFlow
       continue
     }
     if (type === 'started') {
-      events.push({ started: true, url: clip(obj['url'], 200) })
+      events.push({
+        started: true, url: clip(obj['url'], 200),
+        ...(Array.isArray(obj['frames_excluded'])
+          ? {
+              frames_excluded: (obj['frames_excluded'] as Array<Record<string, unknown>>).slice(0, 6).map((f) => ({
+                origin: clip(f['origin'], 200), index: scalar(f['index']),
+              })),
+            }
+          : {}),
+        ...(obj['expect_url'] === undefined ? {} : { expect_url: clip(obj['expect_url'], 200) }),
+      })
       continue
     }
     if (type === 'drive') {

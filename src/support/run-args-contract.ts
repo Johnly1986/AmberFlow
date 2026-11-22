@@ -414,6 +414,18 @@ export const PILOT_ARG_FIELDS: readonly RunArgField[] = [
     engine: { option: "confFloor", map: "context" },
   },
   {
+    key: "expectUrl",
+    param: "expect_url",
+    tool: {
+      type: "string",
+      description: "Task-page URL substring (e.g. '/maps'); when the current URL no longer contains it the pilot stops with `off_task_page` before the next driving step instead of continuing on a drifted page. Omit = no drift guard.",
+    },
+    doc: "Task-page URL substring for the deterministic off_task_page guard.",
+    cli: { flag: "expect-url", type: "string" },
+    argv: { flag: "--expect-url", kind: "value", order: 65 },
+    engine: { option: "expectUrl", map: "string" },
+  },
+  {
     key: "slots",
     param: "slots",
     tool: {

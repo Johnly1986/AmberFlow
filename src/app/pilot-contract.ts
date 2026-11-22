@@ -19,6 +19,7 @@ import { SESSION_IDLE_TIMEOUT_MS } from "../support/tuning.ts";
 export const PILOT_STOP_CODES = [
   "final_signal_held", // 声明的最终信号被 checkSignal 验证成立（正因收尾）
   "budget_exceeded",   // --max-steps 用满（与 run 同名同义）
+  "off_task_page",     // 当前 URL 不含发起方声明的 --expect-url（页面漂移的确定性停因）
   "low_confidence",    // 模型 pick 低于闸门且 reobserve 更宽后仍低（run 同序）
   "target_ambiguous",  // 解析命中多个不同候选（run 命令步同一歧义谓词）
   "needs_value",       // fill/select 决策步缺值（绝不猜；Agent 兜底给值）
@@ -136,6 +137,13 @@ export interface PilotOptions {
   hosts?: string[] | null;
   /** 最终信号声明（缺省 = 无信号收尾：预算内推进、连续 inert 即停）。 */
   finalSignal?: Record<string, unknown> | null;
+  /**
+   * 任务页**期望 URL 子串**（可选，缺省 null = 不判）。
+   * 每轮驾驶前检查当前 URL 是否包含它；不包含即确定性停 `off_task_page` 并交接。
+   * 它是发起方的任务约束（不是模型裁量）：导航漂移（如从 /maps 漂到 /preferences）不得
+   * 默默继续烧预算。裁剪在归因面：只用于守卫与题面提示，不参与 hint/候选解析。
+   */
+  expectUrl?: string | null;
   /** 驾驶步预算（缺省 12；与 run --max-steps 同名同义）。 */
   maxSteps?: number;
   /** 置信闸门覆盖（CLI --conf-floor > provider 自报 floor > 0.25 缺省）。 */
@@ -168,17 +176,38 @@ export const PILOT_REPEAT_LIMIT = 3;
 /** 已走步数摘要上限（驾驶问句里带的已走步数；有界，防题面膨胀）。 */
 export const PILOT_HISTORY_STEPS = 6;
 
-/** 驾驶问句的 goal 底座：总目标 + 有界步史摘要（既有事实投影，不做自由生成；每步 ≤40 字）。 */
+/**
+ * 驾驶问句的 goal 底座：总目标 + 当前页/期望页 + 有界步史摘要（既有事实投影，不做自由生成）。
+ *
+ * 步史是**已执行**（不是"已完成"）：每一步带 outcome 标记（changed / no_change / failed）——
+ * 模型必须能看出「点了但页面没变」，否则 no-op 点击会被当成进展继续复读（走查实测：
+ * Google apps / Settings 连续无进展，旧题面却写"已完成: 1.Google apps; 2.Settings"）。
+ * 当前页/期望页是页面漂移的可读锚点（配合 runtime 的 off_task_page 确定性停因）。
+ * 每步 ≤`maxLabel` 字、URL ≤120 字、总步数 ≤PILOT_HISTORY_STEPS。
+ */
 export function drivingGoalText(goal: string,
-    history: ReadonlyArray<{ target: string; ok: boolean }>, maxLabel = 40): string {
-  const clip = (text: string): string => (text.length <= maxLabel ? text : `${text.slice(0, maxLabel - 1)}…`);
+    history: ReadonlyArray<{ target: string; ok: boolean; changed?: boolean }>,
+    currentUrl = "", expectUrl = "", maxLabel = 40): string {
+  const clip = (text: string, max = maxLabel): string => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
   const hist = history.slice(-PILOT_HISTORY_STEPS)
-    .map((s, i) => `${i + 1}.${clip(s.target)}${s.ok ? "" : "(失败)"}`).join("; ");
-  return hist === "" ? goal : `${goal} | 已完成: ${hist}`;
+    .map((s, i) => {
+      const outcome = s.ok !== true ? "failed" : s.changed === true ? "changed" : s.changed === false ? "no_change" : "ok";
+      return `${i + 1}.${clip(s.target)}[${outcome}]`;
+    }).join("; ");
+  const where = currentUrl === "" ? "" : `当前页: ${clip(currentUrl, 120)}`;
+  const expect = expectUrl === "" ? "" : `期望页: ${clip(expectUrl, 120)}`;
+  const head = [goal, where, expect].filter((s) => s !== "").join(" | ");
+  return hist === "" ? head : `${head} | 已执行: ${hist}`;
 }
 
-/** 停因 → 解锁建议闭集（确定性生成；≤3 条，按停因查表，不是模型建议）。 */
-export function unblockHintsFor(stop: PilotStopCode): string[] {
+/** 解锁建议的可选现场事实（确定性生成用；不是模型建议，也不进 hint 解析面）。 */
+export interface PilotUnblockContext {
+  /** 被 hosts 信封排除的子 frame origins（handoff 证据同源）。 */
+  framesExcluded?: readonly string[];
+}
+
+/** 停因 → 基础解锁建议闭集（确定性生成；按停因查表，不是模型建议）。 */
+function baseUnblockHints(stop: PilotStopCode): string[] {
   switch (stop) {
     case "low_confidence":
       return [
@@ -210,11 +239,36 @@ export function unblockHintsFor(stop: PilotStopCode): string[] {
         "起新 pilot 并增大 --max-steps（预算用尽即终态：本 run 不再接受 resume/redirect）",
         "把这次已走轨迹（record）当输入：换更小的 --goal 或先修入口页",
       ];
+    case "off_task_page":
+      return [
+        "redirect 回任务页（当前 URL 已偏离发起方声明的 --expect-url）",
+        "核对 --expect-url 与入口 URL：只写稳定的路径片段（如 /maps），不要写 query",
+      ];
     case "browser_dead":
       return ["redirect 重开入口页（浏览器已死，现场不可恢复）"];
     case "final_signal_held":
       return []; // 正因收尾，无需解锁
   }
+}
+
+/**
+ * 停因 → 解锁建议闭集（确定性生成；≤3 条）。
+ *
+ * frame 排除只在「候选面可能因此残缺」的停因上当根因级解锁项（low_confidence /
+ * target_ambiguous / needs_value / stuck_inert）——budget_exceeded 是已走了 N 步的终态，
+ * 把 frame 建议放它前面会误导（实测 Maps 页常驻一个与任务无关的 ogs launcher frame）。
+ */
+export function unblockHintsFor(stop: PilotStopCode, ctx?: PilotUnblockContext): string[] {
+  // 走查实测：目标在跨源 iframe（ogs.google.com 九宫格）时，动作池里根本没有候选——
+  // 只看 stop_code 会误判成"模型选不准"。把 frame 排除事实变成可执行的 envelope 建议。
+  const frameStop = stop === "low_confidence" || stop === "target_ambiguous"
+    || stop === "needs_value" || stop === "stuck_inert";
+  const frames = frameStop
+    ? [...new Set((ctx?.framesExcluded ?? []).filter((o) => o !== ""))].slice(0, 2)
+    : [];
+  const frameHint = frames.length === 0
+    ? [] : [`目标可能在未声明的 iframe 内：把 ${frames.join(", ")} 加入 hosts（--host / hosts 参数）后重试`];
+  return [...frameHint, ...baseUnblockHints(stop)].slice(0, 3);
 }
 
 /** 退出码：0 = final_signal_held 或干净收尾 / 1 = browser_dead / 3 = 被挡住（停因待兜底）。 */

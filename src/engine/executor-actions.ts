@@ -7,7 +7,7 @@ import { type AmbiguityView } from "./ambiguity.ts";
 import { type ActMissDiagnostics, describeActionError, firstLoc } from "./executor-pure.ts";
 import { clickPoollessTarget, takeAncestorRetarget } from "./executor-actionability.ts";
 import { _executeElement } from "./executor-resolve-a.ts";
-import { _resolveOne } from "./executor-resolve-b.ts";
+import { _resolveOne, _resolveOneWithLock, type ActLock } from "./executor-resolve-b.ts";
 import { type ActionabilityDetail, type AnyLoc, type AnyPage } from "./executor-types.ts";
 import { scrollGeoOf } from "./executor.ts";
 import { type Elem, urlOf } from "./extraction.ts";
@@ -54,7 +54,7 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
      * `rehydrateRescan:true` 声明仍被接受（兼容，不再有额外效果）；settle 关闭/结论缺失
      * 时门控信号不存在，重扫永不触发。
      */
-    opts?: { occlusionProbe?: boolean; diagnostics?: boolean; rehydrateRescan?: boolean },): Promise<{
+    opts?: { occlusionProbe?: boolean; diagnostics?: boolean; rehydrateRescan?: boolean; lock?: ActLock },): Promise<{
     ok: boolean; how?: string; ref?: string; changed?: boolean;
     moved?: boolean; delta?: number; scrollTop?: number; scrollHeight?: number; clientHeight?: number;
     stopCode?: string; reason?: string; ambiguity?: AmbiguityView;
@@ -65,9 +65,9 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
     /** B1：非 timeout 异常后 URL 已变 = 点击已发生（不补点，如实记）。 */
     probe_navigated?: boolean;
     /** E1-c/F72/AX 回退：`#id` 直查兜底 / rehydrate 重扫 / AX 回退命中时出现（additive；其余路径键集不变）。 */
-    resolved_via?: "live-dom-id-fallback" | "rehydrate-rescan" | "ax-fallback" | "actionable-ancestor" | "nested-fold";
+    resolved_via?: "live-dom-id-fallback" | "rehydrate-rescan" | "ax-fallback" | "actionable-ancestor" | "nested-fold" | "ref-lock";
   }> {
-    const resolved = await _resolveOne(mw, page, target, op, onAmbiguous, opts?.diagnostics === true);
+    const resolved = await _resolveOneWithLock(mw, page, target, op, onAmbiguous, opts);
     if ("error" in resolved) {
       return {
         ok: false,

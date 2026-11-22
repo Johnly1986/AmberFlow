@@ -104,9 +104,10 @@ amber pilot --url https://example.org/list --goal "找到第一条详情的标�
 6. `checkSignal(finalSignal)`——成立即停 `final_signal_held`；缺最终信号声明时以
    「预算内持续推进、连续 inert 即停」收尾（诚实，不发明完成）。
 
-**停因闭集**（全部既有码，零新 stopCode）：`low_confidence` / `target_ambiguous` /
-`needs_value` / 连续 inert（复用 anti-repeat 证据）/ `no_model_runtime` /
-`budget_exceeded`（`--max-steps` 与 run 同名同义）/ `final_signal_held` / `browser_dead`。
+**停因闭集**（9 码）：`low_confidence` / `target_ambiguous` / `needs_value` / 连续 inert
+（复用 anti-repeat 证据）/ `no_model_runtime` / `off_task_page`（`--expect-url` 的页面漂移
+确定性守卫——当前 URL 不含声明子串即停，不在漂移页上继续抽池/问模型）/ `budget_exceeded`
+（`--max-steps` 与 run 同名同义）/ `final_signal_held` / `browser_dead`。
 
 **Agent 兜底指令闭集**（stdin JSONL，新请求类型；观察类指令复用 session 请求面）：
 
@@ -140,10 +141,12 @@ amber pilot --url https://example.org/list --goal "找到第一条详情的标�
 
 1. **PW1**：停因交接块字段冻结；四件套与停驶页一致；缺省路径产物逐字节不变。
 2. **PW2**：fixtures 静态页 + 真站 core 一条——① model 驾驶在声明预算内到达最终信号
-   （每轮一次模型咨询，规则档命中不计）；② 每类停因各触发一次兜底并 `resume` 成功；
-   ③ 危险动作被 default-deny 拒绝且 Agent 指令无法越过；④ 非 TTY 无 `--input` 时停驶即
-   结构化退出，idle 超时退出码与 session 语义一致；⑤ rules-only 环境如实停
-   `no_model_runtime`，不假装驾驶。
+   （每轮一次模型咨询，规则档命中不计）；② 每类停因（含 `off_task_page`）各触发一次兜底并
+   `resume`/`redirect` 成功；③ 危险动作被 default-deny 拒绝且 Agent 指令无法越过；④ 非 TTY
+   无 `--input` 时停驶即结构化退出，idle 超时退出码与 session 语义一致；⑤ rules-only 环境
+   如实停 `no_model_runtime`，不假装驾驶；⑥ 驾驶问句的步史只记"已执行 + outcome"并带
+   `当前页`/`期望页`；⑦ 被 hosts 信封排除的跨源 frame 进 handoff 证据（`frames_excluded`）
+   且解锁建议点名"把 origin 加入 hosts"。
 3. **PW3**：`pilot export` 骨架过 `amber apps check`；消融报告落 docs（实测数据）；
    桥结果与 CLI 同任务同 slot 逐字节一致（新增键除外）。
 4. **红线验收**：驾驶请求体不存在自由文本动作生成面（pick 只收闭集 ref）；pilot 产物

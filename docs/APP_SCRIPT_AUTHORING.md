@@ -55,16 +55,20 @@
   `plan run` 才真执行。
 
 - **模型驾驶走查（`amber pilot`，第四种）**：`amber pilot --url <入口页> --goal "<一句话>"
-  [--final-signal '<JSON>'] [--max-steps N] [--record <轨迹>]`——决策模型逐步投票驾驶（规则档
-  先行零模型、低置信先宽扫重问，与 run 同序），停因时投影四件套交接（截图/DOM/池快照/
-  observe）+ 确定性解锁建议，等 Agent 兜底（闭集：`resume`（hint 点名零模型 / `value{k:v}`
-  显式给值 / `skip` 禁选上一票）/ `redirect` / `finish` / `abort`）；`--driver agent` 是零模型
-  对照臂（每步等 Agent 点名）。适合目标明确、交互步多的走查。**边界**：产物带 `pilot:true`，
-  走查通过 ≠ 应用通过（正式结论只能来自生成的 app.mjs 走 `amber run`）；`finish` 必须带信号并
-  经 `checkSignal` 验证；危险词面动作确定性拒绝（`risk_declined`，兜底闭集无 confirm 可越过）；
-  被拒指令 = 单行失败不杀会话；**跨 frame 站点**（应用菜单/内嵌搜索框等）要把宿主 frame 的
-  origin 写进 `--hosts`（pilot 的 hosts 信封同时管导航与 frame 准入，缺了即池内无该 frame
-  元素/动作报 `frame_not_allowed`）。**闭环**：`--record` 驾驶轨迹 → `amber pilot export --record
+  [--final-signal '<JSON>'] [--max-steps N] [--expect-url <URL 子串>] [--record <轨迹>]`——
+  决策模型逐步投票驾驶（规则档先行零模型、低置信先宽扫重问，与 run 同序），停因时投影四件套
+  交接（截图/DOM/池快照/observe）+ 确定性解锁建议，等 Agent 兜底（闭集：`resume`（hint 点名
+  零模型 / `value{k:v}` 显式给值 / `skip` 禁选上一票）/ `redirect` / `finish` / `abort`）；
+  `--driver agent` 是零模型对照臂（每步等 Agent 点名）。适合目标明确、交互步多的走查。
+  **边界**：产物带 `pilot:true`，走查通过 ≠ 应用通过（正式结论只能来自生成的 app.mjs 走
+  `amber run`）；`finish` 必须带信号并经 `checkSignal` 验证；危险词面动作确定性拒绝
+  （`risk_declined`，兜底闭集无 confirm 可越过）；被拒指令 = 单行失败不杀会话；**跨 frame
+  站点**（应用菜单/内嵌搜索框等）要把宿主 frame 的 origin 写进 `--hosts`（pilot 的 hosts
+  信封同时管导航与 frame 准入，缺了即池内无该 frame 元素/动作报 `target_not_found`；交接
+  证据会给 `frames_excluded` 与"把 origin 加入 hosts"的解锁建议）；**页面漂移**用
+  `--expect-url <稳定路径片段>` 守卫——当前 URL 不含它即停 `off_task_page`，不继续在漂移页
+  上烧预算。驾驶问句带 `当前页` 与 `已执行: <label>[changed|no_change|failed]` 步史，模型能
+  看出 no-op 点击没有推进。**闭环**：`--record` 驾驶轨迹 → `amber pilot export --record
   <轨迹> --id <app>` 骨架 → `amber apps check` → 补 done/slot → `amber run`（export 只出骨架，
   done 是占位符）。协议/交接块契约见 `docs/AGENT_INTERFACE.md` §3.3；桥面 one-shot
   `amberflow_pilot` 同源（重建桥包后生效）；验收矩阵 `npm run verify:pilot`（非门禁，§3.2）。
