@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>F88 unit-sibling — 同卡兄弟同 label 的单元折叠 fixture</title>
+<!--
+  公理 0 缺的形态（Maps 结果卡同构）：同一 role=article 卡片内，
+  - 覆盖链接 a（aria-label=卡片名，absolute inset:0，真接收点击）；
+  - 可见标题 div（文本=同 label，无独立身份）；
+  两者**互不包含**、共享交互祖先卡片。判据：同 label ∧ 同交互 LCA ∧ 组内恰一个 native
+  → 执行者（a）留、标题 div 出池（data-dshdrop=unit-sibling，DOM 原样）。
+  断言锚点：池内该 label 只剩 1 行（a）；被剔账 why=unit-sibling。
+-->
+</head>
+<body>
+<div role="article" id="card" jsaction="click:card.click"
+     style="position:relative;width:260px;border:1px solid #ccc;padding:8px;margin:12px">
+  <div onclick="void 0" style="font-size:15px;padding:6px;cursor:pointer">确认订单</div>
+  <a id="card-link" href="/detail" aria-label="确认订单"
+     style="position:absolute;inset:0;display:block"></a>
+</div>
+</body>
+</html>

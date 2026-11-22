@@ -19,7 +19,7 @@
 export const DEDUP_DROP_ATTR = "data-dshdrop";
 
 /** 被剔原因闭集：等 label 同区域重复（子让位）/ 空名子（装饰、纯噪声）/ 监听证据在子（父让位）。 */
-export const DEDUP_WHY_CODES = ["label-dup", "empty-child", "listener-child"] as const;
+export const DEDUP_WHY_CODES = ["label-dup", "empty-child", "listener-child", "unit-sibling"] as const;
 
 /**
  * 页内去重片段。内插进 EXTRACT_JS（顶层一次定义，配额/填序前调用一次）：
@@ -98,7 +98,91 @@ export const DEDUP_HELPERS_JS = String.raw`
         try { childEl.setAttribute('data-dshdrop', 'label-dup'); } catch (err) { /* 同上 */ }
       }
     }
-    if (dropped.size === 0) return rows;
+    if (dropped.size !== 0) rows = rows.filter((r) => !dropped.has(r));
+    return __dedupUnitSiblings(rows, all, dropped);
+  };
+  // ── 同卡兄弟单元折叠（公理 0 缺的形态）：互不包含的同 label 候选若共享**交互祖先**
+  //（卡片/行：role article/menuitem 族/option/button/link/tab 或 jsaction click/auxclick 或
+  // onclick 或 cursor:pointer，且非 body/html/main 泛容器），且组内**恰一个 native 控件**、
+  // 该控件的中心点命中自己或其后代（真接收点击）——它就是这一单元的执行者，其余同 label
+  // 兄弟（覆盖链接旁的可读标题/装饰文本，如 Maps 结果卡的 aria-label 链接 + 标题 div）出池。
+  // 被剔只出池、DOM 原样保留（同 label 的 hint 仍命中执行者；异形身份 #id/[data-test] 声明
+  // 由调用方 DRF/ADMIT 回捞）。真歧义（跨卡/同容器多 native/无交互祖先）一律不折叠。
+  const __UNIT_NATIVE = new Set(['a', 'button', 'input', 'select', 'textarea', 'label']);
+  const __UNIT_CAP = 8;
+  const __unitInteractive = (x) => {
+    const role = String(x.getAttribute('role') || '').toLowerCase();
+    const js = String(x.getAttribute('jsaction') || '');
+    if (['article', 'menuitem', 'menuitemradio', 'menuitemcheckbox', 'button', 'link', 'option', 'tab'].indexOf(role) >= 0) return true;
+    if (js.indexOf('click') >= 0 || js.indexOf('auxclick') >= 0 || x.hasAttribute('onclick')) return true;
+    try { return getComputedStyle(x).cursor === 'pointer' } catch (e) { return false }
+  };
+  const __dedupUnitSiblings = (rows, all, dropped) => {
+    if (rows.length < 2) return rows;
+    const byLabel = new Map();
+    for (const r of rows) {
+      if (!all[r.i]) continue;
+      const lab = String(r.full_label == null ? '' : r.full_label).trim();
+      if (lab === '') continue;
+      const list = byLabel.get(lab);
+      if (list === undefined) byLabel.set(lab, [r]); else list.push(r);
+    }
+    let budget = __UNIT_CAP;
+    for (const group of byLabel.values()) {
+      if (budget <= 0) break;
+      if (group.length < 2 || group.length > 4) continue;
+      let nested = false;
+      for (let a = 0; a < group.length && !nested; a++) {
+        for (let b = a + 1; b < group.length; b++) {
+          const ea = all[group[a].i], eb = all[group[b].i];
+          if (ea && eb && (ea.contains(eb) || eb.contains(ea))) { nested = true; break }
+        }
+      }
+      if (nested) continue;                      // 包含关系已归既有裁决；这里只处理兄弟
+      const chains = group.map((r) => {
+        const out = [];
+        let p = all[r.i].parentElement;
+        for (let g = 0; p && g < 12; g++, p = p.parentElement) out.push(p);
+        return out;
+      });
+      let lca = null;
+      for (const cand of chains[0]) {
+        if (cand && chains.every((ch) => ch.indexOf(cand) >= 0)) { lca = cand; break }
+      }
+      if (!lca) continue;
+      const ltag = String(lca.tagName || '').toUpperCase();
+      if (ltag === 'BODY' || ltag === 'HTML' || ltag === 'MAIN') continue;   // 泛容器 = 跨单元
+      if (!__unitInteractive(lca)) continue;
+      let native = null, natives = 0;
+      for (const r of group) {
+        const t = String(all[r.i].tagName || '').toLowerCase();
+        if (!__UNIT_NATIVE.has(t)) continue;
+        natives += 1; native = r;
+      }
+      if (natives !== 1 || native === null) continue;   // 一卡双 native = 语义不可分
+      const rep = all[native.i];
+      const rr = rep.getBoundingClientRect();
+      if (!rr.width || !rr.height) continue;
+      const cx = rr.x + rr.width / 2, cy = rr.y + rr.height / 2;
+      if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) continue;
+      let top = null;
+      try { top = document.elementFromPoint(cx, cy) } catch (e) { top = null }
+      if (!top || (top !== rep && !rep.contains(top))) continue;   // 执行者必须真接收点击
+      let addressable = false;
+      for (const r of group) {
+        if (r === native) continue;
+        const el = all[r.i];
+        if (el && (el.id || el.getAttribute('data-test'))) { addressable = true; break }
+      }
+      if (addressable) continue;                 // 异形身份声明可达性优先，不折叠
+      for (const r of group) {
+        if (r === native) continue;
+        const el = all[r.i];
+        if (el) el.setAttribute(${JSON.stringify(DEDUP_DROP_ATTR)}, 'unit-sibling');
+        dropped.add(r);
+      }
+      budget -= 1;
+    }
     return rows.filter((r) => !dropped.has(r));
   };
   // 桶内排序（类目维 + 醒目度，两分支同用）：atomic 先、container 后（container 只降权

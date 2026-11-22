@@ -299,6 +299,12 @@ const CASES: ObservationCase[] = [
     run: async (ctx) => await observePoolDedup(ctx, "pool-dedup/card-independent.html"),
   },
   {
+    name: "pool-dedup-unit-sibling",
+    // ⑤ 同卡兄弟同 label（Maps 结果卡同构）：互不包含、共享 role=article 交互祖先、
+    // 组内恰一个 native（覆盖链接）→ 执行者留、标题 div 出池（why=unit-sibling）。
+    run: async (ctx) => await observePoolDedup(ctx, "pool-dedup/unit-sibling.html"),
+  },
+  {
     name: "pool-dedup-long-list-64",
     // ⑤ 61 控件全在首屏网格：64 帽全入池、item-50 可达（40 帧下它被挤出窗口）。
     run: async (ctx) => {
