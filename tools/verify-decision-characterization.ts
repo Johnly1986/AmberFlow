@@ -20,8 +20,8 @@
  *   ✔ run-family-repair（族不符：族空停因或 nominated_family_repair）
  *   ✔ run-r2b（词面零重叠提名：conf∈[floor,0.9) + 零重叠 → 第二次宽扫；按 conf/重叠判定进入条件）
  *   ✔ run-retry-memory（同 memory 实例两次 attempt：记忆键稳定 + rank 档第二次带注记）
- *   ✘ pilot leg 生命周期（resume 保留 / redirect 换 leg）——需 pilot runtime harness + record 事件派生，
- *      本 lane 不复制 pilot 装配（避免与 verify-pilot 耦合），列为后续独立任务
+ *   ✔ pilot-leg 生命周期（leg 派生 = redirect 事件计数：初始 0、redirect 后 +1、resume 不变；
+ *      停因经 PilotRuntime 驾驶循环实测，非伪造）
  *
  * 用法：
  *   node --experimental-strip-types tools/verify-decision-characterization.ts [--check | --record | --list]
@@ -37,6 +37,8 @@ import { buildMiddleware } from "../src/app/middleware-factory.ts";
 import { installLayaRuntime } from "../src/model/model.ts";
 import { installDecisionProvider } from "../src/model/decision-provider.ts";
 import { makeStubProvider, type StubRequestSnapshot, type StubTurn } from "./stub-decision-provider.ts";
+import { PilotRuntime, type PilotSink } from "../src/app/pilot-runtime.ts";
+import type { PilotOptions } from "../src/app/pilot-contract.ts";
 import type { AnyPage, RunReport } from "../src/engine/executor-types.ts";
 import type { ElemPool } from "../src/engine/extraction.ts";
 
@@ -93,6 +95,40 @@ async function withMw<T>(turns: StubTurn[] | ((snap: StubRequestSnapshot) => Stu
     await session.close();
     installDecisionProvider(null);
   }
+}
+
+/* ------------------------------------------------------------------ pilot 装配 */
+
+/** pilot 面装配（leg 生命周期场景用）：stub 在 `start()` 之后、首次 `drive()` 之前安装
+ *  （`mw.decision` 在 ready() 才解析，安装顺序决定是否生效）。 */
+async function withPilot<T>(
+    origin: string,
+    turns: StubTurn[],
+    run: (ctx: { rt: PilotRuntime; events: Array<Record<string, unknown>>; stub: ReturnType<typeof makeStubProvider> }) => Promise<T>,
+): Promise<T> {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "af-char-pilot-home-"));
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "af-char-pilot-out-"));
+  installLayaRuntime(null);
+  const events: Array<Record<string, unknown>> = [];
+  const sink: PilotSink = { respond: (obj) => { events.push(obj as Record<string, unknown>); } };
+  const stub = makeStubProvider((snap) => turns[Math.min(snap.seq, turns.length - 1)]!);
+  const opts: Omit<PilotOptions, "env" | "outDir"> = {
+    url: `${origin}/cards.html`, goal: "zzz-no-rule-match", maxSteps: 3,
+  };
+  const rt = new PilotRuntime({ ...opts, env: { ...process.env, AMBERFLOW_HOME: home }, outDir }, sink);
+  await rt.start();
+  installDecisionProvider(stub.provider);
+  try {
+    return await run({ rt, events, stub });
+  } finally {
+    await rt.closeBrowser();
+    installDecisionProvider(null);
+  }
+}
+
+/** leg 派生值 = 截至此刻的改道事件计数（引擎无 leg 字段；resume 不改变它）。 */
+function redirectCountOf(events: Array<Record<string, unknown>>): number {
+  return events.filter((e) => e["type"] === "command_result" && e["redirected"] === true).length;
 }
 
 /* ------------------------------------------------------------------ 投影 */
@@ -292,6 +328,31 @@ const CASES: Case[] = [
       assert.equal(hasNote, true, "rank 档第二次 attempt 应带记忆注记");
       return { attempts: runs.length, keys_equal: true, first_notes: runs[0]!["notes"], second_notes: secondNotes };
     },
+  },
+  {
+    name: "pilot-leg-lifecycle",
+    run: async () => await withPilot(ORIGIN, [{ ref: null, score: 0 }], async ({ rt, events }) => {
+      const stop1 = await rt.drive();
+      assert.equal(stop1, "low_confidence", "stub 弃权 → low_confidence 交接");
+      const legs0 = redirectCountOf(events);
+      assert.equal(legs0, 0, "初始 leg 计数为 0");
+      const redirected = await rt.handleLine(`{"cmd":"redirect","url":"${ORIGIN}/wide.html"}`);
+      assert.equal(redirected, "drive", "redirect 后回到驾驶轮");
+      const legs1 = redirectCountOf(events);
+      assert.equal(legs1, 1, "redirect = 换 leg（计数 +1）");
+      const stop2 = await rt.drive();
+      assert.equal(stop2, "low_confidence", "改道后仍是弃权停");
+      assert.equal(redirectCountOf(events), 1, "驾驶轮不额外改道");
+      const resumed = await rt.handleLine('{"cmd":"resume","hint":"#b1"}');
+      assert.equal(resumed, "drive", "resume 回到驾驶轮");
+      const stop3 = await rt.drive();
+      assert.ok(typeof stop3 === "string", "resume 后仍返回结构化停因");
+      assert.equal(redirectCountOf(events), 1, "resume 保留同 leg（计数不变）");
+      return {
+        stops: [stop1, stop2, stop3], legs: [legs0, legs1, redirectCountOf(events)],
+        handoffs: events.filter((e) => e["type"] === "handoff").length,
+      };
+    }),
   },
 ];
 

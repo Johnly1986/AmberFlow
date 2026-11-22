@@ -4,6 +4,16 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-22 S0a 补齐 pilot-leg + S3 前半模型面白名单断言
+
+- **S0a 补齐 `pilot-leg-lifecycle`（11/11）**：用 `PilotRuntime` 实测 leg 生命周期——leg 派生值 =
+  **redirect 事件计数**（引擎无 leg 字段），golden 钉住 `legs:[0,1,1]`（初始 0 / redirect 后 +1 /
+  resume 不变）与 3 次结构化停因（stub 弃权 → `low_confidence`）。`verify-decision-characterization`
+  **11/11**（`--record` 两次一致）。
+- **S3 前半：模型面字段白名单断言（`verify:model-face`，非门禁）**：用携带**全部 13 个采集期事实字段**
+  的合成池断言 `modelProjectionOf` 的泄漏/过剥双检——13 字段全剥离、9 个核心字段全保留、输入池未被
+  改写（纯函数）、干净行走快路径、`esig` 不受剥离影响；模型面键集合必须等于白名单（过剥也暴露）。
+
 ## [Unreleased] — 2026-11-22 S1 一期：引擎 ask seam 落地 + pilot 切面（双臂零差异）
 
 - **引擎 `ask` seam（DC7 S1 一期）**：新增 `src/engine/decision-ask.ts` —— 把 pilot 当前 `modelVote` 语义

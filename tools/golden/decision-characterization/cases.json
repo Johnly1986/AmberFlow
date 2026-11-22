@@ -149,6 +149,19 @@
         }
       }
     },
+    "pilot-leg-lifecycle": {
+      "handoffs": 3,
+      "legs": [
+        0,
+        1,
+        1
+      ],
+      "stops": [
+        "low_confidence",
+        "low_confidence",
+        "low_confidence"
+      ]
+    },
     "run-adjudicate": {
       "steps": [
         {

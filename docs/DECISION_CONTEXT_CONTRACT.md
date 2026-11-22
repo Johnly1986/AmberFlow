@@ -245,6 +245,10 @@ Ports 接线 → **S4** 结构化段 + 步史迁出 goal（单独 A/B）。
   → S0b（账本适配不删旧账，逐项验证 prune/notes/effective-清-inert/desc 一致）** → S1（仅切 pilot
   `modelVote`，新旧双臂含成功票与宽扫）→ S2（run 只在 `runModelPick` 整段接入）→ S3（白名单 +
   context 能力档）→ S4（结构化段 + 步史迁移单独 A/B）。
+- **S3 前半已交付（2026-11-22）**：`tools/verify-model-face.ts`（`npm run verify:model-face`）——
+  `modelProjectionOf` 的**泄漏/过剥双检**（13 个采集期字段全剥离、核心字段全保留、输入不可变、快路径
+  与 `esig` 不变、模型面键集合 = 白名单）。**S3 余下**：`capabilities.context` 档声明（与既有
+  `state_digest` 的关系需一并定稿）+ `DecisionAskPorts` 的组合根接线 + doctor 的 face×layer×provider 矩阵。
 - **S1 一期（最小切片）已交付（2026-11-22）**：`src/engine/decision-ask.ts` 实现 `ask` 的**当前
   `modelVote` 语义**（窄问 → `filter` 聚合容器剔除 → 账本 forbidden/notes → floor 闸门 → 低置信宽扫
   重问（宽池真变大才重问）→ 弃权/命中），floor 闸门 `gateOf`/`passesFloor` 单源上收引擎；
