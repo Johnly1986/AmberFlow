@@ -1,5 +1,5 @@
 /**
- * pilot 面的决策询问适配器（DC7 迁移）：把 `BrowserMiddleware` + `PilotLedger` 折成引擎的
+ * pilot 面的决策询问适配器（DC7 边界）：把 `BrowserMiddleware` + `PilotLedger` 折成引擎的
  * `DecisionAskHost`，并维护 pilot-leg 作用域与账本实例（策略由引擎工厂按 lifetime 绑定）。
  *
  * 边界：本文件属应用层，可 import engine；engine 反向不 import 本文件（`DecisionAskHost`

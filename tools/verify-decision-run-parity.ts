@@ -1,6 +1,6 @@
 /**
  * run 面选择段 parity lane（非门禁）：把**同一份 host/ctx 输入**分别喂给
- *   - 对照臂：`executor-phases-b.ts` 的 `runModelPick`（现状调用点仍在用它）；
+ *   - 对照臂：`executor-phases-b.ts` 的 `runModelPick`（deprecated；执行路径已切到新实现，本 lane 仍驱动它做对照）；
  *   - 新臂：`decision-pick-phase.ts` 的 `runDecisionPick`（按分支拆分后的实现），
  * 逐字段比较 `ModelPickPhase` 全字段、桩侧请求投影、`windowChainFacts`、`rejectedAskConfs`、
  * `warnings` 与结构化停因（code/reason）。差异必须为零；首现差异逐条打印并 exit 1。
@@ -22,6 +22,7 @@ import { buildMiddleware } from "../src/app/middleware-factory.ts";
 import { installLayaRuntime } from "../src/model/model.ts";
 import { installDecisionProvider } from "../src/model/decision-provider.ts";
 import { runModelPick } from "../src/engine/executor-phases-b.ts";
+import type { RunPickArgs } from "../src/engine/decision-pick-host.ts";
 import { runDecisionPick, type RunPickCtx, type RunPickHost } from "../src/engine/decision-pick-phase.ts";
 import { createRunAccounting } from "../src/engine/run-context.ts";
 import { _hintOpts } from "../src/engine/executor-resolve-a.ts";
@@ -243,7 +244,8 @@ async function driveBoth(mw: BrowserMiddleware, page: AnyPage, stub: Stub, spec:
   const acctOld = createRunAccounting({ maxSteps: 3 });
   const hostOld = makeHost(mw, acctOld, spec);
   const ctxOld = makeCtx(page, spec, hostOld, acctOld);
-  const oldPhase = await runModelPick(mw, {
+  // 用 `RunPickArgs`（装配层与两臂共用的实参面）显式标注：结构漂移会在此处编译期报错。
+  const oldArgs: RunPickArgs = {
     pg: ctxOld.pg, stepNo: ctxOld.stepNo, instruction: ctxOld.instruction, verbose: ctxOld.verbose,
     elems: ctxOld.elems, ruleRef: ctxOld.ruleRef, curHint: ctxOld.curHint, commandMode: ctxOld.commandMode,
     forbidden: ctxOld.forbidden, noted: ctxOld.noted, targets: ctxOld.targets, trace: ctxOld.trace,
@@ -261,7 +263,8 @@ async function driveBoth(mw: BrowserMiddleware, page: AnyPage, stub: Stub, spec:
     goalHeld: hostOld.goalHeld, goalSignalFn: hostOld.goalSignalFn, isTyping: hostOld.isTyping,
     modelLabel: hostOld.modelLabel, degradedReasonSuffix: hostOld.degradedReasonSuffix,
     choiceLimitReason: hostOld.choiceLimitReason, clearChoiceLimitReason: hostOld.clearChoiceLimitReason,
-  });
+  };
+  const oldPhase = await runModelPick(mw, oldArgs);
   const oldArm = collectArm(oldPhase, ctxOld, acctOld, stub);
 
   // 新臂：同一 host/ctx 输入，直接驱动拆分后的实现。

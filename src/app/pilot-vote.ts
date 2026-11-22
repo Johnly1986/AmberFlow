@@ -5,7 +5,7 @@
  *   - `modelVote`（执行路径）：委托引擎 `DecisionAsk` seam（经 `PilotAskAdapter` 注入面的观察与
  *     投票原语）。窄问 → floor 闸门 → 低置信宽扫重问 → 弃权即停的阶梯由
  *     `src/engine/decision-ask.ts` 单点实现，候选池/禁选/注记归引擎自取；
- *   - `modelVoteLegacy`（对照臂）：迁移前的逐字节阶梯实现——只用于 S1 双臂等价度量，
+ *   - `modelVoteLegacy`（对照臂）：逐字节阶梯实现——只用于 S1 双臂等价度量，
  *     不接执行路径。
  *
  * floor 闸门（`gateOf`/`passesFloor`）唯一出处已上收到引擎（`decision-ask.ts`），本模块只
@@ -78,7 +78,7 @@ interface ModelVoteArgs {
 }
 
 /**
- * 对照臂：迁移前的模型投票阶梯（模型不在位 = 如实停，绝不装会抛的 runtime）。
+ * 对照臂：模型投票阶梯（模型不在位 = 如实停，绝不装会抛的 runtime）。
  * 保留它的唯一目的是与 `modelVote` 做同场景双臂对照；新增行为不得只改这里。
  */
 export async function modelVoteLegacy(a: ModelVoteArgs): Promise<PilotVote> {

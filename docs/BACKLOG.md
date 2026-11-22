@@ -446,7 +446,7 @@ lowercase（`i` 旗标），`parseHint` 的 `frameChain` 归一为小写规范 o
 
 ## 20. 决策上下文责任边界落地：引擎单点 `ask(page, scope, accounting, intent, profile)` + 账本上收（DC7）
 
-**状态**：**S0a + S0b + S1 一期已落地**（S1 一期 = ask 承载当前 modelVote 语义 + pilot 切面 + 双臂 5/5 零差异）；**S1.2/S2/S3/S4 待做**｜ **优先级建议**：P1
+**状态**：**S0a + S0b + S1 + S2 已落地**（S1 = ask 承载 pilot modelVote + 双臂 5/5；S2 = run 选择段搬移拆分 + 调用点切换，阶段对照 16/16 零差异）；**S2-Stage-3（旧实现退役）/S3/S4 待做**｜ **优先级建议**：P1
 
 > **现状锚点**：①`elems`/`forbidden`/`notes` 由驾驶面传入 `mw.pickProposal`（引擎只做投影与渲染）——面可换池/裁剪池/自建账本；②pilot 自建 `PilotLedger`（esig 账本 + notes），与 run 面引擎侧 `RunAccounting`/`outcome-memory` 双账并存（P0/P1 的收益只在 pilot 面生效）；③模型面字段由 `executor-pure.modelProjectionOf` 手写 guard+解构两处剥离，无断言；④DC4 的 `capabilities.context` 档未实施，未声明 provider 时上文静默丢弃只记 `context_skipped`；⑤pilot 的 `drivingGoal` 把步史拼进 goal（回声风险）。
 >

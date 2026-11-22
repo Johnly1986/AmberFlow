@@ -259,6 +259,15 @@ Ports 接线 → **S4** 结构化段 + 步史迁出 goal（单独 A/B）。
   escalate/adjudicate/R2b/族修复/窗口升级、`tieredHint` 窄问、`rules_first`、`limit`、`stepTimeoutMs`
   硬约束、L3/L4 段与 ports、跨作用域 memory。已知差异（记录）：ask 内部重新抽一次池（S1.1 用
   executionPool 复用消除）；宽扫重问的 notes 按宽池重算（legacy 复用窄池 notes，属改善）。
+- **S2 已落地（2026-11-22，两阶段）**：Stage-1 = `runModelPick` 实现**搬移+拆分**到
+  `src/engine/decision-pick-phase.ts`（536 行，13 helper 最大 54 行；旧实现原样保留作对照臂），
+  阶段对照 lane `tools/verify-decision-run-parity.ts` **16 场景 × 两臂逐字段零差异** + `--self-test`
+  负向自测（4 类扰动均被 diff 抓住）；Stage-2 = `executor.ts` 调用点经 `src/engine/decision-pick-host.ts`
+  （126 行、纯 `import type`、engine 不 import app）切到 `runDecisionPick`——`executor.ts` 2785→2786 行、
+  `run()` 持平 883 基线，旧 `runModelPick` 标 `@deprecated` 保留；切换前后 `verify:pilot` 12/12、
+  `verify:decision-characterization` 11/11、`verify:runtime:offline` 8/8、parity 16/16 **逐字一致**。
+  **Stage-3（未做）**：先给 parity 旧臂快照 golden，再删旧实现/re-export/清理 `phaseFunctions` 基线例外
+  （`--update`，不手改 baseline）与注释里的符号引用。
 - **当前状态：工作树 v5（**未提交、未冻结**；类型单源 / executionPool / 工厂绑定账本 / Ports 注入 /
   StopCode 复用 / ts 对齐 DC3；审计 P1 已修：`run` 元数据补 `conf`/`label`、`notesFor` 增可选作用域、
   `forbid/unforbid` pilot 不对称与 `entries≤8/不含守停现场` 写进契约、`ruleSkip` 的聚合容器归池构成事实）。

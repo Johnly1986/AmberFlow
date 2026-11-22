@@ -275,7 +275,7 @@ export type DeclaredHintPhase = {
   curHint: string | null;
 };
 
-/** `runModelPick` 的返回值：stopped = 选择段已停（stop 已记账）；elems 为宽扫后的本步视图。 */
+/** 选择段（`runDecisionPick`，经 `runModelPickNext` 装配）的返回值：stopped = 选择段已停（stop 已记账）；elems 为宽扫后的本步视图。 */
 export type ModelPickPhase = {
   stopped: boolean; ref: string | null; conf: number; method: string;
   decisionKind: "rule" | "model" | "escalate"; layaMargin: number | null;
@@ -320,7 +320,8 @@ import { _executeElement, _missingRequired, _hintOpts, resolveCommandRef } from 
 import { _resolveOne, _rehydrateRescanOnce, _liveDomIdFallback, _probeCleanup, _domFallbackResolve, _resolveAxFallback, _resolveClickxyFallback } from "./executor-resolve-b.ts";
 import { actOnce, _scrollIntoViewWithEvidence, scrollIntoView, _scrollContainerForElement, _scrollWithLoc, scrollContainer, scrollDocument, setRange } from "./executor-actions.ts";
 import { runFrameGate, runPoolGate, runDeclaredTargets, runDeclaredHint } from "./executor-phases-a.ts";
-import { runModelPick, runPostAction } from "./executor-phases-b.ts";
+import { createRunPickWiring } from "./decision-pick-host.ts";
+import { runModelPickNext, runPostAction } from "./executor-phases-b.ts";
 import { runActionPhase, runActionExecute, runSetup, runTail, runReportTail } from "./executor-phases-c.ts";
 export * from "./executor-pure.ts";
 import type { ActMissDiagnostics, ActMissRow, DeviceSpec } from "./executor-pure.ts";
@@ -2668,14 +2669,14 @@ export class BrowserMiddleware {
             reAdmitted.add(br);
           }
         }
-        const pickPhase = await runModelPick(this, {
+        const pickPhase = await runModelPickNext(...createRunPickWiring(this, {
           pg, stepNo, instruction, verbose, elems, ruleRef, curHint, commandMode, forbidden, noted, trace, targets, adjudicate, reobserve, escalateFn, expectedFamily,
           confFloor: this.confFloor, candidatePriority, tieredHint, rulesOnly: this.rulesOnly, decisionDegradedReasonClass: this.decisionDegraded?.reason_class ?? null, rejectedAskConfs: this._rejectedAskConfs, warnings,
           reobserved, escalated, escalatedPick, windowChainFacts, stepTimeoutLeft, stop, stopReason: () => acct.stopReason, pickElement: (g, page, pool, blocked, notes) => this.pickElement(g, page, pool, blocked, notes),
           orderedPool, settleBeforeExtract: (page) => this._settleBeforeExtract(page), pruneForbids, hintOpts: () => _hintOpts(this, ), frameHosts: this._frameHosts, stateTextFn: (page, instr) => stateText(page, instr, this.embedFn),
           rowAnchorNote, declaredTargets, goalHeld, goalSignalFn, isTyping: (el) => this._isTyping(el), modelLabel: () => this.modelLabel(), degradedReasonSuffix: () => this.degradedReasonSuffix(),
           choiceLimitReason: () => this._choiceLimitReason, clearChoiceLimitReason: () => { this._choiceLimitReason = null; },
-        });
+        }));
         elems = pickPhase.elems;
         escalatedPick = pickPhase.escalatedPick;
         if (pickPhase.stopped) break;

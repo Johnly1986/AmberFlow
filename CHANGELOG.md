@@ -4,6 +4,23 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-22 S2：run 选择段搬移拆分 + 调用点切换（阶段对照 16/16）
+
+- **S2-Stage-1（搬移+拆分）**：新增 `src/engine/decision-pick-phase.ts`（536 行、13 helper、最大 54 行），
+  把 `runModelPick` 的 8 个分支（规则/窄问/停因/闸门/宽扫+窗口链/升级/裁决/R2b/族修复）等价搬移并拆分；
+  `executor-phases-b.ts` 仅 +1 行 re-export，旧实现原样保留为对照臂。
+- **阶段对照 lane**：`tools/verify-decision-run-parity.ts` —— 16 场景 × 旧/新两臂逐字段对照
+  （`ModelPickPhase` 全字段 + 桩请求投影 + `windowChainFacts` + `rejectedAskConfs` + `warnings` + 停因
+  code/reason）**16/16 零差异**；内置 `--self-test` 负向自测（phase.conf / 候选数 / windowChainFacts /
+  停因 reason 四类扰动均被抓住，证明对照非空）。
+- **S2-Stage-2（调用点切换）**：新增 `src/engine/decision-pick-host.ts`（126 行、纯 `import type`、engine 不
+  import app）把 executor run 上下文折成 `RunPickHost`/`RunPickCtx`；`executor.ts` 仅 5 insertions/4 deletions，
+  `run()` **持平 883 基线**、文件 2785→2786；旧 `runModelPick` 标 `@deprecated`。切换前后 `verify:pilot`
+  12/12、`verify:decision-characterization` 11/11、`verify:runtime:offline` 8/8、parity 16/16 **逐字一致**；
+  `npm run check` exit 0。
+- **S2-Stage-3（未做，登记）**：parity 旧臂快照 golden → 删旧实现/re-export → `maintain --update` 移除
+  `phaseFunctions` 例外 → 清理注释符号引用 → 复跑四条 lane。
+
 ## [Unreleased] — 2026-11-22 S0a 补齐 pilot-leg + S3 前半模型面白名单断言
 
 - **S0a 补齐 `pilot-leg-lifecycle`（11/11）**：用 `PilotRuntime` 实测 leg 生命周期——leg 派生值 =
