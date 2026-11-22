@@ -4,6 +4,18 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-22 S3 完整 + S2-Stage-3（旧实现退役）
+
+- **S3 完整**：`ProviderCapabilities.context?: "none"|"minimal"|"full"`（只声明不改协议）；本地 laya=minimal、
+  decision-service/OpenAI Decisions=full、baselines/scripted-stub=none；`decision-ask` 逐层回执按声明档裁剪
+  （`none/minimal`→L3/L4 `unsupported`；`full` 未接端口→`absent`；段校验不过→`rejected` 但不 abort）；
+  `buildMiddleware({options.decisionAskPorts})` 组合根注入；`amber doctor` 增只读
+  `decision context: provider/context/state_digest`；新 lane `tools/verify-decision-context.ts` **47 断言**全绿。
+- **S2-Stage-3（旧实现退役）**：先 `--record` 旧臂 16 场景 → `tools/golden/decision-run-parity/cases.json`（两遍一致）；
+  再删旧 `runModelPick`（`executor-phases-b.ts` 607→196；`src/` grep 为空）；`--check` 新臂单腿对 golden
+  **16/16 零差异**；退役后 `--record` 拒绝（防被检实现自证）；`executor.ts` 直连 `runDecisionPick`（`run()` 883 持平）。
+- **baseline 维护（未做，登记）**：`--update` 接受合法下调 + 专门提交删除死 `phaseFunctions` 条目 + 复跑 maintain。
+
 ## [Unreleased] — 2026-11-22 S2：run 选择段搬移拆分 + 调用点切换（阶段对照 16/16）
 
 - **S2-Stage-1（搬移+拆分）**：新增 `src/engine/decision-pick-phase.ts`（536 行、13 helper、最大 54 行），

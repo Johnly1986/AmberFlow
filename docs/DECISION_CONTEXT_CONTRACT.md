@@ -268,6 +268,28 @@ Ports 接线 → **S4** 结构化段 + 步史迁出 goal（单独 A/B）。
   `verify:decision-characterization` 11/11、`verify:runtime:offline` 8/8、parity 16/16 **逐字一致**。
   **Stage-3（未做）**：先给 parity 旧臂快照 golden，再删旧实现/re-export/清理 `phaseFunctions` 基线例外
   （`--update`，不手改 baseline）与注释里的符号引用。
+- **S4 设计口径（未实施）**：①**步史移出 goal**——pilot 的 `drivingGoal` 目前把"已完成: …"拼进 goal
+  （回声风险 + 缓存键抖动），S4 改为 `intent.segments=[{kind:"history", layer:"L2", text:…, provenance}]`，
+  goal 只留目标原文；②**结构化段**——L3 plan narrative / L2 history 用判别联合（`{kind, layer, text,
+  provenance}` 已定义，S4 把 `text` 的自由文本收紧为结构化字段渲染，防面借自由文本绕过白名单/注入敏感值）；
+  ③**A/B 口径**：段注入改变题面 → 必须走 DC5 真站 A/B（同 label 七选一 + 停因恢复两条锚），且
+  `--driver agent` 侧零影响；④**顺序**：S4 在 S3 的能力档与 Ports 接线之后（否则 `full` 档无段可带）。
+- **S3 完整已落地（2026-11-22）**：`ProviderCapabilities.context?: "none"|"minimal"|"full"`（**只声明不改协议**）——
+  本地 laya = `minimal`、decision-service/OpenAI Decisions = `full`、baselines 三个 + 工具 scripted-stub = `none`；
+  实验 provider（jevk5/bailian/token-plan）**未声明**（doctor 呈现 none，保守）。`decision-ask` 逐层回执改为
+  **按声明档裁剪**：`none/minimal` → L3/L4 `unsupported`；`full`/未声明且端口未接 → `absent`；提供了段但
+  face/段未注册、层不符、无端口 → `rejected`（**不 abort**，picked/abstained 不变）。Ports 经
+  `buildMiddleware({options.decisionAskPorts})` 组合根注入（WeakMap 寄存，不改执行器类型面）；`amber doctor`
+  增只读 `decision context: provider=… context=… state_digest=…` 矩阵；新 lane `tools/verify-decision-context.ts`
+  **47 项断言**全绿。**已知限制（接受）**：scripted-stub 消融档运行期经 laya legacy 分支呈 minimal（与 laya-onnx
+  不可区分，要区分需动 executor 类型面，不做）。
+- **S2-Stage-3 已落地（2026-11-22）**：先 `--record` 用**旧臂**录 16 场景 golden
+  （`tools/golden/decision-run-parity/cases.json`，两遍一致才入盘）→ 再删旧 `runModelPick`（
+  `executor-phases-b.ts` 607→196 行；`src/` 内 grep 为空）→ `--check` 用**新臂**对 golden **16/16 零差异**；
+  退役后 `--record` 拒绝执行（防被检实现自证）。`executor.ts` import 直连 `runDecisionPick`（`run()` 持平 883）。
+  **后续 baseline 维护待办（已登记）**：①专门提交用 `--update` 接受合法下调（`executor.ts 2833→2787` 等）；
+  ②用专门手段删除 `phaseFunctions` 里的死条目 `executor-phases-b.ts#runModelPick`（`--update` 按设计不修剪
+  allowlist）；③复跑 maintain。
 - **当前状态：工作树 v5（**未提交、未冻结**；类型单源 / executionPool / 工厂绑定账本 / Ports 注入 /
   StopCode 复用 / ts 对齐 DC3；审计 P1 已修：`run` 元数据补 `conf`/`label`、`notesFor` 增可选作用域、
   `forbid/unforbid` pilot 不对称与 `entries≤8/不含守停现场` 写进契约、`ruleSkip` 的聚合容器归池构成事实）。
