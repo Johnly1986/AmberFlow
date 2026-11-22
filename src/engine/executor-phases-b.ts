@@ -18,7 +18,10 @@ import type { BrowserMiddleware } from "./executor.ts";
 import type { ModelPickPhase, PostActionPhase } from "./executor.ts";
 
 
-  /** 4d 阶段：模型选择（rule → ask → floor → reobserve → escalate → adjudicate → R2b → nominated-family 修复）；
+  /**
+   * @deprecated 运行期已切换到 `decision-pick-phase.runDecisionPick`（由 `decision-pick-host` 装配）；
+   *   本函数暂留一版作为 parity lane 的对照臂，删除前先把对照臂输出快照成 golden。
+   * 4d 阶段：模型选择（rule → ask → floor → reobserve → escalate → adjudicate → R2b → nominated-family 修复）；
    * 早停/日志已在此记账；宽扫替换本步视图（elems 随返回值交回）。动作执行仍在 run()。 */
 export async function runModelPick(mw: BrowserMiddleware, a: {
     pg: AnyPage; stepNo: number; instruction: string; verbose: boolean; elems: ElemPool; ruleRef: string | null;
@@ -601,3 +604,4 @@ export async function runPostAction(mw: BrowserMiddleware, a: {
     return { control: "next", done, manualDone };
   }
 
+export { runDecisionPick as runModelPickNext } from "./decision-pick-phase.ts";
