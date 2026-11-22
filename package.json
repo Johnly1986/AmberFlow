@@ -77,7 +77,8 @@
     "verify:runtime:offline": "node --experimental-strip-types tools/verify-runtime-offline.ts",
     "verify:runtime:offline:record": "node --experimental-strip-types tools/verify-runtime-offline.ts --record",
     "site-knowledge:check": "node --experimental-strip-types tools/site-knowledge-check.ts",
-    "verify:pilot": "node --experimental-strip-types tools/verify-pilot.ts"
+    "verify:pilot": "node --experimental-strip-types tools/verify-pilot.ts",
+    "verify:decision-characterization": "node --experimental-strip-types tools/verify-decision-characterization.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

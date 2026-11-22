@@ -382,20 +382,83 @@ lowercase（`i` 旗标），`parseHint` 的 `frameChain` 归一为小写规范 o
 
 ## 16. pilot 自主驾驶的规则误配与访问循环守卫（消融实测发现）
 
-**状态**：proposal（消融实测已复现）｜ **优先级建议**：P1（价值门相关——循环无声烧预算）
+**状态**：**P0 + P1 已落地（2026-11-21，守卫账本 + L2 注记走既有 notes 通道）；P2（DecisionContext/能力档/桥面生成链）待做**｜ **优先级建议**：P2
 
 > **现状锚点**：`src/app/pilot-runtime.ts` driveOnce 规则档 + anti-repeat（inertRun）。消融实测（books.toscrape，见 PILOTED_WALKTHROUGH_PLAN §7）：goal 词 "book" 被 affordanceRule 命中侧栏类目 "Books"，与模型互乒乓——URL 每步都变 ⇒ `ok+changed` 动作永不进禁选、inert 判定捕获不到，6 步预算无声烧尽；budget_exceeded 交接的 why_stuck 只见终点、不见循环成因。
 >
-> **目标**：①驾驶循环加访问环守卫（URL 去重计数：同一 URL 第 2 次到达即把引回该 URL 的动作按 inert 处理并禁选，或引入循环停因如实交代）；②评估自主驾驶（无声明 hint）时规则档对 chrome/侧栏词面的免疫或降档。验收 = 消融同任务复测不再乒乓烧预算，停因可读。
+> **第二变体（2026-11-20 真站用例复测，Google Maps）**：DOM 状态 **toggle、URL 不变**——goal 词 "Hours" 被 affordanceRule 命中筛选按钮，同元素连续 7 次点击、面板开↔关每步 `changed=true` ⇒ inertRun 每轮清零（`inert = !ok || changed!==true`）、元素永不进禁选（准入条件同为 `!ok || changed!==true`）；且 `driveOnce` 每轮重抽池**不做 `carryForbidden` 平移**（唯一的 esig 翻译在模型宽扫路径），ref 重编号（实测 e15→e18）让 ref 键禁选天然失效——run 面禁选按 esig 键、驾驶面按裸 ref，两面漂移。规则档本身零「已试过」记忆：`affordanceRule` 无 exclude 参数，每轮按 goal 词面重新匹配。
 >
-> **来源**：2026-11-20 pilot 消融双臂实测（PILOTED_WALKTHROUGH_PLAN §7）：纯 model 4 配置 0/4 到达，其中 2 个配置由该循环形态烧尽预算。
+> **目标**：①**已试/禁选记账入决策上下文 L2（运行史）**：驾驶账本按 esig 记 `{desc, tries, last_outcome}`，作为 L2 运行史段（与 run 面 `RunAccounting` 同族、带溯源标签）进模型票请求——上文改变输入不改变裁决权（DC1.5）；规则档 exclude 与防循环守卫从**同一账本**派生（同 esig 连续 ≥2 次 = inert 并禁选，URL 乒乓与 DOM toggle 两类通杀），不再是 pilot 本地补丁；②禁选集按 esig 平移（`driveOnce` 每轮抽池后 `carryForbidden`，修 ref 漂移失效）；③评估自主驾驶（无声明 hint）时规则档对 chrome/侧栏词面的免疫或降档。验收 = 消融同任务 + Maps Hours toggle 两形态复测均不再无声烧预算，停因可读。
+>
+> **来源**：2026-11-20 pilot 消融双臂实测（PILOTED_WALKTHROUGH_PLAN §7）：纯 model 4 配置 0/4 到达，其中 2 个配置由该循环形态烧尽预算。第二变体来源：2026-11-20 Google→Maps 用例重测（pilot 轨迹 `/tmp/dsh-amberflow-pilot-HljChy`：8 次 `picked_by=rule` 点击 Hours，`inert_run:0`、`forbidden:["e15"]`，e18 七次从未进禁选）。
+
+> **产品研判（2026-11-21，子代理只读研判，已复核）**：
+> - 定性 **7:3**：主因是驾驶面确定性守卫缺口，不是决策上下文饥饿。决定性事实：Hours 循环 7 次点击**全部 `picked_by=rule`、模型零票**——只改模型上文的方案对本例零效果；批复「记账入决策上下文」方向对，但须落成「**一张 esig 键账本、两个出口**」。
+> - run 面已用三件套兜住同形态、pilot 未复用：`run-context.ts` 的 RunAccounting（esig+forbidWhy/skippedActions）、`model/outcome-memory.ts`（sig 键 forbid|rank 双档）、`executor-phases-b.ts` 的 `maxEffectiveRepeats → no_progress`（同 esig 第 3 次执行而 done 未成立即停）。pilot 自建弱版（`inert = !ok || changed!==true`、裸 ref 禁选、规则档无 exclude）是缺陷来源。
+> - 推荐**混合(c)**：账本单源 → 出口①确定性守卫（规则档 exclude + 同 esig 连续无进展 → `no_progress` 停，不依赖 provider 能力申报）；出口②L2 上文注记（rank 档，只解决"停得明白/下一步往哪走"）。
+> - L2 **不必先开新请求面**：`ChoiceRequest.notes`（ref→注记）已被 `criteriaView` 消费、`layaProvider.pick` 已传 notes ⇒ `minimal` 档天然满足；`ProviderCapabilities.context` 目前尚不存在（DC4 仍是提案）。
+> - 分期：**P0 守卫**（不依赖 §17、不改契约，消 90% 无声烧预算）→ **P1 L2 走既有 notes 通道**（溯源+字符上限+rank）→ **P2** 才补 DecisionContext/能力档/桥面生成链/MAINLINE seam。§17 非 P0 前置；但 §17 拍板须与 P1 同批对齐「redirect 清步史／账本是否清段／预算不清零」三处口径（研判建议：redirect 带预算重开档 + 账本随步史清段）。
+> - 验收锚：fixtures 复现 DOM toggle 与 URL 乒乓两形态 → ≤3 步停、`stop_code=no_progress`、evidence 带 esig+tries+last_outcome；8 步预算不再落 `budget_exceeded`；stub/laya 双臂同 esig 重复执行=0 且 `model_asks` 不增；单次 ask criteria 字符增幅 ≤10%、`evidence_truncated` 不新增、墙钟劣化 ≤10%；run 面逐字节不变。
 
 ## 17. pilot budget_exceeded 后兜底死局：redirect 的预算语义待拍板
 
-**状态**：proposal（消融实测已复现）｜ **优先级建议**：P2
+**状态**：**已实现（预算终态退出口径，非①/②）**｜ **优先级建议**：P2（已收口）
+
+> **实现**：`budget_exceeded` = **终态**——`pilot-entry` 驾驶循环在预算用尽后直接收尾（不再读兜底指令），`pilot-runtime.handleLine` 对所有续驾驶指令回 `code:"budget_exhausted"` 结构化拒绝；`unblockHintsFor` 文案改为「起新 pilot 并增大 --max-steps（本 run 不再接受 resume/redirect）」。验收：CLI 实测 `exit 3` + 单条 `pilot_end`、stdin 里的 resume 行未被消费；`verify:pilot` 预算场景断言 resume 被拒 + drive 仍终态。
 
 > **现状锚点**：`src/app/pilot-runtime.ts` drive 的预算门先于 resume/redirect 生效。混合臂实测：budget_exceeded 交接后 Agent 发 `resume`（hint 到位）被消费且回执 ok，但预算已花光，下一轮 drive 立即再次 budget_exceeded——兜底指令被「成功消费」却无效，纯烧一条指令；unblock 提示如实指向「新起 pilot / 增大 --max-steps」。
 >
 > **目标**：产品拍板二选一——①redirect 显式带预算重开档（语义：换目标=新驾驶，与「步史清段重新累计」一致）；②保持死局但 resume/redirect 在 budget_exceeded 交接上直接回 config_error（不再「成功消费」无效指令）。验收 = 消融剧本复测无无效消费。
 >
 > **来源**：2026-11-20 pilot 消融混合臂实测（PILOTED_WALKTHROUGH_PLAN §7）。
+
+## 18. 提取面的「可动作单元」归一：从池源头消除伪歧义
+
+**状态**：**S2 已落地（2026-11-21，提取面同卡兄弟折叠）；S3（unit: 行提示）/ S4（末端折叠退役）待做**｜ **优先级建议**：P2
+
+> **现状锚点**：extraction 把卡片容器、覆盖链接（按 aria-label）、可见标题 div 各自独立收编为同 label 候选（Maps 结果卡实测：`a.hfpxzc` 与 `div.qBF1Pd` 同 label、共享 `role=article` 卡片、互不包含）。同单元折叠目前发生在**解析末端**（`executor-actionability.foldNestedDuplicates`：DOM 包含 → 最低公共祖先 + 组内唯一 native），每步动作都要页面探测（盖章 → LCA → 清章）。
+>
+> **目标**：把「同一 hit-receiver 等价类」前移到**抽取/准入面**——同卡片/同行的候选在收编时归一为一个单元代表（native 优先、或实际接收点击者），池内不再并存同 label 的同单元候选：伪歧义从源头消失、动作时零探测成本；真歧义（跨行/跨卡、一卡双 native 控件）语义不变。判据单源 = `FN_HIT_RELATION` 的命中关系 + 既有 `row_texts` / `row_index` 行锚机制，不建第二套。实施注意：会改变三面候选构成——runtime lane golden、§3.2 验收矩阵、消融复测都要过，需独立批次。
+>
+> **来源**：2026-11-20 Maps 用例重测（同卡兄弟伪歧义，`/tmp/dsh-amberflow-pilot-*` 与会话证据）+ 批复意见「兜底之上找根本性优化策略」。
+
+> **架构研判（2026-11-21，子代理只读研判，已复核）**：
+> - **落点 = 提取面页内 JS pass，扩既有公理 0**（`src/engine/pool-js-dedup.ts` 的 `__dedupPoolRows`）：单元归一与"一区域一候选去重"是**同一职责**，既有包含折叠只是缺了"互不包含的同卡兄弟"形态；不放 pool-view（只读投影）/candidates 窗口（配额子切片）/解析末端（现状：每动作 n+2 往返、`_resolveOne` 与 pilot ①′ 两处各写）。
+> - **判据 = 三层合取**（页内一次算完，零新增往返）：同 label ∧ 同一 hit-receiver 等价类（`FN_HIT_RELATION` 归一）∧ LCA 是交互单元且非 body/html/main/列表泛容器 + 组内唯一 native。**代表元序**：self 可命中且 native → 实际接收点击者 → id-backed（护 `#id` 声明）→ 最深可动作后代 → 仍多解不折叠；折叠仅当 `actionCapabilities(rep) ⊇ 组内并集`。
+> - **行锚边界**：行组键 `(frame, tag+label)` ⇒ **`row_index` 不同绝不折叠、跨帧绝不折叠**；`rules.ts` 的 `limit` 一字不改；非代表元的 `in-row:`/`row-index:` 声明会落空 → 只在 `target_not_found` 追加「已折叠进 `<rep>`」证据，绝不自动改写声明 hint。关系判据体抽成共享 JS 常量（新 `pool-js-hit.ts`），`eval-snippets.HIT_RELATION_JS`/池内片段/末端折叠三处同源内插，不建第二套语义。
+> - **回归面**：`verify:offline` 现有 10 份 golden **必须逐字节不变**（真歧义/不同 label 夹具即防线）+ 新增行卡夹具 golden（池内 1 行 + `dedup_dropped.why:"unit-sibling"`）；`verify:runtime:offline` 7 场景（`stop-missing-target` 的 `pool_size` 若变需两次一致重录）；`verify:pilot` 的 `scenarioAmbiguous` 仍须 `target_ambiguous`、两个折叠场景的 `resolved_via:"nested-fold"` 证据会消失（断言改为"无折叠也到达"）；`online/` 四 tier；消融双臂；maintain size/split（搬 JS 片段须重钉 hash）。
+> - **尺寸落点（实测）**：`pool-js.ts` 907/907、`extraction.ts` 1113/1113、`executor-pure.ts` 938/938 都压基线（加一行即红）；有空间：`pool-js-dedup.ts`(139)、`candidate-scan.ts`(496)、`eval-snippets.ts`(211)。落点 = JS 片段扩 `pool-js-dedup.ts` + 新 host 模块 `src/app/pool-unit.ts`（只做 flag 与证据整形）；`unit_role` 须同步进 `executor-pure.modelProjectionOf` 的 guard+解构两处剥离（否则泄进模型面）。
+> - **分期**：S1 事实打标（flag off，零行为变更）→ S2 提取面剔除（原设想的 `decision.pool_unit_fold` **未实施、无 policy 键**——落地采用恒开、安全分离改用开关全量对照）→ S3 `unit:` 行提示（仅当模型仍投错）→ S4 末端折叠退役或留一版安全网。**S1 不可省**：把"判据对不对"与"行为变没变"拆开，避免拿 golden 变更掩盖判据错误。
+
+## 19. verify:offline filter-bar 基线漂移（HEAD 既有，待单独排查）
+
+**状态**：open（非本批引入，非门禁）｜ **优先级建议**：P2
+
+> **现象**：`tools/verify-offline.ts --check` 在**净树 HEAD**（`git worktree` 验证）亦失败：`filter-bar` 观测与金标不一致（首个差异为 `e20` vs `e22`：同 label 集、同 ref 集，仅 `订票` 按钮与筛选 `li` 的 ref↔label 映射互换了位置）。本批「提取面单元折叠」开关全量对照证明对该夹具**零影响**（折叠开/关两跑输出逐字节一致）。
+>
+> **判断**：金标记录于 `8bd7a35`（2026-11-19），此后无池构成源码提交（仅注释批）；怀疑为**环境相关**（Chromium/度量差异影响 prominence 排序平局）或更早未重录的运行期变更。不要盲目 `--record` 掩盖——先做一次双跑一致性 + 净树对照，确认是环境还是行为变更，再决定重录或修判据。
+>
+> **来源**：2026-11-21 本批实施时发现（`/tmp/af-head` 净树 worktree 复现）。
+
+## 20. 决策上下文责任边界落地：引擎单点 `ask(page, scope, accounting, intent, profile)` + 账本上收（DC7）
+
+**状态**：proposal（DC7 已写入 `docs/DECISION_CONTEXT_CONTRACT.md`）｜ **优先级建议**：P1
+
+> **现状锚点**：①`elems`/`forbidden`/`notes` 由驾驶面传入 `mw.pickProposal`（引擎只做投影与渲染）——面可换池/裁剪池/自建账本；②pilot 自建 `PilotLedger`（esig 账本 + notes），与 run 面引擎侧 `RunAccounting`/`outcome-memory` 双账并存（P0/P1 的收益只在 pilot 面生效）；③模型面字段由 `executor-pure.modelProjectionOf` 手写 guard+解构两处剥离，无断言；④DC4 的 `capabilities.context` 档未实施，未声明 provider 时上文静默丢弃只记 `context_skipped`；⑤pilot 的 `drivingGoal` 把步史拼进 goal（回声风险）。
+>
+> **目标**（v4 复审后修正批序与签名）：按 DC7 三原则落 **S0a–S4**：引擎单点 `ask(page, scope, accounting, intent, profile)`（自取池/投影/账本/状态/裁剪，面只传意图+策略；类型单源复用执行期 `PickProposal`/`Sig`/`StopCode`/`ModelPickPhase`）→ **S0a** characterization 门禁（确定性 provider 钉住请求/返回序列与 leg/attempt 生命周期，不改运行路径）→ **S0b** 账本适配（`RunAccounting`+`OutcomeMemory` 组成 `DecisionAccounting`，**不删旧账**，逐项验证 prune/notes/effective-清-inert/desc 一致）→ S1 仅切 pilot `modelVote`（新旧双臂，含成功票与宽扫）→ S2 run 以 `runModelPick` 整段接入 → S3 `MODEL_FACE_FIELDS` 白名单断言 + `capabilities.context` → S4 结构化段 + 步史迁移（单独 A/B）。验收 = §3.2 lane + runtime lane + **模型 stub 新旧臂请求序列/选中元素/动作/停因等价** + 真站 A/B（DC5 锚）。
+>
+> **接口抽象（2026-11-21 追加）**：为「应用层以后可能拓展其他类型应用」，询问接口已固化为引擎侧纯契约
+> `src/engine/decision-ask-contract.ts`（`DecisionAskIntent`/`Profile` → `DecisionAskOutcome`，面不得自传池/禁选/注记）；
+> 新 face/新应用类型 = `DecisionFaceKind` 注册项 + 薄适配器（引擎零改动）；新面特有上文 = `DecisionSegment` 登记
+> （不新增第六层）。MAINLINE seam 表已登记（方向冻结·提案）。
+>
+> **架构复核（2026-11-21，独立评审 + 调用链核对）**：初审**不通过**（v1 契约；v2 修正后被复审推翻，见下）。P0：①`ask` 缺 page/scope（执行期页面与 `RunAccounting` 是 `mw.run()` 调用内局部状态，retry 每次重入）；②outcome 只有位置 ref——缺生效池、单元素快照与完整投票信号（`shape/pTop1/entropyConf` 进 floor 闸门），且宽扫后 ref 指向宽池；③session 映射错误（`doAct` 是确定性 `actOnce`，零模型，不得注册询问面）。另：账本生命周期三类（attempt/run/pilot-leg）与三类池（模型/执行/宽扫证据）必须区分。契约已按此修正（`DECISION_ASK_CONTRACT_VERSION=2`：`page+scope+accounting` 入参、`pool/target/signal` 回执、face 开放注册、`anchor` 取代 `hints`、逐层回执带 status/chars）；**批次顺序修正为 S0（`RunAccounting`→`DecisionAccounting`，run 面逐字节不变）前置**，再 S1（ask 实现 + pilot 切面）。独立评审的完整报告在完成前失败（仅阶段结论入档；其证据已逐条对码核实）；其后评审者又以工作树 v2 完成第二轮复审。
+>
+> **复审 2（2026-11-21，v2 仍不通过）**：④ run 接入单位 = **整个 `runModelPick` phase**（executor 单次调用，窄问回退/宽扫/窗口升级/族修复共享同一份 elems/forbidden/noted——逐 `pickElement` 点换会撕裂视图）；⑤ profile 缺现行选择参数（`confFloor`/`candidatePriority`/`tieredHint`/步超时）、outcome 缺阶梯事实，run 后续动作与 trace 无法保持；⑥ `record(el,outcome,desc)` 单签名无法同时替代 `RunAccounting.forbid(ref,el,why)` 与 `OutcomeMemory.record(key(url,instruction),sig,outcome)`——作用域禁选与跨作用域记忆须分开建模。P1：询问页需 `title()`（`ProviderPage = PageLike & title`）、`signal` 缺 `entropyConf`、outcome 可非法组合、reason/limit 码未闭集、零模型 lane 不能证明模型路径等价。已改 v3，**未冻结**；初版「不通过→已修正」表述撤销。
+>
+> **复审 3（2026-11-21，v3 仍不通过）**：⑤ picked 强制模型 `signal`——规则分支无票（`method="rule:match"`、`conf=1.0`），executor 后续消费 `method/decisionKind/layaMargin/tierAsk/nominatedRepair/escalatedPick`；⑥ 账本缺 pilot 守卫面（`changedLoop/unhittable/guardStop/loopTrip/evidence`）且 `recordOutcome` 丢 `desc`——删 PilotLedger 则确定性守卫与交接证据必坏；⑦ `tieredHint` 缺省写反（执行期缺省 OFF，executor-types 805），anchor「总是窄问回退」违背声明 hint 权威/`actHint:"strict"`；⑧ prune/notes 语义冲突（run `pruneStale` 只删同 ref 签名失配 vs pilot 全量 esig 重映射；noted 仅 rank 档定文本 vs pilot 全部条目；`Outcome="inert"|"effective"` 与 esig 编码须单源）；⑨ `no_model.asked:0` 硬编码、reason 闭集缺 run 选择段停因码（`action_space_exhausted/step_names_no_target/hint_matched_nothing/nominated_family_empty/mismatch`）。P1：注册表须组合根注入（engine 禁 import 应用层/site-facts，不许模块全局）；driver/ambiguity/riskVote 不属 pick；`budget.stepTimeoutMs` 须约束阶梯；段缺 rejected 回执。**已改 v4**（origin 判别 + signal 可空 + phase 元数据 + ladder 闭集扩展；账本三语义分离 + `attemptNotes`/`memoryNotes` 分源 + `DecisionMemoryOutcome` 闭集；`tieredHint` 缺省 false + anchor 权威语义；`no_model.asked` 可数 + reason 闭集并入 run 停因码；`DecisionAskRegistry` 组合根注入；回执加 rejected；budget 约束阶梯；driver/ambiguity/riskVote 移出 profile），**仍未冻结**。冻结条件 = S1 后模型路径等价（provider stub 消融 + 真站 A/B）+ 闭集码与执行期停因分类断言一致 + 独立评审复看通过。
+>
+> **复审 4（2026-11-21，完整报告，基于 v3 工作树）**：verdict 不通过；P0-1/2/3 与 P1-1/3 已被 v4 吸收，增量收敛为 **v5**：类型单源复用（删结构复述防漂移）；outcome 字段更名 `executionPool` 并写明**模型投影永不返回执行面**、`target` 缩为 `{ref, sig}`；账本改**工厂按 lifetime 绑定策略**（prune/notesFor/forbiddenRefs；`recordMemory` 收 `Sig` 与 `"inert"|"effective"`，effective 清旧 inert；签名编码唯一 helper）；`DecisionAskPorts`（faces/segments/siteFacts）组合根注入，engine 禁 import 应用层/site-facts、不许模块全局；reason 复用 `StopCode`、limit 复用 `decision_service_choice_limit`、`narrow_abstain` 移为 ladder 事件；`ts` 统一 epoch ms；`stepTimeoutMs` 为阶梯硬约束；S1 不开放 segments（S4 结构化判别联合）。**批序改 S0a（characterization 先行）→ S0b（账本适配不删旧账）→ S1（仅 pilot 双臂）→ S2（runModelPick 整段）→ S3 → S4**。最终放行 = P0 全消 + 模型 stub 新旧臂请求序列/选中/动作/停因等价 + 既有 rules-only lane 不回归 + 危险 dry-run/default-deny 不变 + DC5 真站 A/B。
+>
+> **来源**：2026-11-21 决策上文审计（用户指示「理清引擎喂 vs 驾驶面喂，elems 归引擎」+「接口抽象」）。

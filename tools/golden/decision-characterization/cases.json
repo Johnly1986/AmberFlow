@@ -1,0 +1,203 @@
+{
+  "cases": {
+    "pick-full": {
+      "proposal": {
+        "choiceRef": "e0",
+        "entropyConf": 0.9,
+        "margin": 0.3,
+        "pTop1": 0.6,
+        "pTop2": 0.3,
+        "shape": "full"
+      },
+      "request": {
+        "candidate_count": 3,
+        "candidates_head": [
+          {
+            "label": "确认",
+            "ref": "e0",
+            "tag": "button"
+          },
+          {
+            "label": "取消",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "详情",
+            "ref": "e2",
+            "tag": "button"
+          }
+        ],
+        "forbidden": [],
+        "goal": "选一个",
+        "k": 8,
+        "narrow": null,
+        "notes": null,
+        "seq": 0,
+        "url": "<LOCAL>/cards.html"
+      },
+      "response": {
+        "options": 3,
+        "passthrough": true,
+        "probs": {
+          "e0": 0.6,
+          "e1": 0.3,
+          "e2": 0.1
+        },
+        "ref": "e0",
+        "score": 0.9,
+        "scoreKind": "entropy_conf",
+        "signals": {
+          "margin": 0.3,
+          "pTop1": 0.6,
+          "pTop2": 0.3
+        }
+      }
+    },
+    "pick-none": {
+      "proposal": {
+        "choiceRef": null,
+        "shape": "none"
+      },
+      "request": {
+        "candidate_count": 3,
+        "candidates_head": [
+          {
+            "label": "确认",
+            "ref": "e0",
+            "tag": "button"
+          },
+          {
+            "label": "取消",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "详情",
+            "ref": "e2",
+            "tag": "button"
+          }
+        ],
+        "forbidden": [],
+        "goal": "选一个",
+        "k": 8,
+        "narrow": null,
+        "notes": null,
+        "seq": 0,
+        "url": "<LOCAL>/cards.html"
+      },
+      "response": {
+        "options": 3,
+        "passthrough": true,
+        "probs": {},
+        "ref": null,
+        "score": 0,
+        "scoreKind": "rank_only",
+        "signals": {
+          "margin": null,
+          "pTop1": null,
+          "pTop2": null
+        }
+      }
+    },
+    "pick-shortlist": {
+      "proposal": {
+        "choiceRef": "e0",
+        "entropyConf": 0.8,
+        "shape": "shortlist"
+      },
+      "request": {
+        "candidate_count": 3,
+        "candidates_head": [
+          {
+            "label": "确认",
+            "ref": "e0",
+            "tag": "button"
+          },
+          {
+            "label": "取消",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "详情",
+            "ref": "e2",
+            "tag": "button"
+          }
+        ],
+        "forbidden": [],
+        "goal": "选一个",
+        "k": 8,
+        "narrow": null,
+        "notes": null,
+        "seq": 0,
+        "url": "<LOCAL>/cards.html"
+      },
+      "response": {
+        "options": 3,
+        "passthrough": false,
+        "probs": {
+          "e0": 0.8
+        },
+        "ref": "e0",
+        "score": 0.8,
+        "scoreKind": "calibrated_prob",
+        "signals": {
+          "margin": null,
+          "pTop1": 0.8,
+          "pTop2": null
+        }
+      }
+    },
+    "run-adjudicate": {
+      "steps": [
+        {
+          "changed": false,
+          "conf": 0.05,
+          "decision_kind": "model",
+          "executed": true,
+          "layaMargin": null,
+          "method": "characterization-stub:adjudicated",
+          "nominatedRepair": null,
+          "tierAsk": null
+        }
+      ],
+      "stop_code": "max_steps"
+    },
+    "run-rule": {
+      "steps": [
+        {
+          "changed": false,
+          "conf": 1,
+          "decision_kind": "rule",
+          "executed": true,
+          "layaMargin": null,
+          "method": "rule:match",
+          "nominatedRepair": null,
+          "tierAsk": null
+        }
+      ],
+      "stop_code": "max_steps"
+    },
+    "run-wide-reobserve": {
+      "first_count": 64,
+      "report": {
+        "steps": [
+          {
+            "changed": false,
+            "conf": 0.95,
+            "decision_kind": "model",
+            "executed": true,
+            "layaMargin": null,
+            "method": "characterization-stub:reobserve",
+            "nominatedRepair": null,
+            "tierAsk": null
+          }
+        ],
+        "stop_code": "max_steps"
+      },
+      "second_count": 100
+    }
+  },
+  "schema": 1
+}

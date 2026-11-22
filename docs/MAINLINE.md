@@ -19,7 +19,7 @@
 | **L2 机制** | `browser-env`、`tool-signals`、`extraction`（pool-js（+core）/identity/frame-scope/**elem-model/page-shapes**；页面形状类型已下沉 L0 `support/page-like.ts`，extraction re-export）、`actions`、`rules`、`settle`、`dataset`、`datasource`（传输/来源；字段映射配置驱动，W3-4） | L0–L1 | 页面扫描、动作、稳定门、数据腿等机制；**数据/报表机制不认识站点/业务字段**（扫词门禁） |
 | **L3 决策** | `src/model/*`（provider 协议 / 缓存 / ONNX / prompt views / 审计） | L0–L2（经契约） | 实现 L0 的 provider 契约；现有 `model→engine` 反向边见 §1.2 |
 | **L4 执行** | `executor`（实现片段：executor-phases/actions/resolve 模块；类名/`run()` 冻结）、`planner`、`bindings`、`observe`、`pool-view`、`picker`、`audit` | L0–L2 + 契约 | 唯一执行循环；只消费契约与机制，不 import 具体 provider 装配 |
-| **L5 应用** | `src/app/*`（ctx（+runtime/step/tools/read/nav/scroll/manual 模块；ctx.ts 为组装面）/ runner / adapters / trace / report / session-runtime（+contract/evidence/entry）/ session-export / pilot-runtime（+contract/entry/export/vote/evidence）/ intervention-adapter） | L0–L4 | flow 运行期面；session-runtime 是**调试面**（复用 createCtx，不是第 5 个 ctx 实现）；pilot-runtime 是**模型驾驶走查面**（组合既有原语：抽池/pick/actOnce/checkSignal，不另写执行器） |
+| **L5 应用** | `src/app/*`（ctx（+runtime/step/tools/read/nav/scroll/manual 模块；ctx.ts 为组装面）/ runner / adapters / trace / report / session-runtime（+contract/evidence/entry）/ session-export / pilot-runtime（+contract/entry/export/vote/evidence/ledger/ask-adapter）/ intervention-adapter） | L0–L4 | flow 运行期面；session-runtime 是**调试面**（复用 createCtx，不是第 5 个 ctx 实现）；pilot-runtime 是**模型驾驶走查面**（组合既有原语：抽池/pick/actOnce/checkSignal，不另写执行器） |
 | **L6 入口** | `src/cli/*`、`src/online/*`、`src/flow/*`（归纳）、`tools/*`、`integrations/dsh-bridge/*` | 全部下层 | 入口层；bridge 是宿主集成（called, not embedded） |
 
 ### 1.1 目录 → 层映射（门禁按此断言）
@@ -29,7 +29,7 @@
 | `src/support/` | L0 |
 | `src/prompts/`（规划中） | L1 |
 | `src/intervention/` | L1.5 |
-| `src/browser/`、`src/data/`、`src/engine/`（extraction/rules/settle 等）、`src/flow/` | L2（`src/engine/executor.ts` / planner / bindings / observe / picker / audit / session-lease / **run-execution** / **run-scope** / **decision-seam** 为 L4；候选扫描实现已归 `src/app/candidate-scan.ts`，engine extraction 仅保留共享机制/类型，2.2b） |
+| `src/browser/`、`src/data/`、`src/engine/`（extraction/rules/settle 等）、`src/flow/` | L2（`src/engine/executor.ts` / planner / bindings / observe / picker / audit / session-lease / **run-execution** / **run-scope** / **decision-seam** / **decision-ask**（契约 `decision-ask-contract.ts`，实现 `decision-ask.ts` 为目标）/ **decision-accounting**（`decision-accounting.ts`，账本工厂）为 L4；候选扫描实现已归 `src/app/candidate-scan.ts`，engine extraction 仅保留共享机制/类型，2.2b） |
 | `src/model/` | L3 |
 | `src/app/` | L5 |
 | `src/cli/`、`src/online/`、`tools/`、`integrations/dsh-bridge/` | L6 |
@@ -100,6 +100,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | `DecisionProvider` 接口 | `src/support/decision-provider-contract.ts`（L0，W5-3 已落地）+ 实现 `src/model/decision-provider.ts` 与各 provider | engine（仅契约类型 + 注入面）、model（实现）、组合根（装配） | **方向冻结**：engine 不 import 具体实现；3 个 runtime 函数（`decisionProviderOrNull`/`layaProvider`/`decisionFailureFact`）经 `DecisionRuntimeHooks` 注入（§6.10），engine `grep model/decision-provider`=0 | 契约变更需 model/engine 双侧 typecheck + rules-only 消融 |
 | 决策源装配（resolve/build） | 各处 `resolveProviderSpec → applySpecToRuntime → installLayaRuntime` → **`buildMiddleware({face,confirmPolicy,options})`（P1-1.5 已落地，provider 解析仍在入口）**；runtime 函数组合根 `src/app/decision-runtime.ts`（§6.10） | 入口/组合根 | **冻结**：组合根唯一，构造点唯一；`buildMiddleware` 缺省注入 `appDecisionRuntime`（显式优先） | 任一新入口不得自建 `new BrowserMiddleware`；per-face confirm 策略必填 |
 | `runExecution` 内核 | `src/engine/run-execution.ts`（L4；`runExecution(deps, source)` + `RunExecution` 面） | 四源适配器（flow/declared-flow/plan/suite） | **冻结**：SessionLease/RunScope/mw 装配入口/pace/attempt/停因分类/artifact 交接单点；**不共享** retry/sleep/业务判定 | 新增源适配器先改本表 + MAINLINE §2；内核不得内嵌 sleep；行为等价以四源 lane 为准 |
+| 决策询问契约 `DecisionAsk` | `src/engine/decision-ask-contract.ts`（纯结构类型 v5：`ask(page, scope, accounting, intent, profile)`，**类型单源复用执行期**（`PickProposal`/`Sig`/`StopCode`/`ModelPickPhase`/`ProviderPage`/`score_kind`），outcome 判别联合（picked 按 `origin` 再判别：rule/escalate 无模型信号）；回 `executionPool`（模型投影永不外返回）；账本**工厂按 lifetime 绑定策略**（作用域禁选/守卫账本/跨作用域记忆三语义分立）；`DecisionAskPorts` 组合根注入；实现目标 `src/engine/decision-ask.ts`，前置 S0a characterization 门禁 + S0b 账本适配（不删旧账）；**run 的接入单位 = `runModelPick` 整段 phase**（五处 `pickElement` 共享视图，不得逐点换） | engine 只依赖类型；接入面（pilot/run/未来应用类型）构造 `intent/profile` 并消费 `outcome`；session 确定性 actOnce **不注册** | **方向冻结（提案·复审四轮：v1/v2/v3 不通过，v4 部分吸收，v5 收敛中，未冻结）**：面不得自传候选池/禁选/注记；face/段/site-facts 经 Ports 组合根注入（引擎校验，禁模块全局）；reason/limit 直接复用执行期闭集；冻结前须过模型路径等价（provider stub 消融 + 真站 A/B） | 形状变更 = seam 变更（DC5③）：先改本表 + A/B；不得新增第六层上文，面特有上文走 `DecisionSegment` 登记（S1 不开放） |
 | `DecisionRuntimeHooks` 注入契约 | engine 类型面 `src/engine/executor-middleware-types.ts`；实现 `src/app/decision-runtime.ts`（L5） | engine 执行器只消费类型；app 层装配 | **方向冻结**：engine 不 import model 实现；新增 hook 需 engine/app 双侧 typecheck | rules-only 消融 trace 一致；`grep model/decision-provider src/engine`=0 |
 | 模型 prompt | 目标 `src/prompts/`（L1 叶子） | model providers + executor legacy 兜底（P2 收编） | **方向冻结**（不放 src/model；不 import 实现） | 文本变更 version+1 + 快照 hash + A/B 证据 |
 | Ctx 契约 | `src/app/ctx-types.ts`（接口已存在） | flow 脚本、ctx-dry/replay、session-runtime | **接口冻结**；缺行为矩阵 | 新增原语需 matrix + conformance + dry/replay 同步 |
@@ -108,7 +109,7 @@ S5 唯一循环    BrowserMiddleware.run（不变，不重写）
 | 候选生产者 `CandidateProducer` | 契约 `src/engine/candidate-contract.ts`（engine，纯结构类型，无 Playwright 类型）；实现 `src/app/candidate-scan.ts` + `src/app/candidate-source.ts`（L5，app 层唯一扫描实现） | engine executor 只消费契约；`buildMiddleware` 默认注入 app producer | **方向冻结**（2.2b 完成）：engine 不得 import 扫描实现；新增实现 = 架构变更 | 扫描实现变更跑运行期 lane + examples golden；纯搬移走 split-check |
 | 证据/产物落盘 | `app/trace.ts`、`app/app-report-view.ts`、`data/report-view.ts`、`online/report.ts` | 各源 | 稳定区（允许 W1-b 纯搬） | 产物字段逐字节 + 不提交仓库 |
 | fixtures/engine | `fixtures/engine/*.html` | 仅 `verify:offline` / `verify:runtime:offline` 非门禁 lane | 稳定 | 不进 `npm run check`；新夹具只服务等价验证 |
-| 运行期等价 lane | `tools/verify-runtime-offline.ts`、`tools/golden/runtime/**` | 非门禁（需 chromium）；跑 `BrowserMiddleware.run` 的 **7 个确定性场景**（成功/停因/遮挡/precondition/upload/scroll/range） | 稳定 | 运行期重构前后对比；`--record` 同场景两次一致才入库 |
+| 运行期等价 lane | `tools/verify-runtime-offline.ts`、`tools/golden/runtime/**` | 非门禁（需 chromium）；跑 `BrowserMiddleware.run` 的 **8 个确定性场景**（成功/停因/遮挡/precondition/upload/scroll/range/actionable-ancestor-retarget） | 稳定 | 运行期重构前后对比；`--record` 同场景两次一致才入库 |
 | 编排等价 lane | `tools/verify-run-execution.ts`、`tools/golden/run-execution/**`、`fixtures/engine/run-execution/**`（§6.10） | 非门禁（需 chromium）；四源（flow/declared-flow/plan/suite）canonical JSON，rules-only 零模型、外部请求 0 | 稳定 | 内核/适配器迁移前后对比；基线在干净 HEAD 副本 `--record` 两次一致才入库 |
 
 ### 4.1 文件预留（并行设计）

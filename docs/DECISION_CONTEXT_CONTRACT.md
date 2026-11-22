@@ -105,3 +105,154 @@ export interface DecisionContext {
 | Phase 3 | 观察值提案位 + 采纳闸 | Phase 1 + 确认面扩展评审 |
 
 登记纪律：每实施批次一个 F 号（`statement` 写行为契约、`truth` 写实施文件单点），F 号与代码同批提交；本文件在该批次更新状态行（"提案"→"v1 已实施（批次记录见 CHANGELOG）"）。
+
+## DC7 责任边界：引擎喂什么，驾驶面喂什么
+
+> 目的：把「决策所需的信息」按**事实/意图**划一条稳定的边界，消除当前「两面各建一套账本」
+> 的重复与漂移。`elems`（候选池）是引擎抽取产物，**归引擎喂**；驾驶面不得自建候选面，
+> 也不得自建禁选/已试账本。
+
+### DC7.1 三条原则
+
+- **R1 事实归引擎**：可由引擎自证、与页面/元素/动作结果相关的信息（候选池与结构事实、命中
+  关系、页状态、aria 名称、禁选与已试账本、单元归属、attempts/outcome）由引擎单点提供；
+  驾驶面**不得复制**（复制即漂移，实测：pilot 自建裸 ref 禁选 + 弱 inert 判据，与 run 面
+  `RunAccounting`/`outcome-memory` 分叉）。
+- **R2 意图归驾驶面**：目标语义（总目标/子目标措辞）、声明 hint/slot、face 策略（预算、
+  driver 模式、歧义策略）由驾驶面提供；引擎**不臆测意图**（缺值仍 `needs_value`，缺目标
+  仍 `target_not_found`，绝不代填）。
+- **R3 组装与裁剪归引擎**：题面装配（投影白名单、行渲染、有界化、层预算、能力档裁剪、
+  缓存指纹）是引擎单点职责；驾驶面只传参数与「段」（Face-specific segment），不得绕过
+  白名单自行加字段。
+
+### DC7.2 归属表（逐类）
+
+| 信息 | 归属 | 现状 | 要求 |
+|---|---|---|---|
+| `elems` 候选池（含 label/tag/role/hints） | **引擎** | 引擎抽取（`_extractPoolSettled`），但由驾驶面传入 `pickProposal` | 引擎侧单点入口自取：面不得换池/裁剪池（聚合容器等**投影期**过滤在引擎内） |
+| 结构事实（`kind`/`contains_candidate`/`prominence`/`row_texts`/`row_index`/`frame_*`） | **引擎** | 采集期产出，`modelProjectionOf` 剥离 | 由引擎按**模型面白名单**决定暴露哪些（当前全剥，见 DC7.3 缺口） |
+| 可命中性（covered/zero-size/offscreen/ancestor） | **引擎** | `FN_HIT_RELATION` 探针（引擎） | 引擎在选中前判定并作为 L1 事实/注记提供 |
+| 禁选 + 已试账本（tries/outcome/last） | **引擎** | run 面引擎（`RunAccounting`/`outcome-memory`）；**pilot 自建 `PilotLedger`** | 上收为引擎单源（按 esig），两面共享；面只声明作用域（run/subgoal/leg） |
+| 页状态（url/title/main_text/state digest） | **引擎** | `urlOf`/`stateText`/`_buildStateDigest`（引擎） | 引擎按层预算裁剪；S5 档由面**声明策略**、引擎执行 |
+| notes（逐候选负面证据） | **引擎** | pilot 从自建账本生成；run 用 `outcome-memory` | 引擎从共享账本生成（面不组装） |
+| aria 名称对齐 | **引擎** | `ariaInteractiveLines`（引擎） | 引擎 |
+| goal / instruction（意图） | **驾驶面** | pilot `drivingGoal`（含步史）、run `instruction`、session `goal` | 面只传意图；**步史移出 goal**（改独立段/注记，防回声） |
+| 声明 hint / slot / values | **驾驶面** | 面提供 | 面 |
+| 预算 / driver 模式 / 歧义与风险策略 | **驾驶面** | `maxSteps`/`driver`/`onAmbiguous` | 面声明、引擎执行 |
+| L3 计划叙事 | **驾驶面（段）** | run 面 `RunScope`/plan 适配器 | 面以「段」注入，引擎校验形状与预算（DC1.3/1.4） |
+| L4 站点知识 / site-facts | **引擎（数据）+ 面声明** | app `meta.site`、site-facts | 引擎读数据层，面只声明用哪个站点/来源 |
+| 投影白名单 / 有界化 / 缓存指纹 / 能力档 | **引擎** | `modelProjectionOf`（手写两处）、`askSig`/`notesKey` | 引擎单点 + **白名单断言**（DC7.3） |
+
+### DC7.3 现状缺口（改造成本与顺序）
+
+1. **双账本**：`PilotLedger`（面）与 `RunAccounting`/`outcome-memory`（引擎）并存——上收引擎。
+2. **`pickProposal` 由面传池与禁选**：引擎侧应提供单点入口
+   `ask(page, scope, accounting, intent, profile)`（v5 契约形状），内部自取池、投影、账本、状态、
+   裁剪；面只传意图 + 询问策略（可选段 S4 起）。
+3. **模型面字段手写白名单**：`modelProjectionOf` 的 guard+解构两处列举无断言——加
+   `MODEL_FACE_FIELDS` 闭集与断言（泄漏/漏剥双检）。
+4. **能力档 `context` 未实施**：DC4 的 `none|minimal|full` 仍是提案；未声明 provider 时上文静默丢弃
+   （仅 `context_skipped` 计数）——补声明并在产物里如实报告「哪层带/未带」。
+5. **goal 混步史**：pilot 的 `drivingGoal` 把「已完成」拼进 goal——改为独立段/注记（防回声）。
+
+迁移纪律：**S0a** characterization 门禁（确定性 provider 钉住请求/返回序列与 leg/attempt 生命周期，
+零运行路径变更）→ **S0b** 账本适配（`RunAccounting`+`OutcomeMemory` 组成 `DecisionAccounting`，
+**不删旧账**，逐项验证语义一致）→ **S1** 引擎 `ask` 实现 + 仅切 pilot `modelVote`（新旧双臂含成功票与宽扫）
+→ **S2** run 以 `runModelPick` 整段接入（不得逐点换）→ **S3** 白名单断言 + `capabilities.context` +
+Ports 接线 → **S4** 结构化段 + 步史迁出 goal（单独 A/B）。
+
+### DC7.5 接口抽象（面向未来应用类型与 face）
+
+**契约文件**：`src/engine/decision-ask-contract.ts`（**仅类型 + 两个常量**（`VERSION`/`LADDER_CODES`），无运行行为；对 `executor.ts` 只有 type-only 引用（`ModelPickPhase`，无运行时加载）——S1 批次才接实现与消费面；`ModelPickPhase` 后续建议下沉 `executor-types`）。
+
+**两个方向**（四轮复审收敛后 v5，`DECISION_ASK_CONTRACT_VERSION = 5`；**未冻结**——冻结条件见复核记录）：
+- 面 → 引擎：`ask(page, scope, accounting, intent, profile)`——`page` **复用 L0 `ProviderPage`**
+  （含 `title()`；面持有的资源句柄——执行期页面与账本都是 `mw.run()` 调用内局部状态，引擎不存在
+  可"自取"的成员）；`scope` = `DecisionLifetime`（`attempt{runId,subgoalId,attempt}` /
+  `pilot-leg{runId,leg}`；跨 attempt 的 outcome-memory 由**工厂组合注入**，不压进一个 id），实例由
+  **引擎工厂**创建；`intent` = `goal`/`instruction` + 声明锚点 `anchor` + 可选 `segments[]`（S1 不开放，
+  S4 结构化）；`profile` = `face`/`confFloor`/`candidatePriority`/`tieredHint`（**缺省 false**，与执行期
+  一致）/`reobserve`/`expectedFamily`/`adjudicate`/`stepTimeoutMs`（**阶梯硬约束**）/`needs[]`。
+  **不含 elems/forbidden/notes**，也**不含驾驶循环策略与 remainingSteps**（driver/ambiguity/riskVote
+  留在各面执行层——不属于一次询问）；anchor = 当前声明 hint（curHint）的权威语义
+  （`actHint:"strict"` 不回退），窄问仅显式 tiered。
+- 引擎 → 面：`DecisionAskOutcome` 是**判别联合**（`picked/abstained/limit/no_model`，杜绝非法组合）。
+  picked 再按 `origin` 判别（`rule|escalate` ⇒ `signal:null`；`model` ⇒ 完整投票信号）——规则分支
+  没有模型票；回 `executionPool`（产出 ref 的那份**完整执行池**，宽扫后为宽池；**模型投影
+  （`modelProjectionOf` 输出）永不返回执行面**；面只读）+ `target = {ref, sig}`（池已回，不再重复
+  元素字段）+ `signal.proposal`（**复用执行期 `PickProposal` 单源**）+ `signal.scoreKind`（复用
+  `ProviderCapabilities["score_kind"]` 闭集）+ `method/via/asked` + `run` 元数据（`Pick<ModelPickPhase,…>`，
+  执行器后续动作与 trace 的连续性载体）+ `ladder[]`（阶梯**事件账**，不承担最终动作语义）；
+  `abstained.reason.code` **直接复用执行期 `StopCode` 子集**（含 action_space_exhausted/
+  step_names_no_target/hint_matched_nothing/nominated_family_empty 等，不新造近似码）；`limit`
+  复用 `decision_service_choice_limit`；`no_model.asked` 为已付询问数（provider 首败也是"问过之后
+  降级"）；全部带 `context.layers[]` 逐层回执（`sent/clipped/unsupported/absent/rejected`，**禁止
+  静默丢弃**，DC1.3/DC4）。
+
+**扩展协议**：
+1. **新 face / 新应用类型**：`DecisionFaceKind` 是**开放注册**（app 层注册、引擎校验，未知面
+   结构化拒收）——注册项 + 一个薄适配器（把该面状态折成 intent/profile，消费 outcome），引擎零改动；
+   只有真正接模型的 face 才注册（确定性寻址面如 session 不注册，见映射表）。
+2. **新面特有上文**：S1 **不开放** segments；S4 起用**结构化判别联合**段（plan=L3、history=L2），
+   L4 站点知识由 `DecisionAskPorts.siteFacts` 端口生成（engine 禁 import 应用层实现），不作任意面
+   文本；**不新增第六层**（DC1.2），层预算 `tuning` 单点 + 裁剪序 L4→L3→L2。
+3. **新 provider 类型**：只实现 `DecisionProvider` 接口并声明 `capabilities`（含 DC4 的 `context` 档），
+   引擎不 import 具体实现（MAINLINE 方向冻结）。
+4. **版本纪律**：`DECISION_ASK_CONTRACT_VERSION` 变更 = seam 变更（DC5③），先改 MAINLINE seam 表 + A/B。
+
+**现状调用点 → 未来 `ask` 映射**：
+| 面 | 现状 | 接入 |
+|---|---|---|
+| pilot | `driveOnce → modelVote → mw.pickProposal(goal,page,elems,forbidden,notes)` | 接：`ask(page, scope{pilot-leg}, acct, intent{goal}, profile{face:"pilot"})`（driver/ambiguity 留 pilot 执行层；墙钟走 `stepTimeoutMs` 硬约束） |
+| run | 选择段是**单一 phase** `runModelPick`（executor 内一次调用，窄问→全池回退/宽扫/窗口升级/族修复共享同一份 elems/forbidden/noted 视图），账本为 `run()` 内局部 `RunAccounting` | 接入单位 = **整个 `runModelPick` phase**（不是逐 `pickElement` 点换——五处共享视图，逐点换会撕裂同一视图）：`ask(page, scope{attempt}, acct, intent{instruction,anchor}, profile{face:"run",confFloor,candidatePriority,tieredHint,…})`；L3 段由 run 面注入 |
+| session | **不接入**：`doAct` 是显式 target+op+value 的确定性 `actOnce`，模型零参与 | 无询问面；只有未来出现"歧义时模型裁决"需求才注册 |
+| 规划期（Phase 2） | 无 | 独立 `PlanningRequest` seam（DC6 Phase 2，先改 MAINLINE） |
+
+**架构复核记录（2026-11-21，独立评审四轮 + 调用链核对 + 只读审计）**：
+
+- **初审：不通过（v1）**。P0：①`ask` 无 page/scope（执行期页面与账本都是 `mw.run()` 调用内局部状态，
+  retry 每次重入）；②outcome 只有位置 `ref`（缺生效池/单元素快照/完整投票信号，`passesFloor` 不可复现）；
+  ③session 映射错误（`doAct` 是确定性 `actOnce`，零模型，不得注册询问面）。
+- **复审：v2 仍不通过**（初版修正不完整，"已修正"表述**撤销**）。新增 P0：
+  ④ run 的接入单位是**整个 `runModelPick` phase**——五个 `pickElement` 点共享同一份 elems/forbidden/noted
+  视图（窄问回退/宽扫/窗口升级/族修复），逐点换会撕裂视图；⑤ profile 缺现行选择参数（`confFloor`/
+  `candidatePriority`/`tieredHint`/步超时），outcome 缺阶梯事实（窄问/宽扫/升级/族修复），run 的
+  后续动作与 trace 无法保持；⑥ `DecisionAccounting.record(el,outcome,desc)` 单签名**无法同时**替代
+  `RunAccounting.forbid(ref,el,why)` 与 `OutcomeMemory.record(key(url,instruction),sig,outcome)`——
+  作用域禁选与跨作用域记忆是**两组语义**，必须分开建模。P1：询问页需 `title()`（provider 渲染需要）、
+  `signal` 实际缺 `entropyConf`（与"同形状"注释矛盾）、outcome 字段可非法组合（改判别联合）、
+  reason/limit 码未闭集、零模型 lane 不能证明模型路径等价。
+- **复审 3：v3 仍不通过**。P0：⑤ picked 强制模型 signal——规则分支无票（`method="rule:match"`、
+  `conf=1.0`），执行器后续消费 `method/decisionKind/layaMargin/tierAsk/nominatedRepair/escalatedPick`；
+  ⑥ 账本缺 pilot 守卫面（`changedLoop/unhittable/guardStop/loopTrip/evidence`）且 `recordOutcome` 丢
+  `desc`——删 PilotLedger 则确定性守卫与交接证据必坏；⑦ `tieredHint` 缺省写反（执行期缺省 OFF），
+  anchor"总是窄问回退"违背声明 hint 权威/`actHint:"strict"`；⑧ prune/notes 语义冲突（run `pruneStale`
+  只删同 ref 签名失配 vs pilot 全量 esig 重映射；noted 仅 rank 档定文本 vs pilot 全部条目；
+  `Outcome="inert"|"effective"` 与 esig 编码须单源）；⑨ `no_model.asked:0` 硬编码（provider 首败 =
+  已问后降级）、reason 闭集缺 run 选择段停因码。P1：注册表须**组合根注入**（engine 禁 import
+  应用层/site-facts，不许模块全局）；driver/ambiguity/riskVote 不属 pick；`budget.stepTimeoutMs`
+  须**约束阶梯**而非只透传；段缺 rejected 回执。
+- **复审 4（完整报告，基于 v3 工作树）**：verdict 不通过；其 P0-1/2/3 与 P1-1/3 已被 v4 吸收，
+  本轮增量收敛为 v5：**类型单源复用**（`PickProposal`/`Sig`/`StopCode`/`ModelPickPhase`/
+  `ProviderPage`/`score_kind`，删除结构复述防漂移）；outcome 字段更名 `executionPool` 并写明
+  **模型投影永不返回执行面**；`target` 缩为 `{ref, sig}`；账本改**工厂绑定策略**（`prune`/`notesFor`/
+  `forbiddenRefs` 按 lifetime 绑定，run=清 stale ref+rank 注记 / pilot=esig 重映射+全条目注记；
+  `recordMemory` 收 `Sig` 与 `"inert"|"effective"` 闭集，effective 清旧 inert）；`DecisionAskPorts`
+  组合根注入（faces/segments/siteFacts，engine 禁 import 应用层/site-facts，不许模块全局）；
+  reason **复用 `StopCode`**、limit 复用 `decision_service_choice_limit`、`narrow_abstain` 移为
+  ladder 事件；`ts` 统一 epoch ms（DC3 同形）；**批序改 S0a（characterization 门禁先行，钉住
+  full/shortlist/rank-only/宽扫/rule/escalate/adjudicate/R2b/family-repair 与 leg/attempt 生命周期）
+  → S0b（账本适配不删旧账，逐项验证 prune/notes/effective-清-inert/desc 一致）** → S1（仅切 pilot
+  `modelVote`，新旧双臂含成功票与宽扫）→ S2（run 只在 `runModelPick` 整段接入）→ S3（白名单 +
+  context 能力档）→ S4（结构化段 + 步史迁移单独 A/B）。
+- **当前状态：工作树 v5（**未提交、未冻结**；类型单源 / executionPool / 工厂绑定账本 / Ports 注入 /
+  StopCode 复用 / ts 对齐 DC3；审计 P1 已修：`run` 元数据补 `conf`/`label`、`notesFor` 增可选作用域、
+  `forbid/unforbid` pilot 不对称与 `entries≤8/不含守停现场` 写进契约、`ruleSkip` 的聚合容器归池构成事实）。
+  批序：**S0a → S0b → S1 → S2 → S3 → S4**。冻结条件 = ①S1 实现后模型路径等价证据（provider stub 消融 + 真站 A/B，DC5 锚），
+  ②闭集码与执行期停因分类的断言一致，③独立评审复看通过。**分批顺序**：S0（`RunAccounting`→
+  `DecisionAccounting`，**双语义接口**，run 面逐字节不变）前置 → S1（ask 实现 + pilot 切面）→
+  S2（run 以 `runModelPick` 整段接入）。
+
+**验收**：契约本身零行为（typecheck + maintain 即可）；S1 切换后 §3.2 lane + `verify:runtime:offline`
+对照（逐场景行为等价）——**零模型 lane 只证降级路径，模型路径等价另需 provider stub 消融 + 真站 A/B
+（DC5 锚）**；新 face 接入 checklist = 注册项 + 适配器 + 一条 lane 场景（不新增 stopCode）。
