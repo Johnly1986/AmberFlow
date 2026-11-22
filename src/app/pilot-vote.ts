@@ -10,6 +10,7 @@
  *   - 弃权（choiceRef=null）与 run 的 abstain 判定同源，直接停、不走宽扫。
  */
 import { esig, WIDE_QUOTAS } from "../engine/extraction.ts";
+import { PilotLedger } from "./pilot-ledger.ts";
 import { WIDER_ELEMENTS } from "../engine/executor-pure.ts";
 import type { PickProposal } from "../engine/executor-types.ts";
 import type { AnyPage, BrowserMiddleware } from "../engine/executor.ts";
@@ -80,15 +81,19 @@ export async function modelVote(a: {
   goal: string;
   elems: ElemPool;
   forbidden: Set<string>;
+  /** L2 上文注记（ref → 人读负面证据；null = 不注入，题面逐字节不变）。 */
+  notes?: Record<string, string> | null;
   confFloor: number;
   hosts: string[] | null;
 }): Promise<PilotVote> {
-  const { mw, page, goal, elems, forbidden, confFloor, hosts } = a;
+  const { mw, page, goal, elems, forbidden, confFloor, hosts, notes } = a;
   await mw.ready();
   if (mw.rulesOnly) return { kind: "no_model_runtime", asked: 0, pool: null };
-  let pool = elems;
+  // 候选窗剔除无角色聚合容器（零变化噪声；明细见 PilotLedger.filterAggregate）。
+  const askBase = PilotLedger.filterAggregate(elems) ?? elems;
+  let pool = askBase;
   let asked = 1;
-  let proposal = await mw.pickProposal(goal, page, pool, forbidden, null);
+  let proposal = await mw.pickProposal(goal, page, pool, forbidden, notes ?? null);
   if (proposal.choiceRef === null) {
     // 弃权与 run 的 abstain 判定同源（run 面弃权即停，不走宽扫）：直接交接。
     return { kind: "low_confidence", asked, pool: null };
@@ -97,14 +102,16 @@ export async function modelVote(a: {
   if (!passesFloor(proposal, confFloor)) {
     // 低置信回流（run 4d 同序，红线②「不提前弹人」）：gated 意见先付一次宽扫重问
     // （宽池真变大才重问；禁选集合按元素签名平移到宽视图）；仍不过闸才 low_confidence。
-    const wide = await widePool(mw, page, hosts);
+    const wideRaw = await widePool(mw, page, hosts);
+    // 宽扫同样剔除聚合容器（宽度判定按剔除后的真实候选数，防"宽扫只多了噪声"）。
+    const wide = wideRaw === null ? null : (PilotLedger.filterAggregate(wideRaw) ?? wideRaw);
     if (wide === null || Object.keys(wide).length <= Object.keys(pool).length) {
       return { kind: "low_confidence", asked, pool: null };
     }
     carryForbidden(forbidden, pool, wide);
     pool = wide;
     asked += 1;
-    proposal = await mw.pickProposal(goal, page, pool, forbidden, null);
+    proposal = await mw.pickProposal(goal, page, pool, forbidden, notes ?? null);
     via = "reobserve";
     if (proposal.choiceRef === null || !passesFloor(proposal, confFloor)) {
       return { kind: "low_confidence", asked, pool };

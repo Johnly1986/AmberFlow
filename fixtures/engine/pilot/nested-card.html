@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>nested card</title></head>
+<body>
+  <!-- 嵌套同目标：卡片容器（有 handler，文案继承自子链接）与其内部链接同 label。
+       裸词点名命中两候选——折叠判据应取后代链接执行，不判 target_ambiguous。 -->
+  <div id="card" onclick="void 0" style="width:240px;border:1px solid #ccc;padding:8px">
+    <a id="card-link" href="detail.html" style="display:block;padding:8px">确认订单</a>
+  </div>
+</body>
+</html>

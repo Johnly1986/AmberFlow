@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>toggle loop</title></head>
+<body>
+  <!-- 死目标形态：goal 词面命中按钮名，点击只开关面板（每步 changed=true、URL 不变）。 -->
+  <button id="hours" type="button"
+          onclick="const p=document.getElementById('panel'); p.hidden=!p.hidden; document.getElementById('out').textContent = p.hidden ? 'closed' : 'open'">Hours</button>
+  <div id="panel" hidden>panel</div>
+  <div id="out">closed</div>
+</body>
+</html>

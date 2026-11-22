@@ -62,7 +62,9 @@
   对照臂（每步等 Agent 点名）。适合目标明确、交互步多的走查。**边界**：产物带 `pilot:true`，
   走查通过 ≠ 应用通过（正式结论只能来自生成的 app.mjs 走 `amber run`）；`finish` 必须带信号并
   经 `checkSignal` 验证；危险词面动作确定性拒绝（`risk_declined`，兜底闭集无 confirm 可越过）；
-  被拒指令 = 单行失败不杀会话。**闭环**：`--record` 驾驶轨迹 → `amber pilot export --record
+  被拒指令 = 单行失败不杀会话；**跨 frame 站点**（应用菜单/内嵌搜索框等）要把宿主 frame 的
+  origin 写进 `--hosts`（pilot 的 hosts 信封同时管导航与 frame 准入，缺了即池内无该 frame
+  元素/动作报 `frame_not_allowed`）。**闭环**：`--record` 驾驶轨迹 → `amber pilot export --record
   <轨迹> --id <app>` 骨架 → `amber apps check` → 补 done/slot → `amber run`（export 只出骨架，
   done 是占位符）。协议/交接块契约见 `docs/AGENT_INTERFACE.md` §3.3；桥面 one-shot
   `amberflow_pilot` 同源（重建桥包后生效）；验收矩阵 `npm run verify:pilot`（非门禁，§3.2）。

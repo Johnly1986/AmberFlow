@@ -162,8 +162,20 @@ export const PILOT_DEFAULT_MAX_STEPS = 12;
 export const PILOT_DEFAULT_IDLE_TIMEOUT_MS = SESSION_IDLE_TIMEOUT_MS;
 /** 连续 inert 判定阈值（与执行器 maxEffectiveRepeats 缺省同源的驾驶面口径）。 */
 export const PILOT_INERT_LIMIT = 3;
+/** 同一元素（按 esig）被驱动达上限而最终信号仍未成立 = 死目标（run 面 `maxEffectiveRepeats`
+ *  缺省同口径的驾驶面版）：到达上限即守停，不再执行——防 toggle/复读形态无声烧预算。 */
+export const PILOT_REPEAT_LIMIT = 3;
 /** 已走步数摘要上限（驾驶问句里带的已走步数；有界，防题面膨胀）。 */
 export const PILOT_HISTORY_STEPS = 6;
+
+/** 驾驶问句的 goal 底座：总目标 + 有界步史摘要（既有事实投影，不做自由生成；每步 ≤40 字）。 */
+export function drivingGoalText(goal: string,
+    history: ReadonlyArray<{ target: string; ok: boolean }>, maxLabel = 40): string {
+  const clip = (text: string): string => (text.length <= maxLabel ? text : `${text.slice(0, maxLabel - 1)}…`);
+  const hist = history.slice(-PILOT_HISTORY_STEPS)
+    .map((s, i) => `${i + 1}.${clip(s.target)}${s.ok ? "" : "(失败)"}`).join("; ");
+  return hist === "" ? goal : `${goal} | 已完成: ${hist}`;
+}
 
 /** 停因 → 解锁建议闭集（确定性生成；≤3 条，按停因查表，不是模型建议）。 */
 export function unblockHintsFor(stop: PilotStopCode): string[] {
@@ -195,8 +207,8 @@ export function unblockHintsFor(stop: PilotStopCode): string[] {
       ];
     case "budget_exceeded":
       return [
-        "增大 --max-steps 重试（redirect 不清预算；预算重置请起新 pilot）",
-        "redirect 换目标或入口重驾驶（步史清段重新累计）",
+        "起新 pilot 并增大 --max-steps（预算用尽即终态：本 run 不再接受 resume/redirect）",
+        "把这次已走轨迹（record）当输入：换更小的 --goal 或先修入口页",
       ];
     case "browser_dead":
       return ["redirect 重开入口页（浏览器已死，现场不可恢复）"];

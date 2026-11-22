@@ -168,6 +168,116 @@ async function scenarioStuckInert(origin: string): Promise<void> {
  * §3.2② target_ambiguous：同 label 双候选（跨区域进池）——resume{hint:"Same label"} 走
  * actOnce 词面解析即歧义、只停不选；再 resume{hint:"#detail-link"} 收窄到达。
  */
+/** 嵌套同目标折叠：卡片容器与其内部链接同 label——resume 点名命中两候选，折叠取后代执行
+ *  （不判 target_ambiguous）并到达 detail；兄弟重复组（header/footer）仍只停不选。
+ */
+/** 同卡片兄弟同 label（Maps 结果卡同构）：覆盖链接（aria-label）与标题 div 互不包含、
+ *  共享 role=article 卡片——共同交互祖先 + 组内唯一 native 判据折叠到链接执行。
+ */
+async function scenarioRowUnitFold(origin: string): Promise<void> {
+  const { rt } = await boot({
+    url: `${origin}/row-unit-card.html`, goal: "zerblonix frobnicate",
+    finalSignal: { css_exists: "#detail" }, maxSteps: 4,
+  });
+  try {
+    const stop = await rt.drive();
+    assert.equal(stop, "low_confidence", "unreachable decision source stops honestly first");
+    const outcome = await rt.handleLine('{"cmd":"resume","hint":"提交申请"}');
+    assert.equal(outcome, "drive");
+    const stop2 = await rt.drive();
+    assert.equal(stop2, "final_signal_held", "same-card siblings fold to the native control and arrive");
+  } finally {
+    await rt.closeBrowser();
+  }
+}
+
+/** P0 守卫·死目标：goal 词面 = 按钮名（"Hours"），点击只开关面板（每步 changed=true、URL 不变）。
+ *  规则档命中一次即入账本，第二轮起不再复读（降级档无模型 ⇒ 1 步后 low_confidence 交接），
+ *  此前同形态会连续复读烧满 8 步预算（budget_exceeded）。
+ */
+/** 族推导回归：textarea（fill 族）缺值必须落 needs_value；若被动作前闸门按 click 判
+ *  unsupported，它会被永久禁选、退化成 low_confidence——两种结果可区分。
+ */
+async function scenarioFillFamily(origin: string): Promise<void> {
+  const { rt, events } = await boot({
+    url: `${origin}/fill-family.html`, goal: "备注", maxSteps: 4,
+  });
+  try {
+    const stop = await rt.drive();
+    assert.equal(stop, "needs_value", "fill 族元素要值，不是被闸门拒");
+    const handoff = events.filter((e) => e["type"] === "handoff").pop() as Record<string, unknown> | undefined;
+    const ev = ((handoff?.["handoff"] as Record<string, unknown> | undefined)
+      ?.["why_stuck"] as Record<string, unknown> | undefined)?.["evidence"] as Record<string, unknown> | undefined;
+    const ledger = (ev?.["ledger"] ?? []) as Array<Record<string, unknown>>;
+    const rejected = ledger.filter((e) => String(e["last_outcome"]).startsWith("unsupported"));
+    assert.equal(rejected.length, 0, "fill 族不得被动作前闸门判 unsupported");
+  } finally {
+    await rt.closeBrowser();
+  }
+}
+
+/** 准确率闸门·被覆盖目标：goal 词面命中被第三方覆盖层的按钮——动作前快速拒绝（不执行、
+ *  不耗步、不烧 5.8s 遮挡探针），账本记 unhittable:covered 后规则档跳过；降级档无模型 ⇒
+ *  low_confidence 交接，**零执行步**（此前同形态每次选中都计 1 步并烧满慢探针）。
+ */
+async function scenarioPickRejected(origin: string): Promise<void> {
+  const { rt, events } = await boot({
+    url: `${origin}/covered-target.html`, goal: "确认筛选", maxSteps: 8,
+  });
+  try {
+    const stop = await rt.drive();
+    assert.equal(stop, "low_confidence", "degraded face stops honestly after the pick is rejected");
+    assert.equal(drivesOf(events).length, 0, "no step is spent on an unhittable pick");
+    const handoff = events.filter((e) => e["type"] === "handoff").pop() as Record<string, unknown> | undefined;
+    const ev = ((handoff?.["handoff"] as Record<string, unknown> | undefined)
+      ?.["why_stuck"] as Record<string, unknown> | undefined)?.["evidence"] as Record<string, unknown> | undefined;
+    const ledger = (ev?.["ledger"] ?? []) as Array<Record<string, unknown>>;
+    assert.equal(ledger.length, 1, "the rejection is recorded in the single-source ledger");
+    assert.ok(String(ledger[0]!["last_outcome"]).startsWith("unhittable"), "outcome names the cover relation");
+  } finally {
+    await rt.closeBrowser();
+  }
+}
+
+async function scenarioToggleLoop(origin: string): Promise<void> {
+  const { rt, events } = await boot({
+    url: `${origin}/toggle-loop.html`, goal: "Hours", maxSteps: 8,
+  });
+  try {
+    const stop = await rt.drive();
+    assert.equal(stop, "low_confidence", "rules must not re-pick a ledgered element; the degraded face stops honestly");
+    const drives = drivesOf(events);
+    assert.equal(drives.length, 1, "the toggle button is executed exactly once (no budget-burning loop)");
+    assert.equal(drives[0]["picked_by"], "rule");
+    const handoff = events.filter((e) => e["type"] === "handoff").pop() as Record<string, unknown> | undefined;
+    const block = (handoff?.["handoff"] as Record<string, unknown> | undefined)?.["why_stuck"] as Record<string, unknown> | undefined;
+    const ev = (block?.["evidence"] ?? {}) as Record<string, unknown>;
+    const ledger = (ev["ledger"] ?? []) as Array<Record<string, unknown>>;
+    assert.equal(ledger.length, 1, "the handoff carries the single-source ledger");
+    assert.equal(ledger[0]!["tries"], 1, "the ledger counts the executed attempt");
+    assert.ok(String(ledger[0]!["last_outcome"]).startsWith("changed"), "the outcome records a state change (toggle)");
+  } finally {
+    await rt.closeBrowser();
+  }
+}
+
+async function scenarioNestedFold(origin: string): Promise<void> {
+  const { rt } = await boot({
+    url: `${origin}/nested-card.html`, goal: "zerblonix frobnicate",
+    finalSignal: { css_exists: "#detail" }, maxSteps: 4,
+  });
+  try {
+    const stop = await rt.drive();
+    assert.equal(stop, "low_confidence", "unreachable decision source stops honestly first");
+    const outcome = await rt.handleLine('{"cmd":"resume","hint":"确认订单"}');
+    assert.equal(outcome, "drive");
+    const stop2 = await rt.drive();
+    assert.equal(stop2, "final_signal_held", "nested same-label candidates fold to the descendant and arrive");
+  } finally {
+    await rt.closeBrowser();
+  }
+}
+
 async function scenarioAmbiguous(origin: string): Promise<void> {
   const { rt, events } = await boot({
     url: `${origin}/home.html`, goal: "Same label",
@@ -198,6 +308,12 @@ async function scenarioBudget(origin: string): Promise<void> {
     assert.equal(stop, "budget_exceeded", "one step of budget, one honest handoff");
     const handoff = events.find((e) => e["type"] === "handoff");
     assert.ok(handoff !== undefined, "handoff projected before waiting");
+    // 预算用尽 = 终态：续驾驶指令（resume/redirect）一律结构化拒绝，不再重试。
+    const refused = await rt.handleLine('{"cmd":"resume","hint":"#detail-link"}');
+    assert.equal(refused, "stay", "budget_exhausted is terminal: resume is refused");
+    const rejected = events.filter((e) => e["type"] === "command_result" && e["code"] === "budget_exhausted");
+    assert.equal(rejected.length, 1, "the refusal is a structured command_result");
+    assert.equal(await rt.drive(), "budget_exceeded", "driving stays terminal after the budget");
     await rt.finish(null);
     const end = events.find((e) => e["type"] === "pilot_end");
     assert.ok(end !== undefined);
@@ -269,6 +385,11 @@ const SCENARIOS: Array<[string, (origin: string) => Promise<void>]> = [
   ["needs_value→resume 值+点名", scenarioNeedsValue],
   ["stuck_inert→resume 换目标", scenarioStuckInert],
   ["target_ambiguous→resume 收窄", scenarioAmbiguous],
+  ["嵌套同目标折叠（容器vs链接）", scenarioNestedFold],
+  ["同卡片兄弟同 label 折叠", scenarioRowUnitFold],
+  ["P0 守卫：死目标不复读不烧预算", scenarioToggleLoop],
+  ["准确率：被覆盖选中不耗步", scenarioPickRejected],
+  ["族推导：fill 族不被永久拒", scenarioFillFamily],
   ["budget_exceeded 终态保停因", scenarioBudget],
   ["危险 default-deny 不可越过", scenarioDangerous],
   ["决策源不可达 no_model_runtime", scenarioNoModel],

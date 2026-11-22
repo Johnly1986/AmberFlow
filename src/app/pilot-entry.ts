@@ -114,6 +114,12 @@ export async function runPilot(opts: PilotOptions, sink: PilotSink): Promise<num
     while (true) {
       const stop = await rt.drive();
       if (rt.done || stop === "browser_dead") break;
+      // 预算用尽 = 终态：直接收尾（不再等兜底指令、不再重试）。驾驶步预算是一次调用的
+      // 成本契约，用尽即结构化报错（exit 3 + pilot_end 带停因），继续只能起新 pilot。
+      if (stop === "budget_exceeded") {
+        endNote = { code: "budget_exhausted", reason: `max steps reached — terminal; start a new pilot with a larger --max-steps` };
+        break;
+      }
       const next = await awaitCommands();
       if (next === "closed") break;
       // 交接已被 resume/redirect 解除：继续驾驶（预算不清零）。

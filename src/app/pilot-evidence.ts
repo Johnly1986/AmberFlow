@@ -81,6 +81,27 @@ export async function handoffEvidence(a: {
  * （Agent 照抄 hint_candidates 进 resume.hint 即确定性执行）。observe 失败 = 空候选，
  * Agent 仍可读证据目录/redirect/abort。
  */
+/**
+ * agent 驾驶的步间投影（`--driver agent`）：候选行有界投影后经 respond 写出；浏览器已死 =
+ * 空候选（投影失败不掩盖收尾）。与 `handoffEvidence` 同族：每件事实独立失败，不抛整块。
+ */
+export async function emitStepRequest(args: {
+  respond: (obj: Record<string, unknown>) => void;
+  page: AnyPage | null;
+  observe: PilotObserve;
+  lastPool: ElemPool | null;
+  goal: string;
+  step: number;
+}): Promise<void> {
+  const view = args.page === null
+    ? { url: "", poolSize: 0, candidates: [] as Array<Record<string, unknown>> }
+    : await agentStepCandidates({ page: args.page, observe: args.observe, lastPool: args.lastPool });
+  args.respond({
+    type: "step_request", unsolicited: true, pilot: true, driver: "agent",
+    step: args.step, goal: args.goal, url: view.url, pool_size: view.poolSize, candidates: view.candidates,
+  });
+}
+
 export async function agentStepCandidates(a: {
   page: AnyPage;
   observe: PilotObserve;

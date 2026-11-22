@@ -36,10 +36,11 @@ import {
   BrowserMiddleware, browserSession, disallowedHost,
   type AnyPage, type BrowserSession,
 } from "../engine/executor.ts";
-import { urlOf } from "../engine/extraction.ts";
+import { elemFamily, urlOf } from "../engine/extraction.ts";
 import type { Elem, ElemPool } from "../engine/elem-model.ts";
 import { checkSignal, type SignalSpec } from "../engine/signals.ts";
 import { affordanceRule, DESTRUCTIVE_PATTERNS, hintCandidates, hintMatch, navRule } from "../engine/rules.ts";
+import { foldNestedDuplicates, pickRejection } from "../engine/executor-actionability.ts";
 import { DEFAULT_SETTLE, settle } from "../engine/settle.ts";
 import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
 import {
@@ -47,10 +48,11 @@ import {
 } from "../model/decision-provider.ts";
 import { errMsg, isDeadPageError, isObj, nonEmpty } from "./session-runtime-contract.ts";
 import { modelVote } from "./pilot-vote.ts";
-import { agentStepCandidates, handoffEvidence } from "./pilot-evidence.ts";
+import { PilotLedger } from "./pilot-ledger.ts";
+import { emitStepRequest as emitStepRequestEvidence, handoffEvidence } from "./pilot-evidence.ts";
 import {
   PILOT_AGENT_COMMANDS, PILOT_AWAIT_PICK, PILOT_DEFAULT_MAX_STEPS, PILOT_HISTORY_STEPS,
-  PILOT_INERT_LIMIT, pilotExitCode, unblockHintsFor,
+  PILOT_INERT_LIMIT, drivingGoalText, pilotExitCode, unblockHintsFor,
   type PilotAgentCommand, type PilotHandoff, type PilotOptions, type PilotRecordLine, type PilotStopCode,
 } from "./pilot-contract.ts";
 
@@ -69,6 +71,9 @@ interface DrivingStep {
 }
 
 const MAX_LABEL = 40;
+/** 动作目标上限：与 hint 匹配口径一致（`full_label` ≤200）。`label` 只是模型视图的 40 字前缀，
+ *  拿它当动作目标会在长标签上精确匹配落空——跨 frame/AX 长标签元素尤其常见。 */
+const MAX_HINT = 200;
 const buf = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 
 export class PilotRuntime {
@@ -111,6 +116,9 @@ export class PilotRuntime {
   private handoffCount = 0;
   private fallbackCount = 0;
   private readonly history: DrivingStep[] = [];
+  /** 守卫账本（单源，见 pilot-ledger）：禁选/守停/证据都从它派生。 */
+  private readonly ledger = new PilotLedger();
+  /** 本轮 ref 键禁选视图（每轮抽池后由账本按新 esig 重算；模型票/证据消费）。 */
   private readonly forbidden = new Set<string>();
   private handoffOpen: PilotHandoff | null = null;
   private finished = false;
@@ -144,7 +152,6 @@ export class PilotRuntime {
       : path.join(amberflowHome(opts.env ?? process.env), "pilot", this.runId);
   }
 
-  /* ---------------------------------------------------------------- 构造面 */
 
   private log(line: string): void {
     this.sink.respond({ type: "log", unsolicited: true, line });
@@ -203,7 +210,6 @@ export class PilotRuntime {
     return s.page as AnyPage;
   }
 
-  /* ---------------------------------------------------------------- 记录面 */
 
   private record(line: PilotRecordLine): void {
     if (this.recordPath === null) return;
@@ -226,14 +232,10 @@ export class PilotRuntime {
     });
   }
 
-  /* ---------------------------------------------------------------- 驾驶循环 */
 
-  /** 驾驶问句的 goal 底座：总目标 + 有界步史摘要（不是自由生成，是既有事实投影）。 */
+  /** 驾驶问句的 goal 底座（总目标 + 有界步史摘要；实现见 pilot-contract.drivingGoalText）。 */
   private drivingGoal(): string {
-    const hist = this.history.slice(-PILOT_HISTORY_STEPS)
-      .map((s, i) => `${i + 1}.${buf(s.target, MAX_LABEL)}${s.ok ? "" : "(失败)"}`)
-      .join("; ");
-    return hist === "" ? this.opts.goal : `${this.opts.goal} | 已完成: ${hist}`;
+    return drivingGoalText(this.opts.goal, this.history);
   }
 
   /**
@@ -250,6 +252,8 @@ export class PilotRuntime {
     const { elems } = await mw._extractPoolSettled(page, "bucketed");
     const poolSize = Object.keys(elems).length;
     this.lastPool = elems;
+    this.forbidden.clear();
+    for (const r of this.ledger.forbiddenRefs(elems)) this.forbidden.add(r);
 
     // ①′ resume 带 hint 的确定性执行（Agent 兜底点名）：hint 唯一命中即执行，
     //    与 run 声明目标同一认识论——hint 是作者/兜底方的显式决定，不花模型票。
@@ -266,6 +270,12 @@ export class PilotRuntime {
       }
       const cands = hintCandidates(resumeHint, elems, {});
       if (cands !== null && cands.refs.length > 1) {
+        // 嵌套同目标折叠（与 actOnce 同一谓词面）：容器 vs 它自己的链接 = 同一单元，取后代执行；
+        // 互不包含的同 label 仍只停不选。
+        const folded = await foldNestedDuplicates(this.mw(), page, elems, resumeHint, "click");
+        if (folded !== null && elems[folded[0]!] !== undefined) {
+          return await this.executePicked(page, elems, folded[0]!, "rule", null, poolSize, goal);
+        }
         return "target_ambiguous";
       }
     }
@@ -275,7 +285,11 @@ export class PilotRuntime {
     //    匹配目标里，一次误选可被规则反复复读（不该把「做过什么」当「要做什么」）。
     const navRef = navRule(this.opts.goal, elems);
     const ruleRef = navRef !== null ? navRef : affordanceRule(this.opts.goal, elems, null, {});
-    if (ruleRef !== null && elems[ruleRef] !== undefined) {
+    // 规则档 exclude（判据见 pilot-ledger.changedLoop：只排除 toggle/乒乓形态的复读）。
+    const ruleEl = ruleRef !== null ? elems[ruleRef] : undefined;
+    const ruleSkip = ruleEl !== undefined && (this.ledger.changedLoop(ruleEl) || this.ledger.unhittable(ruleEl)
+      || PilotLedger.aggregateContainer(ruleEl));
+    if (ruleRef !== null && elems[ruleRef] !== undefined && !ruleSkip) {
       return await this.executePicked(page, elems, ruleRef, "rule", null, poolSize, goal);
     }
 
@@ -288,7 +302,7 @@ export class PilotRuntime {
     // ③ 模型投票（闭集 ref；模型不在位 = 如实停，绝不装会抛的 runtime）。阶梯拆在
     //    pilot-vote.ts：floor 闸门 + 低置信宽扫重问一次（run 4d 同序，不提前弹人）。
     const vote = await modelVote({
-      mw, page, goal, elems, forbidden: this.forbidden,
+      mw, page, goal, elems, forbidden: this.forbidden, notes: this.ledger.notesFor(elems),
       confFloor: this.confFloor, hosts: this.hosts,
     });
     if (vote.kind === "no_model_runtime") return "no_model_runtime";
@@ -317,13 +331,12 @@ export class PilotRuntime {
     if (pickedBy === "model") this.modelPicks += 1; else this.rulePicks += 1;
     const urlBefore = urlOf(page);
 
-    // 族判定（与执行器 firstExecFamily 同一分类口径）。
+    // 族判定（引擎单源 `elemFamily`）：textarea/contenteditable/role=textbox|combobox|listbox
+    // 都归 fill/select，不能只看原生 tag——否则这些元素被推成 click，在能力面上不可执行。
     const tag = (el.tag ?? "").toLowerCase();
-    const role = String(el.role ?? el.family ?? "").toLowerCase();
-    let op: "click" | "check" | "fill" | "select" = "click";
-    if (tag === "select" || role === "select") op = "select";
-    else if (tag === "input" && ["text", "search", "email", "password", "tel", "url", "number"].includes(String(el.input_type ?? el.type ?? ""))) op = "fill";
-    else if (tag === "input" && String(el.input_type ?? el.type ?? "") === "checkbox") op = "check";
+    const fam = elemFamily(el);
+    const op: "click" | "check" | "fill" | "select" =
+      fam === "check" ? "check" : fam === "fill" ? "fill" : fam === "select" ? "select" : "click";
 
     // 值不猜（红线②）：fill/select 的值来自预声明 slots 或 Agent resume 显式给值。
     let bind: { value: unknown } | null = null;
@@ -337,13 +350,17 @@ export class PilotRuntime {
 
     // 执行：与 session.act 同一条链（歧义 fail 档、click/check 带遮挡探针）。
     const started = Date.now();
-    const target = buf(String(el.label ?? el.text ?? el.tag ?? ref), MAX_LABEL);
-    // 危险闸门（红线⑥「default-deny 不放宽」）：run 面的风险闸门在动作相位（isRisky→confirmFn），
-    // actOnce 不经过它；default-deny face 又不装 confirmFn（执行器缺省 DEFAULT_CONFIRM 只在
-    // 风险闸门处拒一切）。驾驶面在这里对**每个待执行动作**做确定性关键词判定——与桥
-    // denyDestructive 同一份闭集（单源 rules.ts 的 DESTRUCTIVE_PATTERNS），零模型票。
-    // 拒绝 = 结构化失败 + 禁选 + inert 记账，绝不静默执行；连续拒绝达阈值 = stuck_inert 如实停。
-    const denyDesc = `${op} ${target}`.toLowerCase();
+    // 动作解析口径 = hint 匹配口径（`full_label`）：40 字前缀当目标会在长标签上精确匹配落空。
+    const targetFull = buf(String(el.full_label ?? el.label ?? el.text ?? el.tag ?? ref), MAX_HINT);
+    const target = buf(targetFull, MAX_LABEL);
+    // 危险闸门（红线⑥）：actOnce 不经 run 的风险闸门、default-deny face 不装 confirmFn——
+    // 驾驶面对每个动作做确定性关键词判定（单源 DESTRUCTIVE_PATTERNS）；拒绝 = 结构化失败 +
+    // 禁选 + inert 记账，连续拒绝达阈值 = stuck_inert 如实停。
+    if (this.ledger.guardStop(el, target)) return "stuck_inert";
+    // 动作前快速拒绝（pickRejection）：被覆盖/离屏的选中不执行、不耗步、不烧探针。
+    const rejected = await pickRejection(this.mw(), page, elems, ref, op);
+    if (rejected !== null) { this.forbidden.add(ref); this.ledger.bump(el, target, rejected); return null; }
+    const denyDesc = `${op} ${targetFull}`.toLowerCase();
     if (DESTRUCTIVE_PATTERNS.some((x) => denyDesc.includes(x))) {
       this.history.push({ op, target, ref: null, how: null, ok: false, changed: false });
       this.stepCount += 1;
@@ -359,11 +376,12 @@ export class PilotRuntime {
         ...(pick === null ? {} : { conf: pick.conf, shape: pick.shape, pool_size: pick.pool_size, via: pick.via }),
       });
       this.forbidden.add(ref);
+      this.ledger.bump(el, target, "risk_declined");
       this.inertRun += 1;
       if (this.inertRun >= PILOT_INERT_LIMIT) return "stuck_inert";
       return null;
     }
-    const out = await this.mw().actOnce(page, target, op, bind, "fail", undefined, {
+    const out = await this.mw().actOnce(page, targetFull, op, bind, "fail", undefined, {
       ...(op === "click" || op === "check" ? { occlusionProbe: true } : {}),
       diagnostics: true,
     });
@@ -390,10 +408,12 @@ export class PilotRuntime {
     if (out.ok !== true) {
       // 执行失败不立即停：连续落空由 inert 判定兜住（同一元素禁再选）。
       const code = String(out.stopCode ?? "action_failed");
+      this.ledger.bump(el, target, `failed:${code}`);
       if (code === "target_ambiguous") return "target_ambiguous";
       if (code === "needs_value") return "needs_value";
       if (step.ref !== null) this.forbidden.add(step.ref);
     } else {
+      this.ledger.bump(el, target, step.changed === true ? "changed" : "no_change");
       if (step.ref !== null && step.changed !== true) {
         this.forbidden.add(step.ref);
       }
@@ -406,7 +426,6 @@ export class PilotRuntime {
     return null;
   }
 
-  /* ---------------------------------------------------------------- 完成判定 */
 
   /** checkSignal 验证一条信号声明在当前页是否成立（--final-signal 每轮判与 finish 指令共用）。 */
   private async signalHeld(spec: Record<string, unknown>): Promise<boolean> {
@@ -438,8 +457,14 @@ export class PilotRuntime {
       step_id: this.stepCount,
       goal_digest: buf(this.opts.goal, 200),
       why_stuck: {
-        summary: `${stop} @ step ${this.stepCount}${url === "" ? "" : ` (${buf(url, 120)})`}`,
-        evidence: { inert_run: this.inertRun, forbidden: [...this.forbidden].slice(0, 40) },
+        summary: `${stop} @ step ${this.stepCount}${url === "" ? "" : ` (${buf(url, 120)})`}`
+          + (this.ledger.loopTrip === null ? "" : ` — dead target: "${buf(this.ledger.loopTrip.desc, 40)}"`
+            + ` driven ${String(this.ledger.loopTrip.tries)} time(s) without the signal holding`),
+        evidence: {
+          inert_run: this.inertRun,
+          forbidden: [...this.forbidden].slice(0, 40),
+          ...this.ledger.evidence(),
+        },
       },
       what_would_unblock: unblockHintsFor(stop),
       evidence_refs: page === null ? {} : await this.evidenceRefs(page),
@@ -459,15 +484,10 @@ export class PilotRuntime {
   private async emitStepRequest(): Promise<void> {
     let page: AnyPage | null = null;
     try { page = await this.page(); } catch { /* 浏览器已死：空候选投影 */ }
-    const view = page === null
-      ? { url: "", poolSize: 0, candidates: [] as Array<Record<string, unknown>> }
-      : await agentStepCandidates({
-        page, observe: (o) => this.ctx().observe(o), lastPool: this.lastPool,
-      });
-    this.sink.respond({
-      type: "step_request", unsolicited: true, pilot: true, driver: "agent",
-      step: this.stepCount, goal: this.drivingGoal(),
-      url: view.url, pool_size: view.poolSize, candidates: view.candidates,
+    await emitStepRequestEvidence({
+      respond: (o) => this.sink.respond(o), page,
+      observe: (o) => this.ctx().observe(o), lastPool: this.lastPool,
+      goal: this.drivingGoal(), step: this.stepCount,
     });
   }
 
@@ -502,7 +522,11 @@ export class PilotRuntime {
         }
         // resume.skip：把最近一次驾驶选中的目标加入禁选后继续（不点名换目标的兜底）。
         const skipped = args["skip"] === true && this.lastPickedRef !== null;
-        if (skipped) this.forbidden.add(this.lastPickedRef as string);
+        if (skipped) {
+          this.forbidden.add(this.lastPickedRef as string);
+          const skippedEl = this.lastPool?.[this.lastPickedRef as string];
+          if (skippedEl !== undefined) this.ledger.bump(skippedEl, "resume.skip", "skipped");
+        }
         // resume.hint 点名收窄：写进下一步的规则档（hint 命中即确定性执行，零模型）。
         const hint = args["hint"];
         if (typeof hint === "string" && hint.trim() !== "") {
@@ -586,12 +610,12 @@ export class PilotRuntime {
   private redirectReset(): void {
     this.history.length = 0;
     this.forbidden.clear();
+    this.ledger.clear();
     this.lastPool = null;
     this.inertRun = 0;
     this.handoffOpen = null;
   }
 
-  /* ---------------------------------------------------------------- 主循环 */
 
   /** 起飞：解析决策源 → 开入口页 → 驾驶直到停因/预算/信号。 */
   async start(): Promise<void> {
@@ -682,6 +706,10 @@ export class PilotRuntime {
    * 返回 "stay"（继续等）| "drive"（回驾驶轮）| "close"（收尾）。
    */
   async handleLine(line: string): Promise<"stay" | "drive" | "close"> {
+    if (this.stopCode === "budget_exceeded") {   // 预算终态：续驾驶指令一律结构化拒绝
+      this.sink.respond({ type: "command_result", ok: false, code: "budget_exhausted", reason: "max steps reached — terminal" });
+      return "stay";
+    }
     const raw = line.charCodeAt(0) === 0xfeff ? line.slice(1) : line;
     if (raw.trim() === "") return "stay";
     let req: Record<string, unknown>;

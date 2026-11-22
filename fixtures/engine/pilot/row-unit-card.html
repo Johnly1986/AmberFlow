@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>row unit card</title></head>
+<body>
+  <!-- 同卡片兄弟同 label（Maps 结果卡同构）：覆盖链接按 aria-label 与可见标题 div
+       同 label、互不包含，但共享同一交互祖先（role=article 卡片）——组内唯一 native
+       控件（a）即执行者，折叠执行不判歧义。 -->
+  <div role="article" id="card" jsaction="click:card.click" style="position:relative;width:240px;border:1px solid #ccc;padding:8px">
+    <div id="title" style="font-size:14px;padding:6px">提交申请</div>
+    <a id="card-link" href="detail.html" aria-label="提交申请" style="position:absolute;inset:0"></a>
+  </div>
+</body>
+</html>
