@@ -1,0 +1,6237 @@
+{
+  "cases": {
+    "adjudicate": {
+      "asks": [
+        {
+          "candidate_count": 64,
+          "candidates_head": [
+            {
+              "label": "按钮 100",
+              "ref": "e0",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 10",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 12",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 13",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "点一个按钮",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 0,
+          "url": "<LOCAL>/wide.html"
+        }
+      ],
+      "phase": {
+        "conf": 0.05,
+        "decisionKind": "model",
+        "elems": [
+          {
+            "label": "按钮 100",
+            "ref": "e0",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 10",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 12",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 13",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 14",
+            "ref": "e4",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 15",
+            "ref": "e5",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 16",
+            "ref": "e6",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 17",
+            "ref": "e7",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 18",
+            "ref": "e8",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 19",
+            "ref": "e9",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 20",
+            "ref": "e10",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 21",
+            "ref": "e11",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 22",
+            "ref": "e12",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 23",
+            "ref": "e13",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 24",
+            "ref": "e14",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 25",
+            "ref": "e15",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 26",
+            "ref": "e16",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 27",
+            "ref": "e17",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 28",
+            "ref": "e18",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 29",
+            "ref": "e19",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 30",
+            "ref": "e20",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 31",
+            "ref": "e21",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 32",
+            "ref": "e22",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 33",
+            "ref": "e23",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 34",
+            "ref": "e24",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 35",
+            "ref": "e25",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 36",
+            "ref": "e26",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 37",
+            "ref": "e27",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 38",
+            "ref": "e28",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 39",
+            "ref": "e29",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 40",
+            "ref": "e30",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 41",
+            "ref": "e31",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 42",
+            "ref": "e32",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 43",
+            "ref": "e33",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 44",
+            "ref": "e34",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 45",
+            "ref": "e35",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 46",
+            "ref": "e36",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 47",
+            "ref": "e37",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 48",
+            "ref": "e38",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 49",
+            "ref": "e39",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 50",
+            "ref": "e40",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 51",
+            "ref": "e41",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 52",
+            "ref": "e42",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 53",
+            "ref": "e43",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 54",
+            "ref": "e44",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 55",
+            "ref": "e45",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 56",
+            "ref": "e46",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 57",
+            "ref": "e47",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 58",
+            "ref": "e48",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 59",
+            "ref": "e49",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 60",
+            "ref": "e50",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 61",
+            "ref": "e51",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 62",
+            "ref": "e52",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 63",
+            "ref": "e53",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 64",
+            "ref": "e54",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 65",
+            "ref": "e55",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 66",
+            "ref": "e56",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 67",
+            "ref": "e57",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 68",
+            "ref": "e58",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 69",
+            "ref": "e59",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 70",
+            "ref": "e60",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 71",
+            "ref": "e61",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 72",
+            "ref": "e62",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 73",
+            "ref": "e63",
+            "tag": "button"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": 0.05,
+        "method": "characterization-stub:adjudicated",
+        "nominatedRepair": false,
+        "ref": "e0",
+        "stopped": false,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [],
+      "stop": {
+        "code": "max_steps",
+        "reason": "subgoal action budget used up (3 action step(s) tried) without the done-signal ever holding — raise the budget, narrow the target, or check what the page did after each action"
+      },
+      "warnings": [],
+      "windowChainFacts": []
+    },
+    "choice-limit": {
+      "asks": [],
+      "phase": {
+        "conf": 0,
+        "decisionKind": "model",
+        "elems": [
+          {
+            "label": "选项 0",
+            "ref": "e0",
+            "tag": "button"
+          },
+          {
+            "label": "选项 1",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "选项 2",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "选项 3",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "选项 4",
+            "ref": "e4",
+            "tag": "button"
+          },
+          {
+            "label": "选项 5",
+            "ref": "e5",
+            "tag": "button"
+          },
+          {
+            "label": "选项 6",
+            "ref": "e6",
+            "tag": "button"
+          },
+          {
+            "label": "选项 7",
+            "ref": "e7",
+            "tag": "button"
+          },
+          {
+            "label": "选项 8",
+            "ref": "e8",
+            "tag": "button"
+          },
+          {
+            "label": "选项 9",
+            "ref": "e9",
+            "tag": "button"
+          },
+          {
+            "label": "选项 10",
+            "ref": "e10",
+            "tag": "button"
+          },
+          {
+            "label": "选项 11",
+            "ref": "e11",
+            "tag": "button"
+          },
+          {
+            "label": "选项 12",
+            "ref": "e12",
+            "tag": "button"
+          },
+          {
+            "label": "选项 13",
+            "ref": "e13",
+            "tag": "button"
+          },
+          {
+            "label": "选项 14",
+            "ref": "e14",
+            "tag": "button"
+          },
+          {
+            "label": "选项 15",
+            "ref": "e15",
+            "tag": "button"
+          },
+          {
+            "label": "选项 16",
+            "ref": "e16",
+            "tag": "button"
+          },
+          {
+            "label": "选项 17",
+            "ref": "e17",
+            "tag": "button"
+          },
+          {
+            "label": "选项 18",
+            "ref": "e18",
+            "tag": "button"
+          },
+          {
+            "label": "选项 19",
+            "ref": "e19",
+            "tag": "button"
+          },
+          {
+            "label": "选项 20",
+            "ref": "e20",
+            "tag": "button"
+          },
+          {
+            "label": "选项 21",
+            "ref": "e21",
+            "tag": "button"
+          },
+          {
+            "label": "选项 22",
+            "ref": "e22",
+            "tag": "button"
+          },
+          {
+            "label": "选项 23",
+            "ref": "e23",
+            "tag": "button"
+          },
+          {
+            "label": "选项 24",
+            "ref": "e24",
+            "tag": "button"
+          },
+          {
+            "label": "选项 25",
+            "ref": "e25",
+            "tag": "button"
+          },
+          {
+            "label": "选项 26",
+            "ref": "e26",
+            "tag": "button"
+          },
+          {
+            "label": "选项 27",
+            "ref": "e27",
+            "tag": "button"
+          },
+          {
+            "label": "选项 28",
+            "ref": "e28",
+            "tag": "button"
+          },
+          {
+            "label": "选项 29",
+            "ref": "e29",
+            "tag": "button"
+          },
+          {
+            "label": "选项 30",
+            "ref": "e30",
+            "tag": "button"
+          },
+          {
+            "label": "选项 31",
+            "ref": "e31",
+            "tag": "button"
+          },
+          {
+            "label": "选项 32",
+            "ref": "e32",
+            "tag": "button"
+          },
+          {
+            "label": "选项 33",
+            "ref": "e33",
+            "tag": "button"
+          },
+          {
+            "label": "选项 34",
+            "ref": "e34",
+            "tag": "button"
+          },
+          {
+            "label": "选项 35",
+            "ref": "e35",
+            "tag": "button"
+          },
+          {
+            "label": "选项 36",
+            "ref": "e36",
+            "tag": "button"
+          },
+          {
+            "label": "选项 37",
+            "ref": "e37",
+            "tag": "button"
+          },
+          {
+            "label": "选项 38",
+            "ref": "e38",
+            "tag": "button"
+          },
+          {
+            "label": "选项 39",
+            "ref": "e39",
+            "tag": "button"
+          },
+          {
+            "label": "选项 40",
+            "ref": "e40",
+            "tag": "button"
+          },
+          {
+            "label": "选项 41",
+            "ref": "e41",
+            "tag": "button"
+          },
+          {
+            "label": "选项 42",
+            "ref": "e42",
+            "tag": "button"
+          },
+          {
+            "label": "选项 43",
+            "ref": "e43",
+            "tag": "button"
+          },
+          {
+            "label": "选项 44",
+            "ref": "e44",
+            "tag": "button"
+          },
+          {
+            "label": "选项 45",
+            "ref": "e45",
+            "tag": "button"
+          },
+          {
+            "label": "选项 46",
+            "ref": "e46",
+            "tag": "button"
+          },
+          {
+            "label": "选项 47",
+            "ref": "e47",
+            "tag": "button"
+          },
+          {
+            "label": "选项 48",
+            "ref": "e48",
+            "tag": "button"
+          },
+          {
+            "label": "选项 49",
+            "ref": "e49",
+            "tag": "button"
+          },
+          {
+            "label": "选项 50",
+            "ref": "e50",
+            "tag": "button"
+          },
+          {
+            "label": "选项 51",
+            "ref": "e51",
+            "tag": "button"
+          },
+          {
+            "label": "选项 52",
+            "ref": "e52",
+            "tag": "button"
+          },
+          {
+            "label": "选项 53",
+            "ref": "e53",
+            "tag": "button"
+          },
+          {
+            "label": "选项 54",
+            "ref": "e54",
+            "tag": "button"
+          },
+          {
+            "label": "选项 55",
+            "ref": "e55",
+            "tag": "button"
+          },
+          {
+            "label": "选项 56",
+            "ref": "e56",
+            "tag": "button"
+          },
+          {
+            "label": "选项 57",
+            "ref": "e57",
+            "tag": "button"
+          },
+          {
+            "label": "选项 58",
+            "ref": "e58",
+            "tag": "button"
+          },
+          {
+            "label": "选项 59",
+            "ref": "e59",
+            "tag": "button"
+          },
+          {
+            "label": "选项 60",
+            "ref": "e60",
+            "tag": "button"
+          },
+          {
+            "label": "选项 61",
+            "ref": "e61",
+            "tag": "button"
+          },
+          {
+            "label": "选项 62",
+            "ref": "e62",
+            "tag": "button"
+          },
+          {
+            "label": "选项 63",
+            "ref": "e63",
+            "tag": "button"
+          },
+          {
+            "label": "选项 64",
+            "ref": "e64",
+            "tag": "button"
+          },
+          {
+            "label": "选项 65",
+            "ref": "e65",
+            "tag": "button"
+          },
+          {
+            "label": "选项 66",
+            "ref": "e66",
+            "tag": "button"
+          },
+          {
+            "label": "选项 67",
+            "ref": "e67",
+            "tag": "button"
+          },
+          {
+            "label": "选项 68",
+            "ref": "e68",
+            "tag": "button"
+          },
+          {
+            "label": "选项 69",
+            "ref": "e69",
+            "tag": "button"
+          },
+          {
+            "label": "选项 70",
+            "ref": "e70",
+            "tag": "button"
+          },
+          {
+            "label": "选项 71",
+            "ref": "e71",
+            "tag": "button"
+          },
+          {
+            "label": "选项 72",
+            "ref": "e72",
+            "tag": "button"
+          },
+          {
+            "label": "选项 73",
+            "ref": "e73",
+            "tag": "button"
+          },
+          {
+            "label": "选项 74",
+            "ref": "e74",
+            "tag": "button"
+          },
+          {
+            "label": "选项 75",
+            "ref": "e75",
+            "tag": "button"
+          },
+          {
+            "label": "选项 76",
+            "ref": "e76",
+            "tag": "button"
+          },
+          {
+            "label": "选项 77",
+            "ref": "e77",
+            "tag": "button"
+          },
+          {
+            "label": "选项 78",
+            "ref": "e78",
+            "tag": "button"
+          },
+          {
+            "label": "选项 79",
+            "ref": "e79",
+            "tag": "button"
+          },
+          {
+            "label": "选项 80",
+            "ref": "e80",
+            "tag": "button"
+          },
+          {
+            "label": "选项 81",
+            "ref": "e81",
+            "tag": "button"
+          },
+          {
+            "label": "选项 82",
+            "ref": "e82",
+            "tag": "button"
+          },
+          {
+            "label": "选项 83",
+            "ref": "e83",
+            "tag": "button"
+          },
+          {
+            "label": "选项 84",
+            "ref": "e84",
+            "tag": "button"
+          },
+          {
+            "label": "选项 85",
+            "ref": "e85",
+            "tag": "button"
+          },
+          {
+            "label": "选项 86",
+            "ref": "e86",
+            "tag": "button"
+          },
+          {
+            "label": "选项 87",
+            "ref": "e87",
+            "tag": "button"
+          },
+          {
+            "label": "选项 88",
+            "ref": "e88",
+            "tag": "button"
+          },
+          {
+            "label": "选项 89",
+            "ref": "e89",
+            "tag": "button"
+          },
+          {
+            "label": "选项 90",
+            "ref": "e90",
+            "tag": "button"
+          },
+          {
+            "label": "选项 91",
+            "ref": "e91",
+            "tag": "button"
+          },
+          {
+            "label": "选项 92",
+            "ref": "e92",
+            "tag": "button"
+          },
+          {
+            "label": "选项 93",
+            "ref": "e93",
+            "tag": "button"
+          },
+          {
+            "label": "选项 94",
+            "ref": "e94",
+            "tag": "button"
+          },
+          {
+            "label": "选项 95",
+            "ref": "e95",
+            "tag": "button"
+          },
+          {
+            "label": "选项 96",
+            "ref": "e96",
+            "tag": "button"
+          },
+          {
+            "label": "选项 97",
+            "ref": "e97",
+            "tag": "button"
+          },
+          {
+            "label": "选项 98",
+            "ref": "e98",
+            "tag": "button"
+          },
+          {
+            "label": "选项 99",
+            "ref": "e99",
+            "tag": "button"
+          },
+          {
+            "label": "选项 100",
+            "ref": "e100",
+            "tag": "button"
+          },
+          {
+            "label": "选项 101",
+            "ref": "e101",
+            "tag": "button"
+          },
+          {
+            "label": "选项 102",
+            "ref": "e102",
+            "tag": "button"
+          },
+          {
+            "label": "选项 103",
+            "ref": "e103",
+            "tag": "button"
+          },
+          {
+            "label": "选项 104",
+            "ref": "e104",
+            "tag": "button"
+          },
+          {
+            "label": "选项 105",
+            "ref": "e105",
+            "tag": "button"
+          },
+          {
+            "label": "选项 106",
+            "ref": "e106",
+            "tag": "button"
+          },
+          {
+            "label": "选项 107",
+            "ref": "e107",
+            "tag": "button"
+          },
+          {
+            "label": "选项 108",
+            "ref": "e108",
+            "tag": "button"
+          },
+          {
+            "label": "选项 109",
+            "ref": "e109",
+            "tag": "button"
+          },
+          {
+            "label": "选项 110",
+            "ref": "e110",
+            "tag": "button"
+          },
+          {
+            "label": "选项 111",
+            "ref": "e111",
+            "tag": "button"
+          },
+          {
+            "label": "选项 112",
+            "ref": "e112",
+            "tag": "button"
+          },
+          {
+            "label": "选项 113",
+            "ref": "e113",
+            "tag": "button"
+          },
+          {
+            "label": "选项 114",
+            "ref": "e114",
+            "tag": "button"
+          },
+          {
+            "label": "选项 115",
+            "ref": "e115",
+            "tag": "button"
+          },
+          {
+            "label": "选项 116",
+            "ref": "e116",
+            "tag": "button"
+          },
+          {
+            "label": "选项 117",
+            "ref": "e117",
+            "tag": "button"
+          },
+          {
+            "label": "选项 118",
+            "ref": "e118",
+            "tag": "button"
+          },
+          {
+            "label": "选项 119",
+            "ref": "e119",
+            "tag": "button"
+          },
+          {
+            "label": "选项 120",
+            "ref": "e120",
+            "tag": "button"
+          },
+          {
+            "label": "选项 121",
+            "ref": "e121",
+            "tag": "button"
+          },
+          {
+            "label": "选项 122",
+            "ref": "e122",
+            "tag": "button"
+          },
+          {
+            "label": "选项 123",
+            "ref": "e123",
+            "tag": "button"
+          },
+          {
+            "label": "选项 124",
+            "ref": "e124",
+            "tag": "button"
+          },
+          {
+            "label": "选项 125",
+            "ref": "e125",
+            "tag": "button"
+          },
+          {
+            "label": "选项 126",
+            "ref": "e126",
+            "tag": "button"
+          },
+          {
+            "label": "选项 127",
+            "ref": "e127",
+            "tag": "button"
+          },
+          {
+            "label": "选项 128",
+            "ref": "e128",
+            "tag": "button"
+          },
+          {
+            "label": "选项 129",
+            "ref": "e129",
+            "tag": "button"
+          },
+          {
+            "label": "选项 130",
+            "ref": "e130",
+            "tag": "button"
+          },
+          {
+            "label": "选项 131",
+            "ref": "e131",
+            "tag": "button"
+          },
+          {
+            "label": "选项 132",
+            "ref": "e132",
+            "tag": "button"
+          },
+          {
+            "label": "选项 133",
+            "ref": "e133",
+            "tag": "button"
+          },
+          {
+            "label": "选项 134",
+            "ref": "e134",
+            "tag": "button"
+          },
+          {
+            "label": "选项 135",
+            "ref": "e135",
+            "tag": "button"
+          },
+          {
+            "label": "选项 136",
+            "ref": "e136",
+            "tag": "button"
+          },
+          {
+            "label": "选项 137",
+            "ref": "e137",
+            "tag": "button"
+          },
+          {
+            "label": "选项 138",
+            "ref": "e138",
+            "tag": "button"
+          },
+          {
+            "label": "选项 139",
+            "ref": "e139",
+            "tag": "button"
+          },
+          {
+            "label": "选项 140",
+            "ref": "e140",
+            "tag": "button"
+          },
+          {
+            "label": "选项 141",
+            "ref": "e141",
+            "tag": "button"
+          },
+          {
+            "label": "选项 142",
+            "ref": "e142",
+            "tag": "button"
+          },
+          {
+            "label": "选项 143",
+            "ref": "e143",
+            "tag": "button"
+          },
+          {
+            "label": "选项 144",
+            "ref": "e144",
+            "tag": "button"
+          },
+          {
+            "label": "选项 145",
+            "ref": "e145",
+            "tag": "button"
+          },
+          {
+            "label": "选项 146",
+            "ref": "e146",
+            "tag": "button"
+          },
+          {
+            "label": "选项 147",
+            "ref": "e147",
+            "tag": "button"
+          },
+          {
+            "label": "选项 148",
+            "ref": "e148",
+            "tag": "button"
+          },
+          {
+            "label": "选项 149",
+            "ref": "e149",
+            "tag": "button"
+          },
+          {
+            "label": "选项 150",
+            "ref": "e150",
+            "tag": "button"
+          },
+          {
+            "label": "选项 151",
+            "ref": "e151",
+            "tag": "button"
+          },
+          {
+            "label": "选项 152",
+            "ref": "e152",
+            "tag": "button"
+          },
+          {
+            "label": "选项 153",
+            "ref": "e153",
+            "tag": "button"
+          },
+          {
+            "label": "选项 154",
+            "ref": "e154",
+            "tag": "button"
+          },
+          {
+            "label": "选项 155",
+            "ref": "e155",
+            "tag": "button"
+          },
+          {
+            "label": "选项 156",
+            "ref": "e156",
+            "tag": "button"
+          },
+          {
+            "label": "选项 157",
+            "ref": "e157",
+            "tag": "button"
+          },
+          {
+            "label": "选项 158",
+            "ref": "e158",
+            "tag": "button"
+          },
+          {
+            "label": "选项 159",
+            "ref": "e159",
+            "tag": "button"
+          },
+          {
+            "label": "选项 160",
+            "ref": "e160",
+            "tag": "button"
+          },
+          {
+            "label": "选项 161",
+            "ref": "e161",
+            "tag": "button"
+          },
+          {
+            "label": "选项 162",
+            "ref": "e162",
+            "tag": "button"
+          },
+          {
+            "label": "选项 163",
+            "ref": "e163",
+            "tag": "button"
+          },
+          {
+            "label": "选项 164",
+            "ref": "e164",
+            "tag": "button"
+          },
+          {
+            "label": "选项 165",
+            "ref": "e165",
+            "tag": "button"
+          },
+          {
+            "label": "选项 166",
+            "ref": "e166",
+            "tag": "button"
+          },
+          {
+            "label": "选项 167",
+            "ref": "e167",
+            "tag": "button"
+          },
+          {
+            "label": "选项 168",
+            "ref": "e168",
+            "tag": "button"
+          },
+          {
+            "label": "选项 169",
+            "ref": "e169",
+            "tag": "button"
+          },
+          {
+            "label": "选项 170",
+            "ref": "e170",
+            "tag": "button"
+          },
+          {
+            "label": "选项 171",
+            "ref": "e171",
+            "tag": "button"
+          },
+          {
+            "label": "选项 172",
+            "ref": "e172",
+            "tag": "button"
+          },
+          {
+            "label": "选项 173",
+            "ref": "e173",
+            "tag": "button"
+          },
+          {
+            "label": "选项 174",
+            "ref": "e174",
+            "tag": "button"
+          },
+          {
+            "label": "选项 175",
+            "ref": "e175",
+            "tag": "button"
+          },
+          {
+            "label": "选项 176",
+            "ref": "e176",
+            "tag": "button"
+          },
+          {
+            "label": "选项 177",
+            "ref": "e177",
+            "tag": "button"
+          },
+          {
+            "label": "选项 178",
+            "ref": "e178",
+            "tag": "button"
+          },
+          {
+            "label": "选项 179",
+            "ref": "e179",
+            "tag": "button"
+          },
+          {
+            "label": "选项 180",
+            "ref": "e180",
+            "tag": "button"
+          },
+          {
+            "label": "选项 181",
+            "ref": "e181",
+            "tag": "button"
+          },
+          {
+            "label": "选项 182",
+            "ref": "e182",
+            "tag": "button"
+          },
+          {
+            "label": "选项 183",
+            "ref": "e183",
+            "tag": "button"
+          },
+          {
+            "label": "选项 184",
+            "ref": "e184",
+            "tag": "button"
+          },
+          {
+            "label": "选项 185",
+            "ref": "e185",
+            "tag": "button"
+          },
+          {
+            "label": "选项 186",
+            "ref": "e186",
+            "tag": "button"
+          },
+          {
+            "label": "选项 187",
+            "ref": "e187",
+            "tag": "button"
+          },
+          {
+            "label": "选项 188",
+            "ref": "e188",
+            "tag": "button"
+          },
+          {
+            "label": "选项 189",
+            "ref": "e189",
+            "tag": "button"
+          },
+          {
+            "label": "选项 190",
+            "ref": "e190",
+            "tag": "button"
+          },
+          {
+            "label": "选项 191",
+            "ref": "e191",
+            "tag": "button"
+          },
+          {
+            "label": "选项 192",
+            "ref": "e192",
+            "tag": "button"
+          },
+          {
+            "label": "选项 193",
+            "ref": "e193",
+            "tag": "button"
+          },
+          {
+            "label": "选项 194",
+            "ref": "e194",
+            "tag": "button"
+          },
+          {
+            "label": "选项 195",
+            "ref": "e195",
+            "tag": "button"
+          },
+          {
+            "label": "选项 196",
+            "ref": "e196",
+            "tag": "button"
+          },
+          {
+            "label": "选项 197",
+            "ref": "e197",
+            "tag": "button"
+          },
+          {
+            "label": "选项 198",
+            "ref": "e198",
+            "tag": "button"
+          },
+          {
+            "label": "选项 199",
+            "ref": "e199",
+            "tag": "button"
+          },
+          {
+            "label": "选项 200",
+            "ref": "e200",
+            "tag": "button"
+          },
+          {
+            "label": "选项 201",
+            "ref": "e201",
+            "tag": "button"
+          },
+          {
+            "label": "选项 202",
+            "ref": "e202",
+            "tag": "button"
+          },
+          {
+            "label": "选项 203",
+            "ref": "e203",
+            "tag": "button"
+          },
+          {
+            "label": "选项 204",
+            "ref": "e204",
+            "tag": "button"
+          },
+          {
+            "label": "选项 205",
+            "ref": "e205",
+            "tag": "button"
+          },
+          {
+            "label": "选项 206",
+            "ref": "e206",
+            "tag": "button"
+          },
+          {
+            "label": "选项 207",
+            "ref": "e207",
+            "tag": "button"
+          },
+          {
+            "label": "选项 208",
+            "ref": "e208",
+            "tag": "button"
+          },
+          {
+            "label": "选项 209",
+            "ref": "e209",
+            "tag": "button"
+          },
+          {
+            "label": "选项 210",
+            "ref": "e210",
+            "tag": "button"
+          },
+          {
+            "label": "选项 211",
+            "ref": "e211",
+            "tag": "button"
+          },
+          {
+            "label": "选项 212",
+            "ref": "e212",
+            "tag": "button"
+          },
+          {
+            "label": "选项 213",
+            "ref": "e213",
+            "tag": "button"
+          },
+          {
+            "label": "选项 214",
+            "ref": "e214",
+            "tag": "button"
+          },
+          {
+            "label": "选项 215",
+            "ref": "e215",
+            "tag": "button"
+          },
+          {
+            "label": "选项 216",
+            "ref": "e216",
+            "tag": "button"
+          },
+          {
+            "label": "选项 217",
+            "ref": "e217",
+            "tag": "button"
+          },
+          {
+            "label": "选项 218",
+            "ref": "e218",
+            "tag": "button"
+          },
+          {
+            "label": "选项 219",
+            "ref": "e219",
+            "tag": "button"
+          },
+          {
+            "label": "选项 220",
+            "ref": "e220",
+            "tag": "button"
+          },
+          {
+            "label": "选项 221",
+            "ref": "e221",
+            "tag": "button"
+          },
+          {
+            "label": "选项 222",
+            "ref": "e222",
+            "tag": "button"
+          },
+          {
+            "label": "选项 223",
+            "ref": "e223",
+            "tag": "button"
+          },
+          {
+            "label": "选项 224",
+            "ref": "e224",
+            "tag": "button"
+          },
+          {
+            "label": "选项 225",
+            "ref": "e225",
+            "tag": "button"
+          },
+          {
+            "label": "选项 226",
+            "ref": "e226",
+            "tag": "button"
+          },
+          {
+            "label": "选项 227",
+            "ref": "e227",
+            "tag": "button"
+          },
+          {
+            "label": "选项 228",
+            "ref": "e228",
+            "tag": "button"
+          },
+          {
+            "label": "选项 229",
+            "ref": "e229",
+            "tag": "button"
+          },
+          {
+            "label": "选项 230",
+            "ref": "e230",
+            "tag": "button"
+          },
+          {
+            "label": "选项 231",
+            "ref": "e231",
+            "tag": "button"
+          },
+          {
+            "label": "选项 232",
+            "ref": "e232",
+            "tag": "button"
+          },
+          {
+            "label": "选项 233",
+            "ref": "e233",
+            "tag": "button"
+          },
+          {
+            "label": "选项 234",
+            "ref": "e234",
+            "tag": "button"
+          },
+          {
+            "label": "选项 235",
+            "ref": "e235",
+            "tag": "button"
+          },
+          {
+            "label": "选项 236",
+            "ref": "e236",
+            "tag": "button"
+          },
+          {
+            "label": "选项 237",
+            "ref": "e237",
+            "tag": "button"
+          },
+          {
+            "label": "选项 238",
+            "ref": "e238",
+            "tag": "button"
+          },
+          {
+            "label": "选项 239",
+            "ref": "e239",
+            "tag": "button"
+          },
+          {
+            "label": "选项 240",
+            "ref": "e240",
+            "tag": "button"
+          },
+          {
+            "label": "选项 241",
+            "ref": "e241",
+            "tag": "button"
+          },
+          {
+            "label": "选项 242",
+            "ref": "e242",
+            "tag": "button"
+          },
+          {
+            "label": "选项 243",
+            "ref": "e243",
+            "tag": "button"
+          },
+          {
+            "label": "选项 244",
+            "ref": "e244",
+            "tag": "button"
+          },
+          {
+            "label": "选项 245",
+            "ref": "e245",
+            "tag": "button"
+          },
+          {
+            "label": "选项 246",
+            "ref": "e246",
+            "tag": "button"
+          },
+          {
+            "label": "选项 247",
+            "ref": "e247",
+            "tag": "button"
+          },
+          {
+            "label": "选项 248",
+            "ref": "e248",
+            "tag": "button"
+          },
+          {
+            "label": "选项 249",
+            "ref": "e249",
+            "tag": "button"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": null,
+        "method": "characterization-stub",
+        "nominatedRepair": false,
+        "ref": null,
+        "stopped": true,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [],
+      "stop": {
+        "code": "decision_service_choice_limit",
+        "reason": "candidate window 250 > MAX_CHOICES (200) — the decision service takes at most 255 choices; narrow the hint or rely on bucket priority (chrome/viewport first) instead of widening the pool"
+      },
+      "warnings": [],
+      "windowChainFacts": []
+    },
+    "escalate": {
+      "asks": [
+        {
+          "candidate_count": 64,
+          "candidates_head": [
+            {
+              "label": "按钮 100",
+              "ref": "e0",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 10",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 12",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 13",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "点一个按钮",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 0,
+          "url": "<LOCAL>/wide.html"
+        }
+      ],
+      "phase": {
+        "conf": 0.05,
+        "decisionKind": "escalate",
+        "elems": [
+          {
+            "label": "按钮 100",
+            "ref": "e0",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 10",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 12",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 13",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 14",
+            "ref": "e4",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 15",
+            "ref": "e5",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 16",
+            "ref": "e6",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 17",
+            "ref": "e7",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 18",
+            "ref": "e8",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 19",
+            "ref": "e9",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 20",
+            "ref": "e10",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 21",
+            "ref": "e11",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 22",
+            "ref": "e12",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 23",
+            "ref": "e13",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 24",
+            "ref": "e14",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 25",
+            "ref": "e15",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 26",
+            "ref": "e16",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 27",
+            "ref": "e17",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 28",
+            "ref": "e18",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 29",
+            "ref": "e19",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 30",
+            "ref": "e20",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 31",
+            "ref": "e21",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 32",
+            "ref": "e22",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 33",
+            "ref": "e23",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 34",
+            "ref": "e24",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 35",
+            "ref": "e25",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 36",
+            "ref": "e26",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 37",
+            "ref": "e27",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 38",
+            "ref": "e28",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 39",
+            "ref": "e29",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 40",
+            "ref": "e30",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 41",
+            "ref": "e31",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 42",
+            "ref": "e32",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 43",
+            "ref": "e33",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 44",
+            "ref": "e34",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 45",
+            "ref": "e35",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 46",
+            "ref": "e36",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 47",
+            "ref": "e37",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 48",
+            "ref": "e38",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 49",
+            "ref": "e39",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 50",
+            "ref": "e40",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 51",
+            "ref": "e41",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 52",
+            "ref": "e42",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 53",
+            "ref": "e43",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 54",
+            "ref": "e44",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 55",
+            "ref": "e45",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 56",
+            "ref": "e46",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 57",
+            "ref": "e47",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 58",
+            "ref": "e48",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 59",
+            "ref": "e49",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 60",
+            "ref": "e50",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 61",
+            "ref": "e51",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 62",
+            "ref": "e52",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 63",
+            "ref": "e53",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 64",
+            "ref": "e54",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 65",
+            "ref": "e55",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 66",
+            "ref": "e56",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 67",
+            "ref": "e57",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 68",
+            "ref": "e58",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 69",
+            "ref": "e59",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 70",
+            "ref": "e60",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 71",
+            "ref": "e61",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 72",
+            "ref": "e62",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 73",
+            "ref": "e63",
+            "tag": "button"
+          }
+        ],
+        "escalatedPick": "e1",
+        "label": "characterization-stub",
+        "layaMargin": 0.05,
+        "method": "escalate",
+        "nominatedRepair": false,
+        "ref": "e1",
+        "stopped": false,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [
+        0.05
+      ],
+      "stop": {
+        "code": "max_steps",
+        "reason": "subgoal action budget used up (3 action step(s) tried) without the done-signal ever holding — raise the budget, narrow the target, or check what the page did after each action"
+      },
+      "warnings": [],
+      "windowChainFacts": []
+    },
+    "family-empty": {
+      "asks": [
+        {
+          "candidate_count": 5,
+          "candidates_head": [
+            {
+              "label": "",
+              "ref": "e0",
+              "tag": "input"
+            },
+            {
+              "label": "确认",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "取消",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "详情",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "选一个",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 0,
+          "url": "<LOCAL>/cards.html"
+        }
+      ],
+      "phase": {
+        "conf": 0.9,
+        "decisionKind": "model",
+        "elems": [
+          {
+            "label": "",
+            "ref": "e0",
+            "tag": "input"
+          },
+          {
+            "label": "确认",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "取消",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "详情",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "帮助",
+            "ref": "e4",
+            "tag": "a"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": 0.9,
+        "method": "characterization-stub",
+        "nominatedRepair": false,
+        "ref": "e0",
+        "stopped": true,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [],
+      "stop": {
+        "code": "nominated_family_empty",
+        "reason": "nominated instruction \"check\" but this page has no check candidates on step 1"
+      },
+      "warnings": [],
+      "windowChainFacts": []
+    },
+    "family-repair": {
+      "asks": [
+        {
+          "candidate_count": 3,
+          "candidates_head": [
+            {
+              "label": "甲",
+              "ref": "e1",
+              "tag": "input"
+            },
+            {
+              "label": "乙",
+              "ref": "e2",
+              "tag": "input"
+            },
+            {
+              "label": "继续",
+              "ref": "e0",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "选一个",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 0,
+          "url": "<LOCAL>/family.html"
+        },
+        {
+          "candidate_count": 2,
+          "candidates_head": [
+            {
+              "label": "甲",
+              "ref": "e1",
+              "tag": "input"
+            },
+            {
+              "label": "乙",
+              "ref": "e2",
+              "tag": "input"
+            }
+          ],
+          "forbidden": [],
+          "goal": "选一个",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 1,
+          "url": "<LOCAL>/family.html"
+        }
+      ],
+      "phase": {
+        "conf": 0.9,
+        "decisionKind": "model",
+        "elems": [
+          {
+            "label": "继续",
+            "ref": "e0",
+            "tag": "button"
+          },
+          {
+            "label": "甲",
+            "ref": "e1",
+            "tag": "input"
+          },
+          {
+            "label": "乙",
+            "ref": "e2",
+            "tag": "input"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": 0.9,
+        "method": "characterization-stub",
+        "nominatedRepair": true,
+        "ref": "e1",
+        "stopped": false,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [],
+      "stop": {
+        "code": "max_steps",
+        "reason": "subgoal action budget used up (3 action step(s) tried) without the done-signal ever holding — raise the budget, narrow the target, or check what the page did after each action"
+      },
+      "warnings": [],
+      "windowChainFacts": []
+    },
+    "low-conf-wide-reobserve": {
+      "asks": [
+        {
+          "candidate_count": 64,
+          "candidates_head": [
+            {
+              "label": "按钮 100",
+              "ref": "e0",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 10",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 12",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 13",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "点一个按钮",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 0,
+          "url": "<LOCAL>/wide.html"
+        },
+        {
+          "candidate_count": 100,
+          "candidates_head": [
+            {
+              "label": "按钮 100",
+              "ref": "e0",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 10",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 12",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 13",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "点一个按钮",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 1,
+          "url": "<LOCAL>/wide.html"
+        }
+      ],
+      "phase": {
+        "conf": 0.95,
+        "decisionKind": "model",
+        "elems": [
+          {
+            "label": "按钮 100",
+            "ref": "e0",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 10",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 12",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 13",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 14",
+            "ref": "e4",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 15",
+            "ref": "e5",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 16",
+            "ref": "e6",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 17",
+            "ref": "e7",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 18",
+            "ref": "e8",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 19",
+            "ref": "e9",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 20",
+            "ref": "e10",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 21",
+            "ref": "e11",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 22",
+            "ref": "e12",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 23",
+            "ref": "e13",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 24",
+            "ref": "e14",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 25",
+            "ref": "e15",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 26",
+            "ref": "e16",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 27",
+            "ref": "e17",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 28",
+            "ref": "e18",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 29",
+            "ref": "e19",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 30",
+            "ref": "e20",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 31",
+            "ref": "e21",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 32",
+            "ref": "e22",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 33",
+            "ref": "e23",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 34",
+            "ref": "e24",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 35",
+            "ref": "e25",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 36",
+            "ref": "e26",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 37",
+            "ref": "e27",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 38",
+            "ref": "e28",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 39",
+            "ref": "e29",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 40",
+            "ref": "e30",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 41",
+            "ref": "e31",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 42",
+            "ref": "e32",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 43",
+            "ref": "e33",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 44",
+            "ref": "e34",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 45",
+            "ref": "e35",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 46",
+            "ref": "e36",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 47",
+            "ref": "e37",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 48",
+            "ref": "e38",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 49",
+            "ref": "e39",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 50",
+            "ref": "e40",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 51",
+            "ref": "e41",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 52",
+            "ref": "e42",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 53",
+            "ref": "e43",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 54",
+            "ref": "e44",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 55",
+            "ref": "e45",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 56",
+            "ref": "e46",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 57",
+            "ref": "e47",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 58",
+            "ref": "e48",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 59",
+            "ref": "e49",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 60",
+            "ref": "e50",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 61",
+            "ref": "e51",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 62",
+            "ref": "e52",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 63",
+            "ref": "e53",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 64",
+            "ref": "e54",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 65",
+            "ref": "e55",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 66",
+            "ref": "e56",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 67",
+            "ref": "e57",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 68",
+            "ref": "e58",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 69",
+            "ref": "e59",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 70",
+            "ref": "e60",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 71",
+            "ref": "e61",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 72",
+            "ref": "e62",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 73",
+            "ref": "e63",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 74",
+            "ref": "e64",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 75",
+            "ref": "e65",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 76",
+            "ref": "e66",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 77",
+            "ref": "e67",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 78",
+            "ref": "e68",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 79",
+            "ref": "e69",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 80",
+            "ref": "e70",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 81",
+            "ref": "e71",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 82",
+            "ref": "e72",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 83",
+            "ref": "e73",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 84",
+            "ref": "e74",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 85",
+            "ref": "e75",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 86",
+            "ref": "e76",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 87",
+            "ref": "e77",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 88",
+            "ref": "e78",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 89",
+            "ref": "e79",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 90",
+            "ref": "e80",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 91",
+            "ref": "e81",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 92",
+            "ref": "e82",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 93",
+            "ref": "e83",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 94",
+            "ref": "e84",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 95",
+            "ref": "e85",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 96",
+            "ref": "e86",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 97",
+            "ref": "e87",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 98",
+            "ref": "e88",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 99",
+            "ref": "e89",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 11",
+            "ref": "e90",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 1",
+            "ref": "e91",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 2",
+            "ref": "e92",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 3",
+            "ref": "e93",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 4",
+            "ref": "e94",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 5",
+            "ref": "e95",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 6",
+            "ref": "e96",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 7",
+            "ref": "e97",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 8",
+            "ref": "e98",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 9",
+            "ref": "e99",
+            "tag": "button"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": 0.05,
+        "method": "characterization-stub:reobserve",
+        "nominatedRepair": false,
+        "ref": "e0",
+        "stopped": false,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [
+        0.05
+      ],
+      "stop": {
+        "code": "max_steps",
+        "reason": "subgoal action budget used up (3 action step(s) tried) without the done-signal ever holding — raise the budget, narrow the target, or check what the page did after each action"
+      },
+      "warnings": [],
+      "windowChainFacts": [
+        {
+          "miss": 1,
+          "ref": "e0",
+          "resolved": true,
+          "window": 128
+        }
+      ]
+    },
+    "low-confidence-stop": {
+      "asks": [
+        {
+          "candidate_count": 64,
+          "candidates_head": [
+            {
+              "label": "按钮 100",
+              "ref": "e0",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 10",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 12",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 13",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "点一个按钮",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 0,
+          "url": "<LOCAL>/wide.html"
+        }
+      ],
+      "phase": {
+        "conf": 0.05,
+        "decisionKind": "model",
+        "elems": [
+          {
+            "label": "按钮 100",
+            "ref": "e0",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 10",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 12",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 13",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 14",
+            "ref": "e4",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 15",
+            "ref": "e5",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 16",
+            "ref": "e6",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 17",
+            "ref": "e7",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 18",
+            "ref": "e8",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 19",
+            "ref": "e9",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 20",
+            "ref": "e10",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 21",
+            "ref": "e11",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 22",
+            "ref": "e12",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 23",
+            "ref": "e13",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 24",
+            "ref": "e14",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 25",
+            "ref": "e15",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 26",
+            "ref": "e16",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 27",
+            "ref": "e17",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 28",
+            "ref": "e18",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 29",
+            "ref": "e19",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 30",
+            "ref": "e20",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 31",
+            "ref": "e21",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 32",
+            "ref": "e22",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 33",
+            "ref": "e23",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 34",
+            "ref": "e24",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 35",
+            "ref": "e25",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 36",
+            "ref": "e26",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 37",
+            "ref": "e27",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 38",
+            "ref": "e28",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 39",
+            "ref": "e29",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 40",
+            "ref": "e30",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 41",
+            "ref": "e31",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 42",
+            "ref": "e32",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 43",
+            "ref": "e33",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 44",
+            "ref": "e34",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 45",
+            "ref": "e35",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 46",
+            "ref": "e36",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 47",
+            "ref": "e37",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 48",
+            "ref": "e38",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 49",
+            "ref": "e39",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 50",
+            "ref": "e40",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 51",
+            "ref": "e41",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 52",
+            "ref": "e42",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 53",
+            "ref": "e43",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 54",
+            "ref": "e44",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 55",
+            "ref": "e45",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 56",
+            "ref": "e46",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 57",
+            "ref": "e47",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 58",
+            "ref": "e48",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 59",
+            "ref": "e49",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 60",
+            "ref": "e50",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 61",
+            "ref": "e51",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 62",
+            "ref": "e52",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 63",
+            "ref": "e53",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 64",
+            "ref": "e54",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 65",
+            "ref": "e55",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 66",
+            "ref": "e56",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 67",
+            "ref": "e57",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 68",
+            "ref": "e58",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 69",
+            "ref": "e59",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 70",
+            "ref": "e60",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 71",
+            "ref": "e61",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 72",
+            "ref": "e62",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 73",
+            "ref": "e63",
+            "tag": "button"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": 0.05,
+        "method": "characterization-stub",
+        "nominatedRepair": false,
+        "ref": "e0",
+        "stopped": true,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [
+        0.05
+      ],
+      "stop": {
+        "code": "low_confidence",
+        "reason": "low confidence 0.05 < floor 0.50 on step 1；用 ctx.observe() 在会话内看准入面与 why_not_admitted。判别: 池中不存在与词面「点一个按钮」相关的候选（池 64 项：button×64: 按钮 100, 按钮 10, 按钮 12, 按钮 13, 按钮 14；其余略）——目标可能不在本页面（或未进元素池）"
+      },
+      "warnings": [],
+      "windowChainFacts": []
+    },
+    "r2b": {
+      "asks": [
+        {
+          "candidate_count": 64,
+          "candidates_head": [
+            {
+              "label": "按钮 100",
+              "ref": "e0",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 10",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 12",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 13",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "zzz qqq",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 0,
+          "url": "<LOCAL>/wide.html"
+        },
+        {
+          "candidate_count": 100,
+          "candidates_head": [
+            {
+              "label": "按钮 100",
+              "ref": "e0",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 10",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 12",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "按钮 13",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "zzz qqq",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 1,
+          "url": "<LOCAL>/wide.html"
+        }
+      ],
+      "phase": {
+        "conf": 0.95,
+        "decisionKind": "model",
+        "elems": [
+          {
+            "label": "按钮 100",
+            "ref": "e0",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 10",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 12",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 13",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 14",
+            "ref": "e4",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 15",
+            "ref": "e5",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 16",
+            "ref": "e6",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 17",
+            "ref": "e7",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 18",
+            "ref": "e8",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 19",
+            "ref": "e9",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 20",
+            "ref": "e10",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 21",
+            "ref": "e11",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 22",
+            "ref": "e12",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 23",
+            "ref": "e13",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 24",
+            "ref": "e14",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 25",
+            "ref": "e15",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 26",
+            "ref": "e16",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 27",
+            "ref": "e17",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 28",
+            "ref": "e18",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 29",
+            "ref": "e19",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 30",
+            "ref": "e20",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 31",
+            "ref": "e21",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 32",
+            "ref": "e22",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 33",
+            "ref": "e23",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 34",
+            "ref": "e24",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 35",
+            "ref": "e25",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 36",
+            "ref": "e26",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 37",
+            "ref": "e27",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 38",
+            "ref": "e28",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 39",
+            "ref": "e29",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 40",
+            "ref": "e30",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 41",
+            "ref": "e31",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 42",
+            "ref": "e32",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 43",
+            "ref": "e33",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 44",
+            "ref": "e34",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 45",
+            "ref": "e35",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 46",
+            "ref": "e36",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 47",
+            "ref": "e37",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 48",
+            "ref": "e38",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 49",
+            "ref": "e39",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 50",
+            "ref": "e40",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 51",
+            "ref": "e41",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 52",
+            "ref": "e42",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 53",
+            "ref": "e43",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 54",
+            "ref": "e44",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 55",
+            "ref": "e45",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 56",
+            "ref": "e46",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 57",
+            "ref": "e47",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 58",
+            "ref": "e48",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 59",
+            "ref": "e49",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 60",
+            "ref": "e50",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 61",
+            "ref": "e51",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 62",
+            "ref": "e52",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 63",
+            "ref": "e53",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 64",
+            "ref": "e54",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 65",
+            "ref": "e55",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 66",
+            "ref": "e56",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 67",
+            "ref": "e57",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 68",
+            "ref": "e58",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 69",
+            "ref": "e59",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 70",
+            "ref": "e60",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 71",
+            "ref": "e61",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 72",
+            "ref": "e62",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 73",
+            "ref": "e63",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 74",
+            "ref": "e64",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 75",
+            "ref": "e65",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 76",
+            "ref": "e66",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 77",
+            "ref": "e67",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 78",
+            "ref": "e68",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 79",
+            "ref": "e69",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 80",
+            "ref": "e70",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 81",
+            "ref": "e71",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 82",
+            "ref": "e72",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 83",
+            "ref": "e73",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 84",
+            "ref": "e74",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 85",
+            "ref": "e75",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 86",
+            "ref": "e76",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 87",
+            "ref": "e77",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 88",
+            "ref": "e78",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 89",
+            "ref": "e79",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 90",
+            "ref": "e80",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 91",
+            "ref": "e81",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 92",
+            "ref": "e82",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 93",
+            "ref": "e83",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 94",
+            "ref": "e84",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 95",
+            "ref": "e85",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 96",
+            "ref": "e86",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 97",
+            "ref": "e87",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 98",
+            "ref": "e88",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 99",
+            "ref": "e89",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 11",
+            "ref": "e90",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 1",
+            "ref": "e91",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 2",
+            "ref": "e92",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 3",
+            "ref": "e93",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 4",
+            "ref": "e94",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 5",
+            "ref": "e95",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 6",
+            "ref": "e96",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 7",
+            "ref": "e97",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 8",
+            "ref": "e98",
+            "tag": "button"
+          },
+          {
+            "label": "按钮 9",
+            "ref": "e99",
+            "tag": "button"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": 0.6,
+        "method": "characterization-stub:reobserve",
+        "nominatedRepair": false,
+        "ref": "e0",
+        "stopped": false,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [],
+      "stop": {
+        "code": "max_steps",
+        "reason": "subgoal action budget used up (3 action step(s) tried) without the done-signal ever holding — raise the budget, narrow the target, or check what the page did after each action"
+      },
+      "warnings": [],
+      "windowChainFacts": [
+        {
+          "miss": 1,
+          "ref": "e0",
+          "resolved": true,
+          "window": 128
+        }
+      ]
+    },
+    "rule-hit": {
+      "asks": [],
+      "phase": {
+        "conf": 1,
+        "decisionKind": "rule",
+        "elems": [
+          {
+            "label": "",
+            "ref": "e0",
+            "tag": "input"
+          },
+          {
+            "label": "确认",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "取消",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "详情",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "帮助",
+            "ref": "e4",
+            "tag": "a"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": null,
+        "method": "rule:match",
+        "nominatedRepair": false,
+        "ref": "e0",
+        "stopped": false,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [],
+      "stop": {
+        "code": "max_steps",
+        "reason": "subgoal action budget used up (3 action step(s) tried) without the done-signal ever holding — raise the budget, narrow the target, or check what the page did after each action"
+      },
+      "warnings": [],
+      "windowChainFacts": []
+    },
+    "rules-only-hint-unmatched": {
+      "asks": [],
+      "phase": {
+        "conf": 0,
+        "decisionKind": "model",
+        "elems": [
+          {
+            "label": "",
+            "ref": "e0",
+            "tag": "input"
+          },
+          {
+            "label": "确认",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "取消",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "详情",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "帮助",
+            "ref": "e4",
+            "tag": "a"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": null,
+        "method": "characterization-stub",
+        "nominatedRepair": false,
+        "ref": null,
+        "stopped": true,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [],
+      "stop": {
+        "code": "no_model_runtime",
+        "reason": "no model runtime: this step needs a model pick (rules-only mode) on step 1 — target_hint \"#nope\" 未被规则命中，hint 语法是 6 形状闭集（#id / tag[attr~substr] / tag~token / tag[attr=value] / 角色词 / 裸词；属性名按池字段匹配：test→data-test、type→input_type、aria-label→label、href、name、id、role、near；aria-label 是 label 的别名（提取期已并进 label），label/href 按完整值（≤200）匹配（label = full_label + label、href = href_full + href 双底座），class、title 等不在池字段模型里，永不命中）——容器/后代 CSS（如 \"#outer input\"）会被当成一个永不命中的形状，报\"matches nothing\"而非语法错误"
+      },
+      "warnings": [],
+      "windowChainFacts": []
+    },
+    "rules-only-no-model": {
+      "asks": [],
+      "phase": {
+        "conf": 0,
+        "decisionKind": "model",
+        "elems": [
+          {
+            "label": "",
+            "ref": "e0",
+            "tag": "input"
+          },
+          {
+            "label": "确认",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "取消",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "详情",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "帮助",
+            "ref": "e4",
+            "tag": "a"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": null,
+        "method": "characterization-stub",
+        "nominatedRepair": false,
+        "ref": null,
+        "stopped": true,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [],
+      "stop": {
+        "code": "no_model_runtime",
+        "reason": "step 1 declares no action (no target_hint, no commands) and rules-only has no model to pick one — its done-signal does not hold on this page either: name a target_hint, declare commands, or provide a decision model"
+      },
+      "warnings": [],
+      "windowChainFacts": []
+    },
+    "tiered-narrow-fallback": {
+      "asks": [
+        {
+          "candidate_count": 3,
+          "candidates_head": [
+            {
+              "label": "确认",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "取消",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "详情",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "选一个",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 0,
+          "url": "<LOCAL>/cards.html"
+        },
+        {
+          "candidate_count": 5,
+          "candidates_head": [
+            {
+              "label": "",
+              "ref": "e0",
+              "tag": "input"
+            },
+            {
+              "label": "确认",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "取消",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "详情",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "选一个",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 1,
+          "url": "<LOCAL>/cards.html"
+        }
+      ],
+      "phase": {
+        "conf": 0.9,
+        "decisionKind": "model",
+        "elems": [
+          {
+            "label": "",
+            "ref": "e0",
+            "tag": "input"
+          },
+          {
+            "label": "确认",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "取消",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "详情",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "帮助",
+            "ref": "e4",
+            "tag": "a"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": 0.9,
+        "method": "characterization-stub",
+        "nominatedRepair": false,
+        "ref": "e0",
+        "stopped": false,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [],
+      "stop": {
+        "code": "max_steps",
+        "reason": "subgoal action budget used up (3 action step(s) tried) without the done-signal ever holding — raise the budget, narrow the target, or check what the page did after each action"
+      },
+      "warnings": [],
+      "windowChainFacts": []
+    },
+    "tiered-narrow-hit": {
+      "asks": [
+        {
+          "candidate_count": 3,
+          "candidates_head": [
+            {
+              "label": "确认",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "取消",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "详情",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "选一个",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 0,
+          "url": "<LOCAL>/cards.html"
+        }
+      ],
+      "phase": {
+        "conf": 0.9,
+        "decisionKind": "model",
+        "elems": [
+          {
+            "label": "",
+            "ref": "e0",
+            "tag": "input"
+          },
+          {
+            "label": "确认",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "取消",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "详情",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "帮助",
+            "ref": "e4",
+            "tag": "a"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": 0.9,
+        "method": "characterization-stub",
+        "nominatedRepair": false,
+        "ref": "e1",
+        "stopped": false,
+        "tierAsk": {
+          "n": 3,
+          "tier": 0
+        }
+      },
+      "rejectedAskConfs": [],
+      "stop": {
+        "code": "max_steps",
+        "reason": "subgoal action budget used up (3 action step(s) tried) without the done-signal ever holding — raise the budget, narrow the target, or check what the page did after each action"
+      },
+      "warnings": [],
+      "windowChainFacts": []
+    },
+    "unknown-ref": {
+      "asks": [],
+      "phase": {
+        "conf": 1,
+        "decisionKind": "rule",
+        "elems": [
+          {
+            "label": "",
+            "ref": "e0",
+            "tag": "input"
+          },
+          {
+            "label": "确认",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "取消",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "详情",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "帮助",
+            "ref": "e4",
+            "tag": "a"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": null,
+        "method": "rule:match",
+        "nominatedRepair": false,
+        "ref": "e999",
+        "stopped": true,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [],
+      "stop": {
+        "code": "hint_matched_nothing",
+        "reason": "target_hint \"#b1\" matched nothing in a pool of 5 element(s) on step 1"
+      },
+      "warnings": [],
+      "windowChainFacts": []
+    },
+    "wide-hard-cap-rung-hit": {
+      "asks": [
+        {
+          "candidate_count": 64,
+          "candidates_head": [
+            {
+              "label": "宽按钮 100",
+              "ref": "e0",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 101",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 102",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 103",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "点一个按钮",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 0,
+          "url": "<LOCAL>/wide180.html"
+        },
+        {
+          "candidate_count": 128,
+          "candidates_head": [
+            {
+              "label": "宽按钮 100",
+              "ref": "e0",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 101",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 102",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 103",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "点一个按钮",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 1,
+          "url": "<LOCAL>/wide180.html"
+        },
+        {
+          "candidate_count": 180,
+          "candidates_head": [
+            {
+              "label": "宽按钮 100",
+              "ref": "e0",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 101",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 102",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 103",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "点一个按钮",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 2,
+          "url": "<LOCAL>/wide180.html"
+        }
+      ],
+      "phase": {
+        "conf": 0.95,
+        "decisionKind": "model",
+        "elems": [
+          {
+            "label": "宽按钮 100",
+            "ref": "e0",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 101",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 102",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 103",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 104",
+            "ref": "e4",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 105",
+            "ref": "e5",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 106",
+            "ref": "e6",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 107",
+            "ref": "e7",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 108",
+            "ref": "e8",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 109",
+            "ref": "e9",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 120",
+            "ref": "e10",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 121",
+            "ref": "e11",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 122",
+            "ref": "e12",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 123",
+            "ref": "e13",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 124",
+            "ref": "e14",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 125",
+            "ref": "e15",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 126",
+            "ref": "e16",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 127",
+            "ref": "e17",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 128",
+            "ref": "e18",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 129",
+            "ref": "e19",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 130",
+            "ref": "e20",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 131",
+            "ref": "e21",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 132",
+            "ref": "e22",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 133",
+            "ref": "e23",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 134",
+            "ref": "e24",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 135",
+            "ref": "e25",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 136",
+            "ref": "e26",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 137",
+            "ref": "e27",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 138",
+            "ref": "e28",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 139",
+            "ref": "e29",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 140",
+            "ref": "e30",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 141",
+            "ref": "e31",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 142",
+            "ref": "e32",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 143",
+            "ref": "e33",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 144",
+            "ref": "e34",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 145",
+            "ref": "e35",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 146",
+            "ref": "e36",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 147",
+            "ref": "e37",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 148",
+            "ref": "e38",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 149",
+            "ref": "e39",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 150",
+            "ref": "e40",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 151",
+            "ref": "e41",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 152",
+            "ref": "e42",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 153",
+            "ref": "e43",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 154",
+            "ref": "e44",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 155",
+            "ref": "e45",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 156",
+            "ref": "e46",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 157",
+            "ref": "e47",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 158",
+            "ref": "e48",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 159",
+            "ref": "e49",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 160",
+            "ref": "e50",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 161",
+            "ref": "e51",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 162",
+            "ref": "e52",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 163",
+            "ref": "e53",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 164",
+            "ref": "e54",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 165",
+            "ref": "e55",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 166",
+            "ref": "e56",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 167",
+            "ref": "e57",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 168",
+            "ref": "e58",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 169",
+            "ref": "e59",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 170",
+            "ref": "e60",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 171",
+            "ref": "e61",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 172",
+            "ref": "e62",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 173",
+            "ref": "e63",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 174",
+            "ref": "e64",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 175",
+            "ref": "e65",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 176",
+            "ref": "e66",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 177",
+            "ref": "e67",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 178",
+            "ref": "e68",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 179",
+            "ref": "e69",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 180",
+            "ref": "e70",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 110",
+            "ref": "e71",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 112",
+            "ref": "e72",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 113",
+            "ref": "e73",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 114",
+            "ref": "e74",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 115",
+            "ref": "e75",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 116",
+            "ref": "e76",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 117",
+            "ref": "e77",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 118",
+            "ref": "e78",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 119",
+            "ref": "e79",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 111",
+            "ref": "e80",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 10",
+            "ref": "e81",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 12",
+            "ref": "e82",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 13",
+            "ref": "e83",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 14",
+            "ref": "e84",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 15",
+            "ref": "e85",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 16",
+            "ref": "e86",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 17",
+            "ref": "e87",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 18",
+            "ref": "e88",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 19",
+            "ref": "e89",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 20",
+            "ref": "e90",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 21",
+            "ref": "e91",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 22",
+            "ref": "e92",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 23",
+            "ref": "e93",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 24",
+            "ref": "e94",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 25",
+            "ref": "e95",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 26",
+            "ref": "e96",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 27",
+            "ref": "e97",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 28",
+            "ref": "e98",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 29",
+            "ref": "e99",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 30",
+            "ref": "e100",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 31",
+            "ref": "e101",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 32",
+            "ref": "e102",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 33",
+            "ref": "e103",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 34",
+            "ref": "e104",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 35",
+            "ref": "e105",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 36",
+            "ref": "e106",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 37",
+            "ref": "e107",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 38",
+            "ref": "e108",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 39",
+            "ref": "e109",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 40",
+            "ref": "e110",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 41",
+            "ref": "e111",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 42",
+            "ref": "e112",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 43",
+            "ref": "e113",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 44",
+            "ref": "e114",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 45",
+            "ref": "e115",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 46",
+            "ref": "e116",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 47",
+            "ref": "e117",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 48",
+            "ref": "e118",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 49",
+            "ref": "e119",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 50",
+            "ref": "e120",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 51",
+            "ref": "e121",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 52",
+            "ref": "e122",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 53",
+            "ref": "e123",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 54",
+            "ref": "e124",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 55",
+            "ref": "e125",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 56",
+            "ref": "e126",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 57",
+            "ref": "e127",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 58",
+            "ref": "e128",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 59",
+            "ref": "e129",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 60",
+            "ref": "e130",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 61",
+            "ref": "e131",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 62",
+            "ref": "e132",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 63",
+            "ref": "e133",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 64",
+            "ref": "e134",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 65",
+            "ref": "e135",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 66",
+            "ref": "e136",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 67",
+            "ref": "e137",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 68",
+            "ref": "e138",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 69",
+            "ref": "e139",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 70",
+            "ref": "e140",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 71",
+            "ref": "e141",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 72",
+            "ref": "e142",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 73",
+            "ref": "e143",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 74",
+            "ref": "e144",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 75",
+            "ref": "e145",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 76",
+            "ref": "e146",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 77",
+            "ref": "e147",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 78",
+            "ref": "e148",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 79",
+            "ref": "e149",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 80",
+            "ref": "e150",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 81",
+            "ref": "e151",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 82",
+            "ref": "e152",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 83",
+            "ref": "e153",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 84",
+            "ref": "e154",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 85",
+            "ref": "e155",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 86",
+            "ref": "e156",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 87",
+            "ref": "e157",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 88",
+            "ref": "e158",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 89",
+            "ref": "e159",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 90",
+            "ref": "e160",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 91",
+            "ref": "e161",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 92",
+            "ref": "e162",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 93",
+            "ref": "e163",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 94",
+            "ref": "e164",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 95",
+            "ref": "e165",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 96",
+            "ref": "e166",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 97",
+            "ref": "e167",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 98",
+            "ref": "e168",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 99",
+            "ref": "e169",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 11",
+            "ref": "e170",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 1",
+            "ref": "e171",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 2",
+            "ref": "e172",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 3",
+            "ref": "e173",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 4",
+            "ref": "e174",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 5",
+            "ref": "e175",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 6",
+            "ref": "e176",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 7",
+            "ref": "e177",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 8",
+            "ref": "e178",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 9",
+            "ref": "e179",
+            "tag": "button"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": 0.05,
+        "method": "characterization-stub:reobserve",
+        "nominatedRepair": false,
+        "ref": "e0",
+        "stopped": false,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [
+        0.05,
+        0.05
+      ],
+      "stop": {
+        "code": "max_steps",
+        "reason": "subgoal action budget used up (3 action step(s) tried) without the done-signal ever holding — raise the budget, narrow the target, or check what the page did after each action"
+      },
+      "warnings": [],
+      "windowChainFacts": [
+        {
+          "miss": 1,
+          "resolved": false,
+          "window": 128
+        },
+        {
+          "miss": 2,
+          "ref": "e0",
+          "resolved": true,
+          "window": 256
+        }
+      ]
+    },
+    "window-chain-all-miss": {
+      "asks": [
+        {
+          "candidate_count": 64,
+          "candidates_head": [
+            {
+              "label": "宽按钮 100",
+              "ref": "e0",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 101",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 102",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 103",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "点一个按钮",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 0,
+          "url": "<LOCAL>/wide180.html"
+        },
+        {
+          "candidate_count": 128,
+          "candidates_head": [
+            {
+              "label": "宽按钮 100",
+              "ref": "e0",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 101",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 102",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 103",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "点一个按钮",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 1,
+          "url": "<LOCAL>/wide180.html"
+        },
+        {
+          "candidate_count": 180,
+          "candidates_head": [
+            {
+              "label": "宽按钮 100",
+              "ref": "e0",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 101",
+              "ref": "e1",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 102",
+              "ref": "e2",
+              "tag": "button"
+            },
+            {
+              "label": "宽按钮 103",
+              "ref": "e3",
+              "tag": "button"
+            }
+          ],
+          "forbidden": [],
+          "goal": "点一个按钮",
+          "k": 8,
+          "narrow": null,
+          "notes": null,
+          "seq": 2,
+          "url": "<LOCAL>/wide180.html"
+        }
+      ],
+      "phase": {
+        "conf": 0.05,
+        "decisionKind": "model",
+        "elems": [
+          {
+            "label": "宽按钮 100",
+            "ref": "e0",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 101",
+            "ref": "e1",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 102",
+            "ref": "e2",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 103",
+            "ref": "e3",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 104",
+            "ref": "e4",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 105",
+            "ref": "e5",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 106",
+            "ref": "e6",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 107",
+            "ref": "e7",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 108",
+            "ref": "e8",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 109",
+            "ref": "e9",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 120",
+            "ref": "e10",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 121",
+            "ref": "e11",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 122",
+            "ref": "e12",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 123",
+            "ref": "e13",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 124",
+            "ref": "e14",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 125",
+            "ref": "e15",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 126",
+            "ref": "e16",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 127",
+            "ref": "e17",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 128",
+            "ref": "e18",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 129",
+            "ref": "e19",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 130",
+            "ref": "e20",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 131",
+            "ref": "e21",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 132",
+            "ref": "e22",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 133",
+            "ref": "e23",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 134",
+            "ref": "e24",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 135",
+            "ref": "e25",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 136",
+            "ref": "e26",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 137",
+            "ref": "e27",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 138",
+            "ref": "e28",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 139",
+            "ref": "e29",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 140",
+            "ref": "e30",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 141",
+            "ref": "e31",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 142",
+            "ref": "e32",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 143",
+            "ref": "e33",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 144",
+            "ref": "e34",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 145",
+            "ref": "e35",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 146",
+            "ref": "e36",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 147",
+            "ref": "e37",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 148",
+            "ref": "e38",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 149",
+            "ref": "e39",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 150",
+            "ref": "e40",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 151",
+            "ref": "e41",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 152",
+            "ref": "e42",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 153",
+            "ref": "e43",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 154",
+            "ref": "e44",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 155",
+            "ref": "e45",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 156",
+            "ref": "e46",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 157",
+            "ref": "e47",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 158",
+            "ref": "e48",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 159",
+            "ref": "e49",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 160",
+            "ref": "e50",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 161",
+            "ref": "e51",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 162",
+            "ref": "e52",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 163",
+            "ref": "e53",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 164",
+            "ref": "e54",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 165",
+            "ref": "e55",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 166",
+            "ref": "e56",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 167",
+            "ref": "e57",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 168",
+            "ref": "e58",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 169",
+            "ref": "e59",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 170",
+            "ref": "e60",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 171",
+            "ref": "e61",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 172",
+            "ref": "e62",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 173",
+            "ref": "e63",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 174",
+            "ref": "e64",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 175",
+            "ref": "e65",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 176",
+            "ref": "e66",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 177",
+            "ref": "e67",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 178",
+            "ref": "e68",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 179",
+            "ref": "e69",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 180",
+            "ref": "e70",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 110",
+            "ref": "e71",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 112",
+            "ref": "e72",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 113",
+            "ref": "e73",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 114",
+            "ref": "e74",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 115",
+            "ref": "e75",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 116",
+            "ref": "e76",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 117",
+            "ref": "e77",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 118",
+            "ref": "e78",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 119",
+            "ref": "e79",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 111",
+            "ref": "e80",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 10",
+            "ref": "e81",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 12",
+            "ref": "e82",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 13",
+            "ref": "e83",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 14",
+            "ref": "e84",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 15",
+            "ref": "e85",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 16",
+            "ref": "e86",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 17",
+            "ref": "e87",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 18",
+            "ref": "e88",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 19",
+            "ref": "e89",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 20",
+            "ref": "e90",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 21",
+            "ref": "e91",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 22",
+            "ref": "e92",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 23",
+            "ref": "e93",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 24",
+            "ref": "e94",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 25",
+            "ref": "e95",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 26",
+            "ref": "e96",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 27",
+            "ref": "e97",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 28",
+            "ref": "e98",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 29",
+            "ref": "e99",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 30",
+            "ref": "e100",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 31",
+            "ref": "e101",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 32",
+            "ref": "e102",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 33",
+            "ref": "e103",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 34",
+            "ref": "e104",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 35",
+            "ref": "e105",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 36",
+            "ref": "e106",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 37",
+            "ref": "e107",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 38",
+            "ref": "e108",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 39",
+            "ref": "e109",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 40",
+            "ref": "e110",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 41",
+            "ref": "e111",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 42",
+            "ref": "e112",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 43",
+            "ref": "e113",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 44",
+            "ref": "e114",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 45",
+            "ref": "e115",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 46",
+            "ref": "e116",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 47",
+            "ref": "e117",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 48",
+            "ref": "e118",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 49",
+            "ref": "e119",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 50",
+            "ref": "e120",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 51",
+            "ref": "e121",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 52",
+            "ref": "e122",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 53",
+            "ref": "e123",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 54",
+            "ref": "e124",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 55",
+            "ref": "e125",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 56",
+            "ref": "e126",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 57",
+            "ref": "e127",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 58",
+            "ref": "e128",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 59",
+            "ref": "e129",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 60",
+            "ref": "e130",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 61",
+            "ref": "e131",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 62",
+            "ref": "e132",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 63",
+            "ref": "e133",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 64",
+            "ref": "e134",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 65",
+            "ref": "e135",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 66",
+            "ref": "e136",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 67",
+            "ref": "e137",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 68",
+            "ref": "e138",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 69",
+            "ref": "e139",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 70",
+            "ref": "e140",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 71",
+            "ref": "e141",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 72",
+            "ref": "e142",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 73",
+            "ref": "e143",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 74",
+            "ref": "e144",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 75",
+            "ref": "e145",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 76",
+            "ref": "e146",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 77",
+            "ref": "e147",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 78",
+            "ref": "e148",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 79",
+            "ref": "e149",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 80",
+            "ref": "e150",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 81",
+            "ref": "e151",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 82",
+            "ref": "e152",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 83",
+            "ref": "e153",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 84",
+            "ref": "e154",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 85",
+            "ref": "e155",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 86",
+            "ref": "e156",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 87",
+            "ref": "e157",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 88",
+            "ref": "e158",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 89",
+            "ref": "e159",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 90",
+            "ref": "e160",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 91",
+            "ref": "e161",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 92",
+            "ref": "e162",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 93",
+            "ref": "e163",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 94",
+            "ref": "e164",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 95",
+            "ref": "e165",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 96",
+            "ref": "e166",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 97",
+            "ref": "e167",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 98",
+            "ref": "e168",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 99",
+            "ref": "e169",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 11",
+            "ref": "e170",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 1",
+            "ref": "e171",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 2",
+            "ref": "e172",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 3",
+            "ref": "e173",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 4",
+            "ref": "e174",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 5",
+            "ref": "e175",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 6",
+            "ref": "e176",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 7",
+            "ref": "e177",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 8",
+            "ref": "e178",
+            "tag": "button"
+          },
+          {
+            "label": "宽按钮 9",
+            "ref": "e179",
+            "tag": "button"
+          }
+        ],
+        "escalatedPick": null,
+        "label": "characterization-stub",
+        "layaMargin": 0.05,
+        "method": "characterization-stub",
+        "nominatedRepair": false,
+        "ref": "e0",
+        "stopped": true,
+        "tierAsk": null
+      },
+      "rejectedAskConfs": [
+        0.05,
+        0.05,
+        0.05
+      ],
+      "stop": {
+        "code": "low_confidence",
+        "reason": "low confidence 0.05 < floor 0.50 on step 1；用 ctx.observe() 在会话内看准入面与 why_not_admitted。判别: 池中不存在与词面「点一个按钮」相关的候选（池 180 项：button×180: 宽按钮 100, 宽按钮 101, 宽按钮 102, 宽按钮 103, 宽按钮 104；其余略）——目标可能不在本页面（或未进元素池）; window escalation #1@128 -> #2@256 still no match"
+      },
+      "warnings": [],
+      "windowChainFacts": [
+        {
+          "miss": 1,
+          "resolved": false,
+          "window": 128
+        },
+        {
+          "miss": 2,
+          "resolved": false,
+          "window": 256
+        }
+      ]
+    }
+  },
+  "note": "run 面选择段 golden：由退役前的 runModelPick 对照臂录制（16 场景，URL 端口归一 <LOCAL>）；--check 用 runDecisionPick 单腿比对。",
+  "schema": 1
+}

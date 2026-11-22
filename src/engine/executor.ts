@@ -275,7 +275,7 @@ export type DeclaredHintPhase = {
   curHint: string | null;
 };
 
-/** 选择段（`runDecisionPick`，经 `runModelPickNext` 装配）的返回值：stopped = 选择段已停（stop 已记账）；elems 为宽扫后的本步视图。 */
+/** 选择段（`runDecisionPick`，经 `createRunPickWiring` 装配）的返回值：stopped = 选择段已停（stop 已记账）；elems 为宽扫后的本步视图。 */
 export type ModelPickPhase = {
   stopped: boolean; ref: string | null; conf: number; method: string;
   decisionKind: "rule" | "model" | "escalate"; layaMargin: number | null;
@@ -321,7 +321,8 @@ import { _resolveOne, _rehydrateRescanOnce, _liveDomIdFallback, _probeCleanup, _
 import { actOnce, _scrollIntoViewWithEvidence, scrollIntoView, _scrollContainerForElement, _scrollWithLoc, scrollContainer, scrollDocument, setRange } from "./executor-actions.ts";
 import { runFrameGate, runPoolGate, runDeclaredTargets, runDeclaredHint } from "./executor-phases-a.ts";
 import { createRunPickWiring } from "./decision-pick-host.ts";
-import { runModelPickNext, runPostAction } from "./executor-phases-b.ts";
+import { runDecisionPick } from "./decision-pick-phase.ts";
+import { runPostAction } from "./executor-phases-b.ts";
 import { runActionPhase, runActionExecute, runSetup, runTail, runReportTail } from "./executor-phases-c.ts";
 export * from "./executor-pure.ts";
 import type { ActMissDiagnostics, ActMissRow, DeviceSpec } from "./executor-pure.ts";
@@ -2669,7 +2670,7 @@ export class BrowserMiddleware {
             reAdmitted.add(br);
           }
         }
-        const pickPhase = await runModelPickNext(...createRunPickWiring(this, {
+        const pickPhase = await runDecisionPick(...createRunPickWiring(this, {
           pg, stepNo, instruction, verbose, elems, ruleRef, curHint, commandMode, forbidden, noted, trace, targets, adjudicate, reobserve, escalateFn, expectedFamily,
           confFloor: this.confFloor, candidatePriority, tieredHint, rulesOnly: this.rulesOnly, decisionDegradedReasonClass: this.decisionDegraded?.reason_class ?? null, rejectedAskConfs: this._rejectedAskConfs, warnings,
           reobserved, escalated, escalatedPick, windowChainFacts, stepTimeoutLeft, stop, stopReason: () => acct.stopReason, pickElement: (g, page, pool, blocked, notes) => this.pickElement(g, page, pool, blocked, notes),

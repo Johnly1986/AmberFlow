@@ -1,17 +1,23 @@
 /**
- * run 面选择段 parity lane（非门禁）：把**同一份 host/ctx 输入**分别喂给
- *   - 对照臂：`executor-phases-b.ts` 的 `runModelPick`（deprecated；执行路径已切到新实现，本 lane 仍驱动它做对照）；
- *   - 新臂：`decision-pick-phase.ts` 的 `runDecisionPick`（按分支拆分后的实现），
- * 逐字段比较 `ModelPickPhase` 全字段、桩侧请求投影、`windowChainFacts`、`rejectedAskConfs`、
- * `warnings` 与结构化停因（code/reason）。差异必须为零；首现差异逐条打印并 exit 1。
+ * run 面选择段 parity lane（非门禁）：`decision-pick-phase.runDecisionPick` 对 **golden** 的
+ * 单腿逐字段比对——`ModelPickPhase` 全字段、桩侧请求投影、`windowChainFacts`、`rejectedAskConfs`、
+ * `warnings` 与结构化停因（code/reason）。
  *
- * 为什么能这样对照：`runModelPick` 的 executor 原语全部经参数注入（只有宽扫抽取读 `mw.candidates`），
- * 因此本 lane 用 `buildMiddleware` 真实装配 mw，并把同一批原语（pickElement/orderedPool/
- * settleBeforeExtract/pruneForbids/hintOpts/stateText/停因记账…）同时交给两臂。两臂共享页面、
- * 共享桩剧本；每臂各自一份 `RunAccounting`（forbidden/停因/窗口链事实互不污染）。
+ * golden 的来源（顺序不可颠倒）：旧实现退役**之前**，本 lane 曾把同一份 host/ctx 输入喂给
+ *   - 对照臂：旧 `runModelPick`；
+ *   - 新臂：`runDecisionPick`，
+ * 两臂 16 场景逐字段零差异；随后先由对照臂 `--record` 快照成
+ * `tools/golden/decision-run-parity/cases.json`（URL 端口归一 `<LOCAL>`、键序稳定、录两次
+ * 逐字节一致才入盘），再删除旧实现。此后 `--check` 即"新实现 vs 退役前实现的事实"。
  *
- * 用法：node --experimental-strip-types tools/verify-decision-run-parity.ts [--list]
- * 退出码：0 全场景零差异 / 1 有差异 / 2 用法或环境错误。
+ * 为什么 golden 可信：两臂共享页面与桩剧本，executor 原语全部经参数注入（只有宽扫抽取读
+ * `mw.candidates`），因此本 lane 用 `buildMiddleware` 真实装配 mw，并把同一批原语
+ * （pickElement/orderedPool/settleBeforeExtract/pruneForbids/hintOpts/stateText/停因记账…）
+ * 交给被测实现；每场景一份 `RunAccounting`（forbidden/停因/窗口链事实互不污染）。
+ * `--record` 在旧实现退役后**拒绝执行**——golden 不得由被检实现自行重录。
+ *
+ * 用法：node --experimental-strip-types tools/verify-decision-run-parity.ts [--check | --self-test | --list]
+ * 退出码：0 零差异 / 1 有差异 / 2 用法或环境错误。
  */
 import fs from "node:fs";
 import http from "node:http";
@@ -21,8 +27,6 @@ import { browserSession, type BrowserMiddleware, type ModelPickPhase } from "../
 import { buildMiddleware } from "../src/app/middleware-factory.ts";
 import { installLayaRuntime } from "../src/model/model.ts";
 import { installDecisionProvider } from "../src/model/decision-provider.ts";
-import { runModelPick } from "../src/engine/executor-phases-b.ts";
-import type { RunPickArgs } from "../src/engine/decision-pick-host.ts";
 import { runDecisionPick, type RunPickCtx, type RunPickHost } from "../src/engine/decision-pick-phase.ts";
 import { createRunAccounting } from "../src/engine/run-context.ts";
 import { _hintOpts } from "../src/engine/executor-resolve-a.ts";
@@ -32,7 +36,10 @@ import type { DeclaredTargetsResolver } from "../src/engine/declared-targets.ts"
 import { makeStubProvider, type StubRequestSnapshot, type StubTurn } from "./stub-decision-provider.ts";
 import type { AnyPage } from "../src/engine/executor-types.ts";
 
-const USAGE = "usage: node --experimental-strip-types tools/verify-decision-run-parity.ts [--list]";
+const REPO = path.resolve(import.meta.dirname, "..");
+const GOLDEN_DIR = path.join(REPO, "tools", "golden", "decision-run-parity");
+const GOLDEN_FILE = path.join(GOLDEN_DIR, "cases.json");
+const USAGE = "usage: node --experimental-strip-types tools/verify-decision-run-parity.ts [--check | --self-test | --list]";
 
 /* ------------------------------------------------------------------ 页面 */
 
@@ -207,6 +214,8 @@ function phaseFact(p: ModelPickPhase): Record<string, unknown> {
   };
 }
 
+const stable = (v: unknown): string => `${JSON.stringify(normalize(v), null, 2)}\n`;
+
 function armFact(a: ArmResult): Record<string, unknown> {
   return {
     phase: phaseFact(a.phase),
@@ -232,51 +241,17 @@ function collectArm(phase: ModelPickPhase, ctx: RunPickCtx, acct: ReturnType<typ
   };
 }
 
-/** 同一 spec 依次驱动两臂；每臂各自新账本/新 host/新 ctx，桩请求在臂间清零。 */
-async function driveBoth(mw: BrowserMiddleware, page: AnyPage, stub: Stub, spec: DriveSpec): Promise<{ old: ArmResult; next: ArmResult }> {
-  // run() 在 runSetup 就解析过 provider；两臂必须在同一"已 ready"状态下取 modelLabel，
-  // 否则首臂的懒解析会让第二臂多出一个标签差异（与实现无关的装配噪声）。
+/** 一次驱动：新账本/新 host/新 ctx，桩请求在驱动前清零（与 golden 录制时的输入完全同构）。 */
+async function drivePick(mw: BrowserMiddleware, page: AnyPage, stub: Stub, spec: DriveSpec): Promise<ArmResult> {
+  // run() 在 runSetup 就解析过 provider；必须在"已 ready"状态下取 modelLabel（与录制 golden 时同序）。
   await mw.ready();
-  // 对照臂：现状实现（executor 当前调用点用的就是它）。
   stub.reset();
   mw._choiceLimitReason = null;
   mw.rulesOnly = spec.rulesOnly === true;
-  const acctOld = createRunAccounting({ maxSteps: 3 });
-  const hostOld = makeHost(mw, acctOld, spec);
-  const ctxOld = makeCtx(page, spec, hostOld, acctOld);
-  // 用 `RunPickArgs`（装配层与两臂共用的实参面）显式标注：结构漂移会在此处编译期报错。
-  const oldArgs: RunPickArgs = {
-    pg: ctxOld.pg, stepNo: ctxOld.stepNo, instruction: ctxOld.instruction, verbose: ctxOld.verbose,
-    elems: ctxOld.elems, ruleRef: ctxOld.ruleRef, curHint: ctxOld.curHint, commandMode: ctxOld.commandMode,
-    forbidden: ctxOld.forbidden, noted: ctxOld.noted, targets: ctxOld.targets, trace: ctxOld.trace,
-    adjudicate: ctxOld.adjudicate, reobserve: ctxOld.reobserve, escalateFn: ctxOld.escalateFn,
-    expectedFamily: ctxOld.expectedFamily, confFloor: ctxOld.confFloor, candidatePriority: ctxOld.candidatePriority,
-    tieredHint: ctxOld.tieredHint, rulesOnly: ctxOld.rulesOnly,
-    decisionDegradedReasonClass: ctxOld.decisionDegradedReasonClass, rejectedAskConfs: ctxOld.rejectedAskConfs,
-    warnings: ctxOld.warnings, reobserved: ctxOld.reobserved, escalated: ctxOld.escalated,
-    escalatedPick: ctxOld.escalatedPick, windowChainFacts: ctxOld.windowChainFacts,
-    stepTimeoutLeft: hostOld.stepTimeoutLeft, stop: hostOld.stop, stopReason: hostOld.stopReason,
-    pickElement: hostOld.pickElement, orderedPool: hostOld.orderedPool,
-    settleBeforeExtract: hostOld.settleBeforeExtract, pruneForbids: hostOld.pruneForbids,
-    hintOpts: hostOld.hintOpts, frameHosts: hostOld.frameHosts, stateTextFn: hostOld.stateTextFn,
-    rowAnchorNote: hostOld.rowAnchorNote, declaredTargets: hostOld.declaredTargets,
-    goalHeld: hostOld.goalHeld, goalSignalFn: hostOld.goalSignalFn, isTyping: hostOld.isTyping,
-    modelLabel: hostOld.modelLabel, degradedReasonSuffix: hostOld.degradedReasonSuffix,
-    choiceLimitReason: hostOld.choiceLimitReason, clearChoiceLimitReason: hostOld.clearChoiceLimitReason,
-  };
-  const oldPhase = await runModelPick(mw, oldArgs);
-  const oldArm = collectArm(oldPhase, ctxOld, acctOld, stub);
-
-  // 新臂：同一 host/ctx 输入，直接驱动拆分后的实现。
-  stub.reset();
-  mw._choiceLimitReason = null;
-  mw.rulesOnly = spec.rulesOnly === true;
-  const acctNext = createRunAccounting({ maxSteps: 3 });
-  const hostNext = makeHost(mw, acctNext, spec);
-  const ctxNext = makeCtx(page, spec, hostNext, acctNext);
-  const nextPhase = await runDecisionPick(hostNext, ctxNext);
-  const nextArm = collectArm(nextPhase, ctxNext, acctNext, stub);
-  return { old: oldArm, next: nextArm };
+  const acct = createRunAccounting({ maxSteps: 3 });
+  const host = makeHost(mw, acct, spec);
+  const ctx = makeCtx(page, spec, host, acct);
+  return collectArm(await runDecisionPick(host, ctx), ctx, acct, stub);
 }
 
 /* ------------------------------------------------------------------ 差异 */
@@ -313,7 +288,8 @@ interface Case {
   name: string;
   page: string;
   turns: (snap: StubRequestSnapshot) => StubTurn;
-  run(ctx: { mw: BrowserMiddleware; page: AnyPage; stub: Stub; origin: string }): Promise<{ old: ArmResult; next: ArmResult }>;
+  /** 场景自检直接断在本次驱动结果上；与 golden 的逐字段比对由主流程统一做。 */
+  run(ctx: { mw: BrowserMiddleware; page: AnyPage; stub: Stub; origin: string; drive: (spec: DriveSpec) => Promise<ArmResult> }): Promise<ArmResult>;
 }
 
 const CASES: Case[] = [
@@ -321,12 +297,12 @@ const CASES: Case[] = [
     name: "rule-hit",
     page: "/cards.html",
     turns: () => ({ score: 0.1 }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       const ruleRef = Object.keys(elems)[0] ?? null;
-      const r = await driveBoth(mw, page, stub, { instruction: "点击确认", elems: elems as ElemPool, ruleRef, curHint: "#b1" });
-      assertRuleClean(r.old);
+      const r = await drive({ instruction: "点击确认", elems: elems as ElemPool, ruleRef, curHint: "#b1" });
+      assertRuleClean(r);
       return r;
     },
   },
@@ -334,15 +310,15 @@ const CASES: Case[] = [
     name: "tiered-narrow-fallback",
     page: "/cards.html",
     turns: (snap) => (snap.seq === 0 ? { score: 0.05, passthrough: false, probs: { p: 0.05 } } : { score: 0.9, passthrough: true }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
-      const r = await driveBoth(mw, page, stub, { instruction: "选一个", elems: elems as ElemPool, curHint: "button", tieredHint: true });
+      const r = await drive({ instruction: "选一个", elems: elems as ElemPool, curHint: "button", tieredHint: true });
       // 窄问弃权 → 全池重问：第二问的候选数必须更大（否则档位没被触发）。
-      const n0 = (r.old.asks[0] as { candidate_count: number }).candidate_count;
-      const n1 = (r.old.asks[1] as { candidate_count: number }).candidate_count;
+      const n0 = (r.asks[0] as { candidate_count: number }).candidate_count;
+      const n1 = (r.asks[1] as { candidate_count: number }).candidate_count;
       if (!(n1 > n0)) throw new Error(`tiered 档位未触发：${n0} -> ${n1}`);
-      if (r.old.phase.tierAsk !== null) throw new Error("窄问弃权后 tierAsk 必须清空");
+      if (r.phase.tierAsk !== null) throw new Error("窄问弃权后 tierAsk 必须清空");
       return r;
     },
   },
@@ -350,13 +326,13 @@ const CASES: Case[] = [
     name: "tiered-narrow-hit",
     page: "/cards.html",
     turns: () => ({ score: 0.9, passthrough: false, probs: { p: 0.9 } }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
-      const r = await driveBoth(mw, page, stub, { instruction: "选一个", elems: elems as ElemPool, curHint: "button", tieredHint: true });
+      const r = await drive({ instruction: "选一个", elems: elems as ElemPool, curHint: "button", tieredHint: true });
       // 窄问一次过闸：只问一次，tierAsk 随返回值交回（诊断字段的命中路径）。
-      if (r.old.asks.length !== 1) throw new Error(`窄问命中不应回退全池（实际 ${r.old.asks.length} 问）`);
-      if (r.old.phase.tierAsk === null) throw new Error("窄问命中后 tierAsk 必须非空");
+      if (r.asks.length !== 1) throw new Error(`窄问命中不应回退全池（实际 ${r.asks.length} 问）`);
+      if (r.phase.tierAsk === null) throw new Error("窄问命中后 tierAsk 必须非空");
       return r;
     },
   },
@@ -364,12 +340,12 @@ const CASES: Case[] = [
     name: "low-conf-wide-reobserve",
     page: "/wide.html",
     turns: (snap) => (snap.seq === 0 ? { score: 0.05, passthrough: false, probs: { p: 0.05 } } : { score: 0.95, passthrough: true }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/wide.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
-      const r = await driveBoth(mw, page, stub, { instruction: "点一个按钮", elems: elems as ElemPool });
-      if (!String(r.old.phase.method).includes("reobserve")) throw new Error("低置信宽扫未触发");
-      if (r.old.windowChainFacts.length === 0) throw new Error("窗口链事实缺失");
+      const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool });
+      if (!String(r.phase.method).includes("reobserve")) throw new Error("低置信宽扫未触发");
+      if (r.windowChainFacts.length === 0) throw new Error("窗口链事实缺失");
       return r;
     },
   },
@@ -377,11 +353,11 @@ const CASES: Case[] = [
     name: "escalate",
     page: "/wide.html",
     turns: () => ({ score: 0.05, passthrough: false, probs: { p: 0.05 } }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/wide.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
-      const r = await driveBoth(mw, page, stub, { instruction: "点一个按钮", elems: elems as ElemPool, reobserve: false, escalate: true });
-      if (r.old.phase.decisionKind !== "escalate") throw new Error("升级票未命中");
+      const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool, reobserve: false, escalate: true });
+      if (r.phase.decisionKind !== "escalate") throw new Error("升级票未命中");
       return r;
     },
   },
@@ -389,11 +365,11 @@ const CASES: Case[] = [
     name: "adjudicate",
     page: "/wide.html",
     turns: () => ({ score: 0.05, passthrough: false, probs: { p: 0.05 } }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/wide.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
-      const r = await driveBoth(mw, page, stub, { instruction: "点一个按钮", elems: elems as ElemPool, reobserve: false, adjudicate: true });
-      if (!String(r.old.phase.method).endsWith(":adjudicated")) throw new Error("裁决档未触发");
+      const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool, reobserve: false, adjudicate: true });
+      if (!String(r.phase.method).endsWith(":adjudicated")) throw new Error("裁决档未触发");
       return r;
     },
   },
@@ -401,11 +377,11 @@ const CASES: Case[] = [
     name: "r2b",
     page: "/wide.html",
     turns: (snap) => (snap.seq === 0 ? { score: 0.6, passthrough: true } : { score: 0.95, passthrough: true }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/wide.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
-      const r = await driveBoth(mw, page, stub, { instruction: "zzz qqq", elems: elems as ElemPool });
-      if (r.old.asks.length !== 2) throw new Error(`R2b 应触发一次宽扫重问（实际 ${r.old.asks.length} 问）`);
+      const r = await drive({ instruction: "zzz qqq", elems: elems as ElemPool });
+      if (r.asks.length !== 2) throw new Error(`R2b 应触发一次宽扫重问（实际 ${r.asks.length} 问）`);
       return r;
     },
   },
@@ -419,11 +395,11 @@ const CASES: Case[] = [
       }
       return { score: 0.9, passthrough: true };
     },
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/family.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
-      const r = await driveBoth(mw, page, stub, { instruction: "选一个", elems: elems as ElemPool, expectedFamily: "check" });
-      if (!r.old.phase.nominatedRepair) throw new Error("族修复未触发");
+      const r = await drive({ instruction: "选一个", elems: elems as ElemPool, expectedFamily: "check" });
+      if (!r.phase.nominatedRepair) throw new Error("族修复未触发");
       return r;
     },
   },
@@ -431,11 +407,11 @@ const CASES: Case[] = [
     name: "family-empty",
     page: "/cards.html",
     turns: () => ({ score: 0.9, passthrough: true }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
-      const r = await driveBoth(mw, page, stub, { instruction: "选一个", elems: elems as ElemPool, expectedFamily: "check" });
-      if (r.old.stopCode !== "nominated_family_empty") throw new Error(`族空停因缺失（实际 ${r.old.stopCode}）`);
+      const r = await drive({ instruction: "选一个", elems: elems as ElemPool, expectedFamily: "check" });
+      if (r.stopCode !== "nominated_family_empty") throw new Error(`族空停因缺失（实际 ${r.stopCode}）`);
       return r;
     },
   },
@@ -443,12 +419,12 @@ const CASES: Case[] = [
     name: "choice-limit",
     page: "/empty.html",
     turns: () => ({ score: 0.9, passthrough: true }),
-    run: async ({ mw, page, stub }) => {
+    run: async ({ drive }) => {
       // 决策服务候选上限 255（引擎 MAX_CHOICES=200）：合成超限池直接打到结构化停因分支。
       const elems: ElemPool = {};
       for (let i = 0; i < 250; i += 1) elems[`e${i}`] = { tag: "button", label: `选项 ${i}` } as unknown as Elem;
-      const r = await driveBoth(mw, page, stub, { instruction: "选一个", elems });
-      if (r.old.stopCode !== "decision_service_choice_limit") throw new Error(`候选超限停因缺失（实际 ${r.old.stopCode}）`);
+      const r = await drive({ instruction: "选一个", elems });
+      if (r.stopCode !== "decision_service_choice_limit") throw new Error(`候选超限停因缺失（实际 ${r.stopCode}）`);
       return r;
     },
   },
@@ -456,11 +432,11 @@ const CASES: Case[] = [
     name: "low-confidence-stop",
     page: "/wide.html",
     turns: () => ({ score: 0.05, passthrough: false, probs: { p: 0.05 } }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/wide.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
-      const r = await driveBoth(mw, page, stub, { instruction: "点一个按钮", elems: elems as ElemPool, reobserve: false });
-      if (r.old.stopCode !== "low_confidence") throw new Error(`低置信停因缺失（实际 ${r.old.stopCode}）`);
+      const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool, reobserve: false });
+      if (r.stopCode !== "low_confidence") throw new Error(`低置信停因缺失（实际 ${r.stopCode}）`);
       return r;
     },
   },
@@ -468,11 +444,11 @@ const CASES: Case[] = [
     name: "unknown-ref",
     page: "/cards.html",
     turns: () => ({ score: 0.9, passthrough: true }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
-      const r = await driveBoth(mw, page, stub, { instruction: "点击确认", elems: elems as ElemPool, ruleRef: "e999", curHint: "#b1" });
-      if (r.old.stopCode !== "hint_matched_nothing") throw new Error(`未知 ref 停因缺失（实际 ${r.old.stopCode}）`);
+      const r = await drive({ instruction: "点击确认", elems: elems as ElemPool, ruleRef: "e999", curHint: "#b1" });
+      if (r.stopCode !== "hint_matched_nothing") throw new Error(`未知 ref 停因缺失（实际 ${r.stopCode}）`);
       return r;
     },
   },
@@ -480,12 +456,12 @@ const CASES: Case[] = [
     name: "rules-only-no-model",
     page: "/cards.html",
     turns: () => ({ score: 0.9, passthrough: true }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
-      const r = await driveBoth(mw, page, stub, { instruction: "选一个", elems: elems as ElemPool, rulesOnly: true });
-      if (r.old.stopCode !== "no_model_runtime") throw new Error(`无模型停因缺失（实际 ${r.old.stopCode}）`);
-      if (r.old.asks.length !== 0) throw new Error("无模型运行时不得问票");
+      const r = await drive({ instruction: "选一个", elems: elems as ElemPool, rulesOnly: true });
+      if (r.stopCode !== "no_model_runtime") throw new Error(`无模型停因缺失（实际 ${r.stopCode}）`);
+      if (r.asks.length !== 0) throw new Error("无模型运行时不得问票");
       return r;
     },
   },
@@ -493,12 +469,12 @@ const CASES: Case[] = [
     name: "rules-only-hint-unmatched",
     page: "/cards.html",
     turns: () => ({ score: 0.9, passthrough: true }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/cards.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
       // curHint 非空 ⇒ 走"计划点了名但规则没解出来"的闭集引导文案分支。
-      const r = await driveBoth(mw, page, stub, { instruction: "选一个", elems: elems as ElemPool, curHint: "#nope", rulesOnly: true });
-      if (r.old.stopCode !== "no_model_runtime") throw new Error(`无模型停因缺失（实际 ${r.old.stopCode}）`);
+      const r = await drive({ instruction: "选一个", elems: elems as ElemPool, curHint: "#nope", rulesOnly: true });
+      if (r.stopCode !== "no_model_runtime") throw new Error(`无模型停因缺失（实际 ${r.stopCode}）`);
       return r;
     },
   },
@@ -506,13 +482,13 @@ const CASES: Case[] = [
     name: "wide-hard-cap-rung-hit",
     page: "/wide180.html",
     turns: (snap) => (snap.seq < 2 ? { score: 0.05, passthrough: false, probs: { p: 0.05 } } : { score: 0.95, passthrough: true }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/wide180.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
-      const r = await driveBoth(mw, page, stub, { instruction: "点一个按钮", elems: elems as ElemPool });
+      const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool });
       // 64 池 → 128 档未命中 → 硬顶档命中：两档窗口链事实 + 第三次问票。
-      if (r.old.asks.length !== 3) throw new Error(`硬顶档应产生第三次问票（实际 ${r.old.asks.length}）`);
-      if (r.old.windowChainFacts.length !== 2) throw new Error(`窗口链应记两档（实际 ${r.old.windowChainFacts.length}）`);
+      if (r.asks.length !== 3) throw new Error(`硬顶档应产生第三次问票（实际 ${r.asks.length}）`);
+      if (r.windowChainFacts.length !== 2) throw new Error(`窗口链应记两档（实际 ${r.windowChainFacts.length}）`);
       return r;
     },
   },
@@ -520,13 +496,13 @@ const CASES: Case[] = [
     name: "window-chain-all-miss",
     page: "/wide180.html",
     turns: () => ({ score: 0.05, passthrough: false, probs: { p: 0.05 } }),
-    run: async ({ mw, page, stub, origin }) => {
+    run: async ({ mw, page, stub, origin, drive }) => {
       await page.goto(`${origin}/wide180.html`, { waitUntil: "load" });
       const { elems } = await mw._extractPoolSettled(page as never, "bucketed");
-      const r = await driveBoth(mw, page, stub, { instruction: "点一个按钮", elems: elems as ElemPool });
+      const r = await drive({ instruction: "点一个按钮", elems: elems as ElemPool });
       // 全档未命中 ⇒ 停因尾缀 window escalation #1@128 -> #2@256 still no match。
-      if (r.old.stopCode !== "low_confidence") throw new Error(`全档未命中应停 low_confidence（实际 ${r.old.stopCode}）`);
-      if (!r.old.stopReason.includes("window escalation")) throw new Error("窗口链全未命中尾缀缺失");
+      if (r.stopCode !== "low_confidence") throw new Error(`全档未命中应停 low_confidence（实际 ${r.stopCode}）`);
+      if (!r.stopReason.includes("window escalation")) throw new Error("窗口链全未命中尾缀缺失");
       return r;
     },
   },
@@ -542,15 +518,16 @@ function assertRuleClean(a: ArmResult): void {
 
 /* ------------------------------------------------------------------ 负向自测 */
 
-/** 负向自测：真实跑一个场景证明两臂零差异，再逐处扰动投影，确认 diff 抓得住（不是空对照）。 */
+/** 负向自测：新臂对 golden 零差异，再逐处扰动投影，确认 diff 抓得住（不是空对照）。 */
 async function selfTest(origin: string): Promise<number> {
+  const golden = readGolden();
   const c = CASES.find((x) => x.name === "low-conf-wide-reobserve");
   if (c === undefined) throw new Error("自测场景缺失");
-  const { old, next } = await withMw(c.turns, async ({ mw, page, stub }) => c.run({ mw, page, stub, origin }));
-  const base = normalize(armFact(old));
-  const other = normalize(armFact(next));
-  const noise = diff(base, other);
-  if (noise.length !== 0) { console.error(`self-test: FAIL — 真实两臂已有差异 ${noise.length} 处`); return 1; }
+  const got = await observeCase(c, origin);
+  const base = golden.cases[c.name];
+  if (base === undefined) { console.error(`self-test: FAIL — golden 缺场景 ${c.name}`); return 1; }
+  const noise = diff(normalize(base), normalize(got));
+  if (noise.length !== 0) { console.error(`self-test: FAIL — 新臂与 golden 已有差异 ${noise.length} 处`); return 1; }
   const mutations: Array<[string, (m: Record<string, unknown>) => void]> = [
     ["phase.conf", (m) => { const ph = m["phase"] as Record<string, unknown>; ph["conf"] = Number(ph["conf"] ?? 0) + 1; }],
     ["asks[0].candidate_count", (m) => { const asks = m["asks"] as Array<Record<string, unknown>>; if (asks[0] !== undefined) asks[0]["candidate_count"] = Number(asks[0]["candidate_count"]) + 1; }],
@@ -558,15 +535,72 @@ async function selfTest(origin: string): Promise<number> {
     ["stop.reason", (m) => { const st = m["stop"] as Record<string, unknown>; st["reason"] = `${String(st["reason"])}x`; }],
   ];
   for (const [label, mutate] of mutations) {
-    const copy = structuredClone(other) as Record<string, unknown>;
+    const copy = structuredClone(normalize(got)) as Record<string, unknown>;
     mutate(copy);
-    if (diff(base, copy).length === 0) { console.error(`self-test: FAIL — 扰动 ${label} 未被 diff 抓住`); return 1; }
+    if (diff(normalize(base), copy).length === 0) { console.error(`self-test: FAIL — 扰动 ${label} 未被 diff 抓住`); return 1; }
   }
-  console.log(`verify-decision-run-parity: self-test OK — 真实两臂零差异，且 ${mutations.length} 类扰动均被抓住`);
+  console.log(`verify-decision-run-parity: self-test OK — 新臂对 golden 零差异，且 ${mutations.length} 类扰动均被抓住`);
   return 0;
 }
 
-/* ------------------------------------------------------------------ 主流程 */
+/* ------------------------------------------------------------------ golden 与主流程 */
+
+interface GoldenFile {
+  schema: number;
+  note: string;
+  cases: Record<string, unknown>;
+}
+
+function readGolden(): GoldenFile {
+  if (!fs.existsSync(GOLDEN_FILE)) throw new Error(`缺少 golden ${path.relative(REPO, GOLDEN_FILE)}（旧实现存续时用 --record 录制）`);
+  const parsed = JSON.parse(fs.readFileSync(GOLDEN_FILE, "utf8")) as GoldenFile;
+  if (parsed.schema !== 1 || typeof parsed.cases !== "object") throw new Error("golden 形状不符（schema 1）");
+  return parsed;
+}
+
+/** 单场景驱动一臂并投影（页面级装配：每场景一个 mw，桩剧本随场景）。 */
+async function observeCase(c: Case, origin: string): Promise<Record<string, unknown>> {
+  const result = await withMw(c.turns, async ({ mw, page, stub }) => c.run({ mw, page, stub, origin, drive: (spec) => drivePick(mw, page, stub, spec) }));
+  return normalize(armFact(result)) as Record<string, unknown>;
+}
+
+/** `--record` 在旧实现退役后拒绝执行：golden 只由退役前的对照臂录制，被检实现不得自行重录。 */
+function refuseRecord(): number {
+  console.error(`verify-decision-run-parity: 拒绝 --record — 对照臂已退役；golden ${path.relative(REPO, GOLDEN_FILE)} `
+    + "是退役前录制的事实快照，重录等同自证（如确需刷新，走评审并附新旧 golden 差异）。");
+  return 2;
+}
+
+/** `--check`（缺省）：新臂逐场景对 golden。 */
+async function check(origin: string): Promise<number> {
+  const golden = readGolden();
+  let failures = 0;
+  for (const c of CASES) {
+    const got = await observeCase(c, origin);
+    const want = golden.cases[c.name];
+    if (want === undefined) {
+      failures += 1;
+      console.error(`parity MISSING ${c.name} — golden 无此场景`);
+      continue;
+    }
+    const d = diff(normalize(want), got);
+    if (d.length === 0) {
+      const phase = (got["phase"] as Record<string, unknown>);
+      const asks = got["asks"] as unknown[];
+      console.log(`parity OK  ${c.name.padEnd(24)} asks=${asks.length} stop=${(got["stop"] as Record<string, unknown>)["code"]} method=${phase["method"]}`);
+    } else {
+      failures += 1;
+      console.error(`parity DIFF ${c.name} — ${d.length} 处差异`);
+      for (const line of d.slice(0, 20)) console.error(`  ${line}`);
+    }
+  }
+  if (failures > 0) {
+    console.error(`verify-decision-run-parity: FAIL — ${failures}/${CASES.length} 个场景与 golden 不一致`);
+    return 1;
+  }
+  console.log(`verify-decision-run-parity: OK — ${CASES.length} 个场景与 golden 逐字段一致（ModelPickPhase + 桩请求 + windowChainFacts + 停因）`);
+  return 0;
+}
 
 async function main(argv: string[]): Promise<number> {
   if (argv.includes("--list")) {
@@ -577,31 +611,13 @@ async function main(argv: string[]): Promise<number> {
     "/cards.html": CARDS_HTML, "/wide.html": WIDE_HTML, "/wide180.html": WIDE180_HTML,
     "/family.html": FAMILY_HTML, "/empty.html": EMPTY_HTML,
   });
-  if (argv.includes("--self-test")) {
-    try { return await selfTest(server.origin); } finally { await server.close(); }
-  }
-  let failures = 0;
   try {
-    for (const c of CASES) {
-      const { old, next } = await withMw(c.turns, async ({ mw, page, stub }) => c.run({ mw, page, stub, origin: server.origin }));
-      const d = diff(normalize(armFact(old)), normalize(armFact(next)));
-      if (d.length === 0) {
-        console.log(`parity OK  ${c.name.padEnd(24)} asks=${old.asks.length} stop=${old.stopCode} method=${old.phase.method}`);
-      } else {
-        failures += 1;
-        console.error(`parity DIFF ${c.name} — ${d.length} 处差异`);
-        for (const line of d.slice(0, 20)) console.error(`  ${line}`);
-      }
-    }
+    if (argv.includes("--self-test")) return await selfTest(server.origin);
+    if (argv.includes("--record")) return refuseRecord();
+    return await check(server.origin);
   } finally {
     await server.close();
   }
-  if (failures > 0) {
-    console.error(`verify-decision-run-parity: FAIL — ${failures}/${CASES.length} 个场景有差异`);
-    return 1;
-  }
-  console.log(`verify-decision-run-parity: OK — ${CASES.length} 个场景两臂逐字段一致（ModelPickPhase + 桩请求 + windowChainFacts + 停因）`);
-  return 0;
 }
 
 try {

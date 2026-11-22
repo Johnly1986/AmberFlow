@@ -1,6 +1,6 @@
 /**
  * 执行器实现模块（从 executor-phases-b 切分）：窗口递增链的**硬顶档重问**——
- * `runModelPick` 的两处同构段（低置信恢复 / R2b 词面守卫的 120 档未命中分支）单源到这里。
+ * 选择段的两处同构段（低置信恢复 / R2b 词面守卫的 120 档未命中分支）单源到这里。
  *
  * 本文件函数是 `BrowserMiddleware` 的实现片段，显式接收 `mw` 实例；deps 全部显式注入
  * （pickElement/orderedPool/pruneForbids/forbidden/noted/stepTimeoutLeft…），不闭包捕获

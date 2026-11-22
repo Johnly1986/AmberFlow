@@ -10,7 +10,7 @@
  *   - 事实归引擎：候选池、结构事实、命中关系、投影白名单、渲染、有界化、模型询问本身，
  *     以及**询问内部的整个阶梯**——规则分支（无模型票）、窄问→全池回退、低置信宽扫、
  *     窗口升级、升级票、裁决票、R2b、族修复共享同一份**视图世代**（池/禁选/注记），
- *     必须作为单次询问的内部实现（run 面 = 整个 `runModelPick` phase 的接入单位）；
+ *     必须作为单次询问的内部实现（run 面 = 整个选择段 phase，`decision-pick-phase.runDecisionPick` 的接入单位）；
  *   - 意图归面：`DecisionAskIntent` 与 `DecisionPickProfile`；**池与禁选/注记不在意图面里**；
  *     驾驶循环策略（driver/ambiguity/riskVote/remainingSteps）不属于询问，留在各面执行层；
  *   - 生命周期归面、实现归引擎：`DecisionLifetime` 由面声明，账本实例由**引擎工厂**按

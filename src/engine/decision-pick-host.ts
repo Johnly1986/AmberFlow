@@ -7,7 +7,7 @@
  *   - executor.ts 调用点只做一次装配（形状与 `ModelPickPhase` 返回值不变）；
  *   - 装配映射是**一对一搬运**，不含任何分支/默认值改写（行为等价由 parity lane 与既有
  *     runtime/pilot/characterization 三条 lane 共同钉住）；
- *   - 旧 `runModelPick` 暂留作对照臂，两臂吃同一份 `RunPickArgs`（结构一致由 tsc 强制）。
+ *   - 本实参面与 run 面选择段的调用点逐字段同形（结构漂移由 tsc 强制）。
  *
  * 纪律：
  *   - 本文件不 import app，也不 import 任何运行期符号（全为 `import type`，模块零副作用）；
@@ -25,7 +25,7 @@ import type { Elem, ElemFamily, ElemPool } from "./extraction.ts";
 import type { HintMatchOptions } from "./rules.ts";
 import type { BrowserMiddleware } from "./executor.ts";
 
-/** `run()` 侧的选择段实参面（旧 `runModelPick` 的 a-bag 逐字段同形；两臂共用这一份类型）。 */
+/** `run()` 侧的选择段实参面（run 面选择段 a-bag 逐字段同形；装配层与 parity lane 共用）。 */
 export interface RunPickArgs {
   pg: AnyPage; stepNo: number; instruction: string; verbose: boolean; elems: ElemPool; ruleRef: string | null;
   curHint: string | null; commandMode: boolean; forbidden: Record<string, Sig>; noted: Record<string, string> | null;
@@ -61,7 +61,7 @@ export interface RunPickArgs {
 
 /**
  * 一次选择段的两个纯结构输入（host = 原语面；ctx = 本步数据面），按位置成对返回：
- * 调用点用 `runModelPickNext(...createRunPickWiring(...))` 单表达式装配，`run()` 行数不增
+ * 调用点用 `runDecisionPick(...createRunPickWiring(...))` 单表达式装配，`run()` 行数不增
  * （存量函数只减不增）。
  */
 export type RunPickWiring = [host: RunPickHost, ctx: RunPickCtx];

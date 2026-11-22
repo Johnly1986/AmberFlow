@@ -1,6 +1,6 @@
 /**
- * run 面选择段的独立实现（4d pick phase）：把 `runModelPick` 的阶梯逐分支搬出
- * `executor-phases-b.ts`，按"规则 → 窄问 → 低置信宽扫 → 升级 → 裁决 → R2b → 族修复"拆成
+ * run 面选择段的独立实现（4d pick phase）：把选择段阶梯逐分支实现到
+ * 本模块，按"规则 → 窄问 → 低置信宽扫 → 升级 → 裁决 → R2b → 族修复"拆成
  * 独立 helper（每个 ≤150 行），顶层 `runDecisionPick(host, ctx)` 只做编排。
  *
  * 纪律（与执行器实现片段同一套）：
@@ -8,7 +8,7 @@
  *     结算/剪枝/停因/预算…），engine 不 import 应用层；本模块不持 `BrowserMiddleware`；
  *   - `ctx` 是纯数据（本步的输入与就地记账数组），视图世代（elems 池 / forbidden / 窗口链
  *     事实）只有一份，随 `PickAcc` 滚动；
- *   - 分支顺序、错误分支、返回字段序与 `runModelPick` 逐项一致——搬移不改行为。
+ *   - 分支顺序、错误分支、返回字段序与 run 面选择段的既有语义逐项一致——搬移不改行为。
  */
 import { decisionDegradedAdvice } from "../model/decision-probe.ts";
 import { type TraceStep } from "./audit.ts";
@@ -151,7 +151,7 @@ export async function runDecisionPick(host: RunPickHost, ctx: RunPickCtx): Promi
   return assemblePhase(st, mm, false);
 }
 
-/** 闸门线：禁选越多、可用动作越少，过闸线越低（与 `runModelPick` 同一公式/同一时机）。 */
+/** 闸门线：禁选越多、可用动作越少，过闸线越低（与 run 面选择段的既有公式/时机一致）。 */
 function floorOf(ctx: RunPickCtx): number {
   return Math.max(0.10, ctx.confFloor - 0.05 * Object.keys(ctx.forbidden).length);
 }
