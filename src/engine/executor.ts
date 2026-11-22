@@ -202,6 +202,9 @@ import type {
 import {
   asFunction, FN_STATE, FN_HIT, FN_HIT_DETAIL, FN_EMPTIES, FN_GUARD, FN_OVERLAY,
 } from "./eval-snippets.ts";
+import {
+  clickActionableAncestor, declaredHitTest, describeActionFailure, hitRelation, occlusionProbe,
+} from "./executor-actionability.ts";
 
 /* ------------------------------------------------------------------ run ctx */
 
@@ -731,6 +734,11 @@ export class BrowserMiddleware {
    * 只在同一次单动作调用内消费（与 `_lastActionabilityDetail` 同一纪律），不改 run 面返回值。
    */
   _lastProbeError: string | null = null;
+  /**
+   * 中心点被自己的祖先接住时，动作被**重定向到可动作祖先**并成功的事实（祖先摘要）。
+   * 与 `_lastActionabilityDetail` 同一消费纪律：只在同一次动作调用内取走（additive）。
+   */
+  _lastAncestorRetarget: string | null = null;
 
   /* -- S5 decision-state ---------------------------------------------------- */
 
@@ -1581,50 +1589,9 @@ export class BrowserMiddleware {
    * `"__clicked__"` means the probe already performed the real click.
    */
   async occludedReason(page: AnyPage, el: Elem, probeMs = 800, slowMs = 2500): Promise<string | null> {
-    this._lastActionabilityDetail = null;
-    this._lastProbeError = null;
-    const loc = await this._locatorFor(page, el);
-    if (loc === null) return "stale_ref";
-    try {
-      await firstLoc(loc).click({ timeout: probeMs });   // real click; usually succeeds
-      return "__clicked__";                              // caller treats as done action
-    } catch (ex) {
-      const msg = String((ex as Error)?.message ?? ex);
-      if (msg.toLowerCase().includes("timeout")) {
-        // actionable-but-slow vs blocked: only report blockage when the element
-        // also fails a hit-test at its centre (cheap JS probe).
-        let hit: unknown;
-        try {
-          hit = await firstLoc(loc).evaluate(FN_HIT);
-        } catch (e) {
-          this._lastProbeError = describeActionError(e);
-          return null;
-        }
-        if (hit) {
-          const reason = `not-actionable-or-covered:${String(hit)}`;
-          this._lastActionabilityDetail = await this._readActionabilityDetail(loc, reason);
-          return reason;
-        }
-        // Slow but UNBLOCKED: nothing covers the element, so the short budget was
-        // simply too short — a widget animating in. Give it ONE longer try before
-        // reporting, because reporting is not free: the caller FORBIDS the ref for
-        // the rest of the subgoal. Measured on the live saucedemo logout: the
-        // sidebar slides in over 0.5 s and Playwright would not commit the click
-        // inside the 0.8 s probe, so the ordered `target_hints` sequence lost its
-        // last target and the long flow blocked on a link that works ~1 s later.
-        try {
-          await firstLoc(loc).click({ timeout: slowMs });
-          return "__clicked__";
-        } catch {
-          return "action-timeout";   // still not actionable: it is not just slow
-        }
-      }
-      // B1：click 可能已派发（非 timeout 异常）——记下首行供单动作面 action_failed 使用；
-      // 返回值保持 null，run 面照旧继续走 `_clickOnly`（行为逐字节不变）。
-      this._lastProbeError = describeActionError(ex);
-      return null;
-    }
+    return await occlusionProbe(this, page, el, probeMs, slowMs);
   }
+
 
   /**
    * P0-C：DRF 目标的**动作前** hit-test（click 族必须）。
@@ -1639,36 +1606,7 @@ export class BrowserMiddleware {
    */
   async _declaredHitTest(page: AnyPage, el: Elem):
     Promise<{ ok: true } | { ok: false; kind: "covered" | "ancestor"; blocker: string }> {
-    const loc = await this._locatorFor(page, el);
-    if (loc === null) return { ok: false, kind: "covered", blocker: "stale_ref" };
-    try {
-      const raw = await firstLoc(loc).evaluate((node: any) => {
-        const g = globalThis as unknown as {
-          document: { elementFromPoint(x: number, y: number): any };
-        };
-        try { node.scrollIntoView({ block: "center", inline: "center" }); } catch { /* ignore */ }
-        const r = node.getBoundingClientRect();
-        const x = r.left + r.width / 2;
-        const y = r.top + r.height / 2;
-        const hit = g.document.elementFromPoint(x, y);
-        const desc = (h: any): string => {
-          if (!h) return "none";
-          const id = h.id ? `#${h.id}` : "";
-          const cls = typeof h.className === "string" && h.className.trim()
-            ? `.${h.className.trim().split(/\s+/).slice(0, 2).join(".")}` : "";
-          return `${String(h.tagName || "").toLowerCase()}${id}${cls}`;
-        };
-        if (hit === null || hit === undefined) return { kind: "none", blocker: "none" };
-        if (hit === node || node.contains(hit)) return { kind: "ok", blocker: "" };
-        return { kind: hit.contains(node) ? "ancestor" : "covered", blocker: desc(hit) };
-      });
-      const r = raw as { kind?: string; blocker?: string } | null;
-      if (r?.kind === "ok") return { ok: true };
-      const kind = r?.kind === "ancestor" ? "ancestor" as const : "covered" as const;
-      return { ok: false, kind, blocker: String(r?.blocker ?? "none") };
-    } catch {
-      return { ok: false, kind: "covered", blocker: "probe-failed" };
-    }
+    return await declaredHitTest(this, page, el);
   }
 
   /** S1：取走并清空上一条 actionability 现场（一次调用只消费一次，避免跨步串用）。 */
@@ -1874,7 +1812,21 @@ export class BrowserMiddleware {
     try {
       await firstLoc(loc).click({ timeout: 5000, ...(force ? { force: true } : {}) });
     } catch (e) {
-      return ["action_failed", describeActionError(e)];
+      // 中心点被**自己的祖先**接住 = 元素本身不可命中（Playwright 拒绝点击；冒泡语义下真人
+      // 点击由祖先 handler 处理）：重定向到最近可动作祖先点一次，成功等同点击完成。
+      // 其余失败保持既有 action_failed（文案带拦截者，见 describeActionFailure）。
+      if (!force && String((e as Error)?.message ?? e).toLowerCase().includes("timeout")) {
+        if ((await hitRelation(this, loc)).relation === "ancestor"
+          && await clickActionableAncestor(this, page, el, loc, 5000) !== null) {
+          try {
+            await page.waitForLoadState("domcontentloaded", { timeout: 3000 });
+          } catch {
+            /* the page may never fire it; the action already happened */
+          }
+          return ["clicked", null];
+        }
+      }
+      return ["action_failed", describeActionFailure(e)];
     }
     try {
       await page.waitForLoadState("domcontentloaded", { timeout: 3000 });

@@ -6,6 +6,7 @@ import { sleep } from "../support/sleep.ts";
 import { type AmbiguityView, describeAmbiguity, orderCandidatesByDomPreorder } from "./ambiguity.ts";
 import { type ActMissDiagnostics, type ActMissRow, actMissDiagnostics, actMissDiscrimination, nearCandidates } from "./executor-pure.ts";
 import { _hintOpts, resolveCommandRef } from "./executor-resolve-a.ts";
+import { foldNestedDuplicates } from "./executor-actionability.ts";
 import { type AnyLoc, type AnyPage } from "./executor-types.ts";
 import { PASS_DOM_FALLBACK, PASS_ID_FALLBACK, ambiguityStopReason } from "./executor.ts";
 import { type Elem, type ElemPool, type FrameLike, actionCapabilities, frameHintFailureEvidence, framesOf, probeHintInDom, probeTextBbox } from "./extraction.ts";
@@ -42,8 +43,8 @@ export async function _resolveOne(mw: BrowserMiddleware, page: AnyPage, target: 
     onAmbiguous?: "fail" | "act", wantDiagnostics?: boolean,): Promise<
     | {
       ref: string; el: Elem | null; loc: AnyLoc; poolSize: number; fallback: boolean; cleanup?: () => Promise<void>;
-      /** E1-c：`#id` 直查兜底 / 第五档 AX 回退命中时出现（additive；其余路径不出现 = 键集与之前一致）。 */
-      resolvedVia?: "live-dom-id-fallback" | "rehydrate-rescan" | "ax-fallback";
+      /** E1-c：`#id` 直查兜底 / 第五档 AX 回退 / 嵌套同目标折叠命中时出现（additive）。 */
+      resolvedVia?: "live-dom-id-fallback" | "rehydrate-rescan" | "ax-fallback" | "nested-fold";
     }
     | {
       error: string; poolSize: number; stopCode?: "target_ambiguous"; ambiguity?: AmbiguityView;
@@ -68,6 +69,17 @@ export async function _resolveOne(mw: BrowserMiddleware, page: AnyPage, target: 
         ...(mw.hintTokenAllow !== undefined ? { hintTokenAllow: mw.hintTokenAllow } : {}),
       });
       if (ambiguity !== null) {
+        // 嵌套同目标折叠：同 label 候选存在 DOM 包含关系 = 同一可动作单元（容器 vs 它自己的
+        // 链接/控件）——取可动作后代执行（`resolved_via:"nested-fold"`，additive）；互不包含
+        // 的同 label（兄弟重复组）仍零动作真歧义；探测失败 = fail-open 回既有谓词。
+        const folded = await foldNestedDuplicates(mw, page, elems, target, op);
+        if (folded !== null && elems[folded[0]!] !== undefined) {
+          const el = elems[folded[0]!]!;
+          const loc = await mw._locatorFor(page, el);
+          if (loc !== null) {
+            return { ref: folded[0]!, el, loc, poolSize, fallback: false, resolvedVia: "nested-fold" };
+          }
+        }
         return {
           error: ambiguityStopReason(target, poolSize, ambiguity), poolSize,
           stopCode: "target_ambiguous", ambiguity,

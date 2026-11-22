@@ -1,0 +1,68 @@
+{
+  "_doc": "verify-runtime-offline 基线（非门禁）：本地 fixtures + 无头 chromium + BrowserMiddleware.run 的运行期事实。只用于运行期重构前后的等价对比：--record 显式更新（同场景连跑两次一致才入库）；端口已归一为 <LOCAL>；位置性 ref / 耗时 / timing 类字段不入库，不得手改。",
+  "expected": {
+    "audit_verdict": "APPROVE",
+    "diagnostics": null,
+    "done": true,
+    "evidence": {
+      "hits": [
+        "row"
+      ],
+      "out": "clicked"
+    },
+    "executed": true,
+    "executed_actions": [
+      {
+        "changed": true,
+        "how": "clicked",
+        "op": "click",
+        "target": null
+      }
+    ],
+    "external_requests": [],
+    "goal": "点击不可命中的内层标签",
+    "skipped": false,
+    "skipped_actions": [],
+    "state": {
+      "actions": {
+        "attempted": 1,
+        "changed": 1,
+        "executed": 1
+      },
+      "after": {
+        "epoch": 2,
+        "navEpoch": 1,
+        "readyState": "complete",
+        "url": "<LOCAL>/actionability-ancestor.html"
+      },
+      "before": {
+        "epoch": 1,
+        "navEpoch": 1,
+        "readyState": "complete",
+        "url": "<LOCAL>/actionability-ancestor.html"
+      },
+      "flags": []
+    },
+    "steps": [
+      {
+        "changed": true,
+        "decision_kind": "rule",
+        "desc": "click span \"确认评分 4.5\"",
+        "executed": true,
+        "how": "clicked",
+        "method": "rule:match",
+        "op": "click",
+        "skip_reason": null,
+        "skipped": null,
+        "step": 1,
+        "target": null,
+        "url": "<LOCAL>/actionability-ancestor.html"
+      }
+    ],
+    "stop_code": "dom_goal_signal",
+    "stop_reason": "dom goal signal",
+    "stop_step": 1
+  },
+  "scenario": "actionable-ancestor-retarget",
+  "schema_version": 1
+}

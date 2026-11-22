@@ -103,6 +103,36 @@ const HIT_DETAIL_JS = `(e) => {
 }`;
 const FN_HIT_DETAIL = asFunction(HIT_DETAIL_JS);
 
+/**
+ * Centre hit-test **with the relation** of the hit target to the element.
+ *
+ * 与 HIT_JS 同一条判据的细分版本，解决一个真实缺口：中心点被**自己的祖先**接住时
+ * （元素 pointer-events:none / 布局画在祖先上），Playwright 的动作性检查会拒绝点击
+ * （命中目标既非元素自身也非其后代），而冒泡语义下真人点击由祖先 handler 处理。
+ * HIT_JS 把祖先命中并入"放行"，调用方因此只能等慢重试、最终报一个无信息量的
+ * action-timeout；本探针把关系显式化：`self`/`descendant` = 可动作；`ancestor` = 元素本身
+ * 不可命中、可重定向到该祖先；`covered` = 第三方盖住；`zero-size`/`offscreen` = 布局不可点。
+ * 判据单源：`_declaredHitTest` 与 `occludedReason` 都读这里的关系口径。
+ */
+const HIT_RELATION_JS = `(e) => {
+  const r = e.getBoundingClientRect();
+  const bbox = {
+    x: Math.round(r.x), y: Math.round(r.y),
+    width: Math.round(r.width), height: Math.round(r.height),
+  };
+  const desc = (h) => [h.tagName.toLowerCase(), h.id ? '#' + h.id : ''].join('');
+  if (!r.width || !r.height) return { relation: 'zero-size', blocker: null, bbox };
+  const x = r.x + r.width / 2, y = r.y + r.height / 2;
+  if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) return { relation: 'offscreen', blocker: null, bbox };
+  const top = document.elementFromPoint(x, y);
+  if (!top) return { relation: 'none', blocker: 'none', bbox };
+  if (top === e) return { relation: 'self', blocker: null, bbox };
+  if (e.contains(top)) return { relation: 'descendant', blocker: null, bbox };
+  if (top.contains(e)) return { relation: 'ancestor', blocker: desc(top), bbox };
+  return { relation: 'covered', blocker: desc(top), bbox };
+}`;
+const FN_HIT_RELATION = asFunction(HIT_RELATION_JS);
+
 /** Visible empty inputs/textareas the frozen plan's data bag can supply. */
 const EMPTIES_JS = `() => [...document.querySelectorAll('input:not([type=hidden]),textarea')]
   .filter(e => !e.value.trim() && e.offsetParent !== null
@@ -176,6 +206,6 @@ const OVERLAY_JS = `() => {
 const FN_OVERLAY = asFunction(OVERLAY_JS);
 
 export {
-  VALS_JS, CHECKS_JS, STATE_JS, HIT_JS, HIT_DETAIL_JS, OVERLAY_JS,
-  FN_VALS, FN_CHECKS, FN_STATE, FN_HIT, FN_HIT_DETAIL, FN_EMPTIES, FN_GUARD, FN_OVERLAY,
+  VALS_JS, CHECKS_JS, STATE_JS, HIT_JS, HIT_DETAIL_JS, HIT_RELATION_JS, OVERLAY_JS,
+  FN_VALS, FN_CHECKS, FN_STATE, FN_HIT, FN_HIT_DETAIL, FN_HIT_RELATION, FN_EMPTIES, FN_GUARD, FN_OVERLAY,
 };

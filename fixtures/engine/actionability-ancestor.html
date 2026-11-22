@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>actionability ancestor</title></head>
+<body>
+  <!-- 可点行容器 + 内部不可命中 label（pointer-events:none）：中心点命中的是祖先行。
+       引擎应把点击重定向到可动作祖先（真实用户点击语义 = 事件冒泡到行 handler）。 -->
+  <div id="row" role="menuitemradio" tabindex="0"
+       style="cursor:pointer;width:240px;height:44px;display:flex;align-items:center;padding:0 8px;border:1px solid #ccc"
+       onclick="(window.__hits = window.__hits || []).push('row'); document.getElementById('out').textContent = 'clicked'">
+    <span id="label" style="pointer-events:none;font-size:14px">确认评分 4.5</span>
+  </div>
+  <style>
+    /* 池内路径：label 自身可点，但祖先行用 ::after 覆盖层接住中心点点击（命中关系 = 祖先）。 */
+    #row2::after { content: ""; position: absolute; inset: 0; }
+  </style>
+  <div id="row2" role="menuitemradio" tabindex="0"
+       style="position:relative;cursor:pointer;width:240px;height:44px;display:flex;align-items:center;padding:0 8px;border:1px solid #ccc;margin-top:8px"
+       onclick="(window.__hits = window.__hits || []).push('row2'); document.getElementById('out').textContent = 'clicked2'">
+    <span id="label2" role="img" aria-label="4.6 stars" style="font-size:14px"><span aria-hidden="true">4.6</span></span>
+  </div>
+  <style>
+    /* 池内原生控件路径：button 会进池，但祖先行 ::after 覆盖层接住中心点点击。 */
+    #row3::after { content: ""; position: absolute; inset: 0; }
+  </style>
+  <div id="row3" role="menuitemradio" tabindex="0"
+       style="position:relative;cursor:pointer;width:240px;height:44px;display:flex;align-items:center;padding:0 8px;border:1px solid #ccc;margin-top:8px"
+       onclick="(window.__hits = window.__hits || []).push('row3'); document.getElementById('out').textContent = 'clicked3'">
+    <button id="btn3" type="button" style="font-size:14px">确认评分 4.7</button>
+  </div>
+  <div id="out" style="margin-top:8px">idle</div>
+</body>
+</html>

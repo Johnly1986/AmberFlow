@@ -274,6 +274,14 @@ const UPLOAD_READY =
 const UPLOAD_FACTS =
   `(() => { const f = document.getElementById("file");
     return f ? { count: f.files.length, types: Array.from(f.files).map((x) => x.type) } : null; })()`;
+/** 可动作祖先重定向判据：行 handler 会计账（`window.__hits`）并把 `#out` 写成 clicked。 */
+const ANCESTOR_CLICKED =
+  `(() => (Array.isArray(window.__hits) ? window.__hits : []).includes("row"))()`;
+/** 可动作祖先重定向证据：行点击账 + 落文案（确定性字符串，不含时序/位置事实）。 */
+const ANCESTOR_FACTS =
+  `(() => ({ hits: (Array.isArray(window.__hits) ? window.__hits : []).map(String),
+    out: String(document.getElementById("out") ? document.getElementById("out").textContent : "") }))()`;
+
 /** 容器滚动到底判据（scroll.html 锁定几何：scrollHeight 400 / clientHeight 120）。 */
 const SCROLLER_AT_BOTTOM =
   `(() => { const s = document.getElementById("scroller");
@@ -323,6 +331,18 @@ const SCENARIOS: Scenario[] = [
         verbose: false,
       });
     },
+  },
+  {
+    // 中心点被自己的祖先接住（内层 label `pointer-events:none`）：元素的点击由祖先行接收。
+    // 引擎把动作重定向到最近的可动作祖先（冒泡语义 = 真人点击），行 handler 记账 ⇒ done 成立。
+    name: "actionable-ancestor-retarget",
+    run: async ({ mw, page, origin }) => await mw.run("点击不可命中的内层标签", `${origin}/actionability-ancestor.html`, {
+      targetHint: "#label",
+      goalSignalFn: async (p) => Boolean(await p.evaluate(ANCESTOR_CLICKED)),
+      page,
+      verbose: false,
+    }),
+    evidence: async ({ page }) => await page.evaluate(ANCESTOR_FACTS) as Dict,
   },
   {
     // 跳过路径：when/precondition 不成立 ⇒ done + skipped（零动作、零模型调用）。

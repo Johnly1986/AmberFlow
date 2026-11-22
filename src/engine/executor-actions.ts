@@ -5,6 +5,7 @@
 import { sleep } from "../support/sleep.ts";
 import { type AmbiguityView } from "./ambiguity.ts";
 import { type ActMissDiagnostics, describeActionError, firstLoc } from "./executor-pure.ts";
+import { clickPoollessTarget, takeAncestorRetarget } from "./executor-actionability.ts";
 import { _executeElement } from "./executor-resolve-a.ts";
 import { _resolveOne } from "./executor-resolve-b.ts";
 import { type ActionabilityDetail, type AnyLoc, type AnyPage } from "./executor-types.ts";
@@ -64,7 +65,7 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
     /** B1：非 timeout 异常后 URL 已变 = 点击已发生（不补点，如实记）。 */
     probe_navigated?: boolean;
     /** E1-c/F72/AX 回退：`#id` 直查兜底 / rehydrate 重扫 / AX 回退命中时出现（additive；其余路径键集不变）。 */
-    resolved_via?: "live-dom-id-fallback" | "rehydrate-rescan" | "ax-fallback";
+    resolved_via?: "live-dom-id-fallback" | "rehydrate-rescan" | "ax-fallback" | "actionable-ancestor" | "nested-fold";
   }> {
     const resolved = await _resolveOne(mw, page, target, op, onAmbiguous, opts?.diagnostics === true);
     if ("error" in resolved) {
@@ -122,8 +123,7 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
           };
         }
       } else if (el === null) {
-        // 池外回退（如 0×0 手柄）：直接对探针 locator 点一次（单动作原语的通用兜底）。
-        await firstLoc(loc).click({ timeout: 5000 });
+        await clickPoollessTarget(mw, page, loc);   // 池外回退；祖先接住点击时内部重定向
         how = "clicked";
       } else if (op === "click" || op === "check") {
         if (opts?.occlusionProbe === true) {
@@ -186,7 +186,7 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
     }
     const ok = how !== "stale_ref" && how !== "needs_value" && how !== "action_failed"
       && how !== "action_unsupported" && how !== null;
-    const viaField = resolvedVia === undefined ? {} : { resolved_via: resolvedVia };
+    const retargeted = takeAncestorRetarget(mw), viaField = resolvedVia !== undefined ? { resolved_via: resolvedVia } : (retargeted === null ? {} : { resolved_via: "actionable-ancestor" as const });
     if (!ok) return { ok: false, ref, how: String(how), stopCode: String(how ?? "action_failed"), reason: describeActionError(arg), ...viaField };
     if (op === "scroll") {
       const moved = scrollFact?.moved === true;
