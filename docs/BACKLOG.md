@@ -430,9 +430,13 @@ lowercase（`i` 旗标），`parseHint` 的 `frameChain` 归一为小写规范 o
 > - **尺寸落点（实测）**：`pool-js.ts` 907/907、`extraction.ts` 1113/1113、`executor-pure.ts` 938/938 都压基线（加一行即红）；有空间：`pool-js-dedup.ts`(139)、`candidate-scan.ts`(496)、`eval-snippets.ts`(211)。落点 = JS 片段扩 `pool-js-dedup.ts` + 新 host 模块 `src/app/pool-unit.ts`（只做 flag 与证据整形）；`unit_role` 须同步进 `executor-pure.modelProjectionOf` 的 guard+解构两处剥离（否则泄进模型面）。
 > - **分期**：S1 事实打标（flag off，零行为变更）→ S2 提取面剔除（原设想的 `decision.pool_unit_fold` **未实施、无 policy 键**——落地采用恒开、安全分离改用开关全量对照）→ S3 `unit:` 行提示（仅当模型仍投错）→ S4 末端折叠退役或留一版安全网。**S1 不可省**：把"判据对不对"与"行为变没变"拆开，避免拿 golden 变更掩盖判据错误。
 
-## 19. verify:offline filter-bar 基线漂移（HEAD 既有，待单独排查）
+## 19. verify:offline filter-bar 基线漂移（HEAD 既有）——**已结案（基线重录）**
 
-**状态**：open（非本批引入，非门禁）｜ **优先级建议**：P2
+**状态**：**closed（2026-11-22 重录 filter-bar 基线并复验全绿）**｜ **优先级建议**：P2（已收口）
+
+> **排查证据（2026-11-22）**：①`git log 8bd7a35..HEAD -- src/engine/extraction.ts src/app/candidate-scan.ts src/engine/pool-view.ts src/engine/elem-model.ts src/support/tuning.ts src/engine/pool-js.ts src/engine/pool-js-core.ts` = **空**（金标记录以来池序/抽取源码零变更）；②同一工作树连跑两次 `--check` 的失败行**逐字节一致**（确定性，非抖动）；③净树 HEAD worktree 亦失败（非本会话引入）。⇒ 结论 = **基线在记录时即与环境不符**（提交时基线过期），不是当前行为变更；ref↔label 互换属位置性编号漂移，池构成语义未变。
+>
+> **处置**：只重录 `tools/golden/offline/filter-bar.json`（其余 10 份原样还原），`verify-offline --check` **11/11 全绿**。**长期建议（未做）**：该 lane 的投影对位置性 ref 序敏感，后续可将 `ref_order` 改为按 `(tag,label)` 多重集比较，从根上消除这类环境敏感漂移。
 
 > **现象**：`tools/verify-offline.ts --check` 在**净树 HEAD**（`git worktree` 验证）亦失败：`filter-bar` 观测与金标不一致（首个差异为 `e20` vs `e22`：同 label 集、同 ref 集，仅 `订票` 按钮与筛选 `li` 的 ref↔label 映射互换了位置）。本批「提取面单元折叠」开关全量对照证明对该夹具**零影响**（折叠开/关两跑输出逐字节一致）。
 >

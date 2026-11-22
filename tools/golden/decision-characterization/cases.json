@@ -164,6 +164,67 @@
       ],
       "stop_code": "max_steps"
     },
+    "run-escalate": {
+      "asks": 1,
+      "report": {
+        "steps": [
+          {
+            "changed": false,
+            "conf": 0.05,
+            "decision_kind": "escalate",
+            "executed": true,
+            "layaMargin": null,
+            "method": "escalate",
+            "nominatedRepair": null,
+            "tierAsk": null
+          }
+        ],
+        "stop_code": "max_steps"
+      }
+    },
+    "run-family-repair": {
+      "asks": 1,
+      "nominated_family_repair": false,
+      "report": {
+        "steps": [],
+        "stop_code": "nominated_family_empty"
+      }
+    },
+    "run-r2b": {
+      "first_conf": 0.6,
+      "lexical_overlap": false,
+      "pool_counts": [
+        64,
+        100
+      ],
+      "report": {
+        "steps": [
+          {
+            "changed": false,
+            "conf": 0.95,
+            "decision_kind": "model",
+            "executed": true,
+            "layaMargin": null,
+            "method": "characterization-stub:reobserve",
+            "nominatedRepair": null,
+            "tierAsk": null
+          }
+        ],
+        "stop_code": "max_steps"
+      }
+    },
+    "run-retry-memory": {
+      "attempts": 2,
+      "first_notes": [
+        null
+      ],
+      "keys_equal": true,
+      "second_notes": [
+        {
+          "e0": "[tried before, page did not change]"
+        }
+      ]
+    },
     "run-rule": {
       "steps": [
         {

@@ -59,7 +59,7 @@
           "e17",
           "e18",
           "e19",
-          "e20",
+          "e22",
           "e23",
           "e24"
         ],
@@ -88,7 +88,7 @@
           "e17",
           "e18",
           "e19",
-          "e20",
+          "e22",
           "e23",
           "e24"
         ],
@@ -350,7 +350,7 @@
           "frame": 0,
           "id": "filter_item_price",
           "label": "价格",
-          "ref": "e21",
+          "ref": "e20",
           "scan": 31,
           "tag": "li"
         },
@@ -366,7 +366,7 @@
           "frame": 0,
           "id": "filter_item_cabin",
           "label": "舱等",
-          "ref": "e22",
+          "ref": "e21",
           "scan": 33,
           "tag": "li"
         },
@@ -445,7 +445,7 @@
         {
           "frame": 0,
           "label": "订票",
-          "ref": "e20",
+          "ref": "e22",
           "scan": 43,
           "surface": "native-control",
           "tag": "button"

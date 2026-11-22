@@ -16,10 +16,12 @@
  *   ✔ run-rule（规则分支：零模型票 + method=rule:match + conf=1）
  *   ✔ run-wide-reobserve（低置信宽扫：第二池更大 + method 带 :reobserve）
  *   ✔ run-adjudicate（裁决档：method 以 :adjudicated 结尾）
- *   ✘ escalate / family-repair（引擎可触达，但本 lane 尚未写场景）
- *   ✘ R2b（与低置信宽扫在 run trace 上同为 :reobserve，无法从 trace 区分，需按首 ask conf+词面重叠判定）
- *   ✘ pilot leg 生命周期（resume 保留 / redirect 换 leg，需 pilot runtime + record 事件派生）
- *   ✘ run retry attempt 与记忆复用（需 run-execution 级 harness + OutcomeMemory 注入）
+ *   ✔ run-escalate（升级票：decision_kind=escalate、method=escalate、不产生第二次 provider 询问）
+ *   ✔ run-family-repair（族不符：族空停因或 nominated_family_repair）
+ *   ✔ run-r2b（词面零重叠提名：conf∈[floor,0.9) + 零重叠 → 第二次宽扫；按 conf/重叠判定进入条件）
+ *   ✔ run-retry-memory（同 memory 实例两次 attempt：记忆键稳定 + rank 档第二次带注记）
+ *   ✘ pilot leg 生命周期（resume 保留 / redirect 换 leg）——需 pilot runtime harness + record 事件派生，
+ *      本 lane 不复制 pilot 装配（避免与 verify-pilot 耦合），列为后续独立任务
  *
  * 用法：
  *   node --experimental-strip-types tools/verify-decision-characterization.ts [--check | --record | --list]
@@ -72,6 +74,7 @@ async function startServer(): Promise<{ origin: string; close(): Promise<void> }
 /** 每档一个 mw：provider 在 ready() 只解析一次（见文件头）。 */
 async function withMw<T>(turns: StubTurn[] | ((snap: StubRequestSnapshot) => StubTurn),
     run: (ctx: { mw: BrowserMiddleware; page: AnyPage; origin: string; stub: ReturnType<typeof makeStubProvider>; }) => Promise<T>,
+    extraOptions: Record<string, unknown> = {},
 ): Promise<T> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "af-char-home-"));
   Object.assign(process.env, { AMBERFLOW_HOME: home });
@@ -82,7 +85,7 @@ async function withMw<T>(turns: StubTurn[] | ((snap: StubRequestSnapshot) => Stu
   const page = session.page;
   const mw = buildMiddleware({
     face: "online", confirmPolicy: { kind: "allow-all" },
-    options: { hosts: ["127.0.0.1"], maxSteps: 1, gotoTimeout: 15_000, confFloor: 0.5 },
+    options: { hosts: ["127.0.0.1"], maxSteps: 1, gotoTimeout: 15_000, confFloor: 0.5, ...extraOptions },
   });
   try {
     return await run({ mw, page, origin: ORIGIN, stub });
@@ -212,6 +215,83 @@ const CASES: Case[] = [
         assert.ok(String(step["method"] ?? "").endsWith(":adjudicated"), "adjudicate 档 method 应以 :adjudicated 结尾");
         return reportFact(report);
       }),
+  },
+  {
+    name: "run-escalate",
+    run: async () => await withMw([{ score: 0.05, passthrough: false }], async ({ mw, page, origin, stub }) => {
+      const report = await mw.run("点一个按钮", `${origin}/wide.html`, {
+        page, verbose: false, reobserve: false,
+        escalateFn: (req) => Object.keys(req.criteria)[0] ?? null,
+      });
+      const step = report.steps[0] as unknown as Record<string, unknown>;
+      assert.equal(step["decision_kind"], "escalate", "升级票命中后 decision_kind=escalate");
+      assert.equal(step["method"], "escalate", "升级票 method=escalate");
+      assert.equal(stub.requests.length, 1, "升级票不产生第二次 provider 询问");
+      return { report: reportFact(report), asks: stub.requests.length };
+    }),
+  },
+  {
+    name: "run-family-repair",
+    run: async () => await withMw([{ score: 0.9, passthrough: true, probs: { e0: 0.9 } }], async ({ mw, page, origin, stub }) => {
+      const report = await mw.run("选一个", `${origin}/cards.html`, { page, verbose: false, expectedFamily: "check" });
+      const step = report.steps[0] as unknown as Record<string, unknown> | undefined;
+      const repair = Boolean(step?.["nominated_family_repair"]);
+      assert.ok(report.stop_code === "nominated_family_empty" || repair,
+        "族不符：走族修复或族空停因（cards 页无 check 候选）");
+      return { report: reportFact(report), nominated_family_repair: repair, asks: stub.requests.length };
+    }),
+  },
+  {
+    name: "run-r2b",
+    run: async () => await withMw(
+      (snap) => (snap.seq === 0 ? { score: 0.6, passthrough: true, probs: { e0: 0.6 } } : { score: 0.95, passthrough: true }),
+      async ({ mw, page, origin, stub }) => {
+        const report = await mw.run("zzz qqq", `${origin}/wide.html`, { page, verbose: false });
+        const first = stub.requests[0]!;
+        const firstRef = stub.responses[0]!.ref ?? null;
+        const firstLabel = first.candidates.find((c) => c.ref === firstRef)?.label ?? "";
+        const words = "zzz qqq".split(/\s+/).filter((w) => w !== "");
+        const overlap = words.some((w) => firstLabel.includes(w));
+        assert.equal(stub.requests.length, 2, "R2b：低词面重叠提名应触发一次宽扫重问");
+        assert.equal(overlap, false, "R2b 进入条件 = 提名与指令词面零重叠");
+        assert.ok(stub.responses[0]!.score >= 0.5 && stub.responses[0]!.score < 0.9, "R2b 进入条件 = conf∈[floor,0.9)");
+        return {
+          report: reportFact(report), first_conf: stub.responses[0]!.score, lexical_overlap: overlap,
+          pool_counts: [stub.requests[0]!.candidates.length, stub.requests[1]!.candidates.length],
+        };
+      }),
+  },
+  {
+    name: "run-retry-memory",
+    run: async () => {
+      const { createOutcomeMemory } = await import("../src/model/outcome-memory.ts");
+      const memory = createOutcomeMemory({});
+      const runs: Array<Record<string, unknown>> = [];
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        runs.push(await withMw(
+          () => ({ score: 0.9, passthrough: true, probs: { e0: 0.9 } }),
+          async ({ mw, page, origin, stub }) => {
+            const report = await mw.run("点一个按钮", `${origin}/cards.html`, {
+              page, verbose: false, outcomeMemory: memory,
+            });
+            return {
+              attempt, report: reportFact(report), asks: stub.requests.length,
+              notes: stub.requests.map((r) => r.notes),
+              memory_key: memory.key(`${origin}/cards.html`, "点一个按钮"),
+            };
+          },
+          { outcomeMemoryMode: "rank" },
+        ));
+      }
+      const key1 = String(runs[0]!["memory_key"]).replace(/127\.0\.0\.1:\d+/, "<LOCAL>");
+      const key2 = String(runs[1]!["memory_key"]).replace(/127\.0\.0\.1:\d+/, "<LOCAL>");
+      assert.equal(key1, key2, "同 url+instruction 的记忆键跨 attempt 稳定");
+      assert.equal(runs.length, 2, "工具侧 attempt 计数 1→2");
+      const secondNotes = runs[1]!["notes"] as Array<Record<string, string> | null>;
+      const hasNote = secondNotes.some((n) => n !== null && Object.keys(n).length > 0);
+      assert.equal(hasNote, true, "rank 档第二次 attempt 应带记忆注记");
+      return { attempts: runs.length, keys_equal: true, first_notes: runs[0]!["notes"], second_notes: secondNotes };
+    },
   },
 ];
 

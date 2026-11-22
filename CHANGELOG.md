@@ -4,6 +4,10 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-22 决策 characterization 扩面 + verify:offline 基线结案
+
+- **S0a 二期 characterization 场景（4 条新增，共 10 条）**：`run-escalate`（`decision_kind=escalate`/`method=escalate`/不产生第二次 provider 询问）、`run-family-repair`（族不符 → `nominated_family_empty` 或 `nominated_family_repair`）、`run-r2b`（`conf∈[floor,0.9)` + 提名与指令词面零重叠 → 第二次宽扫，池 64→100，**按 conf/重叠判定进入条件**而非 method）、`run-retry-memory`（同一 `OutcomeMemory` 两次 attempt：记忆键跨 attempt 稳定 + rank 档第二次带 `[tried before, page did not change]` 注记）。`verify-decision-characterization`：10/10（`--record` 连跑两次逐字节一致）；pilot-leg 生命周期场景列为后续（需 pilot runtime harness，避免与 verify-pilot 耦合）。
+- **§19 verify:offline filter-bar 基线结案**：证据链 = 金标记录以来池序/抽取源码零变更 + 两次运行失败行逐字节一致 + 净树 HEAD 亦失败 ⇒ 基线记录时即与环境不符（非当前行为变更）。处置 = 只重录 filter-bar 基线（其余 10 份还原），`verify-offline --check` **11/11 全绿**；长期建议（未做）= 该 lane 改为按 `(tag,label)` 多重集比较以消除位置性 ref 序敏感。
 ## [Unreleased] — 2026-11-22 驾驶面准确率批 + 决策询问契约 v5（提案）+ 账本工厂
 
 - **动作前快速拒绝（`pickRejection`）+ 族推导修复**：驾驶面在动作前只付一次 evaluate——被第三方覆盖/零尺寸/离屏的选中**不执行、不耗步**，账本记 `unhittable:*` 后下一轮换候选（此前每次 1 步 + ~5.8s 遮挡探针；真站 Maps 列表「Open 24 hours」连续 3 次 = 3 步全废）。**能力面判定改 fail-open**：op 统一由 `elemFamily` 单点推导（textarea/contenteditable/role=textbox|combobox|listbox 归 fill/select），能力不符交回 `actOnce` 裁决——修复"fill 族被闸门判 unsupported 后永久禁选"的回归（`firstExecFamily` 注释引用同步修正）。lane 新增「准确率：被覆盖选中不耗步」「族推导：fill 族不被永久拒」→ `verify:pilot` **12/12**；真站 Hours 腿 3→**1** 步、`low_confidence` 诚实停。
