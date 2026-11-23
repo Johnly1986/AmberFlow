@@ -1,4 +1,24 @@
 {
+  "_rebase": {
+    "allowed_diff_paths": [
+      "$.asks[<i>].goal"
+    ],
+    "changed_cases": [
+      "adjudicate",
+      "escalate",
+      "family-empty",
+      "family-repair",
+      "low-conf-wide-reobserve",
+      "low-confidence-stop",
+      "r2b",
+      "tiered-narrow-fallback",
+      "tiered-narrow-hit",
+      "wide-hard-cap-rung-hit",
+      "window-chain-all-miss"
+    ],
+    "policy": "--rebase-reviewed 只换允许路径闭集内的差异；任一非 goal 差异（含缺失/新增场景）拒绝且不改写 golden。 --record 仍按设计拒绝（被检实现不得自证）。",
+    "reason": "L0 改写评审换基：run 面模型询问 goal 尾部追加「| 当前页: <url>」段（ADR-001 R3，与 pilot 面同源渲染 drivingGoalText）；原 golden 是旧实现退役前的事实快照，不含该段。"
+  },
   "cases": {
     "adjudicate": {
       "asks": [
@@ -27,7 +47,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "点一个按钮",
+          "goal": "点一个按钮 | 当前页: <LOCAL>/wide.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -1678,7 +1698,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "点一个按钮",
+          "goal": "点一个按钮 | 当前页: <LOCAL>/wide.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -2057,7 +2077,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "选一个",
+          "goal": "选一个 | 当前页: <LOCAL>/cards.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -2134,7 +2154,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "选一个",
+          "goal": "选一个 | 当前页: <LOCAL>/family.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -2156,7 +2176,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "选一个",
+          "goal": "选一个 | 当前页: <LOCAL>/family.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -2228,7 +2248,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "点一个按钮",
+          "goal": "点一个按钮 | 当前页: <LOCAL>/wide.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -2260,7 +2280,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "点一个按钮",
+          "goal": "点一个按钮 | 当前页: <LOCAL>/wide.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -2826,7 +2846,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "点一个按钮",
+          "goal": "点一个按钮 | 当前页: <LOCAL>/wide.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -3205,7 +3225,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "zzz qqq",
+          "goal": "zzz qqq | 当前页: <LOCAL>/wide.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -3237,7 +3257,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "zzz qqq",
+          "goal": "zzz qqq | 当前页: <LOCAL>/wide.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -3943,7 +3963,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "选一个",
+          "goal": "选一个 | 当前页: <LOCAL>/cards.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -3975,7 +3995,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "选一个",
+          "goal": "选一个 | 当前页: <LOCAL>/cards.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -4052,7 +4072,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "选一个",
+          "goal": "选一个 | 当前页: <LOCAL>/cards.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -4186,7 +4206,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "点一个按钮",
+          "goal": "点一个按钮 | 当前页: <LOCAL>/wide180.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -4218,7 +4238,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "点一个按钮",
+          "goal": "点一个按钮 | 当前页: <LOCAL>/wide180.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -4250,7 +4270,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "点一个按钮",
+          "goal": "点一个按钮 | 当前页: <LOCAL>/wide180.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -5222,7 +5242,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "点一个按钮",
+          "goal": "点一个按钮 | 当前页: <LOCAL>/wide180.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -5254,7 +5274,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "点一个按钮",
+          "goal": "点一个按钮 | 当前页: <LOCAL>/wide180.html",
           "k": 8,
           "narrow": null,
           "notes": null,
@@ -5286,7 +5306,7 @@
             }
           ],
           "forbidden": [],
-          "goal": "点一个按钮",
+          "goal": "点一个按钮 | 当前页: <LOCAL>/wide180.html",
           "k": 8,
           "narrow": null,
           "notes": null,

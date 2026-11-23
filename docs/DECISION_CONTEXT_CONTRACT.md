@@ -298,6 +298,13 @@ Ports 接线 → **S4** 结构化段 + 步史迁出 goal（单独 A/B）。
   `DecisionAccounting`，**双语义接口**，run 面逐字节不变）前置 → S1（ask 实现 + pilot 切面）→
   S2（run 以 `runModelPick` 整段接入）。
 
+- **证据覆盖状态（补充登记，不改本契约条款语义）**：run-parity 阶段对照 lane 的 golden 已按评审
+  换基（`--rebase-reviewed`，仅允许 `$.asks[<i>].goal` 的 L0 文本差异并写 `_rebase` provenance；
+  `--record` 仍拒，防自证保留）；characterization 金标新增 `goals` 投影（run/pilot 场景 L0 的
+  「当前页/已执行」被钉住，另加 `run-two-step-history` 两步场景，金标 11→12）。run-parity lane 仍非门禁；
+  未钉住维度（pilot 两步历史、L3/L4 金标、risk/done L0 形状）见 `docs/DECISION_PLANE_UNIFICATION.md`
+  §4「证据覆盖与金标换基」。
+
 **验收**：契约本身零行为（typecheck + maintain 即可）；S1 切换后 §3.2 lane + `verify:runtime:offline`
 对照（逐场景行为等价）——**零模型 lane 只证降级路径，模型路径等价另需 provider stub 消融 + 真站 A/B
 （DC5 锚）**；新 face 接入 checklist = 注册项 + 适配器 + 一条 lane 场景（不新增 stopCode）。

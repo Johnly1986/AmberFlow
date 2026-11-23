@@ -19,7 +19,7 @@ import {
   frameChainValueProblem, parseHint, splitTailSuffixes, type ParsedHint,
 } from "./hint.ts";
 import { parseClickAtValue } from "./click-at.ts";
-import { sleepMs } from "../support/sleep.ts"; import { POOL_CAP_ELEMENTS, STATE_TEXT_BUDGET_CHARS, WIDE_SCAN_POOL_ELEMENTS } from "../support/tuning.ts";
+import { sleepMs } from "../support/sleep.ts"; import { POOL_CAP_ELEMENTS, WIDE_SCAN_POOL_ELEMENTS } from "../support/tuning.ts";
 // frame:<origin> 帧链 helper（A 批，唯一出处 frame-scope.ts）：extraction 只做打点/帧过滤，
 // 判定与 frameOriginOf 的实现都在 frame-scope（这里 re-export 保持既有导出面不变）。
 import { elemFrameStamp, frameChainOf, frameGateExcludes, frameInHostsEnvelope, frameOriginOf, frameScopeMatchesFrame } from "./frame-scope.ts";
@@ -1069,45 +1069,4 @@ export function frameHintFailureEvidence(
  * Head+tail page text: build_sequence keeps the START of the state and cuts the
  * tail at max_len, and forms/errors usually live at the bottom — ship both ends.
  */
-export async function pageText(page: PageLike, head = 300, tail = 150): Promise<string> {
-  const text = (await firstOf(page.locator!("main, body")).innerText()).trim();
-  if (text.length <= head + tail) return text;
-  return text.slice(0, head) + "\n...\n" + text.slice(-tail);
-}
-
-/**
- * State compressor: rank page lines by keyword overlap with the query and pack
- * only the hits into the budget. Deterministic on purpose — laya's domain-tuned
- * encoder is measurably unreliable as a general text-similarity ranker.
- */
-export async function stateText(page: PageLike, query: string, _embedFn: unknown = null, budget = STATE_TEXT_BUDGET_CHARS): Promise<string> {
-  const text = (await firstOf(page.locator!("main, body")).innerText()).trim();
-  const lines: string[] = [];
-  const seen = new Set<string>();
-  for (const ln of text.split("\n").map((l) => l.trim())) {
-    if (ln.length >= 4 && !seen.has(ln.toLowerCase())) {
-      seen.add(ln.toLowerCase());
-      lines.push(ln);
-    }
-  }
-  if (!lines.length) return "";
-  if (lines.join("\n").length <= budget) return lines.join("\n");
-  const tok = new Set(query.toLowerCase().match(/[a-z0-9]{2,}/g) ?? []);
-  const scored = lines.map((ln, i) => {
-    const ws = new Set(ln.toLowerCase().match(/[a-z0-9]{2,}/g) ?? []);
-    let score = 0;
-    for (const t of tok) if (ws.has(t)) score += 1;
-    return { score, i };
-  }).sort((a, b) => b.score - a.score || a.i - b.i);
-  const out: number[] = [];
-  let used = 0;
-  for (const { score, i } of scored) {
-    if (score <= 0) break;
-    if (used + lines[i]!.length + 1 > budget) continue;
-    out.push(i);
-    used += lines[i]!.length + 1;
-    if (used >= budget * 0.9) break;
-  }
-  if (!out.length) return pageText(page);   // query matches nothing -> head+tail
-  return out.sort((a, b) => a - b).map((i) => lines[i]).join("\n");
-}
+export { pageText, stateText } from "./state-text.ts";

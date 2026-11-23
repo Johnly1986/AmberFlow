@@ -25,6 +25,8 @@ import readline from "node:readline";
 import { createCtx, isSyntheticScrollTarget, StopError, type Ctx } from "./ctx.ts";
 // S1：行容器滚动（rows 寻址）与 scroll 分支执行体在独立模块（主文件只减不增）。
 import { doActScroll } from "./session-act-scroll.ts";
+// A3 范围原语的会话面：act set_range 分支执行体在独立模块（doAct 存量行数只减不增）。
+import { doActSetRange } from "./session-act-range.ts";
 import { wideScanCandidates } from "./session-wide-scan.ts";
 // F76/P3：tab 请求处理体（校验/匹配/切页）在独立模块（主文件只减不增）。
 import { doTabRequest, type TabOpDeps } from "./session-ops-extra.ts";
@@ -590,6 +592,16 @@ export class SessionRuntime {
       return { ok: false, code: "config_error", reason: `act op '${actOp}' needs a non-empty target (hint string)` };
     }
     const target = String(targetRaw);
+
+    // ---- set_range：滑杆设值原语（与 ctx.setRange 同一条 mw.setRange / range.ts 三策略；
+    //      越界 = value_out_of_range 零动作，绝不假装成功）。执行体在 session-act-range.ts
+    //      （doAct 存量行数只减不增）。----
+    if (actOp === "set_range") {
+      return await doActSetRange(target, req["value"], {
+        page, startedAt: started,
+        mw: () => this.mw(), log: (l) => this.log(l),
+      });
+    }
 
     // 值只来自请求本身（authoring 面的"人给的决定"）；不发明取值（红线②的同一条纪律：
     // 缺值 = needs_value，绝不猜）。

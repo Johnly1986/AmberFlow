@@ -14,13 +14,14 @@ import type { ElemPool } from "../engine/elem-model.ts";
 import { createDecisionAccounting } from "../engine/decision-accounting.ts";
 import { createDecisionAsk, type DecisionAskHost } from "../engine/decision-ask.ts";
 import type {
-  DecisionAccounting, DecisionAsk, DecisionAskOutcome, DecisionLifetime,
+  DecisionAccounting, DecisionAsk, DecisionAskOutcome, DecisionAskPorts, DecisionLifetime,
 } from "../engine/decision-ask-contract.ts";
 import { WIDER_ELEMENTS } from "../engine/executor-pure.ts";
 import { decisionAskPortsOf } from "./middleware-factory.ts";
 import type { AnyPage, BrowserMiddleware } from "../engine/executor.ts";
 import type { ProviderPage } from "../support/decision-provider-contract.ts";
 import { PilotLedger } from "./pilot-ledger.ts";
+import { loadSiteFacts, matchSiteFacts, renderModelFence } from "./site-facts.ts";
 
 /** 一次 pilot 驾驶的询问入口（modelVote 委托面；池/禁选/注记由引擎自取）。 */
 export interface PilotAskCall {
@@ -46,6 +47,9 @@ export class PilotAskAdapter {
   private accounting: DecisionAccounting | null = null;
   private boundLeg = 0;
 
+  /** L4 site-facts 文件缓存（进程内一次加载；按 hosts 每次匹配，端口无命中 = null）。 */
+  private siteFactsCache: ReturnType<typeof loadSiteFacts> | null = null;
+
   constructor(mw: () => BrowserMiddleware, ledger: PilotLedger, hosts: () => string[] | null, runId = "pilot") {
     this.mwRef = mw;
     this.ledger = ledger;
@@ -67,7 +71,7 @@ export class PilotAskAdapter {
   /** 询问 seam：组合根经 `buildMiddleware` 注入的端口随 middleware 一起取（缺省 = 无端口）。 */
   private seam(): DecisionAsk {
     if (this.askSeam === null) {
-      this.askSeam = createDecisionAsk(this.host(), { ports: decisionAskPortsOf(this.mwRef()) });
+      this.askSeam = createDecisionAsk(this.host(), { ports: this.ports() });
     }
     return this.askSeam;
   }
@@ -89,6 +93,29 @@ export class PilotAskAdapter {
       this.boundLeg = this.leg;
     }
     return this.accounting;
+  }
+
+  /**
+   * 组合根端口：L4 站点知识按本面 hosts 信封匹配（与 run 面 D2 的 site-facts 同一份文件与
+   * fence 渲染）；无命中/读失败 = null（请求体形状不变）。既有端口原样透传。
+   */
+  private ports(): DecisionAskPorts {
+    const base = decisionAskPortsOf(this.mwRef());
+    return {
+      ...(base ?? {}),
+      siteFacts: {
+        notes: async () => {
+          const hosts = this.hostsRef();
+          if (hosts === null || hosts.length === 0) return null;
+          try {
+            if (this.siteFactsCache === null) {
+              this.siteFactsCache = loadSiteFacts(() => { /* pilot 面没有 stderr 通道 */ });
+            }
+            return renderModelFence(matchSiteFacts(this.siteFactsCache, hosts));
+          } catch { return null; }
+        },
+      },
+    };
   }
 
   /** host 原语：窄池 = 驾驶面同一条抽池链；宽扫 = 执行期 4d 同款参数（WIDER_ELEMENTS/WIDE_QUOTAS）。 */

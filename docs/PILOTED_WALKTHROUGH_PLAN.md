@@ -107,11 +107,34 @@ run 面的**决策语句步**（`ctx.step(goal, { done })`，无 `act`）早已�
 确定性守卫——当前 URL 不含声明子串即停，不在漂移页上继续抽池/问模型）/ `budget_exceeded`
 （`--max-steps` 与 run 同名同义）/ `final_signal_held` / `browser_dead`。
 
+终态语义（session 托管面，单源 `src/app/session-driver.ts`）：driver 到达
+`final_signal_held` / `budget_exceeded` / `aborted` / `browser_dead` 后**不可续驾驶**——
+终态后的 `drive` 回 `drive_terminal`（已 `drive_close` 则 `drive_closed`）；终态后的
+`drive_command{cmd:"resume"|"redirect"}` 回 `drive_terminal`（预算终态保留
+`budget_exhausted` 专属码），均带顶层 `reason` + `stop_code`；`next` = 起新 session
+（预算终态同时增大 `max_steps`）。`finish`/`abort` 在终态保持幂等收尾；单行拒绝
+（如 `signal_not_held`）同样把 `reason` 提升到顶层。参数形状错 = `config_error`（带
+`reason`，不消费会话）。**交接不是终态**：停在 `handoff_open` 时 session 的 `act/observe` 仍可用；
+再次 `drive` 不得静默续驾驶（那会重放同一交接、把新 goal 悄悄丢掉）——回执为显式
+`code:"handoff_open"` + `handoff_open` 回显 + `goal_ignored?` + `next`（继续用
+`driveCommand`，换目标起新 session）。
+
+**结束态责任边界（evidence-only，不改引擎裁决）**：单步 `ok/changed` 只说明这一步执行成功，
+**不等于任务成功**——"把 Rating 4.5+ 改成 4.0"、"Open now 之外又点 Open 24 hours"这类回退，
+页面事实本身合法，引擎在没有声明时无从知道期望态，因此**不做每步 after-state 守卫/自动回滚**
+（会越出"模型只投票"面，且把合法页面变化误报成错误）。责任边界：
+- 调用方要"结束态可验证"，就在 `drive` 声明 `final_signal`（`checkSignal` 每轮判 + finish 再验）；
+  声明了信号却没成立 = 确定性停因/交接，不会被当成"做完了"。
+- 没有声明信号时，handoff 带 `final_signal:null`（结束态**未被验证**的显式 fact）+ 顶层
+  `weak_picks`（只收 model 票且 `conf < 0.25` 的票面事实，≤6）与 `pilot_end.conf_floor`
+  （本次有效闸门刻度）——让"为什么回退"可解释，但**不**阻断、不改正、不新增停因。
+- 长任务用 `expect_url` / 分段 `final_signal` 做检查点；任务成功与否仍由调用方裁决。
+
 **Agent 兜底指令闭集**（stdin JSONL，新请求类型；观察类指令复用 session 请求面）：
 
 | 指令 | 形状 | 语义 |
 |---|---|---|
-| `resume` | `{ hint?, value?{k:v}, skip? }` | 修正后从当前现场继续驾驶；hint 进本轮解析链（`hintMatch` 唯一命中即确定性执行，不花模型）；值进本轮袋（值来自 Agent = 显式给定，红线②不破） |
+| `resume` | `{ hint?, value?, target?, skip? }` | 修正后从当前现场继续驾驶；hint 进本轮解析链（`hintMatch` 唯一命中即确定性执行，不花模型），落空 = 下次交接 evidence 带 `resume_hint.missed`；值进本轮袋（值来自 Agent = 显式给定，红线②不破）——对象 = 多槽 k:v；字符串 = 单值，键序 `target` → 交接 `needs_value.key` → `resumed`，带 hint 时值跟命中目标走。`needs_value` 交接的 `why_stuck.evidence` 带 `needs_value:{target,key,ref}`（只带键/目标/ref，**不带值**）与可照抄的 `resume 带 value：{"<key>":"<值>"}` 解锁建议 |
 | `redirect` | `{ goal, url? }` | 改道：换目标/换入口；步史清段重新累计 |
 | `finish` | `{ signal }` | 声明最终信号；引擎 `checkSignal` 验证，成立才记 held——**产物仍标 `pilot:true`，不冒充 run 结论**（仿 `walk:true` 先例） |
 | `abort` | `{}` | 终止，落已走轨迹 |

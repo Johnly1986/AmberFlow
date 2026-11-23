@@ -27,6 +27,13 @@ import type {
 import { esig, type ElemPool } from "./elem-model.ts";
 import type { PickProposal } from "./executor-types.ts";
 import { urlOf } from "./page-shapes.ts";
+import { effectiveNotes, hasSiteFactsNotes } from "./decision-request.ts";
+import { WIDE_QUOTAS, ariaInteractiveLines, criteriaView } from "./extraction.ts";
+import { WIDER_ELEMENTS, describeActionError } from "./executor-pure.ts";
+import { runWindowEscalationRung } from "./window-escalation.ts";
+import type { BrowserMiddleware } from "./executor.ts";
+import { drivingGoalText, type DecisionHistoryStep } from "./decision-goal-text.ts";
+import type { GateRecovery, PickAcc, RunPickCtx, RunPickHost } from "./decision-pick-types.ts";
 
 /** L1 回执的字符估算（每候选近似人读字节；只做诊断，不参与任何裁剪/裁决）。 */
 const LAYER1_CHARS_PER_CANDIDATE = 40;
@@ -110,6 +117,10 @@ function producedChars(
   if (layer === "L0") return typeof goal === "string" ? goal.trim().length : 0;
   if (layer === "L1") return (pool === null ? 0 : Object.keys(pool).length) * LAYER1_CHARS_PER_CANDIDATE;
   if (layer === "L2") return notes === null ? 0 : Object.keys(notes).length === 0 ? 0 : JSON.stringify(notes).length;
+  if (layer === "L4") {
+    const sf = notes === null ? undefined : notes["site_facts"];
+    return typeof sf === "string" ? sf.length : 0;
+  }
   return 0;
 }
 
@@ -146,6 +157,25 @@ function layerReceipt(
   return { layer, status: "sent", chars, ...(budget === 0 ? {} : { budget }), ...(truncated ? { truncated } : {}) };
 }
 
+/**
+ * 逐层回执的对外入口（run/pilot 两面共用）：只做「声明档 / 段校验 / 产出事实」纯投影，
+ * 不改变询问行为。run 面把它挂进 trace 的 `context_layers`，pilot 面走 DecisionAskOutcome。
+ */
+export function contextLayerReceipts(q: {
+  capability: ProviderCapabilities["context"] | null;
+  goal: string;
+  pool: ElemPool | null;
+  notes: Record<string, string> | null;
+  segments?: DecisionSegment[];
+  face?: string;
+  ports?: DecisionAskPorts;
+}): DecisionLayerReceipt[] {
+  return layerReceipts(
+    { segments: q.segments ?? [], capability: q.capability, ports: q.ports, face: q.face ?? "run" },
+    q.goal, q.pool, q.notes,
+  );
+}
+
 /** 五层回执（顺序固定 L0→L4；层闭集不得增第六层）。 */
 function layerReceipts(
   ctx: ReceiptContext, goal: string, pool: ElemPool | null, notes: Record<string, string> | null,
@@ -178,6 +208,17 @@ export function createDecisionAsk(host: DecisionAskHost, opts: DecisionAskOption
       const goal = intent.goal;
       const instruction = intent.instruction ?? goal;
       const confFloor = profile.confFloor ?? DEFAULT_CONF_FLOOR;
+      // L4 端口：组合根注入 site-facts 摘要；缺端口 / 已有 site_facts / 端口无命中 = notes 原样
+      //（请求体形状不变）。取端口失败按"未产出"处理，不阻断询问。
+      const siteFactsPort = opts.ports?.siteFacts;
+      const enrichNotes = async (notes: Record<string, string> | null): Promise<Record<string, string> | null> => {
+        if (siteFactsPort === undefined || hasSiteFactsNotes(notes)) return notes;
+        let text: string | null = null;
+        try {
+          text = await siteFactsPort.notes({ url: urlOf(page), instruction });
+        } catch { text = null; }
+        return effectiveNotes(notes, text);
+      };
       const ready = await host.ready();
       const receipts = (pool: ElemPool | null, notes: Record<string, string> | null): DecisionLayerReceipt[] =>
         layerReceipts({
@@ -198,7 +239,7 @@ export function createDecisionAsk(host: DecisionAskHost, opts: DecisionAskOption
 
       // ② 账本：禁选按 lifetime 策略重映射到本视图；注记只表达已试负面证据（无 = null）。
       let forbidden = accounting.forbiddenRefs(pool);
-      let notes = accounting.notesFor(pool, { url: urlOf(page), instruction });
+      let notes = await enrichNotes(accounting.notesFor(pool, { url: urlOf(page), instruction }));
 
       // ③ 窄问：弃权（choiceRef=null）与执行期 abstain 同源——直接停，不付宽扫重问。
       let asked = 1;
@@ -227,7 +268,7 @@ export function createDecisionAsk(host: DecisionAskHost, opts: DecisionAskOption
         accounting.prune(wide);
         pool = wide;
         forbidden = accounting.forbiddenRefs(pool);
-        notes = accounting.notesFor(pool, { url: urlOf(page), instruction });
+        notes = await enrichNotes(accounting.notesFor(pool, { url: urlOf(page), instruction }));
         asked += 1;
         proposal = await host.pick(goal, page, pool, forbidden, notes);
         via = "reobserve";
@@ -252,4 +293,130 @@ export function createDecisionAsk(host: DecisionAskHost, opts: DecisionAskOption
       };
     },
   };
+}
+
+/* ------------------------------------------------------------------ run 面阶梯 rung 单源 */
+
+/** 宽扫/升级票的窗口递增链替身（phase 的 `rungCarrier` 同构；本模块不持 BrowserMiddleware）。 */
+function rungCarrierOf(host: RunPickHost): BrowserMiddleware {
+  return { candidates: { extract: (req: Parameters<RunPickHost["candidatesExtract"]>[0]) => host.candidatesExtract(req) } } as unknown as BrowserMiddleware;
+}
+
+/**
+ * 模型问句的 L0 文本（与 pilot 面同源渲染）：instruction + 当前页 + 已执行步史。
+ * 只改**模型询问**的 goal；规则匹配/词面判据/升级建议仍用原 `instruction`（语义面不混入渲染）。
+ */
+export function askGoalOf(ctx: RunPickCtx): string {
+  const history: DecisionHistoryStep[] = [];
+  for (const t of ctx.trace) {
+    if (t.executed !== true || typeof t.desc !== "string") continue;
+    const step: DecisionHistoryStep = { target: t.desc, ok: true };
+    if (t.changed === true || t.changed === false) step.changed = t.changed;
+    history.push(step);
+  }
+  return drivingGoalText(ctx.instruction, history, urlOf(ctx.pg));
+}
+
+/** 作用域禁选：attempt 账本与 run 的 forbid 表同源（无实例时退回就地视图）。 */
+export function forbiddenOf(ctx: RunPickCtx, pool: ElemPool): Set<string> {
+  return ctx.decisionAccounting?.forbiddenRefs(pool) ?? new Set(Object.keys(ctx.forbidden));
+}
+
+/**
+ * run 面低置信恢复阶梯（宽扫 → 窗口递增 → 升级票）的**单一编排点**：phase 只调本函数，
+ * 三档 rung 的实现与顺序都在本模块（P2 迁移边界；裁决/R2b/族修复仍归 phase，P3 再迁）。
+ */
+export async function runRecoveryLadder(
+  host: RunPickHost, ctx: RunPickCtx, st: PickAcc, mm: string, floor: number, rec: GateRecovery,
+): Promise<void> {
+  await runWideReobserve(host, ctx, st, mm, floor, rec);
+  await runEscalatedPick(host, ctx, st, floor, rec);
+}
+
+/** 一次模型询问：记录逐层回执（阶梯选哪支，证据面都看到最后一次询问的上文层）。 */
+export async function askPick(
+  host: RunPickHost, ctx: RunPickCtx, st: PickAcc, goal: string,
+  pool: ElemPool, forbidden: Set<string>, notes: Record<string, string> | null,
+): Promise<[string | null, number, Record<string, number>]> {
+  // 回执的 L4 观察与实际 wire 同一份计算（单源 = `decision-request.effectiveNotes`）：
+  // pickInner 发给 provider 的 notes 也由它得出，此处只按同一入参取投影，不改询问行为。
+  st.decisionContext = {
+    layers: contextLayerReceipts({
+      capability: host.contextCapability(), goal, pool, notes: effectiveNotes(notes, host.siteFactsNotes()),
+    }),
+  };
+  return await host.pickElement(goal, ctx.pg, pool, forbidden, notes);
+}
+
+
+/**
+ * 分支⑤c：低置信宽扫（OBSERVATION-BOTTLENECK RECOVERY）。宽视图**成为本步视图**，
+ * 即使本地提问仍不过闸；第二档由共享的窗口递增链 helper 扩到硬顶重问一次（命中即停）。
+ */
+export async function runWideReobserve(host: RunPickHost, ctx: RunPickCtx, st: PickAcc, mm: string, floor: number, rec: GateRecovery): Promise<void> {
+  if (!(ctx.reobserve && !st.reobserved && st.ref !== null && host.stepTimeoutLeft() > 0)) return;
+  st.reobserved = true;
+  await host.settleBeforeExtract(ctx.pg);
+  const wide = await host.candidatesExtract({ page: ctx.pg, jsProbe: true, maxElements: WIDER_ELEMENTS, widgets: true, quotas: WIDE_QUOTAS, candidatePriority: ctx.candidatePriority, hosts: host.frameHosts });
+  if (!(Object.keys(wide).length > Object.keys(st.elems).length)) return;
+  // refs are positional: re-prune forbids whose ref now names a different element.
+  host.pruneForbids(wide);
+  // 宽视图同样只做**排序先验**（不丢元素：加宽看到的东西不该被族过滤掉）。
+  const wideAsk = host.orderedPool(wide);
+  const [ref2, conf2] = await askPick(host, ctx, st, askGoalOf(ctx), wideAsk, forbiddenOf(ctx, wideAsk), ctx.noted);
+  // The wider view BECOMES the step's view even when the local model still abstains.
+  st.elems = wide;
+  if (ref2 !== null && conf2 >= floor) {
+    st.ref = ref2;
+    st.conf = conf2;
+    st.method = `${mm}:reobserve`;
+    rec.recovered = true;
+    ctx.windowChainFacts.push({ window: WIDER_ELEMENTS, miss: 1, resolved: true, ref: ref2 });
+    if (ctx.verbose) console.log(`  step ${ctx.stepNo}: re-observed wider (${Object.keys(wide).length} elements) -> ${st.ref} conf=${conf2.toFixed(2)}`);
+    return;
+  }
+  if (ref2 !== null) {
+    rec.widePick = { ref: ref2, conf: conf2 };
+    rec.gateRejected.push(conf2);   // 宽看重问的意见也未过 floor（adjudicate 复用时撤回）
+  }
+  ctx.windowChainFacts.push({ window: WIDER_ELEMENTS, miss: 1, resolved: false });
+  if (ctx.verbose) console.log(`  step ${ctx.stepNo}: re-observed wider (${Object.keys(wide).length} elements) -> still below floor`);
+  // 窗口递增链第二档：120 档重问仍未过 floor → 扩到硬顶再重问一次（命中即停）；
+  // widePick/"最后一次观察到的意见"语义随档位滚动（硬顶档成为最后一次观察）。
+  const rung = await runWindowEscalationRung(rungCarrierOf(host), { pg: ctx.pg, stepNo: ctx.stepNo, instruction: askGoalOf(ctx), verbose: ctx.verbose, elems: st.elems, floor, forbidden: ctx.forbidden, noted: ctx.noted, candidatePriority: ctx.candidatePriority, frameHosts: host.frameHosts, stepTimeoutLeft: host.stepTimeoutLeft, pickElement: (g, _page, pool, blocked, notes) => askPick(host, ctx, st, g, pool, blocked, notes), orderedPool: host.orderedPool, pruneForbids: host.pruneForbids, windowChainFacts: ctx.windowChainFacts, logTag: "re-observed wider",
+    hitNote: (poolSize, ref3, conf3) => `(${poolSize} elements) -> ${ref3} conf=${conf3.toFixed(2)}`, missNote: () => "still below floor" });
+  if (rung.grew) {
+    st.elems = rung.pool;
+    if (rung.adopted && rung.ref !== null) { st.ref = rung.ref; st.conf = rung.conf; st.method = `${mm}:reobserve`; rec.recovered = true; }
+    else if (rung.ref !== null) { rec.widePick = { ref: rung.ref, conf: rung.conf }; rec.gateRejected.push(rung.conf); }
+  }
+}
+
+/**
+ * 分支⑤d：升级票（C3-R 的深思路径）。更强的推理者只能从**本轮展示过的候选**里点名
+ * （不在视图里的答案一律拒收），所以它无法发明元素、值或动作。
+ * 决策面已降级（起跑探判死/中途死亡）→ 升级链规则兜底，不再咨询死服务。
+ */
+export async function runEscalatedPick(host: RunPickHost, ctx: RunPickCtx, st: PickAcc, floor: number, rec: GateRecovery): Promise<void> {
+  if (rec.recovered || !ctx.escalateFn || st.escalated || ctx.decisionDegradedReasonClass !== null
+      || host.stepTimeoutLeft() <= 0) return;
+  st.escalated = true;
+  // 显式传当前（宽化后的）池：orderedPool 无参形式读到的是 run() 闭包的旧窄视图
+  // ——低置信恢复刚把 elems 换成宽视图时，升级题面必须与 pickElement 看到的是同一份。
+  // noted 同步传入：升级题面不带 = 更强的推理者反而看不见"这个候选已白跑过"的事实。
+  const crit = criteriaView(host.orderedPool(st.elems), new Set(Object.keys(ctx.forbidden)), await ariaInteractiveLines(ctx.pg), ctx.noted);
+  const state = { url: urlOf(ctx.pg), title: await ctx.pg.title(), main_text: await host.stateTextFn(ctx.pg, ctx.instruction) };
+  try {
+    const pick = await ctx.escalateFn({ instruction: ctx.instruction, criteria: crit, why: `low confidence ${st.conf.toFixed(2)} < floor ${floor.toFixed(2)}`, ...state });
+    if (pick && crit[pick] !== undefined && !(pick in ctx.forbidden)) {
+      st.ref = pick;
+      st.method = "escalate";
+      st.decisionKind = "escalate";
+      st.escalatedPick = pick;
+      rec.recovered = true;
+      if (ctx.verbose) console.log(`  step ${ctx.stepNo}: escalated -> ${pick}`);
+    } else if (ctx.verbose) console.log(`  step ${ctx.stepNo}: escalation rejected (${pick === null ? "no answer" : `'${pick}' is not a shown candidate`})`);
+  } catch (e) {
+    if (ctx.verbose) console.log(`  step ${ctx.stepNo}: escalation failed (${describeActionError(e)})`);
+  }
 }

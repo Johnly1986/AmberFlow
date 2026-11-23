@@ -31,12 +31,16 @@ export interface PilotCommandTarget {
   readonly stepCount: number;
   handoffOpen: PilotHandoff | null;
   resumeHint: string | null;
+  /** resume 字符串值的待注入值（hint 命中时按命中目标的键落地）。 */
+  pendingValue: string | null;
   inertRun: number;
   finished: boolean;
   aborted: boolean;
   stopCode: PilotStopCode | null;
   fallbackCount: number;
   respond(obj: Record<string, unknown>): void;
+  /** 未决值需求的值袋键（needs_value 记录的键；null = 无未决值需求）。 */
+  valueNeedKey(): string | null;
   page(): Promise<AnyPage>;
   redirectReset(): void;
   signalHeld(spec: Record<string, unknown>): Promise<boolean>;
@@ -93,7 +97,9 @@ export async function handlePilotCommand(
         return "stay";
       }
       // resume.value 显式给值（红线②：值只能从这里或预声明 slots 来）：
-      // 对象 = 多槽 k:v 全并入值袋；字符串 = 单值（键取 args.target，缺省 "resumed"）。
+      // 对象 = 多槽 k:v 全并入值袋（语义逐字节不变）；字符串 = 单值，键序
+      // target（显式命名）→ needs_value 记录的目标键 → "resumed"（缺省兜底，真实标签永不命中它）。
+      // 同时记 pendingValue：resume 另带 hint 时值跟 hint 目标走（命中时注入命中元素的键）。
       const value = args["value"];
       if (isObj(value)) {
         for (const [k, v] of Object.entries(value)) {
@@ -102,8 +108,9 @@ export async function handlePilotCommand(
           }
         }
       } else if (typeof value === "string" && nonEmpty(value)) {
-        const key = clip(String(args["target"] ?? ""), 40) || "resumed";
+        const key = clip(String(args["target"] ?? ""), 40) || target.valueNeedKey() || "resumed";
         target.slots[key] = value;
+        target.pendingValue = value;
       }
       // resume.skip：把最近一次驾驶选中的目标加入禁选后继续（不点名换目标的兜底）。
       const skipped = args["skip"] === true && target.lastPickedRef !== null;

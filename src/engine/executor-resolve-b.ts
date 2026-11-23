@@ -617,6 +617,7 @@ export async function _domFallbackResolve(mw: BrowserMiddleware, page: AnyPage, 
         full_label: String(r["label"] ?? "").slice(0, 200),
         role: String(r["role"] ?? ""), id: String(r["id"] ?? ""), data_test: String(r["dt"] ?? ""),
         input_type: String(r["type"] ?? ""),
+        ...a3AttrProjection(r),
         ...(r["draggable"] === true ? { draggable: true } : {}),
         // E1（within 权威对等）：合成主帧行补 anchor_ids（与真池行同构，additive）——
         // resolveCommandRef → hintMatch.inAnchor 据此消费 within（与池/回捞面同语义）。
@@ -705,3 +706,17 @@ export async function _domFallbackResolve(mw: BrowserMiddleware, page: AnyPage, 
     };
   }
 
+/**
+ * A3 合成行的属性投影（与池行同构的 additive 补全）：`name`/`href` 是池行的属性匹配底座，
+ * 缺它们时 `[name=…]` / `[href=…]` 在池外回退面恒落空；`href_full` 只在原始属性非空时出现
+ * （池行同一条省略口径，见 EXTRACT_JS 的 href_full 投影）。字段来源 = DOM_FALLBACK_COLLECT_JS
+ * 的行投影，两处键名一一对应。
+ */
+function a3AttrProjection(r: Record<string, unknown>): { name: string; href: string; href_full?: string } {
+  const hrefFull = String(r["href_full"] ?? "");
+  return {
+    name: String(r["name"] ?? ""),
+    href: String(r["href"] ?? ""),
+    ...(hrefFull === "" ? {} : { href_full: hrefFull }),
+  };
+}

@@ -21,6 +21,7 @@ import { type AdapterRunContext, type ManualStepDecl, type ManualStepRequest, ty
 import { type AppPack, type ExpandedStep, type SourceObservation, expandPack, resolveSourceSlots } from "./app-pack.ts";
 import { AppRunConfigError, preflightConfig, probeCompatDecisionPlane, promptManualOnTty, resolvePace, resolveRunPolicy } from "./app-runner-policy.ts";
 import { runToolStep } from "./app-runner-tool-step.ts";
+import { appStopContextFields, rememberAppStopContext } from "./app-stop-context.ts";
 import { type AppInvariantResult, type AppRunOptions, type AppRunResult, type AppSourceResult, type ToolStepResult, asAfterSignature, startUrl, summarizeDecisions } from "./app-runner-types.ts";
 import { createAppCandidateProducer } from "./candidate-source.ts";
 import { validateApp } from "./cross-ref.ts";
@@ -415,7 +416,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
       }
       const { rep, attempt, steps } = await runSubgoalWithRetries(
         mw as never, sg, plan, sg.start_url ?? "", shell.page, shell.pw, verbose);
-      decisionSteps.push(...steps);
+      decisionSteps.push(...steps); rememberAppStopContext(adapterCtx, rep);
       if (opts.captureTraces) {
         const executed = rep.steps.filter((t) => t.executed);
         // A1 子改动③：after 签名与 hows 一一对齐；全 null 时整字段省略（产物最小纪律）。
@@ -702,7 +703,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     // （缺省等价的纪律：新字段不该只是"多一行没人看的数"）。
     ...(Object.values(walk.visits()).some((n) => n > 1) ? { path_visits: walk.visits() } : {}),
     ...(pathCrossed.length ? { path_crossed: pathCrossed } : {}),
-    ...(pathStopOut ? { path_stop: pathStopOut } : {}),
+    ...(pathStopOut ? { path_stop: pathStopOut } : {}), ...appStopContextFields(adapterCtx),
     ...(endState ? { end_state: endState } : {}),
     // §3：生效策略**只在非缺省时写进产物**（与 path_visits 同一纪律）。
     // 来源三态要说清：CLI 本次覆盖 / 包声明 / 都没写——否则报告看不出这次跑的和上次是不是同一件事。

@@ -45,7 +45,7 @@
     "doctor": "node --experimental-strip-types src/cli/start.ts --doctor",
     "model:fetch": "node --experimental-strip-types src/model/model-fetch.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run precheck && npm run run-args:check && npm run typecheck && npm run config:example:check && npm run schema:check && npm run prompt-hit && npm run site-knowledge:check && npm run secret-scan && npm run examples-check && npm run bridge:test && npm run row-anchor:check && npm run laya-truncation:check && npm run maintain:check && npm run split:check && npm run test:validate",
+    "check": "npm run precheck && npm run run-args:check && npm run typecheck && npm run config:example:check && npm run schema:check && npm run prompt-hit && npm run site-knowledge:check && npm run secret-scan && npm run examples-check && npm run bridge:test && npm run row-anchor:check && npm run laya-truncation:check && npm run maintain:check && npm run split:check && npm run test:validate && npm run verify:decision-run-parity",
     "test": "node --experimental-strip-types src/cli/test.ts",
     "test:validate": "node --experimental-strip-types src/cli/test.ts --validate",
     "apps": "node --experimental-strip-types src/app/app-runner.ts",
@@ -79,6 +79,8 @@
     "site-knowledge:check": "node --experimental-strip-types tools/site-knowledge-check.ts",
     "verify:pilot": "node --experimental-strip-types tools/verify-pilot.ts",
     "verify:parity": "node --experimental-strip-types tools/verify-parity.ts",
+    "verify:decision-context": "node --experimental-strip-types tools/verify-decision-context.ts",
+    "verify:decision-run-parity": "node --experimental-strip-types tools/verify-decision-run-parity.ts --check",
     "verify:decision-characterization": "node --experimental-strip-types tools/verify-decision-characterization.ts",
     "verify:model-face": "node --experimental-strip-types tools/verify-model-face.ts"
   },

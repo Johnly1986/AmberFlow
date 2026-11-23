@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>pool-dedup ⑥：空名可编辑原生表单控件不进 empty-child 剔除</title></head>
+<body>
+  <!-- 可编辑原生控件（input/select/textarea）即使 label 为空也是**独立操作面**（fill/type/select
+       的目标），不是父区域的文本装饰；把它当"空名子"剔出池，模型只能走池外回退。
+       判定条件全在这里复现：wrapper 是候选（data-js-ref 监听章）、input 可见、label 三源全空
+       （无 aria-label/title/placeholder/value attribute，无 text），value 只作 **property** 设置
+       （labelOfRaw 读 value attribute 仍为空）——按"子为空名"规则本应被剔。 -->
+  <div id="search-region" data-js-ref="jsfix6" role="search" style="display:inline-block;padding:8px;border:1px solid #ccc">
+    <input id="free-text" name="q" style="display:block;width:200px;height:28px">
+  </div>
+  <!-- 另外两件可编辑控件同形态（空 label）：证明豁免面是"可编辑原生控件"这一族 -->
+  <div id="select-region" data-js-ref="jsfix7" style="display:inline-block;padding:8px;border:1px solid #ccc">
+    <select id="free-select" style="display:block;width:160px;height:28px"><option value=""></option></select>
+  </div>
+  <div id="textarea-region" data-js-ref="jsfix8" style="display:inline-block;padding:8px;border:1px solid #ccc">
+    <textarea id="free-note" style="display:block;width:200px;height:40px"></textarea>
+  </div>
+  <script>
+    // 值只作 property 写入（不落 attribute）：池行 label 仍为空，但控件有真实用户值语义。
+    document.getElementById("free-text").value = "only-property-value";
+    document.getElementById("free-note").value = "typed note";
+  </script>
+</body>
+</html>

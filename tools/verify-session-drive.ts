@@ -246,6 +246,7 @@ async function scenarioAttachDrive(env: NodeJS.ProcessEnv, origin: string): Prom
     assert.equal(driveAgain["reused"], true, "a second drive reuses the live driver");
     assert.equal(driveAgain["status"], "await_pick");
     assert.equal(driveAgain["out_dir"], pilotOutDir, "the evidence dir does not change");
+    assert.equal(driveAgain["goal_ignored"], true, "a reused driver reports that the request goal was not adopted");
     assert.equal(hostPage(), page0);
 
     // ---- driveCommand resume{hint}：点名确定性命中 → 点击导航到 detail ----
@@ -293,6 +294,17 @@ async function scenarioAttachDrive(env: NodeJS.ProcessEnv, origin: string): Prom
     assert.equal(afterEnd["ok"], false);
     assert.equal(afterEnd["code"], "drive_terminal");
     assert.equal(afterEnd["session_id"], RUN_ID);
+
+    // 终态后 resume/redirect：复用 start()/step() 的 terminal 分类（drive_terminal + 顶层
+    // reason + stop_code），不再是「无 reason 的 config_error」；session 自身仍存活。
+    const terminalResume = await request("driveCommand", { cmd: "resume", hint: "#again" });
+    assert.equal(terminalResume["ok"], false);
+    assert.equal(terminalResume["code"], "drive_terminal", "a terminal driver refuses resume with drive_terminal");
+    assert.equal(terminalResume["stop_code"], "final_signal_held");
+    assert.equal(typeof terminalResume["reason"], "string");
+    assert.ok(String(terminalResume["reason"]).length > 0, "the terminal refusal carries a top-level reason");
+    assert.equal("command" in terminalResume, false, "the terminal refusal is not a pilot single-line receipt");
+    assert.equal((await request("observe", { max: 10 }))["ok"], true, "the session survives the terminal resume refusal");
 
     // ---- driveStatus：只读终态摘要 ----
     const status = await request("driveStatus");
@@ -418,6 +430,10 @@ async function scenarioHandoffPlay(env: NodeJS.ProcessEnv, origin: string): Prom
     const unblock = handoff["what_would_unblock"] as string[];
     assert.ok(Array.isArray(unblock) && unblock.length > 0 && unblock.length <= 3, "unblock hints are bounded");
     assert.ok(unblock.some((h) => h.includes("redirect")), "unblock names the deterministic recovery");
+    assert.equal(typeof handoff["final_signal"], "string",
+      "a declared final signal is echoed as a bounded end-state fact on the handoff");
+    assert.equal("weak_picks" in handoff, false,
+      "no sub-floor model vote (agent driving asks no model) = no weak_picks key");
     assertBoundedEvents(drifted["events"], "handoff/drift");
 
     // 交接打开 = pilot 暂停；session 的 observe/act/read 必须照常可用（同一 page）。
@@ -435,11 +451,38 @@ async function scenarioHandoffPlay(env: NodeJS.ProcessEnv, origin: string): Prom
     assert.equal((openStatus["handoff_open"] as Record<string, unknown>)["stop_code"], "off_task_page",
       "status exposes the open handoff");
 
+    // ---- 未决交接时再 drive：不静默复用/再驾驶，新 goal 未被采纳这件事必须可见 ----
+    // 静默复用会再 step 一轮 → 同一交接重放（handoffCount+1、steps+0），新 goal 被忽略
+    // 却看起来像"又驾驶了一步"；回执带结构化 handoff_open + goal_ignored + next。
+    const stepsBefore = Number(openStatus["steps"]);
+    const reusedDrive = await request("drive", { goal: "一个全新的目标", driver: "agent", max_steps: 9 });
+    assert.equal(reusedDrive["ok"], false, "driving while a handoff is open is an explicit refusal");
+    assert.equal(reusedDrive["code"], "handoff_open", "the refusal names the open handoff");
+    assert.equal(reusedDrive["session_id"], "verify-session-drive-handoff");
+    assert.equal(reusedDrive["reused"], true, "the compat reuse fact stays visible");
+    assert.equal(reusedDrive["goal_ignored"], true, "the new goal is explicitly not adopted");
+    assert.equal(reusedDrive["status"], "handoff");
+    assert.equal(reusedDrive["stop_code"], "off_task_page");
+    assert.equal(reusedDrive["steps"], stepsBefore, "no silent extra driving step");
+    const echoed = reusedDrive["handoff_open"] as Record<string, unknown>;
+    assert.ok(echoed !== null && typeof echoed === "object", "the open handoff is echoed structurally");
+    assert.equal(echoed["stop_code"], "off_task_page", "the echo carries the open stop code");
+    assert.equal(typeof echoed["step_id"], "number", "the echo carries the handoff step");
+    assert.equal(typeof echoed["goal_digest"], "string", "the echo carries the active goal digest");
+    const next = reusedDrive["next"] as string[];
+    assert.ok(Array.isArray(next)
+      && next.some((s) => s.includes("driveCommand")) && next.some((s) => s.includes("new session")),
+      "next names both ways forward (continue this handoff / new session)");
+    assert.equal((await request("driveStatus"))["status"], "handoff", "the handoff stays open and unchanged");
+    assert.equal(hostPage(), page0, "the refused silent reuse touches nothing");
+
     // 预声明信号不成立时 finish 只是单行被拒（交接保持打开，不杀会话）。
     const refused = await request("driveCommand", { cmd: "finish" });
     assert.equal(refused["ok"], false);
     assert.equal(refused["outcome"], "stay");
     assert.equal(refused["code"], "signal_not_held", "finish without a held signal is a structured single-line failure");
+    assert.equal(typeof refused["reason"], "string");
+    assert.ok(String(refused["reason"]).length > 0, "a single-line refusal promotes its reason to the top level");
     assert.equal((await request("driveStatus"))["status"], "handoff", "the handoff stays open after the refusal");
 
     // redirect 回任务页：守卫放行，驾驶重新可继续。
@@ -490,6 +533,55 @@ async function scenarioValidationBeforeBrowser(env: NodeJS.ProcessEnv): Promise<
   }
 }
 
+/* ------------------------------------------------------------------ 场景 4：预算终态诊断 */
+
+/**
+ * 预算用尽（budget_exceeded）后 resume：保留既有 `budget_exhausted` 码（不是通用
+ * drive_terminal），并把 reason 提升到顶层；session 仍可用。
+ */
+async function scenarioBudgetTerminal(env: NodeJS.ProcessEnv, origin: string): Promise<void> {
+  const responses: Array<Record<string, unknown>> = [];
+  const rt = new SessionRuntime({
+    url: `${origin}/home.html`,
+    hosts: [new URL(origin).hostname],
+    outDir: fs.mkdtempSync(path.join(os.tmpdir(), "af-verify-session-drive-budget-")),
+    quiet: true,
+    idleTimeoutMs: 0,
+    env,
+  }, { respond: (o) => { responses.push(o); }, log: () => {} }, "verify-session-drive-budget");
+  let closed = false;
+  try {
+    await rt.start();
+    const request = makeClient(rt, responses);
+    const drive = await request("drive", {
+      goal: "zerblonix frobnicate", driver: "agent",
+      final_signal: { url_contains: "/done.html" }, max_steps: 1,
+    });
+    assert.equal(drive["ok"], true);
+    assert.equal(drive["status"], "await_pick", "agent driving waits for the named pick");
+    const resumed = await request("driveCommand", { cmd: "resume", hint: "#go" });
+    assert.equal(resumed["ok"], true);
+    assert.equal(resumed["outcome"], "drive");
+    assert.equal(resumed["stop_code"], "budget_exceeded", "the one-step budget is spent on the pick");
+    const refused = await request("driveCommand", { cmd: "resume", hint: "#finish" });
+    assert.equal(refused["ok"], false);
+    assert.equal(refused["code"], "budget_exhausted", "a budget terminal keeps its own code (not a generic terminal)");
+    assert.equal(refused["stop_code"], "budget_exceeded");
+    assert.equal(typeof refused["reason"], "string");
+    assert.ok(String(refused["reason"]).length > 0, "the budget refusal carries a top-level reason");
+    assert.equal((await request("observe", { max: 10 }))["ok"], true, "the session keeps working after the budget refusal");
+    assert.equal((await request("driveStatus"))["stop_code"], "budget_exceeded");
+    const droveClosed = await request("driveClose");
+    assert.equal(droveClosed["ok"], true);
+    closed = true;
+    assert.equal(await rt.handleLine(JSON.stringify({ id: 9200, type: "close" })), true);
+  } finally {
+    if (!closed) {
+      try { await rt.finish("eof"); } catch { /* 收尾失败不掩盖断言 */ }
+    }
+  }
+}
+
 /* ------------------------------------------------------------------ main */
 
 async function main(): Promise<number> {
@@ -499,10 +591,11 @@ async function main(): Promise<number> {
     await scenarioAttachDrive(env, server.origin);
     await scenarioHandoffPlay(env, server.origin);
     await scenarioValidationBeforeBrowser(env);
+    await scenarioBudgetTerminal(env, server.origin);
   } finally {
     await server.close();
   }
-  console.log("verify-session-drive: OK — 附着驾驶全链 + 交接期间 session 互证 + 校验先于浏览器 三场景全过（零模型、同一 page、宿主浏览器不被 pilot 关闭）");
+  console.log("verify-session-drive: OK — 附着驾驶全链 + 交接期间 session 互证 + 校验先于浏览器 + 终态诊断 四场景全过（零模型、同一 page、宿主浏览器不被 pilot 关闭）");
   return 0;
 }
 

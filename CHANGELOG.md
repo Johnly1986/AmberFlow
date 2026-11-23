@@ -4,6 +4,191 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-23 门禁：decision run-parity lane 纳入 npm run check（chromium 前置登记）
+
+> 依据：决策上下文审计「第 1 项：证据/登记」的门禁化要求；只动门禁链/注释/文档，**零行为代码改动**。
+
+- **新增 script**：`package.json` 增 `verify:decision-run-parity`（`node --experimental-strip-types
+  tools/verify-decision-run-parity.ts --check`），并把该 lane 追加到 `check` 链末尾（`check:ci`
+  自然继承）；16 场景 `ModelPickPhase` + 桩请求投影 + `windowChainFacts` + 停因逐字段对 golden。
+- **口径变化（代价）**：`npm run check` 不再是纯离线——该 lane 需要本机 chromium
+  （`npx playwright install chromium`）。本机实测：lane 单跑 ≈11.9s；`npm run check` 71.3s → 80.0s
+  （同机连跑，增量 ≈8.7s，浏览器启动/机器负载波动同量级）。
+- **chromium 缺失不假绿**：lane 入口把浏览器启动失败（`no chromium binary found` /
+  `Executable doesn't exist`）归为环境错误，打印修复提示并 exit 2，**不 self-skip**；原有
+  `--record` 拒绝与 `--rebase-reviewed` 评审换基纪律不变。
+- **登记**：`AGENTS.md` 的 `npm run check` 行补「含 decision run-parity（chromium 必需）」；
+  `docs/DECISION_PLANE_UNIFICATION.md` §4、`docs/P2_READINESS.md` §0/§5 同步代价与豁免。
+- **验证**：`npm run verify:decision-run-parity` 16/16 绿；`npm run check` 全绿（80.0s）；
+  `npm run typecheck`、`npm run maintain:check` 绿；**未提交 git**。
+- **CI 前置同步**：`.github/workflows/checks.yml` 的 check job 原本只 `npm ci`（playwright 包无
+  postinstall，npm ci 不下载浏览器）；本批在 `npm ci` 之后、`npm run check` 之前补
+  `npx playwright install --with-deps chromium`，与同文件 offline/online job 的既有写法一致；
+  只动 check job，其它 job 未改。
+
+## [Unreleased] — 2026-11-23 决策平面证据补强（run-parity 评审换基 + characterization goals 投影）
+
+> 依据：决策上下文审计「第 1 项：证据/登记」；只动 lane/金标/文档，**零行为代码改动**。
+
+- **run-parity golden 评审换基**：`tools/verify-decision-run-parity.ts` 新增 `--rebase-reviewed`——
+  逐场景算差异路径，仅当全部落在允许闭集 `$.asks[<i>].goal`（P1 的 run 面 L0 尾部「当前页」段，
+  ADR-001 R3）才写新 golden，顶层加 `_rebase` provenance（原因 / 允许路径闭集 / 换基场景，不写
+  日期戳）；任一非 goal 差异（含缺失/新增场景）拒绝并打印，golden 逐字节不变；`--record` 仍按
+  设计拒绝（防自证保留）。换基 11 场景后 `--check` **16/16 绿**。负向自测：临时副本改
+  `adjudicate.phase.conf` → 拒绝（exit 1，sha256 不变）；`--self-test` 覆盖「正例写入 / 非 goal
+  拒绝 / 缺场景拒绝 / 拒绝零改写」四路。
+- **characterization 钉住 L0/历史**：8 条 run/pilot 场景投影新增 `goals`（桩侧请求 goal 序列，
+  按询问顺序，键序稳定）；新增 `run-two-step-history` 场景（同一次 run 两步）钉住
+  `已执行: 1.click button "确认"[no_change]` 历史折叠。金标 11→12 场景；`--record` 两次逐字节
+  一致（sha256 `2993590a…`）、`--check` 两次一致且绿。
+- **登记/披露**：`docs/DECISION_PLANE_UNIFICATION.md` 增「证据覆盖与金标换基」小节（失绿原因 /
+  换基机制 / 防自证保留 / 剩余未钉住维度）；`docs/P2_READINESS.md` 增 freeze 超口径豁免登记
+  （seam v6、默认路径切换、session `set_range`、关键 bugfix、证据 lane 逐项书面豁免）；
+  `docs/DECISION_CONTEXT_CONTRACT.md` 只补状态/证据备注（契约条款语义未改）。
+- **验证**：`npm run typecheck`、`npm run maintain:check`、两 lane `--check` ×2、`npm run check` 全绿。
+  **未提交 git。**
+
+## [Unreleased] — 2026-11-24 drive 结束态可见性 / 交接回显批（架构审查 §3.3/§2.2）
+
+> 依据：drive 对照走查的三条修复项经架构审查（/tmp/drive-fix-review.md）；本批为 evidence-only
+> 可见性与交接语义回显，不触 freeze D1-A 名单。
+
+- **结束态可见性（evidence-only，不判错/不阻断/不新增停因）**
+  - `PilotHandoff.weak_picks?`（≤6）：只收 `picked_by==="model"` 且 `conf < DEFAULT_CONF_FLOOR(0.25)`
+    的票面事实 `{step,target,conf,picked_by}`；阈值单源 config-schema，取最近 6 条；无票键不出现。
+  - `PilotHandoff.final_signal?: null | 摘要`：`null` = 本 run 无完成信号声明（结束态未验证；
+    needs_value/budget_exceeded ≠ 做完）；有声明给 ≤200 字有界摘要。
+  - `pilot_end.conf_floor`：有效置信刻度（provider 自报 floor 时如实透出），区分"文档默认 0.25"与
+    "本次实际过闸线"。
+  - 投影链：引擎 handoff 顶层 → `session-driver.projectHandoff` → 桥 `driveHandoff` 白名单
+    （step/target≤120/conf/picked_by，不泄露 pool）→ Agent；`PILOT_END_KEYS`/`driveSummary`
+    加 `conf_floor`。纯函数 `weakPicksFrom`/`finalSignalFact` 在 `pilot-evidence.ts` 单源。
+- **handoff 再 drive 不再静默复用**：`SessionPilotDriver.drive()` 在 `handoffOpen!==null` 时
+  **不再 step**（避免同一交接重放/新 goal 被忽略却 ok:true），回执 `ok:false, code:"handoff_open"`
+  + `reused:true`/`goal_ignored` + `handoff_open{step_id,stop_code,goal_digest,summary,url,
+  what_would_unblock,evidence_refs}` + `next`（继续=drive_command / 换目标=新 session）；
+  非 handoff 复用（agent await_pick 等）保留原行为，仅新增 `goal_ignored`。
+- **验证**：verify:pilot 20→**21/21**、bridge:test 15→**18/18**、verify-session-drive 4/4、
+  check（含 run-parity 门禁）exit 0；行数 pilot-runtime **788≤800**（`validatePilotOptions` 搬
+  pilot-contract 抵消）。**未提交 git。**
+- **语义变更**：drive-while-handoff 由 `ok:true`（静默再驾驶）变显式 `handoff_open` 失败，已文档化+
+  测试钉死；桥 `session.ts`/`index.ts` 已 tsc 构建，**宿主重启后生效**。
+- **未做**：真站 S3 复跑（本环境无外部决策服务）；规则词面过宽（Hours→Open 24 hours）与
+  actOnce state_delta 按审查另立 P3 任务；needs_value 键漂移加固（name/id 稳定键/M2）待评估。
+
+## [Unreleased] — 2026-11-24 drive 值绑定与终态诊断修复批（真站走查对照驱动）
+
+> 依据：决策模型 drive 对照走查（报告 /tmp/drive-walkthrough-report.md）后经架构审查
+> （/tmp/drive-fix-review.md §1/§2）判定的引擎/契约缺陷；均落 src/app 的 pilot/session 面，
+> 不触 freeze D1-A 名单。
+
+- **drive resume 值绑定（P0）**：裸字符串 `resume{value}` 不再写永远不可达的 `slots["resumed"]`，
+  改为写入 needs_value 目标键（无 hint/target 时由 `valueKeyOf` 按 label→name→id→tag 推导），
+  hint+value 时值跟随 hint 目标；空键不再参与 includes 匹配（修空 label 误绑）。
+  `drive_command.target` 全链透传（session-driver → 契约校验 → 桥），文档承诺的"键取 target"可达。
+  handoff evidence 增 `needs_value:{target,key,ref}`、`resume_hint:{hint,missed:true}`（仅对应停因，不含值）；
+  needs_value 首条 unblock 给出可照抄的 `{"<key>":"<值>"}` 形状。
+  验证：verify:pilot 16→20/20；真站 Google Maps 搜索框裸字符串 resume → 值真实落地（`read input[name=q]`）。
+- **drive 终态诊断（P1）**：`SessionPilotDriver.command()` 对终态 resume/redirect 复用终端分类——
+  `drive_terminal`（done/final_signal_held 等）或 `budget_exhausted`（预算用尽），带顶层 reason/stop_code/outcome；
+  stay 分支把嵌套 reason 提升到顶层；桥在顶层 reason 为空时回落 command.reason；文档补 code 语义与 next。
+  修复前：`config_error` 且 reason 空。验证：verify-session-drive 3→4 场景 + bridge:test 13→15。
+- **回归**：typecheck/maintain/split/verify:pilot 20/20/verify-session-drive 4/4/bridge:test 15/15/
+  parity/check 全绿。**未提交 git。**
+- **已知边界**：桥面 target/reason/schema 改动需 DSH host 重启才生效（引擎侧经 CLI 子进程即时生效）；
+  同一控件两次抽池 label/name 形状可能漂移（"Search Google Maps"→"q"），裸字符串值需按最新 handoff 重发
+  （稳定键/签名回放留待后续小批）。
+
+## [Unreleased] — 2026-11-23 走查卡点修复批（架构审查 B1-b/B1-c/B3-c + 证据 lane）
+
+> 依据：Google Maps 走查四类卡点架构审查（/tmp/architect-review.md，含 Lead 复核修正 §8）。
+> 冻结口径：fill→click 属关键 bugfix；去重豁免/池外投影为恢复链既有面的补全（MAINLINE §4 备注）；
+> frame-budget 为零行为证据 lane。
+
+- **池外回退按 op 分派**（修 fill/select/hover 被静默变 click）：`actOnce` 的 `el===null` 分支改走
+  新模块 `src/engine/executor-poolless-ops.ts`（fill/select/hover 真实执行；drag/clickAt/upload 等
+  结构化 `action_unsupported`；click/check 行为逐字节不变）；A3 回退面补 `name`/`href`/`href_full`
+  投影（`DOM_FALLBACK_COLLECT_JS` + 合成池映射 `a3AttrProjection`，`[name=q]` 类池外 attr 目标可命中）。
+  验证：`tools/verify-poolless-actions.ts` 19 断言（修前 11 FAIL → 修后 19/19）。
+- **F86 去重空名可编辑控件豁免**：`__DEDUP_EDITABLE_TAGS = {input,select,textarea}`——空 label 不再
+  按装饰剔除（`label-dup`/`listener-child` 规则不变；空名 a/button 不豁免并注明理由）。
+  验证：`tools/verify-dedup-controls.ts` 48 断言（三件控件进池 + 空名图标仍被剔 + 证据形状）。
+- **session act 新增 `set_range` op**（复用 `range.ts` 三策略）：`SESSION_ACT_OPS` + 校验（`{value}`/`{percent}`
+  二选一、缺/非法 = config_error）；执行体 `src/app/session-act-range.ts`；桥 schema `act_op` enum +
+  value oneOf（passthrough 13/13；**需 DSH host 重启生效**）。越界结构化 `value_out_of_range` 不钳制
+  不伪造。验证：`tools/verify-session-range.ts`（值/percent/越界/形状错误四路径）。
+- **帧预算证据 lane**：`tools/verify-frame-budget.ts` + `fixtures/engine/frames/`——量化 act 池帽 64
+  （主帧优先 ⇒ 子帧 0 行）与 snapshot 帽 120（子帧可见 `f1:e0 Cancel`）差异，与真站
+  `s-cHKnOQq8Ab`（actions i=38 target_not_found + pool-27 有 Cancel）互证；`docs/BACKLOG.md` #6
+  更新测量结论与修复方向（fail-path 有界子帧重扫优先）。
+- **回归**：typecheck/maintain/split/check 全绿；pilot 16/16、parity、runtime:offline 8/8、
+  characterization 双臂 11/11、decision-context 76 项、bridge:test。已知无关漂移：`verify:offline`
+  filter-bar golden（e20 vs e22）在 pristine HEAD 同样复现，属存量基线问题，待单独 triage。
+  **未提交 git。**
+
+## [Unreleased] — 2026-11-23 决策平面统一 P3b（收口）
+
+- **契约 v6**：`DECISION_ASK_CONTRACT_VERSION` 6；新增 question kind 闭集
+  `DecisionQuestionKind = "pick" | "risk" | "done"`；`docs/MAINLINE.md` seam 表登记 run 选择段
+  默认统一编排（`decision-pick-unified.ts`）与 phase A/B 对照臂。
+- **risk/done 访问面收口**：新增 `src/engine/decision-questions.ts`（`askRiskProvider`/
+  `askDoneProvider`），executor 的 risk/done provider 直调改经该单点；capability 判断与降级/
+  advisory 语义不变（风险头挂退回关键词规则、完成票缺失按 0 读）。
+- **验证**：`npm run check` + 全部决策平面 lanes 绿；`online/` smoke **7/7 passed**（6.8s），
+  core 10 passed / 1 failed（`wiki-en-search` 因本机决策源 403 AccessDenied.Unpurchased 退规则面，
+  属环境权益问题，非代码回归）。**未提交 git。**
+
+## [Unreleased] — 2026-11-23 决策平面统一 P3（选择段）
+
+- **统一编排入口**：新增 `src/engine/decision-pick-unified.ts`——规则/窄问/闸门（恢复阶梯）/
+  裁决/R2b/族修复/组装单源；`decision-pick-phase.ts` 缩为旧编排对照臂（152 行），
+  `AMBERFLOW_DECISION_LADDER=phase` 切换；新增执行臂 `decision-pick-arm.ts`，`executor.run`
+  默认走统一入口（只调 `runPickPhase`）。
+- **A/B 等价**：`verify:decision-characterization` 默认臂与对照臂**双跑均 11/11 金标一致**；
+  `verify:pilot` 16/16、`verify:parity`、`verify:runtime:offline` 8/8、`verify:decision-context`
+  76 项、`npm run check` 全绿；maintain 五组通过。
+- **未纳入**：risk/done question-kind 统一 + `DecisionAsk` 契约 v6/MAINLINE seam 登记（下一批
+  P3b），随后跑 `online/` 用例测试。**未提交 git。**
+
+## [Unreleased] — 2026-11-23 决策平面统一 P2（ADR-001）
+
+- **低置信恢复阶梯迁入 DecisionAsk**：`runWideReobserve`（宽扫 + 窗口递增）/`runEscalatedPick`
+  （升级票）/`askPick`/`askGoalOf`/`forbiddenOf` 从 `decision-pick-phase.ts` 逐字搬入
+  `src/engine/decision-ask.ts`，新增 `runRecoveryLadder` 作为唯一编排点；phase 的 `floorGate`
+  只调该入口，规则/闸门前置/停因/裁决/R2b/族修复编排仍留在 phase（P3 迁）。
+- **等价证据**：`verify:decision-characterization` 11 金标（含 `run-wide-reobserve`/
+  `run-escalate`）在搬移后逐项一致；`verify:pilot` 16/16、`verify:parity`、
+  `verify:runtime:offline` 8/8、`verify:decision-context` 76 项全绿；`decision-pick-phase.ts`
+  584→476 行（净减 108）且 maintain 五组通过。**未提交 git。**
+
+## [Unreleased] — 2026-11-23 决策平面统一 P1（ADR-001）
+
+- **L0 同源**：`drivingGoalText` 从 pilot 层迁到引擎 `src/engine/decision-goal-text.ts`（pilot 侧
+  re-export，导出面不变）；run 面 `decision-pick-phase` 的**模型询问** goal 改为
+  「instruction + 当前页 + 已执行」（步史由 trace 的已执行行折成，沿用 changed/no_change/failed
+  口径）；规则匹配/词面判据/升级建议仍用原 instruction。
+- **run 面接 DecisionAccounting**：executor 每次 `run()` 创建 attempt 账本
+  （`createRunDecisionAccounting`），phase 的禁选经 `forbiddenRefs` 单源消费（与 `run.forbidden`
+  等价）；记忆注记仍走执行器 rank 注记（P2 统一）。
+- **context.layers 回执**：`decision-ask.contextLayerReceipts` 对外单点；run 面每次模型询问记录
+  L0–L4 逐层回执，经 `attachDecisionContext` 挂到该步 trace 行 `context_layers`（无动作的停因不写）。
+- **lane**：`verify:decision-context` 的 D 组改为「两面 L0 文本同源」（当前页/已执行同渲染），
+  新增 F 组（直接 `mw.run` 断言 trace 回执五层闭集、L0/L1 = sent）；76 项断言全绿。**未提交 git。**
+
+## [Unreleased] — 2026-11-23 决策平面统一 P0（ADR-001）
+
+- **裁决**：新增 `docs/DECISION_PLANE_UNIFICATION.md`（ADR-001）——`DecisionAsk` 为唯一决策
+  询问入口，P0–P3 分层落地；`decision-pick-phase` 在 P2 前保留为对照臂。
+- **P0 已落地**：新增 `src/engine/decision-request.ts`（`buildChoiceRequest` /
+  `mergeSiteFactsNotes` 单点，executor 改用，行为逐字节不变）；`system-one-client` 的 notes
+  通用上 wire（此前只在含 `site_facts` 时挂载，普通负面注记被静默丢弃；空 notes 形状不变）；
+  `DecisionAsk` 消费 `ports.siteFacts` 并计入 L4 回执；pilot 面注入 L4 端口（按 hosts 匹配
+  site-facts，无命中不出现键）；`stateText`/`pageText` 搬移到 `src/engine/state-text.ts` 并新增
+  `AMBERFLOW_STATE_TEXT_SCOPE=wide` opt-in（默认取文逐字节不变；wide = 追加未 detach 子帧 body 文本；extraction 行数回落）。
+- **验收**：本地 mock 抓包自证（notes 首问无/次问有、siteFacts→L4 sent、wide 取文）；新增
+  `npm run verify:decision-context` 镜像 lane（70 项断言全绿，含 E 组 wide 子帧取文）；既有 lanes 与 `npm run check` 见批次收口。
+  **未提交 git。**
+
 ## [Unreleased] — 2026-11-23 移除桥面 `amberflow_pilot`（agent 走查收敛到 session drive）
 
 - **删除**桥面 `amberflow_pilot` 工具及其服务 `integrations/dsh-bridge/src/pilot.ts`：one-shot

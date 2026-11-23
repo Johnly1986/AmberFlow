@@ -18,7 +18,10 @@
 /** EXTRACT_JS 盖在被剔元素身上的章名（windowAudit 的 dedup_dropped.why 词表，additive）。 */
 export const DEDUP_DROP_ATTR = "data-dshdrop";
 
-/** 被剔原因闭集：等 label 同区域重复（子让位）/ 空名子（装饰、纯噪声）/ 监听证据在子（父让位）。 */
+/**
+ * 被剔原因闭集：等 label 同区域重复（子让位）/ 空名子（装饰、纯噪声；可编辑原生控件除外）/
+ * 监听证据在子（父让位）/ 同卡兄弟单元折叠（非原生兄弟让位）。
+ */
 export const DEDUP_WHY_CODES = ["label-dup", "empty-child", "listener-child", "unit-sibling"] as const;
 
 /**
@@ -35,7 +38,11 @@ export const DEDUP_WHY_CODES = ["label-dup", "empty-child", "listener-child", "u
  *      与内层候选同 label）；否则 atomic。行上只在 container 出键（atomic = 缺省）。
  *   3. 同区域重复裁决——前提 = 候选祖先包含 且（父子 label 归一后相等 或 子为空名）：
  *        - 子空名 → 剔子（无 label 即无独立身份；有监听章也一样——空名候选模型无法按
- *          label 寻址，纯占配额的噪声；显式点名可 DRF 回捞）；
+ *          label 寻址，纯占配额的噪声；显式点名可 DRF 回捞）。**例外 = 可编辑原生控件**
+ *          （input/select/textarea）：空 label 只失去"按名寻址"，fill/type/select 仍是
+ *          这块区域上唯一的写入口，按装饰剔掉会让模型被迫走池外回退（连值都写不进）；
+ *          空名 a/button 不豁免——没有可写语义，且采集期按 `!fullLabel` 已跳过（见
+ *          EXTRACT_JS），裁决面本就没有它们的行；
  *        - 等label → 保留父，子让位；例外 = 子带监听章（data-js-ref）而父无章且父非原生
  *          控件 → 父让位（handler 在子、父只是 ARIA 声明——按公理 0 应留实际承载 handler
  *          的一方）；
@@ -50,6 +57,8 @@ export const DEDUP_WHY_CODES = ["label-dup", "empty-child", "listener-child", "u
  */
 export const DEDUP_HELPERS_JS = String.raw`
   const __DEDUP_NATIVE_TAGS = new Set(['a', 'button', 'input', 'select', 'textarea', 'label']);
+  // "空名 = 装饰"的例外面：可编辑原生控件有独立写语义，空 label 不构成装饰证据。
+  const __DEDUP_EDITABLE_TAGS = new Set(['input', 'select', 'textarea']);
   const __dedupPoolRows = (rows, all) => {
     const byEl = new Map();
     for (let k = 0; k < rows.length; k++) byEl.set(all[rows[k].i], rows[k]);
@@ -82,6 +91,9 @@ export const DEDUP_HELPERS_JS = String.raw`
       if (!childEl || !hostEl) continue;
       const childLabel = String(child.full_label || '');
       if (childLabel === '') {
+        // 可编辑原生控件不因空名剔（理由见片段头注释的例外条）：直接留行，不再进 label
+        // 比较——空 label 与空 host label 相等时 label-dup 会把它二次剔掉，等于没豁免。
+        if (__DEDUP_EDITABLE_TAGS.has(String(child.tag || '').toLowerCase())) continue;
         dropped.add(child);
         try { childEl.setAttribute('data-dshdrop', 'empty-child'); } catch (err) { /* 盖章失败只丢证据，不丢裁决 */ }
         continue;

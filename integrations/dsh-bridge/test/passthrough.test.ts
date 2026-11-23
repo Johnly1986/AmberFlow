@@ -298,6 +298,81 @@ test('session drive：有界投影（白名单 + handoff/events 裁剪 + 不泄�
   })
 })
 
+test('session drive：结束态可见性（weak_picks/final_signal/conf_floor）有界投影', async () => {
+  const handoff = {
+    stop_code: 'needs_value', step_id: 2, goal_digest: 'find a restaurant',
+    why_stuck: { summary: 'needs_value @ step 2', evidence: { needs_value: { key: 'q' } } },
+    what_would_unblock: ['resume 带 value'],
+    evidence_refs: { screenshot: '/tmp/h2.png' },
+    final_signal: null,
+    weak_picks: Array.from({ length: 8 }, (_, i) => ({
+      step: i + 1, target: `t-${String(i)}`, conf: 0.1, picked_by: 'model', pool: ['LEAK'],
+    })),
+    pool: ['LEAK'],
+  }
+  await withHarness({
+    routes: [
+      { type: 'drive', respond: { ok: true, status: 'handoff', stop_code: 'needs_value', steps: 2, url: 'http://fixture.local/page', handoff } },
+      { type: 'driveClose', respond: {
+        ok: true, status: 'closed', closed: true,
+        summary: { type: 'pilot_end', pilot: true, stop_code: 'needs_value', steps: 2, conf_floor: 0.2, max_steps: 5 },
+      } },
+    ],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive', goal: 'find a restaurant' })
+    const ho = r.handoff as Record<string, unknown>
+    const picks = ho.weak_picks as Array<Record<string, unknown>>
+    assert.ok(Array.isArray(picks), 'weak_picks reach the caller')
+    assert.equal(picks.length, 6, 'weak_picks are capped at 6')
+    assert.deepEqual(picks[0], { step: 1, target: 't-0', conf: 0.1, picked_by: 'model' },
+      'weak pick rows are whitelisted (no pool/candidates leak)')
+    assert.ok(!('pool' in picks[0]!))
+    assert.equal(ho.final_signal, null, 'the unverified end-state fact is visible')
+    assert.equal(ho.goal_digest, 'find a restaurant', 'the active goal digest is echoed')
+    const cl = await h.call({ op: 'drive_close' })
+    const sm = cl.summary as Record<string, unknown>
+    assert.equal(sm.conf_floor, 0.2, 'the effective floor scale reaches the caller')
+  })
+})
+
+test('session drive：无 weak_picks/final_signal = 旧形状（键不出现）', async () => {
+  const handoff = { stop_code: 'low_confidence', step_id: 1, why_stuck: { summary: 'x' } }
+  await withHarness({
+    routes: [{ type: 'drive', respond: { ok: true, status: 'handoff', stop_code: 'low_confidence', handoff } }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive', goal: 'x' })
+    const ho = r.handoff as Record<string, unknown>
+    assert.equal('weak_picks' in ho, false, 'no weak votes = no key (old handoff shape)')
+    assert.equal('final_signal' in ho, false, 'no final-signal fact in the response = no key (bridge invents nothing)')
+  })
+})
+
+test('session drive：未决交接时 reused 回执带 handoff_open/goal_ignored/next', async () => {
+  await withHarness({
+    routes: [{ type: 'drive', respond: {
+      ok: false, code: 'handoff_open', reused: true, goal_ignored: true,
+      reason: 'a handoff is open; use driveCommand resume|redirect|finish|abort to continue this run',
+      status: 'handoff', stop_code: 'off_task_page', steps: 2, model_asks: 0,
+      handoff_open: { stop_code: 'off_task_page', step_id: 2, goal_digest: 'old goal', why_stuck: { summary: 'x' } },
+      next: ['driveCommand resume|redirect|finish|abort continues the open handoff', 'start a new session', 'third'],
+    } }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive', goal: 'a brand new goal' })
+    assert.equal(r.ok, false)
+    assert.equal(r.code, 'handoff_open')
+    assert.equal(r.reused, true, 'the compat reuse fact is projected')
+    assert.equal(r.goal_ignored, true, 'the ignored goal is explicit')
+    assert.equal(r.status, 'handoff')
+    assert.equal(r.stop_code, 'off_task_page')
+    const ho = r.handoff as Record<string, unknown>
+    assert.equal(ho.stop_code, 'off_task_page', 'the open handoff is echoed')
+    assert.equal(ho.goal_digest, 'old goal', 'the active goal digest proves the new goal was not adopted')
+    const next = r.next as string[]
+    assert.ok(Array.isArray(next) && next.length === 3, 'next is bounded to 3 entries')
+    assert.ok(next.some((s) => s.includes('driveCommand')) && next.some((s) => s.includes('new session')))
+  })
+})
+
 test('session drive_command / drive_status / drive_close：闭集与往返', async () => {
   await withHarness({
     routes: [
@@ -335,6 +410,40 @@ test('session drive：引擎失败 = engineFailure 形状（session 继续存活
     assert.equal(r.code, 'config_error')
     assert.equal(r['session_alive'], true)
     assert.ok(!('pool' in r) && !('candidates' in r))
+  })
+})
+
+test('session drive：终态 resume 的 drive_terminal/reason 透传 + target 到达引擎', async () => {
+  await withHarness({
+    routes: [
+      // lineIncludes 断言 target 真的组进了引擎指令行（桥静默丢弃 target 的回归会被拦住）。
+      { type: 'driveCommand', lineIncludes: '"target":"search-term"', respond: {
+        ok: false, code: 'drive_terminal', reason: 'the pilot driver is terminal; start a new session to drive again',
+        stop_code: 'final_signal_held', status: 'done', outcome: 'stay', cmd: 'resume',
+      } },
+    ],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive_command', cmd: 'resume', value: 'amber', target: 'search-term' })
+    assert.equal(r.ok, false)
+    assert.equal(r.code, 'drive_terminal')
+    assert.equal(r.reason, 'the pilot driver is terminal; start a new session to drive again')
+    assert.equal(r.stop_code, 'final_signal_held')
+    assert.equal(r.outcome, 'stay')
+    assert.equal(r.cmd, 'resume')
+  })
+})
+
+test('session drive：失败回执 reason 为空时回落嵌套 command.reason', async () => {
+  await withHarness({
+    routes: [{ type: 'driveCommand', respond: {
+      ok: false, code: 'config_error', cmd: 'resume', outcome: 'stay',
+      command: { type: 'command_result', ok: false, code: 'config_error', reason: 'resume without an open handoff' },
+    } }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive_command', cmd: 'resume' })
+    assert.equal(r.ok, false)
+    assert.equal(r.code, 'config_error')
+    assert.equal(r.reason, 'resume without an open handoff', 'the nested single-line reason reaches the caller')
   })
 })
 

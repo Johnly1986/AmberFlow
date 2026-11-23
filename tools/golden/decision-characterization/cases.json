@@ -150,6 +150,11 @@
       }
     },
     "pilot-leg-lifecycle": {
+      "goals": [
+        "zzz-no-rule-match | 当前页: <LOCAL>/cards.html",
+        "zzz-no-rule-match | 当前页: <LOCAL>/wide.html",
+        "zzz-no-rule-match | 当前页: <LOCAL>/wide.html"
+      ],
       "handoffs": 3,
       "legs": [
         0,
@@ -163,6 +168,9 @@
       ]
     },
     "run-adjudicate": {
+      "goals": [
+        "点一个按钮 | 当前页: <LOCAL>/wide.html"
+      ],
       "steps": [
         {
           "changed": false,
@@ -179,6 +187,9 @@
     },
     "run-escalate": {
       "asks": 1,
+      "goals": [
+        "点一个按钮 | 当前页: <LOCAL>/wide.html"
+      ],
       "report": {
         "steps": [
           {
@@ -197,6 +208,9 @@
     },
     "run-family-repair": {
       "asks": 1,
+      "goals": [
+        "选一个 | 当前页: <LOCAL>/cards.html"
+      ],
       "nominated_family_repair": false,
       "report": {
         "steps": [],
@@ -205,6 +219,10 @@
     },
     "run-r2b": {
       "first_conf": 0.6,
+      "goals": [
+        "zzz qqq | 当前页: <LOCAL>/wide.html",
+        "zzz qqq | 当前页: <LOCAL>/wide.html"
+      ],
       "lexical_overlap": false,
       "pool_counts": [
         64,
@@ -227,6 +245,14 @@
       }
     },
     "run-retry-memory": {
+      "attempt_goals": [
+        [
+          "点一个按钮 | 当前页: <LOCAL>/cards.html"
+        ],
+        [
+          "点一个按钮 | 当前页: <LOCAL>/cards.html"
+        ]
+      ],
       "attempts": 2,
       "first_notes": [
         null
@@ -239,6 +265,7 @@
       ]
     },
     "run-rule": {
+      "goals": [],
       "steps": [
         {
           "changed": false,
@@ -253,8 +280,20 @@
       ],
       "stop_code": "max_steps"
     },
+    "run-two-step-history": {
+      "goals": [
+        "点一个按钮 | 当前页: <LOCAL>/cards.html",
+        "点一个按钮 | 当前页: <LOCAL>/cards.html | 已执行: 1.click button \"确认\"[no_change]"
+      ],
+      "steps": 2,
+      "stop_code": "max_steps"
+    },
     "run-wide-reobserve": {
       "first_count": 64,
+      "goals": [
+        "点一个按钮 | 当前页: <LOCAL>/wide.html",
+        "点一个按钮 | 当前页: <LOCAL>/wide.html"
+      ],
       "report": {
         "steps": [
           {

@@ -20,6 +20,10 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      # `npm run check` 末尾的 `verify:decision-run-parity` 需要 chromium（`npm ci` 不下载浏览器，
+      # playwright 包没有 postinstall）；缺它时该 lane 按环境错误 exit 2，门禁会红。
+      - name: Install chromium
+        run: npx playwright install --with-deps chromium
       # `npm run check` includes `schema:check` (`amber schema ctx --check`), which compares the
       # engine's rendered context contract against the snapshot at dist/schema/ctx.json. `dist/` is
       # gitignored (it is a build artifact, not committed), so a clean checkout has no snapshot and

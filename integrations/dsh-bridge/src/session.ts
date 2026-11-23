@@ -137,11 +137,16 @@ export interface SessionToolArgs {
   window?: 'maximized' | 'fullscreen'
   record?: boolean
   act_op?: string
+  /** act：目标 hint 字符串；drive_command `resume`：字符串 value 的显式值袋键。 */
   target?: string
   /** A2：不传 = 引擎缺省 fail（歧义不执行）；`"act"` 恢复旧行为。只在有值时透传。 */
   on_ambiguous?: 'fail' | 'act'
   /** F72：act 的 rehydrate 重扫 opt-in（true 才透传；缺省不传 = 引擎缺省关）。 */
   rehydrate_rescan?: boolean
+  /**
+   * act `fill`/`select`（string）/ `set_range`（`{value:number}` 或 `{percent:0..100}`，二选一）
+   * / drive_command `resume`。原样透传，桥不猜值。
+   */
   value?: unknown
   to?: 'bottom' | 'top' | 'page'
   by?: number
@@ -204,7 +209,7 @@ export interface SessionToolArgs {
 export type SessionToolResult = Record<string, unknown>
 
 const SESSION_OPS = ['open', 'goto', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'drive', 'drive_command', 'drive_status', 'drive_close', 'close', 'list'] as const
-const ACT_OPS = ['click', 'check', 'fill', 'select', 'hover', 'scroll'] as const
+const ACT_OPS = ['click', 'check', 'fill', 'select', 'hover', 'scroll', 'set_range'] as const
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -793,7 +798,7 @@ export class SessionManager {
     if (!nonEmpty(args.target) && actOp !== 'scroll') {
       throw new SessionToolError('config_error', `act op '${actOp}' needs a non-empty target (hint string)`)
     }
-    if ((actOp === 'fill' || actOp === 'select') && args.value === undefined) {
+    if ((actOp === 'fill' || actOp === 'select' || actOp === 'set_range') && args.value === undefined) {
       throw new SessionToolError('config_error', `act op '${actOp}' needs a value parameter (the tool never invents values)`)
     }
     const body: Record<string, unknown> = { type: 'act', op: actOp, target: args.target ?? '' }
@@ -829,6 +834,10 @@ export class SessionManager {
     // B2：滚动证据（moved/delta/scroll）同样只透传、不重算——引擎给什么就回什么（成功/失败
     // 同一口径：not_scrollable 也带 moved:false 与当时的容器几何）。
     const scroll = this.scrollDiagnostics(response)
+    // A3：set_range 证据（applied/accurate/strategy/requested/target_value…）只透传、不重算——
+    // 越界/不可设置的 ok:false 由 engineFailure 的 code/reason 承担，绝不补成成功事实。
+    // 只对 set_range 启用：其余 act op 的响应键集逐字节不变（不因引擎未来多字段而漂移）。
+    const range = actOp === 'set_range' ? this.rangeDiagnostics(response) : {}
     if (response['ok'] !== true) {
       // B1：被遮挡/超时失败现场 + opt-in 失败截图路径（只在引擎给了才出现；不内联图片）。
       const actionability = this.actionabilityEvidence(response['actionability'])
@@ -836,6 +845,7 @@ export class SessionManager {
         ...this.engineFailure(response, 'act'),
         ...ambiguity,
         ...scroll,
+        ...range,
         ...(actionability === undefined ? {} : { actionability }),
         ...(typeof response['screenshot_file'] === 'string' ? { screenshot_file: response['screenshot_file'] } : {}),
         ...base,
@@ -852,6 +862,7 @@ export class SessionManager {
       changed: response['changed'] === true,
       url: response['url'] ?? state.url,
       ...scroll,
+      ...range,
       ...(isObj(response['after']) ? { after: response['after'] } : {}),
       ...ambiguity,
     }
@@ -882,6 +893,28 @@ export class SessionManager {
         && typeof geo['clientHeight'] === 'number') {
         out['scroll'] = geo
       }
+    }
+    return out
+  }
+
+  /**
+   * A3：`act set_range` 证据的有界透传（引擎 RangeOutcome 有才有；不重算 applied/accurate、
+   * 不补字段）。越界/不可设置的失败由 `engineFailure` 的 `code`/`reason` 承担（`stopCode`
+   * 不再重复回显）；数值目标落在 `target_value`——`target` 已是 hint 字符串，同名两义会误读。
+   */
+  private rangeDiagnostics(response: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = {}
+    if (typeof response['applied'] === 'boolean') out['applied'] = response['applied']
+    if (typeof response['accurate'] === 'boolean') out['accurate'] = response['accurate']
+    for (const strategy of ['fill', 'keyboard', 'pointer'] as const) {
+      if (response['strategy'] === strategy) out['strategy'] = strategy
+    }
+    for (const key of ['achieved', 'requested', 'target_value', 'clamped_from'] as const) {
+      const v = response[key]
+      if (typeof v === 'number' && Number.isFinite(v)) out[key] = v
+    }
+    for (const probe of ['value_unreadable', 'home_ignored', 'lattice_unreachable'] as const) {
+      if (response['probe'] === probe) out['probe'] = probe
     }
     return out
   }
@@ -1344,6 +1377,12 @@ export class SessionManager {
       body['hint'] = args.hint
     }
     if (args.value !== undefined) body['value'] = args.value
+    // resume 字符串值 + target = 显式值袋键（AGENT_INTERFACE 文档承诺的"键取 target"，
+    // 此前桥静默丢弃；对象值不需要它）。
+    if (args.target !== undefined) {
+      if (!nonEmpty(args.target)) throw new SessionToolError('config_error', 'target must be a non-empty string when present')
+      body['target'] = args.target
+    }
     if (args.goal !== undefined) {
       if (!nonEmpty(args.goal)) throw new SessionToolError('config_error', 'goal must be a non-empty string when present')
       body['goal'] = args.goal
@@ -1386,13 +1425,24 @@ export class SessionManager {
     const out: SessionToolResult = ok
       ? { ok: true, op, session_id: state.id }
       : { ...this.engineFailure(response, op), op, session_id: state.id }
+    // 桥层兜底：引擎失败回执的顶层 reason 为空时回落到单行回执（command.reason）——
+    // 渲染只读顶层 reason，嵌套 reason 到不了调用方。
+    if (out['ok'] === false && out['reason'] === '' && isObj(response['command'])
+      && typeof response['command']['reason'] === 'string' && response['command']['reason'] !== '') {
+      out['reason'] = clip(response['command']['reason'], 1000)
+    }
     // 驾驶面白名单（t7 契约：pilot/attached/status/.../terminal/active/closed/cmd/outcome）。
     for (const key of ['status', 'stop_code', 'steps', 'model_asks', 'out_dir', 'cmd', 'outcome'] as const) {
       const v = response[key]
       if (typeof v === 'string' || typeof v === 'number') out[key] = v
     }
-    for (const key of ['pilot', 'attached', 'terminal', 'active', 'closed'] as const) {
+    for (const key of ['pilot', 'attached', 'terminal', 'active', 'closed', 'reused', 'goal_ignored'] as const) {
       if (response[key] === true || response[key] === false) out[key] = response[key]
+    }
+    // 未决交接时的显式 next（≤3 条：继续本 run 的 drive_command / 起新 session）。
+    if (Array.isArray(response['next'])) {
+      const next = response['next'].filter((x): x is string => typeof x === 'string').slice(0, 3).map((s) => clip(s, 300))
+      if (next.length > 0) out['next'] = next
     }
     if (typeof response['url'] === 'string' && response['url'] !== '') {
       out['url'] = response['url']
@@ -1409,13 +1459,28 @@ export class SessionManager {
     return out
   }
 
-  /** 交接块有界投影（step_id/stop_code/summary/url/≤3 条解锁建议/证据路径）。 */
+  /** 交接块有界投影（step_id/stop_code/goal_digest/summary/url/≤3 条解锁建议/证据路径 + 结束态可见性）。 */
   private driveHandoff(raw: unknown): Record<string, unknown> | undefined {
     if (!isObj(raw)) return undefined
     const out: Record<string, unknown> = {}
     if (typeof raw['step_id'] === 'number') out['step_id'] = raw['step_id']
     if (typeof raw['stop_code'] === 'string') out['stop_code'] = raw['stop_code']
+    if (typeof raw['goal_digest'] === 'string') out['goal_digest'] = clip(raw['goal_digest'], 300)
     if (typeof raw['url'] === 'string') out['url'] = clip(raw['url'], 300)
+    // 结束态可见性（evidence-only）：无完成信号声明 = 显式 null；无低置信票 = 键不出现。
+    if (raw['final_signal'] === null) out['final_signal'] = null
+    else if (typeof raw['final_signal'] === 'string') out['final_signal'] = clip(raw['final_signal'], 200)
+    if (Array.isArray(raw['weak_picks'])) {
+      const picks = raw['weak_picks'].filter(isObj).slice(0, 6).map((p) => {
+        const row: Record<string, unknown> = {}
+        if (typeof p['step'] === 'number') row['step'] = p['step']
+        if (typeof p['target'] === 'string') row['target'] = clip(p['target'], 120)
+        if (typeof p['conf'] === 'number') row['conf'] = p['conf']
+        if (typeof p['picked_by'] === 'string') row['picked_by'] = clip(p['picked_by'], 20)
+        return row
+      })
+      if (picks.length > 0) out['weak_picks'] = picks
+    }
     const why = isObj(raw['why_stuck']) ? raw['why_stuck'] : undefined
     if (why !== undefined && typeof why['summary'] === 'string') out['summary'] = clip(why['summary'], 300)
     if (Array.isArray(raw['what_would_unblock'])) {
@@ -1455,7 +1520,7 @@ export class SessionManager {
       const v = raw[k]
       if (v === true || v === false || typeof v === 'string') out[k] = typeof v === 'string' ? clip(v, 60) : v
     }
-    for (const k of ['steps', 'max_steps', 'model_asks', 'rule_picks', 'model_picks', 'handoffs', 'fallbacks'] as const) {
+    for (const k of ['steps', 'max_steps', 'conf_floor', 'model_asks', 'rule_picks', 'model_picks', 'handoffs', 'fallbacks'] as const) {
       if (typeof raw[k] === 'number') out[k] = raw[k]
     }
     for (const k of ['url', 'out_dir'] as const) {

@@ -1083,7 +1083,10 @@ export function apply(ctx: Context, config: Config): void {
         + 'never judges completion. `observe` returns verified hint candidates; `act` needs an explicit '
         + '`value`. Errors return `{ok:false, code, reason}` and keep the session alive. Sessions expire '
         + 'after an idle TTL. `drive` ops run the pilot in this session\'s page (same browser, no '
-        + 're-navigation; state kept); evidence carries `pilot:true`/`attached:true`, never a run verdict.',
+        + 're-navigation; state kept); evidence carries `pilot:true`/`attached:true`, never a run verdict. '
+        + 'A `drive` while a handoff is already open does not silently continue: it returns '
+        + '`code:"handoff_open"` with `reused:true`, the echoed `handoff` and `goal_ignored?` — use '
+        + '`drive_command` to continue that run, or start a new session for a different goal.',
     parameters: {
       op: {
         type: 'string', required: true,
@@ -1114,11 +1117,15 @@ export function apply(ctx: Context, config: Config): void {
           + 'record path for `amber session export`; set `false` to disable.',
       },
       act_op: {
-        type: 'string', enum: ['click', 'check', 'fill', 'select', 'hover', 'scroll'],
-        description: 'act: single action to perform.',
+        type: 'string', enum: ['click', 'check', 'fill', 'select', 'hover', 'scroll', 'set_range'],
+        description: 'act: single action to perform. `set_range` sets a range/slider control via the engine\'s '
+          + 'fill→keyboard→pointer strategies (the same primitive as `ctx.setRange`); an out-of-range request is '
+          + 'refused with `code:"value_out_of_range"` and zero interaction instead of being clamped.',
       },
       target: { type: 'string', description: 'act: target hint string (hint grammar: `#id`, `tag[attr=value]`, `tag[attr~substr]`, '
-        + '`tag~token`, role word, bare word).' },
+        + '`tag~token`, role word, bare word); drive_command `resume`: explicit value-slot key for a string `value` '
+        + '(defaults to the key of the target that reported `needs_value`, else `resumed` — prefer the key from '
+        + 'the handoff `needs_value` evidence).' },
       on_ambiguous: {
         type: 'string', enum: ['fail', 'act'],
         description: 'act: what to do when several distinct candidates match the hint. `fail` executes nothing and '
@@ -1134,9 +1141,21 @@ export function apply(ctx: Context, config: Config): void {
           + '`wait_for` anchoring when authoring.',
       },
       value: {
-        type: 'string',
-        description: 'act `fill`/`select`: the value to type or select; drive_command `resume`: the value the driver '
-          + 'should type. Explicit only, never invented.',
+        oneOf: [
+          { type: 'string' },
+          {
+            type: 'object', additionalProperties: false,
+            properties: { value: { type: 'number', required: true } },
+          },
+          {
+            type: 'object', additionalProperties: false,
+            properties: { percent: { type: 'number', required: true } },
+          },
+        ],
+        description: 'act `fill`/`select`: the value to type or select; act `set_range`: `{value: <number>}` or '
+          + '`{percent: 0..100}` (exactly one — out-of-range absolute values are refused by the engine with '
+          + '`value_out_of_range`, never clamped); drive_command `resume`: the value the driver should type. '
+          + 'Explicit only, never invented.',
       },
       to: {
         type: 'string', enum: ['bottom', 'top', 'page'],
@@ -1234,8 +1253,9 @@ export function apply(ctx: Context, config: Config): void {
       cmd: {
         type: 'string', enum: ['resume', 'redirect', 'finish', 'abort'],
         description: 'drive_command: fallback instruction (closed set). `resume` continues after a handoff '
-          + '(hint/value/skip), `redirect` changes the goal/URL, `finish` closes with a signal check, `abort` ends '
-          + 'the walkthrough.',
+          + '(hint/value/target/skip), `redirect` changes the goal/URL, `finish` closes with a signal check, '
+          + '`abort` ends the walkthrough. `resume`/`redirect` on a terminal driver are refused with '
+          + '`drive_terminal` (+reason) / `budget_exhausted`; start a new session to drive again.',
       },
       hint: {
         type: 'string',
@@ -1399,6 +1419,18 @@ function renderSessionResult(value: Record<string, unknown>): string {
           : '')
     }
     case 'act':
+      // A3：set_range 的 `how`/`ref`/`changed` 不适用（引擎只给策略与读回事实），单独一行渲染；
+      // 其它 act op 的输出保持逐字节不变（下方原表达式不动）。
+      if (value.act_op === 'set_range') {
+        return `${tag}: set_range ${String(value.target ?? '')} → applied=${String(value.applied === true)}`
+          + ` accurate=${String(value.accurate === true)}`
+          + (typeof value.strategy === 'string' ? ` strategy=${value.strategy}` : '')
+          + (typeof value.target_value === 'number' ? ` value=${String(value.target_value)}` : '')
+          + (typeof value.requested === 'number' ? ` requested=${String(value.requested)}` : '')
+          + (typeof value.clamped_from === 'number' ? ` clamped_from=${String(value.clamped_from)}` : '')
+          + (typeof value.probe === 'string' ? ` probe=${value.probe}` : '')
+          + `\nurl: ${String(value.url ?? '')}`
+      }
       return `${tag}: ${String(value.act_op ?? '')} ${String(value.target ?? '')} → ${String(value.how ?? '?')}`
         + ` ref=${String(value.ref ?? '-')} changed=${String(value.changed === true)}`
         + (value.act_op === 'scroll'

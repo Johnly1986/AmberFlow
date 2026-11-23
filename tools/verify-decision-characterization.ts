@@ -6,7 +6,8 @@
  * 同一 mw 内换 `installDecisionProvider` 不生效——score_kind/shape 矩阵必须每档一个 mw
  * （浏览器 session/page 可复用）。
  *
- * 钉住的投影：桩侧请求快照（goal/候选 ref+tag+label/forbidden/notes/k）+ 桩侧返回投影
+ * 钉住的投影：桩侧请求快照（goal/候选 ref+tag+label/forbidden/notes/k）+ 请求 goal 序列
+ * （`goals`——run/pilot 场景的 L0 文本「当前页/已执行」由此钉住）+ 桩侧返回投影
  * （ref/score/scoreKind/signals/options/passthrough/probs）+ 执行期 step 的 phase 字段
  * （`decision_kind`/`method`/`conf`/`executed`/`changed`）与 `stop_code`。位置性 ref 只在本页
  * 内可比（同页 DOM 确定性），端口归一为 `<LOCAL>`。
@@ -20,6 +21,7 @@
  *   ✔ run-family-repair（族不符：族空停因或 nominated_family_repair）
  *   ✔ run-r2b（词面零重叠提名：conf∈[floor,0.9) + 零重叠 → 第二次宽扫；按 conf/重叠判定进入条件）
  *   ✔ run-retry-memory（同 memory 实例两次 attempt：记忆键稳定 + rank 档第二次带注记）
+ *   ✔ run-two-step-history（同一次 run 两步：第二步的 L0 goals 带「当前页」+「已执行: …[no_change]」）
  *   ✔ pilot-leg 生命周期（leg 派生 = redirect 事件计数：初始 0、redirect 后 +1、resume 不变；
  *      停因经 PilotRuntime 驾驶循环实测，非伪造）
  *
@@ -176,6 +178,11 @@ function reportFact(report: RunReport): Record<string, unknown> {
   return { stop_code: report.stop_code ?? null, steps: (report.steps as Array<Record<string, unknown>>).map(stepFact) };
 }
 
+/** 桩侧请求 goal 序列（L0 文本的唯一载荷；键序稳定 = 数组按询问顺序）。 */
+function goalsOf(stub: ReturnType<typeof makeStubProvider>): string[] {
+  return stub.requests.map((r) => r.goal);
+}
+
 /* ------------------------------------------------------------------ 场景 */
 
 interface Case { name: string; run(ctx: { origin: string }): Promise<Record<string, unknown>>; }
@@ -225,7 +232,7 @@ const CASES: Case[] = [
       assert.equal(step["decision_kind"], "rule", "规则分支 decision_kind=rule");
       assert.equal(step["method"], "rule:match", "规则分支 method=rule:match");
       assert.equal(step["conf"], 1, "规则分支 conf=1");
-      return reportFact(report);
+      return { ...reportFact(report), goals: goalsOf(stub) };
     }),
   },
   {
@@ -238,18 +245,19 @@ const CASES: Case[] = [
         assert.ok(stub.requests[1]!.candidates.length > stub.requests[0]!.candidates.length, "宽扫池必须更大");
         const step = report.steps[0] as unknown as Record<string, unknown>;
         assert.ok(String(step["method"] ?? "").includes("reobserve"), "宽扫后 method 带 :reobserve");
-        return { report: reportFact(report), first_count: stub.requests[0]!.candidates.length, second_count: stub.requests[1]!.candidates.length };
+        return { report: reportFact(report), goals: goalsOf(stub),
+          first_count: stub.requests[0]!.candidates.length, second_count: stub.requests[1]!.candidates.length };
       }),
   },
   {
     name: "run-adjudicate",
     run: async () => await withMw(
       (snap) => (snap.seq === 0 ? { score: 0.05, passthrough: false } : { score: 0.95, passthrough: true }),
-      async ({ mw, page, origin }) => {
+      async ({ mw, page, origin, stub }) => {
         const report = await mw.run("点一个按钮", `${origin}/wide.html`, { page, verbose: false, adjudicate: true, reobserve: false });
         const step = report.steps[0] as unknown as Record<string, unknown>;
         assert.ok(String(step["method"] ?? "").endsWith(":adjudicated"), "adjudicate 档 method 应以 :adjudicated 结尾");
-        return reportFact(report);
+        return { ...reportFact(report), goals: goalsOf(stub) };
       }),
   },
   {
@@ -263,7 +271,7 @@ const CASES: Case[] = [
       assert.equal(step["decision_kind"], "escalate", "升级票命中后 decision_kind=escalate");
       assert.equal(step["method"], "escalate", "升级票 method=escalate");
       assert.equal(stub.requests.length, 1, "升级票不产生第二次 provider 询问");
-      return { report: reportFact(report), asks: stub.requests.length };
+      return { report: reportFact(report), asks: stub.requests.length, goals: goalsOf(stub) };
     }),
   },
   {
@@ -274,7 +282,7 @@ const CASES: Case[] = [
       const repair = Boolean(step?.["nominated_family_repair"]);
       assert.ok(report.stop_code === "nominated_family_empty" || repair,
         "族不符：走族修复或族空停因（cards 页无 check 候选）");
-      return { report: reportFact(report), nominated_family_repair: repair, asks: stub.requests.length };
+      return { report: reportFact(report), nominated_family_repair: repair, asks: stub.requests.length, goals: goalsOf(stub) };
     }),
   },
   {
@@ -294,6 +302,7 @@ const CASES: Case[] = [
         return {
           report: reportFact(report), first_conf: stub.responses[0]!.score, lexical_overlap: overlap,
           pool_counts: [stub.requests[0]!.candidates.length, stub.requests[1]!.candidates.length],
+          goals: goalsOf(stub),
         };
       }),
   },
@@ -312,7 +321,7 @@ const CASES: Case[] = [
             });
             return {
               attempt, report: reportFact(report), asks: stub.requests.length,
-              notes: stub.requests.map((r) => r.notes),
+              notes: stub.requests.map((r) => r.notes), goals: goalsOf(stub),
               memory_key: memory.key(`${origin}/cards.html`, "点一个按钮"),
             };
           },
@@ -326,12 +335,32 @@ const CASES: Case[] = [
       const secondNotes = runs[1]!["notes"] as Array<Record<string, string> | null>;
       const hasNote = secondNotes.some((n) => n !== null && Object.keys(n).length > 0);
       assert.equal(hasNote, true, "rank 档第二次 attempt 应带记忆注记");
-      return { attempts: runs.length, keys_equal: true, first_notes: runs[0]!["notes"], second_notes: secondNotes };
+      return { attempts: runs.length, keys_equal: true, first_notes: runs[0]!["notes"], second_notes: secondNotes,
+        attempt_goals: runs.map((r) => r["goals"]) };
     },
   },
   {
+    name: "run-two-step-history",
+    run: async () => await withMw(
+      () => ({ score: 0.9, passthrough: true, probs: { e0: 0.9 } }),
+      async ({ mw, page, origin, stub }) => {
+        const report = await mw.run("点一个按钮", `${origin}/cards.html`, { page, verbose: false });
+        assert.equal(report.steps.length, 2, "两步预算应各执行一次动作");
+        const goals = goalsOf(stub);
+        assert.equal(goals.length, 2, "两步各问票一次");
+        assert.ok(goals[0]!.includes("当前页"), "第一步 L0 带当前页");
+        assert.equal(goals[0]!.includes("已执行"), false, "第一步前无步史");
+        assert.ok(goals[1]!.includes("当前页"), "第二步 L0 仍带当前页");
+        assert.ok(goals[1]!.includes("已执行:"), "第二步 L0 折入已执行步史");
+        assert.ok(/\[no_change\]/.test(goals[1]!), "静态页点击后的步史 outcome 必须是 no_change");
+        return { goals, stop_code: report.stop_code ?? null, steps: report.steps.length };
+      },
+      { maxSteps: 2 },
+    ),
+  },
+  {
     name: "pilot-leg-lifecycle",
-    run: async () => await withPilot(ORIGIN, [{ ref: null, score: 0 }], async ({ rt, events }) => {
+    run: async () => await withPilot(ORIGIN, [{ ref: null, score: 0 }], async ({ rt, events, stub }) => {
       const stop1 = await rt.drive();
       assert.equal(stop1, "low_confidence", "stub 弃权 → low_confidence 交接");
       const legs0 = redirectCountOf(events);
@@ -350,7 +379,7 @@ const CASES: Case[] = [
       assert.equal(redirectCountOf(events), 1, "resume 保留同 leg（计数不变）");
       return {
         stops: [stop1, stop2, stop3], legs: [legs0, legs1, redirectCountOf(events)],
-        handoffs: events.filter((e) => e["type"] === "handoff").length,
+        handoffs: events.filter((e) => e["type"] === "handoff").length, goals: goalsOf(stub),
       };
     }),
   },

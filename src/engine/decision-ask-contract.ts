@@ -26,7 +26,10 @@ import type { PickProposal, Sig, StopCode } from "./executor-types.ts";
 import type { ProviderCapabilities, ProviderPage } from "../support/decision-provider-contract.ts";
 
 /** 契约版本：形状变更 = seam 变更（`docs/MAINLINE.md` seam 表 + A/B）。 */
-export const DECISION_ASK_CONTRACT_VERSION = 5;
+export const DECISION_ASK_CONTRACT_VERSION = 6;
+
+/** 询问种类闭集（pick 归选择平面；risk/done 经 `decision-questions.ts` 访问面）。 */
+export type DecisionQuestionKind = "pick" | "risk" | "done";
 
 /** 上文层闭集（DC1.2 五层；不得发明第六层）。 */
 export type DecisionLayer = "L0" | "L1" | "L2" | "L3" | "L4";

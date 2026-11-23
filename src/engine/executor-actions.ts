@@ -5,7 +5,8 @@
 import { sleep } from "../support/sleep.ts";
 import { type AmbiguityView } from "./ambiguity.ts";
 import { type ActMissDiagnostics, describeActionError, firstLoc } from "./executor-pure.ts";
-import { clickPoollessTarget, takeAncestorRetarget } from "./executor-actionability.ts";
+import { takeAncestorRetarget } from "./executor-actionability.ts";
+import { executePoollessAction } from "./executor-poolless-ops.ts";
 import { _executeElement } from "./executor-resolve-a.ts";
 import { _resolveOne, _resolveOneWithLock, type ActLock } from "./executor-resolve-b.ts";
 import { type ActionabilityDetail, type AnyLoc, type AnyPage } from "./executor-types.ts";
@@ -123,8 +124,7 @@ export async function actOnce(mw: BrowserMiddleware, // task-33（`amber session
           };
         }
       } else if (el === null) {
-        await clickPoollessTarget(mw, page, loc);   // 池外回退；祖先接住点击时内部重定向
-        how = "clicked";
+        [how, arg] = await executePoollessAction(mw, page, loc, op, bind);   // 池外回退：按 op 分派
       } else if (op === "click" || op === "check") {
         if (opts?.occlusionProbe === true) {
           // B1：探针即点击——`occludedReason` 的快路径本身就是一次真点击，成功即"已点"，

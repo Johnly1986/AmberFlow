@@ -383,3 +383,13 @@ export function createDecisionAccounting(
       );
   }
 }
+
+/**
+ * run 面组合根便捷构造：attempt lifetime（身份字段只用于诊断/证据；策略按 kind 选择，
+ * 记忆作用域经 deps.memory + memoryKey 另行提供）。
+ */
+export function createRunDecisionAccounting(
+  run: RunAccounting, memory: OutcomeMemoryLike | null, subgoalId: string,
+): DecisionAccounting {
+  return createDecisionAccounting({ run, memory }, { kind: "attempt", runId: "run", subgoalId, attempt: 1 });
+}

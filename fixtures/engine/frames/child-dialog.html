@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>frames ②：同源 iframe 对话框（Cancel / Sign In）</title>
+<style>
+  body { margin: 0; padding: 16px; font: 14px/1.4 system-ui, sans-serif; background: #eef; }
+  /* 两按钮同尺寸 ⇒ 池内醒目度全等，桶内次序退化为 scan（DOM 序）：
+     Cancel 恒 e0、Sign In 恒 e1（与真站 pool-27.json 的子帧编号一致）。 */
+  button { width: 96px; height: 32px; margin-right: 12px; }
+</style>
+</head>
+<body>
+<!-- 真站对应：Google Maps 对话框 iframe 的 f1:e0 Cancel / f1:e1 Sign In。
+     act 池（64 帽）下主帧先填满 → 本帧拿不到名额（0 行）；snapshot 池（120 帽）才可见。 -->
+<p>Continue as guest?</p>
+<button id="cancel">Cancel</button>
+<button id="signin">Sign In</button>
+</body>
+</html>

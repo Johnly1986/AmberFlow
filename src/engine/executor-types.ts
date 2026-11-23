@@ -323,6 +323,8 @@ export interface RunReport {
   stop_code?: StopCode;
   /** Which step produced the stop (1-based; absent for pre-step exits like `host_not_allowed`). */
   stop_step?: number;
+  /** 停止路径的逐层回执（additive；选择段动作前停下时挂最后一次询问，见 `decision-context-evidence`）。 */
+  stop_decision_context?: { layers: import("./decision-ask-contract.ts").DecisionLayerReceipt[] };
   steps: TraceStep[];
   audit: AuditVerdictLike;
   /** 结构化诊断：失败时不要求 Agent 再读源码/自己探页面。 */
@@ -352,11 +354,9 @@ export interface RunReport {
      */
     throttle_suspect?: ThrottleSuspect;
   };
-  /**
-   * A1 动作执行证据（全部可选：缺字段 = 该事实不适用，不硬造）。
-   * `executed` 只在**有动作面**的步（命令步/发生过动作尝试）出现：false = 声明了动作但
-   * 一个都没执行（见 skipped_actions），true = 至少执行了一个（见 executed_actions）。
-   */
+  /** A1 动作执行证据（全部可选：缺字段 = 该事实不适用，不硬造）。`executed` 只在**有动作面**
+   * 的步（命令步/发生过动作尝试）出现：false = 声明了动作但一个都没执行（见 skipped_actions），
+   * true = 至少执行了一个（见 executed_actions）。 */
   executed?: boolean;
   executed_actions?: ExecutedAction[];
   skipped_actions?: SkippedAction[];

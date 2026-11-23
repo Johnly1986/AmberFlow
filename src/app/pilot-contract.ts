@@ -17,6 +17,7 @@ import { SESSION_IDLE_TIMEOUT_MS } from "../support/tuning.ts";
 // 会话注入 seam 的类型面走 type-only import：契约叶子不得因这一字段把执行器/决策/浏览器
 // 那一串运行期模块拖进加载图（pilot-contract 被 CLI/导出面单独加载时也要能零副作用）。
 import type { BrowserSession } from "../engine/executor.ts";
+import { DECISION_HISTORY_STEPS, drivingGoalText } from "../engine/decision-goal-text.ts";
 
 /** 驾驶停止原因闭集（引擎既有停因码 + pilot 收尾正因）。 */
 export const PILOT_STOP_CODES = [
@@ -34,7 +35,8 @@ export type PilotStopCode = (typeof PILOT_STOP_CODES)[number];
 
 /**
  * Agent 兜底指令闭集（stdin JSONL；观察类指令复用 session 请求面）。形状：
- *   resume { hint?, value?（对象 = 多槽 k:v；字符串 = 单值，键取 target）, skip? } ｜
+ *   resume { hint?, value?, target?, skip? }（value 对象 = 多槽 k:v；字符串 = 单值，键序
+ *     target → needs_value 记录的目标键 → "resumed"；带 hint 时值跟着 hint 目标走）｜
  *   redirect { url? | goal? }（步史/禁选清段重新累计，预算不清零）｜
  *   finish { signal }（或复用预声明的 --final-signal；checkSignal 验证成立才记 held）｜
  *   abort {}。
@@ -72,6 +74,34 @@ export interface PilotHandoff {
   };
   /** 停驶页 URL（Agent resume/redirect 的现场锚点）。 */
   url: string;
+  /**
+   * 低置信模型票（可选，≤6；**无则键不出现**）。纯 evidence-only：只报票面事实，
+   * 不判错、不阻断、不新增停因。必须放顶层而不是 `why_stuck.evidence`——桥面整体丢弃
+   * evidence（只投影交接块白名单字段），只有顶层才到得了 Agent 面前。
+   */
+  weak_picks?: WeakPick[];
+  /**
+   * 结束态校验声明（显式 fact）：`null` = 本 run **没有声明完成信号**，结束态**未被验证**
+   * （`budget_exceeded`/`needs_value` 不是"做完了"）；有声明时是有界摘要。与 `stop_code`
+   * 分工：`stop_code` 说停在哪，本字段说"有没有可校验的完成真值"。
+   */
+  final_signal?: null | string;
+}
+
+/**
+ * 低置信模型票的票面事实（`PilotHandoff.weak_picks`）。
+ * 只收 **model** 票且 `conf < DEFAULT_CONF_FLOOR`（全局缺省 0.25）：这是"这一票低于文档
+ * 默认刻度却过了闸"的可复现解释——闸门刻度可被 provider 自报/CLI 下调，票面本身不撒谎。
+ */
+export interface WeakPick {
+  /** 1-based 驾驶步号（与 `PilotHandoff.step_id`/轨迹 `i+1` 对齐）。 */
+  step: number;
+  /** 选中的目标（≤40 字，与驾驶轨迹同口径）。 */
+  target: string;
+  /** 模型票置信度原值（0–1）。 */
+  conf: number;
+  /** 票来源；闭集为未来规则票对照保留，当前 weak_picks 只会有 "model"。 */
+  picked_by: "rule" | "model";
 }
 
 /** 驾驶步的轨迹行（`--record` JSONL；export 的输入）。 */
@@ -187,41 +217,24 @@ export const PILOT_INERT_LIMIT = 3;
 /** 同一元素（按 esig）被驱动达上限而最终信号仍未成立 = 死目标（run 面 `maxEffectiveRepeats`
  *  缺省同口径的驾驶面版）：到达上限即守停，不再执行——防 toggle/复读形态无声烧预算。 */
 export const PILOT_REPEAT_LIMIT = 3;
-/** 已走步数摘要上限（驾驶问句里带的已走步数；有界，防题面膨胀）。 */
-export const PILOT_HISTORY_STEPS = 6;
+/** 已走步数摘要上限（驾驶问句里带的已走步数；有界，防题面膨胀）——与 run 面同源常量。 */
+export const PILOT_HISTORY_STEPS = DECISION_HISTORY_STEPS;
 
-/**
- * 驾驶问句的 goal 底座：总目标 + 当前页/期望页 + 有界步史摘要（既有事实投影，不做自由生成）。
- *
- * 步史是**已执行**（不是"已完成"）：每一步带 outcome 标记（changed / no_change / failed）——
- * 模型必须能看出「点了但页面没变」，否则 no-op 点击会被当成进展继续复读（走查实测：
- * Google apps / Settings 连续无进展，旧题面却写"已完成: 1.Google apps; 2.Settings"）。
- * 当前页/期望页是页面漂移的可读锚点（配合 runtime 的 off_task_page 确定性停因）。
- * 每步 ≤`maxLabel` 字、URL ≤120 字、总步数 ≤PILOT_HISTORY_STEPS。
- */
-export function drivingGoalText(goal: string,
-    history: ReadonlyArray<{ target: string; ok: boolean; changed?: boolean }>,
-    currentUrl = "", expectUrl = "", maxLabel = 40): string {
-  const clip = (text: string, max = maxLabel): string => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
-  const hist = history.slice(-PILOT_HISTORY_STEPS)
-    .map((s, i) => {
-      const outcome = s.ok !== true ? "failed" : s.changed === true ? "changed" : s.changed === false ? "no_change" : "ok";
-      return `${i + 1}.${clip(s.target)}[${outcome}]`;
-    }).join("; ");
-  const where = currentUrl === "" ? "" : `当前页: ${clip(currentUrl, 120)}`;
-  const expect = expectUrl === "" ? "" : `期望页: ${clip(expectUrl, 120)}`;
-  const head = [goal, where, expect].filter((s) => s !== "").join(" | ");
-  return hist === "" ? head : `${head} | 已执行: ${hist}`;
-}
+/** 驾驶问句的 goal 底座（总目标 + 当前页/期望页 + 有界步史；实现单源在引擎 `decision-goal-text`）。 */
+export { drivingGoalText };
 
 /** 解锁建议的可选现场事实（确定性生成用；不是模型建议，也不进 hint 解析面）。 */
 export interface PilotUnblockContext {
   /** 被 hosts 信封排除的子 frame origins（handoff 证据同源）。 */
   framesExcluded?: readonly string[];
+  /** 未决值需求的值袋键（needs_value 停时由驾驶面记录；用于生成可照抄的 resume 形状）。 */
+  needsValueKey?: string;
+  /** 未决值需求的目标描述（可读提示用；不参与解析）。 */
+  needsValueTarget?: string;
 }
 
 /** 停因 → 基础解锁建议闭集（确定性生成；按停因查表，不是模型建议）。 */
-function baseUnblockHints(stop: PilotStopCode): string[] {
+function baseUnblockHints(stop: PilotStopCode, ctx?: PilotUnblockContext): string[] {
   switch (stop) {
     case "low_confidence":
       return [
@@ -233,11 +246,16 @@ function baseUnblockHints(stop: PilotStopCode): string[] {
         "resume 带 hint 收窄（闭集：#id | tag[attr=value] | bare-token 等既有 hint 语法）",
         "重新 observe 看候选证据后点名",
       ];
-    case "needs_value":
-      return [
-        "resume 带 value 显式给值（值来自 Agent = 显式给定，引擎绝不猜）",
-        "起会话时预声明 --slots k=v",
-      ];
+    case "needs_value": {
+      // 已知目标键时给可照抄的形状：Agent 照抄即确定性绑定到产生 needs_value 的目标；
+      // 键未知（无记录/异常路径）退回无键建议，绝不发明键。
+      const key = ctx?.needsValueKey ?? "";
+      const target = ctx?.needsValueTarget ?? "";
+      const named = key === ""
+        ? "resume 带 value 显式给值（值来自 Agent = 显式给定，引擎绝不猜）"
+        : `resume 带 value：{"${key}":"<值>"}${target === "" ? "" : `（目标：${target}）`}（值来自 Agent，引擎绝不猜）`;
+      return [named, "起会话时预声明 --slots k=v"];
+    }
     case "stuck_inert":
       return [
         "resume 带 hint 换目标（连续无变化的元素已被禁）",
@@ -282,7 +300,7 @@ export function unblockHintsFor(stop: PilotStopCode, ctx?: PilotUnblockContext):
     : [];
   const frameHint = frames.length === 0
     ? [] : [`目标可能在未声明的 iframe 内：把 ${frames.join(", ")} 加入 hosts（--host / hosts 参数）后重试`];
-  return [...frameHint, ...baseUnblockHints(stop)].slice(0, 3);
+  return [...frameHint, ...baseUnblockHints(stop, ctx)].slice(0, 3);
 }
 
 /** 退出码：0 = final_signal_held 或干净收尾 / 1 = browser_dead / 3 = 被挡住（停因待兜底）。 */
@@ -290,4 +308,30 @@ export function pilotExitCode(stop: PilotStopCode): number {
   if (stop === "final_signal_held") return 0;
   if (stop === "browser_dead") return 1;
   return 3;
+}
+
+/** 形状判断（契约叶子不引入运行期 helper 模块，见文件头注释）。 */
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** 一次性校验 pilot 选项面（CLI 入口先跑；非法 = 结构化错误，不猜）。 */
+export function validatePilotOptions(opts: PilotOptions): string | null {
+  if (typeof opts.url !== "string" || opts.url.trim() === "") return "pilot needs a non-empty --url";
+  try { new URL(opts.url); } catch { return `pilot --url is not a valid URL: ${JSON.stringify(opts.url)}`; }
+  if (typeof opts.goal !== "string" || opts.goal.trim() === "") return "pilot needs a non-empty --goal";
+  if (opts.finalSignal != null && !isObj(opts.finalSignal)) return "pilot --final-signal must be a JSON object when present";
+  if (opts.maxSteps !== undefined && (!Number.isInteger(opts.maxSteps) || opts.maxSteps! < 1 || opts.maxSteps! > 200)) {
+    return "pilot --max-steps must be an integer in [1, 200]";
+  }
+  if (opts.confFloor !== undefined && (typeof opts.confFloor !== "number" || opts.confFloor! < 0 || opts.confFloor! > 1)) {
+    return "pilot --conf-floor must be a number in [0, 1]";
+  }
+  if (opts.driver !== undefined && opts.driver !== "model" && opts.driver !== "agent") {
+    return "pilot --driver must be model|agent";
+  }
+  if (opts.expectUrl !== undefined && opts.expectUrl !== null
+    && (typeof opts.expectUrl !== "string" || opts.expectUrl.trim() === "")) {
+    return "pilot --expect-url must be a non-empty string when present";
+  }
+  return null;
 }

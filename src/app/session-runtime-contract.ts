@@ -13,8 +13,44 @@ import type { LaunchWindowMode } from "../browser/browser-env.ts";
 import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
 
 /** `act` 的 MVP 能力面（执行器里 drag/upload/clickAt 也有，但 authoring MVP 不暴露）。 */
-export const SESSION_ACT_OPS = ["click", "check", "fill", "select", "hover", "scroll"] as const;
+export const SESSION_ACT_OPS = ["click", "check", "fill", "select", "hover", "scroll", "set_range"] as const;
 export type SessionActOp = (typeof SESSION_ACT_OPS)[number];
+
+/** `act set_range` 的目标值形状（与 `ctx.setRange` / range.ts 的 RangeValue 同一闭集）。 */
+export type SessionSetRangeValue = { value: number } | { percent: number };
+
+/**
+ * `act set_range` 的 value 形状校验（返回 null = 合法；否则给人读的 config_error 文案）。
+ *
+ * 只判**声明面**形状：恰好一个键、数值有限、percent 在 [0,100]。数值是否落在页面滑杆的
+ * [min,max] 内是页面事实，由 range.ts 结构化拒绝（`value_out_of_range`，零动作）——这里
+ * 不猜值域、不钳制（与 ctx.setRange 的 validateSetRangeRequest 同一口径）。
+ */
+export function sessionSetRangeProblem(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return "act op 'set_range' needs a value: { value: <number> } or { percent: <0..100> }";
+  }
+  if (!isObj(value)) {
+    return `act set_range value must be an object: { value: <number> } or { percent: <0..100> } (got ${JSON.stringify(value)})`;
+  }
+  const hasValue = value["value"] !== undefined;
+  const hasPercent = value["percent"] !== undefined;
+  if (hasValue === hasPercent) {
+    return "act set_range value must have EXACTLY one of {value} | {percent} (got both or neither)";
+  }
+  if (hasValue) {
+    const v = value["value"];
+    if (typeof v !== "number" || !Number.isFinite(v)) {
+      return `act set_range value.value must be a finite number (got ${JSON.stringify(v)})`;
+    }
+    return null;
+  }
+  const p = value["percent"];
+  if (typeof p !== "number" || !Number.isFinite(p) || p < 0 || p > 100) {
+    return `act set_range value.percent must be a number in [0, 100] (got ${JSON.stringify(p)})`;
+  }
+  return null;
+}
 
 /**
  * `act scroll` 两条路径（合成目标 = `mw.scrollDocument`，元素目标 = `mw.actOnce`）的共同
@@ -313,6 +349,11 @@ export function driveCommandProblem(req: Record<string, unknown>): string | null
   }
   if (req["hint"] !== undefined && !nonEmpty(req["hint"])) {
     return "driveCommand.hint must be a non-empty string when present";
+  }
+  // resume 字符串值的显式值袋键（对象键/字符串+target 两条文档化路径必须真可达；桥与
+  // session-driver 都透传它，这里只做形状校验，语义归 pilot 兜底分派）。
+  if (req["target"] !== undefined && !nonEmpty(req["target"])) {
+    return "driveCommand.target must be a non-empty string when present";
   }
   if (req["url"] !== undefined && !nonEmpty(req["url"])) {
     return "driveCommand.url must be a non-empty string when present";

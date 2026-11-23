@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>poolless fallback actions</title></head>
+<body>
+  <!--
+    Out-of-pool fallback fixture（零外部请求；只服务 tools/verify-poolless-actions.ts）。
+
+    池构成规则按"同 label 子让位"剔掉子控件：`#target`（input）与 `#pick`（select）的 label
+    与各自 role=button 容器相同，因此被剔出池——它们只存在于 DOM，`#id` 只能经池外回退
+    （live-DOM 直查 / A3 DOM 回退）解析到。这样 actOnce 的 `el === null` 分支（合成行 /
+    直查给的是 locator，不是池行）在 fill/select/hover 上才真正可达。
+
+    日志元素只记录动作事实（点击 / 输入 / 选中 / 池内按钮点击），供工具断"fill 没有变成 click"。
+  -->
+  <main>
+    <p>Out-of-pool fallback fixture: the controls below are admitted by the surface selector but
+      dropped from the element pool (same-label child gives way to its role=button container), so
+      they can only be resolved through the out-of-pool fallback face.</p>
+
+    <div id="search-region" role="button" aria-label="Search region"
+         style="display:inline-block;padding:8px;border:1px solid #999">
+      <input id="target" name="q" aria-label="Search region" style="display:block;width:220px;height:28px">
+    </div>
+
+    <div id="color-region" role="button" aria-label="Color region"
+         style="display:inline-block;padding:8px;border:1px solid #999">
+      <select id="pick" name="color" aria-label="Color region" style="display:block;width:120px;height:28px">
+        <option value="">--</option>
+        <option value="red">Red</option>
+        <option value="blue">Blue</option>
+      </select>
+    </div>
+
+    <button id="pool-btn" type="button">Pool button</button>
+
+    <pre id="log"></pre>
+  </main>
+  <script>
+    const input = document.getElementById("target");
+    const pick = document.getElementById("pick");
+    const log = document.getElementById("log");
+    // 事件日志：click 与 input/change 分开记录，断言时按 token 取。
+    input.addEventListener("click", () => { log.textContent += "input-click;"; });
+    input.addEventListener("input", () => { log.textContent += "input-event:" + input.value + ";"; });
+    pick.addEventListener("change", () => { log.textContent += "select-change:" + pick.value + ";"; });
+    document.getElementById("pool-btn").addEventListener("click", () => { log.textContent += "pool-click;"; });
+  </script>
+</body>
+</html>

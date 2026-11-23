@@ -26,7 +26,10 @@ import os from "node:os";
 import path from "node:path";
 import { PilotRuntime, type PilotSink } from "../src/app/pilot-runtime.ts";
 import { drivingGoalText, unblockHintsFor, type PilotOptions } from "../src/app/pilot-contract.ts";
+import { weakPicksFrom } from "../src/app/pilot-evidence.ts";
+import { findPoolRefBySig, slotKeyFor, valueKeyOf, valueNeedOf, valueSigOf } from "../src/app/pilot-value-need.ts";
 import { browserSession } from "../src/engine/executor.ts";
+import type { Elem } from "../src/engine/elem-model.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const FIXTURES = path.join(REPO, "fixtures", "engine", "pilot");
@@ -95,6 +98,22 @@ function drivesOf(events: SinkEvent[]): SinkEvent[] {
   return events.filter((e) => e["type"] === "drive");
 }
 
+/** 最后一次交接的 `why_stuck.evidence`（值需求/落空 hint 等现场事实的断言入口）。 */
+function lastHandoffEvidence(events: SinkEvent[]): Record<string, unknown> {
+  const handoffs = events.filter((e) => e["type"] === "handoff");
+  assert.ok(handoffs.length > 0, "a handoff event exists");
+  const handoff = handoffs[handoffs.length - 1]!["handoff"] as Record<string, unknown>;
+  return (handoff["why_stuck"] as Record<string, unknown>)["evidence"] as Record<string, unknown>;
+}
+
+/** 读出页面元素的值（断言"值真的落在输入框上"，而不只是写进了值袋）。 */
+async function pageValue(rt: PilotRuntime, selector: string): Promise<string> {
+  const page = await rt.page();
+  return await page.evaluate(((sel: string) => (globalThis as unknown as {
+    document: { querySelector(s: string): { value: string } | null };
+  }).document.querySelector(sel)?.value ?? "") as unknown, selector) as string;
+}
+
 /* ------------------------------------------------------------------ 场景表 */
 
 /** §3.2①：rules 面零模型到达——goal 词面命中、声明信号成立、零咨询。 */
@@ -121,6 +140,7 @@ async function scenarioArrival(origin: string): Promise<void> {
     assert.equal(end!["ok"], true);
     assert.equal(end!["stop_code"], "final_signal_held");
     assert.equal(end!["model_asks"], 0, "no model ask on the rules path");
+    assert.equal(end!["conf_floor"], 0.25, "the terminal summary carries the effective floor scale (default 0.25)");
     assert.equal("attached" in end!, false, "the non-attach summary keeps its old shape (attached only in attach mode)");
   } finally {
     await rt.closeBrowser();
@@ -147,6 +167,108 @@ async function scenarioNeedsValue(origin: string): Promise<void> {
   } finally {
     await rt.closeBrowser();
   }
+}
+
+/**
+ * 值绑定（M1）：`needs_value` 交接必须点名「哪个目标/哪个键要值」；裸字符串 resume
+ * （无 hint/target）绑定到该键（而不是不可达的 "resumed"）→ 值落地 → 信号成立、零模型。
+ */
+async function scenarioNeedsValueString(origin: string): Promise<void> {
+  const { rt, events } = await boot({
+    url: `${origin}/home.html`, goal: "Search term",
+    finalSignal: { css_value_equals: ["#q", "amber"] }, maxSteps: 4,
+  });
+  try {
+    assert.equal(await rt.drive(), "needs_value", "fill without a slot stops honestly");
+    const ev = lastHandoffEvidence(events);
+    const need = ev["needs_value"] as Record<string, unknown> | undefined;
+    assert.ok(need !== undefined, "the handoff names which target needs a value");
+    assert.equal(need!["key"], "Search term", "the value key is the target label");
+    assert.equal(typeof need!["target"], "string", "the value need carries a readable target");
+    assert.equal(typeof need!["ref"], "string", "the value need carries the pool ref for evidence");
+    const handoff = events.filter((e) => e["type"] === "handoff").pop()!["handoff"] as Record<string, unknown>;
+    const unblock = handoff["what_would_unblock"] as string[];
+    assert.ok(unblock[0]!.includes('"Search term"'), "the first unblock hint is the exact resume shape");
+    // 裸字符串 resume（无 hint/target）：键取 needs_value 记录的目标键（旧实现写不可达的 "resumed"）。
+    assert.equal(await rt.handleLine('{"cmd":"resume","value":"amber"}'), "drive");
+    assert.equal(rt.slots["Search term"], "amber", "a bare string binds to the needs_value target key");
+    assert.equal(await rt.drive(), "final_signal_held", "the explicit value + signal check = arrival");
+    const drives = drivesOf(events);
+    assert.equal(drives.length, 1, "the fill executed once");
+    assert.equal(drives[0]!["op"], "fill");
+    assert.equal(drives[0]!["ok"], true);
+    assert.equal(await pageValue(rt, "#q"), "amber", "the value landed on the real input");
+    await rt.finish(null);
+    const end = events.find((e) => e["type"] === "pilot_end");
+    assert.equal(end!["model_asks"], 0, "the rules path asks no model");
+  } finally {
+    await rt.closeBrowser();
+  }
+}
+
+/**
+ * 值绑定（M1）：resume 同时带 hint + 字符串值时，值跟着 **hint 目标** 走
+ * （旧值需求键也保留，但命中目标的键由 hint 目标推导，不死守旧目标）。
+ */
+async function scenarioNeedsValueHintTarget(origin: string): Promise<void> {
+  const { rt, events } = await boot({
+    url: `${origin}/value-targets.html`, goal: "Search term",
+    finalSignal: { css_value_equals: ["#note", "amber"] }, maxSteps: 4,
+  });
+  try {
+    assert.equal(await rt.drive(), "needs_value", "the goal's fill target needs a value first");
+    assert.equal(rt.valueNeed?.key, "Search term", "the recorded need is the goal's fill target");
+    assert.equal(await rt.handleLine('{"cmd":"resume","hint":"#note","value":"amber"}'), "drive");
+    assert.equal(await rt.drive(), "final_signal_held", "the hint target takes the value and arrives");
+    const drives = drivesOf(events);
+    assert.equal(drives.length, 1, "exactly the hint target was filled");
+    assert.equal(drives[0]!["op"], "fill");
+    assert.equal(await pageValue(rt, "#note"), "amber", "the value followed the hint target");
+    assert.equal(await pageValue(rt, "#search"), "", "the original value-needing target was not filled");
+  } finally {
+    await rt.closeBrowser();
+  }
+}
+
+/** 诊断（M1）：resume hint 落空 → 下一次交接 evidence 带 `resume_hint.missed`（不再逐字相同）。 */
+async function scenarioResumeHintMissed(origin: string): Promise<void> {
+  const { rt, events } = await boot({
+    url: `${origin}/home.html`, goal: "Search term",
+    finalSignal: { css_value_equals: ["#q", "amber"] }, maxSteps: 4,
+  });
+  try {
+    assert.equal(await rt.drive(), "needs_value");
+    assert.equal(await rt.handleLine('{"cmd":"resume","hint":"#nope"}'), "drive");
+    assert.equal(await rt.drive(), "needs_value", "the missed hint falls back to the same value-needing target");
+    const ev = lastHandoffEvidence(events);
+    assert.deepEqual(ev["resume_hint"], { hint: "#nope", missed: true },
+      "the missed hint is explicit evidence on the next handoff");
+    assert.equal((ev["needs_value"] as Record<string, unknown>)["key"], "Search term",
+      "the value need is still named alongside the missed hint");
+  } finally {
+    await rt.closeBrowser();
+  }
+}
+
+/** 值键推导纯函数：空 label 回落 name/id、空键不参与匹配、签名回找同一目标。 */
+async function scenarioValueKeyPure(_origin: string): Promise<void> {
+  assert.equal(valueKeyOf({ tag: "input", label: "", name: "q" } as Elem), "q",
+    "an empty label falls back to name (never an empty key)");
+  assert.equal(valueKeyOf({ tag: "input", label: "", name: "", id: "ucc-1" } as Elem), "ucc-1", "id is the next fallback");
+  assert.equal(valueKeyOf({ tag: "input", label: "Search term" } as Elem), "Search term");
+  assert.equal(valueKeyOf({ tag: "textarea" } as Elem), "textarea", "tag is the last resort (never empty)");
+  assert.equal(slotKeyFor("", { resumed: "x" }), null, "an empty key never matches a slot (includes('') trap closed)");
+  assert.equal(slotKeyFor("Search Google Maps", { search: "v" }), "search", "the legacy two-way includes stays");
+  assert.equal(slotKeyFor("Note", { "Search term": "v" }), null, "a different key does not match");
+  const need = valueNeedOf({ tag: "input", label: "", name: "q", id: "a" } as Elem, "e4");
+  assert.equal(need.ref, "e4", "the pool ref is passed through");
+  assert.equal(need.key, "q");
+  assert.equal(need.sig, valueSigOf({ tag: "input", label: "", name: "q", id: "a" } as Elem), "the need carries its identity signature");
+  const pool = {
+    e1: { tag: "input", label: "", name: "q", id: "a" } as Elem,
+    e2: { tag: "input", label: "", name: "q", id: "b" } as Elem,
+  };
+  assert.equal(findPoolRefBySig(pool, valueSigOf(pool.e2)), "e2", "the signature identifies the same target across pools");
 }
 
 /** §3.2② stuck_inert：连续无变化如实停 → resume{hint} 点名换目标 → 到达。 */
@@ -314,6 +436,9 @@ async function scenarioBudget(origin: string): Promise<void> {
     assert.equal(stop, "budget_exceeded", "one step of budget, one honest handoff");
     const handoff = events.find((e) => e["type"] === "handoff");
     assert.ok(handoff !== undefined, "handoff projected before waiting");
+    const block = handoff!["handoff"] as Record<string, unknown>;
+    assert.equal(block["final_signal"], null, "no declared completion signal = an explicit unverified end-state fact");
+    assert.equal("weak_picks" in block, false, "no sub-floor model vote = no weak_picks key (old handoff shape)");
     // 预算用尽 = 终态：续驾驶指令（resume/redirect）一律结构化拒绝，不再重试。
     const refused = await rt.handleLine('{"cmd":"resume","hint":"#detail-link"}');
     assert.equal(refused, "stay", "budget_exhausted is terminal: resume is refused");
@@ -405,6 +530,37 @@ async function scenarioContextText(_origin: string): Promise<void> {
   assert.ok(hints.length <= 3 && hints[0]!.includes("https://ogs.google.com"), "frame exclusion is the first unblock hint");
   const budgetHints = unblockHintsFor("budget_exceeded", { framesExcluded: ["https://ogs.google.com"] });
   assert.ok(!budgetHints[0]!.includes("iframe"), "a budget terminal must not lead with a frame hint (it misleads)");
+}
+
+/**
+ * 结束态可见性纯函数（evidence-only）：`weakPicksFrom` 只收 **model** 票且 `conf < 0.25`
+ * （静态默认刻度），有界 ≤6、无票 = undefined（旧交接形状不变）；`conf_floor` 由终态摘要给出。
+ * 不判错、不阻断——这里只钉"票面事实怎么筛"，不钉"应不应该回退"（那是调用方的声明信号）。
+ */
+async function scenarioWeakPicksPure(_origin: string): Promise<void> {
+  const picks = weakPicksFrom([
+    { step: 1, target: "Rating 4.5+", picked_by: "model", conf: 0.88 },
+    { step: 2, target: "Rating 4.0", picked_by: "model", conf: 0.24 },
+    { step: 3, target: "Open 24 hours", picked_by: "rule", conf: 0.1 },
+  ]);
+  assert.deepEqual(picks, [{ step: 2, target: "Rating 4.0", conf: 0.24, picked_by: "model" }],
+    "only model votes below the default floor are reported (rules and high-confidence votes never are)");
+  assert.equal(weakPicksFrom([]), undefined, "no driving history = no key (old shape unchanged)");
+  assert.equal(weakPicksFrom([{ step: 1, target: "x", picked_by: "model", conf: 0.88 }]), undefined,
+    "an empty weak set is undefined, not an empty array");
+  assert.equal(weakPicksFrom([{ step: 1, target: "x", picked_by: "model", conf: 0.25 }]), undefined,
+    "the threshold is strict (< floor): a vote exactly at the floor is not weak");
+  const many = Array.from({ length: 9 }, (_, i) => ({
+    step: i + 1, target: `t-${String(i)}`, picked_by: "model" as const, conf: 0.1,
+  }));
+  const bounded = weakPicksFrom(many);
+  assert.ok(bounded !== undefined && bounded.length === 6, "weak_picks are bounded to 6");
+  assert.equal(bounded[0]!.step, 4, "the most recent weak picks are kept");
+  assert.deepEqual(weakPicksFrom([{ step: 1, target: "x", picked_by: "model", conf: 0.3 }], { floor: 0.4 }),
+    [{ step: 1, target: "x", conf: 0.3, picked_by: "model" }],
+    "an explicit floor overrides the documented default (the default is static 0.25)");
+  const long = weakPicksFrom([{ step: 1, target: "x".repeat(200), picked_by: "model", conf: 0.1 }]);
+  assert.ok(long !== undefined && long[0]!.target.length <= 40, "the target is bounded like the driving trace");
 }
 
 /** 任务页漂移：--expect-url 不含当前 URL → 确定性 off_task_page；redirect 回任务页即恢复。 */
@@ -552,6 +708,10 @@ async function scenarioAttachSession(origin: string): Promise<void> {
 const SCENARIOS: Array<[string, (origin: string) => Promise<void>]> = [
   ["arrival(rules 零模型到达)", scenarioArrival],
   ["needs_value→resume 值+点名", scenarioNeedsValue],
+  ["needs_value→裸字符串值绑定目标键", scenarioNeedsValueString],
+  ["needs_value→hint+值跟随 hint 目标", scenarioNeedsValueHintTarget],
+  ["hint 落空→下次交接 missed 证据", scenarioResumeHintMissed],
+  ["值键推导纯函数（空 label/空键/签名）", scenarioValueKeyPure],
   ["stuck_inert→resume 换目标", scenarioStuckInert],
   ["target_ambiguous→resume 收窄", scenarioAmbiguous],
   ["嵌套同目标折叠（容器vs链接）", scenarioNestedFold],
@@ -563,6 +723,7 @@ const SCENARIOS: Array<[string, (origin: string) => Promise<void>]> = [
   ["危险 default-deny 不可越过", scenarioDangerous],
   ["决策源不可达 no_model_runtime", scenarioNoModel],
   ["驾驶上文：已执行+outcome/当前页/期望页", scenarioContextText],
+  ["结束态可见性：weak_picks 筛选 + conf_floor", scenarioWeakPicksPure],
   ["任务页漂移→off_task_page", scenarioOffTaskPage],
   ["frame 排除→显式证据+加入 hosts 建议", scenarioFrameExcluded],
   ["attach：注入会话+跳过导航+不关宿主", scenarioAttachSession],

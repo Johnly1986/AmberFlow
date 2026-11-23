@@ -25,6 +25,7 @@
  */
 import { type EffectivePolicy, declaredPageUrls, preflightConfig, probeCompatDecisionPlane, promptManualOnTty, resolvePace, resolveRunPolicy } from "./app-runner-policy.ts";
 import { runToolStep } from "./app-runner-tool-step.ts";
+import { appStopContextFields, rememberAppStopContext } from "./app-stop-context.ts";
 import { type AppInvariantResult, type AppRunOptions, type AppRunResult, type AppSourceResult, type ToolStepResult, asAfterSignature, cleanStampAttrs, refusalLine, summarizeDecisions, invariantsFromTrace } from "./app-runner-types.ts";
 import fs from "node:fs";
 import os from "node:os";
@@ -142,7 +143,6 @@ export * from "./app-runner-types.ts";
 export * from "./app-runner-policy.ts";
 export { runToolStep } from "./app-runner-tool-step.ts";
 export { runApp } from "./app-runner-declared.ts";
-
 export interface ScriptRunOptions extends AppRunOptions {
   /** `ctx.step`/`arrive` 的执行预算（`--max-steps`；用满后结果 partial）。 */
   maxSteps?: number;
@@ -423,7 +423,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       onRunReport: (rep) => {
         const steps = rep.steps as TraceStep[];
         decisionSteps.push(...steps);
-        decisionStepGroups.push(steps);
+        decisionStepGroups.push(steps); rememberAppStopContext(captured, rep);
       },
       ...(opts.maxSteps === undefined ? {} : { maxSteps: opts.maxSteps }),
       // A6 walk：旗标只进 flow 应用路径；缺省关 = ctx 与产物逐字节不变。
@@ -823,7 +823,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     // §3：生效策略只在非缺省时进产物（与 runApp 同一纪律）；模型层级照写（脚本应用同样要能说清）。
     ...(finalAnyDeclared && finalPolicy !== null ? { effective_policy: finalPolicy } : {}),
     // 导航纪律拦下的直接导航证据（缺省不出现 = 产物逐字节不变）。
-    ...(stopDiagnostics !== undefined ? { diagnostics: stopDiagnostics } : {}),
+    ...(stopDiagnostics !== undefined ? { diagnostics: stopDiagnostics } : {}), ...appStopContextFields(captured),
     ...(opts.modelStatus === undefined ? {} : { model_status: opts.modelStatus }),
     decisions,
     // A3：与 runApp（声明式路径）同账——降级发生过就必须出现在产物里。

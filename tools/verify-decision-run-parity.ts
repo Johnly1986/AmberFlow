@@ -1,5 +1,6 @@
 /**
- * run 面选择段 parity lane（非门禁）：`decision-pick-phase.runDecisionPick` 对 **golden** 的
+ * run 面选择段 parity lane（**门禁**：随 `npm run check` 经 `verify:decision-run-parity` 运行；
+ * chromium 必需）：`decision-pick-phase.runDecisionPick` 对 **golden** 的
  * 单腿逐字段比对——`ModelPickPhase` 全字段、桩侧请求投影、`windowChainFacts`、`rejectedAskConfs`、
  * `warnings` 与结构化停因（code/reason）。
  *
@@ -16,8 +17,20 @@
  * 交给被测实现；每场景一份 `RunAccounting`（forbidden/停因/窗口链事实互不污染）。
  * `--record` 在旧实现退役后**拒绝执行**——golden 不得由被检实现自行重录。
  *
- * 用法：node --experimental-strip-types tools/verify-decision-run-parity.ts [--check | --self-test | --list]
- * 退出码：0 零差异 / 1 有差异 / 2 用法或环境错误。
+ * **评审换基（`--rebase-reviewed`）**：唯一允许刷新 golden 的路径，且只换"评审过的差异"——
+ * 逐场景算差异路径，任一非允许路径（缺失/新增场景、goal 以外的任何字段）即拒绝并打印；
+ * 全部落在 `.asks[<i>].goal`（run 面 L0 尾巴追加「当前页」，ADR-001 R3）才写新 golden，并在
+ * 顶层写 `_rebase` provenance（原因 + 允许差异路径闭集 + 换基场景；不写日期戳）。
+ * 该旗标不取代断言：`--record` 仍按设计拒绝（被检实现不得自证）。
+ *
+ * **门禁口径**：本 lane 挂在 `npm run check` 末尾（`check:ci` 自然继承），所以跑门禁的机器
+ * **必须**有 chromium（`npx playwright install chromium`；CI 的 check job 已装同款）。
+ * 浏览器缺失/启动失败是环境错误：入口打印修复提示并 exit 2，**不 self-skip**（门禁不许假绿）。
+ * 本机实测本 lane ≈11.9s（16 场景；每场景一次真实 browserSession 装配）。
+ *
+ * 用法：node --experimental-strip-types tools/verify-decision-run-parity.ts
+ *         [--check | --self-test | --list | --rebase-reviewed [--golden <path>]]
+ * 退出码：0 零差异（或换基成功） / 1 有差异（或换基被拒） / 2 用法或环境错误（含 chromium 缺失）。
  */
 import fs from "node:fs";
 import http from "node:http";
@@ -39,7 +52,20 @@ import type { AnyPage } from "../src/engine/executor-types.ts";
 const REPO = path.resolve(import.meta.dirname, "..");
 const GOLDEN_DIR = path.join(REPO, "tools", "golden", "decision-run-parity");
 const GOLDEN_FILE = path.join(GOLDEN_DIR, "cases.json");
-const USAGE = "usage: node --experimental-strip-types tools/verify-decision-run-parity.ts [--check | --self-test | --list]";
+const USAGE = "usage: node --experimental-strip-types tools/verify-decision-run-parity.ts "
+  + "[--check | --self-test | --list | --rebase-reviewed [--golden <path>]]";
+
+/**
+ * 评审换基允许的差异路径闭集（`$` = 单场景投影根；`<i>` = 第 i 次询问）。
+ * 只允许模型询问的 L0 文本变化：run 面的 goal 尾部追加「当前页」段（ADR-001 R3，与 pilot 面
+ * 同源渲染 `drivingGoalText`）。新增允许路径必须在这里登记并在文档/CHANGELOG 说明原因。
+ */
+const REBASE_ALLOWED_PATHS: ReadonlyArray<{ pattern: string; re: RegExp }> = [
+  { pattern: "$.asks[<i>].goal", re: /^\$\.asks\[\d+\]\.goal$/ },
+];
+
+/** golden 顶层 provenance 键（评审换基来源；不含日期戳）。 */
+const REBASE_KEY = "_rebase";
 
 /* ------------------------------------------------------------------ 页面 */
 
@@ -151,6 +177,8 @@ function makeHost(mw: BrowserMiddleware, acct: ReturnType<typeof createRunAccoun
     hintOpts: () => _hintOpts(mw),
     frameHosts: null,
     stateTextFn: (p, instr) => stateText(p, instr, null),
+  contextCapability: () => null,
+  siteFactsNotes: () => null,
     rowAnchorNote: () => "",
     declaredTargets: () => [],
     goalHeld: async () => false,
@@ -519,8 +547,8 @@ function assertRuleClean(a: ArmResult): void {
 /* ------------------------------------------------------------------ 负向自测 */
 
 /** 负向自测：新臂对 golden 零差异，再逐处扰动投影，确认 diff 抓得住（不是空对照）。 */
-async function selfTest(origin: string): Promise<number> {
-  const golden = readGolden();
+async function selfTest(origin: string, goldenPath = GOLDEN_FILE): Promise<number> {
+  const golden = readGolden(goldenPath);
   const c = CASES.find((x) => x.name === "low-conf-wide-reobserve");
   if (c === undefined) throw new Error("自测场景缺失");
   const got = await observeCase(c, origin);
@@ -539,21 +567,202 @@ async function selfTest(origin: string): Promise<number> {
     mutate(copy);
     if (diff(normalize(base), copy).length === 0) { console.error(`self-test: FAIL — 扰动 ${label} 未被 diff 抓住`); return 1; }
   }
-  console.log(`verify-decision-run-parity: self-test OK — 新臂对 golden 零差异，且 ${mutations.length} 类扰动均被抓住`);
+  const rebaseError = rebaseSelfTest(golden);
+  if (rebaseError !== null) { console.error(`self-test: FAIL — ${rebaseError}`); return 1; }
+  console.log(`verify-decision-run-parity: self-test OK — 新臂对 golden 零差异，${mutations.length} 类扰动均被抓住，`
+    + "换基守卫（正例写入 / 非 goal 拒绝 / 缺场景拒绝 / 拒绝时零改写）全部符合");
   return 0;
 }
 
-/* ------------------------------------------------------------------ golden 与主流程 */
+/* ------------------------------------------------------------------ 评审换基 */
+
+interface RebaseProvenance {
+  /** 换基原因（说明哪条评审过的变更导致 golden 重录）。 */
+  reason: string;
+  /** 换基纪律：只换允许路径，其余差异一律拒绝；`--record` 仍拒。 */
+  policy: string;
+  /** 允许的差异路径闭集（`<i>` = 第 i 次询问；`$` = 单场景投影根）。 */
+  allowed_diff_paths: string[];
+  /** 本次实际换基的场景名（按字典序）。 */
+  changed_cases: string[];
+}
 
 interface GoldenFile {
   schema: number;
   note: string;
   cases: Record<string, unknown>;
+  _rebase?: RebaseProvenance;
 }
 
-function readGolden(): GoldenFile {
-  if (!fs.existsSync(GOLDEN_FILE)) throw new Error(`缺少 golden ${path.relative(REPO, GOLDEN_FILE)}（旧实现存续时用 --record 录制）`);
-  const parsed = JSON.parse(fs.readFileSync(GOLDEN_FILE, "utf8")) as GoldenFile;
+interface RebaseDiff {
+  name: string;
+  /** `path: old !== new` 行（与 `diff()` 同格式）。 */
+  lines: string[];
+  /** 不在允许闭集的行（非空 = 该场景拒绝换基）。 */
+  violations: string[];
+}
+
+interface RebasePlan {
+  diffs: RebaseDiff[];
+  /** 全部拒绝行（跨场景汇总；非空 = 整体拒绝）。 */
+  violations: string[];
+  changedCases: string[];
+  observed: Record<string, unknown>;
+  allowed: boolean;
+}
+
+function isAllowedRebasePath(p: string): boolean {
+  return REBASE_ALLOWED_PATHS.some((x) => x.re.test(p));
+}
+
+/** `path: old !== new` → `path`（`diff()` 的行格式固定，值里不会出现路径分隔）。 */
+function pathOfDiffLine(line: string): string {
+  const i = line.indexOf(": ");
+  return i < 0 ? line : line.slice(0, i);
+}
+
+/** 差异分类（纯函数）：唯一判据 = 每条差异行是否落在允许路径闭集。 */
+function classifyRebase(golden: GoldenFile, observed: Record<string, unknown>): RebasePlan {
+  const names = [...new Set([...Object.keys(golden.cases), ...Object.keys(observed)])].sort();
+  const diffs: RebaseDiff[] = [];
+  const violations: string[] = [];
+  const changedCases: string[] = [];
+  for (const name of names) {
+    const want = golden.cases[name];
+    const got = observed[name];
+    if (want === undefined || got === undefined) {
+      const line = want === undefined ? `${name}: 观测有场景但 golden 缺失` : `${name}: golden 有场景但观测缺失`;
+      violations.push(line);
+      continue;
+    }
+    const lines = diff(normalize(want), normalize(got));
+    if (lines.length === 0) continue;
+    const bad = lines.filter((l) => !isAllowedRebasePath(pathOfDiffLine(l)));
+    diffs.push({ name, lines, violations: bad });
+    if (bad.length > 0) violations.push(...bad.map((l) => `${name} ${l}`));
+    else changedCases.push(name);
+  }
+  return { diffs, violations, changedCases, observed, allowed: violations.length === 0 };
+}
+
+function rebaseProvenance(changedCases: string[]): RebaseProvenance {
+  return {
+    reason: "L0 改写评审换基：run 面模型询问 goal 尾部追加「| 当前页: <url>」段"
+      + "（ADR-001 R3，与 pilot 面同源渲染 drivingGoalText）；原 golden 是旧实现退役前的事实快照，不含该段。",
+    policy: "--rebase-reviewed 只换允许路径闭集内的差异；任一非 goal 差异（含缺失/新增场景）拒绝且不改写 golden。"
+      + " --record 仍按设计拒绝（被检实现不得自证）。",
+    allowed_diff_paths: REBASE_ALLOWED_PATHS.map((x) => x.pattern),
+    changed_cases: changedCases,
+  };
+}
+
+/** 写换基 golden（`plan.allowed` 之外的调用一律拒绝且不触碰文件）。 */
+function writeRebaseGolden(goldenPath: string, golden: GoldenFile, plan: RebasePlan): boolean {
+  if (!plan.allowed) return false;
+  // 幂等重跑：无差异时保留既有 provenance 的换基场景（不让二次换基抹掉首次评审换基的清单）。
+  const prior = golden[REBASE_KEY]?.changed_cases ?? [];
+  const changedCases = [...new Set([...prior, ...plan.changedCases])].sort();
+  const next: GoldenFile = {
+    schema: 1,
+    note: golden.note,
+    [REBASE_KEY]: rebaseProvenance(changedCases),
+    cases: plan.observed,
+  };
+  fs.mkdirSync(path.dirname(goldenPath), { recursive: true });
+  fs.writeFileSync(goldenPath, stable(next));
+  return true;
+}
+
+/** 换基负向自测（离屏、纯本地、零浏览器）：临时副本 + 允许/拒绝两路。 */
+function rebaseSelfTest(golden: GoldenFile): string | null {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "af-parity-rebase-"));
+  const tmp = path.join(dir, "cases.json");
+  const original = stable(golden);
+  fs.writeFileSync(tmp, original);
+  const base = normalize(golden.cases) as Record<string, Record<string, unknown>>;
+
+  const goalCase = "tiered-narrow-hit";
+  const positive = structuredClone(base);
+  const positiveAsks = positive[goalCase]?.["asks"] as Array<Record<string, unknown>> | undefined;
+  if (positiveAsks?.[0] === undefined) return "换基自测缺 goal 样本（tiered-narrow-hit.asks[0]）";
+  positiveAsks[0]["goal"] = `${String(positiveAsks[0]["goal"])} | 当前页: <LOCAL>/cards.html`;
+  const okPlan = classifyRebase(golden, positive);
+  if (!okPlan.allowed || !okPlan.changedCases.includes(goalCase)) {
+    return `换基正例（仅 .goal 差异）被误拒：${okPlan.violations.join("; ") || "未识别为换基场景"}`;
+  }
+  if (!writeRebaseGolden(tmp, golden, okPlan)) return "换基正例写入被拒";
+  const written = JSON.parse(fs.readFileSync(tmp, "utf8")) as GoldenFile;
+  if (written[REBASE_KEY] === undefined) return "换基写入缺 provenance";
+  if (written[REBASE_KEY]!.allowed_diff_paths.join() !== REBASE_ALLOWED_PATHS.map((x) => x.pattern).join()) {
+    return "换基 provenance 的允许路径闭集不符";
+  }
+  if (!written[REBASE_KEY]!.changed_cases.includes(goalCase)) return "换基 provenance 缺换基场景";
+
+  fs.writeFileSync(tmp, original);
+  const negative = structuredClone(base);
+  const negativeCase = "adjudicate";
+  const negPhase = negative[negativeCase]?.["phase"] as Record<string, unknown> | undefined;
+  if (negPhase === undefined) return "换基自测缺非 goal 样本（adjudicate.phase）";
+  negPhase["conf"] = Number(negPhase["conf"] ?? 0) + 1;
+  const badPlan = classifyRebase(golden, negative);
+  if (badPlan.allowed) return "换基负例（非 goal 字段）未被拒绝";
+  if (badPlan.violations.length === 0) return "换基负例未产出拒绝行";
+  if (writeRebaseGolden(tmp, golden, badPlan)) return "换基负例写入未被拒绝";
+  if (fs.readFileSync(tmp, "utf8") !== original) return "换基负例拒绝时改写了 golden";
+
+  const missing = structuredClone(base);
+  delete missing[goalCase];
+  if (classifyRebase(golden, missing).allowed) return "换基负例（缺场景）未被拒绝";
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  return null;
+}
+
+/**
+ * `--rebase-reviewed`：逐场景算差异路径 → 全部落在允许闭集才写新 golden（附 provenance）。
+ * 任一非允许差异 → 打印并拒绝（exit 1），golden 逐字节不变。
+ */
+async function rebaseReviewed(origin: string, goldenPath: string): Promise<number> {
+  const golden = readGolden(goldenPath);
+  const observed: Record<string, unknown> = {};
+  for (const c of CASES) observed[c.name] = await observeCase(c, origin);
+  const plan = classifyRebase(golden, observed);
+  for (const d of plan.diffs) {
+    console.log(`rebase ${d.violations.length === 0 ? "goal   " : "REFUSED"} ${d.name} — ${d.lines.length} 处差异`);
+    for (const line of d.lines.slice(0, 20)) {
+      console.log(`  ${d.violations.includes(line) ? "!" : " "} ${line}`);
+    }
+    if (d.lines.length > 20) console.log(`  … 其余 ${d.lines.length - 20} 处省略`);
+  }
+  if (!plan.allowed) {
+    console.error(`verify-decision-run-parity: 评审换基被拒 — ${plan.violations.length} 处差异不在允许路径闭集`
+      + `（${REBASE_ALLOWED_PATHS.map((x) => x.pattern).join(" / ")}）；golden 未改写。`);
+    for (const line of plan.violations.slice(0, 20)) console.error(`  ${line}`);
+    return 1;
+  }
+  if (!writeRebaseGolden(goldenPath, golden, plan)) {
+    console.error("verify-decision-run-parity: 评审换基被拒 — 写入门拒绝（plan.allowed=false）");
+    return 1;
+  }
+  console.log(`verify-decision-run-parity: 评审换基 OK — 改写 ${plan.changedCases.length} 个场景`
+    + `（${plan.changedCases.join(", ") || "无差异（仅补 provenance）"}）；差异全部落在 `
+    + `${REBASE_ALLOWED_PATHS.map((x) => x.pattern).join(" / ")}；provenance 键 ${REBASE_KEY} → ${path.relative(REPO, goldenPath)}`);
+  return 0;
+}
+
+/* ------------------------------------------------------------------ golden 与主流程 */
+
+function goldenPathOf(argv: string[]): string {
+  const i = argv.indexOf("--golden");
+  if (i < 0) return GOLDEN_FILE;
+  const value = argv[i + 1];
+  if (value === undefined || value.startsWith("--")) throw new Error("--golden 缺路径");
+  return path.resolve(value);
+}
+
+function readGolden(goldenPath = GOLDEN_FILE): GoldenFile {
+  if (!fs.existsSync(goldenPath)) throw new Error(`缺少 golden ${path.relative(REPO, goldenPath)}（旧实现存续时用 --record 录制）`);
+  const parsed = JSON.parse(fs.readFileSync(goldenPath, "utf8")) as GoldenFile;
   if (parsed.schema !== 1 || typeof parsed.cases !== "object") throw new Error("golden 形状不符（schema 1）");
   return parsed;
 }
@@ -565,15 +774,16 @@ async function observeCase(c: Case, origin: string): Promise<Record<string, unkn
 }
 
 /** `--record` 在旧实现退役后拒绝执行：golden 只由退役前的对照臂录制，被检实现不得自行重录。 */
-function refuseRecord(): number {
-  console.error(`verify-decision-run-parity: 拒绝 --record — 对照臂已退役；golden ${path.relative(REPO, GOLDEN_FILE)} `
-    + "是退役前录制的事实快照，重录等同自证（如确需刷新，走评审并附新旧 golden 差异）。");
+function refuseRecord(goldenPath: string): number {
+  console.error(`verify-decision-run-parity: 拒绝 --record — 对照臂已退役；golden ${path.relative(REPO, goldenPath)} `
+    + "是退役前录制的事实快照，重录等同自证。确需刷新时，走评审：--rebase-reviewed（只换允许路径闭集并写 provenance），"
+    + "附新旧 golden 差异一并评审。");
   return 2;
 }
 
 /** `--check`（缺省）：新臂逐场景对 golden。 */
-async function check(origin: string): Promise<number> {
-  const golden = readGolden();
+async function check(origin: string, goldenPath: string): Promise<number> {
+  const golden = readGolden(goldenPath);
   let failures = 0;
   for (const c of CASES) {
     const got = await observeCase(c, origin);
@@ -607,23 +817,41 @@ async function main(argv: string[]): Promise<number> {
     for (const c of CASES) console.log(c.name);
     return 0;
   }
+  const goldenPath = goldenPathOf(argv);
   const server = await startServer({
     "/cards.html": CARDS_HTML, "/wide.html": WIDE_HTML, "/wide180.html": WIDE180_HTML,
     "/family.html": FAMILY_HTML, "/empty.html": EMPTY_HTML,
   });
   try {
-    if (argv.includes("--self-test")) return await selfTest(server.origin);
-    if (argv.includes("--record")) return refuseRecord();
-    return await check(server.origin);
+    if (argv.includes("--self-test")) return await selfTest(server.origin, goldenPath);
+    if (argv.includes("--record")) return refuseRecord(goldenPath);
+    if (argv.includes("--rebase-reviewed")) return await rebaseReviewed(server.origin, goldenPath);
+    return await check(server.origin, goldenPath);
   } finally {
     await server.close();
   }
 }
 
+/**
+ * chromium 缺失/不可启动的归类：门禁 lane 依此给可操作提示并 exit 2——既不 self-skip，也不把
+ * 环境问题伪装成 parity 差异（后者会误导金标评审）。
+ */
+function isBrowserLaunchFailure(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return /no chromium binary found|Executable doesn't exist|playwright install chromium|browserType\.launch/i.test(msg);
+}
+
 try {
   process.exitCode = await main(process.argv.slice(2));
 } catch (e) {
-  console.error(USAGE);
-  console.error(e instanceof Error ? e.stack ?? e.message : String(e));
+  if (isBrowserLaunchFailure(e)) {
+    console.error("verify-decision-run-parity: 浏览器启动失败 — 本 lane 随 `npm run check` 运行，门禁需要 chromium。");
+    console.error(`  ${e instanceof Error ? e.message : String(e)}`);
+    console.error("  修复：npx playwright install chromium（或把 PLAYWRIGHT_BROWSERS_PATH 指向含 chromium-*/ 的目录）后重跑；"
+      + "本 lane 不跳过、不假绿。");
+  } else {
+    console.error(USAGE);
+    console.error(e instanceof Error ? e.stack ?? e.message : String(e));
+  }
   process.exitCode = 2;
 }

@@ -54,10 +54,17 @@ const clip = (v: unknown, max = MAX_TEXT): string => {
 
 /** pilot_end 摘要里值得回给会话的字段（其余键不进事件投影）。 */
 const PILOT_END_KEYS = [
-  "ok", "stop_code", "steps", "max_steps", "model_asks", "rule_picks", "model_picks",
+  "ok", "stop_code", "steps", "max_steps", "conf_floor", "model_asks", "rule_picks", "model_picks",
   "handoffs", "fallbacks", "driver", "aborted", "failed_asks", "cache", "url", "attached",
   "expect_url", "out_dir", "code", "reason", "last_error",
 ] as const;
+
+/** weak_picks 有界投影（≤6：step/target/conf/picked_by；只报票面事实，不判优劣）。 */
+function projectWeakPicks(picks: PilotHandoff["weak_picks"]): Array<Record<string, unknown>> {
+  return (picks ?? []).slice(0, 6).map((p) => ({
+    step: p.step, target: clip(p.target, 120), conf: p.conf, picked_by: p.picked_by,
+  }));
+}
 
 /** 交接块的有界投影：只保留 pilot-contract 闭集字段；evidence 超限退化为键名清单。 */
 export function projectHandoff(h: PilotHandoff): Record<string, unknown> {
@@ -85,6 +92,9 @@ export function projectHandoff(h: PilotHandoff): Record<string, unknown> {
       ...(refs.observe === undefined ? {} : { observe: clip(refs.observe, MAX_WHY) }),
     },
     url: clip(h.url),
+    ...(h.final_signal === undefined ? {}
+      : { final_signal: h.final_signal === null ? null : clip(h.final_signal, MAX_WHY) }),
+    ...(h.weak_picks === undefined || h.weak_picks.length === 0 ? {} : { weak_picks: projectWeakPicks(h.weak_picks) }),
   };
 }
 
@@ -406,9 +416,24 @@ export class SessionPilotDriver {
       };
     }
     const cmd = String(req["cmd"]);
+    // 终态短路（仅续跑类指令）：driver 已终态 = 本 run 不能再续驾驶，复用 start()/step() 的
+    // 同一分类；finish/abort 保持既有幂等收尾语义（不动收尾链）。
+    if (this.terminal && (cmd === "resume" || cmd === "redirect")) {
+      const budget = rt.stopCode === "budget_exceeded";
+      return {
+        ok: false, session_id: this.sessionId, pilot: true, attached: true, cmd, outcome: "stay",
+        code: budget ? "budget_exhausted" : "drive_terminal",
+        reason: budget
+          ? "max steps reached — terminal; start a new session to drive again"
+          : "the pilot driver is terminal; start a new session to drive again",
+        ...(rt.stopCode === null ? {} : { stop_code: rt.stopCode }),
+        status: this.statusName(),
+      };
+    }
     const line = JSON.stringify({
       cmd,
       ...(nonEmpty(req["hint"]) ? { hint: String(req["hint"]) } : {}),
+      ...(nonEmpty(req["target"]) ? { target: String(req["target"]) } : {}),
       ...(req["value"] === undefined ? {} : { value: req["value"] }),
       ...(nonEmpty(req["goal"]) ? { goal: String(req["goal"]) } : {}),
       ...(nonEmpty(req["url"]) ? { url: String(req["url"]) } : {}),
@@ -448,6 +473,8 @@ export class SessionPilotDriver {
       cmd,
       outcome,
       ...(accepted || typeof result?.["code"] !== "string" ? {} : { code: result["code"] }),
+      // reason 一并提升到顶层：桥/渲染只读顶层 reason，嵌套 command.reason 到不了调用方。
+      ...(typeof result?.["reason"] === "string" ? { reason: result["reason"] } : {}),
       command: result,
       status: this.statusName(),
       events: cmdEvents,
@@ -506,13 +533,47 @@ export class SessionPilotDriver {
     };
   }
 
-  /** `drive` 协议入口：首次 = start + 一步驾驶；已有 driver = 复用并继续驾驶一步。 */
+  /** 复用分支：请求里的新 goal 是否被忽略（与活跃 driver 的总目标不同即为 true）。 */
+  private requestGoalIgnored(req: Record<string, unknown>): boolean {
+    const goal = typeof req["goal"] === "string" ? req["goal"].trim() : "";
+    const active = (this.rt?.opts.goal ?? "").trim();
+    return goal !== "" && goal !== active;
+  }
+
+  /**
+   * `drive` 协议入口：首次 = start + 一步驾驶；已有 driver = 复用并继续驾驶一步。
+   * **未决交接不是终态**，但也不能静默复用：`handoffOpen !== null` 时不再驾驶一轮
+   * （否则会重放同一交接、`handoffCount+1`、`steps+0`，而新 goal 被忽略却不显眼），
+   * 回执改为显式 `handoff_open` + `goal_ignored` + `next`；继续必须走
+   * `driveCommand resume|redirect|finish|abort`。`reused` 保留为兼容事实。
+   */
   async drive(req: Record<string, unknown>): Promise<Record<string, unknown>> {
     const started = await this.start(req);
     if (started["ok"] !== true) return started;
+    const goalIgnored = this.requestGoalIgnored(req);
+    const rt = this.rt;
     if (started["reused"] === true) {
+      const open = rt === null ? null : rt.handoffOpen;
+      if (rt !== null && open !== null) {
+        return {
+          ok: false,
+          session_id: this.sessionId,
+          code: "handoff_open",
+          reason: "a handoff is open; use driveCommand resume|redirect|finish|abort to continue this run,"
+            + " or start a new session to drive a different goal",
+          pilot: true,
+          attached: true,
+          reused: true,
+          ...(goalIgnored ? { goal_ignored: true } : {}),
+          ...this.statusBody(rt),
+          next: [
+            "driveCommand resume|redirect|finish|abort continues the open handoff on this session",
+            "start a new session to drive a different goal",
+          ],
+        };
+      }
       const stepped = await this.step();
-      return { ...stepped, reused: true };
+      return { ...stepped, reused: true, ...(goalIgnored ? { goal_ignored: true } : {}) };
     }
     const stepped = await this.step();
     const startEvents = Array.isArray(started["events"]) ? started["events"] as Array<Record<string, unknown>> : [];

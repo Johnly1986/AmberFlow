@@ -11,7 +11,7 @@
 
 | 资产 | 证据 |
 |---|---|
-| 门禁基线 | `npm run check` 含 maintain 五组 / prompt-hit 九组 / examples golden / split-check / 用例校验；`maintain --self-test` 22 负向 + 7 正例 |
+| 门禁基线 | `npm run check` 含 maintain 五组 / prompt-hit 九组 / examples golden / split-check / 用例校验 / decision run-parity（chromium 必需）；`maintain --self-test` 22 负向 + 7 正例 |
 | 等价证据 lane | `examples-check` canonical golden（5 示例）、`split-check` 3 manifests（40+83+36 符号 hash）、`verify:offline` 4 夹具页（非门禁，夜间 job 已接入 `.github/workflows/checks.yml`） |
 | 主线与 seam | `docs/MAINLINE.md`：依赖分层 L0–L6+L1.5、执行阶段 S0–S5、入口三类、seam 冻结表（`BrowserMiddleware.run` / RunOptions / buildMiddleware / DecisionProvider / prompt / Ctx / 结果包络 / 恢复链） |
 | 规模基线 | >1000 行 6、≥300 行函数 6、mw 真实构造 1、`src/index.ts` importer 0；ratchet 只降不升 |
@@ -90,3 +90,23 @@
 | D4 freeze window 参数 | ☑ 接受建议 | 每阶段约 3 个工作日；整体 2 周 |
 
 > 未收到回执时：P2 保持关闭，仓库继续 P0/P1 已交付状态 + 证据 lane 夜间运行；不启动任何 `run()`/编排改造。
+
+---
+
+## 5 超口径改动与 freeze 豁免登记（决策平面 P0–P3b + 走查卡点修复批）
+
+D1-A 的 freeze 口径是「`executor.ts`/`ctx*.ts`/`app-runner.ts` 只接受 P2 批次 + 关键 bugfix + 证据 lane」。
+事后登记：ADR-001 的 P0–P3b 与同期 Google Maps 走查卡点修复批**超出**该口径，按「关键 bugfix +
+证据 lane + 评审豁免」逐项豁免——**本登记即 D1-A 要求的书面豁免留痕**（评审依据：ADR-001 裁决 +
+决策上下文审计报告 + 走查卡点架构审查复核；不回滚）：
+
+| 类别 | 项 | 超口径点 | 豁免理由 / 证据 |
+|---|---|---|---|
+| seam 变更 | `DECISION_ASK_CONTRACT_VERSION` 5→6 + question kind 闭集（pick/risk/done） | 契约版本号属 seam 面，D1-A 只批「P2 PR」 | 评审豁免：先改 `docs/MAINLINE.md` seam 表再落码（P3b 台账）；`run-args:check`/`schema:check` 绿 |
+| 默认路径切换 | `executor.run` 默认走统一编排 `decision-pick-unified.ts`；`decision-pick-phase.ts` 降为 A/B 对照臂（`AMBERFLOW_DECISION_LADDER=phase`） | 默认行为切换，非 bugfix | 评审豁免 + A/B 等价：characterization 默认/对照臂双跑同金标一致（本批 11→12 场景） |
+| 新面能力 | session act 增 `set_range` op（引擎 + 桥 schema；桥侧需 host 重启生效） | 新增请求面 op | 关键 bugfix/能力补全：既有 `range.ts` 接到会话面；`tools/verify-session-range.ts` 四路径证据 |
+| 关键 bugfix | 池外回退按 op 分派（fill 不再被静默变 click）/ F86 空名可编辑控件去重豁免 / A3 回退补 `name`·`href` | 触碰 `executor.ts` 恢复链既有面 | 关键 bugfix 豁免 + 本地复现：`verify-poolless-actions` 修前 11 FAIL → 修后 19/19；`verify-dedup-controls` 48 断言 |
+| 证据 lane | frame-budget / dedup-controls / poolless-actions / session-range / run-parity `--rebase-reviewed` / characterization `goals` 投影 | 新增零行为工具与 golden 扩展 | 证据 lane 豁免：不改运行期行为。**口径更新**：run-parity lane 已升级为门禁（`npm run check` 末尾 `verify:decision-run-parity`，`check:ci` 自然继承）；代价是 check 不再是纯离线（chromium 前置 `npx playwright install chromium`，本机实测 lane 单跑 ≈11.9s、check 总时长 71.3s→80.0s，增量 ≈8.7s），chromium 缺失按环境错误 exit 2、不 self-skip 假绿；其余新 lane 仍不进 check |
+
+> 口径说明：豁免只覆盖上表登记项；freeze 其余约束（`executor.ts`/`ctx*.ts`/`app-runner.ts` 不接受
+> 未登记改动）继续有效。本次豁免**不**授权后续同类默认路径切换——同类变更仍需先走评审（ADR-001 R7）。

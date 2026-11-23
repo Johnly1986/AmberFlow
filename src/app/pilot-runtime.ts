@@ -40,7 +40,6 @@ import type { Elem, ElemPool } from "../engine/elem-model.ts";
 import { checkSignal, type SignalSpec } from "../engine/signals.ts";
 import { affordanceRule, DESTRUCTIVE_PATTERNS, hintCandidates, hintMatch, navRule } from "../engine/rules.ts";
 import { foldNestedDuplicates, pickRejection } from "../engine/executor-actionability.ts";
-import { frameGateOf } from "../engine/frame-scope.ts";
 import { DEFAULT_SETTLE, settle } from "../engine/settle.ts";
 import { resolveLocalCheckpoint } from "../model/checkpoint.ts";
 import {
@@ -50,7 +49,11 @@ import { errMsg, isDeadPageError, isObj } from "./session-runtime-contract.ts";
 import { modelVote } from "./pilot-vote.ts";
 import { PilotAskAdapter } from "./pilot-ask-adapter.ts";
 import { PilotLedger } from "./pilot-ledger.ts";
-import { emitStepRequest as emitStepRequestEvidence, handoffEvidence } from "./pilot-evidence.ts";
+import { slotKeyFor, valueKeyOf, valueNeedOf, type ValueNeed } from "./pilot-value-need.ts";
+import {
+  emitStepRequest as emitStepRequestEvidence, finalSignalFact, frameExclusionsOf, handoffEvidence,
+  handoffWhyEvidence, weakPicksFrom,
+} from "./pilot-evidence.ts";
 import { handlePilotLine, type PilotCommandTarget } from "./pilot-commands.ts";
 import {
   PILOT_AWAIT_PICK, PILOT_DEFAULT_MAX_STEPS, PILOT_HISTORY_STEPS,
@@ -70,6 +73,8 @@ interface DrivingStep {
   how: string | null;
   ok: boolean;
   changed: boolean;
+  /** 票面事实（低置信 `weak_picks` 的取数口；不参与驾驶问句/裁决）。 */
+  step: number; picked_by?: "rule" | "model"; conf?: number;
 }
 
 const MAX_LABEL = 40;
@@ -113,6 +118,12 @@ export class PilotRuntime implements PilotCommandTarget {
   lastPool: ElemPool | null = null;
   /** 最近一次驾驶选中的 ref（resume.skip 禁选的对象）。 */
   lastPickedRef: string | null = null;
+  /** 未决值需求（needs_value 的选中目标；resume 字符串值的确定性绑定键）。 */
+  valueNeed: ValueNeed | null = null;
+  /** resume 字符串值：hint 命中时注入**命中目标**的值袋键（值跟着 hint 目标走）。 */
+  pendingValue: string | null = null;
+  /** 上一次 resume 的 hint 落空（下次交接 evidence 可见；落交接后清空，不粘）。 */
+  private missedHint: string | null = null;
   aborted = false;
 
   stepCount = 0;
@@ -171,6 +182,16 @@ export class PilotRuntime implements PilotCommandTarget {
   /** 兜底指令分派面的回执出口（pilot-commands 只经接口回调，不直接碰 sink）。 */
   respond(obj: Record<string, unknown>): void {
     this.sink.respond(obj);
+  }
+
+  /** 未决值需求的值袋键（pilot-commands 字符串值键序：target ?? 本键 ?? "resumed"）。 */
+  valueNeedKey(): string | null {
+    return this.valueNeed === null ? null : this.valueNeed.key;
+  }
+
+  /** resume 字符串值跟随 hint 目标：把待注入值写进命中元素的值袋键（fill/select 随即消费）。 */
+  private bindPendingValue(el: Elem, value: string | null): void {
+    if (value !== null) this.slots[valueKeyOf(el)] = value;
   }
 
   private mw(): BrowserMiddleware {
@@ -260,22 +281,6 @@ export class PilotRuntime implements PilotCommandTarget {
   }
 
   /**
-   * 被 hosts 信封排除的子 frame（**显式信号**）：动作池按信封排除它们，但现场存在。
-   * 交接块把它投影成结构化证据 + 解锁建议，避免把「目标在未声明 iframe 内」误判成
-   * 「模型选不准」（Google 九宫格 = ogs.google.com 跨源 iframe 的走查实测）。
-   * 有界（≤6 帧）且只读；取不到 = 空数组（不掩盖停因）。
-   */
-  private frameExclusions(page: AnyPage): Array<{ origin: string; index: number }> {
-    try {
-      const gate = frameGateOf(page as never, this.hosts);
-      if (gate === null) return [];
-      return gate.excluded.slice(0, 6).map((e) => ({ origin: e.origin === "" ? "about:blank" : e.origin, index: e.index }));
-    } catch {
-      return [];
-    }
-  }
-
-  /**
    * 一步驾驶：规则档先行（零模型）→ 池内闭集投票（pickProposal）→ 闸门 → actOnce 执行。
    * 返回 null = 正常继续；PilotStopCode = 停止（兜底协议接管）；
    * PILOT_AWAIT_PICK = agent 驾驶的步间等待（候选已投影，等 resume{hint} 点名）。
@@ -294,7 +299,7 @@ export class PilotRuntime implements PilotCommandTarget {
     const { elems } = await mw._extractPoolSettled(page, "bucketed");
     const poolSize = Object.keys(elems).length;
     this.lastPool = elems;
-    this.excludedFrames = this.frameExclusions(page);
+    this.excludedFrames = frameExclusionsOf(page, this.hosts);
     this.forbidden.clear();
     for (const r of this.ledger.forbiddenRefs(elems)) this.forbidden.add(r);
 
@@ -306,9 +311,13 @@ export class PilotRuntime implements PilotCommandTarget {
     //    用后即清（一次性）。
     const resumeHint = this.resumeHint;
     this.resumeHint = null;
+    // 待注入值随本轮消费：它只服务 resume 之后的第一轮驾驶（不粘到更晚的点名上）。
+    const hintValue = this.pendingValue;
+    this.pendingValue = null;
     if (resumeHint !== null) {
       const hintRef = hintMatch(resumeHint, elems, {});
       if (hintRef !== null && elems[hintRef] !== undefined) {
+        this.bindPendingValue(elems[hintRef]!, hintValue);
         return await this.executePicked(page, elems, hintRef, "rule", null, poolSize, goal);
       }
       const cands = hintCandidates(resumeHint, elems, {});
@@ -317,10 +326,13 @@ export class PilotRuntime implements PilotCommandTarget {
         // 互不包含的同 label 仍只停不选。
         const folded = await foldNestedDuplicates(this.mw(), page, elems, resumeHint, "click");
         if (folded !== null && elems[folded[0]!] !== undefined) {
+          this.bindPendingValue(elems[folded[0]!]!, hintValue);
           return await this.executePicked(page, elems, folded[0]!, "rule", null, poolSize, goal);
         }
         return "target_ambiguous";
       }
+      // 落空（无命中、无可裁决歧义）：记一次证据，下次交接 evidence 带 resume_hint.missed。
+      this.missedHint = resumeHint;
     }
 
     // ② 规则档先行：导航规则（nav 词面）→ affordance 规则（与 run 的 hybrid picking 同一序）。
@@ -382,12 +394,16 @@ export class PilotRuntime implements PilotCommandTarget {
       fam === "check" ? "check" : fam === "fill" ? "fill" : fam === "select" ? "select" : "click";
 
     // 值不猜（红线②）：fill/select 的值来自预声明 slots 或 Agent resume 显式给值。
+    // 键由 `valueKeyOf` 推导（label→name→id→tag，空 label 回落 name/id；空键不参与匹配）。
     let bind: { value: unknown } | null = null;
+    let need: ValueNeed | null = null;
     if (op === "fill" || op === "select") {
-      const labelKey = buf(String(el.label ?? el.text ?? ""), 40);
-      const slotKey = Object.keys(this.slots).find((k) => k === labelKey || k.toLowerCase() === labelKey.toLowerCase()
-        || labelKey.toLowerCase().includes(k.toLowerCase()) || k.toLowerCase().includes(labelKey.toLowerCase()));
-      if (slotKey === undefined) return "needs_value";
+      need = valueNeedOf(el, ref);
+      const slotKey = slotKeyFor(need.key, this.slots);
+      if (slotKey === null) {
+        this.valueNeed = need;   // 交接带「哪个目标/哪个键要值」；resume 字符串值据此绑定
+        return "needs_value";
+      }
       bind = { value: this.slots[slotKey]! };
     }
 
@@ -405,7 +421,8 @@ export class PilotRuntime implements PilotCommandTarget {
     if (rejected !== null) { this.forbidden.add(ref); this.ledger.bump(el, target, rejected); return null; }
     const denyDesc = `${op} ${targetFull}`.toLowerCase();
     if (DESTRUCTIVE_PATTERNS.some((x) => denyDesc.includes(x))) {
-      this.history.push({ op, target, ref: null, how: null, ok: false, changed: false });
+      this.history.push({ op, target, ref: null, how: null, ok: false, changed: false,
+        step: this.stepCount + 1, picked_by: pickedBy, ...(pick === null ? {} : { conf: pick.conf }) });
       this.stepCount += 1;
       const deniedAction = { op, target, ref: null, how: null, ok: false, changed: false, elapsed_ms: 0, code: "risk_declined" };
       this.record({
@@ -437,6 +454,7 @@ export class PilotRuntime implements PilotCommandTarget {
     const step: DrivingStep = {
       op, target, ref: out.ref ?? null, how: out.how ?? null,
       ok: out.ok === true, changed: out.changed === true,
+      step: this.stepCount + 1, picked_by: pickedBy, ...(pick === null ? {} : { conf: pick.conf }),
     };
     this.history.push(step);
     this.stepCount += 1;
@@ -462,13 +480,18 @@ export class PilotRuntime implements PilotCommandTarget {
       const code = String(out.stopCode ?? "action_failed");
       this.ledger.bump(el, target, `failed:${code}`);
       if (code === "target_ambiguous") return "target_ambiguous";
-      if (code === "needs_value") return "needs_value";
+      if (code === "needs_value") {
+        if (need !== null) this.valueNeed = need;
+        return "needs_value";
+      }
       if (step.ref !== null) this.forbidden.add(step.ref);
     } else {
       this.ledger.bump(el, target, step.changed === true ? "changed" : "no_change");
       if (step.ref !== null && step.changed !== true) {
         this.forbidden.add(step.ref);
       }
+      // 值已消费：值需求与待注入值一起清（下一次 needs_value 会重新记录目标）。
+      if (need !== null) { this.pendingValue = null; this.valueNeed = null; }
     }
 
     // anti-repeat：连续无变化（ok 但 changed=false，或连续失败）达阈值 = stuck_inert。
@@ -504,6 +527,12 @@ export class PilotRuntime implements PilotCommandTarget {
     let page: AnyPage | null = null;
     try { page = await this.page(); } catch { /* 浏览器已死：证据缺字段 */ }
     const url = page === null ? "" : urlOf(page);
+    const valueNeed = stop === "needs_value" ? this.valueNeed : null;
+    const missedHint = this.missedHint;
+    this.missedHint = null;
+    // 结束态可见性（evidence-only）：低置信模型票 + 完成信号声明事实，都是顶层字段
+    //（桥面丢 why_stuck.evidence，只有顶层到得了 Agent 面前；无事实时键不出现/null）。
+    const weakPicks = weakPicksFrom(this.history);
     const h: PilotHandoff = {
       stop_code: stop,
       step_id: this.stepCount,
@@ -512,19 +541,19 @@ export class PilotRuntime implements PilotCommandTarget {
         summary: `${stop} @ step ${this.stepCount}${url === "" ? "" : ` (${buf(url, 120)})`}`
           + (this.ledger.loopTrip === null ? "" : ` — dead target: "${buf(this.ledger.loopTrip.desc, 40)}"`
             + ` driven ${String(this.ledger.loopTrip.tries)} time(s) without the signal holding`),
-        evidence: {
-          inert_run: this.inertRun,
-          forbidden: [...this.forbidden].slice(0, 40),
-          ...this.ledger.evidence(),
-          ...(this.excludedFrames.length === 0 ? {} : { frames_excluded: this.excludedFrames }),
-          ...(this.expectUrl === null ? {} : { expect_url: this.expectUrl }),
-        },
+        evidence: handoffWhyEvidence({
+          inertRun: this.inertRun, forbidden: this.forbidden, ledgerEvidence: this.ledger.evidence(),
+          framesExcluded: this.excludedFrames, expectUrl: this.expectUrl, valueNeed, missedHint,
+        }),
       },
       what_would_unblock: unblockHintsFor(stop, {
         framesExcluded: this.excludedFrames.map((f) => f.origin),
+        ...(valueNeed === null ? {} : { needsValueKey: valueNeed.key, needsValueTarget: valueNeed.target }),
       }),
       evidence_refs: page === null ? {} : await this.evidenceRefs(page),
       url,
+      ...(weakPicks === undefined ? {} : { weak_picks: weakPicks }),
+      final_signal: finalSignalFact(this.opts.finalSignal),
     };
     this.handoffOpen = h;
     this.record({ i: this.stepCount, ts: new Date().toISOString(), type: "handoff", handoff: h, resolved_by: null });
@@ -561,6 +590,10 @@ export class PilotRuntime implements PilotCommandTarget {
     this.excludedFrames = [];
     this.inertRun = 0;
     this.handoffOpen = null;
+    // 改道即换语境：值需求/待注入值/落空 hint 现场都失效（新页面的目标不是同一目标）。
+    this.valueNeed = null;
+    this.pendingValue = null;
+    this.missedHint = null;
   }
 
   /** 起飞：解析决策源 → 开入口页 → 驾驶直到停因/预算/信号。 */
@@ -596,7 +629,7 @@ export class PilotRuntime implements PilotCommandTarget {
       if (bad !== null) throw new Error(bad);
       await page.goto(this.opts.url, { timeout: NAVIGATION_GOTO_TIMEOUT_MS, waitUntil: "domcontentloaded" });
       try { await settle(page as never); } catch { /* settle 不抛 */ }
-      this.excludedFrames = this.frameExclusions(page);
+      this.excludedFrames = frameExclusionsOf(page, this.hosts);
       this.sink.respond({
         type: "started", ok: true, url: urlOf(page), out_dir: this.outDir,
         ...(this.excludedFrames.length === 0 ? {} : { frames_excluded: this.excludedFrames }),
@@ -636,7 +669,7 @@ export class PilotRuntime implements PilotCommandTarget {
       });
       return;
     }
-    this.excludedFrames = this.frameExclusions(page);
+    this.excludedFrames = frameExclusionsOf(page, this.hosts);
     this.sink.respond({
       type: "started", ok: true, attached: true, url: currentUrl, out_dir: this.outDir,
       ...(this.excludedFrames.length === 0 ? {} : { frames_excluded: this.excludedFrames }),
@@ -714,7 +747,7 @@ export class PilotRuntime implements PilotCommandTarget {
     const summary: Record<string, unknown> = {
       type: "pilot_end", unsolicited: true, pilot: true,
       ok: finalStop === "final_signal_held" && !this.aborted,
-      stop_code: finalStop, steps: this.stepCount, max_steps: this.maxSteps,
+      stop_code: finalStop, steps: this.stepCount, max_steps: this.maxSteps, conf_floor: this.confFloor,
       model_asks: asks, rule_picks: this.rulePicks, model_picks: this.modelPicks,
       handoffs: this.handoffCount, fallbacks: this.fallbackCount,
       ...(this.driverMode === "agent" ? { driver: "agent" } : {}),
@@ -751,24 +784,5 @@ export class PilotRuntime implements PilotCommandTarget {
   }
 }
 
-/** 一次性校验 pilot 选项面（CLI 入口先跑；非法 = 结构化错误，不猜）。 */
-export function validatePilotOptions(opts: PilotOptions): string | null {
-  if (typeof opts.url !== "string" || opts.url.trim() === "") return "pilot needs a non-empty --url";
-  try { new URL(opts.url); } catch { return `pilot --url is not a valid URL: ${JSON.stringify(opts.url)}`; }
-  if (typeof opts.goal !== "string" || opts.goal.trim() === "") return "pilot needs a non-empty --goal";
-  if (opts.finalSignal != null && !isObj(opts.finalSignal)) return "pilot --final-signal must be a JSON object when present";
-  if (opts.maxSteps !== undefined && (!Number.isInteger(opts.maxSteps) || opts.maxSteps! < 1 || opts.maxSteps! > 200)) {
-    return "pilot --max-steps must be an integer in [1, 200]";
-  }
-  if (opts.confFloor !== undefined && (typeof opts.confFloor !== "number" || opts.confFloor! < 0 || opts.confFloor! > 1)) {
-    return "pilot --conf-floor must be a number in [0, 1]";
-  }
-  if (opts.driver !== undefined && opts.driver !== "model" && opts.driver !== "agent") {
-    return "pilot --driver must be model|agent";
-  }
-  if (opts.expectUrl !== undefined && opts.expectUrl !== null
-    && (typeof opts.expectUrl !== "string" || opts.expectUrl.trim() === "")) {
-    return "pilot --expect-url must be a non-empty string when present";
-  }
-  return null;
-}
+/** 选项面校验的单一实现在契约模块（本文件只 re-export，公开面不变）。 */
+export { validatePilotOptions } from "./pilot-contract.ts";

@@ -27,7 +27,7 @@ AmberFlow 是浏览器自动化引擎：你把流程写成 app.mjs 的 flow(ctx)
 npm ci
 npx playwright install chromium
 npm run doctor                         # 环境 / 配置 / 决策源体检
-npm run check                          # precheck + 契约生成物一致性 + typecheck + 配置/schema 一致性 + 提示词/站点词/泄露/示例/行锚/截断记账 + maintain/split + test:validate（PR 门禁）
+npm run check                          # precheck + 契约生成物一致性 + typecheck + 配置/schema 一致性 + 提示词/站点词/泄露/示例/行锚/截断记账 + maintain/split + test:validate + 含 decision run-parity（chromium 必需）（PR 门禁）
 npm run verify:offline                 # 非门禁等价验证（fixtures 抽取面；需 chromium，不进 check）
 npm run verify:runtime:offline         # 非门禁运行期等价 lane（fixtures + BrowserMiddleware.run；需 chromium）
 npm run verify:pilot                  # 非门禁：PILOTED_WALKTHROUGH §3.2 走查验收矩阵（停因/兜底/危险拒绝/降级；需 chromium）
@@ -52,7 +52,7 @@ npm run model:fetch -- --from <url|路径>
 npm run picker-server                 # DEPRECATED（P2-2.3）：MV3 extension 已删除，保留一版后评估移除
 ```
 
-`npm run test` 是真实站点套件，不是单元测试；没有 `npm run verify`。PR 门禁只走 `npm run check`，真实站点回归走 `npm run test`（声明数据在 `online/`）。
+`npm run test` 是真实站点套件，不是单元测试；没有 `npm run verify`。PR 门禁只走 `npm run check`（需本机 chromium：`npx playwright install chromium`），真实站点回归走 `npm run test`（声明数据在 `online/`）。
 
 > 应用运行优先走桥工具（`amberflow_run`）：桥用**部署配置**的决策三件套；CLI 直跑读本机用户配置，
 > 两者可能不同——`amber doctor` 缺省对在线决策源发一次最小 ask 探针，401/403 会直接点出来。

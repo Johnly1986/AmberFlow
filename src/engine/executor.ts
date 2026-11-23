@@ -112,6 +112,7 @@ import {
 import { THROTTLE_BODY_FLOOR, THROTTLE_COLLAPSE_RATIO, THROTTLE_POOL_HIGH_MIN } from "./throttle-signature.ts";
 import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts"; import { DONE_POLL_INTERVAL_MS, NAVIGATION_GOTO_TIMEOUT_MS, POOL_CAP_ELEMENTS } from "../support/tuning.ts"; import type { DecisionProvider, EvidenceTruncation } from "../support/decision-provider-contract.ts";
 import { sleep } from "../support/sleep.ts";
+import { buildChoiceRequest, effectiveNotes } from "./decision-request.ts";
 // task-14（D1）：探测失败分类与建议文案的单一出处。
 import { classifyDecisionFailure, decisionDegradedAdvice } from "../model/decision-probe.ts";
 import { applyRange, type RangeOptions, type RangeOutcome, type RangeValue } from "./range.ts";
@@ -281,6 +282,7 @@ export type ModelPickPhase = {
   decisionKind: "rule" | "model" | "escalate"; layaMargin: number | null;
   tierAsk: { n: number; tier: number } | null; nominatedRepair: boolean;
   escalatedPick: string | null; elems: ElemPool; label: string;
+  context?: { layers: import("./decision-ask-contract.ts").DecisionLayerReceipt[] };
 };
 
 /** `runPostAction` 的返回值：control 决定调用点 continue/break；run 级状态用返回值回写。 */
@@ -320,8 +322,7 @@ import { _executeElement, _missingRequired, _hintOpts, resolveCommandRef } from 
 import { _resolveOne, _rehydrateRescanOnce, _liveDomIdFallback, _probeCleanup, _domFallbackResolve, _resolveAxFallback, _resolveClickxyFallback } from "./executor-resolve-b.ts";
 import { actOnce, _scrollIntoViewWithEvidence, scrollIntoView, _scrollContainerForElement, _scrollWithLoc, scrollContainer, scrollDocument, setRange } from "./executor-actions.ts";
 import { runFrameGate, runPoolGate, runDeclaredTargets, runDeclaredHint } from "./executor-phases-a.ts";
-import { createRunPickWiring } from "./decision-pick-host.ts";
-import { runDecisionPick } from "./decision-pick-phase.ts";
+import { runPickPhase } from "./decision-pick-arm.ts";
 import { runPostAction } from "./executor-phases-b.ts";
 import { runActionPhase, runActionExecute, runSetup, runTail, runReportTail } from "./executor-phases-c.ts";
 export * from "./executor-pure.ts";
@@ -363,6 +364,9 @@ import {
   weakRejectedReason,
 } from "./executor-pure.ts";
 import { createRunAccounting, type RunAccounting } from "./run-context.ts";
+import { createRunDecisionAccounting } from "./decision-accounting.ts";
+import { askDoneProvider, askRiskProvider } from "./decision-questions.ts";
+import { attachDecisionContext, rememberStopDecisionContext, withStopDecisionContext } from "./decision-context-evidence.ts";
 import type { CandidateProducer } from "./candidate-contract.ts";
 import { createDeclaredTargetsResolver, type DeclaredTargetsResolver } from "./declared-targets.ts";
 import {
@@ -499,13 +503,24 @@ ${ROW_CLIMB_JS}
       if (c.rows.length) rowTexts = c.rows;
     }
     const selIdx = arg.rowIndex !== undefined && rowCtx !== null ? rowIdxMap.get(e) : undefined;
+    // 与池行同构的属性投影（additive）：name 直接来自属性；href 是展示投影（去 query、
+    // 取末两段），href_full 保留原始属性（query/fragment/origin）——口径与 EXTRACT_JS 的
+    // 池行逐字段一致，合成行并入匹配面后 [name=…] / [href=…] 与池内同语义。
+    const nameAttr = String(e.getAttribute("name") || "");
+    const hrefRaw = String(e.getAttribute("href") || "");
+    const hrefAttr = hrefRaw === ""
+      ? ""
+      : hrefRaw.split("?")[0].replace(/\/+$/, "").split("/").slice(-2).join("/");
     out.push({
       i, tag, label,
       role: String(e.getAttribute("role") || "").toLowerCase(),
       id: String(e.id || ""),
+      name: nameAttr,
       dt: String(e.getAttribute("data-test") || ""),
       type: String(e.getAttribute("type") || "").toLowerCase(),
       draggable: String(e.getAttribute("draggable") || "").toLowerCase() === "true",
+      href: hrefAttr,
+      ...(hrefRaw !== "" ? { href_full: hrefRaw } : {}),
       anchors: anchorIdsOf(e),
       ...(rowTexts !== null ? { row_texts: rowTexts } : {}),
       ...(selIdx !== undefined ? { row_index: selIdx } : {}),
@@ -1311,15 +1326,14 @@ export class BrowserMiddleware {
     const modelElems: ElemPool = modelProjectionOf(elems);
     let out;
     try {
-      // task-26（D2 A/B）：站点事实 fenced block 经 notes 注入模型请求面（opt-in——
-      // siteFactsNotes 缺省 null = notes 原样逐字节不变；本地 laya schema 固定忽略 notes）。
-      const mergedNotes = this.siteFactsNotes === null
-        ? notes
-        : { ...(notes ?? {}), site_facts: this.siteFactsNotes };
-      out = await provider.pick({
+      // 站点事实 fenced block 经 notes 注入模型请求面（opt-in——siteFactsNotes 缺省 null =
+      // notes 原样逐字节不变；本地 laya schema 固定忽略 notes）。合并单源 = `effectiveNotes`，
+      // `decision-ask.askPick` 的逐层回执用同一函数取投影，回执与真实 wire 不会各算一份。
+      const mergedNotes = effectiveNotes(notes, this.siteFactsNotes);
+      out = await provider.pick(buildChoiceRequest({
         goal, page, elems: modelElems, forbidden, notes: mergedNotes, narrow: null, k: 8,
-        ...(digest === null ? {} : { state_digest: digest }),
-      });
+        ...(digest === null ? {} : { stateDigest: digest }),
+      }));
     } catch (err) {
       this.lastPickEvidence = null;
       this.rulesOnly = true;
@@ -1382,10 +1396,10 @@ export class BrowserMiddleware {
     // `Cannot read properties of null (reading 'predict')`，把每个**有 hint 的步**也一起打红
     // （风险闸门在 pick 之后跑，规则决定的步同样要过它）。
     // laya 适配器做的是与下面完全相同的那次 `agent.predict`、同样的问法，所以默认路径逐字节不变。
-    if (this.decision?.capabilities.risk && this.decision.risk) {
+    {
       try {
-        const p = await this.decision.risk(goal, desc);
-        return [p >= this.riskyThreshold, p];
+        const p = await askRiskProvider(this.decision, goal, desc);
+        if (p !== null) return [p >= this.riskyThreshold, p];
       } catch (e) {
         // **风险头挂了 ≠ 整条计划不能跑**：退回到确定性关键词规则（就是上面那条），
         // 并把降级记下来让报告说得出"这次的风险判定是退化的"。
@@ -1429,9 +1443,8 @@ export class BrowserMiddleware {
       main_text: await stateText(page, goal, this.embedFn),
     };
     // 同上：完成投票也走 provider（永远只是参考，红线③不变——DOM 信号才是完成真相）。
-    if (this.decision?.capabilities.done && this.decision.doneVote) {
-      return await this.decision.doneVote(goal, state);
-    }
+    const doneVote = await askDoneProvider(this.decision, goal, state);
+    if (doneVote !== null) return doneVote;
     const { agent } = await this.agentFor(state);
     const res = await agent.predict(state, {
       d: {
@@ -1931,13 +1944,12 @@ export class BrowserMiddleware {
     // E2：歧义命中顺序同理——实例字段是后续 actOnce/命令步读取的唯一口径。
     this.ambiguousOrdering = ambiguousOrdering;
 
-    // 四组记账（stop / forbid+why / noteSkipped / unforbid·pruneForbids）的唯一载体：
-    // 状态与逻辑都在 RunCtx；run() 只持入口，调用点零改写（顺序/时机由本函数掌握）。
+    // 四组记账（stop / forbid+why / noteSkipped / unforbid·pruneForbids）的唯一载体在 RunCtx；run() 只持入口。
     const acct: RunAccounting = createRunAccounting({ maxSteps: this.maxSteps });
     const { stop, forbid, unforbid, pruneForbids, noteSkipped, forbidden, forbidWhy, blockedRetry, reAdmitted, skippedActions } = acct;
+    const decisionAccounting = createRunDecisionAccounting(acct, outcomeMemory, instruction);
 
-    // The navigation envelope: run-level declaration wins, else the middleware's
-    // (set once for a whole journey by the app runner from `pack.hosts`).
+    // The navigation envelope: run-level declaration wins, else the middleware's (set once per journey).
     const hostGate = hosts ?? this.hosts;
     this._frameHosts = hostGate ?? null;
     // P2 command space: the ordered closed set for THIS subgoal. Progress is per-run
@@ -2670,20 +2682,20 @@ export class BrowserMiddleware {
             reAdmitted.add(br);
           }
         }
-        const pickPhase = await runDecisionPick(...createRunPickWiring(this, {
+        const pickPhase = await runPickPhase(this, {
           pg, stepNo, instruction, verbose, elems, ruleRef, curHint, commandMode, forbidden, noted, trace, targets, adjudicate, reobserve, escalateFn, expectedFamily,
           confFloor: this.confFloor, candidatePriority, tieredHint, rulesOnly: this.rulesOnly, decisionDegradedReasonClass: this.decisionDegraded?.reason_class ?? null, rejectedAskConfs: this._rejectedAskConfs, warnings,
-          reobserved, escalated, escalatedPick, windowChainFacts, stepTimeoutLeft, stop, stopReason: () => acct.stopReason, pickElement: (g, page, pool, blocked, notes) => this.pickElement(g, page, pool, blocked, notes),
+          reobserved, escalated, escalatedPick, windowChainFacts, decisionAccounting, contextCapability: () => this.decision?.capabilities.context ?? null, siteFactsNotes: () => this.siteFactsNotes, stepTimeoutLeft, stop, stopReason: () => acct.stopReason, pickElement: (g, page, pool, blocked, notes) => this.pickElement(g, page, pool, blocked, notes),
           orderedPool, settleBeforeExtract: (page) => this._settleBeforeExtract(page), pruneForbids, hintOpts: () => _hintOpts(this, ), frameHosts: this._frameHosts, stateTextFn: (page, instr) => stateText(page, instr, this.embedFn),
           rowAnchorNote, declaredTargets, goalHeld, goalSignalFn, isTyping: (el) => this._isTyping(el), modelLabel: () => this.modelLabel(), degradedReasonSuffix: () => this.degradedReasonSuffix(),
           choiceLimitReason: () => this._choiceLimitReason, clearChoiceLimitReason: () => { this._choiceLimitReason = null; },
-        }));
+        });
         elems = pickPhase.elems;
         escalatedPick = pickPhase.escalatedPick;
-        if (pickPhase.stopped) break;
+        if (pickPhase.stopped) { rememberStopDecisionContext(acct, pickPhase.context); break; }
         let ref = pickPhase.ref;
         const { conf, method, decisionKind, layaMargin, tierAsk, nominatedRepair, label: mm } = pickPhase;
-        if (ref === null) break;
+        if (ref === null) { rememberStopDecisionContext(acct, pickPhase.context); break; }
 
         let el = elems[ref]!;
         const action = await runActionPhase(this, {
@@ -2694,6 +2706,7 @@ export class BrowserMiddleware {
           pruneForbids, stop, stopReason: () => acct.stopReason, domFallbackCleanup, markDryRan: () => { dryRan = true; },
           getPendingAfterIdx: () => pendingAfterIdx, warnings, actionDeclEvidence, refCollision, domFallbackEvidence,
         });
+        attachDecisionContext(trace, stepNo, pickPhase.context);
         ref = action.ref; el = action.el; elems = action.elems;
         if (action.control === "continue") continue;
         if (action.control === "break") break;
@@ -2762,7 +2775,7 @@ export class BrowserMiddleware {
       if (detail !== undefined) rttCtx.stopReason = detail;
       if (at !== undefined) rttCtx.stopStep = at;
     };
-    return await runReportTail(this, rttCtx);
+    return withStopDecisionContext(await runReportTail(this, rttCtx), acct);
   }
 
 

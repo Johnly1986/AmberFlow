@@ -588,6 +588,12 @@ export interface AppRunResult {
    * 不是完成判死；report.md 摘要行同步带「警告 n」（仅 n>0）。
    */
   warnings_count?: number;
+  /**
+   * 停因决策回执（additive）：**仅**在该 run 于动作前停止、且选择段确实问过模型时出现；
+   * 缺字段 = 没有这个事实（无询问 / 已发生动作 / 正常完成 ⇒ 键不出现，既有产物逐字节不变）。
+   * 形状与引擎 `RunReport.stop_decision_context` 同源（type-only 复用 `DecisionLayerReceipt`）。
+   */
+  stop_decision_context?: { layers: import("../engine/decision-ask-contract.ts").DecisionLayerReceipt[] };
   /** 本次是分段运行：`ok` 只代表段内步骤成功，不代表整条旅程验收。 */
   partial?: true;
   /**
