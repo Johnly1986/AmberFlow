@@ -10,6 +10,7 @@ import { SESSION_IDLE_TIMEOUT_MS } from "../support/tuning.ts";
 import type { ActMissDiagnostics, AnyPage } from "../engine/executor.ts";
 import type { AmbiguityView } from "../engine/ambiguity.ts";
 import type { LaunchWindowMode } from "../browser/browser-env.ts";
+import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
 
 /** `act` 的 MVP 能力面（执行器里 drag/upload/clickAt 也有，但 authoring MVP 不暴露）。 */
 export const SESSION_ACT_OPS = ["click", "check", "fill", "select", "hover", "scroll"] as const;
@@ -35,9 +36,16 @@ export interface SessionScrollOut {
   diagnostics?: ActMissDiagnostics;
 }
 
-/** 请求类型闭集（未知 type = 结构化 config_error + 这张表）。 */
+/**
+ * 请求类型闭集（未知 type = 结构化 config_error + 这张表）。
+ *
+ * `drive*` 是「会话内托管 pilot 驾驶」的协议面：`drive` 起/继续驾驶，`driveCommand`
+ * 递兜底指令（resume/redirect/finish/abort 闭集），`driveStatus` 只读状态，`driveClose`
+ * 终结驾驶（**不关宿主浏览器**——会话仍是会话）。驾驶语义本身在 `SessionPilotDriver`。
+ */
 export const SESSION_REQUEST_TYPES = [
-  "open", "goto", "observe", "act", "read", "extract", "waitFor", "signal", "snapshot", "mark", "tab", "close",
+  "open", "goto", "observe", "act", "read", "extract", "waitFor", "signal", "snapshot", "mark", "tab",
+  "drive", "driveCommand", "driveStatus", "driveClose", "close",
 ] as const;
 
 /** 缺省 idle 超时（两次请求之间的静默上限）。 */
@@ -228,7 +236,7 @@ export async function bounded(fn: () => Promise<unknown> | undefined, ms: number
 }
 
 /**
- * F76：任意标签页的标题读取有界（2s）：一个卡死的标签页不能拖住 tab list/switch 的响应
+ * 任意标签页的标题读取有界（2s）：一个卡死的标签页不能拖住 tab list/switch 的响应
  * （与 ctx.ts 的 tabs titleOf 同口径；catch 在 race 之前挂上，race 输了也不产生未处理拒绝）。
  */
 export async function tabTitleOf(p: AnyPage): Promise<string> {
@@ -241,5 +249,81 @@ export async function tabTitleOf(p: AnyPage): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/* ---------------------------------------------- 会话内托管驾驶（drive 协议） */
+
+/** `drive.driver` 闭集（与 pilot 驾驶者同源；agent = 每步等兜底指令点名，零模型票）。 */
+export const SESSION_DRIVE_DRIVERS = ["model", "agent"] as const;
+export type SessionDriveDriver = (typeof SESSION_DRIVE_DRIVERS)[number];
+/** `driveCommand.cmd` 闭集（与 pilot 兜底指令同源，不在这里发明第二套指令）。 */
+export const SESSION_DRIVE_COMMANDS = ["resume", "redirect", "finish", "abort"] as const;
+export type SessionDriveCommand = (typeof SESSION_DRIVE_COMMANDS)[number];
+/** 驾驶步预算边界（与 pilot --max-steps 同口径）。 */
+export const SESSION_DRIVE_MAX_STEPS = { min: 1, max: 200 } as const;
+
+/**
+ * `drive` 请求的形状校验（返回 null = 合法；否则为给人读的 config_error 文案）。
+ *
+ * 只校验**协议形状**：值不猜、不补缺省；合法性口径与 pilot 面一致——`final_signal` 走
+ * 同一个 `validateSignalSpec`（signal/waitFor 的加载期校验器），不合法即 config_error。
+ */
+export function driveStartProblem(req: Record<string, unknown>): string | null {
+  if (!nonEmpty(req["goal"])) return "drive needs a non-empty goal string";
+  const maxSteps = req["max_steps"];
+  if (maxSteps !== undefined) {
+    const { min, max } = SESSION_DRIVE_MAX_STEPS;
+    if (typeof maxSteps !== "number" || !Number.isInteger(maxSteps) || maxSteps < min || maxSteps > max) {
+      return `drive.max_steps must be an integer in [${min}, ${max}] (got ${JSON.stringify(maxSteps)})`;
+    }
+  }
+  const driver = req["driver"];
+  if (driver !== undefined && !(SESSION_DRIVE_DRIVERS as readonly unknown[]).includes(driver)) {
+    return `drive.driver must be one of ${SESSION_DRIVE_DRIVERS.join(" | ")} (got ${JSON.stringify(driver)})`;
+  }
+  const floor = req["conf_floor"];
+  if (floor !== undefined && (typeof floor !== "number" || !Number.isFinite(floor) || floor < 0 || floor > 1)) {
+    return `drive.conf_floor must be a number in [0, 1] (got ${JSON.stringify(floor)})`;
+  }
+  const expectUrl = req["expect_url"];
+  if (expectUrl !== undefined && !nonEmpty(expectUrl)) {
+    return "drive.expect_url must be a non-empty string when present";
+  }
+  const signal = req["final_signal"];
+  if (signal !== undefined && signal !== null) {
+    if (!isObj(signal)) return "drive.final_signal must be a JSON object when present";
+    const problems = validateSignalSpec(signal, "drive.final_signal");
+    if (problems.length > 0) return signalProblemText(problems, "json");
+  }
+  const slots = req["slots"];
+  if (slots !== undefined && slots !== null) {
+    if (!isObj(slots)) return "drive.slots must be a JSON object of slot name → string value";
+    for (const [k, v] of Object.entries(slots)) {
+      if (typeof v !== "string") return `drive.slots.${k} must be a string value`;
+    }
+  }
+  return null;
+}
+
+/** `driveCommand` 请求的形状校验（cmd 闭集 + 各指令参数的类型；语义仍归 pilot 兜底分派）。 */
+export function driveCommandProblem(req: Record<string, unknown>): string | null {
+  const cmd = req["cmd"];
+  if (typeof cmd !== "string" || !(SESSION_DRIVE_COMMANDS as readonly string[]).includes(cmd)) {
+    return `driveCommand.cmd must be one of ${SESSION_DRIVE_COMMANDS.join(" | ")} (got ${JSON.stringify(cmd)})`;
+  }
+  if (req["hint"] !== undefined && !nonEmpty(req["hint"])) {
+    return "driveCommand.hint must be a non-empty string when present";
+  }
+  if (req["url"] !== undefined && !nonEmpty(req["url"])) {
+    return "driveCommand.url must be a non-empty string when present";
+  }
+  if (req["goal"] !== undefined && !nonEmpty(req["goal"])) {
+    return "driveCommand.goal must be a non-empty string when present";
+  }
+  const value = req["value"];
+  if (value !== undefined && !(typeof value === "string" || isObj(value))) {
+    return "driveCommand.value must be a string or a JSON object of slot name → scalar";
+  }
+  return null;
 }
 

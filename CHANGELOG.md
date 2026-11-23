@@ -4,6 +4,51 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-23 移除桥面 `amberflow_pilot`（agent 走查收敛到 session drive）
+
+- **删除**桥面 `amberflow_pilot` 工具及其服务 `integrations/dsh-bridge/src/pilot.ts`：one-shot
+  调用每次起**独立浏览器**、无登录态/cookie，真实站点极易撞登录墙，且与 `amberflow_session` 的
+  drive 系列 op 重复。agent 侧走查统一走 `amberflow_session` 的
+  `drive/drive_command/drive_status/drive_close`（同一 session 子进程/同一 page，跨调用保状态，
+  可先带登录态再驾驶）。
+- **连带清理**：`PILOT_TOOL_*` / `PILOT_ARGV_FIELDS` / `BridgePilotArgs` 从生成契约
+  （`src/support/run-args-contract.ts` + `tools/run-args-gen.ts` + `run-contract.generated.ts`）
+  移除（`run-args:gen` 重新生成、`run-args:check` 绿）；桥面 `pilotArgs`、pilot 单测与 fake-engine
+  pilot 分支删除；桥面工具总数 −1。引擎 `amber pilot` CLI 保留为开发/验收入口（`verify:pilot`
+  仍走引擎面），不再是 agent 面入口。
+- **文档**：`AGENT_INTERFACE.md`（桥表删行、§3.3 改为「agent 面经 session drive」）、
+  `APP_SCRIPT_AUTHORING.md`、`PILOTED_WALKTHROUGH_PLAN.md` PW3 第②项标注已替代。
+- **验收**：`npm run check` 全绿（含 run-args:check / bridge:test / prompt-hit）；`verify:pilot`
+  16/16、`verify:parity`、`verify-session-drive` 不回归。**未提交 git。**
+
+## [Unreleased] — 2026-11-23 共享会话：session 子进程托管 pilot 驾驶（pilot/session 同页互证）
+
+- **形态（按项目决定）**：host 复用现有 `amber session` 子进程；**不新增 daemon、不新增 CLI 命令、
+  不新增桥工具**。
+- **引擎**：`PilotRuntime` 增 attach seam（`sessionFactory` / `ownsSession:false` /
+  `skipStartNavigation`；attach 起步不 goto、校验 hosts 信封、`started.attached:true`，
+  `closeBrowser` 不关宿主）；新增 `src/app/session-driver.ts`（`SessionPilotDriver`：附着式 pilot
+  + 捕获 sink + `session_id` join key + 有界 events/handoff + `drive_terminal`/`drive_closed`）；
+  `SESSION_REQUEST_TYPES` 增 `drive/driveCommand/driveStatus/driveClose`（goal/max_steps/driver/
+  cmd/conf_floor/final_signal/slots 校验；final_signal 复用 `validateSignalSpec` 同一口径）；
+  session 子进程内驾驶与 `act/observe` 共用同一 page（停驶在交接处，人工补步后 resume——
+  **切换互证**）。
+- **桥面**：`amberflow_session` 扩 4 个 op（op 名沿用既有 snake_case：`drive/drive_command/
+  drive_status/drive_close`，映射引擎 camelCase 请求类型），参数校验 + 有界白名单投影（不回
+  池/候选/槽值/DOM）+ 既有 engineFailure 同源失败面；工具数保持 4 个；`amberflow_pilot` one-shot
+  不变。
+- **行数/平台**：`session-runtime.ts` 的 `tab` 处理 99 行纯搬移到 `src/app/session-ops-extra.ts`
+  （1018→929，driver 接线后 948 ≤ 基线）；`tools/verify-session-close.ts` 进程枚举跨平台化
+  （win32 `tasklist` 逐字保留，POSIX `ps`）。
+- **验收**：`npm run check` exit 0；`npm run verify:pilot` **16/16**；新 `tools/verify-session-drive.ts`
+  零模型三场景全过；`npm run bridge:test` **14/14**（新增 4 条 drive 用例）；新增
+  `tools/verify-parity.ts`（`npm run verify:parity`）：同 fixture 三腿 run/session/pilot 步级对照
+  （ref/how/changed/落地 URL/池计数/规则档/零模型）全绿；真站同一 session 内
+  model 驾驶 Google→Maps 2 步 `final_signal_held`（`model_asks=2`），停驶后 session `observe`
+  同页可用；桥级 E2E（真实 `SessionManager` + 真实 `amber session` 子进程）
+  `drive→await_pick→observe→resume→done→session read/act→drive_status→drive_close→session 仍可用
+  →close` 全绿。文档同步 `AGENT_INTERFACE.md`/`INTERACTIVE_SESSION.md`。**未提交 git。**
+
 ## [Unreleased] — 2026-11-23 pilot 驾驶上文与执行身份（1/2/3 三项）
 
 - **驾驶上文（任务3）**：`drivingGoalText` 的步史从"已完成: 1.<label>"改为

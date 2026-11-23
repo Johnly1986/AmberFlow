@@ -5,16 +5,19 @@
 > 正式执行仍然是「冻结计划 + 运行时消歧」：session 不产生 `done`、不写 `result.json`、
 > 不替代 `run` 的通过/失败结论。设计稿见 `iterations/interactive-session/design.md`。
 >
-> 划界（pilot 是并列新面，本面纪律不变）：`amber pilot`（PILOTED_WALKTHROUGH_PLAN）是
-> **模型驾驶走查面**——决策模型逐步投票驾驶、Agent 只在停因交接时兜底；session 保持
-> 「一步都不问模型」的 authoring 纪律。两面的证据与可复现口径各自独立（session 的请求
-> 记录 vs pilot 的驾驶轨迹 + trace），互不借道、互不冒充。
+> 划界（pilot 是并列新面）：pilot 驾驶协议（PILOTED_WALKTHROUGH_PLAN）是**模型驾驶走查面**（CLI 入口已移除，agent 面经 `amberflow_session` 的 drive 系列 op）——
+> 决策模型逐步投票驾驶、Agent 只在停因交接时兜底；session 的 `act/observe/read` 请求保持
+> 「一步都不问模型」的 authoring 纪律。**共享现场**：host 是 `amber session` 子进程，`drive`
+> 请求在同一 page 上跑 pilot（`pilot:true`/`attached:true`）——驾驶停在交接处后可用
+> act/observe 人工补一步再 resume，这就是「切换互证」。两面的证据与可复现口径各自独立
+> （session 的请求记录 vs pilot 的驾驶轨迹 + trace），互不借道、互不冒充。
 
 ## 什么时候用
 
 - 写 `app.mjs` 之前，想先弄清真实页面上「点这个会不会跳、跳完长什么样、信号写什么能成立」；
 - 应用里某一步在 `run` 里失败，要单点复现那一步的解析/动作/回读，而不是整条重跑；
-- 需要跨多步保留页面状态（展开的菜单、滚动位置、输入值）做连续试探。
+- 需要跨多步保留页面状态（展开的菜单、滚动位置、输入值）做连续试探；
+- 走查时想在同一现场切换「模型驾驶」与「人工试错」互证 → `drive` 系列请求（见下）。
 
 不需要它的时候：只想看页面元素 → `amber inspect`；只想核对已声明的 hint 能否命中 →
 `amber apps rehearsal` / `amber plan check --probe`；已经能跑 → `amber run`。
@@ -65,6 +68,10 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
 | `snapshot` | `screenshot?`(缺省 true), `poolMax?`(120) | `snapshot_file,pool_file,screenshot_file?,counts` | `io_error` |
 | `mark` | `note` | `note`（只进 `--record` 轨迹，不动页面） | `config_error` |
 | `tab` | `action?`(`list` 缺省 \| `switch`), `match?`(`{index}` \| `{urlContains}` \| `{titleContains}`，多键 AND) | `list`：`action:"list",tabs:[{index,url,title,active}],active`（免费只读，**不写轨迹、不记动作**）；`switch`：`action:"switch",switched:{index,url,title}`（写一条 JSONL record） | `config_error`（缺/空/未知 match 键、0 个或多于 1 个匹配）/ `host_not_allowed` |
+| `drive` | `goal`(必填), `max_steps?`(1..200), `final_signal?`(对象), `conf_floor?`(0..1), `expect_url?`, `driver?`(`model`\|`agent`), `slots?`(`{k:v}` 字符串) | `status,stop_code?,url?,steps?,model_asks?,out_dir?,attached?,handoff?{…},events?≤20`（有界投影；不回池/候选/槽值） | 引擎停因（`low_confidence`/`needs_value`/`target_*`/`off_task_page`/`budget_exceeded`…，交接结构化返回）/ `config_error` |
+| `driveCommand` | `cmd`(`resume/redirect/finish/abort`), `hint?`, `value?`, `skip?`, `goal?`, `url?`, `note?` | 同 `drive`（继续一轮驾驶后的结果） | 同上（单行失败 = 结构化回执，会话继续） |
+| `driveStatus` | — | `status,url?,steps?,model_asks?,out_dir?,handoff?` | — |
+| `driveClose` | — | 同 `driveStatus`（驾驶面已收尾；浏览器仍归 session） | — |
 | `close` | — | `closed,requests,actions,snapshots,duration_ms,urls,evidence_dir` | — |
 
 会话级异常会补发一行 `{"type":"session_end","unsolicited":true,"ok":false,"code":…}`（`idle_timeout` /
@@ -90,6 +97,23 @@ amber session --url https://books.toscrape.com/ --on-ambiguous act
   `await ctx.switchTab({ urlContains: 落点URL | index })` 原语（URL 子串优先、URL 缺失退 index、
   两者都缺 = 注释块不发明；`ctx.switchTab` 自身计 1 个 flow step）；`list`/未知 tab 行与
   `ok:false` 行 = 注释块保留、不发明动作。
+
+### drive：在会话现场驾驶（与 pilot 共用同一 page）
+
+- `{"type":"drive","goal":"…","max_steps?":8,"final_signal?":{…},"conf_floor?":0.25,"expect_url?":
+  "/maps","driver?":"model","slots?":{…}}`：在**当前会话页**上开始一轮 pilot 驾驶（附着式
+  `PilotRuntime`：`ownsSession:false`、`skipStartNavigation:true`，不新开浏览器、不重新导航）。
+  驾驶到下一个停因交接处返回；`driver:"agent"` = 每步等 `resume` 点名（零模型票，便于验收）。
+- `{"type":"driveCommand","cmd":"resume","hint":"Open the detail page"}`：交接后继续；`cmd` 闭集
+  `resume/redirect/finish/abort`，字段 `hint?/value?/skip?/goal?/url?/note?` 与引擎 pilot 驾驶协议的
+  stdin 指令同一套语义。`resume`/`redirect` 成功会继续驾驶并返回下一步结果。
+- `{"type":"driveStatus"}` / `{"type":"driveClose"}`：只读回显 / 收尾驾驶面（结束 pilot、保留
+  证据；**不关闭宿主浏览器**，session 仍可 `act/observe/close`）。
+- 语义：pilot 在**同一 page** 上驾驶，产物 `pilot:true`/`attached:true`（证据目录独立）；session
+  的 `act/observe` 仍零模型。两者不共享 middleware/账本/预算；交接停在 handoff 后，agent 可以
+  先 `act` 人工补一步，再 `driveCommand{cmd:"resume"}` 交给模型继续——**切换互证**的入口。
+- 红线与边界：`drive` 走 pilot face（危险动作 `default-deny`）；`drive` 是独立请求类型，不改变
+  session `act` 的零模型口径；不新增工具/命令（桥面 `amberflow_session` 的 `drive` 系列 op 同源）。
 
 ### 分页：extract 有 offset，observe 没有
 

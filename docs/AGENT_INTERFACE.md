@@ -50,9 +50,10 @@ apps list → app_show（路径 + 当前源码）→ 编辑 app.mjs
   `app_create` 的骨架含「卡点→能力」cookbook 速查段；会话内实时观察用 `ctx.observe()`。
 - `inspect` 只读：标题、URL、有界元素、候选 hint；`--json` 另带只读的可访问性树证据块 `ax`（浏览器 AX role/name/focusable/disabled + `not_in_pool` 近似口径，不进池/匹配/模型/运行路径）；不点击、不输入、不调模型。**inspect 是独立一次性会话**（新开浏览器、不 attach 运行会话）——会话内实时看当前页用应用内 `ctx.observe()`。元素行带 `frame_origin`/`frame_path`（帧链）；`hint_candidates` 在多 frame 同名场景会给 `<label> frame:<origin>` 或 ≤4 段完整链候选，同文案重复组会给 `<label> in-row:<token>` 行锚候选（F82），内容不可分网格会给 `<label> row-index:N` 顺序行锚候选（F83）；`structure_path`（若出现）只是诊断证据（`structure_unstable:true`，动态页面可能失效）——**不是 hint，不可照抄**。
 - 走查（写应用前把流程走通）：四种走查面见 `docs/APP_SCRIPT_AUTHORING.md` §0.5——探针链 /
-  plan 面草稿 / `amber run --walk` / `amber pilot`（模型驾驶 + Agent 兜底；协议、交接块与桥面
-  `amberflow_pilot` 见 §3.3）。pilot 产物带 `pilot:true`，**走查通过 ≠ 应用通过**；走通后用
-  `amber pilot export` 出 app.mjs 骨架，再补 done/slot 走正式 `amber run`。
+  plan 面草稿 / `amber run --walk` / `amber session` 的 drive 系列 op（模型驾驶 + Agent 兜底；
+  协议与交接块见 §3.3；桥面走查入口已收敛到 `amberflow_session`）。pilot 产物带 `pilot:true`，
+  **走查通过 ≠ 应用通过**；走通后用 `amber session export`（会话 `--record` 轨迹）出 app.mjs 骨架，再补 done/slot 走正式
+  `amber run`。
 - **learn 录制 hint vs inspect 候选**：learn 的 `hint` 是六形状闭集（可带 `within:#id` / `frame:<origin>` / `in-row:<token>` / `row-index:N` 尾缀，同一 `parseHint`）、属性白名单只认 `test`（→data-test）/`type`/`aria-label`；inspect 的 `hint_candidates` 是引擎经同一个 `hintMatch` 自证过的可照抄结果（输出的就是六形状之一；跨帧同名时可能是 `<label> frame:<origin>` / ≤4 段链，同名组可能是 `<label> within:#id`，同文案重复组可能是 `<label> in-row:<token>`，内容不可分网格可能是 `<label> row-index:N`）。inspect 候选可直接抄进 act/learn；自己挑的属性先过白名单。
 - `run --max-steps N` 是**执行预算**，不是“从第 N 步开始”：脚本按自己的控制流执行，
   用满预算时以 `budget_exceeded` 停下，结果带已执行步骤与 trace。
@@ -226,8 +227,7 @@ amber apps remove <id> [--yes] [--force]
 | `amberflow_app_show` | `amber apps show --json --code` | 路径、元数据、当前源码、版本锚点 |
 | `amberflow_app_check` | `amber apps check --json` | 加载 + dry 调用序列校验 |
 | `amberflow_inspect` | `amber inspect --json` | 只读页面观察（含 `ax` 可访问性证据块）与候选 hint |
-| `amberflow_session` | `amber session` | 跨工具调用保持页面状态的交互式试错会话（`open/goto/observe/act/read/extract/signal/wait_for/snapshot/tab/close/list`）；不判完成、不写 run 结果；`act` 缺省歧义零动作（见下） |
-| `amberflow_pilot` | `amber pilot` | 模型驾驶走查（one-shot）：决策模型逐步投票驾驶（规则档先行零模型；低置信先宽扫重问一次），停因交接投影 `handoff`（四件套 + 确定性解锁建议）；`commands` 是兜底剧本（JSONL 文本，引擎闭集逐行消费，被拒 = 单行失败）；返回有界摘要（终态字段 + 事件白名单 + handoff 细节），超时写 `pilot-killed.json`；完成只认信号、不冒充 run 结论；协议契约见 §3.3；`amber pilot export` 把 `--record` 轨迹还原成 app.mjs 骨架（picked_by 来源标记保留，done 占位符待补） |
+| `amberflow_session` | `amber session` | 跨工具调用保持页面状态的交互式试错会话（`open/goto/observe/act/read/extract/signal/wait_for/snapshot/tab/drive/drive_command/drive_status/drive_close/close/list`）；不判完成、不写 run 结果；`act` 缺省歧义零动作；`drive` 系列在**同一 page** 上跑 pilot 驾驶（`pilot:true`/`attached:true`，见下） |
 | `amberflow_app_create` | `amber apps new … --json` | 生成 flow 骨架 |
 | `amberflow_run` | `app-runner`（与 `amber run` 同一运行器） | 运行；**桥用部署配置**决策三件套；`max_steps` 是执行预算，`timeout_sec` 是本次墙钟上限；决策通道故障时结果带恢复指引 |
 | `amberflow_learn` | `learn --json` | 一次录制 → 归纳信号 → 生成 `app.mjs` flow（回放门通过才落盘） |
@@ -463,6 +463,31 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
   如实跳过——导出的骨架不含导航步，作者按现场手写 `ctx.open`/`ctx.arrive`）。换日期/换列表页
   从此不用关开会话改 URL（高频开关撞站点风控的动因由此消除）。
 
+`amberflow_session` 的 `drive` 系列 op（pilot 在会话现场驾驶；不新增工具）：
+
+- 定位：`amber session` 子进程是**唯一 host**（一个 browser/page）；`drive` 在该 page 上跑 pilot
+  驾驶（`pilot:true`/`attached:true`），与 `act/observe` 共用同一现场——**切换互证**：`drive` 停在
+  交接处返回 → Agent 用 `act/observe` 人工补一步 → `drive_command{cmd:"resume",hint?/value?/skip?}`
+  继续。不新开浏览器、不重新导航；跨工具调用由 session 子进程保状态。这是 **agent 侧唯一走查入口**；原 `amberflow_pilot` one-shot 工具已移除（独立会话无登录态，易撞登录墙）。
+- `{"op":"drive","session_id":"s-…","goal":"…","max_steps?":1..200,"final_signal?":{…},
+  "conf_floor?":0..1,"expect_url?":"…","driver?":"model"|"agent","slots?":{"k":"v"}}`：首次调用
+  构造附着式 pilot（`ownsSession:false`、`skipStartNavigation:true`、hosts=会话信封、独立 pilot 证据
+  目录）并跑一轮驾驶；停在停因交接处返回。`driver:"agent"` = 每步等
+  `drive_command{cmd:"resume",hint}` 点名（零模型票），便于本地零模型验收。
+- `{"op":"drive_command","cmd":"resume"|"redirect"|"finish"|"abort","hint?","value?","skip?","goal?","url?","note?"}`：
+  兜底指令闭集（与引擎 pilot 驾驶协议的兜底指令同一套语义）；`resume`/`redirect` 会继续驾驶并返回
+  下一步结果；单行失败 = 结构化回执、会话与驾驶面继续。
+- `{"op":"drive_status"}`：只读回显（`status,url,steps,model_asks,out_dir,handoff?`）。
+- `{"op":"drive_close"}`：收尾驾驶面（结束 pilot、保留证据；**不关闭宿主浏览器**，session 仍可
+  `act/observe/close`）。
+- 响应（有界投影）：`{ok, op, session_id, status, stop_code?, url?, steps?, model_asks?, out_dir?,
+  attached?, handoff?{step_id,stop_code,summary,url,what_would_unblock≤3,evidence_refs}, events?≤20}`；
+  **不回**池/候选/槽值/完整 DOM。`session_id` 是三面 join key；pilot 证据目录经 `out_dir` 给出。
+- 红线：`drive` 走 pilot face（`default-deny` 危险闸门），session 的 `act/observe` 仍零模型；两者
+  共用 page 但不共享 middleware/账本；`drive` 产物恒 `pilot:true`/`attached:true`，不冒充 run 结论。
+- 单驾驶员：同一 session 同一时刻只有一个驾驶面；`drive` 停在 handoff 后 `act/observe` 可用
+  （人工切换），`drive` 进行中 session 请求天然串行。
+
 ### 3.1 决策通道：桥 vs CLI（A5）
 
 同一份决策三件套有两个注入面：**桥通道**（DSH 插件配置页 → 桥注入子进程环境变量，部署配置，
@@ -525,7 +550,7 @@ observe 是会话内状态保持面（`session_id`、`counts={elements,admitted,
   不阻断其余观察面；只读证据：不进模型面、不参与 admitted 判定；dry/replay 不访问浏览器 =
   无此键（缺键 = 引擎没给，桥透传不补算）。
 
-### 3.3 `amber pilot` 驾驶协议（CLI 与桥面 `amberflow_pilot` 均已接入）
+### 3.3 pilot 驾驶协议（引擎库面；CLI 入口已移除，agent 面经 `amberflow_session` 的 drive 系列 op）
 
 stdout 纯 JSONL：`started` / `drive` / `handoff` / `command_result` / `pilot_end` 每行一个
 JSON 对象；`pilot_end` 只发一条（idle/中断/异常的 `code`/`reason` 并进汇总行），摘要恒含
@@ -562,11 +587,11 @@ stdin 兜底指令闭集（每行一个 JSON 对象；单行失败纪律与 sess
 denyDestructive 同源）——命中 = `risk_declined` 结构化失败 + 禁选，绝不静默执行；连续
 拒绝达 inert 阈值 = `stuck_inert`；兜底指令闭集里没有 confirm，Agent 无法越过。
 
-桥面 `amberflow_pilot`（one-shot）：拼 CLI + 收 JSONL 协议流 + 投影有界摘要三件事不变——
-schema 走 `run-args-contract` 生成链（`PILOT_ARG_FIELDS` 单源，`run-args:check` 双段校验），
-`commands`（兜底剧本 JSONL 文本）由桥物化成临时文件走 `--input`，`timeout_sec` 是桥侧墙钟
-（超时写 `pilot-killed.json` 部分证据）；返回摘要带 `status`/`stop_code`/步数与咨询计数、
-事件白名单（≤60）、交接细节（≤4）。交互式常驻驾驶（跨调用同现场、逐交接喂指令）属后续批次。
+桥面入口：**agent 侧走查统一经 `amberflow_session` 的 `drive/drive_command/drive_status/
+drive_close` op**（同一 session 子进程/同一 page，跨调用保状态；带登录态后再驾驶）。原
+`amberflow_pilot` one-shot 工具已移除——它每次起独立浏览器、无 cookie/登录态，真实站点极易撞
+登录墙，且与 session drive 重复。引擎 `amber pilot` CLI **已移除**；驾驶协议保留在引擎库面（`PilotRuntime`，`verify:pilot`
+lane 直接驱动）。交互式常驻驾驶（跨调用同现场、逐交接喂指令）**已落地**：host 是 `amber session` 子进程，经 `amberflow_session` 的 `drive/drive_command/drive_status/drive_close` op 实现（同一 page、`pilot:true`/`attached:true`；见本文件「`amberflow_session` 的 `drive` 系列 op」段）。
 
 `PilotHandoff` 交接块（停因投影；字段冻结，单源 `src/app/pilot-contract.ts`）：
 

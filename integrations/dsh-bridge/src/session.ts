@@ -166,6 +166,29 @@ export interface SessionToolArgs {
   tab_action?: 'list' | 'switch'
   /** F76：tab switch 的匹配条件（AND；至少一个键的语义校验在引擎 ctx-validate，桥只做形状校验）。 */
   match?: { index?: number; urlContains?: string; titleContains?: string }
+  // ---- drive（pilot 在**同一会话页**上驾驶；不新增工具/命令，op 扩展）----
+  /** drive：一行目标（必填；与 `engine pilot protocol goal` 同义）。 */
+  goal?: string
+  /** drive：可选完成信号（与 run done / pilot --final-signal 同一信号语言）。 */
+  final_signal?: Record<string, unknown>
+  /** drive：驾驶步预算 1..200（缺省引擎缺省）。 */
+  max_steps?: number
+  /** drive：置信下限 [0,1]（缺省引擎/provider 口径）。 */
+  conf_floor?: number
+  /** drive：任务页 URL 子串（每轮驾驶前不含即 off_task_page）。 */
+  expect_url?: string
+  /** drive：决策驱动档——model（模型投票，缺省）| agent（每步等 resume 点名，零模型票）。 */
+  driver?: 'model' | 'agent'
+  /** drive：槽位值（k=v 字符串；值只来自调用方显式给，桥不猜）。 */
+  slots?: Record<string, string>
+  /** drive_command：兜底指令闭集。 */
+  cmd?: 'resume' | 'redirect' | 'finish' | 'abort'
+  /** drive_command resume：点名收窄目标（hint 唯一命中即确定性执行）。 */
+  hint?: string
+  /** drive_command resume.skip：把最近一次驾驶选中的目标加入禁选后继续（不点名换目标的兜底）。 */
+  skip?: boolean
+  /** drive_command：备注（finish/abort 的收尾说明）。 */
+  note?: string
   /**
    * F80：open 专属的会话 idle TTL（ms）。undefined = 管理器缺省（逐字节不变）；`0` = 不限
    * （仅显式，reaper 跳过该会话）；非整数或 1..999 = config_error。**其他 op 传入 = config_error**。
@@ -175,7 +198,7 @@ export interface SessionToolArgs {
 
 export type SessionToolResult = Record<string, unknown>
 
-const SESSION_OPS = ['open', 'goto', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'close', 'list'] as const
+const SESSION_OPS = ['open', 'goto', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'drive', 'drive_command', 'drive_status', 'drive_close', 'close', 'list'] as const
 const ACT_OPS = ['click', 'check', 'fill', 'select', 'hover', 'scroll'] as const
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -313,6 +336,10 @@ export class SessionManager {
         case 'wait_for': return await this.waitFor(state, args)
         case 'snapshot': return await this.snapshot(state, args)
         case 'tab': return await this.tab(state, args)
+        case 'drive': return await this.driveOp(state, args)
+        case 'drive_command': return await this.driveCommandOp(state, args)
+        case 'drive_status': return await this.driveStatusOp(state)
+        case 'drive_close': return await this.driveCloseOp(state)
         case 'close': return await this.closeSessionOp(state)
         default:
           throw new SessionToolError('config_error', `unsupported op ${JSON.stringify(op)}`)
@@ -1228,6 +1255,216 @@ export class SessionManager {
       ...(typeof response['active'] === 'number' ? { active: response['active'] } : {}),
       ...(switched !== undefined ? { switched } : {}),
     }
+  }
+
+  /* ------------------------------------------------------------ drive（pilot 驾驶，与 session 共用同一 page） */
+
+  /**
+   * drive：在**当前会话页**上开始/继续模型驱动走查（pilot face，产物 pilot:true/attached:true）。
+   *
+   * 与 session 的 act/observe 共用同一 browser/page（不新开浏览器、不重新导航）；停在交接处返回，
+   * Agent 可先用 act/observe 人工补一步，再 drive_command 继续——"切换互证"的入口。缺省不创建
+   * 任何进程/浏览器（会话已由 open 建好）；不新增工具、不新增 CLI 命令。
+   */
+  private async driveOp(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
+    if (!nonEmpty(args.goal)) {
+      throw new SessionToolError('config_error', 'drive needs a non-empty goal (one line describing the step)')
+    }
+    const body: Record<string, unknown> = { type: 'drive', goal: args.goal.trim() }
+    if (args.max_steps !== undefined) {
+      if (typeof args.max_steps !== 'number' || !Number.isInteger(args.max_steps) || args.max_steps < 1 || args.max_steps > 200) {
+        throw new SessionToolError('config_error', `max_steps must be an integer 1..200 (got ${JSON.stringify(args.max_steps)})`)
+      }
+      body['max_steps'] = args.max_steps
+    }
+    if (args.final_signal !== undefined) {
+      if (!isObj(args.final_signal)) {
+        throw new SessionToolError('config_error', `final_signal must be a JSON object (got ${JSON.stringify(args.final_signal)})`)
+      }
+      body['final_signal'] = args.final_signal
+    }
+    if (args.conf_floor !== undefined) {
+      if (typeof args.conf_floor !== 'number' || !Number.isFinite(args.conf_floor) || args.conf_floor < 0 || args.conf_floor > 1) {
+        throw new SessionToolError('config_error', `conf_floor must be a number in [0,1] (got ${JSON.stringify(args.conf_floor)})`)
+      }
+      body['conf_floor'] = args.conf_floor
+    }
+    if (args.expect_url !== undefined) {
+      if (!nonEmpty(args.expect_url)) {
+        throw new SessionToolError('config_error', 'expect_url must be a non-empty string when present')
+      }
+      body['expect_url'] = args.expect_url
+    }
+    if (args.driver !== undefined) {
+      if (args.driver !== 'model' && args.driver !== 'agent') {
+        throw new SessionToolError('config_error', `driver must be one of model | agent (got ${JSON.stringify(args.driver)})`, {
+          allowed_drivers: ['model', 'agent'],
+        })
+      }
+      body['driver'] = args.driver
+    }
+    if (args.slots !== undefined) {
+      const slots: unknown = args.slots
+      if (!isObj(slots) || Object.values(slots).some((v) => typeof v !== 'string')) {
+        throw new SessionToolError('config_error', 'slots must be an object of string values (the bridge never invents values)')
+      }
+      body['slots'] = slots
+    }
+    const response = await this.request(state, body)
+    return this.driveResult(state, 'drive', response)
+  }
+
+  /** drive_command：把兜底指令（resume/redirect/finish/abort 闭集）交给驾驶面；drive 时继续一轮。 */
+  private async driveCommandOp(state: SessionState, args: SessionToolArgs): Promise<SessionToolResult> {
+    const cmd = args.cmd
+    if (cmd !== 'resume' && cmd !== 'redirect' && cmd !== 'finish' && cmd !== 'abort') {
+      throw new SessionToolError('config_error', `cmd must be one of resume | redirect | finish | abort (got ${JSON.stringify(args.cmd)})`, {
+        allowed_cmds: ['resume', 'redirect', 'finish', 'abort'],
+      })
+    }
+    const body: Record<string, unknown> = { type: 'driveCommand', cmd }
+    if (args.hint !== undefined) {
+      if (!nonEmpty(args.hint)) throw new SessionToolError('config_error', 'hint must be a non-empty string when present')
+      body['hint'] = args.hint
+    }
+    if (args.value !== undefined) body['value'] = args.value
+    if (args.goal !== undefined) {
+      if (!nonEmpty(args.goal)) throw new SessionToolError('config_error', 'goal must be a non-empty string when present')
+      body['goal'] = args.goal
+    }
+    if (args.url !== undefined) {
+      if (!nonEmpty(args.url)) throw new SessionToolError('config_error', 'url must be a non-empty string when present')
+      body['url'] = args.url
+    }
+    if (args.note !== undefined) {
+      if (!nonEmpty(args.note)) throw new SessionToolError('config_error', 'note must be a non-empty string when present')
+      body['note'] = args.note
+    }
+    if (args.skip !== undefined) {
+      if (typeof args.skip !== 'boolean') throw new SessionToolError('config_error', 'skip must be a boolean when present')
+      body['skip'] = args.skip
+    }
+    const response = await this.request(state, body)
+    return this.driveResult(state, 'drive_command', response)
+  }
+
+  /** drive_status：只读回显（url/步数/咨询数/未决交接/证据目录；不推进驾驶）。 */
+  private async driveStatusOp(state: SessionState): Promise<SessionToolResult> {
+    const response = await this.request(state, { type: 'driveStatus' })
+    return this.driveResult(state, 'drive_status', response)
+  }
+
+  /** drive_close：收尾驾驶面（宿主浏览器归 session 所有，不在这里关闭）。 */
+  private async driveCloseOp(state: SessionState): Promise<SessionToolResult> {
+    const response = await this.request(state, { type: 'driveClose' })
+    return this.driveResult(state, 'drive_close', response)
+  }
+
+  /**
+   * 驾驶结果有界投影：白名单字段（status/stop_code/url/steps/model_asks/out_dir/attached +
+   * 有界 handoff/events）；**不回**池/候选/槽值/完整 DOM。引擎 ok:false 走既有 engineFailure
+   * （失败形状与其它会话 op 同源，session 继续存活）。
+   */
+  private driveResult(state: SessionState, op: string, response: Record<string, unknown>): SessionToolResult {
+    const ok = response['ok'] === true
+    const out: SessionToolResult = ok
+      ? { ok: true, op, session_id: state.id }
+      : { ...this.engineFailure(response, op), op, session_id: state.id }
+    // 驾驶面白名单（t7 契约：pilot/attached/status/.../terminal/active/closed/cmd/outcome）。
+    for (const key of ['status', 'stop_code', 'steps', 'model_asks', 'out_dir', 'cmd', 'outcome'] as const) {
+      const v = response[key]
+      if (typeof v === 'string' || typeof v === 'number') out[key] = v
+    }
+    for (const key of ['pilot', 'attached', 'terminal', 'active', 'closed'] as const) {
+      if (response[key] === true || response[key] === false) out[key] = response[key]
+    }
+    if (typeof response['url'] === 'string' && response['url'] !== '') {
+      out['url'] = response['url']
+      state.url = response['url']   // 驾驶换页后桥侧记账（list/失败回退）保持真实
+    }
+    const handoff = this.driveHandoff(response['handoff'] ?? response['handoff_open'])
+    if (handoff !== undefined) out['handoff'] = handoff
+    const command = this.driveCommandSummary(response['command'])
+    if (command !== undefined) out['command'] = command
+    const summary = this.driveSummary(response['summary'])
+    if (summary !== undefined) out['summary'] = summary
+    const events = this.driveEvents(response['events'])
+    if (events !== undefined) out['events'] = events
+    return out
+  }
+
+  /** 交接块有界投影（step_id/stop_code/summary/url/≤3 条解锁建议/证据路径）。 */
+  private driveHandoff(raw: unknown): Record<string, unknown> | undefined {
+    if (!isObj(raw)) return undefined
+    const out: Record<string, unknown> = {}
+    if (typeof raw['step_id'] === 'number') out['step_id'] = raw['step_id']
+    if (typeof raw['stop_code'] === 'string') out['stop_code'] = raw['stop_code']
+    if (typeof raw['url'] === 'string') out['url'] = clip(raw['url'], 300)
+    const why = isObj(raw['why_stuck']) ? raw['why_stuck'] : undefined
+    if (why !== undefined && typeof why['summary'] === 'string') out['summary'] = clip(why['summary'], 300)
+    if (Array.isArray(raw['what_would_unblock'])) {
+      out['what_would_unblock'] = raw['what_would_unblock']
+        .filter((x): x is string => typeof x === 'string')
+        .slice(0, 3)
+        .map((s) => clip(s, 200))
+    }
+    if (isObj(raw['evidence_refs'])) {
+      const refs: Record<string, unknown> = {}
+      for (const k of ['screenshot', 'dom', 'pool_snapshot', 'observe'] as const) {
+        if (typeof raw['evidence_refs'][k] === 'string') refs[k] = raw['evidence_refs'][k]
+      }
+      if (Object.keys(refs).length > 0) out['evidence_refs'] = refs
+    }
+    return Object.keys(out).length > 0 ? out : undefined
+  }
+
+  /** drive_command 的单行回执（command_result/error）有界投影：ok/code/reason + 少量事实键。 */
+  private driveCommandSummary(raw: unknown): Record<string, unknown> | undefined {
+    if (!isObj(raw)) return undefined
+    const out: Record<string, unknown> = {}
+    if (raw['ok'] === true || raw['ok'] === false) out['ok'] = raw['ok']
+    if (typeof raw['code'] === 'string') out['code'] = clip(raw['code'], 60)
+    if (typeof raw['reason'] === 'string') out['reason'] = clip(raw['reason'], 300)
+    for (const k of ['resumed', 'skipped', 'closed'] as const) {
+      if (raw[k] === true || raw[k] === false) out[k] = raw[k]
+    }
+    return Object.keys(out).length > 0 ? out : undefined
+  }
+
+  /** driveClose 的 pilot_end 摘要（有界白名单；不回落盘路径以外的敏感键）。 */
+  private driveSummary(raw: unknown): Record<string, unknown> | undefined {
+    if (!isObj(raw)) return undefined
+    const out: Record<string, unknown> = {}
+    for (const k of ['ok', 'pilot', 'attached', 'driver', 'stop_code', 'aborted'] as const) {
+      const v = raw[k]
+      if (v === true || v === false || typeof v === 'string') out[k] = typeof v === 'string' ? clip(v, 60) : v
+    }
+    for (const k of ['steps', 'max_steps', 'model_asks', 'rule_picks', 'model_picks', 'handoffs', 'fallbacks'] as const) {
+      if (typeof raw[k] === 'number') out[k] = raw[k]
+    }
+    for (const k of ['url', 'out_dir'] as const) {
+      if (typeof raw[k] === 'string') out[k] = clip(raw[k], 300)
+    }
+    return Object.keys(out).length > 0 ? out : undefined
+  }
+
+  /** 驾驶事件有界投影（≤20 条；每字段 clip；不回池/候选/DOM）。 */
+  private driveEvents(raw: unknown): Array<Record<string, unknown>> | undefined {
+    if (!Array.isArray(raw)) return undefined
+    return raw.slice(0, 20).map((entry) => {
+      const e = isObj(entry) ? entry : {}
+      const out: Record<string, unknown> = {}
+      if (typeof e['type'] === 'string') out['type'] = clip(e['type'], 40)
+      if (typeof e['step'] === 'number') out['step'] = e['step']
+      if (typeof e['stop_code'] === 'string') out['stop_code'] = clip(e['stop_code'], 40)
+      if (typeof e['op'] === 'string') out['op'] = clip(e['op'], 20)
+      if (typeof e['target'] === 'string') out['target'] = clip(e['target'], 120)
+      if (e['ok'] === true || e['ok'] === false) out['ok'] = e['ok']
+      if (e['changed'] === true || e['changed'] === false) out['changed'] = e['changed']
+      if (typeof e['url'] === 'string') out['url'] = clip(e['url'], 300)
+      if (typeof e['conf'] === 'number') out['conf'] = e['conf']
+      return out
+    })
   }
 
   private async closeSessionOp(state: SessionState): Promise<SessionToolResult> {

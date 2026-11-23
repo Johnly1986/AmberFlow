@@ -28,10 +28,39 @@ function usage(): number {
   return 2;
 }
 
+/**
+ * 本机 chromium 进程数。win32 走 `tasklist`，其它平台走 `ps`（见下方两个分支）。
+ * 枚举失败返回 -1：调用方按结构化错误处理，**不静默当 0**（静默 0 会让残留检查变成假绿）。
+ */
 function chromeCount(): number {
+  return process.platform === "win32" ? chromeCountWindows() : chromeCountPosix();
+}
+
+/** win32：原枚举路径（逻辑/输出/失败语义保持不变）。 */
+function chromeCountWindows(): number {
   const r = spawnSync("tasklist", ["/FI", "IMAGENAME eq chrome.exe", "/FO", "CSV", "/NH"], { encoding: "utf8", timeout: 15_000 });
   if (r.status !== 0) return -1;
   return r.stdout.split("\n").filter((line) => line.toLowerCase().includes("chrome.exe")).length;
+}
+
+/**
+ * Linux/macOS：`ps -e -o pid=,comm=,args=` 枚举，按 `chrom(e|ium)`（大小写不敏感）过滤
+ * Playwright/Chromium 进程，按 pid 去重计数；本进程（本 lane 自己的 node）不计入。
+ * ps 不可用/非零退出 → -1（与 win32 分支同一失败语义，由 main 报"枚举失败"）。
+ */
+function chromeCountPosix(): number {
+  const r = spawnSync("ps", ["-e", "-o", "pid=,comm=,args="], { encoding: "utf8", timeout: 15_000 });
+  if (r.status !== 0 || typeof r.stdout !== "string") return -1;
+  const chromium = /chrom(e|ium)/i;
+  const pids = new Set<number>();
+  for (const line of r.stdout.split("\n")) {
+    const m = /^\s*(\d+)\s+(.*)$/.exec(line);
+    if (m === null) continue;
+    const pid = Number(m[1]);
+    if (pid === process.pid) continue;
+    if (chromium.test(m[2]!)) pids.add(pid);
+  }
+  return pids.size;
 }
 
 /** 等本地静态服务起来的夹具页（只有这一个文件需要被会话打开）。 */
@@ -137,7 +166,7 @@ async function main(argv: string[]): Promise<number> {
   const problems: string[] = [];
   try {
     const baseline = chromeCount();
-    if (baseline < 0) { console.error("verify-session-close: chromium 进程枚举失败（tasklist 不可用）"); return 1; }
+    if (baseline < 0) { console.error(`verify-session-close: chromium 进程枚举失败（${process.platform === "win32" ? "tasklist" : "ps"} 不可用）`); return 1; }
     // C1：连续 loops 次 open/close——进程数每次回基线（BACKLOG §14 验收本体）。
     for (let i = 1; i <= loops; i++) {
       const r = await runCliForm(server.origin, "close");

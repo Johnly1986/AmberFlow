@@ -12,7 +12,7 @@
 高效规划六步法 v2.1（走查先行）
 目标：先用引擎按真实步序走通一遍，再写正式应用；禁止先写完整应用再反复修。
 ① inspect 先看：`amber inspect --url <页> --json`。hint_candidates 有候选就照抄；核对目标 op 在 `amber schema ctx --topic commands` 能力面内，且词面真的在池里（probe/DOM 命中 ≠ hint 可命中）。
-② 全流程走查：四选一——探针链（每步 1 步微型应用 arrive+read，30 秒判定可达/登录/风控/数据在 DOM）、plan 面草稿（plan new → plan add --signal → plan check --probe → plan run）、walk 模式（`amber run <id> --walk`：同页不重导航、SPA 状态跨步保持，跨页仍导航）。模型驾驶走查（`amber pilot`：决策模型逐步投票驾驶 + 停因交接 Agent 兜底，规则档先行零模型）；走通后 `amber pilot export --record` 还原 app.mjs 骨架，只出骨架不归纳 done。必须带出五样：能力墙（哪步走不通、停因是什么）、产品事实（真实文案/控件/URL 规律）、提槽清单（随任务变化的值 → meta.slots）、done 素材（动作前后页面形态）、绕行决策（换入口/来源/控件族；不绕反爬，早停）。
+② 全流程走查：四选一——探针链（每步 1 步微型应用 arrive+read，30 秒判定可达/登录/风控/数据在 DOM）、plan 面草稿（plan new → plan add --signal → plan check --probe → plan run）、walk 模式（`amber run <id> --walk`：同页不重导航、SPA 状态跨步保持，跨页仍导航）。模型驾驶走查（`amber session` 的 drive 系列 op：决策模型逐步投票驾驶 + 停因交接 Agent 兜底，规则档先行零模型）；走通后 `amber session export --record` 还原 app.mjs 骨架，只出骨架不归纳 done。必须带出五样：能力墙（哪步走不通、停因是什么）、产品事实（真实文案/控件/URL 规律）、提槽清单（随任务变化的值 → meta.slots）、done 素材（动作前后页面形态）、绕行决策（换入口/来源/控件族；不绕反爬，早停）。
 ③ 规划应用：done 四形态——正向锚（url_*/css_*）、否定配 exists（裸 not 在空池或重渲染瞬间会空洞成立，必须配 exists）、多动作后判（第一击是中间态，不算完成）、状态前进自检（信号随页面真前进，不是恒真）。值只认 slot（缺值如实 needs_value，不猜）；虚拟列表按视口采样，长流程分块，多源双腿互核。候选窗口有界：每步 40（宽扫 120），按当前视口分桶；要穷举用 ctx.scrollList/ctx.expand 分块（各计 1 步，expand 内点击不占预算；范围控件用 ctx.setRange），引擎不自动滚动；hint 用完整 label（≤200）匹配，aria-label 是 label 别名；回退主内容优先排序在 meta.policy 写 candidate_priority:"main-first"。
 ④ 落地应用：单段/单城 + slots，1 步 flow；早停守卫（凭据/验证不可得，或命中反爬风控 → ctx.fail("blocked:…")）+ meta.policy.done_timeout_ms；`amber apps check <id> --slot k=v` 离线验分支，改掉两条信号 lint（裸 not / any 含 not(exists)）再进 ⑤。
 ⑤ 真跑留证：`amber run <id> --trace`。失败先看 stopCode/reason（reason 自带池快照判别与决策源降级原因）；再看 executed/changed、skipped_actions、done_preheld——done=true 但零执行时先查跳过原因，别把「信号本来就成立」当成动作推进；被 kill 时看 run-killed.json 部分证据。
@@ -54,24 +54,25 @@
   快速串步：`plan check --probe` 是只读预检（实况核对 hint 解析与验证步信号，不执行动作），
   `plan run` 才真执行。
 
-- **模型驾驶走查（`amber pilot`，第四种）**：`amber pilot --url <入口页> --goal "<一句话>"
-  [--final-signal '<JSON>'] [--max-steps N] [--expect-url <URL 子串>] [--record <轨迹>]`——
-  决策模型逐步投票驾驶（规则档先行零模型、低置信先宽扫重问，与 run 同序），停因时投影四件套
-  交接（截图/DOM/池快照/observe）+ 确定性解锁建议，等 Agent 兜底（闭集：`resume`（hint 点名
-  零模型 / `value{k:v}` 显式给值 / `skip` 禁选上一票）/ `redirect` / `finish` / `abort`）；
-  `--driver agent` 是零模型对照臂（每步等 Agent 点名）。适合目标明确、交互步多的走查。
+- **模型驾驶走查（`amber session` 的 drive 系列 op，第四种）**：
+  `amber session --url <入口页> --input <requests.jsonl>`，请求
+  `{"type":"drive","goal":"<一句话>","final_signal":…,"max_steps":N,"expect_url":"…","driver":"model"|"agent"}`
+  起飞——决策模型逐步投票驾驶（规则档先行零模型、低置信先宽扫重问，与 run 同序），停因时
+  `drive` 响应带 `handoff`（四件套证据路径 + 确定性解锁建议），等 Agent 用
+  `{"type":"driveCommand","cmd":"resume","hint":…}` 兜底（闭集 resume/redirect/finish/abort）；
+  `driver:"agent"` 是零模型对照臂（每步等 Agent 点名）。**同一会话现场**：停驶后可直接
+  `observe/act/read` 人工补步再 resume（登录态/滚动/输入值保持）。适合目标明确、交互步多的走查。
   **边界**：产物带 `pilot:true`，走查通过 ≠ 应用通过（正式结论只能来自生成的 app.mjs 走
   `amber run`）；`finish` 必须带信号并经 `checkSignal` 验证；危险词面动作确定性拒绝
   （`risk_declined`，兜底闭集无 confirm 可越过）；被拒指令 = 单行失败不杀会话；**跨 frame
-  站点**（应用菜单/内嵌搜索框等）要把宿主 frame 的 origin 写进 `--hosts`（pilot 的 hosts
-  信封同时管导航与 frame 准入，缺了即池内无该 frame 元素/动作报 `target_not_found`；交接
-  证据会给 `frames_excluded` 与"把 origin 加入 hosts"的解锁建议）；**页面漂移**用
-  `--expect-url <稳定路径片段>` 守卫——当前 URL 不含它即停 `off_task_page`，不继续在漂移页
-  上烧预算。驾驶问句带 `当前页` 与 `已执行: <label>[changed|no_change|failed]` 步史，模型能
-  看出 no-op 点击没有推进。**闭环**：`--record` 驾驶轨迹 → `amber pilot export --record
-  <轨迹> --id <app>` 骨架 → `amber apps check` → 补 done/slot → `amber run`（export 只出骨架，
-  done 是占位符）。协议/交接块契约见 `docs/AGENT_INTERFACE.md` §3.3；桥面 one-shot
-  `amberflow_pilot` 同源（重建桥包后生效）；验收矩阵 `npm run verify:pilot`（非门禁，§3.2）。
+  站点**（应用菜单/内嵌搜索框等）要把宿主 frame 的 origin 写进 `--host`/`hosts`（drive 的
+  hosts 信封同时管导航与 frame 准入，缺了即池内无该 frame 元素/动作报 `target_not_found`；
+  交接证据会给 `frames_excluded` 与"把 origin 加入 hosts"的解锁建议）；**页面漂移**用
+  `expect_url` 守卫——当前 URL 不含它即停 `off_task_page`，不继续在漂移页上烧预算。驾驶问句带
+  `当前页` 与 `已执行: <label>[changed|no_change|failed]` 步史，模型能看出 no-op 点击没有推进。
+  **闭环**：会话 `--record` 轨迹 → `amber session export --record <轨迹> --id <app>` 骨架 →
+  `amber apps check` → 补 done/slot → `amber run`（export 只出骨架，done 是占位符）。协议/交接块
+  契约见 `docs/AGENT_INTERFACE.md` §3.3；验收矩阵 `npm run verify:pilot`（非门禁，§3.2）。
 
 **walk 模式（A6，调试旗标，默认关）**：`amber run <id> --walk --trace` 让一个临时 flow 应用在
 **一次 run 内**按真实步序 act→read→act→read 串完整流程，用于本节的走查与失败取证。与默认模式的

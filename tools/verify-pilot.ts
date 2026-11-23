@@ -26,6 +26,7 @@ import os from "node:os";
 import path from "node:path";
 import { PilotRuntime, type PilotSink } from "../src/app/pilot-runtime.ts";
 import { drivingGoalText, unblockHintsFor, type PilotOptions } from "../src/app/pilot-contract.ts";
+import { browserSession } from "../src/engine/executor.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
 const FIXTURES = path.join(REPO, "fixtures", "engine", "pilot");
@@ -111,12 +112,16 @@ async function scenarioArrival(origin: string): Promise<void> {
     assert.equal(drives[0]["picked_by"], "rule", "zero-model rule pick");
     assert.equal(drives[0]["ok"], true);
     assert.ok(String(drives[0]["url"]).includes("detail.html"), "navigation happened");
+    const started = events.find((e) => e["type"] === "started");
+    assert.ok(started !== undefined, "started line exists");
+    assert.equal("attached" in started!, false, "the non-attach path keeps its old shape (no attached key)");
     await rt.finish(null);
     const end = events.find((e) => e["type"] === "pilot_end");
     assert.ok(end !== undefined, "single terminal line exists");
     assert.equal(end!["ok"], true);
     assert.equal(end!["stop_code"], "final_signal_held");
     assert.equal(end!["model_asks"], 0, "no model ask on the rules path");
+    assert.equal("attached" in end!, false, "the non-attach summary keeps its old shape (attached only in attach mode)");
   } finally {
     await rt.closeBrowser();
   }
@@ -468,6 +473,82 @@ async function scenarioFrameExcluded(origin: string): Promise<void> {
   }
 }
 
+/**
+ * attach seam（宿主会话内托管 pilot 的前置缝）：注入会话 + 跳过启动导航 + 不关闭宿主浏览器。
+ * 断言三件事：started 带 attached:true 且**没有重新导航**；驾驶跑在注入的同一 page 上并到达
+ * final_signal；`closeBrowser()`（ownsSession:false）后宿主 page 仍可 evaluate。
+ */
+async function scenarioAttachSession(origin: string): Promise<void> {
+  const env = laneEnv();
+  const session = await browserSession(true);
+  try {
+    const homeUrl = `${origin}/home.html`;
+    await session.page.goto(homeUrl, { waitUntil: "domcontentloaded" });
+    // 非附着路径的起步导航唯一入口是 page.goto：计数即「没有重新导航」的直接证据
+    // （点击导航由执行器发出，不经过这个方法）。
+    const page = session.page;
+    const realGoto = page.goto.bind(page);
+    let gotoCalls = 0;
+    page.goto = async (...args: Parameters<typeof realGoto>) => {
+      gotoCalls += 1;
+      return await realGoto(...args);
+    };
+
+    const events: SinkEvent[] = [];
+    const sink: PilotSink = { respond: (obj) => { events.push(obj as SinkEvent); } };
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "af-verify-pilot-out-"));
+    const rt = new PilotRuntime({
+      url: homeUrl, goal: "Open the detail page",
+      finalSignal: { url_contains: "detail.html" }, maxSteps: 3,
+      sessionFactory: async () => session, ownsSession: false, skipStartNavigation: true,
+      env, outDir,
+    }, sink);
+    await rt.start();
+    const started = events.find((e) => e["type"] === "started");
+    assert.ok(started !== undefined, "attach start emits started");
+    assert.equal(started!["ok"], true, "the attached page is inside the hosts envelope");
+    assert.equal(started!["attached"], true, "started marks the attach mode");
+    assert.equal(started!["url"], homeUrl, "started reports the host page as-is");
+    assert.equal(gotoCalls, 0, "attach start must not navigate");
+    assert.equal(await rt.page(), page, "pilot drives the injected session page");
+    const stop = await rt.drive();
+    assert.equal(stop, "final_signal_held", "driving the attached page reaches the declared signal");
+    const drives = drivesOf(events);
+    assert.equal(drives.length, 1, "one driving step on the host page");
+    assert.equal(drives[0]!["picked_by"], "rule", "zero-model rule pick");
+    assert.ok(String(drives[0]!["url"]).includes("detail.html"), "the click navigated the host page");
+    assert.equal(gotoCalls, 0, "driving uses page controls, never a fresh start navigation");
+    await rt.finish(null);
+    const end = events.find((e) => e["type"] === "pilot_end");
+    assert.ok(end !== undefined, "single terminal line exists");
+    assert.equal(end!["attached"], true, "terminal summary carries attached (additive)");
+    assert.equal(end!["stop_code"], "final_signal_held");
+    await rt.closeBrowser();
+    const title = await page.evaluate(
+      () => (globalThis as unknown as { document: { title: string } }).document.title,
+    );
+    assert.ok(typeof title === "string" && title.includes("pilot"), "host page survives rt.closeBrowser()");
+
+    // 信封不合规的附着 = 结构化 config_error（不抛裸栈、不驾驶）；宿主页仍存活。
+    const badEvents: SinkEvent[] = [];
+    const badRt = new PilotRuntime({
+      url: homeUrl, goal: "Open the detail page", hosts: ["not-the-host.invalid"],
+      sessionFactory: async () => session, ownsSession: false, skipStartNavigation: true,
+      env, outDir,
+    }, { respond: (obj) => { badEvents.push(obj as SinkEvent); } });
+    await badRt.start();
+    const badStarted = badEvents.find((e) => e["type"] === "started");
+    assert.ok(badStarted !== undefined, "attach start is always a structured line");
+    assert.equal(badStarted!["ok"], false);
+    assert.equal(badStarted!["code"], "config_error", "an out-of-envelope attach page is a config error, not a throw");
+    assert.equal("attached" in badStarted!, false, "a failed start does not claim the attach mode");
+    assert.equal(await badRt.drive(), null, "a config error ends the driving loop before any action");
+    assert.equal(gotoCalls, 0, "a failed attach start must not navigate either");
+  } finally {
+    await session.close();
+  }
+}
+
 const SCENARIOS: Array<[string, (origin: string) => Promise<void>]> = [
   ["arrival(rules 零模型到达)", scenarioArrival],
   ["needs_value→resume 值+点名", scenarioNeedsValue],
@@ -484,6 +565,7 @@ const SCENARIOS: Array<[string, (origin: string) => Promise<void>]> = [
   ["驾驶上文：已执行+outcome/当前页/期望页", scenarioContextText],
   ["任务页漂移→off_task_page", scenarioOffTaskPage],
   ["frame 排除→显式证据+加入 hosts 建议", scenarioFrameExcluded],
+  ["attach：注入会话+跳过导航+不关宿主", scenarioAttachSession],
 ];
 
 async function main(): Promise<number> {

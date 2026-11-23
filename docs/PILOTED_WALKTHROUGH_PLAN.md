@@ -73,13 +73,11 @@ run 面的**决策语句步**（`ctx.step(goal, { done })`，无 `act`）早已�
 
 验收：交接块字段冻结；四件套内容与停驶页一致；缺省路径产物逐字节不变。
 
-### PW2：`amber pilot` 最小驾驶循环（MVP）
+### PW2：pilot 最小驾驶循环（MVP；CLI 入口已移除）
 
-```bash
-amber pilot --url https://example.org/list --goal "找到第一条详情的标题" \
-  [--final-signal SPEC] [--max-steps N] [--slots k=v …] \
-  [--input requests.jsonl]        # 非 TTY 兜底剧本（对齐 session 先例）
-```
+> 2026-11-23 起 `amber pilot` CLI 已移除。等价入口：`amber session` 的
+> `drive`/`driveCommand`/`driveStatus`/`driveClose` 请求（同一 session 子进程/同一 page；
+> 详见 `docs/AGENT_INTERFACE.md` §3.3）。下列装配/驾驶循环描述保留为协议设计记录。
 
 **装配**（全走既有缝，不新写决策面）：
 
@@ -127,11 +125,12 @@ amber pilot --url https://example.org/list --goal "找到第一条详情的标�
 
 ### PW3：闭环——轨迹导出 + 桥面 + 消融对比
 
-1. `amber pilot export`：驾驶轨迹 → `app.mjs` flow 骨架（衔接 `session-export.ts` 先例：
+1. `amber session export`：会话 `--record` 轨迹 → `app.mjs` flow 骨架（衔接 `session-export.ts` 先例：
    只出骨架；驾驶步的 before/after 可喂 `signal-induction.ts` 归纳候选 done——归纳结果
    是**候选**，落盘前照 learn 纪律复现验证，没把握返回 manual 而不是猜）。
-2. 桥面 `amberflow_pilot`：驾驶启动 + 兜底指令透传（桥契约「拼 CLI、解析 envelope、
-   有界摘要」三件事不变；schema 走 `run-args-contract` 生成链）。
+2. ~~桥面 `amberflow_pilot`~~（已被替代）：agent 侧驾驶经 `amberflow_session` 的
+   `drive/drive_command/drive_status/drive_close` op（同一 session 子进程/同一 page）；原
+   one-shot 工具因独立会话无登录态已移除。
 3. 消融对比：`--driver agent|model` 同一走查任务双臂（消融臂 `--ablate` 先例），产出
    操作数 / 模型咨询数 / 墙钟 / 到达率实测报告——**作为 PW2→PW3 的价值验证门**。
 
@@ -199,16 +198,17 @@ amber pilot --url https://example.org/list --goal "找到第一条详情的标�
 
 ## 7. 落地索引（2026-11-19 实施记录）
 
-PW1+PW2+PW3 已落地（`amber pilot` / `amber pilot export` 可用），文件与方案的对应：
+PW1–PW3 已落地；**CLI 入口 `amber pilot`/`amber pilot export` 已于 2026-11-23 移除**
+（agent 面经 `amberflow_session` 的 drive 系列 op；驾驶协议保留在引擎库面），文件与方案的对应：
 
 | 件 | 文件 | 说明 |
 |---|---|---|
 | 契约 | `src/app/pilot-contract.ts` | 停因闭集（8 码）/ 兜底指令闭集（4 指令）/ `PilotHandoff` 交接块 / 轨迹行类型 / 选项面与解锁建议查表 |
 | 驾驶运行时 | `src/app/pilot-runtime.ts` | `PilotRuntime`：抽池 → resume-hint 确定性执行 → 规则档先行 → `pickProposal` 闭集投票 → 闸门 → `actOnce` 执行 → inert/信号判定；决策源装配与 run 同序列（`resolveProviderSpec` → `applySpecToRuntime`） |
-| 入口编排 | `src/app/pilot-entry.ts` | `runPilot`：起飞 → 驾驶轮 ↔ 兜底等待（stdin 每轮 / `--input` 文件整段只开一次）→ 收尾退出码 |
-| CLI | `src/cli/commands/pilot.ts` | flags 解析 + `export` 子动词；`src/cli/main.ts` 分派、`registry.ts` 帮助、`help-map.ts` 何时用 |
+| 入口编排 | ~~`src/app/pilot-entry.ts`~~ | **2026-11-23 移除**（agent 面经 `amberflow_session` 的 drive 系列 op；引擎库面由 `PilotRuntime` 直接驱动） |
+| CLI | ~~`src/cli/commands/pilot.ts`~~ | **2026-11-23 移除**；等价入口是 `amber session` 的 `drive/driveCommand/driveStatus/driveClose` 请求 |
 | 工厂 | `src/app/middleware-factory.ts` | `MiddlewareFace` 加 `"pilot"`；`FACE_POLICY.pilot = "default-deny"`（与 session 同档） |
-| 导出 | `src/app/pilot-export.ts` | 驾驶轨迹 → app.mjs 骨架（`picked_by` 来源标记 + handoff 注释保留；done 占位符同 session export） |
+| 导出 | ~~`src/app/pilot-export.ts`~~ | **2026-11-23 移除**；轨迹→骨架改用 `amber session export`（同 `session-export.ts` 产出形状） |
 
 端到端冒烟（books.toscrape.com 实测）：起飞 → 模型低置信如实交接（截图 + observe 落盘）→
 Agent `resume` 带 hint 点名 → 规则档确定性点击（零模型）→ `final_signal_held` → exit 0；
@@ -258,7 +258,9 @@ hybrid 到达但比纯 agent 更贵（3 次咨询 + 3 个浪费步 + 1 条兜底
 `commands` 兜底剧本物化 ≤200 行走 `--input`；`timeout_sec` 桥侧墙钟，超时写
 `pilot-killed.json`）。桥层回归 `npm run bridge:test` 10/10（fake-engine 场景 + 真实
 `pilotArgs` 断言 + 剧本透传核对），真引擎端到端冒烟 exit 0。交互式常驻驾驶（跨调用保持
-现场、逐交接喂指令）仍属后续批次。
+现场、逐交接喂指令）**已由「session 子进程托管 pilot」落地**：`amberflow_session` 的
+`drive/drive_command/drive_status/drive_close` op（同一 page、pilot:true/attached:true，
+详见 AGENT_INTERFACE §3.3）。
 
 **2026-11-20 部署面补齐 + 真实线上端到端**：桥包 `tsc -b` 构建通过（`lib` 产物含
 `pilot.js` 与 `amberflow_pilot` 注册——部署按 lib 加载，此前 lib 缺 pilot 即工具不可见
@@ -278,6 +280,6 @@ confirmFn）——改为 `DESTRUCTIVE_PATTERNS` 关键词闭集前置判定（�
 `risk_declined` 结构化失败 + 禁选；**resume-hint 撞歧义静默回落**——改为裁决视图
 （hintMatch）为 null 且候选 >1 时 `target_ambiguous` 只停不选（与 run/session 同一谓词）。
 
-尚未落地（后续批次）：交互式常驻桥面驾驶（跨调用同现场、逐交接喂指令）；BACKLOG §16/§17
-两枚能力墙（访问循环守卫；budget 后兜底死局的 redirect 预算语义拍板）。`--driver` 双臂、
+尚未落地（后续批次）：BACKLOG §16/§17 两枚能力墙（访问循环守卫；budget 后兜底死局的
+redirect 预算语义拍板）。`--driver` 双臂、
 消融实测、桥面 one-shot 与 §3.2 验收矩阵均已落地（见上）。

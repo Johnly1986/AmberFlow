@@ -14,6 +14,9 @@
  * 只有 `final_signal_held` 是 pilot 收尾语义（正因，不是失败）。
  */
 import { SESSION_IDLE_TIMEOUT_MS } from "../support/tuning.ts";
+// 会话注入 seam 的类型面走 type-only import：契约叶子不得因这一字段把执行器/决策/浏览器
+// 那一串运行期模块拖进加载图（pilot-contract 被 CLI/导出面单独加载时也要能零副作用）。
+import type { BrowserSession } from "../engine/executor.ts";
 
 /** 驾驶停止原因闭集（引擎既有停因码 + pilot 收尾正因）。 */
 export const PILOT_STOP_CODES = [
@@ -163,6 +166,17 @@ export interface PilotOptions {
   headful?: boolean;
   verbose?: boolean;
   quiet?: boolean;
+  /**
+   * **attach 会话注入 seam（内部；CLI 无对应 flag）**：由宿主提供已存在的浏览器会话，
+   * pilot 在宿主页面上驾驶而不是自建浏览器。三字段共同表达 attach 模式；全缺省 = 既有
+   * 一次性 pilot（自建会话 → 导航入口页 → 自己关浏览器）行为逐字节不变。
+   */
+  /** 注入会话工厂：给了就直接用（不打印 starting browser、不承担启动失败语义）。 */
+  sessionFactory?: () => Promise<BrowserSession>;
+  /** 浏览器所有权：false = 宿主拥有（`closeBrowser()` no-op）；缺省 true。 */
+  ownsSession?: boolean;
+  /** 起步导航：true = 不 goto / 不 settle，直接驾驶当前页；缺省 false。 */
+  skipStartNavigation?: boolean;
   env?: NodeJS.ProcessEnv;
 }
 

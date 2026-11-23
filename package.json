@@ -78,6 +78,7 @@
     "verify:runtime:offline:record": "node --experimental-strip-types tools/verify-runtime-offline.ts --record",
     "site-knowledge:check": "node --experimental-strip-types tools/site-knowledge-check.ts",
     "verify:pilot": "node --experimental-strip-types tools/verify-pilot.ts",
+    "verify:parity": "node --experimental-strip-types tools/verify-parity.ts",
     "verify:decision-characterization": "node --experimental-strip-types tools/verify-decision-characterization.ts",
     "verify:model-face": "node --experimental-strip-types tools/verify-model-face.ts"
   },

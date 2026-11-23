@@ -302,51 +302,6 @@ amber session export --record <轨迹文件> [--out <app.mjs|目录>] [--id <app
     related: ["inspect", "apps", "run"],
   },
   {
-    name: "pilot",
-    summary: "模型驾驶走查：决策模型逐步投票驾驶，停因交接时 Agent 兜底（产物带 pilot:true）",
-    when: whenOf("pilot"),
-    flow: [
-      "amber pilot --url <入口页> --goal \"<一句话>\" 起飞：规则档先行（零模型）→ 池内闭集投票 → 执行",
-      "停因（low_confidence/target_ambiguous/needs_value/stuck_inert/budget_exceeded/no_model_runtime）投影 handoff：四件套落盘（截图/DOM/池快照/observe）+ 解锁建议闭集",
-      "stdin 发兜底指令：resume（hint 点名零模型/value{k:v} 给值/skip 禁选上一票）| redirect（换 url 或 goal，步史清段）| finish（带 signal，checkSignal 验证）| abort；被拒 = 单行失败不杀会话",
-      "完成只认信号：--final-signal 每轮判、finish 声明后验证，成立才记 final_signal_held = exit 0；产物不冒充 run 结论",
-    ],
-    usage: `amber pilot --url <入口页> --goal "<一句话总目标>"
-             [--host HOST]... [--hosts h1,h2] [--final-signal '<JSON>']
-             [--max-steps N] [--conf-floor F] [--expect-url <子串>] [--slot k=v]...
-             [--input <指令文件>] [--out <目录>] [--record <轨迹文件>]
-             [--idle-timeout-ms N] [--headful]
-amber pilot export --record <轨迹文件> [--out <app.mjs|目录>] [--id <appId>]
-                    [--goal "<一句话>"] [--host HOST]... [--force] [--json]`,
-    examples: [
-      'amber pilot --url https://books.toscrape.com/ --goal "打开第一个商品的详情页" --max-steps 8',
-      "amber pilot --url https://the-internet.herokuapp.com/login --goal \"登录\" --slot username=tomsmith --slot password=SuperSecretPassword! --final-signal '{\"url_contains\":\"/secure\"}'",
-      "amber pilot --url https://books.toscrape.com/ --goal \"翻到第 2 页\" --record ./.amberflow/pilot/books.jsonl",
-      "amber pilot export --record ./.amberflow/pilot/books.jsonl --id books-piloted",
-    ],
-    flags: [
-      "--url <入口页>             必填。起飞时自动打开（hosts 信封缺省由它推断）",
-      "--goal \"<一句话>\"          必填。总目标；驾驶问句的底座（模型只投票选元素，不生成动作）",
-      "--host HOST               允许的主机信封；可重复（缺省从 --url 推断）。redirect 受同一信封约束",
-      "--hosts h1,h2             同上，逗号表形式",
-      "--final-signal '<JSON>'   完成信号声明（如 '{\"url_contains\":\"/success\"}'）。缺省 = 无信号收尾：预算内推进、连续无变化即停",
-      "--max-steps N             驾驶步预算（缺省 12，上限 200）。预算用尽 = budget_exceeded 交接",
-      "--conf-floor F            置信闸门覆盖（优先级：本旗标 > provider 自报 floor > 0.25；[0,1]）。低于闸门先宽扫重问一次，仍低才 low_confidence 交接",
-      "--expect-url <子串>       任务页 URL 子串（缺省不判）。每轮驾驶前当前 URL 不含它 → 确定性停 off_task_page 并交接；用于页面漂移（如 /maps 漂到 /preferences）",
-      "--slot k=v                预声明槽位值（可重复）：fill/select 决策步的值袋；两袋都落空 = needs_value 停，绝不猜",
-      "--input <文件>            兜底指令从文件逐行读（Agent 自动化剧本），而不是 stdin",
-      "--out <目录>              证据落点（缺省 $AMBERFLOW_HOME/pilot/<runId>）；handoff 四件套（截图/DOM/池快照/observe）写这里",
-      "--record <文件>           驾驶轨迹 JSONL（drive/handoff/command 三类行；PW3 export 的输入）",
-      "--idle-timeout-ms N       交接后无人兜底的静默上限（缺省 300000；0 = 不限）；超时干净收尾并 exit 3",
-      "--headful                 显示浏览器窗口（缺省 headless）",
-      "--driver model|agent      驾驶者（缺省 model）。agent = 消融对照臂：每步投影 step_request 候选（含 hint_candidates），等 resume{hint} 点名，零模型票",
-      "协议：stdout 每行 started/drive/handoff/command_result/pilot_end（终态一条；摘要含 model_asks/rule_picks/model_picks/handoffs/fallbacks，laya 档加 cache 命中）；stdin 每行 {\"cmd\":\"resume|redirect|finish|abort\",...}（finish 需 signal 或预声明 --final-signal）",
-      "退出码：0 = final_signal_held；1 = browser_dead；3 = 被停因挡住（含 abort/idle 超时）",
-      "pilot export：--record 驾驶轨迹 → app.mjs 骨架（picked_by 来源标记 + handoff 注释；done 未归纳，占位符待补）",
-    ],
-    related: ["session", "inspect", "run", "doctor"],
-  },
-  {
     name: "schema",
     summary: "引擎语义契约（Agent 无源码自描述面：facts/signals/hints/commands/budget/…）",
     when: whenOf("schema"),

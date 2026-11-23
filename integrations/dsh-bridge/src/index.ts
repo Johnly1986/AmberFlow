@@ -39,7 +39,7 @@ import {
   createService, type AmberFlowRunArgs, type AmberFlowService,
 } from './service.ts'
 import {
-  PILOT_TOOL_FIELDS, PILOT_TOOL_PARAMETERS, RUN_BRIDGE_MESSAGES, RUN_TOOL_FIELDS, RUN_TOOL_PARAMETERS,
+  RUN_BRIDGE_MESSAGES, RUN_TOOL_FIELDS, RUN_TOOL_PARAMETERS,
 } from './run-contract.generated.ts'
 // 语法/规划引导/概述层生成物（勿手改）：唯一出处是引擎的 grammar-prompt.ts、
 // planning-playbook.ts 与 help-map.ts，这里只收字符串（桥不 import 引擎代码）；
@@ -48,7 +48,6 @@ import { HINT_LEARN_NOTE, OVERVIEW_TEXT, PLAN_PLAYBOOK_SHORT, STOP_ESCALATION_TE
 import {
   DEFAULT_MAX_SESSIONS, DEFAULT_SESSION_IDLE_MS, handleSessionTool, SessionManager, type SessionToolArgs,
 } from './session.ts'
-import { runPilotBridge, type AmberFlowPilotArgs } from './pilot.ts'
 
 /**
  * C1：会话结果的模型可见渲染只给有界行数（完整形状在结构化 value 里，模型看不到）。
@@ -660,120 +659,6 @@ export function apply(ctx: Context, config: Config): void {
     },
   }))
 
-  // ---------- `amberflow_pilot`（PILOTED_WALKTHROUGH §PW3.2）：模型驾驶走查的一次性调用 ------
-  // 桥契约三件事不变：拼 CLI（pilotArgs）、收 JSONL 协议流、投影有界摘要；停因/指令闭集、
-  // 信号验证、危险 default-deny 全部留在引擎 CLI。commands（兜底剧本）与 timeout_sec 不是
-  // 引擎旗标（剧本物化走 --input、墙钟是桥侧 spawn 策略），在工具面手写声明。
-  ctx.tools.register(defineTool({
-    name: `${toolPrefix}_pilot`,
-    description:
-      'Run one model-driven walkthrough of a live page: the decision model votes each step, the engine '
-        + 'executes and verifies signals. Rule layer first (zero model); on a stop cause the engine projects '
-        + 'a handoff with four-piece evidence and deterministic unblock hints, and `commands` is a fallback '
-        + 'playbook consumed line by line at those pauses (resume|redirect|finish|abort, engine-verified; a '
-        + 'rejected line is a single-line failure). The summary is walkthrough evidence (a `pilot` face, '
-        + 'never a run verdict). Use `*_run` for frozen apps; `*_session` to drive each step yourself.',
-    parameters: PILOT_TOOL_PARAMETERS,
-    output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          status: { type: 'string', required: true },
-          ok: { type: 'boolean', required: true },
-          stop_code: { type: 'string' },
-          steps: { type: 'integer', required: true },
-          model_asks: { type: 'integer' },
-          rule_picks: { type: 'integer' },
-          model_picks: { type: 'integer' },
-          handoffs: { type: 'integer' },
-          fallbacks: { type: 'integer' },
-          driver: { type: 'string' },
-          failed_asks: { type: 'integer' },
-          cache: {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              hits: { type: 'integer', required: true },
-              misses: { type: 'integer', required: true },
-            },
-          },
-          url: { type: 'string' },
-          out_dir: { type: 'string', required: true },
-          timed_out: { type: 'boolean', required: true },
-          exit_code: { type: 'integer' },
-          events: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
-          handoffs_detail: { type: 'array', items: { type: 'object', additionalProperties: true } },
-          events_truncated: { type: 'integer' },
-          notes: { type: 'array', items: { type: 'string' } },
-          end_code: { type: 'string' },
-          stdout_tail: { type: 'string', required: true },
-        },
-      },
-      render: (_args, value) => [{
-        type: 'text',
-        text: `PILOT ${value.status.toUpperCase()}`
-          + (value.stop_code ? ` (${value.stop_code})` : '')
-          + ` — steps ${String(value.steps)}`
-          + (value.model_asks ? `, asks ${String(value.model_asks)}` : '')
-          + (value.handoffs ? `, handoffs ${String(value.handoffs)}` : '')
-          + (value.fallbacks ? `, fallbacks ${String(value.fallbacks)}` : '')
-          + (value.driver === 'agent' ? ', driver agent' : '')
-          + (value.url ? `; at ${value.url}` : '')
-          + `; out ${value.out_dir}`,
-      }],
-    },
-    async execute(args) {
-      // Tool parameter → camelCase comes from the shared pilot contract; only the slot bag needs its
-      // own collection step (array of `k=v` → record) because the engine CLI takes repeated flags.
-      const slots = new Map<string, string>()
-      for (const entry of (args as { slots?: string[] }).slots ?? []) {
-        const at = entry.indexOf('=')
-        if (at <= 0) {
-          throw new Error(fillArgMessage(RUN_BRIDGE_MESSAGES.slotFormat, { value: JSON.stringify(entry) }))
-        }
-        const key = entry.slice(0, at)
-        // The CLI treats a repeated slot as a usage error; catching it here keeps the bridge from
-        // silently dropping the first value before the CLI ever sees the duplicate.
-        if (slots.has(key)) {
-          throw new Error(fillArgMessage(RUN_BRIDGE_MESSAGES.slotDuplicate, { value: JSON.stringify(key) }))
-        }
-        slots.set(key, entry.slice(at + 1))
-      }
-      const pilotValues: Record<string, unknown> = {}
-      for (const field of PILOT_TOOL_FIELDS) {
-        const value = (args as unknown as Readonly<Record<string, unknown>>)[field.param]
-        if (value === undefined) continue
-        pilotValues[field.key] = field.collect === 'slots' ? Object.fromEntries(slots) : value
-      }
-      const summary = await runPilotBridge(options, pilotValues as unknown as AmberFlowPilotArgs)
-      return {
-        status: summary.status,
-        ok: summary.ok,
-        ...(summary.stop_code === null ? {} : { stop_code: summary.stop_code }),
-        steps: summary.steps,
-        ...(summary.model_asks === null ? {} : { model_asks: summary.model_asks }),
-        ...(summary.rule_picks === null ? {} : { rule_picks: summary.rule_picks }),
-        ...(summary.model_picks === null ? {} : { model_picks: summary.model_picks }),
-        ...(summary.handoffs === null ? {} : { handoffs: summary.handoffs }),
-        ...(summary.fallbacks === null ? {} : { fallbacks: summary.fallbacks }),
-        ...(summary.driver === undefined ? {} : { driver: summary.driver }),
-        ...(summary.failed_asks === undefined ? {} : { failed_asks: summary.failed_asks }),
-        ...(summary.cache === undefined ? {} : { cache: summary.cache }),
-        ...(summary.url === undefined ? {} : { url: summary.url }),
-        out_dir: summary.out_dir,
-        timed_out: summary.timed_out,
-        ...(summary.exit_code === null ? {} : { exit_code: summary.exit_code }),
-        events: summary.events,
-        ...(summary.handoffs_detail === undefined ? {} : { handoffs_detail: summary.handoffs_detail }),
-        ...(summary.events_truncated === undefined ? {} : { events_truncated: summary.events_truncated }),
-        ...(summary.notes === undefined ? {} : { notes: summary.notes }),
-        ...(summary.end_code === undefined ? {} : { end_code: summary.end_code }),
-        stdout_tail: summary.stdout_tail,
-      }
-    },
-  }))
-
   const appDetailSchema = {
     type: 'object' as const,
     additionalProperties: false,
@@ -1197,16 +1082,21 @@ export function apply(ctx: Context, config: Config): void {
         + 'one failing step; `*_inspect` is the one-shot read and `*_run` is completion truth: this tool '
         + 'never judges completion. `observe` returns verified hint candidates; `act` needs an explicit '
         + '`value`. Errors return `{ok:false, code, reason}` and keep the session alive. Sessions expire '
-        + 'after an idle TTL.',
+        + 'after an idle TTL. `drive` ops run the pilot in this session\'s page (same browser, no '
+        + 're-navigation; state kept); evidence carries `pilot:true`/`attached:true`, never a run verdict.',
     parameters: {
       op: {
         type: 'string', required: true,
-        enum: ['open', 'goto', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'close', 'list'],
+        enum: ['open', 'goto', 'observe', 'act', 'read', 'extract', 'signal', 'wait_for', 'snapshot', 'tab', 'drive', 'drive_command', 'drive_status', 'drive_close', 'close', 'list'],
         description: 'Operation to run; `open` creates a session and returns `session_id`; `goto` navigates the '
           + 'current tab within the declared hosts envelope.',
       },
       session_id: { type: 'string', description: 'Session id returned by `open`; required for every op except `open` and `list`.' },
-      url: { type: 'string', description: 'open/goto: entry page (http(s) only; checkout-relative paths are rejected).' },
+      url: {
+        type: 'string',
+        description: 'open/goto: entry page (http(s) only; checkout-relative paths are rejected). '
+          + 'drive_command `redirect`/`finish` may also carry a URL.',
+      },
       hosts: {
         type: 'array', items: { type: 'string' },
         description: 'open: navigation envelope; same semantics as `meta.hosts` (defaults to the URL host).',
@@ -1243,7 +1133,11 @@ export function apply(ctx: Context, config: Config): void {
           + 'Reports `resolved_via:"rehydrate-rescan"` on hit; otherwise keeps the original stop code. Prefer '
           + '`wait_for` anchoring when authoring.',
       },
-      value: { type: 'string', description: 'act `fill`/`select`: the value to type or select; explicit only, never invented.' },
+      value: {
+        type: 'string',
+        description: 'act `fill`/`select`: the value to type or select; drive_command `resume`: the value the driver '
+          + 'should type. Explicit only, never invented.',
+      },
       to: {
         type: 'string', enum: ['bottom', 'top', 'page'],
         description: 'act `scroll`: scroll the target\'s scrollable container to `bottom` or `top`, or use `page` for '
@@ -1309,6 +1203,43 @@ export function apply(ctx: Context, config: Config): void {
           + 'least one is required. Missing, empty, 0 or more than 1 matches return `config_error`; a tab '
           + 'outside the declared hosts envelope returns `host_not_allowed` and is not activated.',
       },
+      goal: { type: 'string', description: 'drive: one-line goal for the pilot driver (same meaning as `engine pilot protocol goal`).' },
+      final_signal: {
+        type: 'object', additionalProperties: true,
+        description: 'drive: optional completion signal (same signal language as run done / pilot final-signal).',
+      },
+      max_steps: { type: 'integer', description: 'drive: driving-step budget 1..200 (default: engine default).' },
+      conf_floor: { type: 'number', description: 'drive: confidence floor in [0,1] (default: engine/provider floor).' },
+      expect_url: {
+        type: 'string',
+        description: 'drive: expected URL substring; when the current URL does not contain it the driver stops with '
+          + '`off_task_page` (deterministic, no model call).',
+      },
+      driver: {
+        type: 'string', enum: ['model', 'agent'],
+        description: 'drive: decision driver — `model` votes each step (default) or `agent` waits for a '
+          + '`drive_command` `resume{hint}` per step (zero model calls).',
+      },
+      slots: {
+        type: 'object', additionalProperties: true,
+        description: 'drive: slot values `{name: "value"}`; values only come from the caller (never invented).',
+      },
+      cmd: {
+        type: 'string', enum: ['resume', 'redirect', 'finish', 'abort'],
+        description: 'drive_command: fallback instruction (closed set). `resume` continues after a handoff '
+          + '(hint/value/skip), `redirect` changes the goal/URL, `finish` closes with a signal check, `abort` ends '
+          + 'the walkthrough.',
+      },
+      hint: {
+        type: 'string',
+        description: 'drive_command `resume`: name a sharper target (a unique hit runs deterministically, no model call).',
+      },
+      skip: {
+        type: 'boolean',
+        description: 'drive_command `resume`: add the last picked target to the skip set and continue without naming '
+          + 'a replacement.',
+      },
+      note: { type: 'string', description: 'drive_command: short note recorded with the instruction (e.g. why finishing).' },
       idle_timeout_ms: {
         type: 'integer',
         description: 'open: per-session idle TTL in milliseconds. Omit for the deployment default; `0` means '
@@ -1514,6 +1445,25 @@ function renderSessionResult(value: Record<string, unknown>): string {
         + `\nsnapshot: ${String(value.snapshot_file ?? '')}`
         + `\npool: ${String(value.pool_file ?? '')}`
         + (value.screenshot_file === undefined ? '' : `\nscreenshot: ${String(value.screenshot_file)}`)
+    case 'drive':
+    case 'drive_command':
+    case 'drive_status':
+    case 'drive_close': {
+      const status = String(value.status ?? value.stop_code ?? '?')
+      const h = typeof value.handoff === 'object' && value.handoff !== null
+        ? value.handoff as Record<string, unknown>
+        : undefined
+      const unlock = h !== undefined && Array.isArray(h.what_would_unblock)
+        ? h.what_would_unblock.filter((x): x is string => typeof x === 'string').slice(0, 3)
+        : []
+      return `${tag}: ${status}`
+        + (value.url === undefined ? '' : `\nurl: ${String(value.url)}`)
+        + (value.steps === undefined ? '' : `\nsteps: ${String(value.steps)}`)
+        + (value.model_asks === undefined ? '' : ` model_asks: ${String(value.model_asks)}`)
+        + (h !== undefined && h.summary !== undefined ? `\nhandoff: ${String(h.summary)}` : '')
+        + (unlock.length > 0 ? `\nunblock: ${unlock.join(' | ')}` : '')
+        + (value.out_dir === undefined ? '' : `\nevidence: ${String(value.out_dir)}`)
+    }
     case 'tab': {
       const sw = typeof value.switched === 'object' && value.switched !== null
         ? value.switched as Record<string, unknown>

@@ -103,6 +103,8 @@ export class PilotRuntime implements PilotCommandTarget {
   private readonly checkpointId: string;
   /** 发起方声明的任务页 URL 子串（null = 不判；见 PilotOptions.expectUrl）。 */
   private readonly expectUrl: string | null;
+  /** 附着模式（内部 seam）：驾驶宿主已打开的页面，不重新导航。started 与终态摘要都带 attached。 */
+  private readonly attached: boolean;
   /** 最近一轮被 hosts 信封排除的子 frame（交接证据与解锁建议用；每轮重算）。 */
   private excludedFrames: Array<{ origin: string; index: number }> = [];
   /** 决策源装配结果（结束摘要的 asks/cache 取数口；装配失败 = null，摘要走本面计数兜底）。 */
@@ -149,6 +151,7 @@ export class PilotRuntime implements PilotCommandTarget {
     this.driverMode = opts.driver === "agent" ? "agent" : "model";
     this.expectUrl = typeof opts.expectUrl === "string" && opts.expectUrl.trim() !== ""
       ? opts.expectUrl.trim() : null;
+    this.attached = opts.skipStartNavigation === true;
     try {
       this.checkpointId = resolveLocalCheckpoint(opts.env ?? process.env);
     } catch {
@@ -212,8 +215,13 @@ export class PilotRuntime implements PilotCommandTarget {
 
   private async ensureSession(): Promise<BrowserSession> {
     if (this.session === null) {
-      this.log(`starting ${this.opts.headful === true ? "headful" : "headless"} browser`);
-      this.session = await browserSession(this.opts.headful !== true, null, null, null);
+      // 注入会话 = 宿主已经起好浏览器：不打印启动行，也不把启动失败算成 pilot 的导航失败。
+      if (this.opts.sessionFactory !== undefined) {
+        this.session = await this.opts.sessionFactory();
+      } else {
+        this.log(`starting ${this.opts.headful === true ? "headful" : "headless"} browser`);
+        this.session = await browserSession(this.opts.headful !== true, null, null, null);
+      }
     }
     return this.session;
   }
@@ -254,7 +262,7 @@ export class PilotRuntime implements PilotCommandTarget {
   /**
    * 被 hosts 信封排除的子 frame（**显式信号**）：动作池按信封排除它们，但现场存在。
    * 交接块把它投影成结构化证据 + 解锁建议，避免把「目标在未声明 iframe 内」误判成
-   * 「模型选不准」（Google 九宫格 = ogs.google.com 跨源 iframe 的实测教训）。
+   * 「模型选不准」（Google 九宫格 = ogs.google.com 跨源 iframe 的走查实测）。
    * 有界（≤6 帧）且只读；取不到 = 空数组（不掩盖停因）。
    */
   private frameExclusions(page: AnyPage): Array<{ origin: string; index: number }> {
@@ -577,6 +585,11 @@ export class PilotRuntime implements PilotCommandTarget {
       this.log(`决策源装配失败（继续以 rules-only 探路）：${errMsg(e)}`);
     }
 
+    if (this.attached) {
+      await this.startAttached();
+      return;
+    }
+
     try {
       const page = await this.page();
       const bad = disallowedHost(this.opts.url, this.hosts ?? undefined);
@@ -595,6 +608,40 @@ export class PilotRuntime implements PilotCommandTarget {
       this.sink.respond({ type: "started", ok: false, code: "browser_dead", reason: errMsg(e) });
       return;
     }
+  }
+
+  /**
+   * 附着起步（attach seam）：宿主已打开页面——不导航、不 settle，只校验当前页在 hosts
+   * 信封内后如实发 `started(attached)`。越界 = 结构化 `config_error` 且不再驾驶：动作/导航
+   * 守卫都会拒绝越界 host，继续只会把配置错误拖成驾驶停因，误导兜底方。
+   */
+  private async startAttached(): Promise<void> {
+    let page: AnyPage;
+    let currentUrl: string;
+    try {
+      page = await this.page();
+      currentUrl = urlOf(page);
+    } catch (e) {
+      this.finished = true;
+      this.stopCode = "browser_dead";
+      this.sink.respond({ type: "started", ok: false, code: "browser_dead", reason: errMsg(e) });
+      return;
+    }
+    const bad = disallowedHost(currentUrl, this.hosts ?? undefined);
+    if (bad !== null) {
+      this.finished = true;
+      this.sink.respond({
+        type: "started", ok: false, code: "config_error",
+        reason: `attached page is outside the hosts envelope: ${bad} (${buf(currentUrl, 120)})`,
+      });
+      return;
+    }
+    this.excludedFrames = this.frameExclusions(page);
+    this.sink.respond({
+      type: "started", ok: true, attached: true, url: currentUrl, out_dir: this.outDir,
+      ...(this.excludedFrames.length === 0 ? {} : { frames_excluded: this.excludedFrames }),
+      ...(this.expectUrl === null ? {} : { expect_url: this.expectUrl }),
+    });
   }
 
   /**
@@ -675,6 +722,7 @@ export class PilotRuntime implements PilotCommandTarget {
       ...(failedAsks !== null && failedAsks > 0 ? { failed_asks: failedAsks } : {}),
       ...(cache !== null ? { cache: { hits: cache.hits, misses: cache.misses } } : {}),
       url: (() => { try { return urlOf(this.session?.page as never); } catch { return ""; } })(),
+      ...(this.attached ? { attached: true } : {}),
       ...(this.expectUrl === null ? {} : { expect_url: this.expectUrl }),
       out_dir: this.outDir,
       ...(note !== null ? { code: note.code, reason: note.reason } : {}),
@@ -689,6 +737,8 @@ export class PilotRuntime implements PilotCommandTarget {
   }
 
   async closeBrowser(): Promise<void> {
+    // 宿主拥有浏览器（attach seam）：pilot 的收尾不得关掉宿主仍在用的会话。
+    if (this.opts.ownsSession === false) return;
     try { await this.session?.close(); } catch { /* 幂等收尾 */ }
   }
 

@@ -21,60 +21,6 @@ trace('started scenario=' + JSON.stringify(scenarioPath))
 const scenario = scenarioPath !== '' ? JSON.parse(fs.readFileSync(scenarioPath, 'utf8')) : {}
 const routes = Array.isArray(scenario.routes) ? scenario.routes : []
 
-// ---- pilot one-shot 分支（`amberflow_pilot` 服务层回归）：--pilot-scenario <name> 下按
-// canned JSONL 协议流打印后退出——不挂 stdin 等待（一次性调用，stdin 由 runProcess 关闭）。
-// 'stop' 场景把收到的 --input 剧本首行回显进 log 行，供透传断言核对物化内容。
-const pilotIdx = process.argv.indexOf('--pilot-scenario')
-if (pilotIdx >= 0) {
-  const name = process.argv[pilotIdx + 1] ?? ''
-  const inputIdx = process.argv.indexOf('--input')
-  const inputPath = inputIdx >= 0 ? process.argv[inputIdx + 1] : ''
-  const out = (obj) => process.stdout.write(JSON.stringify(obj) + '\n')
-  out({ type: 'log', unsolicited: true, line: 'starting headless browser' })
-  out({ type: 'started', ok: true, url: 'https://fixture.local/page', out_dir: '/tmp/fake-pilot' })
-  out({
-    type: 'drive', ok: true, step: 1, picked_by: 'model', op: 'click', target: 'Learn more',
-    ref: 'e0', changed: true, url: 'https://fixture.local/detail', elapsed_ms: 12,
-    conf: 0.9, shape: 'full', pool_size: 3, via: 'ask',
-  })
-  if (name === 'hold') {
-    out({
-      type: 'pilot_end', unsolicited: true, pilot: true, ok: true, stop_code: 'final_signal_held',
-      steps: 1, max_steps: 6, model_asks: 1, rule_picks: 0, model_picks: 1, handoffs: 0, fallbacks: 0,
-      cache: { hits: 0, misses: 2 }, url: 'https://fixture.local/detail', out_dir: '/tmp/fake-pilot',
-    })
-    process.exit(0)
-  }
-  if (name === 'stop') {
-    out({
-      type: 'handoff', unsolicited: true, pilot: true,
-      handoff: {
-        stop_code: 'low_confidence', step_id: 1, goal_digest: 'open the first detail',
-        why_stuck: { summary: 'low_confidence @ step 1 (https://fixture.local/detail)', evidence: { inert_run: 0, forbidden: [] } },
-        what_would_unblock: ['resume 带 hint 点名更精确的目标', 'redirect 换更具体的总目标后重驾驶'],
-        evidence_refs: {
-          screenshot: '/tmp/fake-pilot/handoff-1.png', dom: '/tmp/fake-pilot/handoff-1.dom.html',
-          pool_snapshot: '/tmp/fake-pilot/handoff-1.pool.json', observe: '/tmp/fake-pilot/handoff-1.observe.json',
-        },
-        url: 'https://fixture.local/detail',
-      },
-    })
-    if (inputPath !== '' && fs.existsSync(inputPath)) {
-      const played = fs.readFileSync(inputPath, 'utf8').split('\n').filter((l) => l.trim() !== '')
-      out({ type: 'command_result', ok: true, resumed: true, step: 1 })
-      out({ type: 'log', unsolicited: true, line: 'input=' + String(played[0] ?? '') })
-    }
-    out({
-      type: 'pilot_end', unsolicited: true, pilot: true, ok: false, stop_code: 'low_confidence',
-      steps: 1, max_steps: 6, model_asks: 2, rule_picks: 0, model_picks: 1, handoffs: 1, fallbacks: 1,
-      url: 'https://fixture.local/detail', out_dir: '/tmp/fake-pilot',
-    })
-    process.exit(3)
-  }
-  process.stderr.write('fake-engine: unknown --pilot-scenario ' + JSON.stringify(name) + '\n')
-  process.exit(2)
-}
-
 const matches = (route, req) => {
   if (route.type !== undefined && route.type !== req.type) return false
   if (route.targetIncludes !== undefined && !String(req.target ?? '').includes(route.targetIncludes)) return false

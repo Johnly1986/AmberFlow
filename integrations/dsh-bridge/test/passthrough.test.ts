@@ -20,8 +20,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { SessionManager, handleSessionTool } from '../src/session.ts'
-import { pilotArgs, type BridgeOptions } from '../src/bridge.ts'
-import { runPilotBridge } from '../src/pilot.ts'
+import type { BridgeOptions } from '../src/bridge.ts'
 import type { SessionToolArgs } from '../src/session.ts'
 
 const REPO = path.resolve(import.meta.dirname, '..', '..', '..')
@@ -233,80 +232,108 @@ test('open/goto：基础往返 + engineFailure 投影', async () => {
   })
 })
 
-/* ---- 5. `amberflow_pilot`（PILOTED_WALKTHROUGH §PW3.2）：argv 组装 + JSONL 投影 + 剧本物化 - */
+/* ---- 4.5 `amberflow_session` 的 drive 扩展：与 session 共用同一 page 的 pilot 驾驶 ---- */
 
-/** 桥选项的测试构造（与 session harness 同形；pilot 一次性调用不经 SessionManager）。 */
-function pilotBridgeOptions(): BridgeOptions {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'af-bridge-pilot-'))
-  return {
-    repoPath: dir, nodeBin: process.execPath, timeoutMs: 60_000, allowDangerous: false,
-    toolPrefix: 'amberflow', envMode: 'inherit', forwardEnv: [],
-    decisionModel: { endpoint: '', apiKey: '', model: '' },
-    headful: false, appsEnv: {},
-  } as unknown as BridgeOptions
-}
-
-test('pilot: held 一跑的摘要面（终态字段 + 事件白名单投影）', async () => {
-  const summary = await runPilotBridge(pilotBridgeOptions(), {
-    url: 'https://fixture.local/page', goal: 'open the first detail', finalSignal: '{"url_contains":"detail"}',
-  }, {
-    buildArgv: (options, args) => {
-      // 契约驱动面：先让真实 pilotArgs 组装（断言必填/桥自管旗标都在），再换成 fake 引擎。
-      const real = pilotArgs(options, args)
-      assert.ok(real.includes('--url') && real.includes('--goal') && real.includes('--out'))
-      assert.ok(real.includes('--final-signal'), 'final-signal must be argv-emitted from the contract')
-      assert.ok(!real.includes('--input'), 'no playbook = no --input flag')
-      return [process.execPath, FAKE, '--pilot-scenario', 'hold']
-    },
+test('session drive：参数闭集（goal/max_steps/driver/cmd/conf_floor）', async () => {
+  await withHarness({}, async (h) => {
+    const noGoal = await h.call({ op: 'drive' })
+    assert.equal(noGoal.ok, false)
+    assert.equal(noGoal.code, 'config_error')
+    const badSteps = await h.call({ op: 'drive', goal: 'open detail', max_steps: 0 })
+    assert.equal(badSteps.code, 'config_error')
+    const badDriver = await h.call({ op: 'drive', goal: 'open detail', driver: 'wizard' as never })
+    assert.equal(badDriver.code, 'config_error')
+    const badFloor = await h.call({ op: 'drive', goal: 'open detail', conf_floor: 2 })
+    assert.equal(badFloor.code, 'config_error')
+    const badCmd = await h.call({ op: 'drive_command', cmd: 'fly' as never })
+    assert.equal(badCmd.code, 'config_error')
   })
-  assert.equal(summary.status, 'held')
-  assert.equal(summary.ok, true)
-  assert.equal(summary.stop_code, 'final_signal_held')
-  assert.equal(summary.steps, 1)
-  assert.equal(summary.model_asks, 1)
-  assert.deepEqual(summary.cache, { hits: 0, misses: 2 })
-  assert.equal(summary.events.length, 2)
-  assert.ok(summary.events.some((e) => e['started'] === true))
-  const drive = summary.events.find((e) => e['drive'] === true) as Record<string, unknown>
-  assert.equal(drive['target'], 'Learn more')
-  assert.equal(drive['via'], 'ask')
-  assert.equal(summary.exit_code, 0)
-  assert.equal(summary.timed_out, false)
 })
 
-test('pilot: 停因交接投影 + commands 剧本物化走 --input', async () => {
-  const summary = await runPilotBridge(pilotBridgeOptions(), {
-    url: 'https://fixture.local/page', goal: 'open the first detail',
-    commands: '{"cmd":"resume","hint":"Learn more"}',
-  }, {
-    buildArgv: (options, args) => {
-      const real = pilotArgs(options, args)
-      assert.ok(real.includes('--input'), 'playbook must reach the engine as --input')
-      // 把物化剧本的路径透传给 fake 引擎（真 argv 已断言，fake 消费同一份文件）。
-      const inputPath = real[real.indexOf('--input') + 1]
-      return [process.execPath, FAKE, '--pilot-scenario', 'stop', '--input', inputPath]
-    },
+test('session drive：有界投影（白名单 + handoff/events 裁剪 + 不泄露池/槽值）', async () => {
+  const handoff = {
+    stop_code: 'low_confidence', step_id: 3, url: 'http://fixture.local/page',
+    why_stuck: { summary: 'low_confidence @ step 3 — no clickable candidate', evidence: { inert_run: 0 } },
+    what_would_unblock: ['resume 带 hint 点名', 'redirect 换目标', 'third', 'fourth'],
+    evidence_refs: { screenshot: '/tmp/h3.png', dom: '/tmp/h3.dom.html', pool_snapshot: '/tmp/h3.pool.json', observe: '/tmp/h3.observe.json' },
+    pool: ['LEAK'], candidates: ['LEAK'],
+  }
+  const events = Array.from({ length: 30 }, (_, i) => ({
+    type: 'drive', step: i, op: 'click', target: `t-${i}`, ok: true, changed: i % 2 === 0,
+    url: 'http://fixture.local/page', conf: 0.8, pool: ['LEAK'], candidates: ['LEAK'],
+  }))
+  await withHarness({
+    routes: [{
+      type: 'drive',
+      respond: {
+        ok: true, status: 'handoff', stop_code: 'low_confidence', url: 'http://fixture.local/detail',
+        steps: 3, model_asks: 4, out_dir: '/tmp/pilot-run-1', session_id: 'engine-echo',
+        pilot: true, attached: true, terminal: false,
+        handoff, events, pool: ['LEAK'], candidates: ['LEAK'], slots: { secret: 'LEAK' },
+      },
+    }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive', goal: 'open the first detail', max_steps: 5, driver: 'model', expect_url: '/page' })
+    assert.equal(r.ok, true)
+    assert.equal(r.status, 'handoff')
+    assert.equal(r.stop_code, 'low_confidence')
+    assert.equal(r.url, 'http://fixture.local/detail')
+    assert.equal(r.steps, 3)
+    assert.equal(r.model_asks, 4)
+    assert.equal(r.out_dir, '/tmp/pilot-run-1')
+    assert.equal(r.session_id, h.sid, 'session_id is the join key, not the engine echo')
+    assert.equal(r.op, 'drive')
+    assert.equal(r.pilot, true)
+    assert.equal(r.attached, true)
+    assert.equal(r.terminal, false)
+    const ho = r.handoff as Record<string, unknown>
+    assert.equal(ho.step_id, 3)
+    assert.ok(String(ho.summary).length <= 300)
+    assert.equal((ho.what_would_unblock as string[]).length, 3, 'what_would_unblock capped at 3')
+    assert.ok(!('pool' in ho) && !('candidates' in ho))
+    const ev = r.events as Array<Record<string, unknown>>
+    assert.equal(ev.length, 20, 'events capped at 20')
+    assert.ok(!('pool' in ev[0]!) && !('candidates' in ev[0]!))
+    assert.ok(!('pool' in r) && !('candidates' in r) && !('slots' in r), 'engine extras must not leak')
   })
-  assert.equal(summary.status, 'stopped')
-  assert.equal(summary.stop_code, 'low_confidence')
-  assert.equal(summary.handoffs, 1)
-  assert.equal(summary.fallbacks, 1)
-  const hand = (summary.handoffs_detail ?? [])[0] as Record<string, unknown>
-  assert.equal(hand['stop_code'], 'low_confidence')
-  assert.ok(String(hand['summary']).startsWith('low_confidence @ step 1'))
-  assert.equal((hand['unblock'] as string[]).length, 2)
-  assert.equal((hand['evidence'] as Record<string, unknown>)['dom'], '/tmp/fake-pilot/handoff-1.dom.html')
-  // 剧本物化核对：out_dir 里的 commands.jsonl 逐行原样。
-  const script = fs.readFileSync(path.join(summary.out_dir, 'commands.jsonl'), 'utf8').trim()
-  assert.equal(script, '{"cmd":"resume","hint":"Learn more"}')
-  // 引擎侧对 --input 的消费事实经 log 行回显（notes 白名单投影）。
-  assert.ok((summary.notes ?? []).some((n) => n.includes('input={"cmd":"resume","hint":"Learn more"}')))
-  assert.equal(summary.exit_code, 3)
 })
 
-test('pilot: timeout_sec 防呆（非正整数 = 用法错误，不 spawn）', async () => {
-  await assert.rejects(
-    () => runPilotBridge(pilotBridgeOptions(), { url: 'https://fixture.local/', goal: 'g', timeoutSec: 0 }),
-    /timeout_sec/,
-  )
+test('session drive_command / drive_status / drive_close：闭集与往返', async () => {
+  await withHarness({
+    routes: [
+      { type: 'driveCommand', respond: { ok: true, status: 'final_signal_held', stop_code: 'final_signal_held', url: 'http://fixture.local/detail', steps: 4, model_asks: 5, out_dir: '/tmp/pilot-run-2' } },
+      { type: 'driveStatus', respond: { ok: true, status: 'handoff', url: 'http://fixture.local/detail', steps: 4, model_asks: 5, out_dir: '/tmp/pilot-run-2', pilot: true, attached: true, active: true, terminal: false, handoff_open: { stop_code: 'low_confidence', step_id: 3, why_stuck: { summary: 'x' } } } },
+      { type: 'driveClose', respond: { ok: true, status: 'closed', url: 'http://fixture.local/detail', steps: 4, model_asks: 5, out_dir: '/tmp/pilot-run-2', pilot: true, attached: true, closed: true, summary: { ok: true, pilot: true, stop_code: 'final_signal_held', steps: 4, model_asks: 5, url: 'http://fixture.local/detail', out_dir: '/tmp/pilot-run-2' } } },
+    ],
+  }, async (h) => {
+    const cmd = await h.call({ op: 'drive_command', cmd: 'resume', hint: 'Open the detail page' })
+    assert.equal(cmd.ok, true)
+    assert.equal(cmd.status, 'final_signal_held')
+    const st = await h.call({ op: 'drive_status' })
+    assert.equal(st.ok, true)
+    assert.equal(st.op, 'drive_status')
+    assert.equal(st.steps, 4)
+    assert.equal(st.active, true)
+    assert.equal(st.terminal, false)
+    assert.equal((st.handoff as Record<string, unknown>).stop_code, 'low_confidence')
+    const cl = await h.call({ op: 'drive_close' })
+    assert.equal(cl.ok, true)
+    assert.equal(cl.op, 'drive_close')
+    assert.equal(cl.closed, true)
+    const sm = cl.summary as Record<string, unknown>
+    assert.equal(sm.stop_code, 'final_signal_held')
+    assert.equal(sm.steps, 4)
+  })
+})
+
+test('session drive：引擎失败 = engineFailure 形状（session 继续存活，不泄露池）', async () => {
+  await withHarness({
+    routes: [{ type: 'drive', respond: { ok: false, code: 'config_error', reason: 'attached page outside hosts', session_alive: true, pool: ['LEAK'] } }],
+  }, async (h) => {
+    const r = await h.call({ op: 'drive', goal: 'x' })
+    assert.equal(r.ok, false)
+    assert.equal(r.code, 'config_error')
+    assert.equal(r['session_alive'], true)
+    assert.ok(!('pool' in r) && !('candidates' in r))
+  })
 })
