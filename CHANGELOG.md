@@ -175,6 +175,12 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 - **账本**：门禁 `npm run check` exit 0；冒烟复核：声明信号路径 exit 0、无信号 `finish` 被拒、非 TTY EOF 结构化收尾带停因、`--max-steps 1` 可用、export→`apps check` 闭环仍过。
 - **文档**：AGENT_INTERFACE §3.3 冻结 pilot 驾驶协议（指令形状 + `PilotHandoff` 字段表 + 退出码）；INTERACTIVE_SESSION 加 pilot 划界注记（session 零模型纪律不变）；方案文档头部状态 implemented→partial（PW3 仅 export 落地）+ §7 补修正批记录；`pilot-contract` 注释措辞过 maintain ratchet（历史措辞回到基线）。
 - **账本**：门禁 `npm run check` exit 0；冒烟复核：声明信号路径 exit 0、无信号 `finish` 被拒、非 TTY EOF 结构化收尾带停因、`--max-steps 1` 可用、export→`apps check` 闭环仍过。
+## [Unreleased] — 2026-11-20 F89：懒渲染双指标稳定读缺省化（会话 extract 面）+ 桥透传
+
+- **双指标门缺省开（单循环双读）**：`rowsSettledDual` 改为返回 `{settled, scroll_settled}`——行数 AND 空行数（rowStatsAnyFrame 一次 evaluate 同时拿两个数）与 E5 滚动稳定判定合并成**同一个轮询循环**（600ms × 至多 5 轮；不另起第二个循环，默认化真实成本 ≈ 0：静态页首轮即稳）。`doExtract` 的 `waitSettled` 语义默认化：缺省 / `true`（冗余兼容）= 双门运行、`settled` 恒出现；新增 `false` = 请求级 opt-out（跳过双门回旧 E5 单指标循环，`settled` 缺席——无门无证据绝不谎报稳定）；`settle:"off"` 双门与 E5 同跳。`settled:false` 时 `blank_rows` 以全帧 rowStats 为准。**app 面 ctx.extract 不动**。
+- **桥面透传（F6 教训直接适用）**：extract 响应补 `settled`/`scroll_settled`/`blank_rows`（此前 blank_rows 被桥投影丢弃）+ `wait_settled` 请求参数（缺省不传 = 缺省门；false = opt-out；true = 冗余兼容；非 boolean = config_error）；文本渲染在 `settled:false` 或 `blank_rows>0` 时追加 ≤1 行 `lazy-render:` 提示；AGENT_INTERFACE.md extract 键表同步。
+- **离线锚**：`fixtures/engine/hydrate-delay.html`（`?delay=ms` 参数化——水合在稳定窗口内/窗口外/静态三路径）接入 verify-offline 三个 case（行值 + settled/blank_rows/键存在性；耗时口径不进 golden——静态页 settled:true 即"双门首轮即稳 ≈ 零额外等待"的确定性体现）；bridge:test 增 extract settled 断言两条（缺省透传 + opt-out 缺键 + 非法值 config_error）。
+- **契约与账本**：F89 登记（statement 五条 + truth 全落点）；APP_SCRIPT_AUTHORING 卡点表补懒渲染稳定读条目；baseline session-runtime 1018→1026。门禁：`npm run check` exit 0（15 步含 bridge:test 9/9）；verify:offline 13 夹具两次一致入库；verify:runtime:offline 7 场景 OK。app 面 ctx.extract 零改动；F5 零改动。
 
 ## [Unreleased] — 2026-11-19 BACKLOG §14/§15 收口：会话 close 自收口 + 桥层回归 harness
 

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>hydrate-delay：懒渲染骨架页（?delay=ms）</title></head>
+<body>
+  <!-- F89 懒渲染夹具：骨架行先挂载，内容按 ?delay=ms（缺省 1000）灌入。
+       600ms×5 轮稳定窗口内可见水合（≤~1.5s → 缺省 extract settled:true 且行内有值）；
+       ?delay=3000 = 稳定窗口外才灌（opt-out 观测读到骨架态：空值 + blank_rows>0 如实）；
+       ?delay=0 = 静态页（无定时器，双门首轮即稳 ≈ 零额外等待）。 -->
+  <div id="rows">
+    <div class="h-row"></div>
+    <div class="h-row"></div>
+    <div class="h-row"></div>
+  </div>
+  <script>
+    const delay = Number(new URLSearchParams(location.search).get("delay") || "1000");
+    if (delay > 0) {
+      setTimeout(() => {
+        document.querySelectorAll(".h-row").forEach((el, i) => { el.textContent = "行程 " + (i + 1); });
+      }, delay);
+    }
+  </script>
+</body>
+</html>

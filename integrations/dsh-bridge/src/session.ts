@@ -155,6 +155,11 @@ export interface SessionToolArgs {
   offset?: number
   /** C1：extract save:true = 桥内翻页取全并落盘（每页 ≤500，硬顶 2000 行/4MB）。 */
   save?: boolean
+  /**
+   * F89：extract 稳定读口径（缺省不传 = 双指标缺省门运行，响应恒带 settled；
+   * `false` = 请求级 opt-out 跳过双门，settled 缺键；`true` = 冗余兼容）。
+   */
+  wait_settled?: boolean
   signal?: Record<string, unknown>
   timeout_ms?: number
   max?: number
@@ -1050,11 +1055,17 @@ export class SessionManager {
       })
     }
     const maxItems = Math.max(1, Math.min(EXTRACT_MAX_ROWS, Math.floor(args.max_items ?? EXTRACT_MAX_ROWS)))
+    // F89：wait_settled 请求级口径（true = 冗余兼容 / false = 跳过双指标门 opt-out；
+    // 缺省 = 缺省门运行）。非法值 = config_error，不静默取缺省。
+    if (args.wait_settled !== undefined && typeof args.wait_settled !== 'boolean') {
+      throw new SessionToolError('config_error', `extract wait_settled must be a boolean (got ${JSON.stringify(args.wait_settled)})`)
+    }
     const rows = args.rows
     const fields = args.fields
     const response = await this.request(state, {
       type: 'extract', rows, fields, maxItems,
       ...(offset > 0 ? { offset } : {}),
+      ...(args.wait_settled === undefined ? {} : { waitSettled: args.wait_settled }),
     })
     if (response['ok'] !== true) return this.engineFailure(response, 'extract')
     const page = Array.isArray(response['rows']) ? response['rows'] as Array<Record<string, unknown>> : []
@@ -1065,6 +1076,11 @@ export class SessionManager {
       rows: page.slice(0, EXTRACT_MAX_ROWS),
       count: typeof response['count'] === 'number' ? response['count'] : page.length,
       capped: response['capped'] === true,
+      // F89：稳定读证据（引擎有才有——缺省路径恒带 settled；opt-out/settle-off 缺键）。
+      // blank_rows 恒带（引擎侧本就恒带，此前被本投影丢弃——F6 教训：不透传=白做）。
+      ...(typeof response['blank_rows'] === 'number' ? { blank_rows: response['blank_rows'] } : {}),
+      ...(typeof response['settled'] === 'boolean' ? { settled: response['settled'] } : {}),
+      ...(typeof response['scroll_settled'] === 'boolean' ? { scroll_settled: response['scroll_settled'] } : {}),
       // C1：分页事实只在引擎给的时候透传（capped 或 offset>0 才出现）——旧响应键集逐字节不变。
       ...(typeof response['offset'] === 'number' ? { offset: response['offset'] } : {}),
       ...(typeof response['total'] === 'number' ? { total: response['total'] } : {}),

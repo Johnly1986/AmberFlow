@@ -26,7 +26,7 @@ import type { SessionToolArgs } from '../src/session.ts'
 const REPO = path.resolve(import.meta.dirname, '..', '..', '..')
 const FAKE = path.join(import.meta.dirname, 'fake-engine.cjs')
 
-interface Route { type?: string; targetIncludes?: string; urlIncludes?: string; respond: Record<string, unknown> }
+interface Route { type?: string; targetIncludes?: string; urlIncludes?: string; lineIncludes?: string; respond: Record<string, unknown> }
 interface Scenario { autoOpen?: Record<string, unknown>; routes?: Route[] }
 
 interface Harness {
@@ -335,5 +335,46 @@ test('session drive：引擎失败 = engineFailure 形状（session 继续存活
     assert.equal(r.code, 'config_error')
     assert.equal(r['session_alive'], true)
     assert.ok(!('pool' in r) && !('candidates' in r))
+  })
+})
+
+/* ---- 4.6 extract 稳定读：双指标缺省门证据透传（F89） ---- */
+
+test('extract settled：缺省门证据透传（F89）', async () => {
+  await withHarness({
+    routes: [
+      // 缺省 extract（无 waitSettled 字段）：引擎响应带 settled=false + blank_rows=2（懒渲染骨架）
+      { type: 'extract', lineIncludes: 'extract', respond: {
+        ok: true, rows: [{ name: '' }, { name: '' }], count: 2, capped: false,
+        blank_rows: 2, settled: false, scroll_settled: true,
+      } },
+    ],
+  }, async (h) => {
+    const r = await h.call({ op: 'extract', rows: '.h-row', fields: { name: '.' } })
+    assert.equal(r.ok, true)
+    // F6 教训的直接适用：投影丢键 = 白做——三个键都必须到达桥面
+    assert.equal(r['blank_rows'], 2)
+    assert.equal(r['settled'], false)
+    assert.equal(r['scroll_settled'], true)
+  })
+})
+
+test('extract settled：opt-out 无 settled 键（形状不变）+ 非法值 config_error', async () => {
+  await withHarness({
+    routes: [
+      // opt-out 请求体带 "waitSettled":false：引擎回 opt-out 形状（settled 缺席）
+      { type: 'extract', lineIncludes: '"waitSettled":false', respond: {
+        ok: true, rows: [{ name: '' }], count: 1, capped: false, blank_rows: 1, scroll_settled: true,
+      } },
+    ],
+  }, async (h) => {
+    const r = await h.call({ op: 'extract', rows: '.h-row', fields: { name: '.' }, wait_settled: false })
+    assert.equal(r.ok, true)
+    assert.ok(!('settled' in r), 'opt-out = no gate = no settled key (never claim stability without evidence)')
+    assert.equal(r['blank_rows'], 1)
+    assert.equal(r['scroll_settled'], true)
+    const bad = await h.call({ op: 'extract', rows: '.h-row', fields: { name: '.' }, wait_settled: 'yes' as unknown as boolean })
+    assert.equal(bad.ok, false)
+    assert.equal(bad.code, 'config_error')
   })
 })

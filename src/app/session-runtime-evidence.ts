@@ -224,15 +224,19 @@ export async function rowsSettled(
 }
 
 /**
- * S2：rows 选择器的**双指标**稳定判定——行数与空行数（`rowStatsAnyFrame`，一次
- * evaluate 同时拿两个数）连续 2 轮相等即稳定。空行数单独盯：懒渲染页的行数
- * 可以先稳定（骨架节点已挂载）而内容还在灌——只看行数会提前放行，代理只能
- * 用重复 extract 轮询把这笔税交出去。窗口与 E5 同款（600ms × 至多 5 轮）；
- * 读不到（替身页/帧全失联）= 稳定（让 extract 本体去报结构化结果，这里不抢答）。
+ * 懒渲染稳定读（双指标缺省门）：rows 选择器的**双指标**稳定判定（会话 extract 缺省门）——行数与空行数
+ * （`rowStatsAnyFrame`，一次 evaluate 同时拿两个数）连续 2 轮相等即稳定；返回值同时
+ * 携带 E5 口径的滚动稳定事实（rows 曾在窗口内出现连续相等 = `scroll_settled:true`，
+ * 与 `rowsSettled` 同判据、不早退——blank 还在变时循环继续，rows 的稳定事实照记）。
+ * 单循环双读：双门与 E5 共用同一轮询，不另起第二个循环（默认化的真实成本 ≈ 0）。
+ * 空行数单独盯：懒渲染页的行数可以先稳定（骨架节点已挂载）而内容还在灌——只看行数
+ * 会提前放行，代理只能用重复 extract 轮询把这笔税交出去。窗口与 E5 同款（600ms ×
+ * 至多 5 轮）；读不到（替身页/帧全失联）= 稳定（让 extract 本体去报结构化结果，这里
+ * 不抢答）。超窗 = `{settled:false, …}` 如实回——抽取照常发生，不无界等。
  */
 export async function rowsSettledDual(
   page: () => Promise<PageLike>, hosts: string[] | null, rowsSel: string,
-): Promise<boolean> {
+): Promise<{ settled: boolean; scroll_settled: boolean }> {
   const read = async (): Promise<{ rows: number; blank: number } | null> => {
     try {
       return await rowStatsAnyFrame(await page(), rowsSel,
@@ -242,15 +246,18 @@ export async function rowsSettledDual(
     }
   };
   let prev = await read();
-  if (prev === null) return true;
+  if (prev === null) return { settled: true, scroll_settled: true };
+  let rowsEverStable = false;
   for (let round = 0; round < 4; round++) {
     await sleepMs(600);
     const now = await read();
-    if (now === null) return true;
-    if (now.rows === prev.rows && now.blank === prev.blank) return true;
+    if (now === null) return { settled: true, scroll_settled: true };
+    const rowsStable = now.rows === prev.rows;
+    rowsEverStable = rowsEverStable || rowsStable;
+    if (rowsStable && now.blank === prev.blank) return { settled: true, scroll_settled: true };
     prev = now;
   }
-  return false;
+  return { settled: false, scroll_settled: rowsEverStable };
 }
 
 /**

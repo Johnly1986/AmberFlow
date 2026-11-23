@@ -21,10 +21,11 @@ trace('started scenario=' + JSON.stringify(scenarioPath))
 const scenario = scenarioPath !== '' ? JSON.parse(fs.readFileSync(scenarioPath, 'utf8')) : {}
 const routes = Array.isArray(scenario.routes) ? scenario.routes : []
 
-const matches = (route, req) => {
+const matches = (route, req, line) => {
   if (route.type !== undefined && route.type !== req.type) return false
   if (route.targetIncludes !== undefined && !String(req.target ?? '').includes(route.targetIncludes)) return false
   if (route.urlIncludes !== undefined && !String(req.url ?? '').includes(route.urlIncludes)) return false
+  if (route.lineIncludes !== undefined && !String(line).includes(route.lineIncludes)) return false
   return true
 }
 
@@ -44,7 +45,7 @@ process.stdin.on('data', (chunk) => {
     if (line === '') continue
     let req
     try { req = JSON.parse(line) } catch { continue }
-    const route = routes.find((r) => matches(r, req))
+    const route = routes.find((r) => matches(r, req, line))
     if (route !== undefined) reply(req, route.respond)
     else reply(req, { ok: true })
   }

@@ -22,11 +22,14 @@
  */
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { browserSession } from "../src/engine/executor.ts";
 import { type ElemPool, type PageLike, windowAudit } from "../src/engine/extraction.ts";
 import { extractElements } from "../src/app/candidate-scan.ts";
 import { hintCandidates, hintMatch } from "../src/engine/rules.ts";
+import { SessionRuntime } from "../src/app/session-runtime.ts";
+import type { SessionSink } from "../src/app/session-runtime-contract.ts";
 import type { AnyPage } from "../src/engine/executor-types.ts";
 
 const REPO = path.resolve(import.meta.dirname, "..");
@@ -324,7 +327,57 @@ const CASES: ObservationCase[] = [
       return { ...out, center_hit: await ctx.page.evaluate(CENTER_HIT_EXPR) };
     },
   },
+  {
+    name: "hydrate-delay-default",
+    // F89 缺省门：水合在稳定窗口内 → 双门等出水合（settled:true）且行内有值。
+    run: async (ctx) => await observeSessionExtract(ctx, "?delay=1000", {}),
+  },
+  {
+    name: "hydrate-delay-optout",
+    // F89 opt-out（请求级 waitSettled:false）：跳过双门 → 骨架态如实（空值 + blank_rows>0
+    // + settled 缺席——无门无证据，绝不谎报稳定）。
+    run: async (ctx) => await observeSessionExtract(ctx, "?delay=3000", { waitSettled: false }),
+  },
+  {
+    name: "hydrate-delay-static",
+    // F89 静态页：双门首轮即稳 ≈ 零额外等待（settled:true，耗时口径与 E5 同量级）。
+    run: async (ctx) => await observeSessionExtract(ctx, "?delay=0", {}),
+  },
 ];
+
+/**
+ * 懒渲染稳定读（会话 extract 缺省门）夹具观测：起一个**独立** SessionRuntime（自带浏览器，
+ * 与池观测的 browserSession 互不影响）驱动会话 extract——这是 F89 的消费面（会话 extract 面；
+ * app 面 ctx.extract 不在本批范围）。断言钉住三件事：
+ *   - 缺省路径（?delay=1000，水合在稳定窗口内）：行内有值 + settled:true；
+ *   - opt-out（?delay=3000，水合在窗口外）：空值 + blank_rows>0 + settled 缺席（无门无证据）；
+ *   - 静态页（?delay=0）：settled:true（双门首轮即稳 ≈ 零额外等待，耗时口径与 E5 同量级）。
+ * golden 只钉确定性事实（行值/键/布尔），不钉耗时。
+ */
+async function observeSessionExtract(ctx: ObservationContext, query: string, req: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "af-verify-extract-"));
+  const sink: SessionSink = { respond: () => {}, log: () => {} };
+  const runtime = new SessionRuntime(
+    { url: `${ctx.origin}/hydrate-delay.html${query}`, outDir, quiet: true, env: process.env },
+    sink,
+  );
+  const dispatch = (runtime as unknown as { dispatch(req: Record<string, unknown>): Promise<Record<string, unknown>> }).dispatch.bind(runtime);
+  try {
+    await dispatch({ type: "open", url: `${ctx.origin}/hydrate-delay.html${query}` });
+    const r = await dispatch({ type: "extract", rows: ".h-row", fields: { name: "." }, ...req });
+    const rows = Array.isArray(r["rows"]) ? r["rows"] as Array<Record<string, unknown>> : [];
+    return {
+      count: r["count"],
+      first_row: rows[0] ?? null,
+      blank_rows: r["blank_rows"],
+      has_settled: "settled" in r,
+      settled: r["settled"],
+      scroll_settled: r["scroll_settled"],
+    };
+  } finally {
+    await dispatch({ type: "close" });
+  }
+}
 
 /** 跑全部夹具：返回 `{ case名: 观测 }` + 外部请求清单。 */
 async function observeAll(origin: string, page: AnyPage): Promise<{ observations: Record<string, unknown>; external: string[] }> {

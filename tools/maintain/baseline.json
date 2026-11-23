@@ -6,7 +6,7 @@
     "phaseFunctionMaxLines": 400,
     "files": {
       "src/engine/executor.ts": 2833,
-      "src/app/session-runtime.ts": 1018,
+      "src/app/session-runtime.ts": 1026,
       "src/app/app-adapters.ts": 988,
       "src/engine/executor-pure.ts": 938,
       "src/cli/commands/apps.ts": 880,

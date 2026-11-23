@@ -1,0 +1,16 @@
+{
+  "_doc": "verify-offline 基线（tools/verify-offline.ts，非门禁）：本地静态夹具 + 无头 chromium 的确定性观测。页面/代码变化后显式 --record 更新；端口已归一为 <LOCAL>，不得手改。",
+  "expected": {
+    "blank_rows": 3,
+    "count": 3,
+    "external_requests": [],
+    "first_row": {
+      "name": ""
+    },
+    "has_settled": true,
+    "scroll_settled": true,
+    "settled": true
+  },
+  "fixture": "hydrate-delay-static",
+  "schema_version": 1
+}

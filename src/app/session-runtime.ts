@@ -730,27 +730,33 @@ export class SessionRuntime {
       };
     }
     const offset = typeof rawOffset === "number" ? rawOffset : 0;
-    // S2：`waitSettled:true`（显式 opt-in）= 双指标稳定门（行数与空行数连续两轮相等）。
-    // 缺省不出现 = 既有 E5 滚动稳定判定照旧，键集与行为逐字节不变。
-    if (req["waitSettled"] !== undefined && req["waitSettled"] !== true) {
-      return { ok: false, code: "config_error", reason: `extract.waitSettled must be true when present (got ${JSON.stringify(req["waitSettled"])})` };
+    // 懒渲染稳定读（双指标缺省门）：`waitSettled` 语义默认化——双指标稳定门（行数 AND 空行数）
+    // **缺省运行**，与 E5
+    // 合并成同一个轮询循环（rowStatsAnyFrame 一次 evaluate 同时拿两个数，不另起第二个循环）：
+    //   - 缺省 / waitSettled:true（冗余兼容）：单循环双读，rows+blank 连续 2 轮相等 = 稳定
+    //     （静态页首轮即稳 ≈ 零额外等待）；`settled` 恒出现（additive 登记）；
+    //   - waitSettled:false = 请求级 opt-out：跳过双门，回到今天的 E5 单指标循环；
+    //     `settled` 不出现（无门无证据，绝不谎报稳定）；
+    //   - settle:"off"：双门与 E5 同跳（两键都不出现，键集与今天 settle-off 一致）。
+    // 超窗如实回 `settled:false`——抽取照常发生（读到的就是此刻事实），不无界等。
+    if (req["waitSettled"] !== undefined && typeof req["waitSettled"] !== "boolean") {
+      return { ok: false, code: "config_error", reason: `extract.waitSettled must be a boolean (got ${JSON.stringify(req["waitSettled"])})` };
     }
-    const wantSettled = req["waitSettled"] === true;
-    this.extractStats.total = 0;
-    // E5：**滚动稳定判定**（缺省开；`settle:"off"` 跳过）。懒加载列表在抽行前可能还在
-    // 增长——直接抽会把"截断"错报成"就这么多"。两次连读 rows 命中数相等 = 稳定；最多
-    // 等一个有界窗口（600ms 间隔 × 5 轮），超窗如实回 `scroll_settled:false`（不静默放行，
-    // 也不无界等）。观察面 additive：判定不动抽取语义，只多回一个证据字段。
     const settleOff = this.settleDisabled();
-    let scrollSettled = true;
-    if (!settleOff) {
-      scrollSettled = await rowsSettled(() => this.page(), String(rows));
-    }
-    // S2：稳定读（只在显式 opt-in 时发生）。行数与空行数双指标连续 2 轮相等才算稳定；
-    // 超窗如实回 `settled:false`——抽取照常发生（读到的就是此刻事实），不静默放行也不无界等。
+    const dualGateOn = !settleOff && req["waitSettled"] !== false;
     let settled: boolean | undefined;
-    if (wantSettled) {
-      settled = await rowsSettledDual(() => this.page(), this.hosts, String(rows));
+    let scrollSettled = true;
+    this.extractStats.total = 0;
+    if (settleOff) {
+      // 双门与 E5 同跳：`settled`/`scroll_settled` 都不出现。
+    } else if (!dualGateOn) {
+      // opt-out：回到今天的 E5 单指标循环（请求级回滚出口）。
+      scrollSettled = await rowsSettled(() => this.page(), String(rows));
+    } else {
+      // 缺省门：单循环双指标（双门 + E5 口径同源）。
+      const dual = await rowsSettledDual(() => this.page(), this.hosts, String(rows));
+      settled = dual.settled;
+      scrollSettled = dual.scroll_settled;
     }
     // inline 形态：与 meta.site.listExtract 的声明走同一个 `ctx.extract` → `readRows` 实现
     //（MVP 只接 inline；named 需要 app pack，见 design §7）。
@@ -776,18 +782,20 @@ export class SessionRuntime {
     // S2：空行事实（恒带——只是"本页返回行里所有字段都是空串的行数"，不猜骨架/未渲染，
     // 判读权在调用方）。先在本页行集合上数（零页面往返）；rowStats 读不到时再探测一次。
     let blankRows = out.filter((r) => Object.values(r).every((v) => String(v ?? "").trim() === "")).length;
-    if (wantSettled && settled === false) {
+    if (settled === false) {
       const stats = await rowStatsAnyFrame(await this.page(), String(rows),
         this.hosts === null ? undefined : { hosts: this.hosts });
       if (stats !== null) blankRows = stats.blank;
     }
     return {
       ok: true, rows: out, count, capped, max_items: cap,
-      // S2：空行事实（additive；懒渲染页与"真没有值"的判别面）。
+      // 空行事实（恒带——懒渲染页与"真没有值"的判别面；settled:false 时以全帧
+      // rowStats 的空行数为准，不只数本页已 cap 的行）。
       blank_rows: blankRows,
-      // S2：稳定读证据（只在 waitSettled:true 时出现——超窗 = false 如实回，不是失败）。
-      ...(wantSettled ? { settled: settled === true } : {}),
-      // E5：滚动稳定证据（additive；settle:"off" 时不出现，键集与缺省响应一致）。
+      // 稳定读证据（缺省路径恒出现——超窗 = false 如实回，不是失败；opt-out 与
+      // settle:"off" 无门无证据，键不出现）。
+      ...(settled !== undefined ? { settled } : {}),
+      // E5：滚动稳定证据（additive；settle:"off" 时不出现）。
       ...(settleOff ? {} : { scroll_settled: scrollSettled }),
       // C1：分页事实只在「本页被 cap 挡住」或「offset>0」时出现——旧响应键集不变。
       ...(capped || offset > 0

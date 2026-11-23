@@ -21,6 +21,7 @@
 | `pool-dedup/card-independent.html` | 类目维排序 | 卡片与卡内独立按钮 label 不同 = 不同操作，两者都留（误杀守卫）；空名容器包装层与 icon 型原子按钮都留且 atomic 子排前（container 只降权不除名）。 |
 | `pool-dedup/long-list-64.html` | 池容量 | 61 控件全在首屏网格：64 帽全入池、item-50 可达（40 帧下被挤出窗口）。 |
 | `pool-dedup/hit-descendant.html` | hit-test 语义 | 容器候选中心点被自己的绝对定位子元素盖住：`center_hit` 断言后代命中（executor 三处 hit-test 对此放行，绝不判 covered）。 |
+| `hydrate-delay.html` | 懒渲染稳定读 | `?delay=ms` 参数化（缺省 1000）：水合在稳定窗口内 → 缺省 extract settled:true 且行内有值；`?delay=3000` → opt-out 读到骨架态（空值 + blank_rows>0 + settled 缺席）；`?delay=0` 静态页 settled:true（双门首轮即稳）。 |
 
 ## 通用验收纪律
 

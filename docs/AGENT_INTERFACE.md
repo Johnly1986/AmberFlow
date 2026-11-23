@@ -370,6 +370,22 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
   （observe：`… +N more (M total, K omitted)` + selector/max/snapshot 指引；extract：
   `… +N more` + `total=T · offset=… 续页 · save:true → extract-<n>.json`），无溢出时输出不变。
 
+`amberflow_session` 的 `extract` 懒渲染稳定读（F89）：
+
+- **双指标稳定门缺省开**：行数 AND 空行数（一次 evaluate 同时拿两个数）连续 2 轮相等才算
+  稳定，与滚动稳定判定共用同一个轮询循环（600ms × 至多 5 轮窗口）——懒渲染页的行数可以先
+  稳定（骨架已挂载）而内容还在灌，只看行数会提前放行。响应 `settled` **恒出现**（缺省路径）：
+  稳定 = true；窗口内仍在变 = false（抽取照常发生——读到的就是此刻事实，不无界等）。
+  `blank_rows` 恒带（本页全空字段的行数；settled:false 时以全帧 rowStats 为准）。
+- **`wait_settled` 请求级口径**：缺省不传 = 缺省门运行；`true` = 冗余兼容；`false` =
+  **opt-out**（跳过双门，回到旧的行数单指标判定）——opt-out 与 `settle:"off"` 时 `settled`
+  **缺席**（无门无证据，绝不谎报稳定）。桥对三个键做有界透传（引擎有才有）。
+- 模型可见渲染：`settled:false` 或 `blank_rows>0` 时追加一行
+  `lazy-render: blank_rows=<n>, settled=<b> — rows may still be hydrating; re-extract or read settled`。
+- 离线锚：`fixtures/engine/hydrate-delay.html`（`?delay=ms` 参数化）三路径——缺省（水合在
+  稳定窗口内）行内有值 + settled:true；opt-out（窗口外）空值 + blank_rows>0 + settled 缺席；
+  静态页 settled:true（双门首轮即稳 ≈ 零额外等待）。
+
 `amberflow_session` 的 `extract` 选择器错误（C2）：
 
 - 非法行/字段选择器不再被静默吞成 `[]`/`""`：引擎 `amber session` 的 extract 响应为

@@ -1172,6 +1172,13 @@ export function apply(ctx: Context, config: Config): void {
           + '(hard cap 2000 rows / 4MB) and writes `<evidence_dir>/extract-<n>.json`; the result then carries '
           + '`file`/`saved`/`bytes` and, when capped, `truncated`/`save_limit`.',
       },
+      wait_settled: {
+        type: 'boolean',
+        description: 'extract: dual-metric stability gate (row count AND blank count, default ON). Omit = default '
+          + '(the result always carries `settled`; lazy-hydrated pages wait up to a bounded window and report '
+          + '`settled:false` honestly when it is still filling). `false` = opt out (skip the gate; no `settled` '
+          + 'key; same row-count settle as before). `true` = redundant compatibility.',
+      },
       signal: {
         type: 'object', additionalProperties: true,
         description: 'signal/`wait_for`: verifiable-signal object, same operator set as run done/when signals. '
@@ -1433,6 +1440,12 @@ function renderSessionResult(value: Record<string, unknown>): string {
         + (more > 0
           ? `\n… +${more} more`
             + `\ntotal=${String(total)} · offset=${String(offset + rows.length)} 续页 · save:true → extract-<n>.json`
+          : '')
+        // F89：懒渲染提示（≤1 行；settled=false 或 blank_rows>0 时才有——骨架/未渲染完的
+        // 判别线索：blank_rows>0 = 有行无值，settled=false = 窗口内仍在变化）。
+        + (value.settled === false || (typeof value.blank_rows === 'number' && value.blank_rows > 0)
+          ? `\nlazy-render: blank_rows=${String(value.blank_rows ?? '?')}, settled=${String(value.settled)}`
+            + ' — rows may still be hydrating; re-extract or read `settled`'
           : '')
         + savedLine
     }
