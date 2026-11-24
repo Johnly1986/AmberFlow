@@ -25,8 +25,9 @@ import {
   PILOT_AWAIT_PICK, type PilotHandoff, type PilotOptions, type PilotStopCode,
 } from "./pilot-contract.ts";
 import { PilotRuntime, type PilotSink } from "./pilot-runtime.ts";
+import { clipText } from "../support/text.ts";
 import {
-  driveCommandProblem, driveStartProblem, errMsg, isObj, nonEmpty,
+  driveCommandLine, driveCommandProblem, driveStartProblem, errMsg, isObj, nonEmpty,
 } from "./session-runtime-contract.ts";
 
 /** driver 的宿主面：由 SessionRuntime 注入（会话持有浏览器与 runId，本模块不另存一份）。 */
@@ -47,9 +48,10 @@ const MAX_TEXT = 200;
 const MAX_WHY = 400;
 const MAX_HANDOFF_EVIDENCE_CHARS = 900;
 
+/** 未知值先按字符串强转再截断（截断语义唯一出处 = support/text.ts 的 `clipText`）。 */
 const clip = (v: unknown, max = MAX_TEXT): string => {
   const text = typeof v === "string" ? v : String(v ?? "");
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+  return clipText(text, max);
 };
 
 /** pilot_end 摘要里值得回给会话的字段（其余键不进事件投影）。 */
@@ -430,15 +432,7 @@ export class SessionPilotDriver {
         status: this.statusName(),
       };
     }
-    const line = JSON.stringify({
-      cmd,
-      ...(nonEmpty(req["hint"]) ? { hint: String(req["hint"]) } : {}),
-      ...(nonEmpty(req["target"]) ? { target: String(req["target"]) } : {}),
-      ...(req["value"] === undefined ? {} : { value: req["value"] }),
-      ...(nonEmpty(req["goal"]) ? { goal: String(req["goal"]) } : {}),
-      ...(nonEmpty(req["url"]) ? { url: String(req["url"]) } : {}),
-      ...(req["skip"] === true ? { skip: true } : {}),
-    });
+    const line = driveCommandLine(req);
     let outcome: "stay" | "drive" | "close";
     try {
       outcome = await rt.handleLine(line);

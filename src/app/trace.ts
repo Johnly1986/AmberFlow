@@ -9,9 +9,9 @@
  *   2. **只记事实**：每次调用的种类/参数摘要/结果（ok、stop_code），不记模型自由文本。
  *   3. **确定性可测**：同一脚本+输入两次运行，`events` 序列必须相同（`verifyReplay`）。
  */
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { canonicalJson, sha256 } from "../support/canonical-json.ts";
 
 export type TraceCall =
   | "open" | "openPage" | "arrive" | "step" | "read" | "extract" | "holds" | "waitFor" | "waitForTarget" | "source"
@@ -95,25 +95,11 @@ export interface AppTrace {
   invariants_ok?: boolean;
 }
 
-/** 确定性序列化（键排序）——与 `app-script.canonicalJson` 同一口径（这里再导出一次避免循环依赖）。 */
-export function canonicalJson(value: unknown): string {
-  const walk = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(walk);
-    if (typeof v === "object" && v !== null) {
-      const out: Record<string, unknown> = {};
-      for (const k of Object.keys(v as Record<string, unknown>).sort()) {
-        out[k] = walk((v as Record<string, unknown>)[k]);
-      }
-      return out;
-    }
-    return v;
-  };
-  return JSON.stringify(walk(value));
-}
-
-export function sha256(text: string | Buffer): string {
-  return crypto.createHash("sha256").update(text).digest("hex");
-}
+/**
+ * 确定性序列化与 sha256 的唯一实现在 `support/canonical-json.ts`；本模块 re-export 同两个名字，
+ * 保持既有调用面（`ctx-replay` 的序列化对账、session/pilot 的运行记账）不感知搬迁。
+ */
+export { canonicalJson, sha256 };
 
 /** 输入指纹：槽位（以及声明的 hosts）——故意不含 outDir/runId（它们每次运行都变）。 */
 export function inputsSha256(slots: Record<string, unknown>, hosts: string[] = []): string {

@@ -182,7 +182,7 @@ if (check) {
     const actual = fs.existsSync(out.file) ? fs.readFileSync(out.file, "utf-8") : "";
     if (actual === out.content) continue;
     failed += 1;
-    // task-7：错误面给绝对路径 + 首个差异行号 + 建议动作（只改文案，门禁语义不变）。
+    // 错误面给绝对路径 + 首个差异行号 + 建议动作（只改文案，门禁语义不变）。
     const expLines = out.content.split("\n");
     const actLines = actual.split("\n");
     let diffLine: number | null = null;

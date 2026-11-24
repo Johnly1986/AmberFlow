@@ -42,11 +42,6 @@ function rowMainValue(row: Record<string, string> | null): string {
 
 const PLACEHOLDER = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 
-/** 收集一段文本里的占位符名（未知槽位要在加载期就报错）。 */
-function placeholders(text: string): string[] {
-  return [...text.matchAll(PLACEHOLDER)].map((m) => m[1]!);
-}
-
 /** 只替换**已声明**的槽位，其余花括号原样保留（工具参数/JSON 里到处是花括号）。 */
 export function substitute(value: unknown, slots: Record<string, unknown>, out: string[]): unknown {
   if (typeof value === "string") {

@@ -171,7 +171,6 @@ export function reportMarkdown(
 ): string {
   const rep = (source["report"] || {}) as Record<string, any>;
   const title = pyTruthy(rep["title"]) ? rep["title"] : source["name"];
-  const cur = getOr(rep, "currency", "");
   const tr = source["transport"] as Record<string, any>;
   const client = transportClient(source);
   const L: string[] = [

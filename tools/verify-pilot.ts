@@ -189,7 +189,7 @@ async function scenarioNeedsValueString(origin: string): Promise<void> {
     const handoff = events.filter((e) => e["type"] === "handoff").pop()!["handoff"] as Record<string, unknown>;
     const unblock = handoff["what_would_unblock"] as string[];
     assert.ok(unblock[0]!.includes('"Search term"'), "the first unblock hint is the exact resume shape");
-    // 裸字符串 resume（无 hint/target）：键取 needs_value 记录的目标键（旧实现写不可达的 "resumed"）。
+    // 裸字符串 resume（无 hint/target）：键取 needs_value 记录的目标键（不是 "resumed"）。
     assert.equal(await rt.handleLine('{"cmd":"resume","value":"amber"}'), "drive");
     assert.equal(rt.slots["Search term"], "amber", "a bare string binds to the needs_value target key");
     assert.equal(await rt.drive(), "final_signal_held", "the explicit value + signal check = arrival");

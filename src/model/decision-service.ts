@@ -2,11 +2,11 @@
  * **统一决策服务配置层** —— 用「服务地址 + 模型名 + 密钥」（+ 可选协议/刻度）替代
  * 每家 provider 各一套环境变量（`TOKEN_PLAN_*` / `BAILIAN_*` / `JEVK5_*` / `DASHSCOPE_*`）。
  *
- * 为什么需要它（2026-10-25 项目方提出）：调研发现决策模型已经收敛成两条协议
+ * 为什么需要它（项目方提出）：调研发现决策模型已经收敛成两条协议
  * （TypeSafe **System One**、OpenAI **Decisions API**），而本仓接一家服务就要记一套变量名。
  * 统一层把"接一个新服务"变成改三个值（地址/模型/密钥），provider 细节交给协议适配器。
  *
- * 选择规则（2026-10-26 项目方纠正）：**有服务地址就是线上服务**，不再需要 provider 键；
+ * 选择规则（项目方纠正）：**有服务地址就是线上服务**，不再需要 provider 键；
  * 没有地址才用本地模型。地址/密钥/模型三件套本身就是完整的选择依据。
  *
  * 本轮支持：
@@ -172,7 +172,6 @@ export function serviceConfigError(env: NodeJS.ProcessEnv = process.env): string
 
 /** 读统一配置的 profile；`systemOneClient(profile)` 就是 provider。 */
 export function systemOneServiceProfile(env: NodeJS.ProcessEnv = process.env): SystemOneProfile {
-  const base = serviceBaseUrl(env);
   const model = serviceModel(env);
   const floorKind = envText(env, "AMBERFLOW_DECISION_SCORE_KIND") || CAPABILITIES.score_kind;
   const scoreKind = floorKind as ProviderCapabilities["score_kind"];

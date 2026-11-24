@@ -12,7 +12,7 @@ import { urlOf } from "../engine/extraction.ts";
 import { sleepMs } from "../support/sleep.ts";
 import type { AmbiguityView } from "../engine/ambiguity.ts";
 import type { BrowserMiddleware, AnyPage } from "../engine/executor.ts";
-import { intIn, type SessionActOp, type SessionScrollOut } from "./session-runtime-contract.ts";
+import { type SessionActOp, type SessionScrollOut } from "./session-runtime-contract.ts";
 import {
   actAmbiguity, ambiguityRecord, ambiguityResponse, displayHow, failureScreenshot, missDiagnosticsResponse, observeAfter,
 } from "./session-runtime-evidence.ts";
@@ -225,12 +225,6 @@ export async function doActScroll(
 /** 与会话契约同判的非空字符串（局部复刻，避免循环依赖；语义与 nonEmpty 逐字节一致）。 */
 function nonEmpty(v: unknown): v is string {
   return typeof v === "string" && v.trim() !== "";
-}
-
-/** intIn 的局部复刻（同上：契约面 helper 已在 session-runtime-contract，直接 import 会
- * 造成 contract → evidence/scroll 模块的反向依赖，故此处只复刻这 8 行纯函数）。 */
-export function scrollIntIn(v: unknown, lo: number, hi: number): number | undefined {
-  return intIn(v, lo, hi);
 }
 
 /** displayHow/actAmbiguity 等证据 helper 的再导出（消费面单一 import 口）。 */

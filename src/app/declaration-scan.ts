@@ -7,7 +7,7 @@
  * check 的覆盖对象——**静态 lint，不是 dry 模拟**（架构师已否决 --unroll 模拟方案）。
  *
  * 实现纪律：
- *   - **只读复用**：hint/信号的"是什么形状"仍由既有唯一出处回答（task-2 校验器复用
+ *   - **只读复用**：hint/信号的"是什么形状"仍由既有唯一出处回答（校验器复用
  *     `parseHint` / `validateSignalSpec`）；本模块只回答"源码里有哪些声明调用点、它们的
  *     静态可求值形状是什么"。构造器求值逐字镜像 `kit.ts`（同一份形状语义，两处实现靠
  *     本注释对齐——kit 改了这里必须跟着改，否则收集到的形状会漂移）。
@@ -23,6 +23,7 @@
  */
 
 import { loginWallSignal } from "../engine/signals.ts";
+import { clipText } from "../support/text.ts";
 
 /* ------------------------------------------------------------------ 数据形状 */
 
@@ -42,7 +43,7 @@ export function isDynamicHole(v: unknown): v is DynamicHole {
     && typeof (v as Record<string, unknown>)[DYNAMIC_KEY] === "string";
 }
 
-/** 声明族的分类（task-2 校验器按族选择既有校验器）。 */
+/** 声明族的分类（校验器按族选择既有校验器）。 */
 export type DeclCallKind =
   | "step"        // ctx.step —— done/when/act 声明位
   | "arrive"      // ctx.arrive —— done 声明位
@@ -110,8 +111,6 @@ const REGEX_ALLOWED_KEYWORDS = new Set([
   "return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw",
   "case", "do", "else", "yield", "await",
 ]);
-
-const KEYWORDS = new Set([...REGEX_ALLOWED_KEYWORDS]);
 
 const PUNCT3 = ["...", "===", "!==", "**=", "<<=", ">>=", "&&=", "||=", "??="];
 const PUNCT2 = ["?.", "??", "=>", "==", "!=", "<=", ">=", "&&", "||", "++", "--",
@@ -734,23 +733,19 @@ const SUMMARY_LIMIT = 120;
 /** 摘要渲染：洞显示为 ⟨dynamic: 原因⟩，长值截断（只做人话摘要，不做数据源）。 */
 export function summarizeValue(v: unknown, depth = 0): string {
   if (isDynamicHole(v)) return `⟨dynamic: ${v[DYNAMIC_KEY]}⟩`;
-  if (typeof v === "string") return clip(JSON.stringify(v), SUMMARY_LIMIT);
+  if (typeof v === "string") return clipText(JSON.stringify(v), SUMMARY_LIMIT);
   if (typeof v === "number" || typeof v === "boolean" || v === null) return String(v);
   if (v === undefined) return "undefined";
   if (Array.isArray(v)) {
     if (depth > 2) return "[…]";
-    return clip(`[${v.map((x) => summarizeValue(x, depth + 1)).join(", ")}]`, SUMMARY_LIMIT);
+    return clipText(`[${v.map((x) => summarizeValue(x, depth + 1)).join(", ")}]`, SUMMARY_LIMIT);
   }
   if (isObj(v)) {
     if (depth > 2) return "{…}";
-    return clip(`{${Object.entries(v).map(([k, x]) => `${k}: ${summarizeValue(x, depth + 1)}`).join(", ")}}`,
+    return clipText(`{${Object.entries(v).map(([k, x]) => `${k}: ${summarizeValue(x, depth + 1)}`).join(", ")}}`,
       SUMMARY_LIMIT);
   }
-  return clip(JSON.stringify(v) ?? "?", SUMMARY_LIMIT);
-}
-
-function clip(s: string, max: number): string {
-  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+  return clipText(JSON.stringify(v) ?? "?", SUMMARY_LIMIT);
 }
 
 /* ------------------------------------------------------------------ 主入口 */

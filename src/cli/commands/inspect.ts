@@ -46,7 +46,7 @@ function probeVerdict(p: ProbeOutcome): string {
   return `${p.count ?? 0} 命中${frameNote}${texts}`;
 }
 
-/** task-6 `--summary`：人话紧凑输出的有界常量（总行数 ≈ 头 3 + 元素 12 + 尾注 ≤ 15 + probe ≤ 10）。 */
+/** `--summary`：人话紧凑输出的有界常量（总行数 ≈ 头 3 + 元素 12 + 尾注 ≤ 15 + probe ≤ 10）。 */
 const SUMMARY_ELEMENTS = 12;
 const SUMMARY_HINTS_PER_ELEMENT = 2;
 const SUMMARY_LABEL_CHARS = 36;
@@ -275,7 +275,7 @@ type InspectRenderInput = {
 function renderInspectOutcome(ctx: CliContext, t: InspectRenderInput): void {
   const surfaceLine = Object.entries(t.windowInfo.surface_counts)
     .map(([k, v]) => `${k} ${v}`).join("、");
-  // task-6 `--summary`：人话紧凑输出（行数有界）。只改人话面——`--json` 面逐字节不变
+  // `--summary`：人话紧凑输出（行数有界）。只改人话面——`--json` 面逐字节不变
   // （summary 旗标不进 JSON；--pool/--wide/--probe 的 JSON 语义照旧）。
   if (t.summary) {
     say(ctx, `${t.title} — ${t.url}`);
@@ -429,7 +429,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
     const windowInfo = await windowAudit(page as never, view.count, 10);
     const frameOrigins = view.frame_origins;
     // advisories（自描述运行时 · P0-B）：把「引擎已知、作者看不见」的信息差当场说出来。
-    // 依据 2026-10-30 实测：3/5 次运行失败属此类（ogs.google.com 跨源 frame 1 次、
+    // 依据实测：3/5 次运行失败属此类（ogs.google.com 跨源 frame 1 次、
     // 仅 aria-label 的出行模式 radio 2 次）——inspect 当时就有能力预警。
     // 措辞红线：只说「引擎元素池无法指向」，不说「不可点击/不存在」。
     const mainOrigin = origin;
@@ -514,7 +514,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       await page.screenshot({ path: screenshotPath, fullPage: false });
     }
     // 空池诊断（planning-playbook）：页面上交互元素多而池几乎没收进来 = 重 JS SPA 的典型
-    // 形态（2026-10-29 实测：两个 Agent 都是"跑了才发现池是空的"，才转入宽扫/SSR 深挖）。
+    // 形态（实测：两个 Agent 都是"跑了才发现池是空的"，才转入宽扫/SSR 深挖）。
     // 判定与建议来自唯一出处；建议写进 envelope 的 next（Agent 调用即得）。
     const nearEmpty = poolNearEmpty(view.count, Math.max(0, interactiveOnPage));
     // AX 证据源（只读 additive，第 5 项）：浏览器自己算的可访问性语义作为第二条观察证据，
@@ -550,7 +550,7 @@ export async function runInspect(args: string[], ctx: CliContext): Promise<numbe
       // 既有字段语义不变；人类输出同样标注这一行（水合时机是排障的一等事实）。
       saw_at: sawAt,
       wait_ms: waitMs,
-      // P3（2026-11-01 产品评审）：hint 语法不是 CSS、href 等字段是池投影——实测有 Agent
+      // P3（产品评审）：hint 语法不是 CSS、href 等字段是池投影——实测有 Agent
       // 把 `a[href=…]` 投影误当 CSS 选择器用。把这两句话随每次观察一起给出去。
       // T9：href 匹配同时认原始属性（href_full，query 可命中），hint_candidates 优先给原始值。
       hint_syntax: "hint_candidates 可直接用作 --hint / ctx.hint（非 CSS 语法）；href 字段是展示投影（匹配同时认原始属性 href_full，query 可命中），hint 建议优先给原始值",

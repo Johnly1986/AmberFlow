@@ -1,6 +1,6 @@
 # 可维护性与可扩展性治理方案 v2.1（架构评审修订版）
 
-> **状态**：**P0/P1/P2 已收口（2026-11-17）**；**大文件拆分目标已达成（§6.7：最大文件 2721 ≤3000，>1000 行文件仅剩 executor 例外）**；**常量配置与提示词两线条件项已收口（§6.8）**；**提示词用户/产品视角审查与优化已落地（§6.9：概述/六步法/失败速查/停因 next/桥 82 描述改写 + clarity 门禁）**；**§6.5 D 四项条件项 + 桥 TS2375 已收口（§6.10：runExecution 组合根、W5-3 runtime 注入、W4-4 桥字段共享契约、laya 截断行为变更）**；仅余 ctx conformance（W5-2 另一半）、BACKLOG #3、handler 内化。P0 9/9 批见 §6.1；P1 见 §6.2；P2 见 §6.4/§6.5
+> **状态**：**P0/P1/P2 已收口（2026-11-17）**；**大文件拆分目标已达成（§6.7 快照；当前最大文件 executor 2800 ≤3000，>1000 行文件 2 个：executor 2800 / extraction 1072，存量基线由 `tools/maintain/baseline.json` 只减不增）**；**常量配置与提示词两线条件项已收口（§6.8）**；**提示词用户/产品视角审查与优化已落地（§6.9：概述/六步法/失败速查/停因 next/桥 82 描述改写 + clarity 门禁）**；**§6.5 D 四项条件项 + 桥 TS2375 已收口（§6.10：runExecution 组合根、W5-3 runtime 注入、W4-4 桥字段共享契约、laya 截断行为变更）**；仅余 ctx conformance（W5-2 另一半）、handler 内化；BACKLOG #3 已于 2026-11-24 完成。P0 9/9 批见 §6.1；P1 见 §6.2；P2 见 §6.4/§6.5
 > **基线**：`main @ 91bf379`；`npm run check` 全绿（本轮实测：预检/类型/配置/schema/prompt/泄露/示例/行锚/用例校验 9 项通过）
 > **评审**：3 个独立只读评审（目标架构 / 迁移治理 / 红队）+ Lead 裁决，记录见 [IMPROVEMENT_PLAN_REVIEW.md](IMPROVEMENT_PLAN_REVIEW.md)。本版已按裁决修订：砍 `sdk.ts`/伪端口/单一编排，新增 0.8 等价证据 lane 与 0.9 seam 冻结，门禁降档，P2 条件化。
 > **取代**：本文 v2（2026-11-17 初稿）与 v1（2026-11-10「配置收敛 · 分层治理 · 臃肿文件拆解」）。v1 已完成项保留，未实施项并入本文（§10）；v1 原文见 `git show 91bf379:docs/IMPROVEMENT_PLAN.md`。
@@ -505,13 +505,13 @@ interface PromptSpec {
 | 1.5 | `buildMiddleware` 工厂（6 入口→1 构造点，per-face confirm 策略）+ app-runner 决策探测去重 + 帧门禁 10 处/pickRow 三面收口 | `e9aa330` + `3521f42` + `ad7110d` | mw 真实构造=1；mainline baseline 6→1；examples golden/verify:offline/check 绿 |
 | 1.5c | `executor-types` 1005→826，外搬 `executor-middleware-types`（202 行纯类型，facade 保导出面） | 本批提交 | >1000 行文件 7→6；split hash 36 符号一致 |
 | 1.5d | `app-runner-cli.main` 322→272、`inspect.runInspect` 365→230（各抽 2 helper ≤150 行） | 本批提交 | ≥300 行函数 8→6；9 份 CLI 输出逐字节一致；examples golden 一致 |
-| 1.6 | Agent prompt wrapper 收口 + 证据 spec（条件） | 待做 | — |
+| 1.6 | Agent prompt wrapper 收口 + 证据 spec | **已收口（§6.8）**：证据 spec 5 条 + Agent plan.rules | ✅ |
 
 **P1 出口核对（2026-11-17，全部指标见上表）**：
 
 - 注释禁止类=0、配置漂移=0、prompt 重复=0、白名单外裸 env=0、新文件/函数上限生效、文档断点=0、mw 构造=1、split-check/golden/offline 绿。
 - **规模达标**：>1000 行文件 **6**（目标 ≤6：executor/app-runner/extraction/ctx/session-runtime/pool-js）；≥300 行函数 **6**（目标 ≤6：run/createCtx/runScriptApp/runApp/createDryCtx/createReplayCtx）；≥100 行函数 22（基线 22，只减不增）。
-- **明确延期（条件未触发）**：handler 子进程转交 12 处（按 §4.5 延后，待 P2 进程内化前置）；1.6 Agent prompt wrapper/证据 spec（按方案「真实失败案例驱动」条件保留，当前无失败案例）。
+- **明确延期（条件未触发）**：handler 子进程转交 12 处（按 §4.5 延后，待 P2 进程内化前置）；~~1.6 Agent prompt wrapper/证据 spec（按方案「真实失败案例驱动」条件保留）~~ **已收口（§6.8）**。
 - 结论：**P1 收口完成**；P2 不启动（前置条件核对见 §6.3）。
 
 ### P1 收口（3–5 周，12–18 人日；低 churn 优先）
@@ -585,7 +585,7 @@ interface PromptSpec {
 
 > P2 已启动：freeze 2026-11-17 起 2 周、每阶段约 3 个工作日窗口；按 D3 顺序 `#4 → #2 → #3`，4d 先行。任一窗口内 T1/T2/T3 触发即停该批。
 
-> **指标口径注**：4d 阶段函数（如 `runModelPick` 363 行）按九阶段显式例外（phaseFunctions ≤400）计入「≥300 行函数」统计，故 P2 期间该项为 report-only（当前 7，含该阶段函数）；P2 最终目标按 §3.4 P2 列评估（≤3000 / ≤6），阶段函数例外在冻结表内声明。
+> **指标口径注**：4d 阶段函数（如 `runModelPick` 363 行，退役前快照）按九阶段显式例外（phaseFunctions ≤400）计入「≥300 行函数」统计，故 P2 期间该项为 report-only（当前 7，含该阶段函数）；P2 最终目标按 §3.4 P2 列评估（≤3000 / ≤6），阶段函数例外在冻结表内声明。
 
 ### 6.5 P2 出口核对（2026-11-17，收口）
 
@@ -596,7 +596,7 @@ interface PromptSpec {
 | 维度 | P2 目标 | 实测（2026-11-17） | 判定 |
 |---|---|---|---|
 | 语义 · 同一语义实现份数 | ≤3 | 登记 seam 已单点：mw 构造 1（工厂）/ 候选生产者 1（app）/ SessionLease 1（flow+plan+suite）/ RunScope 1（app 两面）/ 套件聚合器 1 / 停因→退出码名映射 1；重试与业务判定按 S1 契约**归源**（刻意不共享） | ✅ |
-| 注释 · 禁止类 / ratchet | 0 / 0 | `maintain` comments 组 0 fail / 0 warn；禁止类（日期戳/行号锚点/幽灵引用/裸 TODO）=0 | ✅ |
+| 注释 · 禁止类 / ratchet | 0 / 0 | `maintain` comments 组 0 fail / 0 warn；禁止类（行号锚点/幽灵引用/裸 TODO）=0；日期戳/批次 token/历史措辞 0 warn（ratchet 存量只减不增） | ✅ |
 | 配置 · 漂移 / 裸 env | 0 / 0 | constants 组 0 fail；三向生成文档一致（33 keys）；白名单外裸读 env 由门禁覆盖 | ✅ |
 | 提示词 · 重复 / spec | 0；11/11 | prompt-hit **十二组**全绿：模型 11 条唯一文本 × 25 消费点；证据 spec 5 条（分级预算+快照）；Agent plan.rules/playbook 预算；桥 82 描述覆盖（warn-only） | ✅ |
 | 规模 · 新文件 / 新函数 | ≤800 / ≤150（阶段函数 ≤400 例外） | 本阶段新文件最大 367（`candidate-scan.ts`）；新函数均 ≤150；阶段函数例外已入 `phaseFunctions` 冻结表 | ✅ |
@@ -630,7 +630,7 @@ interface PromptSpec {
 
 **D. 明确延期（条件未触发；与 P1 出口同格式）**
 
-> **2026-11-17 追加收口**：本表当时延期的主要条件项已由 §6.10 落地（runExecution 组合根、W5-3 runtime 注入、W4-4 桥字段共享契约、laya 截断）；表内保留历史触发条件，已完成行以删除线/已收口标注。**仍延期**：ctx 行为矩阵 / `tools/ctx-conformance.ts`（W5-2 另一半）、BACKLOG #3、handler 子进程内化。
+> **2026-11-17 追加收口**：本表当时延期的主要条件项已由 §6.10 落地（runExecution 组合根、W5-3 runtime 注入、W4-4 桥字段共享契约、laya 截断）；表内保留历史触发条件，已完成行以删除线/已收口标注。**仍延期**：ctx 行为矩阵 / `tools/ctx-conformance.ts`（W5-2 另一半）、handler 子进程内化；BACKLOG #3 已于 2026-11-24 完成。
 
 | 项 | 触发条件 / 归属 |
 |---|---|
@@ -638,11 +638,11 @@ interface PromptSpec {
 | ~~W5-3 剩余：engine 的 3 个 runtime 函数改组合根注入；model→engine 反向边收缩~~ | **已收口（§6.10）**：`DecisionRuntimeHooks` 注入 + `src/app/decision-runtime.ts`；engine `grep model/decision-provider`=0；model→engine 7→6 |
 | ~~W4-4 剩余：桥**字段**共享契约（5 处穿透）~~ | **已收口（§6.10）**：单源契约 + 生成物，穿透 5→2；桥既有 TS2375 同批修复 |
 | ~~W3-4 站点知识出引擎~~ | **已收口（§6.8）**：Source JSON 字段映射 + 扫词门禁零命中；缺配迁移差异见 CHANGELOG |
-| BACKLOG #3 候选窗口指数递增（40→80→160 cap）+ trace 观测 | 行为变更，仍延期（D3 顺序 #2→#3 的 #3） |
+| BACKLOG #3 候选窗口指数递增（40→80→160 cap）+ trace 观测 | **done（2026-11-24）**：strict-miss `rehydrate_rescan` 证据 additive 落盘 + `tools/verify-rehydrate-rescan.ts` lane；窗口递增行为未改（仍延期） |
 | ~~1.6 证据 spec / Agent prompt wrapper~~ | **已收口（§6.8）**：证据 spec 5 条 + Agent plan.rules；~~仅 laya token 级截断行为变更仍条件保留~~ → **已收口（§6.10）** |
 | handler 子进程内化 12 处 | P0/P1 已登记延后（§4.5），仍延期 |
 
-**E. 状态**：P2 收口（2026-11-17）；§6.5 D 四项条件项 + 桥 TS2375 于同日由 §6.10 收口（全门禁绿）。仍延期：ctx conformance、BACKLOG #3、handler 内化；回访 1（30 天不回潮）与回访 2（可扩展定性）按 §9 在回访窗口执行。
+**E. 状态**：P2 收口（2026-11-17）；§6.5 D 四项条件项 + 桥 TS2375 于同日由 §6.10 收口（全门禁绿）。仍延期：ctx conformance、handler 内化（BACKLOG #3 已于 2026-11-24 完成）；回访 1（30 天不回潮）与回访 2（可扩展定性）按 §9 在回访窗口执行。
 
 ### 6.6 大文件拆分（新阶段，2026-11-17 启动）
 
@@ -693,7 +693,7 @@ interface PromptSpec {
 | `src/engine/pool-js.ts` | 1102 | **824** | `pool-js-core` |
 
 - **>1000 行文件：6 → 1**（仅 `executor.ts` 2721 ≤3000）；其余全部 <1000；新文件全部 ≤800。
-- **≥300 行函数 7**（report）：`runScriptApp` 799、`run` 741（未改）、`runApp` 686、`createDryCtx` 542、`createCtxRead` 460、`runModelPick` 363、`createReplayCtx` 319；`createCtx` 1703 与 `_executeElement`/`actOnce` 等大函数已按模块收敛。
+- **≥300 行函数**（report，2026-11-24 基线）：`run` 883、`runScriptApp` 698、`createDryCtx` 542、`createCtxRead` 460、`createReplayCtx` 319；`runModelPick` 363 已退役（退役前快照计入历史记录，不再计入当前统计）；`createCtx` 1703 与 `_executeElement`/`actOnce` 等大函数已按模块收敛。
 
 **批次与提交**：E1 `2d8072a`/`bbbc4ea`、E2 `a9fc0fa`/`acb3876`、E3 `b64d9eb`/`9268bfe`、A1 `9d8bcce`/`c320d47`、L1 `115750f`、X1 `bb8dda6`/`27056d3`、C1 `43413c5`（文档批次同批记录）。
 
@@ -919,7 +919,7 @@ interface PromptSpec {
 |---|---|---|---|
 | `docs/STATE_LAYER_PLAN.md` | 部分已实施（settle/StateFingerprint/epoch/policy 键） | W1-c 九阶段必须携带 StateCursor、钩子顺序不变；ctx 行为矩阵收录 epoch/settle 语义 | W1-c 的验收项 |
 | `docs/PACE_UNIFICATION_PLAN.md` | 已实施（support/pace.ts） | `runExecution` 只共享 `resolvePace/envPace/PaceClock`；**kernel 内不加 sleep**；unit 边界留源适配器 | W5-2 的约束 |
-| `docs/INTERVENTION_RESCUE_MODULE.md` | 实施中（步 0-3 + 步 5 桥半边已实施） | L1.5 登记回层表；W1-b 运行期区（ctx/executor/app-runner）以步 4/5 + 默认切换为前置；app/adapter 解耦走 golden 六条人工路径 | P2 启动条件；文件预留 |
+| `docs/INTERVENTION_RESCUE_MODULE.md` | 已实施（v1 完成：步 0-5 + `--rescue` 真实 result.rescue 默认切换） | L1.5 登记回层表；W1-b 运行期区（ctx/executor/app-runner）以步 4/5 + 默认切换为前置；app/adapter 解耦走 golden 六条人工路径 | P2 启动条件；文件预留 |
 | `docs/RUN_TAKEOVER_AND_DOM_CONTEXT_PLAN.md` | proposal（未实施） | T1 失败现场四件套并入 `RunOutcome.artifacts`；T2 attach 归 session-runtime（调试面），**不进 runExecution**；D2 hint 第 7 形状与 W5-3 排他 | 不进 P0/P1 |
 | `docs/BACKLOG.md` #2/#3/#4 | open / 部分裁定 | #2 候选契约优先于任何 resolve 面改造；#3 窗口递增依赖 #2；#4 是 W1-c 的前置与唯一依据 | P2 条件 |
 | 行锚/FRAME_SCOPE/WITHIN_PARITY 计划 | 已实施/进行中 | W1-c 拆分不得改变 hint/resolve 语义；并行登记表登记文件面 | 文件预留 |

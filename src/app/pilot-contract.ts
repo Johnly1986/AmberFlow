@@ -13,7 +13,6 @@
  * 零新 stopCode：下表全部来自引擎既有停因（见 executor/actOnce 的返回面），
  * 只有 `final_signal_held` 是 pilot 收尾语义（正因，不是失败）。
  */
-import { SESSION_IDLE_TIMEOUT_MS } from "../support/tuning.ts";
 // 会话注入 seam 的类型面走 type-only import：契约叶子不得因这一字段把执行器/决策/浏览器
 // 那一串运行期模块拖进加载图（pilot-contract 被 CLI/导出面单独加载时也要能零副作用）。
 import type { BrowserSession } from "../engine/executor.ts";
@@ -211,7 +210,6 @@ export interface PilotOptions {
 }
 
 export const PILOT_DEFAULT_MAX_STEPS = 12;
-export const PILOT_DEFAULT_IDLE_TIMEOUT_MS = SESSION_IDLE_TIMEOUT_MS;
 /** 连续 inert 判定阈值（与执行器 maxEffectiveRepeats 缺省同源的驾驶面口径）。 */
 export const PILOT_INERT_LIMIT = 3;
 /** 同一元素（按 esig）被驱动达上限而最终信号仍未成立 = 死目标（run 面 `maxEffectiveRepeats`

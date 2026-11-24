@@ -1202,7 +1202,8 @@ export function apply(ctx: Context, config: Config): void {
         type: 'object', additionalProperties: true,
         description: 'signal/`wait_for`: verifiable-signal object, same operator set as run done/when signals. '
           + 'Operators: `url_contains`, `css_exists`, `css_exists_text`, `css_visible_exists`, '
-          + '`css_text_contains`, `css_text_equals`, `css_value_equals`, `all_of`, `any_of`, `not`, `manual`.',
+          + '`css_text_contains`, `css_text_equals`, `css_value_equals`, `css_count_equals`, '
+          + '`css_count_min`, `all_of`, `any_of`, `not`, `manual`.',
       },
       timeout_ms: {
         type: 'integer',

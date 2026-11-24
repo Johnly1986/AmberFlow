@@ -1,5 +1,5 @@
 /**
- * task-12（C1，评审 #6 改造后形态）：`amber apps rehearsal <id|路径>` —— **只读预检**。
+ * `amber apps rehearsal <id|路径>` —— **只读预检**。
  *
  * 它与 `apps check` 的关系（一句话）：check = 声明形状（dry 校验调用序列合法）；
  * rehearsal = **可达页面上**的 hint 实况（真导航 + hintMatch 核对）——**两者都不证明完成**。

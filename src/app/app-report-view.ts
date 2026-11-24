@@ -129,7 +129,7 @@ export function appReportMarkdown(r: AppRunResult, nextHint?: string | null): st
     }
   }
   if (r.step_traces !== undefined && r.step_traces.length) {
-    // task-8（评审 #12）：URL 列口径显式化——列头注明「步起」；数据取 `state.before.url`
+    // URL 列口径显式化——列头注明「步起」；数据取 `state.before.url`
     // （该步**开始**时刻的页面 URL）。缺步起记录的行（ctx.arrive / 无 state 的旧产物）显示
     // 步后落地 URL（`url` 字段）并在单元格内标注「（落地）」——两种口径不同格，不混读。
     L.push("", "## 执行轨迹（flow 的 ctx.step / ctx.arrive）", "",

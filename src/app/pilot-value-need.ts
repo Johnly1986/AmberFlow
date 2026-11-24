@@ -9,11 +9,10 @@
  * 绝不产生值本身（值只来自预声明 slots 或 Agent resume 的显式 value）。
  */
 import type { Elem, ElemPool } from "../engine/elem-model.ts";
+import { clipText } from "../support/text.ts";
 
 /** 值袋键上限：与模型视图 `label` 投影同口径（40 字符）。 */
 export const VALUE_KEY_MAX = 40;
-
-const buf = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 
 /**
  * 元素 → 值袋键：`label → name → id → tag` 兜底（各自 trim 后取第一个非空）。
@@ -27,7 +26,7 @@ export function valueKeyOf(el: Elem): string {
     || String(el.name ?? "").trim()
     || String(el.id ?? "").trim()
     || String(el.tag ?? "").trim();
-  return buf(raw, VALUE_KEY_MAX);
+  return clipText(raw, VALUE_KEY_MAX);
 }
 
 /**
@@ -42,7 +41,7 @@ export function valueSigOf(el: Elem): string {
 
 /** 交接证据/解锁建议用的目标描述（与驾驶步 `target` 同口径：40 字前缀）。 */
 export function valueTargetOf(el: Elem): string {
-  return buf(String(el.full_label ?? el.label ?? el.text ?? el.tag ?? ""), VALUE_KEY_MAX);
+  return clipText(String(el.full_label ?? el.label ?? el.text ?? el.tag ?? ""), VALUE_KEY_MAX);
 }
 
 /** 一次 needs_value 的值需求（交接证据 + resume 字符串值的确定性绑定键）。 */

@@ -15,6 +15,7 @@
 
 import type { RescueKind, RescueRequest } from "../support/intervention-contract.ts";
 import { RESCUE_TEXTS } from "../support/intervention-texts.ts";
+import { clipText } from "../support/text.ts";
 import { shadowRescue } from "../intervention/index.ts";
 import type { ShadowRecorder } from "./intervention-shadow.ts";
 // `--rescue` 的 result.rescue 生产面（stop 模式）单列在 intervention-result.ts；本文件做转口，
@@ -33,8 +34,7 @@ const ACTION_KIND = "action" as RescueKind;
 const INSTRUCTIONS_EVIDENCE_MAX = 120;
 
 function clipInstructionsEvidence(instructions: string): string {
-  const s = instructions.replace(/\s+/g, " ").trim();
-  return s.length <= INSTRUCTIONS_EVIDENCE_MAX ? s : `${s.slice(0, INSTRUCTIONS_EVIDENCE_MAX - 1)}…`;
+  return clipText(instructions.replace(/\s+/g, " ").trim(), INSTRUCTIONS_EVIDENCE_MAX);
 }
 
 /** 人工步现场事实（adapter 视角的最小形状——通道接口不得收 `index`（§7 冻结约束））。 */

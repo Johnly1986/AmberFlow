@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>rehydrate-rescan · strict miss（慢水合 + 永不命中 hint）</title>
+<!--
+  F72-② strict-miss 证据 lane 夹具（fixtures/engine/rehydrate-rescan/）。
+  构造两件事：
+  1) 慢水合/持续突变：`#tick` 每 40ms 改一次文本 ⇒ settle 稳定门恒 timedOut（页面永不稳定）；
+  2) 永不命中的声明 hint：lane 用 `#never-appears`，池里只有 `#static-btn`（池非空，
+     证明 strict 落空不是"池空"的退化）。
+  期望 run 面：等 2s → 重抽池（池大小不变）→ 仍无匹配 ⇒ strict 停因 target_not_found；
+  RunReport.rehydrate_rescan 必须带 waited_ms/pool_size_before/pool_size/resolved:false
+  （trace 没有动作行可承载 ⇒ 由 run() 直传字段退化提供）。
+-->
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; }
+  .tick { color: #4a5568; font-variant-numeric: tabular-nums; }
+  button { padding: 6px 16px; border: 1px solid #cbd5e0; border-radius: 6px; background: #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>slow-settle / never-hit</h1>
+<p>页面持续突变（水合中间态），稳定门恒超时：<span id="tick" class="tick">0</span></p>
+<button id="static-btn">静态按钮</button>
+<p id="out">idle</p>
+<script>
+  (function () {
+    var tick = document.getElementById("tick");
+    var n = 0;
+    setInterval(function () { tick.textContent = String(++n); }, 40);
+    window.__hits = [];
+    document.getElementById("static-btn").addEventListener("click", function () {
+      window.__hits.push("static-btn");
+      document.getElementById("out").textContent = "clicked static-btn";
+    });
+  })();
+</script>
+</body>
+</html>

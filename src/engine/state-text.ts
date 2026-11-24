@@ -6,6 +6,7 @@
  * 子帧）不在父 body 的 innerText 里——显式 `AMBERFLOW_STATE_TEXT_SCOPE=wide` 才追加最多
  * 2 个未 detach 子帧的 body 文本；默认路径（env 未设）取文与既有行为逐字节一致。
  */
+import { readString } from "../support/env.ts";
 import { STATE_TEXT_BUDGET_CHARS } from "../support/tuning.ts";
 import type { FrameLike, PageLike } from "../support/page-like.ts";
 import { firstOf, framesOf } from "./page-shapes.ts";
@@ -24,7 +25,7 @@ export async function pageText(page: PageLike, head = 300, tail = 150): Promise<
  */
 export async function stateText(page: PageLike, query: string, _embedFn: unknown = null, budget = STATE_TEXT_BUDGET_CHARS): Promise<string> {
   const parts: string[] = [(await firstOf(page.locator!("main, body")).innerText()).trim()];
-  if (process.env.AMBERFLOW_STATE_TEXT_SCOPE === "wide") {
+  if (readString("AMBERFLOW_STATE_TEXT_SCOPE") === "wide") {
     for (const frame of framesOf(page, 3)) {
       if (frame === (page as unknown as FrameLike)) continue;   // 主帧已读
       try {

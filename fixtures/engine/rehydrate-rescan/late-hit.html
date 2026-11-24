@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>rehydrate-rescan · late hit（重扫池里才出现的目标）</title>
+<!--
+  F72-② strict-miss 证据 lane 的**命中**对照夹具：页面同样持续突变（settle 恒 timedOut），
+  `#late-btn` 在页面加载 3000ms 后才插入 ⇒ 步首池/宽扫池都落空（hint 未命中），
+  2s 重扫后的新池才含它（resolved:true，走既有 trace 行证据面）。
+  时序余量：步首抽池 ≈ load+1000ms，宽扫池 ≈ load+2000ms，重扫池 ≈ load+4000ms。
+-->
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px; }
+  .tick { color: #4a5568; font-variant-numeric: tabular-nums; }
+  button { padding: 6px 16px; border: 1px solid #cbd5e0; border-radius: 6px; background: #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>slow-settle / late hit</h1>
+<p>页面持续突变（水合中间态），稳定门恒超时：<span id="tick" class="tick">0</span></p>
+<button id="static-btn">静态按钮</button>
+<div id="late-host"></div>
+<p id="out">idle</p>
+<script>
+  (function () {
+    var tick = document.getElementById("tick");
+    var n = 0;
+    setInterval(function () { tick.textContent = String(++n); }, 40);
+    window.__hits = [];
+    setTimeout(function () {
+      var b = document.createElement("button");
+      b.id = "late-btn";
+      b.textContent = "迟到按钮";
+      b.addEventListener("click", function () {
+        window.__hits.push("late-btn");
+        document.getElementById("out").textContent = "clicked late-btn";
+      });
+      document.getElementById("late-host").appendChild(b);
+    }, 3000);
+  })();
+</script>
+</body>
+</html>

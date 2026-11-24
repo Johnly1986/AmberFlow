@@ -381,6 +381,8 @@ export function validateCollectRequest(req: unknown): void {
  *   - `offset` **只认第二参**：写成 inline spec 键（`{ rows, fields, offset }`）= 结构化
  *     `config_error` 并指路（spec 是声明，offset 是这一次调用的读取位置，两者不混）；
  *   - 未知第二参键不静默忽略（allowed: offset）；
+ *   - inline spec 的 `maxItems` 必须是整数 1..500（NaN/负数/小数/超界 = `config_error`）：
+ *     每页上限被悄悄 clamp/取整会让「续页不重不漏」的声明变成假话，非法值必须在入口红；
  *   - 整数 0..10000；负数/小数/字符串/越界都是 `config_error`（绝不自己 clamp —— 分页起点
  *     被悄悄改掉会让「续页不重不漏」变成假话）。
  *
@@ -391,6 +393,14 @@ export function validateExtractOptions(nameOrSpec: unknown, opts: unknown): numb
     throw new StopError("config_error",
       "ctx.extract: offset is the SECOND argument, not a spec key — call ctx.extract(spec, { offset }) "
       + "(inline spec keys are rows/fields/maxItems)");
+  }
+  if (isObj(nameOrSpec) && nameOrSpec["maxItems"] !== undefined) {
+    const maxItems = nameOrSpec["maxItems"];
+    const shown = typeof maxItems === "number" ? String(maxItems) : JSON.stringify(maxItems);
+    if (typeof maxItems !== "number" || !Number.isInteger(maxItems) || maxItems < 1 || maxItems > 500) {
+      throw new StopError("config_error",
+        `ctx.extract: spec.maxItems must be an integer in [1, 500] (got ${shown})`);
+    }
   }
   if (opts === undefined) return 0;
   if (!isObj(opts)) {

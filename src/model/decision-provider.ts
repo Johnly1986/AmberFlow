@@ -1,7 +1,7 @@
 /**
  * **决策提供者层**（provider seam；接口类型已下沉 `src/support/decision-provider-contract.ts`）——把"问哪个决策模型"从执行器里分出来。
  *
- * 为什么要多这一层（2026-10-13）：项目方要**换不同的决策模型做测试**，而原来的缝
+ * 为什么要多这一层：项目方要**换不同的决策模型做测试**，而原来的缝
  * （`src/model/model.ts` 的 `LayaRuntime`）是 **laya 形状的**：它要求一个 laya `DecisionAgent`、
  * 要求调用方自己构造 `criteria_view`、并把"两种含义共用一个 `confidence`"这个坑写死在返回里
  * （passthrough 时 `conf = 1 − H/log k`，短名单时 `conf = max(子集概率)`——W0 实测两者方向相反）。
@@ -22,15 +22,14 @@
  *    被误报成 action space exhausted。
  *
  * 与旧缝的关系：`LayaRuntime` **保留**，它是 laya 的实现细节；`layaProvider()` 把它包成
- * provider。`installLayaRuntime()` 仍是 51 个文件在用的那扇门，两扇门最终汇到同一处
- * （见 `resolveForMiddleware`）。
+ * provider。`installLayaRuntime()` 仍是 51 个文件在用的那扇门。
  */
 import { ariaInteractiveLines, criteriaView, stateText, urlOf, type PageLike } from "../engine/extraction.ts";
 import { withDecisionCache, type DecisionCacheStats } from "./decision-cache.ts";
 import { decisionServiceConfigured } from "../support/decision-env.ts";
 import * as layaModelModule from "./model.ts";
 import {
-  getLayaRuntime, installLayaRuntime, countingRuntime,
+  installLayaRuntime, countingRuntime,
   type DecisionAgent, type LayaRuntime, type ModelState,
 } from "./model.ts";
 import { choiceInstructions, RISK_INSTRUCTIONS_LONG, doneInstructionsLong } from "../prompts/model-prompts.ts";
@@ -81,18 +80,6 @@ export function listDecisionProviders(): string[] {
 /** 装上当前 provider（`null` = 不装，执行器进 rules-only）。 */
 export function installDecisionProvider(p: DecisionProvider | null): void {
   active = p;
-}
-
-export class DecisionNotConfiguredError extends Error {
-  constructor(what: string) {
-    super(`decision provider not configured (${what}): call installDecisionProvider() first`);
-    this.name = "DecisionNotConfiguredError";
-  }
-}
-
-export function getDecisionProvider(): DecisionProvider {
-  if (!active) throw new DecisionNotConfiguredError("getDecisionProvider");
-  return active;
 }
 
 export function decisionProviderOrNull(): DecisionProvider | null {
@@ -168,7 +155,7 @@ function annotateAskFailure(err: unknown): unknown {
 /* ── 选择：三件套 / 显式名字 → 哪扇门（CLI 与配置都走这一个函数） ─────────── */
 
 /*
- * 选择规则（2026-10-26 项目方纠正）：
+ * 选择规则（项目方纠正）：
  *   - 线上：有 `AMBERFLOW_DECISION_BASE_URL` 就是线上服务，地址/密钥/模型三件套足够，
  *     **不再需要 provider 键**；协议按 URL 推断，必要时用 `AMBERFLOW_DECISION_PROTOCOL` 覆盖。
  *   - 本地：没有服务地址时用本地模型，`AMBERFLOW_DECISION_MODEL` 选 checkpoint。
@@ -177,15 +164,6 @@ function annotateAskFailure(err: unknown): unknown {
 
 /** 内建名字：走旧的 `LayaRuntime` 门（checkpoint 路由、换入换出都在执行器那边）。 */
 export const BUILTIN_LAYA_PROVIDERS = ["laya-onnx", "scripted-stub", "none"] as const;
-
-export interface Selection {
-  /** 实际生效的 provider 名字（写进产物，供报告与 A/B 对照）。 */
-  provider: string;
-  /** 层级：**有决策层在场就是 `on`**，基线 provider 也算 on（它确实被咨询了）。 */
-  tier: string;
-  /** 是不是消融臂（`scripted-stub` / `none`）——只有消融臂的"过关 0"不算证据。 */
-  ablation: boolean;
-}
 
 /** 解析结果：调用方拿到"该装什么"，自己决定要不要再包缓存/计数（app-runner 必须包）。 */
 export type ProviderSpec =
@@ -278,9 +256,9 @@ export interface AppliedSpec {
 
 /**
  * 按 `ProviderSpec` 安装决策源的**唯一**序列。
- * 前身是两处手抄（app-runner main 的缓存/计数安装与 tools/apps_suite.ts 的同一段），
- * start 与 online 接智能缺省是后续安装者——按本仓库"两份实现各扫各的"的复发教训，
- * 先收敛成一个函数再让四个门都用它。每次先清空两扇全局（provider 与 runtime），
+ * 各入口（start / online / 原始工具）的缓存与计数安装都收敛到这里——按本仓库
+ * "两份实现各扫各的"的复发教训，先收敛成一个函数再让所有入口都用它。每次先清空
+ * 两扇全局（provider 与 runtime），
  * 任何残留都不许悄悄改变这一跑的决策来源。
  */
 export async function applySpecToRuntime(spec: ProviderSpec): Promise<AppliedSpec> {
@@ -399,18 +377,6 @@ export async function resolveProviderSpec(
 /** 小工具：同步拿 model.ts 的替身工厂（它在 ESM 下已是静态依赖，这里只为避免顶层循环）。 */
 function require0(): typeof import("./model.ts") {
   return layaModelModule;
-}
-
-/** 解析 + 安装（简单调用方用；需要包缓存/计数的用 `resolveProviderSpec`）。 */
-export async function applyDecisionSelection(
-  name?: string | null, env: NodeJS.ProcessEnv = process.env,
-): Promise<Selection> {
-  const spec = await resolveProviderSpec(name, env);
-  const { installLayaRuntime } = await import("./model.ts");
-  if (spec.kind === "none") { installLayaRuntime(null); installDecisionProvider(null); }
-  else if (spec.kind === "laya") { installLayaRuntime(await spec.make()); installDecisionProvider(null); }
-  else { installDecisionProvider(spec.provider); }
-  return { provider: spec.name, tier: spec.tier, ablation: spec.ablation };
 }
 
 /* ── laya 适配器：把旧的 LayaRuntime 包成 provider ───────────────────────── */
@@ -535,20 +501,3 @@ export function layaProvider(opts: {
   };
 }
 
-/**
- * 执行器解析自己该用哪个 provider：
- *   ① 显式装了 provider ⇒ 用它（换模型测试走这条路）；
- *   ② 只装了旧的 `LayaRuntime`（那 51 个文件的做法）⇒ 就地包一层，行为不变；
- *   ③ 什么都没装 ⇒ null，执行器进 rules-only。
- */
-export function resolveForMiddleware(ctx: {
-  agentFor: (state: ModelState) => Promise<{ agent: DecisionAgent; embedFn: unknown }>;
-}): DecisionProvider | null {
-  if (active) return active;
-  try {
-    return layaProvider({ runtime: getLayaRuntime(), agentFor: ctx.agentFor,
-      name: "laya(legacy-runtime)", capabilities: { score_kind: "entropy_conf" } });
-  } catch {
-    return null;                      // 没有 runtime：调用方按 rules-only 处理
-  }
-}

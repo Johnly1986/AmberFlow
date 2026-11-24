@@ -14,7 +14,7 @@
  * 好几件事（不装 runtime、风险头、完成投票）。`always-abstain` 只改一件事。
  *
  * 注册在 `registerBaselines()`（幂等）。用 `--provider coin-flip` 选中（仅实验/对照，
- * 不写进配置），见 `applyDecisionSelection`。
+ * 不写进配置），见 `resolveProviderSpec`。
  */
 import {
   registerDecisionProvider, type ChoiceOutcome, type ChoiceRequest, type DecisionProvider,

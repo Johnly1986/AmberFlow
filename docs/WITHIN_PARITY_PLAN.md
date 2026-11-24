@@ -1,6 +1,6 @@
 # E 批方案：within 权威对等 + 读侧帧限定（v1.1 · 已评审：CONDITIONAL APPROVE，M1–M6 已吸收）
 
-> 状态：**待架构师评审**。来源：`frame:<origin>` 落地后 `docs/BACKLOG.md`「frame:<origin> 后续立项」#1/#2/#3/#4/#5 + §13.4 延后项 + 小项 #12/#13/#14。
+> 状态：**已实施（E2–E6 批已落地，实施记录见各节与 `CHANGELOG.md`；提交号由 lead 落定）**。来源：`frame:<origin>` 落地后 `docs/BACKLOG.md`「frame:<origin> 后续立项」#1/#2/#3/#4/#5 + §13.4 延后项 + 小项 #12/#13/#14。
 > 姊妹篇：`docs/FRAME_SCOPE_HINT_PLAN.md`（frame:<origin>，已实施，§13 为实施记录）。本文只写**增量**，不重复其语义。
 
 ## 1. 目标与非目标

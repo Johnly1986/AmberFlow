@@ -8,10 +8,16 @@
  *
  * 观测口径（全部确定性、与时机无关）：
  *   - DOM 事实：title / 元素计数 / 文本前缀；
- *   - 引擎元素池：`extractElements` 的行（ref + scan + 稳定字段），按 scan 升序；
+ *   - 引擎元素池：`extractElements` 的行（scan + 稳定字段），按 scan 升序；
  *   - hint 事实：代表性 hint 的 `hintCandidates` 计数/档位/裁决与 `hintMatch` 结果；
  *   - 网络事实：页面发出的外部请求数必须恒为 0（本 lane 的「不联网」自证）。
  * 归一化：`http://127.0.0.1:<随机端口>` → `<LOCAL>`；JSON 键递归排序后再比对。
+ * 比对口径：`ref`（`e0…`）是抽池时按枚举顺序分配的**位置性句柄**——同一代码状态内分配确定
+ * （连跑两次 `--record` 逐字节一致），但抽池实现/枚举顺序一变就整体重排（实测基线记录后
+ * 一次池面演进让 filter-bar 的三行只换编号、元素集合不变），所以它不是页面/引擎行为契约。
+ * 比对前按元素身份（tag/label/scan 等稳定字段）归一：`refs` 比顺序无关**多重集**，
+ * `match`/`decided` 比身份，`ref_count` 仍钉数量（见 `identityView`）。
+ * golden 存原始观测（含当次 ref 编号）；两侧都在身份视图上比，所以纯编号漂移不触发重录。
  *
  * 用法：
  *   node --experimental-strip-types tools/verify-offline.ts            # 比对（默认 --check）
@@ -95,6 +101,102 @@ function normalize(value: unknown): unknown {
 
 function stableStringify(value: unknown): string {
   return `${JSON.stringify(normalize(value), null, 2)}\n`;
+}
+
+/* ------------------------------------------------------------------ 比对视图 */
+
+/**
+ * 元素身份（ref 归一化的唯一出处）：`ref`（`e0…`）是抽池时按枚举顺序分配的位置性句柄，
+ * 抽池实现/枚举顺序变化会让同一个元素换编号——编号本身不是页面或引擎行为契约；
+ * 元素身份才是（tag/label/scan 等稳定字段）。身份 = 池投影行的全部稳定字段（除 ref 外），
+ * 键按字典序编码成可读串。
+ */
+function rowIdentity(row: Record<string, unknown>): string {
+  return Object.keys(row)
+    .filter((key) => key !== "ref")
+    .sort()
+    .map((key) => `${key}=${JSON.stringify(row[key])}`)
+    .join("|");
+}
+
+/** 池 ref → 元素身份（同一池内一一对应）。 */
+function refIdentityMap(pool: unknown): Map<string, string> {
+  const map = new Map<string, string>();
+  const rows = pool !== null && typeof pool === "object"
+    ? (pool as Record<string, unknown>)["rows"]
+    : undefined;
+  if (!Array.isArray(rows)) return map;
+  for (const row of rows) {
+    if (row === null || typeof row !== "object") continue;
+    const ref = (row as Record<string, unknown>)["ref"];
+    if (typeof ref === "string") map.set(ref, rowIdentity(row as Record<string, unknown>));
+  }
+  return map;
+}
+
+/** ref → 身份；解析不到时保留原文并显式标记（不静默当成未变化）。 */
+function refIdentity(ref: string, map: Map<string, string>): string {
+  return map.get(ref) ?? `<unresolved ref ${JSON.stringify(ref)}>`;
+}
+
+/** ref 列表 → 元素身份**多重集**（排序后比较，顺序无关；数量由 ref_count 单独钉住）。 */
+function refIdentityMultiset(value: unknown, map: Map<string, string>): unknown {
+  if (!Array.isArray(value)) return value;
+  const out: string[] = value.map((item) => (typeof item === "string" ? refIdentity(item, map) : String(item)));
+  out.sort();
+  return out;
+}
+
+/**
+ * 池投影的比对视图：行只留身份字段（ref 是位置性句柄）；count 等其它事实原样。
+ * 行序由池投影的 scan 排序保证，不再按 ref 排序。
+ */
+function poolIdentityView(pool: unknown): unknown {
+  if (pool === null || typeof pool !== "object") return pool;
+  const obj = pool as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (key !== "rows" || !Array.isArray(value)) {
+      out[key] = value;
+      continue;
+    }
+    out[key] = value.map((row) => {
+      if (row === null || typeof row !== "object") return row;
+      const clean: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(row as Record<string, unknown>)) if (k !== "ref") clean[k] = v;
+      return clean;
+    });
+  }
+  return out;
+}
+
+/**
+ * 一份观测的比对视图：把位置性 ref 全部归一成元素身份，其余事实原样递归。
+ *   - `pool.rows`：剔除 ref，只留身份字段；
+ *   - `hints.<hint>.refs`：身份多重集（顺序无关），`ref_count` 原样保留（数量是行为事实）；
+ *   - `hints.<hint>.match` / `decided`：ref → 身份（裁决看「哪个元素」，不看「几号」）；
+ *   - `ref_order`：ref 序列 → 身份序列（拾取序是事实，只消编号漂移）；
+ *   - 其它键原样递归。遇到 `pool` 就为所在层重建 ref→身份表——overlay 的 on/off 是两张
+ *     互不相干的池，ref 编号各自从零开始，不能共表。
+ */
+function identityView(node: unknown, inherited?: Map<string, string>): unknown {
+  if (Array.isArray(node)) return node.map((item) => identityView(item, inherited));
+  if (node === null || typeof node !== "object") return node;
+  const obj = node as Record<string, unknown>;
+  const map = "pool" in obj ? refIdentityMap(obj["pool"]) : (inherited ?? new Map<string, string>());
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (key === "pool") out[key] = poolIdentityView(value);
+    else if (key === "refs") out[key] = refIdentityMultiset(value, map);
+    else if (key === "ref_order") {
+      out[key] = Array.isArray(value)
+        ? value.map((item) => (typeof item === "string" ? refIdentity(item, map) : item))
+        : value;
+    } else if ((key === "match" || key === "decided") && typeof value === "string") {
+      out[key] = refIdentity(value, map);
+    } else out[key] = identityView(value, map);
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ 观测 */
@@ -463,8 +565,9 @@ function check(observations: Record<string, unknown>): string[] {
       continue;
     }
     const expected = (golden as { expected?: unknown }).expected;
-    const actualText = stableStringify(expectedOf(observations, testCase.name));
-    const expectedText = stableStringify(expected);
+    // 比对在「元素身份视图」上进行：ref 编号漂移不红，池构成/命中身份/数量变化照红。
+    const actualText = stableStringify(identityView(expectedOf(observations, testCase.name)));
+    const expectedText = stableStringify(identityView(expected));
     if (actualText === expectedText) continue;
     // 首个差异：给出行号 + 左右值，便于定位（不打印整份 golden）。
     const expLines = expectedText.split("\n");

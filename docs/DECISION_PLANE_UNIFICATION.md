@@ -1,6 +1,6 @@
 # 决策平面统一与决策上文优化（ADR-001）
 
-> 状态：**已裁决（2026-11-23）；P0 实施中**。决策依据：代码走读（`decision-ask.ts` /
+> 状态：**已裁决（2026-11-23）；P0–P3b 已落地**。决策依据：代码走读（`decision-ask.ts` /
 > `decision-pick-phase.ts` / `pilot-ask-adapter.ts` / `system-one-client.ts` /
 > `decision-ask-contract.ts`）+ 本地 mock SystemOne 抓包（12 条真实请求体，证据在仓库外）。
 > 本文件是「决策入口统一 + 上下文分层」的裁决与实施台账；DC 契约条款本身见
@@ -49,7 +49,7 @@
 
 ## 4 实施台账
 
-### P0（进行中）
+### P0（已落地）
 
 | 项 | 文件 | 状态 |
 |---|---|---|
@@ -97,9 +97,6 @@
 | 执行臂分派：默认统一入口，executor 只调 `runPickPhase` | `src/engine/decision-pick-arm.ts`（新，20 行）、`executor.ts` | 已落地 |
 | A/B 等价：`verify:decision-characterization` **默认/对照臂双跑均 11/11 金标一致**；pilot 16/16、parity、runtime-offline 8/8、decision-context 76 项、`npm run check` 全绿 | lanes | 已验证 |
 
-**P3 未纳入（后续批）**：`risk`/`done` 询问的 question-kind 统一、`DecisionAsk` 契约 v6 与
-MAINLINE seam 表登记（拿去跟 pick 平面分开评审，避免一次改 seam 面过大）。
-
 ### P3b（已落地）
 
 | 项 | 文件 | 状态 |
@@ -107,7 +104,7 @@ MAINLINE seam 表登记（拿去跟 pick 平面分开评审，避免一次改 se
 | 契约 v6：`DECISION_ASK_CONTRACT_VERSION` 5→6；question kind 闭集（pick/risk/done） | `src/engine/decision-ask-contract.ts` | 已落地 |
 | risk/done provider 直调收口为访问面（capability 判断在入口、异常归调用方 catch，降级语义不变） | `src/engine/decision-questions.ts`（新）、`executor.ts` | 已落地 |
 | MAINLINE seam 表登记 v6：run 默认统一编排、phase 为 A/B 对照臂、question kind 闭集 | `docs/MAINLINE.md` | 已落地 |
-| 验证 | lanes + `online/` 用例测试 | 进行中 |
+| 验证 | lanes + `online/` 用例测试 | 已完成（见下 P3b 验证） |
 
 ### P3b 验证
 
@@ -119,10 +116,6 @@ MAINLINE seam 表登记（拿去跟 pick 平面分开评审，避免一次改 se
 
 > 若要让 core 11/11：修本机 `AMBERFLOW_DECISION_*` 权益（或经 DSH 桥的部署配置运行）。
 > 本 ADR 不把环境性 403 视为决策平面回归。
-
-### P3（待 P2 等价）
-
-裁决/R2b/族修复迁入；`decision-pick-phase` 退役为对照臂；risk/done 纳入同一入口。
 
 ### 证据覆盖与金标换基（审计第 1 项）
 

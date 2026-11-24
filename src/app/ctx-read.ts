@@ -93,7 +93,7 @@ async function tryBatchExtractRows(
 
 /**
  * 行抽取旧路径（**语义源**）：逐行逐字段 locator 读，实现逐字保留（含 1500ms 超时帽、
- * catch→inputValue 兜底、task-24/3c 属性投影）。批量快路径不可用/页内失败时的唯一回退，
+ * catch→inputValue 兜底、属性投影）。批量快路径不可用/页内失败时的唯一回退，
  * 也是快路径语义对齐的基准——改这里 = 改抽取语义，必须连带核对 tryBatchExtractRows。
  */
 async function extractRowsLegacy(
@@ -113,7 +113,7 @@ async function extractRowsLegacy(
         if (cellSel === "." || cellSel === ":scope") {
           if (typeof locators.innerText === "function") value = await locators.innerText({ timeout: 1500 });
         } else if (cellSel.startsWith("@") && cellSel.length > 1) {
-          // task-24/3c：属性投影（opt-in——"@" 前缀）——读**行元素自身**的 attribute
+          // 属性投影（opt-in——"@" 前缀）——读**行元素自身**的 attribute
           //（如 fields:{rating:"@aria-label"}；无子选择器、无行内回退；读不到 → "" 与现行为一致）。
           // 旧 fields（无 @ 前缀）逐字节不变。
           if (typeof locators.getAttribute === "function") {

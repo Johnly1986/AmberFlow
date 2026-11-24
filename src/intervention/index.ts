@@ -24,8 +24,6 @@ export const RESCUE_KINDS = {
   authorization:{ stop_code: "needs_human", who_can_fix: "human-authorization", text: "authorization"  },
 } as const;
 
-export type KnownRescueKind = keyof typeof RESCUE_KINDS;
-
 /** 结构化拒收（形状/大小校验失败）：宿主把它映射成 config_error，不抛裸栈。 */
 export class RescueValidationError extends Error {
   constructor(message: string) {
@@ -128,7 +126,7 @@ export interface RescueChain {
   readonly onShadow?: (record: RescueShadowRecord) => void;
 }
 
-/** 内建通道注册（channels.ts 提供；宿主可注入自定义通道）。 */
+/** 内建通道（单源：`pickChannel`；宿主可注入自定义通道）。 */
 export interface ResolveOptions {
   /** 显式注入的同步 handler（最高优先级；来自 ctx.manual 的 manualRunner / journey manualHandler）。 */
   readonly handler?: (req: RescueRequest, signal?: AbortSignal) => Promise<RescueOutcome> | RescueOutcome;

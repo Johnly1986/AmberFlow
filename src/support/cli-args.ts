@@ -6,7 +6,7 @@
  * 的处理是"缺什么 + 一条补齐命令"（`src/cli/start.ts` 的 MODEL_MISSING_LINE），
  * UX 评审轮也把"使用者完全看不懂的报错"逐个修成了点名式（REFUSAL_LABELS、
  * `step N names no target: …`、`--slot` 未声明键）。unknown-option 是同一类缺陷，
- * 只是此前没人接住它。实测（2026-10-14，开箱测试轮）：
+ * 只是此前没人接住它。实测（开箱测试轮）：
  *   `npm start -- --out /tmp/x`  → ERR_PARSE_ARGS_UNKNOWN_OPTION 裸堆栈；
  *   `plan-cli add --signal 'css_text_equals=#only'` → `needs 'selector|value'` 裸堆栈。
  *

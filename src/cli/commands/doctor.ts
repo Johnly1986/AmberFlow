@@ -12,7 +12,7 @@ import { listAppInfos } from "./apps.ts";
 import { userConfigPath, projectConfigPath, resolveConfig } from "../../support/config-store.ts";
 import { cliInvocationLine, detectCliInvocation, INVOKE_FALLBACKS, LINK_HINT } from "../invocation.ts";
 import { missingPieces } from "../../model/model-artifacts.ts";
-// task-14：探针底座共享（run 起跑探测与 doctor 单一出处）。
+// 探针底座共享（run 起跑探测与 doctor 单一出处）。
 import { probeDecisionPlane } from "../../model/decision-probe.ts";
 
 export async function runDoctor(args: string[], ctx: CliContext): Promise<number> {
@@ -267,11 +267,11 @@ interface AskProbeResult {
  * `doctor` 缺省执行（在线决策源存在时；`--ask-probe` 强制、`--no-ask-probe` 关闭）的 ask 探针：
  * 用与运行时**完全相同**的装配路径（resolveProviderSpec → applySpecToRuntime → provider.pick）
  * 真实发一次最小 pick 请求（一次 HTTP 请求，超时按 `AMBERFLOW_DECISION_TIMEOUT_MS`）。
- * doctor 的静态段只证明"配置项在不在"，证明不了"凭据真的能过网关"——2026-11-02 实测：
+ * doctor 的静态段只证明"配置项在不在"，证明不了"凭据真的能过网关"——实测：
  * 三层配置齐全、doctor 全绿，三件套凭据在网关上是 403 AccessDenied.Unpurchased，而引擎把这次
  * 失败吞成「模型被咨询 1 次（1 次未过闸门）」静默降级。这个探针就是那类故障的直达检查：
  * HTTP 成败给 ref/conf，失败给状态码+错误关键句（不含也不回显任何凭据）。
- * task-14：探针底座抽到 `model/decision-probe.ts` 共享（run 起跑探测与 doctor 单一出处）。
+ * 探针底座抽到 `model/decision-probe.ts` 共享（run 起跑探测与 doctor 单一出处）。
  */
 async function runAskProbe(
   provider: typeof import("../../model/decision-provider.ts"),

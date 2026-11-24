@@ -48,7 +48,6 @@
 | `src/support/intervention-contract.ts` | 合同**类型**（零 import 叶子） | 无 | 一切 |
 | `src/support/intervention-texts.ts` | 求援提示词**数据**（零 import 叶子） | 无 | 一切 |
 | `src/intervention/index.ts` | 编排：状态、顺序链、幂等 | `node:*` + 上述两个 support 文件 | app/engine/model/cli/browser/data/integrations |
-| `src/intervention/channels.ts` | 内建通道（TTY / StructuredStop / FailFast / Handler 桥接） | 同上 | 同上 |
 | `src/app/intervention-adapter.ts` | **唯一** app ↔ 模块适配（ctx.manual / manual_steps / trace / result 映射；`StopError` 映射） | app 层正常依赖 | 模块不反向依赖它 |
 
 理由（架构研判采纳）：仓库目标是 L0–L6 分层（`docs/IMPROVEMENT_PLAN.md` 方案 B 层表），新顶层目录必须**登记为 L1.5**（`ARCHITECTURE.md` §2/§5 层表 + IMPROVEMENT_PLAN，按小节名锚定不用行号），否则是未治理的第八层。合同与文本必须零依赖，才能被 `src/cli/schema-gen.ts`、`tools/prompt-hit.ts` 与桥生成物共同消费；runtime 只依赖叶子。

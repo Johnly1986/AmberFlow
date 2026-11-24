@@ -62,7 +62,7 @@ export interface SystemOneProfile {
   /**
    * choice 题的 `state` 构造（可异步读页面：url/标题/正文窗口）。
    * 缺省不声明 ⇒ `{goal}` 逐字节照旧（默认等价纪律；jevk5/bailian 今天就是这形状）。
-   * 存在的理由（2026-10-20 实测）：token-plan 的 choice conf 0.03、风险票 0.47——而它
+   * 存在的理由（实测）：token-plan 的 choice conf 0.03、风险票 0.47——而它
    * 被问时**看不见页面**（state 只有 goal、criteria 只有 label）。本地 laya 分支从来带
    * `url/title/main_text`（decision-provider.ts 的 layaProvider.pick）——同一个决策问题，
    * 两条分支的信息量不该不对称；"pool 是模型的全世界"这条认识论同样适用于观察侧。
@@ -88,7 +88,7 @@ export interface SystemOneProfile {
 
 /**
  * 从错误体抽一句人读的原因——对象字段先挖 .message/.code，再兜底 stringify，绝不 [object Object]。
- * A3（2026-11-02 实测 token-plan 403）：`.code`（AccessDenied.Unpurchased）与 `.message`（人话）
+ * A3（实测 token-plan 403）：`.code`（AccessDenied.Unpurchased）与 `.message`（人话）
  * 是两句话，message-first 的旧口径会把可检索的 machine code 整个丢掉——负路径排查靠的就是
  * 这个 code。现在 code 与人话并排透出；非 JSON 错误体（网关 HTML/纯文本兜底页）也把原文
  * 关键句带回来，不再输出「(HTTP 403，无 error 字段)」这种没内容的行。

@@ -1,5 +1,5 @@
 /**
- * S3 套件聚合器原语（P2-2.2-3）：`online/runner.ts` 里「退出码分类 / probe 期望映射」
+ * S3 套件聚合器原语（P2-2.2-3）：`src/online/runner.ts` 里「退出码分类 / probe 期望映射」
  * 两个纯策略从编排中抽出为单点，供套件聚合器与后续 `runExecution` 组合根复用。
  *
  * 契约（行为冻结，逐字节从 runner 搬移）：

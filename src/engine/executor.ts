@@ -209,6 +209,17 @@ import {
 
 /* ------------------------------------------------------------------ run ctx */
 
+/** F72-②：一次 rehydrate 重扫的事实（本机制至多一次/run；trace 行与运行汇总是同一份证据）。 */
+export type RehydrateRescanFact = {
+  waited_ms: number; pool_size_before: number; pool_size: number; resolved: boolean; ref?: string;
+};
+
+/** F72-②：strict 停因尾缀——本步重扫跑过且仍未命中（与 session act 面同款文案；没跑过 = 空串）。 */
+function rehydrateRescanMissNote(fact: RehydrateRescanFact | null): string {
+  return fact === null ? ""
+    : `；rehydrate_rescan 已等 ${fact.waited_ms}ms 重抽池（${fact.pool_size} 项）仍未命中`;
+}
+
 /**
  * F3：run() 报告尾（runReportTail）的只读上下文。它是 run() 执行循环结束后
  * 的状态快照——false_done 复核 / 审计 / 限速嗅探 / diagnostics / 最终 RunReport
@@ -245,6 +256,8 @@ export interface RunReportTailCtx {
   cmdSpace: CommandDecl[];
   verbose: boolean;
   poolReady: boolean;
+  /** F72-②：本 run 的重扫事实；trace 行未承载时（strict 落空在动作行之前早停）报告尾退化为它。 */
+  rehydrateRescanFact: RehydrateRescanFact | null;
   stop: (code: StopCode, detail?: string, at?: number) => void;
 }
 
@@ -2081,6 +2094,7 @@ export class BrowserMiddleware {
     let lastPoolSize = 0;
     // task-11（B3）：报告期限速嗅探要用的跨循环事实（步循环内的块作用域变量够不着报告点）。
     let lastPageRef: AnyPage | null = null;
+    let lastRehydrateRescanFact: RehydrateRescanFact | null = null;   // F72-②：trace 无承载行时报告尾退化用它
     let lastDeclaredHiddenBox: { target: string; hidden: number; total: number } | null = null;
     // 闭包内的赋值 TS 控制流看不见（与 getDeclared 同一个坑）——getter 返回注解类型。
     const getLastDeclaredHidden = (): { target: string; hidden: number; total: number } | null =>
@@ -2323,10 +2337,7 @@ export class BrowserMiddleware {
               : "the declared clickAt binding has no value (coordinates come from the plan, never guessed)";
           }
         }
-        // F72-②：显式重扫事实（本步内至多一次；trace 行/运行汇总用）。
-        let rehydrateRescanFact: {
-          waited_ms: number; pool_size_before: number; pool_size: number; resolved: boolean; ref?: string;
-        } | null = null;
+        let rehydrateRescanFact: RehydrateRescanFact | null = null;   // F72-②：本步重扫事实（至多一次；trace 行/汇总用）
         // F75：DOM 回退跳的章与证据（命中才非空；章随动作尝试结束清，与 FW8/DRF 同纪律）。
         let domFallbackRef: string | null = null;
         let domFallbackCleanupFn: (() => Promise<void>) | null = null;
@@ -2496,6 +2507,7 @@ export class BrowserMiddleware {
               waited_ms: waitMs, pool_size_before: Object.keys(elems).length,
               pool_size: Object.keys(fresh).length, resolved: false,
             };
+            lastRehydrateRescanFact = rehydrateRescanFact;
             if (freshGate.ref !== null && !(freshGate.ref in forbidden)) {
               elems = fresh;
               ruleRef = freshGate.ref;
@@ -2639,7 +2651,7 @@ export class BrowserMiddleware {
               weakRejectedReason(weakRejected, curHint, stepNo, poolSize, summary)
               + identityHiddenSuffix(targets.identityHidden) + declaredHiddenSuffix(targets.getDeclaredHidden()) + declaredMissSuffix(targets.declaredMiss) + drfHintSuffix(this.targetResolutionDeclared)
               + (frameNote ? ` — ${frameNote}` : "")
-              + windowChainMissSuffix(windowChainFacts), stepNo);
+              + windowChainMissSuffix(windowChainFacts) + rehydrateRescanMissNote(rehydrateRescanFact), stepNo);
           } else {
             // F73：解析链列举句按声明状态条件化——declared 场景下 DRF 是链的一环，实跑了
             // 就要被点名（缺省未声明时串逐字节不变）。
@@ -2668,7 +2680,7 @@ export class BrowserMiddleware {
               + domFallbackMissSuffix() + drfHintSuffix(this.targetResolutionDeclared)
               + (frameNote ? ` — ${frameNote}` : "")
               + domProbeNote
-              + windowChainMissSuffix(windowChainFacts), stepNo);
+              + windowChainMissSuffix(windowChainFacts) + rehydrateRescanMissNote(rehydrateRescanFact), stepNo);
           }
           if (verbose) console.log(`  step ${stepNo}: ${acct.stopReason}`);
           break;
@@ -2766,6 +2778,7 @@ export class BrowserMiddleware {
       cmdSpace,
       verbose,
       poolReady,
+      rehydrateRescanFact: lastRehydrateRescanFact,
       stop: () => {},
     };
     // ctx.stop 包装原 stop 闭包，并把新停因同步回 ctx（false_done 档需要读到新值）。

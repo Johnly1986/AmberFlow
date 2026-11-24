@@ -34,7 +34,7 @@ export function startUrl(u: string): string {
 }
 
 // S0 上下文实验用：页面状态采集的**单一出处**在 `src/model/page-context.ts`（实验台与运行期共用）；
-// 这里保留同名导出，既有导入面（tools/instruction_nomination.ts 等）不用改。
+// 这里保留同名导出，既有导入面不用改。
 export { captureStepStateView, type StepStateView };
 export interface AppRunOptions {
   /** 覆盖包的槽位（`--slot k=v`）。值仍然只来自计划。 */

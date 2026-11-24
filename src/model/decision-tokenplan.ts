@@ -8,7 +8,7 @@
  * **端点只从环境读（`TOKEN_PLAN_ENDPOINT`）**：共享层的"外部主机不许写死"纪律
  * 与 LLM 的 `OPENAI_BASE_URL` 同一条。
  *
- * 2026-10-15 实测（`POST …/compatible-mode/v1/systemone`，token 只从环境读）：
+ * 实测（`POST …/compatible-mode/v1/systemone`，token 只从环境读）：
  *   - choice 3 选项：`{answers:{act:{type:"choice",choice,confidence:0.97,probabilities:{e1:0.98,e2:0.02,e3:0}}}}`
  *     —— **confidence(0.97) ≠ max(prob)(0.98)**，与百炼同族标定语义（score 取 confidence，
  *     pTop1/pTop2/margin 取分布，score_kind=calibrated_prob）；
@@ -44,7 +44,7 @@ const CAPABILITIES: ProviderCapabilities = {
 };
 
 /**
- * 自报闸门刻度（`ProviderInfo.floor`）：**实测边界** 2026-10-15 —— camera-entry（hintless 包）
+ * 自报闸门刻度（`ProviderInfo.floor`）：**实测边界**——camera-entry（hintless 包）
  * 上模型对某个元素的把握是 0.20，在全局缺省 0.25 下被硬阻塞；floor≤0.20 即恢复 4/4 且不变量全绿
  * （0.20/0.15/0.10 三档同形，松闸没带来错点——每步仍由该步信号裁决）。
  * **边界**：这是单包单点测出来的刻度，不是普适校准；包可用 `policy.conf_floor` 覆盖、CLI 可本次覆盖。
@@ -80,7 +80,7 @@ export function tokenPlanProvider(opts: TokenPlanOptions = {}): DecisionProvider
       if (!keyOf()) missing.push("API key（TOKEN_PLAN_API_KEY 或 DASHSCOPE_API_KEY）");
       const ep = opts.endpoint ?? env.TOKEN_PLAN_ENDPOINT ?? "";
       if (!ep) missing.push("端点（TOKEN_PLAN_ENDPOINT，完整 URL）");
-      // 形状错误同样属于启动期就能判定的配置错误（实测 2026-10-20：endpoint 抄到 /v1 为止、
+      // 形状错误同样属于启动期就能判定的配置错误（实测：endpoint 抄到 /v1 为止、
       // 少了 /systemone 后缀 ⇒ 网关 400 "url error"，风险闸门悄悄退化成关键词规则——
       // 那是一次**不正常**的闸门运行，不该等跑到一半才由退化警告说明）。
       else if (!/\/systemone\/?$/.test(ep)) {
@@ -96,7 +96,7 @@ export function tokenPlanProvider(opts: TokenPlanOptions = {}): DecisionProvider
     validateChoiceInPool: true,
     // 问法与百炼同族（同一 decision-model-preview 后端；措辞唯一出处 = src/prompts/model-prompts.ts）。
     choiceInstructions,
-    // **带上文**（2026-10-20）：choice 的 state 从 `{goal}` 扩为 `goal+url+title+main_text`，
+    // **带上文**：choice 的 state 从 `{goal}` 扩为 `goal+url+title+main_text`，
     // 与本地 laya 分支的 pick 同一口径（复用 stateText/urlOf，不新造渲染）——之前模型在
     // "看不见页面"的条件下被问，conf 0.03 究竟多少归能力、多少归信息量，必须先补上信息量再测。
     // 消融开关：AMBERFLOW_DECISION_STATE_CONTEXT=0（旧名 TOKEN_PLAN_STATE_CONTEXT 兼容）回到旧问法。

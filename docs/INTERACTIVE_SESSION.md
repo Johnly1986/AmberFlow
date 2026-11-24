@@ -3,7 +3,7 @@
 > 定位：**authoring（规划/调试）面**。一次持续会话里「操作一步 → 立即回读 → 再决定下一步」，
 > 元素解析 / 动作执行 / 信号判定与正式 `run` **同源**（调用同一批函数，不是照抄语义）。
 > 正式执行仍然是「冻结计划 + 运行时消歧」：session 不产生 `done`、不写 `result.json`、
-> 不替代 `run` 的通过/失败结论。设计稿见 `iterations/interactive-session/design.md`。
+> 不替代 `run` 的通过/失败结论。实施记录见 `CHANGELOG.md` 的会话面条目。
 >
 > 划界（pilot 是并列新面）：pilot 驾驶协议（PILOTED_WALKTHROUGH_PLAN）是**模型驾驶走查面**（CLI 入口已移除，agent 面经 `amberflow_session` 的 drive 系列 op）——
 > 决策模型逐步投票驾驶、Agent 只在停因交接时兜底；session 的 `act/observe/read` 请求保持
@@ -380,8 +380,7 @@ additive 面（缺省不给 = 响应除 `blank_rows` 外逐字节不变）：
 **现象**：个别站点（已知：zh.wikipedia 文章页，chrome-headless-shell 下）在 open 之后陷入
 客户端 URL 翻页循环——主 frame 每 ~200ms 在同一页面的两种 URL 形态间反复导航（如 ASCII 标题
 路径 ↔ 百分比编码路径），期间 DOM 操作持续撞 "Execution context was destroyed"：`read` 全
-null、`signal` 恒 false，而 observe/截图看起来正常。根因与浏览器 headless 实现相关，详见
-`iterations/interactive-session/task38/ROOT-CAUSE.md`。
+null、`signal` 恒 false，而 observe/截图看起来正常。根因与浏览器 headless 实现相关。
 
 **检测**：每次 `open`（启动自动 open 与显式 open 同一路径）都挂主 frame `framenavigated`
 监听，在 open 返回后的 1.5s 窗口内观察。触发签名**严格**：≥4 次主 frame 导航 **且** URL 在
@@ -457,7 +456,7 @@ headless 实现选择面（换完整 Chrome new headless）另见 task-39 的受
   免疫（task-39 A/B：功能双臂等价，代价冷启动 +~13%）。无系统 Chrome 时 `channel:"chrome"`
   由 launch **如实报错，不静默回退**（要回退请删 env/meta）。生效值见 run 的
   `effective_policy.browser`（仅声明时出现）；真实二进制以 `env.browser.binary_basename` 为准。
-  详见 `docs/APP_SCRIPT_AUTHORING.md` §8 policy 表与 `iterations/interactive-session/task39/DESIGN.md`。
+  详见 `docs/APP_SCRIPT_AUTHORING.md` §8 policy 表。
 - `snapshot` 的截图/DOM 文本落 `--out`；不做 cookie/存储注入；多标签页走**会话面显式 `tab` op**
   （`list`/`switch`，见上）；flow 面的 `ctx.tabs()` / `ctx.switchTab()` 见 `docs/APP_SCRIPT_AUTHORING.md`。
 - 会话结束（含 SIGINT）一定关闭浏览器；`close` 之前没碰过页面就不会启动浏览器。

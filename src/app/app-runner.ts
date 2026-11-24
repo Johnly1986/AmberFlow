@@ -34,9 +34,9 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { MockAuditor, type TraceStep } from "../engine/audit.ts";
 import { createHintMemory, type HintMemoryLike } from "../model/hint-memory.ts";
-// task-14（D1）：起跑探测（与 doctor 共享单一出处）。
+// 起跑探测（与 doctor 共享单一出处）。
 import { probeDecisionPlane } from "../model/decision-probe.ts";
-// task-15（D2）：SITE_FACTS 边缘注入（run 起跑提示 + result.site_facts；仅命中出现）。
+// SITE_FACTS 边缘注入（run 起跑提示 + result.site_facts；仅命中出现）。
 import { loadSiteFacts, matchSiteFacts, renderModelFence, renderSiteFactLines } from "./site-facts.ts";
 import { ensureDir, userAppsDir } from "../support/amberflow-home.ts";
 import { appOptions, cliBool, cliString, cliStrings, parseCliArgs } from "../support/cli-args.ts";
@@ -204,13 +204,13 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
    * R3/R8 实测 result 的 provider_degraded 一直是空。收尾时读一次，两条路径同账。
    */
   let providerDegraded: string | null = null;
-  // task-14（D1）：降级留痕（起跑探测失败/中途死亡；仅 degraded 时进 result.decision）。
+  // 降级留痕（起跑探测失败/中途死亡；仅 degraded 时进 result.decision）。
   let decisionDegraded: NonNullable<BrowserMiddleware["decisionDegraded"]> | null = null;
-  // task-24/4：strict 旗标存活到报告点（resolvedPolicy 在步循环分支里声明，报告点够不着）。
+  // strict 旗标存活到报告点（resolvedPolicy 在步循环分支里声明，报告点够不着）。
   let actHintStrictForWarn = false;
-  // task-15（D2）：site_facts 命中集（步循环外的报告点要读——存活到结果装配）。
+  // site_facts 命中集（步循环外的报告点要读——存活到结果装配）。
   let siteFacts: import("./site-facts.ts").MatchedSiteFact[] = [];
-  // task-26（D2 A/B）：模型面注入计数（opt-in；仅 ON 且有命中时 >0，进 result 顶层只增字段）。
+  // 模型面注入计数（opt-in；仅 ON 且有命中时 >0，进 result 顶层只增字段）。
   let d2Injected = 0;
   /**
    * S5：状态接入决策的指标（与 providerDegraded 同一个「收尾读一次」先例）。执行器是
@@ -304,7 +304,7 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     const decisionDefaults = parseRunDefaults(opts.env ?? process.env).defaults;
     policy = resolvedPolicy.policy;
     anyDeclared = resolvedPolicy.anyDeclared;
-    // task-24/4：strict 旗标存活到报告点（runWarnings 的 model_face_idle 判定用）。
+    // strict 旗标存活到报告点（runWarnings 的 model_face_idle 判定用）。
     actHintStrictForWarn = resolvedPolicy.policy.act_hint?.value === "strict";
     // 执行器装配入口：本 run 唯一实例，首个 getMw() 调用时经内核装配一次；收尾事实也经内核读。
     const getMw = (): BrowserMiddleware => run.middleware(() => {
@@ -365,11 +365,11 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
       }
     });
     await probeCompatDecisionPlane(getMw);
-    // task-15（D2）：SITE_FACTS 按 meta.hosts 匹配 → stderr 提示（运行前一次；仅命中出现；
+    // SITE_FACTS 按 meta.hosts 匹配 → stderr 提示（运行前一次；仅命中出现；
     // 事实不进模型请求面）。无命中 = 零输出（默认等价）。命中集提到函数层（结果装配在分支外）。
     siteFacts = matchSiteFacts(loadSiteFacts((m) => console.error(m)), (pack.hosts ?? []) as string[]);
     for (const line of renderSiteFactLines(siteFacts)) console.error(line);
-    // task-26（D2 A/B）：模型面注入（opt-in env；缺省 OFF = notes 原样逐字节不变）。
+    // 模型面注入（opt-in env；缺省 OFF = notes 原样逐字节不变）。
     // fenced block 渲染唯一出处 renderModelFence（stub 通道断言共用同一函数——"送达已验证"
     // 由此成立）；计数进 result 顶层 site_facts_injected（只增字段）。
     let d2Notes: string | null = null;
@@ -643,13 +643,13 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
         runWarnings.push(`[step ${t.index + 1}${t.id ? `:${t.id}` : ""}] ${w}`);
       }
     }
-    // task-14（D1）：决策面兼容降级时保底一条 run warning（即使没有步被吞掉——
+    // 决策面兼容降级时保底一条 run warning（即使没有步被吞掉——
     // probe 失败本身就该在 result.warnings 里可见）。
     if (finalDecisionDegraded !== null) {
       runWarnings.push(`decision_degraded: 决策面已降级（${finalDecisionDegraded.reason_class}）`
         + `——本次 run 停发模型调用，规则面继续（${finalDecisionDegraded.message.slice(0, 200)}）`);
     }
-    // task-24/4：模型面参与度提示（评审 A.4 因果纠正——strict/rules-only 不改变模型参与度，
+    // 模型面参与度提示（评审 A.4 因果纠正——strict/rules-only 不改变模型参与度，
     // 只改未命中兜底与风险票来源；0 咨询的因是规则面全命中）。决策面已配置 + strict + 0 咨询
     // = idle：不是故障，一句话点明（免得"模型面坏了？"的误诊）；D1 降级场景已有
     // decision_degraded 覆盖，不重复。
@@ -828,14 +828,14 @@ export async function runScriptApp(loaded: LoadedScriptApp, opts: ScriptRunOptio
     decisions,
     // A3：与 runApp（声明式路径）同账——降级发生过就必须出现在产物里。
     ...(providerDegraded ? { provider_degraded: providerDegraded } : {}),
-    // task-14（D1）：决策面兼容降级留痕（仅 degraded 时出现，只增字段——healthy/无决策面
+    // 决策面兼容降级留痕（仅 degraded 时出现，只增字段——healthy/无决策面
     // 的 run 键集与基线逐字节一致）。
     ...(finalDecisionDegraded !== null ? { decision: { degraded: finalDecisionDegraded } } : {}),
-    // task-15（D2）：site_facts 仅命中时出现（只增字段；无命中 = 键集与基线逐字节一致）。
+    // site_facts 仅命中时出现（只增字段；无命中 = 键集与基线逐字节一致）。
     ...(siteFacts.length > 0 ? {
       site_facts: siteFacts.map((f) => ({ site: f.site, id: f.id, as_of: f.as_of, evidence: f.evidence, statement: f.statement })),
     } : {}),
-    // task-26（D2 A/B）：注入计数（仅 ON 且命中时 >0；OFF/未命中 = 键缺席，逐字节不变）。
+    // 注入计数（仅 ON 且命中时 >0；OFF/未命中 = 键缺席，逐字节不变）。
     ...(d2Injected > 0 ? { site_facts_injected: d2Injected } : {}),
     step_traces: stepTraces,
     ...(runWarnings.length ? { warnings: runWarnings } : {}),

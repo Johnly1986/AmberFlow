@@ -4,13 +4,13 @@ import { parseArgs } from "node:util";
 import { APPS_DIR, listAppDirs, type AppDirEntry } from "../../app/app-pack.ts";
 import { validateApp } from "../../app/cross-ref.ts";
 import { dryRunFlow, loadScriptApp, scriptDisplayPath } from "../../app/app-script.ts";
-// task-12（C1）：apps rehearsal——只读预检（真导航 + hintMatch 实况核对；独立命令，不动 check 契约）。
+// apps rehearsal——只读预检（真导航 + hintMatch 实况核对；独立命令，不动 check 契约）。
 import { appsRehearsal } from "./apps-rehearsal.ts";
-// task-10（B2）：hint 语义 lint——声明层的静态提醒（stderr warnings 通道；不进 problems、
+// hint 语义 lint——声明层的静态提醒（stderr warnings 通道；不进 problems、
 // 不改 VALID/exit；clean 应用零输出）。只消费 hint 形状位（见 hint-lint.ts 范围护栏）。
 import { lintHintSemantics, renderHintLintLines } from "../../app/hint-lint.ts";
 import { scanDeclarations } from "../../app/declaration-scan.ts";
-// task-15（D2）：SITE_FACTS 按 meta.hosts 匹配 → stderr 提示（仅命中；辅助数据不进 problems）。
+// SITE_FACTS 按 meta.hosts 匹配 → stderr 提示（仅命中；辅助数据不进 problems）。
 import { loadSiteFacts, matchSiteFacts, renderSiteFactLines } from "../../app/site-facts.ts";
 import { PLAN_PLAYBOOK_TEXT } from "../../engine/planning-playbook.ts";
 import { userAppsDir } from "../../support/amberflow-home.ts";
@@ -508,10 +508,10 @@ async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
       const problems = validateApp(loaded.pack, { allowEmptyJourney: true });
       const dry = await dryRunFlow(loaded, { slots });
       problems.push(...dry.problems);
-      // task-15（D2）：SITE_FACTS 提示（stderr，仅命中；不进 problems/exit）+ JSON 只增字段。
+      // SITE_FACTS 提示（stderr，仅命中；不进 problems/exit）+ JSON 只增字段。
       const siteFacts = matchSiteFacts(loadSiteFacts(console.error), (loaded.pack.hosts ?? []) as string[]);
       for (const line of renderSiteFactLines(siteFacts)) console.error(line);
-      // task-10（B2）：hint 语义 lint（stderr warnings 通道，与 weak_done 同款——JSON/人读
+      // hint 语义 lint（stderr warnings 通道，与 weak_done 同款——JSON/人读
       // 两个面都可见、都不改 stdout/exit）。无三类形状的应用零输出（clean 逐字节不变）。
       // C 批（N10）：把 meta.hosts 一并交给 lint——frame: origin 不在信封内的静态提醒
       // 需要它（取不到 hosts 时 lint 只做值形状检查，行为见 hint-lint.ts）。
@@ -530,7 +530,7 @@ async function appsCheck(args: string[], ctx: CliContext): Promise<number> {
       results.push({
         app: loaded.pack.id, path: loaded.scriptPath, problems,
         ...(navigation === undefined ? {} : { policy_navigation: String(navigation) }),
-        // task-15（D2）：site_facts 仅命中时出现（只增字段；无命中 = 键集与基线逐字节一致）。
+        // site_facts 仅命中时出现（只增字段；无命中 = 键集与基线逐字节一致）。
         ...(siteFacts.length > 0 ? {
           site_facts: siteFacts.map((f) => ({ site: f.site, id: f.id, as_of: f.as_of, evidence: f.evidence, statement: f.statement })),
         } : {}),

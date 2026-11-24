@@ -87,7 +87,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
   const slotArgs = parseSlotArguments(v);
   if (slotArgs === null) return 2;
-  const { slots, cliSlotKeys } = slotArgs;
+  const { slots } = slotArgs;
 
   // --today：时钟缝（数据腿相对日期表达式 + ctx.runtime.today）。格式错是**用法错误**
   // （exit 2）；空缺 = 系统日期（时钟是本次调用的显式参数，不读环境变量）。校验种类与文案
@@ -296,10 +296,10 @@ function buildScriptRunOptions(
 }
 
 /**
- * 解析 `--slot k=v`（可重复）与 `--slot-file`：成功返回槽位袋 + 本次命令行给的键（敏感值告警用），
- * 用法错误打印一行并返回 null（与 `parseCliArgs` 同一体例：入口只关心能不能继续）。
+ * 解析 `--slot k=v`（可重复）与 `--slot-file`：成功返回槽位袋；本次命令行给的键在函数内
+ * 用于敏感值告警。用法错误打印一行并返回 null（与 `parseCliArgs` 同一体例：入口只关心能不能继续）。
  */
-function parseSlotArguments(v: CliValues): { slots: Record<string, unknown>; cliSlotKeys: Set<string> } | null {
+function parseSlotArguments(v: CliValues): { slots: Record<string, unknown> } | null {
   const slots: Record<string, unknown> = {};
   const cliSlotKeys = new Set<string>();
   for (const s of cliStrings(v, "slot")) {
@@ -353,7 +353,7 @@ function parseSlotArguments(v: CliValues): { slots: Record<string, unknown>; cli
     }
   }
 
-  return { slots, cliSlotKeys };
+  return { slots };
 }
 
 /* ------------------------------------------------------- 契约驱动的旗标校验与选项映射 */
@@ -456,7 +456,7 @@ function writeRunArtifacts(result: AppRunResult, outDir: string, quiet: boolean)
   const nextHint = runNextHint(result);
   fs.writeFileSync(jsonPath, JSON.stringify(result, null, 2), "utf-8");
   // 人读的 md 带 UTF-8 BOM：Windows PowerShell 5.1 的 Get-Content 对无 BOM 文件按 ANSI
-  // 读 → 中文全花屏（2026-11-09 取证：无 BOM 读出「杩愯鎶ュ憡」，带 BOM 正确）。
+  // 读 → 中文全花屏（取证：无 BOM 读出「杩愯鎶ュ憡」，带 BOM 正确）。
   // JSON 产物保持无 BOM——Node 的 JSON.parse 不容 BOM（读取必须显式 UTF-8，见
   // docs/APP_SCRIPT_AUTHORING.md「运行产物」）。BOM 只在写盘面加；stdout 打印不加。
   fs.writeFileSync(mdPath, "\uFEFF" + appReportMarkdown(result, nextHint), "utf-8");

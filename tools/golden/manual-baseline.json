@@ -1,17 +1,19 @@
 {
   "note": "六条人工路径话术基线（介入/救援模块设计 §8 步 2）：归一锚点文本 = 锚点行 + 其后 ≤2 行，CRLF→LF、连续空白折叠单空格、去首尾空白。比对为逐字节（归一后）；话术改动 = 演进，须 --fix 显式刷新。",
-  "generated_at": "2026-11-13T04:33:44.204Z",
+  "generated_at": "2026-11-23T23:35:53.495Z",
   "runtime": "deferred",
   "anchors": {
     "src/cli/start.ts": [
-      "const a = await io.ask(\"这一步完成了么？(y/N) > \"); return a === \"y\" || a === \"Y\"; }, actionDelayMs });"
+      "const a = await io.ask(\"这一步完成了么？(y/N) > \"); return a === \"y\" || a === \"Y\"; },"
     ],
-    "src/app/app-runner.ts": [
-      "console.log(`\\n[manual] ${req.desc}`); if (req.instructions) console.log(` ${req.instructions}`); if (req.url) console.log(` 页面：${req.url}`);",
-      "return { done: false, reason: `manual_handler_error: ${e instanceof Error ? e.message : String(e)}` }; } if (!approved) {"
+    "src/app/app-runner-policy.ts": [
+      "console.log(`\\n[manual] ${req.desc}`); if (req.instructions) console.log(` ${req.instructions}`); if (req.url) console.log(` 页面：${req.url}`);"
     ],
     "src/app/ctx-dry.ts": [
       "call: \"manual\", desc, url: currentUrl, ok: true, ...(req.id === undefined ? {} : { id: req.id }), result: { dry: true, instructions: req.instructions ?? \"\" },"
+    ],
+    "src/app/app-runner-declared.ts": [
+      "return { done: false, reason: `manual_handler_error: ${e instanceof Error ? e.message : String(e)}` }; } if (!approved) {"
     ],
     "src/app/ctx-replay.ts": [
       "const ev = nextEvent(\"manual\", { desc }); if (typeof ev.url === \"string\" && ev.url) currentUrl = ev.url; consume();"

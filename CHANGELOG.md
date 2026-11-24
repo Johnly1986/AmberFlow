@@ -4,6 +4,74 @@ AmberFlow（冻结计划的浏览器自动化中间件）的显著变更。本�
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased] — 2026-11-24 审查驱动优化批（A+B+C+D，用户确认后落地）
+
+> 流程：四路只读审计（/tmp/{dead-code,dup-interfaces,comments-docs,tech-debt}-audit.md）→
+> 分级清单+计划经用户确认 → 分 A/B/C/D 四批落地。硬约束：不改外部行为与公开契约、
+> 不引入新依赖、原测试全过（含此前 3 条存量红 lane 归零）。**未提交 git。**
+
+- **B1（P1 bug）**：`--record` 轨迹 WriteStream 挂 `error` 监听并永久降级（磁盘满/只读不再裸栈崩溃，
+  `/dev/full` 复现：修前 exit 1 + Unhandled 'error'，修后 exit 0 + `record write failed` 日志 + 正常收尾）；
+  `ctx.extract` 内联 `maxItems` 校验（非整数/超 [1,500] → `config_error`，与 offset 纪律一致，合法输入逐字节不变）。
+- **B2（P1 契约漂移）**：桥 session signal 描述补全 13 算子（`css_count_equals`/`css_count_min`）
+  并在 `prompt-hit` 增加「桥描述必须列全 SIGNAL_OPS」断言（先红后绿）；`drive_command.note` 落地——
+  引擎校验（非空 ≤300）+ 单一 `driveCommandLine` 透传 + 进 pilot 自身 trace/record、不进响应/run 结果。
+- **B3（P1 证据）**：strict-miss 路径 `rehydrate_rescan` additive 落盘（`run()` 作用域事实 →
+  `RunReportTailCtx` → 报告尾；trace 优先、无 trace 行时退化字段；键仅在发生时出现；strict reason 尾缀）；
+  新 lane `verify:rehydrate-rescan`（29 断言，A/B 负向对照）；BACKLOG #3 done。
+- **C1（死代码）**：删 4 个零 importer 文件（299 行）+ 12 类死导出/死局部（≈560 行含级联孤儿）；
+  split manifest 仅移除死符号条目+note，未重录 hash。
+- **C2（注释/文档）**：修 3 条失效引用、清 52 行不可解析 `task-N`、27 行日期戳（保留格式示例）、
+  5 行纯叙事；文档状态漂移 14 文件/54 处（ARCHITECTURE/MAINLINE/DCC/DPU/WITHIN/STATE_LAYER/
+  IMPROVEMENT_PLAN/PILOTED/BACKLOG/README/AGENTS/SECURITY/INTERACTIVE）；split 钉住符号体内 11 处
+  注释 deferred（重录 hash 需评审换基）。
+- **D（小步收敛）**：`clipText` 单源（10 处，桥 2 份跨包保留；14,129 例等价）；`canonicalJson/sha256`
+  单源（6,603 例逐字节一致，trace 保持 re-export）；`RangeValue`/`SetRangeOptions` type-only 单源；
+  两个实验 env 开关登记 typed getter。
+- **回归**：`npm run check` exit 0；`verify:lanes` 15/15；`verify:pilot` 21/21；
+  `verify:runtime:offline` 8/8；`verify:parity`、`verify:session:close`、`verify:decision-context`、
+  `verify:decision-characterization`、`verify:decision-run-parity`（check 内 16/16）全绿；
+  maintain/comments 基线按只降原则更新（dateStamps 34→7、planTokens 403→341、history 64→60）。
+- **明确未做（登记）**：桥闭集/session 表生成器与 handoff/ElementView 常量生成（大收敛，另批）；
+  `src/index.ts` barrel 与 `picker-server` 公开面删除（需产品决定）；`model/page-context` 截断语义不同未迁；
+  split 钉住符号体注释 11 处 deferred。
+
+## [Unreleased] — 2026-11-24 证据面归零：三条存量红处置 + orphan lane script 标准化
+
+> 依据：「`npm run check` + 全部零网络 lane 全绿」可宣称；**零 src 行为改动**——只动 lane 工具 /
+> golden 基线 / npm script / lane 清单文档。
+
+- **`verify:run-execution` 基线重录（存量红 1/3）**：干净 HEAD 跑 `--record`（每源连跑两次一致）后
+  `--check` 双跑绿。三份 golden 换基、`suite` 不变，差异均为**基线落伍**而非新行为：
+  ① 页面状态指纹元素数 `40`→`46`（8 处 `struct`，存量池面/状态面变化后基线未更新）；
+  ② `plan` 轨迹里已不存在的 `identity` 解析证据对象（10 行，dead 字段）。
+  lane 头注释补纪律：**池构成/排序/容量（窗口、帽）变更后须重录基线**。
+- **`golden-manual` 锚点搬家修复（存量红 2/3）**：A1 拆分后路径 2/4 锚点已离开
+  `src/app/app-runner.ts`。按符号定位改到 `promptManualOnTty`（`src/app/app-runner-policy.ts`）与
+  `runManualStep` 的 `manual_handler_error: …` 原文模板（`src/app/app-runner-declared.ts`）；
+  `--fix` 刷新 `tools/golden/manual-baseline.json`，话术原文逐字节不变、只换文件键。
+  该 lane 是静态源码扫描（毫秒级，无浏览器），不是运行期证据。
+- **`verify:offline` 比对口径归一化（存量红 3/3）**：`ref`（`e0…`）是抽池时按枚举顺序分配的
+  位置性句柄——同一代码状态内分配确定（连跑两次 `--record` 逐字节一致），但抽池实现/枚举顺序
+  一变就整体重排（实测：filter-bar 基线记录后的池面演进让 `e20`/`e21`/`e22` 三行只换编号、
+  元素集合不变），不是页面/引擎行为契约。比对改为**元素身份视图**：`pool.rows` 去 ref、
+  `hints.*.refs` 比顺序无关多重集、`match`/`decided` 解析 ref→身份、**保留 `ref_count`**；
+  golden 仍存原始观测、两侧都在身份视图上比——**旧基线原样即绿，未重录任何 golden**。
+  负向自测：改 `ref_count` / 换 `match` 身份 / 删池行 / 删候选身份均红；正例：refs 乱序、
+  整池 ref 一致重编号均绿；另在隔离副本把 `POOL_CAP_ELEMENTS` 64→20（池帽变更）→ 2 个夹具红，
+  证明检出没有因归一化退化。`--record` 仍存原始 ref（重录不会因编号漂移变红）。
+- **orphan lane script 标准化**：9 条此前没有 npm script 的非门禁 lane 补 `verify:<lane>`
+  （`act-lock` / `session-range` / `session-drive` / `poolless-actions` / `dedup-controls` /
+  `frame-budget` / `app-stop-context` / `decision-accounting` / `decision-ask-parity`），逐条实跑
+  exit 0；新增聚合 `npm run verify:lanes` 顺序跑本批证据面 15 条（三条修复 lane + 9 条新 script + 后续批次 3 条失败路径/校验 lane，
+  不含较重的 `verify:runtime:offline`），任一红即停（本机实测 1m42s）。
+  `tools/intervention-extensibility.ts` 是一次性脚本（死代码清理已登记删除），**不加 script**。
+- **登记**：`AGENTS.md`「测试」节新增非门禁 lane 清单 + 命令块 `verify:lanes` 行；`README.md`
+  「开发与贡献」与 `docs/MAINLINE.md` lane 表下各补清单/指针（脚本清单唯一出处仍是 `package.json`）。
+- **验证**：`npm run check` 全绿（本机 2m20s，含 chromium 的 run-parity lane）；`verify:run-execution` /
+  `golden-manual` / `verify:offline` 各连跑两次绿；9 条新 script 逐条 exit 0；`verify:lanes` 15/15 绿
+  （本机 1m3s）。**未提交 git。**
+
 ## [Unreleased] — 2026-11-23 门禁：decision run-parity lane 纳入 npm run check（chromium 前置登记）
 
 > 依据：决策上下文审计「第 1 项：证据/登记」的门禁化要求；只动门禁链/注释/文档，**零行为代码改动**。

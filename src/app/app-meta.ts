@@ -40,7 +40,6 @@ export const META_FIELD_MAP: readonly MetaField[] = [
 ] as const;
 
 const META_NAMES = new Set(META_FIELD_MAP.map((f) => f.meta));
-const FIELD = Object.fromEntries(META_FIELD_MAP.map((f) => [f.pack, f])) as Record<string, MetaField>;
 
 /** 脚本面的 `meta` 形状。 */
 export interface ScriptMeta {

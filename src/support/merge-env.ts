@@ -9,7 +9,7 @@
  *  - **env 已设键不覆盖**：`baseEnv[key]` 已是非空串就保持原样（环境变量是最高层）；
  *  - 否则把 `effective[key]` 补进去，并记入 `touched` 供随后还原。
  * 保留 VITEST 环境变量豁免（apply-config-env 在外部测试进程里走旧 rc 最低层）与旧 rc 最低层顺序——
- * 那两处是"环境变量最高、旧 rc 最低"纪律的执法点，也是 2026-10-28 实测事故的教材。
+ * 那两处是"环境变量最高、旧 rc 最低"纪律的执法点。
  */
 export interface MergeEnvResult {
   /** 本调用实际补进 env 的键（env 已设的键不会被覆盖，不会出现在这里）。 */

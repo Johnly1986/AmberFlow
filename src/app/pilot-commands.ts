@@ -17,6 +17,7 @@ import {
   type PilotAgentCommand, type PilotHandoff, type PilotOptions, type PilotRecordLine, type PilotStopCode,
 } from "./pilot-contract.ts";
 import { errMsg, isObj, nonEmpty } from "./session-runtime-contract.ts";
+import { clipText } from "../support/text.ts";
 
 /** 分派面需要的运行时公开面（唯一实现 = PilotRuntime；本模块不另存状态）。 */
 export interface PilotCommandTarget {
@@ -46,9 +47,6 @@ export interface PilotCommandTarget {
   signalHeld(spec: Record<string, unknown>): Promise<boolean>;
   record(line: PilotRecordLine): void;
 }
-
-/** 与 pilot-runtime 的 `buf` 同口径（本模块只用到 redirect/result 提示的 40/200/400 截断）。 */
-const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 
 /**
  * 兜底指令入口：空行/坏 JSON/未知指令都只是**单行失败**（回执已发、继续等下一条）。
@@ -87,6 +85,8 @@ export async function handlePilotCommand(
 ): Promise<"stay" | "drive" | "close"> {
   target.fallbackCount += 1;
   // 值不落明文轨迹（与 pilot export 的「值已省略」同一纪律）：record 里 value 只留省略标记。
+  // `note` 等非敏感协议字段刻意保留在 command 行：它唯一出口就是 pilot 自身 trace/record，
+  // 不进会话/桥响应投影（投影只回 cmd/outcome 等固定键）。
   const masked = { ...args, ...(args["value"] === undefined ? {} : { value: "<已省略>" }) };
   target.record({ i: target.stepCount, ts: new Date().toISOString(), type: "command", command: cmd, args: masked });
   switch (cmd) {
@@ -104,11 +104,11 @@ export async function handlePilotCommand(
       if (isObj(value)) {
         for (const [k, v] of Object.entries(value)) {
           if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-            target.slots[clip(String(k), 40)] = String(v);
+            target.slots[clipText(String(k), 40)] = String(v);
           }
         }
       } else if (typeof value === "string" && nonEmpty(value)) {
-        const key = clip(String(args["target"] ?? ""), 40) || target.valueNeedKey() || "resumed";
+        const key = clipText(String(args["target"] ?? ""), 40) || target.valueNeedKey() || "resumed";
         target.slots[key] = value;
         target.pendingValue = value;
       }
@@ -150,9 +150,9 @@ export async function handlePilotCommand(
       }
       if (typeof goal === "string" && nonEmpty(goal)) {
         // redirect 只有 goal = 换总目标重驾驶（预算不清零；预算重置请起新 pilot）。
-        target.opts.goal = clip(goal, 400);
+        target.opts.goal = clipText(goal, 400);
         target.redirectReset();
-        target.respond({ type: "command_result", ok: true, redirected: true, goal_digest: clip(goal, 200) });
+        target.respond({ type: "command_result", ok: true, redirected: true, goal_digest: clipText(goal, 200) });
         return "drive";
       }
       target.respond({ type: "command_result", ok: false, code: "config_error", reason: "redirect needs url or goal" });

@@ -20,7 +20,7 @@ import { LOGIN_WALL_URL_RE, isWeakNegativeSignal } from "./signals.ts";
 import { admitSelectorWithJsFor } from "./surface.ts";
 import { THROTTLE_BODY_FLOOR, THROTTLE_COLLAPSE_RATIO, THROTTLE_POOL_HIGH_MIN } from "./throttle-signature.ts";
 import type { BrowserMiddleware } from "./executor.ts";
-import type { ActionPhaseResult, SetupPhase, RunReportTailCtx } from "./executor.ts";
+import type { ActionPhaseResult, SetupPhase, RunReportTailCtx, RehydrateRescanFact } from "./executor.ts";
 
 import * as browserEnv from "../browser/browser-env.ts";
 
@@ -759,11 +759,11 @@ export async function runReportTail(mw: BrowserMiddleware, ctx: RunReportTailCtx
       }
     }
     const forcedExecuted = executedRows.some((t) => t["forced"] === true);
-    // F72-②：显式重扫事实汇总（本 run 至多一次/步；缺字段 = 没跑过）。
-    const rehydrateRescanFact = ctx.trace.map((t) => t["rehydrate_rescan"])
-      .find((v) => v !== undefined) as
-      | { waited_ms: number; pool_size_before: number; pool_size: number; resolved: boolean; ref?: string }
-      | undefined;
+    // F72-②：重扫事实汇总——trace 行优先（既有形状不变）；strict 落空在动作行之前早停时
+    // trace 没有承载行，退化为 run() 直传的本 run 事实（两者都没有 = 键不出现）。
+    const tracedRescan = ctx.trace.map((t) => t["rehydrate_rescan"])
+      .find((v) => v !== undefined) as RehydrateRescanFact | undefined;
+    const rehydrateRescanFact: RehydrateRescanFact | null = tracedRescan ?? ctx.rehydrateRescanFact;
     return {
       goal: ctx.instruction, done: ctx.done, stop_reason: ctx.stopReason, steps: ctx.trace, audit: verdict,
       stop_code: ctx.stopCode,
@@ -771,7 +771,7 @@ export async function runReportTail(mw: BrowserMiddleware, ctx: RunReportTailCtx
       ...(executedActions.length ? { executed_actions: executedActions } : {}),
       ...(ctx.skippedActions.length ? { skipped_actions: ctx.skippedActions.slice(0, 20) } : {}),
       ...(staleRetries.length ? { stale_retries: staleRetries } : {}),
-      ...(rehydrateRescanFact !== undefined ? { rehydrate_rescan: rehydrateRescanFact } : {}),
+      ...(rehydrateRescanFact === null ? {} : { rehydrate_rescan: rehydrateRescanFact }),
       ...(forcedExecuted ? { forced: true } : {}),
       ...(ctx.donePreheld !== null ? { done_preheld: ctx.donePreheld } : {}),
       ...(ctx.warnings.length ? { warnings: ctx.warnings } : {}),

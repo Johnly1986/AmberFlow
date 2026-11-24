@@ -25,9 +25,9 @@ import {
   type FrameLike, type PageLike,
 } from "../engine/extraction.ts";
 import { extractElements } from "./candidate-scan.ts";
-// task-16（B3+）：arrive 侧限速判据的嗅探面选择器（与执行器同口径的准入面）。
+// arrive 侧限速判据的嗅探面选择器（与执行器同口径的准入面）。
 import { admitSelectorWithJsFor } from "../engine/surface.ts";
-// task-24/6a：限速判据阈值单一出处（step 侧与 arrive 侧共用）。
+// 限速判据阈值单一出处（step 侧与 arrive 侧共用）。
 import { THROTTLE_BODY_FLOOR, THROTTLE_COLLAPSE_RATIO } from "../engine/throttle-signature.ts";
 // C2 waitForTarget：hint 语义核对与规则面同一份语法（hintCandidates → hintMatch 单一出处）。
 import { hintCandidates } from "../engine/rules.ts";

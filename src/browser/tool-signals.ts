@@ -71,9 +71,6 @@ export function validateToolSignal(spec: ToolSignal, where = "signal"): string[]
   ];
 }
 
-/** 非空字符串（路径/匹配串这类载荷不接受空串——空串在运行期只会静默 false）。 */
-const nonEmptyString = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
-
 /**
  * 叶子载荷的**加载期**校验（T7）：算子/参数个数只说明"形状对"，`jsonPath("", "x")`
  * 这类坏载荷必须在这里就红（结构化 config_error），不能留到运行期静默 false。

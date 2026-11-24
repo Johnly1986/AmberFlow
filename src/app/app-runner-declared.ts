@@ -289,7 +289,7 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     options: mwOptions,
   }));
   await probeCompatDecisionPlane(() => mw);
-  // task-15（D2）：声明式路径同账——SITE_FACTS 按 meta.hosts 匹配（stderr 提示 + result.site_facts）。
+  // 声明式路径同账——SITE_FACTS 按 meta.hosts 匹配（stderr 提示 + result.site_facts）。
   const siteFacts = matchSiteFacts(loadSiteFacts((m) => console.error(m)), (pack.hosts ?? []) as string[]);
   for (const line of renderSiteFactLines(siteFacts)) console.error(line);
 
@@ -376,8 +376,6 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
   const invariantResults: AppInvariantResult[] = [];
   /** 每一步的判定方式（trace 原样收集）——P1 的出场率/挽回数从这儿数出来，不另造机制。 */
   const decisionSteps: TraceStep[] = [];
-  /** 每个 `ctx.step` 一次 mw.run；这里按调用顺序保留它的动作 trace，供 step_traces 补 hows/descs/methods。 */
-  const decisionStepGroups: TraceStep[][] = [];
   // S0（NL Flow）：`captureTraces` 开着才收集（见 AppRunOptions.captureTraces）。
   const stepTraces: NonNullable<AppRunResult["step_traces"]> = [];
   // 浏览器步在 `plan.subgoals` 里的下标：`next` 允许跳步，所以不能再靠一个自增计数器
@@ -735,9 +733,9 @@ export async function runApp(pack: AppPack, opts: AppRunOptions = {}): Promise<A
     ...(mw.riskDegraded ? { risk_degraded: mw.riskDegraded } : {}),
     // 在线 provider 掉线/没配好 ⇒ 本次跑降级到 rules-only——同样必须出现在产物里（同 risk_degraded）。
     ...(mw.providerDegraded ? { provider_degraded: mw.providerDegraded } : {}),
-    // task-14（D1）：决策面兼容降级留痕（仅 degraded 时出现，只增字段——两条路径同账）。
+    // 决策面兼容降级留痕（仅 degraded 时出现，只增字段——两条路径同账）。
     ...(mw.decisionDegraded !== null ? { decision: { degraded: mw.decisionDegraded } } : {}),
-    // task-15（D2）：site_facts 仅命中时出现（只增字段——两条路径同账）。
+    // site_facts 仅命中时出现（只增字段——两条路径同账）。
     ...(siteFacts.length > 0 ? {
       site_facts: siteFacts.map((f) => ({ site: f.site, id: f.id, as_of: f.as_of, evidence: f.evidence, statement: f.statement })),
     } : {}),

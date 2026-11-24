@@ -84,6 +84,8 @@ export class SessionRuntime {
   private readonly extractStats: { total: number } = { total: 0 };
   private traceRef: AppTrace | null = null;
   private recordStream: fs.WriteStream | null = null;
+  /** 记录流写失败（ENOSPC/EIO，如 `--record /dev/full`）后永久停用：不再写、不再重建。 */
+  private recordWriteFailed = false;
 
   private readonly startedAt = Date.now();
   private requestCount = 0;
@@ -198,40 +200,54 @@ export class SessionRuntime {
     this.sink.respond(obj);
   }
 
-  /** 轨迹文件句柄（懒创建；`--record` 没给 = no-op）。Phase 2：一条轨迹要能被 export 还原成骨架。 */
+  /**
+   * 轨迹文件句柄（懒创建；`--record` 没给 = no-op）。Phase 2：一条轨迹要能被 export 还原成骨架。
+   *
+   * 写目标满/坏（`/dev/full`）时流会**异步** emit "error"——必须在这里接管：记录是旁路产物，
+   * 失败只降级为一条日志并永久停用该流，绝不能变成未捕获异常把会话打断成裸栈崩溃。
+   */
   private recordStreamFor(): fs.WriteStream | null {
     if (this.opts.record === null || this.opts.record === undefined) return null;
+    if (this.recordWriteFailed) return null;
     if (this.recordStream !== null) return this.recordStream;
     try {
       ensureDir(path.dirname(path.resolve(this.opts.record)));
-      this.recordStream = fs.createWriteStream(path.resolve(this.opts.record), { flags: "a", encoding: "utf8" });
-      return this.recordStream;
+      const stream = fs.createWriteStream(path.resolve(this.opts.record), { flags: "a", encoding: "utf8" });
+      stream.on("error", (e) => { this.abandonRecord(e); });
+      this.recordStream = stream;
+      return stream;
     } catch (e) {
       this.log(`record open failed: ${errMsg(e)}`);
       return null;
     }
   }
 
+  /** 记录流失效即旁路降级：一条日志 + 永久停用（不重建——重建只会反复失败）。 */
+  private abandonRecord(e: unknown): void {
+    this.recordWriteFailed = true;
+    this.recordStream = null;
+    this.log(`record write failed: ${errMsg(e)}`);
+  }
+
+  /** 轨迹行落盘：写前判可用（失败后不再写）；写抛错也只降级，不打断会话。 */
+  private writeRecordLine(line: string): void {
+    const stream = this.recordStreamFor();
+    if (stream === null || !stream.writable) return;
+    try {
+      stream.write(line);
+    } catch (e) {
+      this.abandonRecord(e);
+    }
+  }
+
   /** 轨迹里的非动作事件（open / mark）：`export` 需要入口页与人工标记。 */
   private recordEvent(entry: Record<string, unknown>): void {
-    const stream = this.recordStreamFor();
-    if (stream === null) return;
-    try {
-      stream.write(`${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`);
-    } catch (e) {
-      this.log(`record write failed: ${errMsg(e)}`);
-    }
+    this.writeRecordLine(`${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`);
   }
 
   /** 动作轨迹（`--record`）：只记**已发生的事实**；fill/select 的值只落 hash（design §5/Q5）。 */
   private recordAction(entry: Record<string, unknown>): void {
-    const stream = this.recordStreamFor();
-    if (stream === null) return;
-    try {
-      stream.write(`${JSON.stringify({ i: this.actionCount, ts: new Date().toISOString(), ...entry })}\n`);
-    } catch (e) {
-      this.log(`record write failed: ${errMsg(e)}`);
-    }
+    this.writeRecordLine(`${JSON.stringify({ i: this.actionCount, ts: new Date().toISOString(), ...entry })}\n`);
   }
 
   private recordMark(note: string): void {

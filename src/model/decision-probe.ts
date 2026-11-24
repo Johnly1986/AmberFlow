@@ -1,5 +1,5 @@
 /**
- * task-14（D1·用户裁决重定 scope）：决策面**起跑探测**——配置兼容性提升的唯一实现。
+ * 决策面**起跑探测**——配置兼容性提升的唯一实现。
  *
  * 背景（run4 连锁实证）：decision plane 配了不可达 endpoint → 升级链反复咨询死服务 →
  * no_model_runtime 毒化后续步骤（12 步全灭）。根因是**配置问题**，解法是兼容性三件：
@@ -9,7 +9,7 @@
  *   ③ 诚实留痕（result.decision.degraded + run/step warning）——由 app-runner/executor 落。
  *
  * 复用 doctor 的探针底座（同一协议端点 resolveProviderSpec → spec.provider 的最小 pick——
- * task-26 实证修正：不 applySpecToRuntime，重装会以未计数 provider 覆盖 run.ts 的计数安装）。
+ * 实证修正：不 applySpecToRuntime，重装会以未计数 provider 覆盖 run.ts 的计数安装）。
  * 探测通过 = 一切照旧（调用方不落任何字段，online 时行为与今天逐字节一致，唯一差异是
  * 起跑多付一次最小 ask——已写进 F52 与 docs）。
  */
@@ -82,7 +82,7 @@ export function decisionDegradedAdvice(cls: DecisionDegradedClass): string {
  * 起跑探测一次：解析决策源并对**同一协议端点**真实发一次最小 pick（doctor 的考卷）。
  * 只测 HTTP 层能不能过、服务答不答协议——不考模型的题感。超时沿用运行时超时配置
  * （AMBERFLOW_DECISION_TIMEOUT_MS）：localhost 停服是连接拒绝（即时），黑洞地址付一次超时。
- * task-26 实证修正：**不再 applySpecToRuntime**——重装会以未计数 provider 覆盖 run.ts 已
+ * 实证修正：**不再 applySpecToRuntime**——重装会以未计数 provider 覆盖 run.ts 已
  * 安装的计数包装（model_asks 恒 0，A/B 前提误判）。探测改用 spec.provider（同一端点/协议的
  * 原话实例，未包装未安装）——wire 请求与运行时逐字节相同，计数包装与安装序列零扰动。
  */

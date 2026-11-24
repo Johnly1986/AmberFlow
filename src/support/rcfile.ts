@@ -39,12 +39,12 @@ export interface RcLoad {
   errors: string[];
 }
 
-/* ---- task-7：错误文案面增强（只改消息，不改校验语义与键集合） ----
+/* ---- 错误文案面增强（只改消息，不改校验语义与键集合） ----
  * 背景：错误只给相对路径 `configs\amberflowrc.json`，真实文件在仓库根（经 npm 全局 junction
  * 隔了好几层），排障要翻目录。现在错误带**绝对路径 + 行号 + 建议动作**。 */
 
 /** 未知键/坏值所在行（1-based；按 `"key":` 词形定位，找不到 = null，不硬猜）。
- * 导出给 config-store（用户/项目统一配置层）共用——行号定位只有这一份实现（task-7-rider）。 */
+ * 导出给 config-store（用户/项目统一配置层）共用——行号定位只有这一份实现。 */
 export function keyLineIn(raw: string, key: string): number | null {
   const lines = raw.split(/\r?\n/);
   const pattern = new RegExp(`"${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\s*:`);
@@ -117,7 +117,7 @@ let lastApply: RcApply | null = null;
 /** 入口唯一该调的函数：把 rc 的键补进目标 env（缺省 process.env）。幂等。
  * 测试进程（以 VITEST 环境变量标记）不吸收用户本机配置：测试直接调各 main()，若让
  * configs/amberflowrc.json 生效，"开箱缺省=规则档"这类断言会随谁的本机文件而漂移
- * （2026-10-20 实测：token-plan 设成默认档后两条 start 测试在开发机上变红）。
+ * （实测：token-plan 设成默认档后两条 start 测试在开发机上变红）。
  * 想测 rc 本身就用注入缝（applyRcToEnv(fakeEnv, tempRoot)），rcfile 测试就是这么做的。 */
 export function applyRcToEnv(env: NodeJS.ProcessEnv = process.env, root: string = REPO_ROOT): RcApply {
   if (env.VITEST !== undefined) return { path: null, values: {}, errors: [], applied: [] };

@@ -21,7 +21,7 @@ AmberFlow 是一个**冻结计划执行器**：流程由人（或规划器）给
 
 ```
 signals.ts       完成信号语言：url_contains / css_* / 组合器 / manual
-prompts/（规划中） 模型提示词单源（P0 0.4：PromptSpec 最小形态；engine 与 model 都可 import）
+prompts/ 模型提示词单源（P0 0.4 已落地：PromptSpec 最小形态；engine 与 model 都可 import）
 extraction.ts    元素类型/共享机制（Elem/ElemPool、恢复链、预算常量）；候选扫描实现已归 app 层 src/app/candidate-scan.ts（2.2b）
                  ├ pool-js.ts     内嵌 JS 探针与宿主编译产物（浏览器执行的字符串区）
                  └ identity.ts    FW8 声明驱动的身份回捞（#id / [attr=value] 白名单）
@@ -145,7 +145,7 @@ cli/             amber 命令入口 + 线上套件入口
 src/engine/       执行器、计划、信号、提取、规则、审计、动作（含 declared.ts DRF 声明目标解析）
 src/intervention/ 介入/救援中断模块（L1.5；依赖白名单 node:* + support 两叶子）
 src/model/        决策提供者、服务协议、缓存、学习、ONNX
-src/prompts/      （规划中，P0 0.4）模型提示词单源；engine 与 model 都可依赖的 L1 叶子
+src/prompts/      模型提示词单源（P0 0.4 已落地）；engine 与 model 都可依赖的 L1 叶子
 src/app/          flow 应用：加载器、meta 投影、运行期 ctx、轨迹、适配器、运行器、
                   session 运行时与导出（session-runtime / session-export）
 src/flow/         信号归纳与共享基础
@@ -156,7 +156,7 @@ integrations/
   dsh-bridge/     DSH 桥（只拼 CLI、解析 JSON、投影有界摘要）
 fixtures/engine/  零依赖静态页：仅用于非门禁本地等价验证（不进 npm run check）
 online/           站点档案 + 用例声明
-docs/             当前有效的设计/接入文档（docs/MAINLINE.md 待 P0 0.6 建）
+docs/             当前有效的设计/接入文档（docs/MAINLINE.md 为依赖分层/入口/seam 的唯一出处）
 ```
 
 ## 6. 验证
@@ -164,5 +164,5 @@ docs/             当前有效的设计/接入文档（docs/MAINLINE.md 待 P0 0
 - PR：`npm run check`（typecheck + 配置示例一致性 + `test:validate`），不访问外网。
 - 作者回路：用用户作用域临时应用跑 `apps new → apps check → apps explain → run --dry-run → run --max-steps`。
 - 手动/定时：`npm run test -- --tier smoke`、`core`，有网络与模型时再跑 `deep`；`probe` 单独跑并按 3 退出。
-- 离线等价验证（**非门禁**）：`fixtures/engine/*.html` 是零依赖静态页，供本地确定性重放/消融对比；`verify:offline` lane 待 P0 0.8 接入，不进 `npm run check`。
+- 离线等价验证（**非门禁**）：`fixtures/engine/*.html` 是零依赖静态页，供本地确定性重放/消融对比；`verify:offline` / `verify:runtime:offline` lane 已接入（P0 0.8），仍不进 `npm run check`。
 - 线上任务产物作为 CI artifact 保存；仓库内不留运行结果。

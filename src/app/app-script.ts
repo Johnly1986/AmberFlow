@@ -8,7 +8,6 @@
  * 任何契约/校验错误都在这里抛（带脚本路径与逐条 problem），绝不“降级成没加载到”：
  * 脚本存在但坏了，就是配置错误，不允许静默回退到另一种格式。
  */
-import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -16,6 +15,7 @@ import { pathToFileURL } from "node:url";
 import { REPO } from "../flow/flow.ts";
 import { appDirs, APPS_DIR, type AppPack } from "./app-pack.ts";
 import { appsSearchPath } from "../support/amberflow-home.ts";
+import { canonicalJson, sha256 } from "../support/canonical-json.ts";
 import { validateApp } from "./cross-ref.ts";
 import { createKit, type Kit } from "./kit.ts";
 import { lowerMeta, type ScriptMeta } from "./app-meta.ts";
@@ -49,24 +49,6 @@ export interface LoadedScriptApp {
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
-
-/** 确定性序列化：键排序，便于算 `plan_sha256`。 */
-export function canonicalJson(value: unknown): string {
-  const walk = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(walk);
-    if (isObj(v)) {
-      const out: Record<string, unknown> = {};
-      for (const k of Object.keys(v).sort()) out[k] = walk(v[k]);
-      return out;
-    }
-    return v;
-  };
-  return JSON.stringify(walk(value));
-}
-
-export function sha256(text: string | Buffer): string {
-  return crypto.createHash("sha256").update(text).digest("hex");
-}
 
 /** 解析脚本路径：显式路径优先；否则按 `appDirs()`（用户目录在前、仓库夹具在后）发现。 */
 export function resolveScriptPath(idOrPath: string): string | null {

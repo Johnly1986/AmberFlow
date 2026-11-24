@@ -21,8 +21,6 @@
  * 任何 `cursor:pointer` 形式。
  */
 
-import type { ElemFamily } from "./extraction.ts";
-
 export type SurfaceCategoryId =
   | "native-control"     // a,button,input,select,textarea —— 今天就在窗口里
   | "native-label"       // label（R1 延迟裁决，保持原逻辑）
@@ -32,58 +30,6 @@ export type SurfaceCategoryId =
   | "focusable";         // ★ 新增但只进解析面：[tabindex]（默认不启用）
 
 export type Admission = "window" | "resolve";
-
-export interface SurfaceCategory {
-  id: SurfaceCategoryId;
-  /** 该类的选择器片段（逗号表成员；禁止后代/伪类：见 matchSelector 可表达子集）。 */
-  selector: string;
-  admission: Admission;
-  /** 可见性口径：window 类目一律 visible-box（由提取 pass 的 checkVisibility 实施）。 */
-  visibility: "visible-box" | "any";
-  /** 仅作 hint/pick 的软先验默认值（不是硬过滤）。 */
-  family: ElemFamily;
-  /** 窗口内该类目的名额上限（缺省不限）；cap 命中时该元素不进池，自然计入 windowAudit 的 out_of_window。 */
-  windowCap?: number;
-  note: string;
-}
-
-export const SURFACE: readonly SurfaceCategory[] = [
-  {
-    id: "native-control", selector: "a, button, input, select, textarea",
-    admission: "window", visibility: "visible-box", family: "click",
-    note: "原生可激活控件：今天的窗口成员，语义与配额不变。",
-  },
-  {
-    id: "native-label", selector: "label",
-    admission: "window", visibility: "visible-box", family: "click",
-    note: "R1 延迟裁决：关联控件自身可见时跳过，避免同控件双份候选。",
-  },
-  {
-    id: "aria-role", admission: "window", visibility: "visible-box", family: "click",
-    selector: "[role='button'], [role='combobox'], [role='listbox'], [role='textbox'], [role='searchbox'], "
-      + "[role='spinbutton'], [role='checkbox'], [role='radio'], [role='switch'], [role='slider'], "
-      + "[role='menuitem'], [role='menuitemradio'], [role='menuitemcheckbox'], [role='option'], [role='tab']",
-    note: "ARIA 自绘控件：前 11 个是既有角色，后 5 个是 B2 扩面（全局行为变更）。",
-  },
-  {
-    id: "aria-widget", admission: "window", visibility: "visible-box", family: "click",
-    selector: "[onclick], [contenteditable='true'], [contenteditable=''], [contenteditable='plaintext-only'], [draggable='true']",
-    note: "通用可交互属性。[contenteditable='plaintext-only'] 是显式追加；绝不用 [contenteditable] 通配（会匹配 =\"false\" 关闭态）。",
-  },
-  {
-    id: "native-activation", selector: "summary",
-    admission: "window", visibility: "visible-box", family: "click", windowCap: 6,
-    note: "原生激活元素（U3 根因）：<summary> 是 details 的切换面，点击后内部内容才进入可动作面。"
-      + "窗口 cap=6（固定，不加数字键）：30 条 FAQ 的 30 个 summary 不得把页头按钮挤出窗口。"
-      + "audio[controls]/video[controls] 缓做（§7.3 拍板）：类目结构保留，有真实案件再追加。",
-  },
-  {
-    id: "focusable", selector: "[tabindex]",
-    admission: "resolve", visibility: "any", family: "click",
-    note: "★只建表、默认不启用：[tabindex] 是\"可聚焦\"事实，不是\"可激活\"证据。"
-      + "FOCUSABLE_ENABLED=false 时既不进 POOL_SEL 也不进 ADMIT_SEL；tabindex-only 页面池仍为 0（ready_empty 而非伪候选）。",
-  },
-];
 
 /** focusable 是否进入解析面（resolve）。FW5 固定 false：“只建表不启用”。 */
 export const FOCUSABLE_ENABLED = false;

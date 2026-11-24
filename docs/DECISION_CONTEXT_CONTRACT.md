@@ -1,6 +1,6 @@
 # 决策上下文契约（Decision Context Contract）v1.0
 
-> 状态：**提案 v1.0（设计出处先行，实施登记待批次）**。
+> 状态：**已实施（v1；`DECISION_ASK_CONTRACT_VERSION = 6` 已提交，未冻结——冻结条件见复核记录）**。
 > 先例：`docs/INTERVENTION_RESCUE_MODULE.md` 同款流程——设计文档先行，v1 实施后在本文件补记状态，并在实施批次内于 `src/cli/schema-gen.ts` 登记 F 号（statement + truth 同批落地，遵守失效引用纪律：F 号不引用尚不存在的代码）。
 > 本文件是"决策模型上文信息"契约条款的**唯一出处**；`src/support/decision-provider-contract.ts` 是其 L0 数据形状的唯一出处（实施批次落地）。
 > 关联：`docs/DECISION_SERVICE_CONFIG.md`（决策源三件套）、`docs/INTERVENTION_RESCUE_MODULE.md`（监督面）、`src/prompts/evidence-prompts.ts`（分级预算）、`src/model/laya-format.ts`（截断单源）、`docs/MAINLINE.md`（seam 冻结表——Phase 2 新请求面属 seam 变更，先改 MAINLINE 再改代码）。
@@ -147,12 +147,12 @@ export interface DecisionContext {
 
 1. **双账本**：`PilotLedger`（面）与 `RunAccounting`/`outcome-memory`（引擎）并存——上收引擎。
 2. **`pickProposal` 由面传池与禁选**：引擎侧应提供单点入口
-   `ask(page, scope, accounting, intent, profile)`（v5 契约形状），内部自取池、投影、账本、状态、
+   `ask(page, scope, accounting, intent, profile)`（v6 契约形状），内部自取池、投影、账本、状态、
    裁剪；面只传意图 + 询问策略（可选段 S4 起）。
 3. **模型面字段手写白名单**：`modelProjectionOf` 的 guard+解构两处列举无断言——加
    `MODEL_FACE_FIELDS` 闭集与断言（泄漏/漏剥双检）。
-4. **能力档 `context` 未实施**：DC4 的 `none|minimal|full` 仍是提案；未声明 provider 时上文静默丢弃
-   （仅 `context_skipped` 计数）——补声明并在产物里如实报告「哪层带/未带」。
+4. **能力档 `context` 已实施（S3 完整落地）**：DC4 的 `none|minimal|full` 声明位与逐层回执已落地；未声明 provider 保守按 `none`（逐层回执 `unsupported`，不静默带层）
+   ——产物 `context.layers[]` 逐层如实报告「哪层带/未带」。
 5. **goal 混步史**：pilot 的 `drivingGoal` 把「已完成」拼进 goal——改为独立段/注记（防回声）。
 
 迁移纪律：**S0a** characterization 门禁（确定性 provider 钉住请求/返回序列与 leg/attempt 生命周期，
@@ -165,7 +165,7 @@ Ports 接线 → **S4** 结构化段 + 步史迁出 goal（单独 A/B）。
 
 **契约文件**：`src/engine/decision-ask-contract.ts`（**仅类型 + 两个常量**（`VERSION`/`LADDER_CODES`），无运行行为；对 `executor.ts` 只有 type-only 引用（`ModelPickPhase`，无运行时加载）——S1 批次才接实现与消费面；`ModelPickPhase` 后续建议下沉 `executor-types`）。
 
-**两个方向**（四轮复审收敛后 v5，`DECISION_ASK_CONTRACT_VERSION = 5`；**未冻结**——冻结条件见复核记录）：
+**两个方向**（四轮复审收敛后 v5 → v6（question kind 闭集），当前 `DECISION_ASK_CONTRACT_VERSION = 6`；**未冻结**——冻结条件见复核记录）：
 - 面 → 引擎：`ask(page, scope, accounting, intent, profile)`——`page` **复用 L0 `ProviderPage`**
   （含 `title()`；面持有的资源句柄——执行期页面与账本都是 `mw.run()` 调用内局部状态，引擎不存在
   可"自取"的成员）；`scope` = `DecisionLifetime`（`attempt{runId,subgoalId,attempt}` /
@@ -204,7 +204,7 @@ Ports 接线 → **S4** 结构化段 + 步史迁出 goal（单独 A/B）。
 | 面 | 现状 | 接入 |
 |---|---|---|
 | pilot | `driveOnce → modelVote → mw.pickProposal(goal,page,elems,forbidden,notes)` | 接：`ask(page, scope{pilot-leg}, acct, intent{goal}, profile{face:"pilot"})`（driver/ambiguity 留 pilot 执行层；墙钟走 `stepTimeoutMs` 硬约束） |
-| run | 选择段是**单一 phase** `runModelPick`（executor 内一次调用，窄问→全池回退/宽扫/窗口升级/族修复共享同一份 elems/forbidden/noted 视图），账本为 `run()` 内局部 `RunAccounting` | 接入单位 = **整个 `runModelPick` phase**（不是逐 `pickElement` 点换——五处共享视图，逐点换会撕裂同一视图）：`ask(page, scope{attempt}, acct, intent{instruction,anchor}, profile{face:"run",confFloor,candidatePriority,tieredHint,…})`；L3 段由 run 面注入 |
+| run | 选择段是**单一 phase**（实现 = `runDecisionPick`；v6 起默认统一编排 `runDecisionPickUnified`），窄问→全池回退/宽扫/窗口升级/族修复共享同一份 elems/forbidden/noted 视图，账本为 `run()` 内局部 `RunAccounting` | 接入单位 = **整个选择段 phase**（不是逐 `pickElement` 点换——五处共享视图，逐点换会撕裂同一视图）：`ask(page, scope{attempt}, acct, intent{instruction,anchor}, profile{face:"run",confFloor,candidatePriority,tieredHint,…})`；L3 段由 run 面注入 |
 | session | **不接入**：`doAct` 是显式 target+op+value 的确定性 `actOnce`，模型零参与 | 无询问面；只有未来出现"歧义时模型裁决"需求才注册 |
 | 规划期（Phase 2） | 无 | 独立 `PlanningRequest` seam（DC6 Phase 2，先改 MAINLINE） |
 
@@ -266,8 +266,7 @@ Ports 接线 → **S4** 结构化段 + 步史迁出 goal（单独 A/B）。
   （126 行、纯 `import type`、engine 不 import app）切到 `runDecisionPick`——`executor.ts` 2785→2786 行、
   `run()` 持平 883 基线，旧 `runModelPick` 标 `@deprecated` 保留；切换前后 `verify:pilot` 12/12、
   `verify:decision-characterization` 11/11、`verify:runtime:offline` 8/8、parity 16/16 **逐字一致**。
-  **Stage-3（未做）**：先给 parity 旧臂快照 golden，再删旧实现/re-export/清理 `phaseFunctions` 基线例外
-  （`--update`，不手改 baseline）与注释里的符号引用。
+  **Stage-3 已落地**（见下方「S2-Stage-3 已落地」记录）：先用旧臂录 golden 再删旧实现；`phaseFunctions` 死条目由后续清理批删除。
 - **S4 设计口径（未实施）**：①**步史移出 goal**——pilot 的 `drivingGoal` 目前把"已完成: …"拼进 goal
   （回声风险 + 缓存键抖动），S4 改为 `intent.segments=[{kind:"history", layer:"L2", text:…, provenance}]`，
   goal 只留目标原文；②**结构化段**——L3 plan narrative / L2 history 用判别联合（`{kind, layer, text,
@@ -290,13 +289,13 @@ Ports 接线 → **S4** 结构化段 + 步史迁出 goal（单独 A/B）。
   **后续 baseline 维护待办（已登记）**：①专门提交用 `--update` 接受合法下调（`executor.ts 2833→2787` 等）；
   ②用专门手段删除 `phaseFunctions` 里的死条目 `executor-phases-b.ts#runModelPick`（`--update` 按设计不修剪
   allowlist）；③复跑 maintain。
-- **当前状态：工作树 v5（**未提交、未冻结**；类型单源 / executionPool / 工厂绑定账本 / Ports 注入 /
+- **当前状态：v6 已提交（**未冻结**；类型单源 / executionPool / 工厂绑定账本 / Ports 注入 /
   StopCode 复用 / ts 对齐 DC3；审计 P1 已修：`run` 元数据补 `conf`/`label`、`notesFor` 增可选作用域、
   `forbid/unforbid` pilot 不对称与 `entries≤8/不含守停现场` 写进契约、`ruleSkip` 的聚合容器归池构成事实）。
   批序：**S0a → S0b → S1 → S2 → S3 → S4**。冻结条件 = ①S1 实现后模型路径等价证据（provider stub 消融 + 真站 A/B，DC5 锚），
   ②闭集码与执行期停因分类的断言一致，③独立评审复看通过。**分批顺序**：S0（`RunAccounting`→
   `DecisionAccounting`，**双语义接口**，run 面逐字节不变）前置 → S1（ask 实现 + pilot 切面）→
-  S2（run 以 `runModelPick` 整段接入）。
+  S2（run 以选择段整段接入；旧 `runModelPick` 已退役）。
 
 - **证据覆盖状态（补充登记，不改本契约条款语义）**：run-parity 阶段对照 lane 的 golden 已按评审
   换基（`--rebase-reviewed`，仅允许 `$.asks[<i>].goal` 的 L0 文本差异并写 `_rebase` provenance；

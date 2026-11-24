@@ -197,7 +197,6 @@ export async function runDeclaredTargets(mw: BrowserMiddleware, a: {
     let rowAmbStop: { code: StopCode; reason: string } | null = null;
     // P2 COMMAND SPACE — the step's action is chosen ON THE CLOSED SET, not on the pool:
     if (cmdSpace.length) {
-      const scans = new Set(Object.values(elems).map((x) => x.scan));
       let pendingUnresolved: string[] = [];
       for (let i = cmdI; i < cmdSpace.length; i++) {
         const c = cmdSpace[i]!;

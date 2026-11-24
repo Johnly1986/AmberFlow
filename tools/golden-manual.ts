@@ -5,14 +5,16 @@
  * 话术锚点事实，与 `tools/golden/manual-baseline.json` 快照比对。A 组（逐字节）的
  * 运行时面（--json / report）由步 2 后续提交接线；B 组（真实求援）本轮只建骨架。
  *
- * 路径清单（设计 §8 步 2 原文）：
+ * 路径清单（设计 §8 步 2 原文；文件按符号定位，不按历史位置）：
  *   1  src/cli/start.ts            规划脸人工确认「这一步完成了么？(y/N) > 」
- *   2  src/app/app-runner.ts       promptManualOnTty 的「[manual] …」/「完成后按 Enter 继续；输入 n 放弃：」
+ *   2  src/app/app-runner-policy.ts  `promptManualOnTty` 的「[manual] …」/「完成后按 Enter 继续；输入 n 放弃：」
  *   3  src/app/ctx-dry.ts          dry 桩 manual 的 trace 事件形状（result: { dry: true, instructions }）
- *   4  src/app/app-runner.ts       runManualStep 的 manual_handler_error reason 模板
+ *   4  src/app/app-runner-declared.ts `runManualStep` 的 manual_handler_error reason 模板
  *   5  src/app/ctx-replay.ts       replay 桩 manual（nextEvent("manual", …) + stepResult）
  *   6  src/app/agent-view.ts +     needs_human 判定 + report「人工步骤」表渲染（消费面）
  *      src/app/app-report-view.ts
+ * 锚点定位纪律：`find` 只按符号/话术原文定位，`file` 是该符号当前所在文件；
+ * 函数搬家后改 `file` 并从符号反查（不要按行号/历史路径猜），话术原文本身是冻结面。
  *
  * 提取方式统一：定位锚点行 → 抽取 ≤3 行窗口 → 归一空白（连续空白折叠为单空格、
  * 去首尾空白）→ 存入快照 JSON。文件不存在或锚点缺失 = 单条 problem。
@@ -88,8 +90,8 @@ const ANCHORS: Anchor[] = [
   },
   {
     path: 2,
-    file: "src/app/app-runner.ts",
-    // promptManualOnTty 函数体：先定位函数头，窗口须含两段话术。
+    file: "src/app/app-runner-policy.ts",
+    // 符号 promptManualOnTty 函数体内的 TTY 话术行（窗口须含两段话术）。
     find: /console\.log\(`\\n\[manual\] \$\{req\.desc\}`\)/,
     mustContain: ["[manual] ", "完成后按 Enter 继续；输入 n 放弃："],
   },
@@ -102,9 +104,9 @@ const ANCHORS: Anchor[] = [
   },
   {
     path: 4,
-    file: "src/app/app-runner.ts",
-    // runManualStep 的 handler 抛错 reason 模板。
-    find: /manual_handler_error: \$\{/,
+    file: "src/app/app-runner-declared.ts",
+    // 符号 runManualStep：handler 抛错 reason 模板（`manual_handler_error: …` 原文冻结）。
+    find: /reason: `manual_handler_error: \$\{/,
     mustContain: ["manual_handler_error: ${"],
   },
   {

@@ -1,5 +1,5 @@
 /**
- * `amber session` —— 交互式试错会话（task-33 / Phase 1）。
+ * `amber session` —— 交互式试错会话。
  *
  * 这是 **authoring 面**的薄入口：真正的事务在 `src/app/session-runtime.ts`
  *（createCtx + BrowserMiddleware.actOnce + checkSignal —— 与正式 run 同一份实现）。

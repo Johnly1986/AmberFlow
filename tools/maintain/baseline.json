@@ -5,15 +5,15 @@
     "newFunctionMaxLines": 150,
     "phaseFunctionMaxLines": 400,
     "files": {
-      "src/engine/executor.ts": 2833,
-      "src/app/session-runtime.ts": 1026,
+      "src/engine/executor.ts": 2813,
+      "src/engine/extraction.ts": 1072,
       "src/app/app-adapters.ts": 988,
+      "src/app/session-runtime.ts": 984,
       "src/engine/executor-pure.ts": 938,
+      "src/engine/pool-js.ts": 907,
       "src/cli/commands/apps.ts": 880,
       "src/app/app-runner.ts": 872,
-      "src/engine/extraction.ts": 1113,
-      "src/engine/executor-types.ts": 826,
-      "src/engine/pool-js.ts": 907
+      "src/engine/executor-types.ts": 826
     },
     "functions": [
       {
@@ -57,14 +57,14 @@
         "lines": 222
       },
       {
-        "file": "src/app/session-export.ts",
-        "name": "buildAppSource",
-        "lines": 214
-      },
-      {
         "file": "src/cli/commands/apps.ts",
         "name": "flowScriptTemplate",
         "lines": 217
+      },
+      {
+        "file": "src/app/session-export.ts",
+        "name": "buildAppSource",
+        "lines": 214
       },
       {
         "file": "src/cli/commands/apps-rehearsal.ts",
@@ -72,19 +72,19 @@
         "lines": 208
       },
       {
+        "file": "src/app/app-report-view.ts",
+        "name": "appReportMarkdown",
+        "lines": 194
+      },
+      {
         "file": "src/app/session-runtime.ts",
         "name": "doAct",
-        "lines": 199
+        "lines": 193
       },
       {
         "file": "src/cli/commands/doctor.ts",
         "name": "runDoctor",
-        "lines": 198
-      },
-      {
-        "file": "src/app/app-report-view.ts",
-        "name": "appReportMarkdown",
-        "lines": 194
+        "lines": 192
       },
       {
         "file": "src/cli/start.ts",
@@ -99,7 +99,6 @@
     ],
     "phaseFunctions": [
       "src/engine/executor-phases-a.ts#runDeclaredTargets",
-      "src/engine/executor-phases-b.ts#runModelPick",
       "src/engine/executor-phases-b.ts#runPostAction",
       "src/engine/executor-phases-c.ts#runActionPhase",
       "src/engine/executor-phases-c.ts#runActionExecute",
@@ -133,9 +132,9 @@
     "runEntryCalls": 12
   },
   "comments": {
-    "dateStamps": 34,
-    "planTokens": 403,
-    "historyWording": 64,
+    "dateStamps": 7,
+    "planTokens": 341,
+    "historyWording": 60,
     "lineAnchors": 0,
     "ghostRefs": 0,
     "todo": 0

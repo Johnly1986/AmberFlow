@@ -14,7 +14,9 @@
  *   bridge   `integrations/dsh-bridge/src/grammar.generated.ts` 与引擎侧真源同步
  *            （grammar + playbook + escalation + overview）。桥纪律 "called, not
  *            embedded"：不 import 引擎代码，语法以**生成物**分发——`--fix` 重新生成；
- *            不带 --fix 时漂移即红（接进 `npm run check`）。
+ *            不带 --fix 时漂移即红（接进 `npm run check`）。另守手写闭集的文本漂移：
+ *            session 工具 `signal` 描述必须列全 `SIGNAL_OPS` 键；`drive_command.note`
+ *            的桥 schema/描述 ↔ 引擎形状校验 ↔ pilot JSONL 行三面一致。
  *   doc      `docs/APP_SCRIPT_AUTHORING.md` 逐字包含 ATTR_MATCH_MODEL_TEXT /
  *            PLAN_PLAYBOOK_TEXT / FAILURE_SIGNS_TEXT——文档也是消费面，关键句不许手抄。
  *   overview 概述层（层 1）多面一致：AGENTS.md 逐字含 OVERVIEW_TEXT；长度预算
@@ -68,6 +70,9 @@ import {
 import { PLAN_PLAYBOOK_TEXT, FAILURE_SIGNS_TEXT, PLAN_PLAYBOOK_SHORT, STOP_ESCALATION_TEXT, STOP_NEXT, EXEMPT_NEXT, nextForStop } from "../src/engine/planning-playbook.ts";
 import { hintMatch } from "../src/engine/rules.ts";
 import { validateSignalSpec } from "../src/engine/signals.ts";
+import {
+  driveCommandLine, driveCommandProblem, SESSION_DRIVE_NOTE_MAX_CHARS,
+} from "../src/app/session-runtime-contract.ts";
 import { HOME_NEXT, OVERVIEW_TEXT, WHEN_TO_USE } from "../src/support/help-map.ts";
 import { STOPCODE_MEANING, EXECUTOR_ONLY_STOPCODES, RESCUE_RESULT_SHAPE_TEXT, RESCUE_SHADOW_SWITCH_TEXT } from "../src/cli/schema-gen.ts";
 import { COMMANDS, commandSpec, helpCommandsPayload } from "../src/cli/registry.ts";
@@ -230,6 +235,54 @@ if (actual !== expected) {
     console.log(`wrote ${path.relative(REPO, GENERATED)}`);
   } else {
     problems.push("bridge: integrations/dsh-bridge/src/grammar.generated.ts 与 grammar-prompt 不一致；运行 npm run prompt-hit -- --fix 重新生成");
+  }
+}
+
+/* ---- 4b. bridge：session 工具闭集 ↔ 引擎契约（fail，防文本分发漂移） -------- */
+// 桥纪律 "called, not embedded"：桥不 import 引擎，Agent 可见的闭集只能由**文本**分发，
+// 因此桥描述最容易与引擎真源漂移。这里把桥描述与引擎真源逐键钉住：漏列 = Agent 以为引擎
+// 不支持，多列 = 桥承诺了引擎会拒绝的算子。
+
+const BRIDGE_INDEX_SRC_PATH = path.join(REPO, "integrations", "dsh-bridge", "src", "index.ts");
+const bridgeDescriptionTexts = extractDescriptions(fs.readFileSync(BRIDGE_INDEX_SRC_PATH, "utf-8"));
+const signalDescription = bridgeDescriptionTexts.find(
+  (t) => t.includes("same operator set as run done/when signals"),
+);
+if (signalDescription === undefined) {
+  problems.push("bridge: 找不到 session 工具 signal 描述（锚句 'same operator set as run done/when signals'）——算子闭集断言失去锚点");
+} else {
+  const opsAt = signalDescription.indexOf("Operators:");
+  const listedOps = opsAt < 0
+    ? []
+    : [...signalDescription.slice(opsAt).matchAll(/`([a-z][a-z0-9_]*)`/g)].map((m) => m[1]!);
+  const missingOps = opKeys.filter((k) => !listedOps.includes(k));
+  const extraOps = listedOps.filter((k) => !(k in SIGNAL_OPS));
+  if (missingOps.length > 0 || extraOps.length > 0) {
+    problems.push(`bridge: session signal 描述与 SIGNAL_OPS 不一致（漏列: ${missingOps.join(", ") || "-"}；多列: ${extraOps.join(", ") || "-"}）——桥不 import 引擎，算子闭集必须逐键列全`);
+  }
+}
+// `drive_command.note`：桥 schema/描述承诺「recorded」⇒ 引擎必须按同一有界形状接受，且
+// JSONL 白名单必须真把它交给 pilot 记录——承诺、校验、透传三面任何一面掉链都红。
+if (!bridgeDescriptionTexts.some((t) => t.includes("short note recorded with the instruction"))) {
+  problems.push("bridge: session 工具缺 `note` 参数描述（锚句 'short note recorded with the instruction'）——drive_command.note 的桥承诺消失");
+}
+if (driveCommandProblem({ cmd: "finish", note: "why finishing" }) !== null) {
+  problems.push("bridge: 引擎 driveCommandProblem 拒绝了合法 drive_command.note——桥 schema 承诺的字段必须落地");
+}
+if (driveCommandProblem({ cmd: "finish", note: "" }) === null) {
+  problems.push("bridge: driveCommandProblem 放行了空 note——桥面 note 是非空字符串，形状校验必须一致");
+}
+if (driveCommandProblem({ cmd: "finish", note: "x".repeat(SESSION_DRIVE_NOTE_MAX_CHARS + 1) }) === null) {
+  problems.push(`bridge: driveCommandProblem 放行了超过 ${SESSION_DRIVE_NOTE_MAX_CHARS} 字符的 note——有界字符串协议失守`);
+}
+{
+  const withNote = JSON.parse(driveCommandLine({ cmd: "abort", note: "why aborting" })) as Record<string, unknown>;
+  const withoutNote = JSON.parse(driveCommandLine({ cmd: "abort" })) as Record<string, unknown>;
+  if (withNote["note"] !== "why aborting") {
+    problems.push("bridge: driveCommandLine 漏透传 note——桥承诺的 note 进不了 pilot 自身 trace/record");
+  }
+  if ("note" in withoutNote) {
+    problems.push("bridge: driveCommandLine 在未给 note 时仍写出 note 键——缺省形状应无该键");
   }
 }
 
@@ -1007,6 +1060,7 @@ console.log(
   `prompt-hit: OK — grammar/pool/plan/bridge/doc/overview/coverage/intervention/model/agent/evidence/bridge_desc/clarity 十三组全绿（bridge_desc 仅 warn）：`
     + `hint ${HINT_SHAPES.length} 形状全部可解析且示例可命中，`
     + `信号 ${Object.keys(SIGNAL_OPS).length} 算子提示词↔校验器一致，`
+    + `桥 session signal 描述列全同一闭集、drive_command.note 承诺↔校验↔透传一致，`
     + `停因 ${Object.keys(STOPCODE_MEANING).length} 个 next/豁免全覆盖，`
     + `概述层多面一致（AGENTS.md/桥/长度预算），CLI next 无死链，`
     + `求援文案 ${Object.keys(RESCUE_TEXTS).length} kind 六条清单全过，`

@@ -168,20 +168,6 @@ export function diffStates(before: StateView, after: StateView): StateDiff {
   return { urlChanged: before.url !== after.url, appeared, changed, visibility, gone };
 }
 
-function kindOf(signal: SignalSpec): InducedCandidate["kind"] {
-  if ("url_contains" in signal) return "url";
-  if ("all_of" in signal) return "all_of";
-  if ("css_visible_exists" in signal) return "visible";
-  if ("not" in signal) {
-    const inner = signal.not;
-    return typeof inner === "object" && inner !== null && "css_visible_exists" in inner ? "hidden" : "gone";
-  }
-  if ("css_text_equals" in signal) return "text_equals";
-  if ("css_value_equals" in signal) return "value_equals";
-  if ("css_text_contains" in signal) return "text_contains";
-  return "exists";
-}
-
 /** Candidates a stable-handle element can carry, strongest literal first. */
 function candidatesForEl(
   e: El, selector: { sel: string; stability: number }, effect: string, scan?: number,

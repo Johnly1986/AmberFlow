@@ -1,5 +1,5 @@
 /**
- * `amber session export` —— 把 `--record` 动作轨迹还原成 `app.mjs` 骨架（task-33 / Phase 2）。
+ * `amber session export` —— 把 `--record` 动作轨迹还原成 `app.mjs` 骨架。
  *
  * 定位（design Q6 拍板口径）：
  *   - **只出骨架**：`meta` 占位 + `flow(ctx)` 的 steps 序列 + 每步 `observe_hints` 候选；
@@ -216,11 +216,6 @@ export function readRecord(file: string): {
 /** JS 字符串字面量（`null/undefined` 折成空串——轨迹缺字段时不猜内容）。 */
 function js(s: string | null | undefined): string {
   return JSON.stringify(s ?? "");
-}
-
-/** 一步的动作是否"能直接生成"：click/check/hover 是命令闭集；fill/select 缺明文值；scroll 走原语。 */
-function isDirectAction(a: RecordedAction): boolean {
-  return a.op === "click" || a.op === "check" || a.op === "hover";
 }
 
 interface BuiltFile {

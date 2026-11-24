@@ -352,7 +352,7 @@ export function describeFrameSuffixRejection(hint: string): string | null {
   const h = hint.trim().toLowerCase();
   // E6（BACKLOG #8 / WITHIN_PARITY_PLAN §8）：**整串 `frame:<origin>`、首词即 frame:**
   // （无前导空白主体，如 `frame:https://a.com`）——词法预扫只认「前置空白 + 串尾」，
-  // 这种串根本进不了下面的循环（`frame:` 在串首），旧实现于是不点名"缺少主体"。
+  // 这种串根本进不了下面的循环（`frame:` 在串首），需在此处补点名"缺少主体"。
   // 这里显式补同一条措辞的诊断（仍是失败路径附注，不改 parseHint 的解析结果）。
   // 守卫：带未闭合 `[` 时 `frame:` 可能落在属性值内部（`[data-x=frame:o]` 一类形状），
   // 与循环里同一条守卫——不把它当后缀尝试，防误报。

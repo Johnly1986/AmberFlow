@@ -144,8 +144,7 @@ capabilities/`score_kind`/`conf_floor`/缓存/计数/审计对两条路径同语
 
 ## 4. executor.ts 按功能划分拆分：第二波文件级外搬 + run() 提九阶段
 
-**状态**：open ｜ **优先级建议**：**P1**（本评审裁定：拆分窗口内**冻结新机制进 `run()`**；先落
-RunCtx + evidence collector，再 4c/4d）
+**状态**：done（4a–4d 已落地：4a 滚动/范围原语、4b 动作执行族、4c 单动作事务、4d `run()` 九阶段（W1-c；阶段函数 ≤400 行例外）；行数快照见 IMPROVEMENT_PLAN §6.4）｜ **优先级建议**：**P1**（本评审裁定：拆分窗口内**冻结新机制进 `run()`**；先落 RunCtx + evidence collector，再 4c/4d）
 
 > 本评审裁定（2026-11-16）：executor.ts 拆分升为 P1。窗口期内不再往 `run()` 加新机制；先落
 > RunCtx（四组记账闭包收敛）+ evidence collector（行锚/帧/DRF 证据单点），再动 4c/4d。
@@ -228,7 +227,7 @@ SC7960 那一卡的按钮——token 来自 `inspect`/`ctx.observe` 的 `hint_ca
 |---|---|---|---|
 | 1 | 桥 typecheck 纳入门禁 | 桥（`integrations/dsh-bridge`）尚无独立 tsc 门禁——先修既有 tsc 错误，再把桥 typecheck 接入 `npm run check`/CI，防止桥侧类型漂移逃过 PR 门禁 | open（需先修 bridge 既有 tsc 错误） |
 | 2 | row-index 编号基统一到页级全量收集 | 当前编号基 = 各面收集到的成员（池面 `POOL_SEL`+heuristic vs 回捞/observe 面 `ADMIT_SEL` 两个元素宇宙）；跨面 N 可移植的前提 = 同名组成员在两集合都在场。统一到**页级全量收集（合并 POOL_SEL/ADMIT_SEL 口径）**后 N 才无条件可移植；池帽仍只截尾、编号是页面前缀。文档口径：照抄 inspect 候选前用 `ctx.observe`/run 复核 | open（有实测不可移植案例再排期） |
-| 3 | F72 `rehydrate_rescan` 的 miss+strict 路径 RunReport 缺重扫事实 | 评审 P2：act hint miss 且 `act_hint:"strict"` 时，RunReport/汇总未带 `rehydrate_rescan` 重扫事实（trace 行有、报告尾缺），归因链断一截 | open（待收口） |
+| 3 | F72 `rehydrate_rescan` 的 miss+strict 路径 RunReport 缺重扫事实 | 评审 P2：act hint miss 且 `act_hint:"strict"` 时，RunReport/汇总未带 `rehydrate_rescan` 重扫事实（trace 行有、报告尾缺），归因链断一截 | done（2026-11-24）：`run()` 作用域保存 `lastRehydrateRescanFact`（重扫事实赋值处同步）并经 `RunReportTailCtx.rehydrateRescanFact` 传给 `runReportTail`；报告尾保留 trace 行优先查找，trace 无承载行（strict 在动作行之前早停）时退化为该字段输出 `rehydrate_rescan`——键仅在发生时出现，判定/退出码/既有报告形状不变；strict 停因 reason 追加「；rehydrate_rescan 已等 Xms 重抽池（N 项）仍未命中」。证据 lane：`tools/verify-rehydrate-rescan.ts`（`fixtures/engine/rehydrate-rescan/` 三场景：strict-miss 退化字段且 trace 无承载行、重扫命中时 trace 形状不变、`settle:off` 无键；规则面零模型、零外部网络；非门禁） |
 
 **已收口（本轮 F85 一并关闭）**：`resolved_by` / F75 决策步 DOM 回退的歧义证据（同一
 `hintCandidates` 谓词 + `skipped_actions` 已统一）；行锚消费面 fail-closed（F85）见 CHANGELOG
@@ -241,7 +240,7 @@ SC7960 那一卡的按钮——token 来自 `inspect`/`ctx.observe` 的 `hint_ca
 #3 依赖 #2 的候选契约；#1 独立可先行。建议顺序：**#1 → #2 → #3**；
 每条独立成提交，行为等价性验收先行（#2 的逐字节对比是硬门）。
 #4 的 4a-4c（文件级外搬）与 #2/#3 无依赖、可随时穿插；**4d（run() 提函数）与 #2 改 run() 同段，须前后错开**（见 #4 末节）。
-**进度（2026-11-07）**：#1 已完成（规划归 Agent 前提下重定义落地，见条目内落地记录）；**#2 / #3 仍开放**（验收标准不变）。相邻的实施队列第 7 项（T4/T3/T7 依赖评审，`369f895`）与第 8 项（U2a/U2b learn 观测面与值管道，`5d11e0b`/`c1e1f71`）均已落地，且**未新增运行时依赖**——下节依赖评审的结论对新能力面同样成立；learn 的可见性/值候选只扩观测与生成面（`schema-gen.ts` F38/F39），不改运行时 judge/池语义。
+**进度（2026-11-24）**：#1 / #2 / #4 已完成（见各条目落地记录）；**#3 已完成**（2026-11-24，strict-miss 重扫证据 additive 落盘 + 证据 lane；见条目落地记录）。相邻的实施队列第 7 项（T4/T3/T7 依赖评审，`369f895`）与第 8 项（U2a/U2b learn 观测面与值管道，`5d11e0b`/`c1e1f71`）均已落地，且**未新增运行时依赖**——下节依赖评审的结论对新能力面同样成立；learn 的可见性/值候选只扩观测与生成面（`schema-gen.ts` F38/F39），不改运行时 judge/池语义。
 
 ---
 

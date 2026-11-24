@@ -51,7 +51,6 @@ export interface RangeOutcome {
    *   - `accurate`：**精确语义（task-21/1a 收紧）——achieved === requested**（requested 值
    *     真实在控件上）。容差（缺省 max(0.5, step/2)）只用于交互过程的收敛判定，不再用于
    *     accurate 判定——「容差内但非请求值」如实报 accurate:false（achieved 如实带出）。
-   *   - 旧行为（accurate 按钳制值/容差判）已废除——1a 行为变更，CHANGELOG 记录。
    * 失败路径也如实给 false——不把“动作没抛错”当成“值设上了”。
    */
   applied?: boolean;

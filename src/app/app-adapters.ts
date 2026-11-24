@@ -13,7 +13,7 @@
  *
  * 注册表纪律与 provider 注册表同一条：**拼错类型名在加载期就红并列出已知项**，绝不静默退回。
  *
- * Slice 2（2026-10-18）：进程族支持器新增 `ssh`（真实的 `ssh` 子进程，信号复用 `tool-signals`），
+ * Slice 2：进程族支持器新增 `ssh`（真实的 `ssh` 子进程，信号复用 `tool-signals`），
  * 并给 `cli`/`ssh` 加**返回值**（`returns`，stdout/regex/exit_code 抽取）→ 运行级数据集 →
  * 后续步骤以 `{dataset:NAME}` 消费（缺失 = 结构化 `needs_value`，绝不猜）。
  */

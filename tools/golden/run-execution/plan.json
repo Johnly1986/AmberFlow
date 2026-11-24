@@ -57,16 +57,6 @@
         "desc": "click li \"航空公司\"",
         "executed": true,
         "how": "clicked",
-        "identity": {
-          "attr": "id",
-          "frame": 0,
-          "hidden_matches": 0,
-          "matches": 1,
-          "shape": "#id",
-          "target": "#filter_item_airline",
-          "total_matches": 1,
-          "value": "filter_item_airline"
-        },
         "inert": false,
         "method": "rule:match",
         "op": "click",

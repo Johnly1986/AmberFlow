@@ -121,7 +121,9 @@ npm run check              # PR 门禁：预检/快照重生成 + 契约生成�
 npm run test -- --tier smoke   # 真实站点（需要网络；跳过 ≠ 通过）
 ```
 
-仓库没有单元测试是**设计决定**：真实站点套件是唯一测试层；离线夹具（`fixtures/engine/`）只用于非门禁本地等价验证（抽取面 / 运行期 / 四源编排 lane），不进 `npm run check`；运行证据不进仓库。发现问题请通过 issue 反馈，安全问题请走 [SECURITY.md](SECURITY.md) 的报告渠道。
+本地等价证据 lane（需要 chromium，不进 `npm run check`）用 `npm run verify:lanes` 顺序跑（抽取面 / 四源编排 / 人工话术 / 会话动作 / 决策账本 / 失败路径共 15 条）；单条 script 与完整清单见 `package.json` 与 [AGENTS.md](AGENTS.md)「测试」节。
+
+仓库没有单元测试是**设计决定**：真实站点套件是主测试层；唯一例外是 DSH 桥的 fake-engine 透传 harness（`integrations/dsh-bridge/test/`，`npm run bridge:test`；进程内 stdio 桩、不启浏览器、不联网，只断言桥面投影与参数闭集）；离线夹具（`fixtures/engine/`）只用于非门禁本地等价验证（抽取面 / 运行期 / 四源编排 lane），不进 `npm run check`；运行证据不进仓库。发现问题请通过 issue 反馈，安全问题请走 [SECURITY.md](SECURITY.md) 的报告渠道。
 
 ## License
 

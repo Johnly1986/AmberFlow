@@ -50,6 +50,7 @@ import { modelVote } from "./pilot-vote.ts";
 import { PilotAskAdapter } from "./pilot-ask-adapter.ts";
 import { PilotLedger } from "./pilot-ledger.ts";
 import { slotKeyFor, valueKeyOf, valueNeedOf, type ValueNeed } from "./pilot-value-need.ts";
+import { clipText } from "../support/text.ts";
 import {
   emitStepRequest as emitStepRequestEvidence, finalSignalFact, frameExclusionsOf, handoffEvidence,
   handoffWhyEvidence, weakPicksFrom,
@@ -81,7 +82,6 @@ const MAX_LABEL = 40;
 /** 动作目标上限：与 hint 匹配口径一致（`full_label` ≤200）。`label` 只是模型视图的 40 字前缀，
  *  拿它当动作目标会在长标签上精确匹配落空——跨 frame/AX 长标签元素尤其常见。 */
 const MAX_HINT = 200;
-const buf = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 
 export class PilotRuntime implements PilotCommandTarget {
   readonly runId: string;
@@ -100,6 +100,8 @@ export class PilotRuntime implements PilotCommandTarget {
   private traceRef: AppTrace | null = null;
   private recordStream: fs.WriteStream | null = null;
   private recordPath: string | null = null;
+  /** 记录流写失败（ENOSPC/EIO）后永久停用：不再写、不再重建（重建只会反复失败）。 */
+  private recordFailed = false;
   resumeHint: string | null = null;
   private lastError: string | null = null;
   /** 驾驶者：model = 决策模型投票（缺省）；agent = 每步等 Agent resume{hint} 点名（零模型票）。 */
@@ -254,11 +256,19 @@ export class PilotRuntime implements PilotCommandTarget {
 
 
   record(line: PilotRecordLine): void {
-    if (this.recordPath === null) return;
+    if (this.recordPath === null || this.recordFailed) return;
     try {
-      this.recordStream ??= fs.createWriteStream(this.recordPath, { flags: "a", encoding: "utf8" });
-      this.recordStream.write(`${JSON.stringify(line)}\n`);
+      let stream = this.recordStream;
+      if (stream === null) {
+        stream = fs.createWriteStream(this.recordPath, { flags: "a", encoding: "utf8" });
+        // 旁路记录写坏（如 /dev/full）时流会异步 emit "error"：接管降级，不打断驾驶。
+        stream.on("error", (e) => { this.recordFailed = true; this.recordStream = null; this.log(`record write failed: ${errMsg(e)}`); });
+        this.recordStream = stream;
+      }
+      stream.write(`${JSON.stringify(line)}\n`);
     } catch (e) {
+      this.recordFailed = true;
+      this.recordStream = null;
       this.log(`record write failed: ${errMsg(e)}`);
     }
   }
@@ -410,8 +420,8 @@ export class PilotRuntime implements PilotCommandTarget {
     // 执行：与 session.act 同一条链（歧义 fail 档、click/check 带遮挡探针）。
     const started = Date.now();
     // 动作解析口径 = hint 匹配口径（`full_label`）：40 字前缀当目标会在长标签上精确匹配落空。
-    const targetFull = buf(String(el.full_label ?? el.label ?? el.text ?? el.tag ?? ref), MAX_HINT);
-    const target = buf(targetFull, MAX_LABEL);
+    const targetFull = clipText(String(el.full_label ?? el.label ?? el.text ?? el.tag ?? ref), MAX_HINT);
+    const target = clipText(targetFull, MAX_LABEL);
     // 危险闸门（红线⑥）：actOnce 不经 run 的风险闸门、default-deny face 不装 confirmFn——
     // 驾驶面对每个动作做确定性关键词判定（单源 DESTRUCTIVE_PATTERNS）；拒绝 = 结构化失败 +
     // 禁选 + inert 记账，连续拒绝达阈值 = stuck_inert 如实停。
@@ -536,10 +546,10 @@ export class PilotRuntime implements PilotCommandTarget {
     const h: PilotHandoff = {
       stop_code: stop,
       step_id: this.stepCount,
-      goal_digest: buf(this.opts.goal, 200),
+      goal_digest: clipText(this.opts.goal, 200),
       why_stuck: {
-        summary: `${stop} @ step ${this.stepCount}${url === "" ? "" : ` (${buf(url, 120)})`}`
-          + (this.ledger.loopTrip === null ? "" : ` — dead target: "${buf(this.ledger.loopTrip.desc, 40)}"`
+        summary: `${stop} @ step ${this.stepCount}${url === "" ? "" : ` (${clipText(url, 120)})`}`
+          + (this.ledger.loopTrip === null ? "" : ` — dead target: "${clipText(this.ledger.loopTrip.desc, 40)}"`
             + ` driven ${String(this.ledger.loopTrip.tries)} time(s) without the signal holding`),
         evidence: handoffWhyEvidence({
           inertRun: this.inertRun, forbidden: this.forbidden, ledgerEvidence: this.ledger.evidence(),
@@ -665,7 +675,7 @@ export class PilotRuntime implements PilotCommandTarget {
       this.finished = true;
       this.sink.respond({
         type: "started", ok: false, code: "config_error",
-        reason: `attached page is outside the hosts envelope: ${bad} (${buf(currentUrl, 120)})`,
+        reason: `attached page is outside the hosts envelope: ${bad} (${clipText(currentUrl, 120)})`,
       });
       return;
     }
@@ -764,7 +774,7 @@ export class PilotRuntime implements PilotCommandTarget {
     if (this.traceRef !== null) {
       try { writeTrace(path.join(this.outDir, "pilot-trace.json"), this.traceRef); } catch { /* 落盘失败不掩盖停因 */ }
     }
-    this.recordStream?.end();
+    try { this.recordStream?.end(); } catch { /* 关流失败不影响结论 */ }
     try { this.recordStream?.close?.(); } catch { /* already closed */ }
     this.sink.respond(summary);
   }

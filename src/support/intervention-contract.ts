@@ -21,25 +21,6 @@ export type RescueMode = "suspend" | "stop";
 /** 求援 kind：RESCUE_KINDS 注册表键的 union（编译期穷尽；二期可加 credential / external-task / captcha）。 */
 export type RescueKind = string & { readonly __rescueKind: unique symbol };
 
-/** 每个 kind 绑定三件事（§3）：既有停因（零新增）/ 谁能修 / 文案词面。纯数据，不挂函数。 */
-export interface RescueKindSpec {
-  /** 只引用**既有**停因（needs_human / needs_value / manual_declined 等），零新 stop code。 */
-  readonly stop_code: string;
-  /** 谁能修：human-action / human-value / human-authorization；二期可扩展 vault / external（非人应答者）。 */
-  readonly who_can_fix: string;
-  /** 文案词面键（intervention-texts.ts 的键集与之同步）。 */
-  readonly text: string;
-}
-
-/**
- * kind 注册表形状：实现侧以 `as const` 对象给出，键集 = RescueKind 的事实来源。
- * v1 注册三个 kind：action / value / authorization。
- * credential 依赖凭据保险箱（未建）——不注册、不生成文案（§3 二期依赖声明）。
- */
-export interface RescueKindRegistry {
-  readonly [kind: string]: RescueKindSpec;
-}
-
 /** 求援请求：一次结构化求援的完整事实（模块只校验形状与大小，不解释语义）。 */
 export interface RescueRequest {
   /** 幂等键 = `${run_id}:${seq}`；去重键 = (run_id, kind, step_id)（§5.5）。 */

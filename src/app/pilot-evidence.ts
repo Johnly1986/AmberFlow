@@ -17,6 +17,7 @@ import type { AnyPage } from "../engine/executor.ts";
 import type { ElemPool } from "../engine/elem-model.ts";
 import { sleep } from "../support/sleep.ts";
 import { DEFAULT_CONF_FLOOR } from "../support/config-schema.ts";
+import { clipText } from "../support/text.ts";
 import { bounded, isObj } from "./session-runtime-contract.ts";
 import type { PilotHandoff, WeakPick } from "./pilot-contract.ts";
 
@@ -174,7 +175,7 @@ export async function agentStepCandidates(a: {
 
 /** weak_picks 上限（有界证据：够解释最近的回退，不膨胀交接块）。 */
 export const WEAK_PICKS_MAX = 6;
-/** weak_picks 目标文本上限（与驾驶轨迹 buf(label, 40) 同口径）。 */
+/** weak_picks 目标文本上限（与驾驶轨迹的 40 字截断同口径；截断唯一出处 = support/text.ts）。 */
 const WEAK_TARGET_MAX = 40;
 
 /**
@@ -197,7 +198,7 @@ export function weakPicksFrom(
     if (typeof conf !== "number" || !Number.isFinite(conf) || conf >= floor) continue;
     out.push({
       step: typeof s.step === "number" ? s.step : i + 1,
-      target: s.target.length <= WEAK_TARGET_MAX ? s.target : `${s.target.slice(0, WEAK_TARGET_MAX - 1)}…`,
+      target: clipText(s.target, WEAK_TARGET_MAX),
       conf,
       picked_by: "model",
     });
@@ -212,8 +213,7 @@ export function weakPicksFrom(
 export function finalSignalFact(spec: Record<string, unknown> | null | undefined, max = 200): string | null {
   if (spec === null || spec === undefined || !isObj(spec) || Object.keys(spec).length === 0) return null;
   try {
-    const text = JSON.stringify(spec);
-    return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+    return clipText(JSON.stringify(spec), max);
   } catch {
     return null;
   }

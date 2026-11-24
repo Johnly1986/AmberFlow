@@ -8,7 +8,7 @@
 - **禁止落产物**：明文凭据不得进入用例、计划、报告、trace、证据、stdout 或仓库。`meta.secretSlots` 声明的槽位在结果/报告中自动掩码（`***`）；名称像凭据的槽位（password/token/api_key/...）也会被启发式掩码。
 - **CLI 注意**：`--slot k=v` 的明文会出现在进程参数与桥 argv 中；敏感值请用 `--slot-file FILE`（JSON 对象，建议 `chmod 600`）或环境/本机配置。
 - **本机配置**：写入后权限收紧到 `0600`（Windows 无 POSIX 模式，忽略失败）；`doctor`/`config show` 只显示掩码。
-- **待建**：应用级加密凭据保险箱、会话持久化、验证处理器（规划在 M0/M1，见 `docs/direction/2026-10-31-final-direction-v3.md`）。
+- **待建**：应用级加密凭据保险箱、会话持久化、验证处理器（规划在 M0/M1）。
 
 ## 2. 证据与产物
 

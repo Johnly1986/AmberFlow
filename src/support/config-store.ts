@@ -50,7 +50,7 @@ export function readConfigFile(file: string, name: string): ConfigLayer {
     raw = JSON.parse(text);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    // task-7-rider：错误面与 rcfile 同口径——绝对路径 + 行号 + 建议（行号助手共享，不复制第二份）。
+    // 错误面与 rcfile 同口径——绝对路径 + 行号 + 建议（行号助手共享，不复制第二份）。
     const line = jsonErrorLine(text, msg);
     return {
       name, path: file, exists: true, values: {},

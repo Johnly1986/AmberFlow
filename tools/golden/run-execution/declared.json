@@ -75,7 +75,7 @@
               "epoch": 2,
               "navEpoch": 1,
               "readyState": "complete",
-              "struct": "40:<HASH>",
+              "struct": "46:<HASH>",
               "url": "<LOCAL>/filter-bar.html"
             },
             "before": {
@@ -83,7 +83,7 @@
               "epoch": 1,
               "navEpoch": 1,
               "readyState": "complete",
-              "struct": "40:<HASH>",
+              "struct": "46:<HASH>",
               "url": "<LOCAL>/filter-bar.html"
             },
             "flags": []

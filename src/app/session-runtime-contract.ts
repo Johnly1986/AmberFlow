@@ -9,6 +9,7 @@ import { sleepMs } from "../support/sleep.ts";
 import { SESSION_IDLE_TIMEOUT_MS } from "../support/tuning.ts";
 import type { ActMissDiagnostics, AnyPage } from "../engine/executor.ts";
 import type { AmbiguityView } from "../engine/ambiguity.ts";
+import type { RangeValue } from "../engine/range.ts";
 import type { LaunchWindowMode } from "../browser/browser-env.ts";
 import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
 
@@ -16,8 +17,8 @@ import { signalProblemText, validateSignalSpec } from "../engine/signals.ts";
 export const SESSION_ACT_OPS = ["click", "check", "fill", "select", "hover", "scroll", "set_range"] as const;
 export type SessionActOp = (typeof SESSION_ACT_OPS)[number];
 
-/** `act set_range` 的目标值形状（与 `ctx.setRange` / range.ts 的 RangeValue 同一闭集）。 */
-export type SessionSetRangeValue = { value: number } | { percent: number };
+/** `act set_range` 的目标值形状：`ctx.setRange` 与执行器共用 `engine/range.ts` 的闭集，type-only 引用。 */
+export type SessionSetRangeValue = RangeValue;
 
 /**
  * `act set_range` 的 value 形状校验（返回 null = 合法；否则给人读的 config_error 文案）。
@@ -297,6 +298,11 @@ export const SESSION_DRIVE_COMMANDS = ["resume", "redirect", "finish", "abort"] 
 export type SessionDriveCommand = (typeof SESSION_DRIVE_COMMANDS)[number];
 /** 驾驶步预算边界（与 pilot --max-steps 同口径）。 */
 export const SESSION_DRIVE_MAX_STEPS = { min: 1, max: 200 } as const;
+/**
+ * `driveCommand.note` 上界（桥描述口径 "short note"）：有界是为了调用方别把 pilot 轨迹写爆；
+ * 非空/上界都在形状校验里拒绝，pilot 侧不再二次截断（唯一出处 = `driveCommandProblem`）。
+ */
+export const SESSION_DRIVE_NOTE_MAX_CHARS = 300;
 
 /**
  * `drive` 请求的形状校验（返回 null = 合法；否则为给人读的 config_error 文案）。
@@ -365,6 +371,34 @@ export function driveCommandProblem(req: Record<string, unknown>): string | null
   if (value !== undefined && !(typeof value === "string" || isObj(value))) {
     return "driveCommand.value must be a string or a JSON object of slot name → scalar";
   }
+  // `note` 是调用方备注（桥 schema/描述承诺「recorded」）：放行前必须在入口验有界非空，
+  // 否则超长备注会原样写进 pilot 轨迹；它只进 pilot 自身 trace/record，不进响应。
+  const note = req["note"];
+  if (note !== undefined) {
+    if (!nonEmpty(note)) return "driveCommand.note must be a non-empty string when present";
+    if (note.length > SESSION_DRIVE_NOTE_MAX_CHARS) {
+      return `driveCommand.note must be at most ${SESSION_DRIVE_NOTE_MAX_CHARS} characters (got ${note.length})`;
+    }
+  }
   return null;
+}
+
+/**
+ * `driveCommand` 请求 → pilot 兜底指令 JSONL 行（**唯一出处**；session-driver 不再手写白名单）。
+ *
+ * 白名单只放协议字段：新增可透传字段必须在这里显式加入，否则会被静默丢弃。
+ * `note` 随该行进 pilot 自身 trace/record，不进会话/桥响应投影。
+ */
+export function driveCommandLine(req: Record<string, unknown>): string {
+  return JSON.stringify({
+    cmd: String(req["cmd"]),
+    ...(nonEmpty(req["hint"]) ? { hint: String(req["hint"]) } : {}),
+    ...(nonEmpty(req["target"]) ? { target: String(req["target"]) } : {}),
+    ...(req["value"] === undefined ? {} : { value: req["value"] }),
+    ...(nonEmpty(req["goal"]) ? { goal: String(req["goal"]) } : {}),
+    ...(nonEmpty(req["url"]) ? { url: String(req["url"]) } : {}),
+    ...(req["skip"] === true ? { skip: true } : {}),
+    ...(nonEmpty(req["note"]) ? { note: String(req["note"]) } : {}),
+  });
 }
 

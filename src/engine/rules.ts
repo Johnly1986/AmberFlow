@@ -188,7 +188,7 @@ export interface HintCandidates {
  * DOM 的 aria-label 在提取期已并进 label（labelOf 优先读 aria-label），池字段模型里没有
  * 独立的 aria_label 字段——所以这类属性选择器按 `label` 匹配。提示词面的属性白名单
  * （grammar-prompt.MATCHABLE_POOL_ATTRS）与本函数同一口径，改一处必须改另一处。
- * task-10 起导出：check 面的 hint 语义 lint（declaration-scan）用它判定
+ * check 面的 hint 语义 lint（declaration-scan）用它判定
  * 「attrSubstr 是否落在 label 上」——别名口径只有这一份实现，不复制第二份。
  */
 export function poolFieldFor(attr: string): string {
@@ -268,7 +268,7 @@ function boundaryHit(label: string, token: string): boolean {
   return false;
 }
 
-/* ---- task-9（评审 #2）：弱档命中的**旁路**诊断（不改任何公开签名与选择语义） ----
+/* ---- 弱档命中的**旁路**诊断（不改任何公开签名与选择语义） ----
  * bare 与 attrSubstr 的弱档胜出（词前缀/词包含/loose 子串）是"误点容器/同缀元素"的高发
  * 形状——实测现场：裸词"价格"前缀命中 label="价格评分时间所有过滤条件…" 的整块结果容器
  * （class Vo5ZAe），reason 只有 step_timeout，靠人工比对 URL 才定位。这里在解析时把
@@ -461,7 +461,7 @@ function hintMatchImpl(
     //   3. the old behaviour over all substring hits (still None when the
     //      candidates are genuinely different — the bbc.com two-identical-links
     //      rule is unchanged).
-    // task-9：每次 attrSubstr 解析都旁路记录撞词候选（含 loose 档的 suspicious 标记）——
+    // 每次 attrSubstr 解析都旁路记录撞词候选（含 loose 档的 suspicious 标记）——
     // 返回值与 sink 语义逐字节不变；记录被执行器 take 走（见 takeHintMatchOthers）。
     const finishSubstr = (refs: string[], tier: number): string | null => {
       // F82/F83 收口：行锚声明下多候选 = 零动作（同 emit 的 decide 口径）。
@@ -551,7 +551,7 @@ function hintMatchImpl(
   // 档位顺序：整 label 全等 → 词全等 → **词边界/前缀**（A2 新增档，纯加档不挪旧档语义）
   // → 词前缀 → 词包含。旧档位内仍"宁缺勿错"（真歧义 null）。
   const ladder = [whole, tiers[0]!, boundary, tiers[1]!, tiers[2]!];
-  // task-9：全部撞词候选 = 五档并集（含最终选中者），供 matched_others 旁路诊断。
+  // 全部撞词候选 = 五档并集（含最终选中者），供 matched_others 旁路诊断。
   const allBareHits = new Set<string>();
   for (const s of ladder) for (const r of s) allBareHits.add(r);
   for (let t = 0; t < ladder.length; t++) {

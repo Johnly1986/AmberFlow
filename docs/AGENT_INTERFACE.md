@@ -493,6 +493,9 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
 - `{"op":"drive_command","cmd":"resume"|"redirect"|"finish"|"abort","hint?","value?","target?","skip?","goal?","url?","note?"}`：
   兜底指令闭集（与引擎 pilot 驾驶协议的兜底指令同一套语义）；`resume`/`redirect` 会继续驾驶并返回
   下一步结果；单行失败 = 结构化回执（顶层带 `reason`）、会话与驾驶面继续。
+  `note?` = 指令备注（非空字符串、≤300 字符）：只随该指令记入 pilot 自身 trace/record
+  （`out_dir/pilot-trace.jsonl` 的 `command` 行 `args.note`），**不回显**在响应/run 结果里；
+  空串或超长 = `config_error`。
   `resume.value` 是字符串时：值的键序 = 显式 `target` → 交接 evidence `needs_value.key`（引擎记录的
   未决目标键）→ 历史兜底 `resumed`；同时带 `hint` 时值跟着 **hint 命中目标** 走（值绑定到该目标的
   键）。对象值（`{"<key>":"<值>"}`）= 多槽并入值袋，语义不变。`needs_value` 交接的
@@ -531,8 +534,9 @@ note），并让错误消息引用该路径——已完成步骤的证据至少�
     续驾驶**（旧行为会重放同一交接且不显眼），回执带 `reused:true`、`handoff_open` 回显、
     `goal_ignored?`（请求 goal 未被采纳）与 `next`；继续本 run 用
     `drive_command{cmd:"resume"|"redirect"|"finish"|"abort"}`，换目标起新 session。
-  - `config_error` —— 参数形状错（未知 cmd、`hint`/`target`/`url`/`goal` 空串、`max_steps`/`conf_floor`
-    越界等）；不消费会话、session 仍可用，`next` = 按 `reason` 改参数重发。
+  - `config_error` —— 参数形状错（未知 cmd、`hint`/`target`/`url`/`goal`/`note` 空串、`note`
+    超 300 字符、`max_steps`/`conf_floor` 越界等）；不消费会话、session 仍可用，`next` = 按
+    `reason` 改参数重发。
   - `finish`/`abort` 在终态保持幂等收尾；`finish` 信号不成立 = `signal_not_held` 单行拒绝（顶层
     `reason`），交接保持打开。
 - 红线：`drive` 走 pilot face（`default-deny` 危险闸门），session 的 `act/observe` 仍零模型；两者

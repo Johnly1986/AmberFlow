@@ -12,6 +12,7 @@ import type {
   BrowserMiddleware, BrowserSession, ExecutedAction, RunReport, SkippedAction, StepStateRecord,
 } from "../engine/executor.ts";
 import type { ObserveOptions, ObserveResult } from "../engine/observe.ts";
+import type { RangeOptions, RangeValue as EngineRangeValue } from "../engine/range.ts";
 import type { AppTrace, TraceCall } from "./trace.ts";
 import type { DatasetStore } from "../engine/dataset.ts";
 import type { ReturnExtractor } from "./app-adapters.ts";
@@ -238,15 +239,11 @@ export interface ExpandResult {
   reason?: string;
 }
 
-/** A3 `ctx.setRange` 的目标值：绝对值或百分比。 */
-export type RangeValue = { value: number } | { percent: number };
+/** A3 `ctx.setRange` 的目标值：绝对值或百分比（闭集唯一出处 = `engine/range.ts` 的 `RangeValue`）。 */
+export type RangeValue = EngineRangeValue;
 
-export interface SetRangeOptions {
-  /** 成功判定容差（缺省 0.5；整数滑块不可能像素级精确）。 */
-  tolerance?: number;
-  /** 总超时（毫秒；缺省 10000）。 */
-  timeoutMs?: number;
-}
+/** A3 `ctx.setRange` 选项（唯一出处 = `engine/range.ts` 的 `RangeOptions`；字段语义见其声明）。 */
+export type SetRangeOptions = RangeOptions;
 
 /** A3 `ctx.setRange` 结果：三道策略的最终事实（失败 = `slider_not_settable`，绝不造假）。 */
 export interface SetRangeResult {

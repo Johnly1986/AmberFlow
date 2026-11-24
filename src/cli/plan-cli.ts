@@ -179,7 +179,7 @@ export function cmdCheck(file: string, max: number, io: CliIO = defaultIO): bool
 }
 
 /**
- * 信号可判定性探针（P1b，2026-11-01 产品评审）：opt-in 在线预检——`check --probe`。
+ * 信号可判定性探针（P1b，产品评审）：opt-in 在线预检——`check --probe`。
  *
  * plan check 是纯离线校验，对「信号在目标页永远不成立」「hint 在实况页不存在」零提示；
  * 执行时才挡、且（修复前）停因误导。探针把每个 start_url 真实到达一遍（只读观察，

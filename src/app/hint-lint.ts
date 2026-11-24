@@ -1,5 +1,5 @@
 /**
- * task-10（B2，评审 #5）：hint 语义 lint——`apps check` 声明层的**静态提醒**。
+ * hint 语义 lint——`apps check` 声明层的**静态提醒**。
  *
  * 通道纪律（与 weak_done lint 同款）：只产 stderr 人话行，**不进 problems、不改 VALID/exit**——
  * 它是"这个写法容易撞容器"的先天提醒，不是裁决。clean 应用（无三类形状）零输出。

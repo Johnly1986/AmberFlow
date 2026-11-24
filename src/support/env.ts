@@ -1,9 +1,9 @@
 /**
  * 环境变量 typed getter —— **配置面读取的唯一入口**（L0）。
  *
- * 键集与内建默认值从 `src/support/config-schema.ts` 的 `CONFIG_GROUPS` 派生；另有两个
- * **只在环境变量层读取、不在配置面**的开关（`AMBERFLOW_BROWSER_CHANNEL` /
- * `AMBERFLOW_RESCUE_SHADOW`）在本模块显式登记（写进 rc/用户配置仍会被未知键拒绝）。
+ * 键集与内建默认值从 `src/support/config-schema.ts` 的 `CONFIG_GROUPS` 派生；另有若干
+ * **只在环境变量层读取、不在配置面**的开关（见 `ENV_ONLY_KEYS`：浏览器通道、救援影子模式、
+ * 两个实验/lane 开关）在本模块显式登记（写进 rc/用户配置仍会被未知键拒绝）。
  *
  * 消费点不再裸读 `process.env.<配置键>`：门禁 `tools/maintain/constants.ts` 把白名单外的
  * 裸读判 fail。允许的例外（平台变量 PATH/NO_COLOR/LOCALAPPDATA/VITEST/GITHUB_SHA、
@@ -58,7 +58,7 @@ for (const group of CONFIG_GROUPS) {
 
 /**
  * 只在环境变量层读取、不在配置面的开关（显式登记；写进 rc/配置会被未知键拒绝）。
- * 由 `intervention-shadow.ts` / `browser-env.ts` 经本模块读取，因此不再出现裸 `process.env.X`。
+ * 消费点一律经本模块的 typed getter 读取，因此 src 内不再出现裸 `process.env.X`。
  */
 export const ENV_ONLY_KEYS = [
   {
@@ -68,6 +68,14 @@ export const ENV_ONLY_KEYS = [
   {
     key: "AMBERFLOW_RESCUE_SHADOW",
     description: "介入/救援影子模式（仅 1 = 开）；实验开关，不在配置面",
+  },
+  {
+    key: "AMBERFLOW_STATE_TEXT_SCOPE",
+    description: "决策上下文取文范围（仅 wide = 主文档外追加子帧正文）；实验/lane 开关，不在配置面",
+  },
+  {
+    key: "AMBERFLOW_DECISION_LADDER",
+    description: "选择段执行臂 A/B 对照（仅 phase = 对照臂）；实验/lane 开关，不在配置面",
   },
 ] as const;
 

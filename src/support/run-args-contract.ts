@@ -380,16 +380,3 @@ export const RUN_BRIDGE_MESSAGES = {
 
 /** `timeout_sec` 的防呆上限（秒）：更长流程应拆应用，而不是占住一个调用。 */
 export const RUN_TIMEOUT_MAX_SEC = 7200;
-
-/** 一个 tool 字段在桥侧的注册项（生成物用它做 tool 参数 → camelCase 的唯一映射）。 */
-export interface RunToolFieldBinding {
-  key: string;
-  param: string;
-  collect?: "slots";
-}
-
-/** 一个 tool 字段在桥侧的 argv 映射项（字段 key → `runArgs` 参数名）。 */
-export interface RunServiceFieldBinding {
-  key: string;
-  argvKey?: string;
-}

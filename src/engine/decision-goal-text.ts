@@ -9,6 +9,7 @@
  *
  * 纯函数、无 I/O：run 面从 trace 折步史，pilot 面从驾驶步史折同类摘要，渲染只此一处。
  */
+import { clipText } from "../support/text.ts";
 
 /** 已走步数摘要上限（两侧题面共用；有界，防题面膨胀）。 */
 export const DECISION_HISTORY_STEPS = 6;
@@ -24,14 +25,13 @@ export interface DecisionHistoryStep {
 export function drivingGoalText(goal: string,
     history: ReadonlyArray<DecisionHistoryStep>,
     currentUrl = "", expectUrl = "", maxLabel = 40): string {
-  const clip = (text: string, max = maxLabel): string => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
   const hist = history.slice(-DECISION_HISTORY_STEPS)
     .map((s, i) => {
       const outcome = s.ok !== true ? "failed" : s.changed === true ? "changed" : s.changed === false ? "no_change" : "ok";
-      return `${i + 1}.${clip(s.target)}[${outcome}]`;
+      return `${i + 1}.${clipText(s.target, maxLabel)}[${outcome}]`;
     }).join("; ");
-  const where = currentUrl === "" ? "" : `当前页: ${clip(currentUrl, 120)}`;
-  const expect = expectUrl === "" ? "" : `期望页: ${clip(expectUrl, 120)}`;
+  const where = currentUrl === "" ? "" : `当前页: ${clipText(currentUrl, 120)}`;
+  const expect = expectUrl === "" ? "" : `期望页: ${clipText(expectUrl, 120)}`;
   const head = [goal, where, expect].filter((s) => s !== "").join(" | ");
   return hist === "" ? head : `${head} | 已执行: ${hist}`;
 }

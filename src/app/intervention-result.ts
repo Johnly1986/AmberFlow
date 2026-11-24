@@ -14,6 +14,7 @@
 import { validateRescueRequest } from "../intervention/index.ts";
 import type { RescueKind, RescueRequest } from "../support/intervention-contract.ts";
 import { RESCUE_TEXTS } from "../support/intervention-texts.ts";
+import { clipText } from "../support/text.ts";
 
 export type { RescueRequest } from "../support/intervention-contract.ts";
 
@@ -63,11 +64,6 @@ export function rescueKindForStopCode(stopCode: string | undefined | null): Resc
   return STOP_CODE_KIND[stopCode] ?? null;
 }
 
-function clip(text: string, max: number): string {
-  const s = text.replace(/\s+/g, " ").trim();
-  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
-}
-
 /** evidence 里的 URL：只保留 http(s) 的 origin+path（query/hash 可能带 token；无页面时 urlOf 会给出哨兵串）。 */
 function urlWithoutQuery(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined || raw === "") return null;
@@ -97,7 +93,7 @@ export function buildRescueRequest(input: {
   if (texts === undefined) return null;
   const facts = input.lastManualFacts;
   const evidence: Record<string, unknown> = {};
-  if (facts?.desc !== undefined && facts.desc !== "") evidence["desc"] = clip(facts.desc, 120);
+  if (facts?.desc !== undefined && facts.desc !== "") evidence["desc"] = clipText(facts.desc.replace(/\s+/g, " ").trim(), 120);
   const url = urlWithoutQuery(facts?.pageUrl ?? input.pageUrl ?? null);
   if (url !== null) evidence["url"] = url;
   const summary = texts.summary.length <= 400 ? texts.summary : `${texts.summary.slice(0, 399)}…`;

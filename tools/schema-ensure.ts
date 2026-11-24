@@ -3,7 +3,7 @@
  *
  * `dist/schema/ctx.json` 是 gitignored 的构建产物：`schema:check` 拿它做"引擎契约 ↔ 快照"
  * 比较。但它**没有任何版本基线**（不进仓库）——旧快照只会让本地 `npm run check` 恒红，
- * 且无法区分"代码改坏了契约"与"快照过期"（2026-11-16 架构评审实测：F72-F84 落地后，
+ * 且无法区分"代码改坏了契约"与"快照过期"（架构评审实测：F72-F84 落地后，
  * 本机 check 恒以 SCHEMA_DRIFT exit 2，而 CI 因为先生成再 check 反而全绿）。
  *
  * 评审收口：precheck 改为**无条件重生成**快照——`schema:check` 退化为"当前源能渲染且

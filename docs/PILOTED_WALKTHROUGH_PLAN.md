@@ -303,6 +303,4 @@ confirmFn）——改为 `DESTRUCTIVE_PATTERNS` 关键词闭集前置判定（�
 `risk_declined` 结构化失败 + 禁选；**resume-hint 撞歧义静默回落**——改为裁决视图
 （hintMatch）为 null 且候选 >1 时 `target_ambiguous` 只停不选（与 run/session 同一谓词）。
 
-尚未落地（后续批次）：BACKLOG §16/§17 两枚能力墙（访问循环守卫；budget 后兜底死局的
-redirect 预算语义拍板）。`--driver` 双臂、
-消融实测、桥面 one-shot 与 §3.2 验收矩阵均已落地（见上）。
+尚未落地（后续批次）：BACKLOG §16 剩余项（P2：DecisionContext/能力档/桥面生成链）；§17 的 budget 终态口径已收口。`--driver` 双臂、消融实测与 §3.2 验收矩阵均已落地（见上）；桥面 one-shot 已移除（agent 面经 `amberflow_session` 的 drive 系列 op）。

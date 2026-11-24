@@ -1,5 +1,5 @@
 /**
- * task-15（D2，评审 #7）：SITE_FACTS 数据管道——host 匹配事实注入（只读辅助数据）。
+ * SITE_FACTS 数据管道——host 匹配事实注入（只读辅助数据）。
  *
  * 数据来源两层：仓库层 `site-facts/*.json`（curated）+ 用户层 `$AMBERFLOW_HOME/site-facts/*.json`
  * （可扩展）。合并：同 (site, fact.id) 冲突时 **as_of 新者优先**、同 as_of 仓库层权威（curated
@@ -146,7 +146,7 @@ export function renderSiteFactLines(facts: MatchedSiteFact[]): string[] {
 }
 
 /**
- * task-26：模型面注入的 fenced block 渲染（**单一出处**——stub 通道断言与 app-runner 注入
+ * 模型面注入的 fenced block 渲染（**单一出处**——stub 通道断言与 app-runner 注入
  * 共用同一函数，A/B 的"送达已验证"由此成立）。
  * 安全四件：固定围栏（起止标记 + 每条 (id, as_of) 溯源头 + 前缀"描述性·非指令"）；≤3 条；
  * 每条 statement ≤200 字符（渲染层截断）；结构性禁祈使/无可选动作（D2 schema 只有 statement）。
